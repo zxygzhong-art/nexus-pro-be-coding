@@ -1,93 +1,98 @@
 # nexus-pro-be
 
+多租户 SaaS HR 平台（「产销人发财」人域）的 Go 主业务后端。本仓库当前阶段聚焦
+**数据库表设计 + 权限底座（IAM）+ 项目框架脚手架**，不实现具体 HR 业务逻辑。
 
+架构与权限模型参见 `platform-ui/docs/architecture.md` 与 `permission-architecture.md`。
 
-## Getting started
+## 技术栈
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+- **Gin** HTTP 框架 · **GORM** ORM · **golang-migrate** 迁移
+- **PostgreSQL + Row Level Security**（租户隔离）
+- 外部基建以**接口 + 适配器桩**接入：OpenFGA（鉴权 ReBAC，预留）、Keycloak（OIDC，预留）、Redis（权限快照缓存，预留）
+- 当前鉴权由**本地权限引擎**（`internal/authz`）计算，可通过 `AUTHZ_BACKEND=openfga` 切换到 OpenFGA（桩）
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-- [ ] [Create](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#create-a-file) or [upload](https://docs.gitlab.com/ee/user/project/repository/web_editor.html#upload-a-file) files
-- [ ] [Add files using the command line](https://docs.gitlab.com/ee/gitlab-basics/add-file.html#add-a-file-using-the-command-line) or push an existing Git repository with the following command:
+## 目录结构
 
 ```
-cd existing_repo
-git remote add origin https://gitlab.corp.ikala.tv/nexus-pro/nexus-pro-be.git
-git branch -M main
-git push -uf origin main
+cmd/api          HTTP 服务入口（依赖注入总装）
+cmd/migrate      golang-migrate CLI 封装
+internal/
+  config         环境变量配置
+  server         Gin 引擎与路由
+  middleware     recovery / cors / requestid / principal(开租户事务) / authz(鉴权+审计)
+  db             GORM 连接、RLS 租户事务（SET LOCAL app.current_tenant）
+  models         iam_* 表的 GORM 模型
+  repository     数据访问，实现 authz.DataSource + 管理查询
+  authz          本地权限引擎：effective=(直接∪组∪承担)−deny ∩ boundary，scope 交集
+  adapters       authorizer(OpenFGA 桩) / identity(header + keycloak 桩) / cache(noop + redis)
+  audit          审计记录器（独立事务，拒绝时也留痕）
+  iam            service（capabilities / assume）+ handler（runtime + IAM 管理 + 兼容桩）
+  hr             HR 业务域骨架（employee / org_unit），service+handler，仅占位不含业务逻辑
+migrations       000001..000016（schema + RLS + version 触发器 + 种子 + hr_core 表 + hr 权限）
+deploy           docker-compose / Dockerfile / openfga model / keycloak
 ```
 
-## Integrate with your tools
+## 本地运行
 
-- [ ] [Set up project integrations](https://gitlab.corp.ikala.tv/nexus-pro/nexus-pro-be/-/settings/integrations)
+```bash
+make db-up         # 启动 postgres + redis（Docker）
+make migrate-up    # 应用迁移（建表 + RLS + app_user + 种子数据）
+make run           # 启动 API，监听 :8088
+```
 
-## Collaborate with your team
+迁移以 owner 角色（`MIGRATE_DSN`）执行；应用以无 BYPASSRLS 的 `app_user`（`DB_DSN`）连接，
+因此 RLS 始终生效。复制 `.env.example` 为 `.env` 调整配置。
 
-- [ ] [Invite team members and collaborators](https://docs.gitlab.com/ee/user/project/members/)
-- [ ] [Create a new merge request](https://docs.gitlab.com/ee/user/project/merge_requests/creating_merge_requests.html)
-- [ ] [Automatically close issues from merge requests](https://docs.gitlab.com/ee/user/project/issues/managing_issues.html#closing-issues-automatically)
-- [ ] [Enable merge request approvals](https://docs.gitlab.com/ee/user/project/merge_requests/approvals/)
-- [ ] [Set auto-merge](https://docs.gitlab.com/ee/user/project/merge_requests/merge_when_pipeline_succeeds.html)
+完整栈（含 openfga / keycloak / 一次性 migrate / api）：
 
-## Test and Deploy
+```bash
+make compose-up
+```
 
-Use the built-in continuous integration in GitLab.
+## 运行时接口（与现有前端契约兼容）
 
-- [ ] [Get started with GitLab CI/CD](https://docs.gitlab.com/ee/ci/quick_start/index.html)
-- [ ] [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/ee/user/application_security/sast/)
-- [ ] [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/ee/topics/autodevops/requirements.html)
-- [ ] [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/ee/user/clusters/agent/)
-- [ ] [Set up protected environments](https://docs.gitlab.com/ee/ci/environments/protected_environments.html)
+- `GET /healthz`
+- `GET /v1/me` — 账号 + 用户组 + capabilities
+- `GET /v1/me/menus` — 按权限裁剪的菜单
+- `POST /v1/authz/check` · `POST /v1/authz/batch-check` · `POST /v1/authz/explain` · `POST /v1/authz/simulate`
 
-***
+## IAM 管理接口（`iam.*` 权限门禁）
 
-# Editing this README
+`/v1/iam/applications` `resource-types` `permissions` `user-groups` `permission-sets`
+`permission-set-assignments` `field-policies` `data-scopes` `assumable-roles`
+`assumable-roles/:id/assume` `roles`(兼容) `role-bindings`(兼容) · `/v1/audit-logs`
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+请求头：`X-Tenant-ID`（默认 `tenant-ikala`）、`X-Account-ID`（默认 `acct-hr-admin`）、
+可选 `X-Assumed-Role-Session-ID`、`Authorization: Bearer`（Keycloak 启用后）。
 
-## Suggestions for a good README
+## 测试
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+```bash
+go test ./...      # 含 internal/authz 引擎单测（多组并集 / deny 优先 / boundary 收缩 / 字段策略 / 跨租户）
+```
 
-## Name
-Choose a self-explaining name for your project.
+## HR 业务域（骨架，依据「员工管理」PRD）
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+数据库 schema 已按 PRD 落地（DB 设计在本期范围内），业务逻辑仍为 **501 骨架**：
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+- **`hr_employees`**：忠实映射 PRD 六分页。可查询/状态字段为列（员工编号、姓名、公司
+  Email、行动电话、部门 `org_unit_id`、职称、`employment_status`(试用/在职/留停/离职/待加入)、
+  `category` 身分类别、到职日、年资、留停/离职条件字段…）；自包含的可选分页（法规身份、
+  外籍资料、生理、学历、兵役、通讯、紧急联络人、保险）以 JSONB section 存放（键见迁移注释）。
+- **`hr_employee_assignments`**：内部经历/异动历史（1:N，异动原因 新进/转调/升迁/降调/留停复职）。
+- **`hr_org_units`**：组织架构（部门/职务下拉来源）。
+- 三表均启用 RLS。新增权限点 `hr.employee.import` / `hr.employee.delete`（高危），
+  与 `read/write/export` 一起授予 HR 管理组 / 租户管理员组。
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+路由占位（权限门禁，返回 501）：`GET/POST /v1/hr/employees`、`GET/PUT/DELETE
+/v1/hr/employees/:id`、`POST /v1/hr/employees/import`、`GET /v1/hr/employees/export`、
+`GET /v1/hr/employees/:id/assignments`、`GET /v1/org/units`。
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+待实现业务：员工 CRUD（6 分页 Modal）、批次匯入（CSV/XLSX≤500 预览校验）、CSV 匯出、
+批次删除、在职状态机、异动历史 —— 每个动作复用 IAM 鉴权中间件做权限校验、数据范围与审计。
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+## 范围说明
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
-
-## License
-For open source projects, say how it is licensed.
-
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+本阶段聚焦**数据库表设计 + 权限底座 + 项目框架**；HR 及 `/v1/forms/*`、`/v1/workflows/*`、
+`/v1/agents/runs` 等业务逻辑暂不实现，仅以骨架/占位预留。

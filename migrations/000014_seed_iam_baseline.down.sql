@@ -1,0 +1,14 @@
+DELETE FROM iam_permission_set_assignments WHERE tenant_id IN ('tenant-ikala','tenant-acme');
+DELETE FROM iam_assumable_roles WHERE tenant_id = 'tenant-ikala';
+DELETE FROM iam_permission_boundaries WHERE tenant_id = 'tenant-ikala';
+DELETE FROM iam_field_policies WHERE tenant_id = 'tenant-ikala';
+DELETE FROM iam_menu_items WHERE tenant_id = 'tenant-ikala';
+DELETE FROM iam_group_memberships WHERE tenant_id = 'tenant-ikala';
+DELETE FROM iam_accounts WHERE tenant_id IN ('tenant-ikala','tenant-acme');
+DELETE FROM iam_data_scopes WHERE tenant_id = 'tenant-ikala';
+DELETE FROM iam_user_groups WHERE tenant_id = 'tenant-ikala';
+DELETE FROM iam_permission_set_permissions WHERE tenant_id = 'tenant-ikala';
+DELETE FROM iam_permission_sets WHERE tenant_id = 'tenant-ikala';
+DELETE FROM iam_permissions WHERE tenant_id = 'tenant-ikala';
+DELETE FROM iam_applications WHERE id IN ('app-hr','app-iam');
+DELETE FROM iam_tenants WHERE id IN ('tenant-ikala','tenant-acme');
