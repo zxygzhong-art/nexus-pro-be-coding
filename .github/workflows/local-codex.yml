@@ -1,0 +1,99 @@
+name: Local Codex Automation
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: "Task for local Codex"
+        required: true
+        type: string
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: local-codex-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  local-codex:
+    name: Run Codex on local Mac
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'issue_comment' &&
+        github.actor == 'zxygzhong-art' &&
+        startsWith(github.event.comment.body, '/codex ')
+      )
+    runs-on: [self-hosted, macOS, ARM64, nexus-pro-be-coding, local-codex]
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve task
+        id: task
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          DISPATCH_TASK: ${{ github.event.inputs.task }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            task="$DISPATCH_TASK"
+          else
+            task="${COMMENT_BODY#/codex }"
+          fi
+
+          if [ -z "$task" ]; then
+            echo "No task provided."
+            exit 2
+          fi
+
+          {
+            echo "task<<EOF"
+            echo "$task"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Run local Codex cycle
+        shell: bash
+        env:
+          CODEX_HOME: /Users/kuzhiluoya/.codex
+          PATH: /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+          TASK: ${{ steps.task.outputs.task }}
+        run: |
+          .ai-workflow/auto-codex-cycle.sh "$TASK"
+
+      - name: Commit and push changes
+        shell: bash
+        run: |
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "No changes to commit."
+            exit 0
+          fi
+
+          git config user.name "zxygzhong-art-ai"
+          git config user.email "zxygzhong-art-ai@users.noreply.github.com"
+          git add -A
+          git commit -m "chore(ai): automated Codex update"
+          git push
+
+      - name: Comment completion
+        if: github.event_name == 'issue_comment'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: 'Local Codex automation finished. Check the latest commit on `main`.'
+            })
