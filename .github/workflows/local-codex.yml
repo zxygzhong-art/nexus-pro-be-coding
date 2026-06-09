@@ -3,6 +3,10 @@ name: Local Codex Automation
 on:
   workflow_dispatch:
     inputs:
+      branch:
+        description: "Feature branch to push changes to"
+        required: false
+        type: string
       task:
         description: "Task for local Codex"
         required: true
@@ -43,14 +47,21 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
+          INPUT_BRANCH: ${{ inputs.branch }}
           INPUT_TASK: ${{ inputs.task }}
           DISPATCH_TASK: ${{ github.event.inputs.task }}
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
+          branch="$INPUT_BRANCH"
+
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             task="${INPUT_TASK:-$DISPATCH_TASK}"
           else
             task="${COMMENT_BODY#/codex }"
+            if [[ "$task" =~ ^branch=([^[:space:]]+)[[:space:]]+(.+) ]]; then
+              branch="${BASH_REMATCH[1]}"
+              task="${BASH_REMATCH[2]}"
+            fi
           fi
 
           if [ -z "$task" ]; then
@@ -58,13 +69,40 @@ jobs:
             exit 2
           fi
 
-          echo "Resolved task for event=$EVENT_NAME"
+          if [ -z "$branch" ]; then
+            slug="$(printf "%s" "$task" | tr '[:upper:]' '[:lower:]' | LC_ALL=C tr -cs 'a-z0-9' '-' | sed 's/^-//;s/-$//' | cut -c1-48)"
+            if [ -z "$slug" ]; then
+              slug="task"
+            fi
+            branch="ai/${GITHUB_RUN_NUMBER}-${slug}"
+          fi
+
+          branch="$(printf "%s" "$branch" | sed 's#[^A-Za-z0-9._/-]#-#g; s#//*#/#g; s#^/##; s#/$##')"
+          if ! git check-ref-format --branch "$branch" >/dev/null; then
+            echo "Invalid branch name: $branch"
+            exit 2
+          fi
+
+          echo "Resolved task for event=$EVENT_NAME branch=$branch"
 
           {
+            echo "branch=$branch"
             echo "task<<EOF"
             echo "$task"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+
+      - name: Prepare working branch
+        shell: bash
+        env:
+          BRANCH_NAME: ${{ steps.task.outputs.branch }}
+        run: |
+          if git ls-remote --exit-code --heads origin "$BRANCH_NAME" >/dev/null 2>&1; then
+            git fetch origin "$BRANCH_NAME"
+            git switch -C "$BRANCH_NAME" "origin/$BRANCH_NAME"
+          else
+            git switch -c "$BRANCH_NAME"
+          fi
 
       - name: Run local Codex cycle
         shell: bash
@@ -77,6 +115,8 @@ jobs:
 
       - name: Commit and push changes
         shell: bash
+        env:
+          BRANCH_NAME: ${{ steps.task.outputs.branch }}
         run: |
           if [ -z "$(git status --porcelain)" ]; then
             echo "No changes to commit."
@@ -87,7 +127,7 @@ jobs:
           git config user.email "zxygzhong-art-ai@users.noreply.github.com"
           git add -A
           git commit -m "chore(ai): automated Codex update"
-          git push
+          git push -u origin "HEAD:$BRANCH_NAME"
 
       - name: Comment completion
         if: github.event_name == 'issue_comment'
@@ -98,5 +138,5 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: context.payload.issue.number,
-              body: 'Local Codex automation finished. Check the latest commit on `main`.'
+              body: 'Local Codex automation finished. Check branch `${{ steps.task.outputs.branch }}`.'
             })

@@ -44,8 +44,20 @@ runner 本机安装目录：
 安全限制：
 
 - 只有 `zxygzhong-art` 的 `/codex ...` 评论会触发本机 runner。
-- workflow 会执行 `AI coding -> AI review -> AI fix review findings -> commit -> push`。
-- 自动提交只进入 `nexus-pro-be-coding`，正式仓库仍然只接收你确认后的大版本快照。
+- workflow 会执行 `AI coding -> AI review -> AI fix review findings -> commit -> push branch`。
+- 自动提交只进入 `nexus-pro-be-coding` 的任务分支，正式仓库仍然只接收你确认后的大版本快照。
+
+如果在 Actions 页面触发，建议填写 `branch` 输入框，例如：
+
+```text
+feature/employee-list-filters
+```
+
+如果用 issue 或 PR 评论触发，可以写：
+
+```text
+/codex branch=feature/employee-list-filters 你的开发任务
+```
 
 ## 手动开发闭环
 
