@@ -8588,9 +8588,11 @@ function initOverviewMonthNav() {
 
 // ---------- Employee management (員工管理) ----------
 const EMP_TYPE_TO_VALUE = { '全職': 'full-time', '兼職': 'part-time', '實習': 'intern', '約聘': 'contract', '其他': 'other' };
+const EMP_STATUS_VALUES = ['在職', '試用中', '留停', '待加入', '離職'];
 const EMP_PAGE_SIZE = 5;
 let empPage = 1;
 const empSelectedIds = new Set();
+const EMP_FILTERS = { query: '', dept: 'all', status: 'all', type: 'all' };
 
 function _empSyncBulkBar() {
   const tbody = document.querySelector('.employee-tbody');
@@ -8654,44 +8656,126 @@ function computeTenure(hireDateStr, today = new Date()) {
   return '新入職';
 }
 
+function _empParseDate(dateStr) {
+  const m = String(dateStr || '').trim().match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+  if (!m) return null;
+  return new Date(+m[1], +m[2] - 1, +m[3]);
+}
+
+function _empReadRow(row) {
+  const cells = row.cells;
+  const statusText = row.querySelector('.badge')?.textContent.trim() || '';
+  const typeText = cells[4]?.textContent.trim() || '';
+  const hireText = cells[7]?.textContent.trim() || '';
+  const leftText = row.dataset.empLeftDate || '';
+  const deptCell = row.querySelector('.emp-position');
+
+  return {
+    row,
+    id: row.dataset.empId || cells[1]?.textContent.trim() || '',
+    name: row.querySelector('.workspace-member .p-medium')?.textContent.trim() || '',
+    email: row.querySelector('.workspace-member .p-mini')?.textContent.trim() || '',
+    dept: deptCell?.children[0]?.textContent.trim() || '',
+    title: deptCell?.querySelector('.p-mini')?.textContent.trim() || '',
+    typeText,
+    type: EMP_TYPE_TO_VALUE[typeText] || 'other',
+    status: EMP_STATUS_VALUES.includes(statusText) ? statusText : '',
+    hireDateText: hireText.match(/^(\d{4}\/\d{2}\/\d{2})/)?.[1] || '',
+    hireDate: _empParseDate(hireText),
+    leftDate: _empParseDate(leftText),
+  };
+}
+
+function _empMatchesFilters(emp) {
+  const query = EMP_FILTERS.query.trim().toLowerCase();
+  const matchesQuery = !query || [emp.name, emp.email, emp.id].some(v => v.toLowerCase().includes(query));
+  const matchesDept = EMP_FILTERS.dept === 'all' || emp.dept === EMP_FILTERS.dept;
+  const matchesStatus = EMP_FILTERS.status === 'all' || emp.status === EMP_FILTERS.status;
+  const matchesType = EMP_FILTERS.type === 'all' || emp.type === EMP_FILTERS.type;
+  return matchesQuery && matchesDept && matchesStatus && matchesType;
+}
+
+function _empWireFilterMenu({ empSection, labelSelector, itemAttr, filterKey, defaultLabel, formatLabel }) {
+  const dropdown = empSection?.querySelector(labelSelector)?.closest('.dropdown');
+  if (!dropdown) return;
+
+  const trigger = dropdown.querySelector('button');
+  const labelEl = dropdown.querySelector(labelSelector);
+  const itemSelector = `[${itemAttr}]`;
+
+  trigger?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    toggleDropdownExclusive(dropdown);
+  });
+
+  dropdown.querySelectorAll(itemSelector).forEach(item => {
+    item.addEventListener('click', () => {
+      const value = item.getAttribute(itemAttr) || 'all';
+      EMP_FILTERS[filterKey] = value;
+      empPage = 1;
+
+      dropdown.querySelectorAll(itemSelector).forEach(i => i.classList.remove('selected'));
+      item.classList.add('selected');
+
+      if (labelEl) {
+        if (formatLabel) labelEl.textContent = formatLabel(item, value);
+        else labelEl.textContent = value === 'all'
+          ? defaultLabel
+          : (item.querySelector('span')?.textContent.trim() || defaultLabel);
+      }
+      trigger?.classList.toggle('is-filtered', value !== 'all');
+      dropdown.classList.remove('open');
+      refreshEmployeeView();
+    });
+  });
+
+  dropdown.querySelector(`${itemSelector}[${itemAttr}="all"]`)?.classList.add('selected');
+}
+
 function refreshEmployeeView() {
   const tbody = document.querySelector('.employee-tbody');
   if (!tbody) return;
   const rows = [...tbody.querySelectorAll('tr')];
-  const total = rows.length;
+  const employees = rows.map(_empReadRow);
+  const filteredEmployees = employees.filter(_empMatchesFilters);
+  const total = filteredEmployees.length;
 
   // Aggregate metrics for stat cards + filter dropdown
-  const counts = { '在職': 0, '待加入': 0, '已停用': 0 };
+  const makeStatusStats = () => ({
+    counts: { '在職': 0, '試用中': 0, '留停': 0, '待加入': 0, '離職': 0 },
+    leftThisMonth: 0,
+  });
+  const allStats = makeStatusStats();
+  const filteredStats = makeStatusStats();
   const typeCounts = { 'full-time': 0, 'part-time': 0, 'intern': 0, 'contract': 0, 'other': 0 };
 
   const today = new Date();
   const curYear = today.getFullYear();
   const curMonth = today.getMonth();  // 0-based
-  // 試用期: hired within the last 90 days from today (and currently active)
-  const probationCutoff = new Date(today);
-  probationCutoff.setDate(probationCutoff.getDate() - 90);
-  let hiredThisMonth = 0;
-  let probation = 0;
-
-  rows.forEach(r => {
-    const status = r.querySelector('.badge')?.textContent.trim();
-    if (status && counts[status] !== undefined) counts[status]++;
-    const typeText = r.cells[3]?.textContent.trim();
-    const typeKey = EMP_TYPE_TO_VALUE[typeText];
-    if (typeKey && typeCounts[typeKey] !== undefined) typeCounts[typeKey]++;
-
-    const hireMatch = r.cells[6]?.textContent.trim().match(/^(\d{4})\/(\d{2})\/(\d{2})/);
-    if (hireMatch) {
-      const y = +hireMatch[1], m = +hireMatch[2], d = +hireMatch[3];
-      const hire = new Date(y, m - 1, d);
-      if (y === curYear && (m - 1) === curMonth) hiredThisMonth++;
-      if (status !== '已停用' && hire >= probationCutoff && hire <= today) probation++;
+  const addStatusStat = (emp, stats) => {
+    if (emp.status && stats.counts[emp.status] !== undefined) stats.counts[emp.status]++;
+    if (
+      emp.status === '離職' &&
+      emp.leftDate &&
+      emp.leftDate.getFullYear() === curYear &&
+      emp.leftDate.getMonth() === curMonth
+    ) {
+      stats.leftThisMonth++;
     }
+  };
+
+  employees.forEach(emp => {
+    if (typeCounts[emp.type] !== undefined) typeCounts[emp.type]++;
+    addStatusStat(emp, allStats);
+  });
+
+  filteredEmployees.forEach(emp => {
+    addStatusStat(emp, filteredStats);
   });
 
   // Append tenure (年資) suffix to each hire-date cell
   rows.forEach(r => {
-    const cell = r.cells[6];
+    const cell = r.cells[7];
     if (!cell) return;
     const m = cell.textContent.match(/^(\d{4}\/\d{2}\/\d{2})/);
     if (!m) return;
@@ -8702,23 +8786,26 @@ function refreshEmployeeView() {
       : date;
   });
 
-  // Update all elements with matching data-emp-stat (overview + employees pages share)
-  const setStat = (key, n) => {
-    document.querySelectorAll(`[data-emp-stat="${key}"]`).forEach(el => {
+  const setStat = (scopeSelector, key, n) => {
+    document.querySelectorAll(`${scopeSelector} [data-emp-stat="${key}"]`).forEach(el => {
       el.innerHTML = `${n}<span class="p-small">人</span>`;
     });
   };
-  setStat('active', counts['在職']);
-  setStat('hired-month', hiredThisMonth);
-  setStat('left-month', 0);  // No termination tracking in mock data
-  setStat('probation', probation);
+  const applyStats = (scopeSelector, totalCount, stats) => {
+    setStat(scopeSelector, 'total', totalCount);
+    setStat(scopeSelector, 'active', stats.counts['在職']);
+    setStat(scopeSelector, 'left-month', stats.leftThisMonth);
+    setStat(scopeSelector, 'probation', stats.counts['試用中']);
+  };
+  applyStats('.workspace-section[data-section="overview"]', employees.length, allStats);
+  applyStats('.workspace-section[data-section="employees"]', total, filteredStats);
 
   // Update 類別 filter dropdown counts
   const setTypeCount = (key, n) => {
     const el = document.querySelector(`[data-emp-type-count="${key}"]`);
     if (el) el.textContent = n;
   };
-  setTypeCount('all', total);
+  setTypeCount('all', employees.length);
   Object.entries(typeCounts).forEach(([k, v]) => setTypeCount(k, v));
 
   // Clamp page in case rows were removed
@@ -8727,7 +8814,10 @@ function refreshEmployeeView() {
 
   // Show only the rows for the current page
   const start = (empPage - 1) * EMP_PAGE_SIZE;
-  rows.forEach((r, i) => { r.style.display = (i >= start && i < start + EMP_PAGE_SIZE) ? '' : 'none'; });
+  rows.forEach(r => { r.style.display = 'none'; });
+  filteredEmployees.slice(start, start + EMP_PAGE_SIZE).forEach(emp => {
+    emp.row.style.display = '';
+  });
 
   renderPagination({
     hostId: 'emp-pagination',
@@ -8794,37 +8884,40 @@ function initEmployeeManagement() {
     }
   });
 
-  // 員工類別 filter — toggle menu and update label on selection
+  // Search + filters — update the table, pagination and stats immediately.
   const empSection = document.querySelector('.workspace-section[data-section="employees"]');
-  const typeDD = empSection?.querySelector('[data-emp-type-label]')?.closest('.dropdown');
-  if (typeDD) {
-    const typeTrigger = typeDD.querySelector('button');
-    const typeLabelSpan = typeDD.querySelector('[data-emp-type-label]');
-    typeTrigger?.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleDropdownExclusive(typeDD);
-    });
-    typeDD.querySelectorAll('[data-emp-type]').forEach(item => {
-      item.addEventListener('click', () => {
-        const val = item.dataset.empType;
-        typeDD.querySelectorAll('[data-emp-type]').forEach(i => i.classList.remove('selected'));
-        item.classList.add('selected');
-        if (typeLabelSpan) {
-          if (val === 'all') {
-            typeLabelSpan.textContent = '類別';
-          } else {
-            // First child span = label (e.g. 全職), second = count (e.g. 5)
-            const label = item.querySelector('span:not([data-emp-type-count])')?.textContent.trim() || '';
-            const count = item.querySelector('[data-emp-type-count]')?.textContent.trim() || '0';
-            typeLabelSpan.textContent = `${label}(${count})`;
-          }
-        }
-        typeTrigger?.classList.toggle('is-filtered', val !== 'all');
-        typeDD.classList.remove('open');
-      });
-    });
-    typeDD.querySelector('[data-emp-type="all"]')?.classList.add('selected');
-  }
+  _empWireFilterMenu({
+    empSection,
+    labelSelector: '[data-emp-dept-label]',
+    itemAttr: 'data-emp-dept',
+    filterKey: 'dept',
+    defaultLabel: '部門',
+  });
+  _empWireFilterMenu({
+    empSection,
+    labelSelector: '[data-emp-status-label]',
+    itemAttr: 'data-emp-status',
+    filterKey: 'status',
+    defaultLabel: '狀態',
+  });
+  _empWireFilterMenu({
+    empSection,
+    labelSelector: '[data-emp-type-label]',
+    itemAttr: 'data-emp-type',
+    filterKey: 'type',
+    defaultLabel: '類別',
+    formatLabel: (item, value) => {
+      if (value === 'all') return '類別';
+      const label = item.querySelector('span')?.textContent.trim() || '';
+      const count = item.querySelector('[data-emp-type-count]')?.textContent.trim() || '0';
+      return `${label}(${count})`;
+    },
+  });
+  empSection?.querySelector('[data-emp-search]')?.addEventListener('input', (e) => {
+    EMP_FILTERS.query = e.target.value || '';
+    empPage = 1;
+    refreshEmployeeView();
+  });
 
   // 新增成員
   $('#emp-add-btn')?.addEventListener('click', () => openEmpModal('add'));
@@ -9585,8 +9678,8 @@ function openEmpModal(mode, row = null, { section = 'basic' } = {}) {
     if (emailEl) $('#emp-f-email').value = emailEl.textContent.trim();
 
     const cells = row.cells;
-    // 部門/職稱 combined cell (cell 2): first <div> = 部門, second .p-mini = 職位
-    const positionCell = cells[2];
+    // 部門/職稱 combined cell: first <div> = 部門, second .p-mini = 職位
+    const positionCell = row.querySelector('.emp-position');
     if (positionCell) {
       const deptText = positionCell.children[0]?.textContent.trim();
       const titleText = positionCell.querySelector('.p-mini')?.textContent.trim();
@@ -9594,19 +9687,19 @@ function openEmpModal(mode, row = null, { section = 'basic' } = {}) {
       // Title is now a <select> populated from the chosen dept's positions
       _empSyncTitleOptions(titleText || '');
     }
-    const typeText = cells[3]?.textContent.trim();
+    const typeText = cells[4]?.textContent.trim();
     if (typeText) $('#emp-f-type').value = EMP_TYPE_TO_VALUE[typeText] || 'full-time';
-    const phoneText = cells[4]?.textContent.trim();
+    const phoneText = cells[5]?.textContent.trim();
     if (phoneText) $('#emp-f-mobile').value = phoneText;
     // Status — map badge text to dropdown value
     const statusText = row.querySelector('.badge')?.textContent.trim();
-    const statusMap = { '在職': 'active', '待加入': 'pending', '已停用': 'resigned' };
+    const statusMap = { '在職': 'active', '試用中': 'probation', '留停': 'on-leave', '待加入': 'pending', '離職': 'resigned' };
     const statusVal = statusMap[statusText] || 'active';
     $('#emp-f-status').value = statusVal;
     if (resignRow) resignRow.hidden = statusVal !== 'resigned';
     if (leaveRow) leaveRow.hidden = statusVal !== 'on-leave';
 
-    const hireMatch = cells[6]?.textContent.trim().match(/^(\d{4}\/\d{2}\/\d{2})/);
+    const hireMatch = cells[7]?.textContent.trim().match(/^(\d{4}\/\d{2}\/\d{2})/);
     if (hireMatch) hireDate.value = hireMatch[1].replaceAll('/', '-');
 
     hireDate.disabled = true;

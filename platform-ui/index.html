@@ -1248,19 +1248,19 @@
                 </div>
                 <div class="dash-grid dash-grid-4">
                   <div class="dash-stat-card">
-                    <div class="dash-stat-label">在職人數</div>
-                    <div class="dash-stat-value lg" data-emp-stat="active">0<span class="p-small">人</span></div>
+                    <div class="dash-stat-label">總員工數</div>
+                    <div class="dash-stat-value lg" data-emp-stat="total">0<span class="p-small">人</span></div>
                   </div>
                   <div class="dash-stat-card">
-                    <div class="dash-stat-label">本月入職</div>
-                    <div class="dash-stat-value lg" data-emp-stat="hired-month">0<span class="p-small">人</span></div>
+                    <div class="dash-stat-label">在職人數</div>
+                    <div class="dash-stat-value lg" data-emp-stat="active">0<span class="p-small">人</span></div>
                   </div>
                   <div class="dash-stat-card">
                     <div class="dash-stat-label">本月離職</div>
                     <div class="dash-stat-value lg" data-emp-stat="left-month">0<span class="p-small">人</span></div>
                   </div>
                   <div class="dash-stat-card">
-                    <div class="dash-stat-label">試用期人數</div>
+                    <div class="dash-stat-label">試用中</div>
                     <div class="dash-stat-value lg" data-emp-stat="probation">0<span class="p-small">人</span></div>
                   </div>
                 </div>
@@ -1384,19 +1384,19 @@
 
               <div class="dash-grid dash-grid-4 emp-stats">
                 <div class="dash-stat-card">
-                  <div class="dash-stat-label">在職人數</div>
-                  <div class="dash-stat-value lg" data-emp-stat="active">0<span class="p-small">人</span></div>
+                  <div class="dash-stat-label">總員工數</div>
+                  <div class="dash-stat-value lg" data-emp-stat="total">0<span class="p-small">人</span></div>
                 </div>
                 <div class="dash-stat-card">
-                  <div class="dash-stat-label">本月入職</div>
-                  <div class="dash-stat-value lg" data-emp-stat="hired-month">0<span class="p-small">人</span></div>
+                  <div class="dash-stat-label">在職人數</div>
+                  <div class="dash-stat-value lg" data-emp-stat="active">0<span class="p-small">人</span></div>
                 </div>
                 <div class="dash-stat-card">
                   <div class="dash-stat-label">本月離職</div>
                   <div class="dash-stat-value lg" data-emp-stat="left-month">0<span class="p-small">人</span></div>
                 </div>
                 <div class="dash-stat-card">
-                  <div class="dash-stat-label">試用期人數</div>
+                  <div class="dash-stat-label">試用中</div>
                   <div class="dash-stat-value lg" data-emp-stat="probation">0<span class="p-small">人</span></div>
                 </div>
               </div>
@@ -1404,15 +1404,32 @@
               <div class="workspace-toolbar">
                 <div class="dropdown">
                   <button class="btn btn-outline" type="button">
-                    <i data-lucide="building" class="icon"></i> 部門
+                    <i data-lucide="building" class="icon"></i>
+                    <span data-emp-dept-label>部門</span>
                     <i data-lucide="chevron-down" class="icon chevron-toggle"></i>
                   </button>
+                  <div class="dropdown-menu align-left">
+                    <div class="dropdown-item selected" data-emp-dept="all"><span>全部部門</span></div>
+                    <div class="dropdown-item" data-emp-dept="產品開發部"><span>產品開發部</span></div>
+                    <div class="dropdown-item" data-emp-dept="業務部"><span>業務部</span></div>
+                    <div class="dropdown-item" data-emp-dept="管理部"><span>管理部</span></div>
+                    <div class="dropdown-item" data-emp-dept="行銷部"><span>行銷部</span></div>
+                  </div>
                 </div>
                 <div class="dropdown">
                   <button class="btn btn-outline" type="button">
-                    <i data-lucide="filter" class="icon"></i> 狀態
+                    <i data-lucide="filter" class="icon"></i>
+                    <span data-emp-status-label>狀態</span>
                     <i data-lucide="chevron-down" class="icon chevron-toggle"></i>
                   </button>
+                  <div class="dropdown-menu align-left">
+                    <div class="dropdown-item selected" data-emp-status="all"><span>全部狀態</span></div>
+                    <div class="dropdown-item" data-emp-status="在職"><span>在職</span></div>
+                    <div class="dropdown-item" data-emp-status="試用中"><span>試用中</span></div>
+                    <div class="dropdown-item" data-emp-status="留停"><span>留停</span></div>
+                    <div class="dropdown-item" data-emp-status="待加入"><span>待加入</span></div>
+                    <div class="dropdown-item" data-emp-status="離職"><span>離職</span></div>
+                  </div>
                 </div>
                 <div class="dropdown">
                   <button class="btn btn-outline" type="button">
@@ -1421,7 +1438,7 @@
                     <i data-lucide="chevron-down" class="icon chevron-toggle"></i>
                   </button>
                   <div class="dropdown-menu align-left">
-                    <div class="dropdown-item" data-emp-type="all"><span>全部</span><span class="muted" data-emp-type-count="all">0</span></div>
+                    <div class="dropdown-item selected" data-emp-type="all"><span>全部</span><span class="muted" data-emp-type-count="all">0</span></div>
                     <div class="dropdown-item" data-emp-type="full-time"><span>全職</span><span class="muted" data-emp-type-count="full-time">0</span></div>
                     <div class="dropdown-item" data-emp-type="part-time"><span>兼職</span><span class="muted" data-emp-type-count="part-time">0</span></div>
                     <div class="dropdown-item" data-emp-type="intern"><span>實習</span><span class="muted" data-emp-type-count="intern">0</span></div>
@@ -1431,7 +1448,7 @@
                 </div>
                 <div class="input-wrap workspace-search">
                   <i data-lucide="search" class="icon"></i>
-                  <input class="input" placeholder="搜尋" aria-label="搜尋員工(姓名 / Email / 員編)">
+                  <input class="input" data-emp-search placeholder="搜尋姓名 / Email / 員編" aria-label="搜尋員工(姓名 / Email / 員編)">
                 </div>
                 <button class="btn btn-outline emp-export-btn" id="emp-export-btn" type="button">
                   <i data-lucide="download" class="icon"></i> 下載 csv
@@ -1488,7 +1505,7 @@
                         </td>
                         <td>全職</td>
                         <td class="p-small muted">0912-345-678</td>
-                        <td><span class="badge badge-success">在職</span></td>
+                        <td><span class="badge badge-info">留停</span></td>
                         <td class="p-small muted">2023/02/14</td>
                         <td class="text-right">
                           <div class="emp-row-actions">
@@ -1653,7 +1670,7 @@
                         </td>
                         <td>全職</td>
                         <td class="p-small muted">0975-220-318</td>
-                        <td><span class="badge badge-warning">待加入</span></td>
+                        <td><span class="badge badge-warning">試用中</span></td>
                         <td class="p-small muted">2026/05/10</td>
                         <td class="text-right">
                           <div class="emp-row-actions">
@@ -1686,7 +1703,7 @@
                         </td>
                         <td>實習</td>
                         <td class="p-small muted">0986-014-572</td>
-                        <td><span class="badge badge-success">在職</span></td>
+                        <td><span class="badge badge-secondary">待加入</span></td>
                         <td class="p-small muted">2025/07/21</td>
                         <td class="text-right">
                           <div class="emp-row-actions">
@@ -1701,7 +1718,7 @@
                           </div>
                         </td>
                       </tr>
-                      <tr data-emp-id="IKL014">
+                      <tr data-emp-id="IKL014" data-emp-left-date="2026/06/05">
                         <td class="emp-check-td"><span class="bulk-review-check emp-row-check" role="checkbox" aria-checked="false" tabindex="0" aria-label="選取"></span></td>
                         <td class="p-small muted emp-id-cell">IKL014</td>
                         <td>
@@ -1719,7 +1736,7 @@
                         </td>
                         <td>兼職</td>
                         <td class="p-small muted">0911-808-292</td>
-                        <td><span class="badge badge-secondary">已停用</span></td>
+                        <td><span class="badge badge-destructive">離職</span></td>
                         <td class="p-small muted">2017/03/01</td>
                         <td class="text-right">
                           <div class="emp-row-actions">
