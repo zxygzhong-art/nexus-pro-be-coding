@@ -59,6 +59,14 @@ feature/employee-list-filters
 /codex branch=feature/employee-list-filters 你的开发任务
 ```
 
+如果要按队列自动执行多个任务，使用 `Local Codex Task Queue` workflow。队列文件默认是：
+
+```text
+.ai-workflow/queues/employee-management.json
+```
+
+流程图和队列说明在 `.ai-workflow/VISUAL_WORKFLOW.md`。
+
 ## 手动开发闭环
 
 1. 进入 coding 仓库：

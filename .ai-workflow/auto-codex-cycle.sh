@@ -10,6 +10,7 @@ repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
 task="$*"
+review_base_ref="${CODEX_REVIEW_BASE_REF:-origin/main}"
 tmp_dir="$(mktemp -d)"
 trap 'rm -rf "$tmp_dir"' EXIT
 
@@ -18,7 +19,7 @@ echo "== Codex implement =="
 
 echo "== Codex review =="
 set +e
-.ai-workflow/codex-review.sh > "$tmp_dir/review.md" 2>&1
+.ai-workflow/codex-review.sh "$review_base_ref" > "$tmp_dir/review.md" 2>&1
 review_status=$?
 set -e
 
@@ -31,6 +32,9 @@ codex exec --sandbox workspace-write "$(cat <<PROMPT
 
 原始任务：
 $task
+
+Review base:
+$review_base_ref
 
 Review 输出：
 $(cat "$tmp_dir/review.md")

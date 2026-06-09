@@ -1,0 +1,55 @@
+name: Local Codex Task Queue
+
+on:
+  workflow_dispatch:
+    inputs:
+      queue_file:
+        description: "Queue JSON file"
+        required: false
+        default: ".ai-workflow/queues/employee-management.json"
+        type: string
+      start_from:
+        description: "Optional task id to start from"
+        required: false
+        type: string
+      max_tasks:
+        description: "How many enabled tasks to run; 0 means all"
+        required: false
+        default: "1"
+        type: string
+      dry_run:
+        description: "Only print queue plan"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: write
+
+concurrency:
+  group: local-codex-queue-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  queue:
+    name: Run Codex task queue
+    runs-on: [self-hosted, macOS, ARM64, nexus-pro-be-coding, local-codex]
+    timeout-minutes: 360
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run queue
+        shell: bash
+        env:
+          PATH: /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+          QUEUE_FILE: ${{ inputs.queue_file }}
+          START_FROM: ${{ inputs.start_from }}
+          MAX_TASKS: ${{ inputs.max_tasks }}
+          DRY_RUN: ${{ inputs.dry_run && '1' || '0' }}
+        run: |
+          export CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
+          .ai-workflow/run-task-queue.rb "$QUEUE_FILE"

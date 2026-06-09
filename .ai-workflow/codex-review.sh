@@ -4,7 +4,7 @@ set -euo pipefail
 repo_root="$(git rev-parse --show-toplevel)"
 cd "$repo_root"
 
-base_ref="${1:-origin/main}"
+base_ref="${1:-${CODEX_REVIEW_BASE_REF:-origin/main}}"
 if ! git rev-parse --verify --quiet "$base_ref" >/dev/null; then
   base_ref="HEAD"
 fi

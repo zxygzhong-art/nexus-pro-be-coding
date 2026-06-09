@@ -1,0 +1,64 @@
+{
+  "name": "Employee Management Frontend Queue",
+  "description": "Stacked local Codex tasks for the Notion employee-management feature.",
+  "skip_existing_branches": true,
+  "tasks": [
+    {
+      "id": "M1",
+      "title": "列表筛选、搜索、统计",
+      "branch": "feature/employee-list-filters",
+      "base": "main",
+      "enabled": false,
+      "status": "done",
+      "task": "M1 已完成。分支 feature/employee-list-filters，提交 fee9bd1。"
+    },
+    {
+      "id": "M2",
+      "title": "新增和编辑写回前端数据",
+      "branch": "feature/employee-crud-local-state",
+      "base": "feature/employee-list-filters",
+      "enabled": true,
+      "task": "在 M1 基础上补齐员工新增和编辑的前端数据闭环。\n\n需求：\n1. 新增员工保存后写入当前前端员工数据，并刷新列表、筛选结果和 Dashboard 统计。\n2. 编辑员工保存后更新当前前端员工数据，并刷新列表、筛选结果和 Dashboard 统计。\n3. 保存前做最小字段校验，至少包含姓名、Email、员工编号、部门、状态。\n4. 员工编号和 Email 避免重复；重复时给出清晰错误提示。\n5. 保存后关闭 modal 或回到合理状态，并给出成功提示。\n\n不做：\n- 不接后端 API。\n- 不做完整六分页资料。\n- 不做导入导出。\n\n验收：\n- 新增员工后可以在列表中搜索到。\n- 编辑员工状态/部门后，筛选和统计立即反映变化。\n- 重复员工编号或 Email 会阻止保存。\n- 运行最小必要验证；如果没有自动化测试，至少做 JS 语法检查并说明人工验证路径。"
+    },
+    {
+      "id": "M3",
+      "title": "批量删除和 CSV 导出",
+      "branch": "feature/employee-bulk-delete-export",
+      "base": "feature/employee-crud-local-state",
+      "enabled": true,
+      "task": "在 M1/M2 基础上补齐批量删除和 CSV 导出。\n\n需求：\n1. 多选、全选、跨筛选后的选择状态要稳定。\n2. 批量删除确认后真实从当前前端员工数据移除。\n3. 删除后刷新列表、筛选结果、选择状态和 Dashboard 统计。\n4. CSV 导出要基于当前筛选后的员工数据生成真实 CSV 下载。\n5. CSV 包含列表中关键字段：员工编号、姓名、Email、部门、职称、状态、类别、入职日、离职日。\n\n不做：\n- 不接后端 API。\n- 不做审计日志。\n- 不做 CSV 导入。\n\n验收：\n- 批量删除后被删除员工不再出现在搜索结果中。\n- CSV 导出行数等于当前筛选结果数量。\n- 运行最小必要验证；如果没有自动化测试，至少做 JS 语法检查并说明人工验证路径。"
+    },
+    {
+      "id": "M4",
+      "title": "CSV 导入预览和确认导入",
+      "branch": "feature/employee-csv-import-preview",
+      "base": "feature/employee-bulk-delete-export",
+      "enabled": true,
+      "task": "把员工导入从 mock 改成真实 CSV 前端解析、预览和确认导入。\n\n需求：\n1. 模板下载生成真实 CSV 模板。\n2. 上传 CSV 后解析内容，展示预览行。\n3. 校验必填字段、状态枚举、员工编号重复、Email 重复。\n4. 错误行要显示行号和错误原因。\n5. 只有无阻断错误的数据才能确认导入。\n6. 确认导入后写入当前前端员工数据，并刷新列表和统计。\n\n不做：\n- 不做 XLSX 完整兼容。\n- 不接后端 API。\n\n验收：\n- 正确 CSV 可以导入并出现在列表。\n- 错误 CSV 可以看到错误行和原因。\n- 运行最小必要验证；如果没有自动化测试，至少做 JS 语法检查并说明人工验证路径。"
+    },
+    {
+      "id": "M5",
+      "title": "员工详情六分页资料",
+      "branch": "feature/employee-detail-tabs",
+      "base": "feature/employee-csv-import-preview",
+      "enabled": true,
+      "task": "补齐员工详情页六分页资料的前端展示和保存闭环。\n\n需求：\n1. 六个分页：基本资料、在职资料、学历兵役、通讯资料、保险资料、内部经历。\n2. 每个分页读取当前员工数据展示。\n3. 编辑后保存回当前前端数据。\n4. 条件显示：本国籍/外国籍、留停/离职、毕业/肄业。\n5. 列表进入详情、详情返回列表的状态要稳定。\n\n不做：\n- 不做后端 API。\n- 不做头像真实上传与裁切。\n- 不做复杂异动审计。\n\n验收：\n- 切换员工详情不串数据。\n- 修改详情字段保存后再次打开仍能看到修改结果。\n- 运行最小必要验证；如果没有自动化测试，至少做 JS 语法检查并说明人工验证路径。"
+    },
+    {
+      "id": "M6",
+      "title": "组织架构联动",
+      "branch": "feature/employee-org-linkage",
+      "base": "feature/employee-detail-tabs",
+      "enabled": true,
+      "task": "补齐员工管理与组织架构数据的前端联动。\n\n需求：\n1. 部门筛选选项来自现有组织架构/员工数据，不再硬编码不一致选项。\n2. 新增/编辑员工中的部门、职称、上级、代理人选项来自当前组织和在职员工数据。\n3. 上级和代理人不能选择当前员工自己。\n4. 员工状态变化后，上级/代理人候选和统计合理刷新。\n\n不做：\n- 不接后端组织 API。\n- 不做组织架构编辑器。\n\n验收：\n- 部门、职称、上级、代理人选项与当前数据一致。\n- 编辑员工后相关候选项能同步更新。\n- 运行最小必要验证；如果没有自动化测试，至少做 JS 语法检查并说明人工验证路径。"
+    },
+    {
+      "id": "M7",
+      "title": "回归验证和体验收口",
+      "branch": "feature/employee-management-regression",
+      "base": "feature/employee-org-linkage",
+      "enabled": true,
+      "task": "对 M1-M6 合并后的员工管理功能做回归验证和体验收口。\n\n需求：\n1. 检查员工列表、详情、CRUD、批量删除、CSV 导入导出主流程。\n2. 修复明显 UI 破版、移动端布局问题和空状态问题。\n3. 补齐必要的本地验证说明。\n4. 删除调试输出和无用 mock 分支。\n\n验收：\n- 主流程可按人工验证路径完整走通。\n- 没有明显控制台错误。\n- 静态前端服务可正常打开。\n- 运行最小必要验证；如果没有自动化测试，至少做 JS 语法检查并说明人工验证路径。"
+    }
+  ]
+}
