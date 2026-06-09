@@ -43,19 +43,22 @@ jobs:
         shell: bash
         env:
           EVENT_NAME: ${{ github.event_name }}
+          INPUT_TASK: ${{ inputs.task }}
           DISPATCH_TASK: ${{ github.event.inputs.task }}
           COMMENT_BODY: ${{ github.event.comment.body }}
         run: |
           if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
-            task="$DISPATCH_TASK"
+            task="${INPUT_TASK:-$DISPATCH_TASK}"
           else
             task="${COMMENT_BODY#/codex }"
           fi
 
           if [ -z "$task" ]; then
-            echo "No task provided."
+            echo "No task provided. event=$EVENT_NAME"
             exit 2
           fi
+
+          echo "Resolved task for event=$EVENT_NAME"
 
           {
             echo "task<<EOF"
