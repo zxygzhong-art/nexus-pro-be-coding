@@ -30,6 +30,8 @@ runner 本机安装目录：
 
 注意不要把 runner 放在带空格的路径里，例如 `Application Support`。GitHub runner 执行 bash step 时会把临时脚本路径传给 shell，带空格的安装路径会导致 `/Users/.../Library/Application: No such file or directory`。
 
+迁移到其他机器时按 `.ai-workflow/MIGRATION.md` 操作。
+
 触发方式有两种：
 
 1. 在 GitHub Actions 页面手动运行 `Local Codex Automation`，填写 `task`。

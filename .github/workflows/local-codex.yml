@@ -69,10 +69,10 @@ jobs:
       - name: Run local Codex cycle
         shell: bash
         env:
-          CODEX_HOME: /Users/kuzhiluoya/.codex
           PATH: /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
           TASK: ${{ steps.task.outputs.task }}
         run: |
+          export CODEX_HOME="${CODEX_HOME:-$HOME/.codex}"
           .ai-workflow/auto-codex-cycle.sh "$TASK"
 
       - name: Commit and push changes
