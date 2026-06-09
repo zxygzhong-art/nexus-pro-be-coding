@@ -1,0 +1,22 @@
+.DS_Store
+*.log
+
+# Local environment
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+.next/
+.nuxt/
+coverage/
+
+# Editor / OS noise
+.idea/
+.vscode/
+Thumbs.db
