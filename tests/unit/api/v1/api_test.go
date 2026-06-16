@@ -1,0 +1,695 @@
+package v1_test
+
+import (
+	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"math/big"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"sync"
+	"testing"
+	"time"
+
+	v1api "nexus-pro-be/internal/api/v1"
+	"nexus-pro-be/internal/domain"
+	platformauth "nexus-pro-be/internal/platform/auth"
+	"nexus-pro-be/internal/repository/memory"
+	"nexus-pro-be/internal/service"
+)
+
+func newTestAPI(allowDemoContext bool) http.Handler {
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	return v1api.New(service.New(store), nil, v1api.Options{AllowDemoContext: allowDemoContext}).Routes()
+}
+
+func decodeData[T any](t *testing.T, body []byte) T {
+	t.Helper()
+	var payload struct {
+		Data T `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	return payload.Data
+}
+
+func TestProductionContextRequiresAuthenticatedContext(t *testing.T) {
+	handler := newTestAPI(false)
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without authenticated context, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDefaultAPIRequiresAuthenticatedContext(t *testing.T) {
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	handler := v1api.New(service.New(store), nil).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected default API to require auth context, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestProductionContextRejectsHeaderOnlyContext(t *testing.T) {
+	handler := newTestAPI(false)
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("X-Tenant-ID", "demo")
+	req.Header.Set("X-Account-ID", "acct-admin")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for header-only production context, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestProductionContextAcceptsBearerClaims(t *testing.T) {
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	handler := v1api.New(service.New(store), nil, v1api.Options{
+		AllowDemoContext: false,
+		TokenResolver:    staticTokenResolver{ctx: v1api.TokenContext{TenantID: "demo", AccountID: "acct-admin"}, ok: true},
+	}).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 with token-derived context, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestTokenContextTakesPrecedenceOverSpoofedHeaders(t *testing.T) {
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	handler := v1api.New(service.New(store), nil, v1api.Options{
+		AllowDemoContext: false,
+		TokenResolver:    staticTokenResolver{ctx: v1api.TokenContext{TenantID: "demo", AccountID: "acct-admin"}, ok: true},
+	}).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("X-Tenant-ID", "other-tenant")
+	req.Header.Set("X-Account-ID", "acct-other")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 using token-derived context despite spoofed headers, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestProductionContextRejectsUnsignedBearerFallback(t *testing.T) {
+	handler := newTestAPI(false)
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+testJWT(map[string]any{"tenant_id": "demo", "account_id": "acct-admin"}))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 without configured production token resolver, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestKeycloakTokenResolverRefreshesJWKSWhenKidRotates(t *testing.T) {
+	oldKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var issuer string
+	var mu sync.RWMutex
+	keys := map[string]*rsa.PublicKey{"old": &oldKey.PublicKey}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"issuer":   issuer,
+				"jwks_uri": issuer + "/certs",
+			})
+		case "/certs":
+			mu.RLock()
+			body := map[string]any{"keys": jwksFromKeys(keys)}
+			mu.RUnlock()
+			_ = json.NewEncoder(w).Encode(body)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	issuer = server.URL
+
+	resolver := platformauth.NewKeycloakTokenResolver(issuer, "nexus-api", server.Client())
+	oldReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	oldReq.Header.Set("Authorization", "Bearer "+signedRS256JWT(t, "old", oldKey, keycloakClaims(issuer)))
+	if tokenCtx, ok, err := resolver.Resolve(oldReq); err != nil || !ok || tokenCtx.TenantID != "demo" || tokenCtx.AccountID != "acct-admin" {
+		t.Fatalf("expected old key token to resolve, ctx=%+v ok=%v err=%v", tokenCtx, ok, err)
+	}
+
+	mu.Lock()
+	keys = map[string]*rsa.PublicKey{"new": &newKey.PublicKey}
+	mu.Unlock()
+	newReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	newReq.Header.Set("Authorization", "Bearer "+signedRS256JWT(t, "new", newKey, keycloakClaims(issuer)))
+	if tokenCtx, ok, err := resolver.Resolve(newReq); err != nil || !ok || tokenCtx.TenantID != "demo" || tokenCtx.AccountID != "acct-admin" {
+		t.Fatalf("expected rotated key token to resolve, ctx=%+v ok=%v err=%v", tokenCtx, ok, err)
+	}
+}
+
+func TestKeycloakTokenResolverCachesUnknownKidMisses(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var issuer string
+	var certFetches int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"issuer":   issuer,
+				"jwks_uri": issuer + "/certs",
+			})
+		case "/certs":
+			certFetches++
+			_ = json.NewEncoder(w).Encode(map[string]any{"keys": jwksFromKeys(map[string]*rsa.PublicKey{"good": &key.PublicKey})})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	issuer = server.URL
+
+	resolver := platformauth.NewKeycloakTokenResolver(issuer, "nexus-api", server.Client())
+	goodReq := httptest.NewRequest(http.MethodGet, "/", nil)
+	goodReq.Header.Set("Authorization", "Bearer "+signedRS256JWT(t, "good", key, keycloakClaims(issuer)))
+	if _, ok, err := resolver.Resolve(goodReq); err != nil || !ok {
+		t.Fatalf("expected good token to resolve, ok=%v err=%v", ok, err)
+	}
+	badToken := signedRS256JWT(t, "missing", key, keycloakClaims(issuer))
+	for i := 0; i < 2; i++ {
+		badReq := httptest.NewRequest(http.MethodGet, "/", nil)
+		badReq.Header.Set("Authorization", "Bearer "+badToken)
+		if _, _, err := resolver.Resolve(badReq); err == nil {
+			t.Fatal("expected missing kid token to fail")
+		}
+	}
+	if certFetches != 2 {
+		t.Fatalf("expected one initial fetch and one forced miss refresh, got %d", certFetches)
+	}
+}
+
+func TestDemoContextAllowsLocalRequests(t *testing.T) {
+	handler := newTestAPI(true)
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 with demo context, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestReadinessEndpointReportsDependencyFailures(t *testing.T) {
+	handler := v1api.New(nil, nil, v1api.Options{
+		ReadinessChecks: map[string]v1api.ReadinessCheck{
+			"postgres": func(_ context.Context) error { return nil },
+			"redis":    func(_ context.Context) error { return errors.New("redis unavailable") },
+		},
+	}).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/readyz", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 for failed readiness check, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Status string            `json:"status"`
+		Checks map[string]string `json:"checks"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Status != "degraded" || payload.Checks["postgres"] != "ok" || payload.Checks["redis"] != "error" {
+		t.Fatalf("unexpected readiness payload: %+v", payload)
+	}
+}
+
+func TestRecoveryReturnsJSONInternalError(t *testing.T) {
+	handler := v1api.New(nil, nil, v1api.Options{AllowDemoContext: true}).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("X-Request-ID", "panic-trace")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 for recovered panic, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Header().Get("Content-Type"), "application/json") {
+		t.Fatalf("expected JSON content type, got %q", rec.Header().Get("Content-Type"))
+	}
+	var payload struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+			TraceID string `json:"trace_id"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error.Code != "internal_error" || payload.Error.TraceID != "panic-trace" {
+		t.Fatalf("unexpected recovered panic payload: %+v", payload)
+	}
+}
+
+func TestSwaggerUIDisplaysOpenAPISpec(t *testing.T) {
+	handler := newTestAPI(false)
+
+	uiReq := httptest.NewRequest(http.MethodGet, "/swagger/index.html", nil)
+	uiRec := httptest.NewRecorder()
+	handler.ServeHTTP(uiRec, uiReq)
+	if uiRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for swagger ui, got %d: %s", uiRec.Code, uiRec.Body.String())
+	}
+	if !strings.Contains(uiRec.Body.String(), `fetch("/openapi.yaml"`) {
+		t.Fatalf("expected local swagger page to load embedded OpenAPI spec, got: %s", uiRec.Body.String())
+	}
+	if strings.Contains(uiRec.Body.String(), "unpkg.com") {
+		t.Fatalf("expected swagger page to avoid CDN assets, got: %s", uiRec.Body.String())
+	}
+
+	specReq := httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil)
+	specRec := httptest.NewRecorder()
+	handler.ServeHTTP(specRec, specReq)
+	if specRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for openapi spec, got %d: %s", specRec.Code, specRec.Body.String())
+	}
+	if !strings.Contains(specRec.Body.String(), "openapi: 3.0.3") {
+		t.Fatalf("expected openapi yaml response, got: %s", specRec.Body.String())
+	}
+}
+
+func TestAuthzCheckReturnsTargetSchema(t *testing.T) {
+	handler := newTestAPI(true)
+	req := httptest.NewRequest(http.MethodPost, "/v1/authz/check", strings.NewReader(`{"application_code":"hr","resource_type":"employee","action":"export","resource_id":"emp-employee"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for authz check, got %d: %s", rec.Code, rec.Body.String())
+	}
+	result := decodeData[domain.CheckResult](t, rec.Body.Bytes())
+	if !result.Allowed || result.ApplicationCode != "hr" || result.ResourceType != "employee" || result.ResourceID != "emp-employee" {
+		t.Fatalf("unexpected authz result: %+v", result)
+	}
+	if !result.RequiresApproval {
+		t.Fatalf("expected export check to require approval, got %+v", result)
+	}
+	if len(result.MatchedBy) == 0 || len(result.PermissionSetIDs) == 0 {
+		t.Fatalf("expected matched sources and permission sets, got %+v", result)
+	}
+}
+
+func TestCreatePermissionSetAssignmentEndpointWritesAssignment(t *testing.T) {
+	handler := newTestAPI(true)
+	req := httptest.NewRequest(http.MethodPost, "/v1/iam/permission-set-assignments", strings.NewReader(`{"principal_type":"account","principal_id":"acct-employee","permission_set_id":"ps-audit"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Approval-Confirmed", "true")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for assignment create, got %d: %s", rec.Code, rec.Body.String())
+	}
+	assignment := decodeData[domain.PermissionSetAssignment](t, rec.Body.Bytes())
+	if assignment.PrincipalID != "acct-employee" || assignment.PermissionSetID != "ps-audit" || assignment.Effect != "allow" {
+		t.Fatalf("unexpected assignment: %+v", assignment)
+	}
+}
+
+func TestReadJSONRejectsMultipleValues(t *testing.T) {
+	handler := newTestAPI(true)
+	req := httptest.NewRequest(http.MethodPost, "/v1/authz/check", strings.NewReader(`{"resource":"me","action":"read"} {}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for multiple JSON values, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHighRiskRouteRequiresApprovalConfirmation(t *testing.T) {
+	handler := newTestAPI(true)
+	req := httptest.NewRequest(http.MethodPost, "/v1/iam/user-groups", strings.NewReader(`{"name":"Finance Admin"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for high-risk route without confirmation, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestHighRiskRouteAllowsConfirmedRequest(t *testing.T) {
+	handler := newTestAPI(true)
+	req := httptest.NewRequest(http.MethodPost, "/v1/iam/user-groups", strings.NewReader(`{"name":"Finance Admin"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Approval-Confirmed", "true")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for confirmed high-risk route, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAssumeRoleEndpointReturnsCreatedTypedResponse(t *testing.T) {
+	handler := newTestAPI(true)
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/iam/assumable-roles", strings.NewReader(`{"name":"Audit Assume","trusted":true,"permission_set_ids":["ps-audit"],"session_duration_seconds":3600}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("X-Approval-Confirmed", "true")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for role create, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	role := decodeData[domain.AssumableRole](t, createRec.Body.Bytes())
+
+	assumeReq := httptest.NewRequest(http.MethodPost, "/v1/iam/assumable-roles/"+role.ID+"/assume", strings.NewReader(`{"reason":"test"}`))
+	assumeReq.Header.Set("Content-Type", "application/json")
+	assumeReq.Header.Set("X-Approval-Confirmed", "true")
+	assumeRec := httptest.NewRecorder()
+	handler.ServeHTTP(assumeRec, assumeReq)
+	if assumeRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for assume role, got %d: %s", assumeRec.Code, assumeRec.Body.String())
+	}
+	result := decodeData[domain.AssumeRoleResponse](t, assumeRec.Body.Bytes())
+	if result.SessionID == "" || result.SessionToken != result.SessionID || result.AssumedRole.ID != role.ID {
+		t.Fatalf("unexpected assume role response: %+v", result)
+	}
+}
+
+func TestBatchDeleteEmployeesReturnsMultiStatusOnRowFailure(t *testing.T) {
+	handler := newTestAPI(true)
+	req := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/batch-delete", strings.NewReader(`{"employee_ids":["emp-employee","emp-missing"],"reason":"cleanup"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Approval-Confirmed", "true")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+	if rec.Code != http.StatusMultiStatus {
+		t.Fatalf("expected 207 for partial batch delete, got %d: %s", rec.Code, rec.Body.String())
+	}
+	result := decodeData[domain.BatchEmployeeResponse](t, rec.Body.Bytes())
+	if len(result.Results) != 2 || !result.Results[0].Success || result.Results[1].Success {
+		t.Fatalf("unexpected batch delete result: %+v", result)
+	}
+}
+
+func TestEmployeeListDetailAndCSVExportEndpoints(t *testing.T) {
+	handler := newTestAPI(true)
+	req := httptest.NewRequest(http.MethodGet, "/v1/hr/employees?page=1&page_size=2&sort=created_at_desc", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for employee list, got %d: %s", rec.Code, rec.Body.String())
+	}
+	page := decodeData[domain.PageResponse[domain.Employee]](t, rec.Body.Bytes())
+	if page.Total != 3 || page.Page != 1 || page.PageSize != 2 || len(page.Items) != 2 {
+		t.Fatalf("unexpected employee page: %+v", page)
+	}
+
+	badPageReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees?page=abc", nil)
+	badPageRec := httptest.NewRecorder()
+	handler.ServeHTTP(badPageRec, badPageReq)
+	if badPageRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid page, got %d: %s", badPageRec.Code, badPageRec.Body.String())
+	}
+
+	badSizeReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees?page_size=101", nil)
+	badSizeRec := httptest.NewRecorder()
+	handler.ServeHTTP(badSizeRec, badSizeReq)
+	if badSizeRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized page_size, got %d: %s", badSizeRec.Code, badSizeRec.Body.String())
+	}
+
+	detailReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/emp-admin", nil)
+	detailRec := httptest.NewRecorder()
+	handler.ServeHTTP(detailRec, detailReq)
+	if detailRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for employee detail, got %d: %s", detailRec.Code, detailRec.Body.String())
+	}
+	detail := decodeData[domain.Employee](t, detailRec.Body.Bytes())
+	if detail.ID != "emp-admin" || detail.BasicInfo["national_id"] == "" {
+		t.Fatalf("unexpected employee detail: %+v", detail)
+	}
+
+	exportReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/export", nil)
+	exportReq.Header.Set("X-Approval-Confirmed", "true")
+	exportRec := httptest.NewRecorder()
+	handler.ServeHTTP(exportRec, exportReq)
+	if exportRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for employee CSV export, got %d: %s", exportRec.Code, exportRec.Body.String())
+	}
+	if !strings.Contains(exportRec.Header().Get("Content-Type"), "text/csv") || !strings.Contains(exportRec.Body.String(), "Demo Admin") {
+		t.Fatalf("unexpected CSV export: content-type=%s body=%q", exportRec.Header().Get("Content-Type"), exportRec.Body.String())
+	}
+}
+
+func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
+	handler := newTestAPI(true)
+	payload, _ := json.Marshal(map[string]string{
+		"filename": "employees.csv",
+		"content":  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期\nE9001,Nina Lin,nina@example.com,ou-hq,Recruiter,全職,0911888999,在職,2026-06-01\n",
+	})
+	previewReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/preview", strings.NewReader(string(payload)))
+	previewReq.Header.Set("Content-Type", "application/json")
+	previewReq.Header.Set("X-Approval-Confirmed", "true")
+	previewRec := httptest.NewRecorder()
+
+	handler.ServeHTTP(previewRec, previewReq)
+
+	if previewRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for import preview, got %d: %s", previewRec.Code, previewRec.Body.String())
+	}
+	session := decodeData[domain.EmployeeImportSession](t, previewRec.Body.Bytes())
+	if session.ID == "" || session.Summary["valid"].(float64) != 1 {
+		t.Fatalf("unexpected preview session: %+v", session)
+	}
+
+	confirmReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/"+session.ID+"/confirm", strings.NewReader(`{"mode":"create"}`))
+	confirmReq.Header.Set("Content-Type", "application/json")
+	confirmReq.Header.Set("X-Approval-Confirmed", "true")
+	confirmRec := httptest.NewRecorder()
+	handler.ServeHTTP(confirmRec, confirmReq)
+	if confirmRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for import confirm, got %d: %s", confirmRec.Code, confirmRec.Body.String())
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees", strings.NewReader(`{}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("X-Request-ID", "trace-test")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid employee create, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	var errPayload struct {
+		Error struct {
+			Code        string              `json:"code"`
+			FieldErrors []domain.FieldError `json:"field_errors"`
+			TraceID     string              `json:"trace_id"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(createRec.Body.Bytes(), &errPayload); err != nil {
+		t.Fatal(err)
+	}
+	if errPayload.Error.Code != "validation_failed" || len(errPayload.Error.FieldErrors) == 0 || errPayload.Error.TraceID != "trace-test" {
+		t.Fatalf("expected validation error details, got %+v", errPayload)
+	}
+}
+
+func TestEmployeeCreateStatusAndDeleteContract(t *testing.T) {
+	handler := newTestAPI(true)
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees", strings.NewReader(`{"name":"Contract Person","company_email":"contract.person@example.com","category":"full-time","employment_status":"待加入"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, createReq)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for employee create, got %d: %s", rec.Code, rec.Body.String())
+	}
+	created := decodeData[domain.Employee](t, rec.Body.Bytes())
+	if created.EmployeeNo != "IKL001" || created.Category != "full_time" || created.EmploymentStatus != "onboarding" {
+		t.Fatalf("expected generated number and normalized fields, got %+v", created)
+	}
+
+	statusReq := httptest.NewRequest(http.MethodPatch, "/v1/hr/employees/"+created.ID+"/status", strings.NewReader(`{"status":"試用中"}`))
+	statusReq.Header.Set("Content-Type", "application/json")
+	statusRec := httptest.NewRecorder()
+	handler.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for unconfirmed high-risk status patch, got %d: %s", statusRec.Code, statusRec.Body.String())
+	}
+
+	statusReq = httptest.NewRequest(http.MethodPatch, "/v1/hr/employees/"+created.ID+"/status", strings.NewReader(`{"status":"試用中"}`))
+	statusReq.Header.Set("Content-Type", "application/json")
+	statusReq.Header.Set("X-Approval-Confirmed", "true")
+	statusRec = httptest.NewRecorder()
+	handler.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for status patch, got %d: %s", statusRec.Code, statusRec.Body.String())
+	}
+	updated := decodeData[domain.Employee](t, statusRec.Body.Bytes())
+	if updated.EmploymentStatus != "probation" {
+		t.Fatalf("expected normalized probation status, got %+v", updated)
+	}
+
+	resignReq := httptest.NewRequest(http.MethodPatch, "/v1/hr/employees/"+created.ID+"/status", strings.NewReader(`{"status":"resigned"}`))
+	resignReq.Header.Set("Content-Type", "application/json")
+	resignReq.Header.Set("X-Approval-Confirmed", "true")
+	resignRec := httptest.NewRecorder()
+	handler.ServeHTTP(resignRec, resignReq)
+	if resignRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 when direct status patch tries to resign, got %d: %s", resignRec.Code, resignRec.Body.String())
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/hr/employees/"+created.ID, nil)
+	deleteReq.Header.Set("X-Approval-Confirmed", "true")
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for confirmed delete, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees?keyword=contract.person@example.com", nil)
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for list after delete, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+	page := decodeData[domain.PageResponse[domain.Employee]](t, listRec.Body.Bytes())
+	if page.Total != 0 || len(page.Items) != 0 {
+		t.Fatalf("expected soft-deleted employee to be hidden by default, got %+v", page)
+	}
+}
+
+func TestListResponsesUsePageEnvelope(t *testing.T) {
+	handler := newTestAPI(true)
+	req := httptest.NewRequest(http.MethodGet, "/v1/iam/user-groups?page=1&page_size=1", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for user group page, got %d: %s", rec.Code, rec.Body.String())
+	}
+	page := decodeData[domain.PageResponse[domain.UserGroup]](t, rec.Body.Bytes())
+	if page.Total == 0 || page.Page != 1 || page.PageSize != 1 || len(page.Items) != 1 {
+		t.Fatalf("unexpected page envelope: %+v", page)
+	}
+
+	badReq := httptest.NewRequest(http.MethodGet, "/v1/iam/user-groups?page_size=101", nil)
+	badRec := httptest.NewRecorder()
+	handler.ServeHTTP(badRec, badReq)
+	if badRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized page_size, got %d: %s", badRec.Code, badRec.Body.String())
+	}
+}
+
+func testJWT(claims map[string]any) string {
+	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	payloadBytes, _ := json.Marshal(claims)
+	payload := base64.RawURLEncoding.EncodeToString(payloadBytes)
+	return header + "." + payload + "."
+}
+
+func keycloakClaims(issuer string) map[string]any {
+	return map[string]any{
+		"iss":        issuer,
+		"aud":        "nexus-api",
+		"exp":        time.Now().Add(time.Hour).Unix(),
+		"tenant_id":  "demo",
+		"account_id": "acct-admin",
+	}
+}
+
+func jwksFromKeys(keys map[string]*rsa.PublicKey) []map[string]string {
+	out := make([]map[string]string, 0, len(keys))
+	for kid, key := range keys {
+		out = append(out, map[string]string{
+			"kid": kid,
+			"kty": "RSA",
+			"alg": "RS256",
+			"n":   base64.RawURLEncoding.EncodeToString(key.N.Bytes()),
+			"e":   base64.RawURLEncoding.EncodeToString(big.NewInt(int64(key.E)).Bytes()),
+		})
+	}
+	return out
+}
+
+func signedRS256JWT(t *testing.T, kid string, key *rsa.PrivateKey, claims map[string]any) string {
+	t.Helper()
+	header, err := json.Marshal(map[string]string{"alg": "RS256", "kid": kid, "typ": "JWT"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := json.Marshal(claims)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signingInput := base64.RawURLEncoding.EncodeToString(header) + "." + base64.RawURLEncoding.EncodeToString(payload)
+	sum := sha256.Sum256([]byte(signingInput))
+	signature, err := rsa.SignPKCS1v15(rand.Reader, key, crypto.SHA256, sum[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return signingInput + "." + base64.RawURLEncoding.EncodeToString(signature)
+}
+
+type staticTokenResolver struct {
+	ctx v1api.TokenContext
+	ok  bool
+	err error
+}
+
+func (r staticTokenResolver) Resolve(*http.Request) (v1api.TokenContext, bool, error) {
+	return r.ctx, r.ok, r.err
+}
