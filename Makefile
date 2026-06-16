@@ -1,44 +1,31 @@
-.PHONY: tidy build run test lint migrate-up migrate-down migrate-force migrate-version db-up compose-up compose-down seed
+GO ?= go
+GOOSE ?= $(GO) run github.com/pressly/goose/v3/cmd/goose@latest
+SQLC ?= $(GO) run github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 
-COMPOSE := docker compose -f deploy/docker-compose.yml
+DATABASE_URL ?= postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable
 
-tidy:
-	go mod tidy
+.PHONY: dev test unit-test sqlc migrate-up migrate-down migrate-status migrate-validate
 
-build:
-	go build ./...
-
-run:
-	go run ./cmd/api
+dev:
+	$(GO) run ./cmd/api
 
 test:
-	go test ./...
+	$(GO) test ./...
 
-lint:
-	golangci-lint run ./... || echo "golangci-lint not installed; skipping"
+unit-test:
+	$(GO) test ./tests/unit/...
 
-# Database migrations (golang-migrate via cmd/migrate). Uses MIGRATE_DSN/DB_DSN.
+sqlc:
+	$(SQLC) generate
+
 migrate-up:
-	go run ./cmd/migrate up
+	$(GOOSE) -dir db/migrations postgres "$(DATABASE_URL)" up
 
 migrate-down:
-	go run ./cmd/migrate down
+	$(GOOSE) -dir db/migrations postgres "$(DATABASE_URL)" down
 
-migrate-force:
-	go run ./cmd/migrate force $(V)
+migrate-status:
+	$(GOOSE) -dir db/migrations postgres "$(DATABASE_URL)" status
 
-migrate-version:
-	go run ./cmd/migrate version
-
-# Seed is the last migration (000014); migrate-up applies it.
-seed: migrate-up
-
-# Local infra
-db-up:
-	$(COMPOSE) up -d postgres redis
-
-compose-up:
-	$(COMPOSE) up -d
-
-compose-down:
-	$(COMPOSE) down
+migrate-validate:
+	$(GOOSE) -dir db/migrations validate

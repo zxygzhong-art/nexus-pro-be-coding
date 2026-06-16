@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - "feat/**"
+      - "codex/**"
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    name: Unit And Generated Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          args: --timeout=5m
+
+      - name: Unit tests
+        run: GOCACHE=$PWD/.gocache go test ./tests/unit/...
+
+      - name: Validate migrations
+        run: make migrate-validate
+
+      - name: Regenerate sqlc
+        run: make sqlc
+
+      - name: Check generated files
+        run: git diff --exit-code
+
+  postgres:
+    name: Postgres Repository Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: nexus_pro_be
+          POSTGRES_USER: nexus
+          POSTGRES_PASSWORD: nexus
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nexus -d nexus_pro_be"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+
+      - name: Repository tests
+        env:
+          DATABASE_URL: postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable
+        run: GOCACHE=$PWD/.gocache go test ./tests/unit/repository/postgres

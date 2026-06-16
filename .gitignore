@@ -1,24 +1,12 @@
-# Binaries / build output
-/bin/
-*.exe
-*.test
-*.out
-
-# Go
-/vendor/
-
-# Env & secrets — NEVER commit
 .env
-.env.local
-*.local.env
+.env.*
+!.env.example
 
-# Project MCP config holds a Notion token; keep it local. Commit .mcp.json.example.
-.mcp.json
+bin/
+tmp/
+dist/
+coverage.out
+logs/*.log
+.gocache/
 
-# Claude Code local settings
-.claude/settings.local.json
-
-# Editor / OS
 .DS_Store
-.idea/
-.vscode/
