@@ -1,0 +1,20 @@
+-- +goose Up
+
+ALTER TABLE employees VALIDATE CONSTRAINT employees_manager_employee_fk;
+ALTER TABLE leave_balances VALIDATE CONSTRAINT leave_balances_employee_fk;
+ALTER TABLE leave_requests VALIDATE CONSTRAINT leave_requests_employee_fk;
+ALTER TABLE form_instances VALIDATE CONSTRAINT form_instances_template_fk;
+ALTER TABLE form_instances VALIDATE CONSTRAINT form_instances_applicant_account_fk;
+ALTER TABLE agent_runs VALIDATE CONSTRAINT agent_runs_account_fk;
+ALTER TABLE authz_permission_set_permissions VALIDATE CONSTRAINT authz_permission_set_permissions_set_fk;
+ALTER TABLE authz_permission_set_permissions VALIDATE CONSTRAINT authz_permission_set_permissions_permission_fk;
+ALTER TABLE authz_group_memberships VALIDATE CONSTRAINT authz_group_memberships_group_fk;
+ALTER TABLE authz_group_memberships VALIDATE CONSTRAINT authz_group_memberships_account_fk;
+ALTER TABLE authz_permission_set_assignments VALIDATE CONSTRAINT authz_permission_set_assignments_set_fk;
+ALTER TABLE authz_assumable_role_sessions VALIDATE CONSTRAINT authz_assumable_role_sessions_account_fk;
+ALTER TABLE authz_assumable_role_sessions VALIDATE CONSTRAINT authz_assumable_role_sessions_role_fk;
+
+-- +goose Down
+
+-- Constraint validation is intentionally not reverted. Dropping the constraints is
+-- owned by the migration that created them.
