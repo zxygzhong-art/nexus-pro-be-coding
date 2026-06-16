@@ -1,0 +1,716 @@
+openapi: 3.0.3
+info:
+  title: Nexus Pro Backend API
+  version: 0.2.0
+paths:
+  /v1/hr/employees:
+    get:
+      summary: List employees
+      parameters:
+        - {name: keyword, in: query, schema: {type: string}}
+        - {name: department_id, in: query, schema: {type: string}}
+        - {name: employment_status, in: query, schema: {type: string}}
+        - {name: category, in: query, schema: {type: string}}
+        - {name: page, in: query, schema: {type: integer, minimum: 1}}
+        - {name: page_size, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
+        - {name: sort, in: query, schema: {type: string, enum: [created_at_asc, created_at_desc, hire_date_asc, hire_date_desc]}}
+      responses:
+        "200":
+          description: Employee page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeeListResponse"
+    post:
+      summary: Create employee aggregate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmployeeInput"
+      responses:
+        "201":
+          description: Created employee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+  /v1/hr/employees/{id}:
+    get:
+      summary: Get employee detail grouped by profile sections
+      parameters:
+        - $ref: "#/components/parameters/EmployeeID"
+      responses:
+        "200":
+          description: Employee detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+    patch:
+      summary: Patch employee aggregate sections
+      parameters:
+        - $ref: "#/components/parameters/EmployeeID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmployeePatch"
+      responses:
+        "200":
+          description: Updated employee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+    delete:
+      summary: Soft delete an employee
+      parameters:
+        - $ref: "#/components/parameters/EmployeeID"
+      responses:
+        "200":
+          description: Soft-deleted employee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+  /v1/hr/employees/stats:
+    get:
+      summary: Employee dashboard counts
+      parameters:
+        - {name: keyword, in: query, schema: {type: string}}
+        - {name: department_id, in: query, schema: {type: string}}
+        - {name: employment_status, in: query, schema: {type: string}}
+        - {name: category, in: query, schema: {type: string}}
+      responses:
+        "200":
+          description: Employee statistics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeeStats"
+  /v1/hr/employee-options:
+    get:
+      summary: Employee form options
+      responses:
+        "200":
+          description: Employee options
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeeOptions"
+  /v1/hr/employees/import/preview:
+    post:
+      summary: Preview employee CSV or XLSX import
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+          application/json:
+            schema:
+              type: object
+              required: [filename, content]
+              properties:
+                filename: {type: string}
+                content: {type: string}
+      responses:
+        "201":
+          description: Import preview session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeeImportSession"
+  /v1/hr/employees/import/{id}/confirm:
+    post:
+      summary: Confirm a previewed employee import
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                mode: {type: string, default: create}
+      responses:
+        "200":
+          description: Confirmed import session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeeImportSession"
+  /v1/hr/employees/export:
+    get:
+      summary: Export employees as CSV
+      parameters:
+        - {name: keyword, in: query, schema: {type: string}}
+        - {name: department_id, in: query, schema: {type: string}}
+        - {name: employment_status, in: query, schema: {type: string}}
+        - {name: category, in: query, schema: {type: string}}
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema:
+                type: string
+    post:
+      summary: Export filtered employees as JSON
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmployeeQuery"
+      responses:
+        "200":
+          description: Exported employee rows
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [items]
+                properties:
+                  items:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Employee"
+  /v1/hr/employees/batch-delete:
+    post:
+      summary: Soft delete employees in batch
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [employee_ids, reason]
+              properties:
+                employee_ids:
+                  type: array
+                  items: {type: string}
+                reason: {type: string}
+      responses:
+        "200":
+          description: Batch delete results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchEmployeeResponse"
+  /v1/hr/employees/{id}/invite:
+    post:
+      summary: Create or resend an account invitation for an employee
+      parameters:
+        - $ref: "#/components/parameters/EmployeeID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                email: {type: string, format: email}
+      responses:
+        "200":
+          description: Employee with invitation account link
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+  /v1/hr/employees/{id}/status-transition:
+    post:
+      summary: Transition employee lifecycle status
+      parameters:
+        - $ref: "#/components/parameters/EmployeeID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: {type: string}
+                reason: {type: string}
+                start_date: {type: string}
+                end_date: {type: string}
+                details:
+                  type: object
+                  additionalProperties: true
+      responses:
+        "200":
+          description: Updated employee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+  /v1/hr/employees/{id}/status:
+    patch:
+      summary: Update employee status directly
+      parameters:
+        - $ref: "#/components/parameters/EmployeeID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  $ref: "#/components/schemas/EmployeeDirectStatus"
+      responses:
+        "200":
+          description: Updated employee
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+  /v1/me:
+    get:
+      summary: Resolve current account profile
+      responses:
+        "200": {description: OK}
+  /v1/me/menus:
+    get:
+      summary: List current account menus
+      responses:
+        "200": {description: OK}
+  /v1/authz/check:
+    post:
+      summary: Check one authorization request
+      responses:
+        "200": {description: OK}
+  /v1/authz/batch-check:
+    post:
+      summary: Check multiple authorization requests
+      responses:
+        "200": {description: OK}
+  /v1/authz/explain:
+    post:
+      summary: Explain one authorization decision
+      responses:
+        "200": {description: OK}
+  /v1/authz/simulate:
+    post:
+      summary: Simulate one authorization decision
+      responses:
+        "200": {description: OK}
+  /v1/iam/permissions:
+    get:
+      summary: List permissions
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200": {description: OK}
+  /v1/iam/user-groups:
+    get:
+      summary: List user groups
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200": {description: OK}
+    post:
+      summary: Create user group
+      responses:
+        "201": {description: Created}
+  /v1/iam/permission-sets:
+    get:
+      summary: List permission sets
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200": {description: OK}
+    post:
+      summary: Create permission set
+      responses:
+        "201": {description: Created}
+  /v1/iam/permission-set-assignments:
+    get:
+      summary: List permission set assignments
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200": {description: OK}
+    post:
+      summary: Create permission set assignment
+      responses:
+        "201": {description: Created}
+  /v1/iam/data-scopes:
+    get:
+      summary: List data scopes
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200": {description: OK}
+    post:
+      summary: Create data scope
+      responses:
+        "201": {description: Created}
+  /v1/iam/field-policies:
+    get:
+      summary: List field policies
+      parameters:
+        - {name: application_code, in: query, schema: {type: string}}
+        - {name: resource_type, in: query, schema: {type: string}}
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200": {description: OK}
+    post:
+      summary: Create field policy
+      responses:
+        "201": {description: Created}
+  /v1/iam/assumable-roles:
+    get:
+      summary: List assumable roles
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200": {description: OK}
+    post:
+      summary: Create assumable role
+      responses:
+        "201": {description: Created}
+  /v1/iam/assumable-roles/{id}/assume:
+    post:
+      summary: Assume a role
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": {description: OK}
+  /v1/org/units:
+    get:
+      summary: List organization units
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200": {description: OK}
+    post:
+      summary: Create organization unit
+      responses:
+        "201": {description: Created}
+  /v1/attendance/leave-balances:
+    get:
+      summary: List leave balances
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200": {description: OK}
+  /v1/attendance/leave-requests:
+    get:
+      summary: List leave requests
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200": {description: OK}
+    post:
+      summary: Create leave request
+      responses:
+        "201": {description: Created}
+  /v1/forms/templates:
+    get:
+      summary: List form templates
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200": {description: OK}
+    post:
+      summary: Create form template
+      responses:
+        "201": {description: Created}
+  /v1/workflows/forms/{id}/submit:
+    post:
+      summary: Submit a workflow form
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "201": {description: Created}
+  /v1/agents/runs:
+    get:
+      summary: List agent runs
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200": {description: OK}
+    post:
+      summary: Create agent run
+      responses:
+        "201": {description: Created}
+  /v1/audit-logs:
+    get:
+      summary: List audit logs
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200": {description: OK}
+components:
+  parameters:
+    ID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    Page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+    PageSize:
+      name: page_size
+      in: query
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+    Sort:
+      name: sort
+      in: query
+      schema:
+        type: string
+    EmployeeID:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+  schemas:
+    Employee:
+      allOf:
+        - $ref: "#/components/schemas/EmployeeInput"
+        - type: object
+          required: [id, tenant_id, name, status, created_at, updated_at]
+          properties:
+            id: {type: string}
+            tenant_id: {type: string}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+    EmployeeInput:
+      type: object
+      required: [name, company_email]
+      properties:
+        employee_no:
+          type: string
+          description: Optional. Generated by the backend with IKL prefix when omitted.
+        name: {type: string}
+        company_email: {type: string, format: email}
+        personal_email: {type: string, format: email}
+        phone: {type: string}
+        org_unit_id: {type: string}
+        account_id: {type: string}
+        position: {type: string}
+        category:
+          $ref: "#/components/schemas/EmployeeCategory"
+        status:
+          $ref: "#/components/schemas/EmployeeStatusWithDeleted"
+        employment_status:
+          $ref: "#/components/schemas/EmployeeStatusWithDeleted"
+        hire_date: {type: string}
+        resign_date: {type: string}
+        basic_info: {$ref: "#/components/schemas/Section"}
+        employment_info: {$ref: "#/components/schemas/Section"}
+        education_military_info: {$ref: "#/components/schemas/Section"}
+        contact_info: {$ref: "#/components/schemas/Section"}
+        insurance_info: {$ref: "#/components/schemas/Section"}
+        internal_experiences:
+          type: array
+          items: {$ref: "#/components/schemas/EmployeeExperience"}
+    EmployeePatch:
+      type: object
+      properties:
+        employee_no: {type: string}
+        name: {type: string}
+        company_email: {type: string, format: email}
+        personal_email: {type: string, format: email}
+        phone: {type: string}
+        org_unit_id: {type: string}
+        account_id: {type: string}
+        position: {type: string}
+        category:
+          $ref: "#/components/schemas/EmployeeCategory"
+        status:
+          $ref: "#/components/schemas/EmployeeStatusWithDeleted"
+        employment_status:
+          $ref: "#/components/schemas/EmployeeStatusWithDeleted"
+        hire_date: {type: string}
+        resign_date: {type: string}
+        basic_info: {$ref: "#/components/schemas/Section"}
+        employment_info: {$ref: "#/components/schemas/Section"}
+        education_military_info: {$ref: "#/components/schemas/Section"}
+        contact_info: {$ref: "#/components/schemas/Section"}
+        insurance_info: {$ref: "#/components/schemas/Section"}
+        internal_experiences:
+          type: array
+          items: {$ref: "#/components/schemas/EmployeeExperience"}
+    EmployeeQuery:
+      type: object
+      properties:
+        keyword: {type: string}
+        department_id: {type: string}
+        employment_status:
+          $ref: "#/components/schemas/EmployeeStatusWithDeleted"
+        category:
+          $ref: "#/components/schemas/EmployeeCategory"
+        page: {type: integer, minimum: 1}
+        page_size: {type: integer, minimum: 1, maximum: 100}
+        sort: {type: string, enum: [created_at_asc, created_at_desc, hire_date_asc, hire_date_desc]}
+    EmployeeCategory:
+      type: string
+      enum: [full_time, part_time, intern, contractor, other]
+    EmployeeStatus:
+      type: string
+      enum: [active, probation, leave_suspended, onboarding, resigned]
+    EmployeeDirectStatus:
+      type: string
+      enum: [active, probation, leave_suspended, onboarding]
+    EmployeeStatusWithDeleted:
+      type: string
+      enum: [active, probation, leave_suspended, onboarding, resigned, deleted]
+    EmployeeExperience:
+      type: object
+      properties:
+        id: {type: string}
+        start_date: {type: string, format: date-time}
+        end_date: {type: string, format: date-time}
+        reason: {type: string}
+        org_unit_id: {type: string}
+        position: {type: string}
+        category: {type: string}
+        current: {type: boolean}
+        created_at: {type: string, format: date-time}
+    Section:
+      type: object
+      additionalProperties: true
+    EmployeeListResponse:
+      type: object
+      required: [items, total, page, page_size, sort]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/Employee"}
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+        sort: {type: string}
+    EmployeeStats:
+      type: object
+      properties:
+        total: {type: integer}
+        active: {type: integer}
+        onboarding: {type: integer}
+        probation: {type: integer}
+        leave_suspended: {type: integer}
+        resigned: {type: integer}
+        hired_this_month: {type: integer}
+        left_this_month: {type: integer}
+    EmployeeOptions:
+      type: object
+      properties:
+        departments:
+          type: array
+          items: {type: object}
+        positions:
+          type: array
+          items: {type: string}
+        employment_statuses:
+          type: array
+          items: {type: string}
+        categories:
+          type: array
+          items: {type: string}
+        job_grades:
+          type: array
+          items: {type: string}
+        job_levels:
+          type: array
+          items: {type: string}
+    EmployeeImportSession:
+      type: object
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        filename: {type: string}
+        object_key: {type: string}
+        status: {type: string}
+        rows:
+          type: array
+          items: {type: object}
+        summary:
+          type: object
+          additionalProperties: true
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        confirmed_at: {type: string, format: date-time}
+    BatchEmployeeResponse:
+      type: object
+      properties:
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              employee_id: {type: string}
+              success: {type: boolean}
+              code: {type: string}
+              message: {type: string}
+    Error:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code: {type: string}
+            message: {type: string}
+            field_errors:
+              type: array
+              items:
+                type: object
+                properties:
+                  tab: {type: string}
+                  field: {type: string}
+                  code: {type: string}
+                  message: {type: string}
+            row_errors:
+              type: array
+              items:
+                type: object
+                properties:
+                  row: {type: integer}
+                  field: {type: string}
+                  code: {type: string}
+                  message: {type: string}
+            trace_id: {type: string}

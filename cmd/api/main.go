@@ -1,83 +1,179 @@
-// Command api is the nexus-pro backend HTTP server entrypoint. It wires config →
-// db → repository → authz engine → adapters → handlers → gin router.
 package main
 
 import (
 	"context"
-	"log"
+	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
-	"git.corp.ikala.tv/nexus-pro/nexus-pro-be/internal/adapters/authorizer"
-	"git.corp.ikala.tv/nexus-pro/nexus-pro-be/internal/adapters/identity"
-	"git.corp.ikala.tv/nexus-pro/nexus-pro-be/internal/audit"
-	"git.corp.ikala.tv/nexus-pro/nexus-pro-be/internal/authz"
-	"git.corp.ikala.tv/nexus-pro/nexus-pro-be/internal/config"
-	"git.corp.ikala.tv/nexus-pro/nexus-pro-be/internal/db"
-	hrhandler "git.corp.ikala.tv/nexus-pro/nexus-pro-be/internal/hr/handler"
-	hrservice "git.corp.ikala.tv/nexus-pro/nexus-pro-be/internal/hr/service"
-	"git.corp.ikala.tv/nexus-pro/nexus-pro-be/internal/iam/handler"
-	"git.corp.ikala.tv/nexus-pro/nexus-pro-be/internal/iam/service"
-	"git.corp.ikala.tv/nexus-pro/nexus-pro-be/internal/repository"
-	"git.corp.ikala.tv/nexus-pro/nexus-pro-be/internal/server"
+	v1api "nexus-pro-be/internal/api/v1"
+	"nexus-pro-be/internal/config"
+	platformauth "nexus-pro-be/internal/platform/auth"
+	openfgaclient "nexus-pro-be/internal/platform/openfga"
+	"nexus-pro-be/internal/platform/postgres"
+	redisstore "nexus-pro-be/internal/platform/redis"
+	"nexus-pro-be/internal/platform/telemetry"
+	"nexus-pro-be/internal/repository"
+	"nexus-pro-be/internal/repository/memory"
+	pgstore "nexus-pro-be/internal/repository/postgres"
+	"nexus-pro-be/internal/service"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 func main() {
 	cfg := config.Load()
-
-	gdb, err := db.Open(cfg.DBDsn)
-	if err != nil {
-		log.Fatalf("db: %v", err)
-	}
-
-	repo := repository.New()
-	recorder := audit.NewRecorder(gdb)
-
-	// Authorization backend: local engine over the repository, or OpenFGA (stub).
-	var az authorizer.Authorizer = authz.NewLocalEngine(repo)
-	if cfg.AuthzBackend == "openfga" {
-		az = authorizer.NewOpenFGAAuthorizer(cfg.OpenFGAURL, cfg.OpenFGAStoreID, cfg.OpenFGAModelID)
-	}
-
-	// Identity: bearer (Keycloak, stub) first when enabled, then dev headers.
-	var providers []identity.Provider
-	if cfg.KeycloakEnabled {
-		providers = append(providers, identity.NewKeycloakProvider(cfg.KeycloakIssuer, cfg.KeycloakJWKSURL, true))
-	}
-	providers = append(providers, identity.NewHeaderProvider())
-	idp := identity.NewChain(providers...)
-
-	identitySvc := service.NewIdentityService(az)
-	assumeSvc := service.NewAssumableRoleService(repo, recorder)
-	h := handler.New(repo, az, identitySvc, assumeSvc)
-	hrH := hrhandler.New(hrservice.NewEmployeeService(), hrservice.NewOrgUnitService())
-
-	srv := server.New(cfg.APIAddr, server.Deps{
-		GDB:       gdb,
-		Repo:      repo,
-		Authz:     az,
-		Recorder:  recorder,
-		Identity:  idp,
-		Handler:   h,
-		HRHandler: hrH,
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel(cfg.LogLevel)}))
+	telemetryShutdown, err := telemetry.Init(context.Background(), telemetry.Config{
+		Enabled:  cfg.OTelEnabled,
+		Service:  cfg.OTelServiceName,
+		Endpoint: cfg.OTelExporterOTLPEndpoint,
+		Insecure: cfg.OTelExporterOTLPInsecure,
+		Env:      cfg.Env,
 	})
-
-	go func() {
-		log.Printf("nexus-pro api listening on %s (authz=%s)", cfg.APIAddr, cfg.AuthzBackend)
-		if err := srv.ListenAndServe(); err != nil && err.Error() != "http: Server closed" {
-			log.Fatalf("listen: %v", err)
+	if err != nil {
+		logger.Error("opentelemetry initialization failed", "error", err)
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := telemetryShutdown(shutdownCtx); err != nil {
+			logger.Error("opentelemetry shutdown failed", "error", err)
 		}
 	}()
+	if cfg.OTelEnabled {
+		logger.Info("opentelemetry tracing enabled", "service", cfg.OTelServiceName, "endpoint", cfg.OTelExporterOTLPEndpoint)
+	}
+	var store repository.Store
+	var authzSnapshot service.AuthzSnapshotCache
+	var relationships service.RelationshipChecker
+	var objectStore service.ObjectStore
+	readinessChecks := map[string]v1api.ReadinessCheck{}
+	if cfg.DatabaseURL != "" {
+		startupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		pool, err := postgres.OpenPool(startupCtx, cfg.DatabaseURL)
+		cancel()
+		if err != nil {
+			logger.Error("postgres connection failed", "error", err)
+			os.Exit(1)
+		}
+		defer pool.Close()
+		logger.Info("postgres connected")
+		store = pgstore.NewStore(pool)
+		readinessChecks["postgres"] = pool.Ping
+	}
+	if cfg.RedisAddr != "" {
+		startupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		redisClient, err := redisstore.OpenClient(startupCtx, redisstore.Options{
+			Addr:     cfg.RedisAddr,
+			Password: cfg.RedisPassword,
+			DB:       cfg.RedisDB,
+		})
+		cancel()
+		if err != nil {
+			logger.Error("redis connection failed", "error", err)
+			os.Exit(1)
+		}
+		defer redisClient.Close()
+		logger.Info("redis connected")
+		authzSnapshot = redisstore.NewAuthzSnapshotStore(redisClient)
+		readinessChecks["redis"] = func(ctx context.Context) error {
+			return redisClient.Ping(ctx).Err()
+		}
+	}
+	if cfg.OpenFGAAPIURL != "" && cfg.OpenFGAStoreID != "" {
+		relationships = openfgaclient.NewChecker(cfg.OpenFGAAPIURL, cfg.OpenFGAStoreID, &http.Client{
+			Timeout:   5 * time.Second,
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+		})
+		logger.Info("openfga relationship checker enabled", "api_url", cfg.OpenFGAAPIURL, "store_id", cfg.OpenFGAStoreID)
+	}
+	if cfg.ObjectStoreDir != "" {
+		objectStore, err = service.NewLocalObjectStore(cfg.ObjectStoreDir)
+		if err != nil {
+			logger.Error("object store initialization failed", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("local object store enabled", "dir", cfg.ObjectStoreDir)
+	}
 
-	// Graceful shutdown.
-	stop := make(chan os.Signal, 1)
-	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
-	<-stop
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	if err := server.Shutdown(ctx, srv); err != nil {
-		log.Printf("shutdown: %v", err)
+	if store == nil {
+		store = memory.NewStore()
+	}
+	if cfg.SeedDemo {
+		service.SeedDemo(store)
+		logger.Info("demo data seeded")
+	}
+	app := service.New(store, service.Options{AuthzSnapshot: authzSnapshot, Relationships: relationships, ObjectStore: objectStore})
+	apiOptions := v1api.Options{
+		AllowDemoContext:   cfg.AllowDemoContext,
+		AllowHeaderContext: cfg.AllowHeaderContext,
+		AllowUnsignedJWT:   cfg.AllowUnsignedJWT,
+		ReadinessChecks:    readinessChecks,
+	}
+	if cfg.Env == "production" && (cfg.KeycloakIssuerURL == "" || cfg.KeycloakClientID == "") {
+		logger.Error("production requires Keycloak OIDC configuration", "missing", "KEYCLOAK_ISSUER_URL or KEYCLOAK_CLIENT_ID")
+		os.Exit(1)
+	}
+	if cfg.KeycloakIssuerURL != "" && cfg.KeycloakClientID != "" {
+		apiOptions.TokenResolver = platformauth.NewKeycloakTokenResolver(cfg.KeycloakIssuerURL, cfg.KeycloakClientID, &http.Client{
+			Timeout:   5 * time.Second,
+			Transport: otelhttp.NewTransport(http.DefaultTransport),
+		})
+		logger.Info("keycloak token resolver enabled", "issuer", cfg.KeycloakIssuerURL, "client_id", cfg.KeycloakClientID)
+	}
+	if cfg.OTelEnabled {
+		apiOptions.TelemetryServiceName = cfg.OTelServiceName
+	}
+
+	server := &http.Server{
+		Addr:              cfg.HTTPAddr,
+		Handler:           v1api.New(app, logger, apiOptions).Routes(),
+		ReadTimeout:       15 * time.Second,
+		ReadHeaderTimeout: 5 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	errs := make(chan error, 1)
+	go func() {
+		logger.Info("nexus-pro-be started", "addr", cfg.HTTPAddr)
+		errs <- server.ListenAndServe()
+	}()
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	select {
+	case <-ctx.Done():
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			logger.Error("server shutdown failed", "error", err)
+			os.Exit(1)
+		}
+	case err := <-errs:
+		if err != nil && err != http.ErrServerClosed {
+			logger.Error("server failed", "error", err)
+			os.Exit(1)
+		}
+	}
+}
+
+func logLevel(value string) slog.Level {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
 }

@@ -1,68 +1,97 @@
-// Package config loads runtime configuration from environment variables with
-// sensible defaults so that `make run` works against a local Postgres only.
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
+	"strings"
 )
 
-// Config holds all runtime configuration. Defaults are chosen so the existing
-// platform-ui frontend (port 8088, X-Account-ID default) keeps working unchanged.
 type Config struct {
-	APIAddr string
-
-	DBDsn      string
-	MigrateDsn string
-	RedisURL   string
-
-	AuthzBackend string // "local" | "openfga"
-
-	OpenFGAURL     string
-	OpenFGAStoreID string
-	OpenFGAModelID string
-
-	KeycloakEnabled bool
-	KeycloakIssuer  string
-	KeycloakJWKSURL string
-
+	Env      string
+	HTTPAddr string
+	SeedDemo bool
 	LogLevel string
+
+	DatabaseURL string
+
+	RedisAddr     string
+	RedisPassword string
+	RedisDB       int
+
+	KeycloakIssuerURL  string
+	KeycloakClientID   string
+	AllowDemoContext   bool
+	AllowHeaderContext bool
+	AllowUnsignedJWT   bool
+
+	OpenFGAAPIURL  string
+	OpenFGAStoreID string
+
+	ObjectStoreDir string
+
+	OTelEnabled              bool
+	OTelServiceName          string
+	OTelExporterOTLPEndpoint string
+	OTelExporterOTLPInsecure bool
 }
 
-// Load reads configuration from the environment, applying defaults.
 func Load() Config {
-	c := Config{
-		APIAddr:         env("API_ADDR", ":8088"),
-		DBDsn:           env("DB_DSN", "postgres://app_user:app_pass@localhost:5432/nexus?sslmode=disable"),
-		MigrateDsn:      env("MIGRATE_DSN", ""),
-		RedisURL:        env("REDIS_URL", ""),
-		AuthzBackend:    env("AUTHZ_BACKEND", "local"),
-		OpenFGAURL:      env("OPENFGA_API_URL", ""),
-		OpenFGAStoreID:  env("OPENFGA_STORE_ID", ""),
-		OpenFGAModelID:  env("OPENFGA_MODEL_ID", ""),
-		KeycloakEnabled: envBool("KEYCLOAK_ENABLED", false),
-		KeycloakIssuer:  env("KEYCLOAK_ISSUER", ""),
-		KeycloakJWKSURL: env("KEYCLOAK_JWKS_URL", ""),
-		LogLevel:        env("LOG_LEVEL", "info"),
+	return Config{
+		Env:           env("APP_ENV", "development"),
+		HTTPAddr:      env("HTTP_ADDR", ":8080"),
+		SeedDemo:      envBool("SEED_DEMO", env("APP_ENV", "development") != "production"),
+		LogLevel:      env("LOG_LEVEL", "info"),
+		DatabaseURL:   strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		RedisAddr:     strings.TrimSpace(os.Getenv("REDIS_ADDR")),
+		RedisPassword: os.Getenv("REDIS_PASSWORD"),
+		RedisDB:       envInt("REDIS_DB", 0),
+
+		KeycloakIssuerURL:  strings.TrimSpace(os.Getenv("KEYCLOAK_ISSUER_URL")),
+		KeycloakClientID:   strings.TrimSpace(os.Getenv("KEYCLOAK_CLIENT_ID")),
+		AllowDemoContext:   envBool("ALLOW_DEMO_CONTEXT", false),
+		AllowHeaderContext: envBool("ALLOW_HEADER_CONTEXT", false),
+		AllowUnsignedJWT:   envBool("ALLOW_UNSIGNED_JWT", false),
+
+		OpenFGAAPIURL:  strings.TrimSpace(os.Getenv("OPENFGA_API_URL")),
+		OpenFGAStoreID: strings.TrimSpace(os.Getenv("OPENFGA_STORE_ID")),
+
+		ObjectStoreDir: strings.TrimSpace(os.Getenv("OBJECT_STORE_DIR")),
+
+		OTelEnabled:              envBool("OTEL_ENABLED", false),
+		OTelServiceName:          env("OTEL_SERVICE_NAME", "nexus-pro-be"),
+		OTelExporterOTLPEndpoint: env("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
+		OTelExporterOTLPInsecure: envBool("OTEL_EXPORTER_OTLP_INSECURE", true),
 	}
-	if c.MigrateDsn == "" {
-		c.MigrateDsn = c.DBDsn
-	}
-	return c
 }
 
-func env(key, def string) string {
-	if v, ok := os.LookupEnv(key); ok && v != "" {
+func env(key, fallback string) string {
+	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
 	}
-	return def
+	return fallback
 }
 
-func envBool(key string, def bool) bool {
-	if v, ok := os.LookupEnv(key); ok && v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			return b
-		}
+func envInt(key string, fallback int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
 	}
-	return def
+	parsed, err := strconv.Atoi(v)
+	if err != nil {
+		panic(fmt.Sprintf("%s must be an integer: %q", key, v))
+	}
+	return parsed
+}
+
+func envBool(key string, fallback bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	parsed, err := strconv.ParseBool(v)
+	if err != nil {
+		panic(fmt.Sprintf("%s must be a boolean: %q", key, v))
+	}
+	return parsed
 }
