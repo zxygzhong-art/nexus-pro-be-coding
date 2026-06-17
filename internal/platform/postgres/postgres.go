@@ -17,6 +17,7 @@ func OpenPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	if err != nil {
 		return nil, fmt.Errorf("parse database url: %w", err)
 	}
+	config.ConnConfig.Tracer = newQueryTracer()
 	config.MaxConns = 10
 	config.MinConns = 1
 	config.MaxConnLifetime = time.Hour

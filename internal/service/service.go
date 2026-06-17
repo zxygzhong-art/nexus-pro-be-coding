@@ -138,17 +138,22 @@ type AuthzAudit struct {
 	decision CheckResult
 }
 
-func (c *Service) Authorize(ctx RequestContext, req CheckRequest, audit AuditTarget) (Account, CheckResult, AuthzAudit, error) {
-	account, _, err := c.resolveAccount(ctx)
+func (c *Service) Authorize(ctx RequestContext, req CheckRequest, audit AuditTarget) (account Account, decision CheckResult, done AuthzAudit, err error) {
+	ctx, span := startServiceSpan(ctx, "service.authz.authorize", authzSpanAttributes(req)...)
+	defer func() {
+		setAuthzSpanResult(span, decision)
+		finishServiceSpan(span, err)
+	}()
+	account, _, err = c.resolveAccount(ctx)
 	if err != nil {
 		return Account{}, CheckResult{}, AuthzAudit{}, err
 	}
-	decision, err := c.evaluateAuthz(ctx, account, req)
+	decision, err = c.evaluateAuthz(ctx, account, req)
 	if err != nil {
 		return Account{}, CheckResult{}, AuthzAudit{}, err
 	}
 	audit = audit.fromRequest(req)
-	done := AuthzAudit{service: c, target: audit, decision: decision}
+	done = AuthzAudit{service: c, target: audit, decision: decision}
 	if !decision.Allowed {
 		_ = c.auditAuthzTarget(ctx, audit, decision)
 		c.logWarn(ctx, "authorization denied",
