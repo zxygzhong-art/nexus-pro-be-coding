@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="zh-Hans">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Nexus Pro API Tester</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <p class="eyebrow">nexus-pro-be</p>
+        <h1>API Tester</h1>
+      </div>
+      <div class="topbar-actions">
+        <button id="smokeBtn" type="button">Run Smoke</button>
+        <button id="copyCurlBtn" type="button" class="secondary">Copy cURL</button>
+      </div>
+    </header>
+
+    <main class="shell">
+      <aside class="sidebar">
+        <section class="settings">
+          <label>
+            Backend URL
+            <input id="baseUrl" autocomplete="off" spellcheck="false" />
+          </label>
+          <label>
+            Transport
+            <select id="transport">
+              <option value="proxy">Local proxy</option>
+              <option value="direct">Direct browser fetch</option>
+            </select>
+          </label>
+          <label>
+            Bearer token
+            <textarea id="token" rows="3" spellcheck="false" placeholder="Optional"></textarea>
+          </label>
+          <div class="grid-2">
+            <label>
+              X-Tenant-ID
+              <input id="tenantId" autocomplete="off" />
+            </label>
+            <label>
+              X-Account-ID
+              <input id="accountId" autocomplete="off" />
+            </label>
+          </div>
+          <label>
+            X-Assumable-Role-Session-ID
+            <input id="assumedSessionId" autocomplete="off" placeholder="Optional" />
+          </label>
+          <div class="toolbar">
+            <label class="check">
+              <input id="approvalConfirmed" type="checkbox" />
+              <span>X-Approval-Confirmed</span>
+            </label>
+            <button id="generateTokenBtn" type="button" class="secondary">Unsigned JWT</button>
+          </div>
+        </section>
+
+        <section class="endpoint-nav">
+          <label>
+            Search endpoints
+            <input id="endpointSearch" autocomplete="off" placeholder="hr employee, authz, GET..." />
+          </label>
+          <div id="endpointList" class="endpoint-list"></div>
+        </section>
+      </aside>
+
+      <section class="workspace">
+        <section class="request-panel">
+          <div class="request-heading">
+            <span id="methodBadge" class="method">GET</span>
+            <div>
+              <h2 id="endpointTitle">Select an endpoint</h2>
+              <p id="endpointMeta">Choose a route from the left list.</p>
+            </div>
+          </div>
+
+          <div class="form-grid">
+            <label>
+              Method
+              <select id="method"></select>
+            </label>
+            <label>
+              Path
+              <input id="path" spellcheck="false" />
+            </label>
+          </div>
+
+          <div class="dynamic-grid">
+            <section>
+              <div class="section-title">
+                <h3>Path Params</h3>
+                <button id="clearPathParamsBtn" type="button" class="text-button">Clear</button>
+              </div>
+              <div id="pathParams" class="kv-list empty-state">No path params.</div>
+            </section>
+            <section>
+              <div class="section-title">
+                <h3>Query Params</h3>
+                <button id="clearQueryBtn" type="button" class="text-button">Clear</button>
+              </div>
+              <div id="queryParams" class="kv-list empty-state">No query params.</div>
+            </section>
+          </div>
+
+          <label class="body-editor">
+            JSON Body
+            <textarea id="body" spellcheck="false"></textarea>
+          </label>
+
+          <div class="toolbar">
+            <button id="sendBtn" type="button">Send Request</button>
+            <button id="formatBodyBtn" type="button" class="secondary">Format JSON</button>
+            <button id="resetBodyBtn" type="button" class="secondary">Reset Sample</button>
+          </div>
+        </section>
+
+        <section class="response-panel">
+          <div class="response-head">
+            <div>
+              <p class="eyebrow">Response</p>
+              <h2 id="responseStatus">Idle</h2>
+            </div>
+            <div id="responseMetrics" class="metrics"></div>
+          </div>
+          <div id="smokeResults" class="smoke-results" hidden></div>
+          <pre id="responseBody">{}</pre>
+        </section>
+      </section>
+    </main>
+
+    <script src="./app.js"></script>
+  </body>
+</html>
