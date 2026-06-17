@@ -916,6 +916,43 @@ func (s *Store) IncrementPermissionVersion(execCtx context.Context, tenantID str
 	return v.Version, nil
 }
 
+func (s *Store) UpsertAuthzRelationshipTuple(execCtx context.Context, v domain.AuthzRelationshipTuple) error {
+	_, err := s.q.UpsertAuthzRelationshipTuple(execCtx, sqlc.UpsertAuthzRelationshipTupleParams{
+		ID:          v.ID,
+		TenantID:    v.TenantID,
+		ObjectType:  v.ObjectType,
+		ObjectID:    v.ObjectID,
+		Relation:    v.Relation,
+		SubjectType: v.SubjectType,
+		SubjectID:   v.SubjectID,
+		CreatedAt:   timestamptz(v.CreatedAt),
+	})
+	return err
+}
+
+func (s *Store) DeleteAuthzRelationshipTuple(execCtx context.Context, v domain.AuthzRelationshipTuple) error {
+	return s.q.DeleteAuthzRelationshipTuple(execCtx, sqlc.DeleteAuthzRelationshipTupleParams{
+		TenantID:    v.TenantID,
+		ObjectType:  v.ObjectType,
+		ObjectID:    v.ObjectID,
+		Relation:    v.Relation,
+		SubjectType: v.SubjectType,
+		SubjectID:   v.SubjectID,
+	})
+}
+
+func (s *Store) ListAuthzRelationshipTuplesForObject(execCtx context.Context, tenantID, objectType, objectID string) ([]domain.AuthzRelationshipTuple, error) {
+	items, err := s.q.ListAuthzRelationshipTuplesForObject(tenantContext(execCtx, tenantID), sqlc.ListAuthzRelationshipTuplesForObjectParams{
+		TenantID:   tenantID,
+		ObjectType: objectType,
+		ObjectID:   objectID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAuthzRelationshipTuple), nil
+}
+
 func (s *Store) AppendAuthzOutboxEvent(execCtx context.Context, v domain.AuthzOutboxEvent) error {
 	_, err := s.q.AppendAuthzOutboxEvent(execCtx, sqlc.AppendAuthzOutboxEventParams{
 		ID:          v.ID,
@@ -937,6 +974,18 @@ func (s *Store) ListAuthzOutboxEvents(execCtx context.Context, tenantID string) 
 		return nil, err
 	}
 	return mapSlice(items, fromAuthzOutboxEvent), nil
+}
+
+func (s *Store) UpdateAuthzOutboxEvent(execCtx context.Context, v domain.AuthzOutboxEvent) error {
+	_, err := s.q.UpdateAuthzOutboxEvent(tenantContext(execCtx, v.TenantID), sqlc.UpdateAuthzOutboxEventParams{
+		TenantID:    v.TenantID,
+		ID:          v.ID,
+		Status:      v.Status,
+		RetryCount:  int32(v.RetryCount),
+		LastError:   v.LastError,
+		ProcessedAt: nullableTimestamptz(v.ProcessedAt),
+	})
+	return err
 }
 
 func isNotFound(err error) bool {
@@ -1316,5 +1365,18 @@ func fromAuthzOutboxEvent(v sqlc.AuthzOutboxEvent) domain.AuthzOutboxEvent {
 		LastError:   v.LastError,
 		CreatedAt:   timeFrom(v.CreatedAt),
 		ProcessedAt: timePtrFrom(v.ProcessedAt),
+	}
+}
+
+func fromAuthzRelationshipTuple(v sqlc.AuthzRelationshipTuple) domain.AuthzRelationshipTuple {
+	return domain.AuthzRelationshipTuple{
+		ID:          v.ID,
+		TenantID:    v.TenantID,
+		ObjectType:  v.ObjectType,
+		ObjectID:    v.ObjectID,
+		Relation:    v.Relation,
+		SubjectType: v.SubjectType,
+		SubjectID:   v.SubjectID,
+		CreatedAt:   timeFrom(v.CreatedAt),
 	}
 }

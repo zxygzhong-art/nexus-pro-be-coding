@@ -38,6 +38,7 @@ type Store struct {
 	auditLogs           map[string][]AuditLog
 	permissionVersions  map[string]int64
 	authzOutbox         map[string][]AuthzOutboxEvent
+	relationshipTuples  map[string]map[string]AuthzRelationshipTuple
 }
 
 func NewStore() *Store {
@@ -64,6 +65,7 @@ func NewStore() *Store {
 		auditLogs:           map[string][]AuditLog{},
 		permissionVersions:  map[string]int64{},
 		authzOutbox:         map[string][]AuthzOutboxEvent{},
+		relationshipTuples:  map[string]map[string]AuthzRelationshipTuple{},
 	}
 }
 
@@ -834,6 +836,45 @@ func (s *Store) IncrementPermissionVersion(_ context.Context, tenantID string) (
 	return s.permissionVersions[tenantID], nil
 }
 
+func (s *Store) UpsertAuthzRelationshipTuple(_ context.Context, v AuthzRelationshipTuple) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.relationshipTuples[v.TenantID] == nil {
+		s.relationshipTuples[v.TenantID] = map[string]AuthzRelationshipTuple{}
+	}
+	s.relationshipTuples[v.TenantID][relationshipTupleKey(v)] = v
+	return nil
+}
+
+func (s *Store) DeleteAuthzRelationshipTuple(_ context.Context, v AuthzRelationshipTuple) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.relationshipTuples[v.TenantID], relationshipTupleKey(v))
+	return nil
+}
+
+func (s *Store) ListAuthzRelationshipTuplesForObject(_ context.Context, tenantID, objectType, objectID string) ([]AuthzRelationshipTuple, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	src := s.relationshipTuples[tenantID]
+	out := make([]AuthzRelationshipTuple, 0)
+	for _, v := range src {
+		if v.ObjectType == objectType && v.ObjectID == objectID {
+			out = append(out, v)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Relation != out[j].Relation {
+			return out[i].Relation < out[j].Relation
+		}
+		if out[i].SubjectType != out[j].SubjectType {
+			return out[i].SubjectType < out[j].SubjectType
+		}
+		return out[i].SubjectID < out[j].SubjectID
+	})
+	return out, nil
+}
+
 func (s *Store) AppendAuthzOutboxEvent(_ context.Context, v AuthzOutboxEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -851,6 +892,20 @@ func (s *Store) ListAuthzOutboxEvents(_ context.Context, tenantID string) ([]Aut
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
+}
+
+func (s *Store) UpdateAuthzOutboxEvent(_ context.Context, v AuthzOutboxEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	events := s.authzOutbox[v.TenantID]
+	for i := range events {
+		if events[i].ID == v.ID {
+			events[i] = copyAuthzOutboxEvent(v)
+			s.authzOutbox[v.TenantID] = events
+			return nil
+		}
+	}
+	return nil
 }
 
 func (s *Store) RemoveAccountGroup(_ context.Context, tenantID, accountID, groupID string) error {

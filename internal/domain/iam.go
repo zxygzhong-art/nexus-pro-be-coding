@@ -112,6 +112,29 @@ type AuthzOutboxEvent struct {
 	ProcessedAt *time.Time     `json:"processed_at,omitempty"`
 }
 
+type AuthzRelationshipTuple struct {
+	ID          string    `json:"id"`
+	TenantID    string    `json:"tenant_id"`
+	ObjectType  string    `json:"object_type"`
+	ObjectID    string    `json:"object_id"`
+	Relation    string    `json:"relation"`
+	SubjectType string    `json:"subject_type"`
+	SubjectID   string    `json:"subject_id"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+type AuthzRelationshipTupleOperation string
+
+const (
+	AuthzRelationshipTupleWrite  AuthzRelationshipTupleOperation = "write"
+	AuthzRelationshipTupleDelete AuthzRelationshipTupleOperation = "delete"
+)
+
+type AuthzRelationshipTupleChange struct {
+	Operation AuthzRelationshipTupleOperation `json:"operation"`
+	Tuple     AuthzRelationshipTuple          `json:"tuple"`
+}
+
 type CheckRequest struct {
 	ApplicationCode ApplicationCode `json:"application_code,omitempty"`
 	ResourceType    ResourceType    `json:"resource_type,omitempty"`

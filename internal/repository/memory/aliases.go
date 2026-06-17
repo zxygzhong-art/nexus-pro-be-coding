@@ -29,6 +29,7 @@ type CheckResult = domain.CheckResult
 type RowError = domain.RowError
 type AuditLog = domain.AuditLog
 type AuthzOutboxEvent = domain.AuthzOutboxEvent
+type AuthzRelationshipTuple = domain.AuthzRelationshipTuple
 type PageRequest = domain.PageRequest
 
 const DefaultPage = domain.DefaultPage

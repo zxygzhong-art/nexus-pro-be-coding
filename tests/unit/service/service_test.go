@@ -1231,6 +1231,64 @@ func TestEmployeeAggregateCreatePatchAndDetail(t *testing.T) {
 	}
 }
 
+func TestEmployeeAccountChangesEmitOpenFGATupleOutbox(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-hr",
+		TenantID: "tenant-1",
+		Name:     "HR",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "create", Scope: "all"},
+			{Resource: "hr.employee", Action: "update", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-hr", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-hr"}, CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-old", TenantID: "tenant-1", Status: "active", CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-new", TenantID: "tenant-1", Status: "active", CreatedAt: now})
+	svc := service.New(store)
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-hr"}
+
+	created, err := svc.CreateEmployee(ctx, domain.CreateEmployeeInput{
+		EmployeeNo:   "E2001",
+		Name:         "Relationship Owner",
+		CompanyEmail: "relationship.owner@example.com",
+		AccountID:    "acct-old",
+		HireDate:     "2026-06-01",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tuples, err := store.ListAuthzRelationshipTuplesForObject(context.Background(), "tenant-1", "hr.employee", created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tuples) != 1 || tuples[0].Relation != "owner" || tuples[0].SubjectID != "acct-old" {
+		t.Fatalf("expected owner tuple for old account, got %+v", tuples)
+	}
+
+	newAccountID := "acct-new"
+	if _, err := svc.UpdateEmployee(ctx, created.ID, domain.UpdateEmployeeInput{AccountID: &newAccountID}); err != nil {
+		t.Fatal(err)
+	}
+	tuples, err = store.ListAuthzRelationshipTuplesForObject(context.Background(), "tenant-1", "hr.employee", created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tuples) != 1 || tuples[0].Relation != "owner" || tuples[0].SubjectID != "acct-new" {
+		t.Fatalf("expected owner tuple to move to new account, got %+v", tuples)
+	}
+	events, err := store.ListAuthzOutboxEvents(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasOutboxEvent(events, string(domain.EventOpenFGARelationshipWrite)) || !hasOutboxEvent(events, string(domain.EventOpenFGARelationshipDelete)) {
+		t.Fatalf("expected OpenFGA write/delete outbox events, got %+v", events)
+	}
+}
+
 func TestEmployeeCreateRejectsDuplicateUniqueFields(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()

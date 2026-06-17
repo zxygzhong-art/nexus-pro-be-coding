@@ -114,6 +114,8 @@ const (
 	EventEmployeeAuthzSubjectUpdate EventType = "hr.employee.authz_subject.update"
 	EventEmployeeAuthzSubjectInvite EventType = "hr.employee.authz_subject.invite"
 	EventEmployeeAuthzSubjectImport EventType = "hr.employee.authz_subject.import"
+	EventOpenFGARelationshipWrite   EventType = "openfga.relationship.write"
+	EventOpenFGARelationshipDelete  EventType = "openfga.relationship.delete"
 )
 
 const (

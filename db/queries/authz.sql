@@ -215,6 +215,15 @@ WHERE tenant_id = $1
   AND object_id = $3
 ORDER BY relation ASC, subject_type ASC, subject_id ASC;
 
+-- name: DeleteAuthzRelationshipTuple :exec
+DELETE FROM authz_relationship_tuples
+WHERE tenant_id = $1
+  AND object_type = $2
+  AND object_id = $3
+  AND relation = $4
+  AND subject_type = $5
+  AND subject_id = $6;
+
 -- name: GetAuthzPermissionVersion :one
 SELECT * FROM authz_permission_versions
 WHERE tenant_id = $1;
@@ -243,3 +252,13 @@ RETURNING *;
 SELECT * FROM authz_outbox_events
 WHERE tenant_id = $1
 ORDER BY created_at ASC;
+
+-- name: UpdateAuthzOutboxEvent :one
+UPDATE authz_outbox_events
+SET status = $3,
+    retry_count = $4,
+    last_error = $5,
+    processed_at = $6
+WHERE tenant_id = $1
+  AND id = $2
+RETURNING *;

@@ -418,6 +418,9 @@ func (c *Service) touchEmployeeAuthzIfNeeded(ctx RequestContext, before, after E
 	if before.OrgUnitID == after.OrgUnitID && before.AccountID == after.AccountID && before.ManagerEmployeeID == after.ManagerEmployeeID {
 		return nil
 	}
+	if err := c.syncEmployeeRelationshipTuples(ctx, before, after); err != nil {
+		return err
+	}
 	return c.touchAuthzConfig(ctx, eventType, map[string]any{
 		"employee_id":                after.ID,
 		"before_org_unit_id":         before.OrgUnitID,

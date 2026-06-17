@@ -161,6 +161,37 @@ func (q *Queries) CreateAuthzPermissionSetAssignment(ctx context.Context, arg Cr
 	return i, err
 }
 
+const deleteAuthzRelationshipTuple = `-- name: DeleteAuthzRelationshipTuple :exec
+DELETE FROM authz_relationship_tuples
+WHERE tenant_id = $1
+  AND object_type = $2
+  AND object_id = $3
+  AND relation = $4
+  AND subject_type = $5
+  AND subject_id = $6
+`
+
+type DeleteAuthzRelationshipTupleParams struct {
+	TenantID    string `json:"tenant_id"`
+	ObjectType  string `json:"object_type"`
+	ObjectID    string `json:"object_id"`
+	Relation    string `json:"relation"`
+	SubjectType string `json:"subject_type"`
+	SubjectID   string `json:"subject_id"`
+}
+
+func (q *Queries) DeleteAuthzRelationshipTuple(ctx context.Context, arg DeleteAuthzRelationshipTupleParams) error {
+	_, err := q.db.Exec(ctx, deleteAuthzRelationshipTuple,
+		arg.TenantID,
+		arg.ObjectType,
+		arg.ObjectID,
+		arg.Relation,
+		arg.SubjectType,
+		arg.SubjectID,
+	)
+	return err
+}
+
 const getActiveAuthzAssumableRoleSession = `-- name: GetActiveAuthzAssumableRoleSession :one
 SELECT id, tenant_id, account_id, assumable_role_id, session_policy, expires_at, revoked_at, created_at FROM authz_assumable_role_sessions
 WHERE tenant_id = $1
@@ -799,6 +830,50 @@ func (q *Queries) RevokeAuthzAssumableRoleSession(ctx context.Context, arg Revok
 		&i.ExpiresAt,
 		&i.RevokedAt,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateAuthzOutboxEvent = `-- name: UpdateAuthzOutboxEvent :one
+UPDATE authz_outbox_events
+SET status = $3,
+    retry_count = $4,
+    last_error = $5,
+    processed_at = $6
+WHERE tenant_id = $1
+  AND id = $2
+RETURNING id, tenant_id, event_type, payload, status, retry_count, last_error, created_at, processed_at
+`
+
+type UpdateAuthzOutboxEventParams struct {
+	TenantID    string             `json:"tenant_id"`
+	ID          string             `json:"id"`
+	Status      string             `json:"status"`
+	RetryCount  int32              `json:"retry_count"`
+	LastError   string             `json:"last_error"`
+	ProcessedAt pgtype.Timestamptz `json:"processed_at"`
+}
+
+func (q *Queries) UpdateAuthzOutboxEvent(ctx context.Context, arg UpdateAuthzOutboxEventParams) (AuthzOutboxEvent, error) {
+	row := q.db.QueryRow(ctx, updateAuthzOutboxEvent,
+		arg.TenantID,
+		arg.ID,
+		arg.Status,
+		arg.RetryCount,
+		arg.LastError,
+		arg.ProcessedAt,
+	)
+	var i AuthzOutboxEvent
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EventType,
+		&i.Payload,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.ProcessedAt,
 	)
 	return i, err
 }

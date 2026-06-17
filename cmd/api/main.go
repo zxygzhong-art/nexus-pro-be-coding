@@ -13,6 +13,7 @@ import (
 
 	v1api "nexus-pro-be/internal/api/v1"
 	"nexus-pro-be/internal/config"
+	"nexus-pro-be/internal/jobs"
 	platformauth "nexus-pro-be/internal/platform/auth"
 	"nexus-pro-be/internal/platform/objectstore"
 	openfgaclient "nexus-pro-be/internal/platform/openfga"
@@ -73,6 +74,7 @@ func main() {
 	var store repository.Store
 	var authzSnapshot service.AuthzSnapshotCache
 	var relationships service.RelationshipChecker
+	var relationshipWriter jobs.RelationshipTupleWriter
 	var objectStore service.ObjectStore
 	readinessChecks := map[string]v1api.ReadinessCheck{}
 	if cfg.DatabaseURL != "" {
@@ -135,10 +137,12 @@ func main() {
 		})
 	}
 	if cfg.OpenFGAAPIURL != "" && cfg.OpenFGAStoreID != "" {
-		relationships = openfgaclient.NewChecker(cfg.OpenFGAAPIURL, cfg.OpenFGAStoreID, &http.Client{
+		openfgaClient := openfgaclient.NewChecker(cfg.OpenFGAAPIURL, cfg.OpenFGAStoreID, &http.Client{
 			Timeout:   5 * time.Second,
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		})
+		relationships = openfgaClient
+		relationshipWriter = openfgaClient
 		logger.Info("openfga relationship checker enabled", "api_url", cfg.OpenFGAAPIURL, "store_id", cfg.OpenFGAStoreID)
 		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
 			Name:   "OpenFGA",
@@ -268,6 +272,11 @@ func main() {
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if relationshipWriter != nil {
+		processor := jobs.NewAuthzOutboxProcessor(store, relationshipWriter, logger)
+		go processor.Run(ctx, jobs.AuthzOutboxOptions{})
+		logger.Info("openfga outbox worker started")
+	}
 
 	select {
 	case <-ctx.Done():

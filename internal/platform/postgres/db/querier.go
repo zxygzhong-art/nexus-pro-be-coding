@@ -16,6 +16,7 @@ type Querier interface {
 	CountEmployeesFiltered(ctx context.Context, arg CountEmployeesFilteredParams) (int64, error)
 	CreateAuthzAssumableRoleSession(ctx context.Context, arg CreateAuthzAssumableRoleSessionParams) (AuthzAssumableRoleSession, error)
 	CreateAuthzPermissionSetAssignment(ctx context.Context, arg CreateAuthzPermissionSetAssignmentParams) (AuthzPermissionSetAssignment, error)
+	DeleteAuthzRelationshipTuple(ctx context.Context, arg DeleteAuthzRelationshipTupleParams) error
 	GetAccount(ctx context.Context, arg GetAccountParams) (Account, error)
 	GetActiveAuthzAssumableRoleSession(ctx context.Context, arg GetActiveAuthzAssumableRoleSessionParams) (AuthzAssumableRoleSession, error)
 	GetAgentRun(ctx context.Context, arg GetAgentRunParams) (AgentRun, error)
@@ -72,6 +73,7 @@ type Querier interface {
 	NextEmployeeNoSequence(ctx context.Context, arg NextEmployeeNoSequenceParams) (int32, error)
 	ReserveLeaveBalance(ctx context.Context, arg ReserveLeaveBalanceParams) (LeaveBalance, error)
 	RevokeAuthzAssumableRoleSession(ctx context.Context, arg RevokeAuthzAssumableRoleSessionParams) (AuthzAssumableRoleSession, error)
+	UpdateAuthzOutboxEvent(ctx context.Context, arg UpdateAuthzOutboxEventParams) (AuthzOutboxEvent, error)
 	UpsertAccount(ctx context.Context, arg UpsertAccountParams) (Account, error)
 	UpsertAgentRun(ctx context.Context, arg UpsertAgentRunParams) (AgentRun, error)
 	UpsertAssumableRole(ctx context.Context, arg UpsertAssumableRoleParams) (AssumableRole, error)
