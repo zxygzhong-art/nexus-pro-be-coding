@@ -75,6 +75,7 @@ func SeedDemo(store repository.Store) {
 		TenantID: "demo",
 		Name:     "Audit Viewer",
 		Permissions: []Permission{
+			{Resource: "me", Action: "read", Scope: "all", MenuKey: "workbench"},
 			{Resource: "audit.log", Action: "read", Scope: "all", MenuKey: "audit"},
 			{Resource: "iam.permission_set", Action: "read", Scope: "all", MenuKey: "iam.permission_sets"},
 		},

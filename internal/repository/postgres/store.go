@@ -101,8 +101,8 @@ func (s *Store) UpsertAccount(execCtx context.Context, v domain.Account) error {
 		Email:                  v.Email,
 		EmployeeID:             v.EmployeeID,
 		Status:                 v.Status,
-		UserGroupIds:           utils.CopyStrings(v.UserGroupIDs),
-		DirectPermissionSetIds: utils.CopyStrings(v.DirectPermissionSetIDs),
+		UserGroupIds:           textArray(v.UserGroupIDs),
+		DirectPermissionSetIds: textArray(v.DirectPermissionSetIDs),
 		ActiveAssumableRoleID:  v.ActiveAssumableRoleID,
 		CreatedAt:              timestamptz(v.CreatedAt),
 	})
@@ -161,8 +161,8 @@ func (s *Store) UpsertUserGroup(execCtx context.Context, v domain.UserGroup) err
 		TenantID:         v.TenantID,
 		Name:             v.Name,
 		Description:      v.Description,
-		MemberAccountIds: utils.CopyStrings(v.MemberAccountIDs),
-		PermissionSetIds: utils.CopyStrings(v.PermissionSetIDs),
+		MemberAccountIds: textArray(v.MemberAccountIDs),
+		PermissionSetIds: textArray(v.PermissionSetIDs),
 		CreatedAt:        timestamptz(v.CreatedAt),
 	})
 	return err
@@ -335,7 +335,7 @@ func (s *Store) UpsertAssumableRole(execCtx context.Context, v domain.AssumableR
 		TenantID:               v.TenantID,
 		Name:                   v.Name,
 		Description:            v.Description,
-		PermissionSetIds:       utils.CopyStrings(v.PermissionSetIDs),
+		PermissionSetIds:       textArray(v.PermissionSetIDs),
 		Trusted:                v.Trusted,
 		Column7:                mustJSON(v.TrustPolicy),
 		Column8:                mustJSON(v.PermissionBoundary),
@@ -1011,6 +1011,14 @@ func nullableText(v string) pgtype.Text {
 		return pgtype.Text{}
 	}
 	return pgtype.Text{String: v, Valid: true}
+}
+
+func textArray(values []string) []string {
+	out := utils.CopyStrings(values)
+	if out == nil {
+		return []string{}
+	}
+	return out
 }
 
 func textFrom(v pgtype.Text) string {

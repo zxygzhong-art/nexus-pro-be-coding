@@ -349,11 +349,31 @@ func TestSwaggerUIDisplaysOpenAPISpec(t *testing.T) {
 	if uiRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for swagger ui, got %d: %s", uiRec.Code, uiRec.Body.String())
 	}
-	if !strings.Contains(uiRec.Body.String(), `fetch("/openapi.yaml"`) {
-		t.Fatalf("expected local swagger page to load embedded OpenAPI spec, got: %s", uiRec.Body.String())
+	if !strings.Contains(uiRec.Body.String(), `swagger-ui`) {
+		t.Fatalf("expected packaged swagger ui markup, got: %s", uiRec.Body.String())
+	}
+	if !strings.Contains(uiRec.Body.String(), `swagger-initializer.js`) {
+		t.Fatalf("expected packaged swagger initializer, got: %s", uiRec.Body.String())
 	}
 	if strings.Contains(uiRec.Body.String(), "unpkg.com") {
-		t.Fatalf("expected swagger page to avoid CDN assets, got: %s", uiRec.Body.String())
+		t.Fatalf("expected swagger page to avoid unpkg assets, got: %s", uiRec.Body.String())
+	}
+
+	initReq := httptest.NewRequest(http.MethodGet, "/swagger/swagger-initializer.js", nil)
+	initRec := httptest.NewRecorder()
+	handler.ServeHTTP(initRec, initReq)
+	if initRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for swagger initializer, got %d: %s", initRec.Code, initRec.Body.String())
+	}
+	if !strings.Contains(initRec.Body.String(), `url: "/openapi.yaml"`) {
+		t.Fatalf("expected swagger initializer to load embedded OpenAPI spec, got: %s", initRec.Body.String())
+	}
+
+	cssReq := httptest.NewRequest(http.MethodGet, "/swagger/swagger-ui.css", nil)
+	cssRec := httptest.NewRecorder()
+	handler.ServeHTTP(cssRec, cssReq)
+	if cssRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for packaged swagger ui css, got %d: %s", cssRec.Code, cssRec.Body.String())
 	}
 
 	specReq := httptest.NewRequest(http.MethodGet, "/openapi.yaml", nil)
@@ -449,6 +469,30 @@ func TestHighRiskRouteAllowsConfirmedRequest(t *testing.T) {
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected 201 for confirmed high-risk route, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAuditLogRouteRequiresApprovalConfirmation(t *testing.T) {
+	handler := newTestAPI(true)
+	req := httptest.NewRequest(http.MethodGet, "/v1/audit-logs", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for audit log route without confirmation, got %d: %s", rec.Code, rec.Body.String())
+	}
+	errPayload := decodeError(t, rec.Body.Bytes())
+	if errPayload.ReasonCode != "approval_required" {
+		t.Fatalf("expected approval_required reason code, got %+v", errPayload)
+	}
+
+	confirmedReq := httptest.NewRequest(http.MethodGet, "/v1/audit-logs", nil)
+	confirmedReq.Header.Set("X-Approval-Confirmed", "true")
+	confirmedRec := httptest.NewRecorder()
+	handler.ServeHTTP(confirmedRec, confirmedReq)
+	if confirmedRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for confirmed audit log route, got %d: %s", confirmedRec.Code, confirmedRec.Body.String())
 	}
 }
 

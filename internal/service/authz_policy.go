@@ -24,10 +24,9 @@ func isHighRiskPermission(perm Permission) bool {
 }
 
 func approvalPolicyForRoute(req CheckRequest) (bool, string, string, string) {
+	reqResource := strings.TrimSpace(req.Resource)
 	for _, policy := range authzpkg.DefaultRoutePolicies {
-		if policy.ApplicationCode == string(req.ApplicationCode) &&
-			policy.ResourceType == string(req.ResourceType) &&
-			strings.EqualFold(policy.Action, string(req.Action)) {
+		if strings.EqualFold(policy.Action, string(req.Action)) && routePolicyMatchesRequest(req, policy, reqResource) {
 			risk := string(policy.RiskLevel)
 			if policy.RiskLevel == authzpkg.RiskHigh || policy.RiskLevel == authzpkg.RiskCritical {
 				return true, risk, approvalTypeForRisk(risk), "route_policy"
@@ -36,6 +35,23 @@ func approvalPolicyForRoute(req CheckRequest) (bool, string, string, string) {
 		}
 	}
 	return false, string(authzpkg.RiskNormal), "", ""
+}
+
+func routePolicyMatchesRequest(req CheckRequest, policy authzpkg.RoutePolicy, reqResource string) bool {
+	if policy.ApplicationCode == string(req.ApplicationCode) && policy.ResourceType == string(req.ResourceType) {
+		return true
+	}
+	if reqResource == "" {
+		return false
+	}
+	return strings.EqualFold(reqResource, legacyRouteResourceName(policy.ApplicationCode, policy.ResourceType))
+}
+
+func legacyRouteResourceName(applicationCode, resourceType string) string {
+	if applicationCode == string(AppAudit) && resourceType == "audit_log" {
+		return "audit.log"
+	}
+	return routeResourceName(ApplicationCode(applicationCode), ResourceType(resourceType))
 }
 
 func approvalTypeForRisk(risk string) string {
