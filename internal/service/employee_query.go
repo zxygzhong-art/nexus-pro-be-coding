@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 	"time"
+
+	"nexus-pro-be/internal/utils"
 )
 
 func (c *Service) listEmployeesForQuery(ctx RequestContext, query EmployeeQuery) ([]Employee, error) {
@@ -99,7 +101,7 @@ func paginateEmployees(items []Employee, page, pageSize int) []Employee {
 }
 
 func employeeStatus(item Employee) string {
-	return firstNonEmpty(item.EmploymentStatus, item.Status)
+	return utils.FirstNonEmpty(item.EmploymentStatus, item.Status)
 }
 
 func normalizeEmployeeStatus(value string) string {

@@ -21,6 +21,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmployeeListResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
     post:
       summary: Create employee aggregate
       requestBody:
@@ -36,6 +42,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Employee"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees/{id}:
     get:
       summary: Get employee detail grouped by profile sections
@@ -48,6 +60,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Employee"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
     patch:
       summary: Patch employee aggregate sections
       parameters:
@@ -65,6 +83,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Employee"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
     delete:
       summary: Soft delete an employee
       parameters:
@@ -76,6 +100,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Employee"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees/stats:
     get:
       summary: Employee dashboard counts
@@ -91,6 +121,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmployeeStats"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employee-options:
     get:
       summary: Employee form options
@@ -101,6 +137,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmployeeOptions"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees/import/preview:
     post:
       summary: Preview employee CSV or XLSX import
@@ -129,6 +171,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmployeeImportSession"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees/import/{id}/confirm:
     post:
       summary: Confirm a previewed employee import
@@ -148,6 +196,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmployeeImportSession"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees/export:
     get:
       summary: Export employees as CSV
@@ -163,6 +217,12 @@ paths:
             text/csv:
               schema:
                 type: string
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
     post:
       summary: Export filtered employees as JSON
       requestBody:
@@ -183,6 +243,12 @@ paths:
                     type: array
                     items:
                       $ref: "#/components/schemas/Employee"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees/batch-delete:
     post:
       summary: Soft delete employees in batch
@@ -205,6 +271,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/BatchEmployeeResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees/{id}/invite:
     post:
       summary: Create or resend an account invitation for an employee
@@ -224,9 +296,16 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Employee"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees/{id}/status-transition:
     post:
       summary: Transition employee lifecycle status
+      description: Use status=active, probation, or onboarding with reason and start_date to reinstate a resigned employee. Use status=resigned with reason and end_date to offboard. Use status=leave_suspended with start_date and end_date for leave suspension.
       parameters:
         - $ref: "#/components/parameters/EmployeeID"
       requestBody:
@@ -251,6 +330,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Employee"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees/{id}/status:
     patch:
       summary: Update employee status directly
@@ -273,6 +358,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Employee"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/me:
     get:
       summary: Resolve current account profile
@@ -508,6 +599,43 @@ components:
       required: true
       schema:
         type: string
+  responses:
+    ValidationError:
+      description: Validation failed. Field errors include tab, field, code and message; import row errors include row_number.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Unauthenticated:
+      description: Authenticated tenant/account context is required.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Forbidden:
+      description: Permission, menu, button, field, data-scope, or high-risk approval was denied.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    NotFound:
+      description: Resource was not found in the current tenant.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Conflict:
+      description: Request conflicts with current resource state.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InternalError:
+      description: Internal server error. Response includes trace_id.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
   schemas:
     Employee:
       allOf:
@@ -695,6 +823,15 @@ components:
           properties:
             code: {type: string}
             message: {type: string}
+            reason_code:
+              type: string
+              enum:
+                - permission_missing
+                - menu_denied
+                - button_denied
+                - field_denied
+                - data_scope_denied
+                - approval_required
             field_errors:
               type: array
               items:
@@ -709,8 +846,14 @@ components:
               items:
                 type: object
                 properties:
-                  row: {type: integer}
-                  field: {type: string}
-                  code: {type: string}
-                  message: {type: string}
+                  row_number: {type: integer}
+                  field_errors:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        tab: {type: string}
+                        field: {type: string}
+                        code: {type: string}
+                        message: {type: string}
             trace_id: {type: string}

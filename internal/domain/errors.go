@@ -8,6 +8,7 @@ import (
 type AppError struct {
 	Status      int
 	Code        string
+	ReasonCode  string
 	Message     string
 	FieldErrors []FieldError
 	RowErrors   []RowError
@@ -31,7 +32,7 @@ type FieldError struct {
 }
 
 type RowError struct {
-	Row     int    `json:"row"`
+	Row     int    `json:"row_number"`
 	Field   string `json:"field,omitempty"`
 	Code    string `json:"code"`
 	Message string `json:"message"`
@@ -55,6 +56,12 @@ func ImportValidationFailed(message string, rows []RowError) *AppError {
 
 func Forbidden(message string) *AppError {
 	return E(403, "forbidden", message)
+}
+
+func ForbiddenReason(reasonCode, message string) *AppError {
+	err := Forbidden(message)
+	err.ReasonCode = reasonCode
+	return err
 }
 
 func Unauthorized(message string) *AppError {

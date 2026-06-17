@@ -36,10 +36,15 @@ const (
 const (
 	ScopeAll               Scope = "all"
 	ScopeSelf              Scope = "self"
+	ScopeOwn               Scope = "own"
 	ScopeTenant            Scope = "tenant"
 	ScopeObject            Scope = "object"
+	ScopeDepartment        Scope = "department"
 	ScopeDepartmentSubtree Scope = "department_subtree"
 	ScopeDirectReports     Scope = "direct_reports"
+	ScopeAssignedOrgUnits  Scope = "assigned_org_units"
+	ScopeCustomCondition   Scope = "custom_condition"
+	ScopeSystem            Scope = "system"
 )
 
 const (
@@ -64,6 +69,7 @@ const (
 	ResourceFieldPolicy        ResourceType = "field_policy"
 	ResourceAssumableRole      ResourceType = "assumable_role"
 	ResourceTool               ResourceType = "tool"
+	ResourceKnowledgeArticle   ResourceType = "knowledge_article"
 	ResourceEmployeeCollection ResourceType = "employee_collection"
 )
 
@@ -102,6 +108,7 @@ const (
 	EventEmployeeInvited            EventType = "employee.invited"
 	EventEmployeeImported           EventType = "employee.imported"
 	EventEmployeeOffboarded         EventType = "employee.offboarded"
+	EventEmployeeReinstated         EventType = "employee.reinstated"
 	EventEmployeeStatusChanged      EventType = "employee.status_changed"
 	EventEmployeeAuthzSubjectCreate EventType = "hr.employee.authz_subject.create"
 	EventEmployeeAuthzSubjectUpdate EventType = "hr.employee.authz_subject.update"

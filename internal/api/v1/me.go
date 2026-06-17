@@ -11,7 +11,7 @@ import (
 
 type MeCtrl struct {
 	routes routeBinder
-	svc    service.MeService
+	svc    service.MeFacade
 }
 
 func (c MeCtrl) RegisterRoutes(router *gin.RouterGroup) {

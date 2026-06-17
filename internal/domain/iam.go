@@ -30,6 +30,7 @@ type Permission struct {
 	Scope           Scope           `json:"scope,omitempty"`
 	Effect          string          `json:"effect,omitempty"`
 	RiskLevel       string          `json:"risk_level,omitempty"`
+	Relation        string          `json:"relation,omitempty"`
 	MenuKey         string          `json:"menu_key,omitempty"`
 }
 
@@ -138,6 +139,9 @@ type CheckResult struct {
 	AssumedRole        *AssumedRoleDecision `json:"assumed_role,omitempty"`
 	PermissionBoundary map[string]any       `json:"permission_boundary,omitempty"`
 	RequiresApproval   bool                 `json:"requires_approval,omitempty"`
+	RiskLevel          string               `json:"risk_level,omitempty"`
+	ApprovalType       string               `json:"approval_type,omitempty"`
+	ApprovalReason     string               `json:"approval_reason,omitempty"`
 	Resource           string               `json:"resource,omitempty"`
 	ApplicationCode    ApplicationCode      `json:"application_code,omitempty"`
 	ResourceType       ResourceType         `json:"resource_type,omitempty"`

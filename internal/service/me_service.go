@@ -2,10 +2,11 @@ package service
 
 type MeService struct {
 	*Service
+	store meStore
 }
 
 func (c *Service) Me() MeService {
-	return MeService{Service: c}
+	return MeService{Service: c, store: c.store}
 }
 
 func (c *Service) ResolveMe(ctx RequestContext) (MeResponse, error) {

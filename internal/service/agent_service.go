@@ -1,13 +1,18 @@
 package service
 
-import "strings"
+import (
+	"strings"
+
+	"nexus-pro-be/internal/utils"
+)
 
 type AgentService struct {
 	*Service
+	store agentStore
 }
 
 func (c *Service) Agent() AgentService {
-	return AgentService{Service: c}
+	return AgentService{Service: c, store: c.store}
 }
 
 func (c *Service) ListAgentRuns(ctx RequestContext) ([]AgentRun, error) {
@@ -33,12 +38,12 @@ func (c AgentService) ListRunPage(ctx RequestContext, page PageRequest) (PageRes
 	if _, _, err := c.resolveAccount(ctx); err != nil {
 		return PageResponse[AgentRun]{}, err
 	}
-	page = normalizePageRequest(page)
+	page = utils.NormalizePageRequest(page)
 	items, total, err := c.store.ListAgentRunPage(goContext(ctx), ctx.TenantID, page)
 	if err != nil {
 		return PageResponse[AgentRun]{}, err
 	}
-	return pageResponseFromStore(items, total, page), nil
+	return utils.PageResponseFromStore(items, total, page), nil
 }
 
 func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (AgentRun, error) {
@@ -55,7 +60,7 @@ func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (
 	}
 
 	run := AgentRun{
-		ID:        newID("arun"),
+		ID:        utils.NewID("arun"),
 		TenantID:  ctx.TenantID,
 		AccountID: account.ID,
 		Mode:      mode,
@@ -67,6 +72,11 @@ func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (
 	if err := c.store.UpsertAgentRun(goContext(ctx), run); err != nil {
 		return AgentRun{}, err
 	}
+	c.logInfo(ctx, "agent run created",
+		"run_id", run.ID,
+		"mode", run.Mode,
+		"status", run.Status,
+	)
 	run, err = c.transitionRun(ctx, run, AgentRunStatusRunning)
 	if err != nil {
 		return AgentRun{}, err
@@ -110,16 +120,28 @@ func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (
 }
 
 func (c AgentService) transitionRun(ctx RequestContext, run AgentRun, status AgentRunStatus) (AgentRun, error) {
+	previousStatus := run.Status
 	run.Status = string(status)
 	run.UpdatedAt = c.Now()
 	if err := c.store.UpsertAgentRun(goContext(ctx), run); err != nil {
 		return AgentRun{}, err
 	}
+	c.logInfo(ctx, "agent run status changed",
+		"run_id", run.ID,
+		"mode", run.Mode,
+		"previous_status", previousStatus,
+		"status", run.Status,
+	)
 	return run, nil
 }
 
 func (c AgentService) failRun(ctx RequestContext, run AgentRun, cause error) error {
 	run.Answer = cause.Error()
+	c.logWarn(ctx, "agent run failed",
+		"run_id", run.ID,
+		"mode", run.Mode,
+		"error", cause.Error(),
+	)
 	_, err := c.transitionRun(ctx, run, AgentRunStatusFailed)
 	return err
 }

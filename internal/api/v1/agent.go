@@ -11,7 +11,7 @@ import (
 
 type AgentCtrl struct {
 	routes routeBinder
-	svc    service.AgentService
+	svc    service.AgentFacade
 }
 
 func (c AgentCtrl) RegisterRoutes(router *gin.RouterGroup) {

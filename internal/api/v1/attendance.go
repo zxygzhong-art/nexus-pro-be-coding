@@ -11,7 +11,7 @@ import (
 
 type AttendanceCtrl struct {
 	routes routeBinder
-	svc    service.AttendanceService
+	svc    service.AttendanceFacade
 }
 
 func (c AttendanceCtrl) RegisterRoutes(router *gin.RouterGroup) {

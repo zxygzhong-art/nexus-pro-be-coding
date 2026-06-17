@@ -136,6 +136,23 @@ func employeeImportColumnCount() int {
 	return len(employeeImportColumns)
 }
 
+func restrictedEmployeeFieldPolicies(policies map[string]string) map[string][]string {
+	out := map[string][]string{}
+	for field, effect := range policies {
+		switch effect {
+		case "mask", "hide", "deny":
+			out[effect] = append(out[effect], field)
+		}
+	}
+	for effect, fields := range out {
+		out[effect] = uniqueSorted(fields)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
 func employeeImportInputFromRecord(record []string) map[string]string {
 	input := make(map[string]string, len(employeeImportColumns))
 	for i, column := range employeeImportColumns {

@@ -7,6 +7,10 @@ import (
 )
 
 func (c *Service) answerAgentPrompt(ctx RequestContext, prompt string) (string, []Reference, error) {
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return "", nil, err
+	}
 	articles, err := c.store.ListKnowledgeArticles(goContext(ctx), ctx.TenantID)
 	if err != nil {
 		return "", nil, err
@@ -18,6 +22,18 @@ func (c *Service) answerAgentPrompt(ctx RequestContext, prompt string) (string, 
 	tokens := tokenize(prompt)
 	matches := make([]KnowledgeArticle, 0)
 	for _, article := range articles {
+		decision, err := c.evaluateAuthz(ctx, account, CheckRequest{
+			ApplicationCode: AppAgent,
+			ResourceType:    ResourceKnowledgeArticle,
+			ResourceID:      article.ID,
+			Action:          ActionRead,
+		})
+		if err != nil {
+			return "", nil, err
+		}
+		if !decision.Allowed {
+			continue
+		}
 		if articleMatches(article, tokens) {
 			matches = append(matches, article)
 		}

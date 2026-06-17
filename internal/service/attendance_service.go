@@ -3,14 +3,17 @@ package service
 import (
 	"strings"
 	"time"
+
+	"nexus-pro-be/internal/utils"
 )
 
 type AttendanceService struct {
 	*Service
+	store attendanceStore
 }
 
 func (c *Service) Attendance() AttendanceService {
-	return AttendanceService{Service: c}
+	return AttendanceService{Service: c, store: c.store}
 }
 
 func (c *Service) ListLeaveBalances(ctx RequestContext) ([]LeaveBalance, error) {
@@ -64,8 +67,8 @@ func (c AttendanceService) ListLeaveBalancePage(ctx RequestContext, page PageReq
 	if err != nil {
 		return PageResponse[LeaveBalance]{}, err
 	}
-	items = sortLeaveBalances(items, page.Sort)
-	return pageResponse(items, page), nil
+	items = utils.SortLeaveBalances(items, page.Sort)
+	return utils.PageResponse(items, page), nil
 }
 
 func (c AttendanceService) ListLeaveRequests(ctx RequestContext) ([]LeaveRequest, error) {
@@ -99,8 +102,8 @@ func (c AttendanceService) ListLeaveRequestPage(ctx RequestContext, page PageReq
 	if err != nil {
 		return PageResponse[LeaveRequest]{}, err
 	}
-	items = sortLeaveRequests(items, page.Sort)
-	return pageResponse(items, page), nil
+	items = utils.SortLeaveRequests(items, page.Sort)
+	return utils.PageResponse(items, page), nil
 }
 
 func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLeaveRequestInput) (LeaveRequest, error) {
@@ -149,11 +152,11 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 	if input.Hours <= 0 {
 		return LeaveRequest{}, BadRequest("hours must be greater than zero")
 	}
-	startAt, err := parseDateTime(input.StartAt)
+	startAt, err := utils.ParseDateTime(input.StartAt)
 	if err != nil {
 		return LeaveRequest{}, BadRequest("start_at must be RFC3339 or YYYY-MM-DD")
 	}
-	endAt, err := parseDateTime(input.EndAt)
+	endAt, err := utils.ParseDateTime(input.EndAt)
 	if err != nil {
 		return LeaveRequest{}, BadRequest("end_at must be RFC3339 or YYYY-MM-DD")
 	}
@@ -172,7 +175,7 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 		}
 		if !ok {
 			template = FormTemplate{
-				ID:        newID("ft"),
+				ID:        utils.NewID("ft"),
 				TenantID:  ctx.TenantID,
 				Key:       "leave-request",
 				Name:      "请假申请",
@@ -184,7 +187,7 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 			}
 		}
 		instance := FormInstance{
-			ID:                 newID("fi"),
+			ID:                 utils.NewID("fi"),
 			TenantID:           ctx.TenantID,
 			TemplateID:         template.ID,
 			ApplicantAccountID: account.ID,
@@ -204,7 +207,7 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 			return err
 		}
 		req = LeaveRequest{
-			ID:             newID("lr"),
+			ID:             utils.NewID("lr"),
 			TenantID:       ctx.TenantID,
 			EmployeeID:     employeeID,
 			LeaveType:      strings.TrimSpace(input.LeaveType),
@@ -234,6 +237,14 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 	}); err != nil {
 		return LeaveRequest{}, err
 	}
+	c.logInfo(ctx, "leave request created",
+		"leave_request_id", req.ID,
+		"employee_id", req.EmployeeID,
+		"leave_type", req.LeaveType,
+		"hours", req.Hours,
+		"status", req.Status,
+		"form_instance_id", req.FormInstanceID,
+	)
 	return req, nil
 }
 

@@ -1,11 +1,14 @@
 package service
 
+import "nexus-pro-be/internal/utils"
+
 type AuditService struct {
 	*Service
+	store auditStore
 }
 
 func (c *Service) Audit() AuditService {
-	return AuditService{Service: c}
+	return AuditService{Service: c, store: c.store}
 }
 
 func (c *Service) ListAuditLogs(ctx RequestContext) ([]AuditLog, error) {
@@ -27,10 +30,10 @@ func (c AuditService) ListLogPage(ctx RequestContext, page PageRequest) (PageRes
 	if _, _, err := c.resolveAccount(ctx); err != nil {
 		return PageResponse[AuditLog]{}, err
 	}
-	page = normalizePageRequest(page)
+	page = utils.NormalizePageRequest(page)
 	items, total, err := c.store.ListAuditLogPage(goContext(ctx), ctx.TenantID, page)
 	if err != nil {
 		return PageResponse[AuditLog]{}, err
 	}
-	return pageResponseFromStore(items, total, page), nil
+	return utils.PageResponseFromStore(items, total, page), nil
 }

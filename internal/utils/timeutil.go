@@ -1,4 +1,4 @@
-package service
+package utils
 
 import (
 	"fmt"
@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-func parseDate(value string) (time.Time, error) {
+func ParseDate(value string) (time.Time, error) {
 	layouts := []string{time.RFC3339, "2006-01-02"}
 	for _, layout := range layouts {
 		if t, err := time.Parse(layout, value); err == nil {
@@ -16,9 +16,9 @@ func parseDate(value string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("invalid date: %s", value)
 }
 
-func parseDateTime(value string) (time.Time, error) {
+func ParseDateTime(value string) (time.Time, error) {
 	if strings.TrimSpace(value) == "" {
 		return time.Time{}, fmt.Errorf("empty time")
 	}
-	return parseDate(value)
+	return ParseDate(value)
 }

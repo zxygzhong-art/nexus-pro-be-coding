@@ -1,12 +1,14 @@
-package sliceutil
+package utils
 
-func CopyStrings(src []string) []string {
-	if len(src) == 0 {
-		return nil
+import "strings"
+
+func FirstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
 	}
-	out := make([]string, len(src))
-	copy(out, src)
-	return out
+	return ""
 }
 
 func ContainsString(src []string, target string) bool {

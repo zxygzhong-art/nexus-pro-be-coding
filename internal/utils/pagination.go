@@ -1,16 +1,20 @@
-package service
+package utils
 
-import "sort"
+import (
+	"sort"
 
-func normalizePageRequest(req PageRequest) PageRequest {
+	"nexus-pro-be/internal/domain"
+)
+
+func NormalizePageRequest(req domain.PageRequest) domain.PageRequest {
 	if req.Page <= 0 {
-		req.Page = DefaultPage
+		req.Page = domain.DefaultPage
 	}
 	if req.PageSize <= 0 {
-		req.PageSize = DefaultPageSize
+		req.PageSize = domain.DefaultPageSize
 	}
-	if req.PageSize > MaxPageSize {
-		req.PageSize = MaxPageSize
+	if req.PageSize > domain.MaxPageSize {
+		req.PageSize = domain.MaxPageSize
 	}
 	if req.Sort == "" {
 		req.Sort = "created_at_desc"
@@ -18,8 +22,8 @@ func normalizePageRequest(req PageRequest) PageRequest {
 	return req
 }
 
-func pageResponse[T any](items []T, req PageRequest) PageResponse[T] {
-	req = normalizePageRequest(req)
+func PageResponse[T any](items []T, req domain.PageRequest) domain.PageResponse[T] {
+	req = NormalizePageRequest(req)
 	total := len(items)
 	start := (req.Page - 1) * req.PageSize
 	if start > total {
@@ -31,7 +35,7 @@ func pageResponse[T any](items []T, req PageRequest) PageResponse[T] {
 	}
 	pageItems := make([]T, end-start)
 	copy(pageItems, items[start:end])
-	return PageResponse[T]{
+	return domain.PageResponse[T]{
 		Items:    pageItems,
 		Total:    total,
 		Page:     req.Page,
@@ -40,12 +44,12 @@ func pageResponse[T any](items []T, req PageRequest) PageResponse[T] {
 	}
 }
 
-func pageResponseFromStore[T any](items []T, total int, req PageRequest) PageResponse[T] {
-	req = normalizePageRequest(req)
+func PageResponseFromStore[T any](items []T, total int, req domain.PageRequest) domain.PageResponse[T] {
+	req = NormalizePageRequest(req)
 	if items == nil {
 		items = []T{}
 	}
-	return PageResponse[T]{
+	return domain.PageResponse[T]{
 		Items:    items,
 		Total:    total,
 		Page:     req.Page,
@@ -54,7 +58,7 @@ func pageResponseFromStore[T any](items []T, total int, req PageRequest) PageRes
 	}
 }
 
-func sortSlice[T any](items []T, less func(a, b T) bool) {
+func SortSlice[T any](items []T, less func(a, b T) bool) {
 	sort.SliceStable(items, func(i, j int) bool {
 		return less(items[i], items[j])
 	})

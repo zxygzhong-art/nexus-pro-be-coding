@@ -9,6 +9,10 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
+type validatedInput interface {
+	Validate() error
+}
+
 func readJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	defer r.Body.Close()
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
@@ -34,7 +38,7 @@ func readOptionalJSON(w http.ResponseWriter, r *http.Request, target any) (bool,
 }
 
 func validateInput(target any) error {
-	input, ok := target.(domain.ValidatedInput)
+	input, ok := target.(validatedInput)
 	if !ok {
 		return nil
 	}
@@ -64,11 +68,14 @@ func (a *API) writeError(w http.ResponseWriter, r *http.Request, err error) {
 			"code":    appErr.Code,
 			"message": appErr.Message,
 		}
+		if appErr.ReasonCode != "" {
+			body["reason_code"] = appErr.ReasonCode
+		}
 		if len(appErr.FieldErrors) > 0 {
 			body["field_errors"] = appErr.FieldErrors
 		}
 		if len(appErr.RowErrors) > 0 {
-			body["row_errors"] = appErr.RowErrors
+			body["row_errors"] = rowErrorPayloads(appErr.RowErrors)
 		}
 		if traceID != "" {
 			body["trace_id"] = traceID
@@ -91,4 +98,32 @@ func (a *API) writeError(w http.ResponseWriter, r *http.Request, err error) {
 			"trace_id": traceID,
 		},
 	})
+}
+
+type rowErrorPayload struct {
+	RowNumber   int                 `json:"row_number"`
+	FieldErrors []domain.FieldError `json:"field_errors"`
+}
+
+func rowErrorPayloads(rowErrors []domain.RowError) []rowErrorPayload {
+	grouped := make(map[int][]domain.FieldError)
+	order := make([]int, 0)
+	for _, rowError := range rowErrors {
+		if _, ok := grouped[rowError.Row]; !ok {
+			order = append(order, rowError.Row)
+		}
+		grouped[rowError.Row] = append(grouped[rowError.Row], domain.FieldError{
+			Field:   rowError.Field,
+			Code:    rowError.Code,
+			Message: rowError.Message,
+		})
+	}
+	payloads := make([]rowErrorPayload, 0, len(order))
+	for _, rowNumber := range order {
+		payloads = append(payloads, rowErrorPayload{
+			RowNumber:   rowNumber,
+			FieldErrors: grouped[rowNumber],
+		})
+	}
+	return payloads
 }

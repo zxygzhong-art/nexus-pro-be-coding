@@ -13,8 +13,15 @@ import (
 )
 
 type API struct {
-	app                *service.Service
 	logger             *slog.Logger
+	me                 service.MeFacade
+	authz              service.AuthzFacade
+	iam                service.IAMFacade
+	hr                 service.HRFacade
+	attendance         service.AttendanceFacade
+	workflow           service.WorkflowFacade
+	agent              service.AgentFacade
+	audit              service.AuditFacade
 	allowDemoContext   bool
 	allowHeaderContext bool
 	tokenResolver      TokenResolver
@@ -48,8 +55,7 @@ func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
 			cfg.TokenResolver = unsignedJWTResolver{}
 		}
 	}
-	return &API{
-		app:                app,
+	api := &API{
 		logger:             logger,
 		allowDemoContext:   cfg.AllowDemoContext,
 		allowHeaderContext: cfg.AllowHeaderContext,
@@ -57,6 +63,17 @@ func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
 		telemetryService:   cfg.TelemetryServiceName,
 		readinessChecks:    copyReadinessChecks(cfg.ReadinessChecks),
 	}
+	if app != nil {
+		api.me = app.Me()
+		api.authz = app.Authz()
+		api.iam = app.IAM()
+		api.hr = app.HR()
+		api.attendance = app.Attendance()
+		api.workflow = app.Workflow()
+		api.agent = app.Agent()
+		api.audit = app.Audit()
+	}
+	return api
 }
 
 func (a *API) Routes() http.Handler {

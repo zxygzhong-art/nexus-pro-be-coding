@@ -15,9 +15,9 @@ import (
 	"nexus-pro-be/internal/domain"
 	sqlc "nexus-pro-be/internal/platform/postgres/db"
 	"nexus-pro-be/internal/repository"
-	"nexus-pro-be/internal/repository/internal/sliceutil"
-	"nexus-pro-be/internal/repository/postgres/jsoncodec"
-	"nexus-pro-be/internal/repository/postgres/tenantctx"
+	"nexus-pro-be/internal/utils"
+	"nexus-pro-be/internal/utils/jsoncodec"
+	"nexus-pro-be/internal/utils/tenantctx"
 )
 
 type Store struct {
@@ -101,8 +101,8 @@ func (s *Store) UpsertAccount(execCtx context.Context, v domain.Account) error {
 		Email:                  v.Email,
 		EmployeeID:             v.EmployeeID,
 		Status:                 v.Status,
-		UserGroupIds:           copyStrings(v.UserGroupIDs),
-		DirectPermissionSetIds: copyStrings(v.DirectPermissionSetIDs),
+		UserGroupIds:           utils.CopyStrings(v.UserGroupIDs),
+		DirectPermissionSetIds: utils.CopyStrings(v.DirectPermissionSetIDs),
 		ActiveAssumableRoleID:  v.ActiveAssumableRoleID,
 		CreatedAt:              timestamptz(v.CreatedAt),
 	})
@@ -136,7 +136,7 @@ func (s *Store) RemoveAccountGroup(execCtx context.Context, tenantID, accountID,
 	if !ok {
 		return nil
 	}
-	account.UserGroupIDs = removeString(account.UserGroupIDs, groupID)
+	account.UserGroupIDs = utils.RemoveString(account.UserGroupIDs, groupID)
 	return s.UpsertAccount(execCtx, account)
 }
 
@@ -148,7 +148,7 @@ func (s *Store) AddAccountGroup(execCtx context.Context, tenantID, accountID, gr
 	if !ok {
 		return nil
 	}
-	if containsString(account.UserGroupIDs, groupID) {
+	if utils.ContainsString(account.UserGroupIDs, groupID) {
 		return nil
 	}
 	account.UserGroupIDs = append(account.UserGroupIDs, groupID)
@@ -161,8 +161,8 @@ func (s *Store) UpsertUserGroup(execCtx context.Context, v domain.UserGroup) err
 		TenantID:         v.TenantID,
 		Name:             v.Name,
 		Description:      v.Description,
-		MemberAccountIds: copyStrings(v.MemberAccountIDs),
-		PermissionSetIds: copyStrings(v.PermissionSetIDs),
+		MemberAccountIds: utils.CopyStrings(v.MemberAccountIDs),
+		PermissionSetIds: utils.CopyStrings(v.PermissionSetIDs),
 		CreatedAt:        timestamptz(v.CreatedAt),
 	})
 	return err
@@ -335,7 +335,7 @@ func (s *Store) UpsertAssumableRole(execCtx context.Context, v domain.AssumableR
 		TenantID:               v.TenantID,
 		Name:                   v.Name,
 		Description:            v.Description,
-		PermissionSetIds:       copyStrings(v.PermissionSetIDs),
+		PermissionSetIds:       utils.CopyStrings(v.PermissionSetIDs),
 		Trusted:                v.Trusted,
 		Column7:                mustJSON(v.TrustPolicy),
 		Column8:                mustJSON(v.PermissionBoundary),
@@ -396,7 +396,7 @@ func (s *Store) UpsertOrgUnit(execCtx context.Context, v domain.OrgUnit) error {
 		Code:      v.Code,
 		Name:      v.Name,
 		ParentID:  v.ParentID,
-		Path:      copyStrings(v.Path),
+		Path:      utils.CopyStrings(v.Path),
 		CreatedAt: timestamptz(v.CreatedAt),
 	})
 	return err
@@ -784,7 +784,7 @@ func (s *Store) UpsertKnowledgeArticle(execCtx context.Context, v domain.Knowled
 		TenantID:  v.TenantID,
 		Title:     v.Title,
 		Content:   v.Content,
-		Tags:      copyStrings(v.Tags),
+		Tags:      utils.CopyStrings(v.Tags),
 		CreatedAt: timestamptz(v.CreatedAt),
 	})
 	return err
@@ -834,7 +834,7 @@ func (s *Store) ListAgentRuns(execCtx context.Context, tenantID string) ([]domai
 }
 
 func (s *Store) ListAgentRunPage(execCtx context.Context, tenantID string, page domain.PageRequest) ([]domain.AgentRun, int, error) {
-	page = normalizePageRequest(page)
+	page = utils.NormalizePageRequest(page)
 	total, err := s.q.CountAgentRuns(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
 		return nil, 0, err
@@ -877,7 +877,7 @@ func (s *Store) ListAuditLogs(execCtx context.Context, tenantID string) ([]domai
 }
 
 func (s *Store) ListAuditLogPage(execCtx context.Context, tenantID string, page domain.PageRequest) ([]domain.AuditLog, int, error) {
-	page = normalizePageRequest(page)
+	page = utils.NormalizePageRequest(page)
 	total, err := s.q.CountAuditLogs(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
 		return nil, 0, err
@@ -937,22 +937,6 @@ func (s *Store) ListAuthzOutboxEvents(execCtx context.Context, tenantID string) 
 		return nil, err
 	}
 	return mapSlice(items, fromAuthzOutboxEvent), nil
-}
-
-func normalizePageRequest(page domain.PageRequest) domain.PageRequest {
-	if page.Page <= 0 {
-		page.Page = domain.DefaultPage
-	}
-	if page.PageSize <= 0 {
-		page.PageSize = domain.DefaultPageSize
-	}
-	if page.PageSize > domain.MaxPageSize {
-		page.PageSize = domain.MaxPageSize
-	}
-	if page.Sort == "" {
-		page.Sort = "created_at_desc"
-	}
-	return page
 }
 
 func isNotFound(err error) bool {
@@ -1070,8 +1054,8 @@ func fromAccount(v sqlc.Account) domain.Account {
 		Email:                  v.Email,
 		EmployeeID:             v.EmployeeID,
 		Status:                 v.Status,
-		UserGroupIDs:           copyStrings(v.UserGroupIds),
-		DirectPermissionSetIDs: copyStrings(v.DirectPermissionSetIds),
+		UserGroupIDs:           utils.CopyStrings(v.UserGroupIds),
+		DirectPermissionSetIDs: utils.CopyStrings(v.DirectPermissionSetIds),
 		ActiveAssumableRoleID:  v.ActiveAssumableRoleID,
 		CreatedAt:              timeFrom(v.CreatedAt),
 	}
@@ -1083,8 +1067,8 @@ func fromUserGroup(v sqlc.UserGroup) domain.UserGroup {
 		TenantID:         v.TenantID,
 		Name:             v.Name,
 		Description:      v.Description,
-		MemberAccountIDs: copyStrings(v.MemberAccountIds),
-		PermissionSetIDs: copyStrings(v.PermissionSetIds),
+		MemberAccountIDs: utils.CopyStrings(v.MemberAccountIds),
+		PermissionSetIDs: utils.CopyStrings(v.PermissionSetIds),
 		CreatedAt:        timeFrom(v.CreatedAt),
 	}
 }
@@ -1148,7 +1132,7 @@ func fromAssumableRole(v sqlc.AssumableRole) domain.AssumableRole {
 		TenantID:               v.TenantID,
 		Name:                   v.Name,
 		Description:            v.Description,
-		PermissionSetIDs:       copyStrings(v.PermissionSetIds),
+		PermissionSetIDs:       utils.CopyStrings(v.PermissionSetIds),
 		Trusted:                v.Trusted,
 		TrustPolicy:            jsonMap(v.TrustPolicy),
 		PermissionBoundary:     jsonMap(v.PermissionBoundary),
@@ -1177,7 +1161,7 @@ func fromOrgUnit(v sqlc.OrgUnit) domain.OrgUnit {
 		Code:      v.Code,
 		Name:      v.Name,
 		ParentID:  v.ParentID,
-		Path:      copyStrings(v.Path),
+		Path:      utils.CopyStrings(v.Path),
 		CreatedAt: timeFrom(v.CreatedAt),
 	}
 }
@@ -1285,7 +1269,7 @@ func fromKnowledgeArticle(v sqlc.KnowledgeArticle) domain.KnowledgeArticle {
 		TenantID:  v.TenantID,
 		Title:     v.Title,
 		Content:   v.Content,
-		Tags:      copyStrings(v.Tags),
+		Tags:      utils.CopyStrings(v.Tags),
 		CreatedAt: timeFrom(v.CreatedAt),
 	}
 }
@@ -1333,16 +1317,4 @@ func fromAuthzOutboxEvent(v sqlc.AuthzOutboxEvent) domain.AuthzOutboxEvent {
 		CreatedAt:   timeFrom(v.CreatedAt),
 		ProcessedAt: timePtrFrom(v.ProcessedAt),
 	}
-}
-
-func copyStrings(src []string) []string {
-	return sliceutil.CopyStrings(src)
-}
-
-func containsString(src []string, target string) bool {
-	return sliceutil.ContainsString(src, target)
-}
-
-func removeString(src []string, target string) []string {
-	return sliceutil.RemoveString(src, target)
 }

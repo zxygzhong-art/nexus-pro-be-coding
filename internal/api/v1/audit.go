@@ -11,7 +11,7 @@ import (
 
 type AuditCtrl struct {
 	routes routeBinder
-	svc    service.AuditService
+	svc    service.AuditFacade
 }
 
 func (c AuditCtrl) RegisterRoutes(router *gin.RouterGroup) {

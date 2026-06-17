@@ -1,11 +1,11 @@
 package service
 
 import (
-	"fmt"
 	"strings"
 	"time"
 
 	authzpkg "nexus-pro-be/internal/domain/authz"
+	"nexus-pro-be/internal/utils"
 )
 
 type authzGrant struct {
@@ -44,9 +44,10 @@ func (c *Service) evaluateAuthz(ctx RequestContext, account Account, req CheckRe
 	matched := make([]string, 0)
 	matchedBy := make([]string, 0)
 	deniedBy := make([]string, 0)
+	relationshipDeniedBy := make([]string, 0)
 	var chosenScope Scope
 	var chosenConditions map[string]any
-	requiresApproval := routeRequiresApproval(req)
+	requiresApproval, riskLevel, approvalType, approvalReason := approvalPolicyForRoute(req)
 	permissionKey := permissionKey(req.ApplicationCode, req.ResourceType, req.Action)
 
 	for _, grant := range grants {
@@ -69,10 +70,28 @@ func (c *Service) evaluateAuthz(ctx RequestContext, account Account, req CheckRe
 			deniedBy = append(deniedBy, "permission_boundary")
 			continue
 		}
+		if relation := relationshipConstraint(grant.Permission); relation != "" {
+			allowed, label, err := c.relationshipAllows(ctx, account, req, relation)
+			if err != nil {
+				return CheckResult{}, err
+			}
+			if !allowed {
+				relationshipDeniedBy = append(relationshipDeniedBy, label)
+				continue
+			}
+			matchedBy = append(matchedBy, label)
+		}
 		matched = append(matched, permissionLabel(grant.Permission))
 		matchedBy = append(matchedBy, source)
 		if isHighRiskPermission(grant.Permission) {
 			requiresApproval = true
+			riskLevel = maxRiskLevel(riskLevel, grant.Permission.RiskLevel)
+			if approvalType == "" {
+				approvalType = approvalTypeForRisk(grant.Permission.RiskLevel)
+			}
+			if approvalReason == "" {
+				approvalReason = "permission_risk"
+			}
 		}
 		scope, conditions, err := c.conditionsForGrant(ctx, account, grant, req)
 		if err != nil {
@@ -81,7 +100,7 @@ func (c *Service) evaluateAuthz(ctx RequestContext, account Account, req CheckRe
 		chosenScope, chosenConditions = chooseScope(chosenScope, chosenConditions, scope, conditions)
 	}
 	if c.relationships != nil && len(matched) == 0 && req.ResourceID != "" {
-		object := routeResourceName(req.ApplicationCode, req.ResourceType) + ":" + req.ResourceID
+		object := relationshipObject(req)
 		allowed, err := c.relationships.CheckRelationship(goContext(ctx), authzpkg.RelationshipCheck{
 			TenantID: ctx.TenantID,
 			Subject:  "account:" + account.ID,
@@ -117,6 +136,9 @@ func (c *Service) evaluateAuthz(ctx RequestContext, account Account, req CheckRe
 		FieldPolicies:      fieldPolicies,
 		PermissionBoundary: boundary,
 		RequiresApproval:   requiresApproval && len(matched) > 0,
+		RiskLevel:          riskLevel,
+		ApprovalType:       approvalType,
+		ApprovalReason:     approvalReason,
 		Resource:           req.Resource,
 		ApplicationCode:    req.ApplicationCode,
 		ResourceType:       req.ResourceType,
@@ -134,6 +156,12 @@ func (c *Service) evaluateAuthz(ctx RequestContext, account Account, req CheckRe
 		return cacheResult(result), nil
 	}
 	if len(matched) == 0 {
+		if len(relationshipDeniedBy) > 0 {
+			result.Reason = "relationship denied"
+			result.MissingPermissions = []string{permissionKey}
+			result.MatchedBy = uniqueStrings(relationshipDeniedBy)
+			return cacheResult(result), nil
+		}
 		result.Reason = "missing permission"
 		result.MissingPermissions = []string{permissionKey}
 		return cacheResult(result), nil
@@ -161,7 +189,7 @@ func (c *Service) collectAuthzGrants(ctx RequestContext, account Account) ([]aut
 				Permission:      perm,
 				PermissionSetID: set.ID,
 				Source:          source,
-				Effect:          firstNonEmpty(effect, "allow"),
+				Effect:          utils.FirstNonEmpty(effect, "allow"),
 				DataScope:       scope,
 			})
 		}
@@ -226,7 +254,7 @@ func (c *Service) collectAuthzGrants(ctx RequestContext, account Account) ([]aut
 	boundary := map[string]any(nil)
 	if role != nil {
 		assumed = &AssumedRoleDecision{RoleID: role.ID, Name: role.Name}
-		boundary = copyStringMap(role.PermissionBoundary)
+		boundary = utils.CopyStringMap(role.PermissionBoundary)
 		for _, id := range role.PermissionSetIDs {
 			if err := addSet(id, "assumable_role:"+role.ID+":"+id, "allow", nil); err != nil {
 				return nil, nil, nil, nil, err
@@ -270,24 +298,13 @@ func (c *Service) activeAssumableRole(ctx RequestContext, account Account) (*Ass
 		}
 		return &role, &session, nil
 	}
-	roleID := account.ActiveAssumableRoleID
-	if roleID == "" {
-		return nil, nil, nil
-	}
-	role, ok, err := c.store.GetAssumableRole(goContext(ctx), ctx.TenantID, roleID)
-	if err != nil {
-		return nil, nil, err
-	}
-	if !ok {
-		return nil, nil, NotFound("assumable role", roleID)
-	}
-	return &role, nil, nil
+	return nil, nil, nil
 }
 
 func (c *Service) conditionsForGrant(ctx RequestContext, account Account, grant authzGrant, req CheckRequest) (Scope, map[string]any, error) {
 	if grant.DataScope != nil {
 		conditions, err := c.scopeConditions(ctx, account, Scope(grant.DataScope.ScopeType), grant.DataScope.Params)
-		return Scope(grant.DataScope.Code), conditions, err
+		return Scope(grant.DataScope.ScopeType), conditions, err
 	}
 	scope := grant.Permission.Scope
 	if scope == "" {
@@ -312,231 +329,8 @@ func (c *Service) fieldPolicyDecision(ctx RequestContext, applicationCode Applic
 	return out, nil
 }
 
-func (c *Service) applyEmployeeDecision(ctx RequestContext, account Account, items []Employee, decision CheckResult) ([]Employee, error) {
-	filtered, err := c.filterEmployeesByDecision(ctx, account, items, decision)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]Employee, 0, len(filtered))
-	for _, item := range filtered {
-		out = append(out, maskEmployee(item, decision.FieldPolicies))
-	}
-	return out, nil
-}
-
-func (c *Service) filterEmployeesByDecision(ctx RequestContext, account Account, items []Employee, decision CheckResult) ([]Employee, error) {
-	switch decision.Scope {
-	case "", "all", "tenant":
-		return items, nil
-	case "self":
-		out := make([]Employee, 0, 1)
-		for _, item := range items {
-			if item.ID == account.EmployeeID {
-				out = append(out, item)
-			}
-		}
-		return out, nil
-	case "department_subtree":
-		orgIDs := stringSliceFromAny(decision.Conditions["org_unit_ids"])
-		if len(orgIDs) == 0 && account.EmployeeID != "" {
-			employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, account.EmployeeID)
-			if err != nil {
-				return nil, err
-			}
-			if ok && employee.OrgUnitID != "" {
-				orgIDs = []string{employee.OrgUnitID}
-			}
-		}
-		if len(orgIDs) == 0 {
-			return []Employee{}, nil
-		}
-		allowed := map[string]struct{}{}
-		for _, id := range orgIDs {
-			allowed[id] = struct{}{}
-		}
-		units, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]Employee, 0)
-		for _, item := range items {
-			if orgUnitInScope(units, item.OrgUnitID, allowed) {
-				out = append(out, item)
-			}
-		}
-		return out, nil
-	case "direct_reports":
-		ids := stringSliceFromAny(decision.Conditions["employee_ids"])
-		allowed := map[string]struct{}{}
-		for _, id := range ids {
-			allowed[id] = struct{}{}
-		}
-		out := make([]Employee, 0)
-		for _, item := range items {
-			if _, ok := allowed[item.ID]; ok {
-				out = append(out, item)
-			}
-		}
-		return out, nil
-	default:
-		return []Employee{}, nil
-	}
-}
-
-func maskEmployee(item Employee, policies map[string]string) Employee {
-	for field, effect := range policies {
-		if effect != "mask" && effect != "hide" && effect != "deny" {
-			continue
-		}
-		hide := effect == "hide" || effect == "deny"
-		switch field {
-		case "employee_no":
-			item.EmployeeNo = redactString(item.EmployeeNo, hide)
-		case "name":
-			item.Name = redactString(item.Name, hide)
-		case "company_email":
-			if hide {
-				item.CompanyEmail = ""
-			} else {
-				item.CompanyEmail = maskEmail(item.CompanyEmail)
-			}
-		case "personal_email":
-			if hide {
-				item.PersonalEmail = ""
-			} else {
-				item.PersonalEmail = maskEmail(item.PersonalEmail)
-			}
-		case "phone":
-			if hide {
-				item.Phone = ""
-			} else {
-				item.Phone = maskValue(item.Phone)
-			}
-		case "position":
-			item.Position = redactString(item.Position, hide)
-		case "org_unit_id":
-			item.OrgUnitID = ""
-		case "account_id":
-			item.AccountID = ""
-		case "basic_info":
-			item.BasicInfo = nil
-		case "contact_info":
-			item.ContactInfo = nil
-		case "insurance_info":
-			item.InsuranceInfo = nil
-		default:
-			item.BasicInfo = redactMapField(item.BasicInfo, field, hide)
-			item.ContactInfo = redactMapField(item.ContactInfo, field, hide)
-			item.InsuranceInfo = redactMapField(item.InsuranceInfo, field, hide)
-			item.EmploymentInfo = redactMapField(item.EmploymentInfo, field, hide)
-			item.EducationMilitaryInfo = redactMapField(item.EducationMilitaryInfo, field, hide)
-		}
-	}
-	return item
-}
-
-func redactString(value string, hide bool) string {
-	if hide {
-		return ""
-	}
-	return "***"
-}
-
-func redactMapField(values map[string]any, field string, hide bool) map[string]any {
-	if len(values) == 0 {
-		return values
-	}
-	if _, ok := values[field]; !ok {
-		return values
-	}
-	out := copyStringMap(values)
-	if hide {
-		delete(out, field)
-	} else {
-		out[field] = "***"
-	}
-	return out
-}
-
-func maskValue(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	if len(value) <= 4 {
-		return "***"
-	}
-	return value[:2] + "***" + value[len(value)-2:]
-}
-
-func maskEmail(value string) string {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return ""
-	}
-	parts := strings.SplitN(value, "@", 2)
-	if len(parts) != 2 {
-		return maskValue(value)
-	}
-	local := parts[0]
-	if len(local) <= 2 {
-		local = "***"
-	} else {
-		local = local[:1] + "***" + local[len(local)-1:]
-	}
-	return local + "@" + parts[1]
-}
-
-func orgUnitInScope(units []OrgUnit, orgUnitID string, allowed map[string]struct{}) bool {
-	if _, ok := allowed[orgUnitID]; ok {
-		return true
-	}
-	for _, unit := range units {
-		if unit.ID != orgUnitID {
-			continue
-		}
-		for _, parentID := range unit.Path {
-			if _, ok := allowed[parentID]; ok {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func stringSliceFromAny(value any) []string {
-	switch v := value.(type) {
-	case []string:
-		return v
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	case string:
-		if v == "" {
-			return nil
-		}
-		return []string{v}
-	default:
-		return nil
-	}
-}
-
 func (c *Service) auditAuthzDecision(ctx RequestContext, action, resource, target string, decision CheckResult) error {
-	return c.audit(ctx, action, resource, target, "high", map[string]any{
-		"authz_decision":      decision.Allowed,
-		"reason":              decision.Reason,
-		"matched_permissions": decision.MatchedPermissions,
-		"matched_sources":     decision.MatchedBy,
-		"permission_boundary": decision.PermissionBoundary,
-		"data_scope":          decision.Scope,
-		"field_policies":      decision.FieldPolicies,
-		"requires_approval":   decision.RequiresApproval,
-	})
+	return c.audit(ctx, action, resource, target, "high", auditDecisionDetails(ctx, decision, nil))
 }
 
 func defaultPermissions() []Permission {
@@ -564,7 +358,7 @@ func (c *Service) touchAuthzConfig(ctx RequestContext, eventType string, payload
 	}
 	payload["permission_version"] = version
 	return c.store.AppendAuthzOutboxEvent(goContext(ctx), AuthzOutboxEvent{
-		ID:         newID("outbox"),
+		ID:         utils.NewID("outbox"),
 		TenantID:   ctx.TenantID,
 		EventType:  eventType,
 		Payload:    payload,
@@ -650,314 +444,11 @@ func routeResourceName(applicationCode ApplicationCode, resourceType ResourceTyp
 	return string(applicationCode) + "." + string(resourceType)
 }
 
-func permissionKey(applicationCode ApplicationCode, resourceType ResourceType, action Action) string {
-	return fmt.Sprintf("%s.%s.%s", applicationCode, resourceType, action)
-}
-
-func permissionEffect(grant authzGrant) string {
-	if strings.EqualFold(grant.Effect, "deny") || strings.EqualFold(grant.Permission.Effect, "deny") {
-		return "deny"
-	}
-	return firstNonEmpty(grant.Permission.Effect, grant.Effect, "allow")
-}
-
-func isHighRiskPermission(perm Permission) bool {
-	return perm.RiskLevel == "high" || perm.RiskLevel == "critical"
-}
-
-func routeRequiresApproval(req CheckRequest) bool {
-	for _, policy := range authzpkg.DefaultRoutePolicies {
-		if policy.ApplicationCode == string(req.ApplicationCode) &&
-			policy.ResourceType == string(req.ResourceType) &&
-			strings.EqualFold(policy.Action, string(req.Action)) {
-			return policy.RiskLevel == authzpkg.RiskHigh || policy.RiskLevel == authzpkg.RiskCritical
-		}
-	}
-	return false
-}
-
-func chooseScope(current Scope, currentConditions map[string]any, candidate Scope, candidateConditions map[string]any) (Scope, map[string]any) {
-	if candidate == "" {
-		return current, currentConditions
-	}
-	candidateRank := scopeRank(candidate)
-	currentRank := scopeRank(current)
-	if current == "" || candidateRank > currentRank {
-		return candidate, candidateConditions
-	}
-	if candidateRank == currentRank {
-		return current, mergeScopeConditions(currentConditions, candidateConditions)
-	}
-	return current, currentConditions
-}
-
-func mergeScopeConditions(current, candidate map[string]any) map[string]any {
-	out := copyStringMap(current)
-	if out == nil {
-		out = map[string]any{}
-	}
-	for key, value := range candidate {
-		switch key {
-		case "employee_ids", "org_unit_ids":
-			merged := uniqueStrings(append(stringSliceFromAny(out[key]), stringSliceFromAny(value)...))
-			if len(merged) > 0 {
-				out[key] = merged
-			}
-		default:
-			if _, exists := out[key]; !exists {
-				out[key] = value
-			}
-		}
-	}
-	if len(out) == 0 {
-		return nil
-	}
-	return out
-}
-
-func scopeRank(scope Scope) int {
-	switch scope {
-	case "all", "tenant":
-		return 100
-	case "department_subtree":
-		return 80
-	case "direct_reports":
-		return 60
-	case "self":
-		return 40
-	default:
-		return 20
-	}
-}
-
-func (c *Service) scopeConditions(ctx RequestContext, account Account, scope Scope, params map[string]any) (map[string]any, error) {
-	out := copyStringMap(params)
-	if out == nil {
-		out = map[string]any{}
-	}
-	out["tenant_id"] = ctx.TenantID
-	switch scope {
-	case "", "all", "tenant":
-		return out, nil
-	case "self":
-		if _, ok := out["employee_ids"]; !ok {
-			if account.EmployeeID == "" {
-				return nil, Forbidden("account is not linked to an employee for self scope")
-			}
-			out["employee_ids"] = []string{account.EmployeeID}
-		}
-	case "department_subtree":
-		if _, ok := out["org_unit_ids"]; !ok && account.EmployeeID == "" {
-			return nil, Forbidden("account is not linked to an employee for department_subtree scope")
-		}
-		if _, ok := out["org_unit_ids"]; !ok && account.EmployeeID != "" {
-			employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, account.EmployeeID)
-			if err != nil {
-				return nil, err
-			}
-			if ok && employee.OrgUnitID != "" {
-				units, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
-				if err != nil {
-					return nil, err
-				}
-				out["org_unit_ids"] = orgUnitIDsInSubtree(units, []string{employee.OrgUnitID})
-			}
-		}
-	case "direct_reports":
-		if _, ok := out["employee_ids"]; !ok && account.EmployeeID != "" {
-			employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
-			if err != nil {
-				return nil, err
-			}
-			ids := make([]string, 0)
-			for _, employee := range employees {
-				if employee.ManagerEmployeeID == account.EmployeeID {
-					ids = append(ids, employee.ID)
-				}
-			}
-			out["employee_ids"] = ids
-		}
-	default:
-		out["scope"] = scope
-	}
-	return out, nil
-}
-
-func orgUnitIDsInSubtree(units []OrgUnit, roots []string) []string {
-	allowed := map[string]struct{}{}
-	for _, id := range roots {
-		if strings.TrimSpace(id) != "" {
-			allowed[id] = struct{}{}
-		}
-	}
-	if len(allowed) == 0 {
-		return nil
-	}
-	out := make([]string, 0, len(units))
-	for _, unit := range units {
-		if orgUnitInScope(units, unit.ID, allowed) {
-			out = append(out, unit.ID)
-		}
-	}
-	return uniqueStrings(out)
-}
-
-func policyDenies(policy map[string]any, key string) bool {
-	return policyListContains(policy, "deny", key)
-}
-
-func policyAllows(policy map[string]any, key string) bool {
-	if len(policy) == 0 {
-		return true
-	}
-	allows, ok := policy["allow"]
-	if !ok {
-		return true
-	}
-	return valueListContains(allows, key)
-}
-
-func policyListContains(policy map[string]any, field, key string) bool {
-	if len(policy) == 0 {
-		return false
-	}
-	return valueListContains(policy[field], key)
-}
-
-func valueListContains(value any, key string) bool {
-	switch v := value.(type) {
-	case []string:
-		for _, item := range v {
-			if permissionKeyMatches(key, item) {
-				return true
-			}
-		}
-	case []any:
-		for _, item := range v {
-			if s, ok := item.(string); ok && permissionKeyMatches(key, s) {
-				return true
-			}
-		}
-	case string:
-		return permissionKeyMatches(key, v)
-	}
-	return false
-}
-
-func permissionKeyMatches(key, pattern string) bool {
-	if pattern == "" {
-		return false
-	}
-	if pattern == "*" || strings.EqualFold(key, pattern) {
-		return true
-	}
-	if strings.HasSuffix(pattern, ".*") {
-		return strings.HasPrefix(key, strings.TrimSuffix(pattern, "*"))
-	}
-	return false
-}
-
-func mergePolicy(base, extra map[string]any) map[string]any {
-	if len(base) == 0 {
-		return copyStringMap(extra)
-	}
-	out := copyStringMap(base)
-	for key, value := range extra {
-		if existing, ok := out[key]; ok && key == "deny" {
-			out[key] = appendPolicyList(existing, value)
-			continue
-		}
-		if existing, ok := out[key]; ok && key == "allow" {
-			out[key] = intersectPolicyList(existing, value)
-			continue
-		}
-		out[key] = value
-	}
-	return out
-}
-
-func appendPolicyList(a, b any) []any {
-	out := make([]any, 0)
-	appendOne := func(v any) {
-		switch x := v.(type) {
-		case []string:
-			for _, item := range x {
-				out = append(out, item)
-			}
-		case []any:
-			out = append(out, x...)
-		case string:
-			out = append(out, x)
-		}
-	}
-	appendOne(a)
-	appendOne(b)
-	return out
-}
-
-func intersectPolicyList(a, b any) []any {
-	left := policyStrings(a)
-	right := policyStrings(b)
-	out := make([]string, 0)
-	for _, l := range left {
-		for _, r := range right {
-			switch {
-			case permissionKeyMatches(r, l):
-				out = append(out, r)
-			case permissionKeyMatches(l, r):
-				out = append(out, l)
-			case strings.EqualFold(l, r):
-				out = append(out, l)
-			}
-		}
-	}
-	return anyStrings(uniqueStrings(out))
-}
-
-func policyStrings(value any) []string {
-	switch v := value.(type) {
-	case []string:
-		return copyStrings(v)
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			if s, ok := item.(string); ok {
-				out = append(out, s)
-			}
-		}
-		return out
-	case string:
-		if v == "" {
-			return nil
-		}
-		return []string{v}
-	default:
-		return nil
-	}
-}
-
-func anyStrings(values []string) []any {
-	out := make([]any, 0, len(values))
-	for _, value := range values {
-		out = append(out, value)
-	}
-	return out
-}
-
-func firstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
 func optionalDateTime(value string) (*time.Time, error) {
 	if strings.TrimSpace(value) == "" {
 		return nil, nil
 	}
-	t, err := parseDateTime(value)
+	t, err := utils.ParseDateTime(value)
 	if err != nil {
 		return nil, err
 	}

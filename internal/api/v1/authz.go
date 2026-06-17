@@ -11,7 +11,7 @@ import (
 
 type AuthzCtrl struct {
 	routes routeBinder
-	svc    service.AuthzService
+	svc    service.AuthzFacade
 }
 
 func (c AuthzCtrl) RegisterRoutes(router *gin.RouterGroup) {
@@ -33,17 +33,33 @@ func (a *API) authorize(ctx domain.RequestContext, r *http.Request, resource, ac
 			req.ResourceID = req.TargetEmployeeID
 		}
 	}
-	result, err := a.app.Authz().Check(ctx, req)
+	result, err := a.authz.Check(ctx, req)
 	if err != nil {
 		return err
 	}
 	if !result.Allowed {
-		return domain.Forbidden(result.Reason)
+		return domain.ForbiddenReason(apiAuthzReasonCode(result), result.Reason)
 	}
 	if result.RequiresApproval && !approvalConfirmed(r) {
-		return domain.Forbidden("high-risk action requires approval confirmation")
+		return domain.ForbiddenReason("approval_required", "high-risk action requires approval confirmation")
 	}
 	return nil
+}
+
+func apiAuthzReasonCode(result domain.CheckResult) string {
+	switch result.Reason {
+	case "missing permission":
+		switch result.Action {
+		case domain.ActionRead:
+			return "menu_denied"
+		case domain.ActionCreate, domain.ActionUpdate, domain.ActionDelete, domain.ActionExport, domain.ActionImport, domain.ActionInvite, domain.ActionUpdateStatus, domain.ActionStatusTransition:
+			return "button_denied"
+		default:
+			return "permission_missing"
+		}
+	default:
+		return "permission_missing"
+	}
 }
 
 func (c AuthzCtrl) checkAuthz(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {

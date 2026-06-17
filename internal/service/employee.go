@@ -11,6 +11,10 @@ func (c HRService) QueryEmployees(ctx RequestContext, query EmployeeQuery) (Page
 	}
 	query = normalizeEmployeeQuery(query)
 	if !decision.Allowed {
+		c.logInfo(ctx, "employee query returned no rows because authorization was denied",
+			"reason", decision.Reason,
+			"missing_permissions", decision.MissingPermissions,
+		)
 		return PageResponse[Employee]{Items: []Employee{}, Page: query.Page, PageSize: query.PageSize, Sort: query.Sort}, nil
 	}
 	authzAudit := AuthzAudit{service: c.Service, target: AuditTarget{Event: "hr.employee.query", Resource: string(ResourceEmployeeCollection)}, decision: decision}
@@ -56,7 +60,7 @@ func (c HRService) GetEmployee(ctx RequestContext, id string) (Employee, error) 
 		return Employee{}, err
 	}
 	if !decision.Allowed {
-		return Employee{}, Forbidden(decision.Reason)
+		return Employee{}, forbiddenAuthz(decision)
 	}
 	employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, id)
 	if err != nil {
@@ -70,7 +74,7 @@ func (c HRService) GetEmployee(ctx RequestContext, id string) (Employee, error) 
 		return Employee{}, err
 	}
 	if len(visible) == 0 {
-		return Employee{}, Forbidden("employee is outside data scope")
+		return Employee{}, forbiddenDataScope("employee is outside data scope")
 	}
 	return visible[0], nil
 }
@@ -112,6 +116,12 @@ func (c HRService) CreateEmployeeAggregate(ctx RequestContext, input CreateEmplo
 	}); err != nil {
 		return Employee{}, err
 	}
+	c.logInfo(ctx, "employee created",
+		"employee_id", employee.ID,
+		"employee_no", employee.EmployeeNo,
+		"status", employeeStatus(employee),
+		"account_id", employee.AccountID,
+	)
 	return employee, nil
 }
 
@@ -124,6 +134,7 @@ func (c HRService) UpdateEmployee(ctx RequestContext, id string, input UpdateEmp
 		return Employee{}, err
 	}
 	var employee Employee
+	previousStatus := ""
 	if err := c.withTenantTransaction(ctx, func(tx *Service) error {
 		next, ok, err := tx.store.GetEmployee(goContext(ctx), ctx.TenantID, id)
 		if err != nil {
@@ -137,12 +148,13 @@ func (c HRService) UpdateEmployee(ctx RequestContext, id string, input UpdateEmp
 			return err
 		}
 		if len(visible) == 0 {
-			return Forbidden("employee is outside data scope")
+			return forbiddenDataScope("employee is outside data scope")
 		}
 		if fields := forbiddenEmployeePatchFields(input, decision.FieldPolicies); len(fields) > 0 {
 			return domainValidation("employee field policy denied update", fields...)
 		}
 		before := next
+		previousStatus = employeeStatus(before)
 		if err := tx.applyEmployeePatch(ctx, &next, input); err != nil {
 			return err
 		}
@@ -170,6 +182,13 @@ func (c HRService) UpdateEmployee(ctx RequestContext, id string, input UpdateEmp
 	}); err != nil {
 		return Employee{}, err
 	}
+	c.logInfo(ctx, "employee updated",
+		"employee_id", employee.ID,
+		"employee_no", employee.EmployeeNo,
+		"previous_status", previousStatus,
+		"status", employeeStatus(employee),
+		"account_id", employee.AccountID,
+	)
 	return employee, nil
 }
 
@@ -237,7 +256,7 @@ func (c HRService) EmployeeOptions(ctx RequestContext) (EmployeeOptions, error) 
 		return EmployeeOptions{}, err
 	}
 	if !decision.Allowed {
-		return EmployeeOptions{}, Forbidden(decision.Reason)
+		return EmployeeOptions{}, forbiddenAuthz(decision)
 	}
 	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
 	if err != nil {

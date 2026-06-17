@@ -14,7 +14,7 @@ import (
 
 type HRCtrl struct {
 	routes routeBinder
-	svc    service.HRService
+	svc    service.HRFacade
 }
 
 func (c HRCtrl) RegisterRoutes(router *gin.RouterGroup) {

@@ -1,6 +1,10 @@
 package service
 
-import "strings"
+import (
+	"strings"
+
+	"nexus-pro-be/internal/utils"
+)
 
 func (c *Service) employeeFromCreateInput(ctx RequestContext, input CreateEmployeeInput, reservedEmployeeNos ...map[string]struct{}) (Employee, error) {
 	employee, err := c.employeeCreateCandidate(ctx, input)
@@ -36,9 +40,9 @@ func (c *Service) employeeCreateCandidate(ctx RequestContext, input CreateEmploy
 	if err != nil {
 		return Employee{}, BadRequest("resign_date must be RFC3339 or YYYY-MM-DD")
 	}
-	status := normalizeEmployeeStatus(firstNonEmpty(input.EmploymentStatus, input.Status, string(EmployeeStatusActive)))
+	status := normalizeEmployeeStatus(utils.FirstNonEmpty(input.EmploymentStatus, input.Status, string(EmployeeStatusActive)))
 	employee := Employee{
-		ID:                    newID("emp"),
+		ID:                    utils.NewID("emp"),
 		TenantID:              ctx.TenantID,
 		EmployeeNo:            strings.TrimSpace(input.EmployeeNo),
 		Name:                  strings.TrimSpace(input.Name),
@@ -54,12 +58,12 @@ func (c *Service) employeeCreateCandidate(ctx RequestContext, input CreateEmploy
 		EmploymentStatus:      status,
 		HireDate:              hireDate,
 		ResignDate:            resignDate,
-		BasicInfo:             copyStringMap(input.BasicInfo),
-		EmploymentInfo:        copyStringMap(input.EmploymentInfo),
-		EducationMilitaryInfo: copyStringMap(input.EducationMilitaryInfo),
-		ContactInfo:           copyStringMap(input.ContactInfo),
-		InsuranceInfo:         copyStringMap(input.InsuranceInfo),
-		InternalExperiences:   copyEmployeeExperiences(input.InternalExperiences),
+		BasicInfo:             utils.CopyStringMap(input.BasicInfo),
+		EmploymentInfo:        utils.CopyStringMap(input.EmploymentInfo),
+		EducationMilitaryInfo: utils.CopyStringMap(input.EducationMilitaryInfo),
+		ContactInfo:           utils.CopyStringMap(input.ContactInfo),
+		InsuranceInfo:         utils.CopyStringMap(input.InsuranceInfo),
+		InternalExperiences:   utils.CopyEmployeeExperiences(input.InternalExperiences),
 		CreatedAt:             now,
 		UpdatedAt:             now,
 	}
@@ -123,7 +127,7 @@ func (c *Service) applyEmployeePatch(ctx RequestContext, employee *Employee, inp
 	employee.ContactInfo = mergeMap(employee.ContactInfo, input.ContactInfo)
 	employee.InsuranceInfo = mergeMap(employee.InsuranceInfo, input.InsuranceInfo)
 	if input.InternalExperiences != nil {
-		employee.InternalExperiences = copyEmployeeExperiences(input.InternalExperiences)
+		employee.InternalExperiences = utils.CopyEmployeeExperiences(input.InternalExperiences)
 	}
 	*employee = c.deriveEmployeeHotFields(*employee)
 	employee.UpdatedAt = c.Now()
@@ -140,7 +144,7 @@ func forbiddenEmployeePatchFields(input UpdateEmployeeInput, policies map[string
 		if effect != "deny" && effect != "hide" && effect != "readonly" {
 			return
 		}
-		fields = append(fields, FieldError{Tab: tab, Field: field, Code: "field_policy_denied", Message: field + " cannot be updated by current permission policy"})
+		fields = append(fields, FieldError{Tab: tab, Field: field, Code: "field_denied", Message: field + " cannot be updated by current permission policy"})
 	}
 	for _, field := range employeeScalarPatchPolicyFields {
 		if field.present(input) {
@@ -158,26 +162,26 @@ func addPatchMapFields(fields *[]FieldError, policies map[string]string, tab str
 		return
 	}
 	if effect := policies[tab]; effect == "deny" || effect == "hide" || effect == "readonly" {
-		*fields = append(*fields, FieldError{Tab: tab, Field: tab, Code: "field_policy_denied", Message: tab + " cannot be updated by current permission policy"})
+		*fields = append(*fields, FieldError{Tab: tab, Field: tab, Code: "field_denied", Message: tab + " cannot be updated by current permission policy"})
 	}
 	for field := range values {
 		effect := policies[field]
 		if effect != "deny" && effect != "hide" && effect != "readonly" {
 			continue
 		}
-		*fields = append(*fields, FieldError{Tab: tab, Field: field, Code: "field_policy_denied", Message: field + " cannot be updated by current permission policy"})
+		*fields = append(*fields, FieldError{Tab: tab, Field: field, Code: "field_denied", Message: field + " cannot be updated by current permission policy"})
 	}
 }
 
 func (c *Service) deriveEmployeeHotFields(employee Employee) Employee {
-	employee.CompanyEmail = firstNonEmpty(employee.CompanyEmail, employeeHotValue(employee, "company_email"))
-	employee.PersonalEmail = firstNonEmpty(employee.PersonalEmail, employeeHotValue(employee, "personal_email"))
-	employee.Phone = firstNonEmpty(employee.Phone, employeeHotValue(employee, "phone"))
-	employee.OrgUnitID = firstNonEmpty(employee.OrgUnitID, employeeHotValue(employee, "org_unit_id"))
-	employee.ManagerEmployeeID = firstNonEmpty(employee.ManagerEmployeeID, employeeHotValue(employee, "manager_employee_id"))
-	employee.Position = firstNonEmpty(employee.Position, employeeHotValue(employee, "position"))
-	employee.Category = normalizeEmployeeCategory(firstNonEmpty(employee.Category, employeeHotValue(employee, "category")))
-	employee.Name = firstNonEmpty(employee.Name, employeeHotValue(employee, "name"), strings.TrimSpace(stringFromMap(employee.BasicInfo, "first_name")+" "+stringFromMap(employee.BasicInfo, "last_name")))
+	employee.CompanyEmail = utils.FirstNonEmpty(employee.CompanyEmail, employeeHotValue(employee, "company_email"))
+	employee.PersonalEmail = utils.FirstNonEmpty(employee.PersonalEmail, employeeHotValue(employee, "personal_email"))
+	employee.Phone = utils.FirstNonEmpty(employee.Phone, employeeHotValue(employee, "phone"))
+	employee.OrgUnitID = utils.FirstNonEmpty(employee.OrgUnitID, employeeHotValue(employee, "org_unit_id"))
+	employee.ManagerEmployeeID = utils.FirstNonEmpty(employee.ManagerEmployeeID, employeeHotValue(employee, "manager_employee_id"))
+	employee.Position = utils.FirstNonEmpty(employee.Position, employeeHotValue(employee, "position"))
+	employee.Category = normalizeEmployeeCategory(utils.FirstNonEmpty(employee.Category, employeeHotValue(employee, "category")))
+	employee.Name = utils.FirstNonEmpty(employee.Name, employeeHotValue(employee, "name"), strings.TrimSpace(stringFromMap(employee.BasicInfo, "first_name")+" "+stringFromMap(employee.BasicInfo, "last_name")))
 	if employee.EmploymentStatus == "" {
 		employee.EmploymentStatus = employee.Status
 	}
@@ -371,7 +375,7 @@ func mergeMap(base map[string]any, patch map[string]any) map[string]any {
 	if len(base) == 0 && len(patch) == 0 {
 		return nil
 	}
-	out := copyStringMap(base)
+	out := utils.CopyStringMap(base)
 	if out == nil {
 		out = map[string]any{}
 	}
@@ -383,9 +387,9 @@ func mergeMap(base map[string]any, patch map[string]any) map[string]any {
 
 func (c *Service) newEmployeeExperience(employee Employee, reason string) EmployeeExperience {
 	return EmployeeExperience{
-		ID:                newID("ehist"),
+		ID:                utils.NewID("ehist"),
 		StartDate:         employee.HireDate,
-		Reason:            firstNonEmpty(reason, "資料更新"),
+		Reason:            utils.FirstNonEmpty(reason, "資料更新"),
 		OrgUnitID:         employee.OrgUnitID,
 		ManagerEmployeeID: employee.ManagerEmployeeID,
 		Position:          employee.Position,
@@ -435,8 +439,8 @@ func (c *Service) linkEmployeeAccount(ctx RequestContext, employee Employee) err
 	}
 	if ok {
 		account.EmployeeID = employee.ID
-		account.DisplayName = firstNonEmpty(account.DisplayName, employee.Name)
-		account.Email = firstNonEmpty(account.Email, employee.CompanyEmail)
+		account.DisplayName = utils.FirstNonEmpty(account.DisplayName, employee.Name)
+		account.Email = utils.FirstNonEmpty(account.Email, employee.CompanyEmail)
 		return c.store.UpsertAccount(goContext(ctx), account)
 	}
 	return nil
@@ -448,7 +452,7 @@ func (c *Service) appendEmployeeEvent(ctx RequestContext, eventType, target stri
 	}
 	payload["target"] = target
 	return c.store.AppendAuthzOutboxEvent(goContext(ctx), AuthzOutboxEvent{
-		ID:         newID("outbox"),
+		ID:         utils.NewID("outbox"),
 		TenantID:   ctx.TenantID,
 		EventType:  eventType,
 		Payload:    payload,

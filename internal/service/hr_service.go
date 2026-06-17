@@ -1,13 +1,18 @@
 package service
 
-import "strings"
+import (
+	"strings"
+
+	"nexus-pro-be/internal/utils"
+)
 
 type HRService struct {
 	*Service
+	store hrStore
 }
 
 func (c *Service) HR() HRService {
-	return HRService{Service: c}
+	return HRService{Service: c, store: c.store}
 }
 
 func (c *Service) QueryEmployees(ctx RequestContext, query EmployeeQuery) (PageResponse[Employee], error) {
@@ -102,8 +107,8 @@ func (c HRService) ListOrgUnitPage(ctx RequestContext, page PageRequest) (PageRe
 	if err != nil {
 		return PageResponse[OrgUnit]{}, err
 	}
-	items = sortOrgUnits(items, page.Sort)
-	return pageResponse(items, page), nil
+	items = utils.SortOrgUnits(items, page.Sort)
+	return utils.PageResponse(items, page), nil
 }
 
 func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (OrgUnit, error) {
@@ -116,7 +121,7 @@ func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (
 	var unit OrgUnit
 	if err := c.withTenantTransaction(ctx, func(tx *Service) error {
 		next := OrgUnit{
-			ID:        newID("ou"),
+			ID:        utils.NewID("ou"),
 			TenantID:  ctx.TenantID,
 			Code:      strings.TrimSpace(input.Code),
 			Name:      strings.TrimSpace(input.Name),
@@ -131,7 +136,7 @@ func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (
 			if !ok {
 				return NotFound("org unit", next.ParentID)
 			}
-			next.Path = append(copyStrings(parent.Path), parent.ID, next.ID)
+			next.Path = append(utils.CopyStrings(parent.Path), parent.ID, next.ID)
 		} else {
 			next.Path = []string{next.ID}
 		}
@@ -149,6 +154,11 @@ func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (
 	}); err != nil {
 		return OrgUnit{}, err
 	}
+	c.logInfo(ctx, "org unit created",
+		"org_unit_id", unit.ID,
+		"parent_id", unit.ParentID,
+		"code", unit.Code,
+	)
 	return unit, nil
 }
 
@@ -165,7 +175,7 @@ func (c HRService) CreateEmployee(ctx RequestContext, input CreateEmployeeInput)
 }
 
 func (c HRService) ExportEmployees(ctx RequestContext, queries ...EmployeeQuery) ([]Employee, error) {
-	account, decision, audit, err := c.Authorize(ctx,
+	account, decision, _, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, Action: ActionExport},
 		AuditTarget{Resource: string(ResourceEmployeeCollection)},
 	)
@@ -192,7 +202,18 @@ func (c HRService) ExportEmployees(ctx RequestContext, queries ...EmployeeQuery)
 	if len(items) > maxEmployeeExportRows {
 		return nil, employeeExportLimitError()
 	}
-	audit.Commit(ctx)
+	if err := c.audit(ctx, "hr.employee.export", string(ResourceEmployeeCollection), "", string(SeverityHigh), auditDecisionDetails(ctx, decision, map[string]any{
+		"filters":           query,
+		"row_count":         len(items),
+		"restricted_fields": restrictedEmployeeFieldPolicies(decision.FieldPolicies),
+	})); err != nil {
+		return nil, err
+	}
+	c.logInfo(ctx, "employees exported",
+		"row_count", len(items),
+		"restricted_fields", restrictedEmployeeFieldPolicies(decision.FieldPolicies),
+		"scope", decision.EffectiveScope,
+	)
 	return items, nil
 }
 
@@ -205,6 +226,8 @@ func (c HRService) DeleteEmployee(ctx RequestContext, id string) (Employee, erro
 		return Employee{}, err
 	}
 	var employee Employee
+	previousStatus := ""
+	accountDisabled := false
 	if err := c.withTenantTransaction(ctx, func(tx *Service) error {
 		next, ok, err := tx.store.GetEmployee(goContext(ctx), ctx.TenantID, id)
 		if err != nil {
@@ -218,9 +241,10 @@ func (c HRService) DeleteEmployee(ctx RequestContext, id string) (Employee, erro
 			return err
 		}
 		if len(visible) == 0 {
-			return Forbidden("employee is outside data scope")
+			return forbiddenDataScope("employee is outside data scope")
 		}
 		before := next
+		previousStatus = employeeStatus(before)
 		next.Status = string(EmployeeStatusDeleted)
 		next.EmploymentStatus = string(EmployeeStatusDeleted)
 		next.UpdatedAt = tx.Now()
@@ -238,9 +262,16 @@ func (c HRService) DeleteEmployee(ctx RequestContext, id string) (Employee, erro
 				if err := tx.store.UpsertAccount(goContext(ctx), account); err != nil {
 					return err
 				}
+				accountDisabled = true
 			}
 		}
 		if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeOffboarded), next.ID, map[string]any{"employee_id": next.ID, "status": string(EmployeeStatusDeleted)}); err != nil {
+			return err
+		}
+		if err := tx.audit(ctx, "hr.employee.delete", string(ResourceEmployee), next.ID, string(SeverityHigh), auditDecisionDetails(ctx, decision, map[string]any{
+			"previous_status": employeeStatus(before),
+			"status":          string(EmployeeStatusDeleted),
+		})); err != nil {
 			return err
 		}
 		if err := audit.CommitWith(ctx, tx); err != nil {
@@ -251,6 +282,14 @@ func (c HRService) DeleteEmployee(ctx RequestContext, id string) (Employee, erro
 	}); err != nil {
 		return Employee{}, err
 	}
+	c.logWarn(ctx, "employee deleted",
+		"employee_id", employee.ID,
+		"employee_no", employee.EmployeeNo,
+		"previous_status", previousStatus,
+		"status", employeeStatus(employee),
+		"account_id", employee.AccountID,
+		"account_disabled", accountDisabled,
+	)
 	return employee, nil
 }
 
@@ -276,6 +315,7 @@ func (c HRService) UpdateEmployeeStatus(ctx RequestContext, id, status string) (
 		return Employee{}, err
 	}
 	var employee Employee
+	previousStatus := ""
 	if err := c.withTenantTransaction(ctx, func(tx *Service) error {
 		next, ok, err := tx.store.GetEmployee(goContext(ctx), ctx.TenantID, id)
 		if err != nil {
@@ -292,9 +332,10 @@ func (c HRService) UpdateEmployeeStatus(ctx RequestContext, id, status string) (
 			return err
 		}
 		if len(visible) == 0 {
-			return Forbidden("employee is outside data scope")
+			return forbiddenDataScope("employee is outside data scope")
 		}
 		before := next
+		previousStatus = employeeStatus(before)
 		next.Status = status
 		next.EmploymentStatus = status
 		next.UpdatedAt = tx.Now()
@@ -305,6 +346,12 @@ func (c HRService) UpdateEmployeeStatus(ctx RequestContext, id, status string) (
 		if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeStatusChanged), next.ID, map[string]any{"employee_id": next.ID, "status": status}); err != nil {
 			return err
 		}
+		if err := tx.audit(ctx, "hr.employee.status_update", string(ResourceEmployee), next.ID, string(SeverityHigh), auditDecisionDetails(ctx, decision, map[string]any{
+			"previous_status": employeeStatus(before),
+			"status":          status,
+		})); err != nil {
+			return err
+		}
 		if err := audit.CommitWith(ctx, tx); err != nil {
 			return err
 		}
@@ -313,5 +360,11 @@ func (c HRService) UpdateEmployeeStatus(ctx RequestContext, id, status string) (
 	}); err != nil {
 		return Employee{}, err
 	}
+	c.logInfo(ctx, "employee status updated",
+		"employee_id", employee.ID,
+		"employee_no", employee.EmployeeNo,
+		"previous_status", previousStatus,
+		"status", employeeStatus(employee),
+	)
 	return employee, nil
 }

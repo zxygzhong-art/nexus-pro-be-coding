@@ -11,7 +11,7 @@ import (
 
 type WorkflowCtrl struct {
 	routes routeBinder
-	svc    service.WorkflowService
+	svc    service.WorkflowFacade
 }
 
 func (c WorkflowCtrl) RegisterRoutes(router *gin.RouterGroup) {

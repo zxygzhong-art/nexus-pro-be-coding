@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -13,6 +14,7 @@ import (
 	v1api "nexus-pro-be/internal/api/v1"
 	"nexus-pro-be/internal/config"
 	platformauth "nexus-pro-be/internal/platform/auth"
+	"nexus-pro-be/internal/platform/objectstore"
 	openfgaclient "nexus-pro-be/internal/platform/openfga"
 	"nexus-pro-be/internal/platform/postgres"
 	redisstore "nexus-pro-be/internal/platform/redis"
@@ -21,6 +23,7 @@ import (
 	"nexus-pro-be/internal/repository/memory"
 	pgstore "nexus-pro-be/internal/repository/postgres"
 	"nexus-pro-be/internal/service"
+	"nexus-pro-be/internal/startup"
 
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
@@ -28,6 +31,18 @@ import (
 func main() {
 	cfg := config.Load()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel(cfg.LogLevel)}))
+	startupReport := startup.Report{
+		Name:       "nexus-pro-be",
+		Env:        cfg.Env,
+		HTTPAddr:   cfg.HTTPAddr,
+		Repository: "memory",
+	}
+	telemetryStatus := startup.Dependency{
+		Name:   "OpenTelemetry",
+		Status: "skipped",
+		Target: "OTEL_ENABLED=false",
+		Detail: "tracing disabled",
+	}
 	telemetryShutdown, err := telemetry.Init(context.Background(), telemetry.Config{
 		Enabled:  cfg.OTelEnabled,
 		Service:  cfg.OTelServiceName,
@@ -48,6 +63,12 @@ func main() {
 	}()
 	if cfg.OTelEnabled {
 		logger.Info("opentelemetry tracing enabled", "service", cfg.OTelServiceName, "endpoint", cfg.OTelExporterOTLPEndpoint)
+		telemetryStatus = startup.Dependency{
+			Name:   "OpenTelemetry",
+			Status: "enabled",
+			Target: cfg.OTelExporterOTLPEndpoint,
+			Detail: "service=" + cfg.OTelServiceName,
+		}
 	}
 	var store repository.Store
 	var authzSnapshot service.AuthzSnapshotCache
@@ -65,7 +86,21 @@ func main() {
 		defer pool.Close()
 		logger.Info("postgres connected")
 		store = pgstore.NewStore(pool)
+		startupReport.Repository = "postgresql"
+		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
+			Name:   "PostgreSQL",
+			Status: "connected",
+			Target: startup.SafeURL(cfg.DatabaseURL),
+			Detail: "repository backend",
+		})
 		readinessChecks["postgres"] = pool.Ping
+	} else {
+		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
+			Name:   "PostgreSQL",
+			Status: "skipped",
+			Target: "DATABASE_URL not set",
+			Detail: "using in-memory store",
+		})
 	}
 	if cfg.RedisAddr != "" {
 		startupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -82,9 +117,22 @@ func main() {
 		defer redisClient.Close()
 		logger.Info("redis connected")
 		authzSnapshot = redisstore.NewAuthzSnapshotStore(redisClient)
+		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
+			Name:   "Redis",
+			Status: "connected",
+			Target: cfg.RedisAddr,
+			Detail: "db=" + strconv.Itoa(cfg.RedisDB),
+		})
 		readinessChecks["redis"] = func(ctx context.Context) error {
 			return redisClient.Ping(ctx).Err()
 		}
+	} else {
+		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
+			Name:   "Redis",
+			Status: "skipped",
+			Target: "REDIS_ADDR not set",
+			Detail: "authz snapshots disabled",
+		})
 	}
 	if cfg.OpenFGAAPIURL != "" && cfg.OpenFGAStoreID != "" {
 		relationships = openfgaclient.NewChecker(cfg.OpenFGAAPIURL, cfg.OpenFGAStoreID, &http.Client{
@@ -92,14 +140,54 @@ func main() {
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		})
 		logger.Info("openfga relationship checker enabled", "api_url", cfg.OpenFGAAPIURL, "store_id", cfg.OpenFGAStoreID)
+		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
+			Name:   "OpenFGA",
+			Status: "configured",
+			Target: startup.SafeURL(cfg.OpenFGAAPIURL),
+			Detail: "store=" + cfg.OpenFGAStoreID,
+		})
+	} else if cfg.OpenFGAAPIURL != "" || cfg.OpenFGAStoreID != "" {
+		missing := []string{}
+		if cfg.OpenFGAAPIURL == "" {
+			missing = append(missing, "OPENFGA_API_URL")
+		}
+		if cfg.OpenFGAStoreID == "" {
+			missing = append(missing, "OPENFGA_STORE_ID")
+		}
+		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
+			Name:   "OpenFGA",
+			Status: "incomplete",
+			Target: "disabled",
+			Detail: startup.Missing(missing...),
+		})
+	} else {
+		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
+			Name:   "OpenFGA",
+			Status: "skipped",
+			Target: "OPENFGA_* not set",
+			Detail: "relationship checks off",
+		})
 	}
 	if cfg.ObjectStoreDir != "" {
-		objectStore, err = service.NewLocalObjectStore(cfg.ObjectStoreDir)
+		objectStore, err = objectstore.NewLocal(cfg.ObjectStoreDir)
 		if err != nil {
 			logger.Error("object store initialization failed", "error", err)
 			os.Exit(1)
 		}
 		logger.Info("local object store enabled", "dir", cfg.ObjectStoreDir)
+		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
+			Name:   "ObjectStore",
+			Status: "local",
+			Target: cfg.ObjectStoreDir,
+			Detail: "ready",
+		})
+	} else {
+		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
+			Name:   "ObjectStore",
+			Status: "memory",
+			Target: "OBJECT_STORE_DIR not set",
+			Detail: "import files in memory",
+		})
 	}
 
 	if store == nil {
@@ -109,7 +197,7 @@ func main() {
 		service.SeedDemo(store)
 		logger.Info("demo data seeded")
 	}
-	app := service.New(store, service.Options{AuthzSnapshot: authzSnapshot, Relationships: relationships, ObjectStore: objectStore})
+	app := service.New(store, service.Options{Logger: logger, AuthzSnapshot: authzSnapshot, Relationships: relationships, ObjectStore: objectStore})
 	apiOptions := v1api.Options{
 		AllowDemoContext:   cfg.AllowDemoContext,
 		AllowHeaderContext: cfg.AllowHeaderContext,
@@ -126,10 +214,38 @@ func main() {
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		})
 		logger.Info("keycloak token resolver enabled", "issuer", cfg.KeycloakIssuerURL, "client_id", cfg.KeycloakClientID)
+		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
+			Name:   "Keycloak",
+			Status: "configured",
+			Target: startup.SafeURL(cfg.KeycloakIssuerURL),
+			Detail: "client=" + cfg.KeycloakClientID,
+		})
+	} else if cfg.KeycloakIssuerURL != "" || cfg.KeycloakClientID != "" {
+		missing := []string{}
+		if cfg.KeycloakIssuerURL == "" {
+			missing = append(missing, "KEYCLOAK_ISSUER_URL")
+		}
+		if cfg.KeycloakClientID == "" {
+			missing = append(missing, "KEYCLOAK_CLIENT_ID")
+		}
+		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
+			Name:   "Keycloak",
+			Status: "incomplete",
+			Target: "disabled",
+			Detail: startup.Missing(missing...),
+		})
+	} else {
+		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
+			Name:   "Keycloak",
+			Status: "skipped",
+			Target: "KEYCLOAK_* not set",
+			Detail: "token resolver off",
+		})
 	}
 	if cfg.OTelEnabled {
 		apiOptions.TelemetryServiceName = cfg.OTelServiceName
 	}
+	startupReport.Dependencies = append(startupReport.Dependencies, telemetryStatus)
 
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
@@ -138,6 +254,10 @@ func main() {
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
+	}
+
+	if err := startup.Print(os.Stdout, startupReport); err != nil {
+		logger.Warn("startup report render failed", "error", err)
 	}
 
 	errs := make(chan error, 1)

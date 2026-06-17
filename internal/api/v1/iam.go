@@ -11,7 +11,7 @@ import (
 
 type IAMCtrl struct {
 	routes routeBinder
-	svc    service.IAMService
+	svc    service.IAMFacade
 }
 
 func (c IAMCtrl) RegisterRoutes(router *gin.RouterGroup) {

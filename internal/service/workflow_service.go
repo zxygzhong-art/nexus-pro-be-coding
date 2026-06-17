@@ -1,13 +1,18 @@
 package service
 
-import "strings"
+import (
+	"strings"
+
+	"nexus-pro-be/internal/utils"
+)
 
 type WorkflowService struct {
 	*Service
+	store workflowStore
 }
 
 func (c *Service) Workflow() WorkflowService {
-	return WorkflowService{Service: c}
+	return WorkflowService{Service: c, store: c.store}
 }
 
 func (c *Service) ListFormTemplates(ctx RequestContext) ([]FormTemplate, error) {
@@ -38,8 +43,8 @@ func (c WorkflowService) ListFormTemplatePage(ctx RequestContext, page PageReque
 	if err != nil {
 		return PageResponse[FormTemplate]{}, err
 	}
-	items = sortFormTemplates(items, page.Sort)
-	return pageResponse(items, page), nil
+	items = utils.SortFormTemplates(items, page.Sort)
+	return utils.PageResponse(items, page), nil
 }
 
 func (c WorkflowService) CreateFormTemplate(ctx RequestContext, input CreateFormTemplateInput) (FormTemplate, error) {
@@ -50,12 +55,12 @@ func (c WorkflowService) CreateFormTemplate(ctx RequestContext, input CreateForm
 		return FormTemplate{}, BadRequest("template key and name are required")
 	}
 	tpl := FormTemplate{
-		ID:          newID("ft"),
+		ID:          utils.NewID("ft"),
 		TenantID:    ctx.TenantID,
 		Key:         strings.TrimSpace(input.Key),
 		Name:        strings.TrimSpace(input.Name),
 		Description: strings.TrimSpace(input.Description),
-		Schema:      copyStringMap(input.Schema),
+		Schema:      utils.CopyStringMap(input.Schema),
 		CreatedAt:   c.Now(),
 	}
 	if err := c.store.UpsertFormTemplate(goContext(ctx), tpl); err != nil {
@@ -64,6 +69,10 @@ func (c WorkflowService) CreateFormTemplate(ctx RequestContext, input CreateForm
 	if err := c.audit(ctx, "workflow.form_template.create", "form_template", tpl.ID, "medium", map[string]any{"key": tpl.Key}); err != nil {
 		return FormTemplate{}, err
 	}
+	c.logInfo(ctx, "form template created",
+		"form_template_id", tpl.ID,
+		"template_key", tpl.Key,
+	)
 	return tpl, nil
 }
 
@@ -83,12 +92,12 @@ func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (
 		return FormInstance{}, NotFound("form template", input.TemplateKey)
 	}
 	instance := FormInstance{
-		ID:                 newID("fi"),
+		ID:                 utils.NewID("fi"),
 		TenantID:           ctx.TenantID,
 		TemplateID:         template.ID,
 		ApplicantAccountID: account.ID,
 		Status:             "submitted",
-		Payload:            copyStringMap(input.Payload),
+		Payload:            utils.CopyStringMap(input.Payload),
 		SubmittedAt:        c.Now(),
 		UpdatedAt:          c.Now(),
 	}
@@ -98,5 +107,11 @@ func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (
 	if err := c.audit(ctx, "workflow.form.submit", "form_instance", instance.ID, "medium", map[string]any{"template_key": template.Key}); err != nil {
 		return FormInstance{}, err
 	}
+	c.logInfo(ctx, "form submitted",
+		"form_instance_id", instance.ID,
+		"form_template_id", template.ID,
+		"template_key", template.Key,
+		"status", instance.Status,
+	)
 	return instance, nil
 }

@@ -2,22 +2,27 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"sort"
 	"strings"
 	"time"
 
+	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/repository"
+	"nexus-pro-be/internal/utils"
 )
 
 type Service struct {
 	store         repository.Store
 	now           func() time.Time
+	logger        *slog.Logger
 	authzSnapshot AuthzSnapshotCache
 	relationships RelationshipChecker
 	objectStore   ObjectStore
 }
 
 type Options struct {
+	Logger        *slog.Logger
 	AuthzSnapshot AuthzSnapshotCache
 	Relationships RelationshipChecker
 	ObjectStore   ObjectStore
@@ -28,9 +33,14 @@ func New(store repository.Store, options ...Options) *Service {
 	if len(options) > 0 {
 		cfg = options[0]
 	}
+	logger := cfg.Logger
+	if logger == nil {
+		logger = slog.Default()
+	}
 	return &Service{
 		store:         store,
 		now:           time.Now,
+		logger:        logger,
 		authzSnapshot: cfg.AuthzSnapshot,
 		relationships: cfg.Relationships,
 		objectStore:   firstObjectStore(cfg.ObjectStore),
@@ -58,6 +68,38 @@ func goContext(ctx RequestContext) context.Context {
 
 func (c *Service) Now() time.Time {
 	return c.now().UTC()
+}
+
+func (c *Service) logInfo(ctx RequestContext, message string, args ...any) {
+	c.loggerFor(ctx).InfoContext(goContext(ctx), message, args...)
+}
+
+func (c *Service) logWarn(ctx RequestContext, message string, args ...any) {
+	c.loggerFor(ctx).WarnContext(goContext(ctx), message, args...)
+}
+
+func (c *Service) loggerFor(ctx RequestContext) *slog.Logger {
+	logger := slog.Default()
+	if c != nil && c.logger != nil {
+		logger = c.logger
+	}
+	attrs := []any{"component", "service"}
+	if ctx.TenantID != "" {
+		attrs = append(attrs, "tenant_id", ctx.TenantID)
+	}
+	if ctx.AccountID != "" {
+		attrs = append(attrs, "account_id", ctx.AccountID)
+	}
+	if ctx.RequestID != "" {
+		attrs = append(attrs, "request_id", ctx.RequestID)
+	}
+	if ctx.AssumedRoleID != "" {
+		attrs = append(attrs, "assumed_role_id", ctx.AssumedRoleID)
+	}
+	if ctx.AssumedRoleSessionID != "" {
+		attrs = append(attrs, "assumed_role_session_id", ctx.AssumedRoleSessionID)
+	}
+	return logger.With(attrs...)
 }
 
 func (c *Service) resolveAccount(ctx RequestContext) (Account, Tenant, error) {
@@ -109,11 +151,29 @@ func (c *Service) Authorize(ctx RequestContext, req CheckRequest, audit AuditTar
 	done := AuthzAudit{service: c, target: audit, decision: decision}
 	if !decision.Allowed {
 		_ = c.auditAuthzTarget(ctx, audit, decision)
-		return Account{}, decision, AuthzAudit{}, Forbidden(decision.Reason)
+		c.logWarn(ctx, "authorization denied",
+			"application_code", req.ApplicationCode,
+			"resource_type", req.ResourceType,
+			"resource_id", req.ResourceID,
+			"action", req.Action,
+			"reason", decision.Reason,
+			"missing_permissions", decision.MissingPermissions,
+			"matched_by", decision.MatchedBy,
+		)
+		return Account{}, decision, AuthzAudit{}, forbiddenAuthz(decision)
 	}
 	if decision.RequiresApproval && !ctx.ApprovalConfirmed {
 		_ = c.auditAuthzTarget(ctx, audit, decision)
-		return Account{}, decision, AuthzAudit{}, Forbidden("high-risk action requires approval")
+		c.logWarn(ctx, "authorization requires approval",
+			"application_code", req.ApplicationCode,
+			"resource_type", req.ResourceType,
+			"resource_id", req.ResourceID,
+			"action", req.Action,
+			"risk_level", decision.RiskLevel,
+			"approval_type", decision.ApprovalType,
+			"approval_reason", decision.ApprovalReason,
+		)
+		return Account{}, decision, AuthzAudit{}, domain.ForbiddenReason("approval_required", "high-risk action requires approval")
 	}
 	return account, decision, done, nil
 }
@@ -245,17 +305,80 @@ func (c *Service) canAssumeRole(ctx RequestContext, account Account, role Assuma
 }
 
 func (c *Service) audit(ctx RequestContext, action, resource, target, severity string, details map[string]any) error {
+	details = auditDetailsWithContext(ctx, details)
 	return c.store.AppendAuditLog(goContext(ctx), AuditLog{
-		ID:             newID("aud"),
+		ID:             utils.NewID("aud"),
 		TenantID:       ctx.TenantID,
 		ActorAccountID: ctx.AccountID,
 		Action:         action,
 		Resource:       resource,
 		Target:         target,
 		Severity:       severity,
+		TraceID:        ctx.RequestID,
 		Details:        details,
 		CreatedAt:      c.Now(),
 	})
+}
+
+func forbiddenAuthz(decision CheckResult) error {
+	return domain.ForbiddenReason(authzReasonCode(decision), decision.Reason)
+}
+
+func forbiddenDataScope(message string) error {
+	return domain.ForbiddenReason("data_scope_denied", message)
+}
+
+func authzReasonCode(decision CheckResult) string {
+	switch decision.Reason {
+	case "missing permission":
+		switch decision.Action {
+		case ActionRead:
+			return "menu_denied"
+		case ActionCreate, ActionUpdate, ActionDelete, ActionExport, ActionImport, ActionInvite, ActionUpdateStatus, ActionStatusTransition:
+			return "button_denied"
+		default:
+			return "permission_missing"
+		}
+	case "relationship denied", "explicit deny":
+		return "permission_missing"
+	default:
+		return "permission_missing"
+	}
+}
+
+func auditDetailsWithContext(ctx RequestContext, details map[string]any) map[string]any {
+	out := utils.CopyStringMap(details)
+	if out == nil {
+		out = map[string]any{}
+	}
+	if ctx.RequestID != "" {
+		out["request_id"] = ctx.RequestID
+		out["trace_id"] = ctx.RequestID
+	}
+	if ctx.AccountID != "" {
+		out["actor_account_id"] = ctx.AccountID
+	}
+	if ctx.TenantID != "" {
+		out["tenant_id"] = ctx.TenantID
+	}
+	return out
+}
+
+func auditDecisionDetails(ctx RequestContext, decision CheckResult, details map[string]any) map[string]any {
+	out := auditDetailsWithContext(ctx, details)
+	out["authz_decision"] = decision.Allowed
+	out["reason"] = decision.Reason
+	out["reason_code"] = authzReasonCode(decision)
+	out["matched_permissions"] = decision.MatchedPermissions
+	out["matched_sources"] = decision.MatchedBy
+	out["permission_boundary"] = decision.PermissionBoundary
+	out["data_scope"] = decision.Scope
+	out["field_policies"] = decision.FieldPolicies
+	out["requires_approval"] = decision.RequiresApproval
+	out["risk_level"] = decision.RiskLevel
+	out["approval_type"] = decision.ApprovalType
+	out["approval_reason"] = decision.ApprovalReason
+	return out
 }
 
 func permissionMatches(perm Permission, req CheckRequest, account Account) bool {
@@ -267,8 +390,8 @@ func permissionMatches(perm Permission, req CheckRequest, account Account) bool 
 	if !wildcardMatch(string(req.Action), string(perm.Action)) {
 		return false
 	}
-	if perm.Target != "" && perm.Target != "*" {
-		target := firstNonEmpty(req.Target, req.TargetEmployeeID, req.ResourceID)
+	if perm.Target != "" && perm.Target != "*" && !strings.HasPrefix(perm.Target, "rebac:") {
+		target := utils.FirstNonEmpty(req.Target, req.TargetEmployeeID, req.ResourceID)
 		if target != perm.Target {
 			return false
 		}
@@ -277,8 +400,8 @@ func permissionMatches(perm Permission, req CheckRequest, account Account) bool 
 		return true
 	}
 	switch perm.Scope {
-	case "self":
-		if req.Scope != "" && req.Scope != "self" {
+	case "self", "own":
+		if req.Scope != "" && !sameOwnScope(req.Scope, perm.Scope) {
 			return false
 		}
 		if account.EmployeeID == "" {
@@ -294,6 +417,10 @@ func permissionMatches(perm Permission, req CheckRequest, account Account) bool 
 	default:
 		return req.Scope == "" || perm.Scope == req.Scope
 	}
+}
+
+func sameOwnScope(a, b Scope) bool {
+	return (a == ScopeSelf || a == ScopeOwn) && (b == ScopeSelf || b == ScopeOwn)
 }
 
 func permissionLabel(p Permission) string {

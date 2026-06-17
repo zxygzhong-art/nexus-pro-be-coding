@@ -19,7 +19,7 @@ func (c *Service) authzSnapshotKey(ctx RequestContext, account Account, req Chec
 	payload, _ := json.Marshal(map[string]any{
 		"tenant_id":                 ctx.TenantID,
 		"account_id":                account.ID,
-		"assumed_role_id":           firstNonEmpty(ctx.AssumedRoleSessionID, account.ActiveAssumableRoleID),
+		"assumed_role_session_id":   ctx.AssumedRoleSessionID,
 		"permission_version":        version,
 		"application_code":          req.ApplicationCode,
 		"resource_type":             req.ResourceType,

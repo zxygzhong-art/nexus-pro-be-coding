@@ -1,4 +1,4 @@
-package service
+package utils
 
 import (
 	"fmt"
@@ -9,7 +9,7 @@ import (
 
 var idCounter uint64
 
-func newID(prefix string) string {
+func NewID(prefix string) string {
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" {
 		prefix = "id"

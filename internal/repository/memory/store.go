@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"nexus-pro-be/internal/repository/internal/sliceutil"
+	"nexus-pro-be/internal/utils"
 )
 
 type Store struct {
@@ -444,7 +444,7 @@ func filterMemoryEmployeesByQuery(items []Employee, query EmployeeQuery) []Emplo
 	query = normalizeMemoryEmployeeQuery(query)
 	keyword := strings.ToLower(strings.TrimSpace(query.Keyword))
 	for _, item := range items {
-		status := memoryFirstNonEmpty(item.EmploymentStatus, item.Status)
+		status := utils.FirstNonEmpty(item.EmploymentStatus, item.Status)
 		if query.EmploymentStatus != "deleted" && status == "deleted" {
 			continue
 		}
@@ -576,15 +576,6 @@ func memoryEmployeeNoSequence(employeeNo, prefix string) (int, bool) {
 		return 0, false
 	}
 	return seq, true
-}
-
-func memoryFirstNonEmpty(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
 }
 
 func (s *Store) UpsertEmployeeImportSession(_ context.Context, v EmployeeImportSession) error {
@@ -788,7 +779,7 @@ func (s *Store) ListAgentRunPage(ctx context.Context, tenantID string, page Page
 			return items[i].CreatedAt.After(items[j].CreatedAt)
 		}
 	})
-	page = normalizeMemoryPageRequest(page)
+	page = utils.NormalizePageRequest(page)
 	total := len(items)
 	return paginateMemory(items, page.Page, page.PageSize), total, nil
 }
@@ -825,25 +816,9 @@ func (s *Store) ListAuditLogPage(ctx context.Context, tenantID string, page Page
 			return items[i].CreatedAt.After(items[j].CreatedAt)
 		}
 	})
-	page = normalizeMemoryPageRequest(page)
+	page = utils.NormalizePageRequest(page)
 	total := len(items)
 	return paginateMemory(items, page.Page, page.PageSize), total, nil
-}
-
-func normalizeMemoryPageRequest(page PageRequest) PageRequest {
-	if page.Page <= 0 {
-		page.Page = DefaultPage
-	}
-	if page.PageSize <= 0 {
-		page.PageSize = DefaultPageSize
-	}
-	if page.PageSize > MaxPageSize {
-		page.PageSize = MaxPageSize
-	}
-	if page.Sort == "" {
-		page.Sort = "created_at_desc"
-	}
-	return page
 }
 
 func (s *Store) GetPermissionVersion(_ context.Context, tenantID string) (int64, error) {
@@ -886,7 +861,7 @@ func (s *Store) RemoveAccountGroup(_ context.Context, tenantID, accountID, group
 	if !ok {
 		return nil
 	}
-	account.UserGroupIDs = removeString(account.UserGroupIDs, groupID)
+	account.UserGroupIDs = utils.RemoveString(account.UserGroupIDs, groupID)
 	accountBucket[accountID] = account
 	return nil
 }
@@ -899,7 +874,7 @@ func (s *Store) AddAccountGroup(_ context.Context, tenantID, accountID, groupID 
 	if !ok {
 		return nil
 	}
-	if !containsString(account.UserGroupIDs, groupID) {
+	if !utils.ContainsString(account.UserGroupIDs, groupID) {
 		account.UserGroupIDs = append(account.UserGroupIDs, groupID)
 		accountBucket[accountID] = account
 	}
@@ -937,14 +912,6 @@ func copyNestedValues[T any](bucket map[string]T, clone func(T) T) []T {
 		out = append(out, clone(v))
 	}
 	return out
-}
-
-func containsString(src []string, target string) bool {
-	return sliceutil.ContainsString(src, target)
-}
-
-func removeString(src []string, target string) []string {
-	return sliceutil.RemoveString(src, target)
 }
 
 func nowUTC() time.Time {

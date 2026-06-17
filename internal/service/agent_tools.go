@@ -1,6 +1,6 @@
 package service
 
-type AgentToolGateway interface {
+type agentToolCaller interface {
 	Call(ctx RequestContext, call AgentToolCall) (AgentToolResult, error)
 }
 
@@ -22,7 +22,7 @@ type authzToolGateway struct {
 	service *Service
 }
 
-func (c *Service) agentToolGateway() AgentToolGateway {
+func (c *Service) agentToolGateway() agentToolCaller {
 	return authzToolGateway{service: c}
 }
 

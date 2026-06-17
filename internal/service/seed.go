@@ -49,6 +49,7 @@ func SeedDemo(store repository.Store) {
 			{Resource: "agent.run", Action: "read", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.run", Action: "create", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "knowledge.search", Scope: "all", MenuKey: "agents.runs"},
+			{Resource: "agent.knowledge_article", Action: "read", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "audit.log", Action: "read", Scope: "all", MenuKey: "audit"},
 		},
 		CreatedAt: now,
@@ -65,6 +66,7 @@ func SeedDemo(store repository.Store) {
 			{Resource: "agent.run", Action: "read", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.run", Action: "create", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "knowledge.search", Scope: "all", MenuKey: "agents.runs"},
+			{Resource: "agent.knowledge_article", Action: "read", Scope: "all", MenuKey: "agents.runs"},
 		},
 		CreatedAt: now.Add(time.Minute),
 	}
