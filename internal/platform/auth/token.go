@@ -1,6 +1,7 @@
 package auth
 
 import (
+	"context"
 	"crypto"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -72,14 +73,14 @@ func (r *KeycloakTokenResolver) Resolve(req *http.Request) (TokenContext, bool, 
 	if token == "" {
 		return TokenContext{}, false, nil
 	}
-	claims, err := r.verify(token)
+	claims, err := r.verify(req.Context(), token)
 	if err != nil {
 		return TokenContext{}, true, domain.Unauthorized("invalid bearer token")
 	}
 	return tokenContextFromClaims(claims), true, nil
 }
 
-func (r *KeycloakTokenResolver) verify(token string) (map[string]any, error) {
+func (r *KeycloakTokenResolver) verify(ctx context.Context, token string) (map[string]any, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
 		return nil, errors.New("jwt must have three parts")
@@ -98,7 +99,7 @@ func (r *KeycloakTokenResolver) verify(token string) (map[string]any, error) {
 	if header.Alg != "RS256" || header.Kid == "" {
 		return nil, errors.New("unsupported jwt header")
 	}
-	if err := r.refreshKeysIfNeeded(); err != nil {
+	if err := r.refreshKeysIfNeeded(ctx); err != nil {
 		return nil, err
 	}
 
@@ -110,7 +111,7 @@ func (r *KeycloakTokenResolver) verify(token string) (map[string]any, error) {
 		return nil, errors.New("jwk not found")
 	}
 	if key == nil && r.canForceRefresh() {
-		if err := r.refreshKeys(true); err != nil {
+		if err := r.refreshKeys(ctx, true); err != nil {
 			return nil, err
 		}
 		r.mu.Lock()
@@ -164,11 +165,11 @@ func (r *KeycloakTokenResolver) validateClaims(claims map[string]any) error {
 	return nil
 }
 
-func (r *KeycloakTokenResolver) refreshKeysIfNeeded() error {
-	return r.refreshKeys(false)
+func (r *KeycloakTokenResolver) refreshKeysIfNeeded(ctx context.Context) error {
+	return r.refreshKeys(ctx, false)
 }
 
-func (r *KeycloakTokenResolver) refreshKeys(force bool) error {
+func (r *KeycloakTokenResolver) refreshKeys(ctx context.Context, force bool) error {
 	r.mu.Lock()
 	if !force && len(r.jwksKeys) > 0 && time.Since(r.fetched) < jwksCacheTTL {
 		r.mu.Unlock()
@@ -179,11 +180,11 @@ func (r *KeycloakTokenResolver) refreshKeys(force bool) error {
 	}
 	r.mu.Unlock()
 
-	jwksURI, err := r.discoveryJWKSURI()
+	jwksURI, err := r.discoveryJWKSURI(ctx)
 	if err != nil {
 		return err
 	}
-	keys, err := r.fetchJWKS(jwksURI)
+	keys, err := r.fetchJWKS(ctx, jwksURI)
 	if err != nil {
 		return err
 	}
@@ -211,11 +212,14 @@ func (r *KeycloakTokenResolver) rememberMissingKid(kid string) {
 	r.missingKids[kid] = time.Now().Add(jwksMissingKidTTL)
 }
 
-func (r *KeycloakTokenResolver) discoveryJWKSURI() (string, error) {
+func (r *KeycloakTokenResolver) discoveryJWKSURI(ctx context.Context) (string, error) {
 	if r.issuerURL == "" {
 		return "", errors.New("issuer is required")
 	}
-	req, err := http.NewRequest(http.MethodGet, r.issuerURL+"/.well-known/openid-configuration", nil)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, r.issuerURL+"/.well-known/openid-configuration", nil)
 	if err != nil {
 		return "", err
 	}
@@ -240,8 +244,11 @@ func (r *KeycloakTokenResolver) discoveryJWKSURI() (string, error) {
 	return body.JWKSURI, nil
 }
 
-func (r *KeycloakTokenResolver) fetchJWKS(uri string) (map[string]*rsa.PublicKey, error) {
-	req, err := http.NewRequest(http.MethodGet, uri, nil)
+func (r *KeycloakTokenResolver) fetchJWKS(ctx context.Context, uri string) (map[string]*rsa.PublicKey, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, uri, nil)
 	if err != nil {
 		return nil, err
 	}

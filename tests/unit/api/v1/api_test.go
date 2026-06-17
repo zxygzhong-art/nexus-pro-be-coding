@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -243,6 +244,31 @@ func TestKeycloakTokenResolverCachesUnknownKidMisses(t *testing.T) {
 	}
 	if certFetches != 2 {
 		t.Fatalf("expected one initial fetch and one forced miss refresh, got %d", certFetches)
+	}
+}
+
+func TestKeycloakTokenResolverUsesRequestContextForJWKSRequests(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	issuer := "https://issuer.example"
+	transport := &keycloakContextTransport{
+		t:      t,
+		issuer: issuer,
+		keys:   map[string]*rsa.PublicKey{"ctx": &key.PublicKey},
+	}
+	resolver := platformauth.NewKeycloakTokenResolver(issuer, "nexus-api", &http.Client{Transport: transport})
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req = req.WithContext(context.WithValue(req.Context(), keycloakContextMarkerKey{}, "present"))
+	req.Header.Set("Authorization", "Bearer "+signedRS256JWT(t, "ctx", key, keycloakClaims(issuer)))
+
+	if tokenCtx, ok, err := resolver.Resolve(req); err != nil || !ok || tokenCtx.TenantID != "demo" || tokenCtx.AccountID != "acct-admin" {
+		t.Fatalf("expected context-bound token to resolve, ctx=%+v ok=%v err=%v", tokenCtx, ok, err)
+	}
+	if transport.calls != 2 {
+		t.Fatalf("expected discovery and JWKS requests, got %d calls", transport.calls)
 	}
 }
 
@@ -773,6 +799,46 @@ type staticTokenResolver struct {
 	ctx v1api.TokenContext
 	ok  bool
 	err error
+}
+
+type keycloakContextMarkerKey struct{}
+
+type keycloakContextTransport struct {
+	t      *testing.T
+	issuer string
+	keys   map[string]*rsa.PublicKey
+	calls  int
+}
+
+func (t *keycloakContextTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.calls++
+	if got := req.Context().Value(keycloakContextMarkerKey{}); got != "present" {
+		t.t.Fatalf("expected request context marker to propagate, got %v", got)
+	}
+
+	var payload any
+	switch req.URL.Path {
+	case "/.well-known/openid-configuration":
+		payload = map[string]string{
+			"issuer":   t.issuer,
+			"jwks_uri": t.issuer + "/certs",
+		}
+	case "/certs":
+		payload = map[string]any{"keys": jwksFromKeys(t.keys)}
+	default:
+		return &http.Response{StatusCode: http.StatusNotFound, Body: http.NoBody, Request: req}, nil
+	}
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, err
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(string(raw))),
+		Request:    req,
+	}, nil
 }
 
 func (r staticTokenResolver) Resolve(*http.Request) (v1api.TokenContext, bool, error) {
