@@ -1,0 +1,73 @@
+services:
+  openfga-postgres:
+    image: postgres:17
+    container_name: nexus-openfga-postgres
+    environment:
+      POSTGRES_USER: ${OPENFGA_POSTGRES_USER:-openfga}
+      POSTGRES_PASSWORD: ${OPENFGA_POSTGRES_PASSWORD:-openfga}
+      POSTGRES_DB: ${OPENFGA_POSTGRES_DB:-openfga}
+    ports:
+      - "${OPENFGA_POSTGRES_PORT:-15433}:5432"
+    volumes:
+      - openfga-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    networks:
+      - openfga-net
+
+  openfga-migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        OPENFGA_IMAGE: ${OPENFGA_IMAGE:-openfga/openfga:latest}
+    image: nexus-pro-openfga:local
+    container_name: nexus-openfga-migrate
+    command: migrate
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://${OPENFGA_POSTGRES_USER:-openfga}:${OPENFGA_POSTGRES_PASSWORD:-openfga}@openfga-postgres:5432/${OPENFGA_POSTGRES_DB:-openfga}?sslmode=disable
+      OPENFGA_LOG_FORMAT: json
+    depends_on:
+      openfga-postgres:
+        condition: service_healthy
+    networks:
+      - openfga-net
+    restart: "no"
+
+  openfga:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        OPENFGA_IMAGE: ${OPENFGA_IMAGE:-openfga/openfga:latest}
+    image: nexus-pro-openfga:local
+    container_name: nexus-openfga
+    command: run
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://${OPENFGA_POSTGRES_USER:-openfga}:${OPENFGA_POSTGRES_PASSWORD:-openfga}@openfga-postgres:5432/${OPENFGA_POSTGRES_DB:-openfga}?sslmode=disable
+      OPENFGA_HTTP_ADDR: 0.0.0.0:8080
+      OPENFGA_GRPC_ADDR: 0.0.0.0:8081
+      OPENFGA_PLAYGROUND_ENABLED: "true"
+      OPENFGA_LOG_FORMAT: json
+    ports:
+      - "${OPENFGA_HTTP_PORT:-8081}:8080"
+      - "${OPENFGA_GRPC_PORT:-8082}:8081"
+    depends_on:
+      openfga-postgres:
+        condition: service_healthy
+      openfga-migrate:
+        condition: service_completed_successfully
+    networks:
+      - openfga-net
+
+volumes:
+  openfga-postgres-data:
+
+networks:
+  openfga-net:
+    name: nexus-openfga-net
