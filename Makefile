@@ -2,7 +2,7 @@ GO ?= go
 GOOSE ?= $(GO) run github.com/pressly/goose/v3/cmd/goose@latest
 SQLC ?= $(GO) run github.com/sqlc-dev/sqlc/cmd/sqlc@latest
 
-DATABASE_URL ?= postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable
+DATABASE_URL ?= postgres://postgres:12345678@192.168.100.100:5432/nexus_pro?sslmode=disable
 
 .PHONY: dev test unit-test sqlc migrate-up migrate-down migrate-status migrate-validate
 
