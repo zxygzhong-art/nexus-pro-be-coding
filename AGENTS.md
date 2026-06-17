@@ -15,6 +15,7 @@
 
 - 这是 Go 后端项目，当前主体是模块化单体，核心边界包括 `internal/api/v1`、`internal/service`、`internal/repository`、`internal/domain`、`internal/platform/postgres` 和 `tests/unit`。
 - 当前 people-domain / employee / IAM / agent 相关工作仍以“保持既有 API 行为，逐步补齐契约”为主，避免无关大重构。
+- `docs/openapi.yaml` 是 API 契约源头；后续做代码生成时优先走 OpenAPI spec-first（例如由 OpenAPI 生成 Go types/server interface），不要把 ctrl 注解生成作为主契约来源。
 - 需要回答启动、验证或配置问题时，先看真实仓库文件，例如 `Makefile`、`.env.example`、`internal/config/config.go`、`docs/openapi.yaml`，不要按通用 Go 项目习惯猜。
 - 涉及员工管理前后端契约时，如果用户指向 `~/Desktop/platform-ui`，把该目录视为 UI/交互契约来源之一，并与 OpenAPI、领域模型、测试一起核对。
 - 需求补齐优先按阶段推进：需求矩阵 -> schema 对齐决策 -> employee 校验/导入硬化 -> 权限闭环 -> PostgreSQL/RLS 集成 -> Agent runtime。
@@ -25,6 +26,7 @@
 - 请求相关的 repository/store 路径应显式传递 `context.Context`；避免在请求链路里用 `context.Background()` 或 panic 型 helper 掩盖错误。
 - 鉴权边界必须 token-first：token 派生的 tenant/account 身份优先于可伪造请求头；临时角色/assumed role 只能来自已验证的会话状态。
 - 路由策略、authz resource/action 字符串、service 写路径和 authz snapshot 要一起核对；缺失 `data_scope_id` 等关键约束时应 fail closed。
+- 修改 `internal/api/v1` 的 ctrl/handler/路由契约时，必须同步检查并更新 `docs/openapi.yaml`；如确认无 OpenAPI 契约变化，最终反馈必须明确说明原因。
 - IAM permission-set assignment 相关路由和服务应使用专用 `permission_set_assignment` resource，不要混用普通 permission-set 资源。
 - 涉及 tenant 数据写入时，优先走现有 transaction helper，保证错误和 panic 都能回滚，不留下部分写入。
 - 员工可见范围、部门选项、列表结果等必须来自当前 authz 决策下的可见数据，不要退回全租户列表。
