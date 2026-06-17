@@ -220,7 +220,7 @@ IncrementPermissionVersion(ctx context.Context, tenantID string) (int64, error)
   ```
   **提升**：10 个函数（139 行）→ 1 个泛型 + N 张小表，逻辑唯一。
 - **`PageResponse[T]` 与 `ListResponse[T]` 字段完全相同**（`domain/pagination.go:15-29`）→ 合并为一个；删除冗余类型。
-- **跨包重复 helper**：`copyStrings`/`containsString`/`removeString` 在 `memory/` 与 `postgres/` 各一份（且 `removeString` 两份语义还略有差异）→ 抽到 `internal/repository/internal/sliceutil`，**消除潜在不一致**。
+- **跨包重复 helper**：`copyStrings`/`containsString`/`removeString` 在 `memory/` 与 `postgres/` 各一份（且 `removeString` 两份语义还略有差异）→ 抽到 `internal/utils`，**消除潜在不一致**。
 - **两份 unique-check**（`employeeUniqueFieldErrors` vs `…FromList`，`employee_model.go:296/329`）与**死代码** `filterLeaveBalancesByEmployee`（`service.go:247`，已被 `…Employees` 复数版取代）→ 删/并。
 
 ---
@@ -257,7 +257,7 @@ IncrementPermissionVersion(ctx context.Context, tenantID string) (int64, error)
 | **T1.1 授权 guard** | 抽 `core.Authorize(ctx, req, auditTarget) (Account, CheckResult, error)`，迁移 ~16 处前导块；以 `authzToolGateway` 为蓝本 | 简洁 | 中 | 新增 guard 单测；逐方法对比迁移前后审计/拒绝行为快照 |
 | **T1.2 泛型排序** | `list_sort.go` 10 函数 → `sortBy[T]` + 比较器表 | 简洁 | 低 | 既有排序单测保持绿 |
 | **T1.3 合并分页类型** | `PageResponse`==`ListResponse` 合一；统一分页默认魔数（与 `postgres/store.go:467` 对齐 `normalizePageRequest`） | 简洁 | 低 | 编译 + API 响应快照 |
-| **T1.4 抽 sliceutil** | `copyStrings`/`containsString`/`removeString` 跨包去重，统一 `removeString` 语义 | 简洁 | 低 | 新增 sliceutil 单测覆盖空/重复/不存在 |
+| **T1.4 抽 utils** | `copyStrings`/`containsString`/`removeString` 跨包去重，统一 `removeString` 语义 | 简洁 | 低 | 新增 utils 单测覆盖空/重复/不存在 |
 | **T1.5 清死代码/双实现** | 删 `filterLeaveBalancesByEmployee` 等死代码；合并两份 unique-check | 简洁 | 低 | `go vet` + 覆盖率不降 |
 | **T1.6 service.go 瘦身** | Agent/菜单/日期 helper 迁出至各归属文件 | 模块化 | 低 | 编译 + 对应域单测 |
 

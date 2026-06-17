@@ -12,7 +12,7 @@
 |---|---|---|
 | T1.1 抽授权 guard | ✅ 已做 | `c.Authorize(ctx, CheckRequest, AuditTarget) (Account, CheckResult, error)`，`hr_service.go:151/183/241` 等已迁移 |
 | T1.6 `service.go` 瘦身 | ✅ 已做 | 461→297 行；新增 `agent_knowledge.go`/`me_menu.go`/`timeutil.go` |
-| T1.4 抽 sliceutil | ✅ 已做 | 新增 `internal/repository/internal/` |
+| T1.4 抽 utils | ✅ 已做 | 新增 `internal/utils` |
 | T1.2 泛型排序 | ◑ 部分 | `list_sort.go` 139→115，仍是每类型一函数 |
 | CSV 文件名头注入 | ✅ 已修 | `hr.go:146` 改用 `mime.FormatMediaType` |
 | 响应信封统一 | ✅ 基本统一 | `writeJSON` 统一 `{data}`，`writeError` 统一 `{error}` |

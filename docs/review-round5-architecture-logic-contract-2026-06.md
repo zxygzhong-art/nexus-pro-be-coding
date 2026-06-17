@@ -75,7 +75,7 @@
 
 ### 1.4 目录结构
 
-**优点**：`internal/{api/v1, service, repository/{memory,postgres}, domain, domain/authz, platform/*, jobs, config}` 完全符合 Go 社区惯例；生成代码独立在 `platform/postgres/db`；`repository/internal/sliceutil` 用 internal 收窄可见性，规范。
+**优点**：`internal/{api/v1, service, repository/{memory,postgres}, domain, domain/authz, platform/*, jobs, config, utils}` 完全符合 Go 社区惯例；生成代码独立在 `platform/postgres/db`；通用 helper 已统一放在 `internal/utils`。
 
 **缺点 / 建议**
 - `token.go` 归位 `platform/auth`（见上）。
