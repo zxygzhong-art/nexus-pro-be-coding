@@ -1,5 +1,7 @@
 -- +goose Up
 
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 CREATE TABLE tenants (
     id text PRIMARY KEY,
     name text NOT NULL,
@@ -231,7 +233,8 @@ CREATE TABLE accounts (
     user_group_ids text[] NOT NULL DEFAULT '{}',
     direct_permission_set_ids text[] NOT NULL DEFAULT '{}',
     active_assumable_role_id text NOT NULL DEFAULT '',
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT accounts_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX accounts_tenant_id_idx ON accounts (tenant_id);
@@ -244,7 +247,8 @@ CREATE TABLE user_groups (
     description text NOT NULL DEFAULT '',
     member_account_ids text[] NOT NULL DEFAULT '{}',
     permission_set_ids text[] NOT NULL DEFAULT '{}',
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT user_groups_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX user_groups_tenant_id_idx ON user_groups (tenant_id);
@@ -255,7 +259,8 @@ CREATE TABLE permission_sets (
     name text NOT NULL,
     description text NOT NULL DEFAULT '',
     permissions jsonb NOT NULL DEFAULT '[]'::jsonb,
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT permission_sets_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX permission_sets_tenant_id_idx ON permission_sets (tenant_id);
@@ -270,7 +275,8 @@ CREATE TABLE assumable_roles (
     trust_policy jsonb NOT NULL DEFAULT '{}'::jsonb,
     permission_boundary jsonb NOT NULL DEFAULT '{}'::jsonb,
     session_duration_seconds integer NOT NULL DEFAULT 28800 CHECK (session_duration_seconds > 0),
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT assumable_roles_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX assumable_roles_tenant_id_idx ON assumable_roles (tenant_id);
@@ -308,7 +314,8 @@ CREATE TABLE authz_permissions (
     name text NOT NULL,
     description text NOT NULL DEFAULT '',
     risk_level text NOT NULL DEFAULT 'normal' CHECK (risk_level IN ('normal', 'high', 'critical')),
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT authz_permissions_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE UNIQUE INDEX authz_permissions_tenant_key_idx ON authz_permissions (
@@ -321,7 +328,9 @@ CREATE TABLE authz_permission_set_permissions (
     permission_set_id text NOT NULL,
     permission_id text NOT NULL,
     effect text NOT NULL DEFAULT 'allow' CHECK (effect IN ('allow', 'deny')),
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT authz_permission_set_permissions_set_fk FOREIGN KEY (tenant_id, permission_set_id) REFERENCES permission_sets (tenant_id, id),
+    CONSTRAINT authz_permission_set_permissions_permission_fk FOREIGN KEY (tenant_id, permission_id) REFERENCES authz_permissions (tenant_id, id)
 );
 
 CREATE INDEX authz_permission_set_permissions_set_idx ON authz_permission_set_permissions (tenant_id, permission_set_id);
@@ -336,7 +345,9 @@ CREATE TABLE authz_group_memberships (
     account_id text NOT NULL,
     source text NOT NULL DEFAULT 'manual',
     expires_at timestamptz,
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT authz_group_memberships_group_fk FOREIGN KEY (tenant_id, group_id) REFERENCES user_groups (tenant_id, id),
+    CONSTRAINT authz_group_memberships_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id)
 );
 
 CREATE INDEX authz_group_memberships_account_idx ON authz_group_memberships (tenant_id, account_id);
@@ -391,7 +402,8 @@ CREATE TABLE authz_permission_set_assignments (
     condition_id text NOT NULL DEFAULT '',
     starts_at timestamptz,
     expires_at timestamptz,
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT authz_permission_set_assignments_set_fk FOREIGN KEY (tenant_id, permission_set_id) REFERENCES permission_sets (tenant_id, id)
 );
 
 CREATE INDEX authz_permission_set_assignments_principal_idx ON authz_permission_set_assignments (
@@ -407,7 +419,9 @@ CREATE TABLE authz_assumable_role_sessions (
     session_policy jsonb NOT NULL DEFAULT '{}'::jsonb,
     expires_at timestamptz NOT NULL,
     revoked_at timestamptz,
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT authz_assumable_role_sessions_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id),
+    CONSTRAINT authz_assumable_role_sessions_role_fk FOREIGN KEY (tenant_id, assumable_role_id) REFERENCES assumable_roles (tenant_id, id)
 );
 
 CREATE INDEX authz_assumable_role_sessions_account_idx ON authz_assumable_role_sessions (tenant_id, account_id, created_at DESC);
@@ -473,6 +487,7 @@ CREATE TABLE employees (
     phone text NOT NULL DEFAULT '',
     org_unit_id text NOT NULL DEFAULT '',
     account_id text NOT NULL DEFAULT '',
+    manager_employee_id text,
     position text NOT NULL DEFAULT '',
     category text NOT NULL DEFAULT '',
     status text NOT NULL,
@@ -486,17 +501,37 @@ CREATE TABLE employees (
     insurance_info jsonb NOT NULL DEFAULT '{}'::jsonb,
     internal_experiences jsonb NOT NULL DEFAULT '[]'::jsonb,
     created_at timestamptz NOT NULL,
-    updated_at timestamptz NOT NULL
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT employees_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT employees_manager_employee_fk FOREIGN KEY (tenant_id, manager_employee_id) REFERENCES employees (tenant_id, id)
 );
 
 CREATE INDEX employees_tenant_id_idx ON employees (tenant_id);
 CREATE INDEX employees_tenant_status_idx ON employees (tenant_id, employment_status, status);
 CREATE INDEX employees_tenant_category_idx ON employees (tenant_id, category);
 CREATE INDEX employees_tenant_org_unit_idx ON employees (tenant_id, org_unit_id);
+CREATE INDEX employees_tenant_manager_employee_idx ON employees (tenant_id, manager_employee_id) WHERE manager_employee_id IS NOT NULL;
 CREATE INDEX employees_tenant_hire_date_idx ON employees (tenant_id, hire_date);
+CREATE INDEX employees_keyword_trgm_idx ON employees USING gin (
+    lower(
+        coalesce(employee_no, '') || ' ' ||
+        coalesce(name, '') || ' ' ||
+        coalesce(company_email, '') || ' ' ||
+        coalesce(personal_email, '') || ' ' ||
+        coalesce(phone, '')
+    ) gin_trgm_ops
+);
 CREATE UNIQUE INDEX employees_tenant_employee_no_idx ON employees (tenant_id, employee_no) WHERE employee_no <> '';
 CREATE UNIQUE INDEX employees_tenant_account_id_idx ON employees (tenant_id, account_id) WHERE account_id <> '';
 CREATE UNIQUE INDEX employees_tenant_company_email_idx ON employees (tenant_id, company_email) WHERE company_email <> '';
+
+CREATE TABLE employee_number_sequences (
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    prefix text NOT NULL,
+    next_value integer NOT NULL DEFAULT 1 CHECK (next_value > 0),
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, prefix)
+);
 
 CREATE TABLE employee_import_sessions (
     id text PRIMARY KEY,
@@ -519,7 +554,8 @@ CREATE TABLE leave_balances (
     employee_id text NOT NULL,
     leave_type text NOT NULL,
     remaining_hours double precision NOT NULL,
-    updated_at timestamptz NOT NULL
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT leave_balances_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id)
 );
 
 CREATE INDEX leave_balances_tenant_id_idx ON leave_balances (tenant_id);
@@ -532,7 +568,8 @@ CREATE TABLE form_templates (
     name text NOT NULL,
     description text NOT NULL DEFAULT '',
     schema jsonb NOT NULL DEFAULT '{}'::jsonb,
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT form_templates_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX form_templates_tenant_id_idx ON form_templates (tenant_id);
@@ -547,7 +584,9 @@ CREATE TABLE form_instances (
     payload jsonb NOT NULL DEFAULT '{}'::jsonb,
     submitted_at timestamptz NOT NULL,
     approved_by text NOT NULL DEFAULT '',
-    updated_at timestamptz NOT NULL
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT form_instances_template_fk FOREIGN KEY (tenant_id, template_id) REFERENCES form_templates (tenant_id, id),
+    CONSTRAINT form_instances_applicant_account_fk FOREIGN KEY (tenant_id, applicant_account_id) REFERENCES accounts (tenant_id, id)
 );
 
 CREATE INDEX form_instances_tenant_id_idx ON form_instances (tenant_id);
@@ -564,7 +603,8 @@ CREATE TABLE leave_requests (
     reason text NOT NULL DEFAULT '',
     status text NOT NULL,
     form_instance_id text NOT NULL DEFAULT '',
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT leave_requests_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id)
 );
 
 CREATE INDEX leave_requests_tenant_id_idx ON leave_requests (tenant_id);
@@ -591,7 +631,8 @@ CREATE TABLE agent_runs (
     status text NOT NULL,
     reference_items jsonb NOT NULL DEFAULT '[]'::jsonb,
     created_at timestamptz NOT NULL,
-    updated_at timestamptz NOT NULL
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT agent_runs_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id)
 );
 
 CREATE INDEX agent_runs_tenant_id_idx ON agent_runs (tenant_id);
@@ -615,76 +656,92 @@ CREATE INDEX audit_logs_tenant_id_created_at_idx ON audit_logs (tenant_id, creat
 CREATE INDEX audit_logs_actor_account_id_idx ON audit_logs (actor_account_id);
 
 ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE companies FORCE ROW LEVEL SECURITY;
 ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE users FORCE ROW LEVEL SECURITY;
 ALTER TABLE roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE roles FORCE ROW LEVEL SECURITY;
 ALTER TABLE workspaces ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workspaces FORCE ROW LEVEL SECURITY;
 ALTER TABLE workspace_users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workspace_users FORCE ROW LEVEL SECURITY;
 ALTER TABLE agents ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agents FORCE ROW LEVEL SECURITY;
 ALTER TABLE knowledges ENABLE ROW LEVEL SECURITY;
+ALTER TABLE knowledges FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_knowledges ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_knowledges FORCE ROW LEVEL SECURITY;
 ALTER TABLE knowledge_user_permissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE knowledge_user_permissions FORCE ROW LEVEL SECURITY;
 ALTER TABLE company_storage_configs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE company_storage_configs FORCE ROW LEVEL SECURITY;
 ALTER TABLE files ENABLE ROW LEVEL SECURITY;
+ALTER TABLE files FORCE ROW LEVEL SECURITY;
 ALTER TABLE file_process_tasks ENABLE ROW LEVEL SECURITY;
+ALTER TABLE file_process_tasks FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_platform_files ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_platform_files FORCE ROW LEVEL SECURITY;
 ALTER TABLE company_plans ENABLE ROW LEVEL SECURITY;
+ALTER TABLE company_plans FORCE ROW LEVEL SECURITY;
 ALTER TABLE licenses ENABLE ROW LEVEL SECURITY;
+ALTER TABLE licenses FORCE ROW LEVEL SECURITY;
 
 ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE accounts FORCE ROW LEVEL SECURITY;
 ALTER TABLE user_groups ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_groups FORCE ROW LEVEL SECURITY;
 ALTER TABLE permission_sets ENABLE ROW LEVEL SECURITY;
+ALTER TABLE permission_sets FORCE ROW LEVEL SECURITY;
 ALTER TABLE assumable_roles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE assumable_roles FORCE ROW LEVEL SECURITY;
 ALTER TABLE user_identities ENABLE ROW LEVEL SECURITY;
+ALTER TABLE user_identities FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_applications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_applications FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_permissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_permissions FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_permission_set_permissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_permission_set_permissions FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_group_memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_group_memberships FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_data_scopes ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_data_scopes FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_policy_conditions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_policy_conditions FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_field_policies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_field_policies FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_permission_set_assignments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_permission_set_assignments FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_assumable_role_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_assumable_role_sessions FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_relationship_tuples ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_relationship_tuples FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_permission_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_permission_versions FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_outbox_events ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_outbox_events FORCE ROW LEVEL SECURITY;
 ALTER TABLE org_units ENABLE ROW LEVEL SECURITY;
+ALTER TABLE org_units FORCE ROW LEVEL SECURITY;
 ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
+ALTER TABLE employees FORCE ROW LEVEL SECURITY;
+ALTER TABLE employee_number_sequences ENABLE ROW LEVEL SECURITY;
+ALTER TABLE employee_number_sequences FORCE ROW LEVEL SECURITY;
 ALTER TABLE employee_import_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE employee_import_sessions FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_balances ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leave_balances FORCE ROW LEVEL SECURITY;
 ALTER TABLE form_templates ENABLE ROW LEVEL SECURITY;
+ALTER TABLE form_templates FORCE ROW LEVEL SECURITY;
 ALTER TABLE form_instances ENABLE ROW LEVEL SECURITY;
+ALTER TABLE form_instances FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leave_requests FORCE ROW LEVEL SECURITY;
 ALTER TABLE knowledge_articles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE knowledge_articles FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_runs FORCE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY tenant_isolation_accounts ON accounts USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_user_groups ON user_groups USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_permission_sets ON permission_sets USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_assumable_roles ON assumable_roles USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_user_identities ON user_identities USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_authz_applications ON authz_applications USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_authz_permissions ON authz_permissions USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_authz_permission_set_permissions ON authz_permission_set_permissions USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_authz_group_memberships ON authz_group_memberships USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_authz_data_scopes ON authz_data_scopes USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_authz_policy_conditions ON authz_policy_conditions USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_authz_field_policies ON authz_field_policies USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_authz_permission_set_assignments ON authz_permission_set_assignments USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_authz_assumable_role_sessions ON authz_assumable_role_sessions USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_authz_relationship_tuples ON authz_relationship_tuples USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_authz_permission_versions ON authz_permission_versions USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_authz_outbox_events ON authz_outbox_events USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_org_units ON org_units USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_employees ON employees USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_employee_import_sessions ON employee_import_sessions USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_leave_balances ON leave_balances USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_form_templates ON form_templates USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_form_instances ON form_instances USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_leave_requests ON leave_requests USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_knowledge_articles ON knowledge_articles USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_agent_runs ON agent_runs USING (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_audit_logs ON audit_logs USING (tenant_id = current_setting('app.tenant_id', true));
+ALTER TABLE audit_logs FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY company_isolation_companies ON companies USING (id::text = current_setting('app.company_id', true)) WITH CHECK (id::text = current_setting('app.company_id', true));
 CREATE POLICY company_isolation_users ON users USING (company_id::text = current_setting('app.company_id', true)) WITH CHECK (company_id::text = current_setting('app.company_id', true));
@@ -702,11 +759,66 @@ CREATE POLICY company_isolation_agent_platform_files ON agent_platform_files USI
 CREATE POLICY company_isolation_company_plans ON company_plans USING (company_id::text = current_setting('app.company_id', true)) WITH CHECK (company_id::text = current_setting('app.company_id', true));
 CREATE POLICY company_isolation_licenses ON licenses USING (company_id::text = current_setting('app.company_id', true)) WITH CHECK (company_id::text = current_setting('app.company_id', true));
 
+CREATE POLICY tenant_isolation_accounts ON accounts USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_user_groups ON user_groups USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_permission_sets ON permission_sets USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_assumable_roles ON assumable_roles USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_user_identities ON user_identities USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_authz_applications ON authz_applications USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_authz_permissions ON authz_permissions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_authz_permission_set_permissions ON authz_permission_set_permissions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_authz_group_memberships ON authz_group_memberships USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_authz_data_scopes ON authz_data_scopes USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_authz_policy_conditions ON authz_policy_conditions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_authz_field_policies ON authz_field_policies USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_authz_permission_set_assignments ON authz_permission_set_assignments USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_authz_assumable_role_sessions ON authz_assumable_role_sessions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_authz_relationship_tuples ON authz_relationship_tuples USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_authz_permission_versions ON authz_permission_versions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_authz_outbox_events ON authz_outbox_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_org_units ON org_units USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_employees ON employees USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_employee_number_sequences ON employee_number_sequences USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_employee_import_sessions ON employee_import_sessions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_leave_balances ON leave_balances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_form_templates ON form_templates USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_form_instances ON form_instances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_leave_requests ON leave_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_knowledge_articles ON knowledge_articles USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_agent_runs ON agent_runs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_audit_logs ON audit_logs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
+
 -- +goose Down
 
 DROP TABLE IF EXISTS audit_logs;
 DROP TABLE IF EXISTS agent_runs;
 DROP TABLE IF EXISTS knowledge_articles;
+DROP TABLE IF EXISTS leave_requests;
+DROP TABLE IF EXISTS form_instances;
+DROP TABLE IF EXISTS form_templates;
+DROP TABLE IF EXISTS leave_balances;
+DROP TABLE IF EXISTS employee_import_sessions;
+DROP TABLE IF EXISTS employee_number_sequences;
+DROP TABLE IF EXISTS employees;
+DROP TABLE IF EXISTS org_units;
+DROP TABLE IF EXISTS authz_relationship_tuples;
+DROP TABLE IF EXISTS authz_assumable_role_sessions;
+DROP TABLE IF EXISTS authz_permission_set_assignments;
+DROP TABLE IF EXISTS authz_outbox_events;
+DROP TABLE IF EXISTS authz_field_policies;
+DROP TABLE IF EXISTS authz_policy_conditions;
+DROP TABLE IF EXISTS authz_data_scopes;
+DROP TABLE IF EXISTS authz_group_memberships;
+DROP TABLE IF EXISTS authz_permission_set_permissions;
+DROP TABLE IF EXISTS authz_permissions;
+DROP TABLE IF EXISTS authz_applications;
+DROP TABLE IF EXISTS user_identities;
+DROP TABLE IF EXISTS authz_permission_versions;
+DROP TABLE IF EXISTS assumable_roles;
+DROP TABLE IF EXISTS permission_sets;
+DROP TABLE IF EXISTS user_groups;
+DROP TABLE IF EXISTS accounts;
 DROP TABLE IF EXISTS licenses;
 DROP TABLE IF EXISTS company_plans;
 DROP TABLE IF EXISTS pricing_plans;
@@ -723,26 +835,4 @@ DROP TABLE IF EXISTS workspaces;
 DROP TABLE IF EXISTS roles;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS companies;
-DROP TABLE IF EXISTS leave_requests;
-DROP TABLE IF EXISTS form_instances;
-DROP TABLE IF EXISTS form_templates;
-DROP TABLE IF EXISTS leave_balances;
-DROP TABLE IF EXISTS employees;
-DROP TABLE IF EXISTS employee_import_sessions;
-DROP TABLE IF EXISTS org_units;
-DROP TABLE IF EXISTS authz_relationship_tuples;
-DROP TABLE IF EXISTS authz_assumable_role_sessions;
-DROP TABLE IF EXISTS authz_permission_set_assignments;
-DROP TABLE IF EXISTS authz_field_policies;
-DROP TABLE IF EXISTS authz_policy_conditions;
-DROP TABLE IF EXISTS authz_data_scopes;
-DROP TABLE IF EXISTS authz_group_memberships;
-DROP TABLE IF EXISTS authz_permission_set_permissions;
-DROP TABLE IF EXISTS authz_permissions;
-DROP TABLE IF EXISTS authz_applications;
-DROP TABLE IF EXISTS user_identities;
-DROP TABLE IF EXISTS assumable_roles;
-DROP TABLE IF EXISTS permission_sets;
-DROP TABLE IF EXISTS user_groups;
-DROP TABLE IF EXISTS accounts;
 DROP TABLE IF EXISTS tenants;

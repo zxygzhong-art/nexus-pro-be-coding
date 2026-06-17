@@ -1,3 +1,4 @@
+
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 
 CREATE TABLE tenants (
@@ -231,11 +232,11 @@ CREATE TABLE accounts (
     user_group_ids text[] NOT NULL DEFAULT '{}',
     direct_permission_set_ids text[] NOT NULL DEFAULT '{}',
     active_assumable_role_id text NOT NULL DEFAULT '',
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT accounts_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX accounts_tenant_id_idx ON accounts (tenant_id);
-CREATE UNIQUE INDEX accounts_tenant_id_id_idx ON accounts (tenant_id, id);
 CREATE UNIQUE INDEX accounts_tenant_email_idx ON accounts (tenant_id, email) WHERE email <> '';
 
 CREATE TABLE user_groups (
@@ -245,11 +246,11 @@ CREATE TABLE user_groups (
     description text NOT NULL DEFAULT '',
     member_account_ids text[] NOT NULL DEFAULT '{}',
     permission_set_ids text[] NOT NULL DEFAULT '{}',
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT user_groups_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX user_groups_tenant_id_idx ON user_groups (tenant_id);
-CREATE UNIQUE INDEX user_groups_tenant_id_id_idx ON user_groups (tenant_id, id);
 
 CREATE TABLE permission_sets (
     id text PRIMARY KEY,
@@ -257,11 +258,11 @@ CREATE TABLE permission_sets (
     name text NOT NULL,
     description text NOT NULL DEFAULT '',
     permissions jsonb NOT NULL DEFAULT '[]'::jsonb,
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT permission_sets_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX permission_sets_tenant_id_idx ON permission_sets (tenant_id);
-CREATE UNIQUE INDEX permission_sets_tenant_id_id_idx ON permission_sets (tenant_id, id);
 
 CREATE TABLE assumable_roles (
     id text PRIMARY KEY,
@@ -273,11 +274,11 @@ CREATE TABLE assumable_roles (
     trust_policy jsonb NOT NULL DEFAULT '{}'::jsonb,
     permission_boundary jsonb NOT NULL DEFAULT '{}'::jsonb,
     session_duration_seconds integer NOT NULL DEFAULT 28800 CHECK (session_duration_seconds > 0),
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT assumable_roles_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX assumable_roles_tenant_id_idx ON assumable_roles (tenant_id);
-CREATE UNIQUE INDEX assumable_roles_tenant_id_id_idx ON assumable_roles (tenant_id, id);
 
 CREATE TABLE user_identities (
     id text PRIMARY KEY,
@@ -312,13 +313,13 @@ CREATE TABLE authz_permissions (
     name text NOT NULL,
     description text NOT NULL DEFAULT '',
     risk_level text NOT NULL DEFAULT 'normal' CHECK (risk_level IN ('normal', 'high', 'critical')),
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT authz_permissions_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE UNIQUE INDEX authz_permissions_tenant_key_idx ON authz_permissions (
     tenant_id, application_code, resource_type, action
 );
-CREATE UNIQUE INDEX authz_permissions_tenant_id_id_idx ON authz_permissions (tenant_id, id);
 
 CREATE TABLE authz_permission_set_permissions (
     id text PRIMARY KEY,
@@ -326,7 +327,9 @@ CREATE TABLE authz_permission_set_permissions (
     permission_set_id text NOT NULL,
     permission_id text NOT NULL,
     effect text NOT NULL DEFAULT 'allow' CHECK (effect IN ('allow', 'deny')),
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT authz_permission_set_permissions_set_fk FOREIGN KEY (tenant_id, permission_set_id) REFERENCES permission_sets (tenant_id, id),
+    CONSTRAINT authz_permission_set_permissions_permission_fk FOREIGN KEY (tenant_id, permission_id) REFERENCES authz_permissions (tenant_id, id)
 );
 
 CREATE INDEX authz_permission_set_permissions_set_idx ON authz_permission_set_permissions (tenant_id, permission_set_id);
@@ -341,7 +344,9 @@ CREATE TABLE authz_group_memberships (
     account_id text NOT NULL,
     source text NOT NULL DEFAULT 'manual',
     expires_at timestamptz,
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT authz_group_memberships_group_fk FOREIGN KEY (tenant_id, group_id) REFERENCES user_groups (tenant_id, id),
+    CONSTRAINT authz_group_memberships_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id)
 );
 
 CREATE INDEX authz_group_memberships_account_idx ON authz_group_memberships (tenant_id, account_id);
@@ -396,7 +401,8 @@ CREATE TABLE authz_permission_set_assignments (
     condition_id text NOT NULL DEFAULT '',
     starts_at timestamptz,
     expires_at timestamptz,
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT authz_permission_set_assignments_set_fk FOREIGN KEY (tenant_id, permission_set_id) REFERENCES permission_sets (tenant_id, id)
 );
 
 CREATE INDEX authz_permission_set_assignments_principal_idx ON authz_permission_set_assignments (
@@ -412,7 +418,9 @@ CREATE TABLE authz_assumable_role_sessions (
     session_policy jsonb NOT NULL DEFAULT '{}'::jsonb,
     expires_at timestamptz NOT NULL,
     revoked_at timestamptz,
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT authz_assumable_role_sessions_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id),
+    CONSTRAINT authz_assumable_role_sessions_role_fk FOREIGN KEY (tenant_id, assumable_role_id) REFERENCES assumable_roles (tenant_id, id)
 );
 
 CREATE INDEX authz_assumable_role_sessions_account_idx ON authz_assumable_role_sessions (tenant_id, account_id, created_at DESC);
@@ -492,11 +500,12 @@ CREATE TABLE employees (
     insurance_info jsonb NOT NULL DEFAULT '{}'::jsonb,
     internal_experiences jsonb NOT NULL DEFAULT '[]'::jsonb,
     created_at timestamptz NOT NULL,
-    updated_at timestamptz NOT NULL
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT employees_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT employees_manager_employee_fk FOREIGN KEY (tenant_id, manager_employee_id) REFERENCES employees (tenant_id, id)
 );
 
 CREATE INDEX employees_tenant_id_idx ON employees (tenant_id);
-CREATE UNIQUE INDEX employees_tenant_id_id_idx ON employees (tenant_id, id);
 CREATE INDEX employees_tenant_status_idx ON employees (tenant_id, employment_status, status);
 CREATE INDEX employees_tenant_category_idx ON employees (tenant_id, category);
 CREATE INDEX employees_tenant_org_unit_idx ON employees (tenant_id, org_unit_id);
@@ -544,7 +553,8 @@ CREATE TABLE leave_balances (
     employee_id text NOT NULL,
     leave_type text NOT NULL,
     remaining_hours double precision NOT NULL,
-    updated_at timestamptz NOT NULL
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT leave_balances_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id)
 );
 
 CREATE INDEX leave_balances_tenant_id_idx ON leave_balances (tenant_id);
@@ -557,11 +567,11 @@ CREATE TABLE form_templates (
     name text NOT NULL,
     description text NOT NULL DEFAULT '',
     schema jsonb NOT NULL DEFAULT '{}'::jsonb,
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT form_templates_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX form_templates_tenant_id_idx ON form_templates (tenant_id);
-CREATE UNIQUE INDEX form_templates_tenant_id_id_idx ON form_templates (tenant_id, id);
 CREATE UNIQUE INDEX form_templates_tenant_key_idx ON form_templates (tenant_id, key);
 
 CREATE TABLE form_instances (
@@ -573,7 +583,9 @@ CREATE TABLE form_instances (
     payload jsonb NOT NULL DEFAULT '{}'::jsonb,
     submitted_at timestamptz NOT NULL,
     approved_by text NOT NULL DEFAULT '',
-    updated_at timestamptz NOT NULL
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT form_instances_template_fk FOREIGN KEY (tenant_id, template_id) REFERENCES form_templates (tenant_id, id),
+    CONSTRAINT form_instances_applicant_account_fk FOREIGN KEY (tenant_id, applicant_account_id) REFERENCES accounts (tenant_id, id)
 );
 
 CREATE INDEX form_instances_tenant_id_idx ON form_instances (tenant_id);
@@ -590,7 +602,8 @@ CREATE TABLE leave_requests (
     reason text NOT NULL DEFAULT '',
     status text NOT NULL,
     form_instance_id text NOT NULL DEFAULT '',
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT leave_requests_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id)
 );
 
 CREATE INDEX leave_requests_tenant_id_idx ON leave_requests (tenant_id);
@@ -617,7 +630,8 @@ CREATE TABLE agent_runs (
     status text NOT NULL,
     reference_items jsonb NOT NULL DEFAULT '[]'::jsonb,
     created_at timestamptz NOT NULL,
-    updated_at timestamptz NOT NULL
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT agent_runs_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id)
 );
 
 CREATE INDEX agent_runs_tenant_id_idx ON agent_runs (tenant_id);
@@ -639,20 +653,6 @@ CREATE TABLE audit_logs (
 
 CREATE INDEX audit_logs_tenant_id_created_at_idx ON audit_logs (tenant_id, created_at DESC);
 CREATE INDEX audit_logs_actor_account_id_idx ON audit_logs (actor_account_id);
-
-ALTER TABLE employees ADD CONSTRAINT employees_manager_employee_fk FOREIGN KEY (tenant_id, manager_employee_id) REFERENCES employees (tenant_id, id);
-ALTER TABLE leave_balances ADD CONSTRAINT leave_balances_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id);
-ALTER TABLE leave_requests ADD CONSTRAINT leave_requests_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id);
-ALTER TABLE form_instances ADD CONSTRAINT form_instances_template_fk FOREIGN KEY (tenant_id, template_id) REFERENCES form_templates (tenant_id, id);
-ALTER TABLE form_instances ADD CONSTRAINT form_instances_applicant_account_fk FOREIGN KEY (tenant_id, applicant_account_id) REFERENCES accounts (tenant_id, id);
-ALTER TABLE agent_runs ADD CONSTRAINT agent_runs_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id);
-ALTER TABLE authz_permission_set_permissions ADD CONSTRAINT authz_permission_set_permissions_set_fk FOREIGN KEY (tenant_id, permission_set_id) REFERENCES permission_sets (tenant_id, id);
-ALTER TABLE authz_permission_set_permissions ADD CONSTRAINT authz_permission_set_permissions_permission_fk FOREIGN KEY (tenant_id, permission_id) REFERENCES authz_permissions (tenant_id, id);
-ALTER TABLE authz_group_memberships ADD CONSTRAINT authz_group_memberships_group_fk FOREIGN KEY (tenant_id, group_id) REFERENCES user_groups (tenant_id, id);
-ALTER TABLE authz_group_memberships ADD CONSTRAINT authz_group_memberships_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id);
-ALTER TABLE authz_permission_set_assignments ADD CONSTRAINT authz_permission_set_assignments_set_fk FOREIGN KEY (tenant_id, permission_set_id) REFERENCES permission_sets (tenant_id, id);
-ALTER TABLE authz_assumable_role_sessions ADD CONSTRAINT authz_assumable_role_sessions_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id);
-ALTER TABLE authz_assumable_role_sessions ADD CONSTRAINT authz_assumable_role_sessions_role_fk FOREIGN KEY (tenant_id, assumable_role_id) REFERENCES assumable_roles (tenant_id, id);
 
 ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE companies FORCE ROW LEVEL SECURITY;
@@ -786,3 +786,5 @@ CREATE POLICY tenant_isolation_leave_requests ON leave_requests USING (tenant_id
 CREATE POLICY tenant_isolation_knowledge_articles ON knowledge_articles USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_runs ON agent_runs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_audit_logs ON audit_logs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
+-- +goose Down
