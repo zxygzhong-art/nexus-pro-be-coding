@@ -23,17 +23,6 @@ func isHighRiskPermission(perm Permission) bool {
 	return perm.RiskLevel == "high" || perm.RiskLevel == "critical"
 }
 
-func routeRequiresApproval(req CheckRequest) bool {
-	for _, policy := range authzpkg.DefaultRoutePolicies {
-		if policy.ApplicationCode == string(req.ApplicationCode) &&
-			policy.ResourceType == string(req.ResourceType) &&
-			strings.EqualFold(policy.Action, string(req.Action)) {
-			return policy.RiskLevel == authzpkg.RiskHigh || policy.RiskLevel == authzpkg.RiskCritical
-		}
-	}
-	return false
-}
-
 func approvalPolicyForRoute(req CheckRequest) (bool, string, string, string) {
 	for _, policy := range authzpkg.DefaultRoutePolicies {
 		if policy.ApplicationCode == string(req.ApplicationCode) &&
