@@ -41,6 +41,30 @@ func decodeData[T any](t *testing.T, body []byte) T {
 	return payload.Data
 }
 
+type apiErrorPayload struct {
+	Code        string               `json:"code"`
+	ReasonCode  string               `json:"reason_code"`
+	FieldErrors []domain.FieldError  `json:"field_errors"`
+	RowErrors   []apiRowErrorPayload `json:"row_errors"`
+	TraceID     string               `json:"trace_id"`
+}
+
+type apiRowErrorPayload struct {
+	RowNumber   int                 `json:"row_number"`
+	FieldErrors []domain.FieldError `json:"field_errors"`
+}
+
+func decodeError(t *testing.T, body []byte) apiErrorPayload {
+	t.Helper()
+	var payload struct {
+		Error apiErrorPayload `json:"error"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	return payload.Error
+}
+
 func TestProductionContextRequiresAuthenticatedContext(t *testing.T) {
 	handler := newTestAPI(false)
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
@@ -382,6 +406,10 @@ func TestHighRiskRouteRequiresApprovalConfirmation(t *testing.T) {
 	if rec.Code != http.StatusForbidden {
 		t.Fatalf("expected 403 for high-risk route without confirmation, got %d: %s", rec.Code, rec.Body.String())
 	}
+	errPayload := decodeError(t, rec.Body.Bytes())
+	if errPayload.ReasonCode != "approval_required" {
+		t.Fatalf("expected approval_required reason code, got %+v", errPayload)
+	}
 }
 
 func TestHighRiskRouteAllowsConfirmedRequest(t *testing.T) {
@@ -398,9 +426,44 @@ func TestHighRiskRouteAllowsConfirmedRequest(t *testing.T) {
 	}
 }
 
+func TestHRRouteForbiddenReasonCodes(t *testing.T) {
+	store := memory.NewStore()
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-limited", TenantID: "tenant-1", Status: "active", CreatedAt: now})
+	handler := v1api.New(service.New(store), nil, v1api.Options{AllowHeaderContext: true}).Routes()
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees", nil)
+	listReq.Header.Set("X-Tenant-ID", "tenant-1")
+	listReq.Header.Set("X-Account-ID", "acct-limited")
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for missing HR read permission, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+	listErr := decodeError(t, listRec.Body.Bytes())
+	if listErr.Code != "forbidden" || listErr.ReasonCode != "menu_denied" {
+		t.Fatalf("expected menu_denied reason code, got %+v", listErr)
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees", strings.NewReader(`{"name":"No Button","company_email":"no.button@example.com"}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createReq.Header.Set("X-Tenant-ID", "tenant-1")
+	createReq.Header.Set("X-Account-ID", "acct-limited")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for missing HR create permission, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	createErr := decodeError(t, createRec.Body.Bytes())
+	if createErr.Code != "forbidden" || createErr.ReasonCode != "button_denied" {
+		t.Fatalf("expected button_denied reason code, got %+v", createErr)
+	}
+}
+
 func TestAssumeRoleEndpointReturnsCreatedTypedResponse(t *testing.T) {
 	handler := newTestAPI(true)
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/iam/assumable-roles", strings.NewReader(`{"name":"Audit Assume","trusted":true,"permission_set_ids":["ps-audit"],"session_duration_seconds":3600}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/iam/assumable-roles", strings.NewReader(`{"name":"Audit Assume","trusted":true,"trust_policy":{"accounts":["acct-admin"]},"permission_boundary":{"allow":["audit.log.read","iam.permission_set.read"]},"permission_set_ids":["ps-audit"],"session_duration_seconds":3600}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createReq.Header.Set("X-Approval-Confirmed", "true")
 	createRec := httptest.NewRecorder()
@@ -520,6 +583,28 @@ func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
 	handler.ServeHTTP(confirmRec, confirmReq)
 	if confirmRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for import confirm, got %d: %s", confirmRec.Code, confirmRec.Body.String())
+	}
+
+	duplicatePreviewReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/preview", strings.NewReader(string(payload)))
+	duplicatePreviewReq.Header.Set("Content-Type", "application/json")
+	duplicatePreviewReq.Header.Set("X-Approval-Confirmed", "true")
+	duplicatePreviewRec := httptest.NewRecorder()
+	handler.ServeHTTP(duplicatePreviewRec, duplicatePreviewReq)
+	if duplicatePreviewRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for duplicate import preview, got %d: %s", duplicatePreviewRec.Code, duplicatePreviewRec.Body.String())
+	}
+	duplicateSession := decodeData[domain.EmployeeImportSession](t, duplicatePreviewRec.Body.Bytes())
+	duplicateConfirmReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/"+duplicateSession.ID+"/confirm", strings.NewReader(`{"mode":"create"}`))
+	duplicateConfirmReq.Header.Set("Content-Type", "application/json")
+	duplicateConfirmReq.Header.Set("X-Approval-Confirmed", "true")
+	duplicateConfirmRec := httptest.NewRecorder()
+	handler.ServeHTTP(duplicateConfirmRec, duplicateConfirmReq)
+	if duplicateConfirmRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for duplicate import confirm, got %d: %s", duplicateConfirmRec.Code, duplicateConfirmRec.Body.String())
+	}
+	duplicateErr := decodeError(t, duplicateConfirmRec.Body.Bytes())
+	if duplicateErr.Code != "import_validation_failed" || len(duplicateErr.RowErrors) == 0 || duplicateErr.RowErrors[0].RowNumber == 0 || len(duplicateErr.RowErrors[0].FieldErrors) == 0 {
+		t.Fatalf("expected row_number and field_errors for import error, got %+v", duplicateErr)
 	}
 
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees", strings.NewReader(`{}`))

@@ -5,8 +5,8 @@ import (
 	"testing"
 
 	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/postgres/jsoncodec"
-	"nexus-pro-be/internal/repository/postgres/tenantctx"
+	"nexus-pro-be/internal/utils/jsoncodec"
+	"nexus-pro-be/internal/utils/tenantctx"
 )
 
 func TestTenantIDFromArgs(t *testing.T) {

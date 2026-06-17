@@ -15,6 +15,7 @@ import (
 	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/repository"
 	postgresrepo "nexus-pro-be/internal/repository/postgres"
+	"nexus-pro-be/internal/service"
 )
 
 func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
@@ -106,6 +107,106 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 	}
 	if !found || !reserved || updated.RemainingHours != 8 {
 		t.Fatalf("expected trimmed leave type to reserve hours, got found=%v reserved=%v balance=%+v", found, reserved, updated)
+	}
+}
+
+func TestHRCoreCRUDPostgresAcceptanceSemantics(t *testing.T) {
+	pool := openIntegrationPool(t)
+	defer pool.Close()
+	requireMigratedSchema(t, pool)
+	store := postgresrepo.NewStore(pool)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	suffix := strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_") + "_" + time.Now().UTC().Format("150405000000")
+	tenantA := "tenant_" + suffix + "_a"
+	tenantB := "tenant_" + suffix + "_b"
+	accountID := "acct_" + suffix
+
+	for _, tenantID := range []string{tenantA, tenantB} {
+		if err := store.UpsertTenant(ctx, domain.Tenant{ID: tenantID, Name: tenantID, CreatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.UpsertPermissionSet(ctx, domain.PermissionSet{
+		ID:       "ps_" + suffix,
+		TenantID: tenantA,
+		Name:     "HR Acceptance",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "create", Scope: "all"},
+			{Resource: "hr.employee", Action: "read", Scope: "all"},
+			{Resource: "hr.employee", Action: "update", Scope: "all"},
+			{Resource: "hr.employee", Action: "delete", Scope: "all"},
+			{Resource: "hr.employee", Action: "import", Scope: "all"},
+			{Resource: "hr.employee", Action: "export", Scope: "all"},
+			{Resource: "hr.employee", Action: "status_transition", Scope: "all"},
+		},
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAccount(ctx, domain.Account{ID: accountID, TenantID: tenantA, Status: "active", DirectPermissionSetIDs: []string{"ps_" + suffix}, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	app := service.New(store)
+	reqCtx := domain.RequestContext{TenantID: tenantA, AccountID: accountID, RequestID: "it-" + suffix, ApprovalConfirmed: true}
+
+	created, err := app.CreateEmployee(reqCtx, domain.CreateEmployeeInput{Name: "Integration One", CompanyEmail: "one_" + suffix + "@example.com", Status: "active", EmploymentStatus: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.GetEmployee(ctx, tenantB, created.ID); err != nil || ok {
+		t.Fatalf("tenant B should not read tenant A employee, ok=%v err=%v", ok, err)
+	}
+	newPhone := "0911222333"
+	updated, err := app.UpdateEmployee(reqCtx, created.ID, domain.UpdateEmployeeInput{Phone: &newPhone})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Phone != newPhone {
+		t.Fatalf("expected updated phone, got %+v", updated)
+	}
+
+	session, err := app.PreviewEmployeeImport(reqCtx, domain.EmployeeImportPreviewInput{
+		Filename: "employees.csv",
+		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\n,Integration Import,import_" + suffix + "@example.com,,HRBP,全職,0911000222,在職,2026-06-01,\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmed, err := app.ConfirmEmployeeImport(reqCtx, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if confirmed.Summary["confirmed"] != 1 {
+		t.Fatalf("expected one confirmed import, got %+v", confirmed.Summary)
+	}
+	exported, err := app.ExportEmployees(reqCtx, domain.EmployeeQuery{Keyword: "Integration"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exported) < 2 {
+		t.Fatalf("expected created and imported employees in export, got %+v", exported)
+	}
+	resigned, err := app.TransitionEmployeeStatus(reqCtx, created.ID, domain.StatusTransitionInput{Status: "resigned", Reason: "integration offboard", EndDate: "2026-06-30"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resigned.EmploymentStatus != "resigned" || resigned.ResignDate == nil {
+		t.Fatalf("expected resigned employee, got %+v", resigned)
+	}
+	reinstated, err := app.TransitionEmployeeStatus(reqCtx, created.ID, domain.StatusTransitionInput{Status: "active", Reason: "integration reinstate", StartDate: "2026-07-01"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reinstated.EmploymentStatus != "active" || reinstated.ResignDate != nil {
+		t.Fatalf("expected active reinstated employee, got %+v", reinstated)
+	}
+	batch, err := app.BatchDeleteEmployees(reqCtx, domain.BatchDeleteEmployeesInput{EmployeeIDs: []string{created.ID}, Reason: "integration cleanup"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(batch.Results) != 1 || !batch.Results[0].Success {
+		t.Fatalf("expected successful batch delete, got %+v", batch)
 	}
 }
 
