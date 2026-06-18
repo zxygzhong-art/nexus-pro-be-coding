@@ -20,7 +20,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmployeeListResponse"
+                $ref: "#/components/schemas/EmployeeListDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -41,7 +41,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Employee"
+                $ref: "#/components/schemas/EmployeeDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -63,7 +63,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmployeePreviewResponse"
+                $ref: "#/components/schemas/EmployeePreviewDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -81,7 +81,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Employee"
+                $ref: "#/components/schemas/EmployeeDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -104,7 +104,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Employee"
+                $ref: "#/components/schemas/EmployeeDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -121,7 +121,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Employee"
+                $ref: "#/components/schemas/EmployeeDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -145,7 +145,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmployeePreviewResponse"
+                $ref: "#/components/schemas/EmployeePreviewDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -172,7 +172,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Employee"
+                $ref: "#/components/schemas/EmployeeDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -189,7 +189,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Employee"
+                $ref: "#/components/schemas/EmployeeDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -210,7 +210,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmployeeStats"
+                $ref: "#/components/schemas/EmployeeStatsDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -226,7 +226,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmployeeOptions"
+                $ref: "#/components/schemas/EmployeeOptionsDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -274,7 +274,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmployeeImportSession"
+                $ref: "#/components/schemas/EmployeeImportSessionDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -299,7 +299,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmployeeImportSession"
+                $ref: "#/components/schemas/EmployeeImportSessionDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -340,13 +340,7 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [items]
-                properties:
-                  items:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Employee"
+                $ref: "#/components/schemas/EmployeeExportDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -374,7 +368,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/BatchEmployeeResponse"
+                $ref: "#/components/schemas/BatchEmployeeDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -399,7 +393,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Employee"
+                $ref: "#/components/schemas/EmployeeDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -433,7 +427,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Employee"
+                $ref: "#/components/schemas/EmployeeDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -461,7 +455,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Employee"
+                $ref: "#/components/schemas/EmployeeDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -472,32 +466,62 @@ paths:
     get:
       summary: Resolve current account profile
       responses:
-        "200": {description: OK}
+        "200":
+          description: Current account profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/me/menus:
     get:
       summary: List current account menus
       responses:
-        "200": {description: OK}
+        "200":
+          description: Current account menus
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/authz/check:
     post:
       summary: Check one authorization request
       responses:
-        "200": {description: OK}
+        "200":
+          description: Authorization decision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/authz/batch-check:
     post:
       summary: Check multiple authorization requests
       responses:
-        "200": {description: OK}
+        "200":
+          description: Batch authorization decisions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/authz/explain:
     post:
       summary: Explain one authorization decision
       responses:
-        "200": {description: OK}
+        "200":
+          description: Authorization explanation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/authz/simulate:
     post:
       summary: Simulate one authorization decision
       responses:
-        "200": {description: OK}
+        "200":
+          description: Authorization simulation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/iam/permissions:
     get:
       summary: List permissions
@@ -506,7 +530,12 @@ paths:
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
       responses:
-        "200": {description: OK}
+        "200":
+          description: Permission page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/iam/user-groups:
     get:
       summary: List user groups
@@ -515,11 +544,21 @@ paths:
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
       responses:
-        "200": {description: OK}
+        "200":
+          description: User group page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
     post:
       summary: Create user group
       responses:
-        "201": {description: Created}
+        "201":
+          description: Created user group
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/iam/permission-sets:
     get:
       summary: List permission sets
@@ -528,11 +567,21 @@ paths:
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
       responses:
-        "200": {description: OK}
+        "200":
+          description: Permission set page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
     post:
       summary: Create permission set
       responses:
-        "201": {description: Created}
+        "201":
+          description: Created permission set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/iam/permission-set-assignments:
     get:
       summary: List permission set assignments
@@ -541,11 +590,21 @@ paths:
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
       responses:
-        "200": {description: OK}
+        "200":
+          description: Permission set assignment page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
     post:
       summary: Create permission set assignment
       responses:
-        "201": {description: Created}
+        "201":
+          description: Created permission set assignment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/iam/data-scopes:
     get:
       summary: List data scopes
@@ -554,11 +613,21 @@ paths:
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
       responses:
-        "200": {description: OK}
+        "200":
+          description: Data scope page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
     post:
       summary: Create data scope
       responses:
-        "201": {description: Created}
+        "201":
+          description: Created data scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/iam/field-policies:
     get:
       summary: List field policies
@@ -569,11 +638,21 @@ paths:
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
       responses:
-        "200": {description: OK}
+        "200":
+          description: Field policy page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
     post:
       summary: Create field policy
       responses:
-        "201": {description: Created}
+        "201":
+          description: Created field policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/iam/assumable-roles:
     get:
       summary: List assumable roles
@@ -582,18 +661,33 @@ paths:
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
       responses:
-        "200": {description: OK}
+        "200":
+          description: Assumable role page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
     post:
       summary: Create assumable role
       responses:
-        "201": {description: Created}
+        "201":
+          description: Created assumable role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/iam/assumable-roles/{id}/assume:
     post:
       summary: Assume a role
       parameters:
         - $ref: "#/components/parameters/ID"
       responses:
-        "200": {description: OK}
+        "200":
+          description: Active assumed role session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/org/units:
     get:
       summary: List organization units
@@ -602,11 +696,21 @@ paths:
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
       responses:
-        "200": {description: OK}
+        "200":
+          description: Organization unit page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
     post:
       summary: Create organization unit
       responses:
-        "201": {description: Created}
+        "201":
+          description: Created organization unit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/attendance/leave-balances:
     get:
       summary: List leave balances
@@ -615,7 +719,12 @@ paths:
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
       responses:
-        "200": {description: OK}
+        "200":
+          description: Leave balance page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/attendance/leave-requests:
     get:
       summary: List leave requests
@@ -624,11 +733,21 @@ paths:
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
       responses:
-        "200": {description: OK}
+        "200":
+          description: Leave request page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
     post:
       summary: Create leave request
       responses:
-        "201": {description: Created}
+        "201":
+          description: Created leave request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/forms/templates:
     get:
       summary: List form templates
@@ -637,25 +756,45 @@ paths:
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
       responses:
-        "200": {description: OK}
+        "200":
+          description: Form template page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
     post:
       summary: Create form template
       responses:
-        "201": {description: Created}
+        "201":
+          description: Created form template
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/workflows/forms/{id}/submit:
     post:
       summary: Submit a workflow form
       parameters:
         - $ref: "#/components/parameters/ID"
       responses:
-        "201": {description: Created}
+        "201":
+          description: Submitted workflow form instance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/workflows/forms/{id}/approve:
     post:
       summary: Approve a workflow form instance for high-risk action confirmation
       parameters:
         - $ref: "#/components/parameters/ID"
       responses:
-        "200": {description: Approved}
+        "200":
+          description: Approved workflow form instance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -670,11 +809,21 @@ paths:
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
       responses:
-        "200": {description: OK}
+        "200":
+          description: Agent run page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
     post:
       summary: Create agent run
       responses:
-        "201": {description: Created}
+        "201":
+          description: Created agent run
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/audit-logs:
     get:
       summary: List audit logs
@@ -683,7 +832,12 @@ paths:
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
       responses:
-        "200": {description: OK}
+        "200":
+          description: Audit log page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
 components:
   parameters:
     ID:
@@ -754,6 +908,66 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
   schemas:
+    DataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          description: Successful response payload.
+    EmployeeDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/Employee"
+    EmployeeListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EmployeeListResponse"
+    EmployeePreviewDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EmployeePreviewResponse"
+    EmployeeStatsDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EmployeeStats"
+    EmployeeOptionsDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EmployeeOptions"
+    EmployeeImportSessionDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EmployeeImportSession"
+    EmployeeExportDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [items]
+          properties:
+            items:
+              type: array
+              items:
+                $ref: "#/components/schemas/Employee"
+    BatchEmployeeDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/BatchEmployeeResponse"
     Employee:
       allOf:
         - $ref: "#/components/schemas/EmployeeInput"

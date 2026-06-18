@@ -76,6 +76,47 @@ func TestPermissionSetAssignmentPoliciesUseDedicatedResource(t *testing.T) {
 	}
 }
 
+func TestDocumentedJSONSuccessResponsesUseDataEnvelope(t *testing.T) {
+	raw := string(readOpenAPI(t))
+	for _, inlineStatus := range []string{`"200": {description:`, `"201": {description:`} {
+		if strings.Contains(raw, inlineStatus) {
+			t.Fatalf("documented success responses must include JSON data envelope content, found inline %s", inlineStatus)
+		}
+	}
+
+	refs := openAPISuccessJSONSchemaRefs(t)
+	expected := map[string]string{
+		"GET /v1/hr/employees 200":                         "EmployeeListDataResponse",
+		"POST /v1/hr/employees 201":                        "EmployeeDataResponse",
+		"POST /v1/hr/employees/preview 200":                "EmployeePreviewDataResponse",
+		"GET /v1/hr/employees/{id} 200":                    "EmployeeDataResponse",
+		"PATCH /v1/hr/employees/{id} 200":                  "EmployeeDataResponse",
+		"DELETE /v1/hr/employees/{id} 200":                 "EmployeeDataResponse",
+		"POST /v1/hr/employees/{id}/preview 200":           "EmployeePreviewDataResponse",
+		"POST /v1/hr/employees/{id}/avatar 200":            "EmployeeDataResponse",
+		"DELETE /v1/hr/employees/{id}/avatar 200":          "EmployeeDataResponse",
+		"GET /v1/hr/employees/stats 200":                   "EmployeeStatsDataResponse",
+		"GET /v1/hr/employee-options 200":                  "EmployeeOptionsDataResponse",
+		"POST /v1/hr/employees/import/preview 201":         "EmployeeImportSessionDataResponse",
+		"POST /v1/hr/employees/import/{id}/confirm 200":    "EmployeeImportSessionDataResponse",
+		"POST /v1/hr/employees/export 200":                 "EmployeeExportDataResponse",
+		"POST /v1/hr/employees/batch-delete 200":           "BatchEmployeeDataResponse",
+		"POST /v1/hr/employees/{id}/invite 200":            "EmployeeDataResponse",
+		"POST /v1/hr/employees/{id}/status-transition 200": "EmployeeDataResponse",
+		"PATCH /v1/hr/employees/{id}/status 200":           "EmployeeDataResponse",
+	}
+	for key, want := range expected {
+		if got := refs[key]; got != want {
+			t.Fatalf("documented success response %s uses %q, want %q", key, got, want)
+		}
+	}
+	for key, schema := range refs {
+		if !strings.HasSuffix(schema, "DataResponse") {
+			t.Fatalf("documented success response %s uses %q without data envelope", key, schema)
+		}
+	}
+}
+
 func isPublicRoute(path string) bool {
 	switch path {
 	case "/healthz", "/readyz", "/openapi.yaml", "/swagger", "/swagger/*any":
@@ -97,14 +138,9 @@ func openAPIPath(path string) string {
 
 func openAPIRouteKeys(t *testing.T) map[string]struct{} {
 	t.Helper()
-	path := filepath.Join("..", "..", "..", "..", "docs", "openapi.yaml")
-	raw, err := os.ReadFile(path)
-	if err != nil {
-		t.Fatal(err)
-	}
 	keys := map[string]struct{}{}
 	currentPath := ""
-	for _, line := range strings.Split(string(raw), "\n") {
+	for _, line := range strings.Split(string(readOpenAPI(t)), "\n") {
 		if strings.HasPrefix(line, "  /") {
 			currentPath = strings.TrimSuffix(strings.TrimSpace(line), ":")
 			continue
@@ -119,4 +155,73 @@ func openAPIRouteKeys(t *testing.T) map[string]struct{} {
 		}
 	}
 	return keys
+}
+
+func openAPISuccessJSONSchemaRefs(t *testing.T) map[string]string {
+	t.Helper()
+	refs := map[string]string{}
+	currentPath := ""
+	currentMethod := ""
+	currentStatus := ""
+	inJSON := false
+	for _, line := range strings.Split(string(readOpenAPI(t)), "\n") {
+		if strings.HasPrefix(line, "components:") {
+			break
+		}
+		if strings.HasPrefix(line, "  /") {
+			currentPath = strings.TrimSuffix(strings.TrimSpace(line), ":")
+			currentMethod = ""
+			currentStatus = ""
+			inJSON = false
+			continue
+		}
+		if currentPath == "" {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		switch trimmed {
+		case "get:", "post:", "patch:", "delete:":
+			currentMethod = strings.ToUpper(strings.TrimSuffix(trimmed, ":"))
+			currentStatus = ""
+			inJSON = false
+			continue
+		case "application/json:":
+			inJSON = currentStatus != "" && currentMethod != ""
+			continue
+		}
+		if strings.HasPrefix(trimmed, "\"") && strings.Contains(trimmed, "\":") {
+			statusEnd := strings.Index(trimmed[1:], "\"")
+			if statusEnd < 0 {
+				currentStatus = ""
+				inJSON = false
+				continue
+			}
+			status := trimmed[1 : statusEnd+1]
+			if (status == "200" || status == "201") && currentMethod != "" {
+				currentStatus = status
+			} else {
+				currentStatus = ""
+			}
+			inJSON = false
+			continue
+		}
+		if !inJSON || !strings.HasPrefix(trimmed, "$ref: \"#/components/schemas/") {
+			continue
+		}
+		schema := strings.TrimPrefix(trimmed, "$ref: \"#/components/schemas/")
+		schema = strings.TrimSuffix(schema, "\"")
+		refs[currentMethod+" "+currentPath+" "+currentStatus] = schema
+		inJSON = false
+	}
+	return refs
+}
+
+func readOpenAPI(t *testing.T) []byte {
+	t.Helper()
+	path := filepath.Join("..", "..", "..", "..", "docs", "openapi.yaml")
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
