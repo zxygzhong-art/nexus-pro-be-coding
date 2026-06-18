@@ -23,6 +23,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
+import uuid
 from typing import Any, Callable
 
 
@@ -41,6 +42,8 @@ DEFAULT_ROLE_ACCOUNTS = {
 
 JsonFactory = Callable[[dict[str, Any]], Any]
 PathFactory = Callable[[dict[str, Any]], str]
+BytesFactory = Callable[[dict[str, Any]], bytes]
+ContentTypeFactory = Callable[[dict[str, Any]], str]
 CheckFunc = Callable[["HTTPResult", dict[str, Any]], None]
 CaptureFunc = Callable[["HTTPResult", dict[str, Any]], None]
 
@@ -66,8 +69,8 @@ class Case:
     route_key: str | None = None
     auth: str | None = "admin"
     json_body: Any | JsonFactory | None = None
-    raw_body: bytes | str | None = None
-    content_type: str | None = "application/json"
+    raw_body: bytes | str | BytesFactory | None = None
+    content_type: str | ContentTypeFactory | None = "application/json"
     headers: dict[str, str] = dataclasses.field(default_factory=dict)
     check: CheckFunc | None = None
     capture: CaptureFunc | None = None
@@ -80,8 +83,8 @@ class MatrixCase:
     path: str | PathFactory
     expected: dict[str, int | tuple[int, ...]]
     json_body: Any | JsonFactory | None = None
-    raw_body: bytes | str | None = None
-    content_type: str | None = "application/json"
+    raw_body: bytes | str | BytesFactory | None = None
+    content_type: str | ContentTypeFactory | None = "application/json"
     headers: dict[str, str] = dataclasses.field(default_factory=dict)
 
 
@@ -286,12 +289,14 @@ def run_case(base_url: str, case: Case, context: dict[str, Any], args: argparse.
     headers.update(case.headers)
     body: bytes | None = None
     if case.raw_body is not None:
-        body = case.raw_body.encode("utf-8") if isinstance(case.raw_body, str) else case.raw_body
+        raw_body = case.raw_body(context) if callable(case.raw_body) else case.raw_body
+        body = raw_body.encode("utf-8") if isinstance(raw_body, str) else raw_body
     elif case.json_body is not None:
         payload = case.json_body(context) if callable(case.json_body) else case.json_body
         body = json.dumps(payload, ensure_ascii=True).encode("utf-8")
     if body is not None and case.content_type:
-        headers.setdefault("Content-Type", case.content_type)
+        content_type = case.content_type(context) if callable(case.content_type) else case.content_type
+        headers.setdefault("Content-Type", content_type)
 
     result = request(base_url, case.method, path, headers=headers, body=body)
     expected = case.expected if isinstance(case.expected, tuple) else (case.expected,)
@@ -318,12 +323,14 @@ def run_matrix_case(
     headers.update(case.headers)
     body: bytes | None = None
     if case.raw_body is not None:
-        body = case.raw_body.encode("utf-8") if isinstance(case.raw_body, str) else case.raw_body
+        raw_body = case.raw_body(context) if callable(case.raw_body) else case.raw_body
+        body = raw_body.encode("utf-8") if isinstance(raw_body, str) else raw_body
     elif case.json_body is not None:
         payload = case.json_body(context) if callable(case.json_body) else case.json_body
         body = json.dumps(payload, ensure_ascii=True).encode("utf-8")
     if body is not None and case.content_type:
-        headers.setdefault("Content-Type", case.content_type)
+        content_type = case.content_type(context) if callable(case.content_type) else case.content_type
+        headers.setdefault("Content-Type", content_type)
     result = request(base_url, case.method, path, headers=headers, body=body)
     expected = case.expected[role] if isinstance(case.expected[role], tuple) else (case.expected[role],)
     if result.status not in expected:
@@ -331,6 +338,38 @@ def run_matrix_case(
     if case.name == "me profile":
         expect_profile(result, context, role)
     return result
+
+
+def multipart_body(
+    fields: dict[str, str] | None = None,
+    files: dict[str, tuple[str, str, bytes]] | None = None,
+) -> tuple[bytes, str]:
+    boundary = "----nexus-smoke-" + uuid.uuid4().hex
+    chunks: list[bytes] = []
+    for name, value in (fields or {}).items():
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode("ascii"),
+                f'Content-Disposition: form-data; name="{name}"\r\n\r\n'.encode("ascii"),
+                value.encode("utf-8"),
+                b"\r\n",
+            ]
+        )
+    for name, (filename, content_type, content) in (files or {}).items():
+        chunks.extend(
+            [
+                f"--{boundary}\r\n".encode("ascii"),
+                (
+                    f'Content-Disposition: form-data; name="{name}"; '
+                    f'filename="{filename}"\r\n'
+                ).encode("ascii"),
+                f"Content-Type: {content_type}\r\n\r\n".encode("ascii"),
+                content,
+                b"\r\n",
+            ]
+        )
+    chunks.append(f"--{boundary}--\r\n".encode("ascii"))
+    return b"".join(chunks), "multipart/form-data; boundary=" + boundary
 
 
 def request(
@@ -801,6 +840,8 @@ def hr_cases() -> list[Case]:
         Case("employees invalid page", "GET", "/v1/hr/employees?page=abc", 400, "GET /v1/hr/employees"),
         Case("employee stats", "GET", "/v1/hr/employees/stats", 200, "GET /v1/hr/employees/stats", check=expect_data_object),
         Case("employee options", "GET", "/v1/hr/employee-options", 200, "GET /v1/hr/employee-options", check=expect_data_object),
+        Case("employee import template csv", "GET", "/v1/hr/employees/import/template?format=csv", 200, "GET /v1/hr/employees/import/template", check=expect_text("員工編號")),
+        Case("employee import template bad format", "GET", "/v1/hr/employees/import/template?format=pdf", 400, "GET /v1/hr/employees/import/template"),
         Case(
             "create employee invalid body",
             "POST",
@@ -808,6 +849,24 @@ def hr_cases() -> list[Case]:
             400,
             "POST /v1/hr/employees",
             json_body={},
+        ),
+        Case(
+            "preview employee create invalid",
+            "POST",
+            "/v1/hr/employees/preview",
+            200,
+            "POST /v1/hr/employees/preview",
+            json_body={},
+            check=expect_preview_invalid,
+        ),
+        Case(
+            "preview employee create valid",
+            "POST",
+            "/v1/hr/employees/preview",
+            200,
+            "POST /v1/hr/employees/preview",
+            json_body=lambda c: employee_payload(c, "preview"),
+            check=expect_preview_valid,
         ),
         Case(
             "create employee main",
@@ -830,6 +889,25 @@ def hr_cases() -> list[Case]:
             capture=capture_id("delete_employee_id"),
         ),
         Case(
+            "employee avatar upload missing file",
+            "POST",
+            lambda c: "/v1/hr/employees/" + urllib.parse.quote(c["employee_id"]) + "/avatar",
+            400,
+            "POST /v1/hr/employees/{id}/avatar",
+            raw_body=empty_multipart_body,
+            content_type=empty_multipart_content_type,
+        ),
+        Case(
+            "employee avatar upload",
+            "POST",
+            lambda c: "/v1/hr/employees/" + urllib.parse.quote(c["employee_id"]) + "/avatar",
+            200,
+            "POST /v1/hr/employees/{id}/avatar",
+            raw_body=avatar_multipart_body,
+            content_type=avatar_multipart_content_type,
+            check=expect_employee_avatar_present,
+        ),
+        Case(
             "employee detail",
             "GET",
             lambda c: "/v1/hr/employees/" + urllib.parse.quote(c["employee_id"]),
@@ -845,6 +923,15 @@ def hr_cases() -> list[Case]:
             "PATCH /v1/hr/employees/{id}",
             json_body={"phone": "0911222333", "position": "Smoke Analyst"},
             check=expect_data_object,
+        ),
+        Case(
+            "employee patch preview",
+            "POST",
+            lambda c: "/v1/hr/employees/" + urllib.parse.quote(c["employee_id"]) + "/preview",
+            200,
+            "POST /v1/hr/employees/{id}/preview",
+            json_body={"position": "Smoke Preview Analyst"},
+            check=expect_preview_valid,
         ),
         Case(
             "employee direct status needs approval",
@@ -883,6 +970,14 @@ def hr_cases() -> list[Case]:
             json_body=lambda c: {"email": f"smoke.invite.{c['suffix']}@example.com"},
             headers=APPROVAL_HEADER,
             check=expect_data_object,
+        ),
+        Case(
+            "employee avatar delete",
+            "DELETE",
+            lambda c: "/v1/hr/employees/" + urllib.parse.quote(c["employee_id"]) + "/avatar",
+            200,
+            "DELETE /v1/hr/employees/{id}/avatar",
+            check=expect_employee_avatar_absent,
         ),
         Case("employee export needs approval", "GET", "/v1/hr/employees/export", 403, "GET /v1/hr/employees/export"),
         Case("employee export csv", "GET", "/v1/hr/employees/export", 200, "GET /v1/hr/employees/export", headers=APPROVAL_HEADER, check=expect_text("Demo Admin")),
@@ -978,6 +1073,15 @@ def workflow_cases() -> list[Case]:
             check=expect_data_object,
             capture=capture_id("form_instance_id"),
         ),
+        Case(
+            "approve workflow form",
+            "POST",
+            lambda c: "/v1/workflows/forms/" + urllib.parse.quote(c["form_instance_id"]) + "/approve",
+            200,
+            "POST /v1/workflows/forms/{id}/approve",
+            json_body={"approved_by": "acct-admin"},
+            check=expect_data_object,
+        ),
     ]
 
 
@@ -1007,19 +1111,42 @@ def agent_cases() -> list[Case]:
 
 def employee_payload(context: dict[str, Any], label: str) -> dict[str, Any]:
     suffix = context["suffix"]
+    name = f"Smoke {label} {suffix}"
+    email = f"smoke.{label}.{suffix}@example.com"
+    national_id = "SMK" + suffix[-7:] + label[:1].upper()
     return {
         "employee_no": f"SMK-{label}-{suffix}",
-        "name": f"Smoke {label} {suffix}",
-        "company_email": f"smoke.{label}.{suffix}@example.com",
+        "name": name,
+        "company_email": email,
         "phone": "0911000999",
         "org_unit_id": "ou-hq",
         "position": "Smoke Analyst",
         "category": "full_time",
         "employment_status": "onboarding",
         "hire_date": "2026-06-01",
-        "basic_info": {"name": f"Smoke {label} {suffix}", "company_email": f"smoke.{label}.{suffix}@example.com"},
+        "basic_info": {
+            "name": name,
+            "company_email": email,
+            "nationality_type": "local",
+            "national_id": national_id,
+        },
         "employment_info": {"org_unit_id": "ou-hq", "position": "Smoke Analyst", "category": "full_time"},
-        "contact_info": {"mobile_phone": "0911000999"},
+        "education_military_info": {"highest_education": "master", "school": "NTU"},
+        "contact_info": {
+            "mobile_phone": "0911000999",
+            "address": "Taipei",
+            "emergency_contact_relation": "spouse",
+            "emergency_contact_name": "Smoke Contact",
+            "emergency_contact_phone": "0922333444",
+        },
+        "insurance_info": {
+            "labor_insurance_date": "2026-06-01",
+            "labor_insurance_level": "L1",
+            "labor_insurance_salary": "45800",
+            "health_insurance_date": "2026-06-01",
+            "health_insurance_level": "H1",
+            "health_insurance_amount": "826",
+        },
     }
 
 
@@ -1030,6 +1157,41 @@ def authz_export_check(_: dict[str, Any]) -> dict[str, Any]:
         "resource_id": "emp-employee",
         "action": "export",
     }
+
+
+def empty_multipart_body(context: dict[str, Any]) -> bytes:
+    body, content_type = multipart_body()
+    context["_empty_multipart_content_type"] = content_type
+    return body
+
+
+def empty_multipart_content_type(context: dict[str, Any]) -> str:
+    return str(context.pop("_empty_multipart_content_type"))
+
+
+def avatar_multipart_body(context: dict[str, Any]) -> bytes:
+    body, content_type = avatar_multipart()
+    context["_avatar_multipart_content_type"] = content_type
+    return body
+
+
+def avatar_multipart_content_type(context: dict[str, Any]) -> str:
+    return str(context.pop("_avatar_multipart_content_type"))
+
+
+def avatar_multipart() -> tuple[bytes, str]:
+    return multipart_body(
+        files={
+            "file": (
+                "avatar.png",
+                "image/png",
+                base64.b64decode(
+                    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJ"
+                    "AAAADUlEQVR42mP8z8BQDwAFgwJ/lQ4N9wAAAABJRU5ErkJggg=="
+                ),
+            )
+        }
+    )
 
 
 def expect_data_object(result: HTTPResult, _: dict[str, Any]) -> None:
@@ -1050,6 +1212,40 @@ def expect_text(needle: str) -> CheckFunc:
             raise SmokeFailure(f"expected response to contain {needle!r}, got {truncate(result.text)}")
 
     return check
+
+
+def expect_preview_valid(result: HTTPResult, context: dict[str, Any]) -> None:
+    expect_data_object(result, context)
+    data = result.json_body["data"]
+    if not isinstance(data, dict) or data.get("valid") is not True or not isinstance(data.get("employee"), dict):
+        raise SmokeFailure(f"expected valid employee preview, got {truncate(result.text)}")
+
+
+def expect_preview_invalid(result: HTTPResult, context: dict[str, Any]) -> None:
+    expect_data_object(result, context)
+    data = result.json_body["data"]
+    if not isinstance(data, dict) or data.get("valid") is not False:
+        raise SmokeFailure(f"expected invalid employee preview, got {truncate(result.text)}")
+    errors = data.get("field_errors")
+    if not isinstance(errors, list) or not errors:
+        raise SmokeFailure(f"expected preview field errors, got {truncate(result.text)}")
+
+
+def expect_employee_avatar_present(result: HTTPResult, context: dict[str, Any]) -> None:
+    expect_data_object(result, context)
+    data = result.json_body["data"]
+    basic_info = data.get("basic_info") if isinstance(data, dict) else None
+    avatar = basic_info.get("avatar") if isinstance(basic_info, dict) else None
+    if not isinstance(avatar, dict) or not avatar.get("object_key"):
+        raise SmokeFailure(f"expected employee avatar metadata, got {truncate(result.text)}")
+
+
+def expect_employee_avatar_absent(result: HTTPResult, context: dict[str, Any]) -> None:
+    expect_data_object(result, context)
+    data = result.json_body["data"]
+    basic_info = data.get("basic_info") if isinstance(data, dict) else None
+    if isinstance(basic_info, dict) and ("avatar" in basic_info or "avatar_object_key" in basic_info):
+        raise SmokeFailure(f"expected employee avatar metadata to be removed, got {truncate(result.text)}")
 
 
 def expect_profile(result: HTTPResult, context: dict[str, Any], role: str) -> None:

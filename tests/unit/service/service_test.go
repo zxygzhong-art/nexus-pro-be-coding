@@ -1196,9 +1196,9 @@ func TestEmployeeAggregateCreatePatchAndDetail(t *testing.T) {
 		HireDate:              "2026-06-01",
 		BasicInfo:             map[string]any{"nationality_type": "local", "national_id": "A123456789"},
 		EmploymentInfo:        map[string]any{"job_level": "senior"},
-		EducationMilitaryInfo: map[string]any{"degree": "master"},
-		ContactInfo:           map[string]any{"address": "Taipei"},
-		InsuranceInfo:         map[string]any{"labor_insurance_salary": "45800"},
+		EducationMilitaryInfo: map[string]any{"degree": "master", "school": "NTU"},
+		ContactInfo:           validContactInfo(),
+		InsuranceInfo:         validInsuranceInfo(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1248,16 +1248,13 @@ func TestEmployeeAccountChangesEmitOpenFGATupleOutbox(t *testing.T) {
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-hr", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-hr"}, CreatedAt: now})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-old", TenantID: "tenant-1", Status: "active", CreatedAt: now})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-new", TenantID: "tenant-1", Status: "active", CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "HQ", Path: []string{"ou-1"}, CreatedAt: now})
 	svc := service.New(store)
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-hr"}
 
-	created, err := svc.CreateEmployee(ctx, domain.CreateEmployeeInput{
-		EmployeeNo:   "E2001",
-		Name:         "Relationship Owner",
-		CompanyEmail: "relationship.owner@example.com",
-		AccountID:    "acct-old",
-		HireDate:     "2026-06-01",
-	})
+	input := validEmployeeInput("E2001", "Relationship Owner", "relationship.owner@example.com")
+	input.AccountID = "acct-old"
+	created, err := svc.CreateEmployee(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1304,6 +1301,7 @@ func TestEmployeeCreateRejectsDuplicateUniqueFields(t *testing.T) {
 	})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-hr"}, CreatedAt: now})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-linked", TenantID: "tenant-1", Status: "active", CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "HQ", Path: []string{"ou-1"}, CreatedAt: now})
 	store.UpsertEmployee(context.Background(), domain.Employee{
 		ID:           "emp-existing",
 		TenantID:     "tenant-1",
@@ -1318,12 +1316,9 @@ func TestEmployeeCreateRejectsDuplicateUniqueFields(t *testing.T) {
 	svc := service.New(store)
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
-	_, err := svc.CreateEmployee(ctx, domain.CreateEmployeeInput{
-		EmployeeNo:   "E1001",
-		Name:         "Duplicate Employee",
-		CompanyEmail: "duplicate@example.com",
-		AccountID:    "acct-linked",
-	})
+	input := validEmployeeInput("E1001", "Duplicate Employee", "duplicate@example.com")
+	input.AccountID = "acct-linked"
+	_, err := svc.CreateEmployee(ctx, input)
 	if err == nil {
 		t.Fatal("expected duplicate unique fields to fail")
 	}
@@ -1360,25 +1355,15 @@ func TestEmployeeStatusTransitionHandlesEmptyEmploymentInfo(t *testing.T) {
 	svc := service.New(store)
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
 
-	leaveTarget, err := svc.CreateEmployee(ctx, domain.CreateEmployeeInput{
-		Name:         "Leave Target",
-		CompanyEmail: "leave.target@example.com",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = svc.TransitionEmployeeStatus(ctx, leaveTarget.ID, domain.StatusTransitionInput{Status: "leave_suspended"})
+	leaveTarget := domain.Employee{ID: "emp-leave", TenantID: "tenant-1", Name: "Leave Target", CompanyEmail: "leave.target@example.com", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now}
+	_ = store.UpsertEmployee(context.Background(), leaveTarget)
+	_, err := svc.TransitionEmployeeStatus(ctx, leaveTarget.ID, domain.StatusTransitionInput{Status: "leave_suspended"})
 	if appErr, ok := domain.AsAppError(err); !ok || appErr.Code != "validation_failed" {
 		t.Fatalf("expected missing leave dates validation, got %v", err)
 	}
 
-	resignTarget, err := svc.CreateEmployee(ctx, domain.CreateEmployeeInput{
-		Name:         "Resign Target",
-		CompanyEmail: "resign.target@example.com",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
+	resignTarget := domain.Employee{ID: "emp-resign-target", TenantID: "tenant-1", Name: "Resign Target", CompanyEmail: "resign.target@example.com", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now}
+	_ = store.UpsertEmployee(context.Background(), resignTarget)
 	if resignTarget.EmploymentInfo != nil {
 		t.Fatalf("test setup expected empty employment info, got %+v", resignTarget.EmploymentInfo)
 	}
@@ -1649,12 +1634,23 @@ func TestEmployeeImportXLSXPreservesManagerEmployeeID(t *testing.T) {
 		CreatedAt: now,
 	})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-hr"}, CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-manager",
+		TenantID:         "tenant-1",
+		EmployeeNo:       "E1000",
+		Name:             "Manager Chen",
+		CompanyEmail:     "manager@example.com",
+		Status:           "active",
+		EmploymentStatus: "active",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
 
 	svc := service.New(store)
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
 	content := minimalEmployeeImportXLSX(t, [][]string{
 		{"員工編號", "姓名", "Email", "部門", "職位", "類別", "電話", "狀態", "到職日期", "主管員工ID"},
-		{"E2002", "Mina Chen", "mina@example.com", "ou-1", "HRBP", "全職", "0911000444", "在職", "2026-06-01", "E1000"},
+		{"E2002", "Mina Chen", "mina@example.com", "ou-1", "HRBP", "全職", "0911000444", "在職", "2026-06-01", "emp-manager"},
 	})
 
 	session, err := svc.PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
@@ -1668,14 +1664,352 @@ func TestEmployeeImportXLSXPreservesManagerEmployeeID(t *testing.T) {
 		t.Fatalf("expected one preview row, got %d", len(session.Rows))
 	}
 	row := session.Rows[0]
-	if row.Employee.ManagerEmployeeID != "E1000" {
+	if row.Employee.ManagerEmployeeID != "emp-manager" {
 		t.Fatalf("expected manager employee id from xlsx column J, got %+v", row.Employee)
 	}
-	if got := row.Employee.EmploymentInfo["manager_employee_id"]; got != "E1000" {
+	if got := row.Employee.EmploymentInfo["manager_employee_id"]; got != "emp-manager" {
 		t.Fatalf("expected employment info manager_employee_id from xlsx column J, got %v", got)
 	}
-	if got := row.Input["主管員工ID"]; got != "E1000" {
+	if got := row.Input["主管員工ID"]; got != "emp-manager" {
 		t.Fatalf("expected input manager column from xlsx column J, got %q", got)
+	}
+	if !row.Valid {
+		t.Fatalf("expected import_minimal profile to accept 10-column xlsx row, got errors %+v", row.Errors)
+	}
+
+	missingManagerContent := minimalEmployeeImportXLSX(t, [][]string{
+		{"員工編號", "姓名", "Email", "部門", "職位", "類別", "電話", "狀態", "到職日期", "主管員工ID"},
+		{"E2003", "Missing Manager", "missing.manager@example.com", "ou-1", "HRBP", "全職", "0911000445", "在職", "2026-06-01", "emp-missing"},
+	})
+	missingSession, err := svc.PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
+		Filename: "employees.xlsx",
+		Content:  missingManagerContent,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(missingSession.Rows) != 1 || missingSession.Rows[0].Valid || !rowErrorsContain(missingSession.Rows[0].Errors, "manager_employee_id") {
+		t.Fatalf("expected missing manager employee id to invalidate import row, got %+v", missingSession.Rows)
+	}
+}
+
+func TestEmployeePreviewCreateDoesNotPersist(t *testing.T) {
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "create", Scope: "all"},
+	})
+	input := validEmployeeInput("E3001", "Preview Person", "preview.person@example.com")
+
+	preview, err := svc.PreviewCreateEmployee(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !preview.Valid || preview.Employee.CompanyEmail != input.CompanyEmail || len(preview.FieldErrors) != 0 {
+		t.Fatalf("expected valid preview response, got %+v", preview)
+	}
+	employees, err := store.ListEmployees(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(employees) != 0 {
+		t.Fatalf("preview must not persist employees, got %+v", employees)
+	}
+
+	invalid := input
+	invalid.Name = ""
+	invalidPreview, err := svc.PreviewCreateEmployee(ctx, invalid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invalidPreview.Valid || !fieldErrorsContain(invalidPreview.FieldErrors, "name") {
+		t.Fatalf("expected validation errors in preview response, got %+v", invalidPreview)
+	}
+	logs, err := store.ListAuditLogs(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findAuditLog(logs, "hr.employee.create"); ok {
+		t.Fatalf("preview should not write employee create audit event, got %+v", logs)
+	}
+}
+
+func TestEmployeeAvatarUploadReplaceAndDelete(t *testing.T) {
+	objects := &recordingObjectStore{}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "update", Scope: "all"},
+	}, service.Options{ObjectStore: objects})
+	now := time.Now().UTC()
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-avatar",
+		TenantID:         "tenant-1",
+		EmployeeNo:       "E4001",
+		Name:             "Avatar Person",
+		CompanyEmail:     "avatar.person@example.com",
+		Status:           "active",
+		EmploymentStatus: "active",
+		BasicInfo:        map[string]any{"avatar_object_key": "employee-avatars/tenant-1/emp-avatar/old.png"},
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+
+	updated, err := svc.UpdateEmployeeAvatar(ctx, "emp-avatar", domain.EmployeeAvatarInput{
+		Filename:    "photo.png",
+		ContentType: "image/png",
+		Content:     testPNGBytes(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(objects.keys) != 1 || !strings.HasPrefix(objects.keys[0], "employee-avatars/tenant-1/emp-avatar/") {
+		t.Fatalf("expected avatar object key under tenant/employee prefix, got %+v", objects.keys)
+	}
+	if updated.BasicInfo["avatar_object_key"] != objects.keys[0] {
+		t.Fatalf("expected avatar key on employee, got %+v", updated.BasicInfo)
+	}
+	if len(objects.deleted) != 1 || objects.deleted[0] != "employee-avatars/tenant-1/emp-avatar/old.png" {
+		t.Fatalf("expected old avatar object to be deleted, got %+v", objects.deleted)
+	}
+
+	deleted, err := svc.DeleteEmployeeAvatar(ctx, "emp-avatar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := deleted.BasicInfo["avatar"]; ok {
+		t.Fatalf("expected avatar metadata to be removed, got %+v", deleted.BasicInfo)
+	}
+	if _, ok := deleted.BasicInfo["avatar_object_key"]; ok {
+		t.Fatalf("expected avatar object key to be removed, got %+v", deleted.BasicInfo)
+	}
+	if len(objects.deleted) != 2 || objects.deleted[1] != objects.keys[0] {
+		t.Fatalf("expected current avatar object to be deleted, got %+v", objects.deleted)
+	}
+}
+
+func TestEmployeeAvatarRejectsForgedContentType(t *testing.T) {
+	objects := &recordingObjectStore{}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "update", Scope: "all"},
+	}, service.Options{ObjectStore: objects})
+	now := time.Now().UTC()
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-avatar",
+		TenantID:         "tenant-1",
+		EmployeeNo:       "E4002",
+		Name:             "Forged Avatar",
+		CompanyEmail:     "forged.avatar@example.com",
+		Status:           "active",
+		EmploymentStatus: "active",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+
+	_, err := svc.UpdateEmployeeAvatar(ctx, "emp-avatar", domain.EmployeeAvatarInput{
+		Filename:    "photo.png",
+		ContentType: "image/png",
+		Content:     []byte("not really a png"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "valid image") {
+		t.Fatalf("expected forged avatar content to be rejected, got %v", err)
+	}
+	if len(objects.keys) != 0 || len(objects.deleted) != 0 {
+		t.Fatalf("invalid avatar should not touch object store, keys=%+v deleted=%+v", objects.keys, objects.deleted)
+	}
+}
+
+func TestEmployeeImportTemplateHeaders(t *testing.T) {
+	_, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "read", Scope: "all"},
+	})
+	expected := []string{"員工編號", "姓名", "Email", "部門", "職位", "類別", "電話", "狀態", "到職日期", "主管員工ID"}
+
+	rawCSV, filename, contentType, err := svc.EmployeeImportTemplate(ctx, "csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filename != "employee-import-template.csv" || !strings.HasPrefix(contentType, "text/csv") {
+		t.Fatalf("unexpected csv template metadata filename=%q content_type=%q", filename, contentType)
+	}
+	if !bytes.HasPrefix(rawCSV, []byte{0xEF, 0xBB, 0xBF}) {
+		t.Fatalf("expected csv template to include UTF-8 BOM")
+	}
+	csvHeaders := strings.Split(strings.TrimSpace(strings.TrimPrefix(string(rawCSV), "\ufeff")), ",")
+	if !equalStrings(csvHeaders, expected) || csvHeaders[9] != "主管員工ID" {
+		t.Fatalf("unexpected csv headers: %+v", csvHeaders)
+	}
+
+	rawXLSX, filename, contentType, err := svc.EmployeeImportTemplate(ctx, "xlsx")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filename != "employee-import-template.xlsx" || contentType != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" {
+		t.Fatalf("unexpected xlsx template metadata filename=%q content_type=%q", filename, contentType)
+	}
+	xlsxHeaders := xlsxSharedStrings(t, rawXLSX)
+	if !equalStrings(xlsxHeaders, expected) || xlsxHeaders[9] != "主管員工ID" {
+		t.Fatalf("unexpected xlsx headers: %+v", xlsxHeaders)
+	}
+}
+
+func TestEmployeeExportApprovalInstanceMatchesFilters(t *testing.T) {
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "export", Scope: "all"},
+	})
+	now := time.Now().UTC()
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-export",
+		TenantID:         "tenant-1",
+		EmployeeNo:       "E5001",
+		Name:             "Export Person",
+		CompanyEmail:     "export.person@example.com",
+		Status:           "active",
+		EmploymentStatus: "active",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+	_ = store.UpsertFormInstance(context.Background(), domain.FormInstance{
+		ID:       "fi-export-good",
+		TenantID: "tenant-1",
+		Status:   "approved",
+		Payload: map[string]any{
+			"application_code": "hr",
+			"resource_type":    "employee",
+			"action":           "export",
+			"filters":          map[string]any{"employment_status": "active"},
+		},
+		SubmittedAt: now,
+		UpdatedAt:   now,
+	})
+	ctx.ApprovalInstanceID = "fi-export-good"
+	items, err := svc.ExportEmployees(ctx, domain.EmployeeQuery{EmploymentStatus: "active"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != "emp-export" {
+		t.Fatalf("expected approved export result, got %+v", items)
+	}
+
+	_ = store.UpsertFormInstance(context.Background(), domain.FormInstance{
+		ID:       "fi-export-generic",
+		TenantID: "tenant-1",
+		Status:   "approved",
+		Payload: map[string]any{
+			"application_code": "hr",
+			"resource_type":    "employee",
+			"action":           "export",
+		},
+		SubmittedAt: now,
+		UpdatedAt:   now,
+	})
+	ctx.ApprovalInstanceID = "fi-export-generic"
+	_, err = svc.ExportEmployees(ctx, domain.EmployeeQuery{EmploymentStatus: "active"})
+	if err == nil || !strings.Contains(err.Error(), "approval filters do not match request") {
+		t.Fatalf("expected unfiltered approval to fail filtered export, got %v", err)
+	}
+
+	_ = store.UpsertFormInstance(context.Background(), domain.FormInstance{
+		ID:       "fi-export-bad",
+		TenantID: "tenant-1",
+		Status:   "approved",
+		Payload: map[string]any{
+			"application_code": "hr",
+			"resource_type":    "employee",
+			"action":           "export",
+			"filters":          map[string]any{"employment_status": "resigned"},
+		},
+		SubmittedAt: now,
+		UpdatedAt:   now,
+	})
+	ctx.ApprovalInstanceID = "fi-export-bad"
+	_, err = svc.ExportEmployees(ctx, domain.EmployeeQuery{EmploymentStatus: "active"})
+	if err == nil || !strings.Contains(err.Error(), "approval filters do not match request") {
+		t.Fatalf("expected filter-mismatched approval to fail, got %v", err)
+	}
+}
+
+func TestEmployeeStatusTransitionApprovalInstanceRequiresTarget(t *testing.T) {
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "status_transition", Scope: "all"},
+	})
+	now := time.Now().UTC()
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-status-target",
+		TenantID:         "tenant-1",
+		EmployeeNo:       "E5002",
+		Name:             "Status Target",
+		CompanyEmail:     "status.target@example.com",
+		Status:           "active",
+		EmploymentStatus: "active",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+	_ = store.UpsertFormInstance(context.Background(), domain.FormInstance{
+		ID:       "fi-status-generic",
+		TenantID: "tenant-1",
+		Status:   "approved",
+		Payload: map[string]any{
+			"application_code": "hr",
+			"resource_type":    "employee",
+			"action":           "status_transition",
+		},
+		SubmittedAt: now,
+		UpdatedAt:   now,
+	})
+
+	ctx.ApprovalInstanceID = "fi-status-generic"
+	_, err := svc.TransitionEmployeeStatus(ctx, "emp-status-target", domain.StatusTransitionInput{
+		Status:  "resigned",
+		Reason:  "left",
+		EndDate: "2026-06-30",
+	})
+	if err == nil || !strings.Contains(err.Error(), "approval target does not match request") {
+		t.Fatalf("expected unbound approval target to fail, got %v", err)
+	}
+
+	_ = store.UpsertFormInstance(context.Background(), domain.FormInstance{
+		ID:       "fi-status-target",
+		TenantID: "tenant-1",
+		Status:   "approved",
+		Payload: map[string]any{
+			"application_code": "hr",
+			"resource_type":    "employee",
+			"action":           "status_transition",
+			"resource_id":      "emp-status-target",
+		},
+		SubmittedAt: now,
+		UpdatedAt:   now,
+	})
+	ctx.ApprovalInstanceID = "fi-status-target"
+	transitioned, err := svc.TransitionEmployeeStatus(ctx, "emp-status-target", domain.StatusTransitionInput{
+		Status:  "resigned",
+		Reason:  "left",
+		EndDate: "2026-06-30",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if transitioned.EmploymentStatus != "resigned" {
+		t.Fatalf("expected approved target transition, got %+v", transitioned)
+	}
+}
+
+func TestInviteDeletedOrResignedEmployeeFails(t *testing.T) {
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "invite", Scope: "all"},
+	})
+	ctx.ApprovalConfirmed = true
+	now := time.Now().UTC()
+	for _, item := range []domain.Employee{
+		{ID: "emp-resigned", TenantID: "tenant-1", EmployeeNo: "E6001", Name: "Resigned", CompanyEmail: "resigned@example.com", Status: "resigned", EmploymentStatus: "resigned", CreatedAt: now, UpdatedAt: now},
+		{ID: "emp-deleted", TenantID: "tenant-1", EmployeeNo: "E6002", Name: "Deleted", CompanyEmail: "deleted@example.com", Status: "deleted", EmploymentStatus: "deleted", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := store.UpsertEmployee(context.Background(), item); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, id := range []string{"emp-resigned", "emp-deleted"} {
+		_, err := svc.InviteEmployee(ctx, id, domain.InviteEmployeeInput{})
+		if appErr, ok := domain.AsAppError(err); !ok || appErr.Code != "conflict" {
+			t.Fatalf("expected conflict for %s invite, got %v", id, err)
+		}
 	}
 }
 
@@ -1868,13 +2202,83 @@ func newServiceFixture(permissions []domain.Permission) (*service.Service, domai
 	return service.New(store), domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 }
 
+func newEmployeeFeatureFixture(t *testing.T, permissions []domain.Permission, options ...service.Options) (*memory.Store, *service.Service, domain.RequestContext) {
+	t.Helper()
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "HQ", Path: []string{"ou-1"}, CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:          "ps-employee-feature",
+		TenantID:    "tenant-1",
+		Name:        "Employee Feature",
+		Permissions: permissions,
+		CreatedAt:   now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-1",
+		TenantID:               "tenant-1",
+		DisplayName:            "Feature Tester",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-employee-feature"},
+		CreatedAt:              now,
+	})
+	return store, service.New(store, options...), domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
+}
+
 type recordingObjectStore struct {
-	keys []string
+	keys    []string
+	deleted []string
 }
 
 func (s *recordingObjectStore) PutObject(_ context.Context, key string, _ string, _ []byte) error {
 	s.keys = append(s.keys, key)
 	return nil
+}
+
+func (s *recordingObjectStore) DeleteObject(_ context.Context, key string) error {
+	s.deleted = append(s.deleted, key)
+	return nil
+}
+
+func validEmployeeInput(employeeNo, name, email string) domain.CreateEmployeeInput {
+	return domain.CreateEmployeeInput{
+		EmployeeNo:            employeeNo,
+		Name:                  name,
+		CompanyEmail:          email,
+		OrgUnitID:             "ou-1",
+		Position:              "Engineer",
+		Category:              "full_time",
+		Status:                "active",
+		EmploymentStatus:      "active",
+		HireDate:              "2026-06-01",
+		BasicInfo:             map[string]any{"nationality_type": "local", "national_id": "A123456789"},
+		EmploymentInfo:        map[string]any{"org_unit_id": "ou-1", "position": "Engineer", "category": "full_time"},
+		EducationMilitaryInfo: map[string]any{"highest_education": "master", "school": "NTU"},
+		ContactInfo:           validContactInfo(),
+		InsuranceInfo:         validInsuranceInfo(),
+	}
+}
+
+func validContactInfo() map[string]any {
+	return map[string]any{
+		"mobile_phone":               "0911222333",
+		"address":                    "Taipei",
+		"emergency_contact_relation": "spouse",
+		"emergency_contact_name":     "Emergency Contact",
+		"emergency_contact_phone":    "0922333444",
+	}
+}
+
+func validInsuranceInfo() map[string]any {
+	return map[string]any{
+		"labor_insurance_date":    "2026-06-01",
+		"labor_insurance_level":   "L1",
+		"labor_insurance_salary":  "45800",
+		"health_insurance_date":   "2026-06-01",
+		"health_insurance_level":  "H1",
+		"health_insurance_amount": "826",
+	}
 }
 
 type recordingAuthzSnapshot struct {
@@ -1939,6 +2343,77 @@ func stringSliceContains(values []string, expected string) bool {
 		}
 	}
 	return false
+}
+
+func fieldErrorsContain(fields []domain.FieldError, expectedField string) bool {
+	for _, field := range fields {
+		if field.Field == expectedField {
+			return true
+		}
+	}
+	return false
+}
+
+func rowErrorsContain(fields []domain.RowError, expectedField string) bool {
+	for _, field := range fields {
+		if field.Field == expectedField {
+			return true
+		}
+	}
+	return false
+}
+
+func testPNGBytes() []byte {
+	return []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0}
+}
+
+func equalStrings(left, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func xlsxSharedStrings(t *testing.T, raw []byte) []string {
+	t.Helper()
+	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, file := range reader.File {
+		if file.Name != "xl/sharedStrings.xml" {
+			continue
+		}
+		rc, err := file.Open()
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer rc.Close()
+		var buf bytes.Buffer
+		if _, err := buf.ReadFrom(rc); err != nil {
+			t.Fatal(err)
+		}
+		var parsed struct {
+			Items []struct {
+				Text string `xml:"t"`
+			} `xml:"si"`
+		}
+		if err := xml.Unmarshal(buf.Bytes(), &parsed); err != nil {
+			t.Fatal(err)
+		}
+		values := make([]string, 0, len(parsed.Items))
+		for _, item := range parsed.Items {
+			values = append(values, item.Text)
+		}
+		return values
+	}
+	t.Fatal("xl/sharedStrings.xml not found")
+	return nil
 }
 
 func minimalEmployeeImportXLSX(t *testing.T, rows [][]string) string {

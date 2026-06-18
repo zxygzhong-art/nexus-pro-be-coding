@@ -1,6 +1,7 @@
 package v1_test
 
 import (
+	"bytes"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -11,8 +12,10 @@ import (
 	"errors"
 	"io"
 	"math/big"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
+	"net/textproto"
 	"strings"
 	"sync"
 	"testing"
@@ -64,6 +67,34 @@ func decodeError(t *testing.T, body []byte) apiErrorPayload {
 		t.Fatal(err)
 	}
 	return payload.Error
+}
+
+func validEmployeeCreateJSON(name, email string) string {
+	return `{"name":"` + name + `","company_email":"` + email + `","org_unit_id":"ou-hq","position":"Engineer","category":"full-time","employment_status":"待加入","hire_date":"2026-06-01","basic_info":{"nationality_type":"local","national_id":"A123456789"},"employment_info":{"org_unit_id":"ou-hq","position":"Engineer","category":"full_time"},"education_military_info":{"highest_education":"master","school":"NTU"},"contact_info":{"mobile_phone":"0911222333","address":"Taipei","emergency_contact_relation":"spouse","emergency_contact_name":"Emergency Contact","emergency_contact_phone":"0922333444"},"insurance_info":{"labor_insurance_date":"2026-06-01","labor_insurance_level":"L1","labor_insurance_salary":"45800","health_insurance_date":"2026-06-01","health_insurance_level":"H1","health_insurance_amount":"826"}}`
+}
+
+func avatarMultipartBody(t *testing.T) (*bytes.Buffer, string) {
+	t.Helper()
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	header := textproto.MIMEHeader{}
+	header.Set("Content-Disposition", `form-data; name="file"; filename="avatar.png"`)
+	header.Set("Content-Type", "image/png")
+	part, err := writer.CreatePart(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(testPNGBytes()); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return body, writer.FormDataContentType()
+}
+
+func testPNGBytes() []byte {
+	return []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0}
 }
 
 func TestProductionContextRequiresAuthenticatedContext(t *testing.T) {
@@ -702,7 +733,7 @@ func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
 
 func TestEmployeeCreateStatusAndDeleteContract(t *testing.T) {
 	handler := newTestAPI(true)
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees", strings.NewReader(`{"name":"Contract Person","company_email":"contract.person@example.com","category":"full-time","employment_status":"待加入"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees", strings.NewReader(validEmployeeCreateJSON("Contract Person", "contract.person@example.com")))
 	createReq.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -763,6 +794,117 @@ func TestEmployeeCreateStatusAndDeleteContract(t *testing.T) {
 	page := decodeData[domain.PageResponse[domain.Employee]](t, listRec.Body.Bytes())
 	if page.Total != 0 || len(page.Items) != 0 {
 		t.Fatalf("expected soft-deleted employee to be hidden by default, got %+v", page)
+	}
+}
+
+func TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes(t *testing.T) {
+	handler := newTestAPI(true)
+
+	previewReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/preview", strings.NewReader(`{}`))
+	previewReq.Header.Set("Content-Type", "application/json")
+	previewRec := httptest.NewRecorder()
+	handler.ServeHTTP(previewRec, previewReq)
+	if previewRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for invalid employee preview response, got %d: %s", previewRec.Code, previewRec.Body.String())
+	}
+	preview := decodeData[domain.EmployeePreviewResponse](t, previewRec.Body.Bytes())
+	if preview.Valid || len(preview.FieldErrors) == 0 {
+		t.Fatalf("expected preview validation details, got %+v", preview)
+	}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees", strings.NewReader(validEmployeeCreateJSON("Route Person", "route.person@example.com")))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for employee create, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	created := decodeData[domain.Employee](t, createRec.Body.Bytes())
+
+	updatePreviewReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/"+created.ID+"/preview", strings.NewReader(`{"position":"Lead Engineer"}`))
+	updatePreviewReq.Header.Set("Content-Type", "application/json")
+	updatePreviewRec := httptest.NewRecorder()
+	handler.ServeHTTP(updatePreviewRec, updatePreviewReq)
+	if updatePreviewRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for employee update preview, got %d: %s", updatePreviewRec.Code, updatePreviewRec.Body.String())
+	}
+	updatePreview := decodeData[domain.EmployeePreviewResponse](t, updatePreviewRec.Body.Bytes())
+	if !updatePreview.Valid || updatePreview.Employee.Position != "Lead Engineer" || updatePreview.Diff["position"] == nil {
+		t.Fatalf("expected update preview diff, got %+v", updatePreview)
+	}
+
+	templateReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/import/template?format=csv", nil)
+	templateRec := httptest.NewRecorder()
+	handler.ServeHTTP(templateRec, templateReq)
+	if templateRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for import template, got %d: %s", templateRec.Code, templateRec.Body.String())
+	}
+	if !strings.Contains(templateRec.Header().Get("Content-Type"), "text/csv") || !bytes.HasPrefix(templateRec.Body.Bytes(), []byte{0xEF, 0xBB, 0xBF}) {
+		t.Fatalf("expected csv template response with BOM, headers=%v body=%q", templateRec.Header(), templateRec.Body.String())
+	}
+	badTemplateReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/import/template?format=pdf", nil)
+	badTemplateRec := httptest.NewRecorder()
+	handler.ServeHTTP(badTemplateRec, badTemplateReq)
+	if badTemplateRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for bad template format, got %d: %s", badTemplateRec.Code, badTemplateRec.Body.String())
+	}
+
+	avatarBody, avatarContentType := avatarMultipartBody(t)
+	avatarReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/"+created.ID+"/avatar", avatarBody)
+	avatarReq.Header.Set("Content-Type", avatarContentType)
+	avatarRec := httptest.NewRecorder()
+	handler.ServeHTTP(avatarRec, avatarReq)
+	if avatarRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for avatar upload, got %d: %s", avatarRec.Code, avatarRec.Body.String())
+	}
+	withAvatar := decodeData[domain.Employee](t, avatarRec.Body.Bytes())
+	if got, ok := withAvatar.BasicInfo["avatar_object_key"].(string); !ok || !strings.HasPrefix(got, "employee-avatars/demo/"+created.ID+"/") {
+		t.Fatalf("expected avatar object key in response, got %+v", withAvatar.BasicInfo)
+	}
+	deleteAvatarReq := httptest.NewRequest(http.MethodDelete, "/v1/hr/employees/"+created.ID+"/avatar", nil)
+	deleteAvatarRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteAvatarRec, deleteAvatarReq)
+	if deleteAvatarRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for avatar delete, got %d: %s", deleteAvatarRec.Code, deleteAvatarRec.Body.String())
+	}
+	withoutAvatar := decodeData[domain.Employee](t, deleteAvatarRec.Body.Bytes())
+	if _, ok := withoutAvatar.BasicInfo["avatar_object_key"]; ok {
+		t.Fatalf("expected avatar metadata removed, got %+v", withoutAvatar.BasicInfo)
+	}
+
+	submitReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/leave-request/submit", strings.NewReader(`{"payload":{"application_code":"hr","resource_type":"employee","action":"export","filters":{"employment_status":"active"}}}`))
+	submitReq.Header.Set("Content-Type", "application/json")
+	submitRec := httptest.NewRecorder()
+	handler.ServeHTTP(submitRec, submitReq)
+	if submitRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for workflow form submit, got %d: %s", submitRec.Code, submitRec.Body.String())
+	}
+	form := decodeData[domain.FormInstance](t, submitRec.Body.Bytes())
+	approveReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/"+form.ID+"/approve", nil)
+	approveRec := httptest.NewRecorder()
+	handler.ServeHTTP(approveRec, approveReq)
+	if approveRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for workflow approve, got %d: %s", approveRec.Code, approveRec.Body.String())
+	}
+	approved := decodeData[domain.FormInstance](t, approveRec.Body.Bytes())
+	if approved.Status != "approved" || approved.ApprovedBy != "acct-admin" {
+		t.Fatalf("expected approved form instance, got %+v", approved)
+	}
+
+	forgedApproveReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/"+form.ID+"/approve", strings.NewReader(`{"approved_by":"acct-other"}`))
+	forgedApproveReq.Header.Set("Content-Type", "application/json")
+	forgedApproveRec := httptest.NewRecorder()
+	handler.ServeHTTP(forgedApproveRec, forgedApproveReq)
+	if forgedApproveRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for forged approved_by, got %d: %s", forgedApproveRec.Code, forgedApproveRec.Body.String())
+	}
+
+	exportReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/export?employment_status=active", nil)
+	exportReq.Header.Set("X-Approval-Instance-ID", form.ID)
+	exportRec := httptest.NewRecorder()
+	handler.ServeHTTP(exportRec, exportReq)
+	if exportRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for approval instance export, got %d: %s", exportRec.Code, exportRec.Body.String())
 	}
 }
 
