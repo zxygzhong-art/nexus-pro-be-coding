@@ -218,10 +218,12 @@ func main() {
 		ReadinessChecks:       readinessChecks,
 	}
 	if cfg.KeycloakIssuerURL != "" && cfg.KeycloakClientID != "" {
-		apiOptions.TokenResolver = platformauth.NewKeycloakTokenResolver(cfg.KeycloakIssuerURL, cfg.KeycloakClientID, &http.Client{
+		keycloakResolver := platformauth.NewKeycloakTokenResolver(cfg.KeycloakIssuerURL, cfg.KeycloakClientID, &http.Client{
 			Timeout:   5 * time.Second,
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
 		})
+		apiOptions.TokenResolver = keycloakResolver
+		readinessChecks["keycloak"] = keycloakResolver.Ping
 		logger.Info("keycloak token resolver enabled", "issuer", cfg.KeycloakIssuerURL, "client_id", cfg.KeycloakClientID)
 		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
 			Name:   "Keycloak",

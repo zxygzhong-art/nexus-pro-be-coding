@@ -303,6 +303,63 @@ func TestKeycloakTokenResolverUsesRequestContextForJWKSRequests(t *testing.T) {
 	}
 }
 
+func TestKeycloakTokenResolverPingChecksDiscoveryAndJWKS(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var issuer string
+	var certFetches int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"issuer":   issuer,
+				"jwks_uri": issuer + "/certs",
+			})
+		case "/certs":
+			certFetches++
+			_ = json.NewEncoder(w).Encode(map[string]any{"keys": jwksFromKeys(map[string]*rsa.PublicKey{"ready": &key.PublicKey})})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	issuer = server.URL
+
+	resolver := platformauth.NewKeycloakTokenResolver(issuer, "nexus-api", server.Client())
+	if err := resolver.Ping(context.Background()); err != nil {
+		t.Fatalf("expected keycloak ping to verify discovery and JWKS, got %v", err)
+	}
+	if certFetches != 1 {
+		t.Fatalf("expected one JWKS fetch, got %d", certFetches)
+	}
+}
+
+func TestKeycloakTokenResolverPingFailsWhenJWKSUnavailable(t *testing.T) {
+	var issuer string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"issuer":   issuer,
+				"jwks_uri": issuer + "/certs",
+			})
+		case "/certs":
+			http.Error(w, "jwks unavailable", http.StatusServiceUnavailable)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	issuer = server.URL
+
+	resolver := platformauth.NewKeycloakTokenResolver(issuer, "nexus-api", server.Client())
+	if err := resolver.Ping(context.Background()); err == nil {
+		t.Fatal("expected keycloak ping to fail when JWKS is unavailable")
+	}
+}
+
 func TestDemoContextAllowsLocalRequests(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)

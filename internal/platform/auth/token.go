@@ -80,6 +80,13 @@ func (r *KeycloakTokenResolver) Resolve(req *http.Request) (TokenContext, bool, 
 	return tokenContextFromClaims(claims), true, nil
 }
 
+func (r *KeycloakTokenResolver) Ping(ctx context.Context) error {
+	if r == nil || r.issuerURL == "" {
+		return errors.New("keycloak token resolver not configured")
+	}
+	return r.refreshKeysIfNeeded(ctx)
+}
+
 func (r *KeycloakTokenResolver) verify(ctx context.Context, token string) (map[string]any, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
