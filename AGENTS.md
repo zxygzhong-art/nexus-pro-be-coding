@@ -1,63 +1,63 @@
 # AGENTS.md
 
-## 协作偏好
+## 協作偏好
 
-- 执行任务时，默认先区分哪些步骤可以并行、哪些必须串行；不要把本可并行的工作保守地全按顺序执行。
-- 信息收集尽量并行化，例如同时搜索相关文件、测试、调用链、配置和日志；只有存在明确依赖关系的步骤才串行推进。
-- 优先走最短关键路径，先完成能推进判断和交付的最小闭环，减少过度探索和不必要的上下文铺陈。
-- 验证采用分层策略：先做最小必要验证，再根据结果决定是否扩大验证范围；除非明确要求，否则不要默认执行耗时的全量检查。
-- 在没有明显高风险时，可以自行做合理假设并继续执行，减少频繁确认。默认偏速度优先，但保证基本正确性。
-- 用户给出精确路径、分支、工作区或“不修改代码/只给方案”等边界时，以最新明确边界为准。
-- 不回滚或覆盖用户已有改动；遇到无关脏工作区时忽略，遇到相关改动时先读懂并在其基础上继续。
-- 最终反馈优先说明改了什么、如何验证、剩余风险；避免泛泛解释。
+- 執行任務時，預設先區分哪些步驟可以並行、哪些必須串行；不要把本可並行的工作保守地全按順序執行。
+- 資訊蒐集儘量並行化，例如同時搜尋相關檔案、測試、呼叫鏈、設定和日誌；只有存在明確依賴關係的步驟才串行推進。
+- 優先走最短關鍵路徑，先完成能推進判斷和交付的最小閉環，減少過度探索和不必要的上下文鋪陳。
+- 驗證採用分層策略：先做最小必要驗證，再根據結果決定是否擴大驗證範圍；除非明確要求，否則不要預設執行耗時的全量檢查。
+- 在沒有明顯高風險時，可以自行做合理假設並繼續執行，減少頻繁確認。預設偏速度優先，但保證基本正確性。
+- 使用者給出精確路徑、分支、工作區或「不修改程式碼/只給方案」等邊界時，以最新明確邊界為準。
+- 不回滾或覆蓋使用者已有改動；遇到無關髒工作區時忽略，遇到相關改動時先讀懂並在其基礎上繼續。
+- 最終回饋優先說明改了什麼、如何驗證、剩餘風險；避免泛泛解釋。
 
-## 项目画像
+## 專案畫像
 
-- 这是 Go 后端项目，当前主体是模块化单体，核心边界包括 `internal/api/v1`、`internal/service`、`internal/repository`、`internal/domain`、`internal/platform/postgres` 和 `tests/unit`。
-- 当前 people-domain / employee / IAM / agent 相关工作仍以“保持既有 API 行为，逐步补齐契约”为主，避免无关大重构。
-- `docs/openapi.yaml` 是 API 契约源头；后续做代码生成时优先走 OpenAPI spec-first（例如由 OpenAPI 生成 Go types/server interface），不要把 ctrl 注解生成作为主契约来源。
-- 需要回答启动、验证或配置问题时，先看真实仓库文件，例如 `Makefile`、`.env.example`、`internal/config/config.go`、`docs/openapi.yaml`，不要按通用 Go 项目习惯猜。
-- 涉及员工管理前后端契约时，如果用户指向 `~/Desktop/platform-ui`，把该目录视为 UI/交互契约来源之一，并与 OpenAPI、领域模型、测试一起核对。
-- 需求补齐优先按阶段推进：需求矩阵 -> schema 对齐决策 -> employee 校验/导入硬化 -> 权限闭环 -> PostgreSQL/RLS 集成 -> Agent runtime。
+- 這是 Go 後端專案，當前主體是模組化單體，核心邊界包括 `internal/api/v1`、`internal/service`、`internal/repository`、`internal/domain`、`internal/platform/postgres` 和 `tests/unit`。
+- 當前 people-domain / employee / IAM / agent 相關工作仍以「保持既有 API 行為，逐步補齊契約」為主，避免無關大重構。
+- `docs/openapi.yaml` 是 API 契約源頭；後續做程式碼生成時優先走 OpenAPI spec-first（例如由 OpenAPI 生成 Go types/server interface），不要把 ctrl 註解生成作為主契約來源。
+- 需要回答啟動、驗證或設定問題時，先看真實倉庫檔案，例如 `Makefile`、`.env.example`、`internal/config/config.go`、`docs/openapi.yaml`，不要按通用 Go 專案習慣猜。
+- 涉及員工管理前後端契約時，如果使用者指向 `~/Desktop/platform-ui`，把該目錄視為 UI/互動契約來源之一，並與 OpenAPI、領域模型、測試一起核對。
+- 需求補齊優先按階段推進：需求矩陣 -> schema 對齊決策 -> employee 校驗/匯入硬化 -> 權限閉環 -> PostgreSQL/RLS 整合 -> Agent runtime。
 
-## 代码规范
+## 程式碼規範
 
-- 测试优先放在 `tests/unit/...`，按模块镜像目录组织；不要把新的单元测试随意散落到 `internal/...`，除非现有模式或 Go 包可见性确实要求。
-- 请求相关的 repository/store 路径应显式传递 `context.Context`；避免在请求链路里用 `context.Background()` 或 panic 型 helper 掩盖错误。
-- 鉴权边界必须 token-first：token 派生的 tenant/account 身份优先于可伪造请求头；临时角色/assumed role 只能来自已验证的会话状态。
-- 路由策略、authz resource/action 字符串、service 写路径和 authz snapshot 要一起核对；缺失 `data_scope_id` 等关键约束时应 fail closed。
-- 修改 `internal/api/v1` 的 ctrl/handler/路由契约时，必须同步检查并更新 `docs/openapi.yaml`；如确认无 OpenAPI 契约变化，最终反馈必须明确说明原因。
-- IAM permission-set assignment 相关路由和服务应使用专用 `permission_set_assignment` resource，不要混用普通 permission-set 资源。
-- 涉及 tenant 数据写入时，优先走现有 transaction helper，保证错误和 panic 都能回滚，不留下部分写入。
-- 员工可见范围、部门选项、列表结果等必须来自当前 authz 决策下的可见数据，不要退回全租户列表。
-- XLSX 员工导入保持 10 列契约，尤其不要丢失第 J 列 `主管員工ID`。
-- 修改 `db/queries/*.sql` 后运行 `make sqlc`；修改迁移后运行 `make migrate-validate`。
+- 測試優先放在 `tests/unit/...`，按模組鏡像目錄組織；不要把新的單元測試隨意散落到 `internal/...`，除非現有模式或 Go 套件可見性確實要求。
+- 請求相關的 repository/store 路徑應顯式傳遞 `context.Context`；避免在請求鏈路裡用 `context.Background()` 或 panic 型 helper 掩蓋錯誤。
+- 鑑權邊界必須 token-first：token 派生的 tenant/account 身分優先於可偽造請求頭；臨時角色/assumed role 只能來自已驗證的會話狀態。
+- 路由策略、authz resource/action 字串、service 寫路徑和 authz snapshot 要一起核對；缺失 `data_scope_id` 等關鍵約束時應 fail closed。
+- 修改 `internal/api/v1` 的 ctrl/handler/路由契約時，必須同步檢查並更新 `docs/openapi.yaml`；如確認無 OpenAPI 契約變化，最終回饋必須明確說明原因。
+- IAM permission-set assignment 相關路由和服務應使用專用 `permission_set_assignment` resource，不要混用普通 permission-set 資源。
+- 涉及 tenant 資料寫入時，優先走現有 transaction helper，保證錯誤和 panic 都能回滾，不留下部分寫入。
+- 員工可見範圍、部門選項、列表結果等必須來自當前 authz 決策下的可見資料，不要退回全租戶列表。
+- XLSX 員工匯入保持 10 列契約，尤其不要遺失第 J 列 `主管員工ID`。
+- 修改 `db/queries/*.sql` 後執行 `make sqlc`；修改遷移後執行 `make migrate-validate`。
 
-## 项目验证
+## 專案驗證
 
-- 优先使用仓库已有命令：`make unit-test`、`make test`、`make sqlc`、`make migrate-validate`。
-- 在本环境跑 Go 测试时优先加 `GOCACHE=$PWD/.gocache`，避免默认缓存路径或并发清理导致的失败。
-- 修改 Go 代码后先跑最小相关验证，例如：
+- 優先使用倉庫已有命令：`make unit-test`、`make test`、`make sqlc`、`make migrate-validate`。
+- 在本環境跑 Go 測試時優先加 `GOCACHE=$PWD/.gocache`，避免預設快取路徑或並發清理導致的失敗。
+- 修改 Go 程式碼後先跑最小相關驗證，例如：
   - API v1：`GOCACHE=$PWD/.gocache go test ./internal/api/v1 ./tests/unit/api/v1`
   - service：`GOCACHE=$PWD/.gocache go test ./internal/service ./tests/unit/service`
   - unit baseline：`GOCACHE=$PWD/.gocache go test ./tests/unit/...`
-- 需要扩大验证时再运行 `GOCACHE=$PWD/.gocache go test ./...` 或 `make test`；除非任务明确需要，不默认做耗时全量检查。
-- 本项目不会自动加载 `.env`；本地启动前需要手动导出环境，常用方式是 `set -a; source .env; set +a`。
-- 最快的无外部依赖 smoke 可以不设置 `DATABASE_URL` / `REDIS_ADDR`，启动后检查 `/healthz`、`/v1/me`、`/swagger/index.html`、`/openapi.yaml`。
-- 不要默认启动依赖 Docker 的本地服务，除非任务明确需要集成验证。
+- 需要擴大驗證時再執行 `GOCACHE=$PWD/.gocache go test ./...` 或 `make test`；除非任務明確需要，不預設做耗時全量檢查。
+- 本專案不會自動載入 `.env`；本地啟動前需要手動匯出環境，常用方式是 `set -a; source .env; set +a`。
+- 最快的無外部依賴 smoke 可以不設定 `DATABASE_URL` / `REDIS_ADDR`，啟動後檢查 `/healthz`、`/v1/me`、`/swagger/index.html`、`/openapi.yaml`。
+- 不要預設啟動依賴 Docker 的本地服務，除非任務明確需要整合驗證。
 
-## Git 与工作区
+## Git 與工作區
 
-- 开始涉及代码或历史操作前先看 `git status --short`，确认当前工作区和分支。
-- `nexus-pro-be`、相邻 sibling repo、以及 `.codex/worktrees/.../nexus-pro-be` 可能不是同一个工作区；路径比名称更权威。
-- 历史改写、分支整理、删除 worktree 或本地分支前，要先证明目标路径和 diff/HEAD 关系；不要用宽泛假设操作相似目录。
-- `docs/people-domain-employee-iam-test-plan.md` 这类临时/计划文档曾被当作 opt-in 上下文处理；不要自动纳入提交，除非用户要求。
+- 開始涉及程式碼或歷史操作前先看 `git status --short`，確認當前工作區和分支。
+- `nexus-pro-be`、相鄰 sibling repo、以及 `.codex/worktrees/.../nexus-pro-be` 可能不是同一個工作區；路徑比名稱更權威。
+- 歷史改寫、分支整理、刪除 worktree 或本地分支前，要先證明目標路徑和 diff/HEAD 關係；不要用寬泛假設操作相似目錄。
+- `docs/people-domain-employee-iam-test-plan.md` 這類臨時/計畫文件曾被當作 opt-in 上下文處理；不要自動納入提交，除非使用者要求。
 
 
 <claude-mem-context>
 # Memory Context
 
-# [nexus-pro-be] recent context, 2026-06-18 10:46am GMT+8
+# [nexus-pro-be] recent context, 2026-06-18 6:56pm GMT+8
 
 No previous sessions found.
 </claude-mem-context>
