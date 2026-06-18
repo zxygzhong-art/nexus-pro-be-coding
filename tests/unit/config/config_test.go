@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"strings"
 	"testing"
 
 	"nexus-pro-be/internal/config"
@@ -67,6 +68,72 @@ func TestObjectStoreDirConfig(t *testing.T) {
 
 	if cfg.ObjectStoreDir != "/tmp/nexus-objects" {
 		t.Fatalf("unexpected object store dir: %q", cfg.ObjectStoreDir)
+	}
+}
+
+func TestValidateStartupAllowsDevelopmentDefaults(t *testing.T) {
+	cfg := config.Config{Env: "development"}
+
+	if err := cfg.ValidateStartup(); err != nil {
+		t.Fatalf("expected development defaults to validate, got %v", err)
+	}
+}
+
+func TestValidateStartupAcceptsProductionMinimum(t *testing.T) {
+	cfg := config.Config{
+		Env:               "production",
+		DatabaseURL:       "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable",
+		KeycloakIssuerURL: "https://issuer.example/realms/nexus",
+		KeycloakClientID:  "nexus-api",
+		OpenFGAAPIURL:     "https://openfga.example",
+		OpenFGAStoreID:    "store-1",
+		OpenFGAModelID:    "model-1",
+		ObjectStoreDir:    "/var/lib/nexus-pro-be/objects",
+	}
+
+	if err := cfg.ValidateStartup(); err != nil {
+		t.Fatalf("expected production minimum config to validate, got %v", err)
+	}
+}
+
+func TestValidateStartupRejectsMissingProductionDependencies(t *testing.T) {
+	cfg := config.Config{Env: "production"}
+
+	err := cfg.ValidateStartup()
+	if err == nil {
+		t.Fatal("expected production config validation error")
+	}
+	for _, want := range []string{"DATABASE_URL", "KEYCLOAK_ISSUER_URL", "KEYCLOAK_CLIENT_ID", "OPENFGA_API_URL", "OPENFGA_STORE_ID", "OPENFGA_MODEL_ID", "OBJECT_STORE_DIR"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected validation error to mention %s, got %v", want, err)
+		}
+	}
+}
+
+func TestValidateStartupRejectsUnsafeProductionCompatibilityFlags(t *testing.T) {
+	cfg := config.Config{
+		Env:                "production",
+		DatabaseURL:        "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable",
+		KeycloakIssuerURL:  "https://issuer.example/realms/nexus",
+		KeycloakClientID:   "nexus-api",
+		OpenFGAAPIURL:      "https://openfga.example",
+		OpenFGAStoreID:     "store-1",
+		OpenFGAModelID:     "model-1",
+		ObjectStoreDir:     "/var/lib/nexus-pro-be/objects",
+		SeedDemo:           true,
+		AllowDemoContext:   true,
+		AllowHeaderContext: true,
+		AllowUnsignedJWT:   true,
+	}
+
+	err := cfg.ValidateStartup()
+	if err == nil {
+		t.Fatal("expected unsafe production config validation error")
+	}
+	for _, want := range []string{"SEED_DEMO", "ALLOW_DEMO_CONTEXT", "ALLOW_HEADER_CONTEXT", "ALLOW_UNSIGNED_JWT"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected validation error to mention %s, got %v", want, err)
+		}
 	}
 }
 

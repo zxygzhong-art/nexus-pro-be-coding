@@ -27,6 +27,7 @@ type Config struct {
 
 	OpenFGAAPIURL  string
 	OpenFGAStoreID string
+	OpenFGAModelID string
 
 	ObjectStoreDir string
 
@@ -34,6 +35,50 @@ type Config struct {
 	OTelServiceName          string
 	OTelExporterOTLPEndpoint string
 	OTelExporterOTLPInsecure bool
+}
+
+func (c Config) ValidateStartup() error {
+	if c.Env != "production" {
+		return nil
+	}
+	problems := []string{}
+	if strings.TrimSpace(c.DatabaseURL) == "" {
+		problems = append(problems, "DATABASE_URL is required")
+	}
+	if strings.TrimSpace(c.KeycloakIssuerURL) == "" {
+		problems = append(problems, "KEYCLOAK_ISSUER_URL is required")
+	}
+	if strings.TrimSpace(c.KeycloakClientID) == "" {
+		problems = append(problems, "KEYCLOAK_CLIENT_ID is required")
+	}
+	if strings.TrimSpace(c.OpenFGAAPIURL) == "" {
+		problems = append(problems, "OPENFGA_API_URL is required")
+	}
+	if strings.TrimSpace(c.OpenFGAStoreID) == "" {
+		problems = append(problems, "OPENFGA_STORE_ID is required")
+	}
+	if strings.TrimSpace(c.OpenFGAModelID) == "" {
+		problems = append(problems, "OPENFGA_MODEL_ID is required")
+	}
+	if strings.TrimSpace(c.ObjectStoreDir) == "" {
+		problems = append(problems, "OBJECT_STORE_DIR is required")
+	}
+	if c.SeedDemo {
+		problems = append(problems, "SEED_DEMO must be false")
+	}
+	if c.AllowDemoContext {
+		problems = append(problems, "ALLOW_DEMO_CONTEXT must be false")
+	}
+	if c.AllowHeaderContext {
+		problems = append(problems, "ALLOW_HEADER_CONTEXT must be false")
+	}
+	if c.AllowUnsignedJWT {
+		problems = append(problems, "ALLOW_UNSIGNED_JWT must be false")
+	}
+	if len(problems) > 0 {
+		return fmt.Errorf("production configuration invalid: %s", strings.Join(problems, "; "))
+	}
+	return nil
 }
 
 func Load() Config {
@@ -55,6 +100,7 @@ func Load() Config {
 
 		OpenFGAAPIURL:  strings.TrimSpace(os.Getenv("OPENFGA_API_URL")),
 		OpenFGAStoreID: strings.TrimSpace(os.Getenv("OPENFGA_STORE_ID")),
+		OpenFGAModelID: strings.TrimSpace(os.Getenv("OPENFGA_MODEL_ID")),
 
 		ObjectStoreDir: strings.TrimSpace(os.Getenv("OBJECT_STORE_DIR")),
 

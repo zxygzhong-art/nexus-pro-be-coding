@@ -32,6 +32,10 @@ import (
 func main() {
 	cfg := config.Load()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel(cfg.LogLevel)}))
+	if err := cfg.ValidateStartup(); err != nil {
+		logger.Error("invalid startup configuration", "error", err)
+		os.Exit(1)
+	}
 	startupReport := startup.Report{
 		Name:       "nexus-pro-be",
 		Env:        cfg.Env,
@@ -136,27 +140,31 @@ func main() {
 			Detail: "authz snapshots disabled",
 		})
 	}
-	if cfg.OpenFGAAPIURL != "" && cfg.OpenFGAStoreID != "" {
+	if cfg.OpenFGAAPIURL != "" && cfg.OpenFGAStoreID != "" && cfg.OpenFGAModelID != "" {
 		openfgaClient := openfgaclient.NewChecker(cfg.OpenFGAAPIURL, cfg.OpenFGAStoreID, &http.Client{
 			Timeout:   5 * time.Second,
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
-		})
+		}).WithAuthorizationModelID(cfg.OpenFGAModelID)
 		relationships = openfgaClient
 		relationshipWriter = openfgaClient
-		logger.Info("openfga relationship checker enabled", "api_url", cfg.OpenFGAAPIURL, "store_id", cfg.OpenFGAStoreID)
+		readinessChecks["openfga"] = openfgaClient.Ping
+		logger.Info("openfga relationship checker enabled", "api_url", cfg.OpenFGAAPIURL, "store_id", cfg.OpenFGAStoreID, "model_id", cfg.OpenFGAModelID)
 		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
 			Name:   "OpenFGA",
 			Status: "configured",
 			Target: startup.SafeURL(cfg.OpenFGAAPIURL),
-			Detail: "store=" + cfg.OpenFGAStoreID,
+			Detail: "store=" + cfg.OpenFGAStoreID + " model=" + cfg.OpenFGAModelID,
 		})
-	} else if cfg.OpenFGAAPIURL != "" || cfg.OpenFGAStoreID != "" {
+	} else if cfg.OpenFGAAPIURL != "" || cfg.OpenFGAStoreID != "" || cfg.OpenFGAModelID != "" {
 		missing := []string{}
 		if cfg.OpenFGAAPIURL == "" {
 			missing = append(missing, "OPENFGA_API_URL")
 		}
 		if cfg.OpenFGAStoreID == "" {
 			missing = append(missing, "OPENFGA_STORE_ID")
+		}
+		if cfg.OpenFGAModelID == "" {
+			missing = append(missing, "OPENFGA_MODEL_ID")
 		}
 		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
 			Name:   "OpenFGA",
@@ -203,14 +211,11 @@ func main() {
 	}
 	app := service.New(store, service.Options{Logger: logger, AuthzSnapshot: authzSnapshot, Relationships: relationships, ObjectStore: objectStore})
 	apiOptions := v1api.Options{
-		AllowDemoContext:   cfg.AllowDemoContext,
-		AllowHeaderContext: cfg.AllowHeaderContext,
-		AllowUnsignedJWT:   cfg.AllowUnsignedJWT,
-		ReadinessChecks:    readinessChecks,
-	}
-	if cfg.Env == "production" && (cfg.KeycloakIssuerURL == "" || cfg.KeycloakClientID == "") {
-		logger.Error("production requires Keycloak OIDC configuration", "missing", "KEYCLOAK_ISSUER_URL or KEYCLOAK_CLIENT_ID")
-		os.Exit(1)
+		AllowDemoContext:      cfg.AllowDemoContext,
+		AllowHeaderContext:    cfg.AllowHeaderContext,
+		AllowUnsignedJWT:      cfg.AllowUnsignedJWT,
+		DisableApprovalHeader: cfg.Env == "production",
+		ReadinessChecks:       readinessChecks,
 	}
 	if cfg.KeycloakIssuerURL != "" && cfg.KeycloakClientID != "" {
 		apiOptions.TokenResolver = platformauth.NewKeycloakTokenResolver(cfg.KeycloakIssuerURL, cfg.KeycloakClientID, &http.Client{

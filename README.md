@@ -164,10 +164,11 @@ Current scope:
 - Authz schema tables for applications, permission catalog, normalized group memberships, permission-set assignments, data scopes, field policies, policy conditions, assumable-role sessions, and relationship tuples for future OpenFGA sync.
 - `internal/domain/authz` defines default route policy metadata and high-risk markers used by the service-level authorization path.
 - `KEYCLOAK_*` enables Keycloak/OIDC bearer-token validation. In production, `KEYCLOAK_ISSUER_URL` and `KEYCLOAK_CLIENT_ID` are required at startup.
-- `OPENFGA_*` enables relationship checks and starts the relationship tuple outbox worker as an optional authorization adapter.
+- `OPENFGA_*` enables relationship checks and starts the relationship tuple outbox worker. In production, `OPENFGA_API_URL`, `OPENFGA_STORE_ID`, and `OPENFGA_MODEL_ID` are required at startup because relation-scoped permissions depend on this adapter.
+- `ops/openfga/model.json` is the versioned authorization model. Apply it explicitly with `make openfga-apply-model`, then set `OPENFGA_MODEL_ID` to the returned `authorization_model_id`; the API readiness check verifies that model ID.
 - Employee authz-subject changes emit local relationship tuples and OpenFGA write/delete outbox events with retryable status tracking.
 
 Not included yet:
 
-- OpenFGA authorization model management and full relationship coverage beyond the current employee owner/manager tuples.
+- Automatic OpenFGA model migrations and full relationship coverage beyond the current employee owner/manager and agent knowledge article viewer tuples.
 - End-to-end PostgreSQL RLS integration tests for every request/repository path.

@@ -48,6 +48,10 @@ func approvalConfirmed(r *http.Request) bool {
 	return strings.EqualFold(value, "true") || value == "1"
 }
 
+func (a *API) approvalConfirmed(r *http.Request) bool {
+	return a.allowApprovalHeader && approvalConfirmed(r)
+}
+
 func pageRequestFromRequest(r *http.Request) (domain.PageRequest, error) {
 	values := r.URL.Query()
 	page, err := positiveIntQuery(values.Get("page"), "page", 0)

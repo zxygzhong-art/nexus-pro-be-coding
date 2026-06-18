@@ -503,6 +503,29 @@ func TestHighRiskRouteAllowsConfirmedRequest(t *testing.T) {
 	}
 }
 
+func TestHighRiskRouteCanDisableApprovalHeader(t *testing.T) {
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	handler := v1api.New(service.New(store), nil, v1api.Options{
+		AllowDemoContext:      true,
+		DisableApprovalHeader: true,
+	}).Routes()
+	req := httptest.NewRequest(http.MethodPost, "/v1/iam/user-groups", strings.NewReader(`{"name":"Finance Admin"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Approval-Confirmed", "true")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 when approval header is disabled, got %d: %s", rec.Code, rec.Body.String())
+	}
+	errPayload := decodeError(t, rec.Body.Bytes())
+	if errPayload.ReasonCode != "approval_required" {
+		t.Fatalf("expected approval_required reason code, got %+v", errPayload)
+	}
+}
+
 func TestAuditLogRouteRequiresApprovalConfirmation(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodGet, "/v1/audit-logs", nil)

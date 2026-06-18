@@ -43,7 +43,7 @@ func (a *API) requestContext(r *http.Request) (domain.RequestContext, error) {
 		AccountID:            accountID,
 		AssumedRoleSessionID: strings.TrimSpace(r.Header.Get("X-Assumable-Role-Session-ID")),
 		RequestID:            requestIDFrom(r),
-		ApprovalConfirmed:    approvalConfirmed(r),
+		ApprovalConfirmed:    a.approvalConfirmed(r),
 		ApprovalInstanceID:   strings.TrimSpace(r.Header.Get("X-Approval-Instance-ID")),
 	}, nil
 }

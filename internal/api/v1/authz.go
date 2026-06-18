@@ -45,7 +45,7 @@ func (a *API) authorize(ctx domain.RequestContext, r *http.Request, resource, ac
 			return err
 		}
 	}
-	if result.RequiresApproval && ctx.ApprovalInstanceID == "" && !approvalConfirmed(r) {
+	if result.RequiresApproval && ctx.ApprovalInstanceID == "" && !ctx.ApprovalConfirmed {
 		return domain.ForbiddenReason("approval_required", "high-risk action requires approval confirmation")
 	}
 	return nil

@@ -13,32 +13,34 @@ import (
 )
 
 type API struct {
-	logger             *slog.Logger
-	me                 service.MeFacade
-	authz              service.AuthzFacade
-	iam                service.IAMFacade
-	hr                 service.HRFacade
-	attendance         service.AttendanceFacade
-	workflow           service.WorkflowFacade
-	agent              service.AgentFacade
-	audit              service.AuditFacade
-	allowDemoContext   bool
-	allowHeaderContext bool
-	tokenResolver      TokenResolver
-	telemetryService   string
-	readinessChecks    map[string]ReadinessCheck
+	logger              *slog.Logger
+	me                  service.MeFacade
+	authz               service.AuthzFacade
+	iam                 service.IAMFacade
+	hr                  service.HRFacade
+	attendance          service.AttendanceFacade
+	workflow            service.WorkflowFacade
+	agent               service.AgentFacade
+	audit               service.AuditFacade
+	allowDemoContext    bool
+	allowHeaderContext  bool
+	allowApprovalHeader bool
+	tokenResolver       TokenResolver
+	telemetryService    string
+	readinessChecks     map[string]ReadinessCheck
 }
 
 type HandlerFunc func(http.ResponseWriter, *http.Request, domain.RequestContext) error
 type ReadinessCheck func(context.Context) error
 
 type Options struct {
-	AllowDemoContext     bool
-	AllowHeaderContext   bool
-	AllowUnsignedJWT     bool
-	TokenResolver        TokenResolver
-	TelemetryServiceName string
-	ReadinessChecks      map[string]ReadinessCheck
+	AllowDemoContext      bool
+	AllowHeaderContext    bool
+	AllowUnsignedJWT      bool
+	DisableApprovalHeader bool
+	TokenResolver         TokenResolver
+	TelemetryServiceName  string
+	ReadinessChecks       map[string]ReadinessCheck
 }
 
 func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
@@ -56,12 +58,13 @@ func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
 		}
 	}
 	api := &API{
-		logger:             logger,
-		allowDemoContext:   cfg.AllowDemoContext,
-		allowHeaderContext: cfg.AllowHeaderContext,
-		tokenResolver:      cfg.TokenResolver,
-		telemetryService:   cfg.TelemetryServiceName,
-		readinessChecks:    copyReadinessChecks(cfg.ReadinessChecks),
+		logger:              logger,
+		allowDemoContext:    cfg.AllowDemoContext,
+		allowHeaderContext:  cfg.AllowHeaderContext,
+		allowApprovalHeader: !cfg.DisableApprovalHeader,
+		tokenResolver:       cfg.TokenResolver,
+		telemetryService:    cfg.TelemetryServiceName,
+		readinessChecks:     copyReadinessChecks(cfg.ReadinessChecks),
 	}
 	if app != nil {
 		api.me = app.Me()

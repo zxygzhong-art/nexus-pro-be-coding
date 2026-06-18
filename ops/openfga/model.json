@@ -1,0 +1,106 @@
+{
+  "schema_version": "1.1",
+  "type_definitions": [
+    {
+      "type": "account",
+      "relations": {},
+      "metadata": {
+        "relations": {}
+      }
+    },
+    {
+      "type": "hr.employee",
+      "relations": {
+        "owner": {
+          "this": {}
+        },
+        "manager": {
+          "this": {}
+        },
+        "read": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "owner"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "manager"
+                }
+              }
+            ]
+          }
+        },
+        "update": {
+          "computedUserset": {
+            "relation": "owner"
+          }
+        },
+        "delete": {
+          "computedUserset": {
+            "relation": "owner"
+          }
+        },
+        "invite": {
+          "computedUserset": {
+            "relation": "owner"
+          }
+        },
+        "update_status": {
+          "computedUserset": {
+            "relation": "owner"
+          }
+        },
+        "status_transition": {
+          "computedUserset": {
+            "relation": "owner"
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "owner": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          },
+          "manager": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "agent.knowledge_article",
+      "relations": {
+        "viewer": {
+          "this": {}
+        },
+        "read": {
+          "computedUserset": {
+            "relation": "viewer"
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "viewer": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          }
+        }
+      }
+    }
+  ]
+}

@@ -18,7 +18,7 @@ PostgreSQL:            localhost:15433
 
 ## Backend `.env`
 
-Create an OpenFGA store after startup, then put the returned store ID in the backend environment:
+Create an OpenFGA store after startup:
 
 ```sh
 curl -sS -X POST http://localhost:8081/stores \
@@ -27,11 +27,31 @@ curl -sS -X POST http://localhost:8081/stores \
 | jq
 ```
 
-Then configure the backend:
+Apply the versioned authorization model and keep the returned `authorization_model_id`:
+
+```sh
+make openfga-apply-model \
+  OPENFGA_API_URL=http://localhost:8081 \
+  OPENFGA_STORE_ID=<store-id> \
+| jq
+```
+
+You can verify the model ID later:
+
+```sh
+make openfga-check-model \
+  OPENFGA_API_URL=http://localhost:8081 \
+  OPENFGA_STORE_ID=<store-id> \
+  OPENFGA_MODEL_ID=<authorization-model-id> \
+| jq
+```
+
+Then configure the backend. `/readyz` checks that this model ID is readable from the configured store.
 
 ```env
 OPENFGA_API_URL=http://localhost:8081
 OPENFGA_STORE_ID=<store-id>
+OPENFGA_MODEL_ID=<authorization-model-id>
 ```
 
 If the backend runs on a different machine than this container host, replace `localhost` with the reachable host IP, for example:
@@ -39,6 +59,7 @@ If the backend runs on a different machine than this container host, replace `lo
 ```env
 OPENFGA_API_URL=http://192.168.100.100:8081
 OPENFGA_STORE_ID=<store-id>
+OPENFGA_MODEL_ID=<authorization-model-id>
 ```
 
 ## Stop
