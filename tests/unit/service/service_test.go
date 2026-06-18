@@ -1866,9 +1866,10 @@ func TestEmployeeExportApprovalInstanceMatchesFilters(t *testing.T) {
 		UpdatedAt:        now,
 	})
 	_ = store.UpsertFormInstance(context.Background(), domain.FormInstance{
-		ID:       "fi-export-good",
-		TenantID: "tenant-1",
-		Status:   "approved",
+		ID:                 "fi-export-good",
+		TenantID:           "tenant-1",
+		ApplicantAccountID: ctx.AccountID,
+		Status:             "approved",
 		Payload: map[string]any{
 			"application_code": "hr",
 			"resource_type":    "employee",
@@ -1888,9 +1889,10 @@ func TestEmployeeExportApprovalInstanceMatchesFilters(t *testing.T) {
 	}
 
 	_ = store.UpsertFormInstance(context.Background(), domain.FormInstance{
-		ID:       "fi-export-generic",
-		TenantID: "tenant-1",
-		Status:   "approved",
+		ID:                 "fi-export-generic",
+		TenantID:           "tenant-1",
+		ApplicantAccountID: ctx.AccountID,
+		Status:             "approved",
 		Payload: map[string]any{
 			"application_code": "hr",
 			"resource_type":    "employee",
@@ -1906,9 +1908,10 @@ func TestEmployeeExportApprovalInstanceMatchesFilters(t *testing.T) {
 	}
 
 	_ = store.UpsertFormInstance(context.Background(), domain.FormInstance{
-		ID:       "fi-export-bad",
-		TenantID: "tenant-1",
-		Status:   "approved",
+		ID:                 "fi-export-bad",
+		TenantID:           "tenant-1",
+		ApplicantAccountID: ctx.AccountID,
+		Status:             "approved",
 		Payload: map[string]any{
 			"application_code": "hr",
 			"resource_type":    "employee",
@@ -1922,6 +1925,44 @@ func TestEmployeeExportApprovalInstanceMatchesFilters(t *testing.T) {
 	_, err = svc.ExportEmployees(ctx, domain.EmployeeQuery{EmploymentStatus: "active"})
 	if err == nil || !strings.Contains(err.Error(), "approval filters do not match request") {
 		t.Fatalf("expected filter-mismatched approval to fail, got %v", err)
+	}
+}
+
+func TestApprovalInstanceMustBelongToCurrentAccount(t *testing.T) {
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "export", Scope: "all"},
+	})
+	now := time.Now().UTC()
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-export-other-approval",
+		TenantID:         "tenant-1",
+		EmployeeNo:       "E5009",
+		Name:             "Export Other Approval",
+		CompanyEmail:     "export.other.approval@example.com",
+		Status:           "active",
+		EmploymentStatus: "active",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+	_ = store.UpsertFormInstance(context.Background(), domain.FormInstance{
+		ID:                 "fi-export-other-account",
+		TenantID:           "tenant-1",
+		ApplicantAccountID: "acct-other",
+		Status:             "approved",
+		Payload: map[string]any{
+			"application_code": "hr",
+			"resource_type":    "employee",
+			"action":           "export",
+			"filters":          map[string]any{"employment_status": "active"},
+		},
+		SubmittedAt: now,
+		UpdatedAt:   now,
+	})
+
+	ctx.ApprovalInstanceID = "fi-export-other-account"
+	_, err := svc.ExportEmployees(ctx, domain.EmployeeQuery{EmploymentStatus: "active"})
+	if err == nil || !strings.Contains(err.Error(), "approval instance does not belong to current account") {
+		t.Fatalf("expected approval owner mismatch to fail, got %v", err)
 	}
 }
 
@@ -1942,9 +1983,10 @@ func TestEmployeeStatusTransitionApprovalInstanceRequiresTarget(t *testing.T) {
 		UpdatedAt:        now,
 	})
 	_ = store.UpsertFormInstance(context.Background(), domain.FormInstance{
-		ID:       "fi-status-generic",
-		TenantID: "tenant-1",
-		Status:   "approved",
+		ID:                 "fi-status-generic",
+		TenantID:           "tenant-1",
+		ApplicantAccountID: ctx.AccountID,
+		Status:             "approved",
 		Payload: map[string]any{
 			"application_code": "hr",
 			"resource_type":    "employee",
@@ -1965,9 +2007,10 @@ func TestEmployeeStatusTransitionApprovalInstanceRequiresTarget(t *testing.T) {
 	}
 
 	_ = store.UpsertFormInstance(context.Background(), domain.FormInstance{
-		ID:       "fi-status-target",
-		TenantID: "tenant-1",
-		Status:   "approved",
+		ID:                 "fi-status-target",
+		TenantID:           "tenant-1",
+		ApplicantAccountID: ctx.AccountID,
+		Status:             "approved",
 		Payload: map[string]any{
 			"application_code": "hr",
 			"resource_type":    "employee",

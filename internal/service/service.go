@@ -213,6 +213,9 @@ func (c *Service) validateApprovalInstance(ctx RequestContext, req CheckRequest)
 	if !ok {
 		return domain.ForbiddenReason("approval_required", "approval instance not found")
 	}
+	if instance.ApplicantAccountID != ctx.AccountID {
+		return domain.ForbiddenReason("approval_required", "approval instance does not belong to current account")
+	}
 	if !strings.EqualFold(instance.Status, "approved") {
 		return domain.ForbiddenReason("approval_required", "approval instance is not approved")
 	}
