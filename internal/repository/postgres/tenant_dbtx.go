@@ -23,7 +23,7 @@ func (db tenantDBTX) Exec(ctx context.Context, sql string, args ...interface{}) 
 	if tenantID == "" {
 		return db.pool.Exec(ctx, sql, args...)
 	}
-	tx, err := db.beginTenant(ctx, tenantID)
+	tx, err := db.beginScoped(ctx, tenantID, firstCompanyID(ctx, args))
 	if err != nil {
 		return pgconn.CommandTag{}, err
 	}
@@ -43,7 +43,7 @@ func (db tenantDBTX) Query(ctx context.Context, sql string, args ...interface{})
 	if tenantID == "" {
 		return db.pool.Query(ctx, sql, args...)
 	}
-	tx, err := db.beginTenant(ctx, tenantID)
+	tx, err := db.beginScoped(ctx, tenantID, firstCompanyID(ctx, args))
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +60,7 @@ func (db tenantDBTX) QueryRow(ctx context.Context, sql string, args ...interface
 	if tenantID == "" {
 		return db.pool.QueryRow(ctx, sql, args...)
 	}
-	tx, err := db.beginTenant(ctx, tenantID)
+	tx, err := db.beginScoped(ctx, tenantID, firstCompanyID(ctx, args))
 	if err != nil {
 		return errorRow{err: err}
 	}
@@ -74,7 +74,14 @@ func firstTenantID(ctx context.Context, args []interface{}) string {
 	return tenantctx.TenantIDFromArgs(args)
 }
 
-func (db tenantDBTX) beginTenant(ctx context.Context, tenantID string) (pgx.Tx, error) {
+func firstCompanyID(ctx context.Context, args []interface{}) string {
+	if companyID := tenantctx.CompanyIDFromContext(ctx); companyID != "" {
+		return companyID
+	}
+	return tenantctx.CompanyIDFromArgs(args)
+}
+
+func (db tenantDBTX) beginScoped(ctx context.Context, tenantID, companyID string) (pgx.Tx, error) {
 	tx, err := db.pool.Begin(ctx)
 	if err != nil {
 		return nil, err
@@ -82,6 +89,12 @@ func (db tenantDBTX) beginTenant(ctx context.Context, tenantID string) (pgx.Tx, 
 	if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", tenantID); err != nil {
 		_ = tx.Rollback(ctx)
 		return nil, err
+	}
+	if companyID != "" {
+		if _, err := tx.Exec(ctx, "SELECT set_config('app.company_id', $1, true)", companyID); err != nil {
+			_ = tx.Rollback(ctx)
+			return nil, err
+		}
 	}
 	return tx, nil
 }

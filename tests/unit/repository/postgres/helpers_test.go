@@ -41,6 +41,43 @@ func TestTenantIDFromContext(t *testing.T) {
 	}
 }
 
+func TestCompanyIDFromArgs(t *testing.T) {
+	type intParams struct {
+		CompanyID int
+		ID        string
+	}
+	type stringParams struct {
+		CompanyID string
+		ID        string
+	}
+	tests := []struct {
+		name string
+		args []interface{}
+		want string
+	}{
+		{name: "int company id", args: []interface{}{intParams{CompanyID: 42, ID: "x"}}, want: "42"},
+		{name: "string company id", args: []interface{}{stringParams{CompanyID: "company-7", ID: "x"}}, want: "company-7"},
+		{name: "params pointer", args: []interface{}{&intParams{CompanyID: 99, ID: "x"}}, want: "99"},
+		{name: "zero int omitted", args: []interface{}{intParams{ID: "x"}}, want: ""},
+		{name: "nil pointer ignored", args: []interface{}{(*intParams)(nil), intParams{CompanyID: 8}}, want: "8"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tenantctx.CompanyIDFromArgs(tt.args); got != tt.want {
+				t.Fatalf("CompanyIDFromArgs() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCompanyIDFromContext(t *testing.T) {
+	ctx := tenantctx.WithCompanyID(context.Background(), "42")
+
+	if got := tenantctx.CompanyIDFromContext(ctx); got != "42" {
+		t.Fatalf("CompanyIDFromContext() = %q, want 42", got)
+	}
+}
+
 func TestJSONCodecsDoNotPanicOnInvalidPayload(t *testing.T) {
 	invalid := []byte("{")
 	if got := jsoncodec.Map(invalid); got != nil {
