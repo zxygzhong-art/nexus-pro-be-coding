@@ -27,6 +27,10 @@ func (c *Service) CreateEmployee(ctx RequestContext, input CreateEmployeeInput) 
 	return c.HR().CreateEmployee(ctx, input)
 }
 
+func (c *Service) PreviewCreateEmployee(ctx RequestContext, input CreateEmployeeInput) (EmployeePreviewResponse, error) {
+	return c.HR().PreviewCreateEmployee(ctx, input)
+}
+
 func (c *Service) CreateEmployeeAggregate(ctx RequestContext, input CreateEmployeeInput) (Employee, error) {
 	return c.HR().CreateEmployeeAggregate(ctx, input)
 }
@@ -39,12 +43,28 @@ func (c *Service) UpdateEmployee(ctx RequestContext, id string, input UpdateEmpl
 	return c.HR().UpdateEmployee(ctx, id, input)
 }
 
+func (c *Service) PreviewUpdateEmployee(ctx RequestContext, id string, input UpdateEmployeeInput) (EmployeePreviewResponse, error) {
+	return c.HR().PreviewUpdateEmployee(ctx, id, input)
+}
+
+func (c *Service) UpdateEmployeeAvatar(ctx RequestContext, id string, input EmployeeAvatarInput) (Employee, error) {
+	return c.HR().UpdateEmployeeAvatar(ctx, id, input)
+}
+
+func (c *Service) DeleteEmployeeAvatar(ctx RequestContext, id string) (Employee, error) {
+	return c.HR().DeleteEmployeeAvatar(ctx, id)
+}
+
 func (c *Service) EmployeeStats(ctx RequestContext, query EmployeeQuery) (EmployeeStats, error) {
 	return c.HR().EmployeeStats(ctx, query)
 }
 
 func (c *Service) EmployeeOptions(ctx RequestContext) (EmployeeOptions, error) {
 	return c.HR().EmployeeOptions(ctx)
+}
+
+func (c *Service) EmployeeImportTemplate(ctx RequestContext, format string) ([]byte, string, string, error) {
+	return c.HR().EmployeeImportTemplate(ctx, format)
 }
 
 func (c *Service) PreviewEmployeeImport(ctx RequestContext, input EmployeeImportPreviewInput) (EmployeeImportSession, error) {
@@ -175,16 +195,16 @@ func (c HRService) CreateEmployee(ctx RequestContext, input CreateEmployeeInput)
 }
 
 func (c HRService) ExportEmployees(ctx RequestContext, queries ...EmployeeQuery) ([]Employee, error) {
+	query := EmployeeQuery{}
+	if len(queries) > 0 {
+		query = normalizeEmployeeQuery(queries[0])
+	}
 	account, decision, _, err := c.Authorize(ctx,
-		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, Action: ActionExport},
+		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, Action: ActionExport, Context: map[string]any{"filters": employeeQueryApprovalFilters(query)}},
 		AuditTarget{Resource: string(ResourceEmployeeCollection)},
 	)
 	if err != nil {
 		return nil, err
-	}
-	query := EmployeeQuery{}
-	if len(queries) > 0 {
-		query = normalizeEmployeeQuery(queries[0])
 	}
 	if err := c.rejectOversizedEmployeeExport(ctx, query, decision); err != nil {
 		return nil, err

@@ -48,6 +48,28 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/hr/employees/preview:
+    post:
+      summary: Validate and normalize employee create payload without persistence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmployeeInput"
+      responses:
+        "200":
+          description: Employee preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeePreviewResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees/{id}:
     get:
       summary: Get employee detail grouped by profile sections
@@ -106,6 +128,74 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/hr/employees/{id}/preview:
+    post:
+      summary: Validate and preview employee patch without persistence
+      parameters:
+        - $ref: "#/components/parameters/EmployeeID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmployeePatch"
+      responses:
+        "200":
+          description: Employee update preview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmployeePreviewResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/hr/employees/{id}/avatar:
+    post:
+      summary: Upload or replace employee avatar
+      parameters:
+        - $ref: "#/components/parameters/EmployeeID"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary}
+      responses:
+        "200":
+          description: Employee with updated avatar metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      summary: Remove employee avatar
+      parameters:
+        - $ref: "#/components/parameters/EmployeeID"
+      responses:
+        "200":
+          description: Employee with avatar metadata removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Employee"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees/stats:
     get:
       summary: Employee dashboard counts
@@ -137,6 +227,20 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmployeeOptions"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/hr/employees/import/template:
+    get:
+      summary: Download employee import template
+      parameters:
+        - {name: format, in: query, schema: {type: string, enum: [csv, xlsx], default: csv}}
+      responses:
+        "200":
+          description: CSV or XLSX template with 10 import columns
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -545,6 +649,19 @@ paths:
         - $ref: "#/components/parameters/ID"
       responses:
         "201": {description: Created}
+  /v1/workflows/forms/{id}/approve:
+    post:
+      summary: Approve a workflow form instance for high-risk action confirmation
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200": {description: Approved}
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/agents/runs:
     get:
       summary: List agent runs
@@ -649,7 +766,7 @@ components:
             updated_at: {type: string, format: date-time}
     EmployeeInput:
       type: object
-      required: [name, company_email]
+      required: [name, company_email, org_unit_id, position, category, hire_date, basic_info, employment_info, education_military_info, contact_info, insurance_info]
       properties:
         employee_no:
           type: string
@@ -669,11 +786,11 @@ components:
           $ref: "#/components/schemas/EmployeeStatusWithDeleted"
         hire_date: {type: string}
         resign_date: {type: string}
-        basic_info: {$ref: "#/components/schemas/Section"}
-        employment_info: {$ref: "#/components/schemas/Section"}
-        education_military_info: {$ref: "#/components/schemas/Section"}
-        contact_info: {$ref: "#/components/schemas/Section"}
-        insurance_info: {$ref: "#/components/schemas/Section"}
+        basic_info: {$ref: "#/components/schemas/EmployeeBasicInfo"}
+        employment_info: {$ref: "#/components/schemas/EmployeeEmploymentInfo"}
+        education_military_info: {$ref: "#/components/schemas/EmployeeEducationMilitaryInfo"}
+        contact_info: {$ref: "#/components/schemas/EmployeeContactInfo"}
+        insurance_info: {$ref: "#/components/schemas/EmployeeInsuranceInfo"}
         internal_experiences:
           type: array
           items: {$ref: "#/components/schemas/EmployeeExperience"}
@@ -696,11 +813,11 @@ components:
           $ref: "#/components/schemas/EmployeeStatusWithDeleted"
         hire_date: {type: string}
         resign_date: {type: string}
-        basic_info: {$ref: "#/components/schemas/Section"}
-        employment_info: {$ref: "#/components/schemas/Section"}
-        education_military_info: {$ref: "#/components/schemas/Section"}
-        contact_info: {$ref: "#/components/schemas/Section"}
-        insurance_info: {$ref: "#/components/schemas/Section"}
+        basic_info: {$ref: "#/components/schemas/EmployeeBasicInfo"}
+        employment_info: {$ref: "#/components/schemas/EmployeeEmploymentInfo"}
+        education_military_info: {$ref: "#/components/schemas/EmployeeEducationMilitaryInfo"}
+        contact_info: {$ref: "#/components/schemas/EmployeeContactInfo"}
+        insurance_info: {$ref: "#/components/schemas/EmployeeInsuranceInfo"}
         internal_experiences:
           type: array
           items: {$ref: "#/components/schemas/EmployeeExperience"}
@@ -740,6 +857,84 @@ components:
         category: {type: string}
         current: {type: boolean}
         created_at: {type: string, format: date-time}
+    EmployeePreviewResponse:
+      type: object
+      required: [employee, valid]
+      properties:
+        employee: {$ref: "#/components/schemas/Employee"}
+        valid: {type: boolean}
+        field_errors:
+          type: array
+          items:
+            type: object
+            properties:
+              tab: {type: string}
+              field: {type: string}
+              code: {type: string}
+              message: {type: string}
+        diff:
+          type: object
+          additionalProperties: true
+    EmployeeBasicInfo:
+      type: object
+      required: [nationality_type]
+      additionalProperties: true
+      properties:
+        nationality_type: {type: string, enum: [local, foreign]}
+        national_id: {type: string}
+        passport_no: {type: string}
+        passport_name: {type: string}
+        entry_date: {type: string}
+        arc_no: {type: string}
+        arc_expiry_date: {type: string}
+        tax_id: {type: string}
+        work_permit_no: {type: string}
+        work_permit_expiry_date: {type: string}
+        contract_expiry_date: {type: string}
+        broker: {type: string}
+        avatar:
+          type: object
+          additionalProperties: true
+    EmployeeEmploymentInfo:
+      type: object
+      required: [org_unit_id, position, category]
+      additionalProperties: true
+      properties:
+        org_unit_id: {type: string}
+        position: {type: string}
+        category: {$ref: "#/components/schemas/EmployeeCategory"}
+        manager_employee_id: {type: string}
+        shift: {type: string}
+        tenure_start_date: {type: string}
+    EmployeeEducationMilitaryInfo:
+      type: object
+      required: [highest_education, school]
+      additionalProperties: true
+      properties:
+        highest_education: {type: string}
+        school: {type: string}
+        graduation_date: {type: string}
+    EmployeeContactInfo:
+      type: object
+      required: [mobile_phone, address, emergency_contact_relation, emergency_contact_name, emergency_contact_phone]
+      additionalProperties: true
+      properties:
+        mobile_phone: {type: string}
+        address: {type: string}
+        emergency_contact_relation: {type: string}
+        emergency_contact_name: {type: string}
+        emergency_contact_phone: {type: string}
+    EmployeeInsuranceInfo:
+      type: object
+      required: [labor_insurance_date, labor_insurance_level, labor_insurance_salary, health_insurance_date, health_insurance_level, health_insurance_amount]
+      additionalProperties: true
+      properties:
+        labor_insurance_date: {type: string}
+        labor_insurance_level: {type: string}
+        labor_insurance_salary: {type: number}
+        health_insurance_date: {type: string}
+        health_insurance_level: {type: string}
+        health_insurance_amount: {type: number}
     Section:
       type: object
       additionalProperties: true

@@ -21,6 +21,7 @@ func (c WorkflowCtrl) RegisterRoutes(router *gin.RouterGroup) {
 
 	workflows := router.Group("/workflows")
 	workflows.POST("/forms/:id/submit", c.routes.Handle("workflow.form_instance", "submit", c.submitForm, ResourceID(PathParamID)))
+	workflows.POST("/forms/:id/approve", c.routes.Handle("workflow.form_instance", "approve", c.approveForm, ResourceID(PathParamID)))
 }
 
 func (c WorkflowCtrl) listFormTemplates(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
@@ -62,5 +63,18 @@ func (c WorkflowCtrl) submitForm(w http.ResponseWriter, r *http.Request, ctx dom
 		return err
 	}
 	writeJSON(w, http.StatusCreated, item)
+	return nil
+}
+
+func (c WorkflowCtrl) approveForm(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.ApproveFormInput
+	if _, err := readOptionalJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.ApproveForm(ctx, r.PathValue(PathParamID), input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
 	return nil
 }

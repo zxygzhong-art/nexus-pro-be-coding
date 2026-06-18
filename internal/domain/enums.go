@@ -71,6 +71,7 @@ const (
 	ResourceTool               ResourceType = "tool"
 	ResourceKnowledgeArticle   ResourceType = "knowledge_article"
 	ResourceEmployeeCollection ResourceType = "employee_collection"
+	ResourceFormInstance       ResourceType = "form_instance"
 )
 
 const (
@@ -83,6 +84,7 @@ const (
 	ActionAssume           Action = "assume"
 	ActionInvite           Action = "invite"
 	ActionSubmit           Action = "submit"
+	ActionApprove          Action = "approve"
 	ActionCall             Action = "call"
 	ActionUpdateStatus     Action = "update_status"
 	ActionStatusTransition Action = "status_transition"

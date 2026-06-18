@@ -10,4 +10,5 @@ type RequestContext struct {
 	AssumedRoleSessionID string
 	RequestID            string
 	ApprovalConfirmed    bool
+	ApprovalInstanceID   string
 }

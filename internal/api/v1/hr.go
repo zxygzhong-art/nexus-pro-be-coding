@@ -24,7 +24,9 @@ func (c HRCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	employees := hr.Group("/employees")
 	employees.GET("", c.routes.Handle("hr.employee", "read", c.listEmployees))
 	employees.POST("", c.routes.Handle("hr.employee", "create", c.createEmployee))
+	employees.POST("/preview", c.routes.Handle("hr.employee", "create", c.previewCreateEmployee))
 	employees.GET("/stats", c.routes.Handle("hr.employee", "read", c.employeeStats))
+	employees.GET("/import/template", c.routes.Handle("hr.employee", "read", c.employeeImportTemplate))
 	employees.POST("/import/preview", c.routes.Handle("hr.employee", "import", c.previewEmployeeImport))
 	employees.POST("/import/:id/confirm", c.routes.Handle("hr.employee", "import", c.confirmEmployeeImport, ResourceID(PathParamID)))
 	employees.GET("/export", c.routes.Handle("hr.employee", "export", c.exportEmployeesCSV))
@@ -32,6 +34,9 @@ func (c HRCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	employees.POST("/batch-delete", c.routes.Handle("hr.employee", "delete", c.batchDeleteEmployees))
 	employees.GET("/:id", c.routes.Handle("hr.employee", "read", c.getEmployee, TargetEmployeeID(PathParamID)))
 	employees.PATCH("/:id", c.routes.Handle("hr.employee", "update", c.updateEmployee, TargetEmployeeID(PathParamID)))
+	employees.POST("/:id/preview", c.routes.Handle("hr.employee", "update", c.previewUpdateEmployee, TargetEmployeeID(PathParamID)))
+	employees.POST("/:id/avatar", c.routes.Handle("hr.employee", "update", c.updateEmployeeAvatar, TargetEmployeeID(PathParamID)))
+	employees.DELETE("/:id/avatar", c.routes.Handle("hr.employee", "update", c.deleteEmployeeAvatar, TargetEmployeeID(PathParamID)))
 	employees.DELETE("/:id", c.routes.Handle("hr.employee", "delete", c.deleteEmployee, TargetEmployeeID(PathParamID)))
 	employees.PATCH("/:id/status", c.routes.Handle("hr.employee", "update_status", c.updateEmployeeStatus, TargetEmployeeID(PathParamID)))
 	employees.POST("/:id/invite", c.routes.Handle("hr.employee", "invite", c.inviteEmployee, TargetEmployeeID(PathParamID)))
@@ -68,6 +73,19 @@ func (c HRCtrl) createEmployee(w http.ResponseWriter, r *http.Request, ctx domai
 	return nil
 }
 
+func (c HRCtrl) previewCreateEmployee(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.CreateEmployeeInput
+	if err := readJSONNoValidate(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.PreviewCreateEmployee(ctx, input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
 func (c HRCtrl) getEmployee(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.GetEmployee(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -83,6 +101,19 @@ func (c HRCtrl) updateEmployee(w http.ResponseWriter, r *http.Request, ctx domai
 		return err
 	}
 	item, err := c.svc.UpdateEmployee(ctx, r.PathValue(PathParamID), input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+func (c HRCtrl) previewUpdateEmployee(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.UpdateEmployeeInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.PreviewUpdateEmployee(ctx, r.PathValue(PathParamID), input)
 	if err != nil {
 		return err
 	}
@@ -109,6 +140,18 @@ func (c HRCtrl) employeeOptions(w http.ResponseWriter, r *http.Request, ctx doma
 		return err
 	}
 	writeJSON(w, http.StatusOK, options)
+	return nil
+}
+
+func (c HRCtrl) employeeImportTemplate(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	raw, filename, contentType, err := c.svc.EmployeeImportTemplate(ctx, r.URL.Query().Get("format"))
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", contentType)
+	w.Header().Set("Content-Disposition", `attachment; filename="`+filename+`"`)
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(raw)
 	return nil
 }
 
@@ -196,6 +239,28 @@ func (c HRCtrl) batchDeleteEmployees(w http.ResponseWriter, r *http.Request, ctx
 
 func (c HRCtrl) deleteEmployee(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.DeleteEmployee(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+func (c HRCtrl) updateEmployeeAvatar(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	input, err := employeeAvatarInput(w, r)
+	if err != nil {
+		return err
+	}
+	item, err := c.svc.UpdateEmployeeAvatar(ctx, r.PathValue(PathParamID), input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+func (c HRCtrl) deleteEmployeeAvatar(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.DeleteEmployeeAvatar(ctx, r.PathValue(PathParamID))
 	if err != nil {
 		return err
 	}
@@ -311,4 +376,24 @@ func employeeImportPreviewInput(w http.ResponseWriter, r *http.Request) (domain.
 		return domain.EmployeeImportPreviewInput{}, err
 	}
 	return input, nil
+}
+
+func employeeAvatarInput(w http.ResponseWriter, r *http.Request) (domain.EmployeeAvatarInput, error) {
+	if err := r.ParseMultipartForm(3 << 20); err != nil {
+		return domain.EmployeeAvatarInput{}, domain.BadRequest("invalid multipart form: " + err.Error())
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		return domain.EmployeeAvatarInput{}, domain.BadRequest("file is required")
+	}
+	defer file.Close()
+	raw, err := io.ReadAll(http.MaxBytesReader(w, file, 3<<20))
+	if err != nil {
+		return domain.EmployeeAvatarInput{}, domain.BadRequest("read avatar file: " + err.Error())
+	}
+	contentType := strings.TrimSpace(header.Header.Get("Content-Type"))
+	if contentType == "" && len(raw) > 0 {
+		contentType = http.DetectContentType(raw)
+	}
+	return domain.EmployeeAvatarInput{Filename: header.Filename, ContentType: contentType, Content: raw}, nil
 }

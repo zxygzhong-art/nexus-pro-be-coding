@@ -108,6 +108,19 @@ type UpdateEmployeeInput struct {
 	InternalExperiences   []EmployeeExperience `json:"internal_experiences,omitempty"`
 }
 
+type EmployeePreviewResponse struct {
+	Employee    Employee       `json:"employee"`
+	FieldErrors []FieldError   `json:"field_errors,omitempty"`
+	Diff        map[string]any `json:"diff,omitempty"`
+	Valid       bool           `json:"valid"`
+}
+
+type EmployeeAvatarInput struct {
+	Filename    string `json:"filename"`
+	ContentType string `json:"content_type"`
+	Content     []byte `json:"-"`
+}
+
 type EmployeeImportPreviewInput struct {
 	Filename string `json:"filename"`
 	Content  string `json:"content"`
@@ -149,6 +162,8 @@ type SubmitFormInput struct {
 	TemplateKey string         `json:"template_key"`
 	Payload     map[string]any `json:"payload,omitempty"`
 }
+
+type ApproveFormInput struct{}
 
 type CreateLeaveRequestInput struct {
 	EmployeeID string  `json:"employee_id,omitempty"`

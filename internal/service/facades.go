@@ -8,6 +8,7 @@ type MeFacade interface {
 type AuthzFacade interface {
 	Check(RequestContext, CheckRequest) (CheckResult, error)
 	BatchCheck(RequestContext, BatchCheckRequest) (BatchCheckResult, error)
+	ValidateApprovalInstance(RequestContext, CheckRequest) error
 }
 
 type IAMFacade interface {
@@ -30,10 +31,15 @@ type IAMFacade interface {
 type HRFacade interface {
 	QueryEmployees(RequestContext, EmployeeQuery) (PageResponse[Employee], error)
 	CreateEmployee(RequestContext, CreateEmployeeInput) (Employee, error)
+	PreviewCreateEmployee(RequestContext, CreateEmployeeInput) (EmployeePreviewResponse, error)
 	GetEmployee(RequestContext, string) (Employee, error)
 	UpdateEmployee(RequestContext, string, UpdateEmployeeInput) (Employee, error)
+	PreviewUpdateEmployee(RequestContext, string, UpdateEmployeeInput) (EmployeePreviewResponse, error)
+	UpdateEmployeeAvatar(RequestContext, string, EmployeeAvatarInput) (Employee, error)
+	DeleteEmployeeAvatar(RequestContext, string) (Employee, error)
 	EmployeeStats(RequestContext, EmployeeQuery) (EmployeeStats, error)
 	EmployeeOptions(RequestContext) (EmployeeOptions, error)
+	EmployeeImportTemplate(RequestContext, string) ([]byte, string, string, error)
 	PreviewEmployeeImport(RequestContext, EmployeeImportPreviewInput) (EmployeeImportSession, error)
 	ConfirmEmployeeImport(RequestContext, string, EmployeeImportConfirmInput) (EmployeeImportSession, error)
 	ExportEmployeesCSV(RequestContext, EmployeeQuery) ([]byte, string, error)
@@ -57,6 +63,7 @@ type WorkflowFacade interface {
 	ListFormTemplatePage(RequestContext, PageRequest) (PageResponse[FormTemplate], error)
 	CreateFormTemplate(RequestContext, CreateFormTemplateInput) (FormTemplate, error)
 	SubmitForm(RequestContext, SubmitFormInput) (FormInstance, error)
+	ApproveForm(RequestContext, string, ApproveFormInput) (FormInstance, error)
 }
 
 type AgentFacade interface {

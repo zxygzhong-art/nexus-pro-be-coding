@@ -67,6 +67,10 @@ func (c HRService) InviteEmployee(ctx RequestContext, id string, input InviteEmp
 		if len(visible) == 0 {
 			return forbiddenDataScope("employee is outside data scope")
 		}
+		switch employeeStatus(next) {
+		case string(EmployeeStatusDeleted), string(EmployeeStatusResigned):
+			return Conflict("deleted or resigned employee cannot be invited")
+		}
 		before := next
 		email := strings.TrimSpace(input.Email)
 		if email == "" {
@@ -187,6 +191,13 @@ func (c HRService) TransitionEmployeeStatus(ctx RequestContext, id string, input
 			if err != nil {
 				return BadRequest("start_date must be RFC3339 or YYYY-MM-DD")
 			}
+			end, err := utils.ParseDate(input.EndDate)
+			if err != nil {
+				return BadRequest("end_date must be RFC3339 or YYYY-MM-DD")
+			}
+			if end.Before(start) {
+				return domainValidation("leave suspension date range is invalid", FieldError{Tab: "employment_info", Field: "end_date", Code: "invalid", Message: "end_date must be on or after start_date"})
+			}
 			transitionStart = &start
 		case string(EmployeeStatusResigned):
 			if strings.TrimSpace(input.EndDate) == "" || strings.TrimSpace(input.Reason) == "" {
@@ -195,6 +206,9 @@ func (c HRService) TransitionEmployeeStatus(ctx RequestContext, id string, input
 			resignDate, err := utils.ParseDate(input.EndDate)
 			if err != nil {
 				return BadRequest("end_date must be RFC3339 or YYYY-MM-DD")
+			}
+			if next.HireDate != nil && resignDate.Before(*next.HireDate) {
+				return domainValidation("resignation date range is invalid", FieldError{Tab: "employment_info", Field: "end_date", Code: "invalid", Message: "end_date must be on or after hire_date"})
 			}
 			next.ResignDate = &resignDate
 			if next.AccountID != "" {
@@ -217,6 +231,9 @@ func (c HRService) TransitionEmployeeStatus(ctx RequestContext, id string, input
 			start, err := utils.ParseDate(input.StartDate)
 			if err != nil {
 				return BadRequest("start_date must be RFC3339 or YYYY-MM-DD")
+			}
+			if next.ResignDate != nil && start.Before(*next.ResignDate) {
+				return domainValidation("reinstatement date range is invalid", FieldError{Tab: "employment_info", Field: "start_date", Code: "invalid", Message: "start_date must be on or after resign_date"})
 			}
 			transitionStart = &start
 			next.ResignDate = nil

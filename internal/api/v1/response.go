@@ -14,6 +14,16 @@ type validatedInput interface {
 }
 
 func readJSON(w http.ResponseWriter, r *http.Request, target any) error {
+	if err := readJSONNoValidate(w, r, target); err != nil {
+		return err
+	}
+	if err := validateInput(target); err != nil {
+		return err
+	}
+	return nil
+}
+
+func readJSONNoValidate(w http.ResponseWriter, r *http.Request, target any) error {
 	defer r.Body.Close()
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
@@ -23,9 +33,6 @@ func readJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
 		return domain.BadRequest("request body must contain a single JSON value")
-	}
-	if err := validateInput(target); err != nil {
-		return err
 	}
 	return nil
 }

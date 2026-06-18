@@ -31,6 +31,10 @@ func (c *Service) SubmitForm(ctx RequestContext, input SubmitFormInput) (FormIns
 	return c.Workflow().SubmitForm(ctx, input)
 }
 
+func (c *Service) ApproveForm(ctx RequestContext, id string, input ApproveFormInput) (FormInstance, error) {
+	return c.Workflow().ApproveForm(ctx, id, input)
+}
+
 func (c WorkflowService) ListFormTemplates(ctx RequestContext) ([]FormTemplate, error) {
 	if _, _, err := c.resolveAccount(ctx); err != nil {
 		return nil, err
@@ -112,6 +116,54 @@ func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (
 		"form_template_id", template.ID,
 		"template_key", template.Key,
 		"status", instance.Status,
+	)
+	return instance, nil
+}
+
+func (c WorkflowService) ApproveForm(ctx RequestContext, id string, _ ApproveFormInput) (FormInstance, error) {
+	_, _, authzAudit, err := c.Authorize(ctx,
+		CheckRequest{ApplicationCode: AppWorkflow, ResourceType: ResourceFormInstance, ResourceID: id, Action: ActionApprove},
+		AuditTarget{Event: "workflow.form.approve", Resource: string(ResourceFormInstance), Target: id},
+	)
+	if err != nil {
+		return FormInstance{}, err
+	}
+	var instance FormInstance
+	if err := c.withTenantTransaction(ctx, func(tx *Service) error {
+		next, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("form instance", id)
+		}
+		if strings.EqualFold(next.Status, "approved") {
+			instance = next
+			return nil
+		}
+		next.Status = "approved"
+		next.ApprovedBy = ctx.AccountID
+		next.UpdatedAt = tx.Now()
+		if err := tx.store.UpsertFormInstance(goContext(ctx), next); err != nil {
+			return err
+		}
+		if err := tx.audit(ctx, "workflow.form.approve", string(ResourceFormInstance), next.ID, string(SeverityHigh), map[string]any{
+			"template_id": next.TemplateID,
+			"approved_by": next.ApprovedBy,
+		}); err != nil {
+			return err
+		}
+		if err := authzAudit.CommitWith(ctx, tx); err != nil {
+			return err
+		}
+		instance = next
+		return nil
+	}); err != nil {
+		return FormInstance{}, err
+	}
+	c.logInfo(ctx, "form approved",
+		"form_instance_id", instance.ID,
+		"approved_by", instance.ApprovedBy,
 	)
 	return instance, nil
 }

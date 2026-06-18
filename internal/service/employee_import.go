@@ -14,7 +14,8 @@ func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImpor
 	if err != nil {
 		return EmployeeImportSession{}, err
 	}
-	decision, err := c.evaluateAuthz(ctx, account, CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, Action: ActionImport})
+	req := CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, Action: ActionImport}
+	decision, err := c.evaluateAuthz(ctx, account, req)
 	if err != nil {
 		return EmployeeImportSession{}, err
 	}
@@ -25,14 +26,19 @@ func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImpor
 		)
 		return EmployeeImportSession{}, forbiddenAuthz(decision)
 	}
-	if decision.RequiresApproval && !ctx.ApprovalConfirmed {
-		c.auditAuthzDecision(ctx, "hr.employee.import.preview", "employee_import_session", "", decision)
-		c.logWarn(ctx, "employee import preview requires approval",
-			"risk_level", decision.RiskLevel,
-			"approval_type", decision.ApprovalType,
-			"approval_reason", decision.ApprovalReason,
-		)
-		return EmployeeImportSession{}, domain.ForbiddenReason("approval_required", "high-risk action requires approval")
+	if decision.RequiresApproval {
+		if err := c.confirmApproval(ctx, req); err != nil {
+			_ = c.auditAuthzDecision(ctx, "hr.employee.import.preview", "employee_import_session", "", decision)
+			if ctx.ApprovalInstanceID != "" {
+				return EmployeeImportSession{}, err
+			}
+			c.logWarn(ctx, "employee import preview requires approval",
+				"risk_level", decision.RiskLevel,
+				"approval_type", decision.ApprovalType,
+				"approval_reason", decision.ApprovalReason,
+			)
+			return EmployeeImportSession{}, domain.ForbiddenReason("approval_required", "high-risk action requires approval")
+		}
 	}
 	authzAudit := AuthzAudit{service: c.Service, target: AuditTarget{Event: "hr.employee.import.preview", Resource: string(ResourceEmployeeImport)}, decision: decision}
 	filename := strings.TrimSpace(input.Filename)
@@ -110,7 +116,8 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 	if err != nil {
 		return EmployeeImportSession{}, err
 	}
-	decision, err := c.evaluateAuthz(ctx, account, CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, ResourceID: sessionID, Action: ActionImport})
+	req := CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, ResourceID: sessionID, Action: ActionImport}
+	decision, err := c.evaluateAuthz(ctx, account, req)
 	if err != nil {
 		return EmployeeImportSession{}, err
 	}
@@ -122,15 +129,20 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 		)
 		return EmployeeImportSession{}, forbiddenAuthz(decision)
 	}
-	if decision.RequiresApproval && !ctx.ApprovalConfirmed {
-		_ = c.auditAuthzDecision(ctx, "hr.employee.import.confirm", "employee_import_session", sessionID, decision)
-		c.logWarn(ctx, "employee import confirmation requires approval",
-			"session_id", sessionID,
-			"risk_level", decision.RiskLevel,
-			"approval_type", decision.ApprovalType,
-			"approval_reason", decision.ApprovalReason,
-		)
-		return EmployeeImportSession{}, domain.ForbiddenReason("approval_required", "high-risk action requires approval")
+	if decision.RequiresApproval {
+		if err := c.confirmApproval(ctx, req); err != nil {
+			_ = c.auditAuthzDecision(ctx, "hr.employee.import.confirm", "employee_import_session", sessionID, decision)
+			if ctx.ApprovalInstanceID != "" {
+				return EmployeeImportSession{}, err
+			}
+			c.logWarn(ctx, "employee import confirmation requires approval",
+				"session_id", sessionID,
+				"risk_level", decision.RiskLevel,
+				"approval_type", decision.ApprovalType,
+				"approval_reason", decision.ApprovalReason,
+			)
+			return EmployeeImportSession{}, domain.ForbiddenReason("approval_required", "high-risk action requires approval")
+		}
 	}
 	authzAudit := AuthzAudit{service: c.Service, target: AuditTarget{Event: "hr.employee.import.confirm", Resource: string(ResourceEmployeeImport), Target: sessionID}, decision: decision}
 	var session EmployeeImportSession
@@ -172,7 +184,7 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 				next.Rows[i] = row
 				continue
 			}
-			employee, err := tx.employeeFromCreateInput(ctx, row.Employee, reservedEmployeeNos)
+			employee, err := tx.employeeFromImportInput(ctx, row.Employee, reservedEmployeeNos)
 			if err != nil {
 				if errors, ok := employeeImportErrorsFromError(row.RowNumber, err); ok {
 					row.Errors = errors
@@ -285,7 +297,7 @@ func (c *Service) validateEmployeeImportRow(ctx RequestContext, row EmployeeImpo
 		}
 		return nil, err
 	}
-	err = c.validateEmployee(ctx, employee, "create")
+	err = c.validateEmployee(ctx, employee, "create", employeeValidationImportMinimal)
 	errors, ok := employeeImportErrorsFromError(row.RowNumber, err)
 	if err != nil && !ok {
 		return nil, err

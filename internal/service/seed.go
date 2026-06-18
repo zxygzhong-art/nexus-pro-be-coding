@@ -37,6 +37,7 @@ func SeedDemo(store repository.Store) {
 			{Resource: "workflow.form_template", Action: "read", Scope: "all", MenuKey: "workflow.forms"},
 			{Resource: "workflow.form_template", Action: "create", Scope: "all", MenuKey: "workflow.forms"},
 			{Resource: "workflow.form_instance", Action: "submit", Scope: "all", MenuKey: "workflow.instances"},
+			{Resource: "workflow.form_instance", Action: "approve", Scope: "all", MenuKey: "workflow.instances"},
 			{Resource: "iam.user_group", Action: "read", Scope: "all", MenuKey: "iam.user_groups"},
 			{Resource: "iam.user_group", Action: "create", Scope: "all", MenuKey: "iam.user_groups"},
 			{Resource: "iam.permission_set", Action: "read", Scope: "all", MenuKey: "iam.permission_sets"},

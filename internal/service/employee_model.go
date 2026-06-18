@@ -1,12 +1,26 @@
 package service
 
 import (
+	"strconv"
 	"strings"
 
 	"nexus-pro-be/internal/utils"
 )
 
+const (
+	employeeValidationFullForm      = "full_form"
+	employeeValidationImportMinimal = "import_minimal"
+)
+
 func (c *Service) employeeFromCreateInput(ctx RequestContext, input CreateEmployeeInput, reservedEmployeeNos ...map[string]struct{}) (Employee, error) {
+	return c.employeeFromCreateInputWithProfile(ctx, input, employeeValidationFullForm, reservedEmployeeNos...)
+}
+
+func (c *Service) employeeFromImportInput(ctx RequestContext, input CreateEmployeeInput, reservedEmployeeNos ...map[string]struct{}) (Employee, error) {
+	return c.employeeFromCreateInputWithProfile(ctx, input, employeeValidationImportMinimal, reservedEmployeeNos...)
+}
+
+func (c *Service) employeeFromCreateInputWithProfile(ctx RequestContext, input CreateEmployeeInput, profile string, reservedEmployeeNos ...map[string]struct{}) (Employee, error) {
 	employee, err := c.employeeCreateCandidate(ctx, input)
 	if err != nil {
 		return Employee{}, err
@@ -18,7 +32,7 @@ func (c *Service) employeeFromCreateInput(ctx RequestContext, input CreateEmploy
 		}
 		employee.EmployeeNo = employeeNo
 	}
-	if err := c.validateEmployee(ctx, employee, "create"); err != nil {
+	if err := c.validateEmployee(ctx, employee, "create", profile); err != nil {
 		return Employee{}, err
 	}
 	if err := reserveEmployeeNo(employee.EmployeeNo, reservedEmployeeNos...); err != nil {
@@ -131,7 +145,7 @@ func (c *Service) applyEmployeePatch(ctx RequestContext, employee *Employee, inp
 	}
 	*employee = c.deriveEmployeeHotFields(*employee)
 	employee.UpdatedAt = c.Now()
-	return c.validateEmployee(ctx, *employee, "update")
+	return c.validateEmployee(ctx, *employee, "update", employeeValidationFullForm)
 }
 
 func forbiddenEmployeePatchFields(input UpdateEmployeeInput, policies map[string]string) []FieldError {
@@ -193,7 +207,11 @@ func (c *Service) deriveEmployeeHotFields(employee Employee) Employee {
 	return employee
 }
 
-func (c *Service) validateEmployee(ctx RequestContext, employee Employee, mode string) error {
+func (c *Service) validateEmployee(ctx RequestContext, employee Employee, mode string, profile ...string) error {
+	validationProfile := employeeValidationFullForm
+	if len(profile) > 0 && strings.TrimSpace(profile[0]) != "" {
+		validationProfile = strings.TrimSpace(profile[0])
+	}
 	fields := make([]FieldError, 0)
 	if strings.TrimSpace(employee.Name) == "" {
 		fields = append(fields, FieldError{Tab: "basic_info", Field: "name", Code: "required", Message: "name is required"})
@@ -241,6 +259,9 @@ func (c *Service) validateEmployee(ctx RequestContext, employee Employee, mode s
 			fields = append(fields, FieldError{Tab: "employment_info", Field: "resign_reason", Code: "required", Message: "resign_reason is required"})
 		}
 	}
+	if validationProfile == employeeValidationFullForm {
+		fields = append(fields, fullFormEmployeeFieldErrors(employee)...)
+	}
 	if len(fields) == 0 {
 		if uniqueLookup, ok := c.store.(employeeUniqueLookupStore); ok {
 			uniqueFields, err := c.employeeUniqueFieldErrors(ctx, uniqueLookup, employee)
@@ -258,6 +279,66 @@ func (c *Service) validateEmployee(ctx RequestContext, employee Employee, mode s
 		return domainValidation("employee validation failed", fields...)
 	}
 	return nil
+}
+
+func fullFormEmployeeFieldErrors(employee Employee) []FieldError {
+	fields := make([]FieldError, 0)
+	addRequired := func(tab, field, message string) {
+		fields = append(fields, FieldError{Tab: tab, Field: field, Code: "required", Message: message})
+	}
+	if strings.TrimSpace(employee.OrgUnitID) == "" {
+		addRequired(employeeTabEmploymentInfo, "org_unit_id", "org_unit_id is required")
+	}
+	if strings.TrimSpace(employee.Position) == "" {
+		addRequired(employeeTabEmploymentInfo, "position", "position is required")
+	}
+	if strings.TrimSpace(employee.Category) == "" {
+		addRequired(employeeTabEmploymentInfo, "category", "category is required")
+	}
+	if strings.TrimSpace(employeeStatus(employee)) == "" {
+		addRequired(employeeTabEmploymentInfo, "employment_status", "employment_status is required")
+	}
+	if employee.HireDate == nil && stringFromMap(employee.EmploymentInfo, "hire_date") == "" {
+		addRequired(employeeTabEmploymentInfo, "hire_date", "hire_date is required")
+	}
+	if identityType := stringFromMap(employee.BasicInfo, "nationality_type"); identityType == "" {
+		addRequired(employeeTabBasicInfo, "nationality_type", "nationality_type is required")
+	}
+	requireAny(&fields, employeeTabEducationMilitaryInfo, employee.EducationMilitaryInfo, "highest_education", "highest_education is required", "highest_education", "education_level", "degree")
+	requireAny(&fields, employeeTabEducationMilitaryInfo, employee.EducationMilitaryInfo, "school", "school is required", "school", "school_name")
+	requireAny(&fields, employeeTabContactInfo, employee.ContactInfo, "mobile_phone", "mobile_phone is required", "mobile_phone", "phone")
+	requireAny(&fields, employeeTabContactInfo, employee.ContactInfo, "address", "address is required", "address", "communication_address")
+	requireAny(&fields, employeeTabContactInfo, employee.ContactInfo, "emergency_contact_relation", "emergency_contact_relation is required", "emergency_contact_relation", "emergency_relation")
+	requireAny(&fields, employeeTabContactInfo, employee.ContactInfo, "emergency_contact_name", "emergency_contact_name is required", "emergency_contact_name", "emergency_name")
+	requireAny(&fields, employeeTabContactInfo, employee.ContactInfo, "emergency_contact_phone", "emergency_contact_phone is required", "emergency_contact_phone", "emergency_phone")
+	requireAny(&fields, employeeTabInsuranceInfo, employee.InsuranceInfo, "labor_insurance_date", "labor_insurance_date is required", "labor_insurance_date")
+	requireAny(&fields, employeeTabInsuranceInfo, employee.InsuranceInfo, "labor_insurance_level", "labor_insurance_level is required", "labor_insurance_level")
+	requirePositiveNumber(&fields, employee.InsuranceInfo, "labor_insurance_salary", "labor_insurance_salary must be positive")
+	requireAny(&fields, employeeTabInsuranceInfo, employee.InsuranceInfo, "health_insurance_date", "health_insurance_date is required", "health_insurance_date")
+	requireAny(&fields, employeeTabInsuranceInfo, employee.InsuranceInfo, "health_insurance_level", "health_insurance_level is required", "health_insurance_level")
+	requirePositiveNumber(&fields, employee.InsuranceInfo, "health_insurance_amount", "health_insurance_amount must be positive")
+	return fields
+}
+
+func requireAny(fields *[]FieldError, tab string, values map[string]any, field, message string, keys ...string) {
+	for _, key := range keys {
+		if mapAnyString(values, key) != "" {
+			return
+		}
+	}
+	*fields = append(*fields, FieldError{Tab: tab, Field: field, Code: "required", Message: message})
+}
+
+func requirePositiveNumber(fields *[]FieldError, values map[string]any, field, message string) {
+	raw := mapAnyString(values, field)
+	if raw == "" {
+		*fields = append(*fields, FieldError{Tab: employeeTabInsuranceInfo, Field: field, Code: "required", Message: message})
+		return
+	}
+	number, err := strconv.ParseFloat(raw, 64)
+	if err != nil || number <= 0 {
+		*fields = append(*fields, FieldError{Tab: employeeTabInsuranceInfo, Field: field, Code: "invalid", Message: message})
+	}
 }
 
 func (c *Service) employeeUniqueFieldErrors(ctx RequestContext, store employeeUniqueLookupStore, employee Employee) ([]FieldError, error) {
@@ -369,6 +450,26 @@ func stringFromMap(values map[string]any, key string) string {
 		return strings.TrimSpace(v)
 	}
 	return ""
+}
+
+func mapAnyString(values map[string]any, key string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	switch v := values[key].(type) {
+	case string:
+		return strings.TrimSpace(v)
+	case int:
+		return strconv.Itoa(v)
+	case int64:
+		return strconv.FormatInt(v, 10)
+	case float64:
+		return strconv.FormatFloat(v, 'f', -1, 64)
+	case float32:
+		return strconv.FormatFloat(float64(v), 'f', -1, 32)
+	default:
+		return ""
+	}
 }
 
 func mergeMap(base map[string]any, patch map[string]any) map[string]any {

@@ -48,3 +48,7 @@ func (c AuthzService) BatchCheck(ctx RequestContext, req BatchCheckRequest) (res
 	}
 	return BatchCheckResult{Results: results}, nil
 }
+
+func (c AuthzService) ValidateApprovalInstance(ctx RequestContext, req CheckRequest) error {
+	return c.Service.ValidateApprovalInstance(ctx, req)
+}

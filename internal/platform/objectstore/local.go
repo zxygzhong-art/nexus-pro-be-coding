@@ -46,6 +46,20 @@ func (s *Local) PutObject(ctx context.Context, key string, _ string, data []byte
 	return os.WriteFile(path, copyData, 0o644)
 }
 
+func (s *Local) DeleteObject(ctx context.Context, key string) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	path, err := s.pathForKey(key)
+	if err != nil {
+		return err
+	}
+	if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return ctx.Err()
+}
+
 func (s *Local) pathForKey(key string) (string, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {

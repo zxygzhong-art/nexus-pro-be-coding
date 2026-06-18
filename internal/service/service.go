@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
+	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -167,7 +169,13 @@ func (c *Service) Authorize(ctx RequestContext, req CheckRequest, audit AuditTar
 		)
 		return Account{}, decision, AuthzAudit{}, forbiddenAuthz(decision)
 	}
-	if decision.RequiresApproval && !ctx.ApprovalConfirmed {
+	if decision.RequiresApproval {
+		if err := c.confirmApproval(ctx, req); err == nil {
+			return account, decision, done, nil
+		} else if ctx.ApprovalInstanceID != "" {
+			_ = c.auditAuthzTarget(ctx, audit, decision)
+			return Account{}, decision, AuthzAudit{}, err
+		}
 		_ = c.auditAuthzTarget(ctx, audit, decision)
 		c.logWarn(ctx, "authorization requires approval",
 			"application_code", req.ApplicationCode,
@@ -181,6 +189,111 @@ func (c *Service) Authorize(ctx RequestContext, req CheckRequest, audit AuditTar
 		return Account{}, decision, AuthzAudit{}, domain.ForbiddenReason("approval_required", "high-risk action requires approval")
 	}
 	return account, decision, done, nil
+}
+
+func (c *Service) ValidateApprovalInstance(ctx RequestContext, req CheckRequest) error {
+	return c.validateApprovalInstance(ctx, normalizeCheckRequest(req))
+}
+
+func (c *Service) confirmApproval(ctx RequestContext, req CheckRequest) error {
+	if ctx.ApprovalInstanceID != "" {
+		return c.ValidateApprovalInstance(ctx, req)
+	}
+	if ctx.ApprovalConfirmed {
+		return nil
+	}
+	return domain.ForbiddenReason("approval_required", "high-risk action requires approval")
+}
+
+func (c *Service) validateApprovalInstance(ctx RequestContext, req CheckRequest) error {
+	instance, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, ctx.ApprovalInstanceID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return domain.ForbiddenReason("approval_required", "approval instance not found")
+	}
+	if !strings.EqualFold(instance.Status, "approved") {
+		return domain.ForbiddenReason("approval_required", "approval instance is not approved")
+	}
+	payload := instance.Payload
+	if !approvalPayloadMatches(payload, "application_code", string(req.ApplicationCode)) {
+		return domain.ForbiddenReason("approval_required", "approval application_code does not match request")
+	}
+	resourceMatches := approvalPayloadMatches(payload, "resource_type", string(req.ResourceType))
+	if req.Resource != "" {
+		resourceMatches = resourceMatches || approvalPayloadMatches(payload, "resource", req.Resource)
+	}
+	if !resourceMatches {
+		return domain.ForbiddenReason("approval_required", "approval resource does not match request")
+	}
+	if !approvalPayloadMatches(payload, "action", string(req.Action)) {
+		return domain.ForbiddenReason("approval_required", "approval action does not match request")
+	}
+	target := utils.FirstNonEmpty(req.ResourceID, req.Target, req.TargetEmployeeID)
+	if target != "" && !approvalPayloadMatchesAny(payload, target, "target", "resource_id", "employee_id", "session_id") {
+		return domain.ForbiddenReason("approval_required", "approval target does not match request")
+	}
+	if filters, ok := req.Context["filters"]; ok {
+		payloadFilters, hasFilters := payload["filters"]
+		if !hasFilters || !approvalPayloadValueMatches(payloadFilters, filters) {
+			return domain.ForbiddenReason("approval_required", "approval filters do not match request")
+		}
+	}
+	return nil
+}
+
+func approvalPayloadMatches(payload map[string]any, key, expected string) bool {
+	if strings.TrimSpace(expected) == "" {
+		return true
+	}
+	value, ok := payload[key]
+	if !ok {
+		return false
+	}
+	return strings.EqualFold(strings.TrimSpace(stringFromAny(value)), strings.TrimSpace(expected))
+}
+
+func approvalPayloadMatchesAny(payload map[string]any, expected string, keys ...string) bool {
+	for _, key := range keys {
+		if value, ok := payload[key]; ok && strings.EqualFold(strings.TrimSpace(stringFromAny(value)), strings.TrimSpace(expected)) {
+			return true
+		}
+	}
+	return false
+}
+
+func payloadHasAny(payload map[string]any, keys ...string) bool {
+	for _, key := range keys {
+		if _, ok := payload[key]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func approvalPayloadValueMatches(actual, expected any) bool {
+	actualJSON, actualErr := json.Marshal(actual)
+	expectedJSON, expectedErr := json.Marshal(expected)
+	if actualErr == nil && expectedErr == nil {
+		return string(actualJSON) == string(expectedJSON)
+	}
+	return reflect.DeepEqual(actual, expected)
+}
+
+func stringFromAny(value any) string {
+	switch v := value.(type) {
+	case string:
+		return v
+	case Action:
+		return string(v)
+	case ApplicationCode:
+		return string(v)
+	case ResourceType:
+		return string(v)
+	default:
+		return ""
+	}
 }
 
 func (a AuthzAudit) Commit(ctx RequestContext) error {
@@ -365,6 +478,12 @@ func auditDetailsWithContext(ctx RequestContext, details map[string]any) map[str
 	}
 	if ctx.TenantID != "" {
 		out["tenant_id"] = ctx.TenantID
+	}
+	if ctx.ApprovalInstanceID != "" {
+		out["approval_method"] = "workflow_approval"
+		out["approval_instance_id"] = ctx.ApprovalInstanceID
+	} else if ctx.ApprovalConfirmed {
+		out["approval_method"] = "header_confirmation"
 	}
 	return out
 }

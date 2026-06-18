@@ -51,8 +51,10 @@ func (g authzToolGateway) Call(ctx RequestContext, call AgentToolCall) (AgentToo
 	if !decision.Allowed {
 		return AgentToolResult{Name: call.Name, Decision: decision}, Forbidden("agent tool call denied: " + decision.Reason)
 	}
-	if decision.RequiresApproval && !ctx.ApprovalConfirmed {
-		return AgentToolResult{Name: call.Name, Decision: decision}, Forbidden("agent tool call requires approval confirmation")
+	if decision.RequiresApproval {
+		if err := g.service.confirmApproval(ctx, req); err != nil {
+			return AgentToolResult{Name: call.Name, Decision: decision}, err
+		}
 	}
 	if call.Execute == nil {
 		return AgentToolResult{Name: call.Name, Decision: decision}, nil
