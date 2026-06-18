@@ -52,3 +52,12 @@
 - `nexus-pro-be`、相邻 sibling repo、以及 `.codex/worktrees/.../nexus-pro-be` 可能不是同一个工作区；路径比名称更权威。
 - 历史改写、分支整理、删除 worktree 或本地分支前，要先证明目标路径和 diff/HEAD 关系；不要用宽泛假设操作相似目录。
 - `docs/people-domain-employee-iam-test-plan.md` 这类临时/计划文档曾被当作 opt-in 上下文处理；不要自动纳入提交，除非用户要求。
+
+
+<claude-mem-context>
+# Memory Context
+
+# [nexus-pro-be] recent context, 2026-06-18 10:46am GMT+8
+
+No previous sessions found.
+</claude-mem-context>
