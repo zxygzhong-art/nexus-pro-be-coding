@@ -36,9 +36,9 @@ Current branch: `feat/2026-6/yannis/people-domain-foundation`.
 Current relevant files:
 
 - `internal/api/v1/routes.go` and the `internal/api/v1/*` controllers: HTTP routes and request authorization wrapper.
-- `internal/service/employee.go`: employee aggregate, import, export, lifecycle, invite, and batch operations.
-- `internal/service/authz_runtime.go`: runtime permission calculation, data scopes, field policies, AssumableRole handling, and audit decision payloads.
-- `internal/domain/authz/routes.go`: route policy metadata and high-risk markers.
+- `internal/service/hr_service.go`: employee aggregate, import, export, lifecycle, invite, and batch operations.
+- `internal/service/authz_service.go`: runtime permission calculation, data scopes, field policies, AssumableRole handling, and audit decision payloads.
+- `internal/domain/authz.go`: route policy metadata and high-risk markers.
 - `db/schema.sql` and `db/migrations/000001_init.sql`: IAM, HR, audit, Agent, RLS, and outbox schema.
 - `docs/openapi.yaml`: current employee API contract.
 - `tests/unit/...`: current unit/API coverage.
@@ -546,7 +546,7 @@ Run these with product/HR stakeholders:
 - Put import confirm in a transaction or job with clear all-or-nothing/partial-success semantics.
 - Store export jobs and generated files for large exports instead of synchronous huge response bodies.
 - Add `If-Match` / version field for employee patch if concurrent HR edits are realistic.
-- Split `internal/domain/hr.go` and `internal/service/employee.go` further once employee aggregate keeps growing.
+- Keep HR service logic in `internal/service/hr_service.go` unless a separate module boundary emerges; do not split purely because the file grows.
 
 ## 21. Production Exit Criteria
 
