@@ -70,7 +70,8 @@ func decodeError(t *testing.T, body []byte) apiErrorPayload {
 }
 
 func validEmployeeCreateJSON(name, email string) string {
-	return `{"name":"` + name + `","company_email":"` + email + `","org_unit_id":"ou-hq","position":"Engineer","category":"full-time","employment_status":"待加入","hire_date":"2026-06-01","basic_info":{"nationality_type":"local","national_id":"A123456789"},"employment_info":{"org_unit_id":"ou-hq","position":"Engineer","category":"full_time"},"education_military_info":{"highest_education":"master","school":"NTU"},"contact_info":{"mobile_phone":"0911222333","address":"Taipei","emergency_contact_relation":"spouse","emergency_contact_name":"Emergency Contact","emergency_contact_phone":"0922333444"},"insurance_info":{"labor_insurance_date":"2026-06-01","labor_insurance_level":"L1","labor_insurance_salary":"45800","health_insurance_date":"2026-06-01","health_insurance_level":"H1","health_insurance_amount":"826"}}`
+	nationalID := "ID-" + strings.NewReplacer("@", "-", ".", "-", "+", "-").Replace(email)
+	return `{"name":"` + name + `","company_email":"` + email + `","org_unit_id":"ou-hq","position":"Engineer","category":"full-time","employment_status":"待加入","hire_date":"2026-06-01","basic_info":{"nationality_type":"local","national_id":"` + nationalID + `"},"employment_info":{"org_unit_id":"ou-hq","position":"Engineer","category":"full_time"},"education_military_info":{"highest_education":"master","school":"NTU"},"contact_info":{"mobile_phone":"0911222333","address":"Taipei","emergency_contact_relation":"spouse","emergency_contact_name":"Emergency Contact","emergency_contact_phone":"0922333444"},"insurance_info":{"labor_insurance_date":"2026-06-01","labor_insurance_level":"L1","labor_insurance_salary":"45800","health_insurance_date":"2026-06-01","health_insurance_level":"H1","health_insurance_amount":"826"}}`
 }
 
 func avatarMultipartBody(t *testing.T) (*bytes.Buffer, string) {
@@ -731,8 +732,8 @@ func TestEmployeeListDetailAndCSVExportEndpoints(t *testing.T) {
 	if detailRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for employee detail, got %d: %s", detailRec.Code, detailRec.Body.String())
 	}
-	detail := decodeData[domain.Employee](t, detailRec.Body.Bytes())
-	if detail.ID != "emp-admin" || detail.BasicInfo["national_id"] == "" {
+	detail := decodeData[domain.EmployeeDetail](t, detailRec.Body.Bytes())
+	if detail.ID != "emp-admin" || detail.BasicInfo["national_id"] == "" || detail.Sections.BasicInfo.NationalID == "" {
 		t.Fatalf("unexpected employee detail: %+v", detail)
 	}
 
@@ -864,9 +865,12 @@ func TestEmployeeCreateStatusAndDeleteContract(t *testing.T) {
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected 201 for employee create, got %d: %s", rec.Code, rec.Body.String())
 	}
-	created := decodeData[domain.Employee](t, rec.Body.Bytes())
+	created := decodeData[domain.EmployeeDetail](t, rec.Body.Bytes())
 	if created.EmployeeNo != "IKL001" || created.Category != "full_time" || created.EmploymentStatus != "onboarding" {
 		t.Fatalf("expected generated number and normalized fields, got %+v", created)
+	}
+	if created.Sections.BasicInfo.NationalID == "" || created.Sections.EmploymentInfo.OrgUnitID != "ou-hq" {
+		t.Fatalf("expected create response to include detail sections, got %+v", created.Sections)
 	}
 
 	statusReq := httptest.NewRequest(http.MethodPatch, "/v1/hr/employees/"+created.ID+"/status", strings.NewReader(`{"status":"試用中"}`))
@@ -941,7 +945,7 @@ func TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes(t *testing.T) {
 	if createRec.Code != http.StatusCreated {
 		t.Fatalf("expected 201 for employee create, got %d: %s", createRec.Code, createRec.Body.String())
 	}
-	created := decodeData[domain.Employee](t, createRec.Body.Bytes())
+	created := decodeData[domain.EmployeeDetail](t, createRec.Body.Bytes())
 
 	updatePreviewReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/"+created.ID+"/preview", strings.NewReader(`{"position":"Lead Engineer"}`))
 	updatePreviewReq.Header.Set("Content-Type", "application/json")
@@ -951,7 +955,7 @@ func TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes(t *testing.T) {
 		t.Fatalf("expected 200 for employee update preview, got %d: %s", updatePreviewRec.Code, updatePreviewRec.Body.String())
 	}
 	updatePreview := decodeData[domain.EmployeePreviewResponse](t, updatePreviewRec.Body.Bytes())
-	if !updatePreview.Valid || updatePreview.Employee.Position != "Lead Engineer" || updatePreview.Diff["position"] == nil {
+	if !updatePreview.Valid || updatePreview.Employee.Position != "Lead Engineer" || updatePreview.Detail.Sections.EmploymentInfo.Position != "Lead Engineer" || updatePreview.Diff["position"] == nil {
 		t.Fatalf("expected update preview diff, got %+v", updatePreview)
 	}
 

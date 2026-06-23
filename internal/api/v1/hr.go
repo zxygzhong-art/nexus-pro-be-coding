@@ -79,7 +79,7 @@ func (c HRCtrl) createEmployee(w http.ResponseWriter, r *http.Request, ctx domai
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusCreated, item)
+	writeJSON(w, http.StatusCreated, domain.EmployeeDetailFromEmployee(item))
 	return nil
 }
 
@@ -101,7 +101,7 @@ func (c HRCtrl) getEmployee(w http.ResponseWriter, r *http.Request, ctx domain.R
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeJSON(w, http.StatusOK, domain.EmployeeDetailFromEmployee(item))
 	return nil
 }
 
@@ -114,7 +114,7 @@ func (c HRCtrl) updateEmployee(w http.ResponseWriter, r *http.Request, ctx domai
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, item)
+	writeJSON(w, http.StatusOK, domain.EmployeeDetailFromEmployee(item))
 	return nil
 }
 

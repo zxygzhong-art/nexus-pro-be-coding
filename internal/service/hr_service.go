@@ -778,7 +778,9 @@ const (
 type employeeUniqueLookupStore interface {
 	GetEmployeeByEmployeeNo(context.Context, string, string) (Employee, bool, error)
 	GetEmployeeByCompanyEmail(context.Context, string, string) (Employee, bool, error)
+	GetEmployeeByPersonalEmail(context.Context, string, string) (Employee, bool, error)
 	GetEmployeeByAccountID(context.Context, string, string) (Employee, bool, error)
+	GetEmployeeByBasicInfoField(context.Context, string, string, string) (Employee, bool, error)
 }
 
 func (c HRService) employeeFromCreateInput(ctx RequestContext, input CreateEmployeeInput, reservedEmployeeNos ...map[string]struct{}) (Employee, error) {
@@ -1111,7 +1113,7 @@ func requirePositiveNumber(fields *[]FieldError, values map[string]any, field, m
 }
 
 func (c HRService) employeeUniqueFieldErrors(ctx RequestContext, store employeeUniqueLookupStore, employee Employee) ([]FieldError, error) {
-	fields := make([]FieldError, 0, 3)
+	fields := make([]FieldError, 0, 8)
 	goCtx := goContext(ctx)
 	if employee.EmployeeNo != "" {
 		existing, ok, err := store.GetEmployeeByEmployeeNo(goCtx, ctx.TenantID, employee.EmployeeNo)
@@ -1131,6 +1133,15 @@ func (c HRService) employeeUniqueFieldErrors(ctx RequestContext, store employeeU
 			fields = append(fields, FieldError{Tab: "basic_info", Field: "company_email", Code: "unique", Message: "company_email already exists"})
 		}
 	}
+	if employee.PersonalEmail != "" {
+		existing, ok, err := store.GetEmployeeByPersonalEmail(goCtx, ctx.TenantID, employee.PersonalEmail)
+		if err != nil {
+			return nil, err
+		}
+		if ok && existing.ID != employee.ID {
+			fields = append(fields, FieldError{Tab: "basic_info", Field: "personal_email", Code: "unique", Message: "personal_email already exists"})
+		}
+	}
 	if employee.AccountID != "" {
 		existing, ok, err := store.GetEmployeeByAccountID(goCtx, ctx.TenantID, employee.AccountID)
 		if err != nil {
@@ -1138,6 +1149,19 @@ func (c HRService) employeeUniqueFieldErrors(ctx RequestContext, store employeeU
 		}
 		if ok && existing.ID != employee.ID {
 			fields = append(fields, FieldError{Tab: "basic_info", Field: "account_id", Code: "unique", Message: "account_id already linked"})
+		}
+	}
+	for _, field := range employeeUniqueBasicInfoFields {
+		value := stringFromMap(employee.BasicInfo, field)
+		if value == "" {
+			continue
+		}
+		existing, ok, err := store.GetEmployeeByBasicInfoField(goCtx, ctx.TenantID, field, value)
+		if err != nil {
+			return nil, err
+		}
+		if ok && existing.ID != employee.ID {
+			fields = append(fields, FieldError{Tab: "basic_info", Field: field, Code: "unique", Message: field + " already exists"})
 		}
 	}
 	return fields, nil
@@ -1148,7 +1172,7 @@ func (c HRService) employeeUniqueFieldErrorsFromList(ctx RequestContext, employe
 	if err != nil {
 		return nil, err
 	}
-	fields := make([]FieldError, 0, 3)
+	fields := make([]FieldError, 0, 8)
 	for _, existing := range existingEmployees {
 		if existing.ID == employee.ID {
 			continue
@@ -1156,14 +1180,34 @@ func (c HRService) employeeUniqueFieldErrorsFromList(ctx RequestContext, employe
 		if employee.EmployeeNo != "" && existing.EmployeeNo == employee.EmployeeNo {
 			fields = append(fields, FieldError{Tab: "basic_info", Field: "employee_no", Code: "unique", Message: "employee_no already exists"})
 		}
-		if employee.CompanyEmail != "" && existing.CompanyEmail == employee.CompanyEmail {
+		if employee.CompanyEmail != "" && strings.EqualFold(existing.CompanyEmail, employee.CompanyEmail) {
 			fields = append(fields, FieldError{Tab: "basic_info", Field: "company_email", Code: "unique", Message: "company_email already exists"})
+		}
+		if employee.PersonalEmail != "" && strings.EqualFold(existing.PersonalEmail, employee.PersonalEmail) {
+			fields = append(fields, FieldError{Tab: "basic_info", Field: "personal_email", Code: "unique", Message: "personal_email already exists"})
 		}
 		if employee.AccountID != "" && existing.AccountID == employee.AccountID {
 			fields = append(fields, FieldError{Tab: "basic_info", Field: "account_id", Code: "unique", Message: "account_id already linked"})
 		}
+		for _, field := range employeeUniqueBasicInfoFields {
+			value := stringFromMap(employee.BasicInfo, field)
+			if value == "" {
+				continue
+			}
+			if strings.EqualFold(stringFromMap(existing.BasicInfo, field), value) {
+				fields = append(fields, FieldError{Tab: "basic_info", Field: field, Code: "unique", Message: field + " already exists"})
+			}
+		}
 	}
 	return fields, nil
+}
+
+var employeeUniqueBasicInfoFields = []string{
+	"national_id",
+	"passport_no",
+	"arc_no",
+	"tax_id",
+	"work_permit_no",
 }
 
 func (c HRService) generateEmployeeNo(ctx RequestContext, reservedEmployeeNos ...map[string]struct{}) (string, error) {
@@ -1789,7 +1833,7 @@ func (c HRService) EmployeeImportTemplate(ctx RequestContext, format string) ([]
 }
 
 func employeePreviewResponse(employee Employee, diff map[string]any) EmployeePreviewResponse {
-	return EmployeePreviewResponse{Employee: employee, Diff: diff, Valid: true}
+	return EmployeePreviewResponse{Employee: employee, Detail: domain.EmployeeDetailFromEmployee(employee), Diff: diff, Valid: true}
 }
 
 func employeeQueryApprovalFilters(query EmployeeQuery) map[string]any {

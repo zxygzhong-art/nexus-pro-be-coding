@@ -194,9 +194,19 @@ WHERE tenant_id = $1 AND employee_no = $2 AND employee_no <> '';
 SELECT * FROM employees
 WHERE tenant_id = sqlc.arg(tenant_id) AND lower(company_email) = lower(sqlc.arg(company_email)) AND company_email <> '';
 
+-- name: GetEmployeeByPersonalEmail :one
+SELECT * FROM employees
+WHERE tenant_id = sqlc.arg(tenant_id) AND lower(personal_email) = lower(sqlc.arg(personal_email)) AND personal_email <> '';
+
 -- name: GetEmployeeByAccountID :one
 SELECT * FROM employees
 WHERE tenant_id = $1 AND account_id = $2 AND account_id <> '';
+
+-- name: GetEmployeeByBasicInfoField :one
+SELECT * FROM employees
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND lower(coalesce(basic_info ->> sqlc.arg(field_name)::text, '')) = lower(sqlc.arg(field_value))
+  AND coalesce(basic_info ->> sqlc.arg(field_name)::text, '') <> '';
 
 -- name: ListEmployees :many
 SELECT * FROM employees

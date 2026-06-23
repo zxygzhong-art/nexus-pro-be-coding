@@ -1316,21 +1316,24 @@ func TestEmployeeCreateRejectsDuplicateUniqueFields(t *testing.T) {
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-linked", TenantID: "tenant-1", Status: "active", CreatedAt: now})
 	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "HQ", Path: []string{"ou-1"}, CreatedAt: now})
 	store.UpsertEmployee(context.Background(), domain.Employee{
-		ID:           "emp-existing",
-		TenantID:     "tenant-1",
-		EmployeeNo:   "E1001",
-		Name:         "Existing Employee",
-		CompanyEmail: "duplicate@example.com",
-		AccountID:    "acct-linked",
-		Status:       "active",
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:            "emp-existing",
+		TenantID:      "tenant-1",
+		EmployeeNo:    "E1001",
+		Name:          "Existing Employee",
+		CompanyEmail:  "duplicate@example.com",
+		PersonalEmail: "personal.duplicate@example.com",
+		AccountID:     "acct-linked",
+		Status:        "active",
+		BasicInfo:     map[string]any{"national_id": "A123456789"},
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	})
 	svc := service.New(store)
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
 	input := validEmployeeInput("E1001", "Duplicate Employee", "duplicate@example.com")
 	input.AccountID = "acct-linked"
+	input.PersonalEmail = "PERSONAL.DUPLICATE@example.com"
 	_, err := svc.HR().CreateEmployee(ctx, input)
 	if err == nil {
 		t.Fatal("expected duplicate unique fields to fail")
@@ -1343,7 +1346,7 @@ func TestEmployeeCreateRejectsDuplicateUniqueFields(t *testing.T) {
 	for _, field := range appErr.FieldErrors {
 		codes[field.Field] = field.Code
 	}
-	for _, field := range []string{"employee_no", "company_email", "account_id"} {
+	for _, field := range []string{"employee_no", "company_email", "personal_email", "account_id", "national_id"} {
 		if codes[field] != "unique" {
 			t.Fatalf("expected %s unique error, got %+v", field, appErr.FieldErrors)
 		}

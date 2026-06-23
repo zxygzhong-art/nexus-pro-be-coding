@@ -488,8 +488,30 @@ func (s *Store) GetEmployeeByCompanyEmail(execCtx context.Context, tenantID, com
 	return fromEmployee(v), true, nil
 }
 
+func (s *Store) GetEmployeeByPersonalEmail(execCtx context.Context, tenantID, personalEmail string) (domain.Employee, bool, error) {
+	v, err := s.q.GetEmployeeByPersonalEmail(execCtx, sqlc.GetEmployeeByPersonalEmailParams{TenantID: tenantID, PersonalEmail: personalEmail})
+	if isNotFound(err) {
+		return domain.Employee{}, false, nil
+	}
+	if err != nil {
+		return domain.Employee{}, false, err
+	}
+	return fromEmployee(v), true, nil
+}
+
 func (s *Store) GetEmployeeByAccountID(execCtx context.Context, tenantID, accountID string) (domain.Employee, bool, error) {
 	v, err := s.q.GetEmployeeByAccountID(execCtx, sqlc.GetEmployeeByAccountIDParams{TenantID: tenantID, AccountID: accountID})
+	if isNotFound(err) {
+		return domain.Employee{}, false, nil
+	}
+	if err != nil {
+		return domain.Employee{}, false, err
+	}
+	return fromEmployee(v), true, nil
+}
+
+func (s *Store) GetEmployeeByBasicInfoField(execCtx context.Context, tenantID, fieldName, fieldValue string) (domain.Employee, bool, error) {
+	v, err := s.q.GetEmployeeByBasicInfoField(execCtx, sqlc.GetEmployeeByBasicInfoFieldParams{TenantID: tenantID, FieldName: fieldName, FieldValue: fieldValue})
 	if isNotFound(err) {
 		return domain.Employee{}, false, nil
 	}

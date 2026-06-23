@@ -280,15 +280,6 @@ func approvalPayloadMatchesAny(payload map[string]any, expected string, keys ...
 	return false
 }
 
-func payloadHasAny(payload map[string]any, keys ...string) bool {
-	for _, key := range keys {
-		if _, ok := payload[key]; ok {
-			return true
-		}
-	}
-	return false
-}
-
 func approvalPayloadValueMatches(actual, expected any) bool {
 	actualJSON, actualErr := json.Marshal(actual)
 	expectedJSON, expectedErr := json.Marshal(expected)
@@ -425,20 +416,6 @@ func (c *Service) resolveAccess(ctx RequestContext, account Account) ([]Permissi
 	}
 
 	return permissions, permissionSets, groups, nil
-}
-
-func (c *Service) canAssumeRole(ctx RequestContext, account Account, role AssumableRole) (bool, error) {
-	decision, err := c.evaluateAuthz(ctx, account, CheckRequest{
-		ApplicationCode: AppIAM,
-		ResourceType:    ResourceAssumableRole,
-		ResourceID:      role.ID,
-		Target:          role.ID,
-		Action:          ActionAssume,
-	})
-	if err != nil {
-		return false, err
-	}
-	return decision.Allowed, nil
 }
 
 func (c *Service) audit(ctx RequestContext, action, resource, target, severity string, details map[string]any) error {

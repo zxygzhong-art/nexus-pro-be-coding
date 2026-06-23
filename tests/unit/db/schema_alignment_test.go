@@ -60,6 +60,9 @@ func TestEmployeeIntegrityConstraintsStayInSchema(t *testing.T) {
 	schema := string(raw)
 	required := []string{
 		"CREATE UNIQUE INDEX employees_tenant_company_email_idx ON employees (tenant_id, lower(company_email)) WHERE company_email <> '';",
+		"CREATE UNIQUE INDEX employees_tenant_personal_email_idx ON employees (tenant_id, lower(personal_email)) WHERE personal_email <> '';",
+		"CREATE UNIQUE INDEX employees_tenant_national_id_idx ON employees (tenant_id, lower(basic_info->>'national_id')) WHERE coalesce(basic_info->>'national_id', '') <> '';",
+		"CREATE UNIQUE INDEX employees_tenant_passport_no_idx ON employees (tenant_id, lower(basic_info->>'passport_no')) WHERE coalesce(basic_info->>'passport_no', '') <> '';",
 		"CREATE OR REPLACE FUNCTION validate_employee_references()",
 		"IF NEW.account_id <> '' AND NOT EXISTS",
 		"IF NEW.org_unit_id <> '' AND NOT EXISTS",

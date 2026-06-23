@@ -42,6 +42,16 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 	if err := store.UpsertEmployee(ctx, domain.Employee{ID: empB, TenantID: tenantB, Name: "Tenant B", CompanyEmail: empB + "@example.com", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
+	t.Run("employee RLS isolates tenant visibility", func(t *testing.T) {
+		requireRLSCapableUser(t, pool)
+		if got := countEmployeesVisibleViaRLS(t, pool, tenantA, empA); got != 1 {
+			t.Fatalf("expected tenant A RLS scope to see employee %s once, got %d", empA, got)
+		}
+		if got := countEmployeesVisibleViaRLS(t, pool, tenantB, empA); got != 0 {
+			t.Fatalf("expected tenant B RLS scope not to see tenant A employee %s, got %d", empA, got)
+		}
+	})
+
 	employees, err := store.ListEmployees(ctx, tenantA)
 	if err != nil {
 		t.Fatal(err)
@@ -147,12 +157,24 @@ func TestHRCoreCRUDPostgresAcceptanceSemantics(t *testing.T) {
 	if err := store.UpsertAccount(ctx, domain.Account{ID: accountID, TenantID: tenantA, Status: "active", DirectPermissionSetIDs: []string{"ps_" + suffix}, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.UpsertOrgUnit(ctx, domain.OrgUnit{ID: "ou_" + suffix, TenantID: tenantA, Name: "HQ " + suffix, Path: []string{"ou_" + suffix}, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
 	app := service.New(store)
 	reqCtx := domain.RequestContext{TenantID: tenantA, AccountID: accountID, RequestID: "it-" + suffix, ApprovalConfirmed: true}
 
-	created, err := app.HR().CreateEmployee(reqCtx, domain.CreateEmployeeInput{Name: "Integration One", CompanyEmail: "one_" + suffix + "@example.com", Status: "active", EmploymentStatus: "active"})
+	created, err := app.HR().CreateEmployee(reqCtx, validEmployeeCreateInput(suffix, "Integration One", "one_"+suffix+"@example.com"))
 	if err != nil {
 		t.Fatal(err)
+	}
+	detail := domain.EmployeeDetailFromEmployee(created)
+	if detail.Sections.BasicInfo.NationalID == "" ||
+		detail.Sections.EmploymentInfo.OrgUnitID == "" ||
+		detail.Sections.EducationMilitaryInfo.HighestEducation == "" ||
+		detail.Sections.ContactInfo.MobilePhone == "" ||
+		detail.Sections.InsuranceInfo.LaborInsuranceSalary == nil ||
+		len(detail.Sections.InternalExperiences) == 0 {
+		t.Fatalf("expected complete six-section employee detail, got %+v", detail.Sections)
 	}
 	if _, ok, err := store.GetEmployee(ctx, tenantB, created.ID); err != nil || ok {
 		t.Fatalf("tenant B should not read tenant A employee, ok=%v err=%v", ok, err)
@@ -212,12 +234,9 @@ func TestHRCoreCRUDPostgresAcceptanceSemantics(t *testing.T) {
 
 func openIntegrationPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("TEST_DATABASE_URL"))
+	dsn := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if dsn == "" {
-		dsn = strings.TrimSpace(os.Getenv("DATABASE_URL"))
-	}
-	if dsn == "" {
-		t.Skip("TEST_DATABASE_URL/DATABASE_URL is not set; skipping postgres integration test")
+		t.Skip("DATABASE_URL is not set; skipping postgres integration test")
 	}
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
@@ -247,5 +266,90 @@ func requireMigratedSchema(t *testing.T, pool *pgxpool.Pool) {
 	}
 	if !ready {
 		t.Skip("postgres schema is not migrated; skipping integration semantics test")
+	}
+}
+
+func requireRLSCapableUser(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var bypassesRLS bool
+	if err := pool.QueryRow(ctx, "select rolsuper or rolbypassrls from pg_roles where rolname = current_user").Scan(&bypassesRLS); err != nil {
+		t.Fatal(err)
+	}
+	if bypassesRLS {
+		t.Skip("current DATABASE_URL user bypasses RLS; use a non-superuser role to run RLS integration checks")
+	}
+}
+
+func countEmployeesVisibleViaRLS(t *testing.T, pool *pgxpool.Pool, tenantID, employeeID string) int {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	tx, err := pool.Begin(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer tx.Rollback(ctx)
+	if _, err := tx.Exec(ctx, "SELECT set_config('app.tenant_id', $1, true)", tenantID); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err := tx.QueryRow(ctx, "SELECT count(*) FROM employees WHERE id = $1", employeeID).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	return count
+}
+
+func validEmployeeCreateInput(suffix, name, email string) domain.CreateEmployeeInput {
+	orgUnitID := "ou_" + suffix
+	return domain.CreateEmployeeInput{
+		EmployeeNo:       "E" + strings.NewReplacer("_", "", "-", "").Replace(suffix),
+		Name:             name,
+		CompanyEmail:     email,
+		PersonalEmail:    "personal_" + suffix + "@example.com",
+		Phone:            "0911222333",
+		OrgUnitID:        orgUnitID,
+		Position:         "Engineer",
+		Category:         "full_time",
+		Status:           "active",
+		EmploymentStatus: "active",
+		HireDate:         "2026-06-01",
+		BasicInfo: map[string]any{
+			"name":             name,
+			"company_email":    email,
+			"personal_email":   "personal_" + suffix + "@example.com",
+			"nationality_type": "local",
+			"national_id":      "ID-" + suffix,
+		},
+		EmploymentInfo: map[string]any{
+			"org_unit_id":         orgUnitID,
+			"position":            "Engineer",
+			"category":            "full_time",
+			"employment_status":   "active",
+			"hire_date":           "2026-06-01",
+			"tenure_start_date":   "2026-06-01",
+			"manager_employee_id": "",
+		},
+		EducationMilitaryInfo: map[string]any{
+			"highest_education": "master",
+			"school":            "NTU",
+			"graduation_date":   "2025-06-01",
+		},
+		ContactInfo: map[string]any{
+			"mobile_phone":               "0911222333",
+			"address":                    "Taipei",
+			"emergency_contact_relation": "spouse",
+			"emergency_contact_name":     "Emergency Contact",
+			"emergency_contact_phone":    "0922333444",
+		},
+		InsuranceInfo: map[string]any{
+			"labor_insurance_date":    "2026-06-01",
+			"labor_insurance_level":   "L1",
+			"labor_insurance_salary":  "45800",
+			"health_insurance_date":   "2026-06-01",
+			"health_insurance_level":  "H1",
+			"health_insurance_amount": "826",
+		},
 	}
 }

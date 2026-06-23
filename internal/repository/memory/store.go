@@ -367,10 +367,32 @@ func (s *Store) GetEmployeeByCompanyEmail(_ context.Context, tenantID, companyEm
 	})
 }
 
+func (s *Store) GetEmployeeByPersonalEmail(_ context.Context, tenantID, personalEmail string) (Employee, bool, error) {
+	email := strings.ToLower(strings.TrimSpace(personalEmail))
+	if email == "" {
+		return Employee{}, false, nil
+	}
+	return s.getEmployeeBy(tenantID, func(v Employee) bool {
+		return strings.ToLower(strings.TrimSpace(v.PersonalEmail)) == email
+	})
+}
+
 func (s *Store) GetEmployeeByAccountID(_ context.Context, tenantID, accountID string) (Employee, bool, error) {
 	accountID = strings.TrimSpace(accountID)
 	return s.getEmployeeBy(tenantID, func(v Employee) bool {
 		return v.AccountID == accountID
+	})
+}
+
+func (s *Store) GetEmployeeByBasicInfoField(_ context.Context, tenantID, fieldName, fieldValue string) (Employee, bool, error) {
+	fieldName = strings.TrimSpace(fieldName)
+	fieldValue = strings.ToLower(strings.TrimSpace(fieldValue))
+	if fieldName == "" || fieldValue == "" {
+		return Employee{}, false, nil
+	}
+	return s.getEmployeeBy(tenantID, func(v Employee) bool {
+		value, _ := v.BasicInfo[fieldName].(string)
+		return strings.ToLower(strings.TrimSpace(value)) == fieldValue
 	})
 }
 

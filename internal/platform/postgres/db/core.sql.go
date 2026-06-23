@@ -304,6 +304,51 @@ func (q *Queries) GetEmployeeByAccountID(ctx context.Context, arg GetEmployeeByA
 	return i, err
 }
 
+const getEmployeeByBasicInfoField = `-- name: GetEmployeeByBasicInfoField :one
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+WHERE tenant_id = $1
+  AND lower(coalesce(basic_info ->> $2::text, '')) = lower($3)
+  AND coalesce(basic_info ->> $2::text, '') <> ''
+`
+
+type GetEmployeeByBasicInfoFieldParams struct {
+	TenantID   string `json:"tenant_id"`
+	FieldName  string `json:"field_name"`
+	FieldValue string `json:"field_value"`
+}
+
+func (q *Queries) GetEmployeeByBasicInfoField(ctx context.Context, arg GetEmployeeByBasicInfoFieldParams) (Employee, error) {
+	row := q.db.QueryRow(ctx, getEmployeeByBasicInfoField, arg.TenantID, arg.FieldName, arg.FieldValue)
+	var i Employee
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeNo,
+		&i.Name,
+		&i.CompanyEmail,
+		&i.PersonalEmail,
+		&i.Phone,
+		&i.OrgUnitID,
+		&i.AccountID,
+		&i.ManagerEmployeeID,
+		&i.Position,
+		&i.Category,
+		&i.Status,
+		&i.EmploymentStatus,
+		&i.HireDate,
+		&i.ResignDate,
+		&i.BasicInfo,
+		&i.EmploymentInfo,
+		&i.EducationMilitaryInfo,
+		&i.ContactInfo,
+		&i.InsuranceInfo,
+		&i.InternalExperiences,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getEmployeeByCompanyEmail = `-- name: GetEmployeeByCompanyEmail :one
 SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1 AND lower(company_email) = lower($2) AND company_email <> ''
@@ -358,6 +403,48 @@ type GetEmployeeByEmployeeNoParams struct {
 
 func (q *Queries) GetEmployeeByEmployeeNo(ctx context.Context, arg GetEmployeeByEmployeeNoParams) (Employee, error) {
 	row := q.db.QueryRow(ctx, getEmployeeByEmployeeNo, arg.TenantID, arg.EmployeeNo)
+	var i Employee
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeNo,
+		&i.Name,
+		&i.CompanyEmail,
+		&i.PersonalEmail,
+		&i.Phone,
+		&i.OrgUnitID,
+		&i.AccountID,
+		&i.ManagerEmployeeID,
+		&i.Position,
+		&i.Category,
+		&i.Status,
+		&i.EmploymentStatus,
+		&i.HireDate,
+		&i.ResignDate,
+		&i.BasicInfo,
+		&i.EmploymentInfo,
+		&i.EducationMilitaryInfo,
+		&i.ContactInfo,
+		&i.InsuranceInfo,
+		&i.InternalExperiences,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getEmployeeByPersonalEmail = `-- name: GetEmployeeByPersonalEmail :one
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+WHERE tenant_id = $1 AND lower(personal_email) = lower($2) AND personal_email <> ''
+`
+
+type GetEmployeeByPersonalEmailParams struct {
+	TenantID      string `json:"tenant_id"`
+	PersonalEmail string `json:"personal_email"`
+}
+
+func (q *Queries) GetEmployeeByPersonalEmail(ctx context.Context, arg GetEmployeeByPersonalEmailParams) (Employee, error) {
+	row := q.db.QueryRow(ctx, getEmployeeByPersonalEmail, arg.TenantID, arg.PersonalEmail)
 	var i Employee
 	err := row.Scan(
 		&i.ID,

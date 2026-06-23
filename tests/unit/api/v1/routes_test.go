@@ -84,10 +84,10 @@ func TestDocumentedJSONSuccessResponsesUseDataEnvelope(t *testing.T) {
 	refs := openAPISuccessJSONSchemaRefs(t)
 	expected := map[string]string{
 		"GET /v1/hr/employees 200":                         "EmployeeListDataResponse",
-		"POST /v1/hr/employees 201":                        "EmployeeDataResponse",
+		"POST /v1/hr/employees 201":                        "EmployeeDetailDataResponse",
 		"POST /v1/hr/employees/preview 200":                "EmployeePreviewDataResponse",
-		"GET /v1/hr/employees/{id} 200":                    "EmployeeDataResponse",
-		"PATCH /v1/hr/employees/{id} 200":                  "EmployeeDataResponse",
+		"GET /v1/hr/employees/{id} 200":                    "EmployeeDetailDataResponse",
+		"PATCH /v1/hr/employees/{id} 200":                  "EmployeeDetailDataResponse",
 		"DELETE /v1/hr/employees/{id} 200":                 "EmployeeDataResponse",
 		"POST /v1/hr/employees/{id}/preview 200":           "EmployeePreviewDataResponse",
 		"POST /v1/hr/employees/{id}/avatar 200":            "EmployeeDataResponse",

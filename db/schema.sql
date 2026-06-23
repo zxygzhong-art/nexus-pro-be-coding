@@ -546,6 +546,12 @@ CREATE INDEX employees_keyword_trgm_idx ON employees USING gin (
 CREATE UNIQUE INDEX employees_tenant_employee_no_idx ON employees (tenant_id, employee_no) WHERE employee_no <> '';
 CREATE UNIQUE INDEX employees_tenant_account_id_idx ON employees (tenant_id, account_id) WHERE account_id <> '';
 CREATE UNIQUE INDEX employees_tenant_company_email_idx ON employees (tenant_id, lower(company_email)) WHERE company_email <> '';
+CREATE UNIQUE INDEX employees_tenant_personal_email_idx ON employees (tenant_id, lower(personal_email)) WHERE personal_email <> '';
+CREATE UNIQUE INDEX employees_tenant_national_id_idx ON employees (tenant_id, lower(basic_info->>'national_id')) WHERE coalesce(basic_info->>'national_id', '') <> '';
+CREATE UNIQUE INDEX employees_tenant_passport_no_idx ON employees (tenant_id, lower(basic_info->>'passport_no')) WHERE coalesce(basic_info->>'passport_no', '') <> '';
+CREATE UNIQUE INDEX employees_tenant_arc_no_idx ON employees (tenant_id, lower(basic_info->>'arc_no')) WHERE coalesce(basic_info->>'arc_no', '') <> '';
+CREATE UNIQUE INDEX employees_tenant_tax_id_idx ON employees (tenant_id, lower(basic_info->>'tax_id')) WHERE coalesce(basic_info->>'tax_id', '') <> '';
+CREATE UNIQUE INDEX employees_tenant_work_permit_no_idx ON employees (tenant_id, lower(basic_info->>'work_permit_no')) WHERE coalesce(basic_info->>'work_permit_no', '') <> '';
 
 CREATE TABLE employee_number_sequences (
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

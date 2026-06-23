@@ -41,7 +41,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmployeeDataResponse"
+                $ref: "#/components/schemas/EmployeeDetailDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -81,7 +81,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmployeeDataResponse"
+                $ref: "#/components/schemas/EmployeeDetailDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -104,7 +104,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EmployeeDataResponse"
+                $ref: "#/components/schemas/EmployeeDetailDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -920,6 +920,12 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/Employee"
+    EmployeeDetailDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EmployeeDetail"
     EmployeeListDataResponse:
       type: object
       required: [data]
@@ -978,6 +984,124 @@ components:
             tenant_id: {type: string}
             created_at: {type: string, format: date-time}
             updated_at: {type: string, format: date-time}
+    EmployeeDetail:
+      description: Backward-compatible employee detail with explicit modal sections.
+      allOf:
+        - $ref: "#/components/schemas/Employee"
+        - type: object
+          required: [preview, sections]
+          properties:
+            preview:
+              $ref: "#/components/schemas/EmployeeDetailPreview"
+            sections:
+              $ref: "#/components/schemas/EmployeeSections"
+    EmployeeDetailPreview:
+      type: object
+      required: [id, name, status, created_at, updated_at]
+      properties:
+        id: {type: string}
+        employee_no: {type: string}
+        name: {type: string}
+        company_email: {type: string, format: email}
+        personal_email: {type: string, format: email}
+        phone: {type: string}
+        org_unit_id: {type: string}
+        account_id: {type: string}
+        manager_employee_id: {type: string}
+        position: {type: string}
+        category:
+          $ref: "#/components/schemas/EmployeeCategory"
+        status:
+          $ref: "#/components/schemas/EmployeeStatusWithDeleted"
+        employment_status:
+          $ref: "#/components/schemas/EmployeeStatusWithDeleted"
+        hire_date: {type: string, format: date-time}
+        resign_date: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    EmployeeSections:
+      type: object
+      required: [basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences]
+      properties:
+        basic_info: {$ref: "#/components/schemas/EmployeeBasicInfoSection"}
+        employment_info: {$ref: "#/components/schemas/EmployeeEmploymentInfoSection"}
+        education_military_info: {$ref: "#/components/schemas/EmployeeEducationMilitaryInfoSection"}
+        contact_info: {$ref: "#/components/schemas/EmployeeContactInfoSection"}
+        insurance_info: {$ref: "#/components/schemas/EmployeeInsuranceInfoSection"}
+        internal_experiences:
+          type: array
+          description: Replaced as a whole when submitted in EmployeePatch.
+          items: {$ref: "#/components/schemas/EmployeeExperience"}
+    EmployeeBasicInfoSection:
+      type: object
+      additionalProperties: true
+      properties:
+        name: {type: string}
+        company_email: {type: string, format: email}
+        personal_email: {type: string, format: email}
+        nationality_type: {type: string, enum: [local, foreign]}
+        national_id: {type: string}
+        passport_no: {type: string}
+        passport_name: {type: string}
+        entry_date: {type: string}
+        arc_no: {type: string}
+        arc_expiry_date: {type: string}
+        tax_id: {type: string}
+        work_permit_no: {type: string}
+        work_permit_expiry_date: {type: string}
+        contract_expiry_date: {type: string}
+        broker: {type: string}
+        avatar:
+          type: object
+          additionalProperties: true
+    EmployeeEmploymentInfoSection:
+      type: object
+      additionalProperties: true
+      properties:
+        org_unit_id: {type: string}
+        position: {type: string}
+        category: {$ref: "#/components/schemas/EmployeeCategory"}
+        manager_employee_id: {type: string}
+        employment_status:
+          $ref: "#/components/schemas/EmployeeStatusWithDeleted"
+        hire_date: {type: string}
+        resign_date: {type: string}
+        resign_reason: {type: string}
+        shift: {type: string}
+        tenure_start_date: {type: string}
+    EmployeeEducationMilitaryInfoSection:
+      type: object
+      additionalProperties: true
+      properties:
+        highest_education: {type: string}
+        education_level: {type: string}
+        degree: {type: string}
+        school: {type: string}
+        school_name: {type: string}
+        graduation_date: {type: string}
+        military_status: {type: string}
+        military_service_status: {type: string}
+    EmployeeContactInfoSection:
+      type: object
+      additionalProperties: true
+      properties:
+        mobile_phone: {type: string}
+        phone: {type: string}
+        address: {type: string}
+        communication_address: {type: string}
+        emergency_contact_relation: {type: string}
+        emergency_contact_name: {type: string}
+        emergency_contact_phone: {type: string}
+    EmployeeInsuranceInfoSection:
+      type: object
+      additionalProperties: true
+      properties:
+        labor_insurance_date: {type: string}
+        labor_insurance_level: {type: string}
+        labor_insurance_salary: {type: number}
+        health_insurance_date: {type: string}
+        health_insurance_level: {type: string}
+        health_insurance_amount: {type: number}
     EmployeeInput:
       type: object
       required: [name, company_email, org_unit_id, position, category, hire_date, basic_info, employment_info, education_military_info, contact_info, insurance_info]
@@ -1010,6 +1134,7 @@ components:
           items: {$ref: "#/components/schemas/EmployeeExperience"}
     EmployeePatch:
       type: object
+      description: Omitted scalar fields and omitted sections are preserved. Object sections are merged key-by-key. internal_experiences is replaced as a whole when provided.
       properties:
         employee_no: {type: string}
         name: {type: string}
@@ -1073,9 +1198,10 @@ components:
         created_at: {type: string, format: date-time}
     EmployeePreviewResponse:
       type: object
-      required: [employee, valid]
+      required: [employee, detail, valid]
       properties:
         employee: {$ref: "#/components/schemas/Employee"}
+        detail: {$ref: "#/components/schemas/EmployeeDetail"}
         valid: {type: boolean}
         field_errors:
           type: array
