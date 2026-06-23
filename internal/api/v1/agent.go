@@ -9,11 +9,13 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
+// AgentCtrl wires agent run endpoints to the agent service facade.
 type AgentCtrl struct {
 	routes routeBinder
 	svc    service.AgentFacade
 }
 
+// RegisterRoutes attaches agent run routes to the v1 route group.
 func (c AgentCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	agents := router.Group("/agents")
 	agents.GET("/runs", c.routes.Handle("agent.run", "read", c.listAgentRuns))

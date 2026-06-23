@@ -13,14 +13,17 @@ import (
 	"time"
 )
 
+// AuthzService evaluates permissions, scopes, field policies, and approval requirements.
 type AuthzService struct {
 	*Service
 }
 
+// Authz returns the authorization service facade.
 func (c *Service) Authz() AuthzService {
 	return AuthzService{Service: c}
 }
 
+// Check evaluates one authorization request for the current account context.
 func (c AuthzService) Check(ctx RequestContext, req CheckRequest) (result CheckResult, err error) {
 	ctx, span := startServiceSpan(ctx, "service.authz.check", authzSpanAttributes(req)...)
 	defer func() {
@@ -35,6 +38,7 @@ func (c AuthzService) Check(ctx RequestContext, req CheckRequest) (result CheckR
 	return result, err
 }
 
+// BatchCheck evaluates multiple authorization requests in order.
 func (c AuthzService) BatchCheck(ctx RequestContext, req BatchCheckRequest) (result BatchCheckResult, err error) {
 	ctx, span := startServiceSpan(ctx, "service.authz.batch_check")
 	defer func() {
@@ -52,6 +56,7 @@ func (c AuthzService) BatchCheck(ctx RequestContext, req BatchCheckRequest) (res
 	return BatchCheckResult{Results: results}, nil
 }
 
+// ValidateApprovalInstance verifies approval evidence for a high-risk request.
 func (c AuthzService) ValidateApprovalInstance(ctx RequestContext, req CheckRequest) error {
 	return c.Service.ValidateApprovalInstance(ctx, req)
 }
@@ -1190,6 +1195,7 @@ func stringSliceFromAny(value any) []string {
 	}
 }
 
+// AuthzSnapshotCache stores reusable authorization decisions between permission-version changes.
 type AuthzSnapshotCache interface {
 	GetAuthzSnapshot(ctx context.Context, key string) (CheckResult, bool, error)
 	SetAuthzSnapshot(ctx context.Context, key string, result CheckResult, ttl time.Duration) error

@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// Config contains all environment-backed runtime settings for the API process.
 type Config struct {
 	Env      string
 	HTTPAddr string
@@ -37,6 +38,7 @@ type Config struct {
 	OTelExporterOTLPInsecure bool
 }
 
+// ValidateStartup enforces fail-closed production defaults before the server starts.
 func (c Config) ValidateStartup() error {
 	if c.Env != "production" {
 		return nil
@@ -81,11 +83,13 @@ func (c Config) ValidateStartup() error {
 	return nil
 }
 
+// Load reads configuration and ignores validation errors for legacy callers.
 func Load() Config {
 	cfg, _ := LoadE()
 	return cfg
 }
 
+// LoadE reads configuration and returns all environment parsing errors.
 func LoadE() (Config, error) {
 	appEnv := env("APP_ENV", "development")
 	problems := []string{}

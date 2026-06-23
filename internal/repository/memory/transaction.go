@@ -8,12 +8,14 @@ import (
 
 var _ repository.Store = (*Store)(nil)
 
+// WithTenantTransaction applies writes to a cloned store and commits only on success.
 func (s *Store) WithTenantTransaction(ctx context.Context, tenantID string, fn func(repository.Store) error) error {
 	_ = ctx
 	_ = tenantID
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
+	// Clone-and-swap gives tests transaction semantics without a database.
 	tx := s.cloneLocked()
 	if err := fn(tx); err != nil {
 		return err

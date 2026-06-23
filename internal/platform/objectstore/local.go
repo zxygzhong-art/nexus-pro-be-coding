@@ -8,10 +8,12 @@ import (
 	"strings"
 )
 
+// Local stores objects under a filesystem root while preventing key traversal.
 type Local struct {
 	root string
 }
 
+// NewLocal creates a filesystem-backed object store rooted at root.
 func NewLocal(root string) (*Local, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
@@ -27,6 +29,7 @@ func NewLocal(root string) (*Local, error) {
 	return &Local{root: abs}, nil
 }
 
+// PutObject writes an object to disk after validating the key stays under root.
 func (s *Local) PutObject(ctx context.Context, key string, _ string, data []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -46,6 +49,7 @@ func (s *Local) PutObject(ctx context.Context, key string, _ string, data []byte
 	return os.WriteFile(path, copyData, 0o644)
 }
 
+// DeleteObject removes an object from disk and treats missing files as success.
 func (s *Local) DeleteObject(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {
 		return err

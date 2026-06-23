@@ -16,6 +16,7 @@ import (
 
 const maxOpenFGAErrorBodyLength = 500
 
+// Checker adapts OpenFGA check and write APIs to service-layer interfaces.
 type Checker struct {
 	apiURL  string
 	storeID string
@@ -23,6 +24,7 @@ type Checker struct {
 	client  *http.Client
 }
 
+// NewChecker creates an OpenFGA client for one store.
 func NewChecker(apiURL, storeID string, client *http.Client) *Checker {
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
@@ -34,6 +36,7 @@ func NewChecker(apiURL, storeID string, client *http.Client) *Checker {
 	}
 }
 
+// WithAuthorizationModelID pins checks and health validation to a specific model.
 func (c *Checker) WithAuthorizationModelID(modelID string) *Checker {
 	if c == nil {
 		return c
@@ -42,6 +45,7 @@ func (c *Checker) WithAuthorizationModelID(modelID string) *Checker {
 	return c
 }
 
+// Ping verifies OpenFGA health and the configured authorization model.
 func (c *Checker) Ping(ctx context.Context) error {
 	if c == nil || c.apiURL == "" || c.storeID == "" {
 		return errors.New("openfga checker not configured")
@@ -61,6 +65,7 @@ func (c *Checker) Ping(ctx context.Context) error {
 	return c.verifyAuthorizationModel(ctx)
 }
 
+// CheckRelationship asks OpenFGA whether one relationship tuple is allowed.
 func (c *Checker) CheckRelationship(ctx context.Context, check domain.RelationshipCheck) (bool, error) {
 	if c == nil || c.apiURL == "" || c.storeID == "" {
 		return false, nil
@@ -104,6 +109,7 @@ func (c *Checker) CheckRelationship(ctx context.Context, check domain.Relationsh
 	return payload.Allowed, nil
 }
 
+// WriteRelationshipTuples sends tuple write/delete changes to OpenFGA.
 func (c *Checker) WriteRelationshipTuples(ctx context.Context, changes []domain.AuthzRelationshipTupleChange) error {
 	if c == nil || c.apiURL == "" || c.storeID == "" || len(changes) == 0 {
 		return nil

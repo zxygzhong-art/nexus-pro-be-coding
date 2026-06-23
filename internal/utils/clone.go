@@ -2,6 +2,7 @@ package utils
 
 import "nexus-pro-be/internal/domain"
 
+// CopyStrings returns a defensive copy of a string slice.
 func CopyStrings(src []string) []string {
 	if len(src) == 0 {
 		return nil
@@ -11,6 +12,7 @@ func CopyStrings(src []string) []string {
 	return dst
 }
 
+// CopyStringMap returns a shallow defensive copy of a string-keyed map.
 func CopyStringMap(src map[string]any) map[string]any {
 	if len(src) == 0 {
 		return nil
@@ -22,6 +24,7 @@ func CopyStringMap(src map[string]any) map[string]any {
 	return dst
 }
 
+// CopyStringStringMap returns a defensive copy of a string-to-string map.
 func CopyStringStringMap(src map[string]string) map[string]string {
 	if len(src) == 0 {
 		return nil
@@ -33,6 +36,7 @@ func CopyStringStringMap(src map[string]string) map[string]string {
 	return dst
 }
 
+// CopyEmployeeExperiences returns a defensive copy of employee experience rows.
 func CopyEmployeeExperiences(src []domain.EmployeeExperience) []domain.EmployeeExperience {
 	if len(src) == 0 {
 		return nil

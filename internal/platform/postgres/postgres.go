@@ -8,6 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// OpenPool opens and verifies a PostgreSQL pool with project tracing defaults.
 func OpenPool(ctx context.Context, databaseURL string) (*pgxpool.Pool, error) {
 	if databaseURL == "" {
 		return nil, fmt.Errorf("database url is required")

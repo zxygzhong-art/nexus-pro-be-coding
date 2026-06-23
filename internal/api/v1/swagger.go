@@ -10,8 +10,10 @@ import (
 	apidocs "nexus-pro-be/docs"
 )
 
+// SwaggerCtrl serves the embedded OpenAPI contract and Swagger UI.
 type SwaggerCtrl struct{}
 
+// RegisterRoutes attaches OpenAPI and Swagger UI routes.
 func (SwaggerCtrl) RegisterRoutes(router *gin.Engine) {
 	router.GET("/openapi.yaml", func(c *gin.Context) {
 		c.Data(http.StatusOK, "application/yaml; charset=utf-8", apidocs.OpenAPIYAML)

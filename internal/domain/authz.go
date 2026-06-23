@@ -2,21 +2,40 @@ package domain
 
 import "strings"
 
+// Effect describes whether a permission grants or denies access.
 type Effect string
+
+// Severity describes the audit severity for an authorization-relevant action.
 type Severity string
+
+// PrincipalType identifies the kind of IAM principal receiving permissions.
 type PrincipalType string
+
+// Scope identifies the data visibility boundary for a permission.
 type Scope string
+
+// ApplicationCode identifies the product area owning a permission.
 type ApplicationCode string
+
+// ResourceType identifies the kind of protected resource.
 type ResourceType string
+
+// Action identifies the operation requested on a resource.
 type Action string
+
+// FieldPolicyEffect identifies how a field policy transforms field visibility.
 type FieldPolicyEffect string
+
+// EventType identifies domain events emitted for audit or authorization sync.
 type EventType string
 
+// Permission effects.
 const (
 	EffectAllow Effect = "allow"
 	EffectDeny  Effect = "deny"
 )
 
+// Audit severities.
 const (
 	SeverityLow      Severity = "low"
 	SeverityMedium   Severity = "medium"
@@ -24,12 +43,14 @@ const (
 	SeverityCritical Severity = "critical"
 )
 
+// IAM principal types.
 const (
 	PrincipalTypeAccount       PrincipalType = "account"
 	PrincipalTypeUserGroup     PrincipalType = "user_group"
 	PrincipalTypeAssumableRole PrincipalType = "assumable_role"
 )
 
+// Data scopes used by authorization decisions.
 const (
 	ScopeAll               Scope = "all"
 	ScopeSelf              Scope = "self"
@@ -44,6 +65,7 @@ const (
 	ScopeSystem            Scope = "system"
 )
 
+// Application codes used in route policies and permissions.
 const (
 	AppPlatform   ApplicationCode = "platform"
 	AppHR         ApplicationCode = "hr"
@@ -54,6 +76,7 @@ const (
 	AppAudit      ApplicationCode = "audit"
 )
 
+// Resource types used in route policies and permissions.
 const (
 	ResourceEmployee           ResourceType = "employee"
 	ResourceEmployeeImport     ResourceType = "employee_import_session"
@@ -71,6 +94,7 @@ const (
 	ResourceFormInstance       ResourceType = "form_instance"
 )
 
+// Action values used in route policies and permissions.
 const (
 	ActionRead             Action = "read"
 	ActionCreate           Action = "create"
@@ -87,6 +111,7 @@ const (
 	ActionStatusTransition Action = "status_transition"
 )
 
+// Field policy effects.
 const (
 	FieldPolicyEffectAllow    FieldPolicyEffect = "allow"
 	FieldPolicyEffectDeny     FieldPolicyEffect = "deny"
@@ -95,19 +120,23 @@ const (
 	FieldPolicyEffectReadonly FieldPolicyEffect = "readonly"
 )
 
+// OpenFGA relationship event types.
 const (
 	EventOpenFGARelationshipWrite  EventType = "openfga.relationship.write"
 	EventOpenFGARelationshipDelete EventType = "openfga.relationship.delete"
 )
 
+// RiskLevel describes whether an action needs stronger approval handling.
 type RiskLevel string
 
+// Risk levels used by route policy metadata.
 const (
 	RiskNormal   RiskLevel = "normal"
 	RiskHigh     RiskLevel = "high"
 	RiskCritical RiskLevel = "critical"
 )
 
+// RoutePolicy binds an HTTP route to its authorization metadata.
 type RoutePolicy struct {
 	Name            string
 	Method          string
@@ -118,6 +147,7 @@ type RoutePolicy struct {
 	RiskLevel       RiskLevel
 }
 
+// RelationshipCheck asks an external relationship engine about one tuple.
 type RelationshipCheck struct {
 	TenantID string
 	Subject  string
@@ -125,6 +155,7 @@ type RelationshipCheck struct {
 	Object   string
 }
 
+// AuditEvent returns the canonical audit event name for the check request.
 func (r CheckRequest) AuditEvent() string {
 	req := r
 	if req.ApplicationCode == "" || req.ResourceType == "" {
@@ -162,6 +193,7 @@ func splitResourceName(resource string) (string, string) {
 	return string(AppPlatform), resource
 }
 
+// DefaultRoutePolicies is the source-of-truth authorization metadata for API routes.
 var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "me.read", Method: "GET", Path: "/v1/me", ApplicationCode: "platform", ResourceType: "me", Action: "read"},
 	{Name: "me.menus", Method: "GET", Path: "/v1/me/menus", ApplicationCode: "platform", ResourceType: "me", Action: "read"},

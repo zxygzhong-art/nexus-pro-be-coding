@@ -18,16 +18,19 @@ const (
 	maxOutboxErrorLength         = 500
 )
 
+// RelationshipTupleWriter writes authorization tuple changes to an external relationship system.
 type RelationshipTupleWriter interface {
 	WriteRelationshipTuples(context.Context, []domain.AuthzRelationshipTupleChange) error
 }
 
+// AuthzOutboxOptions controls polling, retry, and batch behavior for tuple sync.
 type AuthzOutboxOptions struct {
 	BatchSize  int
 	MaxRetries int
 	Interval   time.Duration
 }
 
+// AuthzOutboxProcessor drains authorization tuple events from the repository outbox.
 type AuthzOutboxProcessor struct {
 	store  repository.Store
 	writer RelationshipTupleWriter
@@ -35,6 +38,7 @@ type AuthzOutboxProcessor struct {
 	now    func() time.Time
 }
 
+// NewAuthzOutboxProcessor creates a processor for syncing local authz events externally.
 func NewAuthzOutboxProcessor(store repository.Store, writer RelationshipTupleWriter, logger *slog.Logger) *AuthzOutboxProcessor {
 	if logger == nil {
 		logger = slog.Default()
@@ -47,6 +51,7 @@ func NewAuthzOutboxProcessor(store repository.Store, writer RelationshipTupleWri
 	}
 }
 
+// Run processes the outbox immediately and then polls until the context is canceled.
 func (p *AuthzOutboxProcessor) Run(ctx context.Context, opts AuthzOutboxOptions) {
 	opts = normalizeAuthzOutboxOptions(opts)
 	p.processAllTenantsAndLog(ctx, opts)
@@ -62,6 +67,7 @@ func (p *AuthzOutboxProcessor) Run(ctx context.Context, opts AuthzOutboxOptions)
 	}
 }
 
+// ProcessAllTenants drains queued authorization events for every known tenant.
 func (p *AuthzOutboxProcessor) ProcessAllTenants(ctx context.Context, opts AuthzOutboxOptions) (int, error) {
 	opts = normalizeAuthzOutboxOptions(opts)
 	if p == nil || p.store == nil {
@@ -82,6 +88,7 @@ func (p *AuthzOutboxProcessor) ProcessAllTenants(ctx context.Context, opts Authz
 	return processed, nil
 }
 
+// ProcessTenant drains queued authorization events for a single tenant.
 func (p *AuthzOutboxProcessor) ProcessTenant(ctx context.Context, tenantID string, opts AuthzOutboxOptions) (int, error) {
 	opts = normalizeAuthzOutboxOptions(opts)
 	if p == nil || p.store == nil {

@@ -1,14 +1,17 @@
 package service
 
+// MeService resolves the current account profile, permissions, and menu tree.
 type MeService struct {
 	*Service
 	store meStore
 }
 
+// Me returns the current-user service facade.
 func (c *Service) Me() MeService {
 	return MeService{Service: c, store: c.store}
 }
 
+// Resolve builds the current account profile, grants, capabilities, and menu keys.
 func (c MeService) Resolve(ctx RequestContext) (MeResponse, error) {
 	account, tenant, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -64,6 +67,7 @@ func (c MeService) Resolve(ctx RequestContext) (MeResponse, error) {
 	}, nil
 }
 
+// ListMenus returns the menu tree filtered by the current account permissions.
 func (c MeService) ListMenus(ctx RequestContext) ([]MenuNode, error) {
 	me, err := c.Resolve(ctx)
 	if err != nil {

@@ -6,6 +6,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
+// WorkflowStore persists form templates and form instances.
 type WorkflowStore interface {
 	UpsertFormTemplate(context.Context, domain.FormTemplate) error
 	GetFormTemplate(ctx context.Context, tenantID, id string) (domain.FormTemplate, bool, error)

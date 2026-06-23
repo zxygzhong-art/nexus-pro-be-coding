@@ -9,6 +9,7 @@ import (
 
 var idCounter uint64
 
+// NewID returns a stable, sortable-enough local identifier with the given prefix.
 func NewID(prefix string) string {
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" {

@@ -8,10 +8,12 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// HealthCtrl serves process liveness and dependency readiness endpoints.
 type HealthCtrl struct {
 	readinessChecks map[string]ReadinessCheck
 }
 
+// RegisterRoutes attaches liveness and readiness probes outside the versioned API.
 func (c HealthCtrl) RegisterRoutes(router *gin.Engine) {
 	router.GET("/healthz", func(ginCtx *gin.Context) { c.health(ginCtx.Writer, ginCtx.Request) })
 	router.GET("/readyz", func(ginCtx *gin.Context) { c.ready(ginCtx.Writer, ginCtx.Request) })

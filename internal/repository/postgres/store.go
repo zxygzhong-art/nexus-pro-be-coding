@@ -20,6 +20,7 @@ import (
 	"nexus-pro-be/internal/utils/tenantctx"
 )
 
+// Store implements repository.Store using PostgreSQL and generated sqlc queries.
 type Store struct {
 	pool *pgxpool.Pool
 	q    *sqlc.Queries
@@ -28,6 +29,7 @@ type Store struct {
 
 var _ repository.Store = (*Store)(nil)
 
+// NewStore creates a PostgreSQL repository with tenant-scoped query execution.
 func NewStore(pool *pgxpool.Pool) *Store {
 	db := newTenantDBTX(pool)
 	return &Store{pool: pool, q: sqlc.New(db), db: db}
@@ -37,6 +39,7 @@ func tenantContext(ctx context.Context, tenantID string) context.Context {
 	return tenantctx.WithTenantID(ctx, tenantID)
 }
 
+// WithTenantTransaction runs fn inside a PostgreSQL transaction with tenant context set.
 func (s *Store) WithTenantTransaction(execCtx context.Context, tenantID string, fn func(repository.Store) error) error {
 	if s.pool == nil {
 		return fn(s)
@@ -53,6 +56,7 @@ func (s *Store) WithTenantTransaction(execCtx context.Context, tenantID string, 
 			_ = tx.Rollback(execCtx)
 			panic(p)
 		}
+		// Rollback after commit is harmless in pgx and protects every early return path.
 		_ = tx.Rollback(execCtx)
 	}()
 	if _, err := tx.Exec(execCtx, "SELECT set_config('app.tenant_id', $1, true)", tenantID); err != nil {

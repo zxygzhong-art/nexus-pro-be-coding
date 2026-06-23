@@ -1,17 +1,20 @@
 package domain
 
+// Pagination defaults used across list endpoints.
 const (
 	DefaultPage     = 1
 	DefaultPageSize = 20
 	MaxPageSize     = 100
 )
 
+// PageRequest carries common pagination and sorting query parameters.
 type PageRequest struct {
 	Page     int    `json:"page,omitempty"`
 	PageSize int    `json:"page_size,omitempty"`
 	Sort     string `json:"sort,omitempty"`
 }
 
+// PageResponse wraps a paged list and its total item count.
 type PageResponse[T any] struct {
 	Items    []T    `json:"items"`
 	Total    int    `json:"total"`
@@ -20,6 +23,7 @@ type PageResponse[T any] struct {
 	Sort     string `json:"sort"`
 }
 
+// MeResponse returns the current account, tenant, IAM grants, and capabilities.
 type MeResponse struct {
 	Tenant               Tenant          `json:"tenant"`
 	Account              Account         `json:"account"`
@@ -32,11 +36,13 @@ type MeResponse struct {
 	Capabilities         []string        `json:"capabilities"`
 }
 
+// MenuListResponse returns the visible menu tree for the current account.
 type MenuListResponse struct {
 	Items []MenuNode `json:"items"`
 	Total int        `json:"total"`
 }
 
+// AssumeRoleResponse returns the created role session and its effective boundary.
 type AssumeRoleResponse struct {
 	SessionID          string         `json:"session_id"`
 	SessionToken       string         `json:"session_token"`
@@ -47,11 +53,13 @@ type AssumeRoleResponse struct {
 	ExpiresAt          string         `json:"expires_at"`
 }
 
+// AuthzExplainResponse returns an authorization decision with a short explanation.
 type AuthzExplainResponse struct {
 	Decision CheckResult `json:"decision"`
 	Explain  string      `json:"explain"`
 }
 
+// AuthzSimulationResponse returns a simulated authorization decision.
 type AuthzSimulationResponse struct {
 	Decision  CheckResult `json:"decision"`
 	Simulated bool        `json:"simulated"`

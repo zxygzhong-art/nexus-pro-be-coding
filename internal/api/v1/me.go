@@ -9,11 +9,13 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
+// MeCtrl wires current-account endpoints to the me service facade.
 type MeCtrl struct {
 	routes routeBinder
 	svc    service.MeFacade
 }
 
+// RegisterRoutes attaches current-account routes to the v1 route group.
 func (c MeCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	me := router.Group("/me")
 	me.GET("", c.routes.Handle("me", "read", c.getMe))

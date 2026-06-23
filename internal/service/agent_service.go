@@ -7,15 +7,18 @@ import (
 	"strings"
 )
 
+// AgentService implements agent run orchestration and tool authorization.
 type AgentService struct {
 	*Service
 	store agentStore
 }
 
+// Agent returns the agent service facade.
 func (c *Service) Agent() AgentService {
 	return AgentService{Service: c, store: c.store}
 }
 
+// ListRuns returns all visible agent runs for the current tenant.
 func (c AgentService) ListRuns(ctx RequestContext) ([]AgentRun, error) {
 	if _, _, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionRead, ""); err != nil {
 		return nil, err
@@ -23,6 +26,7 @@ func (c AgentService) ListRuns(ctx RequestContext) ([]AgentRun, error) {
 	return c.store.ListAgentRuns(goContext(ctx), ctx.TenantID)
 }
 
+// ListRunPage returns a paginated list of visible agent runs.
 func (c AgentService) ListRunPage(ctx RequestContext, page PageRequest) (PageResponse[AgentRun], error) {
 	if _, _, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionRead, ""); err != nil {
 		return PageResponse[AgentRun]{}, err
@@ -35,6 +39,7 @@ func (c AgentService) ListRunPage(ctx RequestContext, page PageRequest) (PageRes
 	return utils.PageResponseFromStore(items, total, page), nil
 }
 
+// CreateRun creates and completes an agent run after tool authorization.
 func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (AgentRun, error) {
 	account, _, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionCreate, "")
 	if err != nil {
@@ -139,12 +144,14 @@ type agentToolCaller interface {
 	Call(ctx RequestContext, call AgentToolCall) (AgentToolResult, error)
 }
 
+// AgentToolCall describes one tool invocation guarded by authorization.
 type AgentToolCall struct {
 	Name    string
 	Authz   CheckRequest
 	Execute func() (AgentToolResult, error)
 }
 
+// AgentToolResult returns the outcome of an authorized agent tool call.
 type AgentToolResult struct {
 	Name       string
 	Decision   CheckResult
@@ -161,6 +168,7 @@ func (c *Service) agentToolGateway() agentToolCaller {
 	return authzToolGateway{service: c}
 }
 
+// Call authorizes and executes one agent tool invocation.
 func (g authzToolGateway) Call(ctx RequestContext, call AgentToolCall) (AgentToolResult, error) {
 	account, _, err := g.service.resolveAccount(ctx)
 	if err != nil {

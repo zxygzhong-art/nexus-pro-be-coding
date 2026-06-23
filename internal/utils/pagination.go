@@ -6,6 +6,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
+// NormalizePageRequest applies default and maximum pagination limits.
 func NormalizePageRequest(req domain.PageRequest) domain.PageRequest {
 	if req.Page <= 0 {
 		req.Page = domain.DefaultPage
@@ -22,6 +23,7 @@ func NormalizePageRequest(req domain.PageRequest) domain.PageRequest {
 	return req
 }
 
+// PageResponse builds a page response when the item slice already represents one page.
 func PageResponse[T any](items []T, req domain.PageRequest) domain.PageResponse[T] {
 	req = NormalizePageRequest(req)
 	total := len(items)
@@ -44,6 +46,7 @@ func PageResponse[T any](items []T, req domain.PageRequest) domain.PageResponse[
 	}
 }
 
+// PageResponseFromStore builds a page response using a total from the persistence layer.
 func PageResponseFromStore[T any](items []T, total int, req domain.PageRequest) domain.PageResponse[T] {
 	req = NormalizePageRequest(req)
 	if items == nil {
@@ -58,6 +61,7 @@ func PageResponseFromStore[T any](items []T, total int, req domain.PageRequest) 
 	}
 }
 
+// SortSlice sorts items in place using a stable ordering.
 func SortSlice[T any](items []T, less func(a, b T) bool) {
 	sort.SliceStable(items, func(i, j int) bool {
 		return less(items[i], items[j])

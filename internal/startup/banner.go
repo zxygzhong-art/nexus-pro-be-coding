@@ -7,6 +7,7 @@ import (
 	"strings"
 )
 
+// Report is the structured startup summary printed on boot.
 type Report struct {
 	Name         string
 	Env          string
@@ -15,6 +16,7 @@ type Report struct {
 	Dependencies []Dependency
 }
 
+// Dependency describes one optional runtime dependency and its startup state.
 type Dependency struct {
 	Name   string
 	Status string
@@ -22,11 +24,13 @@ type Dependency struct {
 	Detail string
 }
 
+// Print writes the rendered startup report.
 func Print(w io.Writer, report Report) error {
 	_, err := io.WriteString(w, Render(report))
 	return err
 }
 
+// Render formats the startup report for terminal output.
 func Render(report Report) string {
 	name := clean(report.Name)
 	if name == "" {
@@ -73,6 +77,7 @@ func Render(report Report) string {
 	return b.String()
 }
 
+// SafeURL redacts credentials and sensitive query values before logging URLs.
 func SafeURL(raw string) string {
 	value := clean(raw)
 	if value == "" {
@@ -100,6 +105,7 @@ func SafeURL(raw string) string {
 	return parsed.String()
 }
 
+// Missing formats a dependency message for omitted configuration keys.
 func Missing(keys ...string) string {
 	missing := make([]string, 0, len(keys))
 	for _, key := range keys {

@@ -6,6 +6,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
+// IAMStore persists permission sets, assignments, data scopes, and assumable roles.
 type IAMStore interface {
 	UpsertUserGroup(context.Context, domain.UserGroup) error
 	GetUserGroup(ctx context.Context, tenantID, id string) (domain.UserGroup, bool, error)

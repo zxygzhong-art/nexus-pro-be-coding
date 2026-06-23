@@ -6,15 +6,18 @@ import (
 	"nexus-pro-be/internal/utils"
 )
 
+// WorkflowService implements form template and form instance workflows.
 type WorkflowService struct {
 	*Service
 	store workflowStore
 }
 
+// Workflow returns the workflow service facade.
 func (c *Service) Workflow() WorkflowService {
 	return WorkflowService{Service: c, store: c.store}
 }
 
+// ListFormTemplates returns form templates visible to the current account.
 func (c WorkflowService) ListFormTemplates(ctx RequestContext) ([]FormTemplate, error) {
 	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceType("form_template"), ActionRead, ""); err != nil {
 		return nil, err
@@ -22,6 +25,7 @@ func (c WorkflowService) ListFormTemplates(ctx RequestContext) ([]FormTemplate, 
 	return c.store.ListFormTemplates(goContext(ctx), ctx.TenantID)
 }
 
+// ListFormTemplatePage returns paginated form templates.
 func (c WorkflowService) ListFormTemplatePage(ctx RequestContext, page PageRequest) (PageResponse[FormTemplate], error) {
 	items, err := c.ListFormTemplates(ctx)
 	if err != nil {
@@ -31,6 +35,7 @@ func (c WorkflowService) ListFormTemplatePage(ctx RequestContext, page PageReque
 	return utils.PageResponse(items, page), nil
 }
 
+// CreateFormTemplate creates a reusable workflow form template.
 func (c WorkflowService) CreateFormTemplate(ctx RequestContext, input CreateFormTemplateInput) (FormTemplate, error) {
 	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceType("form_template"), ActionCreate, ""); err != nil {
 		return FormTemplate{}, err
@@ -60,6 +65,7 @@ func (c WorkflowService) CreateFormTemplate(ctx RequestContext, input CreateForm
 	return tpl, nil
 }
 
+// SubmitForm creates a submitted form instance for the current account.
 func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (FormInstance, error) {
 	templateKey := strings.TrimSpace(input.TemplateKey)
 	account, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionSubmit, templateKey)
@@ -101,6 +107,7 @@ func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (
 	return instance, nil
 }
 
+// ApproveForm marks a submitted form instance as approved.
 func (c WorkflowService) ApproveForm(ctx RequestContext, id string, _ ApproveFormInput) (FormInstance, error) {
 	_, _, authzAudit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppWorkflow, ResourceType: ResourceFormInstance, ResourceID: id, Action: ActionApprove},

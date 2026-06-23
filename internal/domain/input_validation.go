@@ -2,6 +2,7 @@ package domain
 
 import "strings"
 
+// Validate enforces employee creation rules shared by API and service paths.
 func (in CreateEmployeeInput) Validate() error {
 	fields := make([]FieldError, 0)
 	if strings.TrimSpace(in.Name) == "" {
@@ -45,10 +46,12 @@ func (in CreateEmployeeInput) Validate() error {
 	return nil
 }
 
+// Validate enforces direct employee status update rules.
 func (in UpdateEmployeeStatusInput) Validate() error {
 	return validateEmployeeStatusInput(in.Status, "employee status validation failed")
 }
 
+// Validate enforces employee status transition rules.
 func (in StatusTransitionInput) Validate() error {
 	return validateEmployeeStatusInput(in.Status, "employee status transition validation failed")
 }

@@ -9,11 +9,13 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
+// AttendanceCtrl wires leave endpoints to the attendance service facade.
 type AttendanceCtrl struct {
 	routes routeBinder
 	svc    service.AttendanceFacade
 }
 
+// RegisterRoutes attaches attendance and leave routes to the v1 route group.
 func (c AttendanceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	attendance := router.Group("/attendance")
 	attendance.GET("/leave-balances", c.routes.Handle("attendance.leave", "read", c.listLeaveBalances))

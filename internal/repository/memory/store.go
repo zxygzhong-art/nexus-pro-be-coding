@@ -12,6 +12,7 @@ import (
 	"nexus-pro-be/internal/utils"
 )
 
+// Store is a concurrency-safe in-memory implementation of repository.Store.
 type Store struct {
 	mu sync.RWMutex
 
@@ -41,6 +42,7 @@ type Store struct {
 	relationshipTuples  map[string]map[string]AuthzRelationshipTuple
 }
 
+// NewStore creates an empty in-memory repository.
 func NewStore() *Store {
 	return &Store{
 		tenants:             map[string]Tenant{},

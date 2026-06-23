@@ -21,6 +21,7 @@ func newQueryTracer() pgx.QueryTracer {
 	return queryTracer{tracer: otel.Tracer("nexus-pro-be/internal/platform/postgres")}
 }
 
+// TraceQueryStart starts a client span for a PostgreSQL query.
 func (t queryTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -41,6 +42,7 @@ func (t queryTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.
 	return ctx
 }
 
+// TraceQueryEnd closes the PostgreSQL query span and records errors.
 func (queryTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
 	span := trace.SpanFromContext(ctx)
 	defer span.End()

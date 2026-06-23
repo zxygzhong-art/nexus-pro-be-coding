@@ -2,6 +2,7 @@ package domain
 
 import "time"
 
+// FormTemplate defines a reusable workflow form schema.
 type FormTemplate struct {
 	ID          string         `json:"id"`
 	TenantID    string         `json:"tenant_id"`
@@ -12,6 +13,7 @@ type FormTemplate struct {
 	CreatedAt   time.Time      `json:"created_at"`
 }
 
+// FormInstance records one submitted workflow form and its approval state.
 type FormInstance struct {
 	ID                 string         `json:"id"`
 	TenantID           string         `json:"tenant_id"`
@@ -24,6 +26,7 @@ type FormInstance struct {
 	UpdatedAt          time.Time      `json:"updated_at"`
 }
 
+// CreateFormTemplateInput carries the payload for creating a form template.
 type CreateFormTemplateInput struct {
 	Key         string         `json:"key"`
 	Name        string         `json:"name"`
@@ -31,9 +34,11 @@ type CreateFormTemplateInput struct {
 	Schema      map[string]any `json:"schema,omitempty"`
 }
 
+// SubmitFormInput carries the payload used to submit a workflow form.
 type SubmitFormInput struct {
 	TemplateKey string         `json:"template_key"`
 	Payload     map[string]any `json:"payload,omitempty"`
 }
 
+// ApproveFormInput is reserved for future approval metadata.
 type ApproveFormInput struct{}

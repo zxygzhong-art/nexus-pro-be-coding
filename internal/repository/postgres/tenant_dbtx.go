@@ -10,6 +10,7 @@ import (
 	"nexus-pro-be/internal/utils/tenantctx"
 )
 
+// tenantDBTX injects tenant settings around individual sqlc calls outside explicit transactions.
 type tenantDBTX struct {
 	pool *pgxpool.Pool
 }
@@ -52,6 +53,7 @@ func (db tenantDBTX) Query(ctx context.Context, sql string, args ...interface{})
 		_ = tx.Rollback(ctx)
 		return nil, err
 	}
+	// The transaction remains open until the caller closes or exhausts the rows.
 	return &tenantRows{Rows: rows, tx: tx, ctx: ctx}, nil
 }
 

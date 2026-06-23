@@ -6,6 +6,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
+// AuditStore persists append-only audit logs.
 type AuditStore interface {
 	AppendAuditLog(context.Context, domain.AuditLog) error
 	ListAuditLogs(ctx context.Context, tenantID string) ([]domain.AuditLog, error)

@@ -5,9 +5,13 @@ import (
 	"time"
 )
 
+// EmployeeStatus is the canonical employee lifecycle state.
 type EmployeeStatus string
+
+// EmployeeCategory classifies the employee's employment contract type.
 type EmployeeCategory string
 
+// Employee lifecycle states accepted by HR APIs and imports.
 const (
 	EmployeeStatusActive         EmployeeStatus = "active"
 	EmployeeStatusProbation      EmployeeStatus = "probation"
@@ -17,6 +21,7 @@ const (
 	EmployeeStatusDeleted        EmployeeStatus = "deleted"
 )
 
+// Employee category values accepted by HR APIs and imports.
 const (
 	EmployeeCategoryFullTime   EmployeeCategory = "full_time"
 	EmployeeCategoryPartTime   EmployeeCategory = "part_time"
@@ -25,6 +30,7 @@ const (
 	EmployeeCategoryOther      EmployeeCategory = "other"
 )
 
+// Employee domain event names used for audit and authorization synchronization.
 const (
 	EventEmployeeCreated            EventType = "employee.created"
 	EventEmployeeUpdated            EventType = "employee.updated"
@@ -39,6 +45,7 @@ const (
 	EventEmployeeAuthzSubjectImport EventType = "hr.employee.authz_subject.import"
 )
 
+// OrgUnit represents one node in the tenant's organization hierarchy.
 type OrgUnit struct {
 	ID        string    `json:"id"`
 	TenantID  string    `json:"tenant_id"`
@@ -49,12 +56,14 @@ type OrgUnit struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
+// CreateOrgUnitInput carries the payload for creating an organization unit.
 type CreateOrgUnitInput struct {
 	Code     string `json:"code,omitempty"`
 	Name     string `json:"name"`
 	ParentID string `json:"parent_id,omitempty"`
 }
 
+// Employee is the canonical people-domain profile used by HR and IAM workflows.
 type Employee struct {
 	ID                    string               `json:"id"`
 	TenantID              string               `json:"tenant_id"`
@@ -82,6 +91,7 @@ type Employee struct {
 	UpdatedAt             time.Time            `json:"updated_at"`
 }
 
+// EmployeeExperience records one internal employment or position history item.
 type EmployeeExperience struct {
 	ID                string     `json:"id"`
 	StartDate         *time.Time `json:"start_date,omitempty"`
@@ -95,6 +105,7 @@ type EmployeeExperience struct {
 	CreatedAt         time.Time  `json:"created_at"`
 }
 
+// CreateEmployeeInput carries the full employee creation payload.
 type CreateEmployeeInput struct {
 	EmployeeNo            string               `json:"employee_no,omitempty"`
 	Name                  string               `json:"name"`
@@ -118,6 +129,7 @@ type CreateEmployeeInput struct {
 	InternalExperiences   []EmployeeExperience `json:"internal_experiences,omitempty"`
 }
 
+// UpdateEmployeeInput carries optional employee fields for partial updates.
 type UpdateEmployeeInput struct {
 	EmployeeNo            *string              `json:"employee_no,omitempty"`
 	Name                  *string              `json:"name,omitempty"`
@@ -141,6 +153,7 @@ type UpdateEmployeeInput struct {
 	InternalExperiences   []EmployeeExperience `json:"internal_experiences,omitempty"`
 }
 
+// EmployeeQuery contains filters, pagination, and sorting for employee lists.
 type EmployeeQuery struct {
 	Keyword          string `json:"keyword,omitempty"`
 	DepartmentID     string `json:"department_id,omitempty"`
@@ -151,6 +164,7 @@ type EmployeeQuery struct {
 	Sort             string `json:"sort,omitempty"`
 }
 
+// EmployeeStats summarizes employee counts for dashboard surfaces.
 type EmployeeStats struct {
 	Total          int `json:"total"`
 	Active         int `json:"active"`
@@ -162,6 +176,7 @@ type EmployeeStats struct {
 	LeftThisMonth  int `json:"left_this_month"`
 }
 
+// EmployeeOptions returns selectable HR values visible to the current account.
 type EmployeeOptions struct {
 	Departments        []OrgUnit `json:"departments"`
 	Positions          []string  `json:"positions"`
@@ -171,6 +186,7 @@ type EmployeeOptions struct {
 	JobLevels          []string  `json:"job_levels"`
 }
 
+// EmployeeImportSession stores the preview and confirmation state for one import file.
 type EmployeeImportSession struct {
 	ID          string              `json:"id"`
 	TenantID    string              `json:"tenant_id"`
@@ -184,6 +200,7 @@ type EmployeeImportSession struct {
 	ConfirmedAt *time.Time          `json:"confirmed_at,omitempty"`
 }
 
+// EmployeeImportRow stores parsed input and validation results for one spreadsheet row.
 type EmployeeImportRow struct {
 	RowNumber int                 `json:"row_number"`
 	Input     map[string]string   `json:"input"`
@@ -192,6 +209,7 @@ type EmployeeImportRow struct {
 	Valid     bool                `json:"valid"`
 }
 
+// EmployeePreviewResponse returns validation status and calculated diff for employee edits.
 type EmployeePreviewResponse struct {
 	Employee    Employee       `json:"employee"`
 	FieldErrors []FieldError   `json:"field_errors,omitempty"`
@@ -199,34 +217,41 @@ type EmployeePreviewResponse struct {
 	Valid       bool           `json:"valid"`
 }
 
+// EmployeeAvatarInput carries avatar file metadata and bytes.
 type EmployeeAvatarInput struct {
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	Content     []byte `json:"-"`
 }
 
+// EmployeeImportPreviewInput carries a base64 or text import file payload for preview.
 type EmployeeImportPreviewInput struct {
 	Filename string `json:"filename"`
 	Content  string `json:"content"`
 }
 
+// EmployeeImportConfirmInput selects how a previously previewed import should be applied.
 type EmployeeImportConfirmInput struct {
 	Mode string `json:"mode,omitempty"`
 }
 
+// BatchDeleteEmployeesInput carries the employees and reason for a bulk delete.
 type BatchDeleteEmployeesInput struct {
 	EmployeeIDs []string `json:"employee_ids"`
 	Reason      string   `json:"reason"`
 }
 
+// InviteEmployeeInput carries an optional invite email override.
 type InviteEmployeeInput struct {
 	Email string `json:"email,omitempty"`
 }
 
+// UpdateEmployeeStatusInput carries a direct employee status update.
 type UpdateEmployeeStatusInput struct {
 	Status string `json:"status"`
 }
 
+// StatusTransitionInput carries an employee lifecycle transition and its metadata.
 type StatusTransitionInput struct {
 	Status    string         `json:"status"`
 	Reason    string         `json:"reason,omitempty"`
@@ -235,6 +260,7 @@ type StatusTransitionInput struct {
 	Details   map[string]any `json:"details,omitempty"`
 }
 
+// BatchEmployeeResult reports the outcome for one employee in a bulk operation.
 type BatchEmployeeResult struct {
 	RowNumber  int    `json:"row_number,omitempty"`
 	EmployeeID string `json:"employee_id"`
@@ -243,10 +269,12 @@ type BatchEmployeeResult struct {
 	Message    string `json:"message,omitempty"`
 }
 
+// BatchEmployeeResponse wraps bulk employee operation results.
 type BatchEmployeeResponse struct {
 	Results []BatchEmployeeResult `json:"results"`
 }
 
+// ParseEmployeeStatus normalizes supported localized and API employee status values.
 func ParseEmployeeStatus(raw string) (EmployeeStatus, bool) {
 	switch strings.TrimSpace(raw) {
 	case "在職", "active":
@@ -266,6 +294,7 @@ func ParseEmployeeStatus(raw string) (EmployeeStatus, bool) {
 	}
 }
 
+// NormalizeEmployeeStatus returns a canonical status value when recognized.
 func NormalizeEmployeeStatus(raw string) string {
 	if status, ok := ParseEmployeeStatus(raw); ok {
 		return string(status)
@@ -273,6 +302,7 @@ func NormalizeEmployeeStatus(raw string) string {
 	return strings.TrimSpace(raw)
 }
 
+// Valid reports whether the status can be used in employee write paths.
 func (s EmployeeStatus) Valid(includeDeleted bool) bool {
 	switch s {
 	case EmployeeStatusActive, EmployeeStatusProbation, EmployeeStatusLeaveSuspended, EmployeeStatusOnboarding, EmployeeStatusResigned:
@@ -284,6 +314,7 @@ func (s EmployeeStatus) Valid(includeDeleted bool) bool {
 	}
 }
 
+// EmployeeStatuses returns the canonical status list for option endpoints.
 func EmployeeStatuses(includeDeleted bool) []string {
 	statuses := []string{
 		string(EmployeeStatusActive),
@@ -298,6 +329,7 @@ func EmployeeStatuses(includeDeleted bool) []string {
 	return statuses
 }
 
+// ParseEmployeeCategory normalizes supported localized and API category values.
 func ParseEmployeeCategory(raw string) (EmployeeCategory, bool) {
 	switch strings.TrimSpace(raw) {
 	case "全職", "正職", "full-time", "full_time":
@@ -315,6 +347,7 @@ func ParseEmployeeCategory(raw string) (EmployeeCategory, bool) {
 	}
 }
 
+// NormalizeEmployeeCategory returns a canonical category value when recognized.
 func NormalizeEmployeeCategory(raw string) string {
 	if category, ok := ParseEmployeeCategory(raw); ok {
 		return string(category)
@@ -322,6 +355,7 @@ func NormalizeEmployeeCategory(raw string) string {
 	return strings.TrimSpace(raw)
 }
 
+// Valid reports whether the employee category is accepted by write paths.
 func (c EmployeeCategory) Valid() bool {
 	switch c {
 	case EmployeeCategoryFullTime, EmployeeCategoryPartTime, EmployeeCategoryIntern, EmployeeCategoryContractor, EmployeeCategoryOther:
@@ -331,6 +365,7 @@ func (c EmployeeCategory) Valid() bool {
 	}
 }
 
+// EmployeeCategories returns the canonical category list for option endpoints.
 func EmployeeCategories() []string {
 	return []string{
 		string(EmployeeCategoryFullTime),

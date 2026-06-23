@@ -18,15 +18,18 @@ import (
 	"time"
 )
 
+// HRService implements people-domain and organization workflows.
 type HRService struct {
 	*Service
 	store hrStore
 }
 
+// HR returns the people-domain service facade.
 func (c *Service) HR() HRService {
 	return HRService{Service: c, store: c.store}
 }
 
+// ListOrgUnits returns organization units visible to the current account.
 func (c HRService) ListOrgUnits(ctx RequestContext) ([]OrgUnit, error) {
 	if _, _, err := c.Service.requireServiceAuthz(ctx, AppHR, ResourceOrgUnit, ActionRead, ""); err != nil {
 		return nil, err
@@ -34,6 +37,7 @@ func (c HRService) ListOrgUnits(ctx RequestContext) ([]OrgUnit, error) {
 	return c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
 }
 
+// ListOrgUnitPage returns paginated visible organization units.
 func (c HRService) ListOrgUnitPage(ctx RequestContext, page PageRequest) (PageResponse[OrgUnit], error) {
 	items, err := c.ListOrgUnits(ctx)
 	if err != nil {
@@ -43,6 +47,7 @@ func (c HRService) ListOrgUnitPage(ctx RequestContext, page PageRequest) (PageRe
 	return utils.PageResponse(items, page), nil
 }
 
+// CreateOrgUnit creates an organization unit and computes its hierarchy path.
 func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (OrgUnit, error) {
 	if _, _, err := c.Service.requireServiceAuthz(ctx, AppHR, ResourceOrgUnit, ActionCreate, ""); err != nil {
 		return OrgUnit{}, err
@@ -94,6 +99,7 @@ func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (
 	return unit, nil
 }
 
+// ListEmployees returns employees visible to the current account.
 func (c HRService) ListEmployees(ctx RequestContext) ([]Employee, error) {
 	response, err := c.QueryEmployees(ctx, EmployeeQuery{})
 	if err != nil {
@@ -102,10 +108,12 @@ func (c HRService) ListEmployees(ctx RequestContext) ([]Employee, error) {
 	return response.Items, nil
 }
 
+// CreateEmployee validates and creates a tenant employee profile.
 func (c HRService) CreateEmployee(ctx RequestContext, input CreateEmployeeInput) (Employee, error) {
 	return c.CreateEmployeeAggregate(ctx, input)
 }
 
+// ExportEmployees returns exportable employees after applying authorization scope.
 func (c HRService) ExportEmployees(ctx RequestContext, queries ...EmployeeQuery) ([]Employee, error) {
 	query := EmployeeQuery{}
 	if len(queries) > 0 {
@@ -149,6 +157,7 @@ func (c HRService) ExportEmployees(ctx RequestContext, queries ...EmployeeQuery)
 	return items, nil
 }
 
+// DeleteEmployee soft-deletes an employee after authorization and audit checks.
 func (c HRService) DeleteEmployee(ctx RequestContext, id string) (Employee, error) {
 	account, decision, audit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, ResourceID: id, Action: ActionDelete},
@@ -225,6 +234,7 @@ func (c HRService) DeleteEmployee(ctx RequestContext, id string) (Employee, erro
 	return employee, nil
 }
 
+// UpdateEmployeeStatus updates an employee lifecycle state through the transition path.
 func (c HRService) UpdateEmployeeStatus(ctx RequestContext, id, status string) (Employee, error) {
 	status = normalizeEmployeeStatus(status)
 	if status == "" {
@@ -301,6 +311,7 @@ func (c HRService) UpdateEmployeeStatus(ctx RequestContext, id, status string) (
 	return employee, nil
 }
 
+// QueryEmployees returns employees filtered by query and authorization scope.
 func (c HRService) QueryEmployees(ctx RequestContext, query EmployeeQuery) (PageResponse[Employee], error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -351,6 +362,7 @@ func (c HRService) QueryEmployees(ctx RequestContext, query EmployeeQuery) (Page
 	return PageResponse[Employee]{Items: items, Total: total, Page: query.Page, PageSize: query.PageSize, Sort: query.Sort}, nil
 }
 
+// GetEmployee returns one employee when the current account can view it.
 func (c HRService) GetEmployee(ctx RequestContext, id string) (Employee, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -380,6 +392,7 @@ func (c HRService) GetEmployee(ctx RequestContext, id string) (Employee, error) 
 	return visible[0], nil
 }
 
+// CreateEmployeeAggregate creates the employee profile and related identity side effects.
 func (c HRService) CreateEmployeeAggregate(ctx RequestContext, input CreateEmployeeInput) (Employee, error) {
 	_, _, authzAudit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, Action: ActionCreate},
@@ -426,6 +439,7 @@ func (c HRService) CreateEmployeeAggregate(ctx RequestContext, input CreateEmplo
 	return employee, nil
 }
 
+// UpdateEmployee applies a partial employee update and records its authorization side effects.
 func (c HRService) UpdateEmployee(ctx RequestContext, id string, input UpdateEmployeeInput) (Employee, error) {
 	account, decision, authzAudit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, ResourceID: id, Action: ActionUpdate},
@@ -493,6 +507,7 @@ func (c HRService) UpdateEmployee(ctx RequestContext, id string, input UpdateEmp
 	return employee, nil
 }
 
+// EmployeeStats summarizes employees visible under the current query and authz scope.
 func (c HRService) EmployeeStats(ctx RequestContext, query EmployeeQuery) (EmployeeStats, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -547,6 +562,7 @@ func (c HRService) EmployeeStats(ctx RequestContext, query EmployeeQuery) (Emplo
 	return stats, nil
 }
 
+// EmployeeOptions returns selectable HR values constrained by visible employee data.
 func (c HRService) EmployeeOptions(ctx RequestContext) (EmployeeOptions, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -1543,6 +1559,7 @@ func employeeSourceValue(employee Employee, source employeeFieldSource) string {
 
 const maxEmployeeAvatarBytes = 2 << 20
 
+// PreviewCreateEmployee validates a create payload without persisting it.
 func (c HRService) PreviewCreateEmployee(ctx RequestContext, input CreateEmployeeInput) (EmployeePreviewResponse, error) {
 	_, _, authzAudit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, Action: ActionCreate},
@@ -1573,6 +1590,7 @@ func (c HRService) PreviewCreateEmployee(ctx RequestContext, input CreateEmploye
 	return resp, nil
 }
 
+// PreviewUpdateEmployee validates an update payload and returns the computed diff.
 func (c HRService) PreviewUpdateEmployee(ctx RequestContext, id string, input UpdateEmployeeInput) (EmployeePreviewResponse, error) {
 	account, decision, authzAudit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, ResourceID: id, Action: ActionUpdate},
@@ -1615,6 +1633,7 @@ func (c HRService) PreviewUpdateEmployee(ctx RequestContext, id string, input Up
 	return resp, nil
 }
 
+// UpdateEmployeeAvatar stores an avatar object and attaches it to the employee profile.
 func (c HRService) UpdateEmployeeAvatar(ctx RequestContext, id string, input EmployeeAvatarInput) (Employee, error) {
 	contentType, err := validateEmployeeAvatarInput(input)
 	if err != nil {
@@ -1689,6 +1708,7 @@ func (c HRService) UpdateEmployeeAvatar(ctx RequestContext, id string, input Emp
 	return employee, nil
 }
 
+// DeleteEmployeeAvatar removes the avatar reference and deletes stored bytes when supported.
 func (c HRService) DeleteEmployeeAvatar(ctx RequestContext, id string) (Employee, error) {
 	account, decision, authzAudit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, ResourceID: id, Action: ActionUpdate},
@@ -1743,6 +1763,7 @@ func (c HRService) DeleteEmployeeAvatar(ctx RequestContext, id string) (Employee
 	return employee, nil
 }
 
+// EmployeeImportTemplate returns the CSV or XLSX template used by employee imports.
 func (c HRService) EmployeeImportTemplate(ctx RequestContext, format string) ([]byte, string, string, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -2178,6 +2199,7 @@ const (
 	maxEmployeeImportRows  = 500
 )
 
+// PreviewEmployeeImport parses an import file and stores row-level validation results.
 func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImportPreviewInput) (EmployeeImportSession, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -2280,6 +2302,7 @@ func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImpor
 	return session, nil
 }
 
+// ConfirmEmployeeImport applies a valid preview session inside a tenant transaction.
 func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, input EmployeeImportConfirmInput) (EmployeeImportSession, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -2534,6 +2557,7 @@ func firstRowErrorMessage(errors []RowError) string {
 
 const maxEmployeeExportRows = 5000
 
+// ExportEmployeesCSV renders authorized employee results as a CSV download.
 func (c HRService) ExportEmployeesCSV(ctx RequestContext, query EmployeeQuery) ([]byte, string, error) {
 	items, err := c.ExportEmployees(ctx, query)
 	if err != nil {
@@ -2581,6 +2605,7 @@ func employeeExportLimitError() error {
 	return Conflict(fmt.Sprintf("employee export exceeds synchronous limit of %d rows; use async export job", maxEmployeeExportRows))
 }
 
+// BatchDeleteEmployees soft-deletes multiple employees and returns per-row results.
 func (c HRService) BatchDeleteEmployees(ctx RequestContext, input BatchDeleteEmployeesInput) (BatchEmployeeResponse, error) {
 	if strings.TrimSpace(input.Reason) == "" {
 		return BatchEmployeeResponse{}, BadRequest("reason is required")
@@ -2616,6 +2641,7 @@ func (c HRService) BatchDeleteEmployees(ctx RequestContext, input BatchDeleteEmp
 	return BatchEmployeeResponse{Results: results}, nil
 }
 
+// InviteEmployee links or prepares an account invitation for an employee.
 func (c HRService) InviteEmployee(ctx RequestContext, id string, input InviteEmployeeInput) (Employee, error) {
 	account, decision, audit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, ResourceID: id, Action: ActionInvite},
@@ -2713,6 +2739,7 @@ func (c HRService) InviteEmployee(ctx RequestContext, id string, input InviteEmp
 	return employee, nil
 }
 
+// TransitionEmployeeStatus records an employee lifecycle transition with audit context.
 func (c HRService) TransitionEmployeeStatus(ctx RequestContext, id string, input StatusTransitionInput) (Employee, error) {
 	status := normalizeEmployeeStatus(input.Status)
 	if status == "" {

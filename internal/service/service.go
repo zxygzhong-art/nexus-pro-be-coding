@@ -14,6 +14,7 @@ import (
 	"nexus-pro-be/internal/utils"
 )
 
+// Service is the root business facade composed from stores and platform adapters.
 type Service struct {
 	store         repository.Store
 	now           func() time.Time
@@ -23,6 +24,7 @@ type Service struct {
 	objectStore   ObjectStore
 }
 
+// Options configures optional runtime adapters for the service facade.
 type Options struct {
 	Logger        *slog.Logger
 	AuthzSnapshot AuthzSnapshotCache
@@ -30,10 +32,12 @@ type Options struct {
 	ObjectStore   ObjectStore
 }
 
+// RelationshipChecker verifies external relationship tuples for authorization decisions.
 type RelationshipChecker interface {
 	CheckRelationship(ctx context.Context, check domain.RelationshipCheck) (bool, error)
 }
 
+// New builds a service facade over the supplied repository store.
 func New(store repository.Store, options ...Options) *Service {
 	cfg := Options{}
 	if len(options) > 0 {
@@ -53,6 +57,7 @@ func New(store repository.Store, options ...Options) *Service {
 	}
 }
 
+// Store exposes the backing repository for integrations that need lower-level access.
 func (c *Service) Store() repository.Store {
 	return c.store
 }
@@ -72,6 +77,7 @@ func goContext(ctx RequestContext) context.Context {
 	return context.Background()
 }
 
+// Now returns the current UTC time and gives tests a single override point.
 func (c *Service) Now() time.Time {
 	return c.now().UTC()
 }
@@ -132,18 +138,21 @@ func (c *Service) resolveAccount(ctx RequestContext) (Account, Tenant, error) {
 	return account, tenant, nil
 }
 
+// AuditTarget identifies the resource written to the audit log after authorization.
 type AuditTarget struct {
 	Event    string
 	Resource string
 	Target   string
 }
 
+// AuthzAudit is a deferred audit handle returned after successful authorization.
 type AuthzAudit struct {
 	service  *Service
 	target   AuditTarget
 	decision CheckResult
 }
 
+// Authorize resolves the account, evaluates permissions, and prepares audit recording.
 func (c *Service) Authorize(ctx RequestContext, req CheckRequest, audit AuditTarget) (account Account, decision CheckResult, done AuthzAudit, err error) {
 	ctx, span := startServiceSpan(ctx, "service.authz.authorize", authzSpanAttributes(req)...)
 	defer func() {
@@ -195,6 +204,7 @@ func (c *Service) Authorize(ctx RequestContext, req CheckRequest, audit AuditTar
 	return account, decision, done, nil
 }
 
+// ValidateApprovalInstance verifies that a high-risk approval instance belongs to the caller.
 func (c *Service) ValidateApprovalInstance(ctx RequestContext, req CheckRequest) error {
 	return c.validateApprovalInstance(ctx, normalizeCheckRequest(req))
 }
@@ -303,10 +313,12 @@ func stringFromAny(value any) string {
 	}
 }
 
+// Commit writes the prepared authorization audit record with its original service.
 func (a AuthzAudit) Commit(ctx RequestContext) error {
 	return a.CommitWith(ctx, a.service)
 }
 
+// CommitWith writes the prepared authorization audit record with an override service.
 func (a AuthzAudit) CommitWith(ctx RequestContext, service *Service) error {
 	if service == nil {
 		return nil

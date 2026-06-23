@@ -23,6 +23,7 @@ var userGroupComparators = comparators[domain.UserGroup]{
 	"name_asc":        func(a, b domain.UserGroup) bool { return a.Name < b.Name },
 }
 
+// SortUserGroups applies the user-group list sort contract.
 func SortUserGroups(items []domain.UserGroup, sort string) []domain.UserGroup {
 	return sortBy(items, sort, userGroupComparators, "created_at_desc")
 }
@@ -33,6 +34,7 @@ var permissionSetComparators = comparators[domain.PermissionSet]{
 	"name_asc":        func(a, b domain.PermissionSet) bool { return a.Name < b.Name },
 }
 
+// SortPermissionSets applies the permission-set list sort contract.
 func SortPermissionSets(items []domain.PermissionSet, sort string) []domain.PermissionSet {
 	return sortBy(items, sort, permissionSetComparators, "created_at_desc")
 }
@@ -42,6 +44,7 @@ var permissionSetAssignmentComparators = comparators[domain.PermissionSetAssignm
 	"created_at_desc": func(a, b domain.PermissionSetAssignment) bool { return a.CreatedAt.After(b.CreatedAt) },
 }
 
+// SortPermissionSetAssignments applies the assignment list sort contract.
 func SortPermissionSetAssignments(items []domain.PermissionSetAssignment, sort string) []domain.PermissionSetAssignment {
 	return sortBy(items, sort, permissionSetAssignmentComparators, "created_at_desc")
 }
@@ -52,6 +55,7 @@ var dataScopeComparators = comparators[domain.DataScope]{
 	"name_asc":        func(a, b domain.DataScope) bool { return a.Name < b.Name },
 }
 
+// SortDataScopes applies the data-scope list sort contract.
 func SortDataScopes(items []domain.DataScope, sort string) []domain.DataScope {
 	return sortBy(items, sort, dataScopeComparators, "created_at_desc")
 }
@@ -62,6 +66,7 @@ var fieldPolicyComparators = comparators[domain.FieldPolicy]{
 	"field_asc":       func(a, b domain.FieldPolicy) bool { return a.FieldName < b.FieldName },
 }
 
+// SortFieldPolicies applies the field-policy list sort contract.
 func SortFieldPolicies(items []domain.FieldPolicy, sort string) []domain.FieldPolicy {
 	return sortBy(items, sort, fieldPolicyComparators, "created_at_desc")
 }
@@ -72,6 +77,7 @@ var assumableRoleComparators = comparators[domain.AssumableRole]{
 	"name_asc":        func(a, b domain.AssumableRole) bool { return a.Name < b.Name },
 }
 
+// SortAssumableRoles applies the assumable-role list sort contract.
 func SortAssumableRoles(items []domain.AssumableRole, sort string) []domain.AssumableRole {
 	return sortBy(items, sort, assumableRoleComparators, "created_at_desc")
 }
@@ -82,6 +88,7 @@ var formTemplateComparators = comparators[domain.FormTemplate]{
 	"key_asc":         func(a, b domain.FormTemplate) bool { return a.Key < b.Key },
 }
 
+// SortFormTemplates applies the form-template list sort contract.
 func SortFormTemplates(items []domain.FormTemplate, sort string) []domain.FormTemplate {
 	return sortBy(items, sort, formTemplateComparators, "created_at_desc")
 }
@@ -92,6 +99,7 @@ var leaveBalanceComparators = comparators[domain.LeaveBalance]{
 	"employee_id_asc": func(a, b domain.LeaveBalance) bool { return a.EmployeeID < b.EmployeeID },
 }
 
+// SortLeaveBalances applies the leave-balance list sort contract.
 func SortLeaveBalances(items []domain.LeaveBalance, sort string) []domain.LeaveBalance {
 	return sortBy(items, sort, leaveBalanceComparators, "updated_at_desc")
 }
@@ -102,6 +110,7 @@ var leaveRequestComparators = comparators[domain.LeaveRequest]{
 	"start_at_asc":    func(a, b domain.LeaveRequest) bool { return a.StartAt.Before(b.StartAt) },
 }
 
+// SortLeaveRequests applies the leave-request list sort contract.
 func SortLeaveRequests(items []domain.LeaveRequest, sort string) []domain.LeaveRequest {
 	return sortBy(items, sort, leaveRequestComparators, "created_at_desc")
 }
@@ -112,6 +121,7 @@ var orgUnitComparators = comparators[domain.OrgUnit]{
 	"name_asc":        func(a, b domain.OrgUnit) bool { return a.Name < b.Name },
 }
 
+// SortOrgUnits applies the organization-unit list sort contract.
 func SortOrgUnits(items []domain.OrgUnit, sort string) []domain.OrgUnit {
 	return sortBy(items, sort, orgUnitComparators, "created_at_desc")
 }

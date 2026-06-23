@@ -2,5 +2,9 @@ package apidocs
 
 import _ "embed"
 
-//go:embed openapi.yaml
-var OpenAPIYAML []byte
+var (
+	// OpenAPIYAML contains the embedded OpenAPI contract served by the HTTP API.
+	//
+	//go:embed openapi.yaml
+	OpenAPIYAML []byte
+)

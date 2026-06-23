@@ -9,11 +9,13 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
+// AuditCtrl wires audit log endpoints to the audit service facade.
 type AuditCtrl struct {
 	routes routeBinder
 	svc    service.AuditFacade
 }
 
+// RegisterRoutes attaches audit log routes to the v1 route group.
 func (c AuditCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	router.GET("/audit-logs", c.routes.Handle("audit.log", "read", c.listAuditLogs))
 }

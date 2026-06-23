@@ -7,6 +7,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
+// AttendanceStore persists leave balances and leave requests.
 type AttendanceStore interface {
 	UpsertLeaveBalance(context.Context, domain.LeaveBalance) error
 	GetLeaveBalance(ctx context.Context, tenantID, id string) (domain.LeaveBalance, bool, error)

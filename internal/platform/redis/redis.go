@@ -8,12 +8,14 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 )
 
+// Options configures a Redis client connection.
 type Options struct {
 	Addr     string
 	Password string
 	DB       int
 }
 
+// OpenClient opens, instruments, and pings a Redis client.
 func OpenClient(ctx context.Context, options Options) (*goredis.Client, error) {
 	if options.Addr == "" {
 		return nil, fmt.Errorf("redis addr is required")

@@ -9,11 +9,13 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
+// IAMCtrl wires IAM management endpoints to the IAM service facade.
 type IAMCtrl struct {
 	routes routeBinder
 	svc    service.IAMFacade
 }
 
+// RegisterRoutes attaches IAM management routes to the v1 route group.
 func (c IAMCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	iam := router.Group("/iam")
 	iam.GET("/permissions", c.routes.Handle("iam.permission", "read", c.listPermissions))

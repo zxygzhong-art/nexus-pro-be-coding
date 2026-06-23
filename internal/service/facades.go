@@ -1,16 +1,19 @@
 package service
 
+// MeFacade exposes current-user read operations to the API layer.
 type MeFacade interface {
 	Resolve(RequestContext) (MeResponse, error)
 	ListMenus(RequestContext) ([]MenuNode, error)
 }
 
+// AuthzFacade exposes authorization checks to API routes and explicit authz endpoints.
 type AuthzFacade interface {
 	Check(RequestContext, CheckRequest) (CheckResult, error)
 	BatchCheck(RequestContext, BatchCheckRequest) (BatchCheckResult, error)
 	ValidateApprovalInstance(RequestContext, CheckRequest) error
 }
 
+// IAMFacade exposes IAM management use cases to the API layer.
 type IAMFacade interface {
 	ListPermissionPage(RequestContext, PageRequest) (PageResponse[Permission], error)
 	ListUserGroupPage(RequestContext, PageRequest) (PageResponse[UserGroup], error)
@@ -28,6 +31,7 @@ type IAMFacade interface {
 	AssumeRole(RequestContext, string, AssumeRoleInput) (AssumeRoleResponse, error)
 }
 
+// HRFacade exposes people-domain and organization use cases to the API layer.
 type HRFacade interface {
 	QueryEmployees(RequestContext, EmployeeQuery) (PageResponse[Employee], error)
 	CreateEmployee(RequestContext, CreateEmployeeInput) (Employee, error)
@@ -53,12 +57,14 @@ type HRFacade interface {
 	CreateOrgUnit(RequestContext, CreateOrgUnitInput) (OrgUnit, error)
 }
 
+// AttendanceFacade exposes leave balance and leave request use cases.
 type AttendanceFacade interface {
 	ListLeaveBalancePage(RequestContext, PageRequest) (PageResponse[LeaveBalance], error)
 	ListLeaveRequestPage(RequestContext, PageRequest) (PageResponse[LeaveRequest], error)
 	CreateLeaveRequest(RequestContext, CreateLeaveRequestInput) (LeaveRequest, error)
 }
 
+// WorkflowFacade exposes form template and form instance use cases.
 type WorkflowFacade interface {
 	ListFormTemplatePage(RequestContext, PageRequest) (PageResponse[FormTemplate], error)
 	CreateFormTemplate(RequestContext, CreateFormTemplateInput) (FormTemplate, error)
@@ -66,11 +72,13 @@ type WorkflowFacade interface {
 	ApproveForm(RequestContext, string, ApproveFormInput) (FormInstance, error)
 }
 
+// AgentFacade exposes agent run use cases.
 type AgentFacade interface {
 	ListRunPage(RequestContext, PageRequest) (PageResponse[AgentRun], error)
 	CreateRun(RequestContext, CreateAgentRunInput) (AgentRun, error)
 }
 
+// AuditFacade exposes audit log queries.
 type AuditFacade interface {
 	ListLogPage(RequestContext, PageRequest) (PageResponse[AuditLog], error)
 }

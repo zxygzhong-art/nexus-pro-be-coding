@@ -85,6 +85,7 @@ func main() {
 	var relationshipWriter jobs.RelationshipTupleWriter
 	var objectStore service.ObjectStore
 	readinessChecks := map[string]v1api.ReadinessCheck{}
+	// Optional dependencies are wired from environment variables; empty settings keep local development lightweight.
 	if cfg.DatabaseURL != "" {
 		startupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		pool, err := postgres.OpenPool(startupCtx, cfg.DatabaseURL)
@@ -284,6 +285,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 	if relationshipWriter != nil {
+		// The tuple outbox only runs when OpenFGA is fully configured to accept writes.
 		processor := jobs.NewAuthzOutboxProcessor(store, relationshipWriter, logger)
 		go processor.Run(ctx, jobs.AuthzOutboxOptions{})
 		logger.Info("openfga outbox worker started")

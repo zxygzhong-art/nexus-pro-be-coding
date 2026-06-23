@@ -6,6 +6,7 @@ type routeBinder interface {
 	Handle(resource, action string, next HandlerFunc, options ...RouteOption) gin.HandlerFunc
 }
 
+// PathParamID is the conventional path parameter name for resource identifiers.
 const PathParamID = "id"
 
 type apiRouteBinder struct {
@@ -18,8 +19,10 @@ type routeAuthz struct {
 	targetEmployeeIDParam string
 }
 
+// RouteOption adjusts how route parameters are passed into authorization checks.
 type RouteOption func(*routeAuthz)
 
+// ResourceID marks a path parameter as the protected resource identifier.
 func ResourceID(param string) RouteOption {
 	return func(cfg *routeAuthz) {
 		cfg.resourceIDParam = param
@@ -27,6 +30,7 @@ func ResourceID(param string) RouteOption {
 	}
 }
 
+// TargetEmployeeID marks a path parameter as the employee target for scoped HR checks.
 func TargetEmployeeID(param string) RouteOption {
 	return func(cfg *routeAuthz) {
 		cfg.targetEmployeeIDParam = param
@@ -53,10 +57,12 @@ func routeAuthzFrom(options []RouteOption) routeAuthz {
 	return cfg
 }
 
+// Handle wraps a handler with route-level authorization metadata.
 func (r apiRouteBinder) Handle(resource, action string, next HandlerFunc, options ...RouteOption) gin.HandlerFunc {
 	return r.api.ginHandle(resource, action, next, routeAuthzFrom(options))
 }
 
+// RegisterRoutes attaches health, Swagger, and all v1 route groups.
 func (a *API) RegisterRoutes(router *gin.Engine) {
 	routes := apiRouteBinder{api: a}
 	SwaggerCtrl{}.RegisterRoutes(router)

@@ -7,15 +7,18 @@ import (
 	"nexus-pro-be/internal/utils"
 )
 
+// AttendanceService implements leave balance and leave request workflows.
 type AttendanceService struct {
 	*Service
 	store attendanceStore
 }
 
+// Attendance returns the attendance service facade.
 func (c *Service) Attendance() AttendanceService {
 	return AttendanceService{Service: c, store: c.store}
 }
 
+// ListLeaveBalances returns leave balances visible under the current authorization scope.
 func (c AttendanceService) ListLeaveBalances(ctx RequestContext) ([]LeaveBalance, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -42,6 +45,7 @@ func (c AttendanceService) ListLeaveBalances(ctx RequestContext) ([]LeaveBalance
 	return filterLeaveBalancesByEmployees(items, allowed), nil
 }
 
+// ListLeaveBalancePage returns paginated visible leave balances.
 func (c AttendanceService) ListLeaveBalancePage(ctx RequestContext, page PageRequest) (PageResponse[LeaveBalance], error) {
 	items, err := c.ListLeaveBalances(ctx)
 	if err != nil {
@@ -51,6 +55,7 @@ func (c AttendanceService) ListLeaveBalancePage(ctx RequestContext, page PageReq
 	return utils.PageResponse(items, page), nil
 }
 
+// ListLeaveRequests returns leave requests visible under the current authorization scope.
 func (c AttendanceService) ListLeaveRequests(ctx RequestContext) ([]LeaveRequest, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -77,6 +82,7 @@ func (c AttendanceService) ListLeaveRequests(ctx RequestContext) ([]LeaveRequest
 	return filterLeaveRequestsByEmployees(items, allowed), nil
 }
 
+// ListLeaveRequestPage returns paginated visible leave requests.
 func (c AttendanceService) ListLeaveRequestPage(ctx RequestContext, page PageRequest) (PageResponse[LeaveRequest], error) {
 	items, err := c.ListLeaveRequests(ctx)
 	if err != nil {
@@ -86,6 +92,7 @@ func (c AttendanceService) ListLeaveRequestPage(ctx RequestContext, page PageReq
 	return utils.PageResponse(items, page), nil
 }
 
+// CreateLeaveRequest creates a leave request and reserves leave balance atomically.
 func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLeaveRequestInput) (LeaveRequest, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {

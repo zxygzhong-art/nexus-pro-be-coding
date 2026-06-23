@@ -2,6 +2,7 @@ package domain
 
 import "time"
 
+// AuditLog records an auditable action performed inside a tenant.
 type AuditLog struct {
 	ID             string         `json:"id"`
 	TenantID       string         `json:"tenant_id"`

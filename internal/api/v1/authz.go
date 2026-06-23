@@ -9,11 +9,13 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
+// AuthzCtrl wires explicit authorization endpoints to the authz service facade.
 type AuthzCtrl struct {
 	routes routeBinder
 	svc    service.AuthzFacade
 }
 
+// RegisterRoutes attaches authorization routes to the v1 route group.
 func (c AuthzCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	authz := router.Group("/authz")
 	authz.POST("/check", c.routes.Handle("iam.authz", "check", c.checkAuthz))
@@ -22,6 +24,7 @@ func (c AuthzCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	authz.POST("/simulate", c.routes.Handle("iam.authz", "simulate", c.simulateAuthz))
 }
 
+// authorize performs route-level authorization before the handler executes.
 func (a *API) authorize(ctx domain.RequestContext, r *http.Request, resource, action string, authz routeAuthz) error {
 	req := domain.CheckRequest{Resource: resource, Action: domain.Action(action)}
 	if authz.resourceIDParam != "" {

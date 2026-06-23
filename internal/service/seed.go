@@ -7,6 +7,7 @@ import (
 	"nexus-pro-be/internal/repository"
 )
 
+// SeedDemo inserts deterministic demo data for local development and tests.
 func SeedDemo(store repository.Store) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)

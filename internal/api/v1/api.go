@@ -12,6 +12,7 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
+// API owns HTTP routing, middleware, and service facade wiring for v1.
 type API struct {
 	logger              *slog.Logger
 	me                  service.MeFacade
@@ -30,9 +31,13 @@ type API struct {
 	readinessChecks     map[string]ReadinessCheck
 }
 
+// HandlerFunc is the internal handler signature after request context resolution.
 type HandlerFunc func(http.ResponseWriter, *http.Request, domain.RequestContext) error
+
+// ReadinessCheck verifies one runtime dependency for /readyz.
 type ReadinessCheck func(context.Context) error
 
+// Options controls API middleware behavior and optional dependency checks.
 type Options struct {
 	AllowDemoContext      bool
 	AllowHeaderContext    bool
@@ -43,6 +48,7 @@ type Options struct {
 	ReadinessChecks       map[string]ReadinessCheck
 }
 
+// New builds an API instance from the service facade and runtime options.
 func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
 	if logger == nil {
 		logger = slog.Default()
@@ -79,6 +85,7 @@ func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
 	return api
 }
 
+// Routes builds the Gin router and registers all public endpoints.
 func (a *API) Routes() http.Handler {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()

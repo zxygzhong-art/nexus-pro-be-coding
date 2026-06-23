@@ -18,17 +18,21 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
+// TokenContext is trusted tenant and account identity extracted from a token.
 type TokenContext struct {
 	TenantID  string
 	AccountID string
 }
 
+// TokenResolver resolves a request token into trusted application identity.
 type TokenResolver interface {
 	Resolve(r *http.Request) (TokenContext, bool, error)
 }
 
+// UnsignedJWTResolver parses unsigned JWT claims for explicit local/demo modes only.
 type UnsignedJWTResolver struct{}
 
+// Resolve extracts tenant and account claims without verifying a signature.
 func (UnsignedJWTResolver) Resolve(r *http.Request) (TokenContext, bool, error) {
 	claims, ok, err := parseUnsignedClaims(bearerToken(r))
 	if err != nil || !ok {
@@ -37,6 +41,7 @@ func (UnsignedJWTResolver) Resolve(r *http.Request) (TokenContext, bool, error) 
 	return tokenContextFromClaims(claims), true, nil
 }
 
+// KeycloakTokenResolver validates Keycloak-issued RS256 JWTs against JWKS keys.
 type KeycloakTokenResolver struct {
 	issuerURL string
 	clientID  string
@@ -56,6 +61,7 @@ const (
 	jwksForcedRefreshWindow = 30 * time.Second
 )
 
+// NewKeycloakTokenResolver creates a Keycloak-backed token resolver.
 func NewKeycloakTokenResolver(issuerURL, clientID string, client *http.Client) *KeycloakTokenResolver {
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
@@ -68,6 +74,7 @@ func NewKeycloakTokenResolver(issuerURL, clientID string, client *http.Client) *
 	}
 }
 
+// Resolve validates a bearer token and returns trusted tenant/account identity.
 func (r *KeycloakTokenResolver) Resolve(req *http.Request) (TokenContext, bool, error) {
 	token := bearerToken(req)
 	if token == "" {
@@ -80,6 +87,7 @@ func (r *KeycloakTokenResolver) Resolve(req *http.Request) (TokenContext, bool, 
 	return tokenContextFromClaims(claims), true, nil
 }
 
+// Ping refreshes JWKS metadata to prove the resolver can reach Keycloak.
 func (r *KeycloakTokenResolver) Ping(ctx context.Context) error {
 	if r == nil || r.issuerURL == "" {
 		return errors.New("keycloak token resolver not configured")
@@ -117,6 +125,7 @@ func (r *KeycloakTokenResolver) verify(ctx context.Context, token string) (map[s
 	if key == nil && time.Now().Before(missingUntil) {
 		return nil, errors.New("jwk not found")
 	}
+	// A missing kid may mean Keycloak rotated keys, so force-refresh with a short throttle.
 	if key == nil && r.canForceRefresh() {
 		if err := r.refreshKeys(ctx, true); err != nil {
 			return nil, err
