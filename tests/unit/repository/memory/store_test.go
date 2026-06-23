@@ -131,3 +131,33 @@ func TestWithTenantTransactionRollsBackPanic(t *testing.T) {
 		panic("force rollback")
 	})
 }
+
+func TestUserIdentityLookupAndList(t *testing.T) {
+	store := memory.NewStore()
+	ctx := context.Background()
+	now := time.Now()
+	identity := domain.UserIdentity{
+		ID:        "uid-1",
+		TenantID:  "tenant-1",
+		AccountID: "acct-1",
+		Provider:  "google",
+		Subject:   "google-subject",
+		Email:     "user@example.com",
+		CreatedAt: now,
+	}
+	if err := store.UpsertUserIdentity(ctx, identity); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok, err := store.GetUserIdentity(ctx, "tenant-1", "google", "google-subject")
+	if err != nil || !ok || got.AccountID != "acct-1" {
+		t.Fatalf("expected identity lookup to resolve account, got=%+v ok=%v err=%v", got, ok, err)
+	}
+	items, err := store.ListUserIdentities(ctx, "tenant-1", "acct-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].Subject != "google-subject" {
+		t.Fatalf("expected one listed identity, got %+v", items)
+	}
+}

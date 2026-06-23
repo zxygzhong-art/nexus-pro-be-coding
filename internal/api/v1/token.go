@@ -3,11 +3,12 @@ package v1
 import (
 	"net/http"
 
+	"nexus-pro-be/internal/domain"
 	platformauth "nexus-pro-be/internal/platform/auth"
 )
 
-// TokenContext is the trusted identity extracted from an authenticated token.
-type TokenContext = platformauth.TokenContext
+// TokenContext is the authenticated principal extracted from a trusted token.
+type TokenContext = domain.AuthenticatedPrincipal
 
 // TokenResolver resolves trusted identity from an HTTP request.
 type TokenResolver = platformauth.TokenResolver

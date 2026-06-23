@@ -6,6 +6,7 @@ import "nexus-pro-be/internal/domain"
 type (
 	Tenant                  = domain.Tenant
 	Account                 = domain.Account
+	UserIdentity            = domain.UserIdentity
 	UserGroup               = domain.UserGroup
 	PermissionSet           = domain.PermissionSet
 	Permission              = domain.Permission

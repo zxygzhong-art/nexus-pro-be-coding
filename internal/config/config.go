@@ -20,11 +20,23 @@ type Config struct {
 	RedisPassword string
 	RedisDB       int
 
-	KeycloakIssuerURL  string
-	KeycloakClientID   string
-	AllowDemoContext   bool
-	AllowHeaderContext bool
-	AllowUnsignedJWT   bool
+	KeycloakIssuerURL         string
+	KeycloakClientID          string
+	AllowDemoContext          bool
+	AllowHeaderContext        bool
+	AllowUnsignedJWT          bool
+	AuthTokenIssuer           string
+	AuthTokenAudience         string
+	AuthSessionSigningKey     string
+	AuthStateSigningKey       string
+	GoogleOIDCIssuerURL       string
+	GoogleOIDCClientID        string
+	GoogleOIDCClientSecret    string
+	GoogleOIDCRedirectURL     string
+	MicrosoftOIDCIssuerURL    string
+	MicrosoftOIDCClientID     string
+	MicrosoftOIDCClientSecret string
+	MicrosoftOIDCRedirectURL  string
 
 	OpenFGAAPIURL  string
 	OpenFGAStoreID string
@@ -103,6 +115,13 @@ func (c Config) ValidateStartup() error {
 	if c.AllowUnsignedJWT {
 		problems = append(problems, "ALLOW_UNSIGNED_JWT must be false")
 	}
+	if c.googleOIDCConfigured() || c.microsoftOIDCConfigured() {
+		if strings.TrimSpace(c.AuthSessionSigningKey) == "" {
+			problems = append(problems, "AUTH_SESSION_SIGNING_KEY is required when OIDC login is configured")
+		}
+	}
+	problems = append(problems, oidcProviderProblems("GOOGLE_OIDC", c.GoogleOIDCIssuerURL, c.GoogleOIDCClientID, c.GoogleOIDCClientSecret, c.GoogleOIDCRedirectURL)...)
+	problems = append(problems, oidcProviderProblems("MICROSOFT_OIDC", c.MicrosoftOIDCIssuerURL, c.MicrosoftOIDCClientID, c.MicrosoftOIDCClientSecret, c.MicrosoftOIDCRedirectURL)...)
 	if len(problems) > 0 {
 		return fmt.Errorf("production configuration invalid: %s", strings.Join(problems, "; "))
 	}
@@ -130,11 +149,23 @@ func LoadE() (Config, error) {
 		RedisPassword: os.Getenv("REDIS_PASSWORD"),
 		RedisDB:       envInt("REDIS_DB", 0, &problems),
 
-		KeycloakIssuerURL:  strings.TrimSpace(os.Getenv("KEYCLOAK_ISSUER_URL")),
-		KeycloakClientID:   strings.TrimSpace(os.Getenv("KEYCLOAK_CLIENT_ID")),
-		AllowDemoContext:   envBool("ALLOW_DEMO_CONTEXT", false, &problems),
-		AllowHeaderContext: envBool("ALLOW_HEADER_CONTEXT", false, &problems),
-		AllowUnsignedJWT:   envBool("ALLOW_UNSIGNED_JWT", false, &problems),
+		KeycloakIssuerURL:         strings.TrimSpace(os.Getenv("KEYCLOAK_ISSUER_URL")),
+		KeycloakClientID:          strings.TrimSpace(os.Getenv("KEYCLOAK_CLIENT_ID")),
+		AllowDemoContext:          envBool("ALLOW_DEMO_CONTEXT", false, &problems),
+		AllowHeaderContext:        envBool("ALLOW_HEADER_CONTEXT", false, &problems),
+		AllowUnsignedJWT:          envBool("ALLOW_UNSIGNED_JWT", false, &problems),
+		AuthTokenIssuer:           env("AUTH_TOKEN_ISSUER", "nexus-pro-be"),
+		AuthTokenAudience:         env("AUTH_TOKEN_AUDIENCE", "nexus-pro-be-api"),
+		AuthSessionSigningKey:     os.Getenv("AUTH_SESSION_SIGNING_KEY"),
+		AuthStateSigningKey:       os.Getenv("AUTH_STATE_SIGNING_KEY"),
+		GoogleOIDCIssuerURL:       env("GOOGLE_OIDC_ISSUER_URL", "https://accounts.google.com"),
+		GoogleOIDCClientID:        strings.TrimSpace(os.Getenv("GOOGLE_OIDC_CLIENT_ID")),
+		GoogleOIDCClientSecret:    os.Getenv("GOOGLE_OIDC_CLIENT_SECRET"),
+		GoogleOIDCRedirectURL:     strings.TrimSpace(os.Getenv("GOOGLE_OIDC_REDIRECT_URL")),
+		MicrosoftOIDCIssuerURL:    env("MICROSOFT_OIDC_ISSUER_URL", "https://login.microsoftonline.com/common/v2.0"),
+		MicrosoftOIDCClientID:     strings.TrimSpace(os.Getenv("MICROSOFT_OIDC_CLIENT_ID")),
+		MicrosoftOIDCClientSecret: os.Getenv("MICROSOFT_OIDC_CLIENT_SECRET"),
+		MicrosoftOIDCRedirectURL:  strings.TrimSpace(os.Getenv("MICROSOFT_OIDC_REDIRECT_URL")),
 
 		OpenFGAAPIURL:  strings.TrimSpace(os.Getenv("OPENFGA_API_URL")),
 		OpenFGAStoreID: strings.TrimSpace(os.Getenv("OPENFGA_STORE_ID")),
@@ -159,6 +190,39 @@ func LoadE() (Config, error) {
 		return cfg, fmt.Errorf("configuration invalid: %s", strings.Join(problems, "; "))
 	}
 	return cfg, nil
+}
+
+func (c Config) googleOIDCConfigured() bool {
+	return oidcProviderConfigured(c.GoogleOIDCIssuerURL, c.GoogleOIDCClientID, c.GoogleOIDCClientSecret, c.GoogleOIDCRedirectURL)
+}
+
+func (c Config) microsoftOIDCConfigured() bool {
+	return oidcProviderConfigured(c.MicrosoftOIDCIssuerURL, c.MicrosoftOIDCClientID, c.MicrosoftOIDCClientSecret, c.MicrosoftOIDCRedirectURL)
+}
+
+func oidcProviderConfigured(issuer, clientID, clientSecret, redirectURL string) bool {
+	return strings.TrimSpace(clientID) != "" || strings.TrimSpace(clientSecret) != "" || strings.TrimSpace(redirectURL) != "" ||
+		(strings.TrimSpace(issuer) != "" && strings.TrimSpace(issuer) != "https://accounts.google.com" && strings.TrimSpace(issuer) != "https://login.microsoftonline.com/common/v2.0")
+}
+
+func oidcProviderProblems(prefix, issuer, clientID, clientSecret, redirectURL string) []string {
+	if !oidcProviderConfigured(issuer, clientID, clientSecret, redirectURL) {
+		return nil
+	}
+	problems := []string{}
+	if strings.TrimSpace(issuer) == "" {
+		problems = append(problems, prefix+"_ISSUER_URL is required")
+	}
+	if strings.TrimSpace(clientID) == "" {
+		problems = append(problems, prefix+"_CLIENT_ID is required")
+	}
+	if strings.TrimSpace(clientSecret) == "" {
+		problems = append(problems, prefix+"_CLIENT_SECRET is required")
+	}
+	if strings.TrimSpace(redirectURL) == "" {
+		problems = append(problems, prefix+"_REDIRECT_URL is required")
+	}
+	return problems
 }
 
 func normalizeObjectStoreProvider(provider, dir, endpoint, bucket string) string {

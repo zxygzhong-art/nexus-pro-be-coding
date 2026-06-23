@@ -28,6 +28,8 @@ func copyAccount(v Account) Account {
 	return v
 }
 
+func copyUserIdentity(v UserIdentity) UserIdentity { return v }
+
 func copyUserGroup(v UserGroup) UserGroup {
 	v.MemberAccountIDs = utils.CopyStrings(v.MemberAccountIDs)
 	v.PermissionSetIDs = utils.CopyStrings(v.PermissionSetIDs)

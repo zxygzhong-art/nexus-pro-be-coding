@@ -148,6 +148,33 @@ func SeedDemo(store repository.Store) {
 		DirectPermissionSetIDs: []string{"ps-audit"},
 		CreatedAt:              now.Add(2 * time.Minute),
 	})
+	_ = store.UpsertUserIdentity(ctx, UserIdentity{
+		ID:        "uid-keycloak-admin",
+		TenantID:  "demo",
+		AccountID: "acct-admin",
+		Provider:  "keycloak",
+		Subject:   "acct-admin",
+		Email:     "admin@demo.local",
+		CreatedAt: now,
+	})
+	_ = store.UpsertUserIdentity(ctx, UserIdentity{
+		ID:        "uid-keycloak-employee",
+		TenantID:  "demo",
+		AccountID: "acct-employee",
+		Provider:  "keycloak",
+		Subject:   "acct-employee",
+		Email:     "employee@demo.local",
+		CreatedAt: now.Add(time.Minute),
+	})
+	_ = store.UpsertUserIdentity(ctx, UserIdentity{
+		ID:        "uid-keycloak-audit",
+		TenantID:  "demo",
+		AccountID: "acct-audit",
+		Provider:  "keycloak",
+		Subject:   "acct-audit",
+		Email:     "audit@demo.local",
+		CreatedAt: now.Add(2 * time.Minute),
+	})
 
 	_ = store.UpsertOrgUnit(ctx, OrgUnit{
 		ID:        "ou-hq",

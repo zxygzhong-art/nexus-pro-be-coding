@@ -29,11 +29,12 @@ func TestRegisteredRoutesMatchAuthzPolicies(t *testing.T) {
 	openAPIRoutes := openAPIRouteKeys(t)
 	documentedRoutes := map[string]struct{}{}
 	for _, route := range router.Routes() {
+		docKey := route.Method + " " + openAPIPath(route.Path)
 		if isPublicRoute(route.Path) {
+			documentedRoutes[docKey] = struct{}{}
 			continue
 		}
 		key := route.Method + " " + route.Path
-		docKey := route.Method + " " + openAPIPath(route.Path)
 		routes[key] = struct{}{}
 		documentedRoutes[docKey] = struct{}{}
 		if _, ok := policies[key]; !ok {
@@ -83,6 +84,8 @@ func TestDocumentedJSONSuccessResponsesUseDataEnvelope(t *testing.T) {
 
 	refs := openAPISuccessJSONSchemaRefs(t)
 	expected := map[string]string{
+		"GET /v1/auth/oidc/{provider}/authorize 200":       "OIDCAuthorizationDataResponse",
+		"GET /v1/auth/oidc/{provider}/callback 200":        "AuthLoginDataResponse",
 		"GET /v1/hr/employees 200":                         "EmployeeListDataResponse",
 		"POST /v1/hr/employees 201":                        "EmployeeDetailDataResponse",
 		"POST /v1/hr/employees/preview 200":                "EmployeePreviewDataResponse",
@@ -185,7 +188,7 @@ func isPublicRoute(path string) bool {
 	case "/healthz", "/readyz", "/openapi.yaml", "/swagger", "/swagger/*any":
 		return true
 	default:
-		return false
+		return strings.HasPrefix(path, "/v1/auth/oidc/")
 	}
 }
 

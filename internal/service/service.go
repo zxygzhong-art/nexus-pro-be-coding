@@ -16,25 +16,48 @@ import (
 
 // Service is the root business facade composed from stores and platform adapters.
 type Service struct {
-	store         repository.Store
-	now           func() time.Time
-	logger        *slog.Logger
-	authzSnapshot AuthzSnapshotCache
-	relationships RelationshipChecker
-	objectStore   ObjectStore
+	store           repository.Store
+	now             func() time.Time
+	logger          *slog.Logger
+	authzSnapshot   AuthzSnapshotCache
+	relationships   RelationshipChecker
+	objectStore     ObjectStore
+	oidcProviders   map[string]OIDCProvider
+	authTokenIssuer AuthTokenIssuer
+	authStateCodec  AuthStateCodec
 }
 
 // Options configures optional runtime adapters for the service facade.
 type Options struct {
-	Logger        *slog.Logger
-	AuthzSnapshot AuthzSnapshotCache
-	Relationships RelationshipChecker
-	ObjectStore   ObjectStore
+	Logger          *slog.Logger
+	AuthzSnapshot   AuthzSnapshotCache
+	Relationships   RelationshipChecker
+	ObjectStore     ObjectStore
+	OIDCProviders   map[string]OIDCProvider
+	AuthTokenIssuer AuthTokenIssuer
+	AuthStateCodec  AuthStateCodec
 }
 
 // RelationshipChecker verifies external relationship tuples for authorization decisions.
 type RelationshipChecker interface {
 	CheckRelationship(ctx context.Context, check domain.RelationshipCheck) (bool, error)
+}
+
+// OIDCProvider resolves an external authorization-code callback into a principal.
+type OIDCProvider interface {
+	AuthorizationURL(state string) (string, error)
+	ResolveCallback(ctx context.Context, code string) (domain.AuthenticatedPrincipal, error)
+}
+
+// AuthTokenIssuer issues first-party bearer tokens for successful external logins.
+type AuthTokenIssuer interface {
+	IssueToken(domain.IdentityResolution, domain.AuthenticatedPrincipal) (string, time.Time, error)
+}
+
+// AuthStateCodec signs and verifies OIDC callback state.
+type AuthStateCodec interface {
+	EncodeOIDCState(provider, tenantID, returnURL string) (string, error)
+	DecodeOIDCState(string) (domain.OIDCState, error)
 }
 
 // New builds a service facade over the supplied repository store.
@@ -48,13 +71,29 @@ func New(store repository.Store, options ...Options) *Service {
 		logger = slog.Default()
 	}
 	return &Service{
-		store:         store,
-		now:           time.Now,
-		logger:        logger,
-		authzSnapshot: cfg.AuthzSnapshot,
-		relationships: cfg.Relationships,
-		objectStore:   firstObjectStore(cfg.ObjectStore),
+		store:           store,
+		now:             time.Now,
+		logger:          logger,
+		authzSnapshot:   cfg.AuthzSnapshot,
+		relationships:   cfg.Relationships,
+		objectStore:     firstObjectStore(cfg.ObjectStore),
+		oidcProviders:   copyOIDCProviders(cfg.OIDCProviders),
+		authTokenIssuer: cfg.AuthTokenIssuer,
+		authStateCodec:  cfg.AuthStateCodec,
 	}
+}
+
+func copyOIDCProviders(src map[string]OIDCProvider) map[string]OIDCProvider {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]OIDCProvider, len(src))
+	for key, provider := range src {
+		if provider != nil && strings.TrimSpace(key) != "" {
+			dst[strings.TrimSpace(key)] = provider
+		}
+	}
+	return dst
 }
 
 // Store exposes the backing repository for integrations that need lower-level access.
@@ -137,6 +176,9 @@ func (c *Service) resolveAccount(ctx RequestContext) (Account, Tenant, error) {
 	}
 	if !ok {
 		return Account{}, Tenant{}, NotFound("account", ctx.AccountID)
+	}
+	if account.Status == string(AccountStatusDisabled) || account.Status == string(AccountStatusPendingInvite) {
+		return Account{}, Tenant{}, domain.Unauthorized("account is not active")
 	}
 	return account, tenant, nil
 }

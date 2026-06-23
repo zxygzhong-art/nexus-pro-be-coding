@@ -28,6 +28,7 @@ func (s *Store) cloneLocked() *Store {
 	return &Store{
 		tenants:             cloneMap(s.tenants, copyTenant),
 		accounts:            cloneNestedMap(s.accounts, copyAccount),
+		userIdentities:      cloneNestedMap(s.userIdentities, copyUserIdentity),
 		userGroups:          cloneNestedMap(s.userGroups, copyUserGroup),
 		permissionSets:      cloneNestedMap(s.permissionSets, copyPermissionSet),
 		assignments:         cloneNestedMap(s.assignments, copyPermissionSetAssignment),
@@ -56,6 +57,7 @@ func (s *Store) cloneLocked() *Store {
 func (s *Store) replaceLocked(next *Store) {
 	s.tenants = next.tenants
 	s.accounts = next.accounts
+	s.userIdentities = next.userIdentities
 	s.userGroups = next.userGroups
 	s.permissionSets = next.permissionSets
 	s.assignments = next.assignments

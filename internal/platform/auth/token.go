@@ -18,33 +18,28 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
-// TokenContext is trusted tenant and account identity extracted from a token.
-type TokenContext struct {
-	TenantID  string
-	AccountID string
-}
-
 // TokenResolver resolves a request token into trusted application identity.
 type TokenResolver interface {
-	Resolve(r *http.Request) (TokenContext, bool, error)
+	Resolve(r *http.Request) (domain.AuthenticatedPrincipal, bool, error)
 }
 
 // UnsignedJWTResolver parses unsigned JWT claims for explicit local/demo modes only.
 type UnsignedJWTResolver struct{}
 
 // Resolve extracts tenant and account claims without verifying a signature.
-func (UnsignedJWTResolver) Resolve(r *http.Request) (TokenContext, bool, error) {
+func (UnsignedJWTResolver) Resolve(r *http.Request) (domain.AuthenticatedPrincipal, bool, error) {
 	claims, ok, err := parseUnsignedClaims(bearerToken(r))
 	if err != nil || !ok {
-		return TokenContext{}, ok, err
+		return domain.AuthenticatedPrincipal{}, ok, err
 	}
-	return tokenContextFromClaims(claims), true, nil
+	return tokenPrincipalFromClaims("unsigned_jwt", claims), true, nil
 }
 
 // KeycloakTokenResolver validates Keycloak-issued RS256 JWTs against JWKS keys.
 type KeycloakTokenResolver struct {
 	issuerURL string
 	clientID  string
+	provider  string
 	client    *http.Client
 
 	mu             sync.Mutex
@@ -69,22 +64,31 @@ func NewKeycloakTokenResolver(issuerURL, clientID string, client *http.Client) *
 	return &KeycloakTokenResolver{
 		issuerURL:   strings.TrimRight(strings.TrimSpace(issuerURL), "/"),
 		clientID:    strings.TrimSpace(clientID),
+		provider:    "keycloak",
 		client:      client,
 		missingKids: map[string]time.Time{},
 	}
 }
 
+// WithProvider overrides the provider code used in identity mapping.
+func (r *KeycloakTokenResolver) WithProvider(provider string) *KeycloakTokenResolver {
+	if strings.TrimSpace(provider) != "" {
+		r.provider = strings.TrimSpace(provider)
+	}
+	return r
+}
+
 // Resolve validates a bearer token and returns trusted tenant/account identity.
-func (r *KeycloakTokenResolver) Resolve(req *http.Request) (TokenContext, bool, error) {
+func (r *KeycloakTokenResolver) Resolve(req *http.Request) (domain.AuthenticatedPrincipal, bool, error) {
 	token := bearerToken(req)
 	if token == "" {
-		return TokenContext{}, false, nil
+		return domain.AuthenticatedPrincipal{}, false, nil
 	}
 	claims, err := r.verify(req.Context(), token)
 	if err != nil {
-		return TokenContext{}, true, domain.Unauthorized("invalid bearer token")
+		return domain.AuthenticatedPrincipal{}, true, domain.Unauthorized("invalid bearer token")
 	}
-	return tokenContextFromClaims(claims), true, nil
+	return tokenPrincipalFromClaims(r.provider, claims), true, nil
 }
 
 // Ping refreshes JWKS metadata to prove the resolver can reach Keycloak.
@@ -175,7 +179,7 @@ func (r *KeycloakTokenResolver) validateClaims(claims map[string]any) error {
 	if nbf := claimUnix(claims["nbf"]); nbf > now {
 		return errors.New("token not yet valid")
 	}
-	if claimString(claims, "tenant_id", "tid") == "" || claimString(claims, "account_id", "acct", "sub") == "" {
+	if claimString(claims, "tenant_id", "tid", "tenant_hint") == "" || claimString(claims, "sub", "account_id", "acct") == "" {
 		return errors.New("missing tenant or account claim")
 	}
 	return nil
@@ -366,11 +370,38 @@ func parseUnsignedClaims(token string) (map[string]any, bool, error) {
 	return claims, true, nil
 }
 
-func tokenContextFromClaims(claims map[string]any) TokenContext {
-	return TokenContext{
-		TenantID:  claimString(claims, "tenant_id", "tid"),
-		AccountID: claimString(claims, "account_id", "acct", "sub"),
+func tokenPrincipalFromClaims(provider string, claims map[string]any) domain.AuthenticatedPrincipal {
+	accountID := claimString(claims, "account_id", "acct")
+	subject := claimString(claims, "sub")
+	if subject == "" {
+		subject = accountID
 	}
+	tenantID := claimString(claims, "tenant_id", "tid")
+	tenantHint := claimString(claims, "tenant_hint")
+	if tenantHint == "" {
+		tenantHint = tenantID
+	}
+	return domain.AuthenticatedPrincipal{
+		Provider:   strings.TrimSpace(provider),
+		Subject:    subject,
+		Email:      claimString(claims, "email"),
+		Name:       claimString(claims, "name", "preferred_username"),
+		TenantID:   tenantID,
+		TenantHint: tenantHint,
+		AccountID:  accountID,
+		Claims:     copyClaims(claims),
+	}
+}
+
+func copyClaims(src map[string]any) map[string]any {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make(map[string]any, len(src))
+	for key, value := range src {
+		dst[key] = value
+	}
+	return dst
 }
 
 func claimString(claims map[string]any, keys ...string) string {

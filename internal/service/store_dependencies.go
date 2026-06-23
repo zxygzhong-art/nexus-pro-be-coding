@@ -6,6 +6,10 @@ type meStore interface {
 	repository.EmployeeStore
 }
 
+type identityStore interface {
+	repository.IdentityStore
+}
+
 type iamStore interface {
 	repository.AccountStore
 	repository.IAMStore

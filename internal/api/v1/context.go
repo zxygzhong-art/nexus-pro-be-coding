@@ -15,8 +15,17 @@ func (a *API) requestContext(r *http.Request) (domain.RequestContext, error) {
 		return domain.RequestContext{}, err
 	}
 	if ok {
-		tenantID = tokenCtx.TenantID
-		accountID = tokenCtx.AccountID
+		if a.identity != nil {
+			resolved, err := a.identity.ResolveAuthenticatedPrincipal(r.Context(), tokenCtx)
+			if err != nil {
+				return domain.RequestContext{}, err
+			}
+			tenantID = resolved.TenantID
+			accountID = resolved.AccountID
+		} else {
+			tenantID = tokenCtx.TenantID
+			accountID = tokenCtx.AccountID
+		}
 	}
 	if a.allowHeaderContext {
 		if tenantID == "" {

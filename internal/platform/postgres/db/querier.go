@@ -42,6 +42,7 @@ type Querier interface {
 	GetPermissionSet(ctx context.Context, arg GetPermissionSetParams) (PermissionSet, error)
 	GetTenant(ctx context.Context, id string) (Tenant, error)
 	GetUserGroup(ctx context.Context, arg GetUserGroupParams) (UserGroup, error)
+	GetUserIdentity(ctx context.Context, arg GetUserIdentityParams) (UserIdentity, error)
 	IncrementAuthzPermissionVersion(ctx context.Context, arg IncrementAuthzPermissionVersionParams) (AuthzPermissionVersion, error)
 	ListAccounts(ctx context.Context, tenantID string) ([]Account, error)
 	ListAgentRuns(ctx context.Context, tenantID string) ([]AgentRun, error)

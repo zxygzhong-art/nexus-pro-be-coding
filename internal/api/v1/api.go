@@ -15,6 +15,8 @@ import (
 // API owns HTTP routing, middleware, and service facade wiring for v1.
 type API struct {
 	logger              *slog.Logger
+	authn               service.AuthnFacade
+	identity            service.IdentityFacade
 	me                  service.MeFacade
 	authz               service.AuthzFacade
 	iam                 service.IAMFacade
@@ -73,6 +75,8 @@ func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
 		readinessChecks:     copyReadinessChecks(cfg.ReadinessChecks),
 	}
 	if app != nil {
+		api.authn = app.Authn()
+		api.identity = app.Identity()
 		api.me = app.Me()
 		api.authz = app.Authz()
 		api.iam = app.IAM()

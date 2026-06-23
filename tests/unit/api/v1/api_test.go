@@ -178,6 +178,216 @@ func TestTokenContextTakesPrecedenceOverSpoofedHeaders(t *testing.T) {
 	}
 }
 
+func TestIdentityMappingOverridesLegacyAccountClaim(t *testing.T) {
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	now := time.Now().UTC()
+	if err := store.UpsertUserIdentity(context.Background(), domain.UserIdentity{
+		ID:        "uid-google-employee",
+		TenantID:  "demo",
+		AccountID: "acct-employee",
+		Provider:  "keycloak",
+		Subject:   "google-oauth2|123",
+		Email:     "employee@demo.local",
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	handler := v1api.New(service.New(store), nil, v1api.Options{
+		AllowDemoContext: false,
+		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{
+			Provider:  "keycloak",
+			Subject:   "google-oauth2|123",
+			TenantID:  "demo",
+			AccountID: "acct-admin",
+		}, ok: true},
+	}).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 with mapped identity, got %d: %s", rec.Code, rec.Body.String())
+	}
+	me := decodeData[domain.MeResponse](t, rec.Body.Bytes())
+	if me.Account.ID != "acct-employee" {
+		t.Fatalf("expected mapped account to win over token account claim, got %+v", me.Account)
+	}
+}
+
+func TestUnlinkedExternalIdentityIsRejected(t *testing.T) {
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	handler := v1api.New(service.New(store), nil, v1api.Options{
+		AllowDemoContext: false,
+		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{
+			Provider: "keycloak",
+			Subject:  "unknown-subject",
+			TenantID: "demo",
+		}, ok: true},
+	}).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unlinked external identity, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestDisabledAccountIsRejectedAfterIdentityResolution(t *testing.T) {
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	account, ok, err := store.GetAccount(context.Background(), "demo", "acct-admin")
+	if err != nil || !ok {
+		t.Fatalf("expected seeded account, ok=%v err=%v", ok, err)
+	}
+	account.Status = string(domain.AccountStatusDisabled)
+	if err := store.UpsertAccount(context.Background(), account); err != nil {
+		t.Fatal(err)
+	}
+	handler := v1api.New(service.New(store), nil, v1api.Options{
+		AllowDemoContext: false,
+		TokenResolver:    staticTokenResolver{ctx: v1api.TokenContext{TenantID: "demo", AccountID: "acct-admin"}, ok: true},
+	}).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for disabled account, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestOIDCAuthorizationURLReturnsSignedState(t *testing.T) {
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	stateCodec := platformauth.NewOIDCStateCodec("state-secret", time.Minute)
+	handler := v1api.New(service.New(store, service.Options{
+		OIDCProviders: map[string]service.OIDCProvider{
+			"google": fakeOIDCProvider{authURL: "https://accounts.google.com/o/oauth2/v2/auth"},
+		},
+		AuthTokenIssuer: platformauth.NewInternalTokenIssuer("session-secret", "nexus-pro-be", "nexus-pro-be-api", time.Hour),
+		AuthStateCodec:  stateCodec,
+	}), nil).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/auth/oidc/google/authorize?tenant_id=demo&return_url=https%3A%2F%2Fapp.example%2Fdone", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for OIDC authorize, got %d: %s", rec.Code, rec.Body.String())
+	}
+	result := decodeData[domain.OIDCAuthorizationResponse](t, rec.Body.Bytes())
+	if result.Provider != "google" || result.State == "" || !strings.Contains(result.AuthorizationURL, "state=") {
+		t.Fatalf("unexpected authorization response: %+v", result)
+	}
+	state, err := stateCodec.DecodeOIDCState(result.State)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.Provider != "google" || state.TenantID != "demo" || state.ReturnURL != "https://app.example/done" {
+		t.Fatalf("unexpected decoded state: %+v", state)
+	}
+}
+
+func TestOIDCCallbackIssuesInternalTokenForBoundIdentity(t *testing.T) {
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	if err := store.UpsertUserIdentity(context.Background(), domain.UserIdentity{
+		ID:        "uid-google-employee",
+		TenantID:  "demo",
+		AccountID: "acct-employee",
+		Provider:  "google",
+		Subject:   "google-subject",
+		Email:     "employee@demo.local",
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stateCodec := platformauth.NewOIDCStateCodec("state-secret", time.Minute)
+	tokenIssuer := platformauth.NewInternalTokenIssuer("session-secret", "nexus-pro-be", "nexus-pro-be-api", time.Hour)
+	handler := v1api.New(service.New(store, service.Options{
+		OIDCProviders: map[string]service.OIDCProvider{
+			"google": fakeOIDCProvider{
+				authURL: "https://accounts.google.com/o/oauth2/v2/auth",
+				principal: domain.AuthenticatedPrincipal{
+					Provider: "google",
+					Subject:  "google-subject",
+					Email:    "employee@demo.local",
+				},
+			},
+		},
+		AuthTokenIssuer: tokenIssuer,
+		AuthStateCodec:  stateCodec,
+	}), nil, v1api.Options{
+		TokenResolver: platformauth.NewInternalTokenResolver("session-secret", "nexus-pro-be", "nexus-pro-be-api"),
+	}).Routes()
+	state, err := stateCodec.EncodeOIDCState("google", "demo", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	callbackReq := httptest.NewRequest(http.MethodGet, "/v1/auth/oidc/google/callback?code=ok&state="+state, nil)
+	callbackRec := httptest.NewRecorder()
+
+	handler.ServeHTTP(callbackRec, callbackReq)
+
+	if callbackRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for OIDC callback, got %d: %s", callbackRec.Code, callbackRec.Body.String())
+	}
+	login := decodeData[domain.AuthLoginResponse](t, callbackRec.Body.Bytes())
+	if login.AccessToken == "" || login.AccountID != "acct-employee" || login.Provider != "google" || login.Subject != "google-subject" {
+		t.Fatalf("unexpected login response: %+v", login)
+	}
+
+	meReq := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	meReq.Header.Set("Authorization", "Bearer "+login.AccessToken)
+	meRec := httptest.NewRecorder()
+	handler.ServeHTTP(meRec, meReq)
+	if meRec.Code != http.StatusOK {
+		t.Fatalf("expected issued internal token to access /me, got %d: %s", meRec.Code, meRec.Body.String())
+	}
+	me := decodeData[domain.MeResponse](t, meRec.Body.Bytes())
+	if me.Account.ID != "acct-employee" {
+		t.Fatalf("expected /me to use bound account, got %+v", me.Account)
+	}
+}
+
+func TestOIDCCallbackRejectsUnboundIdentity(t *testing.T) {
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	stateCodec := platformauth.NewOIDCStateCodec("state-secret", time.Minute)
+	handler := v1api.New(service.New(store, service.Options{
+		OIDCProviders: map[string]service.OIDCProvider{
+			"microsoft": fakeOIDCProvider{
+				authURL: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+				principal: domain.AuthenticatedPrincipal{
+					Provider: "microsoft",
+					Subject:  "unbound-subject",
+					Email:    "unbound@example.com",
+				},
+			},
+		},
+		AuthTokenIssuer: platformauth.NewInternalTokenIssuer("session-secret", "nexus-pro-be", "nexus-pro-be-api", time.Hour),
+		AuthStateCodec:  stateCodec,
+	}), nil).Routes()
+	state, err := stateCodec.EncodeOIDCState("microsoft", "demo", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/auth/oidc/microsoft/callback?code=ok&state="+state, nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unbound external identity, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
 func TestProductionContextRejectsUnsignedBearerFallback(t *testing.T) {
 	handler := newTestAPI(false)
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
@@ -1116,6 +1326,7 @@ func keycloakClaims(issuer string) map[string]any {
 		"iss":        issuer,
 		"aud":        "nexus-api",
 		"exp":        time.Now().Add(time.Hour).Unix(),
+		"sub":        "acct-admin",
 		"tenant_id":  "demo",
 		"account_id": "acct-admin",
 	}
@@ -1158,6 +1369,26 @@ type staticTokenResolver struct {
 	ctx v1api.TokenContext
 	ok  bool
 	err error
+}
+
+type fakeOIDCProvider struct {
+	authURL   string
+	principal domain.AuthenticatedPrincipal
+	err       error
+}
+
+func (p fakeOIDCProvider) AuthorizationURL(state string) (string, error) {
+	if p.err != nil {
+		return "", p.err
+	}
+	return p.authURL + "?state=" + state, nil
+}
+
+func (p fakeOIDCProvider) ResolveCallback(context.Context, string) (domain.AuthenticatedPrincipal, error) {
+	if p.err != nil {
+		return domain.AuthenticatedPrincipal{}, p.err
+	}
+	return p.principal, nil
 }
 
 type keycloakContextMarkerKey struct{}

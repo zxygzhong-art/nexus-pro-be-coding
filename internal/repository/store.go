@@ -6,6 +6,7 @@ import "context"
 type Store interface {
 	TenantStore
 	AccountStore
+	IdentityStore
 	IAMStore
 	OrgStore
 	EmployeeStore

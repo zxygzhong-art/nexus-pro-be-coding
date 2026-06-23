@@ -15,6 +15,10 @@ SELECT * FROM user_identities
 WHERE tenant_id = $1 AND account_id = $2
 ORDER BY created_at ASC;
 
+-- name: GetUserIdentity :one
+SELECT * FROM user_identities
+WHERE tenant_id = $1 AND provider = $2 AND subject = $3;
+
 -- name: UpsertAuthzApplication :one
 INSERT INTO authz_applications (
     id, tenant_id, code, name, description, created_at

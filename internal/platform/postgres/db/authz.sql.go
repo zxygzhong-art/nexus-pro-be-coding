@@ -320,6 +320,32 @@ func (q *Queries) GetAuthzPermissionVersion(ctx context.Context, tenantID string
 	return i, err
 }
 
+const getUserIdentity = `-- name: GetUserIdentity :one
+SELECT id, tenant_id, account_id, provider, subject, email, created_at FROM user_identities
+WHERE tenant_id = $1 AND provider = $2 AND subject = $3
+`
+
+type GetUserIdentityParams struct {
+	TenantID string `json:"tenant_id"`
+	Provider string `json:"provider"`
+	Subject  string `json:"subject"`
+}
+
+func (q *Queries) GetUserIdentity(ctx context.Context, arg GetUserIdentityParams) (UserIdentity, error) {
+	row := q.db.QueryRow(ctx, getUserIdentity, arg.TenantID, arg.Provider, arg.Subject)
+	var i UserIdentity
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.Provider,
+		&i.Subject,
+		&i.Email,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const incrementAuthzPermissionVersion = `-- name: IncrementAuthzPermissionVersion :one
 INSERT INTO authz_permission_versions (
     tenant_id, version, updated_at

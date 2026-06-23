@@ -2,7 +2,59 @@ openapi: 3.0.3
 info:
   title: Nexus Pro Backend API
   version: 0.2.0
+security:
+  - bearerAuth: []
 paths:
+  /v1/auth/oidc/{provider}/authorize:
+    get:
+      summary: Build third-party OIDC authorization URL
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/OIDCProvider"
+        - name: tenant_id
+          in: query
+          required: true
+          schema: {type: string}
+        - name: return_url
+          in: query
+          schema: {type: string}
+      responses:
+        "200":
+          description: OIDC authorization URL
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OIDCAuthorizationDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/auth/oidc/{provider}/callback:
+    get:
+      summary: Complete third-party OIDC callback for an already-bound account
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/OIDCProvider"
+        - name: code
+          in: query
+          required: true
+          schema: {type: string}
+        - name: state
+          in: query
+          required: true
+          schema: {type: string}
+      responses:
+        "200":
+          description: Internal bearer token for the bound account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthLoginDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees:
     get:
       summary: List employees
@@ -836,6 +888,12 @@ paths:
               schema:
                 $ref: "#/components/schemas/DataResponse"
 components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Bearer token issued by the configured identity provider and mapped to a local tenant account.
   parameters:
     ID:
       name: id
@@ -879,6 +937,13 @@ components:
       required: true
       schema:
         type: string
+    OIDCProvider:
+      name: provider
+      in: path
+      required: true
+      schema:
+        type: string
+        enum: [google, microsoft]
   responses:
     ValidationError:
       description: Validation failed. Field errors include tab, field, code and message; import row errors include row_number.
@@ -923,6 +988,39 @@ components:
       properties:
         data:
           description: Successful response payload.
+    OIDCAuthorizationDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/OIDCAuthorizationResponse"
+    AuthLoginDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/AuthLoginResponse"
+    OIDCAuthorizationResponse:
+      type: object
+      required: [provider, authorization_url, state]
+      properties:
+        provider: {type: string}
+        authorization_url: {type: string}
+        state: {type: string}
+    AuthLoginResponse:
+      type: object
+      required: [access_token, token_type, expires_at, expires_in, tenant_id, account_id, provider, subject]
+      properties:
+        access_token: {type: string}
+        token_type: {type: string, enum: [Bearer]}
+        expires_at: {type: string, format: date-time}
+        expires_in: {type: integer}
+        tenant_id: {type: string}
+        account_id: {type: string}
+        provider: {type: string}
+        subject: {type: string}
+        email: {type: string}
+        return_url: {type: string}
     EmployeeDataResponse:
       type: object
       required: [data]

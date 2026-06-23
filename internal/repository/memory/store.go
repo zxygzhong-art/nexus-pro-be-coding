@@ -19,6 +19,7 @@ type Store struct {
 	tenants map[string]Tenant
 
 	accounts            map[string]map[string]Account
+	userIdentities      map[string]map[string]UserIdentity
 	userGroups          map[string]map[string]UserGroup
 	permissionSets      map[string]map[string]PermissionSet
 	assignments         map[string]map[string]PermissionSetAssignment
@@ -48,6 +49,7 @@ func NewStore() *Store {
 	return &Store{
 		tenants:             map[string]Tenant{},
 		accounts:            map[string]map[string]Account{},
+		userIdentities:      map[string]map[string]UserIdentity{},
 		userGroups:          map[string]map[string]UserGroup{},
 		permissionSets:      map[string]map[string]PermissionSet{},
 		assignments:         map[string]map[string]PermissionSetAssignment{},
@@ -122,6 +124,37 @@ func (s *Store) ListAccounts(_ context.Context, tenantID string) ([]Account, err
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := copyNestedValues(s.accounts[tenantID], copyAccount)
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (s *Store) UpsertUserIdentity(_ context.Context, v UserIdentity) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.userIdentities, v.TenantID, identityKey(v.Provider, v.Subject), copyUserIdentity(v))
+	return nil
+}
+
+func (s *Store) GetUserIdentity(_ context.Context, tenantID, provider, subject string) (UserIdentity, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.userIdentities, tenantID, identityKey(provider, subject))
+	if !ok {
+		return UserIdentity{}, false, nil
+	}
+	return copyUserIdentity(v), true, nil
+}
+
+func (s *Store) ListUserIdentities(_ context.Context, tenantID, accountID string) ([]UserIdentity, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	src := s.userIdentities[tenantID]
+	out := make([]UserIdentity, 0)
+	for _, v := range src {
+		if v.AccountID == accountID {
+			out = append(out, copyUserIdentity(v))
+		}
+	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
 }
@@ -1066,6 +1099,10 @@ func copyNestedValues[T any](bucket map[string]T, clone func(T) T) []T {
 		out = append(out, clone(v))
 	}
 	return out
+}
+
+func identityKey(provider, subject string) string {
+	return strings.TrimSpace(provider) + "\x00" + strings.TrimSpace(subject)
 }
 
 func nowUTC() time.Time {

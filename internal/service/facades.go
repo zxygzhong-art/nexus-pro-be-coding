@@ -1,5 +1,19 @@
 package service
 
+import "context"
+
+// AuthnFacade exposes public authentication entrypoints to the API layer.
+type AuthnFacade interface {
+	OIDCAuthorizationURL(string, OIDCAuthorizationInput) (OIDCAuthorizationResponse, error)
+	CompleteOIDCCallback(context.Context, string, string, string) (AuthLoginResponse, error)
+}
+
+// IdentityFacade exposes external-principal to local-account mapping to the API layer.
+type IdentityFacade interface {
+	ResolveAuthenticatedPrincipal(context.Context, AuthenticatedPrincipal) (IdentityResolution, error)
+	ResolveBoundAuthenticatedPrincipal(context.Context, AuthenticatedPrincipal) (IdentityResolution, error)
+}
+
 // MeFacade exposes current-user read operations to the API layer.
 type MeFacade interface {
 	Resolve(RequestContext) (MeResponse, error)
@@ -85,6 +99,8 @@ type AuditFacade interface {
 }
 
 var (
+	_ AuthnFacade      = AuthnService{}
+	_ IdentityFacade   = IdentityService{}
 	_ MeFacade         = MeService{}
 	_ AuthzFacade      = AuthzService{}
 	_ IAMFacade        = IAMService{}

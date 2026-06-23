@@ -132,6 +132,42 @@ func (s *Store) ListAccounts(execCtx context.Context, tenantID string) ([]domain
 	return mapSlice(items, fromAccount), nil
 }
 
+func (s *Store) UpsertUserIdentity(execCtx context.Context, v domain.UserIdentity) error {
+	_, err := s.q.UpsertUserIdentity(tenantContext(execCtx, v.TenantID), sqlc.UpsertUserIdentityParams{
+		ID:        v.ID,
+		TenantID:  v.TenantID,
+		AccountID: v.AccountID,
+		Provider:  v.Provider,
+		Subject:   v.Subject,
+		Email:     v.Email,
+		CreatedAt: timestamptz(v.CreatedAt),
+	})
+	return err
+}
+
+func (s *Store) GetUserIdentity(execCtx context.Context, tenantID, provider, subject string) (domain.UserIdentity, bool, error) {
+	v, err := s.q.GetUserIdentity(tenantContext(execCtx, tenantID), sqlc.GetUserIdentityParams{
+		TenantID: tenantID,
+		Provider: provider,
+		Subject:  subject,
+	})
+	if isNotFound(err) {
+		return domain.UserIdentity{}, false, nil
+	}
+	if err != nil {
+		return domain.UserIdentity{}, false, err
+	}
+	return fromUserIdentity(v), true, nil
+}
+
+func (s *Store) ListUserIdentities(execCtx context.Context, tenantID, accountID string) ([]domain.UserIdentity, error) {
+	items, err := s.q.ListUserIdentities(tenantContext(execCtx, tenantID), sqlc.ListUserIdentitiesParams{TenantID: tenantID, AccountID: accountID})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromUserIdentity), nil
+}
+
 func (s *Store) RemoveAccountGroup(execCtx context.Context, tenantID, accountID, groupID string) error {
 	account, ok, err := s.GetAccount(execCtx, tenantID, accountID)
 	if err != nil {
@@ -1265,6 +1301,18 @@ func fromAccount(v sqlc.Account) domain.Account {
 		DirectPermissionSetIDs: utils.CopyStrings(v.DirectPermissionSetIds),
 		ActiveAssumableRoleID:  v.ActiveAssumableRoleID,
 		CreatedAt:              timeFrom(v.CreatedAt),
+	}
+}
+
+func fromUserIdentity(v sqlc.UserIdentity) domain.UserIdentity {
+	return domain.UserIdentity{
+		ID:        v.ID,
+		TenantID:  v.TenantID,
+		AccountID: v.AccountID,
+		Provider:  v.Provider,
+		Subject:   v.Subject,
+		Email:     v.Email,
+		CreatedAt: timeFrom(v.CreatedAt),
 	}
 }
 

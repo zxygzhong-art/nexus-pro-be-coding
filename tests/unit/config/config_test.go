@@ -158,6 +158,54 @@ func TestValidateStartupRejectsUnsafeProductionCompatibilityFlags(t *testing.T) 
 	}
 }
 
+func TestValidateStartupRejectsIncompleteOIDCProvider(t *testing.T) {
+	cfg := config.Config{
+		Env:                   "production",
+		DatabaseURL:           "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable",
+		KeycloakIssuerURL:     "https://issuer.example/realms/nexus",
+		KeycloakClientID:      "nexus-api",
+		OpenFGAAPIURL:         "https://openfga.example",
+		OpenFGAStoreID:        "store-1",
+		OpenFGAModelID:        "model-1",
+		ObjectStoreDir:        "/var/lib/nexus-pro-be/objects",
+		GoogleOIDCIssuerURL:   "https://accounts.google.com",
+		GoogleOIDCClientID:    "google-client",
+		AuthSessionSigningKey: "session-secret",
+	}
+
+	err := cfg.ValidateStartup()
+	if err == nil {
+		t.Fatal("expected incomplete OIDC config validation error")
+	}
+	for _, want := range []string{"GOOGLE_OIDC_CLIENT_SECRET", "GOOGLE_OIDC_REDIRECT_URL"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected validation error to mention %s, got %v", want, err)
+		}
+	}
+}
+
+func TestValidateStartupRejectsOIDCWithoutSessionSigningKey(t *testing.T) {
+	cfg := config.Config{
+		Env:                       "production",
+		DatabaseURL:               "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable",
+		KeycloakIssuerURL:         "https://issuer.example/realms/nexus",
+		KeycloakClientID:          "nexus-api",
+		OpenFGAAPIURL:             "https://openfga.example",
+		OpenFGAStoreID:            "store-1",
+		OpenFGAModelID:            "model-1",
+		ObjectStoreDir:            "/var/lib/nexus-pro-be/objects",
+		MicrosoftOIDCIssuerURL:    "https://login.microsoftonline.com/common/v2.0",
+		MicrosoftOIDCClientID:     "microsoft-client",
+		MicrosoftOIDCClientSecret: "microsoft-secret",
+		MicrosoftOIDCRedirectURL:  "https://api.example/v1/auth/oidc/microsoft/callback",
+	}
+
+	err := cfg.ValidateStartup()
+	if err == nil || !strings.Contains(err.Error(), "AUTH_SESSION_SIGNING_KEY") {
+		t.Fatalf("expected missing session signing key validation error, got %v", err)
+	}
+}
+
 func TestInvalidIntegerConfigReturnsError(t *testing.T) {
 	t.Setenv("REDIS_DB", "not-a-number")
 
