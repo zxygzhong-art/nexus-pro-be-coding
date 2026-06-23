@@ -38,12 +38,19 @@ func (a *API) requestContext(r *http.Request) (domain.RequestContext, error) {
 		}
 		accountID = "acct-admin"
 	}
+	requestID := requestIDFrom(r)
+	traceID, spanID := traceContextIDs(r)
+	if traceID == "" {
+		traceID = requestID
+	}
 	return domain.RequestContext{
 		Context:              r.Context(),
 		TenantID:             tenantID,
 		AccountID:            accountID,
 		AssumedRoleSessionID: strings.TrimSpace(r.Header.Get("X-Assumable-Role-Session-ID")),
-		RequestID:            requestIDFrom(r),
+		RequestID:            requestID,
+		TraceID:              traceID,
+		SpanID:               spanID,
 		ApprovalConfirmed:    a.approvalConfirmed(r),
 		ApprovalInstanceID:   strings.TrimSpace(r.Header.Get("X-Approval-Instance-ID")),
 	}, nil

@@ -58,12 +58,8 @@ func (a *API) ginHandle(resource, action string, next HandlerFunc, authz routeAu
 		}
 		c.Set("tenant_id", ctx.TenantID)
 		c.Set("account_id", ctx.AccountID)
-		traceID, spanID := traceContextIDs(c.Request)
-		if traceID == "" {
-			traceID = ctx.RequestID
-		}
-		c.Set("trace_id", traceID)
-		c.Set("span_id", spanID)
+		c.Set("trace_id", ctx.TraceID)
+		c.Set("span_id", ctx.SpanID)
 		c.Writer.Header().Set("X-Request-ID", ctx.RequestID)
 		if err := a.authorize(ctx, c.Request, resource, action, authz); err != nil {
 			a.writeError(c.Writer, c.Request, err)

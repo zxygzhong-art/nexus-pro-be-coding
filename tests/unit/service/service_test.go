@@ -879,7 +879,7 @@ func TestEmployeeFieldPolicyHidesDenyFieldsAndBlocksWrites(t *testing.T) {
 		UpdatedAt:    now,
 	})
 	svc := service.New(store)
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", RequestID: "req-field-policy", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", RequestID: "req-field-policy", TraceID: "trace-field-policy", ApprovalConfirmed: true}
 
 	items, err := svc.HR().ListEmployees(ctx)
 	if err != nil {
@@ -923,7 +923,7 @@ func TestEmployeeFieldPolicyHidesDenyFieldsAndBlocksWrites(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected export audit log, got %+v", logs)
 	}
-	if exportLog.TraceID != "req-field-policy" || exportLog.Details["row_count"] != 1 {
+	if exportLog.TraceID != "trace-field-policy" || exportLog.Details["trace_id"] != "trace-field-policy" || exportLog.Details["request_id"] != "req-field-policy" || exportLog.Details["row_count"] != 1 {
 		t.Fatalf("expected export audit trace and row count, got %+v", exportLog)
 	}
 	restricted, ok := exportLog.Details["restricted_fields"].(map[string][]string)

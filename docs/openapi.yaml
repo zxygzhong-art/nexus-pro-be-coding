@@ -241,6 +241,14 @@ paths:
       responses:
         "200":
           description: CSV or XLSX template with 10 import columns
+          content:
+            text/csv:
+              schema:
+                type: string
+            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+              schema:
+                type: string
+                format: binary
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -263,11 +271,7 @@ paths:
                   format: binary
           application/json:
             schema:
-              type: object
-              required: [filename, content]
-              properties:
-                filename: {type: string}
-                content: {type: string}
+              $ref: "#/components/schemas/EmployeeImportPreviewRequest"
       responses:
         "201":
           description: Import preview session
@@ -290,10 +294,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                mode: {type: string, enum: [create, update, upsert], default: create}
-                failure_policy: {type: string, enum: [all_or_nothing], default: all_or_nothing}
+              $ref: "#/components/schemas/EmployeeImportConfirmRequest"
       responses:
         "200":
           description: Confirmed import session
@@ -364,13 +365,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [employee_ids, reason]
-              properties:
-                employee_ids:
-                  type: array
-                  items: {type: string}
-                reason: {type: string}
+              $ref: "#/components/schemas/BatchDeleteEmployeesRequest"
       responses:
         "200":
           description: Batch delete results
@@ -399,9 +394,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                email: {type: string, format: email}
+              $ref: "#/components/schemas/InviteEmployeeRequest"
       responses:
         "200":
           description: Employee with invitation account link
@@ -426,16 +419,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [status]
-              properties:
-                status: {type: string}
-                reason: {type: string}
-                start_date: {type: string}
-                end_date: {type: string}
-                details:
-                  type: object
-                  additionalProperties: true
+              $ref: "#/components/schemas/EmployeeStatusTransitionRequest"
       responses:
         "200":
           description: Updated employee
@@ -459,11 +443,7 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              required: [status]
-              properties:
-                status:
-                  $ref: "#/components/schemas/EmployeeDirectStatus"
+              $ref: "#/components/schemas/EmployeeDirectStatusRequest"
       responses:
         "200":
           description: Updated employee
@@ -991,18 +971,66 @@ components:
       properties:
         data:
           type: object
-          required: [items]
+          required: [items, total, page, page_size, sort]
           properties:
             items:
               type: array
               items:
                 $ref: "#/components/schemas/Employee"
+            total: {type: integer}
+            page: {type: integer}
+            page_size: {type: integer}
+            sort: {type: string}
     BatchEmployeeDataResponse:
       type: object
       required: [data]
       properties:
         data:
           $ref: "#/components/schemas/BatchEmployeeResponse"
+    EmployeeImportPreviewRequest:
+      type: object
+      required: [filename, content]
+      properties:
+        filename: {type: string}
+        content:
+          type: string
+          description: Raw CSV or XLSX content when JSON upload is used.
+    EmployeeImportConfirmRequest:
+      type: object
+      properties:
+        mode: {type: string, enum: [create, update, upsert], default: create}
+        failure_policy: {type: string, enum: [all_or_nothing], default: all_or_nothing}
+    BatchDeleteEmployeesRequest:
+      type: object
+      required: [employee_ids, reason]
+      properties:
+        employee_ids:
+          type: array
+          minItems: 1
+          items: {type: string}
+        reason: {type: string}
+    InviteEmployeeRequest:
+      type: object
+      properties:
+        email: {type: string, format: email}
+    EmployeeStatusTransitionRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/EmployeeStatus"
+        reason: {type: string}
+        start_date: {type: string}
+        end_date: {type: string}
+        details:
+          type: object
+          additionalProperties: true
+    EmployeeDirectStatusRequest:
+      type: object
+      required: [status]
+      properties:
+        status:
+          $ref: "#/components/schemas/EmployeeDirectStatus"
     Employee:
       allOf:
         - $ref: "#/components/schemas/EmployeeInput"
@@ -1237,12 +1265,7 @@ components:
         field_errors:
           type: array
           items:
-            type: object
-            properties:
-              tab: {type: string}
-              field: {type: string}
-              code: {type: string}
-              message: {type: string}
+            $ref: "#/components/schemas/FieldError"
         diff:
           type: object
           additionalProperties: true
@@ -1391,11 +1414,40 @@ components:
                 enum: [soft_deleted, soft_deleted_account_disabled]
               code: {type: string}
               message: {type: string}
+    FieldError:
+      type: object
+      required: [field, code, message]
+      properties:
+        tab:
+          type: string
+          description: Employee modal tab or section key, for example basic_info or employment_info.
+        field:
+          type: string
+          description: Request or spreadsheet field key that failed validation.
+        code:
+          type: string
+          description: Stable machine-readable validation or field-policy code.
+        message:
+          type: string
+    RowError:
+      type: object
+      required: [row_number, field_errors]
+      properties:
+        row_number:
+          type: integer
+          minimum: 1
+          description: Spreadsheet or CSV row number, including the header row offset used by the import parser.
+        field_errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldError"
     Error:
       type: object
+      required: [error]
       properties:
         error:
           type: object
+          required: [code, message, trace_id]
           properties:
             code:
               type: integer
@@ -1446,25 +1498,9 @@ components:
             field_errors:
               type: array
               items:
-                type: object
-                properties:
-                  tab: {type: string}
-                  field: {type: string}
-                  code: {type: string}
-                  message: {type: string}
+                $ref: "#/components/schemas/FieldError"
             row_errors:
               type: array
               items:
-                type: object
-                properties:
-                  row_number: {type: integer}
-                  field_errors:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        tab: {type: string}
-                        field: {type: string}
-                        code: {type: string}
-                        message: {type: string}
+                $ref: "#/components/schemas/RowError"
             trace_id: {type: string}

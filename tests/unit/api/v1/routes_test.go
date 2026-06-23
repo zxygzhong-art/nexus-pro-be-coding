@@ -114,6 +114,72 @@ func TestDocumentedJSONSuccessResponsesUseDataEnvelope(t *testing.T) {
 	}
 }
 
+func TestEmployeeOpenAPIRequestBodiesUseNamedSchemas(t *testing.T) {
+	refs := openAPIRequestJSONSchemaRefs(t)
+	expected := map[string]string{
+		"POST /v1/hr/employees":                        "EmployeeInput",
+		"POST /v1/hr/employees/preview":                "EmployeeInput",
+		"PATCH /v1/hr/employees/{id}":                  "EmployeePatch",
+		"POST /v1/hr/employees/{id}/preview":           "EmployeePatch",
+		"POST /v1/hr/employees/import/preview":         "EmployeeImportPreviewRequest",
+		"POST /v1/hr/employees/import/{id}/confirm":    "EmployeeImportConfirmRequest",
+		"POST /v1/hr/employees/export":                 "EmployeeQuery",
+		"POST /v1/hr/employees/batch-delete":           "BatchDeleteEmployeesRequest",
+		"POST /v1/hr/employees/{id}/invite":            "InviteEmployeeRequest",
+		"POST /v1/hr/employees/{id}/status-transition": "EmployeeStatusTransitionRequest",
+		"PATCH /v1/hr/employees/{id}/status":           "EmployeeDirectStatusRequest",
+	}
+	for key, schemaName := range expected {
+		if got := refs[key]; got != schemaName {
+			t.Fatalf("%s request body uses %q, want %q", key, got, schemaName)
+		}
+	}
+}
+
+func TestEmployeeOpenAPIOperationsDocumentStandardErrors(t *testing.T) {
+	routes := openAPIRouteKeys(t)
+	refs := openAPIErrorResponseRefs(t)
+	expected := map[string]string{
+		"400": "ValidationError",
+		"401": "Unauthenticated",
+		"403": "Forbidden",
+		"404": "NotFound",
+		"409": "Conflict",
+		"500": "InternalError",
+	}
+	for route := range routes {
+		if !strings.Contains(route, " /v1/hr/employees") && !strings.HasSuffix(route, " /v1/hr/employee-options") {
+			continue
+		}
+		for status, name := range expected {
+			key := route + " " + status
+			if got := refs[key]; got != name {
+				t.Fatalf("%s response uses %q, want %q", key, got, name)
+			}
+		}
+	}
+}
+
+func TestOpenAPIErrorSchemaSupportsFieldAndRowLocalization(t *testing.T) {
+	raw := string(readOpenAPI(t))
+	requiredSnippets := map[string]string{
+		"FieldError required fields":        "    FieldError:\n      type: object\n      required: [field, code, message]",
+		"FieldError tab property":           "        tab:\n          type: string",
+		"RowError required fields":          "    RowError:\n      type: object\n      required: [row_number, field_errors]",
+		"RowError field errors ref":         "        field_errors:\n          type: array\n          items:\n            $ref: \"#/components/schemas/FieldError\"",
+		"Error top-level required":          "    Error:\n      type: object\n      required: [error]",
+		"Error body required trace":         "        error:\n          type: object\n          required: [code, message, trace_id]",
+		"Error field errors ref":            "            field_errors:\n              type: array\n              items:\n                $ref: \"#/components/schemas/FieldError\"",
+		"Error row errors ref":              "            row_errors:\n              type: array\n              items:\n                $ref: \"#/components/schemas/RowError\"",
+		"Preview field errors named schema": "        field_errors:\n          type: array\n          items:\n            $ref: \"#/components/schemas/FieldError\"",
+	}
+	for name, snippet := range requiredSnippets {
+		if !strings.Contains(raw, snippet) {
+			t.Fatalf("missing OpenAPI %s snippet:\n%s", name, snippet)
+		}
+	}
+}
+
 func isPublicRoute(path string) bool {
 	switch path {
 	case "/healthz", "/readyz", "/openapi.yaml", "/swagger", "/swagger/*any":
@@ -211,6 +277,116 @@ func openAPISuccessJSONSchemaRefs(t *testing.T) map[string]string {
 		inJSON = false
 	}
 	return refs
+}
+
+func openAPIRequestJSONSchemaRefs(t *testing.T) map[string]string {
+	t.Helper()
+	refs := map[string]string{}
+	currentPath := ""
+	currentMethod := ""
+	inRequestBody := false
+	inJSON := false
+	for _, line := range strings.Split(string(readOpenAPI(t)), "\n") {
+		if strings.HasPrefix(line, "components:") {
+			break
+		}
+		if strings.HasPrefix(line, "  /") {
+			currentPath = strings.TrimSuffix(strings.TrimSpace(line), ":")
+			currentMethod = ""
+			inRequestBody = false
+			inJSON = false
+			continue
+		}
+		if currentPath == "" {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		switch trimmed {
+		case "get:", "post:", "patch:", "delete:":
+			currentMethod = strings.ToUpper(strings.TrimSuffix(trimmed, ":"))
+			inRequestBody = false
+			inJSON = false
+			continue
+		case "requestBody:":
+			inRequestBody = currentMethod != ""
+			inJSON = false
+			continue
+		case "responses:":
+			inRequestBody = false
+			inJSON = false
+			continue
+		case "application/json:":
+			inJSON = inRequestBody && currentMethod != ""
+			continue
+		}
+		if !inJSON || !strings.HasPrefix(trimmed, "$ref: \"#/components/schemas/") {
+			continue
+		}
+		schema := strings.TrimPrefix(trimmed, "$ref: \"#/components/schemas/")
+		schema = strings.TrimSuffix(schema, "\"")
+		refs[currentMethod+" "+currentPath] = schema
+		inJSON = false
+	}
+	return refs
+}
+
+func openAPIErrorResponseRefs(t *testing.T) map[string]string {
+	t.Helper()
+	refs := map[string]string{}
+	currentPath := ""
+	currentMethod := ""
+	inResponses := false
+	for _, line := range strings.Split(string(readOpenAPI(t)), "\n") {
+		if strings.HasPrefix(line, "components:") {
+			break
+		}
+		if strings.HasPrefix(line, "  /") {
+			currentPath = strings.TrimSuffix(strings.TrimSpace(line), ":")
+			currentMethod = ""
+			inResponses = false
+			continue
+		}
+		if currentPath == "" {
+			continue
+		}
+		trimmed := strings.TrimSpace(line)
+		switch trimmed {
+		case "get:", "post:", "patch:", "delete:":
+			currentMethod = strings.ToUpper(strings.TrimSuffix(trimmed, ":"))
+			inResponses = false
+			continue
+		case "responses:":
+			inResponses = currentMethod != ""
+			continue
+		case "requestBody:":
+			inResponses = false
+			continue
+		}
+		status, response, ok := openAPIInlineResponseRef(trimmed)
+		if inResponses && ok {
+			refs[currentMethod+" "+currentPath+" "+status] = response
+		}
+	}
+	return refs
+}
+
+func openAPIInlineResponseRef(trimmed string) (string, string, bool) {
+	if !strings.HasPrefix(trimmed, "\"") {
+		return "", "", false
+	}
+	statusEnd := strings.Index(trimmed[1:], "\"")
+	if statusEnd < 0 {
+		return "", "", false
+	}
+	prefix := `{$ref: "#/components/responses/`
+	refStart := strings.Index(trimmed, prefix)
+	if refStart < 0 {
+		return "", "", false
+	}
+	status := trimmed[1 : statusEnd+1]
+	response := strings.TrimSpace(trimmed[refStart+len(prefix):])
+	response = strings.TrimSuffix(response, `"}`)
+	return status, response, response != ""
 }
 
 func readOpenAPI(t *testing.T) []byte {

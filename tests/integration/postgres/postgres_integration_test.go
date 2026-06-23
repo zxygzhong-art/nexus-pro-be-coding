@@ -2,7 +2,10 @@ package postgres_integration_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"sort"
 	"strings"
@@ -11,8 +14,15 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
+	v1api "nexus-pro-be/internal/api/v1"
 	"nexus-pro-be/internal/domain"
+	openfgaclient "nexus-pro-be/internal/platform/openfga"
+	pgplatform "nexus-pro-be/internal/platform/postgres"
 	"nexus-pro-be/internal/repository"
 	postgresrepo "nexus-pro-be/internal/repository/postgres"
 	"nexus-pro-be/internal/service"
@@ -232,25 +242,251 @@ func TestHRCoreCRUDPostgresAcceptanceSemantics(t *testing.T) {
 	}
 }
 
+func TestEmployeeHTTPPostgresAcceptanceTraceAuthzAndFieldPolicy(t *testing.T) {
+	spanRecorder := installIntegrationSpanRecorder(t)
+	pool := openIntegrationPool(t)
+	defer pool.Close()
+	requireMigratedSchema(t, pool)
+	store := postgresrepo.NewStore(pool)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	suffix := strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_") + "_" + time.Now().UTC().Format("150405000000")
+	tenantID := "tenant_" + suffix
+	hrAccountID := "acct_" + suffix + "_hr"
+	limitedAccountID := "acct_" + suffix + "_limited"
+	rebacAccountID := "acct_" + suffix + "_rebac"
+	permissionSetID := "ps_" + suffix + "_hr"
+	rebacPermissionSetID := "ps_" + suffix + "_rebac"
+	employeeID := "emp_" + suffix
+	orgUnitID := "ou_" + suffix
+	hireDate := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	var openFGACheckPath string
+	var openFGATraceParent string
+	openFGAServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		openFGACheckPath = r.URL.Path
+		openFGATraceParent = r.Header.Get("Traceparent")
+		if r.URL.Path != "/stores/store-1/check" {
+			http.NotFound(w, r)
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]bool{"allowed": true})
+	}))
+	defer openFGAServer.Close()
+	openFGATransport := openFGAServer.Client().Transport
+	if openFGATransport == nil {
+		openFGATransport = http.DefaultTransport
+	}
+	relationshipChecker := openfgaclient.NewChecker(openFGAServer.URL, "store-1", &http.Client{
+		Transport: otelhttp.NewTransport(openFGATransport),
+	}).WithAuthorizationModelID("model-1")
+
+	if err := store.UpsertTenant(ctx, domain.Tenant{ID: tenantID, Name: tenantID, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertPermissionSet(ctx, domain.PermissionSet{
+		ID:       permissionSetID,
+		TenantID: tenantID,
+		Name:     "HR HTTP Acceptance",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "read", Scope: "all"},
+			{Resource: "hr.employee", Action: "export", Scope: "all"},
+			{Resource: "hr.employee", Action: "delete", Scope: "all"},
+		},
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertPermissionSet(ctx, domain.PermissionSet{
+		ID:       rebacPermissionSetID,
+		TenantID: tenantID,
+		Name:     "HR ReBAC Acceptance",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "read", Scope: "all", Relation: "viewer"},
+		},
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAccount(ctx, domain.Account{ID: hrAccountID, TenantID: tenantID, Status: "active", DirectPermissionSetIDs: []string{permissionSetID}, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAccount(ctx, domain.Account{ID: limitedAccountID, TenantID: tenantID, Status: "active", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAccount(ctx, domain.Account{ID: rebacAccountID, TenantID: tenantID, Status: "active", DirectPermissionSetIDs: []string{rebacPermissionSetID}, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertOrgUnit(ctx, domain.OrgUnit{ID: orgUnitID, TenantID: tenantID, Name: "HTTP HQ " + suffix, Path: []string{orgUnitID}, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertFieldPolicy(ctx, domain.FieldPolicy{
+		ID:              "fp_" + suffix + "_hide_phone",
+		TenantID:        tenantID,
+		ApplicationCode: "hr",
+		ResourceType:    "employee",
+		FieldName:       "phone",
+		Effect:          "hide",
+		CreatedAt:       now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertFieldPolicy(ctx, domain.FieldPolicy{
+		ID:              "fp_" + suffix + "_deny_national",
+		TenantID:        tenantID,
+		ApplicationCode: "hr",
+		ResourceType:    "employee",
+		FieldName:       "national_id",
+		Effect:          "deny",
+		CreatedAt:       now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertEmployee(ctx, domain.Employee{
+		ID:               employeeID,
+		TenantID:         tenantID,
+		EmployeeNo:       "E" + strings.NewReplacer("_", "", "-", "").Replace(suffix),
+		Name:             "HTTP Integration",
+		CompanyEmail:     "http_" + suffix + "@example.com",
+		Phone:            "0912345678",
+		OrgUnitID:        orgUnitID,
+		Position:         "Engineer",
+		Category:         "full_time",
+		Status:           "active",
+		EmploymentStatus: "active",
+		HireDate:         &hireDate,
+		BasicInfo:        map[string]any{"nationality_type": "local", "national_id": "A123456789"},
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := v1api.New(service.New(store, service.Options{Relationships: relationshipChecker}), nil, v1api.Options{
+		AllowHeaderContext:   true,
+		TelemetryServiceName: "nexus-pro-be-it",
+	}).Routes()
+
+	deniedReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees", nil)
+	addIntegrationHeaders(deniedReq, tenantID, limitedAccountID, "req-"+suffix+"-denied")
+	deniedRec := httptest.NewRecorder()
+	handler.ServeHTTP(deniedRec, deniedReq)
+	if deniedRec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for missing employee read permission, got %d: %s", deniedRec.Code, deniedRec.Body.String())
+	}
+	deniedErr := decodeIntegrationError(t, deniedRec.Body.Bytes())
+	if deniedErr.ReasonCode != "menu_denied" || deniedErr.TraceID == "" {
+		t.Fatalf("expected menu_denied with trace_id, got %+v", deniedErr)
+	}
+	logs, err := store.ListAuditLogs(ctx, tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deniedLog, ok := findIntegrationAuditLog(logs, "hr.employee.read")
+	if !ok || deniedLog.Details["authz_decision"] != false || deniedLog.Details["reason_code"] != "menu_denied" {
+		t.Fatalf("expected permission-denied audit log, got log=%+v all=%+v", deniedLog, logs)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees?page=1&page_size=10", nil)
+	addIntegrationHeaders(listReq, tenantID, hrAccountID, "req-"+suffix+"-list")
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for employee list, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+	page := decodeIntegrationData[domain.PageResponse[domain.Employee]](t, listRec.Body.Bytes())
+	if len(page.Items) != 1 || page.Items[0].ID != employeeID {
+		t.Fatalf("expected one employee page item, got %+v", page)
+	}
+	if page.Items[0].Phone != "" {
+		t.Fatalf("expected phone to be hidden by field policy, got %+v", page.Items[0])
+	}
+	if _, ok := page.Items[0].BasicInfo["national_id"]; ok {
+		t.Fatalf("expected national_id to be removed by field policy, got %+v", page.Items[0].BasicInfo)
+	}
+
+	detailReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/"+employeeID, nil)
+	addIntegrationHeaders(detailReq, tenantID, rebacAccountID, "req-"+suffix+"-openfga")
+	detailRec := httptest.NewRecorder()
+	handler.ServeHTTP(detailRec, detailReq)
+	if detailRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for OpenFGA-backed employee detail, got %d: %s", detailRec.Code, detailRec.Body.String())
+	}
+	if openFGACheckPath != "/stores/store-1/check" || openFGATraceParent == "" {
+		t.Fatalf("expected traced OpenFGA check, path=%q traceparent=%q", openFGACheckPath, openFGATraceParent)
+	}
+	detailTraceID := integrationTraceIDForSpanNamePrefix(spanRecorder, "GET /v1/hr/employees/")
+	if detailTraceID == "" || !strings.Contains(openFGATraceParent, detailTraceID) {
+		t.Fatalf("expected OpenFGA traceparent %q to contain BFF detail trace %q; spans=%v", openFGATraceParent, detailTraceID, integrationSpanNames(spanRecorder))
+	}
+
+	exportReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/export", nil)
+	addIntegrationHeaders(exportReq, tenantID, hrAccountID, "req-"+suffix+"-export")
+	exportReq.Header.Set("X-Approval-Confirmed", "true")
+	exportRec := httptest.NewRecorder()
+	handler.ServeHTTP(exportRec, exportReq)
+	if exportRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for employee export, got %d: %s", exportRec.Code, exportRec.Body.String())
+	}
+	if strings.Contains(exportRec.Body.String(), "0912345678") {
+		t.Fatalf("expected exported CSV to omit hidden phone, got %q", exportRec.Body.String())
+	}
+	logs, err = store.ListAuditLogs(ctx, tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exportLog, ok := findIntegrationAuditLog(logs, "hr.employee.export")
+	if !ok {
+		t.Fatalf("expected employee export audit log, got %+v", logs)
+	}
+	if exportLog.TraceID == "" || exportLog.TraceID == "req-"+suffix+"-export" {
+		t.Fatalf("expected export audit trace_id from OTel, got %+v", exportLog)
+	}
+	if exportLog.Details["trace_id"] != exportLog.TraceID || exportLog.Details["request_id"] != "req-"+suffix+"-export" {
+		t.Fatalf("expected export audit details to retain trace/request IDs, got %+v", exportLog.Details)
+	}
+	if !integrationSpanWithTrace(spanRecorder, exportLog.TraceID, "GET /v1/hr/employees/export") {
+		t.Fatalf("expected BFF export span on trace %s, got %v", exportLog.TraceID, integrationSpanNames(spanRecorder))
+	}
+	if !integrationSpanWithTrace(spanRecorder, exportLog.TraceID, "service.authz.authorize") {
+		t.Fatalf("expected HR Core authz span on trace %s, got %v", exportLog.TraceID, integrationSpanNames(spanRecorder))
+	}
+	if !integrationSpanWithTracePrefix(spanRecorder, exportLog.TraceID, "postgres.") {
+		t.Fatalf("expected Postgres span on trace %s, got %v", exportLog.TraceID, integrationSpanNames(spanRecorder))
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/batch-delete", strings.NewReader(`{"employee_ids":["`+employeeID+`"],"reason":"integration cleanup"}`))
+	addIntegrationHeaders(deleteReq, tenantID, hrAccountID, "req-"+suffix+"-delete")
+	deleteReq.Header.Set("Content-Type", "application/json")
+	deleteReq.Header.Set("X-Approval-Confirmed", "true")
+	deleteRec := httptest.NewRecorder()
+	handler.ServeHTTP(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for batch delete, got %d: %s", deleteRec.Code, deleteRec.Body.String())
+	}
+	result := decodeIntegrationData[domain.BatchEmployeeResponse](t, deleteRec.Body.Bytes())
+	if len(result.Results) != 1 || !result.Results[0].Success {
+		t.Fatalf("expected successful batch delete result, got %+v", result)
+	}
+	logs, err = store.ListAuditLogs(ctx, tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteLog, ok := findIntegrationAuditLog(logs, "hr.employee.batch_delete")
+	if !ok || deleteLog.Details["request_id"] != "req-"+suffix+"-delete" || deleteLog.Details["reason"] != "integration cleanup" {
+		t.Fatalf("expected high-risk batch delete audit log, got log=%+v all=%+v", deleteLog, logs)
+	}
+}
+
 func openIntegrationPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if dsn == "" {
 		t.Skip("DATABASE_URL is not set; skipping postgres integration test")
 	}
-	config, err := pgxpool.ParseConfig(dsn)
-	if err != nil {
-		t.Fatal(err)
-	}
-	config.MaxConns = 4
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-	pool, err := pgxpool.NewWithConfig(ctx, config)
+	pool, err := pgplatform.OpenPool(ctx, dsn)
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
 		t.Fatal(err)
 	}
 	return pool
@@ -352,4 +588,96 @@ func validEmployeeCreateInput(suffix, name, email string) domain.CreateEmployeeI
 			"health_insurance_amount": "826",
 		},
 	}
+}
+
+type integrationErrorPayload struct {
+	Code       domain.ErrorCode `json:"code"`
+	ReasonCode string           `json:"reason_code"`
+	TraceID    string           `json:"trace_id"`
+}
+
+func decodeIntegrationData[T any](t *testing.T, body []byte) T {
+	t.Helper()
+	var payload struct {
+		Data T `json:"data"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	return payload.Data
+}
+
+func decodeIntegrationError(t *testing.T, body []byte) integrationErrorPayload {
+	t.Helper()
+	var payload struct {
+		Error integrationErrorPayload `json:"error"`
+	}
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatal(err)
+	}
+	return payload.Error
+}
+
+func addIntegrationHeaders(req *http.Request, tenantID, accountID, requestID string) {
+	req.Header.Set("X-Tenant-ID", tenantID)
+	req.Header.Set("X-Account-ID", accountID)
+	req.Header.Set("X-Request-ID", requestID)
+}
+
+func findIntegrationAuditLog(logs []domain.AuditLog, action string) (domain.AuditLog, bool) {
+	for _, log := range logs {
+		if log.Action == action {
+			return log, true
+		}
+	}
+	return domain.AuditLog{}, false
+}
+
+func installIntegrationSpanRecorder(t *testing.T) *tracetest.SpanRecorder {
+	t.Helper()
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previous)
+		_ = provider.Shutdown(context.Background())
+	})
+	return recorder
+}
+
+func integrationSpanWithTrace(recorder *tracetest.SpanRecorder, traceID, name string) bool {
+	for _, span := range recorder.Ended() {
+		if span.SpanContext().TraceID().String() == traceID && span.Name() == name {
+			return true
+		}
+	}
+	return false
+}
+
+func integrationSpanWithTracePrefix(recorder *tracetest.SpanRecorder, traceID, prefix string) bool {
+	for _, span := range recorder.Ended() {
+		if span.SpanContext().TraceID().String() == traceID && strings.HasPrefix(span.Name(), prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func integrationTraceIDForSpanNamePrefix(recorder *tracetest.SpanRecorder, prefix string) string {
+	for _, span := range recorder.Ended() {
+		if strings.HasPrefix(span.Name(), prefix) {
+			return span.SpanContext().TraceID().String()
+		}
+	}
+	return ""
+}
+
+func integrationSpanNames(recorder *tracetest.SpanRecorder) []string {
+	names := make([]string, 0)
+	for _, span := range recorder.Ended() {
+		names = append(names, span.Name())
+	}
+	sort.Strings(names)
+	return names
 }

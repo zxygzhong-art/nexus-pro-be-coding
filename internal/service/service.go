@@ -105,6 +105,9 @@ func (c *Service) loggerFor(ctx RequestContext) *slog.Logger {
 	if ctx.RequestID != "" {
 		attrs = append(attrs, "request_id", ctx.RequestID)
 	}
+	if ctx.TraceID != "" {
+		attrs = append(attrs, "trace_id", ctx.TraceID)
+	}
 	if ctx.AssumedRoleID != "" {
 		attrs = append(attrs, "assumed_role_id", ctx.AssumedRoleID)
 	}
@@ -318,6 +321,7 @@ func (a AuthzAudit) CommitWith(ctx RequestContext, service *Service) error {
 }
 
 func (a AuditTarget) fromRequest(req CheckRequest) AuditTarget {
+	req = normalizeCheckRequest(req)
 	if a.Event == "" {
 		a.Event = req.AuditEvent()
 	}
@@ -420,6 +424,10 @@ func (c *Service) resolveAccess(ctx RequestContext, account Account) ([]Permissi
 
 func (c *Service) audit(ctx RequestContext, action, resource, target, severity string, details map[string]any) error {
 	details = auditDetailsWithContext(ctx, details)
+	traceID := ctx.TraceID
+	if traceID == "" {
+		traceID = ctx.RequestID
+	}
 	return c.store.AppendAuditLog(goContext(ctx), AuditLog{
 		ID:             utils.NewID("aud"),
 		TenantID:       ctx.TenantID,
@@ -428,7 +436,7 @@ func (c *Service) audit(ctx RequestContext, action, resource, target, severity s
 		Resource:       resource,
 		Target:         target,
 		Severity:       severity,
-		TraceID:        ctx.RequestID,
+		TraceID:        traceID,
 		Details:        details,
 		CreatedAt:      c.Now(),
 	})
@@ -467,7 +475,13 @@ func auditDetailsWithContext(ctx RequestContext, details map[string]any) map[str
 	}
 	if ctx.RequestID != "" {
 		out["request_id"] = ctx.RequestID
-		out["trace_id"] = ctx.RequestID
+	}
+	traceID := ctx.TraceID
+	if traceID == "" {
+		traceID = ctx.RequestID
+	}
+	if traceID != "" {
+		out["trace_id"] = traceID
 	}
 	if ctx.AccountID != "" {
 		out["actor_account_id"] = ctx.AccountID

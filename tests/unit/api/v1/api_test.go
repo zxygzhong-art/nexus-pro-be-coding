@@ -21,6 +21,10 @@ import (
 	"testing"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/sdk/trace/tracetest"
+
 	v1api "nexus-pro-be/internal/api/v1"
 	"nexus-pro-be/internal/domain"
 	platformauth "nexus-pro-be/internal/platform/auth"
@@ -749,6 +753,46 @@ func TestEmployeeListDetailAndCSVExportEndpoints(t *testing.T) {
 	}
 }
 
+func TestEmployeeExportAuditUsesOpenTelemetryTraceID(t *testing.T) {
+	spanRecorder := installAPISpanRecorder(t)
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	handler := v1api.New(service.New(store), nil, v1api.Options{
+		AllowDemoContext:     true,
+		TelemetryServiceName: "nexus-pro-be-test",
+	}).Routes()
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/export", nil)
+	req.Header.Set("X-Request-ID", "req-export-trace")
+	req.Header.Set("X-Approval-Confirmed", "true")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for employee CSV export, got %d: %s", rec.Code, rec.Body.String())
+	}
+	logs, err := store.ListAuditLogs(context.Background(), "demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	exportLog, ok := findAPIAuditLog(logs, "hr.employee.export")
+	if !ok {
+		t.Fatalf("expected employee export audit log, got %+v", logs)
+	}
+	if exportLog.TraceID == "" || exportLog.TraceID == "req-export-trace" {
+		t.Fatalf("expected audit trace_id from OpenTelemetry span, got %+v", exportLog)
+	}
+	if exportLog.Details["trace_id"] != exportLog.TraceID || exportLog.Details["request_id"] != "req-export-trace" {
+		t.Fatalf("expected audit details to keep distinct trace_id and request_id, got %+v", exportLog.Details)
+	}
+	if !apiSpanEnded(spanRecorder, "GET /v1/hr/employees/export") {
+		t.Fatalf("expected BFF span for employee export, got %v", apiSpanNames(spanRecorder))
+	}
+	if !apiSpanEnded(spanRecorder, "service.authz.authorize") {
+		t.Fatalf("expected HR Core authz span, got %v", apiSpanNames(spanRecorder))
+	}
+}
+
 func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
 	handler := newTestAPI(true)
 	payload, _ := json.Marshal(map[string]string{
@@ -1155,4 +1199,43 @@ func (t *keycloakContextTransport) RoundTrip(req *http.Request) (*http.Response,
 
 func (r staticTokenResolver) Resolve(*http.Request) (v1api.TokenContext, bool, error) {
 	return r.ctx, r.ok, r.err
+}
+
+func installAPISpanRecorder(t *testing.T) *tracetest.SpanRecorder {
+	t.Helper()
+	recorder := tracetest.NewSpanRecorder()
+	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
+	previous := otel.GetTracerProvider()
+	otel.SetTracerProvider(provider)
+	t.Cleanup(func() {
+		otel.SetTracerProvider(previous)
+		_ = provider.Shutdown(context.Background())
+	})
+	return recorder
+}
+
+func apiSpanEnded(recorder *tracetest.SpanRecorder, name string) bool {
+	for _, span := range recorder.Ended() {
+		if span.Name() == name {
+			return true
+		}
+	}
+	return false
+}
+
+func apiSpanNames(recorder *tracetest.SpanRecorder) []string {
+	names := make([]string, 0)
+	for _, span := range recorder.Ended() {
+		names = append(names, span.Name())
+	}
+	return names
+}
+
+func findAPIAuditLog(logs []domain.AuditLog, action string) (domain.AuditLog, bool) {
+	for _, log := range logs {
+		if log.Action == action {
+			return log, true
+		}
+	}
+	return domain.AuditLog{}, false
 }

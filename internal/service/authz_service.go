@@ -35,6 +35,9 @@ func (c AuthzService) Check(ctx RequestContext, req CheckRequest) (result CheckR
 		return CheckResult{}, err
 	}
 	result, err = c.evaluateAuthz(ctx, account, req)
+	if err == nil && c.shouldAuditRouteAuthzCheck(ctx, result) {
+		_ = c.auditAuthzTarget(ctx, AuditTarget{}.fromRequest(req), result)
+	}
 	return result, err
 }
 
@@ -54,6 +57,13 @@ func (c AuthzService) BatchCheck(ctx RequestContext, req BatchCheckRequest) (res
 		results = append(results, itemResult)
 	}
 	return BatchCheckResult{Results: results}, nil
+}
+
+func (c AuthzService) shouldAuditRouteAuthzCheck(ctx RequestContext, result CheckResult) bool {
+	if !result.Allowed {
+		return true
+	}
+	return result.RequiresApproval && ctx.ApprovalInstanceID == "" && !ctx.ApprovalConfirmed
 }
 
 // ValidateApprovalInstance verifies approval evidence for a high-risk request.
