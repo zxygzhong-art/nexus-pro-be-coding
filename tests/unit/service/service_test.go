@@ -1366,6 +1366,55 @@ func TestEmployeeAggregateCreatePatchAndDetail(t *testing.T) {
 	}
 }
 
+func TestEmployeeCreateAccountPolicyCreatesAccountsAndEvents(t *testing.T) {
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "create", Scope: "all"},
+	})
+
+	pendingInput := validEmployeeInput("E1901", "Pending Invite", "pending.invite@example.com")
+	pendingInput.AccountPolicy = "create_pending_invite"
+	pending, err := svc.HR().CreateEmployee(ctx, pendingInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.AccountID == "" {
+		t.Fatalf("expected pending invite account link, got %+v", pending)
+	}
+	pendingAccount, ok, err := store.GetAccount(context.Background(), "tenant-1", pending.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || pendingAccount.EmployeeID != pending.ID || pendingAccount.Status != "pending_invite" {
+		t.Fatalf("expected pending invite account linked to employee, got %+v", pendingAccount)
+	}
+	if pending.InternalExperiences[0].Status != "active" {
+		t.Fatalf("expected initial experience to snapshot status, got %+v", pending.InternalExperiences)
+	}
+
+	activeInput := validEmployeeInput("E1902", "Active Account", "active.account@example.com")
+	activeInput.AccountPolicy = "create_active"
+	activeInput.BasicInfo["national_id"] = "A223456789"
+	active, err := svc.HR().CreateEmployee(ctx, activeInput)
+	if err != nil {
+		t.Fatal(err)
+	}
+	activeAccount, ok, err := store.GetAccount(context.Background(), "tenant-1", active.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || activeAccount.EmployeeID != active.ID || activeAccount.Status != "active" {
+		t.Fatalf("expected active account linked to employee, got %+v", activeAccount)
+	}
+
+	events, err := store.ListOutboxEvents(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasBusinessOutboxEvent(events, string(domain.EventEmployeeCreated)) || !hasBusinessOutboxEvent(events, string(domain.EventEmployeeInvited)) {
+		t.Fatalf("expected employee created and invited events, got %+v", events)
+	}
+}
+
 func TestEmployeeAccountChangesEmitOpenFGATupleOutbox(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1499,6 +1548,10 @@ func TestEmployeeStatusTransitionHandlesEmptyEmploymentInfo(t *testing.T) {
 	if appErr, ok := domain.AsAppError(err); !ok || appErr.Code != "validation_failed" {
 		t.Fatalf("expected missing leave dates validation, got %v", err)
 	}
+	_, err = svc.HR().TransitionEmployeeStatus(ctx, leaveTarget.ID, domain.StatusTransitionInput{Status: "leave_suspended", StartDate: "2026-06-10", EndDate: "2026-06-20"})
+	if appErr, ok := domain.AsAppError(err); !ok || appErr.Code != "validation_failed" || !fieldErrorsContain(appErr.FieldErrors, "reason") {
+		t.Fatalf("expected missing leave reason validation, got %v", err)
+	}
 
 	resignTarget := domain.Employee{ID: "emp-resign-target", TenantID: "tenant-1", Name: "Resign Target", CompanyEmail: "resign.target@example.com", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now}
 	_ = store.UpsertEmployee(context.Background(), resignTarget)
@@ -1515,6 +1568,27 @@ func TestEmployeeStatusTransitionHandlesEmptyEmploymentInfo(t *testing.T) {
 	}
 	if transitioned.EmploymentStatus != "resigned" || transitioned.EmploymentInfo["transition_reason"] != "left voluntarily" {
 		t.Fatalf("expected resigned transition details, got %+v", transitioned)
+	}
+}
+
+func TestEmployeeStatusWritesRequireTransitionPath(t *testing.T) {
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "update", Scope: "all"},
+		{Resource: "hr.employee", Action: "update_status", Scope: "all"},
+	})
+	ctx.ApprovalConfirmed = true
+	now := time.Now().UTC()
+	employee := domain.Employee{ID: "emp-status-write", TenantID: "tenant-1", Name: "Status Write", CompanyEmail: "status.write@example.com", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now}
+	if err := store.UpsertEmployee(context.Background(), employee); err != nil {
+		t.Fatal(err)
+	}
+
+	status := "resigned"
+	if _, err := svc.HR().UpdateEmployee(ctx, employee.ID, domain.UpdateEmployeeInput{Status: &status}); err == nil {
+		t.Fatal("expected patch status to require status-transition")
+	}
+	if _, err := svc.HR().UpdateEmployeeStatus(ctx, employee.ID, "leave_suspended"); err == nil {
+		t.Fatal("expected direct leave_suspended status to require status-transition")
 	}
 }
 

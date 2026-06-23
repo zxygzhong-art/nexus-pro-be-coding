@@ -58,6 +58,7 @@ type (
 	EventType               = domain.EventType
 	EmployeeStatus          = domain.EmployeeStatus
 	EmployeeCategory        = domain.EmployeeCategory
+	EmployeeAccountPolicy   = domain.EmployeeAccountPolicy
 	MeResponse              = domain.MeResponse
 	MenuListResponse        = domain.MenuListResponse
 	AssumeRoleResponse      = domain.AssumeRoleResponse
@@ -161,6 +162,11 @@ const (
 	AccountStatusDisabled      = domain.AccountStatusDisabled
 	AccountStatusPendingInvite = domain.AccountStatusPendingInvite
 
+	EmployeeAccountPolicyNone                = domain.EmployeeAccountPolicyNone
+	EmployeeAccountPolicyLinkExisting        = domain.EmployeeAccountPolicyLinkExisting
+	EmployeeAccountPolicyCreatePendingInvite = domain.EmployeeAccountPolicyCreatePendingInvite
+	EmployeeAccountPolicyCreateActive        = domain.EmployeeAccountPolicyCreateActive
+
 	AgentRunStatusQueued    = domain.AgentRunStatusQueued
 	AgentRunStatusRunning   = domain.AgentRunStatusRunning
 	AgentRunStatusCompleted = domain.AgentRunStatusCompleted
@@ -188,17 +194,19 @@ const (
 
 // Domain helper aliases preserve older service-package call sites during refactors.
 var (
-	NotFound                  = domain.NotFound
-	BadRequest                = domain.BadRequest
-	Forbidden                 = domain.Forbidden
-	Conflict                  = domain.Conflict
-	ValidationFailed          = domain.ValidationFailed
-	ImportValidationFailed    = domain.ImportValidationFailed
-	AsAppError                = domain.AsAppError
-	NormalizeEmployeeStatus   = domain.NormalizeEmployeeStatus
-	ParseEmployeeStatus       = domain.ParseEmployeeStatus
-	NormalizeEmployeeCategory = domain.NormalizeEmployeeCategory
-	ParseEmployeeCategory     = domain.ParseEmployeeCategory
-	EmployeeStatuses          = domain.EmployeeStatuses
-	EmployeeCategories        = domain.EmployeeCategories
+	NotFound                       = domain.NotFound
+	BadRequest                     = domain.BadRequest
+	Forbidden                      = domain.Forbidden
+	Conflict                       = domain.Conflict
+	ValidationFailed               = domain.ValidationFailed
+	ImportValidationFailed         = domain.ImportValidationFailed
+	AsAppError                     = domain.AsAppError
+	NormalizeEmployeeStatus        = domain.NormalizeEmployeeStatus
+	ParseEmployeeStatus            = domain.ParseEmployeeStatus
+	NormalizeEmployeeCategory      = domain.NormalizeEmployeeCategory
+	ParseEmployeeCategory          = domain.ParseEmployeeCategory
+	NormalizeEmployeeAccountPolicy = domain.NormalizeEmployeeAccountPolicy
+	ParseEmployeeAccountPolicy     = domain.ParseEmployeeAccountPolicy
+	EmployeeStatuses               = domain.EmployeeStatuses
+	EmployeeCategories             = domain.EmployeeCategories
 )

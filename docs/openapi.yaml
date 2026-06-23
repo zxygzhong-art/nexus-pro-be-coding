@@ -418,7 +418,7 @@ paths:
   /v1/hr/employees/{id}/status-transition:
     post:
       summary: Transition employee lifecycle status
-      description: Use status=active, probation, or onboarding with reason and start_date to reinstate a resigned employee. Use status=resigned with reason and end_date to offboard. Use status=leave_suspended with start_date and end_date for leave suspension.
+      description: Use status=active, probation, or onboarding with reason and start_date to reinstate a resigned employee. Use status=resigned with reason and end_date to offboard. Use status=leave_suspended with reason, start_date, and end_date for leave suspension.
       parameters:
         - $ref: "#/components/parameters/EmployeeID"
       requestBody:
@@ -1144,6 +1144,10 @@ components:
         phone: {type: string}
         org_unit_id: {type: string}
         account_id: {type: string}
+        account_policy:
+          type: string
+          enum: [none, link_existing, create_pending_invite, create_active]
+          description: Optional account lifecycle policy. Defaults to link_existing when account_id is provided, otherwise none.
         position: {type: string}
         category:
           $ref: "#/components/schemas/EmployeeCategory"
@@ -1175,10 +1179,6 @@ components:
         position: {type: string}
         category:
           $ref: "#/components/schemas/EmployeeCategory"
-        status:
-          $ref: "#/components/schemas/EmployeeStatusWithDeleted"
-        employment_status:
-          $ref: "#/components/schemas/EmployeeStatusWithDeleted"
         hire_date: {type: string}
         resign_date: {type: string}
         basic_info: {$ref: "#/components/schemas/EmployeeBasicInfo"}
@@ -1209,7 +1209,7 @@ components:
       enum: [active, probation, leave_suspended, onboarding, resigned]
     EmployeeDirectStatus:
       type: string
-      enum: [active, probation, leave_suspended, onboarding]
+      enum: [active, probation, onboarding]
     EmployeeStatusWithDeleted:
       type: string
       enum: [active, probation, leave_suspended, onboarding, resigned, deleted]
@@ -1223,6 +1223,8 @@ components:
         org_unit_id: {type: string}
         position: {type: string}
         category: {type: string}
+        status:
+          $ref: "#/components/schemas/EmployeeStatusWithDeleted"
         current: {type: boolean}
         created_at: {type: string, format: date-time}
     EmployeePreviewResponse:

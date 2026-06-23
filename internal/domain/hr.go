@@ -13,6 +13,9 @@ type EmployeeStatus string
 // EmployeeCategory classifies the employee's employment contract type.
 type EmployeeCategory string
 
+// EmployeeAccountPolicy selects how employee creation handles login accounts.
+type EmployeeAccountPolicy string
+
 // Employee lifecycle states accepted by HR APIs and imports.
 const (
 	EmployeeStatusActive         EmployeeStatus = "active"
@@ -30,6 +33,14 @@ const (
 	EmployeeCategoryIntern     EmployeeCategory = "intern"
 	EmployeeCategoryContractor EmployeeCategory = "contractor"
 	EmployeeCategoryOther      EmployeeCategory = "other"
+)
+
+// Employee account creation/linking policies.
+const (
+	EmployeeAccountPolicyNone                EmployeeAccountPolicy = "none"
+	EmployeeAccountPolicyLinkExisting        EmployeeAccountPolicy = "link_existing"
+	EmployeeAccountPolicyCreatePendingInvite EmployeeAccountPolicy = "create_pending_invite"
+	EmployeeAccountPolicyCreateActive        EmployeeAccountPolicy = "create_active"
 )
 
 // Employee domain event names used for audit and authorization synchronization.
@@ -214,6 +225,7 @@ type EmployeeExperience struct {
 	ManagerEmployeeID string     `json:"manager_employee_id,omitempty"`
 	Position          string     `json:"position,omitempty"`
 	Category          string     `json:"category,omitempty"`
+	Status            string     `json:"status,omitempty"`
 	Current           bool       `json:"current"`
 	CreatedAt         time.Time  `json:"created_at"`
 }
@@ -227,6 +239,7 @@ type CreateEmployeeInput struct {
 	Phone                 string               `json:"phone,omitempty"`
 	OrgUnitID             string               `json:"org_unit_id,omitempty"`
 	AccountID             string               `json:"account_id,omitempty"`
+	AccountPolicy         string               `json:"account_policy,omitempty"`
 	ManagerEmployeeID     string               `json:"manager_employee_id,omitempty"`
 	Position              string               `json:"position,omitempty"`
 	Category              string               `json:"category,omitempty"`
@@ -704,6 +717,30 @@ func ParseEmployeeStatus(raw string) (EmployeeStatus, bool) {
 func NormalizeEmployeeStatus(raw string) string {
 	if status, ok := ParseEmployeeStatus(raw); ok {
 		return string(status)
+	}
+	return strings.TrimSpace(raw)
+}
+
+// ParseEmployeeAccountPolicy normalizes supported employee account lifecycle policies.
+func ParseEmployeeAccountPolicy(raw string) (EmployeeAccountPolicy, bool) {
+	switch strings.TrimSpace(raw) {
+	case "", "none":
+		return EmployeeAccountPolicyNone, true
+	case "link_existing":
+		return EmployeeAccountPolicyLinkExisting, true
+	case "create_pending_invite", "pending_invite":
+		return EmployeeAccountPolicyCreatePendingInvite, true
+	case "create_active", "active":
+		return EmployeeAccountPolicyCreateActive, true
+	default:
+		return "", false
+	}
+}
+
+// NormalizeEmployeeAccountPolicy returns a canonical account policy value when recognized.
+func NormalizeEmployeeAccountPolicy(raw string) string {
+	if policy, ok := ParseEmployeeAccountPolicy(raw); ok {
+		return string(policy)
 	}
 	return strings.TrimSpace(raw)
 }

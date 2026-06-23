@@ -249,6 +249,9 @@ func (c HRService) UpdateEmployeeStatus(ctx RequestContext, id, status string) (
 	if status == string(EmployeeStatusResigned) {
 		return Employee{}, BadRequest("resigned status requires status-transition")
 	}
+	if status == string(EmployeeStatusLeaveSuspended) {
+		return Employee{}, BadRequest("leave_suspended status requires status-transition")
+	}
 	if status == string(EmployeeStatusDeleted) {
 		return Employee{}, BadRequest("deleted status requires delete")
 	}
@@ -412,6 +415,10 @@ func (c HRService) CreateEmployeeAggregate(ctx RequestContext, input CreateEmplo
 		if err != nil {
 			return err
 		}
+		accountPolicy, accountCreated, err := tx.applyEmployeeCreateAccountPolicy(ctx, &next, input)
+		if err != nil {
+			return err
+		}
 		if err := tx.store.UpsertEmployee(goContext(ctx), next); err != nil {
 			return err
 		}
@@ -421,10 +428,19 @@ func (c HRService) CreateEmployeeAggregate(ctx RequestContext, input CreateEmplo
 		if err := tx.linkEmployeeAccount(ctx, next); err != nil {
 			return err
 		}
-		if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeCreated), next.ID, map[string]any{"employee_id": next.ID}); err != nil {
+		eventPayload := map[string]any{"employee_id": next.ID, "account_policy": accountPolicy}
+		if next.AccountID != "" {
+			eventPayload["account_id"] = next.AccountID
+		}
+		if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeCreated), next.ID, eventPayload); err != nil {
 			return err
 		}
-		if err := tx.audit(ctx, "hr.employee.create", string(ResourceEmployee), next.ID, string(SeverityMedium), map[string]any{"name": next.Name}); err != nil {
+		if accountCreated && accountPolicy == string(EmployeeAccountPolicyCreatePendingInvite) {
+			if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeInvited), next.ID, map[string]any{"employee_id": next.ID, "account_id": next.AccountID, "account_policy": accountPolicy}); err != nil {
+				return err
+			}
+		}
+		if err := tx.audit(ctx, "hr.employee.create", string(ResourceEmployee), next.ID, string(SeverityMedium), map[string]any{"name": next.Name, "account_id": next.AccountID, "account_policy": accountPolicy}); err != nil {
 			return err
 		}
 		if err := authzAudit.CommitWith(ctx, tx.Service); err != nil {
@@ -787,6 +803,10 @@ func normalizeEmployeeCategory(value string) string {
 	return NormalizeEmployeeCategory(value)
 }
 
+func normalizeEmployeeAccountPolicy(value string) string {
+	return NormalizeEmployeeAccountPolicy(value)
+}
+
 func validEmployeeStatus(value string, includeDeleted bool) bool {
 	status, ok := ParseEmployeeStatus(value)
 	return ok && status.Valid(includeDeleted)
@@ -795,6 +815,16 @@ func validEmployeeStatus(value string, includeDeleted bool) bool {
 func validEmployeeCategory(value string) bool {
 	category, ok := ParseEmployeeCategory(value)
 	return ok && category.Valid()
+}
+
+func validEmployeeAccountPolicy(value string) bool {
+	_, ok := ParseEmployeeAccountPolicy(value)
+	return ok
+}
+
+func employeeTerminalStatus(status string) bool {
+	status = normalizeEmployeeStatus(status)
+	return status == string(EmployeeStatusResigned) || status == string(EmployeeStatusDeleted)
 }
 
 func sameMonth(t time.Time, ref time.Time) bool {
@@ -919,6 +949,9 @@ func (c HRService) employeeCreateCandidate(ctx RequestContext, input CreateEmplo
 }
 
 func (c HRService) applyEmployeePatch(ctx RequestContext, employee *Employee, input UpdateEmployeeInput) error {
+	if input.Status != nil || input.EmploymentStatus != nil {
+		return domainValidation("employee status must be changed through status-transition", FieldError{Tab: employeeTabEmploymentInfo, Field: "status", Code: "transition_required", Message: "status must be changed through status-transition"})
+	}
 	if input.EmployeeNo != nil {
 		employee.EmployeeNo = strings.TrimSpace(*input.EmployeeNo)
 	}
@@ -948,12 +981,6 @@ func (c HRService) applyEmployeePatch(ctx RequestContext, employee *Employee, in
 	}
 	if input.Category != nil {
 		employee.Category = normalizeEmployeeCategory(*input.Category)
-	}
-	if input.Status != nil {
-		employee.Status = normalizeEmployeeStatus(*input.Status)
-	}
-	if input.EmploymentStatus != nil {
-		employee.EmploymentStatus = normalizeEmployeeStatus(*input.EmploymentStatus)
 	}
 	if input.HireDate != nil {
 		t, err := optionalDateTime(*input.HireDate)
@@ -1064,6 +1091,22 @@ func (c HRService) validateEmployee(ctx RequestContext, employee Employee, mode 
 			return err
 		} else if !ok {
 			fields = append(fields, FieldError{Tab: "employment_info", Field: "org_unit_id", Code: "not_found", Message: "org unit not found"})
+		}
+	}
+	if strings.TrimSpace(employee.AccountID) != "" {
+		account, ok, err := c.store.GetAccount(goContext(ctx), ctx.TenantID, employee.AccountID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			fields = append(fields, FieldError{Tab: "employment_info", Field: "account_id", Code: "not_found", Message: "account not found"})
+		} else {
+			if account.EmployeeID != "" && account.EmployeeID != employee.ID {
+				fields = append(fields, FieldError{Tab: "employment_info", Field: "account_id", Code: "unique", Message: "account_id already linked"})
+			}
+			if account.Status == string(AccountStatusDisabled) && !employeeTerminalStatus(employeeStatus(employee)) {
+				fields = append(fields, FieldError{Tab: "employment_info", Field: "account_id", Code: "invalid", Message: "disabled account cannot be linked to a non-terminal employee"})
+			}
 		}
 	}
 	if strings.TrimSpace(employee.ManagerEmployeeID) != "" {
@@ -1371,6 +1414,7 @@ func (c HRService) newEmployeeExperience(employee Employee, reason string) Emplo
 		ManagerEmployeeID: employee.ManagerEmployeeID,
 		Position:          employee.Position,
 		Category:          employee.Category,
+		Status:            employeeStatus(employee),
 		Current:           true,
 		CreatedAt:         c.Now(),
 	}
@@ -1422,6 +1466,105 @@ func (c HRService) linkEmployeeAccount(ctx RequestContext, employee Employee) er
 		account.DisplayName = utils.FirstNonEmpty(account.DisplayName, employee.Name)
 		account.Email = utils.FirstNonEmpty(account.Email, employee.CompanyEmail)
 		return c.store.UpsertAccount(goContext(ctx), account)
+	}
+	return nil
+}
+
+func (c HRService) applyEmployeeCreateAccountPolicy(ctx RequestContext, employee *Employee, input CreateEmployeeInput) (string, bool, error) {
+	policy, err := employeeCreateAccountPolicy(input)
+	if err != nil {
+		return "", false, err
+	}
+	switch policy {
+	case string(EmployeeAccountPolicyNone):
+		return policy, false, nil
+	case string(EmployeeAccountPolicyLinkExisting):
+		if strings.TrimSpace(employee.AccountID) == "" {
+			return "", false, domainValidation("employee account policy validation failed", FieldError{Tab: employeeTabEmploymentInfo, Field: "account_id", Code: "required", Message: "account_id is required when account_policy is link_existing"})
+		}
+		return policy, false, c.ensureEmployeeLinkedAccount(ctx, *employee)
+	case string(EmployeeAccountPolicyCreatePendingInvite), string(EmployeeAccountPolicyCreateActive):
+		if strings.TrimSpace(input.AccountID) != "" {
+			return "", false, domainValidation("employee account policy validation failed", FieldError{Tab: employeeTabEmploymentInfo, Field: "account_id", Code: "invalid", Message: "account_id is only allowed when account_policy is link_existing"})
+		}
+		if employeeTerminalStatus(employeeStatus(*employee)) {
+			return "", false, domainValidation("employee account policy validation failed", FieldError{Tab: employeeTabEmploymentInfo, Field: "account_policy", Code: "invalid", Message: "terminal employee cannot create a login account"})
+		}
+		email := strings.TrimSpace(employee.CompanyEmail)
+		if email == "" {
+			return "", false, domainValidation("employee account policy validation failed", FieldError{Tab: employeeTabBasicInfo, Field: "company_email", Code: "required", Message: "company_email is required to create an account"})
+		}
+		if err := c.ensureAccountEmailAvailable(ctx, email); err != nil {
+			return "", false, err
+		}
+		accountStatus := string(AccountStatusPendingInvite)
+		if policy == string(EmployeeAccountPolicyCreateActive) {
+			accountStatus = string(AccountStatusActive)
+		}
+		account := Account{
+			ID:          utils.NewID("acct"),
+			TenantID:    ctx.TenantID,
+			DisplayName: employee.Name,
+			Email:       email,
+			EmployeeID:  employee.ID,
+			Status:      accountStatus,
+			CreatedAt:   c.Now(),
+		}
+		if err := c.store.UpsertAccount(goContext(ctx), account); err != nil {
+			return "", false, err
+		}
+		employee.AccountID = account.ID
+		return policy, true, nil
+	default:
+		return "", false, BadRequest("invalid account_policy")
+	}
+}
+
+func employeeCreateAccountPolicy(input CreateEmployeeInput) (string, error) {
+	rawPolicy := strings.TrimSpace(input.AccountPolicy)
+	if rawPolicy == "" {
+		if strings.TrimSpace(input.AccountID) != "" {
+			return string(EmployeeAccountPolicyLinkExisting), nil
+		}
+		return string(EmployeeAccountPolicyNone), nil
+	}
+	policy := normalizeEmployeeAccountPolicy(rawPolicy)
+	if !validEmployeeAccountPolicy(policy) {
+		return "", BadRequest("invalid account_policy")
+	}
+	return policy, nil
+}
+
+func (c HRService) ensureEmployeeLinkedAccount(ctx RequestContext, employee Employee) error {
+	account, ok, err := c.store.GetAccount(goContext(ctx), ctx.TenantID, employee.AccountID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return domainValidation("employee account validation failed", FieldError{Tab: employeeTabEmploymentInfo, Field: "account_id", Code: "not_found", Message: "account not found"})
+	}
+	if account.EmployeeID != "" && account.EmployeeID != employee.ID {
+		return domainValidation("employee account validation failed", FieldError{Tab: employeeTabEmploymentInfo, Field: "account_id", Code: "unique", Message: "account_id already linked"})
+	}
+	if account.Status == string(AccountStatusDisabled) && !employeeTerminalStatus(employeeStatus(employee)) {
+		return domainValidation("employee account validation failed", FieldError{Tab: employeeTabEmploymentInfo, Field: "account_id", Code: "invalid", Message: "disabled account cannot be linked to a non-terminal employee"})
+	}
+	return nil
+}
+
+func (c HRService) ensureAccountEmailAvailable(ctx RequestContext, email string) error {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return nil
+	}
+	accounts, err := c.store.ListAccounts(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return err
+	}
+	for _, account := range accounts {
+		if strings.EqualFold(strings.TrimSpace(account.Email), email) {
+			return domainValidation("employee account policy validation failed", FieldError{Tab: employeeTabBasicInfo, Field: "company_email", Code: "unique", Message: "account email already exists"})
+		}
 	}
 	return nil
 }
@@ -3315,8 +3458,18 @@ func (c HRService) TransitionEmployeeStatus(ctx RequestContext, id string, input
 		var transitionStart *time.Time
 		switch status {
 		case string(EmployeeStatusLeaveSuspended):
-			if strings.TrimSpace(input.StartDate) == "" || strings.TrimSpace(input.EndDate) == "" {
-				return domainValidation("leave suspension requires start_date and end_date", FieldError{Tab: "employment_info", Field: "start_date", Code: "required", Message: "start_date is required"}, FieldError{Tab: "employment_info", Field: "end_date", Code: "required", Message: "end_date is required"})
+			fields := make([]FieldError, 0, 3)
+			if strings.TrimSpace(input.Reason) == "" {
+				fields = append(fields, FieldError{Tab: "employment_info", Field: "reason", Code: "required", Message: "reason is required"})
+			}
+			if strings.TrimSpace(input.StartDate) == "" {
+				fields = append(fields, FieldError{Tab: "employment_info", Field: "start_date", Code: "required", Message: "start_date is required"})
+			}
+			if strings.TrimSpace(input.EndDate) == "" {
+				fields = append(fields, FieldError{Tab: "employment_info", Field: "end_date", Code: "required", Message: "end_date is required"})
+			}
+			if len(fields) > 0 {
+				return domainValidation("leave suspension requires reason, start_date and end_date", fields...)
 			}
 			start, err := utils.ParseDate(input.StartDate)
 			if err != nil {
