@@ -9,7 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	v1api "nexus-pro-be/internal/api/v1"
-	authzpkg "nexus-pro-be/internal/domain/authz"
+	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/repository/memory"
 	"nexus-pro-be/internal/service"
 )
@@ -21,10 +21,7 @@ func TestRegisteredRoutesMatchAuthzPolicies(t *testing.T) {
 	}
 
 	policies := map[string]struct{}{}
-	for _, policy := range authzpkg.DefaultRoutePolicies {
-		if strings.HasPrefix(policy.Path, "/internal/") {
-			continue
-		}
+	for _, policy := range domain.DefaultRoutePolicies {
 		policies[policy.Method+" "+policy.Path] = struct{}{}
 	}
 
@@ -62,7 +59,7 @@ func TestRegisteredRoutesMatchAuthzPolicies(t *testing.T) {
 
 func TestPermissionSetAssignmentPoliciesUseDedicatedResource(t *testing.T) {
 	found := 0
-	for _, policy := range authzpkg.DefaultRoutePolicies {
+	for _, policy := range domain.DefaultRoutePolicies {
 		if policy.Path != "/v1/iam/permission-set-assignments" {
 			continue
 		}

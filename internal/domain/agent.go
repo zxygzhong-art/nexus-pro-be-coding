@@ -40,6 +40,11 @@ type AgentRun struct {
 	UpdatedAt     time.Time     `json:"updated_at"`
 }
 
+type CreateAgentRunInput struct {
+	Mode   string `json:"mode,omitempty"`
+	Prompt string `json:"prompt"`
+}
+
 type Company struct {
 	ID        int       `json:"id"`
 	Name      string    `json:"name"`

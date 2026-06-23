@@ -24,3 +24,12 @@ type LeaveRequest struct {
 	FormInstanceID string    `json:"form_instance_id,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 }
+
+type CreateLeaveRequestInput struct {
+	EmployeeID string  `json:"employee_id,omitempty"`
+	LeaveType  string  `json:"leave_type"`
+	StartAt    string  `json:"start_at"`
+	EndAt      string  `json:"end_at"`
+	Hours      float64 `json:"hours"`
+	Reason     string  `json:"reason,omitempty"`
+}

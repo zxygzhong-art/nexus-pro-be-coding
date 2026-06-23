@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"nexus-pro-be/internal/domain"
-	authzpkg "nexus-pro-be/internal/domain/authz"
 	"nexus-pro-be/internal/platform/openfga"
 )
 
@@ -90,7 +89,7 @@ func TestCheckRelationshipIncludesAuthorizationModelID(t *testing.T) {
 	defer server.Close()
 	checker := openfga.NewChecker(server.URL, "store-1", server.Client()).WithAuthorizationModelID("model-1")
 
-	allowed, err := checker.CheckRelationship(context.Background(), authzpkg.RelationshipCheck{
+	allowed, err := checker.CheckRelationship(context.Background(), domain.RelationshipCheck{
 		TenantID: "tenant-1",
 		Subject:  "account:acct-1",
 		Relation: "viewer",
@@ -165,7 +164,7 @@ func TestCheckRelationshipReturnsDetailedHTTPError(t *testing.T) {
 	defer server.Close()
 	checker := openfga.NewChecker(server.URL, "store-1", server.Client())
 
-	_, err := checker.CheckRelationship(context.Background(), authzpkg.RelationshipCheck{
+	_, err := checker.CheckRelationship(context.Background(), domain.RelationshipCheck{
 		TenantID: "tenant-1",
 		Subject:  "account:acct-1",
 		Relation: "viewer",

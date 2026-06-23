@@ -15,28 +15,8 @@ func (c *Service) Workflow() WorkflowService {
 	return WorkflowService{Service: c, store: c.store}
 }
 
-func (c *Service) ListFormTemplates(ctx RequestContext) ([]FormTemplate, error) {
-	return c.Workflow().ListFormTemplates(ctx)
-}
-
-func (c *Service) ListFormTemplatePage(ctx RequestContext, page PageRequest) (PageResponse[FormTemplate], error) {
-	return c.Workflow().ListFormTemplatePage(ctx, page)
-}
-
-func (c *Service) CreateFormTemplate(ctx RequestContext, input CreateFormTemplateInput) (FormTemplate, error) {
-	return c.Workflow().CreateFormTemplate(ctx, input)
-}
-
-func (c *Service) SubmitForm(ctx RequestContext, input SubmitFormInput) (FormInstance, error) {
-	return c.Workflow().SubmitForm(ctx, input)
-}
-
-func (c *Service) ApproveForm(ctx RequestContext, id string, input ApproveFormInput) (FormInstance, error) {
-	return c.Workflow().ApproveForm(ctx, id, input)
-}
-
 func (c WorkflowService) ListFormTemplates(ctx RequestContext) ([]FormTemplate, error) {
-	if _, _, err := c.resolveAccount(ctx); err != nil {
+	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceType("form_template"), ActionRead, ""); err != nil {
 		return nil, err
 	}
 	return c.store.ListFormTemplates(goContext(ctx), ctx.TenantID)
@@ -52,7 +32,7 @@ func (c WorkflowService) ListFormTemplatePage(ctx RequestContext, page PageReque
 }
 
 func (c WorkflowService) CreateFormTemplate(ctx RequestContext, input CreateFormTemplateInput) (FormTemplate, error) {
-	if _, _, err := c.resolveAccount(ctx); err != nil {
+	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceType("form_template"), ActionCreate, ""); err != nil {
 		return FormTemplate{}, err
 	}
 	if strings.TrimSpace(input.Key) == "" || strings.TrimSpace(input.Name) == "" {
@@ -81,19 +61,20 @@ func (c WorkflowService) CreateFormTemplate(ctx RequestContext, input CreateForm
 }
 
 func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (FormInstance, error) {
-	account, _, err := c.resolveAccount(ctx)
+	templateKey := strings.TrimSpace(input.TemplateKey)
+	account, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionSubmit, templateKey)
 	if err != nil {
 		return FormInstance{}, err
 	}
-	if strings.TrimSpace(input.TemplateKey) == "" {
+	if templateKey == "" {
 		return FormInstance{}, BadRequest("template_key is required")
 	}
-	template, ok, err := c.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, input.TemplateKey)
+	template, ok, err := c.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, templateKey)
 	if err != nil {
 		return FormInstance{}, err
 	}
 	if !ok {
-		return FormInstance{}, NotFound("form template", input.TemplateKey)
+		return FormInstance{}, NotFound("form template", templateKey)
 	}
 	instance := FormInstance{
 		ID:                 utils.NewID("fi"),
@@ -129,7 +110,7 @@ func (c WorkflowService) ApproveForm(ctx RequestContext, id string, _ ApproveFor
 		return FormInstance{}, err
 	}
 	var instance FormInstance
-	if err := c.withTenantTransaction(ctx, func(tx *Service) error {
+	if err := c.withTransaction(ctx, func(tx WorkflowService) error {
 		next, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, id)
 		if err != nil {
 			return err
@@ -153,7 +134,7 @@ func (c WorkflowService) ApproveForm(ctx RequestContext, id string, _ ApproveFor
 		}); err != nil {
 			return err
 		}
-		if err := authzAudit.CommitWith(ctx, tx); err != nil {
+		if err := authzAudit.CommitWith(ctx, tx.Service); err != nil {
 			return err
 		}
 		instance = next

@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"nexus-pro-be/internal/domain"
-	authzpkg "nexus-pro-be/internal/domain/authz"
 )
 
 const maxOpenFGAErrorBodyLength = 500
@@ -62,7 +61,7 @@ func (c *Checker) Ping(ctx context.Context) error {
 	return c.verifyAuthorizationModel(ctx)
 }
 
-func (c *Checker) CheckRelationship(ctx context.Context, check authzpkg.RelationshipCheck) (bool, error) {
+func (c *Checker) CheckRelationship(ctx context.Context, check domain.RelationshipCheck) (bool, error) {
 	if c == nil || c.apiURL == "" || c.storeID == "" {
 		return false, nil
 	}

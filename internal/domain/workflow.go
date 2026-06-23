@@ -23,3 +23,17 @@ type FormInstance struct {
 	ApprovedBy         string         `json:"approved_by,omitempty"`
 	UpdatedAt          time.Time      `json:"updated_at"`
 }
+
+type CreateFormTemplateInput struct {
+	Key         string         `json:"key"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	Schema      map[string]any `json:"schema,omitempty"`
+}
+
+type SubmitFormInput struct {
+	TemplateKey string         `json:"template_key"`
+	Payload     map[string]any `json:"payload,omitempty"`
+}
+
+type ApproveFormInput struct{}

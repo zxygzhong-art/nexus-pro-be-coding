@@ -12,6 +12,13 @@ type UserGroup struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
+type CreateUserGroupInput struct {
+	Name             string   `json:"name"`
+	Description      string   `json:"description,omitempty"`
+	PermissionSetIDs []string `json:"permission_set_ids,omitempty"`
+	MemberAccountIDs []string `json:"member_account_ids,omitempty"`
+}
+
 type PermissionSet struct {
 	ID          string       `json:"id"`
 	TenantID    string       `json:"tenant_id"`
@@ -19,6 +26,12 @@ type PermissionSet struct {
 	Description string       `json:"description,omitempty"`
 	Permissions []Permission `json:"permissions"`
 	CreatedAt   time.Time    `json:"created_at"`
+}
+
+type CreatePermissionSetInput struct {
+	Name        string       `json:"name"`
+	Description string       `json:"description,omitempty"`
+	Permissions []Permission `json:"permissions"`
 }
 
 type Permission struct {
@@ -47,6 +60,16 @@ type AssumableRole struct {
 	CreatedAt              time.Time      `json:"created_at"`
 }
 
+type CreateAssumableRoleInput struct {
+	Name                   string         `json:"name"`
+	Description            string         `json:"description,omitempty"`
+	PermissionSetIDs       []string       `json:"permission_set_ids,omitempty"`
+	Trusted                bool           `json:"trusted"`
+	TrustPolicy            map[string]any `json:"trust_policy,omitempty"`
+	PermissionBoundary     map[string]any `json:"permission_boundary,omitempty"`
+	SessionDurationSeconds int            `json:"session_duration_seconds,omitempty"`
+}
+
 type PermissionSetAssignment struct {
 	ID              string     `json:"id"`
 	TenantID        string     `json:"tenant_id"`
@@ -61,6 +84,17 @@ type PermissionSetAssignment struct {
 	CreatedAt       time.Time  `json:"created_at"`
 }
 
+type CreatePermissionSetAssignmentInput struct {
+	PrincipalType   string `json:"principal_type"`
+	PrincipalID     string `json:"principal_id"`
+	PermissionSetID string `json:"permission_set_id"`
+	Effect          string `json:"effect,omitempty"`
+	DataScopeID     string `json:"data_scope_id,omitempty"`
+	ConditionID     string `json:"condition_id,omitempty"`
+	StartsAt        string `json:"starts_at,omitempty"`
+	ExpiresAt       string `json:"expires_at,omitempty"`
+}
+
 type DataScope struct {
 	ID        string         `json:"id"`
 	TenantID  string         `json:"tenant_id"`
@@ -69,6 +103,13 @@ type DataScope struct {
 	ScopeType string         `json:"scope_type"`
 	Params    map[string]any `json:"params,omitempty"`
 	CreatedAt time.Time      `json:"created_at"`
+}
+
+type CreateDataScopeInput struct {
+	Code      string         `json:"code"`
+	Name      string         `json:"name"`
+	ScopeType string         `json:"scope_type"`
+	Params    map[string]any `json:"params,omitempty"`
 }
 
 type FieldPolicy struct {
@@ -83,6 +124,15 @@ type FieldPolicy struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
+type CreateFieldPolicyInput struct {
+	ApplicationCode string `json:"application_code"`
+	ResourceType    string `json:"resource_type"`
+	FieldName       string `json:"field_name"`
+	Effect          string `json:"effect"`
+	MaskStrategy    string `json:"mask_strategy,omitempty"`
+	PermissionID    string `json:"permission_id,omitempty"`
+}
+
 type AssumableRoleSession struct {
 	ID                 string         `json:"id"`
 	TenantID           string         `json:"tenant_id"`
@@ -93,6 +143,12 @@ type AssumableRoleSession struct {
 	ExpiresAt          time.Time      `json:"expires_at"`
 	RevokedAt          *time.Time     `json:"revoked_at,omitempty"`
 	CreatedAt          time.Time      `json:"created_at"`
+}
+
+type AssumeRoleInput struct {
+	Reason          string         `json:"reason,omitempty"`
+	DurationMinutes int            `json:"duration_minutes,omitempty"`
+	SessionPolicy   map[string]any `json:"session_policy,omitempty"`
 }
 
 type PermissionVersion struct {

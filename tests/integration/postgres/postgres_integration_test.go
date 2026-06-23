@@ -150,7 +150,7 @@ func TestHRCoreCRUDPostgresAcceptanceSemantics(t *testing.T) {
 	app := service.New(store)
 	reqCtx := domain.RequestContext{TenantID: tenantA, AccountID: accountID, RequestID: "it-" + suffix, ApprovalConfirmed: true}
 
-	created, err := app.CreateEmployee(reqCtx, domain.CreateEmployeeInput{Name: "Integration One", CompanyEmail: "one_" + suffix + "@example.com", Status: "active", EmploymentStatus: "active"})
+	created, err := app.HR().CreateEmployee(reqCtx, domain.CreateEmployeeInput{Name: "Integration One", CompanyEmail: "one_" + suffix + "@example.com", Status: "active", EmploymentStatus: "active"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func TestHRCoreCRUDPostgresAcceptanceSemantics(t *testing.T) {
 		t.Fatalf("tenant B should not read tenant A employee, ok=%v err=%v", ok, err)
 	}
 	newPhone := "0911222333"
-	updated, err := app.UpdateEmployee(reqCtx, created.ID, domain.UpdateEmployeeInput{Phone: &newPhone})
+	updated, err := app.HR().UpdateEmployee(reqCtx, created.ID, domain.UpdateEmployeeInput{Phone: &newPhone})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,42 +166,42 @@ func TestHRCoreCRUDPostgresAcceptanceSemantics(t *testing.T) {
 		t.Fatalf("expected updated phone, got %+v", updated)
 	}
 
-	session, err := app.PreviewEmployeeImport(reqCtx, domain.EmployeeImportPreviewInput{
+	session, err := app.HR().PreviewEmployeeImport(reqCtx, domain.EmployeeImportPreviewInput{
 		Filename: "employees.csv",
 		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\n,Integration Import,import_" + suffix + "@example.com,,HRBP,全職,0911000222,在職,2026-06-01,\n",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	confirmed, err := app.ConfirmEmployeeImport(reqCtx, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
+	confirmed, err := app.HR().ConfirmEmployeeImport(reqCtx, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if confirmed.Summary["confirmed"] != 1 {
 		t.Fatalf("expected one confirmed import, got %+v", confirmed.Summary)
 	}
-	exported, err := app.ExportEmployees(reqCtx, domain.EmployeeQuery{Keyword: "Integration"})
+	exported, err := app.HR().ExportEmployees(reqCtx, domain.EmployeeQuery{Keyword: "Integration"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(exported) < 2 {
 		t.Fatalf("expected created and imported employees in export, got %+v", exported)
 	}
-	resigned, err := app.TransitionEmployeeStatus(reqCtx, created.ID, domain.StatusTransitionInput{Status: "resigned", Reason: "integration offboard", EndDate: "2026-06-30"})
+	resigned, err := app.HR().TransitionEmployeeStatus(reqCtx, created.ID, domain.StatusTransitionInput{Status: "resigned", Reason: "integration offboard", EndDate: "2026-06-30"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if resigned.EmploymentStatus != "resigned" || resigned.ResignDate == nil {
 		t.Fatalf("expected resigned employee, got %+v", resigned)
 	}
-	reinstated, err := app.TransitionEmployeeStatus(reqCtx, created.ID, domain.StatusTransitionInput{Status: "active", Reason: "integration reinstate", StartDate: "2026-07-01"})
+	reinstated, err := app.HR().TransitionEmployeeStatus(reqCtx, created.ID, domain.StatusTransitionInput{Status: "active", Reason: "integration reinstate", StartDate: "2026-07-01"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if reinstated.EmploymentStatus != "active" || reinstated.ResignDate != nil {
 		t.Fatalf("expected active reinstated employee, got %+v", reinstated)
 	}
-	batch, err := app.BatchDeleteEmployees(reqCtx, domain.BatchDeleteEmployeesInput{EmployeeIDs: []string{created.ID}, Reason: "integration cleanup"})
+	batch, err := app.HR().BatchDeleteEmployees(reqCtx, domain.BatchDeleteEmployeesInput{EmployeeIDs: []string{created.ID}, Reason: "integration cleanup"})
 	if err != nil {
 		t.Fatal(err)
 	}

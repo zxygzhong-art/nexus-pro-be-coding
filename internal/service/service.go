@@ -30,6 +30,10 @@ type Options struct {
 	ObjectStore   ObjectStore
 }
 
+type RelationshipChecker interface {
+	CheckRelationship(ctx context.Context, check domain.RelationshipCheck) (bool, error)
+}
+
 func New(store repository.Store, options ...Options) *Service {
 	cfg := Options{}
 	if len(options) > 0 {

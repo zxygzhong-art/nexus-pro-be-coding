@@ -2,6 +2,14 @@ package domain
 
 import "time"
 
+type AccountStatus string
+
+const (
+	AccountStatusActive        AccountStatus = "active"
+	AccountStatusDisabled      AccountStatus = "disabled"
+	AccountStatusPendingInvite AccountStatus = "pending_invite"
+)
+
 type Account struct {
 	ID                     string    `json:"id"`
 	TenantID               string    `json:"tenant_id"`

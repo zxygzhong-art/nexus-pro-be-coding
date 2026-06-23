@@ -16,26 +16,6 @@ func (c *Service) Attendance() AttendanceService {
 	return AttendanceService{Service: c, store: c.store}
 }
 
-func (c *Service) ListLeaveBalances(ctx RequestContext) ([]LeaveBalance, error) {
-	return c.Attendance().ListLeaveBalances(ctx)
-}
-
-func (c *Service) ListLeaveBalancePage(ctx RequestContext, page PageRequest) (PageResponse[LeaveBalance], error) {
-	return c.Attendance().ListLeaveBalancePage(ctx, page)
-}
-
-func (c *Service) ListLeaveRequests(ctx RequestContext) ([]LeaveRequest, error) {
-	return c.Attendance().ListLeaveRequests(ctx)
-}
-
-func (c *Service) ListLeaveRequestPage(ctx RequestContext, page PageRequest) (PageResponse[LeaveRequest], error) {
-	return c.Attendance().ListLeaveRequestPage(ctx, page)
-}
-
-func (c *Service) CreateLeaveRequest(ctx RequestContext, input CreateLeaveRequestInput) (LeaveRequest, error) {
-	return c.Attendance().CreateLeaveRequest(ctx, input)
-}
-
 func (c AttendanceService) ListLeaveBalances(ctx RequestContext) ([]LeaveBalance, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -164,8 +144,8 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 		return LeaveRequest{}, BadRequest("end_at must be after start_at")
 	}
 	var req LeaveRequest
-	if err := c.withTenantTransaction(ctx, func(tx *Service) error {
-		balance, err := tx.Attendance().reserveLeaveBalance(ctx, employeeID, input.LeaveType, input.Hours)
+	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
+		balance, err := tx.reserveLeaveBalance(ctx, employeeID, input.LeaveType, input.Hours)
 		if err != nil {
 			return err
 		}

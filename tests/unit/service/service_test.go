@@ -12,7 +12,6 @@ import (
 	"unicode/utf8"
 
 	"nexus-pro-be/internal/domain"
-	authzpkg "nexus-pro-be/internal/domain/authz"
 	"nexus-pro-be/internal/repository/memory"
 	"nexus-pro-be/internal/service"
 )
@@ -22,7 +21,7 @@ func TestCheckRequiresSpecificTarget(t *testing.T) {
 		{Resource: "hr.employee", Action: "read", Target: "emp-1"},
 	})
 
-	untargeted, err := svc.Check(ctx, domain.CheckRequest{Resource: "hr.employee", Action: "read"})
+	untargeted, err := svc.Authz().Check(ctx, domain.CheckRequest{Resource: "hr.employee", Action: "read"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +29,7 @@ func TestCheckRequiresSpecificTarget(t *testing.T) {
 		t.Fatalf("target-specific permission matched an untargeted request")
 	}
 
-	targeted, err := svc.Check(ctx, domain.CheckRequest{Resource: "hr.employee", Action: "read", Target: "emp-1"})
+	targeted, err := svc.Authz().Check(ctx, domain.CheckRequest{Resource: "hr.employee", Action: "read", Target: "emp-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,7 +37,7 @@ func TestCheckRequiresSpecificTarget(t *testing.T) {
 		t.Fatalf("target-specific permission did not match its target: %+v", targeted)
 	}
 
-	employeeTargeted, err := svc.Check(ctx, domain.CheckRequest{Resource: "hr.employee", Action: "read", TargetEmployeeID: "emp-1"})
+	employeeTargeted, err := svc.Authz().Check(ctx, domain.CheckRequest{Resource: "hr.employee", Action: "read", TargetEmployeeID: "emp-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +45,7 @@ func TestCheckRequiresSpecificTarget(t *testing.T) {
 		t.Fatalf("target-specific permission did not match target_employee_id: %+v", employeeTargeted)
 	}
 
-	resourceIDTargeted, err := svc.Check(ctx, domain.CheckRequest{Resource: "hr.employee", Action: "read", ResourceID: "emp-1"})
+	resourceIDTargeted, err := svc.Authz().Check(ctx, domain.CheckRequest{Resource: "hr.employee", Action: "read", ResourceID: "emp-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -64,6 +63,7 @@ func TestCreateAgentRunPreservesMultibyteReferenceSnippet(t *testing.T) {
 		TenantID: "tenant-1",
 		Name:     "Agent Tool",
 		Permissions: []domain.Permission{
+			{Resource: "agent.run", Action: "create", Scope: "all"},
 			{Resource: "agent.tool", Action: "call", Target: "knowledge.search", Scope: "all"},
 			{Resource: "agent.knowledge_article", Action: "read", Scope: "all"},
 		},
@@ -84,7 +84,7 @@ func TestCreateAgentRunPreservesMultibyteReferenceSnippet(t *testing.T) {
 		CreatedAt: now,
 	})
 
-	run, err := service.New(store).CreateAgentRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.CreateAgentRunInput{Prompt: "请"})
+	run, err := service.New(store).Agent().CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}, domain.CreateAgentRunInput{Prompt: "请"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,19 @@ func TestCreateAgentRunRequiresToolPermission(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
 	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-agent-run",
+		TenantID: "tenant-1",
+		Name:     "Agent Run",
+		Permissions: []domain.Permission{
+			{Resource: "agent.run", Action: "create", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", CreatedAt: now})
+	account, _, _ := store.GetAccount(context.Background(), "tenant-1", "acct-1")
+	account.DirectPermissionSetIDs = []string{"ps-agent-run"}
+	_ = store.UpsertAccount(context.Background(), account)
 	_ = store.UpsertKnowledgeArticle(context.Background(), domain.KnowledgeArticle{
 		ID:        "ka-1",
 		TenantID:  "tenant-1",
@@ -117,7 +129,7 @@ func TestCreateAgentRunRequiresToolPermission(t *testing.T) {
 		CreatedAt: now,
 	})
 
-	_, err := service.New(store).CreateAgentRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.CreateAgentRunInput{Prompt: "请假"})
+	_, err := service.New(store).Agent().CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}, domain.CreateAgentRunInput{Prompt: "请假"})
 	if err == nil {
 		t.Fatal("expected agent tool gateway to reject missing tool permission")
 	}
@@ -132,6 +144,7 @@ func TestCreateAgentRunFiltersUnauthorizedKnowledge(t *testing.T) {
 		TenantID: "tenant-1",
 		Name:     "Agent Tool",
 		Permissions: []domain.Permission{
+			{Resource: "agent.run", Action: "create", Scope: "all"},
 			{Resource: "agent.tool", Action: "call", Target: "knowledge.search", Scope: "all"},
 			{Resource: "agent.knowledge_article", Action: "read", Target: "ka-allowed", Scope: "all"},
 		},
@@ -159,7 +172,7 @@ func TestCreateAgentRunFiltersUnauthorizedKnowledge(t *testing.T) {
 		CreatedAt: now.Add(time.Minute),
 	})
 
-	run, err := service.New(store).CreateAgentRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.CreateAgentRunInput{Prompt: "请假"})
+	run, err := service.New(store).Agent().CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}, domain.CreateAgentRunInput{Prompt: "请假"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -177,7 +190,7 @@ func TestAuthzExplicitDenyWins(t *testing.T) {
 		{Resource: "hr.employee", Action: "read", Scope: "all", Effect: "deny"},
 	})
 
-	result, err := svc.Check(ctx, domain.CheckRequest{ApplicationCode: "hr", ResourceType: "employee", Action: "read", ResourceID: "emp-1"})
+	result, err := svc.Authz().Check(ctx, domain.CheckRequest{ApplicationCode: "hr", ResourceType: "employee", Action: "read", ResourceID: "emp-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +229,7 @@ func TestPermissionRelationRequiresOpenFGA(t *testing.T) {
 	req := domain.CheckRequest{Resource: "agent.knowledge_article", ResourceID: "ka-1", Action: "read"}
 
 	denyChecker := &fixedRelationshipChecker{allowed: false}
-	denied, err := service.New(store, service.Options{Relationships: denyChecker}).Check(ctx, req)
+	denied, err := service.New(store, service.Options{Relationships: denyChecker}).Authz().Check(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -225,7 +238,7 @@ func TestPermissionRelationRequiresOpenFGA(t *testing.T) {
 	}
 
 	allowChecker := &fixedRelationshipChecker{allowed: true}
-	allowed, err := service.New(store, service.Options{Relationships: allowChecker}).Check(ctx, req)
+	allowed, err := service.New(store, service.Options{Relationships: allowChecker}).Authz().Check(ctx, req)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +292,7 @@ func TestAssumableRoleSessionPolicyCanOnlyShrink(t *testing.T) {
 		CreatedAt:              now,
 	})
 	svc := service.New(store)
-	session, err := svc.AssumeRole(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, "role-hr", domain.AssumeRoleInput{
+	session, err := svc.IAM().AssumeRole(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}, "role-hr", domain.AssumeRoleInput{
 		Reason:          "test temporary HR read",
 		DurationMinutes: 10,
 		SessionPolicy:   map[string]any{"allow": []string{"hr.employee.read"}},
@@ -293,7 +306,7 @@ func TestAssumableRoleSessionPolicyCanOnlyShrink(t *testing.T) {
 	}
 
 	assumedCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", AssumedRoleSessionID: sessionID}
-	read, err := svc.Check(assumedCtx, domain.CheckRequest{Resource: "hr.employee", Action: "read"})
+	read, err := svc.Authz().Check(assumedCtx, domain.CheckRequest{Resource: "hr.employee", Action: "read"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +314,7 @@ func TestAssumableRoleSessionPolicyCanOnlyShrink(t *testing.T) {
 		t.Fatalf("expected read allowed through assumed role session, got %+v", read)
 	}
 
-	export, err := svc.Check(assumedCtx, domain.CheckRequest{Resource: "hr.employee", Action: "export"})
+	export, err := svc.Authz().Check(assumedCtx, domain.CheckRequest{Resource: "hr.employee", Action: "export"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -352,12 +365,12 @@ func TestAssumableRoleSessionBypassesAuthzSnapshot(t *testing.T) {
 	})
 	cache := &recordingAuthzSnapshot{values: map[string]domain.CheckResult{}}
 	svc := service.New(store, service.Options{AuthzSnapshot: cache})
-	session, err := svc.AssumeRole(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, "role-hr", domain.AssumeRoleInput{Reason: "test snapshot bypass"})
+	session, err := svc.IAM().AssumeRole(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}, "role-hr", domain.AssumeRoleInput{Reason: "test snapshot bypass"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assumedCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", AssumedRoleSessionID: session.SessionID}
-	if result, err := svc.Check(assumedCtx, domain.CheckRequest{Resource: "hr.employee", Action: "read"}); err != nil || !result.Allowed {
+	if result, err := svc.Authz().Check(assumedCtx, domain.CheckRequest{Resource: "hr.employee", Action: "read"}); err != nil || !result.Allowed {
 		t.Fatalf("expected assumed role read before revocation, result=%+v err=%v", result, err)
 	}
 	if cache.gets != 1 || cache.sets != 1 {
@@ -373,7 +386,7 @@ func TestAssumableRoleSessionBypassesAuthzSnapshot(t *testing.T) {
 		RevokedAt:       &revokedAt,
 		CreatedAt:       now,
 	})
-	if _, err := svc.Check(assumedCtx, domain.CheckRequest{Resource: "hr.employee", Action: "read"}); err == nil {
+	if _, err := svc.Authz().Check(assumedCtx, domain.CheckRequest{Resource: "hr.employee", Action: "read"}); err == nil {
 		t.Fatal("expected revoked assumed role session to be rejected instead of served from cache")
 	}
 	if cache.gets != 1 || cache.sets != 1 {
@@ -411,7 +424,7 @@ func TestDirectAssumedRoleIDDoesNotGrantRolePermissions(t *testing.T) {
 		CreatedAt:          now,
 	})
 
-	result, err := service.New(store).Check(
+	result, err := service.New(store).Authz().Check(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", AssumedRoleID: "role-hr"},
 		domain.CheckRequest{Resource: "hr.employee", Action: "read"},
 	)
@@ -443,7 +456,7 @@ func TestTrustedAssumableRoleStillRequiresAssumePermission(t *testing.T) {
 		CreatedAt:          now,
 	})
 
-	_, err := service.New(store).AssumeRole(
+	_, err := service.New(store).IAM().AssumeRole(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		"role-hr",
 		domain.AssumeRoleInput{Reason: "test missing assume permission"},
@@ -484,7 +497,7 @@ func TestAccountActiveAssumableRoleIDDoesNotGrantRolePermissions(t *testing.T) {
 		CreatedAt:          now,
 	})
 
-	result, err := service.New(store).Check(
+	result, err := service.New(store).Authz().Check(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		domain.CheckRequest{Resource: "hr.employee", Action: "read"},
 	)
@@ -507,7 +520,7 @@ func TestResolveMeRequiresMeReadPermission(t *testing.T) {
 		CreatedAt: now,
 	})
 
-	_, err := service.New(store).ResolveMe(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	_, err := service.New(store).Me().Resolve(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
 	if err == nil {
 		t.Fatal("expected /me resolution to require me read permission")
 	}
@@ -558,7 +571,7 @@ func TestEmployeeReadAppliesAssignmentDataScopeAndFieldPolicy(t *testing.T) {
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", EmployeeNo: "E0001", Name: "Employee One", Status: "active", CreatedAt: now})
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-2", TenantID: "tenant-1", EmployeeNo: "E0002", Name: "Employee Two", Status: "active", CreatedAt: now.Add(time.Minute)})
 
-	items, err := service.New(store).ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	items, err := service.New(store).HR().ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -599,7 +612,7 @@ func TestDirectReportsScopeDerivesEmployeeIDs(t *testing.T) {
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-2", TenantID: "tenant-1", Name: "Report", ManagerEmployeeID: "emp-1", Status: "active", CreatedAt: now.Add(time.Minute)})
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-3", TenantID: "tenant-1", Name: "Other", Status: "active", CreatedAt: now.Add(2 * time.Minute)})
 
-	items, err := service.New(store).ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	items, err := service.New(store).HR().ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -649,7 +662,7 @@ func TestSameRankDataScopesMergeEmployeeIDs(t *testing.T) {
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-3", TenantID: "tenant-1", Name: "Report 3", Status: "active", CreatedAt: now.Add(2 * time.Minute)})
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-4", TenantID: "tenant-1", Name: "Other", Status: "active", CreatedAt: now.Add(3 * time.Minute)})
 
-	items, err := service.New(store).ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	items, err := service.New(store).HR().ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -690,7 +703,7 @@ func TestDepartmentSubtreeScopeDerivesOrgUnitIDs(t *testing.T) {
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-2", TenantID: "tenant-1", Name: "Child Employee", OrgUnitID: "ou-child", Status: "active", CreatedAt: now.Add(time.Minute)})
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-3", TenantID: "tenant-1", Name: "Other Employee", OrgUnitID: "ou-other", Status: "active", CreatedAt: now.Add(2 * time.Minute)})
 
-	items, err := service.New(store).ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	items, err := service.New(store).HR().ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -736,7 +749,7 @@ func TestAssignedOrgUnitsScopeFiltersExactDepartments(t *testing.T) {
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-2", TenantID: "tenant-1", Name: "Child Is Not Included", OrgUnitID: "ou-child", Status: "active", CreatedAt: now.Add(time.Minute)})
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-3", TenantID: "tenant-1", Name: "Other", OrgUnitID: "ou-other", Status: "active", CreatedAt: now.Add(2 * time.Minute)})
 
-	items, err := service.New(store).ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	items, err := service.New(store).HR().ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -800,7 +813,7 @@ func TestEmployeeFieldPolicyHidesDenyFieldsAndBlocksWrites(t *testing.T) {
 	svc := service.New(store)
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", RequestID: "req-field-policy", ApprovalConfirmed: true}
 
-	items, err := svc.ListEmployees(ctx)
+	items, err := svc.HR().ListEmployees(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -815,7 +828,7 @@ func TestEmployeeFieldPolicyHidesDenyFieldsAndBlocksWrites(t *testing.T) {
 	}
 
 	nextPhone := "0999999999"
-	_, err = svc.UpdateEmployee(ctx, "emp-1", domain.UpdateEmployeeInput{
+	_, err = svc.HR().UpdateEmployee(ctx, "emp-1", domain.UpdateEmployeeInput{
 		Phone:     &nextPhone,
 		BasicInfo: map[string]any{"national_id": "B123456789"},
 	})
@@ -827,7 +840,7 @@ func TestEmployeeFieldPolicyHidesDenyFieldsAndBlocksWrites(t *testing.T) {
 		t.Fatalf("expected field_denied error code, got %v", err)
 	}
 
-	exported, err := svc.ExportEmployees(ctx)
+	exported, err := svc.HR().ExportEmployees(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -874,7 +887,7 @@ func TestEmployeeExportRequiresApprovalAndAudits(t *testing.T) {
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", EmployeeNo: "E0001", Name: "Employee One", Status: "active", CreatedAt: now})
 	svc := service.New(store)
 
-	_, err := svc.ExportEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	_, err := svc.HR().ExportEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
 	if err == nil {
 		t.Fatal("expected export to require approval confirmation")
 	}
@@ -886,7 +899,7 @@ func TestEmployeeExportRequiresApprovalAndAudits(t *testing.T) {
 		t.Fatalf("expected approval audit log, got %+v", logs)
 	}
 
-	items, err := svc.ExportEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true})
+	items, err := svc.HR().ExportEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -929,7 +942,7 @@ func TestEmployeeExportRejectsOversizedSyncResult(t *testing.T) {
 		})
 	}
 
-	_, err := service.New(store).ExportEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true})
+	_, err := service.New(store).HR().ExportEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true})
 	if appErr, ok := domain.AsAppError(err); !ok || appErr.Code != "conflict" {
 		t.Fatalf("expected oversized export conflict, got %v", err)
 	}
@@ -960,7 +973,7 @@ func TestSelfScopedEmployeeReadOnlyReturnsCurrentEmployee(t *testing.T) {
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now})
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-2", TenantID: "tenant-1", Name: "Employee Two", Status: "active", CreatedAt: now.Add(time.Minute)})
 
-	items, err := service.New(store).ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	items, err := service.New(store).HR().ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -994,7 +1007,7 @@ func TestSelfScopedLeaveCreateCannotTargetAnotherEmployee(t *testing.T) {
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now})
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-2", TenantID: "tenant-1", Name: "Employee Two", Status: "active", CreatedAt: now.Add(time.Minute)})
 
-	_, err := service.New(store).CreateLeaveRequest(
+	_, err := service.New(store).Attendance().CreateLeaveRequest(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		domain.CreateLeaveRequestInput{
 			EmployeeID: "emp-2",
@@ -1039,14 +1052,14 @@ func TestSelfScopedLeaveReadOnlyReturnsCurrentEmployeeItems(t *testing.T) {
 	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lr-2", TenantID: "tenant-1", EmployeeID: "emp-2", LeaveType: "annual", Hours: 8, Status: "pending", CreatedAt: now.Add(time.Minute)})
 
 	svc := service.New(store)
-	balances, err := svc.ListLeaveBalances(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	balances, err := svc.Attendance().ListLeaveBalances(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(balances) != 1 || balances[0].EmployeeID != "emp-1" {
 		t.Fatalf("expected only current employee balance, got %+v", balances)
 	}
-	requests, err := svc.ListLeaveRequests(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	requests, err := svc.Attendance().ListLeaveRequests(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1080,7 +1093,7 @@ func TestCreateLeaveRequestReservesLeaveBalance(t *testing.T) {
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now})
 	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 16, UpdatedAt: now})
 
-	created, err := service.New(store).CreateLeaveRequest(
+	created, err := service.New(store).Attendance().CreateLeaveRequest(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		domain.CreateLeaveRequestInput{
 			LeaveType: "annual",
@@ -1132,7 +1145,7 @@ func TestCreateLeaveRequestRejectsInsufficientLeaveBalance(t *testing.T) {
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now})
 	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 4, UpdatedAt: now})
 
-	_, err := service.New(store).CreateLeaveRequest(
+	_, err := service.New(store).Attendance().CreateLeaveRequest(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		domain.CreateLeaveRequestInput{
 			LeaveType: "annual",
@@ -1186,7 +1199,7 @@ func TestEmployeeAggregateCreatePatchAndDetail(t *testing.T) {
 	svc := service.New(store)
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
-	created, err := svc.CreateEmployee(ctx, domain.CreateEmployeeInput{
+	created, err := svc.HR().CreateEmployee(ctx, domain.CreateEmployeeInput{
 		EmployeeNo:            "E1001",
 		Name:                  "Ada Chen",
 		CompanyEmail:          "ada@example.com",
@@ -1208,7 +1221,7 @@ func TestEmployeeAggregateCreatePatchAndDetail(t *testing.T) {
 	}
 
 	newPhone := "0911222333"
-	updated, err := svc.UpdateEmployee(ctx, created.ID, domain.UpdateEmployeeInput{
+	updated, err := svc.HR().UpdateEmployee(ctx, created.ID, domain.UpdateEmployeeInput{
 		Phone:       &newPhone,
 		ContactInfo: map[string]any{"mobile_phone": newPhone},
 	})
@@ -1222,7 +1235,7 @@ func TestEmployeeAggregateCreatePatchAndDetail(t *testing.T) {
 		t.Fatalf("expected untouched section to remain, got %+v", updated.EducationMilitaryInfo)
 	}
 
-	detail, err := svc.GetEmployee(ctx, created.ID)
+	detail, err := svc.HR().GetEmployee(ctx, created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1254,7 +1267,7 @@ func TestEmployeeAccountChangesEmitOpenFGATupleOutbox(t *testing.T) {
 
 	input := validEmployeeInput("E2001", "Relationship Owner", "relationship.owner@example.com")
 	input.AccountID = "acct-old"
-	created, err := svc.CreateEmployee(ctx, input)
+	created, err := svc.HR().CreateEmployee(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1267,7 +1280,7 @@ func TestEmployeeAccountChangesEmitOpenFGATupleOutbox(t *testing.T) {
 	}
 
 	newAccountID := "acct-new"
-	if _, err := svc.UpdateEmployee(ctx, created.ID, domain.UpdateEmployeeInput{AccountID: &newAccountID}); err != nil {
+	if _, err := svc.HR().UpdateEmployee(ctx, created.ID, domain.UpdateEmployeeInput{AccountID: &newAccountID}); err != nil {
 		t.Fatal(err)
 	}
 	tuples, err = store.ListAuthzRelationshipTuplesForObject(context.Background(), "tenant-1", "hr.employee", created.ID)
@@ -1318,7 +1331,7 @@ func TestEmployeeCreateRejectsDuplicateUniqueFields(t *testing.T) {
 
 	input := validEmployeeInput("E1001", "Duplicate Employee", "duplicate@example.com")
 	input.AccountID = "acct-linked"
-	_, err := svc.CreateEmployee(ctx, input)
+	_, err := svc.HR().CreateEmployee(ctx, input)
 	if err == nil {
 		t.Fatal("expected duplicate unique fields to fail")
 	}
@@ -1357,7 +1370,7 @@ func TestEmployeeStatusTransitionHandlesEmptyEmploymentInfo(t *testing.T) {
 
 	leaveTarget := domain.Employee{ID: "emp-leave", TenantID: "tenant-1", Name: "Leave Target", CompanyEmail: "leave.target@example.com", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now}
 	_ = store.UpsertEmployee(context.Background(), leaveTarget)
-	_, err := svc.TransitionEmployeeStatus(ctx, leaveTarget.ID, domain.StatusTransitionInput{Status: "leave_suspended"})
+	_, err := svc.HR().TransitionEmployeeStatus(ctx, leaveTarget.ID, domain.StatusTransitionInput{Status: "leave_suspended"})
 	if appErr, ok := domain.AsAppError(err); !ok || appErr.Code != "validation_failed" {
 		t.Fatalf("expected missing leave dates validation, got %v", err)
 	}
@@ -1367,7 +1380,7 @@ func TestEmployeeStatusTransitionHandlesEmptyEmploymentInfo(t *testing.T) {
 	if resignTarget.EmploymentInfo != nil {
 		t.Fatalf("test setup expected empty employment info, got %+v", resignTarget.EmploymentInfo)
 	}
-	transitioned, err := svc.TransitionEmployeeStatus(ctx, resignTarget.ID, domain.StatusTransitionInput{
+	transitioned, err := svc.HR().TransitionEmployeeStatus(ctx, resignTarget.ID, domain.StatusTransitionInput{
 		Status:  "resigned",
 		Reason:  "left voluntarily",
 		EndDate: "2026-06-30",
@@ -1401,7 +1414,7 @@ func TestEmployeeImportPreviewConfirmAndStatusTransition(t *testing.T) {
 	svc := service.New(store, service.Options{ObjectStore: objects})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
 
-	session, err := svc.PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
+	session, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
 		Filename: "employees.csv",
 		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期\nE2001,Partial Wu,partial@example.com,ou-1,HRBP,全職,0911000222,在職,2026-06-01\nE2001,Duplicate,dup@example.com,ou-1,HRBP,全職,0911000333,在職,2026-06-01\n",
 	})
@@ -1415,7 +1428,7 @@ func TestEmployeeImportPreviewConfirmAndStatusTransition(t *testing.T) {
 		t.Fatalf("expected import file to be stored through object store, keys=%+v session=%+v", objects.keys, session)
 	}
 
-	_, err = svc.ConfirmEmployeeImport(ctx, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
+	_, err = svc.HR().ConfirmEmployeeImport(ctx, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
 	if err == nil {
 		t.Fatal("expected all-or-nothing import confirmation to reject invalid preview rows")
 	}
@@ -1433,14 +1446,14 @@ func TestEmployeeImportPreviewConfirmAndStatusTransition(t *testing.T) {
 		}
 	}
 
-	session, err = svc.PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
+	session, err = svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
 		Filename: "employees.csv",
 		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期\n,Lina Wu,lina@example.com,ou-1,HRBP,約聘,0911000222,在職,2026-06-01\n",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	confirmed, err := svc.ConfirmEmployeeImport(ctx, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
+	confirmed, err := svc.HR().ConfirmEmployeeImport(ctx, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1466,7 +1479,7 @@ func TestEmployeeImportPreviewConfirmAndStatusTransition(t *testing.T) {
 		t.Fatalf("expected generated employee number and normalized category, got %+v", imported)
 	}
 
-	transitioned, err := svc.TransitionEmployeeStatus(ctx, imported.ID, domain.StatusTransitionInput{
+	transitioned, err := svc.HR().TransitionEmployeeStatus(ctx, imported.ID, domain.StatusTransitionInput{
 		Status:  "resigned",
 		Reason:  "contract ended",
 		EndDate: "2026-06-30",
@@ -1511,7 +1524,7 @@ func TestEmployeeImportConfirmRevalidatesBatchDuplicates(t *testing.T) {
 	if err := store.UpsertEmployeeImportSession(context.Background(), session); err != nil {
 		t.Fatal(err)
 	}
-	_, err := service.New(store).ConfirmEmployeeImport(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
+	_, err := service.New(store).HR().ConfirmEmployeeImport(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
 	if err == nil {
 		t.Fatal("expected duplicate batch to fail all-or-nothing import confirmation")
 	}
@@ -1553,7 +1566,7 @@ func TestEmployeeReinstatementRequiresTransitionAndKeepsDeletedTerminal(t *testi
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-delete", TenantID: "tenant-1", Name: "Delete", CompanyEmail: "delete@example.com", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
 	svc := service.New(store)
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", RequestID: "req-reinstate", ApprovalConfirmed: true}
-	if _, err := svc.TransitionEmployeeStatus(ctx, "emp-resign", domain.StatusTransitionInput{Status: "resigned", Reason: "left", EndDate: "2026-06-30"}); err != nil {
+	if _, err := svc.HR().TransitionEmployeeStatus(ctx, "emp-resign", domain.StatusTransitionInput{Status: "resigned", Reason: "left", EndDate: "2026-06-30"}); err != nil {
 		t.Fatal(err)
 	}
 	linked, ok, err := store.GetAccount(context.Background(), "tenant-1", "acct-linked")
@@ -1563,14 +1576,14 @@ func TestEmployeeReinstatementRequiresTransitionAndKeepsDeletedTerminal(t *testi
 	if !ok || linked.Status != "disabled" {
 		t.Fatalf("expected resignation to disable linked account, got %+v", linked)
 	}
-	if _, err := svc.UpdateEmployeeStatus(ctx, "emp-resign", "active"); err == nil {
+	if _, err := svc.HR().UpdateEmployeeStatus(ctx, "emp-resign", "active"); err == nil {
 		t.Fatal("expected direct status patch to reject resigned employee reactivation")
 	}
-	_, err = svc.TransitionEmployeeStatus(ctx, "emp-resign", domain.StatusTransitionInput{Status: "active", Reason: "rehired"})
+	_, err = svc.HR().TransitionEmployeeStatus(ctx, "emp-resign", domain.StatusTransitionInput{Status: "active", Reason: "rehired"})
 	if appErr, ok := domain.AsAppError(err); !ok || appErr.Code != "validation_failed" || len(appErr.FieldErrors) == 0 {
 		t.Fatalf("expected reinstatement start_date validation, got %v", err)
 	}
-	reinstated, err := svc.TransitionEmployeeStatus(ctx, "emp-resign", domain.StatusTransitionInput{Status: "active", Reason: "rehired", StartDate: "2026-07-01"})
+	reinstated, err := svc.HR().TransitionEmployeeStatus(ctx, "emp-resign", domain.StatusTransitionInput{Status: "active", Reason: "rehired", StartDate: "2026-07-01"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1611,10 +1624,10 @@ func TestEmployeeReinstatementRequiresTransitionAndKeepsDeletedTerminal(t *testi
 	if reinstateLog.TraceID != "req-reinstate" || reinstateLog.Details["transition_type"] != "reinstatement" || reinstateLog.Details["data_scope"] == nil {
 		t.Fatalf("expected reinstatement audit details with trace and authz context, got %+v", reinstateLog)
 	}
-	if _, err := svc.DeleteEmployee(ctx, "emp-delete"); err != nil {
+	if _, err := svc.HR().DeleteEmployee(ctx, "emp-delete"); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.TransitionEmployeeStatus(ctx, "emp-delete", domain.StatusTransitionInput{Status: "active"}); err == nil {
+	if _, err := svc.HR().TransitionEmployeeStatus(ctx, "emp-delete", domain.StatusTransitionInput{Status: "active"}); err == nil {
 		t.Fatal("expected deleted employee reactivation to be rejected")
 	}
 }
@@ -1653,7 +1666,7 @@ func TestEmployeeImportXLSXPreservesManagerEmployeeID(t *testing.T) {
 		{"E2002", "Mina Chen", "mina@example.com", "ou-1", "HRBP", "全職", "0911000444", "在職", "2026-06-01", "emp-manager"},
 	})
 
-	session, err := svc.PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
+	session, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
 		Filename: "employees.xlsx",
 		Content:  content,
 	})
@@ -1681,7 +1694,7 @@ func TestEmployeeImportXLSXPreservesManagerEmployeeID(t *testing.T) {
 		{"員工編號", "姓名", "Email", "部門", "職位", "類別", "電話", "狀態", "到職日期", "主管員工ID"},
 		{"E2003", "Missing Manager", "missing.manager@example.com", "ou-1", "HRBP", "全職", "0911000445", "在職", "2026-06-01", "emp-missing"},
 	})
-	missingSession, err := svc.PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
+	missingSession, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
 		Filename: "employees.xlsx",
 		Content:  missingManagerContent,
 	})
@@ -1699,7 +1712,7 @@ func TestEmployeePreviewCreateDoesNotPersist(t *testing.T) {
 	})
 	input := validEmployeeInput("E3001", "Preview Person", "preview.person@example.com")
 
-	preview, err := svc.PreviewCreateEmployee(ctx, input)
+	preview, err := svc.HR().PreviewCreateEmployee(ctx, input)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1716,7 +1729,7 @@ func TestEmployeePreviewCreateDoesNotPersist(t *testing.T) {
 
 	invalid := input
 	invalid.Name = ""
-	invalidPreview, err := svc.PreviewCreateEmployee(ctx, invalid)
+	invalidPreview, err := svc.HR().PreviewCreateEmployee(ctx, invalid)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1751,7 +1764,7 @@ func TestEmployeeAvatarUploadReplaceAndDelete(t *testing.T) {
 		UpdatedAt:        now,
 	})
 
-	updated, err := svc.UpdateEmployeeAvatar(ctx, "emp-avatar", domain.EmployeeAvatarInput{
+	updated, err := svc.HR().UpdateEmployeeAvatar(ctx, "emp-avatar", domain.EmployeeAvatarInput{
 		Filename:    "photo.png",
 		ContentType: "image/png",
 		Content:     testPNGBytes(),
@@ -1769,7 +1782,7 @@ func TestEmployeeAvatarUploadReplaceAndDelete(t *testing.T) {
 		t.Fatalf("expected old avatar object to be deleted, got %+v", objects.deleted)
 	}
 
-	deleted, err := svc.DeleteEmployeeAvatar(ctx, "emp-avatar")
+	deleted, err := svc.HR().DeleteEmployeeAvatar(ctx, "emp-avatar")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1802,7 +1815,7 @@ func TestEmployeeAvatarRejectsForgedContentType(t *testing.T) {
 		UpdatedAt:        now,
 	})
 
-	_, err := svc.UpdateEmployeeAvatar(ctx, "emp-avatar", domain.EmployeeAvatarInput{
+	_, err := svc.HR().UpdateEmployeeAvatar(ctx, "emp-avatar", domain.EmployeeAvatarInput{
 		Filename:    "photo.png",
 		ContentType: "image/png",
 		Content:     []byte("not really a png"),
@@ -1821,7 +1834,7 @@ func TestEmployeeImportTemplateHeaders(t *testing.T) {
 	})
 	expected := []string{"員工編號", "姓名", "Email", "部門", "職位", "類別", "電話", "狀態", "到職日期", "主管員工ID"}
 
-	rawCSV, filename, contentType, err := svc.EmployeeImportTemplate(ctx, "csv")
+	rawCSV, filename, contentType, err := svc.HR().EmployeeImportTemplate(ctx, "csv")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1836,7 +1849,7 @@ func TestEmployeeImportTemplateHeaders(t *testing.T) {
 		t.Fatalf("unexpected csv headers: %+v", csvHeaders)
 	}
 
-	rawXLSX, filename, contentType, err := svc.EmployeeImportTemplate(ctx, "xlsx")
+	rawXLSX, filename, contentType, err := svc.HR().EmployeeImportTemplate(ctx, "xlsx")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1880,7 +1893,7 @@ func TestEmployeeExportApprovalInstanceMatchesFilters(t *testing.T) {
 		UpdatedAt:   now,
 	})
 	ctx.ApprovalInstanceID = "fi-export-good"
-	items, err := svc.ExportEmployees(ctx, domain.EmployeeQuery{EmploymentStatus: "active"})
+	items, err := svc.HR().ExportEmployees(ctx, domain.EmployeeQuery{EmploymentStatus: "active"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1902,7 +1915,7 @@ func TestEmployeeExportApprovalInstanceMatchesFilters(t *testing.T) {
 		UpdatedAt:   now,
 	})
 	ctx.ApprovalInstanceID = "fi-export-generic"
-	_, err = svc.ExportEmployees(ctx, domain.EmployeeQuery{EmploymentStatus: "active"})
+	_, err = svc.HR().ExportEmployees(ctx, domain.EmployeeQuery{EmploymentStatus: "active"})
 	if err == nil || !strings.Contains(err.Error(), "approval filters do not match request") {
 		t.Fatalf("expected unfiltered approval to fail filtered export, got %v", err)
 	}
@@ -1922,7 +1935,7 @@ func TestEmployeeExportApprovalInstanceMatchesFilters(t *testing.T) {
 		UpdatedAt:   now,
 	})
 	ctx.ApprovalInstanceID = "fi-export-bad"
-	_, err = svc.ExportEmployees(ctx, domain.EmployeeQuery{EmploymentStatus: "active"})
+	_, err = svc.HR().ExportEmployees(ctx, domain.EmployeeQuery{EmploymentStatus: "active"})
 	if err == nil || !strings.Contains(err.Error(), "approval filters do not match request") {
 		t.Fatalf("expected filter-mismatched approval to fail, got %v", err)
 	}
@@ -1960,7 +1973,7 @@ func TestApprovalInstanceMustBelongToCurrentAccount(t *testing.T) {
 	})
 
 	ctx.ApprovalInstanceID = "fi-export-other-account"
-	_, err := svc.ExportEmployees(ctx, domain.EmployeeQuery{EmploymentStatus: "active"})
+	_, err := svc.HR().ExportEmployees(ctx, domain.EmployeeQuery{EmploymentStatus: "active"})
 	if err == nil || !strings.Contains(err.Error(), "approval instance does not belong to current account") {
 		t.Fatalf("expected approval owner mismatch to fail, got %v", err)
 	}
@@ -1997,7 +2010,7 @@ func TestEmployeeStatusTransitionApprovalInstanceRequiresTarget(t *testing.T) {
 	})
 
 	ctx.ApprovalInstanceID = "fi-status-generic"
-	_, err := svc.TransitionEmployeeStatus(ctx, "emp-status-target", domain.StatusTransitionInput{
+	_, err := svc.HR().TransitionEmployeeStatus(ctx, "emp-status-target", domain.StatusTransitionInput{
 		Status:  "resigned",
 		Reason:  "left",
 		EndDate: "2026-06-30",
@@ -2021,7 +2034,7 @@ func TestEmployeeStatusTransitionApprovalInstanceRequiresTarget(t *testing.T) {
 		UpdatedAt:   now,
 	})
 	ctx.ApprovalInstanceID = "fi-status-target"
-	transitioned, err := svc.TransitionEmployeeStatus(ctx, "emp-status-target", domain.StatusTransitionInput{
+	transitioned, err := svc.HR().TransitionEmployeeStatus(ctx, "emp-status-target", domain.StatusTransitionInput{
 		Status:  "resigned",
 		Reason:  "left",
 		EndDate: "2026-06-30",
@@ -2049,7 +2062,7 @@ func TestInviteDeletedOrResignedEmployeeFails(t *testing.T) {
 		}
 	}
 	for _, id := range []string{"emp-resigned", "emp-deleted"} {
-		_, err := svc.InviteEmployee(ctx, id, domain.InviteEmployeeInput{})
+		_, err := svc.HR().InviteEmployee(ctx, id, domain.InviteEmployeeInput{})
 		if appErr, ok := domain.AsAppError(err); !ok || appErr.Code != "conflict" {
 			t.Fatalf("expected conflict for %s invite, got %v", id, err)
 		}
@@ -2074,7 +2087,7 @@ func TestEmployeeUpdateRespectsDataScope(t *testing.T) {
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-2", TenantID: "tenant-1", Name: "Employee Two", CompanyEmail: "two@example.com", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
 
 	newName := "Changed"
-	_, err := service.New(store).UpdateEmployee(
+	_, err := service.New(store).HR().UpdateEmployee(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		"emp-2",
 		domain.UpdateEmployeeInput{Name: &newName},
@@ -2097,12 +2110,21 @@ func TestCreatePermissionSetAssignmentRejectsDanglingReferences(t *testing.T) {
 		},
 		CreatedAt: now,
 	})
-	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-admin", TenantID: "tenant-1", Status: "active", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-admin",
+		TenantID: "tenant-1",
+		Name:     "Admin",
+		Permissions: []domain.Permission{
+			{Resource: "iam.permission_set_assignment", Action: "create", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-admin", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-admin"}, CreatedAt: now})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-target", TenantID: "tenant-1", Status: "active", CreatedAt: now})
 
 	svc := service.New(store)
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
-	_, err := svc.CreatePermissionSetAssignment(ctx, domain.CreatePermissionSetAssignmentInput{
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", ApprovalConfirmed: true}
+	_, err := svc.IAM().CreatePermissionSetAssignment(ctx, domain.CreatePermissionSetAssignmentInput{
 		PrincipalType:   "account",
 		PrincipalID:     "acct-target",
 		PermissionSetID: "ps-read",
@@ -2119,7 +2141,7 @@ func TestCreatePermissionSetAssignmentRejectsDanglingReferences(t *testing.T) {
 		t.Fatalf("expected rejected assignment to avoid writes, got %+v", assignments)
 	}
 
-	_, err = svc.CreatePermissionSetAssignment(ctx, domain.CreatePermissionSetAssignmentInput{
+	_, err = svc.IAM().CreatePermissionSetAssignment(ctx, domain.CreatePermissionSetAssignmentInput{
 		PrincipalType:   "account",
 		PrincipalID:     "missing-account",
 		PermissionSetID: "ps-read",
@@ -2128,7 +2150,7 @@ func TestCreatePermissionSetAssignmentRejectsDanglingReferences(t *testing.T) {
 		t.Fatalf("expected missing account to be rejected, got %v", err)
 	}
 
-	_, err = svc.CreatePermissionSetAssignment(ctx, domain.CreatePermissionSetAssignmentInput{
+	_, err = svc.IAM().CreatePermissionSetAssignment(ctx, domain.CreatePermissionSetAssignmentInput{
 		PrincipalType:   "external",
 		PrincipalID:     "acct-target",
 		PermissionSetID: "ps-read",
@@ -2164,7 +2186,7 @@ func TestMissingAssignmentDataScopeDoesNotBecomeUnscopedGrant(t *testing.T) {
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", CreatedAt: now})
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now})
 
-	_, err := service.New(store).ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	_, err := service.New(store).HR().ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
 	if err == nil || !strings.Contains(err.Error(), "data scope") {
 		t.Fatalf("expected dangling data scope to fail closed, got %v", err)
 	}
@@ -2210,7 +2232,7 @@ func TestEmployeeOptionsOnlyIncludeVisibleDepartments(t *testing.T) {
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-2", TenantID: "tenant-1", Name: "Visible Report", OrgUnitID: "ou-child", Position: "Engineer", Status: "active", CreatedAt: now.Add(time.Minute)})
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-3", TenantID: "tenant-1", Name: "Hidden", OrgUnitID: "ou-other", Position: "Finance", Status: "active", CreatedAt: now.Add(2 * time.Minute)})
 
-	options, err := service.New(store).EmployeeOptions(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	options, err := service.New(store).HR().EmployeeOptions(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2219,6 +2241,23 @@ func TestEmployeeOptionsOnlyIncludeVisibleDepartments(t *testing.T) {
 	}
 	if len(options.Positions) != 1 || options.Positions[0] != "Engineer" {
 		t.Fatalf("expected only visible positions, got %+v", options.Positions)
+	}
+}
+
+func TestCreateOrgUnitPathDoesNotDuplicateParent(t *testing.T) {
+	svc, ctx := newServiceFixture([]domain.Permission{
+		{Resource: "hr.org_unit", Action: "create", Scope: "all"},
+	})
+	root, err := svc.HR().CreateOrgUnit(ctx, domain.CreateOrgUnitInput{Name: "Root"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := svc.HR().CreateOrgUnit(ctx, domain.CreateOrgUnitInput{Name: "Child", ParentID: root.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := strings.Join(child.Path, "/"), root.ID+"/"+child.ID; got != want {
+		t.Fatalf("unexpected child path: got %q want %q", got, want)
 	}
 }
 
@@ -2353,10 +2392,10 @@ func (s *recordingAuthzSnapshot) InvalidateTenant(_ context.Context, tenantID st
 
 type fixedRelationshipChecker struct {
 	allowed bool
-	checks  []authzpkg.RelationshipCheck
+	checks  []domain.RelationshipCheck
 }
 
-func (c *fixedRelationshipChecker) CheckRelationship(_ context.Context, check authzpkg.RelationshipCheck) (bool, error) {
+func (c *fixedRelationshipChecker) CheckRelationship(_ context.Context, check domain.RelationshipCheck) (bool, error) {
 	c.checks = append(c.checks, check)
 	return c.allowed, nil
 }
