@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"time"
 
@@ -32,7 +33,11 @@ func (c AuthnService) OIDCAuthorizationURL(provider string, input OIDCAuthorizat
 	if tenantID == "" {
 		return OIDCAuthorizationResponse{}, domain.Unauthorized("tenant id is required for external login")
 	}
-	state, err := c.authStateCodec.EncodeOIDCState(provider, tenantID, strings.TrimSpace(input.ReturnURL))
+	returnURL, err := normalizeOIDCReturnURL(input.ReturnURL)
+	if err != nil {
+		return OIDCAuthorizationResponse{}, err
+	}
+	state, err := c.authStateCodec.EncodeOIDCState(provider, tenantID, returnURL)
 	if err != nil {
 		return OIDCAuthorizationResponse{}, err
 	}
@@ -65,6 +70,10 @@ func (c AuthnService) CompleteOIDCCallback(ctx context.Context, provider, code, 
 	}
 	if decodedState.Provider != provider {
 		return AuthLoginResponse{}, domain.Unauthorized("OIDC state provider mismatch")
+	}
+	returnURL, err := normalizeOIDCReturnURL(decodedState.ReturnURL)
+	if err != nil {
+		return AuthLoginResponse{}, err
 	}
 	principal, err := oidcProvider.ResolveCallback(ctx, strings.TrimSpace(code))
 	if err != nil {
@@ -102,6 +111,24 @@ func (c AuthnService) CompleteOIDCCallback(ctx context.Context, provider, code, 
 		Provider:    principal.Provider,
 		Subject:     principal.Subject,
 		Email:       principal.Email,
-		ReturnURL:   decodedState.ReturnURL,
+		ReturnURL:   returnURL,
 	}, nil
+}
+
+func normalizeOIDCReturnURL(raw string) (string, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", nil
+	}
+	if strings.ContainsAny(raw, "\r\n\t\\") || strings.HasPrefix(raw, "//") {
+		return "", BadRequest("return_url must be a same-origin path")
+	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return "", BadRequest("return_url must be a same-origin path")
+	}
+	if parsed.IsAbs() || parsed.Host != "" || !strings.HasPrefix(parsed.Path, "/") {
+		return "", BadRequest("return_url must be a same-origin path")
+	}
+	return parsed.String(), nil
 }

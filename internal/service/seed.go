@@ -65,7 +65,7 @@ func SeedDemo(store repository.Store) {
 			{Resource: "hr.employee", Action: "read", Scope: "self", MenuKey: "hr.employees"},
 			{Resource: "attendance.leave", Action: "create", Scope: "self", MenuKey: "attendance.leave"},
 			{Resource: "workflow.form_instance", Action: "submit", Scope: "self", MenuKey: "workflow.instances"},
-			{Resource: "agent.run", Action: "read", Scope: "all", MenuKey: "agents.runs"},
+			{Resource: "agent.run", Action: "read", Scope: "own", MenuKey: "agents.runs"},
 			{Resource: "agent.run", Action: "create", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "knowledge.search", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.knowledge_article", Action: "read", Scope: "all", MenuKey: "agents.runs"},

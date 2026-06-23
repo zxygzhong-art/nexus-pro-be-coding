@@ -273,7 +273,7 @@ func TestOIDCAuthorizationURLReturnsSignedState(t *testing.T) {
 		AuthTokenIssuer: platformauth.NewInternalTokenIssuer("session-secret", "nexus-pro-be", "nexus-pro-be-api", time.Hour),
 		AuthStateCodec:  stateCodec,
 	}), nil).Routes()
-	req := httptest.NewRequest(http.MethodGet, "/v1/auth/oidc/google/authorize?tenant_id=demo&return_url=https%3A%2F%2Fapp.example%2Fdone", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/auth/oidc/google/authorize?tenant_id=demo&return_url=%2Fdone%3Ffrom%3Doidc", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -289,8 +289,27 @@ func TestOIDCAuthorizationURLReturnsSignedState(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if state.Provider != "google" || state.TenantID != "demo" || state.ReturnURL != "https://app.example/done" {
+	if state.Provider != "google" || state.TenantID != "demo" || state.ReturnURL != "/done?from=oidc" {
 		t.Fatalf("unexpected decoded state: %+v", state)
+	}
+}
+
+func TestOIDCAuthorizationURLRejectsExternalReturnURL(t *testing.T) {
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	handler := v1api.New(service.New(store, service.Options{
+		OIDCProviders: map[string]service.OIDCProvider{
+			"google": fakeOIDCProvider{authURL: "https://accounts.google.com/o/oauth2/v2/auth"},
+		},
+		AuthStateCodec: platformauth.NewOIDCStateCodec("state-secret", time.Minute),
+	}), nil).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/auth/oidc/google/authorize?tenant_id=demo&return_url=https%3A%2F%2Fapp.example%2Fdone", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for external return_url, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -353,6 +372,49 @@ func TestOIDCCallbackIssuesInternalTokenForBoundIdentity(t *testing.T) {
 	me := decodeData[domain.MeResponse](t, meRec.Body.Bytes())
 	if me.Account.ID != "acct-employee" {
 		t.Fatalf("expected /me to use bound account, got %+v", me.Account)
+	}
+}
+
+func TestOIDCCallbackRejectsExternalReturnURL(t *testing.T) {
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	if err := store.UpsertUserIdentity(context.Background(), domain.UserIdentity{
+		ID:        "uid-google-employee",
+		TenantID:  "demo",
+		AccountID: "acct-employee",
+		Provider:  "google",
+		Subject:   "google-subject",
+		Email:     "employee@demo.local",
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	stateCodec := platformauth.NewOIDCStateCodec("state-secret", time.Minute)
+	handler := v1api.New(service.New(store, service.Options{
+		OIDCProviders: map[string]service.OIDCProvider{
+			"google": fakeOIDCProvider{
+				authURL: "https://accounts.google.com/o/oauth2/v2/auth",
+				principal: domain.AuthenticatedPrincipal{
+					Provider: "google",
+					Subject:  "google-subject",
+					Email:    "employee@demo.local",
+				},
+			},
+		},
+		AuthTokenIssuer: platformauth.NewInternalTokenIssuer("session-secret", "nexus-pro-be", "nexus-pro-be-api", time.Hour),
+		AuthStateCodec:  stateCodec,
+	}), nil).Routes()
+	state, err := stateCodec.EncodeOIDCState("google", "demo", "https://app.example/done")
+	if err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/v1/auth/oidc/google/callback?code=ok&state="+state, nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for external state return_url, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 

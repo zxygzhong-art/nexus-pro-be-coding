@@ -20,23 +20,30 @@ func (c *Service) Agent() AgentService {
 
 // ListRuns returns all visible agent runs for the current tenant.
 func (c AgentService) ListRuns(ctx RequestContext) ([]AgentRun, error) {
-	if _, _, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionRead, ""); err != nil {
+	account, decision, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionRead, "")
+	if err != nil {
 		return nil, err
 	}
-	return c.store.ListAgentRuns(goContext(ctx), ctx.TenantID)
+	items, err := c.store.ListAgentRuns(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	return filterAgentRunsByDecision(account, decision, items), nil
 }
 
 // ListRunPage returns a paginated list of visible agent runs.
 func (c AgentService) ListRunPage(ctx RequestContext, page PageRequest) (PageResponse[AgentRun], error) {
-	if _, _, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionRead, ""); err != nil {
-		return PageResponse[AgentRun]{}, err
-	}
-	page = utils.NormalizePageRequest(page)
-	items, total, err := c.store.ListAgentRunPage(goContext(ctx), ctx.TenantID, page)
+	account, decision, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionRead, "")
 	if err != nil {
 		return PageResponse[AgentRun]{}, err
 	}
-	return utils.PageResponseFromStore(items, total, page), nil
+	items, err := c.store.ListAgentRuns(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return PageResponse[AgentRun]{}, err
+	}
+	items = filterAgentRunsByDecision(account, decision, items)
+	sortAgentRuns(items, page.Sort)
+	return utils.PageResponse(items, page), nil
 }
 
 // CreateRun creates and completes an agent run after tool authorization.
@@ -138,6 +145,36 @@ func (c AgentService) failRun(ctx RequestContext, run AgentRun, cause error) err
 	)
 	_, err := c.transitionRun(ctx, run, AgentRunStatusFailed)
 	return err
+}
+
+func filterAgentRunsByDecision(account Account, decision CheckResult, items []AgentRun) []AgentRun {
+	switch decision.Scope {
+	case "", ScopeAll, ScopeTenant, ScopeSystem:
+		return append([]AgentRun(nil), items...)
+	}
+	accountIDs := stringSliceFromAny(decision.Conditions["account_ids"])
+	if len(accountIDs) == 0 {
+		accountIDs = []string{account.ID}
+	}
+	allowed := stringSet(accountIDs)
+	out := make([]AgentRun, 0, len(items))
+	for _, item := range items {
+		if _, ok := allowed[item.AccountID]; ok {
+			out = append(out, item)
+		}
+	}
+	return out
+}
+
+func sortAgentRuns(items []AgentRun, order string) {
+	sort.SliceStable(items, func(i, j int) bool {
+		switch order {
+		case "created_at_asc":
+			return items[i].CreatedAt.Before(items[j].CreatedAt)
+		default:
+			return items[i].CreatedAt.After(items[j].CreatedAt)
+		}
+	})
 }
 
 type agentToolCaller interface {

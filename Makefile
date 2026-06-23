@@ -11,7 +11,7 @@ OPENFGA_STORE_ID ?=
 OPENFGA_MODEL_ID ?=
 OPENFGA_MODEL_FILE ?= ops/openfga/model.json
 
-.PHONY: dev test unit-test sqlc require-database-url require-openfga-store require-openfga-model-id db-create migrate-up migrate-down migrate-status migrate-validate openfga-apply-model openfga-check-model
+.PHONY: dev test unit-test ci-local sqlc require-database-url require-openfga-store require-openfga-model-id db-create migrate-up migrate-down migrate-status migrate-validate openfga-apply-model openfga-check-model
 
 dev:
 	$(GO) run ./cmd/api
@@ -21,6 +21,14 @@ test:
 
 unit-test:
 	$(GO) test ./tests/unit/...
+
+ci-local:
+	$(GO) vet ./...
+	golangci-lint run ./...
+	$(GO) test ./tests/unit/...
+	$(MAKE) migrate-validate
+	$(MAKE) sqlc
+	git diff --exit-code
 
 sqlc:
 	$(SQLC) generate

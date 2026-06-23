@@ -237,7 +237,7 @@ CREATE TABLE accounts (
 );
 
 CREATE INDEX accounts_tenant_id_idx ON accounts (tenant_id);
-CREATE UNIQUE INDEX accounts_tenant_email_idx ON accounts (tenant_id, email) WHERE email <> '';
+CREATE UNIQUE INDEX accounts_tenant_email_idx ON accounts (tenant_id, lower(email)) WHERE email <> '';
 
 CREATE TABLE user_groups (
     id text PRIMARY KEY,

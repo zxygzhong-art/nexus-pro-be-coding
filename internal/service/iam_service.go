@@ -12,6 +12,11 @@ type IAMService struct {
 	store iamStore
 }
 
+const (
+	defaultAssumableRoleSessionSeconds = 8 * 60 * 60
+	maxAssumableRoleSessionSeconds     = 12 * 60 * 60
+)
+
 // IAM returns the IAM service facade.
 func (c *Service) IAM() IAMService {
 	return IAMService{Service: c, store: c.store}
@@ -452,6 +457,9 @@ func (c IAMService) CreateAssumableRole(ctx RequestContext, input CreateAssumabl
 	if len(input.PermissionBoundary) == 0 {
 		return AssumableRole{}, BadRequest("assumable role permission_boundary is required")
 	}
+	if err := validateAssumableRoleSessionSeconds(input.SessionDurationSeconds); err != nil {
+		return AssumableRole{}, err
+	}
 	for _, id := range input.PermissionSetIDs {
 		if _, ok, err := c.store.GetPermissionSet(goContext(ctx), ctx.TenantID, id); err != nil {
 			return AssumableRole{}, err
@@ -520,12 +528,9 @@ func (c IAMService) AssumeRole(ctx RequestContext, roleID string, input AssumeRo
 	}
 
 	token := utils.NewID("sess")
-	duration := time.Duration(role.SessionDurationSeconds) * time.Second
-	if duration <= 0 {
-		duration = 8 * time.Hour
-	}
-	if input.DurationMinutes > 0 {
-		duration = time.Duration(input.DurationMinutes) * time.Minute
+	duration, err := effectiveAssumableRoleSessionDuration(role.SessionDurationSeconds, input.DurationMinutes)
+	if err != nil {
+		return AssumeRoleResponse{}, err
 	}
 	session := AssumableRoleSession{
 		ID:                 token,
@@ -572,6 +577,35 @@ func (c IAMService) AssumeRole(ctx RequestContext, roleID string, input AssumeRo
 		PermissionBoundary: role.PermissionBoundary,
 		ExpiresAt:          session.ExpiresAt.Format(time.RFC3339),
 	}, nil
+}
+
+func validateAssumableRoleSessionSeconds(seconds int) error {
+	if seconds < 0 {
+		return BadRequest("session_duration_seconds must be positive")
+	}
+	if seconds > maxAssumableRoleSessionSeconds {
+		return BadRequest("session_duration_seconds exceeds 12 hour maximum")
+	}
+	return nil
+}
+
+func effectiveAssumableRoleSessionDuration(roleSeconds int, requestedMinutes int) (time.Duration, error) {
+	if err := validateAssumableRoleSessionSeconds(roleSeconds); err != nil {
+		return 0, err
+	}
+	if requestedMinutes < 0 {
+		return 0, BadRequest("duration_minutes must be positive")
+	}
+	if roleSeconds == 0 {
+		roleSeconds = defaultAssumableRoleSessionSeconds
+	}
+	if requestedMinutes == 0 {
+		return time.Duration(roleSeconds) * time.Second, nil
+	}
+	if requestedMinutes > roleSeconds/60 {
+		return 0, BadRequest("duration_minutes exceeds assumable role session duration")
+	}
+	return time.Duration(requestedMinutes) * time.Minute, nil
 }
 
 func (c IAMService) trustPolicyAllowsAccount(account Account, role AssumableRole) (bool, error) {

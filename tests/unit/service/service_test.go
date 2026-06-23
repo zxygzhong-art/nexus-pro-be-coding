@@ -12,6 +12,7 @@ import (
 	"unicode/utf8"
 
 	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/repository"
 	"nexus-pro-be/internal/repository/memory"
 	"nexus-pro-be/internal/service"
 )
@@ -132,6 +133,60 @@ func TestCreateAgentRunRequiresToolPermission(t *testing.T) {
 	_, err := service.New(store).Agent().CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}, domain.CreateAgentRunInput{Prompt: "请假"})
 	if err == nil {
 		t.Fatal("expected agent tool gateway to reject missing tool permission")
+	}
+}
+
+func TestAgentRunListRespectsOwnerScope(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-agent-own",
+		TenantID: "tenant-1",
+		Name:     "Own Agent Runs",
+		Permissions: []domain.Permission{
+			{Resource: "agent.run", Action: "read", Scope: "own"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-agent-all",
+		TenantID: "tenant-1",
+		Name:     "All Agent Runs",
+		Permissions: []domain.Permission{
+			{Resource: "agent.run", Action: "read", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-owner", TenantID: "tenant-1", EmployeeID: "emp-owner", Status: "active", DirectPermissionSetIDs: []string{"ps-agent-own"}, CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-other", TenantID: "tenant-1", EmployeeID: "emp-other", Status: "active", CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-admin", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-agent-all"}, CreatedAt: now})
+	_ = store.UpsertAgentRun(context.Background(), domain.AgentRun{ID: "run-owner", TenantID: "tenant-1", AccountID: "acct-owner", Mode: "qa", Prompt: "own", Status: "completed", CreatedAt: now, UpdatedAt: now})
+	_ = store.UpsertAgentRun(context.Background(), domain.AgentRun{ID: "run-other", TenantID: "tenant-1", AccountID: "acct-other", Mode: "qa", Prompt: "other", Status: "completed", CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute)})
+
+	svc := service.New(store)
+	ownCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-owner"}
+	runs, err := svc.Agent().ListRuns(ownCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || runs[0].ID != "run-owner" {
+		t.Fatalf("expected own-scoped list to return only owner run, got %+v", runs)
+	}
+	page, err := svc.Agent().ListRunPage(ownCtx, domain.PageRequest{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != "run-owner" {
+		t.Fatalf("expected own-scoped page to return only owner run, got %+v", page)
+	}
+
+	allRuns, err := svc.Agent().ListRuns(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(allRuns) != 2 {
+		t.Fatalf("expected all-scoped account to see all runs, got %+v", allRuns)
 	}
 }
 
@@ -320,6 +375,54 @@ func TestAssumableRoleSessionPolicyCanOnlyShrink(t *testing.T) {
 	}
 	if export.Allowed {
 		t.Fatalf("expected session policy to shrink export permission, got %+v", export)
+	}
+}
+
+func TestAssumableRoleDurationCannotExceedRoleOrGlobalMaximum(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-assume",
+		TenantID: "tenant-1",
+		Name:     "Assume Roles",
+		Permissions: []domain.Permission{
+			{Resource: "iam.assumable_role", Action: "assume", Target: "role-hr", Scope: "all"},
+			{Resource: "iam.assumable_role", Action: "create", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-1",
+		TenantID:               "tenant-1",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-assume"},
+		CreatedAt:              now,
+	})
+	_ = store.UpsertAssumableRole(context.Background(), domain.AssumableRole{
+		ID:                     "role-hr",
+		TenantID:               "tenant-1",
+		Name:                   "HR Role",
+		Trusted:                true,
+		TrustPolicy:            map[string]any{"accounts": []string{"acct-1"}},
+		PermissionBoundary:     map[string]any{"allow": []string{"hr.employee.*"}},
+		SessionDurationSeconds: 3600,
+		CreatedAt:              now,
+	})
+	svc := service.New(store)
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+
+	if _, err := svc.IAM().AssumeRole(ctx, "role-hr", domain.AssumeRoleInput{Reason: "too long", DurationMinutes: 120}); err == nil {
+		t.Fatal("expected assume role request beyond role duration to fail")
+	}
+	if _, err := svc.IAM().CreateAssumableRole(ctx, domain.CreateAssumableRoleInput{
+		Name:                   "Too Long",
+		Trusted:                true,
+		TrustPolicy:            map[string]any{"accounts": []string{"acct-1"}},
+		PermissionBoundary:     map[string]any{"allow": []string{"hr.employee.*"}},
+		SessionDurationSeconds: 13 * 60 * 60,
+	}); err == nil {
+		t.Fatal("expected role session duration above global maximum to fail")
 	}
 }
 
@@ -823,6 +926,45 @@ func TestEmployeeStatsRespectDepartmentSubtreeScope(t *testing.T) {
 	}
 	if stats.Total != 2 || stats.Active != 1 || stats.Onboarding != 1 || stats.Resigned != 0 {
 		t.Fatalf("expected stats to exclude hidden department employees, got %+v", stats)
+	}
+}
+
+func TestListOrgUnitsRespectsDepartmentSubtreeScope(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-root", TenantID: "tenant-1", Name: "Root", Path: []string{"ou-root"}, CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-child", TenantID: "tenant-1", Name: "Child", ParentID: "ou-root", Path: []string{"ou-root", "ou-child"}, CreatedAt: now.Add(time.Minute)})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-other", TenantID: "tenant-1", Name: "Other", Path: []string{"ou-other"}, CreatedAt: now.Add(2 * time.Minute)})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-org-read",
+		TenantID: "tenant-1",
+		Name:     "Scoped Org Read",
+		Permissions: []domain.Permission{
+			{Resource: "hr.org_unit", Action: "read", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertDataScope(context.Background(), domain.DataScope{ID: "ds-subtree", TenantID: "tenant-1", Code: "department_subtree", Name: "Department Subtree", ScopeType: "department_subtree", CreatedAt: now})
+	_ = store.UpsertPermissionSetAssignment(context.Background(), domain.PermissionSetAssignment{
+		ID:              "assign-org",
+		TenantID:        "tenant-1",
+		PrincipalType:   "account",
+		PrincipalID:     "acct-1",
+		PermissionSetID: "ps-org-read",
+		Effect:          "allow",
+		DataScopeID:     "ds-subtree",
+		CreatedAt:       now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", EmployeeID: "emp-manager", Status: "active", CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-manager", TenantID: "tenant-1", Name: "Manager", OrgUnitID: "ou-root", Status: "active", EmploymentStatus: "active", CreatedAt: now})
+
+	page, err := service.New(store).HR().ListOrgUnitPage(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.PageRequest{Page: 1, PageSize: 10, Sort: "created_at_asc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 2 || len(page.Items) != 2 || page.Items[0].ID != "ou-root" || page.Items[1].ID != "ou-child" {
+		t.Fatalf("expected org units to be scoped to manager subtree, got %+v", page)
 	}
 }
 
@@ -1720,6 +1862,37 @@ func TestEmployeeImportPreviewConfirmAndStatusTransition(t *testing.T) {
 	}
 }
 
+func TestEmployeeImportPreviewCleansObjectWhenSessionPersistenceFails(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	base := memory.NewStore()
+	store := &failingEmployeeImportSessionStore{Store: base}
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "HQ", Path: []string{"ou-1"}, CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-hr",
+		TenantID: "tenant-1",
+		Name:     "HR",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "import", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-hr"}, CreatedAt: now})
+	objects := &recordingObjectStore{}
+	svc := service.New(store, service.Options{ObjectStore: objects})
+
+	_, err := svc.HR().PreviewEmployeeImport(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}, domain.EmployeeImportPreviewInput{
+		Filename: "employees.csv",
+		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\nE9001,Cleanup Target,cleanup@example.com,ou-1,HRBP,全職,0911000222,在職,2026-06-01,\n",
+	})
+	if err == nil || !strings.Contains(err.Error(), "session persistence failed") {
+		t.Fatalf("expected session persistence failure, got %v", err)
+	}
+	if len(objects.keys) != 1 || len(objects.deleted) != 1 || objects.deleted[0] != objects.keys[0] {
+		t.Fatalf("expected stored import object to be deleted on failure, keys=%+v deleted=%+v", objects.keys, objects.deleted)
+	}
+}
+
 func TestEmployeeImportConfirmRevalidatesBatchDuplicates(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2000,6 +2173,35 @@ func TestBatchDeleteEmployeesUsesPerEmployeeResultsAndAudits(t *testing.T) {
 	failed, _ := batchLog.Details["failed_employee_ids"].([]string)
 	if !stringSliceContains(succeeded, "emp-linked") || !stringSliceContains(failed, "emp-deleted") {
 		t.Fatalf("expected batch audit to record succeeded and failed employee ids, got %+v", batchLog.Details)
+	}
+}
+
+func TestDeleteEmployeeRejectsAlreadyDeleted(t *testing.T) {
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "delete", Scope: "all"},
+	})
+	ctx.ApprovalConfirmed = true
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-deleted-single",
+		TenantID:         "tenant-1",
+		Name:             "Already Deleted",
+		Status:           "deleted",
+		EmploymentStatus: "deleted",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+
+	_, err := svc.HR().DeleteEmployee(ctx, "emp-deleted-single")
+	if appErr, ok := domain.AsAppError(err); !ok || appErr.Code != "conflict" {
+		t.Fatalf("expected conflict for already deleted employee, got %v", err)
+	}
+	events, err := store.ListOutboxEvents(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 0 {
+		t.Fatalf("expected no offboard event for rejected delete, got %+v", events)
 	}
 }
 
@@ -2467,6 +2669,32 @@ func TestInviteDeletedOrResignedEmployeeFails(t *testing.T) {
 	}
 }
 
+func TestInviteEmployeeRejectsDuplicateAccountEmail(t *testing.T) {
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "invite", Scope: "all"},
+	})
+	ctx.ApprovalConfirmed = true
+	now := time.Now().UTC()
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-existing", TenantID: "tenant-1", Email: "taken@example.com", Status: "active", CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-invite",
+		TenantID:         "tenant-1",
+		EmployeeNo:       "E6100",
+		Name:             "Invite Target",
+		CompanyEmail:     "invite.target@example.com",
+		Status:           "active",
+		EmploymentStatus: "active",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+
+	_, err := svc.HR().InviteEmployee(ctx, "emp-invite", domain.InviteEmployeeInput{Email: "TAKEN@example.com"})
+	appErr, ok := domain.AsAppError(err)
+	if !ok || appErr.Code != "validation_failed" || len(appErr.FieldErrors) == 0 || appErr.FieldErrors[0].Code != "unique" {
+		t.Fatalf("expected duplicate invite email validation failure, got %v", err)
+	}
+}
+
 func TestEmployeeUpdateRespectsDataScope(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2772,6 +3000,18 @@ func (s *recordingObjectStore) Provider() string {
 
 func (s *recordingObjectStore) Bucket() string {
 	return "imports"
+}
+
+type failingEmployeeImportSessionStore struct {
+	*memory.Store
+}
+
+func (s *failingEmployeeImportSessionStore) WithTenantTransaction(_ context.Context, _ string, fn func(repository.Store) error) error {
+	return fn(s)
+}
+
+func (s *failingEmployeeImportSessionStore) UpsertEmployeeImportSession(_ context.Context, _ domain.EmployeeImportSession) error {
+	return fmt.Errorf("session persistence failed")
 }
 
 func validEmployeeInput(employeeNo, name, email string) domain.CreateEmployeeInput {

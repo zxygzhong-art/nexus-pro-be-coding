@@ -33,10 +33,15 @@ func (c *Service) HR() HRService {
 
 // ListOrgUnits returns organization units visible to the current account.
 func (c HRService) ListOrgUnits(ctx RequestContext) ([]OrgUnit, error) {
-	if _, _, err := c.Service.requireServiceAuthz(ctx, AppHR, ResourceOrgUnit, ActionRead, ""); err != nil {
+	account, decision, err := c.Service.requireServiceAuthz(ctx, AppHR, ResourceOrgUnit, ActionRead, "")
+	if err != nil {
 		return nil, err
 	}
-	return c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+	units, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	return c.filterOrgUnitsByDecision(ctx, account, decision, units)
 }
 
 // ListOrgUnitPage returns paginated visible organization units.
@@ -186,6 +191,9 @@ func (c HRService) DeleteEmployee(ctx RequestContext, id string) (Employee, erro
 		}
 		if !ok {
 			return NotFound("employee", id)
+		}
+		if employeeStatus(next) == string(EmployeeStatusDeleted) {
+			return Conflict("employee is already deleted")
 		}
 		visible, err := tx.filterEmployeesByDecision(ctx, account, []Employee{next}, decision)
 		if err != nil {
@@ -646,6 +654,68 @@ func (c HRService) employeeDepartmentOptions(ctx RequestContext, account Account
 	default:
 		return employeeDepartmentOptionsFromEmployees(units, employees), nil
 	}
+}
+
+func (c HRService) filterOrgUnitsByDecision(ctx RequestContext, account Account, decision CheckResult, units []OrgUnit) ([]OrgUnit, error) {
+	switch decision.Scope {
+	case "", ScopeAll, ScopeTenant, ScopeSystem:
+		return append([]OrgUnit(nil), units...), nil
+	case ScopeDepartment, ScopeAssignedOrgUnits:
+		return orgUnitOptionsByIDs(units, stringSliceFromAny(decision.Conditions["org_unit_ids"])), nil
+	case ScopeDepartmentSubtree:
+		orgIDs := stringSliceFromAny(decision.Conditions["org_unit_ids"])
+		if len(orgIDs) == 0 && account.EmployeeID != "" {
+			employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, account.EmployeeID)
+			if err != nil {
+				return nil, err
+			}
+			if ok && employee.OrgUnitID != "" {
+				orgIDs = []string{employee.OrgUnitID}
+			}
+		}
+		return orgUnitOptionsInSubtree(units, orgIDs), nil
+	case ScopeSelf, ScopeOwn:
+		orgIDs, err := c.orgUnitIDsForEmployeeIDs(ctx, []string{account.EmployeeID})
+		if err != nil {
+			return nil, err
+		}
+		return orgUnitOptionsByIDs(units, orgIDs), nil
+	case ScopeDirectReports:
+		orgIDs, err := c.orgUnitIDsForEmployeeIDs(ctx, stringSliceFromAny(decision.Conditions["employee_ids"]))
+		if err != nil {
+			return nil, err
+		}
+		return orgUnitOptionsByIDs(units, orgIDs), nil
+	case ScopeCustomCondition:
+		if orgIDs := stringSliceFromAny(decision.Conditions["org_unit_ids"]); len(orgIDs) > 0 {
+			return orgUnitOptionsByIDs(units, orgIDs), nil
+		}
+		orgIDs, err := c.orgUnitIDsForEmployeeIDs(ctx, stringSliceFromAny(decision.Conditions["employee_ids"]))
+		if err != nil {
+			return nil, err
+		}
+		return orgUnitOptionsByIDs(units, orgIDs), nil
+	default:
+		return []OrgUnit{}, nil
+	}
+}
+
+func (c HRService) orgUnitIDsForEmployeeIDs(ctx RequestContext, employeeIDs []string) ([]string, error) {
+	allowedEmployees := stringSet(employeeIDs)
+	if len(allowedEmployees) == 0 {
+		return nil, nil
+	}
+	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	orgIDs := make([]string, 0, len(allowedEmployees))
+	for _, employee := range employees {
+		if _, ok := allowedEmployees[employee.ID]; ok && employee.OrgUnitID != "" {
+			orgIDs = append(orgIDs, employee.OrgUnitID)
+		}
+	}
+	return uniqueStrings(orgIDs), nil
 }
 
 func orgUnitOptionsByIDs(units []OrgUnit, ids []string) []OrgUnit {
@@ -1621,6 +1691,10 @@ func (c HRService) ensureEmployeeLinkedAccount(ctx RequestContext, employee Empl
 }
 
 func (c HRService) ensureAccountEmailAvailable(ctx RequestContext, email string) error {
+	return c.ensureAccountEmailAvailableForAccount(ctx, email, "")
+}
+
+func (c HRService) ensureAccountEmailAvailableForAccount(ctx RequestContext, email, allowedAccountID string) error {
 	email = strings.TrimSpace(email)
 	if email == "" {
 		return nil
@@ -1630,7 +1704,7 @@ func (c HRService) ensureAccountEmailAvailable(ctx RequestContext, email string)
 		return err
 	}
 	for _, account := range accounts {
-		if strings.EqualFold(strings.TrimSpace(account.Email), email) {
+		if strings.EqualFold(strings.TrimSpace(account.Email), email) && account.ID != strings.TrimSpace(allowedAccountID) {
 			return domainValidation("employee account policy validation failed", FieldError{Tab: employeeTabBasicInfo, Field: "company_email", Code: "unique", Message: "account email already exists"})
 		}
 	}
@@ -2686,6 +2760,12 @@ func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImpor
 	if err := c.objectStore.PutObject(goContext(ctx), objectKey, contentType, raw); err != nil {
 		return EmployeeImportSession{}, BadRequest("store import file: " + err.Error())
 	}
+	objectCommitted := false
+	defer func() {
+		if !objectCommitted {
+			c.deleteObjectIfSupported(ctx, objectKey)
+		}
+	}()
 	valid := 0
 	rowErrors := make([]RowError, 0)
 	batch := newEmployeeImportBatchIndex()
@@ -2727,15 +2807,18 @@ func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImpor
 		CreatedAt: c.Now(),
 		ExpiresAt: c.Now().Add(24 * time.Hour),
 	}
-	if err := c.store.UpsertEmployeeImportSession(goContext(ctx), session); err != nil {
+	if err := c.withTransaction(ctx, func(tx HRService) error {
+		if err := tx.store.UpsertEmployeeImportSession(goContext(ctx), session); err != nil {
+			return err
+		}
+		if err := tx.audit(ctx, "hr.employee.import.preview", string(ResourceEmployeeImport), session.ID, string(SeverityMedium), employeeImportAuditDetails(session)); err != nil {
+			return err
+		}
+		return authzAudit.CommitWith(ctx, tx.Service)
+	}); err != nil {
 		return EmployeeImportSession{}, err
 	}
-	if err := c.audit(ctx, "hr.employee.import.preview", string(ResourceEmployeeImport), session.ID, string(SeverityMedium), employeeImportAuditDetails(session)); err != nil {
-		return EmployeeImportSession{}, err
-	}
-	if err := authzAudit.Commit(ctx); err != nil {
-		return EmployeeImportSession{}, err
-	}
+	objectCommitted = true
 	c.logInfo(ctx, "employee import preview created",
 		"session_id", session.ID,
 		"filename", filename,
@@ -3433,6 +3516,9 @@ func (c HRService) InviteEmployee(ctx RequestContext, id string, input InviteEmp
 		accountID := next.AccountID
 		if accountID == "" {
 			accountID = utils.NewID("acct")
+		}
+		if err := tx.ensureAccountEmailAvailableForAccount(ctx, email, accountID); err != nil {
+			return err
 		}
 		inviteAccount := Account{
 			ID:          accountID,

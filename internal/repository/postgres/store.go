@@ -1000,7 +1000,7 @@ func (s *Store) ListAgentRunPage(execCtx context.Context, tenantID string, page 
 	if err != nil {
 		return nil, 0, err
 	}
-	items, err := s.q.ListAgentRunsPage(execCtx, sqlc.ListAgentRunsPageParams{
+	items, err := s.q.ListAgentRunsPage(tenantContext(execCtx, tenantID), sqlc.ListAgentRunsPageParams{
 		TenantID:    tenantID,
 		Sort:        page.Sort,
 		LimitCount:  int32(page.PageSize),
