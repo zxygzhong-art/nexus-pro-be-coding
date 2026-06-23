@@ -10,6 +10,11 @@ type ObjectStore interface {
 	PutObject(ctx context.Context, key string, contentType string, data []byte) error
 }
 
+type objectStoreDescriptor interface {
+	Provider() string
+	Bucket() string
+}
+
 type objectDeleter interface {
 	DeleteObject(ctx context.Context, key string) error
 }
@@ -42,6 +47,16 @@ func (s *MemoryObjectStore) PutObject(_ context.Context, key string, contentType
 	return nil
 }
 
+// Provider identifies this process-local store in import metadata.
+func (s *MemoryObjectStore) Provider() string {
+	return "memory"
+}
+
+// Bucket returns an empty bucket because memory storage is process-local.
+func (s *MemoryObjectStore) Bucket() string {
+	return ""
+}
+
 // GetObject returns a defensive copy of an object when present.
 func (s *MemoryObjectStore) GetObject(key string) (StoredObject, bool) {
 	s.mu.RLock()
@@ -69,4 +84,18 @@ func firstObjectStore(store ObjectStore) ObjectStore {
 		return store
 	}
 	return NewMemoryObjectStore()
+}
+
+func objectStoreProvider(store ObjectStore) string {
+	if described, ok := store.(objectStoreDescriptor); ok {
+		return described.Provider()
+	}
+	return ""
+}
+
+func objectStoreBucket(store ObjectStore) string {
+	if described, ok := store.(objectStoreDescriptor); ok {
+		return described.Bucket()
+	}
+	return ""
 }

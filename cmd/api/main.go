@@ -185,7 +185,8 @@ func main() {
 			Detail: "relationship checks off",
 		})
 	}
-	if cfg.ObjectStoreDir != "" {
+	switch cfg.ObjectStoreProvider {
+	case "local":
 		objectStore, err = objectstore.NewLocal(cfg.ObjectStoreDir)
 		if err != nil {
 			logger.Error("object store initialization failed", "error", err)
@@ -198,11 +199,35 @@ func main() {
 			Target: cfg.ObjectStoreDir,
 			Detail: "ready",
 		})
-	} else {
+	case "minio", "s3":
+		startupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		objectStore, err = objectstore.NewMinIO(startupCtx, objectstore.MinIOOptions{
+			Provider:        cfg.ObjectStoreProvider,
+			Endpoint:        cfg.ObjectStoreEndpoint,
+			Bucket:          cfg.ObjectStoreBucket,
+			AccessKeyID:     cfg.ObjectStoreAccessKeyID,
+			SecretAccessKey: cfg.ObjectStoreSecretAccessKey,
+			Region:          cfg.ObjectStoreRegion,
+			UseSSL:          cfg.ObjectStoreUseSSL,
+			CreateBucket:    cfg.ObjectStoreCreateBucket,
+		})
+		cancel()
+		if err != nil {
+			logger.Error("object store initialization failed", "provider", cfg.ObjectStoreProvider, "error", err)
+			os.Exit(1)
+		}
+		logger.Info("s3-compatible object store enabled", "provider", cfg.ObjectStoreProvider, "endpoint", startup.SafeURL(cfg.ObjectStoreEndpoint), "bucket", cfg.ObjectStoreBucket)
+		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
+			Name:   "ObjectStore",
+			Status: cfg.ObjectStoreProvider,
+			Target: startup.SafeURL(cfg.ObjectStoreEndpoint),
+			Detail: "bucket=" + cfg.ObjectStoreBucket,
+		})
+	default:
 		startupReport.Dependencies = append(startupReport.Dependencies, startup.Dependency{
 			Name:   "ObjectStore",
 			Status: "memory",
-			Target: "OBJECT_STORE_DIR not set",
+			Target: "OBJECT_STORE_PROVIDER=memory",
 			Detail: "import files in memory",
 		})
 	}

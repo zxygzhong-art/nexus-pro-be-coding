@@ -66,6 +66,61 @@ func (q *Queries) AppendAuditLog(ctx context.Context, arg AppendAuditLogParams) 
 	return i, err
 }
 
+const appendOutboxEvent = `-- name: AppendOutboxEvent :one
+INSERT INTO outbox_events (
+    id, tenant_id, event_type, aggregate_type, aggregate_id,
+    payload, status, retry_count, last_error, created_at, processed_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11
+)
+RETURNING id, tenant_id, event_type, aggregate_type, aggregate_id, payload, status, retry_count, last_error, created_at, processed_at
+`
+
+type AppendOutboxEventParams struct {
+	ID            string             `json:"id"`
+	TenantID      string             `json:"tenant_id"`
+	EventType     string             `json:"event_type"`
+	AggregateType string             `json:"aggregate_type"`
+	AggregateID   string             `json:"aggregate_id"`
+	Column6       []byte             `json:"column_6"`
+	Status        string             `json:"status"`
+	RetryCount    int32              `json:"retry_count"`
+	LastError     string             `json:"last_error"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	ProcessedAt   pgtype.Timestamptz `json:"processed_at"`
+}
+
+func (q *Queries) AppendOutboxEvent(ctx context.Context, arg AppendOutboxEventParams) (OutboxEvent, error) {
+	row := q.db.QueryRow(ctx, appendOutboxEvent,
+		arg.ID,
+		arg.TenantID,
+		arg.EventType,
+		arg.AggregateType,
+		arg.AggregateID,
+		arg.Column6,
+		arg.Status,
+		arg.RetryCount,
+		arg.LastError,
+		arg.CreatedAt,
+		arg.ProcessedAt,
+	)
+	var i OutboxEvent
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EventType,
+		&i.AggregateType,
+		&i.AggregateID,
+		&i.Payload,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.ProcessedAt,
+	)
+	return i, err
+}
+
 const countAgentRuns = `-- name: CountAgentRuns :one
 SELECT count(*) FROM agent_runs
 WHERE tenant_id = $1
@@ -476,7 +531,7 @@ func (q *Queries) GetEmployeeByPersonalEmail(ctx context.Context, arg GetEmploye
 }
 
 const getEmployeeImportSession = `-- name: GetEmployeeImportSession :one
-SELECT id, tenant_id, filename, object_key, status, rows, summary, created_at, expires_at, confirmed_at FROM employee_import_sessions
+SELECT id, tenant_id, filename, object_provider, object_bucket, object_key, content_type, size_bytes, sha256, status, rows, summary, created_by_account_id, confirmed_by_account_id, created_at, expires_at, confirmed_at FROM employee_import_sessions
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -492,10 +547,17 @@ func (q *Queries) GetEmployeeImportSession(ctx context.Context, arg GetEmployeeI
 		&i.ID,
 		&i.TenantID,
 		&i.Filename,
+		&i.ObjectProvider,
+		&i.ObjectBucket,
 		&i.ObjectKey,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.Sha256,
 		&i.Status,
 		&i.Rows,
 		&i.Summary,
+		&i.CreatedByAccountID,
+		&i.ConfirmedByAccountID,
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.ConfirmedAt,
@@ -1426,6 +1488,44 @@ func (q *Queries) ListOrgUnits(ctx context.Context, tenantID string) ([]OrgUnit,
 	return items, nil
 }
 
+const listOutboxEvents = `-- name: ListOutboxEvents :many
+SELECT id, tenant_id, event_type, aggregate_type, aggregate_id, payload, status, retry_count, last_error, created_at, processed_at FROM outbox_events
+WHERE tenant_id = $1
+ORDER BY created_at ASC, id ASC
+`
+
+func (q *Queries) ListOutboxEvents(ctx context.Context, tenantID string) ([]OutboxEvent, error) {
+	rows, err := q.db.Query(ctx, listOutboxEvents, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OutboxEvent
+	for rows.Next() {
+		var i OutboxEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.EventType,
+			&i.AggregateType,
+			&i.AggregateID,
+			&i.Payload,
+			&i.Status,
+			&i.RetryCount,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.ProcessedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPermissionSets = `-- name: ListPermissionSets :many
 SELECT id, tenant_id, name, description, permissions, created_at FROM permission_sets
 WHERE tenant_id = $1
@@ -1892,34 +1992,50 @@ func (q *Queries) UpsertEmployee(ctx context.Context, arg UpsertEmployeeParams) 
 
 const upsertEmployeeImportSession = `-- name: UpsertEmployeeImportSession :one
 INSERT INTO employee_import_sessions (
-    id, tenant_id, filename, object_key, status, rows, summary, created_at, expires_at, confirmed_at
+    id, tenant_id, filename, object_provider, object_bucket, object_key,
+    content_type, size_bytes, sha256, status, rows, summary,
+    created_by_account_id, confirmed_by_account_id, created_at, expires_at, confirmed_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
     filename = EXCLUDED.filename,
+    object_provider = EXCLUDED.object_provider,
+    object_bucket = EXCLUDED.object_bucket,
     object_key = EXCLUDED.object_key,
+    content_type = EXCLUDED.content_type,
+    size_bytes = EXCLUDED.size_bytes,
+    sha256 = EXCLUDED.sha256,
     status = EXCLUDED.status,
     rows = EXCLUDED.rows,
     summary = EXCLUDED.summary,
+    created_by_account_id = EXCLUDED.created_by_account_id,
+    confirmed_by_account_id = EXCLUDED.confirmed_by_account_id,
     created_at = EXCLUDED.created_at,
     expires_at = EXCLUDED.expires_at,
     confirmed_at = EXCLUDED.confirmed_at
-RETURNING id, tenant_id, filename, object_key, status, rows, summary, created_at, expires_at, confirmed_at
+RETURNING id, tenant_id, filename, object_provider, object_bucket, object_key, content_type, size_bytes, sha256, status, rows, summary, created_by_account_id, confirmed_by_account_id, created_at, expires_at, confirmed_at
 `
 
 type UpsertEmployeeImportSessionParams struct {
-	ID          string             `json:"id"`
-	TenantID    string             `json:"tenant_id"`
-	Filename    string             `json:"filename"`
-	ObjectKey   string             `json:"object_key"`
-	Status      string             `json:"status"`
-	Rows        []byte             `json:"rows"`
-	Summary     []byte             `json:"summary"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
-	ConfirmedAt pgtype.Timestamptz `json:"confirmed_at"`
+	ID                   string             `json:"id"`
+	TenantID             string             `json:"tenant_id"`
+	Filename             string             `json:"filename"`
+	ObjectProvider       string             `json:"object_provider"`
+	ObjectBucket         string             `json:"object_bucket"`
+	ObjectKey            string             `json:"object_key"`
+	ContentType          string             `json:"content_type"`
+	SizeBytes            int64              `json:"size_bytes"`
+	Sha256               string             `json:"sha256"`
+	Status               string             `json:"status"`
+	Rows                 []byte             `json:"rows"`
+	Summary              []byte             `json:"summary"`
+	CreatedByAccountID   string             `json:"created_by_account_id"`
+	ConfirmedByAccountID string             `json:"confirmed_by_account_id"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt            pgtype.Timestamptz `json:"expires_at"`
+	ConfirmedAt          pgtype.Timestamptz `json:"confirmed_at"`
 }
 
 func (q *Queries) UpsertEmployeeImportSession(ctx context.Context, arg UpsertEmployeeImportSessionParams) (EmployeeImportSession, error) {
@@ -1927,10 +2043,17 @@ func (q *Queries) UpsertEmployeeImportSession(ctx context.Context, arg UpsertEmp
 		arg.ID,
 		arg.TenantID,
 		arg.Filename,
+		arg.ObjectProvider,
+		arg.ObjectBucket,
 		arg.ObjectKey,
+		arg.ContentType,
+		arg.SizeBytes,
+		arg.Sha256,
 		arg.Status,
 		arg.Rows,
 		arg.Summary,
+		arg.CreatedByAccountID,
+		arg.ConfirmedByAccountID,
 		arg.CreatedAt,
 		arg.ExpiresAt,
 		arg.ConfirmedAt,
@@ -1940,10 +2063,17 @@ func (q *Queries) UpsertEmployeeImportSession(ctx context.Context, arg UpsertEmp
 		&i.ID,
 		&i.TenantID,
 		&i.Filename,
+		&i.ObjectProvider,
+		&i.ObjectBucket,
 		&i.ObjectKey,
+		&i.ContentType,
+		&i.SizeBytes,
+		&i.Sha256,
 		&i.Status,
 		&i.Rows,
 		&i.Summary,
+		&i.CreatedByAccountID,
+		&i.ConfirmedByAccountID,
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.ConfirmedAt,

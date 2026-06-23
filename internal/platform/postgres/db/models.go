@@ -280,16 +280,23 @@ type Employee struct {
 }
 
 type EmployeeImportSession struct {
-	ID          string             `json:"id"`
-	TenantID    string             `json:"tenant_id"`
-	Filename    string             `json:"filename"`
-	ObjectKey   string             `json:"object_key"`
-	Status      string             `json:"status"`
-	Rows        []byte             `json:"rows"`
-	Summary     []byte             `json:"summary"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	ExpiresAt   pgtype.Timestamptz `json:"expires_at"`
-	ConfirmedAt pgtype.Timestamptz `json:"confirmed_at"`
+	ID                   string             `json:"id"`
+	TenantID             string             `json:"tenant_id"`
+	Filename             string             `json:"filename"`
+	ObjectProvider       string             `json:"object_provider"`
+	ObjectBucket         string             `json:"object_bucket"`
+	ObjectKey            string             `json:"object_key"`
+	ContentType          string             `json:"content_type"`
+	SizeBytes            int64              `json:"size_bytes"`
+	Sha256               string             `json:"sha256"`
+	Status               string             `json:"status"`
+	Rows                 []byte             `json:"rows"`
+	Summary              []byte             `json:"summary"`
+	CreatedByAccountID   string             `json:"created_by_account_id"`
+	ConfirmedByAccountID string             `json:"confirmed_by_account_id"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt            pgtype.Timestamptz `json:"expires_at"`
+	ConfirmedAt          pgtype.Timestamptz `json:"confirmed_at"`
 }
 
 type EmployeeNumberSequence struct {
@@ -423,6 +430,20 @@ type OrgUnit struct {
 	ParentID  string             `json:"parent_id"`
 	Path      []string           `json:"path"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type OutboxEvent struct {
+	ID            string             `json:"id"`
+	TenantID      string             `json:"tenant_id"`
+	EventType     string             `json:"event_type"`
+	AggregateType string             `json:"aggregate_type"`
+	AggregateID   string             `json:"aggregate_id"`
+	Payload       []byte             `json:"payload"`
+	Status        string             `json:"status"`
+	RetryCount    int32              `json:"retry_count"`
+	LastError     string             `json:"last_error"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	ProcessedAt   pgtype.Timestamptz `json:"processed_at"`
 }
 
 type PermissionSet struct {

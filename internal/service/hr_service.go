@@ -4,7 +4,9 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/csv"
+	"encoding/hex"
 	"encoding/xml"
 	"fmt"
 	"io"
@@ -1368,14 +1370,20 @@ func (c HRService) appendEmployeeEvent(ctx RequestContext, eventType, target str
 		payload = map[string]any{}
 	}
 	payload["target"] = target
-	return c.store.AppendAuthzOutboxEvent(goContext(ctx), AuthzOutboxEvent{
-		ID:         utils.NewID("outbox"),
-		TenantID:   ctx.TenantID,
-		EventType:  eventType,
-		Payload:    payload,
-		Status:     "pending",
-		RetryCount: 0,
-		CreatedAt:  c.Now(),
+	aggregateType := string(ResourceEmployee)
+	if eventType == string(EventEmployeeImported) {
+		aggregateType = string(ResourceEmployeeImport)
+	}
+	return c.store.AppendOutboxEvent(goContext(ctx), OutboxEvent{
+		ID:            utils.NewID("outbox"),
+		TenantID:      ctx.TenantID,
+		EventType:     eventType,
+		AggregateType: aggregateType,
+		AggregateID:   target,
+		Payload:       payload,
+		Status:        "pending",
+		RetryCount:    0,
+		CreatedAt:     c.Now(),
 	})
 }
 
@@ -2063,10 +2071,14 @@ const xlsxWorkbookRelsXML = `<?xml version="1.0" encoding="UTF-8" standalone="ye
 
 func parseEmployeeImport(filename string, raw []byte) ([]EmployeeImportRow, error) {
 	ext := strings.ToLower(filepath.Ext(filename))
-	if ext == ".xlsx" {
+	switch ext {
+	case ".xlsx":
 		return parseEmployeeXLSX(raw)
+	case ".csv":
+		return parseEmployeeCSV(raw)
+	default:
+		return nil, fmt.Errorf("employee import supports csv and xlsx files")
 	}
-	return parseEmployeeCSV(raw)
 }
 
 func importContentType(filename string) string {
@@ -2116,6 +2128,9 @@ func employeeRowsFromRecords(records [][]string) ([]EmployeeImportRow, error) {
 	if len(records) < 2 {
 		return nil, fmt.Errorf("import file must include header and at least one data row")
 	}
+	if err := validateEmployeeImportHeader(records[0]); err != nil {
+		return nil, err
+	}
 	rows := make([]EmployeeImportRow, 0, len(records)-1)
 	for i, record := range records[1:] {
 		record = padRecord(record, employeeImportColumnCount())
@@ -2126,6 +2141,18 @@ func employeeRowsFromRecords(records [][]string) ([]EmployeeImportRow, error) {
 		})
 	}
 	return rows, nil
+}
+
+func validateEmployeeImportHeader(record []string) error {
+	if len(record) < employeeImportColumnCount() {
+		return fmt.Errorf("import file header must include %d columns", employeeImportColumnCount())
+	}
+	for i, want := range employeeImportTemplateHeaders() {
+		if got := strings.TrimSpace(record[i]); got != want {
+			return fmt.Errorf("import file header column %d must be %q", i+1, want)
+		}
+	}
+	return nil
 }
 
 type xlsxSST struct {
@@ -2243,6 +2270,82 @@ const (
 	maxEmployeeImportRows  = 500
 )
 
+const (
+	employeeImportModeCreate = "create"
+	employeeImportModeUpdate = "update"
+	employeeImportModeUpsert = "upsert"
+)
+
+func normalizeEmployeeImportMode(mode string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "", employeeImportModeCreate:
+		return employeeImportModeCreate, nil
+	case employeeImportModeUpdate:
+		return employeeImportModeUpdate, nil
+	case employeeImportModeUpsert:
+		return employeeImportModeUpsert, nil
+	default:
+		return "", BadRequest("employee import mode must be create, update, or upsert")
+	}
+}
+
+func validateEmployeeImportFailurePolicy(policy string) error {
+	switch strings.ToLower(strings.TrimSpace(policy)) {
+	case "", "all_or_nothing":
+		return nil
+	default:
+		return BadRequest("employee import failure_policy must be all_or_nothing")
+	}
+}
+
+func safeImportFilename(filename string) string {
+	filename = strings.TrimSpace(filename)
+	if filename == "" {
+		filename = "employees.csv"
+	}
+	filename = filepath.Base(strings.ReplaceAll(filename, "\\", "/"))
+	if filename == "." || filename == "/" || filename == "" {
+		return "employees.csv"
+	}
+	return strings.Map(func(r rune) rune {
+		switch r {
+		case '/', '\\', ':', 0:
+			return '_'
+		default:
+			return r
+		}
+	}, filename)
+}
+
+func employeeImportObjectKey(tenantID, sessionID, filename string) string {
+	return "employee-imports/" + tenantID + "/" + sessionID + "/" + utils.NewID("file") + "-" + safeImportFilename(filename)
+}
+
+func employeeImportSHA256(raw []byte) string {
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+func employeeImportAuditDetails(session EmployeeImportSession) map[string]any {
+	details := utils.CopyStringMap(session.Summary)
+	if details == nil {
+		details = map[string]any{}
+	}
+	details["session_id"] = session.ID
+	details["filename"] = session.Filename
+	details["object_provider"] = session.ObjectProvider
+	details["object_bucket"] = session.ObjectBucket
+	details["object_key"] = session.ObjectKey
+	details["content_type"] = session.ContentType
+	details["size_bytes"] = session.SizeBytes
+	details["sha256"] = session.SHA256
+	details["created_by_account_id"] = session.CreatedByAccountID
+	if session.ConfirmedByAccountID != "" {
+		details["confirmed_by_account_id"] = session.ConfirmedByAccountID
+	}
+	return details
+}
+
 // PreviewEmployeeImport parses an import file and stores row-level validation results.
 func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImportPreviewInput) (EmployeeImportSession, error) {
 	account, _, err := c.resolveAccount(ctx)
@@ -2276,14 +2379,13 @@ func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImpor
 		}
 	}
 	authzAudit := AuthzAudit{service: c.Service, target: AuditTarget{Event: "hr.employee.import.preview", Resource: string(ResourceEmployeeImport)}, decision: decision}
-	filename := strings.TrimSpace(input.Filename)
-	if filename == "" {
-		filename = "employees.csv"
-	}
+	filename := safeImportFilename(input.Filename)
 	raw := []byte(input.Content)
 	if len(raw) > maxEmployeeImportBytes {
 		return EmployeeImportSession{}, BadRequest("employee import file exceeds 10MB limit")
 	}
+	contentType := importContentType(filename)
+	sha256Value := employeeImportSHA256(raw)
 	rows, err := parseEmployeeImport(filename, raw)
 	if err != nil {
 		return EmployeeImportSession{}, BadRequest(err.Error())
@@ -2291,8 +2393,9 @@ func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImpor
 	if len(rows) > maxEmployeeImportRows {
 		return EmployeeImportSession{}, BadRequest(fmt.Sprintf("employee import supports at most %d rows", maxEmployeeImportRows))
 	}
-	objectKey := "employee-imports/" + ctx.TenantID + "/" + utils.NewID("file") + "/" + filename
-	if err := c.objectStore.PutObject(goContext(ctx), objectKey, importContentType(filename), raw); err != nil {
+	sessionID := utils.NewID("eimp")
+	objectKey := employeeImportObjectKey(ctx.TenantID, sessionID, filename)
+	if err := c.objectStore.PutObject(goContext(ctx), objectKey, contentType, raw); err != nil {
 		return EmployeeImportSession{}, BadRequest("store import file: " + err.Error())
 	}
 	valid := 0
@@ -2311,17 +2414,27 @@ func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImpor
 		rowErrors = append(rowErrors, rows[i].Errors...)
 	}
 	session := EmployeeImportSession{
-		ID:        utils.NewID("eimp"),
-		TenantID:  ctx.TenantID,
-		Filename:  filename,
-		ObjectKey: objectKey,
-		Status:    "previewed",
-		Rows:      rows,
+		ID:                 sessionID,
+		TenantID:           ctx.TenantID,
+		Filename:           filename,
+		ObjectProvider:     objectStoreProvider(c.objectStore),
+		ObjectBucket:       objectStoreBucket(c.objectStore),
+		ObjectKey:          objectKey,
+		ContentType:        contentType,
+		SizeBytes:          int64(len(raw)),
+		SHA256:             sha256Value,
+		Status:             "previewed",
+		Rows:               rows,
+		CreatedByAccountID: ctx.AccountID,
 		Summary: map[string]any{
 			"total":       len(rows),
 			"valid":       valid,
 			"invalid":     len(rows) - valid,
+			"confirmable": valid,
 			"error_count": len(rowErrors),
+			"filename":    filename,
+			"size_bytes":  len(raw),
+			"sha256":      sha256Value,
 		},
 		CreatedAt: c.Now(),
 		ExpiresAt: c.Now().Add(24 * time.Hour),
@@ -2329,7 +2442,7 @@ func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImpor
 	if err := c.store.UpsertEmployeeImportSession(goContext(ctx), session); err != nil {
 		return EmployeeImportSession{}, err
 	}
-	if err := c.audit(ctx, "hr.employee.import.preview", string(ResourceEmployeeImport), session.ID, string(SeverityMedium), session.Summary); err != nil {
+	if err := c.audit(ctx, "hr.employee.import.preview", string(ResourceEmployeeImport), session.ID, string(SeverityMedium), employeeImportAuditDetails(session)); err != nil {
 		return EmployeeImportSession{}, err
 	}
 	if err := authzAudit.Commit(ctx); err != nil {
@@ -2381,8 +2494,18 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 		}
 	}
 	authzAudit := AuthzAudit{service: c.Service, target: AuditTarget{Event: "hr.employee.import.confirm", Resource: string(ResourceEmployeeImport), Target: sessionID}, decision: decision}
+	mode, err := normalizeEmployeeImportMode(input.Mode)
+	if err != nil {
+		return EmployeeImportSession{}, err
+	}
+	if err := validateEmployeeImportFailurePolicy(input.FailurePolicy); err != nil {
+		return EmployeeImportSession{}, err
+	}
 	var session EmployeeImportSession
 	confirmedCount := 0
+	createdCount := 0
+	updatedCount := 0
+	var validationErr error
 	if err := c.withTransaction(ctx, func(tx HRService) error {
 		next, ok, err := tx.store.GetEmployeeImportSession(goContext(ctx), ctx.TenantID, sessionID)
 		if err != nil {
@@ -2402,13 +2525,15 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 		type importEmployeeWrite struct {
 			row      EmployeeImportRow
 			employee Employee
+			previous Employee
+			update   bool
 		}
 		employees := make([]importEmployeeWrite, 0, len(next.Rows))
 		reservedEmployeeNos := map[string]struct{}{}
 		batch := newEmployeeImportBatchIndex()
 		for i, row := range next.Rows {
 			row.Errors = nil
-			errors, err := tx.validateEmployeeImportRow(ctx, row, batch)
+			employee, previous, update, errors, err := tx.prepareEmployeeImportWrite(ctx, row, batch, mode, reservedEmployeeNos)
 			if err != nil {
 				return err
 			}
@@ -2420,21 +2545,9 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 				next.Rows[i] = row
 				continue
 			}
-			employee, err := tx.employeeFromImportInput(ctx, row.Employee, reservedEmployeeNos)
-			if err != nil {
-				if errors, ok := employeeImportErrorsFromError(row.RowNumber, err); ok {
-					row.Errors = errors
-					row.Valid = false
-					rowErrors = append(rowErrors, errors...)
-					results = append(results, BatchEmployeeResult{RowNumber: row.RowNumber, Success: false, Code: "import_validation_failed", Message: firstRowErrorMessage(errors)})
-					next.Rows[i] = row
-					continue
-				}
-				return err
-			}
 			row.Valid = true
 			next.Rows[i] = row
-			employees = append(employees, importEmployeeWrite{row: row, employee: employee})
+			employees = append(employees, importEmployeeWrite{row: row, employee: employee, previous: previous, update: update})
 		}
 		if len(rowErrors) > 0 {
 			tx.logWarn(ctx, "employee import confirmation failed validation",
@@ -2442,23 +2555,59 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 				"total_rows", len(next.Rows),
 				"error_count", len(rowErrors),
 			)
-			return ImportValidationFailed("employee import contains invalid rows", rowErrors)
+			next.Status = "failed_validation"
+			next.ConfirmedByAccountID = ctx.AccountID
+			if next.Summary == nil {
+				next.Summary = map[string]any{}
+			}
+			next.Summary["total"] = len(next.Rows)
+			next.Summary["confirmed"] = 0
+			next.Summary["created"] = 0
+			next.Summary["updated"] = 0
+			next.Summary["failed"] = len(next.Rows)
+			next.Summary["results"] = results
+			next.Summary["row_errors"] = rowErrors
+			next.Summary["error_count"] = len(rowErrors)
+			next.Summary["mode"] = mode
+			next.Summary["failure_policy"] = "all_or_nothing"
+			if err := tx.store.UpsertEmployeeImportSession(goContext(ctx), next); err != nil {
+				return err
+			}
+			if err := tx.audit(ctx, "hr.employee.import.confirm_failed", string(ResourceEmployeeImport), next.ID, string(SeverityHigh), employeeImportAuditDetails(next)); err != nil {
+				return err
+			}
+			if err := authzAudit.CommitWith(ctx, tx.Service); err != nil {
+				return err
+			}
+			session = next
+			validationErr = ImportValidationFailed("employee import contains invalid rows", rowErrors)
+			return nil
 		}
 		for _, item := range employees {
 			employee := item.employee
 			if err := tx.store.UpsertEmployee(goContext(ctx), employee); err != nil {
 				return err
 			}
-			if err := tx.touchEmployeeAuthzIfNeeded(ctx, Employee{}, employee, string(EventEmployeeAuthzSubjectImport)); err != nil {
+			previous := item.previous
+			if err := tx.touchEmployeeAuthzIfNeeded(ctx, previous, employee, string(EventEmployeeAuthzSubjectImport)); err != nil {
 				return err
 			}
 			if err := tx.linkEmployeeAccount(ctx, employee); err != nil {
 				return err
 			}
-			if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeCreated), employee.ID, map[string]any{"employee_id": employee.ID, "import_session_id": next.ID}); err != nil {
+			eventType := string(EventEmployeeCreated)
+			action := "created"
+			if item.update {
+				eventType = string(EventEmployeeUpdated)
+				action = "updated"
+				updatedCount++
+			} else {
+				createdCount++
+			}
+			if err := tx.appendEmployeeEvent(ctx, eventType, employee.ID, map[string]any{"employee_id": employee.ID, "import_session_id": next.ID, "action": action}); err != nil {
 				return err
 			}
-			results = append(results, BatchEmployeeResult{RowNumber: item.row.RowNumber, EmployeeID: employee.ID, Success: true})
+			results = append(results, BatchEmployeeResult{RowNumber: item.row.RowNumber, EmployeeID: employee.ID, Success: true, Message: action})
 		}
 		now := tx.Now()
 		next.Status = "confirmed"
@@ -2468,18 +2617,22 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 		}
 		next.Summary["total"] = len(next.Rows)
 		next.Summary["confirmed"] = len(employees)
+		next.Summary["created"] = createdCount
+		next.Summary["updated"] = updatedCount
 		next.Summary["failed"] = 0
 		next.Summary["results"] = results
 		next.Summary["row_errors"] = rowErrors
 		next.Summary["error_count"] = len(rowErrors)
-		next.Summary["mode"] = strings.TrimSpace(input.Mode)
+		next.Summary["mode"] = mode
+		next.Summary["failure_policy"] = "all_or_nothing"
+		next.ConfirmedByAccountID = ctx.AccountID
 		if err := tx.store.UpsertEmployeeImportSession(goContext(ctx), next); err != nil {
 			return err
 		}
-		if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeImported), next.ID, map[string]any{"session_id": next.ID, "success": len(employees), "failed": len(next.Rows) - len(employees)}); err != nil {
+		if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeImported), next.ID, map[string]any{"session_id": next.ID, "success": len(employees), "created": createdCount, "updated": updatedCount, "failed": len(next.Rows) - len(employees), "mode": mode}); err != nil {
 			return err
 		}
-		if err := tx.audit(ctx, "hr.employee.import.confirm", string(ResourceEmployeeImport), next.ID, string(SeverityHigh), next.Summary); err != nil {
+		if err := tx.audit(ctx, "hr.employee.import.confirm", string(ResourceEmployeeImport), next.ID, string(SeverityHigh), employeeImportAuditDetails(next)); err != nil {
 			return err
 		}
 		if err := authzAudit.CommitWith(ctx, tx.Service); err != nil {
@@ -2491,12 +2644,15 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 	}); err != nil {
 		return EmployeeImportSession{}, err
 	}
+	if validationErr != nil {
+		return session, validationErr
+	}
 	c.logInfo(ctx, "employee import confirmed",
 		"session_id", session.ID,
 		"total_rows", len(session.Rows),
 		"confirmed_count", confirmedCount,
 		"failed_count", len(session.Rows)-confirmedCount,
-		"mode", strings.TrimSpace(input.Mode),
+		"mode", mode,
 	)
 	return session, nil
 }
@@ -2517,11 +2673,143 @@ func newEmployeeImportBatchIndex() *employeeImportBatchIndex {
 
 func terminalEmployeeImportStatus(status string) bool {
 	switch strings.TrimSpace(status) {
-	case "confirmed", "partially_confirmed", "failed":
+	case "confirmed", "partially_confirmed", "failed", "failed_validation":
 		return true
 	default:
 		return false
 	}
+}
+
+func (c HRService) prepareEmployeeImportWrite(ctx RequestContext, row EmployeeImportRow, batch *employeeImportBatchIndex, mode string, reservedEmployeeNos map[string]struct{}) (Employee, Employee, bool, []RowError, error) {
+	batchErrors := employeeImportBatchErrors(row, batch)
+	if mode == employeeImportModeUpdate {
+		return c.prepareEmployeeImportUpdate(ctx, row, batchErrors)
+	}
+	if mode == employeeImportModeUpsert {
+		existing, ok, err := c.employeeImportExistingByEmployeeNo(ctx, row.Employee)
+		if err != nil {
+			return Employee{}, Employee{}, false, nil, err
+		}
+		if ok {
+			return c.prepareEmployeeImportUpdateWithExisting(ctx, row, existing, batchErrors)
+		}
+	}
+	employee, err := c.employeeFromImportInput(ctx, row.Employee, reservedEmployeeNos)
+	if err != nil {
+		errors, ok := employeeImportErrorsFromError(row.RowNumber, err)
+		if !ok {
+			return Employee{}, Employee{}, false, nil, err
+		}
+		return Employee{}, Employee{}, false, append(errors, batchErrors...), nil
+	}
+	return employee, Employee{}, false, batchErrors, nil
+}
+
+func (c HRService) prepareEmployeeImportUpdate(ctx RequestContext, row EmployeeImportRow, batchErrors []RowError) (Employee, Employee, bool, []RowError, error) {
+	existing, ok, err := c.employeeImportExistingByEmployeeNo(ctx, row.Employee)
+	if err != nil {
+		return Employee{}, Employee{}, false, nil, err
+	}
+	if strings.TrimSpace(row.Employee.EmployeeNo) == "" {
+		errors := []RowError{{Row: row.RowNumber, Field: "employee_no", Code: "required", Message: "employee_no is required for update imports"}}
+		return Employee{}, Employee{}, false, append(errors, batchErrors...), nil
+	}
+	if !ok {
+		errors := []RowError{{Row: row.RowNumber, Field: "employee_no", Code: "not_found", Message: "employee_no was not found for update import"}}
+		return Employee{}, Employee{}, false, append(errors, batchErrors...), nil
+	}
+	return c.prepareEmployeeImportUpdateWithExisting(ctx, row, existing, batchErrors)
+}
+
+func (c HRService) prepareEmployeeImportUpdateWithExisting(ctx RequestContext, row EmployeeImportRow, existing Employee, batchErrors []RowError) (Employee, Employee, bool, []RowError, error) {
+	candidate, err := c.employeeCreateCandidate(ctx, row.Employee)
+	if err != nil {
+		errors, ok := employeeImportErrorsFromError(row.RowNumber, err)
+		if !ok {
+			return Employee{}, Employee{}, false, nil, err
+		}
+		return Employee{}, Employee{}, false, append(errors, batchErrors...), nil
+	}
+	next := employeeImportUpdateEmployee(existing, candidate, row.Employee)
+	if err := c.validateEmployee(ctx, next, "update", employeeValidationImportMinimal); err != nil {
+		errors, ok := employeeImportErrorsFromError(row.RowNumber, err)
+		if !ok {
+			return Employee{}, Employee{}, false, nil, err
+		}
+		return Employee{}, Employee{}, false, append(errors, batchErrors...), nil
+	}
+	return next, existing, true, batchErrors, nil
+}
+
+func (c HRService) employeeImportExistingByEmployeeNo(ctx RequestContext, input CreateEmployeeInput) (Employee, bool, error) {
+	employeeNo := strings.TrimSpace(input.EmployeeNo)
+	if employeeNo == "" {
+		return Employee{}, false, nil
+	}
+	return c.store.GetEmployeeByEmployeeNo(goContext(ctx), ctx.TenantID, employeeNo)
+}
+
+func employeeImportUpdateEmployee(existing Employee, candidate Employee, input CreateEmployeeInput) Employee {
+	next := existing
+	if strings.TrimSpace(input.EmployeeNo) != "" {
+		next.EmployeeNo = candidate.EmployeeNo
+	}
+	if strings.TrimSpace(input.Name) != "" {
+		next.Name = candidate.Name
+	}
+	if strings.TrimSpace(input.CompanyEmail) != "" {
+		next.CompanyEmail = candidate.CompanyEmail
+	}
+	if strings.TrimSpace(input.Phone) != "" {
+		next.Phone = candidate.Phone
+	}
+	if strings.TrimSpace(input.OrgUnitID) != "" {
+		next.OrgUnitID = candidate.OrgUnitID
+	}
+	if strings.TrimSpace(input.ManagerEmployeeID) != "" {
+		next.ManagerEmployeeID = candidate.ManagerEmployeeID
+	}
+	if strings.TrimSpace(input.Position) != "" {
+		next.Position = candidate.Position
+	}
+	if strings.TrimSpace(input.Category) != "" {
+		next.Category = candidate.Category
+	}
+	if strings.TrimSpace(input.Status) != "" || strings.TrimSpace(input.EmploymentStatus) != "" {
+		next.Status = candidate.Status
+		next.EmploymentStatus = candidate.EmploymentStatus
+	}
+	if strings.TrimSpace(input.HireDate) != "" {
+		next.HireDate = candidate.HireDate
+	}
+	next.BasicInfo = mergeEmployeeImportMap(next.BasicInfo, candidate.BasicInfo)
+	next.EmploymentInfo = mergeEmployeeImportMap(next.EmploymentInfo, candidate.EmploymentInfo)
+	next.ContactInfo = mergeEmployeeImportMap(next.ContactInfo, candidate.ContactInfo)
+	next.UpdatedAt = candidate.UpdatedAt
+	next.Category = normalizeEmployeeCategory(next.Category)
+	if next.EmploymentStatus == "" {
+		next.EmploymentStatus = next.Status
+	}
+	if next.Status == "" {
+		next.Status = next.EmploymentStatus
+	}
+	next.EmploymentStatus = normalizeEmployeeStatus(next.EmploymentStatus)
+	next.Status = normalizeEmployeeStatus(next.Status)
+	return next
+}
+
+func mergeEmployeeImportMap(existing map[string]any, updates map[string]any) map[string]any {
+	out := utils.CopyStringMap(existing)
+	if out == nil {
+		out = map[string]any{}
+	}
+	for key, value := range updates {
+		if strings.TrimSpace(fmt.Sprint(value)) == "" {
+			continue
+		}
+		out[key] = value
+	}
+	return out
 }
 
 func (c HRService) validateEmployeeImportRow(ctx RequestContext, row EmployeeImportRow, batch *employeeImportBatchIndex) ([]RowError, error) {

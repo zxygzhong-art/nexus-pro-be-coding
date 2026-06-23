@@ -301,16 +301,23 @@ type EmployeeOptions struct {
 
 // EmployeeImportSession stores the preview and confirmation state for one import file.
 type EmployeeImportSession struct {
-	ID          string              `json:"id"`
-	TenantID    string              `json:"tenant_id"`
-	Filename    string              `json:"filename"`
-	ObjectKey   string              `json:"object_key,omitempty"`
-	Status      string              `json:"status"`
-	Rows        []EmployeeImportRow `json:"rows"`
-	Summary     map[string]any      `json:"summary,omitempty"`
-	CreatedAt   time.Time           `json:"created_at"`
-	ExpiresAt   time.Time           `json:"expires_at"`
-	ConfirmedAt *time.Time          `json:"confirmed_at,omitempty"`
+	ID                   string              `json:"id"`
+	TenantID             string              `json:"tenant_id"`
+	Filename             string              `json:"filename"`
+	ObjectProvider       string              `json:"object_provider,omitempty"`
+	ObjectBucket         string              `json:"object_bucket,omitempty"`
+	ObjectKey            string              `json:"object_key,omitempty"`
+	ContentType          string              `json:"content_type,omitempty"`
+	SizeBytes            int64               `json:"size_bytes,omitempty"`
+	SHA256               string              `json:"sha256,omitempty"`
+	Status               string              `json:"status"`
+	Rows                 []EmployeeImportRow `json:"rows"`
+	Summary              map[string]any      `json:"summary,omitempty"`
+	CreatedByAccountID   string              `json:"created_by_account_id,omitempty"`
+	ConfirmedByAccountID string              `json:"confirmed_by_account_id,omitempty"`
+	CreatedAt            time.Time           `json:"created_at"`
+	ExpiresAt            time.Time           `json:"expires_at"`
+	ConfirmedAt          *time.Time          `json:"confirmed_at,omitempty"`
 }
 
 // EmployeeImportRow stores parsed input and validation results for one spreadsheet row.
@@ -346,7 +353,8 @@ type EmployeeImportPreviewInput struct {
 
 // EmployeeImportConfirmInput selects how a previously previewed import should be applied.
 type EmployeeImportConfirmInput struct {
-	Mode string `json:"mode,omitempty"`
+	Mode          string `json:"mode,omitempty"`
+	FailurePolicy string `json:"failure_policy,omitempty"`
 }
 
 // BatchDeleteEmployeesInput carries the employees and reason for a bulk delete.

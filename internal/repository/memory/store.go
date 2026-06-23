@@ -39,6 +39,7 @@ type Store struct {
 	auditLogs           map[string][]AuditLog
 	permissionVersions  map[string]int64
 	authzOutbox         map[string][]AuthzOutboxEvent
+	outboxEvents        map[string][]OutboxEvent
 	relationshipTuples  map[string]map[string]AuthzRelationshipTuple
 }
 
@@ -67,6 +68,7 @@ func NewStore() *Store {
 		auditLogs:           map[string][]AuditLog{},
 		permissionVersions:  map[string]int64{},
 		authzOutbox:         map[string][]AuthzOutboxEvent{},
+		outboxEvents:        map[string][]OutboxEvent{},
 		relationshipTuples:  map[string]map[string]AuthzRelationshipTuple{},
 	}
 }
@@ -913,6 +915,25 @@ func (s *Store) ListAuthzOutboxEvents(_ context.Context, tenantID string) ([]Aut
 	out := make([]AuthzOutboxEvent, 0, len(src))
 	for _, v := range src {
 		out = append(out, copyAuthzOutboxEvent(v))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (s *Store) AppendOutboxEvent(_ context.Context, v OutboxEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.outboxEvents[v.TenantID] = append(s.outboxEvents[v.TenantID], copyOutboxEvent(v))
+	return nil
+}
+
+func (s *Store) ListOutboxEvents(_ context.Context, tenantID string) ([]OutboxEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	src := s.outboxEvents[tenantID]
+	out := make([]OutboxEvent, 0, len(src))
+	for _, v := range src {
+		out = append(out, copyOutboxEvent(v))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil

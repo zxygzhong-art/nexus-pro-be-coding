@@ -290,9 +290,10 @@ paths:
         content:
           application/json:
             schema:
-              type: object
-              properties:
-                mode: {type: string, default: create}
+	              type: object
+	              properties:
+	                mode: {type: string, enum: [create, update, upsert], default: create}
+	                failure_policy: {type: string, enum: [all_or_nothing], default: all_or_nothing}
       responses:
         "200":
           description: Confirmed import session
@@ -1324,18 +1325,25 @@ components:
     EmployeeImportSession:
       type: object
       properties:
-        id: {type: string}
-        tenant_id: {type: string}
-        filename: {type: string}
-        object_key: {type: string}
-        status: {type: string}
-        rows:
-          type: array
-          items: {type: object}
-        summary:
-          type: object
-          additionalProperties: true
-        created_at: {type: string, format: date-time}
+	        id: {type: string}
+	        tenant_id: {type: string}
+	        filename: {type: string}
+	        object_provider: {type: string}
+	        object_bucket: {type: string}
+	        object_key: {type: string}
+	        content_type: {type: string}
+	        size_bytes: {type: integer, format: int64}
+	        sha256: {type: string}
+	        status: {type: string}
+	        rows:
+	          type: array
+	          items: {type: object}
+	        summary:
+	          type: object
+	          additionalProperties: true
+	        created_by_account_id: {type: string}
+	        confirmed_by_account_id: {type: string}
+	        created_at: {type: string, format: date-time}
         expires_at: {type: string, format: date-time}
         confirmed_at: {type: string, format: date-time}
     BatchEmployeeResponse:

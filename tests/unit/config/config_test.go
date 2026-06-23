@@ -66,8 +66,29 @@ func TestObjectStoreDirConfig(t *testing.T) {
 
 	cfg := config.Load()
 
+	if cfg.ObjectStoreProvider != "local" {
+		t.Fatalf("unexpected object store provider: %q", cfg.ObjectStoreProvider)
+	}
 	if cfg.ObjectStoreDir != "/tmp/nexus-objects" {
 		t.Fatalf("unexpected object store dir: %q", cfg.ObjectStoreDir)
+	}
+}
+
+func TestMinIOObjectStoreConfig(t *testing.T) {
+	t.Setenv("OBJECT_STORE_PROVIDER", "minio")
+	t.Setenv("OBJECT_STORE_ENDPOINT", "http://localhost:9000")
+	t.Setenv("OBJECT_STORE_BUCKET", "nexus-hr-imports")
+	t.Setenv("OBJECT_STORE_ACCESS_KEY_ID", "minioadmin")
+	t.Setenv("OBJECT_STORE_SECRET_ACCESS_KEY", "minioadmin")
+	t.Setenv("OBJECT_STORE_CREATE_BUCKET", "true")
+
+	cfg := config.Load()
+
+	if cfg.ObjectStoreProvider != "minio" || cfg.ObjectStoreEndpoint != "http://localhost:9000" || cfg.ObjectStoreBucket != "nexus-hr-imports" {
+		t.Fatalf("unexpected minio config: %+v", cfg)
+	}
+	if !cfg.ObjectStoreCreateBucket {
+		t.Fatal("expected OBJECT_STORE_CREATE_BUCKET to be true")
 	}
 }
 
@@ -103,7 +124,7 @@ func TestValidateStartupRejectsMissingProductionDependencies(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected production config validation error")
 	}
-	for _, want := range []string{"DATABASE_URL", "KEYCLOAK_ISSUER_URL", "KEYCLOAK_CLIENT_ID", "OPENFGA_API_URL", "OPENFGA_STORE_ID", "OPENFGA_MODEL_ID", "OBJECT_STORE_DIR"} {
+	for _, want := range []string{"DATABASE_URL", "KEYCLOAK_ISSUER_URL", "KEYCLOAK_CLIENT_ID", "OPENFGA_API_URL", "OPENFGA_STORE_ID", "OPENFGA_MODEL_ID", "OBJECT_STORE_PROVIDER"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected validation error to mention %s, got %v", want, err)
 		}

@@ -30,6 +30,7 @@ type (
 	CheckResult             = domain.CheckResult
 	RowError                = domain.RowError
 	AuditLog                = domain.AuditLog
+	OutboxEvent             = domain.OutboxEvent
 	AuthzOutboxEvent        = domain.AuthzOutboxEvent
 	AuthzRelationshipTuple  = domain.AuthzRelationshipTuple
 	PageRequest             = domain.PageRequest

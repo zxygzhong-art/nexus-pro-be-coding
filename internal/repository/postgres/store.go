@@ -608,16 +608,23 @@ func (s *Store) NextEmployeeNo(execCtx context.Context, tenantID, prefix string)
 
 func (s *Store) UpsertEmployeeImportSession(execCtx context.Context, v domain.EmployeeImportSession) error {
 	_, err := s.q.UpsertEmployeeImportSession(execCtx, sqlc.UpsertEmployeeImportSessionParams{
-		ID:          v.ID,
-		TenantID:    v.TenantID,
-		Filename:    v.Filename,
-		ObjectKey:   v.ObjectKey,
-		Status:      v.Status,
-		Rows:        mustJSON(v.Rows),
-		Summary:     mustJSON(v.Summary),
-		CreatedAt:   timestamptz(v.CreatedAt),
-		ExpiresAt:   timestamptz(v.ExpiresAt),
-		ConfirmedAt: nullableTimestamptz(v.ConfirmedAt),
+		ID:                   v.ID,
+		TenantID:             v.TenantID,
+		Filename:             v.Filename,
+		ObjectProvider:       v.ObjectProvider,
+		ObjectBucket:         v.ObjectBucket,
+		ObjectKey:            v.ObjectKey,
+		ContentType:          v.ContentType,
+		SizeBytes:            v.SizeBytes,
+		Sha256:               v.SHA256,
+		Status:               v.Status,
+		Rows:                 mustJSON(v.Rows),
+		Summary:              mustJSON(v.Summary),
+		CreatedByAccountID:   v.CreatedByAccountID,
+		ConfirmedByAccountID: v.ConfirmedByAccountID,
+		CreatedAt:            timestamptz(v.CreatedAt),
+		ExpiresAt:            timestamptz(v.ExpiresAt),
+		ConfirmedAt:          nullableTimestamptz(v.ConfirmedAt),
 	})
 	return err
 }
@@ -1014,6 +1021,31 @@ func (s *Store) UpdateAuthzOutboxEvent(execCtx context.Context, v domain.AuthzOu
 	return err
 }
 
+func (s *Store) AppendOutboxEvent(execCtx context.Context, v domain.OutboxEvent) error {
+	_, err := s.q.AppendOutboxEvent(execCtx, sqlc.AppendOutboxEventParams{
+		ID:            v.ID,
+		TenantID:      v.TenantID,
+		EventType:     v.EventType,
+		AggregateType: v.AggregateType,
+		AggregateID:   v.AggregateID,
+		Column6:       mustJSON(v.Payload),
+		Status:        v.Status,
+		RetryCount:    int32(v.RetryCount),
+		LastError:     v.LastError,
+		CreatedAt:     timestamptz(v.CreatedAt),
+		ProcessedAt:   nullableTimestamptz(v.ProcessedAt),
+	})
+	return err
+}
+
+func (s *Store) ListOutboxEvents(execCtx context.Context, tenantID string) ([]domain.OutboxEvent, error) {
+	items, err := s.q.ListOutboxEvents(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromOutboxEvent), nil
+}
+
 func isNotFound(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
 }
@@ -1280,16 +1312,39 @@ func fromEmployee(v sqlc.Employee) domain.Employee {
 
 func fromEmployeeImportSession(v sqlc.EmployeeImportSession) domain.EmployeeImportSession {
 	return domain.EmployeeImportSession{
-		ID:          v.ID,
-		TenantID:    v.TenantID,
-		Filename:    v.Filename,
-		ObjectKey:   v.ObjectKey,
-		Status:      v.Status,
-		Rows:        jsonEmployeeImportRows(v.Rows),
-		Summary:     jsonMap(v.Summary),
-		CreatedAt:   timeFrom(v.CreatedAt),
-		ExpiresAt:   timeFrom(v.ExpiresAt),
-		ConfirmedAt: timePtrFrom(v.ConfirmedAt),
+		ID:                   v.ID,
+		TenantID:             v.TenantID,
+		Filename:             v.Filename,
+		ObjectProvider:       v.ObjectProvider,
+		ObjectBucket:         v.ObjectBucket,
+		ObjectKey:            v.ObjectKey,
+		ContentType:          v.ContentType,
+		SizeBytes:            v.SizeBytes,
+		SHA256:               v.Sha256,
+		Status:               v.Status,
+		Rows:                 jsonEmployeeImportRows(v.Rows),
+		Summary:              jsonMap(v.Summary),
+		CreatedByAccountID:   v.CreatedByAccountID,
+		ConfirmedByAccountID: v.ConfirmedByAccountID,
+		CreatedAt:            timeFrom(v.CreatedAt),
+		ExpiresAt:            timeFrom(v.ExpiresAt),
+		ConfirmedAt:          timePtrFrom(v.ConfirmedAt),
+	}
+}
+
+func fromOutboxEvent(v sqlc.OutboxEvent) domain.OutboxEvent {
+	return domain.OutboxEvent{
+		ID:            v.ID,
+		TenantID:      v.TenantID,
+		EventType:     v.EventType,
+		AggregateType: v.AggregateType,
+		AggregateID:   v.AggregateID,
+		Payload:       jsonMap(v.Payload),
+		Status:        v.Status,
+		RetryCount:    int(v.RetryCount),
+		LastError:     v.LastError,
+		CreatedAt:     timeFrom(v.CreatedAt),
+		ProcessedAt:   timePtrFrom(v.ProcessedAt),
 	}
 }
 

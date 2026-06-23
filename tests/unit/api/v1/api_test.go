@@ -753,7 +753,7 @@ func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
 	handler := newTestAPI(true)
 	payload, _ := json.Marshal(map[string]string{
 		"filename": "employees.csv",
-		"content":  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期\nE9001,Nina Lin,nina@example.com,ou-hq,Recruiter,全職,0911888999,在職,2026-06-01\n",
+		"content":  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\nE9001,Nina Lin,nina@example.com,ou-hq,Recruiter,全職,0911888999,在職,2026-06-01,\n",
 	})
 	previewReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/preview", strings.NewReader(string(payload)))
 	previewReq.Header.Set("Content-Type", "application/json")

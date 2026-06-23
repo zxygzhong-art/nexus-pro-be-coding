@@ -16,3 +16,18 @@ type AuditLog struct {
 	Details        map[string]any `json:"details,omitempty"`
 	CreatedAt      time.Time      `json:"created_at"`
 }
+
+// OutboxEvent records tenant-scoped business events waiting for external delivery.
+type OutboxEvent struct {
+	ID            string         `json:"id"`
+	TenantID      string         `json:"tenant_id"`
+	EventType     string         `json:"event_type"`
+	AggregateType string         `json:"aggregate_type,omitempty"`
+	AggregateID   string         `json:"aggregate_id,omitempty"`
+	Payload       map[string]any `json:"payload,omitempty"`
+	Status        string         `json:"status"`
+	RetryCount    int            `json:"retry_count"`
+	LastError     string         `json:"last_error,omitempty"`
+	CreatedAt     time.Time      `json:"created_at"`
+	ProcessedAt   *time.Time     `json:"processed_at,omitempty"`
+}

@@ -197,6 +197,15 @@ func copyAuthzOutboxEvent(v AuthzOutboxEvent) AuthzOutboxEvent {
 	return v
 }
 
+func copyOutboxEvent(v OutboxEvent) OutboxEvent {
+	v.Payload = utils.CopyStringMap(v.Payload)
+	if v.ProcessedAt != nil {
+		t := *v.ProcessedAt
+		v.ProcessedAt = &t
+	}
+	return v
+}
+
 func relationshipTupleKey(v AuthzRelationshipTuple) string {
 	return v.ObjectType + "\x00" + v.ObjectID + "\x00" + v.Relation + "\x00" + v.SubjectType + "\x00" + v.SubjectID
 }

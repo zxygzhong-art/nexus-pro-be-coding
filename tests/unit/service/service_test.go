@@ -1294,7 +1294,7 @@ func TestEmployeeAccountChangesEmitOpenFGATupleOutbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasOutboxEvent(events, string(domain.EventOpenFGARelationshipWrite)) || !hasOutboxEvent(events, string(domain.EventOpenFGARelationshipDelete)) {
+	if !hasAuthzOutboxEvent(events, string(domain.EventOpenFGARelationshipWrite)) || !hasAuthzOutboxEvent(events, string(domain.EventOpenFGARelationshipDelete)) {
 		t.Fatalf("expected OpenFGA write/delete outbox events, got %+v", events)
 	}
 }
@@ -1419,7 +1419,7 @@ func TestEmployeeImportPreviewConfirmAndStatusTransition(t *testing.T) {
 
 	session, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
 		Filename: "employees.csv",
-		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期\nE2001,Partial Wu,partial@example.com,ou-1,HRBP,全職,0911000222,在職,2026-06-01\nE2001,Duplicate,dup@example.com,ou-1,HRBP,全職,0911000333,在職,2026-06-01\n",
+		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\nE2001,Partial Wu,partial@example.com,ou-1,HRBP,全職,0911000222,在職,2026-06-01,\nE2001,Duplicate,dup@example.com,ou-1,HRBP,全職,0911000333,在職,2026-06-01,\n",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1430,6 +1430,9 @@ func TestEmployeeImportPreviewConfirmAndStatusTransition(t *testing.T) {
 	if len(objects.keys) != 1 || objects.keys[0] != session.ObjectKey {
 		t.Fatalf("expected import file to be stored through object store, keys=%+v session=%+v", objects.keys, session)
 	}
+	if session.ObjectProvider != "test" || session.ObjectBucket != "imports" || session.SizeBytes == 0 || session.SHA256 == "" || session.CreatedByAccountID != "acct-1" {
+		t.Fatalf("expected object metadata on preview session, got %+v", session)
+	}
 
 	_, err = svc.HR().ConfirmEmployeeImport(ctx, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
 	if err == nil {
@@ -1438,6 +1441,20 @@ func TestEmployeeImportPreviewConfirmAndStatusTransition(t *testing.T) {
 	appErr, ok := domain.AsAppError(err)
 	if !ok || appErr.Code != "import_validation_failed" || len(appErr.RowErrors) == 0 {
 		t.Fatalf("expected import_validation_failed with row errors, got %v", err)
+	}
+	failedSession, ok, err := store.GetEmployeeImportSession(context.Background(), "tenant-1", session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || failedSession.Status != "failed_validation" || failedSession.Summary["failed"] != 2 {
+		t.Fatalf("expected failed validation session summary, got ok=%v session=%+v", ok, failedSession)
+	}
+	logs, err := store.ListAuditLogs(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if failedLog, ok := findAuditLog(logs, "hr.employee.import.confirm_failed"); !ok || failedLog.Details["object_key"] != failedSession.ObjectKey {
+		t.Fatalf("expected failed import audit with object metadata, got %+v", logs)
 	}
 	storedEmployees, err := store.ListEmployees(context.Background(), "tenant-1")
 	if err != nil {
@@ -1451,7 +1468,7 @@ func TestEmployeeImportPreviewConfirmAndStatusTransition(t *testing.T) {
 
 	session, err = svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
 		Filename: "employees.csv",
-		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期\n,Lina Wu,lina@example.com,ou-1,HRBP,約聘,0911000222,在職,2026-06-01\n",
+		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\n,Lina Wu,lina@example.com,ou-1,HRBP,約聘,0911000222,在職,2026-06-01,\n",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -1462,6 +1479,13 @@ func TestEmployeeImportPreviewConfirmAndStatusTransition(t *testing.T) {
 	}
 	if confirmed.Summary["confirmed"] != 1 {
 		t.Fatalf("expected one confirmed import, got %+v", confirmed.Summary)
+	}
+	events, err := store.ListOutboxEvents(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !hasBusinessOutboxEvent(events, string(domain.EventEmployeeImported)) {
+		t.Fatalf("expected employee.imported outbox event, got %+v", events)
 	}
 
 	var imported domain.Employee
@@ -1547,6 +1571,85 @@ func TestEmployeeImportConfirmRevalidatesBatchDuplicates(t *testing.T) {
 	}
 }
 
+func TestEmployeeImportConfirmSupportsUpdateAndUpsert(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "HQ", Path: []string{"ou-1"}, CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-hr",
+		TenantID: "tenant-1",
+		Name:     "HR",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "import", Scope: "all"},
+			{Resource: "hr.employee", Action: "read", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-hr"}, CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-existing",
+		TenantID:         "tenant-1",
+		EmployeeNo:       "E3001",
+		Name:             "Original",
+		CompanyEmail:     "original@example.com",
+		Phone:            "0900000000",
+		OrgUnitID:        "ou-1",
+		Position:         "HRBP",
+		Category:         "full_time",
+		Status:           "active",
+		EmploymentStatus: "active",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+	svc := service.New(store)
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+
+	updateSession, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
+		Filename: "employees.csv",
+		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\nE3001,Updated,original@example.com,ou-1,People Lead,全職,0911000999,在職,2026-06-01,\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updatedSession, err := svc.HR().ConfirmEmployeeImport(ctx, updateSession.ID, domain.EmployeeImportConfirmInput{Mode: "update"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updatedSession.Summary["updated"] != 1 || updatedSession.Summary["created"] != 0 {
+		t.Fatalf("expected update import summary, got %+v", updatedSession.Summary)
+	}
+	updated, ok, err := store.GetEmployee(context.Background(), "tenant-1", "emp-existing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || updated.Phone != "0911000999" || updated.Position != "People Lead" {
+		t.Fatalf("expected existing employee to be updated, got ok=%v employee=%+v", ok, updated)
+	}
+
+	upsertSession, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
+		Filename: "employees.csv",
+		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\nE3001,Updated Again,original@example.com,ou-1,HR Manager,全職,0911000888,在職,2026-06-01,\nE3002,New Hire,new.hire@example.com,ou-1,Recruiter,全職,0911000777,在職,2026-06-01,\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	upsertedSession, err := svc.HR().ConfirmEmployeeImport(ctx, upsertSession.ID, domain.EmployeeImportConfirmInput{Mode: "upsert"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upsertedSession.Summary["updated"] != 1 || upsertedSession.Summary["created"] != 1 {
+		t.Fatalf("expected upsert import summary, got %+v", upsertedSession.Summary)
+	}
+	employees, err := store.ListEmployees(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(employees) != 2 {
+		t.Fatalf("expected one updated and one created employee, got %+v", employees)
+	}
+}
+
 func TestEmployeeReinstatementRequiresTransitionAndKeepsDeletedTerminal(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1609,11 +1712,11 @@ func TestEmployeeReinstatementRequiresTransitionAndKeepsDeletedTerminal(t *testi
 	if !ok || linked.Status != "active" {
 		t.Fatalf("expected reinstatement to reactivate linked account, got %+v", linked)
 	}
-	events, err := store.ListAuthzOutboxEvents(context.Background(), "tenant-1")
+	events, err := store.ListOutboxEvents(context.Background(), "tenant-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasOutboxEvent(events, "employee.reinstated") {
+	if !hasBusinessOutboxEvent(events, "employee.reinstated") {
 		t.Fatalf("expected employee.reinstated event, got %+v", events)
 	}
 	logs, err := store.ListAuditLogs(context.Background(), "tenant-1")
@@ -2326,6 +2429,14 @@ func (s *recordingObjectStore) DeleteObject(_ context.Context, key string) error
 	return nil
 }
 
+func (s *recordingObjectStore) Provider() string {
+	return "test"
+}
+
+func (s *recordingObjectStore) Bucket() string {
+	return "imports"
+}
+
 func validEmployeeInput(employeeNo, name, email string) domain.CreateEmployeeInput {
 	return domain.CreateEmployeeInput{
 		EmployeeNo:            employeeNo,
@@ -2403,7 +2514,16 @@ func (c *fixedRelationshipChecker) CheckRelationship(_ context.Context, check do
 	return c.allowed, nil
 }
 
-func hasOutboxEvent(events []domain.AuthzOutboxEvent, eventType string) bool {
+func hasAuthzOutboxEvent(events []domain.AuthzOutboxEvent, eventType string) bool {
+	for _, event := range events {
+		if event.EventType == eventType {
+			return true
+		}
+	}
+	return false
+}
+
+func hasBusinessOutboxEvent(events []domain.OutboxEvent, eventType string) bool {
 	for _, event := range events {
 		if event.EventType == eventType {
 			return true

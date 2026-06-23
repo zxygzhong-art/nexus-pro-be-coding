@@ -34,6 +34,7 @@ type (
 	AgentRun                = domain.AgentRun
 	AgentRunStatus          = domain.AgentRunStatus
 	AuditLog                = domain.AuditLog
+	OutboxEvent             = domain.OutboxEvent
 	AuthzOutboxEvent        = domain.AuthzOutboxEvent
 	PageRequest             = domain.PageRequest
 	PageResponse[T any]     = domain.PageResponse[T]

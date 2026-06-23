@@ -30,7 +30,15 @@ type Config struct {
 	OpenFGAStoreID string
 	OpenFGAModelID string
 
-	ObjectStoreDir string
+	ObjectStoreProvider        string
+	ObjectStoreDir             string
+	ObjectStoreEndpoint        string
+	ObjectStoreBucket          string
+	ObjectStoreRegion          string
+	ObjectStoreAccessKeyID     string
+	ObjectStoreSecretAccessKey string
+	ObjectStoreUseSSL          bool
+	ObjectStoreCreateBucket    bool
 
 	OTelEnabled              bool
 	OTelServiceName          string
@@ -62,8 +70,26 @@ func (c Config) ValidateStartup() error {
 	if strings.TrimSpace(c.OpenFGAModelID) == "" {
 		problems = append(problems, "OPENFGA_MODEL_ID is required")
 	}
-	if strings.TrimSpace(c.ObjectStoreDir) == "" {
-		problems = append(problems, "OBJECT_STORE_DIR is required")
+	switch normalizeObjectStoreProvider(c.ObjectStoreProvider, c.ObjectStoreDir, c.ObjectStoreEndpoint, c.ObjectStoreBucket) {
+	case "minio", "s3":
+		if strings.TrimSpace(c.ObjectStoreEndpoint) == "" {
+			problems = append(problems, "OBJECT_STORE_ENDPOINT is required")
+		}
+		if strings.TrimSpace(c.ObjectStoreBucket) == "" {
+			problems = append(problems, "OBJECT_STORE_BUCKET is required")
+		}
+		if strings.TrimSpace(c.ObjectStoreAccessKeyID) == "" {
+			problems = append(problems, "OBJECT_STORE_ACCESS_KEY_ID is required")
+		}
+		if strings.TrimSpace(c.ObjectStoreSecretAccessKey) == "" {
+			problems = append(problems, "OBJECT_STORE_SECRET_ACCESS_KEY is required")
+		}
+	case "local":
+		if strings.TrimSpace(c.ObjectStoreDir) == "" {
+			problems = append(problems, "OBJECT_STORE_DIR is required")
+		}
+	default:
+		problems = append(problems, "OBJECT_STORE_PROVIDER must be minio, s3, or local")
 	}
 	if c.SeedDemo {
 		problems = append(problems, "SEED_DEMO must be false")
@@ -93,6 +119,7 @@ func Load() Config {
 func LoadE() (Config, error) {
 	appEnv := env("APP_ENV", "development")
 	problems := []string{}
+	objectStoreProvider := normalizeObjectStoreProvider(os.Getenv("OBJECT_STORE_PROVIDER"), os.Getenv("OBJECT_STORE_DIR"), os.Getenv("OBJECT_STORE_ENDPOINT"), os.Getenv("OBJECT_STORE_BUCKET"))
 	cfg := Config{
 		Env:           appEnv,
 		HTTPAddr:      env("HTTP_ADDR", ":8080"),
@@ -113,7 +140,15 @@ func LoadE() (Config, error) {
 		OpenFGAStoreID: strings.TrimSpace(os.Getenv("OPENFGA_STORE_ID")),
 		OpenFGAModelID: strings.TrimSpace(os.Getenv("OPENFGA_MODEL_ID")),
 
-		ObjectStoreDir: strings.TrimSpace(os.Getenv("OBJECT_STORE_DIR")),
+		ObjectStoreProvider:        objectStoreProvider,
+		ObjectStoreDir:             strings.TrimSpace(os.Getenv("OBJECT_STORE_DIR")),
+		ObjectStoreEndpoint:        strings.TrimSpace(os.Getenv("OBJECT_STORE_ENDPOINT")),
+		ObjectStoreBucket:          strings.TrimSpace(os.Getenv("OBJECT_STORE_BUCKET")),
+		ObjectStoreRegion:          env("OBJECT_STORE_REGION", "us-east-1"),
+		ObjectStoreAccessKeyID:     strings.TrimSpace(os.Getenv("OBJECT_STORE_ACCESS_KEY_ID")),
+		ObjectStoreSecretAccessKey: os.Getenv("OBJECT_STORE_SECRET_ACCESS_KEY"),
+		ObjectStoreUseSSL:          envBool("OBJECT_STORE_USE_SSL", false, &problems),
+		ObjectStoreCreateBucket:    envBool("OBJECT_STORE_CREATE_BUCKET", false, &problems),
 
 		OTelEnabled:              envBool("OTEL_ENABLED", false, &problems),
 		OTelServiceName:          env("OTEL_SERVICE_NAME", "nexus-pro-be"),
@@ -124,6 +159,20 @@ func LoadE() (Config, error) {
 		return cfg, fmt.Errorf("configuration invalid: %s", strings.Join(problems, "; "))
 	}
 	return cfg, nil
+}
+
+func normalizeObjectStoreProvider(provider, dir, endpoint, bucket string) string {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider != "" {
+		return provider
+	}
+	if strings.TrimSpace(endpoint) != "" || strings.TrimSpace(bucket) != "" {
+		return "minio"
+	}
+	if strings.TrimSpace(dir) != "" {
+		return "local"
+	}
+	return "memory"
 }
 
 func env(key, fallback string) string {

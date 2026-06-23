@@ -312,17 +312,26 @@ RETURNING (next_value - 1)::int;
 
 -- name: UpsertEmployeeImportSession :one
 INSERT INTO employee_import_sessions (
-    id, tenant_id, filename, object_key, status, rows, summary, created_at, expires_at, confirmed_at
+    id, tenant_id, filename, object_provider, object_bucket, object_key,
+    content_type, size_bytes, sha256, status, rows, summary,
+    created_by_account_id, confirmed_by_account_id, created_at, expires_at, confirmed_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
     filename = EXCLUDED.filename,
+    object_provider = EXCLUDED.object_provider,
+    object_bucket = EXCLUDED.object_bucket,
     object_key = EXCLUDED.object_key,
+    content_type = EXCLUDED.content_type,
+    size_bytes = EXCLUDED.size_bytes,
+    sha256 = EXCLUDED.sha256,
     status = EXCLUDED.status,
     rows = EXCLUDED.rows,
     summary = EXCLUDED.summary,
+    created_by_account_id = EXCLUDED.created_by_account_id,
+    confirmed_by_account_id = EXCLUDED.confirmed_by_account_id,
     created_at = EXCLUDED.created_at,
     expires_at = EXCLUDED.expires_at,
     confirmed_at = EXCLUDED.confirmed_at
@@ -331,6 +340,20 @@ RETURNING *;
 -- name: GetEmployeeImportSession :one
 SELECT * FROM employee_import_sessions
 WHERE tenant_id = $1 AND id = $2;
+
+-- name: AppendOutboxEvent :one
+INSERT INTO outbox_events (
+    id, tenant_id, event_type, aggregate_type, aggregate_id,
+    payload, status, retry_count, last_error, created_at, processed_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10, $11
+)
+RETURNING *;
+
+-- name: ListOutboxEvents :many
+SELECT * FROM outbox_events
+WHERE tenant_id = $1
+ORDER BY created_at ASC, id ASC;
 
 -- name: UpsertLeaveBalance :one
 INSERT INTO leave_balances (

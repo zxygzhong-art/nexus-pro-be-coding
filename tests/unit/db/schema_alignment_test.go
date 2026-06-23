@@ -67,6 +67,8 @@ func TestEmployeeIntegrityConstraintsStayInSchema(t *testing.T) {
 		"IF NEW.account_id <> '' AND NOT EXISTS",
 		"IF NEW.org_unit_id <> '' AND NOT EXISTS",
 		"CREATE TRIGGER employees_reference_check",
+		"CREATE TABLE outbox_events (",
+		"CREATE POLICY tenant_isolation_outbox_events",
 	}
 	for _, item := range required {
 		if !strings.Contains(schema, item) {

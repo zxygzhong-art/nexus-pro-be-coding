@@ -11,6 +11,7 @@ import (
 type Querier interface {
 	AppendAuditLog(ctx context.Context, arg AppendAuditLogParams) (AuditLog, error)
 	AppendAuthzOutboxEvent(ctx context.Context, arg AppendAuthzOutboxEventParams) (AuthzOutboxEvent, error)
+	AppendOutboxEvent(ctx context.Context, arg AppendOutboxEventParams) (OutboxEvent, error)
 	CountAgentRuns(ctx context.Context, tenantID string) (int64, error)
 	CountAuditLogs(ctx context.Context, tenantID string) (int64, error)
 	CountEmployeesFiltered(ctx context.Context, arg CountEmployeesFilteredParams) (int64, error)
@@ -68,6 +69,7 @@ type Querier interface {
 	ListLeaveBalances(ctx context.Context, tenantID string) ([]LeaveBalance, error)
 	ListLeaveRequests(ctx context.Context, tenantID string) ([]LeaveRequest, error)
 	ListOrgUnits(ctx context.Context, tenantID string) ([]OrgUnit, error)
+	ListOutboxEvents(ctx context.Context, tenantID string) ([]OutboxEvent, error)
 	ListPermissionSets(ctx context.Context, tenantID string) ([]PermissionSet, error)
 	ListTenants(ctx context.Context) ([]Tenant, error)
 	ListUserGroups(ctx context.Context, tenantID string) ([]UserGroup, error)

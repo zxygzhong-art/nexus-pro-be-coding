@@ -15,6 +15,7 @@ type Store interface {
 	AgentStore
 	AuditStore
 	AuthzEventStore
+	OutboxStore
 }
 
 // TenantTransactor marks stores that can execute tenant-scoped write transactions.

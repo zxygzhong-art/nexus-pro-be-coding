@@ -16,6 +16,7 @@ type hrStore interface {
 	repository.OrgStore
 	repository.EmployeeStore
 	repository.AuthzEventStore
+	repository.OutboxStore
 }
 
 type attendanceStore interface {

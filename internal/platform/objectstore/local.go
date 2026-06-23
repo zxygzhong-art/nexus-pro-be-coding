@@ -49,6 +49,16 @@ func (s *Local) PutObject(ctx context.Context, key string, _ string, data []byte
 	return os.WriteFile(path, copyData, 0o644)
 }
 
+// Provider identifies this filesystem-backed store in import metadata.
+func (s *Local) Provider() string {
+	return "local"
+}
+
+// Bucket returns the local root path as the storage boundary for metadata/debugging.
+func (s *Local) Bucket() string {
+	return s.root
+}
+
 // DeleteObject removes an object from disk and treats missing files as success.
 func (s *Local) DeleteObject(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {
