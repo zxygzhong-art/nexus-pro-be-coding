@@ -89,13 +89,13 @@ func positiveIntQuery(raw, name string, max int) (int, error) {
 	}
 	value, err := strconv.Atoi(raw)
 	if err != nil {
-		return 0, domain.BadRequest(name + " must be an integer")
+		return 0, domain.BadRequestCode(domain.ErrorCodeInvalidQueryInteger, name+" must be an integer")
 	}
 	if value <= 0 {
-		return 0, domain.BadRequest(name + " must be greater than zero")
+		return 0, domain.BadRequestCode(domain.ErrorCodeQueryBelowMinimum, name+" must be greater than zero")
 	}
 	if max > 0 && value > max {
-		return 0, domain.BadRequest(name + " must be less than or equal to " + strconv.Itoa(max))
+		return 0, domain.BadRequestCode(domain.ErrorCodeQueryAboveMaximum, name+" must be less than or equal to "+strconv.Itoa(max))
 	}
 	return value, nil
 }

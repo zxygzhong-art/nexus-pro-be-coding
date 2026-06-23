@@ -6,6 +6,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"nexus-pro-be/internal/domain"
 )
 
 func (a *API) recovery() gin.HandlerFunc {
@@ -32,7 +34,7 @@ func (a *API) recovery() gin.HandlerFunc {
 				if !c.Writer.Written() {
 					writeJSON(c.Writer, http.StatusInternalServerError, map[string]any{
 						"error": map[string]any{
-							"code":     "internal_error",
+							"code":     domain.ErrorCodeInternal,
 							"message":  "internal server error",
 							"trace_id": traceID,
 						},

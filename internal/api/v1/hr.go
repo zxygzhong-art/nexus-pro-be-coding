@@ -13,17 +13,20 @@ import (
 )
 
 const (
+	// Employee import and avatar endpoints keep strict request size limits.
 	employeeImportMultipartMaxBytes = 16 << 20
 	employeeImportFileMaxBytes      = 10 << 20
 	employeeAvatarMultipartMaxBytes = 4 << 20
 	employeeAvatarFileMaxBytes      = 3 << 20
 )
 
+// HRCtrl wires people-domain and organization endpoints to the HR service facade.
 type HRCtrl struct {
 	routes routeBinder
 	svc    service.HRFacade
 }
 
+// RegisterRoutes attaches people-domain and organization routes to the v1 route group.
 func (c HRCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	hr := router.Group("/hr")
 	hr.GET("/employee-options", c.routes.Handle("hr.employee", "read", c.employeeOptions))
@@ -362,16 +365,16 @@ func employeeImportPreviewInput(w http.ResponseWriter, r *http.Request) (domain.
 	if strings.HasPrefix(contentType, "multipart/form-data") {
 		r.Body = http.MaxBytesReader(w, r.Body, employeeImportMultipartMaxBytes)
 		if err := r.ParseMultipartForm(employeeImportMultipartMaxBytes); err != nil {
-			return domain.EmployeeImportPreviewInput{}, domain.BadRequest("invalid multipart form: " + err.Error())
+			return domain.EmployeeImportPreviewInput{}, domain.BadRequestCode(domain.ErrorCodeInvalidMultipartForm, "invalid multipart form: "+err.Error())
 		}
 		file, header, err := r.FormFile("file")
 		if err != nil {
-			return domain.EmployeeImportPreviewInput{}, domain.BadRequest("file is required")
+			return domain.EmployeeImportPreviewInput{}, domain.BadRequestCode(domain.ErrorCodeRequiredMultipartFile, "file is required")
 		}
 		defer file.Close()
 		raw, err := io.ReadAll(http.MaxBytesReader(w, file, employeeImportFileMaxBytes))
 		if err != nil {
-			return domain.EmployeeImportPreviewInput{}, domain.BadRequest("read import file: " + err.Error())
+			return domain.EmployeeImportPreviewInput{}, domain.BadRequestCode(domain.ErrorCodeMultipartFileReadFailed, "read import file: "+err.Error())
 		}
 		filename := strings.TrimSpace(r.FormValue("filename"))
 		if filename == "" && header != nil {
@@ -389,16 +392,16 @@ func employeeImportPreviewInput(w http.ResponseWriter, r *http.Request) (domain.
 func employeeAvatarInput(w http.ResponseWriter, r *http.Request) (domain.EmployeeAvatarInput, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, employeeAvatarMultipartMaxBytes)
 	if err := r.ParseMultipartForm(employeeAvatarMultipartMaxBytes); err != nil {
-		return domain.EmployeeAvatarInput{}, domain.BadRequest("invalid multipart form: " + err.Error())
+		return domain.EmployeeAvatarInput{}, domain.BadRequestCode(domain.ErrorCodeInvalidMultipartForm, "invalid multipart form: "+err.Error())
 	}
 	file, header, err := r.FormFile("file")
 	if err != nil {
-		return domain.EmployeeAvatarInput{}, domain.BadRequest("file is required")
+		return domain.EmployeeAvatarInput{}, domain.BadRequestCode(domain.ErrorCodeRequiredMultipartFile, "file is required")
 	}
 	defer file.Close()
 	raw, err := io.ReadAll(http.MaxBytesReader(w, file, employeeAvatarFileMaxBytes))
 	if err != nil {
-		return domain.EmployeeAvatarInput{}, domain.BadRequest("read avatar file: " + err.Error())
+		return domain.EmployeeAvatarInput{}, domain.BadRequestCode(domain.ErrorCodeMultipartFileReadFailed, "read avatar file: "+err.Error())
 	}
 	contentType := strings.TrimSpace(header.Header.Get("Content-Type"))
 	if contentType == "" && len(raw) > 0 {

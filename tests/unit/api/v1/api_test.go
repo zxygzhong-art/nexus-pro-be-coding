@@ -46,7 +46,7 @@ func decodeData[T any](t *testing.T, body []byte) T {
 }
 
 type apiErrorPayload struct {
-	Code        string               `json:"code"`
+	Code        domain.ErrorCode     `json:"code"`
 	ReasonCode  string               `json:"reason_code"`
 	FieldErrors []domain.FieldError  `json:"field_errors"`
 	RowErrors   []apiRowErrorPayload `json:"row_errors"`
@@ -415,15 +415,15 @@ func TestRecoveryReturnsJSONInternalError(t *testing.T) {
 	}
 	var payload struct {
 		Error struct {
-			Code    string `json:"code"`
-			Message string `json:"message"`
-			TraceID string `json:"trace_id"`
+			Code    domain.ErrorCode `json:"code"`
+			Message string           `json:"message"`
+			TraceID string           `json:"trace_id"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Error.Code != "internal_error" || payload.Error.TraceID != "panic-trace" {
+	if payload.Error.Code != domain.ErrorCodeInternal || payload.Error.TraceID != "panic-trace" {
 		t.Fatalf("unexpected recovered panic payload: %+v", payload)
 	}
 }
@@ -527,6 +527,10 @@ func TestReadJSONRejectsMultipleValues(t *testing.T) {
 	if rec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for multiple JSON values, got %d: %s", rec.Code, rec.Body.String())
 	}
+	errPayload := decodeError(t, rec.Body.Bytes())
+	if errPayload.Code != domain.ErrorCodeMultipleJSONValues {
+		t.Fatalf("expected multiple JSON values code, got %+v", errPayload)
+	}
 }
 
 func TestHighRiskRouteRequiresApprovalConfirmation(t *testing.T) {
@@ -623,7 +627,7 @@ func TestHRRouteForbiddenReasonCodes(t *testing.T) {
 		t.Fatalf("expected 403 for missing HR read permission, got %d: %s", listRec.Code, listRec.Body.String())
 	}
 	listErr := decodeError(t, listRec.Body.Bytes())
-	if listErr.Code != "forbidden" || listErr.ReasonCode != "menu_denied" {
+	if listErr.Code != domain.ErrorCodeMenuDenied || listErr.ReasonCode != "menu_denied" {
 		t.Fatalf("expected menu_denied reason code, got %+v", listErr)
 	}
 
@@ -637,7 +641,7 @@ func TestHRRouteForbiddenReasonCodes(t *testing.T) {
 		t.Fatalf("expected 403 for missing HR create permission, got %d: %s", createRec.Code, createRec.Body.String())
 	}
 	createErr := decodeError(t, createRec.Body.Bytes())
-	if createErr.Code != "forbidden" || createErr.ReasonCode != "button_denied" {
+	if createErr.Code != domain.ErrorCodeButtonDenied || createErr.ReasonCode != "button_denied" {
 		t.Fatalf("expected button_denied reason code, got %+v", createErr)
 	}
 }
@@ -705,12 +709,20 @@ func TestEmployeeListDetailAndCSVExportEndpoints(t *testing.T) {
 	if badPageRec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for invalid page, got %d: %s", badPageRec.Code, badPageRec.Body.String())
 	}
+	badPageErr := decodeError(t, badPageRec.Body.Bytes())
+	if badPageErr.Code != domain.ErrorCodeInvalidQueryInteger {
+		t.Fatalf("expected invalid query integer code, got %+v", badPageErr)
+	}
 
 	badSizeReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees?page_size=101", nil)
 	badSizeRec := httptest.NewRecorder()
 	handler.ServeHTTP(badSizeRec, badSizeReq)
 	if badSizeRec.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for oversized page_size, got %d: %s", badSizeRec.Code, badSizeRec.Body.String())
+	}
+	badSizeErr := decodeError(t, badSizeRec.Body.Bytes())
+	if badSizeErr.Code != domain.ErrorCodeQueryAboveMaximum {
+		t.Fatalf("expected query above maximum code, got %+v", badSizeErr)
 	}
 
 	detailReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/emp-admin", nil)
@@ -784,7 +796,7 @@ func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
 		t.Fatalf("expected 400 for duplicate import confirm, got %d: %s", duplicateConfirmRec.Code, duplicateConfirmRec.Body.String())
 	}
 	duplicateErr := decodeError(t, duplicateConfirmRec.Body.Bytes())
-	if duplicateErr.Code != "import_validation_failed" || len(duplicateErr.RowErrors) == 0 || duplicateErr.RowErrors[0].RowNumber == 0 || len(duplicateErr.RowErrors[0].FieldErrors) == 0 {
+	if duplicateErr.Code != domain.ErrorCodeFieldUnique || len(duplicateErr.RowErrors) == 0 || duplicateErr.RowErrors[0].RowNumber == 0 || len(duplicateErr.RowErrors[0].FieldErrors) == 0 {
 		t.Fatalf("expected row_number and field_errors for import error, got %+v", duplicateErr)
 	}
 
@@ -798,7 +810,7 @@ func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
 	}
 	var errPayload struct {
 		Error struct {
-			Code        string              `json:"code"`
+			Code        domain.ErrorCode    `json:"code"`
 			FieldErrors []domain.FieldError `json:"field_errors"`
 			TraceID     string              `json:"trace_id"`
 		} `json:"error"`
@@ -806,7 +818,7 @@ func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
 	if err := json.Unmarshal(createRec.Body.Bytes(), &errPayload); err != nil {
 		t.Fatal(err)
 	}
-	if errPayload.Error.Code != "validation_failed" || len(errPayload.Error.FieldErrors) == 0 || errPayload.Error.TraceID != "trace-test" {
+	if errPayload.Error.Code != domain.ErrorCodeFieldRequired || len(errPayload.Error.FieldErrors) == 0 || errPayload.Error.TraceID != "trace-test" {
 		t.Fatalf("expected validation error details, got %+v", errPayload)
 	}
 }
@@ -836,8 +848,8 @@ func TestEmployeeImportPreviewRejectsOversizedMultipartBody(t *testing.T) {
 		t.Fatalf("expected 400 for oversized multipart import, got %d: %s", rec.Code, rec.Body.String())
 	}
 	errPayload := decodeError(t, rec.Body.Bytes())
-	if errPayload.Code != "bad_request" {
-		t.Fatalf("expected bad_request for oversized multipart import, got %+v", errPayload)
+	if errPayload.Code != domain.ErrorCodeInvalidMultipartForm {
+		t.Fatalf("expected invalid multipart form code for oversized multipart import, got %+v", errPayload)
 	}
 }
 

@@ -28,11 +28,11 @@ func readJSONNoValidate(w http.ResponseWriter, r *http.Request, target any) erro
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
-		return domain.BadRequest("invalid JSON body: " + err.Error())
+		return domain.BadRequestCode(domain.ErrorCodeInvalidJSONBody, "invalid JSON body: "+err.Error())
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
-		return domain.BadRequest("request body must contain a single JSON value")
+		return domain.BadRequestCode(domain.ErrorCodeMultipleJSONValues, "request body must contain a single JSON value")
 	}
 	return nil
 }
@@ -72,7 +72,7 @@ func (a *API) writeError(w http.ResponseWriter, r *http.Request, err error) {
 			traceID = requestIDFrom(r)
 		}
 		body := map[string]any{
-			"code":    appErr.Code,
+			"code":    appErr.NumericCode(),
 			"message": appErr.Message,
 		}
 		if appErr.ReasonCode != "" {
@@ -100,13 +100,14 @@ func (a *API) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	a.logger.Error("request failed", "path", r.URL.Path, "trace_id", traceID, "span_id", spanID, "request_id", requestID, "error", err)
 	writeJSON(w, http.StatusInternalServerError, map[string]any{
 		"error": map[string]any{
-			"code":     "internal_error",
+			"code":     domain.ErrorCodeInternal,
 			"message":  "internal server error",
 			"trace_id": traceID,
 		},
 	})
 }
 
+// rowErrorPayload groups import validation failures by spreadsheet row.
 type rowErrorPayload struct {
 	RowNumber   int                 `json:"row_number"`
 	FieldErrors []domain.FieldError `json:"field_errors"`

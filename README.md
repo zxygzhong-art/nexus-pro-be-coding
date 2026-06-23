@@ -98,6 +98,23 @@ curl http://localhost:8080/v1/me
 
 Swagger UI is available at `http://localhost:8080/swagger/index.html`, backed by the embedded OpenAPI spec at `http://localhost:8080/openapi.yaml`.
 
+### Error Code Design
+
+API error envelopes expose a numeric `error.code` for stable client handling. The canonical definitions live in `internal/domain/error_codes.go`, and `docs/openapi.yaml` must be updated whenever the public code set changes.
+
+Prefix allocation:
+
+| Prefix | Owner |
+| --- | --- |
+| `1xxxx` | Common platform, request parsing, authentication, not-found, conflict, and fallback errors |
+| `2xxxx` | IAM and authorization errors |
+| `3xxxx` | People-domain and HR errors |
+| `4xxxx` | Attendance errors |
+| `5xxxx` | Workflow errors |
+| `6xxxx` | Agent errors |
+
+Within a prefix, keep low numbers for generic fallbacks and reserve narrower ranges for more specific cases. Do not reuse a retired code with a different meaning. The top-level `error.code` is numeric; `reason_code`, `field_errors[].code`, and `row_errors[].field_errors[].code` remain semantic strings for diagnostics and UI copy.
+
 Run the minimal validation suite:
 
 ```sh

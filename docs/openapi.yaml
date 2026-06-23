@@ -1230,7 +1230,43 @@ components:
         error:
           type: object
           properties:
-            code: {type: string}
+            code:
+              type: integer
+              format: int32
+              description: |
+                Numeric application error code. Current ranges:
+                1xxxx common platform, request and authentication errors;
+                2xxxx IAM and authorization errors; 3xxxx people-domain and HR errors;
+                4xxxx attendance errors; 5xxxx workflow errors; 6xxxx agent errors.
+              enum:
+                - 10000
+                - 10001
+                - 10002
+                - 10003
+                - 10004
+                - 10005
+                - 10006
+                - 10007
+                - 10008
+                - 10009
+                - 10030
+                - 10050
+                - 10060
+                - 20040
+                - 20041
+                - 20042
+                - 20043
+                - 20044
+                - 20045
+                - 30010
+                - 30011
+                - 30012
+                - 30013
+                - 30014
+                - 30015
+                - 30016
+                - 30017
+                - 30018
             message: {type: string}
             reason_code:
               type: string
@@ -1238,7 +1274,6 @@ components:
                 - permission_missing
                 - menu_denied
                 - button_denied
-                - field_denied
                 - data_scope_denied
                 - approval_required
             field_errors:
