@@ -30,8 +30,12 @@ import (
 )
 
 func main() {
-	cfg := config.Load()
+	cfg, err := config.LoadE()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel(cfg.LogLevel)}))
+	if err != nil {
+		logger.Error("invalid startup configuration", "error", err)
+		os.Exit(1)
+	}
 	if err := cfg.ValidateStartup(); err != nil {
 		logger.Error("invalid startup configuration", "error", err)
 		os.Exit(1)

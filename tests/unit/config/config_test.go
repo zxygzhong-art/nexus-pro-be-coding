@@ -137,26 +137,20 @@ func TestValidateStartupRejectsUnsafeProductionCompatibilityFlags(t *testing.T) 
 	}
 }
 
-func TestInvalidIntegerConfigPanics(t *testing.T) {
+func TestInvalidIntegerConfigReturnsError(t *testing.T) {
 	t.Setenv("REDIS_DB", "not-a-number")
 
-	defer func() {
-		if recover() == nil {
-			t.Fatal("expected invalid integer config to panic")
-		}
-	}()
-
-	_ = config.Load()
+	_, err := config.LoadE()
+	if err == nil || !strings.Contains(err.Error(), "REDIS_DB must be an integer") {
+		t.Fatalf("expected invalid integer config error, got %v", err)
+	}
 }
 
-func TestInvalidBooleanConfigPanics(t *testing.T) {
+func TestInvalidBooleanConfigReturnsError(t *testing.T) {
 	t.Setenv("ALLOW_UNSIGNED_JWT", "maybe")
 
-	defer func() {
-		if recover() == nil {
-			t.Fatal("expected invalid boolean config to panic")
-		}
-	}()
-
-	_ = config.Load()
+	_, err := config.LoadE()
+	if err == nil || !strings.Contains(err.Error(), "ALLOW_UNSIGNED_JWT must be a boolean") {
+		t.Fatalf("expected invalid boolean config error, got %v", err)
+	}
 }

@@ -506,6 +506,29 @@ CREATE TABLE employees (
     CONSTRAINT employees_manager_employee_fk FOREIGN KEY (tenant_id, manager_employee_id) REFERENCES employees (tenant_id, id)
 );
 
+CREATE OR REPLACE FUNCTION validate_employee_references()
+RETURNS trigger AS $$
+BEGIN
+    IF NEW.account_id <> '' AND NOT EXISTS (
+        SELECT 1 FROM accounts WHERE tenant_id = NEW.tenant_id AND id = NEW.account_id
+    ) THEN
+        RAISE EXCEPTION 'employee account_id % does not exist in tenant %', NEW.account_id, NEW.tenant_id
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    IF NEW.org_unit_id <> '' AND NOT EXISTS (
+        SELECT 1 FROM org_units WHERE tenant_id = NEW.tenant_id AND id = NEW.org_unit_id
+    ) THEN
+        RAISE EXCEPTION 'employee org_unit_id % does not exist in tenant %', NEW.org_unit_id, NEW.tenant_id
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER employees_reference_check
+BEFORE INSERT OR UPDATE OF tenant_id, account_id, org_unit_id ON employees
+FOR EACH ROW EXECUTE FUNCTION validate_employee_references();
+
 CREATE INDEX employees_tenant_id_idx ON employees (tenant_id);
 CREATE INDEX employees_tenant_status_idx ON employees (tenant_id, employment_status, status);
 CREATE INDEX employees_tenant_category_idx ON employees (tenant_id, category);
@@ -523,7 +546,7 @@ CREATE INDEX employees_keyword_trgm_idx ON employees USING gin (
 );
 CREATE UNIQUE INDEX employees_tenant_employee_no_idx ON employees (tenant_id, employee_no) WHERE employee_no <> '';
 CREATE UNIQUE INDEX employees_tenant_account_id_idx ON employees (tenant_id, account_id) WHERE account_id <> '';
-CREATE UNIQUE INDEX employees_tenant_company_email_idx ON employees (tenant_id, company_email) WHERE company_email <> '';
+CREATE UNIQUE INDEX employees_tenant_company_email_idx ON employees (tenant_id, lower(company_email)) WHERE company_email <> '';
 
 CREATE TABLE employee_number_sequences (
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,

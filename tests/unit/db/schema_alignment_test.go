@@ -51,3 +51,23 @@ func TestAIAgentArchitectureTablesStayInSchema(t *testing.T) {
 		}
 	}
 }
+
+func TestEmployeeIntegrityConstraintsStayInSchema(t *testing.T) {
+	raw, err := os.ReadFile("../../../db/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := string(raw)
+	required := []string{
+		"CREATE UNIQUE INDEX employees_tenant_company_email_idx ON employees (tenant_id, lower(company_email)) WHERE company_email <> '';",
+		"CREATE OR REPLACE FUNCTION validate_employee_references()",
+		"IF NEW.account_id <> '' AND NOT EXISTS",
+		"IF NEW.org_unit_id <> '' AND NOT EXISTS",
+		"CREATE TRIGGER employees_reference_check",
+	}
+	for _, item := range required {
+		if !strings.Contains(schema, item) {
+			t.Fatalf("expected employee integrity schema fragment %q", item)
+		}
+	}
+}

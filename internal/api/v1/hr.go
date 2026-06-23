@@ -12,6 +12,13 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
+const (
+	employeeImportMultipartMaxBytes = 16 << 20
+	employeeImportFileMaxBytes      = 10 << 20
+	employeeAvatarMultipartMaxBytes = 4 << 20
+	employeeAvatarFileMaxBytes      = 3 << 20
+)
+
 type HRCtrl struct {
 	routes routeBinder
 	svc    service.HRFacade
@@ -353,7 +360,8 @@ func employeeQueryFromRequest(r *http.Request) (domain.EmployeeQuery, error) {
 func employeeImportPreviewInput(w http.ResponseWriter, r *http.Request) (domain.EmployeeImportPreviewInput, error) {
 	contentType := strings.ToLower(r.Header.Get("Content-Type"))
 	if strings.HasPrefix(contentType, "multipart/form-data") {
-		if err := r.ParseMultipartForm(16 << 20); err != nil {
+		r.Body = http.MaxBytesReader(w, r.Body, employeeImportMultipartMaxBytes)
+		if err := r.ParseMultipartForm(employeeImportMultipartMaxBytes); err != nil {
 			return domain.EmployeeImportPreviewInput{}, domain.BadRequest("invalid multipart form: " + err.Error())
 		}
 		file, header, err := r.FormFile("file")
@@ -361,7 +369,7 @@ func employeeImportPreviewInput(w http.ResponseWriter, r *http.Request) (domain.
 			return domain.EmployeeImportPreviewInput{}, domain.BadRequest("file is required")
 		}
 		defer file.Close()
-		raw, err := io.ReadAll(http.MaxBytesReader(w, file, 10<<20))
+		raw, err := io.ReadAll(http.MaxBytesReader(w, file, employeeImportFileMaxBytes))
 		if err != nil {
 			return domain.EmployeeImportPreviewInput{}, domain.BadRequest("read import file: " + err.Error())
 		}
@@ -379,7 +387,8 @@ func employeeImportPreviewInput(w http.ResponseWriter, r *http.Request) (domain.
 }
 
 func employeeAvatarInput(w http.ResponseWriter, r *http.Request) (domain.EmployeeAvatarInput, error) {
-	if err := r.ParseMultipartForm(3 << 20); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, employeeAvatarMultipartMaxBytes)
+	if err := r.ParseMultipartForm(employeeAvatarMultipartMaxBytes); err != nil {
 		return domain.EmployeeAvatarInput{}, domain.BadRequest("invalid multipart form: " + err.Error())
 	}
 	file, header, err := r.FormFile("file")
@@ -387,7 +396,7 @@ func employeeAvatarInput(w http.ResponseWriter, r *http.Request) (domain.Employe
 		return domain.EmployeeAvatarInput{}, domain.BadRequest("file is required")
 	}
 	defer file.Close()
-	raw, err := io.ReadAll(http.MaxBytesReader(w, file, 3<<20))
+	raw, err := io.ReadAll(http.MaxBytesReader(w, file, employeeAvatarFileMaxBytes))
 	if err != nil {
 		return domain.EmployeeAvatarInput{}, domain.BadRequest("read avatar file: " + err.Error())
 	}

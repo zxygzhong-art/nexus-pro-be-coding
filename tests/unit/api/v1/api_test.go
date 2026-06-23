@@ -811,6 +811,36 @@ func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
 	}
 }
 
+func TestEmployeeImportPreviewRejectsOversizedMultipartBody(t *testing.T) {
+	handler := newTestAPI(true)
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+	part, err := writer.CreateFormFile("file", "employees.csv")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := part.Write(bytes.Repeat([]byte("x"), 17<<20)); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/preview", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("X-Approval-Confirmed", "true")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for oversized multipart import, got %d: %s", rec.Code, rec.Body.String())
+	}
+	errPayload := decodeError(t, rec.Body.Bytes())
+	if errPayload.Code != "bad_request" {
+		t.Fatalf("expected bad_request for oversized multipart import, got %+v", errPayload)
+	}
+}
+
 func TestEmployeeCreateStatusAndDeleteContract(t *testing.T) {
 	handler := newTestAPI(true)
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees", strings.NewReader(validEmployeeCreateJSON("Contract Person", "contract.person@example.com")))
