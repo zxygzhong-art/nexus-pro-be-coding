@@ -1,0 +1,35 @@
+package repository
+
+import (
+	"context"
+
+	"nexus-pro-be/internal/domain"
+)
+
+type IAMStore interface {
+	UpsertUserGroup(context.Context, domain.UserGroup) error
+	GetUserGroup(ctx context.Context, tenantID, id string) (domain.UserGroup, bool, error)
+	ListUserGroups(ctx context.Context, tenantID string) ([]domain.UserGroup, error)
+
+	UpsertPermissionSet(context.Context, domain.PermissionSet) error
+	GetPermissionSet(ctx context.Context, tenantID, id string) (domain.PermissionSet, bool, error)
+	ListPermissionSets(ctx context.Context, tenantID string) ([]domain.PermissionSet, error)
+
+	UpsertPermissionSetAssignment(context.Context, domain.PermissionSetAssignment) error
+	ListPermissionSetAssignments(ctx context.Context, tenantID string) ([]domain.PermissionSetAssignment, error)
+	ListPermissionSetAssignmentsForPrincipal(ctx context.Context, tenantID, principalType, principalID string) ([]domain.PermissionSetAssignment, error)
+
+	UpsertDataScope(context.Context, domain.DataScope) error
+	GetDataScope(ctx context.Context, tenantID, id string) (domain.DataScope, bool, error)
+	GetDataScopeByCode(ctx context.Context, tenantID, code string) (domain.DataScope, bool, error)
+	ListDataScopes(ctx context.Context, tenantID string) ([]domain.DataScope, error)
+
+	UpsertFieldPolicy(context.Context, domain.FieldPolicy) error
+	ListFieldPolicies(ctx context.Context, tenantID, applicationCode, resourceType string) ([]domain.FieldPolicy, error)
+
+	UpsertAssumableRole(context.Context, domain.AssumableRole) error
+	GetAssumableRole(ctx context.Context, tenantID, id string) (domain.AssumableRole, bool, error)
+	ListAssumableRoles(ctx context.Context, tenantID string) ([]domain.AssumableRole, error)
+	UpsertAssumableRoleSession(context.Context, domain.AssumableRoleSession) error
+	GetActiveAssumableRoleSession(ctx context.Context, tenantID, id string) (domain.AssumableRoleSession, bool, error)
+}
