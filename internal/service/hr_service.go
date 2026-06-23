@@ -139,7 +139,6 @@ func (c HRService) ExportEmployees(ctx RequestContext, queries ...EmployeeQuery)
 	if err != nil {
 		return nil, err
 	}
-	items = filterEmployeeQuery(items, query)
 	sortEmployees(items, query.Sort)
 	if len(items) > maxEmployeeExportRows {
 		return nil, employeeExportLimitError()
@@ -354,7 +353,6 @@ func (c HRService) QueryEmployees(ctx RequestContext, query EmployeeQuery) (Page
 	if err != nil {
 		return PageResponse[Employee]{}, err
 	}
-	items = filterEmployeeQuery(items, query)
 	sortEmployees(items, query.Sort)
 	total := len(items)
 	items = paginateEmployees(items, query.Page, query.PageSize)
@@ -537,7 +535,6 @@ func (c HRService) EmployeeStats(ctx RequestContext, query EmployeeQuery) (Emplo
 	if err != nil {
 		return EmployeeStats{}, err
 	}
-	items = filterEmployeeQuery(items, query)
 	now := c.Now()
 	stats := EmployeeStats{Total: len(items)}
 	for _, item := range items {
@@ -564,7 +561,7 @@ func (c HRService) EmployeeStats(ctx RequestContext, query EmployeeQuery) (Emplo
 	return stats, nil
 }
 
-// EmployeeOptions returns selectable HR values constrained by visible employee data.
+// EmployeeOptions returns selectable HR values constrained by current data scope.
 func (c HRService) EmployeeOptions(ctx RequestContext) (EmployeeOptions, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -589,7 +586,10 @@ func (c HRService) EmployeeOptions(ctx RequestContext) (EmployeeOptions, error) 
 	if err != nil {
 		return EmployeeOptions{}, err
 	}
-	departments := employeeDepartmentOptions(units, employees)
+	departments, err := c.employeeDepartmentOptions(ctx, account, decision, units, employees)
+	if err != nil {
+		return EmployeeOptions{}, err
+	}
 	return EmployeeOptions{
 		Departments:        departments,
 		Positions:          uniqueSorted(employeeStringValues(employees, func(v Employee) string { return v.Position })),
@@ -600,7 +600,63 @@ func (c HRService) EmployeeOptions(ctx RequestContext) (EmployeeOptions, error) 
 	}, nil
 }
 
-func employeeDepartmentOptions(units []OrgUnit, employees []Employee) []OrgUnit {
+func (c HRService) employeeDepartmentOptions(ctx RequestContext, account Account, decision CheckResult, units []OrgUnit, employees []Employee) ([]OrgUnit, error) {
+	switch decision.Scope {
+	case "", ScopeAll, ScopeTenant, ScopeSystem:
+		return append([]OrgUnit(nil), units...), nil
+	case ScopeDepartment, ScopeAssignedOrgUnits:
+		return orgUnitOptionsByIDs(units, stringSliceFromAny(decision.Conditions["org_unit_ids"])), nil
+	case ScopeDepartmentSubtree:
+		orgIDs := stringSliceFromAny(decision.Conditions["org_unit_ids"])
+		if len(orgIDs) == 0 && account.EmployeeID != "" {
+			employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, account.EmployeeID)
+			if err != nil {
+				return nil, err
+			}
+			if ok && employee.OrgUnitID != "" {
+				orgIDs = []string{employee.OrgUnitID}
+			}
+		}
+		return orgUnitOptionsInSubtree(units, orgIDs), nil
+	case ScopeCustomCondition:
+		if orgIDs := stringSliceFromAny(decision.Conditions["org_unit_ids"]); len(orgIDs) > 0 {
+			return orgUnitOptionsByIDs(units, orgIDs), nil
+		}
+		return employeeDepartmentOptionsFromEmployees(units, employees), nil
+	default:
+		return employeeDepartmentOptionsFromEmployees(units, employees), nil
+	}
+}
+
+func orgUnitOptionsByIDs(units []OrgUnit, ids []string) []OrgUnit {
+	allowed := stringSet(ids)
+	if len(allowed) == 0 {
+		return []OrgUnit{}
+	}
+	out := make([]OrgUnit, 0, len(allowed))
+	for _, unit := range units {
+		if _, ok := allowed[unit.ID]; ok {
+			out = append(out, unit)
+		}
+	}
+	return out
+}
+
+func orgUnitOptionsInSubtree(units []OrgUnit, roots []string) []OrgUnit {
+	allowed := stringSet(roots)
+	if len(allowed) == 0 {
+		return []OrgUnit{}
+	}
+	out := make([]OrgUnit, 0)
+	for _, unit := range units {
+		if orgUnitInScope(units, unit.ID, allowed) {
+			out = append(out, unit)
+		}
+	}
+	return out
+}
+
+func employeeDepartmentOptionsFromEmployees(units []OrgUnit, employees []Employee) []OrgUnit {
 	visible := map[string]struct{}{}
 	for _, employee := range employees {
 		if employee.OrgUnitID != "" {

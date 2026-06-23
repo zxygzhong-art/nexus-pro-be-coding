@@ -147,27 +147,34 @@ func (q *Queries) CountAuditLogs(ctx context.Context, tenantID string) (int64, e
 
 const countEmployeesFiltered = `-- name: CountEmployeesFiltered :one
 SELECT count(*) FROM employees
-WHERE tenant_id = $1
+LEFT JOIN accounts
+  ON accounts.tenant_id = employees.tenant_id
+ AND accounts.id = employees.account_id
+WHERE employees.tenant_id = $1
   AND (
     $2::text = ''
     OR lower(
-      coalesce(employee_no, '') || ' ' ||
-      coalesce(name, '') || ' ' ||
-      coalesce(company_email, '') || ' ' ||
-      coalesce(personal_email, '') || ' ' ||
-      coalesce(phone, '')
+      coalesce(employees.employee_no, '') || ' ' ||
+      coalesce(employees.name, '') || ' ' ||
+      coalesce(employees.company_email, '') || ' ' ||
+      coalesce(employees.personal_email, '') || ' ' ||
+      coalesce(employees.phone, '') || ' ' ||
+      coalesce(employees.account_id, '') || ' ' ||
+      coalesce(accounts.display_name, '') || ' ' ||
+      coalesce(accounts.email, '') || ' ' ||
+      coalesce(accounts.employee_id, '')
     ) LIKE '%' || lower($2::text) || '%'
   )
-  AND ($3::text = '' OR org_unit_id = $3)
+  AND ($3::text = '' OR employees.org_unit_id = $3)
   AND (
     $4::text = ''
-    OR coalesce(nullif(employment_status, ''), status) = $4
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) = $4
   )
   AND (
     $4::text = 'deleted'
-    OR coalesce(nullif(employment_status, ''), status) <> 'deleted'
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'deleted'
   )
-  AND ($5::text = '' OR category = $5)
+  AND ($5::text = '' OR employees.category = $5)
 `
 
 type CountEmployeesFilteredParams struct {
@@ -1091,34 +1098,41 @@ func (q *Queries) ListEmployees(ctx context.Context, tenantID string) ([]Employe
 }
 
 const listEmployeesFiltered = `-- name: ListEmployeesFiltered :many
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
-WHERE tenant_id = $1
+SELECT employees.id, employees.tenant_id, employees.employee_no, employees.name, employees.company_email, employees.personal_email, employees.phone, employees.org_unit_id, employees.account_id, employees.manager_employee_id, employees.position, employees.category, employees.status, employees.employment_status, employees.hire_date, employees.resign_date, employees.basic_info, employees.employment_info, employees.education_military_info, employees.contact_info, employees.insurance_info, employees.internal_experiences, employees.created_at, employees.updated_at FROM employees
+LEFT JOIN accounts
+  ON accounts.tenant_id = employees.tenant_id
+ AND accounts.id = employees.account_id
+WHERE employees.tenant_id = $1
   AND (
     $2::text = ''
     OR lower(
-      coalesce(employee_no, '') || ' ' ||
-      coalesce(name, '') || ' ' ||
-      coalesce(company_email, '') || ' ' ||
-      coalesce(personal_email, '') || ' ' ||
-      coalesce(phone, '')
+      coalesce(employees.employee_no, '') || ' ' ||
+      coalesce(employees.name, '') || ' ' ||
+      coalesce(employees.company_email, '') || ' ' ||
+      coalesce(employees.personal_email, '') || ' ' ||
+      coalesce(employees.phone, '') || ' ' ||
+      coalesce(employees.account_id, '') || ' ' ||
+      coalesce(accounts.display_name, '') || ' ' ||
+      coalesce(accounts.email, '') || ' ' ||
+      coalesce(accounts.employee_id, '')
     ) LIKE '%' || lower($2::text) || '%'
   )
-  AND ($3::text = '' OR org_unit_id = $3)
+  AND ($3::text = '' OR employees.org_unit_id = $3)
   AND (
     $4::text = ''
-    OR coalesce(nullif(employment_status, ''), status) = $4
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) = $4
   )
   AND (
     $4::text = 'deleted'
-    OR coalesce(nullif(employment_status, ''), status) <> 'deleted'
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'deleted'
   )
-  AND ($5::text = '' OR category = $5)
+  AND ($5::text = '' OR employees.category = $5)
 ORDER BY
-  CASE WHEN $6::text = 'created_at_desc' THEN created_at END DESC,
-  CASE WHEN $6::text = 'hire_date_desc' THEN hire_date END DESC NULLS LAST,
-  CASE WHEN $6::text = 'hire_date_asc' THEN hire_date END ASC NULLS LAST,
-  created_at ASC,
-  id ASC
+  CASE WHEN $6::text = 'created_at_desc' THEN employees.created_at END DESC,
+  CASE WHEN $6::text = 'hire_date_desc' THEN employees.hire_date END DESC NULLS LAST,
+  CASE WHEN $6::text = 'hire_date_asc' THEN employees.hire_date END ASC NULLS LAST,
+  employees.created_at ASC,
+  employees.id ASC
 `
 
 type ListEmployeesFilteredParams struct {
@@ -1183,34 +1197,41 @@ func (q *Queries) ListEmployeesFiltered(ctx context.Context, arg ListEmployeesFi
 }
 
 const listEmployeesFilteredPage = `-- name: ListEmployeesFilteredPage :many
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
-WHERE tenant_id = $1
+SELECT employees.id, employees.tenant_id, employees.employee_no, employees.name, employees.company_email, employees.personal_email, employees.phone, employees.org_unit_id, employees.account_id, employees.manager_employee_id, employees.position, employees.category, employees.status, employees.employment_status, employees.hire_date, employees.resign_date, employees.basic_info, employees.employment_info, employees.education_military_info, employees.contact_info, employees.insurance_info, employees.internal_experiences, employees.created_at, employees.updated_at FROM employees
+LEFT JOIN accounts
+  ON accounts.tenant_id = employees.tenant_id
+ AND accounts.id = employees.account_id
+WHERE employees.tenant_id = $1
   AND (
     $2::text = ''
     OR lower(
-      coalesce(employee_no, '') || ' ' ||
-      coalesce(name, '') || ' ' ||
-      coalesce(company_email, '') || ' ' ||
-      coalesce(personal_email, '') || ' ' ||
-      coalesce(phone, '')
+      coalesce(employees.employee_no, '') || ' ' ||
+      coalesce(employees.name, '') || ' ' ||
+      coalesce(employees.company_email, '') || ' ' ||
+      coalesce(employees.personal_email, '') || ' ' ||
+      coalesce(employees.phone, '') || ' ' ||
+      coalesce(employees.account_id, '') || ' ' ||
+      coalesce(accounts.display_name, '') || ' ' ||
+      coalesce(accounts.email, '') || ' ' ||
+      coalesce(accounts.employee_id, '')
     ) LIKE '%' || lower($2::text) || '%'
   )
-  AND ($3::text = '' OR org_unit_id = $3)
+  AND ($3::text = '' OR employees.org_unit_id = $3)
   AND (
     $4::text = ''
-    OR coalesce(nullif(employment_status, ''), status) = $4
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) = $4
   )
   AND (
     $4::text = 'deleted'
-    OR coalesce(nullif(employment_status, ''), status) <> 'deleted'
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'deleted'
   )
-  AND ($5::text = '' OR category = $5)
+  AND ($5::text = '' OR employees.category = $5)
 ORDER BY
-  CASE WHEN $6::text = 'created_at_desc' THEN created_at END DESC,
-  CASE WHEN $6::text = 'hire_date_desc' THEN hire_date END DESC NULLS LAST,
-  CASE WHEN $6::text = 'hire_date_asc' THEN hire_date END ASC NULLS LAST,
-  created_at ASC,
-  id ASC
+  CASE WHEN $6::text = 'created_at_desc' THEN employees.created_at END DESC,
+  CASE WHEN $6::text = 'hire_date_desc' THEN employees.hire_date END DESC NULLS LAST,
+  CASE WHEN $6::text = 'hire_date_asc' THEN employees.hire_date END ASC NULLS LAST,
+  employees.created_at ASC,
+  employees.id ASC
 LIMIT $8::int
 OFFSET $7::int
 `

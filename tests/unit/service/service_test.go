@@ -758,6 +758,74 @@ func TestAssignedOrgUnitsScopeFiltersExactDepartments(t *testing.T) {
 	}
 }
 
+func TestEmployeeQueryKeywordMatchesLinkedAccount(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-read",
+		TenantID: "tenant-1",
+		Name:     "Employee Read",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "read", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-reader", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-read"}, CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-linked", TenantID: "tenant-1", DisplayName: "Portal Login", Email: "login@example.com", EmployeeID: "emp-1", Status: "active", CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Visible Employee", CompanyEmail: "employee@example.com", AccountID: "acct-linked", Status: "active", CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-2", TenantID: "tenant-1", Name: "Other Employee", CompanyEmail: "other@example.com", Status: "active", CreatedAt: now.Add(time.Minute)})
+
+	page, err := service.New(store).HR().QueryEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-reader"}, domain.EmployeeQuery{Keyword: "portal login"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != "emp-1" {
+		t.Fatalf("expected keyword to match linked account, got %+v", page)
+	}
+}
+
+func TestEmployeeStatsRespectDepartmentSubtreeScope(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-root", TenantID: "tenant-1", Name: "Root", Path: []string{"ou-root"}, CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-child", TenantID: "tenant-1", Name: "Child", ParentID: "ou-root", Path: []string{"ou-root", "ou-child"}, CreatedAt: now.Add(time.Minute)})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-other", TenantID: "tenant-1", Name: "Other", Path: []string{"ou-other"}, CreatedAt: now.Add(2 * time.Minute)})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-read",
+		TenantID: "tenant-1",
+		Name:     "Scoped Employee Read",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "read", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertDataScope(context.Background(), domain.DataScope{ID: "ds-subtree", TenantID: "tenant-1", Code: "department_subtree", Name: "Department Subtree", ScopeType: "department_subtree", CreatedAt: now})
+	_ = store.UpsertPermissionSetAssignment(context.Background(), domain.PermissionSetAssignment{
+		ID:              "assign-1",
+		TenantID:        "tenant-1",
+		PrincipalType:   "account",
+		PrincipalID:     "acct-1",
+		PermissionSetID: "ps-read",
+		Effect:          "allow",
+		DataScopeID:     "ds-subtree",
+		CreatedAt:       now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", EmployeeID: "emp-manager", Status: "active", CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-manager", TenantID: "tenant-1", Name: "Manager", OrgUnitID: "ou-root", Status: "active", EmploymentStatus: "active", CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-child", TenantID: "tenant-1", Name: "Child", OrgUnitID: "ou-child", Status: "onboarding", EmploymentStatus: "onboarding", CreatedAt: now.Add(time.Minute)})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-hidden", TenantID: "tenant-1", Name: "Hidden", OrgUnitID: "ou-other", Status: "resigned", EmploymentStatus: "resigned", CreatedAt: now.Add(2 * time.Minute)})
+
+	stats, err := service.New(store).HR().EmployeeStats(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.EmployeeQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.Total != 2 || stats.Active != 1 || stats.Onboarding != 1 || stats.Resigned != 0 {
+		t.Fatalf("expected stats to exclude hidden department employees, got %+v", stats)
+	}
+}
+
 func TestEmployeeFieldPolicyHidesDenyFieldsAndBlocksWrites(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2347,6 +2415,51 @@ func TestEmployeeOptionsOnlyIncludeVisibleDepartments(t *testing.T) {
 	}
 	if len(options.Positions) != 1 || options.Positions[0] != "Engineer" {
 		t.Fatalf("expected only visible positions, got %+v", options.Positions)
+	}
+}
+
+func TestEmployeeOptionsDepartmentSubtreeIncludesEmptyOrgUnits(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-root", TenantID: "tenant-1", Name: "Root", Path: []string{"ou-root"}, CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-filled", TenantID: "tenant-1", Name: "Filled", ParentID: "ou-root", Path: []string{"ou-root", "ou-filled"}, CreatedAt: now.Add(time.Minute)})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-empty", TenantID: "tenant-1", Name: "Empty", ParentID: "ou-root", Path: []string{"ou-root", "ou-empty"}, CreatedAt: now.Add(2 * time.Minute)})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-hidden", TenantID: "tenant-1", Name: "Hidden", Path: []string{"ou-hidden"}, CreatedAt: now.Add(3 * time.Minute)})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-read",
+		TenantID: "tenant-1",
+		Name:     "Scoped Employee Read",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "read", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertDataScope(context.Background(), domain.DataScope{ID: "ds-subtree", TenantID: "tenant-1", Code: "department_subtree", Name: "Department Subtree", ScopeType: "department_subtree", CreatedAt: now})
+	_ = store.UpsertPermissionSetAssignment(context.Background(), domain.PermissionSetAssignment{
+		ID:              "assign-1",
+		TenantID:        "tenant-1",
+		PrincipalType:   "account",
+		PrincipalID:     "acct-1",
+		PermissionSetID: "ps-read",
+		Effect:          "allow",
+		DataScopeID:     "ds-subtree",
+		CreatedAt:       now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", EmployeeID: "emp-manager", Status: "active", CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-manager", TenantID: "tenant-1", Name: "Manager", OrgUnitID: "ou-root", Position: "Manager", Status: "active", CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-filled", TenantID: "tenant-1", Name: "Filled Employee", OrgUnitID: "ou-filled", Position: "Engineer", Status: "active", CreatedAt: now.Add(time.Minute)})
+
+	options, err := service.New(store).HR().EmployeeOptions(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := make([]string, 0, len(options.Departments))
+	for _, unit := range options.Departments {
+		got = append(got, unit.ID)
+	}
+	if strings.Join(got, ",") != "ou-root,ou-filled,ou-empty" {
+		t.Fatalf("expected subtree departments including empty org unit, got %+v", got)
 	}
 }
 

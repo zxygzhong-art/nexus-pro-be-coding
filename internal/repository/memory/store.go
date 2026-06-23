@@ -427,7 +427,7 @@ func (s *Store) ListEmployeesByQuery(ctx context.Context, tenantID string, query
 	if err != nil {
 		return nil, err
 	}
-	items = filterMemoryEmployeesByQuery(items, query)
+	items = s.filterMemoryEmployeesByQuery(tenantID, items, query)
 	sortMemoryEmployees(items, query.Sort)
 	return items, nil
 }
@@ -467,10 +467,18 @@ func (s *Store) NextEmployeeNo(_ context.Context, tenantID, prefix string) (stri
 	return fmt.Sprintf("%s%03d", prefix, nextSeq), nil
 }
 
-func filterMemoryEmployeesByQuery(items []Employee, query EmployeeQuery) []Employee {
+func (s *Store) filterMemoryEmployeesByQuery(tenantID string, items []Employee, query EmployeeQuery) []Employee {
 	out := make([]Employee, 0, len(items))
 	query = normalizeMemoryEmployeeQuery(query)
 	keyword := strings.ToLower(strings.TrimSpace(query.Keyword))
+	accounts := map[string]Account{}
+	if keyword != "" {
+		s.mu.RLock()
+		for id, account := range s.accounts[tenantID] {
+			accounts[id] = copyAccount(account)
+		}
+		s.mu.RUnlock()
+	}
 	for _, item := range items {
 		status := utils.FirstNonEmpty(item.EmploymentStatus, item.Status)
 		if query.EmploymentStatus != "deleted" && status == "deleted" {
@@ -486,7 +494,18 @@ func filterMemoryEmployeesByQuery(items []Employee, query EmployeeQuery) []Emplo
 			continue
 		}
 		if keyword != "" {
-			haystack := strings.ToLower(strings.Join([]string{item.Name, item.CompanyEmail, item.PersonalEmail, item.EmployeeNo, item.Phone}, " "))
+			account := accounts[item.AccountID]
+			haystack := strings.ToLower(strings.Join([]string{
+				item.Name,
+				item.CompanyEmail,
+				item.PersonalEmail,
+				item.EmployeeNo,
+				item.Phone,
+				item.AccountID,
+				account.DisplayName,
+				account.Email,
+				account.EmployeeID,
+			}, " "))
 			if !strings.Contains(haystack, keyword) {
 				continue
 			}

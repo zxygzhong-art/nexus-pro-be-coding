@@ -214,88 +214,109 @@ WHERE tenant_id = $1
 ORDER BY created_at ASC, id ASC;
 
 -- name: ListEmployeesFiltered :many
-SELECT * FROM employees
-WHERE tenant_id = sqlc.arg(tenant_id)
+SELECT employees.* FROM employees
+LEFT JOIN accounts
+  ON accounts.tenant_id = employees.tenant_id
+ AND accounts.id = employees.account_id
+WHERE employees.tenant_id = sqlc.arg(tenant_id)
   AND (
     sqlc.arg(keyword)::text = ''
     OR lower(
-      coalesce(employee_no, '') || ' ' ||
-      coalesce(name, '') || ' ' ||
-      coalesce(company_email, '') || ' ' ||
-      coalesce(personal_email, '') || ' ' ||
-      coalesce(phone, '')
+      coalesce(employees.employee_no, '') || ' ' ||
+      coalesce(employees.name, '') || ' ' ||
+      coalesce(employees.company_email, '') || ' ' ||
+      coalesce(employees.personal_email, '') || ' ' ||
+      coalesce(employees.phone, '') || ' ' ||
+      coalesce(employees.account_id, '') || ' ' ||
+      coalesce(accounts.display_name, '') || ' ' ||
+      coalesce(accounts.email, '') || ' ' ||
+      coalesce(accounts.employee_id, '')
     ) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
   )
-  AND (sqlc.arg(department_id)::text = '' OR org_unit_id = sqlc.arg(department_id))
+  AND (sqlc.arg(department_id)::text = '' OR employees.org_unit_id = sqlc.arg(department_id))
   AND (
     sqlc.arg(employment_status)::text = ''
-    OR coalesce(nullif(employment_status, ''), status) = sqlc.arg(employment_status)
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) = sqlc.arg(employment_status)
   )
   AND (
     sqlc.arg(employment_status)::text = 'deleted'
-    OR coalesce(nullif(employment_status, ''), status) <> 'deleted'
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'deleted'
   )
-  AND (sqlc.arg(category)::text = '' OR category = sqlc.arg(category))
+  AND (sqlc.arg(category)::text = '' OR employees.category = sqlc.arg(category))
 ORDER BY
-  CASE WHEN sqlc.arg(sort)::text = 'created_at_desc' THEN created_at END DESC,
-  CASE WHEN sqlc.arg(sort)::text = 'hire_date_desc' THEN hire_date END DESC NULLS LAST,
-  CASE WHEN sqlc.arg(sort)::text = 'hire_date_asc' THEN hire_date END ASC NULLS LAST,
-  created_at ASC,
-  id ASC;
+  CASE WHEN sqlc.arg(sort)::text = 'created_at_desc' THEN employees.created_at END DESC,
+  CASE WHEN sqlc.arg(sort)::text = 'hire_date_desc' THEN employees.hire_date END DESC NULLS LAST,
+  CASE WHEN sqlc.arg(sort)::text = 'hire_date_asc' THEN employees.hire_date END ASC NULLS LAST,
+  employees.created_at ASC,
+  employees.id ASC;
 
 -- name: CountEmployeesFiltered :one
 SELECT count(*) FROM employees
-WHERE tenant_id = sqlc.arg(tenant_id)
+LEFT JOIN accounts
+  ON accounts.tenant_id = employees.tenant_id
+ AND accounts.id = employees.account_id
+WHERE employees.tenant_id = sqlc.arg(tenant_id)
   AND (
     sqlc.arg(keyword)::text = ''
     OR lower(
-      coalesce(employee_no, '') || ' ' ||
-      coalesce(name, '') || ' ' ||
-      coalesce(company_email, '') || ' ' ||
-      coalesce(personal_email, '') || ' ' ||
-      coalesce(phone, '')
+      coalesce(employees.employee_no, '') || ' ' ||
+      coalesce(employees.name, '') || ' ' ||
+      coalesce(employees.company_email, '') || ' ' ||
+      coalesce(employees.personal_email, '') || ' ' ||
+      coalesce(employees.phone, '') || ' ' ||
+      coalesce(employees.account_id, '') || ' ' ||
+      coalesce(accounts.display_name, '') || ' ' ||
+      coalesce(accounts.email, '') || ' ' ||
+      coalesce(accounts.employee_id, '')
     ) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
   )
-  AND (sqlc.arg(department_id)::text = '' OR org_unit_id = sqlc.arg(department_id))
+  AND (sqlc.arg(department_id)::text = '' OR employees.org_unit_id = sqlc.arg(department_id))
   AND (
     sqlc.arg(employment_status)::text = ''
-    OR coalesce(nullif(employment_status, ''), status) = sqlc.arg(employment_status)
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) = sqlc.arg(employment_status)
   )
   AND (
     sqlc.arg(employment_status)::text = 'deleted'
-    OR coalesce(nullif(employment_status, ''), status) <> 'deleted'
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'deleted'
   )
-  AND (sqlc.arg(category)::text = '' OR category = sqlc.arg(category));
+  AND (sqlc.arg(category)::text = '' OR employees.category = sqlc.arg(category));
 
 -- name: ListEmployeesFilteredPage :many
-SELECT * FROM employees
-WHERE tenant_id = sqlc.arg(tenant_id)
+SELECT employees.* FROM employees
+LEFT JOIN accounts
+  ON accounts.tenant_id = employees.tenant_id
+ AND accounts.id = employees.account_id
+WHERE employees.tenant_id = sqlc.arg(tenant_id)
   AND (
     sqlc.arg(keyword)::text = ''
     OR lower(
-      coalesce(employee_no, '') || ' ' ||
-      coalesce(name, '') || ' ' ||
-      coalesce(company_email, '') || ' ' ||
-      coalesce(personal_email, '') || ' ' ||
-      coalesce(phone, '')
+      coalesce(employees.employee_no, '') || ' ' ||
+      coalesce(employees.name, '') || ' ' ||
+      coalesce(employees.company_email, '') || ' ' ||
+      coalesce(employees.personal_email, '') || ' ' ||
+      coalesce(employees.phone, '') || ' ' ||
+      coalesce(employees.account_id, '') || ' ' ||
+      coalesce(accounts.display_name, '') || ' ' ||
+      coalesce(accounts.email, '') || ' ' ||
+      coalesce(accounts.employee_id, '')
     ) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
   )
-  AND (sqlc.arg(department_id)::text = '' OR org_unit_id = sqlc.arg(department_id))
+  AND (sqlc.arg(department_id)::text = '' OR employees.org_unit_id = sqlc.arg(department_id))
   AND (
     sqlc.arg(employment_status)::text = ''
-    OR coalesce(nullif(employment_status, ''), status) = sqlc.arg(employment_status)
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) = sqlc.arg(employment_status)
   )
   AND (
     sqlc.arg(employment_status)::text = 'deleted'
-    OR coalesce(nullif(employment_status, ''), status) <> 'deleted'
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'deleted'
   )
-  AND (sqlc.arg(category)::text = '' OR category = sqlc.arg(category))
+  AND (sqlc.arg(category)::text = '' OR employees.category = sqlc.arg(category))
 ORDER BY
-  CASE WHEN sqlc.arg(sort)::text = 'created_at_desc' THEN created_at END DESC,
-  CASE WHEN sqlc.arg(sort)::text = 'hire_date_desc' THEN hire_date END DESC NULLS LAST,
-  CASE WHEN sqlc.arg(sort)::text = 'hire_date_asc' THEN hire_date END ASC NULLS LAST,
-  created_at ASC,
-  id ASC
+  CASE WHEN sqlc.arg(sort)::text = 'created_at_desc' THEN employees.created_at END DESC,
+  CASE WHEN sqlc.arg(sort)::text = 'hire_date_desc' THEN employees.hire_date END DESC NULLS LAST,
+  CASE WHEN sqlc.arg(sort)::text = 'hire_date_asc' THEN employees.hire_date END ASC NULLS LAST,
+  employees.created_at ASC,
+  employees.id ASC
 LIMIT sqlc.arg(limit_count)::int
 OFFSET sqlc.arg(offset_count)::int;
 
