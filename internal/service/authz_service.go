@@ -174,14 +174,16 @@ func (c *Service) evaluateAuthz(ctx RequestContext, account Account, req CheckRe
 		}
 	}
 
-	fieldPolicies, err := c.fieldPolicyDecision(ctx, req.ApplicationCode, req.ResourceType)
+	matchedPermissions := uniqueStrings(matched)
+	matchedSources := uniqueStrings(matchedBy)
+	fieldPolicies, err := c.fieldPolicyDecision(ctx, req.ApplicationCode, req.ResourceType, permissionKey, matchedPermissions)
 	if err != nil {
 		return CheckResult{}, err
 	}
 	result := CheckResult{
 		Allowed:            len(matched) > 0 && len(deniedBy) == 0,
-		MatchedBy:          uniqueStrings(matchedBy),
-		MatchedPermissions: uniqueStrings(matched),
+		MatchedBy:          matchedSources,
+		MatchedPermissions: matchedPermissions,
 		PermissionSetIDs:   uniqueStrings(setIDs),
 		Scope:              chosenScope,
 		EffectiveScope:     chosenScope,
@@ -367,7 +369,7 @@ func (c *Service) conditionsForGrant(ctx RequestContext, account Account, grant 
 	return scope, conditions, err
 }
 
-func (c *Service) fieldPolicyDecision(ctx RequestContext, applicationCode ApplicationCode, resourceType ResourceType) (map[string]string, error) {
+func (c *Service) fieldPolicyDecision(ctx RequestContext, applicationCode ApplicationCode, resourceType ResourceType, permissionKey string, matchedPermissions []string) (map[string]string, error) {
 	policies, err := c.store.ListFieldPolicies(goContext(ctx), ctx.TenantID, string(applicationCode), string(resourceType))
 	if err != nil {
 		return nil, err
@@ -377,9 +379,67 @@ func (c *Service) fieldPolicyDecision(ctx RequestContext, applicationCode Applic
 	}
 	out := map[string]string{}
 	for _, policy := range policies {
-		out[policy.FieldName] = policy.Effect
+		if !fieldPolicyApplies(policy, permissionKey, matchedPermissions) {
+			continue
+		}
+		if current, ok := out[policy.FieldName]; !ok || fieldPolicyEffectRank(policy.Effect) > fieldPolicyEffectRank(current) {
+			out[policy.FieldName] = policy.Effect
+		}
+	}
+	if len(out) == 0 {
+		return nil, nil
 	}
 	return out, nil
+}
+
+func fieldPolicyApplies(policy FieldPolicy, permissionKey string, matchedPermissions []string) bool {
+	policyPermission := strings.TrimSpace(policy.PermissionID)
+	if policyPermission == "" {
+		return true
+	}
+	if permissionLabelMatches(permissionKey, policyPermission) {
+		return true
+	}
+	for _, matched := range matchedPermissions {
+		if permissionLabelMatches(matched, policyPermission) {
+			return true
+		}
+	}
+	return false
+}
+
+func permissionLabelMatches(value, pattern string) bool {
+	value = strings.TrimSpace(value)
+	pattern = strings.TrimSpace(pattern)
+	if value == "" || pattern == "" {
+		return false
+	}
+	if wildcardMatch(value, pattern) {
+		return true
+	}
+	valueBase, _, _ := strings.Cut(value, "#")
+	patternBase, _, patternHasScope := strings.Cut(pattern, "#")
+	if !patternHasScope && permissionKeyMatches(valueBase, patternBase) {
+		return true
+	}
+	return permissionKeyMatches(value, pattern)
+}
+
+func fieldPolicyEffectRank(effect string) int {
+	switch effect {
+	case "deny":
+		return 5
+	case "hide":
+		return 4
+	case "mask":
+		return 3
+	case "readonly":
+		return 2
+	case "allow":
+		return 1
+	default:
+		return 0
+	}
 }
 
 func (c *Service) auditAuthzDecision(ctx RequestContext, action, resource, target string, decision CheckResult) error {
@@ -1083,6 +1143,18 @@ func maskEmployee(item Employee, policies map[string]string) Employee {
 			}
 		case "position":
 			item.Position = redactString(item.Position, hide)
+		case "category":
+			item.Category = redactString(item.Category, hide)
+		case "status":
+			item.Status = redactString(item.Status, hide)
+		case "employment_status":
+			item.EmploymentStatus = redactString(item.EmploymentStatus, hide)
+		case "manager_employee_id":
+			item.ManagerEmployeeID = redactString(item.ManagerEmployeeID, hide)
+		case "hire_date":
+			item.HireDate = nil
+		case "resign_date":
+			item.ResignDate = nil
 		case "org_unit_id":
 			item.OrgUnitID = ""
 		case "account_id":

@@ -15,7 +15,7 @@ func (c *Service) Audit() AuditService {
 
 // ListLogs returns audit logs visible to the current account.
 func (c AuditService) ListLogs(ctx RequestContext) ([]AuditLog, error) {
-	if _, _, err := c.resolveAccount(ctx); err != nil {
+	if _, _, err := c.requireAuditAuthz(ctx); err != nil {
 		return nil, err
 	}
 	return c.store.ListAuditLogs(goContext(ctx), ctx.TenantID)
@@ -23,7 +23,7 @@ func (c AuditService) ListLogs(ctx RequestContext) ([]AuditLog, error) {
 
 // ListLogPage returns a paginated audit log result.
 func (c AuditService) ListLogPage(ctx RequestContext, page PageRequest) (PageResponse[AuditLog], error) {
-	if _, _, err := c.resolveAccount(ctx); err != nil {
+	if _, _, err := c.requireAuditAuthz(ctx); err != nil {
 		return PageResponse[AuditLog]{}, err
 	}
 	page = utils.NormalizePageRequest(page)
@@ -32,4 +32,9 @@ func (c AuditService) ListLogPage(ctx RequestContext, page PageRequest) (PageRes
 		return PageResponse[AuditLog]{}, err
 	}
 	return utils.PageResponseFromStore(items, total, page), nil
+}
+
+func (c AuditService) requireAuditAuthz(ctx RequestContext) (Account, CheckResult, error) {
+	account, decision, _, err := c.Authorize(ctx, CheckRequest{Resource: "audit.log", Action: ActionRead}, AuditTarget{})
+	return account, decision, err
 }

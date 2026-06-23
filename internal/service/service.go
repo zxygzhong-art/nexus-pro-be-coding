@@ -487,7 +487,11 @@ func auditDetailsWithContext(ctx RequestContext, details map[string]any) map[str
 func auditDecisionDetails(ctx RequestContext, decision CheckResult, details map[string]any) map[string]any {
 	out := auditDetailsWithContext(ctx, details)
 	out["authz_decision"] = decision.Allowed
-	out["reason"] = decision.Reason
+	if _, ok := out["reason"]; ok {
+		out["authz_reason"] = decision.Reason
+	} else {
+		out["reason"] = decision.Reason
+	}
 	out["reason_code"] = authzReasonCode(decision)
 	out["matched_permissions"] = decision.MatchedPermissions
 	out["matched_sources"] = decision.MatchedBy

@@ -387,6 +387,7 @@ type BatchEmployeeResult struct {
 	RowNumber  int    `json:"row_number,omitempty"`
 	EmployeeID string `json:"employee_id"`
 	Success    bool   `json:"success"`
+	Action     string `json:"action,omitempty"`
 	Code       string `json:"code,omitempty"`
 	Message    string `json:"message,omitempty"`
 }

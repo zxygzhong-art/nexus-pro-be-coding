@@ -121,41 +121,46 @@ func (c HRService) ExportEmployees(ctx RequestContext, queries ...EmployeeQuery)
 	if len(queries) > 0 {
 		query = normalizeEmployeeQuery(queries[0])
 	}
+	items, _, err := c.exportEmployees(ctx, query)
+	return items, err
+}
+
+func (c HRService) exportEmployees(ctx RequestContext, query EmployeeQuery) ([]Employee, CheckResult, error) {
 	account, decision, _, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, Action: ActionExport, Context: map[string]any{"filters": employeeQueryApprovalFilters(query)}},
 		AuditTarget{Resource: string(ResourceEmployeeCollection)},
 	)
 	if err != nil {
-		return nil, err
+		return nil, CheckResult{}, err
 	}
 	if err := c.rejectOversizedEmployeeExport(ctx, query, decision); err != nil {
-		return nil, err
+		return nil, CheckResult{}, err
 	}
 	items, err := c.listEmployeesForQuery(ctx, query)
 	if err != nil {
-		return nil, err
+		return nil, CheckResult{}, err
 	}
 	items, err = c.applyEmployeeDecision(ctx, account, items, decision)
 	if err != nil {
-		return nil, err
+		return nil, CheckResult{}, err
 	}
 	sortEmployees(items, query.Sort)
 	if len(items) > maxEmployeeExportRows {
-		return nil, employeeExportLimitError()
+		return nil, CheckResult{}, employeeExportLimitError()
 	}
 	if err := c.audit(ctx, "hr.employee.export", string(ResourceEmployeeCollection), "", string(SeverityHigh), auditDecisionDetails(ctx, decision, map[string]any{
 		"filters":           query,
 		"row_count":         len(items),
 		"restricted_fields": restrictedEmployeeFieldPolicies(decision.FieldPolicies),
 	})); err != nil {
-		return nil, err
+		return nil, CheckResult{}, err
 	}
 	c.logInfo(ctx, "employees exported",
 		"row_count", len(items),
 		"restricted_fields", restrictedEmployeeFieldPolicies(decision.FieldPolicies),
 		"scope", decision.EffectiveScope,
 	)
-	return items, nil
+	return items, decision, nil
 }
 
 // DeleteEmployee soft-deletes an employee after authorization and audit checks.
@@ -1530,21 +1535,37 @@ var employeeMapPatchPolicyFields = []employeePatchMapPolicyField{
 }
 
 type employeeExportColumn struct {
+	field  string
 	header string
 	value  func(Employee) string
 }
 
 var employeeExportColumns = []employeeExportColumn{
-	{header: "員工編號", value: func(employee Employee) string { return employee.EmployeeNo }},
-	{header: "姓名", value: func(employee Employee) string { return employee.Name }},
-	{header: "Email", value: func(employee Employee) string { return employee.CompanyEmail }},
-	{header: "部門", value: func(employee Employee) string { return employee.OrgUnitID }},
-	{header: "職位", value: func(employee Employee) string { return employee.Position }},
-	{header: "類別", value: func(employee Employee) string { return employee.Category }},
-	{header: "電話", value: func(employee Employee) string { return employee.Phone }},
-	{header: "狀態", value: func(employee Employee) string { return employeeStatus(employee) }},
-	{header: "到職日期", value: func(employee Employee) string { return formatDate(employee.HireDate) }},
-	{header: "主管員工ID", value: func(employee Employee) string { return employee.ManagerEmployeeID }},
+	{field: "employee_no", header: "員工編號", value: func(employee Employee) string { return employee.EmployeeNo }},
+	{field: "name", header: "姓名", value: func(employee Employee) string { return employee.Name }},
+	{field: "company_email", header: "Email", value: func(employee Employee) string { return employee.CompanyEmail }},
+	{field: "org_unit_id", header: "部門", value: func(employee Employee) string { return employee.OrgUnitID }},
+	{field: "position", header: "職位", value: func(employee Employee) string { return employee.Position }},
+	{field: "category", header: "類別", value: func(employee Employee) string { return employee.Category }},
+	{field: "phone", header: "電話", value: func(employee Employee) string { return employee.Phone }},
+	{field: "employment_status", header: "狀態", value: func(employee Employee) string { return employeeStatus(employee) }},
+	{field: "hire_date", header: "到職日期", value: func(employee Employee) string { return formatDate(employee.HireDate) }},
+	{field: "manager_employee_id", header: "主管員工ID", value: func(employee Employee) string { return employee.ManagerEmployeeID }},
+}
+
+func employeeExportColumnsForPolicy(policies map[string]string) []employeeExportColumn {
+	out := make([]employeeExportColumn, 0, len(employeeExportColumns))
+	for _, column := range employeeExportColumns {
+		if employeeFieldPolicyHidden(policies[column.field]) {
+			continue
+		}
+		out = append(out, column)
+	}
+	return out
+}
+
+func employeeFieldPolicyHidden(effect string) bool {
+	return effect == "hide" || effect == "deny"
 }
 
 const (
@@ -2947,7 +2968,8 @@ const maxEmployeeExportRows = 5000
 
 // ExportEmployeesCSV renders authorized employee results as a CSV download.
 func (c HRService) ExportEmployeesCSV(ctx RequestContext, query EmployeeQuery) ([]byte, string, error) {
-	items, err := c.ExportEmployees(ctx, query)
+	query = normalizeEmployeeQuery(query)
+	items, decision, err := c.exportEmployees(ctx, query)
 	if err != nil {
 		return nil, "", err
 	}
@@ -2957,14 +2979,15 @@ func (c HRService) ExportEmployeesCSV(ctx RequestContext, query EmployeeQuery) (
 	var buf bytes.Buffer
 	buf.Write([]byte{0xEF, 0xBB, 0xBF})
 	w := csv.NewWriter(&buf)
-	headers := make([]string, 0, len(employeeExportColumns))
-	for _, column := range employeeExportColumns {
+	columns := employeeExportColumnsForPolicy(decision.FieldPolicies)
+	headers := make([]string, 0, len(columns))
+	for _, column := range columns {
 		headers = append(headers, column.header)
 	}
 	_ = w.Write(headers)
 	for _, item := range items {
-		record := make([]string, 0, len(employeeExportColumns))
-		for _, column := range employeeExportColumns {
+		record := make([]string, 0, len(columns))
+		for _, column := range columns {
 			record = append(record, column.value(item))
 		}
 		_ = w.Write(record)
@@ -2995,23 +3018,72 @@ func employeeExportLimitError() error {
 
 // BatchDeleteEmployees soft-deletes multiple employees and returns per-row results.
 func (c HRService) BatchDeleteEmployees(ctx RequestContext, input BatchDeleteEmployeesInput) (BatchEmployeeResponse, error) {
-	if strings.TrimSpace(input.Reason) == "" {
+	reason := strings.TrimSpace(input.Reason)
+	if reason == "" {
 		return BatchEmployeeResponse{}, BadRequest("reason is required")
 	}
-	results := make([]BatchEmployeeResult, 0, len(input.EmployeeIDs))
-	for _, id := range uniqueStrings(input.EmployeeIDs) {
-		employee, err := c.DeleteEmployee(ctx, id)
+	ids := uniqueStrings(input.EmployeeIDs)
+	if len(ids) == 0 {
+		return BatchEmployeeResponse{}, BadRequest("employee_ids is required")
+	}
+	account, collectionDecision, _, err := c.Authorize(ctx,
+		CheckRequest{
+			ApplicationCode: AppHR,
+			ResourceType:    ResourceEmployee,
+			Action:          ActionDelete,
+			Context: map[string]any{"filters": map[string]any{
+				"employee_ids": ids,
+			}},
+		},
+		AuditTarget{Event: "hr.employee.batch_delete", Resource: string(ResourceEmployeeCollection)},
+	)
+	if err != nil {
+		return BatchEmployeeResponse{}, err
+	}
+	checks := make([]CheckRequest, 0, len(ids))
+	for _, id := range ids {
+		checks = append(checks, CheckRequest{
+			ApplicationCode:  AppHR,
+			ResourceType:     ResourceEmployee,
+			ResourceID:       id,
+			TargetEmployeeID: id,
+			Action:           ActionDelete,
+		})
+	}
+	batch, err := c.Authz().BatchCheck(ctx, BatchCheckRequest{Checks: checks})
+	if err != nil {
+		return BatchEmployeeResponse{}, err
+	}
+	if len(batch.Results) != len(ids) {
+		return BatchEmployeeResponse{}, fmt.Errorf("authz batch-check returned %d results for %d employees", len(batch.Results), len(ids))
+	}
+	results := make([]BatchEmployeeResult, 0, len(ids))
+	for i, id := range ids {
+		decision := batch.Results[i]
+		if !decision.Allowed {
+			results = append(results, BatchEmployeeResult{EmployeeID: id, Success: false, Code: authzReasonCode(decision), Message: decision.Reason})
+			continue
+		}
+		employee, accountDisabled, err := c.deleteEmployeeWithDecision(ctx, account, decision, id)
 		if err != nil {
 			results = append(results, BatchEmployeeResult{EmployeeID: id, Success: false, Code: errorCode(err), Message: err.Error()})
 			continue
 		}
-		results = append(results, BatchEmployeeResult{EmployeeID: employee.ID, Success: true})
+		action := "soft_deleted"
+		if accountDisabled {
+			action = "soft_deleted_account_disabled"
+		}
+		results = append(results, BatchEmployeeResult{EmployeeID: employee.ID, Success: true, Action: action})
 	}
-	if err := c.audit(ctx, "hr.employee.batch_delete", string(ResourceEmployeeCollection), "", string(SeverityHigh), map[string]any{
-		"reason":    input.Reason,
-		"row_count": len(results),
-		"results":   results,
-	}); err != nil {
+	auditDetails := auditDecisionDetails(ctx, collectionDecision, map[string]any{
+		"reason":                 reason,
+		"requested_employee_ids": ids,
+		"succeeded_employee_ids": batchEmployeeResultIDs(results, true),
+		"failed_employee_ids":    batchEmployeeResultIDs(results, false),
+		"row_count":              len(results),
+		"results":                results,
+	})
+	if err := c.audit(ctx, "hr.employee.batch_delete", string(ResourceEmployeeCollection), "", string(SeverityHigh), auditDetails); err != nil {
 		return BatchEmployeeResponse{}, err
 	}
 	succeeded := 0
@@ -3027,6 +3099,76 @@ func (c HRService) BatchDeleteEmployees(ctx RequestContext, input BatchDeleteEmp
 		"reason_present", strings.TrimSpace(input.Reason) != "",
 	)
 	return BatchEmployeeResponse{Results: results}, nil
+}
+
+func (c HRService) deleteEmployeeWithDecision(ctx RequestContext, account Account, decision CheckResult, id string) (Employee, bool, error) {
+	var employee Employee
+	accountDisabled := false
+	if err := c.withTransaction(ctx, func(tx HRService) error {
+		next, ok, err := tx.store.GetEmployee(goContext(ctx), ctx.TenantID, id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("employee", id)
+		}
+		if employeeStatus(next) == string(EmployeeStatusDeleted) {
+			return Conflict("employee is already deleted")
+		}
+		visible, err := tx.filterEmployeesByDecision(ctx, account, []Employee{next}, decision)
+		if err != nil {
+			return err
+		}
+		if len(visible) == 0 {
+			return forbiddenDataScope("employee is outside data scope")
+		}
+		before := next
+		next.Status = string(EmployeeStatusDeleted)
+		next.EmploymentStatus = string(EmployeeStatusDeleted)
+		next.UpdatedAt = tx.Now()
+		next = tx.appendHistoryForChangedEmployment(before, next, "刪除")
+		if err := tx.store.UpsertEmployee(goContext(ctx), next); err != nil {
+			return err
+		}
+		if next.AccountID != "" {
+			linkedAccount, ok, err := tx.store.GetAccount(goContext(ctx), ctx.TenantID, next.AccountID)
+			if err != nil {
+				return err
+			}
+			if ok {
+				linkedAccount.Status = string(AccountStatusDisabled)
+				if err := tx.store.UpsertAccount(goContext(ctx), linkedAccount); err != nil {
+					return err
+				}
+				accountDisabled = true
+			}
+		}
+		if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeOffboarded), next.ID, map[string]any{"employee_id": next.ID, "status": string(EmployeeStatusDeleted)}); err != nil {
+			return err
+		}
+		if err := tx.audit(ctx, "hr.employee.delete", string(ResourceEmployee), next.ID, string(SeverityHigh), auditDecisionDetails(ctx, decision, map[string]any{
+			"previous_status":  employeeStatus(before),
+			"status":           string(EmployeeStatusDeleted),
+			"account_disabled": accountDisabled,
+		})); err != nil {
+			return err
+		}
+		employee = next
+		return nil
+	}); err != nil {
+		return Employee{}, false, err
+	}
+	return employee, accountDisabled, nil
+}
+
+func batchEmployeeResultIDs(results []BatchEmployeeResult, success bool) []string {
+	ids := make([]string, 0)
+	for _, result := range results {
+		if result.Success == success {
+			ids = append(ids, result.EmployeeID)
+		}
+	}
+	return ids
 }
 
 // InviteEmployee links or prepares an account invitation for an employee.

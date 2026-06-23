@@ -290,10 +290,10 @@ paths:
         content:
           application/json:
             schema:
-	              type: object
-	              properties:
-	                mode: {type: string, enum: [create, update, upsert], default: create}
-	                failure_policy: {type: string, enum: [all_or_nothing], default: all_or_nothing}
+              type: object
+              properties:
+                mode: {type: string, enum: [create, update, upsert], default: create}
+                failure_policy: {type: string, enum: [all_or_nothing], default: all_or_nothing}
       responses:
         "200":
           description: Confirmed import session
@@ -311,6 +311,8 @@ paths:
     get:
       summary: Export employees as CSV
       parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
         - {name: keyword, in: query, schema: {type: string}}
         - {name: department_id, in: query, schema: {type: string}}
         - {name: employment_status, in: query, schema: {type: string}}
@@ -330,6 +332,9 @@ paths:
         "500": {$ref: "#/components/responses/InternalError"}
     post:
       summary: Export filtered employees as JSON
+      parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
       requestBody:
         content:
           application/json:
@@ -351,6 +356,9 @@ paths:
   /v1/hr/employees/batch-delete:
     post:
       summary: Soft delete employees in batch
+      parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
       requestBody:
         required: true
         content:
@@ -366,6 +374,12 @@ paths:
       responses:
         "200":
           description: Batch delete results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BatchEmployeeDataResponse"
+        "207":
+          description: Batch delete results with per-employee failures
           content:
             application/json:
               schema:
@@ -829,6 +843,8 @@ paths:
     get:
       summary: List audit logs
       parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
@@ -865,6 +881,18 @@ components:
       in: query
       schema:
         type: string
+    ApprovalConfirmed:
+      name: X-Approval-Confirmed
+      in: header
+      schema:
+        type: boolean
+      description: Required for high-risk actions when no approved workflow instance is supplied.
+    ApprovalInstanceID:
+      name: X-Approval-Instance-ID
+      in: header
+      schema:
+        type: string
+      description: Approved workflow instance bound to the high-risk action target or filters.
     EmployeeID:
       name: id
       in: path
@@ -1325,25 +1353,25 @@ components:
     EmployeeImportSession:
       type: object
       properties:
-	        id: {type: string}
-	        tenant_id: {type: string}
-	        filename: {type: string}
-	        object_provider: {type: string}
-	        object_bucket: {type: string}
-	        object_key: {type: string}
-	        content_type: {type: string}
-	        size_bytes: {type: integer, format: int64}
-	        sha256: {type: string}
-	        status: {type: string}
-	        rows:
-	          type: array
-	          items: {type: object}
-	        summary:
-	          type: object
-	          additionalProperties: true
-	        created_by_account_id: {type: string}
-	        confirmed_by_account_id: {type: string}
-	        created_at: {type: string, format: date-time}
+        id: {type: string}
+        tenant_id: {type: string}
+        filename: {type: string}
+        object_provider: {type: string}
+        object_bucket: {type: string}
+        object_key: {type: string}
+        content_type: {type: string}
+        size_bytes: {type: integer, format: int64}
+        sha256: {type: string}
+        status: {type: string}
+        rows:
+          type: array
+          items: {type: object}
+        summary:
+          type: object
+          additionalProperties: true
+        created_by_account_id: {type: string}
+        confirmed_by_account_id: {type: string}
+        created_at: {type: string, format: date-time}
         expires_at: {type: string, format: date-time}
         confirmed_at: {type: string, format: date-time}
     BatchEmployeeResponse:
@@ -1356,6 +1384,9 @@ components:
             properties:
               employee_id: {type: string}
               success: {type: boolean}
+              action:
+                type: string
+                enum: [soft_deleted, soft_deleted_account_disabled]
               code: {type: string}
               message: {type: string}
     Error:

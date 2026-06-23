@@ -932,6 +932,60 @@ func TestEmployeeFieldPolicyHidesDenyFieldsAndBlocksWrites(t *testing.T) {
 	}
 }
 
+func TestEmployeeExportAppliesPermissionScopedFieldPoliciesToJSONAndCSV(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-hr",
+		TenantID: "tenant-1",
+		Name:     "Employee Read Export",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "read", Scope: "all"},
+			{Resource: "hr.employee", Action: "export", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertFieldPolicy(context.Background(), domain.FieldPolicy{
+		ID:              "fp-export-phone",
+		TenantID:        "tenant-1",
+		ApplicationCode: "hr",
+		ResourceType:    "employee",
+		FieldName:       "phone",
+		Effect:          "hide",
+		PermissionID:    "hr.employee.export",
+		CreatedAt:       now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-hr"}, CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", EmployeeNo: "E0001", Name: "Employee One", Phone: "0912345678", Status: "active", CreatedAt: now})
+	svc := service.New(store)
+
+	page, err := svc.HR().QueryEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.EmployeeQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].Phone != "0912345678" {
+		t.Fatalf("expected read permission to keep phone visible, got %+v", page.Items)
+	}
+
+	exportCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	exported, err := svc.HR().ExportEmployees(exportCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(exported) != 1 || exported[0].Phone != "" {
+		t.Fatalf("expected JSON export to hide phone, got %+v", exported)
+	}
+	raw, _, err := svc.HR().ExportEmployeesCSV(exportCtx, domain.EmployeeQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	csvBody := string(raw)
+	if strings.Contains(csvBody, "電話") || strings.Contains(csvBody, "0912345678") {
+		t.Fatalf("expected CSV export to omit hidden phone column/value, got %q", csvBody)
+	}
+}
+
 func TestEmployeeExportRequiresApprovalAndAudits(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1803,6 +1857,100 @@ func TestEmployeeReinstatementRequiresTransitionAndKeepsDeletedTerminal(t *testi
 	}
 	if _, err := svc.HR().TransitionEmployeeStatus(ctx, "emp-delete", domain.StatusTransitionInput{Status: "active"}); err == nil {
 		t.Fatal("expected deleted employee reactivation to be rejected")
+	}
+}
+
+func TestBatchDeleteEmployeesUsesPerEmployeeResultsAndAudits(t *testing.T) {
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "delete", Scope: "all"},
+	})
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	ctx.ApprovalConfirmed = true
+	ctx.RequestID = "req-batch-delete"
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-linked", TenantID: "tenant-1", Status: "active", CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-linked",
+		TenantID:         "tenant-1",
+		Name:             "Linked Employee",
+		AccountID:        "acct-linked",
+		Status:           "active",
+		EmploymentStatus: "active",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-deleted",
+		TenantID:         "tenant-1",
+		Name:             "Already Deleted",
+		Status:           "deleted",
+		EmploymentStatus: "deleted",
+		CreatedAt:        now.Add(time.Minute),
+		UpdatedAt:        now.Add(time.Minute),
+	})
+
+	result, err := svc.HR().BatchDeleteEmployees(ctx, domain.BatchDeleteEmployeesInput{
+		EmployeeIDs: []string{"emp-linked", "emp-deleted"},
+		Reason:      "cleanup",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Results) != 2 || !result.Results[0].Success || result.Results[0].Action != "soft_deleted_account_disabled" || result.Results[1].Success {
+		t.Fatalf("unexpected batch delete result: %+v", result)
+	}
+	if result.Results[1].Code != "conflict" {
+		t.Fatalf("expected already deleted row to fail with conflict, got %+v", result.Results[1])
+	}
+	linked, ok, err := store.GetAccount(context.Background(), "tenant-1", "acct-linked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || linked.Status != "disabled" {
+		t.Fatalf("expected linked account to be disabled, got %+v", linked)
+	}
+	logs, err := store.ListAuditLogs(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deleteLog, ok := findAuditLog(logs, "hr.employee.delete")
+	if !ok || deleteLog.Target != "emp-linked" || deleteLog.Details["account_disabled"] != true {
+		t.Fatalf("expected per-employee delete audit, got %+v", logs)
+	}
+	batchLog, ok := findAuditLog(logs, "hr.employee.batch_delete")
+	if !ok || batchLog.TraceID != "req-batch-delete" || batchLog.Details["reason"] != "cleanup" {
+		t.Fatalf("expected batch delete audit, got %+v", logs)
+	}
+	succeeded, _ := batchLog.Details["succeeded_employee_ids"].([]string)
+	failed, _ := batchLog.Details["failed_employee_ids"].([]string)
+	if !stringSliceContains(succeeded, "emp-linked") || !stringSliceContains(failed, "emp-deleted") {
+		t.Fatalf("expected batch audit to record succeeded and failed employee ids, got %+v", batchLog.Details)
+	}
+}
+
+func TestAuditServiceRequiresAuditReadPermission(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", CreatedAt: now})
+	svc := service.New(store)
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+
+	if _, err := svc.Audit().ListLogPage(ctx, domain.PageRequest{}); err == nil {
+		t.Fatal("expected audit log read to require audit permission")
+	}
+
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-audit",
+		TenantID: "tenant-1",
+		Name:     "Audit",
+		Permissions: []domain.Permission{
+			{Resource: "audit.log", Action: "read", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-audit"}, CreatedAt: now})
+	if _, err := svc.Audit().ListLogPage(ctx, domain.PageRequest{}); err != nil {
+		t.Fatalf("expected audit log read with permission to succeed, got %v", err)
 	}
 }
 
