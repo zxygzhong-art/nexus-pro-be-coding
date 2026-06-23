@@ -470,7 +470,13 @@ func (s *Store) NextEmployeeNo(_ context.Context, tenantID, prefix string) (stri
 func (s *Store) filterMemoryEmployeesByQuery(tenantID string, items []Employee, query EmployeeQuery) []Employee {
 	out := make([]Employee, 0, len(items))
 	query = normalizeMemoryEmployeeQuery(query)
+	if query.Scope.DenyAll {
+		return []Employee{}
+	}
 	keyword := strings.ToLower(strings.TrimSpace(query.Keyword))
+	employeeAllowed := memoryStringSet(query.Scope.EmployeeIDs)
+	orgAllowed := memoryStringSet(query.Scope.OrgUnitIDs)
+	statusAllowed := memoryStringSet(query.Scope.Statuses)
 	accounts := map[string]Account{}
 	if keyword != "" {
 		s.mu.RLock()
@@ -481,6 +487,21 @@ func (s *Store) filterMemoryEmployeesByQuery(tenantID string, items []Employee, 
 	}
 	for _, item := range items {
 		status := utils.FirstNonEmpty(item.EmploymentStatus, item.Status)
+		if len(employeeAllowed) > 0 {
+			if _, ok := employeeAllowed[item.ID]; !ok {
+				continue
+			}
+		}
+		if len(orgAllowed) > 0 {
+			if _, ok := orgAllowed[item.OrgUnitID]; !ok {
+				continue
+			}
+		}
+		if len(statusAllowed) > 0 {
+			if _, ok := statusAllowed[status]; !ok {
+				continue
+			}
+		}
 		if query.EmploymentStatus != "deleted" && status == "deleted" {
 			continue
 		}
@@ -511,6 +532,20 @@ func (s *Store) filterMemoryEmployeesByQuery(tenantID string, items []Employee, 
 			}
 		}
 		out = append(out, item)
+	}
+	return out
+}
+
+func memoryStringSet(values []string) map[string]struct{} {
+	if len(values) == 0 {
+		return nil
+	}
+	out := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out[value] = struct{}{}
+		}
 	}
 	return out
 }

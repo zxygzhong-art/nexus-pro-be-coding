@@ -45,6 +45,10 @@ func (a *API) authorize(ctx domain.RequestContext, r *http.Request, resource, ac
 	}
 	if result.RequiresApproval && ctx.ApprovalInstanceID != "" {
 		if err := a.authz.ValidateApprovalInstance(ctx, req); err != nil {
+			auditResult := result
+			auditResult.Allowed = false
+			auditResult.Reason = "approval_required"
+			_ = a.authz.AuditDecision(ctx, req, auditResult)
 			return err
 		}
 	}

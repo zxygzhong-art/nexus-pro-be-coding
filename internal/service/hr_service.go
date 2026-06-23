@@ -133,10 +133,14 @@ func (c HRService) exportEmployees(ctx RequestContext, query EmployeeQuery) ([]E
 	if err != nil {
 		return nil, CheckResult{}, err
 	}
-	if err := c.rejectOversizedEmployeeExport(ctx, query, decision); err != nil {
+	scopedQuery, err := c.employeeQueryWithDecisionScope(ctx, account, query, decision)
+	if err != nil {
 		return nil, CheckResult{}, err
 	}
-	items, err := c.listEmployeesForQuery(ctx, query)
+	if err := c.rejectOversizedEmployeeExport(ctx, scopedQuery); err != nil {
+		return nil, CheckResult{}, err
+	}
+	items, err := c.listEmployeesForQuery(ctx, scopedQuery)
 	if err != nil {
 		return nil, CheckResult{}, err
 	}
@@ -339,21 +343,11 @@ func (c HRService) QueryEmployees(ctx RequestContext, query EmployeeQuery) (Page
 		return PageResponse[Employee]{Items: []Employee{}, Page: query.Page, PageSize: query.PageSize, Sort: query.Sort}, nil
 	}
 	authzAudit := AuthzAudit{service: c.Service, target: AuditTarget{Event: "hr.employee.query", Resource: string(ResourceEmployeeCollection)}, decision: decision}
-	if employeeDecisionCanUseStorePage(decision) {
-		items, total, err := c.store.ListEmployeePageByQuery(goContext(ctx), ctx.TenantID, query)
-		if err != nil {
-			return PageResponse[Employee]{}, err
-		}
-		items, err = c.applyEmployeeDecision(ctx, account, items, decision)
-		if err != nil {
-			return PageResponse[Employee]{}, err
-		}
-		if err := authzAudit.Commit(ctx); err != nil {
-			return PageResponse[Employee]{}, err
-		}
-		return PageResponse[Employee]{Items: items, Total: total, Page: query.Page, PageSize: query.PageSize, Sort: query.Sort}, nil
+	scopedQuery, err := c.employeeQueryWithDecisionScope(ctx, account, query, decision)
+	if err != nil {
+		return PageResponse[Employee]{}, err
 	}
-	items, err := c.listEmployeesForQuery(ctx, query)
+	items, total, err := c.store.ListEmployeePageByQuery(goContext(ctx), ctx.TenantID, scopedQuery)
 	if err != nil {
 		return PageResponse[Employee]{}, err
 	}
@@ -361,9 +355,6 @@ func (c HRService) QueryEmployees(ctx RequestContext, query EmployeeQuery) (Page
 	if err != nil {
 		return PageResponse[Employee]{}, err
 	}
-	sortEmployees(items, query.Sort)
-	total := len(items)
-	items = paginateEmployees(items, query.Page, query.PageSize)
 	if err := authzAudit.Commit(ctx); err != nil {
 		return PageResponse[Employee]{}, err
 	}
@@ -548,7 +539,11 @@ func (c HRService) EmployeeStats(ctx RequestContext, query EmployeeQuery) (Emplo
 		Category:         query.Category,
 		Sort:             query.Sort,
 	})
-	items, err := c.listEmployeesForQuery(ctx, query)
+	scopedQuery, err := c.employeeQueryWithDecisionScope(ctx, account, query, decision)
+	if err != nil {
+		return EmployeeStats{}, err
+	}
+	items, err := c.listEmployeesForQuery(ctx, scopedQuery)
 	if err != nil {
 		return EmployeeStats{}, err
 	}
@@ -595,7 +590,11 @@ func (c HRService) EmployeeOptions(ctx RequestContext) (EmployeeOptions, error) 
 	if !decision.Allowed {
 		return EmployeeOptions{}, forbiddenAuthz(decision)
 	}
-	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+	query, err := c.employeeQueryWithDecisionScope(ctx, account, EmployeeQuery{}, decision)
+	if err != nil {
+		return EmployeeOptions{}, err
+	}
+	employees, err := c.listEmployeesForQuery(ctx, query)
 	if err != nil {
 		return EmployeeOptions{}, err
 	}
@@ -703,13 +702,82 @@ func (c HRService) listEmployeesForQuery(ctx RequestContext, query EmployeeQuery
 	return c.store.ListEmployeesByQuery(goContext(ctx), ctx.TenantID, query)
 }
 
-func employeeDecisionCanUseStorePage(decision CheckResult) bool {
-	switch decision.Scope {
-	case "", ScopeAll, ScopeTenant:
-		return true
-	default:
-		return false
+func (c HRService) employeeQueryWithDecisionScope(ctx RequestContext, account Account, query EmployeeQuery, decision CheckResult) (EmployeeQuery, error) {
+	query = normalizeEmployeeQuery(query)
+	scope, err := c.employeeScopeConstraint(ctx, account, decision)
+	if err != nil {
+		return EmployeeQuery{}, err
 	}
+	query.Scope = scope
+	return query, nil
+}
+
+func (c HRService) employeeScopeConstraint(ctx RequestContext, account Account, decision CheckResult) (domain.EmployeeScopeConstraint, error) {
+	switch decision.Scope {
+	case "", ScopeAll, ScopeTenant, ScopeSystem:
+		return domain.EmployeeScopeConstraint{}, nil
+	case ScopeSelf, ScopeOwn:
+		ids := stringSliceFromAny(decision.Conditions["employee_ids"])
+		if len(ids) == 0 && account.EmployeeID != "" {
+			ids = []string{account.EmployeeID}
+		}
+		return employeeScopeByIDs(ids), nil
+	case ScopeDepartment, ScopeAssignedOrgUnits:
+		return employeeScopeByOrgUnits(stringSliceFromAny(decision.Conditions["org_unit_ids"])), nil
+	case ScopeDepartmentSubtree:
+		orgIDs := stringSliceFromAny(decision.Conditions["org_unit_ids"])
+		if len(orgIDs) == 0 && account.EmployeeID != "" {
+			employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, account.EmployeeID)
+			if err != nil {
+				return domain.EmployeeScopeConstraint{}, err
+			}
+			if ok && employee.OrgUnitID != "" {
+				units, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+				if err != nil {
+					return domain.EmployeeScopeConstraint{}, err
+				}
+				orgIDs = orgUnitIDsInSubtree(units, []string{employee.OrgUnitID})
+			}
+		}
+		return employeeScopeByOrgUnits(orgIDs), nil
+	case ScopeDirectReports:
+		return employeeScopeByIDs(stringSliceFromAny(decision.Conditions["employee_ids"])), nil
+	case ScopeCustomCondition:
+		return employeeScopeFromConditions(decision.Conditions), nil
+	default:
+		return domain.EmployeeScopeConstraint{DenyAll: true}, nil
+	}
+}
+
+func employeeScopeByIDs(ids []string) domain.EmployeeScopeConstraint {
+	ids = uniqueStrings(ids)
+	if len(ids) == 0 {
+		return domain.EmployeeScopeConstraint{DenyAll: true}
+	}
+	return domain.EmployeeScopeConstraint{EmployeeIDs: ids}
+}
+
+func employeeScopeByOrgUnits(ids []string) domain.EmployeeScopeConstraint {
+	ids = uniqueStrings(ids)
+	if len(ids) == 0 {
+		return domain.EmployeeScopeConstraint{DenyAll: true}
+	}
+	return domain.EmployeeScopeConstraint{OrgUnitIDs: ids}
+}
+
+func employeeScopeFromConditions(conditions map[string]any) domain.EmployeeScopeConstraint {
+	scope := domain.EmployeeScopeConstraint{
+		EmployeeIDs: uniqueStrings(stringSliceFromAny(conditions["employee_ids"])),
+		OrgUnitIDs:  uniqueStrings(stringSliceFromAny(conditions["org_unit_ids"])),
+		Statuses:    uniqueStrings(stringSliceFromAny(conditions["employee_statuses"])),
+	}
+	if len(scope.Statuses) == 0 {
+		scope.Statuses = uniqueStrings(stringSliceFromAny(conditions["statuses"]))
+	}
+	if len(scope.EmployeeIDs) == 0 && len(scope.OrgUnitIDs) == 0 && len(scope.Statuses) == 0 {
+		scope.DenyAll = true
+	}
+	return scope
 }
 
 func normalizeEmployeeQuery(query EmployeeQuery) EmployeeQuery {
@@ -3142,15 +3210,13 @@ func (c HRService) ExportEmployeesCSV(ctx RequestContext, query EmployeeQuery) (
 	return buf.Bytes(), "employees.csv", nil
 }
 
-func (c HRService) rejectOversizedEmployeeExport(ctx RequestContext, query EmployeeQuery, decision CheckResult) error {
-	if employeeDecisionCanUseStorePage(decision) {
-		total, err := c.store.CountEmployeesByQuery(goContext(ctx), ctx.TenantID, query)
-		if err != nil {
-			return err
-		}
-		if total > maxEmployeeExportRows {
-			return employeeExportLimitError()
-		}
+func (c HRService) rejectOversizedEmployeeExport(ctx RequestContext, query EmployeeQuery) error {
+	total, err := c.store.CountEmployeesByQuery(goContext(ctx), ctx.TenantID, query)
+	if err != nil {
+		return err
+	}
+	if total > maxEmployeeExportRows {
+		return employeeExportLimitError()
 	}
 	return nil
 }
@@ -3218,8 +3284,15 @@ func (c HRService) BatchDeleteEmployees(ctx RequestContext, input BatchDeleteEmp
 		}
 		results = append(results, BatchEmployeeResult{EmployeeID: employee.ID, Success: true, Action: action})
 	}
+	succeeded := 0
+	for _, result := range results {
+		if result.Success {
+			succeeded++
+		}
+	}
 	auditDetails := auditDecisionDetails(ctx, collectionDecision, map[string]any{
 		"reason":                 reason,
+		"result":                 batchEmployeeAuditResult(succeeded, len(results)),
 		"requested_employee_ids": ids,
 		"succeeded_employee_ids": batchEmployeeResultIDs(results, true),
 		"failed_employee_ids":    batchEmployeeResultIDs(results, false),
@@ -3229,12 +3302,6 @@ func (c HRService) BatchDeleteEmployees(ctx RequestContext, input BatchDeleteEmp
 	if err := c.audit(ctx, "hr.employee.batch_delete", string(ResourceEmployeeCollection), "", string(SeverityHigh), auditDetails); err != nil {
 		return BatchEmployeeResponse{}, err
 	}
-	succeeded := 0
-	for _, result := range results {
-		if result.Success {
-			succeeded++
-		}
-	}
 	c.logWarn(ctx, "employee batch delete completed",
 		"requested_count", len(uniqueStrings(input.EmployeeIDs)),
 		"succeeded_count", succeeded,
@@ -3242,6 +3309,17 @@ func (c HRService) BatchDeleteEmployees(ctx RequestContext, input BatchDeleteEmp
 		"reason_present", strings.TrimSpace(input.Reason) != "",
 	)
 	return BatchEmployeeResponse{Results: results}, nil
+}
+
+func batchEmployeeAuditResult(succeeded, total int) string {
+	switch {
+	case total <= 0 || succeeded == 0:
+		return "failed"
+	case succeeded < total:
+		return "partial_success"
+	default:
+		return "success"
+	}
 }
 
 func (c HRService) deleteEmployeeWithDecision(ctx RequestContext, account Account, decision CheckResult, id string) (Employee, bool, error) {

@@ -281,13 +281,23 @@ type UpdateEmployeeInput struct {
 
 // EmployeeQuery contains filters, pagination, and sorting for employee lists.
 type EmployeeQuery struct {
-	Keyword          string `json:"keyword,omitempty"`
-	DepartmentID     string `json:"department_id,omitempty"`
-	EmploymentStatus string `json:"employment_status,omitempty"`
-	Category         string `json:"category,omitempty"`
-	Page             int    `json:"page,omitempty"`
-	PageSize         int    `json:"page_size,omitempty"`
-	Sort             string `json:"sort,omitempty"`
+	Keyword          string                  `json:"keyword,omitempty"`
+	DepartmentID     string                  `json:"department_id,omitempty"`
+	EmploymentStatus string                  `json:"employment_status,omitempty"`
+	Category         string                  `json:"category,omitempty"`
+	Page             int                     `json:"page,omitempty"`
+	PageSize         int                     `json:"page_size,omitempty"`
+	Sort             string                  `json:"sort,omitempty"`
+	Scope            EmployeeScopeConstraint `json:"-"`
+}
+
+// EmployeeScopeConstraint carries an already-authorized data-scope predicate
+// from service authorization into repository employee queries.
+type EmployeeScopeConstraint struct {
+	EmployeeIDs []string `json:"-"`
+	OrgUnitIDs  []string `json:"-"`
+	Statuses    []string `json:"-"`
+	DenyAll     bool     `json:"-"`
 }
 
 // EmployeeStats summarizes employee counts for dashboard surfaces.

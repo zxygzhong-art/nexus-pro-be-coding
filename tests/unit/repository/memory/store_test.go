@@ -67,6 +67,18 @@ func TestListEmployeePageByQueryMatchesMemoryFiltering(t *testing.T) {
 	if len(items) != 1 || items[0].ID != "emp-2" {
 		t.Fatalf("items = %#v, want newest active employee", items)
 	}
+
+	scoped, scopedTotal, err := store.ListEmployeePageByQuery(ctx, "tenant-1", domain.EmployeeQuery{
+		Page:     1,
+		PageSize: 2,
+		Scope:    domain.EmployeeScopeConstraint{EmployeeIDs: []string{"emp-1"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if scopedTotal != 1 || len(scoped) != 1 || scoped[0].ID != "emp-1" {
+		t.Fatalf("scoped page = %#v total=%d, want only emp-1", scoped, scopedTotal)
+	}
 }
 
 func TestWithTenantTransactionCommitsAndRollsBack(t *testing.T) {

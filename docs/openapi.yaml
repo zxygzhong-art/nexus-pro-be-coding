@@ -1493,6 +1493,7 @@ components:
                 - permission_missing
                 - menu_denied
                 - button_denied
+                - field_denied
                 - data_scope_denied
                 - approval_required
             field_errors:

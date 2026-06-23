@@ -84,9 +84,19 @@ func ValidationFailed(message string, fields []FieldError) *AppError {
 		Status:      400,
 		Code:        "validation_failed",
 		PublicCode:  firstFieldErrorCode(fields, ErrorCodeValidationFailed),
+		ReasonCode:  firstFieldReasonCode(fields),
 		Message:     message,
 		FieldErrors: fields,
 	}
+}
+
+func firstFieldReasonCode(fields []FieldError) string {
+	for _, field := range fields {
+		if field.Code == "field_denied" {
+			return "field_denied"
+		}
+	}
+	return ""
 }
 
 // ImportValidationFailed returns a 400 error with row-level import failures.

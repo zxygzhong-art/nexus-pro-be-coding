@@ -541,10 +541,18 @@ func (s *Store) ListEmployeesByQuery(execCtx context.Context, tenantID string, q
 	if err != nil {
 		return nil, err
 	}
-	return mapSlice(items, fromEmployee), nil
+	return filterPostgresEmployeesByScope(mapSlice(items, fromEmployee), query.Scope), nil
 }
 
 func (s *Store) ListEmployeePageByQuery(execCtx context.Context, tenantID string, query domain.EmployeeQuery) ([]domain.Employee, int, error) {
+	if employeeQueryHasScope(query) {
+		items, err := s.ListEmployeesByQuery(execCtx, tenantID, query)
+		if err != nil {
+			return nil, 0, err
+		}
+		page, pageSize := normalizePostgresEmployeePage(query)
+		return paginatePostgresEmployees(items, page, pageSize), len(items), nil
+	}
 	params := sqlc.CountEmployeesFilteredParams{
 		TenantID:         tenantID,
 		Keyword:          query.Keyword,
@@ -581,6 +589,13 @@ func (s *Store) ListEmployeePageByQuery(execCtx context.Context, tenantID string
 }
 
 func (s *Store) CountEmployeesByQuery(execCtx context.Context, tenantID string, query domain.EmployeeQuery) (int, error) {
+	if employeeQueryHasScope(query) {
+		items, err := s.ListEmployeesByQuery(execCtx, tenantID, query)
+		if err != nil {
+			return 0, err
+		}
+		return len(items), nil
+	}
 	total, err := s.q.CountEmployeesFiltered(execCtx, sqlc.CountEmployeesFilteredParams{
 		TenantID:         tenantID,
 		Keyword:          query.Keyword,
@@ -592,6 +607,83 @@ func (s *Store) CountEmployeesByQuery(execCtx context.Context, tenantID string, 
 		return 0, err
 	}
 	return int(total), nil
+}
+
+func employeeQueryHasScope(query domain.EmployeeQuery) bool {
+	return query.Scope.DenyAll || len(query.Scope.EmployeeIDs) > 0 || len(query.Scope.OrgUnitIDs) > 0 || len(query.Scope.Statuses) > 0
+}
+
+func filterPostgresEmployeesByScope(items []domain.Employee, scope domain.EmployeeScopeConstraint) []domain.Employee {
+	if scope.DenyAll {
+		return []domain.Employee{}
+	}
+	employeeAllowed := postgresStringSet(scope.EmployeeIDs)
+	orgAllowed := postgresStringSet(scope.OrgUnitIDs)
+	statusAllowed := postgresStringSet(scope.Statuses)
+	if len(employeeAllowed) == 0 && len(orgAllowed) == 0 && len(statusAllowed) == 0 {
+		return items
+	}
+	out := make([]domain.Employee, 0, len(items))
+	for _, item := range items {
+		status := utils.FirstNonEmpty(item.EmploymentStatus, item.Status)
+		if len(employeeAllowed) > 0 {
+			if _, ok := employeeAllowed[item.ID]; !ok {
+				continue
+			}
+		}
+		if len(orgAllowed) > 0 {
+			if _, ok := orgAllowed[item.OrgUnitID]; !ok {
+				continue
+			}
+		}
+		if len(statusAllowed) > 0 {
+			if _, ok := statusAllowed[status]; !ok {
+				continue
+			}
+		}
+		out = append(out, item)
+	}
+	return out
+}
+
+func postgresStringSet(values []string) map[string]struct{} {
+	if len(values) == 0 {
+		return nil
+	}
+	out := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value != "" {
+			out[value] = struct{}{}
+		}
+	}
+	return out
+}
+
+func normalizePostgresEmployeePage(query domain.EmployeeQuery) (int, int) {
+	page := query.Page
+	if page <= 0 {
+		page = 1
+	}
+	pageSize := query.PageSize
+	if pageSize <= 0 {
+		pageSize = 20
+	}
+	return page, pageSize
+}
+
+func paginatePostgresEmployees(items []domain.Employee, page, pageSize int) []domain.Employee {
+	start := (page - 1) * pageSize
+	if start >= len(items) {
+		return []domain.Employee{}
+	}
+	end := start + pageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	out := make([]domain.Employee, end-start)
+	copy(out, items[start:end])
+	return out
 }
 
 func (s *Store) NextEmployeeNo(execCtx context.Context, tenantID, prefix string) (string, error) {

@@ -424,6 +424,7 @@ func (c *Service) resolveAccess(ctx RequestContext, account Account) ([]Permissi
 
 func (c *Service) audit(ctx RequestContext, action, resource, target, severity string, details map[string]any) error {
 	details = auditDetailsWithContext(ctx, details)
+	result := auditResultFromDetails(details)
 	traceID := ctx.TraceID
 	if traceID == "" {
 		traceID = ctx.RequestID
@@ -435,11 +436,33 @@ func (c *Service) audit(ctx RequestContext, action, resource, target, severity s
 		Action:         action,
 		Resource:       resource,
 		Target:         target,
+		Result:         result,
 		Severity:       severity,
 		TraceID:        traceID,
 		Details:        details,
 		CreatedAt:      c.Now(),
 	})
+}
+
+func auditResultFromDetails(details map[string]any) string {
+	if result := strings.TrimSpace(stringFromAny(details["result"])); result != "" {
+		return result
+	}
+	if reasonCode := strings.TrimSpace(stringFromAny(details["reason_code"])); reasonCode == "approval_required" {
+		return "approval_required"
+	}
+	if allowed, ok := details["authz_decision"].(bool); ok {
+		if !allowed {
+			return "denied"
+		}
+		if requiresApproval, ok := details["requires_approval"].(bool); ok && requiresApproval {
+			if strings.TrimSpace(stringFromAny(details["approval_method"])) == "" {
+				return "approval_required"
+			}
+		}
+		return "allowed"
+	}
+	return "success"
 }
 
 func forbiddenAuthz(decision CheckResult) error {
@@ -451,6 +474,9 @@ func forbiddenDataScope(message string) error {
 }
 
 func authzReasonCode(decision CheckResult) string {
+	if decision.Reason == "approval_required" {
+		return "approval_required"
+	}
 	switch decision.Reason {
 	case "missing permission":
 		switch decision.Action {

@@ -779,6 +779,9 @@ func TestEmployeeExportAuditUsesOpenTelemetryTraceID(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected employee export audit log, got %+v", logs)
 	}
+	if exportLog.Result == "" {
+		t.Fatalf("expected employee export audit result, got %+v", exportLog)
+	}
 	if exportLog.TraceID == "" || exportLog.TraceID == "req-export-trace" {
 		t.Fatalf("expected audit trace_id from OpenTelemetry span, got %+v", exportLog)
 	}

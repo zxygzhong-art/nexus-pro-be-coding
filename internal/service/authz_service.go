@@ -66,6 +66,11 @@ func (c AuthzService) shouldAuditRouteAuthzCheck(ctx RequestContext, result Chec
 	return result.RequiresApproval && ctx.ApprovalInstanceID == "" && !ctx.ApprovalConfirmed
 }
 
+// AuditDecision records an authorization decision that was finalized in the API layer.
+func (c AuthzService) AuditDecision(ctx RequestContext, req CheckRequest, result CheckResult) error {
+	return c.auditAuthzTarget(ctx, AuditTarget{}.fromRequest(req), result)
+}
+
 // ValidateApprovalInstance verifies approval evidence for a high-risk request.
 func (c AuthzService) ValidateApprovalInstance(ctx RequestContext, req CheckRequest) error {
 	return c.Service.ValidateApprovalInstance(ctx, req)
@@ -384,22 +389,63 @@ func (c *Service) fieldPolicyDecision(ctx RequestContext, applicationCode Applic
 	if err != nil {
 		return nil, err
 	}
-	if len(policies) == 0 {
-		return nil, nil
-	}
-	out := map[string]string{}
+	out := defaultFieldPolicies(applicationCode, resourceType)
+	explicitRestrictions := map[string]string{}
+	explicitAllows := map[string]struct{}{}
 	for _, policy := range policies {
 		if !fieldPolicyApplies(policy, permissionKey, matchedPermissions) {
 			continue
 		}
-		if current, ok := out[policy.FieldName]; !ok || fieldPolicyEffectRank(policy.Effect) > fieldPolicyEffectRank(current) {
-			out[policy.FieldName] = policy.Effect
+		field := strings.TrimSpace(policy.FieldName)
+		if field == "" {
+			continue
+		}
+		effect := strings.TrimSpace(policy.Effect)
+		if effect == "allow" {
+			explicitAllows[field] = struct{}{}
+			continue
+		}
+		if current, ok := explicitRestrictions[field]; !ok || fieldPolicyEffectRank(effect) > fieldPolicyEffectRank(current) {
+			explicitRestrictions[field] = effect
+		}
+	}
+	for field, effect := range explicitRestrictions {
+		out[field] = effect
+	}
+	for field := range explicitAllows {
+		if _, restricted := explicitRestrictions[field]; !restricted {
+			delete(out, field)
 		}
 	}
 	if len(out) == 0 {
 		return nil, nil
 	}
 	return out, nil
+}
+
+func defaultFieldPolicies(applicationCode ApplicationCode, resourceType ResourceType) map[string]string {
+	if applicationCode != AppHR || resourceType != ResourceEmployee {
+		return map[string]string{}
+	}
+	return map[string]string{
+		"personal_email":          "mask",
+		"phone":                   "mask",
+		"mobile_phone":            "mask",
+		"address":                 "mask",
+		"communication_address":   "mask",
+		"emergency_contact_name":  "mask",
+		"emergency_name":          "mask",
+		"emergency_contact_phone": "mask",
+		"emergency_phone":         "mask",
+		"national_id":             "mask",
+		"passport_no":             "mask",
+		"arc_no":                  "mask",
+		"tax_id":                  "mask",
+		"work_permit_no":          "mask",
+		"insurance_info":          "mask",
+		"labor_insurance_salary":  "mask",
+		"health_insurance_amount": "mask",
+	}
 }
 
 func fieldPolicyApplies(policy FieldPolicy, permissionKey string, matchedPermissions []string) bool {

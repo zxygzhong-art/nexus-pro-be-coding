@@ -904,7 +904,7 @@ func TestEmployeeFieldPolicyHidesDenyFieldsAndBlocksWrites(t *testing.T) {
 		t.Fatalf("expected field policy update error, got %v", err)
 	}
 	appErr, ok := domain.AsAppError(err)
-	if !ok || len(appErr.FieldErrors) == 0 || appErr.FieldErrors[0].Code != "field_denied" {
+	if !ok || appErr.ReasonCode != "field_denied" || len(appErr.FieldErrors) == 0 || appErr.FieldErrors[0].Code != "field_denied" {
 		t.Fatalf("expected field_denied error code, got %v", err)
 	}
 
@@ -956,6 +956,7 @@ func TestEmployeeExportAppliesPermissionScopedFieldPoliciesToJSONAndCSV(t *testi
 		PermissionID:    "hr.employee.export",
 		CreatedAt:       now,
 	})
+	allowEmployeeSensitiveFieldsForPermission(t, store, now, "hr.employee.read")
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-hr"}, CreatedAt: now})
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", EmployeeNo: "E0001", Name: "Employee One", Phone: "0912345678", Status: "active", CreatedAt: now})
 	svc := service.New(store)
@@ -1318,6 +1319,7 @@ func TestEmployeeAggregateCreatePatchAndDetail(t *testing.T) {
 		CreatedAt: now,
 	})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-hr"}, CreatedAt: now})
+	allowEmployeeSensitiveFieldsForPermission(t, store, now, "hr.employee.read")
 	svc := service.New(store)
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
@@ -1987,11 +1989,11 @@ func TestBatchDeleteEmployeesUsesPerEmployeeResultsAndAudits(t *testing.T) {
 		t.Fatal(err)
 	}
 	deleteLog, ok := findAuditLog(logs, "hr.employee.delete")
-	if !ok || deleteLog.Target != "emp-linked" || deleteLog.Details["account_disabled"] != true {
+	if !ok || deleteLog.Target != "emp-linked" || deleteLog.Result == "" || deleteLog.Details["account_disabled"] != true {
 		t.Fatalf("expected per-employee delete audit, got %+v", logs)
 	}
 	batchLog, ok := findAuditLog(logs, "hr.employee.batch_delete")
-	if !ok || batchLog.TraceID != "req-batch-delete" || batchLog.Details["reason"] != "cleanup" {
+	if !ok || batchLog.TraceID != "req-batch-delete" || batchLog.Result != "partial_success" || batchLog.Details["reason"] != "cleanup" {
 		t.Fatalf("expected batch delete audit, got %+v", logs)
 	}
 	succeeded, _ := batchLog.Details["succeeded_employee_ids"].([]string)
@@ -2874,6 +2876,42 @@ func findAuditLog(logs []domain.AuditLog, action string) (domain.AuditLog, bool)
 		}
 	}
 	return domain.AuditLog{}, false
+}
+
+func allowEmployeeSensitiveFieldsForPermission(t *testing.T, store *memory.Store, now time.Time, permissionID string) {
+	t.Helper()
+	for _, field := range []string{
+		"personal_email",
+		"phone",
+		"mobile_phone",
+		"address",
+		"communication_address",
+		"emergency_contact_name",
+		"emergency_name",
+		"emergency_contact_phone",
+		"emergency_phone",
+		"national_id",
+		"passport_no",
+		"arc_no",
+		"tax_id",
+		"work_permit_no",
+		"insurance_info",
+		"labor_insurance_salary",
+		"health_insurance_amount",
+	} {
+		if err := store.UpsertFieldPolicy(context.Background(), domain.FieldPolicy{
+			ID:              "fp-allow-" + strings.ReplaceAll(permissionID, ".", "-") + "-" + field,
+			TenantID:        "tenant-1",
+			ApplicationCode: "hr",
+			ResourceType:    "employee",
+			FieldName:       field,
+			Effect:          "allow",
+			PermissionID:    permissionID,
+			CreatedAt:       now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
 }
 
 func stringSliceContains(values []string, expected string) bool {

@@ -10,6 +10,7 @@ type MeFacade interface {
 type AuthzFacade interface {
 	Check(RequestContext, CheckRequest) (CheckResult, error)
 	BatchCheck(RequestContext, BatchCheckRequest) (BatchCheckResult, error)
+	AuditDecision(RequestContext, CheckRequest, CheckResult) error
 	ValidateApprovalInstance(RequestContext, CheckRequest) error
 }
 
