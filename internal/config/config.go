@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -69,12 +70,16 @@ func (c Config) ValidateStartup() error {
 	}
 	if strings.TrimSpace(c.KeycloakIssuerURL) == "" {
 		problems = append(problems, "KEYCLOAK_ISSUER_URL is required")
+	} else if problem := productionHTTPSURLProblem("KEYCLOAK_ISSUER_URL", c.KeycloakIssuerURL); problem != "" {
+		problems = append(problems, problem)
 	}
 	if strings.TrimSpace(c.KeycloakClientID) == "" {
 		problems = append(problems, "KEYCLOAK_CLIENT_ID is required")
 	}
 	if strings.TrimSpace(c.OpenFGAAPIURL) == "" {
 		problems = append(problems, "OPENFGA_API_URL is required")
+	} else if problem := productionHTTPSURLProblem("OPENFGA_API_URL", c.OpenFGAAPIURL); problem != "" {
+		problems = append(problems, problem)
 	}
 	if strings.TrimSpace(c.OpenFGAStoreID) == "" {
 		problems = append(problems, "OPENFGA_STORE_ID is required")
@@ -121,7 +126,17 @@ func (c Config) ValidateStartup() error {
 		}
 	}
 	problems = append(problems, oidcProviderProblems("GOOGLE_OIDC", c.GoogleOIDCIssuerURL, c.GoogleOIDCClientID, c.GoogleOIDCClientSecret, c.GoogleOIDCRedirectURL)...)
+	if c.googleOIDCConfigured() {
+		if problem := productionHTTPSURLProblem("GOOGLE_OIDC_ISSUER_URL", c.GoogleOIDCIssuerURL); problem != "" {
+			problems = append(problems, problem)
+		}
+	}
 	problems = append(problems, oidcProviderProblems("MICROSOFT_OIDC", c.MicrosoftOIDCIssuerURL, c.MicrosoftOIDCClientID, c.MicrosoftOIDCClientSecret, c.MicrosoftOIDCRedirectURL)...)
+	if c.microsoftOIDCConfigured() {
+		if problem := productionHTTPSURLProblem("MICROSOFT_OIDC_ISSUER_URL", c.MicrosoftOIDCIssuerURL); problem != "" {
+			problems = append(problems, problem)
+		}
+	}
 	if len(problems) > 0 {
 		return fmt.Errorf("production configuration invalid: %s", strings.Join(problems, "; "))
 	}
@@ -223,6 +238,19 @@ func oidcProviderProblems(prefix, issuer, clientID, clientSecret, redirectURL st
 		problems = append(problems, prefix+"_REDIRECT_URL is required")
 	}
 	return problems
+}
+
+// productionHTTPSURLProblem rejects cleartext security-critical upstream URLs in production.
+func productionHTTPSURLProblem(name string, raw string) string {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return ""
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Scheme != "https" || parsed.Host == "" {
+		return name + " must be an https URL in production"
+	}
+	return ""
 }
 
 func normalizeObjectStoreProvider(provider, dir, endpoint, bucket string) string {

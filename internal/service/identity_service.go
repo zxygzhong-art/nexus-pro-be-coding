@@ -36,6 +36,9 @@ func (c IdentityService) ResolveAuthenticatedPrincipal(ctx context.Context, prin
 		if ok {
 			return IdentityResolution{TenantID: identity.TenantID, AccountID: identity.AccountID, Identity: &identity}, nil
 		}
+		if !allowPrincipalAccountClaimFallback(provider) {
+			return IdentityResolution{}, domain.Unauthorized("external identity is not linked to a local account")
+		}
 	}
 
 	accountID := strings.TrimSpace(principal.AccountID)
@@ -46,6 +49,16 @@ func (c IdentityService) ResolveAuthenticatedPrincipal(ctx context.Context, prin
 		return IdentityResolution{}, domain.Unauthorized("authenticated account context is required")
 	}
 	return IdentityResolution{}, domain.Unauthorized("external identity is not linked to a local account")
+}
+
+// allowPrincipalAccountClaimFallback limits account-claim trust to first-party or local-dev token families.
+func allowPrincipalAccountClaimFallback(provider string) bool {
+	switch strings.TrimSpace(provider) {
+	case "", "internal", "unsigned_jwt":
+		return true
+	default:
+		return false
+	}
 }
 
 // ResolveBoundAuthenticatedPrincipal requires a pre-existing provider/subject binding.

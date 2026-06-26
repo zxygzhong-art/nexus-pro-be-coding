@@ -2527,13 +2527,12 @@ func readXLSXSharedStrings(file *zip.File) ([]string, error) {
 	if file == nil {
 		return nil, nil
 	}
-	rc, err := file.Open()
+	raw, err := readLimitedXLSXFile(file, maxEmployeeImportXLSXEntryBytes)
 	if err != nil {
 		return nil, err
 	}
-	defer rc.Close()
 	var sst xlsxSST
-	if err := xml.NewDecoder(rc).Decode(&sst); err != nil {
+	if err := xml.Unmarshal(raw, &sst); err != nil {
 		return nil, err
 	}
 	out := make([]string, 0, len(sst.Items))
@@ -2554,12 +2553,7 @@ type xlsxWorksheet struct {
 }
 
 func readXLSXSheet(file *zip.File, shared []string) ([][]string, error) {
-	rc, err := file.Open()
-	if err != nil {
-		return nil, err
-	}
-	defer rc.Close()
-	raw, err := io.ReadAll(rc)
+	raw, err := readLimitedXLSXFile(file, maxEmployeeImportXLSXEntryBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -2590,6 +2584,30 @@ func readXLSXSheet(file *zip.File, shared []string) ([][]string, error) {
 		records = append(records, record)
 	}
 	return records, nil
+}
+
+// readLimitedXLSXFile rejects compressed workbook members that expand beyond the import budget.
+func readLimitedXLSXFile(file *zip.File, maxBytes int64) ([]byte, error) {
+	if file == nil {
+		return nil, nil
+	}
+	if file.UncompressedSize64 > uint64(maxBytes) {
+		return nil, fmt.Errorf("xlsx entry %s exceeds %d bytes", file.Name, maxBytes)
+	}
+	rc, err := file.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer rc.Close()
+	limited := &io.LimitedReader{R: rc, N: maxBytes + 1}
+	raw, err := io.ReadAll(limited)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(raw)) > maxBytes {
+		return nil, fmt.Errorf("xlsx entry %s exceeds %d bytes", file.Name, maxBytes)
+	}
+	return raw, nil
 }
 
 func xlsxColumnIndex(ref string) int {
@@ -2628,8 +2646,9 @@ func padRecord(record []string, size int) []string {
 }
 
 const (
-	maxEmployeeImportBytes = 10 << 20
-	maxEmployeeImportRows  = 500
+	maxEmployeeImportBytes          = 10 << 20
+	maxEmployeeImportXLSXEntryBytes = maxEmployeeImportBytes
+	maxEmployeeImportRows           = 500
 )
 
 const (
@@ -2916,6 +2935,18 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 				next.Rows[i] = row
 				continue
 			}
+			scopeErrors, err := tx.employeeImportScopeErrors(ctx, account, row.RowNumber, employee, previous, update, decision)
+			if err != nil {
+				return err
+			}
+			if len(scopeErrors) > 0 {
+				row.Errors = scopeErrors
+				row.Valid = false
+				rowErrors = append(rowErrors, scopeErrors...)
+				results = append(results, BatchEmployeeResult{RowNumber: row.RowNumber, Success: false, Code: "import_validation_failed", Message: firstRowErrorMessage(scopeErrors)})
+				next.Rows[i] = row
+				continue
+			}
 			row.Valid = true
 			next.Rows[i] = row
 			employees = append(employees, importEmployeeWrite{row: row, employee: employee, previous: previous, update: update})
@@ -3026,6 +3057,27 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 		"mode", mode,
 	)
 	return session, nil
+}
+
+// employeeImportScopeErrors enforces the active data-scope decision before import writes persist rows.
+func (c HRService) employeeImportScopeErrors(ctx RequestContext, account Account, rowNumber int, employee Employee, previous Employee, update bool, decision CheckResult) ([]RowError, error) {
+	targets := []Employee{employee}
+	if update {
+		targets = append(targets, previous)
+	}
+	visible, err := c.filterEmployeesByDecision(ctx, account, targets, decision)
+	if err != nil {
+		return nil, err
+	}
+	if len(visible) == len(targets) {
+		return nil, nil
+	}
+	return []RowError{{
+		Row:     rowNumber,
+		Field:   "authz_scope",
+		Code:    "out_of_scope",
+		Message: "employee import row is outside authorized scope",
+	}}, nil
 }
 
 type employeeImportBatchIndex struct {
@@ -3282,7 +3334,7 @@ func (c HRService) ExportEmployeesCSV(ctx RequestContext, query EmployeeQuery) (
 	for _, item := range items {
 		record := make([]string, 0, len(columns))
 		for _, column := range columns {
-			record = append(record, column.value(item))
+			record = append(record, neutralizeSpreadsheetCell(column.value(item)))
 		}
 		_ = w.Write(record)
 	}
@@ -3291,6 +3343,20 @@ func (c HRService) ExportEmployeesCSV(ctx RequestContext, query EmployeeQuery) (
 		return nil, "", err
 	}
 	return buf.Bytes(), "employees.csv", nil
+}
+
+// neutralizeSpreadsheetCell prevents spreadsheet clients from treating exported text as formulas.
+func neutralizeSpreadsheetCell(value string) string {
+	trimmed := strings.TrimLeft(value, " \t\r\n")
+	if trimmed == "" {
+		return value
+	}
+	switch trimmed[0] {
+	case '=', '+', '-', '@':
+		return "'" + value
+	default:
+		return value
+	}
 }
 
 func (c HRService) rejectOversizedEmployeeExport(ctx RequestContext, query EmployeeQuery) error {

@@ -16,6 +16,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/textproto"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -234,6 +235,28 @@ func TestUnlinkedExternalIdentityIsRejected(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 for unlinked external identity, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestUnlinkedExternalIdentityWithAccountClaimIsRejected(t *testing.T) {
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	handler := v1api.New(service.New(store), nil, v1api.Options{
+		AllowDemoContext: false,
+		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{
+			Provider:  "keycloak",
+			Subject:   "unknown-subject",
+			TenantID:  "demo",
+			AccountID: "acct-admin",
+		}, ok: true},
+	}).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unlinked external identity with account claim, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -946,6 +969,9 @@ func TestAssumeRoleEndpointReturnsCreatedTypedResponse(t *testing.T) {
 	result := decodeData[domain.AssumeRoleResponse](t, assumeRec.Body.Bytes())
 	if result.SessionID == "" || result.SessionToken != result.SessionID || result.AssumedRole.ID != role.ID {
 		t.Fatalf("unexpected assume role response: %+v", result)
+	}
+	if regexp.MustCompile(`^sess-\d+-\d{6}$`).MatchString(result.SessionToken) {
+		t.Fatalf("assume role session token should not use timestamp-counter format: %q", result.SessionToken)
 	}
 }
 

@@ -527,7 +527,10 @@ func (c IAMService) AssumeRole(ctx RequestContext, roleID string, input AssumeRo
 		return AssumeRoleResponse{}, Forbidden("assumable role trust policy does not allow this account")
 	}
 
-	token := utils.NewID("sess")
+	token, err := utils.NewSecretID("sess")
+	if err != nil {
+		return AssumeRoleResponse{}, err
+	}
 	duration, err := effectiveAssumableRoleSessionDuration(role.SessionDurationSeconds, input.DurationMinutes)
 	if err != nil {
 		return AssumeRoleResponse{}, err

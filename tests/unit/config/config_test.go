@@ -117,6 +117,38 @@ func TestValidateStartupAcceptsProductionMinimum(t *testing.T) {
 	}
 }
 
+func TestValidateStartupRejectsCleartextProductionSecurityURLs(t *testing.T) {
+	cfg := config.Config{
+		Env:                       "production",
+		DatabaseURL:               "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable",
+		KeycloakIssuerURL:         "http://issuer.example/realms/nexus",
+		KeycloakClientID:          "nexus-api",
+		OpenFGAAPIURL:             "http://openfga.example",
+		OpenFGAStoreID:            "store-1",
+		OpenFGAModelID:            "model-1",
+		ObjectStoreDir:            "/var/lib/nexus-pro-be/objects",
+		AuthSessionSigningKey:     "session-secret",
+		GoogleOIDCIssuerURL:       "http://accounts.example",
+		GoogleOIDCClientID:        "google-client",
+		GoogleOIDCClientSecret:    "google-secret",
+		GoogleOIDCRedirectURL:     "https://api.example/v1/auth/oidc/google/callback",
+		MicrosoftOIDCIssuerURL:    "http://login.example/common/v2.0",
+		MicrosoftOIDCClientID:     "microsoft-client",
+		MicrosoftOIDCClientSecret: "microsoft-secret",
+		MicrosoftOIDCRedirectURL:  "https://api.example/v1/auth/oidc/microsoft/callback",
+	}
+
+	err := cfg.ValidateStartup()
+	if err == nil {
+		t.Fatal("expected cleartext production security URL validation error")
+	}
+	for _, want := range []string{"KEYCLOAK_ISSUER_URL", "OPENFGA_API_URL", "GOOGLE_OIDC_ISSUER_URL", "MICROSOFT_OIDC_ISSUER_URL"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Fatalf("expected validation error to mention %s, got %v", want, err)
+		}
+	}
+}
+
 func TestValidateStartupRejectsMissingProductionDependencies(t *testing.T) {
 	cfg := config.Config{Env: "production"}
 

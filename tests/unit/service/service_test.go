@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/xml"
 	"fmt"
 	"strings"
@@ -1129,6 +1130,57 @@ func TestEmployeeExportAppliesPermissionScopedFieldPoliciesToJSONAndCSV(t *testi
 	}
 }
 
+func TestEmployeeExportCSVNeutralizesSpreadsheetFormulas(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-export",
+		TenantID: "tenant-1",
+		Name:     "Employee Export",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "export", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-1",
+		TenantID:               "tenant-1",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-export"},
+		CreatedAt:              now,
+	})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:           "emp-1",
+		TenantID:     "tenant-1",
+		EmployeeNo:   "=HYPERLINK(http://evil.test)",
+		Name:         "+SUM(1,1)",
+		CompanyEmail: "@evil.test",
+		Position:     "-cmd|' /C calc'!A0",
+		Status:       "active",
+		CreatedAt:    now,
+	})
+
+	raw, _, err := service.New(store).HR().ExportEmployeesCSV(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}, domain.EmployeeQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := csv.NewReader(strings.NewReader(strings.TrimPrefix(string(raw), "\ufeff")))
+	records, err := reader.ReadAll()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("expected header and one employee row, got %+v", records)
+	}
+	row := records[1]
+	for _, index := range []int{0, 1, 2, 4} {
+		if !strings.HasPrefix(row[index], "'") {
+			t.Fatalf("expected formula-like cell %d to be neutralized, row=%+v", index, row)
+		}
+	}
+}
+
 func TestEmployeeExportRequiresApprovalAndAudits(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2021,6 +2073,82 @@ func TestEmployeeImportConfirmSupportsUpdateAndUpsert(t *testing.T) {
 	}
 }
 
+func TestEmployeeImportConfirmEnforcesAssignedOrgScope(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-allowed", TenantID: "tenant-1", Name: "Allowed", Path: []string{"ou-allowed"}, CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-blocked", TenantID: "tenant-1", Name: "Blocked", Path: []string{"ou-blocked"}, CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-import",
+		TenantID: "tenant-1",
+		Name:     "Scoped Import",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "import", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertDataScope(context.Background(), domain.DataScope{
+		ID:        "ds-assigned",
+		TenantID:  "tenant-1",
+		Code:      "assigned_hr_orgs",
+		Name:      "Assigned HR Orgs",
+		ScopeType: "assigned_org_units",
+		Params:    map[string]any{"org_unit_ids": []string{"ou-allowed"}},
+		CreatedAt: now,
+	})
+	_ = store.UpsertPermissionSetAssignment(context.Background(), domain.PermissionSetAssignment{
+		ID:              "assign-1",
+		TenantID:        "tenant-1",
+		PrincipalType:   "account",
+		PrincipalID:     "acct-1",
+		PermissionSetID: "ps-import",
+		Effect:          "allow",
+		DataScopeID:     "ds-assigned",
+		CreatedAt:       now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-blocked",
+		TenantID:         "tenant-1",
+		EmployeeNo:       "E9001",
+		Name:             "Blocked",
+		CompanyEmail:     "blocked@example.com",
+		OrgUnitID:        "ou-blocked",
+		Position:         "Engineer",
+		Category:         "full_time",
+		Status:           "active",
+		EmploymentStatus: "active",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+	svc := service.New(store)
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+
+	session, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
+		Filename: "employees.csv",
+		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\nE9001,Move Into Scope,blocked@example.com,ou-allowed,Engineer,全職,0911000000,在職,2026-06-01,\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = svc.HR().ConfirmEmployeeImport(ctx, session.ID, domain.EmployeeImportConfirmInput{Mode: "update"})
+	if err == nil {
+		t.Fatal("expected scoped import confirmation to reject out-of-scope employee update")
+	}
+	appErr, ok := domain.AsAppError(err)
+	if !ok || appErr.Code != "import_validation_failed" || !rowErrorsContain(appErr.RowErrors, "authz_scope") {
+		t.Fatalf("expected authz_scope import validation error, got %v", err)
+	}
+	stored, ok, err := store.GetEmployee(context.Background(), "tenant-1", "emp-blocked")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || stored.OrgUnitID != "ou-blocked" || stored.Name != "Blocked" {
+		t.Fatalf("out-of-scope import should not mutate employee, got ok=%v employee=%+v", ok, stored)
+	}
+}
+
 func TestEmployeeReinstatementRequiresTransitionAndKeepsDeletedTerminal(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2303,6 +2431,25 @@ func TestEmployeeImportXLSXPreservesManagerEmployeeID(t *testing.T) {
 	}
 	if len(missingSession.Rows) != 1 || missingSession.Rows[0].Valid || !rowErrorsContain(missingSession.Rows[0].Errors, "manager_employee_id") {
 		t.Fatalf("expected missing manager employee id to invalidate import row, got %+v", missingSession.Rows)
+	}
+}
+
+func TestEmployeeImportPreviewRejectsOversizedXLSXEntry(t *testing.T) {
+	_, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "import", Scope: "all"},
+	})
+	ctx.ApprovalConfirmed = true
+	content := oversizedEmployeeImportXLSX(t)
+	if len(content) > 10<<20 {
+		t.Fatalf("test workbook should stay below upload byte limit, got %d bytes", len(content))
+	}
+
+	_, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
+		Filename: "employees.xlsx",
+		Content:  content,
+	})
+	if err == nil || !strings.Contains(err.Error(), "exceeds") {
+		t.Fatalf("expected oversized xlsx entry error, got %v", err)
 	}
 }
 
@@ -3279,6 +3426,28 @@ func minimalEmployeeImportXLSX(t *testing.T, rows [][]string) string {
 	}
 	add("xl/sharedStrings.xml", shared.Bytes())
 	add("xl/worksheets/sheet1.xml", sheet.Bytes())
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	return buf.String()
+}
+
+func oversizedEmployeeImportXLSX(t *testing.T) string {
+	t.Helper()
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	add := func(name string, data []byte) {
+		w, err := zw.Create(name)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := w.Write(data); err != nil {
+			t.Fatal(err)
+		}
+	}
+	add("xl/sharedStrings.xml", []byte(`<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>員工編號</t></si></sst>`))
+	oversizedSheet := `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>` + strings.Repeat(" ", (10<<20)+1) + `</sheetData></worksheet>`
+	add("xl/worksheets/sheet1.xml", []byte(oversizedSheet))
 	if err := zw.Close(); err != nil {
 		t.Fatal(err)
 	}
