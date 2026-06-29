@@ -26,31 +26,36 @@ func (s *Store) WithTenantTransaction(ctx context.Context, tenantID string, fn f
 
 func (s *Store) cloneLocked() *Store {
 	return &Store{
-		tenants:             cloneMap(s.tenants, copyTenant),
-		accounts:            cloneNestedMap(s.accounts, copyAccount),
-		userIdentities:      cloneNestedMap(s.userIdentities, copyUserIdentity),
-		userGroups:          cloneNestedMap(s.userGroups, copyUserGroup),
-		permissionSets:      cloneNestedMap(s.permissionSets, copyPermissionSet),
-		assignments:         cloneNestedMap(s.assignments, copyPermissionSetAssignment),
-		dataScopes:          cloneNestedMap(s.dataScopes, copyDataScope),
-		fieldPolicies:       cloneNestedMap(s.fieldPolicies, copyFieldPolicy),
-		assumableRoles:      cloneNestedMap(s.assumableRoles, copyAssumableRole),
-		roleSessions:        cloneNestedMap(s.roleSessions, copyAssumableRoleSession),
-		orgUnits:            cloneNestedMap(s.orgUnits, copyOrgUnit),
-		employees:           cloneNestedMap(s.employees, copyEmployee),
-		employeeNoSequences: cloneNestedMap(s.employeeNoSequences, func(v int) int { return v }),
-		employeeImports:     cloneNestedMap(s.employeeImports, copyEmployeeImportSession),
-		leaveBalances:       cloneNestedMap(s.leaveBalances, copyLeaveBalance),
-		leaveRequests:       cloneNestedMap(s.leaveRequests, copyLeaveRequest),
-		formTemplates:       cloneNestedMap(s.formTemplates, copyFormTemplate),
-		formInstances:       cloneNestedMap(s.formInstances, copyFormInstance),
-		knowledgeArticles:   cloneNestedMap(s.knowledgeArticles, copyKnowledgeArticle),
-		agentRuns:           cloneNestedMap(s.agentRuns, copyAgentRun),
-		auditLogs:           cloneSliceMap(s.auditLogs, copyAuditLog),
-		permissionVersions:  cloneMap(s.permissionVersions, func(v int64) int64 { return v }),
-		authzOutbox:         cloneSliceMap(s.authzOutbox, copyAuthzOutboxEvent),
-		outboxEvents:        cloneSliceMap(s.outboxEvents, copyOutboxEvent),
-		relationshipTuples:  cloneNestedMap(s.relationshipTuples, func(v AuthzRelationshipTuple) AuthzRelationshipTuple { return v }),
+		tenants:                cloneMap(s.tenants, copyTenant),
+		accounts:               cloneNestedMap(s.accounts, copyAccount),
+		userIdentities:         cloneNestedMap(s.userIdentities, copyUserIdentity),
+		userGroups:             cloneNestedMap(s.userGroups, copyUserGroup),
+		permissionSets:         cloneNestedMap(s.permissionSets, copyPermissionSet),
+		assignments:            cloneNestedMap(s.assignments, copyPermissionSetAssignment),
+		dataScopes:             cloneNestedMap(s.dataScopes, copyDataScope),
+		fieldPolicies:          cloneNestedMap(s.fieldPolicies, copyFieldPolicy),
+		assumableRoles:         cloneNestedMap(s.assumableRoles, copyAssumableRole),
+		roleSessions:           cloneNestedMap(s.roleSessions, copyAssumableRoleSession),
+		orgUnits:               cloneNestedMap(s.orgUnits, copyOrgUnit),
+		employees:              cloneNestedMap(s.employees, copyEmployee),
+		employeeNoSequences:    cloneNestedMap(s.employeeNoSequences, func(v int) int { return v }),
+		employeeImports:        cloneNestedMap(s.employeeImports, copyEmployeeImportSession),
+		leaveBalances:          cloneNestedMap(s.leaveBalances, copyLeaveBalance),
+		leaveRequests:          cloneNestedMap(s.leaveRequests, copyLeaveRequest),
+		attendanceWorksites:    cloneNestedMap(s.attendanceWorksites, copyAttendanceWorksite),
+		attendanceShifts:       cloneNestedMap(s.attendanceShifts, copyAttendanceShift),
+		attendanceAssignments:  cloneNestedMap(s.attendanceAssignments, copyAttendanceShiftAssignment),
+		attendanceClockRecords: cloneNestedMap(s.attendanceClockRecords, copyAttendanceClockRecord),
+		attendanceCorrections:  cloneNestedMap(s.attendanceCorrections, copyAttendanceCorrectionRequest),
+		formTemplates:          cloneNestedMap(s.formTemplates, copyFormTemplate),
+		formInstances:          cloneNestedMap(s.formInstances, copyFormInstance),
+		knowledgeArticles:      cloneNestedMap(s.knowledgeArticles, copyKnowledgeArticle),
+		agentRuns:              cloneNestedMap(s.agentRuns, copyAgentRun),
+		auditLogs:              cloneSliceMap(s.auditLogs, copyAuditLog),
+		permissionVersions:     cloneMap(s.permissionVersions, func(v int64) int64 { return v }),
+		authzOutbox:            cloneSliceMap(s.authzOutbox, copyAuthzOutboxEvent),
+		outboxEvents:           cloneSliceMap(s.outboxEvents, copyOutboxEvent),
+		relationshipTuples:     cloneNestedMap(s.relationshipTuples, func(v AuthzRelationshipTuple) AuthzRelationshipTuple { return v }),
 	}
 }
 
@@ -71,6 +76,11 @@ func (s *Store) replaceLocked(next *Store) {
 	s.employeeImports = next.employeeImports
 	s.leaveBalances = next.leaveBalances
 	s.leaveRequests = next.leaveRequests
+	s.attendanceWorksites = next.attendanceWorksites
+	s.attendanceShifts = next.attendanceShifts
+	s.attendanceAssignments = next.attendanceAssignments
+	s.attendanceClockRecords = next.attendanceClockRecords
+	s.attendanceCorrections = next.attendanceCorrections
 	s.formTemplates = next.formTemplates
 	s.formInstances = next.formInstances
 	s.knowledgeArticles = next.knowledgeArticles

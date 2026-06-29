@@ -493,6 +493,198 @@ SELECT * FROM leave_requests
 WHERE tenant_id = $1
 ORDER BY created_at ASC;
 
+-- name: UpsertAttendanceWorksite :one
+INSERT INTO attendance_worksites (
+    id, tenant_id, name, address, latitude, longitude, radius_meters,
+    status, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    name = EXCLUDED.name,
+    address = EXCLUDED.address,
+    latitude = EXCLUDED.latitude,
+    longitude = EXCLUDED.longitude,
+    radius_meters = EXCLUDED.radius_meters,
+    status = EXCLUDED.status,
+    created_at = EXCLUDED.created_at,
+    updated_at = EXCLUDED.updated_at
+RETURNING *;
+
+-- name: GetAttendanceWorksite :one
+SELECT * FROM attendance_worksites
+WHERE tenant_id = $1 AND id = $2;
+
+-- name: ListAttendanceWorksites :many
+SELECT * FROM attendance_worksites
+WHERE tenant_id = $1
+ORDER BY created_at DESC, id ASC;
+
+-- name: UpsertAttendanceShift :one
+INSERT INTO attendance_shifts (
+    id, tenant_id, name, clock_in_start, clock_in_end, clock_out_start,
+    clock_out_end, late_grace_minutes, early_leave_grace_minutes,
+    status, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    name = EXCLUDED.name,
+    clock_in_start = EXCLUDED.clock_in_start,
+    clock_in_end = EXCLUDED.clock_in_end,
+    clock_out_start = EXCLUDED.clock_out_start,
+    clock_out_end = EXCLUDED.clock_out_end,
+    late_grace_minutes = EXCLUDED.late_grace_minutes,
+    early_leave_grace_minutes = EXCLUDED.early_leave_grace_minutes,
+    status = EXCLUDED.status,
+    created_at = EXCLUDED.created_at,
+    updated_at = EXCLUDED.updated_at
+RETURNING *;
+
+-- name: GetAttendanceShift :one
+SELECT * FROM attendance_shifts
+WHERE tenant_id = $1 AND id = $2;
+
+-- name: ListAttendanceShifts :many
+SELECT * FROM attendance_shifts
+WHERE tenant_id = $1
+ORDER BY created_at DESC, id ASC;
+
+-- name: UpsertAttendanceShiftAssignment :one
+INSERT INTO attendance_shift_assignments (
+    id, tenant_id, employee_id, shift_id, worksite_id, effective_from,
+    effective_to, status, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    employee_id = EXCLUDED.employee_id,
+    shift_id = EXCLUDED.shift_id,
+    worksite_id = EXCLUDED.worksite_id,
+    effective_from = EXCLUDED.effective_from,
+    effective_to = EXCLUDED.effective_to,
+    status = EXCLUDED.status,
+    created_at = EXCLUDED.created_at,
+    updated_at = EXCLUDED.updated_at
+RETURNING *;
+
+-- name: GetAttendanceShiftAssignment :one
+SELECT * FROM attendance_shift_assignments
+WHERE tenant_id = $1 AND id = $2;
+
+-- name: ListAttendanceShiftAssignments :many
+SELECT * FROM attendance_shift_assignments
+WHERE tenant_id = $1
+ORDER BY effective_from DESC, created_at DESC, id ASC;
+
+-- name: FindEffectiveAttendanceShiftAssignment :one
+SELECT * FROM attendance_shift_assignments
+WHERE tenant_id = $1
+  AND employee_id = $2
+  AND status = 'active'
+  AND effective_from <= $3
+  AND (effective_to IS NULL OR effective_to >= $3)
+ORDER BY effective_from DESC, created_at DESC, id ASC
+LIMIT 1;
+
+-- name: UpsertAttendanceClockRecord :one
+INSERT INTO attendance_clock_records (
+    id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id,
+    work_date, direction, clocked_at, latitude, longitude, accuracy_meters,
+    distance_meters, record_status, rejection_reason, source, device_id,
+    device_info, correction_request_id, created_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+    $13, $14, $15, $16, $17, $18::jsonb, $19, $20
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    employee_id = EXCLUDED.employee_id,
+    shift_assignment_id = EXCLUDED.shift_assignment_id,
+    shift_id = EXCLUDED.shift_id,
+    worksite_id = EXCLUDED.worksite_id,
+    work_date = EXCLUDED.work_date,
+    direction = EXCLUDED.direction,
+    clocked_at = EXCLUDED.clocked_at,
+    latitude = EXCLUDED.latitude,
+    longitude = EXCLUDED.longitude,
+    accuracy_meters = EXCLUDED.accuracy_meters,
+    distance_meters = EXCLUDED.distance_meters,
+    record_status = EXCLUDED.record_status,
+    rejection_reason = EXCLUDED.rejection_reason,
+    source = EXCLUDED.source,
+    device_id = EXCLUDED.device_id,
+    device_info = EXCLUDED.device_info,
+    correction_request_id = EXCLUDED.correction_request_id,
+    created_at = EXCLUDED.created_at
+RETURNING *;
+
+-- name: GetAttendanceClockRecord :one
+SELECT * FROM attendance_clock_records
+WHERE tenant_id = $1 AND id = $2;
+
+-- name: GetAcceptedAttendanceClockRecord :one
+SELECT * FROM attendance_clock_records
+WHERE tenant_id = $1
+  AND employee_id = $2
+  AND work_date = $3
+  AND direction = $4
+  AND record_status = 'accepted'
+LIMIT 1;
+
+-- name: ListAttendanceClockRecords :many
+SELECT * FROM attendance_clock_records
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.arg(employee_id)::text = '' OR employee_id = sqlc.arg(employee_id))
+  AND (sqlc.arg(from_date)::text = '' OR work_date >= sqlc.arg(from_date))
+  AND (sqlc.arg(to_date)::text = '' OR work_date <= sqlc.arg(to_date))
+  AND (sqlc.arg(direction)::text = '' OR direction = sqlc.arg(direction))
+  AND (sqlc.arg(record_status)::text = '' OR record_status = sqlc.arg(record_status))
+  AND (sqlc.arg(source)::text = '' OR source = sqlc.arg(source))
+ORDER BY clocked_at DESC, created_at DESC, id ASC;
+
+-- name: UpsertAttendanceCorrectionRequest :one
+INSERT INTO attendance_correction_requests (
+    id, tenant_id, employee_id, direction, requested_clocked_at, work_date,
+    reason, status, form_instance_id, clock_record_id, reviewed_by_account_id,
+    review_reason, reviewed_at, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    employee_id = EXCLUDED.employee_id,
+    direction = EXCLUDED.direction,
+    requested_clocked_at = EXCLUDED.requested_clocked_at,
+    work_date = EXCLUDED.work_date,
+    reason = EXCLUDED.reason,
+    status = EXCLUDED.status,
+    form_instance_id = EXCLUDED.form_instance_id,
+    clock_record_id = EXCLUDED.clock_record_id,
+    reviewed_by_account_id = EXCLUDED.reviewed_by_account_id,
+    review_reason = EXCLUDED.review_reason,
+    reviewed_at = EXCLUDED.reviewed_at,
+    created_at = EXCLUDED.created_at,
+    updated_at = EXCLUDED.updated_at
+RETURNING *;
+
+-- name: GetAttendanceCorrectionRequest :one
+SELECT * FROM attendance_correction_requests
+WHERE tenant_id = $1 AND id = $2;
+
+-- name: ListAttendanceCorrectionRequests :many
+SELECT * FROM attendance_correction_requests
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.arg(employee_id)::text = '' OR employee_id = sqlc.arg(employee_id))
+  AND (sqlc.arg(from_date)::text = '' OR work_date >= sqlc.arg(from_date))
+  AND (sqlc.arg(to_date)::text = '' OR work_date <= sqlc.arg(to_date))
+  AND (sqlc.arg(status)::text = '' OR status = sqlc.arg(status))
+  AND (sqlc.arg(direction)::text = '' OR direction = sqlc.arg(direction))
+ORDER BY created_at DESC, id ASC;
+
 -- name: UpsertKnowledgeArticle :one
 INSERT INTO knowledge_articles (
     id, tenant_id, title, content, tags, created_at

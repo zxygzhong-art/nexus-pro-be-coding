@@ -64,7 +64,7 @@ func apiAuthzReasonCode(result domain.CheckResult) string {
 		switch result.Action {
 		case domain.ActionRead:
 			return "menu_denied"
-		case domain.ActionCreate, domain.ActionUpdate, domain.ActionDelete, domain.ActionExport, domain.ActionImport, domain.ActionInvite, domain.ActionUpdateStatus, domain.ActionStatusTransition:
+		case domain.ActionCreate, domain.ActionUpdate, domain.ActionDelete, domain.ActionExport, domain.ActionImport, domain.ActionInvite, domain.ActionApprove, domain.ActionUpdateStatus, domain.ActionStatusTransition:
 			return "button_denied"
 		default:
 			return "permission_missing"

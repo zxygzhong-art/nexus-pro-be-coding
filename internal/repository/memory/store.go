@@ -9,6 +9,7 @@ import (
 	"sync"
 	"time"
 
+	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/utils"
 )
 
@@ -18,60 +19,70 @@ type Store struct {
 
 	tenants map[string]Tenant
 
-	accounts            map[string]map[string]Account
-	userIdentities      map[string]map[string]UserIdentity
-	userGroups          map[string]map[string]UserGroup
-	permissionSets      map[string]map[string]PermissionSet
-	assignments         map[string]map[string]PermissionSetAssignment
-	dataScopes          map[string]map[string]DataScope
-	fieldPolicies       map[string]map[string]FieldPolicy
-	assumableRoles      map[string]map[string]AssumableRole
-	roleSessions        map[string]map[string]AssumableRoleSession
-	orgUnits            map[string]map[string]OrgUnit
-	employees           map[string]map[string]Employee
-	employeeNoSequences map[string]map[string]int
-	employeeImports     map[string]map[string]EmployeeImportSession
-	leaveBalances       map[string]map[string]LeaveBalance
-	leaveRequests       map[string]map[string]LeaveRequest
-	formTemplates       map[string]map[string]FormTemplate
-	formInstances       map[string]map[string]FormInstance
-	knowledgeArticles   map[string]map[string]KnowledgeArticle
-	agentRuns           map[string]map[string]AgentRun
-	auditLogs           map[string][]AuditLog
-	permissionVersions  map[string]int64
-	authzOutbox         map[string][]AuthzOutboxEvent
-	outboxEvents        map[string][]OutboxEvent
-	relationshipTuples  map[string]map[string]AuthzRelationshipTuple
+	accounts               map[string]map[string]Account
+	userIdentities         map[string]map[string]UserIdentity
+	userGroups             map[string]map[string]UserGroup
+	permissionSets         map[string]map[string]PermissionSet
+	assignments            map[string]map[string]PermissionSetAssignment
+	dataScopes             map[string]map[string]DataScope
+	fieldPolicies          map[string]map[string]FieldPolicy
+	assumableRoles         map[string]map[string]AssumableRole
+	roleSessions           map[string]map[string]AssumableRoleSession
+	orgUnits               map[string]map[string]OrgUnit
+	employees              map[string]map[string]Employee
+	employeeNoSequences    map[string]map[string]int
+	employeeImports        map[string]map[string]EmployeeImportSession
+	leaveBalances          map[string]map[string]LeaveBalance
+	leaveRequests          map[string]map[string]LeaveRequest
+	attendanceWorksites    map[string]map[string]AttendanceWorksite
+	attendanceShifts       map[string]map[string]AttendanceShift
+	attendanceAssignments  map[string]map[string]AttendanceShiftAssignment
+	attendanceClockRecords map[string]map[string]AttendanceClockRecord
+	attendanceCorrections  map[string]map[string]AttendanceCorrectionRequest
+	formTemplates          map[string]map[string]FormTemplate
+	formInstances          map[string]map[string]FormInstance
+	knowledgeArticles      map[string]map[string]KnowledgeArticle
+	agentRuns              map[string]map[string]AgentRun
+	auditLogs              map[string][]AuditLog
+	permissionVersions     map[string]int64
+	authzOutbox            map[string][]AuthzOutboxEvent
+	outboxEvents           map[string][]OutboxEvent
+	relationshipTuples     map[string]map[string]AuthzRelationshipTuple
 }
 
 // NewStore creates an empty in-memory repository.
 func NewStore() *Store {
 	return &Store{
-		tenants:             map[string]Tenant{},
-		accounts:            map[string]map[string]Account{},
-		userIdentities:      map[string]map[string]UserIdentity{},
-		userGroups:          map[string]map[string]UserGroup{},
-		permissionSets:      map[string]map[string]PermissionSet{},
-		assignments:         map[string]map[string]PermissionSetAssignment{},
-		dataScopes:          map[string]map[string]DataScope{},
-		fieldPolicies:       map[string]map[string]FieldPolicy{},
-		assumableRoles:      map[string]map[string]AssumableRole{},
-		roleSessions:        map[string]map[string]AssumableRoleSession{},
-		orgUnits:            map[string]map[string]OrgUnit{},
-		employees:           map[string]map[string]Employee{},
-		employeeNoSequences: map[string]map[string]int{},
-		employeeImports:     map[string]map[string]EmployeeImportSession{},
-		leaveBalances:       map[string]map[string]LeaveBalance{},
-		leaveRequests:       map[string]map[string]LeaveRequest{},
-		formTemplates:       map[string]map[string]FormTemplate{},
-		formInstances:       map[string]map[string]FormInstance{},
-		knowledgeArticles:   map[string]map[string]KnowledgeArticle{},
-		agentRuns:           map[string]map[string]AgentRun{},
-		auditLogs:           map[string][]AuditLog{},
-		permissionVersions:  map[string]int64{},
-		authzOutbox:         map[string][]AuthzOutboxEvent{},
-		outboxEvents:        map[string][]OutboxEvent{},
-		relationshipTuples:  map[string]map[string]AuthzRelationshipTuple{},
+		tenants:                map[string]Tenant{},
+		accounts:               map[string]map[string]Account{},
+		userIdentities:         map[string]map[string]UserIdentity{},
+		userGroups:             map[string]map[string]UserGroup{},
+		permissionSets:         map[string]map[string]PermissionSet{},
+		assignments:            map[string]map[string]PermissionSetAssignment{},
+		dataScopes:             map[string]map[string]DataScope{},
+		fieldPolicies:          map[string]map[string]FieldPolicy{},
+		assumableRoles:         map[string]map[string]AssumableRole{},
+		roleSessions:           map[string]map[string]AssumableRoleSession{},
+		orgUnits:               map[string]map[string]OrgUnit{},
+		employees:              map[string]map[string]Employee{},
+		employeeNoSequences:    map[string]map[string]int{},
+		employeeImports:        map[string]map[string]EmployeeImportSession{},
+		leaveBalances:          map[string]map[string]LeaveBalance{},
+		leaveRequests:          map[string]map[string]LeaveRequest{},
+		attendanceWorksites:    map[string]map[string]AttendanceWorksite{},
+		attendanceShifts:       map[string]map[string]AttendanceShift{},
+		attendanceAssignments:  map[string]map[string]AttendanceShiftAssignment{},
+		attendanceClockRecords: map[string]map[string]AttendanceClockRecord{},
+		attendanceCorrections:  map[string]map[string]AttendanceCorrectionRequest{},
+		formTemplates:          map[string]map[string]FormTemplate{},
+		formInstances:          map[string]map[string]FormInstance{},
+		knowledgeArticles:      map[string]map[string]KnowledgeArticle{},
+		agentRuns:              map[string]map[string]AgentRun{},
+		auditLogs:              map[string][]AuditLog{},
+		permissionVersions:     map[string]int64{},
+		authzOutbox:            map[string][]AuthzOutboxEvent{},
+		outboxEvents:           map[string][]OutboxEvent{},
+		relationshipTuples:     map[string]map[string]AuthzRelationshipTuple{},
 	}
 }
 
@@ -777,6 +788,221 @@ func (s *Store) ListLeaveRequests(_ context.Context, tenantID string) ([]LeaveRe
 	out := copyNestedValues(s.leaveRequests[tenantID], copyLeaveRequest)
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
+}
+
+func (s *Store) UpsertAttendanceWorksite(_ context.Context, v AttendanceWorksite) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.attendanceWorksites, v.TenantID, v.ID, copyAttendanceWorksite(v))
+	return nil
+}
+
+func (s *Store) GetAttendanceWorksite(_ context.Context, tenantID, id string) (AttendanceWorksite, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.attendanceWorksites, tenantID, id)
+	if !ok {
+		return AttendanceWorksite{}, false, nil
+	}
+	return copyAttendanceWorksite(v), true, nil
+}
+
+func (s *Store) ListAttendanceWorksites(_ context.Context, tenantID string) ([]AttendanceWorksite, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.attendanceWorksites[tenantID], copyAttendanceWorksite)
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (s *Store) UpsertAttendanceShift(_ context.Context, v AttendanceShift) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.attendanceShifts, v.TenantID, v.ID, copyAttendanceShift(v))
+	return nil
+}
+
+func (s *Store) GetAttendanceShift(_ context.Context, tenantID, id string) (AttendanceShift, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.attendanceShifts, tenantID, id)
+	if !ok {
+		return AttendanceShift{}, false, nil
+	}
+	return copyAttendanceShift(v), true, nil
+}
+
+func (s *Store) ListAttendanceShifts(_ context.Context, tenantID string) ([]AttendanceShift, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.attendanceShifts[tenantID], copyAttendanceShift)
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+func (s *Store) UpsertAttendanceShiftAssignment(_ context.Context, v AttendanceShiftAssignment) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.attendanceAssignments, v.TenantID, v.ID, copyAttendanceShiftAssignment(v))
+	return nil
+}
+
+func (s *Store) GetAttendanceShiftAssignment(_ context.Context, tenantID, id string) (AttendanceShiftAssignment, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.attendanceAssignments, tenantID, id)
+	if !ok {
+		return AttendanceShiftAssignment{}, false, nil
+	}
+	return copyAttendanceShiftAssignment(v), true, nil
+}
+
+func (s *Store) ListAttendanceShiftAssignments(_ context.Context, tenantID string) ([]AttendanceShiftAssignment, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.attendanceAssignments[tenantID], copyAttendanceShiftAssignment)
+	sort.Slice(out, func(i, j int) bool { return out[i].EffectiveFrom.After(out[j].EffectiveFrom) })
+	return out, nil
+}
+
+func (s *Store) FindEffectiveAttendanceShiftAssignment(_ context.Context, tenantID, employeeID string, at time.Time) (AttendanceShiftAssignment, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var best AttendanceShiftAssignment
+	found := false
+	for _, item := range s.attendanceAssignments[tenantID] {
+		if item.EmployeeID != employeeID || !strings.EqualFold(item.Status, "active") {
+			continue
+		}
+		if item.EffectiveFrom.After(at) {
+			continue
+		}
+		if item.EffectiveTo != nil && item.EffectiveTo.Before(at) {
+			continue
+		}
+		if !found || item.EffectiveFrom.After(best.EffectiveFrom) {
+			best = item
+			found = true
+		}
+	}
+	if !found {
+		return AttendanceShiftAssignment{}, false, nil
+	}
+	return copyAttendanceShiftAssignment(best), true, nil
+}
+
+func (s *Store) UpsertAttendanceClockRecord(_ context.Context, v AttendanceClockRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.attendanceClockRecords, v.TenantID, v.ID, copyAttendanceClockRecord(v))
+	return nil
+}
+
+func (s *Store) GetAttendanceClockRecord(_ context.Context, tenantID, id string) (AttendanceClockRecord, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.attendanceClockRecords, tenantID, id)
+	if !ok {
+		return AttendanceClockRecord{}, false, nil
+	}
+	return copyAttendanceClockRecord(v), true, nil
+}
+
+func (s *Store) GetAcceptedAttendanceClockRecord(_ context.Context, tenantID, employeeID, workDate, direction string) (AttendanceClockRecord, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, item := range s.attendanceClockRecords[tenantID] {
+		if item.EmployeeID == employeeID && item.WorkDate == workDate && item.Direction == direction && item.RecordStatus == "accepted" {
+			return copyAttendanceClockRecord(item), true, nil
+		}
+	}
+	return AttendanceClockRecord{}, false, nil
+}
+
+func (s *Store) ListAttendanceClockRecords(_ context.Context, tenantID string, query domain.AttendanceClockRecordQuery) ([]AttendanceClockRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]AttendanceClockRecord, 0, len(s.attendanceClockRecords[tenantID]))
+	for _, item := range s.attendanceClockRecords[tenantID] {
+		if !memoryClockRecordMatches(item, query) {
+			continue
+		}
+		out = append(out, copyAttendanceClockRecord(item))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ClockedAt.After(out[j].ClockedAt) })
+	return out, nil
+}
+
+func (s *Store) UpsertAttendanceCorrectionRequest(_ context.Context, v AttendanceCorrectionRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.attendanceCorrections, v.TenantID, v.ID, copyAttendanceCorrectionRequest(v))
+	return nil
+}
+
+func (s *Store) GetAttendanceCorrectionRequest(_ context.Context, tenantID, id string) (AttendanceCorrectionRequest, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.attendanceCorrections, tenantID, id)
+	if !ok {
+		return AttendanceCorrectionRequest{}, false, nil
+	}
+	return copyAttendanceCorrectionRequest(v), true, nil
+}
+
+func (s *Store) ListAttendanceCorrectionRequests(_ context.Context, tenantID string, query domain.AttendanceCorrectionQuery) ([]AttendanceCorrectionRequest, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]AttendanceCorrectionRequest, 0, len(s.attendanceCorrections[tenantID]))
+	for _, item := range s.attendanceCorrections[tenantID] {
+		if !memoryCorrectionMatches(item, query) {
+			continue
+		}
+		out = append(out, copyAttendanceCorrectionRequest(item))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
+	return out, nil
+}
+
+func memoryClockRecordMatches(item AttendanceClockRecord, query domain.AttendanceClockRecordQuery) bool {
+	if query.EmployeeID != "" && item.EmployeeID != query.EmployeeID {
+		return false
+	}
+	if query.FromDate != "" && item.WorkDate < query.FromDate {
+		return false
+	}
+	if query.ToDate != "" && item.WorkDate > query.ToDate {
+		return false
+	}
+	if query.Direction != "" && item.Direction != query.Direction {
+		return false
+	}
+	if query.RecordStatus != "" && item.RecordStatus != query.RecordStatus {
+		return false
+	}
+	if query.Source != "" && item.Source != query.Source {
+		return false
+	}
+	return true
+}
+
+func memoryCorrectionMatches(item AttendanceCorrectionRequest, query domain.AttendanceCorrectionQuery) bool {
+	if query.EmployeeID != "" && item.EmployeeID != query.EmployeeID {
+		return false
+	}
+	if query.FromDate != "" && item.WorkDate < query.FromDate {
+		return false
+	}
+	if query.ToDate != "" && item.WorkDate > query.ToDate {
+		return false
+	}
+	if query.Status != "" && item.Status != query.Status {
+		return false
+	}
+	if query.Direction != "" && item.Direction != query.Direction {
+		return false
+	}
+	return true
 }
 
 func (s *Store) UpsertFormTemplate(_ context.Context, v FormTemplate) error {

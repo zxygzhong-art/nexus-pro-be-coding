@@ -198,6 +198,91 @@ func (q *Queries) CountEmployeesFiltered(ctx context.Context, arg CountEmployees
 	return count, err
 }
 
+const findEffectiveAttendanceShiftAssignment = `-- name: FindEffectiveAttendanceShiftAssignment :one
+SELECT id, tenant_id, employee_id, shift_id, worksite_id, effective_from, effective_to, status, created_at, updated_at FROM attendance_shift_assignments
+WHERE tenant_id = $1
+  AND employee_id = $2
+  AND status = 'active'
+  AND effective_from <= $3
+  AND (effective_to IS NULL OR effective_to >= $3)
+ORDER BY effective_from DESC, created_at DESC, id ASC
+LIMIT 1
+`
+
+type FindEffectiveAttendanceShiftAssignmentParams struct {
+	TenantID      string             `json:"tenant_id"`
+	EmployeeID    string             `json:"employee_id"`
+	EffectiveFrom pgtype.Timestamptz `json:"effective_from"`
+}
+
+func (q *Queries) FindEffectiveAttendanceShiftAssignment(ctx context.Context, arg FindEffectiveAttendanceShiftAssignmentParams) (AttendanceShiftAssignment, error) {
+	row := q.db.QueryRow(ctx, findEffectiveAttendanceShiftAssignment, arg.TenantID, arg.EmployeeID, arg.EffectiveFrom)
+	var i AttendanceShiftAssignment
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.ShiftID,
+		&i.WorksiteID,
+		&i.EffectiveFrom,
+		&i.EffectiveTo,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAcceptedAttendanceClockRecord = `-- name: GetAcceptedAttendanceClockRecord :one
+SELECT id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id, work_date, direction, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, created_at FROM attendance_clock_records
+WHERE tenant_id = $1
+  AND employee_id = $2
+  AND work_date = $3
+  AND direction = $4
+  AND record_status = 'accepted'
+LIMIT 1
+`
+
+type GetAcceptedAttendanceClockRecordParams struct {
+	TenantID   string `json:"tenant_id"`
+	EmployeeID string `json:"employee_id"`
+	WorkDate   string `json:"work_date"`
+	Direction  string `json:"direction"`
+}
+
+func (q *Queries) GetAcceptedAttendanceClockRecord(ctx context.Context, arg GetAcceptedAttendanceClockRecordParams) (AttendanceClockRecord, error) {
+	row := q.db.QueryRow(ctx, getAcceptedAttendanceClockRecord,
+		arg.TenantID,
+		arg.EmployeeID,
+		arg.WorkDate,
+		arg.Direction,
+	)
+	var i AttendanceClockRecord
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.ShiftAssignmentID,
+		&i.ShiftID,
+		&i.WorksiteID,
+		&i.WorkDate,
+		&i.Direction,
+		&i.ClockedAt,
+		&i.Latitude,
+		&i.Longitude,
+		&i.AccuracyMeters,
+		&i.DistanceMeters,
+		&i.RecordStatus,
+		&i.RejectionReason,
+		&i.Source,
+		&i.DeviceID,
+		&i.DeviceInfo,
+		&i.CorrectionRequestID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getAccount = `-- name: GetAccount :one
 SELECT id, tenant_id, display_name, email, employee_id, status, user_group_ids, direct_permission_set_ids, active_assumable_role_id, created_at FROM accounts
 WHERE tenant_id = $1 AND id = $2
@@ -278,6 +363,163 @@ func (q *Queries) GetAssumableRole(ctx context.Context, arg GetAssumableRolePara
 		&i.PermissionBoundary,
 		&i.SessionDurationSeconds,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getAttendanceClockRecord = `-- name: GetAttendanceClockRecord :one
+SELECT id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id, work_date, direction, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, created_at FROM attendance_clock_records
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetAttendanceClockRecordParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetAttendanceClockRecord(ctx context.Context, arg GetAttendanceClockRecordParams) (AttendanceClockRecord, error) {
+	row := q.db.QueryRow(ctx, getAttendanceClockRecord, arg.TenantID, arg.ID)
+	var i AttendanceClockRecord
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.ShiftAssignmentID,
+		&i.ShiftID,
+		&i.WorksiteID,
+		&i.WorkDate,
+		&i.Direction,
+		&i.ClockedAt,
+		&i.Latitude,
+		&i.Longitude,
+		&i.AccuracyMeters,
+		&i.DistanceMeters,
+		&i.RecordStatus,
+		&i.RejectionReason,
+		&i.Source,
+		&i.DeviceID,
+		&i.DeviceInfo,
+		&i.CorrectionRequestID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getAttendanceCorrectionRequest = `-- name: GetAttendanceCorrectionRequest :one
+SELECT id, tenant_id, employee_id, direction, requested_clocked_at, work_date, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at FROM attendance_correction_requests
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetAttendanceCorrectionRequestParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetAttendanceCorrectionRequest(ctx context.Context, arg GetAttendanceCorrectionRequestParams) (AttendanceCorrectionRequest, error) {
+	row := q.db.QueryRow(ctx, getAttendanceCorrectionRequest, arg.TenantID, arg.ID)
+	var i AttendanceCorrectionRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.Direction,
+		&i.RequestedClockedAt,
+		&i.WorkDate,
+		&i.Reason,
+		&i.Status,
+		&i.FormInstanceID,
+		&i.ClockRecordID,
+		&i.ReviewedByAccountID,
+		&i.ReviewReason,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAttendanceShift = `-- name: GetAttendanceShift :one
+SELECT id, tenant_id, name, clock_in_start, clock_in_end, clock_out_start, clock_out_end, late_grace_minutes, early_leave_grace_minutes, status, created_at, updated_at FROM attendance_shifts
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetAttendanceShiftParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetAttendanceShift(ctx context.Context, arg GetAttendanceShiftParams) (AttendanceShift, error) {
+	row := q.db.QueryRow(ctx, getAttendanceShift, arg.TenantID, arg.ID)
+	var i AttendanceShift
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.ClockInStart,
+		&i.ClockInEnd,
+		&i.ClockOutStart,
+		&i.ClockOutEnd,
+		&i.LateGraceMinutes,
+		&i.EarlyLeaveGraceMinutes,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAttendanceShiftAssignment = `-- name: GetAttendanceShiftAssignment :one
+SELECT id, tenant_id, employee_id, shift_id, worksite_id, effective_from, effective_to, status, created_at, updated_at FROM attendance_shift_assignments
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetAttendanceShiftAssignmentParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetAttendanceShiftAssignment(ctx context.Context, arg GetAttendanceShiftAssignmentParams) (AttendanceShiftAssignment, error) {
+	row := q.db.QueryRow(ctx, getAttendanceShiftAssignment, arg.TenantID, arg.ID)
+	var i AttendanceShiftAssignment
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.ShiftID,
+		&i.WorksiteID,
+		&i.EffectiveFrom,
+		&i.EffectiveTo,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAttendanceWorksite = `-- name: GetAttendanceWorksite :one
+SELECT id, tenant_id, name, address, latitude, longitude, radius_meters, status, created_at, updated_at FROM attendance_worksites
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetAttendanceWorksiteParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetAttendanceWorksite(ctx context.Context, arg GetAttendanceWorksiteParams) (AttendanceWorksite, error) {
+	row := q.db.QueryRow(ctx, getAttendanceWorksite, arg.TenantID, arg.ID)
+	var i AttendanceWorksite
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.Address,
+		&i.Latitude,
+		&i.Longitude,
+		&i.RadiusMeters,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -942,6 +1184,253 @@ func (q *Queries) ListAssumableRoles(ctx context.Context, tenantID string) ([]As
 			&i.PermissionBoundary,
 			&i.SessionDurationSeconds,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAttendanceClockRecords = `-- name: ListAttendanceClockRecords :many
+SELECT id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id, work_date, direction, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, created_at FROM attendance_clock_records
+WHERE tenant_id = $1
+  AND ($2::text = '' OR employee_id = $2)
+  AND ($3::text = '' OR work_date >= $3)
+  AND ($4::text = '' OR work_date <= $4)
+  AND ($5::text = '' OR direction = $5)
+  AND ($6::text = '' OR record_status = $6)
+  AND ($7::text = '' OR source = $7)
+ORDER BY clocked_at DESC, created_at DESC, id ASC
+`
+
+type ListAttendanceClockRecordsParams struct {
+	TenantID     string `json:"tenant_id"`
+	EmployeeID   string `json:"employee_id"`
+	FromDate     string `json:"from_date"`
+	ToDate       string `json:"to_date"`
+	Direction    string `json:"direction"`
+	RecordStatus string `json:"record_status"`
+	Source       string `json:"source"`
+}
+
+func (q *Queries) ListAttendanceClockRecords(ctx context.Context, arg ListAttendanceClockRecordsParams) ([]AttendanceClockRecord, error) {
+	rows, err := q.db.Query(ctx, listAttendanceClockRecords,
+		arg.TenantID,
+		arg.EmployeeID,
+		arg.FromDate,
+		arg.ToDate,
+		arg.Direction,
+		arg.RecordStatus,
+		arg.Source,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AttendanceClockRecord
+	for rows.Next() {
+		var i AttendanceClockRecord
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.EmployeeID,
+			&i.ShiftAssignmentID,
+			&i.ShiftID,
+			&i.WorksiteID,
+			&i.WorkDate,
+			&i.Direction,
+			&i.ClockedAt,
+			&i.Latitude,
+			&i.Longitude,
+			&i.AccuracyMeters,
+			&i.DistanceMeters,
+			&i.RecordStatus,
+			&i.RejectionReason,
+			&i.Source,
+			&i.DeviceID,
+			&i.DeviceInfo,
+			&i.CorrectionRequestID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAttendanceCorrectionRequests = `-- name: ListAttendanceCorrectionRequests :many
+SELECT id, tenant_id, employee_id, direction, requested_clocked_at, work_date, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at FROM attendance_correction_requests
+WHERE tenant_id = $1
+  AND ($2::text = '' OR employee_id = $2)
+  AND ($3::text = '' OR work_date >= $3)
+  AND ($4::text = '' OR work_date <= $4)
+  AND ($5::text = '' OR status = $5)
+  AND ($6::text = '' OR direction = $6)
+ORDER BY created_at DESC, id ASC
+`
+
+type ListAttendanceCorrectionRequestsParams struct {
+	TenantID   string `json:"tenant_id"`
+	EmployeeID string `json:"employee_id"`
+	FromDate   string `json:"from_date"`
+	ToDate     string `json:"to_date"`
+	Status     string `json:"status"`
+	Direction  string `json:"direction"`
+}
+
+func (q *Queries) ListAttendanceCorrectionRequests(ctx context.Context, arg ListAttendanceCorrectionRequestsParams) ([]AttendanceCorrectionRequest, error) {
+	rows, err := q.db.Query(ctx, listAttendanceCorrectionRequests,
+		arg.TenantID,
+		arg.EmployeeID,
+		arg.FromDate,
+		arg.ToDate,
+		arg.Status,
+		arg.Direction,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AttendanceCorrectionRequest
+	for rows.Next() {
+		var i AttendanceCorrectionRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.EmployeeID,
+			&i.Direction,
+			&i.RequestedClockedAt,
+			&i.WorkDate,
+			&i.Reason,
+			&i.Status,
+			&i.FormInstanceID,
+			&i.ClockRecordID,
+			&i.ReviewedByAccountID,
+			&i.ReviewReason,
+			&i.ReviewedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAttendanceShiftAssignments = `-- name: ListAttendanceShiftAssignments :many
+SELECT id, tenant_id, employee_id, shift_id, worksite_id, effective_from, effective_to, status, created_at, updated_at FROM attendance_shift_assignments
+WHERE tenant_id = $1
+ORDER BY effective_from DESC, created_at DESC, id ASC
+`
+
+func (q *Queries) ListAttendanceShiftAssignments(ctx context.Context, tenantID string) ([]AttendanceShiftAssignment, error) {
+	rows, err := q.db.Query(ctx, listAttendanceShiftAssignments, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AttendanceShiftAssignment
+	for rows.Next() {
+		var i AttendanceShiftAssignment
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.EmployeeID,
+			&i.ShiftID,
+			&i.WorksiteID,
+			&i.EffectiveFrom,
+			&i.EffectiveTo,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAttendanceShifts = `-- name: ListAttendanceShifts :many
+SELECT id, tenant_id, name, clock_in_start, clock_in_end, clock_out_start, clock_out_end, late_grace_minutes, early_leave_grace_minutes, status, created_at, updated_at FROM attendance_shifts
+WHERE tenant_id = $1
+ORDER BY created_at DESC, id ASC
+`
+
+func (q *Queries) ListAttendanceShifts(ctx context.Context, tenantID string) ([]AttendanceShift, error) {
+	rows, err := q.db.Query(ctx, listAttendanceShifts, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AttendanceShift
+	for rows.Next() {
+		var i AttendanceShift
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Name,
+			&i.ClockInStart,
+			&i.ClockInEnd,
+			&i.ClockOutStart,
+			&i.ClockOutEnd,
+			&i.LateGraceMinutes,
+			&i.EarlyLeaveGraceMinutes,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAttendanceWorksites = `-- name: ListAttendanceWorksites :many
+SELECT id, tenant_id, name, address, latitude, longitude, radius_meters, status, created_at, updated_at FROM attendance_worksites
+WHERE tenant_id = $1
+ORDER BY created_at DESC, id ASC
+`
+
+func (q *Queries) ListAttendanceWorksites(ctx context.Context, tenantID string) ([]AttendanceWorksite, error) {
+	rows, err := q.db.Query(ctx, listAttendanceWorksites, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AttendanceWorksite
+	for rows.Next() {
+		var i AttendanceWorksite
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Name,
+			&i.Address,
+			&i.Latitude,
+			&i.Longitude,
+			&i.RadiusMeters,
+			&i.Status,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -1886,6 +2375,389 @@ func (q *Queries) UpsertAssumableRole(ctx context.Context, arg UpsertAssumableRo
 		&i.PermissionBoundary,
 		&i.SessionDurationSeconds,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertAttendanceClockRecord = `-- name: UpsertAttendanceClockRecord :one
+INSERT INTO attendance_clock_records (
+    id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id,
+    work_date, direction, clocked_at, latitude, longitude, accuracy_meters,
+    distance_meters, record_status, rejection_reason, source, device_id,
+    device_info, correction_request_id, created_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+    $13, $14, $15, $16, $17, $18::jsonb, $19, $20
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    employee_id = EXCLUDED.employee_id,
+    shift_assignment_id = EXCLUDED.shift_assignment_id,
+    shift_id = EXCLUDED.shift_id,
+    worksite_id = EXCLUDED.worksite_id,
+    work_date = EXCLUDED.work_date,
+    direction = EXCLUDED.direction,
+    clocked_at = EXCLUDED.clocked_at,
+    latitude = EXCLUDED.latitude,
+    longitude = EXCLUDED.longitude,
+    accuracy_meters = EXCLUDED.accuracy_meters,
+    distance_meters = EXCLUDED.distance_meters,
+    record_status = EXCLUDED.record_status,
+    rejection_reason = EXCLUDED.rejection_reason,
+    source = EXCLUDED.source,
+    device_id = EXCLUDED.device_id,
+    device_info = EXCLUDED.device_info,
+    correction_request_id = EXCLUDED.correction_request_id,
+    created_at = EXCLUDED.created_at
+RETURNING id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id, work_date, direction, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, created_at
+`
+
+type UpsertAttendanceClockRecordParams struct {
+	ID                  string             `json:"id"`
+	TenantID            string             `json:"tenant_id"`
+	EmployeeID          string             `json:"employee_id"`
+	ShiftAssignmentID   string             `json:"shift_assignment_id"`
+	ShiftID             string             `json:"shift_id"`
+	WorksiteID          string             `json:"worksite_id"`
+	WorkDate            string             `json:"work_date"`
+	Direction           string             `json:"direction"`
+	ClockedAt           pgtype.Timestamptz `json:"clocked_at"`
+	Latitude            float64            `json:"latitude"`
+	Longitude           float64            `json:"longitude"`
+	AccuracyMeters      float64            `json:"accuracy_meters"`
+	DistanceMeters      float64            `json:"distance_meters"`
+	RecordStatus        string             `json:"record_status"`
+	RejectionReason     string             `json:"rejection_reason"`
+	Source              string             `json:"source"`
+	DeviceID            string             `json:"device_id"`
+	Column18            []byte             `json:"column_18"`
+	CorrectionRequestID string             `json:"correction_request_id"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) UpsertAttendanceClockRecord(ctx context.Context, arg UpsertAttendanceClockRecordParams) (AttendanceClockRecord, error) {
+	row := q.db.QueryRow(ctx, upsertAttendanceClockRecord,
+		arg.ID,
+		arg.TenantID,
+		arg.EmployeeID,
+		arg.ShiftAssignmentID,
+		arg.ShiftID,
+		arg.WorksiteID,
+		arg.WorkDate,
+		arg.Direction,
+		arg.ClockedAt,
+		arg.Latitude,
+		arg.Longitude,
+		arg.AccuracyMeters,
+		arg.DistanceMeters,
+		arg.RecordStatus,
+		arg.RejectionReason,
+		arg.Source,
+		arg.DeviceID,
+		arg.Column18,
+		arg.CorrectionRequestID,
+		arg.CreatedAt,
+	)
+	var i AttendanceClockRecord
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.ShiftAssignmentID,
+		&i.ShiftID,
+		&i.WorksiteID,
+		&i.WorkDate,
+		&i.Direction,
+		&i.ClockedAt,
+		&i.Latitude,
+		&i.Longitude,
+		&i.AccuracyMeters,
+		&i.DistanceMeters,
+		&i.RecordStatus,
+		&i.RejectionReason,
+		&i.Source,
+		&i.DeviceID,
+		&i.DeviceInfo,
+		&i.CorrectionRequestID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertAttendanceCorrectionRequest = `-- name: UpsertAttendanceCorrectionRequest :one
+INSERT INTO attendance_correction_requests (
+    id, tenant_id, employee_id, direction, requested_clocked_at, work_date,
+    reason, status, form_instance_id, clock_record_id, reviewed_by_account_id,
+    review_reason, reviewed_at, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    employee_id = EXCLUDED.employee_id,
+    direction = EXCLUDED.direction,
+    requested_clocked_at = EXCLUDED.requested_clocked_at,
+    work_date = EXCLUDED.work_date,
+    reason = EXCLUDED.reason,
+    status = EXCLUDED.status,
+    form_instance_id = EXCLUDED.form_instance_id,
+    clock_record_id = EXCLUDED.clock_record_id,
+    reviewed_by_account_id = EXCLUDED.reviewed_by_account_id,
+    review_reason = EXCLUDED.review_reason,
+    reviewed_at = EXCLUDED.reviewed_at,
+    created_at = EXCLUDED.created_at,
+    updated_at = EXCLUDED.updated_at
+RETURNING id, tenant_id, employee_id, direction, requested_clocked_at, work_date, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at
+`
+
+type UpsertAttendanceCorrectionRequestParams struct {
+	ID                  string             `json:"id"`
+	TenantID            string             `json:"tenant_id"`
+	EmployeeID          string             `json:"employee_id"`
+	Direction           string             `json:"direction"`
+	RequestedClockedAt  pgtype.Timestamptz `json:"requested_clocked_at"`
+	WorkDate            string             `json:"work_date"`
+	Reason              string             `json:"reason"`
+	Status              string             `json:"status"`
+	FormInstanceID      string             `json:"form_instance_id"`
+	ClockRecordID       string             `json:"clock_record_id"`
+	ReviewedByAccountID string             `json:"reviewed_by_account_id"`
+	ReviewReason        string             `json:"review_reason"`
+	ReviewedAt          pgtype.Timestamptz `json:"reviewed_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertAttendanceCorrectionRequest(ctx context.Context, arg UpsertAttendanceCorrectionRequestParams) (AttendanceCorrectionRequest, error) {
+	row := q.db.QueryRow(ctx, upsertAttendanceCorrectionRequest,
+		arg.ID,
+		arg.TenantID,
+		arg.EmployeeID,
+		arg.Direction,
+		arg.RequestedClockedAt,
+		arg.WorkDate,
+		arg.Reason,
+		arg.Status,
+		arg.FormInstanceID,
+		arg.ClockRecordID,
+		arg.ReviewedByAccountID,
+		arg.ReviewReason,
+		arg.ReviewedAt,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i AttendanceCorrectionRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.Direction,
+		&i.RequestedClockedAt,
+		&i.WorkDate,
+		&i.Reason,
+		&i.Status,
+		&i.FormInstanceID,
+		&i.ClockRecordID,
+		&i.ReviewedByAccountID,
+		&i.ReviewReason,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertAttendanceShift = `-- name: UpsertAttendanceShift :one
+INSERT INTO attendance_shifts (
+    id, tenant_id, name, clock_in_start, clock_in_end, clock_out_start,
+    clock_out_end, late_grace_minutes, early_leave_grace_minutes,
+    status, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    name = EXCLUDED.name,
+    clock_in_start = EXCLUDED.clock_in_start,
+    clock_in_end = EXCLUDED.clock_in_end,
+    clock_out_start = EXCLUDED.clock_out_start,
+    clock_out_end = EXCLUDED.clock_out_end,
+    late_grace_minutes = EXCLUDED.late_grace_minutes,
+    early_leave_grace_minutes = EXCLUDED.early_leave_grace_minutes,
+    status = EXCLUDED.status,
+    created_at = EXCLUDED.created_at,
+    updated_at = EXCLUDED.updated_at
+RETURNING id, tenant_id, name, clock_in_start, clock_in_end, clock_out_start, clock_out_end, late_grace_minutes, early_leave_grace_minutes, status, created_at, updated_at
+`
+
+type UpsertAttendanceShiftParams struct {
+	ID                     string             `json:"id"`
+	TenantID               string             `json:"tenant_id"`
+	Name                   string             `json:"name"`
+	ClockInStart           string             `json:"clock_in_start"`
+	ClockInEnd             string             `json:"clock_in_end"`
+	ClockOutStart          string             `json:"clock_out_start"`
+	ClockOutEnd            string             `json:"clock_out_end"`
+	LateGraceMinutes       int32              `json:"late_grace_minutes"`
+	EarlyLeaveGraceMinutes int32              `json:"early_leave_grace_minutes"`
+	Status                 string             `json:"status"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertAttendanceShift(ctx context.Context, arg UpsertAttendanceShiftParams) (AttendanceShift, error) {
+	row := q.db.QueryRow(ctx, upsertAttendanceShift,
+		arg.ID,
+		arg.TenantID,
+		arg.Name,
+		arg.ClockInStart,
+		arg.ClockInEnd,
+		arg.ClockOutStart,
+		arg.ClockOutEnd,
+		arg.LateGraceMinutes,
+		arg.EarlyLeaveGraceMinutes,
+		arg.Status,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i AttendanceShift
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.ClockInStart,
+		&i.ClockInEnd,
+		&i.ClockOutStart,
+		&i.ClockOutEnd,
+		&i.LateGraceMinutes,
+		&i.EarlyLeaveGraceMinutes,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertAttendanceShiftAssignment = `-- name: UpsertAttendanceShiftAssignment :one
+INSERT INTO attendance_shift_assignments (
+    id, tenant_id, employee_id, shift_id, worksite_id, effective_from,
+    effective_to, status, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    employee_id = EXCLUDED.employee_id,
+    shift_id = EXCLUDED.shift_id,
+    worksite_id = EXCLUDED.worksite_id,
+    effective_from = EXCLUDED.effective_from,
+    effective_to = EXCLUDED.effective_to,
+    status = EXCLUDED.status,
+    created_at = EXCLUDED.created_at,
+    updated_at = EXCLUDED.updated_at
+RETURNING id, tenant_id, employee_id, shift_id, worksite_id, effective_from, effective_to, status, created_at, updated_at
+`
+
+type UpsertAttendanceShiftAssignmentParams struct {
+	ID            string             `json:"id"`
+	TenantID      string             `json:"tenant_id"`
+	EmployeeID    string             `json:"employee_id"`
+	ShiftID       string             `json:"shift_id"`
+	WorksiteID    string             `json:"worksite_id"`
+	EffectiveFrom pgtype.Timestamptz `json:"effective_from"`
+	EffectiveTo   pgtype.Timestamptz `json:"effective_to"`
+	Status        string             `json:"status"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertAttendanceShiftAssignment(ctx context.Context, arg UpsertAttendanceShiftAssignmentParams) (AttendanceShiftAssignment, error) {
+	row := q.db.QueryRow(ctx, upsertAttendanceShiftAssignment,
+		arg.ID,
+		arg.TenantID,
+		arg.EmployeeID,
+		arg.ShiftID,
+		arg.WorksiteID,
+		arg.EffectiveFrom,
+		arg.EffectiveTo,
+		arg.Status,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i AttendanceShiftAssignment
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.ShiftID,
+		&i.WorksiteID,
+		&i.EffectiveFrom,
+		&i.EffectiveTo,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertAttendanceWorksite = `-- name: UpsertAttendanceWorksite :one
+INSERT INTO attendance_worksites (
+    id, tenant_id, name, address, latitude, longitude, radius_meters,
+    status, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    name = EXCLUDED.name,
+    address = EXCLUDED.address,
+    latitude = EXCLUDED.latitude,
+    longitude = EXCLUDED.longitude,
+    radius_meters = EXCLUDED.radius_meters,
+    status = EXCLUDED.status,
+    created_at = EXCLUDED.created_at,
+    updated_at = EXCLUDED.updated_at
+RETURNING id, tenant_id, name, address, latitude, longitude, radius_meters, status, created_at, updated_at
+`
+
+type UpsertAttendanceWorksiteParams struct {
+	ID           string             `json:"id"`
+	TenantID     string             `json:"tenant_id"`
+	Name         string             `json:"name"`
+	Address      string             `json:"address"`
+	Latitude     float64            `json:"latitude"`
+	Longitude    float64            `json:"longitude"`
+	RadiusMeters int32              `json:"radius_meters"`
+	Status       string             `json:"status"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertAttendanceWorksite(ctx context.Context, arg UpsertAttendanceWorksiteParams) (AttendanceWorksite, error) {
+	row := q.db.QueryRow(ctx, upsertAttendanceWorksite,
+		arg.ID,
+		arg.TenantID,
+		arg.Name,
+		arg.Address,
+		arg.Latitude,
+		arg.Longitude,
+		arg.RadiusMeters,
+		arg.Status,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i AttendanceWorksite
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.Address,
+		&i.Latitude,
+		&i.Longitude,
+		&i.RadiusMeters,
+		&i.Status,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

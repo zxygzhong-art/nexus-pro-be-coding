@@ -524,7 +524,7 @@ func authzReasonCode(decision CheckResult) string {
 		switch decision.Action {
 		case ActionRead:
 			return "menu_denied"
-		case ActionCreate, ActionUpdate, ActionDelete, ActionExport, ActionImport, ActionInvite, ActionUpdateStatus, ActionStatusTransition:
+		case ActionCreate, ActionUpdate, ActionDelete, ActionExport, ActionImport, ActionInvite, ActionApprove, ActionUpdateStatus, ActionStatusTransition:
 			return "button_denied"
 		default:
 			return "permission_missing"

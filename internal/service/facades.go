@@ -77,6 +77,32 @@ type AttendanceFacade interface {
 	ListLeaveBalancePage(RequestContext, PageRequest) (PageResponse[LeaveBalance], error)
 	ListLeaveRequestPage(RequestContext, PageRequest) (PageResponse[LeaveRequest], error)
 	CreateLeaveRequest(RequestContext, CreateLeaveRequestInput) (LeaveRequest, error)
+	CurrentAttendancePolicy(RequestContext) (AttendancePolicyResponse, error)
+	ListAttendanceWorksitePage(RequestContext, PageRequest) (PageResponse[AttendanceWorksite], error)
+	CreateAttendanceWorksite(RequestContext, CreateAttendanceWorksiteInput) (AttendanceWorksite, error)
+	UpdateAttendanceWorksite(RequestContext, UpdateAttendanceWorksiteInput) (AttendanceWorksite, error)
+	ListAttendanceShiftPage(RequestContext, PageRequest) (PageResponse[AttendanceShift], error)
+	CreateAttendanceShift(RequestContext, CreateAttendanceShiftInput) (AttendanceShift, error)
+	UpdateAttendanceShift(RequestContext, UpdateAttendanceShiftInput) (AttendanceShift, error)
+	ListAttendanceShiftAssignmentPage(RequestContext, PageRequest) (PageResponse[AttendanceShiftAssignment], error)
+	CreateAttendanceShiftAssignment(RequestContext, CreateAttendanceShiftAssignmentInput) (AttendanceShiftAssignment, error)
+	AttendanceClockStatus(RequestContext) (AttendanceClockStatus, error)
+	CreateAttendanceClockRecord(RequestContext, CreateAttendanceClockRecordInput) (AttendanceClockRecord, error)
+	ListAttendanceClockRecordPage(RequestContext, AttendanceClockRecordQuery, PageRequest) (PageResponse[AttendanceClockRecord], error)
+	CreateAttendanceCorrection(RequestContext, CreateAttendanceCorrectionInput) (AttendanceCorrectionRequest, error)
+	ListAttendanceCorrectionPage(RequestContext, AttendanceCorrectionQuery, PageRequest) (PageResponse[AttendanceCorrectionRequest], error)
+	ApproveAttendanceCorrection(RequestContext, string, ReviewAttendanceCorrectionInput) (AttendanceCorrectionRequest, error)
+	RejectAttendanceCorrection(RequestContext, string, ReviewAttendanceCorrectionInput) (AttendanceCorrectionRequest, error)
+}
+
+// WorkspaceFacade exposes workspace dashboard aggregates to the API layer.
+type WorkspaceFacade interface {
+	WorkspaceOverview(RequestContext, WorkspaceOverviewQuery) (WorkspaceOverviewResponse, error)
+	WorkspaceOrganization(RequestContext) (WorkspaceOrganizationResponse, error)
+	WorkspaceTurnover(RequestContext, WorkspaceTurnoverQuery) (WorkspaceTurnoverResponse, error)
+	WorkspaceAttendance(RequestContext, WorkspaceAttendanceQuery) (WorkspaceAttendanceResponse, error)
+	WorkspaceAdmins(RequestContext) (WorkspaceAdminsResponse, error)
+	WorkspaceAuditLogs(RequestContext, WorkspaceAuditLogQuery, PageRequest) (PageResponse[WorkspaceAuditLog], error)
 }
 
 // WorkflowFacade exposes form template and form instance use cases.
@@ -106,6 +132,7 @@ var (
 	_ IAMFacade        = IAMService{}
 	_ HRFacade         = HRService{}
 	_ AttendanceFacade = AttendanceService{}
+	_ WorkspaceFacade  = WorkspaceService{}
 	_ WorkflowFacade   = WorkflowService{}
 	_ AgentFacade      = AgentService{}
 	_ AuditFacade      = AuditService{}

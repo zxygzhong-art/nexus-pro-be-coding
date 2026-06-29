@@ -862,6 +862,244 @@ func (s *Store) ListLeaveRequests(execCtx context.Context, tenantID string) ([]d
 	return mapSlice(items, fromLeaveRequest), nil
 }
 
+func (s *Store) UpsertAttendanceWorksite(execCtx context.Context, v domain.AttendanceWorksite) error {
+	_, err := s.q.UpsertAttendanceWorksite(execCtx, sqlc.UpsertAttendanceWorksiteParams{
+		ID:           v.ID,
+		TenantID:     v.TenantID,
+		Name:         v.Name,
+		Address:      v.Address,
+		Latitude:     v.Latitude,
+		Longitude:    v.Longitude,
+		RadiusMeters: int32(v.RadiusMeters),
+		Status:       v.Status,
+		CreatedAt:    timestamptz(v.CreatedAt),
+		UpdatedAt:    timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+func (s *Store) GetAttendanceWorksite(execCtx context.Context, tenantID, id string) (domain.AttendanceWorksite, bool, error) {
+	v, err := s.q.GetAttendanceWorksite(execCtx, sqlc.GetAttendanceWorksiteParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.AttendanceWorksite{}, false, nil
+	}
+	if err != nil {
+		return domain.AttendanceWorksite{}, false, err
+	}
+	return fromAttendanceWorksite(v), true, nil
+}
+
+func (s *Store) ListAttendanceWorksites(execCtx context.Context, tenantID string) ([]domain.AttendanceWorksite, error) {
+	items, err := s.q.ListAttendanceWorksites(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAttendanceWorksite), nil
+}
+
+func (s *Store) UpsertAttendanceShift(execCtx context.Context, v domain.AttendanceShift) error {
+	_, err := s.q.UpsertAttendanceShift(execCtx, sqlc.UpsertAttendanceShiftParams{
+		ID:                     v.ID,
+		TenantID:               v.TenantID,
+		Name:                   v.Name,
+		ClockInStart:           v.ClockInStart,
+		ClockInEnd:             v.ClockInEnd,
+		ClockOutStart:          v.ClockOutStart,
+		ClockOutEnd:            v.ClockOutEnd,
+		LateGraceMinutes:       int32(v.LateGraceMinutes),
+		EarlyLeaveGraceMinutes: int32(v.EarlyLeaveGraceMinutes),
+		Status:                 v.Status,
+		CreatedAt:              timestamptz(v.CreatedAt),
+		UpdatedAt:              timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+func (s *Store) GetAttendanceShift(execCtx context.Context, tenantID, id string) (domain.AttendanceShift, bool, error) {
+	v, err := s.q.GetAttendanceShift(execCtx, sqlc.GetAttendanceShiftParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.AttendanceShift{}, false, nil
+	}
+	if err != nil {
+		return domain.AttendanceShift{}, false, err
+	}
+	return fromAttendanceShift(v), true, nil
+}
+
+func (s *Store) ListAttendanceShifts(execCtx context.Context, tenantID string) ([]domain.AttendanceShift, error) {
+	items, err := s.q.ListAttendanceShifts(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAttendanceShift), nil
+}
+
+func (s *Store) UpsertAttendanceShiftAssignment(execCtx context.Context, v domain.AttendanceShiftAssignment) error {
+	_, err := s.q.UpsertAttendanceShiftAssignment(execCtx, sqlc.UpsertAttendanceShiftAssignmentParams{
+		ID:            v.ID,
+		TenantID:      v.TenantID,
+		EmployeeID:    v.EmployeeID,
+		ShiftID:       v.ShiftID,
+		WorksiteID:    v.WorksiteID,
+		EffectiveFrom: timestamptz(v.EffectiveFrom),
+		EffectiveTo:   nullableTimestamptz(v.EffectiveTo),
+		Status:        v.Status,
+		CreatedAt:     timestamptz(v.CreatedAt),
+		UpdatedAt:     timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+func (s *Store) GetAttendanceShiftAssignment(execCtx context.Context, tenantID, id string) (domain.AttendanceShiftAssignment, bool, error) {
+	v, err := s.q.GetAttendanceShiftAssignment(execCtx, sqlc.GetAttendanceShiftAssignmentParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.AttendanceShiftAssignment{}, false, nil
+	}
+	if err != nil {
+		return domain.AttendanceShiftAssignment{}, false, err
+	}
+	return fromAttendanceShiftAssignment(v), true, nil
+}
+
+func (s *Store) ListAttendanceShiftAssignments(execCtx context.Context, tenantID string) ([]domain.AttendanceShiftAssignment, error) {
+	items, err := s.q.ListAttendanceShiftAssignments(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAttendanceShiftAssignment), nil
+}
+
+func (s *Store) FindEffectiveAttendanceShiftAssignment(execCtx context.Context, tenantID, employeeID string, at time.Time) (domain.AttendanceShiftAssignment, bool, error) {
+	v, err := s.q.FindEffectiveAttendanceShiftAssignment(execCtx, sqlc.FindEffectiveAttendanceShiftAssignmentParams{
+		TenantID:      tenantID,
+		EmployeeID:    employeeID,
+		EffectiveFrom: timestamptz(at),
+	})
+	if isNotFound(err) {
+		return domain.AttendanceShiftAssignment{}, false, nil
+	}
+	if err != nil {
+		return domain.AttendanceShiftAssignment{}, false, err
+	}
+	return fromAttendanceShiftAssignment(v), true, nil
+}
+
+func (s *Store) UpsertAttendanceClockRecord(execCtx context.Context, v domain.AttendanceClockRecord) error {
+	_, err := s.q.UpsertAttendanceClockRecord(execCtx, sqlc.UpsertAttendanceClockRecordParams{
+		ID:                  v.ID,
+		TenantID:            v.TenantID,
+		EmployeeID:          v.EmployeeID,
+		ShiftAssignmentID:   v.ShiftAssignmentID,
+		ShiftID:             v.ShiftID,
+		WorksiteID:          v.WorksiteID,
+		WorkDate:            v.WorkDate,
+		Direction:           v.Direction,
+		ClockedAt:           timestamptz(v.ClockedAt),
+		Latitude:            v.Latitude,
+		Longitude:           v.Longitude,
+		AccuracyMeters:      v.AccuracyMeters,
+		DistanceMeters:      v.DistanceMeters,
+		RecordStatus:        v.RecordStatus,
+		RejectionReason:     v.RejectionReason,
+		Source:              v.Source,
+		DeviceID:            v.DeviceID,
+		Column18:            mustJSON(v.DeviceInfo),
+		CorrectionRequestID: v.CorrectionRequestID,
+		CreatedAt:           timestamptz(v.CreatedAt),
+	})
+	return err
+}
+
+func (s *Store) GetAttendanceClockRecord(execCtx context.Context, tenantID, id string) (domain.AttendanceClockRecord, bool, error) {
+	v, err := s.q.GetAttendanceClockRecord(execCtx, sqlc.GetAttendanceClockRecordParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.AttendanceClockRecord{}, false, nil
+	}
+	if err != nil {
+		return domain.AttendanceClockRecord{}, false, err
+	}
+	return fromAttendanceClockRecord(v), true, nil
+}
+
+func (s *Store) GetAcceptedAttendanceClockRecord(execCtx context.Context, tenantID, employeeID, workDate, direction string) (domain.AttendanceClockRecord, bool, error) {
+	v, err := s.q.GetAcceptedAttendanceClockRecord(execCtx, sqlc.GetAcceptedAttendanceClockRecordParams{
+		TenantID:   tenantID,
+		EmployeeID: employeeID,
+		WorkDate:   workDate,
+		Direction:  direction,
+	})
+	if isNotFound(err) {
+		return domain.AttendanceClockRecord{}, false, nil
+	}
+	if err != nil {
+		return domain.AttendanceClockRecord{}, false, err
+	}
+	return fromAttendanceClockRecord(v), true, nil
+}
+
+func (s *Store) ListAttendanceClockRecords(execCtx context.Context, tenantID string, query domain.AttendanceClockRecordQuery) ([]domain.AttendanceClockRecord, error) {
+	items, err := s.q.ListAttendanceClockRecords(tenantContext(execCtx, tenantID), sqlc.ListAttendanceClockRecordsParams{
+		TenantID:     tenantID,
+		EmployeeID:   query.EmployeeID,
+		FromDate:     query.FromDate,
+		ToDate:       query.ToDate,
+		Direction:    query.Direction,
+		RecordStatus: query.RecordStatus,
+		Source:       query.Source,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAttendanceClockRecord), nil
+}
+
+func (s *Store) UpsertAttendanceCorrectionRequest(execCtx context.Context, v domain.AttendanceCorrectionRequest) error {
+	_, err := s.q.UpsertAttendanceCorrectionRequest(execCtx, sqlc.UpsertAttendanceCorrectionRequestParams{
+		ID:                  v.ID,
+		TenantID:            v.TenantID,
+		EmployeeID:          v.EmployeeID,
+		Direction:           v.Direction,
+		RequestedClockedAt:  timestamptz(v.RequestedClockedAt),
+		WorkDate:            v.WorkDate,
+		Reason:              v.Reason,
+		Status:              v.Status,
+		FormInstanceID:      v.FormInstanceID,
+		ClockRecordID:       v.ClockRecordID,
+		ReviewedByAccountID: v.ReviewedByAccountID,
+		ReviewReason:        v.ReviewReason,
+		ReviewedAt:          nullableTimestamptz(v.ReviewedAt),
+		CreatedAt:           timestamptz(v.CreatedAt),
+		UpdatedAt:           timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+func (s *Store) GetAttendanceCorrectionRequest(execCtx context.Context, tenantID, id string) (domain.AttendanceCorrectionRequest, bool, error) {
+	v, err := s.q.GetAttendanceCorrectionRequest(execCtx, sqlc.GetAttendanceCorrectionRequestParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.AttendanceCorrectionRequest{}, false, nil
+	}
+	if err != nil {
+		return domain.AttendanceCorrectionRequest{}, false, err
+	}
+	return fromAttendanceCorrectionRequest(v), true, nil
+}
+
+func (s *Store) ListAttendanceCorrectionRequests(execCtx context.Context, tenantID string, query domain.AttendanceCorrectionQuery) ([]domain.AttendanceCorrectionRequest, error) {
+	items, err := s.q.ListAttendanceCorrectionRequests(tenantContext(execCtx, tenantID), sqlc.ListAttendanceCorrectionRequestsParams{
+		TenantID:   tenantID,
+		EmployeeID: query.EmployeeID,
+		FromDate:   query.FromDate,
+		ToDate:     query.ToDate,
+		Status:     query.Status,
+		Direction:  query.Direction,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAttendanceCorrectionRequest), nil
+}
+
 func (s *Store) UpsertFormTemplate(execCtx context.Context, v domain.FormTemplate) error {
 	_, err := s.q.UpsertFormTemplate(execCtx, sqlc.UpsertFormTemplateParams{
 		ID:          v.ID,
@@ -1512,6 +1750,98 @@ func fromLeaveRequest(v sqlc.LeaveRequest) domain.LeaveRequest {
 		Status:         v.Status,
 		FormInstanceID: v.FormInstanceID,
 		CreatedAt:      timeFrom(v.CreatedAt),
+	}
+}
+
+func fromAttendanceWorksite(v sqlc.AttendanceWorksite) domain.AttendanceWorksite {
+	return domain.AttendanceWorksite{
+		ID:           v.ID,
+		TenantID:     v.TenantID,
+		Name:         v.Name,
+		Address:      v.Address,
+		Latitude:     v.Latitude,
+		Longitude:    v.Longitude,
+		RadiusMeters: int(v.RadiusMeters),
+		Status:       v.Status,
+		CreatedAt:    timeFrom(v.CreatedAt),
+		UpdatedAt:    timeFrom(v.UpdatedAt),
+	}
+}
+
+func fromAttendanceShift(v sqlc.AttendanceShift) domain.AttendanceShift {
+	return domain.AttendanceShift{
+		ID:                     v.ID,
+		TenantID:               v.TenantID,
+		Name:                   v.Name,
+		ClockInStart:           v.ClockInStart,
+		ClockInEnd:             v.ClockInEnd,
+		ClockOutStart:          v.ClockOutStart,
+		ClockOutEnd:            v.ClockOutEnd,
+		LateGraceMinutes:       int(v.LateGraceMinutes),
+		EarlyLeaveGraceMinutes: int(v.EarlyLeaveGraceMinutes),
+		Status:                 v.Status,
+		CreatedAt:              timeFrom(v.CreatedAt),
+		UpdatedAt:              timeFrom(v.UpdatedAt),
+	}
+}
+
+func fromAttendanceShiftAssignment(v sqlc.AttendanceShiftAssignment) domain.AttendanceShiftAssignment {
+	return domain.AttendanceShiftAssignment{
+		ID:            v.ID,
+		TenantID:      v.TenantID,
+		EmployeeID:    v.EmployeeID,
+		ShiftID:       v.ShiftID,
+		WorksiteID:    v.WorksiteID,
+		EffectiveFrom: timeFrom(v.EffectiveFrom),
+		EffectiveTo:   timePtrFrom(v.EffectiveTo),
+		Status:        v.Status,
+		CreatedAt:     timeFrom(v.CreatedAt),
+		UpdatedAt:     timeFrom(v.UpdatedAt),
+	}
+}
+
+func fromAttendanceClockRecord(v sqlc.AttendanceClockRecord) domain.AttendanceClockRecord {
+	return domain.AttendanceClockRecord{
+		ID:                  v.ID,
+		TenantID:            v.TenantID,
+		EmployeeID:          v.EmployeeID,
+		ShiftAssignmentID:   v.ShiftAssignmentID,
+		ShiftID:             v.ShiftID,
+		WorksiteID:          v.WorksiteID,
+		WorkDate:            v.WorkDate,
+		Direction:           v.Direction,
+		ClockedAt:           timeFrom(v.ClockedAt),
+		Latitude:            v.Latitude,
+		Longitude:           v.Longitude,
+		AccuracyMeters:      v.AccuracyMeters,
+		DistanceMeters:      v.DistanceMeters,
+		RecordStatus:        v.RecordStatus,
+		RejectionReason:     v.RejectionReason,
+		Source:              v.Source,
+		DeviceID:            v.DeviceID,
+		DeviceInfo:          jsonMap(v.DeviceInfo),
+		CorrectionRequestID: v.CorrectionRequestID,
+		CreatedAt:           timeFrom(v.CreatedAt),
+	}
+}
+
+func fromAttendanceCorrectionRequest(v sqlc.AttendanceCorrectionRequest) domain.AttendanceCorrectionRequest {
+	return domain.AttendanceCorrectionRequest{
+		ID:                  v.ID,
+		TenantID:            v.TenantID,
+		EmployeeID:          v.EmployeeID,
+		Direction:           v.Direction,
+		RequestedClockedAt:  timeFrom(v.RequestedClockedAt),
+		WorkDate:            v.WorkDate,
+		Reason:              v.Reason,
+		Status:              v.Status,
+		FormInstanceID:      v.FormInstanceID,
+		ClockRecordID:       v.ClockRecordID,
+		ReviewedByAccountID: v.ReviewedByAccountID,
+		ReviewReason:        v.ReviewReason,
+		ReviewedAt:          timePtrFrom(v.ReviewedAt),
+		CreatedAt:           timeFrom(v.CreatedAt),
+		UpdatedAt:           timeFrom(v.UpdatedAt),
 	}
 }
 

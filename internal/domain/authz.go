@@ -78,20 +78,25 @@ const (
 
 // Resource types used in route policies and permissions.
 const (
-	ResourceEmployee           ResourceType = "employee"
-	ResourceEmployeeImport     ResourceType = "employee_import_session"
-	ResourceOrgUnit            ResourceType = "org_unit"
-	ResourceLeave              ResourceType = "leave"
-	ResourceUserGroup          ResourceType = "user_group"
-	ResourcePermissionSet      ResourceType = "permission_set"
-	ResourcePermissionAssign   ResourceType = "permission_set_assignment"
-	ResourceDataScope          ResourceType = "data_scope"
-	ResourceFieldPolicy        ResourceType = "field_policy"
-	ResourceAssumableRole      ResourceType = "assumable_role"
-	ResourceTool               ResourceType = "tool"
-	ResourceKnowledgeArticle   ResourceType = "knowledge_article"
-	ResourceEmployeeCollection ResourceType = "employee_collection"
-	ResourceFormInstance       ResourceType = "form_instance"
+	ResourceEmployee                  ResourceType = "employee"
+	ResourceEmployeeImport            ResourceType = "employee_import_session"
+	ResourceOrgUnit                   ResourceType = "org_unit"
+	ResourceLeave                     ResourceType = "leave"
+	ResourceAttendanceWorksite        ResourceType = "worksite"
+	ResourceAttendanceShift           ResourceType = "shift"
+	ResourceAttendanceShiftAssignment ResourceType = "shift_assignment"
+	ResourceAttendanceClock           ResourceType = "clock"
+	ResourceAttendanceCorrection      ResourceType = "correction"
+	ResourceUserGroup                 ResourceType = "user_group"
+	ResourcePermissionSet             ResourceType = "permission_set"
+	ResourcePermissionAssign          ResourceType = "permission_set_assignment"
+	ResourceDataScope                 ResourceType = "data_scope"
+	ResourceFieldPolicy               ResourceType = "field_policy"
+	ResourceAssumableRole             ResourceType = "assumable_role"
+	ResourceTool                      ResourceType = "tool"
+	ResourceKnowledgeArticle          ResourceType = "knowledge_article"
+	ResourceEmployeeCollection        ResourceType = "employee_collection"
+	ResourceFormInstance              ResourceType = "form_instance"
 )
 
 // Action values used in route policies and permissions.
@@ -240,6 +245,28 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "attendance.leave.read_balance", Method: "GET", Path: "/v1/attendance/leave-balances", ApplicationCode: "attendance", ResourceType: "leave", Action: "read"},
 	{Name: "attendance.leave.read_request", Method: "GET", Path: "/v1/attendance/leave-requests", ApplicationCode: "attendance", ResourceType: "leave", Action: "read"},
 	{Name: "attendance.leave.create", Method: "POST", Path: "/v1/attendance/leave-requests", ApplicationCode: "attendance", ResourceType: "leave", Action: "create"},
+	{Name: "attendance.policy.read", Method: "GET", Path: "/v1/attendance/policies/current", ApplicationCode: "attendance", ResourceType: "leave", Action: "read"},
+	{Name: "attendance.worksite.read", Method: "GET", Path: "/v1/attendance/worksites", ApplicationCode: "attendance", ResourceType: "worksite", Action: "read"},
+	{Name: "attendance.worksite.create", Method: "POST", Path: "/v1/attendance/worksites", ApplicationCode: "attendance", ResourceType: "worksite", Action: "create"},
+	{Name: "attendance.worksite.update", Method: "PATCH", Path: "/v1/attendance/worksites", ApplicationCode: "attendance", ResourceType: "worksite", Action: "update"},
+	{Name: "attendance.shift.read", Method: "GET", Path: "/v1/attendance/shifts", ApplicationCode: "attendance", ResourceType: "shift", Action: "read"},
+	{Name: "attendance.shift.create", Method: "POST", Path: "/v1/attendance/shifts", ApplicationCode: "attendance", ResourceType: "shift", Action: "create"},
+	{Name: "attendance.shift.update", Method: "PATCH", Path: "/v1/attendance/shifts", ApplicationCode: "attendance", ResourceType: "shift", Action: "update"},
+	{Name: "attendance.shift_assignment.read", Method: "GET", Path: "/v1/attendance/shift-assignments", ApplicationCode: "attendance", ResourceType: "shift_assignment", Action: "read"},
+	{Name: "attendance.shift_assignment.create", Method: "POST", Path: "/v1/attendance/shift-assignments", ApplicationCode: "attendance", ResourceType: "shift_assignment", Action: "create"},
+	{Name: "attendance.clock.status", Method: "GET", Path: "/v1/attendance/clock-status", ApplicationCode: "attendance", ResourceType: "clock", Action: "read"},
+	{Name: "attendance.clock.read", Method: "GET", Path: "/v1/attendance/clock-records", ApplicationCode: "attendance", ResourceType: "clock", Action: "read"},
+	{Name: "attendance.clock.create", Method: "POST", Path: "/v1/attendance/clock-records", ApplicationCode: "attendance", ResourceType: "clock", Action: "create"},
+	{Name: "attendance.correction.read", Method: "GET", Path: "/v1/attendance/corrections", ApplicationCode: "attendance", ResourceType: "correction", Action: "read"},
+	{Name: "attendance.correction.create", Method: "POST", Path: "/v1/attendance/corrections", ApplicationCode: "attendance", ResourceType: "correction", Action: "create"},
+	{Name: "attendance.correction.approve", Method: "POST", Path: "/v1/attendance/corrections/:id/approve", ApplicationCode: "attendance", ResourceType: "correction", Action: "approve", RiskLevel: RiskHigh},
+	{Name: "attendance.correction.reject", Method: "POST", Path: "/v1/attendance/corrections/:id/reject", ApplicationCode: "attendance", ResourceType: "correction", Action: "update", RiskLevel: RiskHigh},
+	{Name: "workspace.overview.read", Method: "GET", Path: "/v1/workspace/overview", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
+	{Name: "workspace.organization.read", Method: "GET", Path: "/v1/workspace/organization", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
+	{Name: "workspace.turnover.read", Method: "GET", Path: "/v1/workspace/turnover", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
+	{Name: "workspace.attendance.read", Method: "GET", Path: "/v1/workspace/attendance", ApplicationCode: "attendance", ResourceType: "clock", Action: "read"},
+	{Name: "workspace.admins.read", Method: "GET", Path: "/v1/workspace/admins", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "read"},
+	{Name: "workspace.audit_logs.read", Method: "GET", Path: "/v1/workspace/audit-logs", ApplicationCode: "audit", ResourceType: "audit_log", Action: "read", RiskLevel: RiskHigh},
 	{Name: "workflow.form_template.read", Method: "GET", Path: "/v1/forms/templates", ApplicationCode: "workflow", ResourceType: "form_template", Action: "read"},
 	{Name: "workflow.form_template.create", Method: "POST", Path: "/v1/forms/templates", ApplicationCode: "workflow", ResourceType: "form_template", Action: "create"},
 	{Name: "workflow.form_instance.submit", Method: "POST", Path: "/v1/workflows/forms/:id/submit", ApplicationCode: "workflow", ResourceType: "form_instance", Action: "submit"},

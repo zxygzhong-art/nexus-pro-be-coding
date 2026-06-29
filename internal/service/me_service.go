@@ -115,7 +115,19 @@ var defaultMenuCatalog = []MenuNode{
 		Children: []MenuNode{
 			{Key: "hr.employees", Label: "员工", Path: "/hr/employees"},
 			{Key: "hr.org_units", Label: "组织", Path: "/org/units"},
-			{Key: "attendance", Label: "假勤", Path: "/attendance"},
+			{
+				Key:   "attendance",
+				Label: "假勤",
+				Path:  "/attendance",
+				Children: []MenuNode{
+					{Key: "attendance.clock", Label: "上下班打卡", Path: "/attendance/clock"},
+					{Key: "attendance.corrections", Label: "补卡申请", Path: "/attendance/corrections"},
+					{Key: "attendance.leave", Label: "请假申请", Path: "/attendance/leave-requests"},
+					{Key: "attendance.worksites", Label: "办公地点", Path: "/attendance/worksites"},
+					{Key: "attendance.shifts", Label: "班次规则", Path: "/attendance/shifts"},
+					{Key: "attendance.shift_assignments", Label: "员工排班", Path: "/attendance/shift-assignments"},
+				},
+			},
 		},
 	},
 	{
@@ -125,7 +137,6 @@ var defaultMenuCatalog = []MenuNode{
 		Children: []MenuNode{
 			{Key: "workflow.forms", Label: "动态表单", Path: "/forms/templates"},
 			{Key: "workflow.instances", Label: "流程实例", Path: "/workflows/forms"},
-			{Key: "attendance.leave", Label: "请假申请", Path: "/attendance/leave-requests"},
 		},
 	},
 	{

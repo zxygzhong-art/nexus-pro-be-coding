@@ -35,6 +35,20 @@ func SeedDemo(store repository.Store) {
 			{Resource: "hr.org_unit", Action: "create", Scope: "all", MenuKey: "hr.org_units"},
 			{Resource: "attendance.leave", Action: "read", Scope: "all", MenuKey: "attendance.leave"},
 			{Resource: "attendance.leave", Action: "create", Scope: "all", MenuKey: "attendance.leave"},
+			{Resource: "attendance.worksite", Action: "read", Scope: "all", MenuKey: "attendance.worksites"},
+			{Resource: "attendance.worksite", Action: "create", Scope: "all", MenuKey: "attendance.worksites"},
+			{Resource: "attendance.worksite", Action: "update", Scope: "all", MenuKey: "attendance.worksites"},
+			{Resource: "attendance.shift", Action: "read", Scope: "all", MenuKey: "attendance.shifts"},
+			{Resource: "attendance.shift", Action: "create", Scope: "all", MenuKey: "attendance.shifts"},
+			{Resource: "attendance.shift", Action: "update", Scope: "all", MenuKey: "attendance.shifts"},
+			{Resource: "attendance.shift_assignment", Action: "read", Scope: "all", MenuKey: "attendance.shift_assignments"},
+			{Resource: "attendance.shift_assignment", Action: "create", Scope: "all", MenuKey: "attendance.shift_assignments"},
+			{Resource: "attendance.clock", Action: "read", Scope: "all", MenuKey: "attendance.clock"},
+			{Resource: "attendance.clock", Action: "create", Scope: "all", MenuKey: "attendance.clock"},
+			{Resource: "attendance.correction", Action: "read", Scope: "all", MenuKey: "attendance.corrections"},
+			{Resource: "attendance.correction", Action: "create", Scope: "all", MenuKey: "attendance.corrections"},
+			{Resource: "attendance.correction", Action: "approve", Scope: "all", MenuKey: "attendance.corrections"},
+			{Resource: "attendance.correction", Action: "update", Scope: "all", MenuKey: "attendance.corrections"},
 			{Resource: "workflow.form_template", Action: "read", Scope: "all", MenuKey: "workflow.forms"},
 			{Resource: "workflow.form_template", Action: "create", Scope: "all", MenuKey: "workflow.forms"},
 			{Resource: "workflow.form_instance", Action: "submit", Scope: "all", MenuKey: "workflow.instances"},
@@ -64,6 +78,10 @@ func SeedDemo(store repository.Store) {
 			{Resource: "me", Action: "read", Scope: "all", MenuKey: "workbench"},
 			{Resource: "hr.employee", Action: "read", Scope: "self", MenuKey: "hr.employees"},
 			{Resource: "attendance.leave", Action: "create", Scope: "self", MenuKey: "attendance.leave"},
+			{Resource: "attendance.clock", Action: "read", Scope: "self", MenuKey: "attendance.clock"},
+			{Resource: "attendance.clock", Action: "create", Scope: "self", MenuKey: "attendance.clock"},
+			{Resource: "attendance.correction", Action: "read", Scope: "self", MenuKey: "attendance.corrections"},
+			{Resource: "attendance.correction", Action: "create", Scope: "self", MenuKey: "attendance.corrections"},
 			{Resource: "workflow.form_instance", Action: "submit", Scope: "self", MenuKey: "workflow.instances"},
 			{Resource: "agent.run", Action: "read", Scope: "own", MenuKey: "agents.runs"},
 			{Resource: "agent.run", Action: "create", Scope: "all", MenuKey: "agents.runs"},
@@ -276,6 +294,46 @@ func SeedDemo(store repository.Store) {
 		UpdatedAt:      now,
 	})
 
+	_ = store.UpsertAttendanceWorksite(ctx, AttendanceWorksite{
+		ID:           "aws-demo-hq",
+		TenantID:     "demo",
+		Name:         "Demo HQ",
+		Address:      "Demo headquarters",
+		Latitude:     25.033964,
+		Longitude:    121.564468,
+		RadiusMeters: 300,
+		Status:       "active",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	})
+	_ = store.UpsertAttendanceShift(ctx, AttendanceShift{
+		ID:                     "ash-day",
+		TenantID:               "demo",
+		Name:                   "Day Shift",
+		ClockInStart:           "08:00",
+		ClockInEnd:             "10:00",
+		ClockOutStart:          "17:00",
+		ClockOutEnd:            "19:00",
+		LateGraceMinutes:       10,
+		EarlyLeaveGraceMinutes: 10,
+		Status:                 "active",
+		CreatedAt:              now,
+		UpdatedAt:              now,
+	})
+	for _, employeeID := range []string{"emp-admin", "emp-employee"} {
+		_ = store.UpsertAttendanceShiftAssignment(ctx, AttendanceShiftAssignment{
+			ID:            "asa-" + employeeID,
+			TenantID:      "demo",
+			EmployeeID:    employeeID,
+			ShiftID:       "ash-day",
+			WorksiteID:    "aws-demo-hq",
+			EffectiveFrom: now.Add(-30 * 24 * time.Hour),
+			Status:        "active",
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		})
+	}
+
 	_ = store.UpsertFormTemplate(ctx, FormTemplate{
 		ID:          "ft-leave",
 		TenantID:    "demo",
@@ -292,6 +350,22 @@ func SeedDemo(store repository.Store) {
 			},
 		},
 		CreatedAt: now,
+	})
+	_ = store.UpsertFormTemplate(ctx, FormTemplate{
+		ID:          "ft-attendance-correction",
+		TenantID:    "demo",
+		Key:         "attendance-correction",
+		Name:        "补卡申请",
+		Description: "员工补卡审批流程模板",
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"direction":            map[string]any{"type": "string"},
+				"requested_clocked_at": map[string]any{"type": "string"},
+				"reason":               map[string]any{"type": "string"},
+			},
+		},
+		CreatedAt: now.Add(time.Minute),
 	})
 	_ = store.UpsertFormTemplate(ctx, FormTemplate{
 		ID:          "ft-proof",

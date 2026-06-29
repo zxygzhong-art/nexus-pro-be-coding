@@ -645,6 +645,114 @@ CREATE TABLE leave_requests (
 CREATE INDEX leave_requests_tenant_id_idx ON leave_requests (tenant_id);
 CREATE INDEX leave_requests_employee_id_idx ON leave_requests (employee_id);
 
+CREATE TABLE attendance_worksites (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name text NOT NULL,
+    address text NOT NULL DEFAULT '',
+    latitude double precision NOT NULL CHECK (latitude >= -90 AND latitude <= 90),
+    longitude double precision NOT NULL CHECK (longitude >= -180 AND longitude <= 180),
+    radius_meters integer NOT NULL CHECK (radius_meters > 0),
+    status text NOT NULL DEFAULT 'active',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT attendance_worksites_tenant_id_id_idx UNIQUE (tenant_id, id)
+);
+
+CREATE INDEX attendance_worksites_tenant_status_idx ON attendance_worksites (tenant_id, status);
+
+CREATE TABLE attendance_shifts (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name text NOT NULL,
+    clock_in_start text NOT NULL,
+    clock_in_end text NOT NULL,
+    clock_out_start text NOT NULL,
+    clock_out_end text NOT NULL,
+    late_grace_minutes integer NOT NULL DEFAULT 0 CHECK (late_grace_minutes >= 0),
+    early_leave_grace_minutes integer NOT NULL DEFAULT 0 CHECK (early_leave_grace_minutes >= 0),
+    status text NOT NULL DEFAULT 'active',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT attendance_shifts_tenant_id_id_idx UNIQUE (tenant_id, id)
+);
+
+CREATE INDEX attendance_shifts_tenant_status_idx ON attendance_shifts (tenant_id, status);
+
+CREATE TABLE attendance_shift_assignments (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    employee_id text NOT NULL,
+    shift_id text NOT NULL,
+    worksite_id text NOT NULL,
+    effective_from timestamptz NOT NULL,
+    effective_to timestamptz,
+    status text NOT NULL DEFAULT 'active',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT attendance_shift_assignments_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT attendance_shift_assignments_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
+    CONSTRAINT attendance_shift_assignments_shift_fk FOREIGN KEY (tenant_id, shift_id) REFERENCES attendance_shifts (tenant_id, id),
+    CONSTRAINT attendance_shift_assignments_worksite_fk FOREIGN KEY (tenant_id, worksite_id) REFERENCES attendance_worksites (tenant_id, id)
+);
+
+CREATE INDEX attendance_shift_assignments_tenant_employee_idx ON attendance_shift_assignments (tenant_id, employee_id, effective_from DESC);
+CREATE INDEX attendance_shift_assignments_shift_idx ON attendance_shift_assignments (tenant_id, shift_id);
+CREATE INDEX attendance_shift_assignments_worksite_idx ON attendance_shift_assignments (tenant_id, worksite_id);
+
+CREATE TABLE attendance_clock_records (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    employee_id text NOT NULL,
+    shift_assignment_id text NOT NULL,
+    shift_id text NOT NULL,
+    worksite_id text NOT NULL,
+    work_date text NOT NULL,
+    direction text NOT NULL,
+    clocked_at timestamptz NOT NULL,
+    latitude double precision NOT NULL CHECK (latitude >= -90 AND latitude <= 90),
+    longitude double precision NOT NULL CHECK (longitude >= -180 AND longitude <= 180),
+    accuracy_meters double precision NOT NULL DEFAULT 0 CHECK (accuracy_meters >= 0),
+    distance_meters double precision NOT NULL DEFAULT 0 CHECK (distance_meters >= 0),
+    record_status text NOT NULL,
+    rejection_reason text NOT NULL DEFAULT '',
+    source text NOT NULL,
+    device_id text NOT NULL DEFAULT '',
+    device_info jsonb NOT NULL DEFAULT '{}'::jsonb,
+    correction_request_id text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    CONSTRAINT attendance_clock_records_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
+    CONSTRAINT attendance_clock_records_shift_assignment_fk FOREIGN KEY (tenant_id, shift_assignment_id) REFERENCES attendance_shift_assignments (tenant_id, id),
+    CONSTRAINT attendance_clock_records_shift_fk FOREIGN KEY (tenant_id, shift_id) REFERENCES attendance_shifts (tenant_id, id),
+    CONSTRAINT attendance_clock_records_worksite_fk FOREIGN KEY (tenant_id, worksite_id) REFERENCES attendance_worksites (tenant_id, id)
+);
+
+CREATE INDEX attendance_clock_records_tenant_employee_date_idx ON attendance_clock_records (tenant_id, employee_id, work_date DESC);
+CREATE INDEX attendance_clock_records_tenant_status_idx ON attendance_clock_records (tenant_id, record_status, clocked_at DESC);
+CREATE UNIQUE INDEX attendance_clock_records_one_accepted_idx ON attendance_clock_records (tenant_id, employee_id, work_date, direction) WHERE record_status = 'accepted';
+
+CREATE TABLE attendance_correction_requests (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    employee_id text NOT NULL,
+    direction text NOT NULL,
+    requested_clocked_at timestamptz NOT NULL,
+    work_date text NOT NULL,
+    reason text NOT NULL DEFAULT '',
+    status text NOT NULL,
+    form_instance_id text NOT NULL DEFAULT '',
+    clock_record_id text NOT NULL DEFAULT '',
+    reviewed_by_account_id text NOT NULL DEFAULT '',
+    review_reason text NOT NULL DEFAULT '',
+    reviewed_at timestamptz,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT attendance_correction_requests_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id)
+);
+
+CREATE INDEX attendance_correction_requests_tenant_employee_date_idx ON attendance_correction_requests (tenant_id, employee_id, work_date DESC);
+CREATE INDEX attendance_correction_requests_tenant_status_idx ON attendance_correction_requests (tenant_id, status, created_at DESC);
+
 CREATE TABLE knowledge_articles (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -787,6 +895,16 @@ ALTER TABLE form_instances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE form_instances FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_requests FORCE ROW LEVEL SECURITY;
+ALTER TABLE attendance_worksites ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_worksites FORCE ROW LEVEL SECURITY;
+ALTER TABLE attendance_shifts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_shifts FORCE ROW LEVEL SECURITY;
+ALTER TABLE attendance_shift_assignments ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_shift_assignments FORCE ROW LEVEL SECURITY;
+ALTER TABLE attendance_clock_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_clock_records FORCE ROW LEVEL SECURITY;
+ALTER TABLE attendance_correction_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_correction_requests FORCE ROW LEVEL SECURITY;
 ALTER TABLE knowledge_articles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE knowledge_articles FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
@@ -837,6 +955,11 @@ CREATE POLICY tenant_isolation_leave_balances ON leave_balances USING (tenant_id
 CREATE POLICY tenant_isolation_form_templates ON form_templates USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_form_instances ON form_instances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_requests ON leave_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_attendance_worksites ON attendance_worksites USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_attendance_shifts ON attendance_shifts USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_attendance_shift_assignments ON attendance_shift_assignments USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_attendance_clock_records ON attendance_clock_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_attendance_correction_requests ON attendance_correction_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_knowledge_articles ON knowledge_articles USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_runs ON agent_runs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_outbox_events ON outbox_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));

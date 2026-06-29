@@ -81,6 +81,88 @@ type AssumableRole struct {
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
+type AttendanceClockRecord struct {
+	ID                  string             `json:"id"`
+	TenantID            string             `json:"tenant_id"`
+	EmployeeID          string             `json:"employee_id"`
+	ShiftAssignmentID   string             `json:"shift_assignment_id"`
+	ShiftID             string             `json:"shift_id"`
+	WorksiteID          string             `json:"worksite_id"`
+	WorkDate            string             `json:"work_date"`
+	Direction           string             `json:"direction"`
+	ClockedAt           pgtype.Timestamptz `json:"clocked_at"`
+	Latitude            float64            `json:"latitude"`
+	Longitude           float64            `json:"longitude"`
+	AccuracyMeters      float64            `json:"accuracy_meters"`
+	DistanceMeters      float64            `json:"distance_meters"`
+	RecordStatus        string             `json:"record_status"`
+	RejectionReason     string             `json:"rejection_reason"`
+	Source              string             `json:"source"`
+	DeviceID            string             `json:"device_id"`
+	DeviceInfo          []byte             `json:"device_info"`
+	CorrectionRequestID string             `json:"correction_request_id"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+}
+
+type AttendanceCorrectionRequest struct {
+	ID                  string             `json:"id"`
+	TenantID            string             `json:"tenant_id"`
+	EmployeeID          string             `json:"employee_id"`
+	Direction           string             `json:"direction"`
+	RequestedClockedAt  pgtype.Timestamptz `json:"requested_clocked_at"`
+	WorkDate            string             `json:"work_date"`
+	Reason              string             `json:"reason"`
+	Status              string             `json:"status"`
+	FormInstanceID      string             `json:"form_instance_id"`
+	ClockRecordID       string             `json:"clock_record_id"`
+	ReviewedByAccountID string             `json:"reviewed_by_account_id"`
+	ReviewReason        string             `json:"review_reason"`
+	ReviewedAt          pgtype.Timestamptz `json:"reviewed_at"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AttendanceShift struct {
+	ID                     string             `json:"id"`
+	TenantID               string             `json:"tenant_id"`
+	Name                   string             `json:"name"`
+	ClockInStart           string             `json:"clock_in_start"`
+	ClockInEnd             string             `json:"clock_in_end"`
+	ClockOutStart          string             `json:"clock_out_start"`
+	ClockOutEnd            string             `json:"clock_out_end"`
+	LateGraceMinutes       int32              `json:"late_grace_minutes"`
+	EarlyLeaveGraceMinutes int32              `json:"early_leave_grace_minutes"`
+	Status                 string             `json:"status"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AttendanceShiftAssignment struct {
+	ID            string             `json:"id"`
+	TenantID      string             `json:"tenant_id"`
+	EmployeeID    string             `json:"employee_id"`
+	ShiftID       string             `json:"shift_id"`
+	WorksiteID    string             `json:"worksite_id"`
+	EffectiveFrom pgtype.Timestamptz `json:"effective_from"`
+	EffectiveTo   pgtype.Timestamptz `json:"effective_to"`
+	Status        string             `json:"status"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AttendanceWorksite struct {
+	ID           string             `json:"id"`
+	TenantID     string             `json:"tenant_id"`
+	Name         string             `json:"name"`
+	Address      string             `json:"address"`
+	Latitude     float64            `json:"latitude"`
+	Longitude    float64            `json:"longitude"`
+	RadiusMeters int32              `json:"radius_meters"`
+	Status       string             `json:"status"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
 type AuditLog struct {
 	ID             string             `json:"id"`
 	TenantID       string             `json:"tenant_id"`

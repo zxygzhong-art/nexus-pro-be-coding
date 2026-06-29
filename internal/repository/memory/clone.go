@@ -142,6 +142,31 @@ func copyLeaveBalance(v LeaveBalance) LeaveBalance { return v }
 
 func copyLeaveRequest(v LeaveRequest) LeaveRequest { return v }
 
+func copyAttendanceWorksite(v AttendanceWorksite) AttendanceWorksite { return v }
+
+func copyAttendanceShift(v AttendanceShift) AttendanceShift { return v }
+
+func copyAttendanceShiftAssignment(v AttendanceShiftAssignment) AttendanceShiftAssignment {
+	if v.EffectiveTo != nil {
+		t := *v.EffectiveTo
+		v.EffectiveTo = &t
+	}
+	return v
+}
+
+func copyAttendanceClockRecord(v AttendanceClockRecord) AttendanceClockRecord {
+	v.DeviceInfo = utils.CopyStringMap(v.DeviceInfo)
+	return v
+}
+
+func copyAttendanceCorrectionRequest(v AttendanceCorrectionRequest) AttendanceCorrectionRequest {
+	if v.ReviewedAt != nil {
+		t := *v.ReviewedAt
+		v.ReviewedAt = &t
+	}
+	return v
+}
+
 func copyFormTemplate(v FormTemplate) FormTemplate {
 	v.Schema = utils.CopyStringMap(v.Schema)
 	return v
