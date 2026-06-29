@@ -1385,6 +1385,127 @@ func TestSelfScopedLeaveReadOnlyReturnsCurrentEmployeeItems(t *testing.T) {
 	}
 }
 
+func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
+	_, svc, employeeCtx, _ := newAttendanceFixture(t)
+
+	accepted, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_in",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+		LocationSource: "gps",
+		DeviceID:       "phone-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if accepted.RecordStatus != "accepted" || accepted.RejectionReason != "" {
+		t.Fatalf("expected accepted clock-in, got %+v", accepted)
+	}
+	if got := accepted.DeviceInfo["location_source"]; got != "gps" {
+		t.Fatalf("expected location_source audit evidence, got %v", got)
+	}
+
+	outside, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction: "clock_out",
+		Latitude:  25.100000,
+		Longitude: 121.700000,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outside.RecordStatus != "rejected" || outside.RejectionReason != "outside_geofence" {
+		t.Fatalf("expected outside geofence rejected attempt, got %+v", outside)
+	}
+
+	duplicate, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction: "clock_in",
+		Latitude:  25.033964,
+		Longitude: 121.564468,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duplicate.RecordStatus != "rejected" || duplicate.RejectionReason != "duplicate" {
+		t.Fatalf("expected duplicate rejected attempt, got %+v", duplicate)
+	}
+
+	status, err := svc.Attendance().AttendanceClockStatus(employeeCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.NextAction != "clock_out" || status.ClockIn == nil || status.ClockOut != nil {
+		t.Fatalf("unexpected clock status: %+v", status)
+	}
+}
+
+func TestAttendanceClockSelfScopeCannotTargetAnotherEmployee(t *testing.T) {
+	_, svc, employeeCtx, _ := newAttendanceFixture(t)
+
+	_, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		EmployeeID: "emp-2",
+		Direction:  "clock_in",
+		Latitude:   25.033964,
+		Longitude:  121.564468,
+	})
+	if err == nil {
+		t.Fatal("expected self-scoped account to be forbidden from clocking another employee")
+	}
+}
+
+func TestAttendanceCorrectionApproveCreatesManualRecordAndRejectDoesNot(t *testing.T) {
+	store, svc, employeeCtx, adminCtx := newAttendanceFixture(t)
+	requestedAt := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+
+	pending, err := svc.Attendance().CreateAttendanceCorrection(employeeCtx, domain.CreateAttendanceCorrectionInput{
+		Direction:          "clock_in",
+		RequestedClockedAt: requestedAt,
+		Reason:             "forgot to clock in",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.Status != "pending" || pending.FormInstanceID == "" {
+		t.Fatalf("expected pending correction with form evidence, got %+v", pending)
+	}
+
+	approved, err := svc.Attendance().ApproveAttendanceCorrection(adminCtx, pending.ID, domain.ReviewAttendanceCorrectionInput{Reason: "verified"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approved.Status != "approved" || approved.ClockRecordID == "" {
+		t.Fatalf("expected approved correction with manual record, got %+v", approved)
+	}
+	record, ok, err := store.GetAcceptedAttendanceClockRecord(context.Background(), "tenant-1", "emp-1", approved.WorkDate, "clock_in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || record.Source != "manual_correction" || record.CorrectionRequestID != approved.ID {
+		t.Fatalf("expected accepted manual correction record, got ok=%v record=%+v", ok, record)
+	}
+
+	rejected, err := svc.Attendance().CreateAttendanceCorrection(employeeCtx, domain.CreateAttendanceCorrectionInput{
+		Direction:          "clock_out",
+		RequestedClockedAt: time.Now().UTC().Add(-30 * time.Minute).Format(time.RFC3339),
+		Reason:             "forgot to clock out",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rejected, err = svc.Attendance().RejectAttendanceCorrection(adminCtx, rejected.ID, domain.ReviewAttendanceCorrectionInput{Reason: "not enough evidence"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rejected.Status != "rejected" || rejected.ClockRecordID != "" {
+		t.Fatalf("expected rejected correction without record, got %+v", rejected)
+	}
+	if _, ok, err := store.GetAcceptedAttendanceClockRecord(context.Background(), "tenant-1", "emp-1", rejected.WorkDate, "clock_out"); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("rejecting a correction should not create an accepted clock-out record")
+	}
+}
+
 func TestCreateLeaveRequestReservesLeaveBalance(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -3124,6 +3245,100 @@ func newEmployeeFeatureFixture(t *testing.T, permissions []domain.Permission, op
 		CreatedAt:              now,
 	})
 	return store, service.New(store, options...), domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
+}
+
+func newAttendanceFixture(t *testing.T) (*memory.Store, *service.Service, domain.RequestContext, domain.RequestContext) {
+	t.Helper()
+	now := time.Now().UTC().Truncate(time.Second)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-attendance-self",
+		TenantID: "tenant-1",
+		Name:     "Attendance Self",
+		Permissions: []domain.Permission{
+			{Resource: "attendance.clock", Action: "read", Scope: "self"},
+			{Resource: "attendance.clock", Action: "create", Scope: "self"},
+			{Resource: "attendance.correction", Action: "read", Scope: "self"},
+			{Resource: "attendance.correction", Action: "create", Scope: "self"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-attendance-admin",
+		TenantID: "tenant-1",
+		Name:     "Attendance Admin",
+		Permissions: []domain.Permission{
+			{Resource: "attendance.clock", Action: "read", Scope: "all"},
+			{Resource: "attendance.correction", Action: "read", Scope: "all"},
+			{Resource: "attendance.correction", Action: "approve", Scope: "all"},
+			{Resource: "attendance.correction", Action: "update", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-employee",
+		TenantID:               "tenant-1",
+		EmployeeID:             "emp-1",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-attendance-self"},
+		CreatedAt:              now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-admin",
+		TenantID:               "tenant-1",
+		EmployeeID:             "emp-admin",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-attendance-admin"},
+		CreatedAt:              now,
+	})
+	for _, employee := range []domain.Employee{
+		{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now},
+		{ID: "emp-2", TenantID: "tenant-1", Name: "Employee Two", Status: "active", CreatedAt: now},
+		{ID: "emp-admin", TenantID: "tenant-1", Name: "Attendance Admin", Status: "active", CreatedAt: now},
+	} {
+		_ = store.UpsertEmployee(context.Background(), employee)
+	}
+	_ = store.UpsertAttendanceWorksite(context.Background(), domain.AttendanceWorksite{
+		ID:           "aws-1",
+		TenantID:     "tenant-1",
+		Name:         "HQ",
+		Latitude:     25.033964,
+		Longitude:    121.564468,
+		RadiusMeters: 200,
+		Status:       "active",
+		CreatedAt:    now,
+		UpdatedAt:    now,
+	})
+	_ = store.UpsertAttendanceShift(context.Background(), domain.AttendanceShift{
+		ID:            "ash-1",
+		TenantID:      "tenant-1",
+		Name:          "Day Shift",
+		ClockInStart:  "08:00",
+		ClockInEnd:    "10:00",
+		ClockOutStart: "17:00",
+		ClockOutEnd:   "19:00",
+		Status:        "active",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
+	for _, employeeID := range []string{"emp-1", "emp-2"} {
+		_ = store.UpsertAttendanceShiftAssignment(context.Background(), domain.AttendanceShiftAssignment{
+			ID:            "asa-" + employeeID,
+			TenantID:      "tenant-1",
+			EmployeeID:    employeeID,
+			ShiftID:       "ash-1",
+			WorksiteID:    "aws-1",
+			EffectiveFrom: now.Add(-24 * time.Hour),
+			Status:        "active",
+			CreatedAt:     now,
+			UpdatedAt:     now,
+		})
+	}
+	svc := service.New(store)
+	return store, svc,
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"},
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", ApprovalConfirmed: true}
 }
 
 type recordingObjectStore struct {
