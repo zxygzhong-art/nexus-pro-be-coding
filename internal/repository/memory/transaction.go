@@ -40,6 +40,7 @@ func (s *Store) cloneLocked() *Store {
 		employees:              cloneNestedMap(s.employees, copyEmployee),
 		employeeNoSequences:    cloneNestedMap(s.employeeNoSequences, func(v int) int { return v }),
 		employeeImports:        cloneNestedMap(s.employeeImports, copyEmployeeImportSession),
+		attendancePolicies:     cloneMap(s.attendancePolicies, copyAttendancePolicy),
 		leaveBalances:          cloneNestedMap(s.leaveBalances, copyLeaveBalance),
 		leaveRequests:          cloneNestedMap(s.leaveRequests, copyLeaveRequest),
 		attendanceWorksites:    cloneNestedMap(s.attendanceWorksites, copyAttendanceWorksite),
@@ -50,6 +51,8 @@ func (s *Store) cloneLocked() *Store {
 		formTemplates:          cloneNestedMap(s.formTemplates, copyFormTemplate),
 		formInstances:          cloneNestedMap(s.formInstances, copyFormInstance),
 		knowledgeArticles:      cloneNestedMap(s.knowledgeArticles, copyKnowledgeArticle),
+		platformTaskItems:      cloneNestedMap(s.platformTaskItems, copyPlatformTaskRecordItem),
+		platformTaskTodos:      cloneNestedMap(s.platformTaskTodos, copyPlatformTaskTodoRecord),
 		agentRuns:              cloneNestedMap(s.agentRuns, copyAgentRun),
 		auditLogs:              cloneSliceMap(s.auditLogs, copyAuditLog),
 		permissionVersions:     cloneMap(s.permissionVersions, func(v int64) int64 { return v }),
@@ -74,6 +77,7 @@ func (s *Store) replaceLocked(next *Store) {
 	s.employees = next.employees
 	s.employeeNoSequences = next.employeeNoSequences
 	s.employeeImports = next.employeeImports
+	s.attendancePolicies = next.attendancePolicies
 	s.leaveBalances = next.leaveBalances
 	s.leaveRequests = next.leaveRequests
 	s.attendanceWorksites = next.attendanceWorksites
@@ -84,6 +88,8 @@ func (s *Store) replaceLocked(next *Store) {
 	s.formTemplates = next.formTemplates
 	s.formInstances = next.formInstances
 	s.knowledgeArticles = next.knowledgeArticles
+	s.platformTaskItems = next.platformTaskItems
+	s.platformTaskTodos = next.platformTaskTodos
 	s.agentRuns = next.agentRuns
 	s.auditLogs = next.auditLogs
 	s.permissionVersions = next.permissionVersions

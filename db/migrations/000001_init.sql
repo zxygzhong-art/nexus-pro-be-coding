@@ -584,6 +584,18 @@ CREATE TABLE employee_import_sessions (
 
 CREATE INDEX employee_import_sessions_tenant_id_idx ON employee_import_sessions (tenant_id, created_at DESC);
 
+CREATE TABLE attendance_policies (
+    id text NOT NULL,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    work_time jsonb NOT NULL DEFAULT '{}'::jsonb,
+    leave_types jsonb NOT NULL DEFAULT '[]'::jsonb,
+    updated_by_account_id text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    PRIMARY KEY (tenant_id, id),
+    CONSTRAINT attendance_policies_tenant_id_idx UNIQUE (tenant_id)
+);
+
 CREATE TABLE leave_balances (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -627,6 +639,7 @@ CREATE TABLE form_instances (
 
 CREATE INDEX form_instances_tenant_id_idx ON form_instances (tenant_id);
 CREATE INDEX form_instances_template_id_idx ON form_instances (template_id);
+CREATE INDEX form_instances_tenant_applicant_status_idx ON form_instances (tenant_id, applicant_account_id, status, submitted_at DESC);
 
 CREATE TABLE leave_requests (
     id text PRIMARY KEY,
@@ -645,6 +658,8 @@ CREATE TABLE leave_requests (
 
 CREATE INDEX leave_requests_tenant_id_idx ON leave_requests (tenant_id);
 CREATE INDEX leave_requests_employee_id_idx ON leave_requests (employee_id);
+CREATE INDEX leave_requests_tenant_form_instance_idx ON leave_requests (tenant_id, form_instance_id);
+CREATE INDEX leave_requests_tenant_employee_status_dates_idx ON leave_requests (tenant_id, employee_id, status, start_at, end_at);
 
 CREATE TABLE attendance_worksites (
     id text PRIMARY KEY,
@@ -765,6 +780,40 @@ CREATE TABLE knowledge_articles (
 
 CREATE INDEX knowledge_articles_tenant_id_idx ON knowledge_articles (tenant_id);
 
+CREATE TABLE platform_task_items (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    account_id text NOT NULL,
+    work_date text NOT NULL,
+    title text NOT NULL,
+    category text NOT NULL DEFAULT '',
+    product text NOT NULL DEFAULT '',
+    hours double precision NOT NULL CHECK (hours > 0),
+    note text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT platform_task_items_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT platform_task_items_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id)
+);
+
+CREATE INDEX platform_task_items_tenant_account_date_idx ON platform_task_items (tenant_id, account_id, work_date DESC, created_at ASC);
+
+CREATE TABLE platform_task_todos (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    account_id text NOT NULL,
+    text text NOT NULL,
+    due_date text NOT NULL DEFAULT '',
+    status text NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'done')),
+    converted_task_item_id text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT platform_task_todos_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT platform_task_todos_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id)
+);
+
+CREATE INDEX platform_task_todos_tenant_account_status_idx ON platform_task_todos (tenant_id, account_id, status, created_at ASC);
+
 CREATE TABLE agent_runs (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -781,6 +830,7 @@ CREATE TABLE agent_runs (
 
 CREATE INDEX agent_runs_tenant_id_idx ON agent_runs (tenant_id);
 CREATE INDEX agent_runs_account_id_idx ON agent_runs (account_id);
+CREATE INDEX agent_runs_tenant_account_created_at_idx ON agent_runs (tenant_id, account_id, created_at DESC);
 
 CREATE TABLE outbox_events (
     id text PRIMARY KEY,
@@ -888,6 +938,8 @@ ALTER TABLE employee_number_sequences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employee_number_sequences FORCE ROW LEVEL SECURITY;
 ALTER TABLE employee_import_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employee_import_sessions FORCE ROW LEVEL SECURITY;
+ALTER TABLE attendance_policies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_policies FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_balances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_balances FORCE ROW LEVEL SECURITY;
 ALTER TABLE form_templates ENABLE ROW LEVEL SECURITY;
@@ -908,6 +960,10 @@ ALTER TABLE attendance_correction_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_correction_requests FORCE ROW LEVEL SECURITY;
 ALTER TABLE knowledge_articles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE knowledge_articles FORCE ROW LEVEL SECURITY;
+ALTER TABLE platform_task_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE platform_task_items FORCE ROW LEVEL SECURITY;
+ALTER TABLE platform_task_todos ENABLE ROW LEVEL SECURITY;
+ALTER TABLE platform_task_todos FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs FORCE ROW LEVEL SECURITY;
 ALTER TABLE outbox_events ENABLE ROW LEVEL SECURITY;
@@ -952,6 +1008,7 @@ CREATE POLICY tenant_isolation_org_units ON org_units USING (tenant_id = current
 CREATE POLICY tenant_isolation_employees ON employees USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_employee_number_sequences ON employee_number_sequences USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_employee_import_sessions ON employee_import_sessions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_attendance_policies ON attendance_policies USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_balances ON leave_balances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_form_templates ON form_templates USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_form_instances ON form_instances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -962,6 +1019,8 @@ CREATE POLICY tenant_isolation_attendance_shift_assignments ON attendance_shift_
 CREATE POLICY tenant_isolation_attendance_clock_records ON attendance_clock_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_correction_requests ON attendance_correction_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_knowledge_articles ON knowledge_articles USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_platform_task_items ON platform_task_items USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_platform_task_todos ON platform_task_todos USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_runs ON agent_runs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_outbox_events ON outbox_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_audit_logs ON audit_logs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -971,6 +1030,8 @@ CREATE POLICY tenant_isolation_audit_logs ON audit_logs USING (tenant_id = curre
 
 DROP TABLE IF EXISTS audit_logs;
 DROP TABLE IF EXISTS agent_runs;
+DROP TABLE IF EXISTS platform_task_todos;
+DROP TABLE IF EXISTS platform_task_items;
 DROP TABLE IF EXISTS knowledge_articles;
 DROP TABLE IF EXISTS attendance_correction_requests;
 DROP TABLE IF EXISTS attendance_clock_records;
@@ -981,6 +1042,7 @@ DROP TABLE IF EXISTS leave_requests;
 DROP TABLE IF EXISTS form_instances;
 DROP TABLE IF EXISTS form_templates;
 DROP TABLE IF EXISTS leave_balances;
+DROP TABLE IF EXISTS attendance_policies;
 DROP TABLE IF EXISTS outbox_events;
 DROP TABLE IF EXISTS employee_import_sessions;
 DROP TABLE IF EXISTS employee_number_sequences;

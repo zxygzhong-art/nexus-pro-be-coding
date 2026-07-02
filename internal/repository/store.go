@@ -13,6 +13,7 @@ type Store interface {
 	AttendanceStore
 	WorkflowStore
 	KnowledgeStore
+	TaskStore
 	AgentStore
 	AuditStore
 	AuthzEventStore

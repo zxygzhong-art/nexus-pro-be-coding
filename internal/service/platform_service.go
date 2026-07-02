@@ -1,0 +1,1814 @@
+package service
+
+import (
+	"encoding/json"
+	"fmt"
+	"math"
+	"sort"
+	"strings"
+	"time"
+
+	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/utils"
+)
+
+const (
+	platformDateLayout          = "2006/01/02"
+	platformFormDesignSchemaKey = "workspace_design"
+)
+
+// PlatformService builds read-only OA page projections from existing domain services.
+type PlatformService struct {
+	*Service
+}
+
+// Platform returns the OA workbench projection service.
+func (c *Service) Platform() PlatformService {
+	return PlatformService{Service: c}
+}
+
+// Home returns the first-screen workbench widgets used by the frontend.
+func (c PlatformService) Home(ctx RequestContext) (PlatformHomeResponse, error) {
+	clockSummary, err := c.clockSummary(ctx)
+	if err != nil {
+		return PlatformHomeResponse{}, err
+	}
+	return PlatformHomeResponse{
+		Assistants:   firstPlatformAssistants(6),
+		FormColumns:  platformHomeFormColumns(),
+		ClockSummary: clockSummary,
+	}, nil
+}
+
+// ListAssistants returns assistant cards filtered by tag and keyword.
+func (c PlatformService) ListAssistants(_ RequestContext, query PlatformAssistantsQuery) (PlatformAssistantsResponse, error) {
+	tag := strings.ToLower(strings.TrimSpace(query.Tag))
+	search := strings.ToLower(strings.TrimSpace(query.Search))
+	items := make([]PlatformAssistant, 0)
+	for _, assistant := range platformAssistantCatalog() {
+		if tag != "" && tag != "all" && assistant.Tag != tag {
+			continue
+		}
+		if search != "" && !strings.Contains(strings.ToLower(assistant.Title+" "+assistant.Desc+" "+assistant.Tag), search) {
+			continue
+		}
+		items = append(items, assistant)
+	}
+	return PlatformAssistantsResponse{
+		Data:         items,
+		Total:        len(items),
+		ChatMessages: platformAssistantMessages(),
+		QuickPrompts: []string{"推薦客訴處理助理", "月度業績分析", "幫我擬週報", "新人 onboarding", "出差交通建議"},
+	}, nil
+}
+
+// Forms returns the employee self-service form catalog and current-account applications.
+func (c PlatformService) Forms(ctx RequestContext) (PlatformFormsResponse, error) {
+	applications, drafts, err := c.formInstances(ctx)
+	if err != nil {
+		return PlatformFormsResponse{}, err
+	}
+	return PlatformFormsResponse{
+		Categories:   platformFormColumns(),
+		Applications: applications,
+		Drafts:       drafts,
+		AIMessages: []PlatformChatMessage{
+			{ID: "fm1", Role: "assistant", Avatar: "📋", Content: "哈囉！我是 AI 表單助理。告訴我你想處理什麼事情，我能推薦最適合的表單並協助你填寫。"},
+		},
+		QuickPrompts: []string{"我要請假", "我要報銷", "我要用印", "不確定用哪張", "我要領用", "設備報修"},
+	}, nil
+}
+
+// Tasks returns task records, todos, clock summary, and task assistant seed messages.
+func (c PlatformService) Tasks(ctx RequestContext) (PlatformTasksResponse, error) {
+	clockSummary, err := c.clockSummary(ctx)
+	if err != nil {
+		return PlatformTasksResponse{}, err
+	}
+	records, todos, err := c.taskProjection(ctx)
+	if err != nil {
+		return PlatformTasksResponse{}, err
+	}
+	return PlatformTasksResponse{
+		Records:      records,
+		Todos:        todos,
+		ClockSummary: clockSummary,
+		AIMessages: []PlatformChatMessage{
+			{ID: "tm1", Role: "assistant", Avatar: "🤖", Content: "今日工時與任務已整理完成，可以繼續追問本週投入分佈或待辦重點。"},
+		},
+		QuickPrompts: []string{"本月工時統計", "本週任務重點", "今日剩餘工時", "類別分佈"},
+	}, nil
+}
+
+// CreateTaskItem stores one current-account work-log item for the task page.
+func (c PlatformService) CreateTaskItem(ctx RequestContext, input CreatePlatformTaskItemInput) (PlatformTaskItem, error) {
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return PlatformTaskItem{}, err
+	}
+	record, err := c.platformTaskItemRecord(ctx, account.ID, PlatformTaskRecordItem{
+		ID:        utils.NewID("pti"),
+		TenantID:  ctx.TenantID,
+		AccountID: account.ID,
+		WorkDate:  input.WorkDate,
+		Title:     input.Title,
+		Category:  input.Category,
+		Product:   input.Product,
+		Hours:     input.Hours,
+		Note:      input.Note,
+	})
+	if err != nil {
+		return PlatformTaskItem{}, err
+	}
+	if err := c.store.UpsertPlatformTaskItem(goContext(ctx), record); err != nil {
+		return PlatformTaskItem{}, err
+	}
+	return platformTaskItemFromRecord(record), nil
+}
+
+// UpdateTaskItem patches one current-account work-log item.
+func (c PlatformService) UpdateTaskItem(ctx RequestContext, id string, input UpdatePlatformTaskItemInput) (PlatformTaskItem, error) {
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return PlatformTaskItem{}, err
+	}
+	record, err := c.currentPlatformTaskItem(ctx, account.ID, id)
+	if err != nil {
+		return PlatformTaskItem{}, err
+	}
+	if input.WorkDate != nil {
+		record.WorkDate = *input.WorkDate
+	}
+	if input.Title != nil {
+		record.Title = *input.Title
+	}
+	if input.Category != nil {
+		record.Category = *input.Category
+	}
+	if input.Product != nil {
+		record.Product = *input.Product
+	}
+	if input.Hours != nil {
+		record.Hours = *input.Hours
+	}
+	if input.Note != nil {
+		record.Note = *input.Note
+	}
+	record, err = c.platformTaskItemRecord(ctx, account.ID, record)
+	if err != nil {
+		return PlatformTaskItem{}, err
+	}
+	if err := c.store.UpsertPlatformTaskItem(goContext(ctx), record); err != nil {
+		return PlatformTaskItem{}, err
+	}
+	return platformTaskItemFromRecord(record), nil
+}
+
+// DeleteTaskItem removes one current-account work-log item.
+func (c PlatformService) DeleteTaskItem(ctx RequestContext, id string) (PlatformTaskItem, error) {
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return PlatformTaskItem{}, err
+	}
+	record, err := c.currentPlatformTaskItem(ctx, account.ID, id)
+	if err != nil {
+		return PlatformTaskItem{}, err
+	}
+	if err := c.store.DeletePlatformTaskItem(goContext(ctx), ctx.TenantID, account.ID, strings.TrimSpace(id)); err != nil {
+		return PlatformTaskItem{}, err
+	}
+	return platformTaskItemFromRecord(record), nil
+}
+
+// CreateTaskTodo stores one current-account sidebar todo.
+func (c PlatformService) CreateTaskTodo(ctx RequestContext, input CreatePlatformTaskTodoInput) (PlatformTaskTodo, error) {
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return PlatformTaskTodo{}, err
+	}
+	record, err := c.platformTaskTodoRecord(ctx, account.ID, PlatformTaskTodoRecord{
+		ID:        utils.NewID("ptd"),
+		TenantID:  ctx.TenantID,
+		AccountID: account.ID,
+		Text:      input.Text,
+		DueDate:   input.DueDate,
+		Status:    "open",
+	})
+	if err != nil {
+		return PlatformTaskTodo{}, err
+	}
+	if err := c.store.UpsertPlatformTaskTodo(goContext(ctx), record); err != nil {
+		return PlatformTaskTodo{}, err
+	}
+	return platformTaskTodoFromRecord(record), nil
+}
+
+// UpdateTaskTodo patches one current-account sidebar todo.
+func (c PlatformService) UpdateTaskTodo(ctx RequestContext, id string, input UpdatePlatformTaskTodoInput) (PlatformTaskTodo, error) {
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return PlatformTaskTodo{}, err
+	}
+	record, err := c.currentPlatformTaskTodo(ctx, account.ID, id)
+	if err != nil {
+		return PlatformTaskTodo{}, err
+	}
+	if input.Text != nil {
+		record.Text = *input.Text
+	}
+	if input.DueDate != nil {
+		record.DueDate = *input.DueDate
+	}
+	if input.Done != nil {
+		if *input.Done {
+			record.Status = "done"
+		} else {
+			record.Status = "open"
+		}
+	}
+	record, err = c.platformTaskTodoRecord(ctx, account.ID, record)
+	if err != nil {
+		return PlatformTaskTodo{}, err
+	}
+	if err := c.store.UpsertPlatformTaskTodo(goContext(ctx), record); err != nil {
+		return PlatformTaskTodo{}, err
+	}
+	return platformTaskTodoFromRecord(record), nil
+}
+
+// DeleteTaskTodo removes one current-account sidebar todo.
+func (c PlatformService) DeleteTaskTodo(ctx RequestContext, id string) (PlatformTaskTodo, error) {
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return PlatformTaskTodo{}, err
+	}
+	record, err := c.currentPlatformTaskTodo(ctx, account.ID, id)
+	if err != nil {
+		return PlatformTaskTodo{}, err
+	}
+	if err := c.store.DeletePlatformTaskTodo(goContext(ctx), ctx.TenantID, account.ID, strings.TrimSpace(id)); err != nil {
+		return PlatformTaskTodo{}, err
+	}
+	return platformTaskTodoFromRecord(record), nil
+}
+
+// ConvertTaskTodo turns a todo into a work-log item and marks the todo done atomically.
+func (c PlatformService) ConvertTaskTodo(ctx RequestContext, id string, input ConvertPlatformTaskTodoInput) (PlatformTaskItem, error) {
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return PlatformTaskItem{}, err
+	}
+	var out PlatformTaskItem
+	err = c.withTenantTransaction(ctx, func(tx *Service) error {
+		platform := tx.Platform()
+		todo, err := platform.currentPlatformTaskTodo(ctx, account.ID, id)
+		if err != nil {
+			return err
+		}
+		title := strings.TrimSpace(input.Title)
+		if title == "" {
+			title = todo.Text
+		}
+		hours := input.Hours
+		if hours == 0 {
+			hours = 0.5
+		}
+		item, err := platform.platformTaskItemRecord(ctx, account.ID, PlatformTaskRecordItem{
+			ID:        utils.NewID("pti"),
+			TenantID:  ctx.TenantID,
+			AccountID: account.ID,
+			WorkDate:  input.WorkDate,
+			Title:     title,
+			Category:  firstNonEmpty(input.Category, "待辦"),
+			Product:   firstNonEmpty(input.Product, "Nexus"),
+			Hours:     hours,
+			Note:      input.Note,
+		})
+		if err != nil {
+			return err
+		}
+		if err := platform.store.UpsertPlatformTaskItem(goContext(ctx), item); err != nil {
+			return err
+		}
+		todo.Status = "done"
+		todo.ConvertedTaskItemID = item.ID
+		todo.UpdatedAt = platform.Now()
+		if err := platform.store.UpsertPlatformTaskTodo(goContext(ctx), todo); err != nil {
+			return err
+		}
+		out = platformTaskItemFromRecord(item)
+		return nil
+	})
+	if err != nil {
+		return PlatformTaskItem{}, err
+	}
+	return out, nil
+}
+
+// Workspace returns the workspace settings aggregate expected by the frontend.
+func (c PlatformService) Workspace(ctx RequestContext) (PlatformWorkspaceResponse, error) {
+	admins, err := c.Service.Workspace().WorkspaceAdmins(ctx)
+	if err != nil {
+		return PlatformWorkspaceResponse{}, err
+	}
+	auditLogs, err := c.workspaceAuditLogsForAggregate(ctx)
+	if err != nil {
+		return PlatformWorkspaceResponse{}, err
+	}
+	leavePolicy, err := c.Service.Attendance().CurrentAttendancePolicy(ctx)
+	if err != nil {
+		return PlatformWorkspaceResponse{}, err
+	}
+	formDesign, err := c.formDesign(ctx)
+	if err != nil {
+		return PlatformWorkspaceResponse{}, err
+	}
+	return PlatformWorkspaceResponse{
+		AdminSettings: admins,
+		AuditLogs:     auditLogs,
+		FormDesign:    formDesign,
+		LeavePolicy:   leavePolicy,
+	}, nil
+}
+
+// UpdateWorkspaceOrganizationManager persists one employee's manager link and returns the refreshed organization projection.
+func (c PlatformService) UpdateWorkspaceOrganizationManager(ctx RequestContext, displayID string, input UpdateWorkspaceOrganizationManagerInput) (WorkspaceOrganizationResponse, error) {
+	if input.ParentID == nil {
+		return WorkspaceOrganizationResponse{}, BadRequest("parent_id is required")
+	}
+	visibleEmployees, err := c.Service.Workspace().visibleWorkspaceEmployees(ctx, "workspace.organization")
+	if err != nil {
+		return WorkspaceOrganizationResponse{}, err
+	}
+	employee, ok := workspaceEmployeeByDisplayID(visibleEmployees, displayID)
+	if !ok {
+		return WorkspaceOrganizationResponse{}, NotFound("employee", strings.TrimSpace(displayID))
+	}
+	parentDisplayID := strings.TrimSpace(*input.ParentID)
+	managerEmployeeID := ""
+	if parentDisplayID != "" && parentDisplayID != workspaceParentNone {
+		manager, ok := workspaceEmployeeByDisplayID(visibleEmployees, parentDisplayID)
+		if !ok {
+			return WorkspaceOrganizationResponse{}, NotFound("employee", parentDisplayID)
+		}
+		managerEmployeeID = manager.ID
+	}
+	if workspaceManagerCycle(visibleEmployees, employee.ID, managerEmployeeID) {
+		return WorkspaceOrganizationResponse{}, domainValidation("manager relationship would create a cycle", FieldError{Tab: "employment_info", Field: "manager_employee_id", Code: "invalid", Message: "manager relationship would create a cycle"})
+	}
+	account, decision, authzAudit, err := c.Service.Authorize(ctx,
+		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, ResourceID: employee.ID, Action: ActionUpdate},
+		AuditTarget{Event: "platform.workspace.organization.manager.update", Resource: string(ResourceEmployee), Target: employee.ID},
+	)
+	if err != nil {
+		return WorkspaceOrganizationResponse{}, err
+	}
+	if err := c.Service.HR().withTransaction(ctx, func(tx HRService) error {
+		next, ok, err := tx.store.GetEmployee(goContext(ctx), ctx.TenantID, employee.ID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("employee", employee.ID)
+		}
+		visible, err := tx.filterEmployeesByDecision(ctx, account, []Employee{next}, decision)
+		if err != nil {
+			return err
+		}
+		if len(visible) == 0 {
+			return forbiddenDataScope("employee is outside data scope")
+		}
+		before := next
+		next.ManagerEmployeeID = managerEmployeeID
+		next.UpdatedAt = tx.Now()
+		next = tx.appendHistoryForChangedEmployment(before, next, "主管調整")
+		if err := tx.store.UpsertEmployee(goContext(ctx), next); err != nil {
+			return err
+		}
+		if err := tx.touchEmployeeAuthzIfNeeded(ctx, before, next, string(EventEmployeeAuthzSubjectUpdate)); err != nil {
+			return err
+		}
+		if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeUpdated), next.ID, map[string]any{"employee_id": next.ID, "manager_employee_id": next.ManagerEmployeeID}); err != nil {
+			return err
+		}
+		if err := tx.audit(ctx, "platform.workspace.organization.manager.update", string(ResourceEmployee), next.ID, string(SeverityMedium), auditDecisionDetails(ctx, decision, map[string]any{
+			"before_manager_employee_id": before.ManagerEmployeeID,
+			"after_manager_employee_id":  next.ManagerEmployeeID,
+		})); err != nil {
+			return err
+		}
+		return authzAudit.CommitWith(ctx, tx.Service)
+	}); err != nil {
+		return WorkspaceOrganizationResponse{}, err
+	}
+	return c.WorkspaceOrganization(ctx)
+}
+
+// CreateWorkspaceAdmin grants workspace-admin permissions to an account-bound employee.
+func (c PlatformService) CreateWorkspaceAdmin(ctx RequestContext, input CreateWorkspaceAdminInput) (WorkspaceAdminsResponse, error) {
+	account, employee, err := c.workspaceAdminTarget(ctx, input.EmployeeID)
+	if err != nil {
+		return WorkspaceAdminsResponse{}, err
+	}
+	return c.saveWorkspaceAdminPermissions(ctx, account, employee, input.Permissions, ActionCreate, "platform.workspace.admin.create")
+}
+
+// UpdateWorkspaceAdminPermissions replaces one workspace admin's managed permission set.
+func (c PlatformService) UpdateWorkspaceAdminPermissions(ctx RequestContext, displayID string, input UpdateWorkspaceAdminPermissionsInput) (WorkspaceAdminsResponse, error) {
+	account, employee, err := c.workspaceAdminTarget(ctx, displayID)
+	if err != nil {
+		return WorkspaceAdminsResponse{}, err
+	}
+	return c.saveWorkspaceAdminPermissions(ctx, account, employee, input.Permissions, ActionUpdate, "platform.workspace.admin.update")
+}
+
+// DeleteWorkspaceAdmin removes workspace-managed admin permissions from one account.
+func (c PlatformService) DeleteWorkspaceAdmin(ctx RequestContext, displayID string) (WorkspaceAdminsResponse, error) {
+	account, employee, err := c.workspaceAdminTarget(ctx, displayID)
+	if err != nil {
+		return WorkspaceAdminsResponse{}, err
+	}
+	return c.saveWorkspaceAdminPermissions(ctx, account, employee, map[string]string{}, ActionDelete, "platform.workspace.admin.delete")
+}
+
+// CreateWorkspaceFormDesign persists one form-builder template through the workspace settings surface.
+func (c PlatformService) CreateWorkspaceFormDesign(ctx RequestContext, input SaveWorkspaceFormDesignInput) (PlatformFormDesign, error) {
+	key := workspaceFormDesignKey(input.ID, input.Name, c.Now())
+	if strings.TrimSpace(input.Name) == "" {
+		return PlatformFormDesign{}, BadRequest("name is required")
+	}
+	_, decision, authzAudit, err := c.Authorize(ctx,
+		CheckRequest{ApplicationCode: AppWorkflow, ResourceType: ResourceType("form_template"), ResourceID: key, Action: ActionCreate},
+		AuditTarget{Event: "platform.workspace.form_design.create", Resource: "form_template", Target: key},
+	)
+	if err != nil {
+		return PlatformFormDesign{}, err
+	}
+	if err := c.withTenantTransaction(ctx, func(tx *Service) error {
+		platform := tx.Platform()
+		current, exists, err := platform.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, key)
+		if err != nil {
+			return err
+		}
+		if exists && !platformTemplateDeleted(current.Schema) {
+			return domain.Conflict("form template key already exists")
+		}
+		now := platform.Now()
+		enabled := true
+		if input.Enabled != nil {
+			enabled = *input.Enabled
+		}
+		templateID := "ft-" + key
+		createdAt := now
+		if exists {
+			templateID = current.ID
+			createdAt = current.CreatedAt
+			if createdAt.IsZero() {
+				createdAt = now
+			}
+		}
+		template := FormTemplate{
+			ID:          templateID,
+			TenantID:    ctx.TenantID,
+			Key:         key,
+			Name:        strings.TrimSpace(input.Name),
+			Description: strings.TrimSpace(input.Desc),
+			Schema:      workspaceFormDesignSchema(nil, input, enabled, false, now),
+			CreatedAt:   createdAt,
+		}
+		if err := platform.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
+			return err
+		}
+		if err := tx.audit(ctx, "platform.workspace.form_design.create", "form_template", template.ID, string(SeverityMedium), auditDecisionDetails(ctx, decision, map[string]any{
+			"template_key": template.Key,
+			"name":         template.Name,
+		})); err != nil {
+			return err
+		}
+		return authzAudit.CommitWith(ctx, tx)
+	}); err != nil {
+		return PlatformFormDesign{}, err
+	}
+	return c.formDesign(ctx)
+}
+
+// UpdateWorkspaceFormDesign patches builder metadata, fields, stages, or enabled state.
+func (c PlatformService) UpdateWorkspaceFormDesign(ctx RequestContext, id string, input UpdateWorkspaceFormDesignInput) (PlatformFormDesign, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return PlatformFormDesign{}, BadRequest("id is required")
+	}
+	_, decision, authzAudit, err := c.Authorize(ctx,
+		CheckRequest{ApplicationCode: AppWorkflow, ResourceType: ResourceType("form_template"), ResourceID: id, Action: ActionUpdate},
+		AuditTarget{Event: "platform.workspace.form_design.update", Resource: "form_template", Target: id},
+	)
+	if err != nil {
+		return PlatformFormDesign{}, err
+	}
+	if err := c.withTenantTransaction(ctx, func(tx *Service) error {
+		platform := tx.Platform()
+		template, err := platform.currentWorkspaceFormTemplate(ctx, id)
+		if err != nil {
+			return err
+		}
+		if platformTemplateDeleted(template.Schema) {
+			return NotFound("form template", id)
+		}
+		next := workspaceFormDesignInputFromTemplate(template)
+		if input.Icon != nil {
+			next.Icon = strings.TrimSpace(*input.Icon)
+		}
+		if input.Name != nil {
+			next.Name = strings.TrimSpace(*input.Name)
+		}
+		if input.Category != nil {
+			next.Category = strings.TrimSpace(*input.Category)
+		}
+		if input.Desc != nil {
+			next.Desc = strings.TrimSpace(*input.Desc)
+		}
+		if input.Enabled != nil {
+			next.Enabled = input.Enabled
+		}
+		if input.Fields != nil {
+			next.Fields = *input.Fields
+		}
+		if input.Stages != nil {
+			next.Stages = *input.Stages
+		}
+		if strings.TrimSpace(next.Name) == "" {
+			return BadRequest("name is required")
+		}
+		enabled := true
+		if next.Enabled != nil {
+			enabled = *next.Enabled
+		}
+		template.Name = strings.TrimSpace(next.Name)
+		template.Description = strings.TrimSpace(next.Desc)
+		template.Schema = workspaceFormDesignSchema(template.Schema, next, enabled, false, platform.Now())
+		if err := platform.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
+			return err
+		}
+		if err := tx.audit(ctx, "platform.workspace.form_design.update", "form_template", template.ID, string(SeverityMedium), auditDecisionDetails(ctx, decision, map[string]any{
+			"template_key": template.Key,
+			"name":         template.Name,
+			"enabled":      enabled,
+		})); err != nil {
+			return err
+		}
+		return authzAudit.CommitWith(ctx, tx)
+	}); err != nil {
+		return PlatformFormDesign{}, err
+	}
+	return c.formDesign(ctx)
+}
+
+// DeleteWorkspaceFormDesign soft-deletes one template so historical form instances remain readable.
+func (c PlatformService) DeleteWorkspaceFormDesign(ctx RequestContext, id string) (PlatformFormDesign, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return PlatformFormDesign{}, BadRequest("id is required")
+	}
+	_, decision, authzAudit, err := c.Authorize(ctx,
+		CheckRequest{ApplicationCode: AppWorkflow, ResourceType: ResourceType("form_template"), ResourceID: id, Action: ActionDelete},
+		AuditTarget{Event: "platform.workspace.form_design.delete", Resource: "form_template", Target: id},
+	)
+	if err != nil {
+		return PlatformFormDesign{}, err
+	}
+	if err := c.withTenantTransaction(ctx, func(tx *Service) error {
+		platform := tx.Platform()
+		template, err := platform.currentWorkspaceFormTemplate(ctx, id)
+		if err != nil {
+			return err
+		}
+		if platformTemplateDeleted(template.Schema) {
+			return NotFound("form template", id)
+		}
+		next := workspaceFormDesignInputFromTemplate(template)
+		disabled := false
+		next.Enabled = &disabled
+		template.Schema = workspaceFormDesignSchema(template.Schema, next, false, true, platform.Now())
+		if err := platform.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
+			return err
+		}
+		if err := tx.audit(ctx, "platform.workspace.form_design.delete", "form_template", template.ID, string(SeverityMedium), auditDecisionDetails(ctx, decision, map[string]any{
+			"template_key": template.Key,
+			"name":         template.Name,
+		})); err != nil {
+			return err
+		}
+		return authzAudit.CommitWith(ctx, tx)
+	}); err != nil {
+		return PlatformFormDesign{}, err
+	}
+	return c.formDesign(ctx)
+}
+
+// WorkspaceAuditLogs exposes the protected workspace audit-log projection through the platform namespace.
+func (c PlatformService) WorkspaceAuditLogs(ctx RequestContext, query WorkspaceAuditLogQuery, page PageRequest) (PageResponse[WorkspaceAuditLog], error) {
+	return c.Service.Workspace().WorkspaceAuditLogs(ctx, query, page)
+}
+
+func (c PlatformService) saveWorkspaceAdminPermissions(ctx RequestContext, account Account, employee Employee, matrix map[string]string, action Action, auditAction string) (WorkspaceAdminsResponse, error) {
+	permissions, err := workspaceAdminPermissionsFromMatrix(matrix)
+	if err != nil {
+		return WorkspaceAdminsResponse{}, err
+	}
+	_, decision, authzAudit, err := c.Service.Authorize(ctx,
+		CheckRequest{ApplicationCode: AppIAM, ResourceType: ResourcePermissionAssign, ResourceID: account.ID, Action: action},
+		AuditTarget{Event: auditAction, Resource: string(ResourcePermissionAssign), Target: account.ID},
+	)
+	if err != nil {
+		return WorkspaceAdminsResponse{}, err
+	}
+	if err := c.withTenantTransaction(ctx, func(tx *Service) error {
+		platform := tx.Platform()
+		if err := platform.upsertWorkspaceAdminPermissionSet(ctx, account, employee, permissions); err != nil {
+			return err
+		}
+		if len(permissions) > 0 {
+			if err := platform.ensureWorkspaceAdminAssignment(ctx, account); err != nil {
+				return err
+			}
+		}
+		if err := tx.touchAuthzConfig(ctx, auditAction, map[string]any{
+			"target_account_id": account.ID,
+			"employee_id":       employee.ID,
+			"permission_set_id": workspaceAdminPermissionSetID(account.ID),
+			"permission_count":  len(permissions),
+		}); err != nil {
+			return err
+		}
+		if err := tx.audit(ctx, auditAction, string(ResourcePermissionAssign), account.ID, string(SeverityHigh), auditDecisionDetails(ctx, decision, map[string]any{
+			"target_account_id": account.ID,
+			"employee_id":       employee.ID,
+			"employee_no":       workspaceEmployeeDisplayID(employee),
+			"permission_count":  len(permissions),
+			"permission_modes":  matrix,
+		})); err != nil {
+			return err
+		}
+		return authzAudit.CommitWith(ctx, tx)
+	}); err != nil {
+		return WorkspaceAdminsResponse{}, err
+	}
+	return c.Service.Workspace().WorkspaceAdmins(ctx)
+}
+
+func (c PlatformService) workspaceAdminTarget(ctx RequestContext, displayID string) (Account, Employee, error) {
+	trimmedID := strings.TrimSpace(displayID)
+	if trimmedID == "" {
+		return Account{}, Employee{}, BadRequest("employee_id is required")
+	}
+	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return Account{}, Employee{}, err
+	}
+	employee, ok := workspaceEmployeeByDisplayID(employees, trimmedID)
+	if !ok {
+		return Account{}, Employee{}, NotFound("employee", trimmedID)
+	}
+	accounts, err := c.store.ListAccounts(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return Account{}, Employee{}, err
+	}
+	for _, account := range accounts {
+		if account.EmployeeID != employee.ID && (employee.AccountID == "" || account.ID != employee.AccountID) {
+			continue
+		}
+		if account.Status != string(AccountStatusActive) {
+			return Account{}, Employee{}, domain.UnauthorizedReason("account_inactive", "account is not active")
+		}
+		return account, employee, nil
+	}
+	return Account{}, Employee{}, NotFound("account", trimmedID)
+}
+
+func (c PlatformService) upsertWorkspaceAdminPermissionSet(ctx RequestContext, account Account, employee Employee, permissions []Permission) error {
+	permissionSetID := workspaceAdminPermissionSetID(account.ID)
+	createdAt := c.Now()
+	if current, ok, err := c.store.GetPermissionSet(goContext(ctx), ctx.TenantID, permissionSetID); err != nil {
+		return err
+	} else if ok && !current.CreatedAt.IsZero() {
+		createdAt = current.CreatedAt
+	}
+	return c.store.UpsertPermissionSet(goContext(ctx), PermissionSet{
+		ID:          permissionSetID,
+		TenantID:    ctx.TenantID,
+		Name:        fmt.Sprintf("Workspace Admin - %s", workspaceAdminName(account, employee)),
+		Description: "Managed by platform workspace admin settings.",
+		Permissions: permissions,
+		CreatedAt:   createdAt,
+	})
+}
+
+func (c PlatformService) ensureWorkspaceAdminAssignment(ctx RequestContext, account Account) error {
+	permissionSetID := workspaceAdminPermissionSetID(account.ID)
+	assignments, err := c.store.ListPermissionSetAssignmentsForPrincipal(goContext(ctx), ctx.TenantID, string(PrincipalTypeAccount), account.ID)
+	if err != nil {
+		return err
+	}
+	for _, assignment := range assignments {
+		if assignment.PermissionSetID == permissionSetID && (assignment.Effect == "" || assignment.Effect == string(EffectAllow)) && workspaceAssignmentActive(assignment, c.Now()) {
+			return nil
+		}
+	}
+	return c.store.UpsertPermissionSetAssignment(goContext(ctx), PermissionSetAssignment{
+		ID:              workspaceAdminAssignmentID(account.ID),
+		TenantID:        ctx.TenantID,
+		PrincipalType:   string(PrincipalTypeAccount),
+		PrincipalID:     account.ID,
+		PermissionSetID: permissionSetID,
+		Effect:          string(EffectAllow),
+		CreatedAt:       c.Now(),
+	})
+}
+
+// workspaceAuditLogsForAggregate keeps the settings aggregate usable without bypassing the protected audit-log route.
+func (c PlatformService) workspaceAuditLogsForAggregate(ctx RequestContext) ([]WorkspaceAuditLog, error) {
+	auditLogs, err := c.Service.Workspace().WorkspaceAuditLogs(ctx, WorkspaceAuditLogQuery{}, PageRequest{Page: 1, PageSize: 50, Sort: "created_at_desc"})
+	if err != nil {
+		if appErr, ok := domain.AsAppError(err); ok && appErr.ReasonCode == "approval_required" {
+			return []WorkspaceAuditLog{}, nil
+		}
+		return nil, err
+	}
+	return auditLogs.Items, nil
+}
+
+// WorkspaceOverview delegates the frontend-compatible overview path to the workspace read model.
+func (c PlatformService) WorkspaceOverview(ctx RequestContext, query WorkspaceOverviewQuery) (WorkspaceOverviewResponse, error) {
+	return c.Service.Workspace().WorkspaceOverview(ctx, query)
+}
+
+// WorkspaceEmployees returns the filtered employee table payload expected by the OA workspace page.
+func (c PlatformService) WorkspaceEmployees(ctx RequestContext, query PlatformWorkspaceEmployeesQuery) (PlatformWorkspaceEmployeesResponse, error) {
+	workspace := c.Service.Workspace()
+	employees, err := workspace.visibleWorkspaceEmployees(ctx, "platform.workspace.employees")
+	if err != nil {
+		return PlatformWorkspaceEmployeesResponse{}, err
+	}
+	units, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return PlatformWorkspaceEmployeesResponse{}, err
+	}
+	cardsByID := workspaceEmployeeCards(employees, workspaceOrgNames(units))
+	items := make([]WorkspaceEmployeeCard, 0, len(employees))
+	for _, employee := range employees {
+		if card, ok := cardsByID[employee.ID]; ok {
+			if !platformWorkspaceEmployeeMatches(query, employee, card) {
+				continue
+			}
+			items = append(items, card)
+		}
+	}
+	sort.SliceStable(items, func(i, j int) bool { return items[i].ID < items[j].ID })
+	return PlatformWorkspaceEmployeesResponse{
+		Employees:  items,
+		CSVHeaders: []string{"員工編號", "姓名", "Email", "部門", "職位", "類別", "電話", "狀態", "到職日期"},
+	}, nil
+}
+
+// platformWorkspaceEmployeeMatches applies UI table filters after authz scoping.
+func platformWorkspaceEmployeeMatches(query PlatformWorkspaceEmployeesQuery, employee Employee, card WorkspaceEmployeeCard) bool {
+	departmentID := strings.TrimSpace(query.DepartmentID)
+	if departmentID != "" && employee.OrgUnitID != departmentID {
+		return false
+	}
+	department := strings.ToLower(strings.TrimSpace(query.Department))
+	if department != "" && !strings.Contains(strings.ToLower(card.Dept+" "+employee.OrgUnitID), department) {
+		return false
+	}
+	if status := strings.TrimSpace(query.Status); status != "" && card.Status != workspaceStatusLabel(NormalizeEmployeeStatus(status)) {
+		return false
+	}
+	if employmentStatus := strings.TrimSpace(query.EmploymentStatus); employmentStatus != "" {
+		if workspaceEmployeeStatus(employee) != strings.ToLower(NormalizeEmployeeStatus(employmentStatus)) {
+			return false
+		}
+	}
+	keyword := strings.ToLower(strings.TrimSpace(query.Keyword))
+	if keyword == "" {
+		return true
+	}
+	haystack := strings.ToLower(strings.Join([]string{
+		card.ID,
+		card.NameZH,
+		card.NameEN,
+		card.Email,
+		card.Dept,
+		card.Title,
+		card.Type,
+		card.Phone,
+	}, " "))
+	return strings.Contains(haystack, keyword)
+}
+
+// WorkspaceOrganization delegates the frontend-compatible organization path to the workspace read model.
+func (c PlatformService) WorkspaceOrganization(ctx RequestContext) (WorkspaceOrganizationResponse, error) {
+	return c.Service.Workspace().WorkspaceOrganization(ctx)
+}
+
+// WorkspaceAttendance delegates the frontend-compatible attendance path to the workspace read model.
+func (c PlatformService) WorkspaceAttendance(ctx RequestContext, query WorkspaceAttendanceQuery) (WorkspaceAttendanceResponse, error) {
+	return c.Service.Workspace().WorkspaceAttendance(ctx, query)
+}
+
+// WorkspaceTurnover delegates the frontend-compatible turnover path to the workspace read model.
+func (c PlatformService) WorkspaceTurnover(ctx RequestContext, query WorkspaceTurnoverQuery) (WorkspaceTurnoverResponse, error) {
+	return c.Service.Workspace().WorkspaceTurnover(ctx, query)
+}
+
+// Insights returns compact report payloads that match the current FE insight schemas.
+func (c PlatformService) Insights(ctx RequestContext, query PlatformInsightsQuery) (PlatformInsightsResponse, error) {
+	month := strings.TrimSpace(query.Month)
+	if month == "" {
+		month = c.Now().Format("2006-01")
+	}
+	overview, err := c.Service.Workspace().WorkspaceOverview(ctx, WorkspaceOverviewQuery{})
+	if err != nil {
+		return PlatformInsightsResponse{}, err
+	}
+	return PlatformInsightsResponse{
+		Month:   month,
+		Reports: c.insightReports(month, overview),
+		AIPanel: PlatformInsightsAIPanel{
+			Messages: []PlatformChatMessage{
+				{ID: "im1", Role: "assistant", Avatar: "🤖", Content: "已根據目前後端資料產生人力、業務與財務報表摘要。"},
+			},
+			QuickPrompts: []string{"本月重點", "異常部門", "請假排行", "生成摘要"},
+		},
+	}, nil
+}
+
+func (c PlatformService) clockSummary(ctx RequestContext) (PlatformClockSummary, error) {
+	status, err := c.Service.Attendance().AttendanceClockStatus(ctx)
+	if err != nil {
+		return PlatformClockSummary{}, err
+	}
+	now := c.Now()
+	checkedInAt := clockTime(status.ClockIn)
+	checkedOutAt := clockTime(status.ClockOut)
+	location := "未設定"
+	if status.Worksite != nil && strings.TrimSpace(status.Worksite.Name) != "" {
+		location = status.Worksite.Name
+	}
+	monthlyDays, monthlyHours, leaveDays := c.monthlyClockAndLeaveSummary(ctx, status.EmployeeID, now)
+	return PlatformClockSummary{
+		DateLabel:             platformDateLabel(now),
+		CheckedInAt:           checkedInAt,
+		CheckedOutAt:          checkedOutAt,
+		Location:              location,
+		MonthlyAttendanceDays: monthlyDays,
+		MonthlyHours:          monthlyHours,
+		LeaveDays:             leaveDays,
+	}, nil
+}
+
+func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employeeID string, now time.Time) (int, float64, float64) {
+	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
+	end := start.AddDate(0, 1, 0)
+	records, err := c.store.ListAttendanceClockRecords(goContext(ctx), ctx.TenantID, AttendanceClockRecordQuery{
+		EmployeeID: employeeID,
+		FromDate:   start.Format(time.DateOnly),
+		ToDate:     end.AddDate(0, 0, -1).Format(time.DateOnly),
+	})
+	if err != nil {
+		return 0, 0, 0
+	}
+	days := map[string]struct{}{}
+	for _, record := range records {
+		if record.EmployeeID != employeeID || record.Direction != clockDirectionIn || record.RecordStatus != clockRecordStatusAccepted {
+			continue
+		}
+		if !record.ClockedAt.Before(start) && record.ClockedAt.Before(end) {
+			days[record.WorkDate] = struct{}{}
+		}
+	}
+	leaveHours := 0.0
+	leaves, err := c.store.ListLeaveRequestsByQuery(goContext(ctx), ctx.TenantID, LeaveRequestQuery{
+		EmployeeIDs: []string{employeeID},
+		FromDate:    start.Format(time.DateOnly),
+		ToDate:      end.AddDate(0, 0, -1).Format(time.DateOnly),
+	})
+	if err == nil {
+		for _, leave := range leaves {
+			if leave.EmployeeID != employeeID || leave.EndAt.Before(start) || !leave.StartAt.Before(end) {
+				continue
+			}
+			leaveHours += leave.Hours
+		}
+	}
+	return len(days), float64(len(days)) * workspaceDayHours, leaveHours / workspaceDayHours
+}
+
+func (c PlatformService) formInstances(ctx RequestContext) ([]PlatformFormApplication, []PlatformFormDraft, error) {
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	instances, err := c.store.ListFormInstancesByQuery(goContext(ctx), ctx.TenantID, FormInstanceQuery{ApplicantAccountID: account.ID})
+	if err != nil {
+		return nil, nil, err
+	}
+	templates, err := c.store.ListFormTemplates(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, nil, err
+	}
+	templateByID := map[string]FormTemplate{}
+	for _, template := range templates {
+		templateByID[template.ID] = template
+	}
+	applications := make([]PlatformFormApplication, 0)
+	drafts := make([]PlatformFormDraft, 0)
+	for _, instance := range instances {
+		if instance.ApplicantAccountID != account.ID {
+			continue
+		}
+		template := templateByID[instance.TemplateID]
+		title := template.Name
+		if title == "" {
+			title = template.Key
+		}
+		if strings.EqualFold(instance.Status, workflowFormStatusDraft) {
+			drafts = append(drafts, PlatformFormDraft{
+				ID:          instance.ID,
+				TemplateKey: template.Key,
+				Title:       title,
+				UpdatedAt:   platformTime(instance.UpdatedAt),
+				Summary:     platformFormSummary(instance.Payload),
+				Payload:     utils.CopyStringMap(instance.Payload),
+			})
+			continue
+		}
+		applications = append(applications, PlatformFormApplication{
+			ID:          instance.ID,
+			TemplateKey: template.Key,
+			Title:       title,
+			Applicant:   account.DisplayName,
+			SubmittedAt: platformTime(instance.SubmittedAt),
+			Status:      platformFormStatus(instance.Status),
+			Summary:     platformFormSummary(instance.Payload),
+			Payload:     utils.CopyStringMap(instance.Payload),
+		})
+	}
+	sort.SliceStable(applications, func(i, j int) bool {
+		return applications[i].SubmittedAt > applications[j].SubmittedAt
+	})
+	sort.SliceStable(drafts, func(i, j int) bool {
+		return drafts[i].UpdatedAt > drafts[j].UpdatedAt
+	})
+	return applications, drafts, nil
+}
+
+func (c PlatformService) taskProjection(ctx RequestContext) ([]PlatformTaskRecord, []PlatformTaskTodo, error) {
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	taskItems, err := c.store.ListPlatformTaskItems(goContext(ctx), ctx.TenantID, account.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	taskTodos, err := c.store.ListPlatformTaskTodos(goContext(ctx), ctx.TenantID, account.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	runs, err := c.store.ListAgentRunsByAccount(goContext(ctx), ctx.TenantID, account.ID)
+	if err != nil {
+		return nil, nil, err
+	}
+	recordsByDate := map[string]*PlatformTaskRecord{}
+	todos := make([]PlatformTaskTodo, 0)
+	for _, item := range taskItems {
+		record := recordsByDate[item.WorkDate]
+		if record == nil {
+			record = &PlatformTaskRecord{Date: item.WorkDate, Weekday: platformWeekdayFromDate(item.WorkDate), Items: []PlatformTaskItem{}}
+			recordsByDate[item.WorkDate] = record
+		}
+		record.Items = append(record.Items, platformTaskItemFromRecord(item))
+		record.TotalHours += item.Hours
+	}
+	for _, todo := range taskTodos {
+		todos = append(todos, platformTaskTodoFromRecord(todo))
+	}
+	for _, run := range runs {
+		if run.AccountID != account.ID {
+			continue
+		}
+		date := run.CreatedAt.Format(platformDateLayout)
+		record := recordsByDate[date]
+		if record == nil {
+			record = &PlatformTaskRecord{Date: date, Weekday: platformWeekday(run.CreatedAt), Items: []PlatformTaskItem{}}
+			recordsByDate[date] = record
+		}
+		hours := 1.0
+		item := PlatformTaskItem{ID: run.ID, Title: run.Prompt, Category: "AI", Product: "Nexus", Hours: hours, Note: run.Status}
+		record.Items = append(record.Items, item)
+		record.TotalHours += hours
+		todos = append(todos, PlatformTaskTodo{ID: "todo-" + run.ID, Text: run.Prompt, Done: run.Status == string(AgentRunStatusCompleted), Date: run.CreatedAt.Format("01/02")})
+	}
+	records := make([]PlatformTaskRecord, 0, len(recordsByDate))
+	for _, record := range recordsByDate {
+		records = append(records, *record)
+	}
+	sort.SliceStable(records, func(i, j int) bool {
+		return records[i].Date > records[j].Date
+	})
+	if len(records) == 0 {
+		records = []PlatformTaskRecord{{
+			Date:       c.Now().Format(platformDateLayout),
+			Weekday:    platformWeekday(c.Now()),
+			TotalHours: 0,
+			Items:      []PlatformTaskItem{},
+		}}
+	}
+	return records, todos, nil
+}
+
+func (c PlatformService) currentPlatformTaskItem(ctx RequestContext, accountID string, id string) (PlatformTaskRecordItem, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return PlatformTaskRecordItem{}, BadRequest("id is required")
+	}
+	item, ok, err := c.store.GetPlatformTaskItem(goContext(ctx), ctx.TenantID, accountID, id)
+	if err != nil {
+		return PlatformTaskRecordItem{}, err
+	}
+	if !ok || item.AccountID != accountID {
+		return PlatformTaskRecordItem{}, NotFound("platform task item", id)
+	}
+	return item, nil
+}
+
+func (c PlatformService) currentPlatformTaskTodo(ctx RequestContext, accountID string, id string) (PlatformTaskTodoRecord, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return PlatformTaskTodoRecord{}, BadRequest("id is required")
+	}
+	todo, ok, err := c.store.GetPlatformTaskTodo(goContext(ctx), ctx.TenantID, accountID, id)
+	if err != nil {
+		return PlatformTaskTodoRecord{}, err
+	}
+	if !ok || todo.AccountID != accountID {
+		return PlatformTaskTodoRecord{}, NotFound("platform task todo", id)
+	}
+	return todo, nil
+}
+
+func (c PlatformService) platformTaskItemRecord(ctx RequestContext, accountID string, item PlatformTaskRecordItem) (PlatformTaskRecordItem, error) {
+	title := strings.TrimSpace(item.Title)
+	if title == "" {
+		return PlatformTaskRecordItem{}, BadRequest("title is required")
+	}
+	if err := validatePlatformTaskHours(item.Hours); err != nil {
+		return PlatformTaskRecordItem{}, err
+	}
+	workDate, err := normalizePlatformWorkDate(item.WorkDate, c.Now())
+	if err != nil {
+		return PlatformTaskRecordItem{}, err
+	}
+	now := c.Now()
+	if item.CreatedAt.IsZero() {
+		item.CreatedAt = now
+	}
+	item.ID = strings.TrimSpace(item.ID)
+	item.TenantID = ctx.TenantID
+	item.AccountID = accountID
+	item.WorkDate = workDate
+	item.Title = title
+	item.Category = firstNonEmpty(item.Category, "一般")
+	item.Product = firstNonEmpty(item.Product, "Nexus")
+	item.Note = strings.TrimSpace(item.Note)
+	item.UpdatedAt = now
+	return item, nil
+}
+
+func (c PlatformService) platformTaskTodoRecord(ctx RequestContext, accountID string, todo PlatformTaskTodoRecord) (PlatformTaskTodoRecord, error) {
+	text := strings.TrimSpace(todo.Text)
+	if text == "" {
+		return PlatformTaskTodoRecord{}, BadRequest("text is required")
+	}
+	dueDate, err := normalizeOptionalPlatformDate(todo.DueDate)
+	if err != nil {
+		return PlatformTaskTodoRecord{}, err
+	}
+	status := strings.TrimSpace(todo.Status)
+	if status == "" {
+		status = "open"
+	}
+	if status != "open" && status != "done" {
+		return PlatformTaskTodoRecord{}, BadRequest("status must be open or done")
+	}
+	now := c.Now()
+	if todo.CreatedAt.IsZero() {
+		todo.CreatedAt = now
+	}
+	todo.ID = strings.TrimSpace(todo.ID)
+	todo.TenantID = ctx.TenantID
+	todo.AccountID = accountID
+	todo.Text = text
+	todo.DueDate = dueDate
+	todo.Status = status
+	todo.UpdatedAt = now
+	return todo, nil
+}
+
+func platformTaskItemFromRecord(item PlatformTaskRecordItem) PlatformTaskItem {
+	return PlatformTaskItem{
+		ID:       item.ID,
+		Title:    item.Title,
+		Category: item.Category,
+		Product:  item.Product,
+		Hours:    item.Hours,
+		Note:     item.Note,
+	}
+}
+
+func platformTaskTodoFromRecord(todo PlatformTaskTodoRecord) PlatformTaskTodo {
+	return PlatformTaskTodo{
+		ID:   todo.ID,
+		Text: todo.Text,
+		Done: todo.Status == "done",
+		Date: platformTaskTodoDate(todo),
+	}
+}
+
+func platformTaskTodoDate(todo PlatformTaskTodoRecord) string {
+	if todo.DueDate != "" {
+		if parsed, err := time.Parse(platformDateLayout, todo.DueDate); err == nil {
+			return parsed.Format("01/02")
+		}
+		return todo.DueDate
+	}
+	if !todo.CreatedAt.IsZero() {
+		return todo.CreatedAt.Format("01/02")
+	}
+	return ""
+}
+
+func platformWeekdayFromDate(date string) string {
+	parsed, err := time.Parse(platformDateLayout, date)
+	if err != nil {
+		return ""
+	}
+	return platformWeekday(parsed)
+}
+
+func normalizePlatformWorkDate(value string, fallback time.Time) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return fallback.Format(platformDateLayout), nil
+	}
+	for _, layout := range []string{platformDateLayout, "2006-01-02"} {
+		parsed, err := time.Parse(layout, value)
+		if err == nil {
+			return parsed.Format(platformDateLayout), nil
+		}
+	}
+	return "", BadRequest("work_date must be YYYY/MM/DD or YYYY-MM-DD")
+}
+
+func normalizeOptionalPlatformDate(value string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "", nil
+	}
+	return normalizePlatformWorkDate(value, time.Time{})
+}
+
+func validatePlatformTaskHours(hours float64) error {
+	if hours <= 0 || hours > 24 {
+		return BadRequest("hours must be greater than zero and no more than 24")
+	}
+	if math.Abs(hours*2-math.Round(hours*2)) > 0.000001 {
+		return BadRequest("hours must use 0.5 hour increments")
+	}
+	return nil
+}
+
+func firstNonEmpty(value string, fallback string) string {
+	value = strings.TrimSpace(value)
+	if value != "" {
+		return value
+	}
+	return fallback
+}
+
+func (c PlatformService) formDesign(ctx RequestContext) (PlatformFormDesign, error) {
+	templates, err := c.Service.Workflow().ListFormTemplates(ctx)
+	if err != nil {
+		return PlatformFormDesign{}, err
+	}
+	forms := make([]PlatformFormDesignForm, 0, len(templates))
+	hasTemplates := len(templates) > 0
+	for _, template := range templates {
+		if platformTemplateDeleted(template.Schema) {
+			continue
+		}
+		forms = append(forms, PlatformFormDesignForm{
+			ID:             template.Key,
+			Icon:           platformTemplateIcon(template),
+			Name:           template.Name,
+			Category:       platformTemplateCategory(template),
+			Desc:           platformTemplateDesc(template),
+			Flow:           platformTemplateFlow(template.Schema),
+			Enabled:        platformTemplateEnabled(template.Schema),
+			AddedThisMonth: sameYearMonth(template.CreatedAt, c.Now()),
+			UpdatedAt:      platformTemplateUpdatedAt(template.Schema, template.CreatedAt),
+			Fields:         platformTemplateFields(template.Schema),
+			Stages:         platformTemplateStages(template.Schema),
+		})
+	}
+	if len(forms) == 0 && !hasTemplates {
+		for _, column := range platformFormColumns() {
+			for _, item := range column.Items {
+				forms = append(forms, PlatformFormDesignForm{
+					ID:        item.ID,
+					Icon:      item.Emoji,
+					Name:      item.Title,
+					Category:  column.Title,
+					Flow:      "直屬主管 → HR",
+					Enabled:   true,
+					UpdatedAt: platformTime(c.Now()),
+				})
+			}
+		}
+	}
+	return PlatformFormDesign{
+		Categories: platformFormCategoryNames(),
+		Forms:      forms,
+		Builder:    platformFormBuilderContract(),
+	}, nil
+}
+
+func (c PlatformService) currentWorkspaceFormTemplate(ctx RequestContext, id string) (FormTemplate, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return FormTemplate{}, BadRequest("id is required")
+	}
+	if template, ok, err := c.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, id); err != nil {
+		return FormTemplate{}, err
+	} else if ok {
+		return template, nil
+	}
+	if template, ok, err := c.store.GetFormTemplate(goContext(ctx), ctx.TenantID, id); err != nil {
+		return FormTemplate{}, err
+	} else if ok {
+		return template, nil
+	}
+	return FormTemplate{}, NotFound("form template", id)
+}
+
+func workspaceFormDesignKey(id string, name string, now time.Time) string {
+	id = workspaceFormDesignSlug(id)
+	if id != "" {
+		return id
+	}
+	id = workspaceFormDesignSlug(name)
+	if id != "" {
+		return "custom-" + id
+	}
+	return fmt.Sprintf("custom-%d", now.UnixNano())
+}
+
+func workspaceFormDesignSlug(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	var b strings.Builder
+	lastDash := false
+	for _, r := range value {
+		isAlphaNum := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9')
+		if isAlphaNum {
+			b.WriteRune(r)
+			lastDash = false
+			continue
+		}
+		if b.Len() > 0 && !lastDash {
+			b.WriteByte('-')
+			lastDash = true
+		}
+	}
+	return strings.Trim(b.String(), "-")
+}
+
+func workspaceFormDesignInputFromTemplate(template FormTemplate) SaveWorkspaceFormDesignInput {
+	enabled := platformTemplateEnabled(template.Schema)
+	return SaveWorkspaceFormDesignInput{
+		ID:       template.Key,
+		Icon:     platformTemplateIcon(template),
+		Name:     template.Name,
+		Category: platformTemplateCategory(template),
+		Desc:     platformTemplateDesc(template),
+		Enabled:  &enabled,
+		Fields:   platformTemplateFields(template.Schema),
+		Stages:   platformTemplateStages(template.Schema),
+	}
+}
+
+func workspaceFormDesignSchema(base map[string]any, input SaveWorkspaceFormDesignInput, enabled bool, deleted bool, updatedAt time.Time) map[string]any {
+	schema := utils.CopyStringMap(base)
+	if schema == nil {
+		schema = map[string]any{"type": "object"}
+	}
+	fields := input.Fields
+	if len(fields) == 0 {
+		fields = platformFormBuilderContract().Fields
+	}
+	stages := input.Stages
+	if len(stages) == 0 {
+		stages = platformFormBuilderContract().Stages
+	}
+	schema[platformFormDesignSchemaKey] = map[string]any{
+		"icon":       firstNonEmpty(input.Icon, "📋"),
+		"category":   firstNonEmpty(input.Category, "其他"),
+		"desc":       strings.TrimSpace(input.Desc),
+		"enabled":    enabled,
+		"deleted":    deleted,
+		"updated_at": updatedAt.UTC().Format(time.RFC3339),
+		"fields":     fields,
+		"stages":     stages,
+	}
+	schema["flow"] = platformStageFlow(stages)
+	return schema
+}
+
+func platformTemplateDesign(schema map[string]any) map[string]any {
+	if len(schema) == 0 {
+		return nil
+	}
+	if value, ok := schema[platformFormDesignSchemaKey].(map[string]any); ok {
+		return value
+	}
+	return nil
+}
+
+func platformTemplateDeleted(schema map[string]any) bool {
+	return platformDesignBool(platformTemplateDesign(schema), "deleted", false)
+}
+
+func platformTemplateEnabled(schema map[string]any) bool {
+	return platformDesignBool(platformTemplateDesign(schema), "enabled", true)
+}
+
+func platformTemplateIcon(template FormTemplate) string {
+	if icon := platformDesignString(platformTemplateDesign(template.Schema), "icon"); icon != "" {
+		return icon
+	}
+	for _, column := range platformFormColumns() {
+		for _, item := range column.Items {
+			if item.ID == template.Key && item.Emoji != "" {
+				return item.Emoji
+			}
+		}
+	}
+	return "📋"
+}
+
+func platformTemplateCategory(template FormTemplate) string {
+	if category := platformDesignString(platformTemplateDesign(template.Schema), "category"); category != "" {
+		return category
+	}
+	return platformFormCategory(template.Key)
+}
+
+func platformTemplateDesc(template FormTemplate) string {
+	if desc := platformDesignString(platformTemplateDesign(template.Schema), "desc"); desc != "" {
+		return desc
+	}
+	return template.Description
+}
+
+func platformTemplateUpdatedAt(schema map[string]any, fallback time.Time) string {
+	if raw := platformDesignString(platformTemplateDesign(schema), "updated_at"); raw != "" {
+		if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+			return platformTime(parsed)
+		}
+	}
+	return platformTime(fallback)
+}
+
+func platformTemplateFields(schema map[string]any) []PlatformFormBuilderField {
+	if fields, ok := platformDecodeSlice[PlatformFormBuilderField](platformTemplateDesign(schema)["fields"]); ok {
+		return fields
+	}
+	return platformFormBuilderContract().Fields
+}
+
+func platformTemplateStages(schema map[string]any) []PlatformFormBuilderStage {
+	if stages, ok := platformDecodeSlice[PlatformFormBuilderStage](platformTemplateDesign(schema)["stages"]); ok {
+		return stages
+	}
+	return platformFormBuilderContract().Stages
+}
+
+func platformDecodeSlice[T any](value any) ([]T, bool) {
+	if value == nil {
+		return nil, false
+	}
+	if typed, ok := value.([]T); ok {
+		return typed, true
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, false
+	}
+	var out []T
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return nil, false
+	}
+	return out, true
+}
+
+func platformDesignString(values map[string]any, key string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	if value, ok := values[key].(string); ok {
+		return strings.TrimSpace(value)
+	}
+	return ""
+}
+
+func platformDesignBool(values map[string]any, key string, fallback bool) bool {
+	if len(values) == 0 {
+		return fallback
+	}
+	if value, ok := values[key].(bool); ok {
+		return value
+	}
+	return fallback
+}
+
+func platformFormBuilderContract() PlatformFormBuilderContract {
+	return PlatformFormBuilderContract{
+		Layouts: []PlatformFormBuilderLayout{
+			{Key: "single", Label: "單欄", Columns: []string{"100%"}},
+			{Key: "two", Label: "雙欄", Columns: []string{"50%", "50%"}},
+		},
+		FieldTypes: []PlatformFormBuilderFieldType{
+			{Key: "text", Label: "文字", Icon: "type"},
+			{Key: "textarea", Label: "多行文字", Icon: "align-left"},
+			{Key: "date", Label: "日期", Icon: "calendar"},
+			{Key: "number", Label: "數字", Icon: "hash"},
+			{Key: "upload", Label: "附件", Icon: "paperclip"},
+		},
+		Fields: []PlatformFormBuilderField{
+			{ID: "field-title", Type: "text", Label: "申請主旨", Placeholder: "請輸入申請主旨", Required: true},
+			{ID: "field-reason", Type: "textarea", Label: "申請原因", Placeholder: "請描述原因", Required: true},
+		},
+		Stages: []PlatformFormBuilderStage{
+			{ID: "stage-manager", Type: "approver", Label: "直屬主管", Detail: "依員工主管關係自動帶入"},
+			{ID: "stage-hr", Type: "approver", Label: "HR 複核", Detail: "高風險表單需 HR 確認"},
+			{ID: "stage-notify", Type: "notify", Label: "通知申請人", Detail: "簽核完成後發送通知"},
+		},
+	}
+}
+
+func (c PlatformService) insightReports(month string, overview WorkspaceOverviewResponse) map[string]any {
+	active := overview.HRSummary.Active
+	hires := overview.HRSummary.Hires
+	separations := overview.HRSummary.Separations
+	return map[string]any{
+		"dept_tasks": map[string]any{
+			"title": "部門任務與出勤摘要",
+			"metrics": []map[string]any{
+				{"id": "dept-total-hours", "label": "估算工時", "value": active * 8, "unit": "h", "variant": "primary"},
+				{"id": "leave-days", "label": "今日請假", "value": overview.Attendance.Leave, "unit": "人", "variant": "warning"},
+				{"id": "checked-in", "label": "已上班", "value": overview.Attendance.CheckedIn, "unit": "人", "variant": "success"},
+			},
+			"leave_chart": []map[string]any{
+				{"id": "leave", "label": "請假", "value": overview.Attendance.Leave, "max": maxInt(active, 1), "tone": "warning", "active": true},
+				{"id": "absent", "label": "未到", "value": overview.Attendance.Absent, "max": maxInt(active, 1), "tone": "danger"},
+			},
+			"member_hours": []map[string]any{
+				{"id": "team", "label": "全公司", "value": active * 8, "max": maxInt(active*8, 1), "tone": "primary"},
+			},
+			"product_distribution": []map[string]any{{
+				"id":       "nexus",
+				"label":    "Nexus",
+				"total":    active * 8,
+				"segments": []map[string]any{{"id": "oa", "label": "OA", "value": active * 8, "tone": "primary"}},
+			}},
+			"category_distribution": []map[string]any{{
+				"id":       "work",
+				"label":    "工作類型",
+				"total":    active * 8,
+				"segments": []map[string]any{{"id": "operation", "label": "營運", "value": active * 8, "tone": "info"}},
+			}},
+			"members": []map[string]any{},
+		},
+		"sales": map[string]any{
+			"title": "業務摘要",
+			"metrics": []map[string]any{
+				{"id": "pipeline", "label": "Pipeline", "value": "NT$ 0", "variant": "primary"},
+				{"id": "won", "label": "已成交", "value": "NT$ 0", "variant": "success"},
+			},
+			"trend_bars": []map[string]any{{"id": month, "label": month, "value": 0, "max": 1, "tone": "primary", "active": true}},
+			"clients":    []map[string]any{},
+		},
+		"finance": map[string]any{
+			"title": "財務摘要",
+			"metrics": []map[string]any{
+				{"id": "hires", "label": "本月新進", "value": hires, "unit": "人", "variant": "success"},
+				{"id": "separations", "label": "本月離職", "value": separations, "unit": "人", "variant": "warning"},
+			},
+			"monthly_bars": []map[string]any{{"id": month, "label": month, "income": hires, "expense": separations, "active": true}},
+			"departments":  []map[string]any{},
+		},
+	}
+}
+
+func platformAssistantCatalog() []PlatformAssistant {
+	return []PlatformAssistant{
+		{ID: "employee-care", Emoji: "🙋", Title: "員工疑難雜症助理", Desc: "提供員工諮詢、申訴與 IT 報修引導。", Tag: "workflow"},
+		{ID: "sales-analytics", Emoji: "📈", Title: "業務報表分析", Desc: "解讀銷售數據並抓取成長或衰退訊號。", Tag: "analytics"},
+		{ID: "product-catalog", Emoji: "📖", Title: "產品目錄助理", Desc: "查詢產品規格並產出提案摘要。", Tag: "doc"},
+		{ID: "recruiting", Emoji: "🤝", Title: "招聘獵頭助理", Desc: "協助產生 JD、篩選履歷與安排面試。", Tag: "workflow"},
+		{ID: "training-mentor", Emoji: "🎓", Title: "培訓學長姐", Desc: "推薦入職訓練清單並解答內部作業規範。", Tag: "doc"},
+		{ID: "legal-contract", Emoji: "⚖️", Title: "合約法務顧問", Desc: "掃描合約風險並比對版本差異。", Tag: "doc"},
+		{ID: "project-manager", Emoji: "🏗️", Title: "專案進度管家", Desc: "彙整專案里程碑並產出週報。", Tag: "workflow"},
+		{ID: "security", Emoji: "🛡️", Title: "資安風控官", Desc: "提醒異常登入與資安宣導。", Tag: "it"},
+	}
+}
+
+func firstPlatformAssistants(limit int) []PlatformAssistant {
+	items := platformAssistantCatalog()
+	if limit > 0 && len(items) > limit {
+		return append([]PlatformAssistant(nil), items[:limit]...)
+	}
+	return append([]PlatformAssistant(nil), items...)
+}
+
+func platformAssistantMessages() []PlatformChatMessage {
+	return []PlatformChatMessage{
+		{ID: "m1", Role: "assistant", Avatar: "🤖", Content: "哈囉！告訴我你想處理的事情，我能幫你挑選最合適的助理。"},
+	}
+}
+
+func platformHomeFormColumns() []PlatformFormColumn {
+	columns := platformFormColumns()
+	if len(columns) > 2 {
+		return append([]PlatformFormColumn(nil), columns[:2]...)
+	}
+	return columns
+}
+
+func workspaceAdminPermissionsFromMatrix(matrix map[string]string) ([]Permission, error) {
+	permissions := make([]Permission, 0)
+	seen := map[string]struct{}{}
+	known := workspaceEmptyAdminPermissions()
+	for key, mode := range matrix {
+		if _, ok := known[key]; !ok {
+			return nil, BadRequest("unknown admin permission key: " + key)
+		}
+		normalized := strings.ToLower(strings.TrimSpace(mode))
+		if normalized == "" || normalized == "none" {
+			continue
+		}
+		if normalized != "view" && normalized != "edit" {
+			return nil, BadRequest("admin permission mode must be none, view or edit")
+		}
+		for _, permission := range workspaceAdminPermissionSpecs(key, normalized) {
+			label := permission.Resource + ":" + string(permission.Action) + ":" + string(permission.Scope)
+			if _, exists := seen[label]; exists {
+				continue
+			}
+			seen[label] = struct{}{}
+			permissions = append(permissions, permission)
+		}
+	}
+	sort.SliceStable(permissions, func(i, j int) bool {
+		left := permissions[i].Resource + "." + string(permissions[i].Action)
+		right := permissions[j].Resource + "." + string(permissions[j].Action)
+		return left < right
+	})
+	return permissions, nil
+}
+
+func workspaceAdminPermissionSpecs(key string, mode string) []Permission {
+	read := func(resource string, menuKey string) Permission {
+		return workspaceAdminPermission(resource, ActionRead, menuKey)
+	}
+	write := func(resource string, action Action, menuKey string) Permission {
+		return workspaceAdminPermission(resource, action, menuKey)
+	}
+	var view []Permission
+	var edit []Permission
+	switch key {
+	case "employees":
+		view = []Permission{read("hr.employee", "hr.employees")}
+		edit = []Permission{
+			write("hr.employee", ActionCreate, "hr.employees"),
+			write("hr.employee", ActionUpdate, "hr.employees"),
+			write("hr.employee", ActionDelete, "hr.employees"),
+			write("hr.employee", ActionExport, "hr.employees"),
+			write("hr.employee", ActionInvite, "hr.employees"),
+		}
+	case "salary":
+		view = []Permission{read("hr.salary", "hr.salary")}
+		edit = []Permission{write("hr.salary", ActionUpdate, "hr.salary")}
+	case "organization":
+		view = []Permission{read("hr.org_unit", "hr.org_units")}
+		edit = []Permission{
+			write("hr.org_unit", ActionCreate, "hr.org_units"),
+			write("hr.org_unit", ActionUpdate, "hr.org_units"),
+			write("hr.employee", ActionUpdate, "hr.employees"),
+		}
+	case "leave-policy":
+		view = []Permission{
+			read("attendance.leave", "attendance.leave"),
+			read("attendance.clock", "attendance.clock"),
+			read("attendance.worksite", "attendance.worksites"),
+			read("attendance.shift", "attendance.shifts"),
+		}
+		edit = []Permission{
+			write("attendance.leave", ActionUpdate, "attendance.leave"),
+			write("attendance.worksite", ActionCreate, "attendance.worksites"),
+			write("attendance.worksite", ActionUpdate, "attendance.worksites"),
+			write("attendance.shift", ActionCreate, "attendance.shifts"),
+			write("attendance.shift", ActionUpdate, "attendance.shifts"),
+			write("attendance.shift_assignment", ActionCreate, "attendance.shift_assignments"),
+			write("attendance.correction", ActionApprove, "attendance.corrections"),
+			write("attendance.correction", ActionUpdate, "attendance.corrections"),
+		}
+	case "forms":
+		view = []Permission{
+			read("workflow.form_template", "workflow.forms"),
+			read("workflow.form_instance", "workflow.instances"),
+		}
+		edit = []Permission{
+			write("workflow.form_template", ActionCreate, "workflow.forms"),
+			write("workflow.form_template", ActionUpdate, "workflow.forms"),
+			write("workflow.form_template", ActionDelete, "workflow.forms"),
+			write("workflow.form_instance", ActionSubmit, "workflow.instances"),
+			write("workflow.form_instance", ActionUpdate, "workflow.instances"),
+			write("workflow.form_instance", ActionDelete, "workflow.instances"),
+			write("workflow.form_instance", ActionApprove, "workflow.instances"),
+		}
+	case "admins":
+		view = []Permission{
+			read("iam.permission_set", "iam.permission_sets"),
+			read("iam.permission_set_assignment", "iam.permission_sets"),
+		}
+		edit = []Permission{
+			write("iam.permission_set", ActionCreate, "iam.permission_sets"),
+			write("iam.permission_set", ActionUpdate, "iam.permission_sets"),
+			write("iam.permission_set_assignment", ActionCreate, "iam.permission_sets"),
+			write("iam.permission_set_assignment", ActionUpdate, "iam.permission_sets"),
+			write("iam.permission_set_assignment", ActionDelete, "iam.permission_sets"),
+		}
+	}
+	if mode == "edit" {
+		return append(view, edit...)
+	}
+	return view
+}
+
+func workspaceAdminPermission(resource string, action Action, menuKey string) Permission {
+	return Permission{Resource: resource, Action: action, Scope: ScopeAll, MenuKey: menuKey}
+}
+
+func workspaceAdminPermissionSetID(accountID string) string {
+	return "ps-workspace-admin-" + workspaceAdminSafeID(accountID)
+}
+
+func workspaceAdminAssignmentID(accountID string) string {
+	return "psa-workspace-admin-" + workspaceAdminSafeID(accountID)
+}
+
+func workspaceAdminSafeID(value string) string {
+	replacer := strings.NewReplacer(":", "-", "/", "-", "\\", "-", " ", "-", ".", "-")
+	value = strings.ToLower(strings.TrimSpace(replacer.Replace(value)))
+	if value == "" {
+		return "unknown"
+	}
+	return value
+}
+
+func platformFormColumns() []PlatformFormColumn {
+	return []PlatformFormColumn{
+		{Title: "人事考勤類", Emoji: "👥", Items: []PlatformFormItem{
+			{ID: "leave-request", Emoji: "🗓️", Title: "請假申請單", Desc: "特休 / 事假 / 病假 / 公假"},
+			{ID: "overtime-approval", Emoji: "⏰", Title: "加班核准申請單", Desc: "平日延時、假日加班皆可使用"},
+			{ID: "punch-fix", Emoji: "🕒", Title: "HR-005 補卡單", Desc: "漏打卡或打卡異常補登"},
+		}},
+		{Title: "人資相關", Emoji: "👥", Items: []PlatformFormItem{
+			{ID: "job-change", Emoji: "📋", Title: "人事/職務/薪資異動單", Desc: "異動職務、調薪、調動"},
+			{ID: "headcount-request", Emoji: "➕", Title: "iKala 人員增補申請單", Desc: "新增職缺與招募"},
+			{ID: "resignation", Emoji: "👋", Title: "離職及退休申請單", Desc: "離職、退休手續辦理"},
+		}},
+		{Title: "財會相關", Emoji: "💰", Items: []PlatformFormItem{
+			{ID: "expense-claim", Emoji: "💸", Title: "費用報支申請單", Desc: "日常費用核銷"},
+			{ID: "prepayment", Emoji: "💵", Title: "預支款申請單", Desc: "出差或專案預支款"},
+			{ID: "advance-reimburse", Emoji: "💳", Title: "員工代墊款請領清單", Desc: "員工代墊費用請領"},
+		}},
+		{Title: "行政相關", Emoji: "🧾", Items: []PlatformFormItem{
+			{ID: "travel-request", Emoji: "🛫", Title: "國內外出差申請表", Desc: "出差行程預先申請"},
+			{ID: "business-card", Emoji: "📇", Title: "名片申請單", Desc: "新印或補印名片"},
+			{ID: "memo", Emoji: "📝", Title: "簽呈", Desc: "通用簽呈"},
+		}},
+	}
+}
+
+func platformFormCategoryNames() []string {
+	columns := platformFormColumns()
+	out := make([]string, 0, len(columns))
+	for _, column := range columns {
+		out = append(out, column.Title)
+	}
+	return out
+}
+
+func platformFormCategory(templateKey string) string {
+	for _, column := range platformFormColumns() {
+		for _, item := range column.Items {
+			if item.ID == templateKey {
+				return column.Title
+			}
+		}
+	}
+	return "其他"
+}
+
+func platformTemplateFlow(schema map[string]any) string {
+	if stages, ok := platformDecodeSlice[PlatformFormBuilderStage](platformTemplateDesign(schema)["stages"]); ok {
+		return platformStageFlow(stages)
+	}
+	if flow, ok := schema["flow"].(string); ok && strings.TrimSpace(flow) != "" {
+		return flow
+	}
+	return "直屬主管 → HR"
+}
+
+func platformStageFlow(stages []PlatformFormBuilderStage) string {
+	labels := make([]string, 0, len(stages))
+	for _, stage := range stages {
+		if label := strings.TrimSpace(stage.Label); label != "" {
+			labels = append(labels, label)
+		}
+	}
+	if len(labels) == 0 {
+		return "—"
+	}
+	return strings.Join(labels, " → ")
+}
+
+func platformFormStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "approved":
+		return "approved"
+	case "rejected":
+		return "rejected"
+	case "cancelled", "canceled":
+		return "cancelled"
+	default:
+		return "reviewing"
+	}
+}
+
+func platformFormSummary(payload map[string]any) string {
+	if len(payload) == 0 {
+		return "已送出"
+	}
+	for _, key := range []string{"desc", "description", "subject", "reason"} {
+		if value, ok := payload[key].(string); ok && strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	if leaveType, ok := payload["leave_type"].(string); ok {
+		return "假別 " + leaveType
+	}
+	if leaveType, ok := payload["leaveType"].(string); ok {
+		return "假別 " + leaveType
+	}
+	return "已送出"
+}
+
+func clockTime(record *AttendanceClockRecord) *string {
+	if record == nil {
+		return nil
+	}
+	text := record.ClockedAt.Format("15:04")
+	return &text
+}
+
+func platformDateLabel(t time.Time) string {
+	return fmt.Sprintf("%s %s", t.Format(platformDateLayout), platformWeekday(t))
+}
+
+func platformWeekday(t time.Time) string {
+	names := []string{"週日", "週一", "週二", "週三", "週四", "週五", "週六"}
+	return names[int(t.Weekday())]
+}
+
+func platformTime(t time.Time) string {
+	if t.IsZero() {
+		return ""
+	}
+	return t.Format("2006/01/02 15:04")
+}
+
+func sameYearMonth(left, right time.Time) bool {
+	return !left.IsZero() && left.Year() == right.Year() && left.Month() == right.Month()
+}

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
@@ -768,6 +769,30 @@ func (s *Store) GetEmployeeImportSession(execCtx context.Context, tenantID, id s
 	return fromEmployeeImportSession(v), true, nil
 }
 
+func (s *Store) UpsertAttendancePolicy(execCtx context.Context, v domain.AttendancePolicy) error {
+	_, err := s.q.UpsertAttendancePolicy(execCtx, sqlc.UpsertAttendancePolicyParams{
+		ID:                 v.ID,
+		TenantID:           v.TenantID,
+		WorkTime:           mustJSON(v.WorkTime),
+		LeaveTypes:         mustJSON(v.LeaveTypes),
+		UpdatedByAccountID: v.UpdatedByAccountID,
+		CreatedAt:          timestamptz(v.CreatedAt),
+		UpdatedAt:          timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+func (s *Store) GetAttendancePolicy(execCtx context.Context, tenantID string) (domain.AttendancePolicy, bool, error) {
+	v, err := s.q.GetAttendancePolicy(tenantContext(execCtx, tenantID), tenantID)
+	if isNotFound(err) {
+		return domain.AttendancePolicy{}, false, nil
+	}
+	if err != nil {
+		return domain.AttendancePolicy{}, false, err
+	}
+	return fromAttendancePolicy(v), true, nil
+}
+
 func (s *Store) UpsertLeaveBalance(execCtx context.Context, v domain.LeaveBalance) error {
 	_, err := s.q.UpsertLeaveBalance(execCtx, sqlc.UpsertLeaveBalanceParams{
 		ID:             v.ID,
@@ -801,7 +826,7 @@ func (s *Store) ListLeaveBalances(execCtx context.Context, tenantID string) ([]d
 
 func (s *Store) ReserveLeaveBalance(execCtx context.Context, tenantID, employeeID, leaveType string, hours float64, updatedAt time.Time) (domain.LeaveBalance, bool, bool, error) {
 	leaveType = strings.TrimSpace(leaveType)
-	v, err := s.q.ReserveLeaveBalance(execCtx, sqlc.ReserveLeaveBalanceParams{
+	v, err := s.q.ReserveLeaveBalance(tenantContext(execCtx, tenantID), sqlc.ReserveLeaveBalanceParams{
 		TenantID:   tenantID,
 		EmployeeID: employeeID,
 		LeaveType:  leaveType,
@@ -826,8 +851,26 @@ func (s *Store) ReserveLeaveBalance(execCtx context.Context, tenantID, employeeI
 	return domain.LeaveBalance{}, false, false, nil
 }
 
+func (s *Store) ReleaseLeaveBalance(execCtx context.Context, tenantID, employeeID, leaveType string, hours float64, updatedAt time.Time) (domain.LeaveBalance, bool, error) {
+	leaveType = strings.TrimSpace(leaveType)
+	v, err := s.q.ReleaseLeaveBalance(tenantContext(execCtx, tenantID), sqlc.ReleaseLeaveBalanceParams{
+		TenantID:   tenantID,
+		EmployeeID: employeeID,
+		LeaveType:  leaveType,
+		Hours:      hours,
+		UpdatedAt:  timestamptz(updatedAt),
+	})
+	if isNotFound(err) {
+		return domain.LeaveBalance{}, false, nil
+	}
+	if err != nil {
+		return domain.LeaveBalance{}, false, err
+	}
+	return fromLeaveBalance(v), true, nil
+}
+
 func (s *Store) UpsertLeaveRequest(execCtx context.Context, v domain.LeaveRequest) error {
-	_, err := s.q.UpsertLeaveRequest(execCtx, sqlc.UpsertLeaveRequestParams{
+	_, err := s.q.UpsertLeaveRequest(tenantContext(execCtx, v.TenantID), sqlc.UpsertLeaveRequestParams{
 		ID:             v.ID,
 		TenantID:       v.TenantID,
 		EmployeeID:     v.EmployeeID,
@@ -844,7 +887,18 @@ func (s *Store) UpsertLeaveRequest(execCtx context.Context, v domain.LeaveReques
 }
 
 func (s *Store) GetLeaveRequest(execCtx context.Context, tenantID, id string) (domain.LeaveRequest, bool, error) {
-	v, err := s.q.GetLeaveRequest(execCtx, sqlc.GetLeaveRequestParams{TenantID: tenantID, ID: id})
+	v, err := s.q.GetLeaveRequest(tenantContext(execCtx, tenantID), sqlc.GetLeaveRequestParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.LeaveRequest{}, false, nil
+	}
+	if err != nil {
+		return domain.LeaveRequest{}, false, err
+	}
+	return fromLeaveRequest(v), true, nil
+}
+
+func (s *Store) GetLeaveRequestByFormInstanceID(execCtx context.Context, tenantID, formInstanceID string) (domain.LeaveRequest, bool, error) {
+	v, err := s.q.GetLeaveRequestByFormInstanceID(tenantContext(execCtx, tenantID), sqlc.GetLeaveRequestByFormInstanceIDParams{TenantID: tenantID, FormInstanceID: formInstanceID})
 	if isNotFound(err) {
 		return domain.LeaveRequest{}, false, nil
 	}
@@ -860,6 +914,45 @@ func (s *Store) ListLeaveRequests(execCtx context.Context, tenantID string) ([]d
 		return nil, err
 	}
 	return mapSlice(items, fromLeaveRequest), nil
+}
+
+func (s *Store) ListLeaveRequestsByQuery(execCtx context.Context, tenantID string, query domain.LeaveRequestQuery) ([]domain.LeaveRequest, error) {
+	params := leaveRequestQueryParams(tenantID, query)
+	items, err := s.q.ListLeaveRequestsByQuery(tenantContext(execCtx, tenantID), sqlc.ListLeaveRequestsByQueryParams{
+		TenantID:    params.TenantID,
+		EmployeeIds: params.EmployeeIds,
+		Status:      params.Status,
+		FromDate:    params.FromDate,
+		ToDate:      params.ToDate,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromLeaveRequest), nil
+}
+
+func (s *Store) ListLeaveRequestPageByQuery(execCtx context.Context, tenantID string, query domain.LeaveRequestQuery, page domain.PageRequest) ([]domain.LeaveRequest, int, error) {
+	page = utils.NormalizePageRequest(page)
+	countParams := leaveRequestQueryParams(tenantID, query)
+	total, err := s.q.CountLeaveRequestsByQuery(tenantContext(execCtx, tenantID), countParams)
+	if err != nil {
+		return nil, 0, err
+	}
+	listParams := sqlc.ListLeaveRequestPageByQueryParams{
+		TenantID:    countParams.TenantID,
+		EmployeeIds: countParams.EmployeeIds,
+		Status:      countParams.Status,
+		FromDate:    countParams.FromDate,
+		ToDate:      countParams.ToDate,
+		Sort:        page.Sort,
+		LimitCount:  int32(page.PageSize),
+		OffsetCount: int32((page.Page - 1) * page.PageSize),
+	}
+	items, err := s.q.ListLeaveRequestPageByQuery(tenantContext(execCtx, tenantID), listParams)
+	if err != nil {
+		return nil, 0, err
+	}
+	return mapSlice(items, fromLeaveRequest), int(total), nil
 }
 
 func (s *Store) UpsertAttendanceWorksite(execCtx context.Context, v domain.AttendanceWorksite) error {
@@ -984,6 +1077,7 @@ func (s *Store) FindEffectiveAttendanceShiftAssignment(execCtx context.Context, 
 	return fromAttendanceShiftAssignment(v), true, nil
 }
 
+// UpsertAttendanceClockRecord stores a clock attempt and maps accepted duplicates to domain conflicts.
 func (s *Store) UpsertAttendanceClockRecord(execCtx context.Context, v domain.AttendanceClockRecord) error {
 	_, err := s.q.UpsertAttendanceClockRecord(execCtx, sqlc.UpsertAttendanceClockRecordParams{
 		ID:                  v.ID,
@@ -1007,6 +1101,9 @@ func (s *Store) UpsertAttendanceClockRecord(execCtx context.Context, v domain.At
 		CorrectionRequestID: v.CorrectionRequestID,
 		CreatedAt:           timestamptz(v.CreatedAt),
 	})
+	if isUniqueConstraint(err, "attendance_clock_records_one_accepted_idx") {
+		return domain.Conflict("accepted clock record already exists")
+	}
 	return err
 }
 
@@ -1144,7 +1241,7 @@ func (s *Store) ListFormTemplates(execCtx context.Context, tenantID string) ([]d
 }
 
 func (s *Store) UpsertFormInstance(execCtx context.Context, v domain.FormInstance) error {
-	_, err := s.q.UpsertFormInstance(execCtx, sqlc.UpsertFormInstanceParams{
+	_, err := s.q.UpsertFormInstance(tenantContext(execCtx, v.TenantID), sqlc.UpsertFormInstanceParams{
 		ID:                 v.ID,
 		TenantID:           v.TenantID,
 		TemplateID:         v.TemplateID,
@@ -1159,7 +1256,7 @@ func (s *Store) UpsertFormInstance(execCtx context.Context, v domain.FormInstanc
 }
 
 func (s *Store) GetFormInstance(execCtx context.Context, tenantID, id string) (domain.FormInstance, bool, error) {
-	v, err := s.q.GetFormInstance(execCtx, sqlc.GetFormInstanceParams{TenantID: tenantID, ID: id})
+	v, err := s.q.GetFormInstance(tenantContext(execCtx, tenantID), sqlc.GetFormInstanceParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
 		return domain.FormInstance{}, false, nil
 	}
@@ -1175,6 +1272,50 @@ func (s *Store) ListFormInstances(execCtx context.Context, tenantID string) ([]d
 		return nil, err
 	}
 	return mapSlice(items, fromFormInstance), nil
+}
+
+func (s *Store) ListFormInstancesByQuery(execCtx context.Context, tenantID string, query domain.FormInstanceQuery) ([]domain.FormInstance, error) {
+	params := formInstanceQueryParams(tenantID, query)
+	items, err := s.q.ListFormInstancesByQuery(tenantContext(execCtx, tenantID), sqlc.ListFormInstancesByQueryParams{
+		TenantID:           params.TenantID,
+		Status:             params.Status,
+		TemplateID:         params.TemplateID,
+		TemplateKey:        params.TemplateKey,
+		ApplicantAccountID: params.ApplicantAccountID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromFormInstance), nil
+}
+
+func (s *Store) ListFormInstancePageByQuery(execCtx context.Context, tenantID string, query domain.FormInstanceQuery, page domain.PageRequest) ([]domain.FormInstance, int, error) {
+	page = utils.NormalizePageRequest(page)
+	countParams := formInstanceQueryParams(tenantID, query)
+	total, err := s.q.CountFormInstancesByQuery(tenantContext(execCtx, tenantID), countParams)
+	if err != nil {
+		return nil, 0, err
+	}
+	listParams := sqlc.ListFormInstancePageByQueryParams{
+		TenantID:           countParams.TenantID,
+		Status:             countParams.Status,
+		TemplateID:         countParams.TemplateID,
+		TemplateKey:        countParams.TemplateKey,
+		ApplicantAccountID: countParams.ApplicantAccountID,
+		Sort:               page.Sort,
+		LimitCount:         int32(page.PageSize),
+		OffsetCount:        int32((page.Page - 1) * page.PageSize),
+	}
+	items, err := s.q.ListFormInstancePageByQuery(tenantContext(execCtx, tenantID), listParams)
+	if err != nil {
+		return nil, 0, err
+	}
+	return mapSlice(items, fromFormInstance), int(total), nil
+}
+
+// DeleteFormInstance removes a workflow form instance scoped by tenant.
+func (s *Store) DeleteFormInstance(execCtx context.Context, tenantID, id string) error {
+	return s.q.DeleteFormInstance(tenantContext(execCtx, tenantID), sqlc.DeleteFormInstanceParams{TenantID: tenantID, ID: id})
 }
 
 func (s *Store) UpsertKnowledgeArticle(execCtx context.Context, v domain.KnowledgeArticle) error {
@@ -1197,8 +1338,86 @@ func (s *Store) ListKnowledgeArticles(execCtx context.Context, tenantID string) 
 	return mapSlice(items, fromKnowledgeArticle), nil
 }
 
+func (s *Store) UpsertPlatformTaskItem(execCtx context.Context, v domain.PlatformTaskRecordItem) error {
+	_, err := s.q.UpsertPlatformTaskItem(tenantContext(execCtx, v.TenantID), sqlc.UpsertPlatformTaskItemParams{
+		ID:        v.ID,
+		TenantID:  v.TenantID,
+		AccountID: v.AccountID,
+		WorkDate:  v.WorkDate,
+		Title:     v.Title,
+		Category:  v.Category,
+		Product:   v.Product,
+		Hours:     v.Hours,
+		Note:      v.Note,
+		CreatedAt: timestamptz(v.CreatedAt),
+		UpdatedAt: timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+func (s *Store) GetPlatformTaskItem(execCtx context.Context, tenantID, accountID, id string) (domain.PlatformTaskRecordItem, bool, error) {
+	v, err := s.q.GetPlatformTaskItem(tenantContext(execCtx, tenantID), sqlc.GetPlatformTaskItemParams{TenantID: tenantID, AccountID: accountID, ID: id})
+	if isNotFound(err) {
+		return domain.PlatformTaskRecordItem{}, false, nil
+	}
+	if err != nil {
+		return domain.PlatformTaskRecordItem{}, false, err
+	}
+	return fromPlatformTaskItem(v), true, nil
+}
+
+func (s *Store) ListPlatformTaskItems(execCtx context.Context, tenantID, accountID string) ([]domain.PlatformTaskRecordItem, error) {
+	items, err := s.q.ListPlatformTaskItems(tenantContext(execCtx, tenantID), sqlc.ListPlatformTaskItemsParams{TenantID: tenantID, AccountID: accountID})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromPlatformTaskItem), nil
+}
+
+func (s *Store) DeletePlatformTaskItem(execCtx context.Context, tenantID, accountID, id string) error {
+	return s.q.DeletePlatformTaskItem(tenantContext(execCtx, tenantID), sqlc.DeletePlatformTaskItemParams{TenantID: tenantID, AccountID: accountID, ID: id})
+}
+
+func (s *Store) UpsertPlatformTaskTodo(execCtx context.Context, v domain.PlatformTaskTodoRecord) error {
+	_, err := s.q.UpsertPlatformTaskTodo(tenantContext(execCtx, v.TenantID), sqlc.UpsertPlatformTaskTodoParams{
+		ID:                  v.ID,
+		TenantID:            v.TenantID,
+		AccountID:           v.AccountID,
+		Text:                v.Text,
+		DueDate:             v.DueDate,
+		Status:              v.Status,
+		ConvertedTaskItemID: v.ConvertedTaskItemID,
+		CreatedAt:           timestamptz(v.CreatedAt),
+		UpdatedAt:           timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+func (s *Store) GetPlatformTaskTodo(execCtx context.Context, tenantID, accountID, id string) (domain.PlatformTaskTodoRecord, bool, error) {
+	v, err := s.q.GetPlatformTaskTodo(tenantContext(execCtx, tenantID), sqlc.GetPlatformTaskTodoParams{TenantID: tenantID, AccountID: accountID, ID: id})
+	if isNotFound(err) {
+		return domain.PlatformTaskTodoRecord{}, false, nil
+	}
+	if err != nil {
+		return domain.PlatformTaskTodoRecord{}, false, err
+	}
+	return fromPlatformTaskTodo(v), true, nil
+}
+
+func (s *Store) ListPlatformTaskTodos(execCtx context.Context, tenantID, accountID string) ([]domain.PlatformTaskTodoRecord, error) {
+	items, err := s.q.ListPlatformTaskTodos(tenantContext(execCtx, tenantID), sqlc.ListPlatformTaskTodosParams{TenantID: tenantID, AccountID: accountID})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromPlatformTaskTodo), nil
+}
+
+func (s *Store) DeletePlatformTaskTodo(execCtx context.Context, tenantID, accountID, id string) error {
+	return s.q.DeletePlatformTaskTodo(tenantContext(execCtx, tenantID), sqlc.DeletePlatformTaskTodoParams{TenantID: tenantID, AccountID: accountID, ID: id})
+}
+
 func (s *Store) UpsertAgentRun(execCtx context.Context, v domain.AgentRun) error {
-	_, err := s.q.UpsertAgentRun(execCtx, sqlc.UpsertAgentRunParams{
+	_, err := s.q.UpsertAgentRun(tenantContext(execCtx, v.TenantID), sqlc.UpsertAgentRunParams{
 		ID:        v.ID,
 		TenantID:  v.TenantID,
 		AccountID: v.AccountID,
@@ -1214,7 +1433,7 @@ func (s *Store) UpsertAgentRun(execCtx context.Context, v domain.AgentRun) error
 }
 
 func (s *Store) GetAgentRun(execCtx context.Context, tenantID, id string) (domain.AgentRun, bool, error) {
-	v, err := s.q.GetAgentRun(execCtx, sqlc.GetAgentRunParams{TenantID: tenantID, ID: id})
+	v, err := s.q.GetAgentRun(tenantContext(execCtx, tenantID), sqlc.GetAgentRunParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
 		return domain.AgentRun{}, false, nil
 	}
@@ -1226,6 +1445,14 @@ func (s *Store) GetAgentRun(execCtx context.Context, tenantID, id string) (domai
 
 func (s *Store) ListAgentRuns(execCtx context.Context, tenantID string) ([]domain.AgentRun, error) {
 	items, err := s.q.ListAgentRuns(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAgentRun), nil
+}
+
+func (s *Store) ListAgentRunsByAccount(execCtx context.Context, tenantID, accountID string) ([]domain.AgentRun, error) {
+	items, err := s.q.ListAgentRunsByAccount(tenantContext(execCtx, tenantID), sqlc.ListAgentRunsByAccountParams{TenantID: tenantID, AccountID: accountID})
 	if err != nil {
 		return nil, err
 	}
@@ -1250,8 +1477,27 @@ func (s *Store) ListAgentRunPage(execCtx context.Context, tenantID string, page 
 	return mapSlice(items, fromAgentRun), int(total), nil
 }
 
+func (s *Store) ListAgentRunPageByAccount(execCtx context.Context, tenantID, accountID string, page domain.PageRequest) ([]domain.AgentRun, int, error) {
+	page = utils.NormalizePageRequest(page)
+	total, err := s.q.CountAgentRunsByAccount(tenantContext(execCtx, tenantID), sqlc.CountAgentRunsByAccountParams{TenantID: tenantID, AccountID: accountID})
+	if err != nil {
+		return nil, 0, err
+	}
+	items, err := s.q.ListAgentRunsPageByAccount(tenantContext(execCtx, tenantID), sqlc.ListAgentRunsPageByAccountParams{
+		TenantID:    tenantID,
+		AccountID:   accountID,
+		Sort:        page.Sort,
+		LimitCount:  int32(page.PageSize),
+		OffsetCount: int32((page.Page - 1) * page.PageSize),
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return mapSlice(items, fromAgentRun), int(total), nil
+}
+
 func (s *Store) AppendAuditLog(execCtx context.Context, v domain.AuditLog) error {
-	_, err := s.q.AppendAuditLog(execCtx, sqlc.AppendAuditLogParams{
+	_, err := s.q.AppendAuditLog(tenantContext(execCtx, v.TenantID), sqlc.AppendAuditLogParams{
 		ID:             v.ID,
 		TenantID:       v.TenantID,
 		ActorAccountID: v.ActorAccountID,
@@ -1281,7 +1527,7 @@ func (s *Store) ListAuditLogPage(execCtx context.Context, tenantID string, page 
 	if err != nil {
 		return nil, 0, err
 	}
-	items, err := s.q.ListAuditLogsPage(execCtx, sqlc.ListAuditLogsPageParams{
+	items, err := s.q.ListAuditLogsPage(tenantContext(execCtx, tenantID), sqlc.ListAuditLogsPageParams{
 		TenantID:    tenantID,
 		Sort:        page.Sort,
 		LimitCount:  int32(page.PageSize),
@@ -1416,6 +1662,12 @@ func isNotFound(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
 }
 
+// isUniqueConstraint identifies a specific PostgreSQL unique-constraint violation.
+func isUniqueConstraint(err error, constraint string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == constraint
+}
+
 func timestamptz(t time.Time) pgtype.Timestamptz {
 	if t.IsZero() {
 		return pgtype.Timestamptz{}
@@ -1441,6 +1693,36 @@ func textArray(values []string) []string {
 	out := utils.CopyStrings(values)
 	if out == nil {
 		return []string{}
+	}
+	return out
+}
+
+func leaveRequestQueryParams(tenantID string, query domain.LeaveRequestQuery) sqlc.CountLeaveRequestsByQueryParams {
+	return sqlc.CountLeaveRequestsByQueryParams{
+		TenantID:    tenantID,
+		EmployeeIds: textArray(trimmedStrings(query.EmployeeIDs)),
+		Status:      strings.TrimSpace(query.Status),
+		FromDate:    strings.TrimSpace(query.FromDate),
+		ToDate:      strings.TrimSpace(query.ToDate),
+	}
+}
+
+func formInstanceQueryParams(tenantID string, query domain.FormInstanceQuery) sqlc.CountFormInstancesByQueryParams {
+	return sqlc.CountFormInstancesByQueryParams{
+		TenantID:           tenantID,
+		Status:             strings.TrimSpace(query.Status),
+		TemplateID:         strings.TrimSpace(query.TemplateID),
+		TemplateKey:        strings.TrimSpace(query.TemplateKey),
+		ApplicantAccountID: strings.TrimSpace(query.ApplicantAccountID),
+	}
+}
+
+func trimmedStrings(values []string) []string {
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			out = append(out, trimmed)
+		}
 	}
 	return out
 }
@@ -1491,6 +1773,28 @@ func jsonEmployeeImportRows(b []byte) []domain.EmployeeImportRow {
 		return nil
 	}
 	var out []domain.EmployeeImportRow
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+func jsonAttendancePolicyWorkTime(b []byte) domain.AttendancePolicyWorkTime {
+	if len(b) == 0 {
+		return domain.AttendancePolicyWorkTime{}
+	}
+	var out domain.AttendancePolicyWorkTime
+	if err := json.Unmarshal(b, &out); err != nil {
+		return domain.AttendancePolicyWorkTime{}
+	}
+	return out
+}
+
+func jsonAttendanceLeaveTypes(b []byte) []domain.AttendanceLeaveType {
+	if len(b) == 0 {
+		return nil
+	}
+	var out []domain.AttendanceLeaveType
 	if err := json.Unmarshal(b, &out); err != nil {
 		return nil
 	}
@@ -1726,6 +2030,18 @@ func fromOutboxEvent(v sqlc.OutboxEvent) domain.OutboxEvent {
 	}
 }
 
+func fromAttendancePolicy(v sqlc.AttendancePolicy) domain.AttendancePolicy {
+	return domain.AttendancePolicy{
+		ID:                 v.ID,
+		TenantID:           v.TenantID,
+		WorkTime:           jsonAttendancePolicyWorkTime(v.WorkTime),
+		LeaveTypes:         jsonAttendanceLeaveTypes(v.LeaveTypes),
+		UpdatedByAccountID: v.UpdatedByAccountID,
+		CreatedAt:          timeFrom(v.CreatedAt),
+		UpdatedAt:          timeFrom(v.UpdatedAt),
+	}
+}
+
 func fromLeaveBalance(v sqlc.LeaveBalance) domain.LeaveBalance {
 	return domain.LeaveBalance{
 		ID:             v.ID,
@@ -1879,6 +2195,36 @@ func fromKnowledgeArticle(v sqlc.KnowledgeArticle) domain.KnowledgeArticle {
 		Content:   v.Content,
 		Tags:      utils.CopyStrings(v.Tags),
 		CreatedAt: timeFrom(v.CreatedAt),
+	}
+}
+
+func fromPlatformTaskItem(v sqlc.PlatformTaskItem) domain.PlatformTaskRecordItem {
+	return domain.PlatformTaskRecordItem{
+		ID:        v.ID,
+		TenantID:  v.TenantID,
+		AccountID: v.AccountID,
+		WorkDate:  v.WorkDate,
+		Title:     v.Title,
+		Category:  v.Category,
+		Product:   v.Product,
+		Hours:     v.Hours,
+		Note:      v.Note,
+		CreatedAt: timeFrom(v.CreatedAt),
+		UpdatedAt: timeFrom(v.UpdatedAt),
+	}
+}
+
+func fromPlatformTaskTodo(v sqlc.PlatformTaskTodo) domain.PlatformTaskTodoRecord {
+	return domain.PlatformTaskTodoRecord{
+		ID:                  v.ID,
+		TenantID:            v.TenantID,
+		AccountID:           v.AccountID,
+		Text:                v.Text,
+		DueDate:             v.DueDate,
+		Status:              v.Status,
+		ConvertedTaskItemID: v.ConvertedTaskItemID,
+		CreatedAt:           timeFrom(v.CreatedAt),
+		UpdatedAt:           timeFrom(v.UpdatedAt),
 	}
 }
 

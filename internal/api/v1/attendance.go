@@ -23,6 +23,7 @@ func (c AttendanceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	attendance.GET("/leave-requests", c.routes.Handle("attendance.leave", "read", c.listLeaveRequests))
 	attendance.POST("/leave-requests", c.routes.Handle("attendance.leave", "create", c.createLeaveRequest))
 	attendance.GET("/policies/current", c.routes.Handle("attendance.leave", "read", c.currentPolicy))
+	attendance.PATCH("/policies/current", c.routes.Handle("attendance.leave", "update", c.updatePolicy))
 	attendance.GET("/worksites", c.routes.Handle("attendance.worksite", "read", c.listWorksites))
 	attendance.POST("/worksites", c.routes.Handle("attendance.worksite", "create", c.createWorksite))
 	attendance.PATCH("/worksites", c.routes.Handle("attendance.worksite", "update", c.updateWorksite))
@@ -82,6 +83,20 @@ func (c AttendanceCtrl) createLeaveRequest(w http.ResponseWriter, r *http.Reques
 // currentPolicy returns the current attendance policy projection.
 func (c AttendanceCtrl) currentPolicy(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.CurrentAttendancePolicy(ctx)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// updatePolicy persists the tenant attendance policy used by workspace settings.
+func (c AttendanceCtrl) updatePolicy(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.UpdateAttendancePolicyInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.UpdateAttendancePolicy(ctx, input)
 	if err != nil {
 		return err
 	}

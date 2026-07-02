@@ -1,6 +1,9 @@
 package domain
 
-import "time"
+import (
+	"strings"
+	"time"
+)
 
 // LeaveBalance tracks remaining leave hours for one employee and leave type.
 type LeaveBalance struct {
@@ -37,6 +40,14 @@ type CreateLeaveRequestInput struct {
 	Reason     string  `json:"reason,omitempty"`
 }
 
+// LeaveRequestQuery filters leave requests for scoped list and reporting reads.
+type LeaveRequestQuery struct {
+	EmployeeIDs []string `json:"employee_ids,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	FromDate    string   `json:"from_date,omitempty"`
+	ToDate      string   `json:"to_date,omitempty"`
+}
+
 // AttendanceWorksite defines one allowed geographic clock-in area.
 type AttendanceWorksite struct {
 	ID           string    `json:"id"`
@@ -51,7 +62,7 @@ type AttendanceWorksite struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
-// AttendanceShift defines same-day clock-in and clock-out windows.
+// AttendanceShift defines clock-in and clock-out windows, including overnight shifts.
 type AttendanceShift struct {
 	ID                     string    `json:"id"`
 	TenantID               string    `json:"tenant_id"`
@@ -142,6 +153,17 @@ type AttendancePolicyResponse struct {
 	LeaveTypes []AttendanceLeaveType    `json:"leave_types"`
 }
 
+// AttendancePolicy stores the tenant-level policy behind the attendance settings page.
+type AttendancePolicy struct {
+	ID                 string                   `json:"id"`
+	TenantID           string                   `json:"tenant_id"`
+	WorkTime           AttendancePolicyWorkTime `json:"work_time"`
+	LeaveTypes         []AttendanceLeaveType    `json:"leave_types"`
+	UpdatedByAccountID string                   `json:"updated_by_account_id,omitempty"`
+	CreatedAt          time.Time                `json:"created_at"`
+	UpdatedAt          time.Time                `json:"updated_at"`
+}
+
 // AttendancePolicyWorkTime contains working hours, weekends, and calculation-cycle options.
 type AttendancePolicyWorkTime struct {
 	StandardStart     string   `json:"standard_start"`
@@ -164,6 +186,34 @@ type AttendanceLeaveType struct {
 	Quota string `json:"quota"`
 	Rule  string `json:"rule"`
 	Proof string `json:"proof"`
+}
+
+// UpdateAttendancePolicyInput carries the editable attendance settings from workspace.
+type UpdateAttendancePolicyInput struct {
+	WorkTime   AttendancePolicyWorkTime `json:"work_time"`
+	LeaveTypes []AttendanceLeaveType    `json:"leave_types"`
+}
+
+// Validate rejects incomplete attendance policies before service-layer normalization.
+func (in UpdateAttendancePolicyInput) Validate() error {
+	if strings.TrimSpace(in.WorkTime.StandardStart) == "" || strings.TrimSpace(in.WorkTime.StandardEnd) == "" {
+		return BadRequest("standard_start and standard_end are required")
+	}
+	if strings.TrimSpace(in.WorkTime.BreakStart) == "" || strings.TrimSpace(in.WorkTime.BreakEnd) == "" {
+		return BadRequest("break_start and break_end are required")
+	}
+	if strings.TrimSpace(in.WorkTime.Weekend) == "" || strings.TrimSpace(in.WorkTime.CycleStart) == "" || strings.TrimSpace(in.WorkTime.CycleEnd) == "" {
+		return BadRequest("weekend, cycle_start and cycle_end are required")
+	}
+	if len(in.LeaveTypes) == 0 {
+		return BadRequest("leave_types is required")
+	}
+	for _, item := range in.LeaveTypes {
+		if strings.TrimSpace(item.Code) == "" || strings.TrimSpace(item.Name) == "" {
+			return BadRequest("leave type code and name are required")
+		}
+	}
+	return nil
 }
 
 // CreateAttendanceWorksiteInput carries the payload for creating a worksite.

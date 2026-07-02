@@ -3,6 +3,7 @@ package config_test
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"nexus-pro-be/internal/config"
 )
@@ -89,6 +90,64 @@ func TestMinIOObjectStoreConfig(t *testing.T) {
 	}
 	if !cfg.ObjectStoreCreateBucket {
 		t.Fatal("expected OBJECT_STORE_CREATE_BUCKET to be true")
+	}
+}
+
+func TestEHRMSConfig(t *testing.T) {
+	t.Setenv("EHRMS_BASE_URL", "https://ehrms.example")
+	t.Setenv("EHRMS_API_KEY", "test-key")
+	t.Setenv("EHRMS_SYNC_ENABLED", "true")
+	t.Setenv("EHRMS_SYNC_INTERVAL", "12h")
+	t.Setenv("EHRMS_SYNC_MODE", "upsert")
+	t.Setenv("EHRMS_SYNC_TENANT_ID", "tenant-1")
+	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
+	t.Setenv("EHRMS_SYNC_RUN_ON_START", "true")
+
+	cfg, err := config.LoadE()
+	if err != nil {
+		t.Fatalf("expected eHRMS config to load, got %v", err)
+	}
+	if cfg.EHRMSBaseURL != "https://ehrms.example" || cfg.EHRMSAPIKey != "test-key" {
+		t.Fatalf("unexpected eHRMS config: %+v", cfg)
+	}
+	if !cfg.EHRMSSyncEnabled || cfg.EHRMSSyncInterval != 12*time.Hour || cfg.EHRMSSyncMode != "upsert" || cfg.EHRMSSyncTenantID != "tenant-1" || cfg.EHRMSSyncAccountID != "acct-1" || !cfg.EHRMSSyncRunOnStart {
+		t.Fatalf("unexpected eHRMS sync config: %+v", cfg)
+	}
+}
+
+func TestEHRMSConfigRequiresURLAndKeyTogether(t *testing.T) {
+	t.Setenv("EHRMS_BASE_URL", "https://ehrms.example")
+	t.Setenv("EHRMS_API_KEY", "")
+
+	_, err := config.LoadE()
+	if err == nil || !strings.Contains(err.Error(), "EHRMS_API_KEY is required") {
+		t.Fatalf("expected missing EHRMS_API_KEY error, got %v", err)
+	}
+}
+
+func TestEHRMSSyncConfigRequiresServiceActor(t *testing.T) {
+	t.Setenv("EHRMS_BASE_URL", "https://ehrms.example")
+	t.Setenv("EHRMS_API_KEY", "test-key")
+	t.Setenv("EHRMS_SYNC_ENABLED", "true")
+
+	_, err := config.LoadE()
+	if err == nil || !strings.Contains(err.Error(), "EHRMS_SYNC_TENANT_ID is required") || !strings.Contains(err.Error(), "EHRMS_SYNC_ACCOUNT_ID is required") {
+		t.Fatalf("expected eHRMS sync actor errors, got %v", err)
+	}
+}
+
+func TestEHRMSSyncConfigValidatesIntervalAndMode(t *testing.T) {
+	t.Setenv("EHRMS_BASE_URL", "https://ehrms.example")
+	t.Setenv("EHRMS_API_KEY", "test-key")
+	t.Setenv("EHRMS_SYNC_ENABLED", "true")
+	t.Setenv("EHRMS_SYNC_INTERVAL", "soon")
+	t.Setenv("EHRMS_SYNC_MODE", "merge")
+	t.Setenv("EHRMS_SYNC_TENANT_ID", "tenant-1")
+	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
+
+	_, err := config.LoadE()
+	if err == nil || !strings.Contains(err.Error(), "EHRMS_SYNC_INTERVAL must be a positive duration") || !strings.Contains(err.Error(), "EHRMS_SYNC_MODE must be create, update, or upsert") {
+		t.Fatalf("expected eHRMS sync interval/mode errors, got %v", err)
 	}
 }
 

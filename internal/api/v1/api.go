@@ -22,6 +22,7 @@ type API struct {
 	iam                 service.IAMFacade
 	hr                  service.HRFacade
 	attendance          service.AttendanceFacade
+	platform            service.PlatformFacade
 	workspace           service.WorkspaceFacade
 	workflow            service.WorkflowFacade
 	agent               service.AgentFacade
@@ -83,6 +84,7 @@ func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
 		api.iam = app.IAM()
 		api.hr = app.HR()
 		api.attendance = app.Attendance()
+		api.platform = app.Platform()
 		api.workspace = app.Workspace()
 		api.workflow = app.Workflow()
 		api.agent = app.Agent()

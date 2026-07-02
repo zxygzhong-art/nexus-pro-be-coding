@@ -54,6 +54,8 @@ const (
 	ErrorCodeImportValidation ErrorCode = 30018
 	// ErrorCodeUnauthorized indicates authenticated tenant or account context is missing or invalid.
 	ErrorCodeUnauthorized ErrorCode = 10030
+	// ErrorCodeAccountInactive indicates the authenticated account is disabled or not active.
+	ErrorCodeAccountInactive ErrorCode = 10031
 	// ErrorCodeForbidden is the generic authorization denial fallback.
 	ErrorCodeForbidden ErrorCode = 20040
 	// ErrorCodePermissionMissing indicates no matching permission allowed the operation.
@@ -95,6 +97,8 @@ func appErrorCode(kind string) ErrorCode {
 
 func reasonErrorCode(reason string) (ErrorCode, bool) {
 	switch reason {
+	case "account_inactive":
+		return ErrorCodeAccountInactive, true
 	case "permission_missing":
 		return ErrorCodePermissionMissing, true
 	case "menu_denied":

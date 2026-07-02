@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -161,11 +162,55 @@ func TestOIDCProviderAuthorizationURLIncludesState(t *testing.T) {
 		RedirectURL:  "https://app.example/auth/callback",
 	}, server.Client())
 
-	authURL, err := provider.AuthorizationURL("signed-state")
+	authURL, err := provider.AuthorizationURL(context.Background(), "signed-state")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !strings.Contains(authURL, "state=signed-state") || !strings.Contains(authURL, "client_id=nexus-client") {
 		t.Fatalf("unexpected authorization URL: %s", authURL)
 	}
+}
+
+func TestOIDCProviderAuthorizationURLUsesRequestContext(t *testing.T) {
+	client := &http.Client{Transport: oidcContextTransport{t: t}}
+	provider := platformauth.NewOIDCProvider(platformauth.OIDCProviderConfig{
+		Code:         "google",
+		IssuerURL:    "https://issuer.example",
+		ClientID:     "nexus-client",
+		ClientSecret: "secret",
+		RedirectURL:  "https://app.example/auth/callback",
+	}, client)
+	ctx := context.WithValue(context.Background(), oidcContextMarkerKey{}, "present")
+
+	authURL, err := provider.AuthorizationURL(ctx, "signed-state")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(authURL, "state=signed-state") {
+		t.Fatalf("unexpected authorization URL: %s", authURL)
+	}
+}
+
+type oidcContextMarkerKey struct{}
+
+type oidcContextTransport struct {
+	t *testing.T
+}
+
+func (t oidcContextTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	t.t.Helper()
+	if got := req.Context().Value(oidcContextMarkerKey{}); got != "present" {
+		t.t.Fatalf("expected authorization URL metadata request to use caller context, got %v", got)
+	}
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(`{
+			"issuer":"https://issuer.example",
+			"authorization_endpoint":"https://issuer.example/auth",
+			"token_endpoint":"https://issuer.example/token",
+			"jwks_uri":"https://issuer.example/jwks"
+		}`)),
+		Request: req,
+	}, nil
 }

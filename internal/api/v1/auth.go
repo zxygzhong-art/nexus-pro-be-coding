@@ -33,7 +33,7 @@ func (c AuthCtrl) authorizeOIDC(ctx *gin.Context) {
 		TenantID:  strings.TrimSpace(ctx.Query("tenant_id")),
 		ReturnURL: strings.TrimSpace(ctx.Query("return_url")),
 	}
-	result, err := c.svc.OIDCAuthorizationURL(provider, input)
+	result, err := c.svc.OIDCAuthorizationURL(ctx.Request.Context(), provider, input)
 	if err != nil {
 		c.api.writeError(ctx.Writer, ctx.Request, err)
 		return

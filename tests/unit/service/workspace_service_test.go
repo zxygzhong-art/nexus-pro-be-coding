@@ -82,6 +82,39 @@ func TestWorkspaceAttendanceBuildsLeaveAndClockMatrices(t *testing.T) {
 	}
 }
 
+// TestPlatformWorkspaceEmployeesFiltersAndNormalizesStatus verifies the FE table contract.
+func TestPlatformWorkspaceEmployeesFiltersAndNormalizesStatus(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-hr", TenantID: "tenant-1", Name: "人力資源部", Path: []string{"ou-hr"}, CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-sales", TenantID: "tenant-1", Name: "業務部", Path: []string{"ou-sales"}, CreatedAt: now})
+	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-active", EmployeeNo: "E001", Name: "Active HR", CompanyEmail: "active@example.com", OrgUnitID: "ou-hr", Position: "HRBP", Status: "active", EmploymentStatus: "active", CreatedAt: now})
+	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-probation", EmployeeNo: "E002", Name: "Probation HR", CompanyEmail: "probation@example.com", OrgUnitID: "ou-hr", Position: "Recruiter", Status: "probation", EmploymentStatus: "probation", CreatedAt: now.Add(time.Minute)})
+	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-onboarding", EmployeeNo: "E003", Name: "Onboarding Sales", CompanyEmail: "onboarding@example.com", OrgUnitID: "ou-sales", Position: "AE", Status: "onboarding", EmploymentStatus: "onboarding", CreatedAt: now.Add(2 * time.Minute)})
+	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-resigned", EmployeeNo: "E004", Name: "Resigned HR", CompanyEmail: "resigned@example.com", OrgUnitID: "ou-hr", Position: "Former HR", Status: "resigned", EmploymentStatus: "resigned", CreatedAt: now.Add(3 * time.Minute)})
+
+	activeHR, err := svc.Platform().WorkspaceEmployees(ctx, domain.PlatformWorkspaceEmployeesQuery{DepartmentID: "ou-hr", Status: "在職"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(activeHR.Employees) != 2 {
+		t.Fatalf("expected two active HR rows, got %+v", activeHR.Employees)
+	}
+	for _, item := range activeHR.Employees {
+		if item.Status != "在職" {
+			t.Fatalf("expected active HR row status to match FE enum, got %+v", item)
+		}
+	}
+
+	onboarding, err := svc.Platform().WorkspaceEmployees(ctx, domain.PlatformWorkspaceEmployeesQuery{Status: "待加入", Keyword: "sales"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(onboarding.Employees) != 1 || onboarding.Employees[0].ID != "E003" || onboarding.Employees[0].Status != "待加入" {
+		t.Fatalf("unexpected onboarding filter result: %+v", onboarding.Employees)
+	}
+}
+
 // TestCurrentAttendancePolicyReturnsDefaultCatalog verifies the policy read endpoint contract.
 func TestCurrentAttendancePolicyReturnsDefaultCatalog(t *testing.T) {
 	_, svc, ctx := newWorkspaceFixture(t)
@@ -97,13 +130,56 @@ func TestCurrentAttendancePolicyReturnsDefaultCatalog(t *testing.T) {
 	}
 }
 
+// TestUpdateAttendancePolicyPersistsWorkspaceSettings verifies saved policy rows feed later reads and workspace aggregation.
+func TestUpdateAttendancePolicyPersistsWorkspaceSettings(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	ctx.ApprovalConfirmed = true
+	input := domain.UpdateAttendancePolicyInput{
+		WorkTime: domain.AttendancePolicyWorkTime{
+			StandardStart: "08:30",
+			StandardEnd:   "17:30",
+			BreakStart:    "12:30",
+			BreakEnd:      "13:30",
+			Weekend:       "週日",
+			CycleStart:    "5 日",
+			CycleEnd:      "次月 4 日",
+		},
+		LeaveTypes: []domain.AttendanceLeaveType{
+			{Code: "特", Name: "特休假", Quota: "20 天 / 年", Rule: "可遞延一年", Proof: "—"},
+			{Code: "病", Name: "全薪病假", Quota: "30 天 / 年", Rule: "無累計", Proof: "診斷證明"},
+		},
+	}
+
+	got, err := svc.Attendance().UpdateAttendancePolicy(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.WorkTime.StandardStart != "08:30" || got.WorkTime.Weekend != "週日" || len(got.LeaveTypes) != 2 {
+		t.Fatalf("unexpected updated policy: %+v", got)
+	}
+	stored, ok, err := store.GetAttendancePolicy(context.Background(), "tenant-1")
+	if err != nil || !ok {
+		t.Fatalf("policy was not stored: ok=%v err=%v", ok, err)
+	}
+	if stored.UpdatedByAccountID != "acct-1" || stored.WorkTime.CycleEnd != "次月 4 日" {
+		t.Fatalf("unexpected stored policy: %+v", stored)
+	}
+	workspace, err := svc.Platform().Workspace(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workspace.LeavePolicy.WorkTime.StandardStart != "08:30" || workspace.LeavePolicy.LeaveTypes[0].Quota != "20 天 / 年" {
+		t.Fatalf("workspace did not project updated policy: %+v", workspace.LeavePolicy)
+	}
+}
+
 // TestWorkspaceAdminsProjectsIAMAssignments verifies IAM grants become administrator rows and candidates.
 func TestWorkspaceAdminsProjectsIAMAssignments(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
 	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
 	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-hr", TenantID: "tenant-1", Name: "人力資源部", Path: []string{"ou-hr"}, CreatedAt: now})
-	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{ID: "ps-reader", TenantID: "tenant-1", Name: "Reader", Permissions: []domain.Permission{{Resource: "iam.permission_set_assignment", Action: "read", Scope: "all"}}, CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{ID: "ps-reader", TenantID: "tenant-1", Name: "Reader", Permissions: []domain.Permission{{Resource: "iam.permission_set_assignment", Action: "read", Scope: "all"}, {Resource: "hr.employee", Action: "read", Scope: "all"}}, CreatedAt: now})
 	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{ID: "ps-hr-admin", TenantID: "tenant-1", Name: "HR Admin", Permissions: []domain.Permission{{Resource: "hr.employee", Action: "update", Scope: "all"}, {Resource: "attendance.leave", Action: "read", Scope: "all"}, {Resource: "iam.permission_set_assignment", Action: "read", Scope: "all"}}, CreatedAt: now})
 	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-reader", EmployeeNo: "IKL001", Name: "王偉", OrgUnitID: "ou-hr", Position: "HR Director", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
 	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-target", EmployeeNo: "IKL002", Name: "張琪", OrgUnitID: "ou-hr", Position: "HR Manager", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
@@ -129,6 +205,67 @@ func TestWorkspaceAdminsProjectsIAMAssignments(t *testing.T) {
 	}
 	if len(got.Candidates) != 1 || got.Candidates[0].AccountID != "acct-candidate" {
 		t.Fatalf("unexpected candidates: %+v", got.Candidates)
+	}
+}
+
+// TestWorkspaceAdminsRespectsHRDataScope keeps IAM admin projection inside the caller's HR visibility.
+func TestWorkspaceAdminsRespectsHRDataScope(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-hr", TenantID: "tenant-1", Name: "人力資源部", Path: []string{"ou-hr"}, CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{ID: "ps-reader", TenantID: "tenant-1", Name: "Reader", Permissions: []domain.Permission{{Resource: "iam.permission_set_assignment", Action: "read", Scope: "all"}, {Resource: "hr.employee", Action: "read", Scope: "self"}}, CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{ID: "ps-hr-admin", TenantID: "tenant-1", Name: "HR Admin", Permissions: []domain.Permission{{Resource: "hr.employee", Action: "update", Scope: "all"}, {Resource: "iam.permission_set_assignment", Action: "read", Scope: "all"}}, CreatedAt: now})
+	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-reader", EmployeeNo: "IKL001", Name: "王偉", OrgUnitID: "ou-hr", Position: "HR Director", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-target", EmployeeNo: "IKL002", Name: "張琪", OrgUnitID: "ou-hr", Position: "HR Manager", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-candidate", EmployeeNo: "IKL003", Name: "陳俊", OrgUnitID: "ou-hr", Position: "Recruiter", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-reader", TenantID: "tenant-1", EmployeeID: "emp-reader", Status: "active", DirectPermissionSetIDs: []string{"ps-reader"}, CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-target", TenantID: "tenant-1", EmployeeID: "emp-target", Status: "active", CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-candidate", TenantID: "tenant-1", EmployeeID: "emp-candidate", Status: "active", CreatedAt: now})
+	_ = store.UpsertPermissionSetAssignment(context.Background(), domain.PermissionSetAssignment{ID: "psa-target", TenantID: "tenant-1", PrincipalType: "account", PrincipalID: "acct-target", PermissionSetID: "ps-hr-admin", Effect: "allow", CreatedAt: now})
+
+	got, err := service.New(store).Workspace().WorkspaceAdmins(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-reader"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, admin := range got.Admins {
+		if admin.AccountID == "acct-target" || admin.AccountID == "acct-candidate" {
+			t.Fatalf("admin projection leaked out-of-scope account: %+v", got.Admins)
+		}
+	}
+	for _, candidate := range got.Candidates {
+		if candidate.AccountID == "acct-target" || candidate.AccountID == "acct-candidate" {
+			t.Fatalf("candidate projection leaked out-of-scope account: %+v", got.Candidates)
+		}
+	}
+}
+
+// TestPlatformWorkspaceRequiresWorkflowFormTemplateRead verifies aggregate form design keeps its own permission gate.
+func TestPlatformWorkspaceRequiresWorkflowFormTemplateRead(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workspace-no-form",
+		TenantID: "tenant-1",
+		Name:     "Workspace Without Form Design",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "read", Scope: "all"},
+			{Resource: "attendance.leave", Action: "read", Scope: "all"},
+			{Resource: "iam.permission_set_assignment", Action: "read", Scope: "all"},
+			{Resource: "audit.log", Action: "read", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-workspace-no-form"}, CreatedAt: now})
+
+	_, err := service.New(store).Platform().Workspace(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	if err == nil {
+		t.Fatal("expected workspace aggregate to require workflow form template read")
+	}
+	appErr, ok := domain.AsAppError(err)
+	if !ok || appErr.Status != 403 || appErr.ReasonCode != "menu_denied" {
+		t.Fatalf("expected workflow form template read denial, got %v", err)
 	}
 }
 
@@ -167,6 +304,10 @@ func newWorkspaceFixture(t *testing.T) (*memory.Store, *service.Service, domain.
 			{Resource: "hr.org_unit", Action: "read", Scope: "all"},
 			{Resource: "attendance.clock", Action: "read", Scope: "all"},
 			{Resource: "attendance.leave", Action: "read", Scope: "all"},
+			{Resource: "attendance.leave", Action: "update", Scope: "all"},
+			{Resource: "iam.permission_set_assignment", Action: "read", Scope: "all"},
+			{Resource: "audit.log", Action: "read", Scope: "all"},
+			{Resource: "workflow.form_template", Action: "read", Scope: "all"},
 		},
 		CreatedAt: now,
 	})

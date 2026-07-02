@@ -130,6 +130,16 @@ func Unauthorized(message string) *AppError {
 	return E(401, "unauthorized", message)
 }
 
+// UnauthorizedReason returns a 401 application error with a machine-readable reason.
+func UnauthorizedReason(reasonCode, message string) *AppError {
+	err := Unauthorized(message)
+	err.ReasonCode = reasonCode
+	if code, ok := reasonErrorCode(reasonCode); ok {
+		err.PublicCode = code
+	}
+	return err
+}
+
 // Conflict returns a 409 application error.
 func Conflict(message string) *AppError {
 	return E(409, "conflict", message)

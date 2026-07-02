@@ -868,33 +868,6 @@ func normalizeEmployeeQuery(query EmployeeQuery) EmployeeQuery {
 	return query
 }
 
-func filterEmployeeQuery(items []Employee, query EmployeeQuery) []Employee {
-	out := make([]Employee, 0, len(items))
-	keyword := strings.ToLower(strings.TrimSpace(query.Keyword))
-	for _, item := range items {
-		if query.EmploymentStatus != string(EmployeeStatusDeleted) && employeeStatus(item) == string(EmployeeStatusDeleted) {
-			continue
-		}
-		if query.DepartmentID != "" && item.OrgUnitID != query.DepartmentID {
-			continue
-		}
-		if query.EmploymentStatus != "" && employeeStatus(item) != query.EmploymentStatus {
-			continue
-		}
-		if query.Category != "" && item.Category != query.Category {
-			continue
-		}
-		if keyword != "" {
-			haystack := strings.ToLower(strings.Join([]string{item.Name, item.CompanyEmail, item.PersonalEmail, item.EmployeeNo, item.Phone}, " "))
-			if !strings.Contains(haystack, keyword) {
-				continue
-			}
-		}
-		out = append(out, item)
-	}
-	return out
-}
-
 func sortEmployees(items []Employee, sortKey string) {
 	sort.SliceStable(items, func(i, j int) bool {
 		a, b := items[i], items[j]
@@ -915,18 +888,6 @@ func sortEmployees(items []Employee, sortKey string) {
 			return a.CreatedAt.Before(b.CreatedAt)
 		}
 	})
-}
-
-func paginateEmployees(items []Employee, page, pageSize int) []Employee {
-	start := (page - 1) * pageSize
-	if start >= len(items) {
-		return []Employee{}
-	}
-	end := start + pageSize
-	if end > len(items) {
-		end = len(items)
-	}
-	return items[start:end]
 }
 
 func employeeStatus(item Employee) string {

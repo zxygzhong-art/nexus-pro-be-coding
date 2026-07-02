@@ -122,6 +122,16 @@ type AttendanceCorrectionRequest struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
+type AttendancePolicy struct {
+	ID                 string             `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	WorkTime           []byte             `json:"work_time"`
+	LeaveTypes         []byte             `json:"leave_types"`
+	UpdatedByAccountID string             `json:"updated_by_account_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
 type AttendanceShift struct {
 	ID                     string             `json:"id"`
 	TenantID               string             `json:"tenant_id"`
@@ -535,6 +545,32 @@ type PermissionSet struct {
 	Description string             `json:"description"`
 	Permissions []byte             `json:"permissions"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type PlatformTaskItem struct {
+	ID        string             `json:"id"`
+	TenantID  string             `json:"tenant_id"`
+	AccountID string             `json:"account_id"`
+	WorkDate  string             `json:"work_date"`
+	Title     string             `json:"title"`
+	Category  string             `json:"category"`
+	Product   string             `json:"product"`
+	Hours     float64            `json:"hours"`
+	Note      string             `json:"note"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type PlatformTaskTodo struct {
+	ID                  string             `json:"id"`
+	TenantID            string             `json:"tenant_id"`
+	AccountID           string             `json:"account_id"`
+	Text                string             `json:"text"`
+	DueDate             string             `json:"due_date"`
+	Status              string             `json:"status"`
+	ConvertedTaskItemID string             `json:"converted_task_item_id"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
 type PricingPlan struct {

@@ -133,6 +133,24 @@ func (q *Queries) CountAgentRuns(ctx context.Context, tenantID string) (int64, e
 	return count, err
 }
 
+const countAgentRunsByAccount = `-- name: CountAgentRunsByAccount :one
+SELECT count(*) FROM agent_runs
+WHERE tenant_id = $1
+  AND account_id = $2
+`
+
+type CountAgentRunsByAccountParams struct {
+	TenantID  string `json:"tenant_id"`
+	AccountID string `json:"account_id"`
+}
+
+func (q *Queries) CountAgentRunsByAccount(ctx context.Context, arg CountAgentRunsByAccountParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAgentRunsByAccount, arg.TenantID, arg.AccountID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countAuditLogs = `-- name: CountAuditLogs :one
 SELECT count(*) FROM audit_logs
 WHERE tenant_id = $1
@@ -196,6 +214,122 @@ func (q *Queries) CountEmployeesFiltered(ctx context.Context, arg CountEmployees
 	var count int64
 	err := row.Scan(&count)
 	return count, err
+}
+
+const countFormInstancesByQuery = `-- name: CountFormInstancesByQuery :one
+SELECT count(*) FROM form_instances fi
+WHERE fi.tenant_id = $1
+  AND ($2::text = '' OR fi.status = $2)
+  AND ($3::text = '' OR fi.template_id = $3)
+  AND ($4::text = '' OR EXISTS (
+    SELECT 1 FROM form_templates
+    WHERE form_templates.tenant_id = fi.tenant_id
+      AND form_templates.id = fi.template_id
+      AND form_templates.key = $4
+  ))
+  AND ($5::text = '' OR fi.applicant_account_id = $5)
+`
+
+type CountFormInstancesByQueryParams struct {
+	TenantID           string `json:"tenant_id"`
+	Status             string `json:"status"`
+	TemplateID         string `json:"template_id"`
+	TemplateKey        string `json:"template_key"`
+	ApplicantAccountID string `json:"applicant_account_id"`
+}
+
+func (q *Queries) CountFormInstancesByQuery(ctx context.Context, arg CountFormInstancesByQueryParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countFormInstancesByQuery,
+		arg.TenantID,
+		arg.Status,
+		arg.TemplateID,
+		arg.TemplateKey,
+		arg.ApplicantAccountID,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countLeaveRequestsByQuery = `-- name: CountLeaveRequestsByQuery :one
+SELECT count(*) FROM leave_requests
+WHERE tenant_id = $1
+  AND (coalesce(cardinality($2::text[]), 0) = 0 OR employee_id = ANY($2::text[]))
+  AND ($3::text = '' OR lower(status) = lower($3::text))
+  AND (NULLIF($4::text, '') IS NULL OR end_at::date >= NULLIF($4::text, '')::date)
+  AND (NULLIF($5::text, '') IS NULL OR start_at::date <= NULLIF($5::text, '')::date)
+`
+
+type CountLeaveRequestsByQueryParams struct {
+	TenantID    string   `json:"tenant_id"`
+	EmployeeIds []string `json:"employee_ids"`
+	Status      string   `json:"status"`
+	FromDate    string   `json:"from_date"`
+	ToDate      string   `json:"to_date"`
+}
+
+func (q *Queries) CountLeaveRequestsByQuery(ctx context.Context, arg CountLeaveRequestsByQueryParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countLeaveRequestsByQuery,
+		arg.TenantID,
+		arg.EmployeeIds,
+		arg.Status,
+		arg.FromDate,
+		arg.ToDate,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const deleteFormInstance = `-- name: DeleteFormInstance :exec
+DELETE FROM form_instances
+WHERE tenant_id = $1 AND id = $2
+`
+
+type DeleteFormInstanceParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) DeleteFormInstance(ctx context.Context, arg DeleteFormInstanceParams) error {
+	_, err := q.db.Exec(ctx, deleteFormInstance, arg.TenantID, arg.ID)
+	return err
+}
+
+const deletePlatformTaskItem = `-- name: DeletePlatformTaskItem :exec
+DELETE FROM platform_task_items
+WHERE tenant_id = $1
+  AND account_id = $2
+  AND id = $3
+`
+
+type DeletePlatformTaskItemParams struct {
+	TenantID  string `json:"tenant_id"`
+	AccountID string `json:"account_id"`
+	ID        string `json:"id"`
+}
+
+func (q *Queries) DeletePlatformTaskItem(ctx context.Context, arg DeletePlatformTaskItemParams) error {
+	_, err := q.db.Exec(ctx, deletePlatformTaskItem, arg.TenantID, arg.AccountID, arg.ID)
+	return err
+}
+
+const deletePlatformTaskTodo = `-- name: DeletePlatformTaskTodo :exec
+DELETE FROM platform_task_todos
+WHERE tenant_id = $1
+  AND account_id = $2
+  AND id = $3
+`
+
+type DeletePlatformTaskTodoParams struct {
+	TenantID  string `json:"tenant_id"`
+	AccountID string `json:"account_id"`
+	ID        string `json:"id"`
+}
+
+func (q *Queries) DeletePlatformTaskTodo(ctx context.Context, arg DeletePlatformTaskTodoParams) error {
+	_, err := q.db.Exec(ctx, deletePlatformTaskTodo, arg.TenantID, arg.AccountID, arg.ID)
+	return err
 }
 
 const findEffectiveAttendanceShiftAssignment = `-- name: FindEffectiveAttendanceShiftAssignment :one
@@ -432,6 +566,26 @@ func (q *Queries) GetAttendanceCorrectionRequest(ctx context.Context, arg GetAtt
 		&i.ReviewedByAccountID,
 		&i.ReviewReason,
 		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAttendancePolicy = `-- name: GetAttendancePolicy :one
+SELECT id, tenant_id, work_time, leave_types, updated_by_account_id, created_at, updated_at FROM attendance_policies
+WHERE tenant_id = $1
+`
+
+func (q *Queries) GetAttendancePolicy(ctx context.Context, tenantID string) (AttendancePolicy, error) {
+	row := q.db.QueryRow(ctx, getAttendancePolicy, tenantID)
+	var i AttendancePolicy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkTime,
+		&i.LeaveTypes,
+		&i.UpdatedByAccountID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -944,6 +1098,36 @@ func (q *Queries) GetLeaveRequest(ctx context.Context, arg GetLeaveRequestParams
 	return i, err
 }
 
+const getLeaveRequestByFormInstanceID = `-- name: GetLeaveRequestByFormInstanceID :one
+SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, created_at FROM leave_requests
+WHERE tenant_id = $1 AND form_instance_id = $2
+LIMIT 1
+`
+
+type GetLeaveRequestByFormInstanceIDParams struct {
+	TenantID       string `json:"tenant_id"`
+	FormInstanceID string `json:"form_instance_id"`
+}
+
+func (q *Queries) GetLeaveRequestByFormInstanceID(ctx context.Context, arg GetLeaveRequestByFormInstanceIDParams) (LeaveRequest, error) {
+	row := q.db.QueryRow(ctx, getLeaveRequestByFormInstanceID, arg.TenantID, arg.FormInstanceID)
+	var i LeaveRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.LeaveType,
+		&i.StartAt,
+		&i.EndAt,
+		&i.Hours,
+		&i.Reason,
+		&i.Status,
+		&i.FormInstanceID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getOrgUnit = `-- name: GetOrgUnit :one
 SELECT id, tenant_id, code, name, parent_id, path, created_at FROM org_units
 WHERE tenant_id = $1 AND id = $2
@@ -989,6 +1173,68 @@ func (q *Queries) GetPermissionSet(ctx context.Context, arg GetPermissionSetPara
 		&i.Description,
 		&i.Permissions,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getPlatformTaskItem = `-- name: GetPlatformTaskItem :one
+SELECT id, tenant_id, account_id, work_date, title, category, product, hours, note, created_at, updated_at FROM platform_task_items
+WHERE tenant_id = $1
+  AND account_id = $2
+  AND id = $3
+`
+
+type GetPlatformTaskItemParams struct {
+	TenantID  string `json:"tenant_id"`
+	AccountID string `json:"account_id"`
+	ID        string `json:"id"`
+}
+
+func (q *Queries) GetPlatformTaskItem(ctx context.Context, arg GetPlatformTaskItemParams) (PlatformTaskItem, error) {
+	row := q.db.QueryRow(ctx, getPlatformTaskItem, arg.TenantID, arg.AccountID, arg.ID)
+	var i PlatformTaskItem
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.WorkDate,
+		&i.Title,
+		&i.Category,
+		&i.Product,
+		&i.Hours,
+		&i.Note,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getPlatformTaskTodo = `-- name: GetPlatformTaskTodo :one
+SELECT id, tenant_id, account_id, text, due_date, status, converted_task_item_id, created_at, updated_at FROM platform_task_todos
+WHERE tenant_id = $1
+  AND account_id = $2
+  AND id = $3
+`
+
+type GetPlatformTaskTodoParams struct {
+	TenantID  string `json:"tenant_id"`
+	AccountID string `json:"account_id"`
+	ID        string `json:"id"`
+}
+
+func (q *Queries) GetPlatformTaskTodo(ctx context.Context, arg GetPlatformTaskTodoParams) (PlatformTaskTodo, error) {
+	row := q.db.QueryRow(ctx, getPlatformTaskTodo, arg.TenantID, arg.AccountID, arg.ID)
+	var i PlatformTaskTodo
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.Text,
+		&i.DueDate,
+		&i.Status,
+		&i.ConvertedTaskItemID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -1104,6 +1350,49 @@ func (q *Queries) ListAgentRuns(ctx context.Context, tenantID string) ([]AgentRu
 	return items, nil
 }
 
+const listAgentRunsByAccount = `-- name: ListAgentRunsByAccount :many
+SELECT id, tenant_id, account_id, mode, prompt, answer, status, reference_items, created_at, updated_at FROM agent_runs
+WHERE tenant_id = $1
+  AND account_id = $2
+ORDER BY created_at DESC, id ASC
+`
+
+type ListAgentRunsByAccountParams struct {
+	TenantID  string `json:"tenant_id"`
+	AccountID string `json:"account_id"`
+}
+
+func (q *Queries) ListAgentRunsByAccount(ctx context.Context, arg ListAgentRunsByAccountParams) ([]AgentRun, error) {
+	rows, err := q.db.Query(ctx, listAgentRunsByAccount, arg.TenantID, arg.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AgentRun
+	for rows.Next() {
+		var i AgentRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.AccountID,
+			&i.Mode,
+			&i.Prompt,
+			&i.Answer,
+			&i.Status,
+			&i.ReferenceItems,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentRunsPage = `-- name: ListAgentRunsPage :many
 SELECT id, tenant_id, account_id, mode, prompt, answer, status, reference_items, created_at, updated_at FROM agent_runs
 WHERE tenant_id = $1
@@ -1125,6 +1414,63 @@ type ListAgentRunsPageParams struct {
 func (q *Queries) ListAgentRunsPage(ctx context.Context, arg ListAgentRunsPageParams) ([]AgentRun, error) {
 	rows, err := q.db.Query(ctx, listAgentRunsPage,
 		arg.TenantID,
+		arg.Sort,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AgentRun
+	for rows.Next() {
+		var i AgentRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.AccountID,
+			&i.Mode,
+			&i.Prompt,
+			&i.Answer,
+			&i.Status,
+			&i.ReferenceItems,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentRunsPageByAccount = `-- name: ListAgentRunsPageByAccount :many
+SELECT id, tenant_id, account_id, mode, prompt, answer, status, reference_items, created_at, updated_at FROM agent_runs
+WHERE tenant_id = $1
+  AND account_id = $2
+ORDER BY
+  CASE WHEN $3::text = 'created_at_asc' THEN created_at END ASC,
+  created_at DESC,
+  id ASC
+LIMIT $5::int
+OFFSET $4::int
+`
+
+type ListAgentRunsPageByAccountParams struct {
+	TenantID    string `json:"tenant_id"`
+	AccountID   string `json:"account_id"`
+	Sort        string `json:"sort"`
+	OffsetCount int32  `json:"offset_count"`
+	LimitCount  int32  `json:"limit_count"`
+}
+
+func (q *Queries) ListAgentRunsPageByAccount(ctx context.Context, arg ListAgentRunsPageByAccountParams) ([]AgentRun, error) {
+	rows, err := q.db.Query(ctx, listAgentRunsPageByAccount,
+		arg.TenantID,
+		arg.AccountID,
 		arg.Sort,
 		arg.OffsetCount,
 		arg.LimitCount,
@@ -1790,6 +2136,76 @@ func (q *Queries) ListEmployeesFilteredPage(ctx context.Context, arg ListEmploye
 	return items, nil
 }
 
+const listFormInstancePageByQuery = `-- name: ListFormInstancePageByQuery :many
+SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, updated_at FROM form_instances fi
+WHERE fi.tenant_id = $1
+  AND ($2::text = '' OR fi.status = $2)
+  AND ($3::text = '' OR fi.template_id = $3)
+  AND ($4::text = '' OR EXISTS (
+    SELECT 1 FROM form_templates
+    WHERE form_templates.tenant_id = fi.tenant_id
+      AND form_templates.id = fi.template_id
+      AND form_templates.key = $4
+  ))
+  AND ($5::text = '' OR fi.applicant_account_id = $5)
+ORDER BY
+  CASE WHEN $6::text = 'submitted_at_asc' THEN fi.submitted_at END ASC,
+  fi.submitted_at DESC,
+  fi.id ASC
+LIMIT $8::int
+OFFSET $7::int
+`
+
+type ListFormInstancePageByQueryParams struct {
+	TenantID           string `json:"tenant_id"`
+	Status             string `json:"status"`
+	TemplateID         string `json:"template_id"`
+	TemplateKey        string `json:"template_key"`
+	ApplicantAccountID string `json:"applicant_account_id"`
+	Sort               string `json:"sort"`
+	OffsetCount        int32  `json:"offset_count"`
+	LimitCount         int32  `json:"limit_count"`
+}
+
+func (q *Queries) ListFormInstancePageByQuery(ctx context.Context, arg ListFormInstancePageByQueryParams) ([]FormInstance, error) {
+	rows, err := q.db.Query(ctx, listFormInstancePageByQuery,
+		arg.TenantID,
+		arg.Status,
+		arg.TemplateID,
+		arg.TemplateKey,
+		arg.ApplicantAccountID,
+		arg.Sort,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FormInstance
+	for rows.Next() {
+		var i FormInstance
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.TemplateID,
+			&i.ApplicantAccountID,
+			&i.Status,
+			&i.Payload,
+			&i.SubmittedAt,
+			&i.ApprovedBy,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFormInstances = `-- name: ListFormInstances :many
 SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, updated_at FROM form_instances
 WHERE tenant_id = $1
@@ -1798,6 +2214,65 @@ ORDER BY submitted_at ASC
 
 func (q *Queries) ListFormInstances(ctx context.Context, tenantID string) ([]FormInstance, error) {
 	rows, err := q.db.Query(ctx, listFormInstances, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FormInstance
+	for rows.Next() {
+		var i FormInstance
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.TemplateID,
+			&i.ApplicantAccountID,
+			&i.Status,
+			&i.Payload,
+			&i.SubmittedAt,
+			&i.ApprovedBy,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFormInstancesByQuery = `-- name: ListFormInstancesByQuery :many
+SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, updated_at FROM form_instances fi
+WHERE fi.tenant_id = $1
+  AND ($2::text = '' OR fi.status = $2)
+  AND ($3::text = '' OR fi.template_id = $3)
+  AND ($4::text = '' OR EXISTS (
+    SELECT 1 FROM form_templates
+    WHERE form_templates.tenant_id = fi.tenant_id
+      AND form_templates.id = fi.template_id
+      AND form_templates.key = $4
+  ))
+  AND ($5::text = '' OR fi.applicant_account_id = $5)
+ORDER BY fi.submitted_at ASC
+`
+
+type ListFormInstancesByQueryParams struct {
+	TenantID           string `json:"tenant_id"`
+	Status             string `json:"status"`
+	TemplateID         string `json:"template_id"`
+	TemplateKey        string `json:"template_key"`
+	ApplicantAccountID string `json:"applicant_account_id"`
+}
+
+func (q *Queries) ListFormInstancesByQuery(ctx context.Context, arg ListFormInstancesByQueryParams) ([]FormInstance, error) {
+	rows, err := q.db.Query(ctx, listFormInstancesByQuery,
+		arg.TenantID,
+		arg.Status,
+		arg.TemplateID,
+		arg.TemplateKey,
+		arg.ApplicantAccountID,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -1926,6 +2401,73 @@ func (q *Queries) ListLeaveBalances(ctx context.Context, tenantID string) ([]Lea
 	return items, nil
 }
 
+const listLeaveRequestPageByQuery = `-- name: ListLeaveRequestPageByQuery :many
+SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, created_at FROM leave_requests
+WHERE tenant_id = $1
+  AND (coalesce(cardinality($2::text[]), 0) = 0 OR employee_id = ANY($2::text[]))
+  AND ($3::text = '' OR lower(status) = lower($3::text))
+  AND (NULLIF($4::text, '') IS NULL OR end_at::date >= NULLIF($4::text, '')::date)
+  AND (NULLIF($5::text, '') IS NULL OR start_at::date <= NULLIF($5::text, '')::date)
+ORDER BY
+  CASE WHEN $6::text = 'created_at_asc' THEN created_at END ASC,
+  created_at DESC,
+  id ASC
+LIMIT $8::int
+OFFSET $7::int
+`
+
+type ListLeaveRequestPageByQueryParams struct {
+	TenantID    string   `json:"tenant_id"`
+	EmployeeIds []string `json:"employee_ids"`
+	Status      string   `json:"status"`
+	FromDate    string   `json:"from_date"`
+	ToDate      string   `json:"to_date"`
+	Sort        string   `json:"sort"`
+	OffsetCount int32    `json:"offset_count"`
+	LimitCount  int32    `json:"limit_count"`
+}
+
+func (q *Queries) ListLeaveRequestPageByQuery(ctx context.Context, arg ListLeaveRequestPageByQueryParams) ([]LeaveRequest, error) {
+	rows, err := q.db.Query(ctx, listLeaveRequestPageByQuery,
+		arg.TenantID,
+		arg.EmployeeIds,
+		arg.Status,
+		arg.FromDate,
+		arg.ToDate,
+		arg.Sort,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LeaveRequest
+	for rows.Next() {
+		var i LeaveRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.EmployeeID,
+			&i.LeaveType,
+			&i.StartAt,
+			&i.EndAt,
+			&i.Hours,
+			&i.Reason,
+			&i.Status,
+			&i.FormInstanceID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLeaveRequests = `-- name: ListLeaveRequests :many
 SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, created_at FROM leave_requests
 WHERE tenant_id = $1
@@ -1934,6 +2476,62 @@ ORDER BY created_at ASC
 
 func (q *Queries) ListLeaveRequests(ctx context.Context, tenantID string) ([]LeaveRequest, error) {
 	rows, err := q.db.Query(ctx, listLeaveRequests, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LeaveRequest
+	for rows.Next() {
+		var i LeaveRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.EmployeeID,
+			&i.LeaveType,
+			&i.StartAt,
+			&i.EndAt,
+			&i.Hours,
+			&i.Reason,
+			&i.Status,
+			&i.FormInstanceID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLeaveRequestsByQuery = `-- name: ListLeaveRequestsByQuery :many
+SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, created_at FROM leave_requests
+WHERE tenant_id = $1
+  AND (coalesce(cardinality($2::text[]), 0) = 0 OR employee_id = ANY($2::text[]))
+  AND ($3::text = '' OR lower(status) = lower($3::text))
+  AND (NULLIF($4::text, '') IS NULL OR end_at::date >= NULLIF($4::text, '')::date)
+  AND (NULLIF($5::text, '') IS NULL OR start_at::date <= NULLIF($5::text, '')::date)
+ORDER BY created_at ASC
+`
+
+type ListLeaveRequestsByQueryParams struct {
+	TenantID    string   `json:"tenant_id"`
+	EmployeeIds []string `json:"employee_ids"`
+	Status      string   `json:"status"`
+	FromDate    string   `json:"from_date"`
+	ToDate      string   `json:"to_date"`
+}
+
+func (q *Queries) ListLeaveRequestsByQuery(ctx context.Context, arg ListLeaveRequestsByQueryParams) ([]LeaveRequest, error) {
+	rows, err := q.db.Query(ctx, listLeaveRequestsByQuery,
+		arg.TenantID,
+		arg.EmployeeIds,
+		arg.Status,
+		arg.FromDate,
+		arg.ToDate,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -2069,6 +2667,90 @@ func (q *Queries) ListPermissionSets(ctx context.Context, tenantID string) ([]Pe
 	return items, nil
 }
 
+const listPlatformTaskItems = `-- name: ListPlatformTaskItems :many
+SELECT id, tenant_id, account_id, work_date, title, category, product, hours, note, created_at, updated_at FROM platform_task_items
+WHERE tenant_id = $1 AND account_id = $2
+ORDER BY work_date DESC, created_at ASC, id ASC
+`
+
+type ListPlatformTaskItemsParams struct {
+	TenantID  string `json:"tenant_id"`
+	AccountID string `json:"account_id"`
+}
+
+func (q *Queries) ListPlatformTaskItems(ctx context.Context, arg ListPlatformTaskItemsParams) ([]PlatformTaskItem, error) {
+	rows, err := q.db.Query(ctx, listPlatformTaskItems, arg.TenantID, arg.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PlatformTaskItem
+	for rows.Next() {
+		var i PlatformTaskItem
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.AccountID,
+			&i.WorkDate,
+			&i.Title,
+			&i.Category,
+			&i.Product,
+			&i.Hours,
+			&i.Note,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPlatformTaskTodos = `-- name: ListPlatformTaskTodos :many
+SELECT id, tenant_id, account_id, text, due_date, status, converted_task_item_id, created_at, updated_at FROM platform_task_todos
+WHERE tenant_id = $1 AND account_id = $2
+ORDER BY CASE WHEN status = 'open' THEN 0 ELSE 1 END, created_at ASC, id ASC
+`
+
+type ListPlatformTaskTodosParams struct {
+	TenantID  string `json:"tenant_id"`
+	AccountID string `json:"account_id"`
+}
+
+func (q *Queries) ListPlatformTaskTodos(ctx context.Context, arg ListPlatformTaskTodosParams) ([]PlatformTaskTodo, error) {
+	rows, err := q.db.Query(ctx, listPlatformTaskTodos, arg.TenantID, arg.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []PlatformTaskTodo
+	for rows.Next() {
+		var i PlatformTaskTodo
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.AccountID,
+			&i.Text,
+			&i.DueDate,
+			&i.Status,
+			&i.ConvertedTaskItemID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTenants = `-- name: ListTenants :many
 SELECT id, name, created_at FROM tenants
 ORDER BY created_at ASC
@@ -2151,6 +2833,44 @@ func (q *Queries) NextEmployeeNoSequence(ctx context.Context, arg NextEmployeeNo
 	var column_1 int32
 	err := row.Scan(&column_1)
 	return column_1, err
+}
+
+const releaseLeaveBalance = `-- name: ReleaseLeaveBalance :one
+UPDATE leave_balances
+SET remaining_hours = remaining_hours + $1::double precision,
+    updated_at = $2::timestamptz
+WHERE tenant_id = $3
+  AND employee_id = $4
+  AND lower(leave_type) = lower($5::text)
+RETURNING id, tenant_id, employee_id, leave_type, remaining_hours, updated_at
+`
+
+type ReleaseLeaveBalanceParams struct {
+	Hours      float64            `json:"hours"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	TenantID   string             `json:"tenant_id"`
+	EmployeeID string             `json:"employee_id"`
+	LeaveType  string             `json:"leave_type"`
+}
+
+func (q *Queries) ReleaseLeaveBalance(ctx context.Context, arg ReleaseLeaveBalanceParams) (LeaveBalance, error) {
+	row := q.db.QueryRow(ctx, releaseLeaveBalance,
+		arg.Hours,
+		arg.UpdatedAt,
+		arg.TenantID,
+		arg.EmployeeID,
+		arg.LeaveType,
+	)
+	var i LeaveBalance
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.LeaveType,
+		&i.RemainingHours,
+		&i.UpdatedAt,
+	)
+	return i, err
 }
 
 const reserveLeaveBalance = `-- name: ReserveLeaveBalance :one
@@ -2561,6 +3281,56 @@ func (q *Queries) UpsertAttendanceCorrectionRequest(ctx context.Context, arg Ups
 		&i.ReviewedByAccountID,
 		&i.ReviewReason,
 		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertAttendancePolicy = `-- name: UpsertAttendancePolicy :one
+INSERT INTO attendance_policies (
+    id, tenant_id, work_time, leave_types, updated_by_account_id, created_at, updated_at
+) VALUES (
+    $1, $2, $3::jsonb,
+    $4::jsonb, $5,
+    $6, $7
+)
+ON CONFLICT (tenant_id) DO UPDATE SET
+    id = EXCLUDED.id,
+    work_time = EXCLUDED.work_time,
+    leave_types = EXCLUDED.leave_types,
+    updated_by_account_id = EXCLUDED.updated_by_account_id,
+    updated_at = EXCLUDED.updated_at
+RETURNING id, tenant_id, work_time, leave_types, updated_by_account_id, created_at, updated_at
+`
+
+type UpsertAttendancePolicyParams struct {
+	ID                 string             `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	WorkTime           []byte             `json:"work_time"`
+	LeaveTypes         []byte             `json:"leave_types"`
+	UpdatedByAccountID string             `json:"updated_by_account_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertAttendancePolicy(ctx context.Context, arg UpsertAttendancePolicyParams) (AttendancePolicy, error) {
+	row := q.db.QueryRow(ctx, upsertAttendancePolicy,
+		arg.ID,
+		arg.TenantID,
+		arg.WorkTime,
+		arg.LeaveTypes,
+		arg.UpdatedByAccountID,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i AttendancePolicy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.WorkTime,
+		&i.LeaveTypes,
+		&i.UpdatedByAccountID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -3327,6 +4097,130 @@ func (q *Queries) UpsertPermissionSet(ctx context.Context, arg UpsertPermissionS
 		&i.Description,
 		&i.Permissions,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertPlatformTaskItem = `-- name: UpsertPlatformTaskItem :one
+INSERT INTO platform_task_items (
+    id, tenant_id, account_id, work_date, title, category,
+    product, hours, note, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7, $8,
+    $9, $10, $11
+)
+ON CONFLICT (tenant_id, id) DO UPDATE SET
+    work_date = EXCLUDED.work_date,
+    title = EXCLUDED.title,
+    category = EXCLUDED.category,
+    product = EXCLUDED.product,
+    hours = EXCLUDED.hours,
+    note = EXCLUDED.note,
+    updated_at = EXCLUDED.updated_at
+WHERE platform_task_items.account_id = EXCLUDED.account_id
+RETURNING id, tenant_id, account_id, work_date, title, category, product, hours, note, created_at, updated_at
+`
+
+type UpsertPlatformTaskItemParams struct {
+	ID        string             `json:"id"`
+	TenantID  string             `json:"tenant_id"`
+	AccountID string             `json:"account_id"`
+	WorkDate  string             `json:"work_date"`
+	Title     string             `json:"title"`
+	Category  string             `json:"category"`
+	Product   string             `json:"product"`
+	Hours     float64            `json:"hours"`
+	Note      string             `json:"note"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertPlatformTaskItem(ctx context.Context, arg UpsertPlatformTaskItemParams) (PlatformTaskItem, error) {
+	row := q.db.QueryRow(ctx, upsertPlatformTaskItem,
+		arg.ID,
+		arg.TenantID,
+		arg.AccountID,
+		arg.WorkDate,
+		arg.Title,
+		arg.Category,
+		arg.Product,
+		arg.Hours,
+		arg.Note,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i PlatformTaskItem
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.WorkDate,
+		&i.Title,
+		&i.Category,
+		&i.Product,
+		&i.Hours,
+		&i.Note,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertPlatformTaskTodo = `-- name: UpsertPlatformTaskTodo :one
+INSERT INTO platform_task_todos (
+    id, tenant_id, account_id, text, due_date, status,
+    converted_task_item_id, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7,
+    $8, $9
+)
+ON CONFLICT (tenant_id, id) DO UPDATE SET
+    text = EXCLUDED.text,
+    due_date = EXCLUDED.due_date,
+    status = EXCLUDED.status,
+    converted_task_item_id = EXCLUDED.converted_task_item_id,
+    updated_at = EXCLUDED.updated_at
+WHERE platform_task_todos.account_id = EXCLUDED.account_id
+RETURNING id, tenant_id, account_id, text, due_date, status, converted_task_item_id, created_at, updated_at
+`
+
+type UpsertPlatformTaskTodoParams struct {
+	ID                  string             `json:"id"`
+	TenantID            string             `json:"tenant_id"`
+	AccountID           string             `json:"account_id"`
+	Text                string             `json:"text"`
+	DueDate             string             `json:"due_date"`
+	Status              string             `json:"status"`
+	ConvertedTaskItemID string             `json:"converted_task_item_id"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertPlatformTaskTodo(ctx context.Context, arg UpsertPlatformTaskTodoParams) (PlatformTaskTodo, error) {
+	row := q.db.QueryRow(ctx, upsertPlatformTaskTodo,
+		arg.ID,
+		arg.TenantID,
+		arg.AccountID,
+		arg.Text,
+		arg.DueDate,
+		arg.Status,
+		arg.ConvertedTaskItemID,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i PlatformTaskTodo
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.Text,
+		&i.DueDate,
+		&i.Status,
+		&i.ConvertedTaskItemID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

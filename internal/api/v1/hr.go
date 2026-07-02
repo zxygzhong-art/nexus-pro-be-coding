@@ -39,6 +39,7 @@ func (c HRCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	employees.GET("/import/template", c.routes.Handle("hr.employee", "read", c.employeeImportTemplate))
 	employees.POST("/import/preview", c.routes.Handle("hr.employee", "import", c.previewEmployeeImport))
 	employees.POST("/import/:id/confirm", c.routes.Handle("hr.employee", "import", c.confirmEmployeeImport, ResourceID(PathParamID)))
+	employees.POST("/ehrms/sync", c.routes.Handle("hr.employee", "import", c.syncEHRMSEmployees))
 	employees.GET("/export", c.routes.Handle("hr.employee", "export", c.exportEmployeesCSV))
 	employees.POST("/export", c.routes.Handle("hr.employee", "export", c.exportEmployees))
 	employees.POST("/batch-delete", c.routes.Handle("hr.employee", "delete", c.batchDeleteEmployees))
@@ -188,6 +189,19 @@ func (c HRCtrl) confirmEmployeeImport(w http.ResponseWriter, r *http.Request, ct
 		return err
 	}
 	writeJSON(w, http.StatusOK, session)
+	return nil
+}
+
+func (c HRCtrl) syncEHRMSEmployees(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.EHRMSEmployeeSyncInput
+	if _, err := readOptionalJSON(w, r, &input); err != nil {
+		return err
+	}
+	result, err := c.svc.SyncEHRMSEmployees(ctx, input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, result)
 	return nil
 }
 

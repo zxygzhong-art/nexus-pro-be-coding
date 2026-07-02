@@ -4,7 +4,7 @@ import "context"
 
 // AuthnFacade exposes public authentication entrypoints to the API layer.
 type AuthnFacade interface {
-	OIDCAuthorizationURL(string, OIDCAuthorizationInput) (OIDCAuthorizationResponse, error)
+	OIDCAuthorizationURL(context.Context, string, OIDCAuthorizationInput) (OIDCAuthorizationResponse, error)
 	CompleteOIDCCallback(context.Context, string, string, string) (AuthLoginResponse, error)
 }
 
@@ -61,6 +61,7 @@ type HRFacade interface {
 	EmployeeImportTemplate(RequestContext, string) ([]byte, string, string, error)
 	PreviewEmployeeImport(RequestContext, EmployeeImportPreviewInput) (EmployeeImportSession, error)
 	ConfirmEmployeeImport(RequestContext, string, EmployeeImportConfirmInput) (EmployeeImportSession, error)
+	SyncEHRMSEmployees(RequestContext, EHRMSEmployeeSyncInput) (EHRMSEmployeeSyncResponse, error)
 	ExportEmployeesCSV(RequestContext, EmployeeQuery) ([]byte, string, error)
 	ExportEmployees(RequestContext, ...EmployeeQuery) ([]Employee, error)
 	BatchDeleteEmployees(RequestContext, BatchDeleteEmployeesInput) (BatchEmployeeResponse, error)
@@ -78,6 +79,7 @@ type AttendanceFacade interface {
 	ListLeaveRequestPage(RequestContext, PageRequest) (PageResponse[LeaveRequest], error)
 	CreateLeaveRequest(RequestContext, CreateLeaveRequestInput) (LeaveRequest, error)
 	CurrentAttendancePolicy(RequestContext) (AttendancePolicyResponse, error)
+	UpdateAttendancePolicy(RequestContext, UpdateAttendancePolicyInput) (AttendancePolicyResponse, error)
 	ListAttendanceWorksitePage(RequestContext, PageRequest) (PageResponse[AttendanceWorksite], error)
 	CreateAttendanceWorksite(RequestContext, CreateAttendanceWorksiteInput) (AttendanceWorksite, error)
 	UpdateAttendanceWorksite(RequestContext, UpdateAttendanceWorksiteInput) (AttendanceWorksite, error)
@@ -95,6 +97,36 @@ type AttendanceFacade interface {
 	RejectAttendanceCorrection(RequestContext, string, ReviewAttendanceCorrectionInput) (AttendanceCorrectionRequest, error)
 }
 
+// PlatformFacade exposes OA frontend aggregate read models.
+type PlatformFacade interface {
+	Home(RequestContext) (PlatformHomeResponse, error)
+	ListAssistants(RequestContext, PlatformAssistantsQuery) (PlatformAssistantsResponse, error)
+	Forms(RequestContext) (PlatformFormsResponse, error)
+	Tasks(RequestContext) (PlatformTasksResponse, error)
+	CreateTaskItem(RequestContext, CreatePlatformTaskItemInput) (PlatformTaskItem, error)
+	UpdateTaskItem(RequestContext, string, UpdatePlatformTaskItemInput) (PlatformTaskItem, error)
+	DeleteTaskItem(RequestContext, string) (PlatformTaskItem, error)
+	CreateTaskTodo(RequestContext, CreatePlatformTaskTodoInput) (PlatformTaskTodo, error)
+	UpdateTaskTodo(RequestContext, string, UpdatePlatformTaskTodoInput) (PlatformTaskTodo, error)
+	DeleteTaskTodo(RequestContext, string) (PlatformTaskTodo, error)
+	ConvertTaskTodo(RequestContext, string, ConvertPlatformTaskTodoInput) (PlatformTaskItem, error)
+	Workspace(RequestContext) (PlatformWorkspaceResponse, error)
+	WorkspaceOverview(RequestContext, WorkspaceOverviewQuery) (WorkspaceOverviewResponse, error)
+	WorkspaceEmployees(RequestContext, PlatformWorkspaceEmployeesQuery) (PlatformWorkspaceEmployeesResponse, error)
+	WorkspaceOrganization(RequestContext) (WorkspaceOrganizationResponse, error)
+	UpdateWorkspaceOrganizationManager(RequestContext, string, UpdateWorkspaceOrganizationManagerInput) (WorkspaceOrganizationResponse, error)
+	CreateWorkspaceAdmin(RequestContext, CreateWorkspaceAdminInput) (WorkspaceAdminsResponse, error)
+	UpdateWorkspaceAdminPermissions(RequestContext, string, UpdateWorkspaceAdminPermissionsInput) (WorkspaceAdminsResponse, error)
+	DeleteWorkspaceAdmin(RequestContext, string) (WorkspaceAdminsResponse, error)
+	CreateWorkspaceFormDesign(RequestContext, SaveWorkspaceFormDesignInput) (PlatformFormDesign, error)
+	UpdateWorkspaceFormDesign(RequestContext, string, UpdateWorkspaceFormDesignInput) (PlatformFormDesign, error)
+	DeleteWorkspaceFormDesign(RequestContext, string) (PlatformFormDesign, error)
+	WorkspaceAuditLogs(RequestContext, WorkspaceAuditLogQuery, PageRequest) (PageResponse[WorkspaceAuditLog], error)
+	WorkspaceAttendance(RequestContext, WorkspaceAttendanceQuery) (WorkspaceAttendanceResponse, error)
+	WorkspaceTurnover(RequestContext, WorkspaceTurnoverQuery) (WorkspaceTurnoverResponse, error)
+	Insights(RequestContext, PlatformInsightsQuery) (PlatformInsightsResponse, error)
+}
+
 // WorkspaceFacade exposes workspace dashboard aggregates to the API layer.
 type WorkspaceFacade interface {
 	WorkspaceOverview(RequestContext, WorkspaceOverviewQuery) (WorkspaceOverviewResponse, error)
@@ -109,8 +141,19 @@ type WorkspaceFacade interface {
 type WorkflowFacade interface {
 	ListFormTemplatePage(RequestContext, PageRequest) (PageResponse[FormTemplate], error)
 	CreateFormTemplate(RequestContext, CreateFormTemplateInput) (FormTemplate, error)
+	ListFormInstancePage(RequestContext, FormInstanceQuery, PageRequest) (PageResponse[FormInstance], error)
+	ReviewQueue(RequestContext) (WorkflowReviewQueueResponse, error)
+	SaveFormDraft(RequestContext, SaveFormDraftInput) (FormInstance, error)
+	UpdateFormDraft(RequestContext, string, UpdateFormDraftInput) (FormInstance, error)
+	DeleteFormDraft(RequestContext, string) (FormInstance, error)
 	SubmitForm(RequestContext, SubmitFormInput) (FormInstance, error)
 	ApproveForm(RequestContext, string, ApproveFormInput) (FormInstance, error)
+	RejectForm(RequestContext, string, RejectFormInput) (FormInstance, error)
+	ReturnForm(RequestContext, string, ReturnFormInput) (FormInstance, error)
+	CancelForm(RequestContext, string, CancelFormInput) (FormInstance, error)
+	DuplicateForm(RequestContext, string) (FormInstance, error)
+	ExportForm(RequestContext, string) (ExportedFormFile, error)
+	BulkReviewForms(RequestContext, BulkReviewFormsInput) (BulkReviewFormsResponse, error)
 }
 
 // AgentFacade exposes agent run use cases.
@@ -132,6 +175,7 @@ var (
 	_ IAMFacade        = IAMService{}
 	_ HRFacade         = HRService{}
 	_ AttendanceFacade = AttendanceService{}
+	_ PlatformFacade   = PlatformService{}
 	_ WorkspaceFacade  = WorkspaceService{}
 	_ WorkflowFacade   = WorkflowService{}
 	_ AgentFacade      = AgentService{}

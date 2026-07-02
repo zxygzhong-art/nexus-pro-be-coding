@@ -104,17 +104,6 @@ func SortLeaveBalances(items []domain.LeaveBalance, sort string) []domain.LeaveB
 	return sortBy(items, sort, leaveBalanceComparators, "updated_at_desc")
 }
 
-var leaveRequestComparators = comparators[domain.LeaveRequest]{
-	"created_at_asc":  func(a, b domain.LeaveRequest) bool { return a.CreatedAt.Before(b.CreatedAt) },
-	"created_at_desc": func(a, b domain.LeaveRequest) bool { return a.CreatedAt.After(b.CreatedAt) },
-	"start_at_asc":    func(a, b domain.LeaveRequest) bool { return a.StartAt.Before(b.StartAt) },
-}
-
-// SortLeaveRequests applies the leave-request list sort contract.
-func SortLeaveRequests(items []domain.LeaveRequest, sort string) []domain.LeaveRequest {
-	return sortBy(items, sort, leaveRequestComparators, "created_at_desc")
-}
-
 var orgUnitComparators = comparators[domain.OrgUnit]{
 	"created_at_asc":  func(a, b domain.OrgUnit) bool { return a.CreatedAt.Before(b.CreatedAt) },
 	"created_at_desc": func(a, b domain.OrgUnit) bool { return a.CreatedAt.After(b.CreatedAt) },

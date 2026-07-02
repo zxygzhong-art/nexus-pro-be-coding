@@ -486,6 +486,42 @@ func TestProductionContextRejectsUnsignedBearerFallback(t *testing.T) {
 	}
 }
 
+func TestTokenResolverChainFallsBackToUnsignedDemoJWT(t *testing.T) {
+	resolver := platformauth.NewTokenResolverChain(
+		platformauth.NewKeycloakTokenResolver("https://issuer.example/realms/demo", "nexus-api", nil),
+		platformauth.UnsignedJWTResolver{},
+	)
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("Authorization", "Bearer "+testJWT(map[string]any{"tenant_id": "demo", "account_id": "acct-admin"}))
+
+	principal, ok, err := resolver.Resolve(req)
+	if err != nil || !ok {
+		t.Fatalf("expected unsigned demo JWT to resolve after keycloak shape skip, ok=%v err=%v", ok, err)
+	}
+	if principal.Provider != "unsigned_jwt" || principal.TenantID != "demo" || principal.AccountID != "acct-admin" {
+		t.Fatalf("unexpected principal: %+v", principal)
+	}
+}
+
+func TestDisabledAccountReturnsInactiveReasonCode(t *testing.T) {
+	store := memory.NewStore()
+	service.SeedDemo(store)
+	handler := v1api.New(service.New(store), nil, v1api.Options{AllowUnsignedJWT: true}).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	req.Header.Set("Authorization", "Bearer "+testJWT(map[string]any{"tenant_id": "demo", "account_id": "acct-disabled"}))
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for disabled account, got %d: %s", rec.Code, rec.Body.String())
+	}
+	errPayload := decodeError(t, rec.Body.Bytes())
+	if errPayload.Code != domain.ErrorCodeAccountInactive || errPayload.ReasonCode != "account_inactive" {
+		t.Fatalf("expected account_inactive reason code, got %+v", errPayload)
+	}
+}
+
 func TestKeycloakTokenResolverRefreshesJWKSWhenKidRotates(t *testing.T) {
 	oldKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -1002,7 +1038,7 @@ func TestEmployeeListDetailAndCSVExportEndpoints(t *testing.T) {
 		t.Fatalf("expected 200 for employee list, got %d: %s", rec.Code, rec.Body.String())
 	}
 	page := decodeData[domain.PageResponse[domain.Employee]](t, rec.Body.Bytes())
-	if page.Total != 3 || page.Page != 1 || page.PageSize != 2 || len(page.Items) != 2 {
+	if page.Total != 10 || page.Page != 1 || page.PageSize != 2 || len(page.Items) != 2 {
 		t.Fatalf("unexpected employee page: %+v", page)
 	}
 
@@ -1465,7 +1501,7 @@ type fakeOIDCProvider struct {
 	err       error
 }
 
-func (p fakeOIDCProvider) AuthorizationURL(state string) (string, error) {
+func (p fakeOIDCProvider) AuthorizationURL(_ context.Context, state string) (string, error) {
 	if p.err != nil {
 		return "", p.err
 	}

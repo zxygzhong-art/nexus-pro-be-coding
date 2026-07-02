@@ -12,6 +12,7 @@ import (
 	"nexus-pro-be/internal/config"
 	"nexus-pro-be/internal/jobs"
 	platformauth "nexus-pro-be/internal/platform/auth"
+	"nexus-pro-be/internal/platform/ehrms"
 	"nexus-pro-be/internal/platform/objectstore"
 	openfgaclient "nexus-pro-be/internal/platform/openfga"
 	"nexus-pro-be/internal/platform/postgres"
@@ -31,6 +32,8 @@ type apiRuntime struct {
 	report             startup.Report
 	store              repository.Store
 	relationshipWriter jobs.RelationshipTupleWriter
+	ehrmsSyncScheduler *jobs.EHRMSEmployeeSyncScheduler
+	ehrmsSyncOptions   jobs.EHRMSEmployeeSyncOptions
 	shutdowns          []moduleShutdown
 }
 
@@ -130,6 +133,14 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	}
 	tokenResolvers := make([]platformauth.TokenResolver, 0, 2)
 
+	ehrmsClient, ehrmsDependency, err := configuredEHRMSClient(cfg, authHTTPClient)
+	if err != nil {
+		shutdownStartedModules(shutdowns, logger)
+		return nil, err
+	}
+	report.Dependencies = append(report.Dependencies, ehrmsDependency)
+	serviceOptions.EHRMSClient = ehrmsClient
+
 	oidcProviders, oidcDependencies := configuredOIDCProviders(cfg, authHTTPClient)
 	report.Dependencies = append(report.Dependencies, oidcDependencies...)
 	if len(oidcProviders) > 0 && strings.TrimSpace(cfg.AuthSessionSigningKey) != "" {
@@ -145,6 +156,8 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	}
 
 	app := service.New(store, serviceOptions)
+	ehrmsSyncScheduler, ehrmsSyncOptions, ehrmsSyncDependency := configuredEHRMSSyncScheduler(cfg, app.HR(), ehrmsClient != nil, logger)
+	report.Dependencies = append(report.Dependencies, ehrmsSyncDependency)
 	apiOptions := v1api.Options{
 		AllowDemoContext:      cfg.AllowDemoContext,
 		AllowHeaderContext:    cfg.AllowHeaderContext,
@@ -159,6 +172,10 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		readinessChecks["keycloak"] = keycloakReadiness
 	}
 	report.Dependencies = append(report.Dependencies, keycloakDependency)
+	if cfg.AllowUnsignedJWT {
+		tokenResolvers = append(tokenResolvers, platformauth.UnsignedJWTResolver{})
+		logger.Warn("unsigned JWT resolver enabled for local/demo mode")
+	}
 
 	if cfg.OTelEnabled {
 		apiOptions.TelemetryServiceName = cfg.OTelServiceName
@@ -184,6 +201,8 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		report:             report,
 		store:              store,
 		relationshipWriter: relationshipModule.writer,
+		ehrmsSyncScheduler: ehrmsSyncScheduler,
+		ehrmsSyncOptions:   ehrmsSyncOptions,
 		shutdowns:          shutdowns,
 	}, nil
 }
@@ -465,6 +484,55 @@ func configuredOIDCProviders(cfg config.Config, client *http.Client) (map[string
 	return providers, deps
 }
 
+// configuredEHRMSClient builds the optional employee master-data upstream adapter.
+func configuredEHRMSClient(cfg config.Config, client *http.Client) (service.EHRMSClient, startup.Dependency, error) {
+	if strings.TrimSpace(cfg.EHRMSBaseURL) == "" && strings.TrimSpace(cfg.EHRMSAPIKey) == "" {
+		return nil, startup.Dependency{Name: "eHRMS", Status: "skipped", Target: "EHRMS_* not set", Detail: "employee sync disabled"}, nil
+	}
+	missing := []string{}
+	if strings.TrimSpace(cfg.EHRMSBaseURL) == "" {
+		missing = append(missing, "EHRMS_BASE_URL")
+	}
+	if strings.TrimSpace(cfg.EHRMSAPIKey) == "" {
+		missing = append(missing, "EHRMS_API_KEY")
+	}
+	if len(missing) > 0 {
+		return nil, startup.Dependency{Name: "eHRMS", Status: "incomplete", Target: "disabled", Detail: startup.Missing(missing...)}, nil
+	}
+	clientAdapter, err := ehrms.NewClient(cfg.EHRMSBaseURL, cfg.EHRMSAPIKey, client)
+	if err != nil {
+		return nil, startup.Dependency{Name: "eHRMS", Status: "invalid", Target: startup.SafeURL(cfg.EHRMSBaseURL), Detail: err.Error()}, err
+	}
+	return clientAdapter, startup.Dependency{Name: "eHRMS", Status: "configured", Target: startup.SafeURL(cfg.EHRMSBaseURL), Detail: "employee sync enabled"}, nil
+}
+
+// configuredEHRMSSyncScheduler wires periodic employee refresh only when explicitly enabled.
+func configuredEHRMSSyncScheduler(cfg config.Config, svc jobs.EHRMSEmployeeSyncService, ehrmsConfigured bool, logger *slog.Logger) (*jobs.EHRMSEmployeeSyncScheduler, jobs.EHRMSEmployeeSyncOptions, startup.Dependency) {
+	opts := jobs.EHRMSEmployeeSyncOptions{
+		Interval:   cfg.EHRMSSyncInterval,
+		Mode:       cfg.EHRMSSyncMode,
+		TenantID:   cfg.EHRMSSyncTenantID,
+		AccountID:  cfg.EHRMSSyncAccountID,
+		RunOnStart: cfg.EHRMSSyncRunOnStart,
+	}
+	if !cfg.EHRMSSyncEnabled {
+		return nil, opts, startup.Dependency{Name: "eHRMS Scheduler", Status: "skipped", Target: "EHRMS_SYNC_ENABLED=false", Detail: "periodic employee sync disabled"}
+	}
+	if !ehrmsConfigured {
+		return nil, opts, startup.Dependency{Name: "eHRMS Scheduler", Status: "incomplete", Target: "disabled", Detail: "eHRMS upstream is not configured"}
+	}
+	detail := "interval=" + cfg.EHRMSSyncInterval.String() + " mode=" + strings.TrimSpace(cfg.EHRMSSyncMode)
+	if strings.TrimSpace(cfg.EHRMSSyncMode) == "" {
+		detail = "interval=" + cfg.EHRMSSyncInterval.String() + " mode=upsert"
+	}
+	return jobs.NewEHRMSEmployeeSyncScheduler(svc, logger), opts, startup.Dependency{
+		Name:   "eHRMS Scheduler",
+		Status: "configured",
+		Target: "tenant=" + cfg.EHRMSSyncTenantID + " account=" + cfg.EHRMSSyncAccountID,
+		Detail: detail,
+	}
+}
+
 func oidcMissing(clientID, clientSecret, redirectURL string) []string {
 	missing := []string{}
 	if strings.TrimSpace(clientID) == "" {
@@ -488,13 +556,16 @@ func providerNames(providers map[string]service.OIDCProvider) []string {
 }
 
 func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Logger) {
-	if r.relationshipWriter == nil {
-		return
+	if r.relationshipWriter != nil {
+		// The tuple outbox only runs when OpenFGA is fully configured to accept writes.
+		processor := jobs.NewAuthzOutboxProcessor(r.store, r.relationshipWriter, logger)
+		go processor.Run(ctx, jobs.AuthzOutboxOptions{})
+		logger.Info("openfga outbox worker started")
 	}
-	// The tuple outbox only runs when OpenFGA is fully configured to accept writes.
-	processor := jobs.NewAuthzOutboxProcessor(r.store, r.relationshipWriter, logger)
-	go processor.Run(ctx, jobs.AuthzOutboxOptions{})
-	logger.Info("openfga outbox worker started")
+	if r.ehrmsSyncScheduler != nil {
+		go r.ehrmsSyncScheduler.Run(ctx, r.ehrmsSyncOptions)
+		logger.Info("eHRMS employee sync scheduler started", "interval", r.ehrmsSyncOptions.Interval.String(), "mode", r.ehrmsSyncOptions.Mode, "tenant_id", r.ehrmsSyncOptions.TenantID, "account_id", r.ehrmsSyncOptions.AccountID)
+	}
 }
 
 func (r *apiRuntime) shutdown(logger *slog.Logger) {

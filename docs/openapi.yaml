@@ -55,6 +55,505 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/home:
+    get:
+      summary: Get OA workbench home aggregates
+      responses:
+        "200":
+          description: Home assistants, forms, and clock summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformHomeDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/assistants:
+    get:
+      summary: List OA assistant cards
+      parameters:
+        - {name: tag, in: query, schema: {type: string, enum: [all, workflow, doc, analytics, it]}}
+        - {name: search, in: query, schema: {type: string}}
+      responses:
+        "200":
+          description: Assistant cards and prompt seeds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformAssistantsDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/forms:
+    get:
+      summary: Get employee self-service form catalog and applications
+      responses:
+        "200":
+          description: Form catalog and current-account applications
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformFormsDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/tasks:
+    get:
+      summary: Get current-account task dashboard projection
+      responses:
+        "200":
+          description: Task records, todos, clock summary, and AI panel seeds
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTasksDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/tasks/items:
+    post:
+      summary: Create one current-account task work-log item
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePlatformTaskItemRequest"
+      responses:
+        "201":
+          description: Created task item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTaskItemDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/tasks/items/{id}:
+    patch:
+      summary: Update one current-account task work-log item
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePlatformTaskItemRequest"
+      responses:
+        "200":
+          description: Updated task item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTaskItemDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      summary: Delete one current-account task work-log item
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Deleted task item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTaskItemDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/tasks/todos:
+    post:
+      summary: Create one current-account task todo
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePlatformTaskTodoRequest"
+      responses:
+        "201":
+          description: Created task todo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTaskTodoDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/tasks/todos/{id}:
+    patch:
+      summary: Update one current-account task todo
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePlatformTaskTodoRequest"
+      responses:
+        "200":
+          description: Updated task todo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTaskTodoDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      summary: Delete one current-account task todo
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Deleted task todo
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTaskTodoDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/tasks/todos/{id}/convert:
+    post:
+      summary: Convert one current-account todo into a task work-log item
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ConvertPlatformTaskTodoRequest"
+      responses:
+        "200":
+          description: Created task item
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformTaskItemDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/workspace:
+    get:
+      summary: Get workspace settings aggregate for the OA frontend
+      responses:
+        "200":
+          description: Workspace settings panes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformWorkspaceDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/workspace/admins:
+    post:
+      summary: Grant workspace administrator permissions through the OA frontend namespace
+      parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceAdminRequest"
+      responses:
+        "201":
+          description: Refreshed workspace administrator settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/workspace/admins/{id}/permissions:
+    patch:
+      summary: Replace workspace administrator permissions through the OA frontend namespace
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkspaceAdminPermissionsRequest"
+      responses:
+        "200":
+          description: Refreshed workspace administrator settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/workspace/admins/{id}:
+    delete:
+      summary: Clear workspace-managed administrator permissions through the OA frontend namespace
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Refreshed workspace administrator settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/workspace/forms:
+    post:
+      summary: Create one workspace form-builder template through the OA frontend namespace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveWorkspaceFormDesignRequest"
+      responses:
+        "201":
+          description: Refreshed workspace form design settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformFormDesignDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/workspace/forms/{id}:
+    patch:
+      summary: Patch one workspace form-builder template through the OA frontend namespace
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkspaceFormDesignRequest"
+      responses:
+        "200":
+          description: Refreshed workspace form design settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformFormDesignDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      summary: Soft-delete one workspace form-builder template through the OA frontend namespace
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Refreshed workspace form design settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformFormDesignDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/workspace/audit-logs:
+    get:
+      summary: Get workspace audit-log projection through the OA frontend namespace
+      parameters:
+        - {name: operator_id, in: query, schema: {type: string}}
+        - {name: type, in: query, schema: {type: string}}
+        - {name: from, in: query, schema: {type: string}}
+        - {name: to, in: query, schema: {type: string}}
+        - {name: keyword, in: query, schema: {type: string}}
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Workspace audit-log page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceAuditLogPageDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/workspace/overview:
+    get:
+      summary: Get workspace overview aggregates through the OA frontend namespace
+      parameters:
+        - {name: year, in: query, schema: {type: integer, minimum: 1970}}
+        - {name: month, in: query, schema: {type: integer, minimum: 1, maximum: 12}}
+        - {name: date, in: query, schema: {type: string, format: date}}
+      responses:
+        "200":
+          description: Workspace overview widgets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceOverviewDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/workspace/employees:
+    get:
+      summary: Get workspace employee table through the OA frontend namespace
+      parameters:
+        - {name: department_id, in: query, schema: {type: string}}
+        - {name: department, in: query, schema: {type: string}}
+        - {name: dept, in: query, schema: {type: string}}
+        - {name: status, in: query, schema: {type: string, enum: [在職, 待加入, 已停用]}}
+        - {name: employment_status, in: query, schema: {type: string, enum: [active, probation, leave_suspended, onboarding, resigned, deleted]}}
+        - {name: keyword, in: query, schema: {type: string}}
+        - {name: search, in: query, schema: {type: string}}
+      responses:
+        "200":
+          description: Employee table rows and CSV headers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformWorkspaceEmployeesDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/workspace/organization:
+    get:
+      summary: Get workspace organization tree through the OA frontend namespace
+      responses:
+        "200":
+          description: Employee organization hierarchy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceOrganizationDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/workspace/organization/employees/{id}/manager:
+    patch:
+      summary: Update one employee manager from the workspace organization view
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkspaceOrganizationManagerRequest"
+      responses:
+        "200":
+          description: Updated employee organization hierarchy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceOrganizationDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/ValidationError"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/workspace/attendance:
+    get:
+      summary: Get workspace monthly attendance matrices through the OA frontend namespace
+      parameters:
+        - {name: year, in: query, schema: {type: integer, minimum: 1970}}
+        - {name: month, in: query, schema: {type: integer, minimum: 1, maximum: 12}}
+      responses:
+        "200":
+          description: Monthly attendance and clock matrices
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceAttendanceDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/workspace/turnover:
+    get:
+      summary: Get workspace turnover analysis through the OA frontend namespace
+      parameters:
+        - {name: year, in: query, schema: {type: integer, minimum: 1970}}
+        - {name: month, in: query, schema: {type: integer, minimum: 1, maximum: 12}}
+        - {name: annual_year, in: query, schema: {type: integer, minimum: 1970}}
+        - {name: annualYear, in: query, deprecated: true, schema: {type: integer, minimum: 1970}}
+      responses:
+        "200":
+          description: Monthly and annual turnover analysis
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceTurnoverDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/platform/insights:
+    get:
+      summary: Get insight report dashboard projection
+      parameters:
+        - {name: month, in: query, schema: {type: string, pattern: "^\\d{4}-\\d{2}$"}}
+      responses:
+        "200":
+          description: Insight report payloads
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformInsightsDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees:
     get:
       summary: List employees
@@ -354,6 +853,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmployeeImportSessionDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/hr/employees/ehrms/sync:
+    post:
+      summary: Sync employees from configured eHRMS
+      parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EHRMSEmployeeSyncRequest"
+      responses:
+        "200":
+          description: eHRMS sync summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EHRMSEmployeeSyncDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -809,6 +1332,25 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
+    patch:
+      summary: Update current attendance policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAttendancePolicyRequest"
+      responses:
+        "200":
+          description: Updated current attendance policy projection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttendancePolicyDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/attendance/worksites:
     get:
       summary: List attendance worksites
@@ -1251,11 +1793,157 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+  /v1/workflows/forms:
+    get:
+      summary: List workflow form instances
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+        - {name: status, in: query, schema: {type: string, enum: [all, submitted, pending, approved, rejected, cancelled]}}
+        - {name: template_id, in: query, schema: {type: string}}
+        - {name: template_key, in: query, schema: {type: string}}
+        - {name: applicant_account_id, in: query, schema: {type: string}}
+        - {name: mine, in: query, schema: {type: boolean}}
+      responses:
+        "200":
+          description: Workflow form instance page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workflows/reviews:
+    get:
+      summary: Group workflow form instances for review notification tabs
+      responses:
+        "200":
+          description: Workflow review queue projection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workflows/reviews/bulk-action:
+    post:
+      summary: Apply one workflow review action to multiple form instances
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkReviewFormsRequest"
+      responses:
+        "200":
+          description: Bulk workflow review result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "207":
+          description: Bulk workflow review result with per-item failures
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workflows/forms/drafts:
+    post:
+      summary: Save a workflow form draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveFormDraftRequest"
+      responses:
+        "201":
+          description: Created workflow form draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workflows/forms/{id}:
+    patch:
+      summary: Update a workflow form draft
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateFormDraftRequest"
+      responses:
+        "200":
+          description: Updated workflow form draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      summary: Delete a workflow form draft
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Deleted workflow form draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workflows/forms/{id}/export:
+    get:
+      summary: Download a workflow form instance as a JSON file
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Workflow form JSON file
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/workflows/forms/{id}/submit:
     post:
       summary: Submit a workflow form
       parameters:
         - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitFormRequest"
       responses:
         "201":
           description: Submitted workflow form instance
@@ -1263,6 +1951,11 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/workflows/forms/{id}/approve:
     post:
       summary: Approve a workflow form instance for high-risk action confirmation
@@ -1280,6 +1973,99 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workflows/forms/{id}/reject:
+    post:
+      summary: Reject a workflow form instance
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string}
+      responses:
+        "200":
+          description: Rejected workflow form instance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workflows/forms/{id}/return:
+    post:
+      summary: Return a workflow form instance for applicant revision
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string}
+      responses:
+        "200":
+          description: Returned workflow form instance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workflows/forms/{id}/cancel:
+    post:
+      summary: Cancel a workflow form instance
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CancelFormRequest"
+      responses:
+        "200":
+          description: Cancelled workflow form instance
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workflows/forms/{id}/duplicate:
+    post:
+      summary: Duplicate a workflow form instance into a new draft
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "201":
+          description: Created duplicate workflow form draft
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/agents/runs:
     get:
@@ -1454,6 +2240,298 @@ components:
         subject: {type: string}
         email: {type: string}
         return_url: {type: string}
+    PlatformHomeDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PlatformHomeResponse"
+    PlatformAssistantsDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PlatformAssistantsResponse"
+    PlatformFormsDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PlatformFormsResponse"
+    PlatformTasksDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PlatformTasksResponse"
+    PlatformTaskItemDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PlatformTaskItem"
+    PlatformTaskTodoDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PlatformTaskTodo"
+    PlatformWorkspaceDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PlatformWorkspaceResponse"
+    PlatformFormDesignDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PlatformFormDesign"
+    PlatformWorkspaceEmployeesDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PlatformWorkspaceEmployeesResponse"
+    PlatformInsightsDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PlatformInsightsResponse"
+    PlatformHomeResponse:
+      type: object
+      required: [assistants, form_columns, clock_summary]
+      additionalProperties: true
+      properties:
+        assistants:
+          type: array
+          items: {$ref: "#/components/schemas/PlatformAssistant"}
+        form_columns:
+          type: array
+          items: {$ref: "#/components/schemas/PlatformFormColumn"}
+        clock_summary:
+          $ref: "#/components/schemas/PlatformClockSummary"
+    PlatformAssistant:
+      type: object
+      required: [id, emoji, title, desc]
+      properties:
+        id: {type: string}
+        emoji: {type: string}
+        title: {type: string}
+        desc: {type: string}
+        tag: {type: string, enum: [workflow, doc, analytics, it]}
+    PlatformFormColumn:
+      type: object
+      required: [title, emoji, items]
+      properties:
+        title: {type: string}
+        emoji: {type: string}
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/PlatformFormItem"}
+    PlatformFormItem:
+      type: object
+      required: [id, emoji, title, desc]
+      properties:
+        id: {type: string}
+        emoji: {type: string}
+        title: {type: string}
+        desc: {type: string}
+    PlatformClockSummary:
+      type: object
+      required: [date_label, location, monthly_attendance_days, monthly_hours, leave_days]
+      properties:
+        date_label: {type: string}
+        checked_in_at: {type: string, nullable: true}
+        checked_out_at: {type: string, nullable: true}
+        location: {type: string}
+        monthly_attendance_days: {type: integer}
+        monthly_hours: {type: number}
+        leave_days: {type: number}
+    PlatformAssistantsResponse:
+      type: object
+      required: [data, total, chat_messages, quick_prompts]
+      additionalProperties: true
+      properties:
+        data:
+          type: array
+          items: {$ref: "#/components/schemas/PlatformAssistant"}
+        total: {type: integer}
+        chat_messages:
+          type: array
+          items: {$ref: "#/components/schemas/PlatformChatMessage"}
+        quick_prompts:
+          type: array
+          items: {type: string}
+    PlatformChatMessage:
+      type: object
+      required: [id, role, avatar, content]
+      properties:
+        id: {type: string}
+        role: {type: string, enum: [assistant, user]}
+        avatar: {type: string}
+        content: {type: string}
+    PlatformFormsResponse:
+      type: object
+      additionalProperties: true
+    PlatformTasksResponse:
+      type: object
+      additionalProperties: true
+      required: [records, todos, clock_summary, ai_messages, quick_prompts]
+      properties:
+        records:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformTaskRecord"
+        todos:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformTaskTodo"
+        clock_summary:
+          $ref: "#/components/schemas/PlatformClockSummary"
+        ai_messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformChatMessage"
+        quick_prompts:
+          type: array
+          items: {type: string}
+    PlatformTaskRecord:
+      type: object
+      required: [date, weekday, total_hours, items]
+      properties:
+        date: {type: string, example: "2026/07/01"}
+        weekday: {type: string}
+        total_hours: {type: number}
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformTaskItem"
+    PlatformTaskItem:
+      type: object
+      required: [id, title, category, product, hours, note]
+      properties:
+        id: {type: string}
+        title: {type: string}
+        category: {type: string}
+        product: {type: string}
+        hours: {type: number}
+        note: {type: string}
+    PlatformTaskTodo:
+      type: object
+      required: [id, text, done, date]
+      properties:
+        id: {type: string}
+        text: {type: string}
+        done: {type: boolean}
+        date: {type: string}
+    PlatformWorkspaceResponse:
+      type: object
+      additionalProperties: true
+    PlatformFormDesign:
+      type: object
+      required: [categories, forms, builder]
+      properties:
+        categories:
+          type: array
+          items: {type: string}
+        forms:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformFormDesignForm"
+        builder:
+          $ref: "#/components/schemas/PlatformFormBuilder"
+    PlatformFormDesignForm:
+      type: object
+      required: [id, icon, name, category, flow, enabled, added_this_month, updated_at]
+      properties:
+        id: {type: string}
+        icon: {type: string}
+        name: {type: string}
+        category: {type: string}
+        desc: {type: string}
+        flow: {type: string}
+        enabled: {type: boolean}
+        added_this_month: {type: boolean}
+        updated_at: {type: string}
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformFormBuilderField"
+        stages:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformFormBuilderStage"
+    PlatformFormBuilder:
+      type: object
+      required: [layouts, field_types, fields, stages]
+      properties:
+        layouts:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformFormBuilderLayout"
+        field_types:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformFormBuilderFieldType"
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformFormBuilderField"
+        stages:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformFormBuilderStage"
+    PlatformFormBuilderLayout:
+      type: object
+      required: [key, label, columns]
+      properties:
+        key: {type: string}
+        label: {type: string}
+        columns:
+          type: array
+          items: {type: string}
+    PlatformFormBuilderFieldType:
+      type: object
+      required: [key, label, icon]
+      properties:
+        key: {type: string}
+        label: {type: string}
+        icon: {type: string}
+    PlatformFormBuilderField:
+      type: object
+      required: [id, type, label, placeholder, required]
+      properties:
+        id: {type: string}
+        type: {type: string}
+        label: {type: string}
+        placeholder: {type: string}
+        required: {type: boolean}
+    PlatformFormBuilderStage:
+      type: object
+      required: [id, type, label, detail]
+      properties:
+        id: {type: string}
+        type: {type: string, enum: [approver, condition, parallel, notify]}
+        label: {type: string}
+        detail: {type: string}
+    PlatformWorkspaceEmployeesResponse:
+      type: object
+      required: [employees, csv_headers]
+      properties:
+        employees:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceEmployeeCard"
+        csv_headers:
+          type: array
+          items:
+            type: string
+    PlatformInsightsResponse:
+      type: object
+      additionalProperties: true
     EmployeeDataResponse:
       type: object
       required: [data]
@@ -1496,6 +2574,12 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/EmployeeImportSession"
+    EHRMSEmployeeSyncDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EHRMSEmployeeSyncResponse"
     EmployeeExportDataResponse:
       type: object
       required: [data]
@@ -1724,6 +2808,24 @@ components:
               quota: {type: string}
               rule: {type: string}
               proof: {type: string}
+    UpdateAttendancePolicyRequest:
+      allOf:
+        - $ref: "#/components/schemas/AttendancePolicy"
+    WorkspaceEmployeeCard:
+      type: object
+      required: [id, avatar, name_zh, name_en, email, dept, title, type, phone, status, hire_date]
+      properties:
+        id: {type: string}
+        avatar: {type: string}
+        name_zh: {type: string}
+        name_en: {type: string}
+        email: {type: string}
+        dept: {type: string}
+        title: {type: string}
+        type: {type: string}
+        phone: {type: string}
+        status: {type: string, enum: [在職, 待加入, 已停用]}
+        hire_date: {type: string}
     WorkspaceOverview:
       type: object
       required: [month, year, month_number, hr_summary, attendance, todo_categories]
@@ -1915,7 +3017,9 @@ components:
         id: {type: string}
         time: {type: string}
         operator: {type: string}
-        type: {type: string}
+        type:
+          type: string
+          enum: [員工管理, 組織架構, 假勤制度, 表單設計, 管理員設定, 系統]
         action: {type: string}
         detail: {type: string}
     WorkspaceDate:
@@ -2065,7 +3169,7 @@ components:
         accuracy_meters: {type: number, format: double}
         distance_meters: {type: number, format: double}
         record_status: {type: string, enum: [accepted, rejected]}
-        rejection_reason: {type: string, enum: [duplicate, outside_geofence]}
+        rejection_reason: {type: string, enum: [duplicate, invalid_sequence, low_location_accuracy, outside_geofence, outside_time_window]}
         source: {type: string, enum: [geofence, manual_correction]}
         device_id: {type: string}
         device_info:
@@ -2077,11 +3181,17 @@ components:
       type: object
       required: [direction, latitude, longitude]
       properties:
-        employee_id: {type: string}
+        employee_id:
+          type: string
+          description: Optional compatibility field; when provided it must match the current account's employee_id.
         direction: {type: string, enum: [clock_in, clock_out]}
         latitude: {type: number, format: double}
         longitude: {type: number, format: double}
-        accuracy_meters: {type: number, format: double, minimum: 0}
+        accuracy_meters:
+          type: number
+          format: double
+          minimum: 0
+          description: Values above the server accuracy threshold are recorded as rejected low_location_accuracy attempts.
         location_source: {type: string}
         device_id: {type: string}
         device_info:
@@ -2131,6 +3241,14 @@ components:
       properties:
         mode: {type: string, enum: [create, update, upsert], default: create}
         failure_policy: {type: string, enum: [all_or_nothing], default: all_or_nothing}
+    EHRMSEmployeeSyncRequest:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [create, update, upsert]
+          default: upsert
+          description: create rejects existing employee numbers, update rejects missing employee numbers, upsert creates or updates by employee number.
     BatchDeleteEmployeesRequest:
       type: object
       required: [employee_ids, reason]
@@ -2140,6 +3258,180 @@ components:
           minItems: 1
           items: {type: string}
         reason: {type: string}
+    BulkReviewFormsRequest:
+      type: object
+      required: [form_instance_ids, action]
+      properties:
+        form_instance_ids:
+          type: array
+          minItems: 1
+          items: {type: string}
+        action:
+          type: string
+          enum: [approve, reject, return]
+        reason: {type: string}
+    SaveFormDraftRequest:
+      type: object
+      required: [template_key]
+      properties:
+        template_key: {type: string}
+        payload:
+          type: object
+          additionalProperties: true
+    UpdateFormDraftRequest:
+      type: object
+      properties:
+        template_key:
+          type: string
+          description: Optional template key when changing the draft template.
+        payload:
+          type: object
+          additionalProperties: true
+    SubmitFormRequest:
+      type: object
+      properties:
+        template_key:
+          type: string
+          description: Optional when the template key is supplied by the path id.
+        payload:
+          type: object
+          additionalProperties: true
+    CancelFormRequest:
+      type: object
+      properties:
+        reason: {type: string}
+    UpdateWorkspaceOrganizationManagerRequest:
+      type: object
+      required: [parent_id]
+      properties:
+        parent_id:
+          type: string
+          description: Employee-facing manager id, internal employee id, or __none__ to clear the manager.
+    WorkspaceAdminPermissionsInput:
+      type: object
+      additionalProperties:
+        type: string
+        enum: [none, view, edit]
+      example:
+        employees: edit
+        salary: view
+        organization: edit
+        leave-policy: view
+        forms: edit
+        admins: none
+    CreateWorkspaceAdminRequest:
+      type: object
+      required: [employee_id, permissions]
+      properties:
+        employee_id:
+          type: string
+          description: Employee-facing id from workspace admin candidates.
+        permissions:
+          $ref: "#/components/schemas/WorkspaceAdminPermissionsInput"
+    UpdateWorkspaceAdminPermissionsRequest:
+      type: object
+      required: [permissions]
+      properties:
+        permissions:
+          $ref: "#/components/schemas/WorkspaceAdminPermissionsInput"
+    SaveWorkspaceFormDesignRequest:
+      type: object
+      required: [name]
+      properties:
+        id:
+          type: string
+          description: Optional stable template key. When omitted, the backend generates a custom key from the name.
+        icon: {type: string}
+        name: {type: string}
+        category: {type: string}
+        desc: {type: string}
+        enabled: {type: boolean}
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformFormBuilderField"
+        stages:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformFormBuilderStage"
+    UpdateWorkspaceFormDesignRequest:
+      type: object
+      properties:
+        icon: {type: string}
+        name: {type: string}
+        category: {type: string}
+        desc: {type: string}
+        enabled: {type: boolean}
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformFormBuilderField"
+        stages:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformFormBuilderStage"
+    CreatePlatformTaskItemRequest:
+      type: object
+      required: [title, hours]
+      properties:
+        work_date:
+          type: string
+          description: YYYY/MM/DD or YYYY-MM-DD. Defaults to today.
+        title: {type: string}
+        category: {type: string}
+        product: {type: string}
+        hours:
+          type: number
+          minimum: 0.5
+          maximum: 24
+          description: Must use 0.5 hour increments.
+        note: {type: string}
+    UpdatePlatformTaskItemRequest:
+      type: object
+      properties:
+        work_date:
+          type: string
+          description: YYYY/MM/DD or YYYY-MM-DD.
+        title: {type: string}
+        category: {type: string}
+        product: {type: string}
+        hours:
+          type: number
+          minimum: 0.5
+          maximum: 24
+          description: Must use 0.5 hour increments.
+        note: {type: string}
+    CreatePlatformTaskTodoRequest:
+      type: object
+      required: [text]
+      properties:
+        text: {type: string}
+        due_date:
+          type: string
+          description: Optional YYYY/MM/DD or YYYY-MM-DD due date.
+    UpdatePlatformTaskTodoRequest:
+      type: object
+      properties:
+        text: {type: string}
+        due_date:
+          type: string
+          description: Optional YYYY/MM/DD or YYYY-MM-DD due date.
+        done: {type: boolean}
+    ConvertPlatformTaskTodoRequest:
+      type: object
+      properties:
+        work_date:
+          type: string
+          description: YYYY/MM/DD or YYYY-MM-DD. Defaults to today.
+        title: {type: string}
+        category: {type: string}
+        product: {type: string}
+        hours:
+          type: number
+          minimum: 0.5
+          maximum: 24
+          description: Defaults to 0.5 when omitted.
+        note: {type: string}
     InviteEmployeeRequest:
       type: object
       properties:
@@ -2530,21 +3822,39 @@ components:
         created_at: {type: string, format: date-time}
         expires_at: {type: string, format: date-time}
         confirmed_at: {type: string, format: date-time}
+    EHRMSEmployeeSyncResponse:
+      type: object
+      properties:
+        fetched: {type: integer}
+        created: {type: integer}
+        updated: {type: integer}
+        failed: {type: integer}
+        departments_upserted: {type: integer}
+        mode: {type: string, enum: [create, update, upsert]}
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/BatchEmployeeResult"
+        row_errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/SyncRowError"
     BatchEmployeeResponse:
       type: object
       properties:
         results:
           type: array
           items:
-            type: object
-            properties:
-              employee_id: {type: string}
-              success: {type: boolean}
-              action:
-                type: string
-                enum: [soft_deleted, soft_deleted_account_disabled]
-              code: {type: string}
-              message: {type: string}
+            $ref: "#/components/schemas/BatchEmployeeResult"
+    BatchEmployeeResult:
+      type: object
+      properties:
+        row_number: {type: integer}
+        employee_id: {type: string}
+        success: {type: boolean}
+        action: {type: string}
+        code: {type: string}
+        message: {type: string}
     FieldError:
       type: object
       required: [field, code, message]
@@ -2572,6 +3882,13 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/FieldError"
+    SyncRowError:
+      type: object
+      properties:
+        row_number: {type: integer}
+        field: {type: string}
+        code: {type: string}
+        message: {type: string}
     Error:
       type: object
       required: [error]

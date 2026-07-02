@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/csv"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -1386,7 +1387,7 @@ func TestSelfScopedLeaveReadOnlyReturnsCurrentEmployeeItems(t *testing.T) {
 }
 
 func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
-	_, svc, employeeCtx, _ := newAttendanceFixture(t)
+	_, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
 
 	accepted, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
 		Direction:      "clock_in",
@@ -1406,6 +1407,7 @@ func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
 		t.Fatalf("expected location_source audit evidence, got %v", got)
 	}
 
+	setNow(attendanceFixtureClockOutTime())
 	outside, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
 		Direction: "clock_out",
 		Latitude:  25.100000,
@@ -1418,6 +1420,7 @@ func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
 		t.Fatalf("expected outside geofence rejected attempt, got %+v", outside)
 	}
 
+	setNow(attendanceFixtureClockInTime().Add(30 * time.Minute))
 	duplicate, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
 		Direction: "clock_in",
 		Latitude:  25.033964,
@@ -1430,6 +1433,7 @@ func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
 		t.Fatalf("expected duplicate rejected attempt, got %+v", duplicate)
 	}
 
+	setNow(attendanceFixtureClockOutTime())
 	status, err := svc.Attendance().AttendanceClockStatus(employeeCtx)
 	if err != nil {
 		t.Fatal(err)
@@ -1439,8 +1443,105 @@ func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
 	}
 }
 
+func TestAttendanceClockRejectsWindowSequenceAndLowAccuracy(t *testing.T) {
+	_, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
+
+	setNow(time.Date(2026, 6, 9, 23, 30, 0, 0, time.UTC))
+	outsideWindow, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction: "clock_in",
+		Latitude:  25.033964,
+		Longitude: 121.564468,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if outsideWindow.WorkDate != "2026-06-10" || outsideWindow.RecordStatus != "rejected" || outsideWindow.RejectionReason != "outside_time_window" {
+		t.Fatalf("expected local-date outside-window rejection, got %+v", outsideWindow)
+	}
+
+	setNow(attendanceFixtureClockOutTime())
+	invalidSequence, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction: "clock_out",
+		Latitude:  25.033964,
+		Longitude: 121.564468,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invalidSequence.RecordStatus != "rejected" || invalidSequence.RejectionReason != "invalid_sequence" {
+		t.Fatalf("expected clock-out before clock-in rejection, got %+v", invalidSequence)
+	}
+
+	_, svc, employeeCtx, _, setNow = newAttendanceFixture(t)
+	setNow(attendanceFixtureClockInTime())
+	lowAccuracy, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_in",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 250,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lowAccuracy.RecordStatus != "rejected" || lowAccuracy.RejectionReason != "low_location_accuracy" {
+		t.Fatalf("expected low accuracy rejection, got %+v", lowAccuracy)
+	}
+}
+
+func TestAttendanceClockSupportsOvernightShiftWorkDate(t *testing.T) {
+	store, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
+	now := attendanceFixtureClockInTime()
+	_ = store.UpsertAttendanceShift(context.Background(), domain.AttendanceShift{
+		ID:            "ash-1",
+		TenantID:      "tenant-1",
+		Name:          "Night Shift",
+		ClockInStart:  "22:00",
+		ClockInEnd:    "23:59",
+		ClockOutStart: "05:00",
+		ClockOutEnd:   "07:00",
+		Status:        "active",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
+
+	setNow(time.Date(2026, 6, 10, 14, 30, 0, 0, time.UTC))
+	clockIn, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_in",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clockIn.WorkDate != "2026-06-10" || clockIn.RecordStatus != "accepted" {
+		t.Fatalf("expected accepted night clock-in on 2026-06-10, got %+v", clockIn)
+	}
+
+	setNow(time.Date(2026, 6, 10, 22, 0, 0, 0, time.UTC))
+	clockOut, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_out",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clockOut.WorkDate != clockIn.WorkDate || clockOut.RecordStatus != "accepted" {
+		t.Fatalf("expected accepted night clock-out on same work date, got in=%+v out=%+v", clockIn, clockOut)
+	}
+	status, err := svc.Attendance().AttendanceClockStatus(employeeCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.WorkDate != "2026-06-10" || status.NextAction != "complete" || status.ClockIn == nil || status.ClockOut == nil {
+		t.Fatalf("expected completed night-shift status for previous work date, got %+v", status)
+	}
+}
+
 func TestAttendanceClockSelfScopeCannotTargetAnotherEmployee(t *testing.T) {
-	_, svc, employeeCtx, _ := newAttendanceFixture(t)
+	_, svc, employeeCtx, adminCtx, _ := newAttendanceFixture(t)
 
 	_, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
 		EmployeeID: "emp-2",
@@ -1451,11 +1552,21 @@ func TestAttendanceClockSelfScopeCannotTargetAnotherEmployee(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected self-scoped account to be forbidden from clocking another employee")
 	}
+
+	_, err = svc.Attendance().CreateAttendanceClockRecord(adminCtx, domain.CreateAttendanceClockRecordInput{
+		EmployeeID: "emp-1",
+		Direction:  "clock_in",
+		Latitude:   25.033964,
+		Longitude:  121.564468,
+	})
+	if err == nil {
+		t.Fatal("expected admin account to use correction flow instead of direct employee clocking")
+	}
 }
 
 func TestAttendanceCorrectionApproveCreatesManualRecordAndRejectDoesNot(t *testing.T) {
-	store, svc, employeeCtx, adminCtx := newAttendanceFixture(t)
-	requestedAt := time.Now().UTC().Add(-time.Hour).Format(time.RFC3339)
+	store, svc, employeeCtx, adminCtx, _ := newAttendanceFixture(t)
+	requestedAt := attendanceFixtureClockInTime().Format(time.RFC3339)
 
 	pending, err := svc.Attendance().CreateAttendanceCorrection(employeeCtx, domain.CreateAttendanceCorrectionInput{
 		Direction:          "clock_in",
@@ -1486,7 +1597,7 @@ func TestAttendanceCorrectionApproveCreatesManualRecordAndRejectDoesNot(t *testi
 
 	rejected, err := svc.Attendance().CreateAttendanceCorrection(employeeCtx, domain.CreateAttendanceCorrectionInput{
 		Direction:          "clock_out",
-		RequestedClockedAt: time.Now().UTC().Add(-30 * time.Minute).Format(time.RFC3339),
+		RequestedClockedAt: attendanceFixtureClockOutTime().Format(time.RFC3339),
 		Reason:             "forgot to clock out",
 	})
 	if err != nil {
@@ -1558,6 +1669,108 @@ func TestCreateLeaveRequestReservesLeaveBalance(t *testing.T) {
 	}
 }
 
+func TestLeaveWorkflowReviewUpdatesRequestAndBalance(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-self",
+		TenantID: "tenant-1",
+		Name:     "Self Service",
+		Permissions: []domain.Permission{
+			{Resource: "attendance.leave", Action: "create", Scope: "self"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workflow-reviewer",
+		TenantID: "tenant-1",
+		Name:     "Workflow Reviewer",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_instance", Action: "read", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "update", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "approve", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-employee",
+		TenantID:               "tenant-1",
+		DisplayName:            "Employee One",
+		EmployeeID:             "emp-1",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-self"},
+		CreatedAt:              now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-reviewer",
+		TenantID:               "tenant-1",
+		DisplayName:            "Reviewer",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workflow-reviewer"},
+		CreatedAt:              now,
+	})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now})
+	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 24, UpdatedAt: now})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	employeeCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"}
+	reviewerCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-reviewer"}
+
+	approvedRequest, err := svc.Attendance().CreateLeaveRequest(employeeCtx, domain.CreateLeaveRequestInput{
+		LeaveType: "annual",
+		StartAt:   "2026-06-10",
+		EndAt:     "2026-06-11",
+		Hours:     8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Workflow().ApproveForm(reviewerCtx, approvedRequest.FormInstanceID, domain.ApproveFormInput{}); err != nil {
+		t.Fatal(err)
+	}
+	storedApproved, ok, err := store.GetLeaveRequest(context.Background(), "tenant-1", approvedRequest.ID)
+	if err != nil || !ok {
+		t.Fatalf("approved leave request missing ok=%v err=%v", ok, err)
+	}
+	if storedApproved.Status != "approved" {
+		t.Fatalf("expected approved leave request, got %+v", storedApproved)
+	}
+	balance, ok, err := store.GetLeaveBalance(context.Background(), "tenant-1", "lb-1")
+	if err != nil || !ok {
+		t.Fatalf("leave balance missing ok=%v err=%v", ok, err)
+	}
+	if balance.RemainingHours != 16 {
+		t.Fatalf("approval should keep reserved hours deducted, got %v", balance.RemainingHours)
+	}
+
+	rejectedRequest, err := svc.Attendance().CreateLeaveRequest(employeeCtx, domain.CreateLeaveRequestInput{
+		LeaveType: "annual",
+		StartAt:   "2026-06-12",
+		EndAt:     "2026-06-13",
+		Hours:     8,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Workflow().RejectForm(reviewerCtx, rejectedRequest.FormInstanceID, domain.RejectFormInput{Reason: "missing attachment"}); err != nil {
+		t.Fatal(err)
+	}
+	storedRejected, ok, err := store.GetLeaveRequest(context.Background(), "tenant-1", rejectedRequest.ID)
+	if err != nil || !ok {
+		t.Fatalf("rejected leave request missing ok=%v err=%v", ok, err)
+	}
+	if storedRejected.Status != "rejected" {
+		t.Fatalf("expected rejected leave request, got %+v", storedRejected)
+	}
+	balance, ok, err = store.GetLeaveBalance(context.Background(), "tenant-1", "lb-1")
+	if err != nil || !ok {
+		t.Fatalf("leave balance missing ok=%v err=%v", ok, err)
+	}
+	if balance.RemainingHours != 16 {
+		t.Fatalf("rejection should release reserved hours, got %v", balance.RemainingHours)
+	}
+}
+
 func TestCreateLeaveRequestRejectsInsufficientLeaveBalance(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1614,6 +1827,373 @@ func TestCreateLeaveRequestRejectsInsufficientLeaveBalance(t *testing.T) {
 	}
 	if balance.RemainingHours != 4 {
 		t.Fatalf("expected remaining balance to stay 4, got %v", balance.RemainingHours)
+	}
+}
+
+func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workflow-self",
+		TenantID: "tenant-1",
+		Name:     "Workflow Self Service",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_instance", Action: "read", Scope: "self"},
+			{Resource: "workflow.form_instance", Action: "create", Scope: "self"},
+			{Resource: "workflow.form_instance", Action: "submit", Scope: "self"},
+			{Resource: "workflow.form_instance", Action: "update", Scope: "self"},
+			{Resource: "workflow.form_instance", Action: "delete", Scope: "self"},
+			{Resource: "platform.forms", Action: "read", Scope: "self"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-self",
+		TenantID:               "tenant-1",
+		DisplayName:            "Self User",
+		EmployeeID:             "emp-self",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workflow-self"},
+		CreatedAt:              now,
+	})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:        "emp-self",
+		TenantID:  "tenant-1",
+		Name:      "Self User",
+		AccountID: "acct-self",
+		Status:    "active",
+		CreatedAt: now,
+	})
+	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
+		ID:        "ft-leave",
+		TenantID:  "tenant-1",
+		Key:       "leave-request",
+		Name:      "请假申请单",
+		CreatedAt: now,
+	})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-self"}
+
+	draft, err := svc.Workflow().SaveFormDraft(ctx, domain.SaveFormDraftInput{
+		TemplateKey: "leave-request",
+		Payload:     map[string]any{"desc": "draft leave"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if draft.Status != "draft" {
+		t.Fatalf("expected draft status, got %+v", draft)
+	}
+	updated, err := svc.Workflow().UpdateFormDraft(ctx, draft.ID, domain.UpdateFormDraftInput{
+		Payload: map[string]any{"desc": "updated leave"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Payload["desc"] != "updated leave" {
+		t.Fatalf("expected updated payload, got %+v", updated.Payload)
+	}
+	forms, err := svc.Platform().Forms(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(forms.Drafts) != 1 || forms.Drafts[0].ID != draft.ID || forms.Drafts[0].Summary != "updated leave" {
+		t.Fatalf("expected draft projection, got %+v", forms.Drafts)
+	}
+
+	submitted, err := svc.Workflow().SubmitForm(ctx, domain.SubmitFormInput{
+		TemplateKey: draft.ID,
+		Payload:     map[string]any{"desc": "submitted leave"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if submitted.ID != draft.ID || submitted.Status != "submitted" || submitted.Payload["desc"] != "submitted leave" {
+		t.Fatalf("expected submitted draft, got %+v", submitted)
+	}
+	forms, err = svc.Platform().Forms(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(forms.Drafts) != 0 || len(forms.Applications) != 1 || forms.Applications[0].ID != draft.ID {
+		t.Fatalf("expected one application and no drafts, got applications=%+v drafts=%+v", forms.Applications, forms.Drafts)
+	}
+
+	duplicate, err := svc.Workflow().DuplicateForm(ctx, submitted.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if duplicate.Status != "draft" || duplicate.ID == submitted.ID || duplicate.Payload["desc"] != "submitted leave" {
+		t.Fatalf("expected duplicated draft, got %+v", duplicate)
+	}
+	exported, err := svc.Workflow().ExportForm(ctx, submitted.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if exported.FileName == "" || !strings.Contains(string(exported.Body), "submitted leave") {
+		t.Fatalf("expected exported JSON to include submitted payload, got name=%q body=%s", exported.FileName, string(exported.Body))
+	}
+	cancelled, err := svc.Workflow().CancelForm(ctx, submitted.ID, domain.CancelFormInput{Reason: "no longer needed"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cancelled.Status != "cancelled" {
+		t.Fatalf("expected cancelled status, got %+v", cancelled)
+	}
+	deleted, err := svc.Workflow().DeleteFormDraft(ctx, duplicate.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted.ID != duplicate.ID {
+		t.Fatalf("expected deleted draft, got %+v", deleted)
+	}
+	if _, ok, err := store.GetFormInstance(context.Background(), "tenant-1", duplicate.ID); err != nil || ok {
+		t.Fatalf("expected duplicate draft to be removed ok=%v err=%v", ok, err)
+	}
+}
+
+func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workflow-admin",
+		TenantID: "tenant-1",
+		Name:     "Workflow Admin",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_instance", Action: "read", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "update", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "approve", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-admin",
+		TenantID:               "tenant-1",
+		DisplayName:            "Admin Reviewer",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workflow-admin"},
+		CreatedAt:              now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:          "acct-applicant",
+		TenantID:    "tenant-1",
+		DisplayName: "Applicant One",
+		Status:      "active",
+		CreatedAt:   now,
+	})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:        "emp-applicant",
+		TenantID:  "tenant-1",
+		Name:      "Applicant One",
+		AccountID: "acct-applicant",
+		Status:    "active",
+		CreatedAt: now,
+	})
+	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
+		ID:        "ft-leave",
+		TenantID:  "tenant-1",
+		Key:       "leave-request",
+		Name:      "请假申请单",
+		CreatedAt: now,
+	})
+	_ = store.UpsertFormInstance(context.Background(), domain.FormInstance{
+		ID:                 "fi-leave",
+		TenantID:           "tenant-1",
+		TemplateID:         "ft-leave",
+		ApplicantAccountID: "acct-applicant",
+		Status:             "submitted",
+		Payload: map[string]any{
+			"desc":               "申请一天特休",
+			"notify_account_ids": []any{"acct-admin"},
+		},
+		SubmittedAt: now,
+		UpdatedAt:   now,
+	})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
+
+	queue, err := svc.Workflow().ReviewQueue(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queue.PendingReview) != 1 || len(queue.Notified) != 1 {
+		t.Fatalf("expected one pending and notified item, got %+v", queue)
+	}
+	if queue.PendingReview[0].Title != "请假申请单" || queue.PendingReview[0].Desc != "申请一天特休" {
+		t.Fatalf("unexpected review projection: %+v", queue.PendingReview[0])
+	}
+
+	rejected, err := svc.Workflow().RejectForm(ctx, "fi-leave", domain.RejectFormInput{Reason: "missing attachment"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rejected.Status != "rejected" || rejected.ApprovedBy != "acct-admin" {
+		t.Fatalf("expected rejected form instance, got %+v", rejected)
+	}
+	review, _ := rejected.Payload["_review"].(map[string]any)
+	if review["type"] != "reject" || review["comment"] != "missing attachment" {
+		t.Fatalf("expected rejection metadata in payload, got %+v", rejected.Payload)
+	}
+
+	queue, err = svc.Workflow().ReviewQueue(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(queue.PendingReview) != 0 || len(queue.AlreadyReviewed) != 1 {
+		t.Fatalf("expected rejected item to move to reviewed bucket, got %+v", queue)
+	}
+	if got := queue.AlreadyReviewed[0].ReviewLog; len(got) != 1 || got[0].Type != "reject" || got[0].Comment != "missing attachment" {
+		t.Fatalf("unexpected review log: %+v", got)
+	}
+}
+
+func TestWorkflowBulkReviewFormsReturnsPerItemResults(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workflow-admin",
+		TenantID: "tenant-1",
+		Name:     "Workflow Admin",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_instance", Action: "read", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "update", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "approve", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-admin",
+		TenantID:               "tenant-1",
+		DisplayName:            "Admin Reviewer",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workflow-admin"},
+		CreatedAt:              now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:          "acct-applicant",
+		TenantID:    "tenant-1",
+		DisplayName: "Applicant One",
+		Status:      "active",
+		CreatedAt:   now,
+	})
+	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
+		ID:        "ft-general",
+		TenantID:  "tenant-1",
+		Key:       "general",
+		Name:      "通用签呈",
+		CreatedAt: now,
+	})
+	for _, item := range []domain.FormInstance{
+		{ID: "fi-approve", TenantID: "tenant-1", TemplateID: "ft-general", ApplicantAccountID: "acct-applicant", Status: "submitted", SubmittedAt: now, UpdatedAt: now},
+		{ID: "fi-return", TenantID: "tenant-1", TemplateID: "ft-general", ApplicantAccountID: "acct-applicant", Status: "submitted", SubmittedAt: now, UpdatedAt: now},
+		{ID: "fi-direct-return", TenantID: "tenant-1", TemplateID: "ft-general", ApplicantAccountID: "acct-applicant", Status: "submitted", SubmittedAt: now, UpdatedAt: now},
+	} {
+		_ = store.UpsertFormInstance(context.Background(), item)
+	}
+	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
+
+	approved, err := svc.Workflow().BulkReviewForms(ctx, domain.BulkReviewFormsInput{
+		FormInstanceIDs: []string{"fi-approve", "fi-missing"},
+		Action:          "approve",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(approved.Results) != 2 || !approved.Results[0].Success || approved.Results[1].Success || approved.Results[1].Code != "not_found" {
+		t.Fatalf("unexpected approve batch result: %+v", approved.Results)
+	}
+	approveInstance, ok, err := store.GetFormInstance(context.Background(), "tenant-1", "fi-approve")
+	if err != nil || !ok {
+		t.Fatalf("approved instance lookup failed ok=%v err=%v", ok, err)
+	}
+	if approveInstance.Status != "approved" || approveInstance.ApprovedBy != "acct-admin" {
+		t.Fatalf("expected approved instance, got %+v", approveInstance)
+	}
+
+	returned, err := svc.Workflow().BulkReviewForms(ctx, domain.BulkReviewFormsInput{
+		FormInstanceIDs: []string{"fi-return"},
+		Action:          "return",
+		Reason:          "please add attachment",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(returned.Results) != 1 || !returned.Results[0].Success || returned.Results[0].Action != "return" {
+		t.Fatalf("unexpected return batch result: %+v", returned.Results)
+	}
+	returnInstance, ok, err := store.GetFormInstance(context.Background(), "tenant-1", "fi-return")
+	if err != nil || !ok {
+		t.Fatalf("returned instance lookup failed ok=%v err=%v", ok, err)
+	}
+	review, _ := returnInstance.Payload["_review"].(map[string]any)
+	if returnInstance.Status != "rejected" || review["type"] != "return" || review["comment"] != "please add attachment" {
+		t.Fatalf("expected returned review metadata, got status=%s payload=%+v", returnInstance.Status, returnInstance.Payload)
+	}
+
+	directReturn, err := svc.Workflow().ReturnForm(ctx, "fi-direct-return", domain.ReturnFormInput{Reason: "please update approver"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	review, _ = directReturn.Payload["_review"].(map[string]any)
+	if directReturn.Status != "rejected" || review["type"] != "return" || review["comment"] != "please update approver" {
+		t.Fatalf("expected direct return metadata, got status=%s payload=%+v", directReturn.Status, directReturn.Payload)
+	}
+}
+
+func TestWorkflowFormInstanceReadSelfScopeOnlyReturnsOwnItems(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workflow-self",
+		TenantID: "tenant-1",
+		Name:     "Workflow Self",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_instance", Action: "read", Scope: "self"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-self",
+		TenantID:               "tenant-1",
+		DisplayName:            "Self User",
+		EmployeeID:             "emp-self",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workflow-self"},
+		CreatedAt:              now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:          "acct-other",
+		TenantID:    "tenant-1",
+		DisplayName: "Other User",
+		Status:      "active",
+		CreatedAt:   now,
+	})
+	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
+		ID:        "ft-general",
+		TenantID:  "tenant-1",
+		Key:       "general",
+		Name:      "通用签呈",
+		CreatedAt: now,
+	})
+	for _, item := range []domain.FormInstance{
+		{ID: "fi-self", TenantID: "tenant-1", TemplateID: "ft-general", ApplicantAccountID: "acct-self", Status: "submitted", SubmittedAt: now, UpdatedAt: now},
+		{ID: "fi-other", TenantID: "tenant-1", TemplateID: "ft-general", ApplicantAccountID: "acct-other", Status: "submitted", SubmittedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute)},
+	} {
+		_ = store.UpsertFormInstance(context.Background(), item)
+	}
+	svc := service.New(store)
+
+	page, err := svc.Workflow().ListFormInstancePage(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-self"}, domain.FormInstanceQuery{}, domain.PageRequest{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 || page.Items[0].ID != "fi-self" {
+		t.Fatalf("expected self scope to return only own form instance, got %+v", page)
 	}
 }
 
@@ -2112,6 +2692,124 @@ func TestEmployeeImportConfirmRevalidatesBatchDuplicates(t *testing.T) {
 	}
 	if len(storedEmployees) != 0 {
 		t.Fatalf("duplicate batch should not write partial employees, got %+v", storedEmployees)
+	}
+}
+
+func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
+	rows := []domain.EHRMSEmployeeRecord{{
+		"員工編號":     "IKM001",
+		"中文姓名":     "測試員工",
+		"英文姓名":     "Test Employee",
+		"到職日期":     "2026/06/01",
+		"在職狀態":     "在職",
+		"部門代碼":     "M0101",
+		"部門中文名稱":   "Nexus",
+		"職務中文名稱":   "工程師",
+		"身份類別名稱":   "一般員工",
+		"身份證號":     "A123456789",
+		"學校名稱(中文)": "Nexus University",
+	}}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "import", Scope: "all"},
+		{Resource: "hr.employee", Action: "read", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{rows: rows}})
+	ctx.ApprovalConfirmed = true
+
+	result, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Fetched != 1 || result.Created != 1 || result.Updated != 0 || result.DepartmentsUpserted != 1 || result.Mode != "upsert" {
+		t.Fatalf("unexpected eHRMS sync result: %+v", result)
+	}
+	unit, ok, err := store.GetOrgUnit(context.Background(), "tenant-1", "M0101")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || unit.Name != "Nexus" {
+		t.Fatalf("expected eHRMS department to be upserted, ok=%v unit=%+v", ok, unit)
+	}
+	employee, ok, err := store.GetEmployeeByEmployeeNo(context.Background(), "tenant-1", "IKM001")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected eHRMS employee to be created")
+	}
+	if employee.Name != "測試員工" || employee.CompanyEmail != "" || employee.OrgUnitID != "M0101" || employee.Status != "active" || employee.Category != "full_time" {
+		t.Fatalf("unexpected eHRMS employee mapping: %+v", employee)
+	}
+	if employee.BasicInfo["national_id"] != "A123456789" || employee.EmploymentInfo["position"] != "工程師" || employee.EducationMilitaryInfo["school_name"] != "Nexus University" {
+		t.Fatalf("expected eHRMS profile sections to be preserved, got basic=%+v employment=%+v education=%+v", employee.BasicInfo, employee.EmploymentInfo, employee.EducationMilitaryInfo)
+	}
+}
+
+func TestSyncEHRMSEmployeesUpdatesExistingAndPreservesLocalEmail(t *testing.T) {
+	rows := []domain.EHRMSEmployeeRecord{{
+		"員工編號":   "IKM002",
+		"中文姓名":   "更新員工",
+		"到職日期":   "2026/06/01",
+		"在職狀態":   "留職停薪",
+		"部門代碼":   "M0202",
+		"部門中文名稱": "People",
+		"職務中文名稱": "專員",
+		"身份類別名稱": "時薪員工",
+		"身份證號":   "B123456789",
+	}}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "import", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{rows: rows}})
+	ctx.ApprovalConfirmed = true
+	now := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	if err := store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-existing",
+		TenantID:         "tenant-1",
+		EmployeeNo:       "IKM002",
+		Name:             "舊員工",
+		CompanyEmail:     "local@example.com",
+		Status:           "active",
+		EmploymentStatus: "active",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Created != 0 || result.Updated != 1 {
+		t.Fatalf("expected one eHRMS update, got %+v", result)
+	}
+	employee, ok, err := store.GetEmployee(context.Background(), "tenant-1", "emp-existing")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected existing employee to remain")
+	}
+	if employee.Name != "更新員工" || employee.CompanyEmail != "local@example.com" || employee.Status != "leave_suspended" || employee.Category != "part_time" {
+		t.Fatalf("unexpected updated employee: %+v", employee)
+	}
+}
+
+func TestSyncEHRMSEmployeesHidesUpstreamFetchDetails(t *testing.T) {
+	_, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "import", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{err: errors.New("upstream 500: token=secret-value")}})
+	ctx.ApprovalConfirmed = true
+
+	_, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{})
+	if err == nil {
+		t.Fatal("expected eHRMS fetch failure")
+	}
+	appErr, ok := domain.AsAppError(err)
+	if !ok || appErr.Code != "bad_request" || appErr.Message != "fetch eHRMS employees failed" {
+		t.Fatalf("expected sanitized bad_request, got %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-value") || strings.Contains(err.Error(), "upstream 500") {
+		t.Fatalf("eHRMS fetch error leaked upstream detail: %v", err)
 	}
 }
 
@@ -3200,6 +3898,498 @@ func TestCreateOrgUnitPathDoesNotDuplicateParent(t *testing.T) {
 	}
 }
 
+func TestPlatformTaskMutationsPersistAndProject(t *testing.T) {
+	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-platform-task",
+		TenantID: "tenant-1",
+		Name:     "Platform Task",
+		Permissions: []domain.Permission{
+			{Resource: "me", Action: "read", Scope: "self"},
+			{Resource: "me", Action: "create", Scope: "self"},
+			{Resource: "me", Action: "update", Scope: "self"},
+			{Resource: "me", Action: "delete", Scope: "self"},
+			{Resource: "attendance.clock", Action: "read", Scope: "self"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-1",
+		TenantID:               "tenant-1",
+		DisplayName:            "Task Tester",
+		EmployeeID:             "emp-1",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-platform-task"},
+		CreatedAt:              now,
+	})
+
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
+
+	item, err := svc.Platform().CreateTaskItem(ctx, domain.CreatePlatformTaskItemInput{
+		WorkDate: "2026-07-01",
+		Title:    "Implement task API",
+		Category: "Backend",
+		Product:  "Nexus",
+		Hours:    1.5,
+		Note:     "wire frontend",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if item.Title != "Implement task API" || item.Hours != 1.5 {
+		t.Fatalf("unexpected created task item: %+v", item)
+	}
+
+	tasks, err := svc.Platform().Tasks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := findPlatformTaskRecord(t, tasks.Records, "2026/07/01")
+	if record.TotalHours != 1.5 || len(record.Items) != 1 || record.Items[0].ID != item.ID {
+		t.Fatalf("expected task item to project into 2026/07/01 record, got %+v", record)
+	}
+
+	updatedTitle := "Implement task API v2"
+	updatedHours := 2.0
+	updated, err := svc.Platform().UpdateTaskItem(ctx, item.ID, domain.UpdatePlatformTaskItemInput{
+		Title: &updatedTitle,
+		Hours: &updatedHours,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Title != updatedTitle || updated.Hours != updatedHours {
+		t.Fatalf("unexpected updated task item: %+v", updated)
+	}
+
+	todo, err := svc.Platform().CreateTaskTodo(ctx, domain.CreatePlatformTaskTodoInput{
+		Text:    "Convert me",
+		DueDate: "2026-07-02",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if todo.Done || todo.Date != "07/02" {
+		t.Fatalf("unexpected created todo: %+v", todo)
+	}
+
+	converted, err := svc.Platform().ConvertTaskTodo(ctx, todo.ID, domain.ConvertPlatformTaskTodoInput{
+		WorkDate: "2026-07-02",
+		Hours:    0.5,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if converted.Title != "Convert me" || converted.Category != "待辦" || converted.Hours != 0.5 {
+		t.Fatalf("unexpected converted item: %+v", converted)
+	}
+
+	tasks, err = svc.Platform().Tasks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	convertedRecord := findPlatformTaskRecord(t, tasks.Records, "2026/07/02")
+	if convertedRecord.TotalHours != 0.5 || len(convertedRecord.Items) != 1 || convertedRecord.Items[0].ID != converted.ID {
+		t.Fatalf("expected converted todo to project as a task item, got %+v", convertedRecord)
+	}
+	projectedTodo := findPlatformTaskTodo(t, tasks.Todos, todo.ID)
+	if !projectedTodo.Done {
+		t.Fatalf("expected converted todo to be done, got %+v", projectedTodo)
+	}
+
+	deletedTodo, err := svc.Platform().DeleteTaskTodo(ctx, todo.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deletedTodo.ID != todo.ID {
+		t.Fatalf("unexpected deleted todo: %+v", deletedTodo)
+	}
+	deletedItem, err := svc.Platform().DeleteTaskItem(ctx, updated.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deletedItem.ID != updated.ID {
+		t.Fatalf("unexpected deleted task item: %+v", deletedItem)
+	}
+}
+
+func TestPlatformWorkspaceOrganizationManagerUpdatePersistsHierarchy(t *testing.T) {
+	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "HQ", Path: []string{"ou-1"}, CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workspace-org",
+		TenantID: "tenant-1",
+		Name:     "Workspace Org",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "read", Scope: "all"},
+			{Resource: "hr.employee", Action: "update", Scope: "all"},
+			{Resource: "hr.org_unit", Action: "read", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-1",
+		TenantID:               "tenant-1",
+		DisplayName:            "Workspace Admin",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workspace-org"},
+		CreatedAt:              now,
+	})
+	for _, employee := range []domain.Employee{
+		{ID: "emp-manager", TenantID: "tenant-1", EmployeeNo: "E1001", Name: "Manager One", CompanyEmail: "manager@example.com", OrgUnitID: "ou-1", Position: "Manager", Status: "active", EmploymentStatus: "active", CreatedAt: now},
+		{ID: "emp-report", TenantID: "tenant-1", EmployeeNo: "E1002", Name: "Report Two", CompanyEmail: "report@example.com", OrgUnitID: "ou-1", Position: "Engineer", Status: "active", EmploymentStatus: "active", CreatedAt: now.Add(time.Minute)},
+		{ID: "emp-leaf", TenantID: "tenant-1", EmployeeNo: "E1003", Name: "Leaf Three", CompanyEmail: "leaf@example.com", OrgUnitID: "ou-1", ManagerEmployeeID: "emp-report", Position: "Engineer", Status: "active", EmploymentStatus: "active", CreatedAt: now.Add(2 * time.Minute)},
+	} {
+		_ = store.UpsertEmployee(context.Background(), employee)
+	}
+	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
+
+	organization, err := svc.Platform().UpdateWorkspaceOrganizationManager(ctx, "E1002", domain.UpdateWorkspaceOrganizationManagerInput{ParentID: stringPtr("E1001")})
+	if err != nil {
+		if appErr, ok := domain.AsAppError(err); ok {
+			t.Fatalf("%s fields=%+v", appErr.Message, appErr.FieldErrors)
+		}
+		t.Fatal(err)
+	}
+	report, ok, err := store.GetEmployee(context.Background(), "tenant-1", "emp-report")
+	if err != nil || !ok {
+		t.Fatalf("report lookup failed ok=%v err=%v", ok, err)
+	}
+	if report.ManagerEmployeeID != "emp-manager" {
+		t.Fatalf("expected report manager to persist, got %+v", report)
+	}
+	row := findWorkspaceOrganizationRow(t, organization.Rows, "E1002")
+	if row.ParentID != "E1001" || row.Level != 2 {
+		t.Fatalf("expected refreshed organization row to point at E1001, got %+v", row)
+	}
+
+	if _, err := svc.Platform().UpdateWorkspaceOrganizationManager(ctx, "E1001", domain.UpdateWorkspaceOrganizationManagerInput{ParentID: stringPtr("E1003")}); err == nil {
+		t.Fatal("expected manager cycle to be rejected")
+	}
+}
+
+func TestPlatformWorkspaceAdminMutationsPersistPermissionMatrix(t *testing.T) {
+	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "HQ", Path: []string{"ou-1"}, CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workspace-owner",
+		TenantID: "tenant-1",
+		Name:     "Workspace Owner",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "read", Scope: "all"},
+			{Resource: "iam.permission_set_assignment", Action: "read", Scope: "all"},
+			{Resource: "iam.permission_set_assignment", Action: "create", Scope: "all"},
+			{Resource: "iam.permission_set_assignment", Action: "update", Scope: "all"},
+			{Resource: "iam.permission_set_assignment", Action: "delete", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-owner",
+		TenantID:               "tenant-1",
+		DisplayName:            "Owner",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workspace-owner"},
+		CreatedAt:              now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:          "acct-target",
+		TenantID:    "tenant-1",
+		DisplayName: "Target Admin",
+		EmployeeID:  "emp-target",
+		Status:      "active",
+		CreatedAt:   now.Add(time.Minute),
+	})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-target",
+		TenantID:         "tenant-1",
+		EmployeeNo:       "E2002",
+		Name:             "Target Admin",
+		CompanyEmail:     "target@example.com",
+		OrgUnitID:        "ou-1",
+		Position:         "HRBP",
+		Status:           "active",
+		EmploymentStatus: "active",
+		CreatedAt:        now.Add(time.Minute),
+	})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-owner", ApprovalConfirmed: true}
+
+	admins, err := svc.Platform().CreateWorkspaceAdmin(ctx, domain.CreateWorkspaceAdminInput{
+		EmployeeID: "E2002",
+		Permissions: map[string]string{
+			"employees":    "view",
+			"forms":        "edit",
+			"admins":       "edit",
+			"organization": "none",
+			"salary":       "none",
+			"leave-policy": "none",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := findWorkspaceAdmin(t, admins.Admins, "E2002")
+	if created.Permissions["employees"] != "view" || created.Permissions["forms"] != "edit" || created.Permissions["admins"] != "edit" {
+		t.Fatalf("expected created admin permissions to project from IAM, got %+v", created.Permissions)
+	}
+	managedSet, ok, err := store.GetPermissionSet(context.Background(), "tenant-1", "ps-workspace-admin-acct-target")
+	if err != nil || !ok {
+		t.Fatalf("managed permission set lookup failed ok=%v err=%v", ok, err)
+	}
+	if !permissionSetContains(managedSet, "workflow.form_instance", "update") || permissionSetContains(managedSet, "hr.salary", "read") {
+		t.Fatalf("unexpected managed permission set after create: %+v", managedSet.Permissions)
+	}
+
+	admins, err = svc.Platform().UpdateWorkspaceAdminPermissions(ctx, "E2002", domain.UpdateWorkspaceAdminPermissionsInput{
+		Permissions: map[string]string{
+			"employees":    "edit",
+			"forms":        "none",
+			"admins":       "view",
+			"organization": "none",
+			"salary":       "none",
+			"leave-policy": "none",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := findWorkspaceAdmin(t, admins.Admins, "E2002")
+	if updated.Permissions["employees"] != "edit" || updated.Permissions["forms"] != "none" || updated.Permissions["admins"] != "view" {
+		t.Fatalf("expected updated admin permissions to replace previous grants, got %+v", updated.Permissions)
+	}
+	managedSet, ok, err = store.GetPermissionSet(context.Background(), "tenant-1", "ps-workspace-admin-acct-target")
+	if err != nil || !ok {
+		t.Fatalf("managed permission set lookup failed ok=%v err=%v", ok, err)
+	}
+	if permissionSetContains(managedSet, "workflow.form_instance", "update") || !permissionSetContains(managedSet, "hr.employee", "update") {
+		t.Fatalf("expected managed permission set to be replaced, got %+v", managedSet.Permissions)
+	}
+
+	admins, err = svc.Platform().DeleteWorkspaceAdmin(ctx, "E2002")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := workspaceAdminByID(admins.Admins, "E2002"); ok {
+		t.Fatalf("expected target admin to disappear after delete, got %+v", admins.Admins)
+	}
+	managedSet, ok, err = store.GetPermissionSet(context.Background(), "tenant-1", "ps-workspace-admin-acct-target")
+	if err != nil || !ok {
+		t.Fatalf("managed permission set lookup failed ok=%v err=%v", ok, err)
+	}
+	if len(managedSet.Permissions) != 0 {
+		t.Fatalf("expected managed permission set to be empty after delete, got %+v", managedSet.Permissions)
+	}
+}
+
+func TestPlatformWorkspaceFormDesignMutationsPersistTemplateSchema(t *testing.T) {
+	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
+	currentNow := now
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workspace-forms",
+		TenantID: "tenant-1",
+		Name:     "Workspace Forms",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_template", Action: "read", Scope: "all"},
+			{Resource: "workflow.form_template", Action: "create", Scope: "all"},
+			{Resource: "workflow.form_template", Action: "update", Scope: "all"},
+			{Resource: "workflow.form_template", Action: "delete", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-forms",
+		TenantID:               "tenant-1",
+		DisplayName:            "Forms Admin",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workspace-forms"},
+		CreatedAt:              now,
+	})
+	svc := service.New(store, service.Options{Now: func() time.Time { return currentNow }})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-forms", ApprovalConfirmed: true}
+
+	design, err := svc.Platform().CreateWorkspaceFormDesign(ctx, domain.SaveWorkspaceFormDesignInput{
+		ID:       "custom-approval",
+		Icon:     "🧪",
+		Name:     "Custom Approval",
+		Category: "行政相關",
+		Desc:     "first draft",
+		Enabled:  boolPtr(true),
+		Fields: []domain.PlatformFormBuilderField{
+			{ID: "field-subject", Type: "text", Label: "Subject", Placeholder: "Subject", Required: true},
+		},
+		Stages: []domain.PlatformFormBuilderStage{
+			{ID: "stage-manager", Type: "approver", Label: "Manager", Detail: "Manager approves"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := findPlatformFormDesignForm(t, design.Forms, "custom-approval")
+	if created.Name != "Custom Approval" || created.Icon != "🧪" || !created.Enabled || created.Flow != "Manager" {
+		t.Fatalf("unexpected created form projection: %+v", created)
+	}
+	template, ok, err := store.GetFormTemplateByKey(context.Background(), "tenant-1", "custom-approval")
+	if err != nil || !ok {
+		t.Fatalf("template lookup failed ok=%v err=%v", ok, err)
+	}
+	if workspaceDesignFlag(t, template.Schema, "enabled") != true || workspaceDesignFlag(t, template.Schema, "deleted") != false {
+		t.Fatalf("expected enabled non-deleted schema, got %+v", template.Schema)
+	}
+
+	currentNow = now.Add(time.Hour)
+	nextName := "Custom Approval v2"
+	disabled := false
+	nextDesc := "second draft"
+	design, err = svc.Platform().UpdateWorkspaceFormDesign(ctx, "custom-approval", domain.UpdateWorkspaceFormDesignInput{
+		Name:    &nextName,
+		Desc:    &nextDesc,
+		Enabled: &disabled,
+		Stages: &[]domain.PlatformFormBuilderStage{
+			{ID: "stage-finance", Type: "approver", Label: "Finance", Detail: "Finance approves"},
+			{ID: "stage-hr", Type: "notify", Label: "HR", Detail: "Notify HR"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated := findPlatformFormDesignForm(t, design.Forms, "custom-approval")
+	if updated.Name != nextName || updated.Desc != nextDesc || updated.Enabled || updated.Flow != "Finance → HR" {
+		t.Fatalf("unexpected updated form projection: %+v", updated)
+	}
+
+	design, err = svc.Platform().DeleteWorkspaceFormDesign(ctx, "custom-approval")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := platformFormDesignFormByID(design.Forms, "custom-approval"); ok {
+		t.Fatalf("expected soft-deleted form to disappear from projection, got %+v", design.Forms)
+	}
+	template, ok, err = store.GetFormTemplateByKey(context.Background(), "tenant-1", "custom-approval")
+	if err != nil || !ok {
+		t.Fatalf("soft-deleted template lookup failed ok=%v err=%v", ok, err)
+	}
+	if workspaceDesignFlag(t, template.Schema, "deleted") != true {
+		t.Fatalf("expected template to be soft-deleted, got %+v", template.Schema)
+	}
+	logs, err := store.ListAuditLogs(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findAuditLog(logs, "platform.workspace.form_design.delete"); !ok {
+		t.Fatalf("expected form design delete audit log, got %+v", logs)
+	}
+}
+
+func findWorkspaceOrganizationRow(t *testing.T, rows []domain.WorkspaceOrganizationRow, id string) domain.WorkspaceOrganizationRow {
+	t.Helper()
+	for _, row := range rows {
+		if row.ID == id {
+			return row
+		}
+	}
+	t.Fatalf("missing organization row %s in %+v", id, rows)
+	return domain.WorkspaceOrganizationRow{}
+}
+
+func findWorkspaceAdmin(t *testing.T, admins []domain.WorkspaceAdmin, id string) domain.WorkspaceAdmin {
+	t.Helper()
+	admin, ok := workspaceAdminByID(admins, id)
+	if !ok {
+		t.Fatalf("missing workspace admin %s in %+v", id, admins)
+	}
+	return admin
+}
+
+func workspaceAdminByID(admins []domain.WorkspaceAdmin, id string) (domain.WorkspaceAdmin, bool) {
+	for _, admin := range admins {
+		if admin.ID == id {
+			return admin, true
+		}
+	}
+	return domain.WorkspaceAdmin{}, false
+}
+
+func findPlatformFormDesignForm(t *testing.T, forms []domain.PlatformFormDesignForm, id string) domain.PlatformFormDesignForm {
+	t.Helper()
+	form, ok := platformFormDesignFormByID(forms, id)
+	if !ok {
+		t.Fatalf("missing form design %s in %+v", id, forms)
+	}
+	return form
+}
+
+func platformFormDesignFormByID(forms []domain.PlatformFormDesignForm, id string) (domain.PlatformFormDesignForm, bool) {
+	for _, form := range forms {
+		if form.ID == id {
+			return form, true
+		}
+	}
+	return domain.PlatformFormDesignForm{}, false
+}
+
+func workspaceDesignFlag(t *testing.T, schema map[string]any, key string) bool {
+	t.Helper()
+	workspace, ok := schema["workspace_design"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing workspace_design in schema %+v", schema)
+	}
+	value, ok := workspace[key].(bool)
+	if !ok {
+		t.Fatalf("missing boolean %s in workspace_design %+v", key, workspace)
+	}
+	return value
+}
+
+func permissionSetContains(set domain.PermissionSet, resource, action string) bool {
+	for _, permission := range set.Permissions {
+		if permission.Resource == resource && string(permission.Action) == action {
+			return true
+		}
+	}
+	return false
+}
+
+func stringPtr(value string) *string {
+	return &value
+}
+
+func boolPtr(value bool) *bool {
+	return &value
+}
+
+func findPlatformTaskRecord(t *testing.T, records []domain.PlatformTaskRecord, date string) domain.PlatformTaskRecord {
+	t.Helper()
+	for _, record := range records {
+		if record.Date == date {
+			return record
+		}
+	}
+	t.Fatalf("missing task record for %s in %+v", date, records)
+	return domain.PlatformTaskRecord{}
+}
+
+func findPlatformTaskTodo(t *testing.T, todos []domain.PlatformTaskTodo, id string) domain.PlatformTaskTodo {
+	t.Helper()
+	for _, todo := range todos {
+		if todo.ID == id {
+			return todo
+		}
+	}
+	t.Fatalf("missing task todo %s in %+v", id, todos)
+	return domain.PlatformTaskTodo{}
+}
+
 func newServiceFixture(permissions []domain.Permission) (*service.Service, domain.RequestContext) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -3247,9 +4437,10 @@ func newEmployeeFeatureFixture(t *testing.T, permissions []domain.Permission, op
 	return store, service.New(store, options...), domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 }
 
-func newAttendanceFixture(t *testing.T) (*memory.Store, *service.Service, domain.RequestContext, domain.RequestContext) {
+func newAttendanceFixture(t *testing.T) (*memory.Store, *service.Service, domain.RequestContext, domain.RequestContext, func(time.Time)) {
 	t.Helper()
-	now := time.Now().UTC().Truncate(time.Second)
+	now := attendanceFixtureClockInTime()
+	currentNow := now
 	store := memory.NewStore()
 	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
 	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
@@ -3335,15 +4526,36 @@ func newAttendanceFixture(t *testing.T) (*memory.Store, *service.Service, domain
 			UpdatedAt:     now,
 		})
 	}
-	svc := service.New(store)
+	svc := service.New(store, service.Options{Now: func() time.Time { return currentNow }})
+	setNow := func(next time.Time) { currentNow = next.UTC().Truncate(time.Second) }
 	return store, svc,
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"},
-		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", ApprovalConfirmed: true}
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", ApprovalConfirmed: true},
+		setNow
+}
+
+// attendanceFixtureClockInTime returns 09:00 in the UTC+8 attendance business day.
+func attendanceFixtureClockInTime() time.Time {
+	return time.Date(2026, 6, 10, 1, 0, 0, 0, time.UTC)
+}
+
+// attendanceFixtureClockOutTime returns 18:00 in the UTC+8 attendance business day.
+func attendanceFixtureClockOutTime() time.Time {
+	return time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC)
 }
 
 type recordingObjectStore struct {
 	keys    []string
 	deleted []string
+}
+
+type fakeEHRMSClient struct {
+	rows []domain.EHRMSEmployeeRecord
+	err  error
+}
+
+func (c fakeEHRMSClient) ListEmployees(context.Context) ([]domain.EHRMSEmployeeRecord, error) {
+	return c.rows, c.err
 }
 
 func (s *recordingObjectStore) PutObject(_ context.Context, key string, _ string, _ []byte) error {

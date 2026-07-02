@@ -24,6 +24,9 @@ func (c AgentService) ListRuns(ctx RequestContext) ([]AgentRun, error) {
 	if err != nil {
 		return nil, err
 	}
+	if accountIDs, ok := agentAccountIDsForDecision(account, decision); ok && len(accountIDs) == 1 {
+		return c.store.ListAgentRunsByAccount(goContext(ctx), ctx.TenantID, accountIDs[0])
+	}
 	items, err := c.store.ListAgentRuns(goContext(ctx), ctx.TenantID)
 	if err != nil {
 		return nil, err
@@ -36,6 +39,21 @@ func (c AgentService) ListRunPage(ctx RequestContext, page PageRequest) (PageRes
 	account, decision, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionRead, "")
 	if err != nil {
 		return PageResponse[AgentRun]{}, err
+	}
+	page = utils.NormalizePageRequest(page)
+	if accountIDs, ok := agentAccountIDsForDecision(account, decision); ok && len(accountIDs) == 1 {
+		items, total, err := c.store.ListAgentRunPageByAccount(goContext(ctx), ctx.TenantID, accountIDs[0], page)
+		if err != nil {
+			return PageResponse[AgentRun]{}, err
+		}
+		return utils.PageResponseFromStore(items, total, page), nil
+	}
+	if decision.Scope == "" || decision.Scope == ScopeAll || decision.Scope == ScopeTenant || decision.Scope == ScopeSystem {
+		items, total, err := c.store.ListAgentRunPage(goContext(ctx), ctx.TenantID, page)
+		if err != nil {
+			return PageResponse[AgentRun]{}, err
+		}
+		return utils.PageResponseFromStore(items, total, page), nil
 	}
 	items, err := c.store.ListAgentRuns(goContext(ctx), ctx.TenantID)
 	if err != nil {
@@ -148,14 +166,10 @@ func (c AgentService) failRun(ctx RequestContext, run AgentRun, cause error) err
 }
 
 func filterAgentRunsByDecision(account Account, decision CheckResult, items []AgentRun) []AgentRun {
-	switch decision.Scope {
-	case "", ScopeAll, ScopeTenant, ScopeSystem:
+	if decision.Scope == "" || decision.Scope == ScopeAll || decision.Scope == ScopeTenant || decision.Scope == ScopeSystem {
 		return append([]AgentRun(nil), items...)
 	}
-	accountIDs := stringSliceFromAny(decision.Conditions["account_ids"])
-	if len(accountIDs) == 0 {
-		accountIDs = []string{account.ID}
-	}
+	accountIDs, _ := agentAccountIDsForDecision(account, decision)
 	allowed := stringSet(accountIDs)
 	out := make([]AgentRun, 0, len(items))
 	for _, item := range items {
@@ -164,6 +178,17 @@ func filterAgentRunsByDecision(account Account, decision CheckResult, items []Ag
 		}
 	}
 	return out
+}
+
+func agentAccountIDsForDecision(account Account, decision CheckResult) ([]string, bool) {
+	if decision.Scope == "" || decision.Scope == ScopeAll || decision.Scope == ScopeTenant || decision.Scope == ScopeSystem {
+		return nil, false
+	}
+	accountIDs := stringSliceFromAny(decision.Conditions["account_ids"])
+	if len(accountIDs) == 0 {
+		accountIDs = []string{account.ID}
+	}
+	return uniqueStrings(accountIDs), true
 }
 
 func sortAgentRuns(items []AgentRun, order string) {

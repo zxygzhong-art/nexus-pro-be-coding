@@ -132,6 +132,87 @@ func TestWithTenantTransactionRollsBackPanic(t *testing.T) {
 	})
 }
 
+func TestAttendanceClockRecordAcceptedUniqueInvariant(t *testing.T) {
+	store := memory.NewStore()
+	ctx := context.Background()
+	now := time.Now()
+	first := domain.AttendanceClockRecord{ID: "acr-1", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_in", ClockedAt: now, RecordStatus: "accepted", Source: "geofence", CreatedAt: now}
+	if err := store.UpsertAttendanceClockRecord(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	duplicate := first
+	duplicate.ID = "acr-2"
+	err := store.UpsertAttendanceClockRecord(ctx, duplicate)
+	if appErr, ok := domain.AsAppError(err); !ok || appErr.Code != "conflict" {
+		t.Fatalf("expected accepted duplicate conflict, got %v", err)
+	}
+	duplicate.RecordStatus = "rejected"
+	duplicate.RejectionReason = "duplicate"
+	if err := store.UpsertAttendanceClockRecord(ctx, duplicate); err != nil {
+		t.Fatalf("expected rejected duplicate attempt to be stored, got %v", err)
+	}
+}
+
+func TestPlatformTaskStoreScopesRecordsByAccount(t *testing.T) {
+	store := memory.NewStore()
+	ctx := context.Background()
+	now := time.Now()
+	item := domain.PlatformTaskRecordItem{
+		ID:        "pti-1",
+		TenantID:  "tenant-1",
+		AccountID: "acct-a",
+		WorkDate:  "2026/07/01",
+		Title:     "Owner task",
+		Category:  "Backend",
+		Product:   "Nexus",
+		Hours:     1,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := store.UpsertPlatformTaskItem(ctx, item); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.GetPlatformTaskItem(ctx, "tenant-1", "acct-b", "pti-1"); err != nil || ok {
+		t.Fatalf("expected cross-account task item lookup to miss, ok=%v err=%v", ok, err)
+	}
+	if err := store.DeletePlatformTaskItem(ctx, "tenant-1", "acct-b", "pti-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.GetPlatformTaskItem(ctx, "tenant-1", "acct-a", "pti-1"); err != nil || !ok {
+		t.Fatalf("expected owner task item to remain after cross-account delete, ok=%v err=%v", ok, err)
+	}
+	item.AccountID = "acct-b"
+	if appErr, ok := domain.AsAppError(store.UpsertPlatformTaskItem(ctx, item)); !ok || appErr.Code != "conflict" {
+		t.Fatalf("expected cross-account task item upsert conflict, got %v", appErr)
+	}
+
+	todo := domain.PlatformTaskTodoRecord{
+		ID:        "ptd-1",
+		TenantID:  "tenant-1",
+		AccountID: "acct-a",
+		Text:      "Owner todo",
+		Status:    "open",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := store.UpsertPlatformTaskTodo(ctx, todo); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.GetPlatformTaskTodo(ctx, "tenant-1", "acct-b", "ptd-1"); err != nil || ok {
+		t.Fatalf("expected cross-account task todo lookup to miss, ok=%v err=%v", ok, err)
+	}
+	if err := store.DeletePlatformTaskTodo(ctx, "tenant-1", "acct-b", "ptd-1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok, err := store.GetPlatformTaskTodo(ctx, "tenant-1", "acct-a", "ptd-1"); err != nil || !ok {
+		t.Fatalf("expected owner task todo to remain after cross-account delete, ok=%v err=%v", ok, err)
+	}
+	todo.AccountID = "acct-b"
+	if appErr, ok := domain.AsAppError(store.UpsertPlatformTaskTodo(ctx, todo)); !ok || appErr.Code != "conflict" {
+		t.Fatalf("expected cross-account task todo upsert conflict, got %v", appErr)
+	}
+}
+
 func TestUserIdentityLookupAndList(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()

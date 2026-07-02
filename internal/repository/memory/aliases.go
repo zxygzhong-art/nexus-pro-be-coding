@@ -21,6 +21,8 @@ type (
 	EmployeeQuery               = domain.EmployeeQuery
 	EmployeeImportSession       = domain.EmployeeImportSession
 	EmployeeImportRow           = domain.EmployeeImportRow
+	AttendancePolicy            = domain.AttendancePolicy
+	AttendanceLeaveType         = domain.AttendanceLeaveType
 	LeaveBalance                = domain.LeaveBalance
 	LeaveRequest                = domain.LeaveRequest
 	AttendanceWorksite          = domain.AttendanceWorksite
@@ -31,6 +33,8 @@ type (
 	FormTemplate                = domain.FormTemplate
 	FormInstance                = domain.FormInstance
 	KnowledgeArticle            = domain.KnowledgeArticle
+	PlatformTaskRecordItem      = domain.PlatformTaskRecordItem
+	PlatformTaskTodoRecord      = domain.PlatformTaskTodoRecord
 	Reference                   = domain.Reference
 	AgentRun                    = domain.AgentRun
 	CheckResult                 = domain.CheckResult

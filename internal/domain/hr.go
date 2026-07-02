@@ -380,6 +380,26 @@ type EmployeeImportConfirmInput struct {
 	FailurePolicy string `json:"failure_policy,omitempty"`
 }
 
+// EHRMSEmployeeRecord keeps the dynamic Chinese-field payload returned by eHRMS.
+type EHRMSEmployeeRecord map[string]string
+
+// EHRMSEmployeeSyncInput selects how eHRMS source rows are applied.
+type EHRMSEmployeeSyncInput struct {
+	Mode string `json:"mode,omitempty"`
+}
+
+// EHRMSEmployeeSyncResponse summarizes one eHRMS employee synchronization run.
+type EHRMSEmployeeSyncResponse struct {
+	Fetched             int                   `json:"fetched"`
+	Created             int                   `json:"created"`
+	Updated             int                   `json:"updated"`
+	Failed              int                   `json:"failed"`
+	DepartmentsUpserted int                   `json:"departments_upserted"`
+	Mode                string                `json:"mode"`
+	Results             []BatchEmployeeResult `json:"results,omitempty"`
+	RowErrors           []RowError            `json:"row_errors,omitempty"`
+}
+
 // BatchDeleteEmployeesInput carries the employees and reason for a bulk delete.
 type BatchDeleteEmployeesInput struct {
 	EmployeeIDs []string `json:"employee_ids"`
@@ -710,7 +730,7 @@ func ParseEmployeeStatus(raw string) (EmployeeStatus, bool) {
 		return EmployeeStatusActive, true
 	case "試用中", "probation":
 		return EmployeeStatusProbation, true
-	case "留停", "on-leave", "leave_suspended":
+	case "留停", "留職停薪", "on-leave", "leave_suspended":
 		return EmployeeStatusLeaveSuspended, true
 	case "待加入", "pending", "onboarding":
 		return EmployeeStatusOnboarding, true

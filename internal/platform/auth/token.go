@@ -84,6 +84,9 @@ func (r *KeycloakTokenResolver) Resolve(req *http.Request) (domain.Authenticated
 	if token == "" {
 		return domain.AuthenticatedPrincipal{}, false, nil
 	}
+	if !keycloakTokenShape(token) {
+		return domain.AuthenticatedPrincipal{}, false, nil
+	}
 	claims, err := r.verify(req.Context(), token)
 	if err != nil {
 		return domain.AuthenticatedPrincipal{}, true, domain.Unauthorized("invalid bearer token")
@@ -368,6 +371,25 @@ func parseUnsignedClaims(token string) (map[string]any, bool, error) {
 		return nil, true, err
 	}
 	return claims, true, nil
+}
+
+func keycloakTokenShape(token string) bool {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return false
+	}
+	headerBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
+	if err != nil {
+		return false
+	}
+	var header struct {
+		Alg string `json:"alg"`
+		Kid string `json:"kid"`
+	}
+	if err := json.Unmarshal(headerBytes, &header); err != nil {
+		return false
+	}
+	return header.Alg == "RS256" && header.Kid != ""
 }
 
 func tokenPrincipalFromClaims(provider string, claims map[string]any) domain.AuthenticatedPrincipal {

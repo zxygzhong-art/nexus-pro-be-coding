@@ -32,6 +32,7 @@ type Store struct {
 	employees              map[string]map[string]Employee
 	employeeNoSequences    map[string]map[string]int
 	employeeImports        map[string]map[string]EmployeeImportSession
+	attendancePolicies     map[string]AttendancePolicy
 	leaveBalances          map[string]map[string]LeaveBalance
 	leaveRequests          map[string]map[string]LeaveRequest
 	attendanceWorksites    map[string]map[string]AttendanceWorksite
@@ -42,6 +43,8 @@ type Store struct {
 	formTemplates          map[string]map[string]FormTemplate
 	formInstances          map[string]map[string]FormInstance
 	knowledgeArticles      map[string]map[string]KnowledgeArticle
+	platformTaskItems      map[string]map[string]PlatformTaskRecordItem
+	platformTaskTodos      map[string]map[string]PlatformTaskTodoRecord
 	agentRuns              map[string]map[string]AgentRun
 	auditLogs              map[string][]AuditLog
 	permissionVersions     map[string]int64
@@ -67,6 +70,7 @@ func NewStore() *Store {
 		employees:              map[string]map[string]Employee{},
 		employeeNoSequences:    map[string]map[string]int{},
 		employeeImports:        map[string]map[string]EmployeeImportSession{},
+		attendancePolicies:     map[string]AttendancePolicy{},
 		leaveBalances:          map[string]map[string]LeaveBalance{},
 		leaveRequests:          map[string]map[string]LeaveRequest{},
 		attendanceWorksites:    map[string]map[string]AttendanceWorksite{},
@@ -77,6 +81,8 @@ func NewStore() *Store {
 		formTemplates:          map[string]map[string]FormTemplate{},
 		formInstances:          map[string]map[string]FormInstance{},
 		knowledgeArticles:      map[string]map[string]KnowledgeArticle{},
+		platformTaskItems:      map[string]map[string]PlatformTaskRecordItem{},
+		platformTaskTodos:      map[string]map[string]PlatformTaskTodoRecord{},
 		agentRuns:              map[string]map[string]AgentRun{},
 		auditLogs:              map[string][]AuditLog{},
 		permissionVersions:     map[string]int64{},
@@ -618,7 +624,7 @@ func normalizeMemoryEmployeeStatus(value string) string {
 		return "active"
 	case "試用中", "probation":
 		return "probation"
-	case "留停", "on-leave", "leave_suspended":
+	case "留停", "留職停薪", "on-leave", "leave_suspended":
 		return "leave_suspended"
 	case "待加入", "pending", "onboarding":
 		return "onboarding"
@@ -684,6 +690,60 @@ func paginateMemory[T any](items []T, page, pageSize int) []T {
 	return out
 }
 
+func memoryLeaveRequestMatches(item LeaveRequest, query domain.LeaveRequestQuery) bool {
+	if len(query.EmployeeIDs) > 0 {
+		allowed := map[string]struct{}{}
+		for _, id := range query.EmployeeIDs {
+			if trimmed := strings.TrimSpace(id); trimmed != "" {
+				allowed[trimmed] = struct{}{}
+			}
+		}
+		if len(allowed) > 0 {
+			if _, ok := allowed[item.EmployeeID]; !ok {
+				return false
+			}
+		}
+	}
+	if status := strings.TrimSpace(query.Status); status != "" && !strings.EqualFold(item.Status, status) {
+		return false
+	}
+	if from, ok := memoryDateOnly(query.FromDate); ok && item.EndAt.Before(from) {
+		return false
+	}
+	if to, ok := memoryDateOnly(query.ToDate); ok && !item.StartAt.Before(to.AddDate(0, 0, 1)) {
+		return false
+	}
+	return true
+}
+
+func memoryFormInstanceMatches(item FormInstance, templateKey string, query domain.FormInstanceQuery) bool {
+	if status := strings.TrimSpace(query.Status); status != "" && item.Status != status {
+		return false
+	}
+	if templateID := strings.TrimSpace(query.TemplateID); templateID != "" && item.TemplateID != templateID {
+		return false
+	}
+	if key := strings.TrimSpace(query.TemplateKey); key != "" && templateKey != key {
+		return false
+	}
+	if accountID := strings.TrimSpace(query.ApplicantAccountID); accountID != "" && item.ApplicantAccountID != accountID {
+		return false
+	}
+	return true
+}
+
+func memoryDateOnly(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	parsed, err := time.Parse(time.DateOnly, value)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return parsed, true
+}
+
 func memoryTimeValue(t *time.Time) time.Time {
 	if t == nil {
 		return time.Time{}
@@ -719,6 +779,23 @@ func (s *Store) GetEmployeeImportSession(_ context.Context, tenantID, id string)
 		return EmployeeImportSession{}, false, nil
 	}
 	return copyEmployeeImportSession(v), true, nil
+}
+
+func (s *Store) UpsertAttendancePolicy(_ context.Context, v AttendancePolicy) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.attendancePolicies[v.TenantID] = copyAttendancePolicy(v)
+	return nil
+}
+
+func (s *Store) GetAttendancePolicy(_ context.Context, tenantID string) (AttendancePolicy, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.attendancePolicies[tenantID]
+	if !ok {
+		return AttendancePolicy{}, false, nil
+	}
+	return copyAttendancePolicy(v), true, nil
 }
 
 func (s *Store) UpsertLeaveBalance(_ context.Context, v LeaveBalance) error {
@@ -765,6 +842,22 @@ func (s *Store) ReserveLeaveBalance(_ context.Context, tenantID, employeeID, lea
 	return LeaveBalance{}, false, false, nil
 }
 
+func (s *Store) ReleaseLeaveBalance(_ context.Context, tenantID, employeeID, leaveType string, hours float64, updatedAt time.Time) (LeaveBalance, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	leaveType = strings.TrimSpace(leaveType)
+	for id, balance := range s.leaveBalances[tenantID] {
+		if balance.EmployeeID != employeeID || !strings.EqualFold(balance.LeaveType, leaveType) {
+			continue
+		}
+		balance.RemainingHours += hours
+		balance.UpdatedAt = updatedAt
+		s.leaveBalances[tenantID][id] = copyLeaveBalance(balance)
+		return copyLeaveBalance(balance), true, nil
+	}
+	return LeaveBalance{}, false, nil
+}
+
 func (s *Store) UpsertLeaveRequest(_ context.Context, v LeaveRequest) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -782,12 +875,55 @@ func (s *Store) GetLeaveRequest(_ context.Context, tenantID, id string) (LeaveRe
 	return copyLeaveRequest(v), true, nil
 }
 
+func (s *Store) GetLeaveRequestByFormInstanceID(_ context.Context, tenantID, formInstanceID string) (LeaveRequest, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, item := range s.leaveRequests[tenantID] {
+		if item.FormInstanceID == formInstanceID {
+			return copyLeaveRequest(item), true, nil
+		}
+	}
+	return LeaveRequest{}, false, nil
+}
+
 func (s *Store) ListLeaveRequests(_ context.Context, tenantID string) ([]LeaveRequest, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := copyNestedValues(s.leaveRequests[tenantID], copyLeaveRequest)
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
+}
+
+func (s *Store) ListLeaveRequestsByQuery(ctx context.Context, tenantID string, query domain.LeaveRequestQuery) ([]LeaveRequest, error) {
+	items, err := s.ListLeaveRequests(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]LeaveRequest, 0, len(items))
+	for _, item := range items {
+		if memoryLeaveRequestMatches(item, query) {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) ListLeaveRequestPageByQuery(ctx context.Context, tenantID string, query domain.LeaveRequestQuery, page PageRequest) ([]LeaveRequest, int, error) {
+	items, err := s.ListLeaveRequestsByQuery(ctx, tenantID, query)
+	if err != nil {
+		return nil, 0, err
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		switch page.Sort {
+		case "created_at_asc":
+			return items[i].CreatedAt.Before(items[j].CreatedAt)
+		default:
+			return items[i].CreatedAt.After(items[j].CreatedAt)
+		}
+	})
+	page = utils.NormalizePageRequest(page)
+	total := len(items)
+	return paginateMemory(items, page.Page, page.PageSize), total, nil
 }
 
 func (s *Store) UpsertAttendanceWorksite(_ context.Context, v AttendanceWorksite) error {
@@ -891,9 +1027,17 @@ func (s *Store) FindEffectiveAttendanceShiftAssignment(_ context.Context, tenant
 	return copyAttendanceShiftAssignment(best), true, nil
 }
 
+// UpsertAttendanceClockRecord preserves the accepted-per-day clock invariant used by PostgreSQL.
 func (s *Store) UpsertAttendanceClockRecord(_ context.Context, v AttendanceClockRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if strings.EqualFold(v.RecordStatus, "accepted") {
+		for _, item := range s.attendanceClockRecords[v.TenantID] {
+			if item.ID != v.ID && item.EmployeeID == v.EmployeeID && item.WorkDate == v.WorkDate && item.Direction == v.Direction && strings.EqualFold(item.RecordStatus, "accepted") {
+				return domain.Conflict("accepted clock record already exists")
+			}
+		}
+	}
 	putNested(s.attendanceClockRecords, v.TenantID, v.ID, copyAttendanceClockRecord(v))
 	return nil
 }
@@ -1067,6 +1211,56 @@ func (s *Store) ListFormInstances(_ context.Context, tenantID string) ([]FormIns
 	return out, nil
 }
 
+func (s *Store) ListFormInstancesByQuery(ctx context.Context, tenantID string, query domain.FormInstanceQuery) ([]FormInstance, error) {
+	items, err := s.ListFormInstances(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	templateKeys := map[string]string{}
+	if strings.TrimSpace(query.TemplateKey) != "" {
+		templates, err := s.ListFormTemplates(ctx, tenantID)
+		if err != nil {
+			return nil, err
+		}
+		for _, template := range templates {
+			templateKeys[template.ID] = template.Key
+		}
+	}
+	out := make([]FormInstance, 0, len(items))
+	for _, item := range items {
+		if memoryFormInstanceMatches(item, templateKeys[item.TemplateID], query) {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+func (s *Store) ListFormInstancePageByQuery(ctx context.Context, tenantID string, query domain.FormInstanceQuery, page PageRequest) ([]FormInstance, int, error) {
+	items, err := s.ListFormInstancesByQuery(ctx, tenantID, query)
+	if err != nil {
+		return nil, 0, err
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		switch page.Sort {
+		case "submitted_at_asc":
+			return items[i].SubmittedAt.Before(items[j].SubmittedAt)
+		default:
+			return items[i].SubmittedAt.After(items[j].SubmittedAt)
+		}
+	})
+	page = utils.NormalizePageRequest(page)
+	total := len(items)
+	return paginateMemory(items, page.Page, page.PageSize), total, nil
+}
+
+// DeleteFormInstance removes one workflow form instance from the in-memory tenant bucket.
+func (s *Store) DeleteFormInstance(_ context.Context, tenantID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.formInstances[tenantID], id)
+	return nil
+}
+
 func (s *Store) UpsertKnowledgeArticle(_ context.Context, v KnowledgeArticle) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1080,6 +1274,100 @@ func (s *Store) ListKnowledgeArticles(_ context.Context, tenantID string) ([]Kno
 	out := copyNestedValues(s.knowledgeArticles[tenantID], copyKnowledgeArticle)
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
+}
+
+func (s *Store) UpsertPlatformTaskItem(_ context.Context, v PlatformTaskRecordItem) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if current, ok := getNested(s.platformTaskItems, v.TenantID, v.ID); ok && current.AccountID != v.AccountID {
+		return domain.Conflict("platform task item belongs to another account")
+	}
+	putNested(s.platformTaskItems, v.TenantID, v.ID, copyPlatformTaskRecordItem(v))
+	return nil
+}
+
+func (s *Store) GetPlatformTaskItem(_ context.Context, tenantID, accountID, id string) (PlatformTaskRecordItem, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.platformTaskItems, tenantID, id)
+	if !ok || v.AccountID != accountID {
+		return PlatformTaskRecordItem{}, false, nil
+	}
+	return copyPlatformTaskRecordItem(v), true, nil
+}
+
+func (s *Store) ListPlatformTaskItems(_ context.Context, tenantID, accountID string) ([]PlatformTaskRecordItem, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]PlatformTaskRecordItem, 0)
+	for _, v := range s.platformTaskItems[tenantID] {
+		if v.AccountID == accountID {
+			out = append(out, copyPlatformTaskRecordItem(v))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].WorkDate == out[j].WorkDate {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].WorkDate > out[j].WorkDate
+	})
+	return out, nil
+}
+
+func (s *Store) DeletePlatformTaskItem(_ context.Context, tenantID, accountID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if current, ok := getNested(s.platformTaskItems, tenantID, id); ok && current.AccountID == accountID {
+		delete(s.platformTaskItems[tenantID], id)
+	}
+	return nil
+}
+
+func (s *Store) UpsertPlatformTaskTodo(_ context.Context, v PlatformTaskTodoRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if current, ok := getNested(s.platformTaskTodos, v.TenantID, v.ID); ok && current.AccountID != v.AccountID {
+		return domain.Conflict("platform task todo belongs to another account")
+	}
+	putNested(s.platformTaskTodos, v.TenantID, v.ID, copyPlatformTaskTodoRecord(v))
+	return nil
+}
+
+func (s *Store) GetPlatformTaskTodo(_ context.Context, tenantID, accountID, id string) (PlatformTaskTodoRecord, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.platformTaskTodos, tenantID, id)
+	if !ok || v.AccountID != accountID {
+		return PlatformTaskTodoRecord{}, false, nil
+	}
+	return copyPlatformTaskTodoRecord(v), true, nil
+}
+
+func (s *Store) ListPlatformTaskTodos(_ context.Context, tenantID, accountID string) ([]PlatformTaskTodoRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]PlatformTaskTodoRecord, 0)
+	for _, v := range s.platformTaskTodos[tenantID] {
+		if v.AccountID == accountID {
+			out = append(out, copyPlatformTaskTodoRecord(v))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Status == out[j].Status {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].Status < out[j].Status
+	})
+	return out, nil
+}
+
+func (s *Store) DeletePlatformTaskTodo(_ context.Context, tenantID, accountID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if current, ok := getNested(s.platformTaskTodos, tenantID, id); ok && current.AccountID == accountID {
+		delete(s.platformTaskTodos[tenantID], id)
+	}
+	return nil
 }
 
 func (s *Store) UpsertAgentRun(_ context.Context, v AgentRun) error {
@@ -1107,8 +1395,46 @@ func (s *Store) ListAgentRuns(_ context.Context, tenantID string) ([]AgentRun, e
 	return out, nil
 }
 
+func (s *Store) ListAgentRunsByAccount(ctx context.Context, tenantID, accountID string) ([]AgentRun, error) {
+	items, err := s.ListAgentRuns(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AgentRun, 0, len(items))
+	for _, item := range items {
+		if item.AccountID == accountID {
+			out = append(out, item)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
 func (s *Store) ListAgentRunPage(ctx context.Context, tenantID string, page PageRequest) ([]AgentRun, int, error) {
 	items, err := s.ListAgentRuns(ctx, tenantID)
+	if err != nil {
+		return nil, 0, err
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		switch page.Sort {
+		case "created_at_asc":
+			return items[i].CreatedAt.Before(items[j].CreatedAt)
+		default:
+			return items[i].CreatedAt.After(items[j].CreatedAt)
+		}
+	})
+	page = utils.NormalizePageRequest(page)
+	total := len(items)
+	return paginateMemory(items, page.Page, page.PageSize), total, nil
+}
+
+func (s *Store) ListAgentRunPageByAccount(ctx context.Context, tenantID, accountID string, page PageRequest) ([]AgentRun, int, error) {
+	items, err := s.ListAgentRunsByAccount(ctx, tenantID, accountID)
 	if err != nil {
 		return nil, 0, err
 	}

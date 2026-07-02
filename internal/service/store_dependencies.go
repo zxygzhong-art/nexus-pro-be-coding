@@ -31,6 +31,8 @@ type attendanceStore interface {
 }
 
 type workflowStore interface {
+	repository.AccountStore
+	repository.EmployeeStore
 	repository.WorkflowStore
 }
 

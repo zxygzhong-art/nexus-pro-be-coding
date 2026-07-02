@@ -39,7 +39,10 @@ func (c WorkspaceService) WorkspaceOverview(ctx RequestContext, query WorkspaceO
 	if err != nil {
 		return WorkspaceOverviewResponse{}, err
 	}
-	leaves, err := c.Service.Attendance().ListLeaveRequests(ctx)
+	leaves, err := c.Service.Attendance().listLeaveRequestsByQuery(ctx, LeaveRequestQuery{
+		FromDate: start.Format(time.DateOnly),
+		ToDate:   end.AddDate(0, 0, -1).Format(time.DateOnly),
+	})
 	if err != nil {
 		return WorkspaceOverviewResponse{}, err
 	}
@@ -174,7 +177,10 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	if err != nil {
 		return WorkspaceAttendanceResponse{}, err
 	}
-	leaves, err := c.Service.Attendance().ListLeaveRequests(ctx)
+	leaves, err := c.Service.Attendance().listLeaveRequestsByQuery(ctx, LeaveRequestQuery{
+		FromDate: start.Format(time.DateOnly),
+		ToDate:   end.AddDate(0, 0, -1).Format(time.DateOnly),
+	})
 	if err != nil {
 		return WorkspaceAttendanceResponse{}, err
 	}
@@ -221,7 +227,7 @@ func (c WorkspaceService) WorkspaceAdmins(ctx RequestContext) (WorkspaceAdminsRe
 	if err != nil {
 		return WorkspaceAdminsResponse{}, err
 	}
-	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+	employees, err := c.visibleWorkspaceEmployees(ctx, "workspace.admin_settings.query")
 	if err != nil {
 		return WorkspaceAdminsResponse{}, err
 	}
@@ -239,8 +245,10 @@ func (c WorkspaceService) WorkspaceAdmins(ctx RequestContext) (WorkspaceAdminsRe
 	}
 	orgNames := workspaceOrgNames(units)
 	employeeByID := map[string]Employee{}
+	visibleEmployeeIDs := map[string]struct{}{}
 	for _, employee := range employees {
 		employeeByID[employee.ID] = employee
+		visibleEmployeeIDs[employee.ID] = struct{}{}
 	}
 	accountByEmployeeID := map[string]Account{}
 	for _, account := range accounts {
@@ -263,6 +271,11 @@ func (c WorkspaceService) WorkspaceAdmins(ctx RequestContext) (WorkspaceAdminsRe
 	admins := []WorkspaceAdmin{}
 	adminAccountIDs := map[string]struct{}{}
 	for _, account := range accounts {
+		if account.EmployeeID != "" {
+			if _, ok := visibleEmployeeIDs[account.EmployeeID]; !ok {
+				continue
+			}
+		}
 		permissions, assignedAt := workspaceAdminPermissions(account, assignmentsByAccount[account.ID], permissionSetByID)
 		if !workspaceHasAdminPermissions(permissions) {
 			continue
@@ -297,10 +310,6 @@ func (c WorkspaceService) WorkspaceAuditLogs(ctx RequestContext, query Workspace
 	if _, _, _, err := c.Authorize(ctx, CheckRequest{Resource: "audit.log", Action: ActionRead}, AuditTarget{Event: "workspace.audit_log.query", Resource: "audit_log"}); err != nil {
 		return PageResponse[WorkspaceAuditLog]{}, err
 	}
-	logs, err := c.store.ListAuditLogs(goContext(ctx), ctx.TenantID)
-	if err != nil {
-		return PageResponse[WorkspaceAuditLog]{}, err
-	}
 	accounts, err := c.store.ListAccounts(goContext(ctx), ctx.TenantID)
 	if err != nil {
 		return PageResponse[WorkspaceAuditLog]{}, err
@@ -316,6 +325,22 @@ func (c WorkspaceService) WorkspaceAuditLogs(ctx RequestContext, query Workspace
 	employeeByID := map[string]Employee{}
 	for _, employee := range employees {
 		employeeByID[employee.ID] = employee
+	}
+	if workspaceAuditLogQueryEmpty(query) {
+		page = utils.NormalizePageRequest(page)
+		logs, total, err := c.store.ListAuditLogPage(goContext(ctx), ctx.TenantID, page)
+		if err != nil {
+			return PageResponse[WorkspaceAuditLog]{}, err
+		}
+		projected := make([]WorkspaceAuditLog, 0, len(logs))
+		for _, log := range logs {
+			projected = append(projected, workspaceAuditLogProjection(log, accountByID, employeeByID))
+		}
+		return utils.PageResponseFromStore(projected, total, page), nil
+	}
+	logs, err := c.store.ListAuditLogs(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return PageResponse[WorkspaceAuditLog]{}, err
 	}
 	projected := make([]WorkspaceAuditLog, 0, len(logs))
 	for _, log := range logs {
@@ -781,9 +806,50 @@ func workspaceEmployeeDisplayIDs(employees []Employee) map[string]string {
 	return out
 }
 
+// workspaceEmployeeByDisplayID resolves either the employee-facing id or the internal id.
+func workspaceEmployeeByDisplayID(employees []Employee, displayID string) (Employee, bool) {
+	normalized := strings.TrimSpace(displayID)
+	if normalized == "" {
+		return Employee{}, false
+	}
+	for _, employee := range employees {
+		if workspaceEmployeeDisplayID(employee) == normalized || employee.ID == normalized {
+			return employee, true
+		}
+	}
+	return Employee{}, false
+}
+
 // workspaceEmployeeDisplayID returns employee_no when available.
 func workspaceEmployeeDisplayID(employee Employee) string {
 	return utils.FirstNonEmpty(strings.TrimSpace(employee.EmployeeNo), employee.ID)
+}
+
+// workspaceManagerCycle detects whether assigning managerID would introduce a reporting loop.
+func workspaceManagerCycle(employees []Employee, employeeID, managerID string) bool {
+	if managerID == "" {
+		return false
+	}
+	byID := map[string]Employee{}
+	for _, employee := range employees {
+		byID[employee.ID] = employee
+	}
+	seen := map[string]struct{}{}
+	for current := managerID; current != ""; {
+		if current == employeeID {
+			return true
+		}
+		if _, exists := seen[current]; exists {
+			return true
+		}
+		seen[current] = struct{}{}
+		manager, ok := byID[current]
+		if !ok {
+			return false
+		}
+		current = manager.ManagerEmployeeID
+	}
+	return false
 }
 
 // workspaceEmployeeLevel computes an employee's tree level with cycle protection.
@@ -1305,6 +1371,9 @@ func workspaceAdminPermissions(account Account, assignments []PermissionSetAssig
 			continue
 		}
 		for _, permission := range permissionSet.Permissions {
+			if !workspaceAdminPermissionInAdminScope(permission) {
+				continue
+			}
 			key := workspaceAdminPermissionKey(permission)
 			if key == "" {
 				continue
@@ -1325,6 +1394,10 @@ func workspaceEmptyAdminPermissions() map[string]string {
 		"leave-policy": "none",
 		"admins":       "none",
 	}
+}
+
+func workspaceAdminPermissionInAdminScope(permission Permission) bool {
+	return permission.Scope != ScopeSelf && permission.Scope != ScopeOwn
 }
 
 // workspaceAdminPermissionKey maps a low-level permission onto one admin page section key.
@@ -1470,11 +1543,11 @@ func workspaceAuditLogMatches(log AuditLog, query WorkspaceAuditLogQuery, accoun
 	}
 	account := accounts[log.ActorAccountID]
 	employee := employees[account.EmployeeID]
+	projected := workspaceAuditLogProjection(log, accounts, employees)
 	operatorID := strings.TrimSpace(query.OperatorID)
-	if operatorID != "" && operatorID != log.ActorAccountID && operatorID != account.EmployeeID && operatorID != workspaceEmployeeDisplayID(employee) {
+	if operatorID != "" && operatorID != log.ActorAccountID && operatorID != account.EmployeeID && operatorID != workspaceEmployeeDisplayID(employee) && operatorID != projected.Operator {
 		return false
 	}
-	projected := workspaceAuditLogProjection(log, accounts, employees)
 	if filterType := strings.ToLower(strings.TrimSpace(query.Type)); filterType != "" {
 		haystack := strings.ToLower(strings.Join([]string{projected.Type, log.Resource, log.Action}, " "))
 		if !strings.Contains(haystack, filterType) {
@@ -1488,6 +1561,14 @@ func workspaceAuditLogMatches(log AuditLog, query WorkspaceAuditLogQuery, accoun
 		}
 	}
 	return true
+}
+
+func workspaceAuditLogQueryEmpty(query WorkspaceAuditLogQuery) bool {
+	return strings.TrimSpace(query.OperatorID) == "" &&
+		strings.TrimSpace(query.Type) == "" &&
+		strings.TrimSpace(query.From) == "" &&
+		strings.TrimSpace(query.To) == "" &&
+		strings.TrimSpace(query.Keyword) == ""
 }
 
 // workspaceAuditLogProjection converts one audit log into the page-level row.
@@ -1916,23 +1997,17 @@ func workspaceCategoryLabel(category string) string {
 	}
 }
 
-// workspaceStatusLabel localizes employee status values.
+// workspaceStatusLabel collapses HR lifecycle states into the workspace card contract.
 func workspaceStatusLabel(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
-	case string(EmployeeStatusActive), "":
+	case string(EmployeeStatusActive), string(EmployeeStatusProbation), string(EmployeeStatusLeaveSuspended), "", "在職", "試用", "試用中", "留停", "留職停薪":
 		return "在職"
-	case string(EmployeeStatusProbation):
-		return "試用"
 	case string(EmployeeStatusOnboarding):
 		return "待加入"
-	case string(EmployeeStatusLeaveSuspended):
-		return "留職停薪"
-	case string(EmployeeStatusResigned):
-		return "已離職"
-	case string(EmployeeStatusDeleted):
+	case string(EmployeeStatusResigned), string(EmployeeStatusDeleted), "離職", "已離職", "已停用":
 		return "已停用"
 	default:
-		return status
+		return "已停用"
 	}
 }
 

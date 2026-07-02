@@ -20,7 +20,7 @@ func (c *Service) Authn() AuthnService {
 }
 
 // OIDCAuthorizationURL builds a provider authorization URL with signed callback state.
-func (c AuthnService) OIDCAuthorizationURL(provider string, input OIDCAuthorizationInput) (OIDCAuthorizationResponse, error) {
+func (c AuthnService) OIDCAuthorizationURL(ctx context.Context, provider string, input OIDCAuthorizationInput) (OIDCAuthorizationResponse, error) {
 	provider = strings.TrimSpace(provider)
 	oidcProvider, ok := c.oidcProviders[provider]
 	if !ok || oidcProvider == nil {
@@ -41,7 +41,7 @@ func (c AuthnService) OIDCAuthorizationURL(provider string, input OIDCAuthorizat
 	if err != nil {
 		return OIDCAuthorizationResponse{}, err
 	}
-	authURL, err := oidcProvider.AuthorizationURL(state)
+	authURL, err := oidcProvider.AuthorizationURL(ctx, state)
 	if err != nil {
 		return OIDCAuthorizationResponse{}, err
 	}

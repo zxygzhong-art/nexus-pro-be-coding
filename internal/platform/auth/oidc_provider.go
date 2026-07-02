@@ -74,8 +74,11 @@ func NewOIDCProvider(cfg OIDCProviderConfig, client *http.Client) *OIDCProvider 
 }
 
 // AuthorizationURL returns the provider redirect URL.
-func (p *OIDCProvider) AuthorizationURL(state string) (string, error) {
-	meta, err := p.metadataFor(context.Background())
+func (p *OIDCProvider) AuthorizationURL(ctx context.Context, state string) (string, error) {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	meta, err := p.metadataFor(ctx)
 	if err != nil {
 		return "", err
 	}

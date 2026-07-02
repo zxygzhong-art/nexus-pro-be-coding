@@ -25,17 +25,20 @@ type Service struct {
 	oidcProviders   map[string]OIDCProvider
 	authTokenIssuer AuthTokenIssuer
 	authStateCodec  AuthStateCodec
+	ehrmsClient     EHRMSClient
 }
 
 // Options configures optional runtime adapters for the service facade.
 type Options struct {
 	Logger          *slog.Logger
+	Now             func() time.Time
 	AuthzSnapshot   AuthzSnapshotCache
 	Relationships   RelationshipChecker
 	ObjectStore     ObjectStore
 	OIDCProviders   map[string]OIDCProvider
 	AuthTokenIssuer AuthTokenIssuer
 	AuthStateCodec  AuthStateCodec
+	EHRMSClient     EHRMSClient
 }
 
 // RelationshipChecker verifies external relationship tuples for authorization decisions.
@@ -45,7 +48,7 @@ type RelationshipChecker interface {
 
 // OIDCProvider resolves an external authorization-code callback into a principal.
 type OIDCProvider interface {
-	AuthorizationURL(state string) (string, error)
+	AuthorizationURL(ctx context.Context, state string) (string, error)
 	ResolveCallback(ctx context.Context, code string) (domain.AuthenticatedPrincipal, error)
 }
 
@@ -60,6 +63,11 @@ type AuthStateCodec interface {
 	DecodeOIDCState(string) (domain.OIDCState, error)
 }
 
+// EHRMSClient reads employee master data from the configured eHRMS upstream.
+type EHRMSClient interface {
+	ListEmployees(context.Context) ([]domain.EHRMSEmployeeRecord, error)
+}
+
 // New builds a service facade over the supplied repository store.
 func New(store repository.Store, options ...Options) *Service {
 	cfg := Options{}
@@ -70,9 +78,13 @@ func New(store repository.Store, options ...Options) *Service {
 	if logger == nil {
 		logger = slog.Default()
 	}
+	now := time.Now
+	if cfg.Now != nil {
+		now = cfg.Now
+	}
 	return &Service{
 		store:           store,
-		now:             time.Now,
+		now:             now,
 		logger:          logger,
 		authzSnapshot:   cfg.AuthzSnapshot,
 		relationships:   cfg.Relationships,
@@ -80,6 +92,7 @@ func New(store repository.Store, options ...Options) *Service {
 		oidcProviders:   copyOIDCProviders(cfg.OIDCProviders),
 		authTokenIssuer: cfg.AuthTokenIssuer,
 		authStateCodec:  cfg.AuthStateCodec,
+		ehrmsClient:     cfg.EHRMSClient,
 	}
 }
 
@@ -178,7 +191,7 @@ func (c *Service) resolveAccount(ctx RequestContext) (Account, Tenant, error) {
 		return Account{}, Tenant{}, NotFound("account", ctx.AccountID)
 	}
 	if account.Status == string(AccountStatusDisabled) || account.Status == string(AccountStatusPendingInvite) {
-		return Account{}, Tenant{}, domain.Unauthorized("account is not active")
+		return Account{}, Tenant{}, domain.UnauthorizedReason("account_inactive", "account is not active")
 	}
 	return account, tenant, nil
 }

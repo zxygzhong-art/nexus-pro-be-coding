@@ -140,6 +140,19 @@ func copyRowErrors(src []RowError) []RowError {
 
 func copyLeaveBalance(v LeaveBalance) LeaveBalance { return v }
 
+func copyAttendancePolicy(v AttendancePolicy) AttendancePolicy {
+	v.WorkTime.TimeOptions = utils.CopyStrings(v.WorkTime.TimeOptions)
+	v.WorkTime.WeekendOptions = utils.CopyStrings(v.WorkTime.WeekendOptions)
+	v.WorkTime.CycleStartOptions = utils.CopyStrings(v.WorkTime.CycleStartOptions)
+	v.WorkTime.CycleEndOptions = utils.CopyStrings(v.WorkTime.CycleEndOptions)
+	if len(v.LeaveTypes) > 0 {
+		next := make([]AttendanceLeaveType, len(v.LeaveTypes))
+		copy(next, v.LeaveTypes)
+		v.LeaveTypes = next
+	}
+	return v
+}
+
 func copyLeaveRequest(v LeaveRequest) LeaveRequest { return v }
 
 func copyAttendanceWorksite(v AttendanceWorksite) AttendanceWorksite { return v }
@@ -181,6 +194,10 @@ func copyKnowledgeArticle(v KnowledgeArticle) KnowledgeArticle {
 	v.Tags = utils.CopyStrings(v.Tags)
 	return v
 }
+
+func copyPlatformTaskRecordItem(v PlatformTaskRecordItem) PlatformTaskRecordItem { return v }
+
+func copyPlatformTaskTodoRecord(v PlatformTaskTodoRecord) PlatformTaskTodoRecord { return v }
 
 func copyAgentRun(v AgentRun) AgentRun {
 	v.References = copyRefs(v.References)

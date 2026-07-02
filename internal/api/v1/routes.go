@@ -30,6 +30,13 @@ func ResourceID(param string) RouteOption {
 	}
 }
 
+// PathParam exposes a route parameter to handlers without using it as an authz target.
+func PathParam(param string) RouteOption {
+	return func(cfg *routeAuthz) {
+		cfg.pathParams = appendPathParam(cfg.pathParams, param)
+	}
+}
+
 // TargetEmployeeID marks a path parameter as the employee target for scoped HR checks.
 func TargetEmployeeID(param string) RouteOption {
 	return func(cfg *routeAuthz) {
@@ -75,6 +82,7 @@ func (a *API) RegisterRoutes(router *gin.Engine) {
 	IAMCtrl{routes: routes, svc: a.iam}.RegisterRoutes(v1)
 	HRCtrl{routes: routes, svc: a.hr}.RegisterRoutes(v1)
 	AttendanceCtrl{routes: routes, svc: a.attendance}.RegisterRoutes(v1)
+	PlatformCtrl{routes: routes, svc: a.platform}.RegisterRoutes(v1)
 	WorkspaceCtrl{routes: routes, svc: a.workspace}.RegisterRoutes(v1)
 	WorkflowCtrl{routes: routes, svc: a.workflow}.RegisterRoutes(v1)
 	AgentCtrl{routes: routes, svc: a.agent}.RegisterRoutes(v1)

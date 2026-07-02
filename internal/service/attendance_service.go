@@ -2,6 +2,7 @@ package service
 
 import (
 	"math"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -20,7 +21,10 @@ const (
 	clockRecordStatusRejected = "rejected"
 
 	clockRejectionDuplicate       = "duplicate"
+	clockRejectionInvalidSequence = "invalid_sequence"
+	clockRejectionLowAccuracy     = "low_location_accuracy"
 	clockRejectionOutsideGeofence = "outside_geofence"
+	clockRejectionOutsideWindow   = "outside_time_window"
 
 	clockSourceGeofence         = "geofence"
 	clockSourceManualCorrection = "manual_correction"
@@ -28,7 +32,11 @@ const (
 	correctionStatusPending  = "pending"
 	correctionStatusApproved = "approved"
 	correctionStatusRejected = "rejected"
+
+	clockMaxAccuracyMeters = 200.0
 )
+
+var attendanceClockLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
 
 // AttendanceService implements leave balance and leave request workflows.
 type AttendanceService struct {
@@ -80,6 +88,10 @@ func (c AttendanceService) ListLeaveBalancePage(ctx RequestContext, page PageReq
 
 // ListLeaveRequests returns leave requests visible under the current authorization scope.
 func (c AttendanceService) ListLeaveRequests(ctx RequestContext) ([]LeaveRequest, error) {
+	return c.listLeaveRequestsByQuery(ctx, LeaveRequestQuery{})
+}
+
+func (c AttendanceService) listLeaveRequestsByQuery(ctx RequestContext, query LeaveRequestQuery) ([]LeaveRequest, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
 		return nil, err
@@ -91,28 +103,51 @@ func (c AttendanceService) ListLeaveRequests(ctx RequestContext) ([]LeaveRequest
 	if !decision.Allowed {
 		return []LeaveRequest{}, nil
 	}
-	items, err := c.store.ListLeaveRequests(goContext(ctx), ctx.TenantID)
-	if err != nil {
-		return nil, err
-	}
 	allowed, all, err := c.attendanceEmployeeScope(ctx, account, decision)
 	if err != nil {
 		return nil, err
 	}
-	if all {
-		return items, nil
+	if !all {
+		query.EmployeeIDs = employeeIDsFromSet(allowed)
+		if len(query.EmployeeIDs) == 0 {
+			return []LeaveRequest{}, nil
+		}
 	}
-	return filterLeaveRequestsByEmployees(items, allowed), nil
+	return c.store.ListLeaveRequestsByQuery(goContext(ctx), ctx.TenantID, normalizeLeaveRequestQuery(query))
 }
 
 // ListLeaveRequestPage returns paginated visible leave requests.
 func (c AttendanceService) ListLeaveRequestPage(ctx RequestContext, page PageRequest) (PageResponse[LeaveRequest], error) {
-	items, err := c.ListLeaveRequests(ctx)
+	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
 		return PageResponse[LeaveRequest]{}, err
 	}
-	items = utils.SortLeaveRequests(items, page.Sort)
-	return utils.PageResponse(items, page), nil
+	decision, err := c.evaluateAuthz(ctx, account, CheckRequest{ApplicationCode: AppAttendance, ResourceType: ResourceLeave, Action: ActionRead})
+	if err != nil {
+		return PageResponse[LeaveRequest]{}, err
+	}
+	if !decision.Allowed {
+		page = utils.NormalizePageRequest(page)
+		return PageResponse[LeaveRequest]{Items: []LeaveRequest{}, Page: page.Page, PageSize: page.PageSize, Sort: page.Sort}, nil
+	}
+	allowed, all, err := c.attendanceEmployeeScope(ctx, account, decision)
+	if err != nil {
+		return PageResponse[LeaveRequest]{}, err
+	}
+	query := LeaveRequestQuery{}
+	if !all {
+		query.EmployeeIDs = employeeIDsFromSet(allowed)
+		if len(query.EmployeeIDs) == 0 {
+			page = utils.NormalizePageRequest(page)
+			return PageResponse[LeaveRequest]{Items: []LeaveRequest{}, Page: page.Page, PageSize: page.PageSize, Sort: page.Sort}, nil
+		}
+	}
+	page = utils.NormalizePageRequest(page)
+	items, total, err := c.store.ListLeaveRequestPageByQuery(goContext(ctx), ctx.TenantID, normalizeLeaveRequestQuery(query), page)
+	if err != nil {
+		return PageResponse[LeaveRequest]{}, err
+	}
+	return utils.PageResponseFromStore(items, total, page), nil
 }
 
 // CurrentAttendancePolicy returns the current tenant attendance policy projection.
@@ -120,6 +155,75 @@ func (c AttendanceService) CurrentAttendancePolicy(ctx RequestContext) (Attendan
 	if _, _, err := c.requireAttendanceAuthz(ctx, ResourceLeave, ActionRead, ""); err != nil {
 		return AttendancePolicyResponse{}, err
 	}
+	policy, ok, err := c.store.GetAttendancePolicy(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return AttendancePolicyResponse{}, err
+	}
+	if !ok {
+		return defaultAttendancePolicyResponse(), nil
+	}
+	return attendancePolicyResponse(policy), nil
+}
+
+// UpdateAttendancePolicy persists tenant-level attendance rules used by workspace settings.
+func (c AttendanceService) UpdateAttendancePolicy(ctx RequestContext, input UpdateAttendancePolicyInput) (AttendancePolicyResponse, error) {
+	account, decision, authzAudit, err := c.Authorize(ctx,
+		CheckRequest{ApplicationCode: AppAttendance, ResourceType: ResourceLeave, Action: ActionUpdate},
+		AuditTarget{Event: "attendance.policy.update", Resource: string(ResourceLeave)},
+	)
+	if err != nil {
+		return AttendancePolicyResponse{}, err
+	}
+	next, err := c.attendancePolicyFromInput(ctx, account.ID, input)
+	if err != nil {
+		return AttendancePolicyResponse{}, err
+	}
+	if err := c.Service.withTenantTransaction(ctx, func(txService *Service) error {
+		tx := txService.Attendance()
+		if err := tx.store.UpsertAttendancePolicy(goContext(ctx), next); err != nil {
+			return err
+		}
+		if err := tx.audit(ctx, "attendance.policy.update", string(ResourceLeave), next.ID, string(SeverityHigh), auditDecisionDetails(ctx, decision, map[string]any{
+			"leave_type_count": len(next.LeaveTypes),
+			"standard_start":   next.WorkTime.StandardStart,
+			"standard_end":     next.WorkTime.StandardEnd,
+			"weekend":          next.WorkTime.Weekend,
+		})); err != nil {
+			return err
+		}
+		return authzAudit.CommitWith(ctx, tx.Service)
+	}); err != nil {
+		return AttendancePolicyResponse{}, err
+	}
+	return attendancePolicyResponse(next), nil
+}
+
+func (c AttendanceService) attendancePolicyFromInput(ctx RequestContext, accountID string, input UpdateAttendancePolicyInput) (AttendancePolicy, error) {
+	current, ok, err := c.store.GetAttendancePolicy(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return AttendancePolicy{}, err
+	}
+	now := c.Now()
+	createdAt := now
+	if ok && !current.CreatedAt.IsZero() {
+		createdAt = current.CreatedAt
+	}
+	policy := AttendancePolicy{
+		ID:                 "current",
+		TenantID:           ctx.TenantID,
+		WorkTime:           normalizeAttendancePolicyWorkTime(input.WorkTime),
+		LeaveTypes:         normalizeAttendanceLeaveTypes(input.LeaveTypes),
+		UpdatedByAccountID: strings.TrimSpace(accountID),
+		CreatedAt:          createdAt,
+		UpdatedAt:          now,
+	}
+	if err := validateAttendancePolicy(policy); err != nil {
+		return AttendancePolicy{}, err
+	}
+	return policy, nil
+}
+
+func defaultAttendancePolicyResponse() AttendancePolicyResponse {
 	return AttendancePolicyResponse{
 		WorkTime: AttendancePolicyWorkTime{
 			StandardStart:     "09:00",
@@ -130,12 +234,116 @@ func (c AttendanceService) CurrentAttendancePolicy(ctx RequestContext) (Attendan
 			CycleStart:        "1 日",
 			CycleEnd:          "本月 月底（最後一日）",
 			TimeOptions:       attendancePolicyTimeOptions(),
-			WeekendOptions:    []string{"週六、週日", "週日", "無"},
+			WeekendOptions:    attendancePolicyWeekendOptions(),
 			CycleStartOptions: attendancePolicyCycleStartOptions(),
 			CycleEndOptions:   attendancePolicyCycleEndOptions(),
 		},
 		LeaveTypes: attendancePolicyLeaveTypes(),
-	}, nil
+	}
+}
+
+func attendancePolicyResponse(policy AttendancePolicy) AttendancePolicyResponse {
+	workTime := normalizeAttendancePolicyWorkTime(policy.WorkTime)
+	leaveTypes := normalizeAttendanceLeaveTypes(policy.LeaveTypes)
+	if len(leaveTypes) == 0 {
+		leaveTypes = attendancePolicyLeaveTypes()
+	}
+	return AttendancePolicyResponse{WorkTime: workTime, LeaveTypes: leaveTypes}
+}
+
+func normalizeAttendancePolicyWorkTime(workTime AttendancePolicyWorkTime) AttendancePolicyWorkTime {
+	defaults := defaultAttendancePolicyResponse().WorkTime
+	out := AttendancePolicyWorkTime{
+		StandardStart:     strings.TrimSpace(workTime.StandardStart),
+		StandardEnd:       strings.TrimSpace(workTime.StandardEnd),
+		BreakStart:        strings.TrimSpace(workTime.BreakStart),
+		BreakEnd:          strings.TrimSpace(workTime.BreakEnd),
+		Weekend:           strings.TrimSpace(workTime.Weekend),
+		CycleStart:        strings.TrimSpace(workTime.CycleStart),
+		CycleEnd:          strings.TrimSpace(workTime.CycleEnd),
+		TimeOptions:       defaults.TimeOptions,
+		WeekendOptions:    defaults.WeekendOptions,
+		CycleStartOptions: defaults.CycleStartOptions,
+		CycleEndOptions:   defaults.CycleEndOptions,
+	}
+	if out.StandardStart == "" {
+		out.StandardStart = defaults.StandardStart
+	}
+	if out.StandardEnd == "" {
+		out.StandardEnd = defaults.StandardEnd
+	}
+	if out.BreakStart == "" {
+		out.BreakStart = defaults.BreakStart
+	}
+	if out.BreakEnd == "" {
+		out.BreakEnd = defaults.BreakEnd
+	}
+	if out.Weekend == "" {
+		out.Weekend = defaults.Weekend
+	}
+	if out.CycleStart == "" {
+		out.CycleStart = defaults.CycleStart
+	}
+	if out.CycleEnd == "" {
+		out.CycleEnd = defaults.CycleEnd
+	}
+	return out
+}
+
+func normalizeAttendanceLeaveTypes(items []AttendanceLeaveType) []AttendanceLeaveType {
+	out := make([]AttendanceLeaveType, 0, len(items))
+	for _, item := range items {
+		next := AttendanceLeaveType{
+			Code:  strings.TrimSpace(item.Code),
+			Name:  strings.TrimSpace(item.Name),
+			Quota: strings.TrimSpace(item.Quota),
+			Rule:  strings.TrimSpace(item.Rule),
+			Proof: strings.TrimSpace(item.Proof),
+		}
+		if next.Code == "" && next.Name == "" {
+			continue
+		}
+		out = append(out, next)
+	}
+	return out
+}
+
+func validateAttendancePolicy(policy AttendancePolicy) error {
+	if !stringInSlice(policy.WorkTime.StandardStart, policy.WorkTime.TimeOptions) || !stringInSlice(policy.WorkTime.StandardEnd, policy.WorkTime.TimeOptions) {
+		return BadRequest("standard time must use a configured time option")
+	}
+	if !stringInSlice(policy.WorkTime.BreakStart, policy.WorkTime.TimeOptions) || !stringInSlice(policy.WorkTime.BreakEnd, policy.WorkTime.TimeOptions) {
+		return BadRequest("break time must use a configured time option")
+	}
+	if !stringInSlice(policy.WorkTime.Weekend, policy.WorkTime.WeekendOptions) {
+		return BadRequest("weekend must use a configured weekend option")
+	}
+	if !stringInSlice(policy.WorkTime.CycleStart, policy.WorkTime.CycleStartOptions) || !stringInSlice(policy.WorkTime.CycleEnd, policy.WorkTime.CycleEndOptions) {
+		return BadRequest("cycle must use configured cycle options")
+	}
+	if len(policy.LeaveTypes) == 0 {
+		return BadRequest("leave_types is required")
+	}
+	seen := map[string]struct{}{}
+	for _, item := range policy.LeaveTypes {
+		if item.Code == "" || item.Name == "" {
+			return BadRequest("leave type code and name are required")
+		}
+		if _, ok := seen[item.Code]; ok {
+			return BadRequest("leave type code must be unique")
+		}
+		seen[item.Code] = struct{}{}
+	}
+	return nil
+}
+
+func stringInSlice(value string, options []string) bool {
+	for _, option := range options {
+		if value == option {
+			return true
+		}
+	}
+	return false
 }
 
 // CreateLeaveRequest creates a leave request and reserves leave balance atomically.
@@ -197,6 +405,7 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 		return LeaveRequest{}, BadRequest("end_at must be after start_at")
 	}
 	var req LeaveRequest
+	requestID := utils.NewID("lr")
 	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
 		balance, err := tx.reserveLeaveBalance(ctx, employeeID, input.LeaveType, input.Hours)
 		if err != nil {
@@ -226,12 +435,15 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 			ApplicantAccountID: account.ID,
 			Status:             "submitted",
 			Payload: map[string]any{
-				"employee_id": employeeID,
-				"leave_type":  input.LeaveType,
-				"start_at":    startAt.Format(time.RFC3339),
-				"end_at":      endAt.Format(time.RFC3339),
-				"hours":       input.Hours,
-				"reason":      input.Reason,
+				"employee_id":          employeeID,
+				"leave_request_id":     requestID,
+				"leave_type":           input.LeaveType,
+				"linked_resource_id":   requestID,
+				"linked_resource_type": "attendance.leave_request",
+				"start_at":             startAt.Format(time.RFC3339),
+				"end_at":               endAt.Format(time.RFC3339),
+				"hours":                input.Hours,
+				"reason":               input.Reason,
 			},
 			SubmittedAt: tx.Now(),
 			UpdatedAt:   tx.Now(),
@@ -240,7 +452,7 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 			return err
 		}
 		req = LeaveRequest{
-			ID:             utils.NewID("lr"),
+			ID:             requestID,
 			TenantID:       ctx.TenantID,
 			EmployeeID:     employeeID,
 			LeaveType:      strings.TrimSpace(input.LeaveType),
@@ -591,6 +803,8 @@ func (c AttendanceService) AttendanceClockStatus(ctx RequestContext) (Attendance
 		return AttendanceClockStatus{}, err
 	} else if ok {
 		status.Shift = &shift
+		workDate = attendanceActiveWorkDate(shift, now)
+		status.WorkDate = workDate
 	}
 	if worksite, ok, err := c.store.GetAttendanceWorksite(goContext(ctx), ctx.TenantID, assignment.WorksiteID); err != nil {
 		return AttendanceClockStatus{}, err
@@ -623,6 +837,9 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 	}
 	if employeeID == "" {
 		return AttendanceClockRecord{}, BadRequest("employee_id is required")
+	}
+	if account.EmployeeID == "" || employeeID != account.EmployeeID {
+		return AttendanceClockRecord{}, Forbidden("geofence clock records can only be created for the current employee")
 	}
 	decision, err := c.evaluateAuthz(ctx, account, CheckRequest{
 		ApplicationCode:  AppAttendance,
@@ -660,18 +877,23 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 	if err != nil {
 		return AttendanceClockRecord{}, err
 	}
-	workDate := attendanceWorkDate(now)
+	workDate := attendanceWorkDateForClock(direction, shift, now)
 	distance := haversineMeters(input.Latitude, input.Longitude, worksite.Latitude, worksite.Longitude)
 	recordStatus := clockRecordStatusAccepted
 	rejectionReason := ""
-	if _, exists, err := c.store.GetAcceptedAttendanceClockRecord(goContext(ctx), ctx.TenantID, employeeID, workDate, direction); err != nil {
+	_, hasClockIn, err := c.store.GetAcceptedAttendanceClockRecord(goContext(ctx), ctx.TenantID, employeeID, workDate, clockDirectionIn)
+	if err != nil {
 		return AttendanceClockRecord{}, err
-	} else if exists {
+	}
+	_, hasClockOut, err := c.store.GetAcceptedAttendanceClockRecord(goContext(ctx), ctx.TenantID, employeeID, workDate, clockDirectionOut)
+	if err != nil {
+		return AttendanceClockRecord{}, err
+	}
+	if reason, err := clockRejectionReason(direction, shift, worksite, now, input.AccuracyMeters, distance, hasClockIn, hasClockOut); err != nil {
+		return AttendanceClockRecord{}, err
+	} else if reason != "" {
 		recordStatus = clockRecordStatusRejected
-		rejectionReason = clockRejectionDuplicate
-	} else if distance > float64(worksite.RadiusMeters) {
-		recordStatus = clockRecordStatusRejected
-		rejectionReason = clockRejectionOutsideGeofence
+		rejectionReason = reason
 	}
 	deviceInfo := utils.CopyStringMap(input.DeviceInfo)
 	if deviceInfo == nil {
@@ -702,7 +924,19 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 		CreatedAt:         now,
 	}
 	if err := c.store.UpsertAttendanceClockRecord(goContext(ctx), record); err != nil {
-		return AttendanceClockRecord{}, err
+		if acceptedClockConflict(err) && record.RecordStatus == clockRecordStatusAccepted {
+			record.ID = utils.NewID("acr")
+			record.RecordStatus = clockRecordStatusRejected
+			record.RejectionReason = clockRejectionDuplicate
+			if retryErr := c.store.UpsertAttendanceClockRecord(goContext(ctx), record); retryErr == nil {
+				err = nil
+			} else {
+				err = retryErr
+			}
+		}
+		if err != nil {
+			return AttendanceClockRecord{}, err
+		}
 	}
 	if err := c.audit(ctx, "attendance.clock_record.create", string(ResourceAttendanceClock), record.ID, string(SeverityMedium), map[string]any{
 		"employee_id":      record.EmployeeID,
@@ -887,6 +1121,55 @@ func (c AttendanceService) reserveLeaveBalance(ctx RequestContext, employeeID, l
 	return balance, nil
 }
 
+func (c AttendanceService) releaseLeaveBalance(ctx RequestContext, employeeID, leaveType string, hours float64) (LeaveBalance, error) {
+	balance, found, err := c.store.ReleaseLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, leaveType, hours, c.Now())
+	if err != nil {
+		return LeaveBalance{}, err
+	}
+	if !found {
+		return LeaveBalance{}, BadRequest("leave balance is required for this leave type")
+	}
+	return balance, nil
+}
+
+// applyLeaveWorkflowReview keeps leave requests and reserved balances in sync with workflow reviews.
+func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance FormInstance, kind string, status string) error {
+	leaveRequestID := workflowLinkedLeaveRequestID(instance)
+	var request LeaveRequest
+	var ok bool
+	var err error
+	if leaveRequestID != "" {
+		request, ok, err = c.store.GetLeaveRequest(goContext(ctx), ctx.TenantID, leaveRequestID)
+		if err != nil {
+			return err
+		}
+	}
+	if leaveRequestID == "" || !ok {
+		request, ok, err = c.store.GetLeaveRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+	}
+	previousStatus := normalizeLeaveRequestStatus(request.Status)
+	nextStatus := leaveRequestStatusForWorkflow(kind, status)
+	if nextStatus == "" || previousStatus == nextStatus {
+		return nil
+	}
+	if previousStatus == "approved" && nextStatus != "approved" {
+		return BadRequest("approved leave request cannot be changed by workflow")
+	}
+	if leaveRequestStatusReleasesBalance(previousStatus, nextStatus) {
+		if _, err := c.releaseLeaveBalance(ctx, request.EmployeeID, request.LeaveType, request.Hours); err != nil {
+			return err
+		}
+	}
+	request.Status = nextStatus
+	return c.store.UpsertLeaveRequest(goContext(ctx), request)
+}
+
 func (c AttendanceService) attendanceEmployeeScope(ctx RequestContext, account Account, decision CheckResult) (map[string]struct{}, bool, error) {
 	if decision.Scope == "" || decision.Scope == "all" || decision.Scope == "tenant" {
 		return nil, true, nil
@@ -949,6 +1232,11 @@ func attendancePolicyTimeOptions() []string {
 		options = append(options, twoDigit(hour)+":00", twoDigit(hour)+":30")
 	}
 	return options
+}
+
+// attendancePolicyWeekendOptions returns supported weekend presets for policy settings.
+func attendancePolicyWeekendOptions() []string {
+	return []string{"週六、週日", "週日", "無"}
 }
 
 // attendancePolicyCycleStartOptions returns valid monthly cycle start days.
@@ -1085,30 +1373,17 @@ func validateShiftInput(name, clockInStart, clockInEnd, clockOutStart, clockOutE
 	if strings.TrimSpace(name) == "" {
 		return BadRequest("name is required")
 	}
-	inStart, err := parseClockWindowTime(clockInStart, "clock_in_start")
-	if err != nil {
+	if _, err := parseClockWindowTime(clockInStart, "clock_in_start"); err != nil {
 		return err
 	}
-	inEnd, err := parseClockWindowTime(clockInEnd, "clock_in_end")
-	if err != nil {
+	if _, err := parseClockWindowTime(clockInEnd, "clock_in_end"); err != nil {
 		return err
 	}
-	outStart, err := parseClockWindowTime(clockOutStart, "clock_out_start")
-	if err != nil {
+	if _, err := parseClockWindowTime(clockOutStart, "clock_out_start"); err != nil {
 		return err
 	}
-	outEnd, err := parseClockWindowTime(clockOutEnd, "clock_out_end")
-	if err != nil {
+	if _, err := parseClockWindowTime(clockOutEnd, "clock_out_end"); err != nil {
 		return err
-	}
-	if inEnd.Before(inStart) {
-		return BadRequest("clock_in_end must not be before clock_in_start")
-	}
-	if outEnd.Before(outStart) {
-		return BadRequest("clock_out_end must not be before clock_out_start")
-	}
-	if outStart.Before(inStart) {
-		return BadRequest("clock_out_start must not be before clock_in_start")
 	}
 	if lateGraceMinutes < 0 || earlyLeaveGraceMinutes < 0 {
 		return BadRequest("grace minutes must be greater than or equal to zero")
@@ -1154,6 +1429,84 @@ func normalizeClockDirection(value string) (string, error) {
 	}
 }
 
+// clockRejectionReason returns the first business rule that rejects a geofence clock attempt.
+func clockRejectionReason(direction string, shift AttendanceShift, worksite AttendanceWorksite, at time.Time, accuracyMeters, distanceMeters float64, hasClockIn, hasClockOut bool) (string, error) {
+	if (direction == clockDirectionIn && hasClockIn) || (direction == clockDirectionOut && hasClockOut) {
+		return clockRejectionDuplicate, nil
+	}
+	if direction == clockDirectionOut && !hasClockIn {
+		return clockRejectionInvalidSequence, nil
+	}
+	if direction == clockDirectionIn && hasClockOut {
+		return clockRejectionInvalidSequence, nil
+	}
+	ok, err := clockWithinShiftWindow(direction, shift, at)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return clockRejectionOutsideWindow, nil
+	}
+	if distanceMeters > float64(worksite.RadiusMeters) {
+		return clockRejectionOutsideGeofence, nil
+	}
+	if accuracyMeters > clockMaxAccuracyMeters {
+		return clockRejectionLowAccuracy, nil
+	}
+	return "", nil
+}
+
+// clockWithinShiftWindow checks the configured shift window in the attendance business timezone.
+func clockWithinShiftWindow(direction string, shift AttendanceShift, at time.Time) (bool, error) {
+	start, end, err := clockWindowMinutes(direction, shift)
+	if err != nil {
+		return false, err
+	}
+	minute := clockMinuteOfDay(at)
+	if start <= end {
+		return minute >= start && minute <= end, nil
+	}
+	return minute >= start || minute <= end, nil
+}
+
+// clockWindowMinutes resolves the configured HH:MM window for one clock direction.
+func clockWindowMinutes(direction string, shift AttendanceShift) (int, int, error) {
+	startField := "clock_in_start"
+	endField := "clock_in_end"
+	startValue := shift.ClockInStart
+	endValue := shift.ClockInEnd
+	if direction == clockDirectionOut {
+		startField = "clock_out_start"
+		endField = "clock_out_end"
+		startValue = shift.ClockOutStart
+		endValue = shift.ClockOutEnd
+	}
+	start, err := parseClockWindowMinute(startValue, startField)
+	if err != nil {
+		return 0, 0, err
+	}
+	end, err := parseClockWindowMinute(endValue, endField)
+	if err != nil {
+		return 0, 0, err
+	}
+	return start, end, nil
+}
+
+// parseClockWindowMinute converts an HH:MM window value into minute-of-day.
+func parseClockWindowMinute(value, field string) (int, error) {
+	parsed, err := parseClockWindowTime(value, field)
+	if err != nil {
+		return 0, err
+	}
+	return parsed.Hour()*60 + parsed.Minute(), nil
+}
+
+// clockMinuteOfDay returns the local business minute for shift-window checks.
+func clockMinuteOfDay(at time.Time) int {
+	local := at.In(attendanceClockLocation)
+	return local.Hour()*60 + local.Minute()
+}
+
 func validateCoordinates(latitude, longitude float64) error {
 	if latitude < -90 || latitude > 90 {
 		return BadRequest("latitude must be between -90 and 90")
@@ -1164,8 +1517,42 @@ func validateCoordinates(latitude, longitude float64) error {
 	return nil
 }
 
+// attendanceWorkDate formats the UTC+8 business day used for duplicate checks and reports.
 func attendanceWorkDate(at time.Time) string {
-	return at.UTC().Format("2006-01-02")
+	return at.In(attendanceClockLocation).Format("2006-01-02")
+}
+
+func attendanceWorkDateForClock(direction string, shift AttendanceShift, at time.Time) string {
+	if direction == clockDirectionOut && clockOutBelongsToPreviousWorkDate(shift, at) {
+		return at.In(attendanceClockLocation).AddDate(0, 0, -1).Format(time.DateOnly)
+	}
+	return attendanceWorkDate(at)
+}
+
+func attendanceActiveWorkDate(shift AttendanceShift, at time.Time) string {
+	if clockOutBelongsToPreviousWorkDate(shift, at) {
+		return at.In(attendanceClockLocation).AddDate(0, 0, -1).Format(time.DateOnly)
+	}
+	return attendanceWorkDate(at)
+}
+
+func clockOutBelongsToPreviousWorkDate(shift AttendanceShift, at time.Time) bool {
+	inStart, _, err := clockWindowMinutes(clockDirectionIn, shift)
+	if err != nil {
+		return false
+	}
+	outStart, outEnd, err := clockWindowMinutes(clockDirectionOut, shift)
+	if err != nil {
+		return false
+	}
+	if outStart >= inStart {
+		return false
+	}
+	minute := clockMinuteOfDay(at)
+	if outStart <= outEnd {
+		return minute <= outEnd
+	}
+	return minute >= outStart || minute <= outEnd
 }
 
 func (c AttendanceService) attendanceAssignmentBundle(ctx RequestContext, employeeID string, at time.Time) (AttendanceShiftAssignment, AttendanceShift, AttendanceWorksite, error) {
@@ -1215,6 +1602,12 @@ func nextClockAction(clockIn, clockOut *AttendanceClockRecord) string {
 		return clockDirectionOut
 	}
 	return "complete"
+}
+
+// acceptedClockConflict detects the database-level unique guard for accepted daily clock records.
+func acceptedClockConflict(err error) bool {
+	appErr, ok := AsAppError(err)
+	return ok && appErr.Code == "conflict" && strings.Contains(appErr.Message, "accepted clock record")
 }
 
 func normalizeClockRecordQuery(query AttendanceClockRecordQuery) AttendanceClockRecordQuery {
@@ -1384,12 +1777,86 @@ func filterLeaveBalancesByEmployees(items []LeaveBalance, allowed map[string]str
 	return out
 }
 
-func filterLeaveRequestsByEmployees(items []LeaveRequest, allowed map[string]struct{}) []LeaveRequest {
-	out := make([]LeaveRequest, 0, len(items))
-	for _, item := range items {
-		if _, ok := allowed[item.EmployeeID]; ok {
-			out = append(out, item)
+func normalizeLeaveRequestQuery(query LeaveRequestQuery) LeaveRequestQuery {
+	query.Status = strings.TrimSpace(strings.ToLower(query.Status))
+	query.FromDate = strings.TrimSpace(query.FromDate)
+	query.ToDate = strings.TrimSpace(query.ToDate)
+	query.EmployeeIDs = employeeIDsFromSlice(query.EmployeeIDs)
+	return query
+}
+
+func employeeIDsFromSet(values map[string]struct{}) []string {
+	out := make([]string, 0, len(values))
+	for id := range values {
+		if trimmed := strings.TrimSpace(id); trimmed != "" {
+			out = append(out, trimmed)
 		}
 	}
+	sort.Strings(out)
 	return out
+}
+
+func employeeIDsFromSlice(values []string) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		out = append(out, trimmed)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func workflowLinkedLeaveRequestID(instance FormInstance) string {
+	if !strings.EqualFold(stringFromAny(instance.Payload["linked_resource_type"]), "attendance.leave_request") {
+		if stringFromAny(instance.Payload["leave_request_id"]) == "" {
+			return ""
+		}
+	}
+	if id := strings.TrimSpace(stringFromAny(instance.Payload["leave_request_id"])); id != "" {
+		return id
+	}
+	return strings.TrimSpace(stringFromAny(instance.Payload["linked_resource_id"]))
+}
+
+func leaveRequestStatusForWorkflow(kind string, status string) string {
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "approve":
+		return "approved"
+	case "reject", "return":
+		return "rejected"
+	case "cancel":
+		return "cancelled"
+	}
+	return normalizeLeaveRequestStatus(status)
+}
+
+func normalizeLeaveRequestStatus(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "approved":
+		return "approved"
+	case "rejected", "reject":
+		return "rejected"
+	case "cancelled", "canceled", "cancel":
+		return "cancelled"
+	case "submitted", "pending", "pending_approval", "":
+		return "pending_approval"
+	default:
+		return strings.ToLower(strings.TrimSpace(status))
+	}
+}
+
+func leaveRequestStatusReleasesBalance(previousStatus string, nextStatus string) bool {
+	switch previousStatus {
+	case "rejected", "cancelled":
+		return false
+	}
+	return nextStatus == "rejected" || nextStatus == "cancelled"
 }

@@ -16,4 +16,7 @@ type WorkflowStore interface {
 	UpsertFormInstance(context.Context, domain.FormInstance) error
 	GetFormInstance(ctx context.Context, tenantID, id string) (domain.FormInstance, bool, error)
 	ListFormInstances(ctx context.Context, tenantID string) ([]domain.FormInstance, error)
+	ListFormInstancesByQuery(ctx context.Context, tenantID string, query domain.FormInstanceQuery) ([]domain.FormInstance, error)
+	ListFormInstancePageByQuery(ctx context.Context, tenantID string, query domain.FormInstanceQuery, page domain.PageRequest) ([]domain.FormInstance, int, error)
+	DeleteFormInstance(ctx context.Context, tenantID, id string) error
 }

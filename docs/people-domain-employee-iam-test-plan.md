@@ -114,6 +114,39 @@ Create a deterministic test fixture set and reuse it across unit, API, integrati
 | Agent service account | Can run only allowed tools under user permission intersection. |
 | Disabled / missing account | Must be rejected. |
 
+### Seeded Demo Login Accounts
+
+All accounts below are seeded by `SeedDemo` for cross-page manual testing and should not be deleted from local demo data. The local frontend demo login password is `Password123!`.
+
+| Email | Account ID | Permission profile | Recommended cross-test pages | Expected boundary |
+| --- | --- | --- | --- | --- |
+| `admin@demo.local` | `acct-admin` | Platform Admin | Home, Workspace, Employee, Attendance, Workflow, IAM, Audit | Full demo tenant access. |
+| `employee@demo.local` | `acct-employee` | Employee Self Service | Home, Tasks, Forms, Clock, own workflow forms | Self-scoped employee, leave, clock, and workflow access only. |
+| `audit@demo.local` | `acct-audit` | Audit Viewer | Audit logs, IAM permission-set read, forbidden HR pages | Audit and permission-set read only; HR dashboard/list should be denied. |
+| `hr.manager@demo.local` | `acct-hr-manager` | HR Manager | Workspace overview, employees, organization, insights, workspace settings read | HR employee create/update/invite and dashboard read; no delete/export. |
+| `hr.readonly@demo.local` | `acct-hr-readonly` | HR Readonly | Workspace overview, employees, organization, insights | Read-only HR/dashboard access; create/update/delete APIs should be denied. |
+| `attendance.manager@demo.local` | `acct-attendance-manager` | Attendance Manager | Attendance clock, leave, corrections, worksites, shifts, workspace attendance | Attendance write/approve access; HR employee writes and IAM pages should be denied. |
+| `workflow.approver@demo.local` | `acct-workflow-approver` | Workflow Approver | Forms, workflow review queue, workspace overview, notifications | Workflow approve/update access; HR and attendance writes should be denied. |
+| `security.admin@demo.local` | `acct-security-admin` | Security Admin | IAM user groups, permission sets, workspace admins, audit logs | IAM/audit administration; HR employee writes should be denied. |
+| `insights.viewer@demo.local` | `acct-insights-viewer` | Insights Viewer | Workspace overview, attendance read, turnover, insights | Data dashboard read-only account; writes should be denied. |
+| `disabled@demo.local` | `acct-disabled` | Disabled / missing account | Login negative path, `/v1/me`, any protected API | Frontend demo login can issue a local token, but backend must reject the disabled account. |
+
+### Seeded Dashboard User Cohort
+
+For a DB-backed dashboard smoke, run `scripts/seed_demo_dashboard_users.sql` after migrations. It keeps existing test data, fills the `demo` tenant to 100 employees, and adds deterministic login-capable accounts:
+
+| Pattern | Range | Password | Account ID pattern | Purpose |
+| --- | --- | --- | --- | --- |
+| `demo.bulkNNN@demo.local` | `001` to `097` | `Password123!` | `acct-demo-bulk-NNN` | 100-user dashboard/list/permission smoke data. |
+
+The seeded DB cohort currently covers:
+
+| Dimension | Distribution |
+| --- | --- |
+| Status | active 69, probation 11, onboarding 8, leave_suspended 7, resigned 5 |
+| Departments | 10 org units: HQ, Ops, HR, Finance, Sales, Security, R&D, Product, Marketing, Customer Success |
+| July 1 samples | 10 approved leave requests and 71 accepted clock records |
+
 ### Employees
 
 Cover every status and category from the Notion feature:

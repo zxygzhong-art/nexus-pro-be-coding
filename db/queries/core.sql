@@ -376,6 +376,26 @@ SELECT * FROM outbox_events
 WHERE tenant_id = $1
 ORDER BY created_at ASC, id ASC;
 
+-- name: UpsertAttendancePolicy :one
+INSERT INTO attendance_policies (
+    id, tenant_id, work_time, leave_types, updated_by_account_id, created_at, updated_at
+) VALUES (
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(work_time)::jsonb,
+    sqlc.arg(leave_types)::jsonb, sqlc.arg(updated_by_account_id),
+    sqlc.arg(created_at), sqlc.arg(updated_at)
+)
+ON CONFLICT (tenant_id) DO UPDATE SET
+    id = EXCLUDED.id,
+    work_time = EXCLUDED.work_time,
+    leave_types = EXCLUDED.leave_types,
+    updated_by_account_id = EXCLUDED.updated_by_account_id,
+    updated_at = EXCLUDED.updated_at
+RETURNING *;
+
+-- name: GetAttendancePolicy :one
+SELECT * FROM attendance_policies
+WHERE tenant_id = sqlc.arg(tenant_id);
+
 -- name: UpsertLeaveBalance :one
 INSERT INTO leave_balances (
     id, tenant_id, employee_id, leave_type, remaining_hours, updated_at
@@ -407,6 +427,15 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND employee_id = sqlc.arg(employee_id)
   AND lower(leave_type) = lower(sqlc.arg(leave_type)::text)
   AND remaining_hours >= sqlc.arg(hours)::double precision
+RETURNING *;
+
+-- name: ReleaseLeaveBalance :one
+UPDATE leave_balances
+SET remaining_hours = remaining_hours + sqlc.arg(hours)::double precision,
+    updated_at = sqlc.arg(updated_at)::timestamptz
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND employee_id = sqlc.arg(employee_id)
+  AND lower(leave_type) = lower(sqlc.arg(leave_type)::text)
 RETURNING *;
 
 -- name: UpsertFormTemplate :one
@@ -464,6 +493,56 @@ SELECT * FROM form_instances
 WHERE tenant_id = $1
 ORDER BY submitted_at ASC;
 
+-- name: CountFormInstancesByQuery :one
+SELECT count(*) FROM form_instances fi
+WHERE fi.tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.arg(status)::text = '' OR fi.status = sqlc.arg(status))
+  AND (sqlc.arg(template_id)::text = '' OR fi.template_id = sqlc.arg(template_id))
+  AND (sqlc.arg(template_key)::text = '' OR EXISTS (
+    SELECT 1 FROM form_templates
+    WHERE form_templates.tenant_id = fi.tenant_id
+      AND form_templates.id = fi.template_id
+      AND form_templates.key = sqlc.arg(template_key)
+  ))
+  AND (sqlc.arg(applicant_account_id)::text = '' OR fi.applicant_account_id = sqlc.arg(applicant_account_id));
+
+-- name: ListFormInstancesByQuery :many
+SELECT * FROM form_instances fi
+WHERE fi.tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.arg(status)::text = '' OR fi.status = sqlc.arg(status))
+  AND (sqlc.arg(template_id)::text = '' OR fi.template_id = sqlc.arg(template_id))
+  AND (sqlc.arg(template_key)::text = '' OR EXISTS (
+    SELECT 1 FROM form_templates
+    WHERE form_templates.tenant_id = fi.tenant_id
+      AND form_templates.id = fi.template_id
+      AND form_templates.key = sqlc.arg(template_key)
+  ))
+  AND (sqlc.arg(applicant_account_id)::text = '' OR fi.applicant_account_id = sqlc.arg(applicant_account_id))
+ORDER BY fi.submitted_at ASC;
+
+-- name: ListFormInstancePageByQuery :many
+SELECT * FROM form_instances fi
+WHERE fi.tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.arg(status)::text = '' OR fi.status = sqlc.arg(status))
+  AND (sqlc.arg(template_id)::text = '' OR fi.template_id = sqlc.arg(template_id))
+  AND (sqlc.arg(template_key)::text = '' OR EXISTS (
+    SELECT 1 FROM form_templates
+    WHERE form_templates.tenant_id = fi.tenant_id
+      AND form_templates.id = fi.template_id
+      AND form_templates.key = sqlc.arg(template_key)
+  ))
+  AND (sqlc.arg(applicant_account_id)::text = '' OR fi.applicant_account_id = sqlc.arg(applicant_account_id))
+ORDER BY
+  CASE WHEN sqlc.arg(sort)::text = 'submitted_at_asc' THEN fi.submitted_at END ASC,
+  fi.submitted_at DESC,
+  fi.id ASC
+LIMIT sqlc.arg(limit_count)::int
+OFFSET sqlc.arg(offset_count)::int;
+
+-- name: DeleteFormInstance :exec
+DELETE FROM form_instances
+WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id);
+
 -- name: UpsertLeaveRequest :one
 INSERT INTO leave_requests (
     id, tenant_id, employee_id, leave_type, start_at, end_at,
@@ -488,10 +567,46 @@ RETURNING *;
 SELECT * FROM leave_requests
 WHERE tenant_id = $1 AND id = $2;
 
+-- name: GetLeaveRequestByFormInstanceID :one
+SELECT * FROM leave_requests
+WHERE tenant_id = sqlc.arg(tenant_id) AND form_instance_id = sqlc.arg(form_instance_id)
+LIMIT 1;
+
 -- name: ListLeaveRequests :many
 SELECT * FROM leave_requests
 WHERE tenant_id = $1
 ORDER BY created_at ASC;
+
+-- name: CountLeaveRequestsByQuery :one
+SELECT count(*) FROM leave_requests
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND (coalesce(cardinality(sqlc.arg(employee_ids)::text[]), 0) = 0 OR employee_id = ANY(sqlc.arg(employee_ids)::text[]))
+  AND (sqlc.arg(status)::text = '' OR lower(status) = lower(sqlc.arg(status)::text))
+  AND (NULLIF(sqlc.arg(from_date)::text, '') IS NULL OR end_at::date >= NULLIF(sqlc.arg(from_date)::text, '')::date)
+  AND (NULLIF(sqlc.arg(to_date)::text, '') IS NULL OR start_at::date <= NULLIF(sqlc.arg(to_date)::text, '')::date);
+
+-- name: ListLeaveRequestsByQuery :many
+SELECT * FROM leave_requests
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND (coalesce(cardinality(sqlc.arg(employee_ids)::text[]), 0) = 0 OR employee_id = ANY(sqlc.arg(employee_ids)::text[]))
+  AND (sqlc.arg(status)::text = '' OR lower(status) = lower(sqlc.arg(status)::text))
+  AND (NULLIF(sqlc.arg(from_date)::text, '') IS NULL OR end_at::date >= NULLIF(sqlc.arg(from_date)::text, '')::date)
+  AND (NULLIF(sqlc.arg(to_date)::text, '') IS NULL OR start_at::date <= NULLIF(sqlc.arg(to_date)::text, '')::date)
+ORDER BY created_at ASC;
+
+-- name: ListLeaveRequestPageByQuery :many
+SELECT * FROM leave_requests
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND (coalesce(cardinality(sqlc.arg(employee_ids)::text[]), 0) = 0 OR employee_id = ANY(sqlc.arg(employee_ids)::text[]))
+  AND (sqlc.arg(status)::text = '' OR lower(status) = lower(sqlc.arg(status)::text))
+  AND (NULLIF(sqlc.arg(from_date)::text, '') IS NULL OR end_at::date >= NULLIF(sqlc.arg(from_date)::text, '')::date)
+  AND (NULLIF(sqlc.arg(to_date)::text, '') IS NULL OR start_at::date <= NULLIF(sqlc.arg(to_date)::text, '')::date)
+ORDER BY
+  CASE WHEN sqlc.arg(sort)::text = 'created_at_asc' THEN created_at END ASC,
+  created_at DESC,
+  id ASC
+LIMIT sqlc.arg(limit_count)::int
+OFFSET sqlc.arg(offset_count)::int;
 
 -- name: UpsertAttendanceWorksite :one
 INSERT INTO attendance_worksites (
@@ -704,6 +819,78 @@ SELECT * FROM knowledge_articles
 WHERE tenant_id = $1
 ORDER BY created_at ASC;
 
+-- name: UpsertPlatformTaskItem :one
+INSERT INTO platform_task_items (
+    id, tenant_id, account_id, work_date, title, category,
+    product, hours, note, created_at, updated_at
+) VALUES (
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(account_id), sqlc.arg(work_date),
+    sqlc.arg(title), sqlc.arg(category), sqlc.arg(product), sqlc.arg(hours),
+    sqlc.arg(note), sqlc.arg(created_at), sqlc.arg(updated_at)
+)
+ON CONFLICT (tenant_id, id) DO UPDATE SET
+    work_date = EXCLUDED.work_date,
+    title = EXCLUDED.title,
+    category = EXCLUDED.category,
+    product = EXCLUDED.product,
+    hours = EXCLUDED.hours,
+    note = EXCLUDED.note,
+    updated_at = EXCLUDED.updated_at
+WHERE platform_task_items.account_id = EXCLUDED.account_id
+RETURNING *;
+
+-- name: GetPlatformTaskItem :one
+SELECT * FROM platform_task_items
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND account_id = sqlc.arg(account_id)
+  AND id = sqlc.arg(id);
+
+-- name: ListPlatformTaskItems :many
+SELECT * FROM platform_task_items
+WHERE tenant_id = sqlc.arg(tenant_id) AND account_id = sqlc.arg(account_id)
+ORDER BY work_date DESC, created_at ASC, id ASC;
+
+-- name: DeletePlatformTaskItem :exec
+DELETE FROM platform_task_items
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND account_id = sqlc.arg(account_id)
+  AND id = sqlc.arg(id);
+
+-- name: UpsertPlatformTaskTodo :one
+INSERT INTO platform_task_todos (
+    id, tenant_id, account_id, text, due_date, status,
+    converted_task_item_id, created_at, updated_at
+) VALUES (
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(account_id), sqlc.arg(text),
+    sqlc.arg(due_date), sqlc.arg(status), sqlc.arg(converted_task_item_id),
+    sqlc.arg(created_at), sqlc.arg(updated_at)
+)
+ON CONFLICT (tenant_id, id) DO UPDATE SET
+    text = EXCLUDED.text,
+    due_date = EXCLUDED.due_date,
+    status = EXCLUDED.status,
+    converted_task_item_id = EXCLUDED.converted_task_item_id,
+    updated_at = EXCLUDED.updated_at
+WHERE platform_task_todos.account_id = EXCLUDED.account_id
+RETURNING *;
+
+-- name: GetPlatformTaskTodo :one
+SELECT * FROM platform_task_todos
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND account_id = sqlc.arg(account_id)
+  AND id = sqlc.arg(id);
+
+-- name: ListPlatformTaskTodos :many
+SELECT * FROM platform_task_todos
+WHERE tenant_id = sqlc.arg(tenant_id) AND account_id = sqlc.arg(account_id)
+ORDER BY CASE WHEN status = 'open' THEN 0 ELSE 1 END, created_at ASC, id ASC;
+
+-- name: DeletePlatformTaskTodo :exec
+DELETE FROM platform_task_todos
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND account_id = sqlc.arg(account_id)
+  AND id = sqlc.arg(id);
+
 -- name: UpsertAgentRun :one
 INSERT INTO agent_runs (
     id, tenant_id, account_id, mode, prompt, answer,
@@ -732,13 +919,35 @@ SELECT * FROM agent_runs
 WHERE tenant_id = $1
 ORDER BY created_at ASC;
 
+-- name: ListAgentRunsByAccount :many
+SELECT * FROM agent_runs
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND account_id = sqlc.arg(account_id)
+ORDER BY created_at DESC, id ASC;
+
 -- name: CountAgentRuns :one
 SELECT count(*) FROM agent_runs
 WHERE tenant_id = $1;
 
+-- name: CountAgentRunsByAccount :one
+SELECT count(*) FROM agent_runs
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND account_id = sqlc.arg(account_id);
+
 -- name: ListAgentRunsPage :many
 SELECT * FROM agent_runs
 WHERE tenant_id = sqlc.arg(tenant_id)
+ORDER BY
+  CASE WHEN sqlc.arg(sort)::text = 'created_at_asc' THEN created_at END ASC,
+  created_at DESC,
+  id ASC
+LIMIT sqlc.arg(limit_count)::int
+OFFSET sqlc.arg(offset_count)::int;
+
+-- name: ListAgentRunsPageByAccount :many
+SELECT * FROM agent_runs
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND account_id = sqlc.arg(account_id)
 ORDER BY
   CASE WHEN sqlc.arg(sort)::text = 'created_at_asc' THEN created_at END ASC,
   created_at DESC,
