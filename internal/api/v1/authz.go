@@ -25,8 +25,8 @@ func (c AuthzCtrl) RegisterRoutes(router *gin.RouterGroup) {
 }
 
 // authorize performs route-level authorization before the handler executes.
-func (a *API) authorize(ctx domain.RequestContext, r *http.Request, resource, action string, authz routeAuthz) error {
-	req := domain.CheckRequest{Resource: resource, Action: domain.Action(action)}
+func (a *API) authorize(ctx domain.RequestContext, r *http.Request, routePath, resource, action string, authz routeAuthz) error {
+	req := domain.CheckRequest{Resource: resource, Action: domain.Action(action), RouteMethod: r.Method, RoutePath: routePath}
 	if authz.resourceIDParam != "" {
 		req.ResourceID = r.PathValue(authz.resourceIDParam)
 	}

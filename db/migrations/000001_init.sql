@@ -239,6 +239,13 @@ CREATE TABLE accounts (
 
 CREATE INDEX accounts_tenant_id_idx ON accounts (tenant_id);
 CREATE UNIQUE INDEX accounts_tenant_email_idx ON accounts (tenant_id, lower(email)) WHERE email <> '';
+CREATE INDEX accounts_keyword_trgm_idx ON accounts USING gin (
+    lower(
+        coalesce(display_name, '') || ' ' ||
+        coalesce(email, '') || ' ' ||
+        coalesce(employee_id, '')
+    ) gin_trgm_ops
+);
 
 CREATE TABLE user_groups (
     id text PRIMARY KEY,
@@ -410,6 +417,29 @@ CREATE INDEX authz_permission_set_assignments_principal_idx ON authz_permission_
     tenant_id, principal_type, principal_id
 );
 CREATE INDEX authz_permission_set_assignments_set_idx ON authz_permission_set_assignments (tenant_id, permission_set_id);
+
+CREATE OR REPLACE FUNCTION validate_authz_assignment_references()
+RETURNS trigger AS $$
+BEGIN
+    IF NEW.data_scope_id <> '' AND NOT EXISTS (
+        SELECT 1 FROM authz_data_scopes
+        WHERE tenant_id = NEW.tenant_id AND id = NEW.data_scope_id
+    ) THEN
+        RAISE EXCEPTION 'authz data_scope_id % does not exist for tenant %', NEW.data_scope_id, NEW.tenant_id;
+    END IF;
+    IF NEW.condition_id <> '' AND NOT EXISTS (
+        SELECT 1 FROM authz_policy_conditions
+        WHERE tenant_id = NEW.tenant_id AND id = NEW.condition_id
+    ) THEN
+        RAISE EXCEPTION 'authz condition_id % does not exist for tenant %', NEW.condition_id, NEW.tenant_id;
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER authz_permission_set_assignments_reference_check
+BEFORE INSERT OR UPDATE ON authz_permission_set_assignments
+FOR EACH ROW EXECUTE FUNCTION validate_authz_assignment_references();
 
 CREATE TABLE authz_assumable_role_sessions (
     id text PRIMARY KEY,
@@ -1024,8 +1054,6 @@ CREATE POLICY tenant_isolation_platform_task_todos ON platform_task_todos USING 
 CREATE POLICY tenant_isolation_agent_runs ON agent_runs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_outbox_events ON outbox_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_audit_logs ON audit_logs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-
-
 -- +goose Down
 
 DROP TABLE IF EXISTS audit_logs;
@@ -1082,3 +1110,5 @@ DROP TABLE IF EXISTS roles;
 DROP TABLE IF EXISTS users;
 DROP TABLE IF EXISTS companies;
 DROP TABLE IF EXISTS tenants;
+DROP FUNCTION IF EXISTS validate_authz_assignment_references();
+DROP FUNCTION IF EXISTS validate_employee_references();

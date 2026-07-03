@@ -69,10 +69,65 @@ func TestEmployeeIntegrityConstraintsStayInSchema(t *testing.T) {
 		"CREATE TRIGGER employees_reference_check",
 		"CREATE TABLE outbox_events (",
 		"CREATE POLICY tenant_isolation_outbox_events",
+		"CREATE OR REPLACE FUNCTION validate_authz_assignment_references()",
+		"CREATE TRIGGER authz_permission_set_assignments_reference_check",
 	}
 	for _, item := range required {
 		if !strings.Contains(schema, item) {
 			t.Fatalf("expected employee integrity schema fragment %q", item)
 		}
+	}
+}
+
+func TestTenantResourceIDsStayGloballyUniqueContract(t *testing.T) {
+	schemaRaw, err := os.ReadFile("../../../db/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	coreRaw, err := os.ReadFile("../../../db/queries/core.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	authzRaw, err := os.ReadFile("../../../db/queries/authz.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	openAPIRaw, err := os.ReadFile("../../../docs/openapi.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := string(schemaRaw)
+	core := string(coreRaw)
+	authz := string(authzRaw)
+	openAPI := string(openAPIRaw)
+
+	requiredSchema := []string{
+		"CREATE TABLE accounts (\n    id text PRIMARY KEY",
+		"CONSTRAINT accounts_tenant_id_id_idx UNIQUE (tenant_id, id)",
+		"CREATE TABLE employees (\n    id text PRIMARY KEY",
+		"CONSTRAINT employees_tenant_id_id_idx UNIQUE (tenant_id, id)",
+		"CREATE TABLE platform_task_items (\n    id text PRIMARY KEY",
+		"CONSTRAINT platform_task_items_tenant_id_id_idx UNIQUE (tenant_id, id)",
+		"CREATE INDEX accounts_keyword_trgm_idx ON accounts USING gin",
+	}
+	for _, item := range requiredSchema {
+		if !strings.Contains(schema, item) {
+			t.Fatalf("expected globally unique tenant-resource id schema fragment %q", item)
+		}
+	}
+	requiredQueries := []string{
+		"-- name: UpsertAccount :one\nINSERT INTO accounts",
+		"ON CONFLICT (id) DO UPDATE SET\n    tenant_id = EXCLUDED.tenant_id",
+		"-- name: UpsertEmployee :one\nINSERT INTO employees",
+		"-- name: UpsertAuthzPermissionSetAssignment :one\nINSERT INTO authz_permission_set_assignments",
+		"ON CONFLICT (id) DO UPDATE SET\n    tenant_id = EXCLUDED.tenant_id",
+	}
+	for _, item := range requiredQueries {
+		if !strings.Contains(core, item) && !strings.Contains(authz, item) {
+			t.Fatalf("expected globally unique tenant-resource id query fragment %q", item)
+		}
+	}
+	if !strings.Contains(openAPI, "Identifiers for persisted tenant resources are globally unique across tenants.") {
+		t.Fatal("expected OpenAPI to document globally unique persisted resource identifiers")
 	}
 }

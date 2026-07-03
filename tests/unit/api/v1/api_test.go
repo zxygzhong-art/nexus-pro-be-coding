@@ -900,6 +900,34 @@ func TestHighRiskRouteAllowsConfirmedRequest(t *testing.T) {
 	}
 }
 
+func TestEHRMSEmployeeSyncRouteRequiresApprovalConfirmation(t *testing.T) {
+	handler := newTestAPI(true)
+	req := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/ehrms/sync", strings.NewReader(`{"mode":"upsert"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for unconfirmed eHRMS sync, got %d: %s", rec.Code, rec.Body.String())
+	}
+	errPayload := decodeError(t, rec.Body.Bytes())
+	if errPayload.ReasonCode != "approval_required" {
+		t.Fatalf("expected approval_required reason code, got %+v", errPayload)
+	}
+
+	confirmedReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/ehrms/sync", strings.NewReader(`{"mode":"upsert"}`))
+	confirmedReq.Header.Set("Content-Type", "application/json")
+	confirmedReq.Header.Set("X-Approval-Confirmed", "true")
+	confirmedRec := httptest.NewRecorder()
+
+	handler.ServeHTTP(confirmedRec, confirmedReq)
+
+	if confirmedRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected confirmed eHRMS sync to reach service configuration check, got %d: %s", confirmedRec.Code, confirmedRec.Body.String())
+	}
+}
+
 func TestHighRiskRouteCanDisableApprovalHeader(t *testing.T) {
 	store := memory.NewStore()
 	service.SeedDemo(store)

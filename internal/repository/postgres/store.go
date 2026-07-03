@@ -63,6 +63,11 @@ func (s *Store) WithTenantTransaction(execCtx context.Context, tenantID string, 
 	if _, err := tx.Exec(execCtx, "SELECT set_config('app.tenant_id', $1, true)", tenantID); err != nil {
 		return err
 	}
+	if companyID := tenantctx.CompanyIDFromContext(execCtx); companyID != "" {
+		if _, err := tx.Exec(execCtx, "SELECT set_config('app.company_id', $1, true)", companyID); err != nil {
+			return err
+		}
+	}
 	txStore := &Store{q: sqlc.New(tx), db: tx}
 	if err := fn(txStore); err != nil {
 		return err
@@ -260,7 +265,7 @@ func (s *Store) ListPermissionSets(execCtx context.Context, tenantID string) ([]
 }
 
 func (s *Store) UpsertPermissionSetAssignment(execCtx context.Context, v domain.PermissionSetAssignment) error {
-	_, err := s.q.CreateAuthzPermissionSetAssignment(execCtx, sqlc.CreateAuthzPermissionSetAssignmentParams{
+	_, err := s.q.UpsertAuthzPermissionSetAssignment(execCtx, sqlc.UpsertAuthzPermissionSetAssignmentParams{
 		ID:              v.ID,
 		TenantID:        v.TenantID,
 		PrincipalType:   v.PrincipalType,

@@ -1,6 +1,9 @@
 package repository
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // Store aggregates all persistence contracts required by the service layer.
 type Store interface {
@@ -25,10 +28,10 @@ type TenantTransactor interface {
 	WithTenantTransaction(ctx context.Context, tenantID string, fn func(Store) error) error
 }
 
-// WithinTenantTransaction runs fn in a tenant transaction when the store supports it.
+// WithinTenantTransaction requires a tenant transaction so multi-write flows stay atomic.
 func WithinTenantTransaction(ctx context.Context, store Store, tenantID string, fn func(Store) error) error {
 	if tx, ok := store.(TenantTransactor); ok {
 		return tx.WithTenantTransaction(ctx, tenantID, fn)
 	}
-	return fn(store)
+	return errors.New("repository store does not support tenant transactions")
 }

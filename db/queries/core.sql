@@ -226,8 +226,10 @@ WHERE employees.tenant_id = sqlc.arg(tenant_id)
       coalesce(employees.name, '') || ' ' ||
       coalesce(employees.company_email, '') || ' ' ||
       coalesce(employees.personal_email, '') || ' ' ||
-      coalesce(employees.phone, '') || ' ' ||
-      coalesce(employees.account_id, '') || ' ' ||
+      coalesce(employees.phone, '')
+    ) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
+    OR lower(coalesce(employees.account_id, '')) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
+    OR lower(
       coalesce(accounts.display_name, '') || ' ' ||
       coalesce(accounts.email, '') || ' ' ||
       coalesce(accounts.employee_id, '')
@@ -263,8 +265,10 @@ WHERE employees.tenant_id = sqlc.arg(tenant_id)
       coalesce(employees.name, '') || ' ' ||
       coalesce(employees.company_email, '') || ' ' ||
       coalesce(employees.personal_email, '') || ' ' ||
-      coalesce(employees.phone, '') || ' ' ||
-      coalesce(employees.account_id, '') || ' ' ||
+      coalesce(employees.phone, '')
+    ) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
+    OR lower(coalesce(employees.account_id, '')) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
+    OR lower(
       coalesce(accounts.display_name, '') || ' ' ||
       coalesce(accounts.email, '') || ' ' ||
       coalesce(accounts.employee_id, '')
@@ -294,8 +298,10 @@ WHERE employees.tenant_id = sqlc.arg(tenant_id)
       coalesce(employees.name, '') || ' ' ||
       coalesce(employees.company_email, '') || ' ' ||
       coalesce(employees.personal_email, '') || ' ' ||
-      coalesce(employees.phone, '') || ' ' ||
-      coalesce(employees.account_id, '') || ' ' ||
+      coalesce(employees.phone, '')
+    ) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
+    OR lower(coalesce(employees.account_id, '')) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
+    OR lower(
       coalesce(accounts.display_name, '') || ' ' ||
       coalesce(accounts.email, '') || ' ' ||
       coalesce(accounts.employee_id, '')

@@ -8,6 +8,7 @@ import (
 	"encoding/xml"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
@@ -18,6 +19,80 @@ import (
 	"nexus-pro-be/internal/repository/memory"
 	"nexus-pro-be/internal/service"
 )
+
+type storeWithoutTenantTransaction struct {
+	repository.Store
+}
+
+func TestWithinTenantTransactionRequiresTransactionalStore(t *testing.T) {
+	called := false
+	err := repository.WithinTenantTransaction(context.Background(), storeWithoutTenantTransaction{Store: memory.NewStore()}, "tenant-1", func(repository.Store) error {
+		called = true
+		return nil
+	})
+	if err == nil || !strings.Contains(err.Error(), "does not support tenant transactions") {
+		t.Fatalf("expected missing transaction support error, got %v", err)
+	}
+	if called {
+		t.Fatal("transaction callback should not run without a tenant transactor")
+	}
+}
+
+func TestRouteApprovalPolicyUsesMatchedHTTPRoute(t *testing.T) {
+	svc, ctx := newServiceFixture([]domain.Permission{
+		{Resource: "hr.employee", Action: "import", Scope: "all"},
+	})
+
+	matched, err := svc.Authz().Check(ctx, domain.CheckRequest{
+		ApplicationCode: "hr",
+		ResourceType:    "employee",
+		Action:          "import",
+		RouteMethod:     http.MethodPost,
+		RoutePath:       "/v1/hr/employees/import/preview",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !matched.RequiresApproval || matched.ApprovalReason != "route_policy" {
+		t.Fatalf("expected matched import route to require approval, got %+v", matched)
+	}
+
+	mismatched, err := svc.Authz().Check(ctx, domain.CheckRequest{
+		ApplicationCode: "hr",
+		ResourceType:    "employee",
+		Action:          "import",
+		RouteMethod:     http.MethodPost,
+		RoutePath:       "/v1/hr/employees",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mismatched.RequiresApproval {
+		t.Fatalf("unexpected approval requirement for unmatched HTTP route: %+v", mismatched)
+	}
+}
+
+func TestReadFacadesReturnForbiddenWhenReadPermissionMissing(t *testing.T) {
+	svc, ctx := newServiceFixture(nil)
+
+	if _, err := svc.HR().QueryEmployees(ctx, domain.EmployeeQuery{}); err == nil {
+		t.Fatal("expected employee query to be forbidden without hr.employee.read")
+	} else if appErr, ok := domain.AsAppError(err); !ok || appErr.Status != 403 || appErr.ReasonCode != "menu_denied" {
+		t.Fatalf("expected employee query menu_denied, got %v", err)
+	}
+
+	if _, err := svc.HR().EmployeeStats(ctx, domain.EmployeeQuery{}); err == nil {
+		t.Fatal("expected employee stats to be forbidden without hr.employee.read")
+	} else if appErr, ok := domain.AsAppError(err); !ok || appErr.Status != 403 || appErr.ReasonCode != "menu_denied" {
+		t.Fatalf("expected employee stats menu_denied, got %v", err)
+	}
+
+	if _, err := svc.Attendance().ListLeaveBalances(ctx); err == nil {
+		t.Fatal("expected leave balances to be forbidden without attendance.leave.read")
+	} else if appErr, ok := domain.AsAppError(err); !ok || appErr.Status != 403 || appErr.ReasonCode != "menu_denied" {
+		t.Fatalf("expected leave balance menu_denied, got %v", err)
+	}
+}
 
 func TestCheckRequiresSpecificTarget(t *testing.T) {
 	svc, ctx := newServiceFixture([]domain.Permission{
@@ -1386,8 +1461,58 @@ func TestSelfScopedLeaveReadOnlyReturnsCurrentEmployeeItems(t *testing.T) {
 	}
 }
 
+func TestAttendanceShiftAssignmentRejectsOverlappingActiveRange(t *testing.T) {
+	store, svc, _, adminCtx, _ := newAttendanceFixture(t)
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-attendance-admin",
+		TenantID: "tenant-1",
+		Name:     "Attendance Admin",
+		Permissions: []domain.Permission{
+			{Resource: "attendance.shift_assignment", Action: "create", Scope: "all"},
+			{Resource: "attendance.shift_assignment", Action: "read", Scope: "all"},
+		},
+		CreatedAt: attendanceFixtureClockInTime(),
+	})
+
+	created, err := svc.Attendance().CreateAttendanceShiftAssignment(adminCtx, domain.CreateAttendanceShiftAssignmentInput{
+		EmployeeID:    "emp-1",
+		ShiftID:       "ash-1",
+		WorksiteID:    "aws-1",
+		EffectiveFrom: "2026-06-01T00:00:00Z",
+		EffectiveTo:   "2026-06-08T00:00:00Z",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.EmployeeID != "emp-1" || created.Status != "active" {
+		t.Fatalf("unexpected non-overlapping assignment: %+v", created)
+	}
+
+	_, err = svc.Attendance().CreateAttendanceShiftAssignment(adminCtx, domain.CreateAttendanceShiftAssignmentInput{
+		EmployeeID:    "emp-1",
+		ShiftID:       "ash-1",
+		WorksiteID:    "aws-1",
+		EffectiveFrom: "2026-06-10T00:00:00Z",
+	})
+	if err == nil {
+		t.Fatal("expected overlapping active shift assignment to be rejected")
+	}
+	appErr, ok := domain.AsAppError(err)
+	if !ok || appErr.Status != 400 || !strings.Contains(appErr.Message, "overlaps existing assignment") {
+		t.Fatalf("expected overlap bad request, got %v", err)
+	}
+
+	assignments, err := store.ListAttendanceShiftAssignments(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(assignments) != 3 {
+		t.Fatalf("overlapping assignment should not be stored, got %+v", assignments)
+	}
+}
+
 func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
-	_, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
+	store, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
 
 	accepted, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
 		Direction:      "clock_in",
@@ -1403,8 +1528,18 @@ func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
 	if accepted.RecordStatus != "accepted" || accepted.RejectionReason != "" {
 		t.Fatalf("expected accepted clock-in, got %+v", accepted)
 	}
-	if got := accepted.DeviceInfo["location_source"]; got != "gps" {
-		t.Fatalf("expected location_source audit evidence, got %v", got)
+	if accepted.Latitude != 0 || accepted.Longitude != 0 || accepted.DeviceID != "" || accepted.DeviceInfo != nil {
+		t.Fatalf("expected create response to hide clock location evidence, got %+v", accepted)
+	}
+	stored, ok, err := store.GetAcceptedAttendanceClockRecord(context.Background(), "tenant-1", "emp-1", accepted.WorkDate, "clock_in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected raw accepted clock-in evidence to be stored")
+	}
+	if got := stored.DeviceInfo["location_source"]; got != "gps" {
+		t.Fatalf("expected stored location_source evidence, got %v", got)
 	}
 
 	setNow(attendanceFixtureClockOutTime())
@@ -1440,6 +1575,72 @@ func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
 	}
 	if status.NextAction != "clock_out" || status.ClockIn == nil || status.ClockOut != nil {
 		t.Fatalf("unexpected clock status: %+v", status)
+	}
+}
+
+func TestAttendanceClockReadAppliesFieldPolicyToGPSAndDeviceInfo(t *testing.T) {
+	store, svc, employeeCtx, adminCtx, _ := newAttendanceFixture(t)
+
+	created, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_in",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+		LocationSource: "gps",
+		DeviceID:       "phone-1",
+		DeviceInfo:     map[string]any{"os": "ios"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, ok, err := store.GetAcceptedAttendanceClockRecord(context.Background(), "tenant-1", "emp-1", created.WorkDate, "clock_in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || raw.Latitude == 0 || raw.Longitude == 0 || raw.DeviceID == "" || raw.DeviceInfo["location_source"] != "gps" {
+		t.Fatalf("expected raw clock evidence to remain in storage, ok=%v record=%+v", ok, raw)
+	}
+
+	page, err := svc.Attendance().ListAttendanceClockRecordPage(adminCtx, domain.AttendanceClockRecordQuery{EmployeeID: "emp-1"}, domain.PageRequest{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 {
+		t.Fatalf("expected one visible clock record, got %+v", page)
+	}
+	item := page.Items[0]
+	if item.Latitude != 0 || item.Longitude != 0 || item.AccuracyMeters != 0 || item.DistanceMeters != 0 || item.DeviceID != "" || item.DeviceInfo != nil {
+		t.Fatalf("expected clock read to hide GPS and device evidence by default, got %+v", item)
+	}
+}
+
+func TestAttendanceClockReadAllowsGPSAndDeviceInfoByPermissionFieldPolicy(t *testing.T) {
+	store, svc, employeeCtx, adminCtx, _ := newAttendanceFixture(t)
+	allowAttendanceClockSensitiveFieldsForPermission(t, store, attendanceFixtureClockInTime(), "attendance.clock.read")
+
+	_, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_in",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+		LocationSource: "gps",
+		DeviceID:       "phone-1",
+		DeviceInfo:     map[string]any{"os": "ios"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := svc.Attendance().ListAttendanceClockRecordPage(adminCtx, domain.AttendanceClockRecordQuery{EmployeeID: "emp-1"}, domain.PageRequest{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 {
+		t.Fatalf("expected one visible clock record, got %+v", page)
+	}
+	item := page.Items[0]
+	if item.Latitude != 25.033964 || item.Longitude != 121.564468 || item.AccuracyMeters != 12 || item.DeviceID != "phone-1" || item.DeviceInfo["location_source"] != "gps" || item.DeviceInfo["os"] != "ios" {
+		t.Fatalf("expected explicit allow policy to reveal clock GPS and device evidence, got %+v", item)
 	}
 }
 
@@ -2741,6 +2942,41 @@ func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
 	}
 	if employee.BasicInfo["national_id"] != "A123456789" || employee.EmploymentInfo["position"] != "工程師" || employee.EducationMilitaryInfo["school_name"] != "Nexus University" {
 		t.Fatalf("expected eHRMS profile sections to be preserved, got basic=%+v employment=%+v education=%+v", employee.BasicInfo, employee.EmploymentInfo, employee.EducationMilitaryInfo)
+	}
+}
+
+func TestSyncEHRMSEmployeesRequiresImportPermissionEvenWhenApproved(t *testing.T) {
+	rows := []domain.EHRMSEmployeeRecord{{
+		"員工編號":     "IKM-NOAUTH",
+		"中文姓名":     "未授權同步",
+		"到職日期":     "2026/06/01",
+		"在職狀態":     "在職",
+		"部門代碼":     "M0101",
+		"部門中文名稱":   "Nexus",
+		"職務中文名稱":   "工程師",
+		"身份類別名稱":   "一般員工",
+		"身份證號":     "C123456789",
+		"學校名稱(中文)": "Nexus University",
+	}}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "read", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{rows: rows}})
+	ctx.ApprovalConfirmed = true
+
+	_, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{})
+	if err == nil {
+		t.Fatal("expected eHRMS sync to require hr.employee.import permission")
+	}
+	appErr, ok := domain.AsAppError(err)
+	if !ok || appErr.Status != 403 || appErr.ReasonCode != "button_denied" {
+		t.Fatalf("expected button_denied forbidden error, got %v", err)
+	}
+	employees, err := store.ListEmployees(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(employees) != 0 {
+		t.Fatalf("unauthorized eHRMS sync should not write employees, got %+v", employees)
 	}
 }
 
@@ -4718,6 +4954,33 @@ func allowEmployeeSensitiveFieldsForPermission(t *testing.T, store *memory.Store
 			TenantID:        "tenant-1",
 			ApplicationCode: "hr",
 			ResourceType:    "employee",
+			FieldName:       field,
+			Effect:          "allow",
+			PermissionID:    permissionID,
+			CreatedAt:       now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+// allowAttendanceClockSensitiveFieldsForPermission opts a test permission into raw GPS evidence reads.
+func allowAttendanceClockSensitiveFieldsForPermission(t *testing.T, store *memory.Store, now time.Time, permissionID string) {
+	t.Helper()
+	for _, field := range []string{
+		"latitude",
+		"longitude",
+		"accuracy_meters",
+		"distance_meters",
+		"device_id",
+		"device_info",
+		"location_source",
+	} {
+		if err := store.UpsertFieldPolicy(context.Background(), domain.FieldPolicy{
+			ID:              "fp-allow-" + strings.ReplaceAll(permissionID, ".", "-") + "-" + field,
+			TenantID:        "tenant-1",
+			ApplicationCode: "attendance",
+			ResourceType:    "clock",
 			FieldName:       field,
 			Effect:          "allow",
 			PermissionID:    permissionID,

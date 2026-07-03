@@ -56,6 +56,12 @@ func authzSpanAttributes(req CheckRequest) []attribute.KeyValue {
 	if req.TargetEmployeeID != "" {
 		attrs = append(attrs, attribute.String("authz.target_employee_id", req.TargetEmployeeID))
 	}
+	if req.RouteMethod != "" {
+		attrs = append(attrs, attribute.String("authz.route_method", req.RouteMethod))
+	}
+	if req.RoutePath != "" {
+		attrs = append(attrs, attribute.String("authz.route_path", req.RoutePath))
+	}
 	return attrs
 }
 

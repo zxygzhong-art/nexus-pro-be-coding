@@ -2,6 +2,9 @@ openapi: 3.0.3
 info:
   title: Nexus Pro Backend API
   version: 0.2.0
+  description: |
+    Identifiers for persisted tenant resources are globally unique across tenants.
+    tenant_id scopes ownership, authorization, and row-level security.
 security:
   - bearerAuth: []
 paths:
@@ -2118,6 +2121,7 @@ components:
       name: id
       in: path
       required: true
+      description: Globally unique persisted resource identifier; tenant_id still scopes ownership and authorization.
       schema:
         type: string
     Page:
@@ -2154,6 +2158,7 @@ components:
       name: id
       in: path
       required: true
+      description: Globally unique employee identifier; tenant_id still scopes ownership and authorization.
       schema:
         type: string
     OIDCProvider:
@@ -2411,6 +2416,7 @@ components:
             $ref: "#/components/schemas/PlatformTaskItem"
     PlatformTaskItem:
       type: object
+      description: Persisted tenant resource. id is globally unique across tenants; account_id and tenant_id scope ownership in the backend.
       required: [id, title, category, product, hours, note]
       properties:
         id: {type: string}
@@ -3036,6 +3042,7 @@ components:
           nullable: true
     AttendanceWorksite:
       type: object
+      description: Persisted tenant resource. id is globally unique across tenants; tenant_id scopes ownership and authorization.
       required: [id, tenant_id, name, latitude, longitude, radius_meters, status, created_at, updated_at]
       properties:
         id: {type: string}
@@ -3071,6 +3078,7 @@ components:
         status: {type: string, enum: [active, inactive]}
     AttendanceShift:
       type: object
+      description: Persisted tenant resource. id is globally unique across tenants; tenant_id scopes ownership and authorization.
       required: [id, tenant_id, name, clock_in_start, clock_in_end, clock_out_start, clock_out_end, status, created_at, updated_at]
       properties:
         id: {type: string}
@@ -3112,6 +3120,7 @@ components:
         status: {type: string, enum: [active, inactive]}
     AttendanceShiftAssignment:
       type: object
+      description: Persisted tenant resource. id is globally unique across tenants; tenant_id scopes ownership and authorization.
       required: [id, tenant_id, employee_id, shift_id, worksite_id, effective_from, status, created_at, updated_at]
       properties:
         id: {type: string}
@@ -3153,6 +3162,7 @@ components:
         next_action: {type: string, enum: [clock_in, clock_out, complete, no_assignment]}
     AttendanceClockRecord:
       type: object
+      description: Persisted tenant resource. id is globally unique across tenants; tenant_id scopes ownership and authorization.
       required: [id, tenant_id, employee_id, work_date, direction, clocked_at, latitude, longitude, record_status, source, created_at]
       properties:
         id: {type: string}
@@ -3164,17 +3174,32 @@ components:
         work_date: {type: string, format: date}
         direction: {type: string, enum: [clock_in, clock_out]}
         clocked_at: {type: string, format: date-time}
-        latitude: {type: number, format: double}
-        longitude: {type: number, format: double}
-        accuracy_meters: {type: number, format: double}
-        distance_meters: {type: number, format: double}
+        latitude:
+          type: number
+          format: double
+          description: Sensitive GPS evidence; response value may be redacted to 0 by attendance clock field policy.
+        longitude:
+          type: number
+          format: double
+          description: Sensitive GPS evidence; response value may be redacted to 0 by attendance clock field policy.
+        accuracy_meters:
+          type: number
+          format: double
+          description: Sensitive GPS evidence; response value may be redacted to 0 by attendance clock field policy.
+        distance_meters:
+          type: number
+          format: double
+          description: Sensitive GPS evidence; response value may be redacted to 0 by attendance clock field policy.
         record_status: {type: string, enum: [accepted, rejected]}
         rejection_reason: {type: string, enum: [duplicate, invalid_sequence, low_location_accuracy, outside_geofence, outside_time_window]}
         source: {type: string, enum: [geofence, manual_correction]}
-        device_id: {type: string}
+        device_id:
+          type: string
+          description: Sensitive device evidence; response value may be hidden by attendance clock field policy.
         device_info:
           type: object
           additionalProperties: true
+          description: Sensitive device evidence; response value may be hidden by attendance clock field policy.
         correction_request_id: {type: string}
         created_at: {type: string, format: date-time}
     CreateAttendanceClockRecordRequest:
@@ -3199,6 +3224,7 @@ components:
           additionalProperties: true
     AttendanceCorrection:
       type: object
+      description: Persisted tenant resource. id is globally unique across tenants; tenant_id scopes ownership and authorization.
       required: [id, tenant_id, employee_id, direction, requested_clocked_at, work_date, reason, status, created_at, updated_at]
       properties:
         id: {type: string}
@@ -3455,6 +3481,7 @@ components:
         status:
           $ref: "#/components/schemas/EmployeeDirectStatus"
     Employee:
+      description: Persisted tenant resource. id is globally unique across tenants; tenant_id scopes ownership and authorization.
       allOf:
         - $ref: "#/components/schemas/EmployeeInput"
         - type: object
@@ -3800,6 +3827,7 @@ components:
           items: {type: string}
     EmployeeImportSession:
       type: object
+      description: Persisted tenant resource. id is globally unique across tenants; tenant_id scopes ownership and authorization.
       properties:
         id: {type: string}
         tenant_id: {type: string}

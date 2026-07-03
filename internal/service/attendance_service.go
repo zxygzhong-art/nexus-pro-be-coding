@@ -60,7 +60,7 @@ func (c AttendanceService) ListLeaveBalances(ctx RequestContext) ([]LeaveBalance
 		return nil, err
 	}
 	if !decision.Allowed {
-		return []LeaveBalance{}, nil
+		return nil, forbiddenAuthz(decision)
 	}
 	items, err := c.store.ListLeaveBalances(goContext(ctx), ctx.TenantID)
 	if err != nil {
@@ -101,7 +101,7 @@ func (c AttendanceService) listLeaveRequestsByQuery(ctx RequestContext, query Le
 		return nil, err
 	}
 	if !decision.Allowed {
-		return []LeaveRequest{}, nil
+		return nil, forbiddenAuthz(decision)
 	}
 	allowed, all, err := c.attendanceEmployeeScope(ctx, account, decision)
 	if err != nil {
@@ -127,8 +127,7 @@ func (c AttendanceService) ListLeaveRequestPage(ctx RequestContext, page PageReq
 		return PageResponse[LeaveRequest]{}, err
 	}
 	if !decision.Allowed {
-		page = utils.NormalizePageRequest(page)
-		return PageResponse[LeaveRequest]{Items: []LeaveRequest{}, Page: page.Page, PageSize: page.PageSize, Sort: page.Sort}, nil
+		return PageResponse[LeaveRequest]{}, forbiddenAuthz(decision)
 	}
 	allowed, all, err := c.attendanceEmployeeScope(ctx, account, decision)
 	if err != nil {
@@ -745,6 +744,9 @@ func (c AttendanceService) CreateAttendanceShiftAssignment(ctx RequestContext, i
 		return AttendanceShiftAssignment{}, BadRequest("effective_to must be after effective_from")
 	}
 	status := normalizeAttendanceStatus(input.Status)
+	if err := c.ensureNoOverlappingActiveShiftAssignment(ctx, employeeID, effectiveFrom, effectiveTo, status); err != nil {
+		return AttendanceShiftAssignment{}, err
+	}
 	now := c.Now()
 	item := AttendanceShiftAssignment{
 		ID:            utils.NewID("asa"),
@@ -765,6 +767,37 @@ func (c AttendanceService) CreateAttendanceShiftAssignment(ctx RequestContext, i
 		return AttendanceShiftAssignment{}, err
 	}
 	return item, nil
+}
+
+// ensureNoOverlappingActiveShiftAssignment prevents ambiguous effective assignment resolution.
+func (c AttendanceService) ensureNoOverlappingActiveShiftAssignment(ctx RequestContext, employeeID string, effectiveFrom time.Time, effectiveTo *time.Time, status string) error {
+	if !strings.EqualFold(status, attendanceStatusActive) {
+		return nil
+	}
+	items, err := c.store.ListAttendanceShiftAssignments(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return err
+	}
+	for _, item := range items {
+		if item.EmployeeID != employeeID || !strings.EqualFold(item.Status, attendanceStatusActive) {
+			continue
+		}
+		if attendanceAssignmentRangesOverlap(effectiveFrom, effectiveTo, item.EffectiveFrom, item.EffectiveTo) {
+			return BadRequest("active shift assignment overlaps existing assignment")
+		}
+	}
+	return nil
+}
+
+// attendanceAssignmentRangesOverlap follows the current inclusive effective_to lookup semantics.
+func attendanceAssignmentRangesOverlap(leftFrom time.Time, leftTo *time.Time, rightFrom time.Time, rightTo *time.Time) bool {
+	if rightTo != nil && rightTo.Before(leftFrom) {
+		return false
+	}
+	if leftTo != nil && leftTo.Before(rightFrom) {
+		return false
+	}
+	return true
 }
 
 // AttendanceClockStatus returns today's assignment and accepted clock records.
@@ -946,7 +979,7 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 	}); err != nil {
 		return AttendanceClockRecord{}, err
 	}
-	return record, nil
+	return applyAttendanceClockFieldPolicy(record, decision.FieldPolicies), nil
 }
 
 // ListAttendanceClockRecordPage returns clock records under the caller's employee scope.
@@ -964,6 +997,7 @@ func (c AttendanceService) ListAttendanceClockRecordPage(ctx RequestContext, que
 	if err != nil {
 		return PageResponse[AttendanceClockRecord]{}, err
 	}
+	items = applyAttendanceClockFieldPolicies(items, decision.FieldPolicies)
 	return utils.PageResponse(items, page), nil
 }
 
@@ -1321,6 +1355,57 @@ func (c AttendanceService) filterClockRecordsByDecision(ctx RequestContext, acco
 		}
 	}
 	return out, nil
+}
+
+// applyAttendanceClockFieldPolicies redacts sensitive clock evidence at response boundaries.
+func applyAttendanceClockFieldPolicies(items []AttendanceClockRecord, policies map[string]string) []AttendanceClockRecord {
+	if len(policies) == 0 {
+		return items
+	}
+	out := make([]AttendanceClockRecord, 0, len(items))
+	for _, item := range items {
+		out = append(out, applyAttendanceClockFieldPolicy(item, policies))
+	}
+	return out
+}
+
+// applyAttendanceClockFieldPolicy keeps stored GPS evidence intact while hiding disallowed fields.
+func applyAttendanceClockFieldPolicy(item AttendanceClockRecord, policies map[string]string) AttendanceClockRecord {
+	for field, effect := range policies {
+		if effect != "mask" && effect != "hide" && effect != "deny" {
+			continue
+		}
+		switch field {
+		case "latitude":
+			item.Latitude = 0
+		case "longitude":
+			item.Longitude = 0
+		case "accuracy_meters":
+			item.AccuracyMeters = 0
+		case "distance_meters":
+			item.DistanceMeters = 0
+		case "device_id":
+			item.DeviceID = ""
+		case "device_info":
+			item.DeviceInfo = nil
+		case "location_source":
+			item.DeviceInfo = removeClockDeviceInfoField(item.DeviceInfo, "location_source")
+		}
+	}
+	return item
+}
+
+// removeClockDeviceInfoField copies device metadata before removing one sensitive evidence key.
+func removeClockDeviceInfoField(values map[string]any, field string) map[string]any {
+	if len(values) == 0 {
+		return values
+	}
+	if _, ok := values[field]; !ok {
+		return values
+	}
+	out := utils.CopyStringMap(values)
+	delete(out, field)
+	return out
 }
 
 func (c AttendanceService) filterCorrectionsByDecision(ctx RequestContext, account Account, decision CheckResult, items []AttendanceCorrectionRequest) ([]AttendanceCorrectionRequest, error) {

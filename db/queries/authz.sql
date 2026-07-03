@@ -156,13 +156,24 @@ WHERE tenant_id = $1
   AND resource_type = $3
 ORDER BY field_name ASC;
 
--- name: CreateAuthzPermissionSetAssignment :one
+-- name: UpsertAuthzPermissionSetAssignment :one
 INSERT INTO authz_permission_set_assignments (
     id, tenant_id, principal_type, principal_id, permission_set_id,
     effect, data_scope_id, condition_id, starts_at, expires_at, created_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    principal_type = EXCLUDED.principal_type,
+    principal_id = EXCLUDED.principal_id,
+    permission_set_id = EXCLUDED.permission_set_id,
+    effect = EXCLUDED.effect,
+    data_scope_id = EXCLUDED.data_scope_id,
+    condition_id = EXCLUDED.condition_id,
+    starts_at = EXCLUDED.starts_at,
+    expires_at = EXCLUDED.expires_at,
+    created_at = EXCLUDED.created_at
 RETURNING *;
 
 -- name: ListAuthzPermissionSetAssignmentsForPrincipal :many

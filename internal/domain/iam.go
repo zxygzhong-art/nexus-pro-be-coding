@@ -224,6 +224,8 @@ type CheckRequest struct {
 	Target           string `json:"target,omitempty"`
 	Scope            Scope  `json:"scope,omitempty"`
 	TargetEmployeeID string `json:"target_employee_id,omitempty"`
+	RouteMethod      string `json:"route_method,omitempty"`
+	RoutePath        string `json:"route_path,omitempty"`
 }
 
 // CheckResult describes the authorization decision and the evidence behind it.

@@ -7,12 +7,52 @@ import (
 	"testing"
 
 	"github.com/gin-gonic/gin"
+	"gopkg.in/yaml.v2"
 
 	v1api "nexus-pro-be/internal/api/v1"
 	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/repository/memory"
 	"nexus-pro-be/internal/service"
 )
+
+func TestOpenAPIYAMLParsesStructurally(t *testing.T) {
+	var doc struct {
+		OpenAPI string `yaml:"openapi"`
+		Info    struct {
+			Title       string `yaml:"title"`
+			Version     string `yaml:"version"`
+			Description string `yaml:"description"`
+		} `yaml:"info"`
+		Paths      map[string]map[string]any `yaml:"paths"`
+		Components struct {
+			Parameters map[string]any `yaml:"parameters"`
+			Responses  map[string]any `yaml:"responses"`
+			Schemas    map[string]any `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(readOpenAPI(t), &doc); err != nil {
+		t.Fatalf("openapi.yaml should parse as YAML: %v", err)
+	}
+	if doc.OpenAPI != "3.0.3" || doc.Info.Title == "" || doc.Info.Version == "" {
+		t.Fatalf("unexpected OpenAPI metadata: %+v", doc.Info)
+	}
+	if !strings.Contains(doc.Info.Description, "globally unique across tenants") {
+		t.Fatalf("expected OpenAPI metadata to document tenant resource id invariants: %q", doc.Info.Description)
+	}
+	for _, path := range []string{"/v1/hr/employees", "/v1/attendance/clock-records", "/v1/platform/workspace/admins"} {
+		if _, ok := doc.Paths[path]; !ok {
+			t.Fatalf("expected structured OpenAPI path %s", path)
+		}
+	}
+	for _, schema := range []string{"Employee", "AttendanceClockRecord", "Error"} {
+		if _, ok := doc.Components.Schemas[schema]; !ok {
+			t.Fatalf("expected structured OpenAPI schema %s", schema)
+		}
+	}
+	if len(doc.Components.Parameters) == 0 || len(doc.Components.Responses) == 0 {
+		t.Fatal("expected OpenAPI components to include parameters and responses")
+	}
+}
 
 func TestRegisteredRoutesMatchAuthzPolicies(t *testing.T) {
 	router, ok := v1api.New(service.New(memory.NewStore()), nil).Routes().(*gin.Engine)

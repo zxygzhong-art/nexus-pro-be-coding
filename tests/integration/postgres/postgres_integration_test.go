@@ -477,6 +477,144 @@ func TestEmployeeHTTPPostgresAcceptanceTraceAuthzAndFieldPolicy(t *testing.T) {
 	}
 }
 
+func TestAttendanceClockHTTPPostgresFieldPolicy(t *testing.T) {
+	pool := openIntegrationPool(t)
+	defer pool.Close()
+	requireMigratedSchema(t, pool)
+	store := postgresrepo.NewStore(pool)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	clockNow := time.Date(2026, 6, 10, 1, 0, 0, 0, time.UTC)
+	suffix := strings.ReplaceAll(strings.ToLower(t.Name()), "/", "_") + "_" + time.Now().UTC().Format("150405000000")
+	tenantID := "tenant_" + suffix
+	employeeID := "emp_" + suffix
+	adminEmployeeID := "emp_" + suffix + "_admin"
+	employeeAccountID := "acct_" + suffix + "_employee"
+	adminAccountID := "acct_" + suffix + "_admin"
+	worksiteID := "aws_" + suffix
+	shiftID := "ash_" + suffix
+	assignmentID := "asa_" + suffix
+
+	if err := store.UpsertTenant(ctx, domain.Tenant{ID: tenantID, Name: tenantID, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertPermissionSet(ctx, domain.PermissionSet{
+		ID:       "ps_" + suffix + "_self",
+		TenantID: tenantID,
+		Name:     "Attendance Self",
+		Permissions: []domain.Permission{
+			{Resource: "attendance.clock", Action: "create", Scope: "self"},
+			{Resource: "attendance.clock", Action: "read", Scope: "self"},
+		},
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertPermissionSet(ctx, domain.PermissionSet{
+		ID:       "ps_" + suffix + "_admin",
+		TenantID: tenantID,
+		Name:     "Attendance Admin",
+		Permissions: []domain.Permission{
+			{Resource: "attendance.clock", Action: "read", Scope: "all"},
+		},
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAccount(ctx, domain.Account{ID: employeeAccountID, TenantID: tenantID, EmployeeID: employeeID, Status: "active", DirectPermissionSetIDs: []string{"ps_" + suffix + "_self"}, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAccount(ctx, domain.Account{ID: adminAccountID, TenantID: tenantID, EmployeeID: adminEmployeeID, Status: "active", DirectPermissionSetIDs: []string{"ps_" + suffix + "_admin"}, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertEmployee(ctx, domain.Employee{ID: employeeID, TenantID: tenantID, Name: "Clock Target", CompanyEmail: employeeID + "@example.com", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertEmployee(ctx, domain.Employee{ID: adminEmployeeID, TenantID: tenantID, Name: "Clock Admin", CompanyEmail: adminEmployeeID + "@example.com", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAttendanceWorksite(ctx, domain.AttendanceWorksite{ID: worksiteID, TenantID: tenantID, Name: "HQ", Latitude: 25.033964, Longitude: 121.564468, RadiusMeters: 200, Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAttendanceShift(ctx, domain.AttendanceShift{ID: shiftID, TenantID: tenantID, Name: "Day Shift", ClockInStart: "08:00", ClockInEnd: "10:00", ClockOutStart: "17:00", ClockOutEnd: "19:00", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAttendanceShiftAssignment(ctx, domain.AttendanceShiftAssignment{ID: assignmentID, TenantID: tenantID, EmployeeID: employeeID, ShiftID: shiftID, WorksiteID: worksiteID, EffectiveFrom: clockNow.Add(-24 * time.Hour), Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := v1api.New(service.New(store, service.Options{Now: func() time.Time { return clockNow }}), nil, v1api.Options{
+		AllowHeaderContext: true,
+	}).Routes()
+
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/attendance/clock-records", strings.NewReader(`{"direction":"clock_in","latitude":25.034,"longitude":121.5645,"accuracy_meters":12,"location_source":"gps","device_id":"phone-1","device_info":{"os":"ios"}}`))
+	addIntegrationHeaders(createReq, tenantID, employeeAccountID, "req-"+suffix+"-clock-create")
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for clock create, got %d: %s", createRec.Code, createRec.Body.String())
+	}
+	created := decodeIntegrationData[domain.AttendanceClockRecord](t, createRec.Body.Bytes())
+	if created.Latitude != 0 || created.Longitude != 0 || created.AccuracyMeters != 0 || created.DeviceID != "" || created.DeviceInfo != nil {
+		t.Fatalf("expected create response to hide GPS and device evidence, got %+v", created)
+	}
+	raw, ok, err := store.GetAcceptedAttendanceClockRecord(ctx, tenantID, employeeID, created.WorkDate, "clock_in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || raw.Latitude == 0 || raw.Longitude == 0 || raw.AccuracyMeters != 12 || raw.DeviceID != "phone-1" || raw.DeviceInfo["location_source"] != "gps" || raw.DeviceInfo["os"] != "ios" {
+		t.Fatalf("expected raw clock evidence to remain in PostgreSQL, ok=%v record=%+v", ok, raw)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/attendance/clock-records?employee_id="+employeeID, nil)
+	addIntegrationHeaders(listReq, tenantID, adminAccountID, "req-"+suffix+"-clock-list")
+	listRec := httptest.NewRecorder()
+	handler.ServeHTTP(listRec, listReq)
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for clock list, got %d: %s", listRec.Code, listRec.Body.String())
+	}
+	page := decodeIntegrationData[domain.PageResponse[domain.AttendanceClockRecord]](t, listRec.Body.Bytes())
+	if page.Total != 1 || len(page.Items) != 1 {
+		t.Fatalf("expected one clock record page item, got %+v", page)
+	}
+	redacted := page.Items[0]
+	if redacted.Latitude != 0 || redacted.Longitude != 0 || redacted.AccuracyMeters != 0 || redacted.DistanceMeters != 0 || redacted.DeviceID != "" || redacted.DeviceInfo != nil {
+		t.Fatalf("expected default clock read to hide GPS and device evidence, got %+v", redacted)
+	}
+
+	for _, field := range []string{"latitude", "longitude", "accuracy_meters", "distance_meters", "device_id", "device_info", "location_source"} {
+		if err := store.UpsertFieldPolicy(ctx, domain.FieldPolicy{
+			ID:              "fp_" + suffix + "_" + strings.ReplaceAll(field, "_", "-"),
+			TenantID:        tenantID,
+			ApplicationCode: "attendance",
+			ResourceType:    "clock",
+			FieldName:       field,
+			Effect:          "allow",
+			PermissionID:    "attendance.clock.read",
+			CreatedAt:       now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	allowedReq := httptest.NewRequest(http.MethodGet, "/v1/attendance/clock-records?employee_id="+employeeID, nil)
+	addIntegrationHeaders(allowedReq, tenantID, adminAccountID, "req-"+suffix+"-clock-list-allow")
+	allowedRec := httptest.NewRecorder()
+	handler.ServeHTTP(allowedRec, allowedReq)
+	if allowedRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for allowed clock list, got %d: %s", allowedRec.Code, allowedRec.Body.String())
+	}
+	allowedPage := decodeIntegrationData[domain.PageResponse[domain.AttendanceClockRecord]](t, allowedRec.Body.Bytes())
+	if allowedPage.Total != 1 || len(allowedPage.Items) != 1 {
+		t.Fatalf("expected one allowed clock record page item, got %+v", allowedPage)
+	}
+	visible := allowedPage.Items[0]
+	if visible.Latitude != raw.Latitude || visible.Longitude != raw.Longitude || visible.AccuracyMeters != 12 || visible.DeviceID != "phone-1" || visible.DeviceInfo["location_source"] != "gps" || visible.DeviceInfo["os"] != "ios" {
+		t.Fatalf("expected allow field policies to reveal GPS and device evidence, got %+v", visible)
+	}
+}
+
 func openIntegrationPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("DATABASE_URL"))

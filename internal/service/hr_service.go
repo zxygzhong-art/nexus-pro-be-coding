@@ -344,11 +344,11 @@ func (c HRService) QueryEmployees(ctx RequestContext, query EmployeeQuery) (Page
 	}
 	query = normalizeEmployeeQuery(query)
 	if !decision.Allowed {
-		c.logInfo(ctx, "employee query returned no rows because authorization was denied",
+		c.logWarn(ctx, "employee query denied",
 			"reason", decision.Reason,
 			"missing_permissions", decision.MissingPermissions,
 		)
-		return PageResponse[Employee]{Items: []Employee{}, Page: query.Page, PageSize: query.PageSize, Sort: query.Sort}, nil
+		return PageResponse[Employee]{}, forbiddenAuthz(decision)
 	}
 	authzAudit := AuthzAudit{service: c.Service, target: AuditTarget{Event: "hr.employee.query", Resource: string(ResourceEmployeeCollection)}, decision: decision}
 	scopedQuery, err := c.employeeQueryWithDecisionScope(ctx, account, query, decision)
@@ -538,7 +538,7 @@ func (c HRService) EmployeeStats(ctx RequestContext, query EmployeeQuery) (Emplo
 		return EmployeeStats{}, err
 	}
 	if !decision.Allowed {
-		return EmployeeStats{}, nil
+		return EmployeeStats{}, forbiddenAuthz(decision)
 	}
 	query = normalizeEmployeeQuery(EmployeeQuery{
 		Keyword:          query.Keyword,

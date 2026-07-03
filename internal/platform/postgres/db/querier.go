@@ -19,7 +19,6 @@ type Querier interface {
 	CountFormInstancesByQuery(ctx context.Context, arg CountFormInstancesByQueryParams) (int64, error)
 	CountLeaveRequestsByQuery(ctx context.Context, arg CountLeaveRequestsByQueryParams) (int64, error)
 	CreateAuthzAssumableRoleSession(ctx context.Context, arg CreateAuthzAssumableRoleSessionParams) (AuthzAssumableRoleSession, error)
-	CreateAuthzPermissionSetAssignment(ctx context.Context, arg CreateAuthzPermissionSetAssignmentParams) (AuthzPermissionSetAssignment, error)
 	DeleteAuthzRelationshipTuple(ctx context.Context, arg DeleteAuthzRelationshipTupleParams) error
 	DeleteFormInstance(ctx context.Context, arg DeleteFormInstanceParams) error
 	DeletePlatformTaskItem(ctx context.Context, arg DeletePlatformTaskItemParams) error
@@ -124,6 +123,7 @@ type Querier interface {
 	UpsertAuthzFieldPolicy(ctx context.Context, arg UpsertAuthzFieldPolicyParams) (AuthzFieldPolicy, error)
 	UpsertAuthzGroupMembership(ctx context.Context, arg UpsertAuthzGroupMembershipParams) (AuthzGroupMembership, error)
 	UpsertAuthzPermission(ctx context.Context, arg UpsertAuthzPermissionParams) (AuthzPermission, error)
+	UpsertAuthzPermissionSetAssignment(ctx context.Context, arg UpsertAuthzPermissionSetAssignmentParams) (AuthzPermissionSetAssignment, error)
 	UpsertAuthzPermissionSetPermission(ctx context.Context, arg UpsertAuthzPermissionSetPermissionParams) (AuthzPermissionSetPermission, error)
 	UpsertAuthzPolicyCondition(ctx context.Context, arg UpsertAuthzPolicyConditionParams) (AuthzPolicyCondition, error)
 	UpsertAuthzRelationshipTuple(ctx context.Context, arg UpsertAuthzRelationshipTupleParams) (AuthzRelationshipTuple, error)

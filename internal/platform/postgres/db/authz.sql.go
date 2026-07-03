@@ -106,61 +106,6 @@ func (q *Queries) CreateAuthzAssumableRoleSession(ctx context.Context, arg Creat
 	return i, err
 }
 
-const createAuthzPermissionSetAssignment = `-- name: CreateAuthzPermissionSetAssignment :one
-INSERT INTO authz_permission_set_assignments (
-    id, tenant_id, principal_type, principal_id, permission_set_id,
-    effect, data_scope_id, condition_id, starts_at, expires_at, created_at
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
-)
-RETURNING id, tenant_id, principal_type, principal_id, permission_set_id, effect, data_scope_id, condition_id, starts_at, expires_at, created_at
-`
-
-type CreateAuthzPermissionSetAssignmentParams struct {
-	ID              string             `json:"id"`
-	TenantID        string             `json:"tenant_id"`
-	PrincipalType   string             `json:"principal_type"`
-	PrincipalID     string             `json:"principal_id"`
-	PermissionSetID string             `json:"permission_set_id"`
-	Effect          string             `json:"effect"`
-	DataScopeID     string             `json:"data_scope_id"`
-	ConditionID     string             `json:"condition_id"`
-	StartsAt        pgtype.Timestamptz `json:"starts_at"`
-	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-}
-
-func (q *Queries) CreateAuthzPermissionSetAssignment(ctx context.Context, arg CreateAuthzPermissionSetAssignmentParams) (AuthzPermissionSetAssignment, error) {
-	row := q.db.QueryRow(ctx, createAuthzPermissionSetAssignment,
-		arg.ID,
-		arg.TenantID,
-		arg.PrincipalType,
-		arg.PrincipalID,
-		arg.PermissionSetID,
-		arg.Effect,
-		arg.DataScopeID,
-		arg.ConditionID,
-		arg.StartsAt,
-		arg.ExpiresAt,
-		arg.CreatedAt,
-	)
-	var i AuthzPermissionSetAssignment
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.PrincipalType,
-		&i.PrincipalID,
-		&i.PermissionSetID,
-		&i.Effect,
-		&i.DataScopeID,
-		&i.ConditionID,
-		&i.StartsAt,
-		&i.ExpiresAt,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const deleteAuthzRelationshipTuple = `-- name: DeleteAuthzRelationshipTuple :exec
 DELETE FROM authz_relationship_tuples
 WHERE tenant_id = $1
@@ -1141,6 +1086,72 @@ func (q *Queries) UpsertAuthzPermission(ctx context.Context, arg UpsertAuthzPerm
 		&i.Name,
 		&i.Description,
 		&i.RiskLevel,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertAuthzPermissionSetAssignment = `-- name: UpsertAuthzPermissionSetAssignment :one
+INSERT INTO authz_permission_set_assignments (
+    id, tenant_id, principal_type, principal_id, permission_set_id,
+    effect, data_scope_id, condition_id, starts_at, expires_at, created_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    principal_type = EXCLUDED.principal_type,
+    principal_id = EXCLUDED.principal_id,
+    permission_set_id = EXCLUDED.permission_set_id,
+    effect = EXCLUDED.effect,
+    data_scope_id = EXCLUDED.data_scope_id,
+    condition_id = EXCLUDED.condition_id,
+    starts_at = EXCLUDED.starts_at,
+    expires_at = EXCLUDED.expires_at,
+    created_at = EXCLUDED.created_at
+RETURNING id, tenant_id, principal_type, principal_id, permission_set_id, effect, data_scope_id, condition_id, starts_at, expires_at, created_at
+`
+
+type UpsertAuthzPermissionSetAssignmentParams struct {
+	ID              string             `json:"id"`
+	TenantID        string             `json:"tenant_id"`
+	PrincipalType   string             `json:"principal_type"`
+	PrincipalID     string             `json:"principal_id"`
+	PermissionSetID string             `json:"permission_set_id"`
+	Effect          string             `json:"effect"`
+	DataScopeID     string             `json:"data_scope_id"`
+	ConditionID     string             `json:"condition_id"`
+	StartsAt        pgtype.Timestamptz `json:"starts_at"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) UpsertAuthzPermissionSetAssignment(ctx context.Context, arg UpsertAuthzPermissionSetAssignmentParams) (AuthzPermissionSetAssignment, error) {
+	row := q.db.QueryRow(ctx, upsertAuthzPermissionSetAssignment,
+		arg.ID,
+		arg.TenantID,
+		arg.PrincipalType,
+		arg.PrincipalID,
+		arg.PermissionSetID,
+		arg.Effect,
+		arg.DataScopeID,
+		arg.ConditionID,
+		arg.StartsAt,
+		arg.ExpiresAt,
+		arg.CreatedAt,
+	)
+	var i AuthzPermissionSetAssignment
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.PrincipalType,
+		&i.PrincipalID,
+		&i.PermissionSetID,
+		&i.Effect,
+		&i.DataScopeID,
+		&i.ConditionID,
+		&i.StartsAt,
+		&i.ExpiresAt,
 		&i.CreatedAt,
 	)
 	return i, err

@@ -424,6 +424,17 @@ func (c *Service) fieldPolicyDecision(ctx RequestContext, applicationCode Applic
 }
 
 func defaultFieldPolicies(applicationCode ApplicationCode, resourceType ResourceType) map[string]string {
+	if applicationCode == AppAttendance && resourceType == ResourceAttendanceClock {
+		return map[string]string{
+			"latitude":        "hide",
+			"longitude":       "hide",
+			"accuracy_meters": "hide",
+			"distance_meters": "hide",
+			"device_id":       "hide",
+			"device_info":     "hide",
+			"location_source": "hide",
+		}
+	}
 	if applicationCode != AppHR || resourceType != ResourceEmployee {
 		return map[string]string{}
 	}
@@ -538,6 +549,8 @@ func (c *Service) touchAuthzConfig(ctx RequestContext, eventType string, payload
 }
 
 func normalizeCheckRequest(req CheckRequest) CheckRequest {
+	req.RouteMethod = strings.ToUpper(strings.TrimSpace(req.RouteMethod))
+	req.RoutePath = strings.TrimSpace(req.RoutePath)
 	if req.ApplicationCode == "" || req.ResourceType == "" {
 		app, resourceType := splitResource(req.Resource)
 		if req.ApplicationCode == "" {
@@ -639,18 +652,34 @@ func isHighRiskPermission(perm Permission) bool {
 	return perm.RiskLevel == "high" || perm.RiskLevel == "critical"
 }
 
+// approvalPolicyForRoute resolves high-risk approval requirements from route metadata.
 func approvalPolicyForRoute(req CheckRequest) (bool, string, string, string) {
 	reqResource := strings.TrimSpace(req.Resource)
+	if req.RouteMethod != "" || req.RoutePath != "" {
+		for _, policy := range domain.DefaultRoutePolicies {
+			if routePolicyMatchesHTTPRoute(req, policy, reqResource) {
+				return approvalPolicyDecision(policy)
+			}
+		}
+		return false, string(domain.RiskNormal), "", ""
+	}
 	for _, policy := range domain.DefaultRoutePolicies {
 		if strings.EqualFold(policy.Action, string(req.Action)) && routePolicyMatchesRequest(req, policy, reqResource) {
-			risk := string(policy.RiskLevel)
-			if policy.RiskLevel == domain.RiskHigh || policy.RiskLevel == domain.RiskCritical {
-				return true, risk, approvalTypeForRisk(risk), "route_policy"
-			}
-			return false, risk, "", ""
+			return approvalPolicyDecision(policy)
 		}
 	}
 	return false, string(domain.RiskNormal), "", ""
+}
+
+// routePolicyMatchesHTTPRoute keeps route-level approval checks tied to the matched HTTP route.
+func routePolicyMatchesHTTPRoute(req CheckRequest, policy domain.RoutePolicy, reqResource string) bool {
+	if req.RouteMethod != "" && !strings.EqualFold(policy.Method, req.RouteMethod) {
+		return false
+	}
+	if req.RoutePath != "" && policy.Path != req.RoutePath {
+		return false
+	}
+	return strings.EqualFold(policy.Action, string(req.Action)) && routePolicyMatchesRequest(req, policy, reqResource)
 }
 
 func routePolicyMatchesRequest(req CheckRequest, policy domain.RoutePolicy, reqResource string) bool {
@@ -661,6 +690,15 @@ func routePolicyMatchesRequest(req CheckRequest, policy domain.RoutePolicy, reqR
 		return false
 	}
 	return strings.EqualFold(reqResource, legacyRouteResourceName(policy.ApplicationCode, policy.ResourceType))
+}
+
+// approvalPolicyDecision converts route risk metadata into a service decision tuple.
+func approvalPolicyDecision(policy domain.RoutePolicy) (bool, string, string, string) {
+	risk := string(policy.RiskLevel)
+	if policy.RiskLevel == domain.RiskHigh || policy.RiskLevel == domain.RiskCritical {
+		return true, risk, approvalTypeForRisk(risk), "route_policy"
+	}
+	return false, risk, "", ""
 }
 
 func legacyRouteResourceName(applicationCode, resourceType string) string {
@@ -1343,6 +1381,8 @@ func (c *Service) authzSnapshotKey(ctx RequestContext, account Account, req Chec
 		"action":                    req.Action,
 		"target":                    req.Target,
 		"target_employee_id":        req.TargetEmployeeID,
+		"route_method":              req.RouteMethod,
+		"route_path":                req.RoutePath,
 		"context":                   req.Context,
 		"approval_confirmation_set": ctx.ApprovalConfirmed,
 	})
