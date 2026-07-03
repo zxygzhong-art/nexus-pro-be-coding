@@ -27,7 +27,7 @@ Do not release to production unless all P0 gates pass:
 | Import/export safety | CSV/XLSX preview, row errors, confirmation idempotency, size limits, duplicate handling, encoding, and high-risk approval behavior pass. |
 | Auditability | Permission changes, employee high-risk actions, export, import confirm, delete, AssumableRole assume, denied cross-tenant access, and Agent tool calls produce useful audit records. |
 | Observability | Request IDs, trace IDs, structured logs, health checks, error rates, latency, DB/Redis dependencies, and high-risk audit failures are visible. |
-| Production config | Demo seed disabled by default in production; secrets are not logged; Keycloak/OpenFGA/Redis/Postgres config failure modes are tested. |
+| Production config | Runtime accounts are database-backed only; secrets are not logged; Keycloak/OpenFGA/Redis/Postgres config failure modes are tested. |
 
 ## 3. Current Implementation Context
 
@@ -114,9 +114,9 @@ Create a deterministic test fixture set and reuse it across unit, API, integrati
 | Agent service account | Can run only allowed tools under user permission intersection. |
 | Disabled / missing account | Must be rejected. |
 
-### Seeded Demo Login Accounts
+### DB-Backed Demo Login Accounts
 
-All accounts below are seeded by `SeedDemo` for cross-page manual testing and should not be deleted from local demo data. The local frontend demo login password is `Password123!`.
+All accounts below are DB-backed test data for cross-page manual testing and should not be deleted from local demo data. The backend no longer creates these accounts at runtime; create or import them in PostgreSQL before browser/API testing. The local frontend demo login password is `Password123!`.
 
 | Email | Account ID | Permission profile | Recommended cross-test pages | Expected boundary |
 | --- | --- | --- | --- | --- |
@@ -131,15 +131,15 @@ All accounts below are seeded by `SeedDemo` for cross-page manual testing and sh
 | `insights.viewer@demo.local` | `acct-insights-viewer` | Insights Viewer | Workspace overview, attendance read, turnover, insights | Data dashboard read-only account; writes should be denied. |
 | `disabled@demo.local` | `acct-disabled` | Disabled / missing account | Login negative path, `/v1/me`, any protected API | Frontend demo login can issue a local token, but backend must reject the disabled account. |
 
-### Seeded Dashboard User Cohort
+### DB-Backed Dashboard User Cohort
 
-For a DB-backed dashboard smoke, run `scripts/seed_demo_dashboard_users.sql` after migrations. It keeps existing test data, fills the `demo` tenant to 100 employees, and adds deterministic login-capable accounts:
+For a DB-backed dashboard smoke, prepare deterministic login-capable accounts in PostgreSQL before starting the API:
 
 | Pattern | Range | Password | Account ID pattern | Purpose |
 | --- | --- | --- | --- | --- |
 | `demo.bulkNNN@demo.local` | `001` to `097` | `Password123!` | `acct-demo-bulk-NNN` | 100-user dashboard/list/permission smoke data. |
 
-The seeded DB cohort currently covers:
+The recommended DB cohort covers:
 
 | Dimension | Distribution |
 | --- | --- |
@@ -482,7 +482,7 @@ Required checks:
 
 Pre-production checklist:
 
-- `APP_ENV=production` disables demo seed unless explicitly overridden.
+- Runtime login accounts and identity bindings already exist in PostgreSQL.
 - Migrations tested on production-like backup.
 - Blue/green or rolling deployment does not mix incompatible permission snapshot versions.
 - Permission package versioning and migration plan documented.

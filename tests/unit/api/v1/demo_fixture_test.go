@@ -1,14 +1,45 @@
-package service
+package v1_test
 
 import (
 	"context"
 	"time"
 
+	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/repository"
 )
 
-// SeedDemo inserts deterministic demo data for local development and tests.
-func SeedDemo(store repository.Store) {
+type (
+	Tenant                    = domain.Tenant
+	Account                   = domain.Account
+	UserIdentity              = domain.UserIdentity
+	UserGroup                 = domain.UserGroup
+	PermissionSet             = domain.PermissionSet
+	Permission                = domain.Permission
+	OrgUnit                   = domain.OrgUnit
+	Employee                  = domain.Employee
+	LeaveBalance              = domain.LeaveBalance
+	AttendanceWorksite        = domain.AttendanceWorksite
+	AttendanceShift           = domain.AttendanceShift
+	AttendanceShiftAssignment = domain.AttendanceShiftAssignment
+	LeaveRequest              = domain.LeaveRequest
+	AttendanceClockRecord     = domain.AttendanceClockRecord
+	FormTemplate              = domain.FormTemplate
+	KnowledgeArticle          = domain.KnowledgeArticle
+	PlatformFormColumn        = domain.PlatformFormColumn
+	PlatformFormItem          = domain.PlatformFormItem
+)
+
+const (
+	fixtureClockDirectionIn     = "clock_in"
+	fixtureClockDirectionOut    = "clock_out"
+	fixtureClockRecordAccepted  = "accepted"
+	fixtureClockSourceGeofence  = "geofence"
+	fixtureClockDeviceDashboard = "fixture-dashboard"
+	fixtureDashboardLeaveReason = "Dashboard fixture sample"
+)
+
+// populateDemoFixture inserts deterministic data used only by API unit tests.
+func populateDemoFixture(store repository.Store) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 
@@ -904,7 +935,7 @@ func SeedDemo(store repository.Store) {
 		StartAt:    dashboardDate.Add(9 * time.Hour),
 		EndAt:      dashboardDate.Add(18 * time.Hour),
 		Hours:      8,
-		Reason:     "Seeded dashboard sample",
+		Reason:     fixtureDashboardLeaveReason,
 		Status:     "approved",
 		CreatedAt:  now.Add(10 * time.Minute),
 	})
@@ -917,15 +948,15 @@ func SeedDemo(store repository.Store) {
 			ShiftID:           "ash-day",
 			WorksiteID:        "aws-demo-hq",
 			WorkDate:          "2026-07-01",
-			Direction:         clockDirectionIn,
+			Direction:         fixtureClockDirectionIn,
 			ClockedAt:         dashboardDate.Add(8*time.Hour + 55*time.Minute),
 			Latitude:          25.033964,
 			Longitude:         121.564468,
 			AccuracyMeters:    12,
 			DistanceMeters:    0,
-			RecordStatus:      clockRecordStatusAccepted,
-			Source:            clockSourceGeofence,
-			DeviceID:          "seeded-dashboard",
+			RecordStatus:      fixtureClockRecordAccepted,
+			Source:            fixtureClockSourceGeofence,
+			DeviceID:          fixtureClockDeviceDashboard,
 			CreatedAt:         now.Add(10 * time.Minute),
 		},
 		{
@@ -936,15 +967,15 @@ func SeedDemo(store repository.Store) {
 			ShiftID:           "ash-day",
 			WorksiteID:        "aws-demo-hq",
 			WorkDate:          "2026-07-01",
-			Direction:         clockDirectionOut,
+			Direction:         fixtureClockDirectionOut,
 			ClockedAt:         dashboardDate.Add(18 * time.Hour),
 			Latitude:          25.033964,
 			Longitude:         121.564468,
 			AccuracyMeters:    18,
 			DistanceMeters:    0,
-			RecordStatus:      clockRecordStatusAccepted,
-			Source:            clockSourceGeofence,
-			DeviceID:          "seeded-dashboard",
+			RecordStatus:      fixtureClockRecordAccepted,
+			Source:            fixtureClockSourceGeofence,
+			DeviceID:          fixtureClockDeviceDashboard,
 			CreatedAt:         now.Add(10*time.Minute + 30*time.Second),
 		},
 		{
@@ -955,15 +986,15 @@ func SeedDemo(store repository.Store) {
 			ShiftID:           "ash-day",
 			WorksiteID:        "aws-demo-hq",
 			WorkDate:          "2026-07-01",
-			Direction:         clockDirectionIn,
+			Direction:         fixtureClockDirectionIn,
 			ClockedAt:         dashboardDate.Add(9*time.Hour + 5*time.Minute),
 			Latitude:          25.033964,
 			Longitude:         121.564468,
 			AccuracyMeters:    20,
 			DistanceMeters:    0,
-			RecordStatus:      clockRecordStatusAccepted,
-			Source:            clockSourceGeofence,
-			DeviceID:          "seeded-dashboard",
+			RecordStatus:      fixtureClockRecordAccepted,
+			Source:            fixtureClockSourceGeofence,
+			DeviceID:          fixtureClockDeviceDashboard,
 			CreatedAt:         now.Add(11 * time.Minute),
 		},
 		{
@@ -974,15 +1005,15 @@ func SeedDemo(store repository.Store) {
 			ShiftID:           "ash-day",
 			WorksiteID:        "aws-demo-hq",
 			WorkDate:          "2026-07-01",
-			Direction:         clockDirectionIn,
+			Direction:         fixtureClockDirectionIn,
 			ClockedAt:         dashboardDate.Add(8*time.Hour + 48*time.Minute),
 			Latitude:          25.033964,
 			Longitude:         121.564468,
 			AccuracyMeters:    9,
 			DistanceMeters:    0,
-			RecordStatus:      clockRecordStatusAccepted,
-			Source:            clockSourceGeofence,
-			DeviceID:          "seeded-dashboard",
+			RecordStatus:      fixtureClockRecordAccepted,
+			Source:            fixtureClockSourceGeofence,
+			DeviceID:          fixtureClockDeviceDashboard,
 			CreatedAt:         now.Add(12 * time.Minute),
 		},
 	} {
@@ -1006,7 +1037,7 @@ func SeedDemo(store repository.Store) {
 		},
 		CreatedAt: now,
 	})
-	seedPlatformFormTemplates(ctx, store, now)
+	populateFixturePlatformFormTemplates(ctx, store, now)
 	_ = store.UpsertFormTemplate(ctx, FormTemplate{
 		ID:          "ft-attendance-correction",
 		TenantID:    "demo",
@@ -1079,7 +1110,7 @@ func SeedDemo(store repository.Store) {
 	})
 }
 
-func seedPlatformFormTemplates(ctx context.Context, store repository.Store, now time.Time) {
+func populateFixturePlatformFormTemplates(ctx context.Context, store repository.Store, now time.Time) {
 	offset := 2
 	for _, column := range platformFormColumns() {
 		for _, item := range column.Items {
@@ -1105,5 +1136,30 @@ func seedPlatformFormTemplates(ctx context.Context, store repository.Store, now 
 			})
 			offset++
 		}
+	}
+}
+
+func platformFormColumns() []PlatformFormColumn {
+	return []PlatformFormColumn{
+		{Title: "人事考勤類", Emoji: "👥", Items: []PlatformFormItem{
+			{ID: "leave-request", Emoji: "🗓️", Title: "請假申請單", Desc: "特休 / 事假 / 病假 / 公假"},
+			{ID: "overtime-approval", Emoji: "⏰", Title: "加班核准申請單", Desc: "平日延時、假日加班皆可使用"},
+			{ID: "punch-fix", Emoji: "🕒", Title: "HR-005 補卡單", Desc: "漏打卡或打卡異常補登"},
+		}},
+		{Title: "人資相關", Emoji: "👥", Items: []PlatformFormItem{
+			{ID: "job-change", Emoji: "📋", Title: "人事/職務/薪資異動單", Desc: "異動職務、調薪、調動"},
+			{ID: "headcount-request", Emoji: "➕", Title: "iKala 人員增補申請單", Desc: "新增職缺與招募"},
+			{ID: "resignation", Emoji: "👋", Title: "離職及退休申請單", Desc: "離職、退休手續辦理"},
+		}},
+		{Title: "財會相關", Emoji: "💰", Items: []PlatformFormItem{
+			{ID: "expense-claim", Emoji: "💸", Title: "費用報支申請單", Desc: "日常費用核銷"},
+			{ID: "prepayment", Emoji: "💵", Title: "預支款申請單", Desc: "出差或專案預支款"},
+			{ID: "advance-reimburse", Emoji: "💳", Title: "員工代墊款請領清單", Desc: "員工代墊費用請領"},
+		}},
+		{Title: "行政相關", Emoji: "🧾", Items: []PlatformFormItem{
+			{ID: "travel-request", Emoji: "🛫", Title: "國內外出差申請表", Desc: "出差行程預先申請"},
+			{ID: "business-card", Emoji: "📇", Title: "名片申請單", Desc: "新印或補印名片"},
+			{ID: "memo", Emoji: "📝", Title: "簽呈", Desc: "通用簽呈"},
+		}},
 	}
 }

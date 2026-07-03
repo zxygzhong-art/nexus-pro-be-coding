@@ -13,7 +13,6 @@ import (
 type Config struct {
 	Env      string
 	HTTPAddr string
-	SeedDemo bool
 	LogLevel string
 
 	DatabaseURL string
@@ -118,9 +117,6 @@ func (c Config) ValidateStartup() error {
 	default:
 		problems = append(problems, "OBJECT_STORE_PROVIDER must be minio, s3, or local")
 	}
-	if c.SeedDemo {
-		problems = append(problems, "SEED_DEMO must be false")
-	}
 	if c.AllowDemoContext {
 		problems = append(problems, "ALLOW_DEMO_CONTEXT must be false")
 	}
@@ -172,7 +168,6 @@ func LoadE() (Config, error) {
 	cfg := Config{
 		Env:           appEnv,
 		HTTPAddr:      env("HTTP_ADDR", ":8080"),
-		SeedDemo:      envBool("SEED_DEMO", appEnv != "production", &problems),
 		LogLevel:      env("LOG_LEVEL", "info"),
 		DatabaseURL:   strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		RedisAddr:     strings.TrimSpace(os.Getenv("REDIS_ADDR")),

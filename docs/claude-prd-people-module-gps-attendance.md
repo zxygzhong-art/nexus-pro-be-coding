@@ -82,7 +82,7 @@ Relevant files:
 - GPS geofence clock records.
 - Manual attendance correction request and review.
 - Workspace projections for overview, employees, organization, turnover, attendance, clock matrices.
-- Tests, OpenAPI, route policy, seed permission, audit, and tenant/RLS proof for the above.
+- Tests, OpenAPI, route policy, permission fixtures, audit, and tenant/RLS proof for the above.
 
 ### Out of Scope
 

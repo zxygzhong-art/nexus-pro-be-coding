@@ -79,7 +79,7 @@ func (c PlatformService) Forms(ctx RequestContext) (PlatformFormsResponse, error
 	}, nil
 }
 
-// Tasks returns task records, todos, clock summary, and task assistant seed messages.
+// Tasks returns task records, todos, clock summary, and task assistant messages.
 func (c PlatformService) Tasks(ctx RequestContext) (PlatformTasksResponse, error) {
 	clockSummary, err := c.clockSummary(ctx)
 	if err != nil {

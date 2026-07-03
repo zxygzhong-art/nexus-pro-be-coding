@@ -14,10 +14,10 @@ import (
 func TestWorkspaceOverviewAggregatesVisibleHRAndAttendance(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-2", EmployeeNo: "IKL002", Name: "張琪", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-3", EmployeeNo: "IKL003", Name: "陳俊", Status: "resigned", EmploymentStatus: "resigned", HireDate: ptrTime(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)), ResignDate: ptrTime(time.Date(2026, 6, 5, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: time.Date(2026, 6, 5, 0, 0, 0, 0, time.UTC)})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-4", EmployeeNo: "IKL004", Name: "李雅琳", Status: "onboarding", EmploymentStatus: "onboarding", HireDate: ptrTime(time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-2", EmployeeNo: "IKL002", Name: "張琪", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-3", EmployeeNo: "IKL003", Name: "陳俊", Status: "resigned", EmploymentStatus: "resigned", HireDate: ptrTime(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)), ResignDate: ptrTime(time.Date(2026, 6, 5, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: time.Date(2026, 6, 5, 0, 0, 0, 0, time.UTC)})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-4", EmployeeNo: "IKL004", Name: "李雅琳", Status: "onboarding", EmploymentStatus: "onboarding", HireDate: ptrTime(time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
 	_ = store.UpsertAttendanceClockRecord(context.Background(), domain.AttendanceClockRecord{ID: "clk-1", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_in", ClockedAt: now, RecordStatus: "accepted", Source: "geofence", CreatedAt: now})
 	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lv-1", TenantID: "tenant-1", EmployeeID: "emp-2", LeaveType: "annual", StartAt: now, EndAt: now.Add(8 * time.Hour), Hours: 8, Status: "approved", CreatedAt: now})
 
@@ -41,8 +41,8 @@ func TestWorkspaceOrganizationBuildsManagerTree(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-eng", TenantID: "tenant-1", Name: "產品開發部", Path: []string{"ou-eng"}, CreatedAt: now})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-manager", EmployeeNo: "IKL001", Name: "王偉", OrgUnitID: "ou-eng", Position: "VP Engineering", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-child", EmployeeNo: "IKL002", Name: "張琪", OrgUnitID: "ou-eng", ManagerEmployeeID: "emp-manager", Position: "Engineer", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-manager", EmployeeNo: "IKL001", Name: "王偉", OrgUnitID: "ou-eng", Position: "VP Engineering", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-child", EmployeeNo: "IKL002", Name: "張琪", OrgUnitID: "ou-eng", ManagerEmployeeID: "emp-manager", Position: "Engineer", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
 
 	got, err := svc.Workspace().WorkspaceOrganization(ctx)
 	if err != nil {
@@ -63,7 +63,7 @@ func TestWorkspaceOrganizationBuildsManagerTree(t *testing.T) {
 func TestWorkspaceAttendanceBuildsLeaveAndClockMatrices(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", CompanyEmail: "wei@example.com", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", CompanyEmail: "wei@example.com", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
 	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lv-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", StartAt: time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 10, 23, 0, 0, 0, time.UTC), Hours: 8, Status: "approved", CreatedAt: now})
 	_ = store.UpsertAttendanceClockRecord(context.Background(), domain.AttendanceClockRecord{ID: "clk-in", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", Direction: "clock_in", ClockedAt: time.Date(2026, 6, 11, 9, 0, 0, 0, time.UTC), RecordStatus: "accepted", Source: "geofence", CreatedAt: now})
 
@@ -88,10 +88,10 @@ func TestPlatformWorkspaceEmployeesFiltersAndNormalizesStatus(t *testing.T) {
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-hr", TenantID: "tenant-1", Name: "人力資源部", Path: []string{"ou-hr"}, CreatedAt: now})
 	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-sales", TenantID: "tenant-1", Name: "業務部", Path: []string{"ou-sales"}, CreatedAt: now})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-active", EmployeeNo: "E001", Name: "Active HR", CompanyEmail: "active@example.com", OrgUnitID: "ou-hr", Position: "HRBP", Status: "active", EmploymentStatus: "active", CreatedAt: now})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-probation", EmployeeNo: "E002", Name: "Probation HR", CompanyEmail: "probation@example.com", OrgUnitID: "ou-hr", Position: "Recruiter", Status: "probation", EmploymentStatus: "probation", CreatedAt: now.Add(time.Minute)})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-onboarding", EmployeeNo: "E003", Name: "Onboarding Sales", CompanyEmail: "onboarding@example.com", OrgUnitID: "ou-sales", Position: "AE", Status: "onboarding", EmploymentStatus: "onboarding", CreatedAt: now.Add(2 * time.Minute)})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-resigned", EmployeeNo: "E004", Name: "Resigned HR", CompanyEmail: "resigned@example.com", OrgUnitID: "ou-hr", Position: "Former HR", Status: "resigned", EmploymentStatus: "resigned", CreatedAt: now.Add(3 * time.Minute)})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-active", EmployeeNo: "E001", Name: "Active HR", CompanyEmail: "active@example.com", OrgUnitID: "ou-hr", Position: "HRBP", Status: "active", EmploymentStatus: "active", CreatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-probation", EmployeeNo: "E002", Name: "Probation HR", CompanyEmail: "probation@example.com", OrgUnitID: "ou-hr", Position: "Recruiter", Status: "probation", EmploymentStatus: "probation", CreatedAt: now.Add(time.Minute)})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-onboarding", EmployeeNo: "E003", Name: "Onboarding Sales", CompanyEmail: "onboarding@example.com", OrgUnitID: "ou-sales", Position: "AE", Status: "onboarding", EmploymentStatus: "onboarding", CreatedAt: now.Add(2 * time.Minute)})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-resigned", EmployeeNo: "E004", Name: "Resigned HR", CompanyEmail: "resigned@example.com", OrgUnitID: "ou-hr", Position: "Former HR", Status: "resigned", EmploymentStatus: "resigned", CreatedAt: now.Add(3 * time.Minute)})
 
 	activeHR, err := svc.Platform().WorkspaceEmployees(ctx, domain.PlatformWorkspaceEmployeesQuery{DepartmentID: "ou-hr", Status: "在職"})
 	if err != nil {
@@ -181,9 +181,9 @@ func TestWorkspaceAdminsProjectsIAMAssignments(t *testing.T) {
 	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-hr", TenantID: "tenant-1", Name: "人力資源部", Path: []string{"ou-hr"}, CreatedAt: now})
 	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{ID: "ps-reader", TenantID: "tenant-1", Name: "Reader", Permissions: []domain.Permission{{Resource: "iam.permission_set_assignment", Action: "read", Scope: "all"}, {Resource: "hr.employee", Action: "read", Scope: "all"}}, CreatedAt: now})
 	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{ID: "ps-hr-admin", TenantID: "tenant-1", Name: "HR Admin", Permissions: []domain.Permission{{Resource: "hr.employee", Action: "update", Scope: "all"}, {Resource: "attendance.leave", Action: "read", Scope: "all"}, {Resource: "iam.permission_set_assignment", Action: "read", Scope: "all"}}, CreatedAt: now})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-reader", EmployeeNo: "IKL001", Name: "王偉", OrgUnitID: "ou-hr", Position: "HR Director", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-target", EmployeeNo: "IKL002", Name: "張琪", OrgUnitID: "ou-hr", Position: "HR Manager", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-candidate", EmployeeNo: "IKL003", Name: "陳俊", OrgUnitID: "ou-hr", Position: "Recruiter", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-reader", EmployeeNo: "IKL001", Name: "王偉", OrgUnitID: "ou-hr", Position: "HR Director", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-target", EmployeeNo: "IKL002", Name: "張琪", OrgUnitID: "ou-hr", Position: "HR Manager", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-candidate", EmployeeNo: "IKL003", Name: "陳俊", OrgUnitID: "ou-hr", Position: "Recruiter", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-reader", TenantID: "tenant-1", EmployeeID: "emp-reader", Status: "active", DirectPermissionSetIDs: []string{"ps-reader"}, CreatedAt: now})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-target", TenantID: "tenant-1", EmployeeID: "emp-target", Status: "active", CreatedAt: now})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-candidate", TenantID: "tenant-1", EmployeeID: "emp-candidate", Status: "active", CreatedAt: now})
@@ -216,9 +216,9 @@ func TestWorkspaceAdminsRespectsHRDataScope(t *testing.T) {
 	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-hr", TenantID: "tenant-1", Name: "人力資源部", Path: []string{"ou-hr"}, CreatedAt: now})
 	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{ID: "ps-reader", TenantID: "tenant-1", Name: "Reader", Permissions: []domain.Permission{{Resource: "iam.permission_set_assignment", Action: "read", Scope: "all"}, {Resource: "hr.employee", Action: "read", Scope: "self"}}, CreatedAt: now})
 	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{ID: "ps-hr-admin", TenantID: "tenant-1", Name: "HR Admin", Permissions: []domain.Permission{{Resource: "hr.employee", Action: "update", Scope: "all"}, {Resource: "iam.permission_set_assignment", Action: "read", Scope: "all"}}, CreatedAt: now})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-reader", EmployeeNo: "IKL001", Name: "王偉", OrgUnitID: "ou-hr", Position: "HR Director", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-target", EmployeeNo: "IKL002", Name: "張琪", OrgUnitID: "ou-hr", Position: "HR Manager", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-candidate", EmployeeNo: "IKL003", Name: "陳俊", OrgUnitID: "ou-hr", Position: "Recruiter", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-reader", EmployeeNo: "IKL001", Name: "王偉", OrgUnitID: "ou-hr", Position: "HR Director", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-target", EmployeeNo: "IKL002", Name: "張琪", OrgUnitID: "ou-hr", Position: "HR Manager", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-candidate", EmployeeNo: "IKL003", Name: "陳俊", OrgUnitID: "ou-hr", Position: "Recruiter", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-reader", TenantID: "tenant-1", EmployeeID: "emp-reader", Status: "active", DirectPermissionSetIDs: []string{"ps-reader"}, CreatedAt: now})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-target", TenantID: "tenant-1", EmployeeID: "emp-target", Status: "active", CreatedAt: now})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-candidate", TenantID: "tenant-1", EmployeeID: "emp-candidate", Status: "active", CreatedAt: now})
@@ -275,7 +275,7 @@ func TestWorkspaceAuditLogsFiltersAndProjects(t *testing.T) {
 	store := memory.NewStore()
 	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
 	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{ID: "ps-audit", TenantID: "tenant-1", Name: "Audit", Permissions: []domain.Permission{{Resource: "audit.log", Action: "read", Scope: "all"}}, CreatedAt: now})
-	seedWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", EmployeeID: "emp-1", Status: "active", DirectPermissionSetIDs: []string{"ps-audit"}, CreatedAt: now})
 	_ = store.AppendAuditLog(context.Background(), domain.AuditLog{ID: "audit-1", TenantID: "tenant-1", ActorAccountID: "acct-1", Action: "hr.employee.create", Resource: "hr.employee", Target: "emp-2", Severity: "medium", Details: map[string]any{"name": "張琪"}, CreatedAt: now})
 	_ = store.AppendAuditLog(context.Background(), domain.AuditLog{ID: "audit-2", TenantID: "tenant-1", ActorAccountID: "acct-1", Action: "attendance.shift.update", Resource: "attendance.shift", Target: "shift-1", Severity: "medium", CreatedAt: now.Add(-24 * time.Hour)})
@@ -315,8 +315,8 @@ func newWorkspaceFixture(t *testing.T) (*memory.Store, *service.Service, domain.
 	return store, service.New(store), domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 }
 
-// seedWorkspaceEmployee fills tenant defaults before storing an employee.
-func seedWorkspaceEmployee(t *testing.T, store *memory.Store, employee domain.Employee) {
+// insertWorkspaceEmployee fills tenant defaults before storing an employee.
+func insertWorkspaceEmployee(t *testing.T, store *memory.Store, employee domain.Employee) {
 	t.Helper()
 	employee.TenantID = "tenant-1"
 	if employee.Status == "" {

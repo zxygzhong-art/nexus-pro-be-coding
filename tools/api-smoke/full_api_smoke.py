@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Run a full HTTP smoke pass over the public OpenAPI routes.
 
-The default mode starts the API with the in-memory repository, demo seed data,
-and header-based request context. Pass --base-url to run against an already
+The default mode starts the API against the configured PostgreSQL database and
+uses header-based request context. Pass --base-url to run against an already
 started server instead.
 """
 
@@ -160,7 +160,9 @@ def parse_args() -> argparse.Namespace:
 
 def start_server(port: int, args: argparse.Namespace) -> tuple[subprocess.Popen[str], list[str]]:
     env = os.environ.copy()
-    for key in ("DATABASE_URL", "REDIS_ADDR", "OPENFGA_API_URL", "OPENFGA_STORE_ID"):
+    if not env_first("DATABASE_URL"):
+        raise SmokeFailure("DATABASE_URL is required because smoke accounts must come from the database")
+    for key in ("REDIS_ADDR", "OPENFGA_API_URL", "OPENFGA_STORE_ID"):
         env.pop(key, None)
     if args.auth_mode != "keycloak":
         env.pop("KEYCLOAK_ISSUER_URL", None)
@@ -169,7 +171,6 @@ def start_server(port: int, args: argparse.Namespace) -> tuple[subprocess.Popen[
         {
             "APP_ENV": "development",
             "HTTP_ADDR": f"127.0.0.1:{port}",
-            "SEED_DEMO": "true",
             "ALLOW_HEADER_CONTEXT": "false" if args.auth_mode == "keycloak" else "true",
             "ALLOW_DEMO_CONTEXT": "false",
             "OTEL_ENABLED": "false",

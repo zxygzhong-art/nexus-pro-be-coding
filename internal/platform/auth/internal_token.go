@@ -112,8 +112,8 @@ func (r *InternalTokenResolver) Resolve(req *http.Request) (domain.Authenticated
 		return domain.AuthenticatedPrincipal{}, true, domain.Unauthorized("invalid bearer token")
 	}
 	return domain.AuthenticatedPrincipal{
-		Provider:  "internal",
-		Subject:   claimString(claims, "sub", "account_id"),
+		Provider:  claimString(claims, "authn_provider"),
+		Subject:   claimString(claims, "authn_subject"),
 		Email:     claimString(claims, "email"),
 		TenantID:  claimString(claims, "tenant_id", "tid"),
 		AccountID: claimString(claims, "account_id", "acct", "sub"),

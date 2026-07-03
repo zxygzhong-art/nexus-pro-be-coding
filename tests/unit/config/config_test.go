@@ -8,28 +8,6 @@ import (
 	"nexus-pro-be/internal/config"
 )
 
-func TestSeedDemoDefaultsToDisabledInProduction(t *testing.T) {
-	t.Setenv("APP_ENV", "production")
-	t.Setenv("SEED_DEMO", "")
-
-	cfg := config.Load()
-
-	if cfg.SeedDemo {
-		t.Fatal("expected production to disable demo seed by default")
-	}
-}
-
-func TestSeedDemoCanBeEnabledExplicitly(t *testing.T) {
-	t.Setenv("APP_ENV", "production")
-	t.Setenv("SEED_DEMO", "true")
-
-	cfg := config.Load()
-
-	if !cfg.SeedDemo {
-		t.Fatal("expected explicit SEED_DEMO=true to enable demo seed")
-	}
-}
-
 func TestLogLevelDefaultsToInfo(t *testing.T) {
 	t.Setenv("LOG_LEVEL", "")
 
@@ -232,7 +210,6 @@ func TestValidateStartupRejectsUnsafeProductionCompatibilityFlags(t *testing.T) 
 		OpenFGAStoreID:     "store-1",
 		OpenFGAModelID:     "model-1",
 		ObjectStoreDir:     "/var/lib/nexus-pro-be/objects",
-		SeedDemo:           true,
 		AllowDemoContext:   true,
 		AllowHeaderContext: true,
 		AllowUnsignedJWT:   true,
@@ -242,7 +219,7 @@ func TestValidateStartupRejectsUnsafeProductionCompatibilityFlags(t *testing.T) 
 	if err == nil {
 		t.Fatal("expected unsafe production config validation error")
 	}
-	for _, want := range []string{"SEED_DEMO", "ALLOW_DEMO_CONTEXT", "ALLOW_HEADER_CONTEXT", "ALLOW_UNSIGNED_JWT"} {
+	for _, want := range []string{"ALLOW_DEMO_CONTEXT", "ALLOW_HEADER_CONTEXT", "ALLOW_UNSIGNED_JWT"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected validation error to mention %s, got %v", want, err)
 		}

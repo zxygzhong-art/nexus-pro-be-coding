@@ -80,7 +80,7 @@ paths:
         - {name: search, in: query, schema: {type: string}}
       responses:
         "200":
-          description: Assistant cards and prompt seeds
+          description: Assistant cards and quick prompts
           content:
             application/json:
               schema:
@@ -108,7 +108,7 @@ paths:
       summary: Get current-account task dashboard projection
       responses:
         "200":
-          description: Task records, todos, clock summary, and AI panel seeds
+          description: Task records, todos, clock summary, and AI panel prompts
           content:
             application/json:
               schema:

@@ -9,7 +9,7 @@ import (
 
 func (a *API) requestContext(r *http.Request) (domain.RequestContext, error) {
 	var tenantID, accountID string
-	// Token-derived identity wins over configurable demo/header fallbacks.
+	// Token-derived identity wins over optional local header context.
 	tokenCtx, ok, err := a.tokenResolver.Resolve(r)
 	if err != nil {
 		return domain.RequestContext{}, err
@@ -36,16 +36,10 @@ func (a *API) requestContext(r *http.Request) (domain.RequestContext, error) {
 		}
 	}
 	if tenantID == "" {
-		if !a.allowDemoContext {
-			return domain.RequestContext{}, domain.Unauthorized("authenticated tenant context is required")
-		}
-		tenantID = "demo"
+		return domain.RequestContext{}, domain.Unauthorized("authenticated tenant context is required")
 	}
 	if accountID == "" {
-		if !a.allowDemoContext {
-			return domain.RequestContext{}, domain.Unauthorized("authenticated account context is required")
-		}
-		accountID = "acct-admin"
+		return domain.RequestContext{}, domain.Unauthorized("authenticated account context is required")
 	}
 	requestID := requestIDFrom(r)
 	traceID, spanID := traceContextIDs(r)

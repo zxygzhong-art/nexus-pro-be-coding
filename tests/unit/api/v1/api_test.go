@@ -35,8 +35,12 @@ import (
 
 func newTestAPI(allowDemoContext bool) http.Handler {
 	store := memory.NewStore()
-	service.SeedDemo(store)
-	return v1api.New(service.New(store), nil, v1api.Options{AllowDemoContext: allowDemoContext}).Routes()
+	populateDemoFixture(store)
+	options := v1api.Options{AllowDemoContext: allowDemoContext}
+	if allowDemoContext {
+		options.TokenResolver = staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo"}, ok: true}
+	}
+	return v1api.New(service.New(store), nil, options).Routes()
 }
 
 func decodeData[T any](t *testing.T, body []byte) T {
@@ -117,7 +121,7 @@ func TestProductionContextRequiresAuthenticatedContext(t *testing.T) {
 
 func TestDefaultAPIRequiresAuthenticatedContext(t *testing.T) {
 	store := memory.NewStore()
-	service.SeedDemo(store)
+	populateDemoFixture(store)
 	handler := v1api.New(service.New(store), nil).Routes()
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
 	rec := httptest.NewRecorder()
@@ -145,10 +149,10 @@ func TestProductionContextRejectsHeaderOnlyContext(t *testing.T) {
 
 func TestProductionContextAcceptsBearerClaims(t *testing.T) {
 	store := memory.NewStore()
-	service.SeedDemo(store)
+	populateDemoFixture(store)
 	handler := v1api.New(service.New(store), nil, v1api.Options{
 		AllowDemoContext: false,
-		TokenResolver:    staticTokenResolver{ctx: v1api.TokenContext{TenantID: "demo", AccountID: "acct-admin"}, ok: true},
+		TokenResolver:    staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo", AccountID: "acct-other"}, ok: true},
 	}).Routes()
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
 	rec := httptest.NewRecorder()
@@ -162,10 +166,10 @@ func TestProductionContextAcceptsBearerClaims(t *testing.T) {
 
 func TestTokenContextTakesPrecedenceOverSpoofedHeaders(t *testing.T) {
 	store := memory.NewStore()
-	service.SeedDemo(store)
+	populateDemoFixture(store)
 	handler := v1api.New(service.New(store), nil, v1api.Options{
 		AllowDemoContext: false,
-		TokenResolver:    staticTokenResolver{ctx: v1api.TokenContext{TenantID: "demo", AccountID: "acct-admin"}, ok: true},
+		TokenResolver:    staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo", AccountID: "acct-admin"}, ok: true},
 	}).Routes()
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
 	req.Header.Set("X-Tenant-ID", "other-tenant")
@@ -181,7 +185,7 @@ func TestTokenContextTakesPrecedenceOverSpoofedHeaders(t *testing.T) {
 
 func TestIdentityMappingOverridesLegacyAccountClaim(t *testing.T) {
 	store := memory.NewStore()
-	service.SeedDemo(store)
+	populateDemoFixture(store)
 	now := time.Now().UTC()
 	if err := store.UpsertUserIdentity(context.Background(), domain.UserIdentity{
 		ID:        "uid-google-employee",
@@ -219,7 +223,7 @@ func TestIdentityMappingOverridesLegacyAccountClaim(t *testing.T) {
 
 func TestUnlinkedExternalIdentityIsRejected(t *testing.T) {
 	store := memory.NewStore()
-	service.SeedDemo(store)
+	populateDemoFixture(store)
 	handler := v1api.New(service.New(store), nil, v1api.Options{
 		AllowDemoContext: false,
 		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{
@@ -240,7 +244,7 @@ func TestUnlinkedExternalIdentityIsRejected(t *testing.T) {
 
 func TestUnlinkedExternalIdentityWithAccountClaimIsRejected(t *testing.T) {
 	store := memory.NewStore()
-	service.SeedDemo(store)
+	populateDemoFixture(store)
 	handler := v1api.New(service.New(store), nil, v1api.Options{
 		AllowDemoContext: false,
 		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{
@@ -262,10 +266,10 @@ func TestUnlinkedExternalIdentityWithAccountClaimIsRejected(t *testing.T) {
 
 func TestDisabledAccountIsRejectedAfterIdentityResolution(t *testing.T) {
 	store := memory.NewStore()
-	service.SeedDemo(store)
+	populateDemoFixture(store)
 	account, ok, err := store.GetAccount(context.Background(), "demo", "acct-admin")
 	if err != nil || !ok {
-		t.Fatalf("expected seeded account, ok=%v err=%v", ok, err)
+		t.Fatalf("expected fixture account, ok=%v err=%v", ok, err)
 	}
 	account.Status = string(domain.AccountStatusDisabled)
 	if err := store.UpsertAccount(context.Background(), account); err != nil {
@@ -273,7 +277,7 @@ func TestDisabledAccountIsRejectedAfterIdentityResolution(t *testing.T) {
 	}
 	handler := v1api.New(service.New(store), nil, v1api.Options{
 		AllowDemoContext: false,
-		TokenResolver:    staticTokenResolver{ctx: v1api.TokenContext{TenantID: "demo", AccountID: "acct-admin"}, ok: true},
+		TokenResolver:    staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo", AccountID: "acct-admin"}, ok: true},
 	}).Routes()
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
 	rec := httptest.NewRecorder()
@@ -287,7 +291,7 @@ func TestDisabledAccountIsRejectedAfterIdentityResolution(t *testing.T) {
 
 func TestOIDCAuthorizationURLReturnsSignedState(t *testing.T) {
 	store := memory.NewStore()
-	service.SeedDemo(store)
+	populateDemoFixture(store)
 	stateCodec := platformauth.NewOIDCStateCodec("state-secret", time.Minute)
 	handler := v1api.New(service.New(store, service.Options{
 		OIDCProviders: map[string]service.OIDCProvider{
@@ -319,7 +323,7 @@ func TestOIDCAuthorizationURLReturnsSignedState(t *testing.T) {
 
 func TestOIDCAuthorizationURLRejectsExternalReturnURL(t *testing.T) {
 	store := memory.NewStore()
-	service.SeedDemo(store)
+	populateDemoFixture(store)
 	handler := v1api.New(service.New(store, service.Options{
 		OIDCProviders: map[string]service.OIDCProvider{
 			"google": fakeOIDCProvider{authURL: "https://accounts.google.com/o/oauth2/v2/auth"},
@@ -338,7 +342,7 @@ func TestOIDCAuthorizationURLRejectsExternalReturnURL(t *testing.T) {
 
 func TestOIDCCallbackIssuesInternalTokenForBoundIdentity(t *testing.T) {
 	store := memory.NewStore()
-	service.SeedDemo(store)
+	populateDemoFixture(store)
 	if err := store.UpsertUserIdentity(context.Background(), domain.UserIdentity{
 		ID:        "uid-google-employee",
 		TenantID:  "demo",
@@ -400,7 +404,7 @@ func TestOIDCCallbackIssuesInternalTokenForBoundIdentity(t *testing.T) {
 
 func TestOIDCCallbackRejectsExternalReturnURL(t *testing.T) {
 	store := memory.NewStore()
-	service.SeedDemo(store)
+	populateDemoFixture(store)
 	if err := store.UpsertUserIdentity(context.Background(), domain.UserIdentity{
 		ID:        "uid-google-employee",
 		TenantID:  "demo",
@@ -443,7 +447,7 @@ func TestOIDCCallbackRejectsExternalReturnURL(t *testing.T) {
 
 func TestOIDCCallbackRejectsUnboundIdentity(t *testing.T) {
 	store := memory.NewStore()
-	service.SeedDemo(store)
+	populateDemoFixture(store)
 	stateCodec := platformauth.NewOIDCStateCodec("state-secret", time.Minute)
 	handler := v1api.New(service.New(store, service.Options{
 		OIDCProviders: map[string]service.OIDCProvider{
@@ -505,7 +509,18 @@ func TestTokenResolverChainFallsBackToUnsignedDemoJWT(t *testing.T) {
 
 func TestDisabledAccountReturnsInactiveReasonCode(t *testing.T) {
 	store := memory.NewStore()
-	service.SeedDemo(store)
+	populateDemoFixture(store)
+	if err := store.UpsertUserIdentity(context.Background(), domain.UserIdentity{
+		ID:        "uid-unsigned-disabled",
+		TenantID:  "demo",
+		AccountID: "acct-disabled",
+		Provider:  "unsigned_jwt",
+		Subject:   "acct-disabled",
+		Email:     "disabled@demo.local",
+		CreatedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
 	handler := v1api.New(service.New(store), nil, v1api.Options{AllowUnsignedJWT: true}).Routes()
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
 	req.Header.Set("Authorization", "Bearer "+testJWT(map[string]any{"tenant_id": "demo", "account_id": "acct-disabled"}))
@@ -736,7 +751,9 @@ func TestReadinessEndpointReportsDependencyFailures(t *testing.T) {
 }
 
 func TestRecoveryReturnsJSONInternalError(t *testing.T) {
-	handler := v1api.New(nil, nil, v1api.Options{AllowDemoContext: true}).Routes()
+	handler := v1api.New(nil, nil, v1api.Options{
+		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{TenantID: "demo", AccountID: "acct-admin"}, ok: true},
+	}).Routes()
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
 	req.Header.Set("X-Request-ID", "panic-trace")
 	rec := httptest.NewRecorder()
@@ -930,9 +947,9 @@ func TestEHRMSEmployeeSyncRouteRequiresApprovalConfirmation(t *testing.T) {
 
 func TestHighRiskRouteCanDisableApprovalHeader(t *testing.T) {
 	store := memory.NewStore()
-	service.SeedDemo(store)
+	populateDemoFixture(store)
 	handler := v1api.New(service.New(store), nil, v1api.Options{
-		AllowDemoContext:      true,
+		TokenResolver:         staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo"}, ok: true},
 		DisableApprovalHeader: true,
 	}).Routes()
 	req := httptest.NewRequest(http.MethodPost, "/v1/iam/user-groups", strings.NewReader(`{"name":"Finance Admin"}`))
@@ -1118,9 +1135,9 @@ func TestEmployeeListDetailAndCSVExportEndpoints(t *testing.T) {
 func TestEmployeeExportAuditUsesOpenTelemetryTraceID(t *testing.T) {
 	spanRecorder := installAPISpanRecorder(t)
 	store := memory.NewStore()
-	service.SeedDemo(store)
+	populateDemoFixture(store)
 	handler := v1api.New(service.New(store), nil, v1api.Options{
-		AllowDemoContext:     true,
+		TokenResolver:        staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo"}, ok: true},
 		TelemetryServiceName: "nexus-pro-be-test",
 	}).Routes()
 

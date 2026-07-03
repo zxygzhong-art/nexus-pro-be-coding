@@ -58,7 +58,7 @@ type PlatformAssistantsQuery struct {
 	Search string `json:"search,omitempty"`
 }
 
-// PlatformAssistantsResponse lists assistant cards plus the sidebar chat seed.
+// PlatformAssistantsResponse lists assistant cards plus sidebar chat prompts.
 type PlatformAssistantsResponse struct {
 	Data         []PlatformAssistant   `json:"data"`
 	Total        int                   `json:"total"`
@@ -203,7 +203,7 @@ type PlatformTasksResponse struct {
 	QuickPrompts []string              `json:"quick_prompts"`
 }
 
-// PlatformFormDesign describes the workspace form-builder seed data.
+// PlatformFormDesign describes the workspace form-builder catalog.
 type PlatformFormDesign struct {
 	Categories []string                    `json:"categories"`
 	Forms      []PlatformFormDesignForm    `json:"forms"`
@@ -338,7 +338,7 @@ type PlatformInsightsResponse struct {
 	AIPanel PlatformInsightsAIPanel `json:"ai_panel"`
 }
 
-// PlatformInsightsAIPanel contains chat seed messages and quick prompts.
+// PlatformInsightsAIPanel contains chat messages and quick prompts.
 type PlatformInsightsAIPanel struct {
 	Messages     []PlatformChatMessage `json:"messages"`
 	QuickPrompts []string              `json:"quick_prompts"`

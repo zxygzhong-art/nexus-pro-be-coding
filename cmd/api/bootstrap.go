@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -19,7 +20,6 @@ import (
 	redisstore "nexus-pro-be/internal/platform/redis"
 	"nexus-pro-be/internal/platform/telemetry"
 	"nexus-pro-be/internal/repository"
-	"nexus-pro-be/internal/repository/memory"
 	pgstore "nexus-pro-be/internal/repository/postgres"
 	"nexus-pro-be/internal/service"
 	"nexus-pro-be/internal/startup"
@@ -74,7 +74,7 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		Name:       "nexus-pro-be",
 		Env:        cfg.Env,
 		HTTPAddr:   cfg.HTTPAddr,
-		Repository: "memory",
+		Repository: "postgresql",
 	}
 	readinessChecks := map[string]v1api.ReadinessCheck{}
 	shutdowns := []moduleShutdown{}
@@ -117,11 +117,7 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 
 	store := repositoryModule.store
 	if store == nil {
-		store = memory.NewStore()
-	}
-	if cfg.SeedDemo {
-		service.SeedDemo(store)
-		logger.Info("demo data seeded")
+		return nil, errors.New("postgres repository is required")
 	}
 
 	authHTTPClient := &http.Client{Timeout: 5 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}
@@ -239,17 +235,11 @@ func startTelemetryModule(ctx context.Context, cfg config.Config, logger *slog.L
 
 func startRepositoryModule(ctx context.Context, cfg config.Config, logger *slog.Logger) (repositoryModule, error) {
 	result := repositoryModule{
-		name:      "memory",
+		name:      "postgresql",
 		readiness: map[string]v1api.ReadinessCheck{},
-		dependencies: []startup.Dependency{{
-			Name:   "PostgreSQL",
-			Status: "skipped",
-			Target: "DATABASE_URL not set",
-			Detail: "using in-memory store",
-		}},
 	}
 	if cfg.DatabaseURL == "" {
-		return result, nil
+		return result, errors.New("DATABASE_URL is required")
 	}
 
 	startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)

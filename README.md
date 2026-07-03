@@ -86,6 +86,7 @@ Generated files live in `internal/platform/postgres/db`.
 Run the API:
 
 ```sh
+export DATABASE_URL='postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable'
 go run ./cmd/api
 ```
 
@@ -145,7 +146,7 @@ The codebase is organized by responsibility so new modules can be added without 
 - `internal/domain` contains shared domain models, request/response types, and application errors.
 - `internal/domain/authz` contains route policy metadata used by the service authorization runtime.
 - `internal/repository` contains repository interfaces.
-- `internal/repository/memory` contains the current in-memory repository implementation for local development and tests.
+- `internal/repository/memory` contains the in-memory repository implementation for tests.
 - `internal/jobs` is reserved for scheduled and background task entrypoints.
 - `internal/platform` contains infrastructure clients such as PostgreSQL and Redis.
 - `tests/unit` contains unit tests outside production packages.
@@ -154,10 +155,10 @@ Project code-organization preferences are documented in `docs/code-organization.
 
 ## Current Architecture Boundary
 
-The API now supports two repository backends:
+The API runtime uses PostgreSQL as the source of truth:
 
-- PostgreSQL-backed repository when `DATABASE_URL` is configured.
-- In-memory repository when `DATABASE_URL` is empty, intended for local demos and fast unit tests.
+- PostgreSQL-backed repository is required through `DATABASE_URL`.
+- In-memory repository remains available only for focused tests.
 
 The project has the production persistence foundation in place:
 
@@ -170,7 +171,7 @@ The project has the production persistence foundation in place:
 - environment config in `internal/config`
 - permission route metadata in `internal/domain/authz`
 
-Demo seed data is controlled by `SEED_DEMO`. It defaults to enabled outside production and disabled when `APP_ENV=production`.
+Runtime accounts are database-backed only. Accounts and identity bindings must already be present in PostgreSQL before login.
 
 ## Permission Foundation
 

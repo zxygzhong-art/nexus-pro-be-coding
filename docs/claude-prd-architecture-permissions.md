@@ -42,11 +42,11 @@ The backend is a Go modular monolith:
 
 Current core runtime supports:
 
-- PostgreSQL repository when `DATABASE_URL` is configured.
-- In-memory repository when `DATABASE_URL` is empty.
+- PostgreSQL repository is required through `DATABASE_URL`.
+- In-memory repository is limited to tests.
 - Keycloak/OIDC token validation when `KEYCLOAK_*` is configured.
 - OpenFGA relationship checks when `OPENFGA_*` is configured.
-- Demo seed controlled by `SEED_DEMO`, disabled by default in production.
+- Runtime accounts and identity bindings must come from PostgreSQL.
 
 ## 3. Architecture Requirements
 
@@ -139,7 +139,7 @@ Examples:
 - `agent.run.create`
 - `audit.audit_log.read`
 
-Route policy, service authorization, seed permissions, OpenAPI behavior, audit event names, and tests must stay aligned.
+Route policy, service authorization, permission fixtures, OpenAPI behavior, audit event names, and tests must stay aligned.
 
 ### 5.3 Decision Inputs
 
@@ -346,7 +346,7 @@ When changing any API route, request/response shape, error code, route policy, o
 
 - Update `docs/openapi.yaml`.
 - Update route policy metadata in `internal/domain/authz.go`.
-- Update seed permissions if needed.
+- Update permission fixtures if needed.
 - Update service authorization checks.
 - Update tests.
 
@@ -378,7 +378,7 @@ Deliverable:
 
 Goal:
 
-- Align route policies, IAM resources/actions, seed permissions, service authorization, OpenAPI, and tests.
+- Align route policies, IAM resources/actions, permission fixtures, service authorization, OpenAPI, and tests.
 
 Acceptance:
 

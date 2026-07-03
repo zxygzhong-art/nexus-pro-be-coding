@@ -7,7 +7,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
-// Must marshals a value and returns the type's empty JSON shape for unsupported seed values.
+// Must marshals a value and returns the type's empty JSON shape for unsupported values.
 func Must(v any) []byte {
 	b, err := json.Marshal(v)
 	if err != nil {

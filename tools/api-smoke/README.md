@@ -2,13 +2,13 @@
 
 `full_api_smoke.py` runs the public HTTP API smoke suite and a multi-role authorization matrix.
 
-Default local mode starts `go run ./cmd/api` with the in-memory demo store and header-based identity:
+Default local mode starts `go run ./cmd/api` against the configured PostgreSQL database and uses header-based identity. `DATABASE_URL` must point at a database that already contains the test accounts:
 
 ```bash
 tools/api-smoke/full_api_smoke.py
 ```
 
-Real Keycloak login E2E mode uses password-grant login for three backend seed roles and then calls the API with Bearer tokens:
+Real Keycloak login E2E mode uses password-grant login for three DB-backed roles and then calls the API with Bearer tokens:
 
 ```bash
 export SMOKE_KEYCLOAK_ISSUER_URL="http://localhost:18080/realms/nexus-pro"
@@ -29,7 +29,7 @@ export SMOKE_AUDIT_ACCOUNT_ID="acct-audit"
 tools/api-smoke/full_api_smoke.py --auth-mode keycloak
 ```
 
-Each Keycloak user must emit access-token claims matching the backend demo seed data:
+Each Keycloak user must emit access-token claims matching rows in the backend `user_identities` / `accounts` tables:
 
 | Role | tenant_id | account_id |
 | --- | --- | --- |
