@@ -21,18 +21,8 @@ type Config struct {
 	RedisPassword string
 	RedisDB       int
 
-	KeycloakIssuerURL         string
-	KeycloakClientID          string
-	AuthTokenIssuer           string
-	AuthTokenAudience         string
-	AuthSessionSigningKey     string
-	AuthStateSigningKey       string
-	GoogleOIDCEnabled         bool
-	GoogleOIDCClientID        string
-	GoogleOIDCClientSecret    string
-	MicrosoftOIDCEnabled      bool
-	MicrosoftOIDCClientID     string
-	MicrosoftOIDCClientSecret string
+	KeycloakIssuerURL string
+	KeycloakClientID  string
 
 	OpenFGAAPIURL  string
 	OpenFGAStoreID string
@@ -112,13 +102,6 @@ func (c Config) ValidateStartup() error {
 	default:
 		problems = append(problems, "OBJECT_STORE_PROVIDER must be minio, s3, or local")
 	}
-	if c.googleOIDCConfigured() || c.microsoftOIDCConfigured() {
-		if strings.TrimSpace(c.AuthSessionSigningKey) == "" {
-			problems = append(problems, "AUTH_SESSION_SIGNING_KEY is required when OIDC login is configured")
-		}
-	}
-	problems = append(problems, oidcProviderProblems("GOOGLE_OIDC", c.GoogleOIDCEnabled, c.GoogleOIDCClientID, c.GoogleOIDCClientSecret)...)
-	problems = append(problems, oidcProviderProblems("MICROSOFT_OIDC", c.MicrosoftOIDCEnabled, c.MicrosoftOIDCClientID, c.MicrosoftOIDCClientSecret)...)
 	if strings.TrimSpace(c.EHRMSBaseURL) != "" {
 		if problem := productionHTTPSURLProblem("EHRMS_BASE_URL", c.EHRMSBaseURL); problem != "" {
 			problems = append(problems, problem)
@@ -150,18 +133,8 @@ func LoadE() (Config, error) {
 		RedisPassword: os.Getenv("REDIS_PASSWORD"),
 		RedisDB:       envInt("REDIS_DB", 0, &problems),
 
-		KeycloakIssuerURL:         strings.TrimSpace(os.Getenv("KEYCLOAK_ISSUER_URL")),
-		KeycloakClientID:          strings.TrimSpace(os.Getenv("KEYCLOAK_CLIENT_ID")),
-		AuthTokenIssuer:           env("AUTH_TOKEN_ISSUER", "nexus-pro-be"),
-		AuthTokenAudience:         env("AUTH_TOKEN_AUDIENCE", "nexus-pro-be-api"),
-		AuthSessionSigningKey:     os.Getenv("AUTH_SESSION_SIGNING_KEY"),
-		AuthStateSigningKey:       os.Getenv("AUTH_STATE_SIGNING_KEY"),
-		GoogleOIDCEnabled:         envBool("GOOGLE_OIDC_ENABLED", false, &problems),
-		GoogleOIDCClientID:        strings.TrimSpace(os.Getenv("GOOGLE_OIDC_CLIENT_ID")),
-		GoogleOIDCClientSecret:    os.Getenv("GOOGLE_OIDC_CLIENT_SECRET"),
-		MicrosoftOIDCEnabled:      envBool("MICROSOFT_OIDC_ENABLED", false, &problems),
-		MicrosoftOIDCClientID:     strings.TrimSpace(os.Getenv("MICROSOFT_OIDC_CLIENT_ID")),
-		MicrosoftOIDCClientSecret: os.Getenv("MICROSOFT_OIDC_CLIENT_SECRET"),
+		KeycloakIssuerURL: strings.TrimSpace(os.Getenv("KEYCLOAK_ISSUER_URL")),
+		KeycloakClientID:  strings.TrimSpace(os.Getenv("KEYCLOAK_CLIENT_ID")),
 
 		OpenFGAAPIURL:  strings.TrimSpace(os.Getenv("OPENFGA_API_URL")),
 		OpenFGAStoreID: strings.TrimSpace(os.Getenv("OPENFGA_STORE_ID")),
@@ -197,28 +170,6 @@ func LoadE() (Config, error) {
 		return cfg, fmt.Errorf("configuration invalid: %s", strings.Join(problems, "; "))
 	}
 	return cfg, nil
-}
-
-func (c Config) googleOIDCConfigured() bool {
-	return c.GoogleOIDCEnabled
-}
-
-func (c Config) microsoftOIDCConfigured() bool {
-	return c.MicrosoftOIDCEnabled
-}
-
-func oidcProviderProblems(prefix string, enabled bool, clientID, clientSecret string) []string {
-	if !enabled {
-		return nil
-	}
-	problems := []string{}
-	if strings.TrimSpace(clientID) == "" {
-		problems = append(problems, prefix+"_CLIENT_ID is required")
-	}
-	if strings.TrimSpace(clientSecret) == "" {
-		problems = append(problems, prefix+"_CLIENT_SECRET is required")
-	}
-	return problems
 }
 
 // ehrmsConfigProblems validates that the eHRMS upstream is configured atomically.

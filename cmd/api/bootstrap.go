@@ -27,11 +27,6 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
-const (
-	googleOIDCIssuerURL    = "https://accounts.google.com"
-	microsoftOIDCIssuerURL = "https://login.microsoftonline.com/common/v2.0"
-)
-
 type apiRuntime struct {
 	server             *http.Server
 	report             startup.Report
@@ -142,20 +137,6 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	report.Dependencies = append(report.Dependencies, ehrmsDependency)
 	serviceOptions.EHRMSClient = ehrmsClient
 
-	oidcProviders, oidcDependencies := configuredOIDCProviders(cfg, authHTTPClient)
-	report.Dependencies = append(report.Dependencies, oidcDependencies...)
-	if len(oidcProviders) > 0 && strings.TrimSpace(cfg.AuthSessionSigningKey) != "" {
-		stateKey := cfg.AuthStateSigningKey
-		if strings.TrimSpace(stateKey) == "" {
-			stateKey = cfg.AuthSessionSigningKey
-		}
-		serviceOptions.OIDCProviders = oidcProviders
-		serviceOptions.AuthTokenIssuer = platformauth.NewInternalTokenIssuer(cfg.AuthSessionSigningKey, cfg.AuthTokenIssuer, cfg.AuthTokenAudience, 8*time.Hour)
-		serviceOptions.AuthStateCodec = platformauth.NewOIDCStateCodec(stateKey, 10*time.Minute)
-		tokenResolvers = append(tokenResolvers, platformauth.NewInternalTokenResolver(cfg.AuthSessionSigningKey, cfg.AuthTokenIssuer, cfg.AuthTokenAudience))
-		logger.Info("OIDC login enabled", "providers", providerNames(oidcProviders))
-	}
-
 	app := service.New(store, serviceOptions)
 	ehrmsSyncScheduler, ehrmsSyncOptions, ehrmsSyncDependency := configuredEHRMSSyncScheduler(cfg, app.HR(), ehrmsClient != nil, logger)
 	report.Dependencies = append(report.Dependencies, ehrmsSyncDependency)
@@ -175,8 +156,6 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	}
 	if len(tokenResolvers) == 1 {
 		apiOptions.TokenResolver = tokenResolvers[0]
-	} else if len(tokenResolvers) > 1 {
-		apiOptions.TokenResolver = platformauth.NewTokenResolverChain(tokenResolvers...)
 	}
 	report.Dependencies = append(report.Dependencies, telemetryStatus)
 
@@ -441,38 +420,6 @@ func configureKeycloakModule(cfg config.Config, client *http.Client, logger *slo
 	}
 }
 
-// configuredOIDCProviders registers only providers explicitly enabled in config.
-func configuredOIDCProviders(cfg config.Config, client *http.Client) (map[string]service.OIDCProvider, []startup.Dependency) {
-	providers := map[string]service.OIDCProvider{}
-	deps := []startup.Dependency{}
-	add := func(code, display string, enabled bool, issuer, clientID, clientSecret string) {
-		if !enabled {
-			deps = append(deps, startup.Dependency{Name: display, Status: "skipped", Target: code, Detail: "OIDC login disabled"})
-			return
-		}
-		missing := oidcMissing(clientID, clientSecret)
-		if strings.TrimSpace(cfg.AuthSessionSigningKey) == "" {
-			missing = append(missing, "AUTH_SESSION_SIGNING_KEY")
-		}
-		if len(missing) > 0 {
-			deps = append(deps, startup.Dependency{Name: display, Status: "incomplete", Target: startup.SafeURL(issuer), Detail: startup.Missing(missing...)})
-			return
-		}
-		redirectURL := oidcRedirectURL(cfg.HTTPAddr, code)
-		providers[code] = platformauth.NewOIDCProvider(platformauth.OIDCProviderConfig{
-			Code:         code,
-			IssuerURL:    issuer,
-			ClientID:     clientID,
-			ClientSecret: clientSecret,
-			RedirectURL:  redirectURL,
-		}, client)
-		deps = append(deps, startup.Dependency{Name: display, Status: "configured", Target: startup.SafeURL(issuer), Detail: "client=" + clientID + " redirect=" + redirectURL})
-	}
-	add("google", "Google OIDC", cfg.GoogleOIDCEnabled, googleOIDCIssuerURL, cfg.GoogleOIDCClientID, cfg.GoogleOIDCClientSecret)
-	add("microsoft", "Microsoft OIDC", cfg.MicrosoftOIDCEnabled, microsoftOIDCIssuerURL, cfg.MicrosoftOIDCClientID, cfg.MicrosoftOIDCClientSecret)
-	return providers, deps
-}
-
 // configuredEHRMSClient builds the optional employee master-data upstream adapter.
 func configuredEHRMSClient(cfg config.Config, client *http.Client) (service.EHRMSClient, startup.Dependency, error) {
 	if strings.TrimSpace(cfg.EHRMSBaseURL) == "" && strings.TrimSpace(cfg.EHRMSAPIKey) == "" {
@@ -520,46 +467,6 @@ func configuredEHRMSSyncScheduler(cfg config.Config, svc jobs.EHRMSEmployeeSyncS
 		Target: "tenant=" + cfg.EHRMSSyncTenantID + " account=" + cfg.EHRMSSyncAccountID,
 		Detail: detail,
 	}
-}
-
-// oidcMissing reports the provider credentials required once an OIDC provider is enabled.
-func oidcMissing(clientID, clientSecret string) []string {
-	missing := []string{}
-	if strings.TrimSpace(clientID) == "" {
-		missing = append(missing, "CLIENT_ID")
-	}
-	if strings.TrimSpace(clientSecret) == "" {
-		missing = append(missing, "CLIENT_SECRET")
-	}
-	return missing
-}
-
-// oidcRedirectURL derives the OAuth callback URL from the API bind address.
-func oidcRedirectURL(httpAddr, provider string) string {
-	addr := strings.TrimSpace(httpAddr)
-	if addr == "" {
-		addr = ":8080"
-	}
-	switch {
-	case strings.HasPrefix(addr, ":"):
-		addr = "localhost" + addr
-	case strings.HasPrefix(addr, "0.0.0.0:"):
-		addr = "localhost:" + strings.TrimPrefix(addr, "0.0.0.0:")
-	case strings.HasPrefix(addr, "[::]:"):
-		addr = "localhost:" + strings.TrimPrefix(addr, "[::]:")
-	}
-	if !strings.Contains(addr, "://") {
-		addr = "http://" + addr
-	}
-	return strings.TrimRight(addr, "/") + "/v1/auth/oidc/" + strings.TrimSpace(provider) + "/callback"
-}
-
-func providerNames(providers map[string]service.OIDCProvider) []string {
-	names := make([]string, 0, len(providers))
-	for name := range providers {
-		names = append(names, name)
-	}
-	return names
 }
 
 func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Logger) {

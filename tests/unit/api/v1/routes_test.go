@@ -124,8 +124,6 @@ func TestDocumentedJSONSuccessResponsesUseDataEnvelope(t *testing.T) {
 
 	refs := openAPISuccessJSONSchemaRefs(t)
 	expected := map[string]string{
-		"GET /v1/auth/oidc/{provider}/authorize 200":       "OIDCAuthorizationDataResponse",
-		"GET /v1/auth/oidc/{provider}/callback 200":        "AuthLoginDataResponse",
 		"GET /v1/hr/employees 200":                         "EmployeeListDataResponse",
 		"POST /v1/hr/employees 201":                        "EmployeeDetailDataResponse",
 		"POST /v1/hr/employees/preview 200":                "EmployeePreviewDataResponse",
@@ -230,7 +228,7 @@ func isPublicRoute(path string) bool {
 	case "/healthz", "/readyz", "/openapi.yaml", "/swagger", "/swagger/*any":
 		return true
 	default:
-		return strings.HasPrefix(path, "/v1/auth/oidc/")
+		return false
 	}
 }
 

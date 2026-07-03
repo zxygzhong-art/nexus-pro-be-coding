@@ -153,10 +153,6 @@ type (
 	EmployeeAccountPolicy              = domain.EmployeeAccountPolicy
 	MeResponse                         = domain.MeResponse
 	MenuListResponse                   = domain.MenuListResponse
-	OIDCAuthorizationInput             = domain.OIDCAuthorizationInput
-	OIDCAuthorizationResponse          = domain.OIDCAuthorizationResponse
-	OIDCState                          = domain.OIDCState
-	AuthLoginResponse                  = domain.AuthLoginResponse
 	AssumeRoleResponse                 = domain.AssumeRoleResponse
 	AuthzExplainResponse               = domain.AuthzExplainResponse
 	AuthzSimulationResponse            = domain.AuthzSimulationResponse

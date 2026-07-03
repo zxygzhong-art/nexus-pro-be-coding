@@ -1,7 +1,5 @@
 package domain
 
-import "time"
-
 // Pagination defaults used across list endpoints.
 const (
 	DefaultPage     = 1
@@ -65,40 +63,4 @@ type AuthzExplainResponse struct {
 type AuthzSimulationResponse struct {
 	Decision  CheckResult `json:"decision"`
 	Simulated bool        `json:"simulated"`
-}
-
-// OIDCAuthorizationInput starts an external OIDC authorization flow.
-type OIDCAuthorizationInput struct {
-	TenantID  string `json:"tenant_id,omitempty"`
-	ReturnURL string `json:"return_url,omitempty"`
-}
-
-// OIDCAuthorizationResponse returns the provider authorization URL and signed state.
-type OIDCAuthorizationResponse struct {
-	Provider         string `json:"provider"`
-	AuthorizationURL string `json:"authorization_url"`
-	State            string `json:"state"`
-}
-
-// OIDCState is the signed, stateless callback context for OIDC login.
-type OIDCState struct {
-	Provider  string    `json:"provider"`
-	TenantID  string    `json:"tenant_id"`
-	ReturnURL string    `json:"return_url,omitempty"`
-	Nonce     string    `json:"nonce"`
-	ExpiresAt time.Time `json:"expires_at"`
-}
-
-// AuthLoginResponse returns an internal bearer token after a successful external login.
-type AuthLoginResponse struct {
-	AccessToken string `json:"access_token"`
-	TokenType   string `json:"token_type"`
-	ExpiresAt   string `json:"expires_at"`
-	ExpiresIn   int64  `json:"expires_in"`
-	TenantID    string `json:"tenant_id"`
-	AccountID   string `json:"account_id"`
-	Provider    string `json:"provider"`
-	Subject     string `json:"subject"`
-	Email       string `json:"email,omitempty"`
-	ReturnURL   string `json:"return_url,omitempty"`
 }
