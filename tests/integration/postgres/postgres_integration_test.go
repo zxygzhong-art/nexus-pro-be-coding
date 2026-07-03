@@ -310,12 +310,15 @@ func TestEmployeeHTTPPostgresAcceptanceTraceAuthzAndFieldPolicy(t *testing.T) {
 	if err := store.UpsertAccount(ctx, domain.Account{ID: hrAccountID, TenantID: tenantID, Status: "active", DirectPermissionSetIDs: []string{permissionSetID}, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
+	upsertIntegrationIdentity(t, store, tenantID, hrAccountID, now)
 	if err := store.UpsertAccount(ctx, domain.Account{ID: limitedAccountID, TenantID: tenantID, Status: "active", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
+	upsertIntegrationIdentity(t, store, tenantID, limitedAccountID, now)
 	if err := store.UpsertAccount(ctx, domain.Account{ID: rebacAccountID, TenantID: tenantID, Status: "active", DirectPermissionSetIDs: []string{rebacPermissionSetID}, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
+	upsertIntegrationIdentity(t, store, tenantID, rebacAccountID, now)
 	if err := store.UpsertOrgUnit(ctx, domain.OrgUnit{ID: orgUnitID, TenantID: tenantID, Name: "HTTP HQ " + suffix, Path: []string{orgUnitID}, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
@@ -362,8 +365,8 @@ func TestEmployeeHTTPPostgresAcceptanceTraceAuthzAndFieldPolicy(t *testing.T) {
 	}
 
 	handler := v1api.New(service.New(store, service.Options{Relationships: relationshipChecker}), nil, v1api.Options{
-		AllowHeaderContext:   true,
 		TelemetryServiceName: "nexus-pro-be-it",
+		TokenResolver:        integrationTokenResolver{},
 	}).Routes()
 
 	deniedReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees", nil)
@@ -524,9 +527,11 @@ func TestAttendanceClockHTTPPostgresFieldPolicy(t *testing.T) {
 	if err := store.UpsertAccount(ctx, domain.Account{ID: employeeAccountID, TenantID: tenantID, EmployeeID: employeeID, Status: "active", DirectPermissionSetIDs: []string{"ps_" + suffix + "_self"}, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
+	upsertIntegrationIdentity(t, store, tenantID, employeeAccountID, now)
 	if err := store.UpsertAccount(ctx, domain.Account{ID: adminAccountID, TenantID: tenantID, EmployeeID: adminEmployeeID, Status: "active", DirectPermissionSetIDs: []string{"ps_" + suffix + "_admin"}, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
+	upsertIntegrationIdentity(t, store, tenantID, adminAccountID, now)
 	if err := store.UpsertEmployee(ctx, domain.Employee{ID: employeeID, TenantID: tenantID, Name: "Clock Target", CompanyEmail: employeeID + "@example.com", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
@@ -543,9 +548,7 @@ func TestAttendanceClockHTTPPostgresFieldPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	handler := v1api.New(service.New(store, service.Options{Now: func() time.Time { return clockNow }}), nil, v1api.Options{
-		AllowHeaderContext: true,
-	}).Routes()
+	handler := v1api.New(service.New(store, service.Options{Now: func() time.Time { return clockNow }}), nil, v1api.Options{TokenResolver: integrationTokenResolver{}}).Routes()
 
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/attendance/clock-records", strings.NewReader(`{"direction":"clock_in","latitude":25.034,"longitude":121.5645,"accuracy_meters":12,"location_source":"gps","device_id":"phone-1","device_info":{"os":"ios"}}`))
 	addIntegrationHeaders(createReq, tenantID, employeeAccountID, "req-"+suffix+"-clock-create")
@@ -757,9 +760,41 @@ func decodeIntegrationError(t *testing.T, body []byte) integrationErrorPayload {
 }
 
 func addIntegrationHeaders(req *http.Request, tenantID, accountID, requestID string) {
-	req.Header.Set("X-Tenant-ID", tenantID)
-	req.Header.Set("X-Account-ID", accountID)
+	req.Header.Set("Authorization", "Bearer "+tenantID+":"+accountID)
 	req.Header.Set("X-Request-ID", requestID)
+}
+
+func upsertIntegrationIdentity(t *testing.T, store repository.Store, tenantID, accountID string, now time.Time) {
+	t.Helper()
+	if err := store.UpsertUserIdentity(context.Background(), domain.UserIdentity{
+		ID:        "uid_" + tenantID + "_" + accountID,
+		TenantID:  tenantID,
+		AccountID: accountID,
+		Provider:  "keycloak",
+		Subject:   accountID,
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+}
+
+type integrationTokenResolver struct{}
+
+func (integrationTokenResolver) Resolve(req *http.Request) (v1api.TokenContext, bool, error) {
+	const prefix = "Bearer "
+	header := strings.TrimSpace(req.Header.Get("Authorization"))
+	if !strings.HasPrefix(header, prefix) {
+		return v1api.TokenContext{}, false, nil
+	}
+	tenantID, accountID, ok := strings.Cut(strings.TrimSpace(strings.TrimPrefix(header, prefix)), ":")
+	if !ok || tenantID == "" || accountID == "" {
+		return v1api.TokenContext{}, false, nil
+	}
+	return v1api.TokenContext{
+		Provider: "keycloak",
+		Subject:  accountID,
+		TenantID: tenantID,
+	}, true, nil
 }
 
 func findIntegrationAuditLog(logs []domain.AuditLog, action string) (domain.AuditLog, bool) {

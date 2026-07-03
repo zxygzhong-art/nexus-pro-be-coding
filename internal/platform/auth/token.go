@@ -23,18 +23,6 @@ type TokenResolver interface {
 	Resolve(r *http.Request) (domain.AuthenticatedPrincipal, bool, error)
 }
 
-// UnsignedJWTResolver parses unsigned JWT claims for explicit local/demo modes only.
-type UnsignedJWTResolver struct{}
-
-// Resolve extracts tenant and account claims without verifying a signature.
-func (UnsignedJWTResolver) Resolve(r *http.Request) (domain.AuthenticatedPrincipal, bool, error) {
-	claims, ok, err := parseUnsignedClaims(bearerToken(r))
-	if err != nil || !ok {
-		return domain.AuthenticatedPrincipal{}, ok, err
-	}
-	return tokenPrincipalFromClaims("unsigned_jwt", claims), true, nil
-}
-
 // KeycloakTokenResolver validates Keycloak-issued RS256 JWTs against JWKS keys.
 type KeycloakTokenResolver struct {
 	issuerURL string
@@ -352,25 +340,6 @@ func bearerToken(r *http.Request) string {
 		return ""
 	}
 	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
-}
-
-func parseUnsignedClaims(token string) (map[string]any, bool, error) {
-	if token == "" {
-		return nil, false, nil
-	}
-	parts := strings.Split(token, ".")
-	if len(parts) < 2 {
-		return nil, false, nil
-	}
-	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return nil, true, err
-	}
-	var claims map[string]any
-	if err := json.Unmarshal(payload, &claims); err != nil {
-		return nil, true, err
-	}
-	return claims, true, nil
 }
 
 func keycloakTokenShape(token string) bool {

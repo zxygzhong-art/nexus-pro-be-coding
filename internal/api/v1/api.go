@@ -27,8 +27,6 @@ type API struct {
 	workflow            service.WorkflowFacade
 	agent               service.AgentFacade
 	audit               service.AuditFacade
-	allowDemoContext    bool
-	allowHeaderContext  bool
 	allowApprovalHeader bool
 	tokenResolver       TokenResolver
 	telemetryService    string
@@ -43,9 +41,6 @@ type ReadinessCheck func(context.Context) error
 
 // Options controls API middleware behavior and optional dependency checks.
 type Options struct {
-	AllowDemoContext      bool
-	AllowHeaderContext    bool
-	AllowUnsignedJWT      bool
 	DisableApprovalHeader bool
 	TokenResolver         TokenResolver
 	TelemetryServiceName  string
@@ -63,14 +58,9 @@ func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
 	}
 	if cfg.TokenResolver == nil {
 		cfg.TokenResolver = noTokenResolver{}
-		if cfg.AllowUnsignedJWT {
-			cfg.TokenResolver = unsignedJWTResolver{}
-		}
 	}
 	api := &API{
 		logger:              logger,
-		allowDemoContext:    cfg.AllowDemoContext,
-		allowHeaderContext:  cfg.AllowHeaderContext,
 		allowApprovalHeader: !cfg.DisableApprovalHeader,
 		tokenResolver:       cfg.TokenResolver,
 		telemetryService:    cfg.TelemetryServiceName,

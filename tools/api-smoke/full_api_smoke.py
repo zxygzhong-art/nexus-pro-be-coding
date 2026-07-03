@@ -28,9 +28,6 @@ from typing import Any, Callable
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-ADMIN_HEADERS = {"X-Tenant-ID": "demo", "X-Account-ID": "acct-admin"}
-EMPLOYEE_HEADERS = {"X-Tenant-ID": "demo", "X-Account-ID": "acct-employee"}
-AUDIT_HEADERS = {"X-Tenant-ID": "demo", "X-Account-ID": "acct-audit"}
 APPROVAL_HEADER = {"X-Approval-Confirmed": "true"}
 DEFAULT_KEYCLOAK_CLIENT_ID = "nexus-pro-connect-api"
 DEFAULT_ROLE_ACCOUNTS = {
@@ -138,7 +135,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Full HTTP smoke test for nexus-pro-be APIs.")
     parser.add_argument("--base-url", help="Use an existing server instead of starting go run ./cmd/api.")
     parser.add_argument("--start-timeout", type=float, default=90.0, help="Seconds to wait for a started server.")
-    parser.add_argument("--auth-mode", choices=("header", "keycloak"), default="header", help="Use header context or real Keycloak password-grant login.")
+    parser.add_argument("--auth-mode", choices=("keycloak",), default="keycloak", help="Use real Keycloak password-grant login.")
     parser.add_argument("--tenant", default="demo", help="Tenant id for the default request context.")
     parser.add_argument("--account", default="acct-admin", help="Account id for the default request context.")
     parser.add_argument("--skip-role-matrix", action="store_true", help="Skip the multi-role HTTP authorization matrix.")
@@ -164,25 +161,19 @@ def start_server(port: int, args: argparse.Namespace) -> tuple[subprocess.Popen[
         raise SmokeFailure("DATABASE_URL is required because smoke accounts must come from the database")
     for key in ("REDIS_ADDR", "OPENFGA_API_URL", "OPENFGA_STORE_ID"):
         env.pop(key, None)
-    if args.auth_mode != "keycloak":
-        env.pop("KEYCLOAK_ISSUER_URL", None)
-        env.pop("KEYCLOAK_CLIENT_ID", None)
     env.update(
         {
             "APP_ENV": "development",
             "HTTP_ADDR": f"127.0.0.1:{port}",
-            "ALLOW_HEADER_CONTEXT": "false" if args.auth_mode == "keycloak" else "true",
-            "ALLOW_DEMO_CONTEXT": "false",
             "OTEL_ENABLED": "false",
             "LOG_LEVEL": "warn",
             "GOCACHE": str(ROOT / ".gocache"),
         }
     )
-    if args.auth_mode == "keycloak":
-        if not args.keycloak_issuer_url:
-            raise SmokeFailure("--keycloak-issuer-url or SMOKE_KEYCLOAK_ISSUER_URL is required in keycloak mode")
-        env["KEYCLOAK_ISSUER_URL"] = args.keycloak_issuer_url
-        env["KEYCLOAK_CLIENT_ID"] = args.keycloak_client_id
+    if not args.keycloak_issuer_url:
+        raise SmokeFailure("--keycloak-issuer-url or SMOKE_KEYCLOAK_ISSUER_URL is required")
+    env["KEYCLOAK_ISSUER_URL"] = args.keycloak_issuer_url
+    env["KEYCLOAK_CLIENT_ID"] = args.keycloak_client_id
     proc = subprocess.Popen(
         ["go", "run", "./cmd/api"],
         cwd=ROOT,
@@ -413,12 +404,6 @@ def headers_for(auth: str | None, args: argparse.Namespace, context: dict[str, A
 
 
 def build_auth_profiles(args: argparse.Namespace) -> dict[str, AuthProfile]:
-    if args.auth_mode == "header":
-        return {
-            "admin": AuthProfile("admin", args.tenant, args.account, {"X-Tenant-ID": args.tenant, "X-Account-ID": args.account}),
-            "employee": AuthProfile("employee", "demo", "acct-employee", dict(EMPLOYEE_HEADERS)),
-            "audit": AuthProfile("audit", "demo", "acct-audit", dict(AUDIT_HEADERS)),
-        }
     login_profiles = parse_login_profiles(args)
     token_url = keycloak_token_url(args)
     profiles: dict[str, AuthProfile] = {}

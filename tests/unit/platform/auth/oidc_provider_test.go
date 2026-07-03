@@ -65,6 +65,26 @@ func TestOIDCProviderAcceptsMicrosoftTenantIssuerTemplate(t *testing.T) {
 	}
 }
 
+func TestOIDCProviderRejectsMicrosoftTenantIssuerMismatch(t *testing.T) {
+	key := mustRSAKey(t)
+	claims := oidcProviderTestClaims("https://evil.example/tenant-123/v2.0", "nexus-client")
+	claims["tid"] = "tenant-123"
+	server, issuer := oidcProviderTestServer(t, key, claims)
+	defer server.Close()
+
+	provider := platformauth.NewOIDCProvider(platformauth.OIDCProviderConfig{
+		Code:         "microsoft",
+		IssuerURL:    issuer,
+		ClientID:     "nexus-client",
+		ClientSecret: "secret",
+		RedirectURL:  "https://app.example/auth/callback",
+	}, server.Client())
+
+	if _, err := provider.ResolveCallback(context.Background(), "ok"); err == nil {
+		t.Fatal("expected issuer mismatch to fail")
+	}
+}
+
 func oidcProviderTestServer(t *testing.T, key *rsa.PrivateKey, claims map[string]any) (*httptest.Server, string) {
 	t.Helper()
 	var issuer string
@@ -74,9 +94,13 @@ func oidcProviderTestServer(t *testing.T, key *rsa.PrivateKey, claims map[string
 			discoveryIssuer := issuer
 			if _, ok := claims["tid"]; ok {
 				discoveryIssuer = issuer + "/{tenantid}/v2.0"
-				claims["iss"] = issuer + "/" + claims["tid"].(string) + "/v2.0"
+				if claim, _ := claims["iss"].(string); strings.TrimSpace(claim) == "" {
+					claims["iss"] = issuer + "/" + claims["tid"].(string) + "/v2.0"
+				}
 			} else {
-				claims["iss"] = issuer
+				if claim, _ := claims["iss"].(string); strings.TrimSpace(claim) == "" {
+					claims["iss"] = issuer
+				}
 			}
 			_ = json.NewEncoder(w).Encode(map[string]string{
 				"issuer":                 discoveryIssuer,
@@ -88,10 +112,23 @@ func oidcProviderTestServer(t *testing.T, key *rsa.PrivateKey, claims map[string
 			if err := r.ParseForm(); err != nil {
 				t.Fatal(err)
 			}
-			if r.Form.Get("code") != "ok" || r.Form.Get("client_id") != "nexus-client" || r.Form.Get("client_secret") != "secret" {
-				t.Fatalf("unexpected token exchange form: %s", r.Form.Encode())
+			clientID, clientSecret, _ := r.BasicAuth()
+			if clientID == "" {
+				clientID = r.Form.Get("client_id")
 			}
-			_ = json.NewEncoder(w).Encode(map[string]string{"id_token": signedRS256JWT(t, "kid-1", key, claims)})
+			if clientSecret == "" {
+				clientSecret = r.Form.Get("client_secret")
+			}
+			if r.Form.Get("code") != "ok" || clientID != "nexus-client" || clientSecret != "secret" {
+				t.Fatalf("unexpected token exchange form: %s basic=%s/%s", r.Form.Encode(), clientID, clientSecret)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"access_token": "provider-access-token",
+				"token_type":   "Bearer",
+				"expires_in":   3600,
+				"id_token":     signedRS256JWT(t, "kid-1", key, claims),
+			})
 		case "/certs":
 			_ = json.NewEncoder(w).Encode(map[string]any{"keys": []map[string]string{jwkFromKey("kid-1", &key.PublicKey)}})
 		default:

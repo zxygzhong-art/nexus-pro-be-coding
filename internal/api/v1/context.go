@@ -9,7 +9,7 @@ import (
 
 func (a *API) requestContext(r *http.Request) (domain.RequestContext, error) {
 	var tenantID, accountID string
-	// Token-derived identity wins over optional local header context.
+	// Token-derived identity is the only trusted source for request context.
 	tokenCtx, ok, err := a.tokenResolver.Resolve(r)
 	if err != nil {
 		return domain.RequestContext{}, err
@@ -25,14 +25,6 @@ func (a *API) requestContext(r *http.Request) (domain.RequestContext, error) {
 		} else {
 			tenantID = tokenCtx.TenantID
 			accountID = tokenCtx.AccountID
-		}
-	}
-	if a.allowHeaderContext {
-		if tenantID == "" {
-			tenantID = strings.TrimSpace(r.Header.Get("X-Tenant-ID"))
-		}
-		if accountID == "" {
-			accountID = strings.TrimSpace(r.Header.Get("X-Account-ID"))
 		}
 	}
 	if tenantID == "" {

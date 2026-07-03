@@ -3,8 +3,10 @@ module nexus-pro-be
 go 1.26.4
 
 require (
+	github.com/coreos/go-oidc/v3 v3.19.0
 	github.com/gin-gonic/gin v1.12.0
 	github.com/jackc/pgx/v5 v5.10.0
+	github.com/minio/minio-go/v7 v7.2.0
 	github.com/redis/go-redis/extra/redisotel/v9 v9.20.0
 	github.com/redis/go-redis/v9 v9.20.0
 	github.com/swaggo/files v1.0.1
@@ -15,6 +17,8 @@ require (
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.44.0
 	go.opentelemetry.io/otel/sdk v1.44.0
 	go.opentelemetry.io/otel/trace v1.44.0
+	golang.org/x/oauth2 v0.36.0
+	gopkg.in/yaml.v2 v2.4.0
 )
 
 require (
@@ -31,6 +35,7 @@ require (
 	github.com/felixge/httpsnoop v1.0.4 // indirect
 	github.com/gabriel-vasile/mimetype v1.4.13 // indirect
 	github.com/gin-contrib/sse v1.1.1 // indirect
+	github.com/go-jose/go-jose/v4 v4.1.4 // indirect
 	github.com/go-logr/logr v1.4.3 // indirect
 	github.com/go-logr/stdr v1.2.2 // indirect
 	github.com/go-openapi/jsonpointer v0.19.5 // indirect
@@ -57,7 +62,6 @@ require (
 	github.com/mattn/go-isatty v0.0.22 // indirect
 	github.com/minio/crc64nvme v1.1.1 // indirect
 	github.com/minio/md5-simd v1.1.2 // indirect
-	github.com/minio/minio-go/v7 v7.2.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/pelletier/go-toml/v2 v2.3.1 // indirect
@@ -90,5 +94,4 @@ require (
 	google.golang.org/grpc v1.81.1 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/ini.v1 v1.67.2 // indirect
-	gopkg.in/yaml.v2 v2.4.0 // indirect
 )

@@ -156,30 +156,21 @@ func TestValidateStartupAcceptsProductionMinimum(t *testing.T) {
 
 func TestValidateStartupRejectsCleartextProductionSecurityURLs(t *testing.T) {
 	cfg := config.Config{
-		Env:                       "production",
-		DatabaseURL:               "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable",
-		KeycloakIssuerURL:         "http://issuer.example/realms/nexus",
-		KeycloakClientID:          "nexus-api",
-		OpenFGAAPIURL:             "http://openfga.example",
-		OpenFGAStoreID:            "store-1",
-		OpenFGAModelID:            "model-1",
-		ObjectStoreDir:            "/var/lib/nexus-pro-be/objects",
-		AuthSessionSigningKey:     "session-secret",
-		GoogleOIDCIssuerURL:       "http://accounts.example",
-		GoogleOIDCClientID:        "google-client",
-		GoogleOIDCClientSecret:    "google-secret",
-		GoogleOIDCRedirectURL:     "https://api.example/v1/auth/oidc/google/callback",
-		MicrosoftOIDCIssuerURL:    "http://login.example/common/v2.0",
-		MicrosoftOIDCClientID:     "microsoft-client",
-		MicrosoftOIDCClientSecret: "microsoft-secret",
-		MicrosoftOIDCRedirectURL:  "https://api.example/v1/auth/oidc/microsoft/callback",
+		Env:               "production",
+		DatabaseURL:       "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable",
+		KeycloakIssuerURL: "http://issuer.example/realms/nexus",
+		KeycloakClientID:  "nexus-api",
+		OpenFGAAPIURL:     "http://openfga.example",
+		OpenFGAStoreID:    "store-1",
+		OpenFGAModelID:    "model-1",
+		ObjectStoreDir:    "/var/lib/nexus-pro-be/objects",
 	}
 
 	err := cfg.ValidateStartup()
 	if err == nil {
 		t.Fatal("expected cleartext production security URL validation error")
 	}
-	for _, want := range []string{"KEYCLOAK_ISSUER_URL", "OPENFGA_API_URL", "GOOGLE_OIDC_ISSUER_URL", "MICROSOFT_OIDC_ISSUER_URL"} {
+	for _, want := range []string{"KEYCLOAK_ISSUER_URL", "OPENFGA_API_URL"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected validation error to mention %s, got %v", want, err)
 		}
@@ -200,32 +191,6 @@ func TestValidateStartupRejectsMissingProductionDependencies(t *testing.T) {
 	}
 }
 
-func TestValidateStartupRejectsUnsafeProductionCompatibilityFlags(t *testing.T) {
-	cfg := config.Config{
-		Env:                "production",
-		DatabaseURL:        "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable",
-		KeycloakIssuerURL:  "https://issuer.example/realms/nexus",
-		KeycloakClientID:   "nexus-api",
-		OpenFGAAPIURL:      "https://openfga.example",
-		OpenFGAStoreID:     "store-1",
-		OpenFGAModelID:     "model-1",
-		ObjectStoreDir:     "/var/lib/nexus-pro-be/objects",
-		AllowDemoContext:   true,
-		AllowHeaderContext: true,
-		AllowUnsignedJWT:   true,
-	}
-
-	err := cfg.ValidateStartup()
-	if err == nil {
-		t.Fatal("expected unsafe production config validation error")
-	}
-	for _, want := range []string{"ALLOW_DEMO_CONTEXT", "ALLOW_HEADER_CONTEXT", "ALLOW_UNSIGNED_JWT"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Fatalf("expected validation error to mention %s, got %v", want, err)
-		}
-	}
-}
-
 func TestValidateStartupRejectsIncompleteOIDCProvider(t *testing.T) {
 	cfg := config.Config{
 		Env:                   "production",
@@ -236,7 +201,7 @@ func TestValidateStartupRejectsIncompleteOIDCProvider(t *testing.T) {
 		OpenFGAStoreID:        "store-1",
 		OpenFGAModelID:        "model-1",
 		ObjectStoreDir:        "/var/lib/nexus-pro-be/objects",
-		GoogleOIDCIssuerURL:   "https://accounts.google.com",
+		GoogleOIDCEnabled:     true,
 		GoogleOIDCClientID:    "google-client",
 		AuthSessionSigningKey: "session-secret",
 	}
@@ -245,7 +210,7 @@ func TestValidateStartupRejectsIncompleteOIDCProvider(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected incomplete OIDC config validation error")
 	}
-	for _, want := range []string{"GOOGLE_OIDC_CLIENT_SECRET", "GOOGLE_OIDC_REDIRECT_URL"} {
+	for _, want := range []string{"GOOGLE_OIDC_CLIENT_SECRET"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected validation error to mention %s, got %v", want, err)
 		}
@@ -262,15 +227,55 @@ func TestValidateStartupRejectsOIDCWithoutSessionSigningKey(t *testing.T) {
 		OpenFGAStoreID:            "store-1",
 		OpenFGAModelID:            "model-1",
 		ObjectStoreDir:            "/var/lib/nexus-pro-be/objects",
-		MicrosoftOIDCIssuerURL:    "https://login.microsoftonline.com/common/v2.0",
+		MicrosoftOIDCEnabled:      true,
 		MicrosoftOIDCClientID:     "microsoft-client",
 		MicrosoftOIDCClientSecret: "microsoft-secret",
-		MicrosoftOIDCRedirectURL:  "https://api.example/v1/auth/oidc/microsoft/callback",
 	}
 
 	err := cfg.ValidateStartup()
 	if err == nil || !strings.Contains(err.Error(), "AUTH_SESSION_SIGNING_KEY") {
 		t.Fatalf("expected missing session signing key validation error, got %v", err)
+	}
+}
+
+func TestValidateStartupIgnoresDisabledOIDCCredentials(t *testing.T) {
+	cfg := config.Config{
+		Env:                   "production",
+		DatabaseURL:           "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable",
+		KeycloakIssuerURL:     "https://issuer.example/realms/nexus",
+		KeycloakClientID:      "nexus-api",
+		OpenFGAAPIURL:         "https://openfga.example",
+		OpenFGAStoreID:        "store-1",
+		OpenFGAModelID:        "model-1",
+		ObjectStoreDir:        "/var/lib/nexus-pro-be/objects",
+		GoogleOIDCEnabled:     false,
+		GoogleOIDCClientID:    "google-client",
+		MicrosoftOIDCEnabled:  false,
+		MicrosoftOIDCClientID: "microsoft-client",
+	}
+
+	if err := cfg.ValidateStartup(); err != nil {
+		t.Fatalf("expected disabled OIDC credentials to be ignored, got %v", err)
+	}
+}
+
+func TestOIDCConfigLoadsEnabledFlags(t *testing.T) {
+	t.Setenv("GOOGLE_OIDC_ENABLED", "true")
+	t.Setenv("GOOGLE_OIDC_CLIENT_ID", "google-client")
+	t.Setenv("GOOGLE_OIDC_CLIENT_SECRET", "google-secret")
+	t.Setenv("MICROSOFT_OIDC_ENABLED", "false")
+	t.Setenv("MICROSOFT_OIDC_CLIENT_ID", "microsoft-client")
+	t.Setenv("MICROSOFT_OIDC_CLIENT_SECRET", "microsoft-secret")
+
+	cfg, err := config.LoadE()
+	if err != nil {
+		t.Fatalf("expected OIDC config to load, got %v", err)
+	}
+	if !cfg.GoogleOIDCEnabled || cfg.GoogleOIDCClientID != "google-client" || cfg.GoogleOIDCClientSecret != "google-secret" {
+		t.Fatalf("unexpected Google OIDC config: %+v", cfg)
+	}
+	if cfg.MicrosoftOIDCEnabled || cfg.MicrosoftOIDCClientID != "microsoft-client" || cfg.MicrosoftOIDCClientSecret != "microsoft-secret" {
+		t.Fatalf("unexpected Microsoft OIDC config: %+v", cfg)
 	}
 }
 
@@ -284,10 +289,10 @@ func TestInvalidIntegerConfigReturnsError(t *testing.T) {
 }
 
 func TestInvalidBooleanConfigReturnsError(t *testing.T) {
-	t.Setenv("ALLOW_UNSIGNED_JWT", "maybe")
+	t.Setenv("GOOGLE_OIDC_ENABLED", "maybe")
 
 	_, err := config.LoadE()
-	if err == nil || !strings.Contains(err.Error(), "ALLOW_UNSIGNED_JWT must be a boolean") {
+	if err == nil || !strings.Contains(err.Error(), "GOOGLE_OIDC_ENABLED must be a boolean") {
 		t.Fatalf("expected invalid boolean config error, got %v", err)
 	}
 }

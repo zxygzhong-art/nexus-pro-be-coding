@@ -33,11 +33,11 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
-func newTestAPI(allowDemoContext bool) http.Handler {
+func newTestAPI(authenticated bool) http.Handler {
 	store := memory.NewStore()
 	populateDemoFixture(store)
-	options := v1api.Options{AllowDemoContext: allowDemoContext}
-	if allowDemoContext {
+	options := v1api.Options{}
+	if authenticated {
 		options.TokenResolver = staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo"}, ok: true}
 	}
 	return v1api.New(service.New(store), nil, options).Routes()
@@ -151,8 +151,7 @@ func TestProductionContextAcceptsBearerClaims(t *testing.T) {
 	store := memory.NewStore()
 	populateDemoFixture(store)
 	handler := v1api.New(service.New(store), nil, v1api.Options{
-		AllowDemoContext: false,
-		TokenResolver:    staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo", AccountID: "acct-other"}, ok: true},
+		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo", AccountID: "acct-other"}, ok: true},
 	}).Routes()
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
 	rec := httptest.NewRecorder()
@@ -168,8 +167,7 @@ func TestTokenContextTakesPrecedenceOverSpoofedHeaders(t *testing.T) {
 	store := memory.NewStore()
 	populateDemoFixture(store)
 	handler := v1api.New(service.New(store), nil, v1api.Options{
-		AllowDemoContext: false,
-		TokenResolver:    staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo", AccountID: "acct-admin"}, ok: true},
+		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo", AccountID: "acct-admin"}, ok: true},
 	}).Routes()
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
 	req.Header.Set("X-Tenant-ID", "other-tenant")
@@ -199,7 +197,6 @@ func TestIdentityMappingOverridesLegacyAccountClaim(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := v1api.New(service.New(store), nil, v1api.Options{
-		AllowDemoContext: false,
 		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{
 			Provider:  "keycloak",
 			Subject:   "google-oauth2|123",
@@ -225,7 +222,6 @@ func TestUnlinkedExternalIdentityIsRejected(t *testing.T) {
 	store := memory.NewStore()
 	populateDemoFixture(store)
 	handler := v1api.New(service.New(store), nil, v1api.Options{
-		AllowDemoContext: false,
 		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{
 			Provider: "keycloak",
 			Subject:  "unknown-subject",
@@ -246,7 +242,6 @@ func TestUnlinkedExternalIdentityWithAccountClaimIsRejected(t *testing.T) {
 	store := memory.NewStore()
 	populateDemoFixture(store)
 	handler := v1api.New(service.New(store), nil, v1api.Options{
-		AllowDemoContext: false,
 		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{
 			Provider:  "keycloak",
 			Subject:   "unknown-subject",
@@ -276,8 +271,7 @@ func TestDisabledAccountIsRejectedAfterIdentityResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := v1api.New(service.New(store), nil, v1api.Options{
-		AllowDemoContext: false,
-		TokenResolver:    staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo", AccountID: "acct-admin"}, ok: true},
+		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo", AccountID: "acct-admin"}, ok: true},
 	}).Routes()
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
 	rec := httptest.NewRecorder()
@@ -487,53 +481,6 @@ func TestProductionContextRejectsUnsignedBearerFallback(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected 401 without configured production token resolver, got %d: %s", rec.Code, rec.Body.String())
-	}
-}
-
-func TestTokenResolverChainFallsBackToUnsignedDemoJWT(t *testing.T) {
-	resolver := platformauth.NewTokenResolverChain(
-		platformauth.NewKeycloakTokenResolver("https://issuer.example/realms/demo", "nexus-api", nil),
-		platformauth.UnsignedJWTResolver{},
-	)
-	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.Header.Set("Authorization", "Bearer "+testJWT(map[string]any{"tenant_id": "demo", "account_id": "acct-admin"}))
-
-	principal, ok, err := resolver.Resolve(req)
-	if err != nil || !ok {
-		t.Fatalf("expected unsigned demo JWT to resolve after keycloak shape skip, ok=%v err=%v", ok, err)
-	}
-	if principal.Provider != "unsigned_jwt" || principal.TenantID != "demo" || principal.AccountID != "acct-admin" {
-		t.Fatalf("unexpected principal: %+v", principal)
-	}
-}
-
-func TestDisabledAccountReturnsInactiveReasonCode(t *testing.T) {
-	store := memory.NewStore()
-	populateDemoFixture(store)
-	if err := store.UpsertUserIdentity(context.Background(), domain.UserIdentity{
-		ID:        "uid-unsigned-disabled",
-		TenantID:  "demo",
-		AccountID: "acct-disabled",
-		Provider:  "unsigned_jwt",
-		Subject:   "acct-disabled",
-		Email:     "disabled@demo.local",
-		CreatedAt: time.Now().UTC(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	handler := v1api.New(service.New(store), nil, v1api.Options{AllowUnsignedJWT: true}).Routes()
-	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
-	req.Header.Set("Authorization", "Bearer "+testJWT(map[string]any{"tenant_id": "demo", "account_id": "acct-disabled"}))
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("expected 401 for disabled account, got %d: %s", rec.Code, rec.Body.String())
-	}
-	errPayload := decodeError(t, rec.Body.Bytes())
-	if errPayload.Code != domain.ErrorCodeAccountInactive || errPayload.ReasonCode != "account_inactive" {
-		t.Fatalf("expected account_inactive reason code, got %+v", errPayload)
 	}
 }
 
@@ -997,11 +944,12 @@ func TestHRRouteForbiddenReasonCodes(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-limited", TenantID: "tenant-1", Status: "active", CreatedAt: now})
-	handler := v1api.New(service.New(store), nil, v1api.Options{AllowHeaderContext: true}).Routes()
+	_ = store.UpsertUserIdentity(context.Background(), domain.UserIdentity{ID: "uid-limited", TenantID: "tenant-1", AccountID: "acct-limited", Provider: "keycloak", Subject: "acct-limited", CreatedAt: now})
+	handler := v1api.New(service.New(store), nil, v1api.Options{
+		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-limited", TenantID: "tenant-1"}, ok: true},
+	}).Routes()
 
 	listReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees", nil)
-	listReq.Header.Set("X-Tenant-ID", "tenant-1")
-	listReq.Header.Set("X-Account-ID", "acct-limited")
 	listRec := httptest.NewRecorder()
 	handler.ServeHTTP(listRec, listReq)
 	if listRec.Code != http.StatusForbidden {
@@ -1014,8 +962,6 @@ func TestHRRouteForbiddenReasonCodes(t *testing.T) {
 
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees", strings.NewReader(`{"name":"No Button","company_email":"no.button@example.com"}`))
 	createReq.Header.Set("Content-Type", "application/json")
-	createReq.Header.Set("X-Tenant-ID", "tenant-1")
-	createReq.Header.Set("X-Account-ID", "acct-limited")
 	createRec := httptest.NewRecorder()
 	handler.ServeHTTP(createRec, createReq)
 	if createRec.Code != http.StatusForbidden {

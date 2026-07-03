@@ -19,6 +19,3 @@ type noTokenResolver struct{}
 func (noTokenResolver) Resolve(*http.Request) (TokenContext, bool, error) {
 	return TokenContext{}, false, nil
 }
-
-// unsignedJWTResolver is enabled only for explicit local/demo modes.
-type unsignedJWTResolver = platformauth.UnsignedJWTResolver

@@ -27,6 +27,11 @@ import (
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
+const (
+	googleOIDCIssuerURL    = "https://accounts.google.com"
+	microsoftOIDCIssuerURL = "https://login.microsoftonline.com/common/v2.0"
+)
+
 type apiRuntime struct {
 	server             *http.Server
 	report             startup.Report
@@ -155,9 +160,6 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	ehrmsSyncScheduler, ehrmsSyncOptions, ehrmsSyncDependency := configuredEHRMSSyncScheduler(cfg, app.HR(), ehrmsClient != nil, logger)
 	report.Dependencies = append(report.Dependencies, ehrmsSyncDependency)
 	apiOptions := v1api.Options{
-		AllowDemoContext:      cfg.AllowDemoContext,
-		AllowHeaderContext:    cfg.AllowHeaderContext,
-		AllowUnsignedJWT:      cfg.AllowUnsignedJWT,
 		DisableApprovalHeader: cfg.Env == "production",
 		ReadinessChecks:       readinessChecks,
 	}
@@ -168,11 +170,6 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		readinessChecks["keycloak"] = keycloakReadiness
 	}
 	report.Dependencies = append(report.Dependencies, keycloakDependency)
-	if cfg.AllowUnsignedJWT {
-		tokenResolvers = append(tokenResolvers, platformauth.UnsignedJWTResolver{})
-		logger.Warn("unsigned JWT resolver enabled for local/demo mode")
-	}
-
 	if cfg.OTelEnabled {
 		apiOptions.TelemetryServiceName = cfg.OTelServiceName
 	}
@@ -444,15 +441,16 @@ func configureKeycloakModule(cfg config.Config, client *http.Client, logger *slo
 	}
 }
 
+// configuredOIDCProviders registers only providers explicitly enabled in config.
 func configuredOIDCProviders(cfg config.Config, client *http.Client) (map[string]service.OIDCProvider, []startup.Dependency) {
 	providers := map[string]service.OIDCProvider{}
 	deps := []startup.Dependency{}
-	add := func(code, display, issuer, clientID, clientSecret, redirectURL string) {
-		missing := oidcMissing(clientID, clientSecret, redirectURL)
-		if len(missing) == 3 {
+	add := func(code, display string, enabled bool, issuer, clientID, clientSecret string) {
+		if !enabled {
 			deps = append(deps, startup.Dependency{Name: display, Status: "skipped", Target: code, Detail: "OIDC login disabled"})
 			return
 		}
+		missing := oidcMissing(clientID, clientSecret)
 		if strings.TrimSpace(cfg.AuthSessionSigningKey) == "" {
 			missing = append(missing, "AUTH_SESSION_SIGNING_KEY")
 		}
@@ -460,6 +458,7 @@ func configuredOIDCProviders(cfg config.Config, client *http.Client) (map[string
 			deps = append(deps, startup.Dependency{Name: display, Status: "incomplete", Target: startup.SafeURL(issuer), Detail: startup.Missing(missing...)})
 			return
 		}
+		redirectURL := oidcRedirectURL(cfg.HTTPAddr, code)
 		providers[code] = platformauth.NewOIDCProvider(platformauth.OIDCProviderConfig{
 			Code:         code,
 			IssuerURL:    issuer,
@@ -467,10 +466,10 @@ func configuredOIDCProviders(cfg config.Config, client *http.Client) (map[string
 			ClientSecret: clientSecret,
 			RedirectURL:  redirectURL,
 		}, client)
-		deps = append(deps, startup.Dependency{Name: display, Status: "configured", Target: startup.SafeURL(issuer), Detail: "client=" + clientID})
+		deps = append(deps, startup.Dependency{Name: display, Status: "configured", Target: startup.SafeURL(issuer), Detail: "client=" + clientID + " redirect=" + redirectURL})
 	}
-	add("google", "Google OIDC", cfg.GoogleOIDCIssuerURL, cfg.GoogleOIDCClientID, cfg.GoogleOIDCClientSecret, cfg.GoogleOIDCRedirectURL)
-	add("microsoft", "Microsoft OIDC", cfg.MicrosoftOIDCIssuerURL, cfg.MicrosoftOIDCClientID, cfg.MicrosoftOIDCClientSecret, cfg.MicrosoftOIDCRedirectURL)
+	add("google", "Google OIDC", cfg.GoogleOIDCEnabled, googleOIDCIssuerURL, cfg.GoogleOIDCClientID, cfg.GoogleOIDCClientSecret)
+	add("microsoft", "Microsoft OIDC", cfg.MicrosoftOIDCEnabled, microsoftOIDCIssuerURL, cfg.MicrosoftOIDCClientID, cfg.MicrosoftOIDCClientSecret)
 	return providers, deps
 }
 
@@ -523,7 +522,8 @@ func configuredEHRMSSyncScheduler(cfg config.Config, svc jobs.EHRMSEmployeeSyncS
 	}
 }
 
-func oidcMissing(clientID, clientSecret, redirectURL string) []string {
+// oidcMissing reports the provider credentials required once an OIDC provider is enabled.
+func oidcMissing(clientID, clientSecret string) []string {
 	missing := []string{}
 	if strings.TrimSpace(clientID) == "" {
 		missing = append(missing, "CLIENT_ID")
@@ -531,10 +531,27 @@ func oidcMissing(clientID, clientSecret, redirectURL string) []string {
 	if strings.TrimSpace(clientSecret) == "" {
 		missing = append(missing, "CLIENT_SECRET")
 	}
-	if strings.TrimSpace(redirectURL) == "" {
-		missing = append(missing, "REDIRECT_URL")
-	}
 	return missing
+}
+
+// oidcRedirectURL derives the OAuth callback URL from the API bind address.
+func oidcRedirectURL(httpAddr, provider string) string {
+	addr := strings.TrimSpace(httpAddr)
+	if addr == "" {
+		addr = ":8080"
+	}
+	switch {
+	case strings.HasPrefix(addr, ":"):
+		addr = "localhost" + addr
+	case strings.HasPrefix(addr, "0.0.0.0:"):
+		addr = "localhost:" + strings.TrimPrefix(addr, "0.0.0.0:")
+	case strings.HasPrefix(addr, "[::]:"):
+		addr = "localhost:" + strings.TrimPrefix(addr, "[::]:")
+	}
+	if !strings.Contains(addr, "://") {
+		addr = "http://" + addr
+	}
+	return strings.TrimRight(addr, "/") + "/v1/auth/oidc/" + strings.TrimSpace(provider) + "/callback"
 }
 
 func providerNames(providers map[string]service.OIDCProvider) []string {
