@@ -2,19 +2,19 @@ package service
 
 import "context"
 
-// IdentityFacade exposes external-principal to local-account mapping to the API layer.
+// IdentityFacade 定義身分 facade 的行為契約。
 type IdentityFacade interface {
 	ResolveAuthenticatedPrincipal(context.Context, AuthenticatedPrincipal) (IdentityResolution, error)
 	ResolveBoundAuthenticatedPrincipal(context.Context, AuthenticatedPrincipal) (IdentityResolution, error)
 }
 
-// MeFacade exposes current-user read operations to the API layer.
+// MeFacade 定義 me facade 的行為契約。
 type MeFacade interface {
 	Resolve(RequestContext) (MeResponse, error)
 	ListMenus(RequestContext) ([]MenuNode, error)
 }
 
-// AuthzFacade exposes authorization checks to API routes and explicit authz endpoints.
+// AuthzFacade 定義授權 facade 的行為契約。
 type AuthzFacade interface {
 	Check(RequestContext, CheckRequest) (CheckResult, error)
 	BatchCheck(RequestContext, BatchCheckRequest) (BatchCheckResult, error)
@@ -22,7 +22,7 @@ type AuthzFacade interface {
 	ValidateApprovalInstance(RequestContext, CheckRequest) error
 }
 
-// IAMFacade exposes IAM management use cases to the API layer.
+// IAMFacade 定義 IAM facade 的行為契約。
 type IAMFacade interface {
 	ListPermissionPage(RequestContext, PageRequest) (PageResponse[Permission], error)
 	ListUserGroupPage(RequestContext, PageRequest) (PageResponse[UserGroup], error)
@@ -40,7 +40,7 @@ type IAMFacade interface {
 	AssumeRole(RequestContext, string, AssumeRoleInput) (AssumeRoleResponse, error)
 }
 
-// HRFacade exposes people-domain and organization use cases to the API layer.
+// HRFacade 定義 HR facade 的行為契約。
 type HRFacade interface {
 	QueryEmployees(RequestContext, EmployeeQuery) (PageResponse[Employee], error)
 	CreateEmployee(RequestContext, CreateEmployeeInput) (Employee, error)
@@ -67,7 +67,7 @@ type HRFacade interface {
 	CreateOrgUnit(RequestContext, CreateOrgUnitInput) (OrgUnit, error)
 }
 
-// AttendanceFacade exposes leave balance and leave request use cases.
+// AttendanceFacade 定義考勤 facade 的行為契約。
 type AttendanceFacade interface {
 	ListLeaveBalancePage(RequestContext, PageRequest) (PageResponse[LeaveBalance], error)
 	ListLeaveRequestPage(RequestContext, PageRequest) (PageResponse[LeaveRequest], error)
@@ -91,7 +91,7 @@ type AttendanceFacade interface {
 	RejectAttendanceCorrection(RequestContext, string, ReviewAttendanceCorrectionInput) (AttendanceCorrectionRequest, error)
 }
 
-// PlatformFacade exposes OA frontend aggregate read models.
+// PlatformFacade 定義平台 facade 的行為契約。
 type PlatformFacade interface {
 	Home(RequestContext) (PlatformHomeResponse, error)
 	ListAssistants(RequestContext, PlatformAssistantsQuery) (PlatformAssistantsResponse, error)
@@ -121,7 +121,7 @@ type PlatformFacade interface {
 	Insights(RequestContext, PlatformInsightsQuery) (PlatformInsightsResponse, error)
 }
 
-// WorkspaceFacade exposes workspace dashboard aggregates to the API layer.
+// WorkspaceFacade 定義工作區 facade 的行為契約。
 type WorkspaceFacade interface {
 	WorkspaceOverview(RequestContext, WorkspaceOverviewQuery) (WorkspaceOverviewResponse, error)
 	WorkspaceOrganization(RequestContext) (WorkspaceOrganizationResponse, error)
@@ -131,7 +131,7 @@ type WorkspaceFacade interface {
 	WorkspaceAuditLogs(RequestContext, WorkspaceAuditLogQuery, PageRequest) (PageResponse[WorkspaceAuditLog], error)
 }
 
-// WorkflowFacade exposes form template and form instance use cases.
+// WorkflowFacade 定義流程 facade 的行為契約。
 type WorkflowFacade interface {
 	ListFormTemplatePage(RequestContext, PageRequest) (PageResponse[FormTemplate], error)
 	CreateFormTemplate(RequestContext, CreateFormTemplateInput) (FormTemplate, error)
@@ -150,27 +150,36 @@ type WorkflowFacade interface {
 	BulkReviewForms(RequestContext, BulkReviewFormsInput) (BulkReviewFormsResponse, error)
 }
 
-// AgentFacade exposes agent run use cases.
+// AgentFacade 定義 agent facade 的行為契約。
 type AgentFacade interface {
 	ListRunPage(RequestContext, PageRequest) (PageResponse[AgentRun], error)
 	CreateRun(RequestContext, CreateAgentRunInput) (AgentRun, error)
 }
 
-// AuditFacade exposes audit log queries.
+// NotificationFacade 定義系統通知 facade 的行為契約。
+type NotificationFacade interface {
+	ListNotifications(RequestContext, NotificationListQuery) (NotificationListResponse, error)
+	UnreadNotificationCount(RequestContext) (NotificationUnreadCountResponse, error)
+	MarkNotificationRead(RequestContext, string) (NotificationReadResponse, error)
+	MarkAllNotificationsRead(RequestContext) (NotificationReadAllResponse, error)
+}
+
+// AuditFacade 定義稽核 facade 的行為契約。
 type AuditFacade interface {
 	ListLogPage(RequestContext, PageRequest) (PageResponse[AuditLog], error)
 }
 
 var (
-	_ IdentityFacade   = IdentityService{}
-	_ MeFacade         = MeService{}
-	_ AuthzFacade      = AuthzService{}
-	_ IAMFacade        = IAMService{}
-	_ HRFacade         = HRService{}
-	_ AttendanceFacade = AttendanceService{}
-	_ PlatformFacade   = PlatformService{}
-	_ WorkspaceFacade  = WorkspaceService{}
-	_ WorkflowFacade   = WorkflowService{}
-	_ AgentFacade      = AgentService{}
-	_ AuditFacade      = AuditService{}
+	_ IdentityFacade     = IdentityService{}
+	_ MeFacade           = MeService{}
+	_ AuthzFacade        = AuthzService{}
+	_ IAMFacade          = IAMService{}
+	_ HRFacade           = HRService{}
+	_ AttendanceFacade   = AttendanceService{}
+	_ PlatformFacade     = PlatformService{}
+	_ WorkspaceFacade    = WorkspaceService{}
+	_ WorkflowFacade     = WorkflowService{}
+	_ AgentFacade        = AgentService{}
+	_ NotificationFacade = NotificationService{}
+	_ AuditFacade        = AuditService{}
 )

@@ -17,11 +17,12 @@ type queryTracer struct {
 	tracer trace.Tracer
 }
 
+// newQueryTracer 建立查詢 tracer。
 func newQueryTracer() pgx.QueryTracer {
 	return queryTracer{tracer: otel.Tracer("nexus-pro-be/internal/platform/postgres")}
 }
 
-// TraceQueryStart starts a client span for a PostgreSQL query.
+// TraceQueryStart 處理 trace 查詢 start。
 func (t queryTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryStartData) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -42,7 +43,7 @@ func (t queryTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.
 	return ctx
 }
 
-// TraceQueryEnd closes the PostgreSQL query span and records errors.
+// TraceQueryEnd 處理 trace 查詢 end。
 func (queryTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.TraceQueryEndData) {
 	span := trace.SpanFromContext(ctx)
 	defer span.End()
@@ -59,6 +60,7 @@ func (queryTracer) TraceQueryEnd(ctx context.Context, _ *pgx.Conn, data pgx.Trac
 	}
 }
 
+// sqlOperation 處理 SQL operation。
 func sqlOperation(sql string) string {
 	sql = stripLeadingLineComments(sql)
 	fields := strings.Fields(sql)
@@ -73,6 +75,7 @@ func sqlOperation(sql string) string {
 	}
 }
 
+// stripLeadingLineComments 移除 leading line comments。
 func stripLeadingLineComments(sql string) string {
 	sql = strings.TrimSpace(sql)
 	for strings.HasPrefix(sql, "--") {
@@ -85,6 +88,7 @@ func stripLeadingLineComments(sql string) string {
 	return sql
 }
 
+// traceSQL 處理 trace SQL。
 func traceSQL(sql string) string {
 	sql = strings.Join(strings.Fields(sql), " ")
 	if len(sql) <= maxTraceSQLLength {

@@ -7,7 +7,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
-// AttendanceStore persists leave balances and leave requests.
+// AttendanceStore 定義考勤儲存層的行為契約。
 type AttendanceStore interface {
 	UpsertAttendancePolicy(context.Context, domain.AttendancePolicy) error
 	GetAttendancePolicy(ctx context.Context, tenantID string) (domain.AttendancePolicy, bool, error)

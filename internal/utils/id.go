@@ -11,7 +11,7 @@ import (
 
 var idCounter uint64
 
-// NewID returns a stable, sortable-enough local identifier with the given prefix.
+// NewID 建立 ID。
 func NewID(prefix string) string {
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" {
@@ -21,7 +21,7 @@ func NewID(prefix string) string {
 	return fmt.Sprintf("%s-%d-%06d", prefix, time.Now().UTC().UnixNano(), seq)
 }
 
-// NewSecretID returns an opaque high-entropy identifier suitable for bearer-like tokens.
+// NewSecretID 建立 secret ID。
 func NewSecretID(prefix string) (string, error) {
 	prefix = strings.TrimSpace(prefix)
 	if prefix == "" {

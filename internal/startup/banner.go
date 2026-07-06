@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// Report is the structured startup summary printed on boot.
+// Report 定義 report 的資料結構。
 type Report struct {
 	Name         string
 	Env          string
@@ -16,7 +16,7 @@ type Report struct {
 	Dependencies []Dependency
 }
 
-// Dependency describes one optional runtime dependency and its startup state.
+// Dependency 定義依賴的資料結構。
 type Dependency struct {
 	Name   string
 	Status string
@@ -24,13 +24,13 @@ type Dependency struct {
 	Detail string
 }
 
-// Print writes the rendered startup report.
+// Print 處理 print。
 func Print(w io.Writer, report Report) error {
 	_, err := io.WriteString(w, Render(report))
 	return err
 }
 
-// Render formats the startup report for terminal output.
+// Render 處理 render。
 func Render(report Report) string {
 	name := clean(report.Name)
 	if name == "" {
@@ -77,7 +77,7 @@ func Render(report Report) string {
 	return b.String()
 }
 
-// SafeURL redacts credentials and sensitive query values before logging URLs.
+// SafeURL 處理 safe URL。
 func SafeURL(raw string) string {
 	value := clean(raw)
 	if value == "" {
@@ -105,7 +105,7 @@ func SafeURL(raw string) string {
 	return parsed.String()
 }
 
-// Missing formats a dependency message for omitted configuration keys.
+// Missing 處理 missing。
 func Missing(keys ...string) string {
 	missing := make([]string, 0, len(keys))
 	for _, key := range keys {
@@ -119,10 +119,12 @@ func Missing(keys ...string) string {
 	return "missing " + strings.Join(missing, ", ")
 }
 
+// clean 處理 clean。
 func clean(value string) string {
 	return strings.TrimSpace(value)
 }
 
+// isSensitiveKey 判斷是否為sensitive key。
 func isSensitiveKey(key string) bool {
 	lower := strings.ToLower(key)
 	return strings.Contains(lower, "password") ||
@@ -131,6 +133,7 @@ func isSensitiveKey(key string) bool {
 		strings.Contains(lower, "key")
 }
 
+// redactInlineSecret 處理 redact inline secret。
 func redactInlineSecret(value string) string {
 	if at := strings.LastIndex(value, "@"); at >= 0 {
 		before := value[:at]

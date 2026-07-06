@@ -1,6 +1,8 @@
 GO ?= go
-GOOSE ?= $(GO) run github.com/pressly/goose/v3/cmd/goose@latest
-SQLC ?= $(GO) run github.com/sqlc-dev/sqlc/cmd/sqlc@latest
+GOOSE_VERSION ?= v3.27.2
+SQLC_VERSION ?= v1.31.1
+GOOSE ?= $(GO) run github.com/pressly/goose/v3/cmd/goose@$(GOOSE_VERSION)
+SQLC ?= $(GO) run github.com/sqlc-dev/sqlc/cmd/sqlc@$(SQLC_VERSION)
 PSQL ?= psql
 CREATEDB ?= createdb
 CURL ?= curl

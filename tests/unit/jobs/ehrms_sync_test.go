@@ -10,6 +10,7 @@ import (
 	"nexus-pro-be/internal/jobs"
 )
 
+// TestEHRMSEmployeeSyncSchedulerSyncOnceUsesConfiguredActor 驗證 eHRMS 員工 sync scheduler sync once uses configured actor。
 func TestEHRMSEmployeeSyncSchedulerSyncOnceUsesConfiguredActor(t *testing.T) {
 	service := &recordingEHRMSSyncService{
 		result: domain.EHRMSEmployeeSyncResponse{Fetched: 2, Created: 1, Updated: 1, Mode: "upsert"},
@@ -39,6 +40,7 @@ func TestEHRMSEmployeeSyncSchedulerSyncOnceUsesConfiguredActor(t *testing.T) {
 	}
 }
 
+// TestEHRMSEmployeeSyncSchedulerRequiresActor 驗證 eHRMS 員工 sync scheduler requires actor。
 func TestEHRMSEmployeeSyncSchedulerRequiresActor(t *testing.T) {
 	scheduler := jobs.NewEHRMSEmployeeSyncScheduler(&recordingEHRMSSyncService{}, nil)
 
@@ -53,6 +55,7 @@ func TestEHRMSEmployeeSyncSchedulerRequiresActor(t *testing.T) {
 	}
 }
 
+// TestEHRMSEmployeeSyncSchedulerPropagatesServiceError 驗證 eHRMS 員工 sync scheduler propagates 服務錯誤。
 func TestEHRMSEmployeeSyncSchedulerPropagatesServiceError(t *testing.T) {
 	service := &recordingEHRMSSyncService{err: errors.New("eHRMS unavailable")}
 	scheduler := jobs.NewEHRMSEmployeeSyncScheduler(service, nil)
@@ -70,6 +73,7 @@ type recordingEHRMSSyncService struct {
 	err    error
 }
 
+// SyncEHRMSEmployees 驗證 eHRMS 員工。
 func (s *recordingEHRMSSyncService) SyncEHRMSEmployees(ctx domain.RequestContext, input domain.EHRMSEmployeeSyncInput) (domain.EHRMSEmployeeSyncResponse, error) {
 	s.ctx = ctx
 	s.input = input

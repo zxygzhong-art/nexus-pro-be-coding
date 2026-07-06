@@ -8,17 +8,18 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
-// HealthCtrl serves process liveness and dependency readiness endpoints.
+// HealthCtrl 定義健康檢查 ctrl 的資料結構。
 type HealthCtrl struct {
 	readinessChecks map[string]ReadinessCheck
 }
 
-// RegisterRoutes attaches liveness and readiness probes outside the versioned API.
+// RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c HealthCtrl) RegisterRoutes(router *gin.Engine) {
 	router.GET("/healthz", func(ginCtx *gin.Context) { c.health(ginCtx.Writer, ginCtx.Request) })
 	router.GET("/readyz", func(ginCtx *gin.Context) { c.ready(ginCtx.Writer, ginCtx.Request) })
 }
 
+// health 處理健康檢查的 HTTP 請求。
 func (c HealthCtrl) health(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"status": "ok",
@@ -26,6 +27,7 @@ func (c HealthCtrl) health(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// ready 處理就緒檢查的 HTTP 請求。
 func (c HealthCtrl) ready(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
 	defer cancel()

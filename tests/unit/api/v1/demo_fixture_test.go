@@ -38,7 +38,7 @@ const (
 	fixtureDashboardLeaveReason = "Dashboard fixture sample"
 )
 
-// populateDemoFixture inserts deterministic data used only by API unit tests.
+// populateDemoFixture 驗證 populate demo fixture。
 func populateDemoFixture(store repository.Store) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
@@ -1081,7 +1081,7 @@ func populateDemoFixture(store repository.Store) {
 		CreatedAt: now.Add(time.Minute),
 	})
 
-	// An additional tenant to validate tenant isolation.
+	// 額外 tenant 用於驗證 tenant 隔離。
 	_ = store.UpsertPermissionSet(ctx, PermissionSet{
 		ID:       "ps-alpha-basic",
 		TenantID: "alpha",
@@ -1110,6 +1110,7 @@ func populateDemoFixture(store repository.Store) {
 	})
 }
 
+// populateFixturePlatformFormTemplates 驗證 populate fixture 平台表單範本。
 func populateFixturePlatformFormTemplates(ctx context.Context, store repository.Store, now time.Time) {
 	offset := 2
 	for _, column := range platformFormColumns() {
@@ -1139,6 +1140,7 @@ func populateFixturePlatformFormTemplates(ctx context.Context, store repository.
 	}
 }
 
+// platformFormColumns 驗證平台表單 columns。
 func platformFormColumns() []PlatformFormColumn {
 	return []PlatformFormColumn{
 		{Title: "人事考勤類", Emoji: "👥", Items: []PlatformFormItem{

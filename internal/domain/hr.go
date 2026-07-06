@@ -7,16 +7,16 @@ import (
 	"time"
 )
 
-// EmployeeStatus is the canonical employee lifecycle state.
+// EmployeeStatus 表示員工狀態。
 type EmployeeStatus string
 
-// EmployeeCategory classifies the employee's employment contract type.
+// EmployeeCategory 表示員工分類。
 type EmployeeCategory string
 
-// EmployeeAccountPolicy selects how employee creation handles login accounts.
+// EmployeeAccountPolicy 表示員工帳號政策。
 type EmployeeAccountPolicy string
 
-// Employee lifecycle states accepted by HR APIs and imports.
+// 下列常數定義此模組使用的固定值。
 const (
 	EmployeeStatusActive         EmployeeStatus = "active"
 	EmployeeStatusProbation      EmployeeStatus = "probation"
@@ -26,7 +26,7 @@ const (
 	EmployeeStatusDeleted        EmployeeStatus = "deleted"
 )
 
-// Employee category values accepted by HR APIs and imports.
+// 下列常數定義此模組使用的固定值。
 const (
 	EmployeeCategoryFullTime   EmployeeCategory = "full_time"
 	EmployeeCategoryPartTime   EmployeeCategory = "part_time"
@@ -35,7 +35,7 @@ const (
 	EmployeeCategoryOther      EmployeeCategory = "other"
 )
 
-// Employee account creation/linking policies.
+// 下列常數定義此模組使用的固定值。
 const (
 	EmployeeAccountPolicyNone                EmployeeAccountPolicy = "none"
 	EmployeeAccountPolicyLinkExisting        EmployeeAccountPolicy = "link_existing"
@@ -43,7 +43,7 @@ const (
 	EmployeeAccountPolicyCreateActive        EmployeeAccountPolicy = "create_active"
 )
 
-// Employee domain event names used for audit and authorization synchronization.
+// 下列常數定義此模組使用的固定值。
 const (
 	EventEmployeeCreated            EventType = "employee.created"
 	EventEmployeeUpdated            EventType = "employee.updated"
@@ -58,7 +58,7 @@ const (
 	EventEmployeeAuthzSubjectImport EventType = "hr.employee.authz_subject.import"
 )
 
-// OrgUnit represents one node in the tenant's organization hierarchy.
+// OrgUnit 定義組織單位的資料結構。
 type OrgUnit struct {
 	ID        string    `json:"id"`
 	TenantID  string    `json:"tenant_id"`
@@ -69,14 +69,14 @@ type OrgUnit struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// CreateOrgUnitInput carries the payload for creating an organization unit.
+// CreateOrgUnitInput 定義組織單位輸入的資料結構。
 type CreateOrgUnitInput struct {
 	Code     string `json:"code,omitempty"`
 	Name     string `json:"name"`
 	ParentID string `json:"parent_id,omitempty"`
 }
 
-// Employee is the canonical people-domain profile used by HR and IAM workflows.
+// Employee 定義員工的資料結構。
 type Employee struct {
 	ID                    string               `json:"id"`
 	TenantID              string               `json:"tenant_id"`
@@ -104,15 +104,14 @@ type Employee struct {
 	UpdatedAt             time.Time            `json:"updated_at"`
 }
 
-// EmployeeDetail is the modal/detail contract exposed by HR CRUD endpoints.
-// It keeps legacy top-level employee fields while adding typed section DTOs.
+// EmployeeDetail 定義員工 detail 的資料結構。
 type EmployeeDetail struct {
 	Employee
 	Preview  EmployeeDetailPreview `json:"preview"`
 	Sections EmployeeSections      `json:"sections"`
 }
 
-// EmployeeDetailPreview contains the fields commonly shown in employee headers.
+// EmployeeDetailPreview 定義員工 detail preview 的資料結構。
 type EmployeeDetailPreview struct {
 	ID                string     `json:"id"`
 	EmployeeNo        string     `json:"employee_no,omitempty"`
@@ -133,7 +132,7 @@ type EmployeeDetailPreview struct {
 	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
-// EmployeeSections groups the six profile tabs used by employee modals.
+// EmployeeSections 定義員工區段的資料結構。
 type EmployeeSections struct {
 	BasicInfo             EmployeeBasicInfo             `json:"basic_info"`
 	EmploymentInfo        EmployeeEmploymentInfo        `json:"employment_info"`
@@ -143,7 +142,7 @@ type EmployeeSections struct {
 	InternalExperiences   []EmployeeExperience          `json:"internal_experiences"`
 }
 
-// EmployeeBasicInfo is the typed DTO for the employee basic/profile tab.
+// EmployeeBasicInfo 定義員工基本 info 的資料結構。
 type EmployeeBasicInfo struct {
 	Name                 string         `json:"name,omitempty"`
 	CompanyEmail         string         `json:"company_email,omitempty"`
@@ -164,7 +163,7 @@ type EmployeeBasicInfo struct {
 	Additional           map[string]any `json:"-"`
 }
 
-// EmployeeEmploymentInfo is the typed DTO for employment/on-duty data.
+// EmployeeEmploymentInfo 定義員工任職 info 的資料結構。
 type EmployeeEmploymentInfo struct {
 	OrgUnitID         string         `json:"org_unit_id,omitempty"`
 	Position          string         `json:"position,omitempty"`
@@ -179,7 +178,7 @@ type EmployeeEmploymentInfo struct {
 	Additional        map[string]any `json:"-"`
 }
 
-// EmployeeEducationMilitaryInfo is the typed DTO for education and military data.
+// EmployeeEducationMilitaryInfo 定義員工教育兵役 info 的資料結構。
 type EmployeeEducationMilitaryInfo struct {
 	HighestEducation     string         `json:"highest_education,omitempty"`
 	EducationLevel       string         `json:"education_level,omitempty"`
@@ -192,7 +191,7 @@ type EmployeeEducationMilitaryInfo struct {
 	Additional           map[string]any `json:"-"`
 }
 
-// EmployeeContactInfo is the typed DTO for communication/contact data.
+// EmployeeContactInfo 定義員工聯絡 info 的資料結構。
 type EmployeeContactInfo struct {
 	MobilePhone              string         `json:"mobile_phone,omitempty"`
 	Phone                    string         `json:"phone,omitempty"`
@@ -204,7 +203,7 @@ type EmployeeContactInfo struct {
 	Additional               map[string]any `json:"-"`
 }
 
-// EmployeeInsuranceInfo is the typed DTO for insurance data.
+// EmployeeInsuranceInfo 定義員工保險 info 的資料結構。
 type EmployeeInsuranceInfo struct {
 	LaborInsuranceDate    string         `json:"labor_insurance_date,omitempty"`
 	LaborInsuranceLevel   string         `json:"labor_insurance_level,omitempty"`
@@ -215,7 +214,7 @@ type EmployeeInsuranceInfo struct {
 	Additional            map[string]any `json:"-"`
 }
 
-// EmployeeExperience records one internal employment or position history item.
+// EmployeeExperience 定義員工經歷的資料結構。
 type EmployeeExperience struct {
 	ID                string     `json:"id"`
 	StartDate         *time.Time `json:"start_date,omitempty"`
@@ -230,7 +229,7 @@ type EmployeeExperience struct {
 	CreatedAt         time.Time  `json:"created_at"`
 }
 
-// CreateEmployeeInput carries the full employee creation payload.
+// CreateEmployeeInput 定義員工輸入的資料結構。
 type CreateEmployeeInput struct {
 	EmployeeNo            string               `json:"employee_no,omitempty"`
 	Name                  string               `json:"name"`
@@ -255,7 +254,7 @@ type CreateEmployeeInput struct {
 	InternalExperiences   []EmployeeExperience `json:"internal_experiences,omitempty"`
 }
 
-// UpdateEmployeeInput carries optional employee fields for partial updates.
+// UpdateEmployeeInput 定義員工輸入的資料結構。
 type UpdateEmployeeInput struct {
 	EmployeeNo            *string              `json:"employee_no,omitempty"`
 	Name                  *string              `json:"name,omitempty"`
@@ -279,7 +278,7 @@ type UpdateEmployeeInput struct {
 	InternalExperiences   []EmployeeExperience `json:"internal_experiences,omitempty"`
 }
 
-// EmployeeQuery contains filters, pagination, and sorting for employee lists.
+// EmployeeQuery 定義員工查詢的資料結構。
 type EmployeeQuery struct {
 	Keyword          string                  `json:"keyword,omitempty"`
 	DepartmentID     string                  `json:"department_id,omitempty"`
@@ -291,8 +290,7 @@ type EmployeeQuery struct {
 	Scope            EmployeeScopeConstraint `json:"-"`
 }
 
-// EmployeeScopeConstraint carries an already-authorized data-scope predicate
-// from service authorization into repository employee queries.
+// EmployeeScopeConstraint 定義員工範圍 constraint 的資料結構。
 type EmployeeScopeConstraint struct {
 	EmployeeIDs []string `json:"-"`
 	OrgUnitIDs  []string `json:"-"`
@@ -300,7 +298,7 @@ type EmployeeScopeConstraint struct {
 	DenyAll     bool     `json:"-"`
 }
 
-// EmployeeStats summarizes employee counts for dashboard surfaces.
+// EmployeeStats 定義員工 stats 的資料結構。
 type EmployeeStats struct {
 	Total          int `json:"total"`
 	Active         int `json:"active"`
@@ -312,7 +310,7 @@ type EmployeeStats struct {
 	LeftThisMonth  int `json:"left_this_month"`
 }
 
-// EmployeeOptions returns selectable HR values visible to the current account.
+// EmployeeOptions 定義員工選項的資料結構。
 type EmployeeOptions struct {
 	Departments        []OrgUnit `json:"departments"`
 	Positions          []string  `json:"positions"`
@@ -322,7 +320,7 @@ type EmployeeOptions struct {
 	JobLevels          []string  `json:"job_levels"`
 }
 
-// EmployeeImportSession stores the preview and confirmation state for one import file.
+// EmployeeImportSession 定義員工 import session 的資料結構。
 type EmployeeImportSession struct {
 	ID                   string              `json:"id"`
 	TenantID             string              `json:"tenant_id"`
@@ -343,7 +341,7 @@ type EmployeeImportSession struct {
 	ConfirmedAt          *time.Time          `json:"confirmed_at,omitempty"`
 }
 
-// EmployeeImportRow stores parsed input and validation results for one spreadsheet row.
+// EmployeeImportRow 定義員工 import 列的資料結構。
 type EmployeeImportRow struct {
 	RowNumber int                 `json:"row_number"`
 	Input     map[string]string   `json:"input"`
@@ -352,7 +350,7 @@ type EmployeeImportRow struct {
 	Valid     bool                `json:"valid"`
 }
 
-// EmployeePreviewResponse returns validation status and calculated diff for employee edits.
+// EmployeePreviewResponse 定義員工 preview 回應的資料結構。
 type EmployeePreviewResponse struct {
 	Employee    Employee       `json:"employee"`
 	Detail      EmployeeDetail `json:"detail"`
@@ -361,34 +359,34 @@ type EmployeePreviewResponse struct {
 	Valid       bool           `json:"valid"`
 }
 
-// EmployeeAvatarInput carries avatar file metadata and bytes.
+// EmployeeAvatarInput 定義員工 avatar 輸入的資料結構。
 type EmployeeAvatarInput struct {
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	Content     []byte `json:"-"`
 }
 
-// EmployeeImportPreviewInput carries a base64 or text import file payload for preview.
+// EmployeeImportPreviewInput 定義員工 import preview 輸入的資料結構。
 type EmployeeImportPreviewInput struct {
 	Filename string `json:"filename"`
 	Content  string `json:"content"`
 }
 
-// EmployeeImportConfirmInput selects how a previously previewed import should be applied.
+// EmployeeImportConfirmInput 定義員工 import confirm 輸入的資料結構。
 type EmployeeImportConfirmInput struct {
 	Mode          string `json:"mode,omitempty"`
 	FailurePolicy string `json:"failure_policy,omitempty"`
 }
 
-// EHRMSEmployeeRecord keeps the dynamic Chinese-field payload returned by eHRMS.
+// EHRMSEmployeeRecord 表示 eHRMS 員工 record。
 type EHRMSEmployeeRecord map[string]string
 
-// EHRMSEmployeeSyncInput selects how eHRMS source rows are applied.
+// EHRMSEmployeeSyncInput 定義 eHRMS 員工 sync 輸入的資料結構。
 type EHRMSEmployeeSyncInput struct {
 	Mode string `json:"mode,omitempty"`
 }
 
-// EHRMSEmployeeSyncResponse summarizes one eHRMS employee synchronization run.
+// EHRMSEmployeeSyncResponse 定義 eHRMS 員工 sync 回應的資料結構。
 type EHRMSEmployeeSyncResponse struct {
 	Fetched             int                   `json:"fetched"`
 	Created             int                   `json:"created"`
@@ -400,23 +398,23 @@ type EHRMSEmployeeSyncResponse struct {
 	RowErrors           []RowError            `json:"row_errors,omitempty"`
 }
 
-// BatchDeleteEmployeesInput carries the employees and reason for a bulk delete.
+// BatchDeleteEmployeesInput 定義批次 delete 員工輸入的資料結構。
 type BatchDeleteEmployeesInput struct {
 	EmployeeIDs []string `json:"employee_ids"`
 	Reason      string   `json:"reason"`
 }
 
-// InviteEmployeeInput carries an optional invite email override.
+// InviteEmployeeInput 定義員工輸入的資料結構。
 type InviteEmployeeInput struct {
 	Email string `json:"email,omitempty"`
 }
 
-// UpdateEmployeeStatusInput carries a direct employee status update.
+// UpdateEmployeeStatusInput 定義員工狀態輸入的資料結構。
 type UpdateEmployeeStatusInput struct {
 	Status string `json:"status"`
 }
 
-// StatusTransitionInput carries an employee lifecycle transition and its metadata.
+// StatusTransitionInput 定義狀態轉換輸入的資料結構。
 type StatusTransitionInput struct {
 	Status    string         `json:"status"`
 	Reason    string         `json:"reason,omitempty"`
@@ -425,7 +423,7 @@ type StatusTransitionInput struct {
 	Details   map[string]any `json:"details,omitempty"`
 }
 
-// BatchEmployeeResult reports the outcome for one employee in a bulk operation.
+// BatchEmployeeResult 定義批次員工結果的資料結構。
 type BatchEmployeeResult struct {
 	RowNumber  int    `json:"row_number,omitempty"`
 	EmployeeID string `json:"employee_id"`
@@ -435,12 +433,12 @@ type BatchEmployeeResult struct {
 	Message    string `json:"message,omitempty"`
 }
 
-// BatchEmployeeResponse wraps bulk employee operation results.
+// BatchEmployeeResponse 定義批次員工回應的資料結構。
 type BatchEmployeeResponse struct {
 	Results []BatchEmployeeResult `json:"results"`
 }
 
-// EmployeeDetailFromEmployee builds the detail/modal response from the stored aggregate.
+// EmployeeDetailFromEmployee 處理員工 detail 來源 員工。
 func EmployeeDetailFromEmployee(employee Employee) EmployeeDetail {
 	return EmployeeDetail{
 		Employee: employee,
@@ -467,7 +465,7 @@ func EmployeeDetailFromEmployee(employee Employee) EmployeeDetail {
 	}
 }
 
-// EmployeeSectionsFromEmployee projects hot fields and JSONB sections into typed tabs.
+// EmployeeSectionsFromEmployee 處理員工區段 來源 員工。
 func EmployeeSectionsFromEmployee(employee Employee) EmployeeSections {
 	return EmployeeSections{
 		BasicInfo: EmployeeBasicInfo{
@@ -547,6 +545,7 @@ func EmployeeSectionsFromEmployee(employee Employee) EmployeeSections {
 	}
 }
 
+// MarshalJSON 將資料序列化為 JSON。
 func (v EmployeeBasicInfo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(sectionJSON(v.Additional, map[string]any{
 		"name":                    v.Name,
@@ -568,6 +567,7 @@ func (v EmployeeBasicInfo) MarshalJSON() ([]byte, error) {
 	}))
 }
 
+// MarshalJSON 將資料序列化為 JSON。
 func (v EmployeeEmploymentInfo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(sectionJSON(v.Additional, map[string]any{
 		"org_unit_id":         v.OrgUnitID,
@@ -583,6 +583,7 @@ func (v EmployeeEmploymentInfo) MarshalJSON() ([]byte, error) {
 	}))
 }
 
+// MarshalJSON 將資料序列化為 JSON。
 func (v EmployeeEducationMilitaryInfo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(sectionJSON(v.Additional, map[string]any{
 		"highest_education":       v.HighestEducation,
@@ -596,6 +597,7 @@ func (v EmployeeEducationMilitaryInfo) MarshalJSON() ([]byte, error) {
 	}))
 }
 
+// MarshalJSON 將資料序列化為 JSON。
 func (v EmployeeContactInfo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(sectionJSON(v.Additional, map[string]any{
 		"mobile_phone":               v.MobilePhone,
@@ -608,6 +610,7 @@ func (v EmployeeContactInfo) MarshalJSON() ([]byte, error) {
 	}))
 }
 
+// MarshalJSON 將資料序列化為 JSON。
 func (v EmployeeInsuranceInfo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(sectionJSON(v.Additional, map[string]any{
 		"labor_insurance_date":    v.LaborInsuranceDate,
@@ -619,6 +622,7 @@ func (v EmployeeInsuranceInfo) MarshalJSON() ([]byte, error) {
 	}))
 }
 
+// sectionString 處理區段字串。
 func sectionString(values map[string]any, key string) string {
 	if len(values) == 0 {
 		return ""
@@ -641,6 +645,7 @@ func sectionString(values map[string]any, key string) string {
 	}
 }
 
+// sectionNumber 處理區段數字。
 func sectionNumber(values map[string]any, key string) *float64 {
 	if len(values) == 0 {
 		return nil
@@ -669,6 +674,7 @@ func sectionNumber(values map[string]any, key string) *float64 {
 	return nil
 }
 
+// sectionAdditional 處理區段 additional。
 func sectionAdditional(values map[string]any, known ...string) map[string]any {
 	if len(values) == 0 {
 		return nil
@@ -690,6 +696,7 @@ func sectionAdditional(values map[string]any, known ...string) map[string]any {
 	return out
 }
 
+// sectionJSON 處理區段 JSON。
 func sectionJSON(additional map[string]any, fields map[string]any) map[string]any {
 	out := make(map[string]any, len(additional)+len(fields))
 	for key, value := range additional {
@@ -703,6 +710,7 @@ func sectionJSON(additional map[string]any, fields map[string]any) map[string]an
 	return out
 }
 
+// sectionValuePresent 處理區段 value present。
 func sectionValuePresent(value any) bool {
 	switch v := value.(type) {
 	case nil:
@@ -716,6 +724,7 @@ func sectionValuePresent(value any) bool {
 	}
 }
 
+// dateString 處理日期字串。
 func dateString(t *time.Time) string {
 	if t == nil || t.IsZero() {
 		return ""
@@ -723,7 +732,7 @@ func dateString(t *time.Time) string {
 	return t.UTC().Format("2006-01-02")
 }
 
-// ParseEmployeeStatus normalizes supported localized and API employee status values.
+// ParseEmployeeStatus 解析員工狀態。
 func ParseEmployeeStatus(raw string) (EmployeeStatus, bool) {
 	switch strings.TrimSpace(raw) {
 	case "在職", "active":
@@ -743,7 +752,7 @@ func ParseEmployeeStatus(raw string) (EmployeeStatus, bool) {
 	}
 }
 
-// NormalizeEmployeeStatus returns a canonical status value when recognized.
+// NormalizeEmployeeStatus 正規化員工狀態。
 func NormalizeEmployeeStatus(raw string) string {
 	if status, ok := ParseEmployeeStatus(raw); ok {
 		return string(status)
@@ -751,7 +760,7 @@ func NormalizeEmployeeStatus(raw string) string {
 	return strings.TrimSpace(raw)
 }
 
-// ParseEmployeeAccountPolicy normalizes supported employee account lifecycle policies.
+// ParseEmployeeAccountPolicy 解析員工帳號政策。
 func ParseEmployeeAccountPolicy(raw string) (EmployeeAccountPolicy, bool) {
 	switch strings.TrimSpace(raw) {
 	case "", "none":
@@ -767,7 +776,7 @@ func ParseEmployeeAccountPolicy(raw string) (EmployeeAccountPolicy, bool) {
 	}
 }
 
-// NormalizeEmployeeAccountPolicy returns a canonical account policy value when recognized.
+// NormalizeEmployeeAccountPolicy 正規化員工帳號政策。
 func NormalizeEmployeeAccountPolicy(raw string) string {
 	if policy, ok := ParseEmployeeAccountPolicy(raw); ok {
 		return string(policy)
@@ -775,7 +784,7 @@ func NormalizeEmployeeAccountPolicy(raw string) string {
 	return strings.TrimSpace(raw)
 }
 
-// Valid reports whether the status can be used in employee write paths.
+// Valid 處理有效。
 func (s EmployeeStatus) Valid(includeDeleted bool) bool {
 	switch s {
 	case EmployeeStatusActive, EmployeeStatusProbation, EmployeeStatusLeaveSuspended, EmployeeStatusOnboarding, EmployeeStatusResigned:
@@ -787,7 +796,7 @@ func (s EmployeeStatus) Valid(includeDeleted bool) bool {
 	}
 }
 
-// EmployeeStatuses returns the canonical status list for option endpoints.
+// EmployeeStatuses 處理員工 statuses。
 func EmployeeStatuses(includeDeleted bool) []string {
 	statuses := []string{
 		string(EmployeeStatusActive),
@@ -802,7 +811,7 @@ func EmployeeStatuses(includeDeleted bool) []string {
 	return statuses
 }
 
-// ParseEmployeeCategory normalizes supported localized and API category values.
+// ParseEmployeeCategory 解析員工分類。
 func ParseEmployeeCategory(raw string) (EmployeeCategory, bool) {
 	switch strings.TrimSpace(raw) {
 	case "全職", "正職", "full-time", "full_time":
@@ -820,7 +829,7 @@ func ParseEmployeeCategory(raw string) (EmployeeCategory, bool) {
 	}
 }
 
-// NormalizeEmployeeCategory returns a canonical category value when recognized.
+// NormalizeEmployeeCategory 正規化員工分類。
 func NormalizeEmployeeCategory(raw string) string {
 	if category, ok := ParseEmployeeCategory(raw); ok {
 		return string(category)
@@ -828,7 +837,7 @@ func NormalizeEmployeeCategory(raw string) string {
 	return strings.TrimSpace(raw)
 }
 
-// Valid reports whether the employee category is accepted by write paths.
+// Valid 處理有效。
 func (c EmployeeCategory) Valid() bool {
 	switch c {
 	case EmployeeCategoryFullTime, EmployeeCategoryPartTime, EmployeeCategoryIntern, EmployeeCategoryContractor, EmployeeCategoryOther:
@@ -838,7 +847,7 @@ func (c EmployeeCategory) Valid() bool {
 	}
 }
 
-// EmployeeCategories returns the canonical category list for option endpoints.
+// EmployeeCategories 處理員工分類。
 func EmployeeCategories() []string {
 	return []string{
 		string(EmployeeCategoryFullTime),

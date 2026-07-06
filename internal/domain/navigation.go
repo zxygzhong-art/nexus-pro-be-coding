@@ -1,6 +1,6 @@
 package domain
 
-// MenuNode describes one menu entry returned to the current account.
+// MenuNode 定義 menu node 的資料結構。
 type MenuNode struct {
 	Key      string     `json:"key"`
 	Label    string     `json:"label"`

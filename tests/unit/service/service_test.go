@@ -24,6 +24,7 @@ type storeWithoutTenantTransaction struct {
 	repository.Store
 }
 
+// TestWithinTenantTransactionRequiresTransactionalStore 驗證 within 租戶 transaction requires transactional 儲存層。
 func TestWithinTenantTransactionRequiresTransactionalStore(t *testing.T) {
 	called := false
 	err := repository.WithinTenantTransaction(context.Background(), storeWithoutTenantTransaction{Store: memory.NewStore()}, "tenant-1", func(repository.Store) error {
@@ -38,6 +39,7 @@ func TestWithinTenantTransactionRequiresTransactionalStore(t *testing.T) {
 	}
 }
 
+// TestRouteApprovalPolicyUsesMatchedHTTPRoute 驗證路由核准政策 uses matched HTTP 路由。
 func TestRouteApprovalPolicyUsesMatchedHTTPRoute(t *testing.T) {
 	svc, ctx := newServiceFixture([]domain.Permission{
 		{Resource: "hr.employee", Action: "import", Scope: "all"},
@@ -72,6 +74,7 @@ func TestRouteApprovalPolicyUsesMatchedHTTPRoute(t *testing.T) {
 	}
 }
 
+// TestReadFacadesReturnForbiddenWhenReadPermissionMissing 驗證 facades 退回禁止 when read 權限 missing。
 func TestReadFacadesReturnForbiddenWhenReadPermissionMissing(t *testing.T) {
 	svc, ctx := newServiceFixture(nil)
 
@@ -94,6 +97,7 @@ func TestReadFacadesReturnForbiddenWhenReadPermissionMissing(t *testing.T) {
 	}
 }
 
+// TestCheckRequiresSpecificTarget 驗證 requires specific target。
 func TestCheckRequiresSpecificTarget(t *testing.T) {
 	svc, ctx := newServiceFixture([]domain.Permission{
 		{Resource: "hr.employee", Action: "read", Target: "emp-1"},
@@ -132,6 +136,7 @@ func TestCheckRequiresSpecificTarget(t *testing.T) {
 	}
 }
 
+// TestCreateAgentRunPreservesMultibyteReferenceSnippet 驗證 agent 執行 preserves multibyte reference snippet。
 func TestCreateAgentRunPreservesMultibyteReferenceSnippet(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -182,6 +187,7 @@ func TestCreateAgentRunPreservesMultibyteReferenceSnippet(t *testing.T) {
 	}
 }
 
+// TestCreateAgentRunRequiresToolPermission 驗證 agent 執行 requires 工具權限。
 func TestCreateAgentRunRequiresToolPermission(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -213,6 +219,7 @@ func TestCreateAgentRunRequiresToolPermission(t *testing.T) {
 	}
 }
 
+// TestAgentRunListRespectsOwnerScope 驗證 agent 執行列表 respects owner 範圍。
 func TestAgentRunListRespectsOwnerScope(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -267,6 +274,7 @@ func TestAgentRunListRespectsOwnerScope(t *testing.T) {
 	}
 }
 
+// TestCreateAgentRunFiltersUnauthorizedKnowledge 驗證 agent 執行篩選未授權知識。
 func TestCreateAgentRunFiltersUnauthorizedKnowledge(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -316,6 +324,7 @@ func TestCreateAgentRunFiltersUnauthorizedKnowledge(t *testing.T) {
 	}
 }
 
+// TestAuthzExplicitDenyWins 驗證授權 explicit deny wins。
 func TestAuthzExplicitDenyWins(t *testing.T) {
 	svc, ctx := newServiceFixture([]domain.Permission{
 		{Resource: "hr.employee", Action: "read", Scope: "all"},
@@ -337,6 +346,7 @@ func TestAuthzExplicitDenyWins(t *testing.T) {
 	}
 }
 
+// TestPermissionRelationRequiresOpenFGA 驗證權限 relation requires OpenFGA。
 func TestPermissionRelationRequiresOpenFGA(t *testing.T) {
 	store := memory.NewStore()
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
@@ -382,6 +392,7 @@ func TestPermissionRelationRequiresOpenFGA(t *testing.T) {
 	}
 }
 
+// TestAssumableRoleSessionPolicyCanOnlyShrink 驗證 assumable 角色 session 政策 can only shrink。
 func TestAssumableRoleSessionPolicyCanOnlyShrink(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -455,6 +466,7 @@ func TestAssumableRoleSessionPolicyCanOnlyShrink(t *testing.T) {
 	}
 }
 
+// TestAssumableRoleDurationCannotExceedRoleOrGlobalMaximum 驗證 assumable 角色 duration cannot exceed 角色 or global maximum。
 func TestAssumableRoleDurationCannotExceedRoleOrGlobalMaximum(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -503,6 +515,7 @@ func TestAssumableRoleDurationCannotExceedRoleOrGlobalMaximum(t *testing.T) {
 	}
 }
 
+// TestAssumableRoleSessionBypassesAuthzSnapshot 驗證 assumable 角色 session bypasses 授權快照。
 func TestAssumableRoleSessionBypassesAuthzSnapshot(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -574,6 +587,7 @@ func TestAssumableRoleSessionBypassesAuthzSnapshot(t *testing.T) {
 	}
 }
 
+// TestDirectAssumedRoleIDDoesNotGrantRolePermissions 驗證 direct assumed 角色 ID does not grant 角色權限。
 func TestDirectAssumedRoleIDDoesNotGrantRolePermissions(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -616,6 +630,7 @@ func TestDirectAssumedRoleIDDoesNotGrantRolePermissions(t *testing.T) {
 	}
 }
 
+// TestTrustedAssumableRoleStillRequiresAssumePermission 驗證 trusted assumable 角色 still requires assume 權限。
 func TestTrustedAssumableRoleStillRequiresAssumePermission(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -646,6 +661,7 @@ func TestTrustedAssumableRoleStillRequiresAssumePermission(t *testing.T) {
 	}
 }
 
+// TestAccountActiveAssumableRoleIDDoesNotGrantRolePermissions 驗證帳號啟用中 assumable 角色 ID does not grant 角色權限。
 func TestAccountActiveAssumableRoleIDDoesNotGrantRolePermissions(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -689,6 +705,7 @@ func TestAccountActiveAssumableRoleIDDoesNotGrantRolePermissions(t *testing.T) {
 	}
 }
 
+// TestResolveMeRequiresMeReadPermission 驗證 me requires me read 權限。
 func TestResolveMeRequiresMeReadPermission(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -706,6 +723,7 @@ func TestResolveMeRequiresMeReadPermission(t *testing.T) {
 	}
 }
 
+// TestEmployeeReadAppliesAssignmentDataScopeAndFieldPolicy 驗證員工 read applies 指派資料範圍 and 欄位政策。
 func TestEmployeeReadAppliesAssignmentDataScopeAndFieldPolicy(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -763,6 +781,7 @@ func TestEmployeeReadAppliesAssignmentDataScopeAndFieldPolicy(t *testing.T) {
 	}
 }
 
+// TestDirectReportsScopeDerivesEmployeeIDs 驗證 direct reports 範圍 derives 員工 IDs。
 func TestDirectReportsScopeDerivesEmployeeIDs(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -801,6 +820,7 @@ func TestDirectReportsScopeDerivesEmployeeIDs(t *testing.T) {
 	}
 }
 
+// TestSameRankDataScopesMergeEmployeeIDs 驗證 same rank 資料範圍 merge 員工 IDs。
 func TestSameRankDataScopesMergeEmployeeIDs(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -851,6 +871,7 @@ func TestSameRankDataScopesMergeEmployeeIDs(t *testing.T) {
 	}
 }
 
+// TestDepartmentSubtreeScopeDerivesOrgUnitIDs 驗證部門 subtree 範圍 derives 組織單位 IDs。
 func TestDepartmentSubtreeScopeDerivesOrgUnitIDs(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -892,6 +913,7 @@ func TestDepartmentSubtreeScopeDerivesOrgUnitIDs(t *testing.T) {
 	}
 }
 
+// TestAssignedOrgUnitsScopeFiltersExactDepartments 驗證 assigned 組織單位範圍篩選 exact departments。
 func TestAssignedOrgUnitsScopeFiltersExactDepartments(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -938,6 +960,7 @@ func TestAssignedOrgUnitsScopeFiltersExactDepartments(t *testing.T) {
 	}
 }
 
+// TestEmployeeQueryKeywordMatchesLinkedAccount 驗證員工查詢 keyword matches linked 帳號。
 func TestEmployeeQueryKeywordMatchesLinkedAccount(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -965,6 +988,7 @@ func TestEmployeeQueryKeywordMatchesLinkedAccount(t *testing.T) {
 	}
 }
 
+// TestEmployeeStatsRespectDepartmentSubtreeScope 驗證員工 stats respect 部門 subtree 範圍。
 func TestEmployeeStatsRespectDepartmentSubtreeScope(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1006,6 +1030,7 @@ func TestEmployeeStatsRespectDepartmentSubtreeScope(t *testing.T) {
 	}
 }
 
+// TestListOrgUnitsRespectsDepartmentSubtreeScope 驗證組織單位 respects 部門 subtree 範圍。
 func TestListOrgUnitsRespectsDepartmentSubtreeScope(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1045,6 +1070,7 @@ func TestListOrgUnitsRespectsDepartmentSubtreeScope(t *testing.T) {
 	}
 }
 
+// TestEmployeeFieldPolicyHidesDenyFieldsAndBlocksWrites 驗證員工欄位政策 hides deny 欄位 and blocks writes。
 func TestEmployeeFieldPolicyHidesDenyFieldsAndBlocksWrites(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1151,6 +1177,7 @@ func TestEmployeeFieldPolicyHidesDenyFieldsAndBlocksWrites(t *testing.T) {
 	}
 }
 
+// TestEmployeeExportAppliesPermissionScopedFieldPoliciesToJSONAndCSV 驗證員工 export applies 權限 scoped 欄位政策 to JSON and CSV。
 func TestEmployeeExportAppliesPermissionScopedFieldPoliciesToJSONAndCSV(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1206,6 +1233,7 @@ func TestEmployeeExportAppliesPermissionScopedFieldPoliciesToJSONAndCSV(t *testi
 	}
 }
 
+// TestEmployeeExportCSVNeutralizesSpreadsheetFormulas 驗證員工 export CSV neutralizes spreadsheet formulas。
 func TestEmployeeExportCSVNeutralizesSpreadsheetFormulas(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1257,6 +1285,7 @@ func TestEmployeeExportCSVNeutralizesSpreadsheetFormulas(t *testing.T) {
 	}
 }
 
+// TestEmployeeExportRequiresApprovalAndAudits 驗證員工 export requires 核准 and audits。
 func TestEmployeeExportRequiresApprovalAndAudits(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1301,6 +1330,7 @@ func TestEmployeeExportRequiresApprovalAndAudits(t *testing.T) {
 	}
 }
 
+// TestEmployeeExportRejectsOversizedSyncResult 驗證員工 export rejects oversized sync 結果。
 func TestEmployeeExportRejectsOversizedSyncResult(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1341,6 +1371,7 @@ func TestEmployeeExportRejectsOversizedSyncResult(t *testing.T) {
 	}
 }
 
+// TestSelfScopedEmployeeReadOnlyReturnsCurrentEmployee 驗證 self scoped 員工 read only returns 目前員工。
 func TestSelfScopedEmployeeReadOnlyReturnsCurrentEmployee(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1375,6 +1406,7 @@ func TestSelfScopedEmployeeReadOnlyReturnsCurrentEmployee(t *testing.T) {
 	}
 }
 
+// TestSelfScopedLeaveCreateCannotTargetAnotherEmployee 驗證 self scoped 請假 create cannot target another 員工。
 func TestSelfScopedLeaveCreateCannotTargetAnotherEmployee(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1415,6 +1447,7 @@ func TestSelfScopedLeaveCreateCannotTargetAnotherEmployee(t *testing.T) {
 	}
 }
 
+// TestSelfScopedLeaveReadOnlyReturnsCurrentEmployeeItems 驗證 self scoped 請假 read only returns 目前員工項目。
 func TestSelfScopedLeaveReadOnlyReturnsCurrentEmployeeItems(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1461,6 +1494,7 @@ func TestSelfScopedLeaveReadOnlyReturnsCurrentEmployeeItems(t *testing.T) {
 	}
 }
 
+// TestAttendanceShiftAssignmentRejectsOverlappingActiveRange 驗證考勤班別指派 rejects overlapping 啟用中 range。
 func TestAttendanceShiftAssignmentRejectsOverlappingActiveRange(t *testing.T) {
 	store, svc, _, adminCtx, _ := newAttendanceFixture(t)
 	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
@@ -1511,6 +1545,7 @@ func TestAttendanceShiftAssignmentRejectsOverlappingActiveRange(t *testing.T) {
 	}
 }
 
+// TestAttendanceClockRecordsAcceptedRejectedAndDuplicate 驗證考勤打卡 records accepted rejected and duplicate。
 func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
 	store, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
 
@@ -1578,6 +1613,7 @@ func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
 	}
 }
 
+// TestAttendanceClockReadAppliesFieldPolicyToGPSAndDeviceInfo 驗證考勤打卡 read applies 欄位政策 to gps and device info。
 func TestAttendanceClockReadAppliesFieldPolicyToGPSAndDeviceInfo(t *testing.T) {
 	store, svc, employeeCtx, adminCtx, _ := newAttendanceFixture(t)
 
@@ -1614,6 +1650,7 @@ func TestAttendanceClockReadAppliesFieldPolicyToGPSAndDeviceInfo(t *testing.T) {
 	}
 }
 
+// TestAttendanceClockReadAllowsGPSAndDeviceInfoByPermissionFieldPolicy 驗證考勤打卡 read allows gps and device info by 權限欄位政策。
 func TestAttendanceClockReadAllowsGPSAndDeviceInfoByPermissionFieldPolicy(t *testing.T) {
 	store, svc, employeeCtx, adminCtx, _ := newAttendanceFixture(t)
 	allowAttendanceClockSensitiveFieldsForPermission(t, store, attendanceFixtureClockInTime(), "attendance.clock.read")
@@ -1644,6 +1681,7 @@ func TestAttendanceClockReadAllowsGPSAndDeviceInfoByPermissionFieldPolicy(t *tes
 	}
 }
 
+// TestAttendanceClockRejectsWindowSequenceAndLowAccuracy 驗證考勤打卡 rejects window sequence and low accuracy。
 func TestAttendanceClockRejectsWindowSequenceAndLowAccuracy(t *testing.T) {
 	_, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
 
@@ -1689,6 +1727,7 @@ func TestAttendanceClockRejectsWindowSequenceAndLowAccuracy(t *testing.T) {
 	}
 }
 
+// TestAttendanceClockSupportsOvernightShiftWorkDate 驗證考勤打卡 supports overnight 班別 work 日期。
 func TestAttendanceClockSupportsOvernightShiftWorkDate(t *testing.T) {
 	store, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
 	now := attendanceFixtureClockInTime()
@@ -1741,6 +1780,7 @@ func TestAttendanceClockSupportsOvernightShiftWorkDate(t *testing.T) {
 	}
 }
 
+// TestAttendanceClockSelfScopeCannotTargetAnotherEmployee 驗證考勤打卡 self 範圍 cannot target another 員工。
 func TestAttendanceClockSelfScopeCannotTargetAnotherEmployee(t *testing.T) {
 	_, svc, employeeCtx, adminCtx, _ := newAttendanceFixture(t)
 
@@ -1765,6 +1805,7 @@ func TestAttendanceClockSelfScopeCannotTargetAnotherEmployee(t *testing.T) {
 	}
 }
 
+// TestAttendanceCorrectionApproveCreatesManualRecordAndRejectDoesNot 驗證考勤 correction 核准 creates manual record and 駁回 does not。
 func TestAttendanceCorrectionApproveCreatesManualRecordAndRejectDoesNot(t *testing.T) {
 	store, svc, employeeCtx, adminCtx, _ := newAttendanceFixture(t)
 	requestedAt := attendanceFixtureClockInTime().Format(time.RFC3339)
@@ -1818,6 +1859,7 @@ func TestAttendanceCorrectionApproveCreatesManualRecordAndRejectDoesNot(t *testi
 	}
 }
 
+// TestCreateLeaveRequestReservesLeaveBalance 驗證請假請求 reserves 請假 balance。
 func TestCreateLeaveRequestReservesLeaveBalance(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1870,6 +1912,7 @@ func TestCreateLeaveRequestReservesLeaveBalance(t *testing.T) {
 	}
 }
 
+// TestLeaveWorkflowReviewUpdatesRequestAndBalance 驗證請假流程審核 updates 請求 and balance。
 func TestLeaveWorkflowReviewUpdatesRequestAndBalance(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -1972,6 +2015,7 @@ func TestLeaveWorkflowReviewUpdatesRequestAndBalance(t *testing.T) {
 	}
 }
 
+// TestCreateLeaveRequestRejectsInsufficientLeaveBalance 驗證請假請求 rejects insufficient 請假 balance。
 func TestCreateLeaveRequestRejectsInsufficientLeaveBalance(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2031,6 +2075,7 @@ func TestCreateLeaveRequestRejectsInsufficientLeaveBalance(t *testing.T) {
 	}
 }
 
+// TestWorkflowDraftLifecycleAndPlatformProjection 驗證流程草稿生命週期 and 平台 projection。
 func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2154,6 +2199,7 @@ func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 	}
 }
 
+// TestWorkflowReviewQueueAndRejectForm 驗證流程審核佇列 and 駁回表單。
 func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2250,6 +2296,7 @@ func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
 	}
 }
 
+// TestWorkflowBulkReviewFormsReturnsPerItemResults 驗證流程批次審核表單 returns per 項目結果。
 func TestWorkflowBulkReviewFormsReturnsPerItemResults(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2345,6 +2392,7 @@ func TestWorkflowBulkReviewFormsReturnsPerItemResults(t *testing.T) {
 	}
 }
 
+// TestWorkflowFormInstanceReadSelfScopeOnlyReturnsOwnItems 驗證流程表單實例 read self 範圍 only returns own 項目。
 func TestWorkflowFormInstanceReadSelfScopeOnlyReturnsOwnItems(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2398,6 +2446,7 @@ func TestWorkflowFormInstanceReadSelfScopeOnlyReturnsOwnItems(t *testing.T) {
 	}
 }
 
+// TestEmployeeAggregateCreatePatchAndDetail 驗證員工 aggregate create patch and detail。
 func TestEmployeeAggregateCreatePatchAndDetail(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2464,10 +2513,12 @@ func TestEmployeeAggregateCreatePatchAndDetail(t *testing.T) {
 	}
 }
 
+// TestEmployeeCreateAccountPolicyCreatesAccountsAndEvents 驗證員工 create 帳號政策 creates 帳號 and 事件。
 func TestEmployeeCreateAccountPolicyCreatesAccountsAndEvents(t *testing.T) {
+	provisioner := &recordingIdentityProvisioner{}
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.employee", Action: "create", Scope: "all"},
-	})
+	}, service.Options{IdentityProvisioner: provisioner})
 
 	pendingInput := validEmployeeInput("E1901", "Pending Invite", "pending.invite@example.com")
 	pendingInput.AccountPolicy = "create_pending_invite"
@@ -2484,6 +2535,13 @@ func TestEmployeeCreateAccountPolicyCreatesAccountsAndEvents(t *testing.T) {
 	}
 	if !ok || pendingAccount.EmployeeID != pending.ID || pendingAccount.Status != "pending_invite" {
 		t.Fatalf("expected pending invite account linked to employee, got %+v", pendingAccount)
+	}
+	pendingIdentities, err := store.ListUserIdentities(context.Background(), "tenant-1", pending.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pendingIdentities) != 1 || pendingIdentities[0].Provider != domain.IdentityProviderKeycloak || pendingIdentities[0].Subject != "kc-"+pending.AccountID {
+		t.Fatalf("expected pending invite keycloak identity binding, got %+v", pendingIdentities)
 	}
 	if pending.InternalExperiences[0].Status != "active" {
 		t.Fatalf("expected initial experience to snapshot status, got %+v", pending.InternalExperiences)
@@ -2503,6 +2561,9 @@ func TestEmployeeCreateAccountPolicyCreatesAccountsAndEvents(t *testing.T) {
 	if !ok || activeAccount.EmployeeID != active.ID || activeAccount.Status != "active" {
 		t.Fatalf("expected active account linked to employee, got %+v", activeAccount)
 	}
+	if len(provisioner.inputs) != 2 || !provisioner.inputs[0].SendInvite || provisioner.inputs[1].SendInvite {
+		t.Fatalf("expected provisioning calls for pending invite and active accounts, got %+v", provisioner.inputs)
+	}
 
 	events, err := store.ListOutboxEvents(context.Background(), "tenant-1")
 	if err != nil {
@@ -2513,6 +2574,7 @@ func TestEmployeeCreateAccountPolicyCreatesAccountsAndEvents(t *testing.T) {
 	}
 }
 
+// TestEmployeeAccountChangesEmitOpenFGATupleOutbox 驗證員工帳號 changes emit OpenFGA tuple outbox。
 func TestEmployeeAccountChangesEmitOpenFGATupleOutbox(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2568,6 +2630,7 @@ func TestEmployeeAccountChangesEmitOpenFGATupleOutbox(t *testing.T) {
 	}
 }
 
+// TestEmployeeCreateRejectsDuplicateUniqueFields 驗證員工 create rejects duplicate unique 欄位。
 func TestEmployeeCreateRejectsDuplicateUniqueFields(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2622,6 +2685,7 @@ func TestEmployeeCreateRejectsDuplicateUniqueFields(t *testing.T) {
 	}
 }
 
+// TestEmployeeStatusTransitionHandlesEmptyEmploymentInfo 驗證員工狀態轉換 handles 空值任職 info。
 func TestEmployeeStatusTransitionHandlesEmptyEmploymentInfo(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2669,6 +2733,7 @@ func TestEmployeeStatusTransitionHandlesEmptyEmploymentInfo(t *testing.T) {
 	}
 }
 
+// TestEmployeeStatusWritesRequireTransitionPath 驗證員工狀態 writes require 轉換 path。
 func TestEmployeeStatusWritesRequireTransitionPath(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.employee", Action: "update", Scope: "all"},
@@ -2690,6 +2755,7 @@ func TestEmployeeStatusWritesRequireTransitionPath(t *testing.T) {
 	}
 }
 
+// TestEmployeeImportPreviewConfirmAndStatusTransition 驗證員工 import preview confirm and 狀態轉換。
 func TestEmployeeImportPreviewConfirmAndStatusTransition(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2816,6 +2882,53 @@ func TestEmployeeImportPreviewConfirmAndStatusTransition(t *testing.T) {
 	}
 }
 
+// TestEmployeeImportConfirmProvisionsKeycloakIdentityForAccountPolicy 驗證員工 import confirm provisions Keycloak 身分 for 帳號政策。
+func TestEmployeeImportConfirmProvisionsKeycloakIdentityForAccountPolicy(t *testing.T) {
+	provisioner := &recordingIdentityProvisioner{}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "import", Scope: "all"},
+	}, service.Options{IdentityProvisioner: provisioner})
+	ctx.ApprovalConfirmed = true
+
+	session, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
+		Filename: "employees.csv",
+		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID,帳號策略\nE2101,Import Login,import.login@example.com,ou-1,HRBP,全職,0911000444,在職,2026-06-01,,create_pending_invite\n",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmed, err := svc.HR().ConfirmEmployeeImport(ctx, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if confirmed.Summary["confirmed"] != 1 || len(provisioner.inputs) != 1 || !provisioner.inputs[0].SendInvite {
+		t.Fatalf("expected import confirmation to provision one invited keycloak user, summary=%+v inputs=%+v", confirmed.Summary, provisioner.inputs)
+	}
+
+	employee, ok, err := store.GetEmployeeByEmployeeNo(context.Background(), "tenant-1", "E2101")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || employee.AccountID == "" {
+		t.Fatalf("expected imported employee with account id, ok=%v employee=%+v", ok, employee)
+	}
+	account, ok, err := store.GetAccount(context.Background(), "tenant-1", employee.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || account.Status != "pending_invite" || account.EmployeeID != employee.ID {
+		t.Fatalf("expected pending invite account from import, ok=%v account=%+v", ok, account)
+	}
+	identities, err := store.ListUserIdentities(context.Background(), "tenant-1", employee.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(identities) != 1 || identities[0].Subject != "kc-"+employee.AccountID || identities[0].Email != "import.login@example.com" {
+		t.Fatalf("expected keycloak identity binding for imported employee, got %+v", identities)
+	}
+}
+
+// TestEmployeeImportPreviewCleansObjectWhenSessionPersistenceFails 驗證員工 import preview cleans 物件 when session persistence fails。
 func TestEmployeeImportPreviewCleansObjectWhenSessionPersistenceFails(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	base := memory.NewStore()
@@ -2847,6 +2960,7 @@ func TestEmployeeImportPreviewCleansObjectWhenSessionPersistenceFails(t *testing
 	}
 }
 
+// TestEmployeeImportConfirmRevalidatesBatchDuplicates 驗證員工 import confirm revalidates 批次 duplicates。
 func TestEmployeeImportConfirmRevalidatesBatchDuplicates(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -2896,6 +3010,7 @@ func TestEmployeeImportConfirmRevalidatesBatchDuplicates(t *testing.T) {
 	}
 }
 
+// TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments 驗證 eHRMS 員工 creates 員工 and departments。
 func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
 	rows := []domain.EHRMSEmployeeRecord{{
 		"員工編號":     "IKM001",
@@ -2945,6 +3060,7 @@ func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
 	}
 }
 
+// TestSyncEHRMSEmployeesRequiresImportPermissionEvenWhenApproved 驗證 eHRMS 員工 requires import 權限 even when approved。
 func TestSyncEHRMSEmployeesRequiresImportPermissionEvenWhenApproved(t *testing.T) {
 	rows := []domain.EHRMSEmployeeRecord{{
 		"員工編號":     "IKM-NOAUTH",
@@ -2980,6 +3096,7 @@ func TestSyncEHRMSEmployeesRequiresImportPermissionEvenWhenApproved(t *testing.T
 	}
 }
 
+// TestSyncEHRMSEmployeesUpdatesExistingAndPreservesLocalEmail 驗證 eHRMS 員工 updates existing and preserves 本機 email。
 func TestSyncEHRMSEmployeesUpdatesExistingAndPreservesLocalEmail(t *testing.T) {
 	rows := []domain.EHRMSEmployeeRecord{{
 		"員工編號":   "IKM002",
@@ -3030,6 +3147,7 @@ func TestSyncEHRMSEmployeesUpdatesExistingAndPreservesLocalEmail(t *testing.T) {
 	}
 }
 
+// TestSyncEHRMSEmployeesHidesUpstreamFetchDetails 驗證 eHRMS 員工 hides upstream fetch details。
 func TestSyncEHRMSEmployeesHidesUpstreamFetchDetails(t *testing.T) {
 	_, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.employee", Action: "import", Scope: "all"},
@@ -3049,6 +3167,7 @@ func TestSyncEHRMSEmployeesHidesUpstreamFetchDetails(t *testing.T) {
 	}
 }
 
+// TestEmployeeImportConfirmSupportsUpdateAndUpsert 驗證員工 import confirm supports update and upsert。
 func TestEmployeeImportConfirmSupportsUpdateAndUpsert(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -3128,6 +3247,7 @@ func TestEmployeeImportConfirmSupportsUpdateAndUpsert(t *testing.T) {
 	}
 }
 
+// TestEmployeeImportConfirmEnforcesAssignedOrgScope 驗證員工 import confirm enforces assigned 組織範圍。
 func TestEmployeeImportConfirmEnforcesAssignedOrgScope(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -3204,6 +3324,7 @@ func TestEmployeeImportConfirmEnforcesAssignedOrgScope(t *testing.T) {
 	}
 }
 
+// TestEmployeeReinstatementRequiresTransitionAndKeepsDeletedTerminal 驗證員工 reinstatement requires 轉換 and keeps deleted terminal。
 func TestEmployeeReinstatementRequiresTransitionAndKeepsDeletedTerminal(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -3292,6 +3413,7 @@ func TestEmployeeReinstatementRequiresTransitionAndKeepsDeletedTerminal(t *testi
 	}
 }
 
+// TestBatchDeleteEmployeesUsesPerEmployeeResultsAndAudits 驗證批次 delete 員工 uses per 員工結果 and audits。
 func TestBatchDeleteEmployeesUsesPerEmployeeResultsAndAudits(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.employee", Action: "delete", Scope: "all"},
@@ -3359,6 +3481,7 @@ func TestBatchDeleteEmployeesUsesPerEmployeeResultsAndAudits(t *testing.T) {
 	}
 }
 
+// TestDeleteEmployeeRejectsAlreadyDeleted 驗證員工 rejects already deleted。
 func TestDeleteEmployeeRejectsAlreadyDeleted(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.employee", Action: "delete", Scope: "all"},
@@ -3388,6 +3511,7 @@ func TestDeleteEmployeeRejectsAlreadyDeleted(t *testing.T) {
 	}
 }
 
+// TestAuditServiceRequiresAuditReadPermission 驗證稽核服務 requires 稽核 read 權限。
 func TestAuditServiceRequiresAuditReadPermission(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -3415,6 +3539,7 @@ func TestAuditServiceRequiresAuditReadPermission(t *testing.T) {
 	}
 }
 
+// TestEmployeeImportXLSXPreservesManagerEmployeeID 驗證員工 import XLSX preserves 主管員工 ID。
 func TestEmployeeImportXLSXPreservesManagerEmployeeID(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -3489,6 +3614,7 @@ func TestEmployeeImportXLSXPreservesManagerEmployeeID(t *testing.T) {
 	}
 }
 
+// TestEmployeeImportPreviewRejectsOversizedXLSXEntry 驗證員工 import preview rejects oversized XLSX entry。
 func TestEmployeeImportPreviewRejectsOversizedXLSXEntry(t *testing.T) {
 	_, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.employee", Action: "import", Scope: "all"},
@@ -3508,6 +3634,7 @@ func TestEmployeeImportPreviewRejectsOversizedXLSXEntry(t *testing.T) {
 	}
 }
 
+// TestEmployeePreviewCreateDoesNotPersist 驗證員工 preview create does not persist。
 func TestEmployeePreviewCreateDoesNotPersist(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.employee", Action: "create", Scope: "all"},
@@ -3547,6 +3674,7 @@ func TestEmployeePreviewCreateDoesNotPersist(t *testing.T) {
 	}
 }
 
+// TestEmployeeAvatarUploadReplaceAndDelete 驗證員工 avatar upload replace and delete。
 func TestEmployeeAvatarUploadReplaceAndDelete(t *testing.T) {
 	objects := &recordingObjectStore{}
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
@@ -3599,6 +3727,7 @@ func TestEmployeeAvatarUploadReplaceAndDelete(t *testing.T) {
 	}
 }
 
+// TestEmployeeAvatarRejectsForgedContentType 驗證員工 avatar rejects forged content type。
 func TestEmployeeAvatarRejectsForgedContentType(t *testing.T) {
 	objects := &recordingObjectStore{}
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
@@ -3630,11 +3759,12 @@ func TestEmployeeAvatarRejectsForgedContentType(t *testing.T) {
 	}
 }
 
+// TestEmployeeImportTemplateHeaders 驗證員工 import 範本 headers。
 func TestEmployeeImportTemplateHeaders(t *testing.T) {
 	_, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.employee", Action: "read", Scope: "all"},
 	})
-	expected := []string{"員工編號", "姓名", "Email", "部門", "職位", "類別", "電話", "狀態", "到職日期", "主管員工ID"}
+	expected := []string{"員工編號", "姓名", "Email", "部門", "職位", "類別", "電話", "狀態", "到職日期", "主管員工ID", "帳號策略"}
 
 	rawCSV, filename, contentType, err := svc.HR().EmployeeImportTemplate(ctx, "csv")
 	if err != nil {
@@ -3647,7 +3777,7 @@ func TestEmployeeImportTemplateHeaders(t *testing.T) {
 		t.Fatalf("expected csv template to include UTF-8 BOM")
 	}
 	csvHeaders := strings.Split(strings.TrimSpace(strings.TrimPrefix(string(rawCSV), "\ufeff")), ",")
-	if !equalStrings(csvHeaders, expected) || csvHeaders[9] != "主管員工ID" {
+	if !equalStrings(csvHeaders, expected) || csvHeaders[10] != "帳號策略" {
 		t.Fatalf("unexpected csv headers: %+v", csvHeaders)
 	}
 
@@ -3659,11 +3789,12 @@ func TestEmployeeImportTemplateHeaders(t *testing.T) {
 		t.Fatalf("unexpected xlsx template metadata filename=%q content_type=%q", filename, contentType)
 	}
 	xlsxHeaders := xlsxSharedStrings(t, rawXLSX)
-	if !equalStrings(xlsxHeaders, expected) || xlsxHeaders[9] != "主管員工ID" {
+	if !equalStrings(xlsxHeaders, expected) || xlsxHeaders[10] != "帳號策略" {
 		t.Fatalf("unexpected xlsx headers: %+v", xlsxHeaders)
 	}
 }
 
+// TestEmployeeExportApprovalInstanceMatchesFilters 驗證員工 export 核准實例 matches 篩選。
 func TestEmployeeExportApprovalInstanceMatchesFilters(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.employee", Action: "export", Scope: "all"},
@@ -3743,6 +3874,7 @@ func TestEmployeeExportApprovalInstanceMatchesFilters(t *testing.T) {
 	}
 }
 
+// TestApprovalInstanceMustBelongToCurrentAccount 驗證核准實例 must belong to 目前帳號。
 func TestApprovalInstanceMustBelongToCurrentAccount(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.employee", Action: "export", Scope: "all"},
@@ -3781,6 +3913,7 @@ func TestApprovalInstanceMustBelongToCurrentAccount(t *testing.T) {
 	}
 }
 
+// TestEmployeeStatusTransitionApprovalInstanceRequiresTarget 驗證員工狀態轉換核准實例 requires target。
 func TestEmployeeStatusTransitionApprovalInstanceRequiresTarget(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.employee", Action: "status_transition", Scope: "all"},
@@ -3849,6 +3982,7 @@ func TestEmployeeStatusTransitionApprovalInstanceRequiresTarget(t *testing.T) {
 	}
 }
 
+// TestInviteDeletedOrResignedEmployeeFails 驗證 deleted or resigned 員工 fails。
 func TestInviteDeletedOrResignedEmployeeFails(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.employee", Action: "invite", Scope: "all"},
@@ -3871,6 +4005,7 @@ func TestInviteDeletedOrResignedEmployeeFails(t *testing.T) {
 	}
 }
 
+// TestInviteEmployeeRejectsDuplicateAccountEmail 驗證員工 rejects duplicate 帳號 email。
 func TestInviteEmployeeRejectsDuplicateAccountEmail(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.employee", Action: "invite", Scope: "all"},
@@ -3897,6 +4032,43 @@ func TestInviteEmployeeRejectsDuplicateAccountEmail(t *testing.T) {
 	}
 }
 
+// TestInviteEmployeeProvisionKeycloakIdentity 驗證員工 provision Keycloak 身分。
+func TestInviteEmployeeProvisionKeycloakIdentity(t *testing.T) {
+	provisioner := &recordingIdentityProvisioner{}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "invite", Scope: "all"},
+	}, service.Options{IdentityProvisioner: provisioner})
+	ctx.ApprovalConfirmed = true
+	now := time.Now().UTC()
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-keycloak-invite",
+		TenantID:         "tenant-1",
+		EmployeeNo:       "E6200",
+		Name:             "Keycloak Invite",
+		CompanyEmail:     "keycloak.invite@example.com",
+		Status:           "active",
+		EmploymentStatus: "active",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+
+	invited, err := svc.HR().InviteEmployee(ctx, "emp-keycloak-invite", domain.InviteEmployeeInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if invited.AccountID == "" || len(provisioner.inputs) != 1 || !provisioner.inputs[0].SendInvite {
+		t.Fatalf("expected invite to provision one keycloak user, employee=%+v inputs=%+v", invited, provisioner.inputs)
+	}
+	identities, err := store.ListUserIdentities(context.Background(), "tenant-1", invited.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(identities) != 1 || identities[0].Subject != "kc-"+invited.AccountID || identities[0].Email != "keycloak.invite@example.com" {
+		t.Fatalf("expected keycloak identity binding for invited employee, got %+v", identities)
+	}
+}
+
+// TestEmployeeUpdateRespectsDataScope 驗證員工 update respects 資料範圍。
 func TestEmployeeUpdateRespectsDataScope(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -3925,6 +4097,7 @@ func TestEmployeeUpdateRespectsDataScope(t *testing.T) {
 	}
 }
 
+// TestCreatePermissionSetAssignmentRejectsDanglingReferences 驗證權限集合指派 rejects dangling references。
 func TestCreatePermissionSetAssignmentRejectsDanglingReferences(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -3988,6 +4161,7 @@ func TestCreatePermissionSetAssignmentRejectsDanglingReferences(t *testing.T) {
 	}
 }
 
+// TestMissingAssignmentDataScopeDoesNotBecomeUnscopedGrant 驗證 missing 指派資料範圍 does not become unscoped grant。
 func TestMissingAssignmentDataScopeDoesNotBecomeUnscopedGrant(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -4020,6 +4194,7 @@ func TestMissingAssignmentDataScopeDoesNotBecomeUnscopedGrant(t *testing.T) {
 	}
 }
 
+// TestEmployeeOptionsOnlyIncludeVisibleDepartments 驗證員工選項 only include 可見 departments。
 func TestEmployeeOptionsOnlyIncludeVisibleDepartments(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -4072,6 +4247,7 @@ func TestEmployeeOptionsOnlyIncludeVisibleDepartments(t *testing.T) {
 	}
 }
 
+// TestEmployeeOptionsDepartmentSubtreeIncludesEmptyOrgUnits 驗證員工選項部門 subtree includes 空值組織單位。
 func TestEmployeeOptionsDepartmentSubtreeIncludesEmptyOrgUnits(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -4117,6 +4293,7 @@ func TestEmployeeOptionsDepartmentSubtreeIncludesEmptyOrgUnits(t *testing.T) {
 	}
 }
 
+// TestCreateOrgUnitPathDoesNotDuplicateParent 驗證組織單位 path does not duplicate parent。
 func TestCreateOrgUnitPathDoesNotDuplicateParent(t *testing.T) {
 	svc, ctx := newServiceFixture([]domain.Permission{
 		{Resource: "hr.org_unit", Action: "create", Scope: "all"},
@@ -4134,6 +4311,7 @@ func TestCreateOrgUnitPathDoesNotDuplicateParent(t *testing.T) {
 	}
 }
 
+// TestPlatformTaskMutationsPersistAndProject 驗證平台任務 mutations persist and project。
 func TestPlatformTaskMutationsPersistAndProject(t *testing.T) {
 	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -4252,6 +4430,7 @@ func TestPlatformTaskMutationsPersistAndProject(t *testing.T) {
 	}
 }
 
+// TestPlatformWorkspaceOrganizationManagerUpdatePersistsHierarchy 驗證平台工作區 organization 主管 update persists hierarchy。
 func TestPlatformWorkspaceOrganizationManagerUpdatePersistsHierarchy(t *testing.T) {
 	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -4310,6 +4489,7 @@ func TestPlatformWorkspaceOrganizationManagerUpdatePersistsHierarchy(t *testing.
 	}
 }
 
+// TestPlatformWorkspaceAdminMutationsPersistPermissionMatrix 驗證平台工作區管理員 mutations persist 權限矩陣。
 func TestPlatformWorkspaceAdminMutationsPersistPermissionMatrix(t *testing.T) {
 	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -4426,6 +4606,7 @@ func TestPlatformWorkspaceAdminMutationsPersistPermissionMatrix(t *testing.T) {
 	}
 }
 
+// TestPlatformWorkspaceFormDesignMutationsPersistTemplateSchema 驗證平台工作區表單 design mutations persist 範本 schema。
 func TestPlatformWorkspaceFormDesignMutationsPersistTemplateSchema(t *testing.T) {
 	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
 	currentNow := now
@@ -4527,6 +4708,7 @@ func TestPlatformWorkspaceFormDesignMutationsPersistTemplateSchema(t *testing.T)
 	}
 }
 
+// findWorkspaceOrganizationRow 驗證 find 工作區 organization 列。
 func findWorkspaceOrganizationRow(t *testing.T, rows []domain.WorkspaceOrganizationRow, id string) domain.WorkspaceOrganizationRow {
 	t.Helper()
 	for _, row := range rows {
@@ -4538,6 +4720,7 @@ func findWorkspaceOrganizationRow(t *testing.T, rows []domain.WorkspaceOrganizat
 	return domain.WorkspaceOrganizationRow{}
 }
 
+// findWorkspaceAdmin 驗證 find 工作區管理員。
 func findWorkspaceAdmin(t *testing.T, admins []domain.WorkspaceAdmin, id string) domain.WorkspaceAdmin {
 	t.Helper()
 	admin, ok := workspaceAdminByID(admins, id)
@@ -4547,6 +4730,7 @@ func findWorkspaceAdmin(t *testing.T, admins []domain.WorkspaceAdmin, id string)
 	return admin
 }
 
+// workspaceAdminByID 驗證工作區管理員 by ID。
 func workspaceAdminByID(admins []domain.WorkspaceAdmin, id string) (domain.WorkspaceAdmin, bool) {
 	for _, admin := range admins {
 		if admin.ID == id {
@@ -4556,6 +4740,7 @@ func workspaceAdminByID(admins []domain.WorkspaceAdmin, id string) (domain.Works
 	return domain.WorkspaceAdmin{}, false
 }
 
+// findPlatformFormDesignForm 驗證 find 平台表單 design 表單。
 func findPlatformFormDesignForm(t *testing.T, forms []domain.PlatformFormDesignForm, id string) domain.PlatformFormDesignForm {
 	t.Helper()
 	form, ok := platformFormDesignFormByID(forms, id)
@@ -4565,6 +4750,7 @@ func findPlatformFormDesignForm(t *testing.T, forms []domain.PlatformFormDesignF
 	return form
 }
 
+// platformFormDesignFormByID 驗證平台表單 design 表單 by ID。
 func platformFormDesignFormByID(forms []domain.PlatformFormDesignForm, id string) (domain.PlatformFormDesignForm, bool) {
 	for _, form := range forms {
 		if form.ID == id {
@@ -4574,6 +4760,7 @@ func platformFormDesignFormByID(forms []domain.PlatformFormDesignForm, id string
 	return domain.PlatformFormDesignForm{}, false
 }
 
+// workspaceDesignFlag 驗證工作區 design flag。
 func workspaceDesignFlag(t *testing.T, schema map[string]any, key string) bool {
 	t.Helper()
 	workspace, ok := schema["workspace_design"].(map[string]any)
@@ -4587,6 +4774,7 @@ func workspaceDesignFlag(t *testing.T, schema map[string]any, key string) bool {
 	return value
 }
 
+// permissionSetContains 驗證權限集合 contains。
 func permissionSetContains(set domain.PermissionSet, resource, action string) bool {
 	for _, permission := range set.Permissions {
 		if permission.Resource == resource && string(permission.Action) == action {
@@ -4596,14 +4784,17 @@ func permissionSetContains(set domain.PermissionSet, resource, action string) bo
 	return false
 }
 
+// stringPtr 驗證字串 ptr。
 func stringPtr(value string) *string {
 	return &value
 }
 
+// boolPtr 驗證布林值 ptr。
 func boolPtr(value bool) *bool {
 	return &value
 }
 
+// findPlatformTaskRecord 驗證 find 平台任務 record。
 func findPlatformTaskRecord(t *testing.T, records []domain.PlatformTaskRecord, date string) domain.PlatformTaskRecord {
 	t.Helper()
 	for _, record := range records {
@@ -4615,6 +4806,7 @@ func findPlatformTaskRecord(t *testing.T, records []domain.PlatformTaskRecord, d
 	return domain.PlatformTaskRecord{}
 }
 
+// findPlatformTaskTodo 驗證 find 平台任務待辦。
 func findPlatformTaskTodo(t *testing.T, todos []domain.PlatformTaskTodo, id string) domain.PlatformTaskTodo {
 	t.Helper()
 	for _, todo := range todos {
@@ -4626,6 +4818,7 @@ func findPlatformTaskTodo(t *testing.T, todos []domain.PlatformTaskTodo, id stri
 	return domain.PlatformTaskTodo{}
 }
 
+// newServiceFixture 驗證服務 fixture。
 func newServiceFixture(permissions []domain.Permission) (*service.Service, domain.RequestContext) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -4649,6 +4842,7 @@ func newServiceFixture(permissions []domain.Permission) (*service.Service, domai
 	return service.New(store), domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 }
 
+// newEmployeeFeatureFixture 驗證員工 feature fixture。
 func newEmployeeFeatureFixture(t *testing.T, permissions []domain.Permission, options ...service.Options) (*memory.Store, *service.Service, domain.RequestContext) {
 	t.Helper()
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
@@ -4673,6 +4867,7 @@ func newEmployeeFeatureFixture(t *testing.T, permissions []domain.Permission, op
 	return store, service.New(store, options...), domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 }
 
+// newAttendanceFixture 驗證考勤 fixture。
 func newAttendanceFixture(t *testing.T) (*memory.Store, *service.Service, domain.RequestContext, domain.RequestContext, func(time.Time)) {
 	t.Helper()
 	now := attendanceFixtureClockInTime()
@@ -4770,12 +4965,12 @@ func newAttendanceFixture(t *testing.T) (*memory.Store, *service.Service, domain
 		setNow
 }
 
-// attendanceFixtureClockInTime returns 09:00 in the UTC+8 attendance business day.
+// attendanceFixtureClockInTime 驗證考勤 fixture 打卡 in 時間。
 func attendanceFixtureClockInTime() time.Time {
 	return time.Date(2026, 6, 10, 1, 0, 0, 0, time.UTC)
 }
 
-// attendanceFixtureClockOutTime returns 18:00 in the UTC+8 attendance business day.
+// attendanceFixtureClockOutTime 驗證考勤 fixture 打卡 out 時間。
 func attendanceFixtureClockOutTime() time.Time {
 	return time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC)
 }
@@ -4785,29 +4980,48 @@ type recordingObjectStore struct {
 	deleted []string
 }
 
+type recordingIdentityProvisioner struct {
+	inputs []domain.IdentityProvisioningInput
+	err    error
+}
+
+// EnsureUser 驗證使用者。
+func (p *recordingIdentityProvisioner) EnsureUser(_ context.Context, input domain.IdentityProvisioningInput) (domain.ProvisionedIdentity, error) {
+	p.inputs = append(p.inputs, input)
+	if p.err != nil {
+		return domain.ProvisionedIdentity{}, p.err
+	}
+	return domain.ProvisionedIdentity{Provider: domain.IdentityProviderKeycloak, Subject: "kc-" + input.AccountID, Email: input.Email}, nil
+}
+
 type fakeEHRMSClient struct {
 	rows []domain.EHRMSEmployeeRecord
 	err  error
 }
 
+// ListEmployees 驗證員工。
 func (c fakeEHRMSClient) ListEmployees(context.Context) ([]domain.EHRMSEmployeeRecord, error) {
 	return c.rows, c.err
 }
 
+// PutObject 驗證 put 物件。
 func (s *recordingObjectStore) PutObject(_ context.Context, key string, _ string, _ []byte) error {
 	s.keys = append(s.keys, key)
 	return nil
 }
 
+// DeleteObject 驗證物件。
 func (s *recordingObjectStore) DeleteObject(_ context.Context, key string) error {
 	s.deleted = append(s.deleted, key)
 	return nil
 }
 
+// Provider 驗證提供者。
 func (s *recordingObjectStore) Provider() string {
 	return "test"
 }
 
+// Bucket 驗證 bucket。
 func (s *recordingObjectStore) Bucket() string {
 	return "imports"
 }
@@ -4816,14 +5030,17 @@ type failingEmployeeImportSessionStore struct {
 	*memory.Store
 }
 
+// WithTenantTransaction 驗證租戶 transaction。
 func (s *failingEmployeeImportSessionStore) WithTenantTransaction(_ context.Context, _ string, fn func(repository.Store) error) error {
 	return fn(s)
 }
 
+// UpsertEmployeeImportSession 驗證 upsert 員工 import session。
 func (s *failingEmployeeImportSessionStore) UpsertEmployeeImportSession(_ context.Context, _ domain.EmployeeImportSession) error {
 	return fmt.Errorf("session persistence failed")
 }
 
+// validEmployeeInput 驗證有效員工輸入。
 func validEmployeeInput(employeeNo, name, email string) domain.CreateEmployeeInput {
 	return domain.CreateEmployeeInput{
 		EmployeeNo:            employeeNo,
@@ -4843,6 +5060,7 @@ func validEmployeeInput(employeeNo, name, email string) domain.CreateEmployeeInp
 	}
 }
 
+// validContactInfo 驗證有效聯絡 info。
 func validContactInfo() map[string]any {
 	return map[string]any{
 		"mobile_phone":               "0911222333",
@@ -4853,6 +5071,7 @@ func validContactInfo() map[string]any {
 	}
 }
 
+// validInsuranceInfo 驗證有效保險 info。
 func validInsuranceInfo() map[string]any {
 	return map[string]any{
 		"labor_insurance_date":    "2026-06-01",
@@ -4870,18 +5089,21 @@ type recordingAuthzSnapshot struct {
 	sets   int
 }
 
+// GetAuthzSnapshot 驗證授權快照。
 func (s *recordingAuthzSnapshot) GetAuthzSnapshot(_ context.Context, key string) (domain.CheckResult, bool, error) {
 	s.gets++
 	result, ok := s.values[key]
 	return result, ok, nil
 }
 
+// SetAuthzSnapshot 驗證集合授權快照。
 func (s *recordingAuthzSnapshot) SetAuthzSnapshot(_ context.Context, key string, result domain.CheckResult, _ time.Duration) error {
 	s.sets++
 	s.values[key] = result
 	return nil
 }
 
+// InvalidateTenant 驗證 invalidate 租戶。
 func (s *recordingAuthzSnapshot) InvalidateTenant(_ context.Context, tenantID string) error {
 	for key := range s.values {
 		if strings.Contains(key, tenantID) {
@@ -4896,11 +5118,13 @@ type fixedRelationshipChecker struct {
 	checks  []domain.RelationshipCheck
 }
 
+// CheckRelationship 驗證關係。
 func (c *fixedRelationshipChecker) CheckRelationship(_ context.Context, check domain.RelationshipCheck) (bool, error) {
 	c.checks = append(c.checks, check)
 	return c.allowed, nil
 }
 
+// hasAuthzOutboxEvent 驗證授權 outbox 事件。
 func hasAuthzOutboxEvent(events []domain.AuthzOutboxEvent, eventType string) bool {
 	for _, event := range events {
 		if event.EventType == eventType {
@@ -4910,6 +5134,7 @@ func hasAuthzOutboxEvent(events []domain.AuthzOutboxEvent, eventType string) boo
 	return false
 }
 
+// hasBusinessOutboxEvent 驗證 business outbox 事件。
 func hasBusinessOutboxEvent(events []domain.OutboxEvent, eventType string) bool {
 	for _, event := range events {
 		if event.EventType == eventType {
@@ -4919,6 +5144,7 @@ func hasBusinessOutboxEvent(events []domain.OutboxEvent, eventType string) bool 
 	return false
 }
 
+// findAuditLog 驗證 find 稽核 log。
 func findAuditLog(logs []domain.AuditLog, action string) (domain.AuditLog, bool) {
 	for _, log := range logs {
 		if log.Action == action {
@@ -4928,6 +5154,7 @@ func findAuditLog(logs []domain.AuditLog, action string) (domain.AuditLog, bool)
 	return domain.AuditLog{}, false
 }
 
+// allowEmployeeSensitiveFieldsForPermission 驗證員工 sensitive 欄位 for 權限。
 func allowEmployeeSensitiveFieldsForPermission(t *testing.T, store *memory.Store, now time.Time, permissionID string) {
 	t.Helper()
 	for _, field := range []string{
@@ -4964,7 +5191,7 @@ func allowEmployeeSensitiveFieldsForPermission(t *testing.T, store *memory.Store
 	}
 }
 
-// allowAttendanceClockSensitiveFieldsForPermission opts a test permission into raw GPS evidence reads.
+// allowAttendanceClockSensitiveFieldsForPermission 驗證考勤打卡 sensitive 欄位 for 權限。
 func allowAttendanceClockSensitiveFieldsForPermission(t *testing.T, store *memory.Store, now time.Time, permissionID string) {
 	t.Helper()
 	for _, field := range []string{
@@ -4991,6 +5218,7 @@ func allowAttendanceClockSensitiveFieldsForPermission(t *testing.T, store *memor
 	}
 }
 
+// stringSliceContains 驗證字串 slice contains。
 func stringSliceContains(values []string, expected string) bool {
 	for _, value := range values {
 		if value == expected {
@@ -5000,6 +5228,7 @@ func stringSliceContains(values []string, expected string) bool {
 	return false
 }
 
+// fieldErrorsContain 驗證欄位錯誤 contain。
 func fieldErrorsContain(fields []domain.FieldError, expectedField string) bool {
 	for _, field := range fields {
 		if field.Field == expectedField {
@@ -5009,6 +5238,7 @@ func fieldErrorsContain(fields []domain.FieldError, expectedField string) bool {
 	return false
 }
 
+// rowErrorsContain 驗證列錯誤 contain。
 func rowErrorsContain(fields []domain.RowError, expectedField string) bool {
 	for _, field := range fields {
 		if field.Field == expectedField {
@@ -5018,10 +5248,12 @@ func rowErrorsContain(fields []domain.RowError, expectedField string) bool {
 	return false
 }
 
+// testPNGBytes 驗證 png bytes。
 func testPNGBytes() []byte {
 	return []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0}
 }
 
+// equalStrings 驗證 equal 字串。
 func equalStrings(left, right []string) bool {
 	if len(left) != len(right) {
 		return false
@@ -5034,6 +5266,7 @@ func equalStrings(left, right []string) bool {
 	return true
 }
 
+// xlsxSharedStrings 驗證 XLSX shared 字串。
 func xlsxSharedStrings(t *testing.T, raw []byte) []string {
 	t.Helper()
 	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
@@ -5071,6 +5304,7 @@ func xlsxSharedStrings(t *testing.T, raw []byte) []string {
 	return nil
 }
 
+// minimalEmployeeImportXLSX 驗證 minimal 員工 import XLSX。
 func minimalEmployeeImportXLSX(t *testing.T, rows [][]string) string {
 	t.Helper()
 	var values []string
@@ -5122,6 +5356,7 @@ func minimalEmployeeImportXLSX(t *testing.T, rows [][]string) string {
 	return buf.String()
 }
 
+// oversizedEmployeeImportXLSX 驗證 oversized 員工 import XLSX。
 func oversizedEmployeeImportXLSX(t *testing.T) string {
 	t.Helper()
 	var buf bytes.Buffer

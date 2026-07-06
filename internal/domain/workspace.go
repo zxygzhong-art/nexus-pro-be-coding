@@ -1,13 +1,13 @@
 package domain
 
-// WorkspaceOverviewQuery selects the month and date used by workspace overview widgets.
+// WorkspaceOverviewQuery 定義工作區總覽查詢的資料結構。
 type WorkspaceOverviewQuery struct {
 	Year  int    `json:"year,omitempty"`
 	Month int    `json:"month,omitempty"`
 	Date  string `json:"date,omitempty"`
 }
 
-// WorkspaceOverviewResponse aggregates HR, attendance, and lifecycle task widgets.
+// WorkspaceOverviewResponse 定義工作區總覽回應的資料結構。
 type WorkspaceOverviewResponse struct {
 	Month          string                      `json:"month"`
 	Year           int                         `json:"year"`
@@ -17,7 +17,7 @@ type WorkspaceOverviewResponse struct {
 	TodoCategories []WorkspaceTodoCategory     `json:"todo_categories"`
 }
 
-// WorkspaceHRSummary contains the headline monthly people metrics.
+// WorkspaceHRSummary 定義工作區 HR 摘要的資料結構。
 type WorkspaceHRSummary struct {
 	Title          string `json:"title"`
 	Active         int    `json:"active"`
@@ -26,7 +26,7 @@ type WorkspaceHRSummary struct {
 	SeparationRate string `json:"separation_rate"`
 }
 
-// WorkspaceOverviewAttendance summarizes today's attendance and monthly leave bars.
+// WorkspaceOverviewAttendance 定義工作區總覽考勤的資料結構。
 type WorkspaceOverviewAttendance struct {
 	CheckedIn  int                        `json:"checked_in"`
 	Leave      int                        `json:"leave"`
@@ -35,7 +35,7 @@ type WorkspaceOverviewAttendance struct {
 	DailyLeave []WorkspaceDailyLeave      `json:"daily_leave"`
 }
 
-// WorkspaceAttendanceSlice describes one proportional attendance segment.
+// WorkspaceAttendanceSlice 定義工作區考勤 slice 的資料結構。
 type WorkspaceAttendanceSlice struct {
 	Key     string `json:"key"`
 	Label   string `json:"label"`
@@ -43,7 +43,7 @@ type WorkspaceAttendanceSlice struct {
 	Tone    string `json:"tone"`
 }
 
-// WorkspaceDailyLeave describes one day in the monthly leave bar chart.
+// WorkspaceDailyLeave 定義工作區每日請假的資料結構。
 type WorkspaceDailyLeave struct {
 	Day           int    `json:"day"`
 	Value         int    `json:"value"`
@@ -53,7 +53,7 @@ type WorkspaceDailyLeave struct {
 	Tooltip       string `json:"tooltip"`
 }
 
-// WorkspaceTodoCategory groups lifecycle reminders shown on the overview page.
+// WorkspaceTodoCategory 定義工作區待辦分類的資料結構。
 type WorkspaceTodoCategory struct {
 	Key       string                `json:"key"`
 	Label     string                `json:"label"`
@@ -64,7 +64,7 @@ type WorkspaceTodoCategory struct {
 	Count     int                   `json:"count"`
 }
 
-// WorkspaceTodoPerson is the compact employee card used in lifecycle reminders.
+// WorkspaceTodoPerson 定義工作區待辦 person 的資料結構。
 type WorkspaceTodoPerson struct {
 	ID     string `json:"id"`
 	NameZH string `json:"name_zh"`
@@ -72,13 +72,13 @@ type WorkspaceTodoPerson struct {
 	Date   string `json:"date"`
 }
 
-// WorkspaceOrganizationResponse returns the employee hierarchy rows.
+// WorkspaceOrganizationResponse 定義工作區 organization 回應的資料結構。
 type WorkspaceOrganizationResponse struct {
 	ParentNone string                     `json:"parent_none"`
 	Rows       []WorkspaceOrganizationRow `json:"rows"`
 }
 
-// WorkspaceOrganizationRow is one employee node in the organization chart.
+// WorkspaceOrganizationRow 定義工作區 organization 列的資料結構。
 type WorkspaceOrganizationRow struct {
 	ID        string `json:"id"`
 	NameZH    string `json:"name_zh"`
@@ -90,20 +90,20 @@ type WorkspaceOrganizationRow struct {
 	ParentID  string `json:"parent_id"`
 }
 
-// WorkspaceTurnoverQuery selects the monthly and annual turnover windows.
+// WorkspaceTurnoverQuery 定義工作區人員異動查詢的資料結構。
 type WorkspaceTurnoverQuery struct {
 	Year       int `json:"year,omitempty"`
 	Month      int `json:"month,omitempty"`
 	AnnualYear int `json:"annual_year,omitempty"`
 }
 
-// WorkspaceTurnoverResponse aggregates monthly and annual employment analysis.
+// WorkspaceTurnoverResponse 定義工作區人員異動回應的資料結構。
 type WorkspaceTurnoverResponse struct {
 	Monthly WorkspaceTurnoverMonthly `json:"monthly"`
 	Annual  WorkspaceTurnoverAnnual  `json:"annual"`
 }
 
-// WorkspaceTurnoverMonthly contains monthly headcount, turnover, chart, and table data.
+// WorkspaceTurnoverMonthly 定義工作區人員異動每月的資料結構。
 type WorkspaceTurnoverMonthly struct {
 	Year           int                       `json:"year"`
 	Month          int                       `json:"month"`
@@ -116,7 +116,7 @@ type WorkspaceTurnoverMonthly struct {
 	CSVHeaders     []string                  `json:"csv_headers"`
 }
 
-// WorkspaceTurnoverAnnual contains annual headcount, turnover, chart, and table data.
+// WorkspaceTurnoverAnnual 定義工作區人員異動年度的資料結構。
 type WorkspaceTurnoverAnnual struct {
 	Year               int                       `json:"year"`
 	IsFuture           bool                      `json:"is_future"`
@@ -130,7 +130,7 @@ type WorkspaceTurnoverAnnual struct {
 	CSVHeaders         []string                  `json:"csv_headers"`
 }
 
-// WorkspaceKPI is a compact metric card for turnover analysis.
+// WorkspaceKPI 定義工作區 KPI 的資料結構。
 type WorkspaceKPI struct {
 	Key       string `json:"key"`
 	Label     string `json:"label"`
@@ -140,7 +140,7 @@ type WorkspaceKPI struct {
 	TrendTone string `json:"trend_tone"`
 }
 
-// WorkspaceComparisonItem is one bar in a comparison chart.
+// WorkspaceComparisonItem 定義工作區 comparison 項目的資料結構。
 type WorkspaceComparisonItem struct {
 	Name    string  `json:"name"`
 	Value   float64 `json:"value"`
@@ -148,7 +148,7 @@ type WorkspaceComparisonItem struct {
 	Percent int     `json:"percent"`
 }
 
-// WorkspaceTurnoverRow is one monthly turnover table row.
+// WorkspaceTurnoverRow 定義工作區人員異動列的資料結構。
 type WorkspaceTurnoverRow struct {
 	Key       string `json:"key"`
 	RowType   string `json:"row_type"`
@@ -165,7 +165,7 @@ type WorkspaceTurnoverRow struct {
 	YTDRate   string `json:"ytd_rate"`
 }
 
-// WorkspaceTrendPoint is one monthly point in annual trend charts.
+// WorkspaceTrendPoint 定義工作區趨勢 point 的資料結構。
 type WorkspaceTrendPoint struct {
 	Month   int     `json:"month"`
 	Value   float64 `json:"value"`
@@ -175,7 +175,7 @@ type WorkspaceTrendPoint struct {
 	Tone    string  `json:"tone"`
 }
 
-// WorkspacePieItem is one segment in the annual distribution chart.
+// WorkspacePieItem 定義工作區 pie 項目的資料結構。
 type WorkspacePieItem struct {
 	Name       string  `json:"name"`
 	Value      int     `json:"value"`
@@ -185,7 +185,7 @@ type WorkspacePieItem struct {
 	ColorIndex int     `json:"color_index"`
 }
 
-// WorkspaceAnnualRow is one annual turnover table row.
+// WorkspaceAnnualRow 定義工作區年度列的資料結構。
 type WorkspaceAnnualRow struct {
 	BU       string `json:"bu"`
 	Base     int    `json:"base"`
@@ -198,13 +198,13 @@ type WorkspaceAnnualRow struct {
 	Rate     string `json:"rate"`
 }
 
-// WorkspaceAttendanceQuery selects one month for the attendance and clock matrices.
+// WorkspaceAttendanceQuery 定義工作區考勤查詢的資料結構。
 type WorkspaceAttendanceQuery struct {
 	Year  int `json:"year,omitempty"`
 	Month int `json:"month,omitempty"`
 }
 
-// WorkspaceAttendanceResponse aggregates monthly attendance and clock matrices.
+// WorkspaceAttendanceResponse 定義工作區考勤回應的資料結構。
 type WorkspaceAttendanceResponse struct {
 	Year        int                        `json:"year"`
 	Month       int                        `json:"month"`
@@ -217,7 +217,7 @@ type WorkspaceAttendanceResponse struct {
 	Clock       WorkspaceClockMatrix       `json:"clock"`
 }
 
-// WorkspaceDate is one calendar column in monthly matrices.
+// WorkspaceDate 定義工作區日期的資料結構。
 type WorkspaceDate struct {
 	Key     string  `json:"key"`
 	Y       int     `json:"y"`
@@ -227,26 +227,26 @@ type WorkspaceDate struct {
 	Holiday *string `json:"holiday"`
 }
 
-// WorkspaceLeaveLegendItem labels one leave code used in matrices.
+// WorkspaceLeaveLegendItem 定義工作區請假 legend 項目的資料結構。
 type WorkspaceLeaveLegendItem struct {
 	Code  string `json:"code"`
 	Label string `json:"label"`
 }
 
-// WorkspaceAttendanceMatrix contains work-hour rows and summary metrics.
+// WorkspaceAttendanceMatrix 定義工作區考勤矩陣的資料結構。
 type WorkspaceAttendanceMatrix struct {
 	Rows    []WorkspaceAttendanceRow     `json:"rows"`
 	Summary WorkspaceAttendanceMatrixSum `json:"summary"`
 }
 
-// WorkspaceAttendanceRow is one employee row in the work-hour matrix.
+// WorkspaceAttendanceRow 定義工作區考勤列的資料結構。
 type WorkspaceAttendanceRow struct {
 	Employee WorkspaceEmployeeCard  `json:"employee"`
 	Cells    []WorkspaceDayCell     `json:"cells"`
 	Summary  WorkspaceEmployeeHours `json:"summary"`
 }
 
-// WorkspaceEmployeeCard is the compact employee identity shared by workspace tables.
+// WorkspaceEmployeeCard 定義工作區員工 card 的資料結構。
 type WorkspaceEmployeeCard struct {
 	ID       string `json:"id"`
 	Avatar   string `json:"avatar"`
@@ -261,7 +261,7 @@ type WorkspaceEmployeeCard struct {
 	HireDate string `json:"hire_date"`
 }
 
-// WorkspaceDayCell describes a day cell in attendance and clock matrices.
+// WorkspaceDayCell 定義工作區 day 儲存格的資料結構。
 type WorkspaceDayCell struct {
 	Type     string  `json:"type"`
 	Holiday  string  `json:"holiday,omitempty"`
@@ -276,7 +276,7 @@ type WorkspaceDayCell struct {
 	Reason   string  `json:"reason,omitempty"`
 }
 
-// WorkspaceEmployeeHours summarizes one employee's monthly work-hour row.
+// WorkspaceEmployeeHours 定義工作區員工小時的資料結構。
 type WorkspaceEmployeeHours struct {
 	AttendedHours float64            `json:"attended_hours"`
 	Birthday      bool               `json:"birthday"`
@@ -287,7 +287,7 @@ type WorkspaceEmployeeHours struct {
 	WorkDays      int                `json:"work_days"`
 }
 
-// WorkspaceAttendanceMatrixSum summarizes the work-hour matrix.
+// WorkspaceAttendanceMatrixSum 定義工作區考勤矩陣總和的資料結構。
 type WorkspaceAttendanceMatrixSum struct {
 	Holidays   int     `json:"holidays"`
 	LeaveHours float64 `json:"leave_hours"`
@@ -295,41 +295,41 @@ type WorkspaceAttendanceMatrixSum struct {
 	Workdays   int     `json:"workdays"`
 }
 
-// WorkspaceClockMatrix contains raw clock rows and abnormal records.
+// WorkspaceClockMatrix 定義工作區打卡矩陣的資料結構。
 type WorkspaceClockMatrix struct {
 	Abnormals []WorkspaceClockAbnormal `json:"abnormals"`
 	Rows      []WorkspaceClockRow      `json:"rows"`
 	Summary   WorkspaceClockSummary    `json:"summary"`
 }
 
-// WorkspaceClockAbnormal identifies one abnormal clock day.
+// WorkspaceClockAbnormal 定義工作區打卡 abnormal 的資料結構。
 type WorkspaceClockAbnormal struct {
 	Date     WorkspaceDate         `json:"date"`
 	Employee WorkspaceEmployeeCard `json:"employee"`
 	Record   WorkspaceDayCell      `json:"record"`
 }
 
-// WorkspaceClockRow is one employee row in the clock matrix.
+// WorkspaceClockRow 定義工作區打卡列的資料結構。
 type WorkspaceClockRow struct {
 	Employee WorkspaceEmployeeCard `json:"employee"`
 	Cells    []WorkspaceDayCell    `json:"cells"`
 }
 
-// WorkspaceClockSummary summarizes the clock matrix.
+// WorkspaceClockSummary 定義工作區打卡摘要的資料結構。
 type WorkspaceClockSummary struct {
 	AbnormalDays   int `json:"abnormal_days"`
 	AbnormalPeople int `json:"abnormal_people"`
 	NormalDays     int `json:"normal_days"`
 }
 
-// WorkspaceAdminsResponse projects IAM grants into the HR administrator settings page.
+// WorkspaceAdminsResponse 定義工作區 admins 回應的資料結構。
 type WorkspaceAdminsResponse struct {
 	Admins     []WorkspaceAdmin          `json:"admins"`
 	Candidates []WorkspaceAdminCandidate `json:"candidates"`
 	Sections   []WorkspaceAdminSection   `json:"sections"`
 }
 
-// WorkspaceAdmin is one account with HR workspace administration permissions.
+// WorkspaceAdmin 定義工作區管理員的資料結構。
 type WorkspaceAdmin struct {
 	ID          string            `json:"id"`
 	AccountID   string            `json:"account_id"`
@@ -343,7 +343,7 @@ type WorkspaceAdmin struct {
 	Permissions map[string]string `json:"permissions"`
 }
 
-// WorkspaceAdminCandidate is one employee/account that can be granted HR admin access.
+// WorkspaceAdminCandidate 定義工作區管理員候選的資料結構。
 type WorkspaceAdminCandidate struct {
 	ID        string `json:"id"`
 	AccountID string `json:"account_id"`
@@ -354,20 +354,20 @@ type WorkspaceAdminCandidate struct {
 	Title     string `json:"title"`
 }
 
-// WorkspaceAdminSection describes one permission group displayed by the admin settings page.
+// WorkspaceAdminSection 定義工作區管理員區段的資料結構。
 type WorkspaceAdminSection struct {
 	Group string                      `json:"group"`
 	Items []WorkspaceAdminSectionItem `json:"items"`
 }
 
-// WorkspaceAdminSectionItem describes one editable permission column.
+// WorkspaceAdminSectionItem 定義工作區管理員區段項目的資料結構。
 type WorkspaceAdminSectionItem struct {
 	Key   string `json:"key"`
 	Label string `json:"label"`
 	Icon  string `json:"icon"`
 }
 
-// WorkspaceAuditLogQuery filters the workspace audit log projection.
+// WorkspaceAuditLogQuery 定義工作區稽核 log 查詢的資料結構。
 type WorkspaceAuditLogQuery struct {
 	OperatorID string `json:"operator_id,omitempty"`
 	Type       string `json:"type,omitempty"`
@@ -376,7 +376,7 @@ type WorkspaceAuditLogQuery struct {
 	Keyword    string `json:"keyword,omitempty"`
 }
 
-// WorkspaceAuditLog is the page-level audit log projection.
+// WorkspaceAuditLog 定義工作區稽核 log 的資料結構。
 type WorkspaceAuditLog struct {
 	ID       string `json:"id"`
 	Time     string `json:"time"`

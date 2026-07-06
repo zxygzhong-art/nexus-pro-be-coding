@@ -11,6 +11,7 @@ import (
 	"nexus-pro-be/internal/repository/memory"
 )
 
+// TestAuthzOutboxProcessorWritesOpenFGATupleAndMarksSucceeded 驗證授權 outbox processor writes OpenFGA tuple and marks succeeded。
 func TestAuthzOutboxProcessorWritesOpenFGATupleAndMarksSucceeded(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 17, 8, 0, 0, 0, time.UTC)
@@ -56,6 +57,7 @@ func TestAuthzOutboxProcessorWritesOpenFGATupleAndMarksSucceeded(t *testing.T) {
 	}
 }
 
+// TestAuthzOutboxProcessorRetriesFailedOpenFGATuple 驗證授權 outbox processor retries failed OpenFGA tuple。
 func TestAuthzOutboxProcessorRetriesFailedOpenFGATuple(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 17, 8, 0, 0, 0, time.UTC)
@@ -110,6 +112,7 @@ type recordingTupleWriter struct {
 	changes []domain.AuthzRelationshipTupleChange
 }
 
+// WriteRelationshipTuples 驗證關係 tuple。
 func (w *recordingTupleWriter) WriteRelationshipTuples(_ context.Context, changes []domain.AuthzRelationshipTupleChange) error {
 	w.changes = append(w.changes, changes...)
 	return w.err

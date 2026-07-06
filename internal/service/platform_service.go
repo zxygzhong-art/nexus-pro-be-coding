@@ -17,17 +17,17 @@ const (
 	platformFormDesignSchemaKey = "workspace_design"
 )
 
-// PlatformService builds read-only OA page projections from existing domain services.
+// PlatformService 定義平台服務的資料結構。
 type PlatformService struct {
 	*Service
 }
 
-// Platform returns the OA workbench projection service.
+// Platform 處理平台的服務流程。
 func (c *Service) Platform() PlatformService {
 	return PlatformService{Service: c}
 }
 
-// Home returns the first-screen workbench widgets used by the frontend.
+// Home 處理首頁的服務流程。
 func (c PlatformService) Home(ctx RequestContext) (PlatformHomeResponse, error) {
 	clockSummary, err := c.clockSummary(ctx)
 	if err != nil {
@@ -40,7 +40,7 @@ func (c PlatformService) Home(ctx RequestContext) (PlatformHomeResponse, error) 
 	}, nil
 }
 
-// ListAssistants returns assistant cards filtered by tag and keyword.
+// ListAssistants 列出助理的服務流程。
 func (c PlatformService) ListAssistants(_ RequestContext, query PlatformAssistantsQuery) (PlatformAssistantsResponse, error) {
 	tag := strings.ToLower(strings.TrimSpace(query.Tag))
 	search := strings.ToLower(strings.TrimSpace(query.Search))
@@ -62,7 +62,7 @@ func (c PlatformService) ListAssistants(_ RequestContext, query PlatformAssistan
 	}, nil
 }
 
-// Forms returns the employee self-service form catalog and current-account applications.
+// Forms 處理表單的服務流程。
 func (c PlatformService) Forms(ctx RequestContext) (PlatformFormsResponse, error) {
 	applications, drafts, err := c.formInstances(ctx)
 	if err != nil {
@@ -79,7 +79,7 @@ func (c PlatformService) Forms(ctx RequestContext) (PlatformFormsResponse, error
 	}, nil
 }
 
-// Tasks returns task records, todos, clock summary, and task assistant messages.
+// Tasks 處理任務的服務流程。
 func (c PlatformService) Tasks(ctx RequestContext) (PlatformTasksResponse, error) {
 	clockSummary, err := c.clockSummary(ctx)
 	if err != nil {
@@ -100,7 +100,7 @@ func (c PlatformService) Tasks(ctx RequestContext) (PlatformTasksResponse, error
 	}, nil
 }
 
-// CreateTaskItem stores one current-account work-log item for the task page.
+// CreateTaskItem 建立任務項目的服務流程。
 func (c PlatformService) CreateTaskItem(ctx RequestContext, input CreatePlatformTaskItemInput) (PlatformTaskItem, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -126,7 +126,7 @@ func (c PlatformService) CreateTaskItem(ctx RequestContext, input CreatePlatform
 	return platformTaskItemFromRecord(record), nil
 }
 
-// UpdateTaskItem patches one current-account work-log item.
+// UpdateTaskItem 更新任務項目的服務流程。
 func (c PlatformService) UpdateTaskItem(ctx RequestContext, id string, input UpdatePlatformTaskItemInput) (PlatformTaskItem, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -164,7 +164,7 @@ func (c PlatformService) UpdateTaskItem(ctx RequestContext, id string, input Upd
 	return platformTaskItemFromRecord(record), nil
 }
 
-// DeleteTaskItem removes one current-account work-log item.
+// DeleteTaskItem 刪除任務項目的服務流程。
 func (c PlatformService) DeleteTaskItem(ctx RequestContext, id string) (PlatformTaskItem, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -180,7 +180,7 @@ func (c PlatformService) DeleteTaskItem(ctx RequestContext, id string) (Platform
 	return platformTaskItemFromRecord(record), nil
 }
 
-// CreateTaskTodo stores one current-account sidebar todo.
+// CreateTaskTodo 建立任務待辦的服務流程。
 func (c PlatformService) CreateTaskTodo(ctx RequestContext, input CreatePlatformTaskTodoInput) (PlatformTaskTodo, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -203,7 +203,7 @@ func (c PlatformService) CreateTaskTodo(ctx RequestContext, input CreatePlatform
 	return platformTaskTodoFromRecord(record), nil
 }
 
-// UpdateTaskTodo patches one current-account sidebar todo.
+// UpdateTaskTodo 更新任務待辦的服務流程。
 func (c PlatformService) UpdateTaskTodo(ctx RequestContext, id string, input UpdatePlatformTaskTodoInput) (PlatformTaskTodo, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -236,7 +236,7 @@ func (c PlatformService) UpdateTaskTodo(ctx RequestContext, id string, input Upd
 	return platformTaskTodoFromRecord(record), nil
 }
 
-// DeleteTaskTodo removes one current-account sidebar todo.
+// DeleteTaskTodo 刪除任務待辦的服務流程。
 func (c PlatformService) DeleteTaskTodo(ctx RequestContext, id string) (PlatformTaskTodo, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -252,7 +252,7 @@ func (c PlatformService) DeleteTaskTodo(ctx RequestContext, id string) (Platform
 	return platformTaskTodoFromRecord(record), nil
 }
 
-// ConvertTaskTodo turns a todo into a work-log item and marks the todo done atomically.
+// ConvertTaskTodo 處理 convert 任務待辦的服務流程。
 func (c PlatformService) ConvertTaskTodo(ctx RequestContext, id string, input ConvertPlatformTaskTodoInput) (PlatformTaskItem, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -305,7 +305,7 @@ func (c PlatformService) ConvertTaskTodo(ctx RequestContext, id string, input Co
 	return out, nil
 }
 
-// Workspace returns the workspace settings aggregate expected by the frontend.
+// Workspace 處理工作區的服務流程。
 func (c PlatformService) Workspace(ctx RequestContext) (PlatformWorkspaceResponse, error) {
 	admins, err := c.Service.Workspace().WorkspaceAdmins(ctx)
 	if err != nil {
@@ -331,7 +331,7 @@ func (c PlatformService) Workspace(ctx RequestContext) (PlatformWorkspaceRespons
 	}, nil
 }
 
-// UpdateWorkspaceOrganizationManager persists one employee's manager link and returns the refreshed organization projection.
+// UpdateWorkspaceOrganizationManager 更新工作區 organization 主管的服務流程。
 func (c PlatformService) UpdateWorkspaceOrganizationManager(ctx RequestContext, displayID string, input UpdateWorkspaceOrganizationManagerInput) (WorkspaceOrganizationResponse, error) {
 	if input.ParentID == nil {
 		return WorkspaceOrganizationResponse{}, BadRequest("parent_id is required")
@@ -404,7 +404,7 @@ func (c PlatformService) UpdateWorkspaceOrganizationManager(ctx RequestContext, 
 	return c.WorkspaceOrganization(ctx)
 }
 
-// CreateWorkspaceAdmin grants workspace-admin permissions to an account-bound employee.
+// CreateWorkspaceAdmin 建立工作區管理員的服務流程。
 func (c PlatformService) CreateWorkspaceAdmin(ctx RequestContext, input CreateWorkspaceAdminInput) (WorkspaceAdminsResponse, error) {
 	account, employee, err := c.workspaceAdminTarget(ctx, input.EmployeeID)
 	if err != nil {
@@ -413,7 +413,7 @@ func (c PlatformService) CreateWorkspaceAdmin(ctx RequestContext, input CreateWo
 	return c.saveWorkspaceAdminPermissions(ctx, account, employee, input.Permissions, ActionCreate, "platform.workspace.admin.create")
 }
 
-// UpdateWorkspaceAdminPermissions replaces one workspace admin's managed permission set.
+// UpdateWorkspaceAdminPermissions 更新工作區管理員權限的服務流程。
 func (c PlatformService) UpdateWorkspaceAdminPermissions(ctx RequestContext, displayID string, input UpdateWorkspaceAdminPermissionsInput) (WorkspaceAdminsResponse, error) {
 	account, employee, err := c.workspaceAdminTarget(ctx, displayID)
 	if err != nil {
@@ -422,7 +422,7 @@ func (c PlatformService) UpdateWorkspaceAdminPermissions(ctx RequestContext, dis
 	return c.saveWorkspaceAdminPermissions(ctx, account, employee, input.Permissions, ActionUpdate, "platform.workspace.admin.update")
 }
 
-// DeleteWorkspaceAdmin removes workspace-managed admin permissions from one account.
+// DeleteWorkspaceAdmin 刪除工作區管理員的服務流程。
 func (c PlatformService) DeleteWorkspaceAdmin(ctx RequestContext, displayID string) (WorkspaceAdminsResponse, error) {
 	account, employee, err := c.workspaceAdminTarget(ctx, displayID)
 	if err != nil {
@@ -431,7 +431,7 @@ func (c PlatformService) DeleteWorkspaceAdmin(ctx RequestContext, displayID stri
 	return c.saveWorkspaceAdminPermissions(ctx, account, employee, map[string]string{}, ActionDelete, "platform.workspace.admin.delete")
 }
 
-// CreateWorkspaceFormDesign persists one form-builder template through the workspace settings surface.
+// CreateWorkspaceFormDesign 建立工作區表單 design 的服務流程。
 func (c PlatformService) CreateWorkspaceFormDesign(ctx RequestContext, input SaveWorkspaceFormDesignInput) (PlatformFormDesign, error) {
 	key := workspaceFormDesignKey(input.ID, input.Name, c.Now())
 	if strings.TrimSpace(input.Name) == "" {
@@ -492,7 +492,7 @@ func (c PlatformService) CreateWorkspaceFormDesign(ctx RequestContext, input Sav
 	return c.formDesign(ctx)
 }
 
-// UpdateWorkspaceFormDesign patches builder metadata, fields, stages, or enabled state.
+// UpdateWorkspaceFormDesign 更新工作區表單 design 的服務流程。
 func (c PlatformService) UpdateWorkspaceFormDesign(ctx RequestContext, id string, input UpdateWorkspaceFormDesignInput) (PlatformFormDesign, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -563,7 +563,7 @@ func (c PlatformService) UpdateWorkspaceFormDesign(ctx RequestContext, id string
 	return c.formDesign(ctx)
 }
 
-// DeleteWorkspaceFormDesign soft-deletes one template so historical form instances remain readable.
+// DeleteWorkspaceFormDesign 刪除工作區表單 design 的服務流程。
 func (c PlatformService) DeleteWorkspaceFormDesign(ctx RequestContext, id string) (PlatformFormDesign, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -605,11 +605,12 @@ func (c PlatformService) DeleteWorkspaceFormDesign(ctx RequestContext, id string
 	return c.formDesign(ctx)
 }
 
-// WorkspaceAuditLogs exposes the protected workspace audit-log projection through the platform namespace.
+// WorkspaceAuditLogs 處理工作區稽核 logs 的服務流程。
 func (c PlatformService) WorkspaceAuditLogs(ctx RequestContext, query WorkspaceAuditLogQuery, page PageRequest) (PageResponse[WorkspaceAuditLog], error) {
 	return c.Service.Workspace().WorkspaceAuditLogs(ctx, query, page)
 }
 
+// saveWorkspaceAdminPermissions 儲存工作區管理員權限的服務流程。
 func (c PlatformService) saveWorkspaceAdminPermissions(ctx RequestContext, account Account, employee Employee, matrix map[string]string, action Action, auditAction string) (WorkspaceAdminsResponse, error) {
 	permissions, err := workspaceAdminPermissionsFromMatrix(matrix)
 	if err != nil {
@@ -656,6 +657,7 @@ func (c PlatformService) saveWorkspaceAdminPermissions(ctx RequestContext, accou
 	return c.Service.Workspace().WorkspaceAdmins(ctx)
 }
 
+// workspaceAdminTarget 處理工作區管理員 target 的服務流程。
 func (c PlatformService) workspaceAdminTarget(ctx RequestContext, displayID string) (Account, Employee, error) {
 	trimmedID := strings.TrimSpace(displayID)
 	if trimmedID == "" {
@@ -685,6 +687,7 @@ func (c PlatformService) workspaceAdminTarget(ctx RequestContext, displayID stri
 	return Account{}, Employee{}, NotFound("account", trimmedID)
 }
 
+// upsertWorkspaceAdminPermissionSet 處理 upsert 工作區管理員權限集合的服務流程。
 func (c PlatformService) upsertWorkspaceAdminPermissionSet(ctx RequestContext, account Account, employee Employee, permissions []Permission) error {
 	permissionSetID := workspaceAdminPermissionSetID(account.ID)
 	createdAt := c.Now()
@@ -703,6 +706,7 @@ func (c PlatformService) upsertWorkspaceAdminPermissionSet(ctx RequestContext, a
 	})
 }
 
+// ensureWorkspaceAdminAssignment 確保工作區管理員指派的服務流程。
 func (c PlatformService) ensureWorkspaceAdminAssignment(ctx RequestContext, account Account) error {
 	permissionSetID := workspaceAdminPermissionSetID(account.ID)
 	assignments, err := c.store.ListPermissionSetAssignmentsForPrincipal(goContext(ctx), ctx.TenantID, string(PrincipalTypeAccount), account.ID)
@@ -725,7 +729,7 @@ func (c PlatformService) ensureWorkspaceAdminAssignment(ctx RequestContext, acco
 	})
 }
 
-// workspaceAuditLogsForAggregate keeps the settings aggregate usable without bypassing the protected audit-log route.
+// workspaceAuditLogsForAggregate 處理工作區稽核 logs for aggregate 的服務流程。
 func (c PlatformService) workspaceAuditLogsForAggregate(ctx RequestContext) ([]WorkspaceAuditLog, error) {
 	auditLogs, err := c.Service.Workspace().WorkspaceAuditLogs(ctx, WorkspaceAuditLogQuery{}, PageRequest{Page: 1, PageSize: 50, Sort: "created_at_desc"})
 	if err != nil {
@@ -737,12 +741,12 @@ func (c PlatformService) workspaceAuditLogsForAggregate(ctx RequestContext) ([]W
 	return auditLogs.Items, nil
 }
 
-// WorkspaceOverview delegates the frontend-compatible overview path to the workspace read model.
+// WorkspaceOverview 處理工作區總覽的服務流程。
 func (c PlatformService) WorkspaceOverview(ctx RequestContext, query WorkspaceOverviewQuery) (WorkspaceOverviewResponse, error) {
 	return c.Service.Workspace().WorkspaceOverview(ctx, query)
 }
 
-// WorkspaceEmployees returns the filtered employee table payload expected by the OA workspace page.
+// WorkspaceEmployees 處理工作區員工的服務流程。
 func (c PlatformService) WorkspaceEmployees(ctx RequestContext, query PlatformWorkspaceEmployeesQuery) (PlatformWorkspaceEmployeesResponse, error) {
 	workspace := c.Service.Workspace()
 	employees, err := workspace.visibleWorkspaceEmployees(ctx, "platform.workspace.employees")
@@ -770,7 +774,7 @@ func (c PlatformService) WorkspaceEmployees(ctx RequestContext, query PlatformWo
 	}, nil
 }
 
-// platformWorkspaceEmployeeMatches applies UI table filters after authz scoping.
+// platformWorkspaceEmployeeMatches 處理平台工作區員工 matches。
 func platformWorkspaceEmployeeMatches(query PlatformWorkspaceEmployeesQuery, employee Employee, card WorkspaceEmployeeCard) bool {
 	departmentID := strings.TrimSpace(query.DepartmentID)
 	if departmentID != "" && employee.OrgUnitID != departmentID {
@@ -805,22 +809,22 @@ func platformWorkspaceEmployeeMatches(query PlatformWorkspaceEmployeesQuery, emp
 	return strings.Contains(haystack, keyword)
 }
 
-// WorkspaceOrganization delegates the frontend-compatible organization path to the workspace read model.
+// WorkspaceOrganization 處理工作區 organization 的服務流程。
 func (c PlatformService) WorkspaceOrganization(ctx RequestContext) (WorkspaceOrganizationResponse, error) {
 	return c.Service.Workspace().WorkspaceOrganization(ctx)
 }
 
-// WorkspaceAttendance delegates the frontend-compatible attendance path to the workspace read model.
+// WorkspaceAttendance 處理工作區考勤的服務流程。
 func (c PlatformService) WorkspaceAttendance(ctx RequestContext, query WorkspaceAttendanceQuery) (WorkspaceAttendanceResponse, error) {
 	return c.Service.Workspace().WorkspaceAttendance(ctx, query)
 }
 
-// WorkspaceTurnover delegates the frontend-compatible turnover path to the workspace read model.
+// WorkspaceTurnover 處理工作區人員異動的服務流程。
 func (c PlatformService) WorkspaceTurnover(ctx RequestContext, query WorkspaceTurnoverQuery) (WorkspaceTurnoverResponse, error) {
 	return c.Service.Workspace().WorkspaceTurnover(ctx, query)
 }
 
-// Insights returns compact report payloads that match the current FE insight schemas.
+// Insights 處理洞察的服務流程。
 func (c PlatformService) Insights(ctx RequestContext, query PlatformInsightsQuery) (PlatformInsightsResponse, error) {
 	month := strings.TrimSpace(query.Month)
 	if month == "" {
@@ -842,6 +846,7 @@ func (c PlatformService) Insights(ctx RequestContext, query PlatformInsightsQuer
 	}, nil
 }
 
+// clockSummary 處理打卡摘要的服務流程。
 func (c PlatformService) clockSummary(ctx RequestContext) (PlatformClockSummary, error) {
 	status, err := c.Service.Attendance().AttendanceClockStatus(ctx)
 	if err != nil {
@@ -866,6 +871,7 @@ func (c PlatformService) clockSummary(ctx RequestContext) (PlatformClockSummary,
 	}, nil
 }
 
+// monthlyClockAndLeaveSummary 處理每月打卡 and 請假摘要的服務流程。
 func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employeeID string, now time.Time) (int, float64, float64) {
 	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 	end := start.AddDate(0, 1, 0)
@@ -903,6 +909,7 @@ func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employe
 	return len(days), float64(len(days)) * workspaceDayHours, leaveHours / workspaceDayHours
 }
 
+// formInstances 處理表單實例的服務流程。
 func (c PlatformService) formInstances(ctx RequestContext) ([]PlatformFormApplication, []PlatformFormDraft, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -962,6 +969,7 @@ func (c PlatformService) formInstances(ctx RequestContext) ([]PlatformFormApplic
 	return applications, drafts, nil
 }
 
+// taskProjection 處理任務 projection 的服務流程。
 func (c PlatformService) taskProjection(ctx RequestContext) ([]PlatformTaskRecord, []PlatformTaskTodo, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -1027,6 +1035,7 @@ func (c PlatformService) taskProjection(ctx RequestContext) ([]PlatformTaskRecor
 	return records, todos, nil
 }
 
+// currentPlatformTaskItem 處理目前平台任務項目的服務流程。
 func (c PlatformService) currentPlatformTaskItem(ctx RequestContext, accountID string, id string) (PlatformTaskRecordItem, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -1042,6 +1051,7 @@ func (c PlatformService) currentPlatformTaskItem(ctx RequestContext, accountID s
 	return item, nil
 }
 
+// currentPlatformTaskTodo 處理目前平台任務待辦的服務流程。
 func (c PlatformService) currentPlatformTaskTodo(ctx RequestContext, accountID string, id string) (PlatformTaskTodoRecord, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -1057,6 +1067,7 @@ func (c PlatformService) currentPlatformTaskTodo(ctx RequestContext, accountID s
 	return todo, nil
 }
 
+// platformTaskItemRecord 處理平台任務項目 record 的服務流程。
 func (c PlatformService) platformTaskItemRecord(ctx RequestContext, accountID string, item PlatformTaskRecordItem) (PlatformTaskRecordItem, error) {
 	title := strings.TrimSpace(item.Title)
 	if title == "" {
@@ -1085,6 +1096,7 @@ func (c PlatformService) platformTaskItemRecord(ctx RequestContext, accountID st
 	return item, nil
 }
 
+// platformTaskTodoRecord 處理平台任務待辦 record 的服務流程。
 func (c PlatformService) platformTaskTodoRecord(ctx RequestContext, accountID string, todo PlatformTaskTodoRecord) (PlatformTaskTodoRecord, error) {
 	text := strings.TrimSpace(todo.Text)
 	if text == "" {
@@ -1115,6 +1127,7 @@ func (c PlatformService) platformTaskTodoRecord(ctx RequestContext, accountID st
 	return todo, nil
 }
 
+// platformTaskItemFromRecord 處理平台任務項目 來源 record。
 func platformTaskItemFromRecord(item PlatformTaskRecordItem) PlatformTaskItem {
 	return PlatformTaskItem{
 		ID:       item.ID,
@@ -1126,6 +1139,7 @@ func platformTaskItemFromRecord(item PlatformTaskRecordItem) PlatformTaskItem {
 	}
 }
 
+// platformTaskTodoFromRecord 處理平台任務待辦 來源 record。
 func platformTaskTodoFromRecord(todo PlatformTaskTodoRecord) PlatformTaskTodo {
 	return PlatformTaskTodo{
 		ID:   todo.ID,
@@ -1135,6 +1149,7 @@ func platformTaskTodoFromRecord(todo PlatformTaskTodoRecord) PlatformTaskTodo {
 	}
 }
 
+// platformTaskTodoDate 處理平台任務待辦日期。
 func platformTaskTodoDate(todo PlatformTaskTodoRecord) string {
 	if todo.DueDate != "" {
 		if parsed, err := time.Parse(platformDateLayout, todo.DueDate); err == nil {
@@ -1148,6 +1163,7 @@ func platformTaskTodoDate(todo PlatformTaskTodoRecord) string {
 	return ""
 }
 
+// platformWeekdayFromDate 處理平台星期 來源 日期。
 func platformWeekdayFromDate(date string) string {
 	parsed, err := time.Parse(platformDateLayout, date)
 	if err != nil {
@@ -1156,6 +1172,7 @@ func platformWeekdayFromDate(date string) string {
 	return platformWeekday(parsed)
 }
 
+// normalizePlatformWorkDate 正規化平台 work 日期。
 func normalizePlatformWorkDate(value string, fallback time.Time) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -1170,6 +1187,7 @@ func normalizePlatformWorkDate(value string, fallback time.Time) (string, error)
 	return "", BadRequest("work_date must be YYYY/MM/DD or YYYY-MM-DD")
 }
 
+// normalizeOptionalPlatformDate 正規化可選平台日期。
 func normalizeOptionalPlatformDate(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -1178,6 +1196,7 @@ func normalizeOptionalPlatformDate(value string) (string, error) {
 	return normalizePlatformWorkDate(value, time.Time{})
 }
 
+// validatePlatformTaskHours 驗證平台任務小時。
 func validatePlatformTaskHours(hours float64) error {
 	if hours <= 0 || hours > 24 {
 		return BadRequest("hours must be greater than zero and no more than 24")
@@ -1188,6 +1207,7 @@ func validatePlatformTaskHours(hours float64) error {
 	return nil
 }
 
+// firstNonEmpty 取得第一個non 空值。
 func firstNonEmpty(value string, fallback string) string {
 	value = strings.TrimSpace(value)
 	if value != "" {
@@ -1196,6 +1216,7 @@ func firstNonEmpty(value string, fallback string) string {
 	return fallback
 }
 
+// formDesign 處理表單 design 的服務流程。
 func (c PlatformService) formDesign(ctx RequestContext) (PlatformFormDesign, error) {
 	templates, err := c.Service.Workflow().ListFormTemplates(ctx)
 	if err != nil {
@@ -1243,6 +1264,7 @@ func (c PlatformService) formDesign(ctx RequestContext) (PlatformFormDesign, err
 	}, nil
 }
 
+// currentWorkspaceFormTemplate 處理目前工作區表單範本的服務流程。
 func (c PlatformService) currentWorkspaceFormTemplate(ctx RequestContext, id string) (FormTemplate, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -1261,6 +1283,7 @@ func (c PlatformService) currentWorkspaceFormTemplate(ctx RequestContext, id str
 	return FormTemplate{}, NotFound("form template", id)
 }
 
+// workspaceFormDesignKey 處理工作區表單 design key。
 func workspaceFormDesignKey(id string, name string, now time.Time) string {
 	id = workspaceFormDesignSlug(id)
 	if id != "" {
@@ -1273,6 +1296,7 @@ func workspaceFormDesignKey(id string, name string, now time.Time) string {
 	return fmt.Sprintf("custom-%d", now.UnixNano())
 }
 
+// workspaceFormDesignSlug 處理工作區表單 design slug。
 func workspaceFormDesignSlug(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	var b strings.Builder
@@ -1292,6 +1316,7 @@ func workspaceFormDesignSlug(value string) string {
 	return strings.Trim(b.String(), "-")
 }
 
+// workspaceFormDesignInputFromTemplate 處理工作區表單 design 輸入 來源 範本。
 func workspaceFormDesignInputFromTemplate(template FormTemplate) SaveWorkspaceFormDesignInput {
 	enabled := platformTemplateEnabled(template.Schema)
 	return SaveWorkspaceFormDesignInput{
@@ -1306,6 +1331,7 @@ func workspaceFormDesignInputFromTemplate(template FormTemplate) SaveWorkspaceFo
 	}
 }
 
+// workspaceFormDesignSchema 處理工作區表單 design schema。
 func workspaceFormDesignSchema(base map[string]any, input SaveWorkspaceFormDesignInput, enabled bool, deleted bool, updatedAt time.Time) map[string]any {
 	schema := utils.CopyStringMap(base)
 	if schema == nil {
@@ -1333,6 +1359,7 @@ func workspaceFormDesignSchema(base map[string]any, input SaveWorkspaceFormDesig
 	return schema
 }
 
+// platformTemplateDesign 處理平台範本 design。
 func platformTemplateDesign(schema map[string]any) map[string]any {
 	if len(schema) == 0 {
 		return nil
@@ -1343,14 +1370,17 @@ func platformTemplateDesign(schema map[string]any) map[string]any {
 	return nil
 }
 
+// platformTemplateDeleted 處理平台範本 deleted。
 func platformTemplateDeleted(schema map[string]any) bool {
 	return platformDesignBool(platformTemplateDesign(schema), "deleted", false)
 }
 
+// platformTemplateEnabled 處理平台範本 enabled。
 func platformTemplateEnabled(schema map[string]any) bool {
 	return platformDesignBool(platformTemplateDesign(schema), "enabled", true)
 }
 
+// platformTemplateIcon 處理平台範本 icon。
 func platformTemplateIcon(template FormTemplate) string {
 	if icon := platformDesignString(platformTemplateDesign(template.Schema), "icon"); icon != "" {
 		return icon
@@ -1365,6 +1395,7 @@ func platformTemplateIcon(template FormTemplate) string {
 	return "📋"
 }
 
+// platformTemplateCategory 處理平台範本分類。
 func platformTemplateCategory(template FormTemplate) string {
 	if category := platformDesignString(platformTemplateDesign(template.Schema), "category"); category != "" {
 		return category
@@ -1372,6 +1403,7 @@ func platformTemplateCategory(template FormTemplate) string {
 	return platformFormCategory(template.Key)
 }
 
+// platformTemplateDesc 處理平台範本 desc。
 func platformTemplateDesc(template FormTemplate) string {
 	if desc := platformDesignString(platformTemplateDesign(template.Schema), "desc"); desc != "" {
 		return desc
@@ -1379,6 +1411,7 @@ func platformTemplateDesc(template FormTemplate) string {
 	return template.Description
 }
 
+// platformTemplateUpdatedAt 處理平台範本 updated at。
 func platformTemplateUpdatedAt(schema map[string]any, fallback time.Time) string {
 	if raw := platformDesignString(platformTemplateDesign(schema), "updated_at"); raw != "" {
 		if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
@@ -1388,6 +1421,7 @@ func platformTemplateUpdatedAt(schema map[string]any, fallback time.Time) string
 	return platformTime(fallback)
 }
 
+// platformTemplateFields 處理平台範本欄位。
 func platformTemplateFields(schema map[string]any) []PlatformFormBuilderField {
 	if fields, ok := platformDecodeSlice[PlatformFormBuilderField](platformTemplateDesign(schema)["fields"]); ok {
 		return fields
@@ -1395,6 +1429,7 @@ func platformTemplateFields(schema map[string]any) []PlatformFormBuilderField {
 	return platformFormBuilderContract().Fields
 }
 
+// platformTemplateStages 處理平台範本 stages。
 func platformTemplateStages(schema map[string]any) []PlatformFormBuilderStage {
 	if stages, ok := platformDecodeSlice[PlatformFormBuilderStage](platformTemplateDesign(schema)["stages"]); ok {
 		return stages
@@ -1402,6 +1437,7 @@ func platformTemplateStages(schema map[string]any) []PlatformFormBuilderStage {
 	return platformFormBuilderContract().Stages
 }
 
+// platformDecodeSlice 處理平台 decode slice。
 func platformDecodeSlice[T any](value any) ([]T, bool) {
 	if value == nil {
 		return nil, false
@@ -1420,6 +1456,7 @@ func platformDecodeSlice[T any](value any) ([]T, bool) {
 	return out, true
 }
 
+// platformDesignString 處理平台 design 字串。
 func platformDesignString(values map[string]any, key string) string {
 	if len(values) == 0 {
 		return ""
@@ -1430,6 +1467,7 @@ func platformDesignString(values map[string]any, key string) string {
 	return ""
 }
 
+// platformDesignBool 處理平台 design 布林值。
 func platformDesignBool(values map[string]any, key string, fallback bool) bool {
 	if len(values) == 0 {
 		return fallback
@@ -1440,6 +1478,7 @@ func platformDesignBool(values map[string]any, key string, fallback bool) bool {
 	return fallback
 }
 
+// platformFormBuilderContract 處理平台表單 builder contract。
 func platformFormBuilderContract() PlatformFormBuilderContract {
 	return PlatformFormBuilderContract{
 		Layouts: []PlatformFormBuilderLayout{
@@ -1465,6 +1504,7 @@ func platformFormBuilderContract() PlatformFormBuilderContract {
 	}
 }
 
+// insightReports 處理 insight reports 的服務流程。
 func (c PlatformService) insightReports(month string, overview WorkspaceOverviewResponse) map[string]any {
 	active := overview.HRSummary.Active
 	hires := overview.HRSummary.Hires
@@ -1519,6 +1559,7 @@ func (c PlatformService) insightReports(month string, overview WorkspaceOverview
 	}
 }
 
+// platformAssistantCatalog 處理平台助理目錄。
 func platformAssistantCatalog() []PlatformAssistant {
 	return []PlatformAssistant{
 		{ID: "employee-care", Emoji: "🙋", Title: "員工疑難雜症助理", Desc: "提供員工諮詢、申訴與 IT 報修引導。", Tag: "workflow"},
@@ -1532,6 +1573,7 @@ func platformAssistantCatalog() []PlatformAssistant {
 	}
 }
 
+// firstPlatformAssistants 取得第一個平台助理。
 func firstPlatformAssistants(limit int) []PlatformAssistant {
 	items := platformAssistantCatalog()
 	if limit > 0 && len(items) > limit {
@@ -1540,12 +1582,14 @@ func firstPlatformAssistants(limit int) []PlatformAssistant {
 	return append([]PlatformAssistant(nil), items...)
 }
 
+// platformAssistantMessages 處理平台助理 messages。
 func platformAssistantMessages() []PlatformChatMessage {
 	return []PlatformChatMessage{
 		{ID: "m1", Role: "assistant", Avatar: "🤖", Content: "哈囉！告訴我你想處理的事情，我能幫你挑選最合適的助理。"},
 	}
 }
 
+// platformHomeFormColumns 處理平台首頁表單 columns。
 func platformHomeFormColumns() []PlatformFormColumn {
 	columns := platformFormColumns()
 	if len(columns) > 2 {
@@ -1554,6 +1598,7 @@ func platformHomeFormColumns() []PlatformFormColumn {
 	return columns
 }
 
+// workspaceAdminPermissionsFromMatrix 處理工作區管理員權限 來源 矩陣。
 func workspaceAdminPermissionsFromMatrix(matrix map[string]string) ([]Permission, error) {
 	permissions := make([]Permission, 0)
 	seen := map[string]struct{}{}
@@ -1586,6 +1631,7 @@ func workspaceAdminPermissionsFromMatrix(matrix map[string]string) ([]Permission
 	return permissions, nil
 }
 
+// workspaceAdminPermissionSpecs 處理工作區管理員權限 specs。
 func workspaceAdminPermissionSpecs(key string, mode string) []Permission {
 	read := func(resource string, menuKey string) Permission {
 		return workspaceAdminPermission(resource, ActionRead, menuKey)
@@ -1665,18 +1711,22 @@ func workspaceAdminPermissionSpecs(key string, mode string) []Permission {
 	return view
 }
 
+// workspaceAdminPermission 處理工作區管理員權限。
 func workspaceAdminPermission(resource string, action Action, menuKey string) Permission {
 	return Permission{Resource: resource, Action: action, Scope: ScopeAll, MenuKey: menuKey}
 }
 
+// workspaceAdminPermissionSetID 處理工作區管理員權限集合 ID。
 func workspaceAdminPermissionSetID(accountID string) string {
 	return "ps-workspace-admin-" + workspaceAdminSafeID(accountID)
 }
 
+// workspaceAdminAssignmentID 處理工作區管理員指派 ID。
 func workspaceAdminAssignmentID(accountID string) string {
 	return "psa-workspace-admin-" + workspaceAdminSafeID(accountID)
 }
 
+// workspaceAdminSafeID 處理工作區管理員 safe ID。
 func workspaceAdminSafeID(value string) string {
 	replacer := strings.NewReplacer(":", "-", "/", "-", "\\", "-", " ", "-", ".", "-")
 	value = strings.ToLower(strings.TrimSpace(replacer.Replace(value)))
@@ -1686,6 +1736,7 @@ func workspaceAdminSafeID(value string) string {
 	return value
 }
 
+// platformFormColumns 處理平台表單 columns。
 func platformFormColumns() []PlatformFormColumn {
 	return []PlatformFormColumn{
 		{Title: "人事考勤類", Emoji: "👥", Items: []PlatformFormItem{
@@ -1711,6 +1762,7 @@ func platformFormColumns() []PlatformFormColumn {
 	}
 }
 
+// platformFormCategoryNames 處理平台表單分類 names。
 func platformFormCategoryNames() []string {
 	columns := platformFormColumns()
 	out := make([]string, 0, len(columns))
@@ -1720,6 +1772,7 @@ func platformFormCategoryNames() []string {
 	return out
 }
 
+// platformFormCategory 處理平台表單分類。
 func platformFormCategory(templateKey string) string {
 	for _, column := range platformFormColumns() {
 		for _, item := range column.Items {
@@ -1731,6 +1784,7 @@ func platformFormCategory(templateKey string) string {
 	return "其他"
 }
 
+// platformTemplateFlow 處理平台範本 flow。
 func platformTemplateFlow(schema map[string]any) string {
 	if stages, ok := platformDecodeSlice[PlatformFormBuilderStage](platformTemplateDesign(schema)["stages"]); ok {
 		return platformStageFlow(stages)
@@ -1741,6 +1795,7 @@ func platformTemplateFlow(schema map[string]any) string {
 	return "直屬主管 → HR"
 }
 
+// platformStageFlow 處理平台 stage flow。
 func platformStageFlow(stages []PlatformFormBuilderStage) string {
 	labels := make([]string, 0, len(stages))
 	for _, stage := range stages {
@@ -1754,6 +1809,7 @@ func platformStageFlow(stages []PlatformFormBuilderStage) string {
 	return strings.Join(labels, " → ")
 }
 
+// platformFormStatus 處理平台表單狀態。
 func platformFormStatus(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "approved":
@@ -1767,6 +1823,7 @@ func platformFormStatus(status string) string {
 	}
 }
 
+// platformFormSummary 處理平台表單摘要。
 func platformFormSummary(payload map[string]any) string {
 	if len(payload) == 0 {
 		return "已送出"
@@ -1785,6 +1842,7 @@ func platformFormSummary(payload map[string]any) string {
 	return "已送出"
 }
 
+// clockTime 處理打卡時間。
 func clockTime(record *AttendanceClockRecord) *string {
 	if record == nil {
 		return nil
@@ -1793,15 +1851,18 @@ func clockTime(record *AttendanceClockRecord) *string {
 	return &text
 }
 
+// platformDateLabel 處理平台日期 label。
 func platformDateLabel(t time.Time) string {
 	return fmt.Sprintf("%s %s", t.Format(platformDateLayout), platformWeekday(t))
 }
 
+// platformWeekday 處理平台星期。
 func platformWeekday(t time.Time) string {
 	names := []string{"週日", "週一", "週二", "週三", "週四", "週五", "週六"}
 	return names[int(t.Weekday())]
 }
 
+// platformTime 處理平台時間。
 func platformTime(t time.Time) string {
 	if t.IsZero() {
 		return ""
@@ -1809,6 +1870,7 @@ func platformTime(t time.Time) string {
 	return t.Format("2006/01/02 15:04")
 }
 
+// sameYearMonth 處理 same year 月份。
 func sameYearMonth(left, right time.Time) bool {
 	return !left.IsZero() && left.Year() == right.Year() && left.Month() == right.Month()
 }

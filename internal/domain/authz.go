@@ -2,40 +2,40 @@ package domain
 
 import "strings"
 
-// Effect describes whether a permission grants or denies access.
+// Effect 表示 effect。
 type Effect string
 
-// Severity describes the audit severity for an authorization-relevant action.
+// Severity 表示 severity。
 type Severity string
 
-// PrincipalType identifies the kind of IAM principal receiving permissions.
+// PrincipalType 表示 principal type。
 type PrincipalType string
 
-// Scope identifies the data visibility boundary for a permission.
+// Scope 表示範圍。
 type Scope string
 
-// ApplicationCode identifies the product area owning a permission.
+// ApplicationCode 表示 application 碼。
 type ApplicationCode string
 
-// ResourceType identifies the kind of protected resource.
+// ResourceType 表示 resource type。
 type ResourceType string
 
-// Action identifies the operation requested on a resource.
+// Action 表示 action。
 type Action string
 
-// FieldPolicyEffect identifies how a field policy transforms field visibility.
+// FieldPolicyEffect 表示欄位政策 effect。
 type FieldPolicyEffect string
 
-// EventType identifies domain events emitted for audit or authorization sync.
+// EventType 表示事件 type。
 type EventType string
 
-// Permission effects.
+// 下列常數定義此模組使用的固定值。
 const (
 	EffectAllow Effect = "allow"
 	EffectDeny  Effect = "deny"
 )
 
-// Audit severities.
+// 下列常數定義此模組使用的固定值。
 const (
 	SeverityLow      Severity = "low"
 	SeverityMedium   Severity = "medium"
@@ -43,14 +43,14 @@ const (
 	SeverityCritical Severity = "critical"
 )
 
-// IAM principal types.
+// 下列常數定義此模組使用的固定值。
 const (
 	PrincipalTypeAccount       PrincipalType = "account"
 	PrincipalTypeUserGroup     PrincipalType = "user_group"
 	PrincipalTypeAssumableRole PrincipalType = "assumable_role"
 )
 
-// Data scopes used by authorization decisions.
+// 下列常數定義此模組使用的固定值。
 const (
 	ScopeAll               Scope = "all"
 	ScopeSelf              Scope = "self"
@@ -65,7 +65,7 @@ const (
 	ScopeSystem            Scope = "system"
 )
 
-// Application codes used in route policies and permissions.
+// 下列常數定義此模組使用的固定值。
 const (
 	AppPlatform   ApplicationCode = "platform"
 	AppHR         ApplicationCode = "hr"
@@ -76,7 +76,7 @@ const (
 	AppAudit      ApplicationCode = "audit"
 )
 
-// Resource types used in route policies and permissions.
+// 下列常數定義此模組使用的固定值。
 const (
 	ResourceEmployee                  ResourceType = "employee"
 	ResourceEmployeeImport            ResourceType = "employee_import_session"
@@ -97,9 +97,10 @@ const (
 	ResourceKnowledgeArticle          ResourceType = "knowledge_article"
 	ResourceEmployeeCollection        ResourceType = "employee_collection"
 	ResourceFormInstance              ResourceType = "form_instance"
+	ResourceNotification              ResourceType = "notification"
 )
 
-// Action values used in route policies and permissions.
+// 下列常數定義此模組使用的固定值。
 const (
 	ActionRead             Action = "read"
 	ActionCreate           Action = "create"
@@ -116,7 +117,7 @@ const (
 	ActionStatusTransition Action = "status_transition"
 )
 
-// Field policy effects.
+// 下列常數定義此模組使用的固定值。
 const (
 	FieldPolicyEffectAllow    FieldPolicyEffect = "allow"
 	FieldPolicyEffectDeny     FieldPolicyEffect = "deny"
@@ -125,23 +126,23 @@ const (
 	FieldPolicyEffectReadonly FieldPolicyEffect = "readonly"
 )
 
-// OpenFGA relationship event types.
+// 下列常數定義此模組使用的固定值。
 const (
 	EventOpenFGARelationshipWrite  EventType = "openfga.relationship.write"
 	EventOpenFGARelationshipDelete EventType = "openfga.relationship.delete"
 )
 
-// RiskLevel describes whether an action needs stronger approval handling.
+// RiskLevel 表示 risk level。
 type RiskLevel string
 
-// Risk levels used by route policy metadata.
+// 下列常數定義此模組使用的固定值。
 const (
 	RiskNormal   RiskLevel = "normal"
 	RiskHigh     RiskLevel = "high"
 	RiskCritical RiskLevel = "critical"
 )
 
-// RoutePolicy binds an HTTP route to its authorization metadata.
+// RoutePolicy 定義路由政策的資料結構。
 type RoutePolicy struct {
 	Name            string
 	Method          string
@@ -152,7 +153,7 @@ type RoutePolicy struct {
 	RiskLevel       RiskLevel
 }
 
-// RelationshipCheck asks an external relationship engine about one tuple.
+// RelationshipCheck 定義關係 check 的資料結構。
 type RelationshipCheck struct {
 	TenantID string
 	Subject  string
@@ -160,7 +161,7 @@ type RelationshipCheck struct {
 	Object   string
 }
 
-// AuditEvent returns the canonical audit event name for the check request.
+// AuditEvent 處理稽核事件。
 func (r CheckRequest) AuditEvent() string {
 	req := r
 	if req.ApplicationCode == "" || req.ResourceType == "" {
@@ -184,6 +185,7 @@ func (r CheckRequest) AuditEvent() string {
 	return string(req.ApplicationCode) + "." + string(req.ResourceType) + "." + string(req.Action)
 }
 
+// splitResourceName 拆分resource 名稱。
 func splitResourceName(resource string) (string, string) {
 	if resource == "" {
 		return string(AppPlatform), ""
@@ -198,7 +200,7 @@ func splitResourceName(resource string) (string, string) {
 	return string(AppPlatform), resource
 }
 
-// DefaultRoutePolicies is the source-of-truth authorization metadata for API routes.
+// DefaultRoutePolicies 保存預設路由政策。
 var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "me.read", Method: "GET", Path: "/v1/me", ApplicationCode: "platform", ResourceType: "me", Action: "read"},
 	{Name: "me.menus", Method: "GET", Path: "/v1/me/menus", ApplicationCode: "platform", ResourceType: "me", Action: "read"},
@@ -274,6 +276,10 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "platform.task_todo.update", Method: "PATCH", Path: "/v1/platform/tasks/todos/:id", ApplicationCode: "platform", ResourceType: "me", Action: "update"},
 	{Name: "platform.task_todo.delete", Method: "DELETE", Path: "/v1/platform/tasks/todos/:id", ApplicationCode: "platform", ResourceType: "me", Action: "delete"},
 	{Name: "platform.task_todo.convert", Method: "POST", Path: "/v1/platform/tasks/todos/:id/convert", ApplicationCode: "platform", ResourceType: "me", Action: "update"},
+	{Name: "platform.notification.read", Method: "GET", Path: "/v1/notifications", ApplicationCode: "platform", ResourceType: "me", Action: "read"},
+	{Name: "platform.notification.unread_count", Method: "GET", Path: "/v1/notifications/unread-count", ApplicationCode: "platform", ResourceType: "me", Action: "read"},
+	{Name: "platform.notification.read_one", Method: "POST", Path: "/v1/notifications/:id/read", ApplicationCode: "platform", ResourceType: "me", Action: "update"},
+	{Name: "platform.notification.read_all", Method: "POST", Path: "/v1/notifications/read-all", ApplicationCode: "platform", ResourceType: "me", Action: "update"},
 	{Name: "platform.workspace.read", Method: "GET", Path: "/v1/platform/workspace", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
 	{Name: "platform.workspace_admin.create", Method: "POST", Path: "/v1/platform/workspace/admins", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "create", RiskLevel: RiskHigh},
 	{Name: "platform.workspace_admin.update", Method: "PATCH", Path: "/v1/platform/workspace/admins/:id/permissions", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "update", RiskLevel: RiskHigh},

@@ -7,7 +7,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
-// Must marshals a value and returns the type's empty JSON shape for unsupported values.
+// Must 處理 must。
 func Must(v any) []byte {
 	b, err := json.Marshal(v)
 	if err != nil {
@@ -19,7 +19,7 @@ func Must(v any) []byte {
 	return b
 }
 
-// Map decodes a JSON object into a map and returns nil for empty input.
+// Map 映射目前流程。
 func Map(b []byte) map[string]any {
 	if len(b) == 0 {
 		return nil
@@ -31,7 +31,7 @@ func Map(b []byte) map[string]any {
 	return out
 }
 
-// Permissions decodes a JSON permission array and returns nil for empty input.
+// Permissions 處理權限。
 func Permissions(b []byte) []domain.Permission {
 	if len(b) == 0 {
 		return nil
@@ -43,6 +43,7 @@ func Permissions(b []byte) []domain.Permission {
 	return out
 }
 
+// zero 處理 zero。
 func zero(v any) []byte {
 	if v == nil {
 		return []byte("{}")

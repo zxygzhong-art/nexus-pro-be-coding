@@ -8,12 +8,12 @@ import (
 	"strings"
 )
 
-// Local stores objects under a filesystem root while preventing key traversal.
+// Local 定義本機的資料結構。
 type Local struct {
 	root string
 }
 
-// NewLocal creates a filesystem-backed object store rooted at root.
+// NewLocal 建立本機。
 func NewLocal(root string) (*Local, error) {
 	root = strings.TrimSpace(root)
 	if root == "" {
@@ -29,7 +29,7 @@ func NewLocal(root string) (*Local, error) {
 	return &Local{root: abs}, nil
 }
 
-// PutObject writes an object to disk after validating the key stays under root.
+// PutObject 處理 put 物件。
 func (s *Local) PutObject(ctx context.Context, key string, _ string, data []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -49,17 +49,17 @@ func (s *Local) PutObject(ctx context.Context, key string, _ string, data []byte
 	return os.WriteFile(path, copyData, 0o644)
 }
 
-// Provider identifies this filesystem-backed store in import metadata.
+// Provider 處理提供者。
 func (s *Local) Provider() string {
 	return "local"
 }
 
-// Bucket returns the local root path as the storage boundary for metadata/debugging.
+// Bucket 處理 bucket。
 func (s *Local) Bucket() string {
 	return s.root
 }
 
-// DeleteObject removes an object from disk and treats missing files as success.
+// DeleteObject 刪除物件。
 func (s *Local) DeleteObject(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -74,6 +74,7 @@ func (s *Local) DeleteObject(ctx context.Context, key string) error {
 	return ctx.Err()
 }
 
+// pathForKey 處理 path for key。
 func (s *Local) pathForKey(key string) (string, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {

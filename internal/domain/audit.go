@@ -2,7 +2,7 @@ package domain
 
 import "time"
 
-// AuditLog records an auditable action performed inside a tenant.
+// AuditLog 定義稽核 log 的資料結構。
 type AuditLog struct {
 	ID             string         `json:"id"`
 	TenantID       string         `json:"tenant_id"`
@@ -17,7 +17,7 @@ type AuditLog struct {
 	CreatedAt      time.Time      `json:"created_at"`
 }
 
-// OutboxEvent records tenant-scoped business events waiting for external delivery.
+// OutboxEvent 定義 outbox 事件的資料結構。
 type OutboxEvent struct {
 	ID            string         `json:"id"`
 	TenantID      string         `json:"tenant_id"`

@@ -1,4 +1,24 @@
 services:
+  # 可選的容器化 API；需要時用下列命令明確啟動：
+  #   執行：docker compose --profile api up -d api
+  # 環境變數來自 .env；在 compose network 內，API 必須用 service name
+  # 連到依賴（postgres:5432、redis:6379），不能使用 localhost。
+  api:
+    build: .
+    profiles:
+      - api
+    ports:
+      - "8080:8080"
+    env_file:
+      - .env
+    environment:
+      HTTP_ADDR: ":8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   postgres:
     image: postgres:17
     environment:

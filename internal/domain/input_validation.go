@@ -2,7 +2,7 @@ package domain
 
 import "strings"
 
-// Validate enforces employee creation rules shared by API and service paths.
+// Validate 驗證目前流程。
 func (in CreateEmployeeInput) Validate() error {
 	fields := make([]FieldError, 0)
 	if strings.TrimSpace(in.Name) == "" {
@@ -62,7 +62,7 @@ func (in CreateEmployeeInput) Validate() error {
 	return nil
 }
 
-// Validate enforces direct employee status update rules.
+// Validate 驗證目前流程。
 func (in UpdateEmployeeStatusInput) Validate() error {
 	if err := validateEmployeeStatusInput(in.Status, "employee status validation failed"); err != nil {
 		return err
@@ -74,7 +74,7 @@ func (in UpdateEmployeeStatusInput) Validate() error {
 	return nil
 }
 
-// Validate enforces employee status transition rules.
+// Validate 驗證目前流程。
 func (in StatusTransitionInput) Validate() error {
 	if err := validateEmployeeStatusInput(in.Status, "employee status transition validation failed"); err != nil {
 		return err
@@ -106,6 +106,7 @@ func (in StatusTransitionInput) Validate() error {
 	return nil
 }
 
+// validateEmployeeStatusInput 驗證員工狀態輸入。
 func validateEmployeeStatusInput(rawStatus, message string) error {
 	status := strings.TrimSpace(rawStatus)
 	if status == "" {
@@ -118,6 +119,7 @@ func validateEmployeeStatusInput(rawStatus, message string) error {
 	return nil
 }
 
+// mapString 映射字串。
 func mapString(values map[string]any, key string) string {
 	if len(values) == 0 {
 		return ""
@@ -129,6 +131,7 @@ func mapString(values map[string]any, key string) string {
 	return strings.TrimSpace(value)
 }
 
+// firstNonEmpty 取得第一個non 空值。
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if strings.TrimSpace(value) != "" {

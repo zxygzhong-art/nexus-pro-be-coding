@@ -14,6 +14,7 @@ import (
 	"nexus-pro-be/internal/startup"
 )
 
+// main 啟動 API 程序並協調關閉流程。
 func main() {
 	cfg, err := config.LoadE()
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: logLevel(cfg.LogLevel)}))
@@ -41,6 +42,14 @@ func main() {
 		logger.Info("nexus-pro-be started", "addr", cfg.HTTPAddr)
 		errs <- modules.server.ListenAndServe()
 	}()
+	if modules.metricsServer != nil {
+		go func() {
+			logger.Info("metrics server started", "addr", modules.metricsServer.Addr)
+			if err := modules.metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				logger.Error("metrics server failed", "error", err)
+			}
+		}()
+	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -60,8 +69,22 @@ func main() {
 			os.Exit(1)
 		}
 	}
+	// 業務 server 已經停止；接著停止 metrics listener。
+	// 如此 scrape 能在 drain 視窗結束前持續觀測程序。
+	if modules.metricsServer != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := modules.metricsServer.Shutdown(shutdownCtx); err != nil {
+			logger.Error("metrics server shutdown failed", "error", err)
+		}
+		cancel()
+	}
+	// 在關閉 Postgres pool 與 Redis client 前，先取消 worker context 並等待背景工作收斂。
+	// 延後的模組關閉流程會在背景工作收斂後關閉 Postgres pool 與 Redis client。
+	stop()
+	modules.waitForBackgroundWorkers(5*time.Second, logger)
 }
 
+// logLevel 處理 log level。
 func logLevel(value string) slog.Level {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "debug":

@@ -12,12 +12,12 @@ import (
 
 const defaultEHRMSEmployeeSyncInterval = 24 * time.Hour
 
-// EHRMSEmployeeSyncService applies employee master data from the eHRMS upstream.
+// EHRMSEmployeeSyncService 定義 eHRMS 員工 sync 服務的行為契約。
 type EHRMSEmployeeSyncService interface {
 	SyncEHRMSEmployees(domain.RequestContext, domain.EHRMSEmployeeSyncInput) (domain.EHRMSEmployeeSyncResponse, error)
 }
 
-// EHRMSEmployeeSyncOptions controls the periodic eHRMS employee refresh.
+// EHRMSEmployeeSyncOptions 定義 eHRMS 員工 sync 選項的資料結構。
 type EHRMSEmployeeSyncOptions struct {
 	Interval   time.Duration
 	Mode       string
@@ -26,14 +26,14 @@ type EHRMSEmployeeSyncOptions struct {
 	RunOnStart bool
 }
 
-// EHRMSEmployeeSyncScheduler periodically refreshes employee master data.
+// EHRMSEmployeeSyncScheduler 定義 eHRMS 員工 sync scheduler 的資料結構。
 type EHRMSEmployeeSyncScheduler struct {
 	service EHRMSEmployeeSyncService
 	logger  *slog.Logger
 	now     func() time.Time
 }
 
-// NewEHRMSEmployeeSyncScheduler creates a scheduler for eHRMS employee sync.
+// NewEHRMSEmployeeSyncScheduler 建立 eHRMS 員工 sync scheduler。
 func NewEHRMSEmployeeSyncScheduler(service EHRMSEmployeeSyncService, logger *slog.Logger) *EHRMSEmployeeSyncScheduler {
 	if logger == nil {
 		logger = slog.Default()
@@ -45,7 +45,7 @@ func NewEHRMSEmployeeSyncScheduler(service EHRMSEmployeeSyncService, logger *slo
 	}
 }
 
-// Run optionally syncs once on startup and then runs until the context is canceled.
+// Run 執行背景工作主迴圈。
 func (s *EHRMSEmployeeSyncScheduler) Run(ctx context.Context, opts EHRMSEmployeeSyncOptions) {
 	opts = normalizeEHRMSEmployeeSyncOptions(opts)
 	if opts.RunOnStart {
@@ -63,7 +63,7 @@ func (s *EHRMSEmployeeSyncScheduler) Run(ctx context.Context, opts EHRMSEmployee
 	}
 }
 
-// SyncOnce runs one scheduled eHRMS sync with the configured service account.
+// SyncOnce 同步 once。
 func (s *EHRMSEmployeeSyncScheduler) SyncOnce(ctx context.Context, opts EHRMSEmployeeSyncOptions) (domain.EHRMSEmployeeSyncResponse, error) {
 	opts = normalizeEHRMSEmployeeSyncOptions(opts)
 	if s == nil || s.service == nil {
@@ -86,6 +86,7 @@ func (s *EHRMSEmployeeSyncScheduler) SyncOnce(ctx context.Context, opts EHRMSEmp
 	}, domain.EHRMSEmployeeSyncInput{Mode: opts.Mode})
 }
 
+// syncAndLog 同步 and log。
 func (s *EHRMSEmployeeSyncScheduler) syncAndLog(ctx context.Context, opts EHRMSEmployeeSyncOptions) {
 	result, err := s.SyncOnce(ctx, opts)
 	if err != nil {
@@ -102,6 +103,7 @@ func (s *EHRMSEmployeeSyncScheduler) syncAndLog(ctx context.Context, opts EHRMSE
 	)
 }
 
+// normalizeEHRMSEmployeeSyncOptions 正規化eHRMS 員工 sync 選項。
 func normalizeEHRMSEmployeeSyncOptions(opts EHRMSEmployeeSyncOptions) EHRMSEmployeeSyncOptions {
 	if opts.Interval <= 0 {
 		opts.Interval = defaultEHRMSEmployeeSyncInterval

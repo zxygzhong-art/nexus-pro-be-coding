@@ -13,7 +13,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
-// Client reads employee master data from the external eHRMS HTTP API.
+// Client 定義 client 的資料結構。
 type Client struct {
 	baseURL    string
 	apiKey     string
@@ -22,7 +22,7 @@ type Client struct {
 
 const maxEmployeesResponseBytes = 10 << 20
 
-// NewClient validates eHRMS connection settings and builds an HTTP adapter.
+// NewClient 建立 client。
 func NewClient(baseURL string, apiKey string, httpClient *http.Client) (*Client, error) {
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {
@@ -44,7 +44,7 @@ func NewClient(baseURL string, apiKey string, httpClient *http.Client) (*Client,
 	return &Client{baseURL: baseURL, apiKey: apiKey, httpClient: httpClient}, nil
 }
 
-// Ping verifies the eHRMS health endpoint without fetching employee data.
+// Ping 檢查外部服務連線狀態。
 func (c *Client) Ping(ctx context.Context) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/healthz", nil)
 	if err != nil {
@@ -61,7 +61,7 @@ func (c *Client) Ping(ctx context.Context) error {
 	return nil
 }
 
-// ListEmployees fetches the dynamic Chinese-field employee list from eHRMS.
+// ListEmployees 列出員工。
 func (c *Client) ListEmployees(ctx context.Context) ([]domain.EHRMSEmployeeRecord, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/employees", nil)
 	if err != nil {

@@ -8,8 +8,9 @@ import (
 
 type tenantIDContextKey struct{}
 type companyIDContextKey struct{}
+type systemTaskContextKey struct{}
 
-// WithTenantID returns a context carrying the tenant ID used by repository adapters.
+// WithTenantID 附加租戶 ID。
 func WithTenantID(ctx context.Context, tenantID string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -20,7 +21,7 @@ func WithTenantID(ctx context.Context, tenantID string) context.Context {
 	return context.WithValue(ctx, tenantIDContextKey{}, tenantID)
 }
 
-// TenantIDFromContext returns the tenant ID stored in ctx, if any.
+// TenantIDFromContext 處理租戶 ID 來源 context。
 func TenantIDFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
@@ -29,7 +30,7 @@ func TenantIDFromContext(ctx context.Context) string {
 	return tenantID
 }
 
-// TenantIDFromArgs extracts the first tenant_id string from sqlc argument structs.
+// TenantIDFromArgs 處理租戶 ID 來源 args。
 func TenantIDFromArgs(args []interface{}) string {
 	for _, arg := range args {
 		if tenantID := tenantIDFromArg(arg); tenantID != "" {
@@ -39,7 +40,7 @@ func TenantIDFromArgs(args []interface{}) string {
 	return ""
 }
 
-// WithCompanyID returns a context carrying the company ID used by RLS policies.
+// WithCompanyID 附加公司 ID。
 func WithCompanyID(ctx context.Context, companyID string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -50,7 +51,7 @@ func WithCompanyID(ctx context.Context, companyID string) context.Context {
 	return context.WithValue(ctx, companyIDContextKey{}, companyID)
 }
 
-// CompanyIDFromContext returns the company ID stored in ctx, if any.
+// CompanyIDFromContext 處理公司 ID 來源 context。
 func CompanyIDFromContext(ctx context.Context) string {
 	if ctx == nil {
 		return ""
@@ -59,7 +60,24 @@ func CompanyIDFromContext(ctx context.Context) string {
 	return companyID
 }
 
-// CompanyIDFromArgs extracts the first company_id value from sqlc argument structs.
+// WithSystemTask 附加 system 任務。
+func WithSystemTask(ctx context.Context) context.Context {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return context.WithValue(ctx, systemTaskContextKey{}, true)
+}
+
+// SystemTaskFromContext 處理 system 任務 來源 context。
+func SystemTaskFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	systemTask, _ := ctx.Value(systemTaskContextKey{}).(bool)
+	return systemTask
+}
+
+// CompanyIDFromArgs 處理公司 ID 來源 args。
 func CompanyIDFromArgs(args []interface{}) string {
 	for _, arg := range args {
 		if companyID := companyIDFromArg(arg); companyID != "" {
@@ -69,14 +87,17 @@ func CompanyIDFromArgs(args []interface{}) string {
 	return ""
 }
 
+// tenantIDFromArg 處理租戶 ID 來源 arg。
 func tenantIDFromArg(arg interface{}) string {
 	return stringFieldFromArg(arg, "TenantID")
 }
 
+// companyIDFromArg 處理公司 ID 來源 arg。
 func companyIDFromArg(arg interface{}) string {
 	return stringFieldFromArg(arg, "CompanyID")
 }
 
+// stringFieldFromArg 處理字串欄位 來源 arg。
 func stringFieldFromArg(arg interface{}, fieldName string) string {
 	if arg == nil {
 		return ""

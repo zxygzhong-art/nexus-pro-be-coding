@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestAIAgentArchitectureTablesStayInSchema 驗證 ai agent architecture tables stay in schema。
 func TestAIAgentArchitectureTablesStayInSchema(t *testing.T) {
 	raw, err := os.ReadFile("../../../db/schema.sql")
 	if err != nil {
@@ -52,6 +53,7 @@ func TestAIAgentArchitectureTablesStayInSchema(t *testing.T) {
 	}
 }
 
+// TestEmployeeIntegrityConstraintsStayInSchema 驗證員工 integrity constraints stay in schema。
 func TestEmployeeIntegrityConstraintsStayInSchema(t *testing.T) {
 	raw, err := os.ReadFile("../../../db/schema.sql")
 	if err != nil {
@@ -79,6 +81,7 @@ func TestEmployeeIntegrityConstraintsStayInSchema(t *testing.T) {
 	}
 }
 
+// TestTenantResourceIDsStayGloballyUniqueContract 驗證租戶 resource IDs stay globally unique contract。
 func TestTenantResourceIDsStayGloballyUniqueContract(t *testing.T) {
 	schemaRaw, err := os.ReadFile("../../../db/schema.sql")
 	if err != nil {

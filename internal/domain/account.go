@@ -2,17 +2,17 @@ package domain
 
 import "time"
 
-// AccountStatus is the lifecycle state for a login-capable account.
+// AccountStatus 表示帳號狀態。
 type AccountStatus string
 
-// Account status values shared by services and API responses.
+// 下列常數定義此模組使用的固定值。
 const (
 	AccountStatusActive        AccountStatus = "active"
 	AccountStatusDisabled      AccountStatus = "disabled"
 	AccountStatusPendingInvite AccountStatus = "pending_invite"
 )
 
-// Account represents a tenant-scoped user identity and its direct IAM grants.
+// Account 定義帳號的資料結構。
 type Account struct {
 	ID                     string    `json:"id"`
 	TenantID               string    `json:"tenant_id"`
@@ -26,7 +26,7 @@ type Account struct {
 	CreatedAt              time.Time `json:"created_at"`
 }
 
-// AuthenticatedPrincipal is the external identity extracted from an authenticated token.
+// AuthenticatedPrincipal 定義 authenticated principal 的資料結構。
 type AuthenticatedPrincipal struct {
 	Provider   string         `json:"provider"`
 	Subject    string         `json:"subject"`
@@ -38,7 +38,7 @@ type AuthenticatedPrincipal struct {
 	Claims     map[string]any `json:"claims,omitempty"`
 }
 
-// UserIdentity links one external identity provider subject to a tenant-scoped local account.
+// UserIdentity 定義使用者身分的資料結構。
 type UserIdentity struct {
 	ID        string    `json:"id"`
 	TenantID  string    `json:"tenant_id"`
@@ -49,7 +49,56 @@ type UserIdentity struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// IdentityResolution is the local account context derived from an authenticated principal.
+// IdentityProviderKeycloak 定義身分提供者 Keycloak 的固定值。
+const IdentityProviderKeycloak = "keycloak"
+
+// IdentityProvisioningInput 定義身分開通輸入的資料結構。
+type IdentityProvisioningInput struct {
+	TenantID     string `json:"tenant_id"`
+	AccountID    string `json:"account_id"`
+	EmployeeID   string `json:"employee_id,omitempty"`
+	EmployeeNo   string `json:"employee_no,omitempty"`
+	Email        string `json:"email"`
+	DisplayName  string `json:"display_name,omitempty"`
+	Enabled      bool   `json:"enabled"`
+	SendInvite   bool   `json:"send_invite,omitempty"`
+	InviteClient string `json:"invite_client,omitempty"`
+	InviteURL    string `json:"invite_url,omitempty"`
+}
+
+// ProvisionedIdentity 定義 provisioned 身分的資料結構。
+type ProvisionedIdentity struct {
+	Provider string `json:"provider"`
+	Subject  string `json:"subject"`
+	Email    string `json:"email,omitempty"`
+}
+
+// 下列常數定義此模組使用的固定值。
+const (
+	IdentityProvisioningStatusPending   = "pending"
+	IdentityProvisioningStatusSucceeded = "succeeded"
+	IdentityProvisioningStatusFailed    = "failed"
+)
+
+// IdentityProvisioningOutboxEvent 定義身分開通 outbox 事件的資料結構。
+type IdentityProvisioningOutboxEvent struct {
+	ID          string    `json:"id"`
+	TenantID    string    `json:"tenant_id"`
+	AccountID   string    `json:"account_id"`
+	EmployeeID  string    `json:"employee_id,omitempty"`
+	EmployeeNo  string    `json:"employee_no,omitempty"`
+	Email       string    `json:"email"`
+	DisplayName string    `json:"display_name,omitempty"`
+	Enabled     bool      `json:"enabled"`
+	SendInvite  bool      `json:"send_invite,omitempty"`
+	Status      string    `json:"status"`
+	RetryCount  int       `json:"retry_count"`
+	LastError   string    `json:"last_error,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// IdentityResolution 定義身分 resolution 的資料結構。
 type IdentityResolution struct {
 	TenantID  string        `json:"tenant_id"`
 	AccountID string        `json:"account_id"`

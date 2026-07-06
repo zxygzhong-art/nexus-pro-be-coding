@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-// LeaveBalance tracks remaining leave hours for one employee and leave type.
+// LeaveBalance 定義請假 balance 的資料結構。
 type LeaveBalance struct {
 	ID             string    `json:"id"`
 	TenantID       string    `json:"tenant_id"`
@@ -15,7 +15,7 @@ type LeaveBalance struct {
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
-// LeaveRequest records a requested leave period and its workflow status.
+// LeaveRequest 定義請假請求的資料結構。
 type LeaveRequest struct {
 	ID             string    `json:"id"`
 	TenantID       string    `json:"tenant_id"`
@@ -30,7 +30,7 @@ type LeaveRequest struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
-// CreateLeaveRequestInput carries the payload for creating a leave request.
+// CreateLeaveRequestInput 定義請假請求輸入的資料結構。
 type CreateLeaveRequestInput struct {
 	EmployeeID string  `json:"employee_id,omitempty"`
 	LeaveType  string  `json:"leave_type"`
@@ -40,7 +40,7 @@ type CreateLeaveRequestInput struct {
 	Reason     string  `json:"reason,omitempty"`
 }
 
-// LeaveRequestQuery filters leave requests for scoped list and reporting reads.
+// LeaveRequestQuery 定義請假請求查詢的資料結構。
 type LeaveRequestQuery struct {
 	EmployeeIDs []string `json:"employee_ids,omitempty"`
 	Status      string   `json:"status,omitempty"`
@@ -48,7 +48,7 @@ type LeaveRequestQuery struct {
 	ToDate      string   `json:"to_date,omitempty"`
 }
 
-// AttendanceWorksite defines one allowed geographic clock-in area.
+// AttendanceWorksite 定義考勤工作地點的資料結構。
 type AttendanceWorksite struct {
 	ID           string    `json:"id"`
 	TenantID     string    `json:"tenant_id"`
@@ -62,7 +62,7 @@ type AttendanceWorksite struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
-// AttendanceShift defines clock-in and clock-out windows, including overnight shifts.
+// AttendanceShift 定義考勤班別的資料結構。
 type AttendanceShift struct {
 	ID                     string    `json:"id"`
 	TenantID               string    `json:"tenant_id"`
@@ -78,7 +78,7 @@ type AttendanceShift struct {
 	UpdatedAt              time.Time `json:"updated_at"`
 }
 
-// AttendanceShiftAssignment binds one employee to a shift and worksite.
+// AttendanceShiftAssignment 定義考勤班別指派的資料結構。
 type AttendanceShiftAssignment struct {
 	ID            string     `json:"id"`
 	TenantID      string     `json:"tenant_id"`
@@ -92,7 +92,7 @@ type AttendanceShiftAssignment struct {
 	UpdatedAt     time.Time  `json:"updated_at"`
 }
 
-// AttendanceClockRecord stores one accepted or rejected clock attempt.
+// AttendanceClockRecord 定義考勤打卡 record 的資料結構。
 type AttendanceClockRecord struct {
 	ID                  string         `json:"id"`
 	TenantID            string         `json:"tenant_id"`
@@ -116,7 +116,7 @@ type AttendanceClockRecord struct {
 	CreatedAt           time.Time      `json:"created_at"`
 }
 
-// AttendanceCorrectionRequest records a manual clock correction workflow.
+// AttendanceCorrectionRequest 定義考勤 correction 請求的資料結構。
 type AttendanceCorrectionRequest struct {
 	ID                  string     `json:"id"`
 	TenantID            string     `json:"tenant_id"`
@@ -135,7 +135,7 @@ type AttendanceCorrectionRequest struct {
 	UpdatedAt           time.Time  `json:"updated_at"`
 }
 
-// AttendanceClockStatus summarizes today's clock state for the current account.
+// AttendanceClockStatus 定義考勤打卡狀態的資料結構。
 type AttendanceClockStatus struct {
 	EmployeeID string                     `json:"employee_id"`
 	WorkDate   string                     `json:"work_date"`
@@ -147,13 +147,13 @@ type AttendanceClockStatus struct {
 	NextAction string                     `json:"next_action"`
 }
 
-// AttendancePolicyResponse describes the current tenant attendance policy projection.
+// AttendancePolicyResponse 定義考勤政策回應的資料結構。
 type AttendancePolicyResponse struct {
 	WorkTime   AttendancePolicyWorkTime `json:"work_time"`
 	LeaveTypes []AttendanceLeaveType    `json:"leave_types"`
 }
 
-// AttendancePolicy stores the tenant-level policy behind the attendance settings page.
+// AttendancePolicy 定義考勤政策的資料結構。
 type AttendancePolicy struct {
 	ID                 string                   `json:"id"`
 	TenantID           string                   `json:"tenant_id"`
@@ -164,7 +164,7 @@ type AttendancePolicy struct {
 	UpdatedAt          time.Time                `json:"updated_at"`
 }
 
-// AttendancePolicyWorkTime contains working hours, weekends, and calculation-cycle options.
+// AttendancePolicyWorkTime 定義考勤政策 work 時間的資料結構。
 type AttendancePolicyWorkTime struct {
 	StandardStart     string   `json:"standard_start"`
 	StandardEnd       string   `json:"standard_end"`
@@ -179,7 +179,7 @@ type AttendancePolicyWorkTime struct {
 	CycleEndOptions   []string `json:"cycle_end_options"`
 }
 
-// AttendanceLeaveType describes one leave type shown in the attendance policy page.
+// AttendanceLeaveType 定義考勤請假 type 的資料結構。
 type AttendanceLeaveType struct {
 	Code  string `json:"code"`
 	Name  string `json:"name"`
@@ -188,13 +188,13 @@ type AttendanceLeaveType struct {
 	Proof string `json:"proof"`
 }
 
-// UpdateAttendancePolicyInput carries the editable attendance settings from workspace.
+// UpdateAttendancePolicyInput 定義考勤政策輸入的資料結構。
 type UpdateAttendancePolicyInput struct {
 	WorkTime   AttendancePolicyWorkTime `json:"work_time"`
 	LeaveTypes []AttendanceLeaveType    `json:"leave_types"`
 }
 
-// Validate rejects incomplete attendance policies before service-layer normalization.
+// Validate 驗證目前流程。
 func (in UpdateAttendancePolicyInput) Validate() error {
 	if strings.TrimSpace(in.WorkTime.StandardStart) == "" || strings.TrimSpace(in.WorkTime.StandardEnd) == "" {
 		return BadRequest("standard_start and standard_end are required")
@@ -216,7 +216,7 @@ func (in UpdateAttendancePolicyInput) Validate() error {
 	return nil
 }
 
-// CreateAttendanceWorksiteInput carries the payload for creating a worksite.
+// CreateAttendanceWorksiteInput 定義考勤工作地點輸入的資料結構。
 type CreateAttendanceWorksiteInput struct {
 	Name         string  `json:"name"`
 	Address      string  `json:"address,omitempty"`
@@ -226,7 +226,7 @@ type CreateAttendanceWorksiteInput struct {
 	Status       string  `json:"status,omitempty"`
 }
 
-// UpdateAttendanceWorksiteInput carries partial updates for a worksite.
+// UpdateAttendanceWorksiteInput 定義考勤工作地點輸入的資料結構。
 type UpdateAttendanceWorksiteInput struct {
 	ID           string   `json:"id"`
 	Name         *string  `json:"name,omitempty"`
@@ -237,7 +237,7 @@ type UpdateAttendanceWorksiteInput struct {
 	Status       *string  `json:"status,omitempty"`
 }
 
-// CreateAttendanceShiftInput carries the payload for creating a shift.
+// CreateAttendanceShiftInput 定義考勤班別輸入的資料結構。
 type CreateAttendanceShiftInput struct {
 	Name                   string `json:"name"`
 	ClockInStart           string `json:"clock_in_start"`
@@ -249,7 +249,7 @@ type CreateAttendanceShiftInput struct {
 	Status                 string `json:"status,omitempty"`
 }
 
-// UpdateAttendanceShiftInput carries partial updates for a shift.
+// UpdateAttendanceShiftInput 定義考勤班別輸入的資料結構。
 type UpdateAttendanceShiftInput struct {
 	ID                     string  `json:"id"`
 	Name                   *string `json:"name,omitempty"`
@@ -262,7 +262,7 @@ type UpdateAttendanceShiftInput struct {
 	Status                 *string `json:"status,omitempty"`
 }
 
-// CreateAttendanceShiftAssignmentInput binds an employee to a shift and worksite.
+// CreateAttendanceShiftAssignmentInput 定義考勤班別指派輸入的資料結構。
 type CreateAttendanceShiftAssignmentInput struct {
 	EmployeeID    string `json:"employee_id"`
 	ShiftID       string `json:"shift_id"`
@@ -272,7 +272,7 @@ type CreateAttendanceShiftAssignmentInput struct {
 	Status        string `json:"status,omitempty"`
 }
 
-// CreateAttendanceClockRecordInput carries location evidence for a clock attempt.
+// CreateAttendanceClockRecordInput 定義考勤打卡 record 輸入的資料結構。
 type CreateAttendanceClockRecordInput struct {
 	EmployeeID     string         `json:"employee_id,omitempty"`
 	Direction      string         `json:"direction"`
@@ -284,7 +284,7 @@ type CreateAttendanceClockRecordInput struct {
 	DeviceInfo     map[string]any `json:"device_info,omitempty"`
 }
 
-// AttendanceClockRecordQuery filters clock records before pagination.
+// AttendanceClockRecordQuery 定義考勤打卡 record 查詢的資料結構。
 type AttendanceClockRecordQuery struct {
 	EmployeeID   string `json:"employee_id,omitempty"`
 	FromDate     string `json:"from_date,omitempty"`
@@ -294,7 +294,7 @@ type AttendanceClockRecordQuery struct {
 	Source       string `json:"source,omitempty"`
 }
 
-// CreateAttendanceCorrectionInput carries one manual correction request.
+// CreateAttendanceCorrectionInput 定義考勤 correction 輸入的資料結構。
 type CreateAttendanceCorrectionInput struct {
 	EmployeeID         string `json:"employee_id,omitempty"`
 	Direction          string `json:"direction"`
@@ -302,12 +302,12 @@ type CreateAttendanceCorrectionInput struct {
 	Reason             string `json:"reason"`
 }
 
-// ReviewAttendanceCorrectionInput carries approval or rejection notes.
+// ReviewAttendanceCorrectionInput 定義審核考勤 correction 輸入的資料結構。
 type ReviewAttendanceCorrectionInput struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// AttendanceCorrectionQuery filters correction requests before pagination.
+// AttendanceCorrectionQuery 定義考勤 correction 查詢的資料結構。
 type AttendanceCorrectionQuery struct {
 	EmployeeID string `json:"employee_id,omitempty"`
 	FromDate   string `json:"from_date,omitempty"`

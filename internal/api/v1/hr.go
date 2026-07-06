@@ -13,20 +13,20 @@ import (
 )
 
 const (
-	// Employee import and avatar endpoints keep strict request size limits.
+	// 員工匯入與頭像 endpoint 保持嚴格的 request size 限制。
 	employeeImportMultipartMaxBytes = 16 << 20
 	employeeImportFileMaxBytes      = 10 << 20
 	employeeAvatarMultipartMaxBytes = 4 << 20
 	employeeAvatarFileMaxBytes      = 3 << 20
 )
 
-// HRCtrl wires people-domain and organization endpoints to the HR service facade.
+// HRCtrl 定義 HR ctrl 的資料結構。
 type HRCtrl struct {
 	routes routeBinder
 	svc    service.HRFacade
 }
 
-// RegisterRoutes attaches people-domain and organization routes to the v1 route group.
+// RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c HRCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	hr := router.Group("/hr")
 	hr.GET("/employee-options", c.routes.Handle("hr.employee", "read", c.employeeOptions))
@@ -58,6 +58,7 @@ func (c HRCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	org.POST("/units", c.routes.Handle("hr.org_unit", "create", c.createOrgUnit))
 }
 
+// listEmployees 處理員工的 HTTP 請求。
 func (c HRCtrl) listEmployees(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	query, err := employeeQueryFromRequest(r)
 	if err != nil {
@@ -71,6 +72,7 @@ func (c HRCtrl) listEmployees(w http.ResponseWriter, r *http.Request, ctx domain
 	return nil
 }
 
+// createEmployee 處理員工的 HTTP 請求。
 func (c HRCtrl) createEmployee(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateEmployeeInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -84,6 +86,7 @@ func (c HRCtrl) createEmployee(w http.ResponseWriter, r *http.Request, ctx domai
 	return nil
 }
 
+// previewCreateEmployee 處理 create 員工的 HTTP 請求。
 func (c HRCtrl) previewCreateEmployee(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateEmployeeInput
 	if err := readJSONNoValidate(w, r, &input); err != nil {
@@ -97,6 +100,7 @@ func (c HRCtrl) previewCreateEmployee(w http.ResponseWriter, r *http.Request, ct
 	return nil
 }
 
+// getEmployee 處理員工的 HTTP 請求。
 func (c HRCtrl) getEmployee(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.GetEmployee(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -106,6 +110,7 @@ func (c HRCtrl) getEmployee(w http.ResponseWriter, r *http.Request, ctx domain.R
 	return nil
 }
 
+// updateEmployee 處理員工的 HTTP 請求。
 func (c HRCtrl) updateEmployee(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.UpdateEmployeeInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -119,6 +124,7 @@ func (c HRCtrl) updateEmployee(w http.ResponseWriter, r *http.Request, ctx domai
 	return nil
 }
 
+// previewUpdateEmployee 處理 update 員工的 HTTP 請求。
 func (c HRCtrl) previewUpdateEmployee(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.UpdateEmployeeInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -132,6 +138,7 @@ func (c HRCtrl) previewUpdateEmployee(w http.ResponseWriter, r *http.Request, ct
 	return nil
 }
 
+// employeeStats 處理員工 stats 的 HTTP 請求。
 func (c HRCtrl) employeeStats(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	query, err := employeeQueryFromRequest(r)
 	if err != nil {
@@ -145,6 +152,7 @@ func (c HRCtrl) employeeStats(w http.ResponseWriter, r *http.Request, ctx domain
 	return nil
 }
 
+// employeeOptions 處理員工選項的 HTTP 請求。
 func (c HRCtrl) employeeOptions(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	options, err := c.svc.EmployeeOptions(ctx)
 	if err != nil {
@@ -154,6 +162,7 @@ func (c HRCtrl) employeeOptions(w http.ResponseWriter, r *http.Request, ctx doma
 	return nil
 }
 
+// employeeImportTemplate 處理員工 import 範本的 HTTP 請求。
 func (c HRCtrl) employeeImportTemplate(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	raw, filename, contentType, err := c.svc.EmployeeImportTemplate(ctx, r.URL.Query().Get("format"))
 	if err != nil {
@@ -166,6 +175,7 @@ func (c HRCtrl) employeeImportTemplate(w http.ResponseWriter, r *http.Request, c
 	return nil
 }
 
+// previewEmployeeImport 處理員工 import 的 HTTP 請求。
 func (c HRCtrl) previewEmployeeImport(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	input, err := employeeImportPreviewInput(w, r)
 	if err != nil {
@@ -179,6 +189,7 @@ func (c HRCtrl) previewEmployeeImport(w http.ResponseWriter, r *http.Request, ct
 	return nil
 }
 
+// confirmEmployeeImport 處理員工 import 的 HTTP 請求。
 func (c HRCtrl) confirmEmployeeImport(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.EmployeeImportConfirmInput
 	if _, err := readOptionalJSON(w, r, &input); err != nil {
@@ -192,6 +203,7 @@ func (c HRCtrl) confirmEmployeeImport(w http.ResponseWriter, r *http.Request, ct
 	return nil
 }
 
+// syncEHRMSEmployees 處理 eHRMS 員工的 HTTP 請求。
 func (c HRCtrl) syncEHRMSEmployees(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.EHRMSEmployeeSyncInput
 	if _, err := readOptionalJSON(w, r, &input); err != nil {
@@ -205,6 +217,7 @@ func (c HRCtrl) syncEHRMSEmployees(w http.ResponseWriter, r *http.Request, ctx d
 	return nil
 }
 
+// exportEmployeesCSV 處理員工 CSV 的 HTTP 請求。
 func (c HRCtrl) exportEmployeesCSV(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	query, err := employeeQueryFromRequest(r)
 	if err != nil {
@@ -221,6 +234,7 @@ func (c HRCtrl) exportEmployeesCSV(w http.ResponseWriter, r *http.Request, ctx d
 	return nil
 }
 
+// exportEmployees 處理員工的 HTTP 請求。
 func (c HRCtrl) exportEmployees(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	query, err := employeeQueryFromRequest(r)
 	if err != nil {
@@ -241,6 +255,7 @@ func (c HRCtrl) exportEmployees(w http.ResponseWriter, r *http.Request, ctx doma
 	return nil
 }
 
+// batchDeleteEmployees 處理批次 delete 員工的 HTTP 請求。
 func (c HRCtrl) batchDeleteEmployees(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.BatchDeleteEmployeesInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -261,6 +276,7 @@ func (c HRCtrl) batchDeleteEmployees(w http.ResponseWriter, r *http.Request, ctx
 	return nil
 }
 
+// deleteEmployee 處理員工的 HTTP 請求。
 func (c HRCtrl) deleteEmployee(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.DeleteEmployee(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -270,6 +286,7 @@ func (c HRCtrl) deleteEmployee(w http.ResponseWriter, r *http.Request, ctx domai
 	return nil
 }
 
+// updateEmployeeAvatar 處理員工 avatar 的 HTTP 請求。
 func (c HRCtrl) updateEmployeeAvatar(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	input, err := employeeAvatarInput(w, r)
 	if err != nil {
@@ -283,6 +300,7 @@ func (c HRCtrl) updateEmployeeAvatar(w http.ResponseWriter, r *http.Request, ctx
 	return nil
 }
 
+// deleteEmployeeAvatar 處理員工 avatar 的 HTTP 請求。
 func (c HRCtrl) deleteEmployeeAvatar(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.DeleteEmployeeAvatar(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -292,6 +310,7 @@ func (c HRCtrl) deleteEmployeeAvatar(w http.ResponseWriter, r *http.Request, ctx
 	return nil
 }
 
+// inviteEmployee 處理員工的 HTTP 請求。
 func (c HRCtrl) inviteEmployee(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.InviteEmployeeInput
 	if _, err := readOptionalJSON(w, r, &input); err != nil {
@@ -305,6 +324,7 @@ func (c HRCtrl) inviteEmployee(w http.ResponseWriter, r *http.Request, ctx domai
 	return nil
 }
 
+// transitionEmployeeStatus 處理員工狀態的 HTTP 請求。
 func (c HRCtrl) transitionEmployeeStatus(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.StatusTransitionInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -318,6 +338,7 @@ func (c HRCtrl) transitionEmployeeStatus(w http.ResponseWriter, r *http.Request,
 	return nil
 }
 
+// updateEmployeeStatus 處理員工狀態的 HTTP 請求。
 func (c HRCtrl) updateEmployeeStatus(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.UpdateEmployeeStatusInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -331,6 +352,7 @@ func (c HRCtrl) updateEmployeeStatus(w http.ResponseWriter, r *http.Request, ctx
 	return nil
 }
 
+// listOrgUnits 處理組織單位的 HTTP 請求。
 func (c HRCtrl) listOrgUnits(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -344,6 +366,7 @@ func (c HRCtrl) listOrgUnits(w http.ResponseWriter, r *http.Request, ctx domain.
 	return nil
 }
 
+// createOrgUnit 處理組織單位的 HTTP 請求。
 func (c HRCtrl) createOrgUnit(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateOrgUnitInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -357,6 +380,7 @@ func (c HRCtrl) createOrgUnit(w http.ResponseWriter, r *http.Request, ctx domain
 	return nil
 }
 
+// employeeQueryFromRequest 處理員工查詢 來源 請求。
 func employeeQueryFromRequest(r *http.Request) (domain.EmployeeQuery, error) {
 	values := r.URL.Query()
 	page, err := pageRequestFromRequest(r)
@@ -374,6 +398,7 @@ func employeeQueryFromRequest(r *http.Request) (domain.EmployeeQuery, error) {
 	}, nil
 }
 
+// employeeImportPreviewInput 處理員工 import preview 輸入。
 func employeeImportPreviewInput(w http.ResponseWriter, r *http.Request) (domain.EmployeeImportPreviewInput, error) {
 	contentType := strings.ToLower(r.Header.Get("Content-Type"))
 	if strings.HasPrefix(contentType, "multipart/form-data") {
@@ -403,6 +428,7 @@ func employeeImportPreviewInput(w http.ResponseWriter, r *http.Request) (domain.
 	return input, nil
 }
 
+// employeeAvatarInput 處理員工 avatar 輸入。
 func employeeAvatarInput(w http.ResponseWriter, r *http.Request) (domain.EmployeeAvatarInput, error) {
 	r.Body = http.MaxBytesReader(w, r.Body, employeeAvatarMultipartMaxBytes)
 	if err := r.ParseMultipartForm(employeeAvatarMultipartMaxBytes); err != nil {

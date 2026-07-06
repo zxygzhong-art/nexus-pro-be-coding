@@ -7,6 +7,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// startServiceSpan 啟動服務 span。
 func startServiceSpan(ctx RequestContext, name string, attrs ...attribute.KeyValue) (RequestContext, trace.Span) {
 	base := goContext(ctx)
 	baseAttrs := make([]attribute.KeyValue, 0, len(attrs)+3)
@@ -29,6 +30,7 @@ func startServiceSpan(ctx RequestContext, name string, attrs ...attribute.KeyVal
 	return ctx, span
 }
 
+// finishServiceSpan 處理 finish 服務 span。
 func finishServiceSpan(span trace.Span, err error) {
 	if err != nil {
 		span.RecordError(err)
@@ -37,6 +39,7 @@ func finishServiceSpan(span trace.Span, err error) {
 	span.End()
 }
 
+// authzSpanAttributes 處理授權 span attributes。
 func authzSpanAttributes(req CheckRequest) []attribute.KeyValue {
 	attrs := []attribute.KeyValue{
 		attribute.String("authz.action", string(req.Action)),
@@ -65,6 +68,7 @@ func authzSpanAttributes(req CheckRequest) []attribute.KeyValue {
 	return attrs
 }
 
+// setAuthzSpanResult 處理集合授權 span 結果。
 func setAuthzSpanResult(span trace.Span, result CheckResult) {
 	if result.Action == "" && result.Resource == "" && result.ApplicationCode == "" && result.ResourceType == "" {
 		return

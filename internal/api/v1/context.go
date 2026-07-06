@@ -7,9 +7,10 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
+// requestContext 處理請求 context。
 func (a *API) requestContext(r *http.Request) (domain.RequestContext, error) {
 	var tenantID, accountID string
-	// Token-derived identity is the only trusted source for request context.
+	// 由 token 推導出的身分是 request context 唯一可信來源。
 	tokenCtx, ok, err := a.tokenResolver.Resolve(r)
 	if err != nil {
 		return domain.RequestContext{}, err

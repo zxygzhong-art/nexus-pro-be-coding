@@ -6,7 +6,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
-// TaskStore persists task-page work logs and todos scoped to one account.
+// TaskStore 定義任務儲存層的行為契約。
 type TaskStore interface {
 	UpsertPlatformTaskItem(context.Context, domain.PlatformTaskRecordItem) error
 	GetPlatformTaskItem(ctx context.Context, tenantID, accountID, id string) (domain.PlatformTaskRecordItem, bool, error)

@@ -48,7 +48,7 @@ type ehrmsEmployeeWrite struct {
 	update    bool
 }
 
-// SyncEHRMSEmployees imports employee master data from the configured eHRMS API.
+// SyncEHRMSEmployees 同步 eHRMS 員工的服務流程。
 func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyncInput) (EHRMSEmployeeSyncResponse, error) {
 	if c.ehrmsClient == nil {
 		return EHRMSEmployeeSyncResponse{}, BadRequest("eHRMS is not configured")
@@ -163,7 +163,7 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 	return response, nil
 }
 
-// prepareEHRMSSyncWrites validates source rows and builds all employee writes before persistence.
+// prepareEHRMSSyncWrites 處理 prepare eHRMS sync writes 的服務流程。
 func (c HRService) prepareEHRMSSyncWrites(ctx RequestContext, account Account, decision CheckResult, records []EHRMSEmployeeRecord, mode string) ([]ehrmsEmployeeWrite, []RowError, []BatchEmployeeResult, error) {
 	writes := make([]ehrmsEmployeeWrite, 0, len(records))
 	rowErrors := make([]RowError, 0)
@@ -226,7 +226,7 @@ func (c HRService) prepareEHRMSSyncWrites(ctx RequestContext, account Account, d
 	return writes, rowErrors, results, nil
 }
 
-// ehrmsEmployeeCandidate maps one eHRMS dynamic-field row into the employee aggregate shape.
+// ehrmsEmployeeCandidate 處理 eHRMS 員工候選的服務流程。
 func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmployeeRecord, rowNumber int) (Employee, []RowError, error) {
 	status := normalizeEmployeeStatus(ehrmsValue(record, ehrmsFieldEmployeeStatus))
 	input := CreateEmployeeInput{
@@ -287,7 +287,7 @@ func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmploy
 	return employee, nil, nil
 }
 
-// validateEHRMSEmployee enforces source-specific minimum invariants without requiring local login fields.
+// validateEHRMSEmployee 驗證 eHRMS 員工的服務流程。
 func (c HRService) validateEHRMSEmployee(ctx RequestContext, employee Employee, rowNumber int, lookup ehrmsValidationLookup) ([]RowError, error) {
 	fields := make([]FieldError, 0)
 	if strings.TrimSpace(employee.EmployeeNo) == "" {
@@ -318,6 +318,7 @@ type ehrmsValidationLookup struct {
 	unique     employeeUniqueIndex
 }
 
+// ehrmsValidationLookup 處理 eHRMS 驗證 lookup 的服務流程。
 func (c HRService) ehrmsValidationLookup(ctx RequestContext) (ehrmsValidationLookup, error) {
 	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
 	if err != nil {
@@ -342,6 +343,7 @@ type employeeUniqueIndex struct {
 	basicInfo     map[string]map[string]Employee
 }
 
+// newEmployeeUniqueIndex 建立員工 unique index。
 func newEmployeeUniqueIndex(employees []Employee) employeeUniqueIndex {
 	idx := employeeUniqueIndex{
 		employeeNo:    map[string]Employee{},
@@ -377,6 +379,7 @@ func newEmployeeUniqueIndex(employees []Employee) employeeUniqueIndex {
 	return idx
 }
 
+// fieldErrors 處理欄位錯誤。
 func (idx employeeUniqueIndex) fieldErrors(employee Employee) []FieldError {
 	fields := make([]FieldError, 0, 8)
 	if existing, ok := idx.employeeNo[employee.EmployeeNo]; employee.EmployeeNo != "" && ok && existing.ID != employee.ID {
@@ -407,7 +410,7 @@ func (idx employeeUniqueIndex) fieldErrors(employee Employee) []FieldError {
 	return fields
 }
 
-// ehrmsOrgUnits builds stable org-unit rows from eHRMS department code/name pairs.
+// ehrmsOrgUnits 處理 eHRMS 組織單位。
 func ehrmsOrgUnits(tenantID string, records []EHRMSEmployeeRecord, now time.Time) []OrgUnit {
 	unitsByID := map[string]OrgUnit{}
 	for _, record := range records {
@@ -430,7 +433,7 @@ func ehrmsOrgUnits(tenantID string, records []EHRMSEmployeeRecord, now time.Time
 	return units
 }
 
-// normalizeEHRMSSyncMode defaults eHRMS sync to upsert while reusing import modes.
+// normalizeEHRMSSyncMode 正規化eHRMS sync mode。
 func normalizeEHRMSSyncMode(mode string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "", employeeImportModeUpsert:
@@ -444,7 +447,7 @@ func normalizeEHRMSSyncMode(mode string) (string, error) {
 	}
 }
 
-// ehrmsMergeEmployee applies source-owned eHRMS fields while preserving local-only account/email data.
+// ehrmsMergeEmployee 處理 eHRMS merge 員工。
 func ehrmsMergeEmployee(existing Employee, candidate Employee) Employee {
 	next := existing
 	next.EmployeeNo = candidate.EmployeeNo
@@ -462,7 +465,7 @@ func ehrmsMergeEmployee(existing Employee, candidate Employee) Employee {
 	return next
 }
 
-// ehrmsEmployeeCategory maps eHRMS identity labels into canonical employee categories.
+// ehrmsEmployeeCategory 處理 eHRMS 員工分類。
 func ehrmsEmployeeCategory(record EHRMSEmployeeRecord) string {
 	switch ehrmsValue(record, ehrmsFieldIdentityType) {
 	case "時薪員工":
@@ -476,7 +479,7 @@ func ehrmsEmployeeCategory(record EHRMSEmployeeRecord) string {
 	}
 }
 
-// ehrmsBatchErrors catches duplicate source keys before database unique constraints fire.
+// ehrmsBatchErrors 處理 eHRMS 批次錯誤。
 func ehrmsBatchErrors(rowNumber int, employee Employee, employeeNos map[string]int, nationalIDs map[string]int) []RowError {
 	errors := make([]RowError, 0, 2)
 	if employeeNo := strings.TrimSpace(employee.EmployeeNo); employeeNo != "" {
@@ -496,7 +499,7 @@ func ehrmsBatchErrors(rowNumber int, employee Employee, employeeNos map[string]i
 	return errors
 }
 
-// fieldErrorsToRowErrors projects employee field validation into row-level sync errors.
+// fieldErrorsToRowErrors 處理欄位錯誤 to 列錯誤。
 func fieldErrorsToRowErrors(rowNumber int, fields []FieldError) []RowError {
 	if len(fields) == 0 {
 		return nil
@@ -508,7 +511,7 @@ func fieldErrorsToRowErrors(rowNumber int, fields []FieldError) []RowError {
 	return out
 }
 
-// ehrmsValue returns a trimmed dynamic field from one eHRMS record.
+// ehrmsValue 處理 eHRMS value。
 func ehrmsValue(record EHRMSEmployeeRecord, key string) string {
 	if len(record) == 0 {
 		return ""

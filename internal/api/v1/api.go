@@ -12,7 +12,7 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
-// API owns HTTP routing, middleware, and service facade wiring for v1.
+// API 定義 API 的資料結構。
 type API struct {
 	logger              *slog.Logger
 	identity            service.IdentityFacade
@@ -25,28 +25,41 @@ type API struct {
 	workspace           service.WorkspaceFacade
 	workflow            service.WorkflowFacade
 	agent               service.AgentFacade
+	notification        service.NotificationFacade
 	audit               service.AuditFacade
 	allowApprovalHeader bool
 	tokenResolver       TokenResolver
 	telemetryService    string
 	readinessChecks     map[string]ReadinessCheck
+	corsAllowedOrigins  []string
+	trustedProxies      []string
+	rateLimiter         RateLimiter
+	metrics             *apiMetrics
 }
 
-// HandlerFunc is the internal handler signature after request context resolution.
+// HandlerFunc 表示 handler func。
 type HandlerFunc func(http.ResponseWriter, *http.Request, domain.RequestContext) error
 
-// ReadinessCheck verifies one runtime dependency for /readyz.
+// ReadinessCheck 表示就緒檢查 check。
 type ReadinessCheck func(context.Context) error
 
-// Options controls API middleware behavior and optional dependency checks.
+// Options 定義選項的資料結構。
 type Options struct {
 	DisableApprovalHeader bool
 	TokenResolver         TokenResolver
 	TelemetryServiceName  string
 	ReadinessChecks       map[string]ReadinessCheck
+	// CORSAllowedOrigins 啟用只接受精確來源比對的 CORS middleware。
+	// 空值表示不輸出 CORS headers，維持既有行為。
+	CORSAllowedOrigins []string
+	// TrustedProxies 列出允許信任 forwarding headers 的 proxy CIDR/IP。
+	// 空值表示解析 client IP 時不信任任何 proxy。
+	TrustedProxies []string
+	// RateLimiter 非 nil 時會啟用每個 client IP 的請求限流。
+	RateLimiter RateLimiter
 }
 
-// New builds an API instance from the service facade and runtime options.
+// New 建立 API v1 的主要物件。
 func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
 	if logger == nil {
 		logger = slog.Default()
@@ -64,6 +77,10 @@ func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
 		tokenResolver:       cfg.TokenResolver,
 		telemetryService:    cfg.TelemetryServiceName,
 		readinessChecks:     copyReadinessChecks(cfg.ReadinessChecks),
+		corsAllowedOrigins:  cfg.CORSAllowedOrigins,
+		trustedProxies:      cfg.TrustedProxies,
+		rateLimiter:         cfg.RateLimiter,
+		metrics:             newAPIMetrics(),
 	}
 	if app != nil {
 		api.identity = app.Identity()
@@ -76,17 +93,32 @@ func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
 		api.workspace = app.Workspace()
 		api.workflow = app.Workflow()
 		api.agent = app.Agent()
+		api.notification = app.Notifications()
 		api.audit = app.Audit()
 	}
 	return api
 }
 
-// Routes builds the Gin router and registers all public endpoints.
+// Routes 處理路由。
 func (a *API) Routes() http.Handler {
 	gin.SetMode(gin.ReleaseMode)
 	router := gin.New()
-	_ = router.SetTrustedProxies(nil)
-	router.Use(a.recovery(), a.requestLogger())
+	// 預設不信任 proxy headers，因此 c.ClientIP() 會回傳 peer address。
+	// 部署在 reverse proxy 或 load balancer 後方時，需設定信任的 proxy。
+	// TRUSTED_PROXIES 以逗號分隔 CIDR/IP，供 logs 與限流使用正確 client IP。
+	// 這樣才能安全地從 X-Forwarded-For 推導 client IP。
+	if len(a.trustedProxies) > 0 {
+		_ = router.SetTrustedProxies(a.trustedProxies)
+	} else {
+		_ = router.SetTrustedProxies(nil)
+	}
+	router.Use(a.recovery(), a.requestLogger(), a.metrics.middleware())
+	if len(a.corsAllowedOrigins) > 0 {
+		router.Use(corsMiddleware(a.corsAllowedOrigins))
+	}
+	if a.rateLimiter != nil {
+		router.Use(a.rateLimit(a.rateLimiter))
+	}
 	if a.telemetryService != "" {
 		router.Use(otelgin.Middleware(a.telemetryService))
 	}
@@ -96,6 +128,7 @@ func (a *API) Routes() http.Handler {
 	return router
 }
 
+// copyReadinessChecks 複製就緒檢查 checks。
 func copyReadinessChecks(src map[string]ReadinessCheck) map[string]ReadinessCheck {
 	if len(src) == 0 {
 		return nil

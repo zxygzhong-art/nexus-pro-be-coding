@@ -7,6 +7,7 @@ import (
 	"nexus-pro-be/internal/startup"
 )
 
+// TestRenderIncludesRuntimeAndDependencies 驗證 render includes runtime and 依賴。
 func TestRenderIncludesRuntimeAndDependencies(t *testing.T) {
 	output := startup.Render(startup.Report{
 		Name:       "nexus-pro-be",
@@ -36,6 +37,7 @@ func TestRenderIncludesRuntimeAndDependencies(t *testing.T) {
 	}
 }
 
+// TestSafeURLRedactsCredentials 驗證 safe URL redacts credentials。
 func TestSafeURLRedactsCredentials(t *testing.T) {
 	got := startup.SafeURL("postgres://nexus:secret@localhost:5432/nexus_pro_be?sslmode=disable&password=secret")
 	if strings.Contains(got, "secret") {

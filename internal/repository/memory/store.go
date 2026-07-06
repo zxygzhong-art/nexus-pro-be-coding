@@ -13,7 +13,7 @@ import (
 	"nexus-pro-be/internal/utils"
 )
 
-// Store is a concurrency-safe in-memory implementation of repository.Store.
+// Store 定義儲存層的資料結構。
 type Store struct {
 	mu sync.RWMutex
 
@@ -46,14 +46,17 @@ type Store struct {
 	platformTaskItems      map[string]map[string]PlatformTaskRecordItem
 	platformTaskTodos      map[string]map[string]PlatformTaskTodoRecord
 	agentRuns              map[string]map[string]AgentRun
+	notifications          map[string]map[string]Notification
+	notificationRecipients map[string]map[string]NotificationRecipient
 	auditLogs              map[string][]AuditLog
 	permissionVersions     map[string]int64
 	authzOutbox            map[string][]AuthzOutboxEvent
+	identityOutbox         map[string][]IdentityProvisioningOutboxEvent
 	outboxEvents           map[string][]OutboxEvent
 	relationshipTuples     map[string]map[string]AuthzRelationshipTuple
 }
 
-// NewStore creates an empty in-memory repository.
+// NewStore 建立儲存層。
 func NewStore() *Store {
 	return &Store{
 		tenants:                map[string]Tenant{},
@@ -84,14 +87,18 @@ func NewStore() *Store {
 		platformTaskItems:      map[string]map[string]PlatformTaskRecordItem{},
 		platformTaskTodos:      map[string]map[string]PlatformTaskTodoRecord{},
 		agentRuns:              map[string]map[string]AgentRun{},
+		notifications:          map[string]map[string]Notification{},
+		notificationRecipients: map[string]map[string]NotificationRecipient{},
 		auditLogs:              map[string][]AuditLog{},
 		permissionVersions:     map[string]int64{},
 		authzOutbox:            map[string][]AuthzOutboxEvent{},
+		identityOutbox:         map[string][]IdentityProvisioningOutboxEvent{},
 		outboxEvents:           map[string][]OutboxEvent{},
 		relationshipTuples:     map[string]map[string]AuthzRelationshipTuple{},
 	}
 }
 
+// UpsertTenant 從儲存層處理 upsert 租戶。
 func (s *Store) UpsertTenant(_ context.Context, v Tenant) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -99,6 +106,7 @@ func (s *Store) UpsertTenant(_ context.Context, v Tenant) error {
 	return nil
 }
 
+// GetTenant 從儲存層取得租戶。
 func (s *Store) GetTenant(_ context.Context, id string) (Tenant, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -109,6 +117,7 @@ func (s *Store) GetTenant(_ context.Context, id string) (Tenant, bool, error) {
 	return copyTenant(v), true, nil
 }
 
+// ListTenants 從儲存層列出租戶。
 func (s *Store) ListTenants(_ context.Context) ([]Tenant, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -120,6 +129,7 @@ func (s *Store) ListTenants(_ context.Context) ([]Tenant, error) {
 	return out, nil
 }
 
+// UpsertAccount 從儲存層處理 upsert 帳號。
 func (s *Store) UpsertAccount(_ context.Context, v Account) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -127,6 +137,7 @@ func (s *Store) UpsertAccount(_ context.Context, v Account) error {
 	return nil
 }
 
+// GetAccount 從儲存層取得帳號。
 func (s *Store) GetAccount(_ context.Context, tenantID, id string) (Account, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -137,6 +148,7 @@ func (s *Store) GetAccount(_ context.Context, tenantID, id string) (Account, boo
 	return copyAccount(v), true, nil
 }
 
+// ListAccounts 從儲存層列出帳號。
 func (s *Store) ListAccounts(_ context.Context, tenantID string) ([]Account, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -145,6 +157,7 @@ func (s *Store) ListAccounts(_ context.Context, tenantID string) ([]Account, err
 	return out, nil
 }
 
+// UpsertUserIdentity 從儲存層處理 upsert 使用者身分。
 func (s *Store) UpsertUserIdentity(_ context.Context, v UserIdentity) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -152,6 +165,7 @@ func (s *Store) UpsertUserIdentity(_ context.Context, v UserIdentity) error {
 	return nil
 }
 
+// GetUserIdentity 從儲存層取得使用者身分。
 func (s *Store) GetUserIdentity(_ context.Context, tenantID, provider, subject string) (UserIdentity, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -162,6 +176,7 @@ func (s *Store) GetUserIdentity(_ context.Context, tenantID, provider, subject s
 	return copyUserIdentity(v), true, nil
 }
 
+// ListUserIdentities 從儲存層列出使用者身分。
 func (s *Store) ListUserIdentities(_ context.Context, tenantID, accountID string) ([]UserIdentity, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -176,6 +191,7 @@ func (s *Store) ListUserIdentities(_ context.Context, tenantID, accountID string
 	return out, nil
 }
 
+// UpsertUserGroup 從儲存層處理 upsert 使用者群組。
 func (s *Store) UpsertUserGroup(_ context.Context, v UserGroup) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -183,6 +199,7 @@ func (s *Store) UpsertUserGroup(_ context.Context, v UserGroup) error {
 	return nil
 }
 
+// GetUserGroup 從儲存層取得使用者群組。
 func (s *Store) GetUserGroup(_ context.Context, tenantID, id string) (UserGroup, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -193,6 +210,7 @@ func (s *Store) GetUserGroup(_ context.Context, tenantID, id string) (UserGroup,
 	return copyUserGroup(v), true, nil
 }
 
+// ListUserGroups 從儲存層列出使用者群組。
 func (s *Store) ListUserGroups(_ context.Context, tenantID string) ([]UserGroup, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -201,6 +219,7 @@ func (s *Store) ListUserGroups(_ context.Context, tenantID string) ([]UserGroup,
 	return out, nil
 }
 
+// UpsertPermissionSet 從儲存層處理 upsert 權限集合。
 func (s *Store) UpsertPermissionSet(_ context.Context, v PermissionSet) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -208,6 +227,7 @@ func (s *Store) UpsertPermissionSet(_ context.Context, v PermissionSet) error {
 	return nil
 }
 
+// GetPermissionSet 從儲存層取得權限集合。
 func (s *Store) GetPermissionSet(_ context.Context, tenantID, id string) (PermissionSet, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -218,6 +238,7 @@ func (s *Store) GetPermissionSet(_ context.Context, tenantID, id string) (Permis
 	return copyPermissionSet(v), true, nil
 }
 
+// ListPermissionSets 從儲存層列出權限集合。
 func (s *Store) ListPermissionSets(_ context.Context, tenantID string) ([]PermissionSet, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -226,6 +247,7 @@ func (s *Store) ListPermissionSets(_ context.Context, tenantID string) ([]Permis
 	return out, nil
 }
 
+// UpsertPermissionSetAssignment 從儲存層處理 upsert 權限集合指派。
 func (s *Store) UpsertPermissionSetAssignment(_ context.Context, v PermissionSetAssignment) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -233,6 +255,7 @@ func (s *Store) UpsertPermissionSetAssignment(_ context.Context, v PermissionSet
 	return nil
 }
 
+// ListPermissionSetAssignments 從儲存層列出權限集合指派。
 func (s *Store) ListPermissionSetAssignments(_ context.Context, tenantID string) ([]PermissionSetAssignment, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -241,6 +264,7 @@ func (s *Store) ListPermissionSetAssignments(_ context.Context, tenantID string)
 	return out, nil
 }
 
+// ListPermissionSetAssignmentsForPrincipal 從儲存層列出權限集合指派 for principal。
 func (s *Store) ListPermissionSetAssignmentsForPrincipal(_ context.Context, tenantID, principalType, principalID string) ([]PermissionSetAssignment, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -262,6 +286,7 @@ func (s *Store) ListPermissionSetAssignmentsForPrincipal(_ context.Context, tena
 	return out, nil
 }
 
+// UpsertDataScope 從儲存層處理 upsert 資料範圍。
 func (s *Store) UpsertDataScope(_ context.Context, v DataScope) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -269,6 +294,7 @@ func (s *Store) UpsertDataScope(_ context.Context, v DataScope) error {
 	return nil
 }
 
+// GetDataScope 從儲存層取得資料範圍。
 func (s *Store) GetDataScope(_ context.Context, tenantID, id string) (DataScope, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -279,6 +305,7 @@ func (s *Store) GetDataScope(_ context.Context, tenantID, id string) (DataScope,
 	return copyDataScope(v), true, nil
 }
 
+// GetDataScopeByCode 從儲存層取得資料範圍 by 碼。
 func (s *Store) GetDataScopeByCode(_ context.Context, tenantID, code string) (DataScope, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -290,6 +317,7 @@ func (s *Store) GetDataScopeByCode(_ context.Context, tenantID, code string) (Da
 	return DataScope{}, false, nil
 }
 
+// ListDataScopes 從儲存層列出資料範圍。
 func (s *Store) ListDataScopes(_ context.Context, tenantID string) ([]DataScope, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -298,6 +326,7 @@ func (s *Store) ListDataScopes(_ context.Context, tenantID string) ([]DataScope,
 	return out, nil
 }
 
+// UpsertFieldPolicy 從儲存層處理 upsert 欄位政策。
 func (s *Store) UpsertFieldPolicy(_ context.Context, v FieldPolicy) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -305,6 +334,7 @@ func (s *Store) UpsertFieldPolicy(_ context.Context, v FieldPolicy) error {
 	return nil
 }
 
+// ListFieldPolicies 從儲存層列出欄位政策。
 func (s *Store) ListFieldPolicies(_ context.Context, tenantID, applicationCode, resourceType string) ([]FieldPolicy, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -318,6 +348,7 @@ func (s *Store) ListFieldPolicies(_ context.Context, tenantID, applicationCode, 
 	return out, nil
 }
 
+// UpsertAssumableRole 從儲存層處理 upsert assumable 角色。
 func (s *Store) UpsertAssumableRole(_ context.Context, v AssumableRole) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -325,6 +356,7 @@ func (s *Store) UpsertAssumableRole(_ context.Context, v AssumableRole) error {
 	return nil
 }
 
+// GetAssumableRole 從儲存層取得 assumable 角色。
 func (s *Store) GetAssumableRole(_ context.Context, tenantID, id string) (AssumableRole, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -335,6 +367,7 @@ func (s *Store) GetAssumableRole(_ context.Context, tenantID, id string) (Assuma
 	return copyAssumableRole(v), true, nil
 }
 
+// ListAssumableRoles 從儲存層列出 assumable 角色。
 func (s *Store) ListAssumableRoles(_ context.Context, tenantID string) ([]AssumableRole, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -343,6 +376,7 @@ func (s *Store) ListAssumableRoles(_ context.Context, tenantID string) ([]Assuma
 	return out, nil
 }
 
+// UpsertAssumableRoleSession 從儲存層處理 upsert assumable 角色 session。
 func (s *Store) UpsertAssumableRoleSession(_ context.Context, v AssumableRoleSession) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -350,6 +384,7 @@ func (s *Store) UpsertAssumableRoleSession(_ context.Context, v AssumableRoleSes
 	return nil
 }
 
+// GetActiveAssumableRoleSession 從儲存層取得啟用中 assumable 角色 session。
 func (s *Store) GetActiveAssumableRoleSession(_ context.Context, tenantID, id string) (AssumableRoleSession, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -364,6 +399,7 @@ func (s *Store) GetActiveAssumableRoleSession(_ context.Context, tenantID, id st
 	return copyAssumableRoleSession(v), true, nil
 }
 
+// UpsertOrgUnit 從儲存層處理 upsert 組織單位。
 func (s *Store) UpsertOrgUnit(_ context.Context, v OrgUnit) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -371,6 +407,7 @@ func (s *Store) UpsertOrgUnit(_ context.Context, v OrgUnit) error {
 	return nil
 }
 
+// GetOrgUnit 從儲存層取得組織單位。
 func (s *Store) GetOrgUnit(_ context.Context, tenantID, id string) (OrgUnit, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -381,6 +418,7 @@ func (s *Store) GetOrgUnit(_ context.Context, tenantID, id string) (OrgUnit, boo
 	return copyOrgUnit(v), true, nil
 }
 
+// ListOrgUnits 從儲存層列出組織單位。
 func (s *Store) ListOrgUnits(_ context.Context, tenantID string) ([]OrgUnit, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -389,6 +427,7 @@ func (s *Store) ListOrgUnits(_ context.Context, tenantID string) ([]OrgUnit, err
 	return out, nil
 }
 
+// UpsertEmployee 從儲存層處理 upsert 員工。
 func (s *Store) UpsertEmployee(_ context.Context, v Employee) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -396,6 +435,7 @@ func (s *Store) UpsertEmployee(_ context.Context, v Employee) error {
 	return nil
 }
 
+// GetEmployee 從儲存層取得員工。
 func (s *Store) GetEmployee(_ context.Context, tenantID, id string) (Employee, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -406,12 +446,14 @@ func (s *Store) GetEmployee(_ context.Context, tenantID, id string) (Employee, b
 	return copyEmployee(v), true, nil
 }
 
+// GetEmployeeByEmployeeNo 從儲存層取得員工 by 員工 no。
 func (s *Store) GetEmployeeByEmployeeNo(_ context.Context, tenantID, employeeNo string) (Employee, bool, error) {
 	return s.getEmployeeBy(tenantID, func(v Employee) bool {
 		return v.EmployeeNo == strings.TrimSpace(employeeNo)
 	})
 }
 
+// GetEmployeeByCompanyEmail 從儲存層取得員工 by 公司 email。
 func (s *Store) GetEmployeeByCompanyEmail(_ context.Context, tenantID, companyEmail string) (Employee, bool, error) {
 	email := strings.ToLower(strings.TrimSpace(companyEmail))
 	return s.getEmployeeBy(tenantID, func(v Employee) bool {
@@ -419,6 +461,7 @@ func (s *Store) GetEmployeeByCompanyEmail(_ context.Context, tenantID, companyEm
 	})
 }
 
+// GetEmployeeByPersonalEmail 從儲存層取得員工 by personal email。
 func (s *Store) GetEmployeeByPersonalEmail(_ context.Context, tenantID, personalEmail string) (Employee, bool, error) {
 	email := strings.ToLower(strings.TrimSpace(personalEmail))
 	if email == "" {
@@ -429,6 +472,7 @@ func (s *Store) GetEmployeeByPersonalEmail(_ context.Context, tenantID, personal
 	})
 }
 
+// GetEmployeeByAccountID 從儲存層取得員工 by 帳號 ID。
 func (s *Store) GetEmployeeByAccountID(_ context.Context, tenantID, accountID string) (Employee, bool, error) {
 	accountID = strings.TrimSpace(accountID)
 	return s.getEmployeeBy(tenantID, func(v Employee) bool {
@@ -436,6 +480,7 @@ func (s *Store) GetEmployeeByAccountID(_ context.Context, tenantID, accountID st
 	})
 }
 
+// GetEmployeeByBasicInfoField 從儲存層取得員工 by 基本 info 欄位。
 func (s *Store) GetEmployeeByBasicInfoField(_ context.Context, tenantID, fieldName, fieldValue string) (Employee, bool, error) {
 	fieldName = strings.TrimSpace(fieldName)
 	fieldValue = strings.ToLower(strings.TrimSpace(fieldValue))
@@ -448,6 +493,7 @@ func (s *Store) GetEmployeeByBasicInfoField(_ context.Context, tenantID, fieldNa
 	})
 }
 
+// getEmployeeBy 從儲存層取得員工 by。
 func (s *Store) getEmployeeBy(tenantID string, match func(Employee) bool) (Employee, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -459,6 +505,7 @@ func (s *Store) getEmployeeBy(tenantID string, match func(Employee) bool) (Emplo
 	return Employee{}, false, nil
 }
 
+// ListEmployees 從儲存層列出員工。
 func (s *Store) ListEmployees(_ context.Context, tenantID string) ([]Employee, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -472,6 +519,7 @@ func (s *Store) ListEmployees(_ context.Context, tenantID string) ([]Employee, e
 	return out, nil
 }
 
+// ListEmployeesByQuery 從儲存層列出員工 by 查詢。
 func (s *Store) ListEmployeesByQuery(ctx context.Context, tenantID string, query EmployeeQuery) ([]Employee, error) {
 	items, err := s.ListEmployees(ctx, tenantID)
 	if err != nil {
@@ -482,6 +530,7 @@ func (s *Store) ListEmployeesByQuery(ctx context.Context, tenantID string, query
 	return items, nil
 }
 
+// ListEmployeePageByQuery 從儲存層列出員工分頁 by 查詢。
 func (s *Store) ListEmployeePageByQuery(ctx context.Context, tenantID string, query EmployeeQuery) ([]Employee, int, error) {
 	items, err := s.ListEmployeesByQuery(ctx, tenantID, query)
 	if err != nil {
@@ -492,6 +541,7 @@ func (s *Store) ListEmployeePageByQuery(ctx context.Context, tenantID string, qu
 	return paginateMemory(items, query.Page, query.PageSize), total, nil
 }
 
+// CountEmployeesByQuery 從儲存層處理 count 員工 by 查詢。
 func (s *Store) CountEmployeesByQuery(ctx context.Context, tenantID string, query EmployeeQuery) (int, error) {
 	items, err := s.ListEmployeesByQuery(ctx, tenantID, query)
 	if err != nil {
@@ -500,6 +550,7 @@ func (s *Store) CountEmployeesByQuery(ctx context.Context, tenantID string, quer
 	return len(items), nil
 }
 
+// NextEmployeeNo 從儲存層處理 next 員工 no。
 func (s *Store) NextEmployeeNo(_ context.Context, tenantID, prefix string) (string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -517,6 +568,7 @@ func (s *Store) NextEmployeeNo(_ context.Context, tenantID, prefix string) (stri
 	return fmt.Sprintf("%s%03d", prefix, nextSeq), nil
 }
 
+// filterMemoryEmployeesByQuery 從儲存層處理篩選 memory 員工 by 查詢。
 func (s *Store) filterMemoryEmployeesByQuery(tenantID string, items []Employee, query EmployeeQuery) []Employee {
 	out := make([]Employee, 0, len(items))
 	query = normalizeMemoryEmployeeQuery(query)
@@ -586,6 +638,7 @@ func (s *Store) filterMemoryEmployeesByQuery(tenantID string, items []Employee, 
 	return out
 }
 
+// memoryStringSet 處理 memory 字串集合。
 func memoryStringSet(values []string) map[string]struct{} {
 	if len(values) == 0 {
 		return nil
@@ -600,6 +653,7 @@ func memoryStringSet(values []string) map[string]struct{} {
 	return out
 }
 
+// normalizeMemoryEmployeeQuery 正規化memory 員工查詢。
 func normalizeMemoryEmployeeQuery(query EmployeeQuery) EmployeeQuery {
 	if query.Page <= 0 {
 		query.Page = DefaultPage
@@ -618,6 +672,7 @@ func normalizeMemoryEmployeeQuery(query EmployeeQuery) EmployeeQuery {
 	return query
 }
 
+// normalizeMemoryEmployeeStatus 正規化memory 員工狀態。
 func normalizeMemoryEmployeeStatus(value string) string {
 	switch strings.TrimSpace(value) {
 	case "在職", "active":
@@ -637,6 +692,7 @@ func normalizeMemoryEmployeeStatus(value string) string {
 	}
 }
 
+// normalizeMemoryEmployeeCategory 正規化memory 員工分類。
 func normalizeMemoryEmployeeCategory(value string) string {
 	switch strings.TrimSpace(value) {
 	case "全職", "正職", "full-time", "full_time":
@@ -654,6 +710,7 @@ func normalizeMemoryEmployeeCategory(value string) string {
 	}
 }
 
+// sortMemoryEmployees 排序memory 員工。
 func sortMemoryEmployees(items []Employee, sortKey string) {
 	sort.SliceStable(items, func(i, j int) bool {
 		a, b := items[i], items[j]
@@ -676,6 +733,7 @@ func sortMemoryEmployees(items []Employee, sortKey string) {
 	})
 }
 
+// paginateMemory 處理 paginate memory。
 func paginateMemory[T any](items []T, page, pageSize int) []T {
 	start := (page - 1) * pageSize
 	if start >= len(items) {
@@ -690,6 +748,7 @@ func paginateMemory[T any](items []T, page, pageSize int) []T {
 	return out
 }
 
+// memoryLeaveRequestMatches 處理 memory 請假請求 matches。
 func memoryLeaveRequestMatches(item LeaveRequest, query domain.LeaveRequestQuery) bool {
 	if len(query.EmployeeIDs) > 0 {
 		allowed := map[string]struct{}{}
@@ -716,6 +775,7 @@ func memoryLeaveRequestMatches(item LeaveRequest, query domain.LeaveRequestQuery
 	return true
 }
 
+// memoryFormInstanceMatches 處理 memory 表單實例 matches。
 func memoryFormInstanceMatches(item FormInstance, templateKey string, query domain.FormInstanceQuery) bool {
 	if status := strings.TrimSpace(query.Status); status != "" && item.Status != status {
 		return false
@@ -732,6 +792,7 @@ func memoryFormInstanceMatches(item FormInstance, templateKey string, query doma
 	return true
 }
 
+// memoryDateOnly 處理 memory 日期 only。
 func memoryDateOnly(value string) (time.Time, bool) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -744,6 +805,7 @@ func memoryDateOnly(value string) (time.Time, bool) {
 	return parsed, true
 }
 
+// memoryTimeValue 處理 memory 時間 value。
 func memoryTimeValue(t *time.Time) time.Time {
 	if t == nil {
 		return time.Time{}
@@ -751,6 +813,7 @@ func memoryTimeValue(t *time.Time) time.Time {
 	return *t
 }
 
+// memoryEmployeeNoSequence 處理 memory 員工 no sequence。
 func memoryEmployeeNoSequence(employeeNo, prefix string) (int, bool) {
 	employeeNo = strings.TrimSpace(employeeNo)
 	prefix = strings.TrimSpace(prefix)
@@ -764,6 +827,7 @@ func memoryEmployeeNoSequence(employeeNo, prefix string) (int, bool) {
 	return seq, true
 }
 
+// UpsertEmployeeImportSession 從儲存層處理 upsert 員工 import session。
 func (s *Store) UpsertEmployeeImportSession(_ context.Context, v EmployeeImportSession) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -771,6 +835,7 @@ func (s *Store) UpsertEmployeeImportSession(_ context.Context, v EmployeeImportS
 	return nil
 }
 
+// GetEmployeeImportSession 從儲存層取得員工 import session。
 func (s *Store) GetEmployeeImportSession(_ context.Context, tenantID, id string) (EmployeeImportSession, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -781,6 +846,7 @@ func (s *Store) GetEmployeeImportSession(_ context.Context, tenantID, id string)
 	return copyEmployeeImportSession(v), true, nil
 }
 
+// UpsertAttendancePolicy 從儲存層處理 upsert 考勤政策。
 func (s *Store) UpsertAttendancePolicy(_ context.Context, v AttendancePolicy) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -788,6 +854,7 @@ func (s *Store) UpsertAttendancePolicy(_ context.Context, v AttendancePolicy) er
 	return nil
 }
 
+// GetAttendancePolicy 從儲存層取得考勤政策。
 func (s *Store) GetAttendancePolicy(_ context.Context, tenantID string) (AttendancePolicy, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -798,6 +865,7 @@ func (s *Store) GetAttendancePolicy(_ context.Context, tenantID string) (Attenda
 	return copyAttendancePolicy(v), true, nil
 }
 
+// UpsertLeaveBalance 從儲存層處理 upsert 請假 balance。
 func (s *Store) UpsertLeaveBalance(_ context.Context, v LeaveBalance) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -805,6 +873,7 @@ func (s *Store) UpsertLeaveBalance(_ context.Context, v LeaveBalance) error {
 	return nil
 }
 
+// GetLeaveBalance 從儲存層取得請假 balance。
 func (s *Store) GetLeaveBalance(_ context.Context, tenantID, id string) (LeaveBalance, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -815,6 +884,7 @@ func (s *Store) GetLeaveBalance(_ context.Context, tenantID, id string) (LeaveBa
 	return copyLeaveBalance(v), true, nil
 }
 
+// ListLeaveBalances 從儲存層列出請假 balances。
 func (s *Store) ListLeaveBalances(_ context.Context, tenantID string) ([]LeaveBalance, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -823,6 +893,7 @@ func (s *Store) ListLeaveBalances(_ context.Context, tenantID string) ([]LeaveBa
 	return out, nil
 }
 
+// ReserveLeaveBalance 從儲存層保留請假 balance。
 func (s *Store) ReserveLeaveBalance(_ context.Context, tenantID, employeeID, leaveType string, hours float64, updatedAt time.Time) (LeaveBalance, bool, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -842,6 +913,7 @@ func (s *Store) ReserveLeaveBalance(_ context.Context, tenantID, employeeID, lea
 	return LeaveBalance{}, false, false, nil
 }
 
+// ReleaseLeaveBalance 從儲存層釋放請假 balance。
 func (s *Store) ReleaseLeaveBalance(_ context.Context, tenantID, employeeID, leaveType string, hours float64, updatedAt time.Time) (LeaveBalance, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -858,6 +930,7 @@ func (s *Store) ReleaseLeaveBalance(_ context.Context, tenantID, employeeID, lea
 	return LeaveBalance{}, false, nil
 }
 
+// UpsertLeaveRequest 從儲存層處理 upsert 請假請求。
 func (s *Store) UpsertLeaveRequest(_ context.Context, v LeaveRequest) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -865,6 +938,7 @@ func (s *Store) UpsertLeaveRequest(_ context.Context, v LeaveRequest) error {
 	return nil
 }
 
+// GetLeaveRequest 從儲存層取得請假請求。
 func (s *Store) GetLeaveRequest(_ context.Context, tenantID, id string) (LeaveRequest, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -875,6 +949,7 @@ func (s *Store) GetLeaveRequest(_ context.Context, tenantID, id string) (LeaveRe
 	return copyLeaveRequest(v), true, nil
 }
 
+// GetLeaveRequestByFormInstanceID 從儲存層取得請假請求 by 表單實例 ID。
 func (s *Store) GetLeaveRequestByFormInstanceID(_ context.Context, tenantID, formInstanceID string) (LeaveRequest, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -886,6 +961,7 @@ func (s *Store) GetLeaveRequestByFormInstanceID(_ context.Context, tenantID, for
 	return LeaveRequest{}, false, nil
 }
 
+// ListLeaveRequests 從儲存層列出請假請求。
 func (s *Store) ListLeaveRequests(_ context.Context, tenantID string) ([]LeaveRequest, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -894,6 +970,7 @@ func (s *Store) ListLeaveRequests(_ context.Context, tenantID string) ([]LeaveRe
 	return out, nil
 }
 
+// ListLeaveRequestsByQuery 從儲存層列出請假請求 by 查詢。
 func (s *Store) ListLeaveRequestsByQuery(ctx context.Context, tenantID string, query domain.LeaveRequestQuery) ([]LeaveRequest, error) {
 	items, err := s.ListLeaveRequests(ctx, tenantID)
 	if err != nil {
@@ -908,6 +985,7 @@ func (s *Store) ListLeaveRequestsByQuery(ctx context.Context, tenantID string, q
 	return out, nil
 }
 
+// ListLeaveRequestPageByQuery 從儲存層列出請假請求分頁 by 查詢。
 func (s *Store) ListLeaveRequestPageByQuery(ctx context.Context, tenantID string, query domain.LeaveRequestQuery, page PageRequest) ([]LeaveRequest, int, error) {
 	items, err := s.ListLeaveRequestsByQuery(ctx, tenantID, query)
 	if err != nil {
@@ -926,6 +1004,7 @@ func (s *Store) ListLeaveRequestPageByQuery(ctx context.Context, tenantID string
 	return paginateMemory(items, page.Page, page.PageSize), total, nil
 }
 
+// UpsertAttendanceWorksite 從儲存層處理 upsert 考勤工作地點。
 func (s *Store) UpsertAttendanceWorksite(_ context.Context, v AttendanceWorksite) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -933,6 +1012,7 @@ func (s *Store) UpsertAttendanceWorksite(_ context.Context, v AttendanceWorksite
 	return nil
 }
 
+// GetAttendanceWorksite 從儲存層取得考勤工作地點。
 func (s *Store) GetAttendanceWorksite(_ context.Context, tenantID, id string) (AttendanceWorksite, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -943,6 +1023,7 @@ func (s *Store) GetAttendanceWorksite(_ context.Context, tenantID, id string) (A
 	return copyAttendanceWorksite(v), true, nil
 }
 
+// ListAttendanceWorksites 從儲存層列出考勤 worksites。
 func (s *Store) ListAttendanceWorksites(_ context.Context, tenantID string) ([]AttendanceWorksite, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -951,6 +1032,7 @@ func (s *Store) ListAttendanceWorksites(_ context.Context, tenantID string) ([]A
 	return out, nil
 }
 
+// UpsertAttendanceShift 從儲存層處理 upsert 考勤班別。
 func (s *Store) UpsertAttendanceShift(_ context.Context, v AttendanceShift) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -958,6 +1040,7 @@ func (s *Store) UpsertAttendanceShift(_ context.Context, v AttendanceShift) erro
 	return nil
 }
 
+// GetAttendanceShift 從儲存層取得考勤班別。
 func (s *Store) GetAttendanceShift(_ context.Context, tenantID, id string) (AttendanceShift, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -968,6 +1051,7 @@ func (s *Store) GetAttendanceShift(_ context.Context, tenantID, id string) (Atte
 	return copyAttendanceShift(v), true, nil
 }
 
+// ListAttendanceShifts 從儲存層列出考勤 shifts。
 func (s *Store) ListAttendanceShifts(_ context.Context, tenantID string) ([]AttendanceShift, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -976,6 +1060,7 @@ func (s *Store) ListAttendanceShifts(_ context.Context, tenantID string) ([]Atte
 	return out, nil
 }
 
+// UpsertAttendanceShiftAssignment 從儲存層處理 upsert 考勤班別指派。
 func (s *Store) UpsertAttendanceShiftAssignment(_ context.Context, v AttendanceShiftAssignment) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -983,6 +1068,7 @@ func (s *Store) UpsertAttendanceShiftAssignment(_ context.Context, v AttendanceS
 	return nil
 }
 
+// GetAttendanceShiftAssignment 從儲存層取得考勤班別指派。
 func (s *Store) GetAttendanceShiftAssignment(_ context.Context, tenantID, id string) (AttendanceShiftAssignment, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -993,6 +1079,7 @@ func (s *Store) GetAttendanceShiftAssignment(_ context.Context, tenantID, id str
 	return copyAttendanceShiftAssignment(v), true, nil
 }
 
+// ListAttendanceShiftAssignments 從儲存層列出考勤班別指派。
 func (s *Store) ListAttendanceShiftAssignments(_ context.Context, tenantID string) ([]AttendanceShiftAssignment, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1001,6 +1088,7 @@ func (s *Store) ListAttendanceShiftAssignments(_ context.Context, tenantID strin
 	return out, nil
 }
 
+// FindEffectiveAttendanceShiftAssignment 從儲存層處理 find effective 考勤班別指派。
 func (s *Store) FindEffectiveAttendanceShiftAssignment(_ context.Context, tenantID, employeeID string, at time.Time) (AttendanceShiftAssignment, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1027,7 +1115,7 @@ func (s *Store) FindEffectiveAttendanceShiftAssignment(_ context.Context, tenant
 	return copyAttendanceShiftAssignment(best), true, nil
 }
 
-// UpsertAttendanceClockRecord preserves the accepted-per-day clock invariant used by PostgreSQL.
+// UpsertAttendanceClockRecord 從儲存層處理 upsert 考勤打卡 record。
 func (s *Store) UpsertAttendanceClockRecord(_ context.Context, v AttendanceClockRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1042,6 +1130,7 @@ func (s *Store) UpsertAttendanceClockRecord(_ context.Context, v AttendanceClock
 	return nil
 }
 
+// GetAttendanceClockRecord 從儲存層取得考勤打卡 record。
 func (s *Store) GetAttendanceClockRecord(_ context.Context, tenantID, id string) (AttendanceClockRecord, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1052,6 +1141,7 @@ func (s *Store) GetAttendanceClockRecord(_ context.Context, tenantID, id string)
 	return copyAttendanceClockRecord(v), true, nil
 }
 
+// GetAcceptedAttendanceClockRecord 從儲存層取得 accepted 考勤打卡 record。
 func (s *Store) GetAcceptedAttendanceClockRecord(_ context.Context, tenantID, employeeID, workDate, direction string) (AttendanceClockRecord, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1063,6 +1153,7 @@ func (s *Store) GetAcceptedAttendanceClockRecord(_ context.Context, tenantID, em
 	return AttendanceClockRecord{}, false, nil
 }
 
+// ListAttendanceClockRecords 從儲存層列出考勤打卡 records。
 func (s *Store) ListAttendanceClockRecords(_ context.Context, tenantID string, query domain.AttendanceClockRecordQuery) ([]AttendanceClockRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1077,6 +1168,7 @@ func (s *Store) ListAttendanceClockRecords(_ context.Context, tenantID string, q
 	return out, nil
 }
 
+// UpsertAttendanceCorrectionRequest 從儲存層處理 upsert 考勤 correction 請求。
 func (s *Store) UpsertAttendanceCorrectionRequest(_ context.Context, v AttendanceCorrectionRequest) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1084,6 +1176,7 @@ func (s *Store) UpsertAttendanceCorrectionRequest(_ context.Context, v Attendanc
 	return nil
 }
 
+// GetAttendanceCorrectionRequest 從儲存層取得考勤 correction 請求。
 func (s *Store) GetAttendanceCorrectionRequest(_ context.Context, tenantID, id string) (AttendanceCorrectionRequest, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1094,6 +1187,7 @@ func (s *Store) GetAttendanceCorrectionRequest(_ context.Context, tenantID, id s
 	return copyAttendanceCorrectionRequest(v), true, nil
 }
 
+// ListAttendanceCorrectionRequests 從儲存層列出考勤 correction 請求。
 func (s *Store) ListAttendanceCorrectionRequests(_ context.Context, tenantID string, query domain.AttendanceCorrectionQuery) ([]AttendanceCorrectionRequest, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1108,6 +1202,7 @@ func (s *Store) ListAttendanceCorrectionRequests(_ context.Context, tenantID str
 	return out, nil
 }
 
+// memoryClockRecordMatches 處理 memory 打卡 record matches。
 func memoryClockRecordMatches(item AttendanceClockRecord, query domain.AttendanceClockRecordQuery) bool {
 	if query.EmployeeID != "" && item.EmployeeID != query.EmployeeID {
 		return false
@@ -1130,6 +1225,7 @@ func memoryClockRecordMatches(item AttendanceClockRecord, query domain.Attendanc
 	return true
 }
 
+// memoryCorrectionMatches 處理 memory correction matches。
 func memoryCorrectionMatches(item AttendanceCorrectionRequest, query domain.AttendanceCorrectionQuery) bool {
 	if query.EmployeeID != "" && item.EmployeeID != query.EmployeeID {
 		return false
@@ -1149,6 +1245,7 @@ func memoryCorrectionMatches(item AttendanceCorrectionRequest, query domain.Atte
 	return true
 }
 
+// UpsertFormTemplate 從儲存層處理 upsert 表單範本。
 func (s *Store) UpsertFormTemplate(_ context.Context, v FormTemplate) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1156,6 +1253,7 @@ func (s *Store) UpsertFormTemplate(_ context.Context, v FormTemplate) error {
 	return nil
 }
 
+// GetFormTemplate 從儲存層取得表單範本。
 func (s *Store) GetFormTemplate(_ context.Context, tenantID, id string) (FormTemplate, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1166,6 +1264,7 @@ func (s *Store) GetFormTemplate(_ context.Context, tenantID, id string) (FormTem
 	return copyFormTemplate(v), true, nil
 }
 
+// GetFormTemplateByKey 從儲存層取得表單範本 by key。
 func (s *Store) GetFormTemplateByKey(_ context.Context, tenantID, key string) (FormTemplate, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1178,6 +1277,7 @@ func (s *Store) GetFormTemplateByKey(_ context.Context, tenantID, key string) (F
 	return FormTemplate{}, false, nil
 }
 
+// ListFormTemplates 從儲存層列出表單範本。
 func (s *Store) ListFormTemplates(_ context.Context, tenantID string) ([]FormTemplate, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1186,6 +1286,7 @@ func (s *Store) ListFormTemplates(_ context.Context, tenantID string) ([]FormTem
 	return out, nil
 }
 
+// UpsertFormInstance 從儲存層處理 upsert 表單實例。
 func (s *Store) UpsertFormInstance(_ context.Context, v FormInstance) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1193,6 +1294,7 @@ func (s *Store) UpsertFormInstance(_ context.Context, v FormInstance) error {
 	return nil
 }
 
+// GetFormInstance 從儲存層取得表單實例。
 func (s *Store) GetFormInstance(_ context.Context, tenantID, id string) (FormInstance, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1203,6 +1305,7 @@ func (s *Store) GetFormInstance(_ context.Context, tenantID, id string) (FormIns
 	return copyFormInstance(v), true, nil
 }
 
+// ListFormInstances 從儲存層列出表單實例。
 func (s *Store) ListFormInstances(_ context.Context, tenantID string) ([]FormInstance, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1211,6 +1314,7 @@ func (s *Store) ListFormInstances(_ context.Context, tenantID string) ([]FormIns
 	return out, nil
 }
 
+// ListFormInstancesByQuery 從儲存層列出表單實例 by 查詢。
 func (s *Store) ListFormInstancesByQuery(ctx context.Context, tenantID string, query domain.FormInstanceQuery) ([]FormInstance, error) {
 	items, err := s.ListFormInstances(ctx, tenantID)
 	if err != nil {
@@ -1235,6 +1339,7 @@ func (s *Store) ListFormInstancesByQuery(ctx context.Context, tenantID string, q
 	return out, nil
 }
 
+// ListFormInstancePageByQuery 從儲存層列出表單實例分頁 by 查詢。
 func (s *Store) ListFormInstancePageByQuery(ctx context.Context, tenantID string, query domain.FormInstanceQuery, page PageRequest) ([]FormInstance, int, error) {
 	items, err := s.ListFormInstancesByQuery(ctx, tenantID, query)
 	if err != nil {
@@ -1253,7 +1358,7 @@ func (s *Store) ListFormInstancePageByQuery(ctx context.Context, tenantID string
 	return paginateMemory(items, page.Page, page.PageSize), total, nil
 }
 
-// DeleteFormInstance removes one workflow form instance from the in-memory tenant bucket.
+// DeleteFormInstance 從儲存層刪除表單實例。
 func (s *Store) DeleteFormInstance(_ context.Context, tenantID, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1261,6 +1366,7 @@ func (s *Store) DeleteFormInstance(_ context.Context, tenantID, id string) error
 	return nil
 }
 
+// UpsertKnowledgeArticle 從儲存層處理 upsert 知識文章。
 func (s *Store) UpsertKnowledgeArticle(_ context.Context, v KnowledgeArticle) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1268,6 +1374,7 @@ func (s *Store) UpsertKnowledgeArticle(_ context.Context, v KnowledgeArticle) er
 	return nil
 }
 
+// ListKnowledgeArticles 從儲存層列出知識文章。
 func (s *Store) ListKnowledgeArticles(_ context.Context, tenantID string) ([]KnowledgeArticle, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1276,6 +1383,7 @@ func (s *Store) ListKnowledgeArticles(_ context.Context, tenantID string) ([]Kno
 	return out, nil
 }
 
+// UpsertPlatformTaskItem 從儲存層處理 upsert 平台任務項目。
 func (s *Store) UpsertPlatformTaskItem(_ context.Context, v PlatformTaskRecordItem) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1286,6 +1394,7 @@ func (s *Store) UpsertPlatformTaskItem(_ context.Context, v PlatformTaskRecordIt
 	return nil
 }
 
+// GetPlatformTaskItem 從儲存層取得平台任務項目。
 func (s *Store) GetPlatformTaskItem(_ context.Context, tenantID, accountID, id string) (PlatformTaskRecordItem, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1296,6 +1405,7 @@ func (s *Store) GetPlatformTaskItem(_ context.Context, tenantID, accountID, id s
 	return copyPlatformTaskRecordItem(v), true, nil
 }
 
+// ListPlatformTaskItems 從儲存層列出平台任務項目。
 func (s *Store) ListPlatformTaskItems(_ context.Context, tenantID, accountID string) ([]PlatformTaskRecordItem, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1314,6 +1424,7 @@ func (s *Store) ListPlatformTaskItems(_ context.Context, tenantID, accountID str
 	return out, nil
 }
 
+// DeletePlatformTaskItem 從儲存層刪除平台任務項目。
 func (s *Store) DeletePlatformTaskItem(_ context.Context, tenantID, accountID, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1323,6 +1434,7 @@ func (s *Store) DeletePlatformTaskItem(_ context.Context, tenantID, accountID, i
 	return nil
 }
 
+// UpsertPlatformTaskTodo 從儲存層處理 upsert 平台任務待辦。
 func (s *Store) UpsertPlatformTaskTodo(_ context.Context, v PlatformTaskTodoRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1333,6 +1445,7 @@ func (s *Store) UpsertPlatformTaskTodo(_ context.Context, v PlatformTaskTodoReco
 	return nil
 }
 
+// GetPlatformTaskTodo 從儲存層取得平台任務待辦。
 func (s *Store) GetPlatformTaskTodo(_ context.Context, tenantID, accountID, id string) (PlatformTaskTodoRecord, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1343,6 +1456,7 @@ func (s *Store) GetPlatformTaskTodo(_ context.Context, tenantID, accountID, id s
 	return copyPlatformTaskTodoRecord(v), true, nil
 }
 
+// ListPlatformTaskTodos 從儲存層列出平台任務待辦。
 func (s *Store) ListPlatformTaskTodos(_ context.Context, tenantID, accountID string) ([]PlatformTaskTodoRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1361,6 +1475,7 @@ func (s *Store) ListPlatformTaskTodos(_ context.Context, tenantID, accountID str
 	return out, nil
 }
 
+// DeletePlatformTaskTodo 從儲存層刪除平台任務待辦。
 func (s *Store) DeletePlatformTaskTodo(_ context.Context, tenantID, accountID, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1370,6 +1485,7 @@ func (s *Store) DeletePlatformTaskTodo(_ context.Context, tenantID, accountID, i
 	return nil
 }
 
+// UpsertAgentRun 從儲存層處理 upsert agent 執行。
 func (s *Store) UpsertAgentRun(_ context.Context, v AgentRun) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1377,6 +1493,7 @@ func (s *Store) UpsertAgentRun(_ context.Context, v AgentRun) error {
 	return nil
 }
 
+// GetAgentRun 從儲存層取得 agent 執行。
 func (s *Store) GetAgentRun(_ context.Context, tenantID, id string) (AgentRun, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1387,6 +1504,7 @@ func (s *Store) GetAgentRun(_ context.Context, tenantID, id string) (AgentRun, b
 	return copyAgentRun(v), true, nil
 }
 
+// ListAgentRuns 從儲存層列出 agent 執行紀錄。
 func (s *Store) ListAgentRuns(_ context.Context, tenantID string) ([]AgentRun, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1395,6 +1513,7 @@ func (s *Store) ListAgentRuns(_ context.Context, tenantID string) ([]AgentRun, e
 	return out, nil
 }
 
+// ListAgentRunsByAccount 從儲存層列出 agent 執行紀錄 by 帳號。
 func (s *Store) ListAgentRunsByAccount(ctx context.Context, tenantID, accountID string) ([]AgentRun, error) {
 	items, err := s.ListAgentRuns(ctx, tenantID)
 	if err != nil {
@@ -1415,6 +1534,7 @@ func (s *Store) ListAgentRunsByAccount(ctx context.Context, tenantID, accountID 
 	return out, nil
 }
 
+// ListAgentRunPage 從儲存層列出 agent 執行分頁。
 func (s *Store) ListAgentRunPage(ctx context.Context, tenantID string, page PageRequest) ([]AgentRun, int, error) {
 	items, err := s.ListAgentRuns(ctx, tenantID)
 	if err != nil {
@@ -1433,6 +1553,7 @@ func (s *Store) ListAgentRunPage(ctx context.Context, tenantID string, page Page
 	return paginateMemory(items, page.Page, page.PageSize), total, nil
 }
 
+// ListAgentRunPageByAccount 從儲存層列出 agent 執行分頁 by 帳號。
 func (s *Store) ListAgentRunPageByAccount(ctx context.Context, tenantID, accountID string, page PageRequest) ([]AgentRun, int, error) {
 	items, err := s.ListAgentRunsByAccount(ctx, tenantID, accountID)
 	if err != nil {
@@ -1451,6 +1572,183 @@ func (s *Store) ListAgentRunPageByAccount(ctx context.Context, tenantID, account
 	return paginateMemory(items, page.Page, page.PageSize), total, nil
 }
 
+// UpsertNotification 從儲存層處理 upsert 系統通知。
+func (s *Store) UpsertNotification(_ context.Context, v Notification) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.notifications, v.TenantID, v.ID, copyNotification(v))
+	return nil
+}
+
+// UpsertNotificationRecipient 從儲存層處理 upsert 通知投遞狀態。
+func (s *Store) UpsertNotificationRecipient(_ context.Context, v NotificationRecipient) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.notificationRecipients, v.TenantID, notificationRecipientKey(v.NotificationID, v.AccountID), copyNotificationRecipient(v))
+	return nil
+}
+
+// ListNotificationItems 從儲存層列出目前帳號可見的系統通知。
+func (s *Store) ListNotificationItems(_ context.Context, tenantID, accountID string, query domain.NotificationListQuery) ([]NotificationItem, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now().UTC()
+	out := make([]NotificationItem, 0)
+	for _, recipient := range s.notificationRecipients[tenantID] {
+		if recipient.AccountID != accountID || recipient.DeletedAt != nil {
+			continue
+		}
+		notification, ok := s.notifications[tenantID][recipient.NotificationID]
+		if !ok || !memoryNotificationVisible(notification, now) {
+			continue
+		}
+		if query.Tone != "" && notification.Tone != query.Tone {
+			continue
+		}
+		if query.UnreadOnly && recipient.ReadAt != nil {
+			continue
+		}
+		if query.HasCursor && !memoryNotificationAfterCursor(notification, query) {
+			continue
+		}
+		out = append(out, memoryNotificationItem(notification, recipient))
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID > out[j].ID
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	if query.Limit > 0 && len(out) > query.Limit {
+		out = out[:query.Limit]
+	}
+	return out, nil
+}
+
+// CountUnreadNotifications 從儲存層統計目前帳號未讀通知數。
+func (s *Store) CountUnreadNotifications(_ context.Context, tenantID, accountID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now().UTC()
+	count := 0
+	for _, recipient := range s.notificationRecipients[tenantID] {
+		if recipient.AccountID != accountID || recipient.DeletedAt != nil || recipient.ReadAt != nil {
+			continue
+		}
+		notification, ok := s.notifications[tenantID][recipient.NotificationID]
+		if ok && memoryNotificationVisible(notification, now) {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// CountNotificationTones 從儲存層統計目前帳號可見通知的 tone 分布。
+func (s *Store) CountNotificationTones(_ context.Context, tenantID, accountID string) (NotificationToneCounts, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now().UTC()
+	counts := NotificationToneCounts{}
+	for _, recipient := range s.notificationRecipients[tenantID] {
+		if recipient.AccountID != accountID || recipient.DeletedAt != nil {
+			continue
+		}
+		notification, ok := s.notifications[tenantID][recipient.NotificationID]
+		if !ok || !memoryNotificationVisible(notification, now) {
+			continue
+		}
+		counts.All++
+		switch notification.Tone {
+		case string(domain.NotificationToneSuccess):
+			counts.Success++
+		case string(domain.NotificationToneInfo):
+			counts.Info++
+		case string(domain.NotificationToneWarning):
+			counts.Warning++
+		}
+	}
+	return counts, nil
+}
+
+// MarkNotificationRead 從儲存層將單筆通知標為已讀。
+func (s *Store) MarkNotificationRead(_ context.Context, tenantID, accountID, notificationID string, readAt time.Time) (NotificationItem, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := notificationRecipientKey(notificationID, accountID)
+	recipient, ok := s.notificationRecipients[tenantID][key]
+	if !ok || recipient.DeletedAt != nil {
+		return NotificationItem{}, false, nil
+	}
+	notification, ok := s.notifications[tenantID][notificationID]
+	if !ok || !memoryNotificationVisible(notification, time.Now().UTC()) {
+		return NotificationItem{}, false, nil
+	}
+	if recipient.ReadAt == nil {
+		t := readAt.UTC()
+		recipient.ReadAt = &t
+		s.notificationRecipients[tenantID][key] = copyNotificationRecipient(recipient)
+	}
+	return memoryNotificationItem(notification, recipient), true, nil
+}
+
+// MarkAllNotificationsRead 從儲存層將目前帳號全部未讀通知標為已讀。
+func (s *Store) MarkAllNotificationsRead(_ context.Context, tenantID, accountID string, readAt time.Time) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := time.Now().UTC()
+	updated := 0
+	for key, recipient := range s.notificationRecipients[tenantID] {
+		if recipient.AccountID != accountID || recipient.DeletedAt != nil || recipient.ReadAt != nil {
+			continue
+		}
+		notification, ok := s.notifications[tenantID][recipient.NotificationID]
+		if !ok || !memoryNotificationVisible(notification, now) {
+			continue
+		}
+		t := readAt.UTC()
+		recipient.ReadAt = &t
+		s.notificationRecipients[tenantID][key] = copyNotificationRecipient(recipient)
+		updated++
+	}
+	return updated, nil
+}
+
+// notificationRecipientKey 建立單筆通知送達狀態的 tenant 內 memory map key。
+func notificationRecipientKey(notificationID, accountID string) string {
+	return notificationID + "\x00" + accountID
+}
+
+// memoryNotificationVisible 以 SQL 查詢相同語義檢查通知是否仍可見。
+func memoryNotificationVisible(item Notification, now time.Time) bool {
+	return item.ExpiresAt == nil || item.ExpiresAt.After(now)
+}
+
+// memoryNotificationAfterCursor 只保留早於倒序游標的通知列。
+func memoryNotificationAfterCursor(item Notification, query domain.NotificationListQuery) bool {
+	return item.CreatedAt.Before(query.CursorCreatedAt) || (item.CreatedAt.Equal(query.CursorCreatedAt) && item.ID < query.CursorID)
+}
+
+// memoryNotificationItem 合併通知內容與收件者已讀狀態。
+func memoryNotificationItem(item Notification, recipient NotificationRecipient) NotificationItem {
+	var readAt *time.Time
+	if recipient.ReadAt != nil {
+		t := recipient.ReadAt.UTC()
+		readAt = &t
+	}
+	return NotificationItem{
+		ID:         item.ID,
+		Tone:       item.Tone,
+		Category:   item.Category,
+		Title:      item.Title,
+		Body:       item.Body,
+		StatusText: item.StatusText,
+		LinkURL:    item.LinkURL,
+		ReadAt:     readAt,
+		CreatedAt:  item.CreatedAt.UTC(),
+	}
+}
+
+// AppendAuditLog 從儲存層附加稽核 log。
 func (s *Store) AppendAuditLog(_ context.Context, v AuditLog) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1458,6 +1756,7 @@ func (s *Store) AppendAuditLog(_ context.Context, v AuditLog) error {
 	return nil
 }
 
+// ListAuditLogs 從儲存層列出稽核 logs。
 func (s *Store) ListAuditLogs(_ context.Context, tenantID string) ([]AuditLog, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1470,6 +1769,7 @@ func (s *Store) ListAuditLogs(_ context.Context, tenantID string) ([]AuditLog, e
 	return out, nil
 }
 
+// ListAuditLogPage 從儲存層列出稽核 log 分頁。
 func (s *Store) ListAuditLogPage(ctx context.Context, tenantID string, page PageRequest) ([]AuditLog, int, error) {
 	items, err := s.ListAuditLogs(ctx, tenantID)
 	if err != nil {
@@ -1488,12 +1788,14 @@ func (s *Store) ListAuditLogPage(ctx context.Context, tenantID string, page Page
 	return paginateMemory(items, page.Page, page.PageSize), total, nil
 }
 
+// GetPermissionVersion 從儲存層取得權限 version。
 func (s *Store) GetPermissionVersion(_ context.Context, tenantID string) (int64, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return s.permissionVersions[tenantID], nil
 }
 
+// IncrementPermissionVersion 從儲存層處理 increment 權限 version。
 func (s *Store) IncrementPermissionVersion(_ context.Context, tenantID string) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1501,6 +1803,7 @@ func (s *Store) IncrementPermissionVersion(_ context.Context, tenantID string) (
 	return s.permissionVersions[tenantID], nil
 }
 
+// UpsertAuthzRelationshipTuple 從儲存層處理 upsert 授權關係 tuple。
 func (s *Store) UpsertAuthzRelationshipTuple(_ context.Context, v AuthzRelationshipTuple) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1511,6 +1814,7 @@ func (s *Store) UpsertAuthzRelationshipTuple(_ context.Context, v AuthzRelations
 	return nil
 }
 
+// DeleteAuthzRelationshipTuple 從儲存層刪除授權關係 tuple。
 func (s *Store) DeleteAuthzRelationshipTuple(_ context.Context, v AuthzRelationshipTuple) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1518,6 +1822,7 @@ func (s *Store) DeleteAuthzRelationshipTuple(_ context.Context, v AuthzRelations
 	return nil
 }
 
+// ListAuthzRelationshipTuplesForObject 從儲存層列出授權關係 tuple for 物件。
 func (s *Store) ListAuthzRelationshipTuplesForObject(_ context.Context, tenantID, objectType, objectID string) ([]AuthzRelationshipTuple, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1540,6 +1845,7 @@ func (s *Store) ListAuthzRelationshipTuplesForObject(_ context.Context, tenantID
 	return out, nil
 }
 
+// AppendAuthzOutboxEvent 從儲存層附加授權 outbox 事件。
 func (s *Store) AppendAuthzOutboxEvent(_ context.Context, v AuthzOutboxEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1547,6 +1853,7 @@ func (s *Store) AppendAuthzOutboxEvent(_ context.Context, v AuthzOutboxEvent) er
 	return nil
 }
 
+// ListAuthzOutboxEvents 從儲存層列出授權 outbox 事件。
 func (s *Store) ListAuthzOutboxEvents(_ context.Context, tenantID string) ([]AuthzOutboxEvent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1559,6 +1866,45 @@ func (s *Store) ListAuthzOutboxEvents(_ context.Context, tenantID string) ([]Aut
 	return out, nil
 }
 
+// AppendIdentityProvisioningOutboxEvent 從儲存層附加身分開通 outbox 事件。
+func (s *Store) AppendIdentityProvisioningOutboxEvent(_ context.Context, v IdentityProvisioningOutboxEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.identityOutbox[v.TenantID] = append(s.identityOutbox[v.TenantID], v)
+	return nil
+}
+
+// ListPendingIdentityProvisioningOutboxEvents 從儲存層列出 pending 身分開通 outbox 事件。
+func (s *Store) ListPendingIdentityProvisioningOutboxEvents(_ context.Context, tenantID string) ([]IdentityProvisioningOutboxEvent, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	src := s.identityOutbox[tenantID]
+	out := make([]IdentityProvisioningOutboxEvent, 0, len(src))
+	for _, v := range src {
+		if v.Status == domain.IdentityProvisioningStatusPending {
+			out = append(out, v)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+// UpdateIdentityProvisioningOutboxEvent 從儲存層更新身分開通 outbox 事件。
+func (s *Store) UpdateIdentityProvisioningOutboxEvent(_ context.Context, v IdentityProvisioningOutboxEvent) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	events := s.identityOutbox[v.TenantID]
+	for i := range events {
+		if events[i].ID == v.ID {
+			events[i] = v
+			s.identityOutbox[v.TenantID] = events
+			return nil
+		}
+	}
+	return nil
+}
+
+// AppendOutboxEvent 從儲存層附加 outbox 事件。
 func (s *Store) AppendOutboxEvent(_ context.Context, v OutboxEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1566,6 +1912,7 @@ func (s *Store) AppendOutboxEvent(_ context.Context, v OutboxEvent) error {
 	return nil
 }
 
+// ListOutboxEvents 從儲存層列出 outbox 事件。
 func (s *Store) ListOutboxEvents(_ context.Context, tenantID string) ([]OutboxEvent, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1578,6 +1925,7 @@ func (s *Store) ListOutboxEvents(_ context.Context, tenantID string) ([]OutboxEv
 	return out, nil
 }
 
+// UpdateAuthzOutboxEvent 從儲存層更新授權 outbox 事件。
 func (s *Store) UpdateAuthzOutboxEvent(_ context.Context, v AuthzOutboxEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1592,6 +1940,7 @@ func (s *Store) UpdateAuthzOutboxEvent(_ context.Context, v AuthzOutboxEvent) er
 	return nil
 }
 
+// RemoveAccountGroup 從儲存層移除帳號群組。
 func (s *Store) RemoveAccountGroup(_ context.Context, tenantID, accountID, groupID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1605,6 +1954,7 @@ func (s *Store) RemoveAccountGroup(_ context.Context, tenantID, accountID, group
 	return nil
 }
 
+// AddAccountGroup 從儲存層處理 add 帳號群組。
 func (s *Store) AddAccountGroup(_ context.Context, tenantID, accountID, groupID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1620,6 +1970,7 @@ func (s *Store) AddAccountGroup(_ context.Context, tenantID, accountID, groupID 
 	return nil
 }
 
+// putNested 處理 put nested。
 func putNested[T any](bucket map[string]map[string]T, tenantID, id string, value T) {
 	sub, ok := bucket[tenantID]
 	if !ok {
@@ -1629,6 +1980,7 @@ func putNested[T any](bucket map[string]map[string]T, tenantID, id string, value
 	sub[id] = value
 }
 
+// getNested 取得 nested。
 func getNested[T any](bucket map[string]map[string]T, tenantID, id string) (T, bool) {
 	var zero T
 	sub, ok := bucket[tenantID]
@@ -1642,6 +1994,7 @@ func getNested[T any](bucket map[string]map[string]T, tenantID, id string) (T, b
 	return v, true
 }
 
+// copyNestedValues 複製 nested values。
 func copyNestedValues[T any](bucket map[string]T, clone func(T) T) []T {
 	if len(bucket) == 0 {
 		return []T{}
@@ -1653,10 +2006,12 @@ func copyNestedValues[T any](bucket map[string]T, clone func(T) T) []T {
 	return out
 }
 
+// identityKey 處理身分 key。
 func identityKey(provider, subject string) string {
 	return strings.TrimSpace(provider) + "\x00" + strings.TrimSpace(subject)
 }
 
+// nowUTC 處理 now utc。
 func nowUTC() time.Time {
 	return time.Now().UTC()
 }

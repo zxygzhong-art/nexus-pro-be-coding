@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -9,20 +10,43 @@ import (
 	"time"
 )
 
-// Config contains all environment-backed runtime settings for the API process.
+// Config 定義組態的資料結構。
 type Config struct {
 	Env      string
 	HTTPAddr string
 	LogLevel string
 
-	DatabaseURL string
+	DatabaseURL       string
+	DBMaxConns        int
+	DBMinConns        int
+	DBMaxConnLifetime time.Duration
 
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
 
-	KeycloakIssuerURL string
-	KeycloakClientID  string
+	CORSAllowedOrigins []string
+
+	// TrustedProxies 說明此處的程式契約。
+	// trusted 說明此處的程式契約。
+	TrustedProxies []string
+
+	// MetricsAddr 說明此處的程式契約。
+	// An 說明此處的程式契約。
+	MetricsAddr string
+
+	RateLimitEnabled bool
+	RateLimitRPS     int
+	RateLimitBurst   int
+
+	KeycloakIssuerURL         string
+	KeycloakClientID          string
+	KeycloakProvisionUsers    bool
+	KeycloakAdminClientID     string
+	KeycloakAdminClientSecret string
+	KeycloakSendInviteEmail   bool
+	KeycloakInviteClientID    string
+	KeycloakInviteRedirectURL string
 
 	OpenFGAAPIURL  string
 	OpenFGAStoreID string
@@ -53,7 +77,7 @@ type Config struct {
 	OTelExporterOTLPInsecure bool
 }
 
-// ValidateStartup enforces fail-closed production defaults before the server starts.
+// ValidateStartup 驗證 startup。
 func (c Config) ValidateStartup() error {
 	if c.Env != "production" {
 		return nil
@@ -61,6 +85,8 @@ func (c Config) ValidateStartup() error {
 	problems := []string{}
 	if strings.TrimSpace(c.DatabaseURL) == "" {
 		problems = append(problems, "DATABASE_URL is required")
+	} else if problem := productionDatabaseSSLProblem(c.DatabaseURL); problem != "" {
+		problems = append(problems, problem)
 	}
 	if strings.TrimSpace(c.KeycloakIssuerURL) == "" {
 		problems = append(problems, "KEYCLOAK_ISSUER_URL is required")
@@ -69,6 +95,19 @@ func (c Config) ValidateStartup() error {
 	}
 	if strings.TrimSpace(c.KeycloakClientID) == "" {
 		problems = append(problems, "KEYCLOAK_CLIENT_ID is required")
+	}
+	if c.KeycloakProvisionUsers {
+		if strings.TrimSpace(c.KeycloakAdminClientID) == "" {
+			problems = append(problems, "KEYCLOAK_ADMIN_CLIENT_ID is required when KEYCLOAK_PROVISION_USERS=true")
+		}
+		if strings.TrimSpace(c.KeycloakAdminClientSecret) == "" {
+			problems = append(problems, "KEYCLOAK_ADMIN_CLIENT_SECRET is required when KEYCLOAK_PROVISION_USERS=true")
+		}
+	}
+	if strings.TrimSpace(c.KeycloakInviteRedirectURL) != "" {
+		if problem := productionHTTPSURLProblem("KEYCLOAK_INVITE_REDIRECT_URL", c.KeycloakInviteRedirectURL); problem != "" {
+			problems = append(problems, problem)
+		}
 	}
 	if strings.TrimSpace(c.OpenFGAAPIURL) == "" {
 		problems = append(problems, "OPENFGA_API_URL is required")
@@ -113,28 +152,46 @@ func (c Config) ValidateStartup() error {
 	return nil
 }
 
-// Load reads configuration and ignores validation errors for legacy callers.
+// Load 載入目前流程。
 func Load() Config {
 	cfg, _ := LoadE()
 	return cfg
 }
 
-// LoadE reads configuration and returns all environment parsing errors.
+// LoadE 載入 e。
 func LoadE() (Config, error) {
 	appEnv := env("APP_ENV", "development")
 	problems := []string{}
 	objectStoreProvider := normalizeObjectStoreProvider(os.Getenv("OBJECT_STORE_PROVIDER"), os.Getenv("OBJECT_STORE_DIR"), os.Getenv("OBJECT_STORE_ENDPOINT"), os.Getenv("OBJECT_STORE_BUCKET"))
 	cfg := Config{
-		Env:           appEnv,
-		HTTPAddr:      env("HTTP_ADDR", ":8080"),
-		LogLevel:      env("LOG_LEVEL", "info"),
-		DatabaseURL:   strings.TrimSpace(os.Getenv("DATABASE_URL")),
-		RedisAddr:     strings.TrimSpace(os.Getenv("REDIS_ADDR")),
-		RedisPassword: os.Getenv("REDIS_PASSWORD"),
-		RedisDB:       envInt("REDIS_DB", 0, &problems),
+		Env:               appEnv,
+		HTTPAddr:          env("HTTP_ADDR", ":8080"),
+		LogLevel:          env("LOG_LEVEL", "info"),
+		DatabaseURL:       strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		DBMaxConns:        envInt("DB_MAX_CONNS", 10, &problems),
+		DBMinConns:        envInt("DB_MIN_CONNS", 1, &problems),
+		DBMaxConnLifetime: envDuration("DB_MAX_CONN_LIFETIME", time.Hour, &problems),
+		RedisAddr:         strings.TrimSpace(os.Getenv("REDIS_ADDR")),
+		RedisPassword:     os.Getenv("REDIS_PASSWORD"),
+		RedisDB:           envInt("REDIS_DB", 0, &problems),
 
-		KeycloakIssuerURL: strings.TrimSpace(os.Getenv("KEYCLOAK_ISSUER_URL")),
-		KeycloakClientID:  strings.TrimSpace(os.Getenv("KEYCLOAK_CLIENT_ID")),
+		CORSAllowedOrigins: splitCommaList(os.Getenv("CORS_ALLOWED_ORIGINS")),
+
+		TrustedProxies: splitCommaList(os.Getenv("TRUSTED_PROXIES")),
+		MetricsAddr:    envAllowEmpty("METRICS_ADDR", "127.0.0.1:9091"),
+
+		RateLimitEnabled: envBool("RATE_LIMIT_ENABLED", false, &problems),
+		RateLimitRPS:     envInt("RATE_LIMIT_RPS", 20, &problems),
+		RateLimitBurst:   envInt("RATE_LIMIT_BURST", 40, &problems),
+
+		KeycloakIssuerURL:         strings.TrimSpace(os.Getenv("KEYCLOAK_ISSUER_URL")),
+		KeycloakClientID:          strings.TrimSpace(os.Getenv("KEYCLOAK_CLIENT_ID")),
+		KeycloakProvisionUsers:    envBool("KEYCLOAK_PROVISION_USERS", false, &problems),
+		KeycloakAdminClientID:     strings.TrimSpace(os.Getenv("KEYCLOAK_ADMIN_CLIENT_ID")),
+		KeycloakAdminClientSecret: os.Getenv("KEYCLOAK_ADMIN_CLIENT_SECRET"),
+		KeycloakSendInviteEmail:   envBool("KEYCLOAK_SEND_INVITE_EMAIL", false, &problems),
+		KeycloakInviteClientID:    env("KEYCLOAK_INVITE_CLIENT_ID", strings.TrimSpace(os.Getenv("KEYCLOAK_CLIENT_ID"))),
+		KeycloakInviteRedirectURL: strings.TrimSpace(os.Getenv("KEYCLOAK_INVITE_REDIRECT_URL")),
 
 		OpenFGAAPIURL:  strings.TrimSpace(os.Getenv("OPENFGA_API_URL")),
 		OpenFGAStoreID: strings.TrimSpace(os.Getenv("OPENFGA_STORE_ID")),
@@ -166,13 +223,45 @@ func LoadE() (Config, error) {
 	}
 	problems = append(problems, ehrmsConfigProblems(cfg.EHRMSBaseURL, cfg.EHRMSAPIKey)...)
 	problems = append(problems, ehrmsSyncConfigProblems(cfg)...)
+	problems = append(problems, keycloakProvisioningConfigProblems(cfg)...)
+	problems = append(problems, databasePoolConfigProblems(cfg)...)
+	problems = append(problems, rateLimitConfigProblems(cfg)...)
+	problems = append(problems, trustedProxiesConfigProblems(cfg)...)
 	if len(problems) > 0 {
 		return cfg, fmt.Errorf("configuration invalid: %s", strings.Join(problems, "; "))
 	}
 	return cfg, nil
 }
 
-// ehrmsConfigProblems validates that the eHRMS upstream is configured atomically.
+// keycloakProvisioningConfigProblems 處理 Keycloak 開通組態 problems。
+func keycloakProvisioningConfigProblems(c Config) []string {
+	problems := []string{}
+	if !c.KeycloakProvisionUsers {
+		if c.KeycloakSendInviteEmail {
+			problems = append(problems, "KEYCLOAK_SEND_INVITE_EMAIL requires KEYCLOAK_PROVISION_USERS=true")
+		}
+		return problems
+	}
+	if strings.TrimSpace(c.KeycloakIssuerURL) == "" {
+		problems = append(problems, "KEYCLOAK_ISSUER_URL is required when KEYCLOAK_PROVISION_USERS=true")
+	} else if problem := httpURLProblem("KEYCLOAK_ISSUER_URL", c.KeycloakIssuerURL); problem != "" {
+		problems = append(problems, problem)
+	}
+	if strings.TrimSpace(c.KeycloakAdminClientID) == "" {
+		problems = append(problems, "KEYCLOAK_ADMIN_CLIENT_ID is required when KEYCLOAK_PROVISION_USERS=true")
+	}
+	if strings.TrimSpace(c.KeycloakAdminClientSecret) == "" {
+		problems = append(problems, "KEYCLOAK_ADMIN_CLIENT_SECRET is required when KEYCLOAK_PROVISION_USERS=true")
+	}
+	if strings.TrimSpace(c.KeycloakInviteRedirectURL) != "" {
+		if problem := httpURLProblem("KEYCLOAK_INVITE_REDIRECT_URL", c.KeycloakInviteRedirectURL); problem != "" {
+			problems = append(problems, problem)
+		}
+	}
+	return problems
+}
+
+// ehrmsConfigProblems 處理 eHRMS 組態 problems。
 func ehrmsConfigProblems(baseURL string, apiKey string) []string {
 	baseURL = strings.TrimSpace(baseURL)
 	apiKey = strings.TrimSpace(apiKey)
@@ -191,7 +280,7 @@ func ehrmsConfigProblems(baseURL string, apiKey string) []string {
 	return problems
 }
 
-// ehrmsSyncConfigProblems requires an explicit service actor before periodic writes run.
+// ehrmsSyncConfigProblems 處理 eHRMS sync 組態 problems。
 func ehrmsSyncConfigProblems(c Config) []string {
 	if !c.EHRMSSyncEnabled {
 		return nil
@@ -217,7 +306,52 @@ func ehrmsSyncConfigProblems(c Config) []string {
 	return problems
 }
 
-// httpURLProblem rejects malformed HTTP upstream URLs before adapters are built.
+// databasePoolConfigProblems 處理 database pool 組態 problems。
+func databasePoolConfigProblems(c Config) []string {
+	problems := []string{}
+	if c.DBMaxConns < 1 {
+		problems = append(problems, "DB_MAX_CONNS must be at least 1")
+	}
+	if c.DBMinConns < 0 {
+		problems = append(problems, "DB_MIN_CONNS must be zero or positive")
+	}
+	if c.DBMaxConns >= 1 && c.DBMinConns > c.DBMaxConns {
+		problems = append(problems, "DB_MIN_CONNS must not exceed DB_MAX_CONNS")
+	}
+	return problems
+}
+
+// rateLimitConfigProblems 處理速率限制組態 problems。
+func rateLimitConfigProblems(c Config) []string {
+	if !c.RateLimitEnabled {
+		return nil
+	}
+	problems := []string{}
+	if c.RateLimitRPS < 1 {
+		problems = append(problems, "RATE_LIMIT_RPS must be at least 1 when RATE_LIMIT_ENABLED=true")
+	}
+	if c.RateLimitBurst < 1 {
+		problems = append(problems, "RATE_LIMIT_BURST must be at least 1 when RATE_LIMIT_ENABLED=true")
+	}
+	return problems
+}
+
+// trustedProxiesConfigProblems 處理 trusted proxies 組態 problems。
+func trustedProxiesConfigProblems(c Config) []string {
+	problems := []string{}
+	for _, entry := range c.TrustedProxies {
+		if net.ParseIP(entry) != nil {
+			continue
+		}
+		if _, _, err := net.ParseCIDR(entry); err == nil {
+			continue
+		}
+		problems = append(problems, fmt.Sprintf("TRUSTED_PROXIES entry must be an IP or CIDR: %q", entry))
+	}
+	return problems
+}
+
+// httpURLProblem 處理 HTTP URL problem。
 func httpURLProblem(name string, raw string) string {
 	value := strings.TrimSpace(raw)
 	parsed, err := url.Parse(value)
@@ -230,7 +364,24 @@ func httpURLProblem(name string, raw string) string {
 	return ""
 }
 
-// productionHTTPSURLProblem rejects cleartext security-critical upstream URLs in production.
+// productionDatabaseSSLProblem 處理 production database ssl problem。
+func productionDatabaseSSLProblem(raw string) string {
+	parsed, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil {
+		return "DATABASE_URL must be a valid URL in production"
+	}
+	switch strings.ToLower(strings.TrimSpace(parsed.Query().Get("sslmode"))) {
+	case "require", "verify-ca", "verify-full":
+		return ""
+	case "":
+		// pgx 預設 sslmode=prefer，可能靜默退回明文連線。
+		return "DATABASE_URL must set sslmode=require, verify-ca, or verify-full in production"
+	default:
+		return "DATABASE_URL must not use a non-TLS sslmode in production (require, verify-ca, or verify-full)"
+	}
+}
+
+// productionHTTPSURLProblem 處理 production httpsurl problem。
 func productionHTTPSURLProblem(name string, raw string) string {
 	value := strings.TrimSpace(raw)
 	if value == "" {
@@ -243,6 +394,7 @@ func productionHTTPSURLProblem(name string, raw string) string {
 	return ""
 }
 
+// normalizeObjectStoreProvider 正規化物件儲存層提供者。
 func normalizeObjectStoreProvider(provider, dir, endpoint, bucket string) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 	if provider != "" {
@@ -257,6 +409,29 @@ func normalizeObjectStoreProvider(provider, dir, endpoint, bucket string) string
 	return "memory"
 }
 
+// splitCommaList 拆分comma 列表。
+func splitCommaList(raw string) []string {
+	values := []string{}
+	for _, part := range strings.Split(raw, ",") {
+		if value := strings.TrimSpace(part); value != "" {
+			values = append(values, value)
+		}
+	}
+	if len(values) == 0 {
+		return nil
+	}
+	return values
+}
+
+// envAllowEmpty 處理 env allow 空值。
+func envAllowEmpty(key, fallback string) string {
+	if v, ok := os.LookupEnv(key); ok {
+		return strings.TrimSpace(v)
+	}
+	return fallback
+}
+
+// env 處理 env。
 func env(key, fallback string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
@@ -264,6 +439,7 @@ func env(key, fallback string) string {
 	return fallback
 }
 
+// envInt 處理 env 整數。
 func envInt(key string, fallback int, problems *[]string) int {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
@@ -277,6 +453,7 @@ func envInt(key string, fallback int, problems *[]string) int {
 	return parsed
 }
 
+// envBool 處理 env 布林值。
 func envBool(key string, fallback bool, problems *[]string) bool {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
@@ -290,6 +467,7 @@ func envBool(key string, fallback bool, problems *[]string) bool {
 	return parsed
 }
 
+// envDuration 處理 env duration。
 func envDuration(key string, fallback time.Duration, problems *[]string) time.Duration {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {

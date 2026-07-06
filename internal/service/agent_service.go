@@ -7,18 +7,18 @@ import (
 	"strings"
 )
 
-// AgentService implements agent run orchestration and tool authorization.
+// AgentService 定義 agent 服務的資料結構。
 type AgentService struct {
 	*Service
 	store agentStore
 }
 
-// Agent returns the agent service facade.
+// Agent 處理 agent 的服務流程。
 func (c *Service) Agent() AgentService {
 	return AgentService{Service: c, store: c.store}
 }
 
-// ListRuns returns all visible agent runs for the current tenant.
+// ListRuns 列出執行紀錄的服務流程。
 func (c AgentService) ListRuns(ctx RequestContext) ([]AgentRun, error) {
 	account, decision, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionRead, "")
 	if err != nil {
@@ -34,7 +34,7 @@ func (c AgentService) ListRuns(ctx RequestContext) ([]AgentRun, error) {
 	return filterAgentRunsByDecision(account, decision, items), nil
 }
 
-// ListRunPage returns a paginated list of visible agent runs.
+// ListRunPage 列出執行分頁的服務流程。
 func (c AgentService) ListRunPage(ctx RequestContext, page PageRequest) (PageResponse[AgentRun], error) {
 	account, decision, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionRead, "")
 	if err != nil {
@@ -64,7 +64,7 @@ func (c AgentService) ListRunPage(ctx RequestContext, page PageRequest) (PageRes
 	return utils.PageResponse(items, page), nil
 }
 
-// CreateRun creates and completes an agent run after tool authorization.
+// CreateRun 建立執行的服務流程。
 func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (AgentRun, error) {
 	account, _, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionCreate, "")
 	if err != nil {
@@ -138,6 +138,7 @@ func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (
 	return run, nil
 }
 
+// transitionRun 轉換執行的服務流程。
 func (c AgentService) transitionRun(ctx RequestContext, run AgentRun, status AgentRunStatus) (AgentRun, error) {
 	previousStatus := run.Status
 	run.Status = string(status)
@@ -154,6 +155,7 @@ func (c AgentService) transitionRun(ctx RequestContext, run AgentRun, status Age
 	return run, nil
 }
 
+// failRun 處理 fail 執行的服務流程。
 func (c AgentService) failRun(ctx RequestContext, run AgentRun, cause error) error {
 	run.Answer = cause.Error()
 	c.logWarn(ctx, "agent run failed",
@@ -165,6 +167,7 @@ func (c AgentService) failRun(ctx RequestContext, run AgentRun, cause error) err
 	return err
 }
 
+// filterAgentRunsByDecision 處理篩選 agent 執行紀錄 by 決策。
 func filterAgentRunsByDecision(account Account, decision CheckResult, items []AgentRun) []AgentRun {
 	if decision.Scope == "" || decision.Scope == ScopeAll || decision.Scope == ScopeTenant || decision.Scope == ScopeSystem {
 		return append([]AgentRun(nil), items...)
@@ -180,6 +183,7 @@ func filterAgentRunsByDecision(account Account, decision CheckResult, items []Ag
 	return out
 }
 
+// agentAccountIDsForDecision 處理 agent 帳號 IDs for 決策。
 func agentAccountIDsForDecision(account Account, decision CheckResult) ([]string, bool) {
 	if decision.Scope == "" || decision.Scope == ScopeAll || decision.Scope == ScopeTenant || decision.Scope == ScopeSystem {
 		return nil, false
@@ -191,6 +195,7 @@ func agentAccountIDsForDecision(account Account, decision CheckResult) ([]string
 	return uniqueStrings(accountIDs), true
 }
 
+// sortAgentRuns 排序agent 執行紀錄。
 func sortAgentRuns(items []AgentRun, order string) {
 	sort.SliceStable(items, func(i, j int) bool {
 		switch order {
@@ -206,14 +211,14 @@ type agentToolCaller interface {
 	Call(ctx RequestContext, call AgentToolCall) (AgentToolResult, error)
 }
 
-// AgentToolCall describes one tool invocation guarded by authorization.
+// AgentToolCall 定義 agent 工具呼叫的資料結構。
 type AgentToolCall struct {
 	Name    string
 	Authz   CheckRequest
 	Execute func() (AgentToolResult, error)
 }
 
-// AgentToolResult returns the outcome of an authorized agent tool call.
+// AgentToolResult 定義 agent 工具結果的資料結構。
 type AgentToolResult struct {
 	Name       string
 	Decision   CheckResult
@@ -226,11 +231,12 @@ type authzToolGateway struct {
 	service *Service
 }
 
+// agentToolGateway 處理 agent 工具 gateway 的服務流程。
 func (c *Service) agentToolGateway() agentToolCaller {
 	return authzToolGateway{service: c}
 }
 
-// Call authorizes and executes one agent tool invocation.
+// Call 呼叫目前流程。
 func (g authzToolGateway) Call(ctx RequestContext, call AgentToolCall) (AgentToolResult, error) {
 	account, _, err := g.service.resolveAccount(ctx)
 	if err != nil {
@@ -273,6 +279,7 @@ func (g authzToolGateway) Call(ctx RequestContext, call AgentToolCall) (AgentToo
 	return result, nil
 }
 
+// answerAgentPrompt 處理 answer agent prompt 的服務流程。
 func (c *Service) answerAgentPrompt(ctx RequestContext, prompt string) (string, []Reference, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -328,6 +335,7 @@ func (c *Service) answerAgentPrompt(ctx RequestContext, prompt string) (string, 
 	return strings.Join(lines, "\n"), refs, nil
 }
 
+// truncateRunes 截斷 runes。
 func truncateRunes(value string, limit int) string {
 	if limit <= 0 {
 		return ""
@@ -339,6 +347,7 @@ func truncateRunes(value string, limit int) string {
 	return string(runes[:limit]) + "..."
 }
 
+// tokenize 處理 tokenize。
 func tokenize(value string) []string {
 	value = strings.ToLower(value)
 	fields := strings.FieldsFunc(value, func(r rune) bool {
@@ -352,10 +361,12 @@ func tokenize(value string) []string {
 	return uniqueStrings(fields)
 }
 
+// articleMatches 處理文章 matches。
 func articleMatches(article KnowledgeArticle, tokens []string) bool {
 	return articleMatchScore(article, tokens) > 0
 }
 
+// sortKnowledgeMatches 排序知識 matches。
 func sortKnowledgeMatches(items []KnowledgeArticle, tokens []string) {
 	sort.SliceStable(items, func(i, j int) bool {
 		left := articleMatchScore(items[i], tokens)
@@ -370,6 +381,7 @@ func sortKnowledgeMatches(items []KnowledgeArticle, tokens []string) {
 	})
 }
 
+// articleMatchScore 處理文章 match score。
 func articleMatchScore(article KnowledgeArticle, tokens []string) int {
 	title := strings.ToLower(article.Title)
 	body := strings.ToLower(article.Content + " " + strings.Join(article.Tags, " "))

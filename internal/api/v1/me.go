@@ -9,19 +9,20 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
-// MeCtrl wires current-account endpoints to the me service facade.
+// MeCtrl 定義 me ctrl 的資料結構。
 type MeCtrl struct {
 	routes routeBinder
 	svc    service.MeFacade
 }
 
-// RegisterRoutes attaches current-account routes to the v1 route group.
+// RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c MeCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	me := router.Group("/me")
 	me.GET("", c.routes.Handle("me", "read", c.getMe))
 	me.GET("/menus", c.routes.Handle("me", "read", c.getMenus))
 }
 
+// getMe 處理 me 的 HTTP 請求。
 func (c MeCtrl) getMe(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	me, err := c.svc.Resolve(ctx)
 	if err != nil {
@@ -31,6 +32,7 @@ func (c MeCtrl) getMe(w http.ResponseWriter, r *http.Request, ctx domain.Request
 	return nil
 }
 
+// getMenus 處理 menus 的 HTTP 請求。
 func (c MeCtrl) getMenus(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	menus, err := c.svc.ListMenus(ctx)
 	if err != nil {

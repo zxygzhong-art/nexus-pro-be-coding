@@ -18,12 +18,12 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
-// TokenResolver resolves a request token into trusted application identity.
+// TokenResolver 定義 token resolver 的行為契約。
 type TokenResolver interface {
 	Resolve(r *http.Request) (domain.AuthenticatedPrincipal, bool, error)
 }
 
-// KeycloakTokenResolver validates Keycloak-issued RS256 JWTs against JWKS keys.
+// KeycloakTokenResolver 定義 Keycloak token resolver 的資料結構。
 type KeycloakTokenResolver struct {
 	issuerURL string
 	clientID  string
@@ -44,7 +44,7 @@ const (
 	jwksForcedRefreshWindow = 30 * time.Second
 )
 
-// NewKeycloakTokenResolver creates a Keycloak-backed token resolver.
+// NewKeycloakTokenResolver 建立 Keycloak token resolver。
 func NewKeycloakTokenResolver(issuerURL, clientID string, client *http.Client) *KeycloakTokenResolver {
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
@@ -58,7 +58,7 @@ func NewKeycloakTokenResolver(issuerURL, clientID string, client *http.Client) *
 	}
 }
 
-// WithProvider overrides the provider code used in identity mapping.
+// WithProvider 附加提供者。
 func (r *KeycloakTokenResolver) WithProvider(provider string) *KeycloakTokenResolver {
 	if strings.TrimSpace(provider) != "" {
 		r.provider = strings.TrimSpace(provider)
@@ -66,7 +66,7 @@ func (r *KeycloakTokenResolver) WithProvider(provider string) *KeycloakTokenReso
 	return r
 }
 
-// Resolve validates a bearer token and returns trusted tenant/account identity.
+// Resolve 解析 token 並回傳可信身分。
 func (r *KeycloakTokenResolver) Resolve(req *http.Request) (domain.AuthenticatedPrincipal, bool, error) {
 	token := bearerToken(req)
 	if token == "" {
@@ -82,7 +82,7 @@ func (r *KeycloakTokenResolver) Resolve(req *http.Request) (domain.Authenticated
 	return tokenPrincipalFromClaims(r.provider, claims), true, nil
 }
 
-// Ping refreshes JWKS metadata to prove the resolver can reach Keycloak.
+// Ping 檢查外部服務連線狀態。
 func (r *KeycloakTokenResolver) Ping(ctx context.Context) error {
 	if r == nil || r.issuerURL == "" {
 		return errors.New("keycloak token resolver not configured")
@@ -90,6 +90,7 @@ func (r *KeycloakTokenResolver) Ping(ctx context.Context) error {
 	return r.refreshKeysIfNeeded(ctx)
 }
 
+// verify 處理 verify。
 func (r *KeycloakTokenResolver) verify(ctx context.Context, token string) (map[string]any, error) {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -120,7 +121,7 @@ func (r *KeycloakTokenResolver) verify(ctx context.Context, token string) (map[s
 	if key == nil && time.Now().Before(missingUntil) {
 		return nil, errors.New("jwk not found")
 	}
-	// A missing kid may mean Keycloak rotated keys, so force-refresh with a short throttle.
+	// 缺失 kid 可能代表 Keycloak 已輪替 key，因此以短節流強制刷新。
 	if key == nil && r.canForceRefresh() {
 		if err := r.refreshKeys(ctx, true); err != nil {
 			return nil, err
@@ -156,6 +157,7 @@ func (r *KeycloakTokenResolver) verify(ctx context.Context, token string) (map[s
 	return claims, nil
 }
 
+// validateClaims 驗證 claims。
 func (r *KeycloakTokenResolver) validateClaims(claims map[string]any) error {
 	if claimString(claims, "iss") != r.issuerURL {
 		return errors.New("issuer mismatch")
@@ -176,10 +178,12 @@ func (r *KeycloakTokenResolver) validateClaims(claims map[string]any) error {
 	return nil
 }
 
+// refreshKeysIfNeeded 處理 refresh keys if needed。
 func (r *KeycloakTokenResolver) refreshKeysIfNeeded(ctx context.Context) error {
 	return r.refreshKeys(ctx, false)
 }
 
+// refreshKeys 處理 refresh keys。
 func (r *KeycloakTokenResolver) refreshKeys(ctx context.Context, force bool) error {
 	r.mu.Lock()
 	if !force && len(r.jwksKeys) > 0 && time.Since(r.fetched) < jwksCacheTTL {
@@ -208,12 +212,14 @@ func (r *KeycloakTokenResolver) refreshKeys(ctx context.Context, force bool) err
 	return nil
 }
 
+// canForceRefresh 處理 can force refresh。
 func (r *KeycloakTokenResolver) canForceRefresh() bool {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.lastForceFetch.IsZero() || time.Since(r.lastForceFetch) >= jwksForcedRefreshWindow
 }
 
+// rememberMissingKid 處理 remember missing kid。
 func (r *KeycloakTokenResolver) rememberMissingKid(kid string) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -223,6 +229,7 @@ func (r *KeycloakTokenResolver) rememberMissingKid(kid string) {
 	r.missingKids[kid] = time.Now().Add(jwksMissingKidTTL)
 }
 
+// discoveryJWKSURI 處理 discovery jwksuri。
 func (r *KeycloakTokenResolver) discoveryJWKSURI(ctx context.Context) (string, error) {
 	if r.issuerURL == "" {
 		return "", errors.New("issuer is required")
@@ -255,6 +262,7 @@ func (r *KeycloakTokenResolver) discoveryJWKSURI(ctx context.Context) (string, e
 	return body.JWKSURI, nil
 }
 
+// fetchJWKS 處理 fetch JWKS。
 func (r *KeycloakTokenResolver) fetchJWKS(ctx context.Context, uri string) (map[string]*rsa.PublicKey, error) {
 	if ctx == nil {
 		ctx = context.Background()
@@ -299,6 +307,7 @@ type jwk struct {
 	X5C []string `json:"x5c"`
 }
 
+// rsaPublicKey 處理 rsa public key。
 func (j jwk) rsaPublicKey() (*rsa.PublicKey, error) {
 	if j.Kty != "" && j.Kty != "RSA" {
 		return nil, errors.New("not rsa")
@@ -333,6 +342,7 @@ func (j jwk) rsaPublicKey() (*rsa.PublicKey, error) {
 	return &rsa.PublicKey{N: new(big.Int).SetBytes(n), E: exponent}, nil
 }
 
+// bearerToken 處理 bearer token。
 func bearerToken(r *http.Request) string {
 	const prefix = "Bearer "
 	header := strings.TrimSpace(r.Header.Get("Authorization"))
@@ -342,6 +352,7 @@ func bearerToken(r *http.Request) string {
 	return strings.TrimSpace(strings.TrimPrefix(header, prefix))
 }
 
+// keycloakTokenShape 處理 Keycloak token shape。
 func keycloakTokenShape(token string) bool {
 	parts := strings.Split(token, ".")
 	if len(parts) != 3 {
@@ -361,6 +372,7 @@ func keycloakTokenShape(token string) bool {
 	return header.Alg == "RS256" && header.Kid != ""
 }
 
+// tokenPrincipalFromClaims 處理 token principal 來源 claims。
 func tokenPrincipalFromClaims(provider string, claims map[string]any) domain.AuthenticatedPrincipal {
 	accountID := claimString(claims, "account_id", "acct")
 	subject := claimString(claims, "sub")
@@ -384,6 +396,7 @@ func tokenPrincipalFromClaims(provider string, claims map[string]any) domain.Aut
 	}
 }
 
+// copyClaims 複製 claims。
 func copyClaims(src map[string]any) map[string]any {
 	if len(src) == 0 {
 		return nil
@@ -395,6 +408,7 @@ func copyClaims(src map[string]any) map[string]any {
 	return dst
 }
 
+// claimString 處理 claim 字串。
 func claimString(claims map[string]any, keys ...string) string {
 	for _, key := range keys {
 		if value, ok := claims[key].(string); ok {
@@ -404,6 +418,7 @@ func claimString(claims map[string]any, keys ...string) string {
 	return ""
 }
 
+// audienceContains 處理 audience contains。
 func audienceContains(value any, want string) bool {
 	switch v := value.(type) {
 	case string:
@@ -418,6 +433,7 @@ func audienceContains(value any, want string) bool {
 	return false
 }
 
+// claimUnix 處理 claim unix。
 func claimUnix(value any) int64 {
 	switch v := value.(type) {
 	case float64:

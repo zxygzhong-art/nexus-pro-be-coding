@@ -10,7 +10,7 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
-// TestWorkspaceOverviewAggregatesVisibleHRAndAttendance verifies the first workspace overview contract.
+// TestWorkspaceOverviewAggregatesVisibleHRAndAttendance 驗證工作區總覽 aggregates 可見 HR and 考勤。
 func TestWorkspaceOverviewAggregatesVisibleHRAndAttendance(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
@@ -36,7 +36,7 @@ func TestWorkspaceOverviewAggregatesVisibleHRAndAttendance(t *testing.T) {
 	}
 }
 
-// TestWorkspaceOrganizationBuildsManagerTree verifies organization rows use employee numbers and manager levels.
+// TestWorkspaceOrganizationBuildsManagerTree 驗證工作區 organization builds 主管 tree。
 func TestWorkspaceOrganizationBuildsManagerTree(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
@@ -59,7 +59,7 @@ func TestWorkspaceOrganizationBuildsManagerTree(t *testing.T) {
 	}
 }
 
-// TestWorkspaceAttendanceBuildsLeaveAndClockMatrices verifies leave cells and abnormal clock records are surfaced.
+// TestWorkspaceAttendanceBuildsLeaveAndClockMatrices 驗證工作區考勤 builds 請假 and 打卡 matrices。
 func TestWorkspaceAttendanceBuildsLeaveAndClockMatrices(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
@@ -82,7 +82,7 @@ func TestWorkspaceAttendanceBuildsLeaveAndClockMatrices(t *testing.T) {
 	}
 }
 
-// TestPlatformWorkspaceEmployeesFiltersAndNormalizesStatus verifies the FE table contract.
+// TestPlatformWorkspaceEmployeesFiltersAndNormalizesStatus 驗證平台工作區員工篩選 and normalizes 狀態。
 func TestPlatformWorkspaceEmployeesFiltersAndNormalizesStatus(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
@@ -115,7 +115,7 @@ func TestPlatformWorkspaceEmployeesFiltersAndNormalizesStatus(t *testing.T) {
 	}
 }
 
-// TestCurrentAttendancePolicyReturnsDefaultCatalog verifies the policy read endpoint contract.
+// TestCurrentAttendancePolicyReturnsDefaultCatalog 驗證目前考勤政策 returns 預設目錄。
 func TestCurrentAttendancePolicyReturnsDefaultCatalog(t *testing.T) {
 	_, svc, ctx := newWorkspaceFixture(t)
 	got, err := svc.Attendance().CurrentAttendancePolicy(ctx)
@@ -130,7 +130,7 @@ func TestCurrentAttendancePolicyReturnsDefaultCatalog(t *testing.T) {
 	}
 }
 
-// TestUpdateAttendancePolicyPersistsWorkspaceSettings verifies saved policy rows feed later reads and workspace aggregation.
+// TestUpdateAttendancePolicyPersistsWorkspaceSettings 驗證考勤政策 persists 工作區 settings。
 func TestUpdateAttendancePolicyPersistsWorkspaceSettings(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	ctx.ApprovalConfirmed = true
@@ -173,7 +173,7 @@ func TestUpdateAttendancePolicyPersistsWorkspaceSettings(t *testing.T) {
 	}
 }
 
-// TestWorkspaceAdminsProjectsIAMAssignments verifies IAM grants become administrator rows and candidates.
+// TestWorkspaceAdminsProjectsIAMAssignments 驗證工作區 admins projects IAM 指派。
 func TestWorkspaceAdminsProjectsIAMAssignments(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -208,7 +208,7 @@ func TestWorkspaceAdminsProjectsIAMAssignments(t *testing.T) {
 	}
 }
 
-// TestWorkspaceAdminsRespectsHRDataScope keeps IAM admin projection inside the caller's HR visibility.
+// TestWorkspaceAdminsRespectsHRDataScope 驗證工作區 admins respects HR 資料範圍。
 func TestWorkspaceAdminsRespectsHRDataScope(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -240,7 +240,7 @@ func TestWorkspaceAdminsRespectsHRDataScope(t *testing.T) {
 	}
 }
 
-// TestPlatformWorkspaceRequiresWorkflowFormTemplateRead verifies aggregate form design keeps its own permission gate.
+// TestPlatformWorkspaceRequiresWorkflowFormTemplateRead 驗證平台工作區 requires 流程表單範本 read。
 func TestPlatformWorkspaceRequiresWorkflowFormTemplateRead(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -269,7 +269,7 @@ func TestPlatformWorkspaceRequiresWorkflowFormTemplateRead(t *testing.T) {
 	}
 }
 
-// TestWorkspaceAuditLogsFiltersAndProjects verifies audit filters and page projection.
+// TestWorkspaceAuditLogsFiltersAndProjects 驗證工作區稽核 logs 篩選 and projects。
 func TestWorkspaceAuditLogsFiltersAndProjects(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -289,7 +289,7 @@ func TestWorkspaceAuditLogsFiltersAndProjects(t *testing.T) {
 	}
 }
 
-// newWorkspaceFixture creates a tenant, account, and permissions for workspace service tests.
+// newWorkspaceFixture 驗證工作區 fixture。
 func newWorkspaceFixture(t *testing.T) (*memory.Store, *service.Service, domain.RequestContext) {
 	t.Helper()
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
@@ -315,7 +315,7 @@ func newWorkspaceFixture(t *testing.T) (*memory.Store, *service.Service, domain.
 	return store, service.New(store), domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 }
 
-// insertWorkspaceEmployee fills tenant defaults before storing an employee.
+// insertWorkspaceEmployee 驗證 insert 工作區員工。
 func insertWorkspaceEmployee(t *testing.T, store *memory.Store, employee domain.Employee) {
 	t.Helper()
 	employee.TenantID = "tenant-1"
@@ -336,7 +336,7 @@ func insertWorkspaceEmployee(t *testing.T, store *memory.Store, employee domain.
 	}
 }
 
-// ptrTime returns a pointer for inline date literals.
+// ptrTime 驗證 ptr 時間。
 func ptrTime(value time.Time) *time.Time {
 	return &value
 }

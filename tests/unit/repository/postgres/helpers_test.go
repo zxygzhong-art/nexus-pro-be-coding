@@ -9,6 +9,7 @@ import (
 	"nexus-pro-be/internal/utils/tenantctx"
 )
 
+// TestTenantIDFromArgs 驗證租戶 ID 來源 args。
 func TestTenantIDFromArgs(t *testing.T) {
 	type params struct {
 		TenantID string
@@ -33,6 +34,7 @@ func TestTenantIDFromArgs(t *testing.T) {
 	}
 }
 
+// TestTenantIDFromContext 驗證租戶 ID 來源 context。
 func TestTenantIDFromContext(t *testing.T) {
 	ctx := tenantctx.WithTenantID(context.Background(), "tenant-from-context")
 
@@ -41,6 +43,7 @@ func TestTenantIDFromContext(t *testing.T) {
 	}
 }
 
+// TestCompanyIDFromArgs 驗證公司 ID 來源 args。
 func TestCompanyIDFromArgs(t *testing.T) {
 	type intParams struct {
 		CompanyID int
@@ -70,6 +73,21 @@ func TestCompanyIDFromArgs(t *testing.T) {
 	}
 }
 
+// TestSystemTaskFromContext 驗證 system 任務 來源 context。
+func TestSystemTaskFromContext(t *testing.T) {
+	if tenantctx.SystemTaskFromContext(context.Background()) {
+		t.Fatal("expected plain context not to be a system task")
+	}
+	ctx := tenantctx.WithSystemTask(context.Background())
+	if !tenantctx.SystemTaskFromContext(ctx) {
+		t.Fatal("expected system task context to be detected")
+	}
+	if tenantID := tenantctx.TenantIDFromContext(ctx); tenantID != "" {
+		t.Fatalf("expected system task context to carry no tenant id, got %q", tenantID)
+	}
+}
+
+// TestCompanyIDFromContext 驗證公司 ID 來源 context。
 func TestCompanyIDFromContext(t *testing.T) {
 	ctx := tenantctx.WithCompanyID(context.Background(), "42")
 
@@ -78,6 +96,7 @@ func TestCompanyIDFromContext(t *testing.T) {
 	}
 }
 
+// TestJSONCodecsDoNotPanicOnInvalidPayload 驗證 JSON codecs do not panic on 無效 payload。
 func TestJSONCodecsDoNotPanicOnInvalidPayload(t *testing.T) {
 	invalid := []byte("{")
 	if got := jsoncodec.Map(invalid); got != nil {

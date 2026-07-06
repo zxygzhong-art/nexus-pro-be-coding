@@ -2,7 +2,7 @@ package service
 
 import "nexus-pro-be/internal/domain"
 
-// Domain type aliases expose domain contracts through the service package for legacy callers.
+// Domain 說明此處的程式契約。
 type (
 	Tenant                             = domain.Tenant
 	Account                            = domain.Account
@@ -125,6 +125,15 @@ type (
 	Reference                          = domain.Reference
 	AgentRun                           = domain.AgentRun
 	AgentRunStatus                     = domain.AgentRunStatus
+	Notification                       = domain.Notification
+	NotificationRecipient              = domain.NotificationRecipient
+	NotificationItem                   = domain.NotificationItem
+	NotificationToneCounts             = domain.NotificationToneCounts
+	NotificationListQuery              = domain.NotificationListQuery
+	NotificationListResponse           = domain.NotificationListResponse
+	NotificationUnreadCountResponse    = domain.NotificationUnreadCountResponse
+	NotificationReadResponse           = domain.NotificationReadResponse
+	NotificationReadAllResponse        = domain.NotificationReadAllResponse
 	AuditLog                           = domain.AuditLog
 	OutboxEvent                        = domain.OutboxEvent
 	AuthzOutboxEvent                   = domain.AuthzOutboxEvent
@@ -158,7 +167,7 @@ type (
 	AuthzSimulationResponse            = domain.AuthzSimulationResponse
 )
 
-// Domain input aliases keep service method signatures close to API payload contracts.
+// Domain 說明此處的程式契約。
 type (
 	CreateUserGroupInput                    = domain.CreateUserGroupInput
 	CreatePermissionSetInput                = domain.CreatePermissionSetInput
@@ -215,7 +224,7 @@ type (
 	CreateAgentRunInput                     = domain.CreateAgentRunInput
 )
 
-// Domain constants expose shared pagination, IAM, HR, workflow, and agent values.
+// 下列常數定義此模組使用的固定值。
 const (
 	DefaultPage     = domain.DefaultPage
 	DefaultPageSize = domain.DefaultPageSize
@@ -285,6 +294,7 @@ const (
 	ResourceKnowledgeArticle          = domain.ResourceKnowledgeArticle
 	ResourceEmployeeCollection        = domain.ResourceEmployeeCollection
 	ResourceFormInstance              = domain.ResourceFormInstance
+	ResourceNotification              = domain.ResourceNotification
 
 	AccountStatusActive        = domain.AccountStatusActive
 	AccountStatusDisabled      = domain.AccountStatusDisabled
@@ -325,7 +335,7 @@ const (
 	EmployeeCategoryContractor = domain.EmployeeCategoryContractor
 )
 
-// Domain helper aliases preserve older service-package call sites during refactors.
+// 下列變數保存此模組共用的狀態。
 var (
 	NotFound                       = domain.NotFound
 	BadRequest                     = domain.BadRequest

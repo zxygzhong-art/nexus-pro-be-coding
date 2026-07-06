@@ -6,13 +6,13 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
-// KnowledgeStore persists knowledge articles used by agent runs.
+// KnowledgeStore 定義知識儲存層的行為契約。
 type KnowledgeStore interface {
 	UpsertKnowledgeArticle(context.Context, domain.KnowledgeArticle) error
 	ListKnowledgeArticles(ctx context.Context, tenantID string) ([]domain.KnowledgeArticle, error)
 }
 
-// AgentStore persists agent run state and list queries.
+// AgentStore 定義 agent 儲存層的行為契約。
 type AgentStore interface {
 	UpsertAgentRun(context.Context, domain.AgentRun) error
 	GetAgentRun(ctx context.Context, tenantID, id string) (domain.AgentRun, bool, error)

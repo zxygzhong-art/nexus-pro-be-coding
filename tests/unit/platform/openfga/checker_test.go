@@ -12,6 +12,7 @@ import (
 	"nexus-pro-be/internal/platform/openfga"
 )
 
+// TestPingUsesHealthEndpoint 驗證 uses 健康檢查 endpoint。
 func TestPingUsesHealthEndpoint(t *testing.T) {
 	var gotPath string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -29,6 +30,7 @@ func TestPingUsesHealthEndpoint(t *testing.T) {
 	}
 }
 
+// TestPingVerifiesConfiguredAuthorizationModel 驗證 verifies configured 授權 model。
 func TestPingVerifiesConfiguredAuthorizationModel(t *testing.T) {
 	paths := []string{}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -53,6 +55,7 @@ func TestPingVerifiesConfiguredAuthorizationModel(t *testing.T) {
 	}
 }
 
+// TestPingFailsWhenAuthorizationModelIsMissing 驗證 fails when 授權 model is missing。
 func TestPingFailsWhenAuthorizationModelIsMissing(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -78,6 +81,7 @@ func TestPingFailsWhenAuthorizationModelIsMissing(t *testing.T) {
 	}
 }
 
+// TestCheckRelationshipIncludesAuthorizationModelID 驗證關係 includes 授權 model ID。
 func TestCheckRelationshipIncludesAuthorizationModelID(t *testing.T) {
 	var gotPayload map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -106,6 +110,7 @@ func TestCheckRelationshipIncludesAuthorizationModelID(t *testing.T) {
 	}
 }
 
+// TestWriteRelationshipTuplesPostsWritesAndDeletes 驗證關係 tuple posts writes and deletes。
 func TestWriteRelationshipTuplesPostsWritesAndDeletes(t *testing.T) {
 	var gotPath string
 	var gotPayload map[string]any
@@ -157,6 +162,7 @@ func TestWriteRelationshipTuplesPostsWritesAndDeletes(t *testing.T) {
 	}
 }
 
+// TestCheckRelationshipReturnsDetailedHTTPError 驗證關係 returns detailed HTTP 錯誤。
 func TestCheckRelationshipReturnsDetailedHTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "model not found", http.StatusServiceUnavailable)
@@ -180,6 +186,7 @@ func TestCheckRelationshipReturnsDetailedHTTPError(t *testing.T) {
 	}
 }
 
+// TestWriteRelationshipTuplesReturnsDetailedHTTPError 驗證關係 tuple returns detailed HTTP 錯誤。
 func TestWriteRelationshipTuplesReturnsDetailedHTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid tuple", http.StatusBadRequest)

@@ -2,7 +2,7 @@ package domain
 
 import "time"
 
-// KnowledgeArticle stores searchable knowledge content for agent answers.
+// KnowledgeArticle 定義知識文章的資料結構。
 type KnowledgeArticle struct {
 	ID        string    `json:"id"`
 	TenantID  string    `json:"tenant_id"`
@@ -12,17 +12,17 @@ type KnowledgeArticle struct {
 	CreatedAt time.Time `json:"created_at"`
 }
 
-// Reference describes a source snippet cited by an agent answer.
+// Reference 定義 reference 的資料結構。
 type Reference struct {
 	Title   string `json:"title"`
 	Snippet string `json:"snippet"`
 	Source  string `json:"source,omitempty"`
 }
 
-// AgentRunStatus is the lifecycle state of an agent run.
+// AgentRunStatus 表示 agent 執行狀態。
 type AgentRunStatus string
 
-// Agent run status values returned by the API.
+// 下列常數定義此模組使用的固定值。
 const (
 	AgentRunStatusQueued    AgentRunStatus = "queued"
 	AgentRunStatusRunning   AgentRunStatus = "running"
@@ -30,7 +30,7 @@ const (
 	AgentRunStatusFailed    AgentRunStatus = "failed"
 )
 
-// AgentRun records one user prompt, answer, and tool authorization decisions.
+// AgentRun 定義 agent 執行的資料結構。
 type AgentRun struct {
 	ID            string        `json:"id"`
 	TenantID      string        `json:"tenant_id"`
@@ -45,13 +45,13 @@ type AgentRun struct {
 	UpdatedAt     time.Time     `json:"updated_at"`
 }
 
-// CreateAgentRunInput carries the payload for starting an agent run.
+// CreateAgentRunInput 定義 agent 執行輸入的資料結構。
 type CreateAgentRunInput struct {
 	Mode   string `json:"mode,omitempty"`
 	Prompt string `json:"prompt"`
 }
 
-// Company represents an organization in the agent-platform compatibility model.
+// Company 定義公司的資料結構。
 type Company struct {
 	ID        int       `json:"id"`
 	Name      string    `json:"name"`
@@ -61,7 +61,7 @@ type Company struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// CompanyUser represents a user membership in the agent-platform compatibility model.
+// CompanyUser 定義公司使用者的資料結構。
 type CompanyUser struct {
 	ID           string    `json:"id"`
 	CompanyID    int       `json:"company_id"`
@@ -73,7 +73,7 @@ type CompanyUser struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
-// Role represents a company role with permissions in the compatibility model.
+// Role 定義角色的資料結構。
 type Role struct {
 	ID          string       `json:"id"`
 	CompanyID   int          `json:"company_id"`
@@ -84,7 +84,7 @@ type Role struct {
 	UpdatedAt   time.Time    `json:"updated_at"`
 }
 
-// Workspace represents a company workspace in the compatibility model.
+// Workspace 定義工作區的資料結構。
 type Workspace struct {
 	ID        string    `json:"id"`
 	CompanyID int       `json:"company_id"`
@@ -95,7 +95,7 @@ type Workspace struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// WorkspaceUser represents a user's workspace role assignment.
+// WorkspaceUser 定義工作區使用者的資料結構。
 type WorkspaceUser struct {
 	ID          string    `json:"id"`
 	CompanyID   int       `json:"company_id"`
@@ -105,7 +105,7 @@ type WorkspaceUser struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// Agent represents an AI agent configuration.
+// Agent 定義 agent 的資料結構。
 type Agent struct {
 	ID                 string         `json:"id"`
 	CompanyID          int            `json:"company_id"`
@@ -120,7 +120,7 @@ type Agent struct {
 	UpdatedAt          time.Time      `json:"updated_at"`
 }
 
-// Knowledge represents a knowledge base attached to agents.
+// Knowledge 定義知識的資料結構。
 type Knowledge struct {
 	ID                 string         `json:"id"`
 	CompanyID          int            `json:"company_id"`
@@ -133,7 +133,7 @@ type Knowledge struct {
 	UpdatedAt          time.Time      `json:"updated_at"`
 }
 
-// AgentKnowledge links an agent to a knowledge base.
+// AgentKnowledge 定義 agent 知識的資料結構。
 type AgentKnowledge struct {
 	ID          string    `json:"id"`
 	CompanyID   int       `json:"company_id"`
@@ -142,7 +142,7 @@ type AgentKnowledge struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// KnowledgeUserPermission grants a user access to a knowledge base.
+// KnowledgeUserPermission 定義知識使用者權限的資料結構。
 type KnowledgeUserPermission struct {
 	ID          string    `json:"id"`
 	CompanyID   int       `json:"company_id"`
@@ -152,7 +152,7 @@ type KnowledgeUserPermission struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// CompanyStorageConfig describes where a company stores uploaded files.
+// CompanyStorageConfig 定義公司 storage 組態的資料結構。
 type CompanyStorageConfig struct {
 	ID        string         `json:"id"`
 	CompanyID int            `json:"company_id"`
@@ -165,7 +165,7 @@ type CompanyStorageConfig struct {
 	UpdatedAt time.Time      `json:"updated_at"`
 }
 
-// KnowledgeFile records one uploaded file associated with knowledge ingestion.
+// KnowledgeFile 定義知識檔案的資料結構。
 type KnowledgeFile struct {
 	ID              string         `json:"id"`
 	CompanyID       int            `json:"company_id"`
@@ -182,7 +182,7 @@ type KnowledgeFile struct {
 	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
-// FileProcessTask tracks asynchronous processing for an uploaded file.
+// FileProcessTask 定義檔案 process 任務的資料結構。
 type FileProcessTask struct {
 	ID           string         `json:"id"`
 	CompanyID    int            `json:"company_id"`
@@ -197,7 +197,7 @@ type FileProcessTask struct {
 	UpdatedAt    time.Time      `json:"updated_at"`
 }
 
-// AgentPlatformFile maps a local file to an external agent platform file ID.
+// AgentPlatformFile 定義 agent 平台檔案的資料結構。
 type AgentPlatformFile struct {
 	ID             string         `json:"id"`
 	CompanyID      int            `json:"company_id"`
@@ -210,7 +210,7 @@ type AgentPlatformFile struct {
 	CreatedAt      time.Time      `json:"created_at"`
 }
 
-// PricingPlan describes commercial limits and features for a company plan.
+// PricingPlan 定義 pricing plan 的資料結構。
 type PricingPlan struct {
 	ID                string         `json:"id"`
 	Code              string         `json:"code"`
@@ -222,7 +222,7 @@ type PricingPlan struct {
 	CreatedAt         time.Time      `json:"created_at"`
 }
 
-// CompanyPlan records the active pricing plan for a company.
+// CompanyPlan 定義公司 plan 的資料結構。
 type CompanyPlan struct {
 	ID            string         `json:"id"`
 	CompanyID     int            `json:"company_id"`
@@ -235,7 +235,7 @@ type CompanyPlan struct {
 	UpdatedAt     time.Time      `json:"updated_at"`
 }
 
-// License records a company license and its quota snapshot.
+// License 定義 license 的資料結構。
 type License struct {
 	ID            string         `json:"id"`
 	CompanyID     int            `json:"company_id"`

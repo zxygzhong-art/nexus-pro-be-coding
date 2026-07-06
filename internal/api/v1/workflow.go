@@ -10,13 +10,13 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
-// WorkflowCtrl wires form template and form instance endpoints to the workflow service facade.
+// WorkflowCtrl 定義流程 ctrl 的資料結構。
 type WorkflowCtrl struct {
 	routes routeBinder
 	svc    service.WorkflowFacade
 }
 
-// RegisterRoutes attaches workflow form routes to the v1 route group.
+// RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c WorkflowCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	forms := router.Group("/forms")
 	forms.GET("/templates", c.routes.Handle("workflow.form_template", "read", c.listFormTemplates))
@@ -38,6 +38,7 @@ func (c WorkflowCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workflows.POST("/forms/:id/duplicate", c.routes.Handle("workflow.form_instance", "submit", c.duplicateForm, PathParam(PathParamID)))
 }
 
+// listFormTemplates 處理表單範本的 HTTP 請求。
 func (c WorkflowCtrl) listFormTemplates(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -51,6 +52,7 @@ func (c WorkflowCtrl) listFormTemplates(w http.ResponseWriter, r *http.Request, 
 	return nil
 }
 
+// createFormTemplate 處理表單範本的 HTTP 請求。
 func (c WorkflowCtrl) createFormTemplate(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateFormTemplateInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -64,6 +66,7 @@ func (c WorkflowCtrl) createFormTemplate(w http.ResponseWriter, r *http.Request,
 	return nil
 }
 
+// listFormInstances 處理表單實例的 HTTP 請求。
 func (c WorkflowCtrl) listFormInstances(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -81,6 +84,7 @@ func (c WorkflowCtrl) listFormInstances(w http.ResponseWriter, r *http.Request, 
 	return nil
 }
 
+// reviewQueue 處理審核佇列的 HTTP 請求。
 func (c WorkflowCtrl) reviewQueue(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	items, err := c.svc.ReviewQueue(ctx)
 	if err != nil {
@@ -90,6 +94,7 @@ func (c WorkflowCtrl) reviewQueue(w http.ResponseWriter, r *http.Request, ctx do
 	return nil
 }
 
+// bulkReviewForms 處理批次審核表單的 HTTP 請求。
 func (c WorkflowCtrl) bulkReviewForms(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.BulkReviewFormsInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -110,7 +115,7 @@ func (c WorkflowCtrl) bulkReviewForms(w http.ResponseWriter, r *http.Request, ct
 	return nil
 }
 
-// saveFormDraft creates a resumable workflow form draft.
+// saveFormDraft 處理表單草稿的 HTTP 請求。
 func (c WorkflowCtrl) saveFormDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.SaveFormDraftInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -124,7 +129,7 @@ func (c WorkflowCtrl) saveFormDraft(w http.ResponseWriter, r *http.Request, ctx 
 	return nil
 }
 
-// updateFormDraft persists the latest payload for an existing draft.
+// updateFormDraft 處理表單草稿的 HTTP 請求。
 func (c WorkflowCtrl) updateFormDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.UpdateFormDraftInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -138,7 +143,7 @@ func (c WorkflowCtrl) updateFormDraft(w http.ResponseWriter, r *http.Request, ct
 	return nil
 }
 
-// deleteFormDraft removes a draft form instance.
+// deleteFormDraft 處理表單草稿的 HTTP 請求。
 func (c WorkflowCtrl) deleteFormDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.DeleteFormDraft(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -148,6 +153,7 @@ func (c WorkflowCtrl) deleteFormDraft(w http.ResponseWriter, r *http.Request, ct
 	return nil
 }
 
+// submitForm 處理表單的 HTTP 請求。
 func (c WorkflowCtrl) submitForm(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.SubmitFormInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -164,6 +170,7 @@ func (c WorkflowCtrl) submitForm(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
+// approveForm 處理表單的 HTTP 請求。
 func (c WorkflowCtrl) approveForm(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.ApproveFormInput
 	if _, err := readOptionalJSON(w, r, &input); err != nil {
@@ -177,6 +184,7 @@ func (c WorkflowCtrl) approveForm(w http.ResponseWriter, r *http.Request, ctx do
 	return nil
 }
 
+// rejectForm 處理表單的 HTTP 請求。
 func (c WorkflowCtrl) rejectForm(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.RejectFormInput
 	if _, err := readOptionalJSON(w, r, &input); err != nil {
@@ -190,7 +198,7 @@ func (c WorkflowCtrl) rejectForm(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
-// returnForm sends a workflow form instance back to the applicant for revision.
+// returnForm 處理表單的 HTTP 請求。
 func (c WorkflowCtrl) returnForm(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.ReturnFormInput
 	if _, err := readOptionalJSON(w, r, &input); err != nil {
@@ -204,7 +212,7 @@ func (c WorkflowCtrl) returnForm(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
-// cancelForm marks a visible submitted form instance as cancelled.
+// cancelForm 處理表單的 HTTP 請求。
 func (c WorkflowCtrl) cancelForm(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CancelFormInput
 	if _, err := readOptionalJSON(w, r, &input); err != nil {
@@ -218,7 +226,7 @@ func (c WorkflowCtrl) cancelForm(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
-// duplicateForm creates a draft copy from an existing form instance.
+// duplicateForm 處理 duplicate 表單的 HTTP 請求。
 func (c WorkflowCtrl) duplicateForm(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.DuplicateForm(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -228,7 +236,7 @@ func (c WorkflowCtrl) duplicateForm(w http.ResponseWriter, r *http.Request, ctx 
 	return nil
 }
 
-// exportForm streams a JSON representation of one visible form instance.
+// exportForm 處理表單的 HTTP 請求。
 func (c WorkflowCtrl) exportForm(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	file, err := c.svc.ExportForm(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -241,6 +249,7 @@ func (c WorkflowCtrl) exportForm(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
+// formInstanceQueryFromRequest 處理表單實例查詢 來源 請求。
 func formInstanceQueryFromRequest(r *http.Request) (domain.FormInstanceQuery, error) {
 	values := r.URL.Query()
 	mine, err := optionalBoolQuery(values.Get("mine"), "mine")
@@ -256,6 +265,7 @@ func formInstanceQueryFromRequest(r *http.Request) (domain.FormInstanceQuery, er
 	}, nil
 }
 
+// optionalBoolQuery 處理可選布林值查詢。
 func optionalBoolQuery(raw, name string) (bool, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

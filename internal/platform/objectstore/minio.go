@@ -11,7 +11,7 @@ import (
 	"github.com/minio/minio-go/v7/pkg/credentials"
 )
 
-// MinIOOptions configures an S3-compatible object store, including MinIO.
+// MinIOOptions 定義 io 選項的資料結構。
 type MinIOOptions struct {
 	Provider        string
 	Endpoint        string
@@ -23,14 +23,14 @@ type MinIOOptions struct {
 	CreateBucket    bool
 }
 
-// MinIO stores objects through the S3-compatible MinIO client.
+// MinIO 定義 io 的資料結構。
 type MinIO struct {
 	client   *minio.Client
 	provider string
 	bucket   string
 }
 
-// NewMinIO creates an S3-compatible object store adapter.
+// NewMinIO 建立最小 io。
 func NewMinIO(ctx context.Context, opts MinIOOptions) (*MinIO, error) {
 	endpoint, secure, err := normalizeMinIOEndpoint(opts.Endpoint, opts.UseSSL)
 	if err != nil {
@@ -70,7 +70,7 @@ func NewMinIO(ctx context.Context, opts MinIOOptions) (*MinIO, error) {
 	return store, nil
 }
 
-// PutObject uploads the object bytes under key.
+// PutObject 處理 put 物件。
 func (s *MinIO) PutObject(ctx context.Context, key string, contentType string, data []byte) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -81,7 +81,7 @@ func (s *MinIO) PutObject(ctx context.Context, key string, contentType string, d
 	return err
 }
 
-// DeleteObject removes an object from the configured bucket.
+// DeleteObject 刪除物件。
 func (s *MinIO) DeleteObject(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {
 		return err
@@ -89,16 +89,17 @@ func (s *MinIO) DeleteObject(ctx context.Context, key string) error {
 	return s.client.RemoveObject(ctx, s.bucket, strings.TrimPrefix(key, "/"), minio.RemoveObjectOptions{})
 }
 
-// Provider identifies this store in import metadata.
+// Provider 處理提供者。
 func (s *MinIO) Provider() string {
 	return s.provider
 }
 
-// Bucket returns the configured object bucket.
+// Bucket 處理 bucket。
 func (s *MinIO) Bucket() string {
 	return s.bucket
 }
 
+// normalizeMinIOEndpoint 正規化最小 io endpoint。
 func normalizeMinIOEndpoint(endpoint string, fallbackSecure bool) (string, bool, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {

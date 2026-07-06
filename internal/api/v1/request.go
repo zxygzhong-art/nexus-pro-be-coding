@@ -14,6 +14,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
+// stringValue 處理字串 value。
 func stringValue(c *gin.Context, key string) string {
 	value, ok := c.Get(key)
 	if !ok {
@@ -23,10 +24,12 @@ func stringValue(c *gin.Context, key string) string {
 	return text
 }
 
+// requestIDFrom 處理請求 ID from。
 func requestIDFrom(r *http.Request) string {
 	return strings.TrimSpace(r.Header.Get("X-Request-ID"))
 }
 
+// traceContextIDs 處理 trace context IDs。
 func traceContextIDs(r *http.Request) (string, string) {
 	spanContext := trace.SpanContextFromContext(r.Context())
 	if !spanContext.IsValid() {
@@ -35,6 +38,7 @@ func traceContextIDs(r *http.Request) (string, string) {
 	return spanContext.TraceID().String(), spanContext.SpanID().String()
 }
 
+// newRequestID 建立請求 ID。
 func newRequestID() string {
 	var raw [16]byte
 	if _, err := rand.Read(raw[:]); err == nil {
@@ -43,15 +47,18 @@ func newRequestID() string {
 	return "req_" + strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
 }
 
+// approvalConfirmed 處理核准 confirmed。
 func approvalConfirmed(r *http.Request) bool {
 	value := strings.TrimSpace(r.Header.Get("X-Approval-Confirmed"))
 	return strings.EqualFold(value, "true") || value == "1"
 }
 
+// approvalConfirmed 處理核准 confirmed。
 func (a *API) approvalConfirmed(r *http.Request) bool {
 	return a.allowApprovalHeader && approvalConfirmed(r)
 }
 
+// pageRequestFromRequest 處理分頁請求 來源 請求。
 func pageRequestFromRequest(r *http.Request) (domain.PageRequest, error) {
 	values := r.URL.Query()
 	page, err := positiveIntQuery(values.Get("page"), "page", 0)
@@ -69,6 +76,7 @@ func pageRequestFromRequest(r *http.Request) (domain.PageRequest, error) {
 	}, nil
 }
 
+// pageResponseRequest 處理分頁回應請求。
 func pageResponseRequest(page, pageSize int, sort string) domain.PageRequest {
 	if page <= 0 {
 		page = domain.DefaultPage
@@ -82,6 +90,7 @@ func pageResponseRequest(page, pageSize int, sort string) domain.PageRequest {
 	return domain.PageRequest{Page: page, PageSize: pageSize, Sort: strings.TrimSpace(sort)}
 }
 
+// positiveIntQuery 處理正數整數查詢。
 func positiveIntQuery(raw, name string, max int) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" {

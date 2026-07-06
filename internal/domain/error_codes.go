@@ -1,79 +1,82 @@
 package domain
 
-// ErrorCode is the numeric public code returned in API error envelopes.
+// ErrorCode 表示錯誤碼。
 type ErrorCode int
 
 const (
-	// Public error code prefix allocation:
-	// 1xxxx common platform/request/authentication errors.
-	// 2xxxx IAM and authorization errors.
-	// 3xxxx people-domain and HR errors.
-	// 4xxxx attendance errors.
-	// 5xxxx workflow errors.
-	// 6xxxx agent errors.
+	// 公開錯誤碼前綴分配：
+	// 1xxxx 表示通用平台、請求與認證錯誤。
+	// 2xxxx 表示 IAM 與授權錯誤。
+	// 3xxxx 表示 people-domain 與 HR 錯誤。
+	// 4xxxx 表示考勤錯誤。
+	// 5xxxx 表示流程錯誤。
+	// 6xxxx 表示 agent 錯誤。
 
-	// ErrorCodeInternal is the fallback for unclassified server-side failures.
+	// ErrorCodeInternal 說明此處的錯誤處理語義。
 	ErrorCodeInternal ErrorCode = 10000
 
-	// ErrorCodeBadRequest is the generic malformed request fallback.
+	// ErrorCodeBadRequest 說明此處的錯誤處理語義。
 	ErrorCodeBadRequest ErrorCode = 10001
-	// ErrorCodeInvalidJSONBody indicates the request body could not be decoded as valid JSON.
+	// ErrorCodeInvalidJSONBody 說明此處的錯誤處理語義。
 	ErrorCodeInvalidJSONBody ErrorCode = 10002
-	// ErrorCodeMultipleJSONValues indicates the request body contained more than one JSON value.
+	// ErrorCodeMultipleJSONValues 說明此處的錯誤處理語義。
 	ErrorCodeMultipleJSONValues ErrorCode = 10003
-	// ErrorCodeInvalidQueryInteger indicates a query parameter expected an integer value.
+	// ErrorCodeInvalidQueryInteger 說明此處的錯誤處理語義。
 	ErrorCodeInvalidQueryInteger ErrorCode = 10004
-	// ErrorCodeQueryBelowMinimum indicates a numeric query parameter is below its allowed minimum.
+	// ErrorCodeQueryBelowMinimum 說明此處的錯誤處理語義。
 	ErrorCodeQueryBelowMinimum ErrorCode = 10005
-	// ErrorCodeQueryAboveMaximum indicates a numeric query parameter is above its allowed maximum.
+	// ErrorCodeQueryAboveMaximum 說明此處的錯誤處理語義。
 	ErrorCodeQueryAboveMaximum ErrorCode = 10006
-	// ErrorCodeInvalidMultipartForm indicates a multipart form could not be parsed.
+	// ErrorCodeInvalidMultipartForm 說明此處的錯誤處理語義。
 	ErrorCodeInvalidMultipartForm ErrorCode = 10007
-	// ErrorCodeRequiredMultipartFile indicates a required multipart file field is missing.
+	// ErrorCodeRequiredMultipartFile 說明此處的錯誤處理語義。
 	ErrorCodeRequiredMultipartFile ErrorCode = 10008
-	// ErrorCodeMultipartFileReadFailed indicates an uploaded multipart file could not be read.
+	// ErrorCodeMultipartFileReadFailed 說明此處的錯誤處理語義。
 	ErrorCodeMultipartFileReadFailed ErrorCode = 10009
 
-	// ErrorCodeValidationFailed is the generic field validation fallback.
+	// ErrorCodeValidationFailed 說明此處的錯誤處理語義。
 	ErrorCodeValidationFailed ErrorCode = 30010
-	// ErrorCodeFieldRequired indicates a required field is missing or blank.
+	// ErrorCodeFieldRequired 說明此處的錯誤處理語義。
 	ErrorCodeFieldRequired ErrorCode = 30011
-	// ErrorCodeFieldInvalid indicates a field value is malformed or unsupported.
+	// ErrorCodeFieldInvalid 說明此處的錯誤處理語義。
 	ErrorCodeFieldInvalid ErrorCode = 30012
-	// ErrorCodeFieldNotFound indicates a referenced field value points to a missing resource.
+	// ErrorCodeFieldNotFound 說明此處的錯誤處理語義。
 	ErrorCodeFieldNotFound ErrorCode = 30013
-	// ErrorCodeFieldUnique indicates a field value violates a uniqueness rule.
+	// ErrorCodeFieldUnique 說明此處的錯誤處理語義。
 	ErrorCodeFieldUnique ErrorCode = 30014
-	// ErrorCodeFieldDenied indicates field-level policy denies access or update.
+	// ErrorCodeFieldDenied 說明此處的錯誤處理語義。
 	ErrorCodeFieldDenied ErrorCode = 30015
-	// ErrorCodeDuplicateInImport indicates a value duplicates an existing imported row or entity.
+	// ErrorCodeDuplicateInImport 說明此處的錯誤處理語義。
 	ErrorCodeDuplicateInImport ErrorCode = 30016
-	// ErrorCodeDuplicateInFile indicates duplicate values within the same import file.
+	// ErrorCodeDuplicateInFile 說明此處的錯誤處理語義。
 	ErrorCodeDuplicateInFile ErrorCode = 30017
-	// ErrorCodeImportValidation is the generic import row validation fallback.
+	// ErrorCodeImportValidation 說明此處的錯誤處理語義。
 	ErrorCodeImportValidation ErrorCode = 30018
-	// ErrorCodeUnauthorized indicates authenticated tenant or account context is missing or invalid.
+	// ErrorCodeUnauthorized 說明此處的錯誤處理語義。
 	ErrorCodeUnauthorized ErrorCode = 10030
-	// ErrorCodeAccountInactive indicates the authenticated account is disabled or not active.
+	// ErrorCodeAccountInactive 說明此處的錯誤處理語義。
 	ErrorCodeAccountInactive ErrorCode = 10031
-	// ErrorCodeForbidden is the generic authorization denial fallback.
+	// ErrorCodeForbidden 說明此處的錯誤處理語義。
 	ErrorCodeForbidden ErrorCode = 20040
-	// ErrorCodePermissionMissing indicates no matching permission allowed the operation.
+	// ErrorCodePermissionMissing 說明此處的錯誤處理語義。
 	ErrorCodePermissionMissing ErrorCode = 20041
-	// ErrorCodeMenuDenied indicates a read/menu-level permission is missing.
+	// ErrorCodeMenuDenied 說明此處的錯誤處理語義。
 	ErrorCodeMenuDenied ErrorCode = 20042
-	// ErrorCodeButtonDenied indicates a write/button-level permission is missing.
+	// ErrorCodeButtonDenied 說明此處的錯誤處理語義。
 	ErrorCodeButtonDenied ErrorCode = 20043
-	// ErrorCodeDataScopeDenied indicates the target resource is outside the allowed data scope.
+	// ErrorCodeDataScopeDenied 說明此處的錯誤處理語義。
 	ErrorCodeDataScopeDenied ErrorCode = 20044
-	// ErrorCodeApprovalRequired indicates a high-risk action needs approval confirmation.
+	// ErrorCodeApprovalRequired 說明此處的錯誤處理語義。
 	ErrorCodeApprovalRequired ErrorCode = 20045
-	// ErrorCodeNotFound indicates the requested resource does not exist in the current tenant.
+	// ErrorCodeNotFound 說明此處的錯誤處理語義。
 	ErrorCodeNotFound ErrorCode = 10050
-	// ErrorCodeConflict indicates the request conflicts with current resource state.
+	// ErrorCodeConflict 說明此處的錯誤處理語義。
 	ErrorCodeConflict ErrorCode = 10060
+	// ErrorCodeTooManyRequests 說明此處的錯誤處理語義。
+	ErrorCodeTooManyRequests ErrorCode = 10070
 )
 
+// appErrorCode 處理 app 錯誤碼。
 func appErrorCode(kind string) ErrorCode {
 	switch kind {
 	case "bad_request":
@@ -90,11 +93,14 @@ func appErrorCode(kind string) ErrorCode {
 		return ErrorCodeNotFound
 	case "conflict":
 		return ErrorCodeConflict
+	case "too_many_requests":
+		return ErrorCodeTooManyRequests
 	default:
 		return ErrorCodeInternal
 	}
 }
 
+// reasonErrorCode 處理 reason 錯誤碼。
 func reasonErrorCode(reason string) (ErrorCode, bool) {
 	switch reason {
 	case "account_inactive":
@@ -116,6 +122,7 @@ func reasonErrorCode(reason string) (ErrorCode, bool) {
 	}
 }
 
+// fieldErrorCode 處理欄位錯誤碼。
 func fieldErrorCode(kind string) (ErrorCode, bool) {
 	switch kind {
 	case "required":
@@ -137,6 +144,7 @@ func fieldErrorCode(kind string) (ErrorCode, bool) {
 	}
 }
 
+// firstFieldErrorCode 取得第一個欄位錯誤碼。
 func firstFieldErrorCode(fields []FieldError, fallback ErrorCode) ErrorCode {
 	for _, field := range fields {
 		if code, ok := fieldErrorCode(field.Code); ok {
@@ -146,6 +154,7 @@ func firstFieldErrorCode(fields []FieldError, fallback ErrorCode) ErrorCode {
 	return fallback
 }
 
+// firstRowErrorCode 取得第一個列錯誤碼。
 func firstRowErrorCode(rows []RowError, fallback ErrorCode) ErrorCode {
 	for _, row := range rows {
 		if code, ok := fieldErrorCode(row.Code); ok {

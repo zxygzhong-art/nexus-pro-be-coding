@@ -6,7 +6,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
-// AccountStore persists tenant accounts and their direct group memberships.
+// AccountStore 定義帳號儲存層的行為契約。
 type AccountStore interface {
 	UpsertAccount(context.Context, domain.Account) error
 	GetAccount(ctx context.Context, tenantID, id string) (domain.Account, bool, error)

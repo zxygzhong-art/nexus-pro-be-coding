@@ -20,18 +20,18 @@ import (
 	"time"
 )
 
-// HRService implements people-domain and organization workflows.
+// HRService 定義 HR 服務的資料結構。
 type HRService struct {
 	*Service
 	store hrStore
 }
 
-// HR returns the people-domain service facade.
+// HR 處理 HR 的服務流程。
 func (c *Service) HR() HRService {
 	return HRService{Service: c, store: c.store}
 }
 
-// ListOrgUnits returns organization units visible to the current account.
+// ListOrgUnits 列出組織單位的服務流程。
 func (c HRService) ListOrgUnits(ctx RequestContext) ([]OrgUnit, error) {
 	account, decision, err := c.Service.requireServiceAuthz(ctx, AppHR, ResourceOrgUnit, ActionRead, "")
 	if err != nil {
@@ -44,7 +44,7 @@ func (c HRService) ListOrgUnits(ctx RequestContext) ([]OrgUnit, error) {
 	return c.filterOrgUnitsByDecision(ctx, account, decision, units)
 }
 
-// ListOrgUnitPage returns paginated visible organization units.
+// ListOrgUnitPage 列出組織單位分頁的服務流程。
 func (c HRService) ListOrgUnitPage(ctx RequestContext, page PageRequest) (PageResponse[OrgUnit], error) {
 	items, err := c.ListOrgUnits(ctx)
 	if err != nil {
@@ -54,7 +54,7 @@ func (c HRService) ListOrgUnitPage(ctx RequestContext, page PageRequest) (PageRe
 	return utils.PageResponse(items, page), nil
 }
 
-// CreateOrgUnit creates an organization unit and computes its hierarchy path.
+// CreateOrgUnit 建立組織單位的服務流程。
 func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (OrgUnit, error) {
 	if _, _, err := c.Service.requireServiceAuthz(ctx, AppHR, ResourceOrgUnit, ActionCreate, ""); err != nil {
 		return OrgUnit{}, err
@@ -106,7 +106,7 @@ func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (
 	return unit, nil
 }
 
-// ListEmployees returns employees visible to the current account.
+// ListEmployees 列出員工的服務流程。
 func (c HRService) ListEmployees(ctx RequestContext) ([]Employee, error) {
 	response, err := c.QueryEmployees(ctx, EmployeeQuery{})
 	if err != nil {
@@ -115,12 +115,12 @@ func (c HRService) ListEmployees(ctx RequestContext) ([]Employee, error) {
 	return response.Items, nil
 }
 
-// CreateEmployee validates and creates a tenant employee profile.
+// CreateEmployee 建立員工的服務流程。
 func (c HRService) CreateEmployee(ctx RequestContext, input CreateEmployeeInput) (Employee, error) {
 	return c.CreateEmployeeAggregate(ctx, input)
 }
 
-// ExportEmployees returns exportable employees after applying authorization scope.
+// ExportEmployees 匯出員工的服務流程。
 func (c HRService) ExportEmployees(ctx RequestContext, queries ...EmployeeQuery) ([]Employee, error) {
 	query := EmployeeQuery{}
 	if len(queries) > 0 {
@@ -130,6 +130,7 @@ func (c HRService) ExportEmployees(ctx RequestContext, queries ...EmployeeQuery)
 	return items, err
 }
 
+// exportEmployees 匯出員工的服務流程。
 func (c HRService) exportEmployees(ctx RequestContext, query EmployeeQuery) ([]Employee, CheckResult, error) {
 	account, decision, _, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, Action: ActionExport, Context: map[string]any{"filters": employeeQueryApprovalFilters(query)}},
@@ -172,7 +173,7 @@ func (c HRService) exportEmployees(ctx RequestContext, query EmployeeQuery) ([]E
 	return items, decision, nil
 }
 
-// DeleteEmployee soft-deletes an employee after authorization and audit checks.
+// DeleteEmployee 刪除員工的服務流程。
 func (c HRService) DeleteEmployee(ctx RequestContext, id string) (Employee, error) {
 	account, decision, audit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, ResourceID: id, Action: ActionDelete},
@@ -252,7 +253,7 @@ func (c HRService) DeleteEmployee(ctx RequestContext, id string) (Employee, erro
 	return employee, nil
 }
 
-// UpdateEmployeeStatus updates an employee lifecycle state through the transition path.
+// UpdateEmployeeStatus 更新員工狀態的服務流程。
 func (c HRService) UpdateEmployeeStatus(ctx RequestContext, id, status string) (Employee, error) {
 	status = normalizeEmployeeStatus(status)
 	if status == "" {
@@ -332,7 +333,7 @@ func (c HRService) UpdateEmployeeStatus(ctx RequestContext, id, status string) (
 	return employee, nil
 }
 
-// QueryEmployees returns employees filtered by query and authorization scope.
+// QueryEmployees 處理查詢員工的服務流程。
 func (c HRService) QueryEmployees(ctx RequestContext, query EmployeeQuery) (PageResponse[Employee], error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -369,7 +370,7 @@ func (c HRService) QueryEmployees(ctx RequestContext, query EmployeeQuery) (Page
 	return PageResponse[Employee]{Items: items, Total: total, Page: query.Page, PageSize: query.PageSize, Sort: query.Sort}, nil
 }
 
-// GetEmployee returns one employee when the current account can view it.
+// GetEmployee 取得員工的服務流程。
 func (c HRService) GetEmployee(ctx RequestContext, id string) (Employee, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -399,7 +400,7 @@ func (c HRService) GetEmployee(ctx RequestContext, id string) (Employee, error) 
 	return visible[0], nil
 }
 
-// CreateEmployeeAggregate creates the employee profile and related identity side effects.
+// CreateEmployeeAggregate 建立員工 aggregate 的服務流程。
 func (c HRService) CreateEmployeeAggregate(ctx RequestContext, input CreateEmployeeInput) (Employee, error) {
 	_, _, authzAudit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, Action: ActionCreate},
@@ -409,6 +410,7 @@ func (c HRService) CreateEmployeeAggregate(ctx RequestContext, input CreateEmplo
 		return Employee{}, err
 	}
 	var employee Employee
+	provisionQueued := false
 	if err := c.withTransaction(ctx, func(tx HRService) error {
 		next, err := tx.employeeFromCreateInput(ctx, input)
 		if err != nil {
@@ -426,6 +428,13 @@ func (c HRService) CreateEmployeeAggregate(ctx RequestContext, input CreateEmplo
 		}
 		if err := tx.linkEmployeeAccount(ctx, next); err != nil {
 			return err
+		}
+		if next.AccountID != "" && accountPolicy != string(EmployeeAccountPolicyNone) {
+			sendInvite := accountPolicy == string(EmployeeAccountPolicyCreatePendingInvite)
+			if err := tx.provisionEmployeeIdentityFromAccountID(ctx, next, next.AccountID, sendInvite); err != nil {
+				return err
+			}
+			provisionQueued = true
 		}
 		eventPayload := map[string]any{"employee_id": next.ID, "account_policy": accountPolicy}
 		if next.AccountID != "" {
@@ -450,6 +459,9 @@ func (c HRService) CreateEmployeeAggregate(ctx RequestContext, input CreateEmplo
 	}); err != nil {
 		return Employee{}, err
 	}
+	if provisionQueued {
+		c.runIdentityProvisioningFastPath(ctx)
+	}
 	c.logInfo(ctx, "employee created",
 		"employee_id", employee.ID,
 		"employee_no", employee.EmployeeNo,
@@ -459,7 +471,7 @@ func (c HRService) CreateEmployeeAggregate(ctx RequestContext, input CreateEmplo
 	return employee, nil
 }
 
-// UpdateEmployee applies a partial employee update and records its authorization side effects.
+// UpdateEmployee 更新員工的服務流程。
 func (c HRService) UpdateEmployee(ctx RequestContext, id string, input UpdateEmployeeInput) (Employee, error) {
 	account, decision, authzAudit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, ResourceID: id, Action: ActionUpdate},
@@ -527,7 +539,7 @@ func (c HRService) UpdateEmployee(ctx RequestContext, id string, input UpdateEmp
 	return employee, nil
 }
 
-// EmployeeStats summarizes employees visible under the current query and authz scope.
+// EmployeeStats 處理員工 stats 的服務流程。
 func (c HRService) EmployeeStats(ctx RequestContext, query EmployeeQuery) (EmployeeStats, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -585,7 +597,7 @@ func (c HRService) EmployeeStats(ctx RequestContext, query EmployeeQuery) (Emplo
 	return stats, nil
 }
 
-// EmployeeOptions returns selectable HR values constrained by current data scope.
+// EmployeeOptions 處理員工選項的服務流程。
 func (c HRService) EmployeeOptions(ctx RequestContext) (EmployeeOptions, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -628,6 +640,7 @@ func (c HRService) EmployeeOptions(ctx RequestContext) (EmployeeOptions, error) 
 	}, nil
 }
 
+// employeeDepartmentOptions 處理員工部門選項的服務流程。
 func (c HRService) employeeDepartmentOptions(ctx RequestContext, account Account, decision CheckResult, units []OrgUnit, employees []Employee) ([]OrgUnit, error) {
 	switch decision.Scope {
 	case "", ScopeAll, ScopeTenant, ScopeSystem:
@@ -656,6 +669,7 @@ func (c HRService) employeeDepartmentOptions(ctx RequestContext, account Account
 	}
 }
 
+// filterOrgUnitsByDecision 處理篩選組織單位 by 決策的服務流程。
 func (c HRService) filterOrgUnitsByDecision(ctx RequestContext, account Account, decision CheckResult, units []OrgUnit) ([]OrgUnit, error) {
 	switch decision.Scope {
 	case "", ScopeAll, ScopeTenant, ScopeSystem:
@@ -700,6 +714,7 @@ func (c HRService) filterOrgUnitsByDecision(ctx RequestContext, account Account,
 	}
 }
 
+// orgUnitIDsForEmployeeIDs 處理組織單位 IDs for 員工 IDs 的服務流程。
 func (c HRService) orgUnitIDsForEmployeeIDs(ctx RequestContext, employeeIDs []string) ([]string, error) {
 	allowedEmployees := stringSet(employeeIDs)
 	if len(allowedEmployees) == 0 {
@@ -718,6 +733,7 @@ func (c HRService) orgUnitIDsForEmployeeIDs(ctx RequestContext, employeeIDs []st
 	return uniqueStrings(orgIDs), nil
 }
 
+// orgUnitOptionsByIDs 處理組織單位選項 by IDs。
 func orgUnitOptionsByIDs(units []OrgUnit, ids []string) []OrgUnit {
 	allowed := stringSet(ids)
 	if len(allowed) == 0 {
@@ -732,6 +748,7 @@ func orgUnitOptionsByIDs(units []OrgUnit, ids []string) []OrgUnit {
 	return out
 }
 
+// orgUnitOptionsInSubtree 處理組織單位選項 in subtree。
 func orgUnitOptionsInSubtree(units []OrgUnit, roots []string) []OrgUnit {
 	allowed := stringSet(roots)
 	if len(allowed) == 0 {
@@ -746,6 +763,7 @@ func orgUnitOptionsInSubtree(units []OrgUnit, roots []string) []OrgUnit {
 	return out
 }
 
+// employeeDepartmentOptionsFromEmployees 處理員工部門選項 來源 員工。
 func employeeDepartmentOptionsFromEmployees(units []OrgUnit, employees []Employee) []OrgUnit {
 	visible := map[string]struct{}{}
 	for _, employee := range employees {
@@ -768,10 +786,12 @@ const (
 	maxEmployeePageSize     = 100
 )
 
+// listEmployeesForQuery 列出員工 for 查詢的服務流程。
 func (c HRService) listEmployeesForQuery(ctx RequestContext, query EmployeeQuery) ([]Employee, error) {
 	return c.store.ListEmployeesByQuery(goContext(ctx), ctx.TenantID, query)
 }
 
+// employeeQueryWithDecisionScope 處理員工查詢 with 決策範圍的服務流程。
 func (c HRService) employeeQueryWithDecisionScope(ctx RequestContext, account Account, query EmployeeQuery, decision CheckResult) (EmployeeQuery, error) {
 	query = normalizeEmployeeQuery(query)
 	scope, err := c.employeeScopeConstraint(ctx, account, decision)
@@ -782,6 +802,7 @@ func (c HRService) employeeQueryWithDecisionScope(ctx RequestContext, account Ac
 	return query, nil
 }
 
+// employeeScopeConstraint 處理員工範圍 constraint 的服務流程。
 func (c HRService) employeeScopeConstraint(ctx RequestContext, account Account, decision CheckResult) (domain.EmployeeScopeConstraint, error) {
 	switch decision.Scope {
 	case "", ScopeAll, ScopeTenant, ScopeSystem:
@@ -819,6 +840,7 @@ func (c HRService) employeeScopeConstraint(ctx RequestContext, account Account, 
 	}
 }
 
+// employeeScopeByIDs 處理員工範圍 by IDs。
 func employeeScopeByIDs(ids []string) domain.EmployeeScopeConstraint {
 	ids = uniqueStrings(ids)
 	if len(ids) == 0 {
@@ -827,6 +849,7 @@ func employeeScopeByIDs(ids []string) domain.EmployeeScopeConstraint {
 	return domain.EmployeeScopeConstraint{EmployeeIDs: ids}
 }
 
+// employeeScopeByOrgUnits 處理員工範圍 by 組織單位。
 func employeeScopeByOrgUnits(ids []string) domain.EmployeeScopeConstraint {
 	ids = uniqueStrings(ids)
 	if len(ids) == 0 {
@@ -835,6 +858,7 @@ func employeeScopeByOrgUnits(ids []string) domain.EmployeeScopeConstraint {
 	return domain.EmployeeScopeConstraint{OrgUnitIDs: ids}
 }
 
+// employeeScopeFromConditions 處理員工範圍 來源 conditions。
 func employeeScopeFromConditions(conditions map[string]any) domain.EmployeeScopeConstraint {
 	scope := domain.EmployeeScopeConstraint{
 		EmployeeIDs: uniqueStrings(stringSliceFromAny(conditions["employee_ids"])),
@@ -850,6 +874,7 @@ func employeeScopeFromConditions(conditions map[string]any) domain.EmployeeScope
 	return scope
 }
 
+// normalizeEmployeeQuery 正規化員工查詢。
 func normalizeEmployeeQuery(query EmployeeQuery) EmployeeQuery {
 	if query.Page <= 0 {
 		query.Page = defaultEmployeePage
@@ -868,6 +893,7 @@ func normalizeEmployeeQuery(query EmployeeQuery) EmployeeQuery {
 	return query
 }
 
+// sortEmployees 排序員工。
 func sortEmployees(items []Employee, sortKey string) {
 	sort.SliceStable(items, func(i, j int) bool {
 		a, b := items[i], items[j]
@@ -890,48 +916,58 @@ func sortEmployees(items []Employee, sortKey string) {
 	})
 }
 
+// employeeStatus 處理員工狀態。
 func employeeStatus(item Employee) string {
 	return utils.FirstNonEmpty(item.EmploymentStatus, item.Status)
 }
 
+// normalizeEmployeeStatus 正規化員工狀態。
 func normalizeEmployeeStatus(value string) string {
 	return NormalizeEmployeeStatus(value)
 }
 
+// normalizeEmployeeCategory 正規化員工分類。
 func normalizeEmployeeCategory(value string) string {
 	return NormalizeEmployeeCategory(value)
 }
 
+// normalizeEmployeeAccountPolicy 正規化員工帳號政策。
 func normalizeEmployeeAccountPolicy(value string) string {
 	return NormalizeEmployeeAccountPolicy(value)
 }
 
+// validEmployeeStatus 處理有效員工狀態。
 func validEmployeeStatus(value string, includeDeleted bool) bool {
 	status, ok := ParseEmployeeStatus(value)
 	return ok && status.Valid(includeDeleted)
 }
 
+// validEmployeeCategory 處理有效員工分類。
 func validEmployeeCategory(value string) bool {
 	category, ok := ParseEmployeeCategory(value)
 	return ok && category.Valid()
 }
 
+// validEmployeeAccountPolicy 處理有效員工帳號政策。
 func validEmployeeAccountPolicy(value string) bool {
 	_, ok := ParseEmployeeAccountPolicy(value)
 	return ok
 }
 
+// employeeTerminalStatus 處理員工 terminal 狀態。
 func employeeTerminalStatus(status string) bool {
 	status = normalizeEmployeeStatus(status)
 	return status == string(EmployeeStatusResigned) || status == string(EmployeeStatusDeleted)
 }
 
+// sameMonth 處理 same 月份。
 func sameMonth(t time.Time, ref time.Time) bool {
 	t = t.UTC()
 	ref = ref.UTC()
 	return t.Year() == ref.Year() && t.Month() == ref.Month()
 }
 
+// timeValue 處理時間 value。
 func timeValue(t *time.Time) time.Time {
 	if t == nil {
 		return time.Time{}
@@ -939,6 +975,7 @@ func timeValue(t *time.Time) time.Time {
 	return *t
 }
 
+// formatDate 處理 format 日期。
 func formatDate(t *time.Time) string {
 	if t == nil || t.IsZero() {
 		return ""
@@ -946,10 +983,12 @@ func formatDate(t *time.Time) string {
 	return t.UTC().Format("2006-01-02")
 }
 
+// uniqueSorted 處理 unique sorted。
 func uniqueSorted(values []string) []string {
 	return uniqueStrings(values)
 }
 
+// employeeStringValues 處理員工字串 values。
 func employeeStringValues(items []Employee, fn func(Employee) string) []string {
 	out := make([]string, 0)
 	for _, item := range items {
@@ -975,14 +1014,17 @@ type employeeUniqueLookupStore interface {
 	GetEmployeeByBasicInfoField(context.Context, string, string, string) (Employee, bool, error)
 }
 
+// employeeFromCreateInput 處理員工 來源 create 輸入的服務流程。
 func (c HRService) employeeFromCreateInput(ctx RequestContext, input CreateEmployeeInput, reservedEmployeeNos ...map[string]struct{}) (Employee, error) {
 	return c.employeeFromCreateInputWithProfile(ctx, input, employeeValidationFullForm, reservedEmployeeNos...)
 }
 
+// employeeFromImportInput 處理員工 來源 import 輸入的服務流程。
 func (c HRService) employeeFromImportInput(ctx RequestContext, input CreateEmployeeInput, reservedEmployeeNos ...map[string]struct{}) (Employee, error) {
 	return c.employeeFromCreateInputWithProfile(ctx, input, employeeValidationImportMinimal, reservedEmployeeNos...)
 }
 
+// employeeFromCreateInputWithProfile 處理員工 來源 create 輸入 with 資料檔的服務流程。
 func (c HRService) employeeFromCreateInputWithProfile(ctx RequestContext, input CreateEmployeeInput, profile string, reservedEmployeeNos ...map[string]struct{}) (Employee, error) {
 	employee, err := c.employeeCreateCandidate(ctx, input)
 	if err != nil {
@@ -1007,6 +1049,7 @@ func (c HRService) employeeFromCreateInputWithProfile(ctx RequestContext, input 
 	return employee, nil
 }
 
+// employeeCreateCandidate 處理員工 create 候選的服務流程。
 func (c HRService) employeeCreateCandidate(ctx RequestContext, input CreateEmployeeInput) (Employee, error) {
 	now := c.Now()
 	hireDate, err := optionalDateTime(input.HireDate)
@@ -1047,6 +1090,7 @@ func (c HRService) employeeCreateCandidate(ctx RequestContext, input CreateEmplo
 	return c.deriveEmployeeHotFields(employee), nil
 }
 
+// applyEmployeePatch 處理 apply 員工 patch 的服務流程。
 func (c HRService) applyEmployeePatch(ctx RequestContext, employee *Employee, input UpdateEmployeeInput) error {
 	if input.Status != nil || input.EmploymentStatus != nil {
 		return domainValidation("employee status must be changed through status-transition", FieldError{Tab: employeeTabEmploymentInfo, Field: "status", Code: "transition_required", Message: "status must be changed through status-transition"})
@@ -1108,6 +1152,7 @@ func (c HRService) applyEmployeePatch(ctx RequestContext, employee *Employee, in
 	return c.validateEmployee(ctx, *employee, "update", employeeValidationFullForm)
 }
 
+// forbiddenEmployeePatchFields 處理禁止員工 patch 欄位。
 func forbiddenEmployeePatchFields(input UpdateEmployeeInput, policies map[string]string) []FieldError {
 	if len(policies) == 0 {
 		return nil
@@ -1131,6 +1176,7 @@ func forbiddenEmployeePatchFields(input UpdateEmployeeInput, policies map[string
 	return fields
 }
 
+// addPatchMapFields 處理 add patch map 欄位。
 func addPatchMapFields(fields *[]FieldError, policies map[string]string, tab string, values map[string]any) {
 	if len(values) == 0 {
 		return
@@ -1147,6 +1193,7 @@ func addPatchMapFields(fields *[]FieldError, policies map[string]string, tab str
 	}
 }
 
+// deriveEmployeeHotFields 推導員工 hot 欄位的服務流程。
 func (c HRService) deriveEmployeeHotFields(employee Employee) Employee {
 	employee.CompanyEmail = utils.FirstNonEmpty(employee.CompanyEmail, employeeHotValue(employee, "company_email"))
 	employee.PersonalEmail = utils.FirstNonEmpty(employee.PersonalEmail, employeeHotValue(employee, "personal_email"))
@@ -1167,6 +1214,7 @@ func (c HRService) deriveEmployeeHotFields(employee Employee) Employee {
 	return employee
 }
 
+// validateEmployee 驗證員工的服務流程。
 func (c HRService) validateEmployee(ctx RequestContext, employee Employee, mode string, profile ...string) error {
 	validationProfile := employeeValidationFullForm
 	if len(profile) > 0 && strings.TrimSpace(profile[0]) != "" {
@@ -1257,6 +1305,7 @@ func (c HRService) validateEmployee(ctx RequestContext, employee Employee, mode 
 	return nil
 }
 
+// fullFormEmployeeFieldErrors 處理 full 表單員工欄位錯誤。
 func fullFormEmployeeFieldErrors(employee Employee) []FieldError {
 	fields := make([]FieldError, 0)
 	addRequired := func(tab, field, message string) {
@@ -1296,6 +1345,7 @@ func fullFormEmployeeFieldErrors(employee Employee) []FieldError {
 	return fields
 }
 
+// requireAny 處理 require any。
 func requireAny(fields *[]FieldError, tab string, values map[string]any, field, message string, keys ...string) {
 	for _, key := range keys {
 		if mapAnyString(values, key) != "" {
@@ -1305,6 +1355,7 @@ func requireAny(fields *[]FieldError, tab string, values map[string]any, field, 
 	*fields = append(*fields, FieldError{Tab: tab, Field: field, Code: "required", Message: message})
 }
 
+// requirePositiveNumber 處理 require 正數數字。
 func requirePositiveNumber(fields *[]FieldError, values map[string]any, field, message string) {
 	raw := mapAnyString(values, field)
 	if raw == "" {
@@ -1317,6 +1368,7 @@ func requirePositiveNumber(fields *[]FieldError, values map[string]any, field, m
 	}
 }
 
+// employeeUniqueFieldErrors 處理員工 unique 欄位錯誤的服務流程。
 func (c HRService) employeeUniqueFieldErrors(ctx RequestContext, store employeeUniqueLookupStore, employee Employee) ([]FieldError, error) {
 	fields := make([]FieldError, 0, 8)
 	goCtx := goContext(ctx)
@@ -1372,6 +1424,7 @@ func (c HRService) employeeUniqueFieldErrors(ctx RequestContext, store employeeU
 	return fields, nil
 }
 
+// employeeUniqueFieldErrorsFromList 處理員工 unique 欄位錯誤 來源 列表的服務流程。
 func (c HRService) employeeUniqueFieldErrorsFromList(ctx RequestContext, employee Employee) ([]FieldError, error) {
 	existingEmployees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
 	if err != nil {
@@ -1415,6 +1468,7 @@ var employeeUniqueBasicInfoFields = []string{
 	"work_permit_no",
 }
 
+// generateEmployeeNo 處理 generate 員工 no 的服務流程。
 func (c HRService) generateEmployeeNo(ctx RequestContext, reservedEmployeeNos ...map[string]struct{}) (string, error) {
 	for {
 		employeeNo, err := c.store.NextEmployeeNo(goContext(ctx), ctx.TenantID, employeeNoPrefix)
@@ -1427,6 +1481,7 @@ func (c HRService) generateEmployeeNo(ctx RequestContext, reservedEmployeeNos ..
 	}
 }
 
+// employeeNoReserved 處理員工 no reserved。
 func employeeNoReserved(employeeNo string, reservedEmployeeNos ...map[string]struct{}) bool {
 	employeeNo = strings.TrimSpace(employeeNo)
 	if employeeNo == "" {
@@ -1443,6 +1498,7 @@ func employeeNoReserved(employeeNo string, reservedEmployeeNos ...map[string]str
 	return false
 }
 
+// reserveEmployeeNo 保留員工 no。
 func reserveEmployeeNo(employeeNo string, reservedEmployeeNos ...map[string]struct{}) error {
 	employeeNo = strings.TrimSpace(employeeNo)
 	if employeeNo == "" {
@@ -1460,6 +1516,7 @@ func reserveEmployeeNo(employeeNo string, reservedEmployeeNos ...map[string]stru
 	return nil
 }
 
+// stringFromMap 處理字串 來源 map。
 func stringFromMap(values map[string]any, key string) string {
 	if len(values) == 0 {
 		return ""
@@ -1470,6 +1527,7 @@ func stringFromMap(values map[string]any, key string) string {
 	return ""
 }
 
+// mapAnyString 映射any 字串。
 func mapAnyString(values map[string]any, key string) string {
 	if len(values) == 0 {
 		return ""
@@ -1490,6 +1548,7 @@ func mapAnyString(values map[string]any, key string) string {
 	}
 }
 
+// mergeMap 合併 map。
 func mergeMap(base map[string]any, patch map[string]any) map[string]any {
 	if len(base) == 0 && len(patch) == 0 {
 		return nil
@@ -1504,6 +1563,7 @@ func mergeMap(base map[string]any, patch map[string]any) map[string]any {
 	return out
 }
 
+// newEmployeeExperience 建立員工經歷的服務流程。
 func (c HRService) newEmployeeExperience(employee Employee, reason string) EmployeeExperience {
 	return EmployeeExperience{
 		ID:                utils.NewID("ehist"),
@@ -1519,6 +1579,7 @@ func (c HRService) newEmployeeExperience(employee Employee, reason string) Emplo
 	}
 }
 
+// appendHistoryForChangedEmployment 附加歷史 for changed 任職的服務流程。
 func (c HRService) appendHistoryForChangedEmployment(before, after Employee, reason string) Employee {
 	if before.OrgUnitID == after.OrgUnitID && before.ManagerEmployeeID == after.ManagerEmployeeID && before.Position == after.Position && before.Category == after.Category && before.Status == after.Status && before.EmploymentStatus == after.EmploymentStatus {
 		return after
@@ -1534,6 +1595,7 @@ func (c HRService) appendHistoryForChangedEmployment(before, after Employee, rea
 	return after
 }
 
+// touchEmployeeAuthzIfNeeded 處理 touch 員工授權 if needed 的服務流程。
 func (c HRService) touchEmployeeAuthzIfNeeded(ctx RequestContext, before, after Employee, eventType string) error {
 	if before.OrgUnitID == after.OrgUnitID && before.AccountID == after.AccountID && before.ManagerEmployeeID == after.ManagerEmployeeID {
 		return nil
@@ -1552,6 +1614,7 @@ func (c HRService) touchEmployeeAuthzIfNeeded(ctx RequestContext, before, after 
 	})
 }
 
+// linkEmployeeAccount 處理 link 員工帳號的服務流程。
 func (c HRService) linkEmployeeAccount(ctx RequestContext, employee Employee) error {
 	if employee.AccountID == "" {
 		return nil
@@ -1569,6 +1632,7 @@ func (c HRService) linkEmployeeAccount(ctx RequestContext, employee Employee) er
 	return nil
 }
 
+// applyEmployeeCreateAccountPolicy 處理 apply 員工 create 帳號政策的服務流程。
 func (c HRService) applyEmployeeCreateAccountPolicy(ctx RequestContext, employee *Employee, input CreateEmployeeInput) (string, bool, error) {
 	policy, err := employeeCreateAccountPolicy(input)
 	if err != nil {
@@ -1619,6 +1683,7 @@ func (c HRService) applyEmployeeCreateAccountPolicy(ctx RequestContext, employee
 	}
 }
 
+// employeeCreateAccountPolicy 處理員工 create 帳號政策。
 func employeeCreateAccountPolicy(input CreateEmployeeInput) (string, error) {
 	rawPolicy := strings.TrimSpace(input.AccountPolicy)
 	if rawPolicy == "" {
@@ -1634,6 +1699,7 @@ func employeeCreateAccountPolicy(input CreateEmployeeInput) (string, error) {
 	return policy, nil
 }
 
+// ensureEmployeeLinkedAccount 確保員工 linked 帳號的服務流程。
 func (c HRService) ensureEmployeeLinkedAccount(ctx RequestContext, employee Employee) error {
 	account, ok, err := c.store.GetAccount(goContext(ctx), ctx.TenantID, employee.AccountID)
 	if err != nil {
@@ -1651,10 +1717,12 @@ func (c HRService) ensureEmployeeLinkedAccount(ctx RequestContext, employee Empl
 	return nil
 }
 
+// ensureAccountEmailAvailable 確保帳號 email available 的服務流程。
 func (c HRService) ensureAccountEmailAvailable(ctx RequestContext, email string) error {
 	return c.ensureAccountEmailAvailableForAccount(ctx, email, "")
 }
 
+// ensureAccountEmailAvailableForAccount 確保帳號 email available for 帳號的服務流程。
 func (c HRService) ensureAccountEmailAvailableForAccount(ctx RequestContext, email, allowedAccountID string) error {
 	email = strings.TrimSpace(email)
 	if email == "" {
@@ -1672,6 +1740,7 @@ func (c HRService) ensureAccountEmailAvailableForAccount(ctx RequestContext, ema
 	return nil
 }
 
+// appendEmployeeEvent 附加員工事件的服務流程。
 func (c HRService) appendEmployeeEvent(ctx RequestContext, eventType, target string, payload map[string]any) error {
 	if payload == nil {
 		payload = map[string]any{}
@@ -1694,6 +1763,7 @@ func (c HRService) appendEmployeeEvent(ctx RequestContext, eventType, target str
 	})
 }
 
+// domainValidation 處理 domain 驗證。
 func domainValidation(message string, fields ...FieldError) error {
 	return ValidationFailed(message, fields)
 }
@@ -1799,6 +1869,7 @@ var employeeExportColumns = []employeeExportColumn{
 	{field: "manager_employee_id", header: "主管員工ID", value: func(employee Employee) string { return employee.ManagerEmployeeID }},
 }
 
+// employeeExportColumnsForPolicy 處理員工 export columns for 政策。
 func employeeExportColumnsForPolicy(policies map[string]string) []employeeExportColumn {
 	out := make([]employeeExportColumn, 0, len(employeeExportColumns))
 	for _, column := range employeeExportColumns {
@@ -1810,6 +1881,7 @@ func employeeExportColumnsForPolicy(policies map[string]string) []employeeExport
 	return out
 }
 
+// employeeFieldPolicyHidden 處理員工欄位政策 hidden。
 func employeeFieldPolicyHidden(effect string) bool {
 	return effect == "hide" || effect == "deny"
 }
@@ -1825,6 +1897,7 @@ const (
 	employeeImportColumnStatus
 	employeeImportColumnHireDate
 	employeeImportColumnManagerEmployeeID
+	employeeImportColumnAccountPolicy
 )
 
 type employeeImportColumn struct {
@@ -1842,12 +1915,15 @@ var employeeImportColumns = []employeeImportColumn{
 	{header: "狀態"},
 	{header: "到職日期"},
 	{header: "主管員工ID"},
+	{header: "帳號策略"},
 }
 
+// employeeImportColumnCount 處理員工 import column count。
 func employeeImportColumnCount() int {
 	return len(employeeImportColumns)
 }
 
+// restrictedEmployeeFieldPolicies 處理 restricted 員工欄位政策。
 func restrictedEmployeeFieldPolicies(policies map[string]string) map[string][]string {
 	out := map[string][]string{}
 	for field, effect := range policies {
@@ -1865,6 +1941,7 @@ func restrictedEmployeeFieldPolicies(policies map[string]string) map[string][]st
 	return out
 }
 
+// employeeImportInputFromRecord 處理員工 import 輸入 來源 record。
 func employeeImportInputFromRecord(record []string) map[string]string {
 	input := make(map[string]string, len(employeeImportColumns))
 	for i, column := range employeeImportColumns {
@@ -1873,6 +1950,7 @@ func employeeImportInputFromRecord(record []string) map[string]string {
 	return input
 }
 
+// employeeCreateInputFromImportRecord 處理員工 create 輸入 來源 import record。
 func employeeCreateInputFromImportRecord(record []string) CreateEmployeeInput {
 	email := strings.TrimSpace(record[employeeImportColumnEmail])
 	name := strings.TrimSpace(record[employeeImportColumnName])
@@ -1882,6 +1960,7 @@ func employeeCreateInputFromImportRecord(record []string) CreateEmployeeInput {
 	category := normalizeEmployeeCategory(record[employeeImportColumnCategory])
 	phone := strings.TrimSpace(record[employeeImportColumnPhone])
 	status := normalizeEmployeeStatus(record[employeeImportColumnStatus])
+	accountPolicy := normalizeEmployeeAccountPolicy(record[employeeImportColumnAccountPolicy])
 	return CreateEmployeeInput{
 		EmployeeNo:        strings.TrimSpace(record[employeeImportColumnEmployeeNo]),
 		Name:              name,
@@ -1893,6 +1972,7 @@ func employeeCreateInputFromImportRecord(record []string) CreateEmployeeInput {
 		Phone:             phone,
 		EmploymentStatus:  status,
 		Status:            status,
+		AccountPolicy:     accountPolicy,
 		HireDate:          normalizeImportDate(record[employeeImportColumnHireDate]),
 		BasicInfo:         map[string]any{"company_email": email, "name": name},
 		EmploymentInfo: map[string]any{
@@ -1905,6 +1985,7 @@ func employeeCreateInputFromImportRecord(record []string) CreateEmployeeInput {
 	}
 }
 
+// employeeHotValue 處理員工 hot value。
 func employeeHotValue(employee Employee, field string) string {
 	for _, source := range employeeHotFieldSources[field] {
 		value := employeeSourceValue(employee, source)
@@ -1915,6 +1996,7 @@ func employeeHotValue(employee Employee, field string) string {
 	return ""
 }
 
+// employeeSourceValue 處理員工 source value。
 func employeeSourceValue(employee Employee, source employeeFieldSource) string {
 	switch source.tab {
 	case employeeTabBasicInfo:
@@ -1934,7 +2016,7 @@ func employeeSourceValue(employee Employee, source employeeFieldSource) string {
 
 const maxEmployeeAvatarBytes = 2 << 20
 
-// PreviewCreateEmployee validates a create payload without persisting it.
+// PreviewCreateEmployee 預覽create 員工的服務流程。
 func (c HRService) PreviewCreateEmployee(ctx RequestContext, input CreateEmployeeInput) (EmployeePreviewResponse, error) {
 	_, _, authzAudit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, Action: ActionCreate},
@@ -1965,7 +2047,7 @@ func (c HRService) PreviewCreateEmployee(ctx RequestContext, input CreateEmploye
 	return resp, nil
 }
 
-// PreviewUpdateEmployee validates an update payload and returns the computed diff.
+// PreviewUpdateEmployee 預覽update 員工的服務流程。
 func (c HRService) PreviewUpdateEmployee(ctx RequestContext, id string, input UpdateEmployeeInput) (EmployeePreviewResponse, error) {
 	account, decision, authzAudit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, ResourceID: id, Action: ActionUpdate},
@@ -2008,7 +2090,7 @@ func (c HRService) PreviewUpdateEmployee(ctx RequestContext, id string, input Up
 	return resp, nil
 }
 
-// UpdateEmployeeAvatar stores an avatar object and attaches it to the employee profile.
+// UpdateEmployeeAvatar 更新員工 avatar 的服務流程。
 func (c HRService) UpdateEmployeeAvatar(ctx RequestContext, id string, input EmployeeAvatarInput) (Employee, error) {
 	contentType, err := validateEmployeeAvatarInput(input)
 	if err != nil {
@@ -2083,7 +2165,7 @@ func (c HRService) UpdateEmployeeAvatar(ctx RequestContext, id string, input Emp
 	return employee, nil
 }
 
-// DeleteEmployeeAvatar removes the avatar reference and deletes stored bytes when supported.
+// DeleteEmployeeAvatar 刪除員工 avatar 的服務流程。
 func (c HRService) DeleteEmployeeAvatar(ctx RequestContext, id string) (Employee, error) {
 	account, decision, authzAudit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, ResourceID: id, Action: ActionUpdate},
@@ -2138,7 +2220,7 @@ func (c HRService) DeleteEmployeeAvatar(ctx RequestContext, id string) (Employee
 	return employee, nil
 }
 
-// EmployeeImportTemplate returns the CSV or XLSX template used by employee imports.
+// EmployeeImportTemplate 處理員工 import 範本的服務流程。
 func (c HRService) EmployeeImportTemplate(ctx RequestContext, format string) ([]byte, string, string, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -2163,10 +2245,12 @@ func (c HRService) EmployeeImportTemplate(ctx RequestContext, format string) ([]
 	}
 }
 
+// employeePreviewResponse 處理員工 preview 回應。
 func employeePreviewResponse(employee Employee, diff map[string]any) EmployeePreviewResponse {
 	return EmployeePreviewResponse{Employee: employee, Detail: domain.EmployeeDetailFromEmployee(employee), Diff: diff, Valid: true}
 }
 
+// employeeQueryApprovalFilters 處理員工查詢核准篩選。
 func employeeQueryApprovalFilters(query EmployeeQuery) map[string]any {
 	out := map[string]any{}
 	if query.Keyword != "" {
@@ -2184,6 +2268,7 @@ func employeeQueryApprovalFilters(query EmployeeQuery) map[string]any {
 	return out
 }
 
+// employeeDiff 處理員工 diff。
 func employeeDiff(before, after Employee) map[string]any {
 	diff := map[string]any{}
 	add := func(field string, oldValue, newValue any) {
@@ -2215,6 +2300,7 @@ func employeeDiff(before, after Employee) map[string]any {
 	return diff
 }
 
+// validateEmployeeAvatarInput 驗證員工 avatar 輸入。
 func validateEmployeeAvatarInput(input EmployeeAvatarInput) (string, error) {
 	if len(input.Content) == 0 {
 		return "", BadRequest("avatar file is required")
@@ -2233,6 +2319,7 @@ func validateEmployeeAvatarInput(input EmployeeAvatarInput) (string, error) {
 	return detected, nil
 }
 
+// normalizedEmployeeAvatarContentType 處理 normalized 員工 avatar content type。
 func normalizedEmployeeAvatarContentType(value string) string {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if idx := strings.Index(value, ";"); idx >= 0 {
@@ -2241,6 +2328,7 @@ func normalizedEmployeeAvatarContentType(value string) string {
 	return value
 }
 
+// detectEmployeeAvatarContentType 處理 detect 員工 avatar content type。
 func detectEmployeeAvatarContentType(raw []byte) string {
 	switch {
 	case bytes.HasPrefix(raw, []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a}):
@@ -2254,6 +2342,7 @@ func detectEmployeeAvatarContentType(raw []byte) string {
 	}
 }
 
+// employeeAvatarDenied 處理員工 avatar 拒絕。
 func employeeAvatarDenied(policies map[string]string) bool {
 	for _, field := range []string{"basic_info", "avatar", "avatar_object_key", "avatar_content_type"} {
 		switch policies[field] {
@@ -2264,6 +2353,7 @@ func employeeAvatarDenied(policies map[string]string) bool {
 	return false
 }
 
+// employeeAvatarObjectKey 處理員工 avatar 物件 key。
 func employeeAvatarObjectKey(tenantID, employeeID, filename, contentType string) string {
 	ext := strings.ToLower(filepath.Ext(strings.TrimSpace(filename)))
 	if ext == "" {
@@ -2279,6 +2369,7 @@ func employeeAvatarObjectKey(tenantID, employeeID, filename, contentType string)
 	return "employee-avatars/" + tenantID + "/" + employeeID + "/" + utils.NewID("avatar") + ext
 }
 
+// deleteObjectIfSupported 刪除物件 if supported 的服務流程。
 func (c HRService) deleteObjectIfSupported(ctx RequestContext, key string) {
 	deleter, ok := c.objectStore.(objectDeleter)
 	if !ok {
@@ -2287,6 +2378,7 @@ func (c HRService) deleteObjectIfSupported(ctx RequestContext, key string) {
 	_ = deleter.DeleteObject(goContext(ctx), key)
 }
 
+// employeeImportTemplateCSV 處理員工 import 範本 CSV。
 func employeeImportTemplateCSV() ([]byte, error) {
 	var buf bytes.Buffer
 	buf.Write([]byte{0xEF, 0xBB, 0xBF})
@@ -2301,6 +2393,7 @@ func employeeImportTemplateCSV() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// employeeImportTemplateHeaders 處理員工 import 範本 headers。
 func employeeImportTemplateHeaders() []string {
 	headers := make([]string, 0, len(employeeImportColumns))
 	for _, column := range employeeImportColumns {
@@ -2309,6 +2402,7 @@ func employeeImportTemplateHeaders() []string {
 	return headers
 }
 
+// employeeImportTemplateXLSX 處理員工 import 範本 XLSX。
 func employeeImportTemplateXLSX() ([]byte, error) {
 	var buf bytes.Buffer
 	zipWriter := zip.NewWriter(&buf)
@@ -2335,6 +2429,7 @@ func employeeImportTemplateXLSX() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// employeeImportTemplateSheetXML 處理員工 import 範本 sheet xml。
 func employeeImportTemplateSheetXML() string {
 	var buf bytes.Buffer
 	buf.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row r="1">`)
@@ -2350,6 +2445,7 @@ func employeeImportTemplateSheetXML() string {
 	return buf.String()
 }
 
+// employeeImportTemplateSharedStringsXML 處理員工 import 範本 shared 字串 xml。
 func employeeImportTemplateSharedStringsXML() string {
 	headers := employeeImportTemplateHeaders()
 	var buf bytes.Buffer
@@ -2392,6 +2488,7 @@ const xlsxWorkbookRelsXML = `<?xml version="1.0" encoding="UTF-8" standalone="ye
 <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>
 </Relationships>`
 
+// parseEmployeeImport 解析員工 import。
 func parseEmployeeImport(filename string, raw []byte) ([]EmployeeImportRow, error) {
 	ext := strings.ToLower(filepath.Ext(filename))
 	switch ext {
@@ -2404,6 +2501,7 @@ func parseEmployeeImport(filename string, raw []byte) ([]EmployeeImportRow, erro
 	}
 }
 
+// importContentType 匯入 content type。
 func importContentType(filename string) string {
 	switch strings.ToLower(filepath.Ext(filename)) {
 	case ".xlsx":
@@ -2413,6 +2511,7 @@ func importContentType(filename string) string {
 	}
 }
 
+// parseEmployeeCSV 解析員工 CSV。
 func parseEmployeeCSV(raw []byte) ([]EmployeeImportRow, error) {
 	reader := csv.NewReader(bytes.NewReader(bytes.TrimPrefix(raw, []byte{0xEF, 0xBB, 0xBF})))
 	reader.TrimLeadingSpace = true
@@ -2423,6 +2522,7 @@ func parseEmployeeCSV(raw []byte) ([]EmployeeImportRow, error) {
 	return employeeRowsFromRecords(records)
 }
 
+// parseEmployeeXLSX 解析員工 XLSX。
 func parseEmployeeXLSX(raw []byte) ([]EmployeeImportRow, error) {
 	zr, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
 	if err != nil {
@@ -2447,6 +2547,7 @@ func parseEmployeeXLSX(raw []byte) ([]EmployeeImportRow, error) {
 	return employeeRowsFromRecords(records)
 }
 
+// employeeRowsFromRecords 處理員工列 來源 records。
 func employeeRowsFromRecords(records [][]string) ([]EmployeeImportRow, error) {
 	if len(records) < 2 {
 		return nil, fmt.Errorf("import file must include header and at least one data row")
@@ -2466,16 +2567,38 @@ func employeeRowsFromRecords(records [][]string) ([]EmployeeImportRow, error) {
 	return rows, nil
 }
 
+// validateEmployeeImportHeader 驗證員工 import header。
 func validateEmployeeImportHeader(record []string) error {
-	if len(record) < employeeImportColumnCount() {
-		return fmt.Errorf("import file header must include %d columns", employeeImportColumnCount())
+	headers := employeeImportTemplateHeaders()
+	if employeeImportHeaderMatches(record, headers) {
+		return nil
 	}
-	for i, want := range employeeImportTemplateHeaders() {
+	legacyHeaders := headers[:employeeImportColumnAccountPolicy]
+	if employeeImportHeaderMatches(record, legacyHeaders) {
+		return nil
+	}
+	if len(record) < len(headers) {
+		return fmt.Errorf("import file header must include %d columns", len(headers))
+	}
+	for i, want := range headers {
 		if got := strings.TrimSpace(record[i]); got != want {
 			return fmt.Errorf("import file header column %d must be %q", i+1, want)
 		}
 	}
 	return nil
+}
+
+// employeeImportHeaderMatches 處理員工 import header matches。
+func employeeImportHeaderMatches(record []string, headers []string) bool {
+	if len(record) < len(headers) {
+		return false
+	}
+	for i, want := range headers {
+		if strings.TrimSpace(record[i]) != want {
+			return false
+		}
+	}
+	return true
 }
 
 type xlsxSST struct {
@@ -2484,6 +2607,7 @@ type xlsxSST struct {
 	} `xml:"si"`
 }
 
+// readXLSXSharedStrings 讀取 XLSX shared 字串。
 func readXLSXSharedStrings(file *zip.File) ([]string, error) {
 	if file == nil {
 		return nil, nil
@@ -2513,6 +2637,7 @@ type xlsxWorksheet struct {
 	} `xml:"sheetData>row"`
 }
 
+// readXLSXSheet 讀取 XLSX sheet。
 func readXLSXSheet(file *zip.File, shared []string) ([][]string, error) {
 	raw, err := readLimitedXLSXFile(file, maxEmployeeImportXLSXEntryBytes)
 	if err != nil {
@@ -2547,7 +2672,7 @@ func readXLSXSheet(file *zip.File, shared []string) ([][]string, error) {
 	return records, nil
 }
 
-// readLimitedXLSXFile rejects compressed workbook members that expand beyond the import budget.
+// readLimitedXLSXFile 讀取 limited XLSX 檔案。
 func readLimitedXLSXFile(file *zip.File, maxBytes int64) ([]byte, error) {
 	if file == nil {
 		return nil, nil
@@ -2571,6 +2696,7 @@ func readLimitedXLSXFile(file *zip.File, maxBytes int64) ([]byte, error) {
 	return raw, nil
 }
 
+// xlsxColumnIndex 處理 XLSX column index。
 func xlsxColumnIndex(ref string) int {
 	col := 0
 	for _, r := range ref {
@@ -2582,6 +2708,7 @@ func xlsxColumnIndex(ref string) int {
 	return col - 1
 }
 
+// normalizeImportDate 正規化import 日期。
 func normalizeImportDate(value string) string {
 	value = strings.TrimSpace(value)
 	if strings.Count(value, "/") == 2 {
@@ -2597,6 +2724,7 @@ func normalizeImportDate(value string) string {
 	return value
 }
 
+// padRecord 處理 pad record。
 func padRecord(record []string, size int) []string {
 	if len(record) >= size {
 		return record
@@ -2618,6 +2746,7 @@ const (
 	employeeImportModeUpsert = "upsert"
 )
 
+// normalizeEmployeeImportMode 正規化員工 import mode。
 func normalizeEmployeeImportMode(mode string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(mode)) {
 	case "", employeeImportModeCreate:
@@ -2631,6 +2760,7 @@ func normalizeEmployeeImportMode(mode string) (string, error) {
 	}
 }
 
+// validateEmployeeImportFailurePolicy 驗證員工 import failure 政策。
 func validateEmployeeImportFailurePolicy(policy string) error {
 	switch strings.ToLower(strings.TrimSpace(policy)) {
 	case "", "all_or_nothing":
@@ -2640,6 +2770,7 @@ func validateEmployeeImportFailurePolicy(policy string) error {
 	}
 }
 
+// safeImportFilename 處理 safe import filename。
 func safeImportFilename(filename string) string {
 	filename = strings.TrimSpace(filename)
 	if filename == "" {
@@ -2659,15 +2790,18 @@ func safeImportFilename(filename string) string {
 	}, filename)
 }
 
+// employeeImportObjectKey 處理員工 import 物件 key。
 func employeeImportObjectKey(tenantID, sessionID, filename string) string {
 	return "employee-imports/" + tenantID + "/" + sessionID + "/" + utils.NewID("file") + "-" + safeImportFilename(filename)
 }
 
+// employeeImportSHA256 處理員工 import sha 256。
 func employeeImportSHA256(raw []byte) string {
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
 
+// employeeImportAuditDetails 處理員工 import 稽核 details。
 func employeeImportAuditDetails(session EmployeeImportSession) map[string]any {
 	details := utils.CopyStringMap(session.Summary)
 	if details == nil {
@@ -2688,7 +2822,7 @@ func employeeImportAuditDetails(session EmployeeImportSession) map[string]any {
 	return details
 }
 
-// PreviewEmployeeImport parses an import file and stores row-level validation results.
+// PreviewEmployeeImport 預覽員工 import 的服務流程。
 func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImportPreviewInput) (EmployeeImportSession, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -2810,7 +2944,7 @@ func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImpor
 	return session, nil
 }
 
-// ConfirmEmployeeImport applies a valid preview session inside a tenant transaction.
+// ConfirmEmployeeImport 確認員工 import 的服務流程。
 func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, input EmployeeImportConfirmInput) (EmployeeImportSession, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -2856,6 +2990,7 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 	confirmedCount := 0
 	createdCount := 0
 	updatedCount := 0
+	provisionQueued := false
 	var validationErr error
 	if err := c.withTransaction(ctx, func(tx HRService) error {
 		next, ok, err := tx.store.GetEmployeeImportSession(goContext(ctx), ctx.TenantID, sessionID)
@@ -2948,6 +3083,14 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 		}
 		for _, item := range employees {
 			employee := item.employee
+			accountPolicy := string(EmployeeAccountPolicyNone)
+			if !item.update {
+				var err error
+				accountPolicy, _, err = tx.applyEmployeeCreateAccountPolicy(ctx, &employee, item.row.Employee)
+				if err != nil {
+					return err
+				}
+			}
 			if err := tx.store.UpsertEmployee(goContext(ctx), employee); err != nil {
 				return err
 			}
@@ -2957,6 +3100,13 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 			}
 			if err := tx.linkEmployeeAccount(ctx, employee); err != nil {
 				return err
+			}
+			if employee.AccountID != "" && accountPolicy != string(EmployeeAccountPolicyNone) {
+				sendInvite := accountPolicy == string(EmployeeAccountPolicyCreatePendingInvite)
+				if err := tx.provisionEmployeeIdentityFromAccountID(ctx, employee, employee.AccountID, sendInvite); err != nil {
+					return err
+				}
+				provisionQueued = true
 			}
 			eventType := string(EventEmployeeCreated)
 			action := "created"
@@ -3010,6 +3160,9 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 	if validationErr != nil {
 		return session, validationErr
 	}
+	if provisionQueued {
+		c.runIdentityProvisioningFastPath(ctx)
+	}
 	c.logInfo(ctx, "employee import confirmed",
 		"session_id", session.ID,
 		"total_rows", len(session.Rows),
@@ -3020,7 +3173,7 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 	return session, nil
 }
 
-// employeeImportScopeErrors enforces the active data-scope decision before import writes persist rows.
+// employeeImportScopeErrors 處理員工 import 範圍錯誤的服務流程。
 func (c HRService) employeeImportScopeErrors(ctx RequestContext, account Account, rowNumber int, employee Employee, previous Employee, update bool, decision CheckResult) ([]RowError, error) {
 	targets := []Employee{employee}
 	if update {
@@ -3047,6 +3200,7 @@ type employeeImportBatchIndex struct {
 	accountIDs    map[string]int
 }
 
+// newEmployeeImportBatchIndex 建立員工 import 批次 index。
 func newEmployeeImportBatchIndex() *employeeImportBatchIndex {
 	return &employeeImportBatchIndex{
 		employeeNos:   map[string]int{},
@@ -3055,6 +3209,7 @@ func newEmployeeImportBatchIndex() *employeeImportBatchIndex {
 	}
 }
 
+// terminalEmployeeImportStatus 處理 terminal 員工 import 狀態。
 func terminalEmployeeImportStatus(status string) bool {
 	switch strings.TrimSpace(status) {
 	case "confirmed", "partially_confirmed", "failed", "failed_validation":
@@ -3064,6 +3219,7 @@ func terminalEmployeeImportStatus(status string) bool {
 	}
 }
 
+// prepareEmployeeImportWrite 處理 prepare 員工 import write 的服務流程。
 func (c HRService) prepareEmployeeImportWrite(ctx RequestContext, row EmployeeImportRow, batch *employeeImportBatchIndex, mode string, reservedEmployeeNos map[string]struct{}) (Employee, Employee, bool, []RowError, error) {
 	batchErrors := employeeImportBatchErrors(row, batch)
 	if mode == employeeImportModeUpdate {
@@ -3089,6 +3245,7 @@ func (c HRService) prepareEmployeeImportWrite(ctx RequestContext, row EmployeeIm
 	return employee, Employee{}, false, batchErrors, nil
 }
 
+// prepareEmployeeImportUpdate 處理 prepare 員工 import update 的服務流程。
 func (c HRService) prepareEmployeeImportUpdate(ctx RequestContext, row EmployeeImportRow, batchErrors []RowError) (Employee, Employee, bool, []RowError, error) {
 	existing, ok, err := c.employeeImportExistingByEmployeeNo(ctx, row.Employee)
 	if err != nil {
@@ -3105,6 +3262,7 @@ func (c HRService) prepareEmployeeImportUpdate(ctx RequestContext, row EmployeeI
 	return c.prepareEmployeeImportUpdateWithExisting(ctx, row, existing, batchErrors)
 }
 
+// prepareEmployeeImportUpdateWithExisting 處理 prepare 員工 import update with existing 的服務流程。
 func (c HRService) prepareEmployeeImportUpdateWithExisting(ctx RequestContext, row EmployeeImportRow, existing Employee, batchErrors []RowError) (Employee, Employee, bool, []RowError, error) {
 	candidate, err := c.employeeCreateCandidate(ctx, row.Employee)
 	if err != nil {
@@ -3125,6 +3283,7 @@ func (c HRService) prepareEmployeeImportUpdateWithExisting(ctx RequestContext, r
 	return next, existing, true, batchErrors, nil
 }
 
+// employeeImportExistingByEmployeeNo 處理員工 import existing by 員工 no 的服務流程。
 func (c HRService) employeeImportExistingByEmployeeNo(ctx RequestContext, input CreateEmployeeInput) (Employee, bool, error) {
 	employeeNo := strings.TrimSpace(input.EmployeeNo)
 	if employeeNo == "" {
@@ -3133,6 +3292,7 @@ func (c HRService) employeeImportExistingByEmployeeNo(ctx RequestContext, input 
 	return c.store.GetEmployeeByEmployeeNo(goContext(ctx), ctx.TenantID, employeeNo)
 }
 
+// employeeImportUpdateEmployee 處理員工 import update 員工。
 func employeeImportUpdateEmployee(existing Employee, candidate Employee, input CreateEmployeeInput) Employee {
 	next := existing
 	if strings.TrimSpace(input.EmployeeNo) != "" {
@@ -3182,6 +3342,7 @@ func employeeImportUpdateEmployee(existing Employee, candidate Employee, input C
 	return next
 }
 
+// mergeEmployeeImportMap 合併員工 import map。
 func mergeEmployeeImportMap(existing map[string]any, updates map[string]any) map[string]any {
 	out := utils.CopyStringMap(existing)
 	if out == nil {
@@ -3196,6 +3357,7 @@ func mergeEmployeeImportMap(existing map[string]any, updates map[string]any) map
 	return out
 }
 
+// validateEmployeeImportRow 驗證員工 import 列的服務流程。
 func (c HRService) validateEmployeeImportRow(ctx RequestContext, row EmployeeImportRow, batch *employeeImportBatchIndex) ([]RowError, error) {
 	employee, err := c.employeeCreateCandidate(ctx, row.Employee)
 	if err != nil {
@@ -3210,10 +3372,21 @@ func (c HRService) validateEmployeeImportRow(ctx RequestContext, row EmployeeImp
 	if err != nil && !ok {
 		return nil, err
 	}
+	errors = append(errors, employeeImportAccountPolicyErrors(row)...)
 	errors = append(errors, employeeImportBatchErrors(row, batch)...)
 	return errors, nil
 }
 
+// employeeImportAccountPolicyErrors 處理員工 import 帳號政策錯誤。
+func employeeImportAccountPolicyErrors(row EmployeeImportRow) []RowError {
+	policy := strings.TrimSpace(row.Employee.AccountPolicy)
+	if policy == "" || validEmployeeAccountPolicy(policy) {
+		return nil
+	}
+	return []RowError{{Row: row.RowNumber, Field: "account_policy", Code: "invalid", Message: "account_policy must be one of none, link_existing, create_pending_invite, create_active"}}
+}
+
+// employeeImportBatchErrors 處理員工 import 批次錯誤。
 func employeeImportBatchErrors(row EmployeeImportRow, batch *employeeImportBatchIndex) []RowError {
 	if batch == nil {
 		return nil
@@ -3243,6 +3416,7 @@ func employeeImportBatchErrors(row EmployeeImportRow, batch *employeeImportBatch
 	return errors
 }
 
+// employeeImportErrorsFromError 處理員工 import 錯誤 來源 錯誤。
 func employeeImportErrorsFromError(row int, err error) ([]RowError, bool) {
 	if err == nil {
 		return nil, true
@@ -3264,6 +3438,7 @@ func employeeImportErrorsFromError(row int, err error) ([]RowError, bool) {
 	return []RowError{{Row: row, Code: appErr.Code, Message: appErr.Message}}, true
 }
 
+// firstRowErrorMessage 取得第一個列錯誤 message。
 func firstRowErrorMessage(errors []RowError) string {
 	if len(errors) == 0 {
 		return "employee import row failed"
@@ -3273,7 +3448,7 @@ func firstRowErrorMessage(errors []RowError) string {
 
 const maxEmployeeExportRows = 5000
 
-// ExportEmployeesCSV renders authorized employee results as a CSV download.
+// ExportEmployeesCSV 匯出員工 CSV 的服務流程。
 func (c HRService) ExportEmployeesCSV(ctx RequestContext, query EmployeeQuery) ([]byte, string, error) {
 	query = normalizeEmployeeQuery(query)
 	items, decision, err := c.exportEmployees(ctx, query)
@@ -3306,7 +3481,7 @@ func (c HRService) ExportEmployeesCSV(ctx RequestContext, query EmployeeQuery) (
 	return buf.Bytes(), "employees.csv", nil
 }
 
-// neutralizeSpreadsheetCell prevents spreadsheet clients from treating exported text as formulas.
+// neutralizeSpreadsheetCell 處理 neutralize spreadsheet 儲存格。
 func neutralizeSpreadsheetCell(value string) string {
 	trimmed := strings.TrimLeft(value, " \t\r\n")
 	if trimmed == "" {
@@ -3320,6 +3495,7 @@ func neutralizeSpreadsheetCell(value string) string {
 	}
 }
 
+// rejectOversizedEmployeeExport 駁回 oversized 員工 export 的服務流程。
 func (c HRService) rejectOversizedEmployeeExport(ctx RequestContext, query EmployeeQuery) error {
 	total, err := c.store.CountEmployeesByQuery(goContext(ctx), ctx.TenantID, query)
 	if err != nil {
@@ -3331,11 +3507,12 @@ func (c HRService) rejectOversizedEmployeeExport(ctx RequestContext, query Emplo
 	return nil
 }
 
+// employeeExportLimitError 處理員工 export 限制錯誤。
 func employeeExportLimitError() error {
 	return Conflict(fmt.Sprintf("employee export exceeds synchronous limit of %d rows; use async export job", maxEmployeeExportRows))
 }
 
-// BatchDeleteEmployees soft-deletes multiple employees and returns per-row results.
+// BatchDeleteEmployees 處理批次 delete 員工的服務流程。
 func (c HRService) BatchDeleteEmployees(ctx RequestContext, input BatchDeleteEmployeesInput) (BatchEmployeeResponse, error) {
 	reason := strings.TrimSpace(input.Reason)
 	if reason == "" {
@@ -3421,6 +3598,7 @@ func (c HRService) BatchDeleteEmployees(ctx RequestContext, input BatchDeleteEmp
 	return BatchEmployeeResponse{Results: results}, nil
 }
 
+// batchEmployeeAuditResult 處理批次員工稽核結果。
 func batchEmployeeAuditResult(succeeded, total int) string {
 	switch {
 	case total <= 0 || succeeded == 0:
@@ -3432,6 +3610,7 @@ func batchEmployeeAuditResult(succeeded, total int) string {
 	}
 }
 
+// deleteEmployeeWithDecision 刪除員工 with 決策的服務流程。
 func (c HRService) deleteEmployeeWithDecision(ctx RequestContext, account Account, decision CheckResult, id string) (Employee, bool, error) {
 	var employee Employee
 	accountDisabled := false
@@ -3492,6 +3671,7 @@ func (c HRService) deleteEmployeeWithDecision(ctx RequestContext, account Accoun
 	return employee, accountDisabled, nil
 }
 
+// batchEmployeeResultIDs 處理批次員工結果 IDs。
 func batchEmployeeResultIDs(results []BatchEmployeeResult, success bool) []string {
 	ids := make([]string, 0)
 	for _, result := range results {
@@ -3502,7 +3682,7 @@ func batchEmployeeResultIDs(results []BatchEmployeeResult, success bool) []strin
 	return ids
 }
 
-// InviteEmployee links or prepares an account invitation for an employee.
+// InviteEmployee 邀請員工的服務流程。
 func (c HRService) InviteEmployee(ctx RequestContext, id string, input InviteEmployeeInput) (Employee, error) {
 	account, decision, audit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, ResourceID: id, Action: ActionInvite},
@@ -3579,6 +3759,9 @@ func (c HRService) InviteEmployee(ctx RequestContext, id string, input InviteEmp
 		if err := tx.touchEmployeeAuthzIfNeeded(ctx, before, next, string(EventEmployeeAuthzSubjectInvite)); err != nil {
 			return err
 		}
+		if err := tx.provisionEmployeeAccountIdentity(ctx, next, inviteAccount, true); err != nil {
+			return err
+		}
 		if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeInvited), next.ID, map[string]any{"employee_id": next.ID, "account_id": inviteAccount.ID}); err != nil {
 			return err
 		}
@@ -3594,6 +3777,7 @@ func (c HRService) InviteEmployee(ctx RequestContext, id string, input InviteEmp
 	}); err != nil {
 		return Employee{}, err
 	}
+	c.runIdentityProvisioningFastPath(ctx)
 	c.logInfo(ctx, "employee invitation created",
 		"employee_id", employee.ID,
 		"employee_no", employee.EmployeeNo,
@@ -3603,7 +3787,7 @@ func (c HRService) InviteEmployee(ctx RequestContext, id string, input InviteEmp
 	return employee, nil
 }
 
-// TransitionEmployeeStatus records an employee lifecycle transition with audit context.
+// TransitionEmployeeStatus 轉換員工狀態的服務流程。
 func (c HRService) TransitionEmployeeStatus(ctx RequestContext, id string, input StatusTransitionInput) (Employee, error) {
 	status := normalizeEmployeeStatus(input.Status)
 	if status == "" {
@@ -3786,6 +3970,7 @@ func (c HRService) TransitionEmployeeStatus(ctx RequestContext, id string, input
 	return employee, nil
 }
 
+// errorCode 處理錯誤碼。
 func errorCode(err error) string {
 	if appErr, ok := AsAppError(err); ok {
 		return appErr.Code
@@ -3793,10 +3978,12 @@ func errorCode(err error) string {
 	return "error"
 }
 
+// ensureEmployeeStatusTransition 確保員工狀態轉換。
 func ensureEmployeeStatusTransition(current, next string) error {
 	return ensureEmployeeStatusTransitionWithOptions(current, next, false)
 }
 
+// ensureEmployeeStatusTransitionWithOptions 確保員工狀態轉換 with 選項。
 func ensureEmployeeStatusTransitionWithOptions(current, next string, allowReinstatement bool) error {
 	current = normalizeEmployeeStatus(current)
 	next = normalizeEmployeeStatus(next)
@@ -3813,6 +4000,7 @@ func ensureEmployeeStatusTransitionWithOptions(current, next string, allowReinst
 	return nil
 }
 
+// isEmployeeReinstatement 判斷是否為員工 reinstatement。
 func isEmployeeReinstatement(current, next string) bool {
 	current = normalizeEmployeeStatus(current)
 	next = normalizeEmployeeStatus(next)
@@ -3827,6 +4015,7 @@ func isEmployeeReinstatement(current, next string) bool {
 	}
 }
 
+// employeeTransitionType 處理員工轉換 type。
 func employeeTransitionType(current, next string) string {
 	current = normalizeEmployeeStatus(current)
 	next = normalizeEmployeeStatus(next)
@@ -3842,6 +4031,7 @@ func employeeTransitionType(current, next string) string {
 	}
 }
 
+// employeeStatusTransitionAuditAction 處理員工狀態轉換稽核 action。
 func employeeStatusTransitionAuditAction(current, next string) string {
 	switch employeeTransitionType(current, next) {
 	case "reinstatement":
@@ -3861,6 +4051,7 @@ const (
 	relationshipSubjectType = "account"
 )
 
+// syncEmployeeRelationshipTuples 同步員工關係 tuple 的服務流程。
 func (c HRService) syncEmployeeRelationshipTuples(ctx RequestContext, before, after Employee) error {
 	changes, err := c.employeeRelationshipTupleChanges(ctx, before, after)
 	if err != nil {
@@ -3874,6 +4065,7 @@ func (c HRService) syncEmployeeRelationshipTuples(ctx RequestContext, before, af
 	return nil
 }
 
+// employeeRelationshipTupleChanges 處理員工關係 tuple changes 的服務流程。
 func (c HRService) employeeRelationshipTupleChanges(ctx RequestContext, before, after Employee) ([]domain.AuthzRelationshipTupleChange, error) {
 	now := c.Now()
 	objectType := routeResourceName(AppHR, ResourceEmployee)
@@ -3928,6 +4120,7 @@ func (c HRService) employeeRelationshipTupleChanges(ctx RequestContext, before, 
 	return dedupeRelationshipTupleChanges(changes), nil
 }
 
+// employeeAccountID 處理員工帳號 ID 的服務流程。
 func (c HRService) employeeAccountID(ctx RequestContext, employeeID string) (string, error) {
 	employeeID = strings.TrimSpace(employeeID)
 	if employeeID == "" {
@@ -3940,6 +4133,7 @@ func (c HRService) employeeAccountID(ctx RequestContext, employeeID string) (str
 	return strings.TrimSpace(employee.AccountID), nil
 }
 
+// applyAuthzRelationshipTupleChange 處理 apply 授權關係 tuple change 的服務流程。
 func (c HRService) applyAuthzRelationshipTupleChange(ctx RequestContext, change domain.AuthzRelationshipTupleChange) error {
 	tuple := normalizeAuthzRelationshipTuple(ctx, change.Tuple, c.Now())
 	if tuple.ObjectType == "" || tuple.ObjectID == "" || tuple.Relation == "" || tuple.SubjectType == "" || tuple.SubjectID == "" {
@@ -3968,6 +4162,7 @@ func (c HRService) applyAuthzRelationshipTupleChange(ctx RequestContext, change 
 	})
 }
 
+// normalizeAuthzRelationshipTuple 正規化授權關係 tuple。
 func normalizeAuthzRelationshipTuple(ctx RequestContext, tuple domain.AuthzRelationshipTuple, now time.Time) domain.AuthzRelationshipTuple {
 	tuple.TenantID = utils.FirstNonEmpty(strings.TrimSpace(tuple.TenantID), ctx.TenantID)
 	tuple.ObjectType = strings.TrimSpace(tuple.ObjectType)
@@ -3984,6 +4179,7 @@ func normalizeAuthzRelationshipTuple(ctx RequestContext, tuple domain.AuthzRelat
 	return tuple
 }
 
+// relationshipOutboxEventType 處理關係 outbox 事件 type。
 func relationshipOutboxEventType(operation domain.AuthzRelationshipTupleOperation) string {
 	switch operation {
 	case domain.AuthzRelationshipTupleDelete:
@@ -3993,6 +4189,7 @@ func relationshipOutboxEventType(operation domain.AuthzRelationshipTupleOperatio
 	}
 }
 
+// relationshipTuplePayload 處理關係 tuple payload。
 func relationshipTuplePayload(operation domain.AuthzRelationshipTupleOperation, tuple domain.AuthzRelationshipTuple) map[string]any {
 	return map[string]any{
 		"operation":    string(operation),
@@ -4004,6 +4201,7 @@ func relationshipTuplePayload(operation domain.AuthzRelationshipTupleOperation, 
 	}
 }
 
+// dedupeRelationshipTupleChanges 處理 dedupe 關係 tuple changes。
 func dedupeRelationshipTupleChanges(changes []domain.AuthzRelationshipTupleChange) []domain.AuthzRelationshipTupleChange {
 	out := make([]domain.AuthzRelationshipTupleChange, 0, len(changes))
 	seen := map[string]struct{}{}

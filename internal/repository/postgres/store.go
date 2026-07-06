@@ -21,7 +21,7 @@ import (
 	"nexus-pro-be/internal/utils/tenantctx"
 )
 
-// Store implements repository.Store using PostgreSQL and generated sqlc queries.
+// Store 定義儲存層的資料結構。
 type Store struct {
 	pool *pgxpool.Pool
 	q    *sqlc.Queries
@@ -30,17 +30,18 @@ type Store struct {
 
 var _ repository.Store = (*Store)(nil)
 
-// NewStore creates a PostgreSQL repository with tenant-scoped query execution.
+// NewStore 建立儲存層。
 func NewStore(pool *pgxpool.Pool) *Store {
 	db := newTenantDBTX(pool)
 	return &Store{pool: pool, q: sqlc.New(db), db: db}
 }
 
+// tenantContext 處理租戶 context。
 func tenantContext(ctx context.Context, tenantID string) context.Context {
 	return tenantctx.WithTenantID(ctx, tenantID)
 }
 
-// WithTenantTransaction runs fn inside a PostgreSQL transaction with tenant context set.
+// WithTenantTransaction 從儲存層附加租戶 transaction。
 func (s *Store) WithTenantTransaction(execCtx context.Context, tenantID string, fn func(repository.Store) error) error {
 	if s.pool == nil {
 		return fn(s)
@@ -57,7 +58,7 @@ func (s *Store) WithTenantTransaction(execCtx context.Context, tenantID string, 
 			_ = tx.Rollback(execCtx)
 			panic(p)
 		}
-		// Rollback after commit is harmless in pgx and protects every early return path.
+		// pgx 中 commit 後 rollback 無害，可保護每個提前返回路徑。
 		_ = tx.Rollback(execCtx)
 	}()
 	if _, err := tx.Exec(execCtx, "SELECT set_config('app.tenant_id', $1, true)", tenantID); err != nil {
@@ -75,8 +76,10 @@ func (s *Store) WithTenantTransaction(execCtx context.Context, tenantID string, 
 	return tx.Commit(execCtx)
 }
 
+// UpsertTenant 從儲存層處理 upsert 租戶。
 func (s *Store) UpsertTenant(execCtx context.Context, v domain.Tenant) error {
-	_, err := s.q.UpsertTenant(execCtx, sqlc.UpsertTenantParams{
+	// tenants RLS policy 以自身 id 隔離資料列，因此寫入需套用相同 scope。
+	_, err := s.q.UpsertTenant(tenantContext(execCtx, v.ID), sqlc.UpsertTenantParams{
 		ID:        v.ID,
 		Name:      v.Name,
 		CreatedAt: timestamptz(v.CreatedAt),
@@ -84,8 +87,9 @@ func (s *Store) UpsertTenant(execCtx context.Context, v domain.Tenant) error {
 	return err
 }
 
+// GetTenant 從儲存層取得租戶。
 func (s *Store) GetTenant(execCtx context.Context, id string) (domain.Tenant, bool, error) {
-	v, err := s.q.GetTenant(execCtx, id)
+	v, err := s.q.GetTenant(tenantContext(execCtx, id), id)
 	if isNotFound(err) {
 		return domain.Tenant{}, false, nil
 	}
@@ -95,14 +99,18 @@ func (s *Store) GetTenant(execCtx context.Context, id string) (domain.Tenant, bo
 	return fromTenant(v), true, nil
 }
 
+// ListTenants 從儲存層列出租戶。
 func (s *Store) ListTenants(execCtx context.Context) ([]domain.Tenant, error) {
-	items, err := s.q.ListTenants(execCtx)
+	// 列出所有 tenant 屬於跨 tenant 系統操作；system_task 設定會滿足唯讀 RLS policy。
+	// 此設定會滿足 system_read_tenants 的唯讀 RLS policy。
+	items, err := s.q.ListTenants(tenantctx.WithSystemTask(execCtx))
 	if err != nil {
 		return nil, err
 	}
 	return mapSlice(items, fromTenant), nil
 }
 
+// UpsertAccount 從儲存層處理 upsert 帳號。
 func (s *Store) UpsertAccount(execCtx context.Context, v domain.Account) error {
 	_, err := s.q.UpsertAccount(execCtx, sqlc.UpsertAccountParams{
 		ID:                     v.ID,
@@ -119,6 +127,7 @@ func (s *Store) UpsertAccount(execCtx context.Context, v domain.Account) error {
 	return err
 }
 
+// GetAccount 從儲存層取得帳號。
 func (s *Store) GetAccount(execCtx context.Context, tenantID, id string) (domain.Account, bool, error) {
 	v, err := s.q.GetAccount(execCtx, sqlc.GetAccountParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -130,6 +139,7 @@ func (s *Store) GetAccount(execCtx context.Context, tenantID, id string) (domain
 	return fromAccount(v), true, nil
 }
 
+// ListAccounts 從儲存層列出帳號。
 func (s *Store) ListAccounts(execCtx context.Context, tenantID string) ([]domain.Account, error) {
 	items, err := s.q.ListAccounts(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -138,6 +148,7 @@ func (s *Store) ListAccounts(execCtx context.Context, tenantID string) ([]domain
 	return mapSlice(items, fromAccount), nil
 }
 
+// UpsertUserIdentity 從儲存層處理 upsert 使用者身分。
 func (s *Store) UpsertUserIdentity(execCtx context.Context, v domain.UserIdentity) error {
 	_, err := s.q.UpsertUserIdentity(tenantContext(execCtx, v.TenantID), sqlc.UpsertUserIdentityParams{
 		ID:        v.ID,
@@ -151,6 +162,7 @@ func (s *Store) UpsertUserIdentity(execCtx context.Context, v domain.UserIdentit
 	return err
 }
 
+// GetUserIdentity 從儲存層取得使用者身分。
 func (s *Store) GetUserIdentity(execCtx context.Context, tenantID, provider, subject string) (domain.UserIdentity, bool, error) {
 	v, err := s.q.GetUserIdentity(tenantContext(execCtx, tenantID), sqlc.GetUserIdentityParams{
 		TenantID: tenantID,
@@ -166,6 +178,7 @@ func (s *Store) GetUserIdentity(execCtx context.Context, tenantID, provider, sub
 	return fromUserIdentity(v), true, nil
 }
 
+// ListUserIdentities 從儲存層列出使用者身分。
 func (s *Store) ListUserIdentities(execCtx context.Context, tenantID, accountID string) ([]domain.UserIdentity, error) {
 	items, err := s.q.ListUserIdentities(tenantContext(execCtx, tenantID), sqlc.ListUserIdentitiesParams{TenantID: tenantID, AccountID: accountID})
 	if err != nil {
@@ -174,6 +187,50 @@ func (s *Store) ListUserIdentities(execCtx context.Context, tenantID, accountID 
 	return mapSlice(items, fromUserIdentity), nil
 }
 
+// AppendIdentityProvisioningOutboxEvent 從儲存層附加身分開通 outbox 事件。
+func (s *Store) AppendIdentityProvisioningOutboxEvent(execCtx context.Context, v domain.IdentityProvisioningOutboxEvent) error {
+	_, err := s.q.AppendIdentityProvisioningOutboxEvent(tenantContext(execCtx, v.TenantID), sqlc.AppendIdentityProvisioningOutboxEventParams{
+		ID:          v.ID,
+		TenantID:    v.TenantID,
+		AccountID:   v.AccountID,
+		EmployeeID:  v.EmployeeID,
+		EmployeeNo:  v.EmployeeNo,
+		Email:       v.Email,
+		DisplayName: v.DisplayName,
+		Enabled:     v.Enabled,
+		SendInvite:  v.SendInvite,
+		Status:      v.Status,
+		RetryCount:  int32(v.RetryCount),
+		LastError:   v.LastError,
+		CreatedAt:   timestamptz(v.CreatedAt),
+		UpdatedAt:   timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+// ListPendingIdentityProvisioningOutboxEvents 從儲存層列出 pending 身分開通 outbox 事件。
+func (s *Store) ListPendingIdentityProvisioningOutboxEvents(execCtx context.Context, tenantID string) ([]domain.IdentityProvisioningOutboxEvent, error) {
+	items, err := s.q.ListPendingIdentityProvisioningOutboxEvents(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromIdentityProvisioningOutboxEvent), nil
+}
+
+// UpdateIdentityProvisioningOutboxEvent 從儲存層更新身分開通 outbox 事件。
+func (s *Store) UpdateIdentityProvisioningOutboxEvent(execCtx context.Context, v domain.IdentityProvisioningOutboxEvent) error {
+	_, err := s.q.UpdateIdentityProvisioningOutboxEvent(tenantContext(execCtx, v.TenantID), sqlc.UpdateIdentityProvisioningOutboxEventParams{
+		TenantID:   v.TenantID,
+		ID:         v.ID,
+		Status:     v.Status,
+		RetryCount: int32(v.RetryCount),
+		LastError:  v.LastError,
+		UpdatedAt:  timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+// RemoveAccountGroup 從儲存層移除帳號群組。
 func (s *Store) RemoveAccountGroup(execCtx context.Context, tenantID, accountID, groupID string) error {
 	account, ok, err := s.GetAccount(execCtx, tenantID, accountID)
 	if err != nil {
@@ -186,6 +243,7 @@ func (s *Store) RemoveAccountGroup(execCtx context.Context, tenantID, accountID,
 	return s.UpsertAccount(execCtx, account)
 }
 
+// AddAccountGroup 從儲存層處理 add 帳號群組。
 func (s *Store) AddAccountGroup(execCtx context.Context, tenantID, accountID, groupID string) error {
 	account, ok, err := s.GetAccount(execCtx, tenantID, accountID)
 	if err != nil {
@@ -201,6 +259,7 @@ func (s *Store) AddAccountGroup(execCtx context.Context, tenantID, accountID, gr
 	return s.UpsertAccount(execCtx, account)
 }
 
+// UpsertUserGroup 從儲存層處理 upsert 使用者群組。
 func (s *Store) UpsertUserGroup(execCtx context.Context, v domain.UserGroup) error {
 	_, err := s.q.UpsertUserGroup(execCtx, sqlc.UpsertUserGroupParams{
 		ID:               v.ID,
@@ -214,6 +273,7 @@ func (s *Store) UpsertUserGroup(execCtx context.Context, v domain.UserGroup) err
 	return err
 }
 
+// GetUserGroup 從儲存層取得使用者群組。
 func (s *Store) GetUserGroup(execCtx context.Context, tenantID, id string) (domain.UserGroup, bool, error) {
 	v, err := s.q.GetUserGroup(execCtx, sqlc.GetUserGroupParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -225,6 +285,7 @@ func (s *Store) GetUserGroup(execCtx context.Context, tenantID, id string) (doma
 	return fromUserGroup(v), true, nil
 }
 
+// ListUserGroups 從儲存層列出使用者群組。
 func (s *Store) ListUserGroups(execCtx context.Context, tenantID string) ([]domain.UserGroup, error) {
 	items, err := s.q.ListUserGroups(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -233,6 +294,7 @@ func (s *Store) ListUserGroups(execCtx context.Context, tenantID string) ([]doma
 	return mapSlice(items, fromUserGroup), nil
 }
 
+// UpsertPermissionSet 從儲存層處理 upsert 權限集合。
 func (s *Store) UpsertPermissionSet(execCtx context.Context, v domain.PermissionSet) error {
 	_, err := s.q.UpsertPermissionSet(execCtx, sqlc.UpsertPermissionSetParams{
 		ID:          v.ID,
@@ -245,6 +307,7 @@ func (s *Store) UpsertPermissionSet(execCtx context.Context, v domain.Permission
 	return err
 }
 
+// GetPermissionSet 從儲存層取得權限集合。
 func (s *Store) GetPermissionSet(execCtx context.Context, tenantID, id string) (domain.PermissionSet, bool, error) {
 	v, err := s.q.GetPermissionSet(execCtx, sqlc.GetPermissionSetParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -256,6 +319,7 @@ func (s *Store) GetPermissionSet(execCtx context.Context, tenantID, id string) (
 	return fromPermissionSet(v), true, nil
 }
 
+// ListPermissionSets 從儲存層列出權限集合。
 func (s *Store) ListPermissionSets(execCtx context.Context, tenantID string) ([]domain.PermissionSet, error) {
 	items, err := s.q.ListPermissionSets(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -264,6 +328,7 @@ func (s *Store) ListPermissionSets(execCtx context.Context, tenantID string) ([]
 	return mapSlice(items, fromPermissionSet), nil
 }
 
+// UpsertPermissionSetAssignment 從儲存層處理 upsert 權限集合指派。
 func (s *Store) UpsertPermissionSetAssignment(execCtx context.Context, v domain.PermissionSetAssignment) error {
 	_, err := s.q.UpsertAuthzPermissionSetAssignment(execCtx, sqlc.UpsertAuthzPermissionSetAssignmentParams{
 		ID:              v.ID,
@@ -281,6 +346,7 @@ func (s *Store) UpsertPermissionSetAssignment(execCtx context.Context, v domain.
 	return err
 }
 
+// ListPermissionSetAssignments 從儲存層列出權限集合指派。
 func (s *Store) ListPermissionSetAssignments(execCtx context.Context, tenantID string) ([]domain.PermissionSetAssignment, error) {
 	items, err := s.q.ListAuthzPermissionSetAssignments(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -289,6 +355,7 @@ func (s *Store) ListPermissionSetAssignments(execCtx context.Context, tenantID s
 	return mapSlice(items, fromPermissionSetAssignment), nil
 }
 
+// ListPermissionSetAssignmentsForPrincipal 從儲存層列出權限集合指派 for principal。
 func (s *Store) ListPermissionSetAssignmentsForPrincipal(execCtx context.Context, tenantID, principalType, principalID string) ([]domain.PermissionSetAssignment, error) {
 	items, err := s.q.ListAuthzPermissionSetAssignmentsForPrincipal(execCtx, sqlc.ListAuthzPermissionSetAssignmentsForPrincipalParams{
 		TenantID:      tenantID,
@@ -301,6 +368,7 @@ func (s *Store) ListPermissionSetAssignmentsForPrincipal(execCtx context.Context
 	return mapSlice(items, fromPermissionSetAssignment), nil
 }
 
+// UpsertDataScope 從儲存層處理 upsert 資料範圍。
 func (s *Store) UpsertDataScope(execCtx context.Context, v domain.DataScope) error {
 	_, err := s.q.UpsertAuthzDataScope(execCtx, sqlc.UpsertAuthzDataScopeParams{
 		ID:        v.ID,
@@ -314,6 +382,7 @@ func (s *Store) UpsertDataScope(execCtx context.Context, v domain.DataScope) err
 	return err
 }
 
+// GetDataScope 從儲存層取得資料範圍。
 func (s *Store) GetDataScope(execCtx context.Context, tenantID, id string) (domain.DataScope, bool, error) {
 	v, err := s.q.GetAuthzDataScope(execCtx, sqlc.GetAuthzDataScopeParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -325,6 +394,7 @@ func (s *Store) GetDataScope(execCtx context.Context, tenantID, id string) (doma
 	return fromDataScope(v), true, nil
 }
 
+// GetDataScopeByCode 從儲存層取得資料範圍 by 碼。
 func (s *Store) GetDataScopeByCode(execCtx context.Context, tenantID, code string) (domain.DataScope, bool, error) {
 	v, err := s.q.GetAuthzDataScopeByCode(execCtx, sqlc.GetAuthzDataScopeByCodeParams{TenantID: tenantID, Code: code})
 	if isNotFound(err) {
@@ -336,6 +406,7 @@ func (s *Store) GetDataScopeByCode(execCtx context.Context, tenantID, code strin
 	return fromDataScope(v), true, nil
 }
 
+// ListDataScopes 從儲存層列出資料範圍。
 func (s *Store) ListDataScopes(execCtx context.Context, tenantID string) ([]domain.DataScope, error) {
 	items, err := s.q.ListAuthzDataScopes(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -344,6 +415,7 @@ func (s *Store) ListDataScopes(execCtx context.Context, tenantID string) ([]doma
 	return mapSlice(items, fromDataScope), nil
 }
 
+// UpsertFieldPolicy 從儲存層處理 upsert 欄位政策。
 func (s *Store) UpsertFieldPolicy(execCtx context.Context, v domain.FieldPolicy) error {
 	_, err := s.q.UpsertAuthzFieldPolicy(execCtx, sqlc.UpsertAuthzFieldPolicyParams{
 		ID:              v.ID,
@@ -359,6 +431,7 @@ func (s *Store) UpsertFieldPolicy(execCtx context.Context, v domain.FieldPolicy)
 	return err
 }
 
+// ListFieldPolicies 從儲存層列出欄位政策。
 func (s *Store) ListFieldPolicies(execCtx context.Context, tenantID, applicationCode, resourceType string) ([]domain.FieldPolicy, error) {
 	items, err := s.q.ListAuthzFieldPolicies(execCtx, sqlc.ListAuthzFieldPoliciesParams{
 		TenantID:        tenantID,
@@ -371,6 +444,7 @@ func (s *Store) ListFieldPolicies(execCtx context.Context, tenantID, application
 	return mapSlice(items, fromFieldPolicy), nil
 }
 
+// UpsertAssumableRole 從儲存層處理 upsert assumable 角色。
 func (s *Store) UpsertAssumableRole(execCtx context.Context, v domain.AssumableRole) error {
 	duration := v.SessionDurationSeconds
 	if duration <= 0 {
@@ -391,6 +465,7 @@ func (s *Store) UpsertAssumableRole(execCtx context.Context, v domain.AssumableR
 	return err
 }
 
+// GetAssumableRole 從儲存層取得 assumable 角色。
 func (s *Store) GetAssumableRole(execCtx context.Context, tenantID, id string) (domain.AssumableRole, bool, error) {
 	v, err := s.q.GetAssumableRole(execCtx, sqlc.GetAssumableRoleParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -402,6 +477,7 @@ func (s *Store) GetAssumableRole(execCtx context.Context, tenantID, id string) (
 	return fromAssumableRole(v), true, nil
 }
 
+// ListAssumableRoles 從儲存層列出 assumable 角色。
 func (s *Store) ListAssumableRoles(execCtx context.Context, tenantID string) ([]domain.AssumableRole, error) {
 	items, err := s.q.ListAssumableRoles(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -410,6 +486,7 @@ func (s *Store) ListAssumableRoles(execCtx context.Context, tenantID string) ([]
 	return mapSlice(items, fromAssumableRole), nil
 }
 
+// UpsertAssumableRoleSession 從儲存層處理 upsert assumable 角色 session。
 func (s *Store) UpsertAssumableRoleSession(execCtx context.Context, v domain.AssumableRoleSession) error {
 	_, err := s.q.CreateAuthzAssumableRoleSession(execCtx, sqlc.CreateAuthzAssumableRoleSessionParams{
 		ID:              v.ID,
@@ -424,6 +501,7 @@ func (s *Store) UpsertAssumableRoleSession(execCtx context.Context, v domain.Ass
 	return err
 }
 
+// GetActiveAssumableRoleSession 從儲存層取得啟用中 assumable 角色 session。
 func (s *Store) GetActiveAssumableRoleSession(execCtx context.Context, tenantID, id string) (domain.AssumableRoleSession, bool, error) {
 	v, err := s.q.GetActiveAuthzAssumableRoleSession(execCtx, sqlc.GetActiveAuthzAssumableRoleSessionParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -435,6 +513,7 @@ func (s *Store) GetActiveAssumableRoleSession(execCtx context.Context, tenantID,
 	return fromAssumableRoleSession(v), true, nil
 }
 
+// UpsertOrgUnit 從儲存層處理 upsert 組織單位。
 func (s *Store) UpsertOrgUnit(execCtx context.Context, v domain.OrgUnit) error {
 	_, err := s.q.UpsertOrgUnit(execCtx, sqlc.UpsertOrgUnitParams{
 		ID:        v.ID,
@@ -448,6 +527,7 @@ func (s *Store) UpsertOrgUnit(execCtx context.Context, v domain.OrgUnit) error {
 	return err
 }
 
+// GetOrgUnit 從儲存層取得組織單位。
 func (s *Store) GetOrgUnit(execCtx context.Context, tenantID, id string) (domain.OrgUnit, bool, error) {
 	v, err := s.q.GetOrgUnit(execCtx, sqlc.GetOrgUnitParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -459,6 +539,7 @@ func (s *Store) GetOrgUnit(execCtx context.Context, tenantID, id string) (domain
 	return fromOrgUnit(v), true, nil
 }
 
+// ListOrgUnits 從儲存層列出組織單位。
 func (s *Store) ListOrgUnits(execCtx context.Context, tenantID string) ([]domain.OrgUnit, error) {
 	items, err := s.q.ListOrgUnits(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -467,6 +548,7 @@ func (s *Store) ListOrgUnits(execCtx context.Context, tenantID string) ([]domain
 	return mapSlice(items, fromOrgUnit), nil
 }
 
+// UpsertEmployee 從儲存層處理 upsert 員工。
 func (s *Store) UpsertEmployee(execCtx context.Context, v domain.Employee) error {
 	_, err := s.q.UpsertEmployee(execCtx, sqlc.UpsertEmployeeParams{
 		ID:                    v.ID,
@@ -497,6 +579,7 @@ func (s *Store) UpsertEmployee(execCtx context.Context, v domain.Employee) error
 	return err
 }
 
+// GetEmployee 從儲存層取得員工。
 func (s *Store) GetEmployee(execCtx context.Context, tenantID, id string) (domain.Employee, bool, error) {
 	v, err := s.q.GetEmployee(execCtx, sqlc.GetEmployeeParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -508,6 +591,7 @@ func (s *Store) GetEmployee(execCtx context.Context, tenantID, id string) (domai
 	return fromEmployee(v), true, nil
 }
 
+// GetEmployeeByEmployeeNo 從儲存層取得員工 by 員工 no。
 func (s *Store) GetEmployeeByEmployeeNo(execCtx context.Context, tenantID, employeeNo string) (domain.Employee, bool, error) {
 	v, err := s.q.GetEmployeeByEmployeeNo(execCtx, sqlc.GetEmployeeByEmployeeNoParams{TenantID: tenantID, EmployeeNo: employeeNo})
 	if isNotFound(err) {
@@ -519,6 +603,7 @@ func (s *Store) GetEmployeeByEmployeeNo(execCtx context.Context, tenantID, emplo
 	return fromEmployee(v), true, nil
 }
 
+// GetEmployeeByCompanyEmail 從儲存層取得員工 by 公司 email。
 func (s *Store) GetEmployeeByCompanyEmail(execCtx context.Context, tenantID, companyEmail string) (domain.Employee, bool, error) {
 	v, err := s.q.GetEmployeeByCompanyEmail(execCtx, sqlc.GetEmployeeByCompanyEmailParams{TenantID: tenantID, CompanyEmail: companyEmail})
 	if isNotFound(err) {
@@ -530,6 +615,7 @@ func (s *Store) GetEmployeeByCompanyEmail(execCtx context.Context, tenantID, com
 	return fromEmployee(v), true, nil
 }
 
+// GetEmployeeByPersonalEmail 從儲存層取得員工 by personal email。
 func (s *Store) GetEmployeeByPersonalEmail(execCtx context.Context, tenantID, personalEmail string) (domain.Employee, bool, error) {
 	v, err := s.q.GetEmployeeByPersonalEmail(execCtx, sqlc.GetEmployeeByPersonalEmailParams{TenantID: tenantID, PersonalEmail: personalEmail})
 	if isNotFound(err) {
@@ -541,6 +627,7 @@ func (s *Store) GetEmployeeByPersonalEmail(execCtx context.Context, tenantID, pe
 	return fromEmployee(v), true, nil
 }
 
+// GetEmployeeByAccountID 從儲存層取得員工 by 帳號 ID。
 func (s *Store) GetEmployeeByAccountID(execCtx context.Context, tenantID, accountID string) (domain.Employee, bool, error) {
 	v, err := s.q.GetEmployeeByAccountID(execCtx, sqlc.GetEmployeeByAccountIDParams{TenantID: tenantID, AccountID: accountID})
 	if isNotFound(err) {
@@ -552,6 +639,7 @@ func (s *Store) GetEmployeeByAccountID(execCtx context.Context, tenantID, accoun
 	return fromEmployee(v), true, nil
 }
 
+// GetEmployeeByBasicInfoField 從儲存層取得員工 by 基本 info 欄位。
 func (s *Store) GetEmployeeByBasicInfoField(execCtx context.Context, tenantID, fieldName, fieldValue string) (domain.Employee, bool, error) {
 	v, err := s.q.GetEmployeeByBasicInfoField(execCtx, sqlc.GetEmployeeByBasicInfoFieldParams{TenantID: tenantID, FieldName: fieldName, FieldValue: fieldValue})
 	if isNotFound(err) {
@@ -563,6 +651,7 @@ func (s *Store) GetEmployeeByBasicInfoField(execCtx context.Context, tenantID, f
 	return fromEmployee(v), true, nil
 }
 
+// ListEmployees 從儲存層列出員工。
 func (s *Store) ListEmployees(execCtx context.Context, tenantID string) ([]domain.Employee, error) {
 	items, err := s.q.ListEmployees(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -571,6 +660,7 @@ func (s *Store) ListEmployees(execCtx context.Context, tenantID string) ([]domai
 	return mapSlice(items, fromEmployee), nil
 }
 
+// ListEmployeesByQuery 從儲存層列出員工 by 查詢。
 func (s *Store) ListEmployeesByQuery(execCtx context.Context, tenantID string, query domain.EmployeeQuery) ([]domain.Employee, error) {
 	items, err := s.q.ListEmployeesFiltered(execCtx, sqlc.ListEmployeesFilteredParams{
 		TenantID:         tenantID,
@@ -586,6 +676,7 @@ func (s *Store) ListEmployeesByQuery(execCtx context.Context, tenantID string, q
 	return filterPostgresEmployeesByScope(mapSlice(items, fromEmployee), query.Scope), nil
 }
 
+// ListEmployeePageByQuery 從儲存層列出員工分頁 by 查詢。
 func (s *Store) ListEmployeePageByQuery(execCtx context.Context, tenantID string, query domain.EmployeeQuery) ([]domain.Employee, int, error) {
 	if employeeQueryHasScope(query) {
 		items, err := s.ListEmployeesByQuery(execCtx, tenantID, query)
@@ -630,6 +721,7 @@ func (s *Store) ListEmployeePageByQuery(execCtx context.Context, tenantID string
 	return mapSlice(items, fromEmployee), int(total), nil
 }
 
+// CountEmployeesByQuery 從儲存層處理 count 員工 by 查詢。
 func (s *Store) CountEmployeesByQuery(execCtx context.Context, tenantID string, query domain.EmployeeQuery) (int, error) {
 	if employeeQueryHasScope(query) {
 		items, err := s.ListEmployeesByQuery(execCtx, tenantID, query)
@@ -651,10 +743,12 @@ func (s *Store) CountEmployeesByQuery(execCtx context.Context, tenantID string, 
 	return int(total), nil
 }
 
+// employeeQueryHasScope 處理員工查詢 has 範圍。
 func employeeQueryHasScope(query domain.EmployeeQuery) bool {
 	return query.Scope.DenyAll || len(query.Scope.EmployeeIDs) > 0 || len(query.Scope.OrgUnitIDs) > 0 || len(query.Scope.Statuses) > 0
 }
 
+// filterPostgresEmployeesByScope 處理篩選 Postgres 員工 by 範圍。
 func filterPostgresEmployeesByScope(items []domain.Employee, scope domain.EmployeeScopeConstraint) []domain.Employee {
 	if scope.DenyAll {
 		return []domain.Employee{}
@@ -688,6 +782,7 @@ func filterPostgresEmployeesByScope(items []domain.Employee, scope domain.Employ
 	return out
 }
 
+// postgresStringSet 處理 Postgres 字串集合。
 func postgresStringSet(values []string) map[string]struct{} {
 	if len(values) == 0 {
 		return nil
@@ -702,6 +797,7 @@ func postgresStringSet(values []string) map[string]struct{} {
 	return out
 }
 
+// normalizePostgresEmployeePage 正規化Postgres 員工分頁。
 func normalizePostgresEmployeePage(query domain.EmployeeQuery) (int, int) {
 	page := query.Page
 	if page <= 0 {
@@ -714,6 +810,7 @@ func normalizePostgresEmployeePage(query domain.EmployeeQuery) (int, int) {
 	return page, pageSize
 }
 
+// paginatePostgresEmployees 處理 paginate Postgres 員工。
 func paginatePostgresEmployees(items []domain.Employee, page, pageSize int) []domain.Employee {
 	start := (page - 1) * pageSize
 	if start >= len(items) {
@@ -728,6 +825,7 @@ func paginatePostgresEmployees(items []domain.Employee, page, pageSize int) []do
 	return out
 }
 
+// NextEmployeeNo 從儲存層處理 next 員工 no。
 func (s *Store) NextEmployeeNo(execCtx context.Context, tenantID, prefix string) (string, error) {
 	nextSeq, err := s.q.NextEmployeeNoSequence(execCtx, sqlc.NextEmployeeNoSequenceParams{
 		TenantID:    tenantID,
@@ -740,6 +838,7 @@ func (s *Store) NextEmployeeNo(execCtx context.Context, tenantID, prefix string)
 	return fmt.Sprintf("%s%03d", prefix, nextSeq), nil
 }
 
+// UpsertEmployeeImportSession 從儲存層處理 upsert 員工 import session。
 func (s *Store) UpsertEmployeeImportSession(execCtx context.Context, v domain.EmployeeImportSession) error {
 	_, err := s.q.UpsertEmployeeImportSession(execCtx, sqlc.UpsertEmployeeImportSessionParams{
 		ID:                   v.ID,
@@ -763,6 +862,7 @@ func (s *Store) UpsertEmployeeImportSession(execCtx context.Context, v domain.Em
 	return err
 }
 
+// GetEmployeeImportSession 從儲存層取得員工 import session。
 func (s *Store) GetEmployeeImportSession(execCtx context.Context, tenantID, id string) (domain.EmployeeImportSession, bool, error) {
 	v, err := s.q.GetEmployeeImportSession(execCtx, sqlc.GetEmployeeImportSessionParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -774,6 +874,7 @@ func (s *Store) GetEmployeeImportSession(execCtx context.Context, tenantID, id s
 	return fromEmployeeImportSession(v), true, nil
 }
 
+// UpsertAttendancePolicy 從儲存層處理 upsert 考勤政策。
 func (s *Store) UpsertAttendancePolicy(execCtx context.Context, v domain.AttendancePolicy) error {
 	_, err := s.q.UpsertAttendancePolicy(execCtx, sqlc.UpsertAttendancePolicyParams{
 		ID:                 v.ID,
@@ -787,6 +888,7 @@ func (s *Store) UpsertAttendancePolicy(execCtx context.Context, v domain.Attenda
 	return err
 }
 
+// GetAttendancePolicy 從儲存層取得考勤政策。
 func (s *Store) GetAttendancePolicy(execCtx context.Context, tenantID string) (domain.AttendancePolicy, bool, error) {
 	v, err := s.q.GetAttendancePolicy(tenantContext(execCtx, tenantID), tenantID)
 	if isNotFound(err) {
@@ -798,6 +900,7 @@ func (s *Store) GetAttendancePolicy(execCtx context.Context, tenantID string) (d
 	return fromAttendancePolicy(v), true, nil
 }
 
+// UpsertLeaveBalance 從儲存層處理 upsert 請假 balance。
 func (s *Store) UpsertLeaveBalance(execCtx context.Context, v domain.LeaveBalance) error {
 	_, err := s.q.UpsertLeaveBalance(execCtx, sqlc.UpsertLeaveBalanceParams{
 		ID:             v.ID,
@@ -810,6 +913,7 @@ func (s *Store) UpsertLeaveBalance(execCtx context.Context, v domain.LeaveBalanc
 	return err
 }
 
+// GetLeaveBalance 從儲存層取得請假 balance。
 func (s *Store) GetLeaveBalance(execCtx context.Context, tenantID, id string) (domain.LeaveBalance, bool, error) {
 	v, err := s.q.GetLeaveBalance(execCtx, sqlc.GetLeaveBalanceParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -821,6 +925,7 @@ func (s *Store) GetLeaveBalance(execCtx context.Context, tenantID, id string) (d
 	return fromLeaveBalance(v), true, nil
 }
 
+// ListLeaveBalances 從儲存層列出請假 balances。
 func (s *Store) ListLeaveBalances(execCtx context.Context, tenantID string) ([]domain.LeaveBalance, error) {
 	items, err := s.q.ListLeaveBalances(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -829,6 +934,7 @@ func (s *Store) ListLeaveBalances(execCtx context.Context, tenantID string) ([]d
 	return mapSlice(items, fromLeaveBalance), nil
 }
 
+// ReserveLeaveBalance 從儲存層保留請假 balance。
 func (s *Store) ReserveLeaveBalance(execCtx context.Context, tenantID, employeeID, leaveType string, hours float64, updatedAt time.Time) (domain.LeaveBalance, bool, bool, error) {
 	leaveType = strings.TrimSpace(leaveType)
 	v, err := s.q.ReserveLeaveBalance(tenantContext(execCtx, tenantID), sqlc.ReserveLeaveBalanceParams{
@@ -856,6 +962,7 @@ func (s *Store) ReserveLeaveBalance(execCtx context.Context, tenantID, employeeI
 	return domain.LeaveBalance{}, false, false, nil
 }
 
+// ReleaseLeaveBalance 從儲存層釋放請假 balance。
 func (s *Store) ReleaseLeaveBalance(execCtx context.Context, tenantID, employeeID, leaveType string, hours float64, updatedAt time.Time) (domain.LeaveBalance, bool, error) {
 	leaveType = strings.TrimSpace(leaveType)
 	v, err := s.q.ReleaseLeaveBalance(tenantContext(execCtx, tenantID), sqlc.ReleaseLeaveBalanceParams{
@@ -874,6 +981,7 @@ func (s *Store) ReleaseLeaveBalance(execCtx context.Context, tenantID, employeeI
 	return fromLeaveBalance(v), true, nil
 }
 
+// UpsertLeaveRequest 從儲存層處理 upsert 請假請求。
 func (s *Store) UpsertLeaveRequest(execCtx context.Context, v domain.LeaveRequest) error {
 	_, err := s.q.UpsertLeaveRequest(tenantContext(execCtx, v.TenantID), sqlc.UpsertLeaveRequestParams{
 		ID:             v.ID,
@@ -891,6 +999,7 @@ func (s *Store) UpsertLeaveRequest(execCtx context.Context, v domain.LeaveReques
 	return err
 }
 
+// GetLeaveRequest 從儲存層取得請假請求。
 func (s *Store) GetLeaveRequest(execCtx context.Context, tenantID, id string) (domain.LeaveRequest, bool, error) {
 	v, err := s.q.GetLeaveRequest(tenantContext(execCtx, tenantID), sqlc.GetLeaveRequestParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -902,6 +1011,7 @@ func (s *Store) GetLeaveRequest(execCtx context.Context, tenantID, id string) (d
 	return fromLeaveRequest(v), true, nil
 }
 
+// GetLeaveRequestByFormInstanceID 從儲存層取得請假請求 by 表單實例 ID。
 func (s *Store) GetLeaveRequestByFormInstanceID(execCtx context.Context, tenantID, formInstanceID string) (domain.LeaveRequest, bool, error) {
 	v, err := s.q.GetLeaveRequestByFormInstanceID(tenantContext(execCtx, tenantID), sqlc.GetLeaveRequestByFormInstanceIDParams{TenantID: tenantID, FormInstanceID: formInstanceID})
 	if isNotFound(err) {
@@ -913,6 +1023,7 @@ func (s *Store) GetLeaveRequestByFormInstanceID(execCtx context.Context, tenantI
 	return fromLeaveRequest(v), true, nil
 }
 
+// ListLeaveRequests 從儲存層列出請假請求。
 func (s *Store) ListLeaveRequests(execCtx context.Context, tenantID string) ([]domain.LeaveRequest, error) {
 	items, err := s.q.ListLeaveRequests(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -921,6 +1032,7 @@ func (s *Store) ListLeaveRequests(execCtx context.Context, tenantID string) ([]d
 	return mapSlice(items, fromLeaveRequest), nil
 }
 
+// ListLeaveRequestsByQuery 從儲存層列出請假請求 by 查詢。
 func (s *Store) ListLeaveRequestsByQuery(execCtx context.Context, tenantID string, query domain.LeaveRequestQuery) ([]domain.LeaveRequest, error) {
 	params := leaveRequestQueryParams(tenantID, query)
 	items, err := s.q.ListLeaveRequestsByQuery(tenantContext(execCtx, tenantID), sqlc.ListLeaveRequestsByQueryParams{
@@ -936,6 +1048,7 @@ func (s *Store) ListLeaveRequestsByQuery(execCtx context.Context, tenantID strin
 	return mapSlice(items, fromLeaveRequest), nil
 }
 
+// ListLeaveRequestPageByQuery 從儲存層列出請假請求分頁 by 查詢。
 func (s *Store) ListLeaveRequestPageByQuery(execCtx context.Context, tenantID string, query domain.LeaveRequestQuery, page domain.PageRequest) ([]domain.LeaveRequest, int, error) {
 	page = utils.NormalizePageRequest(page)
 	countParams := leaveRequestQueryParams(tenantID, query)
@@ -960,6 +1073,7 @@ func (s *Store) ListLeaveRequestPageByQuery(execCtx context.Context, tenantID st
 	return mapSlice(items, fromLeaveRequest), int(total), nil
 }
 
+// UpsertAttendanceWorksite 從儲存層處理 upsert 考勤工作地點。
 func (s *Store) UpsertAttendanceWorksite(execCtx context.Context, v domain.AttendanceWorksite) error {
 	_, err := s.q.UpsertAttendanceWorksite(execCtx, sqlc.UpsertAttendanceWorksiteParams{
 		ID:           v.ID,
@@ -976,6 +1090,7 @@ func (s *Store) UpsertAttendanceWorksite(execCtx context.Context, v domain.Atten
 	return err
 }
 
+// GetAttendanceWorksite 從儲存層取得考勤工作地點。
 func (s *Store) GetAttendanceWorksite(execCtx context.Context, tenantID, id string) (domain.AttendanceWorksite, bool, error) {
 	v, err := s.q.GetAttendanceWorksite(execCtx, sqlc.GetAttendanceWorksiteParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -987,6 +1102,7 @@ func (s *Store) GetAttendanceWorksite(execCtx context.Context, tenantID, id stri
 	return fromAttendanceWorksite(v), true, nil
 }
 
+// ListAttendanceWorksites 從儲存層列出考勤 worksites。
 func (s *Store) ListAttendanceWorksites(execCtx context.Context, tenantID string) ([]domain.AttendanceWorksite, error) {
 	items, err := s.q.ListAttendanceWorksites(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -995,6 +1111,7 @@ func (s *Store) ListAttendanceWorksites(execCtx context.Context, tenantID string
 	return mapSlice(items, fromAttendanceWorksite), nil
 }
 
+// UpsertAttendanceShift 從儲存層處理 upsert 考勤班別。
 func (s *Store) UpsertAttendanceShift(execCtx context.Context, v domain.AttendanceShift) error {
 	_, err := s.q.UpsertAttendanceShift(execCtx, sqlc.UpsertAttendanceShiftParams{
 		ID:                     v.ID,
@@ -1013,6 +1130,7 @@ func (s *Store) UpsertAttendanceShift(execCtx context.Context, v domain.Attendan
 	return err
 }
 
+// GetAttendanceShift 從儲存層取得考勤班別。
 func (s *Store) GetAttendanceShift(execCtx context.Context, tenantID, id string) (domain.AttendanceShift, bool, error) {
 	v, err := s.q.GetAttendanceShift(execCtx, sqlc.GetAttendanceShiftParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -1024,6 +1142,7 @@ func (s *Store) GetAttendanceShift(execCtx context.Context, tenantID, id string)
 	return fromAttendanceShift(v), true, nil
 }
 
+// ListAttendanceShifts 從儲存層列出考勤 shifts。
 func (s *Store) ListAttendanceShifts(execCtx context.Context, tenantID string) ([]domain.AttendanceShift, error) {
 	items, err := s.q.ListAttendanceShifts(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -1032,6 +1151,7 @@ func (s *Store) ListAttendanceShifts(execCtx context.Context, tenantID string) (
 	return mapSlice(items, fromAttendanceShift), nil
 }
 
+// UpsertAttendanceShiftAssignment 從儲存層處理 upsert 考勤班別指派。
 func (s *Store) UpsertAttendanceShiftAssignment(execCtx context.Context, v domain.AttendanceShiftAssignment) error {
 	_, err := s.q.UpsertAttendanceShiftAssignment(execCtx, sqlc.UpsertAttendanceShiftAssignmentParams{
 		ID:            v.ID,
@@ -1048,6 +1168,7 @@ func (s *Store) UpsertAttendanceShiftAssignment(execCtx context.Context, v domai
 	return err
 }
 
+// GetAttendanceShiftAssignment 從儲存層取得考勤班別指派。
 func (s *Store) GetAttendanceShiftAssignment(execCtx context.Context, tenantID, id string) (domain.AttendanceShiftAssignment, bool, error) {
 	v, err := s.q.GetAttendanceShiftAssignment(execCtx, sqlc.GetAttendanceShiftAssignmentParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -1059,6 +1180,7 @@ func (s *Store) GetAttendanceShiftAssignment(execCtx context.Context, tenantID, 
 	return fromAttendanceShiftAssignment(v), true, nil
 }
 
+// ListAttendanceShiftAssignments 從儲存層列出考勤班別指派。
 func (s *Store) ListAttendanceShiftAssignments(execCtx context.Context, tenantID string) ([]domain.AttendanceShiftAssignment, error) {
 	items, err := s.q.ListAttendanceShiftAssignments(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -1067,6 +1189,7 @@ func (s *Store) ListAttendanceShiftAssignments(execCtx context.Context, tenantID
 	return mapSlice(items, fromAttendanceShiftAssignment), nil
 }
 
+// FindEffectiveAttendanceShiftAssignment 從儲存層處理 find effective 考勤班別指派。
 func (s *Store) FindEffectiveAttendanceShiftAssignment(execCtx context.Context, tenantID, employeeID string, at time.Time) (domain.AttendanceShiftAssignment, bool, error) {
 	v, err := s.q.FindEffectiveAttendanceShiftAssignment(execCtx, sqlc.FindEffectiveAttendanceShiftAssignmentParams{
 		TenantID:      tenantID,
@@ -1082,7 +1205,7 @@ func (s *Store) FindEffectiveAttendanceShiftAssignment(execCtx context.Context, 
 	return fromAttendanceShiftAssignment(v), true, nil
 }
 
-// UpsertAttendanceClockRecord stores a clock attempt and maps accepted duplicates to domain conflicts.
+// UpsertAttendanceClockRecord 從儲存層處理 upsert 考勤打卡 record。
 func (s *Store) UpsertAttendanceClockRecord(execCtx context.Context, v domain.AttendanceClockRecord) error {
 	_, err := s.q.UpsertAttendanceClockRecord(execCtx, sqlc.UpsertAttendanceClockRecordParams{
 		ID:                  v.ID,
@@ -1112,6 +1235,7 @@ func (s *Store) UpsertAttendanceClockRecord(execCtx context.Context, v domain.At
 	return err
 }
 
+// GetAttendanceClockRecord 從儲存層取得考勤打卡 record。
 func (s *Store) GetAttendanceClockRecord(execCtx context.Context, tenantID, id string) (domain.AttendanceClockRecord, bool, error) {
 	v, err := s.q.GetAttendanceClockRecord(execCtx, sqlc.GetAttendanceClockRecordParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -1123,6 +1247,7 @@ func (s *Store) GetAttendanceClockRecord(execCtx context.Context, tenantID, id s
 	return fromAttendanceClockRecord(v), true, nil
 }
 
+// GetAcceptedAttendanceClockRecord 從儲存層取得 accepted 考勤打卡 record。
 func (s *Store) GetAcceptedAttendanceClockRecord(execCtx context.Context, tenantID, employeeID, workDate, direction string) (domain.AttendanceClockRecord, bool, error) {
 	v, err := s.q.GetAcceptedAttendanceClockRecord(execCtx, sqlc.GetAcceptedAttendanceClockRecordParams{
 		TenantID:   tenantID,
@@ -1139,6 +1264,7 @@ func (s *Store) GetAcceptedAttendanceClockRecord(execCtx context.Context, tenant
 	return fromAttendanceClockRecord(v), true, nil
 }
 
+// ListAttendanceClockRecords 從儲存層列出考勤打卡 records。
 func (s *Store) ListAttendanceClockRecords(execCtx context.Context, tenantID string, query domain.AttendanceClockRecordQuery) ([]domain.AttendanceClockRecord, error) {
 	items, err := s.q.ListAttendanceClockRecords(tenantContext(execCtx, tenantID), sqlc.ListAttendanceClockRecordsParams{
 		TenantID:     tenantID,
@@ -1155,6 +1281,7 @@ func (s *Store) ListAttendanceClockRecords(execCtx context.Context, tenantID str
 	return mapSlice(items, fromAttendanceClockRecord), nil
 }
 
+// UpsertAttendanceCorrectionRequest 從儲存層處理 upsert 考勤 correction 請求。
 func (s *Store) UpsertAttendanceCorrectionRequest(execCtx context.Context, v domain.AttendanceCorrectionRequest) error {
 	_, err := s.q.UpsertAttendanceCorrectionRequest(execCtx, sqlc.UpsertAttendanceCorrectionRequestParams{
 		ID:                  v.ID,
@@ -1176,6 +1303,7 @@ func (s *Store) UpsertAttendanceCorrectionRequest(execCtx context.Context, v dom
 	return err
 }
 
+// GetAttendanceCorrectionRequest 從儲存層取得考勤 correction 請求。
 func (s *Store) GetAttendanceCorrectionRequest(execCtx context.Context, tenantID, id string) (domain.AttendanceCorrectionRequest, bool, error) {
 	v, err := s.q.GetAttendanceCorrectionRequest(execCtx, sqlc.GetAttendanceCorrectionRequestParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -1187,6 +1315,7 @@ func (s *Store) GetAttendanceCorrectionRequest(execCtx context.Context, tenantID
 	return fromAttendanceCorrectionRequest(v), true, nil
 }
 
+// ListAttendanceCorrectionRequests 從儲存層列出考勤 correction 請求。
 func (s *Store) ListAttendanceCorrectionRequests(execCtx context.Context, tenantID string, query domain.AttendanceCorrectionQuery) ([]domain.AttendanceCorrectionRequest, error) {
 	items, err := s.q.ListAttendanceCorrectionRequests(tenantContext(execCtx, tenantID), sqlc.ListAttendanceCorrectionRequestsParams{
 		TenantID:   tenantID,
@@ -1202,6 +1331,7 @@ func (s *Store) ListAttendanceCorrectionRequests(execCtx context.Context, tenant
 	return mapSlice(items, fromAttendanceCorrectionRequest), nil
 }
 
+// UpsertFormTemplate 從儲存層處理 upsert 表單範本。
 func (s *Store) UpsertFormTemplate(execCtx context.Context, v domain.FormTemplate) error {
 	_, err := s.q.UpsertFormTemplate(execCtx, sqlc.UpsertFormTemplateParams{
 		ID:          v.ID,
@@ -1215,6 +1345,7 @@ func (s *Store) UpsertFormTemplate(execCtx context.Context, v domain.FormTemplat
 	return err
 }
 
+// GetFormTemplate 從儲存層取得表單範本。
 func (s *Store) GetFormTemplate(execCtx context.Context, tenantID, id string) (domain.FormTemplate, bool, error) {
 	v, err := s.q.GetFormTemplate(execCtx, sqlc.GetFormTemplateParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -1226,6 +1357,7 @@ func (s *Store) GetFormTemplate(execCtx context.Context, tenantID, id string) (d
 	return fromFormTemplate(v), true, nil
 }
 
+// GetFormTemplateByKey 從儲存層取得表單範本 by key。
 func (s *Store) GetFormTemplateByKey(execCtx context.Context, tenantID, key string) (domain.FormTemplate, bool, error) {
 	v, err := s.q.GetFormTemplateByKey(execCtx, sqlc.GetFormTemplateByKeyParams{TenantID: tenantID, Key: key})
 	if isNotFound(err) {
@@ -1237,6 +1369,7 @@ func (s *Store) GetFormTemplateByKey(execCtx context.Context, tenantID, key stri
 	return fromFormTemplate(v), true, nil
 }
 
+// ListFormTemplates 從儲存層列出表單範本。
 func (s *Store) ListFormTemplates(execCtx context.Context, tenantID string) ([]domain.FormTemplate, error) {
 	items, err := s.q.ListFormTemplates(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -1245,6 +1378,7 @@ func (s *Store) ListFormTemplates(execCtx context.Context, tenantID string) ([]d
 	return mapSlice(items, fromFormTemplate), nil
 }
 
+// UpsertFormInstance 從儲存層處理 upsert 表單實例。
 func (s *Store) UpsertFormInstance(execCtx context.Context, v domain.FormInstance) error {
 	_, err := s.q.UpsertFormInstance(tenantContext(execCtx, v.TenantID), sqlc.UpsertFormInstanceParams{
 		ID:                 v.ID,
@@ -1260,6 +1394,7 @@ func (s *Store) UpsertFormInstance(execCtx context.Context, v domain.FormInstanc
 	return err
 }
 
+// GetFormInstance 從儲存層取得表單實例。
 func (s *Store) GetFormInstance(execCtx context.Context, tenantID, id string) (domain.FormInstance, bool, error) {
 	v, err := s.q.GetFormInstance(tenantContext(execCtx, tenantID), sqlc.GetFormInstanceParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -1271,6 +1406,7 @@ func (s *Store) GetFormInstance(execCtx context.Context, tenantID, id string) (d
 	return fromFormInstance(v), true, nil
 }
 
+// ListFormInstances 從儲存層列出表單實例。
 func (s *Store) ListFormInstances(execCtx context.Context, tenantID string) ([]domain.FormInstance, error) {
 	items, err := s.q.ListFormInstances(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -1279,6 +1415,7 @@ func (s *Store) ListFormInstances(execCtx context.Context, tenantID string) ([]d
 	return mapSlice(items, fromFormInstance), nil
 }
 
+// ListFormInstancesByQuery 從儲存層列出表單實例 by 查詢。
 func (s *Store) ListFormInstancesByQuery(execCtx context.Context, tenantID string, query domain.FormInstanceQuery) ([]domain.FormInstance, error) {
 	params := formInstanceQueryParams(tenantID, query)
 	items, err := s.q.ListFormInstancesByQuery(tenantContext(execCtx, tenantID), sqlc.ListFormInstancesByQueryParams{
@@ -1294,6 +1431,7 @@ func (s *Store) ListFormInstancesByQuery(execCtx context.Context, tenantID strin
 	return mapSlice(items, fromFormInstance), nil
 }
 
+// ListFormInstancePageByQuery 從儲存層列出表單實例分頁 by 查詢。
 func (s *Store) ListFormInstancePageByQuery(execCtx context.Context, tenantID string, query domain.FormInstanceQuery, page domain.PageRequest) ([]domain.FormInstance, int, error) {
 	page = utils.NormalizePageRequest(page)
 	countParams := formInstanceQueryParams(tenantID, query)
@@ -1318,11 +1456,12 @@ func (s *Store) ListFormInstancePageByQuery(execCtx context.Context, tenantID st
 	return mapSlice(items, fromFormInstance), int(total), nil
 }
 
-// DeleteFormInstance removes a workflow form instance scoped by tenant.
+// DeleteFormInstance 從儲存層刪除表單實例。
 func (s *Store) DeleteFormInstance(execCtx context.Context, tenantID, id string) error {
 	return s.q.DeleteFormInstance(tenantContext(execCtx, tenantID), sqlc.DeleteFormInstanceParams{TenantID: tenantID, ID: id})
 }
 
+// UpsertKnowledgeArticle 從儲存層處理 upsert 知識文章。
 func (s *Store) UpsertKnowledgeArticle(execCtx context.Context, v domain.KnowledgeArticle) error {
 	_, err := s.q.UpsertKnowledgeArticle(execCtx, sqlc.UpsertKnowledgeArticleParams{
 		ID:        v.ID,
@@ -1335,6 +1474,7 @@ func (s *Store) UpsertKnowledgeArticle(execCtx context.Context, v domain.Knowled
 	return err
 }
 
+// ListKnowledgeArticles 從儲存層列出知識文章。
 func (s *Store) ListKnowledgeArticles(execCtx context.Context, tenantID string) ([]domain.KnowledgeArticle, error) {
 	items, err := s.q.ListKnowledgeArticles(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -1343,6 +1483,7 @@ func (s *Store) ListKnowledgeArticles(execCtx context.Context, tenantID string) 
 	return mapSlice(items, fromKnowledgeArticle), nil
 }
 
+// UpsertPlatformTaskItem 從儲存層處理 upsert 平台任務項目。
 func (s *Store) UpsertPlatformTaskItem(execCtx context.Context, v domain.PlatformTaskRecordItem) error {
 	_, err := s.q.UpsertPlatformTaskItem(tenantContext(execCtx, v.TenantID), sqlc.UpsertPlatformTaskItemParams{
 		ID:        v.ID,
@@ -1360,6 +1501,7 @@ func (s *Store) UpsertPlatformTaskItem(execCtx context.Context, v domain.Platfor
 	return err
 }
 
+// GetPlatformTaskItem 從儲存層取得平台任務項目。
 func (s *Store) GetPlatformTaskItem(execCtx context.Context, tenantID, accountID, id string) (domain.PlatformTaskRecordItem, bool, error) {
 	v, err := s.q.GetPlatformTaskItem(tenantContext(execCtx, tenantID), sqlc.GetPlatformTaskItemParams{TenantID: tenantID, AccountID: accountID, ID: id})
 	if isNotFound(err) {
@@ -1371,6 +1513,7 @@ func (s *Store) GetPlatformTaskItem(execCtx context.Context, tenantID, accountID
 	return fromPlatformTaskItem(v), true, nil
 }
 
+// ListPlatformTaskItems 從儲存層列出平台任務項目。
 func (s *Store) ListPlatformTaskItems(execCtx context.Context, tenantID, accountID string) ([]domain.PlatformTaskRecordItem, error) {
 	items, err := s.q.ListPlatformTaskItems(tenantContext(execCtx, tenantID), sqlc.ListPlatformTaskItemsParams{TenantID: tenantID, AccountID: accountID})
 	if err != nil {
@@ -1379,10 +1522,12 @@ func (s *Store) ListPlatformTaskItems(execCtx context.Context, tenantID, account
 	return mapSlice(items, fromPlatformTaskItem), nil
 }
 
+// DeletePlatformTaskItem 從儲存層刪除平台任務項目。
 func (s *Store) DeletePlatformTaskItem(execCtx context.Context, tenantID, accountID, id string) error {
 	return s.q.DeletePlatformTaskItem(tenantContext(execCtx, tenantID), sqlc.DeletePlatformTaskItemParams{TenantID: tenantID, AccountID: accountID, ID: id})
 }
 
+// UpsertPlatformTaskTodo 從儲存層處理 upsert 平台任務待辦。
 func (s *Store) UpsertPlatformTaskTodo(execCtx context.Context, v domain.PlatformTaskTodoRecord) error {
 	_, err := s.q.UpsertPlatformTaskTodo(tenantContext(execCtx, v.TenantID), sqlc.UpsertPlatformTaskTodoParams{
 		ID:                  v.ID,
@@ -1398,6 +1543,7 @@ func (s *Store) UpsertPlatformTaskTodo(execCtx context.Context, v domain.Platfor
 	return err
 }
 
+// GetPlatformTaskTodo 從儲存層取得平台任務待辦。
 func (s *Store) GetPlatformTaskTodo(execCtx context.Context, tenantID, accountID, id string) (domain.PlatformTaskTodoRecord, bool, error) {
 	v, err := s.q.GetPlatformTaskTodo(tenantContext(execCtx, tenantID), sqlc.GetPlatformTaskTodoParams{TenantID: tenantID, AccountID: accountID, ID: id})
 	if isNotFound(err) {
@@ -1409,6 +1555,7 @@ func (s *Store) GetPlatformTaskTodo(execCtx context.Context, tenantID, accountID
 	return fromPlatformTaskTodo(v), true, nil
 }
 
+// ListPlatformTaskTodos 從儲存層列出平台任務待辦。
 func (s *Store) ListPlatformTaskTodos(execCtx context.Context, tenantID, accountID string) ([]domain.PlatformTaskTodoRecord, error) {
 	items, err := s.q.ListPlatformTaskTodos(tenantContext(execCtx, tenantID), sqlc.ListPlatformTaskTodosParams{TenantID: tenantID, AccountID: accountID})
 	if err != nil {
@@ -1417,10 +1564,12 @@ func (s *Store) ListPlatformTaskTodos(execCtx context.Context, tenantID, account
 	return mapSlice(items, fromPlatformTaskTodo), nil
 }
 
+// DeletePlatformTaskTodo 從儲存層刪除平台任務待辦。
 func (s *Store) DeletePlatformTaskTodo(execCtx context.Context, tenantID, accountID, id string) error {
 	return s.q.DeletePlatformTaskTodo(tenantContext(execCtx, tenantID), sqlc.DeletePlatformTaskTodoParams{TenantID: tenantID, AccountID: accountID, ID: id})
 }
 
+// UpsertAgentRun 從儲存層處理 upsert agent 執行。
 func (s *Store) UpsertAgentRun(execCtx context.Context, v domain.AgentRun) error {
 	_, err := s.q.UpsertAgentRun(tenantContext(execCtx, v.TenantID), sqlc.UpsertAgentRunParams{
 		ID:        v.ID,
@@ -1437,6 +1586,7 @@ func (s *Store) UpsertAgentRun(execCtx context.Context, v domain.AgentRun) error
 	return err
 }
 
+// GetAgentRun 從儲存層取得 agent 執行。
 func (s *Store) GetAgentRun(execCtx context.Context, tenantID, id string) (domain.AgentRun, bool, error) {
 	v, err := s.q.GetAgentRun(tenantContext(execCtx, tenantID), sqlc.GetAgentRunParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -1448,6 +1598,7 @@ func (s *Store) GetAgentRun(execCtx context.Context, tenantID, id string) (domai
 	return fromAgentRun(v), true, nil
 }
 
+// ListAgentRuns 從儲存層列出 agent 執行紀錄。
 func (s *Store) ListAgentRuns(execCtx context.Context, tenantID string) ([]domain.AgentRun, error) {
 	items, err := s.q.ListAgentRuns(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -1456,6 +1607,7 @@ func (s *Store) ListAgentRuns(execCtx context.Context, tenantID string) ([]domai
 	return mapSlice(items, fromAgentRun), nil
 }
 
+// ListAgentRunsByAccount 從儲存層列出 agent 執行紀錄 by 帳號。
 func (s *Store) ListAgentRunsByAccount(execCtx context.Context, tenantID, accountID string) ([]domain.AgentRun, error) {
 	items, err := s.q.ListAgentRunsByAccount(tenantContext(execCtx, tenantID), sqlc.ListAgentRunsByAccountParams{TenantID: tenantID, AccountID: accountID})
 	if err != nil {
@@ -1464,6 +1616,7 @@ func (s *Store) ListAgentRunsByAccount(execCtx context.Context, tenantID, accoun
 	return mapSlice(items, fromAgentRun), nil
 }
 
+// ListAgentRunPage 從儲存層列出 agent 執行分頁。
 func (s *Store) ListAgentRunPage(execCtx context.Context, tenantID string, page domain.PageRequest) ([]domain.AgentRun, int, error) {
 	page = utils.NormalizePageRequest(page)
 	total, err := s.q.CountAgentRuns(tenantContext(execCtx, tenantID), tenantID)
@@ -1482,6 +1635,7 @@ func (s *Store) ListAgentRunPage(execCtx context.Context, tenantID string, page 
 	return mapSlice(items, fromAgentRun), int(total), nil
 }
 
+// ListAgentRunPageByAccount 從儲存層列出 agent 執行分頁 by 帳號。
 func (s *Store) ListAgentRunPageByAccount(execCtx context.Context, tenantID, accountID string, page domain.PageRequest) ([]domain.AgentRun, int, error) {
 	page = utils.NormalizePageRequest(page)
 	total, err := s.q.CountAgentRunsByAccount(tenantContext(execCtx, tenantID), sqlc.CountAgentRunsByAccountParams{TenantID: tenantID, AccountID: accountID})
@@ -1501,6 +1655,111 @@ func (s *Store) ListAgentRunPageByAccount(execCtx context.Context, tenantID, acc
 	return mapSlice(items, fromAgentRun), int(total), nil
 }
 
+// UpsertNotification 從儲存層處理 upsert 系統通知。
+func (s *Store) UpsertNotification(execCtx context.Context, v domain.Notification) error {
+	_, err := s.q.UpsertNotification(tenantContext(execCtx, v.TenantID), sqlc.UpsertNotificationParams{
+		ID:                 v.ID,
+		TenantID:           v.TenantID,
+		Tone:               v.Tone,
+		Category:           v.Category,
+		Title:              v.Title,
+		Body:               v.Body,
+		StatusText:         v.StatusText,
+		LinkUrl:            v.LinkURL,
+		SourceType:         v.SourceType,
+		SourceID:           v.SourceID,
+		CreatedByAccountID: nullableText(v.CreatedByAccountID),
+		CreatedAt:          timestamptz(v.CreatedAt),
+		ExpiresAt:          nullableTimestamptz(v.ExpiresAt),
+	})
+	return err
+}
+
+// UpsertNotificationRecipient 從儲存層處理 upsert 系統通知投遞狀態。
+func (s *Store) UpsertNotificationRecipient(execCtx context.Context, v domain.NotificationRecipient) error {
+	_, err := s.q.UpsertNotificationRecipient(tenantContext(execCtx, v.TenantID), sqlc.UpsertNotificationRecipientParams{
+		NotificationID: v.NotificationID,
+		TenantID:       v.TenantID,
+		AccountID:      v.AccountID,
+		ReadAt:         nullableTimestamptz(v.ReadAt),
+		DeletedAt:      nullableTimestamptz(v.DeletedAt),
+		CreatedAt:      timestamptz(v.CreatedAt),
+	})
+	return err
+}
+
+// ListNotificationItems 從儲存層列出目前帳號可見的系統通知。
+func (s *Store) ListNotificationItems(execCtx context.Context, tenantID, accountID string, query domain.NotificationListQuery) ([]domain.NotificationItem, error) {
+	items, err := s.q.ListNotificationItems(tenantContext(execCtx, tenantID), sqlc.ListNotificationItemsParams{
+		TenantID:        tenantID,
+		AccountID:       accountID,
+		Tone:            strings.TrimSpace(query.Tone),
+		UnreadOnly:      query.UnreadOnly,
+		HasCursor:       query.HasCursor,
+		CursorCreatedAt: timestamptz(query.CursorCreatedAt),
+		CursorID:        strings.TrimSpace(query.CursorID),
+		LimitCount:      int32(query.Limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromNotificationListRow), nil
+}
+
+// CountUnreadNotifications 從儲存層統計目前帳號未讀通知數。
+func (s *Store) CountUnreadNotifications(execCtx context.Context, tenantID, accountID string) (int, error) {
+	count, err := s.q.CountUnreadNotifications(tenantContext(execCtx, tenantID), sqlc.CountUnreadNotificationsParams{TenantID: tenantID, AccountID: accountID})
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+// CountNotificationTones 從儲存層統計目前帳號可見通知的 tone 分布。
+func (s *Store) CountNotificationTones(execCtx context.Context, tenantID, accountID string) (domain.NotificationToneCounts, error) {
+	counts, err := s.q.CountNotificationTones(tenantContext(execCtx, tenantID), sqlc.CountNotificationTonesParams{TenantID: tenantID, AccountID: accountID})
+	if err != nil {
+		return domain.NotificationToneCounts{}, err
+	}
+	return domain.NotificationToneCounts{
+		All:     int(counts.AllCount),
+		Success: int(counts.SuccessCount),
+		Info:    int(counts.InfoCount),
+		Warning: int(counts.WarningCount),
+	}, nil
+}
+
+// MarkNotificationRead 從儲存層將單筆通知標為已讀。
+func (s *Store) MarkNotificationRead(execCtx context.Context, tenantID, accountID, notificationID string, readAt time.Time) (domain.NotificationItem, bool, error) {
+	item, err := s.q.MarkNotificationRead(tenantContext(execCtx, tenantID), sqlc.MarkNotificationReadParams{
+		TenantID:       tenantID,
+		AccountID:      accountID,
+		NotificationID: notificationID,
+		ReadAt:         timestamptz(readAt),
+	})
+	if isNotFound(err) {
+		return domain.NotificationItem{}, false, nil
+	}
+	if err != nil {
+		return domain.NotificationItem{}, false, err
+	}
+	return fromNotificationReadRow(item), true, nil
+}
+
+// MarkAllNotificationsRead 從儲存層將目前帳號全部未讀通知標為已讀。
+func (s *Store) MarkAllNotificationsRead(execCtx context.Context, tenantID, accountID string, readAt time.Time) (int, error) {
+	count, err := s.q.MarkAllNotificationsRead(tenantContext(execCtx, tenantID), sqlc.MarkAllNotificationsReadParams{
+		TenantID:  tenantID,
+		AccountID: accountID,
+		ReadAt:    timestamptz(readAt),
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+// AppendAuditLog 從儲存層附加稽核 log。
 func (s *Store) AppendAuditLog(execCtx context.Context, v domain.AuditLog) error {
 	_, err := s.q.AppendAuditLog(tenantContext(execCtx, v.TenantID), sqlc.AppendAuditLogParams{
 		ID:             v.ID,
@@ -1518,6 +1777,7 @@ func (s *Store) AppendAuditLog(execCtx context.Context, v domain.AuditLog) error
 	return err
 }
 
+// ListAuditLogs 從儲存層列出稽核 logs。
 func (s *Store) ListAuditLogs(execCtx context.Context, tenantID string) ([]domain.AuditLog, error) {
 	items, err := s.q.ListAuditLogs(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -1526,6 +1786,7 @@ func (s *Store) ListAuditLogs(execCtx context.Context, tenantID string) ([]domai
 	return mapSlice(items, fromAuditLog), nil
 }
 
+// ListAuditLogPage 從儲存層列出稽核 log 分頁。
 func (s *Store) ListAuditLogPage(execCtx context.Context, tenantID string, page domain.PageRequest) ([]domain.AuditLog, int, error) {
 	page = utils.NormalizePageRequest(page)
 	total, err := s.q.CountAuditLogs(tenantContext(execCtx, tenantID), tenantID)
@@ -1544,6 +1805,7 @@ func (s *Store) ListAuditLogPage(execCtx context.Context, tenantID string, page 
 	return mapSlice(items, fromAuditLog), int(total), nil
 }
 
+// GetPermissionVersion 從儲存層取得權限 version。
 func (s *Store) GetPermissionVersion(execCtx context.Context, tenantID string) (int64, error) {
 	v, err := s.q.GetAuthzPermissionVersion(tenantContext(execCtx, tenantID), tenantID)
 	if isNotFound(err) {
@@ -1555,6 +1817,7 @@ func (s *Store) GetPermissionVersion(execCtx context.Context, tenantID string) (
 	return v.Version, nil
 }
 
+// IncrementPermissionVersion 從儲存層處理 increment 權限 version。
 func (s *Store) IncrementPermissionVersion(execCtx context.Context, tenantID string) (int64, error) {
 	v, err := s.q.IncrementAuthzPermissionVersion(execCtx, sqlc.IncrementAuthzPermissionVersionParams{
 		TenantID:  tenantID,
@@ -1566,6 +1829,7 @@ func (s *Store) IncrementPermissionVersion(execCtx context.Context, tenantID str
 	return v.Version, nil
 }
 
+// UpsertAuthzRelationshipTuple 從儲存層處理 upsert 授權關係 tuple。
 func (s *Store) UpsertAuthzRelationshipTuple(execCtx context.Context, v domain.AuthzRelationshipTuple) error {
 	_, err := s.q.UpsertAuthzRelationshipTuple(execCtx, sqlc.UpsertAuthzRelationshipTupleParams{
 		ID:          v.ID,
@@ -1580,6 +1844,7 @@ func (s *Store) UpsertAuthzRelationshipTuple(execCtx context.Context, v domain.A
 	return err
 }
 
+// DeleteAuthzRelationshipTuple 從儲存層刪除授權關係 tuple。
 func (s *Store) DeleteAuthzRelationshipTuple(execCtx context.Context, v domain.AuthzRelationshipTuple) error {
 	return s.q.DeleteAuthzRelationshipTuple(execCtx, sqlc.DeleteAuthzRelationshipTupleParams{
 		TenantID:    v.TenantID,
@@ -1591,6 +1856,7 @@ func (s *Store) DeleteAuthzRelationshipTuple(execCtx context.Context, v domain.A
 	})
 }
 
+// ListAuthzRelationshipTuplesForObject 從儲存層列出授權關係 tuple for 物件。
 func (s *Store) ListAuthzRelationshipTuplesForObject(execCtx context.Context, tenantID, objectType, objectID string) ([]domain.AuthzRelationshipTuple, error) {
 	items, err := s.q.ListAuthzRelationshipTuplesForObject(tenantContext(execCtx, tenantID), sqlc.ListAuthzRelationshipTuplesForObjectParams{
 		TenantID:   tenantID,
@@ -1603,6 +1869,7 @@ func (s *Store) ListAuthzRelationshipTuplesForObject(execCtx context.Context, te
 	return mapSlice(items, fromAuthzRelationshipTuple), nil
 }
 
+// AppendAuthzOutboxEvent 從儲存層附加授權 outbox 事件。
 func (s *Store) AppendAuthzOutboxEvent(execCtx context.Context, v domain.AuthzOutboxEvent) error {
 	_, err := s.q.AppendAuthzOutboxEvent(execCtx, sqlc.AppendAuthzOutboxEventParams{
 		ID:          v.ID,
@@ -1618,6 +1885,7 @@ func (s *Store) AppendAuthzOutboxEvent(execCtx context.Context, v domain.AuthzOu
 	return err
 }
 
+// ListAuthzOutboxEvents 從儲存層列出授權 outbox 事件。
 func (s *Store) ListAuthzOutboxEvents(execCtx context.Context, tenantID string) ([]domain.AuthzOutboxEvent, error) {
 	items, err := s.q.ListAuthzOutboxEvents(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -1626,6 +1894,7 @@ func (s *Store) ListAuthzOutboxEvents(execCtx context.Context, tenantID string) 
 	return mapSlice(items, fromAuthzOutboxEvent), nil
 }
 
+// UpdateAuthzOutboxEvent 從儲存層更新授權 outbox 事件。
 func (s *Store) UpdateAuthzOutboxEvent(execCtx context.Context, v domain.AuthzOutboxEvent) error {
 	_, err := s.q.UpdateAuthzOutboxEvent(tenantContext(execCtx, v.TenantID), sqlc.UpdateAuthzOutboxEventParams{
 		TenantID:    v.TenantID,
@@ -1638,6 +1907,7 @@ func (s *Store) UpdateAuthzOutboxEvent(execCtx context.Context, v domain.AuthzOu
 	return err
 }
 
+// AppendOutboxEvent 從儲存層附加 outbox 事件。
 func (s *Store) AppendOutboxEvent(execCtx context.Context, v domain.OutboxEvent) error {
 	_, err := s.q.AppendOutboxEvent(execCtx, sqlc.AppendOutboxEventParams{
 		ID:            v.ID,
@@ -1655,6 +1925,7 @@ func (s *Store) AppendOutboxEvent(execCtx context.Context, v domain.OutboxEvent)
 	return err
 }
 
+// ListOutboxEvents 從儲存層列出 outbox 事件。
 func (s *Store) ListOutboxEvents(execCtx context.Context, tenantID string) ([]domain.OutboxEvent, error) {
 	items, err := s.q.ListOutboxEvents(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -1663,16 +1934,18 @@ func (s *Store) ListOutboxEvents(execCtx context.Context, tenantID string) ([]do
 	return mapSlice(items, fromOutboxEvent), nil
 }
 
+// isNotFound 判斷是否為not found。
 func isNotFound(err error) bool {
 	return errors.Is(err, pgx.ErrNoRows)
 }
 
-// isUniqueConstraint identifies a specific PostgreSQL unique-constraint violation.
+// isUniqueConstraint 判斷是否為unique constraint。
 func isUniqueConstraint(err error, constraint string) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == constraint
 }
 
+// timestamptz 處理 timestamptz。
 func timestamptz(t time.Time) pgtype.Timestamptz {
 	if t.IsZero() {
 		return pgtype.Timestamptz{}
@@ -1680,6 +1953,7 @@ func timestamptz(t time.Time) pgtype.Timestamptz {
 	return pgtype.Timestamptz{Time: t.UTC(), Valid: true}
 }
 
+// nullableTimestamptz 處理 nullable timestamptz。
 func nullableTimestamptz(t *time.Time) pgtype.Timestamptz {
 	if t == nil || t.IsZero() {
 		return pgtype.Timestamptz{}
@@ -1687,6 +1961,7 @@ func nullableTimestamptz(t *time.Time) pgtype.Timestamptz {
 	return timestamptz(*t)
 }
 
+// nullableText 處理 nullable text。
 func nullableText(v string) pgtype.Text {
 	if v == "" {
 		return pgtype.Text{}
@@ -1694,6 +1969,7 @@ func nullableText(v string) pgtype.Text {
 	return pgtype.Text{String: v, Valid: true}
 }
 
+// textArray 處理 text array。
 func textArray(values []string) []string {
 	out := utils.CopyStrings(values)
 	if out == nil {
@@ -1702,6 +1978,7 @@ func textArray(values []string) []string {
 	return out
 }
 
+// leaveRequestQueryParams 處理請假請求查詢 params。
 func leaveRequestQueryParams(tenantID string, query domain.LeaveRequestQuery) sqlc.CountLeaveRequestsByQueryParams {
 	return sqlc.CountLeaveRequestsByQueryParams{
 		TenantID:    tenantID,
@@ -1712,6 +1989,7 @@ func leaveRequestQueryParams(tenantID string, query domain.LeaveRequestQuery) sq
 	}
 }
 
+// formInstanceQueryParams 處理表單實例查詢 params。
 func formInstanceQueryParams(tenantID string, query domain.FormInstanceQuery) sqlc.CountFormInstancesByQueryParams {
 	return sqlc.CountFormInstancesByQueryParams{
 		TenantID:           tenantID,
@@ -1722,6 +2000,7 @@ func formInstanceQueryParams(tenantID string, query domain.FormInstanceQuery) sq
 	}
 }
 
+// trimmedStrings 處理 trimmed 字串。
 func trimmedStrings(values []string) []string {
 	out := make([]string, 0, len(values))
 	for _, value := range values {
@@ -1732,6 +2011,7 @@ func trimmedStrings(values []string) []string {
 	return out
 }
 
+// textFrom 處理 text from。
 func textFrom(v pgtype.Text) string {
 	if !v.Valid {
 		return ""
@@ -1739,6 +2019,7 @@ func textFrom(v pgtype.Text) string {
 	return v.String
 }
 
+// timeFrom 處理時間 from。
 func timeFrom(v pgtype.Timestamptz) time.Time {
 	if !v.Valid {
 		return time.Time{}
@@ -1746,6 +2027,7 @@ func timeFrom(v pgtype.Timestamptz) time.Time {
 	return v.Time.UTC()
 }
 
+// timePtrFrom 處理時間 ptr from。
 func timePtrFrom(v pgtype.Timestamptz) *time.Time {
 	if !v.Valid {
 		return nil
@@ -1754,14 +2036,17 @@ func timePtrFrom(v pgtype.Timestamptz) *time.Time {
 	return &t
 }
 
+// mustJSON 處理 must JSON。
 func mustJSON(v any) []byte {
 	return jsoncodec.Must(v)
 }
 
+// jsonMap 處理 JSON map。
 func jsonMap(b []byte) map[string]any {
 	return jsoncodec.Map(b)
 }
 
+// jsonEmployeeExperiences 處理 JSON 員工 experiences。
 func jsonEmployeeExperiences(b []byte) []domain.EmployeeExperience {
 	if len(b) == 0 {
 		return nil
@@ -1773,6 +2058,7 @@ func jsonEmployeeExperiences(b []byte) []domain.EmployeeExperience {
 	return out
 }
 
+// jsonEmployeeImportRows 處理 JSON 員工 import 列。
 func jsonEmployeeImportRows(b []byte) []domain.EmployeeImportRow {
 	if len(b) == 0 {
 		return nil
@@ -1784,6 +2070,7 @@ func jsonEmployeeImportRows(b []byte) []domain.EmployeeImportRow {
 	return out
 }
 
+// jsonAttendancePolicyWorkTime 處理 JSON 考勤政策 work 時間。
 func jsonAttendancePolicyWorkTime(b []byte) domain.AttendancePolicyWorkTime {
 	if len(b) == 0 {
 		return domain.AttendancePolicyWorkTime{}
@@ -1795,6 +2082,7 @@ func jsonAttendancePolicyWorkTime(b []byte) domain.AttendancePolicyWorkTime {
 	return out
 }
 
+// jsonAttendanceLeaveTypes 處理 JSON 考勤請假 types。
 func jsonAttendanceLeaveTypes(b []byte) []domain.AttendanceLeaveType {
 	if len(b) == 0 {
 		return nil
@@ -1806,10 +2094,12 @@ func jsonAttendanceLeaveTypes(b []byte) []domain.AttendanceLeaveType {
 	return out
 }
 
+// jsonPermissions 處理 JSON 權限。
 func jsonPermissions(b []byte) []domain.Permission {
 	return jsoncodec.Permissions(b)
 }
 
+// jsonRefs 處理 JSON refs。
 func jsonRefs(b []byte) []domain.Reference {
 	if len(b) == 0 {
 		return nil
@@ -1821,6 +2111,7 @@ func jsonRefs(b []byte) []domain.Reference {
 	return out
 }
 
+// mapSlice 映射slice。
 func mapSlice[S any, D any](items []S, convert func(S) D) []D {
 	if len(items) == 0 {
 		return []D{}
@@ -1832,10 +2123,12 @@ func mapSlice[S any, D any](items []S, convert func(S) D) []D {
 	return out
 }
 
+// fromTenant 轉換租戶。
 func fromTenant(v sqlc.Tenant) domain.Tenant {
 	return domain.Tenant{ID: v.ID, Name: v.Name, CreatedAt: timeFrom(v.CreatedAt)}
 }
 
+// fromAccount 轉換帳號。
 func fromAccount(v sqlc.Account) domain.Account {
 	return domain.Account{
 		ID:                     v.ID,
@@ -1851,6 +2144,7 @@ func fromAccount(v sqlc.Account) domain.Account {
 	}
 }
 
+// fromUserIdentity 轉換使用者身分。
 func fromUserIdentity(v sqlc.UserIdentity) domain.UserIdentity {
 	return domain.UserIdentity{
 		ID:        v.ID,
@@ -1863,6 +2157,7 @@ func fromUserIdentity(v sqlc.UserIdentity) domain.UserIdentity {
 	}
 }
 
+// fromUserGroup 轉換使用者群組。
 func fromUserGroup(v sqlc.UserGroup) domain.UserGroup {
 	return domain.UserGroup{
 		ID:               v.ID,
@@ -1875,6 +2170,7 @@ func fromUserGroup(v sqlc.UserGroup) domain.UserGroup {
 	}
 }
 
+// fromPermissionSet 轉換權限集合。
 func fromPermissionSet(v sqlc.PermissionSet) domain.PermissionSet {
 	return domain.PermissionSet{
 		ID:          v.ID,
@@ -1886,6 +2182,7 @@ func fromPermissionSet(v sqlc.PermissionSet) domain.PermissionSet {
 	}
 }
 
+// fromPermissionSetAssignment 轉換權限集合指派。
 func fromPermissionSetAssignment(v sqlc.AuthzPermissionSetAssignment) domain.PermissionSetAssignment {
 	return domain.PermissionSetAssignment{
 		ID:              v.ID,
@@ -1902,6 +2199,7 @@ func fromPermissionSetAssignment(v sqlc.AuthzPermissionSetAssignment) domain.Per
 	}
 }
 
+// fromDataScope 轉換資料範圍。
 func fromDataScope(v sqlc.AuthzDataScope) domain.DataScope {
 	return domain.DataScope{
 		ID:        v.ID,
@@ -1914,6 +2212,7 @@ func fromDataScope(v sqlc.AuthzDataScope) domain.DataScope {
 	}
 }
 
+// fromFieldPolicy 轉換欄位政策。
 func fromFieldPolicy(v sqlc.AuthzFieldPolicy) domain.FieldPolicy {
 	return domain.FieldPolicy{
 		ID:              v.ID,
@@ -1928,6 +2227,7 @@ func fromFieldPolicy(v sqlc.AuthzFieldPolicy) domain.FieldPolicy {
 	}
 }
 
+// fromAssumableRole 轉換 assumable 角色。
 func fromAssumableRole(v sqlc.AssumableRole) domain.AssumableRole {
 	return domain.AssumableRole{
 		ID:                     v.ID,
@@ -1943,6 +2243,7 @@ func fromAssumableRole(v sqlc.AssumableRole) domain.AssumableRole {
 	}
 }
 
+// fromAssumableRoleSession 轉換 assumable 角色 session。
 func fromAssumableRoleSession(v sqlc.AuthzAssumableRoleSession) domain.AssumableRoleSession {
 	return domain.AssumableRoleSession{
 		ID:              v.ID,
@@ -1956,6 +2257,7 @@ func fromAssumableRoleSession(v sqlc.AuthzAssumableRoleSession) domain.Assumable
 	}
 }
 
+// fromOrgUnit 轉換組織單位。
 func fromOrgUnit(v sqlc.OrgUnit) domain.OrgUnit {
 	return domain.OrgUnit{
 		ID:        v.ID,
@@ -1968,6 +2270,7 @@ func fromOrgUnit(v sqlc.OrgUnit) domain.OrgUnit {
 	}
 }
 
+// fromEmployee 轉換員工。
 func fromEmployee(v sqlc.Employee) domain.Employee {
 	return domain.Employee{
 		ID:                    v.ID,
@@ -1997,6 +2300,7 @@ func fromEmployee(v sqlc.Employee) domain.Employee {
 	}
 }
 
+// fromEmployeeImportSession 轉換員工 import session。
 func fromEmployeeImportSession(v sqlc.EmployeeImportSession) domain.EmployeeImportSession {
 	return domain.EmployeeImportSession{
 		ID:                   v.ID,
@@ -2019,6 +2323,7 @@ func fromEmployeeImportSession(v sqlc.EmployeeImportSession) domain.EmployeeImpo
 	}
 }
 
+// fromOutboxEvent 轉換 outbox 事件。
 func fromOutboxEvent(v sqlc.OutboxEvent) domain.OutboxEvent {
 	return domain.OutboxEvent{
 		ID:            v.ID,
@@ -2035,6 +2340,7 @@ func fromOutboxEvent(v sqlc.OutboxEvent) domain.OutboxEvent {
 	}
 }
 
+// fromAttendancePolicy 轉換考勤政策。
 func fromAttendancePolicy(v sqlc.AttendancePolicy) domain.AttendancePolicy {
 	return domain.AttendancePolicy{
 		ID:                 v.ID,
@@ -2047,6 +2353,7 @@ func fromAttendancePolicy(v sqlc.AttendancePolicy) domain.AttendancePolicy {
 	}
 }
 
+// fromLeaveBalance 轉換請假 balance。
 func fromLeaveBalance(v sqlc.LeaveBalance) domain.LeaveBalance {
 	return domain.LeaveBalance{
 		ID:             v.ID,
@@ -2058,6 +2365,7 @@ func fromLeaveBalance(v sqlc.LeaveBalance) domain.LeaveBalance {
 	}
 }
 
+// fromLeaveRequest 轉換請假請求。
 func fromLeaveRequest(v sqlc.LeaveRequest) domain.LeaveRequest {
 	return domain.LeaveRequest{
 		ID:             v.ID,
@@ -2074,6 +2382,7 @@ func fromLeaveRequest(v sqlc.LeaveRequest) domain.LeaveRequest {
 	}
 }
 
+// fromAttendanceWorksite 轉換考勤工作地點。
 func fromAttendanceWorksite(v sqlc.AttendanceWorksite) domain.AttendanceWorksite {
 	return domain.AttendanceWorksite{
 		ID:           v.ID,
@@ -2089,6 +2398,7 @@ func fromAttendanceWorksite(v sqlc.AttendanceWorksite) domain.AttendanceWorksite
 	}
 }
 
+// fromAttendanceShift 轉換考勤班別。
 func fromAttendanceShift(v sqlc.AttendanceShift) domain.AttendanceShift {
 	return domain.AttendanceShift{
 		ID:                     v.ID,
@@ -2106,6 +2416,7 @@ func fromAttendanceShift(v sqlc.AttendanceShift) domain.AttendanceShift {
 	}
 }
 
+// fromAttendanceShiftAssignment 轉換考勤班別指派。
 func fromAttendanceShiftAssignment(v sqlc.AttendanceShiftAssignment) domain.AttendanceShiftAssignment {
 	return domain.AttendanceShiftAssignment{
 		ID:            v.ID,
@@ -2121,6 +2432,7 @@ func fromAttendanceShiftAssignment(v sqlc.AttendanceShiftAssignment) domain.Atte
 	}
 }
 
+// fromAttendanceClockRecord 轉換考勤打卡 record。
 func fromAttendanceClockRecord(v sqlc.AttendanceClockRecord) domain.AttendanceClockRecord {
 	return domain.AttendanceClockRecord{
 		ID:                  v.ID,
@@ -2146,6 +2458,7 @@ func fromAttendanceClockRecord(v sqlc.AttendanceClockRecord) domain.AttendanceCl
 	}
 }
 
+// fromAttendanceCorrectionRequest 轉換考勤 correction 請求。
 func fromAttendanceCorrectionRequest(v sqlc.AttendanceCorrectionRequest) domain.AttendanceCorrectionRequest {
 	return domain.AttendanceCorrectionRequest{
 		ID:                  v.ID,
@@ -2166,6 +2479,7 @@ func fromAttendanceCorrectionRequest(v sqlc.AttendanceCorrectionRequest) domain.
 	}
 }
 
+// fromFormTemplate 轉換表單範本。
 func fromFormTemplate(v sqlc.FormTemplate) domain.FormTemplate {
 	return domain.FormTemplate{
 		ID:          v.ID,
@@ -2178,6 +2492,7 @@ func fromFormTemplate(v sqlc.FormTemplate) domain.FormTemplate {
 	}
 }
 
+// fromFormInstance 轉換表單實例。
 func fromFormInstance(v sqlc.FormInstance) domain.FormInstance {
 	return domain.FormInstance{
 		ID:                 v.ID,
@@ -2192,6 +2507,7 @@ func fromFormInstance(v sqlc.FormInstance) domain.FormInstance {
 	}
 }
 
+// fromKnowledgeArticle 轉換知識文章。
 func fromKnowledgeArticle(v sqlc.KnowledgeArticle) domain.KnowledgeArticle {
 	return domain.KnowledgeArticle{
 		ID:        v.ID,
@@ -2203,6 +2519,7 @@ func fromKnowledgeArticle(v sqlc.KnowledgeArticle) domain.KnowledgeArticle {
 	}
 }
 
+// fromPlatformTaskItem 轉換平台任務項目。
 func fromPlatformTaskItem(v sqlc.PlatformTaskItem) domain.PlatformTaskRecordItem {
 	return domain.PlatformTaskRecordItem{
 		ID:        v.ID,
@@ -2219,6 +2536,7 @@ func fromPlatformTaskItem(v sqlc.PlatformTaskItem) domain.PlatformTaskRecordItem
 	}
 }
 
+// fromPlatformTaskTodo 轉換平台任務待辦。
 func fromPlatformTaskTodo(v sqlc.PlatformTaskTodo) domain.PlatformTaskTodoRecord {
 	return domain.PlatformTaskTodoRecord{
 		ID:                  v.ID,
@@ -2233,6 +2551,7 @@ func fromPlatformTaskTodo(v sqlc.PlatformTaskTodo) domain.PlatformTaskTodoRecord
 	}
 }
 
+// fromAgentRun 轉換 agent 執行。
 func fromAgentRun(v sqlc.AgentRun) domain.AgentRun {
 	return domain.AgentRun{
 		ID:         v.ID,
@@ -2248,6 +2567,32 @@ func fromAgentRun(v sqlc.AgentRun) domain.AgentRun {
 	}
 }
 
+// fromNotificationListRow 轉換通知列表 row。
+func fromNotificationListRow(v sqlc.ListNotificationItemsRow) domain.NotificationItem {
+	return notificationItemFromFields(v.ID, v.Tone, v.Category, v.Title, v.Body, v.StatusText, v.LinkUrl, v.ReadAt, v.CreatedAt)
+}
+
+// fromNotificationReadRow 轉換通知已讀 row。
+func fromNotificationReadRow(v sqlc.MarkNotificationReadRow) domain.NotificationItem {
+	return notificationItemFromFields(v.ID, v.Tone, v.Category, v.Title, v.Body, v.StatusText, v.LinkUrl, v.ReadAt, v.CreatedAt)
+}
+
+// notificationItemFromFields 組合目前帳號的通知投影。
+func notificationItemFromFields(id, tone, category, title, body, statusText, linkURL string, readAt, createdAt pgtype.Timestamptz) domain.NotificationItem {
+	return domain.NotificationItem{
+		ID:         id,
+		Tone:       tone,
+		Category:   category,
+		Title:      title,
+		Body:       body,
+		StatusText: statusText,
+		LinkURL:    linkURL,
+		ReadAt:     timePtrFrom(readAt),
+		CreatedAt:  timeFrom(createdAt),
+	}
+}
+
+// fromAuditLog 轉換稽核 log。
 func fromAuditLog(v sqlc.AuditLog) domain.AuditLog {
 	return domain.AuditLog{
 		ID:             v.ID,
@@ -2264,6 +2609,27 @@ func fromAuditLog(v sqlc.AuditLog) domain.AuditLog {
 	}
 }
 
+// fromIdentityProvisioningOutboxEvent 轉換身分開通 outbox 事件。
+func fromIdentityProvisioningOutboxEvent(v sqlc.IdentityProvisioningOutbox) domain.IdentityProvisioningOutboxEvent {
+	return domain.IdentityProvisioningOutboxEvent{
+		ID:          v.ID,
+		TenantID:    v.TenantID,
+		AccountID:   v.AccountID,
+		EmployeeID:  v.EmployeeID,
+		EmployeeNo:  v.EmployeeNo,
+		Email:       v.Email,
+		DisplayName: v.DisplayName,
+		Enabled:     v.Enabled,
+		SendInvite:  v.SendInvite,
+		Status:      v.Status,
+		RetryCount:  int(v.RetryCount),
+		LastError:   v.LastError,
+		CreatedAt:   timeFrom(v.CreatedAt),
+		UpdatedAt:   timeFrom(v.UpdatedAt),
+	}
+}
+
+// fromAuthzOutboxEvent 轉換授權 outbox 事件。
 func fromAuthzOutboxEvent(v sqlc.AuthzOutboxEvent) domain.AuthzOutboxEvent {
 	return domain.AuthzOutboxEvent{
 		ID:          v.ID,
@@ -2278,6 +2644,7 @@ func fromAuthzOutboxEvent(v sqlc.AuthzOutboxEvent) domain.AuthzOutboxEvent {
 	}
 }
 
+// fromAuthzRelationshipTuple 轉換授權關係 tuple。
 func fromAuthzRelationshipTuple(v sqlc.AuthzRelationshipTuple) domain.AuthzRelationshipTuple {
 	return domain.AuthzRelationshipTuple{
 		ID:          v.ID,

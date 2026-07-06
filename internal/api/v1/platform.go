@@ -11,13 +11,13 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
-// PlatformCtrl wires OA frontend aggregate endpoints to the platform projection service.
+// PlatformCtrl 定義平台 ctrl 的資料結構。
 type PlatformCtrl struct {
 	routes routeBinder
 	svc    service.PlatformFacade
 }
 
-// RegisterRoutes attaches platform projection routes to the v1 route group.
+// RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c PlatformCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	platform := router.Group("/platform")
 	platform.GET("/home", c.routes.Handle("me", "read", c.home))
@@ -48,7 +48,7 @@ func (c PlatformCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	platform.GET("/insights", c.routes.Handle("hr.employee", "read", c.insights))
 }
 
-// home returns first-screen workbench widgets.
+// home 處理首頁的 HTTP 請求。
 func (c PlatformCtrl) home(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.Home(ctx)
 	if err != nil {
@@ -58,7 +58,7 @@ func (c PlatformCtrl) home(w http.ResponseWriter, _ *http.Request, ctx domain.Re
 	return nil
 }
 
-// assistants returns assistant cards filtered by tag and search text.
+// assistants 處理助理的 HTTP 請求。
 func (c PlatformCtrl) assistants(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	values := r.URL.Query()
 	item, err := c.svc.ListAssistants(ctx, domain.PlatformAssistantsQuery{
@@ -72,7 +72,7 @@ func (c PlatformCtrl) assistants(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
-// forms returns form categories and current-account applications.
+// forms 處理表單的 HTTP 請求。
 func (c PlatformCtrl) forms(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.Forms(ctx)
 	if err != nil {
@@ -82,7 +82,7 @@ func (c PlatformCtrl) forms(w http.ResponseWriter, _ *http.Request, ctx domain.R
 	return nil
 }
 
-// tasks returns task records and todos projected from agent runs.
+// tasks 處理任務的 HTTP 請求。
 func (c PlatformCtrl) tasks(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.Tasks(ctx)
 	if err != nil {
@@ -92,7 +92,7 @@ func (c PlatformCtrl) tasks(w http.ResponseWriter, _ *http.Request, ctx domain.R
 	return nil
 }
 
-// createTaskItem stores a work-log row for the current account.
+// createTaskItem 處理任務項目的 HTTP 請求。
 func (c PlatformCtrl) createTaskItem(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreatePlatformTaskItemInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -106,7 +106,7 @@ func (c PlatformCtrl) createTaskItem(w http.ResponseWriter, r *http.Request, ctx
 	return nil
 }
 
-// updateTaskItem patches a current-account work-log row.
+// updateTaskItem 處理任務項目的 HTTP 請求。
 func (c PlatformCtrl) updateTaskItem(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.UpdatePlatformTaskItemInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -120,7 +120,7 @@ func (c PlatformCtrl) updateTaskItem(w http.ResponseWriter, r *http.Request, ctx
 	return nil
 }
 
-// deleteTaskItem removes a current-account work-log row.
+// deleteTaskItem 處理任務項目的 HTTP 請求。
 func (c PlatformCtrl) deleteTaskItem(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.DeleteTaskItem(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -130,7 +130,7 @@ func (c PlatformCtrl) deleteTaskItem(w http.ResponseWriter, r *http.Request, ctx
 	return nil
 }
 
-// createTaskTodo stores a sidebar todo for the current account.
+// createTaskTodo 處理任務待辦的 HTTP 請求。
 func (c PlatformCtrl) createTaskTodo(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreatePlatformTaskTodoInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -144,7 +144,7 @@ func (c PlatformCtrl) createTaskTodo(w http.ResponseWriter, r *http.Request, ctx
 	return nil
 }
 
-// updateTaskTodo patches a current-account sidebar todo.
+// updateTaskTodo 處理任務待辦的 HTTP 請求。
 func (c PlatformCtrl) updateTaskTodo(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.UpdatePlatformTaskTodoInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -158,7 +158,7 @@ func (c PlatformCtrl) updateTaskTodo(w http.ResponseWriter, r *http.Request, ctx
 	return nil
 }
 
-// deleteTaskTodo removes a current-account sidebar todo.
+// deleteTaskTodo 處理任務待辦的 HTTP 請求。
 func (c PlatformCtrl) deleteTaskTodo(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.DeleteTaskTodo(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -168,7 +168,7 @@ func (c PlatformCtrl) deleteTaskTodo(w http.ResponseWriter, r *http.Request, ctx
 	return nil
 }
 
-// convertTaskTodo creates a work-log row from a todo and marks it done.
+// convertTaskTodo 處理 convert 任務待辦的 HTTP 請求。
 func (c PlatformCtrl) convertTaskTodo(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.ConvertPlatformTaskTodoInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -182,7 +182,7 @@ func (c PlatformCtrl) convertTaskTodo(w http.ResponseWriter, r *http.Request, ct
 	return nil
 }
 
-// workspace returns the workspace settings aggregate used by the frontend.
+// workspace 處理工作區的 HTTP 請求。
 func (c PlatformCtrl) workspace(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.Workspace(ctx)
 	if err != nil {
@@ -192,7 +192,7 @@ func (c PlatformCtrl) workspace(w http.ResponseWriter, _ *http.Request, ctx doma
 	return nil
 }
 
-// createWorkspaceAdmin grants workspace-admin permissions through the frontend namespace.
+// createWorkspaceAdmin 處理工作區管理員的 HTTP 請求。
 func (c PlatformCtrl) createWorkspaceAdmin(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateWorkspaceAdminInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -206,7 +206,7 @@ func (c PlatformCtrl) createWorkspaceAdmin(w http.ResponseWriter, r *http.Reques
 	return nil
 }
 
-// updateWorkspaceAdminPermissions replaces one admin's managed permission matrix.
+// updateWorkspaceAdminPermissions 處理工作區管理員權限的 HTTP 請求。
 func (c PlatformCtrl) updateWorkspaceAdminPermissions(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.UpdateWorkspaceAdminPermissionsInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -220,7 +220,7 @@ func (c PlatformCtrl) updateWorkspaceAdminPermissions(w http.ResponseWriter, r *
 	return nil
 }
 
-// deleteWorkspaceAdmin clears workspace-managed admin permissions from one account.
+// deleteWorkspaceAdmin 處理工作區管理員的 HTTP 請求。
 func (c PlatformCtrl) deleteWorkspaceAdmin(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.DeleteWorkspaceAdmin(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -230,7 +230,7 @@ func (c PlatformCtrl) deleteWorkspaceAdmin(w http.ResponseWriter, r *http.Reques
 	return nil
 }
 
-// createWorkspaceFormDesign creates one workspace form-builder template.
+// createWorkspaceFormDesign 處理工作區表單 design 的 HTTP 請求。
 func (c PlatformCtrl) createWorkspaceFormDesign(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.SaveWorkspaceFormDesignInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -244,7 +244,7 @@ func (c PlatformCtrl) createWorkspaceFormDesign(w http.ResponseWriter, r *http.R
 	return nil
 }
 
-// updateWorkspaceFormDesign patches one workspace form-builder template.
+// updateWorkspaceFormDesign 處理工作區表單 design 的 HTTP 請求。
 func (c PlatformCtrl) updateWorkspaceFormDesign(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.UpdateWorkspaceFormDesignInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -258,7 +258,7 @@ func (c PlatformCtrl) updateWorkspaceFormDesign(w http.ResponseWriter, r *http.R
 	return nil
 }
 
-// deleteWorkspaceFormDesign soft-deletes one workspace form-builder template.
+// deleteWorkspaceFormDesign 處理工作區表單 design 的 HTTP 請求。
 func (c PlatformCtrl) deleteWorkspaceFormDesign(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.DeleteWorkspaceFormDesign(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -268,7 +268,7 @@ func (c PlatformCtrl) deleteWorkspaceFormDesign(w http.ResponseWriter, r *http.R
 	return nil
 }
 
-// workspaceAuditLogs returns filtered workspace audit rows through the platform namespace.
+// workspaceAuditLogs 處理工作區稽核 logs 的 HTTP 請求。
 func (c PlatformCtrl) workspaceAuditLogs(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -289,7 +289,7 @@ func (c PlatformCtrl) workspaceAuditLogs(w http.ResponseWriter, r *http.Request,
 	return nil
 }
 
-// workspaceOverview returns HR and attendance widgets through the frontend namespace.
+// workspaceOverview 處理工作區總覽的 HTTP 請求。
 func (c PlatformCtrl) workspaceOverview(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.WorkspaceOverview(ctx, domain.WorkspaceOverviewQuery{
 		Year:  workspaceIntQuery(r, "year"),
@@ -303,7 +303,7 @@ func (c PlatformCtrl) workspaceOverview(w http.ResponseWriter, r *http.Request, 
 	return nil
 }
 
-// workspaceEmployees returns the filtered employee table payload through the frontend namespace.
+// workspaceEmployees 處理工作區員工的 HTTP 請求。
 func (c PlatformCtrl) workspaceEmployees(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	values := r.URL.Query()
 	item, err := c.svc.WorkspaceEmployees(ctx, domain.PlatformWorkspaceEmployeesQuery{
@@ -320,7 +320,7 @@ func (c PlatformCtrl) workspaceEmployees(w http.ResponseWriter, r *http.Request,
 	return nil
 }
 
-// workspaceOrganization returns the organization tree through the frontend namespace.
+// workspaceOrganization 處理工作區 organization 的 HTTP 請求。
 func (c PlatformCtrl) workspaceOrganization(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.WorkspaceOrganization(ctx)
 	if err != nil {
@@ -330,7 +330,7 @@ func (c PlatformCtrl) workspaceOrganization(w http.ResponseWriter, _ *http.Reque
 	return nil
 }
 
-// updateWorkspaceOrganizationManager persists the manager selected in the workspace organization table.
+// updateWorkspaceOrganizationManager 處理工作區 organization 主管的 HTTP 請求。
 func (c PlatformCtrl) updateWorkspaceOrganizationManager(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.UpdateWorkspaceOrganizationManagerInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -344,7 +344,7 @@ func (c PlatformCtrl) updateWorkspaceOrganizationManager(w http.ResponseWriter, 
 	return nil
 }
 
-// workspaceAttendance returns monthly attendance matrices through the frontend namespace.
+// workspaceAttendance 處理工作區考勤的 HTTP 請求。
 func (c PlatformCtrl) workspaceAttendance(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{
 		Year:  workspaceIntQuery(r, "year"),
@@ -357,7 +357,7 @@ func (c PlatformCtrl) workspaceAttendance(w http.ResponseWriter, r *http.Request
 	return nil
 }
 
-// workspaceTurnover returns turnover analysis through the frontend namespace.
+// workspaceTurnover 處理工作區人員異動的 HTTP 請求。
 func (c PlatformCtrl) workspaceTurnover(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	annualYear := workspaceIntQuery(r, "annual_year")
 	if annualYear <= 0 {
@@ -375,6 +375,7 @@ func (c PlatformCtrl) workspaceTurnover(w http.ResponseWriter, r *http.Request, 
 	return nil
 }
 
+// firstQueryValue 取得第一個查詢 value。
 func firstQueryValue(values url.Values, names ...string) string {
 	for _, name := range names {
 		if value := strings.TrimSpace(values.Get(name)); value != "" {
@@ -384,7 +385,7 @@ func firstQueryValue(values url.Values, names ...string) string {
 	return ""
 }
 
-// insights returns compact report payloads for the insights page.
+// insights 處理洞察的 HTTP 請求。
 func (c PlatformCtrl) insights(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.Insights(ctx, domain.PlatformInsightsQuery{
 		Month: strings.TrimSpace(r.URL.Query().Get("month")),

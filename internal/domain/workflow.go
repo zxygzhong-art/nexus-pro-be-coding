@@ -2,7 +2,7 @@ package domain
 
 import "time"
 
-// FormTemplate defines a reusable workflow form schema.
+// FormTemplate 定義表單範本的資料結構。
 type FormTemplate struct {
 	ID          string         `json:"id"`
 	TenantID    string         `json:"tenant_id"`
@@ -13,7 +13,7 @@ type FormTemplate struct {
 	CreatedAt   time.Time      `json:"created_at"`
 }
 
-// FormInstance records one submitted workflow form and its approval state.
+// FormInstance 定義表單實例的資料結構。
 type FormInstance struct {
 	ID                 string         `json:"id"`
 	TenantID           string         `json:"tenant_id"`
@@ -26,7 +26,7 @@ type FormInstance struct {
 	UpdatedAt          time.Time      `json:"updated_at"`
 }
 
-// FormInstanceQuery carries list filters for workflow form instances.
+// FormInstanceQuery 定義表單實例查詢的資料結構。
 type FormInstanceQuery struct {
 	Status             string `json:"status,omitempty"`
 	TemplateID         string `json:"template_id,omitempty"`
@@ -35,19 +35,19 @@ type FormInstanceQuery struct {
 	Mine               bool   `json:"mine,omitempty"`
 }
 
-// SaveFormDraftInput carries the template and payload for a resumable form draft.
+// SaveFormDraftInput 定義表單草稿輸入的資料結構。
 type SaveFormDraftInput struct {
 	TemplateKey string         `json:"template_key,omitempty"`
 	Payload     map[string]any `json:"payload,omitempty"`
 }
 
-// UpdateFormDraftInput carries an updated payload for an existing draft.
+// UpdateFormDraftInput 定義表單草稿輸入的資料結構。
 type UpdateFormDraftInput struct {
 	TemplateKey string         `json:"template_key,omitempty"`
 	Payload     map[string]any `json:"payload,omitempty"`
 }
 
-// CreateFormTemplateInput carries the payload for creating a form template.
+// CreateFormTemplateInput 定義表單範本輸入的資料結構。
 type CreateFormTemplateInput struct {
 	Key         string         `json:"key"`
 	Name        string         `json:"name"`
@@ -55,45 +55,45 @@ type CreateFormTemplateInput struct {
 	Schema      map[string]any `json:"schema,omitempty"`
 }
 
-// SubmitFormInput carries the payload used to submit a workflow form.
+// SubmitFormInput 定義表單輸入的資料結構。
 type SubmitFormInput struct {
 	TemplateKey string         `json:"template_key"`
 	Payload     map[string]any `json:"payload,omitempty"`
 }
 
-// ApproveFormInput is reserved for future approval metadata.
+// ApproveFormInput 定義表單輸入的資料結構。
 type ApproveFormInput struct{}
 
-// RejectFormInput carries reviewer notes when a workflow form is rejected.
+// RejectFormInput 定義表單輸入的資料結構。
 type RejectFormInput struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// ReturnFormInput carries reviewer notes when a workflow form is returned for revision.
+// ReturnFormInput 定義表單輸入的資料結構。
 type ReturnFormInput struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// CancelFormInput carries applicant notes when a workflow form is cancelled.
+// CancelFormInput 定義表單輸入的資料結構。
 type CancelFormInput struct {
 	Reason string `json:"reason,omitempty"`
 }
 
-// ExportedFormFile is a downloadable representation of a form instance.
+// ExportedFormFile 定義 exported 表單檔案的資料結構。
 type ExportedFormFile struct {
 	FileName    string
 	ContentType string
 	Body        []byte
 }
 
-// BulkReviewFormsInput carries one notification-page batch review operation.
+// BulkReviewFormsInput 定義批次審核表單輸入的資料結構。
 type BulkReviewFormsInput struct {
 	FormInstanceIDs []string `json:"form_instance_ids"`
 	Action          string   `json:"action"`
 	Reason          string   `json:"reason,omitempty"`
 }
 
-// BulkReviewFormResult reports the outcome for one reviewed form instance.
+// BulkReviewFormResult 定義批次審核表單結果的資料結構。
 type BulkReviewFormResult struct {
 	FormInstanceID string        `json:"form_instance_id"`
 	Success        bool          `json:"success"`
@@ -103,12 +103,12 @@ type BulkReviewFormResult struct {
 	Instance       *FormInstance `json:"instance,omitempty"`
 }
 
-// BulkReviewFormsResponse wraps per-form batch review outcomes.
+// BulkReviewFormsResponse 定義批次審核表單回應的資料結構。
 type BulkReviewFormsResponse struct {
 	Results []BulkReviewFormResult `json:"results"`
 }
 
-// WorkflowReviewLogItem describes one visible review timeline entry.
+// WorkflowReviewLogItem 定義流程審核 log 項目的資料結構。
 type WorkflowReviewLogItem struct {
 	Type    string `json:"type"`
 	Name    string `json:"name"`
@@ -117,7 +117,7 @@ type WorkflowReviewLogItem struct {
 	Comment string `json:"comment,omitempty"`
 }
 
-// WorkflowReviewItem is the backend projection consumed by review/notification UIs.
+// WorkflowReviewItem 定義流程審核項目的資料結構。
 type WorkflowReviewItem struct {
 	ID         string                  `json:"id"`
 	Status     string                  `json:"status"`
@@ -130,7 +130,7 @@ type WorkflowReviewItem struct {
 	Instance   FormInstance            `json:"instance"`
 }
 
-// WorkflowReviewQueueResponse groups review items into the UI's tab model.
+// WorkflowReviewQueueResponse 定義流程審核佇列回應的資料結構。
 type WorkflowReviewQueueResponse struct {
 	PendingReview   []WorkflowReviewItem `json:"pending_review"`
 	AlreadyReviewed []WorkflowReviewItem `json:"already_reviewed"`

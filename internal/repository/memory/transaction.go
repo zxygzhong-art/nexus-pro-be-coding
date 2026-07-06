@@ -8,14 +8,14 @@ import (
 
 var _ repository.Store = (*Store)(nil)
 
-// WithTenantTransaction applies writes to a cloned store and commits only on success.
+// WithTenantTransaction 從儲存層附加租戶 transaction。
 func (s *Store) WithTenantTransaction(ctx context.Context, tenantID string, fn func(repository.Store) error) error {
 	_ = ctx
 	_ = tenantID
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	// Clone-and-swap gives tests transaction semantics without a database.
+	// clone-and-swap 讓測試在沒有資料庫時仍具備 transaction 語義。
 	tx := s.cloneLocked()
 	if err := fn(tx); err != nil {
 		return err
@@ -24,6 +24,7 @@ func (s *Store) WithTenantTransaction(ctx context.Context, tenantID string, fn f
 	return nil
 }
 
+// cloneLocked 從儲存層複製 locked。
 func (s *Store) cloneLocked() *Store {
 	return &Store{
 		tenants:                cloneMap(s.tenants, copyTenant),
@@ -54,14 +55,18 @@ func (s *Store) cloneLocked() *Store {
 		platformTaskItems:      cloneNestedMap(s.platformTaskItems, copyPlatformTaskRecordItem),
 		platformTaskTodos:      cloneNestedMap(s.platformTaskTodos, copyPlatformTaskTodoRecord),
 		agentRuns:              cloneNestedMap(s.agentRuns, copyAgentRun),
+		notifications:          cloneNestedMap(s.notifications, copyNotification),
+		notificationRecipients: cloneNestedMap(s.notificationRecipients, copyNotificationRecipient),
 		auditLogs:              cloneSliceMap(s.auditLogs, copyAuditLog),
 		permissionVersions:     cloneMap(s.permissionVersions, func(v int64) int64 { return v }),
 		authzOutbox:            cloneSliceMap(s.authzOutbox, copyAuthzOutboxEvent),
+		identityOutbox:         cloneSliceMap(s.identityOutbox, func(v IdentityProvisioningOutboxEvent) IdentityProvisioningOutboxEvent { return v }),
 		outboxEvents:           cloneSliceMap(s.outboxEvents, copyOutboxEvent),
 		relationshipTuples:     cloneNestedMap(s.relationshipTuples, func(v AuthzRelationshipTuple) AuthzRelationshipTuple { return v }),
 	}
 }
 
+// replaceLocked 從儲存層處理 replace locked。
 func (s *Store) replaceLocked(next *Store) {
 	s.tenants = next.tenants
 	s.accounts = next.accounts
@@ -91,13 +96,17 @@ func (s *Store) replaceLocked(next *Store) {
 	s.platformTaskItems = next.platformTaskItems
 	s.platformTaskTodos = next.platformTaskTodos
 	s.agentRuns = next.agentRuns
+	s.notifications = next.notifications
+	s.notificationRecipients = next.notificationRecipients
 	s.auditLogs = next.auditLogs
 	s.permissionVersions = next.permissionVersions
 	s.authzOutbox = next.authzOutbox
+	s.identityOutbox = next.identityOutbox
 	s.outboxEvents = next.outboxEvents
 	s.relationshipTuples = next.relationshipTuples
 }
 
+// cloneMap 複製 map。
 func cloneMap[T any](src map[string]T, clone func(T) T) map[string]T {
 	dst := make(map[string]T, len(src))
 	for key, value := range src {
@@ -106,6 +115,7 @@ func cloneMap[T any](src map[string]T, clone func(T) T) map[string]T {
 	return dst
 }
 
+// cloneNestedMap 複製 nested map。
 func cloneNestedMap[T any](src map[string]map[string]T, clone func(T) T) map[string]map[string]T {
 	dst := make(map[string]map[string]T, len(src))
 	for tenantID, bucket := range src {
@@ -118,6 +128,7 @@ func cloneNestedMap[T any](src map[string]map[string]T, clone func(T) T) map[str
 	return dst
 }
 
+// cloneSliceMap 複製 slice map。
 func cloneSliceMap[T any](src map[string][]T, clone func(T) T) map[string][]T {
 	dst := make(map[string][]T, len(src))
 	for tenantID, values := range src {

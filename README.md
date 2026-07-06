@@ -34,6 +34,16 @@ The application reads environment variables directly. Export them in your shell 
 
 Grafana is available at `http://localhost:3001` with the local credentials `admin` / `admin`. The Loki and Tempo data sources are provisioned automatically.
 
+### Containerized API
+
+The repository root contains a multi-stage `Dockerfile` (Go builder, distroless non-root runtime, port 8080). An optional `api` compose service builds it and reads environment from `.env`:
+
+```sh
+docker compose --profile api up -d --build api
+```
+
+Inside the compose network, point `DATABASE_URL` and `REDIS_ADDR` at the service names (`postgres:5432`, `redis:6379`) instead of `localhost`.
+
 Application logs are structured JSON written to stdout, which keeps the runtime simple and lets Promtail forward container logs into Loki. Request logs include `trace_id`, `request_id`, `tenant_id`, `account_id`, method, path, status, elapsed time, and client IP.
 
 OpenTelemetry tracing is disabled by default. To send traces to the local Tempo service, enable it before starting the API:
@@ -95,7 +105,22 @@ Useful endpoints:
 ```sh
 curl http://localhost:8080/healthz
 curl http://localhost:8080/v1/me
+curl http://127.0.0.1:9091/metrics
 ```
+
+`/metrics` is a Prometheus endpoint exposing `http_requests_total` and `http_request_duration_seconds` labeled by method, route template, and status. It is served on a dedicated listener configured by `METRICS_ADDR` (default `127.0.0.1:9091`) instead of the business port; set `METRICS_ADDR=` (empty) to disable it. Request metrics are still collected on the business router.
+
+Connection pool sizing is configurable through `DB_MAX_CONNS` (default `10`), `DB_MIN_CONNS` (default `1`), and `DB_MAX_CONN_LIFETIME` (default `1h`).
+
+In production (`APP_ENV=production`), startup validation requires `DATABASE_URL` to set `sslmode=require`, `verify-ca`, or `verify-full`; `sslmode=disable` or an unspecified `sslmode` is rejected.
+
+### CORS
+
+CORS is disabled unless `CORS_ALLOWED_ORIGINS` is set to a comma-separated list of exact origins (for example `https://app.example.com,https://admin.example.com`). Allowed origins receive `Access-Control-Allow-Origin/Methods/Headers/Credentials`, and `OPTIONS` preflight requests are answered with `204`. Origins are matched exactly; no wildcard or prefix matching is performed.
+
+### Rate Limiting
+
+Set `RATE_LIMIT_ENABLED=true` to rate limit requests per client IP. `RATE_LIMIT_RPS` (default `20`) is the sustained request rate and `RATE_LIMIT_BURST` (default `40`) the tolerated burst. When `REDIS_ADDR` is configured the limiter uses a shared Redis fixed-window counter so limits hold across replicas; otherwise an in-process token bucket is used. Rejected requests receive `429` with error code `10070`. The limiter fails open if Redis becomes unavailable. Note that the API trusts no proxy headers by default, so behind a reverse proxy set `TRUSTED_PROXIES` to a comma-separated list of proxy CIDRs/IPs (for example `10.0.0.0/8,192.168.1.1`) so client IPs used in logs and rate limiting are derived from `X-Forwarded-For` safely; when unset, the peer address is used.
 
 Swagger UI is available at `http://localhost:8080/swagger/index.html`, backed by the embedded OpenAPI spec at `http://localhost:8080/openapi.yaml`.
 
@@ -171,7 +196,7 @@ The project has the production persistence foundation in place:
 - environment config in `internal/config`
 - permission route metadata in `internal/domain/authz`
 
-Runtime accounts are database-backed only. Accounts and identity bindings must already be present in PostgreSQL before login.
+Runtime accounts keep business profile and authorization state in PostgreSQL, while login credentials live in Keycloak. When `KEYCLOAK_PROVISION_USERS=true`, employee creation/import/invite flows create or update the Keycloak user through the Admin API and bind its `sub` into `user_identities`.
 
 ## Permission Foundation
 
@@ -181,7 +206,7 @@ Current scope:
 
 - Authz schema tables for applications, permission catalog, normalized group memberships, permission-set assignments, data scopes, field policies, policy conditions, assumable-role sessions, and relationship tuples for future OpenFGA sync.
 - `internal/domain/authz` defines default route policy metadata and high-risk markers used by the service-level authorization path.
-- `KEYCLOAK_*` enables Keycloak/OIDC bearer-token validation. In production, `KEYCLOAK_ISSUER_URL` and `KEYCLOAK_CLIENT_ID` are required at startup.
+- `KEYCLOAK_*` enables Keycloak/OIDC bearer-token validation. In production, `KEYCLOAK_ISSUER_URL` and `KEYCLOAK_CLIENT_ID` are required at startup; enabling `KEYCLOAK_PROVISION_USERS` additionally requires `KEYCLOAK_ADMIN_CLIENT_ID` and `KEYCLOAK_ADMIN_CLIENT_SECRET`.
 - `OPENFGA_*` enables relationship checks and starts the relationship tuple outbox worker. In production, `OPENFGA_API_URL`, `OPENFGA_STORE_ID`, and `OPENFGA_MODEL_ID` are required at startup because relation-scoped permissions depend on this adapter.
 - `ops/openfga/model.json` is the versioned authorization model. Apply it explicitly with `make openfga-apply-model`, then set `OPENFGA_MODEL_ID` to the returned `authorization_model_id`; the API readiness check verifies that model ID.
 - Employee authz-subject changes emit local relationship tuples and OpenFGA write/delete outbox events with retryable status tracking.

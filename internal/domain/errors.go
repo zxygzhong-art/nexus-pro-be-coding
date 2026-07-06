@@ -5,7 +5,7 @@ import (
 	"fmt"
 )
 
-// AppError is the stable error shape carried from services to HTTP responses.
+// AppError 定義 app 錯誤的資料結構。
 type AppError struct {
 	Status      int
 	Code        string
@@ -17,24 +17,24 @@ type AppError struct {
 	TraceID     string
 }
 
-// Error returns the public application error message.
+// Error 處理錯誤。
 func (e *AppError) Error() string {
 
 	return e.Message
 }
 
-// E constructs an application error with the given HTTP status and public code.
+// E 處理 e。
 func E(status int, code, message string) *AppError {
 	return &AppError{Status: status, Code: code, PublicCode: appErrorCode(code), Message: message}
 }
 
-// WithPublicCode overrides the default public numeric code for a specific error.
+// WithPublicCode 附加 public 碼。
 func (e *AppError) WithPublicCode(code ErrorCode) *AppError {
 	e.PublicCode = code
 	return e
 }
 
-// NumericCode returns the public numeric code for API responses.
+// NumericCode 處理 numeric 碼。
 func (e *AppError) NumericCode() ErrorCode {
 	if e.PublicCode != 0 {
 		return e.PublicCode
@@ -47,7 +47,7 @@ func (e *AppError) NumericCode() ErrorCode {
 	return appErrorCode(e.Code)
 }
 
-// FieldError describes a validation failure for one request field.
+// FieldError 定義欄位錯誤的資料結構。
 type FieldError struct {
 	Tab     string `json:"tab,omitempty"`
 	Field   string `json:"field"`
@@ -55,7 +55,7 @@ type FieldError struct {
 	Message string `json:"message"`
 }
 
-// RowError describes a validation failure for one imported spreadsheet row.
+// RowError 定義列錯誤的資料結構。
 type RowError struct {
 	Row     int    `json:"row_number"`
 	Field   string `json:"field,omitempty"`
@@ -63,22 +63,22 @@ type RowError struct {
 	Message string `json:"message"`
 }
 
-// NotFound returns a 404 application error for a missing entity.
+// NotFound 處理 not found。
 func NotFound(entity, id string) *AppError {
 	return E(404, "not_found", fmt.Sprintf("%s %s not found", entity, id))
 }
 
-// BadRequest returns a 400 application error for malformed input.
+// BadRequest 處理 bad 請求。
 func BadRequest(message string) *AppError {
 	return E(400, "bad_request", message)
 }
 
-// BadRequestCode returns a 400 error with a more specific public numeric code.
+// BadRequestCode 處理 bad 請求碼。
 func BadRequestCode(code ErrorCode, message string) *AppError {
 	return BadRequest(message).WithPublicCode(code)
 }
 
-// ValidationFailed returns a 400 error with field-level validation details.
+// ValidationFailed 處理驗證 failed。
 func ValidationFailed(message string, fields []FieldError) *AppError {
 	return &AppError{
 		Status:      400,
@@ -90,6 +90,7 @@ func ValidationFailed(message string, fields []FieldError) *AppError {
 	}
 }
 
+// firstFieldReasonCode 取得第一個欄位 reason 碼。
 func firstFieldReasonCode(fields []FieldError) string {
 	for _, field := range fields {
 		if field.Code == "field_denied" {
@@ -99,7 +100,7 @@ func firstFieldReasonCode(fields []FieldError) string {
 	return ""
 }
 
-// ImportValidationFailed returns a 400 error with row-level import failures.
+// ImportValidationFailed 匯入驗證 failed。
 func ImportValidationFailed(message string, rows []RowError) *AppError {
 	return &AppError{
 		Status:     400,
@@ -110,12 +111,12 @@ func ImportValidationFailed(message string, rows []RowError) *AppError {
 	}
 }
 
-// Forbidden returns a 403 application error.
+// Forbidden 處理禁止。
 func Forbidden(message string) *AppError {
 	return E(403, "forbidden", message)
 }
 
-// ForbiddenReason returns a 403 application error with a machine-readable reason.
+// ForbiddenReason 處理禁止 reason。
 func ForbiddenReason(reasonCode, message string) *AppError {
 	err := Forbidden(message)
 	err.ReasonCode = reasonCode
@@ -125,12 +126,12 @@ func ForbiddenReason(reasonCode, message string) *AppError {
 	return err
 }
 
-// Unauthorized returns a 401 application error.
+// Unauthorized 處理未授權。
 func Unauthorized(message string) *AppError {
 	return E(401, "unauthorized", message)
 }
 
-// UnauthorizedReason returns a 401 application error with a machine-readable reason.
+// UnauthorizedReason 處理未授權 reason。
 func UnauthorizedReason(reasonCode, message string) *AppError {
 	err := Unauthorized(message)
 	err.ReasonCode = reasonCode
@@ -140,12 +141,17 @@ func UnauthorizedReason(reasonCode, message string) *AppError {
 	return err
 }
 
-// Conflict returns a 409 application error.
+// Conflict 處理衝突。
 func Conflict(message string) *AppError {
 	return E(409, "conflict", message)
 }
 
-// AsAppError unwraps an error chain into an AppError when possible.
+// TooManyRequests 處理 too many 請求。
+func TooManyRequests(message string) *AppError {
+	return E(429, "too_many_requests", message)
+}
+
+// AsAppError 處理 as app 錯誤。
 func AsAppError(err error) (*AppError, bool) {
 	var appErr *AppError
 	if errors.As(err, &appErr) {

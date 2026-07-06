@@ -2,7 +2,7 @@ package domain
 
 import "time"
 
-// UserGroup groups accounts so IAM grants can be managed together.
+// UserGroup 定義使用者群組的資料結構。
 type UserGroup struct {
 	ID               string    `json:"id"`
 	TenantID         string    `json:"tenant_id"`
@@ -13,7 +13,7 @@ type UserGroup struct {
 	CreatedAt        time.Time `json:"created_at"`
 }
 
-// CreateUserGroupInput carries the payload for creating a user group.
+// CreateUserGroupInput 定義使用者群組輸入的資料結構。
 type CreateUserGroupInput struct {
 	Name             string   `json:"name"`
 	Description      string   `json:"description,omitempty"`
@@ -21,7 +21,7 @@ type CreateUserGroupInput struct {
 	MemberAccountIDs []string `json:"member_account_ids,omitempty"`
 }
 
-// PermissionSet groups permissions that can be assigned to accounts or groups.
+// PermissionSet 定義權限集合的資料結構。
 type PermissionSet struct {
 	ID          string       `json:"id"`
 	TenantID    string       `json:"tenant_id"`
@@ -31,14 +31,14 @@ type PermissionSet struct {
 	CreatedAt   time.Time    `json:"created_at"`
 }
 
-// CreatePermissionSetInput carries the payload for creating a permission set.
+// CreatePermissionSetInput 定義權限集合輸入的資料結構。
 type CreatePermissionSetInput struct {
 	Name        string       `json:"name"`
 	Description string       `json:"description,omitempty"`
 	Permissions []Permission `json:"permissions"`
 }
 
-// Permission describes one action over a resource and optional scope.
+// Permission 定義權限的資料結構。
 type Permission struct {
 	ApplicationCode ApplicationCode `json:"application_code,omitempty"`
 	ResourceType    ResourceType    `json:"resource_type,omitempty"`
@@ -52,7 +52,7 @@ type Permission struct {
 	MenuKey         string          `json:"menu_key,omitempty"`
 }
 
-// AssumableRole describes a temporary role that an account may assume.
+// AssumableRole 定義 assumable 角色的資料結構。
 type AssumableRole struct {
 	ID                     string         `json:"id"`
 	TenantID               string         `json:"tenant_id"`
@@ -66,7 +66,7 @@ type AssumableRole struct {
 	CreatedAt              time.Time      `json:"created_at"`
 }
 
-// CreateAssumableRoleInput carries the payload for creating an assumable role.
+// CreateAssumableRoleInput 定義 assumable 角色輸入的資料結構。
 type CreateAssumableRoleInput struct {
 	Name                   string         `json:"name"`
 	Description            string         `json:"description,omitempty"`
@@ -77,7 +77,7 @@ type CreateAssumableRoleInput struct {
 	SessionDurationSeconds int            `json:"session_duration_seconds,omitempty"`
 }
 
-// PermissionSetAssignment attaches a permission set to one IAM principal.
+// PermissionSetAssignment 定義權限集合指派的資料結構。
 type PermissionSetAssignment struct {
 	ID              string     `json:"id"`
 	TenantID        string     `json:"tenant_id"`
@@ -92,7 +92,7 @@ type PermissionSetAssignment struct {
 	CreatedAt       time.Time  `json:"created_at"`
 }
 
-// CreatePermissionSetAssignmentInput carries the payload for assigning a permission set.
+// CreatePermissionSetAssignmentInput 定義權限集合指派輸入的資料結構。
 type CreatePermissionSetAssignmentInput struct {
 	PrincipalType   string `json:"principal_type"`
 	PrincipalID     string `json:"principal_id"`
@@ -104,7 +104,7 @@ type CreatePermissionSetAssignmentInput struct {
 	ExpiresAt       string `json:"expires_at,omitempty"`
 }
 
-// DataScope limits the data visible under a permission assignment.
+// DataScope 定義資料範圍的資料結構。
 type DataScope struct {
 	ID        string         `json:"id"`
 	TenantID  string         `json:"tenant_id"`
@@ -115,7 +115,7 @@ type DataScope struct {
 	CreatedAt time.Time      `json:"created_at"`
 }
 
-// CreateDataScopeInput carries the payload for creating a data scope.
+// CreateDataScopeInput 定義資料範圍輸入的資料結構。
 type CreateDataScopeInput struct {
 	Code      string         `json:"code"`
 	Name      string         `json:"name"`
@@ -123,7 +123,7 @@ type CreateDataScopeInput struct {
 	Params    map[string]any `json:"params,omitempty"`
 }
 
-// FieldPolicy controls field-level visibility or masking for a resource.
+// FieldPolicy 定義欄位政策的資料結構。
 type FieldPolicy struct {
 	ID              string    `json:"id"`
 	TenantID        string    `json:"tenant_id"`
@@ -136,7 +136,7 @@ type FieldPolicy struct {
 	CreatedAt       time.Time `json:"created_at"`
 }
 
-// CreateFieldPolicyInput carries the payload for creating a field policy.
+// CreateFieldPolicyInput 定義欄位政策輸入的資料結構。
 type CreateFieldPolicyInput struct {
 	ApplicationCode string `json:"application_code"`
 	ResourceType    string `json:"resource_type"`
@@ -146,7 +146,7 @@ type CreateFieldPolicyInput struct {
 	PermissionID    string `json:"permission_id,omitempty"`
 }
 
-// AssumableRoleSession records an active assumed-role session for an account.
+// AssumableRoleSession 定義 assumable 角色 session 的資料結構。
 type AssumableRoleSession struct {
 	ID                 string         `json:"id"`
 	TenantID           string         `json:"tenant_id"`
@@ -159,20 +159,20 @@ type AssumableRoleSession struct {
 	CreatedAt          time.Time      `json:"created_at"`
 }
 
-// AssumeRoleInput carries the requested duration and optional session policy.
+// AssumeRoleInput 定義角色輸入的資料結構。
 type AssumeRoleInput struct {
 	Reason          string         `json:"reason,omitempty"`
 	DurationMinutes int            `json:"duration_minutes,omitempty"`
 	SessionPolicy   map[string]any `json:"session_policy,omitempty"`
 }
 
-// PermissionVersion tracks the tenant-wide authorization cache version.
+// PermissionVersion 定義權限 version 的資料結構。
 type PermissionVersion struct {
 	TenantID string `json:"tenant_id"`
 	Version  int64  `json:"version"`
 }
 
-// AuthzOutboxEvent records relationship changes waiting for external sync.
+// AuthzOutboxEvent 定義授權 outbox 事件的資料結構。
 type AuthzOutboxEvent struct {
 	ID          string         `json:"id"`
 	TenantID    string         `json:"tenant_id"`
@@ -185,7 +185,7 @@ type AuthzOutboxEvent struct {
 	ProcessedAt *time.Time     `json:"processed_at,omitempty"`
 }
 
-// AuthzRelationshipTuple is the local representation of an OpenFGA tuple.
+// AuthzRelationshipTuple 定義授權關係 tuple 的資料結構。
 type AuthzRelationshipTuple struct {
 	ID          string    `json:"id"`
 	TenantID    string    `json:"tenant_id"`
@@ -197,22 +197,22 @@ type AuthzRelationshipTuple struct {
 	CreatedAt   time.Time `json:"created_at"`
 }
 
-// AuthzRelationshipTupleOperation identifies a tuple write or delete.
+// AuthzRelationshipTupleOperation 表示授權關係 tuple operation。
 type AuthzRelationshipTupleOperation string
 
-// Authz tuple operation values used by the outbox processor.
+// 下列常數定義此模組使用的固定值。
 const (
 	AuthzRelationshipTupleWrite  AuthzRelationshipTupleOperation = "write"
 	AuthzRelationshipTupleDelete AuthzRelationshipTupleOperation = "delete"
 )
 
-// AuthzRelationshipTupleChange combines an operation with a relationship tuple.
+// AuthzRelationshipTupleChange 定義授權關係 tuple change 的資料結構。
 type AuthzRelationshipTupleChange struct {
 	Operation AuthzRelationshipTupleOperation `json:"operation"`
 	Tuple     AuthzRelationshipTuple          `json:"tuple"`
 }
 
-// CheckRequest asks whether the current account can perform an action.
+// CheckRequest 定義請求的資料結構。
 type CheckRequest struct {
 	ApplicationCode ApplicationCode `json:"application_code,omitempty"`
 	ResourceType    ResourceType    `json:"resource_type,omitempty"`
@@ -228,7 +228,7 @@ type CheckRequest struct {
 	RoutePath        string `json:"route_path,omitempty"`
 }
 
-// CheckResult describes the authorization decision and the evidence behind it.
+// CheckResult 定義結果的資料結構。
 type CheckResult struct {
 	Allowed            bool                 `json:"allowed"`
 	Reason             string               `json:"reason"`
@@ -254,17 +254,17 @@ type CheckResult struct {
 	Target             string               `json:"target,omitempty"`
 }
 
-// BatchCheckRequest groups authorization checks into one request.
+// BatchCheckRequest 定義批次 check 請求的資料結構。
 type BatchCheckRequest struct {
 	Checks []CheckRequest `json:"checks"`
 }
 
-// BatchCheckResult returns authorization decisions in request order.
+// BatchCheckResult 定義批次 check 結果的資料結構。
 type BatchCheckResult struct {
 	Results []CheckResult `json:"results"`
 }
 
-// AssumedRoleDecision describes the assumed-role context that influenced a decision.
+// AssumedRoleDecision 定義 assumed 角色決策的資料結構。
 type AssumedRoleDecision struct {
 	SessionID string `json:"session_id,omitempty"`
 	RoleID    string `json:"role_id"`

@@ -6,7 +6,7 @@ import (
 	"time"
 )
 
-// IAMService implements user group, permission, data scope, and role workflows.
+// IAMService 定義 IAM 服務的資料結構。
 type IAMService struct {
 	*Service
 	store iamStore
@@ -17,12 +17,12 @@ const (
 	maxAssumableRoleSessionSeconds     = 12 * 60 * 60
 )
 
-// IAM returns the IAM service facade.
+// IAM 處理 IAM 的服務流程。
 func (c *Service) IAM() IAMService {
 	return IAMService{Service: c, store: c.store}
 }
 
-// ListPermissionSets returns permission sets visible to the current account.
+// ListPermissionSets 列出權限集合的服務流程。
 func (c IAMService) ListPermissionSets(ctx RequestContext) ([]PermissionSet, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourcePermissionSet, ActionRead, ""); err != nil {
 		return nil, err
@@ -30,7 +30,7 @@ func (c IAMService) ListPermissionSets(ctx RequestContext) ([]PermissionSet, err
 	return c.store.ListPermissionSets(goContext(ctx), ctx.TenantID)
 }
 
-// ListPermissionSetPage returns paginated permission sets.
+// ListPermissionSetPage 列出權限集合分頁的服務流程。
 func (c IAMService) ListPermissionSetPage(ctx RequestContext, page PageRequest) (PageResponse[PermissionSet], error) {
 	items, err := c.ListPermissionSets(ctx)
 	if err != nil {
@@ -40,7 +40,7 @@ func (c IAMService) ListPermissionSetPage(ctx RequestContext, page PageRequest) 
 	return utils.PageResponse(items, page), nil
 }
 
-// CreatePermissionSet creates a permission set and bumps the tenant permission version.
+// CreatePermissionSet 建立權限集合的服務流程。
 func (c IAMService) CreatePermissionSet(ctx RequestContext, input CreatePermissionSetInput) (PermissionSet, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourcePermissionSet, ActionCreate, ""); err != nil {
 		return PermissionSet{}, err
@@ -80,7 +80,7 @@ func (c IAMService) CreatePermissionSet(ctx RequestContext, input CreatePermissi
 	return set, nil
 }
 
-// ListPermissions returns route-derived permissions available for assignment.
+// ListPermissions 列出權限的服務流程。
 func (c IAMService) ListPermissions(ctx RequestContext) ([]Permission, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceType("permission"), ActionRead, ""); err != nil {
 		return nil, err
@@ -88,7 +88,7 @@ func (c IAMService) ListPermissions(ctx RequestContext) ([]Permission, error) {
 	return defaultPermissions(), nil
 }
 
-// ListPermissionPage returns paginated route-derived permissions.
+// ListPermissionPage 列出權限分頁的服務流程。
 func (c IAMService) ListPermissionPage(ctx RequestContext, page PageRequest) (PageResponse[Permission], error) {
 	items, err := c.ListPermissions(ctx)
 	if err != nil {
@@ -97,7 +97,7 @@ func (c IAMService) ListPermissionPage(ctx RequestContext, page PageRequest) (Pa
 	return utils.PageResponse(items, page), nil
 }
 
-// ListUserGroups returns user groups visible to the current account.
+// ListUserGroups 列出使用者群組的服務流程。
 func (c IAMService) ListUserGroups(ctx RequestContext) ([]UserGroup, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceUserGroup, ActionRead, ""); err != nil {
 		return nil, err
@@ -105,7 +105,7 @@ func (c IAMService) ListUserGroups(ctx RequestContext) ([]UserGroup, error) {
 	return c.store.ListUserGroups(goContext(ctx), ctx.TenantID)
 }
 
-// ListUserGroupPage returns paginated user groups.
+// ListUserGroupPage 列出使用者群組分頁的服務流程。
 func (c IAMService) ListUserGroupPage(ctx RequestContext, page PageRequest) (PageResponse[UserGroup], error) {
 	items, err := c.ListUserGroups(ctx)
 	if err != nil {
@@ -115,7 +115,7 @@ func (c IAMService) ListUserGroupPage(ctx RequestContext, page PageRequest) (Pag
 	return utils.PageResponse(items, page), nil
 }
 
-// CreateUserGroup creates a group and updates account memberships.
+// CreateUserGroup 建立使用者群組的服務流程。
 func (c IAMService) CreateUserGroup(ctx RequestContext, input CreateUserGroupInput) (UserGroup, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceUserGroup, ActionCreate, ""); err != nil {
 		return UserGroup{}, err
@@ -172,7 +172,7 @@ func (c IAMService) CreateUserGroup(ctx RequestContext, input CreateUserGroupInp
 	return group, nil
 }
 
-// ListPermissionSetAssignments returns permission-set assignments visible to the caller.
+// ListPermissionSetAssignments 列出權限集合指派的服務流程。
 func (c IAMService) ListPermissionSetAssignments(ctx RequestContext) ([]PermissionSetAssignment, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourcePermissionAssign, ActionRead, ""); err != nil {
 		return nil, err
@@ -180,7 +180,7 @@ func (c IAMService) ListPermissionSetAssignments(ctx RequestContext) ([]Permissi
 	return c.store.ListPermissionSetAssignments(goContext(ctx), ctx.TenantID)
 }
 
-// ListPermissionSetAssignmentPage returns paginated permission-set assignments.
+// ListPermissionSetAssignmentPage 列出權限集合指派分頁的服務流程。
 func (c IAMService) ListPermissionSetAssignmentPage(ctx RequestContext, page PageRequest) (PageResponse[PermissionSetAssignment], error) {
 	items, err := c.ListPermissionSetAssignments(ctx)
 	if err != nil {
@@ -190,7 +190,7 @@ func (c IAMService) ListPermissionSetAssignmentPage(ctx RequestContext, page Pag
 	return utils.PageResponse(items, page), nil
 }
 
-// CreatePermissionSetAssignment grants a permission set to a principal with a data scope.
+// CreatePermissionSetAssignment 建立權限集合指派的服務流程。
 func (c IAMService) CreatePermissionSetAssignment(ctx RequestContext, input CreatePermissionSetAssignmentInput) (PermissionSetAssignment, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourcePermissionAssign, ActionCreate, ""); err != nil {
 		return PermissionSetAssignment{}, err
@@ -272,6 +272,7 @@ func (c IAMService) CreatePermissionSetAssignment(ctx RequestContext, input Crea
 	return assignment, nil
 }
 
+// validatePermissionSetAssignmentPrincipal 驗證權限集合指派 principal 的服務流程。
 func (c IAMService) validatePermissionSetAssignmentPrincipal(ctx RequestContext, principalType, principalID string) error {
 	switch PrincipalType(principalType) {
 	case PrincipalTypeAccount:
@@ -298,7 +299,7 @@ func (c IAMService) validatePermissionSetAssignmentPrincipal(ctx RequestContext,
 	return nil
 }
 
-// ListDataScopes returns data scopes visible to the current account.
+// ListDataScopes 列出資料範圍的服務流程。
 func (c IAMService) ListDataScopes(ctx RequestContext) ([]DataScope, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceDataScope, ActionRead, ""); err != nil {
 		return nil, err
@@ -306,7 +307,7 @@ func (c IAMService) ListDataScopes(ctx RequestContext) ([]DataScope, error) {
 	return c.store.ListDataScopes(goContext(ctx), ctx.TenantID)
 }
 
-// ListDataScopePage returns paginated data scopes.
+// ListDataScopePage 列出資料範圍分頁的服務流程。
 func (c IAMService) ListDataScopePage(ctx RequestContext, page PageRequest) (PageResponse[DataScope], error) {
 	items, err := c.ListDataScopes(ctx)
 	if err != nil {
@@ -316,7 +317,7 @@ func (c IAMService) ListDataScopePage(ctx RequestContext, page PageRequest) (Pag
 	return utils.PageResponse(items, page), nil
 }
 
-// CreateDataScope creates a reusable data visibility scope.
+// CreateDataScope 建立資料範圍的服務流程。
 func (c IAMService) CreateDataScope(ctx RequestContext, input CreateDataScopeInput) (DataScope, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceDataScope, ActionCreate, ""); err != nil {
 		return DataScope{}, err
@@ -354,7 +355,7 @@ func (c IAMService) CreateDataScope(ctx RequestContext, input CreateDataScopeInp
 	return scope, nil
 }
 
-// ListFieldPolicies returns field policies filtered by optional application and resource.
+// ListFieldPolicies 列出欄位政策的服務流程。
 func (c IAMService) ListFieldPolicies(ctx RequestContext, applicationCode, resourceType string) ([]FieldPolicy, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceFieldPolicy, ActionRead, ""); err != nil {
 		return nil, err
@@ -362,7 +363,7 @@ func (c IAMService) ListFieldPolicies(ctx RequestContext, applicationCode, resou
 	return c.store.ListFieldPolicies(goContext(ctx), ctx.TenantID, strings.TrimSpace(applicationCode), strings.TrimSpace(resourceType))
 }
 
-// ListFieldPolicyPage returns paginated field policies.
+// ListFieldPolicyPage 列出欄位政策分頁的服務流程。
 func (c IAMService) ListFieldPolicyPage(ctx RequestContext, applicationCode, resourceType string, page PageRequest) (PageResponse[FieldPolicy], error) {
 	items, err := c.ListFieldPolicies(ctx, applicationCode, resourceType)
 	if err != nil {
@@ -372,7 +373,7 @@ func (c IAMService) ListFieldPolicyPage(ctx RequestContext, applicationCode, res
 	return utils.PageResponse(items, page), nil
 }
 
-// CreateFieldPolicy creates a field-level visibility or masking policy.
+// CreateFieldPolicy 建立欄位政策的服務流程。
 func (c IAMService) CreateFieldPolicy(ctx RequestContext, input CreateFieldPolicyInput) (FieldPolicy, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceFieldPolicy, ActionCreate, ""); err != nil {
 		return FieldPolicy{}, err
@@ -416,6 +417,7 @@ func (c IAMService) CreateFieldPolicy(ctx RequestContext, input CreateFieldPolic
 	return policy, nil
 }
 
+// validDataScopeType 處理有效資料範圍 type。
 func validDataScopeType(scopeType string) bool {
 	switch Scope(scopeType) {
 	case ScopeAll, ScopeTenant, ScopeSelf, ScopeOwn, ScopeObject, ScopeDepartment, ScopeDepartmentSubtree, ScopeDirectReports, ScopeAssignedOrgUnits, ScopeCustomCondition, ScopeSystem:
@@ -425,7 +427,7 @@ func validDataScopeType(scopeType string) bool {
 	}
 }
 
-// ListAssumableRoles returns roles the current account can inspect.
+// ListAssumableRoles 列出 assumable 角色的服務流程。
 func (c IAMService) ListAssumableRoles(ctx RequestContext) ([]AssumableRole, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceAssumableRole, ActionRead, ""); err != nil {
 		return nil, err
@@ -433,7 +435,7 @@ func (c IAMService) ListAssumableRoles(ctx RequestContext) ([]AssumableRole, err
 	return c.store.ListAssumableRoles(goContext(ctx), ctx.TenantID)
 }
 
-// ListAssumableRolePage returns paginated assumable roles.
+// ListAssumableRolePage 列出 assumable 角色分頁的服務流程。
 func (c IAMService) ListAssumableRolePage(ctx RequestContext, page PageRequest) (PageResponse[AssumableRole], error) {
 	items, err := c.ListAssumableRoles(ctx)
 	if err != nil {
@@ -443,7 +445,7 @@ func (c IAMService) ListAssumableRolePage(ctx RequestContext, page PageRequest) 
 	return utils.PageResponse(items, page), nil
 }
 
-// CreateAssumableRole creates a temporary role definition.
+// CreateAssumableRole 建立 assumable 角色的服務流程。
 func (c IAMService) CreateAssumableRole(ctx RequestContext, input CreateAssumableRoleInput) (AssumableRole, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceAssumableRole, ActionCreate, ""); err != nil {
 		return AssumableRole{}, err
@@ -499,7 +501,7 @@ func (c IAMService) CreateAssumableRole(ctx RequestContext, input CreateAssumabl
 	return role, nil
 }
 
-// AssumeRole creates a bounded assumed-role session for the current account.
+// AssumeRole 建立 assumed role session角色的服務流程。
 func (c IAMService) AssumeRole(ctx RequestContext, roleID string, input AssumeRoleInput) (AssumeRoleResponse, error) {
 	account, _, err := c.requireIAMAuthz(ctx, ResourceAssumableRole, ActionAssume, roleID)
 	if err != nil {
@@ -582,6 +584,7 @@ func (c IAMService) AssumeRole(ctx RequestContext, roleID string, input AssumeRo
 	}, nil
 }
 
+// validateAssumableRoleSessionSeconds 驗證 assumable 角色 session seconds。
 func validateAssumableRoleSessionSeconds(seconds int) error {
 	if seconds < 0 {
 		return BadRequest("session_duration_seconds must be positive")
@@ -592,6 +595,7 @@ func validateAssumableRoleSessionSeconds(seconds int) error {
 	return nil
 }
 
+// effectiveAssumableRoleSessionDuration 處理 effective assumable 角色 session duration。
 func effectiveAssumableRoleSessionDuration(roleSeconds int, requestedMinutes int) (time.Duration, error) {
 	if err := validateAssumableRoleSessionSeconds(roleSeconds); err != nil {
 		return 0, err
@@ -611,6 +615,7 @@ func effectiveAssumableRoleSessionDuration(roleSeconds int, requestedMinutes int
 	return time.Duration(requestedMinutes) * time.Minute, nil
 }
 
+// trustPolicyAllowsAccount 處理 trust 政策 allows 帳號的服務流程。
 func (c IAMService) trustPolicyAllowsAccount(account Account, role AssumableRole) (bool, error) {
 	if !role.Trusted || len(role.TrustPolicy) == 0 {
 		return false, nil

@@ -16,7 +16,7 @@ import (
 
 const maxOpenFGAErrorBodyLength = 500
 
-// Checker adapts OpenFGA check and write APIs to service-layer interfaces.
+// Checker 定義 checker 的資料結構。
 type Checker struct {
 	apiURL  string
 	storeID string
@@ -24,7 +24,7 @@ type Checker struct {
 	client  *http.Client
 }
 
-// NewChecker creates an OpenFGA client for one store.
+// NewChecker 建立 checker。
 func NewChecker(apiURL, storeID string, client *http.Client) *Checker {
 	if client == nil {
 		client = &http.Client{Timeout: 5 * time.Second}
@@ -36,7 +36,7 @@ func NewChecker(apiURL, storeID string, client *http.Client) *Checker {
 	}
 }
 
-// WithAuthorizationModelID pins checks and health validation to a specific model.
+// WithAuthorizationModelID 附加授權 model ID。
 func (c *Checker) WithAuthorizationModelID(modelID string) *Checker {
 	if c == nil {
 		return c
@@ -45,7 +45,7 @@ func (c *Checker) WithAuthorizationModelID(modelID string) *Checker {
 	return c
 }
 
-// Ping verifies OpenFGA health and the configured authorization model.
+// Ping 檢查外部服務連線狀態。
 func (c *Checker) Ping(ctx context.Context) error {
 	if c == nil || c.apiURL == "" || c.storeID == "" {
 		return errors.New("openfga checker not configured")
@@ -65,7 +65,7 @@ func (c *Checker) Ping(ctx context.Context) error {
 	return c.verifyAuthorizationModel(ctx)
 }
 
-// CheckRelationship asks OpenFGA whether one relationship tuple is allowed.
+// CheckRelationship 檢查關係。
 func (c *Checker) CheckRelationship(ctx context.Context, check domain.RelationshipCheck) (bool, error) {
 	if c == nil || c.apiURL == "" || c.storeID == "" {
 		return false, nil
@@ -109,7 +109,7 @@ func (c *Checker) CheckRelationship(ctx context.Context, check domain.Relationsh
 	return payload.Allowed, nil
 }
 
-// WriteRelationshipTuples sends tuple write/delete changes to OpenFGA.
+// WriteRelationshipTuples 寫入關係 tuple。
 func (c *Checker) WriteRelationshipTuples(ctx context.Context, changes []domain.AuthzRelationshipTupleChange) error {
 	if c == nil || c.apiURL == "" || c.storeID == "" || len(changes) == 0 {
 		return nil
@@ -157,6 +157,7 @@ func (c *Checker) WriteRelationshipTuples(ctx context.Context, changes []domain.
 	return nil
 }
 
+// verifyAuthorizationModel 處理 verify 授權 model。
 func (c *Checker) verifyAuthorizationModel(ctx context.Context) error {
 	if c.modelID == "" {
 		return nil
@@ -176,6 +177,7 @@ func (c *Checker) verifyAuthorizationModel(ctx context.Context) error {
 	return nil
 }
 
+// openFGAStatusError 處理 OpenFGA 狀態錯誤。
 func openFGAStatusError(resp *http.Response, operation string) error {
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return nil
@@ -183,6 +185,7 @@ func openFGAStatusError(resp *http.Response, operation string) error {
 	return fmt.Errorf("openfga %s failed: status=%d body=%q", operation, resp.StatusCode, readOpenFGAErrorBody(resp))
 }
 
+// readOpenFGAErrorBody 讀取 OpenFGA 錯誤 body。
 func readOpenFGAErrorBody(resp *http.Response) string {
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, maxOpenFGAErrorBodyLength+1))
 	if err != nil {

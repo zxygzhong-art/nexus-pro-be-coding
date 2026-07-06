@@ -450,6 +450,23 @@ type FormTemplate struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type IdentityProvisioningOutbox struct {
+	ID          string             `json:"id"`
+	TenantID    string             `json:"tenant_id"`
+	AccountID   string             `json:"account_id"`
+	EmployeeID  string             `json:"employee_id"`
+	EmployeeNo  string             `json:"employee_no"`
+	Email       string             `json:"email"`
+	DisplayName string             `json:"display_name"`
+	Enabled     bool               `json:"enabled"`
+	SendInvite  bool               `json:"send_invite"`
+	Status      string             `json:"status"`
+	RetryCount  int32              `json:"retry_count"`
+	LastError   string             `json:"last_error"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type Knowledge struct {
 	ID                 pgtype.UUID        `json:"id"`
 	CompanyID          int32              `json:"company_id"`
@@ -512,6 +529,31 @@ type License struct {
 	IssuedAt      pgtype.Timestamptz `json:"issued_at"`
 	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
 	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+}
+
+type Notification struct {
+	ID                 string             `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	Tone               string             `json:"tone"`
+	Category           string             `json:"category"`
+	Title              string             `json:"title"`
+	Body               string             `json:"body"`
+	StatusText         string             `json:"status_text"`
+	LinkUrl            string             `json:"link_url"`
+	SourceType         string             `json:"source_type"`
+	SourceID           string             `json:"source_id"`
+	CreatedByAccountID pgtype.Text        `json:"created_by_account_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+}
+
+type NotificationRecipient struct {
+	NotificationID string             `json:"notification_id"`
+	TenantID       string             `json:"tenant_id"`
+	AccountID      string             `json:"account_id"`
+	ReadAt         pgtype.Timestamptz `json:"read_at"`
+	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type OrgUnit struct {

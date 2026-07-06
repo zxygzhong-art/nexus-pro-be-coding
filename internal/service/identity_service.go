@@ -8,18 +8,18 @@ import (
 	"nexus-pro-be/internal/utils"
 )
 
-// IdentityService resolves external authenticated principals to local accounts.
+// IdentityService 定義身分服務的資料結構。
 type IdentityService struct {
 	*Service
 	store identityStore
 }
 
-// Identity returns the external identity mapping facade.
+// Identity 處理身分的服務流程。
 func (c *Service) Identity() IdentityService {
 	return IdentityService{Service: c, store: c.store}
 }
 
-// ResolveAuthenticatedPrincipal maps provider/subject identity to a local tenant/account.
+// ResolveAuthenticatedPrincipal 解析 authenticated principal 的服務流程。
 func (c IdentityService) ResolveAuthenticatedPrincipal(ctx context.Context, principal AuthenticatedPrincipal) (IdentityResolution, error) {
 	tenantID := strings.TrimSpace(utils.FirstNonEmpty(principal.TenantID, principal.TenantHint))
 	if tenantID == "" {
@@ -41,7 +41,7 @@ func (c IdentityService) ResolveAuthenticatedPrincipal(ctx context.Context, prin
 	return IdentityResolution{}, domain.Unauthorized("external identity is not linked to a local account")
 }
 
-// ResolveBoundAuthenticatedPrincipal requires a pre-existing provider/subject binding.
+// ResolveBoundAuthenticatedPrincipal 解析 bound authenticated principal 的服務流程。
 func (c IdentityService) ResolveBoundAuthenticatedPrincipal(ctx context.Context, principal AuthenticatedPrincipal) (IdentityResolution, error) {
 	tenantID := strings.TrimSpace(utils.FirstNonEmpty(principal.TenantID, principal.TenantHint))
 	if tenantID == "" {

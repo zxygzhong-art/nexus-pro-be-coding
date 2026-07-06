@@ -38,18 +38,18 @@ const (
 
 var attendanceClockLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
 
-// AttendanceService implements leave balance and leave request workflows.
+// AttendanceService 定義考勤服務的資料結構。
 type AttendanceService struct {
 	*Service
 	store attendanceStore
 }
 
-// Attendance returns the attendance service facade.
+// Attendance 處理考勤的服務流程。
 func (c *Service) Attendance() AttendanceService {
 	return AttendanceService{Service: c, store: c.store}
 }
 
-// ListLeaveBalances returns leave balances visible under the current authorization scope.
+// ListLeaveBalances 列出請假 balances 的服務流程。
 func (c AttendanceService) ListLeaveBalances(ctx RequestContext) ([]LeaveBalance, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -76,7 +76,7 @@ func (c AttendanceService) ListLeaveBalances(ctx RequestContext) ([]LeaveBalance
 	return filterLeaveBalancesByEmployees(items, allowed), nil
 }
 
-// ListLeaveBalancePage returns paginated visible leave balances.
+// ListLeaveBalancePage 列出請假 balance 分頁的服務流程。
 func (c AttendanceService) ListLeaveBalancePage(ctx RequestContext, page PageRequest) (PageResponse[LeaveBalance], error) {
 	items, err := c.ListLeaveBalances(ctx)
 	if err != nil {
@@ -86,11 +86,12 @@ func (c AttendanceService) ListLeaveBalancePage(ctx RequestContext, page PageReq
 	return utils.PageResponse(items, page), nil
 }
 
-// ListLeaveRequests returns leave requests visible under the current authorization scope.
+// ListLeaveRequests 列出請假請求的服務流程。
 func (c AttendanceService) ListLeaveRequests(ctx RequestContext) ([]LeaveRequest, error) {
 	return c.listLeaveRequestsByQuery(ctx, LeaveRequestQuery{})
 }
 
+// listLeaveRequestsByQuery 列出請假請求 by 查詢的服務流程。
 func (c AttendanceService) listLeaveRequestsByQuery(ctx RequestContext, query LeaveRequestQuery) ([]LeaveRequest, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -116,7 +117,7 @@ func (c AttendanceService) listLeaveRequestsByQuery(ctx RequestContext, query Le
 	return c.store.ListLeaveRequestsByQuery(goContext(ctx), ctx.TenantID, normalizeLeaveRequestQuery(query))
 }
 
-// ListLeaveRequestPage returns paginated visible leave requests.
+// ListLeaveRequestPage 列出請假請求分頁的服務流程。
 func (c AttendanceService) ListLeaveRequestPage(ctx RequestContext, page PageRequest) (PageResponse[LeaveRequest], error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -149,7 +150,7 @@ func (c AttendanceService) ListLeaveRequestPage(ctx RequestContext, page PageReq
 	return utils.PageResponseFromStore(items, total, page), nil
 }
 
-// CurrentAttendancePolicy returns the current tenant attendance policy projection.
+// CurrentAttendancePolicy 處理目前考勤政策的服務流程。
 func (c AttendanceService) CurrentAttendancePolicy(ctx RequestContext) (AttendancePolicyResponse, error) {
 	if _, _, err := c.requireAttendanceAuthz(ctx, ResourceLeave, ActionRead, ""); err != nil {
 		return AttendancePolicyResponse{}, err
@@ -164,7 +165,7 @@ func (c AttendanceService) CurrentAttendancePolicy(ctx RequestContext) (Attendan
 	return attendancePolicyResponse(policy), nil
 }
 
-// UpdateAttendancePolicy persists tenant-level attendance rules used by workspace settings.
+// UpdateAttendancePolicy 更新考勤政策的服務流程。
 func (c AttendanceService) UpdateAttendancePolicy(ctx RequestContext, input UpdateAttendancePolicyInput) (AttendancePolicyResponse, error) {
 	account, decision, authzAudit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppAttendance, ResourceType: ResourceLeave, Action: ActionUpdate},
@@ -197,6 +198,7 @@ func (c AttendanceService) UpdateAttendancePolicy(ctx RequestContext, input Upda
 	return attendancePolicyResponse(next), nil
 }
 
+// attendancePolicyFromInput 處理考勤政策 來源 輸入的服務流程。
 func (c AttendanceService) attendancePolicyFromInput(ctx RequestContext, accountID string, input UpdateAttendancePolicyInput) (AttendancePolicy, error) {
 	current, ok, err := c.store.GetAttendancePolicy(goContext(ctx), ctx.TenantID)
 	if err != nil {
@@ -222,6 +224,7 @@ func (c AttendanceService) attendancePolicyFromInput(ctx RequestContext, account
 	return policy, nil
 }
 
+// defaultAttendancePolicyResponse 處理預設考勤政策回應。
 func defaultAttendancePolicyResponse() AttendancePolicyResponse {
 	return AttendancePolicyResponse{
 		WorkTime: AttendancePolicyWorkTime{
@@ -241,6 +244,7 @@ func defaultAttendancePolicyResponse() AttendancePolicyResponse {
 	}
 }
 
+// attendancePolicyResponse 處理考勤政策回應。
 func attendancePolicyResponse(policy AttendancePolicy) AttendancePolicyResponse {
 	workTime := normalizeAttendancePolicyWorkTime(policy.WorkTime)
 	leaveTypes := normalizeAttendanceLeaveTypes(policy.LeaveTypes)
@@ -250,6 +254,7 @@ func attendancePolicyResponse(policy AttendancePolicy) AttendancePolicyResponse 
 	return AttendancePolicyResponse{WorkTime: workTime, LeaveTypes: leaveTypes}
 }
 
+// normalizeAttendancePolicyWorkTime 正規化考勤政策 work 時間。
 func normalizeAttendancePolicyWorkTime(workTime AttendancePolicyWorkTime) AttendancePolicyWorkTime {
 	defaults := defaultAttendancePolicyResponse().WorkTime
 	out := AttendancePolicyWorkTime{
@@ -289,6 +294,7 @@ func normalizeAttendancePolicyWorkTime(workTime AttendancePolicyWorkTime) Attend
 	return out
 }
 
+// normalizeAttendanceLeaveTypes 正規化考勤請假 types。
 func normalizeAttendanceLeaveTypes(items []AttendanceLeaveType) []AttendanceLeaveType {
 	out := make([]AttendanceLeaveType, 0, len(items))
 	for _, item := range items {
@@ -307,6 +313,7 @@ func normalizeAttendanceLeaveTypes(items []AttendanceLeaveType) []AttendanceLeav
 	return out
 }
 
+// validateAttendancePolicy 驗證考勤政策。
 func validateAttendancePolicy(policy AttendancePolicy) error {
 	if !stringInSlice(policy.WorkTime.StandardStart, policy.WorkTime.TimeOptions) || !stringInSlice(policy.WorkTime.StandardEnd, policy.WorkTime.TimeOptions) {
 		return BadRequest("standard time must use a configured time option")
@@ -336,6 +343,7 @@ func validateAttendancePolicy(policy AttendancePolicy) error {
 	return nil
 }
 
+// stringInSlice 處理字串 in slice。
 func stringInSlice(value string, options []string) bool {
 	for _, option := range options {
 		if value == option {
@@ -345,7 +353,7 @@ func stringInSlice(value string, options []string) bool {
 	return false
 }
 
-// CreateLeaveRequest creates a leave request and reserves leave balance atomically.
+// CreateLeaveRequest 建立請假請求的服務流程。
 func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLeaveRequestInput) (LeaveRequest, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -492,7 +500,7 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 	return req, nil
 }
 
-// ListAttendanceWorksitePage returns configured worksites visible to the caller.
+// ListAttendanceWorksitePage 列出考勤工作地點分頁的服務流程。
 func (c AttendanceService) ListAttendanceWorksitePage(ctx RequestContext, page PageRequest) (PageResponse[AttendanceWorksite], error) {
 	if _, _, err := c.requireAttendanceAuthz(ctx, ResourceAttendanceWorksite, ActionRead, ""); err != nil {
 		return PageResponse[AttendanceWorksite]{}, err
@@ -504,7 +512,7 @@ func (c AttendanceService) ListAttendanceWorksitePage(ctx RequestContext, page P
 	return utils.PageResponse(items, page), nil
 }
 
-// CreateAttendanceWorksite creates a tenant-scoped clock-in geofence.
+// CreateAttendanceWorksite 建立考勤工作地點的服務流程。
 func (c AttendanceService) CreateAttendanceWorksite(ctx RequestContext, input CreateAttendanceWorksiteInput) (AttendanceWorksite, error) {
 	if _, _, err := c.requireAttendanceAuthz(ctx, ResourceAttendanceWorksite, ActionCreate, ""); err != nil {
 		return AttendanceWorksite{}, err
@@ -535,7 +543,7 @@ func (c AttendanceService) CreateAttendanceWorksite(ctx RequestContext, input Cr
 	return item, nil
 }
 
-// UpdateAttendanceWorksite applies partial updates to one worksite.
+// UpdateAttendanceWorksite 更新考勤工作地點的服務流程。
 func (c AttendanceService) UpdateAttendanceWorksite(ctx RequestContext, input UpdateAttendanceWorksiteInput) (AttendanceWorksite, error) {
 	id := strings.TrimSpace(input.ID)
 	if id == "" {
@@ -582,7 +590,7 @@ func (c AttendanceService) UpdateAttendanceWorksite(ctx RequestContext, input Up
 	return item, nil
 }
 
-// ListAttendanceShiftPage returns configured shifts visible to the caller.
+// ListAttendanceShiftPage 列出考勤班別分頁的服務流程。
 func (c AttendanceService) ListAttendanceShiftPage(ctx RequestContext, page PageRequest) (PageResponse[AttendanceShift], error) {
 	if _, _, err := c.requireAttendanceAuthz(ctx, ResourceAttendanceShift, ActionRead, ""); err != nil {
 		return PageResponse[AttendanceShift]{}, err
@@ -594,7 +602,7 @@ func (c AttendanceService) ListAttendanceShiftPage(ctx RequestContext, page Page
 	return utils.PageResponse(items, page), nil
 }
 
-// CreateAttendanceShift creates a same-day shift definition.
+// CreateAttendanceShift 建立考勤班別的服務流程。
 func (c AttendanceService) CreateAttendanceShift(ctx RequestContext, input CreateAttendanceShiftInput) (AttendanceShift, error) {
 	if _, _, err := c.requireAttendanceAuthz(ctx, ResourceAttendanceShift, ActionCreate, ""); err != nil {
 		return AttendanceShift{}, err
@@ -627,7 +635,7 @@ func (c AttendanceService) CreateAttendanceShift(ctx RequestContext, input Creat
 	return item, nil
 }
 
-// UpdateAttendanceShift applies partial updates to one shift.
+// UpdateAttendanceShift 更新考勤班別的服務流程。
 func (c AttendanceService) UpdateAttendanceShift(ctx RequestContext, input UpdateAttendanceShiftInput) (AttendanceShift, error) {
 	id := strings.TrimSpace(input.ID)
 	if id == "" {
@@ -680,7 +688,7 @@ func (c AttendanceService) UpdateAttendanceShift(ctx RequestContext, input Updat
 	return item, nil
 }
 
-// ListAttendanceShiftAssignmentPage returns shift assignments under the caller's employee scope.
+// ListAttendanceShiftAssignmentPage 列出考勤班別指派分頁的服務流程。
 func (c AttendanceService) ListAttendanceShiftAssignmentPage(ctx RequestContext, page PageRequest) (PageResponse[AttendanceShiftAssignment], error) {
 	account, decision, err := c.requireAttendanceAuthz(ctx, ResourceAttendanceShiftAssignment, ActionRead, "")
 	if err != nil {
@@ -697,7 +705,7 @@ func (c AttendanceService) ListAttendanceShiftAssignmentPage(ctx RequestContext,
 	return utils.PageResponse(items, page), nil
 }
 
-// CreateAttendanceShiftAssignment binds an employee to a shift and worksite.
+// CreateAttendanceShiftAssignment 建立考勤班別指派的服務流程。
 func (c AttendanceService) CreateAttendanceShiftAssignment(ctx RequestContext, input CreateAttendanceShiftAssignmentInput) (AttendanceShiftAssignment, error) {
 	account, decision, err := c.requireAttendanceAuthz(ctx, ResourceAttendanceShiftAssignment, ActionCreate, "")
 	if err != nil {
@@ -769,7 +777,7 @@ func (c AttendanceService) CreateAttendanceShiftAssignment(ctx RequestContext, i
 	return item, nil
 }
 
-// ensureNoOverlappingActiveShiftAssignment prevents ambiguous effective assignment resolution.
+// ensureNoOverlappingActiveShiftAssignment 確保no overlapping 啟用中班別指派的服務流程。
 func (c AttendanceService) ensureNoOverlappingActiveShiftAssignment(ctx RequestContext, employeeID string, effectiveFrom time.Time, effectiveTo *time.Time, status string) error {
 	if !strings.EqualFold(status, attendanceStatusActive) {
 		return nil
@@ -789,7 +797,7 @@ func (c AttendanceService) ensureNoOverlappingActiveShiftAssignment(ctx RequestC
 	return nil
 }
 
-// attendanceAssignmentRangesOverlap follows the current inclusive effective_to lookup semantics.
+// attendanceAssignmentRangesOverlap 處理考勤指派 ranges overlap。
 func attendanceAssignmentRangesOverlap(leftFrom time.Time, leftTo *time.Time, rightFrom time.Time, rightTo *time.Time) bool {
 	if rightTo != nil && rightTo.Before(leftFrom) {
 		return false
@@ -800,7 +808,7 @@ func attendanceAssignmentRangesOverlap(leftFrom time.Time, leftTo *time.Time, ri
 	return true
 }
 
-// AttendanceClockStatus returns today's assignment and accepted clock records.
+// AttendanceClockStatus 處理考勤打卡狀態的服務流程。
 func (c AttendanceService) AttendanceClockStatus(ctx RequestContext) (AttendanceClockStatus, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -858,7 +866,7 @@ func (c AttendanceService) AttendanceClockStatus(ctx RequestContext) (Attendance
 	return status, nil
 }
 
-// CreateAttendanceClockRecord records one geofenced clock attempt.
+// CreateAttendanceClockRecord 建立考勤打卡 record 的服務流程。
 func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input CreateAttendanceClockRecordInput) (AttendanceClockRecord, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -982,7 +990,7 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 	return applyAttendanceClockFieldPolicy(record, decision.FieldPolicies), nil
 }
 
-// ListAttendanceClockRecordPage returns clock records under the caller's employee scope.
+// ListAttendanceClockRecordPage 列出考勤打卡 record 分頁的服務流程。
 func (c AttendanceService) ListAttendanceClockRecordPage(ctx RequestContext, query AttendanceClockRecordQuery, page PageRequest) (PageResponse[AttendanceClockRecord], error) {
 	account, decision, err := c.requireAttendanceAuthz(ctx, ResourceAttendanceClock, ActionRead, "")
 	if err != nil {
@@ -1001,7 +1009,7 @@ func (c AttendanceService) ListAttendanceClockRecordPage(ctx RequestContext, que
 	return utils.PageResponse(items, page), nil
 }
 
-// CreateAttendanceCorrection submits a manual clock correction request.
+// CreateAttendanceCorrection 建立考勤 correction 的服務流程。
 func (c AttendanceService) CreateAttendanceCorrection(ctx RequestContext, input CreateAttendanceCorrectionInput) (AttendanceCorrectionRequest, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -1113,7 +1121,7 @@ func (c AttendanceService) CreateAttendanceCorrection(ctx RequestContext, input 
 	return correction, nil
 }
 
-// ListAttendanceCorrectionPage returns correction requests under the caller's employee scope.
+// ListAttendanceCorrectionPage 列出考勤 correction 分頁的服務流程。
 func (c AttendanceService) ListAttendanceCorrectionPage(ctx RequestContext, query AttendanceCorrectionQuery, page PageRequest) (PageResponse[AttendanceCorrectionRequest], error) {
 	account, decision, err := c.requireAttendanceAuthz(ctx, ResourceAttendanceCorrection, ActionRead, "")
 	if err != nil {
@@ -1131,16 +1139,17 @@ func (c AttendanceService) ListAttendanceCorrectionPage(ctx RequestContext, quer
 	return utils.PageResponse(items, page), nil
 }
 
-// ApproveAttendanceCorrection approves a correction and writes the accepted manual clock record.
+// ApproveAttendanceCorrection 核准考勤 correction 的服務流程。
 func (c AttendanceService) ApproveAttendanceCorrection(ctx RequestContext, id string, input ReviewAttendanceCorrectionInput) (AttendanceCorrectionRequest, error) {
 	return c.reviewAttendanceCorrection(ctx, strings.TrimSpace(id), correctionStatusApproved, input)
 }
 
-// RejectAttendanceCorrection rejects a correction without writing a clock record.
+// RejectAttendanceCorrection 駁回考勤 correction 的服務流程。
 func (c AttendanceService) RejectAttendanceCorrection(ctx RequestContext, id string, input ReviewAttendanceCorrectionInput) (AttendanceCorrectionRequest, error) {
 	return c.reviewAttendanceCorrection(ctx, strings.TrimSpace(id), correctionStatusRejected, input)
 }
 
+// reserveLeaveBalance 保留請假 balance 的服務流程。
 func (c AttendanceService) reserveLeaveBalance(ctx RequestContext, employeeID, leaveType string, hours float64) (LeaveBalance, error) {
 	balance, reserved, found, err := c.store.ReserveLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, leaveType, hours, c.Now())
 	if err != nil {
@@ -1155,6 +1164,7 @@ func (c AttendanceService) reserveLeaveBalance(ctx RequestContext, employeeID, l
 	return balance, nil
 }
 
+// releaseLeaveBalance 釋放請假 balance 的服務流程。
 func (c AttendanceService) releaseLeaveBalance(ctx RequestContext, employeeID, leaveType string, hours float64) (LeaveBalance, error) {
 	balance, found, err := c.store.ReleaseLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, leaveType, hours, c.Now())
 	if err != nil {
@@ -1166,7 +1176,7 @@ func (c AttendanceService) releaseLeaveBalance(ctx RequestContext, employeeID, l
 	return balance, nil
 }
 
-// applyLeaveWorkflowReview keeps leave requests and reserved balances in sync with workflow reviews.
+// applyLeaveWorkflowReview 處理 apply 請假流程審核的服務流程。
 func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance FormInstance, kind string, status string) error {
 	leaveRequestID := workflowLinkedLeaveRequestID(instance)
 	var request LeaveRequest
@@ -1204,6 +1214,7 @@ func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance
 	return c.store.UpsertLeaveRequest(goContext(ctx), request)
 }
 
+// attendanceEmployeeScope 處理考勤員工範圍的服務流程。
 func (c AttendanceService) attendanceEmployeeScope(ctx RequestContext, account Account, decision CheckResult) (map[string]struct{}, bool, error) {
 	if decision.Scope == "" || decision.Scope == "all" || decision.Scope == "tenant" {
 		return nil, true, nil
@@ -1241,10 +1252,12 @@ func (c AttendanceService) attendanceEmployeeScope(ctx RequestContext, account A
 	return allowed, false, nil
 }
 
+// requireAttendanceAuthz 處理 require 考勤授權的服務流程。
 func (c AttendanceService) requireAttendanceAuthz(ctx RequestContext, resource ResourceType, action Action, resourceID string) (Account, CheckResult, error) {
 	return c.Service.requireServiceAuthz(ctx, AppAttendance, resource, action, resourceID)
 }
 
+// ensureAttendanceEmployeeAllowed 確保考勤員工 allowed 的服務流程。
 func (c AttendanceService) ensureAttendanceEmployeeAllowed(ctx RequestContext, account Account, decision CheckResult, employeeID string) error {
 	allowed, all, err := c.attendanceEmployeeScope(ctx, account, decision)
 	if err != nil {
@@ -1259,7 +1272,7 @@ func (c AttendanceService) ensureAttendanceEmployeeAllowed(ctx RequestContext, a
 	return forbiddenDataScope("employee is outside data scope")
 }
 
-// attendancePolicyTimeOptions returns half-hour options used by attendance policy forms.
+// attendancePolicyTimeOptions 處理考勤政策時間選項。
 func attendancePolicyTimeOptions() []string {
 	options := make([]string, 0, 48)
 	for hour := 0; hour < 24; hour++ {
@@ -1268,12 +1281,12 @@ func attendancePolicyTimeOptions() []string {
 	return options
 }
 
-// attendancePolicyWeekendOptions returns supported weekend presets for policy settings.
+// attendancePolicyWeekendOptions 處理考勤政策 weekend 選項。
 func attendancePolicyWeekendOptions() []string {
 	return []string{"週六、週日", "週日", "無"}
 }
 
-// attendancePolicyCycleStartOptions returns valid monthly cycle start days.
+// attendancePolicyCycleStartOptions 處理考勤政策 cycle start 選項。
 func attendancePolicyCycleStartOptions() []string {
 	options := make([]string, 0, 28)
 	for day := 1; day <= 28; day++ {
@@ -1282,7 +1295,7 @@ func attendancePolicyCycleStartOptions() []string {
 	return options
 }
 
-// attendancePolicyCycleEndOptions returns same-month and next-month cycle end options.
+// attendancePolicyCycleEndOptions 處理考勤政策 cycle end 選項。
 func attendancePolicyCycleEndOptions() []string {
 	options := make([]string, 0, 58)
 	for day := 1; day <= 30; day++ {
@@ -1295,7 +1308,7 @@ func attendancePolicyCycleEndOptions() []string {
 	return options
 }
 
-// attendancePolicyLeaveTypes returns the default leave-type catalog.
+// attendancePolicyLeaveTypes 處理考勤政策請假 types。
 func attendancePolicyLeaveTypes() []AttendanceLeaveType {
 	return []AttendanceLeaveType{
 		{Code: "病", Name: "全薪病假", Quota: "30 天 / 年", Rule: "無累計", Proof: "3 天以上需診斷證明"},
@@ -1315,7 +1328,7 @@ func attendancePolicyLeaveTypes() []AttendanceLeaveType {
 	}
 }
 
-// twoDigit formats a small integer with a leading zero.
+// twoDigit 處理 two digit。
 func twoDigit(value int) string {
 	if value < 10 {
 		return "0" + strconv.Itoa(value)
@@ -1323,6 +1336,7 @@ func twoDigit(value int) string {
 	return strconv.Itoa(value)
 }
 
+// filterShiftAssignmentsByDecision 處理篩選班別指派 by 決策的服務流程。
 func (c AttendanceService) filterShiftAssignmentsByDecision(ctx RequestContext, account Account, decision CheckResult, items []AttendanceShiftAssignment) ([]AttendanceShiftAssignment, error) {
 	allowed, all, err := c.attendanceEmployeeScope(ctx, account, decision)
 	if err != nil {
@@ -1340,6 +1354,7 @@ func (c AttendanceService) filterShiftAssignmentsByDecision(ctx RequestContext, 
 	return out, nil
 }
 
+// filterClockRecordsByDecision 處理篩選打卡 records by 決策的服務流程。
 func (c AttendanceService) filterClockRecordsByDecision(ctx RequestContext, account Account, decision CheckResult, items []AttendanceClockRecord) ([]AttendanceClockRecord, error) {
 	allowed, all, err := c.attendanceEmployeeScope(ctx, account, decision)
 	if err != nil {
@@ -1357,7 +1372,7 @@ func (c AttendanceService) filterClockRecordsByDecision(ctx RequestContext, acco
 	return out, nil
 }
 
-// applyAttendanceClockFieldPolicies redacts sensitive clock evidence at response boundaries.
+// applyAttendanceClockFieldPolicies 處理 apply 考勤打卡欄位政策。
 func applyAttendanceClockFieldPolicies(items []AttendanceClockRecord, policies map[string]string) []AttendanceClockRecord {
 	if len(policies) == 0 {
 		return items
@@ -1369,7 +1384,7 @@ func applyAttendanceClockFieldPolicies(items []AttendanceClockRecord, policies m
 	return out
 }
 
-// applyAttendanceClockFieldPolicy keeps stored GPS evidence intact while hiding disallowed fields.
+// applyAttendanceClockFieldPolicy 處理 apply 考勤打卡欄位政策。
 func applyAttendanceClockFieldPolicy(item AttendanceClockRecord, policies map[string]string) AttendanceClockRecord {
 	for field, effect := range policies {
 		if effect != "mask" && effect != "hide" && effect != "deny" {
@@ -1395,7 +1410,7 @@ func applyAttendanceClockFieldPolicy(item AttendanceClockRecord, policies map[st
 	return item
 }
 
-// removeClockDeviceInfoField copies device metadata before removing one sensitive evidence key.
+// removeClockDeviceInfoField 移除打卡 device info 欄位。
 func removeClockDeviceInfoField(values map[string]any, field string) map[string]any {
 	if len(values) == 0 {
 		return values
@@ -1408,6 +1423,7 @@ func removeClockDeviceInfoField(values map[string]any, field string) map[string]
 	return out
 }
 
+// filterCorrectionsByDecision 處理篩選 corrections by 決策的服務流程。
 func (c AttendanceService) filterCorrectionsByDecision(ctx RequestContext, account Account, decision CheckResult, items []AttendanceCorrectionRequest) ([]AttendanceCorrectionRequest, error) {
 	allowed, all, err := c.attendanceEmployeeScope(ctx, account, decision)
 	if err != nil {
@@ -1425,6 +1441,7 @@ func (c AttendanceService) filterCorrectionsByDecision(ctx RequestContext, accou
 	return out, nil
 }
 
+// normalizeAttendanceStatus 正規化考勤狀態。
 func normalizeAttendanceStatus(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", attendanceStatusActive:
@@ -1436,6 +1453,7 @@ func normalizeAttendanceStatus(value string) string {
 	}
 }
 
+// validateWorksiteInput 驗證工作地點輸入。
 func validateWorksiteInput(name string, latitude, longitude float64, radiusMeters int, status string) error {
 	if strings.TrimSpace(name) == "" {
 		return BadRequest("name is required")
@@ -1454,6 +1472,7 @@ func validateWorksiteInput(name string, latitude, longitude float64, radiusMeter
 	}
 }
 
+// validateShiftInput 驗證班別輸入。
 func validateShiftInput(name, clockInStart, clockInEnd, clockOutStart, clockOutEnd string, lateGraceMinutes, earlyLeaveGraceMinutes int, status string) error {
 	if strings.TrimSpace(name) == "" {
 		return BadRequest("name is required")
@@ -1481,6 +1500,7 @@ func validateShiftInput(name, clockInStart, clockInEnd, clockOutStart, clockOutE
 	}
 }
 
+// parseClockWindowTime 解析打卡 window 時間。
 func parseClockWindowTime(value, field string) (time.Time, error) {
 	if strings.TrimSpace(value) == "" {
 		return time.Time{}, BadRequest(field + " is required")
@@ -1492,6 +1512,7 @@ func parseClockWindowTime(value, field string) (time.Time, error) {
 	return parsed, nil
 }
 
+// optionalAttendanceDateTime 處理可選考勤日期時間。
 func optionalAttendanceDateTime(value string) (*time.Time, error) {
 	if strings.TrimSpace(value) == "" {
 		return nil, nil
@@ -1503,6 +1524,7 @@ func optionalAttendanceDateTime(value string) (*time.Time, error) {
 	return &parsed, nil
 }
 
+// normalizeClockDirection 正規化打卡 direction。
 func normalizeClockDirection(value string) (string, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case clockDirectionIn:
@@ -1514,7 +1536,7 @@ func normalizeClockDirection(value string) (string, error) {
 	}
 }
 
-// clockRejectionReason returns the first business rule that rejects a geofence clock attempt.
+// clockRejectionReason 處理打卡 rejection reason。
 func clockRejectionReason(direction string, shift AttendanceShift, worksite AttendanceWorksite, at time.Time, accuracyMeters, distanceMeters float64, hasClockIn, hasClockOut bool) (string, error) {
 	if (direction == clockDirectionIn && hasClockIn) || (direction == clockDirectionOut && hasClockOut) {
 		return clockRejectionDuplicate, nil
@@ -1541,7 +1563,7 @@ func clockRejectionReason(direction string, shift AttendanceShift, worksite Atte
 	return "", nil
 }
 
-// clockWithinShiftWindow checks the configured shift window in the attendance business timezone.
+// clockWithinShiftWindow 處理打卡 within 班別 window。
 func clockWithinShiftWindow(direction string, shift AttendanceShift, at time.Time) (bool, error) {
 	start, end, err := clockWindowMinutes(direction, shift)
 	if err != nil {
@@ -1554,7 +1576,7 @@ func clockWithinShiftWindow(direction string, shift AttendanceShift, at time.Tim
 	return minute >= start || minute <= end, nil
 }
 
-// clockWindowMinutes resolves the configured HH:MM window for one clock direction.
+// clockWindowMinutes 處理打卡 window minutes。
 func clockWindowMinutes(direction string, shift AttendanceShift) (int, int, error) {
 	startField := "clock_in_start"
 	endField := "clock_in_end"
@@ -1577,7 +1599,7 @@ func clockWindowMinutes(direction string, shift AttendanceShift) (int, int, erro
 	return start, end, nil
 }
 
-// parseClockWindowMinute converts an HH:MM window value into minute-of-day.
+// parseClockWindowMinute 解析打卡 window minute。
 func parseClockWindowMinute(value, field string) (int, error) {
 	parsed, err := parseClockWindowTime(value, field)
 	if err != nil {
@@ -1586,12 +1608,13 @@ func parseClockWindowMinute(value, field string) (int, error) {
 	return parsed.Hour()*60 + parsed.Minute(), nil
 }
 
-// clockMinuteOfDay returns the local business minute for shift-window checks.
+// clockMinuteOfDay 處理打卡 minute of day。
 func clockMinuteOfDay(at time.Time) int {
 	local := at.In(attendanceClockLocation)
 	return local.Hour()*60 + local.Minute()
 }
 
+// validateCoordinates 驗證 coordinates。
 func validateCoordinates(latitude, longitude float64) error {
 	if latitude < -90 || latitude > 90 {
 		return BadRequest("latitude must be between -90 and 90")
@@ -1602,11 +1625,12 @@ func validateCoordinates(latitude, longitude float64) error {
 	return nil
 }
 
-// attendanceWorkDate formats the UTC+8 business day used for duplicate checks and reports.
+// attendanceWorkDate 處理考勤 work 日期。
 func attendanceWorkDate(at time.Time) string {
 	return at.In(attendanceClockLocation).Format("2006-01-02")
 }
 
+// attendanceWorkDateForClock 處理考勤 work 日期 for 打卡。
 func attendanceWorkDateForClock(direction string, shift AttendanceShift, at time.Time) string {
 	if direction == clockDirectionOut && clockOutBelongsToPreviousWorkDate(shift, at) {
 		return at.In(attendanceClockLocation).AddDate(0, 0, -1).Format(time.DateOnly)
@@ -1614,6 +1638,7 @@ func attendanceWorkDateForClock(direction string, shift AttendanceShift, at time
 	return attendanceWorkDate(at)
 }
 
+// attendanceActiveWorkDate 處理考勤啟用中 work 日期。
 func attendanceActiveWorkDate(shift AttendanceShift, at time.Time) string {
 	if clockOutBelongsToPreviousWorkDate(shift, at) {
 		return at.In(attendanceClockLocation).AddDate(0, 0, -1).Format(time.DateOnly)
@@ -1621,6 +1646,7 @@ func attendanceActiveWorkDate(shift AttendanceShift, at time.Time) string {
 	return attendanceWorkDate(at)
 }
 
+// clockOutBelongsToPreviousWorkDate 處理打卡 out belongs to previous work 日期。
 func clockOutBelongsToPreviousWorkDate(shift AttendanceShift, at time.Time) bool {
 	inStart, _, err := clockWindowMinutes(clockDirectionIn, shift)
 	if err != nil {
@@ -1640,6 +1666,7 @@ func clockOutBelongsToPreviousWorkDate(shift AttendanceShift, at time.Time) bool
 	return minute >= outStart || minute <= outEnd
 }
 
+// attendanceAssignmentBundle 處理考勤指派 bundle 的服務流程。
 func (c AttendanceService) attendanceAssignmentBundle(ctx RequestContext, employeeID string, at time.Time) (AttendanceShiftAssignment, AttendanceShift, AttendanceWorksite, error) {
 	assignment, ok, err := c.store.FindEffectiveAttendanceShiftAssignment(goContext(ctx), ctx.TenantID, employeeID, at)
 	if err != nil {
@@ -1668,6 +1695,7 @@ func (c AttendanceService) attendanceAssignmentBundle(ctx RequestContext, employ
 	return assignment, shift, worksite, nil
 }
 
+// haversineMeters 處理 haversine meters。
 func haversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
 	const earthRadiusMeters = 6371000.0
 	toRad := func(deg float64) float64 { return deg * math.Pi / 180 }
@@ -1679,6 +1707,7 @@ func haversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
 	return earthRadiusMeters * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
 }
 
+// nextClockAction 處理 next 打卡 action。
 func nextClockAction(clockIn, clockOut *AttendanceClockRecord) string {
 	if clockIn == nil {
 		return clockDirectionIn
@@ -1689,12 +1718,13 @@ func nextClockAction(clockIn, clockOut *AttendanceClockRecord) string {
 	return "complete"
 }
 
-// acceptedClockConflict detects the database-level unique guard for accepted daily clock records.
+// acceptedClockConflict 處理 accepted 打卡衝突。
 func acceptedClockConflict(err error) bool {
 	appErr, ok := AsAppError(err)
 	return ok && appErr.Code == "conflict" && strings.Contains(appErr.Message, "accepted clock record")
 }
 
+// normalizeClockRecordQuery 正規化打卡 record 查詢。
 func normalizeClockRecordQuery(query AttendanceClockRecordQuery) AttendanceClockRecordQuery {
 	query.EmployeeID = strings.TrimSpace(query.EmployeeID)
 	query.FromDate = normalizeAttendanceDateQuery(query.FromDate)
@@ -1709,6 +1739,7 @@ func normalizeClockRecordQuery(query AttendanceClockRecordQuery) AttendanceClock
 	return query
 }
 
+// normalizeCorrectionQuery 正規化correction 查詢。
 func normalizeCorrectionQuery(query AttendanceCorrectionQuery) AttendanceCorrectionQuery {
 	query.EmployeeID = strings.TrimSpace(query.EmployeeID)
 	query.FromDate = normalizeAttendanceDateQuery(query.FromDate)
@@ -1722,6 +1753,7 @@ func normalizeCorrectionQuery(query AttendanceCorrectionQuery) AttendanceCorrect
 	return query
 }
 
+// normalizeAttendanceDateQuery 正規化考勤日期查詢。
 func normalizeAttendanceDateQuery(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -1733,6 +1765,7 @@ func normalizeAttendanceDateQuery(value string) string {
 	return value
 }
 
+// reviewAttendanceCorrection 處理審核考勤 correction 的服務流程。
 func (c AttendanceService) reviewAttendanceCorrection(ctx RequestContext, id, nextStatus string, input ReviewAttendanceCorrectionInput) (AttendanceCorrectionRequest, error) {
 	if id == "" {
 		return AttendanceCorrectionRequest{}, BadRequest("id is required")
@@ -1852,6 +1885,7 @@ func (c AttendanceService) reviewAttendanceCorrection(ctx RequestContext, id, ne
 	return correction, nil
 }
 
+// filterLeaveBalancesByEmployees 處理篩選請假 balances by 員工。
 func filterLeaveBalancesByEmployees(items []LeaveBalance, allowed map[string]struct{}) []LeaveBalance {
 	out := make([]LeaveBalance, 0, len(items))
 	for _, item := range items {
@@ -1862,6 +1896,7 @@ func filterLeaveBalancesByEmployees(items []LeaveBalance, allowed map[string]str
 	return out
 }
 
+// normalizeLeaveRequestQuery 正規化請假請求查詢。
 func normalizeLeaveRequestQuery(query LeaveRequestQuery) LeaveRequestQuery {
 	query.Status = strings.TrimSpace(strings.ToLower(query.Status))
 	query.FromDate = strings.TrimSpace(query.FromDate)
@@ -1870,6 +1905,7 @@ func normalizeLeaveRequestQuery(query LeaveRequestQuery) LeaveRequestQuery {
 	return query
 }
 
+// employeeIDsFromSet 處理員工 IDs 來源 集合。
 func employeeIDsFromSet(values map[string]struct{}) []string {
 	out := make([]string, 0, len(values))
 	for id := range values {
@@ -1881,6 +1917,7 @@ func employeeIDsFromSet(values map[string]struct{}) []string {
 	return out
 }
 
+// employeeIDsFromSlice 處理員工 IDs 來源 slice。
 func employeeIDsFromSlice(values []string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(values))
@@ -1899,6 +1936,7 @@ func employeeIDsFromSlice(values []string) []string {
 	return out
 }
 
+// workflowLinkedLeaveRequestID 處理流程 linked 請假請求 ID。
 func workflowLinkedLeaveRequestID(instance FormInstance) string {
 	if !strings.EqualFold(stringFromAny(instance.Payload["linked_resource_type"]), "attendance.leave_request") {
 		if stringFromAny(instance.Payload["leave_request_id"]) == "" {
@@ -1911,6 +1949,7 @@ func workflowLinkedLeaveRequestID(instance FormInstance) string {
 	return strings.TrimSpace(stringFromAny(instance.Payload["linked_resource_id"]))
 }
 
+// leaveRequestStatusForWorkflow 處理請假請求狀態 for 流程。
 func leaveRequestStatusForWorkflow(kind string, status string) string {
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "approve":
@@ -1923,6 +1962,7 @@ func leaveRequestStatusForWorkflow(kind string, status string) string {
 	return normalizeLeaveRequestStatus(status)
 }
 
+// normalizeLeaveRequestStatus 正規化請假請求狀態。
 func normalizeLeaveRequestStatus(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "approved":
@@ -1938,6 +1978,7 @@ func normalizeLeaveRequestStatus(status string) string {
 	}
 }
 
+// leaveRequestStatusReleasesBalance 處理請假請求狀態 releases balance。
 func leaveRequestStatusReleasesBalance(previousStatus string, nextStatus string) bool {
 	switch previousStatus {
 	case "rejected", "cancelled":

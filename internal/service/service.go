@@ -14,38 +14,45 @@ import (
 	"nexus-pro-be/internal/utils"
 )
 
-// Service is the root business facade composed from stores and platform adapters.
+// Service 定義服務的資料結構。
 type Service struct {
-	store         repository.Store
-	now           func() time.Time
-	logger        *slog.Logger
-	authzSnapshot AuthzSnapshotCache
-	relationships RelationshipChecker
-	objectStore   ObjectStore
-	ehrmsClient   EHRMSClient
+	store               repository.Store
+	now                 func() time.Time
+	logger              *slog.Logger
+	authzSnapshot       AuthzSnapshotCache
+	relationships       RelationshipChecker
+	objectStore         ObjectStore
+	ehrmsClient         EHRMSClient
+	identityProvisioner IdentityProvisioner
 }
 
-// Options configures optional runtime adapters for the service facade.
+// Options 定義選項的資料結構。
 type Options struct {
-	Logger        *slog.Logger
-	Now           func() time.Time
-	AuthzSnapshot AuthzSnapshotCache
-	Relationships RelationshipChecker
-	ObjectStore   ObjectStore
-	EHRMSClient   EHRMSClient
+	Logger              *slog.Logger
+	Now                 func() time.Time
+	AuthzSnapshot       AuthzSnapshotCache
+	Relationships       RelationshipChecker
+	ObjectStore         ObjectStore
+	EHRMSClient         EHRMSClient
+	IdentityProvisioner IdentityProvisioner
 }
 
-// RelationshipChecker verifies external relationship tuples for authorization decisions.
+// RelationshipChecker 定義關係 checker 的行為契約。
 type RelationshipChecker interface {
 	CheckRelationship(ctx context.Context, check domain.RelationshipCheck) (bool, error)
 }
 
-// EHRMSClient reads employee master data from the configured eHRMS upstream.
+// EHRMSClient 定義 eHRMS client 的行為契約。
 type EHRMSClient interface {
 	ListEmployees(context.Context) ([]domain.EHRMSEmployeeRecord, error)
 }
 
-// New builds a service facade over the supplied repository store.
+// IdentityProvisioner 定義身分 provisioner 的行為契約。
+type IdentityProvisioner interface {
+	EnsureUser(context.Context, domain.IdentityProvisioningInput) (domain.ProvisionedIdentity, error)
+}
+
+// New 建立 服務 的主要物件。
 func New(store repository.Store, options ...Options) *Service {
 	cfg := Options{}
 	if len(options) > 0 {
@@ -60,21 +67,23 @@ func New(store repository.Store, options ...Options) *Service {
 		now = cfg.Now
 	}
 	return &Service{
-		store:         store,
-		now:           now,
-		logger:        logger,
-		authzSnapshot: cfg.AuthzSnapshot,
-		relationships: cfg.Relationships,
-		objectStore:   firstObjectStore(cfg.ObjectStore),
-		ehrmsClient:   cfg.EHRMSClient,
+		store:               store,
+		now:                 now,
+		logger:              logger,
+		authzSnapshot:       cfg.AuthzSnapshot,
+		relationships:       cfg.Relationships,
+		objectStore:         firstObjectStore(cfg.ObjectStore),
+		ehrmsClient:         cfg.EHRMSClient,
+		identityProvisioner: cfg.IdentityProvisioner,
 	}
 }
 
-// Store exposes the backing repository for integrations that need lower-level access.
+// Store 處理儲存層的服務流程。
 func (c *Service) Store() repository.Store {
 	return c.store
 }
 
+// withTenantTransaction 附加租戶 transaction 的服務流程。
 func (c *Service) withTenantTransaction(ctx RequestContext, fn func(*Service) error) error {
 	return repository.WithinTenantTransaction(goContext(ctx), c.store, ctx.TenantID, func(store repository.Store) error {
 		next := *c
@@ -83,6 +92,7 @@ func (c *Service) withTenantTransaction(ctx RequestContext, fn func(*Service) er
 	})
 }
 
+// goContext 處理 go context。
 func goContext(ctx RequestContext) context.Context {
 	if ctx.Context != nil {
 		return ctx.Context
@@ -90,19 +100,22 @@ func goContext(ctx RequestContext) context.Context {
 	return context.Background()
 }
 
-// Now returns the current UTC time and gives tests a single override point.
+// Now 處理 now 的服務流程。
 func (c *Service) Now() time.Time {
 	return c.now().UTC()
 }
 
+// logInfo 處理 log info 的服務流程。
 func (c *Service) logInfo(ctx RequestContext, message string, args ...any) {
 	c.loggerFor(ctx).InfoContext(goContext(ctx), message, args...)
 }
 
+// logWarn 處理 log warn 的服務流程。
 func (c *Service) logWarn(ctx RequestContext, message string, args ...any) {
 	c.loggerFor(ctx).WarnContext(goContext(ctx), message, args...)
 }
 
+// loggerFor 處理 logger for 的服務流程。
 func (c *Service) loggerFor(ctx RequestContext) *slog.Logger {
 	logger := slog.Default()
 	if c != nil && c.logger != nil {
@@ -130,6 +143,7 @@ func (c *Service) loggerFor(ctx RequestContext) *slog.Logger {
 	return logger.With(attrs...)
 }
 
+// resolveAccount 解析帳號的服務流程。
 func (c *Service) resolveAccount(ctx RequestContext) (Account, Tenant, error) {
 	if strings.TrimSpace(ctx.TenantID) == "" {
 		return Account{}, Tenant{}, BadRequest("tenant id is required")
@@ -157,21 +171,21 @@ func (c *Service) resolveAccount(ctx RequestContext) (Account, Tenant, error) {
 	return account, tenant, nil
 }
 
-// AuditTarget identifies the resource written to the audit log after authorization.
+// AuditTarget 定義稽核 target 的資料結構。
 type AuditTarget struct {
 	Event    string
 	Resource string
 	Target   string
 }
 
-// AuthzAudit is a deferred audit handle returned after successful authorization.
+// AuthzAudit 定義授權稽核的資料結構。
 type AuthzAudit struct {
 	service  *Service
 	target   AuditTarget
 	decision CheckResult
 }
 
-// Authorize resolves the account, evaluates permissions, and prepares audit recording.
+// Authorize 授權對應的服務流程。
 func (c *Service) Authorize(ctx RequestContext, req CheckRequest, audit AuditTarget) (account Account, decision CheckResult, done AuthzAudit, err error) {
 	ctx, span := startServiceSpan(ctx, "service.authz.authorize", authzSpanAttributes(req)...)
 	defer func() {
@@ -223,11 +237,12 @@ func (c *Service) Authorize(ctx RequestContext, req CheckRequest, audit AuditTar
 	return account, decision, done, nil
 }
 
-// ValidateApprovalInstance verifies that a high-risk approval instance belongs to the caller.
+// ValidateApprovalInstance 驗證核准實例的服務流程。
 func (c *Service) ValidateApprovalInstance(ctx RequestContext, req CheckRequest) error {
 	return c.validateApprovalInstance(ctx, normalizeCheckRequest(req))
 }
 
+// confirmApproval 確認核准的服務流程。
 func (c *Service) confirmApproval(ctx RequestContext, req CheckRequest) error {
 	if ctx.ApprovalInstanceID != "" {
 		return c.ValidateApprovalInstance(ctx, req)
@@ -238,6 +253,7 @@ func (c *Service) confirmApproval(ctx RequestContext, req CheckRequest) error {
 	return domain.ForbiddenReason("approval_required", "high-risk action requires approval")
 }
 
+// validateApprovalInstance 驗證核准實例的服務流程。
 func (c *Service) validateApprovalInstance(ctx RequestContext, req CheckRequest) error {
 	instance, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, ctx.ApprovalInstanceID)
 	if err != nil {
@@ -279,6 +295,7 @@ func (c *Service) validateApprovalInstance(ctx RequestContext, req CheckRequest)
 	return nil
 }
 
+// approvalPayloadMatches 處理核准 payload matches。
 func approvalPayloadMatches(payload map[string]any, key, expected string) bool {
 	if strings.TrimSpace(expected) == "" {
 		return true
@@ -290,6 +307,7 @@ func approvalPayloadMatches(payload map[string]any, key, expected string) bool {
 	return strings.EqualFold(strings.TrimSpace(stringFromAny(value)), strings.TrimSpace(expected))
 }
 
+// approvalPayloadMatchesAny 處理核准 payload matches any。
 func approvalPayloadMatchesAny(payload map[string]any, expected string, keys ...string) bool {
 	for _, key := range keys {
 		if value, ok := payload[key]; ok && strings.EqualFold(strings.TrimSpace(stringFromAny(value)), strings.TrimSpace(expected)) {
@@ -299,6 +317,7 @@ func approvalPayloadMatchesAny(payload map[string]any, expected string, keys ...
 	return false
 }
 
+// approvalPayloadValueMatches 處理核准 payload value matches。
 func approvalPayloadValueMatches(actual, expected any) bool {
 	actualJSON, actualErr := json.Marshal(actual)
 	expectedJSON, expectedErr := json.Marshal(expected)
@@ -308,6 +327,7 @@ func approvalPayloadValueMatches(actual, expected any) bool {
 	return reflect.DeepEqual(actual, expected)
 }
 
+// stringFromAny 處理字串 來源 any。
 func stringFromAny(value any) string {
 	switch v := value.(type) {
 	case string:
@@ -323,12 +343,12 @@ func stringFromAny(value any) string {
 	}
 }
 
-// Commit writes the prepared authorization audit record with its original service.
+// Commit 提交目前流程。
 func (a AuthzAudit) Commit(ctx RequestContext) error {
 	return a.CommitWith(ctx, a.service)
 }
 
-// CommitWith writes the prepared authorization audit record with an override service.
+// CommitWith 提交 with。
 func (a AuthzAudit) CommitWith(ctx RequestContext, service *Service) error {
 	if service == nil {
 		return nil
@@ -336,6 +356,7 @@ func (a AuthzAudit) CommitWith(ctx RequestContext, service *Service) error {
 	return service.auditAuthzTarget(ctx, a.target, a.decision)
 }
 
+// fromRequest 轉換請求。
 func (a AuditTarget) fromRequest(req CheckRequest) AuditTarget {
 	req = normalizeCheckRequest(req)
 	if a.Event == "" {
@@ -350,6 +371,7 @@ func (a AuditTarget) fromRequest(req CheckRequest) AuditTarget {
 	return a
 }
 
+// auditAuthzTarget 處理稽核授權 target 的服務流程。
 func (c *Service) auditAuthzTarget(ctx RequestContext, audit AuditTarget, decision CheckResult) error {
 	if audit.Event == "" {
 		return nil
@@ -357,6 +379,7 @@ func (c *Service) auditAuthzTarget(ctx RequestContext, audit AuditTarget, decisi
 	return c.auditAuthzDecision(ctx, audit.Event, audit.Resource, audit.Target, decision)
 }
 
+// resolveAccess 解析 access 的服務流程。
 func (c *Service) resolveAccess(ctx RequestContext, account Account) ([]Permission, []PermissionSet, []UserGroup, error) {
 	permissionSetIDs := map[string]struct{}{}
 	for _, id := range account.DirectPermissionSetIDs {
@@ -438,6 +461,7 @@ func (c *Service) resolveAccess(ctx RequestContext, account Account) ([]Permissi
 	return permissions, permissionSets, groups, nil
 }
 
+// audit 處理稽核的服務流程。
 func (c *Service) audit(ctx RequestContext, action, resource, target, severity string, details map[string]any) error {
 	details = auditDetailsWithContext(ctx, details)
 	result := auditResultFromDetails(details)
@@ -460,6 +484,7 @@ func (c *Service) audit(ctx RequestContext, action, resource, target, severity s
 	})
 }
 
+// auditResultFromDetails 處理稽核結果 來源 details。
 func auditResultFromDetails(details map[string]any) string {
 	if result := strings.TrimSpace(stringFromAny(details["result"])); result != "" {
 		return result
@@ -481,14 +506,17 @@ func auditResultFromDetails(details map[string]any) string {
 	return "success"
 }
 
+// forbiddenAuthz 處理禁止授權。
 func forbiddenAuthz(decision CheckResult) error {
 	return domain.ForbiddenReason(authzReasonCode(decision), decision.Reason)
 }
 
+// forbiddenDataScope 處理禁止資料範圍。
 func forbiddenDataScope(message string) error {
 	return domain.ForbiddenReason("data_scope_denied", message)
 }
 
+// authzReasonCode 處理授權 reason 碼。
 func authzReasonCode(decision CheckResult) string {
 	if decision.Reason == "approval_required" {
 		return "approval_required"
@@ -510,6 +538,7 @@ func authzReasonCode(decision CheckResult) string {
 	}
 }
 
+// auditDetailsWithContext 處理稽核 details with context。
 func auditDetailsWithContext(ctx RequestContext, details map[string]any) map[string]any {
 	out := utils.CopyStringMap(details)
 	if out == nil {
@@ -540,6 +569,7 @@ func auditDetailsWithContext(ctx RequestContext, details map[string]any) map[str
 	return out
 }
 
+// auditDecisionDetails 處理稽核決策 details。
 func auditDecisionDetails(ctx RequestContext, decision CheckResult, details map[string]any) map[string]any {
 	out := auditDetailsWithContext(ctx, details)
 	out["authz_decision"] = decision.Allowed
@@ -561,6 +591,7 @@ func auditDecisionDetails(ctx RequestContext, decision CheckResult, details map[
 	return out
 }
 
+// permissionMatches 處理權限 matches。
 func permissionMatches(perm Permission, req CheckRequest, account Account) bool {
 	perm = normalizePermission(perm)
 	req = normalizeCheckRequest(req)
@@ -599,10 +630,12 @@ func permissionMatches(perm Permission, req CheckRequest, account Account) bool 
 	}
 }
 
+// sameOwnScope 處理 same own 範圍。
 func sameOwnScope(a, b Scope) bool {
 	return (a == ScopeSelf || a == ScopeOwn) && (b == ScopeSelf || b == ScopeOwn)
 }
 
+// permissionLabel 處理權限 label。
 func permissionLabel(p Permission) string {
 	p = normalizePermission(p)
 	label := p.Resource + "." + string(p.Action)
@@ -615,6 +648,7 @@ func permissionLabel(p Permission) string {
 	return label
 }
 
+// wildcardMatch 處理 wildcard match。
 func wildcardMatch(value, pattern string) bool {
 	if pattern == "" || pattern == "*" {
 		return true
@@ -622,6 +656,7 @@ func wildcardMatch(value, pattern string) bool {
 	return strings.EqualFold(value, pattern)
 }
 
+// uniqueStrings 處理 unique 字串。
 func uniqueStrings(values []string) []string {
 	if len(values) == 0 {
 		return nil
@@ -641,6 +676,7 @@ func uniqueStrings(values []string) []string {
 	return out
 }
 
+// capabilitiesFromPermissions 處理 capabilities 來源 權限。
 func capabilitiesFromPermissions(perms []Permission) []string {
 	out := make([]string, 0, len(perms))
 	for _, perm := range perms {

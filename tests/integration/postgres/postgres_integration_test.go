@@ -28,6 +28,7 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
+// TestPostgresRepositoryCriticalSemantics 驗證 Postgres repository critical semantics。
 func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 	pool := openIntegrationPool(t)
 	defer pool.Close()
@@ -59,6 +60,22 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 		}
 		if got := countEmployeesVisibleViaRLS(t, pool, tenantB, empA); got != 0 {
 			t.Fatalf("expected tenant B RLS scope not to see tenant A employee %s, got %d", empA, got)
+		}
+	})
+
+	t.Run("tenants RLS lets system task list every tenant", func(t *testing.T) {
+		requireRLSCapableUser(t, pool)
+		requireTenantsSystemReadPolicy(t, pool)
+		tenants, err := store.ListTenants(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		seen := map[string]bool{}
+		for _, tenant := range tenants {
+			seen[tenant.ID] = true
+		}
+		if !seen[tenantA] || !seen[tenantB] {
+			t.Fatalf("expected ListTenants under RLS to include %s and %s, got %d tenants", tenantA, tenantB, len(tenants))
 		}
 	})
 
@@ -130,6 +147,7 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 	}
 }
 
+// TestHRCoreCRUDPostgresAcceptanceSemantics 驗證 HR core crud Postgres acceptance semantics。
 func TestHRCoreCRUDPostgresAcceptanceSemantics(t *testing.T) {
 	pool := openIntegrationPool(t)
 	defer pool.Close()
@@ -242,6 +260,7 @@ func TestHRCoreCRUDPostgresAcceptanceSemantics(t *testing.T) {
 	}
 }
 
+// TestEmployeeHTTPPostgresAcceptanceTraceAuthzAndFieldPolicy 驗證員工 HTTP Postgres acceptance trace 授權 and 欄位政策。
 func TestEmployeeHTTPPostgresAcceptanceTraceAuthzAndFieldPolicy(t *testing.T) {
 	spanRecorder := installIntegrationSpanRecorder(t)
 	pool := openIntegrationPool(t)
@@ -480,6 +499,7 @@ func TestEmployeeHTTPPostgresAcceptanceTraceAuthzAndFieldPolicy(t *testing.T) {
 	}
 }
 
+// TestAttendanceClockHTTPPostgresFieldPolicy 驗證考勤打卡 HTTP Postgres 欄位政策。
 func TestAttendanceClockHTTPPostgresFieldPolicy(t *testing.T) {
 	pool := openIntegrationPool(t)
 	defer pool.Close()
@@ -618,6 +638,7 @@ func TestAttendanceClockHTTPPostgresFieldPolicy(t *testing.T) {
 	}
 }
 
+// openIntegrationPool 驗證 open integration pool。
 func openIntegrationPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := strings.TrimSpace(os.Getenv("DATABASE_URL"))
@@ -633,6 +654,7 @@ func openIntegrationPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+// requireMigratedSchema 驗證 require migrated schema。
 func requireMigratedSchema(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -646,6 +668,7 @@ func requireMigratedSchema(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
+// requireRLSCapableUser 驗證 require RLS capable 使用者。
 func requireRLSCapableUser(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -659,6 +682,21 @@ func requireRLSCapableUser(t *testing.T, pool *pgxpool.Pool) {
 	}
 }
 
+// requireTenantsSystemReadPolicy 驗證 require 租戶 system read 政策。
+func requireTenantsSystemReadPolicy(t *testing.T, pool *pgxpool.Pool) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var exists bool
+	if err := pool.QueryRow(ctx, "select exists (select 1 from pg_policies where tablename = 'tenants' and policyname = 'system_read_tenants')").Scan(&exists); err != nil {
+		t.Fatal(err)
+	}
+	if !exists {
+		t.Skip("tenants system_read_tenants policy is not migrated; run migration 000003 to exercise system-task RLS reads")
+	}
+}
+
+// countEmployeesVisibleViaRLS 驗證 count 員工可見 via RLS。
 func countEmployeesVisibleViaRLS(t *testing.T, pool *pgxpool.Pool, tenantID, employeeID string) int {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -678,6 +716,7 @@ func countEmployeesVisibleViaRLS(t *testing.T, pool *pgxpool.Pool, tenantID, emp
 	return count
 }
 
+// validEmployeeCreateInput 驗證有效員工 create 輸入。
 func validEmployeeCreateInput(suffix, name, email string) domain.CreateEmployeeInput {
 	orgUnitID := "ou_" + suffix
 	return domain.CreateEmployeeInput{
@@ -737,6 +776,7 @@ type integrationErrorPayload struct {
 	TraceID    string           `json:"trace_id"`
 }
 
+// decodeIntegrationData 驗證 decode integration 資料。
 func decodeIntegrationData[T any](t *testing.T, body []byte) T {
 	t.Helper()
 	var payload struct {
@@ -748,6 +788,7 @@ func decodeIntegrationData[T any](t *testing.T, body []byte) T {
 	return payload.Data
 }
 
+// decodeIntegrationError 驗證 decode integration 錯誤。
 func decodeIntegrationError(t *testing.T, body []byte) integrationErrorPayload {
 	t.Helper()
 	var payload struct {
@@ -759,11 +800,13 @@ func decodeIntegrationError(t *testing.T, body []byte) integrationErrorPayload {
 	return payload.Error
 }
 
+// addIntegrationHeaders 驗證 add integration headers。
 func addIntegrationHeaders(req *http.Request, tenantID, accountID, requestID string) {
 	req.Header.Set("Authorization", "Bearer "+tenantID+":"+accountID)
 	req.Header.Set("X-Request-ID", requestID)
 }
 
+// upsertIntegrationIdentity 驗證 upsert integration 身分。
 func upsertIntegrationIdentity(t *testing.T, store repository.Store, tenantID, accountID string, now time.Time) {
 	t.Helper()
 	if err := store.UpsertUserIdentity(context.Background(), domain.UserIdentity{
@@ -780,6 +823,7 @@ func upsertIntegrationIdentity(t *testing.T, store repository.Store, tenantID, a
 
 type integrationTokenResolver struct{}
 
+// Resolve 驗證目標路徑。
 func (integrationTokenResolver) Resolve(req *http.Request) (v1api.TokenContext, bool, error) {
 	const prefix = "Bearer "
 	header := strings.TrimSpace(req.Header.Get("Authorization"))
@@ -797,6 +841,7 @@ func (integrationTokenResolver) Resolve(req *http.Request) (v1api.TokenContext, 
 	}, true, nil
 }
 
+// findIntegrationAuditLog 驗證 find integration 稽核 log。
 func findIntegrationAuditLog(logs []domain.AuditLog, action string) (domain.AuditLog, bool) {
 	for _, log := range logs {
 		if log.Action == action {
@@ -806,6 +851,7 @@ func findIntegrationAuditLog(logs []domain.AuditLog, action string) (domain.Audi
 	return domain.AuditLog{}, false
 }
 
+// installIntegrationSpanRecorder 驗證 install integration span recorder。
 func installIntegrationSpanRecorder(t *testing.T) *tracetest.SpanRecorder {
 	t.Helper()
 	recorder := tracetest.NewSpanRecorder()
@@ -819,6 +865,7 @@ func installIntegrationSpanRecorder(t *testing.T) *tracetest.SpanRecorder {
 	return recorder
 }
 
+// integrationSpanWithTrace 驗證 integration span with trace。
 func integrationSpanWithTrace(recorder *tracetest.SpanRecorder, traceID, name string) bool {
 	for _, span := range recorder.Ended() {
 		if span.SpanContext().TraceID().String() == traceID && span.Name() == name {
@@ -828,6 +875,7 @@ func integrationSpanWithTrace(recorder *tracetest.SpanRecorder, traceID, name st
 	return false
 }
 
+// integrationSpanWithTracePrefix 驗證 integration span with trace prefix。
 func integrationSpanWithTracePrefix(recorder *tracetest.SpanRecorder, traceID, prefix string) bool {
 	for _, span := range recorder.Ended() {
 		if span.SpanContext().TraceID().String() == traceID && strings.HasPrefix(span.Name(), prefix) {
@@ -837,6 +885,7 @@ func integrationSpanWithTracePrefix(recorder *tracetest.SpanRecorder, traceID, p
 	return false
 }
 
+// integrationTraceIDForSpanNamePrefix 驗證 integration trace ID for span 名稱 prefix。
 func integrationTraceIDForSpanNamePrefix(recorder *tracetest.SpanRecorder, prefix string) string {
 	for _, span := range recorder.Ended() {
 		if strings.HasPrefix(span.Name(), prefix) {
@@ -846,6 +895,7 @@ func integrationTraceIDForSpanNamePrefix(recorder *tracetest.SpanRecorder, prefi
 	return ""
 }
 
+// integrationSpanNames 驗證 integration span names。
 func integrationSpanNames(recorder *tracetest.SpanRecorder) []string {
 	names := make([]string, 0)
 	for _, span := range recorder.Ended() {

@@ -11,13 +11,13 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
-// WorkspaceCtrl wires workspace dashboard aggregate endpoints.
+// WorkspaceCtrl 定義工作區 ctrl 的資料結構。
 type WorkspaceCtrl struct {
 	routes routeBinder
 	svc    service.WorkspaceFacade
 }
 
-// RegisterRoutes attaches workspace aggregate routes to the v1 route group.
+// RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c WorkspaceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace := router.Group("/workspace")
 	workspace.GET("/overview", c.routes.Handle("hr.employee", "read", c.overview))
@@ -28,7 +28,7 @@ func (c WorkspaceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace.GET("/audit-logs", c.routes.Handle("audit.log", "read", c.auditLogs))
 }
 
-// overview returns homepage HR and attendance widgets.
+// overview 處理總覽的 HTTP 請求。
 func (c WorkspaceCtrl) overview(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.WorkspaceOverview(ctx, domain.WorkspaceOverviewQuery{
 		Year:  workspaceIntQuery(r, "year"),
@@ -42,7 +42,7 @@ func (c WorkspaceCtrl) overview(w http.ResponseWriter, r *http.Request, ctx doma
 	return nil
 }
 
-// organization returns the employee organization tree.
+// organization 處理 organization 的 HTTP 請求。
 func (c WorkspaceCtrl) organization(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.WorkspaceOrganization(ctx)
 	if err != nil {
@@ -52,7 +52,7 @@ func (c WorkspaceCtrl) organization(w http.ResponseWriter, r *http.Request, ctx 
 	return nil
 }
 
-// turnover returns monthly and annual employment movement analysis.
+// turnover 處理人員異動的 HTTP 請求。
 func (c WorkspaceCtrl) turnover(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	annualYear := workspaceIntQuery(r, "annual_year")
 	if annualYear <= 0 {
@@ -70,7 +70,7 @@ func (c WorkspaceCtrl) turnover(w http.ResponseWriter, r *http.Request, ctx doma
 	return nil
 }
 
-// attendance returns monthly attendance and clock matrices.
+// attendance 處理考勤的 HTTP 請求。
 func (c WorkspaceCtrl) attendance(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{
 		Year:  workspaceIntQuery(r, "year"),
@@ -83,7 +83,7 @@ func (c WorkspaceCtrl) attendance(w http.ResponseWriter, r *http.Request, ctx do
 	return nil
 }
 
-// admins returns HR workspace administrator settings.
+// admins 處理 admins 的 HTTP 請求。
 func (c WorkspaceCtrl) admins(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.WorkspaceAdmins(ctx)
 	if err != nil {
@@ -93,7 +93,7 @@ func (c WorkspaceCtrl) admins(w http.ResponseWriter, r *http.Request, ctx domain
 	return nil
 }
 
-// auditLogs returns filtered workspace audit-log rows.
+// auditLogs 處理稽核 logs 的 HTTP 請求。
 func (c WorkspaceCtrl) auditLogs(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -114,7 +114,7 @@ func (c WorkspaceCtrl) auditLogs(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
-// workspaceIntQuery parses an optional integer query parameter.
+// workspaceIntQuery 處理工作區整數查詢。
 func workspaceIntQuery(r *http.Request, name string) int {
 	value := strings.TrimSpace(r.URL.Query().Get(name))
 	if value == "" {

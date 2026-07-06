@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 
 	"nexus-pro-be/internal/domain"
@@ -13,6 +14,7 @@ type validatedInput interface {
 	Validate() error
 }
 
+// readJSON 讀取 JSON。
 func readJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	if err := readJSONNoValidate(w, r, target); err != nil {
 		return err
@@ -23,12 +25,21 @@ func readJSON(w http.ResponseWriter, r *http.Request, target any) error {
 	return nil
 }
 
+// readJSONNoValidate 讀取 JSON 不驗證。
 func readJSONNoValidate(w http.ResponseWriter, r *http.Request, target any) error {
 	defer r.Body.Close()
 	decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(target); err != nil {
-		return domain.BadRequestCode(domain.ErrorCodeInvalidJSONBody, "invalid JSON body: "+err.Error())
+		// decoder 錯誤可能帶出 request payload 片段，因此 client 只收到通用訊息。
+		// 詳細錯誤只寫入 log。
+		slog.Default().WarnContext(r.Context(), "request JSON decode failed",
+			"method", r.Method,
+			"path", r.URL.Path,
+			"request_id", requestIDFrom(r),
+			"error", err,
+		)
+		return domain.BadRequestCode(domain.ErrorCodeInvalidJSONBody, "invalid JSON body")
 	}
 	var extra any
 	if err := decoder.Decode(&extra); err != io.EOF {
@@ -37,6 +48,7 @@ func readJSONNoValidate(w http.ResponseWriter, r *http.Request, target any) erro
 	return nil
 }
 
+// readOptionalJSON 讀取可選 JSON。
 func readOptionalJSON(w http.ResponseWriter, r *http.Request, target any) (bool, error) {
 	if r.Body == nil || r.ContentLength == 0 {
 		return false, nil
@@ -44,6 +56,7 @@ func readOptionalJSON(w http.ResponseWriter, r *http.Request, target any) (bool,
 	return true, readJSON(w, r, target)
 }
 
+// validateInput 驗證輸入。
 func validateInput(target any) error {
 	input, ok := target.(validatedInput)
 	if !ok {
@@ -52,6 +65,7 @@ func validateInput(target any) error {
 	return input.Validate()
 }
 
+// writeJSON 寫入 JSON。
 func writeJSON(w http.ResponseWriter, status int, payload any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)
@@ -61,6 +75,7 @@ func writeJSON(w http.ResponseWriter, status int, payload any) {
 	_ = json.NewEncoder(w).Encode(payload)
 }
 
+// writeError 寫入錯誤。
 func (a *API) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	var appErr *domain.AppError
 	if errors.As(err, &appErr) {
@@ -107,12 +122,13 @@ func (a *API) writeError(w http.ResponseWriter, r *http.Request, err error) {
 	})
 }
 
-// rowErrorPayload groups import validation failures by spreadsheet row.
+// rowErrorPayload 定義列錯誤 payload 的資料結構。
 type rowErrorPayload struct {
 	RowNumber   int                 `json:"row_number"`
 	FieldErrors []domain.FieldError `json:"field_errors"`
 }
 
+// rowErrorPayloads 處理列錯誤 payloads。
 func rowErrorPayloads(rowErrors []domain.RowError) []rowErrorPayload {
 	grouped := make(map[int][]domain.FieldError)
 	order := make([]int, 0)

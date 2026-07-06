@@ -11,17 +11,17 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
-// AuthzSnapshotStore stores authorization decisions in Redis.
+// AuthzSnapshotStore 定義授權快照儲存層的資料結構。
 type AuthzSnapshotStore struct {
 	client *goredis.Client
 }
 
-// NewAuthzSnapshotStore creates a Redis-backed authorization snapshot cache.
+// NewAuthzSnapshotStore 建立授權快照儲存層。
 func NewAuthzSnapshotStore(client *goredis.Client) *AuthzSnapshotStore {
 	return &AuthzSnapshotStore{client: client}
 }
 
-// GetAuthzSnapshot returns a cached authorization decision when present.
+// GetAuthzSnapshot 從儲存層取得授權快照。
 func (s *AuthzSnapshotStore) GetAuthzSnapshot(ctx context.Context, key string) (domain.CheckResult, bool, error) {
 	if s == nil || s.client == nil {
 		return domain.CheckResult{}, false, nil
@@ -40,7 +40,7 @@ func (s *AuthzSnapshotStore) GetAuthzSnapshot(ctx context.Context, key string) (
 	return result, true, nil
 }
 
-// SetAuthzSnapshot caches an authorization decision for the supplied TTL.
+// SetAuthzSnapshot 從儲存層處理集合授權快照。
 func (s *AuthzSnapshotStore) SetAuthzSnapshot(ctx context.Context, key string, result domain.CheckResult, ttl time.Duration) error {
 	if s == nil || s.client == nil {
 		return nil
@@ -52,7 +52,7 @@ func (s *AuthzSnapshotStore) SetAuthzSnapshot(ctx context.Context, key string, r
 	return s.client.Set(ctx, key, raw, ttl).Err()
 }
 
-// InvalidateTenant removes all cached authorization decisions for a tenant.
+// InvalidateTenant 從儲存層處理 invalidate 租戶。
 func (s *AuthzSnapshotStore) InvalidateTenant(ctx context.Context, tenantID string) error {
 	if s == nil || s.client == nil || strings.TrimSpace(tenantID) == "" {
 		return nil

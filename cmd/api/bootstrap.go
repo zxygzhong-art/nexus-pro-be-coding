@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	v1api "nexus-pro-be/internal/api/v1"
@@ -24,17 +25,21 @@ import (
 	"nexus-pro-be/internal/service"
 	"nexus-pro-be/internal/startup"
 
+	goredis "github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 type apiRuntime struct {
-	server             *http.Server
-	report             startup.Report
-	store              repository.Store
-	relationshipWriter jobs.RelationshipTupleWriter
-	ehrmsSyncScheduler *jobs.EHRMSEmployeeSyncScheduler
-	ehrmsSyncOptions   jobs.EHRMSEmployeeSyncOptions
-	shutdowns          []moduleShutdown
+	server                     *http.Server
+	metricsServer              *http.Server
+	report                     startup.Report
+	store                      repository.Store
+	relationshipWriter         jobs.RelationshipTupleWriter
+	ehrmsSyncScheduler         *jobs.EHRMSEmployeeSyncScheduler
+	ehrmsSyncOptions           jobs.EHRMSEmployeeSyncOptions
+	identityProvisioningOutbox *jobs.IdentityProvisioningOutboxProcessor
+	shutdowns                  []moduleShutdown
+	workers                    sync.WaitGroup
 }
 
 type moduleShutdown struct {
@@ -52,6 +57,7 @@ type repositoryModule struct {
 
 type authzSnapshotModule struct {
 	cache        service.AuthzSnapshotCache
+	client       *goredis.Client
 	dependencies []startup.Dependency
 	readiness    map[string]v1api.ReadinessCheck
 	shutdown     moduleShutdown
@@ -69,6 +75,7 @@ type objectStoreModule struct {
 	dependencies []startup.Dependency
 }
 
+// startModules 啟動模組。
 func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (*apiRuntime, error) {
 	report := startup.Report{
 		Name:       "nexus-pro-be",
@@ -129,6 +136,17 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	}
 	tokenResolvers := make([]platformauth.TokenResolver, 0, 2)
 
+	identityProvisioner, keycloakAdminReadiness, keycloakAdminDependency, err := configuredKeycloakProvisioner(cfg, authHTTPClient, logger)
+	if err != nil {
+		shutdownStartedModules(shutdowns, logger)
+		return nil, err
+	}
+	report.Dependencies = append(report.Dependencies, keycloakAdminDependency)
+	if identityProvisioner != nil {
+		serviceOptions.IdentityProvisioner = identityProvisioner
+		readinessChecks["keycloak_admin"] = keycloakAdminReadiness
+	}
+
 	ehrmsClient, ehrmsDependency, err := configuredEHRMSClient(cfg, authHTTPClient)
 	if err != nil {
 		shutdownStartedModules(shutdowns, logger)
@@ -143,6 +161,9 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	apiOptions := v1api.Options{
 		DisableApprovalHeader: cfg.Env == "production",
 		ReadinessChecks:       readinessChecks,
+		CORSAllowedOrigins:    cfg.CORSAllowedOrigins,
+		TrustedProxies:        cfg.TrustedProxies,
+		RateLimiter:           configuredRateLimiter(cfg, authzSnapshotModule.client, logger),
 	}
 
 	keycloakResolver, keycloakReadiness, keycloakDependency := configureKeycloakModule(cfg, authHTTPClient, logger)
@@ -159,16 +180,17 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	}
 	report.Dependencies = append(report.Dependencies, telemetryStatus)
 
+	apiInstance := v1api.New(app, logger, apiOptions)
 	server := &http.Server{
 		Addr:              cfg.HTTPAddr,
-		Handler:           v1api.New(app, logger, apiOptions).Routes(),
+		Handler:           apiInstance.Routes(),
 		ReadTimeout:       15 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      30 * time.Second,
 		IdleTimeout:       60 * time.Second,
 	}
 
-	return &apiRuntime{
+	runtime := &apiRuntime{
 		server:             server,
 		report:             report,
 		store:              store,
@@ -176,9 +198,30 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		ehrmsSyncScheduler: ehrmsSyncScheduler,
 		ehrmsSyncOptions:   ehrmsSyncOptions,
 		shutdowns:          shutdowns,
-	}, nil
+	}
+	if identityProvisioner != nil {
+		// 重試 fast path 失敗後仍停留在佇列中的 Keycloak provisioning。
+		runtime.identityProvisioningOutbox = jobs.NewIdentityProvisioningOutboxProcessor(store, app, logger)
+	}
+	if cfg.MetricsAddr != "" {
+		// /metrics 使用獨立 listener，避免 scrape endpoint 暴露在業務連接埠上。
+		// 它會重用 API instance 的 registry。
+		// 指標收集中介層仍保留在業務 router 上。
+		metricsMux := http.NewServeMux()
+		metricsMux.Handle("/metrics", apiInstance.MetricsHandler())
+		runtime.metricsServer = &http.Server{
+			Addr:              cfg.MetricsAddr,
+			Handler:           metricsMux,
+			ReadTimeout:       15 * time.Second,
+			ReadHeaderTimeout: 5 * time.Second,
+			WriteTimeout:      30 * time.Second,
+			IdleTimeout:       60 * time.Second,
+		}
+	}
+	return runtime, nil
 }
 
+// startTelemetryModule 啟動遙測模組。
 func startTelemetryModule(ctx context.Context, cfg config.Config, logger *slog.Logger) (startup.Dependency, func(context.Context) error, error) {
 	dependency := startup.Dependency{
 		Name:   "OpenTelemetry",
@@ -209,6 +252,7 @@ func startTelemetryModule(ctx context.Context, cfg config.Config, logger *slog.L
 	return dependency, shutdown, nil
 }
 
+// startRepositoryModule 啟動repository 模組。
 func startRepositoryModule(ctx context.Context, cfg config.Config, logger *slog.Logger) (repositoryModule, error) {
 	result := repositoryModule{
 		name:      "postgresql",
@@ -219,7 +263,11 @@ func startRepositoryModule(ctx context.Context, cfg config.Config, logger *slog.
 	}
 
 	startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	pool, err := postgres.OpenPool(startupCtx, cfg.DatabaseURL)
+	pool, err := postgres.OpenPool(startupCtx, cfg.DatabaseURL, postgres.PoolOptions{
+		MaxConns:        cfg.DBMaxConns,
+		MinConns:        cfg.DBMinConns,
+		MaxConnLifetime: cfg.DBMaxConnLifetime,
+	})
 	cancel()
 	if err != nil {
 		logger.Error("postgres connection failed", "error", err)
@@ -242,6 +290,7 @@ func startRepositoryModule(ctx context.Context, cfg config.Config, logger *slog.
 	return result, nil
 }
 
+// startAuthzSnapshotModule 啟動授權快照模組。
 func startAuthzSnapshotModule(ctx context.Context, cfg config.Config, logger *slog.Logger) (authzSnapshotModule, error) {
 	result := authzSnapshotModule{
 		readiness: map[string]v1api.ReadinessCheck{},
@@ -269,6 +318,7 @@ func startAuthzSnapshotModule(ctx context.Context, cfg config.Config, logger *sl
 	}
 	logger.Info("redis connected")
 	result.cache = redisstore.NewAuthzSnapshotStore(redisClient)
+	result.client = redisClient
 	result.dependencies = []startup.Dependency{{
 		Name:   "Redis",
 		Status: "connected",
@@ -284,6 +334,7 @@ func startAuthzSnapshotModule(ctx context.Context, cfg config.Config, logger *sl
 	return result, nil
 }
 
+// startRelationshipModule 啟動關係模組。
 func startRelationshipModule(cfg config.Config, logger *slog.Logger) relationshipModule {
 	result := relationshipModule{
 		readiness: map[string]v1api.ReadinessCheck{},
@@ -333,6 +384,7 @@ func startRelationshipModule(cfg config.Config, logger *slog.Logger) relationshi
 	return result
 }
 
+// startObjectStoreModule 啟動物件儲存層模組。
 func startObjectStoreModule(ctx context.Context, cfg config.Config, logger *slog.Logger) (objectStoreModule, error) {
 	result := objectStoreModule{}
 	switch cfg.ObjectStoreProvider {
@@ -386,6 +438,7 @@ func startObjectStoreModule(ctx context.Context, cfg config.Config, logger *slog
 	return result, nil
 }
 
+// configureKeycloakModule 組態化Keycloak 模組。
 func configureKeycloakModule(cfg config.Config, client *http.Client, logger *slog.Logger) (platformauth.TokenResolver, v1api.ReadinessCheck, startup.Dependency) {
 	if cfg.KeycloakIssuerURL != "" && cfg.KeycloakClientID != "" {
 		keycloakResolver := platformauth.NewKeycloakTokenResolver(cfg.KeycloakIssuerURL, cfg.KeycloakClientID, client)
@@ -420,7 +473,65 @@ func configureKeycloakModule(cfg config.Config, client *http.Client, logger *slo
 	}
 }
 
-// configuredEHRMSClient builds the optional employee master-data upstream adapter.
+// configuredKeycloakProvisioner 處理 configured Keycloak provisioner。
+func configuredKeycloakProvisioner(cfg config.Config, client *http.Client, logger *slog.Logger) (service.IdentityProvisioner, v1api.ReadinessCheck, startup.Dependency, error) {
+	if !cfg.KeycloakProvisionUsers {
+		return nil, nil, startup.Dependency{
+			Name:   "Keycloak Admin",
+			Status: "skipped",
+			Target: "KEYCLOAK_PROVISION_USERS=false",
+			Detail: "user provisioning disabled",
+		}, nil
+	}
+	missing := []string{}
+	if strings.TrimSpace(cfg.KeycloakIssuerURL) == "" {
+		missing = append(missing, "KEYCLOAK_ISSUER_URL")
+	}
+	if strings.TrimSpace(cfg.KeycloakAdminClientID) == "" {
+		missing = append(missing, "KEYCLOAK_ADMIN_CLIENT_ID")
+	}
+	if strings.TrimSpace(cfg.KeycloakAdminClientSecret) == "" {
+		missing = append(missing, "KEYCLOAK_ADMIN_CLIENT_SECRET")
+	}
+	if len(missing) > 0 {
+		dependency := startup.Dependency{Name: "Keycloak Admin", Status: "incomplete", Target: "disabled", Detail: startup.Missing(missing...)}
+		return nil, nil, dependency, errors.New("keycloak admin provisioning is enabled but incomplete")
+	}
+	provisioner, err := platformauth.NewKeycloakAdminClient(platformauth.KeycloakAdminConfig{
+		IssuerURL:         cfg.KeycloakIssuerURL,
+		ClientID:          cfg.KeycloakAdminClientID,
+		ClientSecret:      cfg.KeycloakAdminClientSecret,
+		SendInviteEmail:   cfg.KeycloakSendInviteEmail,
+		InviteClientID:    cfg.KeycloakInviteClientID,
+		InviteRedirectURL: cfg.KeycloakInviteRedirectURL,
+	}, client)
+	if err != nil {
+		dependency := startup.Dependency{Name: "Keycloak Admin", Status: "invalid", Target: startup.SafeURL(cfg.KeycloakIssuerURL), Detail: err.Error()}
+		return nil, nil, dependency, err
+	}
+	logger.Info("keycloak admin provisioning enabled", "issuer", cfg.KeycloakIssuerURL, "client_id", cfg.KeycloakAdminClientID, "send_invite_email", cfg.KeycloakSendInviteEmail)
+	return provisioner, provisioner.Ping, startup.Dependency{
+		Name:   "Keycloak Admin",
+		Status: "configured",
+		Target: startup.SafeURL(cfg.KeycloakIssuerURL),
+		Detail: "client=" + cfg.KeycloakAdminClientID,
+	}, nil
+}
+
+// configuredRateLimiter 處理 configured 速率限流器。
+func configuredRateLimiter(cfg config.Config, redisClient *goredis.Client, logger *slog.Logger) v1api.RateLimiter {
+	if !cfg.RateLimitEnabled {
+		return nil
+	}
+	if redisClient != nil {
+		logger.Info("redis rate limiter enabled", "rps", cfg.RateLimitRPS, "burst", cfg.RateLimitBurst)
+		return redisstore.NewFixedWindowRateLimiter(redisClient, cfg.RateLimitRPS, cfg.RateLimitBurst)
+	}
+	logger.Info("in-process rate limiter enabled", "rps", cfg.RateLimitRPS, "burst", cfg.RateLimitBurst)
+	return v1api.NewLocalRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst)
+}
+
+// configuredEHRMSClient 處理 configured eHRMS client。
 func configuredEHRMSClient(cfg config.Config, client *http.Client) (service.EHRMSClient, startup.Dependency, error) {
 	if strings.TrimSpace(cfg.EHRMSBaseURL) == "" && strings.TrimSpace(cfg.EHRMSAPIKey) == "" {
 		return nil, startup.Dependency{Name: "eHRMS", Status: "skipped", Target: "EHRMS_* not set", Detail: "employee sync disabled"}, nil
@@ -442,7 +553,7 @@ func configuredEHRMSClient(cfg config.Config, client *http.Client) (service.EHRM
 	return clientAdapter, startup.Dependency{Name: "eHRMS", Status: "configured", Target: startup.SafeURL(cfg.EHRMSBaseURL), Detail: "employee sync enabled"}, nil
 }
 
-// configuredEHRMSSyncScheduler wires periodic employee refresh only when explicitly enabled.
+// configuredEHRMSSyncScheduler 處理 configured eHRMS sync scheduler。
 func configuredEHRMSSyncScheduler(cfg config.Config, svc jobs.EHRMSEmployeeSyncService, ehrmsConfigured bool, logger *slog.Logger) (*jobs.EHRMSEmployeeSyncScheduler, jobs.EHRMSEmployeeSyncOptions, startup.Dependency) {
 	opts := jobs.EHRMSEmployeeSyncOptions{
 		Interval:   cfg.EHRMSSyncInterval,
@@ -469,23 +580,56 @@ func configuredEHRMSSyncScheduler(cfg config.Config, svc jobs.EHRMSEmployeeSyncS
 	}
 }
 
+// startBackgroundWorkers 啟動background worker。
 func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Logger) {
 	if r.relationshipWriter != nil {
-		// The tuple outbox only runs when OpenFGA is fully configured to accept writes.
+		// 只有在 OpenFGA 已完整設定且可接受寫入時，tuple outbox 才會執行。
 		processor := jobs.NewAuthzOutboxProcessor(r.store, r.relationshipWriter, logger)
-		go processor.Run(ctx, jobs.AuthzOutboxOptions{})
+		r.workers.Add(1)
+		go func() {
+			defer r.workers.Done()
+			processor.Run(ctx, jobs.AuthzOutboxOptions{})
+		}()
 		logger.Info("openfga outbox worker started")
 	}
 	if r.ehrmsSyncScheduler != nil {
-		go r.ehrmsSyncScheduler.Run(ctx, r.ehrmsSyncOptions)
+		r.workers.Add(1)
+		go func() {
+			defer r.workers.Done()
+			r.ehrmsSyncScheduler.Run(ctx, r.ehrmsSyncOptions)
+		}()
 		logger.Info("eHRMS employee sync scheduler started", "interval", r.ehrmsSyncOptions.Interval.String(), "mode", r.ehrmsSyncOptions.Mode, "tenant_id", r.ehrmsSyncOptions.TenantID, "account_id", r.ehrmsSyncOptions.AccountID)
+	}
+	if r.identityProvisioningOutbox != nil {
+		r.workers.Add(1)
+		go func() {
+			defer r.workers.Done()
+			r.identityProvisioningOutbox.Run(ctx, jobs.IdentityProvisioningOutboxOptions{})
+		}()
+		logger.Info("identity provisioning outbox worker started")
 	}
 }
 
+// waitForBackgroundWorkers 處理 wait for background worker。
+func (r *apiRuntime) waitForBackgroundWorkers(timeout time.Duration, logger *slog.Logger) {
+	done := make(chan struct{})
+	go func() {
+		r.workers.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(timeout):
+		logger.Warn("background workers did not stop before timeout", "timeout", timeout.String())
+	}
+}
+
+// shutdown 關閉目前流程。
 func (r *apiRuntime) shutdown(logger *slog.Logger) {
 	shutdownStartedModules(r.shutdowns, logger)
 }
 
+// appendModuleShutdown 附加模組 shutdown。
 func appendModuleShutdown(shutdowns []moduleShutdown, shutdown moduleShutdown) []moduleShutdown {
 	if shutdown.fn == nil {
 		return shutdowns
@@ -493,12 +637,14 @@ func appendModuleShutdown(shutdowns []moduleShutdown, shutdown moduleShutdown) [
 	return append(shutdowns, shutdown)
 }
 
+// mergeReadinessChecks 合併就緒檢查 checks。
 func mergeReadinessChecks(dst map[string]v1api.ReadinessCheck, src map[string]v1api.ReadinessCheck) {
 	for name, check := range src {
 		dst[name] = check
 	}
 }
 
+// shutdownStartedModules 關閉started 模組。
 func shutdownStartedModules(shutdowns []moduleShutdown, logger *slog.Logger) {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()

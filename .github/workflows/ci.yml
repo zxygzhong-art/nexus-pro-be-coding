@@ -78,3 +78,41 @@ jobs:
         env:
           DATABASE_URL: postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable
         run: GOCACHE=$PWD/.gocache go test ./tests/unit/repository/postgres
+
+  integration:
+    name: Postgres Integration Tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_DB: nexus_pro_be
+          POSTGRES_USER: nexus
+          POSTGRES_PASSWORD: nexus
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U nexus -d nexus_pro_be"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          check-latest: true
+          cache: true
+
+      - name: Run migrations
+        env:
+          DATABASE_URL: postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable
+        run: go run github.com/pressly/goose/v3/cmd/goose@v3.27.2 -dir db/migrations postgres "$DATABASE_URL" up
+
+      - name: Integration tests
+        env:
+          DATABASE_URL: postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable
+        run: GOCACHE=$PWD/.gocache go test ./tests/integration/postgres

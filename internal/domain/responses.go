@@ -1,20 +1,20 @@
 package domain
 
-// Pagination defaults used across list endpoints.
+// 下列常數定義此模組使用的固定值。
 const (
 	DefaultPage     = 1
 	DefaultPageSize = 20
 	MaxPageSize     = 100
 )
 
-// PageRequest carries common pagination and sorting query parameters.
+// PageRequest 定義分頁請求的資料結構。
 type PageRequest struct {
 	Page     int    `json:"page,omitempty"`
 	PageSize int    `json:"page_size,omitempty"`
 	Sort     string `json:"sort,omitempty"`
 }
 
-// PageResponse wraps a paged list and its total item count.
+// PageResponse 說明 API 請求或回應契約。
 type PageResponse[T any] struct {
 	Items    []T    `json:"items"`
 	Total    int    `json:"total"`
@@ -23,7 +23,7 @@ type PageResponse[T any] struct {
 	Sort     string `json:"sort"`
 }
 
-// MeResponse returns the current account, tenant, IAM grants, and capabilities.
+// MeResponse 定義 me 回應的資料結構。
 type MeResponse struct {
 	Tenant               Tenant          `json:"tenant"`
 	Account              Account         `json:"account"`
@@ -36,13 +36,13 @@ type MeResponse struct {
 	Capabilities         []string        `json:"capabilities"`
 }
 
-// MenuListResponse returns the visible menu tree for the current account.
+// MenuListResponse 定義 menu 列表回應的資料結構。
 type MenuListResponse struct {
 	Items []MenuNode `json:"items"`
 	Total int        `json:"total"`
 }
 
-// AssumeRoleResponse returns the created role session and its effective boundary.
+// AssumeRoleResponse 定義角色回應的資料結構。
 type AssumeRoleResponse struct {
 	SessionID          string         `json:"session_id"`
 	SessionToken       string         `json:"session_token"`
@@ -53,13 +53,13 @@ type AssumeRoleResponse struct {
 	ExpiresAt          string         `json:"expires_at"`
 }
 
-// AuthzExplainResponse returns an authorization decision with a short explanation.
+// AuthzExplainResponse 定義授權說明回應的資料結構。
 type AuthzExplainResponse struct {
 	Decision CheckResult `json:"decision"`
 	Explain  string      `json:"explain"`
 }
 
-// AuthzSimulationResponse returns a simulated authorization decision.
+// AuthzSimulationResponse 定義授權模擬回應的資料結構。
 type AuthzSimulationResponse struct {
 	Decision  CheckResult `json:"decision"`
 	Simulated bool        `json:"simulated"`

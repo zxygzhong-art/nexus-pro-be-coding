@@ -18,19 +18,19 @@ const (
 	maxOutboxErrorLength         = 500
 )
 
-// RelationshipTupleWriter writes authorization tuple changes to an external relationship system.
+// RelationshipTupleWriter 定義關係 tuple writer 的行為契約。
 type RelationshipTupleWriter interface {
 	WriteRelationshipTuples(context.Context, []domain.AuthzRelationshipTupleChange) error
 }
 
-// AuthzOutboxOptions controls polling, retry, and batch behavior for tuple sync.
+// AuthzOutboxOptions 定義授權 outbox 選項的資料結構。
 type AuthzOutboxOptions struct {
 	BatchSize  int
 	MaxRetries int
 	Interval   time.Duration
 }
 
-// AuthzOutboxProcessor drains authorization tuple events from the repository outbox.
+// AuthzOutboxProcessor 定義授權 outbox processor 的資料結構。
 type AuthzOutboxProcessor struct {
 	store  repository.Store
 	writer RelationshipTupleWriter
@@ -38,7 +38,7 @@ type AuthzOutboxProcessor struct {
 	now    func() time.Time
 }
 
-// NewAuthzOutboxProcessor creates a processor for syncing local authz events externally.
+// NewAuthzOutboxProcessor 建立授權 outbox processor。
 func NewAuthzOutboxProcessor(store repository.Store, writer RelationshipTupleWriter, logger *slog.Logger) *AuthzOutboxProcessor {
 	if logger == nil {
 		logger = slog.Default()
@@ -51,7 +51,7 @@ func NewAuthzOutboxProcessor(store repository.Store, writer RelationshipTupleWri
 	}
 }
 
-// Run processes the outbox immediately and then polls until the context is canceled.
+// Run 執行背景工作主迴圈。
 func (p *AuthzOutboxProcessor) Run(ctx context.Context, opts AuthzOutboxOptions) {
 	opts = normalizeAuthzOutboxOptions(opts)
 	p.processAllTenantsAndLog(ctx, opts)
@@ -67,7 +67,7 @@ func (p *AuthzOutboxProcessor) Run(ctx context.Context, opts AuthzOutboxOptions)
 	}
 }
 
-// ProcessAllTenants drains queued authorization events for every known tenant.
+// ProcessAllTenants 處理 all 租戶。
 func (p *AuthzOutboxProcessor) ProcessAllTenants(ctx context.Context, opts AuthzOutboxOptions) (int, error) {
 	opts = normalizeAuthzOutboxOptions(opts)
 	if p == nil || p.store == nil {
@@ -88,7 +88,7 @@ func (p *AuthzOutboxProcessor) ProcessAllTenants(ctx context.Context, opts Authz
 	return processed, nil
 }
 
-// ProcessTenant drains queued authorization events for a single tenant.
+// ProcessTenant 處理租戶。
 func (p *AuthzOutboxProcessor) ProcessTenant(ctx context.Context, tenantID string, opts AuthzOutboxOptions) (int, error) {
 	opts = normalizeAuthzOutboxOptions(opts)
 	if p == nil || p.store == nil {
@@ -117,6 +117,7 @@ func (p *AuthzOutboxProcessor) ProcessTenant(ctx context.Context, tenantID strin
 	return processed, nil
 }
 
+// processEvent 處理事件。
 func (p *AuthzOutboxProcessor) processEvent(ctx context.Context, event domain.AuthzOutboxEvent) error {
 	event.Status = "processing"
 	event.LastError = ""
@@ -142,6 +143,7 @@ func (p *AuthzOutboxProcessor) processEvent(ctx context.Context, event domain.Au
 	return p.store.UpdateAuthzOutboxEvent(ctx, event)
 }
 
+// processAllTenantsAndLog 處理 all 租戶 and log。
 func (p *AuthzOutboxProcessor) processAllTenantsAndLog(ctx context.Context, opts AuthzOutboxOptions) {
 	processed, err := p.ProcessAllTenants(ctx, opts)
 	if err != nil {
@@ -153,6 +155,7 @@ func (p *AuthzOutboxProcessor) processAllTenantsAndLog(ctx context.Context, opts
 	}
 }
 
+// normalizeAuthzOutboxOptions 正規化授權 outbox 選項。
 func normalizeAuthzOutboxOptions(opts AuthzOutboxOptions) AuthzOutboxOptions {
 	if opts.BatchSize <= 0 {
 		opts.BatchSize = defaultAuthzOutboxBatchSize
@@ -166,6 +169,7 @@ func normalizeAuthzOutboxOptions(opts AuthzOutboxOptions) AuthzOutboxOptions {
 	return opts
 }
 
+// isRetryableOpenFGAEvent 判斷是否為retryable OpenFGA 事件。
 func isRetryableOpenFGAEvent(event domain.AuthzOutboxEvent, maxRetries int) bool {
 	if !isOpenFGARelationshipEvent(event.EventType) {
 		return false
@@ -176,10 +180,12 @@ func isRetryableOpenFGAEvent(event domain.AuthzOutboxEvent, maxRetries int) bool
 	return event.Status == "pending" || event.Status == "failed" || event.Status == "processing"
 }
 
+// isOpenFGARelationshipEvent 判斷是否為open fga 關係事件。
 func isOpenFGARelationshipEvent(eventType string) bool {
 	return eventType == string(domain.EventOpenFGARelationshipWrite) || eventType == string(domain.EventOpenFGARelationshipDelete)
 }
 
+// relationshipChangeFromOutboxEvent 處理關係 change 來源 outbox 事件。
 func relationshipChangeFromOutboxEvent(event domain.AuthzOutboxEvent) (domain.AuthzRelationshipTupleChange, error) {
 	operation := domain.AuthzRelationshipTupleWrite
 	if event.EventType == string(domain.EventOpenFGARelationshipDelete) {
@@ -199,6 +205,7 @@ func relationshipChangeFromOutboxEvent(event domain.AuthzOutboxEvent) (domain.Au
 	return domain.AuthzRelationshipTupleChange{Operation: operation, Tuple: tuple}, nil
 }
 
+// payloadString 處理 payload 字串。
 func payloadString(payload map[string]any, key string) string {
 	if payload == nil {
 		return ""
@@ -207,6 +214,7 @@ func payloadString(payload map[string]any, key string) string {
 	return strings.TrimSpace(value)
 }
 
+// truncateOutboxError 截斷 outbox 錯誤。
 func truncateOutboxError(value string) string {
 	value = strings.TrimSpace(value)
 	if len(value) <= maxOutboxErrorLength {

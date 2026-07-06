@@ -15,6 +15,7 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
+// TestOpenAPIYAMLParsesStructurally 驗證 open API YAML parses structurally。
 func TestOpenAPIYAMLParsesStructurally(t *testing.T) {
 	var doc struct {
 		OpenAPI string `yaml:"openapi"`
@@ -54,6 +55,7 @@ func TestOpenAPIYAMLParsesStructurally(t *testing.T) {
 	}
 }
 
+// TestRegisteredRoutesMatchAuthzPolicies 驗證 registered 路由 match 授權政策。
 func TestRegisteredRoutesMatchAuthzPolicies(t *testing.T) {
 	router, ok := v1api.New(service.New(memory.NewStore()), nil).Routes().(*gin.Engine)
 	if !ok {
@@ -98,6 +100,7 @@ func TestRegisteredRoutesMatchAuthzPolicies(t *testing.T) {
 	}
 }
 
+// TestPermissionSetAssignmentPoliciesUseDedicatedResource 驗證權限集合指派政策 use dedicated resource。
 func TestPermissionSetAssignmentPoliciesUseDedicatedResource(t *testing.T) {
 	found := 0
 	for _, policy := range domain.DefaultRoutePolicies {
@@ -114,6 +117,7 @@ func TestPermissionSetAssignmentPoliciesUseDedicatedResource(t *testing.T) {
 	}
 }
 
+// TestDocumentedJSONSuccessResponsesUseDataEnvelope 驗證 documented JSON success 回應 use 資料 envelope。
 func TestDocumentedJSONSuccessResponsesUseDataEnvelope(t *testing.T) {
 	raw := string(readOpenAPI(t))
 	for _, inlineStatus := range []string{`"200": {description:`, `"201": {description:`} {
@@ -156,6 +160,7 @@ func TestDocumentedJSONSuccessResponsesUseDataEnvelope(t *testing.T) {
 	}
 }
 
+// TestEmployeeOpenAPIRequestBodiesUseNamedSchemas 驗證員工 OpenAPI 請求 bodies use named schemas。
 func TestEmployeeOpenAPIRequestBodiesUseNamedSchemas(t *testing.T) {
 	refs := openAPIRequestJSONSchemaRefs(t)
 	expected := map[string]string{
@@ -179,6 +184,7 @@ func TestEmployeeOpenAPIRequestBodiesUseNamedSchemas(t *testing.T) {
 	}
 }
 
+// TestEmployeeOpenAPIOperationsDocumentStandardErrors 驗證員工 OpenAPI operations document standard 錯誤。
 func TestEmployeeOpenAPIOperationsDocumentStandardErrors(t *testing.T) {
 	routes := openAPIRouteKeys(t)
 	refs := openAPIErrorResponseRefs(t)
@@ -203,6 +209,7 @@ func TestEmployeeOpenAPIOperationsDocumentStandardErrors(t *testing.T) {
 	}
 }
 
+// TestOpenAPIErrorSchemaSupportsFieldAndRowLocalization 驗證 OpenAPI 錯誤 schema supports 欄位 and 列 localization。
 func TestOpenAPIErrorSchemaSupportsFieldAndRowLocalization(t *testing.T) {
 	raw := string(readOpenAPI(t))
 	requiredSnippets := map[string]string{
@@ -223,6 +230,7 @@ func TestOpenAPIErrorSchemaSupportsFieldAndRowLocalization(t *testing.T) {
 	}
 }
 
+// isPublicRoute 驗證 public 路由。
 func isPublicRoute(path string) bool {
 	switch path {
 	case "/healthz", "/readyz", "/openapi.yaml", "/swagger", "/swagger/*any":
@@ -232,6 +240,7 @@ func isPublicRoute(path string) bool {
 	}
 }
 
+// openAPIPath 驗證 OpenAPI path。
 func openAPIPath(path string) string {
 	parts := strings.Split(path, "/")
 	for i, part := range parts {
@@ -242,6 +251,7 @@ func openAPIPath(path string) string {
 	return strings.Join(parts, "/")
 }
 
+// openAPIRouteKeys 驗證 OpenAPI 路由 keys。
 func openAPIRouteKeys(t *testing.T) map[string]struct{} {
 	t.Helper()
 	keys := map[string]struct{}{}
@@ -263,6 +273,7 @@ func openAPIRouteKeys(t *testing.T) map[string]struct{} {
 	return keys
 }
 
+// openAPISuccessJSONSchemaRefs 驗證 OpenAPI success JSON schema refs。
 func openAPISuccessJSONSchemaRefs(t *testing.T) map[string]string {
 	t.Helper()
 	refs := map[string]string{}
@@ -322,6 +333,7 @@ func openAPISuccessJSONSchemaRefs(t *testing.T) map[string]string {
 	return refs
 }
 
+// openAPIRequestJSONSchemaRefs 驗證 OpenAPI 請求 JSON schema refs。
 func openAPIRequestJSONSchemaRefs(t *testing.T) map[string]string {
 	t.Helper()
 	refs := map[string]string{}
@@ -373,6 +385,7 @@ func openAPIRequestJSONSchemaRefs(t *testing.T) map[string]string {
 	return refs
 }
 
+// openAPIErrorResponseRefs 驗證 OpenAPI 錯誤回應 refs。
 func openAPIErrorResponseRefs(t *testing.T) map[string]string {
 	t.Helper()
 	refs := map[string]string{}
@@ -413,6 +426,7 @@ func openAPIErrorResponseRefs(t *testing.T) map[string]string {
 	return refs
 }
 
+// openAPIInlineResponseRef 驗證 OpenAPI inline 回應 ref。
 func openAPIInlineResponseRef(trimmed string) (string, string, bool) {
 	if !strings.HasPrefix(trimmed, "\"") {
 		return "", "", false
@@ -432,6 +446,7 @@ func openAPIInlineResponseRef(trimmed string) (string, string, bool) {
 	return status, response, response != ""
 }
 
+// readOpenAPI 驗證 OpenAPI。
 func readOpenAPI(t *testing.T) []byte {
 	t.Helper()
 	path := filepath.Join("..", "..", "..", "..", "docs", "openapi.yaml")

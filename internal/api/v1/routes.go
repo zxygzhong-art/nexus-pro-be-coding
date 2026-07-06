@@ -6,7 +6,7 @@ type routeBinder interface {
 	Handle(resource, action string, next HandlerFunc, options ...RouteOption) gin.HandlerFunc
 }
 
-// PathParamID is the conventional path parameter name for resource identifiers.
+// PathParamID 定義 path param ID 的固定值。
 const PathParamID = "id"
 
 type apiRouteBinder struct {
@@ -19,10 +19,10 @@ type routeAuthz struct {
 	targetEmployeeIDParam string
 }
 
-// RouteOption adjusts how route parameters are passed into authorization checks.
+// RouteOption 表示路由選項。
 type RouteOption func(*routeAuthz)
 
-// ResourceID marks a path parameter as the protected resource identifier.
+// ResourceID 處理 resource ID。
 func ResourceID(param string) RouteOption {
 	return func(cfg *routeAuthz) {
 		cfg.resourceIDParam = param
@@ -30,14 +30,14 @@ func ResourceID(param string) RouteOption {
 	}
 }
 
-// PathParam exposes a route parameter to handlers without using it as an authz target.
+// PathParam 處理 path param。
 func PathParam(param string) RouteOption {
 	return func(cfg *routeAuthz) {
 		cfg.pathParams = appendPathParam(cfg.pathParams, param)
 	}
 }
 
-// TargetEmployeeID marks a path parameter as the employee target for scoped HR checks.
+// TargetEmployeeID 處理 target 員工 ID。
 func TargetEmployeeID(param string) RouteOption {
 	return func(cfg *routeAuthz) {
 		cfg.targetEmployeeIDParam = param
@@ -45,6 +45,7 @@ func TargetEmployeeID(param string) RouteOption {
 	}
 }
 
+// appendPathParam 附加 path param。
 func appendPathParam(params []string, param string) []string {
 	for _, existing := range params {
 		if existing == param {
@@ -54,6 +55,7 @@ func appendPathParam(params []string, param string) []string {
 	return append(params, param)
 }
 
+// routeAuthzFrom 處理路由授權 from。
 func routeAuthzFrom(options []RouteOption) routeAuthz {
 	cfg := routeAuthz{}
 	for _, option := range options {
@@ -64,12 +66,12 @@ func routeAuthzFrom(options []RouteOption) routeAuthz {
 	return cfg
 }
 
-// Handle wraps a handler with route-level authorization metadata.
+// Handle 處理 handle。
 func (r apiRouteBinder) Handle(resource, action string, next HandlerFunc, options ...RouteOption) gin.HandlerFunc {
 	return r.api.ginHandle(resource, action, next, routeAuthzFrom(options))
 }
 
-// RegisterRoutes attaches health, Swagger, and all v1 route groups.
+// RegisterRoutes 註冊路由。
 func (a *API) RegisterRoutes(router *gin.Engine) {
 	routes := apiRouteBinder{api: a}
 	SwaggerCtrl{}.RegisterRoutes(router)
@@ -85,5 +87,6 @@ func (a *API) RegisterRoutes(router *gin.Engine) {
 	WorkspaceCtrl{routes: routes, svc: a.workspace}.RegisterRoutes(v1)
 	WorkflowCtrl{routes: routes, svc: a.workflow}.RegisterRoutes(v1)
 	AgentCtrl{routes: routes, svc: a.agent}.RegisterRoutes(v1)
+	NotificationCtrl{routes: routes, svc: a.notification}.RegisterRoutes(v1)
 	AuditCtrl{routes: routes, svc: a.audit}.RegisterRoutes(v1)
 }

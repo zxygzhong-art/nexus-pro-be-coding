@@ -8,6 +8,7 @@ import (
 	"nexus-pro-be/internal/utils"
 )
 
+// TestStringHelpers 驗證字串 helpers。
 func TestStringHelpers(t *testing.T) {
 	src := []string{"a", "b", "a"}
 
@@ -32,6 +33,7 @@ func TestStringHelpers(t *testing.T) {
 	}
 }
 
+// TestNewSecretIDIsHighEntropyAndOpaque 驗證 secret ID is high entropy and opaque。
 func TestNewSecretIDIsHighEntropyAndOpaque(t *testing.T) {
 	first, err := utils.NewSecretID("sess")
 	if err != nil {

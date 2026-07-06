@@ -493,6 +493,25 @@ CREATE TABLE authz_outbox_events (
 
 CREATE INDEX authz_outbox_events_tenant_status_idx ON authz_outbox_events (tenant_id, status, created_at);
 
+CREATE TABLE identity_provisioning_outbox (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    account_id text NOT NULL,
+    employee_id text NOT NULL DEFAULT '',
+    employee_no text NOT NULL DEFAULT '',
+    email text NOT NULL,
+    display_name text NOT NULL DEFAULT '',
+    enabled boolean NOT NULL DEFAULT true,
+    send_invite boolean NOT NULL DEFAULT false,
+    status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'succeeded', 'failed')),
+    retry_count integer NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+    last_error text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
+);
+
+CREATE INDEX identity_provisioning_outbox_tenant_status_idx ON identity_provisioning_outbox (tenant_id, status, created_at);
+
 CREATE TABLE org_units (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -861,6 +880,41 @@ CREATE INDEX agent_runs_tenant_id_idx ON agent_runs (tenant_id);
 CREATE INDEX agent_runs_account_id_idx ON agent_runs (account_id);
 CREATE INDEX agent_runs_tenant_account_created_at_idx ON agent_runs (tenant_id, account_id, created_at DESC);
 
+CREATE TABLE notifications (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tone text NOT NULL CHECK (tone IN ('success', 'info', 'warning')),
+    category text NOT NULL DEFAULT 'system',
+    title text NOT NULL,
+    body text NOT NULL,
+    status_text text NOT NULL,
+    link_url text NOT NULL DEFAULT '',
+    source_type text NOT NULL DEFAULT '',
+    source_id text NOT NULL DEFAULT '',
+    created_by_account_id text,
+    created_at timestamptz NOT NULL,
+    expires_at timestamptz,
+    CONSTRAINT notifications_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT notifications_created_by_fk FOREIGN KEY (tenant_id, created_by_account_id) REFERENCES accounts (tenant_id, id)
+);
+
+CREATE INDEX notifications_tenant_created_at_idx ON notifications (tenant_id, created_at DESC, id DESC);
+CREATE UNIQUE INDEX notifications_source_unique_idx ON notifications (tenant_id, source_type, source_id) WHERE source_type <> '' AND source_id <> '';
+
+CREATE TABLE notification_recipients (
+    notification_id text NOT NULL,
+    tenant_id text NOT NULL,
+    account_id text NOT NULL,
+    read_at timestamptz,
+    deleted_at timestamptz,
+    created_at timestamptz NOT NULL,
+    PRIMARY KEY (notification_id, account_id),
+    CONSTRAINT notification_recipients_notification_fk FOREIGN KEY (tenant_id, notification_id) REFERENCES notifications (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT notification_recipients_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX notification_recipients_account_idx ON notification_recipients (tenant_id, account_id, read_at, created_at DESC);
+
 CREATE TABLE outbox_events (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -959,6 +1013,8 @@ ALTER TABLE authz_permission_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE authz_permission_versions FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_outbox_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE authz_outbox_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE identity_provisioning_outbox ENABLE ROW LEVEL SECURITY;
+ALTER TABLE identity_provisioning_outbox FORCE ROW LEVEL SECURITY;
 ALTER TABLE org_units ENABLE ROW LEVEL SECURITY;
 ALTER TABLE org_units FORCE ROW LEVEL SECURITY;
 ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
@@ -995,6 +1051,10 @@ ALTER TABLE platform_task_todos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform_task_todos FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs FORCE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications FORCE ROW LEVEL SECURITY;
+ALTER TABLE notification_recipients ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notification_recipients FORCE ROW LEVEL SECURITY;
 ALTER TABLE outbox_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE outbox_events FORCE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
@@ -1033,6 +1093,7 @@ CREATE POLICY tenant_isolation_authz_assumable_role_sessions ON authz_assumable_
 CREATE POLICY tenant_isolation_authz_relationship_tuples ON authz_relationship_tuples USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_authz_permission_versions ON authz_permission_versions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_authz_outbox_events ON authz_outbox_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_identity_provisioning_outbox ON identity_provisioning_outbox USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_org_units ON org_units USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_employees ON employees USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_employee_number_sequences ON employee_number_sequences USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -1051,5 +1112,7 @@ CREATE POLICY tenant_isolation_knowledge_articles ON knowledge_articles USING (t
 CREATE POLICY tenant_isolation_platform_task_items ON platform_task_items USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_platform_task_todos ON platform_task_todos USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_runs ON agent_runs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_notifications ON notifications USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_notification_recipients ON notification_recipients USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_outbox_events ON outbox_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_audit_logs ON audit_logs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));

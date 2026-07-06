@@ -2,7 +2,7 @@ package domain
 
 import "time"
 
-// PlatformAssistant describes one assistant card shown in the OA workbench.
+// PlatformAssistant 定義平台助理的資料結構。
 type PlatformAssistant struct {
 	ID    string `json:"id"`
 	Emoji string `json:"emoji"`
@@ -11,7 +11,7 @@ type PlatformAssistant struct {
 	Tag   string `json:"tag,omitempty"`
 }
 
-// PlatformFormItem describes one form shortcut in a category column.
+// PlatformFormItem 定義平台表單項目的資料結構。
 type PlatformFormItem struct {
 	ID    string `json:"id"`
 	Emoji string `json:"emoji"`
@@ -19,14 +19,14 @@ type PlatformFormItem struct {
 	Desc  string `json:"desc"`
 }
 
-// PlatformFormColumn groups form shortcuts by business category.
+// PlatformFormColumn 定義平台表單 column 的資料結構。
 type PlatformFormColumn struct {
 	Title string             `json:"title"`
 	Emoji string             `json:"emoji"`
 	Items []PlatformFormItem `json:"items"`
 }
 
-// PlatformClockSummary is the compact home-page attendance card contract.
+// PlatformClockSummary 定義平台打卡摘要的資料結構。
 type PlatformClockSummary struct {
 	DateLabel             string  `json:"date_label"`
 	CheckedInAt           *string `json:"checked_in_at"`
@@ -37,14 +37,14 @@ type PlatformClockSummary struct {
 	LeaveDays             float64 `json:"leave_days"`
 }
 
-// PlatformHomeResponse aggregates the first-screen workbench widgets.
+// PlatformHomeResponse 定義平台首頁回應的資料結構。
 type PlatformHomeResponse struct {
 	Assistants   []PlatformAssistant  `json:"assistants"`
 	FormColumns  []PlatformFormColumn `json:"form_columns"`
 	ClockSummary PlatformClockSummary `json:"clock_summary"`
 }
 
-// PlatformChatMessage is one lightweight AI panel message.
+// PlatformChatMessage 定義平台 chat message 的資料結構。
 type PlatformChatMessage struct {
 	ID      string `json:"id"`
 	Role    string `json:"role"`
@@ -52,13 +52,13 @@ type PlatformChatMessage struct {
 	Content string `json:"content"`
 }
 
-// PlatformAssistantsQuery filters assistant cards.
+// PlatformAssistantsQuery 定義平台助理查詢的資料結構。
 type PlatformAssistantsQuery struct {
 	Tag    string `json:"tag,omitempty"`
 	Search string `json:"search,omitempty"`
 }
 
-// PlatformAssistantsResponse lists assistant cards plus sidebar chat prompts.
+// PlatformAssistantsResponse 定義平台助理回應的資料結構。
 type PlatformAssistantsResponse struct {
 	Data         []PlatformAssistant   `json:"data"`
 	Total        int                   `json:"total"`
@@ -66,7 +66,7 @@ type PlatformAssistantsResponse struct {
 	QuickPrompts []string              `json:"quick_prompts"`
 }
 
-// PlatformFormApplication is one submitted workflow form row for the forms page.
+// PlatformFormApplication 定義平台表單 application 的資料結構。
 type PlatformFormApplication struct {
 	ID          string         `json:"id"`
 	TemplateKey string         `json:"template_key,omitempty"`
@@ -78,7 +78,7 @@ type PlatformFormApplication struct {
 	Payload     map[string]any `json:"payload,omitempty"`
 }
 
-// PlatformFormDraft is one locally resumable form draft placeholder.
+// PlatformFormDraft 定義平台表單草稿的資料結構。
 type PlatformFormDraft struct {
 	ID          string         `json:"id"`
 	TemplateKey string         `json:"template_key,omitempty"`
@@ -88,7 +88,7 @@ type PlatformFormDraft struct {
 	Payload     map[string]any `json:"payload,omitempty"`
 }
 
-// PlatformFormsResponse powers the employee self-service forms page.
+// PlatformFormsResponse 定義平台表單回應的資料結構。
 type PlatformFormsResponse struct {
 	Categories   []PlatformFormColumn      `json:"categories"`
 	Applications []PlatformFormApplication `json:"applications"`
@@ -97,7 +97,7 @@ type PlatformFormsResponse struct {
 	QuickPrompts []string                  `json:"quick_prompts"`
 }
 
-// PlatformTaskItem describes one task record line.
+// PlatformTaskItem 定義平台任務項目的資料結構。
 type PlatformTaskItem struct {
 	ID       string  `json:"id"`
 	Title    string  `json:"title"`
@@ -107,7 +107,7 @@ type PlatformTaskItem struct {
 	Note     string  `json:"note"`
 }
 
-// PlatformTaskRecord groups one day's task lines.
+// PlatformTaskRecord 定義平台任務 record 的資料結構。
 type PlatformTaskRecord struct {
 	Date       string             `json:"date"`
 	Weekday    string             `json:"weekday"`
@@ -115,7 +115,7 @@ type PlatformTaskRecord struct {
 	Items      []PlatformTaskItem `json:"items"`
 }
 
-// PlatformTaskTodo is one task sidebar checklist item.
+// PlatformTaskTodo 定義平台任務待辦的資料結構。
 type PlatformTaskTodo struct {
 	ID   string `json:"id"`
 	Text string `json:"text"`
@@ -123,7 +123,7 @@ type PlatformTaskTodo struct {
 	Date string `json:"date"`
 }
 
-// PlatformTaskRecordItem persists one manually entered work-log item.
+// PlatformTaskRecordItem 定義平台任務 record 項目的資料結構。
 type PlatformTaskRecordItem struct {
 	ID        string    `json:"id"`
 	TenantID  string    `json:"tenant_id"`
@@ -138,7 +138,7 @@ type PlatformTaskRecordItem struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// PlatformTaskTodoRecord persists one current-account task-page todo.
+// PlatformTaskTodoRecord 定義平台任務待辦 record 的資料結構。
 type PlatformTaskTodoRecord struct {
 	ID                  string    `json:"id"`
 	TenantID            string    `json:"tenant_id"`
@@ -151,7 +151,7 @@ type PlatformTaskTodoRecord struct {
 	UpdatedAt           time.Time `json:"updated_at"`
 }
 
-// CreatePlatformTaskItemInput carries task-page work-log create fields.
+// CreatePlatformTaskItemInput 定義平台任務項目輸入的資料結構。
 type CreatePlatformTaskItemInput struct {
 	WorkDate string  `json:"work_date,omitempty"`
 	Title    string  `json:"title"`
@@ -161,7 +161,7 @@ type CreatePlatformTaskItemInput struct {
 	Note     string  `json:"note,omitempty"`
 }
 
-// UpdatePlatformTaskItemInput carries task-page work-log patch fields.
+// UpdatePlatformTaskItemInput 定義平台任務項目輸入的資料結構。
 type UpdatePlatformTaskItemInput struct {
 	WorkDate *string  `json:"work_date,omitempty"`
 	Title    *string  `json:"title,omitempty"`
@@ -171,20 +171,20 @@ type UpdatePlatformTaskItemInput struct {
 	Note     *string  `json:"note,omitempty"`
 }
 
-// CreatePlatformTaskTodoInput carries task-page todo create fields.
+// CreatePlatformTaskTodoInput 定義平台任務待辦輸入的資料結構。
 type CreatePlatformTaskTodoInput struct {
 	Text    string `json:"text"`
 	DueDate string `json:"due_date,omitempty"`
 }
 
-// UpdatePlatformTaskTodoInput carries task-page todo patch fields.
+// UpdatePlatformTaskTodoInput 定義平台任務待辦輸入的資料結構。
 type UpdatePlatformTaskTodoInput struct {
 	Text    *string `json:"text,omitempty"`
 	DueDate *string `json:"due_date,omitempty"`
 	Done    *bool   `json:"done,omitempty"`
 }
 
-// ConvertPlatformTaskTodoInput controls how a todo becomes a work-log item.
+// ConvertPlatformTaskTodoInput 定義 convert 平台任務待辦輸入的資料結構。
 type ConvertPlatformTaskTodoInput struct {
 	WorkDate string  `json:"work_date,omitempty"`
 	Title    string  `json:"title,omitempty"`
@@ -194,7 +194,7 @@ type ConvertPlatformTaskTodoInput struct {
 	Note     string  `json:"note,omitempty"`
 }
 
-// PlatformTasksResponse powers the employee task page.
+// PlatformTasksResponse 定義平台任務回應的資料結構。
 type PlatformTasksResponse struct {
 	Records      []PlatformTaskRecord  `json:"records"`
 	Todos        []PlatformTaskTodo    `json:"todos"`
@@ -203,14 +203,14 @@ type PlatformTasksResponse struct {
 	QuickPrompts []string              `json:"quick_prompts"`
 }
 
-// PlatformFormDesign describes the workspace form-builder catalog.
+// PlatformFormDesign 定義平台表單 design 的資料結構。
 type PlatformFormDesign struct {
 	Categories []string                    `json:"categories"`
 	Forms      []PlatformFormDesignForm    `json:"forms"`
 	Builder    PlatformFormBuilderContract `json:"builder"`
 }
 
-// PlatformFormDesignForm is one form template row in workspace settings.
+// PlatformFormDesignForm 定義平台表單 design 表單的資料結構。
 type PlatformFormDesignForm struct {
 	ID             string                     `json:"id"`
 	Icon           string                     `json:"icon"`
@@ -225,7 +225,7 @@ type PlatformFormDesignForm struct {
 	Stages         []PlatformFormBuilderStage `json:"stages,omitempty"`
 }
 
-// PlatformFormBuilderContract contains reusable form-builder palettes.
+// PlatformFormBuilderContract 定義平台表單 builder contract 的資料結構。
 type PlatformFormBuilderContract struct {
 	Layouts    []PlatformFormBuilderLayout    `json:"layouts"`
 	FieldTypes []PlatformFormBuilderFieldType `json:"field_types"`
@@ -233,21 +233,21 @@ type PlatformFormBuilderContract struct {
 	Stages     []PlatformFormBuilderStage     `json:"stages"`
 }
 
-// PlatformFormBuilderLayout describes a form-builder layout choice.
+// PlatformFormBuilderLayout 定義平台表單 builder layout 的資料結構。
 type PlatformFormBuilderLayout struct {
 	Key     string   `json:"key"`
 	Label   string   `json:"label"`
 	Columns []string `json:"columns"`
 }
 
-// PlatformFormBuilderFieldType describes a field palette item.
+// PlatformFormBuilderFieldType 定義平台表單 builder 欄位 type 的資料結構。
 type PlatformFormBuilderFieldType struct {
 	Key   string `json:"key"`
 	Label string `json:"label"`
 	Icon  string `json:"icon"`
 }
 
-// PlatformFormBuilderField is one default field in the builder canvas.
+// PlatformFormBuilderField 定義平台表單 builder 欄位的資料結構。
 type PlatformFormBuilderField struct {
 	ID          string `json:"id"`
 	Type        string `json:"type"`
@@ -256,7 +256,7 @@ type PlatformFormBuilderField struct {
 	Required    bool   `json:"required"`
 }
 
-// PlatformFormBuilderStage is one approval-flow node in the builder canvas.
+// PlatformFormBuilderStage 定義平台表單 builder stage 的資料結構。
 type PlatformFormBuilderStage struct {
 	ID     string `json:"id"`
 	Type   string `json:"type"`
@@ -264,7 +264,7 @@ type PlatformFormBuilderStage struct {
 	Detail string `json:"detail"`
 }
 
-// PlatformWorkspaceResponse aggregates workspace settings panes used by the FE.
+// PlatformWorkspaceResponse 定義平台工作區回應的資料結構。
 type PlatformWorkspaceResponse struct {
 	AdminSettings WorkspaceAdminsResponse  `json:"admin_settings"`
 	AuditLogs     []WorkspaceAuditLog      `json:"audit_logs"`
@@ -272,13 +272,13 @@ type PlatformWorkspaceResponse struct {
 	LeavePolicy   AttendancePolicyResponse `json:"leave_policy"`
 }
 
-// PlatformWorkspaceEmployeesResponse powers the workspace employee table export contract.
+// PlatformWorkspaceEmployeesResponse 定義平台工作區員工回應的資料結構。
 type PlatformWorkspaceEmployeesResponse struct {
 	Employees  []WorkspaceEmployeeCard `json:"employees"`
 	CSVHeaders []string                `json:"csv_headers"`
 }
 
-// PlatformWorkspaceEmployeesQuery filters the workspace employee table payload.
+// PlatformWorkspaceEmployeesQuery 定義平台工作區員工查詢的資料結構。
 type PlatformWorkspaceEmployeesQuery struct {
 	DepartmentID     string `json:"department_id,omitempty"`
 	Department       string `json:"department,omitempty"`
@@ -287,23 +287,23 @@ type PlatformWorkspaceEmployeesQuery struct {
 	Keyword          string `json:"keyword,omitempty"`
 }
 
-// UpdateWorkspaceOrganizationManagerInput updates one employee's manager link from the workspace organization view.
+// UpdateWorkspaceOrganizationManagerInput 定義工作區 organization 主管輸入的資料結構。
 type UpdateWorkspaceOrganizationManagerInput struct {
 	ParentID *string `json:"parent_id,omitempty"`
 }
 
-// CreateWorkspaceAdminInput grants workspace-admin permissions to an account-bound employee.
+// CreateWorkspaceAdminInput 定義工作區管理員輸入的資料結構。
 type CreateWorkspaceAdminInput struct {
 	EmployeeID  string            `json:"employee_id"`
 	Permissions map[string]string `json:"permissions"`
 }
 
-// UpdateWorkspaceAdminPermissionsInput replaces one workspace admin's permission matrix.
+// UpdateWorkspaceAdminPermissionsInput 定義工作區管理員權限輸入的資料結構。
 type UpdateWorkspaceAdminPermissionsInput struct {
 	Permissions map[string]string `json:"permissions"`
 }
 
-// SaveWorkspaceFormDesignInput carries one workspace form-builder template write.
+// SaveWorkspaceFormDesignInput 定義工作區表單 design 輸入的資料結構。
 type SaveWorkspaceFormDesignInput struct {
 	ID       string                     `json:"id,omitempty"`
 	Icon     string                     `json:"icon,omitempty"`
@@ -315,7 +315,7 @@ type SaveWorkspaceFormDesignInput struct {
 	Stages   []PlatformFormBuilderStage `json:"stages,omitempty"`
 }
 
-// UpdateWorkspaceFormDesignInput carries partial workspace form-builder updates.
+// UpdateWorkspaceFormDesignInput 定義工作區表單 design 輸入的資料結構。
 type UpdateWorkspaceFormDesignInput struct {
 	Icon     *string                     `json:"icon,omitempty"`
 	Name     *string                     `json:"name,omitempty"`
@@ -326,19 +326,19 @@ type UpdateWorkspaceFormDesignInput struct {
 	Stages   *[]PlatformFormBuilderStage `json:"stages,omitempty"`
 }
 
-// PlatformInsightsQuery selects the report month.
+// PlatformInsightsQuery 定義平台洞察查詢的資料結構。
 type PlatformInsightsQuery struct {
 	Month string `json:"month,omitempty"`
 }
 
-// PlatformInsightsResponse returns answer-ready report payloads for the insights page.
+// PlatformInsightsResponse 定義平台洞察回應的資料結構。
 type PlatformInsightsResponse struct {
 	Month   string                  `json:"month"`
 	Reports map[string]any          `json:"reports"`
 	AIPanel PlatformInsightsAIPanel `json:"ai_panel"`
 }
 
-// PlatformInsightsAIPanel contains chat messages and quick prompts.
+// PlatformInsightsAIPanel 定義平台洞察 ai panel 的資料結構。
 type PlatformInsightsAIPanel struct {
 	Messages     []PlatformChatMessage `json:"messages"`
 	QuickPrompts []string              `json:"quick_prompts"`

@@ -13,17 +13,17 @@ import (
 	"time"
 )
 
-// AuthzService evaluates permissions, scopes, field policies, and approval requirements.
+// AuthzService 定義授權服務的資料結構。
 type AuthzService struct {
 	*Service
 }
 
-// Authz returns the authorization service facade.
+// Authz 處理授權的服務流程。
 func (c *Service) Authz() AuthzService {
 	return AuthzService{Service: c}
 }
 
-// Check evaluates one authorization request for the current account context.
+// Check 檢查對應的服務流程。
 func (c AuthzService) Check(ctx RequestContext, req CheckRequest) (result CheckResult, err error) {
 	ctx, span := startServiceSpan(ctx, "service.authz.check", authzSpanAttributes(req)...)
 	defer func() {
@@ -41,7 +41,7 @@ func (c AuthzService) Check(ctx RequestContext, req CheckRequest) (result CheckR
 	return result, err
 }
 
-// BatchCheck evaluates multiple authorization requests in order.
+// BatchCheck 處理批次 check 的服務流程。
 func (c AuthzService) BatchCheck(ctx RequestContext, req BatchCheckRequest) (result BatchCheckResult, err error) {
 	ctx, span := startServiceSpan(ctx, "service.authz.batch_check")
 	defer func() {
@@ -59,6 +59,7 @@ func (c AuthzService) BatchCheck(ctx RequestContext, req BatchCheckRequest) (res
 	return BatchCheckResult{Results: results}, nil
 }
 
+// shouldAuditRouteAuthzCheck 處理 should 稽核路由授權 check 的服務流程。
 func (c AuthzService) shouldAuditRouteAuthzCheck(ctx RequestContext, result CheckResult) bool {
 	if !result.Allowed {
 		return true
@@ -66,12 +67,12 @@ func (c AuthzService) shouldAuditRouteAuthzCheck(ctx RequestContext, result Chec
 	return result.RequiresApproval && ctx.ApprovalInstanceID == "" && !ctx.ApprovalConfirmed
 }
 
-// AuditDecision records an authorization decision that was finalized in the API layer.
+// AuditDecision 處理稽核決策的服務流程。
 func (c AuthzService) AuditDecision(ctx RequestContext, req CheckRequest, result CheckResult) error {
 	return c.auditAuthzTarget(ctx, AuditTarget{}.fromRequest(req), result)
 }
 
-// ValidateApprovalInstance verifies approval evidence for a high-risk request.
+// ValidateApprovalInstance 驗證核准實例的服務流程。
 func (c AuthzService) ValidateApprovalInstance(ctx RequestContext, req CheckRequest) error {
 	return c.Service.ValidateApprovalInstance(ctx, req)
 }
@@ -84,6 +85,7 @@ type authzGrant struct {
 	DataScope       *DataScope
 }
 
+// evaluateAuthz 處理 evaluate 授權的服務流程。
 func (c *Service) evaluateAuthz(ctx RequestContext, account Account, req CheckRequest) (CheckResult, error) {
 	req = normalizeCheckRequest(req)
 	version, err := c.store.GetPermissionVersion(goContext(ctx), ctx.TenantID)
@@ -240,6 +242,7 @@ func (c *Service) evaluateAuthz(ctx RequestContext, account Account, req CheckRe
 	return cacheResult(result), nil
 }
 
+// collectAuthzGrants 處理 collect 授權 grants 的服務流程。
 func (c *Service) collectAuthzGrants(ctx RequestContext, account Account) ([]authzGrant, []string, *AssumedRoleDecision, map[string]any, error) {
 	grants := make([]authzGrant, 0)
 	setIDs := make([]string, 0)
@@ -347,6 +350,7 @@ func (c *Service) collectAuthzGrants(ctx RequestContext, account Account) ([]aut
 	return grants, uniqueStrings(setIDs), assumed, boundary, nil
 }
 
+// activeAssumableRole 處理啟用中 assumable 角色的服務流程。
 func (c *Service) activeAssumableRole(ctx RequestContext, account Account) (*AssumableRole, *AssumableRoleSession, error) {
 	if ctx.AssumedRoleSessionID != "" {
 		session, ok, err := c.store.GetActiveAssumableRoleSession(goContext(ctx), ctx.TenantID, ctx.AssumedRoleSessionID)
@@ -371,6 +375,7 @@ func (c *Service) activeAssumableRole(ctx RequestContext, account Account) (*Ass
 	return nil, nil, nil
 }
 
+// conditionsForGrant 處理 conditions for grant 的服務流程。
 func (c *Service) conditionsForGrant(ctx RequestContext, account Account, grant authzGrant, req CheckRequest) (Scope, map[string]any, error) {
 	if grant.DataScope != nil {
 		conditions, err := c.scopeConditions(ctx, account, Scope(grant.DataScope.ScopeType), grant.DataScope.Params)
@@ -384,6 +389,7 @@ func (c *Service) conditionsForGrant(ctx RequestContext, account Account, grant 
 	return scope, conditions, err
 }
 
+// fieldPolicyDecision 處理欄位政策決策的服務流程。
 func (c *Service) fieldPolicyDecision(ctx RequestContext, applicationCode ApplicationCode, resourceType ResourceType, permissionKey string, matchedPermissions []string) (map[string]string, error) {
 	policies, err := c.store.ListFieldPolicies(goContext(ctx), ctx.TenantID, string(applicationCode), string(resourceType))
 	if err != nil {
@@ -423,6 +429,7 @@ func (c *Service) fieldPolicyDecision(ctx RequestContext, applicationCode Applic
 	return out, nil
 }
 
+// defaultFieldPolicies 處理預設欄位政策。
 func defaultFieldPolicies(applicationCode ApplicationCode, resourceType ResourceType) map[string]string {
 	if applicationCode == AppAttendance && resourceType == ResourceAttendanceClock {
 		return map[string]string{
@@ -459,6 +466,7 @@ func defaultFieldPolicies(applicationCode ApplicationCode, resourceType Resource
 	}
 }
 
+// fieldPolicyApplies 處理欄位政策 applies。
 func fieldPolicyApplies(policy FieldPolicy, permissionKey string, matchedPermissions []string) bool {
 	policyPermission := strings.TrimSpace(policy.PermissionID)
 	if policyPermission == "" {
@@ -475,6 +483,7 @@ func fieldPolicyApplies(policy FieldPolicy, permissionKey string, matchedPermiss
 	return false
 }
 
+// permissionLabelMatches 處理權限 label matches。
 func permissionLabelMatches(value, pattern string) bool {
 	value = strings.TrimSpace(value)
 	pattern = strings.TrimSpace(pattern)
@@ -492,6 +501,7 @@ func permissionLabelMatches(value, pattern string) bool {
 	return permissionKeyMatches(value, pattern)
 }
 
+// fieldPolicyEffectRank 處理欄位政策 effect rank。
 func fieldPolicyEffectRank(effect string) int {
 	switch effect {
 	case "deny":
@@ -509,10 +519,12 @@ func fieldPolicyEffectRank(effect string) int {
 	}
 }
 
+// auditAuthzDecision 處理稽核授權決策的服務流程。
 func (c *Service) auditAuthzDecision(ctx RequestContext, action, resource, target string, decision CheckResult) error {
 	return c.audit(ctx, action, resource, target, "high", auditDecisionDetails(ctx, decision, nil))
 }
 
+// defaultPermissions 處理預設權限。
 func defaultPermissions() []Permission {
 	out := make([]Permission, 0, len(domain.DefaultRoutePolicies))
 	for _, policy := range domain.DefaultRoutePolicies {
@@ -527,6 +539,7 @@ func defaultPermissions() []Permission {
 	return out
 }
 
+// touchAuthzConfig 處理 touch 授權組態的服務流程。
 func (c *Service) touchAuthzConfig(ctx RequestContext, eventType string, payload map[string]any) error {
 	version, err := c.store.IncrementPermissionVersion(goContext(ctx), ctx.TenantID)
 	if err != nil {
@@ -548,6 +561,7 @@ func (c *Service) touchAuthzConfig(ctx RequestContext, eventType string, payload
 	})
 }
 
+// normalizeCheckRequest 正規化check 請求。
 func normalizeCheckRequest(req CheckRequest) CheckRequest {
 	req.RouteMethod = strings.ToUpper(strings.TrimSpace(req.RouteMethod))
 	req.RoutePath = strings.TrimSpace(req.RoutePath)
@@ -578,6 +592,7 @@ func normalizeCheckRequest(req CheckRequest) CheckRequest {
 	return req
 }
 
+// normalizePermission 正規化權限。
 func normalizePermission(perm Permission) Permission {
 	if perm.ApplicationCode == "" || perm.ResourceType == "" {
 		app, resourceType := splitResource(perm.Resource)
@@ -594,6 +609,7 @@ func normalizePermission(perm Permission) Permission {
 	return perm
 }
 
+// normalizePermissions 正規化權限。
 func normalizePermissions(perms []Permission) []Permission {
 	if len(perms) == 0 {
 		return nil
@@ -605,6 +621,7 @@ func normalizePermissions(perms []Permission) []Permission {
 	return out
 }
 
+// splitResource 拆分resource。
 func splitResource(resource string) (ApplicationCode, ResourceType) {
 	if resource == "" {
 		return AppPlatform, ""
@@ -619,6 +636,7 @@ func splitResource(resource string) (ApplicationCode, ResourceType) {
 	return AppPlatform, ResourceType(resource)
 }
 
+// routeResourceName 處理路由 resource 名稱。
 func routeResourceName(applicationCode ApplicationCode, resourceType ResourceType) string {
 	if applicationCode == "" || applicationCode == AppPlatform {
 		return string(resourceType)
@@ -626,6 +644,7 @@ func routeResourceName(applicationCode ApplicationCode, resourceType ResourceTyp
 	return string(applicationCode) + "." + string(resourceType)
 }
 
+// optionalDateTime 處理可選日期時間。
 func optionalDateTime(value string) (*time.Time, error) {
 	if strings.TrimSpace(value) == "" {
 		return nil, nil
@@ -637,10 +656,12 @@ func optionalDateTime(value string) (*time.Time, error) {
 	return &t, nil
 }
 
+// permissionKey 處理權限 key。
 func permissionKey(applicationCode ApplicationCode, resourceType ResourceType, action Action) string {
 	return fmt.Sprintf("%s.%s.%s", applicationCode, resourceType, action)
 }
 
+// permissionEffect 處理權限 effect。
 func permissionEffect(grant authzGrant) string {
 	if strings.EqualFold(grant.Effect, "deny") || strings.EqualFold(grant.Permission.Effect, "deny") {
 		return "deny"
@@ -648,11 +669,12 @@ func permissionEffect(grant authzGrant) string {
 	return utils.FirstNonEmpty(grant.Permission.Effect, grant.Effect, "allow")
 }
 
+// isHighRiskPermission 判斷是否為high risk 權限。
 func isHighRiskPermission(perm Permission) bool {
 	return perm.RiskLevel == "high" || perm.RiskLevel == "critical"
 }
 
-// approvalPolicyForRoute resolves high-risk approval requirements from route metadata.
+// approvalPolicyForRoute 處理核准政策 for 路由。
 func approvalPolicyForRoute(req CheckRequest) (bool, string, string, string) {
 	reqResource := strings.TrimSpace(req.Resource)
 	if req.RouteMethod != "" || req.RoutePath != "" {
@@ -671,7 +693,7 @@ func approvalPolicyForRoute(req CheckRequest) (bool, string, string, string) {
 	return false, string(domain.RiskNormal), "", ""
 }
 
-// routePolicyMatchesHTTPRoute keeps route-level approval checks tied to the matched HTTP route.
+// routePolicyMatchesHTTPRoute 處理路由政策 matches HTTP 路由。
 func routePolicyMatchesHTTPRoute(req CheckRequest, policy domain.RoutePolicy, reqResource string) bool {
 	if req.RouteMethod != "" && !strings.EqualFold(policy.Method, req.RouteMethod) {
 		return false
@@ -682,6 +704,7 @@ func routePolicyMatchesHTTPRoute(req CheckRequest, policy domain.RoutePolicy, re
 	return strings.EqualFold(policy.Action, string(req.Action)) && routePolicyMatchesRequest(req, policy, reqResource)
 }
 
+// routePolicyMatchesRequest 處理路由政策 matches 請求。
 func routePolicyMatchesRequest(req CheckRequest, policy domain.RoutePolicy, reqResource string) bool {
 	if policy.ApplicationCode == string(req.ApplicationCode) && policy.ResourceType == string(req.ResourceType) {
 		return true
@@ -692,7 +715,7 @@ func routePolicyMatchesRequest(req CheckRequest, policy domain.RoutePolicy, reqR
 	return strings.EqualFold(reqResource, legacyRouteResourceName(policy.ApplicationCode, policy.ResourceType))
 }
 
-// approvalPolicyDecision converts route risk metadata into a service decision tuple.
+// approvalPolicyDecision 處理核准政策決策。
 func approvalPolicyDecision(policy domain.RoutePolicy) (bool, string, string, string) {
 	risk := string(policy.RiskLevel)
 	if policy.RiskLevel == domain.RiskHigh || policy.RiskLevel == domain.RiskCritical {
@@ -701,6 +724,7 @@ func approvalPolicyDecision(policy domain.RoutePolicy) (bool, string, string, st
 	return false, risk, "", ""
 }
 
+// legacyRouteResourceName 處理 legacy 路由 resource 名稱。
 func legacyRouteResourceName(applicationCode, resourceType string) string {
 	if applicationCode == string(AppAudit) && resourceType == "audit_log" {
 		return "audit.log"
@@ -708,6 +732,7 @@ func legacyRouteResourceName(applicationCode, resourceType string) string {
 	return routeResourceName(ApplicationCode(applicationCode), ResourceType(resourceType))
 }
 
+// approvalTypeForRisk 處理核准 type for risk。
 func approvalTypeForRisk(risk string) string {
 	switch risk {
 	case string(domain.RiskCritical):
@@ -719,6 +744,7 @@ func approvalTypeForRisk(risk string) string {
 	}
 }
 
+// maxRiskLevel 取得較大值risk level。
 func maxRiskLevel(a, b string) string {
 	if riskRank(b) > riskRank(a) {
 		return b
@@ -729,6 +755,7 @@ func maxRiskLevel(a, b string) string {
 	return a
 }
 
+// riskRank 處理 risk rank。
 func riskRank(risk string) int {
 	switch risk {
 	case string(domain.RiskCritical):
@@ -742,10 +769,12 @@ func riskRank(risk string) int {
 	}
 }
 
+// policyDenies 處理政策 denies。
 func policyDenies(policy map[string]any, key string) bool {
 	return policyListContains(policy, "deny", key)
 }
 
+// policyAllows 處理政策 allows。
 func policyAllows(policy map[string]any, key string) bool {
 	if len(policy) == 0 {
 		return true
@@ -757,6 +786,7 @@ func policyAllows(policy map[string]any, key string) bool {
 	return valueListContains(allows, key)
 }
 
+// policyListContains 處理政策列表 contains。
 func policyListContains(policy map[string]any, field, key string) bool {
 	if len(policy) == 0 {
 		return false
@@ -764,6 +794,7 @@ func policyListContains(policy map[string]any, field, key string) bool {
 	return valueListContains(policy[field], key)
 }
 
+// valueListContains 處理 value 列表 contains。
 func valueListContains(value any, key string) bool {
 	switch v := value.(type) {
 	case []string:
@@ -784,6 +815,7 @@ func valueListContains(value any, key string) bool {
 	return false
 }
 
+// permissionKeyMatches 處理權限 key matches。
 func permissionKeyMatches(key, pattern string) bool {
 	if pattern == "" {
 		return false
@@ -797,6 +829,7 @@ func permissionKeyMatches(key, pattern string) bool {
 	return false
 }
 
+// mergePolicy 合併政策。
 func mergePolicy(base, extra map[string]any) map[string]any {
 	if len(base) == 0 {
 		return utils.CopyStringMap(extra)
@@ -816,6 +849,7 @@ func mergePolicy(base, extra map[string]any) map[string]any {
 	return out
 }
 
+// appendPolicyList 附加政策列表。
 func appendPolicyList(a, b any) []any {
 	out := make([]any, 0)
 	appendOne := func(v any) {
@@ -835,6 +869,7 @@ func appendPolicyList(a, b any) []any {
 	return out
 }
 
+// intersectPolicyList 處理 intersect 政策列表。
 func intersectPolicyList(a, b any) []any {
 	left := policyStrings(a)
 	right := policyStrings(b)
@@ -854,6 +889,7 @@ func intersectPolicyList(a, b any) []any {
 	return anyStrings(uniqueStrings(out))
 }
 
+// policyStrings 處理政策字串。
 func policyStrings(value any) []string {
 	switch v := value.(type) {
 	case []string:
@@ -876,6 +912,7 @@ func policyStrings(value any) []string {
 	}
 }
 
+// anyStrings 處理 any 字串。
 func anyStrings(values []string) []any {
 	out := make([]any, 0, len(values))
 	for _, value := range values {
@@ -884,6 +921,7 @@ func anyStrings(values []string) []any {
 	return out
 }
 
+// relationshipConstraint 處理關係 constraint。
 func relationshipConstraint(perm Permission) string {
 	if strings.TrimSpace(perm.Relation) != "" {
 		return strings.TrimSpace(perm.Relation)
@@ -894,6 +932,7 @@ func relationshipConstraint(perm Permission) string {
 	return ""
 }
 
+// relationshipAllows 處理關係 allows 的服務流程。
 func (c *Service) relationshipAllows(ctx RequestContext, account Account, req CheckRequest, relation string) (bool, string, error) {
 	object := relationshipObject(req)
 	label := "openfga:" + object + "#" + relation
@@ -912,10 +951,12 @@ func (c *Service) relationshipAllows(ctx RequestContext, account Account, req Ch
 	return allowed, label, nil
 }
 
+// relationshipObject 處理關係物件。
 func relationshipObject(req CheckRequest) string {
 	return routeResourceName(req.ApplicationCode, req.ResourceType) + ":" + req.ResourceID
 }
 
+// chooseScope 處理 choose 範圍。
 func chooseScope(current Scope, currentConditions map[string]any, candidate Scope, candidateConditions map[string]any) (Scope, map[string]any) {
 	if candidate == "" {
 		return current, currentConditions
@@ -931,6 +972,7 @@ func chooseScope(current Scope, currentConditions map[string]any, candidate Scop
 	return current, currentConditions
 }
 
+// mergeScopeConditions 合併範圍 conditions。
 func mergeScopeConditions(current, candidate map[string]any) map[string]any {
 	out := utils.CopyStringMap(current)
 	if out == nil {
@@ -955,6 +997,7 @@ func mergeScopeConditions(current, candidate map[string]any) map[string]any {
 	return out
 }
 
+// scopeRank 處理範圍 rank。
 func scopeRank(scope Scope) int {
 	switch scope {
 	case ScopeSystem:
@@ -976,6 +1019,7 @@ func scopeRank(scope Scope) int {
 	}
 }
 
+// scopeConditions 處理範圍 conditions 的服務流程。
 func (c *Service) scopeConditions(ctx RequestContext, account Account, scope Scope, params map[string]any) (map[string]any, error) {
 	out := utils.CopyStringMap(params)
 	if out == nil {
@@ -1053,6 +1097,7 @@ func (c *Service) scopeConditions(ctx RequestContext, account Account, scope Sco
 	return out, nil
 }
 
+// orgUnitIDsInSubtree 處理組織單位 IDs in subtree。
 func orgUnitIDsInSubtree(units []OrgUnit, roots []string) []string {
 	allowed := map[string]struct{}{}
 	for _, id := range roots {
@@ -1072,6 +1117,7 @@ func orgUnitIDsInSubtree(units []OrgUnit, roots []string) []string {
 	return uniqueStrings(out)
 }
 
+// applyEmployeeDecision 處理 apply 員工決策的服務流程。
 func (c HRService) applyEmployeeDecision(ctx RequestContext, account Account, items []Employee, decision CheckResult) ([]Employee, error) {
 	filtered, err := c.filterEmployeesByDecision(ctx, account, items, decision)
 	if err != nil {
@@ -1084,6 +1130,7 @@ func (c HRService) applyEmployeeDecision(ctx RequestContext, account Account, it
 	return out, nil
 }
 
+// filterEmployeesByDecision 處理篩選員工 by 決策的服務流程。
 func (c HRService) filterEmployeesByDecision(ctx RequestContext, account Account, items []Employee, decision CheckResult) ([]Employee, error) {
 	switch decision.Scope {
 	case "", ScopeAll, ScopeTenant, ScopeSystem:
@@ -1161,6 +1208,7 @@ func (c HRService) filterEmployeesByDecision(ctx RequestContext, account Account
 	}
 }
 
+// filterEmployeesByConditions 處理篩選員工 by conditions。
 func filterEmployeesByConditions(items []Employee, conditions map[string]any) []Employee {
 	employeeIDs := stringSliceFromAny(conditions["employee_ids"])
 	orgUnitIDs := stringSliceFromAny(conditions["org_unit_ids"])
@@ -1193,6 +1241,7 @@ func filterEmployeesByConditions(items []Employee, conditions map[string]any) []
 	return out
 }
 
+// stringSet 處理字串集合。
 func stringSet(values []string) map[string]struct{} {
 	if len(values) == 0 {
 		return nil
@@ -1206,6 +1255,7 @@ func stringSet(values []string) map[string]struct{} {
 	return out
 }
 
+// maskEmployee 處理 mask 員工。
 func maskEmployee(item Employee, policies map[string]string) Employee {
 	for field, effect := range policies {
 		if effect != "mask" && effect != "hide" && effect != "deny" {
@@ -1270,6 +1320,7 @@ func maskEmployee(item Employee, policies map[string]string) Employee {
 	return item
 }
 
+// redactString 處理 redact 字串。
 func redactString(value string, hide bool) string {
 	if hide {
 		return ""
@@ -1277,6 +1328,7 @@ func redactString(value string, hide bool) string {
 	return "***"
 }
 
+// redactMapField 處理 redact map 欄位。
 func redactMapField(values map[string]any, field string, hide bool) map[string]any {
 	if len(values) == 0 {
 		return values
@@ -1293,6 +1345,7 @@ func redactMapField(values map[string]any, field string, hide bool) map[string]a
 	return out
 }
 
+// maskValue 處理 mask value。
 func maskValue(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -1304,6 +1357,7 @@ func maskValue(value string) string {
 	return value[:2] + "***" + value[len(value)-2:]
 }
 
+// maskEmail 處理 mask email。
 func maskEmail(value string) string {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -1322,6 +1376,7 @@ func maskEmail(value string) string {
 	return local + "@" + parts[1]
 }
 
+// orgUnitInScope 處理組織單位 in 範圍。
 func orgUnitInScope(units []OrgUnit, orgUnitID string, allowed map[string]struct{}) bool {
 	if _, ok := allowed[orgUnitID]; ok {
 		return true
@@ -1339,6 +1394,7 @@ func orgUnitInScope(units []OrgUnit, orgUnitID string, allowed map[string]struct
 	return false
 }
 
+// stringSliceFromAny 處理字串 slice 來源 any。
 func stringSliceFromAny(value any) []string {
 	switch v := value.(type) {
 	case []string:
@@ -1361,13 +1417,14 @@ func stringSliceFromAny(value any) []string {
 	}
 }
 
-// AuthzSnapshotCache stores reusable authorization decisions between permission-version changes.
+// AuthzSnapshotCache 定義授權快照快取的行為契約。
 type AuthzSnapshotCache interface {
 	GetAuthzSnapshot(ctx context.Context, key string) (CheckResult, bool, error)
 	SetAuthzSnapshot(ctx context.Context, key string, result CheckResult, ttl time.Duration) error
 	InvalidateTenant(ctx context.Context, tenantID string) error
 }
 
+// authzSnapshotKey 處理授權快照 key 的服務流程。
 func (c *Service) authzSnapshotKey(ctx RequestContext, account Account, req CheckRequest, version int64) string {
 	payload, _ := json.Marshal(map[string]any{
 		"tenant_id":                 ctx.TenantID,
@@ -1390,10 +1447,12 @@ func (c *Service) authzSnapshotKey(ctx RequestContext, account Account, req Chec
 	return fmt.Sprintf("authz:snapshot:%s:%s", ctx.TenantID, hex.EncodeToString(sum[:]))
 }
 
+// shouldUseAuthzSnapshot 處理 should use 授權快照的服務流程。
 func (c *Service) shouldUseAuthzSnapshot(ctx RequestContext) bool {
 	return ctx.AssumedRoleSessionID == ""
 }
 
+// getAuthzSnapshot 取得授權快照的服務流程。
 func (c *Service) getAuthzSnapshot(ctx context.Context, key string) (CheckResult, bool) {
 	if c.authzSnapshot == nil {
 		return CheckResult{}, false
@@ -1405,6 +1464,7 @@ func (c *Service) getAuthzSnapshot(ctx context.Context, key string) (CheckResult
 	return result, true
 }
 
+// setAuthzSnapshot 處理集合授權快照的服務流程。
 func (c *Service) setAuthzSnapshot(ctx context.Context, key string, result CheckResult) {
 	if c.authzSnapshot == nil {
 		return
@@ -1412,6 +1472,7 @@ func (c *Service) setAuthzSnapshot(ctx context.Context, key string, result Check
 	_ = c.authzSnapshot.SetAuthzSnapshot(ctx, key, result, 5*time.Minute)
 }
 
+// invalidateAuthzSnapshots 處理 invalidate 授權 snapshots 的服務流程。
 func (c *Service) invalidateAuthzSnapshots(ctx context.Context, tenantID string) {
 	if c.authzSnapshot == nil {
 		return
@@ -1419,6 +1480,7 @@ func (c *Service) invalidateAuthzSnapshots(ctx context.Context, tenantID string)
 	_ = c.authzSnapshot.InvalidateTenant(ctx, tenantID)
 }
 
+// requireServiceAuthz 處理 require 服務授權的服務流程。
 func (c *Service) requireServiceAuthz(ctx RequestContext, app ApplicationCode, resource ResourceType, action Action, resourceID string) (Account, CheckResult, error) {
 	account, decision, _, err := c.Authorize(ctx, CheckRequest{
 		ApplicationCode: app,
@@ -1429,14 +1491,17 @@ func (c *Service) requireServiceAuthz(ctx RequestContext, app ApplicationCode, r
 	return account, decision, err
 }
 
+// requireIAMAuthz 處理 require IAM 授權的服務流程。
 func (c IAMService) requireIAMAuthz(ctx RequestContext, resource ResourceType, action Action, resourceID string) (Account, CheckResult, error) {
 	return c.Service.requireServiceAuthz(ctx, AppIAM, resource, action, resourceID)
 }
 
+// requireWorkflowAuthz 處理 require 流程授權的服務流程。
 func (c WorkflowService) requireWorkflowAuthz(ctx RequestContext, resource ResourceType, action Action, resourceID string) (Account, CheckResult, error) {
 	return c.Service.requireServiceAuthz(ctx, AppWorkflow, resource, action, resourceID)
 }
 
+// requireAgentAuthz 處理 require agent 授權的服務流程。
 func (c AgentService) requireAgentAuthz(ctx RequestContext, resource ResourceType, action Action, resourceID string) (Account, CheckResult, error) {
 	return c.Service.requireServiceAuthz(ctx, AppAgent, resource, action, resourceID)
 }

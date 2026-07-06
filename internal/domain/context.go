@@ -2,7 +2,7 @@ package domain
 
 import "context"
 
-// RequestContext carries trusted request identity and approval metadata through services.
+// RequestContext 定義請求 context 的資料結構。
 type RequestContext struct {
 	Context              context.Context
 	TenantID             string

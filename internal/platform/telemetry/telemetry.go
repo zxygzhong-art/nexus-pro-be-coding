@@ -12,7 +12,7 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
 )
 
-// Config controls OpenTelemetry trace exporter setup.
+// Config 定義組態的資料結構。
 type Config struct {
 	Enabled  bool
 	Service  string
@@ -21,7 +21,7 @@ type Config struct {
 	Env      string
 }
 
-// Init installs the global tracer provider and returns its shutdown function.
+// Init 處理 init。
 func Init(ctx context.Context, cfg Config) (func(context.Context) error, error) {
 	if !cfg.Enabled || cfg.Endpoint == "" {
 		return func(context.Context) error { return nil }, nil

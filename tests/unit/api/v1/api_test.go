@@ -33,6 +33,7 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
+// newTestAPI 驗證 test API。
 func newTestAPI(authenticated bool) http.Handler {
 	store := memory.NewStore()
 	populateDemoFixture(store)
@@ -43,6 +44,7 @@ func newTestAPI(authenticated bool) http.Handler {
 	return v1api.New(service.New(store), nil, options).Routes()
 }
 
+// decodeData 驗證 decode 資料。
 func decodeData[T any](t *testing.T, body []byte) T {
 	t.Helper()
 	var payload struct {
@@ -67,6 +69,7 @@ type apiRowErrorPayload struct {
 	FieldErrors []domain.FieldError `json:"field_errors"`
 }
 
+// decodeError 驗證 decode 錯誤。
 func decodeError(t *testing.T, body []byte) apiErrorPayload {
 	t.Helper()
 	var payload struct {
@@ -78,11 +81,13 @@ func decodeError(t *testing.T, body []byte) apiErrorPayload {
 	return payload.Error
 }
 
+// validEmployeeCreateJSON 驗證有效員工 create JSON。
 func validEmployeeCreateJSON(name, email string) string {
 	nationalID := "ID-" + strings.NewReplacer("@", "-", ".", "-", "+", "-").Replace(email)
 	return `{"name":"` + name + `","company_email":"` + email + `","org_unit_id":"ou-hq","position":"Engineer","category":"full-time","employment_status":"待加入","hire_date":"2026-06-01","basic_info":{"nationality_type":"local","national_id":"` + nationalID + `"},"employment_info":{"org_unit_id":"ou-hq","position":"Engineer","category":"full_time"},"education_military_info":{"highest_education":"master","school":"NTU"},"contact_info":{"mobile_phone":"0911222333","address":"Taipei","emergency_contact_relation":"spouse","emergency_contact_name":"Emergency Contact","emergency_contact_phone":"0922333444"},"insurance_info":{"labor_insurance_date":"2026-06-01","labor_insurance_level":"L1","labor_insurance_salary":"45800","health_insurance_date":"2026-06-01","health_insurance_level":"H1","health_insurance_amount":"826"}}`
 }
 
+// avatarMultipartBody 驗證 avatar multipart body。
 func avatarMultipartBody(t *testing.T) (*bytes.Buffer, string) {
 	t.Helper()
 	body := &bytes.Buffer{}
@@ -103,10 +108,12 @@ func avatarMultipartBody(t *testing.T) (*bytes.Buffer, string) {
 	return body, writer.FormDataContentType()
 }
 
+// testPNGBytes 驗證 png bytes。
 func testPNGBytes() []byte {
 	return []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0}
 }
 
+// TestProductionContextRequiresAuthenticatedContext 驗證 production context requires authenticated context。
 func TestProductionContextRequiresAuthenticatedContext(t *testing.T) {
 	handler := newTestAPI(false)
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
@@ -119,6 +126,7 @@ func TestProductionContextRequiresAuthenticatedContext(t *testing.T) {
 	}
 }
 
+// TestDefaultAPIRequiresAuthenticatedContext 驗證預設 API requires authenticated context。
 func TestDefaultAPIRequiresAuthenticatedContext(t *testing.T) {
 	store := memory.NewStore()
 	populateDemoFixture(store)
@@ -133,6 +141,7 @@ func TestDefaultAPIRequiresAuthenticatedContext(t *testing.T) {
 	}
 }
 
+// TestProductionContextRejectsHeaderOnlyContext 驗證 production context rejects header only context。
 func TestProductionContextRejectsHeaderOnlyContext(t *testing.T) {
 	handler := newTestAPI(false)
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
@@ -147,6 +156,7 @@ func TestProductionContextRejectsHeaderOnlyContext(t *testing.T) {
 	}
 }
 
+// TestProductionContextAcceptsBearerClaims 驗證 production context accepts bearer claims。
 func TestProductionContextAcceptsBearerClaims(t *testing.T) {
 	store := memory.NewStore()
 	populateDemoFixture(store)
@@ -163,6 +173,7 @@ func TestProductionContextAcceptsBearerClaims(t *testing.T) {
 	}
 }
 
+// TestTokenContextTakesPrecedenceOverSpoofedHeaders 驗證 token context takes precedence over spoofed headers。
 func TestTokenContextTakesPrecedenceOverSpoofedHeaders(t *testing.T) {
 	store := memory.NewStore()
 	populateDemoFixture(store)
@@ -181,6 +192,7 @@ func TestTokenContextTakesPrecedenceOverSpoofedHeaders(t *testing.T) {
 	}
 }
 
+// TestIdentityMappingOverridesLegacyAccountClaim 驗證身分 mapping overrides legacy 帳號 claim。
 func TestIdentityMappingOverridesLegacyAccountClaim(t *testing.T) {
 	store := memory.NewStore()
 	populateDemoFixture(store)
@@ -218,6 +230,7 @@ func TestIdentityMappingOverridesLegacyAccountClaim(t *testing.T) {
 	}
 }
 
+// TestUnlinkedExternalIdentityIsRejected 驗證 unlinked 外部身分 is rejected。
 func TestUnlinkedExternalIdentityIsRejected(t *testing.T) {
 	store := memory.NewStore()
 	populateDemoFixture(store)
@@ -238,6 +251,7 @@ func TestUnlinkedExternalIdentityIsRejected(t *testing.T) {
 	}
 }
 
+// TestUnlinkedExternalIdentityWithAccountClaimIsRejected 驗證 unlinked 外部身分 with 帳號 claim is rejected。
 func TestUnlinkedExternalIdentityWithAccountClaimIsRejected(t *testing.T) {
 	store := memory.NewStore()
 	populateDemoFixture(store)
@@ -259,6 +273,7 @@ func TestUnlinkedExternalIdentityWithAccountClaimIsRejected(t *testing.T) {
 	}
 }
 
+// TestDisabledAccountIsRejectedAfterIdentityResolution 驗證 disabled 帳號 is rejected after 身分 resolution。
 func TestDisabledAccountIsRejectedAfterIdentityResolution(t *testing.T) {
 	store := memory.NewStore()
 	populateDemoFixture(store)
@@ -283,6 +298,7 @@ func TestDisabledAccountIsRejectedAfterIdentityResolution(t *testing.T) {
 	}
 }
 
+// TestProductionContextRejectsUnsignedBearerFallback 驗證 production context rejects unsigned bearer fallback。
 func TestProductionContextRejectsUnsignedBearerFallback(t *testing.T) {
 	handler := newTestAPI(false)
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
@@ -296,6 +312,7 @@ func TestProductionContextRejectsUnsignedBearerFallback(t *testing.T) {
 	}
 }
 
+// TestKeycloakTokenResolverRefreshesJWKSWhenKidRotates 驗證 Keycloak token resolver refreshes JWKS when kid rotates。
 func TestKeycloakTokenResolverRefreshesJWKSWhenKidRotates(t *testing.T) {
 	oldKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -345,6 +362,7 @@ func TestKeycloakTokenResolverRefreshesJWKSWhenKidRotates(t *testing.T) {
 	}
 }
 
+// TestKeycloakTokenResolverCachesUnknownKidMisses 驗證 Keycloak token resolver caches unknown kid misses。
 func TestKeycloakTokenResolverCachesUnknownKidMisses(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -388,6 +406,7 @@ func TestKeycloakTokenResolverCachesUnknownKidMisses(t *testing.T) {
 	}
 }
 
+// TestKeycloakTokenResolverUsesRequestContextForJWKSRequests 驗證 Keycloak token resolver uses 請求 context for JWKS 請求。
 func TestKeycloakTokenResolverUsesRequestContextForJWKSRequests(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -413,6 +432,7 @@ func TestKeycloakTokenResolverUsesRequestContextForJWKSRequests(t *testing.T) {
 	}
 }
 
+// TestKeycloakTokenResolverPingChecksDiscoveryAndJWKS 驗證 Keycloak token resolver ping checks discovery and JWKS。
 func TestKeycloakTokenResolverPingChecksDiscoveryAndJWKS(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -446,6 +466,7 @@ func TestKeycloakTokenResolverPingChecksDiscoveryAndJWKS(t *testing.T) {
 	}
 }
 
+// TestKeycloakTokenResolverPingFailsWhenJWKSUnavailable 驗證 Keycloak token resolver ping fails when JWKS unavailable。
 func TestKeycloakTokenResolverPingFailsWhenJWKSUnavailable(t *testing.T) {
 	var issuer string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -470,6 +491,7 @@ func TestKeycloakTokenResolverPingFailsWhenJWKSUnavailable(t *testing.T) {
 	}
 }
 
+// TestDemoContextAllowsLocalRequests 驗證 demo context allows 本機請求。
 func TestDemoContextAllowsLocalRequests(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
@@ -482,6 +504,7 @@ func TestDemoContextAllowsLocalRequests(t *testing.T) {
 	}
 }
 
+// TestReadinessEndpointReportsDependencyFailures 驗證就緒檢查 endpoint reports 依賴 failures。
 func TestReadinessEndpointReportsDependencyFailures(t *testing.T) {
 	handler := v1api.New(nil, nil, v1api.Options{
 		ReadinessChecks: map[string]v1api.ReadinessCheck{
@@ -509,6 +532,7 @@ func TestReadinessEndpointReportsDependencyFailures(t *testing.T) {
 	}
 }
 
+// TestRecoveryReturnsJSONInternalError 驗證 recovery returns JSON 內部錯誤。
 func TestRecoveryReturnsJSONInternalError(t *testing.T) {
 	handler := v1api.New(nil, nil, v1api.Options{
 		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{TenantID: "demo", AccountID: "acct-admin"}, ok: true},
@@ -540,6 +564,7 @@ func TestRecoveryReturnsJSONInternalError(t *testing.T) {
 	}
 }
 
+// TestSwaggerUIDisplaysOpenAPISpec 驗證 swagger ui displays OpenAPI spec。
 func TestSwaggerUIDisplaysOpenAPISpec(t *testing.T) {
 	handler := newTestAPI(false)
 
@@ -587,6 +612,7 @@ func TestSwaggerUIDisplaysOpenAPISpec(t *testing.T) {
 	}
 }
 
+// TestAuthzCheckReturnsTargetSchema 驗證授權 check returns target schema。
 func TestAuthzCheckReturnsTargetSchema(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodPost, "/v1/authz/check", strings.NewReader(`{"application_code":"hr","resource_type":"employee","action":"export","resource_id":"emp-employee"}`))
@@ -610,6 +636,7 @@ func TestAuthzCheckReturnsTargetSchema(t *testing.T) {
 	}
 }
 
+// TestCreatePermissionSetAssignmentEndpointWritesAssignment 驗證權限集合指派 endpoint writes 指派。
 func TestCreatePermissionSetAssignmentEndpointWritesAssignment(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodPost, "/v1/iam/permission-set-assignments", strings.NewReader(`{"principal_type":"account","principal_id":"acct-employee","permission_set_id":"ps-audit"}`))
@@ -628,6 +655,7 @@ func TestCreatePermissionSetAssignmentEndpointWritesAssignment(t *testing.T) {
 	}
 }
 
+// TestReadJSONRejectsMultipleValues 驗證 JSON rejects multiple values。
 func TestReadJSONRejectsMultipleValues(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodPost, "/v1/authz/check", strings.NewReader(`{"resource":"me","action":"read"} {}`))
@@ -645,6 +673,7 @@ func TestReadJSONRejectsMultipleValues(t *testing.T) {
 	}
 }
 
+// TestHighRiskRouteRequiresApprovalConfirmation 驗證 high risk 路由 requires 核准 confirmation。
 func TestHighRiskRouteRequiresApprovalConfirmation(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodPost, "/v1/iam/user-groups", strings.NewReader(`{"name":"Finance Admin"}`))
@@ -662,6 +691,7 @@ func TestHighRiskRouteRequiresApprovalConfirmation(t *testing.T) {
 	}
 }
 
+// TestHighRiskRouteAllowsConfirmedRequest 驗證 high risk 路由 allows confirmed 請求。
 func TestHighRiskRouteAllowsConfirmedRequest(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodPost, "/v1/iam/user-groups", strings.NewReader(`{"name":"Finance Admin"}`))
@@ -676,6 +706,7 @@ func TestHighRiskRouteAllowsConfirmedRequest(t *testing.T) {
 	}
 }
 
+// TestEHRMSEmployeeSyncRouteRequiresApprovalConfirmation 驗證 eHRMS 員工 sync 路由 requires 核准 confirmation。
 func TestEHRMSEmployeeSyncRouteRequiresApprovalConfirmation(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/ehrms/sync", strings.NewReader(`{"mode":"upsert"}`))
@@ -704,6 +735,7 @@ func TestEHRMSEmployeeSyncRouteRequiresApprovalConfirmation(t *testing.T) {
 	}
 }
 
+// TestHighRiskRouteCanDisableApprovalHeader 驗證 high risk 路由 can disable 核准 header。
 func TestHighRiskRouteCanDisableApprovalHeader(t *testing.T) {
 	store := memory.NewStore()
 	populateDemoFixture(store)
@@ -727,6 +759,7 @@ func TestHighRiskRouteCanDisableApprovalHeader(t *testing.T) {
 	}
 }
 
+// TestAuditLogRouteRequiresApprovalConfirmation 驗證稽核 log 路由 requires 核准 confirmation。
 func TestAuditLogRouteRequiresApprovalConfirmation(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodGet, "/v1/audit-logs", nil)
@@ -751,6 +784,7 @@ func TestAuditLogRouteRequiresApprovalConfirmation(t *testing.T) {
 	}
 }
 
+// TestHRRouteForbiddenReasonCodes 驗證 HR 路由禁止 reason 碼。
 func TestHRRouteForbiddenReasonCodes(t *testing.T) {
 	store := memory.NewStore()
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
@@ -785,6 +819,7 @@ func TestHRRouteForbiddenReasonCodes(t *testing.T) {
 	}
 }
 
+// TestAssumeRoleEndpointReturnsCreatedTypedResponse 驗證角色 endpoint returns created typed 回應。
 func TestAssumeRoleEndpointReturnsCreatedTypedResponse(t *testing.T) {
 	handler := newTestAPI(true)
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/iam/assumable-roles", strings.NewReader(`{"name":"Audit Assume","trusted":true,"trust_policy":{"accounts":["acct-admin"]},"permission_boundary":{"allow":["audit.log.read","iam.permission_set.read"]},"permission_set_ids":["ps-audit"],"session_duration_seconds":3600}`))
@@ -814,6 +849,7 @@ func TestAssumeRoleEndpointReturnsCreatedTypedResponse(t *testing.T) {
 	}
 }
 
+// TestBatchDeleteEmployeesReturnsMultiStatusOnRowFailure 驗證批次 delete 員工 returns multi 狀態 on 列 failure。
 func TestBatchDeleteEmployeesReturnsMultiStatusOnRowFailure(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/batch-delete", strings.NewReader(`{"employee_ids":["emp-employee","emp-missing"],"reason":"cleanup"}`))
@@ -830,6 +866,7 @@ func TestBatchDeleteEmployeesReturnsMultiStatusOnRowFailure(t *testing.T) {
 	}
 }
 
+// TestEmployeeListDetailAndCSVExportEndpoints 驗證員工列表 detail and CSV export endpoints。
 func TestEmployeeListDetailAndCSVExportEndpoints(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodGet, "/v1/hr/employees?page=1&page_size=2&sort=created_at_desc", nil)
@@ -890,6 +927,7 @@ func TestEmployeeListDetailAndCSVExportEndpoints(t *testing.T) {
 	}
 }
 
+// TestEmployeeExportAuditUsesOpenTelemetryTraceID 驗證員工 export 稽核 uses open 遙測 trace ID。
 func TestEmployeeExportAuditUsesOpenTelemetryTraceID(t *testing.T) {
 	spanRecorder := installAPISpanRecorder(t)
 	store := memory.NewStore()
@@ -933,6 +971,7 @@ func TestEmployeeExportAuditUsesOpenTelemetryTraceID(t *testing.T) {
 	}
 }
 
+// TestEmployeeImportPreviewConfirmAndValidationErrors 驗證員工 import preview confirm and 驗證錯誤。
 func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
 	handler := newTestAPI(true)
 	payload, _ := json.Marshal(map[string]string{
@@ -1008,6 +1047,7 @@ func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
 	}
 }
 
+// TestEmployeeImportPreviewRejectsOversizedMultipartBody 驗證員工 import preview rejects oversized multipart body。
 func TestEmployeeImportPreviewRejectsOversizedMultipartBody(t *testing.T) {
 	handler := newTestAPI(true)
 	body := &bytes.Buffer{}
@@ -1038,6 +1078,7 @@ func TestEmployeeImportPreviewRejectsOversizedMultipartBody(t *testing.T) {
 	}
 }
 
+// TestEmployeeCreateStatusAndDeleteContract 驗證員工 create 狀態 and delete contract。
 func TestEmployeeCreateStatusAndDeleteContract(t *testing.T) {
 	handler := newTestAPI(true)
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees", strings.NewReader(validEmployeeCreateJSON("Contract Person", "contract.person@example.com")))
@@ -1107,6 +1148,7 @@ func TestEmployeeCreateStatusAndDeleteContract(t *testing.T) {
 	}
 }
 
+// TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes 驗證員工 preview avatar 範本 and 流程核准路由。
 func TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes(t *testing.T) {
 	handler := newTestAPI(true)
 
@@ -1218,6 +1260,7 @@ func TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes(t *testing.T) {
 	}
 }
 
+// TestListResponsesUsePageEnvelope 驗證回應 use 分頁 envelope。
 func TestListResponsesUsePageEnvelope(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodGet, "/v1/iam/user-groups?page=1&page_size=1", nil)
@@ -1241,6 +1284,7 @@ func TestListResponsesUsePageEnvelope(t *testing.T) {
 	}
 }
 
+// testJWT 驗證 JWT。
 func testJWT(claims map[string]any) string {
 	header := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
 	payloadBytes, _ := json.Marshal(claims)
@@ -1248,6 +1292,7 @@ func testJWT(claims map[string]any) string {
 	return header + "." + payload + "."
 }
 
+// keycloakClaims 驗證 Keycloak claims。
 func keycloakClaims(issuer string) map[string]any {
 	return map[string]any{
 		"iss":        issuer,
@@ -1259,6 +1304,7 @@ func keycloakClaims(issuer string) map[string]any {
 	}
 }
 
+// jwksFromKeys 驗證 JWKS 來源 keys。
 func jwksFromKeys(keys map[string]*rsa.PublicKey) []map[string]string {
 	out := make([]map[string]string, 0, len(keys))
 	for kid, key := range keys {
@@ -1273,6 +1319,7 @@ func jwksFromKeys(keys map[string]*rsa.PublicKey) []map[string]string {
 	return out
 }
 
+// signedRS256JWT 驗證 signed rs 256 JWT。
 func signedRS256JWT(t *testing.T, kid string, key *rsa.PrivateKey, claims map[string]any) string {
 	t.Helper()
 	header, err := json.Marshal(map[string]string{"alg": "RS256", "kid": kid, "typ": "JWT"})
@@ -1307,6 +1354,7 @@ type keycloakContextTransport struct {
 	calls  int
 }
 
+// RoundTrip 驗證 round trip。
 func (t *keycloakContextTransport) RoundTrip(req *http.Request) (*http.Response, error) {
 	t.calls++
 	if got := req.Context().Value(keycloakContextMarkerKey{}); got != "present" {
@@ -1338,10 +1386,12 @@ func (t *keycloakContextTransport) RoundTrip(req *http.Request) (*http.Response,
 	}, nil
 }
 
+// Resolve 驗證目標路徑。
 func (r staticTokenResolver) Resolve(*http.Request) (v1api.TokenContext, bool, error) {
 	return r.ctx, r.ok, r.err
 }
 
+// installAPISpanRecorder 驗證 install API span recorder。
 func installAPISpanRecorder(t *testing.T) *tracetest.SpanRecorder {
 	t.Helper()
 	recorder := tracetest.NewSpanRecorder()
@@ -1355,6 +1405,7 @@ func installAPISpanRecorder(t *testing.T) *tracetest.SpanRecorder {
 	return recorder
 }
 
+// apiSpanEnded 驗證 API span ended。
 func apiSpanEnded(recorder *tracetest.SpanRecorder, name string) bool {
 	for _, span := range recorder.Ended() {
 		if span.Name() == name {
@@ -1364,6 +1415,7 @@ func apiSpanEnded(recorder *tracetest.SpanRecorder, name string) bool {
 	return false
 }
 
+// apiSpanNames 驗證 API span names。
 func apiSpanNames(recorder *tracetest.SpanRecorder) []string {
 	names := make([]string, 0)
 	for _, span := range recorder.Ended() {
@@ -1372,6 +1424,7 @@ func apiSpanNames(recorder *tracetest.SpanRecorder) []string {
 	return names
 }
 
+// findAPIAuditLog 驗證 find API 稽核 log。
 func findAPIAuditLog(logs []domain.AuditLog, action string) (domain.AuditLog, bool) {
 	for _, log := range logs {
 		if log.Action == action {

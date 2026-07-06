@@ -2,18 +2,18 @@ package service
 
 import "nexus-pro-be/internal/utils"
 
-// AuditService exposes audit log read operations.
+// AuditService 定義稽核服務的資料結構。
 type AuditService struct {
 	*Service
 	store auditStore
 }
 
-// Audit returns the audit service facade.
+// Audit 處理稽核的服務流程。
 func (c *Service) Audit() AuditService {
 	return AuditService{Service: c, store: c.store}
 }
 
-// ListLogs returns audit logs visible to the current account.
+// ListLogs 列出 logs 的服務流程。
 func (c AuditService) ListLogs(ctx RequestContext) ([]AuditLog, error) {
 	if _, _, err := c.requireAuditAuthz(ctx); err != nil {
 		return nil, err
@@ -21,7 +21,7 @@ func (c AuditService) ListLogs(ctx RequestContext) ([]AuditLog, error) {
 	return c.store.ListAuditLogs(goContext(ctx), ctx.TenantID)
 }
 
-// ListLogPage returns a paginated audit log result.
+// ListLogPage 列出 log 分頁的服務流程。
 func (c AuditService) ListLogPage(ctx RequestContext, page PageRequest) (PageResponse[AuditLog], error) {
 	if _, _, err := c.requireAuditAuthz(ctx); err != nil {
 		return PageResponse[AuditLog]{}, err
@@ -34,6 +34,7 @@ func (c AuditService) ListLogPage(ctx RequestContext, page PageRequest) (PageRes
 	return utils.PageResponseFromStore(items, total, page), nil
 }
 
+// requireAuditAuthz 處理 require 稽核授權的服務流程。
 func (c AuditService) requireAuditAuthz(ctx RequestContext) (Account, CheckResult, error) {
 	account, decision, _, err := c.Authorize(ctx, CheckRequest{Resource: "audit.log", Action: ActionRead}, AuditTarget{})
 	return account, decision, err

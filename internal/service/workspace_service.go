@@ -18,18 +18,18 @@ const (
 	workspaceDayHours   = 8.0
 )
 
-// WorkspaceService implements read-only workspace page aggregates.
+// WorkspaceService 定義工作區服務的資料結構。
 type WorkspaceService struct {
 	*Service
 	store repository.Store
 }
 
-// Workspace returns the workspace dashboard service facade.
+// Workspace 處理工作區的服務流程。
 func (c *Service) Workspace() WorkspaceService {
 	return WorkspaceService{Service: c, store: c.store}
 }
 
-// WorkspaceOverview returns HR, attendance, and lifecycle widgets for one month.
+// WorkspaceOverview 處理工作區總覽的服務流程。
 func (c WorkspaceService) WorkspaceOverview(ctx RequestContext, query WorkspaceOverviewQuery) (WorkspaceOverviewResponse, error) {
 	now := c.Now()
 	start, end := workspaceMonthRange(query.Year, query.Month, now)
@@ -89,7 +89,7 @@ func (c WorkspaceService) WorkspaceOverview(ctx RequestContext, query WorkspaceO
 	}, nil
 }
 
-// WorkspaceOrganization returns a manager-to-employee hierarchy.
+// WorkspaceOrganization 處理工作區 organization 的服務流程。
 func (c WorkspaceService) WorkspaceOrganization(ctx RequestContext) (WorkspaceOrganizationResponse, error) {
 	employees, err := c.visibleWorkspaceEmployees(ctx, "workspace.organization")
 	if err != nil {
@@ -143,7 +143,7 @@ func (c WorkspaceService) WorkspaceOrganization(ctx RequestContext) (WorkspaceOr
 	return WorkspaceOrganizationResponse{ParentNone: workspaceParentNone, Rows: rows}, nil
 }
 
-// WorkspaceTurnover returns monthly and annual employment movement analysis.
+// WorkspaceTurnover 處理工作區人員異動的服務流程。
 func (c WorkspaceService) WorkspaceTurnover(ctx RequestContext, query WorkspaceTurnoverQuery) (WorkspaceTurnoverResponse, error) {
 	now := c.Now()
 	start, end := workspaceMonthRange(query.Year, query.Month, now)
@@ -165,7 +165,7 @@ func (c WorkspaceService) WorkspaceTurnover(ctx RequestContext, query WorkspaceT
 	return WorkspaceTurnoverResponse{Monthly: monthly, Annual: annual}, nil
 }
 
-// WorkspaceAttendance returns monthly work-hour and clock matrices.
+// WorkspaceAttendance 處理工作區考勤的服務流程。
 func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query WorkspaceAttendanceQuery) (WorkspaceAttendanceResponse, error) {
 	now := c.Now()
 	start, end := workspaceMonthRange(query.Year, query.Month, now)
@@ -218,7 +218,7 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	}, nil
 }
 
-// WorkspaceAdmins returns the HR workspace administrator projection.
+// WorkspaceAdmins 處理工作區 admins 的服務流程。
 func (c WorkspaceService) WorkspaceAdmins(ctx RequestContext) (WorkspaceAdminsResponse, error) {
 	if _, _, err := c.Service.requireServiceAuthz(ctx, AppIAM, ResourcePermissionAssign, ActionRead, ""); err != nil {
 		return WorkspaceAdminsResponse{}, err
@@ -305,7 +305,7 @@ func (c WorkspaceService) WorkspaceAdmins(ctx RequestContext) (WorkspaceAdminsRe
 	return WorkspaceAdminsResponse{Admins: admins, Candidates: candidates, Sections: workspaceAdminSections()}, nil
 }
 
-// WorkspaceAuditLogs returns the workspace page audit-log projection.
+// WorkspaceAuditLogs 處理工作區稽核 logs 的服務流程。
 func (c WorkspaceService) WorkspaceAuditLogs(ctx RequestContext, query WorkspaceAuditLogQuery, page PageRequest) (PageResponse[WorkspaceAuditLog], error) {
 	if _, _, _, err := c.Authorize(ctx, CheckRequest{Resource: "audit.log", Action: ActionRead}, AuditTarget{Event: "workspace.audit_log.query", Resource: "audit_log"}); err != nil {
 		return PageResponse[WorkspaceAuditLog]{}, err
@@ -355,7 +355,7 @@ func (c WorkspaceService) WorkspaceAuditLogs(ctx RequestContext, query Workspace
 	return utils.PageResponse(projected, page), nil
 }
 
-// visibleWorkspaceEmployees returns all employees visible under the current HR read scope.
+// visibleWorkspaceEmployees 處理可見工作區員工的服務流程。
 func (c WorkspaceService) visibleWorkspaceEmployees(ctx RequestContext, event string) ([]Employee, error) {
 	account, decision, audit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, Action: ActionRead},
@@ -383,7 +383,7 @@ func (c WorkspaceService) visibleWorkspaceEmployees(ctx RequestContext, event st
 	return items, nil
 }
 
-// visibleWorkspaceClockRecords returns clock records visible under the attendance data scope.
+// visibleWorkspaceClockRecords 處理可見工作區打卡 records 的服務流程。
 func (c WorkspaceService) visibleWorkspaceClockRecords(ctx RequestContext, query AttendanceClockRecordQuery) ([]AttendanceClockRecord, error) {
 	attendance := c.Service.Attendance()
 	account, decision, err := attendance.requireAttendanceAuthz(ctx, ResourceAttendanceClock, ActionRead, "")
@@ -435,7 +435,7 @@ type workspaceClockCell struct {
 	Reason   string
 }
 
-// workspaceMonthRange resolves a year/month pair into a UTC month range.
+// workspaceMonthRange 處理工作區月份 range。
 func workspaceMonthRange(year int, month int, now time.Time) (time.Time, time.Time) {
 	if year <= 0 {
 		year = now.Year()
@@ -447,7 +447,7 @@ func workspaceMonthRange(year int, month int, now time.Time) (time.Time, time.Ti
 	return start, start.AddDate(0, 1, 0)
 }
 
-// workspaceTargetDate resolves an overview date inside the selected month.
+// workspaceTargetDate 處理工作區 target 日期。
 func workspaceTargetDate(raw string, start time.Time, end time.Time, now time.Time) time.Time {
 	if parsed, err := time.Parse(time.DateOnly, strings.TrimSpace(raw)); err == nil {
 		parsed = parsed.UTC()
@@ -461,7 +461,7 @@ func workspaceTargetDate(raw string, start time.Time, end time.Time, now time.Ti
 	return start
 }
 
-// workspaceFilterLeaves keeps leave requests that overlap the selected range.
+// workspaceFilterLeaves 處理工作區篩選 leaves。
 func workspaceFilterLeaves(items []LeaveRequest, start time.Time, end time.Time) []LeaveRequest {
 	out := make([]LeaveRequest, 0, len(items))
 	for _, item := range items {
@@ -476,13 +476,13 @@ func workspaceFilterLeaves(items []LeaveRequest, start time.Time, end time.Time)
 	return out
 }
 
-// workspaceLeaveEffective excludes rejected or cancelled leave requests from reporting.
+// workspaceLeaveEffective 處理工作區請假 effective。
 func workspaceLeaveEffective(item LeaveRequest) bool {
 	status := strings.ToLower(strings.TrimSpace(item.Status))
 	return status != "rejected" && status != "cancelled" && status != "canceled"
 }
 
-// workspaceLeaveEmployeesForDate returns unique employees on leave for a date.
+// workspaceLeaveEmployeesForDate 處理工作區請假員工 for 日期。
 func workspaceLeaveEmployeesForDate(items []LeaveRequest, date time.Time) map[string]struct{} {
 	out := map[string]struct{}{}
 	dayStart := time.Date(date.Year(), date.Month(), date.Day(), 0, 0, 0, 0, time.UTC)
@@ -499,7 +499,7 @@ func workspaceLeaveEmployeesForDate(items []LeaveRequest, date time.Time) map[st
 	return out
 }
 
-// workspaceCheckedInEmployees returns unique employees with an accepted clock-in for a date.
+// workspaceCheckedInEmployees 處理工作區 checked in 員工。
 func workspaceCheckedInEmployees(items []AttendanceClockRecord, date time.Time) map[string]struct{} {
 	out := map[string]struct{}{}
 	key := date.Format(time.DateOnly)
@@ -511,7 +511,7 @@ func workspaceCheckedInEmployees(items []AttendanceClockRecord, date time.Time) 
 	return out
 }
 
-// workspaceCountActiveAt counts employees considered active at one point in time.
+// workspaceCountActiveAt 處理工作區 count 啟用中 at。
 func workspaceCountActiveAt(items []Employee, at time.Time) int {
 	count := 0
 	for _, item := range items {
@@ -522,7 +522,7 @@ func workspaceCountActiveAt(items []Employee, at time.Time) int {
 	return count
 }
 
-// workspaceEmployeeActiveAt checks lifecycle status and employment dates for headcount.
+// workspaceEmployeeActiveAt 處理工作區員工啟用中 at。
 func workspaceEmployeeActiveAt(item Employee, at time.Time) bool {
 	status := strings.ToLower(utils.FirstNonEmpty(item.EmploymentStatus, item.Status))
 	if status == string(EmployeeStatusDeleted) {
@@ -540,7 +540,7 @@ func workspaceEmployeeActiveAt(item Employee, at time.Time) bool {
 	return true
 }
 
-// workspaceEmployeesPresentInRange filters employees that belong in a monthly matrix.
+// workspaceEmployeesPresentInRange 處理工作區員工 present in range。
 func workspaceEmployeesPresentInRange(items []Employee, start time.Time, end time.Time) []Employee {
 	out := make([]Employee, 0, len(items))
 	for _, item := range items {
@@ -561,12 +561,12 @@ func workspaceEmployeesPresentInRange(items []Employee, start time.Time, end tim
 	return out
 }
 
-// workspaceEmployeeStatus returns the preferred lifecycle status field.
+// workspaceEmployeeStatus 處理工作區員工狀態。
 func workspaceEmployeeStatus(item Employee) string {
 	return strings.ToLower(utils.FirstNonEmpty(item.EmploymentStatus, item.Status))
 }
 
-// workspaceCountHires counts employees whose hire date is within the range.
+// workspaceCountHires 處理工作區 count hires。
 func workspaceCountHires(items []Employee, start time.Time, end time.Time) int {
 	count := 0
 	for _, item := range items {
@@ -577,7 +577,7 @@ func workspaceCountHires(items []Employee, start time.Time, end time.Time) int {
 	return count
 }
 
-// workspaceCountSeparations counts employees whose separation date falls in the range.
+// workspaceCountSeparations 處理工作區 count separations。
 func workspaceCountSeparations(items []Employee, start time.Time, end time.Time) int {
 	count := 0
 	for _, item := range items {
@@ -588,7 +588,7 @@ func workspaceCountSeparations(items []Employee, start time.Time, end time.Time)
 	return count
 }
 
-// workspaceEmployeeSeparatedInRange detects explicit or status-derived separations.
+// workspaceEmployeeSeparatedInRange 處理工作區員工 separated in range。
 func workspaceEmployeeSeparatedInRange(item Employee, start time.Time, end time.Time) bool {
 	if item.ResignDate != nil && !item.ResignDate.Before(start) && item.ResignDate.Before(end) {
 		return true
@@ -600,7 +600,7 @@ func workspaceEmployeeSeparatedInRange(item Employee, start time.Time, end time.
 	return !item.UpdatedAt.Before(start) && item.UpdatedAt.Before(end)
 }
 
-// workspaceAttendanceSegments converts counts into rounded percentage segments.
+// workspaceAttendanceSegments 處理工作區考勤 segments。
 func workspaceAttendanceSegments(checkedIn int, leave int, absent int) []WorkspaceAttendanceSlice {
 	total := checkedIn + leave + absent
 	if total <= 0 {
@@ -616,7 +616,7 @@ func workspaceAttendanceSegments(checkedIn int, leave int, absent int) []Workspa
 	return segments
 }
 
-// workspaceDailyLeave builds the monthly leave bar chart.
+// workspaceDailyLeave 處理工作區每日請假。
 func workspaceDailyLeave(start time.Time, end time.Time, leaves []LeaveRequest, activeDate time.Time) []WorkspaceDailyLeave {
 	counts := map[int]int{}
 	maxValue := 0
@@ -646,7 +646,7 @@ func workspaceDailyLeave(start time.Time, end time.Time, leaves []LeaveRequest, 
 	return out
 }
 
-// workspaceTodoCategories builds lifecycle reminder cards from employee state.
+// workspaceTodoCategories 處理工作區待辦分類。
 func workspaceTodoCategories(employees []Employee, now time.Time) []WorkspaceTodoCategory {
 	categories := []WorkspaceTodoCategory{
 		workspaceTodoCategory("onboarding", "待入職", "user-plus", "已發 offer 待報到", "預計到職日", employees, func(item Employee) (string, bool) {
@@ -707,7 +707,7 @@ func workspaceTodoCategories(employees []Employee, now time.Time) []WorkspaceTod
 	return categories
 }
 
-// workspaceTodoCategory filters and formats one lifecycle reminder category.
+// workspaceTodoCategory 處理工作區待辦分類。
 func workspaceTodoCategory(key string, label string, icon string, desc string, dateLabel string, employees []Employee, include func(Employee) (string, bool)) WorkspaceTodoCategory {
 	people := []WorkspaceTodoPerson{}
 	for _, employee := range employees {
@@ -734,7 +734,7 @@ func workspaceTodoCategory(key string, label string, icon string, desc string, d
 	return WorkspaceTodoCategory{Key: key, Label: label, Icon: icon, Desc: desc, DateLabel: dateLabel, People: people}
 }
 
-// workspaceOrgNames builds an organization id-to-name map.
+// workspaceOrgNames 處理工作區組織 names。
 func workspaceOrgNames(units []OrgUnit) map[string]string {
 	out := map[string]string{}
 	for _, unit := range units {
@@ -743,7 +743,7 @@ func workspaceOrgNames(units []OrgUnit) map[string]string {
 	return out
 }
 
-// workspaceOrgCatalog builds organization metadata used by turnover grouping.
+// workspaceOrgCatalog 處理工作區組織目錄。
 func workspaceOrgCatalog(units []OrgUnit) map[string]workspaceOrgInfo {
 	out := map[string]workspaceOrgInfo{}
 	for _, unit := range units {
@@ -752,7 +752,7 @@ func workspaceOrgCatalog(units []OrgUnit) map[string]workspaceOrgInfo {
 	return out
 }
 
-// workspaceOrgName resolves a display name for an organization id.
+// workspaceOrgName 處理工作區組織名稱。
 func workspaceOrgName(names map[string]string, id string) string {
 	if name := strings.TrimSpace(names[id]); name != "" {
 		return name
@@ -763,7 +763,7 @@ func workspaceOrgName(names map[string]string, id string) string {
 	return id
 }
 
-// workspaceOrgBUAndDept resolves BU and department names from organization hierarchy.
+// workspaceOrgBUAndDept 處理工作區組織 bu and 部門。
 func workspaceOrgBUAndDept(orgs map[string]workspaceOrgInfo, orgID string) (string, string) {
 	info, ok := orgs[orgID]
 	if !ok {
@@ -797,7 +797,7 @@ func workspaceOrgBUAndDept(orgs map[string]workspaceOrgInfo, orgID string) (stri
 	return bu, dept
 }
 
-// workspaceEmployeeDisplayIDs maps internal employee ids to frontend-facing ids.
+// workspaceEmployeeDisplayIDs 處理工作區員工顯示 IDs。
 func workspaceEmployeeDisplayIDs(employees []Employee) map[string]string {
 	out := map[string]string{}
 	for _, employee := range employees {
@@ -806,7 +806,7 @@ func workspaceEmployeeDisplayIDs(employees []Employee) map[string]string {
 	return out
 }
 
-// workspaceEmployeeByDisplayID resolves either the employee-facing id or the internal id.
+// workspaceEmployeeByDisplayID 處理工作區員工 by 顯示 ID。
 func workspaceEmployeeByDisplayID(employees []Employee, displayID string) (Employee, bool) {
 	normalized := strings.TrimSpace(displayID)
 	if normalized == "" {
@@ -820,12 +820,12 @@ func workspaceEmployeeByDisplayID(employees []Employee, displayID string) (Emplo
 	return Employee{}, false
 }
 
-// workspaceEmployeeDisplayID returns employee_no when available.
+// workspaceEmployeeDisplayID 處理工作區員工顯示 ID。
 func workspaceEmployeeDisplayID(employee Employee) string {
 	return utils.FirstNonEmpty(strings.TrimSpace(employee.EmployeeNo), employee.ID)
 }
 
-// workspaceManagerCycle detects whether assigning managerID would introduce a reporting loop.
+// workspaceManagerCycle 處理工作區主管 cycle。
 func workspaceManagerCycle(employees []Employee, employeeID, managerID string) bool {
 	if managerID == "" {
 		return false
@@ -852,7 +852,7 @@ func workspaceManagerCycle(employees []Employee, employeeID, managerID string) b
 	return false
 }
 
-// workspaceEmployeeLevel computes an employee's tree level with cycle protection.
+// workspaceEmployeeLevel 處理工作區員工 level。
 func workspaceEmployeeLevel(id string, employees map[string]Employee, memo map[string]int) int {
 	if level, ok := memo[id]; ok {
 		return level
@@ -881,7 +881,7 @@ func workspaceEmployeeLevel(id string, employees map[string]Employee, memo map[s
 	return level
 }
 
-// workspaceMonthlyTurnover aggregates a monthly turnover response.
+// workspaceMonthlyTurnover 處理工作區每月人員異動。
 func workspaceMonthlyTurnover(employees []Employee, orgs map[string]workspaceOrgInfo, start time.Time, end time.Time, now time.Time) WorkspaceTurnoverMonthly {
 	stats := workspaceMovementByDept(employees, orgs, start, end, time.Date(start.Year(), 1, 1, 0, 0, 0, 0, time.UTC))
 	rows := workspaceMonthlyTurnoverRows(stats)
@@ -904,7 +904,7 @@ func workspaceMonthlyTurnover(employees []Employee, orgs map[string]workspaceOrg
 	}
 }
 
-// workspaceAnnualTurnover aggregates an annual turnover response.
+// workspaceAnnualTurnover 處理工作區年度人員異動。
 func workspaceAnnualTurnover(employees []Employee, orgs map[string]workspaceOrgInfo, year int, now time.Time) WorkspaceTurnoverAnnual {
 	annualStart := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
 	annualEnd := annualStart.AddDate(1, 0, 0)
@@ -926,7 +926,7 @@ func workspaceAnnualTurnover(employees []Employee, orgs map[string]workspaceOrgI
 	}
 }
 
-// workspaceMovementByDept groups movement stats by BU and department.
+// workspaceMovementByDept 處理工作區 movement by 部門。
 func workspaceMovementByDept(employees []Employee, orgs map[string]workspaceOrgInfo, start time.Time, end time.Time, ytdStart time.Time) []workspaceMovementStats {
 	byKey := map[string]*workspaceMovementStats{}
 	for _, employee := range employees {
@@ -952,7 +952,7 @@ func workspaceMovementByDept(employees []Employee, orgs map[string]workspaceOrgI
 	return out
 }
 
-// workspaceMovementByBU groups annual movement stats by BU.
+// workspaceMovementByBU 處理工作區 movement by bu。
 func workspaceMovementByBU(employees []Employee, orgs map[string]workspaceOrgInfo, start time.Time, end time.Time) []workspaceMovementStats {
 	byKey := map[string]*workspaceMovementStats{}
 	for _, employee := range employees {
@@ -972,7 +972,7 @@ func workspaceMovementByBU(employees []Employee, orgs map[string]workspaceOrgInf
 	return out
 }
 
-// workspaceApplyMovement updates movement counts for one employee.
+// workspaceApplyMovement 處理工作區 apply movement。
 func workspaceApplyMovement(stat *workspaceMovementStats, employee Employee, start time.Time, end time.Time, ytdStart time.Time) {
 	if workspaceEmployeeActiveAt(employee, start.Add(-time.Nanosecond)) {
 		stat.Prev++
@@ -1002,7 +1002,7 @@ func workspaceApplyMovement(stat *workspaceMovementStats, employee Employee, sta
 	}
 }
 
-// workspaceMovementTotal sums movement stats.
+// workspaceMovementTotal 處理工作區 movement total。
 func workspaceMovementTotal(items []workspaceMovementStats) workspaceMovementStats {
 	total := workspaceMovementStats{BU: "總計", Dept: "總計"}
 	for _, item := range items {
@@ -1021,7 +1021,7 @@ func workspaceMovementTotal(items []workspaceMovementStats) workspaceMovementSta
 	return total
 }
 
-// workspaceMonthlyTurnoverRows formats monthly movement stats for the table.
+// workspaceMonthlyTurnoverRows 處理工作區每月人員異動列。
 func workspaceMonthlyTurnoverRows(stats []workspaceMovementStats) []WorkspaceTurnoverRow {
 	rows := []WorkspaceTurnoverRow{}
 	byBU := map[string][]workspaceMovementStats{}
@@ -1050,7 +1050,7 @@ func workspaceMonthlyTurnoverRows(stats []workspaceMovementStats) []WorkspaceTur
 	return rows
 }
 
-// workspaceMonthlyRow formats one monthly turnover row.
+// workspaceMonthlyRow 處理工作區每月列。
 func workspaceMonthlyRow(stat workspaceMovementStats, rowType string, rowSpan int) WorkspaceTurnoverRow {
 	sep := stat.Resigned + stat.Layoff
 	return WorkspaceTurnoverRow{
@@ -1070,7 +1070,7 @@ func workspaceMonthlyRow(stat workspaceMovementStats, rowType string, rowSpan in
 	}
 }
 
-// workspaceAnnualTurnoverRows formats annual movement stats for the table.
+// workspaceAnnualTurnoverRows 處理工作區年度人員異動列。
 func workspaceAnnualTurnoverRows(stats []workspaceMovementStats) []WorkspaceAnnualRow {
 	rows := make([]WorkspaceAnnualRow, 0, len(stats)+1)
 	total := workspaceMovementStats{BU: "總計"}
@@ -1082,7 +1082,7 @@ func workspaceAnnualTurnoverRows(stats []workspaceMovementStats) []WorkspaceAnnu
 	return rows
 }
 
-// workspaceAnnualRow formats one annual turnover row.
+// workspaceAnnualRow 處理工作區年度列。
 func workspaceAnnualRow(stat workspaceMovementStats) WorkspaceAnnualRow {
 	sep := stat.Resigned + stat.Layoff
 	return WorkspaceAnnualRow{
@@ -1098,7 +1098,7 @@ func workspaceAnnualRow(stat workspaceMovementStats) WorkspaceAnnualRow {
 	}
 }
 
-// workspaceSumMovement adds one movement stat into another.
+// workspaceSumMovement 處理工作區總和 movement。
 func workspaceSumMovement(total workspaceMovementStats, item workspaceMovementStats) workspaceMovementStats {
 	total.Base += item.Base
 	total.Prev += item.Prev
@@ -1114,7 +1114,7 @@ func workspaceSumMovement(total workspaceMovementStats, item workspaceMovementSt
 	return total
 }
 
-// workspaceTurnoverKey returns a stable row key for turnover tables.
+// workspaceTurnoverKey 處理工作區人員異動 key。
 func workspaceTurnoverKey(stat workspaceMovementStats, rowType string) string {
 	switch rowType {
 	case "total":
@@ -1126,7 +1126,7 @@ func workspaceTurnoverKey(stat workspaceMovementStats, rowType string) string {
 	}
 }
 
-// workspaceMonthlyKPIs formats monthly KPI cards.
+// workspaceMonthlyKPIs 處理工作區每月 kp is。
 func workspaceMonthlyKPIs(total workspaceMovementStats, rate float64, prevRate float64) []WorkspaceKPI {
 	diff := rate - prevRate
 	trendTone := "flat"
@@ -1148,7 +1148,7 @@ func workspaceMonthlyKPIs(total workspaceMovementStats, rate float64, prevRate f
 	}
 }
 
-// workspaceAnnualKPIs formats annual KPI cards.
+// workspaceAnnualKPIs 處理工作區年度 kp is。
 func workspaceAnnualKPIs(total workspaceMovementStats, rate float64) []WorkspaceKPI {
 	net := total.Hires - total.Resigned - total.Layoff
 	netText := strconv.Itoa(net)
@@ -1163,7 +1163,7 @@ func workspaceAnnualKPIs(total workspaceMovementStats, rate float64) []Workspace
 	}
 }
 
-// workspaceComparisonFromStats builds sorted comparison bars from movement stats.
+// workspaceComparisonFromStats 處理工作區 comparison 來源 stats。
 func workspaceComparisonFromStats(stats []workspaceMovementStats, valueFn func(workspaceMovementStats) float64, unit string, decimal bool) []WorkspaceComparisonItem {
 	items := make([]WorkspaceComparisonItem, 0, len(stats))
 	maxValue := 0.0
@@ -1196,7 +1196,7 @@ func workspaceComparisonFromStats(stats []workspaceMovementStats, valueFn func(w
 	return items
 }
 
-// workspaceHeadcountTrend builds monthly headcount trend points.
+// workspaceHeadcountTrend 處理工作區 headcount 趨勢。
 func workspaceHeadcountTrend(employees []Employee, year int, now time.Time) []WorkspaceTrendPoint {
 	points := make([]WorkspaceTrendPoint, 0, 12)
 	maxValue := 0
@@ -1232,7 +1232,7 @@ func workspaceHeadcountTrend(employees []Employee, year int, now time.Time) []Wo
 	return points
 }
 
-// workspaceRateTrend builds monthly turnover-rate trend points.
+// workspaceRateTrend 處理工作區速率趨勢。
 func workspaceRateTrend(employees []Employee, year int, now time.Time) []WorkspaceTrendPoint {
 	points := make([]WorkspaceTrendPoint, 0, 12)
 	values := make([]float64, 12)
@@ -1271,7 +1271,7 @@ func workspaceRateTrend(employees []Employee, year int, now time.Time) []Workspa
 	return points
 }
 
-// workspacePieFromStats builds an annual BU distribution pie.
+// workspacePieFromStats 處理工作區 pie 來源 stats。
 func workspacePieFromStats(stats []workspaceMovementStats) []WorkspacePieItem {
 	type pair struct {
 		name  string
@@ -1310,7 +1310,7 @@ func workspacePieFromStats(stats []workspaceMovementStats) []WorkspacePieItem {
 	return out
 }
 
-// workspaceMonthDates builds calendar date columns for a month.
+// workspaceMonthDates 處理工作區月份 dates。
 func workspaceMonthDates(start time.Time, end time.Time) []WorkspaceDate {
 	out := []WorkspaceDate{}
 	for day := start; day.Before(end); day = day.AddDate(0, 0, 1) {
@@ -1326,12 +1326,12 @@ func workspaceMonthDates(start time.Time, end time.Time) []WorkspaceDate {
 	return out
 }
 
-// workspaceHolidayName returns known holiday labels when the backend has a deterministic source.
+// workspaceHolidayName 處理工作區假日名稱。
 func workspaceHolidayName(_ time.Time) *string {
 	return nil
 }
 
-// workspaceLeaveLegend returns the standard leave code legend used by the matrix.
+// workspaceLeaveLegend 處理工作區請假 legend。
 func workspaceLeaveLegend() []WorkspaceLeaveLegendItem {
 	return []WorkspaceLeaveLegendItem{
 		{Code: "病", Label: "全薪病假"},
@@ -1351,7 +1351,7 @@ func workspaceLeaveLegend() []WorkspaceLeaveLegendItem {
 	}
 }
 
-// workspaceAdminPermissions converts account permission sets into page permission levels.
+// workspaceAdminPermissions 處理工作區管理員權限。
 func workspaceAdminPermissions(account Account, assignments []PermissionSetAssignment, permissionSets map[string]PermissionSet) (map[string]string, time.Time) {
 	permissions := workspaceEmptyAdminPermissions()
 	permissionSetIDs := utils.CopyStrings(account.DirectPermissionSetIDs)
@@ -1384,7 +1384,7 @@ func workspaceAdminPermissions(account Account, assignments []PermissionSetAssig
 	return permissions, assignedAt
 }
 
-// workspaceEmptyAdminPermissions returns the default permission matrix.
+// workspaceEmptyAdminPermissions 處理工作區空值管理員權限。
 func workspaceEmptyAdminPermissions() map[string]string {
 	return map[string]string{
 		"employees":    "none",
@@ -1396,11 +1396,12 @@ func workspaceEmptyAdminPermissions() map[string]string {
 	}
 }
 
+// workspaceAdminPermissionInAdminScope 處理工作區管理員權限 in 管理員範圍。
 func workspaceAdminPermissionInAdminScope(permission Permission) bool {
 	return permission.Scope != ScopeSelf && permission.Scope != ScopeOwn
 }
 
-// workspaceAdminPermissionKey maps a low-level permission onto one admin page section key.
+// workspaceAdminPermissionKey 處理工作區管理員權限 key。
 func workspaceAdminPermissionKey(permission Permission) string {
 	resource := strings.ToLower(strings.Join([]string{
 		permission.Resource,
@@ -1425,7 +1426,7 @@ func workspaceAdminPermissionKey(permission Permission) string {
 	}
 }
 
-// workspaceAdminPermissionLevel converts action semantics into view/edit levels.
+// workspaceAdminPermissionLevel 處理工作區管理員權限 level。
 func workspaceAdminPermissionLevel(permission Permission) string {
 	switch strings.ToLower(string(permission.Action)) {
 	case "", "read", "list", "check", "explain", "simulate":
@@ -1435,7 +1436,7 @@ func workspaceAdminPermissionLevel(permission Permission) string {
 	}
 }
 
-// workspaceMergeAdminPermission keeps the strongest level for a permission key.
+// workspaceMergeAdminPermission 處理工作區 merge 管理員權限。
 func workspaceMergeAdminPermission(permissions map[string]string, key string, level string) {
 	if level == "edit" || permissions[key] == "" || permissions[key] == "none" {
 		permissions[key] = level
@@ -1446,7 +1447,7 @@ func workspaceMergeAdminPermission(permissions map[string]string, key string, le
 	}
 }
 
-// workspaceHasAdminPermissions checks whether a permission matrix grants any page section.
+// workspaceHasAdminPermissions 處理工作區 has 管理員權限。
 func workspaceHasAdminPermissions(permissions map[string]string) bool {
 	for _, level := range permissions {
 		if level != "" && level != "none" {
@@ -1456,7 +1457,7 @@ func workspaceHasAdminPermissions(permissions map[string]string) bool {
 	return false
 }
 
-// workspaceAssignmentActive checks assignment time windows.
+// workspaceAssignmentActive 處理工作區指派啟用中。
 func workspaceAssignmentActive(assignment PermissionSetAssignment, now time.Time) bool {
 	if assignment.StartsAt != nil && assignment.StartsAt.After(now) {
 		return false
@@ -1467,7 +1468,7 @@ func workspaceAssignmentActive(assignment PermissionSetAssignment, now time.Time
 	return true
 }
 
-// workspaceAdminCandidates returns active account-bound employees that are not already admins.
+// workspaceAdminCandidates 處理工作區管理員 candidates。
 func workspaceAdminCandidates(employees []Employee, accounts map[string]Account, adminAccountIDs map[string]struct{}, orgNames map[string]string) []WorkspaceAdminCandidate {
 	candidates := []WorkspaceAdminCandidate{}
 	for _, employee := range employees {
@@ -1498,7 +1499,7 @@ func workspaceAdminCandidates(employees []Employee, accounts map[string]Account,
 	return candidates
 }
 
-// workspaceAdminSections returns the fixed admin-settings section definitions.
+// workspaceAdminSections 處理工作區管理員區段。
 func workspaceAdminSections() []WorkspaceAdminSection {
 	return []WorkspaceAdminSection{
 		{Group: "人員", Items: []WorkspaceAdminSectionItem{
@@ -1512,7 +1513,7 @@ func workspaceAdminSections() []WorkspaceAdminSection {
 	}
 }
 
-// workspaceAdminDisplayID returns the employee-facing id for an administrator account.
+// workspaceAdminDisplayID 處理工作區管理員顯示 ID。
 func workspaceAdminDisplayID(account Account, employee Employee) string {
 	if employee.ID != "" {
 		return workspaceEmployeeDisplayID(employee)
@@ -1520,12 +1521,12 @@ func workspaceAdminDisplayID(account Account, employee Employee) string {
 	return account.ID
 }
 
-// workspaceAdminName returns the best display name for an administrator account.
+// workspaceAdminName 處理工作區管理員名稱。
 func workspaceAdminName(account Account, employee Employee) string {
 	return utils.FirstNonEmpty(employee.Name, account.DisplayName, account.Email, account.ID)
 }
 
-// workspaceFormatAdminTime formats an assignment timestamp for the admin page.
+// workspaceFormatAdminTime 處理工作區 format 管理員時間。
 func workspaceFormatAdminTime(value time.Time) string {
 	if value.IsZero() {
 		return ""
@@ -1533,7 +1534,7 @@ func workspaceFormatAdminTime(value time.Time) string {
 	return value.UTC().Format("2006/01/02")
 }
 
-// workspaceAuditLogMatches applies workspace audit-log filters.
+// workspaceAuditLogMatches 處理工作區稽核 log matches。
 func workspaceAuditLogMatches(log AuditLog, query WorkspaceAuditLogQuery, accounts map[string]Account, employees map[string]Employee) bool {
 	if from, ok := workspaceParseAuditTime(query.From, false); ok && log.CreatedAt.Before(from) {
 		return false
@@ -1563,6 +1564,7 @@ func workspaceAuditLogMatches(log AuditLog, query WorkspaceAuditLogQuery, accoun
 	return true
 }
 
+// workspaceAuditLogQueryEmpty 處理工作區稽核 log 查詢空值。
 func workspaceAuditLogQueryEmpty(query WorkspaceAuditLogQuery) bool {
 	return strings.TrimSpace(query.OperatorID) == "" &&
 		strings.TrimSpace(query.Type) == "" &&
@@ -1571,7 +1573,7 @@ func workspaceAuditLogQueryEmpty(query WorkspaceAuditLogQuery) bool {
 		strings.TrimSpace(query.Keyword) == ""
 }
 
-// workspaceAuditLogProjection converts one audit log into the page-level row.
+// workspaceAuditLogProjection 處理工作區稽核 log projection。
 func workspaceAuditLogProjection(log AuditLog, accounts map[string]Account, employees map[string]Employee) WorkspaceAuditLog {
 	account := accounts[log.ActorAccountID]
 	employee := employees[account.EmployeeID]
@@ -1585,12 +1587,12 @@ func workspaceAuditLogProjection(log AuditLog, accounts map[string]Account, empl
 	}
 }
 
-// workspaceAuditOperator resolves an audit actor display name.
+// workspaceAuditOperator 處理工作區稽核 operator。
 func workspaceAuditOperator(log AuditLog, account Account, employee Employee) string {
 	return utils.FirstNonEmpty(employee.Name, account.DisplayName, account.Email, log.ActorAccountID, "系統")
 }
 
-// workspaceAuditType maps low-level audit resources to workspace page categories.
+// workspaceAuditType 處理工作區稽核 type。
 func workspaceAuditType(log AuditLog) string {
 	text := strings.ToLower(strings.Join([]string{log.Resource, log.Action}, " "))
 	switch {
@@ -1609,7 +1611,7 @@ func workspaceAuditType(log AuditLog) string {
 	}
 }
 
-// workspaceAuditAction returns a concise action label.
+// workspaceAuditAction 處理工作區稽核 action。
 func workspaceAuditAction(log AuditLog) string {
 	action := utils.FirstNonEmpty(log.Action, log.Resource)
 	if log.Target != "" {
@@ -1618,7 +1620,7 @@ func workspaceAuditAction(log AuditLog) string {
 	return action
 }
 
-// workspaceAuditDetail formats audit details without losing structured context.
+// workspaceAuditDetail 處理工作區稽核 detail。
 func workspaceAuditDetail(log AuditLog) string {
 	if len(log.Details) > 0 {
 		if raw, err := json.Marshal(log.Details); err == nil {
@@ -1628,7 +1630,7 @@ func workspaceAuditDetail(log AuditLog) string {
 	return utils.FirstNonEmpty(log.Result, log.TraceID)
 }
 
-// workspaceParseAuditTime parses date and timestamp filters.
+// workspaceParseAuditTime 處理工作區 parse 稽核時間。
 func workspaceParseAuditTime(value string, exclusiveEnd bool) (time.Time, bool) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -1646,7 +1648,7 @@ func workspaceParseAuditTime(value string, exclusiveEnd bool) (time.Time, bool) 
 	return time.Time{}, false
 }
 
-// workspaceLeaveCells indexes leave cells by employee and date.
+// workspaceLeaveCells 處理工作區請假儲存格。
 func workspaceLeaveCells(leaves []LeaveRequest, start time.Time, end time.Time) map[string]map[string]workspaceLeaveCell {
 	out := map[string]map[string]workspaceLeaveCell{}
 	for _, leave := range leaves {
@@ -1682,7 +1684,7 @@ func workspaceLeaveCells(leaves []LeaveRequest, start time.Time, end time.Time) 
 	return out
 }
 
-// workspaceClockCells indexes accepted clock records by employee and date.
+// workspaceClockCells 處理工作區打卡儲存格。
 func workspaceClockCells(clocks []AttendanceClockRecord, worksites []AttendanceWorksite) map[string]map[string]workspaceClockCell {
 	worksiteNames := map[string]string{}
 	for _, worksite := range worksites {
@@ -1753,7 +1755,7 @@ func workspaceClockCells(clocks []AttendanceClockRecord, worksites []AttendanceW
 	return out
 }
 
-// workspaceAttendanceMatrix builds the work-hour matrix rows and summary.
+// workspaceAttendanceMatrix 處理工作區考勤矩陣。
 func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceEmployeeCard, dates []WorkspaceDate, leaveCells map[string]map[string]workspaceLeaveCell) WorkspaceAttendanceMatrix {
 	rows := []WorkspaceAttendanceRow{}
 	totalLeaveHours := 0.0
@@ -1785,7 +1787,7 @@ func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceE
 	return WorkspaceAttendanceMatrix{Rows: rows, Summary: WorkspaceAttendanceMatrixSum{Holidays: holidays, LeaveHours: totalLeaveHours, Perfect: perfect, Workdays: workdays}}
 }
 
-// workspaceClockMatrix builds the clock matrix rows, abnormal list, and summary.
+// workspaceClockMatrix 處理工作區打卡矩陣。
 func workspaceClockMatrix(employees []Employee, cards map[string]WorkspaceEmployeeCard, dates []WorkspaceDate, leaveCells map[string]map[string]workspaceLeaveCell, clockCells map[string]map[string]workspaceClockCell) WorkspaceClockMatrix {
 	rows := []WorkspaceClockRow{}
 	abnormals := []WorkspaceClockAbnormal{}
@@ -1831,7 +1833,7 @@ func workspaceClockMatrix(employees []Employee, cards map[string]WorkspaceEmploy
 	return WorkspaceClockMatrix{Rows: rows, Abnormals: abnormals, Summary: WorkspaceClockSummary{AbnormalDays: len(abnormals), AbnormalPeople: len(abnormalPeople), NormalDays: normalDays}}
 }
 
-// workspaceEmployeeCards formats employee metadata for workspace tables.
+// workspaceEmployeeCards 處理工作區員工 cards。
 func workspaceEmployeeCards(employees []Employee, orgNames map[string]string) map[string]WorkspaceEmployeeCard {
 	out := map[string]WorkspaceEmployeeCard{}
 	for _, employee := range employees {
@@ -1852,7 +1854,7 @@ func workspaceEmployeeCards(employees []Employee, orgNames map[string]string) ma
 	return out
 }
 
-// workspaceBaseDayCell creates a calendar-aware base matrix cell.
+// workspaceBaseDayCell 處理工作區 base day 儲存格。
 func workspaceBaseDayCell(date WorkspaceDate) WorkspaceDayCell {
 	if date.Holiday != nil {
 		return WorkspaceDayCell{Type: "holiday", Holiday: *date.Holiday}
@@ -1863,7 +1865,7 @@ func workspaceBaseDayCell(date WorkspaceDate) WorkspaceDayCell {
 	return WorkspaceDayCell{Type: "work"}
 }
 
-// workspaceWorkdayCount counts non-weekend, non-holiday dates.
+// workspaceWorkdayCount 處理工作區 workday count。
 func workspaceWorkdayCount(dates []WorkspaceDate) int {
 	count := 0
 	for _, date := range dates {
@@ -1874,7 +1876,7 @@ func workspaceWorkdayCount(dates []WorkspaceDate) int {
 	return count
 }
 
-// workspaceHolidayCount counts holidays in a date slice.
+// workspaceHolidayCount 處理工作區假日 count。
 func workspaceHolidayCount(dates []WorkspaceDate) int {
 	count := 0
 	for _, date := range dates {
@@ -1885,7 +1887,7 @@ func workspaceHolidayCount(dates []WorkspaceDate) int {
 	return count
 }
 
-// workspaceLeaveCodeLabel maps leave types to matrix code labels.
+// workspaceLeaveCodeLabel 處理工作區請假碼 label。
 func workspaceLeaveCodeLabel(leaveType string) (string, string) {
 	normalized := strings.ToLower(strings.TrimSpace(leaveType))
 	labels := map[string]WorkspaceLeaveLegendItem{
@@ -1916,17 +1918,17 @@ func workspaceLeaveCodeLabel(leaveType string) (string, string) {
 	return string(runes[0]), trimmed
 }
 
-// workspaceEmployeeNameEN returns the stored English name when present.
+// workspaceEmployeeNameEN 處理工作區員工名稱 en。
 func workspaceEmployeeNameEN(employee Employee) string {
 	return workspaceStringFromMaps([]map[string]any{employee.BasicInfo, employee.EmploymentInfo, employee.ContactInfo}, "name_en", "english_name", "en_name")
 }
 
-// workspaceEmployeeInfoDate returns the first matching profile date string.
+// workspaceEmployeeInfoDate 處理工作區員工 info 日期。
 func workspaceEmployeeInfoDate(employee Employee, keys ...string) string {
 	return workspaceStringFromMaps([]map[string]any{employee.BasicInfo, employee.EmploymentInfo}, keys...)
 }
 
-// workspaceStringFromMaps returns the first string-like value found by key.
+// workspaceStringFromMaps 處理工作區字串 來源 map。
 func workspaceStringFromMaps(maps []map[string]any, keys ...string) string {
 	for _, values := range maps {
 		for _, key := range keys {
@@ -1948,7 +1950,7 @@ func workspaceStringFromMaps(maps []map[string]any, keys ...string) string {
 	return ""
 }
 
-// workspaceParseFlexibleDate parses the date formats used in profile metadata.
+// workspaceParseFlexibleDate 處理工作區 parse flexible 日期。
 func workspaceParseFlexibleDate(value string) (time.Time, bool) {
 	value = strings.TrimSpace(value)
 	for _, layout := range []string{time.DateOnly, "2006/01/02", time.RFC3339} {
@@ -1959,7 +1961,7 @@ func workspaceParseFlexibleDate(value string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
-// workspaceFormatDateSlash formats a nullable date pointer.
+// workspaceFormatDateSlash 處理工作區 format 日期 slash。
 func workspaceFormatDateSlash(value *time.Time) string {
 	if value == nil {
 		return ""
@@ -1967,12 +1969,12 @@ func workspaceFormatDateSlash(value *time.Time) string {
 	return workspaceFormatTimeSlash(*value)
 }
 
-// workspaceFormatTimeSlash formats a date as yyyy/mm/dd.
+// workspaceFormatTimeSlash 處理工作區 format 時間 slash。
 func workspaceFormatTimeSlash(value time.Time) string {
 	return value.UTC().Format("2006/01/02")
 }
 
-// workspaceAvatar returns the first rune of a display name.
+// workspaceAvatar 處理工作區 avatar。
 func workspaceAvatar(name string) string {
 	runes := []rune(strings.TrimSpace(name))
 	if len(runes) == 0 {
@@ -1981,7 +1983,7 @@ func workspaceAvatar(name string) string {
 	return string(runes[0])
 }
 
-// workspaceCategoryLabel localizes employee category values.
+// workspaceCategoryLabel 處理工作區分類 label。
 func workspaceCategoryLabel(category string) string {
 	switch strings.ToLower(strings.TrimSpace(category)) {
 	case string(EmployeeCategoryFullTime):
@@ -1997,7 +1999,7 @@ func workspaceCategoryLabel(category string) string {
 	}
 }
 
-// workspaceStatusLabel collapses HR lifecycle states into the workspace card contract.
+// workspaceStatusLabel 處理工作區狀態 label。
 func workspaceStatusLabel(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case string(EmployeeStatusActive), string(EmployeeStatusProbation), string(EmployeeStatusLeaveSuspended), "", "在職", "試用", "試用中", "留停", "留職停薪":
@@ -2011,25 +2013,25 @@ func workspaceStatusLabel(status string) string {
 	}
 }
 
-// workspaceDateOnly truncates a timestamp to a UTC date.
+// workspaceDateOnly 處理工作區日期 only。
 func workspaceDateOnly(value time.Time) time.Time {
 	value = value.UTC()
 	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC)
 }
 
-// workspaceWeekdayZH formats weekday labels in Traditional Chinese.
+// workspaceWeekdayZH 處理工作區星期 zh。
 func workspaceWeekdayZH(value time.Time) string {
 	labels := []string{"週日", "週一", "週二", "週三", "週四", "週五", "週六"}
 	return labels[int(value.Weekday())]
 }
 
-// workspaceMonthNameZH formats Traditional Chinese month names.
+// workspaceMonthNameZH 處理工作區月份名稱 zh。
 func workspaceMonthNameZH(month time.Month) string {
 	names := []string{"", "一月", "二月", "三月", "四月", "五月", "六月", "七月", "八月", "九月", "十月", "十一月", "十二月"}
 	return names[int(month)]
 }
 
-// workspaceRate returns a percentage value.
+// workspaceRate 處理工作區速率。
 func workspaceRate(numerator int, denominator int) float64 {
 	if denominator <= 0 {
 		return 0
@@ -2037,7 +2039,7 @@ func workspaceRate(numerator int, denominator int) float64 {
 	return float64(numerator) / float64(denominator) * 100
 }
 
-// workspaceRateString returns a one-decimal percentage without the percent sign.
+// workspaceRateString 處理工作區速率字串。
 func workspaceRateString(numerator float64, denominator float64) string {
 	if denominator <= 0 {
 		return "0.0"
@@ -2045,12 +2047,12 @@ func workspaceRateString(numerator float64, denominator float64) string {
 	return fmt.Sprintf("%.1f", numerator/denominator*100)
 }
 
-// workspaceRateLabel returns a one-decimal percentage label.
+// workspaceRateLabel 處理工作區速率 label。
 func workspaceRateLabel(numerator int, denominator int) string {
 	return fmt.Sprintf("%.1f%%", workspaceRate(numerator, denominator))
 }
 
-// workspacePercent returns a rounded integer percentage.
+// workspacePercent 處理工作區百分比。
 func workspacePercent(value int, total int) int {
 	if total <= 0 {
 		return 0
@@ -2058,7 +2060,7 @@ func workspacePercent(value int, total int) int {
 	return int(math.Round(float64(value) / float64(total) * 100))
 }
 
-// workspacePercentFloat returns a rounded integer percentage from floats.
+// workspacePercentFloat 處理工作區百分比 float。
 func workspacePercentFloat(value float64, total float64) int {
 	if total <= 0 {
 		return 0
@@ -2066,7 +2068,7 @@ func workspacePercentFloat(value float64, total float64) int {
 	return int(math.Round(value / total * 100))
 }
 
-// sortedKeys returns sorted map keys for deterministic output.
+// sortedKeys 處理 sorted keys。
 func sortedKeys[T any](values map[string]T) []string {
 	keys := make([]string, 0, len(values))
 	for key := range values {
@@ -2076,7 +2078,7 @@ func sortedKeys[T any](values map[string]T) []string {
 	return keys
 }
 
-// maxInt returns the larger integer.
+// maxInt 取得較大值整數。
 func maxInt(a int, b int) int {
 	if a > b {
 		return a
@@ -2084,7 +2086,7 @@ func maxInt(a int, b int) int {
 	return b
 }
 
-// maxTime returns the later time.
+// maxTime 取得較大值時間。
 func maxTime(a time.Time, b time.Time) time.Time {
 	if a.After(b) {
 		return a
@@ -2092,7 +2094,7 @@ func maxTime(a time.Time, b time.Time) time.Time {
 	return b
 }
 
-// minTime returns the earlier time.
+// minTime 取得較小值時間。
 func minTime(a time.Time, b time.Time) time.Time {
 	if a.Before(b) {
 		return a

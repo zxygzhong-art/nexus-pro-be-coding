@@ -6,7 +6,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
-// AuthzEventStore persists authorization versions, tuples, and outbox events.
+// AuthzEventStore 定義授權事件儲存層的行為契約。
 type AuthzEventStore interface {
 	GetPermissionVersion(ctx context.Context, tenantID string) (int64, error)
 	IncrementPermissionVersion(ctx context.Context, tenantID string) (int64, error)

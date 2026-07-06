@@ -9,13 +9,13 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
-// AuthzCtrl wires explicit authorization endpoints to the authz service facade.
+// AuthzCtrl 定義授權 ctrl 的資料結構。
 type AuthzCtrl struct {
 	routes routeBinder
 	svc    service.AuthzFacade
 }
 
-// RegisterRoutes attaches authorization routes to the v1 route group.
+// RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c AuthzCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	authz := router.Group("/authz")
 	authz.POST("/check", c.routes.Handle("iam.authz", "check", c.checkAuthz))
@@ -24,7 +24,7 @@ func (c AuthzCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	authz.POST("/simulate", c.routes.Handle("iam.authz", "simulate", c.simulateAuthz))
 }
 
-// authorize performs route-level authorization before the handler executes.
+// authorize 授權目前流程。
 func (a *API) authorize(ctx domain.RequestContext, r *http.Request, routePath, resource, action string, authz routeAuthz) error {
 	req := domain.CheckRequest{Resource: resource, Action: domain.Action(action), RouteMethod: r.Method, RoutePath: routePath}
 	if authz.resourceIDParam != "" {
@@ -58,6 +58,7 @@ func (a *API) authorize(ctx domain.RequestContext, r *http.Request, routePath, r
 	return nil
 }
 
+// apiAuthzReasonCode 處理 API 授權 reason 碼。
 func apiAuthzReasonCode(result domain.CheckResult) string {
 	switch result.Reason {
 	case "missing permission":
@@ -74,6 +75,7 @@ func apiAuthzReasonCode(result domain.CheckResult) string {
 	}
 }
 
+// checkAuthz 處理授權的 HTTP 請求。
 func (c AuthzCtrl) checkAuthz(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CheckRequest
 	if err := readJSON(w, r, &input); err != nil {
@@ -87,6 +89,7 @@ func (c AuthzCtrl) checkAuthz(w http.ResponseWriter, r *http.Request, ctx domain
 	return nil
 }
 
+// explainAuthz 處理授權的 HTTP 請求。
 func (c AuthzCtrl) explainAuthz(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CheckRequest
 	if err := readJSON(w, r, &input); err != nil {
@@ -100,6 +103,7 @@ func (c AuthzCtrl) explainAuthz(w http.ResponseWriter, r *http.Request, ctx doma
 	return nil
 }
 
+// simulateAuthz 處理授權的 HTTP 請求。
 func (c AuthzCtrl) simulateAuthz(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CheckRequest
 	if err := readJSON(w, r, &input); err != nil {
@@ -113,6 +117,7 @@ func (c AuthzCtrl) simulateAuthz(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
+// batchCheckAuthz 處理批次 check 授權的 HTTP 請求。
 func (c AuthzCtrl) batchCheckAuthz(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.BatchCheckRequest
 	if err := readJSON(w, r, &input); err != nil {

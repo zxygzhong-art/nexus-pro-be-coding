@@ -208,6 +208,70 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/notifications:
+    get:
+      summary: List current-account system notifications
+      parameters:
+        - {name: tone, in: query, schema: {type: string, enum: [success, info, warning]}}
+        - {name: unread_only, in: query, schema: {type: boolean}}
+        - {name: cursor, in: query, schema: {type: string}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 50}}
+      responses:
+        "200":
+          description: Current-account notifications and unread metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationListDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/notifications/unread-count:
+    get:
+      summary: Get current-account unread notification count
+      responses:
+        "200":
+          description: Unread notification count
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationUnreadCountDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/notifications/{id}/read:
+    post:
+      summary: Mark one current-account notification as read
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Read marker
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationReadDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/notifications/read-all:
+    post:
+      summary: Mark all current-account notifications as read
+      responses:
+        "200":
+          description: Bulk read marker
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationReadAllDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/platform/workspace:
     get:
       summary: Get workspace settings aggregate for the OA frontend
@@ -2191,6 +2255,30 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/PlatformTaskTodo"
+    NotificationListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/NotificationListResponse"
+    NotificationUnreadCountDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/NotificationUnreadCountResponse"
+    NotificationReadDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/NotificationReadResponse"
+    NotificationReadAllDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/NotificationReadAllResponse"
     PlatformWorkspaceDataResponse:
       type: object
       required: [data]
@@ -2288,6 +2376,55 @@ components:
         role: {type: string, enum: [assistant, user]}
         avatar: {type: string}
         content: {type: string}
+    NotificationListResponse:
+      type: object
+      required: [items, unread_count, tone_counts]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/NotificationItem"}
+        next_cursor: {type: string}
+        unread_count: {type: integer}
+        tone_counts:
+          $ref: "#/components/schemas/NotificationToneCounts"
+    NotificationItem:
+      type: object
+      required: [id, tone, category, title, body, status_text, created_at]
+      properties:
+        id: {type: string}
+        tone: {type: string, enum: [success, info, warning]}
+        category: {type: string}
+        title: {type: string}
+        body: {type: string}
+        status_text: {type: string}
+        link_url: {type: string}
+        read_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+    NotificationToneCounts:
+      type: object
+      required: [all, success, info, warning]
+      properties:
+        all: {type: integer}
+        success: {type: integer}
+        info: {type: integer}
+        warning: {type: integer}
+    NotificationUnreadCountResponse:
+      type: object
+      required: [unread_count]
+      properties:
+        unread_count: {type: integer}
+    NotificationReadResponse:
+      type: object
+      required: [id, read_at]
+      properties:
+        id: {type: string}
+        read_at: {type: string, format: date-time}
+    NotificationReadAllResponse:
+      type: object
+      required: [updated_count, unread_count]
+      properties:
+        updated_count: {type: integer}
+        unread_count: {type: integer}
     PlatformFormsResponse:
       type: object
       additionalProperties: true
@@ -3857,6 +3994,7 @@ components:
                 - 10030
                 - 10050
                 - 10060
+                - 10070
                 - 20040
                 - 20041
                 - 20042

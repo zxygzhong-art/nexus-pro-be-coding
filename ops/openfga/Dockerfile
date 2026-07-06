@@ -2,4 +2,4 @@ ARG OPENFGA_IMAGE=openfga/openfga:latest
 
 FROM ${OPENFGA_IMAGE}
 
-# Keep the upstream entrypoint. docker-compose.yml supplies migrate/run commands.
+# 保留 upstream entrypoint；docker-compose.yml 會提供 migrate/run commands。

@@ -1,17 +1,17 @@
 package service
 
-// MeService resolves the current account profile, permissions, and menu tree.
+// MeService 定義 me 服務的資料結構。
 type MeService struct {
 	*Service
 	store meStore
 }
 
-// Me returns the current-user service facade.
+// Me 處理 me 的服務流程。
 func (c *Service) Me() MeService {
 	return MeService{Service: c, store: c.store}
 }
 
-// Resolve builds the current account profile, grants, capabilities, and menu keys.
+// Resolve 解析對應的服務流程。
 func (c MeService) Resolve(ctx RequestContext) (MeResponse, error) {
 	account, tenant, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -67,7 +67,7 @@ func (c MeService) Resolve(ctx RequestContext) (MeResponse, error) {
 	}, nil
 }
 
-// ListMenus returns the menu tree filtered by the current account permissions.
+// ListMenus 列出 menus 的服務流程。
 func (c MeService) ListMenus(ctx RequestContext) ([]MenuNode, error) {
 	me, err := c.Resolve(ctx)
 	if err != nil {
@@ -80,6 +80,7 @@ func (c MeService) ListMenus(ctx RequestContext) ([]MenuNode, error) {
 	return filterMenus(defaultMenuCatalog, allowed), nil
 }
 
+// menuKeysFromPermissions 處理 menu keys 來源 權限。
 func menuKeysFromPermissions(perms []Permission) []string {
 	keys := make([]string, 0, len(perms))
 	for _, perm := range perms {
@@ -90,6 +91,7 @@ func menuKeysFromPermissions(perms []Permission) []string {
 	return keys
 }
 
+// filterMenus 處理篩選 menus。
 func filterMenus(nodes []MenuNode, allowed map[string]struct{}) []MenuNode {
 	out := make([]MenuNode, 0)
 	for _, node := range nodes {

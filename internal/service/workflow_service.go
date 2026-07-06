@@ -17,18 +17,18 @@ const (
 	workflowFormStatusCancelled = "cancelled"
 )
 
-// WorkflowService implements form template and form instance workflows.
+// WorkflowService 定義流程服務的資料結構。
 type WorkflowService struct {
 	*Service
 	store workflowStore
 }
 
-// Workflow returns the workflow service facade.
+// Workflow 處理流程的服務流程。
 func (c *Service) Workflow() WorkflowService {
 	return WorkflowService{Service: c, store: c.store}
 }
 
-// ListFormTemplates returns form templates visible to the current account.
+// ListFormTemplates 列出表單範本的服務流程。
 func (c WorkflowService) ListFormTemplates(ctx RequestContext) ([]FormTemplate, error) {
 	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceType("form_template"), ActionRead, ""); err != nil {
 		return nil, err
@@ -36,7 +36,7 @@ func (c WorkflowService) ListFormTemplates(ctx RequestContext) ([]FormTemplate, 
 	return c.store.ListFormTemplates(goContext(ctx), ctx.TenantID)
 }
 
-// ListFormTemplatePage returns paginated form templates.
+// ListFormTemplatePage 列出表單範本分頁的服務流程。
 func (c WorkflowService) ListFormTemplatePage(ctx RequestContext, page PageRequest) (PageResponse[FormTemplate], error) {
 	items, err := c.ListFormTemplates(ctx)
 	if err != nil {
@@ -46,7 +46,7 @@ func (c WorkflowService) ListFormTemplatePage(ctx RequestContext, page PageReque
 	return utils.PageResponse(items, page), nil
 }
 
-// CreateFormTemplate creates a reusable workflow form template.
+// CreateFormTemplate 建立表單範本的服務流程。
 func (c WorkflowService) CreateFormTemplate(ctx RequestContext, input CreateFormTemplateInput) (FormTemplate, error) {
 	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceType("form_template"), ActionCreate, ""); err != nil {
 		return FormTemplate{}, err
@@ -76,7 +76,7 @@ func (c WorkflowService) CreateFormTemplate(ctx RequestContext, input CreateForm
 	return tpl, nil
 }
 
-// ListFormInstancePage returns submitted workflow forms after permission and ownership filters.
+// ListFormInstancePage 列出表單實例分頁的服務流程。
 func (c WorkflowService) ListFormInstancePage(ctx RequestContext, query FormInstanceQuery, page PageRequest) (PageResponse[FormInstance], error) {
 	account, decision, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
 	if err != nil {
@@ -97,7 +97,7 @@ func (c WorkflowService) ListFormInstancePage(ctx RequestContext, query FormInst
 	return utils.PageResponseFromStore(items, total, page), nil
 }
 
-// ReviewQueue groups workflow forms into the notification page review buckets.
+// ReviewQueue 處理審核佇列的服務流程。
 func (c WorkflowService) ReviewQueue(ctx RequestContext) (WorkflowReviewQueueResponse, error) {
 	items, account, err := c.listFormInstances(ctx, FormInstanceQuery{})
 	if err != nil {
@@ -140,7 +140,7 @@ func (c WorkflowService) ReviewQueue(ctx RequestContext) (WorkflowReviewQueueRes
 	return out, nil
 }
 
-// SaveFormDraft creates a draft form instance for the current account.
+// SaveFormDraft 儲存表單草稿的服務流程。
 func (c WorkflowService) SaveFormDraft(ctx RequestContext, input SaveFormDraftInput) (FormInstance, error) {
 	templateKey := strings.TrimSpace(input.TemplateKey)
 	account, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionSubmit, "")
@@ -183,7 +183,7 @@ func (c WorkflowService) SaveFormDraft(ctx RequestContext, input SaveFormDraftIn
 	return instance, nil
 }
 
-// UpdateFormDraft updates an existing draft owned by the current account or visible to an admin.
+// UpdateFormDraft 更新表單草稿的服務流程。
 func (c WorkflowService) UpdateFormDraft(ctx RequestContext, id string, input UpdateFormDraftInput) (FormInstance, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -242,7 +242,7 @@ func (c WorkflowService) UpdateFormDraft(ctx RequestContext, id string, input Up
 	return instance, nil
 }
 
-// DeleteFormDraft removes an existing draft after ownership and status checks.
+// DeleteFormDraft 刪除表單草稿的服務流程。
 func (c WorkflowService) DeleteFormDraft(ctx RequestContext, id string) (FormInstance, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -289,7 +289,7 @@ func (c WorkflowService) DeleteFormDraft(ctx RequestContext, id string) (FormIns
 	return deleted, nil
 }
 
-// SubmitForm creates a submitted instance from a template key or submits an existing draft id.
+// SubmitForm 提交表單的服務流程。
 func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (FormInstance, error) {
 	idOrTemplateKey := strings.TrimSpace(input.TemplateKey)
 	if idOrTemplateKey == "" {
@@ -303,7 +303,7 @@ func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (
 	return c.submitNewForm(ctx, idOrTemplateKey, input.Payload)
 }
 
-// submitNewForm creates a submitted form instance for the current account.
+// submitNewForm 提交 new 表單的服務流程。
 func (c WorkflowService) submitNewForm(ctx RequestContext, templateKey string, payload map[string]any) (FormInstance, error) {
 	account, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionSubmit, "")
 	if err != nil {
@@ -342,7 +342,7 @@ func (c WorkflowService) submitNewForm(ctx RequestContext, templateKey string, p
 	return instance, nil
 }
 
-// submitExistingDraft turns a saved draft into a submitted workflow instance.
+// submitExistingDraft 提交 existing 草稿的服務流程。
 func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payload map[string]any) (FormInstance, error) {
 	account, decision, authzAudit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppWorkflow, ResourceType: ResourceFormInstance, Action: ActionSubmit},
@@ -393,7 +393,7 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 	return instance, nil
 }
 
-// ApproveForm marks a submitted form instance as approved.
+// ApproveForm 核准表單的服務流程。
 func (c WorkflowService) ApproveForm(ctx RequestContext, id string, _ ApproveFormInput) (FormInstance, error) {
 	instance, err := c.reviewForm(ctx, id, "approve", "approved", "")
 	if err != nil {
@@ -406,7 +406,7 @@ func (c WorkflowService) ApproveForm(ctx RequestContext, id string, _ ApproveFor
 	return instance, nil
 }
 
-// RejectForm marks a submitted form instance as rejected and records reviewer metadata.
+// RejectForm 駁回表單的服務流程。
 func (c WorkflowService) RejectForm(ctx RequestContext, id string, input RejectFormInput) (FormInstance, error) {
 	instance, err := c.reviewForm(ctx, id, "reject", "rejected", input.Reason)
 	if err != nil {
@@ -419,7 +419,7 @@ func (c WorkflowService) RejectForm(ctx RequestContext, id string, input RejectF
 	return instance, nil
 }
 
-// ReturnForm sends a submitted form back to the applicant for revision.
+// ReturnForm 退回表單的服務流程。
 func (c WorkflowService) ReturnForm(ctx RequestContext, id string, input ReturnFormInput) (FormInstance, error) {
 	instance, err := c.reviewForm(ctx, id, "return", "rejected", input.Reason)
 	if err != nil {
@@ -432,7 +432,7 @@ func (c WorkflowService) ReturnForm(ctx RequestContext, id string, input ReturnF
 	return instance, nil
 }
 
-// CancelForm lets an applicant cancel a submitted workflow form before approval.
+// CancelForm 取消表單的服務流程。
 func (c WorkflowService) CancelForm(ctx RequestContext, id string, input CancelFormInput) (FormInstance, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -497,7 +497,7 @@ func (c WorkflowService) CancelForm(ctx RequestContext, id string, input CancelF
 	return instance, nil
 }
 
-// DuplicateForm copies an existing visible form into a new draft for the current account.
+// DuplicateForm 處理 duplicate 表單的服務流程。
 func (c WorkflowService) DuplicateForm(ctx RequestContext, id string) (FormInstance, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -543,7 +543,7 @@ func (c WorkflowService) DuplicateForm(ctx RequestContext, id string) (FormInsta
 	return next, nil
 }
 
-// ExportForm returns a JSON file payload for a visible form instance.
+// ExportForm 匯出表單的服務流程。
 func (c WorkflowService) ExportForm(ctx RequestContext, id string) (ExportedFormFile, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -589,7 +589,7 @@ func (c WorkflowService) ExportForm(ctx RequestContext, id string) (ExportedForm
 	}, nil
 }
 
-// BulkReviewForms applies one notification-page review action to multiple form instances.
+// BulkReviewForms 處理批次審核表單的服務流程。
 func (c WorkflowService) BulkReviewForms(ctx RequestContext, input BulkReviewFormsInput) (BulkReviewFormsResponse, error) {
 	action, status, err := normalizeBulkReviewAction(input.Action)
 	if err != nil {
@@ -623,7 +623,7 @@ func (c WorkflowService) BulkReviewForms(ctx RequestContext, input BulkReviewFor
 	return BulkReviewFormsResponse{Results: results}, nil
 }
 
-// reviewForm updates one form review state and records the visible review timeline entry.
+// reviewForm 處理審核表單的服務流程。
 func (c WorkflowService) reviewForm(ctx RequestContext, id string, kind string, status string, comment string) (FormInstance, error) {
 	action := ActionUpdate
 	if kind == "approve" {
@@ -689,6 +689,7 @@ func (c WorkflowService) reviewForm(ctx RequestContext, id string, kind string, 
 	return instance, nil
 }
 
+// normalizeBulkReviewAction 正規化批次審核 action。
 func normalizeBulkReviewAction(action string) (string, string, error) {
 	switch strings.TrimSpace(strings.ToLower(action)) {
 	case "approve", "approved":
@@ -702,6 +703,7 @@ func normalizeBulkReviewAction(action string) (string, string, error) {
 	}
 }
 
+// listFormInstances 列出表單實例的服務流程。
 func (c WorkflowService) listFormInstances(ctx RequestContext, query FormInstanceQuery) ([]FormInstance, Account, error) {
 	account, decision, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
 	if err != nil {
@@ -718,6 +720,7 @@ func (c WorkflowService) listFormInstances(ctx RequestContext, query FormInstanc
 	return items, account, nil
 }
 
+// normalizeFormInstanceQuery 正規化表單實例查詢。
 func normalizeFormInstanceQuery(query FormInstanceQuery, account Account, decision CheckResult) (FormInstanceQuery, error) {
 	query.Status = strings.TrimSpace(strings.ToLower(query.Status))
 	query.TemplateID = strings.TrimSpace(query.TemplateID)
@@ -741,6 +744,7 @@ func normalizeFormInstanceQuery(query FormInstanceQuery, account Account, decisi
 	return query, nil
 }
 
+// normalizeFormInstanceStatusFilter 正規化表單實例狀態篩選。
 func normalizeFormInstanceStatusFilter(status string) (string, error) {
 	switch strings.TrimSpace(strings.ToLower(status)) {
 	case "", "all":
@@ -760,6 +764,7 @@ func normalizeFormInstanceStatusFilter(status string) (string, error) {
 	}
 }
 
+// sortFormInstances 排序表單實例。
 func sortFormInstances(items []FormInstance, sortKey string) {
 	if strings.TrimSpace(sortKey) == "" {
 		sortKey = "submitted_at_desc"
@@ -781,6 +786,7 @@ func sortFormInstances(items []FormInstance, sortKey string) {
 	})
 }
 
+// formTemplateMap 處理表單範本 map 的服務流程。
 func (c WorkflowService) formTemplateMap(ctx RequestContext) (map[string]FormTemplate, error) {
 	templates, err := c.store.ListFormTemplates(goContext(ctx), ctx.TenantID)
 	if err != nil {
@@ -793,6 +799,7 @@ func (c WorkflowService) formTemplateMap(ctx RequestContext) (map[string]FormTem
 	return out, nil
 }
 
+// accountMap 處理帳號 map 的服務流程。
 func (c WorkflowService) accountMap(ctx RequestContext) (map[string]Account, error) {
 	accounts, err := c.store.ListAccounts(goContext(ctx), ctx.TenantID)
 	if err != nil {
@@ -805,6 +812,7 @@ func (c WorkflowService) accountMap(ctx RequestContext) (map[string]Account, err
 	return out, nil
 }
 
+// employeeByAccountMap 處理員工 by 帳號 map 的服務流程。
 func (c WorkflowService) employeeByAccountMap(ctx RequestContext) (map[string]Employee, error) {
 	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
 	if err != nil {
@@ -819,6 +827,7 @@ func (c WorkflowService) employeeByAccountMap(ctx RequestContext) (map[string]Em
 	return out, nil
 }
 
+// reviewItem 處理審核項目的服務流程。
 func (c WorkflowService) reviewItem(item FormInstance, template FormTemplate, account Account, employee Employee) WorkflowReviewItem {
 	status := normalizeWorkflowStatus(item.Status)
 	title := utils.FirstNonEmpty(template.Name, template.Key, item.TemplateID, "审批申请")
@@ -835,10 +844,12 @@ func (c WorkflowService) reviewItem(item FormInstance, template FormTemplate, ac
 	}
 }
 
+// normalizeWorkflowStatus 正規化流程狀態。
 func normalizeWorkflowStatus(status string) string {
 	return strings.TrimSpace(strings.ToLower(status))
 }
 
+// workflowReviewStatus 處理流程審核狀態。
 func workflowReviewStatus(status string) string {
 	switch status {
 	case "approved":
@@ -852,6 +863,7 @@ func workflowReviewStatus(status string) string {
 	}
 }
 
+// workflowReviewStatusText 處理流程審核狀態 text。
 func workflowReviewStatusText(status string) string {
 	switch status {
 	case "approved":
@@ -865,6 +877,7 @@ func workflowReviewStatusText(status string) string {
 	}
 }
 
+// workflowApplicantLabel 處理流程 applicant label。
 func workflowApplicantLabel(account Account, employee Employee) string {
 	name := utils.FirstNonEmpty(employee.Name, account.DisplayName, account.Email, account.ID)
 	if employee.OrgUnitID != "" {
@@ -873,6 +886,7 @@ func workflowApplicantLabel(account Account, employee Employee) string {
 	return name
 }
 
+// workflowReviewDescription 處理流程審核 description。
 func workflowReviewDescription(payload map[string]any) string {
 	if text := strings.TrimSpace(stringFromAny(payload["desc"])); text != "" {
 		return text
@@ -892,6 +906,7 @@ func workflowReviewDescription(payload map[string]any) string {
 	return "表单已提交，等待审批处理。"
 }
 
+// workflowReviewTime 處理流程審核時間。
 func workflowReviewTime(item FormInstance) string {
 	t := item.SubmittedAt
 	if !item.UpdatedAt.IsZero() && !normalizeWorkflowPendingStatus(item.Status) {
@@ -903,6 +918,7 @@ func workflowReviewTime(item FormInstance) string {
 	return t.UTC().Format("2006/01/02 15:04")
 }
 
+// normalizeWorkflowPendingStatus 正規化流程 pending 狀態。
 func normalizeWorkflowPendingStatus(status string) bool {
 	switch normalizeWorkflowStatus(status) {
 	case "approved", "rejected", "cancelled", "canceled":
@@ -912,6 +928,7 @@ func normalizeWorkflowPendingStatus(status string) bool {
 	}
 }
 
+// workflowReviewLog 處理流程審核 log。
 func workflowReviewLog(payload map[string]any) []WorkflowReviewLogItem {
 	review, _ := payload["_review"].(map[string]any)
 	if len(review) == 0 {
@@ -930,6 +947,7 @@ func workflowReviewLog(payload map[string]any) []WorkflowReviewLogItem {
 	}}
 }
 
+// workflowPayloadMentionsAccount 處理流程 payload mentions 帳號。
 func workflowPayloadMentionsAccount(payload map[string]any, accountID string) bool {
 	if accountID == "" {
 		return false
@@ -942,6 +960,7 @@ func workflowPayloadMentionsAccount(payload map[string]any, accountID string) bo
 	return false
 }
 
+// stringSliceContains 處理字串 slice contains。
 func stringSliceContains(value any, target string) bool {
 	switch v := value.(type) {
 	case []string:
@@ -960,6 +979,7 @@ func stringSliceContains(value any, target string) bool {
 	return false
 }
 
+// withWorkflowReview 附加流程審核。
 func withWorkflowReview(payload map[string]any, kind, accountID, comment string, at time.Time) map[string]any {
 	next := utils.CopyStringMap(payload)
 	if next == nil {
@@ -974,7 +994,7 @@ func withWorkflowReview(payload map[string]any, kind, accountID, comment string,
 	return next
 }
 
-// workflowPayload returns a non-nil copy so stored instances never share caller maps.
+// workflowPayload 處理流程 payload。
 func workflowPayload(payload map[string]any) map[string]any {
 	next := utils.CopyStringMap(payload)
 	if next == nil {
@@ -983,7 +1003,7 @@ func workflowPayload(payload map[string]any) map[string]any {
 	return next
 }
 
-// requireFormInstanceVisible enforces self-scoped workflow decisions on direct instance operations.
+// requireFormInstanceVisible 處理 require 表單實例可見。
 func requireFormInstanceVisible(instance FormInstance, account Account, decision CheckResult) error {
 	switch decision.Scope {
 	case ScopeSelf, ScopeOwn:
@@ -994,7 +1014,7 @@ func requireFormInstanceVisible(instance FormInstance, account Account, decision
 	return nil
 }
 
-// safeWorkflowFileName keeps exported form filenames portable across common filesystems.
+// safeWorkflowFileName 處理 safe 流程檔案名稱。
 func safeWorkflowFileName(value string) string {
 	value = strings.TrimSpace(strings.ToLower(value))
 	if value == "" {

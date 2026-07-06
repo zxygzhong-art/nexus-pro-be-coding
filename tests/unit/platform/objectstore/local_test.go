@@ -9,6 +9,7 @@ import (
 	"nexus-pro-be/internal/platform/objectstore"
 )
 
+// TestLocalPutObjectWritesInsideRoot 驗證本機 put 物件 writes inside root。
 func TestLocalPutObjectWritesInsideRoot(t *testing.T) {
 	root := t.TempDir()
 	store, err := objectstore.NewLocal(root)
@@ -29,6 +30,7 @@ func TestLocalPutObjectWritesInsideRoot(t *testing.T) {
 	}
 }
 
+// TestLocalPutObjectRejectsEscapingKeys 驗證本機 put 物件 rejects escaping keys。
 func TestLocalPutObjectRejectsEscapingKeys(t *testing.T) {
 	store, err := objectstore.NewLocal(t.TempDir())
 	if err != nil {

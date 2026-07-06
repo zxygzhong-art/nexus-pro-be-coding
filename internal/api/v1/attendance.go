@@ -10,13 +10,13 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
-// AttendanceCtrl wires leave endpoints to the attendance service facade.
+// AttendanceCtrl 定義考勤 ctrl 的資料結構。
 type AttendanceCtrl struct {
 	routes routeBinder
 	svc    service.AttendanceFacade
 }
 
-// RegisterRoutes attaches attendance and leave routes to the v1 route group.
+// RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c AttendanceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	attendance := router.Group("/attendance")
 	attendance.GET("/leave-balances", c.routes.Handle("attendance.leave", "read", c.listLeaveBalances))
@@ -41,6 +41,7 @@ func (c AttendanceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	attendance.POST("/corrections/:id/reject", c.routes.Handle("attendance.correction", "update", c.rejectCorrection, ResourceID(PathParamID)))
 }
 
+// listLeaveBalances 處理請假 balances 的 HTTP 請求。
 func (c AttendanceCtrl) listLeaveBalances(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -54,6 +55,7 @@ func (c AttendanceCtrl) listLeaveBalances(w http.ResponseWriter, r *http.Request
 	return nil
 }
 
+// listLeaveRequests 處理請假請求的 HTTP 請求。
 func (c AttendanceCtrl) listLeaveRequests(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -67,6 +69,7 @@ func (c AttendanceCtrl) listLeaveRequests(w http.ResponseWriter, r *http.Request
 	return nil
 }
 
+// createLeaveRequest 處理請假請求的 HTTP 請求。
 func (c AttendanceCtrl) createLeaveRequest(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateLeaveRequestInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -80,7 +83,7 @@ func (c AttendanceCtrl) createLeaveRequest(w http.ResponseWriter, r *http.Reques
 	return nil
 }
 
-// currentPolicy returns the current attendance policy projection.
+// currentPolicy 處理目前政策的 HTTP 請求。
 func (c AttendanceCtrl) currentPolicy(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.CurrentAttendancePolicy(ctx)
 	if err != nil {
@@ -90,7 +93,7 @@ func (c AttendanceCtrl) currentPolicy(w http.ResponseWriter, r *http.Request, ct
 	return nil
 }
 
-// updatePolicy persists the tenant attendance policy used by workspace settings.
+// updatePolicy 處理政策的 HTTP 請求。
 func (c AttendanceCtrl) updatePolicy(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.UpdateAttendancePolicyInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -104,6 +107,7 @@ func (c AttendanceCtrl) updatePolicy(w http.ResponseWriter, r *http.Request, ctx
 	return nil
 }
 
+// listWorksites 處理 worksites 的 HTTP 請求。
 func (c AttendanceCtrl) listWorksites(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -117,6 +121,7 @@ func (c AttendanceCtrl) listWorksites(w http.ResponseWriter, r *http.Request, ct
 	return nil
 }
 
+// createWorksite 處理工作地點的 HTTP 請求。
 func (c AttendanceCtrl) createWorksite(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateAttendanceWorksiteInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -130,6 +135,7 @@ func (c AttendanceCtrl) createWorksite(w http.ResponseWriter, r *http.Request, c
 	return nil
 }
 
+// updateWorksite 處理工作地點的 HTTP 請求。
 func (c AttendanceCtrl) updateWorksite(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.UpdateAttendanceWorksiteInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -143,6 +149,7 @@ func (c AttendanceCtrl) updateWorksite(w http.ResponseWriter, r *http.Request, c
 	return nil
 }
 
+// listShifts 處理 shifts 的 HTTP 請求。
 func (c AttendanceCtrl) listShifts(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -156,6 +163,7 @@ func (c AttendanceCtrl) listShifts(w http.ResponseWriter, r *http.Request, ctx d
 	return nil
 }
 
+// createShift 處理班別的 HTTP 請求。
 func (c AttendanceCtrl) createShift(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateAttendanceShiftInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -169,6 +177,7 @@ func (c AttendanceCtrl) createShift(w http.ResponseWriter, r *http.Request, ctx 
 	return nil
 }
 
+// updateShift 處理班別的 HTTP 請求。
 func (c AttendanceCtrl) updateShift(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.UpdateAttendanceShiftInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -182,6 +191,7 @@ func (c AttendanceCtrl) updateShift(w http.ResponseWriter, r *http.Request, ctx 
 	return nil
 }
 
+// listShiftAssignments 處理班別指派的 HTTP 請求。
 func (c AttendanceCtrl) listShiftAssignments(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -195,6 +205,7 @@ func (c AttendanceCtrl) listShiftAssignments(w http.ResponseWriter, r *http.Requ
 	return nil
 }
 
+// createShiftAssignment 處理班別指派的 HTTP 請求。
 func (c AttendanceCtrl) createShiftAssignment(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateAttendanceShiftAssignmentInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -208,6 +219,7 @@ func (c AttendanceCtrl) createShiftAssignment(w http.ResponseWriter, r *http.Req
 	return nil
 }
 
+// clockStatus 處理打卡狀態的 HTTP 請求。
 func (c AttendanceCtrl) clockStatus(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.AttendanceClockStatus(ctx)
 	if err != nil {
@@ -217,6 +229,7 @@ func (c AttendanceCtrl) clockStatus(w http.ResponseWriter, r *http.Request, ctx 
 	return nil
 }
 
+// listClockRecords 處理打卡 records 的 HTTP 請求。
 func (c AttendanceCtrl) listClockRecords(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -230,6 +243,7 @@ func (c AttendanceCtrl) listClockRecords(w http.ResponseWriter, r *http.Request,
 	return nil
 }
 
+// createClockRecord 處理打卡 record 的 HTTP 請求。
 func (c AttendanceCtrl) createClockRecord(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateAttendanceClockRecordInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -243,6 +257,7 @@ func (c AttendanceCtrl) createClockRecord(w http.ResponseWriter, r *http.Request
 	return nil
 }
 
+// listCorrections 處理 corrections 的 HTTP 請求。
 func (c AttendanceCtrl) listCorrections(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -256,6 +271,7 @@ func (c AttendanceCtrl) listCorrections(w http.ResponseWriter, r *http.Request, 
 	return nil
 }
 
+// createCorrection 處理 correction 的 HTTP 請求。
 func (c AttendanceCtrl) createCorrection(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateAttendanceCorrectionInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -269,6 +285,7 @@ func (c AttendanceCtrl) createCorrection(w http.ResponseWriter, r *http.Request,
 	return nil
 }
 
+// approveCorrection 處理 correction 的 HTTP 請求。
 func (c AttendanceCtrl) approveCorrection(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.ReviewAttendanceCorrectionInput
 	if _, err := readOptionalJSON(w, r, &input); err != nil {
@@ -282,6 +299,7 @@ func (c AttendanceCtrl) approveCorrection(w http.ResponseWriter, r *http.Request
 	return nil
 }
 
+// rejectCorrection 處理 correction 的 HTTP 請求。
 func (c AttendanceCtrl) rejectCorrection(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.ReviewAttendanceCorrectionInput
 	if _, err := readOptionalJSON(w, r, &input); err != nil {
@@ -295,6 +313,7 @@ func (c AttendanceCtrl) rejectCorrection(w http.ResponseWriter, r *http.Request,
 	return nil
 }
 
+// attendanceClockRecordQueryFromRequest 處理考勤打卡 record 查詢 來源 請求。
 func attendanceClockRecordQueryFromRequest(r *http.Request) domain.AttendanceClockRecordQuery {
 	values := r.URL.Query()
 	return domain.AttendanceClockRecordQuery{
@@ -307,6 +326,7 @@ func attendanceClockRecordQueryFromRequest(r *http.Request) domain.AttendanceClo
 	}
 }
 
+// attendanceCorrectionQueryFromRequest 處理考勤 correction 查詢 來源 請求。
 func attendanceCorrectionQueryFromRequest(r *http.Request) domain.AttendanceCorrectionQuery {
 	values := r.URL.Query()
 	return domain.AttendanceCorrectionQuery{

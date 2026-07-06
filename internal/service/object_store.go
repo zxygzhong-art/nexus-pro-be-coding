@@ -5,7 +5,7 @@ import (
 	"sync"
 )
 
-// ObjectStore writes binary payloads behind a stable key.
+// ObjectStore 定義物件儲存層的行為契約。
 type ObjectStore interface {
 	PutObject(ctx context.Context, key string, contentType string, data []byte) error
 }
@@ -19,25 +19,25 @@ type objectDeleter interface {
 	DeleteObject(ctx context.Context, key string) error
 }
 
-// StoredObject is the in-memory representation of an object-store item.
+// StoredObject 定義 stored 物件的資料結構。
 type StoredObject struct {
 	Key         string
 	ContentType string
 	Data        []byte
 }
 
-// MemoryObjectStore is a process-local object store used when no external store is configured.
+// MemoryObjectStore 定義 memory 物件儲存層的資料結構。
 type MemoryObjectStore struct {
 	mu      sync.RWMutex
 	objects map[string]StoredObject
 }
 
-// NewMemoryObjectStore creates an empty process-local object store.
+// NewMemoryObjectStore 建立 memory 物件儲存層。
 func NewMemoryObjectStore() *MemoryObjectStore {
 	return &MemoryObjectStore{objects: map[string]StoredObject{}}
 }
 
-// PutObject stores a defensive copy of the object bytes.
+// PutObject 從儲存層處理 put 物件。
 func (s *MemoryObjectStore) PutObject(_ context.Context, key string, contentType string, data []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -47,17 +47,17 @@ func (s *MemoryObjectStore) PutObject(_ context.Context, key string, contentType
 	return nil
 }
 
-// Provider identifies this process-local store in import metadata.
+// Provider 從儲存層處理提供者。
 func (s *MemoryObjectStore) Provider() string {
 	return "memory"
 }
 
-// Bucket returns an empty bucket because memory storage is process-local.
+// Bucket 從儲存層處理 bucket。
 func (s *MemoryObjectStore) Bucket() string {
 	return ""
 }
 
-// GetObject returns a defensive copy of an object when present.
+// GetObject 從儲存層取得物件。
 func (s *MemoryObjectStore) GetObject(key string) (StoredObject, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -71,7 +71,7 @@ func (s *MemoryObjectStore) GetObject(key string) (StoredObject, bool) {
 	return object, true
 }
 
-// DeleteObject removes an object by key.
+// DeleteObject 從儲存層刪除物件。
 func (s *MemoryObjectStore) DeleteObject(_ context.Context, key string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -79,6 +79,7 @@ func (s *MemoryObjectStore) DeleteObject(_ context.Context, key string) error {
 	return nil
 }
 
+// firstObjectStore 取得第一個物件儲存層。
 func firstObjectStore(store ObjectStore) ObjectStore {
 	if store != nil {
 		return store
@@ -86,6 +87,7 @@ func firstObjectStore(store ObjectStore) ObjectStore {
 	return NewMemoryObjectStore()
 }
 
+// objectStoreProvider 處理物件儲存層提供者。
 func objectStoreProvider(store ObjectStore) string {
 	if described, ok := store.(objectStoreDescriptor); ok {
 		return described.Provider()
@@ -93,6 +95,7 @@ func objectStoreProvider(store ObjectStore) string {
 	return ""
 }
 
+// objectStoreBucket 處理物件儲存層 bucket。
 func objectStoreBucket(store ObjectStore) string {
 	if described, ok := store.(objectStoreDescriptor); ok {
 		return described.Bucket()

@@ -9,19 +9,20 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
-// AgentCtrl wires agent run endpoints to the agent service facade.
+// AgentCtrl 定義 agent ctrl 的資料結構。
 type AgentCtrl struct {
 	routes routeBinder
 	svc    service.AgentFacade
 }
 
-// RegisterRoutes attaches agent run routes to the v1 route group.
+// RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c AgentCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	agents := router.Group("/agents")
 	agents.GET("/runs", c.routes.Handle("agent.run", "read", c.listAgentRuns))
 	agents.POST("/runs", c.routes.Handle("agent.run", "create", c.createAgentRun))
 }
 
+// listAgentRuns 處理 agent 執行紀錄的 HTTP 請求。
 func (c AgentCtrl) listAgentRuns(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -35,6 +36,7 @@ func (c AgentCtrl) listAgentRuns(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
+// createAgentRun 處理 agent 執行的 HTTP 請求。
 func (c AgentCtrl) createAgentRun(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateAgentRunInput
 	if err := readJSON(w, r, &input); err != nil {

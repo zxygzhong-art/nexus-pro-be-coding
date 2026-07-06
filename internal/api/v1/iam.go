@@ -9,13 +9,13 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
-// IAMCtrl wires IAM management endpoints to the IAM service facade.
+// IAMCtrl 定義 IAM ctrl 的資料結構。
 type IAMCtrl struct {
 	routes routeBinder
 	svc    service.IAMFacade
 }
 
-// RegisterRoutes attaches IAM management routes to the v1 route group.
+// RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c IAMCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	iam := router.Group("/iam")
 	iam.GET("/permissions", c.routes.Handle("iam.permission", "read", c.listPermissions))
@@ -34,6 +34,7 @@ func (c IAMCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	iam.POST("/assumable-roles/:id/assume", c.routes.Handle("iam.assumable_role", "assume", c.assumeRole, ResourceID(PathParamID)))
 }
 
+// listPermissions 處理權限的 HTTP 請求。
 func (c IAMCtrl) listPermissions(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -47,6 +48,7 @@ func (c IAMCtrl) listPermissions(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
+// listUserGroups 處理使用者群組的 HTTP 請求。
 func (c IAMCtrl) listUserGroups(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -60,6 +62,7 @@ func (c IAMCtrl) listUserGroups(w http.ResponseWriter, r *http.Request, ctx doma
 	return nil
 }
 
+// createUserGroup 處理使用者群組的 HTTP 請求。
 func (c IAMCtrl) createUserGroup(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateUserGroupInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -73,6 +76,7 @@ func (c IAMCtrl) createUserGroup(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
+// listPermissionSets 處理權限集合的 HTTP 請求。
 func (c IAMCtrl) listPermissionSets(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -86,6 +90,7 @@ func (c IAMCtrl) listPermissionSets(w http.ResponseWriter, r *http.Request, ctx 
 	return nil
 }
 
+// createPermissionSet 處理權限集合的 HTTP 請求。
 func (c IAMCtrl) createPermissionSet(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreatePermissionSetInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -99,6 +104,7 @@ func (c IAMCtrl) createPermissionSet(w http.ResponseWriter, r *http.Request, ctx
 	return nil
 }
 
+// listPermissionSetAssignments 處理權限集合指派的 HTTP 請求。
 func (c IAMCtrl) listPermissionSetAssignments(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -112,6 +118,7 @@ func (c IAMCtrl) listPermissionSetAssignments(w http.ResponseWriter, r *http.Req
 	return nil
 }
 
+// createPermissionSetAssignment 處理權限集合指派的 HTTP 請求。
 func (c IAMCtrl) createPermissionSetAssignment(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreatePermissionSetAssignmentInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -125,6 +132,7 @@ func (c IAMCtrl) createPermissionSetAssignment(w http.ResponseWriter, r *http.Re
 	return nil
 }
 
+// listDataScopes 處理資料範圍的 HTTP 請求。
 func (c IAMCtrl) listDataScopes(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -138,6 +146,7 @@ func (c IAMCtrl) listDataScopes(w http.ResponseWriter, r *http.Request, ctx doma
 	return nil
 }
 
+// createDataScope 處理資料範圍的 HTTP 請求。
 func (c IAMCtrl) createDataScope(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateDataScopeInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -151,6 +160,7 @@ func (c IAMCtrl) createDataScope(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
+// listFieldPolicies 處理欄位政策的 HTTP 請求。
 func (c IAMCtrl) listFieldPolicies(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -164,6 +174,7 @@ func (c IAMCtrl) listFieldPolicies(w http.ResponseWriter, r *http.Request, ctx d
 	return nil
 }
 
+// createFieldPolicy 處理欄位政策的 HTTP 請求。
 func (c IAMCtrl) createFieldPolicy(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateFieldPolicyInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -177,6 +188,7 @@ func (c IAMCtrl) createFieldPolicy(w http.ResponseWriter, r *http.Request, ctx d
 	return nil
 }
 
+// listAssumableRoles 處理 assumable 角色的 HTTP 請求。
 func (c IAMCtrl) listAssumableRoles(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -190,6 +202,7 @@ func (c IAMCtrl) listAssumableRoles(w http.ResponseWriter, r *http.Request, ctx 
 	return nil
 }
 
+// createAssumableRole 處理 assumable 角色的 HTTP 請求。
 func (c IAMCtrl) createAssumableRole(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateAssumableRoleInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -203,6 +216,7 @@ func (c IAMCtrl) createAssumableRole(w http.ResponseWriter, r *http.Request, ctx
 	return nil
 }
 
+// assumeRole 處理角色的 HTTP 請求。
 func (c IAMCtrl) assumeRole(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.AssumeRoleInput
 	if _, err := readOptionalJSON(w, r, &input); err != nil {

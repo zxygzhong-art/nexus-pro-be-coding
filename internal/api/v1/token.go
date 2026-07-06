@@ -7,15 +7,15 @@ import (
 	platformauth "nexus-pro-be/internal/platform/auth"
 )
 
-// TokenContext is the authenticated principal extracted from a trusted token.
+// TokenContext 表示 token context。
 type TokenContext = domain.AuthenticatedPrincipal
 
-// TokenResolver resolves trusted identity from an HTTP request.
+// TokenResolver 表示 token resolver。
 type TokenResolver = platformauth.TokenResolver
 
 type noTokenResolver struct{}
 
-// Resolve reports that no authenticated token was present.
+// Resolve 解析 token 並回傳可信身分。
 func (noTokenResolver) Resolve(*http.Request) (TokenContext, bool, error) {
 	return TokenContext{}, false, nil
 }

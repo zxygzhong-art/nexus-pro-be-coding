@@ -11,6 +11,7 @@ import (
 	"nexus-pro-be/internal/repository/memory"
 )
 
+// TestNextEmployeeNoIncrementsAcrossCalls 驗證 next 員工 no increments across calls。
 func TestNextEmployeeNoIncrementsAcrossCalls(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()
@@ -37,6 +38,7 @@ func TestNextEmployeeNoIncrementsAcrossCalls(t *testing.T) {
 	}
 }
 
+// TestListEmployeePageByQueryMatchesMemoryFiltering 驗證員工分頁 by 查詢 matches memory filtering。
 func TestListEmployeePageByQueryMatchesMemoryFiltering(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()
@@ -81,6 +83,7 @@ func TestListEmployeePageByQueryMatchesMemoryFiltering(t *testing.T) {
 	}
 }
 
+// TestWithTenantTransactionCommitsAndRollsBack 驗證租戶 transaction commits and rolls back。
 func TestWithTenantTransactionCommitsAndRollsBack(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()
@@ -110,6 +113,7 @@ func TestWithTenantTransactionCommitsAndRollsBack(t *testing.T) {
 	}
 }
 
+// TestWithTenantTransactionRollsBackPanic 驗證租戶 transaction rolls back panic。
 func TestWithTenantTransactionRollsBackPanic(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()
@@ -132,6 +136,7 @@ func TestWithTenantTransactionRollsBackPanic(t *testing.T) {
 	})
 }
 
+// TestAttendanceClockRecordAcceptedUniqueInvariant 驗證考勤打卡 record accepted unique invariant。
 func TestAttendanceClockRecordAcceptedUniqueInvariant(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()
@@ -153,6 +158,7 @@ func TestAttendanceClockRecordAcceptedUniqueInvariant(t *testing.T) {
 	}
 }
 
+// TestPlatformTaskStoreScopesRecordsByAccount 驗證平台任務儲存層範圍 records by 帳號。
 func TestPlatformTaskStoreScopesRecordsByAccount(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()
@@ -213,6 +219,7 @@ func TestPlatformTaskStoreScopesRecordsByAccount(t *testing.T) {
 	}
 }
 
+// TestUserIdentityLookupAndList 驗證使用者身分 lookup and 列表。
 func TestUserIdentityLookupAndList(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()

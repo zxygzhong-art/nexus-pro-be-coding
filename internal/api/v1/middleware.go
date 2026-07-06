@@ -10,6 +10,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
+// recovery 處理 recovery。
 func (a *API) recovery() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		defer func() {
@@ -46,6 +47,7 @@ func (a *API) recovery() gin.HandlerFunc {
 	}
 }
 
+// ginHandle 處理 gin handle。
 func (a *API) ginHandle(resource, action string, next HandlerFunc, authz routeAuthz) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		for _, param := range authz.pathParams {
@@ -72,6 +74,7 @@ func (a *API) ginHandle(resource, action string, next HandlerFunc, authz routeAu
 	}
 }
 
+// requestLogger 處理請求 logger。
 func (a *API) requestLogger() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		start := time.Now()
