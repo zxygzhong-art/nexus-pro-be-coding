@@ -427,7 +427,7 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 				ID:        utils.NewID("ft"),
 				TenantID:  ctx.TenantID,
 				Key:       "leave-request",
-				Name:      "请假申请",
+				Name:      "請假申請單",
 				Schema:    map[string]any{"type": "object"},
 				CreatedAt: tx.Now(),
 			}
@@ -1060,7 +1060,7 @@ func (c AttendanceService) CreateAttendanceCorrection(ctx RequestContext, input 
 	}
 	var correction AttendanceCorrectionRequest
 	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
-		template, ok, err := tx.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, "attendance-correction")
+		template, ok, err := tx.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, "punch-fix")
 		if err != nil {
 			return err
 		}
@@ -1068,8 +1068,8 @@ func (c AttendanceService) CreateAttendanceCorrection(ctx RequestContext, input 
 			template = FormTemplate{
 				ID:        utils.NewID("ft"),
 				TenantID:  ctx.TenantID,
-				Key:       "attendance-correction",
-				Name:      "补卡申请",
+				Key:       "punch-fix",
+				Name:      "HR-005 補卡單",
 				Schema:    map[string]any{"type": "object"},
 				CreatedAt: tx.Now(),
 			}

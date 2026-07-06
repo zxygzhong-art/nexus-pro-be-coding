@@ -437,6 +437,7 @@ type FormInstance struct {
 	Payload            []byte             `json:"payload"`
 	SubmittedAt        pgtype.Timestamptz `json:"submitted_at"`
 	ApprovedBy         string             `json:"approved_by"`
+	CurrentRunID       string             `json:"current_run_id"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
@@ -671,6 +672,51 @@ type UserIdentity struct {
 	Subject   string             `json:"subject"`
 	Email     string             `json:"email"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkflowAction struct {
+	ID              string             `json:"id"`
+	TenantID        string             `json:"tenant_id"`
+	RunID           string             `json:"run_id"`
+	StageInstanceID string             `json:"stage_instance_id"`
+	AccountID       string             `json:"account_id"`
+	Action          string             `json:"action"`
+	Comment         string             `json:"comment"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type WorkflowRun struct {
+	ID                     string             `json:"id"`
+	TenantID               string             `json:"tenant_id"`
+	FormInstanceID         string             `json:"form_instance_id"`
+	TemplateID             string             `json:"template_id"`
+	Version                int32              `json:"version"`
+	Status                 string             `json:"status"`
+	CurrentStageInstanceID string             `json:"current_stage_instance_id"`
+	StageDefinitionsJson   string             `json:"stage_definitions_json"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
+type WorkflowStageAssignee struct {
+	TenantID        string `json:"tenant_id"`
+	StageInstanceID string `json:"stage_instance_id"`
+	AccountID       string `json:"account_id"`
+	Status          string `json:"status"`
+}
+
+type WorkflowStageInstance struct {
+	ID          string             `json:"id"`
+	TenantID    string             `json:"tenant_id"`
+	RunID       string             `json:"run_id"`
+	StageID     string             `json:"stage_id"`
+	StageType   string             `json:"stage_type"`
+	Label       string             `json:"label"`
+	Status      string             `json:"status"`
+	Sequence    int32              `json:"sequence"`
+	Result      []byte             `json:"result"`
+	StartedAt   pgtype.Timestamptz `json:"started_at"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
 }
 
 type Workspace struct {

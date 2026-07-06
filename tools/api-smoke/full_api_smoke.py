@@ -1065,7 +1065,7 @@ def workflow_cases() -> list[Case]:
             lambda c: "/v1/workflows/forms/" + urllib.parse.quote(c["form_instance_id"]) + "/approve",
             200,
             "POST /v1/workflows/forms/{id}/approve",
-            json_body={"approved_by": "acct-admin"},
+            json_body={"reason": "smoke approval"},
             check=expect_data_object,
         ),
     ]

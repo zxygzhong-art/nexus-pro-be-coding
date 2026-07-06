@@ -1,5 +1,7 @@
 package service
 
+import "strings"
+
 // MeService 定義 me 服務的資料結構。
 type MeService struct {
 	*Service
@@ -37,7 +39,7 @@ func (c MeService) Resolve(ctx RequestContext) (MeResponse, error) {
 			return MeResponse{}, err
 		}
 		if ok {
-			emp := v
+			emp := c.enrichEmployeeProfile(ctx, v)
 			employee = &emp
 		}
 	}
@@ -112,43 +114,43 @@ var defaultMenuCatalog = []MenuNode{
 	{Key: "workbench", Label: "工作台", Path: "/"},
 	{
 		Key:   "hr",
-		Label: "HR 主数据",
-		Path:  "/hr",
+		Label: "HR 主資料",
+		Path:  "/workspace",
 		Children: []MenuNode{
-			{Key: "hr.employees", Label: "员工", Path: "/hr/employees"},
-			{Key: "hr.org_units", Label: "组织", Path: "/org/units"},
+			{Key: "hr.employees", Label: "員工", Path: "/workspace/employees"},
+			{Key: "hr.org_units", Label: "組織", Path: "/workspace/organization"},
 			{
 				Key:   "attendance",
 				Label: "假勤",
-				Path:  "/attendance",
+				Path:  "/workspace/attendance",
 				Children: []MenuNode{
-					{Key: "attendance.clock", Label: "上下班打卡", Path: "/attendance/clock"},
-					{Key: "attendance.corrections", Label: "补卡申请", Path: "/attendance/corrections"},
-					{Key: "attendance.leave", Label: "请假申请", Path: "/attendance/leave-requests"},
-					{Key: "attendance.worksites", Label: "办公地点", Path: "/attendance/worksites"},
-					{Key: "attendance.shifts", Label: "班次规则", Path: "/attendance/shifts"},
-					{Key: "attendance.shift_assignments", Label: "员工排班", Path: "/attendance/shift-assignments"},
+					{Key: "attendance.clock", Label: "上下班打卡", Path: "/workspace/clock"},
+					{Key: "attendance.corrections", Label: "補卡申請", Path: "/workspace/clock"},
+					{Key: "attendance.leave", Label: "請假申請", Path: "/workspace/leave-policy"},
+					{Key: "attendance.worksites", Label: "辦公地點", Path: "/workspace/leave-policy"},
+					{Key: "attendance.shifts", Label: "班次規則", Path: "/workspace/leave-policy"},
+					{Key: "attendance.shift_assignments", Label: "員工排班", Path: "/workspace/leave-policy"},
 				},
 			},
 		},
 	},
 	{
 		Key:   "workflow",
-		Label: "表单审批",
-		Path:  "/workflows",
+		Label: "表單審批",
+		Path:  "/workspace/forms",
 		Children: []MenuNode{
-			{Key: "workflow.forms", Label: "动态表单", Path: "/forms/templates"},
-			{Key: "workflow.instances", Label: "流程实例", Path: "/workflows/forms"},
+			{Key: "workflow.forms", Label: "動態表單", Path: "/workspace/forms"},
+			{Key: "workflow.instances", Label: "流程實例", Path: "/workspace/forms"},
 		},
 	},
 	{
 		Key:   "iam",
-		Label: "权限中心",
-		Path:  "/iam",
+		Label: "權限中心",
+		Path:  "/workspace/admins",
 		Children: []MenuNode{
-			{Key: "iam.user_groups", Label: "用户组", Path: "/iam/user-groups"},
-			{Key: "iam.permission_sets", Label: "权限集合", Path: "/iam/permission-sets"},
-			{Key: "iam.assumable_roles", Label: "可承担身份", Path: "/iam/assumable-roles"},
+			{Key: "iam.user_groups", Label: "使用者群組", Path: "/iam/user-groups"},
+			{Key: "iam.permission_sets", Label: "權限集合", Path: "/workspace/admins"},
+			{Key: "iam.assumable_roles", Label: "可承擔身分", Path: "/iam/assumable-roles"},
 		},
 	},
 	{
@@ -161,7 +163,30 @@ var defaultMenuCatalog = []MenuNode{
 	},
 	{
 		Key:   "audit",
-		Label: "审计中心",
-		Path:  "/audit-logs",
+		Label: "審計中心",
+		Path:  "/workspace/audit-log",
 	},
+}
+
+func (c MeService) enrichEmployeeProfile(ctx RequestContext, employee Employee) Employee {
+	if employee.EmploymentInfo == nil {
+		employee.EmploymentInfo = map[string]any{}
+	}
+	if employee.Position != "" {
+		employee.EmploymentInfo["job_title"] = employee.Position
+		employee.EmploymentInfo["position"] = employee.Position
+	}
+	orgUnitID := strings.TrimSpace(employee.OrgUnitID)
+	if orgUnitID == "" && employee.EmploymentInfo != nil {
+		if value, ok := employee.EmploymentInfo["org_unit_id"].(string); ok {
+			orgUnitID = strings.TrimSpace(value)
+		}
+	}
+	if orgUnitID != "" {
+		if ou, ok, err := c.store.GetOrgUnit(goContext(ctx), ctx.TenantID, orgUnitID); err == nil && ok {
+			employee.EmploymentInfo["department_name"] = ou.Name
+			employee.EmploymentInfo["org_unit_name"] = ou.Name
+		}
+	}
+	return employee
 }

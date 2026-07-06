@@ -759,28 +759,16 @@ func TestHighRiskRouteCanDisableApprovalHeader(t *testing.T) {
 	}
 }
 
-// TestAuditLogRouteRequiresApprovalConfirmation 驗證稽核 log 路由 requires 核准 confirmation。
-func TestAuditLogRouteRequiresApprovalConfirmation(t *testing.T) {
+// TestAuditLogRouteAllowsReadWithoutApprovalConfirmation 驗證稽核 log 只讀列表無需額外核准。
+func TestAuditLogRouteAllowsReadWithoutApprovalConfirmation(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodGet, "/v1/audit-logs", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for audit log route without confirmation, got %d: %s", rec.Code, rec.Body.String())
-	}
-	errPayload := decodeError(t, rec.Body.Bytes())
-	if errPayload.ReasonCode != "approval_required" {
-		t.Fatalf("expected approval_required reason code, got %+v", errPayload)
-	}
-
-	confirmedReq := httptest.NewRequest(http.MethodGet, "/v1/audit-logs", nil)
-	confirmedReq.Header.Set("X-Approval-Confirmed", "true")
-	confirmedRec := httptest.NewRecorder()
-	handler.ServeHTTP(confirmedRec, confirmedReq)
-	if confirmedRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for confirmed audit log route, got %d: %s", confirmedRec.Code, confirmedRec.Body.String())
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for audit log route without confirmation, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -1232,7 +1220,8 @@ func TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes(t *testing.T) {
 		t.Fatalf("expected 201 for workflow form submit, got %d: %s", submitRec.Code, submitRec.Body.String())
 	}
 	form := decodeData[domain.FormInstance](t, submitRec.Body.Bytes())
-	approveReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/"+form.ID+"/approve", nil)
+	approveReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/"+form.ID+"/approve", strings.NewReader(`{"reason":"frontend approval"}`))
+	approveReq.Header.Set("Content-Type", "application/json")
 	approveRec := httptest.NewRecorder()
 	handler.ServeHTTP(approveRec, approveReq)
 	if approveRec.Code != http.StatusOK {
@@ -1241,6 +1230,10 @@ func TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes(t *testing.T) {
 	approved := decodeData[domain.FormInstance](t, approveRec.Body.Bytes())
 	if approved.Status != "approved" || approved.ApprovedBy != "acct-admin" {
 		t.Fatalf("expected approved form instance, got %+v", approved)
+	}
+	review, _ := approved.Payload["_review"].(map[string]any)
+	if review["type"] != "approve" || review["comment"] != "frontend approval" {
+		t.Fatalf("expected approve reason in workflow review payload, got %+v", approved.Payload)
 	}
 
 	forgedApproveReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/"+form.ID+"/approve", strings.NewReader(`{"approved_by":"acct-other"}`))

@@ -294,7 +294,7 @@ func populateDemoFixture(store repository.Store) {
 		ID:               "ug-hr",
 		TenantID:         "demo",
 		Name:             "HR Team",
-		Description:      "人力资源管理组",
+		Description:      "人力資源管理組",
 		MemberAccountIDs: []string{"acct-admin"},
 		PermissionSetIDs: []string{"ps-admin"},
 		CreatedAt:        now,
@@ -577,7 +577,7 @@ func populateDemoFixture(store repository.Store) {
 		ID:        "ou-hq",
 		TenantID:  "demo",
 		Code:      "HQ",
-		Name:      "总部",
+		Name:      "總部",
 		Path:      []string{"ou-hq"},
 		CreatedAt: now,
 	})
@@ -585,7 +585,7 @@ func populateDemoFixture(store repository.Store) {
 		ID:        "ou-ops",
 		TenantID:  "demo",
 		Code:      "OPS",
-		Name:      "运营中心",
+		Name:      "營運中心",
 		ParentID:  "ou-hq",
 		Path:      []string{"ou-hq", "ou-ops"},
 		CreatedAt: now.Add(time.Minute),
@@ -594,7 +594,7 @@ func populateDemoFixture(store repository.Store) {
 		ID:        "ou-hr",
 		TenantID:  "demo",
 		Code:      "HR",
-		Name:      "人力资源部",
+		Name:      "人力資源部",
 		ParentID:  "ou-hq",
 		Path:      []string{"ou-hq", "ou-hr"},
 		CreatedAt: now.Add(2 * time.Minute),
@@ -603,7 +603,7 @@ func populateDemoFixture(store repository.Store) {
 		ID:        "ou-finance",
 		TenantID:  "demo",
 		Code:      "FIN",
-		Name:      "财务中心",
+		Name:      "財務中心",
 		ParentID:  "ou-hq",
 		Path:      []string{"ou-hq", "ou-finance"},
 		CreatedAt: now.Add(3 * time.Minute),
@@ -612,7 +612,7 @@ func populateDemoFixture(store repository.Store) {
 		ID:        "ou-sales",
 		TenantID:  "demo",
 		Code:      "SALES",
-		Name:      "销售中心",
+		Name:      "銷售中心",
 		ParentID:  "ou-hq",
 		Path:      []string{"ou-hq", "ou-sales"},
 		CreatedAt: now.Add(4 * time.Minute),
@@ -913,6 +913,7 @@ func populateDemoFixture(store repository.Store) {
 		"emp-workflow-approver",
 		"emp-security-admin",
 		"emp-insights-viewer",
+		"emp-zxy1",
 	} {
 		_ = store.UpsertAttendanceShiftAssignment(ctx, AttendanceShiftAssignment{
 			ID:            "asa-" + employeeID,
@@ -1024,8 +1025,8 @@ func populateDemoFixture(store repository.Store) {
 		ID:          "ft-leave",
 		TenantID:    "demo",
 		Key:         "leave-request",
-		Name:        "请假申请",
-		Description: "请假与审批流程模板",
+		Name:        "請假申請單",
+		Description: "請假與審批流程模板",
 		Schema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -1034,32 +1035,26 @@ func populateDemoFixture(store repository.Store) {
 				"end_at":     map[string]any{"type": "string"},
 				"hours":      map[string]any{"type": "number"},
 			},
+			"workspace_design": map[string]any{
+				"enabled": true,
+				"stages": []map[string]any{{
+					"id":     "stage-admin",
+					"type":   "approver",
+					"label":  "審核",
+					"detail": "由管理員審核",
+					"config": map[string]any{"account_ids": []any{"acct-zxy1", "acct-admin"}},
+				}},
+			},
 		},
 		CreatedAt: now,
 	})
 	populateFixturePlatformFormTemplates(ctx, store, now)
 	_ = store.UpsertFormTemplate(ctx, FormTemplate{
-		ID:          "ft-attendance-correction",
-		TenantID:    "demo",
-		Key:         "attendance-correction",
-		Name:        "补卡申请",
-		Description: "员工补卡审批流程模板",
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"direction":            map[string]any{"type": "string"},
-				"requested_clocked_at": map[string]any{"type": "string"},
-				"reason":               map[string]any{"type": "string"},
-			},
-		},
-		CreatedAt: now.Add(time.Minute),
-	})
-	_ = store.UpsertFormTemplate(ctx, FormTemplate{
 		ID:          "ft-proof",
 		TenantID:    "demo",
 		Key:         "employment-certificate",
-		Name:        "在职证明",
-		Description: "在职证明模板",
+		Name:        "在職證明",
+		Description: "在職證明模板",
 		Schema:      map[string]any{"type": "object"},
 		CreatedAt:   now.Add(time.Minute),
 	})
@@ -1067,17 +1062,17 @@ func populateDemoFixture(store repository.Store) {
 	_ = store.UpsertKnowledgeArticle(ctx, KnowledgeArticle{
 		ID:        "kb-leave-policy",
 		TenantID:  "demo",
-		Title:     "请假政策",
-		Content:   "员工请假需提前发起申请，余额不足时需要直属主管和HR确认。年假优先扣减年假余额，支持按小时申请。",
-		Tags:      []string{"请假", "假勤", "policy"},
+		Title:     "請假政策",
+		Content:   "員工請假需提前發起申請，餘額不足時需要直屬主管和 HR 確認。年假優先扣減年假餘額，支援按小時申請。",
+		Tags:      []string{"請假", "假勤", "policy"},
 		CreatedAt: now,
 	})
 	_ = store.UpsertKnowledgeArticle(ctx, KnowledgeArticle{
 		ID:        "kb-hr-handbook",
 		TenantID:  "demo",
-		Title:     "员工手册",
-		Content:   "员工手册说明组织、考勤、审批与审计规则，所有高危操作需要二次确认。",
-		Tags:      []string{"手册", "审批", "audit"},
+		Title:     "員工手冊",
+		Content:   "員工手冊說明組織、考勤、審批與審計規則，所有高危操作需要二次確認。",
+		Tags:      []string{"手冊", "審批", "audit"},
 		CreatedAt: now.Add(time.Minute),
 	})
 

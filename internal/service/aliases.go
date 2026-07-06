@@ -117,6 +117,7 @@ type (
 	FormInstance                       = domain.FormInstance
 	FormInstanceQuery                  = domain.FormInstanceQuery
 	WorkflowReviewLogItem              = domain.WorkflowReviewLogItem
+	WorkflowFormStateResponse          = domain.WorkflowFormStateResponse
 	WorkflowReviewItem                 = domain.WorkflowReviewItem
 	WorkflowReviewQueueResponse        = domain.WorkflowReviewQueueResponse
 	BulkReviewFormResult               = domain.BulkReviewFormResult

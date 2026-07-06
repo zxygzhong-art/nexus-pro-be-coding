@@ -258,10 +258,11 @@ type PlatformFormBuilderField struct {
 
 // PlatformFormBuilderStage 定義平台表單 builder stage 的資料結構。
 type PlatformFormBuilderStage struct {
-	ID     string `json:"id"`
-	Type   string `json:"type"`
-	Label  string `json:"label"`
-	Detail string `json:"detail"`
+	ID     string                 `json:"id"`
+	Type   string                 `json:"type"`
+	Label  string                 `json:"label"`
+	Detail string                 `json:"detail"`
+	Config map[string]any         `json:"config,omitempty"`
 }
 
 // PlatformWorkspaceResponse 定義平台工作區回應的資料結構。

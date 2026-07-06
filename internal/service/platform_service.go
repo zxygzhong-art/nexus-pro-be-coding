@@ -68,8 +68,12 @@ func (c PlatformService) Forms(ctx RequestContext) (PlatformFormsResponse, error
 	if err != nil {
 		return PlatformFormsResponse{}, err
 	}
+	categories, err := c.platformFormCategories(ctx)
+	if err != nil {
+		return PlatformFormsResponse{}, err
+	}
 	return PlatformFormsResponse{
-		Categories:   platformFormColumns(),
+		Categories:   categories,
 		Applications: applications,
 		Drafts:       drafts,
 		AIMessages: []PlatformChatMessage{
@@ -404,6 +408,11 @@ func (c PlatformService) UpdateWorkspaceOrganizationManager(ctx RequestContext, 
 	return c.WorkspaceOrganization(ctx)
 }
 
+// WorkspaceAdmins 處理工作區管理員設定讀取的服務流程。
+func (c PlatformService) WorkspaceAdmins(ctx RequestContext) (WorkspaceAdminsResponse, error) {
+	return c.Service.Workspace().WorkspaceAdmins(ctx)
+}
+
 // CreateWorkspaceAdmin 建立工作區管理員的服務流程。
 func (c PlatformService) CreateWorkspaceAdmin(ctx RequestContext, input CreateWorkspaceAdminInput) (WorkspaceAdminsResponse, error) {
 	account, employee, err := c.workspaceAdminTarget(ctx, input.EmployeeID)
@@ -429,6 +438,11 @@ func (c PlatformService) DeleteWorkspaceAdmin(ctx RequestContext, displayID stri
 		return WorkspaceAdminsResponse{}, err
 	}
 	return c.saveWorkspaceAdminPermissions(ctx, account, employee, map[string]string{}, ActionDelete, "platform.workspace.admin.delete")
+}
+
+// WorkspaceFormDesign 處理工作區表單 design 讀取的服務流程。
+func (c PlatformService) WorkspaceFormDesign(ctx RequestContext) (PlatformFormDesign, error) {
+	return c.formDesign(ctx)
 }
 
 // CreateWorkspaceFormDesign 建立工作區表單 design 的服務流程。
@@ -1497,9 +1511,9 @@ func platformFormBuilderContract() PlatformFormBuilderContract {
 			{ID: "field-reason", Type: "textarea", Label: "申請原因", Placeholder: "請描述原因", Required: true},
 		},
 		Stages: []PlatformFormBuilderStage{
-			{ID: "stage-manager", Type: "approver", Label: "直屬主管", Detail: "依員工主管關係自動帶入"},
-			{ID: "stage-hr", Type: "approver", Label: "HR 複核", Detail: "高風險表單需 HR 確認"},
-			{ID: "stage-notify", Type: "notify", Label: "通知申請人", Detail: "簽核完成後發送通知"},
+			{ID: "stage-manager", Type: "approver", Label: "直屬主管", Detail: "依員工主管關係自動帶入", Config: map[string]any{"role": "manager"}},
+			{ID: "stage-hr", Type: "approver", Label: "HR 複核", Detail: "高風險表單需 HR 確認", Config: map[string]any{"role": "hr"}},
+			{ID: "stage-notify", Type: "notify", Label: "通知申請人", Detail: "簽核完成後發送通知", Config: map[string]any{"role": "applicant"}},
 		},
 	}
 }
@@ -1736,6 +1750,71 @@ func workspaceAdminSafeID(value string) string {
 	return value
 }
 
+// platformFormCategories 依已啟用範本組裝表單分類；無範本時回退靜態清單。
+func (c PlatformService) platformFormCategories(ctx RequestContext) ([]PlatformFormColumn, error) {
+	templates, err := c.store.ListFormTemplates(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	return platformFormColumnsFromTemplates(templates), nil
+}
+
+// platformFormColumnsFromTemplates 將啟用範本分組為表單入口欄位。
+func platformFormColumnsFromTemplates(templates []FormTemplate) []PlatformFormColumn {
+	enabled := make([]FormTemplate, 0, len(templates))
+	for _, template := range templates {
+		if platformTemplateDeleted(template.Schema) || !platformTemplateEnabled(template.Schema) {
+			continue
+		}
+		if strings.TrimSpace(template.Key) == "" {
+			continue
+		}
+		enabled = append(enabled, template)
+	}
+	if len(enabled) == 0 {
+		return platformFormColumns()
+	}
+	grouped := map[string][]PlatformFormItem{}
+	for _, template := range enabled {
+		category := platformTemplateCategory(template)
+		title := strings.TrimSpace(template.Name)
+		if title == "" {
+			title = template.Key
+		}
+		grouped[category] = append(grouped[category], PlatformFormItem{
+			ID:    template.Key,
+			Emoji: platformTemplateIcon(template),
+			Title: title,
+			Desc:  platformTemplateDesc(template),
+		})
+	}
+	ordered := make([]PlatformFormColumn, 0, len(grouped))
+	seen := map[string]struct{}{}
+	for _, column := range platformFormColumns() {
+		items, ok := grouped[column.Title]
+		if !ok || len(items) == 0 {
+			continue
+		}
+		ordered = append(ordered, PlatformFormColumn{
+			Title: column.Title,
+			Emoji: column.Emoji,
+			Items: items,
+		})
+		seen[column.Title] = struct{}{}
+	}
+	for category, items := range grouped {
+		if _, ok := seen[category]; ok {
+			continue
+		}
+		ordered = append(ordered, PlatformFormColumn{
+			Title: category,
+			Emoji: "📋",
+			Items: items,
+		})
+	}
+	return ordered
+}
+
 // platformFormColumns 處理平台表單 columns。
 func platformFormColumns() []PlatformFormColumn {
 	return []PlatformFormColumn{
@@ -1816,6 +1895,8 @@ func platformFormStatus(status string) string {
 		return "approved"
 	case "rejected":
 		return "rejected"
+	case "returned":
+		return "returned"
 	case "cancelled", "canceled":
 		return "cancelled"
 	default:

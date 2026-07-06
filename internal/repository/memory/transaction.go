@@ -51,6 +51,10 @@ func (s *Store) cloneLocked() *Store {
 		attendanceCorrections:  cloneNestedMap(s.attendanceCorrections, copyAttendanceCorrectionRequest),
 		formTemplates:          cloneNestedMap(s.formTemplates, copyFormTemplate),
 		formInstances:          cloneNestedMap(s.formInstances, copyFormInstance),
+		workflowRuns:           cloneNestedMap(s.workflowRuns, copyWorkflowRun),
+		workflowStageInstances: cloneNestedMap(s.workflowStageInstances, copyWorkflowStageInstance),
+		workflowStageAssignees: cloneNestedMap(s.workflowStageAssignees, copyWorkflowStageAssignee),
+		workflowActions:        cloneSliceMap(s.workflowActions, copyWorkflowAction),
 		knowledgeArticles:      cloneNestedMap(s.knowledgeArticles, copyKnowledgeArticle),
 		platformTaskItems:      cloneNestedMap(s.platformTaskItems, copyPlatformTaskRecordItem),
 		platformTaskTodos:      cloneNestedMap(s.platformTaskTodos, copyPlatformTaskTodoRecord),
@@ -92,6 +96,10 @@ func (s *Store) replaceLocked(next *Store) {
 	s.attendanceCorrections = next.attendanceCorrections
 	s.formTemplates = next.formTemplates
 	s.formInstances = next.formInstances
+	s.workflowRuns = next.workflowRuns
+	s.workflowStageInstances = next.workflowStageInstances
+	s.workflowStageAssignees = next.workflowStageAssignees
+	s.workflowActions = next.workflowActions
 	s.knowledgeArticles = next.knowledgeArticles
 	s.platformTaskItems = next.platformTaskItems
 	s.platformTaskTodos = next.platformTaskTodos

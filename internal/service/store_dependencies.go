@@ -4,6 +4,7 @@ import "nexus-pro-be/internal/repository"
 
 type meStore interface {
 	repository.EmployeeStore
+	repository.OrgStore
 }
 
 type identityStore interface {
@@ -34,6 +35,7 @@ type workflowStore interface {
 	repository.AccountStore
 	repository.EmployeeStore
 	repository.WorkflowStore
+	repository.NotificationStore
 }
 
 type agentStore interface {

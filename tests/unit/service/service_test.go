@@ -2104,10 +2104,27 @@ func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 		CreatedAt:              now,
 	})
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{
-		ID:        "emp-self",
+		ID:                "emp-self",
+		TenantID:          "tenant-1",
+		Name:              "Self User",
+		AccountID:         "acct-self",
+		ManagerEmployeeID: "emp-manager",
+		Status:            "active",
+		CreatedAt:         now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:          "acct-manager",
+		TenantID:    "tenant-1",
+		DisplayName: "Manager User",
+		EmployeeID:  "emp-manager",
+		Status:      "active",
+		CreatedAt:   now,
+	})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:        "emp-manager",
 		TenantID:  "tenant-1",
-		Name:      "Self User",
-		AccountID: "acct-self",
+		Name:      "Manager User",
+		AccountID: "acct-manager",
 		Status:    "active",
 		CreatedAt: now,
 	})
@@ -2116,6 +2133,7 @@ func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 		TenantID:  "tenant-1",
 		Key:       "leave-request",
 		Name:      "请假申请单",
+		Schema:    workflowEnabledTemplateSchema(),
 		CreatedAt: now,
 	})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
@@ -2155,7 +2173,7 @@ func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if submitted.ID != draft.ID || submitted.Status != "submitted" || submitted.Payload["desc"] != "submitted leave" {
+	if submitted.ID != draft.ID || submitted.Status != "in_review" || submitted.Payload["desc"] != "submitted leave" {
 		t.Fatalf("expected submitted draft, got %+v", submitted)
 	}
 	forms, err = svc.Platform().Forms(ctx)
@@ -2223,12 +2241,15 @@ func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
 		DirectPermissionSetIDs: []string{"ps-workflow-admin"},
 		CreatedAt:              now,
 	})
-	_ = store.UpsertAccount(context.Background(), domain.Account{
-		ID:          "acct-applicant",
-		TenantID:    "tenant-1",
-		DisplayName: "Applicant One",
-		Status:      "active",
-		CreatedAt:   now,
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workflow-applicant",
+		TenantID: "tenant-1",
+		Name:     "Workflow Applicant",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_instance", Action: "submit", Scope: "self"},
+			{Resource: "workflow.form_instance", Action: "read", Scope: "self"},
+		},
+		CreatedAt: now,
 	})
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{
 		ID:        "emp-applicant",
@@ -2238,27 +2259,32 @@ func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
 		Status:    "active",
 		CreatedAt: now,
 	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-applicant",
+		TenantID:               "tenant-1",
+		DisplayName:            "Applicant One",
+		EmployeeID:             "emp-applicant",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workflow-applicant"},
+		CreatedAt:              now,
+	})
 	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
 		ID:        "ft-leave",
 		TenantID:  "tenant-1",
 		Key:       "leave-request",
 		Name:      "请假申请单",
+		Schema:    workflowEnabledTemplateSchema("acct-admin"),
 		CreatedAt: now,
 	})
-	_ = store.UpsertFormInstance(context.Background(), domain.FormInstance{
-		ID:                 "fi-leave",
-		TenantID:           "tenant-1",
-		TemplateID:         "ft-leave",
-		ApplicantAccountID: "acct-applicant",
-		Status:             "submitted",
-		Payload: map[string]any{
-			"desc":               "申请一天特休",
-			"notify_account_ids": []any{"acct-admin"},
-		},
-		SubmittedAt: now,
-		UpdatedAt:   now,
-	})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	applicantCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-applicant"}
+	submitted, err := svc.Workflow().SubmitForm(applicantCtx, domain.SubmitFormInput{
+		TemplateKey: "leave-request",
+		Payload:     map[string]any{"desc": "申请一天特休", "notify_account_ids": []any{"acct-admin"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
 	queue, err := svc.Workflow().ReviewQueue(ctx)
@@ -2272,7 +2298,7 @@ func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
 		t.Fatalf("unexpected review projection: %+v", queue.PendingReview[0])
 	}
 
-	rejected, err := svc.Workflow().RejectForm(ctx, "fi-leave", domain.RejectFormInput{Reason: "missing attachment"})
+	rejected, err := svc.Workflow().RejectForm(ctx, submitted.ID, domain.RejectFormInput{Reason: "missing attachment"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2347,6 +2373,7 @@ func TestWorkflowBulkReviewFormsReturnsPerItemResults(t *testing.T) {
 	approved, err := svc.Workflow().BulkReviewForms(ctx, domain.BulkReviewFormsInput{
 		FormInstanceIDs: []string{"fi-approve", "fi-missing"},
 		Action:          "approve",
+		Reason:          "looks good",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2360,6 +2387,10 @@ func TestWorkflowBulkReviewFormsReturnsPerItemResults(t *testing.T) {
 	}
 	if approveInstance.Status != "approved" || approveInstance.ApprovedBy != "acct-admin" {
 		t.Fatalf("expected approved instance, got %+v", approveInstance)
+	}
+	review, _ := approveInstance.Payload["_review"].(map[string]any)
+	if review["type"] != "approve" || review["comment"] != "looks good" {
+		t.Fatalf("expected approve review metadata, got payload=%+v", approveInstance.Payload)
 	}
 
 	returned, err := svc.Workflow().BulkReviewForms(ctx, domain.BulkReviewFormsInput{
@@ -2377,8 +2408,8 @@ func TestWorkflowBulkReviewFormsReturnsPerItemResults(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("returned instance lookup failed ok=%v err=%v", ok, err)
 	}
-	review, _ := returnInstance.Payload["_review"].(map[string]any)
-	if returnInstance.Status != "rejected" || review["type"] != "return" || review["comment"] != "please add attachment" {
+	review, _ = returnInstance.Payload["_review"].(map[string]any)
+	if returnInstance.Status != "returned" || review["type"] != "return" || review["comment"] != "please add attachment" {
 		t.Fatalf("expected returned review metadata, got status=%s payload=%+v", returnInstance.Status, returnInstance.Payload)
 	}
 
@@ -2387,8 +2418,147 @@ func TestWorkflowBulkReviewFormsReturnsPerItemResults(t *testing.T) {
 		t.Fatal(err)
 	}
 	review, _ = directReturn.Payload["_review"].(map[string]any)
-	if directReturn.Status != "rejected" || review["type"] != "return" || review["comment"] != "please update approver" {
+	if directReturn.Status != "returned" || review["type"] != "return" || review["comment"] != "please update approver" {
 		t.Fatalf("expected direct return metadata, got status=%s payload=%+v", directReturn.Status, directReturn.Payload)
+	}
+}
+
+// TestWorkflowNotificationsFollowSubmitAndReview 驗證流程提交與審核會寫入系統通知。
+func TestWorkflowNotificationsFollowSubmitAndReview(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workflow-applicant",
+		TenantID: "tenant-1",
+		Name:     "Workflow Applicant",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_instance", Action: "submit", Scope: "self"},
+			{Resource: "workflow.form_instance", Action: "read", Scope: "self"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workflow-admin",
+		TenantID: "tenant-1",
+		Name:     "Workflow Admin",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_instance", Action: "read", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "approve", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-applicant",
+		TenantID:               "tenant-1",
+		DisplayName:            "Applicant One",
+		EmployeeID:             "emp-applicant",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workflow-applicant"},
+		CreatedAt:              now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-admin",
+		TenantID:               "tenant-1",
+		DisplayName:            "Admin Reviewer",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workflow-admin"},
+		CreatedAt:              now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:          "acct-observer",
+		TenantID:    "tenant-1",
+		DisplayName: "Observer",
+		Status:      "active",
+		CreatedAt:   now,
+	})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:        "emp-applicant",
+		TenantID:  "tenant-1",
+		Name:      "Applicant One",
+		AccountID: "acct-applicant",
+		Status:    "active",
+		CreatedAt: now,
+	})
+	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
+		ID:        "ft-general",
+		TenantID:  "tenant-1",
+		Key:       "general",
+		Name:      "通用签呈",
+		Schema:    workflowEnabledTemplateSchema("acct-admin"),
+		CreatedAt: now,
+	})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+
+	submitted, err := svc.Workflow().SubmitForm(
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-applicant"},
+		domain.SubmitFormInput{
+			TemplateKey: "general",
+			Payload: map[string]any{
+				"desc":               "請協助查看附件",
+				"notify_account_ids": []any{"acct-observer", "acct-applicant", "acct-missing"},
+			},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	adminNotifications, err := svc.Notifications().ListNotifications(
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"},
+		domain.NotificationListQuery{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if adminNotifications.UnreadCount != 1 || len(adminNotifications.Items) != 1 {
+		t.Fatalf("expected one approver notification, got %+v", adminNotifications)
+	}
+	if item := adminNotifications.Items[0]; item.StatusText != "待處理" || item.LinkURL != "/notifications?reviewId="+submitted.ID || !strings.Contains(item.Body, "通用签呈") {
+		t.Fatalf("unexpected submit notification: %+v", item)
+	}
+
+	observerNotifications, err := svc.Notifications().ListNotifications(
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-observer"},
+		domain.NotificationListQuery{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if observerNotifications.UnreadCount != 0 || len(observerNotifications.Items) != 0 {
+		t.Fatalf("observer should not receive workflow pending notification, got %+v", observerNotifications)
+	}
+
+	applicantBeforeReview, err := svc.Notifications().ListNotifications(
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-applicant"},
+		domain.NotificationListQuery{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applicantBeforeReview.UnreadCount != 0 || len(applicantBeforeReview.Items) != 0 {
+		t.Fatalf("submit notification should not echo to applicant, got %+v", applicantBeforeReview)
+	}
+
+	if _, err := svc.Workflow().ApproveForm(
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"},
+		submitted.ID,
+		domain.ApproveFormInput{Reason: "looks good"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	applicantAfterReview, err := svc.Notifications().ListNotifications(
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-applicant"},
+		domain.NotificationListQuery{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if applicantAfterReview.UnreadCount != 1 || len(applicantAfterReview.Items) != 1 {
+		t.Fatalf("expected one applicant review-result notification, got %+v", applicantAfterReview)
+	}
+	if item := applicantAfterReview.Items[0]; item.Tone != "success" || item.StatusText != "已核准" || item.LinkURL != "/forms?applicationId="+submitted.ID || !strings.Contains(item.Body, "looks good") {
+		t.Fatalf("unexpected review notification: %+v", item)
 	}
 }
 

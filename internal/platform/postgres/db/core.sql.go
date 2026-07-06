@@ -971,7 +971,7 @@ func (q *Queries) GetEmployeeImportSession(ctx context.Context, arg GetEmployeeI
 }
 
 const getFormInstance = `-- name: GetFormInstance :one
-SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, updated_at FROM form_instances
+SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, updated_at FROM form_instances
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -992,6 +992,7 @@ func (q *Queries) GetFormInstance(ctx context.Context, arg GetFormInstanceParams
 		&i.Payload,
 		&i.SubmittedAt,
 		&i.ApprovedBy,
+		&i.CurrentRunID,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -1273,6 +1274,108 @@ func (q *Queries) GetUserGroup(ctx context.Context, arg GetUserGroupParams) (Use
 		&i.Description,
 		&i.MemberAccountIds,
 		&i.PermissionSetIds,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getWorkflowRun = `-- name: GetWorkflowRun :one
+SELECT id, tenant_id, form_instance_id, template_id, version, status, current_stage_instance_id, stage_definitions_json, created_at, updated_at FROM workflow_runs
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetWorkflowRunParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetWorkflowRun(ctx context.Context, arg GetWorkflowRunParams) (WorkflowRun, error) {
+	row := q.db.QueryRow(ctx, getWorkflowRun, arg.TenantID, arg.ID)
+	var i WorkflowRun
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.FormInstanceID,
+		&i.TemplateID,
+		&i.Version,
+		&i.Status,
+		&i.CurrentStageInstanceID,
+		&i.StageDefinitionsJson,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getWorkflowStageInstance = `-- name: GetWorkflowStageInstance :one
+SELECT id, tenant_id, run_id, stage_id, stage_type, label, status, sequence, result, started_at, completed_at FROM workflow_stage_instances
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetWorkflowStageInstanceParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetWorkflowStageInstance(ctx context.Context, arg GetWorkflowStageInstanceParams) (WorkflowStageInstance, error) {
+	row := q.db.QueryRow(ctx, getWorkflowStageInstance, arg.TenantID, arg.ID)
+	var i WorkflowStageInstance
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.RunID,
+		&i.StageID,
+		&i.StageType,
+		&i.Label,
+		&i.Status,
+		&i.Sequence,
+		&i.Result,
+		&i.StartedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
+const insertWorkflowAction = `-- name: InsertWorkflowAction :one
+INSERT INTO workflow_actions (
+    id, tenant_id, run_id, stage_instance_id, account_id, action, comment, created_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+)
+RETURNING id, tenant_id, run_id, stage_instance_id, account_id, action, comment, created_at
+`
+
+type InsertWorkflowActionParams struct {
+	ID              string             `json:"id"`
+	TenantID        string             `json:"tenant_id"`
+	RunID           string             `json:"run_id"`
+	StageInstanceID string             `json:"stage_instance_id"`
+	AccountID       string             `json:"account_id"`
+	Action          string             `json:"action"`
+	Comment         string             `json:"comment"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) InsertWorkflowAction(ctx context.Context, arg InsertWorkflowActionParams) (WorkflowAction, error) {
+	row := q.db.QueryRow(ctx, insertWorkflowAction,
+		arg.ID,
+		arg.TenantID,
+		arg.RunID,
+		arg.StageInstanceID,
+		arg.AccountID,
+		arg.Action,
+		arg.Comment,
+		arg.CreatedAt,
+	)
+	var i WorkflowAction
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.RunID,
+		&i.StageInstanceID,
+		&i.AccountID,
+		&i.Action,
+		&i.Comment,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -2143,7 +2246,7 @@ func (q *Queries) ListEmployeesFilteredPage(ctx context.Context, arg ListEmploye
 }
 
 const listFormInstancePageByQuery = `-- name: ListFormInstancePageByQuery :many
-SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, updated_at FROM form_instances fi
+SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, updated_at FROM form_instances fi
 WHERE fi.tenant_id = $1
   AND ($2::text = '' OR fi.status = $2)
   AND ($3::text = '' OR fi.template_id = $3)
@@ -2200,6 +2303,7 @@ func (q *Queries) ListFormInstancePageByQuery(ctx context.Context, arg ListFormI
 			&i.Payload,
 			&i.SubmittedAt,
 			&i.ApprovedBy,
+			&i.CurrentRunID,
 			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -2213,7 +2317,7 @@ func (q *Queries) ListFormInstancePageByQuery(ctx context.Context, arg ListFormI
 }
 
 const listFormInstances = `-- name: ListFormInstances :many
-SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, updated_at FROM form_instances
+SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, updated_at FROM form_instances
 WHERE tenant_id = $1
 ORDER BY submitted_at ASC
 `
@@ -2236,6 +2340,7 @@ func (q *Queries) ListFormInstances(ctx context.Context, tenantID string) ([]For
 			&i.Payload,
 			&i.SubmittedAt,
 			&i.ApprovedBy,
+			&i.CurrentRunID,
 			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -2249,7 +2354,7 @@ func (q *Queries) ListFormInstances(ctx context.Context, tenantID string) ([]For
 }
 
 const listFormInstancesByQuery = `-- name: ListFormInstancesByQuery :many
-SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, updated_at FROM form_instances fi
+SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, updated_at FROM form_instances fi
 WHERE fi.tenant_id = $1
   AND ($2::text = '' OR fi.status = $2)
   AND ($3::text = '' OR fi.template_id = $3)
@@ -2295,6 +2400,7 @@ func (q *Queries) ListFormInstancesByQuery(ctx context.Context, arg ListFormInst
 			&i.Payload,
 			&i.SubmittedAt,
 			&i.ApprovedBy,
+			&i.CurrentRunID,
 			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -2640,6 +2746,37 @@ func (q *Queries) ListOutboxEvents(ctx context.Context, tenantID string) ([]Outb
 	return items, nil
 }
 
+const listPendingAssigneeStageInstanceIDs = `-- name: ListPendingAssigneeStageInstanceIDs :many
+SELECT DISTINCT stage_instance_id FROM workflow_stage_assignees
+WHERE tenant_id = $1 AND account_id = $2 AND status = 'pending'
+ORDER BY stage_instance_id ASC
+`
+
+type ListPendingAssigneeStageInstanceIDsParams struct {
+	TenantID  string `json:"tenant_id"`
+	AccountID string `json:"account_id"`
+}
+
+func (q *Queries) ListPendingAssigneeStageInstanceIDs(ctx context.Context, arg ListPendingAssigneeStageInstanceIDsParams) ([]string, error) {
+	rows, err := q.db.Query(ctx, listPendingAssigneeStageInstanceIDs, arg.TenantID, arg.AccountID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []string
+	for rows.Next() {
+		var stage_instance_id string
+		if err := rows.Scan(&stage_instance_id); err != nil {
+			return nil, err
+		}
+		items = append(items, stage_instance_id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPermissionSets = `-- name: ListPermissionSets :many
 SELECT id, tenant_id, name, description, permissions, created_at FROM permission_sets
 WHERE tenant_id = $1
@@ -2805,6 +2942,167 @@ func (q *Queries) ListUserGroups(ctx context.Context, tenantID string) ([]UserGr
 			&i.MemberAccountIds,
 			&i.PermissionSetIds,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkflowActionsByRun = `-- name: ListWorkflowActionsByRun :many
+SELECT id, tenant_id, run_id, stage_instance_id, account_id, action, comment, created_at FROM workflow_actions
+WHERE tenant_id = $1 AND run_id = $2
+ORDER BY created_at ASC
+`
+
+type ListWorkflowActionsByRunParams struct {
+	TenantID string `json:"tenant_id"`
+	RunID    string `json:"run_id"`
+}
+
+func (q *Queries) ListWorkflowActionsByRun(ctx context.Context, arg ListWorkflowActionsByRunParams) ([]WorkflowAction, error) {
+	rows, err := q.db.Query(ctx, listWorkflowActionsByRun, arg.TenantID, arg.RunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkflowAction
+	for rows.Next() {
+		var i WorkflowAction
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.RunID,
+			&i.StageInstanceID,
+			&i.AccountID,
+			&i.Action,
+			&i.Comment,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkflowRunsByFormInstance = `-- name: ListWorkflowRunsByFormInstance :many
+SELECT id, tenant_id, form_instance_id, template_id, version, status, current_stage_instance_id, stage_definitions_json, created_at, updated_at FROM workflow_runs
+WHERE tenant_id = $1 AND form_instance_id = $2
+ORDER BY version ASC, created_at ASC
+`
+
+type ListWorkflowRunsByFormInstanceParams struct {
+	TenantID       string `json:"tenant_id"`
+	FormInstanceID string `json:"form_instance_id"`
+}
+
+func (q *Queries) ListWorkflowRunsByFormInstance(ctx context.Context, arg ListWorkflowRunsByFormInstanceParams) ([]WorkflowRun, error) {
+	rows, err := q.db.Query(ctx, listWorkflowRunsByFormInstance, arg.TenantID, arg.FormInstanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkflowRun
+	for rows.Next() {
+		var i WorkflowRun
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.FormInstanceID,
+			&i.TemplateID,
+			&i.Version,
+			&i.Status,
+			&i.CurrentStageInstanceID,
+			&i.StageDefinitionsJson,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkflowStageAssignees = `-- name: ListWorkflowStageAssignees :many
+SELECT tenant_id, stage_instance_id, account_id, status FROM workflow_stage_assignees
+WHERE tenant_id = $1 AND stage_instance_id = $2
+ORDER BY account_id ASC
+`
+
+type ListWorkflowStageAssigneesParams struct {
+	TenantID        string `json:"tenant_id"`
+	StageInstanceID string `json:"stage_instance_id"`
+}
+
+func (q *Queries) ListWorkflowStageAssignees(ctx context.Context, arg ListWorkflowStageAssigneesParams) ([]WorkflowStageAssignee, error) {
+	rows, err := q.db.Query(ctx, listWorkflowStageAssignees, arg.TenantID, arg.StageInstanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkflowStageAssignee
+	for rows.Next() {
+		var i WorkflowStageAssignee
+		if err := rows.Scan(
+			&i.TenantID,
+			&i.StageInstanceID,
+			&i.AccountID,
+			&i.Status,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listWorkflowStageInstancesByRun = `-- name: ListWorkflowStageInstancesByRun :many
+SELECT id, tenant_id, run_id, stage_id, stage_type, label, status, sequence, result, started_at, completed_at FROM workflow_stage_instances
+WHERE tenant_id = $1 AND run_id = $2
+ORDER BY sequence ASC
+`
+
+type ListWorkflowStageInstancesByRunParams struct {
+	TenantID string `json:"tenant_id"`
+	RunID    string `json:"run_id"`
+}
+
+func (q *Queries) ListWorkflowStageInstancesByRun(ctx context.Context, arg ListWorkflowStageInstancesByRunParams) ([]WorkflowStageInstance, error) {
+	rows, err := q.db.Query(ctx, listWorkflowStageInstancesByRun, arg.TenantID, arg.RunID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []WorkflowStageInstance
+	for rows.Next() {
+		var i WorkflowStageInstance
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.RunID,
+			&i.StageID,
+			&i.StageType,
+			&i.Label,
+			&i.Status,
+			&i.Sequence,
+			&i.Result,
+			&i.StartedAt,
+			&i.CompletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -3753,9 +4051,9 @@ func (q *Queries) UpsertEmployeeImportSession(ctx context.Context, arg UpsertEmp
 const upsertFormInstance = `-- name: UpsertFormInstance :one
 INSERT INTO form_instances (
     id, tenant_id, template_id, applicant_account_id, status,
-    payload, submitted_at, approved_by, updated_at
+    payload, submitted_at, approved_by, current_run_id, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9
+    $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -3765,8 +4063,9 @@ ON CONFLICT (id) DO UPDATE SET
     payload = EXCLUDED.payload,
     submitted_at = EXCLUDED.submitted_at,
     approved_by = EXCLUDED.approved_by,
+    current_run_id = EXCLUDED.current_run_id,
     updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, updated_at
+RETURNING id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, updated_at
 `
 
 type UpsertFormInstanceParams struct {
@@ -3778,6 +4077,7 @@ type UpsertFormInstanceParams struct {
 	Column6            []byte             `json:"column_6"`
 	SubmittedAt        pgtype.Timestamptz `json:"submitted_at"`
 	ApprovedBy         string             `json:"approved_by"`
+	CurrentRunID       string             `json:"current_run_id"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
@@ -3791,6 +4091,7 @@ func (q *Queries) UpsertFormInstance(ctx context.Context, arg UpsertFormInstance
 		arg.Column6,
 		arg.SubmittedAt,
 		arg.ApprovedBy,
+		arg.CurrentRunID,
 		arg.UpdatedAt,
 	)
 	var i FormInstance
@@ -3803,6 +4104,7 @@ func (q *Queries) UpsertFormInstance(ctx context.Context, arg UpsertFormInstance
 		&i.Payload,
 		&i.SubmittedAt,
 		&i.ApprovedBy,
+		&i.CurrentRunID,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -4302,6 +4604,161 @@ func (q *Queries) UpsertUserGroup(ctx context.Context, arg UpsertUserGroupParams
 		&i.MemberAccountIds,
 		&i.PermissionSetIds,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertWorkflowRun = `-- name: UpsertWorkflowRun :one
+INSERT INTO workflow_runs (
+    id, tenant_id, form_instance_id, template_id, version, status,
+    current_stage_instance_id, stage_definitions_json, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    form_instance_id = EXCLUDED.form_instance_id,
+    template_id = EXCLUDED.template_id,
+    version = EXCLUDED.version,
+    status = EXCLUDED.status,
+    current_stage_instance_id = EXCLUDED.current_stage_instance_id,
+    stage_definitions_json = EXCLUDED.stage_definitions_json,
+    created_at = EXCLUDED.created_at,
+    updated_at = EXCLUDED.updated_at
+RETURNING id, tenant_id, form_instance_id, template_id, version, status, current_stage_instance_id, stage_definitions_json, created_at, updated_at
+`
+
+type UpsertWorkflowRunParams struct {
+	ID                     string             `json:"id"`
+	TenantID               string             `json:"tenant_id"`
+	FormInstanceID         string             `json:"form_instance_id"`
+	TemplateID             string             `json:"template_id"`
+	Version                int32              `json:"version"`
+	Status                 string             `json:"status"`
+	CurrentStageInstanceID string             `json:"current_stage_instance_id"`
+	StageDefinitionsJson   string             `json:"stage_definitions_json"`
+	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertWorkflowRun(ctx context.Context, arg UpsertWorkflowRunParams) (WorkflowRun, error) {
+	row := q.db.QueryRow(ctx, upsertWorkflowRun,
+		arg.ID,
+		arg.TenantID,
+		arg.FormInstanceID,
+		arg.TemplateID,
+		arg.Version,
+		arg.Status,
+		arg.CurrentStageInstanceID,
+		arg.StageDefinitionsJson,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i WorkflowRun
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.FormInstanceID,
+		&i.TemplateID,
+		&i.Version,
+		&i.Status,
+		&i.CurrentStageInstanceID,
+		&i.StageDefinitionsJson,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertWorkflowStageAssignee = `-- name: UpsertWorkflowStageAssignee :exec
+INSERT INTO workflow_stage_assignees (
+    tenant_id, stage_instance_id, account_id, status
+) VALUES (
+    $1, $2, $3, $4
+)
+ON CONFLICT (tenant_id, stage_instance_id, account_id) DO UPDATE SET
+    status = EXCLUDED.status
+`
+
+type UpsertWorkflowStageAssigneeParams struct {
+	TenantID        string `json:"tenant_id"`
+	StageInstanceID string `json:"stage_instance_id"`
+	AccountID       string `json:"account_id"`
+	Status          string `json:"status"`
+}
+
+func (q *Queries) UpsertWorkflowStageAssignee(ctx context.Context, arg UpsertWorkflowStageAssigneeParams) error {
+	_, err := q.db.Exec(ctx, upsertWorkflowStageAssignee,
+		arg.TenantID,
+		arg.StageInstanceID,
+		arg.AccountID,
+		arg.Status,
+	)
+	return err
+}
+
+const upsertWorkflowStageInstance = `-- name: UpsertWorkflowStageInstance :one
+INSERT INTO workflow_stage_instances (
+    id, tenant_id, run_id, stage_id, stage_type, label, status, sequence,
+    result, started_at, completed_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    run_id = EXCLUDED.run_id,
+    stage_id = EXCLUDED.stage_id,
+    stage_type = EXCLUDED.stage_type,
+    label = EXCLUDED.label,
+    status = EXCLUDED.status,
+    sequence = EXCLUDED.sequence,
+    result = EXCLUDED.result,
+    started_at = EXCLUDED.started_at,
+    completed_at = EXCLUDED.completed_at
+RETURNING id, tenant_id, run_id, stage_id, stage_type, label, status, sequence, result, started_at, completed_at
+`
+
+type UpsertWorkflowStageInstanceParams struct {
+	ID          string             `json:"id"`
+	TenantID    string             `json:"tenant_id"`
+	RunID       string             `json:"run_id"`
+	StageID     string             `json:"stage_id"`
+	StageType   string             `json:"stage_type"`
+	Label       string             `json:"label"`
+	Status      string             `json:"status"`
+	Sequence    int32              `json:"sequence"`
+	Column9     []byte             `json:"column_9"`
+	StartedAt   pgtype.Timestamptz `json:"started_at"`
+	CompletedAt pgtype.Timestamptz `json:"completed_at"`
+}
+
+func (q *Queries) UpsertWorkflowStageInstance(ctx context.Context, arg UpsertWorkflowStageInstanceParams) (WorkflowStageInstance, error) {
+	row := q.db.QueryRow(ctx, upsertWorkflowStageInstance,
+		arg.ID,
+		arg.TenantID,
+		arg.RunID,
+		arg.StageID,
+		arg.StageType,
+		arg.Label,
+		arg.Status,
+		arg.Sequence,
+		arg.Column9,
+		arg.StartedAt,
+		arg.CompletedAt,
+	)
+	var i WorkflowStageInstance
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.RunID,
+		&i.StageID,
+		&i.StageType,
+		&i.Label,
+		&i.Status,
+		&i.Sequence,
+		&i.Result,
+		&i.StartedAt,
+		&i.CompletedAt,
 	)
 	return i, err
 }

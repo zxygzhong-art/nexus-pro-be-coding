@@ -32,9 +32,11 @@ func (c PlatformCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	platform.DELETE("/tasks/todos/:id", c.routes.Handle("me", "delete", c.deleteTaskTodo, ResourceID(PathParamID)))
 	platform.POST("/tasks/todos/:id/convert", c.routes.Handle("me", "update", c.convertTaskTodo, ResourceID(PathParamID)))
 	platform.GET("/workspace", c.routes.Handle("hr.employee", "read", c.workspace))
+	platform.GET("/workspace/admins", c.routes.Handle("iam.permission_set_assignment", "read", c.workspaceAdmins))
 	platform.POST("/workspace/admins", c.routes.Handle("iam.permission_set_assignment", "create", c.createWorkspaceAdmin))
 	platform.PATCH("/workspace/admins/:id/permissions", c.routes.Handle("iam.permission_set_assignment", "update", c.updateWorkspaceAdminPermissions, PathParam(PathParamID)))
 	platform.DELETE("/workspace/admins/:id", c.routes.Handle("iam.permission_set_assignment", "delete", c.deleteWorkspaceAdmin, PathParam(PathParamID)))
+	platform.GET("/workspace/forms", c.routes.Handle("workflow.form_template", "read", c.workspaceFormDesign))
 	platform.POST("/workspace/forms", c.routes.Handle("workflow.form_template", "create", c.createWorkspaceFormDesign))
 	platform.PATCH("/workspace/forms/:id", c.routes.Handle("workflow.form_template", "update", c.updateWorkspaceFormDesign, PathParam(PathParamID)))
 	platform.DELETE("/workspace/forms/:id", c.routes.Handle("workflow.form_template", "delete", c.deleteWorkspaceFormDesign, PathParam(PathParamID)))
@@ -192,6 +194,16 @@ func (c PlatformCtrl) workspace(w http.ResponseWriter, _ *http.Request, ctx doma
 	return nil
 }
 
+// workspaceAdmins 處理工作區管理員設定讀取的 HTTP 請求。
+func (c PlatformCtrl) workspaceAdmins(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.WorkspaceAdmins(ctx)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
 // createWorkspaceAdmin 處理工作區管理員的 HTTP 請求。
 func (c PlatformCtrl) createWorkspaceAdmin(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateWorkspaceAdminInput
@@ -223,6 +235,16 @@ func (c PlatformCtrl) updateWorkspaceAdminPermissions(w http.ResponseWriter, r *
 // deleteWorkspaceAdmin 處理工作區管理員的 HTTP 請求。
 func (c PlatformCtrl) deleteWorkspaceAdmin(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.DeleteWorkspaceAdmin(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// workspaceFormDesign 處理工作區表單 design 讀取的 HTTP 請求。
+func (c PlatformCtrl) workspaceFormDesign(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.WorkspaceFormDesign(ctx)
 	if err != nil {
 		return err
 	}

@@ -23,6 +23,7 @@ type FormInstance struct {
 	Payload            map[string]any `json:"payload,omitempty"`
 	SubmittedAt        time.Time      `json:"submitted_at"`
 	ApprovedBy         string         `json:"approved_by,omitempty"`
+	CurrentRunID       string         `json:"current_run_id,omitempty"`
 	UpdatedAt          time.Time      `json:"updated_at"`
 }
 
@@ -62,7 +63,9 @@ type SubmitFormInput struct {
 }
 
 // ApproveFormInput 定義表單輸入的資料結構。
-type ApproveFormInput struct{}
+type ApproveFormInput struct {
+	Reason string `json:"reason,omitempty"`
+}
 
 // RejectFormInput 定義表單輸入的資料結構。
 type RejectFormInput struct {
@@ -135,4 +138,127 @@ type WorkflowReviewQueueResponse struct {
 	PendingReview   []WorkflowReviewItem `json:"pending_review"`
 	AlreadyReviewed []WorkflowReviewItem `json:"already_reviewed"`
 	Notified        []WorkflowReviewItem `json:"notified"`
+}
+
+// Workflow run / stage runtime statuses.
+const (
+	WorkflowRunStatusRunning   = "running"
+	WorkflowRunStatusReturned  = "returned"
+	WorkflowRunStatusCompleted = "completed"
+	WorkflowRunStatusCancelled = "cancelled"
+
+	WorkflowStageStatusPending   = "pending"
+	WorkflowStageStatusActive    = "active"
+	WorkflowStageStatusCompleted = "completed"
+	WorkflowStageStatusSkipped   = "skipped"
+	WorkflowStageStatusRejected  = "rejected"
+
+	WorkflowAssigneeStatusPending  = "pending"
+	WorkflowAssigneeStatusApproved = "approved"
+	WorkflowAssigneeStatusRejected = "rejected"
+	WorkflowAssigneeStatusReturned = "returned"
+
+	WorkflowFormStatusInReview = "in_review"
+	WorkflowFormStatusReturned = "returned"
+)
+
+// WorkflowStageConfig 定義流程節點可執行設定。
+type WorkflowStageConfig struct {
+	Role             string   `json:"role,omitempty"`
+	RelativeLevel    int      `json:"relative_level,omitempty"`
+	Mode             string   `json:"mode,omitempty"`
+	Field            string   `json:"field,omitempty"`
+	Operator         string   `json:"operator,omitempty"`
+	Value            string   `json:"value,omitempty"`
+	Levels           []int    `json:"levels,omitempty"`
+	TrueNextStageID  string   `json:"true_next_stage_id,omitempty"`
+	FalseNextStageID string   `json:"false_next_stage_id,omitempty"`
+	AccountIDs       []string `json:"account_ids,omitempty"`
+}
+
+// WorkflowStageDefinition 定義從 template 解析出的流程節點。
+type WorkflowStageDefinition struct {
+	ID     string              `json:"id"`
+	Type   string              `json:"type"`
+	Label  string              `json:"label"`
+	Detail string              `json:"detail"`
+	Config WorkflowStageConfig `json:"config"`
+}
+
+// WorkflowRun 定義單據流程運行實例。
+type WorkflowRun struct {
+	ID                     string    `json:"id"`
+	TenantID               string    `json:"tenant_id"`
+	FormInstanceID         string    `json:"form_instance_id"`
+	TemplateID             string    `json:"template_id"`
+	Version                int       `json:"version"`
+	Status                 string    `json:"status"`
+	CurrentStageInstanceID string    `json:"current_stage_instance_id,omitempty"`
+	StageDefinitionsJSON   string    `json:"-"`
+	CreatedAt              time.Time `json:"created_at"`
+	UpdatedAt              time.Time `json:"updated_at"`
+}
+
+// WorkflowStageInstance 定義流程節點運行實例。
+type WorkflowStageInstance struct {
+	ID          string         `json:"id"`
+	TenantID    string         `json:"tenant_id"`
+	RunID       string         `json:"run_id"`
+	StageID     string         `json:"stage_id"`
+	StageType   string         `json:"stage_type"`
+	Label       string         `json:"label"`
+	Status      string         `json:"status"`
+	Sequence    int            `json:"sequence"`
+	Result      map[string]any `json:"result,omitempty"`
+	StartedAt   *time.Time     `json:"started_at,omitempty"`
+	CompletedAt *time.Time     `json:"completed_at,omitempty"`
+}
+
+// WorkflowStageAssignee 定義節點待辦人。
+type WorkflowStageAssignee struct {
+	TenantID        string `json:"tenant_id"`
+	StageInstanceID string `json:"stage_instance_id"`
+	AccountID       string `json:"account_id"`
+	Status          string `json:"status"`
+}
+
+// WorkflowAction 定義流程審批動作歷史。
+type WorkflowAction struct {
+	ID              string    `json:"id"`
+	TenantID        string    `json:"tenant_id"`
+	RunID           string    `json:"run_id"`
+	StageInstanceID string    `json:"stage_instance_id"`
+	AccountID       string    `json:"account_id"`
+	Action          string    `json:"action"`
+	Comment         string    `json:"comment,omitempty"`
+	CreatedAt       time.Time `json:"created_at"`
+}
+
+// WorkflowFormStep 定義前端流程進度條節點。
+type WorkflowFormStep struct {
+	StageID   string                   `json:"stage_id"`
+	Label     string                   `json:"label"`
+	Detail    string                   `json:"detail,omitempty"`
+	State     string                   `json:"state"`
+	Assignees []WorkflowFormStepAssignee `json:"assignees,omitempty"`
+}
+
+// WorkflowFormStepAssignee 定義流程進度條上的待辦人。
+type WorkflowFormStepAssignee struct {
+	AccountID string `json:"account_id"`
+	Name      string `json:"name"`
+	Status    string `json:"status"`
+}
+
+// WorkflowFormStateResponse 定義單據流程運行狀態回應。
+type WorkflowFormStateResponse struct {
+	FormInstanceID    string                  `json:"form_instance_id"`
+	RunID             string                  `json:"run_id,omitempty"`
+	RunStatus         string                  `json:"run_status,omitempty"`
+	CurrentStageID    string                  `json:"current_stage_id,omitempty"`
+	CurrentStageLabel string                  `json:"current_stage_label,omitempty"`
+	CanAct            bool                    `json:"can_act"`
+	AllowedActions    []string                `json:"allowed_actions,omitempty"`
+	Steps             []WorkflowFormStep      `json:"steps"`
+	Actions           []WorkflowReviewLogItem `json:"actions,omitempty"`
 }

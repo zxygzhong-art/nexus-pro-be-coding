@@ -42,6 +42,10 @@ type Store struct {
 	attendanceCorrections  map[string]map[string]AttendanceCorrectionRequest
 	formTemplates          map[string]map[string]FormTemplate
 	formInstances          map[string]map[string]FormInstance
+	workflowRuns           map[string]map[string]domain.WorkflowRun
+	workflowStageInstances map[string]map[string]domain.WorkflowStageInstance
+	workflowStageAssignees map[string]map[string]domain.WorkflowStageAssignee
+	workflowActions        map[string][]domain.WorkflowAction
 	knowledgeArticles      map[string]map[string]KnowledgeArticle
 	platformTaskItems      map[string]map[string]PlatformTaskRecordItem
 	platformTaskTodos      map[string]map[string]PlatformTaskTodoRecord
@@ -83,6 +87,10 @@ func NewStore() *Store {
 		attendanceCorrections:  map[string]map[string]AttendanceCorrectionRequest{},
 		formTemplates:          map[string]map[string]FormTemplate{},
 		formInstances:          map[string]map[string]FormInstance{},
+		workflowRuns:           map[string]map[string]domain.WorkflowRun{},
+		workflowStageInstances: map[string]map[string]domain.WorkflowStageInstance{},
+		workflowStageAssignees: map[string]map[string]domain.WorkflowStageAssignee{},
+		workflowActions:        map[string][]domain.WorkflowAction{},
 		knowledgeArticles:      map[string]map[string]KnowledgeArticle{},
 		platformTaskItems:      map[string]map[string]PlatformTaskRecordItem{},
 		platformTaskTodos:      map[string]map[string]PlatformTaskTodoRecord{},
@@ -2015,3 +2023,173 @@ func identityKey(provider, subject string) string {
 func nowUTC() time.Time {
 	return time.Now().UTC()
 }
+func (s *Store) UpsertWorkflowRun(_ context.Context, v domain.WorkflowRun) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.workflowRuns == nil {
+		s.workflowRuns = map[string]map[string]domain.WorkflowRun{}
+	}
+	putNested(s.workflowRuns, v.TenantID, v.ID, copyWorkflowRun(v))
+	return nil
+}
+
+func (s *Store) GetWorkflowRun(_ context.Context, tenantID, id string) (domain.WorkflowRun, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.workflowRuns, tenantID, id)
+	return copyWorkflowRun(v), ok, nil
+}
+
+func (s *Store) GetWorkflowRunByFormInstance(_ context.Context, tenantID, formInstanceID string) (domain.WorkflowRun, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := s.workflowRuns[tenantID]
+	var latest domain.WorkflowRun
+	found := false
+	for _, item := range items {
+		if item.FormInstanceID != formInstanceID {
+			continue
+		}
+		if !found || item.Version > latest.Version || (item.Version == latest.Version && item.UpdatedAt.After(latest.UpdatedAt)) {
+			latest = item
+			found = true
+		}
+	}
+	return copyWorkflowRun(latest), found, nil
+}
+
+func (s *Store) ListWorkflowRunsByFormInstance(_ context.Context, tenantID, formInstanceID string) ([]domain.WorkflowRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]domain.WorkflowRun, 0)
+	for _, item := range s.workflowRuns[tenantID] {
+		if item.FormInstanceID == formInstanceID {
+			out = append(out, copyWorkflowRun(item))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].Version == out[j].Version {
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		}
+		return out[i].Version < out[j].Version
+	})
+	return out, nil
+}
+
+func (s *Store) UpsertWorkflowStageInstance(_ context.Context, v domain.WorkflowStageInstance) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.workflowStageInstances == nil {
+		s.workflowStageInstances = map[string]map[string]domain.WorkflowStageInstance{}
+	}
+	putNested(s.workflowStageInstances, v.TenantID, v.ID, copyWorkflowStageInstance(v))
+	return nil
+}
+
+func (s *Store) GetWorkflowStageInstance(_ context.Context, tenantID, id string) (domain.WorkflowStageInstance, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.workflowStageInstances, tenantID, id)
+	return copyWorkflowStageInstance(v), ok, nil
+}
+
+func (s *Store) ListWorkflowStageInstancesByRun(_ context.Context, tenantID, runID string) ([]domain.WorkflowStageInstance, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]domain.WorkflowStageInstance, 0)
+	for _, item := range s.workflowStageInstances[tenantID] {
+		if item.RunID == runID {
+			out = append(out, copyWorkflowStageInstance(item))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Sequence < out[j].Sequence })
+	return out, nil
+}
+
+func (s *Store) UpsertWorkflowStageAssignee(_ context.Context, v domain.WorkflowStageAssignee) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.workflowStageAssignees == nil {
+		s.workflowStageAssignees = map[string]map[string]domain.WorkflowStageAssignee{}
+	}
+	key := workflowAssigneeKey(v.StageInstanceID, v.AccountID)
+	putNested(s.workflowStageAssignees, v.TenantID, key, copyWorkflowStageAssignee(v))
+	return nil
+}
+
+func (s *Store) ListWorkflowStageAssignees(_ context.Context, tenantID, stageInstanceID string) ([]domain.WorkflowStageAssignee, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]domain.WorkflowStageAssignee, 0)
+	prefix := stageInstanceID + ":"
+	for key, item := range s.workflowStageAssignees[tenantID] {
+		if strings.HasPrefix(key, prefix) {
+			out = append(out, copyWorkflowStageAssignee(item))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].AccountID < out[j].AccountID })
+	return out, nil
+}
+
+func (s *Store) ListPendingAssigneeStageInstanceIDs(_ context.Context, tenantID, accountID string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := map[string]struct{}{}
+	out := make([]string, 0)
+	for _, item := range s.workflowStageAssignees[tenantID] {
+		if item.AccountID != accountID || item.Status != domain.WorkflowAssigneeStatusPending {
+			continue
+		}
+		if _, ok := seen[item.StageInstanceID]; ok {
+			continue
+		}
+		seen[item.StageInstanceID] = struct{}{}
+		out = append(out, item.StageInstanceID)
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+func (s *Store) InsertWorkflowAction(_ context.Context, v domain.WorkflowAction) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.workflowActions == nil {
+		s.workflowActions = map[string][]domain.WorkflowAction{}
+	}
+	s.workflowActions[v.TenantID] = append(s.workflowActions[v.TenantID], copyWorkflowAction(v))
+	return nil
+}
+
+func (s *Store) ListWorkflowActionsByRun(_ context.Context, tenantID, runID string) ([]domain.WorkflowAction, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]domain.WorkflowAction, 0)
+	for _, item := range s.workflowActions[tenantID] {
+		if item.RunID == runID {
+			out = append(out, copyWorkflowAction(item))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+func workflowAssigneeKey(stageInstanceID, accountID string) string {
+	return stageInstanceID + ":" + accountID
+}
+
+func copyWorkflowRun(v domain.WorkflowRun) domain.WorkflowRun { return v }
+
+func copyWorkflowStageInstance(v domain.WorkflowStageInstance) domain.WorkflowStageInstance {
+	if len(v.Result) > 0 {
+		next := make(map[string]any, len(v.Result))
+		for key, value := range v.Result {
+			next[key] = value
+		}
+		v.Result = next
+	}
+	return v
+}
+
+func copyWorkflowStageAssignee(v domain.WorkflowStageAssignee) domain.WorkflowStageAssignee { return v }
+
+func copyWorkflowAction(v domain.WorkflowAction) domain.WorkflowAction { return v }

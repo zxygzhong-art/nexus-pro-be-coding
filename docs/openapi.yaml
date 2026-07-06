@@ -287,6 +287,19 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/platform/workspace/admins:
+    get:
+      summary: Get workspace administrator settings through the OA frontend namespace
+      responses:
+        "200":
+          description: Workspace administrator settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
     post:
       summary: Grant workspace administrator permissions through the OA frontend namespace
       parameters:
@@ -355,6 +368,19 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/platform/workspace/forms:
+    get:
+      summary: Get workspace form design settings through the OA frontend namespace
+      responses:
+        "200":
+          description: Workspace form design settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformFormDesignDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
     post:
       summary: Create one workspace form-builder template through the OA frontend namespace
       requestBody:
@@ -1978,6 +2004,14 @@ paths:
       summary: Approve a workflow form instance for high-risk action confirmation
       parameters:
         - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: {type: string}
       responses:
         "200":
           description: Approved workflow form instance
@@ -2066,6 +2100,22 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workflows/forms/{id}/workflow:
+    get:
+      summary: Get workflow runtime state for a form instance
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Workflow runtime state
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkflowFormStateDataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/workflows/forms/{id}/duplicate:
     post:
@@ -2219,6 +2269,69 @@ components:
       properties:
         data:
           description: Successful response payload.
+    WorkflowFormStateDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/WorkflowFormStateResponse"
+    WorkflowFormStateResponse:
+      type: object
+      required: [form_instance_id, can_act, steps]
+      properties:
+        form_instance_id: {type: string}
+        run_id: {type: string}
+        run_status:
+          type: string
+          enum: [running, returned, completed, cancelled]
+        current_stage_id: {type: string}
+        current_stage_label: {type: string}
+        can_act: {type: boolean}
+        allowed_actions:
+          type: array
+          items:
+            type: string
+            enum: [approve, reject, return]
+        steps:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowFormStep"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowReviewLogItem"
+    WorkflowFormStep:
+      type: object
+      required: [stage_id, label, state]
+      properties:
+        stage_id: {type: string}
+        label: {type: string}
+        detail: {type: string}
+        state:
+          type: string
+          enum: [pending, active, completed, skipped, rejected]
+        assignees:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkflowFormStepAssignee"
+    WorkflowFormStepAssignee:
+      type: object
+      required: [account_id, name, status]
+      properties:
+        account_id: {type: string}
+        name: {type: string}
+        status:
+          type: string
+          enum: [pending, approved, rejected, returned]
+    WorkflowReviewLogItem:
+      type: object
+      required: [type, name, time]
+      properties:
+        type: {type: string}
+        name: {type: string}
+        role: {type: string}
+        time: {type: string}
+        comment: {type: string}
     PlatformHomeDataResponse:
       type: object
       required: [data]

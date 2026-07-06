@@ -475,9 +475,9 @@ ORDER BY created_at ASC;
 -- name: UpsertFormInstance :one
 INSERT INTO form_instances (
     id, tenant_id, template_id, applicant_account_id, status,
-    payload, submitted_at, approved_by, updated_at
+    payload, submitted_at, approved_by, current_run_id, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9
+    $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -487,6 +487,7 @@ ON CONFLICT (id) DO UPDATE SET
     payload = EXCLUDED.payload,
     submitted_at = EXCLUDED.submitted_at,
     approved_by = EXCLUDED.approved_by,
+    current_run_id = EXCLUDED.current_run_id,
     updated_at = EXCLUDED.updated_at
 RETURNING *;
 
@@ -613,6 +614,96 @@ ORDER BY
   id ASC
 LIMIT sqlc.arg(limit_count)::int
 OFFSET sqlc.arg(offset_count)::int;
+
+-- name: UpsertWorkflowRun :one
+INSERT INTO workflow_runs (
+    id, tenant_id, form_instance_id, template_id, version, status,
+    current_stage_instance_id, stage_definitions_json, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    form_instance_id = EXCLUDED.form_instance_id,
+    template_id = EXCLUDED.template_id,
+    version = EXCLUDED.version,
+    status = EXCLUDED.status,
+    current_stage_instance_id = EXCLUDED.current_stage_instance_id,
+    stage_definitions_json = EXCLUDED.stage_definitions_json,
+    created_at = EXCLUDED.created_at,
+    updated_at = EXCLUDED.updated_at
+RETURNING *;
+
+-- name: GetWorkflowRun :one
+SELECT * FROM workflow_runs
+WHERE tenant_id = $1 AND id = $2;
+
+-- name: ListWorkflowRunsByFormInstance :many
+SELECT * FROM workflow_runs
+WHERE tenant_id = $1 AND form_instance_id = $2
+ORDER BY version ASC, created_at ASC;
+
+-- name: UpsertWorkflowStageInstance :one
+INSERT INTO workflow_stage_instances (
+    id, tenant_id, run_id, stage_id, stage_type, label, status, sequence,
+    result, started_at, completed_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10, $11
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    run_id = EXCLUDED.run_id,
+    stage_id = EXCLUDED.stage_id,
+    stage_type = EXCLUDED.stage_type,
+    label = EXCLUDED.label,
+    status = EXCLUDED.status,
+    sequence = EXCLUDED.sequence,
+    result = EXCLUDED.result,
+    started_at = EXCLUDED.started_at,
+    completed_at = EXCLUDED.completed_at
+RETURNING *;
+
+-- name: GetWorkflowStageInstance :one
+SELECT * FROM workflow_stage_instances
+WHERE tenant_id = $1 AND id = $2;
+
+-- name: ListWorkflowStageInstancesByRun :many
+SELECT * FROM workflow_stage_instances
+WHERE tenant_id = $1 AND run_id = $2
+ORDER BY sequence ASC;
+
+-- name: UpsertWorkflowStageAssignee :exec
+INSERT INTO workflow_stage_assignees (
+    tenant_id, stage_instance_id, account_id, status
+) VALUES (
+    $1, $2, $3, $4
+)
+ON CONFLICT (tenant_id, stage_instance_id, account_id) DO UPDATE SET
+    status = EXCLUDED.status;
+
+-- name: ListWorkflowStageAssignees :many
+SELECT * FROM workflow_stage_assignees
+WHERE tenant_id = $1 AND stage_instance_id = $2
+ORDER BY account_id ASC;
+
+-- name: ListPendingAssigneeStageInstanceIDs :many
+SELECT DISTINCT stage_instance_id FROM workflow_stage_assignees
+WHERE tenant_id = $1 AND account_id = $2 AND status = 'pending'
+ORDER BY stage_instance_id ASC;
+
+-- name: InsertWorkflowAction :one
+INSERT INTO workflow_actions (
+    id, tenant_id, run_id, stage_instance_id, account_id, action, comment, created_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8
+)
+RETURNING *;
+
+-- name: ListWorkflowActionsByRun :many
+SELECT * FROM workflow_actions
+WHERE tenant_id = $1 AND run_id = $2
+ORDER BY created_at ASC;
+
 
 -- name: UpsertAttendanceWorksite :one
 INSERT INTO attendance_worksites (
@@ -988,3 +1079,4 @@ ORDER BY
   id ASC
 LIMIT sqlc.arg(limit_count)::int
 OFFSET sqlc.arg(offset_count)::int;
+

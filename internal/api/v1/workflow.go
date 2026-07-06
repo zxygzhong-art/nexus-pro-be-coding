@@ -27,6 +27,7 @@ func (c WorkflowCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workflows.GET("/reviews", c.routes.Handle("workflow.form_instance", "read", c.reviewQueue))
 	workflows.POST("/reviews/bulk-action", c.routes.Handle("workflow.form_instance", "update", c.bulkReviewForms))
 	workflows.POST("/forms/drafts", c.routes.Handle("workflow.form_instance", "submit", c.saveFormDraft))
+	workflows.GET("/forms/:id/workflow", c.routes.Handle("workflow.form_instance", "read", c.getWorkflowFormState, PathParam(PathParamID)))
 	workflows.GET("/forms/:id/export", c.routes.Handle("workflow.form_instance", "read", c.exportForm, PathParam(PathParamID)))
 	workflows.PATCH("/forms/:id", c.routes.Handle("workflow.form_instance", "update", c.updateFormDraft, PathParam(PathParamID)))
 	workflows.DELETE("/forms/:id", c.routes.Handle("workflow.form_instance", "delete", c.deleteFormDraft, PathParam(PathParamID)))
@@ -233,6 +234,16 @@ func (c WorkflowCtrl) duplicateForm(w http.ResponseWriter, r *http.Request, ctx 
 		return err
 	}
 	writeJSON(w, http.StatusCreated, item)
+	return nil
+}
+
+// getWorkflowFormState 回傳單據流程運行狀態。
+func (c WorkflowCtrl) getWorkflowFormState(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	state, err := c.svc.GetWorkflowFormState(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, state)
 	return nil
 }
 

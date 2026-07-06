@@ -1389,6 +1389,7 @@ func (s *Store) UpsertFormInstance(execCtx context.Context, v domain.FormInstanc
 		Column6:            mustJSON(v.Payload),
 		SubmittedAt:        timestamptz(v.SubmittedAt),
 		ApprovedBy:         v.ApprovedBy,
+		CurrentRunID:       v.CurrentRunID,
 		UpdatedAt:          timestamptz(v.UpdatedAt),
 	})
 	return err
@@ -2503,6 +2504,7 @@ func fromFormInstance(v sqlc.FormInstance) domain.FormInstance {
 		Payload:            jsonMap(v.Payload),
 		SubmittedAt:        timeFrom(v.SubmittedAt),
 		ApprovedBy:         v.ApprovedBy,
+		CurrentRunID:       v.CurrentRunID,
 		UpdatedAt:          timeFrom(v.UpdatedAt),
 	}
 }

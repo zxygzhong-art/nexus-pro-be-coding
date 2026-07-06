@@ -109,9 +109,11 @@ type PlatformFacade interface {
 	WorkspaceEmployees(RequestContext, PlatformWorkspaceEmployeesQuery) (PlatformWorkspaceEmployeesResponse, error)
 	WorkspaceOrganization(RequestContext) (WorkspaceOrganizationResponse, error)
 	UpdateWorkspaceOrganizationManager(RequestContext, string, UpdateWorkspaceOrganizationManagerInput) (WorkspaceOrganizationResponse, error)
+	WorkspaceAdmins(RequestContext) (WorkspaceAdminsResponse, error)
 	CreateWorkspaceAdmin(RequestContext, CreateWorkspaceAdminInput) (WorkspaceAdminsResponse, error)
 	UpdateWorkspaceAdminPermissions(RequestContext, string, UpdateWorkspaceAdminPermissionsInput) (WorkspaceAdminsResponse, error)
 	DeleteWorkspaceAdmin(RequestContext, string) (WorkspaceAdminsResponse, error)
+	WorkspaceFormDesign(RequestContext) (PlatformFormDesign, error)
 	CreateWorkspaceFormDesign(RequestContext, SaveWorkspaceFormDesignInput) (PlatformFormDesign, error)
 	UpdateWorkspaceFormDesign(RequestContext, string, UpdateWorkspaceFormDesignInput) (PlatformFormDesign, error)
 	DeleteWorkspaceFormDesign(RequestContext, string) (PlatformFormDesign, error)
@@ -148,6 +150,7 @@ type WorkflowFacade interface {
 	DuplicateForm(RequestContext, string) (FormInstance, error)
 	ExportForm(RequestContext, string) (ExportedFormFile, error)
 	BulkReviewForms(RequestContext, BulkReviewFormsInput) (BulkReviewFormsResponse, error)
+	GetWorkflowFormState(RequestContext, string) (WorkflowFormStateResponse, error)
 }
 
 // AgentFacade 定義 agent facade 的行為契約。
