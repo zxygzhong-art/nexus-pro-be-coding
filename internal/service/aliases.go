@@ -12,6 +12,10 @@ type (
 	UserGroup                          = domain.UserGroup
 	PermissionSet                      = domain.PermissionSet
 	Permission                         = domain.Permission
+	PermissionType                     = domain.PermissionType
+	PermissionCatalogItem              = domain.PermissionCatalogItem
+	MenuItem                           = domain.MenuItem
+	PermissionSetItem                  = domain.PermissionSetItem
 	PermissionSetAssignment            = domain.PermissionSetAssignment
 	DataScope                          = domain.DataScope
 	FieldPolicy                        = domain.FieldPolicy
@@ -166,6 +170,8 @@ type (
 	AssumeRoleResponse                 = domain.AssumeRoleResponse
 	AuthzExplainResponse               = domain.AuthzExplainResponse
 	AuthzSimulationResponse            = domain.AuthzSimulationResponse
+	IAMRoleProjection                  = domain.IAMRoleProjection
+	IAMRoleBindingProjection           = domain.IAMRoleBindingProjection
 )
 
 // Domain 說明此處的程式契約。
@@ -277,6 +283,12 @@ const (
 	ActionUpdateStatus     = domain.ActionUpdateStatus
 	ActionStatusTransition = domain.ActionStatusTransition
 
+	PermissionTypeMenu   = domain.PermissionTypeMenu
+	PermissionTypeAPI    = domain.PermissionTypeAPI
+	PermissionTypeButton = domain.PermissionTypeButton
+	PermissionTypeField  = domain.PermissionTypeField
+	PermissionTypeScope  = domain.PermissionTypeScope
+
 	ResourceEmployee                  = domain.ResourceEmployee
 	ResourceEmployeeImport            = domain.ResourceEmployeeImport
 	ResourceOrgUnit                   = domain.ResourceOrgUnit
@@ -287,6 +299,7 @@ const (
 	ResourceAttendanceClock           = domain.ResourceAttendanceClock
 	ResourceAttendanceCorrection      = domain.ResourceAttendanceCorrection
 	ResourceUserGroup                 = domain.ResourceUserGroup
+	ResourcePermission                = domain.ResourcePermission
 	ResourcePermissionSet             = domain.ResourcePermissionSet
 	ResourcePermissionAssign          = domain.ResourcePermissionAssign
 	ResourceDataScope                 = domain.ResourceDataScope

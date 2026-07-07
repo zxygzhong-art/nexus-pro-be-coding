@@ -1,6 +1,9 @@
 package service
 
-import "strings"
+import (
+	"sort"
+	"strings"
+)
 
 // MeService 定義 me 服務的資料結構。
 type MeService struct {
@@ -79,7 +82,15 @@ func (c MeService) ListMenus(ctx RequestContext) ([]MenuNode, error) {
 	for _, key := range me.EffectiveMenuKeys {
 		allowed[key] = struct{}{}
 	}
-	return filterMenus(defaultMenuCatalog, allowed), nil
+	nodes := defaultMenuCatalog
+	items, err := c.store.ListMenuItems(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) > 0 {
+		nodes = menuTreeFromItems(items)
+	}
+	return filterMenus(nodes, allowed), nil
 }
 
 // menuKeysFromPermissions 處理 menu keys 來源 權限。
@@ -100,12 +111,51 @@ func filterMenus(nodes []MenuNode, allowed map[string]struct{}) []MenuNode {
 		children := filterMenus(node.Children, allowed)
 		_, ok := allowed[node.Key]
 		if ok || len(children) > 0 {
-			copyNode := MenuNode{Key: node.Key, Label: node.Label, Path: node.Path}
+			copyNode := MenuNode{Key: node.Key, Label: node.Label, Path: node.Path, Icon: node.Icon}
 			if len(children) > 0 {
 				copyNode.Children = children
 			}
 			out = append(out, copyNode)
 		}
+	}
+	return out
+}
+
+// menuTreeFromItems 從落庫選單項建立樹。
+func menuTreeFromItems(items []MenuItem) []MenuNode {
+	children := map[string][]MenuItem{}
+	for _, item := range items {
+		children[item.ParentKey] = append(children[item.ParentKey], item)
+	}
+	for parentKey := range children {
+		sort.SliceStable(children[parentKey], func(i, j int) bool {
+			if children[parentKey][i].SortOrder != children[parentKey][j].SortOrder {
+				return children[parentKey][i].SortOrder < children[parentKey][j].SortOrder
+			}
+			return children[parentKey][i].Key < children[parentKey][j].Key
+		})
+	}
+	visited := map[string]struct{}{}
+	return menuNodesFromChildren("", children, visited)
+}
+
+// menuNodesFromChildren 遞迴建立選單子節點。
+func menuNodesFromChildren(parentKey string, children map[string][]MenuItem, visited map[string]struct{}) []MenuNode {
+	items := children[parentKey]
+	out := make([]MenuNode, 0, len(items))
+	for _, item := range items {
+		if _, ok := visited[item.Key]; ok {
+			continue
+		}
+		visited[item.Key] = struct{}{}
+		node := MenuNode{
+			Key:      item.Key,
+			Label:    item.Label,
+			Path:     item.Path,
+			Icon:     item.Icon,
+			Children: menuNodesFromChildren(item.Key, children, visited),
+		}
+		out = append(out, node)
 	}
 	return out
 }

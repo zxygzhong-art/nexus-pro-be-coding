@@ -44,6 +44,24 @@ func newTestAPI(authenticated bool) http.Handler {
 	return v1api.New(service.New(store), nil, options).Routes()
 }
 
+// newTestAPIForAccountNow builds an authenticated API with deterministic time for endpoint tests.
+func newTestAPIForAccountNow(accountID string, now time.Time, mutateStore func(*memory.Store)) http.Handler {
+	store := memory.NewStore()
+	populateDemoFixture(store)
+	if mutateStore != nil {
+		mutateStore(store)
+	}
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+	return v1api.New(svc, nil, v1api.Options{
+		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{
+			Provider:  "keycloak",
+			Subject:   accountID,
+			TenantID:  "demo",
+			AccountID: accountID,
+		}, ok: true},
+	}).Routes()
+}
+
 // decodeData 驗證 decode 資料。
 func decodeData[T any](t *testing.T, body []byte) T {
 	t.Helper()
@@ -138,6 +156,122 @@ func TestDefaultAPIRequiresAuthenticatedContext(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized {
 		t.Fatalf("expected default API to require auth context, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPlatformHomeEndpointRequiresMeReadPermission 驗證平台首頁 endpoint requires me.read 權限。
+func TestPlatformHomeEndpointRequiresMeReadPermission(t *testing.T) {
+	now := time.Date(2026, 7, 2, 9, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	handler := newTestAPIForAccountNow("acct-no-platform-home", now, func(store *memory.Store) {
+		ctx := context.Background()
+		_ = store.UpsertAccount(ctx, domain.Account{
+			ID:          "acct-no-platform-home",
+			TenantID:    "demo",
+			DisplayName: "No Platform Home",
+			Email:       "no-platform-home@demo.local",
+			EmployeeID:  "emp-employee",
+			Status:      "active",
+			CreatedAt:   now,
+		})
+		_ = store.UpsertUserIdentity(ctx, domain.UserIdentity{
+			ID:        "uid-no-platform-home",
+			TenantID:  "demo",
+			AccountID: "acct-no-platform-home",
+			Provider:  "keycloak",
+			Subject:   "acct-no-platform-home",
+			Email:     "no-platform-home@demo.local",
+			CreatedAt: now,
+		})
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/platform/home", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without me.read, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestPlatformHomeEndpointReturnsHomeProjection 驗證平台首頁 endpoint returns projection。
+func TestPlatformHomeEndpointReturnsHomeProjection(t *testing.T) {
+	now := time.Date(2026, 7, 2, 9, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	handler := newTestAPIForAccountNow("acct-employee", now, nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/platform/home", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for platform home, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := decodeData[domain.PlatformHomeResponse](t, rec.Body.Bytes())
+	if len(body.Assistants) == 0 || len(body.FormColumns) == 0 {
+		t.Fatalf("expected assistants and form columns in home projection, got %+v", body)
+	}
+	if body.ClockSummary.Location != "Demo HQ" || body.ClockSummary.CheckedOutAt != nil {
+		t.Fatalf("unexpected clock summary: %+v", body.ClockSummary)
+	}
+}
+
+// TestAttendanceClockRecordCreateRequiresCreatePermission 驗證打卡建立 endpoint requires attendance.clock.create。
+func TestAttendanceClockRecordCreateRequiresCreatePermission(t *testing.T) {
+	now := time.Date(2026, 7, 2, 8, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	handler := newTestAPIForAccountNow("acct-hr-readonly", now, nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/attendance/clock-records", strings.NewReader(`{"direction":"clock_in","latitude":25.033964,"longitude":121.564468,"accuracy_meters":10}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 without attendance.clock.create, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAttendanceClockRecordCreateRejectsInvalidBody 驗證打卡建立 endpoint rejects invalid body。
+func TestAttendanceClockRecordCreateRejectsInvalidBody(t *testing.T) {
+	now := time.Date(2026, 7, 2, 8, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	handler := newTestAPIForAccountNow("acct-employee", now, nil)
+	req := httptest.NewRequest(http.MethodPost, "/v1/attendance/clock-records", strings.NewReader(`{"direction":`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for invalid JSON body, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestAttendanceClockRecordDuplicatePunchIsRecordedAsRejected 驗證重複打卡 returns rejected record idempotently。
+func TestAttendanceClockRecordDuplicatePunchIsRecordedAsRejected(t *testing.T) {
+	now := time.Date(2026, 7, 2, 8, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	handler := newTestAPIForAccountNow("acct-employee", now, nil)
+	body := `{"direction":"clock_in","latitude":25.033964,"longitude":121.564468,"accuracy_meters":10,"location_source":"browser_geolocation"}`
+
+	firstReq := httptest.NewRequest(http.MethodPost, "/v1/attendance/clock-records", strings.NewReader(body))
+	firstReq.Header.Set("Content-Type", "application/json")
+	firstRec := httptest.NewRecorder()
+	handler.ServeHTTP(firstRec, firstReq)
+	if firstRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for first clock in, got %d: %s", firstRec.Code, firstRec.Body.String())
+	}
+	first := decodeData[domain.AttendanceClockRecord](t, firstRec.Body.Bytes())
+	if first.RecordStatus != "accepted" || first.RejectionReason != "" {
+		t.Fatalf("expected first clock in to be accepted, got %+v", first)
+	}
+
+	secondReq := httptest.NewRequest(http.MethodPost, "/v1/attendance/clock-records", strings.NewReader(body))
+	secondReq.Header.Set("Content-Type", "application/json")
+	secondRec := httptest.NewRecorder()
+	handler.ServeHTTP(secondRec, secondReq)
+	if secondRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for duplicate clock in rejection record, got %d: %s", secondRec.Code, secondRec.Body.String())
+	}
+	second := decodeData[domain.AttendanceClockRecord](t, secondRec.Body.Bytes())
+	if second.RecordStatus != "rejected" || second.RejectionReason != "duplicate" {
+		t.Fatalf("expected duplicate clock in to be recorded as rejected duplicate, got %+v", second)
 	}
 }
 

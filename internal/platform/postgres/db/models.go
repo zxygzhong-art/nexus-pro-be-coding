@@ -336,6 +336,18 @@ type LeaveRequest struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
+type MenuItem struct {
+	ID        string             `json:"id"`
+	TenantID  string             `json:"tenant_id"`
+	Key       string             `json:"key"`
+	Label     string             `json:"label"`
+	Path      string             `json:"path"`
+	Icon      string             `json:"icon"`
+	ParentKey string             `json:"parent_key"`
+	SortOrder int32              `json:"sort_order"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type Notification struct {
 	ID                 string             `json:"id"`
 	TenantID           string             `json:"tenant_id"`
@@ -402,6 +414,21 @@ type OvertimeRequest struct {
 	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
+type Permission struct {
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	Application    string             `json:"application"`
+	Resource       string             `json:"resource"`
+	Action         string             `json:"action"`
+	PermissionType string             `json:"permission_type"`
+	MenuKey        string             `json:"menu_key"`
+	Name           string             `json:"name"`
+	Description    string             `json:"description"`
+	HighRisk       bool               `json:"high_risk"`
+	Severity       string             `json:"severity"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
 type PermissionSet struct {
 	ID          string             `json:"id"`
 	TenantID    string             `json:"tenant_id"`
@@ -409,6 +436,14 @@ type PermissionSet struct {
 	Description string             `json:"description"`
 	Permissions []byte             `json:"permissions"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
+type PermissionSetItem struct {
+	ID              string             `json:"id"`
+	TenantID        string             `json:"tenant_id"`
+	PermissionSetID string             `json:"permission_set_id"`
+	PermissionID    string             `json:"permission_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
 type PlatformTaskItem struct {

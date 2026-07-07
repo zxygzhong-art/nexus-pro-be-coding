@@ -840,6 +840,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+  /v1/iam/roles:
+    get:
+      summary: List read-only IAM role projections
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200":
+          description: Role projection page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IAMRoleProjectionListDataResponse"
+  /v1/iam/role-bindings:
+    get:
+      summary: List read-only IAM role binding projections
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200":
+          description: Role binding projection page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IAMRoleBindingProjectionListDataResponse"
   /v1/iam/user-groups:
     get:
       summary: List user groups
@@ -2201,6 +2229,117 @@ components:
       properties:
         data:
           description: Successful response payload.
+    IAMRoleProjectionListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/IAMRoleProjectionPage"
+    IAMRoleBindingProjectionListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/IAMRoleBindingProjectionPage"
+    IAMRoleProjectionPage:
+      type: object
+      required: [items, total, page, page_size, sort]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/IAMRoleProjection"
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+        sort: {type: string}
+    IAMRoleBindingProjectionPage:
+      type: object
+      required: [items, total, page, page_size, sort]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/IAMRoleBindingProjection"
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+        sort: {type: string}
+    IAMRoleProjection:
+      type: object
+      required: [id, tenant_id, name, permission_set_ids, permission_sets, trusted, created_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        permission_set_ids:
+          type: array
+          items: {type: string}
+        permission_sets:
+          type: array
+          items:
+            $ref: "#/components/schemas/IAMPermissionSet"
+        trusted: {type: boolean}
+        trust_policy:
+          type: object
+          additionalProperties: true
+        permission_boundary:
+          type: object
+          additionalProperties: true
+        session_duration_seconds: {type: integer}
+        created_at: {type: string, format: date-time}
+    IAMRoleBindingProjection:
+      type: object
+      required: [id, tenant_id, principal_type, principal_id, permission_set_id, effect, created_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        principal_type: {type: string, enum: [account, user_group, assumable_role, service, agent]}
+        principal_id: {type: string}
+        permission_set_id: {type: string}
+        permission_set:
+          $ref: "#/components/schemas/IAMPermissionSet"
+        effect: {type: string, enum: [allow, deny]}
+        data_scope_id: {type: string}
+        condition_id: {type: string}
+        starts_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+    IAMPermissionSet:
+      type: object
+      required: [id, tenant_id, name, permissions, created_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        permissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/IAMPermission"
+        created_at: {type: string, format: date-time}
+    IAMPermission:
+      type: object
+      required: [resource, action]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        application_code: {type: string}
+        resource_type: {type: string}
+        permission_type: {type: string, enum: [menu, api, button, field, scope]}
+        resource: {type: string}
+        action: {type: string}
+        target: {type: string}
+        scope: {type: string}
+        effect: {type: string}
+        risk_level: {type: string}
+        severity: {type: string}
+        relation: {type: string}
+        menu_key: {type: string}
+        name: {type: string}
+        description: {type: string}
+        high_risk: {type: boolean}
     SSOLoginVerificationDataResponse:
       type: object
       required: [data]

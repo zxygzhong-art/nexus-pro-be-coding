@@ -23,6 +23,9 @@ type Querier interface {
 	CreateAuthzAssumableRoleSession(ctx context.Context, arg CreateAuthzAssumableRoleSessionParams) (AuthzAssumableRoleSession, error)
 	DeleteAuthzRelationshipTuple(ctx context.Context, arg DeleteAuthzRelationshipTupleParams) error
 	DeleteFormInstance(ctx context.Context, arg DeleteFormInstanceParams) error
+	DeleteMenuItem(ctx context.Context, arg DeleteMenuItemParams) error
+	DeletePermissionCatalogItem(ctx context.Context, arg DeletePermissionCatalogItemParams) error
+	DeletePermissionSetItemsForSet(ctx context.Context, arg DeletePermissionSetItemsForSetParams) error
 	DeletePlatformTaskItem(ctx context.Context, arg DeletePlatformTaskItemParams) error
 	DeletePlatformTaskTodo(ctx context.Context, arg DeletePlatformTaskTodoParams) error
 	FindEffectiveAttendanceShiftAssignment(ctx context.Context, arg FindEffectiveAttendanceShiftAssignmentParams) (AttendanceShiftAssignment, error)
@@ -53,6 +56,7 @@ type Querier interface {
 	GetOrgUnit(ctx context.Context, arg GetOrgUnitParams) (OrgUnit, error)
 	GetOvertimeRequest(ctx context.Context, arg GetOvertimeRequestParams) (OvertimeRequest, error)
 	GetOvertimeRequestByFormInstanceID(ctx context.Context, arg GetOvertimeRequestByFormInstanceIDParams) (OvertimeRequest, error)
+	GetPermissionCatalogItemByKey(ctx context.Context, arg GetPermissionCatalogItemByKeyParams) (Permission, error)
 	GetPermissionSet(ctx context.Context, arg GetPermissionSetParams) (PermissionSet, error)
 	GetPlatformTaskItem(ctx context.Context, arg GetPlatformTaskItemParams) (PlatformTaskItem, error)
 	GetPlatformTaskTodo(ctx context.Context, arg GetPlatformTaskTodoParams) (PlatformTaskTodo, error)
@@ -92,12 +96,16 @@ type Querier interface {
 	ListLeaveRequestPageByQuery(ctx context.Context, arg ListLeaveRequestPageByQueryParams) ([]LeaveRequest, error)
 	ListLeaveRequests(ctx context.Context, tenantID string) ([]LeaveRequest, error)
 	ListLeaveRequestsByQuery(ctx context.Context, arg ListLeaveRequestsByQueryParams) ([]LeaveRequest, error)
+	ListMenuItems(ctx context.Context, tenantID string) ([]MenuItem, error)
 	ListNotificationItems(ctx context.Context, arg ListNotificationItemsParams) ([]ListNotificationItemsRow, error)
 	ListOrgUnits(ctx context.Context, tenantID string) ([]OrgUnit, error)
 	ListOutboxEvents(ctx context.Context, tenantID string) ([]OutboxEvent, error)
 	ListOvertimeRequestsByQuery(ctx context.Context, arg ListOvertimeRequestsByQueryParams) ([]OvertimeRequest, error)
 	ListPendingAssigneeStageInstanceIDs(ctx context.Context, arg ListPendingAssigneeStageInstanceIDsParams) ([]string, error)
 	ListPendingIdentityProvisioningOutboxEvents(ctx context.Context, tenantID string) ([]IdentityProvisioningOutbox, error)
+	ListPermissionCatalogItems(ctx context.Context, tenantID string) ([]Permission, error)
+	ListPermissionSetItems(ctx context.Context, tenantID string) ([]PermissionSetItem, error)
+	ListPermissionSetItemsForSet(ctx context.Context, arg ListPermissionSetItemsForSetParams) ([]PermissionSetItem, error)
 	ListPermissionSets(ctx context.Context, tenantID string) ([]PermissionSet, error)
 	ListPlatformTaskItems(ctx context.Context, arg ListPlatformTaskItemsParams) ([]PlatformTaskItem, error)
 	ListPlatformTaskTodos(ctx context.Context, arg ListPlatformTaskTodosParams) ([]PlatformTaskTodo, error)
@@ -138,11 +146,14 @@ type Querier interface {
 	UpsertFormTemplate(ctx context.Context, arg UpsertFormTemplateParams) (FormTemplate, error)
 	UpsertLeaveBalance(ctx context.Context, arg UpsertLeaveBalanceParams) (LeaveBalance, error)
 	UpsertLeaveRequest(ctx context.Context, arg UpsertLeaveRequestParams) (LeaveRequest, error)
+	UpsertMenuItem(ctx context.Context, arg UpsertMenuItemParams) (MenuItem, error)
 	UpsertNotification(ctx context.Context, arg UpsertNotificationParams) (Notification, error)
 	UpsertNotificationRecipient(ctx context.Context, arg UpsertNotificationRecipientParams) (NotificationRecipient, error)
 	UpsertOrgUnit(ctx context.Context, arg UpsertOrgUnitParams) (OrgUnit, error)
 	UpsertOvertimeRequest(ctx context.Context, arg UpsertOvertimeRequestParams) (OvertimeRequest, error)
+	UpsertPermissionCatalogItem(ctx context.Context, arg UpsertPermissionCatalogItemParams) (Permission, error)
 	UpsertPermissionSet(ctx context.Context, arg UpsertPermissionSetParams) (PermissionSet, error)
+	UpsertPermissionSetItem(ctx context.Context, arg UpsertPermissionSetItemParams) (PermissionSetItem, error)
 	UpsertPlatformTaskItem(ctx context.Context, arg UpsertPlatformTaskItemParams) (PlatformTaskItem, error)
 	UpsertPlatformTaskTodo(ctx context.Context, arg UpsertPlatformTaskTodoParams) (PlatformTaskTodo, error)
 	UpsertTenant(ctx context.Context, arg UpsertTenantParams) (Tenant, error)

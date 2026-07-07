@@ -15,6 +15,14 @@ type IAMStore interface {
 	UpsertPermissionSet(context.Context, domain.PermissionSet) error
 	GetPermissionSet(ctx context.Context, tenantID, id string) (domain.PermissionSet, bool, error)
 	ListPermissionSets(ctx context.Context, tenantID string) ([]domain.PermissionSet, error)
+	ReplacePermissionSetItems(ctx context.Context, tenantID, permissionSetID string, items []domain.PermissionSetItem) error
+	ListPermissionSetItemsForSet(ctx context.Context, tenantID, permissionSetID string) ([]domain.PermissionSetItem, error)
+
+	UpsertPermissionCatalogItem(context.Context, domain.PermissionCatalogItem) error
+	GetPermissionCatalogItemByKey(ctx context.Context, tenantID, application, resource, action string, permissionType domain.PermissionType) (domain.PermissionCatalogItem, bool, error)
+	ListPermissionCatalogItems(ctx context.Context, tenantID string) ([]domain.PermissionCatalogItem, error)
+	UpsertMenuItem(context.Context, domain.MenuItem) error
+	ListMenuItems(ctx context.Context, tenantID string) ([]domain.MenuItem, error)
 
 	UpsertPermissionSetAssignment(context.Context, domain.PermissionSetAssignment) error
 	ListPermissionSetAssignments(ctx context.Context, tenantID string) ([]domain.PermissionSetAssignment, error)

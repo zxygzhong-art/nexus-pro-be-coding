@@ -10,6 +10,9 @@ type (
 	UserGroup                       = domain.UserGroup
 	PermissionSet                   = domain.PermissionSet
 	Permission                      = domain.Permission
+	PermissionCatalogItem           = domain.PermissionCatalogItem
+	MenuItem                        = domain.MenuItem
+	PermissionSetItem               = domain.PermissionSetItem
 	PermissionSetAssignment         = domain.PermissionSetAssignment
 	DataScope                       = domain.DataScope
 	FieldPolicy                     = domain.FieldPolicy

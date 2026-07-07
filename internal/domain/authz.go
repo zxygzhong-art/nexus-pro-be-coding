@@ -88,6 +88,7 @@ const (
 	ResourceAttendanceClock           ResourceType = "clock"
 	ResourceAttendanceCorrection      ResourceType = "correction"
 	ResourceUserGroup                 ResourceType = "user_group"
+	ResourcePermission                ResourceType = "permission"
 	ResourcePermissionSet             ResourceType = "permission_set"
 	ResourcePermissionAssign          ResourceType = "permission_set_assignment"
 	ResourceDataScope                 ResourceType = "data_scope"
@@ -208,6 +209,8 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "authz.explain", Method: "POST", Path: "/v1/authz/explain", ApplicationCode: "iam", ResourceType: "authz", Action: "explain"},
 	{Name: "authz.simulate", Method: "POST", Path: "/v1/authz/simulate", ApplicationCode: "iam", ResourceType: "authz", Action: "simulate", RiskLevel: RiskHigh},
 	{Name: "iam.permission.read", Method: "GET", Path: "/v1/iam/permissions", ApplicationCode: "iam", ResourceType: "permission", Action: "read"},
+	{Name: "iam.roles.read", Method: "GET", Path: "/v1/iam/roles", ApplicationCode: "iam", ResourceType: "assumable_role", Action: "read"},
+	{Name: "iam.role_bindings.read", Method: "GET", Path: "/v1/iam/role-bindings", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "read"},
 	{Name: "iam.user_group.read", Method: "GET", Path: "/v1/iam/user-groups", ApplicationCode: "iam", ResourceType: "user_group", Action: "read"},
 	{Name: "iam.user_group.create", Method: "POST", Path: "/v1/iam/user-groups", ApplicationCode: "iam", ResourceType: "user_group", Action: "create", RiskLevel: RiskHigh},
 	{Name: "iam.permission_set.read", Method: "GET", Path: "/v1/iam/permission-sets", ApplicationCode: "iam", ResourceType: "permission_set", Action: "read"},

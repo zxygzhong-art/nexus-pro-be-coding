@@ -2318,7 +2318,7 @@ func (c WorkspaceService) upsertWorkspaceAdminPermissionSet(ctx RequestContext, 
 	} else if ok && !current.CreatedAt.IsZero() {
 		createdAt = current.CreatedAt
 	}
-	return c.store.UpsertPermissionSet(goContext(ctx), PermissionSet{
+	_, err := c.upsertPermissionSetWithItems(ctx, PermissionSet{
 		ID:          permissionSetID,
 		TenantID:    ctx.TenantID,
 		Name:        fmt.Sprintf("Workspace Admin - %s", workspaceAdminName(account, employee)),
@@ -2326,6 +2326,7 @@ func (c WorkspaceService) upsertWorkspaceAdminPermissionSet(ctx RequestContext, 
 		Permissions: permissions,
 		CreatedAt:   createdAt,
 	})
+	return err
 }
 
 // ensureWorkspaceAdminAssignment 確保工作區管理員指派的服務流程。

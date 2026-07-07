@@ -30,6 +30,8 @@ type AuthzFacade interface {
 // IAMFacade 定義 IAM facade 的行為契約。
 type IAMFacade interface {
 	ListPermissionPage(RequestContext, PageRequest) (PageResponse[Permission], error)
+	ListRolePage(RequestContext, PageRequest) (PageResponse[IAMRoleProjection], error)
+	ListRoleBindingPage(RequestContext, PageRequest) (PageResponse[IAMRoleBindingProjection], error)
 	ListUserGroupPage(RequestContext, PageRequest) (PageResponse[UserGroup], error)
 	CreateUserGroup(RequestContext, CreateUserGroupInput) (UserGroup, error)
 	ListPermissionSetPage(RequestContext, PageRequest) (PageResponse[PermissionSet], error)

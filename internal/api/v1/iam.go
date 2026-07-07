@@ -19,6 +19,8 @@ type IAMCtrl struct {
 func (c IAMCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	iam := router.Group("/iam")
 	iam.GET("/permissions", c.routes.Handle("iam.permission", "read", c.listPermissions))
+	iam.GET("/roles", c.routes.Handle("iam.assumable_role", "read", c.listRoles))
+	iam.GET("/role-bindings", c.routes.Handle("iam.permission_set_assignment", "read", c.listRoleBindings))
 	iam.GET("/user-groups", c.routes.Handle("iam.user_group", "read", c.listUserGroups))
 	iam.POST("/user-groups", c.routes.Handle("iam.user_group", "create", c.createUserGroup))
 	iam.GET("/permission-sets", c.routes.Handle("iam.permission_set", "read", c.listPermissionSets))
@@ -41,6 +43,34 @@ func (c IAMCtrl) listPermissions(w http.ResponseWriter, r *http.Request, ctx dom
 		return err
 	}
 	items, err := c.svc.ListPermissionPage(ctx, page)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, items)
+	return nil
+}
+
+// listRoles 處理 roles 相容投影的 HTTP 請求。
+func (c IAMCtrl) listRoles(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	page, err := pageRequestFromRequest(r)
+	if err != nil {
+		return err
+	}
+	items, err := c.svc.ListRolePage(ctx, page)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, items)
+	return nil
+}
+
+// listRoleBindings 處理 role-bindings 相容投影的 HTTP 請求。
+func (c IAMCtrl) listRoleBindings(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	page, err := pageRequestFromRequest(r)
+	if err != nil {
+		return err
+	}
+	items, err := c.svc.ListRoleBindingPage(ctx, page)
 	if err != nil {
 		return err
 	}

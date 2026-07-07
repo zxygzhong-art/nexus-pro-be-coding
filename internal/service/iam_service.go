@@ -63,11 +63,20 @@ func (c IAMService) CreatePermissionSet(ctx RequestContext, input CreatePermissi
 		CreatedAt:   c.Now(),
 	}
 	if err := c.withTransaction(ctx, func(tx IAMService) error {
-		if err := tx.store.UpsertPermissionSet(goContext(ctx), set); err != nil {
+		itemCount, err := tx.upsertPermissionSetWithItems(ctx, set)
+		if err != nil {
 			return err
 		}
 		if err := tx.touchAuthzConfig(ctx, "iam.permission_set.upsert", map[string]any{"permission_set_id": set.ID}); err != nil {
 			return err
+		}
+		if itemCount > 0 {
+			if err := tx.audit(ctx, "iam.permission_catalog.sync", "permission_catalog", set.ID, "medium", map[string]any{
+				"permission_set_id": set.ID,
+				"permission_count":  itemCount,
+			}); err != nil {
+				return err
+			}
 		}
 		return tx.audit(ctx, "iam.permission_set.create", "permission_set", set.ID, "medium", map[string]any{"name": set.Name})
 	}); err != nil {
@@ -82,10 +91,21 @@ func (c IAMService) CreatePermissionSet(ctx RequestContext, input CreatePermissi
 
 // ListPermissions 列出權限的服務流程。
 func (c IAMService) ListPermissions(ctx RequestContext) ([]Permission, error) {
-	if _, _, err := c.requireIAMAuthz(ctx, ResourceType("permission"), ActionRead, ""); err != nil {
+	if _, _, err := c.requireIAMAuthz(ctx, ResourcePermission, ActionRead, ""); err != nil {
 		return nil, err
 	}
-	return defaultPermissions(), nil
+	items, err := c.store.ListPermissionCatalogItems(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return defaultPermissions(), nil
+	}
+	out := make([]Permission, 0, len(items))
+	for _, item := range items {
+		out = append(out, permissionFromCatalogItem(item))
+	}
+	return out, nil
 }
 
 // ListPermissionPage 列出權限分頁的服務流程。
@@ -93,6 +113,95 @@ func (c IAMService) ListPermissionPage(ctx RequestContext, page PageRequest) (Pa
 	items, err := c.ListPermissions(ctx)
 	if err != nil {
 		return PageResponse[Permission]{}, err
+	}
+	return utils.PageResponse(items, page), nil
+}
+
+// ListRoles 列出 IAM roles 相容投影的服務流程。
+func (c IAMService) ListRoles(ctx RequestContext) ([]IAMRoleProjection, error) {
+	if _, _, err := c.requireIAMAuthz(ctx, ResourceAssumableRole, ActionRead, ""); err != nil {
+		return nil, err
+	}
+	roles, err := c.store.ListAssumableRoles(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]IAMRoleProjection, 0, len(roles))
+	for _, role := range roles {
+		projection := IAMRoleProjection{
+			ID:                     role.ID,
+			TenantID:               role.TenantID,
+			Name:                   role.Name,
+			Description:            role.Description,
+			PermissionSetIDs:       utils.CopyStrings(role.PermissionSetIDs),
+			Trusted:                role.Trusted,
+			TrustPolicy:            utils.CopyStringMap(role.TrustPolicy),
+			PermissionBoundary:     utils.CopyStringMap(role.PermissionBoundary),
+			SessionDurationSeconds: role.SessionDurationSeconds,
+			CreatedAt:              role.CreatedAt,
+		}
+		for _, setID := range role.PermissionSetIDs {
+			set, ok, err := c.store.GetPermissionSet(goContext(ctx), ctx.TenantID, setID)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				projection.PermissionSets = append(projection.PermissionSets, set)
+			}
+		}
+		out = append(out, projection)
+	}
+	return out, nil
+}
+
+// ListRolePage 列出 IAM roles 相容投影分頁的服務流程。
+func (c IAMService) ListRolePage(ctx RequestContext, page PageRequest) (PageResponse[IAMRoleProjection], error) {
+	items, err := c.ListRoles(ctx)
+	if err != nil {
+		return PageResponse[IAMRoleProjection]{}, err
+	}
+	return utils.PageResponse(items, page), nil
+}
+
+// ListRoleBindings 列出 IAM role-bindings 相容投影的服務流程。
+func (c IAMService) ListRoleBindings(ctx RequestContext) ([]IAMRoleBindingProjection, error) {
+	if _, _, err := c.requireIAMAuthz(ctx, ResourcePermissionAssign, ActionRead, ""); err != nil {
+		return nil, err
+	}
+	assignments, err := c.store.ListPermissionSetAssignments(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]IAMRoleBindingProjection, 0, len(assignments))
+	for _, assignment := range assignments {
+		projection := IAMRoleBindingProjection{
+			ID:              assignment.ID,
+			TenantID:        assignment.TenantID,
+			PrincipalType:   assignment.PrincipalType,
+			PrincipalID:     assignment.PrincipalID,
+			PermissionSetID: assignment.PermissionSetID,
+			Effect:          assignment.Effect,
+			DataScopeID:     assignment.DataScopeID,
+			ConditionID:     assignment.ConditionID,
+			StartsAt:        assignment.StartsAt,
+			ExpiresAt:       assignment.ExpiresAt,
+			CreatedAt:       assignment.CreatedAt,
+		}
+		if set, ok, err := c.store.GetPermissionSet(goContext(ctx), ctx.TenantID, assignment.PermissionSetID); err != nil {
+			return nil, err
+		} else if ok {
+			projection.PermissionSet = &set
+		}
+		out = append(out, projection)
+	}
+	return out, nil
+}
+
+// ListRoleBindingPage 列出 IAM role-bindings 相容投影分頁的服務流程。
+func (c IAMService) ListRoleBindingPage(ctx RequestContext, page PageRequest) (PageResponse[IAMRoleBindingProjection], error) {
+	items, err := c.ListRoleBindings(ctx)
+	if err != nil {
+		return PageResponse[IAMRoleBindingProjection]{}, err
 	}
 	return utils.PageResponse(items, page), nil
 }

@@ -23,6 +23,9 @@ type Store struct {
 	userIdentities         map[string]map[string]UserIdentity
 	userGroups             map[string]map[string]UserGroup
 	permissionSets         map[string]map[string]PermissionSet
+	permissionCatalog      map[string]map[string]PermissionCatalogItem
+	menuItems              map[string]map[string]MenuItem
+	permissionSetItems     map[string]map[string]PermissionSetItem
 	assignments            map[string]map[string]PermissionSetAssignment
 	dataScopes             map[string]map[string]DataScope
 	fieldPolicies          map[string]map[string]FieldPolicy
@@ -67,6 +70,9 @@ func NewStore() *Store {
 		userIdentities:         map[string]map[string]UserIdentity{},
 		userGroups:             map[string]map[string]UserGroup{},
 		permissionSets:         map[string]map[string]PermissionSet{},
+		permissionCatalog:      map[string]map[string]PermissionCatalogItem{},
+		menuItems:              map[string]map[string]MenuItem{},
+		permissionSetItems:     map[string]map[string]PermissionSetItem{},
 		assignments:            map[string]map[string]PermissionSetAssignment{},
 		dataScopes:             map[string]map[string]DataScope{},
 		fieldPolicies:          map[string]map[string]FieldPolicy{},
@@ -268,6 +274,127 @@ func (s *Store) ListPermissionSets(_ context.Context, tenantID string) ([]Permis
 	defer s.mu.RUnlock()
 	out := copyNestedValues(s.permissionSets[tenantID], copyPermissionSet)
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+// ReplacePermissionSetItems 從儲存層替換權限集合項。
+func (s *Store) ReplacePermissionSetItems(_ context.Context, tenantID, permissionSetID string, items []PermissionSetItem) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	bucket := s.permissionSetItems[tenantID]
+	for id, item := range bucket {
+		if item.PermissionSetID == permissionSetID {
+			delete(bucket, id)
+		}
+	}
+	for _, item := range items {
+		putNested(s.permissionSetItems, tenantID, item.ID, copyPermissionSetItem(item))
+	}
+	return nil
+}
+
+// ListPermissionSetItemsForSet 從儲存層列出權限集合項。
+func (s *Store) ListPermissionSetItemsForSet(_ context.Context, tenantID, permissionSetID string) ([]PermissionSetItem, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]PermissionSetItem, 0)
+	for _, item := range s.permissionSetItems[tenantID] {
+		if item.PermissionSetID == permissionSetID {
+			out = append(out, copyPermissionSetItem(item))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+// UpsertPermissionCatalogItem 從儲存層處理 upsert 權限 catalog 項。
+func (s *Store) UpsertPermissionCatalogItem(_ context.Context, v PermissionCatalogItem) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, existing := range s.permissionCatalog[v.TenantID] {
+		if existing.Application == v.Application &&
+			existing.Resource == v.Resource &&
+			existing.Action == v.Action &&
+			existing.PermissionType == v.PermissionType {
+			if v.ID == "" {
+				v.ID = existing.ID
+			}
+			v.CreatedAt = existing.CreatedAt
+			putNested(s.permissionCatalog, v.TenantID, id, copyPermissionCatalogItem(v))
+			return nil
+		}
+	}
+	putNested(s.permissionCatalog, v.TenantID, v.ID, copyPermissionCatalogItem(v))
+	return nil
+}
+
+// GetPermissionCatalogItemByKey 從儲存層取得權限 catalog 項。
+func (s *Store) GetPermissionCatalogItemByKey(_ context.Context, tenantID, application, resource, action string, permissionType domain.PermissionType) (PermissionCatalogItem, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, item := range s.permissionCatalog[tenantID] {
+		if item.Application == application &&
+			item.Resource == resource &&
+			item.Action == action &&
+			item.PermissionType == permissionType {
+			return copyPermissionCatalogItem(item), true, nil
+		}
+	}
+	return PermissionCatalogItem{}, false, nil
+}
+
+// ListPermissionCatalogItems 從儲存層列出權限 catalog。
+func (s *Store) ListPermissionCatalogItems(_ context.Context, tenantID string) ([]PermissionCatalogItem, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.permissionCatalog[tenantID], copyPermissionCatalogItem)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Application != out[j].Application {
+			return out[i].Application < out[j].Application
+		}
+		if out[i].Resource != out[j].Resource {
+			return out[i].Resource < out[j].Resource
+		}
+		if out[i].Action != out[j].Action {
+			return out[i].Action < out[j].Action
+		}
+		return out[i].PermissionType < out[j].PermissionType
+	})
+	return out, nil
+}
+
+// UpsertMenuItem 從儲存層處理 upsert 選單項。
+func (s *Store) UpsertMenuItem(_ context.Context, v MenuItem) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, existing := range s.menuItems[v.TenantID] {
+		if existing.Key == v.Key {
+			if v.ID == "" {
+				v.ID = existing.ID
+			}
+			v.CreatedAt = existing.CreatedAt
+			putNested(s.menuItems, v.TenantID, id, copyMenuItem(v))
+			return nil
+		}
+	}
+	putNested(s.menuItems, v.TenantID, v.ID, copyMenuItem(v))
+	return nil
+}
+
+// ListMenuItems 從儲存層列出選單項。
+func (s *Store) ListMenuItems(_ context.Context, tenantID string) ([]MenuItem, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.menuItems[tenantID], copyMenuItem)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ParentKey != out[j].ParentKey {
+			return out[i].ParentKey < out[j].ParentKey
+		}
+		if out[i].SortOrder != out[j].SortOrder {
+			return out[i].SortOrder < out[j].SortOrder
+		}
+		return out[i].Key < out[j].Key
+	})
 	return out, nil
 }
 

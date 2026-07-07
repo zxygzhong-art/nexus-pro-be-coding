@@ -2,6 +2,18 @@ package domain
 
 import "time"
 
+// PermissionType 表示權限點類型。
+type PermissionType string
+
+// 下列常數定義權限 catalog 支援的類型。
+const (
+	PermissionTypeMenu   PermissionType = "menu"
+	PermissionTypeAPI    PermissionType = "api"
+	PermissionTypeButton PermissionType = "button"
+	PermissionTypeField  PermissionType = "field"
+	PermissionTypeScope  PermissionType = "scope"
+)
+
 // UserGroup 定義使用者群組的資料結構。
 type UserGroup struct {
 	ID               string    `json:"id"`
@@ -41,16 +53,61 @@ type CreatePermissionSetInput struct {
 
 // Permission 定義權限的資料結構。
 type Permission struct {
+	ID              string          `json:"id,omitempty"`
+	TenantID        string          `json:"tenant_id,omitempty"`
 	ApplicationCode ApplicationCode `json:"application_code,omitempty"`
 	ResourceType    ResourceType    `json:"resource_type,omitempty"`
+	PermissionType  PermissionType  `json:"permission_type,omitempty"`
 	Resource        string          `json:"resource"`
 	Action          Action          `json:"action"`
 	Target          string          `json:"target,omitempty"`
 	Scope           Scope           `json:"scope,omitempty"`
 	Effect          string          `json:"effect,omitempty"`
 	RiskLevel       string          `json:"risk_level,omitempty"`
+	Severity        string          `json:"severity,omitempty"`
 	Relation        string          `json:"relation,omitempty"`
 	MenuKey         string          `json:"menu_key,omitempty"`
+	Name            string          `json:"name,omitempty"`
+	Description     string          `json:"description,omitempty"`
+	HighRisk        bool            `json:"high_risk,omitempty"`
+}
+
+// PermissionCatalogItem 定義可落庫治理的權限 catalog 項。
+type PermissionCatalogItem struct {
+	ID             string         `json:"id"`
+	TenantID       string         `json:"tenant_id"`
+	Application    string         `json:"application"`
+	Resource       string         `json:"resource"`
+	Action         string         `json:"action"`
+	PermissionType PermissionType `json:"permission_type"`
+	MenuKey        string         `json:"menu_key,omitempty"`
+	Name           string         `json:"name"`
+	Description    string         `json:"description,omitempty"`
+	HighRisk       bool           `json:"high_risk"`
+	Severity       string         `json:"severity,omitempty"`
+	CreatedAt      time.Time      `json:"created_at"`
+}
+
+// MenuItem 定義落庫的選單項。
+type MenuItem struct {
+	ID        string    `json:"id"`
+	TenantID  string    `json:"tenant_id"`
+	Key       string    `json:"key"`
+	Label     string    `json:"label"`
+	Path      string    `json:"path"`
+	Icon      string    `json:"icon,omitempty"`
+	ParentKey string    `json:"parent_key,omitempty"`
+	SortOrder int       `json:"sort_order"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// PermissionSetItem 定義權限集合與權限 catalog 的關聯。
+type PermissionSetItem struct {
+	ID              string    `json:"id"`
+	TenantID        string    `json:"tenant_id"`
+	PermissionSetID string    `json:"permission_set_id"`
+	PermissionID    string    `json:"permission_id"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // AssumableRole 定義 assumable 角色的資料結構。
@@ -91,6 +148,37 @@ type PermissionSetAssignment struct {
 	StartsAt        *time.Time `json:"starts_at,omitempty"`
 	ExpiresAt       *time.Time `json:"expires_at,omitempty"`
 	CreatedAt       time.Time  `json:"created_at"`
+}
+
+// IAMRoleProjection 定義 roles 相容只讀投影。
+type IAMRoleProjection struct {
+	ID                     string          `json:"id"`
+	TenantID               string          `json:"tenant_id"`
+	Name                   string          `json:"name"`
+	Description            string          `json:"description,omitempty"`
+	PermissionSetIDs       []string        `json:"permission_set_ids"`
+	PermissionSets         []PermissionSet `json:"permission_sets"`
+	Trusted                bool            `json:"trusted"`
+	TrustPolicy            map[string]any  `json:"trust_policy,omitempty"`
+	PermissionBoundary     map[string]any  `json:"permission_boundary,omitempty"`
+	SessionDurationSeconds int             `json:"session_duration_seconds,omitempty"`
+	CreatedAt              time.Time       `json:"created_at"`
+}
+
+// IAMRoleBindingProjection 定義 role-bindings 相容只讀投影。
+type IAMRoleBindingProjection struct {
+	ID              string         `json:"id"`
+	TenantID        string         `json:"tenant_id"`
+	PrincipalType   string         `json:"principal_type"`
+	PrincipalID     string         `json:"principal_id"`
+	PermissionSetID string         `json:"permission_set_id"`
+	PermissionSet   *PermissionSet `json:"permission_set,omitempty"`
+	Effect          string         `json:"effect"`
+	DataScopeID     string         `json:"data_scope_id,omitempty"`
+	ConditionID     string         `json:"condition_id,omitempty"`
+	StartsAt        *time.Time     `json:"starts_at,omitempty"`
+	ExpiresAt       *time.Time     `json:"expires_at,omitempty"`
+	CreatedAt       time.Time      `json:"created_at"`
 }
 
 // CreatePermissionSetAssignmentInput 定義權限集合指派輸入的資料結構。

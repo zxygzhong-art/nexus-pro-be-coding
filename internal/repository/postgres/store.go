@@ -323,6 +323,111 @@ func (s *Store) ListPermissionSets(execCtx context.Context, tenantID string) ([]
 	return mapSlice(items, fromPermissionSet), nil
 }
 
+// ReplacePermissionSetItems 從儲存層替換權限集合項。
+func (s *Store) ReplacePermissionSetItems(execCtx context.Context, tenantID, permissionSetID string, items []domain.PermissionSetItem) error {
+	if err := s.q.DeletePermissionSetItemsForSet(execCtx, sqlc.DeletePermissionSetItemsForSetParams{
+		TenantID:        tenantID,
+		PermissionSetID: permissionSetID,
+	}); err != nil {
+		return err
+	}
+	for _, item := range items {
+		if _, err := s.q.UpsertPermissionSetItem(execCtx, sqlc.UpsertPermissionSetItemParams{
+			ID:              item.ID,
+			TenantID:        item.TenantID,
+			PermissionSetID: item.PermissionSetID,
+			PermissionID:    item.PermissionID,
+			CreatedAt:       timestamptz(item.CreatedAt),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListPermissionSetItemsForSet 從儲存層列出權限集合項。
+func (s *Store) ListPermissionSetItemsForSet(execCtx context.Context, tenantID, permissionSetID string) ([]domain.PermissionSetItem, error) {
+	items, err := s.q.ListPermissionSetItemsForSet(tenantContext(execCtx, tenantID), sqlc.ListPermissionSetItemsForSetParams{
+		TenantID:        tenantID,
+		PermissionSetID: permissionSetID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromPermissionSetItem), nil
+}
+
+// UpsertPermissionCatalogItem 從儲存層處理 upsert 權限 catalog 項。
+func (s *Store) UpsertPermissionCatalogItem(execCtx context.Context, v domain.PermissionCatalogItem) error {
+	_, err := s.q.UpsertPermissionCatalogItem(tenantContext(execCtx, v.TenantID), sqlc.UpsertPermissionCatalogItemParams{
+		ID:             v.ID,
+		TenantID:       v.TenantID,
+		Application:    v.Application,
+		Resource:       v.Resource,
+		Action:         v.Action,
+		PermissionType: string(v.PermissionType),
+		MenuKey:        v.MenuKey,
+		Name:           v.Name,
+		Description:    v.Description,
+		HighRisk:       v.HighRisk,
+		Severity:       v.Severity,
+		CreatedAt:      timestamptz(v.CreatedAt),
+	})
+	return err
+}
+
+// GetPermissionCatalogItemByKey 從儲存層取得權限 catalog 項。
+func (s *Store) GetPermissionCatalogItemByKey(execCtx context.Context, tenantID, application, resource, action string, permissionType domain.PermissionType) (domain.PermissionCatalogItem, bool, error) {
+	v, err := s.q.GetPermissionCatalogItemByKey(tenantContext(execCtx, tenantID), sqlc.GetPermissionCatalogItemByKeyParams{
+		TenantID:       tenantID,
+		Application:    application,
+		Resource:       resource,
+		Action:         action,
+		PermissionType: string(permissionType),
+	})
+	if isNotFound(err) {
+		return domain.PermissionCatalogItem{}, false, nil
+	}
+	if err != nil {
+		return domain.PermissionCatalogItem{}, false, err
+	}
+	return fromPermissionCatalogItem(v), true, nil
+}
+
+// ListPermissionCatalogItems 從儲存層列出權限 catalog。
+func (s *Store) ListPermissionCatalogItems(execCtx context.Context, tenantID string) ([]domain.PermissionCatalogItem, error) {
+	items, err := s.q.ListPermissionCatalogItems(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromPermissionCatalogItem), nil
+}
+
+// UpsertMenuItem 從儲存層處理 upsert 選單項。
+func (s *Store) UpsertMenuItem(execCtx context.Context, v domain.MenuItem) error {
+	_, err := s.q.UpsertMenuItem(tenantContext(execCtx, v.TenantID), sqlc.UpsertMenuItemParams{
+		ID:        v.ID,
+		TenantID:  v.TenantID,
+		Key:       v.Key,
+		Label:     v.Label,
+		Path:      v.Path,
+		Icon:      v.Icon,
+		ParentKey: v.ParentKey,
+		SortOrder: int32(v.SortOrder),
+		CreatedAt: timestamptz(v.CreatedAt),
+	})
+	return err
+}
+
+// ListMenuItems 從儲存層列出選單項。
+func (s *Store) ListMenuItems(execCtx context.Context, tenantID string) ([]domain.MenuItem, error) {
+	items, err := s.q.ListMenuItems(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromMenuItem), nil
+}
+
 // UpsertPermissionSetAssignment 從儲存層處理 upsert 權限集合指派。
 func (s *Store) UpsertPermissionSetAssignment(execCtx context.Context, v domain.PermissionSetAssignment) error {
 	_, err := s.q.UpsertAuthzPermissionSetAssignment(execCtx, sqlc.UpsertAuthzPermissionSetAssignmentParams{
@@ -2158,6 +2263,50 @@ func fromPermissionSet(v sqlc.PermissionSet) domain.PermissionSet {
 		Description: v.Description,
 		Permissions: jsonPermissions(v.Permissions),
 		CreatedAt:   timeFrom(v.CreatedAt),
+	}
+}
+
+// fromPermissionCatalogItem 轉換權限 catalog 項。
+func fromPermissionCatalogItem(v sqlc.Permission) domain.PermissionCatalogItem {
+	return domain.PermissionCatalogItem{
+		ID:             v.ID,
+		TenantID:       v.TenantID,
+		Application:    v.Application,
+		Resource:       v.Resource,
+		Action:         v.Action,
+		PermissionType: domain.PermissionType(v.PermissionType),
+		MenuKey:        v.MenuKey,
+		Name:           v.Name,
+		Description:    v.Description,
+		HighRisk:       v.HighRisk,
+		Severity:       v.Severity,
+		CreatedAt:      timeFrom(v.CreatedAt),
+	}
+}
+
+// fromMenuItem 轉換選單項。
+func fromMenuItem(v sqlc.MenuItem) domain.MenuItem {
+	return domain.MenuItem{
+		ID:        v.ID,
+		TenantID:  v.TenantID,
+		Key:       v.Key,
+		Label:     v.Label,
+		Path:      v.Path,
+		Icon:      v.Icon,
+		ParentKey: v.ParentKey,
+		SortOrder: int(v.SortOrder),
+		CreatedAt: timeFrom(v.CreatedAt),
+	}
+}
+
+// fromPermissionSetItem 轉換權限集合項。
+func fromPermissionSetItem(v sqlc.PermissionSetItem) domain.PermissionSetItem {
+	return domain.PermissionSetItem{
+		ID:              v.ID,
+		TenantID:        v.TenantID,
+		PermissionSetID: v.PermissionSetID,
+		PermissionID:    v.PermissionID,
+		CreatedAt:       timeFrom(v.CreatedAt),
 	}
 }
 

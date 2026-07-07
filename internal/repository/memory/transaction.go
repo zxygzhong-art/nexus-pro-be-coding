@@ -32,6 +32,9 @@ func (s *Store) cloneLocked() *Store {
 		userIdentities:         cloneNestedMap(s.userIdentities, copyUserIdentity),
 		userGroups:             cloneNestedMap(s.userGroups, copyUserGroup),
 		permissionSets:         cloneNestedMap(s.permissionSets, copyPermissionSet),
+		permissionCatalog:      cloneNestedMap(s.permissionCatalog, copyPermissionCatalogItem),
+		menuItems:              cloneNestedMap(s.menuItems, copyMenuItem),
+		permissionSetItems:     cloneNestedMap(s.permissionSetItems, copyPermissionSetItem),
 		assignments:            cloneNestedMap(s.assignments, copyPermissionSetAssignment),
 		dataScopes:             cloneNestedMap(s.dataScopes, copyDataScope),
 		fieldPolicies:          cloneNestedMap(s.fieldPolicies, copyFieldPolicy),
@@ -76,6 +79,9 @@ func (s *Store) replaceLocked(next *Store) {
 	s.userIdentities = next.userIdentities
 	s.userGroups = next.userGroups
 	s.permissionSets = next.permissionSets
+	s.permissionCatalog = next.permissionCatalog
+	s.menuItems = next.menuItems
+	s.permissionSetItems = next.permissionSetItems
 	s.assignments = next.assignments
 	s.dataScopes = next.dataScopes
 	s.fieldPolicies = next.fieldPolicies

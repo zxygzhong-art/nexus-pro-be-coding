@@ -48,6 +48,15 @@ func copyPermissionSet(v PermissionSet) PermissionSet {
 	return v
 }
 
+// copyPermissionCatalogItem 複製權限 catalog 項。
+func copyPermissionCatalogItem(v PermissionCatalogItem) PermissionCatalogItem { return v }
+
+// copyMenuItem 複製選單項。
+func copyMenuItem(v MenuItem) MenuItem { return v }
+
+// copyPermissionSetItem 複製權限集合項。
+func copyPermissionSetItem(v PermissionSetItem) PermissionSetItem { return v }
+
 // copyPermissionSetAssignment 複製權限集合指派。
 func copyPermissionSetAssignment(v PermissionSetAssignment) PermissionSetAssignment {
 	if v.StartsAt != nil {

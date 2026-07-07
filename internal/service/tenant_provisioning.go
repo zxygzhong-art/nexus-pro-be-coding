@@ -91,10 +91,17 @@ func (c *Service) ProvisionTenant(ctx context.Context, input TenantProvisionInpu
 		if err := tx.UpsertTenant(ctx, domain.Tenant{ID: normalized.TenantID, Name: normalized.TenantName, CreatedAt: now}); err != nil {
 			return err
 		}
+		if err := syncPermissionCatalogForTenant(ctx, tx, normalized.TenantID, now); err != nil {
+			return err
+		}
 		if err := tx.UpsertOrgUnit(ctx, tenantProvisionRootOrgUnit(normalized, ids, now)); err != nil {
 			return err
 		}
-		if err := tx.UpsertPermissionSet(ctx, tenantProvisionAdminPermissionSet(normalized, ids, now)); err != nil {
+		adminPermissionSet := tenantProvisionAdminPermissionSet(normalized, ids, now)
+		if err := tx.UpsertPermissionSet(ctx, adminPermissionSet); err != nil {
+			return err
+		}
+		if _, err := syncPermissionSetItems(ctx, tx, adminPermissionSet, now); err != nil {
 			return err
 		}
 		if err := tx.UpsertAccount(ctx, tenantProvisionAdminAccount(normalized, ids, now)); err != nil {
