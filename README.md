@@ -35,7 +35,7 @@ cp .env.example .env
 
 The application reads environment variables directly. Export them in your shell or load `.env` with your preferred local tool.
 
-Grafana is available at `http://localhost:3000` with the local credentials `admin` / `admin`. Prometheus, Loki, and Tempo data sources are provisioned automatically.
+Grafana is available at `http://localhost:24000` with the local credentials `admin` / `admin`. Prometheus, Loki, and Tempo data sources are provisioned automatically.
 
 ### Containerized API
 
@@ -54,7 +54,7 @@ OpenTelemetry tracing is disabled by default. To send traces through the local C
 ```sh
 export OTEL_ENABLED=true
 export OTEL_SERVICE_NAME=nexus-pro-be
-export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
+export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:24317
 export OTEL_EXPORTER_OTLP_INSECURE=true
 export METRICS_ADDR=0.0.0.0:9091
 go run ./cmd/api

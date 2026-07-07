@@ -124,7 +124,6 @@ type (
 	WorkflowReviewQueueResponse        = domain.WorkflowReviewQueueResponse
 	BulkReviewFormResult               = domain.BulkReviewFormResult
 	BulkReviewFormsResponse            = domain.BulkReviewFormsResponse
-	KnowledgeArticle                   = domain.KnowledgeArticle
 	Reference                          = domain.Reference
 	AgentRun                           = domain.AgentRun
 	AgentRunStatus                     = domain.AgentRunStatus
@@ -139,7 +138,6 @@ type (
 	NotificationReadAllResponse        = domain.NotificationReadAllResponse
 	AuditLog                           = domain.AuditLog
 	OutboxEvent                        = domain.OutboxEvent
-	AuthzOutboxEvent                   = domain.AuthzOutboxEvent
 	PageRequest                        = domain.PageRequest
 	PageResponse[T any]                = domain.PageResponse[T]
 	FieldError                         = domain.FieldError
@@ -295,7 +293,6 @@ const (
 	ResourceFieldPolicy               = domain.ResourceFieldPolicy
 	ResourceAssumableRole             = domain.ResourceAssumableRole
 	ResourceTool                      = domain.ResourceTool
-	ResourceKnowledgeArticle          = domain.ResourceKnowledgeArticle
 	ResourceEmployeeCollection        = domain.ResourceEmployeeCollection
 	ResourceFormInstance              = domain.ResourceFormInstance
 	ResourceNotification              = domain.ResourceNotification

@@ -17,6 +17,9 @@ type AuditLog struct {
 	CreatedAt      time.Time      `json:"created_at"`
 }
 
+// OutboxAggregateAuthz 標記授權相關的 outbox 事件,dispatcher 依此路由。
+const OutboxAggregateAuthz = "authz"
+
 // OutboxEvent 定義 outbox 事件的資料結構。
 type OutboxEvent struct {
 	ID            string         `json:"id"`

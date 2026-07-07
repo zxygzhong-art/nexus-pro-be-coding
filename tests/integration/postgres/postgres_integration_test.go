@@ -692,7 +692,7 @@ func requireTenantsSystemReadPolicy(t *testing.T, pool *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	if !exists {
-		t.Skip("tenants system_read_tenants policy is not migrated; run migration 000003 to exercise system-task RLS reads")
+		t.Skip("tenants system_read_tenants policy is not migrated; run current migrations to exercise system-task RLS reads")
 	}
 }
 

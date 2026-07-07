@@ -47,7 +47,6 @@ type Store struct {
 	workflowStageInstances map[string]map[string]domain.WorkflowStageInstance
 	workflowStageAssignees map[string]map[string]domain.WorkflowStageAssignee
 	workflowActions        map[string][]domain.WorkflowAction
-	knowledgeArticles      map[string]map[string]KnowledgeArticle
 	platformTaskItems      map[string]map[string]PlatformTaskRecordItem
 	platformTaskTodos      map[string]map[string]PlatformTaskTodoRecord
 	agentRuns              map[string]map[string]AgentRun
@@ -55,7 +54,6 @@ type Store struct {
 	notificationRecipients map[string]map[string]NotificationRecipient
 	auditLogs              map[string][]AuditLog
 	permissionVersions     map[string]int64
-	authzOutbox            map[string][]AuthzOutboxEvent
 	identityOutbox         map[string][]IdentityProvisioningOutboxEvent
 	outboxEvents           map[string][]OutboxEvent
 	relationshipTuples     map[string]map[string]AuthzRelationshipTuple
@@ -93,7 +91,6 @@ func NewStore() *Store {
 		workflowStageInstances: map[string]map[string]domain.WorkflowStageInstance{},
 		workflowStageAssignees: map[string]map[string]domain.WorkflowStageAssignee{},
 		workflowActions:        map[string][]domain.WorkflowAction{},
-		knowledgeArticles:      map[string]map[string]KnowledgeArticle{},
 		platformTaskItems:      map[string]map[string]PlatformTaskRecordItem{},
 		platformTaskTodos:      map[string]map[string]PlatformTaskTodoRecord{},
 		agentRuns:              map[string]map[string]AgentRun{},
@@ -101,7 +98,6 @@ func NewStore() *Store {
 		notificationRecipients: map[string]map[string]NotificationRecipient{},
 		auditLogs:              map[string][]AuditLog{},
 		permissionVersions:     map[string]int64{},
-		authzOutbox:            map[string][]AuthzOutboxEvent{},
 		identityOutbox:         map[string][]IdentityProvisioningOutboxEvent{},
 		outboxEvents:           map[string][]OutboxEvent{},
 		relationshipTuples:     map[string]map[string]AuthzRelationshipTuple{},
@@ -139,10 +135,19 @@ func (s *Store) ListTenants(_ context.Context) ([]Tenant, error) {
 	return out, nil
 }
 
-// UpsertAccount 從儲存層處理 upsert 帳號。
+// UpsertAccount 從儲存層處理 upsert 帳號。Version > 0 時執行樂觀鎖檢查。
 func (s *Store) UpsertAccount(_ context.Context, v Account) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	existing, ok := getNested(s.accounts, v.TenantID, v.ID)
+	if ok {
+		if v.Version > 0 && existing.Version != v.Version {
+			return domain.Conflict("account was modified concurrently")
+		}
+		v.Version = existing.Version + 1
+	} else {
+		v.Version = 1
+	}
 	putNested(s.accounts, v.TenantID, v.ID, copyAccount(v))
 	return nil
 }
@@ -201,10 +206,19 @@ func (s *Store) ListUserIdentities(_ context.Context, tenantID, accountID string
 	return out, nil
 }
 
-// UpsertUserGroup 從儲存層處理 upsert 使用者群組。
+// UpsertUserGroup 從儲存層處理 upsert 使用者群組。Version > 0 時執行樂觀鎖檢查。
 func (s *Store) UpsertUserGroup(_ context.Context, v UserGroup) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	existing, ok := getNested(s.userGroups, v.TenantID, v.ID)
+	if ok {
+		if v.Version > 0 && existing.Version != v.Version {
+			return domain.Conflict("user group was modified concurrently")
+		}
+		v.Version = existing.Version + 1
+	} else {
+		v.Version = 1
+	}
 	putNested(s.userGroups, v.TenantID, v.ID, copyUserGroup(v))
 	return nil
 }
@@ -313,18 +327,6 @@ func (s *Store) GetDataScope(_ context.Context, tenantID, id string) (DataScope,
 		return DataScope{}, false, nil
 	}
 	return copyDataScope(v), true, nil
-}
-
-// GetDataScopeByCode 從儲存層取得資料範圍 by 碼。
-func (s *Store) GetDataScopeByCode(_ context.Context, tenantID, code string) (DataScope, bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	for _, v := range s.dataScopes[tenantID] {
-		if v.Code == code {
-			return copyDataScope(v), true, nil
-		}
-	}
-	return DataScope{}, false, nil
 }
 
 // ListDataScopes 從儲存層列出資料範圍。
@@ -1078,17 +1080,6 @@ func (s *Store) UpsertAttendanceShiftAssignment(_ context.Context, v AttendanceS
 	return nil
 }
 
-// GetAttendanceShiftAssignment 從儲存層取得考勤班別指派。
-func (s *Store) GetAttendanceShiftAssignment(_ context.Context, tenantID, id string) (AttendanceShiftAssignment, bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	v, ok := getNested(s.attendanceAssignments, tenantID, id)
-	if !ok {
-		return AttendanceShiftAssignment{}, false, nil
-	}
-	return copyAttendanceShiftAssignment(v), true, nil
-}
-
 // ListAttendanceShiftAssignments 從儲存層列出考勤班別指派。
 func (s *Store) ListAttendanceShiftAssignments(_ context.Context, tenantID string) ([]AttendanceShiftAssignment, error) {
 	s.mu.RLock()
@@ -1138,17 +1129,6 @@ func (s *Store) UpsertAttendanceClockRecord(_ context.Context, v AttendanceClock
 	}
 	putNested(s.attendanceClockRecords, v.TenantID, v.ID, copyAttendanceClockRecord(v))
 	return nil
-}
-
-// GetAttendanceClockRecord 從儲存層取得考勤打卡 record。
-func (s *Store) GetAttendanceClockRecord(_ context.Context, tenantID, id string) (AttendanceClockRecord, bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	v, ok := getNested(s.attendanceClockRecords, tenantID, id)
-	if !ok {
-		return AttendanceClockRecord{}, false, nil
-	}
-	return copyAttendanceClockRecord(v), true, nil
 }
 
 // GetAcceptedAttendanceClockRecord 從儲存層取得 accepted 考勤打卡 record。
@@ -1381,10 +1361,19 @@ func (s *Store) ListFormTemplates(_ context.Context, tenantID string) ([]FormTem
 	return out, nil
 }
 
-// UpsertFormInstance 從儲存層處理 upsert 表單實例。
+// UpsertFormInstance 從儲存層處理 upsert 表單實例。Version > 0 時執行樂觀鎖檢查。
 func (s *Store) UpsertFormInstance(_ context.Context, v FormInstance) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	existing, ok := getNested(s.formInstances, v.TenantID, v.ID)
+	if ok {
+		if v.Version > 0 && existing.Version != v.Version {
+			return domain.Conflict("form instance was modified concurrently")
+		}
+		v.Version = existing.Version + 1
+	} else {
+		v.Version = 1
+	}
 	putNested(s.formInstances, v.TenantID, v.ID, copyFormInstance(v))
 	return nil
 }
@@ -1459,23 +1448,6 @@ func (s *Store) DeleteFormInstance(_ context.Context, tenantID, id string) error
 	defer s.mu.Unlock()
 	delete(s.formInstances[tenantID], id)
 	return nil
-}
-
-// UpsertKnowledgeArticle 從儲存層處理 upsert 知識文章。
-func (s *Store) UpsertKnowledgeArticle(_ context.Context, v KnowledgeArticle) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	putNested(s.knowledgeArticles, v.TenantID, v.ID, copyKnowledgeArticle(v))
-	return nil
-}
-
-// ListKnowledgeArticles 從儲存層列出知識文章。
-func (s *Store) ListKnowledgeArticles(_ context.Context, tenantID string) ([]KnowledgeArticle, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := copyNestedValues(s.knowledgeArticles[tenantID], copyKnowledgeArticle)
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
-	return out, nil
 }
 
 // UpsertPlatformTaskItem 從儲存層處理 upsert 平台任務項目。
@@ -1586,17 +1558,6 @@ func (s *Store) UpsertAgentRun(_ context.Context, v AgentRun) error {
 	defer s.mu.Unlock()
 	putNested(s.agentRuns, v.TenantID, v.ID, copyAgentRun(v))
 	return nil
-}
-
-// GetAgentRun 從儲存層取得 agent 執行。
-func (s *Store) GetAgentRun(_ context.Context, tenantID, id string) (AgentRun, bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	v, ok := getNested(s.agentRuns, tenantID, id)
-	if !ok {
-		return AgentRun{}, false, nil
-	}
-	return copyAgentRun(v), true, nil
 }
 
 // ListAgentRuns 從儲存層列出 agent 執行紀錄。
@@ -1940,27 +1901,6 @@ func (s *Store) ListAuthzRelationshipTuplesForObject(_ context.Context, tenantID
 	return out, nil
 }
 
-// AppendAuthzOutboxEvent 從儲存層附加授權 outbox 事件。
-func (s *Store) AppendAuthzOutboxEvent(_ context.Context, v AuthzOutboxEvent) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.authzOutbox[v.TenantID] = append(s.authzOutbox[v.TenantID], copyAuthzOutboxEvent(v))
-	return nil
-}
-
-// ListAuthzOutboxEvents 從儲存層列出授權 outbox 事件。
-func (s *Store) ListAuthzOutboxEvents(_ context.Context, tenantID string) ([]AuthzOutboxEvent, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	src := s.authzOutbox[tenantID]
-	out := make([]AuthzOutboxEvent, 0, len(src))
-	for _, v := range src {
-		out = append(out, copyAuthzOutboxEvent(v))
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
-	return out, nil
-}
-
 // AppendIdentityProvisioningOutboxEvent 從儲存層附加身分開通 outbox 事件。
 func (s *Store) AppendIdentityProvisioningOutboxEvent(_ context.Context, v IdentityProvisioningOutboxEvent) error {
 	s.mu.Lock()
@@ -2020,32 +1960,18 @@ func (s *Store) ListOutboxEvents(_ context.Context, tenantID string) ([]OutboxEv
 	return out, nil
 }
 
-// UpdateAuthzOutboxEvent 從儲存層更新授權 outbox 事件。
-func (s *Store) UpdateAuthzOutboxEvent(_ context.Context, v AuthzOutboxEvent) error {
+// UpdateOutboxEvent 從儲存層更新 outbox 事件處理狀態。
+func (s *Store) UpdateOutboxEvent(_ context.Context, v OutboxEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	events := s.authzOutbox[v.TenantID]
+	events := s.outboxEvents[v.TenantID]
 	for i := range events {
 		if events[i].ID == v.ID {
-			events[i] = copyAuthzOutboxEvent(v)
-			s.authzOutbox[v.TenantID] = events
+			events[i] = copyOutboxEvent(v)
+			s.outboxEvents[v.TenantID] = events
 			return nil
 		}
 	}
-	return nil
-}
-
-// RemoveAccountGroup 從儲存層移除帳號群組。
-func (s *Store) RemoveAccountGroup(_ context.Context, tenantID, accountID, groupID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	accountBucket := s.accounts[tenantID]
-	account, ok := accountBucket[accountID]
-	if !ok {
-		return nil
-	}
-	account.UserGroupIDs = utils.RemoveString(account.UserGroupIDs, groupID)
-	accountBucket[accountID] = account
 	return nil
 }
 

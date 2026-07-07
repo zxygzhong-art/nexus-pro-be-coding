@@ -1,11 +1,16 @@
 package service
 
-import "context"
+import (
+	"context"
+
+	"nexus-pro-be/internal/domain"
+)
 
 // IdentityFacade 定義身分 facade 的行為契約。
 type IdentityFacade interface {
 	ResolveAuthenticatedPrincipal(context.Context, AuthenticatedPrincipal) (IdentityResolution, error)
 	ResolveBoundAuthenticatedPrincipal(context.Context, AuthenticatedPrincipal) (IdentityResolution, error)
+	VerifyGoogleSSOLogin(context.Context, AuthenticatedPrincipal) (domain.SSOLoginVerification, error)
 }
 
 // MeFacade 定義 me facade 的行為契約。
@@ -106,11 +111,17 @@ type PlatformFacade interface {
 	UpdateTaskTodo(RequestContext, string, UpdatePlatformTaskTodoInput) (PlatformTaskTodo, error)
 	DeleteTaskTodo(RequestContext, string) (PlatformTaskTodo, error)
 	ConvertTaskTodo(RequestContext, string, ConvertPlatformTaskTodoInput) (PlatformTaskItem, error)
+}
+
+// WorkspaceFacade 定義工作區 facade 的行為契約。
+type WorkspaceFacade interface {
 	Workspace(RequestContext) (PlatformWorkspaceResponse, error)
 	WorkspaceOverview(RequestContext, WorkspaceOverviewQuery) (WorkspaceOverviewResponse, error)
 	WorkspaceEmployees(RequestContext, PlatformWorkspaceEmployeesQuery) (PlatformWorkspaceEmployeesResponse, error)
 	WorkspaceOrganization(RequestContext) (WorkspaceOrganizationResponse, error)
 	UpdateWorkspaceOrganizationManager(RequestContext, string, UpdateWorkspaceOrganizationManagerInput) (WorkspaceOrganizationResponse, error)
+	WorkspaceTurnover(RequestContext, WorkspaceTurnoverQuery) (WorkspaceTurnoverResponse, error)
+	WorkspaceAttendance(RequestContext, WorkspaceAttendanceQuery) (WorkspaceAttendanceResponse, error)
 	WorkspaceAdmins(RequestContext) (WorkspaceAdminsResponse, error)
 	CreateWorkspaceAdmin(RequestContext, CreateWorkspaceAdminInput) (WorkspaceAdminsResponse, error)
 	UpdateWorkspaceAdminPermissions(RequestContext, string, UpdateWorkspaceAdminPermissionsInput) (WorkspaceAdminsResponse, error)
@@ -120,19 +131,7 @@ type PlatformFacade interface {
 	UpdateWorkspaceFormDesign(RequestContext, string, UpdateWorkspaceFormDesignInput) (PlatformFormDesign, error)
 	DeleteWorkspaceFormDesign(RequestContext, string) (PlatformFormDesign, error)
 	WorkspaceAuditLogs(RequestContext, WorkspaceAuditLogQuery, PageRequest) (PageResponse[WorkspaceAuditLog], error)
-	WorkspaceAttendance(RequestContext, WorkspaceAttendanceQuery) (WorkspaceAttendanceResponse, error)
-	WorkspaceTurnover(RequestContext, WorkspaceTurnoverQuery) (WorkspaceTurnoverResponse, error)
 	Insights(RequestContext, PlatformInsightsQuery) (PlatformInsightsResponse, error)
-}
-
-// WorkspaceFacade 定義工作區 facade 的行為契約。
-type WorkspaceFacade interface {
-	WorkspaceOverview(RequestContext, WorkspaceOverviewQuery) (WorkspaceOverviewResponse, error)
-	WorkspaceOrganization(RequestContext) (WorkspaceOrganizationResponse, error)
-	WorkspaceTurnover(RequestContext, WorkspaceTurnoverQuery) (WorkspaceTurnoverResponse, error)
-	WorkspaceAttendance(RequestContext, WorkspaceAttendanceQuery) (WorkspaceAttendanceResponse, error)
-	WorkspaceAdmins(RequestContext) (WorkspaceAdminsResponse, error)
-	WorkspaceAuditLogs(RequestContext, WorkspaceAuditLogQuery, PageRequest) (PageResponse[WorkspaceAuditLog], error)
 }
 
 // WorkflowFacade 定義流程 facade 的行為契約。

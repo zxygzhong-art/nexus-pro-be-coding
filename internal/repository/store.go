@@ -15,7 +15,6 @@ type Store interface {
 	EmployeeStore
 	AttendanceStore
 	WorkflowStore
-	KnowledgeStore
 	TaskStore
 	AgentStore
 	NotificationStore

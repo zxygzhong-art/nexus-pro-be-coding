@@ -12,7 +12,6 @@ import (
 	"strings"
 	"testing"
 	"time"
-	"unicode/utf8"
 
 	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/repository"
@@ -97,6 +96,47 @@ func TestReadFacadesReturnForbiddenWhenReadPermissionMissing(t *testing.T) {
 	}
 }
 
+// TestEmployeeQuerySkipsSuccessfulReadAudit 驗證成功 query 不寫入操作稽核，export 仍保留。
+func TestEmployeeQuerySkipsSuccessfulReadAudit(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "read", Scope: "all"},
+		{Resource: "hr.employee", Action: "export", Scope: "all"},
+	})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-1",
+		TenantID:         "tenant-1",
+		EmployeeNo:       "E0001",
+		Name:             "Employee One",
+		Status:           "active",
+		EmploymentStatus: "active",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	})
+
+	if _, err := svc.HR().QueryEmployees(ctx, domain.EmployeeQuery{}); err != nil {
+		t.Fatal(err)
+	}
+	logs, err := store.ListAuditLogs(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findAuditLog(logs, "hr.employee.query"); ok {
+		t.Fatalf("employee query should not write audit log, got %+v", logs)
+	}
+
+	if _, err := svc.HR().ExportEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}); err != nil {
+		t.Fatal(err)
+	}
+	logs, err = store.ListAuditLogs(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := findAuditLog(logs, "hr.employee.export"); !ok {
+		t.Fatalf("employee export should keep audit log, got %+v", logs)
+	}
+}
+
 // TestCheckRequiresSpecificTarget 驗證 requires specific target。
 func TestCheckRequiresSpecificTarget(t *testing.T) {
 	svc, ctx := newServiceFixture([]domain.Permission{
@@ -136,8 +176,8 @@ func TestCheckRequiresSpecificTarget(t *testing.T) {
 	}
 }
 
-// TestCreateAgentRunPreservesMultibyteReferenceSnippet 驗證 agent 執行 preserves multibyte reference snippet。
-func TestCreateAgentRunPreservesMultibyteReferenceSnippet(t *testing.T) {
+// TestCreateAgentRunReturnsPlaceholderWithoutKnowledgeArticles 驗證 agent 執行在沒有知識文章表時回傳占位回答。
+func TestCreateAgentRunReturnsPlaceholderWithoutKnowledgeArticles(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
 	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
@@ -148,7 +188,6 @@ func TestCreateAgentRunPreservesMultibyteReferenceSnippet(t *testing.T) {
 		Permissions: []domain.Permission{
 			{Resource: "agent.run", Action: "create", Scope: "all"},
 			{Resource: "agent.tool", Action: "call", Target: "knowledge.search", Scope: "all"},
-			{Resource: "agent.knowledge_article", Action: "read", Scope: "all"},
 		},
 		CreatedAt: now,
 	})
@@ -159,28 +198,16 @@ func TestCreateAgentRunPreservesMultibyteReferenceSnippet(t *testing.T) {
 		DirectPermissionSetIDs: []string{"ps-agent"},
 		CreatedAt:              now,
 	})
-	_ = store.UpsertKnowledgeArticle(context.Background(), domain.KnowledgeArticle{
-		ID:        "ka-1",
-		TenantID:  "tenant-1",
-		Title:     "请假制度",
-		Content:   "A" + strings.Repeat("请", 121),
-		CreatedAt: now,
-	})
 
 	run, err := service.New(store).Agent().CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}, domain.CreateAgentRunInput{Prompt: "请"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(run.References) != 1 {
-		t.Fatalf("expected one knowledge reference, got %d", len(run.References))
+	if len(run.References) != 0 {
+		t.Fatalf("expected no knowledge references, got %+v", run.References)
 	}
-
-	snippet := run.References[0].Snippet
-	if !utf8.ValidString(snippet) {
-		t.Fatalf("snippet is not valid UTF-8: %q", snippet)
-	}
-	if want := "A" + strings.Repeat("请", 119) + "..."; snippet != want {
-		t.Fatalf("unexpected snippet: got %q want %q", snippet, want)
+	if !strings.Contains(run.Answer, "没有可检索的知识库内容") {
+		t.Fatalf("unexpected placeholder answer: %s", run.Answer)
 	}
 	if len(run.ToolDecisions) != 1 || !run.ToolDecisions[0].Allowed {
 		t.Fatalf("expected authorized knowledge tool decision, got %+v", run.ToolDecisions)
@@ -205,13 +232,6 @@ func TestCreateAgentRunRequiresToolPermission(t *testing.T) {
 	account, _, _ := store.GetAccount(context.Background(), "tenant-1", "acct-1")
 	account.DirectPermissionSetIDs = []string{"ps-agent-run"}
 	_ = store.UpsertAccount(context.Background(), account)
-	_ = store.UpsertKnowledgeArticle(context.Background(), domain.KnowledgeArticle{
-		ID:        "ka-1",
-		TenantID:  "tenant-1",
-		Title:     "请假制度",
-		Content:   "请假制度内容",
-		CreatedAt: now,
-	})
 
 	_, err := service.New(store).Agent().CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}, domain.CreateAgentRunInput{Prompt: "请假"})
 	if err == nil {
@@ -274,56 +294,6 @@ func TestAgentRunListRespectsOwnerScope(t *testing.T) {
 	}
 }
 
-// TestCreateAgentRunFiltersUnauthorizedKnowledge 驗證 agent 執行篩選未授權知識。
-func TestCreateAgentRunFiltersUnauthorizedKnowledge(t *testing.T) {
-	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
-	store := memory.NewStore()
-	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
-	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
-		ID:       "ps-agent",
-		TenantID: "tenant-1",
-		Name:     "Agent Tool",
-		Permissions: []domain.Permission{
-			{Resource: "agent.run", Action: "create", Scope: "all"},
-			{Resource: "agent.tool", Action: "call", Target: "knowledge.search", Scope: "all"},
-			{Resource: "agent.knowledge_article", Action: "read", Target: "ka-allowed", Scope: "all"},
-		},
-		CreatedAt: now,
-	})
-	_ = store.UpsertAccount(context.Background(), domain.Account{
-		ID:                     "acct-1",
-		TenantID:               "tenant-1",
-		Status:                 "active",
-		DirectPermissionSetIDs: []string{"ps-agent"},
-		CreatedAt:              now,
-	})
-	_ = store.UpsertKnowledgeArticle(context.Background(), domain.KnowledgeArticle{
-		ID:        "ka-allowed",
-		TenantID:  "tenant-1",
-		Title:     "请假制度公开版",
-		Content:   "请假公开制度",
-		CreatedAt: now,
-	})
-	_ = store.UpsertKnowledgeArticle(context.Background(), domain.KnowledgeArticle{
-		ID:        "ka-denied",
-		TenantID:  "tenant-1",
-		Title:     "请假制度敏感版",
-		Content:   "请假敏感薪资字段",
-		CreatedAt: now.Add(time.Minute),
-	})
-
-	run, err := service.New(store).Agent().CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}, domain.CreateAgentRunInput{Prompt: "请假"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(run.References) != 1 || run.References[0].Title != "请假制度公开版" {
-		t.Fatalf("expected only authorized knowledge reference, got %+v", run.References)
-	}
-	if strings.Contains(run.Answer, "敏感") {
-		t.Fatalf("unauthorized knowledge leaked into answer: %s", run.Answer)
-	}
-}
-
 // TestAuthzExplicitDenyWins 驗證授權 explicit deny wins。
 func TestAuthzExplicitDenyWins(t *testing.T) {
 	svc, ctx := newServiceFixture([]domain.Permission{
@@ -356,7 +326,7 @@ func TestPermissionRelationRequiresOpenFGA(t *testing.T) {
 		TenantID: "tenant-1",
 		Name:     "Relationship Read",
 		Permissions: []domain.Permission{
-			{Resource: "agent.knowledge_article", Action: "read", Scope: "all", Relation: "viewer"},
+			{Resource: "agent.run", Action: "read", Scope: "all", Relation: "viewer"},
 		},
 		CreatedAt: now,
 	})
@@ -368,7 +338,7 @@ func TestPermissionRelationRequiresOpenFGA(t *testing.T) {
 		CreatedAt:              now,
 	})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
-	req := domain.CheckRequest{Resource: "agent.knowledge_article", ResourceID: "ka-1", Action: "read"}
+	req := domain.CheckRequest{Resource: "agent.run", ResourceID: "run-1", Action: "read"}
 
 	denyChecker := &fixedRelationshipChecker{allowed: false}
 	denied, err := service.New(store, service.Options{Relationships: denyChecker}).Authz().Check(ctx, req)
@@ -387,7 +357,7 @@ func TestPermissionRelationRequiresOpenFGA(t *testing.T) {
 	if !allowed.Allowed {
 		t.Fatalf("expected OpenFGA relationship to allow permission, got %+v", allowed)
 	}
-	if len(allowChecker.checks) != 1 || allowChecker.checks[0].Relation != "viewer" || allowChecker.checks[0].Object != "agent.knowledge_article:ka-1" {
+	if len(allowChecker.checks) != 1 || allowChecker.checks[0].Relation != "viewer" || allowChecker.checks[0].Object != "agent.run:run-1" {
 		t.Fatalf("unexpected relationship check: %+v", allowChecker.checks)
 	}
 }
@@ -3011,11 +2981,11 @@ func TestEmployeeAccountChangesEmitOpenFGATupleOutbox(t *testing.T) {
 	if len(tuples) != 1 || tuples[0].Relation != "owner" || tuples[0].SubjectID != "acct-new" {
 		t.Fatalf("expected owner tuple to move to new account, got %+v", tuples)
 	}
-	events, err := store.ListAuthzOutboxEvents(context.Background(), "tenant-1")
+	events, err := store.ListOutboxEvents(context.Background(), "tenant-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !hasAuthzOutboxEvent(events, string(domain.EventOpenFGARelationshipWrite)) || !hasAuthzOutboxEvent(events, string(domain.EventOpenFGARelationshipDelete)) {
+	if !hasBusinessOutboxEvent(events, string(domain.EventOpenFGARelationshipWrite)) || !hasBusinessOutboxEvent(events, string(domain.EventOpenFGARelationshipDelete)) {
 		t.Fatalf("expected OpenFGA write/delete outbox events, got %+v", events)
 	}
 }
@@ -4855,7 +4825,7 @@ func TestPlatformWorkspaceOrganizationManagerUpdatePersistsHierarchy(t *testing.
 	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
-	organization, err := svc.Platform().UpdateWorkspaceOrganizationManager(ctx, "E1002", domain.UpdateWorkspaceOrganizationManagerInput{ParentID: stringPtr("E1001")})
+	organization, err := svc.Workspace().UpdateWorkspaceOrganizationManager(ctx, "E1002", domain.UpdateWorkspaceOrganizationManagerInput{ParentID: stringPtr("E1001")})
 	if err != nil {
 		if appErr, ok := domain.AsAppError(err); ok {
 			t.Fatalf("%s fields=%+v", appErr.Message, appErr.FieldErrors)
@@ -4874,7 +4844,7 @@ func TestPlatformWorkspaceOrganizationManagerUpdatePersistsHierarchy(t *testing.
 		t.Fatalf("expected refreshed organization row to point at E1001, got %+v", row)
 	}
 
-	if _, err := svc.Platform().UpdateWorkspaceOrganizationManager(ctx, "E1001", domain.UpdateWorkspaceOrganizationManagerInput{ParentID: stringPtr("E1003")}); err == nil {
+	if _, err := svc.Workspace().UpdateWorkspaceOrganizationManager(ctx, "E1001", domain.UpdateWorkspaceOrganizationManagerInput{ParentID: stringPtr("E1003")}); err == nil {
 		t.Fatal("expected manager cycle to be rejected")
 	}
 }
@@ -4929,7 +4899,7 @@ func TestPlatformWorkspaceAdminMutationsPersistPermissionMatrix(t *testing.T) {
 	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-owner", ApprovalConfirmed: true}
 
-	admins, err := svc.Platform().CreateWorkspaceAdmin(ctx, domain.CreateWorkspaceAdminInput{
+	admins, err := svc.Workspace().CreateWorkspaceAdmin(ctx, domain.CreateWorkspaceAdminInput{
 		EmployeeID: "E2002",
 		Permissions: map[string]string{
 			"employees":    "view",
@@ -4955,7 +4925,7 @@ func TestPlatformWorkspaceAdminMutationsPersistPermissionMatrix(t *testing.T) {
 		t.Fatalf("unexpected managed permission set after create: %+v", managedSet.Permissions)
 	}
 
-	admins, err = svc.Platform().UpdateWorkspaceAdminPermissions(ctx, "E2002", domain.UpdateWorkspaceAdminPermissionsInput{
+	admins, err = svc.Workspace().UpdateWorkspaceAdminPermissions(ctx, "E2002", domain.UpdateWorkspaceAdminPermissionsInput{
 		Permissions: map[string]string{
 			"employees":    "edit",
 			"forms":        "none",
@@ -4980,7 +4950,7 @@ func TestPlatformWorkspaceAdminMutationsPersistPermissionMatrix(t *testing.T) {
 		t.Fatalf("expected managed permission set to be replaced, got %+v", managedSet.Permissions)
 	}
 
-	admins, err = svc.Platform().DeleteWorkspaceAdmin(ctx, "E2002")
+	admins, err = svc.Workspace().DeleteWorkspaceAdmin(ctx, "E2002")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5025,7 +4995,7 @@ func TestPlatformWorkspaceFormDesignMutationsPersistTemplateSchema(t *testing.T)
 	svc := service.New(store, service.Options{Now: func() time.Time { return currentNow }})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-forms", ApprovalConfirmed: true}
 
-	design, err := svc.Platform().CreateWorkspaceFormDesign(ctx, domain.SaveWorkspaceFormDesignInput{
+	design, err := svc.Workspace().CreateWorkspaceFormDesign(ctx, domain.SaveWorkspaceFormDesignInput{
 		ID:       "custom-approval",
 		Icon:     "🧪",
 		Name:     "Custom Approval",
@@ -5058,7 +5028,7 @@ func TestPlatformWorkspaceFormDesignMutationsPersistTemplateSchema(t *testing.T)
 	nextName := "Custom Approval v2"
 	disabled := false
 	nextDesc := "second draft"
-	design, err = svc.Platform().UpdateWorkspaceFormDesign(ctx, "custom-approval", domain.UpdateWorkspaceFormDesignInput{
+	design, err = svc.Workspace().UpdateWorkspaceFormDesign(ctx, "custom-approval", domain.UpdateWorkspaceFormDesignInput{
 		Name:    &nextName,
 		Desc:    &nextDesc,
 		Enabled: &disabled,
@@ -5075,7 +5045,7 @@ func TestPlatformWorkspaceFormDesignMutationsPersistTemplateSchema(t *testing.T)
 		t.Fatalf("unexpected updated form projection: %+v", updated)
 	}
 
-	design, err = svc.Platform().DeleteWorkspaceFormDesign(ctx, "custom-approval")
+	design, err = svc.Workspace().DeleteWorkspaceFormDesign(ctx, "custom-approval")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -5512,16 +5482,6 @@ type fixedRelationshipChecker struct {
 func (c *fixedRelationshipChecker) CheckRelationship(_ context.Context, check domain.RelationshipCheck) (bool, error) {
 	c.checks = append(c.checks, check)
 	return c.allowed, nil
-}
-
-// hasAuthzOutboxEvent 驗證授權 outbox 事件。
-func hasAuthzOutboxEvent(events []domain.AuthzOutboxEvent, eventType string) bool {
-	for _, event := range events {
-		if event.EventType == eventType {
-			return true
-		}
-	}
-	return false
 }
 
 // hasBusinessOutboxEvent 驗證 business outbox 事件。

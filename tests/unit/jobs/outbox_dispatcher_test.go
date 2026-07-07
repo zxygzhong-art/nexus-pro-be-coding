@@ -11,16 +11,17 @@ import (
 	"nexus-pro-be/internal/repository/memory"
 )
 
-// TestAuthzOutboxProcessorWritesOpenFGATupleAndMarksSucceeded 驗證授權 outbox processor writes OpenFGA tuple and marks succeeded。
-func TestAuthzOutboxProcessorWritesOpenFGATupleAndMarksSucceeded(t *testing.T) {
+// TestOutboxDispatcherWritesOpenFGATupleAndMarksSucceeded 驗證 outbox dispatcher writes OpenFGA tuple and marks succeeded。
+func TestOutboxDispatcherWritesOpenFGATupleAndMarksSucceeded(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 17, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
 	_ = store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
-	_ = store.AppendAuthzOutboxEvent(ctx, domain.AuthzOutboxEvent{
-		ID:        "outbox-1",
-		TenantID:  "tenant-1",
-		EventType: string(domain.EventOpenFGARelationshipWrite),
+	_ = store.AppendOutboxEvent(ctx, domain.OutboxEvent{
+		ID:            "outbox-1",
+		TenantID:      "tenant-1",
+		EventType:     string(domain.EventOpenFGARelationshipWrite),
+		AggregateType: domain.OutboxAggregateAuthz,
 		Payload: map[string]any{
 			"object_type":  "hr.employee",
 			"object_id":    "emp-1",
@@ -32,9 +33,9 @@ func TestAuthzOutboxProcessorWritesOpenFGATupleAndMarksSucceeded(t *testing.T) {
 		CreatedAt: now,
 	})
 	writer := &recordingTupleWriter{}
-	processor := jobs.NewAuthzOutboxProcessor(store, writer, nil)
+	dispatcher := jobs.NewOutboxDispatcher(store, writer, nil)
 
-	processed, err := processor.ProcessTenant(ctx, "tenant-1", jobs.AuthzOutboxOptions{BatchSize: 10})
+	processed, err := dispatcher.ProcessTenant(ctx, "tenant-1", jobs.OutboxDispatchOptions{BatchSize: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -48,7 +49,7 @@ func TestAuthzOutboxProcessorWritesOpenFGATupleAndMarksSucceeded(t *testing.T) {
 	if change.Operation != domain.AuthzRelationshipTupleWrite || change.Tuple.ObjectType != "hr.employee" || change.Tuple.ObjectID != "emp-1" || change.Tuple.Relation != "owner" || change.Tuple.SubjectID != "acct-1" {
 		t.Fatalf("unexpected tuple change: %+v", change)
 	}
-	events, err := store.ListAuthzOutboxEvents(ctx, "tenant-1")
+	events, err := store.ListOutboxEvents(ctx, "tenant-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,16 +58,17 @@ func TestAuthzOutboxProcessorWritesOpenFGATupleAndMarksSucceeded(t *testing.T) {
 	}
 }
 
-// TestAuthzOutboxProcessorRetriesFailedOpenFGATuple 驗證授權 outbox processor retries failed OpenFGA tuple。
-func TestAuthzOutboxProcessorRetriesFailedOpenFGATuple(t *testing.T) {
+// TestOutboxDispatcherRetriesFailedOpenFGATuple 驗證 outbox dispatcher retries failed OpenFGA tuple。
+func TestOutboxDispatcherRetriesFailedOpenFGATuple(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 6, 17, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
 	_ = store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
-	_ = store.AppendAuthzOutboxEvent(ctx, domain.AuthzOutboxEvent{
-		ID:        "outbox-1",
-		TenantID:  "tenant-1",
-		EventType: string(domain.EventOpenFGARelationshipDelete),
+	_ = store.AppendOutboxEvent(ctx, domain.OutboxEvent{
+		ID:            "outbox-1",
+		TenantID:      "tenant-1",
+		EventType:     string(domain.EventOpenFGARelationshipDelete),
+		AggregateType: domain.OutboxAggregateAuthz,
 		Payload: map[string]any{
 			"object_type":  "hr.employee",
 			"object_id":    "emp-1",
@@ -78,12 +80,12 @@ func TestAuthzOutboxProcessorRetriesFailedOpenFGATuple(t *testing.T) {
 		CreatedAt: now,
 	})
 	writer := &recordingTupleWriter{err: errors.New("openfga unavailable")}
-	processor := jobs.NewAuthzOutboxProcessor(store, writer, nil)
+	dispatcher := jobs.NewOutboxDispatcher(store, writer, nil)
 
-	if _, err := processor.ProcessTenant(ctx, "tenant-1", jobs.AuthzOutboxOptions{BatchSize: 10, MaxRetries: 2}); err != nil {
+	if _, err := dispatcher.ProcessTenant(ctx, "tenant-1", jobs.OutboxDispatchOptions{BatchSize: 10, MaxRetries: 2}); err != nil {
 		t.Fatal(err)
 	}
-	events, err := store.ListAuthzOutboxEvents(ctx, "tenant-1")
+	events, err := store.ListOutboxEvents(ctx, "tenant-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -92,10 +94,10 @@ func TestAuthzOutboxProcessorRetriesFailedOpenFGATuple(t *testing.T) {
 	}
 
 	writer.err = nil
-	if _, err := processor.ProcessTenant(ctx, "tenant-1", jobs.AuthzOutboxOptions{BatchSize: 10, MaxRetries: 2}); err != nil {
+	if _, err := dispatcher.ProcessTenant(ctx, "tenant-1", jobs.OutboxDispatchOptions{BatchSize: 10, MaxRetries: 2}); err != nil {
 		t.Fatal(err)
 	}
-	events, err = store.ListAuthzOutboxEvents(ctx, "tenant-1")
+	events, err = store.ListOutboxEvents(ctx, "tenant-1")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,6 +106,39 @@ func TestAuthzOutboxProcessorRetriesFailedOpenFGATuple(t *testing.T) {
 	}
 	if len(writer.changes) != 2 || writer.changes[1].Operation != domain.AuthzRelationshipTupleDelete {
 		t.Fatalf("expected delete tuple to be retried, got %+v", writer.changes)
+	}
+}
+
+// TestOutboxDispatcherSkipsEventsWithoutHandler 驗證沒有 handler 的領域事件不會被消費或標記失敗。
+func TestOutboxDispatcherSkipsEventsWithoutHandler(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 17, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.AppendOutboxEvent(ctx, domain.OutboxEvent{
+		ID:            "outbox-domain-1",
+		TenantID:      "tenant-1",
+		EventType:     "hr.employee.created",
+		AggregateType: "hr.employee",
+		AggregateID:   "emp-1",
+		Status:        "pending",
+		CreatedAt:     now,
+	})
+	dispatcher := jobs.NewOutboxDispatcher(store, &recordingTupleWriter{}, nil)
+
+	processed, err := dispatcher.ProcessTenant(ctx, "tenant-1", jobs.OutboxDispatchOptions{BatchSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 0 {
+		t.Fatalf("processed = %d, want 0", processed)
+	}
+	events, err := store.ListOutboxEvents(ctx, "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events[0].Status != "pending" {
+		t.Fatalf("expected domain event to stay pending, got %+v", events[0])
 	}
 }
 

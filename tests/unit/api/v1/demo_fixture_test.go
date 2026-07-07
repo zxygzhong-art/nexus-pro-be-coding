@@ -24,7 +24,6 @@ type (
 	LeaveRequest              = domain.LeaveRequest
 	AttendanceClockRecord     = domain.AttendanceClockRecord
 	FormTemplate              = domain.FormTemplate
-	KnowledgeArticle          = domain.KnowledgeArticle
 	PlatformFormColumn        = domain.PlatformFormColumn
 	PlatformFormItem          = domain.PlatformFormItem
 )
@@ -103,7 +102,6 @@ func populateDemoFixture(store repository.Store) {
 			{Resource: "agent.run", Action: "read", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.run", Action: "create", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "knowledge.search", Scope: "all", MenuKey: "agents.runs"},
-			{Resource: "agent.knowledge_article", Action: "read", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "audit.log", Action: "read", Scope: "all", MenuKey: "audit"},
 		},
 		CreatedAt: now,
@@ -131,7 +129,6 @@ func populateDemoFixture(store repository.Store) {
 			{Resource: "agent.run", Action: "read", Scope: "own", MenuKey: "agents.runs"},
 			{Resource: "agent.run", Action: "create", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "knowledge.search", Scope: "all", MenuKey: "agents.runs"},
-			{Resource: "agent.knowledge_article", Action: "read", Scope: "all", MenuKey: "agents.runs"},
 		},
 		CreatedAt: now.Add(time.Minute),
 	}
@@ -276,7 +273,6 @@ func populateDemoFixture(store repository.Store) {
 			{Resource: "attendance.clock", Action: "read", Scope: "all", MenuKey: "attendance.clock"},
 			{Resource: "workflow.form_instance", Action: "read", Scope: "all", MenuKey: "workflow.instances"},
 			{Resource: "agent.run", Action: "read", Scope: "all", MenuKey: "agents.runs"},
-			{Resource: "agent.knowledge_article", Action: "read", Scope: "all", MenuKey: "agents.runs"},
 		},
 		CreatedAt: now.Add(8 * time.Minute),
 	}
@@ -1057,23 +1053,6 @@ func populateDemoFixture(store repository.Store) {
 		Description: "在職證明模板",
 		Schema:      map[string]any{"type": "object"},
 		CreatedAt:   now.Add(time.Minute),
-	})
-
-	_ = store.UpsertKnowledgeArticle(ctx, KnowledgeArticle{
-		ID:        "kb-leave-policy",
-		TenantID:  "demo",
-		Title:     "請假政策",
-		Content:   "員工請假需提前發起申請，餘額不足時需要直屬主管和 HR 確認。年假優先扣減年假餘額，支援按小時申請。",
-		Tags:      []string{"請假", "假勤", "policy"},
-		CreatedAt: now,
-	})
-	_ = store.UpsertKnowledgeArticle(ctx, KnowledgeArticle{
-		ID:        "kb-hr-handbook",
-		TenantID:  "demo",
-		Title:     "員工手冊",
-		Content:   "員工手冊說明組織、考勤、審批與審計規則，所有高危操作需要二次確認。",
-		Tags:      []string{"手冊", "審批", "audit"},
-		CreatedAt: now.Add(time.Minute),
 	})
 
 	// 額外 tenant 用於驗證 tenant 隔離。

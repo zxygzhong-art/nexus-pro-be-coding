@@ -97,7 +97,7 @@ func TestCheckRelationshipIncludesAuthorizationModelID(t *testing.T) {
 		TenantID: "tenant-1",
 		Subject:  "account:acct-1",
 		Relation: "viewer",
-		Object:   "agent.knowledge_article:ka-1",
+		Object:   "agent.run:run-1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestCheckRelationshipReturnsDetailedHTTPError(t *testing.T) {
 		TenantID: "tenant-1",
 		Subject:  "account:acct-1",
 		Relation: "viewer",
-		Object:   "agent.knowledge_article:ka-1",
+		Object:   "agent.run:run-1",
 	})
 	if err == nil {
 		t.Fatal("expected OpenFGA check error")

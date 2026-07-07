@@ -10,6 +10,7 @@ type UserGroup struct {
 	Description      string    `json:"description,omitempty"`
 	MemberAccountIDs []string  `json:"member_account_ids"`
 	PermissionSetIDs []string  `json:"permission_set_ids"`
+	Version          int64     `json:"version"`
 	CreatedAt        time.Time `json:"created_at"`
 }
 
@@ -170,19 +171,6 @@ type AssumeRoleInput struct {
 type PermissionVersion struct {
 	TenantID string `json:"tenant_id"`
 	Version  int64  `json:"version"`
-}
-
-// AuthzOutboxEvent 定義授權 outbox 事件的資料結構。
-type AuthzOutboxEvent struct {
-	ID          string         `json:"id"`
-	TenantID    string         `json:"tenant_id"`
-	EventType   string         `json:"event_type"`
-	Payload     map[string]any `json:"payload,omitempty"`
-	Status      string         `json:"status"`
-	RetryCount  int            `json:"retry_count"`
-	LastError   string         `json:"last_error,omitempty"`
-	CreatedAt   time.Time      `json:"created_at"`
-	ProcessedAt *time.Time     `json:"processed_at,omitempty"`
 }
 
 // AuthzRelationshipTuple 定義授權關係 tuple 的資料結構。

@@ -18,12 +18,16 @@ SELECT * FROM tenants
 ORDER BY created_at ASC;
 
 -- name: UpsertAccount :one
+-- expected_version = 0 表示盲寫(新建或無條件覆蓋);> 0 時執行樂觀鎖檢查,
+-- 版本不符會因 WHERE 不成立而回傳零列(呼叫端轉為 Conflict)。
 INSERT INTO accounts (
     id, tenant_id, display_name, email, employee_id, status,
     user_group_ids, direct_permission_set_ids, active_assumable_role_id,
-    created_at
+    version, created_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(display_name), sqlc.arg(email), sqlc.arg(employee_id), sqlc.arg(status),
+    sqlc.arg(user_group_ids), sqlc.arg(direct_permission_set_ids), sqlc.arg(active_assumable_role_id),
+    1, sqlc.arg(created_at)
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -34,7 +38,9 @@ ON CONFLICT (id) DO UPDATE SET
     user_group_ids = EXCLUDED.user_group_ids,
     direct_permission_set_ids = EXCLUDED.direct_permission_set_ids,
     active_assumable_role_id = EXCLUDED.active_assumable_role_id,
+    version = accounts.version + 1,
     created_at = EXCLUDED.created_at
+WHERE sqlc.arg(expected_version)::bigint = 0 OR accounts.version = sqlc.arg(expected_version)::bigint
 RETURNING *;
 
 -- name: GetAccount :one
@@ -47,11 +53,13 @@ WHERE tenant_id = $1
 ORDER BY created_at ASC;
 
 -- name: UpsertUserGroup :one
+-- expected_version 語義同 UpsertAccount。
 INSERT INTO user_groups (
     id, tenant_id, name, description, member_account_ids,
-    permission_set_ids, created_at
+    permission_set_ids, version, created_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(name), sqlc.arg(description), sqlc.arg(member_account_ids),
+    sqlc.arg(permission_set_ids), 1, sqlc.arg(created_at)
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -59,7 +67,9 @@ ON CONFLICT (id) DO UPDATE SET
     description = EXCLUDED.description,
     member_account_ids = EXCLUDED.member_account_ids,
     permission_set_ids = EXCLUDED.permission_set_ids,
+    version = user_groups.version + 1,
     created_at = EXCLUDED.created_at
+WHERE sqlc.arg(expected_version)::bigint = 0 OR user_groups.version = sqlc.arg(expected_version)::bigint
 RETURNING *;
 
 -- name: GetUserGroup :one
@@ -382,6 +392,16 @@ SELECT * FROM outbox_events
 WHERE tenant_id = $1
 ORDER BY created_at ASC, id ASC;
 
+-- name: UpdateOutboxEvent :one
+UPDATE outbox_events
+SET status = $3,
+    retry_count = $4,
+    last_error = $5,
+    processed_at = $6
+WHERE tenant_id = $1
+  AND id = $2
+RETURNING *;
+
 -- name: UpsertAttendancePolicy :one
 INSERT INTO attendance_policies (
     id, tenant_id, work_time, leave_types, updated_by_account_id, created_at, updated_at
@@ -473,11 +493,13 @@ WHERE tenant_id = $1
 ORDER BY created_at ASC;
 
 -- name: UpsertFormInstance :one
+-- expected_version 語義同 UpsertAccount。
 INSERT INTO form_instances (
     id, tenant_id, template_id, applicant_account_id, status,
-    payload, submitted_at, approved_by, current_run_id, updated_at
+    payload, submitted_at, approved_by, current_run_id, version, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(template_id), sqlc.arg(applicant_account_id), sqlc.arg(status),
+    sqlc.arg(payload)::jsonb, sqlc.arg(submitted_at), sqlc.arg(approved_by), sqlc.arg(current_run_id), 1, sqlc.arg(updated_at)
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -488,7 +510,9 @@ ON CONFLICT (id) DO UPDATE SET
     submitted_at = EXCLUDED.submitted_at,
     approved_by = EXCLUDED.approved_by,
     current_run_id = EXCLUDED.current_run_id,
+    version = form_instances.version + 1,
     updated_at = EXCLUDED.updated_at
+WHERE sqlc.arg(expected_version)::bigint = 0 OR form_instances.version = sqlc.arg(expected_version)::bigint
 RETURNING *;
 
 -- name: GetFormInstance :one
@@ -783,10 +807,6 @@ ON CONFLICT (id) DO UPDATE SET
     updated_at = EXCLUDED.updated_at
 RETURNING *;
 
--- name: GetAttendanceShiftAssignment :one
-SELECT * FROM attendance_shift_assignments
-WHERE tenant_id = $1 AND id = $2;
-
 -- name: ListAttendanceShiftAssignments :many
 SELECT * FROM attendance_shift_assignments
 WHERE tenant_id = $1
@@ -833,10 +853,6 @@ ON CONFLICT (id) DO UPDATE SET
     correction_request_id = EXCLUDED.correction_request_id,
     created_at = EXCLUDED.created_at
 RETURNING *;
-
--- name: GetAttendanceClockRecord :one
-SELECT * FROM attendance_clock_records
-WHERE tenant_id = $1 AND id = $2;
 
 -- name: GetAcceptedAttendanceClockRecord :one
 SELECT * FROM attendance_clock_records
@@ -944,25 +960,6 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (NULLIF(sqlc.arg(to_date)::text, '') IS NULL OR start_at::date <= NULLIF(sqlc.arg(to_date)::text, '')::date)
 ORDER BY created_at ASC;
 
--- name: UpsertKnowledgeArticle :one
-INSERT INTO knowledge_articles (
-    id, tenant_id, title, content, tags, created_at
-) VALUES (
-    $1, $2, $3, $4, $5, $6
-)
-ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    title = EXCLUDED.title,
-    content = EXCLUDED.content,
-    tags = EXCLUDED.tags,
-    created_at = EXCLUDED.created_at
-RETURNING *;
-
--- name: ListKnowledgeArticles :many
-SELECT * FROM knowledge_articles
-WHERE tenant_id = $1
-ORDER BY created_at ASC;
-
 -- name: UpsertPlatformTaskItem :one
 INSERT INTO platform_task_items (
     id, tenant_id, account_id, work_date, title, category,
@@ -1054,10 +1051,6 @@ ON CONFLICT (id) DO UPDATE SET
     updated_at = EXCLUDED.updated_at
 RETURNING *;
 
--- name: GetAgentRun :one
-SELECT * FROM agent_runs
-WHERE tenant_id = $1 AND id = $2;
-
 -- name: ListAgentRuns :many
 SELECT * FROM agent_runs
 WHERE tenant_id = $1
@@ -1126,4 +1119,3 @@ ORDER BY
   id ASC
 LIMIT sqlc.arg(limit_count)::int
 OFFSET sqlc.arg(offset_count)::int;
-

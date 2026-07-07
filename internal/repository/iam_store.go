@@ -22,7 +22,6 @@ type IAMStore interface {
 
 	UpsertDataScope(context.Context, domain.DataScope) error
 	GetDataScope(ctx context.Context, tenantID, id string) (domain.DataScope, bool, error)
-	GetDataScopeByCode(ctx context.Context, tenantID, code string) (domain.DataScope, bool, error)
 	ListDataScopes(ctx context.Context, tenantID string) ([]domain.DataScope, error)
 
 	UpsertFieldPolicy(context.Context, domain.FieldPolicy) error

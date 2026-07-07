@@ -583,14 +583,14 @@ func configuredEHRMSSyncScheduler(cfg config.Config, svc jobs.EHRMSEmployeeSyncS
 // startBackgroundWorkers 啟動background worker。
 func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Logger) {
 	if r.relationshipWriter != nil {
-		// 只有在 OpenFGA 已完整設定且可接受寫入時，tuple outbox 才會執行。
-		processor := jobs.NewAuthzOutboxProcessor(r.store, r.relationshipWriter, logger)
+		// 只有在 OpenFGA 已完整設定且可接受寫入時，outbox dispatcher 才會執行。
+		dispatcher := jobs.NewOutboxDispatcher(r.store, r.relationshipWriter, logger)
 		r.workers.Add(1)
 		go func() {
 			defer r.workers.Done()
-			processor.Run(ctx, jobs.AuthzOutboxOptions{})
+			dispatcher.Run(ctx, jobs.OutboxDispatchOptions{})
 		}()
-		logger.Info("openfga outbox worker started")
+		logger.Info("outbox dispatcher started")
 	}
 	if r.ehrmsSyncScheduler != nil {
 		r.workers.Add(1)

@@ -13,10 +13,13 @@ OPENFGA_STORE_ID ?=
 OPENFGA_MODEL_ID ?=
 OPENFGA_MODEL_FILE ?= ops/openfga/model.json
 
-.PHONY: dev test unit-test ci-local sqlc require-database-url require-openfga-store require-openfga-model-id db-create migrate-up migrate-down migrate-status migrate-validate openfga-apply-model openfga-check-model
+.PHONY: dev test unit-test ci-local sqlc tenant-provision require-database-url require-openfga-store require-openfga-model-id db-create migrate-up migrate-down migrate-status migrate-validate openfga-apply-model openfga-check-model
 
 dev:
 	$(GO) run ./cmd/api
+
+tenant-provision: require-database-url
+	$(GO) run ./cmd/tenantctl provision --database-url "$(DATABASE_URL)" $(TENANT_PROVISION_FLAGS)
 
 test:
 	$(GO) test ./...

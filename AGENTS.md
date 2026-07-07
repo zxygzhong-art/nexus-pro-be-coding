@@ -33,6 +33,14 @@
 - XLSX 員工匯入保持 10 列契約，尤其不要遺失第 J 列 `主管員工ID`。
 - 修改 `db/queries/*.sql` 後執行 `make sqlc`；修改遷移後執行 `make migrate-validate`。
 
+## Platform 與 Workspace 邊界
+
+- **Platform**（`/v1/platform/*`）：授權對象為 `me` 的個人門戶聚合（home、assistants、我的表單填寫、tasks/todos）。
+- **Workspace**（`/v1/workspace/*`）：授權對象為租戶級資源（`hr.employee`、`iam.permission_set_assignment`、`workflow.form_template`、`audit.log`、`attendance.clock`）的管理後台能力。
+- **Insights** 歸 Workspace（`GET /v1/workspace/insights`），資料來自 HR 概覽，不是個人 `me` 域。
+- service 層 **Platform 可依賴 WorkspaceFacade，Workspace 不可依賴 Platform**。
+- 新增 API 時依授權判据落位；禁止在 `/v1/platform/workspace/*` 下新增路由。
+
 ## 專案驗證
 
 - 優先使用倉庫已有命令：`make unit-test`、`make test`、`make sqlc`、`make migrate-validate`。

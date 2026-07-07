@@ -1550,6 +1550,12 @@ func (c WorkflowService) initWorkflowRun(ctx RequestContext, instance domain.For
 		CreatedAt:            now,
 		UpdatedAt:            now,
 	}
+	// 呼叫端在同一交易內剛寫入過此表單,重讀以取得最新 version 供樂觀鎖檢查。
+	if current, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, instance.ID); err != nil {
+		return domain.FormInstance{}, err
+	} else if ok {
+		instance = current
+	}
 	instance.Status = domain.WorkflowFormStatusInReview
 	instance.CurrentRunID = run.ID
 	instance.UpdatedAt = now

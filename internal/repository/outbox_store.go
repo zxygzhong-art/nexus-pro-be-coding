@@ -10,4 +10,5 @@ import (
 type OutboxStore interface {
 	AppendOutboxEvent(context.Context, domain.OutboxEvent) error
 	ListOutboxEvents(ctx context.Context, tenantID string) ([]domain.OutboxEvent, error)
+	UpdateOutboxEvent(context.Context, domain.OutboxEvent) error
 }

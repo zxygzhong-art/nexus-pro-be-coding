@@ -78,6 +78,7 @@ func (a *API) RegisterRoutes(router *gin.Engine) {
 	HealthCtrl{readinessChecks: a.readinessChecks}.RegisterRoutes(router)
 
 	v1 := router.Group("/v1")
+	AuthCtrl{api: a, svc: a.identity, tokenResolver: a.tokenResolver}.RegisterRoutes(v1)
 	MeCtrl{routes: routes, svc: a.me}.RegisterRoutes(v1)
 	AuthzCtrl{routes: routes, svc: a.authz}.RegisterRoutes(v1)
 	IAMCtrl{routes: routes, svc: a.iam}.RegisterRoutes(v1)

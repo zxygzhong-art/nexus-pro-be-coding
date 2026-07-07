@@ -94,7 +94,6 @@ const (
 	ResourceFieldPolicy               ResourceType = "field_policy"
 	ResourceAssumableRole             ResourceType = "assumable_role"
 	ResourceTool                      ResourceType = "tool"
-	ResourceKnowledgeArticle          ResourceType = "knowledge_article"
 	ResourceEmployeeCollection        ResourceType = "employee_collection"
 	ResourceFormInstance              ResourceType = "form_instance"
 	ResourceNotification              ResourceType = "notification"
@@ -282,29 +281,23 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "platform.notification.unread_count", Method: "GET", Path: "/v1/notifications/unread-count", ApplicationCode: "platform", ResourceType: "me", Action: "read"},
 	{Name: "platform.notification.read_one", Method: "POST", Path: "/v1/notifications/:id/read", ApplicationCode: "platform", ResourceType: "me", Action: "update"},
 	{Name: "platform.notification.read_all", Method: "POST", Path: "/v1/notifications/read-all", ApplicationCode: "platform", ResourceType: "me", Action: "update"},
-	{Name: "platform.workspace.read", Method: "GET", Path: "/v1/platform/workspace", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
-	{Name: "platform.workspace_admin.read", Method: "GET", Path: "/v1/platform/workspace/admins", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "read"},
-	{Name: "platform.workspace_admin.create", Method: "POST", Path: "/v1/platform/workspace/admins", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "create", RiskLevel: RiskHigh},
-	{Name: "platform.workspace_admin.update", Method: "PATCH", Path: "/v1/platform/workspace/admins/:id/permissions", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "update", RiskLevel: RiskHigh},
-	{Name: "platform.workspace_admin.delete", Method: "DELETE", Path: "/v1/platform/workspace/admins/:id", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "delete", RiskLevel: RiskHigh},
-	{Name: "platform.workspace_form.read", Method: "GET", Path: "/v1/platform/workspace/forms", ApplicationCode: "workflow", ResourceType: "form_template", Action: "read"},
-	{Name: "platform.workspace_form.create", Method: "POST", Path: "/v1/platform/workspace/forms", ApplicationCode: "workflow", ResourceType: "form_template", Action: "create"},
-	{Name: "platform.workspace_form.update", Method: "PATCH", Path: "/v1/platform/workspace/forms/:id", ApplicationCode: "workflow", ResourceType: "form_template", Action: "update"},
-	{Name: "platform.workspace_form.delete", Method: "DELETE", Path: "/v1/platform/workspace/forms/:id", ApplicationCode: "workflow", ResourceType: "form_template", Action: "delete", RiskLevel: RiskHigh},
-	{Name: "platform.workspace_audit_logs.read", Method: "GET", Path: "/v1/platform/workspace/audit-logs", ApplicationCode: "audit", ResourceType: "audit_log", Action: "read"},
-	{Name: "platform.workspace_overview.read", Method: "GET", Path: "/v1/platform/workspace/overview", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
-	{Name: "platform.workspace_employees.read", Method: "GET", Path: "/v1/platform/workspace/employees", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
-	{Name: "platform.workspace_organization.read", Method: "GET", Path: "/v1/platform/workspace/organization", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
-	{Name: "platform.workspace_organization_manager.update", Method: "PATCH", Path: "/v1/platform/workspace/organization/employees/:id/manager", ApplicationCode: "hr", ResourceType: "employee", Action: "update"},
-	{Name: "platform.workspace_attendance.read", Method: "GET", Path: "/v1/platform/workspace/attendance", ApplicationCode: "attendance", ResourceType: "clock", Action: "read"},
-	{Name: "platform.workspace_turnover.read", Method: "GET", Path: "/v1/platform/workspace/turnover", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
-	{Name: "platform.insights.read", Method: "GET", Path: "/v1/platform/insights", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
 	{Name: "workspace.overview.read", Method: "GET", Path: "/v1/workspace/overview", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
+	{Name: "workspace.read", Method: "GET", Path: "/v1/workspace", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
+	{Name: "workspace.employees.read", Method: "GET", Path: "/v1/workspace/employees", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
 	{Name: "workspace.organization.read", Method: "GET", Path: "/v1/workspace/organization", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
+	{Name: "workspace.organization_manager.update", Method: "PATCH", Path: "/v1/workspace/organization/employees/:id/manager", ApplicationCode: "hr", ResourceType: "employee", Action: "update"},
 	{Name: "workspace.turnover.read", Method: "GET", Path: "/v1/workspace/turnover", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
 	{Name: "workspace.attendance.read", Method: "GET", Path: "/v1/workspace/attendance", ApplicationCode: "attendance", ResourceType: "clock", Action: "read"},
 	{Name: "workspace.admins.read", Method: "GET", Path: "/v1/workspace/admins", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "read"},
+	{Name: "workspace.admin.create", Method: "POST", Path: "/v1/workspace/admins", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "create", RiskLevel: RiskHigh},
+	{Name: "workspace.admin.update", Method: "PATCH", Path: "/v1/workspace/admins/:id/permissions", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "update", RiskLevel: RiskHigh},
+	{Name: "workspace.admin.delete", Method: "DELETE", Path: "/v1/workspace/admins/:id", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "delete", RiskLevel: RiskHigh},
+	{Name: "workspace.form.read", Method: "GET", Path: "/v1/workspace/forms", ApplicationCode: "workflow", ResourceType: "form_template", Action: "read"},
+	{Name: "workspace.form.create", Method: "POST", Path: "/v1/workspace/forms", ApplicationCode: "workflow", ResourceType: "form_template", Action: "create"},
+	{Name: "workspace.form.update", Method: "PATCH", Path: "/v1/workspace/forms/:id", ApplicationCode: "workflow", ResourceType: "form_template", Action: "update"},
+	{Name: "workspace.form.delete", Method: "DELETE", Path: "/v1/workspace/forms/:id", ApplicationCode: "workflow", ResourceType: "form_template", Action: "delete", RiskLevel: RiskHigh},
 	{Name: "workspace.audit_logs.read", Method: "GET", Path: "/v1/workspace/audit-logs", ApplicationCode: "audit", ResourceType: "audit_log", Action: "read"},
+	{Name: "workspace.insights.read", Method: "GET", Path: "/v1/workspace/insights", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
 	{Name: "workflow.form_template.read", Method: "GET", Path: "/v1/forms/templates", ApplicationCode: "workflow", ResourceType: "form_template", Action: "read"},
 	{Name: "workflow.form_template.create", Method: "POST", Path: "/v1/forms/templates", ApplicationCode: "workflow", ResourceType: "form_template", Action: "create"},
 	{Name: "workflow.form_instance.read", Method: "GET", Path: "/v1/workflows/forms", ApplicationCode: "workflow", ResourceType: "form_instance", Action: "read"},

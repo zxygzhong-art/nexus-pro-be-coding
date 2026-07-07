@@ -420,7 +420,7 @@ func (q *Queries) GetAcceptedAttendanceClockRecord(ctx context.Context, arg GetA
 }
 
 const getAccount = `-- name: GetAccount :one
-SELECT id, tenant_id, display_name, email, employee_id, status, user_group_ids, direct_permission_set_ids, active_assumable_role_id, created_at FROM accounts
+SELECT id, tenant_id, display_name, email, employee_id, status, user_group_ids, direct_permission_set_ids, active_assumable_role_id, version, created_at FROM accounts
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -442,35 +442,8 @@ func (q *Queries) GetAccount(ctx context.Context, arg GetAccountParams) (Account
 		&i.UserGroupIds,
 		&i.DirectPermissionSetIds,
 		&i.ActiveAssumableRoleID,
+		&i.Version,
 		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const getAgentRun = `-- name: GetAgentRun :one
-SELECT id, tenant_id, account_id, mode, prompt, answer, status, reference_items, created_at, updated_at FROM agent_runs
-WHERE tenant_id = $1 AND id = $2
-`
-
-type GetAgentRunParams struct {
-	TenantID string `json:"tenant_id"`
-	ID       string `json:"id"`
-}
-
-func (q *Queries) GetAgentRun(ctx context.Context, arg GetAgentRunParams) (AgentRun, error) {
-	row := q.db.QueryRow(ctx, getAgentRun, arg.TenantID, arg.ID)
-	var i AgentRun
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.AccountID,
-		&i.Mode,
-		&i.Prompt,
-		&i.Answer,
-		&i.Status,
-		&i.ReferenceItems,
-		&i.CreatedAt,
-		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -498,44 +471,6 @@ func (q *Queries) GetAssumableRole(ctx context.Context, arg GetAssumableRolePara
 		&i.TrustPolicy,
 		&i.PermissionBoundary,
 		&i.SessionDurationSeconds,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const getAttendanceClockRecord = `-- name: GetAttendanceClockRecord :one
-SELECT id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id, work_date, direction, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, created_at FROM attendance_clock_records
-WHERE tenant_id = $1 AND id = $2
-`
-
-type GetAttendanceClockRecordParams struct {
-	TenantID string `json:"tenant_id"`
-	ID       string `json:"id"`
-}
-
-func (q *Queries) GetAttendanceClockRecord(ctx context.Context, arg GetAttendanceClockRecordParams) (AttendanceClockRecord, error) {
-	row := q.db.QueryRow(ctx, getAttendanceClockRecord, arg.TenantID, arg.ID)
-	var i AttendanceClockRecord
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.EmployeeID,
-		&i.ShiftAssignmentID,
-		&i.ShiftID,
-		&i.WorksiteID,
-		&i.WorkDate,
-		&i.Direction,
-		&i.ClockedAt,
-		&i.Latitude,
-		&i.Longitude,
-		&i.AccuracyMeters,
-		&i.DistanceMeters,
-		&i.RecordStatus,
-		&i.RejectionReason,
-		&i.Source,
-		&i.DeviceID,
-		&i.DeviceInfo,
-		&i.CorrectionRequestID,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -651,34 +586,6 @@ func (q *Queries) GetAttendanceShift(ctx context.Context, arg GetAttendanceShift
 		&i.ClockOutEnd,
 		&i.LateGraceMinutes,
 		&i.EarlyLeaveGraceMinutes,
-		&i.Status,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getAttendanceShiftAssignment = `-- name: GetAttendanceShiftAssignment :one
-SELECT id, tenant_id, employee_id, shift_id, worksite_id, effective_from, effective_to, status, created_at, updated_at FROM attendance_shift_assignments
-WHERE tenant_id = $1 AND id = $2
-`
-
-type GetAttendanceShiftAssignmentParams struct {
-	TenantID string `json:"tenant_id"`
-	ID       string `json:"id"`
-}
-
-func (q *Queries) GetAttendanceShiftAssignment(ctx context.Context, arg GetAttendanceShiftAssignmentParams) (AttendanceShiftAssignment, error) {
-	row := q.db.QueryRow(ctx, getAttendanceShiftAssignment, arg.TenantID, arg.ID)
-	var i AttendanceShiftAssignment
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.EmployeeID,
-		&i.ShiftID,
-		&i.WorksiteID,
-		&i.EffectiveFrom,
-		&i.EffectiveTo,
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -1005,7 +912,7 @@ func (q *Queries) GetEmployeeImportSession(ctx context.Context, arg GetEmployeeI
 }
 
 const getFormInstance = `-- name: GetFormInstance :one
-SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, updated_at FROM form_instances
+SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at FROM form_instances
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -1027,6 +934,7 @@ func (q *Queries) GetFormInstance(ctx context.Context, arg GetFormInstanceParams
 		&i.SubmittedAt,
 		&i.ApprovedBy,
 		&i.CurrentRunID,
+		&i.Version,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -1354,7 +1262,7 @@ func (q *Queries) GetTenant(ctx context.Context, id string) (Tenant, error) {
 }
 
 const getUserGroup = `-- name: GetUserGroup :one
-SELECT id, tenant_id, name, description, member_account_ids, permission_set_ids, created_at FROM user_groups
+SELECT id, tenant_id, name, description, member_account_ids, permission_set_ids, version, created_at FROM user_groups
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -1373,6 +1281,7 @@ func (q *Queries) GetUserGroup(ctx context.Context, arg GetUserGroupParams) (Use
 		&i.Description,
 		&i.MemberAccountIds,
 		&i.PermissionSetIds,
+		&i.Version,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -1481,7 +1390,7 @@ func (q *Queries) InsertWorkflowAction(ctx context.Context, arg InsertWorkflowAc
 }
 
 const listAccounts = `-- name: ListAccounts :many
-SELECT id, tenant_id, display_name, email, employee_id, status, user_group_ids, direct_permission_set_ids, active_assumable_role_id, created_at FROM accounts
+SELECT id, tenant_id, display_name, email, employee_id, status, user_group_ids, direct_permission_set_ids, active_assumable_role_id, version, created_at FROM accounts
 WHERE tenant_id = $1
 ORDER BY created_at ASC
 `
@@ -1505,6 +1414,7 @@ func (q *Queries) ListAccounts(ctx context.Context, tenantID string) ([]Account,
 			&i.UserGroupIds,
 			&i.DirectPermissionSetIds,
 			&i.ActiveAssumableRoleID,
+			&i.Version,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -2345,7 +2255,7 @@ func (q *Queries) ListEmployeesFilteredPage(ctx context.Context, arg ListEmploye
 }
 
 const listFormInstancePageByQuery = `-- name: ListFormInstancePageByQuery :many
-SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, updated_at FROM form_instances fi
+SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at FROM form_instances fi
 WHERE fi.tenant_id = $1
   AND ($2::text = '' OR fi.status = $2)
   AND ($3::text = '' OR fi.template_id = $3)
@@ -2403,6 +2313,7 @@ func (q *Queries) ListFormInstancePageByQuery(ctx context.Context, arg ListFormI
 			&i.SubmittedAt,
 			&i.ApprovedBy,
 			&i.CurrentRunID,
+			&i.Version,
 			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -2416,7 +2327,7 @@ func (q *Queries) ListFormInstancePageByQuery(ctx context.Context, arg ListFormI
 }
 
 const listFormInstances = `-- name: ListFormInstances :many
-SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, updated_at FROM form_instances
+SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at FROM form_instances
 WHERE tenant_id = $1
 ORDER BY submitted_at ASC
 `
@@ -2440,6 +2351,7 @@ func (q *Queries) ListFormInstances(ctx context.Context, tenantID string) ([]For
 			&i.SubmittedAt,
 			&i.ApprovedBy,
 			&i.CurrentRunID,
+			&i.Version,
 			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -2453,7 +2365,7 @@ func (q *Queries) ListFormInstances(ctx context.Context, tenantID string) ([]For
 }
 
 const listFormInstancesByQuery = `-- name: ListFormInstancesByQuery :many
-SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, updated_at FROM form_instances fi
+SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at FROM form_instances fi
 WHERE fi.tenant_id = $1
   AND ($2::text = '' OR fi.status = $2)
   AND ($3::text = '' OR fi.template_id = $3)
@@ -2500,6 +2412,7 @@ func (q *Queries) ListFormInstancesByQuery(ctx context.Context, arg ListFormInst
 			&i.SubmittedAt,
 			&i.ApprovedBy,
 			&i.CurrentRunID,
+			&i.Version,
 			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -2534,39 +2447,6 @@ func (q *Queries) ListFormTemplates(ctx context.Context, tenantID string) ([]For
 			&i.Name,
 			&i.Description,
 			&i.Schema,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listKnowledgeArticles = `-- name: ListKnowledgeArticles :many
-SELECT id, tenant_id, title, content, tags, created_at FROM knowledge_articles
-WHERE tenant_id = $1
-ORDER BY created_at ASC
-`
-
-func (q *Queries) ListKnowledgeArticles(ctx context.Context, tenantID string) ([]KnowledgeArticle, error) {
-	rows, err := q.db.Query(ctx, listKnowledgeArticles, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []KnowledgeArticle
-	for rows.Next() {
-		var i KnowledgeArticle
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.Title,
-			&i.Content,
-			&i.Tags,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -3078,7 +2958,7 @@ func (q *Queries) ListTenants(ctx context.Context) ([]Tenant, error) {
 }
 
 const listUserGroups = `-- name: ListUserGroups :many
-SELECT id, tenant_id, name, description, member_account_ids, permission_set_ids, created_at FROM user_groups
+SELECT id, tenant_id, name, description, member_account_ids, permission_set_ids, version, created_at FROM user_groups
 WHERE tenant_id = $1
 ORDER BY created_at ASC
 `
@@ -3099,6 +2979,7 @@ func (q *Queries) ListUserGroups(ctx context.Context, tenantID string) ([]UserGr
 			&i.Description,
 			&i.MemberAccountIds,
 			&i.PermissionSetIds,
+			&i.Version,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -3374,13 +3255,61 @@ func (q *Queries) ReserveLeaveBalance(ctx context.Context, arg ReserveLeaveBalan
 	return i, err
 }
 
+const updateOutboxEvent = `-- name: UpdateOutboxEvent :one
+UPDATE outbox_events
+SET status = $3,
+    retry_count = $4,
+    last_error = $5,
+    processed_at = $6
+WHERE tenant_id = $1
+  AND id = $2
+RETURNING id, tenant_id, event_type, aggregate_type, aggregate_id, payload, status, retry_count, last_error, created_at, processed_at
+`
+
+type UpdateOutboxEventParams struct {
+	TenantID    string             `json:"tenant_id"`
+	ID          string             `json:"id"`
+	Status      string             `json:"status"`
+	RetryCount  int32              `json:"retry_count"`
+	LastError   string             `json:"last_error"`
+	ProcessedAt pgtype.Timestamptz `json:"processed_at"`
+}
+
+func (q *Queries) UpdateOutboxEvent(ctx context.Context, arg UpdateOutboxEventParams) (OutboxEvent, error) {
+	row := q.db.QueryRow(ctx, updateOutboxEvent,
+		arg.TenantID,
+		arg.ID,
+		arg.Status,
+		arg.RetryCount,
+		arg.LastError,
+		arg.ProcessedAt,
+	)
+	var i OutboxEvent
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EventType,
+		&i.AggregateType,
+		&i.AggregateID,
+		&i.Payload,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.ProcessedAt,
+	)
+	return i, err
+}
+
 const upsertAccount = `-- name: UpsertAccount :one
 INSERT INTO accounts (
     id, tenant_id, display_name, email, employee_id, status,
     user_group_ids, direct_permission_set_ids, active_assumable_role_id,
-    created_at
+    version, created_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9,
+    1, $10
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -3391,8 +3320,10 @@ ON CONFLICT (id) DO UPDATE SET
     user_group_ids = EXCLUDED.user_group_ids,
     direct_permission_set_ids = EXCLUDED.direct_permission_set_ids,
     active_assumable_role_id = EXCLUDED.active_assumable_role_id,
+    version = accounts.version + 1,
     created_at = EXCLUDED.created_at
-RETURNING id, tenant_id, display_name, email, employee_id, status, user_group_ids, direct_permission_set_ids, active_assumable_role_id, created_at
+WHERE $11::bigint = 0 OR accounts.version = $11::bigint
+RETURNING id, tenant_id, display_name, email, employee_id, status, user_group_ids, direct_permission_set_ids, active_assumable_role_id, version, created_at
 `
 
 type UpsertAccountParams struct {
@@ -3406,8 +3337,11 @@ type UpsertAccountParams struct {
 	DirectPermissionSetIds []string           `json:"direct_permission_set_ids"`
 	ActiveAssumableRoleID  string             `json:"active_assumable_role_id"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+	ExpectedVersion        int64              `json:"expected_version"`
 }
 
+// expected_version = 0 表示盲寫(新建或無條件覆蓋);> 0 時執行樂觀鎖檢查,
+// 版本不符會因 WHERE 不成立而回傳零列(呼叫端轉為 Conflict)。
 func (q *Queries) UpsertAccount(ctx context.Context, arg UpsertAccountParams) (Account, error) {
 	row := q.db.QueryRow(ctx, upsertAccount,
 		arg.ID,
@@ -3420,6 +3354,7 @@ func (q *Queries) UpsertAccount(ctx context.Context, arg UpsertAccountParams) (A
 		arg.DirectPermissionSetIds,
 		arg.ActiveAssumableRoleID,
 		arg.CreatedAt,
+		arg.ExpectedVersion,
 	)
 	var i Account
 	err := row.Scan(
@@ -3432,6 +3367,7 @@ func (q *Queries) UpsertAccount(ctx context.Context, arg UpsertAccountParams) (A
 		&i.UserGroupIds,
 		&i.DirectPermissionSetIds,
 		&i.ActiveAssumableRoleID,
+		&i.Version,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -4209,9 +4145,10 @@ func (q *Queries) UpsertEmployeeImportSession(ctx context.Context, arg UpsertEmp
 const upsertFormInstance = `-- name: UpsertFormInstance :one
 INSERT INTO form_instances (
     id, tenant_id, template_id, applicant_account_id, status,
-    payload, submitted_at, approved_by, current_run_id, updated_at
+    payload, submitted_at, approved_by, current_run_id, version, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6::jsonb, $7, $8, $9, $10
+    $1, $2, $3, $4, $5,
+    $6::jsonb, $7, $8, $9, 1, $10
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -4222,8 +4159,10 @@ ON CONFLICT (id) DO UPDATE SET
     submitted_at = EXCLUDED.submitted_at,
     approved_by = EXCLUDED.approved_by,
     current_run_id = EXCLUDED.current_run_id,
+    version = form_instances.version + 1,
     updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, updated_at
+WHERE $11::bigint = 0 OR form_instances.version = $11::bigint
+RETURNING id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at
 `
 
 type UpsertFormInstanceParams struct {
@@ -4232,13 +4171,15 @@ type UpsertFormInstanceParams struct {
 	TemplateID         string             `json:"template_id"`
 	ApplicantAccountID string             `json:"applicant_account_id"`
 	Status             string             `json:"status"`
-	Column6            []byte             `json:"column_6"`
+	Payload            []byte             `json:"payload"`
 	SubmittedAt        pgtype.Timestamptz `json:"submitted_at"`
 	ApprovedBy         string             `json:"approved_by"`
 	CurrentRunID       string             `json:"current_run_id"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ExpectedVersion    int64              `json:"expected_version"`
 }
 
+// expected_version 語義同 UpsertAccount。
 func (q *Queries) UpsertFormInstance(ctx context.Context, arg UpsertFormInstanceParams) (FormInstance, error) {
 	row := q.db.QueryRow(ctx, upsertFormInstance,
 		arg.ID,
@@ -4246,11 +4187,12 @@ func (q *Queries) UpsertFormInstance(ctx context.Context, arg UpsertFormInstance
 		arg.TemplateID,
 		arg.ApplicantAccountID,
 		arg.Status,
-		arg.Column6,
+		arg.Payload,
 		arg.SubmittedAt,
 		arg.ApprovedBy,
 		arg.CurrentRunID,
 		arg.UpdatedAt,
+		arg.ExpectedVersion,
 	)
 	var i FormInstance
 	err := row.Scan(
@@ -4263,6 +4205,7 @@ func (q *Queries) UpsertFormInstance(ctx context.Context, arg UpsertFormInstance
 		&i.SubmittedAt,
 		&i.ApprovedBy,
 		&i.CurrentRunID,
+		&i.Version,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -4312,51 +4255,6 @@ func (q *Queries) UpsertFormTemplate(ctx context.Context, arg UpsertFormTemplate
 		&i.Name,
 		&i.Description,
 		&i.Schema,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const upsertKnowledgeArticle = `-- name: UpsertKnowledgeArticle :one
-INSERT INTO knowledge_articles (
-    id, tenant_id, title, content, tags, created_at
-) VALUES (
-    $1, $2, $3, $4, $5, $6
-)
-ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    title = EXCLUDED.title,
-    content = EXCLUDED.content,
-    tags = EXCLUDED.tags,
-    created_at = EXCLUDED.created_at
-RETURNING id, tenant_id, title, content, tags, created_at
-`
-
-type UpsertKnowledgeArticleParams struct {
-	ID        string             `json:"id"`
-	TenantID  string             `json:"tenant_id"`
-	Title     string             `json:"title"`
-	Content   string             `json:"content"`
-	Tags      []string           `json:"tags"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-}
-
-func (q *Queries) UpsertKnowledgeArticle(ctx context.Context, arg UpsertKnowledgeArticleParams) (KnowledgeArticle, error) {
-	row := q.db.QueryRow(ctx, upsertKnowledgeArticle,
-		arg.ID,
-		arg.TenantID,
-		arg.Title,
-		arg.Content,
-		arg.Tags,
-		arg.CreatedAt,
-	)
-	var i KnowledgeArticle
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.Title,
-		&i.Content,
-		&i.Tags,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -4798,9 +4696,10 @@ func (q *Queries) UpsertTenant(ctx context.Context, arg UpsertTenantParams) (Ten
 const upsertUserGroup = `-- name: UpsertUserGroup :one
 INSERT INTO user_groups (
     id, tenant_id, name, description, member_account_ids,
-    permission_set_ids, created_at
+    permission_set_ids, version, created_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5,
+    $6, 1, $7
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -4808,8 +4707,10 @@ ON CONFLICT (id) DO UPDATE SET
     description = EXCLUDED.description,
     member_account_ids = EXCLUDED.member_account_ids,
     permission_set_ids = EXCLUDED.permission_set_ids,
+    version = user_groups.version + 1,
     created_at = EXCLUDED.created_at
-RETURNING id, tenant_id, name, description, member_account_ids, permission_set_ids, created_at
+WHERE $8::bigint = 0 OR user_groups.version = $8::bigint
+RETURNING id, tenant_id, name, description, member_account_ids, permission_set_ids, version, created_at
 `
 
 type UpsertUserGroupParams struct {
@@ -4820,8 +4721,10 @@ type UpsertUserGroupParams struct {
 	MemberAccountIds []string           `json:"member_account_ids"`
 	PermissionSetIds []string           `json:"permission_set_ids"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	ExpectedVersion  int64              `json:"expected_version"`
 }
 
+// expected_version 語義同 UpsertAccount。
 func (q *Queries) UpsertUserGroup(ctx context.Context, arg UpsertUserGroupParams) (UserGroup, error) {
 	row := q.db.QueryRow(ctx, upsertUserGroup,
 		arg.ID,
@@ -4831,6 +4734,7 @@ func (q *Queries) UpsertUserGroup(ctx context.Context, arg UpsertUserGroupParams
 		arg.MemberAccountIds,
 		arg.PermissionSetIds,
 		arg.CreatedAt,
+		arg.ExpectedVersion,
 	)
 	var i UserGroup
 	err := row.Scan(
@@ -4840,6 +4744,7 @@ func (q *Queries) UpsertUserGroup(ctx context.Context, arg UpsertUserGroupParams
 		&i.Description,
 		&i.MemberAccountIds,
 		&i.PermissionSetIds,
+		&i.Version,
 		&i.CreatedAt,
 	)
 	return i, err

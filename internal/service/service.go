@@ -376,7 +376,21 @@ func (c *Service) auditAuthzTarget(ctx RequestContext, audit AuditTarget, decisi
 	if audit.Event == "" {
 		return nil
 	}
+	if !shouldAuditAuthzDecision(decision) {
+		return nil
+	}
 	return c.auditAuthzDecision(ctx, audit.Event, audit.Resource, audit.Target, decision)
+}
+
+// shouldAuditAuthzDecision 判斷授權決策是否需要寫入操作稽核。
+func shouldAuditAuthzDecision(decision CheckResult) bool {
+	if !decision.Allowed {
+		return true
+	}
+	if decision.RequiresApproval {
+		return true
+	}
+	return decision.Action != ActionRead
 }
 
 // resolveAccess 解析 access 的服務流程。

@@ -56,7 +56,6 @@ func (s *Store) cloneLocked() *Store {
 		workflowStageInstances: cloneNestedMap(s.workflowStageInstances, copyWorkflowStageInstance),
 		workflowStageAssignees: cloneNestedMap(s.workflowStageAssignees, copyWorkflowStageAssignee),
 		workflowActions:        cloneSliceMap(s.workflowActions, copyWorkflowAction),
-		knowledgeArticles:      cloneNestedMap(s.knowledgeArticles, copyKnowledgeArticle),
 		platformTaskItems:      cloneNestedMap(s.platformTaskItems, copyPlatformTaskRecordItem),
 		platformTaskTodos:      cloneNestedMap(s.platformTaskTodos, copyPlatformTaskTodoRecord),
 		agentRuns:              cloneNestedMap(s.agentRuns, copyAgentRun),
@@ -64,7 +63,6 @@ func (s *Store) cloneLocked() *Store {
 		notificationRecipients: cloneNestedMap(s.notificationRecipients, copyNotificationRecipient),
 		auditLogs:              cloneSliceMap(s.auditLogs, copyAuditLog),
 		permissionVersions:     cloneMap(s.permissionVersions, func(v int64) int64 { return v }),
-		authzOutbox:            cloneSliceMap(s.authzOutbox, copyAuthzOutboxEvent),
 		identityOutbox:         cloneSliceMap(s.identityOutbox, func(v IdentityProvisioningOutboxEvent) IdentityProvisioningOutboxEvent { return v }),
 		outboxEvents:           cloneSliceMap(s.outboxEvents, copyOutboxEvent),
 		relationshipTuples:     cloneNestedMap(s.relationshipTuples, func(v AuthzRelationshipTuple) AuthzRelationshipTuple { return v }),
@@ -102,7 +100,6 @@ func (s *Store) replaceLocked(next *Store) {
 	s.workflowStageInstances = next.workflowStageInstances
 	s.workflowStageAssignees = next.workflowStageAssignees
 	s.workflowActions = next.workflowActions
-	s.knowledgeArticles = next.knowledgeArticles
 	s.platformTaskItems = next.platformTaskItems
 	s.platformTaskTodos = next.platformTaskTodos
 	s.agentRuns = next.agentRuns
@@ -110,7 +107,6 @@ func (s *Store) replaceLocked(next *Store) {
 	s.notificationRecipients = next.notificationRecipients
 	s.auditLogs = next.auditLogs
 	s.permissionVersions = next.permissionVersions
-	s.authzOutbox = next.authzOutbox
 	s.identityOutbox = next.identityOutbox
 	s.outboxEvents = next.outboxEvents
 	s.relationshipTuples = next.relationshipTuples

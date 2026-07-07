@@ -31,8 +31,8 @@ docker compose --env-file .env up -d
 MinIO 默认入口：
 
 ```text
-S3 API:  http://127.0.0.1:9000
-Console: http://127.0.0.1:9001
+S3 API:  http://127.0.0.1:24900
+Console: http://127.0.0.1:24901
 Login:   minioadmin / minioadmin
 ```
 
@@ -61,7 +61,7 @@ go run ./cmd/api
 
 ```bash
 OBJECT_STORE_PROVIDER=minio
-OBJECT_STORE_ENDPOINT=http://127.0.0.1:9000
+OBJECT_STORE_ENDPOINT=http://127.0.0.1:24900
 OBJECT_STORE_BUCKET=nexus-hr-imports
 OBJECT_STORE_REGION=us-east-1
 OBJECT_STORE_ACCESS_KEY_ID=minioadmin

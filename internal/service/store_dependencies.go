@@ -8,6 +8,8 @@ type meStore interface {
 }
 
 type identityStore interface {
+	repository.TenantStore
+	repository.AccountStore
 	repository.IdentityStore
 }
 

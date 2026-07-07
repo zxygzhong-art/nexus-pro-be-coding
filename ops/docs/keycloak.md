@@ -52,7 +52,7 @@ COMPOSE_PROFILES=keycloak docker compose --env-file .env up -d --no-deps keycloa
 | 用途 | 地址 |
 | --- | --- |
 | Admin Console / OIDC | `http://127.0.0.1:8080` |
-| Health / Metrics | `http://127.0.0.1:19090` |
+| Health / Metrics | `http://127.0.0.1:24990` |
 
 默认 bootstrap 管理员（仅本地开发）：
 
@@ -89,7 +89,7 @@ COMPOSE_PROFILES=keycloak docker compose --env-file .env up -d --no-deps keycloa
 http://127.0.0.1:8080/realms/nexus-pro
 ```
 
-若通过反向代理或不同端口对外暴露，请使用浏览器和后端实际访问的地址。例如 `.env.example` 中的 `http://localhost:18080/realms/nexus-pro` 表示宿主映射到了 `18080`——关键是 **issuer 与 discovery 端点可达且一致**。
+若通过反向代理或不同端口对外暴露，请使用浏览器和后端实际访问的地址。例如 `.env.example` 中的 `http://127.0.0.1:8080/realms/nexus-pro` 表示宿主映射到了 `8080`——关键是 **issuer 与 discovery 端点可达且一致**。
 
 验证 discovery 端点：
 
@@ -124,9 +124,9 @@ curl -s http://127.0.0.1:8080/realms/nexus-pro/.well-known/openid-configuration 
 
 | 字段 | 本地开发示例 |
 | --- | --- |
-| Valid redirect URIs | `http://localhost:3000/api/auth/keycloak/callback` |
-| Valid post logout redirect URIs | `http://localhost:3000/*` |
-| Web origins | `http://localhost:3000` |
+| Valid redirect URIs | `http://localhost:3002/api/auth/keycloak/callback`, `http://127.0.0.1:3002/api/auth/keycloak/callback` |
+| Valid post logout redirect URIs | `http://localhost:3002/*`, `http://127.0.0.1:3002/*` |
+| Web origins | `http://localhost:3002`, `http://127.0.0.1:3002` |
 
 正式环境替换为实际前端域名，例如 `https://app.example.com/api/auth/keycloak/callback`。
 
@@ -347,7 +347,7 @@ KEYCLOAK_ADMIN_CLIENT_SECRET=<secret>
 # 邀请邮件（需 SMTP + manage-users 权限）
 KEYCLOAK_SEND_INVITE_EMAIL=false
 KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api
-KEYCLOAK_INVITE_REDIRECT_URL=http://localhost:3000/
+KEYCLOAK_INVITE_REDIRECT_URL=http://localhost:3002/
 ```
 
 当 `KEYCLOAK_PROVISION_USERS=true` 时，员工创建 / 导入 / 邀请会：
@@ -365,7 +365,7 @@ cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-fe
 pnpm dev
 ```
 
-浏览器打开 `http://localhost:3000/login`，使用测试账号登录。成功后在 DevTools → Application → Cookies 中应看到 `_t`、`_rt`、`_session`。
+浏览器打开 `http://localhost:3002/login`，使用测试账号登录。成功后在 DevTools → Application → Cookies 中应看到 `_t`、`_rt`、`_session`。
 
 ### 10.2 后端 API
 
@@ -376,8 +376,8 @@ go run ./cmd/api
 ```
 
 ```bash
-curl -s http://localhost:8080/v1/health
-curl -s -H "Authorization: Bearer $TOKEN" http://localhost:8080/v1/...
+curl -s http://localhost:18080/healthz
+curl -s -H "Authorization: Bearer $TOKEN" http://localhost:18080/v1/...
 ```
 
 ### 10.3 Smoke test

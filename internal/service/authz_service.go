@@ -550,14 +550,15 @@ func (c *Service) touchAuthzConfig(ctx RequestContext, eventType string, payload
 		payload = map[string]any{}
 	}
 	payload["permission_version"] = version
-	return c.store.AppendAuthzOutboxEvent(goContext(ctx), AuthzOutboxEvent{
-		ID:         utils.NewID("outbox"),
-		TenantID:   ctx.TenantID,
-		EventType:  eventType,
-		Payload:    payload,
-		Status:     "pending",
-		RetryCount: 0,
-		CreatedAt:  c.Now(),
+	return c.store.AppendOutboxEvent(goContext(ctx), OutboxEvent{
+		ID:            utils.NewID("outbox"),
+		TenantID:      ctx.TenantID,
+		EventType:     eventType,
+		AggregateType: domain.OutboxAggregateAuthz,
+		Payload:       payload,
+		Status:        "pending",
+		RetryCount:    0,
+		CreatedAt:     c.Now(),
 	})
 }
 

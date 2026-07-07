@@ -8,6 +8,22 @@ info:
 security:
   - bearerAuth: []
 paths:
+  /v1/auth/sso/google/verify:
+    post:
+      summary: Verify Google SSO login and bind the local Nexus account
+      description: Public callback helper. The request must include a Keycloak Google SSO bearer token; the token email must be verified and match an existing active Nexus account.
+      security: []
+      responses:
+        "200":
+          description: Verified local login binding
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SSOLoginVerificationDataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/platform/home:
     get:
       summary: Get OA workbench home aggregates
@@ -268,331 +284,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/NotificationReadAllDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/platform/workspace:
-    get:
-      summary: Get workspace settings aggregate for the OA frontend
-      responses:
-        "200":
-          description: Workspace settings panes
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PlatformWorkspaceDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/platform/workspace/admins:
-    get:
-      summary: Get workspace administrator settings through the OA frontend namespace
-      responses:
-        "200":
-          description: Workspace administrator settings
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    post:
-      summary: Grant workspace administrator permissions through the OA frontend namespace
-      parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateWorkspaceAdminRequest"
-      responses:
-        "201":
-          description: Refreshed workspace administrator settings
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/platform/workspace/admins/{id}/permissions:
-    patch:
-      summary: Replace workspace administrator permissions through the OA frontend namespace
-      parameters:
-        - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateWorkspaceAdminPermissionsRequest"
-      responses:
-        "200":
-          description: Refreshed workspace administrator settings
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/platform/workspace/admins/{id}:
-    delete:
-      summary: Clear workspace-managed administrator permissions through the OA frontend namespace
-      parameters:
-        - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
-      responses:
-        "200":
-          description: Refreshed workspace administrator settings
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/platform/workspace/forms:
-    get:
-      summary: Get workspace form design settings through the OA frontend namespace
-      responses:
-        "200":
-          description: Workspace form design settings
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PlatformFormDesignDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    post:
-      summary: Create one workspace form-builder template through the OA frontend namespace
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SaveWorkspaceFormDesignRequest"
-      responses:
-        "201":
-          description: Refreshed workspace form design settings
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PlatformFormDesignDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/platform/workspace/forms/{id}:
-    patch:
-      summary: Patch one workspace form-builder template through the OA frontend namespace
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateWorkspaceFormDesignRequest"
-      responses:
-        "200":
-          description: Refreshed workspace form design settings
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PlatformFormDesignDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    delete:
-      summary: Soft-delete one workspace form-builder template through the OA frontend namespace
-      parameters:
-        - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
-      responses:
-        "200":
-          description: Refreshed workspace form design settings
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PlatformFormDesignDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/platform/workspace/audit-logs:
-    get:
-      summary: Get workspace audit-log projection through the OA frontend namespace
-      parameters:
-        - {name: operator_id, in: query, schema: {type: string}}
-        - {name: type, in: query, schema: {type: string}}
-        - {name: from, in: query, schema: {type: string}}
-        - {name: to, in: query, schema: {type: string}}
-        - {name: keyword, in: query, schema: {type: string}}
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
-        - $ref: "#/components/parameters/Sort"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
-      responses:
-        "200":
-          description: Workspace audit-log page
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkspaceAuditLogPageDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/platform/workspace/overview:
-    get:
-      summary: Get workspace overview aggregates through the OA frontend namespace
-      parameters:
-        - {name: year, in: query, schema: {type: integer, minimum: 1970}}
-        - {name: month, in: query, schema: {type: integer, minimum: 1, maximum: 12}}
-        - {name: date, in: query, schema: {type: string, format: date}}
-      responses:
-        "200":
-          description: Workspace overview widgets
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkspaceOverviewDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/platform/workspace/employees:
-    get:
-      summary: Get workspace employee table through the OA frontend namespace
-      parameters:
-        - {name: department_id, in: query, schema: {type: string}}
-        - {name: department, in: query, schema: {type: string}}
-        - {name: dept, in: query, schema: {type: string}}
-        - {name: status, in: query, schema: {type: string, enum: [在職, 待加入, 已停用]}}
-        - {name: employment_status, in: query, schema: {type: string, enum: [active, probation, leave_suspended, onboarding, resigned, deleted]}}
-        - {name: keyword, in: query, schema: {type: string}}
-        - {name: search, in: query, schema: {type: string}}
-      responses:
-        "200":
-          description: Employee table rows and CSV headers
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PlatformWorkspaceEmployeesDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/platform/workspace/organization:
-    get:
-      summary: Get workspace organization tree through the OA frontend namespace
-      responses:
-        "200":
-          description: Employee organization hierarchy
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkspaceOrganizationDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/platform/workspace/organization/employees/{id}/manager:
-    patch:
-      summary: Update one employee manager from the workspace organization view
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateWorkspaceOrganizationManagerRequest"
-      responses:
-        "200":
-          description: Updated employee organization hierarchy
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkspaceOrganizationDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "422": {$ref: "#/components/responses/ValidationError"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/platform/workspace/attendance:
-    get:
-      summary: Get workspace monthly attendance matrices through the OA frontend namespace
-      parameters:
-        - {name: year, in: query, schema: {type: integer, minimum: 1970}}
-        - {name: month, in: query, schema: {type: integer, minimum: 1, maximum: 12}}
-      responses:
-        "200":
-          description: Monthly attendance and clock matrices
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkspaceAttendanceDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/platform/workspace/turnover:
-    get:
-      summary: Get workspace turnover analysis through the OA frontend namespace
-      parameters:
-        - {name: year, in: query, schema: {type: integer, minimum: 1970}}
-        - {name: month, in: query, schema: {type: integer, minimum: 1, maximum: 12}}
-        - {name: annual_year, in: query, schema: {type: integer, minimum: 1970}}
-        - {name: annualYear, in: query, deprecated: true, schema: {type: integer, minimum: 1970}}
-      responses:
-        "200":
-          description: Monthly and annual turnover analysis
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkspaceTurnoverDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/platform/insights:
-    get:
-      summary: Get insight report dashboard projection
-      parameters:
-        - {name: month, in: query, schema: {type: string, pattern: "^\\d{4}-\\d{2}$"}}
-      responses:
-        "200":
-          description: Insight report payloads
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PlatformInsightsDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -1729,6 +1420,20 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace:
+    get:
+      summary: Get workspace settings aggregate
+      responses:
+        "200":
+          description: Workspace settings panes
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformWorkspaceDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/workspace/overview:
     get:
       summary: Get workspace overview aggregates
@@ -1807,6 +1512,210 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      summary: Grant workspace administrator permissions
+      parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateWorkspaceAdminRequest"
+      responses:
+        "201":
+          description: Refreshed workspace administrator settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/admins/{id}/permissions:
+    patch:
+      summary: Replace workspace administrator permissions
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkspaceAdminPermissionsRequest"
+      responses:
+        "200":
+          description: Refreshed workspace administrator settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/admins/{id}:
+    delete:
+      summary: Clear workspace-managed administrator permissions
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Refreshed workspace administrator settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/forms:
+    get:
+      summary: Get workspace form design settings
+      responses:
+        "200":
+          description: Workspace form design settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformFormDesignDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      summary: Create one workspace form-builder template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SaveWorkspaceFormDesignRequest"
+      responses:
+        "201":
+          description: Refreshed workspace form design settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformFormDesignDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/forms/{id}:
+    patch:
+      summary: Patch one workspace form-builder template
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkspaceFormDesignRequest"
+      responses:
+        "200":
+          description: Refreshed workspace form design settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformFormDesignDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      summary: Soft-delete one workspace form-builder template
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Refreshed workspace form design settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformFormDesignDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/employees:
+    get:
+      summary: Get workspace employee table
+      parameters:
+        - {name: department_id, in: query, schema: {type: string}}
+        - {name: department, in: query, schema: {type: string}}
+        - {name: dept, in: query, schema: {type: string}}
+        - {name: status, in: query, schema: {type: string, enum: [在職, 待加入, 已停用]}}
+        - {name: employment_status, in: query, schema: {type: string, enum: [active, probation, leave_suspended, onboarding, resigned, deleted]}}
+        - {name: keyword, in: query, schema: {type: string}}
+        - {name: search, in: query, schema: {type: string}}
+      responses:
+        "200":
+          description: Employee table rows and CSV headers
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformWorkspaceEmployeesDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/organization/employees/{id}/manager:
+    patch:
+      summary: Update one employee manager from the workspace organization view
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateWorkspaceOrganizationManagerRequest"
+      responses:
+        "200":
+          description: Updated employee organization hierarchy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceOrganizationDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "422": {$ref: "#/components/responses/ValidationError"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/insights:
+    get:
+      summary: Get insight report dashboard projection
+      parameters:
+        - {name: month, in: query, schema: {type: string, pattern: "^\\d{4}-\\d{2}$"}}
+      responses:
+        "200":
+          description: Insight dashboard projection
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformInsightsDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -2292,6 +2201,20 @@ components:
       properties:
         data:
           description: Successful response payload.
+    SSOLoginVerificationDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/SSOLoginVerification"
+    SSOLoginVerification:
+      type: object
+      required: [provider, tenant_id, account_id, email]
+      properties:
+        provider: {type: string, example: keycloak}
+        tenant_id: {type: string}
+        account_id: {type: string}
+        email: {type: string, format: email}
     WorkflowFormStateDataResponse:
       type: object
       required: [data]
@@ -4128,6 +4051,13 @@ components:
                 - 10008
                 - 10009
                 - 10030
+                - 10031
+                - 10032
+                - 10033
+                - 10034
+                - 10035
+                - 10036
+                - 10037
                 - 10050
                 - 10060
                 - 10070
@@ -4150,6 +4080,13 @@ components:
             reason_code:
               type: string
               enum:
+                - account_inactive
+                - sso_email_not_authorized
+                - sso_email_unverified
+                - company_inactive
+                - google_login_failed
+                - sso_identity_conflict
+                - sso_email_ambiguous
                 - permission_missing
                 - menu_denied
                 - button_denied

@@ -33,7 +33,6 @@ type (
 	OvertimeRequest                 = domain.OvertimeRequest
 	FormTemplate                    = domain.FormTemplate
 	FormInstance                    = domain.FormInstance
-	KnowledgeArticle                = domain.KnowledgeArticle
 	PlatformTaskRecordItem          = domain.PlatformTaskRecordItem
 	PlatformTaskTodoRecord          = domain.PlatformTaskTodoRecord
 	Reference                       = domain.Reference
@@ -46,7 +45,6 @@ type (
 	RowError                        = domain.RowError
 	AuditLog                        = domain.AuditLog
 	OutboxEvent                     = domain.OutboxEvent
-	AuthzOutboxEvent                = domain.AuthzOutboxEvent
 	IdentityProvisioningOutboxEvent = domain.IdentityProvisioningOutboxEvent
 	AuthzRelationshipTuple          = domain.AuthzRelationshipTuple
 	PageRequest                     = domain.PageRequest

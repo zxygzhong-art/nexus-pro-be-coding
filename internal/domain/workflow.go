@@ -24,6 +24,7 @@ type FormInstance struct {
 	SubmittedAt        time.Time      `json:"submitted_at"`
 	ApprovedBy         string         `json:"approved_by,omitempty"`
 	CurrentRunID       string         `json:"current_run_id,omitempty"`
+	Version            int64          `json:"version"`
 	UpdatedAt          time.Time      `json:"updated_at"`
 }
 

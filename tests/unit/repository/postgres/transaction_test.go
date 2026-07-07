@@ -67,7 +67,7 @@ func TestListTenantsInjectsSystemTaskScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !policyExists {
-		t.Skip("tenants system_read_tenants policy is not migrated; run migration 000003")
+		t.Skip("tenants system_read_tenants policy is not migrated; run current migrations")
 	}
 
 	tenantID := "tenant-system-task-" + time.Now().UTC().Format("20060102150405.000000000")

@@ -167,21 +167,21 @@ COMPOSE_PROFILES=loki docker compose --env-file .env up -d --no-deps loki
 ## 本地 URL
 
 ```text
-Grafana:        http://127.0.0.1:3000
-Redis:          127.0.0.1:16379
+Grafana:        http://127.0.0.1:24000
+Redis:          127.0.0.1:26379
 Keycloak:       http://127.0.0.1:8080
-OpenFGA API:    http://127.0.0.1:8081
-OpenFGA gRPC:   127.0.0.1:8082
-OpenFGA UI:     http://127.0.0.1:3001
-Temporal gRPC:  127.0.0.1:7233
-Temporal UI:    http://127.0.0.1:8088
-NATS client:    nats://127.0.0.1:4222
-NATS monitor:   http://127.0.0.1:8222
-Prometheus:     http://127.0.0.1:9090
-Loki:           http://127.0.0.1:3100
-Tempo:          http://127.0.0.1:3200
-MinIO API:      http://127.0.0.1:9000
-MinIO Console:  http://127.0.0.1:9001
+OpenFGA API:    http://127.0.0.1:24081
+OpenFGA gRPC:   127.0.0.1:24082
+OpenFGA UI:     http://127.0.0.1:24001
+Temporal gRPC:  127.0.0.1:27233
+Temporal UI:    http://127.0.0.1:24088
+NATS client:    nats://127.0.0.1:24222
+NATS monitor:   http://127.0.0.1:28222
+Prometheus:     http://127.0.0.1:24090
+Loki:           http://127.0.0.1:24100
+Tempo:          http://127.0.0.1:24200
+MinIO API:      http://127.0.0.1:24900
+MinIO Console:  http://127.0.0.1:24901
 ```
 
 預設本地帳密也在 [`.env`](.env)。任何非本地部署都必須先更換。
@@ -198,7 +198,7 @@ MinIO Console:  http://127.0.0.1:9001
 
 ```bash
 OTEL_ENABLED=true
-OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:4317
+OTEL_EXPORTER_OTLP_ENDPOINT=http://127.0.0.1:24317
 OTEL_EXPORTER_OTLP_INSECURE=true
 OTEL_SERVICE_NAME=nexus-pro-be
 METRICS_ADDR=0.0.0.0:9091
@@ -223,7 +223,7 @@ OTEL_EXPORTER_OTLP_INSECURE=true
 
 ```bash
 OBJECT_STORE_PROVIDER=minio
-OBJECT_STORE_ENDPOINT=http://127.0.0.1:9000
+OBJECT_STORE_ENDPOINT=http://127.0.0.1:24900
 OBJECT_STORE_BUCKET=nexus-hr-imports
 OBJECT_STORE_REGION=us-east-1
 OBJECT_STORE_ACCESS_KEY_ID=minioadmin
@@ -235,16 +235,16 @@ OBJECT_STORE_CREATE_BUCKET=true
 後端 Redis 預設值：
 
 ```bash
-REDIS_ADDR=127.0.0.1:16379
-REDIS_PASSWORD=redis-local-password
+REDIS_ADDR=127.0.0.1:26379
+REDIS_PASSWORD=
 REDIS_DB=0
 ```
 
 Temporal 與 NATS 本地端點：
 
 ```bash
-TEMPORAL_ADDRESS=127.0.0.1:7233
-NATS_URL=nats://127.0.0.1:4222
+TEMPORAL_ADDRESS=127.0.0.1:27233
+NATS_URL=nats://127.0.0.1:24222
 ```
 
 後端不會自動載入 `.env`；從宿主機啟動 API 時需要明確 source：

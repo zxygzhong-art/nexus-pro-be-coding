@@ -249,3 +249,73 @@ func TestUserIdentityLookupAndList(t *testing.T) {
 		t.Fatalf("expected one listed identity, got %+v", items)
 	}
 }
+
+// TestOptimisticLockingRejectsStaleWrites 驗證樂觀鎖拒絕過期版本的寫入。
+func TestOptimisticLockingRejectsStaleWrites(t *testing.T) {
+	store := memory.NewStore()
+	ctx := context.Background()
+	now := time.Now()
+
+	account := domain.Account{ID: "acct-1", TenantID: "tenant-1", DisplayName: "A", Status: "active", CreatedAt: now}
+	if err := store.UpsertAccount(ctx, account); err != nil {
+		t.Fatal(err)
+	}
+
+	first, ok, err := store.GetAccount(ctx, "tenant-1", "acct-1")
+	if err != nil || !ok || first.Version != 1 {
+		t.Fatalf("expected version 1 after insert, got=%+v ok=%v err=%v", first, ok, err)
+	}
+	second := first
+
+	first.DisplayName = "writer-1"
+	if err := store.UpsertAccount(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+
+	second.DisplayName = "writer-2"
+	err = store.UpsertAccount(ctx, second)
+	appErr, isApp := domain.AsAppError(err)
+	if !isApp || appErr.Status != 409 {
+		t.Fatalf("expected 409 conflict for stale write, got %v", err)
+	}
+
+	// 盲寫(version 0)不受樂觀鎖限制,維持既有 upsert 語義。
+	blind := domain.Account{ID: "acct-1", TenantID: "tenant-1", DisplayName: "blind", Status: "active", CreatedAt: now}
+	if err := store.UpsertAccount(ctx, blind); err != nil {
+		t.Fatal(err)
+	}
+	got, _, err := store.GetAccount(ctx, "tenant-1", "acct-1")
+	if err != nil || got.Version != 3 {
+		t.Fatalf("expected version 3 after blind write, got=%+v err=%v", got, err)
+	}
+
+	group := domain.UserGroup{ID: "grp-1", TenantID: "tenant-1", Name: "G", CreatedAt: now}
+	if err := store.UpsertUserGroup(ctx, group); err != nil {
+		t.Fatal(err)
+	}
+	g1, _, _ := store.GetUserGroup(ctx, "tenant-1", "grp-1")
+	g2 := g1
+	g1.Name = "G1"
+	if err := store.UpsertUserGroup(ctx, g1); err != nil {
+		t.Fatal(err)
+	}
+	g2.Name = "G2"
+	if appErr, ok := domain.AsAppError(store.UpsertUserGroup(ctx, g2)); !ok || appErr.Status != 409 {
+		t.Fatalf("expected 409 for stale user group write")
+	}
+
+	instance := domain.FormInstance{ID: "fi-1", TenantID: "tenant-1", TemplateID: "ft-1", ApplicantAccountID: "acct-1", Status: "draft", SubmittedAt: now, UpdatedAt: now}
+	if err := store.UpsertFormInstance(ctx, instance); err != nil {
+		t.Fatal(err)
+	}
+	f1, _, _ := store.GetFormInstance(ctx, "tenant-1", "fi-1")
+	f2 := f1
+	f1.Status = "in_review"
+	if err := store.UpsertFormInstance(ctx, f1); err != nil {
+		t.Fatal(err)
+	}
+	f2.Status = "approved"
+	if appErr, ok := domain.AsAppError(store.UpsertFormInstance(ctx, f2)); !ok || appErr.Status != 409 {
+		t.Fatalf("expected 409 for stale form instance write")
+	}
+}

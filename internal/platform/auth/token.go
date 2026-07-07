@@ -162,7 +162,7 @@ func (r *KeycloakTokenResolver) validateClaims(claims map[string]any) error {
 	if claimString(claims, "iss") != r.issuerURL {
 		return errors.New("issuer mismatch")
 	}
-	if r.clientID != "" && !audienceContains(claims["aud"], r.clientID) {
+	if r.clientID != "" && !audienceContains(claims["aud"], r.clientID) && claimString(claims, "azp") != r.clientID {
 		return errors.New("audience mismatch")
 	}
 	now := time.Now().Unix()
@@ -172,8 +172,8 @@ func (r *KeycloakTokenResolver) validateClaims(claims map[string]any) error {
 	if nbf := claimUnix(claims["nbf"]); nbf > now {
 		return errors.New("token not yet valid")
 	}
-	if claimString(claims, "tenant_id", "tid", "tenant_hint") == "" || claimString(claims, "sub", "account_id", "acct") == "" {
-		return errors.New("missing tenant or account claim")
+	if claimString(claims, "sub", "account_id", "acct") == "" {
+		return errors.New("missing subject or account claim")
 	}
 	return nil
 }

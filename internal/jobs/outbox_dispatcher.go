@@ -12,10 +12,10 @@ import (
 )
 
 const (
-	defaultAuthzOutboxBatchSize  = 100
-	defaultAuthzOutboxMaxRetries = 5
-	defaultAuthzOutboxInterval   = 30 * time.Second
-	maxOutboxErrorLength         = 500
+	defaultOutboxBatchSize  = 100
+	defaultOutboxMaxRetries = 5
+	defaultOutboxInterval   = 30 * time.Second
+	maxOutboxErrorLength    = 500
 )
 
 // RelationshipTupleWriter 定義關係 tuple writer 的行為契約。
@@ -23,27 +23,27 @@ type RelationshipTupleWriter interface {
 	WriteRelationshipTuples(context.Context, []domain.AuthzRelationshipTupleChange) error
 }
 
-// AuthzOutboxOptions 定義授權 outbox 選項的資料結構。
-type AuthzOutboxOptions struct {
+// OutboxDispatchOptions 定義 outbox dispatcher 選項的資料結構。
+type OutboxDispatchOptions struct {
 	BatchSize  int
 	MaxRetries int
 	Interval   time.Duration
 }
 
-// AuthzOutboxProcessor 定義授權 outbox processor 的資料結構。
-type AuthzOutboxProcessor struct {
+// OutboxDispatcher 消費統一 outbox_events,依 event_type 路由到對應 handler。
+type OutboxDispatcher struct {
 	store  repository.Store
 	writer RelationshipTupleWriter
 	logger *slog.Logger
 	now    func() time.Time
 }
 
-// NewAuthzOutboxProcessor 建立授權 outbox processor。
-func NewAuthzOutboxProcessor(store repository.Store, writer RelationshipTupleWriter, logger *slog.Logger) *AuthzOutboxProcessor {
+// NewOutboxDispatcher 建立統一 outbox dispatcher。
+func NewOutboxDispatcher(store repository.Store, writer RelationshipTupleWriter, logger *slog.Logger) *OutboxDispatcher {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &AuthzOutboxProcessor{
+	return &OutboxDispatcher{
 		store:  store,
 		writer: writer,
 		logger: logger,
@@ -52,8 +52,8 @@ func NewAuthzOutboxProcessor(store repository.Store, writer RelationshipTupleWri
 }
 
 // Run 執行背景工作主迴圈。
-func (p *AuthzOutboxProcessor) Run(ctx context.Context, opts AuthzOutboxOptions) {
-	opts = normalizeAuthzOutboxOptions(opts)
+func (p *OutboxDispatcher) Run(ctx context.Context, opts OutboxDispatchOptions) {
+	opts = normalizeOutboxDispatchOptions(opts)
 	p.processAllTenantsAndLog(ctx, opts)
 	ticker := time.NewTicker(opts.Interval)
 	defer ticker.Stop()
@@ -68,10 +68,10 @@ func (p *AuthzOutboxProcessor) Run(ctx context.Context, opts AuthzOutboxOptions)
 }
 
 // ProcessAllTenants 處理 all 租戶。
-func (p *AuthzOutboxProcessor) ProcessAllTenants(ctx context.Context, opts AuthzOutboxOptions) (int, error) {
-	opts = normalizeAuthzOutboxOptions(opts)
+func (p *OutboxDispatcher) ProcessAllTenants(ctx context.Context, opts OutboxDispatchOptions) (int, error) {
+	opts = normalizeOutboxDispatchOptions(opts)
 	if p == nil || p.store == nil {
-		return 0, errors.New("authz outbox processor requires store")
+		return 0, errors.New("outbox dispatcher requires store")
 	}
 	tenants, err := p.store.ListTenants(ctx)
 	if err != nil {
@@ -89,15 +89,12 @@ func (p *AuthzOutboxProcessor) ProcessAllTenants(ctx context.Context, opts Authz
 }
 
 // ProcessTenant 處理租戶。
-func (p *AuthzOutboxProcessor) ProcessTenant(ctx context.Context, tenantID string, opts AuthzOutboxOptions) (int, error) {
-	opts = normalizeAuthzOutboxOptions(opts)
+func (p *OutboxDispatcher) ProcessTenant(ctx context.Context, tenantID string, opts OutboxDispatchOptions) (int, error) {
+	opts = normalizeOutboxDispatchOptions(opts)
 	if p == nil || p.store == nil {
-		return 0, errors.New("authz outbox processor requires store")
+		return 0, errors.New("outbox dispatcher requires store")
 	}
-	if p.writer == nil {
-		return 0, errors.New("authz outbox processor requires OpenFGA writer")
-	}
-	events, err := p.store.ListAuthzOutboxEvents(ctx, tenantID)
+	events, err := p.store.ListOutboxEvents(ctx, tenantID)
 	if err != nil {
 		return 0, err
 	}
@@ -106,7 +103,7 @@ func (p *AuthzOutboxProcessor) ProcessTenant(ctx context.Context, tenantID strin
 		if processed >= opts.BatchSize {
 			break
 		}
-		if !isRetryableOpenFGAEvent(event, opts.MaxRetries) {
+		if !isDispatchableEvent(event, opts.MaxRetries) {
 			continue
 		}
 		if err := p.processEvent(ctx, event); err != nil {
@@ -118,59 +115,75 @@ func (p *AuthzOutboxProcessor) ProcessTenant(ctx context.Context, tenantID strin
 }
 
 // processEvent 處理事件。
-func (p *AuthzOutboxProcessor) processEvent(ctx context.Context, event domain.AuthzOutboxEvent) error {
+func (p *OutboxDispatcher) processEvent(ctx context.Context, event domain.OutboxEvent) error {
 	event.Status = "processing"
 	event.LastError = ""
 	event.ProcessedAt = nil
-	if err := p.store.UpdateAuthzOutboxEvent(ctx, event); err != nil {
+	if err := p.store.UpdateOutboxEvent(ctx, event); err != nil {
 		return err
 	}
 
-	change, err := relationshipChangeFromOutboxEvent(event)
-	if err == nil {
-		err = p.writer.WriteRelationshipTuples(ctx, []domain.AuthzRelationshipTupleChange{change})
-	}
+	err := p.dispatchEvent(ctx, event)
 	now := p.now().UTC()
 	event.ProcessedAt = &now
 	if err != nil {
 		event.Status = "failed"
 		event.RetryCount++
 		event.LastError = truncateOutboxError(err.Error())
-		return p.store.UpdateAuthzOutboxEvent(ctx, event)
+		return p.store.UpdateOutboxEvent(ctx, event)
 	}
 	event.Status = "succeeded"
 	event.LastError = ""
-	return p.store.UpdateAuthzOutboxEvent(ctx, event)
+	return p.store.UpdateOutboxEvent(ctx, event)
+}
+
+// dispatchEvent 依事件類型路由到對應 handler。
+func (p *OutboxDispatcher) dispatchEvent(ctx context.Context, event domain.OutboxEvent) error {
+	switch {
+	case isOpenFGARelationshipEvent(event.EventType):
+		if p.writer == nil {
+			return errors.New("outbox dispatcher requires OpenFGA writer for relationship events")
+		}
+		change, err := relationshipChangeFromOutboxEvent(event)
+		if err != nil {
+			return err
+		}
+		return p.writer.WriteRelationshipTuples(ctx, []domain.AuthzRelationshipTupleChange{change})
+	default:
+		return errors.New("no handler registered for outbox event type " + event.EventType)
+	}
 }
 
 // processAllTenantsAndLog 處理 all 租戶 and log。
-func (p *AuthzOutboxProcessor) processAllTenantsAndLog(ctx context.Context, opts AuthzOutboxOptions) {
+func (p *OutboxDispatcher) processAllTenantsAndLog(ctx context.Context, opts OutboxDispatchOptions) {
 	processed, err := p.ProcessAllTenants(ctx, opts)
 	if err != nil {
-		p.logger.WarnContext(ctx, "authz outbox processing failed", "error", err)
+		p.logger.WarnContext(ctx, "outbox dispatch failed", "error", err)
 		return
 	}
 	if processed > 0 {
-		p.logger.InfoContext(ctx, "authz outbox processed", "events", processed)
+		p.logger.InfoContext(ctx, "outbox events dispatched", "events", processed)
 	}
 }
 
-// normalizeAuthzOutboxOptions 正規化授權 outbox 選項。
-func normalizeAuthzOutboxOptions(opts AuthzOutboxOptions) AuthzOutboxOptions {
+// normalizeOutboxDispatchOptions 正規化 outbox dispatcher 選項。
+func normalizeOutboxDispatchOptions(opts OutboxDispatchOptions) OutboxDispatchOptions {
 	if opts.BatchSize <= 0 {
-		opts.BatchSize = defaultAuthzOutboxBatchSize
+		opts.BatchSize = defaultOutboxBatchSize
 	}
 	if opts.MaxRetries <= 0 {
-		opts.MaxRetries = defaultAuthzOutboxMaxRetries
+		opts.MaxRetries = defaultOutboxMaxRetries
 	}
 	if opts.Interval <= 0 {
-		opts.Interval = defaultAuthzOutboxInterval
+		opts.Interval = defaultOutboxInterval
 	}
 	return opts
 }
 
-// isRetryableOpenFGAEvent 判斷是否為retryable OpenFGA 事件。
-func isRetryableOpenFGAEvent(event domain.AuthzOutboxEvent, maxRetries int) bool {
+// isDispatchableEvent 判斷事件是否可派發。
+// 目前僅 OpenFGA 關係事件有 handler;其他事件(領域事件、租戶開通通知等)
+// 保持 pending 供未來消費者使用,不佔用 batch 名額。
+func isDispatchableEvent(event domain.OutboxEvent, maxRetries int) bool {
 	if !isOpenFGARelationshipEvent(event.EventType) {
 		return false
 	}
@@ -186,7 +199,7 @@ func isOpenFGARelationshipEvent(eventType string) bool {
 }
 
 // relationshipChangeFromOutboxEvent 處理關係 change 來源 outbox 事件。
-func relationshipChangeFromOutboxEvent(event domain.AuthzOutboxEvent) (domain.AuthzRelationshipTupleChange, error) {
+func relationshipChangeFromOutboxEvent(event domain.OutboxEvent) (domain.AuthzRelationshipTupleChange, error) {
 	operation := domain.AuthzRelationshipTupleWrite
 	if event.EventType == string(domain.EventOpenFGARelationshipDelete) {
 		operation = domain.AuthzRelationshipTupleDelete

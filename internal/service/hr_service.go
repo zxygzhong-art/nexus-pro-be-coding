@@ -4151,14 +4151,16 @@ func (c HRService) applyAuthzRelationshipTupleChange(ctx RequestContext, change 
 	default:
 		return BadRequest("unsupported relationship tuple operation")
 	}
-	return c.store.AppendAuthzOutboxEvent(goContext(ctx), domain.AuthzOutboxEvent{
-		ID:         utils.NewID("outbox"),
-		TenantID:   ctx.TenantID,
-		EventType:  relationshipOutboxEventType(change.Operation),
-		Payload:    relationshipTuplePayload(change.Operation, tuple),
-		Status:     "pending",
-		RetryCount: 0,
-		CreatedAt:  c.Now(),
+	return c.store.AppendOutboxEvent(goContext(ctx), domain.OutboxEvent{
+		ID:            utils.NewID("outbox"),
+		TenantID:      ctx.TenantID,
+		EventType:     relationshipOutboxEventType(change.Operation),
+		AggregateType: domain.OutboxAggregateAuthz,
+		AggregateID:   tuple.ObjectID,
+		Payload:       relationshipTuplePayload(change.Operation, tuple),
+		Status:        "pending",
+		RetryCount:    0,
+		CreatedAt:     c.Now(),
 	})
 }
 

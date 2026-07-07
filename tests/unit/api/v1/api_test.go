@@ -273,6 +273,98 @@ func TestUnlinkedExternalIdentityWithAccountClaimIsRejected(t *testing.T) {
 	}
 }
 
+// TestBoundExternalIdentityWithoutTenantClaimIsAccepted 驗證缺少租戶 claim 的已綁定外部身分可解析。
+func TestBoundExternalIdentityWithoutTenantClaimIsAccepted(t *testing.T) {
+	store := memory.NewStore()
+	populateDemoFixture(store)
+	now := time.Now().UTC()
+	if err := store.UpsertUserIdentity(context.Background(), domain.UserIdentity{
+		ID:        "uid-google-no-tenant",
+		TenantID:  "demo",
+		AccountID: "acct-employee",
+		Provider:  "keycloak",
+		Subject:   "google-no-tenant",
+		Email:     "employee@demo.local",
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	handler := v1api.New(service.New(store), nil, v1api.Options{
+		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{
+			Provider: "keycloak",
+			Subject:  "google-no-tenant",
+			Email:    "employee@demo.local",
+		}, ok: true},
+	}).Routes()
+	req := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for bound identity without tenant claim, got %d: %s", rec.Code, rec.Body.String())
+	}
+	me := decodeData[domain.MeResponse](t, rec.Body.Bytes())
+	if me.Account.ID != "acct-employee" {
+		t.Fatalf("expected bound account, got %+v", me.Account)
+	}
+}
+
+// TestGoogleSSOVerifyBindsExistingActiveEmail 驗證 Google SSO email 成功時建立外部身分綁定。
+func TestGoogleSSOVerifyBindsExistingActiveEmail(t *testing.T) {
+	store := memory.NewStore()
+	populateDemoFixture(store)
+	handler := v1api.New(service.New(store), nil, v1api.Options{
+		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{
+			Provider: "keycloak",
+			Subject:  "google-subject-123",
+			Email:    "employee@demo.local",
+			Claims:   map[string]any{"email_verified": true},
+		}, ok: true},
+	}).Routes()
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/sso/google/verify", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for authorized Google email, got %d: %s", rec.Code, rec.Body.String())
+	}
+	result := decodeData[domain.SSOLoginVerification](t, rec.Body.Bytes())
+	if result.TenantID != "demo" || result.AccountID != "acct-employee" || result.Email != "employee@demo.local" {
+		t.Fatalf("unexpected SSO verification result: %+v", result)
+	}
+	identity, ok, err := store.GetUserIdentity(context.Background(), "demo", "keycloak", "google-subject-123")
+	if err != nil || !ok || identity.AccountID != "acct-employee" {
+		t.Fatalf("expected Google subject to bind to employee account, identity=%+v ok=%v err=%v", identity, ok, err)
+	}
+}
+
+// TestGoogleSSOVerifyRejectsUnverifiedEmail 驗證 Google email 未驗證時拒絕登入。
+func TestGoogleSSOVerifyRejectsUnverifiedEmail(t *testing.T) {
+	store := memory.NewStore()
+	populateDemoFixture(store)
+	handler := v1api.New(service.New(store), nil, v1api.Options{
+		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{
+			Provider: "keycloak",
+			Subject:  "google-unverified",
+			Email:    "employee@demo.local",
+			Claims:   map[string]any{"email_verified": false},
+		}, ok: true},
+	}).Routes()
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/sso/google/verify", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected 401 for unverified Google email, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "sso_email_unverified") {
+		t.Fatalf("expected sso_email_unverified reason, got %s", rec.Body.String())
+	}
+}
+
 // TestDisabledAccountIsRejectedAfterIdentityResolution 驗證 disabled 帳號 is rejected after 身分 resolution。
 func TestDisabledAccountIsRejectedAfterIdentityResolution(t *testing.T) {
 	store := memory.NewStore()
@@ -403,6 +495,50 @@ func TestKeycloakTokenResolverCachesUnknownKidMisses(t *testing.T) {
 	}
 	if certFetches != 2 {
 		t.Fatalf("expected one initial fetch and one forced miss refresh, got %d", certFetches)
+	}
+}
+
+// TestKeycloakTokenResolverAllowsTenantlessSSOToken 驗證 SSO token 可先不帶 tenant claim。
+func TestKeycloakTokenResolverAllowsTenantlessSSOToken(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var issuer string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/.well-known/openid-configuration":
+			_ = json.NewEncoder(w).Encode(map[string]string{
+				"issuer":   issuer,
+				"jwks_uri": issuer + "/certs",
+			})
+		case "/certs":
+			_ = json.NewEncoder(w).Encode(map[string]any{"keys": jwksFromKeys(map[string]*rsa.PublicKey{"sso": &key.PublicKey})})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	issuer = server.URL
+
+	claims := keycloakClaims(issuer)
+	delete(claims, "aud")
+	delete(claims, "tenant_id")
+	delete(claims, "account_id")
+	claims["azp"] = "nexus-api"
+	claims["sub"] = "google-subject-123"
+	claims["email"] = "employee@demo.local"
+	claims["email_verified"] = true
+	resolver := platformauth.NewKeycloakTokenResolver(issuer, "nexus-api", server.Client())
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/sso/google/verify", nil)
+	req.Header.Set("Authorization", "Bearer "+signedRS256JWT(t, "sso", key, claims))
+
+	tokenCtx, ok, err := resolver.Resolve(req)
+	if err != nil || !ok {
+		t.Fatalf("expected tenantless SSO token to resolve, ok=%v err=%v", ok, err)
+	}
+	if tokenCtx.TenantID != "" || tokenCtx.AccountID != "" || tokenCtx.Subject != "google-subject-123" || tokenCtx.Email != "employee@demo.local" {
+		t.Fatalf("unexpected tenantless token context: %+v", tokenCtx)
 	}
 }
 

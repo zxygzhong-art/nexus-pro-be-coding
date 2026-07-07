@@ -56,6 +56,18 @@ const (
 	ErrorCodeUnauthorized ErrorCode = 10030
 	// ErrorCodeAccountInactive 說明此處的錯誤處理語義。
 	ErrorCodeAccountInactive ErrorCode = 10031
+	// ErrorCodeSSOEmailNotAuthorized 說明此處的錯誤處理語義。
+	ErrorCodeSSOEmailNotAuthorized ErrorCode = 10032
+	// ErrorCodeSSOEmailUnverified 說明此處的錯誤處理語義。
+	ErrorCodeSSOEmailUnverified ErrorCode = 10033
+	// ErrorCodeCompanyInactive 說明此處的錯誤處理語義。
+	ErrorCodeCompanyInactive ErrorCode = 10034
+	// ErrorCodeGoogleLoginFailed 說明此處的錯誤處理語義。
+	ErrorCodeGoogleLoginFailed ErrorCode = 10035
+	// ErrorCodeSSOIdentityConflict 說明此處的錯誤處理語義。
+	ErrorCodeSSOIdentityConflict ErrorCode = 10036
+	// ErrorCodeSSOEmailAmbiguous 說明此處的錯誤處理語義。
+	ErrorCodeSSOEmailAmbiguous ErrorCode = 10037
 	// ErrorCodeForbidden 說明此處的錯誤處理語義。
 	ErrorCodeForbidden ErrorCode = 20040
 	// ErrorCodePermissionMissing 說明此處的錯誤處理語義。
@@ -105,6 +117,18 @@ func reasonErrorCode(reason string) (ErrorCode, bool) {
 	switch reason {
 	case "account_inactive":
 		return ErrorCodeAccountInactive, true
+	case "sso_email_not_authorized":
+		return ErrorCodeSSOEmailNotAuthorized, true
+	case "sso_email_unverified":
+		return ErrorCodeSSOEmailUnverified, true
+	case "company_inactive":
+		return ErrorCodeCompanyInactive, true
+	case "google_login_failed":
+		return ErrorCodeGoogleLoginFailed, true
+	case "sso_identity_conflict":
+		return ErrorCodeSSOIdentityConflict, true
+	case "sso_email_ambiguous":
+		return ErrorCodeSSOEmailAmbiguous, true
 	case "permission_missing":
 		return ErrorCodePermissionMissing, true
 	case "menu_denied":

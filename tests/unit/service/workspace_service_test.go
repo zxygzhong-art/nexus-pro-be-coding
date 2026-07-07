@@ -153,7 +153,7 @@ func TestPlatformWorkspaceEmployeesFiltersAndNormalizesStatus(t *testing.T) {
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-onboarding", EmployeeNo: "E003", Name: "Onboarding Sales", CompanyEmail: "onboarding@example.com", OrgUnitID: "ou-sales", Position: "AE", Status: "onboarding", EmploymentStatus: "onboarding", CreatedAt: now.Add(2 * time.Minute)})
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-resigned", EmployeeNo: "E004", Name: "Resigned HR", CompanyEmail: "resigned@example.com", OrgUnitID: "ou-hr", Position: "Former HR", Status: "resigned", EmploymentStatus: "resigned", CreatedAt: now.Add(3 * time.Minute)})
 
-	activeHR, err := svc.Platform().WorkspaceEmployees(ctx, domain.PlatformWorkspaceEmployeesQuery{DepartmentID: "ou-hr", Status: "在職"})
+	activeHR, err := svc.Workspace().WorkspaceEmployees(ctx, domain.PlatformWorkspaceEmployeesQuery{DepartmentID: "ou-hr", Status: "在職"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,7 +166,7 @@ func TestPlatformWorkspaceEmployeesFiltersAndNormalizesStatus(t *testing.T) {
 		}
 	}
 
-	onboarding, err := svc.Platform().WorkspaceEmployees(ctx, domain.PlatformWorkspaceEmployeesQuery{Status: "待加入", Keyword: "sales"})
+	onboarding, err := svc.Workspace().WorkspaceEmployees(ctx, domain.PlatformWorkspaceEmployeesQuery{Status: "待加入", Keyword: "sales"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,7 +224,7 @@ func TestUpdateAttendancePolicyPersistsWorkspaceSettings(t *testing.T) {
 	if stored.UpdatedByAccountID != "acct-1" || stored.WorkTime.CycleEnd != "次月 4 日" {
 		t.Fatalf("unexpected stored policy: %+v", stored)
 	}
-	workspace, err := svc.Platform().Workspace(ctx)
+	workspace, err := svc.Workspace().Workspace(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -319,7 +319,7 @@ func TestPlatformWorkspaceRequiresWorkflowFormTemplateRead(t *testing.T) {
 	})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-workspace-no-form"}, CreatedAt: now})
 
-	_, err := service.New(store).Platform().Workspace(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	_, err := service.New(store).Workspace().Workspace(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
 	if err == nil {
 		t.Fatal("expected workspace aggregate to require workflow form template read")
 	}

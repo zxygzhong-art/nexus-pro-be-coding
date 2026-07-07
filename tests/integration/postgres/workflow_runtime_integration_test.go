@@ -288,6 +288,6 @@ func requireWorkflowRuntimeSchema(t *testing.T, pool *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	if !ready {
-		t.Skip("workflow runtime tables are not migrated; run migration 000006")
+		t.Skip("workflow runtime tables are not migrated; run current migrations")
 	}
 }

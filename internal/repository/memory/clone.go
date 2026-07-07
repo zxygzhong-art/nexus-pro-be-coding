@@ -220,12 +220,6 @@ func copyFormInstance(v FormInstance) FormInstance {
 	return v
 }
 
-// copyKnowledgeArticle 複製知識文章。
-func copyKnowledgeArticle(v KnowledgeArticle) KnowledgeArticle {
-	v.Tags = utils.CopyStrings(v.Tags)
-	return v
-}
-
 // copyPlatformTaskRecordItem 複製平台任務 record 項目。
 func copyPlatformTaskRecordItem(v PlatformTaskRecordItem) PlatformTaskRecordItem { return v }
 
@@ -287,16 +281,6 @@ func copyCheckResults(src []CheckResult) []CheckResult {
 // copyAuditLog 複製稽核 log。
 func copyAuditLog(v AuditLog) AuditLog {
 	v.Details = utils.CopyStringMap(v.Details)
-	return v
-}
-
-// copyAuthzOutboxEvent 複製授權 outbox 事件。
-func copyAuthzOutboxEvent(v AuthzOutboxEvent) AuthzOutboxEvent {
-	v.Payload = utils.CopyStringMap(v.Payload)
-	if v.ProcessedAt != nil {
-		t := *v.ProcessedAt
-		v.ProcessedAt = &t
-	}
 	return v
 }
 

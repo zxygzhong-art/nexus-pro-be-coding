@@ -18,41 +18,8 @@ type Account struct {
 	UserGroupIds           []string           `json:"user_group_ids"`
 	DirectPermissionSetIds []string           `json:"direct_permission_set_ids"`
 	ActiveAssumableRoleID  string             `json:"active_assumable_role_id"`
+	Version                int64              `json:"version"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
-}
-
-type Agent struct {
-	ID                 pgtype.UUID        `json:"id"`
-	CompanyID          int32              `json:"company_id"`
-	WorkspaceID        pgtype.UUID        `json:"workspace_id"`
-	Name               string             `json:"name"`
-	AgentImage         string             `json:"agent_image"`
-	AgentType          string             `json:"agent_type"`
-	Opening            []byte             `json:"opening"`
-	SuggestedQuestions []byte             `json:"suggested_questions"`
-	Status             string             `json:"status"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-}
-
-type AgentKnowledge struct {
-	ID          pgtype.UUID        `json:"id"`
-	CompanyID   int32              `json:"company_id"`
-	AgentID     pgtype.UUID        `json:"agent_id"`
-	KnowledgeID pgtype.UUID        `json:"knowledge_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
-type AgentPlatformFile struct {
-	ID             pgtype.UUID        `json:"id"`
-	CompanyID      int32              `json:"company_id"`
-	AgentID        pgtype.UUID        `json:"agent_id"`
-	UserID         pgtype.UUID        `json:"user_id"`
-	FileID         pgtype.UUID        `json:"file_id"`
-	Platform       string             `json:"platform"`
-	PlatformFileID string             `json:"platform_file_id"`
-	Metadata       []byte             `json:"metadata"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type AgentRun struct {
@@ -187,15 +154,6 @@ type AuditLog struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
-type AuthzApplication struct {
-	ID          string             `json:"id"`
-	TenantID    string             `json:"tenant_id"`
-	Code        string             `json:"code"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
 type AuthzAssumableRoleSession struct {
 	ID              string             `json:"id"`
 	TenantID        string             `json:"tenant_id"`
@@ -229,40 +187,6 @@ type AuthzFieldPolicy struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
-type AuthzGroupMembership struct {
-	ID        string             `json:"id"`
-	TenantID  string             `json:"tenant_id"`
-	GroupID   string             `json:"group_id"`
-	AccountID string             `json:"account_id"`
-	Source    string             `json:"source"`
-	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-}
-
-type AuthzOutboxEvent struct {
-	ID          string             `json:"id"`
-	TenantID    string             `json:"tenant_id"`
-	EventType   string             `json:"event_type"`
-	Payload     []byte             `json:"payload"`
-	Status      string             `json:"status"`
-	RetryCount  int32              `json:"retry_count"`
-	LastError   string             `json:"last_error"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	ProcessedAt pgtype.Timestamptz `json:"processed_at"`
-}
-
-type AuthzPermission struct {
-	ID              string             `json:"id"`
-	TenantID        string             `json:"tenant_id"`
-	ApplicationCode string             `json:"application_code"`
-	ResourceType    string             `json:"resource_type"`
-	Action          string             `json:"action"`
-	Name            string             `json:"name"`
-	Description     string             `json:"description"`
-	RiskLevel       string             `json:"risk_level"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-}
-
 type AuthzPermissionSetAssignment struct {
 	ID              string             `json:"id"`
 	TenantID        string             `json:"tenant_id"`
@@ -277,27 +201,10 @@ type AuthzPermissionSetAssignment struct {
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 }
 
-type AuthzPermissionSetPermission struct {
-	ID              string             `json:"id"`
-	TenantID        string             `json:"tenant_id"`
-	PermissionSetID string             `json:"permission_set_id"`
-	PermissionID    string             `json:"permission_id"`
-	Effect          string             `json:"effect"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-}
-
 type AuthzPermissionVersion struct {
 	TenantID  string             `json:"tenant_id"`
 	Version   int64              `json:"version"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-}
-
-type AuthzPolicyCondition struct {
-	ID         string             `json:"id"`
-	TenantID   string             `json:"tenant_id"`
-	Name       string             `json:"name"`
-	Expression []byte             `json:"expression"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
 }
 
 type AuthzRelationshipTuple struct {
@@ -309,39 +216,6 @@ type AuthzRelationshipTuple struct {
 	SubjectType string             `json:"subject_type"`
 	SubjectID   string             `json:"subject_id"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
-type Company struct {
-	ID        int32              `json:"id"`
-	Name      string             `json:"name"`
-	Slug      string             `json:"slug"`
-	Status    string             `json:"status"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-}
-
-type CompanyPlan struct {
-	ID            pgtype.UUID        `json:"id"`
-	CompanyID     int32              `json:"company_id"`
-	PricingPlanID pgtype.UUID        `json:"pricing_plan_id"`
-	Status        string             `json:"status"`
-	QuotaSnapshot []byte             `json:"quota_snapshot"`
-	StartsAt      pgtype.Timestamptz `json:"starts_at"`
-	EndsAt        pgtype.Timestamptz `json:"ends_at"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-}
-
-type CompanyStorageConfig struct {
-	ID        pgtype.UUID        `json:"id"`
-	CompanyID int32              `json:"company_id"`
-	Provider  string             `json:"provider"`
-	Bucket    string             `json:"bucket"`
-	BasePath  string             `json:"base_path"`
-	Config    []byte             `json:"config"`
-	IsDefault bool               `json:"is_default"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Employee struct {
@@ -398,36 +272,6 @@ type EmployeeNumberSequence struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
-type File struct {
-	ID              pgtype.UUID        `json:"id"`
-	CompanyID       int32              `json:"company_id"`
-	KnowledgeID     pgtype.UUID        `json:"knowledge_id"`
-	StorageConfigID pgtype.UUID        `json:"storage_config_id"`
-	FileName        string             `json:"file_name"`
-	MimeType        string             `json:"mime_type"`
-	SizeBytes       int64              `json:"size_bytes"`
-	StoragePath     string             `json:"storage_path"`
-	Checksum        string             `json:"checksum"`
-	Status          string             `json:"status"`
-	Metadata        []byte             `json:"metadata"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
-}
-
-type FileProcessTask struct {
-	ID           pgtype.UUID        `json:"id"`
-	CompanyID    int32              `json:"company_id"`
-	FileID       pgtype.UUID        `json:"file_id"`
-	TaskType     string             `json:"task_type"`
-	Status       string             `json:"status"`
-	QueueName    string             `json:"queue_name"`
-	Payload      []byte             `json:"payload"`
-	Result       []byte             `json:"result"`
-	ErrorMessage string             `json:"error_message"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-}
-
 type FormInstance struct {
 	ID                 string             `json:"id"`
 	TenantID           string             `json:"tenant_id"`
@@ -438,6 +282,7 @@ type FormInstance struct {
 	SubmittedAt        pgtype.Timestamptz `json:"submitted_at"`
 	ApprovedBy         string             `json:"approved_by"`
 	CurrentRunID       string             `json:"current_run_id"`
+	Version            int64              `json:"version"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
@@ -468,36 +313,6 @@ type IdentityProvisioningOutbox struct {
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
-type Knowledge struct {
-	ID                 pgtype.UUID        `json:"id"`
-	CompanyID          int32              `json:"company_id"`
-	Name               string             `json:"name"`
-	Description        string             `json:"description"`
-	MilvusCollectionID string             `json:"milvus_collection_id"`
-	Config             []byte             `json:"config"`
-	Status             string             `json:"status"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-}
-
-type KnowledgeArticle struct {
-	ID        string             `json:"id"`
-	TenantID  string             `json:"tenant_id"`
-	Title     string             `json:"title"`
-	Content   string             `json:"content"`
-	Tags      []string           `json:"tags"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-}
-
-type KnowledgeUserPermission struct {
-	ID          pgtype.UUID        `json:"id"`
-	CompanyID   int32              `json:"company_id"`
-	KnowledgeID pgtype.UUID        `json:"knowledge_id"`
-	UserID      pgtype.UUID        `json:"user_id"`
-	Permission  string             `json:"permission"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
 type LeaveBalance struct {
 	ID             string             `json:"id"`
 	TenantID       string             `json:"tenant_id"`
@@ -519,17 +334,6 @@ type LeaveRequest struct {
 	Status         string             `json:"status"`
 	FormInstanceID string             `json:"form_instance_id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-}
-
-type License struct {
-	ID            pgtype.UUID        `json:"id"`
-	CompanyID     int32              `json:"company_id"`
-	LicenseKey    string             `json:"license_key"`
-	Status        string             `json:"status"`
-	QuotaSnapshot []byte             `json:"quota_snapshot"`
-	IssuedAt      pgtype.Timestamptz `json:"issued_at"`
-	ExpiresAt     pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
 }
 
 type Notification struct {
@@ -633,42 +437,10 @@ type PlatformTaskTodo struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
-type PricingPlan struct {
-	ID                pgtype.UUID        `json:"id"`
-	Code              string             `json:"code"`
-	Name              string             `json:"name"`
-	MessageLimit      int32              `json:"message_limit"`
-	UserLimit         int32              `json:"user_limit"`
-	StorageLimitBytes int64              `json:"storage_limit_bytes"`
-	Features          []byte             `json:"features"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-}
-
-type Role struct {
-	ID          pgtype.UUID        `json:"id"`
-	CompanyID   int32              `json:"company_id"`
-	Code        string             `json:"code"`
-	Name        string             `json:"name"`
-	Permissions []byte             `json:"permissions"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-}
-
 type Tenant struct {
 	ID        string             `json:"id"`
 	Name      string             `json:"name"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
-}
-
-type User struct {
-	ID           pgtype.UUID        `json:"id"`
-	CompanyID    int32              `json:"company_id"`
-	Email        string             `json:"email"`
-	DisplayName  string             `json:"display_name"`
-	IsSuperAdmin bool               `json:"is_super_admin"`
-	Status       string             `json:"status"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
 type UserGroup struct {
@@ -678,6 +450,7 @@ type UserGroup struct {
 	Description      string             `json:"description"`
 	MemberAccountIds []string           `json:"member_account_ids"`
 	PermissionSetIds []string           `json:"permission_set_ids"`
+	Version          int64              `json:"version"`
 	CreatedAt        pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -734,23 +507,4 @@ type WorkflowStageInstance struct {
 	Result      []byte             `json:"result"`
 	StartedAt   pgtype.Timestamptz `json:"started_at"`
 	CompletedAt pgtype.Timestamptz `json:"completed_at"`
-}
-
-type Workspace struct {
-	ID        pgtype.UUID        `json:"id"`
-	CompanyID int32              `json:"company_id"`
-	Name      string             `json:"name"`
-	Slug      string             `json:"slug"`
-	Status    string             `json:"status"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-}
-
-type WorkspaceUser struct {
-	ID          pgtype.UUID        `json:"id"`
-	CompanyID   int32              `json:"company_id"`
-	WorkspaceID pgtype.UUID        `json:"workspace_id"`
-	UserID      pgtype.UUID        `json:"user_id"`
-	RoleID      pgtype.UUID        `json:"role_id"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }

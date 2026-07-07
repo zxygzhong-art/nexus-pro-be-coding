@@ -40,7 +40,7 @@ func TestOpenAPIYAMLParsesStructurally(t *testing.T) {
 	if !strings.Contains(doc.Info.Description, "globally unique across tenants") {
 		t.Fatalf("expected OpenAPI metadata to document tenant resource id invariants: %q", doc.Info.Description)
 	}
-	for _, path := range []string{"/v1/hr/employees", "/v1/attendance/clock-records", "/v1/platform/workspace/admins"} {
+	for _, path := range []string{"/v1/hr/employees", "/v1/attendance/clock-records", "/v1/workspace/admins"} {
 		if _, ok := doc.Paths[path]; !ok {
 			t.Fatalf("expected structured OpenAPI path %s", path)
 		}
@@ -233,7 +233,7 @@ func TestOpenAPIErrorSchemaSupportsFieldAndRowLocalization(t *testing.T) {
 // isPublicRoute 驗證 public 路由。
 func isPublicRoute(path string) bool {
 	switch path {
-	case "/healthz", "/readyz", "/openapi.yaml", "/swagger", "/swagger/*any":
+	case "/healthz", "/readyz", "/openapi.yaml", "/swagger", "/swagger/*any", "/v1/auth/sso/google/verify":
 		return true
 	default:
 		return false

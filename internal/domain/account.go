@@ -23,6 +23,7 @@ type Account struct {
 	UserGroupIDs           []string  `json:"user_group_ids"`
 	DirectPermissionSetIDs []string  `json:"direct_permission_set_ids"`
 	ActiveAssumableRoleID  string    `json:"active_assumable_role_id,omitempty"`
+	Version                int64     `json:"version"`
 	CreatedAt              time.Time `json:"created_at"`
 }
 
@@ -51,6 +52,14 @@ type UserIdentity struct {
 
 // IdentityProviderKeycloak 定義身分提供者 Keycloak 的固定值。
 const IdentityProviderKeycloak = "keycloak"
+
+// SSOLoginVerification 定義 SSO 登入驗證結果。
+type SSOLoginVerification struct {
+	Provider  string `json:"provider"`
+	TenantID  string `json:"tenant_id"`
+	AccountID string `json:"account_id"`
+	Email     string `json:"email"`
+}
 
 // IdentityProvisioningInput 定義身分開通輸入的資料結構。
 type IdentityProvisioningInput struct {
