@@ -636,6 +636,68 @@ func (s *Store) ListOrgUnits(execCtx context.Context, tenantID string) ([]domain
 	return mapSlice(items, fromOrgUnit), nil
 }
 
+// UpsertPosition 從儲存層處理 upsert 崗位。
+func (s *Store) UpsertPosition(execCtx context.Context, v domain.Position) error {
+	_, err := s.q.UpsertPosition(execCtx, sqlc.UpsertPositionParams{
+		ID:          v.ID,
+		TenantID:    v.TenantID,
+		Code:        v.Code,
+		Name:        v.Name,
+		OrgUnitID:   v.OrgUnitID,
+		Level:       v.Level,
+		Status:      v.Status,
+		Description: v.Description,
+		CreatedAt:   timestamptz(v.CreatedAt),
+		UpdatedAt:   timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+// GetPosition 從儲存層取得崗位。
+func (s *Store) GetPosition(execCtx context.Context, tenantID, id string) (domain.Position, bool, error) {
+	v, err := s.q.GetPosition(execCtx, sqlc.GetPositionParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.Position{}, false, nil
+	}
+	if err != nil {
+		return domain.Position{}, false, err
+	}
+	return fromPosition(v), true, nil
+}
+
+// GetPositionByCode 從儲存層取得崗位 by code。
+func (s *Store) GetPositionByCode(execCtx context.Context, tenantID, code string) (domain.Position, bool, error) {
+	v, err := s.q.GetPositionByCode(execCtx, sqlc.GetPositionByCodeParams{TenantID: tenantID, Lower: code})
+	if isNotFound(err) {
+		return domain.Position{}, false, nil
+	}
+	if err != nil {
+		return domain.Position{}, false, err
+	}
+	return fromPosition(v), true, nil
+}
+
+// GetPositionByName 從儲存層取得崗位 by name。
+func (s *Store) GetPositionByName(execCtx context.Context, tenantID, name string) (domain.Position, bool, error) {
+	v, err := s.q.GetPositionByName(execCtx, sqlc.GetPositionByNameParams{TenantID: tenantID, Lower: name})
+	if isNotFound(err) {
+		return domain.Position{}, false, nil
+	}
+	if err != nil {
+		return domain.Position{}, false, err
+	}
+	return fromPosition(v), true, nil
+}
+
+// ListPositions 從儲存層列出崗位。
+func (s *Store) ListPositions(execCtx context.Context, tenantID string) ([]domain.Position, error) {
+	items, err := s.q.ListPositions(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromPosition), nil
+}
+
 // UpsertEmployee 從儲存層處理 upsert 員工。
 func (s *Store) UpsertEmployee(execCtx context.Context, v domain.Employee) error {
 	_, err := s.q.UpsertEmployee(execCtx, sqlc.UpsertEmployeeParams{
@@ -649,6 +711,7 @@ func (s *Store) UpsertEmployee(execCtx context.Context, v domain.Employee) error
 		OrgUnitID:             v.OrgUnitID,
 		AccountID:             v.AccountID,
 		ManagerEmployeeID:     nullableText(v.ManagerEmployeeID),
+		PositionID:            v.PositionID,
 		Position:              v.Position,
 		Category:              v.Category,
 		Status:                v.Status,
@@ -960,6 +1023,56 @@ func (s *Store) GetEmployeeImportSession(execCtx context.Context, tenantID, id s
 		return domain.EmployeeImportSession{}, false, err
 	}
 	return fromEmployeeImportSession(v), true, nil
+}
+
+// UpsertEmploymentContract 從儲存層處理 upsert 員工合約。
+func (s *Store) UpsertEmploymentContract(execCtx context.Context, v domain.EmploymentContract) error {
+	_, err := s.q.UpsertEmploymentContract(execCtx, sqlc.UpsertEmploymentContractParams{
+		ID:                  v.ID,
+		TenantID:            v.TenantID,
+		EmployeeID:          v.EmployeeID,
+		ContractType:        v.ContractType,
+		ContractNo:          v.ContractNo,
+		StartDate:           timestamptz(v.StartDate),
+		EndDate:             nullableTimestamptz(v.EndDate),
+		Status:              v.Status,
+		AttachmentObjectKey: v.AttachmentObjectKey,
+		Notes:               v.Notes,
+		Version:             v.Version,
+		CreatedAt:           timestamptz(v.CreatedAt),
+		UpdatedAt:           timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+// GetEmploymentContract 從儲存層取得員工合約。
+func (s *Store) GetEmploymentContract(execCtx context.Context, tenantID, id string) (domain.EmploymentContract, bool, error) {
+	v, err := s.q.GetEmploymentContract(execCtx, sqlc.GetEmploymentContractParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.EmploymentContract{}, false, nil
+	}
+	if err != nil {
+		return domain.EmploymentContract{}, false, err
+	}
+	return fromEmploymentContract(v), true, nil
+}
+
+// ListEmploymentContracts 從儲存層列出員工合約。
+func (s *Store) ListEmploymentContracts(execCtx context.Context, tenantID string) ([]domain.EmploymentContract, error) {
+	items, err := s.q.ListEmploymentContracts(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromEmploymentContract), nil
+}
+
+// ListEmploymentContractsByEmployee 從儲存層列出員工合約 by 員工。
+func (s *Store) ListEmploymentContractsByEmployee(execCtx context.Context, tenantID, employeeID string) ([]domain.EmploymentContract, error) {
+	items, err := s.q.ListEmploymentContractsByEmployee(tenantContext(execCtx, tenantID), sqlc.ListEmploymentContractsByEmployeeParams{TenantID: tenantID, EmployeeID: employeeID})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromEmploymentContract), nil
 }
 
 // UpsertAttendancePolicy 從儲存層處理 upsert 考勤政策。
@@ -2398,6 +2511,22 @@ func fromOrgUnit(v sqlc.OrgUnit) domain.OrgUnit {
 	}
 }
 
+// fromPosition 轉換崗位。
+func fromPosition(v sqlc.Position) domain.Position {
+	return domain.Position{
+		ID:          v.ID,
+		TenantID:    v.TenantID,
+		Code:        v.Code,
+		Name:        v.Name,
+		OrgUnitID:   v.OrgUnitID,
+		Level:       v.Level,
+		Status:      v.Status,
+		Description: v.Description,
+		CreatedAt:   timeFrom(v.CreatedAt),
+		UpdatedAt:   timeFrom(v.UpdatedAt),
+	}
+}
+
 // fromEmployee 轉換員工。
 func fromEmployee(v sqlc.Employee) domain.Employee {
 	return domain.Employee{
@@ -2411,6 +2540,7 @@ func fromEmployee(v sqlc.Employee) domain.Employee {
 		OrgUnitID:             v.OrgUnitID,
 		AccountID:             v.AccountID,
 		ManagerEmployeeID:     textFrom(v.ManagerEmployeeID),
+		PositionID:            v.PositionID,
 		Position:              v.Position,
 		Category:              v.Category,
 		Status:                v.Status,
@@ -2448,6 +2578,25 @@ func fromEmployeeImportSession(v sqlc.EmployeeImportSession) domain.EmployeeImpo
 		CreatedAt:            timeFrom(v.CreatedAt),
 		ExpiresAt:            timeFrom(v.ExpiresAt),
 		ConfirmedAt:          timePtrFrom(v.ConfirmedAt),
+	}
+}
+
+// fromEmploymentContract 轉換員工合約。
+func fromEmploymentContract(v sqlc.EmploymentContract) domain.EmploymentContract {
+	return domain.EmploymentContract{
+		ID:                  v.ID,
+		TenantID:            v.TenantID,
+		EmployeeID:          v.EmployeeID,
+		ContractType:        v.ContractType,
+		ContractNo:          v.ContractNo,
+		StartDate:           timeFrom(v.StartDate),
+		EndDate:             timePtrFrom(v.EndDate),
+		Status:              v.Status,
+		AttachmentObjectKey: v.AttachmentObjectKey,
+		Notes:               v.Notes,
+		Version:             v.Version,
+		CreatedAt:           timeFrom(v.CreatedAt),
+		UpdatedAt:           timeFrom(v.UpdatedAt),
 	}
 }
 

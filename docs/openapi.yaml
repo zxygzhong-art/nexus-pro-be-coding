@@ -288,6 +288,107 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/hr/positions:
+    get:
+      summary: List positions
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200":
+          description: Position page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PositionListDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      summary: Create position
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PositionInput"
+      responses:
+        "201":
+          description: Created position
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PositionDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/hr/positions/{id}:
+    get:
+      summary: Get position
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Position detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PositionDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    patch:
+      summary: Patch position
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PositionPatch"
+      responses:
+        "200":
+          description: Updated position
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PositionDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      summary: Disable position
+      parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Disabled position
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PositionDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees:
     get:
       summary: List employees
@@ -760,6 +861,115 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmployeeDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/hr/employees/{id}/contracts:
+    get:
+      summary: List employment contracts for an employee
+      parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+        - $ref: "#/components/parameters/EmployeeID"
+      responses:
+        "200":
+          description: Employment contracts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmploymentContractListDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      summary: Create employment contract for an employee
+      parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+        - $ref: "#/components/parameters/EmployeeID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmploymentContractInput"
+      responses:
+        "201":
+          description: Created employment contract
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmploymentContractDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/hr/contracts/{id}:
+    get:
+      summary: Get employment contract
+      parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Employment contract detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmploymentContractDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    patch:
+      summary: Patch employment contract
+      parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EmploymentContractPatch"
+      responses:
+        "200":
+          description: Updated employment contract
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmploymentContractDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      summary: Terminate employment contract
+      parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Terminated employment contract
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmploymentContractDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -2853,6 +3063,32 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/BatchEmployeeResponse"
+    PositionDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/Position"
+    PositionListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PositionListResponse"
+    EmploymentContractDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EmploymentContract"
+    EmploymentContractListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/EmploymentContract"
     AttendanceWorksiteDataResponse:
       type: object
       required: [data]
@@ -3725,6 +3961,100 @@ components:
       properties:
         status:
           $ref: "#/components/schemas/EmployeeDirectStatus"
+    Position:
+      description: Tenant-scoped HR position entity. Existing employee.position remains for backward-compatible display.
+      allOf:
+        - $ref: "#/components/schemas/PositionInput"
+        - type: object
+          required: [id, tenant_id, code, name, status, created_at, updated_at]
+          properties:
+            id: {type: string}
+            tenant_id: {type: string}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+    PositionInput:
+      type: object
+      required: [name]
+      properties:
+        code: {type: string}
+        name: {type: string}
+        org_unit_id:
+          type: string
+          description: Optional tenant-local org unit id. Empty means position is not bound to one org unit.
+        level: {type: string}
+        status:
+          $ref: "#/components/schemas/PositionStatus"
+        description: {type: string}
+    PositionPatch:
+      type: object
+      properties:
+        code: {type: string}
+        name: {type: string}
+        org_unit_id: {type: string}
+        level: {type: string}
+        status:
+          $ref: "#/components/schemas/PositionStatus"
+        description: {type: string}
+    PositionStatus:
+      type: string
+      enum: [active, disabled]
+    PositionListResponse:
+      type: object
+      required: [items, total, page, page_size, sort]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/Position"}
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+        sort: {type: string}
+    EmploymentContract:
+      description: Tenant-scoped employment contract metadata. attachment_object_key stores object metadata only.
+      allOf:
+        - $ref: "#/components/schemas/EmploymentContractInput"
+        - type: object
+          required: [id, tenant_id, employee_id, contract_type, start_date, status, version, created_at, updated_at]
+          properties:
+            id: {type: string}
+            tenant_id: {type: string}
+            employee_id: {type: string}
+            version: {type: integer, format: int64}
+            created_at: {type: string, format: date-time}
+            updated_at: {type: string, format: date-time}
+    EmploymentContractInput:
+      type: object
+      required: [contract_type, start_date]
+      properties:
+        contract_type:
+          $ref: "#/components/schemas/EmploymentContractType"
+        contract_no: {type: string}
+        start_date: {type: string, format: date-time}
+        end_date: {type: string, format: date-time}
+        status:
+          $ref: "#/components/schemas/EmploymentContractStatus"
+        attachment_object_key:
+          type: string
+          description: Object-store key for an already uploaded attachment.
+        notes: {type: string}
+    EmploymentContractPatch:
+      type: object
+      properties:
+        contract_type:
+          $ref: "#/components/schemas/EmploymentContractType"
+        contract_no: {type: string}
+        start_date: {type: string, format: date-time}
+        end_date: {type: string, format: date-time}
+        status:
+          $ref: "#/components/schemas/EmploymentContractStatus"
+        attachment_object_key: {type: string}
+        notes: {type: string}
+    EmploymentContractType:
+      type: string
+      enum: [fulltime, parttime, contractor, intern]
+    EmploymentContractStatus:
+      type: string
+      enum: [draft, active, expired, terminated, renewed]
     Employee:
       description: Persisted tenant resource. id is globally unique across tenants; tenant_id scopes ownership and authorization.
       allOf:
@@ -3760,6 +4090,7 @@ components:
         org_unit_id: {type: string}
         account_id: {type: string}
         manager_employee_id: {type: string}
+        position_id: {type: string}
         position: {type: string}
         category:
           $ref: "#/components/schemas/EmployeeCategory"
@@ -3811,6 +4142,7 @@ components:
       additionalProperties: true
       properties:
         org_unit_id: {type: string}
+        position_id: {type: string}
         position: {type: string}
         category: {$ref: "#/components/schemas/EmployeeCategory"}
         manager_employee_id: {type: string}
@@ -3871,6 +4203,9 @@ components:
           type: string
           enum: [none, link_existing, create_pending_invite, create_active]
           description: Optional account lifecycle policy. Defaults to link_existing when account_id is provided, otherwise none.
+        position_id:
+          type: string
+          description: Optional position entity id. When supplied, employee.position is synchronized from the position name.
         position: {type: string}
         category:
           $ref: "#/components/schemas/EmployeeCategory"
@@ -3899,6 +4234,9 @@ components:
         phone: {type: string}
         org_unit_id: {type: string}
         account_id: {type: string}
+        position_id:
+          type: string
+          description: Optional position entity id. When supplied, employee.position is synchronized from the position name.
         position: {type: string}
         category:
           $ref: "#/components/schemas/EmployeeCategory"
@@ -3944,6 +4282,7 @@ components:
         end_date: {type: string, format: date-time}
         reason: {type: string}
         org_unit_id: {type: string}
+        position_id: {type: string}
         position: {type: string}
         category: {type: string}
         status:
@@ -4215,6 +4554,11 @@ components:
                 - 30016
                 - 30017
                 - 30018
+                - 30030
+                - 30031
+                - 30040
+                - 30041
+                - 30042
             message: {type: string}
             reason_code:
               type: string

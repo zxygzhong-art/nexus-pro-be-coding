@@ -1037,6 +1037,9 @@ func (c HRService) employeeFromCreateInputWithProfile(ctx RequestContext, input 
 		}
 		employee.EmployeeNo = employeeNo
 	}
+	if err := c.ensureEmployeePosition(ctx, &employee, true); err != nil {
+		return Employee{}, err
+	}
 	if err := c.validateEmployee(ctx, employee, "create", profile); err != nil {
 		return Employee{}, err
 	}
@@ -1072,6 +1075,7 @@ func (c HRService) employeeCreateCandidate(ctx RequestContext, input CreateEmplo
 		OrgUnitID:             strings.TrimSpace(input.OrgUnitID),
 		AccountID:             strings.TrimSpace(input.AccountID),
 		ManagerEmployeeID:     strings.TrimSpace(input.ManagerEmployeeID),
+		PositionID:            strings.TrimSpace(input.PositionID),
 		Position:              strings.TrimSpace(input.Position),
 		Category:              normalizeEmployeeCategory(input.Category),
 		Status:                status,
@@ -1092,6 +1096,11 @@ func (c HRService) employeeCreateCandidate(ctx RequestContext, input CreateEmplo
 
 // applyEmployeePatch 處理 apply 員工 patch 的服務流程。
 func (c HRService) applyEmployeePatch(ctx RequestContext, employee *Employee, input UpdateEmployeeInput) error {
+	return c.applyEmployeePatchWithPositionCreation(ctx, employee, input, true)
+}
+
+// applyEmployeePatchWithPositionCreation 處理 apply 員工 patch 的服務流程。
+func (c HRService) applyEmployeePatchWithPositionCreation(ctx RequestContext, employee *Employee, input UpdateEmployeeInput, createMissingPosition bool) error {
 	if input.Status != nil || input.EmploymentStatus != nil {
 		return domainValidation("employee status must be changed through status-transition", FieldError{Tab: employeeTabEmploymentInfo, Field: "status", Code: "transition_required", Message: "status must be changed through status-transition"})
 	}
@@ -1119,6 +1128,9 @@ func (c HRService) applyEmployeePatch(ctx RequestContext, employee *Employee, in
 	if input.ManagerEmployeeID != nil {
 		employee.ManagerEmployeeID = strings.TrimSpace(*input.ManagerEmployeeID)
 	}
+	if input.PositionID != nil {
+		employee.PositionID = strings.TrimSpace(*input.PositionID)
+	}
 	if input.Position != nil {
 		employee.Position = strings.TrimSpace(*input.Position)
 	}
@@ -1141,6 +1153,14 @@ func (c HRService) applyEmployeePatch(ctx RequestContext, employee *Employee, in
 	}
 	employee.BasicInfo = mergeMap(employee.BasicInfo, input.BasicInfo)
 	employee.EmploymentInfo = mergeMap(employee.EmploymentInfo, input.EmploymentInfo)
+	if input.Position != nil && input.PositionID == nil {
+		employee.PositionID = ""
+		if employee.EmploymentInfo == nil {
+			employee.EmploymentInfo = map[string]any{}
+		}
+		delete(employee.EmploymentInfo, "position_id")
+		employee.EmploymentInfo["position"] = employee.Position
+	}
 	employee.EducationMilitaryInfo = mergeMap(employee.EducationMilitaryInfo, input.EducationMilitaryInfo)
 	employee.ContactInfo = mergeMap(employee.ContactInfo, input.ContactInfo)
 	employee.InsuranceInfo = mergeMap(employee.InsuranceInfo, input.InsuranceInfo)
@@ -1148,6 +1168,9 @@ func (c HRService) applyEmployeePatch(ctx RequestContext, employee *Employee, in
 		employee.InternalExperiences = utils.CopyEmployeeExperiences(input.InternalExperiences)
 	}
 	*employee = c.deriveEmployeeHotFields(*employee)
+	if err := c.ensureEmployeePosition(ctx, employee, createMissingPosition); err != nil {
+		return err
+	}
 	employee.UpdatedAt = c.Now()
 	return c.validateEmployee(ctx, *employee, "update", employeeValidationFullForm)
 }
@@ -1200,6 +1223,7 @@ func (c HRService) deriveEmployeeHotFields(employee Employee) Employee {
 	employee.Phone = utils.FirstNonEmpty(employee.Phone, employeeHotValue(employee, "phone"))
 	employee.OrgUnitID = utils.FirstNonEmpty(employee.OrgUnitID, employeeHotValue(employee, "org_unit_id"))
 	employee.ManagerEmployeeID = utils.FirstNonEmpty(employee.ManagerEmployeeID, employeeHotValue(employee, "manager_employee_id"))
+	employee.PositionID = utils.FirstNonEmpty(employee.PositionID, employeeHotValue(employee, "position_id"))
 	employee.Position = utils.FirstNonEmpty(employee.Position, employeeHotValue(employee, "position"))
 	employee.Category = normalizeEmployeeCategory(utils.FirstNonEmpty(employee.Category, employeeHotValue(employee, "category")))
 	employee.Name = utils.FirstNonEmpty(employee.Name, employeeHotValue(employee, "name"), strings.TrimSpace(stringFromMap(employee.BasicInfo, "first_name")+" "+stringFromMap(employee.BasicInfo, "last_name")))
@@ -1801,6 +1825,9 @@ var employeeHotFieldSources = map[string][]employeeFieldSource{
 		{tab: employeeTabEmploymentInfo, key: "manager_employee_id"},
 		{tab: employeeTabBasicInfo, key: "manager_employee_id"},
 	},
+	"position_id": {
+		{tab: employeeTabEmploymentInfo, key: "position_id"},
+	},
 	"position": {
 		{tab: employeeTabEmploymentInfo, key: "position"},
 		{tab: employeeTabEmploymentInfo, key: "job_title"},
@@ -1828,6 +1855,7 @@ var employeeScalarPatchPolicyFields = []employeePatchPolicyField{
 	{tab: employeeTabEmploymentInfo, field: "org_unit_id", present: func(input UpdateEmployeeInput) bool { return input.OrgUnitID != nil }},
 	{tab: employeeTabBasicInfo, field: "account_id", present: func(input UpdateEmployeeInput) bool { return input.AccountID != nil }},
 	{tab: employeeTabEmploymentInfo, field: "manager_employee_id", present: func(input UpdateEmployeeInput) bool { return input.ManagerEmployeeID != nil }},
+	{tab: employeeTabEmploymentInfo, field: "position_id", present: func(input UpdateEmployeeInput) bool { return input.PositionID != nil }},
 	{tab: employeeTabEmploymentInfo, field: "position", present: func(input UpdateEmployeeInput) bool { return input.Position != nil }},
 	{tab: employeeTabEmploymentInfo, field: "category", present: func(input UpdateEmployeeInput) bool { return input.Category != nil }},
 	{tab: employeeTabEmploymentInfo, field: "status", present: func(input UpdateEmployeeInput) bool { return input.Status != nil }},
@@ -2029,6 +2057,9 @@ func (c HRService) PreviewCreateEmployee(ctx RequestContext, input CreateEmploye
 	if err != nil {
 		return EmployeePreviewResponse{}, err
 	}
+	if err := c.ensureEmployeePosition(ctx, &employee, false); err != nil {
+		return EmployeePreviewResponse{}, err
+	}
 	if len(employee.InternalExperiences) == 0 {
 		employee.InternalExperiences = append(employee.InternalExperiences, c.newEmployeeExperience(employee, "新進"))
 	}
@@ -2074,7 +2105,7 @@ func (c HRService) PreviewUpdateEmployee(ctx RequestContext, id string, input Up
 		return EmployeePreviewResponse{}, domainValidation("employee field policy denied update", fields...)
 	}
 	before := employee
-	err = c.applyEmployeePatch(ctx, &employee, input)
+	err = c.applyEmployeePatchWithPositionCreation(ctx, &employee, input, false)
 	resp := employeePreviewResponse(employee, employeeDiff(before, employee))
 	if err != nil {
 		if appErr, ok := domain.AsAppError(err); ok && appErr.Code == "validation_failed" {
@@ -2284,6 +2315,7 @@ func employeeDiff(before, after Employee) map[string]any {
 	add("org_unit_id", before.OrgUnitID, after.OrgUnitID)
 	add("account_id", before.AccountID, after.AccountID)
 	add("manager_employee_id", before.ManagerEmployeeID, after.ManagerEmployeeID)
+	add("position_id", before.PositionID, after.PositionID)
 	add("position", before.Position, after.Position)
 	add("category", before.Category, after.Category)
 	add("status", before.Status, after.Status)
@@ -3273,6 +3305,13 @@ func (c HRService) prepareEmployeeImportUpdateWithExisting(ctx RequestContext, r
 		return Employee{}, Employee{}, false, append(errors, batchErrors...), nil
 	}
 	next := employeeImportUpdateEmployee(existing, candidate, row.Employee)
+	if err := c.ensureEmployeePosition(ctx, &next, true); err != nil {
+		errors, ok := employeeImportErrorsFromError(row.RowNumber, err)
+		if !ok {
+			return Employee{}, Employee{}, false, nil, err
+		}
+		return Employee{}, Employee{}, false, append(errors, batchErrors...), nil
+	}
 	if err := c.validateEmployee(ctx, next, "update", employeeValidationImportMinimal); err != nil {
 		errors, ok := employeeImportErrorsFromError(row.RowNumber, err)
 		if !ok {
@@ -3312,6 +3351,9 @@ func employeeImportUpdateEmployee(existing Employee, candidate Employee, input C
 	}
 	if strings.TrimSpace(input.ManagerEmployeeID) != "" {
 		next.ManagerEmployeeID = candidate.ManagerEmployeeID
+	}
+	if strings.TrimSpace(input.PositionID) != "" {
+		next.PositionID = candidate.PositionID
 	}
 	if strings.TrimSpace(input.Position) != "" {
 		next.Position = candidate.Position

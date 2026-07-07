@@ -229,6 +229,7 @@ type Employee struct {
 	OrgUnitID             string             `json:"org_unit_id"`
 	AccountID             string             `json:"account_id"`
 	ManagerEmployeeID     pgtype.Text        `json:"manager_employee_id"`
+	PositionID            string             `json:"position_id"`
 	Position              string             `json:"position"`
 	Category              string             `json:"category"`
 	Status                string             `json:"status"`
@@ -270,6 +271,22 @@ type EmployeeNumberSequence struct {
 	Prefix    string             `json:"prefix"`
 	NextValue int32              `json:"next_value"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type EmploymentContract struct {
+	ID                  string             `json:"id"`
+	TenantID            string             `json:"tenant_id"`
+	EmployeeID          string             `json:"employee_id"`
+	ContractType        string             `json:"contract_type"`
+	ContractNo          string             `json:"contract_no"`
+	StartDate           pgtype.Timestamptz `json:"start_date"`
+	EndDate             pgtype.Timestamptz `json:"end_date"`
+	Status              string             `json:"status"`
+	AttachmentObjectKey string             `json:"attachment_object_key"`
+	Notes               string             `json:"notes"`
+	Version             int64              `json:"version"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
 type FormInstance struct {
@@ -470,6 +487,19 @@ type PlatformTaskTodo struct {
 	ConvertedTaskItemID string             `json:"converted_task_item_id"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Position struct {
+	ID          string             `json:"id"`
+	TenantID    string             `json:"tenant_id"`
+	Code        string             `json:"code"`
+	Name        string             `json:"name"`
+	OrgUnitID   string             `json:"org_unit_id"`
+	Level       string             `json:"level"`
+	Status      string             `json:"status"`
+	Description string             `json:"description"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Tenant struct {

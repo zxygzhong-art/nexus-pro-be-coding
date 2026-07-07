@@ -12,7 +12,9 @@ type Store interface {
 	IdentityStore
 	IAMStore
 	OrgStore
+	PositionStore
 	EmployeeStore
+	EmploymentContractStore
 	AttendanceStore
 	WorkflowStore
 	TaskStore

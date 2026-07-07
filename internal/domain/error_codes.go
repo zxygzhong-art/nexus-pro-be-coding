@@ -52,6 +52,16 @@ const (
 	ErrorCodeDuplicateInFile ErrorCode = 30017
 	// ErrorCodeImportValidation 說明此處的錯誤處理語義。
 	ErrorCodeImportValidation ErrorCode = 30018
+	// ErrorCodePositionNotFound 說明此處的錯誤處理語義。
+	ErrorCodePositionNotFound ErrorCode = 30030
+	// ErrorCodePositionConflict 說明此處的錯誤處理語義。
+	ErrorCodePositionConflict ErrorCode = 30031
+	// ErrorCodeEmploymentContractNotFound 說明此處的錯誤處理語義。
+	ErrorCodeEmploymentContractNotFound ErrorCode = 30040
+	// ErrorCodeEmploymentContractInvalidStatus 說明此處的錯誤處理語義。
+	ErrorCodeEmploymentContractInvalidStatus ErrorCode = 30041
+	// ErrorCodeEmploymentContractInvalidTransition 說明此處的錯誤處理語義。
+	ErrorCodeEmploymentContractInvalidTransition ErrorCode = 30042
 	// ErrorCodeUnauthorized 說明此處的錯誤處理語義。
 	ErrorCodeUnauthorized ErrorCode = 10030
 	// ErrorCodeAccountInactive 說明此處的錯誤處理語義。

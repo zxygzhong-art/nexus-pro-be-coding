@@ -13,6 +13,15 @@ type OrgStore interface {
 	ListOrgUnits(ctx context.Context, tenantID string) ([]domain.OrgUnit, error)
 }
 
+// PositionStore 定義崗位儲存層的行為契約。
+type PositionStore interface {
+	UpsertPosition(ctx context.Context, position domain.Position) error
+	GetPosition(ctx context.Context, tenantID, id string) (domain.Position, bool, error)
+	GetPositionByCode(ctx context.Context, tenantID, code string) (domain.Position, bool, error)
+	GetPositionByName(ctx context.Context, tenantID, name string) (domain.Position, bool, error)
+	ListPositions(ctx context.Context, tenantID string) ([]domain.Position, error)
+}
+
 // EmployeeStore 定義員工儲存層的行為契約。
 type EmployeeStore interface {
 	UpsertEmployee(ctx context.Context, employee domain.Employee) error
@@ -29,4 +38,12 @@ type EmployeeStore interface {
 	NextEmployeeNo(ctx context.Context, tenantID, prefix string) (string, error)
 	UpsertEmployeeImportSession(ctx context.Context, session domain.EmployeeImportSession) error
 	GetEmployeeImportSession(ctx context.Context, tenantID, id string) (domain.EmployeeImportSession, bool, error)
+}
+
+// EmploymentContractStore 定義員工合約儲存層的行為契約。
+type EmploymentContractStore interface {
+	UpsertEmploymentContract(ctx context.Context, contract domain.EmploymentContract) error
+	GetEmploymentContract(ctx context.Context, tenantID, id string) (domain.EmploymentContract, bool, error)
+	ListEmploymentContracts(ctx context.Context, tenantID string) ([]domain.EmploymentContract, error)
+	ListEmploymentContractsByEmployee(ctx context.Context, tenantID, employeeID string) ([]domain.EmploymentContract, error)
 }

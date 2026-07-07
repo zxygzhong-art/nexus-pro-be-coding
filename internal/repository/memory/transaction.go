@@ -41,9 +41,11 @@ func (s *Store) cloneLocked() *Store {
 		assumableRoles:         cloneNestedMap(s.assumableRoles, copyAssumableRole),
 		roleSessions:           cloneNestedMap(s.roleSessions, copyAssumableRoleSession),
 		orgUnits:               cloneNestedMap(s.orgUnits, copyOrgUnit),
+		positions:              cloneNestedMap(s.positions, copyPosition),
 		employees:              cloneNestedMap(s.employees, copyEmployee),
 		employeeNoSequences:    cloneNestedMap(s.employeeNoSequences, func(v int) int { return v }),
 		employeeImports:        cloneNestedMap(s.employeeImports, copyEmployeeImportSession),
+		employmentContracts:    cloneNestedMap(s.employmentContracts, copyEmploymentContract),
 		attendancePolicies:     cloneMap(s.attendancePolicies, copyAttendancePolicy),
 		leaveBalances:          cloneNestedMap(s.leaveBalances, copyLeaveBalance),
 		leaveRequests:          cloneNestedMap(s.leaveRequests, copyLeaveRequest),
@@ -88,9 +90,11 @@ func (s *Store) replaceLocked(next *Store) {
 	s.assumableRoles = next.assumableRoles
 	s.roleSessions = next.roleSessions
 	s.orgUnits = next.orgUnits
+	s.positions = next.positions
 	s.employees = next.employees
 	s.employeeNoSequences = next.employeeNoSequences
 	s.employeeImports = next.employeeImports
+	s.employmentContracts = next.employmentContracts
 	s.attendancePolicies = next.attendancePolicies
 	s.leaveBalances = next.leaveBalances
 	s.leaveRequests = next.leaveRequests

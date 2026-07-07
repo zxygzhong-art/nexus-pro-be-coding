@@ -81,6 +81,8 @@ const (
 	ResourceEmployee                  ResourceType = "employee"
 	ResourceEmployeeImport            ResourceType = "employee_import_session"
 	ResourceOrgUnit                   ResourceType = "org_unit"
+	ResourcePosition                  ResourceType = "position"
+	ResourceEmploymentContract        ResourceType = "employment_contract"
 	ResourceLeave                     ResourceType = "leave"
 	ResourceAttendanceWorksite        ResourceType = "worksite"
 	ResourceAttendanceShift           ResourceType = "shift"
@@ -224,6 +226,11 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "iam.assumable_role.read", Method: "GET", Path: "/v1/iam/assumable-roles", ApplicationCode: "iam", ResourceType: "assumable_role", Action: "read"},
 	{Name: "iam.assumable_role.create", Method: "POST", Path: "/v1/iam/assumable-roles", ApplicationCode: "iam", ResourceType: "assumable_role", Action: "create", RiskLevel: RiskHigh},
 	{Name: "iam.assumable_role.assume", Method: "POST", Path: "/v1/iam/assumable-roles/:id/assume", ApplicationCode: "iam", ResourceType: "assumable_role", Action: "assume", RiskLevel: RiskHigh},
+	{Name: "hr.position.read", Method: "GET", Path: "/v1/hr/positions", ApplicationCode: "hr", ResourceType: "position", Action: "read"},
+	{Name: "hr.position.create", Method: "POST", Path: "/v1/hr/positions", ApplicationCode: "hr", ResourceType: "position", Action: "create"},
+	{Name: "hr.position.detail", Method: "GET", Path: "/v1/hr/positions/:id", ApplicationCode: "hr", ResourceType: "position", Action: "read"},
+	{Name: "hr.position.update", Method: "PATCH", Path: "/v1/hr/positions/:id", ApplicationCode: "hr", ResourceType: "position", Action: "update"},
+	{Name: "hr.position.delete", Method: "DELETE", Path: "/v1/hr/positions/:id", ApplicationCode: "hr", ResourceType: "position", Action: "delete", RiskLevel: RiskHigh},
 	{Name: "hr.employee.read", Method: "GET", Path: "/v1/hr/employees", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
 	{Name: "hr.employee.detail", Method: "GET", Path: "/v1/hr/employees/:id", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
 	{Name: "hr.employee.create", Method: "POST", Path: "/v1/hr/employees", ApplicationCode: "hr", ResourceType: "employee", Action: "create"},
@@ -245,6 +252,11 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "hr.employee.update_status", Method: "PATCH", Path: "/v1/hr/employees/:id/status", ApplicationCode: "hr", ResourceType: "employee", Action: "update_status", RiskLevel: RiskHigh},
 	{Name: "hr.employee.invite", Method: "POST", Path: "/v1/hr/employees/:id/invite", ApplicationCode: "hr", ResourceType: "employee", Action: "invite", RiskLevel: RiskHigh},
 	{Name: "hr.employee.status_transition", Method: "POST", Path: "/v1/hr/employees/:id/status-transition", ApplicationCode: "hr", ResourceType: "employee", Action: "status_transition", RiskLevel: RiskHigh},
+	{Name: "hr.contract.read_employee", Method: "GET", Path: "/v1/hr/employees/:id/contracts", ApplicationCode: "hr", ResourceType: "employment_contract", Action: "read", RiskLevel: RiskHigh},
+	{Name: "hr.contract.create", Method: "POST", Path: "/v1/hr/employees/:id/contracts", ApplicationCode: "hr", ResourceType: "employment_contract", Action: "create", RiskLevel: RiskHigh},
+	{Name: "hr.contract.detail", Method: "GET", Path: "/v1/hr/contracts/:id", ApplicationCode: "hr", ResourceType: "employment_contract", Action: "read", RiskLevel: RiskHigh},
+	{Name: "hr.contract.update", Method: "PATCH", Path: "/v1/hr/contracts/:id", ApplicationCode: "hr", ResourceType: "employment_contract", Action: "update", RiskLevel: RiskHigh},
+	{Name: "hr.contract.delete", Method: "DELETE", Path: "/v1/hr/contracts/:id", ApplicationCode: "hr", ResourceType: "employment_contract", Action: "delete", RiskLevel: RiskHigh},
 	{Name: "hr.org_unit.read", Method: "GET", Path: "/v1/org/units", ApplicationCode: "hr", ResourceType: "org_unit", Action: "read"},
 	{Name: "hr.org_unit.create", Method: "POST", Path: "/v1/org/units", ApplicationCode: "hr", ResourceType: "org_unit", Action: "create"},
 	{Name: "attendance.leave.read_balance", Method: "GET", Path: "/v1/attendance/leave-balances", ApplicationCode: "attendance", ResourceType: "leave", Action: "read"},

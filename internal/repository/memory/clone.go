@@ -104,6 +104,9 @@ func copyOrgUnit(v OrgUnit) OrgUnit {
 	return v
 }
 
+// copyPosition 複製崗位。
+func copyPosition(v Position) Position { return v }
+
 // copyEmployee 複製員工。
 func copyEmployee(v Employee) Employee {
 	if v.HireDate != nil {
@@ -130,6 +133,15 @@ func copyEmployeeImportSession(v EmployeeImportSession) EmployeeImportSession {
 	if v.ConfirmedAt != nil {
 		t := *v.ConfirmedAt
 		v.ConfirmedAt = &t
+	}
+	return v
+}
+
+// copyEmploymentContract 複製員工合約。
+func copyEmploymentContract(v EmploymentContract) EmploymentContract {
+	if v.EndDate != nil {
+		t := *v.EndDate
+		v.EndDate = &t
 	}
 	return v
 }

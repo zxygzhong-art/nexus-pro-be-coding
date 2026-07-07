@@ -31,6 +31,13 @@ func (c HRCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	hr := router.Group("/hr")
 	hr.GET("/employee-options", c.routes.Handle("hr.employee", "read", c.employeeOptions))
 
+	positions := hr.Group("/positions")
+	positions.GET("", c.routes.Handle("hr.position", "read", c.listPositions))
+	positions.POST("", c.routes.Handle("hr.position", "create", c.createPosition))
+	positions.GET("/:id", c.routes.Handle("hr.position", "read", c.getPosition, ResourceID(PathParamID)))
+	positions.PATCH("/:id", c.routes.Handle("hr.position", "update", c.updatePosition, ResourceID(PathParamID)))
+	positions.DELETE("/:id", c.routes.Handle("hr.position", "delete", c.deletePosition, ResourceID(PathParamID)))
+
 	employees := hr.Group("/employees")
 	employees.GET("", c.routes.Handle("hr.employee", "read", c.listEmployees))
 	employees.POST("", c.routes.Handle("hr.employee", "create", c.createEmployee))
@@ -43,6 +50,8 @@ func (c HRCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	employees.GET("/export", c.routes.Handle("hr.employee", "export", c.exportEmployeesCSV))
 	employees.POST("/export", c.routes.Handle("hr.employee", "export", c.exportEmployees))
 	employees.POST("/batch-delete", c.routes.Handle("hr.employee", "delete", c.batchDeleteEmployees))
+	employees.GET("/:id/contracts", c.routes.Handle("hr.employment_contract", "read", c.listEmploymentContractsByEmployee, ResourceID(PathParamID), TargetEmployeeID(PathParamID)))
+	employees.POST("/:id/contracts", c.routes.Handle("hr.employment_contract", "create", c.createEmploymentContract, ResourceID(PathParamID), TargetEmployeeID(PathParamID)))
 	employees.GET("/:id", c.routes.Handle("hr.employee", "read", c.getEmployee, TargetEmployeeID(PathParamID)))
 	employees.PATCH("/:id", c.routes.Handle("hr.employee", "update", c.updateEmployee, TargetEmployeeID(PathParamID)))
 	employees.POST("/:id/preview", c.routes.Handle("hr.employee", "update", c.previewUpdateEmployee, TargetEmployeeID(PathParamID)))
@@ -52,6 +61,11 @@ func (c HRCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	employees.PATCH("/:id/status", c.routes.Handle("hr.employee", "update_status", c.updateEmployeeStatus, TargetEmployeeID(PathParamID)))
 	employees.POST("/:id/invite", c.routes.Handle("hr.employee", "invite", c.inviteEmployee, TargetEmployeeID(PathParamID)))
 	employees.POST("/:id/status-transition", c.routes.Handle("hr.employee", "status_transition", c.transitionEmployeeStatus, TargetEmployeeID(PathParamID)))
+
+	contracts := hr.Group("/contracts")
+	contracts.GET("/:id", c.routes.Handle("hr.employment_contract", "read", c.getEmploymentContract, ResourceID(PathParamID)))
+	contracts.PATCH("/:id", c.routes.Handle("hr.employment_contract", "update", c.updateEmploymentContract, ResourceID(PathParamID)))
+	contracts.DELETE("/:id", c.routes.Handle("hr.employment_contract", "delete", c.deleteEmploymentContract, ResourceID(PathParamID)))
 
 	org := router.Group("/org")
 	org.GET("/units", c.routes.Handle("hr.org_unit", "read", c.listOrgUnits))
@@ -159,6 +173,68 @@ func (c HRCtrl) employeeOptions(w http.ResponseWriter, r *http.Request, ctx doma
 		return err
 	}
 	writeJSON(w, http.StatusOK, options)
+	return nil
+}
+
+// listPositions 處理崗位列表的 HTTP 請求。
+func (c HRCtrl) listPositions(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	page, err := pageRequestFromRequest(r)
+	if err != nil {
+		return err
+	}
+	items, err := c.svc.ListPositionPage(ctx, page)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, items)
+	return nil
+}
+
+// createPosition 處理建立崗位的 HTTP 請求。
+func (c HRCtrl) createPosition(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.CreatePositionInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.CreatePosition(ctx, input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, item)
+	return nil
+}
+
+// getPosition 處理取得崗位的 HTTP 請求。
+func (c HRCtrl) getPosition(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.GetPosition(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// updatePosition 處理更新崗位的 HTTP 請求。
+func (c HRCtrl) updatePosition(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.UpdatePositionInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.UpdatePosition(ctx, r.PathValue(PathParamID), input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// deletePosition 處理刪除崗位的 HTTP 請求。
+func (c HRCtrl) deletePosition(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.DeletePosition(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 
@@ -345,6 +421,64 @@ func (c HRCtrl) updateEmployeeStatus(w http.ResponseWriter, r *http.Request, ctx
 		return err
 	}
 	item, err := c.svc.UpdateEmployeeStatus(ctx, r.PathValue(PathParamID), input.Status)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// listEmploymentContractsByEmployee 處理員工合約列表的 HTTP 請求。
+func (c HRCtrl) listEmploymentContractsByEmployee(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	items, err := c.svc.ListEmploymentContractsByEmployee(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, items)
+	return nil
+}
+
+// createEmploymentContract 處理建立員工合約的 HTTP 請求。
+func (c HRCtrl) createEmploymentContract(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.CreateEmploymentContractInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.CreateEmploymentContract(ctx, r.PathValue(PathParamID), input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, item)
+	return nil
+}
+
+// getEmploymentContract 處理取得員工合約的 HTTP 請求。
+func (c HRCtrl) getEmploymentContract(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.GetEmploymentContract(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// updateEmploymentContract 處理更新員工合約的 HTTP 請求。
+func (c HRCtrl) updateEmploymentContract(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.UpdateEmploymentContractInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.UpdateEmploymentContract(ctx, r.PathValue(PathParamID), input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// deleteEmploymentContract 處理刪除員工合約的 HTTP 請求。
+func (c HRCtrl) deleteEmploymentContract(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.DeleteEmploymentContract(ctx, r.PathValue(PathParamID))
 	if err != nil {
 		return err
 	}

@@ -13,6 +13,15 @@ type EmployeeStatus string
 // EmployeeCategory 表示員工分類。
 type EmployeeCategory string
 
+// PositionStatus 表示崗位狀態。
+type PositionStatus string
+
+// EmploymentContractType 表示僱用合約類型。
+type EmploymentContractType string
+
+// EmploymentContractStatus 表示僱用合約狀態。
+type EmploymentContractStatus string
+
 // EmployeeAccountPolicy 表示員工帳號政策。
 type EmployeeAccountPolicy string
 
@@ -33,6 +42,29 @@ const (
 	EmployeeCategoryIntern     EmployeeCategory = "intern"
 	EmployeeCategoryContractor EmployeeCategory = "contractor"
 	EmployeeCategoryOther      EmployeeCategory = "other"
+)
+
+// 下列常數定義此模組使用的固定值。
+const (
+	PositionStatusActive   PositionStatus = "active"
+	PositionStatusDisabled PositionStatus = "disabled"
+)
+
+// 下列常數定義此模組使用的固定值。
+const (
+	EmploymentContractTypeFulltime   EmploymentContractType = "fulltime"
+	EmploymentContractTypeParttime   EmploymentContractType = "parttime"
+	EmploymentContractTypeContractor EmploymentContractType = "contractor"
+	EmploymentContractTypeIntern     EmploymentContractType = "intern"
+)
+
+// 下列常數定義此模組使用的固定值。
+const (
+	EmploymentContractStatusDraft      EmploymentContractStatus = "draft"
+	EmploymentContractStatusActive     EmploymentContractStatus = "active"
+	EmploymentContractStatusExpired    EmploymentContractStatus = "expired"
+	EmploymentContractStatusTerminated EmploymentContractStatus = "terminated"
+	EmploymentContractStatusRenewed    EmploymentContractStatus = "renewed"
 )
 
 // 下列常數定義此模組使用的固定值。
@@ -76,6 +108,79 @@ type CreateOrgUnitInput struct {
 	ParentID string `json:"parent_id,omitempty"`
 }
 
+// Position 定義崗位的資料結構。
+type Position struct {
+	ID          string    `json:"id"`
+	TenantID    string    `json:"tenant_id"`
+	Code        string    `json:"code"`
+	Name        string    `json:"name"`
+	OrgUnitID   string    `json:"org_unit_id,omitempty"`
+	Level       string    `json:"level,omitempty"`
+	Status      string    `json:"status"`
+	Description string    `json:"description,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// CreatePositionInput 定義崗位輸入的資料結構。
+type CreatePositionInput struct {
+	Code        string `json:"code,omitempty"`
+	Name        string `json:"name"`
+	OrgUnitID   string `json:"org_unit_id,omitempty"`
+	Level       string `json:"level,omitempty"`
+	Status      string `json:"status,omitempty"`
+	Description string `json:"description,omitempty"`
+}
+
+// UpdatePositionInput 定義崗位 patch 輸入的資料結構。
+type UpdatePositionInput struct {
+	Code        *string `json:"code,omitempty"`
+	Name        *string `json:"name,omitempty"`
+	OrgUnitID   *string `json:"org_unit_id,omitempty"`
+	Level       *string `json:"level,omitempty"`
+	Status      *string `json:"status,omitempty"`
+	Description *string `json:"description,omitempty"`
+}
+
+// EmploymentContract 定義員工合約的資料結構。
+type EmploymentContract struct {
+	ID                  string     `json:"id"`
+	TenantID            string     `json:"tenant_id"`
+	EmployeeID          string     `json:"employee_id"`
+	ContractType        string     `json:"contract_type"`
+	ContractNo          string     `json:"contract_no,omitempty"`
+	StartDate           time.Time  `json:"start_date"`
+	EndDate             *time.Time `json:"end_date,omitempty"`
+	Status              string     `json:"status"`
+	AttachmentObjectKey string     `json:"attachment_object_key,omitempty"`
+	Notes               string     `json:"notes,omitempty"`
+	Version             int64      `json:"version"`
+	CreatedAt           time.Time  `json:"created_at"`
+	UpdatedAt           time.Time  `json:"updated_at"`
+}
+
+// CreateEmploymentContractInput 定義員工合約輸入的資料結構。
+type CreateEmploymentContractInput struct {
+	ContractType        string `json:"contract_type"`
+	ContractNo          string `json:"contract_no,omitempty"`
+	StartDate           string `json:"start_date"`
+	EndDate             string `json:"end_date,omitempty"`
+	Status              string `json:"status,omitempty"`
+	AttachmentObjectKey string `json:"attachment_object_key,omitempty"`
+	Notes               string `json:"notes,omitempty"`
+}
+
+// UpdateEmploymentContractInput 定義員工合約 patch 輸入的資料結構。
+type UpdateEmploymentContractInput struct {
+	ContractType        *string `json:"contract_type,omitempty"`
+	ContractNo          *string `json:"contract_no,omitempty"`
+	StartDate           *string `json:"start_date,omitempty"`
+	EndDate             *string `json:"end_date,omitempty"`
+	Status              *string `json:"status,omitempty"`
+	AttachmentObjectKey *string `json:"attachment_object_key,omitempty"`
+	Notes               *string `json:"notes,omitempty"`
+}
+
 // Employee 定義員工的資料結構。
 type Employee struct {
 	ID                    string               `json:"id"`
@@ -88,6 +193,7 @@ type Employee struct {
 	OrgUnitID             string               `json:"org_unit_id,omitempty"`
 	AccountID             string               `json:"account_id,omitempty"`
 	ManagerEmployeeID     string               `json:"manager_employee_id,omitempty"`
+	PositionID            string               `json:"position_id,omitempty"`
 	Position              string               `json:"position,omitempty"`
 	Category              string               `json:"category,omitempty"`
 	Status                string               `json:"status"`
@@ -122,6 +228,7 @@ type EmployeeDetailPreview struct {
 	OrgUnitID         string     `json:"org_unit_id,omitempty"`
 	AccountID         string     `json:"account_id,omitempty"`
 	ManagerEmployeeID string     `json:"manager_employee_id,omitempty"`
+	PositionID        string     `json:"position_id,omitempty"`
 	Position          string     `json:"position,omitempty"`
 	Category          string     `json:"category,omitempty"`
 	Status            string     `json:"status"`
@@ -166,6 +273,7 @@ type EmployeeBasicInfo struct {
 // EmployeeEmploymentInfo 定義員工任職 info 的資料結構。
 type EmployeeEmploymentInfo struct {
 	OrgUnitID         string         `json:"org_unit_id,omitempty"`
+	PositionID        string         `json:"position_id,omitempty"`
 	Position          string         `json:"position,omitempty"`
 	Category          string         `json:"category,omitempty"`
 	ManagerEmployeeID string         `json:"manager_employee_id,omitempty"`
@@ -240,6 +348,7 @@ type CreateEmployeeInput struct {
 	AccountID             string               `json:"account_id,omitempty"`
 	AccountPolicy         string               `json:"account_policy,omitempty"`
 	ManagerEmployeeID     string               `json:"manager_employee_id,omitempty"`
+	PositionID            string               `json:"position_id,omitempty"`
 	Position              string               `json:"position,omitempty"`
 	Category              string               `json:"category,omitempty"`
 	Status                string               `json:"status,omitempty"`
@@ -264,6 +373,7 @@ type UpdateEmployeeInput struct {
 	OrgUnitID             *string              `json:"org_unit_id,omitempty"`
 	AccountID             *string              `json:"account_id,omitempty"`
 	ManagerEmployeeID     *string              `json:"manager_employee_id,omitempty"`
+	PositionID            *string              `json:"position_id,omitempty"`
 	Position              *string              `json:"position,omitempty"`
 	Category              *string              `json:"category,omitempty"`
 	Status                *string              `json:"status,omitempty"`
@@ -452,6 +562,7 @@ func EmployeeDetailFromEmployee(employee Employee) EmployeeDetail {
 			OrgUnitID:         employee.OrgUnitID,
 			AccountID:         employee.AccountID,
 			ManagerEmployeeID: employee.ManagerEmployeeID,
+			PositionID:        employee.PositionID,
 			Position:          employee.Position,
 			Category:          employee.Category,
 			Status:            employee.Status,
@@ -492,6 +603,7 @@ func EmployeeSectionsFromEmployee(employee Employee) EmployeeSections {
 		},
 		EmploymentInfo: EmployeeEmploymentInfo{
 			OrgUnitID:         firstNonEmpty(employee.OrgUnitID, sectionString(employee.EmploymentInfo, "org_unit_id"), sectionString(employee.EmploymentInfo, "department_id")),
+			PositionID:        firstNonEmpty(employee.PositionID, sectionString(employee.EmploymentInfo, "position_id")),
 			Position:          firstNonEmpty(employee.Position, sectionString(employee.EmploymentInfo, "position"), sectionString(employee.EmploymentInfo, "job_title")),
 			Category:          firstNonEmpty(employee.Category, sectionString(employee.EmploymentInfo, "category")),
 			ManagerEmployeeID: firstNonEmpty(employee.ManagerEmployeeID, sectionString(employee.EmploymentInfo, "manager_employee_id")),
@@ -502,7 +614,7 @@ func EmployeeSectionsFromEmployee(employee Employee) EmployeeSections {
 			Shift:             sectionString(employee.EmploymentInfo, "shift"),
 			TenureStartDate:   sectionString(employee.EmploymentInfo, "tenure_start_date"),
 			Additional: sectionAdditional(employee.EmploymentInfo,
-				"org_unit_id", "department_id", "position", "job_title", "category", "manager_employee_id",
+				"org_unit_id", "department_id", "position_id", "position", "job_title", "category", "manager_employee_id",
 				"employment_status", "hire_date", "resign_date", "resign_reason", "shift", "tenure_start_date"),
 		},
 		EducationMilitaryInfo: EmployeeEducationMilitaryInfo{
@@ -571,6 +683,7 @@ func (v EmployeeBasicInfo) MarshalJSON() ([]byte, error) {
 func (v EmployeeEmploymentInfo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(sectionJSON(v.Additional, map[string]any{
 		"org_unit_id":         v.OrgUnitID,
+		"position_id":         v.PositionID,
 		"position":            v.Position,
 		"category":            v.Category,
 		"manager_employee_id": v.ManagerEmployeeID,

@@ -32,9 +32,11 @@ type Store struct {
 	assumableRoles         map[string]map[string]AssumableRole
 	roleSessions           map[string]map[string]AssumableRoleSession
 	orgUnits               map[string]map[string]OrgUnit
+	positions              map[string]map[string]Position
 	employees              map[string]map[string]Employee
 	employeeNoSequences    map[string]map[string]int
 	employeeImports        map[string]map[string]EmployeeImportSession
+	employmentContracts    map[string]map[string]EmploymentContract
 	attendancePolicies     map[string]AttendancePolicy
 	leaveBalances          map[string]map[string]LeaveBalance
 	leaveRequests          map[string]map[string]LeaveRequest
@@ -79,9 +81,11 @@ func NewStore() *Store {
 		assumableRoles:         map[string]map[string]AssumableRole{},
 		roleSessions:           map[string]map[string]AssumableRoleSession{},
 		orgUnits:               map[string]map[string]OrgUnit{},
+		positions:              map[string]map[string]Position{},
 		employees:              map[string]map[string]Employee{},
 		employeeNoSequences:    map[string]map[string]int{},
 		employeeImports:        map[string]map[string]EmployeeImportSession{},
+		employmentContracts:    map[string]map[string]EmploymentContract{},
 		attendancePolicies:     map[string]AttendancePolicy{},
 		leaveBalances:          map[string]map[string]LeaveBalance{},
 		leaveRequests:          map[string]map[string]LeaveRequest{},
@@ -566,6 +570,78 @@ func (s *Store) ListOrgUnits(_ context.Context, tenantID string) ([]OrgUnit, err
 	return out, nil
 }
 
+// UpsertPosition 從儲存層處理 upsert 崗位。
+func (s *Store) UpsertPosition(_ context.Context, v Position) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.positions, v.TenantID, v.ID, copyPosition(v))
+	return nil
+}
+
+// GetPosition 從儲存層取得崗位。
+func (s *Store) GetPosition(_ context.Context, tenantID, id string) (Position, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.positions, tenantID, id)
+	if !ok {
+		return Position{}, false, nil
+	}
+	return copyPosition(v), true, nil
+}
+
+// GetPositionByCode 從儲存層取得崗位 by code。
+func (s *Store) GetPositionByCode(_ context.Context, tenantID, code string) (Position, bool, error) {
+	code = strings.ToLower(strings.TrimSpace(code))
+	if code == "" {
+		return Position{}, false, nil
+	}
+	return s.getPositionBy(tenantID, func(v Position) bool {
+		return strings.ToLower(strings.TrimSpace(v.Code)) == code
+	})
+}
+
+// GetPositionByName 從儲存層取得崗位 by name。
+func (s *Store) GetPositionByName(_ context.Context, tenantID, name string) (Position, bool, error) {
+	name = strings.ToLower(strings.TrimSpace(name))
+	if name == "" {
+		return Position{}, false, nil
+	}
+	return s.getPositionBy(tenantID, func(v Position) bool {
+		return strings.ToLower(strings.TrimSpace(v.Name)) == name
+	})
+}
+
+// getPositionBy 從儲存層取得崗位 by。
+func (s *Store) getPositionBy(tenantID string, match func(Position) bool) (Position, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, v := range s.positions[tenantID] {
+		if match(v) {
+			return copyPosition(v), true, nil
+		}
+	}
+	return Position{}, false, nil
+}
+
+// ListPositions 從儲存層列出崗位。
+func (s *Store) ListPositions(_ context.Context, tenantID string) ([]Position, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.positions[tenantID], copyPosition)
+	sort.Slice(out, func(i, j int) bool {
+		leftActive := out[i].Status == string(domain.PositionStatusActive)
+		rightActive := out[j].Status == string(domain.PositionStatusActive)
+		if leftActive != rightActive {
+			return leftActive
+		}
+		if out[i].Name == out[j].Name {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].Name < out[j].Name
+	})
+	return out, nil
+}
+
 // UpsertEmployee 從儲存層處理 upsert 員工。
 func (s *Store) UpsertEmployee(_ context.Context, v Employee) error {
 	s.mu.Lock()
@@ -983,6 +1059,61 @@ func (s *Store) GetEmployeeImportSession(_ context.Context, tenantID, id string)
 		return EmployeeImportSession{}, false, nil
 	}
 	return copyEmployeeImportSession(v), true, nil
+}
+
+// UpsertEmploymentContract 從儲存層處理 upsert 員工合約。
+func (s *Store) UpsertEmploymentContract(_ context.Context, v EmploymentContract) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.employmentContracts, v.TenantID, v.ID, copyEmploymentContract(v))
+	return nil
+}
+
+// GetEmploymentContract 從儲存層取得員工合約。
+func (s *Store) GetEmploymentContract(_ context.Context, tenantID, id string) (EmploymentContract, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.employmentContracts, tenantID, id)
+	if !ok {
+		return EmploymentContract{}, false, nil
+	}
+	return copyEmploymentContract(v), true, nil
+}
+
+// ListEmploymentContracts 從儲存層列出員工合約。
+func (s *Store) ListEmploymentContracts(_ context.Context, tenantID string) ([]EmploymentContract, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.employmentContracts[tenantID], copyEmploymentContract)
+	sortEmploymentContracts(out)
+	return out, nil
+}
+
+// ListEmploymentContractsByEmployee 從儲存層列出員工合約 by 員工。
+func (s *Store) ListEmploymentContractsByEmployee(_ context.Context, tenantID, employeeID string) ([]EmploymentContract, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]EmploymentContract, 0)
+	for _, v := range s.employmentContracts[tenantID] {
+		if v.EmployeeID == employeeID {
+			out = append(out, copyEmploymentContract(v))
+		}
+	}
+	sortEmploymentContracts(out)
+	return out, nil
+}
+
+// sortEmploymentContracts 排序員工合約。
+func sortEmploymentContracts(items []EmploymentContract) {
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].StartDate.Equal(items[j].StartDate) {
+			if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+				return items[i].ID < items[j].ID
+			}
+			return items[i].CreatedAt.After(items[j].CreatedAt)
+		}
+		return items[i].StartDate.After(items[j].StartDate)
+	})
 }
 
 // UpsertAttendancePolicy 從儲存層處理 upsert 考勤政策。

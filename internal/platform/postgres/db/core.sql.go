@@ -622,7 +622,7 @@ func (q *Queries) GetAttendanceWorksite(ctx context.Context, arg GetAttendanceWo
 }
 
 const getEmployee = `-- name: GetEmployee :one
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -645,6 +645,7 @@ func (q *Queries) GetEmployee(ctx context.Context, arg GetEmployeeParams) (Emplo
 		&i.OrgUnitID,
 		&i.AccountID,
 		&i.ManagerEmployeeID,
+		&i.PositionID,
 		&i.Position,
 		&i.Category,
 		&i.Status,
@@ -664,7 +665,7 @@ func (q *Queries) GetEmployee(ctx context.Context, arg GetEmployeeParams) (Emplo
 }
 
 const getEmployeeByAccountID = `-- name: GetEmployeeByAccountID :one
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1 AND account_id = $2 AND account_id <> ''
 `
 
@@ -687,6 +688,7 @@ func (q *Queries) GetEmployeeByAccountID(ctx context.Context, arg GetEmployeeByA
 		&i.OrgUnitID,
 		&i.AccountID,
 		&i.ManagerEmployeeID,
+		&i.PositionID,
 		&i.Position,
 		&i.Category,
 		&i.Status,
@@ -706,7 +708,7 @@ func (q *Queries) GetEmployeeByAccountID(ctx context.Context, arg GetEmployeeByA
 }
 
 const getEmployeeByBasicInfoField = `-- name: GetEmployeeByBasicInfoField :one
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1
   AND lower(coalesce(basic_info ->> $2::text, '')) = lower($3)
   AND coalesce(basic_info ->> $2::text, '') <> ''
@@ -732,6 +734,7 @@ func (q *Queries) GetEmployeeByBasicInfoField(ctx context.Context, arg GetEmploy
 		&i.OrgUnitID,
 		&i.AccountID,
 		&i.ManagerEmployeeID,
+		&i.PositionID,
 		&i.Position,
 		&i.Category,
 		&i.Status,
@@ -751,7 +754,7 @@ func (q *Queries) GetEmployeeByBasicInfoField(ctx context.Context, arg GetEmploy
 }
 
 const getEmployeeByCompanyEmail = `-- name: GetEmployeeByCompanyEmail :one
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1 AND lower(company_email) = lower($2) AND company_email <> ''
 `
 
@@ -774,6 +777,7 @@ func (q *Queries) GetEmployeeByCompanyEmail(ctx context.Context, arg GetEmployee
 		&i.OrgUnitID,
 		&i.AccountID,
 		&i.ManagerEmployeeID,
+		&i.PositionID,
 		&i.Position,
 		&i.Category,
 		&i.Status,
@@ -793,7 +797,7 @@ func (q *Queries) GetEmployeeByCompanyEmail(ctx context.Context, arg GetEmployee
 }
 
 const getEmployeeByEmployeeNo = `-- name: GetEmployeeByEmployeeNo :one
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1 AND employee_no = $2 AND employee_no <> ''
 `
 
@@ -816,6 +820,7 @@ func (q *Queries) GetEmployeeByEmployeeNo(ctx context.Context, arg GetEmployeeBy
 		&i.OrgUnitID,
 		&i.AccountID,
 		&i.ManagerEmployeeID,
+		&i.PositionID,
 		&i.Position,
 		&i.Category,
 		&i.Status,
@@ -835,7 +840,7 @@ func (q *Queries) GetEmployeeByEmployeeNo(ctx context.Context, arg GetEmployeeBy
 }
 
 const getEmployeeByPersonalEmail = `-- name: GetEmployeeByPersonalEmail :one
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1 AND lower(personal_email) = lower($2) AND personal_email <> ''
 `
 
@@ -858,6 +863,7 @@ func (q *Queries) GetEmployeeByPersonalEmail(ctx context.Context, arg GetEmploye
 		&i.OrgUnitID,
 		&i.AccountID,
 		&i.ManagerEmployeeID,
+		&i.PositionID,
 		&i.Position,
 		&i.Category,
 		&i.Status,
@@ -1996,7 +2002,7 @@ func (q *Queries) ListAuditLogsPage(ctx context.Context, arg ListAuditLogsPagePa
 }
 
 const listEmployees = `-- name: ListEmployees :many
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1
 ORDER BY created_at ASC, id ASC
 `
@@ -2021,6 +2027,7 @@ func (q *Queries) ListEmployees(ctx context.Context, tenantID string) ([]Employe
 			&i.OrgUnitID,
 			&i.AccountID,
 			&i.ManagerEmployeeID,
+			&i.PositionID,
 			&i.Position,
 			&i.Category,
 			&i.Status,
@@ -2047,7 +2054,7 @@ func (q *Queries) ListEmployees(ctx context.Context, tenantID string) ([]Employe
 }
 
 const listEmployeesFiltered = `-- name: ListEmployeesFiltered :many
-SELECT employees.id, employees.tenant_id, employees.employee_no, employees.name, employees.company_email, employees.personal_email, employees.phone, employees.org_unit_id, employees.account_id, employees.manager_employee_id, employees.position, employees.category, employees.status, employees.employment_status, employees.hire_date, employees.resign_date, employees.basic_info, employees.employment_info, employees.education_military_info, employees.contact_info, employees.insurance_info, employees.internal_experiences, employees.created_at, employees.updated_at FROM employees
+SELECT employees.id, employees.tenant_id, employees.employee_no, employees.name, employees.company_email, employees.personal_email, employees.phone, employees.org_unit_id, employees.account_id, employees.manager_employee_id, employees.position_id, employees.position, employees.category, employees.status, employees.employment_status, employees.hire_date, employees.resign_date, employees.basic_info, employees.employment_info, employees.education_military_info, employees.contact_info, employees.insurance_info, employees.internal_experiences, employees.created_at, employees.updated_at FROM employees
 LEFT JOIN accounts
   ON accounts.tenant_id = employees.tenant_id
  AND accounts.id = employees.account_id
@@ -2122,6 +2129,7 @@ func (q *Queries) ListEmployeesFiltered(ctx context.Context, arg ListEmployeesFi
 			&i.OrgUnitID,
 			&i.AccountID,
 			&i.ManagerEmployeeID,
+			&i.PositionID,
 			&i.Position,
 			&i.Category,
 			&i.Status,
@@ -2148,7 +2156,7 @@ func (q *Queries) ListEmployeesFiltered(ctx context.Context, arg ListEmployeesFi
 }
 
 const listEmployeesFilteredPage = `-- name: ListEmployeesFilteredPage :many
-SELECT employees.id, employees.tenant_id, employees.employee_no, employees.name, employees.company_email, employees.personal_email, employees.phone, employees.org_unit_id, employees.account_id, employees.manager_employee_id, employees.position, employees.category, employees.status, employees.employment_status, employees.hire_date, employees.resign_date, employees.basic_info, employees.employment_info, employees.education_military_info, employees.contact_info, employees.insurance_info, employees.internal_experiences, employees.created_at, employees.updated_at FROM employees
+SELECT employees.id, employees.tenant_id, employees.employee_no, employees.name, employees.company_email, employees.personal_email, employees.phone, employees.org_unit_id, employees.account_id, employees.manager_employee_id, employees.position_id, employees.position, employees.category, employees.status, employees.employment_status, employees.hire_date, employees.resign_date, employees.basic_info, employees.employment_info, employees.education_military_info, employees.contact_info, employees.insurance_info, employees.internal_experiences, employees.created_at, employees.updated_at FROM employees
 LEFT JOIN accounts
   ON accounts.tenant_id = employees.tenant_id
  AND accounts.id = employees.account_id
@@ -2229,6 +2237,7 @@ func (q *Queries) ListEmployeesFilteredPage(ctx context.Context, arg ListEmploye
 			&i.OrgUnitID,
 			&i.AccountID,
 			&i.ManagerEmployeeID,
+			&i.PositionID,
 			&i.Position,
 			&i.Category,
 			&i.Status,
@@ -3933,12 +3942,12 @@ func (q *Queries) UpsertAttendanceWorksite(ctx context.Context, arg UpsertAttend
 const upsertEmployee = `-- name: UpsertEmployee :one
 INSERT INTO employees (
     id, tenant_id, employee_no, name, company_email, personal_email, phone,
-    org_unit_id, account_id, manager_employee_id, position, category, status, employment_status,
+    org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status,
     hire_date, resign_date, basic_info, employment_info, education_military_info,
     contact_info, insurance_info, internal_experiences, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-    $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -3950,6 +3959,7 @@ ON CONFLICT (id) DO UPDATE SET
     org_unit_id = EXCLUDED.org_unit_id,
     account_id = EXCLUDED.account_id,
     manager_employee_id = EXCLUDED.manager_employee_id,
+    position_id = EXCLUDED.position_id,
     position = EXCLUDED.position,
     category = EXCLUDED.category,
     status = EXCLUDED.status,
@@ -3964,7 +3974,7 @@ ON CONFLICT (id) DO UPDATE SET
     internal_experiences = EXCLUDED.internal_experiences,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at
+RETURNING id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at
 `
 
 type UpsertEmployeeParams struct {
@@ -3978,6 +3988,7 @@ type UpsertEmployeeParams struct {
 	OrgUnitID             string             `json:"org_unit_id"`
 	AccountID             string             `json:"account_id"`
 	ManagerEmployeeID     pgtype.Text        `json:"manager_employee_id"`
+	PositionID            string             `json:"position_id"`
 	Position              string             `json:"position"`
 	Category              string             `json:"category"`
 	Status                string             `json:"status"`
@@ -4006,6 +4017,7 @@ func (q *Queries) UpsertEmployee(ctx context.Context, arg UpsertEmployeeParams) 
 		arg.OrgUnitID,
 		arg.AccountID,
 		arg.ManagerEmployeeID,
+		arg.PositionID,
 		arg.Position,
 		arg.Category,
 		arg.Status,
@@ -4033,6 +4045,7 @@ func (q *Queries) UpsertEmployee(ctx context.Context, arg UpsertEmployeeParams) 
 		&i.OrgUnitID,
 		&i.AccountID,
 		&i.ManagerEmployeeID,
+		&i.PositionID,
 		&i.Position,
 		&i.Category,
 		&i.Status,

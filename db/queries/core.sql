@@ -159,12 +159,12 @@ ORDER BY created_at ASC;
 -- name: UpsertEmployee :one
 INSERT INTO employees (
     id, tenant_id, employee_no, name, company_email, personal_email, phone,
-    org_unit_id, account_id, manager_employee_id, position, category, status, employment_status,
+    org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status,
     hire_date, resign_date, basic_info, employment_info, education_military_info,
     contact_info, insurance_info, internal_experiences, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13,
-    $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+    $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -176,6 +176,7 @@ ON CONFLICT (id) DO UPDATE SET
     org_unit_id = EXCLUDED.org_unit_id,
     account_id = EXCLUDED.account_id,
     manager_employee_id = EXCLUDED.manager_employee_id,
+    position_id = EXCLUDED.position_id,
     position = EXCLUDED.position,
     category = EXCLUDED.category,
     status = EXCLUDED.status,

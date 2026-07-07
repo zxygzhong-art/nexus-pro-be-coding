@@ -22,7 +22,9 @@ type iamStore interface {
 type hrStore interface {
 	repository.AccountStore
 	repository.OrgStore
+	repository.PositionStore
 	repository.EmployeeStore
+	repository.EmploymentContractStore
 	repository.AuthzEventStore
 	repository.OutboxStore
 }

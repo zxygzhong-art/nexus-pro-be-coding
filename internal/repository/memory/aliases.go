@@ -19,11 +19,13 @@ type (
 	AssumableRole                   = domain.AssumableRole
 	AssumableRoleSession            = domain.AssumableRoleSession
 	OrgUnit                         = domain.OrgUnit
+	Position                        = domain.Position
 	Employee                        = domain.Employee
 	EmployeeExperience              = domain.EmployeeExperience
 	EmployeeQuery                   = domain.EmployeeQuery
 	EmployeeImportSession           = domain.EmployeeImportSession
 	EmployeeImportRow               = domain.EmployeeImportRow
+	EmploymentContract              = domain.EmploymentContract
 	AttendancePolicy                = domain.AttendancePolicy
 	AttendanceLeaveType             = domain.AttendanceLeaveType
 	LeaveBalance                    = domain.LeaveBalance

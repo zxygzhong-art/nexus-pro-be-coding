@@ -276,6 +276,41 @@ CREATE TABLE org_units (
 CREATE INDEX org_units_tenant_id_idx ON org_units (tenant_id);
 CREATE INDEX org_units_path_idx ON org_units USING gin (path);
 
+CREATE TABLE positions (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    code text NOT NULL,
+    name text NOT NULL,
+    org_unit_id text NOT NULL DEFAULT '',
+    level text NOT NULL DEFAULT '',
+    status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    description text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT positions_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT positions_tenant_code_idx UNIQUE (tenant_id, code)
+);
+
+CREATE INDEX positions_tenant_status_idx ON positions (tenant_id, status, name);
+CREATE INDEX positions_tenant_org_unit_idx ON positions (tenant_id, org_unit_id) WHERE org_unit_id <> '';
+
+CREATE OR REPLACE FUNCTION validate_position_references()
+RETURNS trigger AS $$
+BEGIN
+    IF NEW.org_unit_id <> '' AND NOT EXISTS (
+        SELECT 1 FROM org_units WHERE tenant_id = NEW.tenant_id AND id = NEW.org_unit_id
+    ) THEN
+        RAISE EXCEPTION 'position org_unit_id % does not exist in tenant %', NEW.org_unit_id, NEW.tenant_id
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER positions_reference_check
+BEFORE INSERT OR UPDATE OF tenant_id, org_unit_id ON positions
+FOR EACH ROW EXECUTE FUNCTION validate_position_references();
+
 CREATE TABLE employees (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -287,6 +322,7 @@ CREATE TABLE employees (
     org_unit_id text NOT NULL DEFAULT '',
     account_id text NOT NULL DEFAULT '',
     manager_employee_id text,
+    position_id text NOT NULL DEFAULT '',
     position text NOT NULL DEFAULT '',
     category text NOT NULL DEFAULT '',
     status text NOT NULL,
@@ -328,11 +364,29 @@ CREATE TRIGGER employees_reference_check
 BEFORE INSERT OR UPDATE OF tenant_id, account_id, org_unit_id ON employees
 FOR EACH ROW EXECUTE FUNCTION validate_employee_references();
 
+CREATE OR REPLACE FUNCTION validate_employee_position_reference()
+RETURNS trigger AS $$
+BEGIN
+    IF NEW.position_id <> '' AND NOT EXISTS (
+        SELECT 1 FROM positions WHERE tenant_id = NEW.tenant_id AND id = NEW.position_id
+    ) THEN
+        RAISE EXCEPTION 'employee position_id % does not exist in tenant %', NEW.position_id, NEW.tenant_id
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER employees_position_reference_check
+BEFORE INSERT OR UPDATE OF tenant_id, position_id ON employees
+FOR EACH ROW EXECUTE FUNCTION validate_employee_position_reference();
+
 CREATE INDEX employees_tenant_id_idx ON employees (tenant_id);
 CREATE INDEX employees_tenant_status_idx ON employees (tenant_id, employment_status, status);
 CREATE INDEX employees_tenant_category_idx ON employees (tenant_id, category);
 CREATE INDEX employees_tenant_org_unit_idx ON employees (tenant_id, org_unit_id);
 CREATE INDEX employees_tenant_manager_employee_idx ON employees (tenant_id, manager_employee_id) WHERE manager_employee_id IS NOT NULL;
+CREATE INDEX employees_tenant_position_idx ON employees (tenant_id, position_id) WHERE position_id <> '';
 CREATE INDEX employees_tenant_hire_date_idx ON employees (tenant_id, hire_date);
 CREATE INDEX employees_keyword_trgm_idx ON employees USING gin (
     lower(
@@ -382,6 +436,27 @@ CREATE TABLE employee_import_sessions (
 );
 
 CREATE INDEX employee_import_sessions_tenant_id_idx ON employee_import_sessions (tenant_id, created_at DESC);
+
+CREATE TABLE employment_contracts (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    employee_id text NOT NULL,
+    contract_type text NOT NULL CHECK (contract_type IN ('fulltime', 'parttime', 'contractor', 'intern')),
+    contract_no text NOT NULL DEFAULT '',
+    start_date timestamptz NOT NULL,
+    end_date timestamptz,
+    status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'active', 'expired', 'terminated', 'renewed')),
+    attachment_object_key text NOT NULL DEFAULT '',
+    notes text NOT NULL DEFAULT '',
+    version bigint NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT employment_contracts_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT employment_contracts_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id)
+);
+
+CREATE INDEX employment_contracts_tenant_employee_idx ON employment_contracts (tenant_id, employee_id, start_date DESC);
+CREATE INDEX employment_contracts_tenant_status_idx ON employment_contracts (tenant_id, status, end_date);
 
 CREATE TABLE attendance_policies (
     id text NOT NULL,
@@ -808,12 +883,16 @@ ALTER TABLE identity_provisioning_outbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE identity_provisioning_outbox FORCE ROW LEVEL SECURITY;
 ALTER TABLE org_units ENABLE ROW LEVEL SECURITY;
 ALTER TABLE org_units FORCE ROW LEVEL SECURITY;
+ALTER TABLE positions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE positions FORCE ROW LEVEL SECURITY;
 ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employees FORCE ROW LEVEL SECURITY;
 ALTER TABLE employee_number_sequences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employee_number_sequences FORCE ROW LEVEL SECURITY;
 ALTER TABLE employee_import_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employee_import_sessions FORCE ROW LEVEL SECURITY;
+ALTER TABLE employment_contracts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE employment_contracts FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_policies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_policies FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_balances ENABLE ROW LEVEL SECURITY;
@@ -875,9 +954,13 @@ CREATE POLICY tenant_isolation_authz_relationship_tuples ON authz_relationship_t
 CREATE POLICY tenant_isolation_authz_permission_versions ON authz_permission_versions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_identity_provisioning_outbox ON identity_provisioning_outbox USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_org_units ON org_units USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_positions ON positions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY system_task_positions ON positions USING (current_setting('app.system_task', true) = 'on') WITH CHECK (current_setting('app.system_task', true) = 'on');
 CREATE POLICY tenant_isolation_employees ON employees USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_employee_number_sequences ON employee_number_sequences USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_employee_import_sessions ON employee_import_sessions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_employment_contracts ON employment_contracts USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY system_task_employment_contracts ON employment_contracts USING (current_setting('app.system_task', true) = 'on') WITH CHECK (current_setting('app.system_task', true) = 'on');
 CREATE POLICY tenant_isolation_attendance_policies ON attendance_policies USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_balances ON leave_balances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_form_templates ON form_templates USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));

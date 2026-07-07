@@ -23,6 +23,8 @@ type (
 	AssumableRoleSession               = domain.AssumableRoleSession
 	AssumedRoleDecision                = domain.AssumedRoleDecision
 	OrgUnit                            = domain.OrgUnit
+	Position                           = domain.Position
+	EmploymentContract                 = domain.EmploymentContract
 	Employee                           = domain.Employee
 	EmployeeExperience                 = domain.EmployeeExperience
 	EmployeeQuery                      = domain.EmployeeQuery
@@ -184,8 +186,12 @@ type (
 	CreateAssumableRoleInput                = domain.CreateAssumableRoleInput
 	AssumeRoleInput                         = domain.AssumeRoleInput
 	CreateOrgUnitInput                      = domain.CreateOrgUnitInput
+	CreatePositionInput                     = domain.CreatePositionInput
+	UpdatePositionInput                     = domain.UpdatePositionInput
 	CreateEmployeeInput                     = domain.CreateEmployeeInput
 	UpdateEmployeeInput                     = domain.UpdateEmployeeInput
+	CreateEmploymentContractInput          = domain.CreateEmploymentContractInput
+	UpdateEmploymentContractInput          = domain.UpdateEmploymentContractInput
 	EmployeePreviewResponse                 = domain.EmployeePreviewResponse
 	EmployeeAvatarInput                     = domain.EmployeeAvatarInput
 	EmployeeImportPreviewInput              = domain.EmployeeImportPreviewInput
@@ -292,6 +298,8 @@ const (
 	ResourceEmployee                  = domain.ResourceEmployee
 	ResourceEmployeeImport            = domain.ResourceEmployeeImport
 	ResourceOrgUnit                   = domain.ResourceOrgUnit
+	ResourcePosition                  = domain.ResourcePosition
+	ResourceEmploymentContract        = domain.ResourceEmploymentContract
 	ResourceLeave                     = domain.ResourceLeave
 	ResourceAttendanceWorksite        = domain.ResourceAttendanceWorksite
 	ResourceAttendanceShift           = domain.ResourceAttendanceShift
@@ -347,6 +355,20 @@ const (
 	EmployeeCategoryPartTime   = domain.EmployeeCategoryPartTime
 	EmployeeCategoryIntern     = domain.EmployeeCategoryIntern
 	EmployeeCategoryContractor = domain.EmployeeCategoryContractor
+
+	PositionStatusActive   = domain.PositionStatusActive
+	PositionStatusDisabled = domain.PositionStatusDisabled
+
+	EmploymentContractTypeFulltime   = domain.EmploymentContractTypeFulltime
+	EmploymentContractTypeParttime   = domain.EmploymentContractTypeParttime
+	EmploymentContractTypeContractor = domain.EmploymentContractTypeContractor
+	EmploymentContractTypeIntern     = domain.EmploymentContractTypeIntern
+
+	EmploymentContractStatusDraft      = domain.EmploymentContractStatusDraft
+	EmploymentContractStatusActive     = domain.EmploymentContractStatusActive
+	EmploymentContractStatusExpired    = domain.EmploymentContractStatusExpired
+	EmploymentContractStatusTerminated = domain.EmploymentContractStatusTerminated
+	EmploymentContractStatusRenewed    = domain.EmploymentContractStatusRenewed
 )
 
 // 下列變數保存此模組共用的狀態。

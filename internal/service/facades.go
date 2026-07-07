@@ -49,6 +49,11 @@ type IAMFacade interface {
 
 // HRFacade 定義 HR facade 的行為契約。
 type HRFacade interface {
+	ListPositionPage(RequestContext, PageRequest) (PageResponse[Position], error)
+	CreatePosition(RequestContext, CreatePositionInput) (Position, error)
+	GetPosition(RequestContext, string) (Position, error)
+	UpdatePosition(RequestContext, string, UpdatePositionInput) (Position, error)
+	DeletePosition(RequestContext, string) (Position, error)
 	QueryEmployees(RequestContext, EmployeeQuery) (PageResponse[Employee], error)
 	CreateEmployee(RequestContext, CreateEmployeeInput) (Employee, error)
 	PreviewCreateEmployee(RequestContext, CreateEmployeeInput) (EmployeePreviewResponse, error)
@@ -70,6 +75,11 @@ type HRFacade interface {
 	InviteEmployee(RequestContext, string, InviteEmployeeInput) (Employee, error)
 	TransitionEmployeeStatus(RequestContext, string, StatusTransitionInput) (Employee, error)
 	UpdateEmployeeStatus(RequestContext, string, string) (Employee, error)
+	ListEmploymentContractsByEmployee(RequestContext, string) ([]EmploymentContract, error)
+	CreateEmploymentContract(RequestContext, string, CreateEmploymentContractInput) (EmploymentContract, error)
+	GetEmploymentContract(RequestContext, string) (EmploymentContract, error)
+	UpdateEmploymentContract(RequestContext, string, UpdateEmploymentContractInput) (EmploymentContract, error)
+	DeleteEmploymentContract(RequestContext, string) (EmploymentContract, error)
 	ListOrgUnitPage(RequestContext, PageRequest) (PageResponse[OrgUnit], error)
 	CreateOrgUnit(RequestContext, CreateOrgUnitInput) (OrgUnit, error)
 }
