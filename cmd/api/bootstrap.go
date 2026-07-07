@@ -156,6 +156,10 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	serviceOptions.EHRMSClient = ehrmsClient
 
 	app := service.New(store, serviceOptions)
+	if err := app.SyncPermissionCatalogForAllTenants(ctx); err != nil {
+		shutdownStartedModules(shutdowns, logger)
+		return nil, err
+	}
 	ehrmsSyncScheduler, ehrmsSyncOptions, ehrmsSyncDependency := configuredEHRMSSyncScheduler(cfg, app.HR(), ehrmsClient != nil, logger)
 	report.Dependencies = append(report.Dependencies, ehrmsSyncDependency)
 	apiOptions := v1api.Options{
