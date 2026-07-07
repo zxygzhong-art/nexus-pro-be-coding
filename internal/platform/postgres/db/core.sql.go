@@ -574,6 +574,40 @@ func (q *Queries) GetAttendanceCorrectionRequest(ctx context.Context, arg GetAtt
 	return i, err
 }
 
+const getAttendanceCorrectionRequestByFormInstanceID = `-- name: GetAttendanceCorrectionRequestByFormInstanceID :one
+SELECT id, tenant_id, employee_id, direction, requested_clocked_at, work_date, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at FROM attendance_correction_requests
+WHERE tenant_id = $1 AND form_instance_id = $2
+LIMIT 1
+`
+
+type GetAttendanceCorrectionRequestByFormInstanceIDParams struct {
+	TenantID       string `json:"tenant_id"`
+	FormInstanceID string `json:"form_instance_id"`
+}
+
+func (q *Queries) GetAttendanceCorrectionRequestByFormInstanceID(ctx context.Context, arg GetAttendanceCorrectionRequestByFormInstanceIDParams) (AttendanceCorrectionRequest, error) {
+	row := q.db.QueryRow(ctx, getAttendanceCorrectionRequestByFormInstanceID, arg.TenantID, arg.FormInstanceID)
+	var i AttendanceCorrectionRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.Direction,
+		&i.RequestedClockedAt,
+		&i.WorkDate,
+		&i.Reason,
+		&i.Status,
+		&i.FormInstanceID,
+		&i.ClockRecordID,
+		&i.ReviewedByAccountID,
+		&i.ReviewReason,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getAttendancePolicy = `-- name: GetAttendancePolicy :one
 SELECT id, tenant_id, work_time, leave_types, updated_by_account_id, created_at, updated_at FROM attendance_policies
 WHERE tenant_id = $1
@@ -1152,6 +1186,71 @@ func (q *Queries) GetOrgUnit(ctx context.Context, arg GetOrgUnitParams) (OrgUnit
 		&i.ParentID,
 		&i.Path,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getOvertimeRequest = `-- name: GetOvertimeRequest :one
+SELECT id, tenant_id, employee_id, work_date, start_at, end_at, hours, overtime_type, compensation_type, reason, status, form_instance_id, created_at, updated_at FROM overtime_requests
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetOvertimeRequestParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetOvertimeRequest(ctx context.Context, arg GetOvertimeRequestParams) (OvertimeRequest, error) {
+	row := q.db.QueryRow(ctx, getOvertimeRequest, arg.TenantID, arg.ID)
+	var i OvertimeRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.WorkDate,
+		&i.StartAt,
+		&i.EndAt,
+		&i.Hours,
+		&i.OvertimeType,
+		&i.CompensationType,
+		&i.Reason,
+		&i.Status,
+		&i.FormInstanceID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getOvertimeRequestByFormInstanceID = `-- name: GetOvertimeRequestByFormInstanceID :one
+SELECT id, tenant_id, employee_id, work_date, start_at, end_at, hours, overtime_type, compensation_type, reason, status, form_instance_id, created_at, updated_at FROM overtime_requests
+WHERE tenant_id = $1 AND form_instance_id = $2
+LIMIT 1
+`
+
+type GetOvertimeRequestByFormInstanceIDParams struct {
+	TenantID       string `json:"tenant_id"`
+	FormInstanceID string `json:"form_instance_id"`
+}
+
+func (q *Queries) GetOvertimeRequestByFormInstanceID(ctx context.Context, arg GetOvertimeRequestByFormInstanceIDParams) (OvertimeRequest, error) {
+	row := q.db.QueryRow(ctx, getOvertimeRequestByFormInstanceID, arg.TenantID, arg.FormInstanceID)
+	var i OvertimeRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.WorkDate,
+		&i.StartAt,
+		&i.EndAt,
+		&i.Hours,
+		&i.OvertimeType,
+		&i.CompensationType,
+		&i.Reason,
+		&i.Status,
+		&i.FormInstanceID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -2735,6 +2834,65 @@ func (q *Queries) ListOutboxEvents(ctx context.Context, tenantID string) ([]Outb
 			&i.LastError,
 			&i.CreatedAt,
 			&i.ProcessedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOvertimeRequestsByQuery = `-- name: ListOvertimeRequestsByQuery :many
+SELECT id, tenant_id, employee_id, work_date, start_at, end_at, hours, overtime_type, compensation_type, reason, status, form_instance_id, created_at, updated_at FROM overtime_requests
+WHERE tenant_id = $1
+  AND (coalesce(cardinality($2::text[]), 0) = 0 OR employee_id = ANY($2::text[]))
+  AND ($3::text = '' OR lower(status) = lower($3::text))
+  AND (NULLIF($4::text, '') IS NULL OR end_at::date >= NULLIF($4::text, '')::date)
+  AND (NULLIF($5::text, '') IS NULL OR start_at::date <= NULLIF($5::text, '')::date)
+ORDER BY created_at ASC
+`
+
+type ListOvertimeRequestsByQueryParams struct {
+	TenantID    string   `json:"tenant_id"`
+	EmployeeIds []string `json:"employee_ids"`
+	Status      string   `json:"status"`
+	FromDate    string   `json:"from_date"`
+	ToDate      string   `json:"to_date"`
+}
+
+func (q *Queries) ListOvertimeRequestsByQuery(ctx context.Context, arg ListOvertimeRequestsByQueryParams) ([]OvertimeRequest, error) {
+	rows, err := q.db.Query(ctx, listOvertimeRequestsByQuery,
+		arg.TenantID,
+		arg.EmployeeIds,
+		arg.Status,
+		arg.FromDate,
+		arg.ToDate,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OvertimeRequest
+	for rows.Next() {
+		var i OvertimeRequest
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.EmployeeID,
+			&i.WorkDate,
+			&i.StartAt,
+			&i.EndAt,
+			&i.Hours,
+			&i.OvertimeType,
+			&i.CompensationType,
+			&i.Reason,
+			&i.Status,
+			&i.FormInstanceID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -4360,6 +4518,85 @@ func (q *Queries) UpsertOrgUnit(ctx context.Context, arg UpsertOrgUnitParams) (O
 		&i.ParentID,
 		&i.Path,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertOvertimeRequest = `-- name: UpsertOvertimeRequest :one
+INSERT INTO overtime_requests (
+    id, tenant_id, employee_id, work_date, start_at, end_at,
+    hours, overtime_type, compensation_type, reason, status,
+    form_instance_id, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    employee_id = EXCLUDED.employee_id,
+    work_date = EXCLUDED.work_date,
+    start_at = EXCLUDED.start_at,
+    end_at = EXCLUDED.end_at,
+    hours = EXCLUDED.hours,
+    overtime_type = EXCLUDED.overtime_type,
+    compensation_type = EXCLUDED.compensation_type,
+    reason = EXCLUDED.reason,
+    status = EXCLUDED.status,
+    form_instance_id = EXCLUDED.form_instance_id,
+    created_at = EXCLUDED.created_at,
+    updated_at = EXCLUDED.updated_at
+RETURNING id, tenant_id, employee_id, work_date, start_at, end_at, hours, overtime_type, compensation_type, reason, status, form_instance_id, created_at, updated_at
+`
+
+type UpsertOvertimeRequestParams struct {
+	ID               string             `json:"id"`
+	TenantID         string             `json:"tenant_id"`
+	EmployeeID       string             `json:"employee_id"`
+	WorkDate         string             `json:"work_date"`
+	StartAt          pgtype.Timestamptz `json:"start_at"`
+	EndAt            pgtype.Timestamptz `json:"end_at"`
+	Hours            float64            `json:"hours"`
+	OvertimeType     string             `json:"overtime_type"`
+	CompensationType string             `json:"compensation_type"`
+	Reason           string             `json:"reason"`
+	Status           string             `json:"status"`
+	FormInstanceID   string             `json:"form_instance_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertOvertimeRequest(ctx context.Context, arg UpsertOvertimeRequestParams) (OvertimeRequest, error) {
+	row := q.db.QueryRow(ctx, upsertOvertimeRequest,
+		arg.ID,
+		arg.TenantID,
+		arg.EmployeeID,
+		arg.WorkDate,
+		arg.StartAt,
+		arg.EndAt,
+		arg.Hours,
+		arg.OvertimeType,
+		arg.CompensationType,
+		arg.Reason,
+		arg.Status,
+		arg.FormInstanceID,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i OvertimeRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.WorkDate,
+		&i.StartAt,
+		&i.EndAt,
+		&i.Hours,
+		&i.OvertimeType,
+		&i.CompensationType,
+		&i.Reason,
+		&i.Status,
+		&i.FormInstanceID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

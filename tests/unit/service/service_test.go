@@ -2015,6 +2015,226 @@ func TestLeaveWorkflowReviewUpdatesRequestAndBalance(t *testing.T) {
 	}
 }
 
+// TestCorrectionWorkflowApproveCreatesClockRecord 驗證補卡單走 workflow 審批也會產生打卡記錄。
+func TestCorrectionWorkflowApproveCreatesClockRecord(t *testing.T) {
+	store, svc, employeeCtx, _, _ := newAttendanceFixture(t)
+	now := attendanceFixtureClockInTime()
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workflow-reviewer",
+		TenantID: "tenant-1",
+		Name:     "Workflow Reviewer",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_instance", Action: "read", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "update", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "approve", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-reviewer",
+		TenantID:               "tenant-1",
+		DisplayName:            "Reviewer",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workflow-reviewer"},
+		CreatedAt:              now,
+	})
+	reviewerCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-reviewer"}
+
+	pending, err := svc.Attendance().CreateAttendanceCorrection(employeeCtx, domain.CreateAttendanceCorrectionInput{
+		Direction:          "clock_in",
+		RequestedClockedAt: now.Format(time.RFC3339),
+		Reason:             "forgot to clock in",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Workflow().ApproveForm(reviewerCtx, pending.FormInstanceID, domain.ApproveFormInput{Reason: "verified"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, ok, err := store.GetAttendanceCorrectionRequest(context.Background(), "tenant-1", pending.ID)
+	if err != nil || !ok {
+		t.Fatalf("correction missing ok=%v err=%v", ok, err)
+	}
+	if stored.Status != "approved" || stored.ClockRecordID == "" {
+		t.Fatalf("expected workflow-approved correction with clock record, got %+v", stored)
+	}
+	record, ok, err := store.GetAcceptedAttendanceClockRecord(context.Background(), "tenant-1", "emp-1", stored.WorkDate, "clock_in")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || record.Source != "manual_correction" || record.CorrectionRequestID != stored.ID {
+		t.Fatalf("expected accepted manual correction record via workflow, got ok=%v record=%+v", ok, record)
+	}
+}
+
+// TestCorrectionWorkflowRejectMarksRejectedWithoutRecord 驗證補卡單 workflow 駁回不產生打卡記錄。
+func TestCorrectionWorkflowRejectMarksRejectedWithoutRecord(t *testing.T) {
+	store, svc, employeeCtx, _, _ := newAttendanceFixture(t)
+	now := attendanceFixtureClockInTime()
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workflow-reviewer",
+		TenantID: "tenant-1",
+		Name:     "Workflow Reviewer",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_instance", Action: "read", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "update", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "approve", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-reviewer",
+		TenantID:               "tenant-1",
+		DisplayName:            "Reviewer",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workflow-reviewer"},
+		CreatedAt:              now,
+	})
+	reviewerCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-reviewer"}
+
+	pending, err := svc.Attendance().CreateAttendanceCorrection(employeeCtx, domain.CreateAttendanceCorrectionInput{
+		Direction:          "clock_in",
+		RequestedClockedAt: now.Format(time.RFC3339),
+		Reason:             "forgot to clock in",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Workflow().RejectForm(reviewerCtx, pending.FormInstanceID, domain.RejectFormInput{Reason: "not enough evidence"}); err != nil {
+		t.Fatal(err)
+	}
+	stored, ok, err := store.GetAttendanceCorrectionRequest(context.Background(), "tenant-1", pending.ID)
+	if err != nil || !ok {
+		t.Fatalf("correction missing ok=%v err=%v", ok, err)
+	}
+	if stored.Status != "rejected" || stored.ClockRecordID != "" {
+		t.Fatalf("expected workflow-rejected correction without record, got %+v", stored)
+	}
+	if _, ok, err := store.GetAcceptedAttendanceClockRecord(context.Background(), "tenant-1", "emp-1", stored.WorkDate, "clock_in"); err != nil {
+		t.Fatal(err)
+	} else if ok {
+		t.Fatal("workflow rejection should not create an accepted clock record")
+	}
+}
+
+// TestOvertimeWorkflowReviewUpdatesRequestAndCreditsBalance 驗證加班流程審核更新申請並累積補休餘額。
+func TestOvertimeWorkflowReviewUpdatesRequestAndCreditsBalance(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-self",
+		TenantID: "tenant-1",
+		Name:     "Self Service",
+		Permissions: []domain.Permission{
+			{Resource: "attendance.leave", Action: "create", Scope: "self"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workflow-reviewer",
+		TenantID: "tenant-1",
+		Name:     "Workflow Reviewer",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_instance", Action: "read", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "update", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "approve", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-employee",
+		TenantID:               "tenant-1",
+		DisplayName:            "Employee One",
+		EmployeeID:             "emp-1",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-self"},
+		CreatedAt:              now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-reviewer",
+		TenantID:               "tenant-1",
+		DisplayName:            "Reviewer",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workflow-reviewer"},
+		CreatedAt:              now,
+	})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	employeeCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"}
+	reviewerCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-reviewer"}
+
+	approvedRequest, err := svc.Attendance().CreateOvertimeRequest(employeeCtx, domain.CreateOvertimeRequestInput{
+		StartAt:          "2026-06-12T18:00:00Z",
+		EndAt:            "2026-06-12T21:00:00Z",
+		Hours:            3,
+		OvertimeType:     "weekday",
+		CompensationType: "leave",
+		Reason:           "release",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approvedRequest.Status != "pending_approval" || approvedRequest.FormInstanceID == "" {
+		t.Fatalf("expected pending overtime request with form evidence, got %+v", approvedRequest)
+	}
+	if _, err := svc.Workflow().ApproveForm(reviewerCtx, approvedRequest.FormInstanceID, domain.ApproveFormInput{}); err != nil {
+		t.Fatal(err)
+	}
+	storedApproved, ok, err := store.GetOvertimeRequest(context.Background(), "tenant-1", approvedRequest.ID)
+	if err != nil || !ok {
+		t.Fatalf("approved overtime request missing ok=%v err=%v", ok, err)
+	}
+	if storedApproved.Status != "approved" {
+		t.Fatalf("expected approved overtime request, got %+v", storedApproved)
+	}
+	balances, err := store.ListLeaveBalances(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	compensatory := 0.0
+	for _, balance := range balances {
+		if balance.EmployeeID == "emp-1" && balance.LeaveType == "compensatory" {
+			compensatory = balance.RemainingHours
+		}
+	}
+	if compensatory != 3 {
+		t.Fatalf("expected 3 compensatory hours credited, got %v", compensatory)
+	}
+
+	rejectedRequest, err := svc.Attendance().CreateOvertimeRequest(employeeCtx, domain.CreateOvertimeRequestInput{
+		StartAt: "2026-06-13T18:00:00Z",
+		EndAt:   "2026-06-13T20:00:00Z",
+		Hours:   2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Workflow().RejectForm(reviewerCtx, rejectedRequest.FormInstanceID, domain.RejectFormInput{Reason: "no need"}); err != nil {
+		t.Fatal(err)
+	}
+	storedRejected, ok, err := store.GetOvertimeRequest(context.Background(), "tenant-1", rejectedRequest.ID)
+	if err != nil || !ok {
+		t.Fatalf("rejected overtime request missing ok=%v err=%v", ok, err)
+	}
+	if storedRejected.Status != "rejected" {
+		t.Fatalf("expected rejected overtime request, got %+v", storedRejected)
+	}
+	balances, err = store.ListLeaveBalances(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	compensatory = 0.0
+	for _, balance := range balances {
+		if balance.EmployeeID == "emp-1" && balance.LeaveType == "compensatory" {
+			compensatory = balance.RemainingHours
+		}
+	}
+	if compensatory != 3 {
+		t.Fatalf("rejection should not change compensatory hours, got %v", compensatory)
+	}
+}
+
 // TestCreateLeaveRequestRejectsInsufficientLeaveBalance 驗證請假請求 rejects insufficient 請假 balance。
 func TestCreateLeaveRequestRejectsInsufficientLeaveBalance(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)

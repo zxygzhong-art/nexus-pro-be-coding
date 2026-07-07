@@ -267,6 +267,7 @@ type WorkspaceDayCell struct {
 	Holiday  string  `json:"holiday,omitempty"`
 	Leave    string  `json:"leave,omitempty"`
 	Hours    float64 `json:"hours,omitempty"`
+	Overtime float64 `json:"overtime,omitempty"`
 	Label    string  `json:"label,omitempty"`
 	In       string  `json:"in,omitempty"`
 	Out      string  `json:"out,omitempty"`
@@ -284,15 +285,17 @@ type WorkspaceEmployeeHours struct {
 	DueHours      float64            `json:"due_hours"`
 	LeaveByType   map[string]float64 `json:"leave_by_type"`
 	LeaveHours    float64            `json:"leave_hours"`
+	OvertimeHours float64            `json:"overtime_hours"`
 	WorkDays      int                `json:"work_days"`
 }
 
 // WorkspaceAttendanceMatrixSum 定義工作區考勤矩陣總和的資料結構。
 type WorkspaceAttendanceMatrixSum struct {
-	Holidays   int     `json:"holidays"`
-	LeaveHours float64 `json:"leave_hours"`
-	Perfect    int     `json:"perfect"`
-	Workdays   int     `json:"workdays"`
+	Holidays      int     `json:"holidays"`
+	LeaveHours    float64 `json:"leave_hours"`
+	OvertimeHours float64 `json:"overtime_hours"`
+	Perfect       int     `json:"perfect"`
+	Workdays      int     `json:"workdays"`
 }
 
 // WorkspaceClockMatrix 定義工作區打卡矩陣的資料結構。

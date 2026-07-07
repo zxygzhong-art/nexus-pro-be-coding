@@ -881,6 +881,29 @@ CREATE TABLE attendance_correction_requests (
 CREATE INDEX attendance_correction_requests_tenant_employee_date_idx ON attendance_correction_requests (tenant_id, employee_id, work_date DESC);
 CREATE INDEX attendance_correction_requests_tenant_status_idx ON attendance_correction_requests (tenant_id, status, created_at DESC);
 
+CREATE TABLE overtime_requests (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    employee_id text NOT NULL,
+    work_date text NOT NULL,
+    start_at timestamptz NOT NULL,
+    end_at timestamptz NOT NULL,
+    hours double precision NOT NULL CHECK (hours > 0),
+    overtime_type text NOT NULL DEFAULT 'weekday',
+    compensation_type text NOT NULL DEFAULT 'leave',
+    reason text NOT NULL DEFAULT '',
+    status text NOT NULL,
+    form_instance_id text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT overtime_requests_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id)
+);
+
+CREATE INDEX overtime_requests_tenant_id_idx ON overtime_requests (tenant_id);
+CREATE INDEX overtime_requests_tenant_employee_date_idx ON overtime_requests (tenant_id, employee_id, work_date DESC);
+CREATE INDEX overtime_requests_tenant_form_instance_idx ON overtime_requests (tenant_id, form_instance_id);
+CREATE INDEX overtime_requests_tenant_status_dates_idx ON overtime_requests (tenant_id, status, start_at, end_at);
+
 CREATE TABLE knowledge_articles (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -1115,6 +1138,8 @@ ALTER TABLE attendance_clock_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_clock_records FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_correction_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_correction_requests FORCE ROW LEVEL SECURITY;
+ALTER TABLE overtime_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE overtime_requests FORCE ROW LEVEL SECURITY;
 ALTER TABLE knowledge_articles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE knowledge_articles FORCE ROW LEVEL SECURITY;
 ALTER TABLE platform_task_items ENABLE ROW LEVEL SECURITY;
@@ -1184,6 +1209,7 @@ CREATE POLICY tenant_isolation_attendance_shifts ON attendance_shifts USING (ten
 CREATE POLICY tenant_isolation_attendance_shift_assignments ON attendance_shift_assignments USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_clock_records ON attendance_clock_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_correction_requests ON attendance_correction_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_overtime_requests ON overtime_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_knowledge_articles ON knowledge_articles USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_platform_task_items ON platform_task_items USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_platform_task_todos ON platform_task_todos USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));

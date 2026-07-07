@@ -205,6 +205,9 @@ func copyAttendanceCorrectionRequest(v AttendanceCorrectionRequest) AttendanceCo
 	return v
 }
 
+// copyOvertimeRequest 複製加班申請。
+func copyOvertimeRequest(v OvertimeRequest) OvertimeRequest { return v }
+
 // copyFormTemplate 複製表單範本。
 func copyFormTemplate(v FormTemplate) FormTemplate {
 	v.Schema = utils.CopyStringMap(v.Schema)

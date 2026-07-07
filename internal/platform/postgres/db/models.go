@@ -581,6 +581,23 @@ type OutboxEvent struct {
 	ProcessedAt   pgtype.Timestamptz `json:"processed_at"`
 }
 
+type OvertimeRequest struct {
+	ID               string             `json:"id"`
+	TenantID         string             `json:"tenant_id"`
+	EmployeeID       string             `json:"employee_id"`
+	WorkDate         string             `json:"work_date"`
+	StartAt          pgtype.Timestamptz `json:"start_at"`
+	EndAt            pgtype.Timestamptz `json:"end_at"`
+	Hours            float64            `json:"hours"`
+	OvertimeType     string             `json:"overtime_type"`
+	CompensationType string             `json:"compensation_type"`
+	Reason           string             `json:"reason"`
+	Status           string             `json:"status"`
+	FormInstanceID   string             `json:"form_instance_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
 type PermissionSet struct {
 	ID          string             `json:"id"`
 	TenantID    string             `json:"tenant_id"`

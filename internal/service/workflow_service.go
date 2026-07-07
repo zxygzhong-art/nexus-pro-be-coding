@@ -523,7 +523,7 @@ func (c WorkflowService) CancelForm(ctx RequestContext, id string, input CancelF
 		case workflowFormStatusApproved:
 			return BadRequest("approved form instances cannot be cancelled")
 		case workflowFormStatusCancelled, "canceled":
-			if err := tx.Service.Attendance().applyLeaveWorkflowReview(ctx, next, "cancel", workflowFormStatusCancelled); err != nil {
+			if err := tx.Service.Attendance().applyAttendanceWorkflowReview(ctx, next, "cancel", workflowFormStatusCancelled); err != nil {
 				return err
 			}
 			instance = next
@@ -537,7 +537,7 @@ func (c WorkflowService) CancelForm(ctx RequestContext, id string, input CancelF
 		if err := tx.store.UpsertFormInstance(goContext(ctx), next); err != nil {
 			return err
 		}
-		if err := tx.Service.Attendance().applyLeaveWorkflowReview(ctx, next, "cancel", workflowFormStatusCancelled); err != nil {
+		if err := tx.Service.Attendance().applyAttendanceWorkflowReview(ctx, next, "cancel", workflowFormStatusCancelled); err != nil {
 			return err
 		}
 		if err := tx.audit(ctx, "workflow.form.cancel", string(ResourceFormInstance), next.ID, string(SeverityMedium), map[string]any{
@@ -714,7 +714,7 @@ func (c WorkflowService) reviewForm(ctx RequestContext, id string, kind string, 
 			return BadRequest("approved form instance cannot be " + kind + "ed")
 		}
 		if strings.EqualFold(next.Status, status) {
-			if err := tx.Service.Attendance().applyLeaveWorkflowReview(ctx, next, kind, status); err != nil {
+			if err := tx.Service.Attendance().applyAttendanceWorkflowReview(ctx, next, kind, status); err != nil {
 				return err
 			}
 			instance = next
@@ -730,7 +730,7 @@ func (c WorkflowService) reviewForm(ctx RequestContext, id string, kind string, 
 		if err := tx.store.UpsertFormInstance(goContext(ctx), next); err != nil {
 			return err
 		}
-		if err := tx.Service.Attendance().applyLeaveWorkflowReview(ctx, next, kind, status); err != nil {
+		if err := tx.Service.Attendance().applyAttendanceWorkflowReview(ctx, next, kind, status); err != nil {
 			return err
 		}
 		template, ok, err := tx.store.GetFormTemplate(goContext(ctx), ctx.TenantID, next.TemplateID)
@@ -2041,7 +2041,7 @@ func (c WorkflowService) completeWorkflowDecision(ctx RequestContext, instance d
 	if err := c.store.UpsertFormInstance(goContext(ctx), instance); err != nil {
 		return err
 	}
-	if err := c.Service.Attendance().applyLeaveWorkflowReview(ctx, instance, action, formStatus); err != nil {
+	if err := c.Service.Attendance().applyAttendanceWorkflowReview(ctx, instance, action, formStatus); err != nil {
 		return err
 	}
 	return c.notifyWorkflowFormReviewed(ctx, instance, template, reviewer, action, comment)
@@ -2077,7 +2077,7 @@ func (c WorkflowService) completeWorkflowApproved(ctx RequestContext, run domain
 	if !templateOK {
 		template = domain.FormTemplate{ID: run.TemplateID}
 	}
-	if err := c.Service.Attendance().applyLeaveWorkflowReview(ctx, instance, "approve", workflowFormStatusApproved); err != nil {
+	if err := c.Service.Attendance().applyAttendanceWorkflowReview(ctx, instance, "approve", workflowFormStatusApproved); err != nil {
 		return err
 	}
 	reviewer, reviewerOK, err := c.store.GetAccount(goContext(ctx), ctx.TenantID, ctx.AccountID)

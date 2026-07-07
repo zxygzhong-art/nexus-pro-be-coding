@@ -48,6 +48,43 @@ type LeaveRequestQuery struct {
 	ToDate      string   `json:"to_date,omitempty"`
 }
 
+// OvertimeRequest 定義加班申請的資料結構。
+type OvertimeRequest struct {
+	ID               string    `json:"id"`
+	TenantID         string    `json:"tenant_id"`
+	EmployeeID       string    `json:"employee_id"`
+	WorkDate         string    `json:"work_date"`
+	StartAt          time.Time `json:"start_at"`
+	EndAt            time.Time `json:"end_at"`
+	Hours            float64   `json:"hours"`
+	OvertimeType     string    `json:"overtime_type"`
+	CompensationType string    `json:"compensation_type"`
+	Reason           string    `json:"reason,omitempty"`
+	Status           string    `json:"status"`
+	FormInstanceID   string    `json:"form_instance_id,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+}
+
+// CreateOvertimeRequestInput 定義加班申請輸入的資料結構。
+type CreateOvertimeRequestInput struct {
+	EmployeeID       string  `json:"employee_id,omitempty"`
+	StartAt          string  `json:"start_at"`
+	EndAt            string  `json:"end_at"`
+	Hours            float64 `json:"hours"`
+	OvertimeType     string  `json:"overtime_type,omitempty"`
+	CompensationType string  `json:"compensation_type,omitempty"`
+	Reason           string  `json:"reason,omitempty"`
+}
+
+// OvertimeRequestQuery 定義加班申請查詢的資料結構。
+type OvertimeRequestQuery struct {
+	EmployeeIDs []string `json:"employee_ids,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	FromDate    string   `json:"from_date,omitempty"`
+	ToDate      string   `json:"to_date,omitempty"`
+}
+
 // AttendanceWorksite 定義考勤工作地點的資料結構。
 type AttendanceWorksite struct {
 	ID           string    `json:"id"`

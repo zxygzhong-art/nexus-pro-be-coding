@@ -33,6 +33,8 @@ type (
 	LeaveBalance                       = domain.LeaveBalance
 	LeaveRequest                       = domain.LeaveRequest
 	LeaveRequestQuery                  = domain.LeaveRequestQuery
+	OvertimeRequest                    = domain.OvertimeRequest
+	OvertimeRequestQuery               = domain.OvertimeRequestQuery
 	AttendanceWorksite                 = domain.AttendanceWorksite
 	AttendanceShift                    = domain.AttendanceShift
 	AttendanceShiftAssignment          = domain.AttendanceShiftAssignment
@@ -200,6 +202,7 @@ type (
 	ExportedFormFile                        = domain.ExportedFormFile
 	BulkReviewFormsInput                    = domain.BulkReviewFormsInput
 	CreateLeaveRequestInput                 = domain.CreateLeaveRequestInput
+	CreateOvertimeRequestInput              = domain.CreateOvertimeRequestInput
 	CreateAttendanceWorksiteInput           = domain.CreateAttendanceWorksiteInput
 	UpdateAttendanceWorksiteInput           = domain.UpdateAttendanceWorksiteInput
 	CreateAttendanceShiftInput              = domain.CreateAttendanceShiftInput

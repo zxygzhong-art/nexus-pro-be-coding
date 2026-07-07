@@ -2,6 +2,8 @@ package telemetry
 
 import (
 	"context"
+	"net/url"
+	"strings"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -9,7 +11,7 @@ import (
 	"go.opentelemetry.io/otel/propagation"
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
-	semconv "go.opentelemetry.io/otel/semconv/v1.37.0"
+	semconv "go.opentelemetry.io/otel/semconv/v1.41.0"
 )
 
 // Config 定義組態的資料結構。
@@ -30,8 +32,18 @@ func Init(ctx context.Context, cfg Config) (func(context.Context) error, error) 
 	if serviceName == "" {
 		serviceName = "nexus-pro-be"
 	}
+	endpoint := cfg.Endpoint
+	if strings.Contains(endpoint, "://") {
+		parsed, err := url.Parse(endpoint)
+		if err != nil {
+			return nil, err
+		}
+		if parsed.Host != "" {
+			endpoint = parsed.Host
+		}
+	}
 	options := []otlptracegrpc.Option{
-		otlptracegrpc.WithEndpoint(cfg.Endpoint),
+		otlptracegrpc.WithEndpoint(endpoint),
 	}
 	if cfg.Insecure {
 		options = append(options, otlptracegrpc.WithInsecure())
@@ -43,7 +55,7 @@ func Init(ctx context.Context, cfg Config) (func(context.Context) error, error) 
 	res, err := resource.Merge(resource.Default(), resource.NewWithAttributes(
 		semconv.SchemaURL,
 		semconv.ServiceName(serviceName),
-		semconv.DeploymentEnvironmentName(cfg.Env),
+		semconv.DeploymentEnvironmentNameKey.String(cfg.Env),
 		attribute.String("service.namespace", "nexus-pro"),
 	))
 	if err != nil {

@@ -45,5 +45,11 @@ type AttendanceStore interface {
 
 	UpsertAttendanceCorrectionRequest(context.Context, domain.AttendanceCorrectionRequest) error
 	GetAttendanceCorrectionRequest(ctx context.Context, tenantID, id string) (domain.AttendanceCorrectionRequest, bool, error)
+	GetAttendanceCorrectionRequestByFormInstanceID(ctx context.Context, tenantID, formInstanceID string) (domain.AttendanceCorrectionRequest, bool, error)
 	ListAttendanceCorrectionRequests(ctx context.Context, tenantID string, query domain.AttendanceCorrectionQuery) ([]domain.AttendanceCorrectionRequest, error)
+
+	UpsertOvertimeRequest(context.Context, domain.OvertimeRequest) error
+	GetOvertimeRequest(ctx context.Context, tenantID, id string) (domain.OvertimeRequest, bool, error)
+	GetOvertimeRequestByFormInstanceID(ctx context.Context, tenantID, formInstanceID string) (domain.OvertimeRequest, bool, error)
+	ListOvertimeRequestsByQuery(ctx context.Context, tenantID string, query domain.OvertimeRequestQuery) ([]domain.OvertimeRequest, error)
 }

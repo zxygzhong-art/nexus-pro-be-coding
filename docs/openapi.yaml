@@ -1361,6 +1361,29 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+  /v1/attendance/overtime-requests:
+    get:
+      summary: List overtime requests
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200":
+          description: Overtime request page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+    post:
+      summary: Create overtime request
+      responses:
+        "201":
+          description: Created overtime request
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/attendance/policies/current:
     get:
       summary: Get current attendance policy

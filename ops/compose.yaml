@@ -1,0 +1,368 @@
+name: ${COMPOSE_PROJECT_NAME:-nexus-pro-be-ops}
+
+services:
+  postgres:
+    profiles: ["postgres", "all"]
+    image: ${POSTGRES_IMAGE}
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      KEYCLOAK_DB_NAME: ${KEYCLOAK_DB_NAME}
+      OPENFGA_DB_NAME: ${OPENFGA_DB_NAME}
+      TEMPORAL_DB_NAME: ${TEMPORAL_DB_NAME}
+      TEMPORAL_VISIBILITY_DB_NAME: ${TEMPORAL_VISIBILITY_DB_NAME}
+    ports:
+      - "${POSTGRES_BIND_HOST}:${POSTGRES_HOST_PORT}:${POSTGRES_INTERNAL_PORT}"
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./postgres/initdb:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -p ${POSTGRES_INTERNAL_PORT}"]
+      interval: ${POSTGRES_HEALTHCHECK_INTERVAL}
+      timeout: ${POSTGRES_HEALTHCHECK_TIMEOUT}
+      retries: ${POSTGRES_HEALTHCHECK_RETRIES}
+    networks:
+      - observability
+
+  redis:
+    profiles: ["redis", "all"]
+    image: ${REDIS_IMAGE}
+    container_name: redis-observability
+    restart: unless-stopped
+    command:
+      - redis-server
+      - "--port"
+      - "${REDIS_INTERNAL_PORT}"
+      - "--appendonly"
+      - "${REDIS_APPENDONLY}"
+      - "--requirepass"
+      - "${REDIS_PASSWORD}"
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    ports:
+      - "${REDIS_BIND_HOST}:${REDIS_HOST_PORT}:${REDIS_INTERNAL_PORT}"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -p ${REDIS_INTERNAL_PORT} -a \"$${REDIS_PASSWORD}\" ping | grep PONG"]
+      interval: ${REDIS_HEALTHCHECK_INTERVAL}
+      timeout: ${REDIS_HEALTHCHECK_TIMEOUT}
+      retries: ${REDIS_HEALTHCHECK_RETRIES}
+    networks:
+      - observability
+
+  grafana:
+    profiles: ["grafana", "all"]
+    image: ${GRAFANA_IMAGE}
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "${GRAFANA_BIND_HOST}:${GRAFANA_HOST_PORT}:${GRAFANA_INTERNAL_PORT}"
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: ${GRAFANA_ALLOW_SIGN_UP}
+      GF_AUTH_ANONYMOUS_ENABLED: ${GRAFANA_ANONYMOUS_ENABLED}
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./generated/grafana/provisioning:/etc/grafana/provisioning:ro
+    networks:
+      - observability
+
+  minio:
+    profiles: ["minio", "all"]
+    image: ${MINIO_IMAGE}
+    container_name: minio-observability
+    restart: unless-stopped
+    command:
+      - server
+      - /data
+      - "--console-address=:${MINIO_CONSOLE_INTERNAL_PORT}"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
+      MINIO_PROMETHEUS_AUTH_TYPE: ${MINIO_PROMETHEUS_AUTH_TYPE}
+    ports:
+      - "${MINIO_API_BIND_HOST}:${MINIO_API_HOST_PORT}:${MINIO_API_INTERNAL_PORT}"
+      - "${MINIO_CONSOLE_BIND_HOST}:${MINIO_CONSOLE_HOST_PORT}:${MINIO_CONSOLE_INTERNAL_PORT}"
+    volumes:
+      - minio-data:/data
+    networks:
+      - observability
+
+  minio-init:
+    profiles: ["minio", "all"]
+    image: ${MINIO_CLIENT_IMAGE}
+    container_name: minio-init
+    restart: "no"
+    entrypoint:
+      - /bin/sh
+      - -ec
+      - |
+        until mc alias set local http://${MINIO_INTERNAL_HOST}:${MINIO_API_INTERNAL_PORT} ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}; do
+          sleep 2
+        done
+        mc mb --ignore-existing local/${OBJECT_STORE_BUCKET}
+        mc mb --ignore-existing local/${LOKI_BUCKET}
+        mc mb --ignore-existing local/${TEMPO_BUCKET}
+    depends_on:
+      minio:
+        condition: service_started
+        required: false
+    networks:
+      - observability
+
+  keycloak:
+    profiles: ["keycloak", "all"]
+    image: ${KEYCLOAK_IMAGE}
+    container_name: keycloak
+    restart: unless-stopped
+    command:
+      - ${KEYCLOAK_COMMAND}
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USER}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://${POSTGRES_INTERNAL_HOST}:${POSTGRES_INTERNAL_PORT}/${KEYCLOAK_DB_NAME}
+      KC_DB_USERNAME: ${POSTGRES_USER}
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD}
+      KC_HEALTH_ENABLED: ${KEYCLOAK_HEALTH_ENABLED}
+      KC_METRICS_ENABLED: ${KEYCLOAK_METRICS_ENABLED}
+      KC_FEATURES: ${KEYCLOAK_FEATURES}
+      KC_TRACING_ENABLED: ${KEYCLOAK_TRACING_ENABLED}
+      KC_TRACING_ENDPOINT: http://${OTEL_COLLECTOR_INTERNAL_HOST}:${OTEL_GRPC_INTERNAL_PORT}
+      KC_TRACING_PROTOCOL: ${KEYCLOAK_TRACING_PROTOCOL}
+      KC_TRACING_SERVICE_NAME: ${KEYCLOAK_TRACING_SERVICE_NAME}
+      KC_TRACING_SAMPLER_RATIO: ${KEYCLOAK_TRACING_SAMPLER_RATIO}
+      KC_TELEMETRY_SERVICE_NAME: ${KEYCLOAK_TELEMETRY_SERVICE_NAME}
+      KC_TELEMETRY_RESOURCE_ATTRIBUTES: ${OTEL_RESOURCE_ATTRIBUTES}
+    ports:
+      - "${KEYCLOAK_HTTP_BIND_HOST}:${KEYCLOAK_HTTP_HOST_PORT}:${KEYCLOAK_HTTP_INTERNAL_PORT}"
+      - "${KEYCLOAK_MANAGEMENT_BIND_HOST}:${KEYCLOAK_MANAGEMENT_HOST_PORT}:${KEYCLOAK_MANAGEMENT_INTERNAL_PORT}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    networks:
+      - observability
+
+  openfga-migrate:
+    profiles: ["openfga", "all"]
+    image: ${OPENFGA_IMAGE}
+    container_name: openfga-migrate
+    command: migrate
+    restart: "no"
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_INTERNAL_HOST}:${POSTGRES_INTERNAL_PORT}/${OPENFGA_DB_NAME}?sslmode=disable
+      OPENFGA_LOG_FORMAT: ${OPENFGA_LOG_FORMAT}
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    networks:
+      - observability
+
+  openfga:
+    profiles: ["openfga", "all"]
+    image: ${OPENFGA_IMAGE}
+    container_name: openfga
+    restart: unless-stopped
+    command: run
+    environment:
+      OPENFGA_DATASTORE_ENGINE: postgres
+      OPENFGA_DATASTORE_URI: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_INTERNAL_HOST}:${POSTGRES_INTERNAL_PORT}/${OPENFGA_DB_NAME}?sslmode=disable
+      OPENFGA_HTTP_ADDR: 0.0.0.0:${OPENFGA_HTTP_INTERNAL_PORT}
+      OPENFGA_GRPC_ADDR: 0.0.0.0:${OPENFGA_GRPC_INTERNAL_PORT}
+      OPENFGA_PLAYGROUND_ENABLED: ${OPENFGA_PLAYGROUND_ENABLED}
+      OPENFGA_METRICS_ENABLED: ${OPENFGA_METRICS_ENABLED}
+      OPENFGA_METRICS_ADDR: 0.0.0.0:${OPENFGA_METRICS_INTERNAL_PORT}
+      OPENFGA_TRACE_ENABLED: ${OPENFGA_TRACE_ENABLED}
+      OPENFGA_TRACE_OTLP_ENDPOINT: ${OTEL_COLLECTOR_INTERNAL_HOST}:${OTEL_GRPC_INTERNAL_PORT}
+      OPENFGA_TRACE_OTLP_TLS_ENABLED: ${OPENFGA_TRACE_OTLP_TLS_ENABLED}
+      OPENFGA_TRACE_SAMPLE_RATIO: ${OPENFGA_TRACE_SAMPLE_RATIO}
+      OPENFGA_LOG_FORMAT: ${OPENFGA_LOG_FORMAT}
+    ports:
+      - "${OPENFGA_HTTP_BIND_HOST}:${OPENFGA_HTTP_HOST_PORT}:${OPENFGA_HTTP_INTERNAL_PORT}"
+      - "${OPENFGA_GRPC_BIND_HOST}:${OPENFGA_GRPC_HOST_PORT}:${OPENFGA_GRPC_INTERNAL_PORT}"
+      - "${OPENFGA_PLAYGROUND_BIND_HOST}:${OPENFGA_PLAYGROUND_HOST_PORT}:${OPENFGA_PLAYGROUND_INTERNAL_PORT}"
+      - "${OPENFGA_METRICS_BIND_HOST}:${OPENFGA_METRICS_HOST_PORT}:${OPENFGA_METRICS_INTERNAL_PORT}"
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+      openfga-migrate:
+        condition: service_completed_successfully
+        required: false
+    networks:
+      - observability
+
+  temporal:
+    profiles: ["temporal", "all"]
+    image: ${TEMPORAL_IMAGE}
+    container_name: temporal
+    restart: unless-stopped
+    environment:
+      DB: ${TEMPORAL_DB}
+      DB_PORT: ${POSTGRES_INTERNAL_PORT}
+      POSTGRES_SEEDS: ${POSTGRES_INTERNAL_HOST}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PWD: ${POSTGRES_PASSWORD}
+      DBNAME: ${TEMPORAL_DB_NAME}
+      VISIBILITY_DBNAME: ${TEMPORAL_VISIBILITY_DB_NAME}
+      DEFAULT_NAMESPACE: ${TEMPORAL_DEFAULT_NAMESPACE}
+      DYNAMIC_CONFIG_FILE_PATH: ${TEMPORAL_DYNAMIC_CONFIG_FILE_PATH}
+    ports:
+      - "${TEMPORAL_GRPC_BIND_HOST}:${TEMPORAL_GRPC_HOST_PORT}:${TEMPORAL_GRPC_INTERNAL_PORT}"
+    volumes:
+      - ./generated/temporal/dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+        required: false
+    networks:
+      - observability
+
+  temporal-ui:
+    profiles: ["temporal", "all"]
+    image: ${TEMPORAL_UI_IMAGE}
+    container_name: temporal-ui
+    restart: unless-stopped
+    environment:
+      TEMPORAL_ADDRESS: ${TEMPORAL_INTERNAL_HOST}:${TEMPORAL_GRPC_INTERNAL_PORT}
+      TEMPORAL_CORS_ORIGINS: ${TEMPORAL_CORS_ORIGINS}
+    ports:
+      - "${TEMPORAL_UI_BIND_HOST}:${TEMPORAL_UI_HOST_PORT}:${TEMPORAL_UI_INTERNAL_PORT}"
+    depends_on:
+      temporal:
+        condition: service_started
+        required: false
+    networks:
+      - observability
+
+  temporal-admin-tools:
+    profiles: ["temporal", "all"]
+    image: ${TEMPORAL_ADMIN_TOOLS_IMAGE}
+    container_name: temporal-admin-tools
+    restart: unless-stopped
+    entrypoint:
+      - tail
+      - -f
+      - /dev/null
+    environment:
+      TEMPORAL_ADDRESS: ${TEMPORAL_INTERNAL_HOST}:${TEMPORAL_GRPC_INTERNAL_PORT}
+      TEMPORAL_CLI_ADDRESS: ${TEMPORAL_INTERNAL_HOST}:${TEMPORAL_GRPC_INTERNAL_PORT}
+    depends_on:
+      temporal:
+        condition: service_started
+        required: false
+    networks:
+      - observability
+
+  nats:
+    profiles: ["nats", "all"]
+    image: ${NATS_IMAGE}
+    container_name: nats
+    restart: unless-stopped
+    command:
+      - "--name=${NATS_SERVER_NAME}"
+      - "--jetstream"
+      - "--store_dir=${NATS_JETSTREAM_STORE_DIR}"
+      - "--http_port=${NATS_MONITOR_INTERNAL_PORT}"
+    ports:
+      - "${NATS_CLIENT_BIND_HOST}:${NATS_CLIENT_HOST_PORT}:${NATS_CLIENT_INTERNAL_PORT}"
+      - "${NATS_MONITOR_BIND_HOST}:${NATS_MONITOR_HOST_PORT}:${NATS_MONITOR_INTERNAL_PORT}"
+    volumes:
+      - nats-data:/data
+    networks:
+      - observability
+
+  otel-collector:
+    profiles: ["otel", "all"]
+    image: ${OTEL_COLLECTOR_IMAGE}
+    container_name: otel-collector
+    restart: unless-stopped
+    command:
+      - "--config=/etc/otelcol/config.yaml"
+    ports:
+      - "${OTEL_GRPC_BIND_HOST}:${OTEL_GRPC_HOST_PORT}:${OTEL_GRPC_INTERNAL_PORT}"
+      - "${OTEL_HTTP_BIND_HOST}:${OTEL_HTTP_HOST_PORT}:${OTEL_HTTP_INTERNAL_PORT}"
+      - "${OTEL_PROMETHEUS_EXPORT_BIND_HOST}:${OTEL_PROMETHEUS_EXPORT_HOST_PORT}:${OTEL_PROMETHEUS_EXPORT_INTERNAL_PORT}"
+    volumes:
+      - ./generated/otelcol.yaml:/etc/otelcol/config.yaml:ro
+      - ../logs:/var/log/nexus-pro-be:ro
+    networks:
+      - observability
+
+  tempo:
+    profiles: ["tempo", "all"]
+    image: ${TEMPO_IMAGE}
+    container_name: tempo
+    restart: unless-stopped
+    command:
+      - "-config.file=/etc/tempo/tempo.yaml"
+    ports:
+      - "${TEMPO_HTTP_BIND_HOST}:${TEMPO_HTTP_HOST_PORT}:${TEMPO_HTTP_INTERNAL_PORT}"
+    volumes:
+      - ./generated/tempo.yaml:/etc/tempo/tempo.yaml:ro
+      - tempo-data:/var/tempo
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+        required: false
+    networks:
+      - observability
+
+  prometheus:
+    profiles: ["prometheus", "all"]
+    image: ${PROMETHEUS_IMAGE}
+    container_name: prometheus
+    restart: unless-stopped
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=${PROMETHEUS_RETENTION}"
+      - "--web.enable-lifecycle"
+    ports:
+      - "${PROMETHEUS_BIND_HOST}:${PROMETHEUS_HOST_PORT}:${PROMETHEUS_INTERNAL_PORT}"
+    volumes:
+      - ./generated/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    networks:
+      - observability
+
+  loki:
+    profiles: ["loki", "all"]
+    image: ${LOKI_IMAGE}
+    container_name: loki
+    restart: unless-stopped
+    command:
+      - "-config.file=/etc/loki/loki.yaml"
+    ports:
+      - "${LOKI_HTTP_BIND_HOST}:${LOKI_HTTP_HOST_PORT}:${LOKI_HTTP_INTERNAL_PORT}"
+    volumes:
+      - ./generated/loki.yaml:/etc/loki/loki.yaml:ro
+      - loki-data:/loki
+    depends_on:
+      minio-init:
+        condition: service_completed_successfully
+        required: false
+    networks:
+      - observability
+
+networks:
+  observability:
+    name: ${OBSERVABILITY_NETWORK}
+
+volumes:
+  postgres-data:
+  grafana-data:
+  prometheus-data:
+  tempo-data:
+  loki-data:
+  minio-data:
+  redis-data:
+  nats-data:

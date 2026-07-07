@@ -40,6 +40,7 @@ type Store struct {
 	attendanceAssignments  map[string]map[string]AttendanceShiftAssignment
 	attendanceClockRecords map[string]map[string]AttendanceClockRecord
 	attendanceCorrections  map[string]map[string]AttendanceCorrectionRequest
+	overtimeRequests       map[string]map[string]OvertimeRequest
 	formTemplates          map[string]map[string]FormTemplate
 	formInstances          map[string]map[string]FormInstance
 	workflowRuns           map[string]map[string]domain.WorkflowRun
@@ -85,6 +86,7 @@ func NewStore() *Store {
 		attendanceAssignments:  map[string]map[string]AttendanceShiftAssignment{},
 		attendanceClockRecords: map[string]map[string]AttendanceClockRecord{},
 		attendanceCorrections:  map[string]map[string]AttendanceCorrectionRequest{},
+		overtimeRequests:       map[string]map[string]OvertimeRequest{},
 		formTemplates:          map[string]map[string]FormTemplate{},
 		formInstances:          map[string]map[string]FormInstance{},
 		workflowRuns:           map[string]map[string]domain.WorkflowRun{},
@@ -1208,6 +1210,91 @@ func (s *Store) ListAttendanceCorrectionRequests(_ context.Context, tenantID str
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
+}
+
+// GetAttendanceCorrectionRequestByFormInstanceID 從儲存層取得考勤 correction 請求 by 表單實例 ID。
+func (s *Store) GetAttendanceCorrectionRequestByFormInstanceID(_ context.Context, tenantID, formInstanceID string) (AttendanceCorrectionRequest, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, item := range s.attendanceCorrections[tenantID] {
+		if item.FormInstanceID == formInstanceID {
+			return copyAttendanceCorrectionRequest(item), true, nil
+		}
+	}
+	return AttendanceCorrectionRequest{}, false, nil
+}
+
+// UpsertOvertimeRequest 從儲存層處理 upsert 加班申請。
+func (s *Store) UpsertOvertimeRequest(_ context.Context, v OvertimeRequest) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.overtimeRequests, v.TenantID, v.ID, copyOvertimeRequest(v))
+	return nil
+}
+
+// GetOvertimeRequest 從儲存層取得加班申請。
+func (s *Store) GetOvertimeRequest(_ context.Context, tenantID, id string) (OvertimeRequest, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.overtimeRequests, tenantID, id)
+	if !ok {
+		return OvertimeRequest{}, false, nil
+	}
+	return copyOvertimeRequest(v), true, nil
+}
+
+// GetOvertimeRequestByFormInstanceID 從儲存層取得加班申請 by 表單實例 ID。
+func (s *Store) GetOvertimeRequestByFormInstanceID(_ context.Context, tenantID, formInstanceID string) (OvertimeRequest, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, item := range s.overtimeRequests[tenantID] {
+		if item.FormInstanceID == formInstanceID {
+			return copyOvertimeRequest(item), true, nil
+		}
+	}
+	return OvertimeRequest{}, false, nil
+}
+
+// ListOvertimeRequestsByQuery 從儲存層列出加班申請 by 查詢。
+func (s *Store) ListOvertimeRequestsByQuery(_ context.Context, tenantID string, query domain.OvertimeRequestQuery) ([]OvertimeRequest, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]OvertimeRequest, 0, len(s.overtimeRequests[tenantID]))
+	for _, item := range s.overtimeRequests[tenantID] {
+		if !memoryOvertimeRequestMatches(item, query) {
+			continue
+		}
+		out = append(out, copyOvertimeRequest(item))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+// memoryOvertimeRequestMatches 處理 memory 加班申請 matches。
+func memoryOvertimeRequestMatches(item OvertimeRequest, query domain.OvertimeRequestQuery) bool {
+	if len(query.EmployeeIDs) > 0 {
+		allowed := map[string]struct{}{}
+		for _, id := range query.EmployeeIDs {
+			allowed[id] = struct{}{}
+		}
+		if _, ok := allowed[item.EmployeeID]; !ok {
+			return false
+		}
+	}
+	if query.Status != "" && !strings.EqualFold(item.Status, query.Status) {
+		return false
+	}
+	if query.FromDate != "" {
+		if from, err := time.Parse(time.DateOnly, query.FromDate); err == nil && item.EndAt.Before(from) {
+			return false
+		}
+	}
+	if query.ToDate != "" {
+		if to, err := time.Parse(time.DateOnly, query.ToDate); err == nil && item.StartAt.After(to.AddDate(0, 0, 1)) {
+			return false
+		}
+	}
+	return true
 }
 
 // memoryClockRecordMatches 處理 memory 打卡 record matches。

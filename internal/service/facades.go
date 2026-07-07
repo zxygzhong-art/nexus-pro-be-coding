@@ -72,6 +72,8 @@ type AttendanceFacade interface {
 	ListLeaveBalancePage(RequestContext, PageRequest) (PageResponse[LeaveBalance], error)
 	ListLeaveRequestPage(RequestContext, PageRequest) (PageResponse[LeaveRequest], error)
 	CreateLeaveRequest(RequestContext, CreateLeaveRequestInput) (LeaveRequest, error)
+	ListOvertimeRequestPage(RequestContext, PageRequest) (PageResponse[OvertimeRequest], error)
+	CreateOvertimeRequest(RequestContext, CreateOvertimeRequestInput) (OvertimeRequest, error)
 	CurrentAttendancePolicy(RequestContext) (AttendancePolicyResponse, error)
 	UpdateAttendancePolicy(RequestContext, UpdateAttendancePolicyInput) (AttendancePolicyResponse, error)
 	ListAttendanceWorksitePage(RequestContext, PageRequest) (PageResponse[AttendanceWorksite], error)

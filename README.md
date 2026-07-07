@@ -13,26 +13,29 @@ The first implementation phase focuses on a modular monolith for HR core data, a
 - `sqlc` for type-safe SQL-first data access
 - Redis via `go-redis/v9` for cache, short-lived state, and future rate limiting
 - `slog` for structured logs
-- Grafana + Loki + Promtail for local log aggregation and exploration
-- OpenTelemetry + Grafana Tempo for distributed tracing
+- Grafana + Loki + OpenTelemetry Collector for local log aggregation and exploration
+- OpenTelemetry Collector + Grafana Tempo for distributed tracing
 
 Migration execution uses `goose` as a command-line tool. It is intentionally not part of the application runtime dependency graph.
 
 ## Local Services
 
 ```sh
-docker compose up -d postgres redis loki tempo promtail grafana
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+./render-configs.sh
+docker compose --env-file .env up -d
 ```
 
-Copy the sample environment file if you want local defaults:
+The ops stack reads `ops/.env`. Copy the application sample environment file from the repository root if you want local API defaults:
 
 ```sh
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be
 cp .env.example .env
 ```
 
 The application reads environment variables directly. Export them in your shell or load `.env` with your preferred local tool.
 
-Grafana is available at `http://localhost:3001` with the local credentials `admin` / `admin`. The Loki and Tempo data sources are provisioned automatically.
+Grafana is available at `http://localhost:3000` with the local credentials `admin` / `admin`. Prometheus, Loki, and Tempo data sources are provisioned automatically.
 
 ### Containerized API
 
@@ -44,21 +47,22 @@ docker compose --profile api up -d --build api
 
 Inside the compose network, point `DATABASE_URL` and `REDIS_ADDR` at the service names (`postgres:5432`, `redis:6379`) instead of `localhost`.
 
-Application logs are structured JSON written to stdout, which keeps the runtime simple and lets Promtail forward container logs into Loki. Request logs include `trace_id`, `request_id`, `tenant_id`, `account_id`, method, path, status, elapsed time, and client IP.
+Application logs are structured JSON written to stdout, which keeps the runtime simple and lets the OpenTelemetry Collector filelog receiver forward local log files into Loki. Request logs include `trace_id`, `request_id`, `tenant_id`, `account_id`, method, path, status, elapsed time, and client IP.
 
-OpenTelemetry tracing is disabled by default. To send traces to the local Tempo service, enable it before starting the API:
+OpenTelemetry tracing is disabled by default. To send traces through the local Collector to Tempo, enable it before starting the API:
 
 ```sh
 export OTEL_ENABLED=true
 export OTEL_SERVICE_NAME=nexus-pro-be
 export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:4317
 export OTEL_EXPORTER_OTLP_INSECURE=true
+export METRICS_ADDR=0.0.0.0:9091
 go run ./cmd/api
 ```
 
 HTTP requests, Keycloak discovery calls, and OpenFGA relationship checks are instrumented when tracing is enabled. Trace IDs are also written into request logs, so Grafana can jump between Tempo traces and Loki logs.
 
-When running the API directly with `go run`, stream stdout into the local log directory mounted by Promtail:
+When running the API directly with `go run`, stream stdout into the local log directory mounted by the Collector:
 
 ```sh
 mkdir -p logs
@@ -68,9 +72,9 @@ go run ./cmd/api 2>&1 | tee logs/nexus-pro-be.log
 Useful Grafana Loki queries:
 
 ```logql
-{compose_service="api"} | json
-{compose_service="api"} | json | trace_id="req_xxx"
-{compose_service="api"} | json | tenant_id="demo"
+{service_name="nexus-pro-be"} | json
+{service_name="nexus-pro-be"} | json | trace_id="trace_xxx"
+{service_name="nexus-pro-be"} | json | tenant_id="demo"
 ```
 
 Set `LOG_LEVEL=debug`, `info`, `warn`, or `error` to tune application log verbosity.
@@ -103,12 +107,12 @@ go run ./cmd/api
 Useful endpoints:
 
 ```sh
-curl http://localhost:8080/healthz
-curl http://localhost:8080/v1/me
+curl http://127.0.0.1:18080/healthz
+curl http://127.0.0.1:18080/v1/me
 curl http://127.0.0.1:9091/metrics
 ```
 
-`/metrics` is a Prometheus endpoint exposing `http_requests_total` and `http_request_duration_seconds` labeled by method, route template, and status. It is served on a dedicated listener configured by `METRICS_ADDR` (default `127.0.0.1:9091`) instead of the business port; set `METRICS_ADDR=` (empty) to disable it. Request metrics are still collected on the business router.
+`/metrics` is a Prometheus endpoint exposing `http_requests_total` and `http_request_duration_seconds` labeled by method, route template, and status. It is served on a dedicated listener configured by `METRICS_ADDR` (default `127.0.0.1:9091`) instead of the business port; set `METRICS_ADDR=` (empty) to disable it. For local Docker-based Collector scraping, bind it to an address the Collector container can reach, such as `METRICS_ADDR=0.0.0.0:9091`. Request metrics are still collected on the business router.
 
 Connection pool sizing is configurable through `DB_MAX_CONNS` (default `10`), `DB_MIN_CONNS` (default `1`), and `DB_MAX_CONN_LIFETIME` (default `1h`).
 
@@ -122,7 +126,7 @@ CORS is disabled unless `CORS_ALLOWED_ORIGINS` is set to a comma-separated list 
 
 Set `RATE_LIMIT_ENABLED=true` to rate limit requests per client IP. `RATE_LIMIT_RPS` (default `20`) is the sustained request rate and `RATE_LIMIT_BURST` (default `40`) the tolerated burst. When `REDIS_ADDR` is configured the limiter uses a shared Redis fixed-window counter so limits hold across replicas; otherwise an in-process token bucket is used. Rejected requests receive `429` with error code `10070`. The limiter fails open if Redis becomes unavailable. Note that the API trusts no proxy headers by default, so behind a reverse proxy set `TRUSTED_PROXIES` to a comma-separated list of proxy CIDRs/IPs (for example `10.0.0.0/8,192.168.1.1`) so client IPs used in logs and rate limiting are derived from `X-Forwarded-For` safely; when unset, the peer address is used.
 
-Swagger UI is available at `http://localhost:8080/swagger/index.html`, backed by the embedded OpenAPI spec at `http://localhost:8080/openapi.yaml`.
+Swagger UI is available at `http://127.0.0.1:18080/swagger/index.html`, backed by the embedded OpenAPI spec at `http://127.0.0.1:18080/openapi.yaml`.
 
 ### Error Code Design
 

@@ -49,6 +49,7 @@ func (s *Store) cloneLocked() *Store {
 		attendanceAssignments:  cloneNestedMap(s.attendanceAssignments, copyAttendanceShiftAssignment),
 		attendanceClockRecords: cloneNestedMap(s.attendanceClockRecords, copyAttendanceClockRecord),
 		attendanceCorrections:  cloneNestedMap(s.attendanceCorrections, copyAttendanceCorrectionRequest),
+		overtimeRequests:       cloneNestedMap(s.overtimeRequests, copyOvertimeRequest),
 		formTemplates:          cloneNestedMap(s.formTemplates, copyFormTemplate),
 		formInstances:          cloneNestedMap(s.formInstances, copyFormInstance),
 		workflowRuns:           cloneNestedMap(s.workflowRuns, copyWorkflowRun),
@@ -94,6 +95,7 @@ func (s *Store) replaceLocked(next *Store) {
 	s.attendanceAssignments = next.attendanceAssignments
 	s.attendanceClockRecords = next.attendanceClockRecords
 	s.attendanceCorrections = next.attendanceCorrections
+	s.overtimeRequests = next.overtimeRequests
 	s.formTemplates = next.formTemplates
 	s.formInstances = next.formInstances
 	s.workflowRuns = next.workflowRuns

@@ -248,6 +248,8 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "attendance.leave.read_balance", Method: "GET", Path: "/v1/attendance/leave-balances", ApplicationCode: "attendance", ResourceType: "leave", Action: "read"},
 	{Name: "attendance.leave.read_request", Method: "GET", Path: "/v1/attendance/leave-requests", ApplicationCode: "attendance", ResourceType: "leave", Action: "read"},
 	{Name: "attendance.leave.create", Method: "POST", Path: "/v1/attendance/leave-requests", ApplicationCode: "attendance", ResourceType: "leave", Action: "create"},
+	{Name: "attendance.overtime.read", Method: "GET", Path: "/v1/attendance/overtime-requests", ApplicationCode: "attendance", ResourceType: "leave", Action: "read"},
+	{Name: "attendance.overtime.create", Method: "POST", Path: "/v1/attendance/overtime-requests", ApplicationCode: "attendance", ResourceType: "leave", Action: "create"},
 	{Name: "attendance.policy.read", Method: "GET", Path: "/v1/attendance/policies/current", ApplicationCode: "attendance", ResourceType: "leave", Action: "read"},
 	{Name: "attendance.policy.update", Method: "PATCH", Path: "/v1/attendance/policies/current", ApplicationCode: "attendance", ResourceType: "leave", Action: "update", RiskLevel: RiskHigh},
 	{Name: "attendance.worksite.read", Method: "GET", Path: "/v1/attendance/worksites", ApplicationCode: "attendance", ResourceType: "worksite", Action: "read"},

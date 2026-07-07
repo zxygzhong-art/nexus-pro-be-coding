@@ -33,6 +33,14 @@ const (
 	correctionStatusApproved = "approved"
 	correctionStatusRejected = "rejected"
 
+	overtimeTypeWeekday = "weekday"
+	overtimeTypeHoliday = "holiday"
+
+	overtimeCompensationLeave = "leave"
+	overtimeCompensationPay   = "pay"
+
+	compensatoryLeaveType = "compensatory"
+
 	clockMaxAccuracyMeters = 200.0
 )
 
@@ -1985,4 +1993,367 @@ func leaveRequestStatusReleasesBalance(previousStatus string, nextStatus string)
 		return false
 	}
 	return nextStatus == "rejected" || nextStatus == "cancelled"
+}
+
+// CreateOvertimeRequest 建立加班申請的服務流程。
+func (c AttendanceService) CreateOvertimeRequest(ctx RequestContext, input CreateOvertimeRequestInput) (OvertimeRequest, error) {
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return OvertimeRequest{}, err
+	}
+	employeeID := strings.TrimSpace(input.EmployeeID)
+	if employeeID == "" {
+		employeeID = account.EmployeeID
+	}
+	if employeeID == "" {
+		return OvertimeRequest{}, BadRequest("employee_id is required")
+	}
+	decision, err := c.evaluateAuthz(ctx, account, CheckRequest{
+		ApplicationCode:  AppAttendance,
+		ResourceType:     ResourceLeave,
+		ResourceID:       employeeID,
+		Target:           employeeID,
+		TargetEmployeeID: employeeID,
+		Action:           ActionCreate,
+	})
+	if err != nil {
+		return OvertimeRequest{}, err
+	}
+	if !decision.Allowed {
+		return OvertimeRequest{}, Forbidden(decision.Reason)
+	}
+	if err := c.ensureAttendanceEmployeeAllowed(ctx, account, decision, employeeID); err != nil {
+		return OvertimeRequest{}, err
+	}
+	if _, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, employeeID); err != nil {
+		return OvertimeRequest{}, err
+	} else if !ok {
+		return OvertimeRequest{}, NotFound("employee", employeeID)
+	}
+	if input.Hours <= 0 {
+		return OvertimeRequest{}, BadRequest("hours must be greater than zero")
+	}
+	startAt, err := utils.ParseDateTime(input.StartAt)
+	if err != nil {
+		return OvertimeRequest{}, BadRequest("start_at must be RFC3339 or YYYY-MM-DD")
+	}
+	endAt, err := utils.ParseDateTime(input.EndAt)
+	if err != nil {
+		return OvertimeRequest{}, BadRequest("end_at must be RFC3339 or YYYY-MM-DD")
+	}
+	if !endAt.After(startAt) {
+		return OvertimeRequest{}, BadRequest("end_at must be after start_at")
+	}
+	overtimeType, err := normalizeOvertimeType(input.OvertimeType)
+	if err != nil {
+		return OvertimeRequest{}, err
+	}
+	compensationType, err := normalizeOvertimeCompensationType(input.CompensationType)
+	if err != nil {
+		return OvertimeRequest{}, err
+	}
+	var req OvertimeRequest
+	requestID := utils.NewID("ot")
+	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
+		template, ok, err := tx.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, "overtime-approval")
+		if err != nil {
+			return err
+		}
+		if !ok {
+			template = FormTemplate{
+				ID:        utils.NewID("ft"),
+				TenantID:  ctx.TenantID,
+				Key:       "overtime-approval",
+				Name:      "加班核准申請單",
+				Schema:    map[string]any{"type": "object"},
+				CreatedAt: tx.Now(),
+			}
+			if err := tx.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
+				return err
+			}
+		}
+		instance := FormInstance{
+			ID:                 utils.NewID("fi"),
+			TenantID:           ctx.TenantID,
+			TemplateID:         template.ID,
+			ApplicantAccountID: account.ID,
+			Status:             "submitted",
+			Payload: map[string]any{
+				"employee_id":          employeeID,
+				"overtime_request_id":  requestID,
+				"linked_resource_id":   requestID,
+				"linked_resource_type": "attendance.overtime_request",
+				"start_at":             startAt.Format(time.RFC3339),
+				"end_at":               endAt.Format(time.RFC3339),
+				"hours":                input.Hours,
+				"overtime_type":        overtimeType,
+				"compensation_type":    compensationType,
+				"reason":               input.Reason,
+			},
+			SubmittedAt: tx.Now(),
+			UpdatedAt:   tx.Now(),
+		}
+		if err := tx.store.UpsertFormInstance(goContext(ctx), instance); err != nil {
+			return err
+		}
+		req = OvertimeRequest{
+			ID:               requestID,
+			TenantID:         ctx.TenantID,
+			EmployeeID:       employeeID,
+			WorkDate:         attendanceWorkDate(startAt),
+			StartAt:          startAt,
+			EndAt:            endAt,
+			Hours:            input.Hours,
+			OvertimeType:     overtimeType,
+			CompensationType: compensationType,
+			Reason:           strings.TrimSpace(input.Reason),
+			Status:           "pending_approval",
+			FormInstanceID:   instance.ID,
+			CreatedAt:        tx.Now(),
+			UpdatedAt:        tx.Now(),
+		}
+		if err := tx.store.UpsertOvertimeRequest(goContext(ctx), req); err != nil {
+			return err
+		}
+		return tx.audit(ctx, "attendance.overtime_request.create", "overtime_request", req.ID, "medium", map[string]any{
+			"employee_id":       employeeID,
+			"hours":             req.Hours,
+			"overtime_type":     req.OvertimeType,
+			"compensation_type": req.CompensationType,
+		})
+	}); err != nil {
+		return OvertimeRequest{}, err
+	}
+	c.logInfo(ctx, "overtime request created",
+		"overtime_request_id", req.ID,
+		"employee_id", req.EmployeeID,
+		"hours", req.Hours,
+		"status", req.Status,
+		"form_instance_id", req.FormInstanceID,
+	)
+	return req, nil
+}
+
+// listOvertimeRequestsByQuery 列出加班申請 by 查詢的服務流程。
+func (c AttendanceService) listOvertimeRequestsByQuery(ctx RequestContext, query OvertimeRequestQuery) ([]OvertimeRequest, error) {
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	decision, err := c.evaluateAuthz(ctx, account, CheckRequest{ApplicationCode: AppAttendance, ResourceType: ResourceLeave, Action: ActionRead})
+	if err != nil {
+		return nil, err
+	}
+	if !decision.Allowed {
+		return nil, forbiddenAuthz(decision)
+	}
+	allowed, all, err := c.attendanceEmployeeScope(ctx, account, decision)
+	if err != nil {
+		return nil, err
+	}
+	if !all {
+		query.EmployeeIDs = employeeIDsFromSet(allowed)
+		if len(query.EmployeeIDs) == 0 {
+			return []OvertimeRequest{}, nil
+		}
+	}
+	return c.store.ListOvertimeRequestsByQuery(goContext(ctx), ctx.TenantID, normalizeOvertimeRequestQuery(query))
+}
+
+// ListOvertimeRequestPage 列出加班申請分頁的服務流程。
+func (c AttendanceService) ListOvertimeRequestPage(ctx RequestContext, page PageRequest) (PageResponse[OvertimeRequest], error) {
+	items, err := c.listOvertimeRequestsByQuery(ctx, OvertimeRequestQuery{})
+	if err != nil {
+		return PageResponse[OvertimeRequest]{}, err
+	}
+	return utils.PageResponse(items, page), nil
+}
+
+// normalizeOvertimeRequestQuery 正規化加班申請查詢。
+func normalizeOvertimeRequestQuery(query OvertimeRequestQuery) OvertimeRequestQuery {
+	query.Status = strings.TrimSpace(strings.ToLower(query.Status))
+	query.FromDate = strings.TrimSpace(query.FromDate)
+	query.ToDate = strings.TrimSpace(query.ToDate)
+	query.EmployeeIDs = employeeIDsFromSlice(query.EmployeeIDs)
+	return query
+}
+
+// normalizeOvertimeType 正規化加班類型。
+func normalizeOvertimeType(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", overtimeTypeWeekday:
+		return overtimeTypeWeekday, nil
+	case overtimeTypeHoliday, "weekend":
+		return overtimeTypeHoliday, nil
+	default:
+		return "", BadRequest("overtime_type must be weekday or holiday")
+	}
+}
+
+// normalizeOvertimeCompensationType 正規化加班補償類型。
+func normalizeOvertimeCompensationType(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", overtimeCompensationLeave:
+		return overtimeCompensationLeave, nil
+	case overtimeCompensationPay:
+		return overtimeCompensationPay, nil
+	default:
+		return "", BadRequest("compensation_type must be leave or pay")
+	}
+}
+
+// applyAttendanceWorkflowReview 處理考勤相關表單流程審核的統一入口。
+func (c AttendanceService) applyAttendanceWorkflowReview(ctx RequestContext, instance FormInstance, kind string, status string) error {
+	if err := c.applyLeaveWorkflowReview(ctx, instance, kind, status); err != nil {
+		return err
+	}
+	if err := c.applyCorrectionWorkflowReview(ctx, instance, kind); err != nil {
+		return err
+	}
+	return c.applyOvertimeWorkflowReview(ctx, instance, kind, status)
+}
+
+// applyCorrectionWorkflowReview 處理補卡表單流程審核的服務流程。
+func (c AttendanceService) applyCorrectionWorkflowReview(ctx RequestContext, instance FormInstance, kind string) error {
+	current, ok, err := c.store.GetAttendanceCorrectionRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	if !strings.EqualFold(current.Status, correctionStatusPending) {
+		return nil
+	}
+	nextStatus := ""
+	switch strings.ToLower(strings.TrimSpace(kind)) {
+	case "approve":
+		nextStatus = correctionStatusApproved
+	case "reject", "return", "cancel":
+		nextStatus = correctionStatusRejected
+	default:
+		return nil
+	}
+	now := c.Now()
+	current.Status = nextStatus
+	current.ReviewedByAccountID = strings.TrimSpace(ctx.AccountID)
+	current.ReviewedAt = &now
+	current.UpdatedAt = now
+	if nextStatus == correctionStatusApproved {
+		assignment, shift, worksite, err := c.attendanceAssignmentBundle(ctx, current.EmployeeID, current.RequestedClockedAt)
+		if err != nil {
+			return err
+		}
+		if _, exists, err := c.store.GetAcceptedAttendanceClockRecord(goContext(ctx), ctx.TenantID, current.EmployeeID, current.WorkDate, current.Direction); err != nil {
+			return err
+		} else if exists {
+			return Conflict("accepted clock record already exists")
+		}
+		record := AttendanceClockRecord{
+			ID:                  utils.NewID("acr"),
+			TenantID:            ctx.TenantID,
+			EmployeeID:          current.EmployeeID,
+			ShiftAssignmentID:   assignment.ID,
+			ShiftID:             shift.ID,
+			WorksiteID:          worksite.ID,
+			WorkDate:            current.WorkDate,
+			Direction:           current.Direction,
+			ClockedAt:           current.RequestedClockedAt,
+			Latitude:            worksite.Latitude,
+			Longitude:           worksite.Longitude,
+			RecordStatus:        clockRecordStatusAccepted,
+			Source:              clockSourceManualCorrection,
+			CorrectionRequestID: current.ID,
+			CreatedAt:           now,
+		}
+		if err := c.store.UpsertAttendanceClockRecord(goContext(ctx), record); err != nil {
+			return err
+		}
+		current.ClockRecordID = record.ID
+	}
+	if err := c.store.UpsertAttendanceCorrectionRequest(goContext(ctx), current); err != nil {
+		return err
+	}
+	event := "attendance.correction.reject"
+	if nextStatus == correctionStatusApproved {
+		event = "attendance.correction.approve"
+	}
+	return c.audit(ctx, event, string(ResourceAttendanceCorrection), current.ID, string(SeverityHigh), map[string]any{
+		"employee_id": current.EmployeeID,
+		"direction":   current.Direction,
+		"status":      current.Status,
+		"via":         "workflow",
+	})
+}
+
+// applyOvertimeWorkflowReview 處理加班表單流程審核的服務流程。
+func (c AttendanceService) applyOvertimeWorkflowReview(ctx RequestContext, instance FormInstance, kind string, status string) error {
+	overtimeRequestID := workflowLinkedOvertimeRequestID(instance)
+	var request OvertimeRequest
+	var ok bool
+	var err error
+	if overtimeRequestID != "" {
+		request, ok, err = c.store.GetOvertimeRequest(goContext(ctx), ctx.TenantID, overtimeRequestID)
+		if err != nil {
+			return err
+		}
+	}
+	if overtimeRequestID == "" || !ok {
+		request, ok, err = c.store.GetOvertimeRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+	}
+	previousStatus := normalizeLeaveRequestStatus(request.Status)
+	nextStatus := leaveRequestStatusForWorkflow(kind, status)
+	if nextStatus == "" || previousStatus == nextStatus {
+		return nil
+	}
+	if previousStatus == "approved" && nextStatus != "approved" {
+		return BadRequest("approved overtime request cannot be changed by workflow")
+	}
+	if nextStatus == "approved" && strings.EqualFold(request.CompensationType, overtimeCompensationLeave) {
+		if err := c.creditCompensatoryLeaveBalance(ctx, request.EmployeeID, request.Hours); err != nil {
+			return err
+		}
+	}
+	request.Status = nextStatus
+	request.UpdatedAt = c.Now()
+	return c.store.UpsertOvertimeRequest(goContext(ctx), request)
+}
+
+// creditCompensatoryLeaveBalance 依核准加班時數累積補休假餘額。
+func (c AttendanceService) creditCompensatoryLeaveBalance(ctx RequestContext, employeeID string, hours float64) error {
+	if hours <= 0 {
+		return nil
+	}
+	if _, found, err := c.store.ReleaseLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, compensatoryLeaveType, hours, c.Now()); err != nil {
+		return err
+	} else if found {
+		return nil
+	}
+	return c.store.UpsertLeaveBalance(goContext(ctx), LeaveBalance{
+		ID:             utils.NewID("lb"),
+		TenantID:       ctx.TenantID,
+		EmployeeID:     employeeID,
+		LeaveType:      compensatoryLeaveType,
+		RemainingHours: hours,
+		UpdatedAt:      c.Now(),
+	})
+}
+
+// workflowLinkedOvertimeRequestID 處理流程 linked 加班申請 ID。
+func workflowLinkedOvertimeRequestID(instance FormInstance) string {
+	if !strings.EqualFold(stringFromAny(instance.Payload["linked_resource_type"]), "attendance.overtime_request") {
+		if stringFromAny(instance.Payload["overtime_request_id"]) == "" {
+			return ""
+		}
+	}
+	if id := strings.TrimSpace(stringFromAny(instance.Payload["overtime_request_id"])); id != "" {
+		return id
+	}
+	return strings.TrimSpace(stringFromAny(instance.Payload["linked_resource_id"]))
 }

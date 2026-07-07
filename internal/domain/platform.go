@@ -34,6 +34,7 @@ type PlatformClockSummary struct {
 	Location              string  `json:"location"`
 	MonthlyAttendanceDays int     `json:"monthly_attendance_days"`
 	MonthlyHours          float64 `json:"monthly_hours"`
+	MonthlyOvertimeHours  float64 `json:"monthly_overtime_hours"`
 	LeaveDays             float64 `json:"leave_days"`
 }
 

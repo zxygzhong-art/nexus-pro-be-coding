@@ -1331,6 +1331,78 @@ func (s *Store) ListAttendanceCorrectionRequests(execCtx context.Context, tenant
 	return mapSlice(items, fromAttendanceCorrectionRequest), nil
 }
 
+// GetAttendanceCorrectionRequestByFormInstanceID 從儲存層取得考勤 correction 請求 by 表單實例 ID。
+func (s *Store) GetAttendanceCorrectionRequestByFormInstanceID(execCtx context.Context, tenantID, formInstanceID string) (domain.AttendanceCorrectionRequest, bool, error) {
+	v, err := s.q.GetAttendanceCorrectionRequestByFormInstanceID(tenantContext(execCtx, tenantID), sqlc.GetAttendanceCorrectionRequestByFormInstanceIDParams{TenantID: tenantID, FormInstanceID: formInstanceID})
+	if isNotFound(err) {
+		return domain.AttendanceCorrectionRequest{}, false, nil
+	}
+	if err != nil {
+		return domain.AttendanceCorrectionRequest{}, false, err
+	}
+	return fromAttendanceCorrectionRequest(v), true, nil
+}
+
+// UpsertOvertimeRequest 從儲存層處理 upsert 加班申請。
+func (s *Store) UpsertOvertimeRequest(execCtx context.Context, v domain.OvertimeRequest) error {
+	_, err := s.q.UpsertOvertimeRequest(tenantContext(execCtx, v.TenantID), sqlc.UpsertOvertimeRequestParams{
+		ID:               v.ID,
+		TenantID:         v.TenantID,
+		EmployeeID:       v.EmployeeID,
+		WorkDate:         v.WorkDate,
+		StartAt:          timestamptz(v.StartAt),
+		EndAt:            timestamptz(v.EndAt),
+		Hours:            v.Hours,
+		OvertimeType:     v.OvertimeType,
+		CompensationType: v.CompensationType,
+		Reason:           v.Reason,
+		Status:           v.Status,
+		FormInstanceID:   v.FormInstanceID,
+		CreatedAt:        timestamptz(v.CreatedAt),
+		UpdatedAt:        timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+// GetOvertimeRequest 從儲存層取得加班申請。
+func (s *Store) GetOvertimeRequest(execCtx context.Context, tenantID, id string) (domain.OvertimeRequest, bool, error) {
+	v, err := s.q.GetOvertimeRequest(tenantContext(execCtx, tenantID), sqlc.GetOvertimeRequestParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.OvertimeRequest{}, false, nil
+	}
+	if err != nil {
+		return domain.OvertimeRequest{}, false, err
+	}
+	return fromOvertimeRequest(v), true, nil
+}
+
+// GetOvertimeRequestByFormInstanceID 從儲存層取得加班申請 by 表單實例 ID。
+func (s *Store) GetOvertimeRequestByFormInstanceID(execCtx context.Context, tenantID, formInstanceID string) (domain.OvertimeRequest, bool, error) {
+	v, err := s.q.GetOvertimeRequestByFormInstanceID(tenantContext(execCtx, tenantID), sqlc.GetOvertimeRequestByFormInstanceIDParams{TenantID: tenantID, FormInstanceID: formInstanceID})
+	if isNotFound(err) {
+		return domain.OvertimeRequest{}, false, nil
+	}
+	if err != nil {
+		return domain.OvertimeRequest{}, false, err
+	}
+	return fromOvertimeRequest(v), true, nil
+}
+
+// ListOvertimeRequestsByQuery 從儲存層列出加班申請 by 查詢。
+func (s *Store) ListOvertimeRequestsByQuery(execCtx context.Context, tenantID string, query domain.OvertimeRequestQuery) ([]domain.OvertimeRequest, error) {
+	items, err := s.q.ListOvertimeRequestsByQuery(tenantContext(execCtx, tenantID), sqlc.ListOvertimeRequestsByQueryParams{
+		TenantID:    tenantID,
+		EmployeeIds: query.EmployeeIDs,
+		Status:      query.Status,
+		FromDate:    query.FromDate,
+		ToDate:      query.ToDate,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromOvertimeRequest), nil
+}
+
 // UpsertFormTemplate 從儲存層處理 upsert 表單範本。
 func (s *Store) UpsertFormTemplate(execCtx context.Context, v domain.FormTemplate) error {
 	_, err := s.q.UpsertFormTemplate(execCtx, sqlc.UpsertFormTemplateParams{
@@ -2477,6 +2549,26 @@ func fromAttendanceCorrectionRequest(v sqlc.AttendanceCorrectionRequest) domain.
 		ReviewedAt:          timePtrFrom(v.ReviewedAt),
 		CreatedAt:           timeFrom(v.CreatedAt),
 		UpdatedAt:           timeFrom(v.UpdatedAt),
+	}
+}
+
+// fromOvertimeRequest 轉換加班申請。
+func fromOvertimeRequest(v sqlc.OvertimeRequest) domain.OvertimeRequest {
+	return domain.OvertimeRequest{
+		ID:               v.ID,
+		TenantID:         v.TenantID,
+		EmployeeID:       v.EmployeeID,
+		WorkDate:         v.WorkDate,
+		StartAt:          timeFrom(v.StartAt),
+		EndAt:            timeFrom(v.EndAt),
+		Hours:            v.Hours,
+		OvertimeType:     v.OvertimeType,
+		CompensationType: v.CompensationType,
+		Reason:           v.Reason,
+		Status:           v.Status,
+		FormInstanceID:   v.FormInstanceID,
+		CreatedAt:        timeFrom(v.CreatedAt),
+		UpdatedAt:        timeFrom(v.UpdatedAt),
 	}
 }
 

@@ -897,6 +897,53 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.arg(direction)::text = '' OR direction = sqlc.arg(direction))
 ORDER BY created_at DESC, id ASC;
 
+-- name: GetAttendanceCorrectionRequestByFormInstanceID :one
+SELECT * FROM attendance_correction_requests
+WHERE tenant_id = sqlc.arg(tenant_id) AND form_instance_id = sqlc.arg(form_instance_id)
+LIMIT 1;
+
+-- name: UpsertOvertimeRequest :one
+INSERT INTO overtime_requests (
+    id, tenant_id, employee_id, work_date, start_at, end_at,
+    hours, overtime_type, compensation_type, reason, status,
+    form_instance_id, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    employee_id = EXCLUDED.employee_id,
+    work_date = EXCLUDED.work_date,
+    start_at = EXCLUDED.start_at,
+    end_at = EXCLUDED.end_at,
+    hours = EXCLUDED.hours,
+    overtime_type = EXCLUDED.overtime_type,
+    compensation_type = EXCLUDED.compensation_type,
+    reason = EXCLUDED.reason,
+    status = EXCLUDED.status,
+    form_instance_id = EXCLUDED.form_instance_id,
+    created_at = EXCLUDED.created_at,
+    updated_at = EXCLUDED.updated_at
+RETURNING *;
+
+-- name: GetOvertimeRequest :one
+SELECT * FROM overtime_requests
+WHERE tenant_id = $1 AND id = $2;
+
+-- name: GetOvertimeRequestByFormInstanceID :one
+SELECT * FROM overtime_requests
+WHERE tenant_id = sqlc.arg(tenant_id) AND form_instance_id = sqlc.arg(form_instance_id)
+LIMIT 1;
+
+-- name: ListOvertimeRequestsByQuery :many
+SELECT * FROM overtime_requests
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND (coalesce(cardinality(sqlc.arg(employee_ids)::text[]), 0) = 0 OR employee_id = ANY(sqlc.arg(employee_ids)::text[]))
+  AND (sqlc.arg(status)::text = '' OR lower(status) = lower(sqlc.arg(status)::text))
+  AND (NULLIF(sqlc.arg(from_date)::text, '') IS NULL OR end_at::date >= NULLIF(sqlc.arg(from_date)::text, '')::date)
+  AND (NULLIF(sqlc.arg(to_date)::text, '') IS NULL OR start_at::date <= NULLIF(sqlc.arg(to_date)::text, '')::date)
+ORDER BY created_at ASC;
+
 -- name: UpsertKnowledgeArticle :one
 INSERT INTO knowledge_articles (
     id, tenant_id, title, content, tags, created_at

@@ -191,6 +191,14 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	if err != nil {
 		return WorkspaceAttendanceResponse{}, err
 	}
+	overtimes, err := c.Service.Attendance().listOvertimeRequestsByQuery(ctx, OvertimeRequestQuery{
+		Status:   "approved",
+		FromDate: start.Format(time.DateOnly),
+		ToDate:   end.AddDate(0, 0, -1).Format(time.DateOnly),
+	})
+	if err != nil {
+		return WorkspaceAttendanceResponse{}, err
+	}
 	worksites, err := c.store.ListAttendanceWorksites(goContext(ctx), ctx.TenantID)
 	if err != nil {
 		return WorkspaceAttendanceResponse{}, err
@@ -201,8 +209,9 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	cards := workspaceEmployeeCards(employees, orgNames)
 	monthEmployees := workspaceEmployeesPresentInRange(employees, start, end)
 	leaveByEmployeeDate := workspaceLeaveCells(workspaceFilterLeaves(leaves, start, end), start, end)
-	clockByEmployeeDate := workspaceClockCells(clocks, worksites)
-	attendanceMatrix := workspaceAttendanceMatrix(monthEmployees, cards, dates, leaveByEmployeeDate)
+	overtimeByEmployeeDate := workspaceOvertimeCells(overtimes, start, end)
+	clockByEmployeeDate := workspaceClockCells(clocks, worksites, leaveByEmployeeDate, overtimeByEmployeeDate)
+	attendanceMatrix := workspaceAttendanceMatrix(monthEmployees, cards, dates, leaveByEmployeeDate, overtimeByEmployeeDate)
 	clockMatrix := workspaceClockMatrix(monthEmployees, cards, dates, leaveByEmployeeDate, clockByEmployeeDate)
 
 	return WorkspaceAttendanceResponse{
@@ -476,10 +485,9 @@ func workspaceFilterLeaves(items []LeaveRequest, start time.Time, end time.Time)
 	return out
 }
 
-// workspaceLeaveEffective 處理工作區請假 effective。
+// workspaceLeaveEffective 處理工作區請假 effective。只有審核通過的請假才計入工時統計。
 func workspaceLeaveEffective(item LeaveRequest) bool {
-	status := strings.ToLower(strings.TrimSpace(item.Status))
-	return status != "rejected" && status != "cancelled" && status != "canceled"
+	return strings.ToLower(strings.TrimSpace(item.Status)) == "approved"
 }
 
 // workspaceLeaveEmployeesForDate 處理工作區請假員工 for 日期。
@@ -1684,8 +1692,36 @@ func workspaceLeaveCells(leaves []LeaveRequest, start time.Time, end time.Time) 
 	return out
 }
 
+// workspaceOvertimeCells 處理工作區加班儲存格。僅累計核准加班的每日時數。
+func workspaceOvertimeCells(overtimes []OvertimeRequest, start time.Time, end time.Time) map[string]map[string]float64 {
+	out := map[string]map[string]float64{}
+	for _, overtime := range overtimes {
+		if overtime.EmployeeID == "" || overtime.Hours <= 0 {
+			continue
+		}
+		if !strings.EqualFold(strings.TrimSpace(overtime.Status), "approved") {
+			continue
+		}
+		day := workspaceDateOnly(overtime.StartAt)
+		if day.Before(start) || !day.Before(end) {
+			continue
+		}
+		key := day.Format(time.DateOnly)
+		if overtime.WorkDate != "" {
+			if parsed, err := time.Parse(time.DateOnly, overtime.WorkDate); err == nil && !parsed.Before(start) && parsed.Before(end) {
+				key = overtime.WorkDate
+			}
+		}
+		if out[overtime.EmployeeID] == nil {
+			out[overtime.EmployeeID] = map[string]float64{}
+		}
+		out[overtime.EmployeeID][key] += overtime.Hours
+	}
+	return out
+}
+
 // workspaceClockCells 處理工作區打卡儲存格。
-func workspaceClockCells(clocks []AttendanceClockRecord, worksites []AttendanceWorksite) map[string]map[string]workspaceClockCell {
+func workspaceClockCells(clocks []AttendanceClockRecord, worksites []AttendanceWorksite, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64) map[string]map[string]workspaceClockCell {
 	worksiteNames := map[string]string{}
 	for _, worksite := range worksites {
 		worksiteNames[worksite.ID] = worksite.Name
@@ -1746,8 +1782,10 @@ func workspaceClockCells(clocks []AttendanceClockRecord, worksites []AttendanceW
 				cell.Abnormal = true
 				cell.Reason = "缺下班卡"
 			case p.in != nil && p.out != nil && p.out.ClockedAt.Sub(p.in.ClockedAt).Hours() < workspaceDayHours:
-				cell.Abnormal = true
-				cell.Reason = "工時未滿 8 小時"
+				if !workspaceShortHoursExempted(employeeID, date, p.out.ClockedAt.Sub(p.in.ClockedAt).Hours(), leaveCells, overtimeCells) {
+					cell.Abnormal = true
+					cell.Reason = "工時未滿 8 小時"
+				}
 			}
 			out[employeeID][date] = cell
 		}
@@ -1755,10 +1793,31 @@ func workspaceClockCells(clocks []AttendanceClockRecord, worksites []AttendanceW
 	return out
 }
 
+// workspaceShortHoursExempted 判斷工時不足是否可由核准的請假或加班豁免。
+func workspaceShortHoursExempted(employeeID string, date string, workedHours float64, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64) bool {
+	leaveHours := 0.0
+	if cell, ok := leaveCells[employeeID][date]; ok {
+		leaveHours = cell.Hours
+	}
+	if workedHours+leaveHours >= workspaceDayHours {
+		return true
+	}
+	// 週末或假日的打卡若對應核准加班，不視為工時異常。
+	if overtimeCells[employeeID][date] > 0 {
+		if day, err := time.Parse(time.DateOnly, date); err == nil {
+			if dow := day.Weekday(); dow == time.Saturday || dow == time.Sunday {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // workspaceAttendanceMatrix 處理工作區考勤矩陣。
-func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceEmployeeCard, dates []WorkspaceDate, leaveCells map[string]map[string]workspaceLeaveCell) WorkspaceAttendanceMatrix {
+func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceEmployeeCard, dates []WorkspaceDate, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64) WorkspaceAttendanceMatrix {
 	rows := []WorkspaceAttendanceRow{}
 	totalLeaveHours := 0.0
+	totalOvertimeHours := 0.0
 	perfect := 0
 	workdays := workspaceWorkdayCount(dates)
 	holidays := workspaceHolidayCount(dates)
@@ -1774,17 +1833,22 @@ func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceE
 				row.Summary.LeaveHours += leave.Hours
 				row.Summary.LeaveByType[leave.Code] += leave.Hours
 			}
+			if overtime := overtimeCells[employee.ID][date.Key]; overtime > 0 {
+				cell.Overtime = overtime
+				row.Summary.OvertimeHours += overtime
+			}
 			row.Cells = append(row.Cells, cell)
 		}
 		row.Summary.DueHours = float64(workdays) * workspaceDayHours
-		row.Summary.AttendedHours = math.Max(0, row.Summary.DueHours-row.Summary.LeaveHours-row.Summary.DeductHours)
+		row.Summary.AttendedHours = math.Max(0, row.Summary.DueHours-row.Summary.LeaveHours-row.Summary.DeductHours) + row.Summary.OvertimeHours
 		if row.Summary.LeaveHours == 0 {
 			perfect++
 		}
 		totalLeaveHours += row.Summary.LeaveHours
+		totalOvertimeHours += row.Summary.OvertimeHours
 		rows = append(rows, row)
 	}
-	return WorkspaceAttendanceMatrix{Rows: rows, Summary: WorkspaceAttendanceMatrixSum{Holidays: holidays, LeaveHours: totalLeaveHours, Perfect: perfect, Workdays: workdays}}
+	return WorkspaceAttendanceMatrix{Rows: rows, Summary: WorkspaceAttendanceMatrixSum{Holidays: holidays, LeaveHours: totalLeaveHours, OvertimeHours: totalOvertimeHours, Perfect: perfect, Workdays: workdays}}
 }
 
 // workspaceClockMatrix 處理工作區打卡矩陣。

@@ -82,6 +82,66 @@ func TestWorkspaceAttendanceBuildsLeaveAndClockMatrices(t *testing.T) {
 	}
 }
 
+// TestWorkspaceAttendanceCountsOnlyApprovedLeaveAndOvertime 驗證工時統計只計已核准的請假與加班。
+func TestWorkspaceAttendanceCountsOnlyApprovedLeaveAndOvertime(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+	// pending 請假不應計入工時扣減。
+	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lv-pending", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", StartAt: time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 10, 23, 0, 0, 0, time.UTC), Hours: 8, Status: "pending_approval", CreatedAt: now})
+	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lv-approved", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", StartAt: time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 11, 23, 0, 0, 0, time.UTC), Hours: 8, Status: "approved", CreatedAt: now})
+	// 只有 approved 加班會累計時數。
+	_ = store.UpsertOvertimeRequest(context.Background(), domain.OvertimeRequest{ID: "ot-approved", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-12", StartAt: time.Date(2026, 6, 12, 18, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 12, 21, 0, 0, 0, time.UTC), Hours: 3, OvertimeType: "weekday", CompensationType: "leave", Status: "approved", CreatedAt: now, UpdatedAt: now})
+	_ = store.UpsertOvertimeRequest(context.Background(), domain.OvertimeRequest{ID: "ot-pending", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-13", StartAt: time.Date(2026, 6, 13, 18, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 13, 20, 0, 0, 0, time.UTC), Hours: 2, OvertimeType: "weekday", CompensationType: "leave", Status: "pending_approval", CreatedAt: now, UpdatedAt: now})
+
+	got, err := svc.Workspace().WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := got.Attendance.Rows[0]
+	if cell := row.Cells[9]; cell.Type == "leave" {
+		t.Fatalf("pending leave should not create a leave cell, got %+v", cell)
+	}
+	if cell := row.Cells[10]; cell.Type != "leave" || cell.Hours != 8 {
+		t.Fatalf("approved leave should create a leave cell, got %+v", cell)
+	}
+	if cell := row.Cells[11]; cell.Overtime != 3 {
+		t.Fatalf("approved overtime should mark the day cell, got %+v", cell)
+	}
+	if cell := row.Cells[12]; cell.Overtime != 0 {
+		t.Fatalf("pending overtime should not mark the day cell, got %+v", cell)
+	}
+	if row.Summary.LeaveHours != 8 || row.Summary.OvertimeHours != 3 {
+		t.Fatalf("unexpected summary hours: %+v", row.Summary)
+	}
+	expectedAttended := row.Summary.DueHours - 8 + 3
+	if row.Summary.AttendedHours != expectedAttended {
+		t.Fatalf("expected attended hours %v, got %v", expectedAttended, row.Summary.AttendedHours)
+	}
+	if got.Attendance.Summary.OvertimeHours != 3 {
+		t.Fatalf("unexpected matrix overtime summary: %+v", got.Attendance.Summary)
+	}
+}
+
+// TestWorkspaceClockShortHoursExemptedByApprovedLeave 驗證核准請假可豁免工時不足異常。
+func TestWorkspaceClockShortHoursExemptedByApprovedLeave(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+	// 半天請假 + 半天出勤：工時 4 小時但有 4 小時核准請假，不應標記異常。
+	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lv-half", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", StartAt: time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC), Hours: 4, Status: "approved", CreatedAt: now})
+	_ = store.UpsertAttendanceClockRecord(context.Background(), domain.AttendanceClockRecord{ID: "clk-in", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_in", ClockedAt: time.Date(2026, 6, 10, 13, 0, 0, 0, time.UTC), RecordStatus: "accepted", Source: "geofence", CreatedAt: now})
+	_ = store.UpsertAttendanceClockRecord(context.Background(), domain.AttendanceClockRecord{ID: "clk-out", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_out", ClockedAt: time.Date(2026, 6, 10, 18, 0, 0, 0, time.UTC), RecordStatus: "accepted", Source: "geofence", CreatedAt: now})
+
+	got, err := svc.Workspace().WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Clock.Abnormals) != 0 {
+		t.Fatalf("expected short hours covered by approved leave, got abnormals %+v", got.Clock.Abnormals)
+	}
+}
+
 // TestPlatformWorkspaceEmployeesFiltersAndNormalizesStatus 驗證平台工作區員工篩選 and normalizes 狀態。
 func TestPlatformWorkspaceEmployeesFiltersAndNormalizesStatus(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)

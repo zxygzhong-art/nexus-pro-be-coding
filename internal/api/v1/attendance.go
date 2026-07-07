@@ -22,6 +22,8 @@ func (c AttendanceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	attendance.GET("/leave-balances", c.routes.Handle("attendance.leave", "read", c.listLeaveBalances))
 	attendance.GET("/leave-requests", c.routes.Handle("attendance.leave", "read", c.listLeaveRequests))
 	attendance.POST("/leave-requests", c.routes.Handle("attendance.leave", "create", c.createLeaveRequest))
+	attendance.GET("/overtime-requests", c.routes.Handle("attendance.leave", "read", c.listOvertimeRequests))
+	attendance.POST("/overtime-requests", c.routes.Handle("attendance.leave", "create", c.createOvertimeRequest))
 	attendance.GET("/policies/current", c.routes.Handle("attendance.leave", "read", c.currentPolicy))
 	attendance.PATCH("/policies/current", c.routes.Handle("attendance.leave", "update", c.updatePolicy))
 	attendance.GET("/worksites", c.routes.Handle("attendance.worksite", "read", c.listWorksites))
@@ -76,6 +78,34 @@ func (c AttendanceCtrl) createLeaveRequest(w http.ResponseWriter, r *http.Reques
 		return err
 	}
 	item, err := c.svc.CreateLeaveRequest(ctx, input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, item)
+	return nil
+}
+
+// listOvertimeRequests 處理加班申請的 HTTP 請求。
+func (c AttendanceCtrl) listOvertimeRequests(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	page, err := pageRequestFromRequest(r)
+	if err != nil {
+		return err
+	}
+	items, err := c.svc.ListOvertimeRequestPage(ctx, page)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, items)
+	return nil
+}
+
+// createOvertimeRequest 處理加班申請的 HTTP 請求。
+func (c AttendanceCtrl) createOvertimeRequest(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.CreateOvertimeRequestInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.CreateOvertimeRequest(ctx, input)
 	if err != nil {
 		return err
 	}

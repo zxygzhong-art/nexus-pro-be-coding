@@ -1,0 +1,6 @@
+ARG OTEL_COLLECTOR_IMAGE
+FROM ${OTEL_COLLECTOR_IMAGE}
+
+EXPOSE 4317 4318 8889
+
+CMD ["--config=/etc/otelcol/config.yaml"]

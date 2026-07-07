@@ -873,7 +873,7 @@ func (c PlatformService) clockSummary(ctx RequestContext) (PlatformClockSummary,
 	if status.Worksite != nil && strings.TrimSpace(status.Worksite.Name) != "" {
 		location = status.Worksite.Name
 	}
-	monthlyDays, monthlyHours, leaveDays := c.monthlyClockAndLeaveSummary(ctx, status.EmployeeID, now)
+	monthlyDays, monthlyHours, leaveDays, overtimeHours := c.monthlyClockAndLeaveSummary(ctx, status.EmployeeID, now)
 	return PlatformClockSummary{
 		DateLabel:             platformDateLabel(now),
 		CheckedInAt:           checkedInAt,
@@ -881,12 +881,13 @@ func (c PlatformService) clockSummary(ctx RequestContext) (PlatformClockSummary,
 		Location:              location,
 		MonthlyAttendanceDays: monthlyDays,
 		MonthlyHours:          monthlyHours,
+		MonthlyOvertimeHours:  overtimeHours,
 		LeaveDays:             leaveDays,
 	}, nil
 }
 
-// monthlyClockAndLeaveSummary 處理每月打卡 and 請假摘要的服務流程。
-func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employeeID string, now time.Time) (int, float64, float64) {
+// monthlyClockAndLeaveSummary 處理每月打卡 and 請假摘要的服務流程。請假與加班只計已核准的申請。
+func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employeeID string, now time.Time) (int, float64, float64, float64) {
 	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 	end := start.AddDate(0, 1, 0)
 	records, err := c.store.ListAttendanceClockRecords(goContext(ctx), ctx.TenantID, AttendanceClockRecordQuery{
@@ -895,7 +896,7 @@ func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employe
 		ToDate:     end.AddDate(0, 0, -1).Format(time.DateOnly),
 	})
 	if err != nil {
-		return 0, 0, 0
+		return 0, 0, 0, 0
 	}
 	days := map[string]struct{}{}
 	for _, record := range records {
@@ -909,6 +910,7 @@ func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employe
 	leaveHours := 0.0
 	leaves, err := c.store.ListLeaveRequestsByQuery(goContext(ctx), ctx.TenantID, LeaveRequestQuery{
 		EmployeeIDs: []string{employeeID},
+		Status:      "approved",
 		FromDate:    start.Format(time.DateOnly),
 		ToDate:      end.AddDate(0, 0, -1).Format(time.DateOnly),
 	})
@@ -920,7 +922,22 @@ func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employe
 			leaveHours += leave.Hours
 		}
 	}
-	return len(days), float64(len(days)) * workspaceDayHours, leaveHours / workspaceDayHours
+	overtimeHours := 0.0
+	overtimes, err := c.store.ListOvertimeRequestsByQuery(goContext(ctx), ctx.TenantID, OvertimeRequestQuery{
+		EmployeeIDs: []string{employeeID},
+		Status:      "approved",
+		FromDate:    start.Format(time.DateOnly),
+		ToDate:      end.AddDate(0, 0, -1).Format(time.DateOnly),
+	})
+	if err == nil {
+		for _, overtime := range overtimes {
+			if overtime.EmployeeID != employeeID || overtime.EndAt.Before(start) || !overtime.StartAt.Before(end) {
+				continue
+			}
+			overtimeHours += overtime.Hours
+		}
+	}
+	return len(days), float64(len(days))*workspaceDayHours + overtimeHours, leaveHours / workspaceDayHours, overtimeHours
 }
 
 // formInstances 處理表單實例的服務流程。

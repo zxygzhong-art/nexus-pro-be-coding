@@ -418,6 +418,7 @@ CREATE INDEX authz_permission_set_assignments_principal_idx ON authz_permission_
 );
 CREATE INDEX authz_permission_set_assignments_set_idx ON authz_permission_set_assignments (tenant_id, permission_set_id);
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION validate_authz_assignment_references()
 RETURNS trigger AS $$
 BEGIN
@@ -436,6 +437,7 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 CREATE TRIGGER authz_permission_set_assignments_reference_check
 BEFORE INSERT OR UPDATE ON authz_permission_set_assignments
@@ -494,6 +496,25 @@ CREATE TABLE authz_outbox_events (
 
 CREATE INDEX authz_outbox_events_tenant_status_idx ON authz_outbox_events (tenant_id, status, created_at);
 
+CREATE TABLE identity_provisioning_outbox (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    account_id text NOT NULL,
+    employee_id text NOT NULL DEFAULT '',
+    employee_no text NOT NULL DEFAULT '',
+    email text NOT NULL,
+    display_name text NOT NULL DEFAULT '',
+    enabled boolean NOT NULL DEFAULT true,
+    send_invite boolean NOT NULL DEFAULT false,
+    status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'succeeded', 'failed')),
+    retry_count integer NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
+    last_error text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
+);
+
+CREATE INDEX identity_provisioning_outbox_tenant_status_idx ON identity_provisioning_outbox (tenant_id, status, created_at);
+
 CREATE TABLE org_units (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -536,6 +557,7 @@ CREATE TABLE employees (
     CONSTRAINT employees_manager_employee_fk FOREIGN KEY (tenant_id, manager_employee_id) REFERENCES employees (tenant_id, id)
 );
 
+-- +goose StatementBegin
 CREATE OR REPLACE FUNCTION validate_employee_references()
 RETURNS trigger AS $$
 BEGIN
@@ -554,6 +576,7 @@ BEGIN
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
+-- +goose StatementEnd
 
 CREATE TRIGGER employees_reference_check
 BEFORE INSERT OR UPDATE OF tenant_id, account_id, org_unit_id ON employees
@@ -662,7 +685,9 @@ CREATE TABLE form_instances (
     payload jsonb NOT NULL DEFAULT '{}'::jsonb,
     submitted_at timestamptz NOT NULL,
     approved_by text NOT NULL DEFAULT '',
+    current_run_id text NOT NULL DEFAULT '',
     updated_at timestamptz NOT NULL,
+    CONSTRAINT form_instances_tenant_id_id_idx UNIQUE (tenant_id, id),
     CONSTRAINT form_instances_template_fk FOREIGN KEY (tenant_id, template_id) REFERENCES form_templates (tenant_id, id),
     CONSTRAINT form_instances_applicant_account_fk FOREIGN KEY (tenant_id, applicant_account_id) REFERENCES accounts (tenant_id, id)
 );
@@ -670,6 +695,68 @@ CREATE TABLE form_instances (
 CREATE INDEX form_instances_tenant_id_idx ON form_instances (tenant_id);
 CREATE INDEX form_instances_template_id_idx ON form_instances (template_id);
 CREATE INDEX form_instances_tenant_applicant_status_idx ON form_instances (tenant_id, applicant_account_id, status, submitted_at DESC);
+
+CREATE TABLE workflow_runs (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    form_instance_id text NOT NULL,
+    template_id text NOT NULL,
+    version integer NOT NULL,
+    status text NOT NULL,
+    current_stage_instance_id text NOT NULL DEFAULT '',
+    stage_definitions_json text NOT NULL DEFAULT '[]',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT workflow_runs_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT workflow_runs_form_fk FOREIGN KEY (tenant_id, form_instance_id) REFERENCES form_instances (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT workflow_runs_template_fk FOREIGN KEY (tenant_id, template_id) REFERENCES form_templates (tenant_id, id)
+);
+
+CREATE INDEX workflow_runs_tenant_form_version_idx ON workflow_runs (tenant_id, form_instance_id, version);
+
+CREATE TABLE workflow_stage_instances (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL,
+    run_id text NOT NULL,
+    stage_id text NOT NULL,
+    stage_type text NOT NULL,
+    label text NOT NULL,
+    status text NOT NULL,
+    sequence integer NOT NULL,
+    result jsonb NOT NULL DEFAULT '{}'::jsonb,
+    started_at timestamptz,
+    completed_at timestamptz,
+    CONSTRAINT workflow_stage_instances_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT workflow_stage_instances_run_fk FOREIGN KEY (tenant_id, run_id) REFERENCES workflow_runs (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX workflow_stage_instances_run_sequence_idx ON workflow_stage_instances (tenant_id, run_id, sequence);
+
+CREATE TABLE workflow_stage_assignees (
+    tenant_id text NOT NULL,
+    stage_instance_id text NOT NULL,
+    account_id text NOT NULL,
+    status text NOT NULL,
+    PRIMARY KEY (tenant_id, stage_instance_id, account_id),
+    CONSTRAINT workflow_stage_assignees_stage_fk FOREIGN KEY (tenant_id, stage_instance_id) REFERENCES workflow_stage_instances (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT workflow_stage_assignees_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id)
+);
+
+CREATE INDEX workflow_stage_assignees_pending_idx ON workflow_stage_assignees (tenant_id, account_id, status);
+
+CREATE TABLE workflow_actions (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL,
+    run_id text NOT NULL,
+    stage_instance_id text NOT NULL,
+    account_id text NOT NULL,
+    action text NOT NULL,
+    comment text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    CONSTRAINT workflow_actions_run_fk FOREIGN KEY (tenant_id, run_id) REFERENCES workflow_runs (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX workflow_actions_run_created_idx ON workflow_actions (tenant_id, run_id, created_at);
 
 CREATE TABLE leave_requests (
     id text PRIMARY KEY,
@@ -799,6 +886,29 @@ CREATE TABLE attendance_correction_requests (
 CREATE INDEX attendance_correction_requests_tenant_employee_date_idx ON attendance_correction_requests (tenant_id, employee_id, work_date DESC);
 CREATE INDEX attendance_correction_requests_tenant_status_idx ON attendance_correction_requests (tenant_id, status, created_at DESC);
 
+CREATE TABLE overtime_requests (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    employee_id text NOT NULL,
+    work_date text NOT NULL,
+    start_at timestamptz NOT NULL,
+    end_at timestamptz NOT NULL,
+    hours double precision NOT NULL CHECK (hours > 0),
+    overtime_type text NOT NULL DEFAULT 'weekday',
+    compensation_type text NOT NULL DEFAULT 'leave',
+    reason text NOT NULL DEFAULT '',
+    status text NOT NULL,
+    form_instance_id text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT overtime_requests_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id)
+);
+
+CREATE INDEX overtime_requests_tenant_id_idx ON overtime_requests (tenant_id);
+CREATE INDEX overtime_requests_tenant_employee_date_idx ON overtime_requests (tenant_id, employee_id, work_date DESC);
+CREATE INDEX overtime_requests_tenant_form_instance_idx ON overtime_requests (tenant_id, form_instance_id);
+CREATE INDEX overtime_requests_tenant_status_dates_idx ON overtime_requests (tenant_id, status, start_at, end_at);
+
 CREATE TABLE knowledge_articles (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -862,6 +972,41 @@ CREATE INDEX agent_runs_tenant_id_idx ON agent_runs (tenant_id);
 CREATE INDEX agent_runs_account_id_idx ON agent_runs (account_id);
 CREATE INDEX agent_runs_tenant_account_created_at_idx ON agent_runs (tenant_id, account_id, created_at DESC);
 
+CREATE TABLE notifications (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    tone text NOT NULL CHECK (tone IN ('success', 'info', 'warning')),
+    category text NOT NULL DEFAULT 'system',
+    title text NOT NULL,
+    body text NOT NULL,
+    status_text text NOT NULL,
+    link_url text NOT NULL DEFAULT '',
+    source_type text NOT NULL DEFAULT '',
+    source_id text NOT NULL DEFAULT '',
+    created_by_account_id text,
+    created_at timestamptz NOT NULL,
+    expires_at timestamptz,
+    CONSTRAINT notifications_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT notifications_created_by_fk FOREIGN KEY (tenant_id, created_by_account_id) REFERENCES accounts (tenant_id, id)
+);
+
+CREATE INDEX notifications_tenant_created_at_idx ON notifications (tenant_id, created_at DESC, id DESC);
+CREATE UNIQUE INDEX notifications_source_unique_idx ON notifications (tenant_id, source_type, source_id) WHERE source_type <> '' AND source_id <> '';
+
+CREATE TABLE notification_recipients (
+    notification_id text NOT NULL,
+    tenant_id text NOT NULL,
+    account_id text NOT NULL,
+    read_at timestamptz,
+    deleted_at timestamptz,
+    created_at timestamptz NOT NULL,
+    PRIMARY KEY (notification_id, account_id),
+    CONSTRAINT notification_recipients_notification_fk FOREIGN KEY (tenant_id, notification_id) REFERENCES notifications (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT notification_recipients_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX notification_recipients_account_idx ON notification_recipients (tenant_id, account_id, read_at, created_at DESC);
+
 CREATE TABLE outbox_events (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -894,6 +1039,9 @@ CREATE TABLE audit_logs (
 
 CREATE INDEX audit_logs_tenant_id_created_at_idx ON audit_logs (tenant_id, created_at DESC);
 CREATE INDEX audit_logs_actor_account_id_idx ON audit_logs (actor_account_id);
+
+ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenants FORCE ROW LEVEL SECURITY;
 
 ALTER TABLE companies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE companies FORCE ROW LEVEL SECURITY;
@@ -960,6 +1108,8 @@ ALTER TABLE authz_permission_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE authz_permission_versions FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_outbox_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE authz_outbox_events FORCE ROW LEVEL SECURITY;
+ALTER TABLE identity_provisioning_outbox ENABLE ROW LEVEL SECURITY;
+ALTER TABLE identity_provisioning_outbox FORCE ROW LEVEL SECURITY;
 ALTER TABLE org_units ENABLE ROW LEVEL SECURITY;
 ALTER TABLE org_units FORCE ROW LEVEL SECURITY;
 ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
@@ -976,6 +1126,14 @@ ALTER TABLE form_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE form_templates FORCE ROW LEVEL SECURITY;
 ALTER TABLE form_instances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE form_instances FORCE ROW LEVEL SECURITY;
+ALTER TABLE workflow_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_runs FORCE ROW LEVEL SECURITY;
+ALTER TABLE workflow_stage_instances ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_stage_instances FORCE ROW LEVEL SECURITY;
+ALTER TABLE workflow_stage_assignees ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_stage_assignees FORCE ROW LEVEL SECURITY;
+ALTER TABLE workflow_actions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE workflow_actions FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_requests FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_worksites ENABLE ROW LEVEL SECURITY;
@@ -988,6 +1146,8 @@ ALTER TABLE attendance_clock_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_clock_records FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_correction_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_correction_requests FORCE ROW LEVEL SECURITY;
+ALTER TABLE overtime_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE overtime_requests FORCE ROW LEVEL SECURITY;
 ALTER TABLE knowledge_articles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE knowledge_articles FORCE ROW LEVEL SECURITY;
 ALTER TABLE platform_task_items ENABLE ROW LEVEL SECURITY;
@@ -996,10 +1156,25 @@ ALTER TABLE platform_task_todos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform_task_todos FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs FORCE ROW LEVEL SECURITY;
+ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications FORCE ROW LEVEL SECURITY;
+ALTER TABLE notification_recipients ENABLE ROW LEVEL SECURITY;
+ALTER TABLE notification_recipients FORCE ROW LEVEL SECURITY;
 ALTER TABLE outbox_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE outbox_events FORCE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs FORCE ROW LEVEL SECURITY;
+
+-- tenants table 沒有 tenant_id 欄位；每一列以自身 id 隔離。
+CREATE POLICY tenant_isolation_tenants ON tenants USING (id = current_setting('app.tenant_id', true)) WITH CHECK (id = current_setting('app.tenant_id', true));
+
+-- 跨 tenant 背景工作（例如 OpenFGA outbox processor）需要列舉所有 tenant，
+-- 但 tenant_isolation_tenants 只會暴露符合 app.tenant_id 的列。這個唯讀 policy
+-- 允許透過 set_config('app.system_task', 'on', true) opt in 的連線在沒有 BYPASSRLS
+-- 的情況下列出所有 tenant。應用程式會透過 tenantctx.WithSystemTask 注入此設定
+-- （見 internal/repository/postgres/tenant_dbtx.go）；行為由 tenantctx 單元測試與
+-- tests/integration/postgres 內的 non-BYPASSRLS ListTenants 整合測試覆蓋。
+CREATE POLICY system_read_tenants ON tenants FOR SELECT USING (current_setting('app.system_task', true) = 'on');
 
 CREATE POLICY company_isolation_companies ON companies USING (id::text = current_setting('app.company_id', true)) WITH CHECK (id::text = current_setting('app.company_id', true));
 CREATE POLICY company_isolation_users ON users USING (company_id::text = current_setting('app.company_id', true)) WITH CHECK (company_id::text = current_setting('app.company_id', true));
@@ -1034,6 +1209,7 @@ CREATE POLICY tenant_isolation_authz_assumable_role_sessions ON authz_assumable_
 CREATE POLICY tenant_isolation_authz_relationship_tuples ON authz_relationship_tuples USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_authz_permission_versions ON authz_permission_versions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_authz_outbox_events ON authz_outbox_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_identity_provisioning_outbox ON identity_provisioning_outbox USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_org_units ON org_units USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_employees ON employees USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_employee_number_sequences ON employee_number_sequences USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -1042,44 +1218,61 @@ CREATE POLICY tenant_isolation_attendance_policies ON attendance_policies USING 
 CREATE POLICY tenant_isolation_leave_balances ON leave_balances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_form_templates ON form_templates USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_form_instances ON form_instances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_workflow_runs ON workflow_runs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_workflow_stage_instances ON workflow_stage_instances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_workflow_stage_assignees ON workflow_stage_assignees USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_workflow_actions ON workflow_actions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_requests ON leave_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_worksites ON attendance_worksites USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_shifts ON attendance_shifts USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_shift_assignments ON attendance_shift_assignments USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_clock_records ON attendance_clock_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_correction_requests ON attendance_correction_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_overtime_requests ON overtime_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_knowledge_articles ON knowledge_articles USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_platform_task_items ON platform_task_items USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_platform_task_todos ON platform_task_todos USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_runs ON agent_runs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_notifications ON notifications USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_notification_recipients ON notification_recipients USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_outbox_events ON outbox_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_audit_logs ON audit_logs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
 -- +goose Down
 
 DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS outbox_events;
+DROP TABLE IF EXISTS notification_recipients;
+DROP TABLE IF EXISTS notifications;
 DROP TABLE IF EXISTS agent_runs;
 DROP TABLE IF EXISTS platform_task_todos;
 DROP TABLE IF EXISTS platform_task_items;
 DROP TABLE IF EXISTS knowledge_articles;
+DROP TABLE IF EXISTS overtime_requests;
 DROP TABLE IF EXISTS attendance_correction_requests;
 DROP TABLE IF EXISTS attendance_clock_records;
 DROP TABLE IF EXISTS attendance_shift_assignments;
 DROP TABLE IF EXISTS attendance_shifts;
 DROP TABLE IF EXISTS attendance_worksites;
 DROP TABLE IF EXISTS leave_requests;
+DROP TABLE IF EXISTS workflow_actions;
+DROP TABLE IF EXISTS workflow_stage_assignees;
+DROP TABLE IF EXISTS workflow_stage_instances;
+DROP TABLE IF EXISTS workflow_runs;
 DROP TABLE IF EXISTS form_instances;
 DROP TABLE IF EXISTS form_templates;
 DROP TABLE IF EXISTS leave_balances;
 DROP TABLE IF EXISTS attendance_policies;
-DROP TABLE IF EXISTS outbox_events;
 DROP TABLE IF EXISTS employee_import_sessions;
 DROP TABLE IF EXISTS employee_number_sequences;
 DROP TABLE IF EXISTS employees;
 DROP TABLE IF EXISTS org_units;
+DROP TABLE IF EXISTS identity_provisioning_outbox;
+DROP TABLE IF EXISTS authz_outbox_events;
+DROP TABLE IF EXISTS authz_permission_versions;
 DROP TABLE IF EXISTS authz_relationship_tuples;
 DROP TABLE IF EXISTS authz_assumable_role_sessions;
 DROP TABLE IF EXISTS authz_permission_set_assignments;
-DROP TABLE IF EXISTS authz_outbox_events;
 DROP TABLE IF EXISTS authz_field_policies;
 DROP TABLE IF EXISTS authz_policy_conditions;
 DROP TABLE IF EXISTS authz_data_scopes;
@@ -1088,7 +1281,6 @@ DROP TABLE IF EXISTS authz_permission_set_permissions;
 DROP TABLE IF EXISTS authz_permissions;
 DROP TABLE IF EXISTS authz_applications;
 DROP TABLE IF EXISTS user_identities;
-DROP TABLE IF EXISTS authz_permission_versions;
 DROP TABLE IF EXISTS assumable_roles;
 DROP TABLE IF EXISTS permission_sets;
 DROP TABLE IF EXISTS user_groups;
