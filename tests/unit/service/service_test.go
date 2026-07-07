@@ -883,6 +883,65 @@ func TestDepartmentSubtreeScopeDerivesOrgUnitIDs(t *testing.T) {
 	}
 }
 
+// TestOpenFGAScopeCheckCanFilterDepartmentSubtree 驗證 FGA scope check 可覆蓋 SQL 子樹派生。
+func TestOpenFGAScopeCheckCanFilterDepartmentSubtree(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-root", TenantID: "tenant-1", Name: "Root", Path: []string{"ou-root"}, CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-child", TenantID: "tenant-1", Name: "Child", ParentID: "ou-root", Path: []string{"ou-root", "ou-child"}, CreatedAt: now.Add(time.Minute)})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-other", TenantID: "tenant-1", Name: "Other", Path: []string{"ou-other"}, CreatedAt: now.Add(2 * time.Minute)})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-read",
+		TenantID: "tenant-1",
+		Name:     "Scoped Employee Read",
+		Permissions: []domain.Permission{
+			{Resource: "hr.employee", Action: "read", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertDataScope(context.Background(), domain.DataScope{ID: "ds-dept", TenantID: "tenant-1", Code: "department_subtree", Name: "Department", ScopeType: "department_subtree", CreatedAt: now})
+	_ = store.UpsertPermissionSetAssignment(context.Background(), domain.PermissionSetAssignment{
+		ID:              "assign-1",
+		TenantID:        "tenant-1",
+		PrincipalType:   "account",
+		PrincipalID:     "acct-1",
+		PermissionSetID: "ps-read",
+		Effect:          "allow",
+		DataScopeID:     "ds-dept",
+		CreatedAt:       now,
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", EmployeeID: "emp-1", Status: "active", CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Root Employee", OrgUnitID: "ou-root", Status: "active", CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-2", TenantID: "tenant-1", Name: "Child Employee", OrgUnitID: "ou-child", Status: "active", CreatedAt: now.Add(time.Minute)})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-3", TenantID: "tenant-1", Name: "Other Employee", OrgUnitID: "ou-other", Status: "active", CreatedAt: now.Add(2 * time.Minute)})
+
+	disabledChecker := &mappedRelationshipChecker{allowed: map[string]bool{
+		relationshipCheckKey("account:acct-1", "member_recursive", "org_unit:ou-child"): true,
+	}}
+	disabledItems, err := service.New(store, service.Options{Relationships: disabledChecker}).HR().ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(disabledItems) != 2 || len(disabledChecker.checks) != 0 {
+		t.Fatalf("expected default SQL scope to ignore FGA checker, items=%+v checks=%+v", disabledItems, disabledChecker.checks)
+	}
+
+	enabledChecker := &mappedRelationshipChecker{allowed: map[string]bool{
+		relationshipCheckKey("account:acct-1", "member_recursive", "org_unit:ou-child"): true,
+	}}
+	enabledItems, err := service.New(store, service.Options{Relationships: enabledChecker, OpenFGAScopeChecks: true}).HR().ListEmployees(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(enabledItems) != 1 || enabledItems[0].ID != "emp-2" {
+		t.Fatalf("expected FGA scope check to allow only child employee, got %+v", enabledItems)
+	}
+	if !relationshipCheckSeen(enabledChecker.checks, "member_recursive", "org_unit:ou-child") {
+		t.Fatalf("expected subtree closure check, got %+v", enabledChecker.checks)
+	}
+}
+
 // TestAssignedOrgUnitsScopeFiltersExactDepartments 驗證 assigned 組織單位範圍篩選 exact departments。
 func TestAssignedOrgUnitsScopeFiltersExactDepartments(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
@@ -2953,6 +3012,7 @@ func TestEmployeeAccountChangesEmitOpenFGATupleOutbox(t *testing.T) {
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-old", TenantID: "tenant-1", Status: "active", CreatedAt: now})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-new", TenantID: "tenant-1", Status: "active", CreatedAt: now})
 	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "HQ", Path: []string{"ou-1"}, CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-2", TenantID: "tenant-1", Name: "Branch", Path: []string{"ou-2"}, CreatedAt: now})
 	svc := service.New(store)
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-hr"}
 
@@ -2966,8 +3026,15 @@ func TestEmployeeAccountChangesEmitOpenFGATupleOutbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tuples) != 1 || tuples[0].Relation != "owner" || tuples[0].SubjectID != "acct-old" {
-		t.Fatalf("expected owner tuple for old account, got %+v", tuples)
+	if !relationshipTupleExists(tuples, "owner", "account", "acct-old") || !relationshipTupleExists(tuples, "org", "org_unit", "ou-1") {
+		t.Fatalf("expected owner and org tuple for created employee, got %+v", tuples)
+	}
+	orgTuples, err := store.ListAuthzRelationshipTuplesForObject(context.Background(), "tenant-1", "org_unit", "ou-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !relationshipTupleExists(orgTuples, "member", "account", "acct-old") {
+		t.Fatalf("expected old account to be org unit member, got %+v", orgTuples)
 	}
 
 	newAccountID := "acct-new"
@@ -2978,8 +3045,38 @@ func TestEmployeeAccountChangesEmitOpenFGATupleOutbox(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tuples) != 1 || tuples[0].Relation != "owner" || tuples[0].SubjectID != "acct-new" {
+	if !relationshipTupleExists(tuples, "owner", "account", "acct-new") || relationshipTupleExists(tuples, "owner", "account", "acct-old") || !relationshipTupleExists(tuples, "org", "org_unit", "ou-1") {
 		t.Fatalf("expected owner tuple to move to new account, got %+v", tuples)
+	}
+	orgTuples, err = store.ListAuthzRelationshipTuplesForObject(context.Background(), "tenant-1", "org_unit", "ou-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !relationshipTupleExists(orgTuples, "member", "account", "acct-new") || relationshipTupleExists(orgTuples, "member", "account", "acct-old") {
+		t.Fatalf("expected org unit member tuple to move to new account, got %+v", orgTuples)
+	}
+
+	newOrgUnitID := "ou-2"
+	if _, err := svc.HR().UpdateEmployee(ctx, created.ID, domain.UpdateEmployeeInput{OrgUnitID: &newOrgUnitID}); err != nil {
+		t.Fatal(err)
+	}
+	tuples, err = store.ListAuthzRelationshipTuplesForObject(context.Background(), "tenant-1", "hr.employee", created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !relationshipTupleExists(tuples, "org", "org_unit", "ou-2") || relationshipTupleExists(tuples, "org", "org_unit", "ou-1") {
+		t.Fatalf("expected employee org tuple to move to new org unit, got %+v", tuples)
+	}
+	oldOrgTuples, err := store.ListAuthzRelationshipTuplesForObject(context.Background(), "tenant-1", "org_unit", "ou-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	newOrgTuples, err := store.ListAuthzRelationshipTuplesForObject(context.Background(), "tenant-1", "org_unit", "ou-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if relationshipTupleExists(oldOrgTuples, "member", "account", "acct-new") || !relationshipTupleExists(newOrgTuples, "member", "account", "acct-new") {
+		t.Fatalf("expected org unit member tuple to move to new department, old=%+v new=%+v", oldOrgTuples, newOrgTuples)
 	}
 	events, err := store.ListOutboxEvents(context.Background(), "tenant-1")
 	if err != nil {
@@ -2987,6 +3084,76 @@ func TestEmployeeAccountChangesEmitOpenFGATupleOutbox(t *testing.T) {
 	}
 	if !hasBusinessOutboxEvent(events, string(domain.EventOpenFGARelationshipWrite)) || !hasBusinessOutboxEvent(events, string(domain.EventOpenFGARelationshipDelete)) {
 		t.Fatalf("expected OpenFGA write/delete outbox events, got %+v", events)
+	}
+}
+
+// TestOpenFGABackfillIsIdempotent 驗證 OpenFGA backfill 可重跑且不重複追加 outbox。
+func TestOpenFGABackfillIsIdempotent(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-manager", TenantID: "tenant-1", EmployeeID: "emp-manager", Status: "active", CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-user", TenantID: "tenant-1", EmployeeID: "emp-user", Status: "active", CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-disabled", TenantID: "tenant-1", Status: "disabled", CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-root", TenantID: "tenant-1", Name: "Root", Path: []string{"ou-root"}, CreatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-child", TenantID: "tenant-1", Name: "Child", ParentID: "ou-root", Path: []string{"ou-root", "ou-child"}, CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-manager", TenantID: "tenant-1", Name: "Manager", OrgUnitID: "ou-root", AccountID: "acct-manager", Status: "active", CreatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-user", TenantID: "tenant-1", Name: "User", OrgUnitID: "ou-child", AccountID: "acct-user", ManagerEmployeeID: "emp-manager", Status: "active", CreatedAt: now})
+	_ = store.UpsertUserGroup(context.Background(), domain.UserGroup{ID: "ug-1", TenantID: "tenant-1", Name: "Group", MemberAccountIDs: []string{"acct-user"}, CreatedAt: now})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+
+	first, err := svc.OpenFGABackfillTuples(context.Background(), service.OpenFGABackfillInput{TenantID: "tenant-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.DesiredTuples == 0 || first.CreatedTuples != first.DesiredTuples || first.OutboxEvents != first.CreatedTuples {
+		t.Fatalf("unexpected first backfill result: %+v", first)
+	}
+	employeeTuples, err := store.ListAuthzRelationshipTuplesForObject(context.Background(), "tenant-1", "hr.employee", "emp-user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []struct {
+		relation    string
+		subjectType string
+		subjectID   string
+	}{
+		{relation: "owner", subjectType: "account", subjectID: "acct-user"},
+		{relation: "manager", subjectType: "account", subjectID: "acct-manager"},
+		{relation: "org", subjectType: "org_unit", subjectID: "ou-child"},
+	} {
+		if !relationshipTupleExists(employeeTuples, want.relation, want.subjectType, want.subjectID) {
+			t.Fatalf("expected employee tuple %+v in %+v", want, employeeTuples)
+		}
+	}
+	tenantTuples, err := store.ListAuthzRelationshipTuplesForObject(context.Background(), "tenant-1", "tenant", "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !relationshipTupleExists(tenantTuples, "member", "account", "acct-user") || relationshipTupleExists(tenantTuples, "member", "account", "acct-disabled") {
+		t.Fatalf("expected only active tenant members, got %+v", tenantTuples)
+	}
+	events, err := store.ListOutboxEvents(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != first.OutboxEvents {
+		t.Fatalf("expected one outbox event per created tuple, result=%+v events=%d", first, len(events))
+	}
+
+	second, err := svc.OpenFGABackfillTuples(context.Background(), service.OpenFGABackfillInput{TenantID: "tenant-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.CreatedTuples != 0 || second.SkippedTuples != second.DesiredTuples {
+		t.Fatalf("expected second backfill to skip all tuples, got %+v", second)
+	}
+	eventsAfterSecond, err := store.ListOutboxEvents(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(eventsAfterSecond) != len(events) {
+		t.Fatalf("expected second backfill not to append outbox events, before=%d after=%d", len(events), len(eventsAfterSecond))
 	}
 }
 
@@ -5484,10 +5651,48 @@ func (c *fixedRelationshipChecker) CheckRelationship(_ context.Context, check do
 	return c.allowed, nil
 }
 
+type mappedRelationshipChecker struct {
+	allowed map[string]bool
+	checks  []domain.RelationshipCheck
+	err     error
+}
+
+// CheckRelationship 驗證 map 型關係 checker。
+func (c *mappedRelationshipChecker) CheckRelationship(_ context.Context, check domain.RelationshipCheck) (bool, error) {
+	c.checks = append(c.checks, check)
+	if c.err != nil {
+		return false, c.err
+	}
+	return c.allowed[relationshipCheckKey(check.Subject, check.Relation, check.Object)], nil
+}
+
+func relationshipCheckKey(subject, relation, object string) string {
+	return subject + "|" + relation + "|" + object
+}
+
+func relationshipCheckSeen(checks []domain.RelationshipCheck, relation, object string) bool {
+	for _, check := range checks {
+		if check.Relation == relation && check.Object == object {
+			return true
+		}
+	}
+	return false
+}
+
 // hasBusinessOutboxEvent 驗證 business outbox 事件。
 func hasBusinessOutboxEvent(events []domain.OutboxEvent, eventType string) bool {
 	for _, event := range events {
 		if event.EventType == eventType {
+			return true
+		}
+	}
+	return false
+}
+
+// relationshipTupleExists 驗證 relationship tuple 是否存在。
+func relationshipTupleExists(tuples []domain.AuthzRelationshipTuple, relation, subjectType, subjectID string) bool {
+	for _, tuple := range tuples {
+		if tuple.Relation == relation && tuple.SubjectType == subjectType && tuple.SubjectID == subjectID {
 			return true
 		}
 	}

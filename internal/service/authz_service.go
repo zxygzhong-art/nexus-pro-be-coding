@@ -1055,6 +1055,9 @@ func (c *Service) scopeConditions(ctx RequestContext, account Account, scope Sco
 				out["org_unit_ids"] = []string{employee.OrgUnitID}
 			}
 		}
+		if c.openFGAScopeChecksAvailable() {
+			markOpenFGAScopeCheck(out, scope)
+		}
 	case ScopeDepartmentSubtree:
 		if _, ok := out["org_unit_ids"]; !ok && account.EmployeeID == "" {
 			return nil, forbiddenDataScope("account is not linked to an employee for department_subtree scope")
@@ -1071,6 +1074,9 @@ func (c *Service) scopeConditions(ctx RequestContext, account Account, scope Sco
 				}
 				out["org_unit_ids"] = orgUnitIDsInSubtree(units, []string{employee.OrgUnitID})
 			}
+		}
+		if c.openFGAScopeChecksAvailable() {
+			markOpenFGAScopeCheck(out, scope)
 		}
 	case ScopeDirectReports:
 		if _, ok := out["employee_ids"]; !ok && account.EmployeeID != "" {
@@ -1096,6 +1102,28 @@ func (c *Service) scopeConditions(ctx RequestContext, account Account, scope Sco
 		out["scope"] = scope
 	}
 	return out, nil
+}
+
+// openFGAScopeChecksAvailable 判斷 FGA 資料範圍 check 是否可用。
+func (c *Service) openFGAScopeChecksAvailable() bool {
+	return c != nil && c.openFGAScopeChecks && c.relationships != nil
+}
+
+// markOpenFGAScopeCheck 標記決策要走 FGA scope check。
+func markOpenFGAScopeCheck(out map[string]any, scope Scope) {
+	if out == nil {
+		return
+	}
+	out["scope_check"] = "openfga"
+	out["scope_check_scope"] = string(scope)
+}
+
+// decisionUsesOpenFGAScopeCheck 判斷決策是否使用 FGA scope check。
+func decisionUsesOpenFGAScopeCheck(decision CheckResult) bool {
+	if decision.Conditions == nil {
+		return false
+	}
+	return strings.TrimSpace(fmt.Sprint(decision.Conditions["scope_check"])) == "openfga"
 }
 
 // orgUnitIDsInSubtree 處理組織單位 IDs in subtree。
@@ -1133,6 +1161,13 @@ func (c HRService) applyEmployeeDecision(ctx RequestContext, account Account, it
 
 // filterEmployeesByDecision 處理篩選員工 by 決策的服務流程。
 func (c HRService) filterEmployeesByDecision(ctx RequestContext, account Account, items []Employee, decision CheckResult) ([]Employee, error) {
+	if decisionUsesOpenFGAScopeCheck(decision) {
+		filtered, err := c.filterEmployeesByOpenFGAScope(ctx, account, decision, items)
+		if err == nil {
+			return filtered, nil
+		}
+		c.logWarn(ctx, "openfga employee scope check failed; falling back to SQL-derived scope", "error", err)
+	}
 	switch decision.Scope {
 	case "", ScopeAll, ScopeTenant, ScopeSystem:
 		return items, nil
@@ -1207,6 +1242,90 @@ func (c HRService) filterEmployeesByDecision(ctx RequestContext, account Account
 	default:
 		return []Employee{}, nil
 	}
+}
+
+// filterEmployeesByOpenFGAScope 使用 OpenFGA 檢查員工資料範圍。
+func (c HRService) filterEmployeesByOpenFGAScope(ctx RequestContext, account Account, decision CheckResult, items []Employee) ([]Employee, error) {
+	if c.relationships == nil {
+		return nil, fmt.Errorf("openfga scope checker is not configured")
+	}
+	out := make([]Employee, 0, len(items))
+	for _, item := range items {
+		allowed, err := c.employeeAllowedByOpenFGAScope(ctx, account, decision.Scope, item)
+		if err != nil {
+			return nil, err
+		}
+		if allowed {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+// employeeAllowedByOpenFGAScope 判斷單一員工是否通過 FGA scope check。
+func (c HRService) employeeAllowedByOpenFGAScope(ctx RequestContext, account Account, scope Scope, employee Employee) (bool, error) {
+	orgUnitID := strings.TrimSpace(employee.OrgUnitID)
+	if orgUnitID == "" {
+		return false, nil
+	}
+	subject := "account:" + account.ID
+	object := openFGATypeOrgUnit + ":" + orgUnitID
+	switch scope {
+	case ScopeDepartment:
+		return c.anyRelationshipAllows(ctx, subject, object, openFGARelationOrgUnitMember, openFGARelationOrgUnitManager)
+	case ScopeDepartmentSubtree:
+		return c.anyRelationshipAllows(ctx, subject, object, openFGARelationOrgUnitMemberTree, openFGARelationOrgUnitManager)
+	default:
+		return false, nil
+	}
+}
+
+// filterOrgUnitsByOpenFGAScope 使用 OpenFGA 檢查組織單位資料範圍。
+func (c HRService) filterOrgUnitsByOpenFGAScope(ctx RequestContext, account Account, decision CheckResult, units []OrgUnit) ([]OrgUnit, error) {
+	if c.relationships == nil {
+		return nil, fmt.Errorf("openfga scope checker is not configured")
+	}
+	out := make([]OrgUnit, 0, len(units))
+	subject := "account:" + account.ID
+	for _, unit := range units {
+		object := openFGATypeOrgUnit + ":" + unit.ID
+		var allowed bool
+		var err error
+		switch decision.Scope {
+		case ScopeDepartment:
+			allowed, err = c.anyRelationshipAllows(ctx, subject, object, openFGARelationOrgUnitMember, openFGARelationOrgUnitManager)
+		case ScopeDepartmentSubtree:
+			allowed, err = c.anyRelationshipAllows(ctx, subject, object, openFGARelationOrgUnitMemberTree, openFGARelationOrgUnitManager)
+		default:
+			return []OrgUnit{}, nil
+		}
+		if err != nil {
+			return nil, err
+		}
+		if allowed {
+			out = append(out, unit)
+		}
+	}
+	return out, nil
+}
+
+// anyRelationshipAllows 依序檢查多個 relation, 任一允許即通過。
+func (c HRService) anyRelationshipAllows(ctx RequestContext, subject, object string, relations ...string) (bool, error) {
+	for _, relation := range relations {
+		allowed, err := c.relationships.CheckRelationship(goContext(ctx), domain.RelationshipCheck{
+			TenantID: ctx.TenantID,
+			Subject:  subject,
+			Relation: relation,
+			Object:   object,
+		})
+		if err != nil {
+			return false, err
+		}
+		if allowed {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // filterEmployeesByConditions 處理篩選員工 by conditions。

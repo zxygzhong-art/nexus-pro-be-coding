@@ -261,6 +261,9 @@ func (c IAMService) CreateUserGroup(ctx RequestContext, input CreateUserGroupInp
 		if err := tx.store.UpsertUserGroup(goContext(ctx), group); err != nil {
 			return err
 		}
+		if err := tx.Service.syncUserGroupRelationshipTuples(ctx, UserGroup{}, group); err != nil {
+			return err
+		}
 		for _, accountID := range group.MemberAccountIDs {
 			if err := tx.store.AddAccountGroup(goContext(ctx), ctx.TenantID, accountID, group.ID); err != nil {
 				return err

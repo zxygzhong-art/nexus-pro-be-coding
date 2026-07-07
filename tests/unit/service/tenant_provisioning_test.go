@@ -65,8 +65,11 @@ func TestProvisionTenantCreatesUsableAdmin(t *testing.T) {
 		t.Fatalf("expected permission version to be bumped, version=%d result=%d err=%v", version, result.PermissionVersion, err)
 	}
 	events, err := store.ListOutboxEvents(context.Background(), "tenant-acme")
-	if err != nil || len(events) != 1 || events[0].EventType != "tenant.provisioned" {
-		t.Fatalf("expected tenant provisioned outbox event, events=%+v err=%v", events, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countOutboxEvents(events, "tenant.provisioned") != 1 || countOutboxEvents(events, string(domain.EventOpenFGARelationshipWrite)) == 0 {
+		t.Fatalf("expected tenant provisioned and OpenFGA relationship outbox events, events=%+v", events)
 	}
 }
 
@@ -103,8 +106,15 @@ func TestProvisionTenantIsIdempotent(t *testing.T) {
 		t.Fatalf("expected one identity after rerun, identities=%+v err=%v", identities, err)
 	}
 	events, err := store.ListOutboxEvents(context.Background(), "tenant-acme")
-	if err != nil || len(events) != 2 {
-		t.Fatalf("expected one outbox event per run, events=%+v err=%v", events, err)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if countOutboxEvents(events, "tenant.provisioned") != 2 {
+		t.Fatalf("expected one tenant provisioned event per run, events=%+v", events)
+	}
+	relationshipEvents := countOutboxEvents(events, string(domain.EventOpenFGARelationshipWrite))
+	if relationshipEvents == 0 || relationshipEvents != len(events)-2 {
+		t.Fatalf("expected relationship events only from the first run, events=%+v", events)
 	}
 }
 
@@ -126,4 +136,15 @@ func hasString(values []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// countOutboxEvents 計算指定 outbox event type 數量。
+func countOutboxEvents(events []domain.OutboxEvent, eventType string) int {
+	count := 0
+	for _, event := range events {
+		if event.EventType == eventType {
+			count++
+		}
+	}
+	return count
 }

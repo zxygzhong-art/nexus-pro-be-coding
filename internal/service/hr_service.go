@@ -87,6 +87,9 @@ func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (
 		if err := tx.store.UpsertOrgUnit(goContext(ctx), next); err != nil {
 			return err
 		}
+		if err := tx.Service.syncOrgUnitRelationshipTuples(ctx, OrgUnit{}, next); err != nil {
+			return err
+		}
 		if err := tx.touchAuthzConfig(ctx, "org.unit.upsert", map[string]any{"org_unit_id": next.ID, "parent_id": next.ParentID}); err != nil {
 			return err
 		}
@@ -218,8 +221,12 @@ func (c HRService) DeleteEmployee(ctx RequestContext, id string) (Employee, erro
 				return err
 			}
 			if ok {
+				beforeAccount := account
 				account.Status = string(AccountStatusDisabled)
 				if err := tx.store.UpsertAccount(goContext(ctx), account); err != nil {
+					return err
+				}
+				if err := tx.Service.syncAccountTenantMembershipTuple(ctx, beforeAccount, account); err != nil {
 					return err
 				}
 				accountDisabled = true
@@ -355,6 +362,22 @@ func (c HRService) QueryEmployees(ctx RequestContext, query EmployeeQuery) (Page
 	scopedQuery, err := c.employeeQueryWithDecisionScope(ctx, account, query, decision)
 	if err != nil {
 		return PageResponse[Employee]{}, err
+	}
+	if decisionUsesOpenFGAScopeCheck(decision) {
+		items, err := c.listEmployeesForQuery(ctx, scopedQuery)
+		if err != nil {
+			return PageResponse[Employee]{}, err
+		}
+		items, err = c.applyEmployeeDecision(ctx, account, items, decision)
+		if err != nil {
+			return PageResponse[Employee]{}, err
+		}
+		sortEmployees(items, query.Sort)
+		page := utils.PageResponse(items, PageRequest{Page: query.Page, PageSize: query.PageSize, Sort: query.Sort})
+		if err := authzAudit.Commit(ctx); err != nil {
+			return PageResponse[Employee]{}, err
+		}
+		return page, nil
 	}
 	items, total, err := c.store.ListEmployeePageByQuery(goContext(ctx), ctx.TenantID, scopedQuery)
 	if err != nil {
@@ -642,6 +665,9 @@ func (c HRService) EmployeeOptions(ctx RequestContext) (EmployeeOptions, error) 
 
 // employeeDepartmentOptions 處理員工部門選項的服務流程。
 func (c HRService) employeeDepartmentOptions(ctx RequestContext, account Account, decision CheckResult, units []OrgUnit, employees []Employee) ([]OrgUnit, error) {
+	if decisionUsesOpenFGAScopeCheck(decision) {
+		return employeeDepartmentOptionsFromEmployees(units, employees), nil
+	}
 	switch decision.Scope {
 	case "", ScopeAll, ScopeTenant, ScopeSystem:
 		return append([]OrgUnit(nil), units...), nil
@@ -671,6 +697,13 @@ func (c HRService) employeeDepartmentOptions(ctx RequestContext, account Account
 
 // filterOrgUnitsByDecision 處理篩選組織單位 by 決策的服務流程。
 func (c HRService) filterOrgUnitsByDecision(ctx RequestContext, account Account, decision CheckResult, units []OrgUnit) ([]OrgUnit, error) {
+	if decisionUsesOpenFGAScopeCheck(decision) {
+		filtered, err := c.filterOrgUnitsByOpenFGAScope(ctx, account, decision, units)
+		if err == nil {
+			return filtered, nil
+		}
+		c.logWarn(ctx, "openfga org unit scope check failed; falling back to SQL-derived scope", "error", err)
+	}
 	switch decision.Scope {
 	case "", ScopeAll, ScopeTenant, ScopeSystem:
 		return append([]OrgUnit(nil), units...), nil
@@ -804,6 +837,9 @@ func (c HRService) employeeQueryWithDecisionScope(ctx RequestContext, account Ac
 
 // employeeScopeConstraint 處理員工範圍 constraint 的服務流程。
 func (c HRService) employeeScopeConstraint(ctx RequestContext, account Account, decision CheckResult) (domain.EmployeeScopeConstraint, error) {
+	if decisionUsesOpenFGAScopeCheck(decision) {
+		return domain.EmployeeScopeConstraint{}, nil
+	}
 	switch decision.Scope {
 	case "", ScopeAll, ScopeTenant, ScopeSystem:
 		return domain.EmployeeScopeConstraint{}, nil
@@ -1648,10 +1684,14 @@ func (c HRService) linkEmployeeAccount(ctx RequestContext, employee Employee) er
 		return err
 	}
 	if ok {
+		before := account
 		account.EmployeeID = employee.ID
 		account.DisplayName = utils.FirstNonEmpty(account.DisplayName, employee.Name)
 		account.Email = utils.FirstNonEmpty(account.Email, employee.CompanyEmail)
-		return c.store.UpsertAccount(goContext(ctx), account)
+		if err := c.store.UpsertAccount(goContext(ctx), account); err != nil {
+			return err
+		}
+		return c.Service.syncAccountTenantMembershipTuple(ctx, before, account)
 	}
 	return nil
 }
@@ -1698,6 +1738,9 @@ func (c HRService) applyEmployeeCreateAccountPolicy(ctx RequestContext, employee
 			CreatedAt:   c.Now(),
 		}
 		if err := c.store.UpsertAccount(goContext(ctx), account); err != nil {
+			return "", false, err
+		}
+		if err := c.Service.syncAccountTenantMembershipTuple(ctx, Account{}, account); err != nil {
 			return "", false, err
 		}
 		employee.AccountID = account.ID
@@ -3688,8 +3731,12 @@ func (c HRService) deleteEmployeeWithDecision(ctx RequestContext, account Accoun
 				return err
 			}
 			if ok {
+				beforeAccount := linkedAccount
 				linkedAccount.Status = string(AccountStatusDisabled)
 				if err := tx.store.UpsertAccount(goContext(ctx), linkedAccount); err != nil {
+					return err
+				}
+				if err := tx.Service.syncAccountTenantMembershipTuple(ctx, beforeAccount, linkedAccount); err != nil {
 					return err
 				}
 				accountDisabled = true
@@ -3778,17 +3825,22 @@ func (c HRService) InviteEmployee(ctx RequestContext, id string, input InviteEmp
 			Status:      string(AccountStatusPendingInvite),
 			CreatedAt:   tx.Now(),
 		}
+		beforeAccount := Account{}
 		existing, ok, err := tx.store.GetAccount(goContext(ctx), ctx.TenantID, accountID)
 		if err != nil {
 			return err
 		}
 		if ok {
+			beforeAccount = existing
 			inviteAccount = existing
 			inviteAccount.Email = email
 			inviteAccount.EmployeeID = next.ID
 			inviteAccount.Status = string(AccountStatusPendingInvite)
 		}
 		if err := tx.store.UpsertAccount(goContext(ctx), inviteAccount); err != nil {
+			return err
+		}
+		if err := tx.Service.syncAccountTenantMembershipTuple(ctx, beforeAccount, inviteAccount); err != nil {
 			return err
 		}
 		next.AccountID = inviteAccount.ID
@@ -3918,8 +3970,12 @@ func (c HRService) TransitionEmployeeStatus(ctx RequestContext, id string, input
 					return err
 				}
 				if ok {
+					beforeAccount := linkedAccount
 					linkedAccount.Status = string(AccountStatusDisabled)
 					if err := tx.store.UpsertAccount(goContext(ctx), linkedAccount); err != nil {
+						return err
+					}
+					if err := tx.Service.syncAccountTenantMembershipTuple(ctx, beforeAccount, linkedAccount); err != nil {
 						return err
 					}
 				}
@@ -3944,8 +4000,12 @@ func (c HRService) TransitionEmployeeStatus(ctx RequestContext, id string, input
 					return err
 				}
 				if ok {
+					beforeAccount := linkedAccount
 					linkedAccount.Status = string(AccountStatusActive)
 					if err := tx.store.UpsertAccount(goContext(ctx), linkedAccount); err != nil {
+						return err
+					}
+					if err := tx.Service.syncAccountTenantMembershipTuple(ctx, beforeAccount, linkedAccount); err != nil {
 						return err
 					}
 				}
@@ -4090,7 +4150,6 @@ func employeeStatusTransitionAuditAction(current, next string) string {
 const (
 	employeeOwnerRelation   = "owner"
 	employeeManagerRelation = "manager"
-	relationshipSubjectType = "account"
 )
 
 // syncEmployeeRelationshipTuples 同步員工關係 tuple 的服務流程。
@@ -4110,10 +4169,14 @@ func (c HRService) syncEmployeeRelationshipTuples(ctx RequestContext, before, af
 // employeeRelationshipTupleChanges 處理員工關係 tuple changes 的服務流程。
 func (c HRService) employeeRelationshipTupleChanges(ctx RequestContext, before, after Employee) ([]domain.AuthzRelationshipTupleChange, error) {
 	now := c.Now()
-	objectType := routeResourceName(AppHR, ResourceEmployee)
-	changes := make([]domain.AuthzRelationshipTupleChange, 0, 4)
-	add := func(operation domain.AuthzRelationshipTupleOperation, relation, subjectID string) {
-		if strings.TrimSpace(subjectID) == "" || strings.TrimSpace(after.ID) == "" {
+	objectType := openFGATypeEmployee
+	objectID := strings.TrimSpace(after.ID)
+	if objectID == "" {
+		objectID = strings.TrimSpace(before.ID)
+	}
+	changes := make([]domain.AuthzRelationshipTupleChange, 0, 8)
+	add := func(operation domain.AuthzRelationshipTupleOperation, tupleObjectType, tupleObjectID, relation, subjectType, subjectID string) {
+		if strings.TrimSpace(subjectID) == "" || strings.TrimSpace(tupleObjectID) == "" {
 			return
 		}
 		changes = append(changes, domain.AuthzRelationshipTupleChange{
@@ -4121,10 +4184,10 @@ func (c HRService) employeeRelationshipTupleChanges(ctx RequestContext, before, 
 			Tuple: domain.AuthzRelationshipTuple{
 				ID:          utils.NewID("rel"),
 				TenantID:    ctx.TenantID,
-				ObjectType:  objectType,
-				ObjectID:    after.ID,
+				ObjectType:  tupleObjectType,
+				ObjectID:    tupleObjectID,
 				Relation:    relation,
-				SubjectType: relationshipSubjectType,
+				SubjectType: subjectType,
 				SubjectID:   subjectID,
 				CreatedAt:   now,
 			},
@@ -4134,13 +4197,32 @@ func (c HRService) employeeRelationshipTupleChanges(ctx RequestContext, before, 
 	beforeAccountID := strings.TrimSpace(before.AccountID)
 	afterAccountID := strings.TrimSpace(after.AccountID)
 	if beforeAccountID != "" && beforeAccountID != afterAccountID {
-		add(domain.AuthzRelationshipTupleDelete, employeeOwnerRelation, beforeAccountID)
+		add(domain.AuthzRelationshipTupleDelete, objectType, objectID, employeeOwnerRelation, openFGASubjectTypeAccount, beforeAccountID)
 	}
 	if afterAccountID != "" {
 		if _, ok, err := c.store.GetAccount(goContext(ctx), ctx.TenantID, afterAccountID); err != nil {
 			return nil, err
 		} else if ok {
-			add(domain.AuthzRelationshipTupleWrite, employeeOwnerRelation, afterAccountID)
+			add(domain.AuthzRelationshipTupleWrite, objectType, objectID, employeeOwnerRelation, openFGASubjectTypeAccount, afterAccountID)
+		}
+	}
+
+	beforeOrgUnitID := strings.TrimSpace(before.OrgUnitID)
+	afterOrgUnitID := strings.TrimSpace(after.OrgUnitID)
+	if beforeOrgUnitID != "" && beforeOrgUnitID != afterOrgUnitID {
+		add(domain.AuthzRelationshipTupleDelete, objectType, objectID, openFGARelationEmployeeOrg, openFGASubjectTypeOrgUnit, beforeOrgUnitID)
+	}
+	if afterOrgUnitID != "" {
+		add(domain.AuthzRelationshipTupleWrite, objectType, objectID, openFGARelationEmployeeOrg, openFGASubjectTypeOrgUnit, afterOrgUnitID)
+	}
+	if beforeOrgUnitID != "" && beforeAccountID != "" && (beforeOrgUnitID != afterOrgUnitID || beforeAccountID != afterAccountID) {
+		add(domain.AuthzRelationshipTupleDelete, openFGATypeOrgUnit, beforeOrgUnitID, openFGARelationOrgUnitMember, openFGASubjectTypeAccount, beforeAccountID)
+	}
+	if afterOrgUnitID != "" && afterAccountID != "" {
+		if _, ok, err := c.store.GetAccount(goContext(ctx), ctx.TenantID, afterAccountID); err != nil {
+			return nil, err
+		} else if ok {
+			add(domain.AuthzRelationshipTupleWrite, openFGATypeOrgUnit, afterOrgUnitID, openFGARelationOrgUnitMember, openFGASubjectTypeAccount, afterAccountID)
 		}
 	}
 
@@ -4153,10 +4235,10 @@ func (c HRService) employeeRelationshipTupleChanges(ctx RequestContext, before, 
 		return nil, err
 	}
 	if beforeManagerAccountID != "" && beforeManagerAccountID != afterManagerAccountID {
-		add(domain.AuthzRelationshipTupleDelete, employeeManagerRelation, beforeManagerAccountID)
+		add(domain.AuthzRelationshipTupleDelete, objectType, objectID, employeeManagerRelation, openFGASubjectTypeAccount, beforeManagerAccountID)
 	}
 	if afterManagerAccountID != "" {
-		add(domain.AuthzRelationshipTupleWrite, employeeManagerRelation, afterManagerAccountID)
+		add(domain.AuthzRelationshipTupleWrite, objectType, objectID, employeeManagerRelation, openFGASubjectTypeAccount, afterManagerAccountID)
 	}
 
 	return dedupeRelationshipTupleChanges(changes), nil
@@ -4177,33 +4259,7 @@ func (c HRService) employeeAccountID(ctx RequestContext, employeeID string) (str
 
 // applyAuthzRelationshipTupleChange 處理 apply 授權關係 tuple change 的服務流程。
 func (c HRService) applyAuthzRelationshipTupleChange(ctx RequestContext, change domain.AuthzRelationshipTupleChange) error {
-	tuple := normalizeAuthzRelationshipTuple(ctx, change.Tuple, c.Now())
-	if tuple.ObjectType == "" || tuple.ObjectID == "" || tuple.Relation == "" || tuple.SubjectType == "" || tuple.SubjectID == "" {
-		return nil
-	}
-	switch change.Operation {
-	case domain.AuthzRelationshipTupleWrite:
-		if err := c.store.UpsertAuthzRelationshipTuple(goContext(ctx), tuple); err != nil {
-			return err
-		}
-	case domain.AuthzRelationshipTupleDelete:
-		if err := c.store.DeleteAuthzRelationshipTuple(goContext(ctx), tuple); err != nil {
-			return err
-		}
-	default:
-		return BadRequest("unsupported relationship tuple operation")
-	}
-	return c.store.AppendOutboxEvent(goContext(ctx), domain.OutboxEvent{
-		ID:            utils.NewID("outbox"),
-		TenantID:      ctx.TenantID,
-		EventType:     relationshipOutboxEventType(change.Operation),
-		AggregateType: domain.OutboxAggregateAuthz,
-		AggregateID:   tuple.ObjectID,
-		Payload:       relationshipTuplePayload(change.Operation, tuple),
-		Status:        "pending",
-		RetryCount:    0,
-		CreatedAt:     c.Now(),
-	})
+	return c.Service.applyRelationshipTupleChange(ctx, change)
 }
 
 // normalizeAuthzRelationshipTuple 正規化授權關係 tuple。

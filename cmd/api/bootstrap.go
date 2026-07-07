@@ -129,10 +129,11 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 
 	authHTTPClient := &http.Client{Timeout: 5 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}
 	serviceOptions := service.Options{
-		Logger:        logger,
-		AuthzSnapshot: authzSnapshotModule.cache,
-		Relationships: relationshipModule.checker,
-		ObjectStore:   objectStoreModule.store,
+		Logger:             logger,
+		AuthzSnapshot:      authzSnapshotModule.cache,
+		Relationships:      relationshipModule.checker,
+		OpenFGAScopeChecks: cfg.OpenFGAScopeCheckEnabled,
+		ObjectStore:        objectStoreModule.store,
 	}
 	tokenResolvers := make([]platformauth.TokenResolver, 0, 2)
 

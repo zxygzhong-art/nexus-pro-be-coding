@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -35,6 +36,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "provision":
 		return runProvision(args[1:])
+	case "openfga-backfill":
+		return runOpenFGABackfill(args[1:])
 	default:
 		printUsage(os.Stderr)
 		return fmt.Errorf("unknown command %q", args[0])
@@ -107,6 +110,50 @@ func runProvision(args []string) error {
 	return encoder.Encode(result)
 }
 
+// runOpenFGABackfill 執行 OpenFGA relationship tuple backfill。
+func runOpenFGABackfill(args []string) error {
+	fs := flag.NewFlagSet("tenantctl openfga-backfill", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	tenantID := fs.String("tenant-id", "", "tenant id to backfill")
+	databaseURL := fs.String("database-url", strings.TrimSpace(os.Getenv("DATABASE_URL")), "Postgres database URL")
+	timeout := fs.Duration("timeout", 5*time.Minute, "operation timeout")
+	dryRun := fs.Bool("dry-run", false, "compute missing tuples without writing local tuples or outbox events")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if strings.TrimSpace(*tenantID) == "" {
+		return errors.New("--tenant-id is required")
+	}
+	if strings.TrimSpace(*databaseURL) == "" {
+		return errors.New("DATABASE_URL or --database-url is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	pool, err := postgresplatform.OpenPool(ctx, *databaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	result, err := service.New(postgresrepo.NewStore(pool), service.Options{Logger: logger}).OpenFGABackfillTuples(ctx, service.OpenFGABackfillInput{
+		TenantID: *tenantID,
+		DryRun:   *dryRun,
+		Logger:   logger,
+	})
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(result)
+}
+
 // ensureKeycloakAdmin 透過 Keycloak Admin API 建立或更新首管理員。
 func ensureKeycloakAdmin(ctx context.Context, input service.TenantProvisionInput, sendInvite bool) (domain.ProvisionedIdentity, error) {
 	if strings.TrimSpace(input.IdentityProvider) != "" && input.IdentityProvider != domain.IdentityProviderKeycloak {
@@ -147,6 +194,7 @@ func printUsage(out *os.File) {
 	fmt.Fprintln(out, `Usage:
   tenantctl provision --tenant-id <id> --tenant-name <name> --admin-email <email> --keycloak-sub <subject>
   tenantctl provision --tenant-id <id> --tenant-name <name> --admin-email <email> --provision-keycloak
+  tenantctl openfga-backfill --tenant-id <id>
 
 Required environment:
   DATABASE_URL

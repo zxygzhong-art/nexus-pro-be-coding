@@ -72,7 +72,17 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 	var validationErr error
 	if err := c.withTransaction(ctx, func(tx HRService) error {
 		for _, unit := range departments {
+			before, ok, err := tx.store.GetOrgUnit(goContext(ctx), ctx.TenantID, unit.ID)
+			if err != nil {
+				return err
+			}
 			if err := tx.store.UpsertOrgUnit(goContext(ctx), unit); err != nil {
+				return err
+			}
+			if !ok {
+				before = OrgUnit{}
+			}
+			if err := tx.Service.syncOrgUnitRelationshipTuples(ctx, before, unit); err != nil {
 				return err
 			}
 		}

@@ -21,6 +21,7 @@ type Service struct {
 	logger              *slog.Logger
 	authzSnapshot       AuthzSnapshotCache
 	relationships       RelationshipChecker
+	openFGAScopeChecks  bool
 	objectStore         ObjectStore
 	ehrmsClient         EHRMSClient
 	identityProvisioner IdentityProvisioner
@@ -32,6 +33,7 @@ type Options struct {
 	Now                 func() time.Time
 	AuthzSnapshot       AuthzSnapshotCache
 	Relationships       RelationshipChecker
+	OpenFGAScopeChecks  bool
 	ObjectStore         ObjectStore
 	EHRMSClient         EHRMSClient
 	IdentityProvisioner IdentityProvisioner
@@ -72,6 +74,7 @@ func New(store repository.Store, options ...Options) *Service {
 		logger:              logger,
 		authzSnapshot:       cfg.AuthzSnapshot,
 		relationships:       cfg.Relationships,
+		openFGAScopeChecks:  cfg.OpenFGAScopeChecks,
 		objectStore:         firstObjectStore(cfg.ObjectStore),
 		ehrmsClient:         cfg.EHRMSClient,
 		identityProvisioner: cfg.IdentityProvisioner,

@@ -48,9 +48,10 @@ type Config struct {
 	KeycloakInviteClientID    string
 	KeycloakInviteRedirectURL string
 
-	OpenFGAAPIURL  string
-	OpenFGAStoreID string
-	OpenFGAModelID string
+	OpenFGAAPIURL            string
+	OpenFGAStoreID           string
+	OpenFGAModelID           string
+	OpenFGAScopeCheckEnabled bool
 
 	ObjectStoreProvider        string
 	ObjectStoreDir             string
@@ -193,9 +194,10 @@ func LoadE() (Config, error) {
 		KeycloakInviteClientID:    env("KEYCLOAK_INVITE_CLIENT_ID", strings.TrimSpace(os.Getenv("KEYCLOAK_CLIENT_ID"))),
 		KeycloakInviteRedirectURL: strings.TrimSpace(os.Getenv("KEYCLOAK_INVITE_REDIRECT_URL")),
 
-		OpenFGAAPIURL:  strings.TrimSpace(os.Getenv("OPENFGA_API_URL")),
-		OpenFGAStoreID: strings.TrimSpace(os.Getenv("OPENFGA_STORE_ID")),
-		OpenFGAModelID: strings.TrimSpace(os.Getenv("OPENFGA_MODEL_ID")),
+		OpenFGAAPIURL:            strings.TrimSpace(os.Getenv("OPENFGA_API_URL")),
+		OpenFGAStoreID:           strings.TrimSpace(os.Getenv("OPENFGA_STORE_ID")),
+		OpenFGAModelID:           strings.TrimSpace(os.Getenv("OPENFGA_MODEL_ID")),
+		OpenFGAScopeCheckEnabled: envBool("OPENFGA_SCOPE_CHECK_ENABLED", false, &problems),
 
 		ObjectStoreProvider:        objectStoreProvider,
 		ObjectStoreDir:             strings.TrimSpace(os.Getenv("OBJECT_STORE_DIR")),

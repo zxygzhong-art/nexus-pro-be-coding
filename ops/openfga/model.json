@@ -9,12 +9,113 @@
       }
     },
     {
+      "type": "tenant",
+      "relations": {
+        "member": {
+          "this": {}
+        }
+      },
+      "metadata": {
+        "relations": {
+          "member": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "org_unit",
+      "relations": {
+        "parent": {
+          "this": {}
+        },
+        "member": {
+          "this": {}
+        },
+        "manager": {
+          "this": {}
+        },
+        "member_recursive": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "member"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "tupleset": {
+                    "relation": "parent"
+                  },
+                  "computedUserset": {
+                    "relation": "member_recursive"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "parent": {
+            "directly_related_user_types": [
+              {
+                "type": "org_unit"
+              }
+            ]
+          },
+          "member": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          },
+          "manager": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "user_group",
+      "relations": {
+        "member": {
+          "this": {}
+        }
+      },
+      "metadata": {
+        "relations": {
+          "member": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
       "type": "hr.employee",
       "relations": {
         "owner": {
           "this": {}
         },
         "manager": {
+          "this": {}
+        },
+        "org": {
           "this": {}
         },
         "read": {
@@ -28,6 +129,26 @@
               {
                 "computedUserset": {
                   "relation": "manager"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "tupleset": {
+                    "relation": "org"
+                  },
+                  "computedUserset": {
+                    "relation": "manager"
+                  }
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "tupleset": {
+                    "relation": "org"
+                  },
+                  "computedUserset": {
+                    "relation": "member_recursive"
+                  }
                 }
               }
             ]
@@ -72,6 +193,13 @@
             "directly_related_user_types": [
               {
                 "type": "account"
+              }
+            ]
+          },
+          "org": {
+            "directly_related_user_types": [
+              {
+                "type": "org_unit"
               }
             ]
           }

@@ -212,6 +212,7 @@ Current scope:
 - `internal/domain/authz` defines default route policy metadata and high-risk markers used by the service-level authorization path.
 - `KEYCLOAK_*` enables Keycloak/OIDC bearer-token validation. In production, `KEYCLOAK_ISSUER_URL` and `KEYCLOAK_CLIENT_ID` are required at startup; enabling `KEYCLOAK_PROVISION_USERS` additionally requires `KEYCLOAK_ADMIN_CLIENT_ID` and `KEYCLOAK_ADMIN_CLIENT_SECRET`.
 - `OPENFGA_*` enables relationship checks and starts the relationship tuple outbox worker. In production, `OPENFGA_API_URL`, `OPENFGA_STORE_ID`, and `OPENFGA_MODEL_ID` are required at startup because relation-scoped permissions depend on this adapter.
+- `OPENFGA_SCOPE_CHECK_ENABLED=true` switches department and department-subtree data-scope filtering to OpenFGA checks after the model and tuple backfill are ready. The default is `false`, which keeps the existing SQL scope path.
 - `ops/openfga/model.json` is the versioned authorization model. Apply it explicitly with `make openfga-apply-model`, then set `OPENFGA_MODEL_ID` to the returned `authorization_model_id`; the API readiness check verifies that model ID.
 - Employee authz-subject changes emit local relationship tuples and OpenFGA write/delete outbox events with retryable status tracking.
 

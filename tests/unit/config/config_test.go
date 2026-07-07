@@ -42,6 +42,24 @@ func TestOpenTelemetryConfig(t *testing.T) {
 	}
 }
 
+// TestOpenFGAScopeCheckConfig 驗證 OpenFGA scope check 開關。
+func TestOpenFGAScopeCheckConfig(t *testing.T) {
+	t.Setenv("OPENFGA_SCOPE_CHECK_ENABLED", "")
+	cfg := config.Load()
+	if cfg.OpenFGAScopeCheckEnabled {
+		t.Fatal("expected OpenFGA scope checks to be disabled by default")
+	}
+
+	t.Setenv("OPENFGA_SCOPE_CHECK_ENABLED", "true")
+	cfg, err := config.LoadE()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.OpenFGAScopeCheckEnabled {
+		t.Fatal("expected OpenFGA scope checks to be enabled")
+	}
+}
+
 // TestObjectStoreDirConfig 驗證物件儲存層 dir 組態。
 func TestObjectStoreDirConfig(t *testing.T) {
 	t.Setenv("OBJECT_STORE_DIR", "/tmp/nexus-objects")

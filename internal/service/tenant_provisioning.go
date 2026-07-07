@@ -88,13 +88,27 @@ func (c *Service) ProvisionTenant(ctx context.Context, input TenantProvisionInpu
 		ctx = context.Background()
 	}
 	err = repository.WithinTenantTransaction(ctx, c.store, normalized.TenantID, func(tx repository.Store) error {
+		txService := *c
+		txService.store = tx
+		txCtx := RequestContext{Context: ctx, TenantID: normalized.TenantID}
 		if err := tx.UpsertTenant(ctx, domain.Tenant{ID: normalized.TenantID, Name: normalized.TenantName, CreatedAt: now}); err != nil {
 			return err
 		}
 		if err := syncPermissionCatalogForTenant(ctx, tx, normalized.TenantID, now); err != nil {
 			return err
 		}
-		if err := tx.UpsertOrgUnit(ctx, tenantProvisionRootOrgUnit(normalized, ids, now)); err != nil {
+		rootOrg := tenantProvisionRootOrgUnit(normalized, ids, now)
+		existingRoot, rootExists, err := tx.GetOrgUnit(ctx, normalized.TenantID, rootOrg.ID)
+		if err != nil {
+			return err
+		}
+		if err := tx.UpsertOrgUnit(ctx, rootOrg); err != nil {
+			return err
+		}
+		if !rootExists {
+			existingRoot = domain.OrgUnit{}
+		}
+		if err := txService.syncOrgUnitRelationshipTuples(txCtx, existingRoot, rootOrg); err != nil {
 			return err
 		}
 		adminPermissionSet := tenantProvisionAdminPermissionSet(normalized, ids, now)
@@ -104,11 +118,35 @@ func (c *Service) ProvisionTenant(ctx context.Context, input TenantProvisionInpu
 		if _, err := syncPermissionSetItems(ctx, tx, adminPermissionSet, now); err != nil {
 			return err
 		}
-		if err := tx.UpsertAccount(ctx, tenantProvisionAdminAccount(normalized, ids, now)); err != nil {
+		adminAccount := tenantProvisionAdminAccount(normalized, ids, now)
+		existingAccount, accountExists, err := tx.GetAccount(ctx, normalized.TenantID, adminAccount.ID)
+		if err != nil {
 			return err
 		}
-		if err := tx.UpsertEmployee(ctx, tenantProvisionAdminEmployee(normalized, ids, now)); err != nil {
+		if err := tx.UpsertAccount(ctx, adminAccount); err != nil {
 			return err
+		}
+		if !accountExists {
+			existingAccount = domain.Account{}
+		}
+		if err := txService.syncAccountTenantMembershipTuple(txCtx, existingAccount, adminAccount); err != nil {
+			return err
+		}
+		adminEmployee := tenantProvisionAdminEmployee(normalized, ids, now)
+		existingEmployee, employeeExists, err := tx.GetEmployee(ctx, normalized.TenantID, adminEmployee.ID)
+		if err != nil {
+			return err
+		}
+		if err := tx.UpsertEmployee(ctx, adminEmployee); err != nil {
+			return err
+		}
+		if !employeeExists {
+			existingEmployee = domain.Employee{}
+		}
+		if existingEmployee.OrgUnitID != adminEmployee.OrgUnitID || existingEmployee.AccountID != adminEmployee.AccountID || existingEmployee.ManagerEmployeeID != adminEmployee.ManagerEmployeeID {
+			if err := txService.HR().syncEmployeeRelationshipTuples(txCtx, existingEmployee, adminEmployee); err != nil {
+				return err
+			}
 		}
 		if err := assertTenantProvisionIdentityAvailable(ctx, tx, normalized, ids); err != nil {
 			return err
