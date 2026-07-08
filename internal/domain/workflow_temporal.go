@@ -66,3 +66,14 @@ type FormApprovalReminder struct {
 func FormApprovalWorkflowID(tenantID, formInstanceID string) string {
 	return strings.TrimSpace(tenantID) + ":" + strings.TrimSpace(formInstanceID)
 }
+
+// ValidateFormApprovalWorkflowStart rejects workflow inputs that cannot load a projection.
+func ValidateFormApprovalWorkflowStart(input FormApprovalWorkflowStart) error {
+	if strings.TrimSpace(input.TenantID) == "" {
+		return BadRequest("tenant_id is required")
+	}
+	if strings.TrimSpace(input.FormInstanceID) == "" {
+		return BadRequest("form_instance_id is required")
+	}
+	return nil
+}

@@ -962,6 +962,8 @@ CREATE TABLE audit_logs (
 CREATE INDEX audit_logs_tenant_id_created_at_idx ON audit_logs (tenant_id, created_at DESC);
 CREATE INDEX audit_logs_actor_account_id_idx ON audit_logs (actor_account_id);
 
+ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenants FORCE ROW LEVEL SECURITY;
 ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accounts FORCE ROW LEVEL SECURITY;
 ALTER TABLE user_groups ENABLE ROW LEVEL SECURITY;
@@ -1054,6 +1056,17 @@ ALTER TABLE outbox_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE outbox_events FORCE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs FORCE ROW LEVEL SECURITY;
+
+-- tenants table 沒有 tenant_id 欄位；每一列以自身 id 隔離。
+CREATE POLICY tenant_isolation_tenants ON tenants USING (id = current_setting('app.tenant_id', true)) WITH CHECK (id = current_setting('app.tenant_id', true));
+
+-- 跨 tenant 背景工作（例如 OpenFGA outbox processor）需要列舉所有 tenant，
+-- 但 tenant_isolation_tenants 只會暴露符合 app.tenant_id 的列。這個唯讀 policy
+-- 允許透過 set_config('app.system_task', 'on', true) opt in 的連線在沒有 BYPASSRLS
+-- 的情況下列出所有 tenant。應用程式會透過 tenantctx.WithSystemTask 注入此設定
+-- （見 internal/repository/postgres/tenant_dbtx.go）；行為由 tenantctx 單元測試與
+-- tests/integration/postgres 內的 non-BYPASSRLS ListTenants 整合測試覆蓋。
+CREATE POLICY system_read_tenants ON tenants FOR SELECT USING (current_setting('app.system_task', true) = 'on');
 
 CREATE POLICY tenant_isolation_accounts ON accounts USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_user_groups ON user_groups USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));

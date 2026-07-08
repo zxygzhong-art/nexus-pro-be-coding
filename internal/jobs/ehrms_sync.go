@@ -99,6 +99,7 @@ func (s *EHRMSEmployeeSyncScheduler) syncAndLog(ctx context.Context, opts EHRMSE
 		"updated", result.Updated,
 		"failed", result.Failed,
 		"departments_upserted", result.DepartmentsUpserted,
+		"positions_upserted", result.PositionsUpserted,
 		"mode", result.Mode,
 	)
 }

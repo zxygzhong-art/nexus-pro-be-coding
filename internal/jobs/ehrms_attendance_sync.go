@@ -10,7 +10,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
-const defaultEHRMSAttendanceSyncInterval = 24 * time.Hour
+const defaultEHRMSAttendanceSyncInterval = 30 * 24 * time.Hour
 
 // EHRMSAttendanceSyncService 定義 eHRMS 考勤 sync 服務的行為契約。
 type EHRMSAttendanceSyncService interface {

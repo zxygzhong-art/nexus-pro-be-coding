@@ -503,6 +503,7 @@ type EHRMSEmployeeSyncResponse struct {
 	Updated             int                   `json:"updated"`
 	Failed              int                   `json:"failed"`
 	DepartmentsUpserted int                   `json:"departments_upserted"`
+	PositionsUpserted   int                   `json:"positions_upserted"`
 	Mode                string                `json:"mode"`
 	Results             []BatchEmployeeResult `json:"results,omitempty"`
 	RowErrors           []RowError            `json:"row_errors,omitempty"`

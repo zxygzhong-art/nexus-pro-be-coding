@@ -19,6 +19,7 @@ const (
 	ehrmsAttendanceFieldDailyHours = "應出勤工時"
 	ehrmsAttendanceFieldClockHours = "刷卡工時"
 	ehrmsAttendanceSource          = "ehrms"
+	defaultEHRMSAttendanceSyncWindow = 30 * 24 * time.Hour
 )
 
 // SyncEHRMSAttendance 同步 eHRMS 考勤日彙總。
@@ -30,7 +31,7 @@ func (c AttendanceService) SyncEHRMSAttendance(ctx RequestContext, input EHRMSAt
 	if err != nil {
 		return EHRMSAttendanceSyncResponse{}, err
 	}
-	since, err := normalizeEHRMSAttendanceSince(input.Since)
+	since, err := c.effectiveEHRMSAttendanceSince(input.Since)
 	if err != nil {
 		return EHRMSAttendanceSyncResponse{}, err
 	}
@@ -211,15 +212,32 @@ func ehrmsAttendanceSkipped(rowNumber int, employeeID string, code string, messa
 	}
 }
 
-func normalizeEHRMSAttendanceSince(value string) (string, error) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return "", nil
+func normalizeEHRMSAttendanceSince(input string, now time.Time, window time.Duration) (string, error) {
+	if window <= 0 {
+		window = defaultEHRMSAttendanceSyncWindow
 	}
-	if parsed, err := time.Parse(time.DateOnly, value); err == nil {
-		return parsed.Format(time.DateOnly), nil
+	floor := now.Add(-window).Format(time.DateOnly)
+	input = strings.TrimSpace(input)
+	if input == "" {
+		return floor, nil
 	}
-	return "", BadRequest("since must be YYYY-MM-DD")
+	parsed, err := time.Parse(time.DateOnly, input)
+	if err != nil {
+		return "", BadRequest("since must be YYYY-MM-DD")
+	}
+	explicit := parsed.Format(time.DateOnly)
+	floorTime, err := time.Parse(time.DateOnly, floor)
+	if err != nil {
+		return explicit, nil
+	}
+	if parsed.Before(floorTime) {
+		return floor, nil
+	}
+	return explicit, nil
+}
+
+func (c AttendanceService) effectiveEHRMSAttendanceSince(input string) (string, error) {
+	return normalizeEHRMSAttendanceSince(input, c.Now(), defaultEHRMSAttendanceSyncWindow)
 }
 
 func normalizeEHRMSAttendanceDate(value string) string {
@@ -265,5 +283,25 @@ func ehrmsAttendanceValue(record domain.EHRMSAttendanceRecord, key string) strin
 	if len(record) == 0 {
 		return ""
 	}
-	return strings.TrimSpace(record[key])
+	if value := strings.TrimSpace(record[key]); value != "" {
+		return value
+	}
+	switch key {
+	case ehrmsAttendanceFieldEmployeeNo:
+		return strings.TrimSpace(record["emp_id"])
+	case ehrmsAttendanceFieldDate:
+		return strings.TrimSpace(record["date"])
+	case ehrmsAttendanceFieldShiftStart:
+		return strings.TrimSpace(record["shift_start"])
+	case ehrmsAttendanceFieldShiftEnd:
+		return strings.TrimSpace(record["shift_end"])
+	case ehrmsAttendanceFieldShiftHours:
+		return strings.TrimSpace(record["shift_hours"])
+	case ehrmsAttendanceFieldDailyHours:
+		return strings.TrimSpace(record["daily_hours"])
+	case ehrmsAttendanceFieldClockHours:
+		return strings.TrimSpace(record["clock_hours"])
+	default:
+		return ""
+	}
 }

@@ -7,14 +7,14 @@ import (
 )
 
 func TestPermissionPackageMigrationDefinesTemplatesImportsAndRLS(t *testing.T) {
-	raw, err := os.ReadFile("../../../db/migrations/000005_permission_packages.sql")
+	raw, err := os.ReadFile("../../../db/migrations/000001_init.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	migration := string(raw)
 	required := []string{
-		"ADD COLUMN source_template_key text NOT NULL DEFAULT ''",
-		"ADD COLUMN source_package_version text NOT NULL DEFAULT ''",
+		"source_template_key text NOT NULL DEFAULT ''",
+		"source_package_version text NOT NULL DEFAULT ''",
 		"CREATE TABLE permission_packages",
 		"CONSTRAINT permission_packages_application_version_idx UNIQUE (application_code, version)",
 		"CREATE TABLE permission_set_templates",

@@ -41,6 +41,20 @@ func TestFormApprovalWorkflowApproveSignalCompletes(t *testing.T) {
 	}
 }
 
+func TestFormApprovalWorkflowRejectsEmptyFormInstanceID(t *testing.T) {
+	var suite testsuite.WorkflowTestSuite
+	env := suite.NewTestWorkflowEnvironment()
+	env.RegisterWorkflow(workflows.FormApprovalWorkflow)
+
+	env.ExecuteWorkflow(workflows.FormApprovalWorkflow, domain.FormApprovalWorkflowStart{
+		TenantID: "tenant-1",
+	})
+
+	if err := env.GetWorkflowError(); err == nil {
+		t.Fatal("expected workflow to fail for empty form_instance_id")
+	}
+}
+
 func TestFormApprovalWorkflowReminderTimerFires(t *testing.T) {
 	env, counters := newFormApprovalWorkflowEnv(t, formApprovalWorkflowScript{
 		initial:     activeFormApprovalProjection(1),

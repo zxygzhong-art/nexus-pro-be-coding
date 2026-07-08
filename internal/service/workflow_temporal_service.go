@@ -13,6 +13,9 @@ func (c WorkflowService) startTemporalFormApprovalWorkflow(ctx RequestContext, i
 	if c.formApprovalWorkflows == nil {
 		return domain.E(503, "temporal_workflow_unavailable", "temporal form approval workflow client is required")
 	}
+	if strings.TrimSpace(instance.ID) == "" {
+		return BadRequest("form_instance_id is required")
+	}
 	run, ok, err := c.store.GetWorkflowRunByFormInstance(goContext(ctx), ctx.TenantID, instance.ID)
 	if err != nil {
 		return err

@@ -7,16 +7,16 @@ import (
 )
 
 func TestGroupMembershipMigrationExpandsUserGroupMemberProjection(t *testing.T) {
-	raw, err := os.ReadFile("../../../db/migrations/000004_group_memberships.sql")
+	raw, err := os.ReadFile("../../../db/migrations/000001_init.sql")
 	if err != nil {
 		t.Fatal(err)
 	}
 	migration := string(raw)
 	required := []string{
 		"CREATE TABLE authz_group_memberships",
-		"CROSS JOIN LATERAL unnest(g.member_account_ids) AS member(account_id)",
-		"'migration'",
-		"ON CONFLICT (tenant_id, user_group_id, account_id) DO NOTHING",
+		"CONSTRAINT authz_group_memberships_unique_idx UNIQUE (tenant_id, user_group_id, account_id)",
+		"source text NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'import', 'template', 'approval', 'migration'))",
+		"ALTER TABLE authz_group_memberships ENABLE ROW LEVEL SECURITY",
 		"CREATE POLICY tenant_isolation_authz_group_memberships",
 	}
 	for _, item := range required {

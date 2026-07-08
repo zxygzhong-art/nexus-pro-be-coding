@@ -3607,6 +3607,7 @@ func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
 		"在職狀態":     "在職",
 		"部門代碼":     "M0101",
 		"部門中文名稱":   "Nexus",
+		"職務代碼":     "0704",
 		"職務中文名稱":   "工程師",
 		"身份類別名稱":   "一般員工",
 		"身份證號":     "A123456789",
@@ -3622,7 +3623,7 @@ func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
 	if err != nil {
 		t.Fatalf("%v result=%+v", err, result)
 	}
-	if result.Fetched != 1 || result.Created != 1 || result.Updated != 0 || result.DepartmentsUpserted != 1 || result.Mode != "upsert" {
+	if result.Fetched != 1 || result.Created != 1 || result.Updated != 0 || result.DepartmentsUpserted != 1 || result.PositionsUpserted != 1 || result.Mode != "upsert" {
 		t.Fatalf("unexpected eHRMS sync result: %+v", result)
 	}
 	unit, ok, err := store.GetOrgUnit(context.Background(), "tenant-1", "M0101")
@@ -3639,7 +3640,7 @@ func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
 	if !ok {
 		t.Fatal("expected eHRMS employee to be created")
 	}
-	if employee.Name != "測試員工" || employee.CompanyEmail != "" || employee.OrgUnitID != "M0101" || employee.Status != "active" || employee.Category != "full_time" {
+	if employee.Name != "測試員工" || employee.CompanyEmail != "" || employee.OrgUnitID != "M0101" || employee.Position != "工程師" || employee.PositionID != "0704" || employee.Status != "active" || employee.Category != "full_time" {
 		t.Fatalf("unexpected eHRMS employee mapping: %+v", employee)
 	}
 	if employee.BasicInfo["national_id"] != "A123456789" || employee.EmploymentInfo["position"] != "工程師" || employee.EducationMilitaryInfo["school_name"] != "Nexus University" {
@@ -3795,7 +3796,7 @@ func TestSyncEHRMSEmployeesMapsEnglishAliasesToDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Created != 1 || result.DepartmentsUpserted != 1 {
+	if result.Created != 1 || result.DepartmentsUpserted != 1 || result.PositionsUpserted != 1 {
 		t.Fatalf("unexpected eHRMS sync result: %+v", result)
 	}
 
@@ -3840,8 +3841,59 @@ func TestSyncEHRMSEmployeesMapsEnglishAliasesToDatabase(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok || position.Name != "經理" {
-		t.Fatalf("expected position record for job_title_zh, got ok=%v position=%+v", ok, position)
+	if !ok || position.Name != "經理" || position.Code != "0901" {
+		t.Fatalf("expected position record for job_code, got ok=%v position=%+v", ok, position)
+	}
+}
+
+// TestSyncEHRMSEmployeesBuildsOrgHierarchyAndPositions 驗證 eHRMS 同步會建立組織層級與崗位目錄。
+func TestSyncEHRMSEmployeesBuildsOrgHierarchyAndPositions(t *testing.T) {
+	rows := []domain.EHRMSEmployeeRecord{
+		{
+			"員工編號":   "E1",
+			"中文姓名":   "員工一",
+			"到職日期":   "2026/06/01",
+			"在職狀態":   "在職",
+			"部門代碼":   "C01",
+			"部門中文名稱": "Corporate",
+			"職務代碼":   "0901",
+			"職務中文名稱": "經理",
+			"身份類別名稱": "一般員工",
+			"身份證號":   "A123456789",
+		},
+		{
+			"員工編號":   "E2",
+			"中文姓名":   "員工二",
+			"到職日期":   "2026/06/01",
+			"在職狀態":   "在職",
+			"部門代碼":   "C0101",
+			"部門中文名稱": "Sales",
+			"職務代碼":   "0704",
+			"職務中文名稱": "工程師",
+			"身份類別名稱": "一般員工",
+			"身份證號":   "A223456789",
+		},
+	}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "import", Scope: "all"},
+		{Resource: "hr.employee", Action: "read", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{rows: rows}})
+	ctx.ApprovalConfirmed = true
+
+	result, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.DepartmentsUpserted != 2 || result.PositionsUpserted != 2 {
+		t.Fatalf("unexpected sync counts: %+v", result)
+	}
+	child, ok, err := store.GetOrgUnit(context.Background(), "tenant-1", "C0101")
+	if err != nil || !ok || child.ParentID != "C01" {
+		t.Fatalf("expected child org unit parent, got ok=%v unit=%+v err=%v", ok, child, err)
+	}
+	position, ok, err := store.GetPosition(context.Background(), "tenant-1", "0704")
+	if err != nil || !ok || position.Name != "工程師" {
+		t.Fatalf("expected synced position, got ok=%v position=%+v err=%v", ok, position, err)
 	}
 }
 
@@ -5652,7 +5704,7 @@ func (c fakeEHRMSClient) ListEmployees(context.Context) ([]domain.EHRMSEmployeeR
 
 // ListAttendance 驗證考勤。
 func (c fakeEHRMSClient) ListAttendance(context.Context) ([]domain.EHRMSAttendanceRecord, error) {
-	return c.attendanceRows, c.attendanceErr
+	return ehrms.NormalizeAttendanceRecords(c.attendanceRows), c.attendanceErr
 }
 
 // PutObject 驗證 put 物件。

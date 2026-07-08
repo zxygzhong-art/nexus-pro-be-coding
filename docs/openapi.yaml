@@ -1307,6 +1307,35 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+  /v1/iam/permission-sets/{id}:
+    patch:
+      summary: Update permission set
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Updated permission set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+  /v1/iam/accounts:
+    get:
+      summary: List IAM accounts
+      parameters:
+        - {name: q, in: query, schema: {type: string}}
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200":
+          description: IAM account page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
   /v1/iam/permission-set-assignments:
     get:
       summary: List permission set assignments
@@ -1326,6 +1355,20 @@ paths:
       responses:
         "201":
           description: Created permission set assignment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+  /v1/iam/permission-set-assignments/{id}:
+    delete:
+      summary: Delete permission set assignment
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Deleted permission set assignment
           content:
             application/json:
               schema:
@@ -5482,6 +5525,7 @@ components:
         updated: {type: integer}
         failed: {type: integer}
         departments_upserted: {type: integer}
+        positions_upserted: {type: integer}
         mode: {type: string, enum: [create, update, upsert]}
         results:
           type: array

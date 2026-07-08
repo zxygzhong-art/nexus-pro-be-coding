@@ -43,6 +43,9 @@ func (c FormApprovalClient) StartFormApprovalWorkflow(ctx context.Context, input
 	if c.client == nil {
 		return domain.E(503, "temporal_workflow_unavailable", "temporal form approval workflow client is required")
 	}
+	if err := domain.ValidateFormApprovalWorkflowStart(input); err != nil {
+		return err
+	}
 	workflowID := domain.FormApprovalWorkflowID(input.TenantID, input.FormInstanceID)
 	signal := domain.FormApprovalWorkflowSignal{
 		TenantID:       input.TenantID,

@@ -376,7 +376,7 @@ func (s *Store) ListActiveGroupMembershipsForAccount(execCtx context.Context, te
 	items, err := s.q.ListActiveGroupMembershipsForAccount(tenantContext(execCtx, tenantID), sqlc.ListActiveGroupMembershipsForAccountParams{
 		TenantID:  tenantID,
 		AccountID: accountID,
-		At:        timestamptz(at),
+		ValidFrom: timestamptz(at),
 	})
 	if err != nil {
 		return nil, err
@@ -837,9 +837,9 @@ func (s *Store) GetFieldPolicy(execCtx context.Context, tenantID, id string) (do
 // ListFieldPolicies 從儲存層列出欄位政策。
 func (s *Store) ListFieldPolicies(execCtx context.Context, tenantID, applicationCode, resourceType string) ([]domain.FieldPolicy, error) {
 	items, err := s.q.ListAuthzFieldPolicies(tenantContext(execCtx, tenantID), sqlc.ListAuthzFieldPoliciesParams{
-		TenantID:        tenantID,
-		ApplicationCode: applicationCode,
-		ResourceType:    resourceType,
+		TenantID: tenantID,
+		Column2:  applicationCode,
+		Column3:  resourceType,
 	})
 	if err != nil {
 		return nil, err

@@ -69,7 +69,9 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 		return EHRMSEmployeeSyncResponse{}, BadRequest("fetch eHRMS employees failed")
 	}
 	response := EHRMSEmployeeSyncResponse{Fetched: len(records), Mode: mode}
-	departments := ehrmsOrgUnits(ctx.TenantID, records, c.Now())
+	now := c.Now()
+	departments := ehrmsOrgUnits(ctx.TenantID, records, now)
+	positions := ehrmsPositions(ctx.TenantID, records, now)
 	var validationErr error
 	if err := c.withTransaction(ctx, func(tx HRService) error {
 		for _, unit := range departments {
@@ -84,6 +86,11 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 				before = OrgUnit{}
 			}
 			if err := tx.Service.syncOrgUnitRelationshipTuples(ctx, before, unit); err != nil {
+				return err
+			}
+		}
+		for _, position := range positions {
+			if err := tx.store.UpsertPosition(goContext(ctx), position); err != nil {
 				return err
 			}
 		}
@@ -132,6 +139,7 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 		response.Created = created
 		response.Updated = updated
 		response.DepartmentsUpserted = len(departments)
+		response.PositionsUpserted = len(positions)
 		response.Results = results
 		if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeImported), "ehrms", map[string]any{
 			"source":               "ehrms",
@@ -139,6 +147,7 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 			"created":              created,
 			"updated":              updated,
 			"departments_upserted": len(departments),
+			"positions_upserted":   len(positions),
 			"mode":                 mode,
 		}); err != nil {
 			return err
@@ -150,6 +159,7 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 			"updated":              updated,
 			"failed":               response.Failed,
 			"departments_upserted": len(departments),
+			"positions_upserted":   len(positions),
 			"mode":                 mode,
 		}); err != nil {
 			return err
@@ -169,6 +179,7 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 		"created", response.Created,
 		"updated", response.Updated,
 		"departments_upserted", response.DepartmentsUpserted,
+		"positions_upserted", response.PositionsUpserted,
 		"mode", mode,
 	)
 	return response, nil
@@ -240,11 +251,13 @@ func (c HRService) prepareEHRMSSyncWrites(ctx RequestContext, account Account, d
 // ehrmsEmployeeCandidate 處理 eHRMS 員工候選的服務流程。
 func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmployeeRecord, rowNumber int) (Employee, []RowError, error) {
 	status := normalizeEmployeeStatus(ehrmsValue(record, ehrmsFieldEmployeeStatus))
+	positionCode := ehrmsValue(record, ehrmsFieldPositionCode)
 	input := CreateEmployeeInput{
 		EmployeeNo:       ehrmsValue(record, ehrmsFieldEmployeeNo),
 		Name:             ehrmsValue(record, ehrmsFieldName),
 		OrgUnitID:        ehrmsValue(record, ehrmsFieldDepartmentCode),
-		Position:         utils.FirstNonEmpty(ehrmsValue(record, ehrmsFieldPositionName), ehrmsValue(record, ehrmsFieldPositionCode)),
+		PositionID:       positionCode,
+		Position:         utils.FirstNonEmpty(ehrmsValue(record, ehrmsFieldPositionName), positionCode),
 		Category:         ehrmsEmployeeCategory(record),
 		Status:           status,
 		EmploymentStatus: status,
@@ -296,7 +309,7 @@ func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmploy
 		}
 		return Employee{}, nil, err
 	}
-	if err := c.ensureEmployeePosition(ctx, &employee, true); err != nil {
+	if err := c.ensureEmployeePosition(ctx, &employee, positionCode == ""); err != nil {
 		errors, ok := employeeImportErrorsFromError(rowNumber, err)
 		if ok {
 			return Employee{}, errors, nil
@@ -429,26 +442,118 @@ func (idx employeeUniqueIndex) fieldErrors(employee Employee) []FieldError {
 	return fields
 }
 
-// ehrmsOrgUnits 處理 eHRMS 組織單位。
+// ehrmsOrgUnits 從員工資料彙整組織單位，並依部門代碼推導上級關係。
 func ehrmsOrgUnits(tenantID string, records []EHRMSEmployeeRecord, now time.Time) []OrgUnit {
-	unitsByID := map[string]OrgUnit{}
+	codes := map[string]struct{}{}
+	for _, record := range records {
+		if code := ehrmsValue(record, ehrmsFieldDepartmentCode); code != "" {
+			codes[code] = struct{}{}
+		}
+	}
+	unitsByID := make(map[string]OrgUnit, len(codes))
 	for _, record := range records {
 		code := ehrmsValue(record, ehrmsFieldDepartmentCode)
 		if code == "" {
 			continue
 		}
 		name := utils.FirstNonEmpty(ehrmsValue(record, ehrmsFieldDepartmentName), ehrmsValue(record, ehrmsFieldDepartmentEN), code)
-		unitsByID[code] = OrgUnit{ID: code, TenantID: tenantID, Code: code, Name: name, Path: []string{code}, CreatedAt: now}
+		unitsByID[code] = OrgUnit{
+			ID:        code,
+			TenantID:  tenantID,
+			Code:      code,
+			Name:      name,
+			ParentID:  ehrmsInferParentDeptCode(code, codes),
+			CreatedAt: now,
+		}
 	}
-	ids := make([]string, 0, len(unitsByID))
-	for id := range unitsByID {
+	for code := range unitsByID {
+		unit := unitsByID[code]
+		unit.Path = ehrmsOrgUnitPath(code, unitsByID)
+		unitsByID[code] = unit
+	}
+	return ehrmsSortedOrgUnits(unitsByID)
+}
+
+// ehrmsPositions 從員工資料彙整崗位目錄。
+func ehrmsPositions(tenantID string, records []EHRMSEmployeeRecord, now time.Time) []Position {
+	byCode := map[string]Position{}
+	for _, record := range records {
+		code := ehrmsValue(record, ehrmsFieldPositionCode)
+		if code == "" {
+			continue
+		}
+		name := utils.FirstNonEmpty(ehrmsValue(record, ehrmsFieldPositionName), ehrmsValue(record, ehrmsFieldPositionEN), code)
+		if existing, ok := byCode[code]; ok && strings.TrimSpace(existing.Name) != "" {
+			continue
+		}
+		byCode[code] = Position{
+			ID:        code,
+			TenantID:  tenantID,
+			Code:      code,
+			Name:      name,
+			Status:    string(PositionStatusActive),
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+	}
+	ids := make([]string, 0, len(byCode))
+	for id := range byCode {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
-	units := make([]OrgUnit, 0, len(ids))
+	positions := make([]Position, 0, len(ids))
 	for _, id := range ids {
-		units = append(units, unitsByID[id])
+		positions = append(positions, byCode[id])
 	}
+	return positions
+}
+
+// ehrmsInferParentDeptCode 以最長有效前綴推導上級部門代碼。
+func ehrmsInferParentDeptCode(code string, codes map[string]struct{}) string {
+	for length := len(code) - 1; length > 0; length-- {
+		prefix := code[:length]
+		if _, ok := codes[prefix]; ok {
+			return prefix
+		}
+	}
+	return ""
+}
+
+// ehrmsOrgUnitPath 依 parent 鏈建立 org unit path。
+func ehrmsOrgUnitPath(code string, unitsByID map[string]OrgUnit) []string {
+	path := []string{}
+	current := code
+	seen := map[string]struct{}{}
+	for current != "" {
+		if _, ok := seen[current]; ok {
+			break
+		}
+		seen[current] = struct{}{}
+		path = append([]string{current}, path...)
+		unit, ok := unitsByID[current]
+		if !ok {
+			break
+		}
+		current = strings.TrimSpace(unit.ParentID)
+	}
+	if len(path) == 0 {
+		return []string{code}
+	}
+	return path
+}
+
+// ehrmsSortedOrgUnits 依 path 深度排序，確保上級組織先 upsert。
+func ehrmsSortedOrgUnits(unitsByID map[string]OrgUnit) []OrgUnit {
+	units := make([]OrgUnit, 0, len(unitsByID))
+	for _, unit := range unitsByID {
+		units = append(units, unit)
+	}
+	sort.Slice(units, func(i, j int) bool {
+		if len(units[i].Path) != len(units[j].Path) {
+			return len(units[i].Path) < len(units[j].Path)
+		}
+		return units[i].ID < units[j].ID
+	})
 	return units
 }
 

@@ -255,7 +255,7 @@ func LoadE() (Config, error) {
 		EHRMSSyncRunOnStart: envBool("EHRMS_SYNC_RUN_ON_START", false, &problems),
 
 		EHRMSAttendanceSyncEnabled:    envBool("EHRMS_ATTENDANCE_SYNC_ENABLED", false, &problems),
-		EHRMSAttendanceSyncInterval:   envDuration("EHRMS_ATTENDANCE_SYNC_INTERVAL", 24*time.Hour, &problems),
+		EHRMSAttendanceSyncInterval:   envDuration("EHRMS_ATTENDANCE_SYNC_INTERVAL", 30*24*time.Hour, &problems),
 		EHRMSAttendanceSyncMode:       env("EHRMS_ATTENDANCE_SYNC_MODE", "upsert"),
 		EHRMSAttendanceSyncTenantID:   strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_TENANT_ID")),
 		EHRMSAttendanceSyncAccountID:  strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID")),
@@ -387,6 +387,9 @@ func ehrmsAttendanceSyncConfigProblems(c Config) []string {
 		if _, err := time.Parse(time.DateOnly, since); err != nil {
 			problems = append(problems, "EHRMS_ATTENDANCE_SYNC_SINCE must be YYYY-MM-DD")
 		}
+	}
+	if c.EHRMSAttendanceSyncInterval > 0 && c.EHRMSAttendanceSyncInterval < 30*24*time.Hour {
+		problems = append(problems, "EHRMS_ATTENDANCE_SYNC_INTERVAL must be at least 720h (30 days)")
 	}
 	return problems
 }

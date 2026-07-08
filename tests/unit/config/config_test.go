@@ -160,7 +160,7 @@ func TestEHRMSConfig(t *testing.T) {
 	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
 	t.Setenv("EHRMS_SYNC_RUN_ON_START", "true")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "true")
-	t.Setenv("EHRMS_ATTENDANCE_SYNC_INTERVAL", "6h")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_INTERVAL", "720h")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_MODE", "upsert")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_TENANT_ID", "tenant-att")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID", "acct-att")
@@ -177,7 +177,7 @@ func TestEHRMSConfig(t *testing.T) {
 	if !cfg.EHRMSSyncEnabled || cfg.EHRMSSyncInterval != 12*time.Hour || cfg.EHRMSSyncMode != "upsert" || cfg.EHRMSSyncTenantID != "tenant-1" || cfg.EHRMSSyncAccountID != "acct-1" || !cfg.EHRMSSyncRunOnStart {
 		t.Fatalf("unexpected eHRMS sync config: %+v", cfg)
 	}
-	if !cfg.EHRMSAttendanceSyncEnabled || cfg.EHRMSAttendanceSyncInterval != 6*time.Hour || cfg.EHRMSAttendanceSyncMode != "upsert" || cfg.EHRMSAttendanceSyncTenantID != "tenant-att" || cfg.EHRMSAttendanceSyncAccountID != "acct-att" || !cfg.EHRMSAttendanceSyncRunOnStart || cfg.EHRMSAttendanceSyncSince != "2026-06-01" {
+	if !cfg.EHRMSAttendanceSyncEnabled || cfg.EHRMSAttendanceSyncInterval != 720*time.Hour || cfg.EHRMSAttendanceSyncMode != "upsert" || cfg.EHRMSAttendanceSyncTenantID != "tenant-att" || cfg.EHRMSAttendanceSyncAccountID != "acct-att" || !cfg.EHRMSAttendanceSyncRunOnStart || cfg.EHRMSAttendanceSyncSince != "2026-06-01" {
 		t.Fatalf("unexpected eHRMS attendance sync config: %+v", cfg)
 	}
 }
@@ -235,6 +235,21 @@ func TestEHRMSAttendanceSyncConfigDefaultsToEmployeeActor(t *testing.T) {
 	}
 	if cfg.EHRMSAttendanceSyncTenantID != "tenant-1" || cfg.EHRMSAttendanceSyncAccountID != "acct-1" {
 		t.Fatalf("expected attendance sync actor to default from employee sync, got %+v", cfg)
+	}
+}
+
+// TestEHRMSAttendanceSyncConfigValidatesMinimumInterval 驗證 eHRMS 考勤 sync interval 至少 30 天。
+func TestEHRMSAttendanceSyncConfigValidatesMinimumInterval(t *testing.T) {
+	t.Setenv("EHRMS_BASE_URL", "https://ehrms.example")
+	t.Setenv("EHRMS_API_KEY", "test-key")
+	t.Setenv("EHRMS_SYNC_TENANT_ID", "tenant-1")
+	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "true")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_INTERVAL", "24h")
+
+	_, err := config.LoadE()
+	if err == nil || !strings.Contains(err.Error(), "EHRMS_ATTENDANCE_SYNC_INTERVAL must be at least 720h") {
+		t.Fatalf("expected minimum attendance sync interval error, got %v", err)
 	}
 }
 

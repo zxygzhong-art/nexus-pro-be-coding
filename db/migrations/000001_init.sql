@@ -40,12 +40,35 @@ CREATE TABLE user_groups (
     description text NOT NULL DEFAULT '',
     member_account_ids text[] NOT NULL DEFAULT '{}',
     permission_set_ids text[] NOT NULL DEFAULT '{}',
+    source_template_key text NOT NULL DEFAULT '',
+    source_package_version text NOT NULL DEFAULT '',
     version bigint NOT NULL DEFAULT 1,
     created_at timestamptz NOT NULL,
     CONSTRAINT user_groups_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX user_groups_tenant_id_idx ON user_groups (tenant_id);
+CREATE INDEX user_groups_source_template_idx ON user_groups (tenant_id, source_template_key) WHERE source_template_key <> '';
+
+CREATE TABLE authz_group_memberships (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    user_group_id text NOT NULL,
+    account_id text NOT NULL,
+    valid_from timestamptz NOT NULL,
+    valid_until timestamptz,
+    source text NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'import', 'template', 'approval', 'migration')),
+    approval_instance_id text NOT NULL DEFAULT '',
+    created_by text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    CONSTRAINT authz_group_memberships_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT authz_group_memberships_unique_idx UNIQUE (tenant_id, user_group_id, account_id),
+    CONSTRAINT authz_group_memberships_group_fk FOREIGN KEY (tenant_id, user_group_id) REFERENCES user_groups (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT authz_group_memberships_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX authz_group_memberships_group_idx ON authz_group_memberships (tenant_id, user_group_id, created_at);
+CREATE INDEX authz_group_memberships_account_active_idx ON authz_group_memberships (tenant_id, account_id, valid_from, valid_until);
 
 CREATE TABLE permission_sets (
     id text PRIMARY KEY,
@@ -53,11 +76,67 @@ CREATE TABLE permission_sets (
     name text NOT NULL,
     description text NOT NULL DEFAULT '',
     permissions jsonb NOT NULL DEFAULT '[]'::jsonb,
+    source_template_key text NOT NULL DEFAULT '',
+    source_package_version text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
     CONSTRAINT permission_sets_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX permission_sets_tenant_id_idx ON permission_sets (tenant_id);
+CREATE INDEX permission_sets_source_template_idx ON permission_sets (tenant_id, source_template_key) WHERE source_template_key <> '';
+
+CREATE TABLE permissions (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    application text NOT NULL,
+    resource text NOT NULL,
+    action text NOT NULL,
+    permission_type text NOT NULL CHECK (permission_type IN ('menu', 'api', 'button', 'field', 'scope')),
+    menu_key text NOT NULL DEFAULT '',
+    name text NOT NULL,
+    description text NOT NULL DEFAULT '',
+    high_risk boolean NOT NULL DEFAULT false,
+    severity text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    CONSTRAINT permissions_tenant_id_id_idx UNIQUE (tenant_id, id)
+);
+
+CREATE UNIQUE INDEX permissions_tenant_catalog_unique_idx ON permissions (
+    tenant_id, application, resource, action, permission_type
+);
+CREATE INDEX permissions_tenant_id_idx ON permissions (tenant_id);
+CREATE INDEX permissions_tenant_menu_key_idx ON permissions (tenant_id, menu_key) WHERE menu_key <> '';
+
+CREATE TABLE menu_items (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    key text NOT NULL,
+    label text NOT NULL,
+    path text NOT NULL DEFAULT '',
+    icon text NOT NULL DEFAULT '',
+    parent_key text NOT NULL DEFAULT '',
+    sort_order integer NOT NULL DEFAULT 0,
+    created_at timestamptz NOT NULL,
+    CONSTRAINT menu_items_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT menu_items_tenant_key_idx UNIQUE (tenant_id, key)
+);
+
+CREATE INDEX menu_items_tenant_parent_idx ON menu_items (tenant_id, parent_key, sort_order);
+
+CREATE TABLE permission_set_items (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    permission_set_id text NOT NULL,
+    permission_id text NOT NULL,
+    created_at timestamptz NOT NULL,
+    CONSTRAINT permission_set_items_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT permission_set_items_unique_idx UNIQUE (tenant_id, permission_set_id, permission_id),
+    CONSTRAINT permission_set_items_set_fk FOREIGN KEY (tenant_id, permission_set_id) REFERENCES permission_sets (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT permission_set_items_permission_fk FOREIGN KEY (tenant_id, permission_id) REFERENCES permissions (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX permission_set_items_tenant_set_idx ON permission_set_items (tenant_id, permission_set_id);
+CREATE INDEX permission_set_items_tenant_permission_idx ON permission_set_items (tenant_id, permission_id);
 
 CREATE TABLE assumable_roles (
     id text PRIMARY KEY,
@@ -69,11 +148,74 @@ CREATE TABLE assumable_roles (
     trust_policy jsonb NOT NULL DEFAULT '{}'::jsonb,
     permission_boundary jsonb NOT NULL DEFAULT '{}'::jsonb,
     session_duration_seconds integer NOT NULL DEFAULT 28800 CHECK (session_duration_seconds > 0),
+    source_template_key text NOT NULL DEFAULT '',
+    source_package_version text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
     CONSTRAINT assumable_roles_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX assumable_roles_tenant_id_idx ON assumable_roles (tenant_id);
+CREATE INDEX assumable_roles_source_template_idx ON assumable_roles (tenant_id, source_template_key) WHERE source_template_key <> '';
+
+-- Permission package registry and templates are platform-global immutable snapshots.
+-- Tenant isolation is enforced on permission_package_imports and instantiated tenant artifacts.
+CREATE TABLE permission_packages (
+    id text PRIMARY KEY,
+    application_code text NOT NULL,
+    version text NOT NULL,
+    status text NOT NULL CHECK (status IN ('draft', 'published', 'deprecated')),
+    content jsonb NOT NULL,
+    checksum text NOT NULL,
+    created_at timestamptz NOT NULL,
+    published_at timestamptz,
+    CONSTRAINT permission_packages_application_version_idx UNIQUE (application_code, version)
+);
+
+CREATE INDEX permission_packages_application_idx ON permission_packages (application_code, status, version);
+
+CREATE TABLE permission_set_templates (
+    id text PRIMARY KEY,
+    package_id text NOT NULL REFERENCES permission_packages(id) ON DELETE CASCADE,
+    template_key text NOT NULL,
+    name text NOT NULL,
+    content jsonb NOT NULL DEFAULT '{}'::jsonb,
+    version text NOT NULL,
+    CONSTRAINT permission_set_templates_package_key_idx UNIQUE (package_id, template_key)
+);
+
+CREATE TABLE user_group_templates (
+    id text PRIMARY KEY,
+    package_id text NOT NULL REFERENCES permission_packages(id) ON DELETE CASCADE,
+    template_key text NOT NULL,
+    name text NOT NULL,
+    content jsonb NOT NULL DEFAULT '{}'::jsonb,
+    version text NOT NULL,
+    CONSTRAINT user_group_templates_package_key_idx UNIQUE (package_id, template_key)
+);
+
+CREATE TABLE assumable_role_templates (
+    id text PRIMARY KEY,
+    package_id text NOT NULL REFERENCES permission_packages(id) ON DELETE CASCADE,
+    template_key text NOT NULL,
+    name text NOT NULL,
+    content jsonb NOT NULL DEFAULT '{}'::jsonb,
+    version text NOT NULL,
+    CONSTRAINT assumable_role_templates_package_key_idx UNIQUE (package_id, template_key)
+);
+
+CREATE TABLE permission_package_imports (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    package_id text NOT NULL REFERENCES permission_packages(id) ON DELETE RESTRICT,
+    version text NOT NULL,
+    imported_at timestamptz NOT NULL,
+    imported_by text NOT NULL DEFAULT '',
+    artifact_id_map jsonb NOT NULL DEFAULT '{}'::jsonb,
+    CONSTRAINT permission_package_imports_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT permission_package_imports_unique_idx UNIQUE (tenant_id, package_id, version)
+);
+
+CREATE INDEX permission_package_imports_tenant_idx ON permission_package_imports (tenant_id, imported_at DESC);
 
 CREATE TABLE user_identities (
     id text PRIMARY KEY,
@@ -226,6 +368,43 @@ CREATE TABLE org_units (
 CREATE INDEX org_units_tenant_id_idx ON org_units (tenant_id);
 CREATE INDEX org_units_path_idx ON org_units USING gin (path);
 
+CREATE TABLE positions (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    code text NOT NULL,
+    name text NOT NULL,
+    org_unit_id text NOT NULL DEFAULT '',
+    level text NOT NULL DEFAULT '',
+    status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    description text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT positions_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT positions_tenant_code_idx UNIQUE (tenant_id, code)
+);
+
+CREATE INDEX positions_tenant_status_idx ON positions (tenant_id, status, name);
+CREATE INDEX positions_tenant_org_unit_idx ON positions (tenant_id, org_unit_id) WHERE org_unit_id <> '';
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION validate_position_references()
+RETURNS trigger AS $$
+BEGIN
+    IF NEW.org_unit_id <> '' AND NOT EXISTS (
+        SELECT 1 FROM org_units WHERE tenant_id = NEW.tenant_id AND id = NEW.org_unit_id
+    ) THEN
+        RAISE EXCEPTION 'position org_unit_id % does not exist in tenant %', NEW.org_unit_id, NEW.tenant_id
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+-- +goose StatementEnd
+
+CREATE TRIGGER positions_reference_check
+BEFORE INSERT OR UPDATE OF tenant_id, org_unit_id ON positions
+FOR EACH ROW EXECUTE FUNCTION validate_position_references();
+
 CREATE TABLE employees (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -237,6 +416,7 @@ CREATE TABLE employees (
     org_unit_id text NOT NULL DEFAULT '',
     account_id text NOT NULL DEFAULT '',
     manager_employee_id text,
+    position_id text NOT NULL DEFAULT '',
     position text NOT NULL DEFAULT '',
     category text NOT NULL DEFAULT '',
     status text NOT NULL,
@@ -280,11 +460,31 @@ CREATE TRIGGER employees_reference_check
 BEFORE INSERT OR UPDATE OF tenant_id, account_id, org_unit_id ON employees
 FOR EACH ROW EXECUTE FUNCTION validate_employee_references();
 
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION validate_employee_position_reference()
+RETURNS trigger AS $$
+BEGIN
+    IF NEW.position_id <> '' AND NOT EXISTS (
+        SELECT 1 FROM positions WHERE tenant_id = NEW.tenant_id AND id = NEW.position_id
+    ) THEN
+        RAISE EXCEPTION 'employee position_id % does not exist in tenant %', NEW.position_id, NEW.tenant_id
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+-- +goose StatementEnd
+
+CREATE TRIGGER employees_position_reference_check
+BEFORE INSERT OR UPDATE OF tenant_id, position_id ON employees
+FOR EACH ROW EXECUTE FUNCTION validate_employee_position_reference();
+
 CREATE INDEX employees_tenant_id_idx ON employees (tenant_id);
 CREATE INDEX employees_tenant_status_idx ON employees (tenant_id, employment_status, status);
 CREATE INDEX employees_tenant_category_idx ON employees (tenant_id, category);
 CREATE INDEX employees_tenant_org_unit_idx ON employees (tenant_id, org_unit_id);
 CREATE INDEX employees_tenant_manager_employee_idx ON employees (tenant_id, manager_employee_id) WHERE manager_employee_id IS NOT NULL;
+CREATE INDEX employees_tenant_position_idx ON employees (tenant_id, position_id) WHERE position_id <> '';
 CREATE INDEX employees_tenant_hire_date_idx ON employees (tenant_id, hire_date);
 CREATE INDEX employees_keyword_trgm_idx ON employees USING gin (
     lower(
@@ -334,6 +534,27 @@ CREATE TABLE employee_import_sessions (
 );
 
 CREATE INDEX employee_import_sessions_tenant_id_idx ON employee_import_sessions (tenant_id, created_at DESC);
+
+CREATE TABLE employment_contracts (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    employee_id text NOT NULL,
+    contract_type text NOT NULL CHECK (contract_type IN ('fulltime', 'parttime', 'contractor', 'intern')),
+    contract_no text NOT NULL DEFAULT '',
+    start_date timestamptz NOT NULL,
+    end_date timestamptz,
+    status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'active', 'expired', 'terminated', 'renewed')),
+    attachment_object_key text NOT NULL DEFAULT '',
+    notes text NOT NULL DEFAULT '',
+    version bigint NOT NULL DEFAULT 1 CHECK (version > 0),
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT employment_contracts_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT employment_contracts_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id)
+);
+
+CREATE INDEX employment_contracts_tenant_employee_idx ON employment_contracts (tenant_id, employee_id, start_date DESC);
+CREATE INDEX employment_contracts_tenant_status_idx ON employment_contracts (tenant_id, status, end_date);
 
 CREATE TABLE attendance_policies (
     id text NOT NULL,
@@ -563,6 +784,28 @@ CREATE INDEX attendance_clock_records_tenant_employee_date_idx ON attendance_clo
 CREATE INDEX attendance_clock_records_tenant_status_idx ON attendance_clock_records (tenant_id, record_status, clocked_at DESC);
 CREATE UNIQUE INDEX attendance_clock_records_one_accepted_idx ON attendance_clock_records (tenant_id, employee_id, work_date, direction) WHERE record_status = 'accepted';
 
+CREATE TABLE attendance_daily_summaries (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    employee_id text NOT NULL,
+    work_date text NOT NULL,
+    shift_start text NOT NULL DEFAULT '',
+    shift_end text NOT NULL DEFAULT '',
+    shift_hours double precision NOT NULL DEFAULT 0,
+    daily_hours double precision NOT NULL DEFAULT 0,
+    clock_hours double precision NOT NULL DEFAULT 0,
+    source text NOT NULL DEFAULT 'manual',
+    external_ref text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT attendance_daily_summaries_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
+    CONSTRAINT attendance_daily_summaries_employee_date_idx UNIQUE (tenant_id, employee_id, work_date)
+);
+
+CREATE INDEX attendance_daily_summaries_tenant_employee_date_idx ON attendance_daily_summaries (tenant_id, employee_id, work_date DESC);
+CREATE INDEX attendance_daily_summaries_tenant_source_date_idx ON attendance_daily_summaries (tenant_id, source, work_date DESC);
+CREATE UNIQUE INDEX attendance_daily_summaries_external_ref_idx ON attendance_daily_summaries (tenant_id, external_ref) WHERE external_ref <> '';
+
 CREATE TABLE attendance_correction_requests (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -728,6 +971,7 @@ CREATE TABLE audit_logs (
 CREATE INDEX audit_logs_tenant_id_created_at_idx ON audit_logs (tenant_id, created_at DESC);
 CREATE INDEX audit_logs_actor_account_id_idx ON audit_logs (actor_account_id);
 
+
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenants FORCE ROW LEVEL SECURITY;
 
@@ -735,10 +979,20 @@ ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accounts FORCE ROW LEVEL SECURITY;
 ALTER TABLE user_groups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_groups FORCE ROW LEVEL SECURITY;
+ALTER TABLE authz_group_memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_group_memberships FORCE ROW LEVEL SECURITY;
 ALTER TABLE permission_sets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE permission_sets FORCE ROW LEVEL SECURITY;
+ALTER TABLE permissions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE permissions FORCE ROW LEVEL SECURITY;
+ALTER TABLE menu_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE menu_items FORCE ROW LEVEL SECURITY;
+ALTER TABLE permission_set_items ENABLE ROW LEVEL SECURITY;
+ALTER TABLE permission_set_items FORCE ROW LEVEL SECURITY;
 ALTER TABLE assumable_roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assumable_roles FORCE ROW LEVEL SECURITY;
+ALTER TABLE permission_package_imports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE permission_package_imports FORCE ROW LEVEL SECURITY;
 ALTER TABLE user_identities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_identities FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_data_scopes ENABLE ROW LEVEL SECURITY;
@@ -757,12 +1011,16 @@ ALTER TABLE identity_provisioning_outbox ENABLE ROW LEVEL SECURITY;
 ALTER TABLE identity_provisioning_outbox FORCE ROW LEVEL SECURITY;
 ALTER TABLE org_units ENABLE ROW LEVEL SECURITY;
 ALTER TABLE org_units FORCE ROW LEVEL SECURITY;
+ALTER TABLE positions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE positions FORCE ROW LEVEL SECURITY;
 ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employees FORCE ROW LEVEL SECURITY;
 ALTER TABLE employee_number_sequences ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employee_number_sequences FORCE ROW LEVEL SECURITY;
 ALTER TABLE employee_import_sessions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employee_import_sessions FORCE ROW LEVEL SECURITY;
+ALTER TABLE employment_contracts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE employment_contracts FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_policies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_policies FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_balances ENABLE ROW LEVEL SECURITY;
@@ -789,6 +1047,8 @@ ALTER TABLE attendance_shift_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_shift_assignments FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_clock_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_clock_records FORCE ROW LEVEL SECURITY;
+ALTER TABLE attendance_daily_summaries ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_daily_summaries FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_correction_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_correction_requests FORCE ROW LEVEL SECURITY;
 ALTER TABLE overtime_requests ENABLE ROW LEVEL SECURITY;
@@ -808,6 +1068,7 @@ ALTER TABLE outbox_events FORCE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs FORCE ROW LEVEL SECURITY;
 
+
 -- tenants table 沒有 tenant_id 欄位；每一列以自身 id 隔離。
 CREATE POLICY tenant_isolation_tenants ON tenants USING (id = current_setting('app.tenant_id', true)) WITH CHECK (id = current_setting('app.tenant_id', true));
 
@@ -821,8 +1082,13 @@ CREATE POLICY system_read_tenants ON tenants FOR SELECT USING (current_setting('
 
 CREATE POLICY tenant_isolation_accounts ON accounts USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_user_groups ON user_groups USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_authz_group_memberships ON authz_group_memberships USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_permission_sets ON permission_sets USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_permissions ON permissions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_menu_items ON menu_items USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_permission_set_items ON permission_set_items USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_assumable_roles ON assumable_roles USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_permission_package_imports ON permission_package_imports USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_user_identities ON user_identities USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_authz_data_scopes ON authz_data_scopes USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_authz_field_policies ON authz_field_policies USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -832,9 +1098,13 @@ CREATE POLICY tenant_isolation_authz_relationship_tuples ON authz_relationship_t
 CREATE POLICY tenant_isolation_authz_permission_versions ON authz_permission_versions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_identity_provisioning_outbox ON identity_provisioning_outbox USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_org_units ON org_units USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_positions ON positions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY system_task_positions ON positions USING (current_setting('app.system_task', true) = 'on') WITH CHECK (current_setting('app.system_task', true) = 'on');
 CREATE POLICY tenant_isolation_employees ON employees USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_employee_number_sequences ON employee_number_sequences USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_employee_import_sessions ON employee_import_sessions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_employment_contracts ON employment_contracts USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY system_task_employment_contracts ON employment_contracts USING (current_setting('app.system_task', true) = 'on') WITH CHECK (current_setting('app.system_task', true) = 'on');
 CREATE POLICY tenant_isolation_attendance_policies ON attendance_policies USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_balances ON leave_balances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_form_templates ON form_templates USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -848,6 +1118,7 @@ CREATE POLICY tenant_isolation_attendance_worksites ON attendance_worksites USIN
 CREATE POLICY tenant_isolation_attendance_shifts ON attendance_shifts USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_shift_assignments ON attendance_shift_assignments USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_clock_records ON attendance_clock_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_attendance_daily_summaries ON attendance_daily_summaries USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_correction_requests ON attendance_correction_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_overtime_requests ON overtime_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_platform_task_items ON platform_task_items USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -869,6 +1140,7 @@ DROP TABLE IF EXISTS platform_task_todos;
 DROP TABLE IF EXISTS platform_task_items;
 DROP TABLE IF EXISTS overtime_requests;
 DROP TABLE IF EXISTS attendance_correction_requests;
+DROP TABLE IF EXISTS attendance_daily_summaries;
 DROP TABLE IF EXISTS attendance_clock_records;
 DROP TABLE IF EXISTS attendance_shift_assignments;
 DROP TABLE IF EXISTS attendance_shifts;
@@ -882,9 +1154,11 @@ DROP TABLE IF EXISTS form_instances;
 DROP TABLE IF EXISTS form_templates;
 DROP TABLE IF EXISTS leave_balances;
 DROP TABLE IF EXISTS attendance_policies;
+DROP TABLE IF EXISTS employment_contracts;
 DROP TABLE IF EXISTS employee_import_sessions;
 DROP TABLE IF EXISTS employee_number_sequences;
 DROP TABLE IF EXISTS employees;
+DROP TABLE IF EXISTS positions;
 DROP TABLE IF EXISTS org_units;
 DROP TABLE IF EXISTS identity_provisioning_outbox;
 DROP TABLE IF EXISTS authz_permission_versions;
@@ -894,10 +1168,21 @@ DROP TABLE IF EXISTS authz_permission_set_assignments;
 DROP TABLE IF EXISTS authz_field_policies;
 DROP TABLE IF EXISTS authz_data_scopes;
 DROP TABLE IF EXISTS user_identities;
+DROP TABLE IF EXISTS permission_package_imports;
+DROP TABLE IF EXISTS assumable_role_templates;
+DROP TABLE IF EXISTS user_group_templates;
+DROP TABLE IF EXISTS permission_set_templates;
+DROP TABLE IF EXISTS permission_packages;
 DROP TABLE IF EXISTS assumable_roles;
+DROP TABLE IF EXISTS permission_set_items;
+DROP TABLE IF EXISTS menu_items;
+DROP TABLE IF EXISTS permissions;
 DROP TABLE IF EXISTS permission_sets;
+DROP TABLE IF EXISTS authz_group_memberships;
 DROP TABLE IF EXISTS user_groups;
 DROP TABLE IF EXISTS accounts;
 DROP TABLE IF EXISTS tenants;
-DROP FUNCTION IF EXISTS validate_authz_assignment_references();
+DROP FUNCTION IF EXISTS validate_employee_position_reference();
 DROP FUNCTION IF EXISTS validate_employee_references();
+DROP FUNCTION IF EXISTS validate_position_references();
+DROP FUNCTION IF EXISTS validate_authz_assignment_references();

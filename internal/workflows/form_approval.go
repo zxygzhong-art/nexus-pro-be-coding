@@ -25,6 +25,9 @@ const (
 
 // FormApprovalWorkflow is the Temporal authority for a submitted form approval.
 func FormApprovalWorkflow(ctx workflow.Context, input domain.FormApprovalWorkflowStart) error {
+	if err := domain.ValidateFormApprovalWorkflowStart(input); err != nil {
+		return err
+	}
 	workflow.GetVersion(ctx, formApprovalVersionChangeID, workflow.DefaultVersion, 1)
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
@@ -111,10 +114,11 @@ func (a *Activities) LoadFormApprovalProjection(ctx context.Context, input domai
 	if a == nil || a.Service == nil {
 		return domain.FormApprovalProjection{}, nil
 	}
-	return a.Service.Workflow().LoadTemporalFormApprovalProjection(domain.RequestContext{
+	projection, err = a.Service.Workflow().LoadTemporalFormApprovalProjection(domain.RequestContext{
 		Context:  ctx,
 		TenantID: input.TenantID,
 	}, input.FormInstanceID)
+	return projection, nonRetryableActivityError(err)
 }
 
 // ApplyFormApprovalSignal applies an approve/reject/return/withdraw signal to the read model.
@@ -124,13 +128,14 @@ func (a *Activities) ApplyFormApprovalSignal(ctx context.Context, signal domain.
 	if a == nil || a.Service == nil {
 		return domain.FormApprovalProjection{}, nil
 	}
-	return a.Service.Workflow().ApplyTemporalFormApprovalSignal(domain.RequestContext{
+	projection, err = a.Service.Workflow().ApplyTemporalFormApprovalSignal(domain.RequestContext{
 		Context:   ctx,
 		TenantID:  signal.TenantID,
 		AccountID: signal.AccountID,
 		RequestID: signal.RequestID,
 		TraceID:   signal.TraceID,
 	}, signal)
+	return projection, nonRetryableActivityError(err)
 }
 
 // RecordFormApprovalReminder writes a reminder notification and audit log.
@@ -140,11 +145,12 @@ func (a *Activities) RecordFormApprovalReminder(ctx context.Context, reminder do
 	if a == nil || a.Service == nil {
 		return nil
 	}
-	return a.Service.Workflow().RecordTemporalFormApprovalReminder(domain.RequestContext{
+	err = a.Service.Workflow().RecordTemporalFormApprovalReminder(domain.RequestContext{
 		Context:   ctx,
 		TenantID:  reminder.TenantID,
 		AccountID: "system",
 	}, reminder)
+	return nonRetryableActivityError(err)
 }
 
 func applyFormApprovalSignal(ctx workflow.Context, current domain.FormApprovalProjection, signal domain.FormApprovalWorkflowSignal) (domain.FormApprovalProjection, error) {

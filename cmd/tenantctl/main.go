@@ -151,6 +151,15 @@ func runTemporalBackfillFormWorkflows(args []string) error {
 	}
 
 	for _, item := range items {
+		if strings.TrimSpace(item.ID) == "" {
+			result.Skipped++
+			result.Items = append(result.Items, temporalBackfillFormWorkflowResultItem{
+				FormInstanceID: item.ID,
+				Status:         item.Status,
+				Action:         "skip_empty_form_instance_id",
+			})
+			continue
+		}
 		if !temporalBackfillCandidateStatus(item.Status) {
 			result.Skipped++
 			continue
