@@ -28,10 +28,6 @@ func (c WorkspaceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace.PATCH("/organization/employees/:id/manager", c.routes.Handle("hr.employee", "update", c.updateOrganizationManager, PathParam(PathParamID)))
 	workspace.GET("/attendance", c.routes.Handle("attendance.clock", "read", c.attendance))
 	workspace.GET("/turnover", c.routes.Handle("hr.employee", "read", c.turnover))
-	workspace.GET("/admins", c.routes.Handle("iam.permission_set_assignment", "read", c.admins))
-	workspace.POST("/admins", c.routes.Handle("iam.permission_set_assignment", "create", c.createAdmin))
-	workspace.PATCH("/admins/:id/permissions", c.routes.Handle("iam.permission_set_assignment", "update", c.updateAdminPermissions, PathParam(PathParamID)))
-	workspace.DELETE("/admins/:id", c.routes.Handle("iam.permission_set_assignment", "delete", c.deleteAdmin, PathParam(PathParamID)))
 	workspace.GET("/forms", c.routes.Handle("workflow.form_template", "read", c.formDesign))
 	workspace.POST("/forms", c.routes.Handle("workflow.form_template", "create", c.createFormDesign))
 	workspace.PATCH("/forms/:id", c.routes.Handle("workflow.form_template", "update", c.updateFormDesign, PathParam(PathParamID)))
@@ -129,54 +125,6 @@ func (c WorkspaceCtrl) attendance(w http.ResponseWriter, r *http.Request, ctx do
 		Year:  workspaceIntQuery(r, "year"),
 		Month: workspaceIntQuery(r, "month"),
 	})
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// admins 處理 admins 的 HTTP 請求。
-func (c WorkspaceCtrl) admins(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
-	item, err := c.svc.WorkspaceAdmins(ctx)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// createAdmin 處理建立管理員的 HTTP 請求。
-func (c WorkspaceCtrl) createAdmin(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.CreateWorkspaceAdminInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.CreateWorkspaceAdmin(ctx, input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusCreated, item)
-	return nil
-}
-
-// updateAdminPermissions 處理管理員權限的 HTTP 請求。
-func (c WorkspaceCtrl) updateAdminPermissions(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.UpdateWorkspaceAdminPermissionsInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.UpdateWorkspaceAdminPermissions(ctx, r.PathValue(PathParamID), input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// deleteAdmin 處理刪除管理員的 HTTP 請求。
-func (c WorkspaceCtrl) deleteAdmin(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	item, err := c.svc.DeleteWorkspaceAdmin(ctx, r.PathValue(PathParamID))
 	if err != nil {
 		return err
 	}

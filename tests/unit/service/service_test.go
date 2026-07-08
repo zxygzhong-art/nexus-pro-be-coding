@@ -1988,7 +1988,15 @@ func TestLeaveWorkflowReviewUpdatesRequestAndBalance(t *testing.T) {
 	})
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now})
 	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 24, UpdatedAt: now})
-	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
+		ID:        "ft-leave",
+		TenantID:  "tenant-1",
+		Key:       "leave-request",
+		Name:      "請假申請單",
+		Schema:    workflowEnabledTemplateSchema("acct-reviewer"),
+		CreatedAt: now,
+	})
+	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
 	employeeCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"}
 	reviewerCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-reviewer"}
 
@@ -2001,6 +2009,7 @@ func TestLeaveWorkflowReviewUpdatesRequestAndBalance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	startWorkflowRunForTest(t, svc, store, "tenant-1", approvedRequest.FormInstanceID, "acct-employee")
 	if _, err := svc.Workflow().ApproveForm(reviewerCtx, approvedRequest.FormInstanceID, domain.ApproveFormInput{}); err != nil {
 		t.Fatal(err)
 	}
@@ -2028,6 +2037,7 @@ func TestLeaveWorkflowReviewUpdatesRequestAndBalance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	startWorkflowRunForTest(t, svc, store, "tenant-1", rejectedRequest.FormInstanceID, "acct-employee")
 	if _, err := svc.Workflow().RejectForm(reviewerCtx, rejectedRequest.FormInstanceID, domain.RejectFormInput{Reason: "missing attachment"}); err != nil {
 		t.Fatal(err)
 	}
@@ -2070,6 +2080,14 @@ func TestCorrectionWorkflowApproveCreatesClockRecord(t *testing.T) {
 		DirectPermissionSetIDs: []string{"ps-workflow-reviewer"},
 		CreatedAt:              now,
 	})
+	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
+		ID:        "ft-punch-fix",
+		TenantID:  "tenant-1",
+		Key:       "punch-fix",
+		Name:      "HR-005 補卡單",
+		Schema:    workflowEnabledTemplateSchema("acct-reviewer"),
+		CreatedAt: now,
+	})
 	reviewerCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-reviewer"}
 
 	pending, err := svc.Attendance().CreateAttendanceCorrection(employeeCtx, domain.CreateAttendanceCorrectionInput{
@@ -2080,6 +2098,7 @@ func TestCorrectionWorkflowApproveCreatesClockRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	startWorkflowRunForTest(t, svc, store, "tenant-1", pending.FormInstanceID, "acct-employee")
 	if _, err := svc.Workflow().ApproveForm(reviewerCtx, pending.FormInstanceID, domain.ApproveFormInput{Reason: "verified"}); err != nil {
 		t.Fatal(err)
 	}
@@ -2122,6 +2141,14 @@ func TestCorrectionWorkflowRejectMarksRejectedWithoutRecord(t *testing.T) {
 		DirectPermissionSetIDs: []string{"ps-workflow-reviewer"},
 		CreatedAt:              now,
 	})
+	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
+		ID:        "ft-punch-fix",
+		TenantID:  "tenant-1",
+		Key:       "punch-fix",
+		Name:      "HR-005 補卡單",
+		Schema:    workflowEnabledTemplateSchema("acct-reviewer"),
+		CreatedAt: now,
+	})
 	reviewerCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-reviewer"}
 
 	pending, err := svc.Attendance().CreateAttendanceCorrection(employeeCtx, domain.CreateAttendanceCorrectionInput{
@@ -2132,6 +2159,7 @@ func TestCorrectionWorkflowRejectMarksRejectedWithoutRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	startWorkflowRunForTest(t, svc, store, "tenant-1", pending.FormInstanceID, "acct-employee")
 	if _, err := svc.Workflow().RejectForm(reviewerCtx, pending.FormInstanceID, domain.RejectFormInput{Reason: "not enough evidence"}); err != nil {
 		t.Fatal(err)
 	}
@@ -2192,7 +2220,15 @@ func TestOvertimeWorkflowReviewUpdatesRequestAndCreditsBalance(t *testing.T) {
 		CreatedAt:              now,
 	})
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now})
-	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
+		ID:        "ft-overtime",
+		TenantID:  "tenant-1",
+		Key:       "overtime-approval",
+		Name:      "加班核准申請單",
+		Schema:    workflowEnabledTemplateSchema("acct-reviewer"),
+		CreatedAt: now,
+	})
+	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
 	employeeCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"}
 	reviewerCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-reviewer"}
 
@@ -2210,6 +2246,7 @@ func TestOvertimeWorkflowReviewUpdatesRequestAndCreditsBalance(t *testing.T) {
 	if approvedRequest.Status != "pending_approval" || approvedRequest.FormInstanceID == "" {
 		t.Fatalf("expected pending overtime request with form evidence, got %+v", approvedRequest)
 	}
+	startWorkflowRunForTest(t, svc, store, "tenant-1", approvedRequest.FormInstanceID, "acct-employee")
 	if _, err := svc.Workflow().ApproveForm(reviewerCtx, approvedRequest.FormInstanceID, domain.ApproveFormInput{}); err != nil {
 		t.Fatal(err)
 	}
@@ -2242,6 +2279,7 @@ func TestOvertimeWorkflowReviewUpdatesRequestAndCreditsBalance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	startWorkflowRunForTest(t, svc, store, "tenant-1", rejectedRequest.FormInstanceID, "acct-employee")
 	if _, err := svc.Workflow().RejectForm(reviewerCtx, rejectedRequest.FormInstanceID, domain.RejectFormInput{Reason: "no need"}); err != nil {
 		t.Fatal(err)
 	}
@@ -2388,7 +2426,7 @@ func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 		Schema:    workflowEnabledTemplateSchema(),
 		CreatedAt: now,
 	})
-	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-self"}
 
 	draft, err := svc.Workflow().SaveFormDraft(ctx, domain.SaveFormDraftInput{
@@ -2528,7 +2566,7 @@ func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
 		Schema:    workflowEnabledTemplateSchema("acct-admin"),
 		CreatedAt: now,
 	})
-	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
 	applicantCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-applicant"}
 	submitted, err := svc.Workflow().SubmitForm(applicantCtx, domain.SubmitFormInput{
 		TemplateKey: "leave-request",
@@ -2610,6 +2648,7 @@ func TestWorkflowBulkReviewFormsReturnsPerItemResults(t *testing.T) {
 		TenantID:  "tenant-1",
 		Key:       "general",
 		Name:      "通用签呈",
+		Schema:    workflowEnabledTemplateSchema("acct-admin"),
 		CreatedAt: now,
 	})
 	for _, item := range []domain.FormInstance{
@@ -2619,7 +2658,10 @@ func TestWorkflowBulkReviewFormsReturnsPerItemResults(t *testing.T) {
 	} {
 		_ = store.UpsertFormInstance(context.Background(), item)
 	}
-	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	for _, id := range []string{"fi-approve", "fi-return", "fi-direct-return"} {
+		startWorkflowRunForTest(t, svc, store, "tenant-1", id, "acct-applicant")
+	}
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
 	approved, err := svc.Workflow().BulkReviewForms(ctx, domain.BulkReviewFormsInput{
@@ -2740,7 +2782,7 @@ func TestWorkflowNotificationsFollowSubmitAndReview(t *testing.T) {
 		Schema:    workflowEnabledTemplateSchema("acct-admin"),
 		CreatedAt: now,
 	})
-	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
 
 	submitted, err := svc.Workflow().SubmitForm(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-applicant"},
@@ -5019,123 +5061,6 @@ func TestPlatformWorkspaceOrganizationManagerUpdatePersistsHierarchy(t *testing.
 	}
 }
 
-// TestPlatformWorkspaceAdminMutationsPersistPermissionMatrix 驗證平台工作區管理員 mutations persist 權限矩陣。
-func TestPlatformWorkspaceAdminMutationsPersistPermissionMatrix(t *testing.T) {
-	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
-	store := memory.NewStore()
-	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
-	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "HQ", Path: []string{"ou-1"}, CreatedAt: now})
-	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
-		ID:       "ps-workspace-owner",
-		TenantID: "tenant-1",
-		Name:     "Workspace Owner",
-		Permissions: []domain.Permission{
-			{Resource: "hr.employee", Action: "read", Scope: "all"},
-			{Resource: "iam.permission_set_assignment", Action: "read", Scope: "all"},
-			{Resource: "iam.permission_set_assignment", Action: "create", Scope: "all"},
-			{Resource: "iam.permission_set_assignment", Action: "update", Scope: "all"},
-			{Resource: "iam.permission_set_assignment", Action: "delete", Scope: "all"},
-		},
-		CreatedAt: now,
-	})
-	_ = store.UpsertAccount(context.Background(), domain.Account{
-		ID:                     "acct-owner",
-		TenantID:               "tenant-1",
-		DisplayName:            "Owner",
-		Status:                 "active",
-		DirectPermissionSetIDs: []string{"ps-workspace-owner"},
-		CreatedAt:              now,
-	})
-	_ = store.UpsertAccount(context.Background(), domain.Account{
-		ID:          "acct-target",
-		TenantID:    "tenant-1",
-		DisplayName: "Target Admin",
-		EmployeeID:  "emp-target",
-		Status:      "active",
-		CreatedAt:   now.Add(time.Minute),
-	})
-	_ = store.UpsertEmployee(context.Background(), domain.Employee{
-		ID:               "emp-target",
-		TenantID:         "tenant-1",
-		EmployeeNo:       "E2002",
-		Name:             "Target Admin",
-		CompanyEmail:     "target@example.com",
-		OrgUnitID:        "ou-1",
-		Position:         "HRBP",
-		Status:           "active",
-		EmploymentStatus: "active",
-		CreatedAt:        now.Add(time.Minute),
-	})
-	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-owner", ApprovalConfirmed: true}
-
-	admins, err := svc.Workspace().CreateWorkspaceAdmin(ctx, domain.CreateWorkspaceAdminInput{
-		EmployeeID: "E2002",
-		Permissions: map[string]string{
-			"employees":    "view",
-			"forms":        "edit",
-			"admins":       "edit",
-			"organization": "none",
-			"salary":       "none",
-			"leave-policy": "none",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	created := findWorkspaceAdmin(t, admins.Admins, "E2002")
-	if created.Permissions["employees"] != "view" || created.Permissions["forms"] != "edit" || created.Permissions["admins"] != "edit" {
-		t.Fatalf("expected created admin permissions to project from IAM, got %+v", created.Permissions)
-	}
-	managedSet, ok, err := store.GetPermissionSet(context.Background(), "tenant-1", "ps-workspace-admin-acct-target")
-	if err != nil || !ok {
-		t.Fatalf("managed permission set lookup failed ok=%v err=%v", ok, err)
-	}
-	if !permissionSetContains(managedSet, "workflow.form_instance", "update") || permissionSetContains(managedSet, "hr.salary", "read") {
-		t.Fatalf("unexpected managed permission set after create: %+v", managedSet.Permissions)
-	}
-
-	admins, err = svc.Workspace().UpdateWorkspaceAdminPermissions(ctx, "E2002", domain.UpdateWorkspaceAdminPermissionsInput{
-		Permissions: map[string]string{
-			"employees":    "edit",
-			"forms":        "none",
-			"admins":       "view",
-			"organization": "none",
-			"salary":       "none",
-			"leave-policy": "none",
-		},
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	updated := findWorkspaceAdmin(t, admins.Admins, "E2002")
-	if updated.Permissions["employees"] != "edit" || updated.Permissions["forms"] != "none" || updated.Permissions["admins"] != "view" {
-		t.Fatalf("expected updated admin permissions to replace previous grants, got %+v", updated.Permissions)
-	}
-	managedSet, ok, err = store.GetPermissionSet(context.Background(), "tenant-1", "ps-workspace-admin-acct-target")
-	if err != nil || !ok {
-		t.Fatalf("managed permission set lookup failed ok=%v err=%v", ok, err)
-	}
-	if permissionSetContains(managedSet, "workflow.form_instance", "update") || !permissionSetContains(managedSet, "hr.employee", "update") {
-		t.Fatalf("expected managed permission set to be replaced, got %+v", managedSet.Permissions)
-	}
-
-	admins, err = svc.Workspace().DeleteWorkspaceAdmin(ctx, "E2002")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, ok := workspaceAdminByID(admins.Admins, "E2002"); ok {
-		t.Fatalf("expected target admin to disappear after delete, got %+v", admins.Admins)
-	}
-	managedSet, ok, err = store.GetPermissionSet(context.Background(), "tenant-1", "ps-workspace-admin-acct-target")
-	if err != nil || !ok {
-		t.Fatalf("managed permission set lookup failed ok=%v err=%v", ok, err)
-	}
-	if len(managedSet.Permissions) != 0 {
-		t.Fatalf("expected managed permission set to be empty after delete, got %+v", managedSet.Permissions)
-	}
-}
-
 // TestPlatformWorkspaceFormDesignMutationsPersistTemplateSchema 驗證平台工作區表單 design mutations persist 範本 schema。
 func TestPlatformWorkspaceFormDesignMutationsPersistTemplateSchema(t *testing.T) {
 	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
@@ -5250,26 +5175,6 @@ func findWorkspaceOrganizationRow(t *testing.T, rows []domain.WorkspaceOrganizat
 	return domain.WorkspaceOrganizationRow{}
 }
 
-// findWorkspaceAdmin 驗證 find 工作區管理員。
-func findWorkspaceAdmin(t *testing.T, admins []domain.WorkspaceAdmin, id string) domain.WorkspaceAdmin {
-	t.Helper()
-	admin, ok := workspaceAdminByID(admins, id)
-	if !ok {
-		t.Fatalf("missing workspace admin %s in %+v", id, admins)
-	}
-	return admin
-}
-
-// workspaceAdminByID 驗證工作區管理員 by ID。
-func workspaceAdminByID(admins []domain.WorkspaceAdmin, id string) (domain.WorkspaceAdmin, bool) {
-	for _, admin := range admins {
-		if admin.ID == id {
-			return admin, true
-		}
-	}
-	return domain.WorkspaceAdmin{}, false
-}
-
 // findPlatformFormDesignForm 驗證 find 平台表單 design 表單。
 func findPlatformFormDesignForm(t *testing.T, forms []domain.PlatformFormDesignForm, id string) domain.PlatformFormDesignForm {
 	t.Helper()
@@ -5302,16 +5207,6 @@ func workspaceDesignFlag(t *testing.T, schema map[string]any, key string) bool {
 		t.Fatalf("missing boolean %s in workspace_design %+v", key, workspace)
 	}
 	return value
-}
-
-// permissionSetContains 驗證權限集合 contains。
-func permissionSetContains(set domain.PermissionSet, resource, action string) bool {
-	for _, permission := range set.Permissions {
-		if permission.Resource == resource && string(permission.Action) == action {
-			return true
-		}
-	}
-	return false
 }
 
 // stringPtr 驗證字串 ptr。
@@ -5487,7 +5382,7 @@ func newAttendanceFixture(t *testing.T) (*memory.Store, *service.Service, domain
 			UpdatedAt:     now,
 		})
 	}
-	svc := service.New(store, service.Options{Now: func() time.Time { return currentNow }})
+	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return currentNow }})
 	setNow := func(next time.Time) { currentNow = next.UTC().Truncate(time.Second) }
 	return store, svc,
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"},

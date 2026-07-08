@@ -209,6 +209,36 @@ func (q *Queries) DeleteAuthzDataScope(ctx context.Context, arg DeleteAuthzDataS
 	return i, err
 }
 
+const deleteAuthzPermissionSetAssignment = `-- name: DeleteAuthzPermissionSetAssignment :one
+DELETE FROM authz_permission_set_assignments
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, principal_type, principal_id, permission_set_id, effect, data_scope_id, condition_id, starts_at, expires_at, created_at
+`
+
+type DeleteAuthzPermissionSetAssignmentParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) DeleteAuthzPermissionSetAssignment(ctx context.Context, arg DeleteAuthzPermissionSetAssignmentParams) (AuthzPermissionSetAssignment, error) {
+	row := q.db.QueryRow(ctx, deleteAuthzPermissionSetAssignment, arg.TenantID, arg.ID)
+	var i AuthzPermissionSetAssignment
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.PrincipalType,
+		&i.PrincipalID,
+		&i.PermissionSetID,
+		&i.Effect,
+		&i.DataScopeID,
+		&i.ConditionID,
+		&i.StartsAt,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getAuthzPermissionVersion = `-- name: GetAuthzPermissionVersion :one
 SELECT tenant_id, version, updated_at FROM authz_permission_versions
 WHERE tenant_id = $1

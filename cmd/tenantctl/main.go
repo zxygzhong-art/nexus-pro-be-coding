@@ -15,8 +15,13 @@ import (
 	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/platform/auth"
 	postgresplatform "nexus-pro-be/internal/platform/postgres"
+	temporalplatform "nexus-pro-be/internal/platform/temporal"
 	postgresrepo "nexus-pro-be/internal/repository/postgres"
 	"nexus-pro-be/internal/service"
+
+	enumspb "go.temporal.io/api/enums/v1"
+	"go.temporal.io/api/serviceerror"
+	sdkclient "go.temporal.io/sdk/client"
 )
 
 // main 執行 tenantctl。
@@ -38,6 +43,8 @@ func run(args []string) error {
 		return runProvision(args[1:])
 	case "openfga-backfill":
 		return runOpenFGABackfill(args[1:])
+	case "temporal-backfill-form-workflows":
+		return runTemporalBackfillFormWorkflows(args[1:])
 	case "openfga-grant-tenant-admin":
 		return runOpenFGAGrantTenantAdmin(args[1:], false)
 	case "openfga-grant-tenant-security-admin":
@@ -48,6 +55,174 @@ func run(args []string) error {
 		printUsage(os.Stderr)
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+type temporalBackfillFormWorkflowsResult struct {
+	TenantID string                                   `json:"tenant_id"`
+	DryRun   bool                                     `json:"dry_run"`
+	Scanned  int                                      `json:"scanned"`
+	Started  int                                      `json:"started"`
+	Skipped  int                                      `json:"skipped"`
+	Failed   int                                      `json:"failed"`
+	Items    []temporalBackfillFormWorkflowResultItem `json:"items"`
+}
+
+type temporalBackfillFormWorkflowResultItem struct {
+	FormInstanceID string `json:"form_instance_id"`
+	Status         string `json:"status"`
+	WorkflowRunID  string `json:"workflow_run_id,omitempty"`
+	Action         string `json:"action"`
+	Error          string `json:"error,omitempty"`
+}
+
+// runTemporalBackfillFormWorkflows backfills Temporal executions for active form approvals.
+func runTemporalBackfillFormWorkflows(args []string) error {
+	fs := flag.NewFlagSet("tenantctl temporal-backfill-form-workflows", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	tenantID := fs.String("tenant-id", "", "tenant id to backfill")
+	databaseURL := fs.String("database-url", strings.TrimSpace(os.Getenv("DATABASE_URL")), "Postgres database URL")
+	temporalHostPort := fs.String("temporal-host-port", firstNonEmpty(os.Getenv("TEMPORAL_HOST_PORT"), "127.0.0.1:27233"), "Temporal host:port")
+	temporalNamespace := fs.String("temporal-namespace", firstNonEmpty(os.Getenv("TEMPORAL_NAMESPACE"), "default"), "Temporal namespace")
+	temporalTaskQueue := fs.String("temporal-task-queue", firstNonEmpty(os.Getenv("TEMPORAL_TASK_QUEUE"), "nexus-workflows"), "Temporal task queue")
+	timeout := fs.Duration("timeout", 5*time.Minute, "operation timeout")
+	dryRun := fs.Bool("dry-run", false, "scan candidates without starting Temporal workflows")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if strings.TrimSpace(*tenantID) == "" {
+		return errors.New("--tenant-id is required")
+	}
+	if strings.TrimSpace(*databaseURL) == "" {
+		return errors.New("DATABASE_URL or --database-url is required")
+	}
+	if !*dryRun && strings.TrimSpace(*temporalHostPort) == "" {
+		return errors.New("TEMPORAL_HOST_PORT or --temporal-host-port is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	pool, err := postgresplatform.OpenPool(ctx, *databaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	store := postgresrepo.NewStore(pool)
+	if _, ok, err := store.GetTenant(ctx, *tenantID); err != nil {
+		return err
+	} else if !ok {
+		return fmt.Errorf("tenant %s not found", *tenantID)
+	}
+
+	result := temporalBackfillFormWorkflowsResult{TenantID: strings.TrimSpace(*tenantID), DryRun: *dryRun}
+	items, err := store.ListFormInstances(ctx, result.TenantID)
+	if err != nil {
+		return err
+	}
+
+	var workflowClient temporalplatform.FormApprovalClient
+	var temporalClient sdkclient.Client
+	if !*dryRun {
+		client, err := temporalplatform.Dial(ctx, temporalplatform.Config{
+			HostPort:  *temporalHostPort,
+			Namespace: *temporalNamespace,
+			TaskQueue: *temporalTaskQueue,
+		})
+		if err != nil {
+			return err
+		}
+		temporalClient = client
+		workflowClient = temporalplatform.NewFormApprovalClient(client, *temporalTaskQueue)
+	}
+	if temporalClient != nil {
+		defer temporalClient.Close()
+	}
+
+	for _, item := range items {
+		if !temporalBackfillCandidateStatus(item.Status) {
+			result.Skipped++
+			continue
+		}
+		result.Scanned++
+		run, ok, err := store.GetWorkflowRunByFormInstance(ctx, result.TenantID, item.ID)
+		if err != nil {
+			result.Failed++
+			result.Items = append(result.Items, temporalBackfillFormWorkflowResultItem{
+				FormInstanceID: item.ID,
+				Status:         item.Status,
+				Action:         "error",
+				Error:          err.Error(),
+			})
+			continue
+		}
+		if ok && temporalBackfillTerminalRunStatus(run.Status) {
+			result.Skipped++
+			result.Items = append(result.Items, temporalBackfillFormWorkflowResultItem{
+				FormInstanceID: item.ID,
+				Status:         item.Status,
+				WorkflowRunID:  run.ID,
+				Action:         "skip_terminal_run",
+			})
+			continue
+		}
+		resultItem := temporalBackfillFormWorkflowResultItem{
+			FormInstanceID: item.ID,
+			Status:         item.Status,
+			Action:         "start",
+		}
+		start := domain.FormApprovalWorkflowStart{
+			TenantID:                result.TenantID,
+			FormInstanceID:          item.ID,
+			DefaultRemindAfterHours: domain.DefaultFormApprovalRemindAfterHours,
+		}
+		if ok {
+			start.RunID = run.ID
+			start.StageDefinitionsJSON = run.StageDefinitionsJSON
+			resultItem.WorkflowRunID = run.ID
+		}
+		if *dryRun {
+			resultItem.Action = "would_start"
+			result.Items = append(result.Items, resultItem)
+			continue
+		}
+		active, err := temporalBackfillWorkflowActive(ctx, temporalClient, result.TenantID, item.ID)
+		if err != nil {
+			result.Failed++
+			resultItem.Action = "error"
+			resultItem.Error = err.Error()
+			result.Items = append(result.Items, resultItem)
+			continue
+		}
+		if active {
+			result.Skipped++
+			resultItem.Action = "skip_active_workflow"
+			result.Items = append(result.Items, resultItem)
+			continue
+		}
+		if err := workflowClient.StartFormApprovalWorkflow(ctx, start); err != nil {
+			result.Failed++
+			resultItem.Action = "error"
+			resultItem.Error = err.Error()
+			result.Items = append(result.Items, resultItem)
+			continue
+		}
+		result.Started++
+		result.Items = append(result.Items, resultItem)
+	}
+
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(result); err != nil {
+		return err
+	}
+	if result.Failed > 0 {
+		return fmt.Errorf("failed to backfill %d form workflows", result.Failed)
+	}
+	return nil
 }
 
 // runProvision 執行租戶開通。
@@ -308,12 +483,16 @@ func printUsage(out *os.File) {
   tenantctl provision --tenant-id <id> --tenant-name <name> --admin-email <email> --keycloak-sub <subject>
   tenantctl provision --tenant-id <id> --tenant-name <name> --admin-email <email> --provision-keycloak
   tenantctl openfga-backfill --tenant-id <id>
+  tenantctl temporal-backfill-form-workflows --tenant-id <id> [--dry-run]
   tenantctl openfga-grant-tenant-admin --tenant-id <id> --account-id <account-id>
   tenantctl openfga-grant-tenant-security-admin --tenant-id <id> --account-id <account-id>
   tenantctl openfga-grant-agent-tool --tenant-id <id> --tool-id <tool-id> --account-id <account-id> [--relation runner|approver]
 
 Required environment:
   DATABASE_URL
+  TEMPORAL_HOST_PORT
+  TEMPORAL_NAMESPACE
+  TEMPORAL_TASK_QUEUE
 
 Required for --provision-keycloak:
   KEYCLOAK_ISSUER_URL
@@ -344,4 +523,37 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func temporalBackfillCandidateStatus(status string) bool {
+	switch strings.TrimSpace(strings.ToLower(status)) {
+	case "submitted", "in_review", "pending", "pending_review":
+		return true
+	default:
+		return false
+	}
+}
+
+func temporalBackfillTerminalRunStatus(status string) bool {
+	switch strings.TrimSpace(strings.ToLower(status)) {
+	case domain.WorkflowRunStatusCompleted, domain.WorkflowRunStatusCancelled, domain.WorkflowRunStatusReturned:
+		return true
+	default:
+		return false
+	}
+}
+
+func temporalBackfillWorkflowActive(ctx context.Context, client sdkclient.Client, tenantID, formInstanceID string) (bool, error) {
+	if client == nil {
+		return false, nil
+	}
+	description, err := client.DescribeWorkflow(ctx, domain.FormApprovalWorkflowID(tenantID, formInstanceID), "")
+	if err != nil {
+		var notFound *serviceerror.NotFound
+		if errors.As(err, &notFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	return description.Status == enumspb.WORKFLOW_EXECUTION_STATUS_RUNNING, nil
 }

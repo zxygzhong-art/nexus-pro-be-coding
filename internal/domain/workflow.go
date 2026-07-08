@@ -171,6 +171,7 @@ type WorkflowStageConfig struct {
 	Field            string   `json:"field,omitempty"`
 	Operator         string   `json:"operator,omitempty"`
 	Value            string   `json:"value,omitempty"`
+	RemindAfterHours int      `json:"remind_after_hours,omitempty"`
 	Levels           []int    `json:"levels,omitempty"`
 	TrueNextStageID  string   `json:"true_next_stage_id,omitempty"`
 	FalseNextStageID string   `json:"false_next_stage_id,omitempty"`
@@ -237,10 +238,10 @@ type WorkflowAction struct {
 
 // WorkflowFormStep 定義前端流程進度條節點。
 type WorkflowFormStep struct {
-	StageID   string                   `json:"stage_id"`
-	Label     string                   `json:"label"`
-	Detail    string                   `json:"detail,omitempty"`
-	State     string                   `json:"state"`
+	StageID   string                     `json:"stage_id"`
+	Label     string                     `json:"label"`
+	Detail    string                     `json:"detail,omitempty"`
+	State     string                     `json:"state"`
 	Assignees []WorkflowFormStepAssignee `json:"assignees,omitempty"`
 }
 

@@ -1,6 +1,7 @@
 package service_test
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -41,5 +42,58 @@ func TestWorkflowSubmitCreatesInReviewRun(t *testing.T) {
 	run, ok, err := store.GetWorkflowRunByFormInstance(t.Context(), "tenant-1", instance.ID)
 	if err != nil || !ok || run.Status != domain.WorkflowRunStatusRunning {
 		t.Fatalf("expected running workflow run, got ok=%v err=%v run=%+v", ok, err, run)
+	}
+}
+
+func TestWorkflowTemporalSignalFailsWhenWorkflowMissing(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	svc, applicantCtx, _, fakeTemporal := newWorkflowEngineFixtureWithFake(t, now, "acct-admin")
+
+	instance, err := svc.Workflow().SubmitForm(applicantCtx, domain.SubmitFormInput{
+		TemplateKey: "leave-request",
+		Payload:     map[string]any{"desc": "missing workflow"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fakeTemporal.forgetWorkflow("tenant-1", instance.ID)
+
+	_, err = svc.Workflow().ApproveForm(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}, instance.ID, domain.ApproveFormInput{Reason: "missing"})
+	if err == nil {
+		t.Fatal("expected missing workflow error")
+	}
+	var appErr *domain.AppError
+	if !errors.As(err, &appErr) || appErr.Status != 404 || appErr.Code != "workflow_not_found" {
+		t.Fatalf("expected workflow_not_found 404, got %T %v", err, err)
+	}
+	if len(fakeTemporal.signals) != 1 {
+		t.Fatalf("expected one Temporal signal attempt, got %d", len(fakeTemporal.signals))
+	}
+}
+
+func TestReturnFormUsesTemporalSignal(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	svc, applicantCtx, store, fakeTemporal := newWorkflowEngineFixtureWithFake(t, now, "acct-admin")
+
+	instance, err := svc.Workflow().SubmitForm(applicantCtx, domain.SubmitFormInput{
+		TemplateKey: "leave-request",
+		Payload:     map[string]any{"desc": "return"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	returned, err := svc.Workflow().ReturnForm(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}, instance.ID, domain.ReturnFormInput{Reason: "please update"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if returned.Status != domain.WorkflowFormStatusReturned {
+		t.Fatalf("expected returned status, got %+v", returned)
+	}
+	if len(fakeTemporal.signals) != 1 || fakeTemporal.signals[0].Action != domain.FormApprovalWorkflowActionReturn {
+		t.Fatalf("expected one return signal, got %+v", fakeTemporal.signals)
+	}
+	run, ok, err := store.GetWorkflowRunByFormInstance(t.Context(), "tenant-1", instance.ID)
+	if err != nil || !ok || run.Status != domain.WorkflowRunStatusReturned {
+		t.Fatalf("expected returned workflow run, got ok=%v err=%v run=%+v", ok, err, run)
 	}
 }

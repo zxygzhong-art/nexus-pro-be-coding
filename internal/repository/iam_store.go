@@ -46,6 +46,7 @@ type IAMStore interface {
 	ListPermissionPackageImports(ctx context.Context, tenantID string) ([]domain.PermissionPackageImport, error)
 
 	UpsertPermissionSetAssignment(context.Context, domain.PermissionSetAssignment) error
+	DeletePermissionSetAssignment(ctx context.Context, tenantID, id string) (domain.PermissionSetAssignment, bool, error)
 	ListPermissionSetAssignments(ctx context.Context, tenantID string) ([]domain.PermissionSetAssignment, error)
 	ListPermissionSetAssignmentsForPrincipal(ctx context.Context, tenantID, principalType, principalID string) ([]domain.PermissionSetAssignment, error)
 

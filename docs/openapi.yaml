@@ -2087,87 +2087,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
-  /v1/workspace/admins:
-    get:
-      summary: Get workspace administrator settings
-      responses:
-        "200":
-          description: Workspace administrator list, candidates, and permission sections
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    post:
-      summary: Grant workspace administrator permissions
-      parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateWorkspaceAdminRequest"
-      responses:
-        "201":
-          description: Refreshed workspace administrator settings
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/workspace/admins/{id}/permissions:
-    patch:
-      summary: Replace workspace administrator permissions
-      parameters:
-        - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateWorkspaceAdminPermissionsRequest"
-      responses:
-        "200":
-          description: Refreshed workspace administrator settings
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/workspace/admins/{id}:
-    delete:
-      summary: Clear workspace-managed administrator permissions
-      parameters:
-        - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
-      responses:
-        "200":
-          description: Refreshed workspace administrator settings
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkspaceAdminsDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
   /v1/workspace/forms:
     get:
       summary: Get workspace form design settings
@@ -4368,12 +4287,6 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/WorkspaceAttendance"
-    WorkspaceAdminsDataResponse:
-      type: object
-      required: [data]
-      properties:
-        data:
-          $ref: "#/components/schemas/WorkspaceAdmins"
     WorkspaceAuditLogPageDataResponse:
       type: object
       required: [data]
@@ -4573,63 +4486,6 @@ components:
         clock:
           type: object
           additionalProperties: true
-    WorkspaceAdmins:
-      type: object
-      required: [admins, candidates, sections]
-      properties:
-        admins:
-          type: array
-          items:
-            $ref: "#/components/schemas/WorkspaceAdmin"
-        candidates:
-          type: array
-          items:
-            $ref: "#/components/schemas/WorkspaceAdminCandidate"
-        sections:
-          type: array
-          items:
-            type: object
-            required: [group, items]
-            properties:
-              group: {type: string}
-              items:
-                type: array
-                items:
-                  type: object
-                  required: [key, label, icon]
-                  properties:
-                    key: {type: string}
-                    label: {type: string}
-                    icon: {type: string}
-    WorkspaceAdmin:
-      type: object
-      required: [id, account_id, avatar, name_zh, name_en, dept, title, assigned_at, assigned_by, permissions]
-      properties:
-        id: {type: string}
-        account_id: {type: string}
-        avatar: {type: string}
-        name_zh: {type: string}
-        name_en: {type: string}
-        dept: {type: string}
-        title: {type: string}
-        assigned_at: {type: string}
-        assigned_by: {type: string}
-        permissions:
-          type: object
-          additionalProperties:
-            type: string
-            enum: [none, view, edit]
-    WorkspaceAdminCandidate:
-      type: object
-      required: [id, account_id, avatar, name_zh, name_en, dept, title]
-      properties:
-        id: {type: string}
-        account_id: {type: string}
-        avatar: {type: string}
-        name_zh: {type: string}
-        name_en: {type: string}
-        dept: {type: string}
-        title: {type: string}
     WorkspaceAuditLog:
       type: object
       required: [id, time, operator, type, action, detail]
@@ -4947,33 +4803,6 @@ components:
         parent_id:
           type: string
           description: Employee-facing manager id, internal employee id, or __none__ to clear the manager.
-    WorkspaceAdminPermissionsInput:
-      type: object
-      additionalProperties:
-        type: string
-        enum: [none, view, edit]
-      example:
-        employees: edit
-        salary: view
-        organization: edit
-        leave-policy: view
-        forms: edit
-        admins: none
-    CreateWorkspaceAdminRequest:
-      type: object
-      required: [employee_id, permissions]
-      properties:
-        employee_id:
-          type: string
-          description: Employee-facing id from workspace admin candidates.
-        permissions:
-          $ref: "#/components/schemas/WorkspaceAdminPermissionsInput"
-    UpdateWorkspaceAdminPermissionsRequest:
-      type: object
-      required: [permissions]
-      properties:
-        permissions:
-          $ref: "#/components/schemas/WorkspaceAdminPermissionsInput"
     SaveWorkspaceFormDesignRequest:
       type: object
       required: [name]

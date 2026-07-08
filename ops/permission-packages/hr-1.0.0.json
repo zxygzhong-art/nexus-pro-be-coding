@@ -196,9 +196,7 @@
       "resource_type": "permission_set_assignment",
       "actions": [
         "create",
-        "delete",
-        "read",
-        "update"
+        "read"
       ]
     },
     {
@@ -1042,33 +1040,6 @@
       "action": "read"
     },
     {
-      "application_code": "iam",
-      "resource_type": "permission_set_assignment",
-      "resource": "iam.permission_set_assignment",
-      "action": "read"
-    },
-    {
-      "application_code": "iam",
-      "resource_type": "permission_set_assignment",
-      "resource": "iam.permission_set_assignment",
-      "action": "create",
-      "risk_level": "high"
-    },
-    {
-      "application_code": "iam",
-      "resource_type": "permission_set_assignment",
-      "resource": "iam.permission_set_assignment",
-      "action": "update",
-      "risk_level": "high"
-    },
-    {
-      "application_code": "iam",
-      "resource_type": "permission_set_assignment",
-      "resource": "iam.permission_set_assignment",
-      "action": "delete",
-      "risk_level": "high"
-    },
-    {
       "application_code": "workflow",
       "resource_type": "form_template",
       "resource": "workflow.form_template",
@@ -1311,7 +1282,7 @@
     {
       "key": "iam",
       "label": "權限中心",
-      "path": "/workspace/admins",
+      "path": "/iam/permission-sets",
       "children": [
         {
           "key": "iam.user_groups",
@@ -1321,7 +1292,7 @@
         {
           "key": "iam.permission_sets",
           "label": "權限集合",
-          "path": "/workspace/admins",
+          "path": "/iam/permission-sets",
           "sort_order": 1
         },
         {
@@ -1381,32 +1352,24 @@
       "description": "員工自助入口與本人資料讀取。",
       "permissions": [
         {
-          "application_code": "platform",
-          "resource_type": "me",
           "resource": "me",
           "action": "read",
           "scope": "self",
           "menu_key": "workbench"
         },
         {
-          "application_code": "hr",
-          "resource_type": "employee",
           "resource": "hr.employee",
           "action": "read",
           "scope": "self",
           "menu_key": "hr.employees"
         },
         {
-          "application_code": "attendance",
-          "resource_type": "clock",
           "resource": "attendance.clock",
           "action": "create",
           "scope": "self",
           "menu_key": "attendance.clock"
         },
         {
-          "application_code": "attendance",
-          "resource_type": "leave",
           "resource": "attendance.leave",
           "action": "create",
           "scope": "self",
@@ -1420,104 +1383,78 @@
       "description": "HR 主資料、組織、假勤與權限管理常用操作。",
       "permissions": [
         {
-          "application_code": "hr",
-          "resource_type": "employee",
           "resource": "hr.employee",
           "action": "read",
           "scope": "all",
           "menu_key": "hr.employees"
         },
         {
-          "application_code": "hr",
-          "resource_type": "employee",
           "resource": "hr.employee",
           "action": "create",
           "scope": "all",
           "menu_key": "hr.employees"
         },
         {
-          "application_code": "hr",
-          "resource_type": "employee",
           "resource": "hr.employee",
           "action": "update",
           "scope": "all",
           "menu_key": "hr.employees"
         },
         {
-          "application_code": "hr",
-          "resource_type": "employee",
           "resource": "hr.employee",
           "action": "export",
           "scope": "all",
           "menu_key": "hr.employees"
         },
         {
-          "application_code": "hr",
-          "resource_type": "employee",
           "resource": "hr.employee",
           "action": "import",
           "scope": "all",
           "menu_key": "hr.employees"
         },
         {
-          "application_code": "hr",
-          "resource_type": "org_unit",
           "resource": "hr.org_unit",
           "action": "read",
           "scope": "all",
           "menu_key": "hr.org_units"
         },
         {
-          "application_code": "hr",
-          "resource_type": "org_unit",
           "resource": "hr.org_unit",
           "action": "create",
           "scope": "all",
           "menu_key": "hr.org_units"
         },
         {
-          "application_code": "hr",
-          "resource_type": "org_unit",
           "resource": "hr.org_unit",
           "action": "update",
           "scope": "all",
           "menu_key": "hr.org_units"
         },
         {
-          "application_code": "attendance",
-          "resource_type": "leave",
           "resource": "attendance.leave",
           "action": "read",
           "scope": "all",
           "menu_key": "attendance.leave"
         },
         {
-          "application_code": "attendance",
-          "resource_type": "clock",
           "resource": "attendance.clock",
           "action": "read",
           "scope": "all",
           "menu_key": "attendance.clock"
         },
         {
-          "application_code": "attendance",
-          "resource_type": "correction",
           "resource": "attendance.correction",
           "action": "approve",
           "scope": "all",
           "menu_key": "attendance.corrections"
         },
         {
-          "application_code": "iam",
-          "resource_type": "permission_set",
           "resource": "iam.permission_set",
           "action": "read",
           "scope": "all",
           "menu_key": "iam.permission_sets"
         },
         {
-          "application_code": "iam",
-          "resource_type": "permission_set_assignment",
           "resource": "iam.permission_set_assignment",
           "action": "read",
           "scope": "all",
@@ -1531,32 +1468,24 @@
       "description": "平台與審計唯讀排障用權限集合。",
       "permissions": [
         {
-          "application_code": "platform",
-          "resource_type": "me",
           "resource": "me",
           "action": "read",
           "scope": "all",
           "menu_key": "workbench"
         },
         {
-          "application_code": "audit",
-          "resource_type": "log",
           "resource": "audit.log",
           "action": "read",
           "scope": "all",
           "menu_key": "audit"
         },
         {
-          "application_code": "iam",
-          "resource_type": "permission",
           "resource": "iam.permission",
           "action": "read",
           "scope": "all",
           "menu_key": "iam.permission_sets"
         },
         {
-          "application_code": "iam",
-          "resource_type": "permission_set",
           "resource": "iam.permission_set",
           "action": "read",
           "scope": "all",

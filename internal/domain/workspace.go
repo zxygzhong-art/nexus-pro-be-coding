@@ -325,51 +325,6 @@ type WorkspaceClockSummary struct {
 	NormalDays     int `json:"normal_days"`
 }
 
-// WorkspaceAdminsResponse 定義工作區 admins 回應的資料結構。
-type WorkspaceAdminsResponse struct {
-	Admins     []WorkspaceAdmin          `json:"admins"`
-	Candidates []WorkspaceAdminCandidate `json:"candidates"`
-	Sections   []WorkspaceAdminSection   `json:"sections"`
-}
-
-// WorkspaceAdmin 定義工作區管理員的資料結構。
-type WorkspaceAdmin struct {
-	ID          string            `json:"id"`
-	AccountID   string            `json:"account_id"`
-	Avatar      string            `json:"avatar"`
-	NameZH      string            `json:"name_zh"`
-	NameEN      string            `json:"name_en"`
-	Dept        string            `json:"dept"`
-	Title       string            `json:"title"`
-	AssignedAt  string            `json:"assigned_at"`
-	AssignedBy  string            `json:"assigned_by"`
-	Permissions map[string]string `json:"permissions"`
-}
-
-// WorkspaceAdminCandidate 定義工作區管理員候選的資料結構。
-type WorkspaceAdminCandidate struct {
-	ID        string `json:"id"`
-	AccountID string `json:"account_id"`
-	Avatar    string `json:"avatar"`
-	NameZH    string `json:"name_zh"`
-	NameEN    string `json:"name_en"`
-	Dept      string `json:"dept"`
-	Title     string `json:"title"`
-}
-
-// WorkspaceAdminSection 定義工作區管理員區段的資料結構。
-type WorkspaceAdminSection struct {
-	Group string                      `json:"group"`
-	Items []WorkspaceAdminSectionItem `json:"items"`
-}
-
-// WorkspaceAdminSectionItem 定義工作區管理員區段項目的資料結構。
-type WorkspaceAdminSectionItem struct {
-	Key   string `json:"key"`
-	Label string `json:"label"`
-	Icon  string `json:"icon"`
-}
-
 // WorkspaceAuditLogQuery 定義工作區稽核 log 查詢的資料結構。
 type WorkspaceAuditLogQuery struct {
 	OperatorID string `json:"operator_id,omitempty"`

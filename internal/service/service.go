@@ -16,27 +16,29 @@ import (
 
 // Service 定義服務的資料結構。
 type Service struct {
-	store               repository.Store
-	now                 func() time.Time
-	logger              *slog.Logger
-	authzSnapshot       AuthzSnapshotCache
-	relationships       RelationshipChecker
-	openFGAScopeChecks  bool
-	objectStore         ObjectStore
-	ehrmsClient         EHRMSClient
-	identityProvisioner IdentityProvisioner
+	store                 repository.Store
+	now                   func() time.Time
+	logger                *slog.Logger
+	authzSnapshot         AuthzSnapshotCache
+	relationships         RelationshipChecker
+	openFGAScopeChecks    bool
+	objectStore           ObjectStore
+	ehrmsClient           EHRMSClient
+	identityProvisioner   IdentityProvisioner
+	formApprovalWorkflows FormApprovalWorkflowClient
 }
 
 // Options 定義選項的資料結構。
 type Options struct {
-	Logger              *slog.Logger
-	Now                 func() time.Time
-	AuthzSnapshot       AuthzSnapshotCache
-	Relationships       RelationshipChecker
-	OpenFGAScopeChecks  bool
-	ObjectStore         ObjectStore
-	EHRMSClient         EHRMSClient
-	IdentityProvisioner IdentityProvisioner
+	Logger                *slog.Logger
+	Now                   func() time.Time
+	AuthzSnapshot         AuthzSnapshotCache
+	Relationships         RelationshipChecker
+	OpenFGAScopeChecks    bool
+	ObjectStore           ObjectStore
+	EHRMSClient           EHRMSClient
+	IdentityProvisioner   IdentityProvisioner
+	FormApprovalWorkflows FormApprovalWorkflowClient
 }
 
 // RelationshipChecker 定義關係 checker 的行為契約。
@@ -54,6 +56,12 @@ type IdentityProvisioner interface {
 	EnsureUser(context.Context, domain.IdentityProvisioningInput) (domain.ProvisionedIdentity, error)
 }
 
+// FormApprovalWorkflowClient defines the Temporal operations used by workflow service.
+type FormApprovalWorkflowClient interface {
+	StartFormApprovalWorkflow(context.Context, domain.FormApprovalWorkflowStart) error
+	SignalFormApprovalWorkflow(context.Context, domain.FormApprovalWorkflowSignal) error
+}
+
 // New 建立 服務 的主要物件。
 func New(store repository.Store, options ...Options) *Service {
 	cfg := Options{}
@@ -69,15 +77,16 @@ func New(store repository.Store, options ...Options) *Service {
 		now = cfg.Now
 	}
 	return &Service{
-		store:               store,
-		now:                 now,
-		logger:              logger,
-		authzSnapshot:       cfg.AuthzSnapshot,
-		relationships:       cfg.Relationships,
-		openFGAScopeChecks:  cfg.OpenFGAScopeChecks,
-		objectStore:         firstObjectStore(cfg.ObjectStore),
-		ehrmsClient:         cfg.EHRMSClient,
-		identityProvisioner: cfg.IdentityProvisioner,
+		store:                 store,
+		now:                   now,
+		logger:                logger,
+		authzSnapshot:         cfg.AuthzSnapshot,
+		relationships:         cfg.Relationships,
+		openFGAScopeChecks:    cfg.OpenFGAScopeChecks,
+		objectStore:           firstObjectStore(cfg.ObjectStore),
+		ehrmsClient:           cfg.EHRMSClient,
+		identityProvisioner:   cfg.IdentityProvisioner,
+		formApprovalWorkflows: cfg.FormApprovalWorkflows,
 	}
 }
 

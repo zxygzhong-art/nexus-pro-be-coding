@@ -45,14 +45,60 @@ services:
       timeout: 5s
       retries: 10
 
-  loki:
-    image: grafana/loki:latest
-    command: -config.file=/etc/loki/local-config.yaml
+  temporal:
+    image: temporalio/auto-setup:1.29.7
     ports:
-      - "3100:3100"
+      - "27233:7233"
+    environment:
+      DB: postgres12
+      DB_PORT: 5432
+      POSTGRES_SEEDS: postgres
+      POSTGRES_USER: nexus
+      POSTGRES_PWD: nexus
+      DBNAME: temporal
+      VISIBILITY_DBNAME: temporal_visibility
+      DEFAULT_NAMESPACE: default
+      DYNAMIC_CONFIG_FILE_PATH: config/dynamicconfig/development-sql.yaml
     volumes:
-      - ./ops/loki/local-config.yaml:/etc/loki/local-config.yaml:ro
-      - loki-data:/loki
+      - ./ops/generated/temporal/dynamicconfig:/etc/temporal/config/dynamicconfig:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  temporal-ui:
+    image: temporalio/ui:2.51.1
+    ports:
+      - "24088:8080"
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CORS_ORIGINS: http://localhost:3002,http://localhost:24088
+    depends_on:
+      - temporal
+
+  temporal-admin-tools:
+    image: temporalio/admin-tools:1.29.7-tctl-1.18.4-cli-1.7.2
+    entrypoint:
+      - tail
+      - -f
+      - /dev/null
+    environment:
+      TEMPORAL_ADDRESS: temporal:7233
+      TEMPORAL_CLI_ADDRESS: temporal:7233
+    depends_on:
+      - temporal
+
+  nats:
+    image: nats:2.14.3
+    command:
+      - "--name=nexus-pro-nats"
+      - "--jetstream"
+      - "--store_dir=/data/jetstream"
+      - "--http_port=8222"
+    ports:
+      - "24222:4222"
+      - "28222:8222"
+    volumes:
+      - nats-data:/data
 
   tempo:
     image: grafana/tempo:latest
@@ -64,17 +110,6 @@ services:
     volumes:
       - ./ops/tempo/local-config.yaml:/etc/tempo/local-config.yaml:ro
       - tempo-data:/tmp/tempo
-
-  promtail:
-    image: grafana/promtail:latest
-    command: -config.file=/etc/promtail/config.yaml
-    volumes:
-      - ./ops/promtail/config.yaml:/etc/promtail/config.yaml:ro
-      - ./logs:/var/log/nexus-pro-be:ro
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - /var/lib/docker/containers:/var/lib/docker/containers:ro
-    depends_on:
-      - loki
 
   grafana:
     image: grafana/grafana:latest
@@ -88,11 +123,10 @@ services:
       - grafana-data:/var/lib/grafana
       - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
     depends_on:
-      - loki
       - tempo
 
 volumes:
   postgres-data:
-  loki-data:
+  nats-data:
   tempo-data:
   grafana-data:

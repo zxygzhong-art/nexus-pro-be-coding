@@ -120,6 +120,11 @@ SELECT * FROM authz_permission_set_assignments
 WHERE tenant_id = $1
 ORDER BY created_at ASC;
 
+-- name: DeleteAuthzPermissionSetAssignment :one
+DELETE FROM authz_permission_set_assignments
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
 -- name: CreateAuthzAssumableRoleSession :one
 INSERT INTO authz_assumable_role_sessions (
     id, tenant_id, account_id, assumable_role_id, session_policy,

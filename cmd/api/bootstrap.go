@@ -15,18 +15,22 @@ import (
 	"nexus-pro-be/internal/jobs"
 	platformauth "nexus-pro-be/internal/platform/auth"
 	"nexus-pro-be/internal/platform/ehrms"
+	"nexus-pro-be/internal/platform/natsbus"
 	"nexus-pro-be/internal/platform/objectstore"
 	openfgaclient "nexus-pro-be/internal/platform/openfga"
 	"nexus-pro-be/internal/platform/postgres"
 	redisstore "nexus-pro-be/internal/platform/redis"
 	"nexus-pro-be/internal/platform/telemetry"
+	temporalplatform "nexus-pro-be/internal/platform/temporal"
 	"nexus-pro-be/internal/repository"
 	pgstore "nexus-pro-be/internal/repository/postgres"
 	"nexus-pro-be/internal/service"
 	"nexus-pro-be/internal/startup"
+	"nexus-pro-be/internal/workflows"
 
 	goredis "github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
+	temporalclient "go.temporal.io/sdk/client"
 )
 
 type apiRuntime struct {
@@ -35,9 +39,12 @@ type apiRuntime struct {
 	report                     startup.Report
 	store                      repository.Store
 	relationshipWriter         jobs.RelationshipTupleWriter
+	eventPublisher             natsbus.EventPublisher
 	ehrmsSyncScheduler         *jobs.EHRMSEmployeeSyncScheduler
 	ehrmsSyncOptions           jobs.EHRMSEmployeeSyncOptions
 	identityProvisioningOutbox *jobs.IdentityProvisioningOutboxProcessor
+	openFGAConsumer            *jobs.OpenFGAConsumer
+	openFGAConsumerOptions     jobs.OpenFGAConsumerOptions
 	shutdowns                  []moduleShutdown
 	workers                    sync.WaitGroup
 }
@@ -75,6 +82,27 @@ type objectStoreModule struct {
 	dependencies []startup.Dependency
 }
 
+type temporalModule struct {
+	client       temporalclient.Client
+	dependencies []startup.Dependency
+	readiness    map[string]v1api.ReadinessCheck
+	shutdown     moduleShutdown
+}
+
+type natsModule struct {
+	client       *natsbus.Client
+	dependencies []startup.Dependency
+	readiness    map[string]v1api.ReadinessCheck
+	shutdown     moduleShutdown
+}
+
+func logStartupFailure(logger *slog.Logger, stage string, err error) {
+	if logger == nil || err == nil {
+		return
+	}
+	logger.Error("startup failed", "stage", stage, "error", err)
+}
+
 // startModules 啟動模組。
 func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (*apiRuntime, error) {
 	report := startup.Report{
@@ -88,12 +116,14 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 
 	telemetryStatus, telemetryShutdown, err := startTelemetryModule(ctx, cfg, logger)
 	if err != nil {
+		logStartupFailure(logger, "opentelemetry", err)
 		return nil, err
 	}
 	shutdowns = append(shutdowns, moduleShutdown{name: "opentelemetry", fn: telemetryShutdown})
 
 	repositoryModule, err := startRepositoryModule(ctx, cfg, logger)
 	if err != nil {
+		logStartupFailure(logger, "postgres", err)
 		shutdownStartedModules(shutdowns, logger)
 		return nil, err
 	}
@@ -104,6 +134,7 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 
 	authzSnapshotModule, err := startAuthzSnapshotModule(ctx, cfg, logger)
 	if err != nil {
+		logStartupFailure(logger, "redis", err)
 		shutdownStartedModules(shutdowns, logger)
 		return nil, err
 	}
@@ -117,14 +148,43 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 
 	objectStoreModule, err := startObjectStoreModule(ctx, cfg, logger)
 	if err != nil {
+		logStartupFailure(logger, "object_store", err)
 		shutdownStartedModules(shutdowns, logger)
 		return nil, err
 	}
 	report.Dependencies = append(report.Dependencies, objectStoreModule.dependencies...)
 
+	temporalModule, err := startTemporalModule(ctx, cfg, logger)
+	if err != nil {
+		logStartupFailure(logger, "temporal", err)
+		shutdownStartedModules(shutdowns, logger)
+		return nil, err
+	}
+	report.Dependencies = append(report.Dependencies, temporalModule.dependencies...)
+	mergeReadinessChecks(readinessChecks, temporalModule.readiness)
+	shutdowns = appendModuleShutdown(shutdowns, temporalModule.shutdown)
+
+	if cfg.NATSEnabled && relationshipModule.writer == nil {
+		err := errors.New("NATS_ENABLED=true requires OpenFGA writer for openfga event consumer")
+		logStartupFailure(logger, "nats_openfga_writer", err)
+		shutdownStartedModules(shutdowns, logger)
+		return nil, err
+	}
+	natsModule, err := startNATSModule(ctx, cfg, logger)
+	if err != nil {
+		logStartupFailure(logger, "nats", err)
+		shutdownStartedModules(shutdowns, logger)
+		return nil, err
+	}
+	report.Dependencies = append(report.Dependencies, natsModule.dependencies...)
+	mergeReadinessChecks(readinessChecks, natsModule.readiness)
+	shutdowns = appendModuleShutdown(shutdowns, natsModule.shutdown)
+
 	store := repositoryModule.store
 	if store == nil {
-		return nil, errors.New("postgres repository is required")
+		err := errors.New("postgres repository is required")
+		logStartupFailure(logger, "postgres_repository", err)
+		return nil, err
 	}
 
 	authHTTPClient := &http.Client{Timeout: 5 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}
@@ -134,11 +194,16 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		Relationships:      relationshipModule.checker,
 		OpenFGAScopeChecks: cfg.OpenFGAScopeCheckEnabled,
 		ObjectStore:        objectStoreModule.store,
+		FormApprovalWorkflows: temporalplatform.NewFormApprovalClient(
+			temporalModule.client,
+			cfg.TemporalTaskQueue,
+		),
 	}
 	tokenResolvers := make([]platformauth.TokenResolver, 0, 2)
 
 	identityProvisioner, keycloakAdminReadiness, keycloakAdminDependency, err := configuredKeycloakProvisioner(cfg, authHTTPClient, logger)
 	if err != nil {
+		logStartupFailure(logger, "keycloak_admin", err)
 		shutdownStartedModules(shutdowns, logger)
 		return nil, err
 	}
@@ -148,8 +213,9 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		readinessChecks["keycloak_admin"] = keycloakAdminReadiness
 	}
 
-	ehrmsClient, ehrmsDependency, err := configuredEHRMSClient(cfg, authHTTPClient)
+	ehrmsClient, ehrmsDependency, err := configuredEHRMSClient(cfg, authHTTPClient, logger)
 	if err != nil {
+		logStartupFailure(logger, "ehrms", err)
 		shutdownStartedModules(shutdowns, logger)
 		return nil, err
 	}
@@ -158,9 +224,27 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 
 	app := service.New(store, serviceOptions)
 	if err := app.SyncPermissionCatalogForAllTenants(ctx); err != nil {
+		logStartupFailure(logger, "permission_catalog_sync", err)
 		shutdownStartedModules(shutdowns, logger)
 		return nil, err
 	}
+	worker := temporalplatform.NewWorker(temporalModule.client, cfg.TemporalTaskQueue, &workflows.Activities{Service: app})
+	if err := worker.Start(); err != nil {
+		logStartupFailure(logger, "temporal_worker", err)
+		shutdownStartedModules(shutdowns, logger)
+		return nil, err
+	}
+	logger.Info("temporal worker started", "namespace", cfg.TemporalNamespace, "task_queue", cfg.TemporalTaskQueue)
+	report.Dependencies = append(report.Dependencies, startup.Dependency{
+		Name:   "Temporal Worker",
+		Status: "started",
+		Target: cfg.TemporalTaskQueue,
+		Detail: "form approval workflows registered",
+	})
+	shutdowns = append(shutdowns, moduleShutdown{name: "temporal_worker", fn: func(context.Context) error {
+		worker.Stop()
+		return nil
+	}})
 	ehrmsSyncScheduler, ehrmsSyncOptions, ehrmsSyncDependency := configuredEHRMSSyncScheduler(cfg, app.HR(), ehrmsClient != nil, logger)
 	report.Dependencies = append(report.Dependencies, ehrmsSyncDependency)
 	apiOptions := v1api.Options{
@@ -200,9 +284,17 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		report:             report,
 		store:              store,
 		relationshipWriter: relationshipModule.writer,
+		eventPublisher:     natsModule.client,
 		ehrmsSyncScheduler: ehrmsSyncScheduler,
 		ehrmsSyncOptions:   ehrmsSyncOptions,
 		shutdowns:          shutdowns,
+	}
+	if natsModule.client != nil {
+		runtime.openFGAConsumer = jobs.NewOpenFGAConsumer(natsModule.client, relationshipModule.writer, store, logger)
+		runtime.openFGAConsumerOptions = jobs.OpenFGAConsumerOptions{
+			Stream:         cfg.NATSStream,
+			ConsumerPrefix: cfg.NATSConsumerPrefix,
+		}
 	}
 	if identityProvisioner != nil {
 		// 重試 fast path 失敗後仍停留在佇列中的 Keycloak provisioning。
@@ -264,7 +356,9 @@ func startRepositoryModule(ctx context.Context, cfg config.Config, logger *slog.
 		readiness: map[string]v1api.ReadinessCheck{},
 	}
 	if cfg.DatabaseURL == "" {
-		return result, errors.New("DATABASE_URL is required")
+		err := errors.New("DATABASE_URL is required")
+		logger.Error("postgres connection failed", "error", err)
+		return result, err
 	}
 
 	startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -407,30 +501,29 @@ func startObjectStoreModule(ctx context.Context, cfg config.Config, logger *slog
 			Target: cfg.ObjectStoreDir,
 			Detail: "ready",
 		})
-	case "minio", "s3":
+	case "sftpgo":
 		startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		objectStore, err := objectstore.NewMinIO(startupCtx, objectstore.MinIOOptions{
-			Provider:        cfg.ObjectStoreProvider,
-			Endpoint:        cfg.ObjectStoreEndpoint,
-			Bucket:          cfg.ObjectStoreBucket,
-			AccessKeyID:     cfg.ObjectStoreAccessKeyID,
-			SecretAccessKey: cfg.ObjectStoreSecretAccessKey,
-			Region:          cfg.ObjectStoreRegion,
-			UseSSL:          cfg.ObjectStoreUseSSL,
-			CreateBucket:    cfg.ObjectStoreCreateBucket,
+		objectStore, err := objectstore.NewSFTPGo(startupCtx, objectstore.SFTPGoOptions{
+			Provider:   cfg.ObjectStoreProvider,
+			Endpoint:   cfg.ObjectStoreEndpoint,
+			Root:       cfg.ObjectStoreBucket,
+			Username:   cfg.ObjectStoreAccessKeyID,
+			Password:   cfg.ObjectStoreSecretAccessKey,
+			HostKey:    cfg.ObjectStoreSFTPHostKey,
+			CreateRoot: cfg.ObjectStoreCreateBucket,
 		})
 		cancel()
 		if err != nil {
 			logger.Error("object store initialization failed", "provider", cfg.ObjectStoreProvider, "error", err)
 			return result, err
 		}
-		logger.Info("s3-compatible object store enabled", "provider", cfg.ObjectStoreProvider, "endpoint", startup.SafeURL(cfg.ObjectStoreEndpoint), "bucket", cfg.ObjectStoreBucket)
+		logger.Info("sftpgo object store enabled", "endpoint", startup.SafeURL(cfg.ObjectStoreEndpoint), "root", cfg.ObjectStoreBucket)
 		result.store = objectStore
 		result.dependencies = append(result.dependencies, startup.Dependency{
 			Name:   "ObjectStore",
 			Status: cfg.ObjectStoreProvider,
 			Target: startup.SafeURL(cfg.ObjectStoreEndpoint),
-			Detail: "bucket=" + cfg.ObjectStoreBucket,
+			Detail: "root=" + cfg.ObjectStoreBucket,
 		})
 	default:
 		result.dependencies = append(result.dependencies, startup.Dependency{
@@ -440,6 +533,104 @@ func startObjectStoreModule(ctx context.Context, cfg config.Config, logger *slog
 			Detail: "import files in memory",
 		})
 	}
+	return result, nil
+}
+
+// startTemporalModule 啟動 Temporal client 模組。
+func startTemporalModule(ctx context.Context, cfg config.Config, logger *slog.Logger) (temporalModule, error) {
+	result := temporalModule{
+		readiness: map[string]v1api.ReadinessCheck{},
+	}
+	if strings.TrimSpace(cfg.TemporalHostPort) == "" {
+		err := errors.New("TEMPORAL_HOST_PORT is required")
+		result.dependencies = []startup.Dependency{{
+			Name:   "Temporal",
+			Status: "incomplete",
+			Target: "",
+			Detail: startup.Missing("TEMPORAL_HOST_PORT"),
+		}}
+		logger.Error("temporal startup failed", "error", err)
+		return result, err
+	}
+	startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	client, err := temporalplatform.Dial(startupCtx, temporalplatform.Config{
+		HostPort:  cfg.TemporalHostPort,
+		Namespace: cfg.TemporalNamespace,
+		TaskQueue: cfg.TemporalTaskQueue,
+	})
+	cancel()
+	if err != nil {
+		logger.Error("temporal connection failed", "host_port", cfg.TemporalHostPort, "namespace", cfg.TemporalNamespace, "error", err)
+		result.dependencies = []startup.Dependency{{
+			Name:   "Temporal",
+			Status: "unavailable",
+			Target: cfg.TemporalHostPort,
+			Detail: err.Error(),
+		}}
+		return result, err
+	}
+	logger.Info("temporal connected", "host_port", cfg.TemporalHostPort, "namespace", cfg.TemporalNamespace, "task_queue", cfg.TemporalTaskQueue)
+	result.client = client
+	result.dependencies = []startup.Dependency{{
+		Name:   "Temporal",
+		Status: "connected",
+		Target: cfg.TemporalHostPort,
+		Detail: "namespace=" + cfg.TemporalNamespace + " task_queue=" + cfg.TemporalTaskQueue,
+	}}
+	result.readiness["temporal"] = func(ctx context.Context) error {
+		_, err := client.CheckHealth(ctx, &temporalclient.CheckHealthRequest{})
+		return err
+	}
+	result.shutdown = moduleShutdown{name: "temporal_client", fn: func(context.Context) error {
+		client.Close()
+		return nil
+	}}
+	return result, nil
+}
+
+// startNATSModule 啟動 NATS JetStream event bus 模組。
+func startNATSModule(ctx context.Context, cfg config.Config, logger *slog.Logger) (natsModule, error) {
+	result := natsModule{
+		readiness: map[string]v1api.ReadinessCheck{},
+		dependencies: []startup.Dependency{{
+			Name:   "NATS",
+			Status: "skipped",
+			Target: "NATS_ENABLED=false",
+			Detail: "event bus disabled",
+		}},
+	}
+	if !cfg.NATSEnabled {
+		return result, nil
+	}
+	natsCfg := natsbus.NormalizeConfig(natsbus.Config{
+		URL:    cfg.NATSURL,
+		Stream: cfg.NATSStream,
+	})
+	startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	client, err := natsbus.Connect(startupCtx, natsCfg, logger)
+	cancel()
+	if err != nil {
+		logger.Error("nats jetstream connection failed", "url", startup.SafeURL(natsCfg.URL), "stream", natsCfg.Stream, "error", err)
+		result.dependencies = []startup.Dependency{{
+			Name:   "NATS",
+			Status: "unavailable",
+			Target: startup.SafeURL(natsCfg.URL),
+			Detail: err.Error(),
+		}}
+		return result, err
+	}
+	logger.Info("nats jetstream connected", "url", startup.SafeURL(natsCfg.URL), "stream", natsCfg.Stream)
+	result.client = client
+	result.dependencies = []startup.Dependency{{
+		Name:   "NATS",
+		Status: "connected",
+		Target: startup.SafeURL(natsCfg.URL),
+		Detail: "stream=" + natsCfg.Stream,
+	}}
+	result.readiness["nats"] = client.Ping
+	result.shutdown = moduleShutdown{name: "nats", fn: func(context.Context) error {
+		return client.Close()
+	}}
 	return result, nil
 }
 
@@ -499,8 +690,10 @@ func configuredKeycloakProvisioner(cfg config.Config, client *http.Client, logge
 		missing = append(missing, "KEYCLOAK_ADMIN_CLIENT_SECRET")
 	}
 	if len(missing) > 0 {
+		err := errors.New("keycloak admin provisioning is enabled but incomplete")
 		dependency := startup.Dependency{Name: "Keycloak Admin", Status: "incomplete", Target: "disabled", Detail: startup.Missing(missing...)}
-		return nil, nil, dependency, errors.New("keycloak admin provisioning is enabled but incomplete")
+		logger.Error("keycloak admin provisioning failed", "missing", missing, "error", err)
+		return nil, nil, dependency, err
 	}
 	provisioner, err := platformauth.NewKeycloakAdminClient(platformauth.KeycloakAdminConfig{
 		IssuerURL:         cfg.KeycloakIssuerURL,
@@ -512,6 +705,7 @@ func configuredKeycloakProvisioner(cfg config.Config, client *http.Client, logge
 	}, client)
 	if err != nil {
 		dependency := startup.Dependency{Name: "Keycloak Admin", Status: "invalid", Target: startup.SafeURL(cfg.KeycloakIssuerURL), Detail: err.Error()}
+		logger.Error("keycloak admin provisioning failed", "issuer", cfg.KeycloakIssuerURL, "error", err)
 		return nil, nil, dependency, err
 	}
 	logger.Info("keycloak admin provisioning enabled", "issuer", cfg.KeycloakIssuerURL, "client_id", cfg.KeycloakAdminClientID, "send_invite_email", cfg.KeycloakSendInviteEmail)
@@ -537,7 +731,7 @@ func configuredRateLimiter(cfg config.Config, redisClient *goredis.Client, logge
 }
 
 // configuredEHRMSClient 處理 configured eHRMS client。
-func configuredEHRMSClient(cfg config.Config, client *http.Client) (service.EHRMSClient, startup.Dependency, error) {
+func configuredEHRMSClient(cfg config.Config, client *http.Client, logger *slog.Logger) (service.EHRMSClient, startup.Dependency, error) {
 	if strings.TrimSpace(cfg.EHRMSBaseURL) == "" && strings.TrimSpace(cfg.EHRMSAPIKey) == "" {
 		return nil, startup.Dependency{Name: "eHRMS", Status: "skipped", Target: "EHRMS_* not set", Detail: "employee sync disabled"}, nil
 	}
@@ -553,7 +747,9 @@ func configuredEHRMSClient(cfg config.Config, client *http.Client) (service.EHRM
 	}
 	clientAdapter, err := ehrms.NewClient(cfg.EHRMSBaseURL, cfg.EHRMSAPIKey, client)
 	if err != nil {
-		return nil, startup.Dependency{Name: "eHRMS", Status: "invalid", Target: startup.SafeURL(cfg.EHRMSBaseURL), Detail: err.Error()}, err
+		dependency := startup.Dependency{Name: "eHRMS", Status: "invalid", Target: startup.SafeURL(cfg.EHRMSBaseURL), Detail: err.Error()}
+		logger.Error("ehrms client initialization failed", "base_url", startup.SafeURL(cfg.EHRMSBaseURL), "error", err)
+		return nil, dependency, err
 	}
 	return clientAdapter, startup.Dependency{Name: "eHRMS", Status: "configured", Target: startup.SafeURL(cfg.EHRMSBaseURL), Detail: "employee sync enabled"}, nil
 }
@@ -587,15 +783,26 @@ func configuredEHRMSSyncScheduler(cfg config.Config, svc jobs.EHRMSEmployeeSyncS
 
 // startBackgroundWorkers 啟動background worker。
 func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Logger) {
-	if r.relationshipWriter != nil {
-		// 只有在 OpenFGA 已完整設定且可接受寫入時，outbox dispatcher 才會執行。
+	if r.openFGAConsumer != nil {
+		r.workers.Add(1)
+		go func() {
+			defer r.workers.Done()
+			r.openFGAConsumer.Run(ctx, r.openFGAConsumerOptions)
+		}()
+		logger.Info("openfga event consumer started")
+	}
+	if r.relationshipWriter != nil || r.eventPublisher != nil {
+		// NATS 關閉時只有 OpenFGA writer 完整設定才執行;NATS 開啟時 dispatcher 發布到 JetStream。
 		dispatcher := jobs.NewOutboxDispatcher(r.store, r.relationshipWriter, logger)
+		if r.eventPublisher != nil {
+			dispatcher.WithEventPublisher(r.eventPublisher)
+		}
 		r.workers.Add(1)
 		go func() {
 			defer r.workers.Done()
 			dispatcher.Run(ctx, jobs.OutboxDispatchOptions{})
 		}()
-		logger.Info("outbox dispatcher started")
+		logger.Info("outbox dispatcher started", "nats_enabled", r.eventPublisher != nil)
 	}
 	if r.ehrmsSyncScheduler != nil {
 		r.workers.Add(1)

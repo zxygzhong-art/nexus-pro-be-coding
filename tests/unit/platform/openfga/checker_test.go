@@ -219,6 +219,42 @@ func TestWriteRelationshipTuplesFormatsUsersetSubject(t *testing.T) {
 	}
 }
 
+// TestWriteRelationshipTuplesTreatsReplayConflictsAsSuccess 驗證重放 tuple 衝突保持冪等。
+func TestWriteRelationshipTuplesTreatsReplayConflictsAsSuccess(t *testing.T) {
+	for name, body := range map[string]string{
+		"duplicate write": "tuple already exists",
+		"missing delete":  "tuple not found",
+	} {
+		t.Run(name, func(t *testing.T) {
+			client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+				return &http.Response{
+					StatusCode: http.StatusBadRequest,
+					Header:     http.Header{},
+					Body:       io.NopCloser(strings.NewReader(body)),
+					Request:    req,
+				}, nil
+			})}
+			checker := openfga.NewChecker("http://openfga.test", "store-1", client)
+
+			err := checker.WriteRelationshipTuples(context.Background(), []domain.AuthzRelationshipTupleChange{
+				{
+					Operation: domain.AuthzRelationshipTupleWrite,
+					Tuple: domain.AuthzRelationshipTuple{
+						ObjectType:  "hr.employee",
+						ObjectID:    "emp-1",
+						Relation:    "owner",
+						SubjectType: "account",
+						SubjectID:   "acct-1",
+					},
+				},
+			})
+			if err != nil {
+				t.Fatalf("expected idempotent tuple replay to succeed, got %v", err)
+			}
+		})
+	}
+}
+
 // TestCheckRelationshipReturnsDetailedHTTPError 驗證關係 returns detailed HTTP 錯誤。
 func TestCheckRelationshipReturnsDetailedHTTPError(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

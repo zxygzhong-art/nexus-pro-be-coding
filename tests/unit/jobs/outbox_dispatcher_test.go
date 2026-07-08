@@ -142,6 +142,90 @@ func TestOutboxDispatcherSkipsEventsWithoutHandler(t *testing.T) {
 	}
 }
 
+// TestOutboxDispatcherPublishesWhenNATSEnabled 驗證 NATS 模式發布事件 and marks succeeded。
+func TestOutboxDispatcherPublishesWhenNATSEnabled(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 17, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.AppendOutboxEvent(ctx, domain.OutboxEvent{
+		ID:            "outbox-1",
+		TenantID:      "tenant-1",
+		EventType:     string(domain.EventOpenFGARelationshipWrite),
+		AggregateType: domain.OutboxAggregateAuthz,
+		Payload: map[string]any{
+			"object_type":  "hr.employee",
+			"object_id":    "emp-1",
+			"relation":     "owner",
+			"subject_type": "account",
+			"subject_id":   "acct-1",
+		},
+		Status:    "pending",
+		CreatedAt: now,
+	})
+	writer := &recordingTupleWriter{}
+	publisher := &recordingEventPublisher{}
+	dispatcher := jobs.NewOutboxDispatcher(store, writer, nil).WithEventPublisher(publisher)
+
+	processed, err := dispatcher.ProcessTenant(ctx, "tenant-1", jobs.OutboxDispatchOptions{BatchSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 {
+		t.Fatalf("processed = %d, want 1", processed)
+	}
+	if len(writer.changes) != 0 {
+		t.Fatalf("expected no direct OpenFGA writes in NATS mode, got %+v", writer.changes)
+	}
+	if len(publisher.events) != 1 {
+		t.Fatalf("expected one published event, got %+v", publisher.events)
+	}
+	published := publisher.events[0]
+	if published.subject != "events.iam.relationship.write" || published.envelope.EventID != "outbox-1" || published.envelope.SchemaVersion != domain.DomainEventSchemaVersion {
+		t.Fatalf("unexpected published event: %+v", published)
+	}
+	events, err := store.ListOutboxEvents(ctx, "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events[0].Status != "succeeded" || events[0].ProcessedAt == nil {
+		t.Fatalf("expected published event to be marked succeeded, got %+v", events[0])
+	}
+}
+
+// TestOutboxDispatcherKeepsUnmappedEventsPendingInNATSMode 驗證 NATS 模式無 subject 映射事件保持 pending。
+func TestOutboxDispatcherKeepsUnmappedEventsPendingInNATSMode(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 17, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.AppendOutboxEvent(ctx, domain.OutboxEvent{
+		ID:            "outbox-domain-1",
+		TenantID:      "tenant-1",
+		EventType:     string(domain.EventEmployeeCreated),
+		AggregateType: "hr.employee",
+		AggregateID:   "emp-1",
+		Status:        "pending",
+		CreatedAt:     now,
+	})
+	dispatcher := jobs.NewOutboxDispatcher(store, &recordingTupleWriter{}, nil).WithEventPublisher(&recordingEventPublisher{})
+
+	processed, err := dispatcher.ProcessTenant(ctx, "tenant-1", jobs.OutboxDispatchOptions{BatchSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 0 {
+		t.Fatalf("processed = %d, want 0", processed)
+	}
+	events, err := store.ListOutboxEvents(ctx, "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if events[0].Status != "pending" {
+		t.Fatalf("expected unmapped event to stay pending, got %+v", events[0])
+	}
+}
+
 type recordingTupleWriter struct {
 	err     error
 	changes []domain.AuthzRelationshipTupleChange
@@ -151,4 +235,19 @@ type recordingTupleWriter struct {
 func (w *recordingTupleWriter) WriteRelationshipTuples(_ context.Context, changes []domain.AuthzRelationshipTupleChange) error {
 	w.changes = append(w.changes, changes...)
 	return w.err
+}
+
+type recordingEventPublisher struct {
+	err    error
+	events []publishedEvent
+}
+
+type publishedEvent struct {
+	subject  string
+	envelope domain.DomainEventEnvelope
+}
+
+func (p *recordingEventPublisher) Publish(_ context.Context, subject string, envelope domain.DomainEventEnvelope) error {
+	p.events = append(p.events, publishedEvent{subject: subject, envelope: envelope})
+	return p.err
 }

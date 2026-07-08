@@ -641,6 +641,18 @@ func (s *Store) UpsertPermissionSetAssignment(_ context.Context, v PermissionSet
 	return nil
 }
 
+// DeletePermissionSetAssignment 從儲存層刪除權限集合指派。
+func (s *Store) DeletePermissionSetAssignment(_ context.Context, tenantID, id string) (PermissionSetAssignment, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := getNested(s.assignments, tenantID, id)
+	if !ok {
+		return PermissionSetAssignment{}, false, nil
+	}
+	delete(s.assignments[tenantID], id)
+	return copyPermissionSetAssignment(v), true, nil
+}
+
 // ListPermissionSetAssignments 從儲存層列出權限集合指派。
 func (s *Store) ListPermissionSetAssignments(_ context.Context, tenantID string) ([]PermissionSetAssignment, error) {
 	s.mu.RLock()

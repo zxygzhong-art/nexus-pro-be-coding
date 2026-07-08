@@ -136,11 +136,6 @@ type (
 	WorkspaceClockAbnormal             = domain.WorkspaceClockAbnormal
 	WorkspaceClockRow                  = domain.WorkspaceClockRow
 	WorkspaceClockSummary              = domain.WorkspaceClockSummary
-	WorkspaceAdminsResponse            = domain.WorkspaceAdminsResponse
-	WorkspaceAdmin                     = domain.WorkspaceAdmin
-	WorkspaceAdminCandidate            = domain.WorkspaceAdminCandidate
-	WorkspaceAdminSection              = domain.WorkspaceAdminSection
-	WorkspaceAdminSectionItem          = domain.WorkspaceAdminSectionItem
 	WorkspaceAuditLog                  = domain.WorkspaceAuditLog
 	FormTemplate                       = domain.FormTemplate
 	FormInstance                       = domain.FormInstance
@@ -207,6 +202,9 @@ type (
 	UpdateUserGroupInput                    = domain.UpdateUserGroupInput
 	AddUserGroupMemberInput                 = domain.AddUserGroupMemberInput
 	CreatePermissionSetInput                = domain.CreatePermissionSetInput
+	UpdatePermissionSetInput                = domain.UpdatePermissionSetInput
+	IamAccountProjection                    = domain.IamAccountProjection
+	PermissionSetAssignmentQuery            = domain.PermissionSetAssignmentQuery
 	CreatePermissionSetAssignmentInput      = domain.CreatePermissionSetAssignmentInput
 	CreateFieldPolicyInput                  = domain.CreateFieldPolicyInput
 	UpdateFieldPolicyInput                  = domain.UpdateFieldPolicyInput
@@ -257,8 +255,6 @@ type (
 	AttendanceCorrectionQuery               = domain.AttendanceCorrectionQuery
 	PlatformAssistantsQuery                 = domain.PlatformAssistantsQuery
 	UpdateWorkspaceOrganizationManagerInput = domain.UpdateWorkspaceOrganizationManagerInput
-	CreateWorkspaceAdminInput               = domain.CreateWorkspaceAdminInput
-	UpdateWorkspaceAdminPermissionsInput    = domain.UpdateWorkspaceAdminPermissionsInput
 	SaveWorkspaceFormDesignInput            = domain.SaveWorkspaceFormDesignInput
 	UpdateWorkspaceFormDesignInput          = domain.UpdateWorkspaceFormDesignInput
 	PlatformInsightsQuery                   = domain.PlatformInsightsQuery
@@ -347,6 +343,7 @@ const (
 	ResourcePermissionPackage         = domain.ResourcePermissionPackage
 	ResourcePermissionSet             = domain.ResourcePermissionSet
 	ResourcePermissionAssign          = domain.ResourcePermissionAssign
+	ResourceIAMAccount                = domain.ResourceIAMAccount
 	ResourceDataScope                 = domain.ResourceDataScope
 	ResourceFieldPolicy               = domain.ResourceFieldPolicy
 	ResourceApplication               = domain.ResourceApplication

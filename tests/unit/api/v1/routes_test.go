@@ -40,7 +40,7 @@ func TestOpenAPIYAMLParsesStructurally(t *testing.T) {
 	if !strings.Contains(doc.Info.Description, "globally unique across tenants") {
 		t.Fatalf("expected OpenAPI metadata to document tenant resource id invariants: %q", doc.Info.Description)
 	}
-	for _, path := range []string{"/v1/hr/employees", "/v1/attendance/clock-records", "/v1/workspace/admins"} {
+	for _, path := range []string{"/v1/hr/employees", "/v1/attendance/clock-records", "/v1/iam/permission-sets"} {
 		if _, ok := doc.Paths[path]; !ok {
 			t.Fatalf("expected structured OpenAPI path %s", path)
 		}

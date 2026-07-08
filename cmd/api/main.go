@@ -29,6 +29,7 @@ func main() {
 
 	modules, err := startModules(context.Background(), cfg, logger)
 	if err != nil {
+		logger.Error("api startup aborted", "error", err)
 		os.Exit(1)
 	}
 	defer modules.shutdown(logger)

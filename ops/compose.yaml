@@ -72,46 +72,29 @@ services:
     networks:
       - observability
 
-  minio:
-    profiles: ["minio", "all"]
-    image: ${MINIO_IMAGE}
-    container_name: minio-observability
+  sftpgo:
+    profiles: ["sftpgo", "all"]
+    image: ${SFTPGO_IMAGE}
+    container_name: sftpgo-object-store
     restart: unless-stopped
     command:
-      - server
-      - /data
-      - "--console-address=:${MINIO_CONSOLE_INTERNAL_PORT}"
-    environment:
-      MINIO_ROOT_USER: ${MINIO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD}
-      MINIO_PROMETHEUS_AUTH_TYPE: ${MINIO_PROMETHEUS_AUTH_TYPE}
+      - portable
+      - "--directory"
+      - /srv/sftpgo/data
+      - "--username"
+      - ${SFTPGO_USERNAME}
+      - "--password"
+      - ${SFTPGO_PASSWORD}
+      - "--sftpd-port"
+      - "${SFTPGO_SFTP_INTERNAL_PORT}"
+      - "--permissions"
+      - "*"
+      - "--log-level"
+      - info
     ports:
-      - "${MINIO_API_BIND_HOST}:${MINIO_API_HOST_PORT}:${MINIO_API_INTERNAL_PORT}"
-      - "${MINIO_CONSOLE_BIND_HOST}:${MINIO_CONSOLE_HOST_PORT}:${MINIO_CONSOLE_INTERNAL_PORT}"
+      - "${SFTPGO_SFTP_BIND_HOST}:${SFTPGO_SFTP_HOST_PORT}:${SFTPGO_SFTP_INTERNAL_PORT}"
     volumes:
-      - minio-data:/data
-    networks:
-      - observability
-
-  minio-init:
-    profiles: ["minio", "all"]
-    image: ${MINIO_CLIENT_IMAGE}
-    container_name: minio-init
-    restart: "no"
-    entrypoint:
-      - /bin/sh
-      - -ec
-      - |
-        until mc alias set local http://${MINIO_INTERNAL_HOST}:${MINIO_API_INTERNAL_PORT} ${MINIO_ROOT_USER} ${MINIO_ROOT_PASSWORD}; do
-          sleep 2
-        done
-        mc mb --ignore-existing local/${OBJECT_STORE_BUCKET}
-        mc mb --ignore-existing local/${LOKI_BUCKET}
-        mc mb --ignore-existing local/${TEMPO_BUCKET}
-    depends_on:
-      minio:
-        condition: service_started
-        required: false
+      - sftpgo-data:/srv/sftpgo/data
     networks:
       - observability
 
@@ -133,7 +116,7 @@ services:
       KC_METRICS_ENABLED: ${KEYCLOAK_METRICS_ENABLED}
       KC_FEATURES: ${KEYCLOAK_FEATURES}
       KC_TRACING_ENABLED: ${KEYCLOAK_TRACING_ENABLED}
-      KC_TRACING_ENDPOINT: http://${OTEL_COLLECTOR_INTERNAL_HOST}:${OTEL_GRPC_INTERNAL_PORT}
+      KC_TRACING_ENDPOINT: http://${TEMPO_INTERNAL_HOST}:${OTEL_GRPC_INTERNAL_PORT}
       KC_TRACING_PROTOCOL: ${KEYCLOAK_TRACING_PROTOCOL}
       KC_TRACING_SERVICE_NAME: ${KEYCLOAK_TRACING_SERVICE_NAME}
       KC_TRACING_SAMPLER_RATIO: ${KEYCLOAK_TRACING_SAMPLER_RATIO}
@@ -181,7 +164,7 @@ services:
       OPENFGA_METRICS_ENABLED: ${OPENFGA_METRICS_ENABLED}
       OPENFGA_METRICS_ADDR: 0.0.0.0:${OPENFGA_METRICS_INTERNAL_PORT}
       OPENFGA_TRACE_ENABLED: ${OPENFGA_TRACE_ENABLED}
-      OPENFGA_TRACE_OTLP_ENDPOINT: ${OTEL_COLLECTOR_INTERNAL_HOST}:${OTEL_GRPC_INTERNAL_PORT}
+      OPENFGA_TRACE_OTLP_ENDPOINT: ${TEMPO_INTERNAL_HOST}:${OTEL_GRPC_INTERNAL_PORT}
       OPENFGA_TRACE_OTLP_TLS_ENABLED: ${OPENFGA_TRACE_OTLP_TLS_ENABLED}
       OPENFGA_TRACE_SAMPLE_RATIO: ${OPENFGA_TRACE_SAMPLE_RATIO}
       OPENFGA_LOG_FORMAT: ${OPENFGA_LOG_FORMAT}
@@ -280,23 +263,6 @@ services:
     networks:
       - observability
 
-  otel-collector:
-    profiles: ["otel", "all"]
-    image: ${OTEL_COLLECTOR_IMAGE}
-    container_name: otel-collector
-    restart: unless-stopped
-    command:
-      - "--config=/etc/otelcol/config.yaml"
-    ports:
-      - "${OTEL_GRPC_BIND_HOST}:${OTEL_GRPC_HOST_PORT}:${OTEL_GRPC_INTERNAL_PORT}"
-      - "${OTEL_HTTP_BIND_HOST}:${OTEL_HTTP_HOST_PORT}:${OTEL_HTTP_INTERNAL_PORT}"
-      - "${OTEL_PROMETHEUS_EXPORT_BIND_HOST}:${OTEL_PROMETHEUS_EXPORT_HOST_PORT}:${OTEL_PROMETHEUS_EXPORT_INTERNAL_PORT}"
-    volumes:
-      - ./generated/otelcol.yaml:/etc/otelcol/config.yaml:ro
-      - ../logs:/var/log/nexus-pro-be:ro
-    networks:
-      - observability
-
   tempo:
     profiles: ["tempo", "all"]
     image: ${TEMPO_IMAGE}
@@ -306,13 +272,11 @@ services:
       - "-config.file=/etc/tempo/tempo.yaml"
     ports:
       - "${TEMPO_HTTP_BIND_HOST}:${TEMPO_HTTP_HOST_PORT}:${TEMPO_HTTP_INTERNAL_PORT}"
+      - "${OTEL_GRPC_BIND_HOST}:${OTEL_GRPC_HOST_PORT}:${OTEL_GRPC_INTERNAL_PORT}"
+      - "${OTEL_HTTP_BIND_HOST}:${OTEL_HTTP_HOST_PORT}:${OTEL_HTTP_INTERNAL_PORT}"
     volumes:
       - ./generated/tempo.yaml:/etc/tempo/tempo.yaml:ro
       - tempo-data:/var/tempo
-    depends_on:
-      minio-init:
-        condition: service_completed_successfully
-        required: false
     networks:
       - observability
 
@@ -334,25 +298,6 @@ services:
     networks:
       - observability
 
-  loki:
-    profiles: ["loki", "all"]
-    image: ${LOKI_IMAGE}
-    container_name: loki
-    restart: unless-stopped
-    command:
-      - "-config.file=/etc/loki/loki.yaml"
-    ports:
-      - "${LOKI_HTTP_BIND_HOST}:${LOKI_HTTP_HOST_PORT}:${LOKI_HTTP_INTERNAL_PORT}"
-    volumes:
-      - ./generated/loki.yaml:/etc/loki/loki.yaml:ro
-      - loki-data:/loki
-    depends_on:
-      minio-init:
-        condition: service_completed_successfully
-        required: false
-    networks:
-      - observability
-
 networks:
   observability:
     name: ${OBSERVABILITY_NETWORK}
@@ -362,7 +307,6 @@ volumes:
   grafana-data:
   prometheus-data:
   tempo-data:
-  loki-data:
-  minio-data:
+  sftpgo-data:
   redis-data:
   nats-data:

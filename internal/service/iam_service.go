@@ -145,6 +145,111 @@ func (c IAMService) CreatePermissionSet(ctx RequestContext, input CreatePermissi
 	return set, nil
 }
 
+// UpdatePermissionSet 更新權限集合的服務流程。
+func (c IAMService) UpdatePermissionSet(ctx RequestContext, id string, input UpdatePermissionSetInput) (PermissionSet, error) {
+	if _, _, err := c.requireIAMAuthz(ctx, ResourcePermissionSet, ActionUpdate, id); err != nil {
+		return PermissionSet{}, err
+	}
+	current, ok, err := c.store.GetPermissionSet(goContext(ctx), ctx.TenantID, strings.TrimSpace(id))
+	if err != nil {
+		return PermissionSet{}, err
+	}
+	if !ok {
+		return PermissionSet{}, NotFound("permission set", id)
+	}
+	next := current
+	if input.Name != nil {
+		name := strings.TrimSpace(*input.Name)
+		if name == "" {
+			return PermissionSet{}, BadRequest("permission set name is required")
+		}
+		next.Name = name
+	}
+	if input.Description != nil {
+		next.Description = strings.TrimSpace(*input.Description)
+	}
+	if input.Permissions != nil {
+		for _, perm := range input.Permissions {
+			perm = normalizePermission(perm)
+			if strings.TrimSpace(perm.Resource) == "" || strings.TrimSpace(string(perm.Action)) == "" {
+				return PermissionSet{}, BadRequest("permission resource and action are required")
+			}
+		}
+		next.Permissions = normalizePermissions(input.Permissions)
+	}
+	if err := c.withTransaction(ctx, func(tx IAMService) error {
+		itemCount, err := tx.upsertPermissionSetWithItems(ctx, next)
+		if err != nil {
+			return err
+		}
+		if err := tx.touchAuthzConfig(ctx, "iam.permission_set.upsert", map[string]any{"permission_set_id": next.ID}); err != nil {
+			return err
+		}
+		if itemCount > 0 {
+			if err := tx.audit(ctx, "iam.permission_catalog.sync", "permission_catalog", next.ID, "medium", map[string]any{
+				"permission_set_id": next.ID,
+				"permission_count":  itemCount,
+			}); err != nil {
+				return err
+			}
+		}
+		return tx.audit(ctx, "iam.permission_set.update", "permission_set", next.ID, "high", map[string]any{
+			"name":             next.Name,
+			"permission_count": len(next.Permissions),
+		})
+	}); err != nil {
+		return PermissionSet{}, err
+	}
+	return next, nil
+}
+
+// ListIamAccountPage 列出 IAM 帳號分頁。
+func (c IAMService) ListIamAccountPage(ctx RequestContext, keyword string, page PageRequest) (PageResponse[IamAccountProjection], error) {
+	if _, _, err := c.requireIAMAuthz(ctx, ResourceIAMAccount, ActionRead, ""); err != nil {
+		return PageResponse[IamAccountProjection]{}, err
+	}
+	accounts, err := c.store.ListAccounts(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return PageResponse[IamAccountProjection]{}, err
+	}
+	normalizedKeyword := strings.ToLower(strings.TrimSpace(keyword))
+	items := make([]IamAccountProjection, 0, len(accounts))
+	for _, account := range accounts {
+		if normalizedKeyword != "" && !accountMatchesKeyword(account, normalizedKeyword) {
+			continue
+		}
+		items = append(items, iamAccountProjectionFromAccount(account))
+	}
+	items = utils.SortIamAccountProjections(items, page.Sort)
+	return utils.PageResponse(items, page), nil
+}
+
+func accountMatchesKeyword(account Account, keyword string) bool {
+	candidate := strings.ToLower(strings.Join([]string{
+		account.ID,
+		account.DisplayName,
+		account.Email,
+		account.EmployeeID,
+		account.Status,
+	}, " "))
+	return strings.Contains(candidate, keyword)
+}
+
+func iamAccountProjectionFromAccount(account Account) IamAccountProjection {
+	return IamAccountProjection{
+		ID:                     account.ID,
+		TenantID:               account.TenantID,
+		DisplayName:            account.DisplayName,
+		Email:                  account.Email,
+		EmployeeID:             account.EmployeeID,
+		Status:                 account.Status,
+		UserGroupIDs:           utils.CopyStrings(account.UserGroupIDs),
+		DirectPermissionSetIDs: utils.CopyStrings(account.DirectPermissionSetIDs),
+		ActiveAssumableRoleID:  account.ActiveAssumableRoleID,
+		CreatedAt:              account.CreatedAt,
+	}
+}
+
 // ListPermissions 列出權限的服務流程。
 func (c IAMService) ListPermissions(ctx RequestContext) ([]Permission, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourcePermission, ActionRead, ""); err != nil {
@@ -616,10 +721,25 @@ func (c IAMService) ListPermissionSetAssignments(ctx RequestContext) ([]Permissi
 }
 
 // ListPermissionSetAssignmentPage 列出權限集合指派分頁的服務流程。
-func (c IAMService) ListPermissionSetAssignmentPage(ctx RequestContext, page PageRequest) (PageResponse[PermissionSetAssignment], error) {
+func (c IAMService) ListPermissionSetAssignmentPage(ctx RequestContext, query PermissionSetAssignmentQuery, page PageRequest) (PageResponse[PermissionSetAssignment], error) {
 	items, err := c.ListPermissionSetAssignments(ctx)
 	if err != nil {
 		return PageResponse[PermissionSetAssignment]{}, err
+	}
+	principalType := strings.TrimSpace(query.PrincipalType)
+	principalID := strings.TrimSpace(query.PrincipalID)
+	if principalType != "" || principalID != "" {
+		filtered := make([]PermissionSetAssignment, 0, len(items))
+		for _, item := range items {
+			if principalType != "" && item.PrincipalType != principalType {
+				continue
+			}
+			if principalID != "" && item.PrincipalID != principalID {
+				continue
+			}
+			filtered = append(filtered, item)
+		}
+		items = filtered
 	}
 	items = utils.SortPermissionSetAssignments(items, page.Sort)
 	return utils.PageResponse(items, page), nil
@@ -705,6 +825,50 @@ func (c IAMService) CreatePermissionSetAssignment(ctx RequestContext, input Crea
 		"data_scope_id", assignment.DataScopeID,
 	)
 	return assignment, nil
+}
+
+// DeletePermissionSetAssignment 刪除權限集合指派的服務流程。
+func (c IAMService) DeletePermissionSetAssignment(ctx RequestContext, id string) (PermissionSetAssignment, error) {
+	if _, _, err := c.requireIAMAuthz(ctx, ResourcePermissionAssign, ActionDelete, id); err != nil {
+		return PermissionSetAssignment{}, err
+	}
+	assignments, err := c.store.ListPermissionSetAssignments(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return PermissionSetAssignment{}, err
+	}
+	var current PermissionSetAssignment
+	found := false
+	for _, item := range assignments {
+		if item.ID == strings.TrimSpace(id) {
+			current = item
+			found = true
+			break
+		}
+	}
+	if !found {
+		return PermissionSetAssignment{}, NotFound("permission set assignment", id)
+	}
+	if err := c.withTransaction(ctx, func(tx IAMService) error {
+		deleted, ok, err := tx.store.DeletePermissionSetAssignment(goContext(ctx), ctx.TenantID, current.ID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("permission set assignment", id)
+		}
+		if err := tx.touchAuthzConfig(ctx, "iam.permission_assignment.delete", map[string]any{"assignment_id": deleted.ID}); err != nil {
+			return err
+		}
+		return tx.audit(ctx, "iam.permission_assignment.delete", "permission_set_assignment", deleted.ID, "high", map[string]any{
+			"principal_type": deleted.PrincipalType,
+			"principal_id":   deleted.PrincipalID,
+			"permission_set": deleted.PermissionSetID,
+			"effect":         deleted.Effect,
+		})
+	}); err != nil {
+		return PermissionSetAssignment{}, err
+	}
+	return current, nil
 }
 
 // validatePermissionSetAssignmentPrincipal 驗證權限集合指派 principal 的服務流程。

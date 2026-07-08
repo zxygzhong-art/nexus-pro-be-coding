@@ -196,10 +196,10 @@ var defaultMenuCatalog = []MenuNode{
 	{
 		Key:   "iam",
 		Label: "權限中心",
-		Path:  "/workspace/admins",
+		Path:  "/iam/permission-sets",
 		Children: []MenuNode{
 			{Key: "iam.user_groups", Label: "使用者群組", Path: "/iam/user-groups"},
-			{Key: "iam.permission_sets", Label: "權限集合", Path: "/workspace/admins"},
+			{Key: "iam.permission_sets", Label: "權限集合", Path: "/iam/permission-sets"},
 			{Key: "iam.assumable_roles", Label: "可承擔身分", Path: "/iam/assumable-roles"},
 		},
 	},

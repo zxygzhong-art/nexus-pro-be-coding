@@ -84,6 +84,13 @@ type CreatePermissionSetInput struct {
 	Permissions []Permission `json:"permissions"`
 }
 
+// UpdatePermissionSetInput 定義權限集合更新輸入。
+type UpdatePermissionSetInput struct {
+	Name        *string      `json:"name,omitempty"`
+	Description *string      `json:"description,omitempty"`
+	Permissions []Permission `json:"permissions,omitempty"`
+}
+
 // Permission 定義權限的資料結構。
 type Permission struct {
 	ID              string          `json:"id,omitempty"`
@@ -424,6 +431,20 @@ type IAMRoleBindingProjection struct {
 	CreatedAt       time.Time      `json:"created_at"`
 }
 
+// IamAccountProjection 定義 IAM 帳號只讀投影。
+type IamAccountProjection struct {
+	ID                     string    `json:"id"`
+	TenantID               string    `json:"tenant_id"`
+	DisplayName            string    `json:"display_name"`
+	Email                  string    `json:"email,omitempty"`
+	EmployeeID             string    `json:"employee_id,omitempty"`
+	Status                 string    `json:"status"`
+	UserGroupIDs           []string  `json:"user_group_ids"`
+	DirectPermissionSetIDs []string  `json:"direct_permission_set_ids"`
+	ActiveAssumableRoleID  string    `json:"active_assumable_role_id,omitempty"`
+	CreatedAt              time.Time `json:"created_at"`
+}
+
 // CreatePermissionSetAssignmentInput 定義權限集合指派輸入的資料結構。
 type CreatePermissionSetAssignmentInput struct {
 	PrincipalType   string `json:"principal_type"`
@@ -434,6 +455,12 @@ type CreatePermissionSetAssignmentInput struct {
 	ConditionID     string `json:"condition_id,omitempty"`
 	StartsAt        string `json:"starts_at,omitempty"`
 	ExpiresAt       string `json:"expires_at,omitempty"`
+}
+
+// PermissionSetAssignmentQuery 定義權限集合指派查詢條件。
+type PermissionSetAssignmentQuery struct {
+	PrincipalType string `json:"principal_type,omitempty"`
+	PrincipalID   string `json:"principal_id,omitempty"`
 }
 
 // DataScope 定義資料範圍的資料結構。

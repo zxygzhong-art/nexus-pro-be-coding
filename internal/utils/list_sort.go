@@ -50,6 +50,17 @@ func SortPermissionSetAssignments(items []domain.PermissionSetAssignment, sort s
 	return sortBy(items, sort, permissionSetAssignmentComparators, "created_at_desc")
 }
 
+var iamAccountProjectionComparators = comparators[domain.IamAccountProjection]{
+	"created_at_asc":  func(a, b domain.IamAccountProjection) bool { return a.CreatedAt.Before(b.CreatedAt) },
+	"created_at_desc": func(a, b domain.IamAccountProjection) bool { return a.CreatedAt.After(b.CreatedAt) },
+	"name_asc":        func(a, b domain.IamAccountProjection) bool { return a.DisplayName < b.DisplayName },
+}
+
+// SortIamAccountProjections 排序 IAM 帳號投影。
+func SortIamAccountProjections(items []domain.IamAccountProjection, sort string) []domain.IamAccountProjection {
+	return sortBy(items, sort, iamAccountProjectionComparators, "created_at_desc")
+}
+
 var dataScopeComparators = comparators[domain.DataScope]{
 	"created_at_asc":  func(a, b domain.DataScope) bool { return a.CreatedAt.Before(b.CreatedAt) },
 	"created_at_desc": func(a, b domain.DataScope) bool { return a.CreatedAt.After(b.CreatedAt) },

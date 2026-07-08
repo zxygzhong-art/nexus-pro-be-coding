@@ -712,6 +712,18 @@ func (s *Store) UpsertPermissionSetAssignment(execCtx context.Context, v domain.
 	return err
 }
 
+// DeletePermissionSetAssignment 從儲存層刪除權限集合指派。
+func (s *Store) DeletePermissionSetAssignment(execCtx context.Context, tenantID, id string) (domain.PermissionSetAssignment, bool, error) {
+	v, err := s.q.DeleteAuthzPermissionSetAssignment(tenantContext(execCtx, tenantID), sqlc.DeleteAuthzPermissionSetAssignmentParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.PermissionSetAssignment{}, false, nil
+	}
+	if err != nil {
+		return domain.PermissionSetAssignment{}, false, err
+	}
+	return fromPermissionSetAssignment(v), true, nil
+}
+
 // ListPermissionSetAssignments 從儲存層列出權限集合指派。
 func (s *Store) ListPermissionSetAssignments(execCtx context.Context, tenantID string) ([]domain.PermissionSetAssignment, error) {
 	items, err := s.q.ListAuthzPermissionSetAssignments(tenantContext(execCtx, tenantID), tenantID)

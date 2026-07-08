@@ -11,6 +11,11 @@ import (
 )
 
 func newWorkflowEngineFixture(t *testing.T, now time.Time, reviewerAccountID string) (*service.Service, domain.RequestContext, *memory.Store) {
+	svc, ctx, store, _ := newWorkflowEngineFixtureWithFake(t, now, reviewerAccountID)
+	return svc, ctx, store
+}
+
+func newWorkflowEngineFixtureWithFake(t *testing.T, now time.Time, reviewerAccountID string) (*service.Service, domain.RequestContext, *memory.Store, *fakeFormApprovalWorkflowClient) {
 	t.Helper()
 	store := memory.NewStore()
 	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
@@ -56,6 +61,6 @@ func newWorkflowEngineFixture(t *testing.T, now time.Time, reviewerAccountID str
 		Schema:    workflowEnabledTemplateSchema(reviewerAccountID),
 		CreatedAt: now,
 	})
-	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
-	return svc, domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-applicant"}, store
+	svc, fake := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	return svc, domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-applicant"}, store, fake
 }

@@ -2,7 +2,7 @@
 
 本目錄是本地基礎設施與可觀測性服務的統一入口。所有執行期設定集中在一個檔案：[`.env`](.env)。不要直接修改產生出來的 YAML 檔。
 
-這套堆疊包含 Grafana、OpenTelemetry Collector、Tempo、Prometheus、Loki、Keycloak、OpenFGA、Temporal、NATS JetStream、Redis、PostgreSQL 和 MinIO，所有映像都使用固定版本標籤。MinIO 是後端、Loki、Tempo 預設使用的 S3-compatible 物件儲存。
+這套堆疊包含 Grafana、Tempo、Prometheus、Keycloak、OpenFGA、Temporal、NATS JetStream、Redis、PostgreSQL 和 SFTPGo，所有映像都使用固定版本標籤。SFTPGo 是後端預設使用的業務文件儲存。
 
 ## 啟動
 
@@ -14,11 +14,11 @@ docker compose --env-file .env up -d
 
 [`.env`](.env) 內預設 `COMPOSE_PROFILES=all`，會啟動所有服務。修改 port、密碼、映像版本、bucket、retention 或 telemetry endpoint 後，需要重新執行 `./render-configs.sh`。
 
-產生的設定檔會寫到 `ops/generated/`，並由 Git 忽略。這些檔案只存在於執行期，因為 Grafana、Prometheus、Loki、Tempo 和 OTel Collector 都需要各自的執行期設定格式。
+產生的設定檔會寫到 `ops/generated/`，並由 Git 忽略。這些檔案只存在於執行期，因為 Grafana、Prometheus 和 Tempo 都需要各自的執行期設定格式。
 
 單服務映像建置方式請看 [dockerfiles/README.md](dockerfiles/README.md)。
 
-後端物件儲存與 S3-compatible 部署說明請看 [docs/s3-minio.md](docs/s3-minio.md)。
+後端物件儲存與 SFTPGo 部署說明請看 [docs/sftpgo.md](docs/sftpgo.md)。
 
 Keycloak 部署與前後端對接說明請看 [docs/keycloak.md](docs/keycloak.md)。
 
@@ -42,12 +42,10 @@ Keycloak
 OpenFGA
 Temporal
 NATS JetStream
-MinIO
+SFTPGo
 後端物件儲存
-Loki
-Tempo
-OpenTelemetry Collector
 Prometheus
+Tempo
 Grafana
 ```
 
@@ -72,10 +70,8 @@ Grafana
 | OpenFGA | `openfga` | `openfga`, `openfga-migrate` |
 | Temporal | `temporal` | `temporal`, `temporal-ui`, `temporal-admin-tools` |
 | NATS JetStream | `nats` | `nats` |
-| MinIO | `minio` | `minio`, `minio-init` |
-| Loki | `loki` | `loki` |
+| SFTPGo | `sftpgo` | `sftpgo` |
 | Tempo | `tempo` | `tempo` |
-| OpenTelemetry Collector | `otel` | `otel-collector` |
 | Prometheus | `prometheus` | `prometheus` |
 | Grafana | `grafana` | `grafana` |
 
@@ -93,11 +89,11 @@ cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
 COMPOSE_PROFILES=redis docker compose --env-file .env up -d redis
 ```
 
-只部署 MinIO 並初始化 bucket：
+只部署 SFTPGo：
 
 ```bash
 cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
-COMPOSE_PROFILES=minio docker compose --env-file .env up -d minio minio-init
+COMPOSE_PROFILES=sftpgo docker compose --env-file .env up -d sftpgo
 ```
 
 只部署 NATS JetStream：
@@ -124,22 +120,13 @@ cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
 COMPOSE_PROFILES=keycloak docker compose --env-file .env up -d --no-deps keycloak
 ```
 
-Prometheus、Loki、Tempo 已在其他主機部署，只部署 Grafana：
+Prometheus、Tempo 已在其他主機部署，只部署 Grafana：
 
 ```bash
 cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
-# 先在 .env 裡把 PROMETHEUS_INTERNAL_HOST、LOKI_INTERNAL_HOST、TEMPO_INTERNAL_HOST 指向既有服務主機。
+# 先在 .env 裡把 PROMETHEUS_INTERNAL_HOST、TEMPO_INTERNAL_HOST 指向既有服務主機。
 ./render-configs.sh
 COMPOSE_PROFILES=grafana docker compose --env-file .env up -d --no-deps grafana
-```
-
-MinIO 已在其他主機部署，只部署 Loki：
-
-```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
-# 先在 .env 裡把 MINIO_INTERNAL_HOST、MINIO_API_INTERNAL_PORT、MINIO_ROOT_USER、MINIO_ROOT_PASSWORD 指向既有 MinIO 主機。
-./render-configs.sh
-COMPOSE_PROFILES=loki docker compose --env-file .env up -d --no-deps loki
 ```
 
 當某個依賴已經部署在此 compose project 外部時，使用 `--no-deps`。不加 `--no-deps` 時，Docker Compose 可能會嘗試啟動已宣告的依賴服務。
@@ -149,10 +136,8 @@ COMPOSE_PROFILES=loki docker compose --env-file .env up -d --no-deps loki
 映像標籤都設定在 [`.env`](.env)：
 
 - Grafana：`GRAFANA_IMAGE`
-- OpenTelemetry Collector Contrib：`OTEL_COLLECTOR_IMAGE`
 - Tempo：`TEMPO_IMAGE`
 - Prometheus：`PROMETHEUS_IMAGE`
-- Loki：`LOKI_IMAGE`
 - Keycloak：`KEYCLOAK_IMAGE`
 - OpenFGA：`OPENFGA_IMAGE`
 - Temporal：`TEMPORAL_IMAGE`
@@ -161,8 +146,7 @@ COMPOSE_PROFILES=loki docker compose --env-file .env up -d --no-deps loki
 - NATS JetStream：`NATS_IMAGE`
 - Redis：`REDIS_IMAGE`
 - PostgreSQL：`POSTGRES_IMAGE`
-- MinIO：`MINIO_IMAGE`
-- MinIO Client：`MINIO_CLIENT_IMAGE`
+- SFTPGo：`SFTPGO_IMAGE`
 
 ## 本地 URL
 
@@ -178,21 +162,19 @@ Temporal UI:    http://127.0.0.1:24088
 NATS client:    nats://127.0.0.1:24222
 NATS monitor:   http://127.0.0.1:28222
 Prometheus:     http://127.0.0.1:24090
-Loki:           http://127.0.0.1:24100
 Tempo:          http://127.0.0.1:24200
-MinIO API:      http://127.0.0.1:24900
-MinIO Console:  http://127.0.0.1:24901
+SFTPGo SFTP:    sftp://127.0.0.1:22022
 ```
 
 預設本地帳密也在 [`.env`](.env)。任何非本地部署都必須先更換。
 
 ## 應用程式端點
 
-後端的三類信號都以 OpenTelemetry Collector 為統一入口：
+後端 traces 和 metrics 分別進入對應的本地可觀測性服務，logs 只直接輸出到控制台：
 
-- traces：後端用 OTLP gRPC 上報到 Collector，再由 Collector 送 Tempo。
-- metrics：Collector scrape 後端 `/metrics`，再暴露統一 Prometheus exporter 給 Prometheus。
-- logs：後端 JSON stdout 落到 `logs/*.log`，Collector 用 filelog receiver 讀取後送 Loki。
+- traces：後端用 OTLP gRPC 直接上報到 Tempo。
+- metrics：Prometheus 直接 scrape 後端 `/metrics`。
+- logs：後端 JSON 日誌直接寫 stdout / 控制台。
 
 在宿主機上執行 Go 後端時使用：
 
@@ -204,30 +186,30 @@ OTEL_SERVICE_NAME=nexus-pro-be
 METRICS_ADDR=0.0.0.0:9091
 ```
 
-同時把 stdout 寫入 Collector 掛載的本地日誌目錄：
+日誌直接看啟動進程的控制台輸出：
 
 ```bash
-mkdir -p /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/logs
-go run ./cmd/api 2>&1 | tee /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/logs/nexus-pro-be.log
+go run ./cmd/api
 ```
 
-在同一個 Docker network 內執行 Go 後端時，trace endpoint 改成 Collector service name：
+在同一個 Docker network 內執行 Go 後端時，trace endpoint 改成 Tempo service name：
 
 ```bash
 OTEL_ENABLED=true
-OTEL_EXPORTER_OTLP_ENDPOINT=otel-collector:4317
+OTEL_EXPORTER_OTLP_ENDPOINT=tempo:4317
 OTEL_EXPORTER_OTLP_INSECURE=true
 ```
 
 後端物件儲存預設值：
 
 ```bash
-OBJECT_STORE_PROVIDER=minio
-OBJECT_STORE_ENDPOINT=http://127.0.0.1:24900
+OBJECT_STORE_PROVIDER=sftpgo
+OBJECT_STORE_ENDPOINT=sftp://127.0.0.1:22022
 OBJECT_STORE_BUCKET=nexus-hr-imports
-OBJECT_STORE_REGION=us-east-1
-OBJECT_STORE_ACCESS_KEY_ID=minioadmin
-OBJECT_STORE_SECRET_ACCESS_KEY=minioadmin
+OBJECT_STORE_REGION=
+OBJECT_STORE_ACCESS_KEY_ID=nexus
+OBJECT_STORE_SECRET_ACCESS_KEY=nexus-sftpgo-password
+OBJECT_STORE_SFTP_HOST_KEY=
 OBJECT_STORE_USE_SSL=false
 OBJECT_STORE_CREATE_BUCKET=true
 ```
@@ -257,7 +239,7 @@ set +a
 export OTEL_ENABLED=true
 export METRICS_ADDR=0.0.0.0:9091
 mkdir -p logs
-go run ./cmd/api 2>&1 | tee logs/nexus-pro-be.log
+go run ./cmd/api
 ```
 
 ## 停止

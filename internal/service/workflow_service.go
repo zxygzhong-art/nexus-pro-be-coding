@@ -324,12 +324,22 @@ func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (
 	if idOrTemplateKey == "" {
 		return FormInstance{}, BadRequest("template_key is required")
 	}
+	var instance FormInstance
+	var err error
 	if existing, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, idOrTemplateKey); err != nil {
 		return FormInstance{}, err
 	} else if ok {
-		return c.submitExistingDraft(ctx, existing.ID, input.Payload)
+		instance, err = c.submitExistingDraft(ctx, existing.ID, input.Payload)
+	} else {
+		instance, err = c.submitNewForm(ctx, idOrTemplateKey, input.Payload)
 	}
-	return c.submitNewForm(ctx, idOrTemplateKey, input.Payload)
+	if err != nil {
+		return FormInstance{}, err
+	}
+	if err := c.startTemporalFormApprovalWorkflow(ctx, instance); err != nil {
+		return FormInstance{}, err
+	}
+	return instance, nil
 }
 
 // submitNewForm 提交 new 表單的服務流程。
@@ -505,53 +515,21 @@ func (c WorkflowService) CancelForm(ctx RequestContext, id string, input CancelF
 	if err != nil {
 		return FormInstance{}, err
 	}
-	var instance FormInstance
-	if err := c.withTransaction(ctx, func(tx WorkflowService) error {
-		next, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, id)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return NotFound("form instance", id)
-		}
-		if err := requireFormInstanceVisible(next, account, decision); err != nil {
-			return err
-		}
-		switch normalizeWorkflowStatus(next.Status) {
-		case workflowFormStatusDraft:
-			return BadRequest("draft form instances should be deleted instead of cancelled")
-		case workflowFormStatusApproved:
-			return BadRequest("approved form instances cannot be cancelled")
-		case workflowFormStatusCancelled, "canceled":
-			if err := tx.Service.Attendance().applyAttendanceWorkflowReview(ctx, next, "cancel", workflowFormStatusCancelled); err != nil {
-				return err
-			}
-			instance = next
-			return nil
-		}
-		now := tx.Now()
-		next.Status = workflowFormStatusCancelled
-		next.ApprovedBy = account.ID
-		next.Payload = withWorkflowReview(next.Payload, "cancel", account.ID, input.Reason, now)
-		next.UpdatedAt = now
-		if err := tx.store.UpsertFormInstance(goContext(ctx), next); err != nil {
-			return err
-		}
-		if err := tx.Service.Attendance().applyAttendanceWorkflowReview(ctx, next, "cancel", workflowFormStatusCancelled); err != nil {
-			return err
-		}
-		if err := tx.audit(ctx, "workflow.form.cancel", string(ResourceFormInstance), next.ID, string(SeverityMedium), map[string]any{
-			"template_id": next.TemplateID,
-			"reason":      strings.TrimSpace(input.Reason),
-		}); err != nil {
-			return err
-		}
-		if err := authzAudit.CommitWith(ctx, tx.Service); err != nil {
-			return err
-		}
-		instance = next
-		return nil
-	}); err != nil {
+	current, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, id)
+	if err != nil {
+		return FormInstance{}, err
+	}
+	if !ok {
+		return FormInstance{}, NotFound("form instance", id)
+	}
+	if err := requireFormInstanceVisible(current, account, decision); err != nil {
+		return FormInstance{}, err
+	}
+	instance, err := c.signalTemporalFormApprovalWorkflow(ctx, id, domain.FormApprovalWorkflowActionWithdraw, workflowFormStatusCancelled, input.Reason)
+	if err != nil {
+		return FormInstance{}, err
+	}
+	if err := authzAudit.Commit(ctx); err != nil {
 		return FormInstance{}, err
 	}
 	return instance, nil
@@ -685,83 +663,12 @@ func (c WorkflowService) BulkReviewForms(ctx RequestContext, input BulkReviewFor
 
 // reviewForm 處理審核表單的服務流程。
 func (c WorkflowService) reviewForm(ctx RequestContext, id string, kind string, status string, comment string) (FormInstance, error) {
-	if run, ok, err := c.store.GetWorkflowRunByFormInstance(goContext(ctx), ctx.TenantID, id); err != nil {
-		return FormInstance{}, err
-	} else if ok && strings.EqualFold(run.Status, domain.WorkflowRunStatusRunning) {
-		return c.ActOnWorkflowStage(ctx, id, kind, comment)
+	switch strings.TrimSpace(strings.ToLower(kind)) {
+	case domain.FormApprovalWorkflowActionApprove, domain.FormApprovalWorkflowActionReject, domain.FormApprovalWorkflowActionReturn:
+	default:
+		return FormInstance{}, BadRequest("action must be approve, reject, or return")
 	}
-	action := ActionUpdate
-	if kind == "approve" {
-		action = ActionApprove
-	}
-	reviewer, _, authzAudit, err := c.Authorize(ctx,
-		CheckRequest{ApplicationCode: AppWorkflow, ResourceType: ResourceFormInstance, ResourceID: id, Action: action},
-		AuditTarget{Event: "workflow.form." + kind, Resource: string(ResourceFormInstance), Target: id},
-	)
-	if err != nil {
-		return FormInstance{}, err
-	}
-	var instance FormInstance
-	if err := c.withTransaction(ctx, func(tx WorkflowService) error {
-		next, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, id)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return NotFound("form instance", id)
-		}
-		if kind != "approve" && strings.EqualFold(next.Status, "approved") {
-			return BadRequest("approved form instance cannot be " + kind + "ed")
-		}
-		if strings.EqualFold(next.Status, status) {
-			if err := tx.Service.Attendance().applyAttendanceWorkflowReview(ctx, next, kind, status); err != nil {
-				return err
-			}
-			instance = next
-			return nil
-		}
-		previousStatus := next.Status
-		reason := strings.TrimSpace(comment)
-		now := tx.Now()
-		next.Status = status
-		next.ApprovedBy = ctx.AccountID
-		next.Payload = withWorkflowReview(next.Payload, kind, ctx.AccountID, reason, now)
-		next.UpdatedAt = now
-		if err := tx.store.UpsertFormInstance(goContext(ctx), next); err != nil {
-			return err
-		}
-		if err := tx.Service.Attendance().applyAttendanceWorkflowReview(ctx, next, kind, status); err != nil {
-			return err
-		}
-		template, ok, err := tx.store.GetFormTemplate(goContext(ctx), ctx.TenantID, next.TemplateID)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			template = FormTemplate{ID: next.TemplateID, Name: next.TemplateID}
-		}
-		if err := tx.audit(ctx, "workflow.form."+kind, string(ResourceFormInstance), next.ID, string(SeverityHigh), map[string]any{
-			"template_id":      next.TemplateID,
-			"reviewed_by":      ctx.AccountID,
-			"review_action":    kind,
-			"review_comment":   reason,
-			"previous_status":  previousStatus,
-			"resulting_status": status,
-		}); err != nil {
-			return err
-		}
-		if err := authzAudit.CommitWith(ctx, tx.Service); err != nil {
-			return err
-		}
-		if err := tx.notifyWorkflowFormReviewed(ctx, next, template, reviewer, kind, reason); err != nil {
-			return err
-		}
-		instance = next
-		return nil
-	}); err != nil {
-		return FormInstance{}, err
-	}
-	return instance, nil
+	return c.signalTemporalFormApprovalWorkflow(ctx, id, kind, status, comment)
 }
 
 // normalizeBulkReviewAction 正規化批次審核 action。
@@ -1316,6 +1223,7 @@ func safeWorkflowFileName(value string) string {
 	}
 	return value
 }
+
 var workflowConditionNumberPattern = regexp.MustCompile(`(?:≥|>|=|<|≤|>=|<=)\s*([0-9]+)`)
 
 // ParseWorkflowStagesFromTemplate 從 template schema 解析可執行流程節點。
@@ -1372,16 +1280,21 @@ func workflowStageConfigFromMap(values map[string]any) domain.WorkflowStageConfi
 		return domain.WorkflowStageConfig{}
 	}
 	config := domain.WorkflowStageConfig{
-		Role:            stringFromAny(values["role"]),
-		Mode:            stringFromAny(values["mode"]),
-		Field:           stringFromAny(values["field"]),
-		Operator:        stringFromAny(values["operator"]),
-		Value:           stringFromAny(values["value"]),
-		TrueNextStageID: stringFromAny(values["true_next_stage_id"]),
+		Role:             stringFromAny(values["role"]),
+		Mode:             stringFromAny(values["mode"]),
+		Field:            stringFromAny(values["field"]),
+		Operator:         stringFromAny(values["operator"]),
+		Value:            stringFromAny(values["value"]),
+		TrueNextStageID:  stringFromAny(values["true_next_stage_id"]),
 		FalseNextStageID: stringFromAny(values["false_next_stage_id"]),
 	}
 	if level := intFromAny(values["relative_level"]); level > 0 {
 		config.RelativeLevel = level
+	}
+	if hours := intFromAny(values["remind_after_hours"]); hours > 0 {
+		config.RemindAfterHours = hours
+	} else if hours := intFromAny(values["remindAfterHours"]); hours > 0 {
+		config.RemindAfterHours = hours
 	}
 	if ids, ok := values["account_ids"].([]any); ok {
 		for _, item := range ids {

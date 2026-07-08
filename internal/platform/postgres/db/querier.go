@@ -23,6 +23,7 @@ type Querier interface {
 	CreateAuthzAssumableRoleSession(ctx context.Context, arg CreateAuthzAssumableRoleSessionParams) (AuthzAssumableRoleSession, error)
 	DeleteAuthzDataScope(ctx context.Context, arg DeleteAuthzDataScopeParams) (AuthzDataScope, error)
 	DeleteAuthzFieldPolicy(ctx context.Context, arg DeleteAuthzFieldPolicyParams) (AuthzFieldPolicy, error)
+	DeleteAuthzPermissionSetAssignment(ctx context.Context, arg DeleteAuthzPermissionSetAssignmentParams) (AuthzPermissionSetAssignment, error)
 	DeleteAuthzRelationshipTuple(ctx context.Context, arg DeleteAuthzRelationshipTupleParams) error
 	DeleteFormInstance(ctx context.Context, arg DeleteFormInstanceParams) error
 	DeleteGroupMembership(ctx context.Context, arg DeleteGroupMembershipParams) (AuthzGroupMembership, error)

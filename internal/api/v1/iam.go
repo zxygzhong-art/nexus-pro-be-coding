@@ -37,8 +37,11 @@ func (c IAMCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	iam.DELETE("/user-groups/:id/members/:accountId", c.routes.Handle("iam.user_group", "update", c.removeUserGroupMember, ResourceID(PathParamID), PathParam("accountId")))
 	iam.GET("/permission-sets", c.routes.Handle("iam.permission_set", "read", c.listPermissionSets))
 	iam.POST("/permission-sets", c.routes.Handle("iam.permission_set", "create", c.createPermissionSet))
+	iam.PATCH("/permission-sets/:id", c.routes.Handle("iam.permission_set", "update", c.updatePermissionSet, ResourceID(PathParamID)))
+	iam.GET("/accounts", c.routes.Handle("iam.account", "read", c.listAccounts))
 	iam.GET("/permission-set-assignments", c.routes.Handle("iam.permission_set_assignment", "read", c.listPermissionSetAssignments))
 	iam.POST("/permission-set-assignments", c.routes.Handle("iam.permission_set_assignment", "create", c.createPermissionSetAssignment))
+	iam.DELETE("/permission-set-assignments/:id", c.routes.Handle("iam.permission_set_assignment", "delete", c.deletePermissionSetAssignment, ResourceID(PathParamID)))
 	iam.GET("/data-scopes", c.routes.Handle("iam.data_scope", "read", c.listDataScopes))
 	iam.POST("/data-scopes", c.routes.Handle("iam.data_scope", "create", c.createDataScope))
 	iam.PATCH("/data-scopes/:id", c.routes.Handle("iam.data_scope", "update", c.updateDataScope, ResourceID(PathParamID)))
@@ -271,13 +274,45 @@ func (c IAMCtrl) createPermissionSet(w http.ResponseWriter, r *http.Request, ctx
 	return nil
 }
 
+// updatePermissionSet 處理權限集合更新的 HTTP 請求。
+func (c IAMCtrl) updatePermissionSet(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.UpdatePermissionSetInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.UpdatePermissionSet(ctx, r.PathValue(PathParamID), input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// listAccounts 處理 IAM 帳號目錄的 HTTP 請求。
+func (c IAMCtrl) listAccounts(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	page, err := pageRequestFromRequest(r)
+	if err != nil {
+		return err
+	}
+	items, err := c.svc.ListIamAccountPage(ctx, r.URL.Query().Get("q"), page)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, items)
+	return nil
+}
+
 // listPermissionSetAssignments 處理權限集合指派的 HTTP 請求。
 func (c IAMCtrl) listPermissionSetAssignments(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
 		return err
 	}
-	items, err := c.svc.ListPermissionSetAssignmentPage(ctx, page)
+	query := domain.PermissionSetAssignmentQuery{
+		PrincipalType: strings.TrimSpace(r.URL.Query().Get("principal_type")),
+		PrincipalID:   strings.TrimSpace(r.URL.Query().Get("principal_id")),
+	}
+	items, err := c.svc.ListPermissionSetAssignmentPage(ctx, query, page)
 	if err != nil {
 		return err
 	}
@@ -296,6 +331,16 @@ func (c IAMCtrl) createPermissionSetAssignment(w http.ResponseWriter, r *http.Re
 		return err
 	}
 	writeJSON(w, http.StatusCreated, item)
+	return nil
+}
+
+// deletePermissionSetAssignment 處理權限集合指派刪除的 HTTP 請求。
+func (c IAMCtrl) deletePermissionSetAssignment(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.DeletePermissionSetAssignment(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 

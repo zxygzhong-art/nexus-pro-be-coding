@@ -152,6 +152,9 @@ func (c *Checker) WriteRelationshipTuples(ctx context.Context, changes []domain.
 	}
 	defer resp.Body.Close()
 	if err := openFGAStatusError(resp, "write"); err != nil {
+		if isOpenFGAIdempotentTupleWriteError(err) {
+			return nil
+		}
 		return err
 	}
 	return nil
@@ -196,6 +199,21 @@ func openFGAStatusError(resp *http.Response, operation string) error {
 		return nil
 	}
 	return fmt.Errorf("openfga %s failed: status=%d body=%q", operation, resp.StatusCode, readOpenFGAErrorBody(resp))
+}
+
+// isOpenFGAIdempotentTupleWriteError treats tuple replay conflicts as success.
+func isOpenFGAIdempotentTupleWriteError(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	if !strings.Contains(message, "tuple") {
+		return false
+	}
+	return strings.Contains(message, "already exists") ||
+		strings.Contains(message, "duplicate") ||
+		strings.Contains(message, "does not exist") ||
+		strings.Contains(message, "not found")
 }
 
 // readOpenFGAErrorBody 讀取 OpenFGA 錯誤 body。

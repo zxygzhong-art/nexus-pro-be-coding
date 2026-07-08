@@ -71,7 +71,7 @@ COMPOSE_PROFILES=keycloak docker compose --env-file .env up -d --no-deps keycloa
 | `KEYCLOAK_COMMAND` | `start-dev` | 本地开发模式 |
 | `KEYCLOAK_DB_NAME` | `keycloak` | PostgreSQL 数据库名（initdb 自动创建） |
 | `KEYCLOAK_FEATURES` | `opentelemetry` | 启用 OpenTelemetry |
-| `KEYCLOAK_TRACING_ENABLED` | `true` | trace 上报到 `otel-collector` |
+| `KEYCLOAK_TRACING_ENABLED` | `true` | trace 上报到 `tempo` |
 
 ## 2. 创建 Realm
 

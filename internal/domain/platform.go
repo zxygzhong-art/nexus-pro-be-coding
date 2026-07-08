@@ -259,19 +259,18 @@ type PlatformFormBuilderField struct {
 
 // PlatformFormBuilderStage 定義平台表單 builder stage 的資料結構。
 type PlatformFormBuilderStage struct {
-	ID     string                 `json:"id"`
-	Type   string                 `json:"type"`
-	Label  string                 `json:"label"`
-	Detail string                 `json:"detail"`
-	Config map[string]any         `json:"config,omitempty"`
+	ID     string         `json:"id"`
+	Type   string         `json:"type"`
+	Label  string         `json:"label"`
+	Detail string         `json:"detail"`
+	Config map[string]any `json:"config,omitempty"`
 }
 
 // PlatformWorkspaceResponse 定義平台工作區回應的資料結構。
 type PlatformWorkspaceResponse struct {
-	AdminSettings WorkspaceAdminsResponse  `json:"admin_settings"`
-	AuditLogs     []WorkspaceAuditLog      `json:"audit_logs"`
-	FormDesign    PlatformFormDesign       `json:"form_design"`
-	LeavePolicy   AttendancePolicyResponse `json:"leave_policy"`
+	AuditLogs   []WorkspaceAuditLog      `json:"audit_logs"`
+	FormDesign  PlatformFormDesign       `json:"form_design"`
+	LeavePolicy AttendancePolicyResponse `json:"leave_policy"`
 }
 
 // PlatformWorkspaceEmployeesResponse 定義平台工作區員工回應的資料結構。
@@ -292,17 +291,6 @@ type PlatformWorkspaceEmployeesQuery struct {
 // UpdateWorkspaceOrganizationManagerInput 定義工作區 organization 主管輸入的資料結構。
 type UpdateWorkspaceOrganizationManagerInput struct {
 	ParentID *string `json:"parent_id,omitempty"`
-}
-
-// CreateWorkspaceAdminInput 定義工作區管理員輸入的資料結構。
-type CreateWorkspaceAdminInput struct {
-	EmployeeID  string            `json:"employee_id"`
-	Permissions map[string]string `json:"permissions"`
-}
-
-// UpdateWorkspaceAdminPermissionsInput 定義工作區管理員權限輸入的資料結構。
-type UpdateWorkspaceAdminPermissionsInput struct {
-	Permissions map[string]string `json:"permissions"`
 }
 
 // SaveWorkspaceFormDesignInput 定義工作區表單 design 輸入的資料結構。

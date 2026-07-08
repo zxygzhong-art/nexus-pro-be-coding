@@ -105,6 +105,7 @@ const (
 	ResourceAttendanceClock           ResourceType = "clock"
 	ResourceAttendanceCorrection      ResourceType = "correction"
 	ResourceUserGroup                 ResourceType = "user_group"
+	ResourceIAMAccount                ResourceType = "account"
 	ResourcePermission                ResourceType = "permission"
 	ResourcePermissionPackage         ResourceType = "permission_package"
 	ResourcePermissionSet             ResourceType = "permission_set"
@@ -246,8 +247,11 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "iam.user_group.members.remove", Method: "DELETE", Path: "/v1/iam/user-groups/:id/members/:accountId", ApplicationCode: "iam", ResourceType: "user_group", Action: "update", RiskLevel: RiskHigh},
 	{Name: "iam.permission_set.read", Method: "GET", Path: "/v1/iam/permission-sets", ApplicationCode: "iam", ResourceType: "permission_set", Action: "read"},
 	{Name: "iam.permission_set.create", Method: "POST", Path: "/v1/iam/permission-sets", ApplicationCode: "iam", ResourceType: "permission_set", Action: "create", RiskLevel: RiskHigh},
+	{Name: "iam.permission_set.update", Method: "PATCH", Path: "/v1/iam/permission-sets/:id", ApplicationCode: "iam", ResourceType: "permission_set", Action: "update", RiskLevel: RiskHigh},
+	{Name: "iam.account.read", Method: "GET", Path: "/v1/iam/accounts", ApplicationCode: "iam", ResourceType: "account", Action: "read"},
 	{Name: "iam.permission_assignment.read", Method: "GET", Path: "/v1/iam/permission-set-assignments", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "read"},
 	{Name: "iam.permission_assignment.create", Method: "POST", Path: "/v1/iam/permission-set-assignments", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "create", RiskLevel: RiskHigh},
+	{Name: "iam.permission_assignment.delete", Method: "DELETE", Path: "/v1/iam/permission-set-assignments/:id", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "delete", RiskLevel: RiskHigh},
 	{Name: "iam.data_scope.read", Method: "GET", Path: "/v1/iam/data-scopes", ApplicationCode: "iam", ResourceType: "data_scope", Action: "read"},
 	{Name: "iam.data_scope.create", Method: "POST", Path: "/v1/iam/data-scopes", ApplicationCode: "iam", ResourceType: "data_scope", Action: "create", RiskLevel: RiskHigh},
 	{Name: "iam.data_scope.update", Method: "PATCH", Path: "/v1/iam/data-scopes/:id", ApplicationCode: "iam", ResourceType: "data_scope", Action: "update", RiskLevel: RiskHigh},
@@ -338,10 +342,6 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "workspace.organization_manager.update", Method: "PATCH", Path: "/v1/workspace/organization/employees/:id/manager", ApplicationCode: "hr", ResourceType: "employee", Action: "update"},
 	{Name: "workspace.turnover.read", Method: "GET", Path: "/v1/workspace/turnover", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
 	{Name: "workspace.attendance.read", Method: "GET", Path: "/v1/workspace/attendance", ApplicationCode: "attendance", ResourceType: "clock", Action: "read"},
-	{Name: "workspace.admins.read", Method: "GET", Path: "/v1/workspace/admins", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "read"},
-	{Name: "workspace.admin.create", Method: "POST", Path: "/v1/workspace/admins", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "create", RiskLevel: RiskHigh},
-	{Name: "workspace.admin.update", Method: "PATCH", Path: "/v1/workspace/admins/:id/permissions", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "update", RiskLevel: RiskHigh},
-	{Name: "workspace.admin.delete", Method: "DELETE", Path: "/v1/workspace/admins/:id", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "delete", RiskLevel: RiskHigh},
 	{Name: "workspace.form.read", Method: "GET", Path: "/v1/workspace/forms", ApplicationCode: "workflow", ResourceType: "form_template", Action: "read"},
 	{Name: "workspace.form.create", Method: "POST", Path: "/v1/workspace/forms", ApplicationCode: "workflow", ResourceType: "form_template", Action: "create"},
 	{Name: "workspace.form.update", Method: "PATCH", Path: "/v1/workspace/forms/:id", ApplicationCode: "workflow", ResourceType: "form_template", Action: "update"},

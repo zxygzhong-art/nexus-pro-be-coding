@@ -53,6 +53,15 @@ type Config struct {
 	OpenFGAModelID           string
 	OpenFGAScopeCheckEnabled bool
 
+	TemporalHostPort  string
+	TemporalNamespace string
+	TemporalTaskQueue string
+
+	NATSEnabled        bool
+	NATSURL            string
+	NATSStream         string
+	NATSConsumerPrefix string
+
 	ObjectStoreProvider        string
 	ObjectStoreDir             string
 	ObjectStoreEndpoint        string
@@ -60,6 +69,7 @@ type Config struct {
 	ObjectStoreRegion          string
 	ObjectStoreAccessKeyID     string
 	ObjectStoreSecretAccessKey string
+	ObjectStoreSFTPHostKey     string
 	ObjectStoreUseSSL          bool
 	ObjectStoreCreateBucket    bool
 
@@ -121,26 +131,34 @@ func (c Config) ValidateStartup() error {
 	if strings.TrimSpace(c.OpenFGAModelID) == "" {
 		problems = append(problems, "OPENFGA_MODEL_ID is required")
 	}
+	problems = append(problems, temporalConfigProblems(c)...)
+	if c.NATSEnabled {
+		if strings.TrimSpace(c.NATSURL) == "" {
+			problems = append(problems, "NATS_URL is required when NATS_ENABLED=true")
+		} else if problem := natsURLProblem("NATS_URL", c.NATSURL); problem != "" {
+			problems = append(problems, problem)
+		}
+	}
 	switch normalizeObjectStoreProvider(c.ObjectStoreProvider, c.ObjectStoreDir, c.ObjectStoreEndpoint, c.ObjectStoreBucket) {
-	case "minio", "s3":
+	case "sftpgo":
 		if strings.TrimSpace(c.ObjectStoreEndpoint) == "" {
 			problems = append(problems, "OBJECT_STORE_ENDPOINT is required")
 		}
 		if strings.TrimSpace(c.ObjectStoreBucket) == "" {
-			problems = append(problems, "OBJECT_STORE_BUCKET is required")
+			problems = append(problems, "OBJECT_STORE_BUCKET is required as the SFTPGo root directory")
 		}
 		if strings.TrimSpace(c.ObjectStoreAccessKeyID) == "" {
-			problems = append(problems, "OBJECT_STORE_ACCESS_KEY_ID is required")
+			problems = append(problems, "OBJECT_STORE_ACCESS_KEY_ID is required as the SFTPGo username")
 		}
 		if strings.TrimSpace(c.ObjectStoreSecretAccessKey) == "" {
-			problems = append(problems, "OBJECT_STORE_SECRET_ACCESS_KEY is required")
+			problems = append(problems, "OBJECT_STORE_SECRET_ACCESS_KEY is required as the SFTPGo password")
 		}
 	case "local":
 		if strings.TrimSpace(c.ObjectStoreDir) == "" {
 			problems = append(problems, "OBJECT_STORE_DIR is required")
 		}
 	default:
-		problems = append(problems, "OBJECT_STORE_PROVIDER must be minio, s3, or local")
+		problems = append(problems, "OBJECT_STORE_PROVIDER must be sftpgo or local")
 	}
 	if strings.TrimSpace(c.EHRMSBaseURL) != "" {
 		if problem := productionHTTPSURLProblem("EHRMS_BASE_URL", c.EHRMSBaseURL); problem != "" {
@@ -199,6 +217,15 @@ func LoadE() (Config, error) {
 		OpenFGAModelID:           strings.TrimSpace(os.Getenv("OPENFGA_MODEL_ID")),
 		OpenFGAScopeCheckEnabled: envBool("OPENFGA_SCOPE_CHECK_ENABLED", false, &problems),
 
+		TemporalHostPort:  envAllowEmpty("TEMPORAL_HOST_PORT", "127.0.0.1:27233"),
+		TemporalNamespace: env("TEMPORAL_NAMESPACE", "default"),
+		TemporalTaskQueue: env("TEMPORAL_TASK_QUEUE", "nexus-workflows"),
+
+		NATSEnabled:        envBool("NATS_ENABLED", false, &problems),
+		NATSURL:            env("NATS_URL", "nats://127.0.0.1:24222"),
+		NATSStream:         env("NATS_STREAM", "NEXUS_EVENTS"),
+		NATSConsumerPrefix: env("NATS_CONSUMER_PREFIX", "nexus"),
+
 		ObjectStoreProvider:        objectStoreProvider,
 		ObjectStoreDir:             strings.TrimSpace(os.Getenv("OBJECT_STORE_DIR")),
 		ObjectStoreEndpoint:        strings.TrimSpace(os.Getenv("OBJECT_STORE_ENDPOINT")),
@@ -206,6 +233,7 @@ func LoadE() (Config, error) {
 		ObjectStoreRegion:          env("OBJECT_STORE_REGION", "us-east-1"),
 		ObjectStoreAccessKeyID:     strings.TrimSpace(os.Getenv("OBJECT_STORE_ACCESS_KEY_ID")),
 		ObjectStoreSecretAccessKey: os.Getenv("OBJECT_STORE_SECRET_ACCESS_KEY"),
+		ObjectStoreSFTPHostKey:     strings.TrimSpace(os.Getenv("OBJECT_STORE_SFTP_HOST_KEY")),
 		ObjectStoreUseSSL:          envBool("OBJECT_STORE_USE_SSL", false, &problems),
 		ObjectStoreCreateBucket:    envBool("OBJECT_STORE_CREATE_BUCKET", false, &problems),
 
@@ -228,6 +256,7 @@ func LoadE() (Config, error) {
 	problems = append(problems, keycloakProvisioningConfigProblems(cfg)...)
 	problems = append(problems, databasePoolConfigProblems(cfg)...)
 	problems = append(problems, rateLimitConfigProblems(cfg)...)
+	problems = append(problems, temporalConfigProblems(cfg)...)
 	problems = append(problems, trustedProxiesConfigProblems(cfg)...)
 	if len(problems) > 0 {
 		return cfg, fmt.Errorf("configuration invalid: %s", strings.Join(problems, "; "))
@@ -304,6 +333,21 @@ func ehrmsSyncConfigProblems(c Config) []string {
 	case "", "create", "update", "upsert":
 	default:
 		problems = append(problems, "EHRMS_SYNC_MODE must be create, update, or upsert")
+	}
+	return problems
+}
+
+// temporalConfigProblems 處理 Temporal 組態 problems。
+func temporalConfigProblems(c Config) []string {
+	problems := []string{}
+	if strings.TrimSpace(c.TemporalHostPort) == "" {
+		problems = append(problems, "TEMPORAL_HOST_PORT is required")
+	}
+	if strings.TrimSpace(c.TemporalNamespace) == "" {
+		problems = append(problems, "TEMPORAL_NAMESPACE is required")
+	}
+	if strings.TrimSpace(c.TemporalTaskQueue) == "" {
+		problems = append(problems, "TEMPORAL_TASK_QUEUE is required")
 	}
 	return problems
 }
@@ -396,6 +440,27 @@ func productionHTTPSURLProblem(name string, raw string) string {
 	return ""
 }
 
+// natsURLProblem validates one or more NATS client URLs.
+func natsURLProblem(name string, raw string) string {
+	values := strings.Split(raw, ",")
+	for _, entry := range values {
+		value := strings.TrimSpace(entry)
+		if value == "" {
+			return name + " must be a valid NATS URL"
+		}
+		parsed, err := url.Parse(value)
+		if err != nil || parsed.Host == "" {
+			return name + " must be a valid NATS URL"
+		}
+		switch strings.ToLower(parsed.Scheme) {
+		case "nats", "tls", "ws", "wss":
+		default:
+			return name + " must use nats, tls, ws, or wss scheme"
+		}
+	}
+	return ""
+}
+
 // normalizeObjectStoreProvider 正規化物件儲存層提供者。
 func normalizeObjectStoreProvider(provider, dir, endpoint, bucket string) string {
 	provider = strings.ToLower(strings.TrimSpace(provider))
@@ -403,7 +468,7 @@ func normalizeObjectStoreProvider(provider, dir, endpoint, bucket string) string
 		return provider
 	}
 	if strings.TrimSpace(endpoint) != "" || strings.TrimSpace(bucket) != "" {
-		return "minio"
+		return "sftpgo"
 	}
 	if strings.TrimSpace(dir) != "" {
 		return "local"

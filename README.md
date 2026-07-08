@@ -12,9 +12,8 @@ The first implementation phase focuses on a modular monolith for HR core data, a
 - `pgxpool` for PostgreSQL connections
 - `sqlc` for type-safe SQL-first data access
 - Redis via `go-redis/v9` for cache, short-lived state, and future rate limiting
-- `slog` for structured logs
-- Grafana + Loki + OpenTelemetry Collector for local log aggregation and exploration
-- OpenTelemetry Collector + Grafana Tempo for distributed tracing
+- `slog` JSON logs written directly to stdout / console
+- OpenTelemetry SDK + Grafana Tempo for distributed tracing
 
 Migration execution uses `goose` as a command-line tool. It is intentionally not part of the application runtime dependency graph.
 
@@ -35,7 +34,7 @@ cp .env.example .env
 
 The application reads environment variables directly. Export them in your shell or load `.env` with your preferred local tool.
 
-Grafana is available at `http://localhost:24000` with the local credentials `admin` / `admin`. Prometheus, Loki, and Tempo data sources are provisioned automatically.
+Grafana is available at `http://localhost:24000` with the local credentials `admin` / `admin`. Prometheus and Tempo data sources are provisioned automatically.
 
 ### Containerized API
 
@@ -47,9 +46,9 @@ docker compose --profile api up -d --build api
 
 Inside the compose network, point `DATABASE_URL` and `REDIS_ADDR` at the service names (`postgres:5432`, `redis:6379`) instead of `localhost`.
 
-Application logs are structured JSON written to stdout, which keeps the runtime simple and lets the OpenTelemetry Collector filelog receiver forward local log files into Loki. Request logs include `trace_id`, `request_id`, `tenant_id`, `account_id`, method, path, status, elapsed time, and client IP.
+Application logs are structured JSON written directly to stdout / console. Request logs include `trace_id`, `request_id`, `tenant_id`, `account_id`, method, path, status, elapsed time, and client IP.
 
-OpenTelemetry tracing is disabled by default. To send traces through the local Collector to Tempo, enable it before starting the API:
+OpenTelemetry tracing is disabled by default. To send traces directly to local Tempo, enable it before starting the API:
 
 ```sh
 export OTEL_ENABLED=true
@@ -60,24 +59,70 @@ export METRICS_ADDR=0.0.0.0:9091
 go run ./cmd/api
 ```
 
-HTTP requests, Keycloak discovery calls, and OpenFGA relationship checks are instrumented when tracing is enabled. Trace IDs are also written into request logs, so Grafana can jump between Tempo traces and Loki logs.
+HTTP requests, Keycloak discovery calls, and OpenFGA relationship checks are instrumented when tracing is enabled. Trace IDs are also written into request logs.
 
-When running the API directly with `go run`, stream stdout into the local log directory mounted by the Collector:
+When running the API directly with `go run`, read logs from the console:
 
 ```sh
-mkdir -p logs
-go run ./cmd/api 2>&1 | tee logs/nexus-pro-be.log
-```
-
-Useful Grafana Loki queries:
-
-```logql
-{service_name="nexus-pro-be"} | json
-{service_name="nexus-pro-be"} | json | trace_id="trace_xxx"
-{service_name="nexus-pro-be"} | json | tenant_id="demo"
+go run ./cmd/api
 ```
 
 Set `LOG_LEVEL=debug`, `info`, `warn`, or `error` to tune application log verbosity.
+
+### Temporal Workflow Engine
+
+Temporal is a required runtime dependency for form approval. Form submit starts a Temporal workflow, and approve / reject / return / withdraw API actions only send Temporal signals. The existing `form_instances` and `workflow_runs` tables remain the query projection used by the API, updated by workflow activities. There is no API fallback to the legacy synchronous state machine when a workflow execution is missing.
+
+Start the local Temporal profile:
+
+```sh
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+./render-configs.sh
+docker compose --profile temporal --env-file .env up -d temporal temporal-ui temporal-admin-tools
+```
+
+Then configure Temporal before startup:
+
+```sh
+export TEMPORAL_HOST_PORT=127.0.0.1:27233
+export TEMPORAL_NAMESPACE=default
+export TEMPORAL_TASK_QUEUE=nexus-workflows
+go run ./cmd/api
+```
+
+The API dials Temporal during startup and fails fast if the connection is unavailable. The worker starts in the API process and shuts down with the existing runtime shutdown path.
+
+Backfill in-flight approvals created before Temporal-only rollout:
+
+```sh
+go run ./cmd/tenantctl temporal-backfill-form-workflows --tenant-id <tenant-id> --dry-run
+go run ./cmd/tenantctl temporal-backfill-form-workflows --tenant-id <tenant-id>
+```
+
+Run the dry-run first to inspect candidate form instances. After backfill, retry approval actions that previously returned `workflow_not_found`.
+
+### NATS JetStream Event Bus
+
+NATS JetStream is optional and disabled by default. When enabled, the existing `outbox_events` table remains the source of truth: the outbox dispatcher publishes mapped events to JetStream, then marks the outbox row `succeeded` after the publish ack. The first durable consumer is OpenFGA tuple sync.
+
+Start the local NATS profile:
+
+```sh
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+docker compose --profile nats --env-file .env up -d nats
+```
+
+Then enable the API integration:
+
+```sh
+export NATS_ENABLED=true
+export NATS_URL=nats://127.0.0.1:24222
+export NATS_STREAM=NEXUS_EVENTS
+export NATS_CONSUMER_PREFIX=nexus
+go run ./cmd/api
+```
+
+The stream is `NEXUS_EVENTS` with subjects `events.>`. Event subjects use `events.{domain}.{resource}.{action}`; tenant and idempotency data are headers: `Nexus-Tenant-Id`, `Nexus-Event-Id`, and `Nexus-Event-Type`. The OpenFGA durable consumer is `nexus-openfga` and filters `events.iam.relationship.*`.
 
 ## Database
 
@@ -112,7 +157,7 @@ curl http://127.0.0.1:18080/v1/me
 curl http://127.0.0.1:9091/metrics
 ```
 
-`/metrics` is a Prometheus endpoint exposing `http_requests_total` and `http_request_duration_seconds` labeled by method, route template, and status. It is served on a dedicated listener configured by `METRICS_ADDR` (default `127.0.0.1:9091`) instead of the business port; set `METRICS_ADDR=` (empty) to disable it. For local Docker-based Collector scraping, bind it to an address the Collector container can reach, such as `METRICS_ADDR=0.0.0.0:9091`. Request metrics are still collected on the business router.
+`/metrics` is a Prometheus endpoint exposing `http_requests_total` and `http_request_duration_seconds` labeled by method, route template, and status. It is served on a dedicated listener configured by `METRICS_ADDR` (default `127.0.0.1:9091`) instead of the business port; set `METRICS_ADDR=` (empty) to disable it. For local Docker-based Prometheus scraping, bind it to an address the Prometheus container can reach, such as `METRICS_ADDR=0.0.0.0:9091`. Request metrics are still collected on the business router.
 
 Connection pool sizing is configurable through `DB_MAX_CONNS` (default `10`), `DB_MIN_CONNS` (default `1`), and `DB_MAX_CONN_LIFETIME` (default `1h`).
 

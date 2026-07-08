@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/platform/natsbus"
 	"nexus-pro-be/internal/repository"
 )
 
@@ -32,10 +33,11 @@ type OutboxDispatchOptions struct {
 
 // OutboxDispatcher 消費統一 outbox_events,依 event_type 路由到對應 handler。
 type OutboxDispatcher struct {
-	store  repository.Store
-	writer RelationshipTupleWriter
-	logger *slog.Logger
-	now    func() time.Time
+	store     repository.Store
+	writer    RelationshipTupleWriter
+	publisher natsbus.EventPublisher
+	logger    *slog.Logger
+	now       func() time.Time
 }
 
 // NewOutboxDispatcher 建立統一 outbox dispatcher。
@@ -49,6 +51,15 @@ func NewOutboxDispatcher(store repository.Store, writer RelationshipTupleWriter,
 		logger: logger,
 		now:    time.Now,
 	}
+}
+
+// WithEventPublisher enables JetStream publishing mode for dispatchable events.
+func (p *OutboxDispatcher) WithEventPublisher(publisher natsbus.EventPublisher) *OutboxDispatcher {
+	if p == nil {
+		return p
+	}
+	p.publisher = publisher
+	return p
 }
 
 // Run 執行背景工作主迴圈。
@@ -103,7 +114,7 @@ func (p *OutboxDispatcher) ProcessTenant(ctx context.Context, tenantID string, o
 		if processed >= opts.BatchSize {
 			break
 		}
-		if !isDispatchableEvent(event, opts.MaxRetries) {
+		if !p.isDispatchableEvent(event, opts.MaxRetries) {
 			continue
 		}
 		if err := p.processEvent(ctx, event); err != nil {
@@ -139,6 +150,14 @@ func (p *OutboxDispatcher) processEvent(ctx context.Context, event domain.Outbox
 
 // dispatchEvent 依事件類型路由到對應 handler。
 func (p *OutboxDispatcher) dispatchEvent(ctx context.Context, event domain.OutboxEvent) error {
+	if p.publisher != nil {
+		subject, err := domain.EventSubjectForType(event.EventType)
+		if err != nil {
+			return err
+		}
+		envelope := domain.NewDomainEventEnvelope(event)
+		return p.publisher.Publish(ctx, subject, envelope)
+	}
 	switch {
 	case isOpenFGARelationshipEvent(event.EventType):
 		if p.writer == nil {
@@ -181,10 +200,13 @@ func normalizeOutboxDispatchOptions(opts OutboxDispatchOptions) OutboxDispatchOp
 }
 
 // isDispatchableEvent 判斷事件是否可派發。
-// 目前僅 OpenFGA 關係事件有 handler;其他事件(領域事件、租戶開通通知等)
-// 保持 pending 供未來消費者使用,不佔用 batch 名額。
-func isDispatchableEvent(event domain.OutboxEvent, maxRetries int) bool {
-	if !isOpenFGARelationshipEvent(event.EventType) {
+// NATS 啟用時改由 subject mapping 決定是否可發布;無映射事件保持 pending。
+func (p *OutboxDispatcher) isDispatchableEvent(event domain.OutboxEvent, maxRetries int) bool {
+	if p != nil && p.publisher != nil {
+		if _, err := domain.EventSubjectForType(event.EventType); err != nil {
+			return false
+		}
+	} else if !isOpenFGARelationshipEvent(event.EventType) {
 		return false
 	}
 	if event.RetryCount >= maxRetries {
