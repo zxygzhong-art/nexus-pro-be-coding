@@ -49,6 +49,7 @@ type RelationshipChecker interface {
 // EHRMSClient 定義 eHRMS client 的行為契約。
 type EHRMSClient interface {
 	ListEmployees(context.Context) ([]domain.EHRMSEmployeeRecord, error)
+	ListAttendance(context.Context) ([]domain.EHRMSAttendanceRecord, error)
 }
 
 // IdentityProvisioner 定義身分 provisioner 的行為契約。

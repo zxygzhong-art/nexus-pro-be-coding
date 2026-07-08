@@ -123,6 +123,18 @@ func workspaceCheckedInEmployees(items []AttendanceClockRecord, date time.Time) 
 	return out
 }
 
+// workspaceCheckedInEmployeesFromSummaries 處理工作區 eHRMS 日彙總 checked in 員工。
+func workspaceCheckedInEmployeesFromSummaries(items []AttendanceDailySummary, date time.Time) map[string]struct{} {
+	out := map[string]struct{}{}
+	key := date.Format(time.DateOnly)
+	for _, item := range items {
+		if item.WorkDate == key && item.ClockHours > 0 {
+			out[item.EmployeeID] = struct{}{}
+		}
+	}
+	return out
+}
+
 // workspaceCountActiveAt 處理工作區 count 啟用中 at。
 func workspaceCountActiveAt(items []Employee, at time.Time) int {
 	count := 0

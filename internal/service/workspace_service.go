@@ -48,10 +48,21 @@ func (c WorkspaceService) WorkspaceOverview(ctx RequestContext, query WorkspaceO
 	if err != nil {
 		return WorkspaceOverviewResponse{}, err
 	}
+	summaries, err := c.visibleWorkspaceDailySummaries(ctx, AttendanceDailySummaryQuery{
+		FromDate: start.Format(time.DateOnly),
+		ToDate:   end.AddDate(0, 0, -1).Format(time.DateOnly),
+		Source:   "ehrms",
+	})
+	if err != nil {
+		return WorkspaceOverviewResponse{}, err
+	}
 
 	monthLeaves := workspaceFilterLeaves(leaves, start, end)
 	targetLeaves := workspaceLeaveEmployeesForDate(monthLeaves, targetDate)
 	checkedIn := workspaceCheckedInEmployees(clocks, targetDate)
+	for employeeID := range workspaceCheckedInEmployeesFromSummaries(summaries, targetDate) {
+		checkedIn[employeeID] = struct{}{}
+	}
 	activeOnDate := workspaceCountActiveAt(employees, targetDate)
 	absent := activeOnDate - len(checkedIn) - len(targetLeaves)
 	if absent < 0 {
@@ -186,6 +197,14 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	if err != nil {
 		return WorkspaceAttendanceResponse{}, err
 	}
+	summaries, err := c.visibleWorkspaceDailySummaries(ctx, AttendanceDailySummaryQuery{
+		FromDate: start.Format(time.DateOnly),
+		ToDate:   end.AddDate(0, 0, -1).Format(time.DateOnly),
+		Source:   "ehrms",
+	})
+	if err != nil {
+		return WorkspaceAttendanceResponse{}, err
+	}
 	overtimes, err := c.Service.Attendance().listOvertimeRequestsByQuery(ctx, OvertimeRequestQuery{
 		Status:   "approved",
 		FromDate: start.Format(time.DateOnly),
@@ -205,8 +224,9 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	monthEmployees := workspaceEmployeesPresentInRange(employees, start, end)
 	leaveByEmployeeDate := workspaceLeaveCells(workspaceFilterLeaves(leaves, start, end), start, end)
 	overtimeByEmployeeDate := workspaceOvertimeCells(overtimes, start, end)
-	clockByEmployeeDate := workspaceClockCells(clocks, worksites, leaveByEmployeeDate, overtimeByEmployeeDate)
-	attendanceMatrix := workspaceAttendanceMatrix(monthEmployees, cards, dates, leaveByEmployeeDate, overtimeByEmployeeDate)
+	summaryByEmployeeDate := workspaceSummaryCells(summaries)
+	clockByEmployeeDate := workspaceClockCells(clocks, summaries, worksites, leaveByEmployeeDate, overtimeByEmployeeDate)
+	attendanceMatrix := workspaceAttendanceMatrix(monthEmployees, cards, dates, leaveByEmployeeDate, overtimeByEmployeeDate, summaryByEmployeeDate)
 	clockMatrix := workspaceClockMatrix(monthEmployees, cards, dates, leaveByEmployeeDate, clockByEmployeeDate)
 
 	return WorkspaceAttendanceResponse{
@@ -312,4 +332,32 @@ func (c WorkspaceService) visibleWorkspaceClockRecords(ctx RequestContext, query
 		return nil, err
 	}
 	return attendance.filterClockRecordsByDecision(ctx, account, decision, items)
+}
+
+// visibleWorkspaceDailySummaries 處理可見工作區日彙總。
+func (c WorkspaceService) visibleWorkspaceDailySummaries(ctx RequestContext, query AttendanceDailySummaryQuery) ([]AttendanceDailySummary, error) {
+	attendance := c.Service.Attendance()
+	account, decision, err := attendance.requireAttendanceAuthz(ctx, ResourceAttendanceClock, ActionRead, "")
+	if err != nil {
+		return nil, err
+	}
+	query = normalizeAttendanceDailySummaryQuery(query)
+	items, err := c.store.ListAttendanceDailySummaries(goContext(ctx), ctx.TenantID, query)
+	if err != nil {
+		return nil, err
+	}
+	allowed, all, err := attendance.attendanceEmployeeScope(ctx, account, decision)
+	if err != nil {
+		return nil, err
+	}
+	if all {
+		return items, nil
+	}
+	out := make([]AttendanceDailySummary, 0, len(items))
+	for _, item := range items {
+		if _, ok := allowed[item.EmployeeID]; ok {
+			out = append(out, item)
+		}
+	}
+	return out, nil
 }

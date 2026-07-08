@@ -1787,6 +1787,71 @@ func (s *Store) ListAttendanceClockRecords(execCtx context.Context, tenantID str
 	return mapSlice(items, fromAttendanceClockRecord), nil
 }
 
+// UpsertAttendanceDailySummary 從儲存層處理 upsert 考勤日彙總。
+func (s *Store) UpsertAttendanceDailySummary(execCtx context.Context, v domain.AttendanceDailySummary) error {
+	_, err := s.q.UpsertAttendanceDailySummary(execCtx, sqlc.UpsertAttendanceDailySummaryParams{
+		ID:          v.ID,
+		TenantID:    v.TenantID,
+		EmployeeID:  v.EmployeeID,
+		WorkDate:    v.WorkDate,
+		ShiftStart:  v.ShiftStart,
+		ShiftEnd:    v.ShiftEnd,
+		ShiftHours:  v.ShiftHours,
+		DailyHours:  v.DailyHours,
+		ClockHours:  v.ClockHours,
+		Source:      v.Source,
+		ExternalRef: v.ExternalRef,
+		CreatedAt:   timestamptz(v.CreatedAt),
+		UpdatedAt:   timestamptz(v.UpdatedAt),
+	})
+	if isUniqueConstraint(err, "attendance_daily_summaries_employee_date_idx") {
+		return domain.Conflict("attendance daily summary already exists")
+	}
+	if isUniqueConstraint(err, "attendance_daily_summaries_external_ref_idx") {
+		return domain.Conflict("attendance daily summary external_ref already exists")
+	}
+	return err
+}
+
+// GetAttendanceDailySummaryByExternalRef 從儲存層取得考勤日彙總 by external ref。
+func (s *Store) GetAttendanceDailySummaryByExternalRef(execCtx context.Context, tenantID, externalRef string) (domain.AttendanceDailySummary, bool, error) {
+	v, err := s.q.GetAttendanceDailySummaryByExternalRef(execCtx, sqlc.GetAttendanceDailySummaryByExternalRefParams{TenantID: tenantID, ExternalRef: externalRef})
+	if isNotFound(err) {
+		return domain.AttendanceDailySummary{}, false, nil
+	}
+	if err != nil {
+		return domain.AttendanceDailySummary{}, false, err
+	}
+	return fromAttendanceDailySummary(v), true, nil
+}
+
+// GetAttendanceDailySummaryByEmployeeDate 從儲存層取得考勤日彙總 by 員工日期。
+func (s *Store) GetAttendanceDailySummaryByEmployeeDate(execCtx context.Context, tenantID, employeeID, workDate string) (domain.AttendanceDailySummary, bool, error) {
+	v, err := s.q.GetAttendanceDailySummaryByEmployeeDate(execCtx, sqlc.GetAttendanceDailySummaryByEmployeeDateParams{TenantID: tenantID, EmployeeID: employeeID, WorkDate: workDate})
+	if isNotFound(err) {
+		return domain.AttendanceDailySummary{}, false, nil
+	}
+	if err != nil {
+		return domain.AttendanceDailySummary{}, false, err
+	}
+	return fromAttendanceDailySummary(v), true, nil
+}
+
+// ListAttendanceDailySummaries 從儲存層列出考勤日彙總。
+func (s *Store) ListAttendanceDailySummaries(execCtx context.Context, tenantID string, query domain.AttendanceDailySummaryQuery) ([]domain.AttendanceDailySummary, error) {
+	items, err := s.q.ListAttendanceDailySummaries(tenantContext(execCtx, tenantID), sqlc.ListAttendanceDailySummariesParams{
+		TenantID:   tenantID,
+		EmployeeID: query.EmployeeID,
+		FromDate:   query.FromDate,
+		ToDate:     query.ToDate,
+		Source:     query.Source,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAttendanceDailySummary), nil
+}
+
 // UpsertAttendanceCorrectionRequest 從儲存層處理 upsert 考勤 correction 請求。
 func (s *Store) UpsertAttendanceCorrectionRequest(execCtx context.Context, v domain.AttendanceCorrectionRequest) error {
 	_, err := s.q.UpsertAttendanceCorrectionRequest(execCtx, sqlc.UpsertAttendanceCorrectionRequestParams{
@@ -3194,6 +3259,25 @@ func fromAttendanceClockRecord(v sqlc.AttendanceClockRecord) domain.AttendanceCl
 		DeviceInfo:          jsonMap(v.DeviceInfo),
 		CorrectionRequestID: v.CorrectionRequestID,
 		CreatedAt:           timeFrom(v.CreatedAt),
+	}
+}
+
+// fromAttendanceDailySummary 轉換考勤日彙總。
+func fromAttendanceDailySummary(v sqlc.AttendanceDailySummary) domain.AttendanceDailySummary {
+	return domain.AttendanceDailySummary{
+		ID:          v.ID,
+		TenantID:    v.TenantID,
+		EmployeeID:  v.EmployeeID,
+		WorkDate:    v.WorkDate,
+		ShiftStart:  v.ShiftStart,
+		ShiftEnd:    v.ShiftEnd,
+		ShiftHours:  v.ShiftHours,
+		DailyHours:  v.DailyHours,
+		ClockHours:  v.ClockHours,
+		Source:      v.Source,
+		ExternalRef: v.ExternalRef,
+		CreatedAt:   timeFrom(v.CreatedAt),
+		UpdatedAt:   timeFrom(v.UpdatedAt),
 	}
 }
 

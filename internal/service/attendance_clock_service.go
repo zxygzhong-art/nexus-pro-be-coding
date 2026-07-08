@@ -669,6 +669,15 @@ func normalizeClockRecordQuery(query AttendanceClockRecordQuery) AttendanceClock
 	return query
 }
 
+// normalizeAttendanceDailySummaryQuery 正規化日彙總查詢。
+func normalizeAttendanceDailySummaryQuery(query AttendanceDailySummaryQuery) AttendanceDailySummaryQuery {
+	query.EmployeeID = strings.TrimSpace(query.EmployeeID)
+	query.FromDate = normalizeAttendanceDateQuery(query.FromDate)
+	query.ToDate = normalizeAttendanceDateQuery(query.ToDate)
+	query.Source = strings.ToLower(strings.TrimSpace(query.Source))
+	return query
+}
+
 // normalizeCorrectionQuery 正規化correction 查詢。
 func normalizeCorrectionQuery(query AttendanceCorrectionQuery) AttendanceCorrectionQuery {
 	query.EmployeeID = strings.TrimSpace(query.EmployeeID)

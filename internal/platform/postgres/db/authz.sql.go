@@ -57,6 +57,90 @@ func (q *Queries) CreateAuthzAssumableRoleSession(ctx context.Context, arg Creat
 	return i, err
 }
 
+const deleteAuthzDataScope = `-- name: DeleteAuthzDataScope :one
+DELETE FROM authz_data_scopes
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, code, name, scope_type, params, created_at
+`
+
+type DeleteAuthzDataScopeParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) DeleteAuthzDataScope(ctx context.Context, arg DeleteAuthzDataScopeParams) (AuthzDataScope, error) {
+	row := q.db.QueryRow(ctx, deleteAuthzDataScope, arg.TenantID, arg.ID)
+	var i AuthzDataScope
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Code,
+		&i.Name,
+		&i.ScopeType,
+		&i.Params,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const deleteAuthzFieldPolicy = `-- name: DeleteAuthzFieldPolicy :one
+DELETE FROM authz_field_policies
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, application_code, resource_type, field_name, effect, mask_strategy, permission_id, created_at
+`
+
+type DeleteAuthzFieldPolicyParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) DeleteAuthzFieldPolicy(ctx context.Context, arg DeleteAuthzFieldPolicyParams) (AuthzFieldPolicy, error) {
+	row := q.db.QueryRow(ctx, deleteAuthzFieldPolicy, arg.TenantID, arg.ID)
+	var i AuthzFieldPolicy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ApplicationCode,
+		&i.ResourceType,
+		&i.FieldName,
+		&i.Effect,
+		&i.MaskStrategy,
+		&i.PermissionID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const deleteAuthzPermissionSetAssignment = `-- name: DeleteAuthzPermissionSetAssignment :one
+DELETE FROM authz_permission_set_assignments
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, principal_type, principal_id, permission_set_id, effect, data_scope_id, condition_id, starts_at, expires_at, created_at
+`
+
+type DeleteAuthzPermissionSetAssignmentParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) DeleteAuthzPermissionSetAssignment(ctx context.Context, arg DeleteAuthzPermissionSetAssignmentParams) (AuthzPermissionSetAssignment, error) {
+	row := q.db.QueryRow(ctx, deleteAuthzPermissionSetAssignment, arg.TenantID, arg.ID)
+	var i AuthzPermissionSetAssignment
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.PrincipalType,
+		&i.PrincipalID,
+		&i.PermissionSetID,
+		&i.Effect,
+		&i.DataScopeID,
+		&i.ConditionID,
+		&i.StartsAt,
+		&i.ExpiresAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const deleteAuthzRelationshipTuple = `-- name: DeleteAuthzRelationshipTuple :exec
 DELETE FROM authz_relationship_tuples
 WHERE tenant_id = $1
@@ -142,98 +226,28 @@ func (q *Queries) GetAuthzDataScope(ctx context.Context, arg GetAuthzDataScopePa
 	return i, err
 }
 
-const updateAuthzDataScope = `-- name: UpdateAuthzDataScope :one
-UPDATE authz_data_scopes
-SET code = $3,
-    name = $4,
-    scope_type = $5,
-    params = $6::jsonb
+const getAuthzFieldPolicy = `-- name: GetAuthzFieldPolicy :one
+SELECT id, tenant_id, application_code, resource_type, field_name, effect, mask_strategy, permission_id, created_at FROM authz_field_policies
 WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, code, name, scope_type, params, created_at
 `
 
-type UpdateAuthzDataScopeParams struct {
-	TenantID  string `json:"tenant_id"`
-	ID        string `json:"id"`
-	Code      string `json:"code"`
-	Name      string `json:"name"`
-	ScopeType string `json:"scope_type"`
-	Column6   []byte `json:"column_6"`
-}
-
-func (q *Queries) UpdateAuthzDataScope(ctx context.Context, arg UpdateAuthzDataScopeParams) (AuthzDataScope, error) {
-	row := q.db.QueryRow(ctx, updateAuthzDataScope,
-		arg.TenantID,
-		arg.ID,
-		arg.Code,
-		arg.Name,
-		arg.ScopeType,
-		arg.Column6,
-	)
-	var i AuthzDataScope
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.Code,
-		&i.Name,
-		&i.ScopeType,
-		&i.Params,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const deleteAuthzDataScope = `-- name: DeleteAuthzDataScope :one
-DELETE FROM authz_data_scopes
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, code, name, scope_type, params, created_at
-`
-
-type DeleteAuthzDataScopeParams struct {
+type GetAuthzFieldPolicyParams struct {
 	TenantID string `json:"tenant_id"`
 	ID       string `json:"id"`
 }
 
-func (q *Queries) DeleteAuthzDataScope(ctx context.Context, arg DeleteAuthzDataScopeParams) (AuthzDataScope, error) {
-	row := q.db.QueryRow(ctx, deleteAuthzDataScope, arg.TenantID, arg.ID)
-	var i AuthzDataScope
+func (q *Queries) GetAuthzFieldPolicy(ctx context.Context, arg GetAuthzFieldPolicyParams) (AuthzFieldPolicy, error) {
+	row := q.db.QueryRow(ctx, getAuthzFieldPolicy, arg.TenantID, arg.ID)
+	var i AuthzFieldPolicy
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
-		&i.Code,
-		&i.Name,
-		&i.ScopeType,
-		&i.Params,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const deleteAuthzPermissionSetAssignment = `-- name: DeleteAuthzPermissionSetAssignment :one
-DELETE FROM authz_permission_set_assignments
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, principal_type, principal_id, permission_set_id, effect, data_scope_id, condition_id, starts_at, expires_at, created_at
-`
-
-type DeleteAuthzPermissionSetAssignmentParams struct {
-	TenantID string `json:"tenant_id"`
-	ID       string `json:"id"`
-}
-
-func (q *Queries) DeleteAuthzPermissionSetAssignment(ctx context.Context, arg DeleteAuthzPermissionSetAssignmentParams) (AuthzPermissionSetAssignment, error) {
-	row := q.db.QueryRow(ctx, deleteAuthzPermissionSetAssignment, arg.TenantID, arg.ID)
-	var i AuthzPermissionSetAssignment
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.PrincipalType,
-		&i.PrincipalID,
-		&i.PermissionSetID,
+		&i.ApplicationCode,
+		&i.ResourceType,
+		&i.FieldName,
 		&i.Effect,
-		&i.DataScopeID,
-		&i.ConditionID,
-		&i.StartsAt,
-		&i.ExpiresAt,
+		&i.MaskStrategy,
+		&i.PermissionID,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -335,33 +349,6 @@ func (q *Queries) ListAuthzDataScopes(ctx context.Context, tenantID string) ([]A
 	return items, nil
 }
 
-const getAuthzFieldPolicy = `-- name: GetAuthzFieldPolicy :one
-SELECT id, tenant_id, application_code, resource_type, field_name, effect, mask_strategy, permission_id, created_at FROM authz_field_policies
-WHERE tenant_id = $1 AND id = $2
-`
-
-type GetAuthzFieldPolicyParams struct {
-	TenantID string `json:"tenant_id"`
-	ID       string `json:"id"`
-}
-
-func (q *Queries) GetAuthzFieldPolicy(ctx context.Context, arg GetAuthzFieldPolicyParams) (AuthzFieldPolicy, error) {
-	row := q.db.QueryRow(ctx, getAuthzFieldPolicy, arg.TenantID, arg.ID)
-	var i AuthzFieldPolicy
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.ApplicationCode,
-		&i.ResourceType,
-		&i.FieldName,
-		&i.Effect,
-		&i.MaskStrategy,
-		&i.PermissionID,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const listAuthzFieldPolicies = `-- name: ListAuthzFieldPolicies :many
 SELECT id, tenant_id, application_code, resource_type, field_name, effect, mask_strategy, permission_id, created_at FROM authz_field_policies
 WHERE tenant_id = $1
@@ -371,13 +358,13 @@ ORDER BY field_name ASC
 `
 
 type ListAuthzFieldPoliciesParams struct {
-	TenantID        string `json:"tenant_id"`
-	ApplicationCode string `json:"application_code"`
-	ResourceType    string `json:"resource_type"`
+	TenantID string `json:"tenant_id"`
+	Column2  string `json:"column_2"`
+	Column3  string `json:"column_3"`
 }
 
 func (q *Queries) ListAuthzFieldPolicies(ctx context.Context, arg ListAuthzFieldPoliciesParams) ([]AuthzFieldPolicy, error) {
-	rows, err := q.db.Query(ctx, listAuthzFieldPolicies, arg.TenantID, arg.ApplicationCode, arg.ResourceType)
+	rows, err := q.db.Query(ctx, listAuthzFieldPolicies, arg.TenantID, arg.Column2, arg.Column3)
 	if err != nil {
 		return nil, err
 	}
@@ -404,34 +391,6 @@ func (q *Queries) ListAuthzFieldPolicies(ctx context.Context, arg ListAuthzField
 		return nil, err
 	}
 	return items, nil
-}
-
-const deleteAuthzFieldPolicy = `-- name: DeleteAuthzFieldPolicy :one
-DELETE FROM authz_field_policies
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, application_code, resource_type, field_name, effect, mask_strategy, permission_id, created_at
-`
-
-type DeleteAuthzFieldPolicyParams struct {
-	TenantID string `json:"tenant_id"`
-	ID       string `json:"id"`
-}
-
-func (q *Queries) DeleteAuthzFieldPolicy(ctx context.Context, arg DeleteAuthzFieldPolicyParams) (AuthzFieldPolicy, error) {
-	row := q.db.QueryRow(ctx, deleteAuthzFieldPolicy, arg.TenantID, arg.ID)
-	var i AuthzFieldPolicy
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.ApplicationCode,
-		&i.ResourceType,
-		&i.FieldName,
-		&i.Effect,
-		&i.MaskStrategy,
-		&i.PermissionID,
-		&i.CreatedAt,
-	)
-	return i, err
 }
 
 const listAuthzPermissionSetAssignments = `-- name: ListAuthzPermissionSetAssignments :many
@@ -626,6 +585,47 @@ func (q *Queries) RevokeAuthzAssumableRoleSession(ctx context.Context, arg Revok
 		&i.SessionPolicy,
 		&i.ExpiresAt,
 		&i.RevokedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateAuthzDataScope = `-- name: UpdateAuthzDataScope :one
+UPDATE authz_data_scopes
+SET code = $3,
+    name = $4,
+    scope_type = $5,
+    params = $6::jsonb
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, code, name, scope_type, params, created_at
+`
+
+type UpdateAuthzDataScopeParams struct {
+	TenantID  string `json:"tenant_id"`
+	ID        string `json:"id"`
+	Code      string `json:"code"`
+	Name      string `json:"name"`
+	ScopeType string `json:"scope_type"`
+	Column6   []byte `json:"column_6"`
+}
+
+func (q *Queries) UpdateAuthzDataScope(ctx context.Context, arg UpdateAuthzDataScopeParams) (AuthzDataScope, error) {
+	row := q.db.QueryRow(ctx, updateAuthzDataScope,
+		arg.TenantID,
+		arg.ID,
+		arg.Code,
+		arg.Name,
+		arg.ScopeType,
+		arg.Column6,
+	)
+	var i AuthzDataScope
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Code,
+		&i.Name,
+		&i.ScopeType,
+		&i.Params,
 		&i.CreatedAt,
 	)
 	return i, err

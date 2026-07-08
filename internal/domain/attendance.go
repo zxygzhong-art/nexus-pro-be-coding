@@ -153,6 +153,23 @@ type AttendanceClockRecord struct {
 	CreatedAt           time.Time      `json:"created_at"`
 }
 
+// AttendanceDailySummary 定義考勤日彙總的資料結構。
+type AttendanceDailySummary struct {
+	ID          string    `json:"id"`
+	TenantID    string    `json:"tenant_id"`
+	EmployeeID  string    `json:"employee_id"`
+	WorkDate    string    `json:"work_date"`
+	ShiftStart  string    `json:"shift_start,omitempty"`
+	ShiftEnd    string    `json:"shift_end,omitempty"`
+	ShiftHours  float64   `json:"shift_hours,omitempty"`
+	DailyHours  float64   `json:"daily_hours,omitempty"`
+	ClockHours  float64   `json:"clock_hours,omitempty"`
+	Source      string    `json:"source"`
+	ExternalRef string    `json:"external_ref"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
 // AttendanceCorrectionRequest 定義考勤 correction 請求的資料結構。
 type AttendanceCorrectionRequest struct {
 	ID                  string     `json:"id"`
@@ -329,6 +346,36 @@ type AttendanceClockRecordQuery struct {
 	Direction    string `json:"direction,omitempty"`
 	RecordStatus string `json:"record_status,omitempty"`
 	Source       string `json:"source,omitempty"`
+}
+
+// AttendanceDailySummaryQuery 定義考勤日彙總查詢的資料結構。
+type AttendanceDailySummaryQuery struct {
+	EmployeeID string `json:"employee_id,omitempty"`
+	FromDate   string `json:"from_date,omitempty"`
+	ToDate     string `json:"to_date,omitempty"`
+	Source     string `json:"source,omitempty"`
+}
+
+// EHRMSAttendanceRecord 表示 eHRMS 考勤 record。
+type EHRMSAttendanceRecord map[string]string
+
+// EHRMSAttendanceSyncInput 定義 eHRMS 考勤 sync 輸入的資料結構。
+type EHRMSAttendanceSyncInput struct {
+	Mode  string `json:"mode,omitempty"`
+	Since string `json:"since,omitempty"`
+}
+
+// EHRMSAttendanceSyncResponse 定義 eHRMS 考勤 sync 回應的資料結構。
+type EHRMSAttendanceSyncResponse struct {
+	Fetched   int                   `json:"fetched"`
+	Created   int                   `json:"created"`
+	Updated   int                   `json:"updated"`
+	Skipped   int                   `json:"skipped"`
+	Failed    int                   `json:"failed"`
+	Mode      string                `json:"mode"`
+	Since     string                `json:"since,omitempty"`
+	Results   []BatchEmployeeResult `json:"results,omitempty"`
+	RowErrors []RowError            `json:"row_errors,omitempty"`
 }
 
 // CreateAttendanceCorrectionInput 定義考勤 correction 輸入的資料結構。

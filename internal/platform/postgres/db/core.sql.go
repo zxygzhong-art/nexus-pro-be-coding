@@ -298,6 +298,36 @@ func (q *Queries) DeleteFormInstance(ctx context.Context, arg DeleteFormInstance
 	return err
 }
 
+const deleteGroupMembership = `-- name: DeleteGroupMembership :one
+DELETE FROM authz_group_memberships
+WHERE tenant_id = $1 AND user_group_id = $2 AND account_id = $3
+RETURNING id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at
+`
+
+type DeleteGroupMembershipParams struct {
+	TenantID    string `json:"tenant_id"`
+	UserGroupID string `json:"user_group_id"`
+	AccountID   string `json:"account_id"`
+}
+
+func (q *Queries) DeleteGroupMembership(ctx context.Context, arg DeleteGroupMembershipParams) (AuthzGroupMembership, error) {
+	row := q.db.QueryRow(ctx, deleteGroupMembership, arg.TenantID, arg.UserGroupID, arg.AccountID)
+	var i AuthzGroupMembership
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.UserGroupID,
+		&i.AccountID,
+		&i.ValidFrom,
+		&i.ValidUntil,
+		&i.Source,
+		&i.ApprovalInstanceID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const deletePlatformTaskItem = `-- name: DeletePlatformTaskItem :exec
 DELETE FROM platform_task_items
 WHERE tenant_id = $1
@@ -539,6 +569,71 @@ func (q *Queries) GetAttendanceCorrectionRequestByFormInstanceID(ctx context.Con
 		&i.ReviewedByAccountID,
 		&i.ReviewReason,
 		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAttendanceDailySummaryByEmployeeDate = `-- name: GetAttendanceDailySummaryByEmployeeDate :one
+SELECT id, tenant_id, employee_id, work_date, shift_start, shift_end, shift_hours, daily_hours, clock_hours, source, external_ref, created_at, updated_at FROM attendance_daily_summaries
+WHERE tenant_id = $1 AND employee_id = $2 AND work_date = $3
+LIMIT 1
+`
+
+type GetAttendanceDailySummaryByEmployeeDateParams struct {
+	TenantID   string `json:"tenant_id"`
+	EmployeeID string `json:"employee_id"`
+	WorkDate   string `json:"work_date"`
+}
+
+func (q *Queries) GetAttendanceDailySummaryByEmployeeDate(ctx context.Context, arg GetAttendanceDailySummaryByEmployeeDateParams) (AttendanceDailySummary, error) {
+	row := q.db.QueryRow(ctx, getAttendanceDailySummaryByEmployeeDate, arg.TenantID, arg.EmployeeID, arg.WorkDate)
+	var i AttendanceDailySummary
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.WorkDate,
+		&i.ShiftStart,
+		&i.ShiftEnd,
+		&i.ShiftHours,
+		&i.DailyHours,
+		&i.ClockHours,
+		&i.Source,
+		&i.ExternalRef,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAttendanceDailySummaryByExternalRef = `-- name: GetAttendanceDailySummaryByExternalRef :one
+SELECT id, tenant_id, employee_id, work_date, shift_start, shift_end, shift_hours, daily_hours, clock_hours, source, external_ref, created_at, updated_at FROM attendance_daily_summaries
+WHERE tenant_id = $1 AND external_ref = $2 AND external_ref <> ''
+LIMIT 1
+`
+
+type GetAttendanceDailySummaryByExternalRefParams struct {
+	TenantID    string `json:"tenant_id"`
+	ExternalRef string `json:"external_ref"`
+}
+
+func (q *Queries) GetAttendanceDailySummaryByExternalRef(ctx context.Context, arg GetAttendanceDailySummaryByExternalRefParams) (AttendanceDailySummary, error) {
+	row := q.db.QueryRow(ctx, getAttendanceDailySummaryByExternalRef, arg.TenantID, arg.ExternalRef)
+	var i AttendanceDailySummary
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.WorkDate,
+		&i.ShiftStart,
+		&i.ShiftEnd,
+		&i.ShiftHours,
+		&i.DailyHours,
+		&i.ClockHours,
+		&i.Source,
+		&i.ExternalRef,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -998,6 +1093,35 @@ func (q *Queries) GetFormTemplateByKey(ctx context.Context, arg GetFormTemplateB
 	return i, err
 }
 
+const getGroupMembership = `-- name: GetGroupMembership :one
+SELECT id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at FROM authz_group_memberships
+WHERE tenant_id = $1 AND user_group_id = $2 AND account_id = $3
+`
+
+type GetGroupMembershipParams struct {
+	TenantID    string `json:"tenant_id"`
+	UserGroupID string `json:"user_group_id"`
+	AccountID   string `json:"account_id"`
+}
+
+func (q *Queries) GetGroupMembership(ctx context.Context, arg GetGroupMembershipParams) (AuthzGroupMembership, error) {
+	row := q.db.QueryRow(ctx, getGroupMembership, arg.TenantID, arg.UserGroupID, arg.AccountID)
+	var i AuthzGroupMembership
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.UserGroupID,
+		&i.AccountID,
+		&i.ValidFrom,
+		&i.ValidUntil,
+		&i.Source,
+		&i.ApprovalInstanceID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getLeaveBalance = `-- name: GetLeaveBalance :one
 SELECT id, tenant_id, employee_id, leave_type, remaining_hours, updated_at FROM leave_balances
 WHERE tenant_id = $1 AND id = $2
@@ -1439,6 +1563,52 @@ func (q *Queries) ListAccounts(ctx context.Context, tenantID string) ([]Account,
 	return items, nil
 }
 
+const listActiveGroupMembershipsForAccount = `-- name: ListActiveGroupMembershipsForAccount :many
+SELECT id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at FROM authz_group_memberships
+WHERE tenant_id = $1
+  AND account_id = $2
+  AND valid_from <= $3
+  AND (valid_until IS NULL OR valid_until >= $3)
+ORDER BY created_at ASC
+`
+
+type ListActiveGroupMembershipsForAccountParams struct {
+	TenantID  string             `json:"tenant_id"`
+	AccountID string             `json:"account_id"`
+	ValidFrom pgtype.Timestamptz `json:"valid_from"`
+}
+
+func (q *Queries) ListActiveGroupMembershipsForAccount(ctx context.Context, arg ListActiveGroupMembershipsForAccountParams) ([]AuthzGroupMembership, error) {
+	rows, err := q.db.Query(ctx, listActiveGroupMembershipsForAccount, arg.TenantID, arg.AccountID, arg.ValidFrom)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthzGroupMembership
+	for rows.Next() {
+		var i AuthzGroupMembership
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.UserGroupID,
+			&i.AccountID,
+			&i.ValidFrom,
+			&i.ValidUntil,
+			&i.Source,
+			&i.ApprovalInstanceID,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentRuns = `-- name: ListAgentRuns :many
 SELECT id, tenant_id, account_id, mode, prompt, answer, status, reference_items, created_at, updated_at FROM agent_runs
 WHERE tenant_id = $1
@@ -1790,6 +1960,64 @@ func (q *Queries) ListAttendanceCorrectionRequests(ctx context.Context, arg List
 			&i.ReviewedByAccountID,
 			&i.ReviewReason,
 			&i.ReviewedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAttendanceDailySummaries = `-- name: ListAttendanceDailySummaries :many
+SELECT id, tenant_id, employee_id, work_date, shift_start, shift_end, shift_hours, daily_hours, clock_hours, source, external_ref, created_at, updated_at FROM attendance_daily_summaries
+WHERE tenant_id = $1
+  AND ($2::text = '' OR employee_id = $2)
+  AND ($3::text = '' OR work_date >= $3)
+  AND ($4::text = '' OR work_date <= $4)
+  AND ($5::text = '' OR source = $5)
+ORDER BY work_date ASC, employee_id ASC, id ASC
+`
+
+type ListAttendanceDailySummariesParams struct {
+	TenantID   string `json:"tenant_id"`
+	EmployeeID string `json:"employee_id"`
+	FromDate   string `json:"from_date"`
+	ToDate     string `json:"to_date"`
+	Source     string `json:"source"`
+}
+
+func (q *Queries) ListAttendanceDailySummaries(ctx context.Context, arg ListAttendanceDailySummariesParams) ([]AttendanceDailySummary, error) {
+	rows, err := q.db.Query(ctx, listAttendanceDailySummaries,
+		arg.TenantID,
+		arg.EmployeeID,
+		arg.FromDate,
+		arg.ToDate,
+		arg.Source,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AttendanceDailySummary
+	for rows.Next() {
+		var i AttendanceDailySummary
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.EmployeeID,
+			&i.WorkDate,
+			&i.ShiftStart,
+			&i.ShiftEnd,
+			&i.ShiftHours,
+			&i.DailyHours,
+			&i.ClockHours,
+			&i.Source,
+			&i.ExternalRef,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -2476,6 +2704,48 @@ func (q *Queries) ListFormTemplates(ctx context.Context, tenantID string) ([]For
 	return items, nil
 }
 
+const listGroupMembershipsForGroup = `-- name: ListGroupMembershipsForGroup :many
+SELECT id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at FROM authz_group_memberships
+WHERE tenant_id = $1 AND user_group_id = $2
+ORDER BY created_at ASC
+`
+
+type ListGroupMembershipsForGroupParams struct {
+	TenantID    string `json:"tenant_id"`
+	UserGroupID string `json:"user_group_id"`
+}
+
+func (q *Queries) ListGroupMembershipsForGroup(ctx context.Context, arg ListGroupMembershipsForGroupParams) ([]AuthzGroupMembership, error) {
+	rows, err := q.db.Query(ctx, listGroupMembershipsForGroup, arg.TenantID, arg.UserGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthzGroupMembership
+	for rows.Next() {
+		var i AuthzGroupMembership
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.UserGroupID,
+			&i.AccountID,
+			&i.ValidFrom,
+			&i.ValidUntil,
+			&i.Source,
+			&i.ApprovalInstanceID,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLeaveBalances = `-- name: ListLeaveBalances :many
 SELECT id, tenant_id, employee_id, leave_type, remaining_hours, updated_at FROM leave_balances
 WHERE tenant_id = $1
@@ -3001,212 +3271,6 @@ func (q *Queries) ListUserGroups(ctx context.Context, tenantID string) ([]UserGr
 			&i.SourceTemplateKey,
 			&i.SourcePackageVersion,
 			&i.Version,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const upsertGroupMembership = `-- name: UpsertGroupMembership :one
-INSERT INTO authz_group_memberships (
-    id, tenant_id, user_group_id, account_id, valid_from, valid_until,
-    source, approval_instance_id, created_by, created_at
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7,
-    $8, $9, $10
-)
-ON CONFLICT (tenant_id, user_group_id, account_id) DO UPDATE SET
-    valid_from = EXCLUDED.valid_from,
-    valid_until = EXCLUDED.valid_until,
-    source = EXCLUDED.source,
-    approval_instance_id = EXCLUDED.approval_instance_id,
-    created_by = EXCLUDED.created_by
-RETURNING id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at
-`
-
-type UpsertGroupMembershipParams struct {
-	ID                 string             `json:"id"`
-	TenantID           string             `json:"tenant_id"`
-	UserGroupID        string             `json:"user_group_id"`
-	AccountID          string             `json:"account_id"`
-	ValidFrom          pgtype.Timestamptz `json:"valid_from"`
-	ValidUntil         pgtype.Timestamptz `json:"valid_until"`
-	Source             string             `json:"source"`
-	ApprovalInstanceID string             `json:"approval_instance_id"`
-	CreatedBy          string             `json:"created_by"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-}
-
-func (q *Queries) UpsertGroupMembership(ctx context.Context, arg UpsertGroupMembershipParams) (AuthzGroupMembership, error) {
-	row := q.db.QueryRow(ctx, upsertGroupMembership,
-		arg.ID,
-		arg.TenantID,
-		arg.UserGroupID,
-		arg.AccountID,
-		arg.ValidFrom,
-		arg.ValidUntil,
-		arg.Source,
-		arg.ApprovalInstanceID,
-		arg.CreatedBy,
-		arg.CreatedAt,
-	)
-	var i AuthzGroupMembership
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.UserGroupID,
-		&i.AccountID,
-		&i.ValidFrom,
-		&i.ValidUntil,
-		&i.Source,
-		&i.ApprovalInstanceID,
-		&i.CreatedBy,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const deleteGroupMembership = `-- name: DeleteGroupMembership :one
-DELETE FROM authz_group_memberships
-WHERE tenant_id = $1 AND user_group_id = $2 AND account_id = $3
-RETURNING id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at
-`
-
-type DeleteGroupMembershipParams struct {
-	TenantID    string `json:"tenant_id"`
-	UserGroupID string `json:"user_group_id"`
-	AccountID   string `json:"account_id"`
-}
-
-func (q *Queries) DeleteGroupMembership(ctx context.Context, arg DeleteGroupMembershipParams) (AuthzGroupMembership, error) {
-	row := q.db.QueryRow(ctx, deleteGroupMembership, arg.TenantID, arg.UserGroupID, arg.AccountID)
-	var i AuthzGroupMembership
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.UserGroupID,
-		&i.AccountID,
-		&i.ValidFrom,
-		&i.ValidUntil,
-		&i.Source,
-		&i.ApprovalInstanceID,
-		&i.CreatedBy,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const getGroupMembership = `-- name: GetGroupMembership :one
-SELECT id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at FROM authz_group_memberships
-WHERE tenant_id = $1 AND user_group_id = $2 AND account_id = $3
-`
-
-type GetGroupMembershipParams struct {
-	TenantID    string `json:"tenant_id"`
-	UserGroupID string `json:"user_group_id"`
-	AccountID   string `json:"account_id"`
-}
-
-func (q *Queries) GetGroupMembership(ctx context.Context, arg GetGroupMembershipParams) (AuthzGroupMembership, error) {
-	row := q.db.QueryRow(ctx, getGroupMembership, arg.TenantID, arg.UserGroupID, arg.AccountID)
-	var i AuthzGroupMembership
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.UserGroupID,
-		&i.AccountID,
-		&i.ValidFrom,
-		&i.ValidUntil,
-		&i.Source,
-		&i.ApprovalInstanceID,
-		&i.CreatedBy,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
-const listGroupMembershipsForGroup = `-- name: ListGroupMembershipsForGroup :many
-SELECT id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at FROM authz_group_memberships
-WHERE tenant_id = $1 AND user_group_id = $2
-ORDER BY created_at ASC
-`
-
-type ListGroupMembershipsForGroupParams struct {
-	TenantID    string `json:"tenant_id"`
-	UserGroupID string `json:"user_group_id"`
-}
-
-func (q *Queries) ListGroupMembershipsForGroup(ctx context.Context, arg ListGroupMembershipsForGroupParams) ([]AuthzGroupMembership, error) {
-	rows, err := q.db.Query(ctx, listGroupMembershipsForGroup, arg.TenantID, arg.UserGroupID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AuthzGroupMembership
-	for rows.Next() {
-		var i AuthzGroupMembership
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.UserGroupID,
-			&i.AccountID,
-			&i.ValidFrom,
-			&i.ValidUntil,
-			&i.Source,
-			&i.ApprovalInstanceID,
-			&i.CreatedBy,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listActiveGroupMembershipsForAccount = `-- name: ListActiveGroupMembershipsForAccount :many
-SELECT id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at FROM authz_group_memberships
-WHERE tenant_id = $1
-  AND account_id = $2
-  AND valid_from <= $3
-  AND (valid_until IS NULL OR valid_until >= $3)
-ORDER BY created_at ASC
-`
-
-type ListActiveGroupMembershipsForAccountParams struct {
-	TenantID  string             `json:"tenant_id"`
-	AccountID string             `json:"account_id"`
-	At        pgtype.Timestamptz `json:"at"`
-}
-
-func (q *Queries) ListActiveGroupMembershipsForAccount(ctx context.Context, arg ListActiveGroupMembershipsForAccountParams) ([]AuthzGroupMembership, error) {
-	rows, err := q.db.Query(ctx, listActiveGroupMembershipsForAccount, arg.TenantID, arg.AccountID, arg.At)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AuthzGroupMembership
-	for rows.Next() {
-		var i AuthzGroupMembership
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.UserGroupID,
-			&i.AccountID,
-			&i.ValidFrom,
-			&i.ValidUntil,
-			&i.Source,
-			&i.ApprovalInstanceID,
-			&i.CreatedBy,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -3920,6 +3984,79 @@ func (q *Queries) UpsertAttendanceCorrectionRequest(ctx context.Context, arg Ups
 	return i, err
 }
 
+const upsertAttendanceDailySummary = `-- name: UpsertAttendanceDailySummary :one
+INSERT INTO attendance_daily_summaries (
+    id, tenant_id, employee_id, work_date, shift_start, shift_end,
+    shift_hours, daily_hours, clock_hours, source, external_ref, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    employee_id = EXCLUDED.employee_id,
+    work_date = EXCLUDED.work_date,
+    shift_start = EXCLUDED.shift_start,
+    shift_end = EXCLUDED.shift_end,
+    shift_hours = EXCLUDED.shift_hours,
+    daily_hours = EXCLUDED.daily_hours,
+    clock_hours = EXCLUDED.clock_hours,
+    source = EXCLUDED.source,
+    external_ref = EXCLUDED.external_ref,
+    updated_at = EXCLUDED.updated_at
+RETURNING id, tenant_id, employee_id, work_date, shift_start, shift_end, shift_hours, daily_hours, clock_hours, source, external_ref, created_at, updated_at
+`
+
+type UpsertAttendanceDailySummaryParams struct {
+	ID          string             `json:"id"`
+	TenantID    string             `json:"tenant_id"`
+	EmployeeID  string             `json:"employee_id"`
+	WorkDate    string             `json:"work_date"`
+	ShiftStart  string             `json:"shift_start"`
+	ShiftEnd    string             `json:"shift_end"`
+	ShiftHours  float64            `json:"shift_hours"`
+	DailyHours  float64            `json:"daily_hours"`
+	ClockHours  float64            `json:"clock_hours"`
+	Source      string             `json:"source"`
+	ExternalRef string             `json:"external_ref"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertAttendanceDailySummary(ctx context.Context, arg UpsertAttendanceDailySummaryParams) (AttendanceDailySummary, error) {
+	row := q.db.QueryRow(ctx, upsertAttendanceDailySummary,
+		arg.ID,
+		arg.TenantID,
+		arg.EmployeeID,
+		arg.WorkDate,
+		arg.ShiftStart,
+		arg.ShiftEnd,
+		arg.ShiftHours,
+		arg.DailyHours,
+		arg.ClockHours,
+		arg.Source,
+		arg.ExternalRef,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i AttendanceDailySummary
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.WorkDate,
+		&i.ShiftStart,
+		&i.ShiftEnd,
+		&i.ShiftHours,
+		&i.DailyHours,
+		&i.ClockHours,
+		&i.Source,
+		&i.ExternalRef,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const upsertAttendancePolicy = `-- name: UpsertAttendancePolicy :one
 INSERT INTO attendance_policies (
     id, tenant_id, work_time, leave_types, updated_by_account_id, created_at, updated_at
@@ -4494,6 +4631,66 @@ func (q *Queries) UpsertFormTemplate(ctx context.Context, arg UpsertFormTemplate
 		&i.Name,
 		&i.Description,
 		&i.Schema,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertGroupMembership = `-- name: UpsertGroupMembership :one
+INSERT INTO authz_group_memberships (
+    id, tenant_id, user_group_id, account_id, valid_from, valid_until,
+    source, approval_instance_id, created_by, created_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7,
+    $8, $9, $10
+)
+ON CONFLICT (tenant_id, user_group_id, account_id) DO UPDATE SET
+    valid_from = EXCLUDED.valid_from,
+    valid_until = EXCLUDED.valid_until,
+    source = EXCLUDED.source,
+    approval_instance_id = EXCLUDED.approval_instance_id,
+    created_by = EXCLUDED.created_by
+RETURNING id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at
+`
+
+type UpsertGroupMembershipParams struct {
+	ID                 string             `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	UserGroupID        string             `json:"user_group_id"`
+	AccountID          string             `json:"account_id"`
+	ValidFrom          pgtype.Timestamptz `json:"valid_from"`
+	ValidUntil         pgtype.Timestamptz `json:"valid_until"`
+	Source             string             `json:"source"`
+	ApprovalInstanceID string             `json:"approval_instance_id"`
+	CreatedBy          string             `json:"created_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) UpsertGroupMembership(ctx context.Context, arg UpsertGroupMembershipParams) (AuthzGroupMembership, error) {
+	row := q.db.QueryRow(ctx, upsertGroupMembership,
+		arg.ID,
+		arg.TenantID,
+		arg.UserGroupID,
+		arg.AccountID,
+		arg.ValidFrom,
+		arg.ValidUntil,
+		arg.Source,
+		arg.ApprovalInstanceID,
+		arg.CreatedBy,
+		arg.CreatedAt,
+	)
+	var i AuthzGroupMembership
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.UserGroupID,
+		&i.AccountID,
+		&i.ValidFrom,
+		&i.ValidUntil,
+		&i.Source,
+		&i.ApprovalInstanceID,
+		&i.CreatedBy,
 		&i.CreatedAt,
 	)
 	return i, err

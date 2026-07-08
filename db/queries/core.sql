@@ -920,6 +920,46 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.arg(source)::text = '' OR source = sqlc.arg(source))
 ORDER BY clocked_at DESC, created_at DESC, id ASC;
 
+-- name: UpsertAttendanceDailySummary :one
+INSERT INTO attendance_daily_summaries (
+    id, tenant_id, employee_id, work_date, shift_start, shift_end,
+    shift_hours, daily_hours, clock_hours, source, external_ref, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+)
+ON CONFLICT (id) DO UPDATE SET
+    tenant_id = EXCLUDED.tenant_id,
+    employee_id = EXCLUDED.employee_id,
+    work_date = EXCLUDED.work_date,
+    shift_start = EXCLUDED.shift_start,
+    shift_end = EXCLUDED.shift_end,
+    shift_hours = EXCLUDED.shift_hours,
+    daily_hours = EXCLUDED.daily_hours,
+    clock_hours = EXCLUDED.clock_hours,
+    source = EXCLUDED.source,
+    external_ref = EXCLUDED.external_ref,
+    updated_at = EXCLUDED.updated_at
+RETURNING *;
+
+-- name: GetAttendanceDailySummaryByExternalRef :one
+SELECT * FROM attendance_daily_summaries
+WHERE tenant_id = $1 AND external_ref = $2 AND external_ref <> ''
+LIMIT 1;
+
+-- name: GetAttendanceDailySummaryByEmployeeDate :one
+SELECT * FROM attendance_daily_summaries
+WHERE tenant_id = $1 AND employee_id = $2 AND work_date = $3
+LIMIT 1;
+
+-- name: ListAttendanceDailySummaries :many
+SELECT * FROM attendance_daily_summaries
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.arg(employee_id)::text = '' OR employee_id = sqlc.arg(employee_id))
+  AND (sqlc.arg(from_date)::text = '' OR work_date >= sqlc.arg(from_date))
+  AND (sqlc.arg(to_date)::text = '' OR work_date <= sqlc.arg(to_date))
+  AND (sqlc.arg(source)::text = '' OR source = sqlc.arg(source))
+ORDER BY work_date ASC, employee_id ASC, id ASC;
+
 -- name: UpsertAttendanceCorrectionRequest :one
 INSERT INTO attendance_correction_requests (
     id, tenant_id, employee_id, direction, requested_clocked_at, work_date,

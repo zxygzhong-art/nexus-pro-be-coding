@@ -33,7 +33,7 @@ type AuthzFacade interface {
 type IAMFacade interface {
 	ListApplications(RequestContext) ([]IAMApplication, error)
 	ListResourceTypes(RequestContext) ([]IAMResourceType, error)
-	ListPermissionPage(RequestContext, PageRequest) (PageResponse[Permission], error)
+	ListPermissionPage(RequestContext, PageRequest) (PageResponse[PermissionCatalogItem], error)
 	ListPermissionPackagePage(RequestContext, PageRequest) (PageResponse[PermissionPackage], error)
 	RegisterPermissionPackage(RequestContext, PermissionPackageContent) (PermissionPackage, error)
 	PublishPermissionPackage(RequestContext, string) (PermissionPackage, error)
@@ -125,6 +125,7 @@ type AttendanceFacade interface {
 	AttendanceClockStatus(RequestContext) (AttendanceClockStatus, error)
 	CreateAttendanceClockRecord(RequestContext, CreateAttendanceClockRecordInput) (AttendanceClockRecord, error)
 	ListAttendanceClockRecordPage(RequestContext, AttendanceClockRecordQuery, PageRequest) (PageResponse[AttendanceClockRecord], error)
+	SyncEHRMSAttendance(RequestContext, EHRMSAttendanceSyncInput) (EHRMSAttendanceSyncResponse, error)
 	CreateAttendanceCorrection(RequestContext, CreateAttendanceCorrectionInput) (AttendanceCorrectionRequest, error)
 	ListAttendanceCorrectionPage(RequestContext, AttendanceCorrectionQuery, PageRequest) (PageResponse[AttendanceCorrectionRequest], error)
 	ApproveAttendanceCorrection(RequestContext, string, ReviewAttendanceCorrectionInput) (AttendanceCorrectionRequest, error)

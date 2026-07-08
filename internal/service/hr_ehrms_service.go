@@ -39,6 +39,7 @@ const (
 	ehrmsFieldShiftName       = "員工班別名稱"
 	ehrmsFieldShiftType       = "員工班別屬性"
 	ehrmsFieldDirectIndirect  = "直接/間接員工"
+	ehrmsFieldLeaveGroup      = "休假群組"
 )
 
 type ehrmsEmployeeWrite struct {
@@ -279,6 +280,7 @@ func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmploy
 			"shift_name":               ehrmsValue(record, ehrmsFieldShiftName),
 			"shift_type":               ehrmsValue(record, ehrmsFieldShiftType),
 			"direct_indirect_employee": ehrmsValue(record, ehrmsFieldDirectIndirect),
+			"leave_group":              ehrmsValue(record, ehrmsFieldLeaveGroup),
 			"source":                   "ehrms",
 		},
 		EducationMilitaryInfo: map[string]any{
@@ -288,6 +290,13 @@ func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmploy
 	}
 	employee, err := c.employeeCreateCandidate(ctx, input)
 	if err != nil {
+		errors, ok := employeeImportErrorsFromError(rowNumber, err)
+		if ok {
+			return Employee{}, errors, nil
+		}
+		return Employee{}, nil, err
+	}
+	if err := c.ensureEmployeePosition(ctx, &employee, true); err != nil {
 		errors, ok := employeeImportErrorsFromError(rowNumber, err)
 		if ok {
 			return Employee{}, errors, nil
@@ -464,10 +473,12 @@ func ehrmsMergeEmployee(existing Employee, candidate Employee) Employee {
 	next.Name = candidate.Name
 	next.OrgUnitID = candidate.OrgUnitID
 	next.Position = candidate.Position
+	next.PositionID = candidate.PositionID
 	next.Category = candidate.Category
 	next.Status = candidate.Status
 	next.EmploymentStatus = candidate.EmploymentStatus
 	next.HireDate = candidate.HireDate
+	next.ResignDate = candidate.ResignDate
 	next.BasicInfo = mergeEmployeeImportMap(next.BasicInfo, candidate.BasicInfo)
 	next.EmploymentInfo = mergeEmployeeImportMap(next.EmploymentInfo, candidate.EmploymentInfo)
 	next.EducationMilitaryInfo = mergeEmployeeImportMap(next.EducationMilitaryInfo, candidate.EducationMilitaryInfo)
@@ -526,5 +537,15 @@ func ehrmsValue(record EHRMSEmployeeRecord, key string) string {
 	if len(record) == 0 {
 		return ""
 	}
-	return strings.TrimSpace(record[key])
+	return normalizeEHRMSPlaceholder(record[key])
+}
+
+// normalizeEHRMSPlaceholder 將上游占位值視為空值。
+func normalizeEHRMSPlaceholder(value string) string {
+	value = strings.TrimSpace(value)
+	switch strings.ToLower(value) {
+	case "", "-", "—", "n/a", "na", "null", "none":
+		return ""
+	}
+	return value
 }

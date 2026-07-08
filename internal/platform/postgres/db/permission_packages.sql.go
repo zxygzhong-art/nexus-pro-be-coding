@@ -328,7 +328,8 @@ const upsertPermissionPackage = `-- name: UpsertPermissionPackage :one
 INSERT INTO permission_packages (
     id, application_code, version, status, content, checksum, created_at, published_at
 ) VALUES (
-    $1, $2, $3, $4, $5::jsonb, $6, $7, $8
+    $1, $2, $3, $4,
+    $5::jsonb, $6, $7, $8
 )
 ON CONFLICT (id) DO UPDATE SET
     application_code = EXCLUDED.application_code,
@@ -381,7 +382,8 @@ const upsertPermissionPackageImport = `-- name: UpsertPermissionPackageImport :o
 INSERT INTO permission_package_imports (
     id, tenant_id, package_id, version, imported_at, imported_by, artifact_id_map
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7::jsonb
+    $1, $2, $3, $4,
+    $5, $6, $7::jsonb
 )
 ON CONFLICT (tenant_id, package_id, version) DO UPDATE SET
     artifact_id_map = permission_package_imports.artifact_id_map

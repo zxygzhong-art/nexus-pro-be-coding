@@ -12,8 +12,12 @@ import (
 	"strings"
 	"time"
 
+	"nexus-pro-be/internal/config"
 	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/jobs"
 	"nexus-pro-be/internal/platform/auth"
+	"nexus-pro-be/internal/platform/ehrms"
+	openfgaclient "nexus-pro-be/internal/platform/openfga"
 	postgresplatform "nexus-pro-be/internal/platform/postgres"
 	temporalplatform "nexus-pro-be/internal/platform/temporal"
 	postgresrepo "nexus-pro-be/internal/repository/postgres"
@@ -51,6 +55,10 @@ func run(args []string) error {
 		return runOpenFGAGrantTenantAdmin(args[1:], true)
 	case "openfga-grant-agent-tool":
 		return runOpenFGAGrantAgentTool(args[1:])
+	case "ehrms-sync-employees":
+		return runEHRMSSyncEmployees(args[1:])
+	case "ehrms-sync-attendance":
+		return runEHRMSSyncAttendance(args[1:])
 	default:
 		printUsage(os.Stderr)
 		return fmt.Errorf("unknown command %q", args[0])
@@ -383,6 +391,154 @@ func runOpenFGAGrantAgentTool(args []string) error {
 	return encoder.Encode(result)
 }
 
+// runEHRMSSyncEmployees 從已配置的 eHRMS 上游同步員工資料。
+func runEHRMSSyncEmployees(args []string) error {
+	fs := flag.NewFlagSet("tenantctl ehrms-sync-employees", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	tenantID := fs.String("tenant-id", strings.TrimSpace(os.Getenv("EHRMS_SYNC_TENANT_ID")), "tenant id")
+	accountID := fs.String("account-id", strings.TrimSpace(os.Getenv("EHRMS_SYNC_ACCOUNT_ID")), "service account id with hr.employee.import")
+	mode := fs.String("mode", firstNonEmpty(strings.TrimSpace(os.Getenv("EHRMS_SYNC_MODE")), "upsert"), "sync mode: create, update, or upsert")
+	databaseURL := fs.String("database-url", strings.TrimSpace(os.Getenv("DATABASE_URL")), "Postgres database URL")
+	timeout := fs.Duration("timeout", 10*time.Minute, "operation timeout")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if strings.TrimSpace(*tenantID) == "" {
+		return errors.New("--tenant-id or EHRMS_SYNC_TENANT_ID is required")
+	}
+	if strings.TrimSpace(*accountID) == "" {
+		return errors.New("--account-id or EHRMS_SYNC_ACCOUNT_ID is required")
+	}
+	if strings.TrimSpace(*databaseURL) == "" {
+		return errors.New("DATABASE_URL or --database-url is required")
+	}
+	cfg, err := config.LoadE()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(cfg.EHRMSBaseURL) == "" || strings.TrimSpace(cfg.EHRMSAPIKey) == "" {
+		return errors.New("EHRMS_BASE_URL and EHRMS_API_KEY are required")
+	}
+	if strings.TrimSpace(cfg.OpenFGAAPIURL) == "" || strings.TrimSpace(cfg.OpenFGAStoreID) == "" || strings.TrimSpace(cfg.OpenFGAModelID) == "" {
+		return errors.New("OPENFGA_API_URL, OPENFGA_STORE_ID, and OPENFGA_MODEL_ID are required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	pool, err := postgresplatform.OpenPool(ctx, *databaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	httpClient := &http.Client{Timeout: 60 * time.Second}
+	checker := openfgaclient.NewChecker(cfg.OpenFGAAPIURL, cfg.OpenFGAStoreID, httpClient).WithAuthorizationModelID(cfg.OpenFGAModelID)
+	ehrmsClient, err := ehrms.NewClient(cfg.EHRMSBaseURL, cfg.EHRMSAPIKey, httpClient)
+	if err != nil {
+		return err
+	}
+	svc := service.New(postgresrepo.NewStore(pool), service.Options{
+		Logger:        logger,
+		Relationships: checker,
+		EHRMSClient:   ehrmsClient,
+	})
+	scheduler := jobs.NewEHRMSEmployeeSyncScheduler(svc.HR(), logger)
+	result, err := scheduler.SyncOnce(ctx, jobs.EHRMSEmployeeSyncOptions{
+		TenantID:  *tenantID,
+		AccountID: *accountID,
+		Mode:      *mode,
+	})
+	if err != nil {
+		var appErr *domain.AppError
+		if errors.As(err, &appErr) && len(appErr.RowErrors) > 0 {
+			encoder := json.NewEncoder(os.Stderr)
+			encoder.SetIndent("", "  ")
+			_ = encoder.Encode(appErr.RowErrors[:min(20, len(appErr.RowErrors))])
+		}
+		return err
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(result)
+}
+
+// runEHRMSSyncAttendance 從已配置的 eHRMS 上游同步考勤日彙總。
+func runEHRMSSyncAttendance(args []string) error {
+	fs := flag.NewFlagSet("tenantctl ehrms-sync-attendance", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	tenantID := fs.String("tenant-id", firstNonEmpty(strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_TENANT_ID")), strings.TrimSpace(os.Getenv("EHRMS_SYNC_TENANT_ID"))), "tenant id")
+	accountID := fs.String("account-id", firstNonEmpty(strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID")), strings.TrimSpace(os.Getenv("EHRMS_SYNC_ACCOUNT_ID"))), "service account id with attendance.clock.import")
+	mode := fs.String("mode", firstNonEmpty(strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_MODE")), "upsert"), "sync mode: create, update, or upsert")
+	since := fs.String("since", strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_SINCE")), "optional YYYY-MM-DD lower bound")
+	databaseURL := fs.String("database-url", strings.TrimSpace(os.Getenv("DATABASE_URL")), "Postgres database URL")
+	timeout := fs.Duration("timeout", 10*time.Minute, "operation timeout")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if strings.TrimSpace(*tenantID) == "" {
+		return errors.New("--tenant-id or EHRMS_ATTENDANCE_SYNC_TENANT_ID/EHRMS_SYNC_TENANT_ID is required")
+	}
+	if strings.TrimSpace(*accountID) == "" {
+		return errors.New("--account-id or EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID/EHRMS_SYNC_ACCOUNT_ID is required")
+	}
+	if strings.TrimSpace(*databaseURL) == "" {
+		return errors.New("DATABASE_URL or --database-url is required")
+	}
+	cfg, err := config.LoadE()
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(cfg.EHRMSBaseURL) == "" || strings.TrimSpace(cfg.EHRMSAPIKey) == "" {
+		return errors.New("EHRMS_BASE_URL and EHRMS_API_KEY are required")
+	}
+	if strings.TrimSpace(cfg.OpenFGAAPIURL) == "" || strings.TrimSpace(cfg.OpenFGAStoreID) == "" || strings.TrimSpace(cfg.OpenFGAModelID) == "" {
+		return errors.New("OPENFGA_API_URL, OPENFGA_STORE_ID, and OPENFGA_MODEL_ID are required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	pool, err := postgresplatform.OpenPool(ctx, *databaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	httpClient := &http.Client{Timeout: 60 * time.Second}
+	checker := openfgaclient.NewChecker(cfg.OpenFGAAPIURL, cfg.OpenFGAStoreID, httpClient).WithAuthorizationModelID(cfg.OpenFGAModelID)
+	ehrmsClient, err := ehrms.NewClient(cfg.EHRMSBaseURL, cfg.EHRMSAPIKey, httpClient)
+	if err != nil {
+		return err
+	}
+	svc := service.New(postgresrepo.NewStore(pool), service.Options{
+		Logger:        logger,
+		Relationships: checker,
+		EHRMSClient:   ehrmsClient,
+	})
+	scheduler := jobs.NewEHRMSAttendanceSyncScheduler(svc.Attendance(), logger)
+	result, err := scheduler.SyncOnce(ctx, jobs.EHRMSAttendanceSyncOptions{
+		TenantID:  *tenantID,
+		AccountID: *accountID,
+		Mode:      *mode,
+		Since:     *since,
+	})
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(result)
+}
+
 // runOpenFGABackfill 執行 OpenFGA relationship tuple backfill。
 func runOpenFGABackfill(args []string) error {
 	fs := flag.NewFlagSet("tenantctl openfga-backfill", flag.ContinueOnError)
@@ -487,12 +643,32 @@ func printUsage(out *os.File) {
   tenantctl openfga-grant-tenant-admin --tenant-id <id> --account-id <account-id>
   tenantctl openfga-grant-tenant-security-admin --tenant-id <id> --account-id <account-id>
   tenantctl openfga-grant-agent-tool --tenant-id <id> --tool-id <tool-id> --account-id <account-id> [--relation runner|approver]
+  tenantctl ehrms-sync-employees [--tenant-id <id>] [--account-id <account-id>] [--mode upsert]
+  tenantctl ehrms-sync-attendance [--tenant-id <id>] [--account-id <account-id>] [--mode upsert] [--since YYYY-MM-DD]
 
 Required environment:
   DATABASE_URL
   TEMPORAL_HOST_PORT
   TEMPORAL_NAMESPACE
   TEMPORAL_TASK_QUEUE
+
+Required for ehrms-sync-employees:
+  EHRMS_BASE_URL
+  EHRMS_API_KEY
+  OPENFGA_API_URL
+  OPENFGA_STORE_ID
+  OPENFGA_MODEL_ID
+  EHRMS_SYNC_TENANT_ID (or --tenant-id)
+  EHRMS_SYNC_ACCOUNT_ID (or --account-id)
+
+Required for ehrms-sync-attendance:
+  EHRMS_BASE_URL
+  EHRMS_API_KEY
+  OPENFGA_API_URL
+  OPENFGA_STORE_ID
+  OPENFGA_MODEL_ID
+  EHRMS_ATTENDANCE_SYNC_TENANT_ID or EHRMS_SYNC_TENANT_ID (or --tenant-id)
+  EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID or EHRMS_SYNC_ACCOUNT_ID (or --account-id)
 
 Required for --provision-keycloak:
   KEYCLOAK_ISSUER_URL

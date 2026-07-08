@@ -41,6 +41,11 @@ type AttendanceStore interface {
 	GetAcceptedAttendanceClockRecord(ctx context.Context, tenantID, employeeID, workDate, direction string) (domain.AttendanceClockRecord, bool, error)
 	ListAttendanceClockRecords(ctx context.Context, tenantID string, query domain.AttendanceClockRecordQuery) ([]domain.AttendanceClockRecord, error)
 
+	UpsertAttendanceDailySummary(context.Context, domain.AttendanceDailySummary) error
+	GetAttendanceDailySummaryByExternalRef(ctx context.Context, tenantID, externalRef string) (domain.AttendanceDailySummary, bool, error)
+	GetAttendanceDailySummaryByEmployeeDate(ctx context.Context, tenantID, employeeID, workDate string) (domain.AttendanceDailySummary, bool, error)
+	ListAttendanceDailySummaries(ctx context.Context, tenantID string, query domain.AttendanceDailySummaryQuery) ([]domain.AttendanceDailySummary, error)
+
 	UpsertAttendanceCorrectionRequest(context.Context, domain.AttendanceCorrectionRequest) error
 	GetAttendanceCorrectionRequest(ctx context.Context, tenantID, id string) (domain.AttendanceCorrectionRequest, bool, error)
 	GetAttendanceCorrectionRequestByFormInstanceID(ctx context.Context, tenantID, formInstanceID string) (domain.AttendanceCorrectionRequest, bool, error)

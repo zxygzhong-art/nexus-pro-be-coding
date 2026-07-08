@@ -1069,11 +1069,15 @@ paths:
         - $ref: "#/components/parameters/Sort"
       responses:
         "200":
-          description: Permission page
+          description: Permission catalog page
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/IAMPermissionCatalogPageDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/iam/roles:
     get:
       summary: List read-only IAM role projections
@@ -1908,6 +1912,28 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/attendance/ehrms/sync:
+    post:
+      summary: Sync attendance daily summaries from configured eHRMS
+      parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EHRMSAttendanceSyncRequest"
+      responses:
+        "200":
+          description: eHRMS attendance sync summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EHRMSAttendanceSyncDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/attendance/corrections:
     get:
@@ -2960,6 +2986,12 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/PermissionPackagePage"
+    IAMPermissionCatalogPageDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/IAMPermissionCatalogPage"
     PermissionPackageDataResponse:
       type: object
       required: [data]
@@ -3068,6 +3100,18 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/IAMRoleBindingProjection"
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+        sort: {type: string}
+    IAMPermissionCatalogPage:
+      type: object
+      required: [items, total, page, page_size, sort]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/IAMPermissionCatalogItem"
         total: {type: integer}
         page: {type: integer}
         page_size: {type: integer}
@@ -3580,6 +3624,22 @@ components:
             $ref: "#/components/schemas/IAMPermission"
         source_template_key: {type: string}
         source_package_version: {type: string}
+        created_at: {type: string, format: date-time}
+    IAMPermissionCatalogItem:
+      type: object
+      required: [id, tenant_id, application, resource, action, permission_type, name, created_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        application: {type: string}
+        resource: {type: string}
+        action: {type: string}
+        permission_type: {type: string, enum: [menu, api, button, field, scope]}
+        menu_key: {type: string}
+        name: {type: string}
+        description: {type: string}
+        high_risk: {type: boolean}
+        severity: {type: string}
         created_at: {type: string, format: date-time}
     IAMPermission:
       type: object
@@ -4219,6 +4279,12 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/AttendanceClockRecord"
+    EHRMSAttendanceSyncDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EHRMSAttendanceSyncResponse"
     AttendanceClockRecordPageDataResponse:
       type: object
       required: [data]
@@ -4745,6 +4811,18 @@ components:
           enum: [create, update, upsert]
           default: upsert
           description: create rejects existing employee numbers, update rejects missing employee numbers, upsert creates or updates by employee number.
+    EHRMSAttendanceSyncRequest:
+      type: object
+      properties:
+        mode:
+          type: string
+          enum: [create, update, upsert]
+          default: upsert
+          description: create rejects existing employee/date summaries, update rejects missing summaries, upsert creates or updates by employee/date.
+        since:
+          type: string
+          format: date
+          description: Optional YYYY-MM-DD lower bound; older upstream summary rows are skipped.
     BatchDeleteEmployeesRequest:
       type: object
       required: [employee_ids, reason]
@@ -5405,6 +5483,24 @@ components:
         failed: {type: integer}
         departments_upserted: {type: integer}
         mode: {type: string, enum: [create, update, upsert]}
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/BatchEmployeeResult"
+        row_errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/SyncRowError"
+    EHRMSAttendanceSyncResponse:
+      type: object
+      properties:
+        fetched: {type: integer}
+        created: {type: integer}
+        updated: {type: integer}
+        skipped: {type: integer}
+        failed: {type: integer}
+        mode: {type: string, enum: [create, update, upsert]}
+        since: {type: string, format: date}
         results:
           type: array
           items:

@@ -159,6 +159,13 @@ func TestEHRMSConfig(t *testing.T) {
 	t.Setenv("EHRMS_SYNC_TENANT_ID", "tenant-1")
 	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
 	t.Setenv("EHRMS_SYNC_RUN_ON_START", "true")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "true")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_INTERVAL", "6h")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_MODE", "upsert")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_TENANT_ID", "tenant-att")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID", "acct-att")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_RUN_ON_START", "true")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_SINCE", "2026-06-01")
 
 	cfg, err := config.LoadE()
 	if err != nil {
@@ -169,6 +176,9 @@ func TestEHRMSConfig(t *testing.T) {
 	}
 	if !cfg.EHRMSSyncEnabled || cfg.EHRMSSyncInterval != 12*time.Hour || cfg.EHRMSSyncMode != "upsert" || cfg.EHRMSSyncTenantID != "tenant-1" || cfg.EHRMSSyncAccountID != "acct-1" || !cfg.EHRMSSyncRunOnStart {
 		t.Fatalf("unexpected eHRMS sync config: %+v", cfg)
+	}
+	if !cfg.EHRMSAttendanceSyncEnabled || cfg.EHRMSAttendanceSyncInterval != 6*time.Hour || cfg.EHRMSAttendanceSyncMode != "upsert" || cfg.EHRMSAttendanceSyncTenantID != "tenant-att" || cfg.EHRMSAttendanceSyncAccountID != "acct-att" || !cfg.EHRMSAttendanceSyncRunOnStart || cfg.EHRMSAttendanceSyncSince != "2026-06-01" {
+		t.Fatalf("unexpected eHRMS attendance sync config: %+v", cfg)
 	}
 }
 
@@ -208,6 +218,40 @@ func TestEHRMSSyncConfigValidatesIntervalAndMode(t *testing.T) {
 	_, err := config.LoadE()
 	if err == nil || !strings.Contains(err.Error(), "EHRMS_SYNC_INTERVAL must be a positive duration") || !strings.Contains(err.Error(), "EHRMS_SYNC_MODE must be create, update, or upsert") {
 		t.Fatalf("expected eHRMS sync interval/mode errors, got %v", err)
+	}
+}
+
+// TestEHRMSAttendanceSyncConfigDefaultsToEmployeeActor 驗證 eHRMS 考勤 sync defaults to employee sync actor。
+func TestEHRMSAttendanceSyncConfigDefaultsToEmployeeActor(t *testing.T) {
+	t.Setenv("EHRMS_BASE_URL", "https://ehrms.example")
+	t.Setenv("EHRMS_API_KEY", "test-key")
+	t.Setenv("EHRMS_SYNC_TENANT_ID", "tenant-1")
+	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "true")
+
+	cfg, err := config.LoadE()
+	if err != nil {
+		t.Fatalf("expected eHRMS attendance config to load, got %v", err)
+	}
+	if cfg.EHRMSAttendanceSyncTenantID != "tenant-1" || cfg.EHRMSAttendanceSyncAccountID != "acct-1" {
+		t.Fatalf("expected attendance sync actor to default from employee sync, got %+v", cfg)
+	}
+}
+
+// TestEHRMSAttendanceSyncConfigValidatesSince 驗證 eHRMS 考勤 sync validates since date。
+func TestEHRMSAttendanceSyncConfigValidatesSince(t *testing.T) {
+	t.Setenv("EHRMS_BASE_URL", "https://ehrms.example")
+	t.Setenv("EHRMS_API_KEY", "test-key")
+	t.Setenv("EHRMS_SYNC_TENANT_ID", "tenant-1")
+	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "true")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_INTERVAL", "soon")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_MODE", "merge")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_SINCE", "2026/06/01")
+
+	_, err := config.LoadE()
+	if err == nil || !strings.Contains(err.Error(), "EHRMS_ATTENDANCE_SYNC_INTERVAL must be a positive duration") || !strings.Contains(err.Error(), "EHRMS_ATTENDANCE_SYNC_MODE must be create, update, or upsert") || !strings.Contains(err.Error(), "EHRMS_ATTENDANCE_SYNC_SINCE must be YYYY-MM-DD") {
+		t.Fatalf("expected eHRMS attendance sync validation errors, got %v", err)
 	}
 }
 

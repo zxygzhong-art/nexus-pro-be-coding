@@ -66,6 +66,7 @@ type (
 	AttendanceShift                    = domain.AttendanceShift
 	AttendanceShiftAssignment          = domain.AttendanceShiftAssignment
 	AttendanceClockRecord              = domain.AttendanceClockRecord
+	AttendanceDailySummary             = domain.AttendanceDailySummary
 	AttendanceCorrectionRequest        = domain.AttendanceCorrectionRequest
 	AttendanceClockStatus              = domain.AttendanceClockStatus
 	AttendancePolicy                   = domain.AttendancePolicy
@@ -249,6 +250,9 @@ type (
 	CreateAttendanceShiftAssignmentInput    = domain.CreateAttendanceShiftAssignmentInput
 	CreateAttendanceClockRecordInput        = domain.CreateAttendanceClockRecordInput
 	AttendanceClockRecordQuery              = domain.AttendanceClockRecordQuery
+	AttendanceDailySummaryQuery             = domain.AttendanceDailySummaryQuery
+	EHRMSAttendanceSyncInput                = domain.EHRMSAttendanceSyncInput
+	EHRMSAttendanceSyncResponse             = domain.EHRMSAttendanceSyncResponse
 	CreateAttendanceCorrectionInput         = domain.CreateAttendanceCorrectionInput
 	UpdateAttendancePolicyInput             = domain.UpdateAttendancePolicyInput
 	ReviewAttendanceCorrectionInput         = domain.ReviewAttendanceCorrectionInput

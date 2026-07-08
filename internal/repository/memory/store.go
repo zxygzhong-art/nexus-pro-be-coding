@@ -50,6 +50,7 @@ type Store struct {
 	attendanceShifts       map[string]map[string]AttendanceShift
 	attendanceAssignments  map[string]map[string]AttendanceShiftAssignment
 	attendanceClockRecords map[string]map[string]AttendanceClockRecord
+	attendanceSummaries    map[string]map[string]AttendanceDailySummary
 	attendanceCorrections  map[string]map[string]AttendanceCorrectionRequest
 	overtimeRequests       map[string]map[string]OvertimeRequest
 	formTemplates          map[string]map[string]FormTemplate
@@ -105,6 +106,7 @@ func NewStore() *Store {
 		attendanceShifts:       map[string]map[string]AttendanceShift{},
 		attendanceAssignments:  map[string]map[string]AttendanceShiftAssignment{},
 		attendanceClockRecords: map[string]map[string]AttendanceClockRecord{},
+		attendanceSummaries:    map[string]map[string]AttendanceDailySummary{},
 		attendanceCorrections:  map[string]map[string]AttendanceCorrectionRequest{},
 		overtimeRequests:       map[string]map[string]OvertimeRequest{},
 		formTemplates:          map[string]map[string]FormTemplate{},
@@ -1702,6 +1704,66 @@ func (s *Store) ListAttendanceClockRecords(_ context.Context, tenantID string, q
 	return out, nil
 }
 
+// UpsertAttendanceDailySummary 從儲存層處理 upsert 考勤日彙總。
+func (s *Store) UpsertAttendanceDailySummary(_ context.Context, v AttendanceDailySummary) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, item := range s.attendanceSummaries[v.TenantID] {
+		if item.ID != v.ID && item.EmployeeID == v.EmployeeID && item.WorkDate == v.WorkDate {
+			return domain.Conflict("attendance daily summary already exists")
+		}
+		if item.ID != v.ID && v.ExternalRef != "" && item.ExternalRef == v.ExternalRef {
+			return domain.Conflict("attendance daily summary external_ref already exists")
+		}
+	}
+	putNested(s.attendanceSummaries, v.TenantID, v.ID, copyAttendanceDailySummary(v))
+	return nil
+}
+
+// GetAttendanceDailySummaryByExternalRef 從儲存層取得考勤日彙總 by external ref。
+func (s *Store) GetAttendanceDailySummaryByExternalRef(_ context.Context, tenantID, externalRef string) (AttendanceDailySummary, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, item := range s.attendanceSummaries[tenantID] {
+		if item.ExternalRef == externalRef {
+			return copyAttendanceDailySummary(item), true, nil
+		}
+	}
+	return AttendanceDailySummary{}, false, nil
+}
+
+// GetAttendanceDailySummaryByEmployeeDate 從儲存層取得考勤日彙總 by 員工日期。
+func (s *Store) GetAttendanceDailySummaryByEmployeeDate(_ context.Context, tenantID, employeeID, workDate string) (AttendanceDailySummary, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, item := range s.attendanceSummaries[tenantID] {
+		if item.EmployeeID == employeeID && item.WorkDate == workDate {
+			return copyAttendanceDailySummary(item), true, nil
+		}
+	}
+	return AttendanceDailySummary{}, false, nil
+}
+
+// ListAttendanceDailySummaries 從儲存層列出考勤日彙總。
+func (s *Store) ListAttendanceDailySummaries(_ context.Context, tenantID string, query domain.AttendanceDailySummaryQuery) ([]AttendanceDailySummary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]AttendanceDailySummary, 0, len(s.attendanceSummaries[tenantID]))
+	for _, item := range s.attendanceSummaries[tenantID] {
+		if !memoryAttendanceDailySummaryMatches(item, query) {
+			continue
+		}
+		out = append(out, copyAttendanceDailySummary(item))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].WorkDate != out[j].WorkDate {
+			return out[i].WorkDate < out[j].WorkDate
+		}
+		return out[i].EmployeeID < out[j].EmployeeID
+	})
+	return out, nil
+}
+
 // UpsertAttendanceCorrectionRequest 從儲存層處理 upsert 考勤 correction 請求。
 func (s *Store) UpsertAttendanceCorrectionRequest(_ context.Context, v AttendanceCorrectionRequest) error {
 	s.mu.Lock()
@@ -1836,6 +1898,23 @@ func memoryClockRecordMatches(item AttendanceClockRecord, query domain.Attendanc
 		return false
 	}
 	if query.RecordStatus != "" && item.RecordStatus != query.RecordStatus {
+		return false
+	}
+	if query.Source != "" && item.Source != query.Source {
+		return false
+	}
+	return true
+}
+
+// memoryAttendanceDailySummaryMatches 處理 memory 考勤日彙總 matches。
+func memoryAttendanceDailySummaryMatches(item AttendanceDailySummary, query domain.AttendanceDailySummaryQuery) bool {
+	if query.EmployeeID != "" && item.EmployeeID != query.EmployeeID {
+		return false
+	}
+	if query.FromDate != "" && item.WorkDate < query.FromDate {
+		return false
+	}
+	if query.ToDate != "" && item.WorkDate > query.ToDate {
 		return false
 	}
 	if query.Source != "" && item.Source != query.Source {

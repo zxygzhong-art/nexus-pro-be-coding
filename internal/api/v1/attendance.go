@@ -37,6 +37,7 @@ func (c AttendanceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	attendance.GET("/clock-status", c.routes.Handle("attendance.clock", "read", c.clockStatus))
 	attendance.GET("/clock-records", c.routes.Handle("attendance.clock", "read", c.listClockRecords))
 	attendance.POST("/clock-records", c.routes.Handle("attendance.clock", "create", c.createClockRecord))
+	attendance.POST("/ehrms/sync", c.routes.Handle("attendance.clock", "import", c.syncEHRMSAttendance))
 	attendance.GET("/corrections", c.routes.Handle("attendance.correction", "read", c.listCorrections))
 	attendance.POST("/corrections", c.routes.Handle("attendance.correction", "create", c.createCorrection))
 	attendance.POST("/corrections/:id/approve", c.routes.Handle("attendance.correction", "approve", c.approveCorrection, ResourceID(PathParamID)))
@@ -284,6 +285,20 @@ func (c AttendanceCtrl) createClockRecord(w http.ResponseWriter, r *http.Request
 		return err
 	}
 	writeJSON(w, http.StatusCreated, item)
+	return nil
+}
+
+// syncEHRMSAttendance 處理 eHRMS 考勤同步的 HTTP 請求。
+func (c AttendanceCtrl) syncEHRMSAttendance(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.EHRMSAttendanceSyncInput
+	if _, err := readOptionalJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.SyncEHRMSAttendance(ctx, input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 

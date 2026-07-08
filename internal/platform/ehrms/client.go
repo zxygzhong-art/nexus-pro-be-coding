@@ -21,6 +21,7 @@ type Client struct {
 }
 
 const maxEmployeesResponseBytes = 10 << 20
+const maxAttendanceResponseBytes = 20 << 20
 
 // NewClient 建立 client。
 func NewClient(baseURL string, apiKey string, httpClient *http.Client) (*Client, error) {
@@ -89,5 +90,42 @@ func (c *Client) ListEmployees(ctx context.Context) ([]domain.EHRMSEmployeeRecor
 	if err := json.Unmarshal(body, &rows); err != nil {
 		return nil, fmt.Errorf("decode ehrms employees: %w", err)
 	}
-	return rows, nil
+	return normalizeEmployeeRecords(rows), nil
+}
+
+// ListAttendance 列出考勤日彙總。
+func (c *Client) ListAttendance(ctx context.Context) ([]domain.EHRMSAttendanceRecord, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/attendance", nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("X-API-Key", c.apiKey)
+	req.Header.Set("Accept", "application/json")
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
+		return nil, fmt.Errorf("ehrms attendance returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxAttendanceResponseBytes+1))
+	if err != nil {
+		return nil, fmt.Errorf("read ehrms attendance: %w", err)
+	}
+	if len(body) > maxAttendanceResponseBytes {
+		return nil, fmt.Errorf("ehrms attendance response exceeds %d bytes", maxAttendanceResponseBytes)
+	}
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.UseNumber()
+	var raw []map[string]any
+	if err := decoder.Decode(&raw); err != nil {
+		return nil, fmt.Errorf("decode ehrms attendance: %w", err)
+	}
+	rows := make([]domain.EHRMSAttendanceRecord, 0, len(raw))
+	for _, row := range raw {
+		rows = append(rows, domain.EHRMSAttendanceRecord(stringRecordFromJSON(row)))
+	}
+	return normalizeAttendanceRecords(rows), nil
 }

@@ -168,7 +168,9 @@ var defaultMenuCatalog = []MenuNode{
 		Path:  "/workspace",
 		Children: []MenuNode{
 			{Key: "hr.employees", Label: "員工", Path: "/workspace/employees"},
-			{Key: "hr.org_units", Label: "組織", Path: "/workspace/organization"},
+			{Key: "hr.org_units", Label: "組織單元", Path: "/workspace/org-units"},
+			{Key: "hr.positions", Label: "崗位", Path: "/workspace/positions"},
+			{Key: "hr.reporting", Label: "匯報關係", Path: "/workspace/organization"},
 			{
 				Key:   "attendance",
 				Label: "假勤",

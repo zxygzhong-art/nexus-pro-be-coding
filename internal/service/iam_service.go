@@ -249,8 +249,8 @@ func iamAccountProjectionFromAccount(account Account) IamAccountProjection {
 	}
 }
 
-// ListPermissions 列出權限的服務流程。
-func (c IAMService) ListPermissions(ctx RequestContext) ([]Permission, error) {
+// ListPermissions 列出權限 catalog 的服務流程。
+func (c IAMService) ListPermissions(ctx RequestContext) ([]PermissionCatalogItem, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourcePermission, ActionRead, ""); err != nil {
 		return nil, err
 	}
@@ -259,20 +259,16 @@ func (c IAMService) ListPermissions(ctx RequestContext) ([]Permission, error) {
 		return nil, err
 	}
 	if len(items) == 0 {
-		return defaultPermissions(), nil
+		return defaultPermissionCatalogItems(ctx.TenantID, c.Now()), nil
 	}
-	out := make([]Permission, 0, len(items))
-	for _, item := range items {
-		out = append(out, permissionFromCatalogItem(item))
-	}
-	return out, nil
+	return items, nil
 }
 
-// ListPermissionPage 列出權限分頁的服務流程。
-func (c IAMService) ListPermissionPage(ctx RequestContext, page PageRequest) (PageResponse[Permission], error) {
+// ListPermissionPage 列出權限 catalog 分頁的服務流程。
+func (c IAMService) ListPermissionPage(ctx RequestContext, page PageRequest) (PageResponse[PermissionCatalogItem], error) {
 	items, err := c.ListPermissions(ctx)
 	if err != nil {
-		return PageResponse[Permission]{}, err
+		return PageResponse[PermissionCatalogItem]{}, err
 	}
 	return utils.PageResponse(items, page), nil
 }

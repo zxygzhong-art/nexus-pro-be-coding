@@ -42,6 +42,8 @@ type apiRuntime struct {
 	eventPublisher             natsbus.EventPublisher
 	ehrmsSyncScheduler         *jobs.EHRMSEmployeeSyncScheduler
 	ehrmsSyncOptions           jobs.EHRMSEmployeeSyncOptions
+	ehrmsAttendanceScheduler   *jobs.EHRMSAttendanceSyncScheduler
+	ehrmsAttendanceOptions     jobs.EHRMSAttendanceSyncOptions
 	identityProvisioningOutbox *jobs.IdentityProvisioningOutboxProcessor
 	openFGAConsumer            *jobs.OpenFGAConsumer
 	openFGAConsumerOptions     jobs.OpenFGAConsumerOptions
@@ -247,6 +249,8 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	}})
 	ehrmsSyncScheduler, ehrmsSyncOptions, ehrmsSyncDependency := configuredEHRMSSyncScheduler(cfg, app.HR(), ehrmsClient != nil, logger)
 	report.Dependencies = append(report.Dependencies, ehrmsSyncDependency)
+	ehrmsAttendanceScheduler, ehrmsAttendanceOptions, ehrmsAttendanceDependency := configuredEHRMSAttendanceSyncScheduler(cfg, app.Attendance(), ehrmsClient != nil, logger)
+	report.Dependencies = append(report.Dependencies, ehrmsAttendanceDependency)
 	apiOptions := v1api.Options{
 		DisableApprovalHeader: cfg.Env == "production",
 		ReadinessChecks:       readinessChecks,
@@ -280,14 +284,16 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	}
 
 	runtime := &apiRuntime{
-		server:             server,
-		report:             report,
-		store:              store,
-		relationshipWriter: relationshipModule.writer,
-		eventPublisher:     natsModule.client,
-		ehrmsSyncScheduler: ehrmsSyncScheduler,
-		ehrmsSyncOptions:   ehrmsSyncOptions,
-		shutdowns:          shutdowns,
+		server:                   server,
+		report:                   report,
+		store:                    store,
+		relationshipWriter:       relationshipModule.writer,
+		eventPublisher:           natsModule.client,
+		ehrmsSyncScheduler:       ehrmsSyncScheduler,
+		ehrmsSyncOptions:         ehrmsSyncOptions,
+		ehrmsAttendanceScheduler: ehrmsAttendanceScheduler,
+		ehrmsAttendanceOptions:   ehrmsAttendanceOptions,
+		shutdowns:                shutdowns,
 	}
 	if natsModule.client != nil {
 		runtime.openFGAConsumer = jobs.NewOpenFGAConsumer(natsModule.client, relationshipModule.writer, store, logger)
@@ -781,6 +787,39 @@ func configuredEHRMSSyncScheduler(cfg config.Config, svc jobs.EHRMSEmployeeSyncS
 	}
 }
 
+// configuredEHRMSAttendanceSyncScheduler 處理 configured eHRMS attendance sync scheduler。
+func configuredEHRMSAttendanceSyncScheduler(cfg config.Config, svc jobs.EHRMSAttendanceSyncService, ehrmsConfigured bool, logger *slog.Logger) (*jobs.EHRMSAttendanceSyncScheduler, jobs.EHRMSAttendanceSyncOptions, startup.Dependency) {
+	opts := jobs.EHRMSAttendanceSyncOptions{
+		Interval:         cfg.EHRMSAttendanceSyncInterval,
+		Mode:             cfg.EHRMSAttendanceSyncMode,
+		Since:            cfg.EHRMSAttendanceSyncSince,
+		TenantID:         cfg.EHRMSAttendanceSyncTenantID,
+		AccountID:        cfg.EHRMSAttendanceSyncAccountID,
+		DefaultTenantID:  cfg.EHRMSSyncTenantID,
+		DefaultAccountID: cfg.EHRMSSyncAccountID,
+		RunOnStart:       cfg.EHRMSAttendanceSyncRunOnStart,
+	}
+	if !cfg.EHRMSAttendanceSyncEnabled {
+		return nil, opts, startup.Dependency{Name: "eHRMS Attendance Scheduler", Status: "skipped", Target: "EHRMS_ATTENDANCE_SYNC_ENABLED=false", Detail: "periodic attendance sync disabled"}
+	}
+	if !ehrmsConfigured {
+		return nil, opts, startup.Dependency{Name: "eHRMS Attendance Scheduler", Status: "incomplete", Target: "disabled", Detail: "eHRMS upstream is not configured"}
+	}
+	detail := "interval=" + cfg.EHRMSAttendanceSyncInterval.String() + " mode=" + strings.TrimSpace(cfg.EHRMSAttendanceSyncMode)
+	if strings.TrimSpace(cfg.EHRMSAttendanceSyncMode) == "" {
+		detail = "interval=" + cfg.EHRMSAttendanceSyncInterval.String() + " mode=upsert"
+	}
+	if cfg.EHRMSAttendanceSyncSince != "" {
+		detail += " since=" + cfg.EHRMSAttendanceSyncSince
+	}
+	return jobs.NewEHRMSAttendanceSyncScheduler(svc, logger), opts, startup.Dependency{
+		Name:   "eHRMS Attendance Scheduler",
+		Status: "configured",
+		Target: "tenant=" + opts.TenantID + " account=" + opts.AccountID,
+		Detail: detail,
+	}
+}
+
 // startBackgroundWorkers 啟動background worker。
 func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Logger) {
 	if r.openFGAConsumer != nil {
@@ -811,6 +850,14 @@ func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Lo
 			r.ehrmsSyncScheduler.Run(ctx, r.ehrmsSyncOptions)
 		}()
 		logger.Info("eHRMS employee sync scheduler started", "interval", r.ehrmsSyncOptions.Interval.String(), "mode", r.ehrmsSyncOptions.Mode, "tenant_id", r.ehrmsSyncOptions.TenantID, "account_id", r.ehrmsSyncOptions.AccountID)
+	}
+	if r.ehrmsAttendanceScheduler != nil {
+		r.workers.Add(1)
+		go func() {
+			defer r.workers.Done()
+			r.ehrmsAttendanceScheduler.Run(ctx, r.ehrmsAttendanceOptions)
+		}()
+		logger.Info("eHRMS attendance sync scheduler started", "interval", r.ehrmsAttendanceOptions.Interval.String(), "mode", r.ehrmsAttendanceOptions.Mode, "tenant_id", r.ehrmsAttendanceOptions.TenantID, "account_id", r.ehrmsAttendanceOptions.AccountID, "since", r.ehrmsAttendanceOptions.Since)
 	}
 	if r.identityProvisioningOutbox != nil {
 		r.workers.Add(1)

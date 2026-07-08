@@ -89,7 +89,10 @@ func TestListPermissionsUsesCatalogWhenPresent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(items) != 1 || items[0].ID != "perm-db-only" || items[0].PermissionType != domain.PermissionTypeAPI {
+	if len(items) != 1 ||
+		items[0].ID != "perm-db-only" ||
+		items[0].Application != "iam" ||
+		items[0].PermissionType != domain.PermissionTypeAPI {
 		t.Fatalf("expected permissions from DB catalog, got %+v", items)
 	}
 }

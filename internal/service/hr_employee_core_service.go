@@ -482,7 +482,7 @@ func (c HRService) validateEmployee(ctx RequestContext, employee Employee, mode 
 	if strings.TrimSpace(employee.Name) == "" {
 		fields = append(fields, FieldError{Tab: "basic_info", Field: "name", Code: "required", Message: "name is required"})
 	}
-	if strings.TrimSpace(employee.CompanyEmail) == "" {
+	if validationProfile != employeeValidationImportMinimal && strings.TrimSpace(employee.CompanyEmail) == "" {
 		fields = append(fields, FieldError{Tab: "basic_info", Field: "company_email", Code: "required", Message: "company_email is required"})
 	}
 	if employee.Category != "" && !validEmployeeCategory(employee.Category) {
@@ -533,7 +533,7 @@ func (c HRService) validateEmployee(ctx RequestContext, employee Employee, mode 
 		fields = append(fields, FieldError{Tab: "basic_info", Field: "national_id", Code: "required", Message: "national_id is required for local employees"})
 	}
 	status := employeeStatus(employee)
-	if status == string(EmployeeStatusResigned) {
+	if status == string(EmployeeStatusResigned) && validationProfile != employeeValidationImportMinimal {
 		if employee.ResignDate == nil && stringFromMap(employee.EmploymentInfo, "resign_date") == "" {
 			fields = append(fields, FieldError{Tab: "employment_info", Field: "resign_date", Code: "required", Message: "resign_date is required"})
 		}

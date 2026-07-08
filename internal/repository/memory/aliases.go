@@ -41,6 +41,7 @@ type (
 	AttendanceShift                 = domain.AttendanceShift
 	AttendanceShiftAssignment       = domain.AttendanceShiftAssignment
 	AttendanceClockRecord           = domain.AttendanceClockRecord
+	AttendanceDailySummary          = domain.AttendanceDailySummary
 	AttendanceCorrectionRequest     = domain.AttendanceCorrectionRequest
 	OvertimeRequest                 = domain.OvertimeRequest
 	FormTemplate                    = domain.FormTemplate

@@ -229,7 +229,7 @@ func workspaceOvertimeCells(overtimes []OvertimeRequest, start time.Time, end ti
 }
 
 // workspaceClockCells 處理工作區打卡儲存格。
-func workspaceClockCells(clocks []AttendanceClockRecord, worksites []AttendanceWorksite, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64) map[string]map[string]workspaceClockCell {
+func workspaceClockCells(clocks []AttendanceClockRecord, summaries []AttendanceDailySummary, worksites []AttendanceWorksite, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64) map[string]map[string]workspaceClockCell {
 	worksiteNames := map[string]string{}
 	for _, worksite := range worksites {
 		worksiteNames[worksite.ID] = worksite.Name
@@ -298,6 +298,18 @@ func workspaceClockCells(clocks []AttendanceClockRecord, worksites []AttendanceW
 			out[employeeID][date] = cell
 		}
 	}
+	for _, summary := range summaries {
+		if summary.EmployeeID == "" || summary.WorkDate == "" || summary.ClockHours <= 0 {
+			continue
+		}
+		if out[summary.EmployeeID] == nil {
+			out[summary.EmployeeID] = map[string]workspaceClockCell{}
+		}
+		if _, exists := out[summary.EmployeeID][summary.WorkDate]; exists {
+			continue
+		}
+		out[summary.EmployeeID][summary.WorkDate] = workspaceClockCell{}
+	}
 	return out
 }
 
@@ -322,7 +334,7 @@ func workspaceShortHoursExempted(employeeID string, date string, workedHours flo
 }
 
 // workspaceAttendanceMatrix 處理工作區考勤矩陣。
-func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceEmployeeCard, dates []WorkspaceDate, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64) WorkspaceAttendanceMatrix {
+func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceEmployeeCard, dates []WorkspaceDate, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64, summaryCells map[string]map[string]AttendanceDailySummary) WorkspaceAttendanceMatrix {
 	rows := []WorkspaceAttendanceRow{}
 	totalLeaveHours := 0.0
 	totalOvertimeHours := 0.0
@@ -345,6 +357,11 @@ func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceE
 				cell.Overtime = overtime
 				row.Summary.OvertimeHours += overtime
 			}
+			if summary, ok := summaryCells[employee.ID][date.Key]; ok && summary.ClockHours > 0 && cell.Type != "leave" {
+				cell.Type = "work"
+				cell.Hours = summary.ClockHours
+				cell.Label = "eHRMS"
+			}
 			row.Cells = append(row.Cells, cell)
 		}
 		row.Summary.DueHours = float64(workdays) * workspaceDayHours
@@ -357,6 +374,21 @@ func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceE
 		rows = append(rows, row)
 	}
 	return WorkspaceAttendanceMatrix{Rows: rows, Summary: WorkspaceAttendanceMatrixSum{Holidays: holidays, LeaveHours: totalLeaveHours, OvertimeHours: totalOvertimeHours, Perfect: perfect, Workdays: workdays}}
+}
+
+// workspaceSummaryCells 處理 eHRMS 日彙總儲存格。
+func workspaceSummaryCells(items []AttendanceDailySummary) map[string]map[string]AttendanceDailySummary {
+	out := map[string]map[string]AttendanceDailySummary{}
+	for _, item := range items {
+		if item.EmployeeID == "" || item.WorkDate == "" {
+			continue
+		}
+		if out[item.EmployeeID] == nil {
+			out[item.EmployeeID] = map[string]AttendanceDailySummary{}
+		}
+		out[item.EmployeeID][item.WorkDate] = item
+	}
+	return out
 }
 
 // workspaceClockMatrix 處理工作區打卡矩陣。

@@ -82,6 +82,14 @@ type Config struct {
 	EHRMSSyncAccountID  string
 	EHRMSSyncRunOnStart bool
 
+	EHRMSAttendanceSyncEnabled    bool
+	EHRMSAttendanceSyncInterval   time.Duration
+	EHRMSAttendanceSyncMode       string
+	EHRMSAttendanceSyncTenantID   string
+	EHRMSAttendanceSyncAccountID  string
+	EHRMSAttendanceSyncRunOnStart bool
+	EHRMSAttendanceSyncSince      string
+
 	OTelEnabled              bool
 	OTelServiceName          string
 	OTelExporterOTLPEndpoint string
@@ -246,13 +254,28 @@ func LoadE() (Config, error) {
 		EHRMSSyncAccountID:  strings.TrimSpace(os.Getenv("EHRMS_SYNC_ACCOUNT_ID")),
 		EHRMSSyncRunOnStart: envBool("EHRMS_SYNC_RUN_ON_START", false, &problems),
 
+		EHRMSAttendanceSyncEnabled:    envBool("EHRMS_ATTENDANCE_SYNC_ENABLED", false, &problems),
+		EHRMSAttendanceSyncInterval:   envDuration("EHRMS_ATTENDANCE_SYNC_INTERVAL", 24*time.Hour, &problems),
+		EHRMSAttendanceSyncMode:       env("EHRMS_ATTENDANCE_SYNC_MODE", "upsert"),
+		EHRMSAttendanceSyncTenantID:   strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_TENANT_ID")),
+		EHRMSAttendanceSyncAccountID:  strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID")),
+		EHRMSAttendanceSyncRunOnStart: envBool("EHRMS_ATTENDANCE_SYNC_RUN_ON_START", false, &problems),
+		EHRMSAttendanceSyncSince:      strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_SINCE")),
+
 		OTelEnabled:              envBool("OTEL_ENABLED", false, &problems),
 		OTelServiceName:          env("OTEL_SERVICE_NAME", "nexus-pro-be"),
 		OTelExporterOTLPEndpoint: env("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
 		OTelExporterOTLPInsecure: envBool("OTEL_EXPORTER_OTLP_INSECURE", true, &problems),
 	}
+	if cfg.EHRMSAttendanceSyncTenantID == "" {
+		cfg.EHRMSAttendanceSyncTenantID = cfg.EHRMSSyncTenantID
+	}
+	if cfg.EHRMSAttendanceSyncAccountID == "" {
+		cfg.EHRMSAttendanceSyncAccountID = cfg.EHRMSSyncAccountID
+	}
 	problems = append(problems, ehrmsConfigProblems(cfg.EHRMSBaseURL, cfg.EHRMSAPIKey)...)
 	problems = append(problems, ehrmsSyncConfigProblems(cfg)...)
+	problems = append(problems, ehrmsAttendanceSyncConfigProblems(cfg)...)
 	problems = append(problems, keycloakProvisioningConfigProblems(cfg)...)
 	problems = append(problems, databasePoolConfigProblems(cfg)...)
 	problems = append(problems, rateLimitConfigProblems(cfg)...)
@@ -333,6 +356,37 @@ func ehrmsSyncConfigProblems(c Config) []string {
 	case "", "create", "update", "upsert":
 	default:
 		problems = append(problems, "EHRMS_SYNC_MODE must be create, update, or upsert")
+	}
+	return problems
+}
+
+// ehrmsAttendanceSyncConfigProblems 處理 eHRMS 考勤 sync 組態 problems。
+func ehrmsAttendanceSyncConfigProblems(c Config) []string {
+	if !c.EHRMSAttendanceSyncEnabled {
+		return nil
+	}
+	problems := []string{}
+	if strings.TrimSpace(c.EHRMSBaseURL) == "" {
+		problems = append(problems, "EHRMS_BASE_URL is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
+	}
+	if strings.TrimSpace(c.EHRMSAPIKey) == "" {
+		problems = append(problems, "EHRMS_API_KEY is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
+	}
+	if strings.TrimSpace(c.EHRMSAttendanceSyncTenantID) == "" {
+		problems = append(problems, "EHRMS_ATTENDANCE_SYNC_TENANT_ID is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
+	}
+	if strings.TrimSpace(c.EHRMSAttendanceSyncAccountID) == "" {
+		problems = append(problems, "EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
+	}
+	switch strings.ToLower(strings.TrimSpace(c.EHRMSAttendanceSyncMode)) {
+	case "", "create", "update", "upsert":
+	default:
+		problems = append(problems, "EHRMS_ATTENDANCE_SYNC_MODE must be create, update, or upsert")
+	}
+	if since := strings.TrimSpace(c.EHRMSAttendanceSyncSince); since != "" {
+		if _, err := time.Parse(time.DateOnly, since); err != nil {
+			problems = append(problems, "EHRMS_ATTENDANCE_SYNC_SINCE must be YYYY-MM-DD")
+		}
 	}
 	return problems
 }

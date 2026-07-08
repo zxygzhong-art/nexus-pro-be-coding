@@ -100,6 +100,22 @@ type AttendanceCorrectionRequest struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
+type AttendanceDailySummary struct {
+	ID          string             `json:"id"`
+	TenantID    string             `json:"tenant_id"`
+	EmployeeID  string             `json:"employee_id"`
+	WorkDate    string             `json:"work_date"`
+	ShiftStart  string             `json:"shift_start"`
+	ShiftEnd    string             `json:"shift_end"`
+	ShiftHours  float64            `json:"shift_hours"`
+	DailyHours  float64            `json:"daily_hours"`
+	ClockHours  float64            `json:"clock_hours"`
+	Source      string             `json:"source"`
+	ExternalRef string             `json:"external_ref"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
 type AttendancePolicy struct {
 	ID                 string             `json:"id"`
 	TenantID           string             `json:"tenant_id"`
@@ -196,6 +212,19 @@ type AuthzFieldPolicy struct {
 	MaskStrategy    string             `json:"mask_strategy"`
 	PermissionID    string             `json:"permission_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type AuthzGroupMembership struct {
+	ID                 string             `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	UserGroupID        string             `json:"user_group_id"`
+	AccountID          string             `json:"account_id"`
+	ValidFrom          pgtype.Timestamptz `json:"valid_from"`
+	ValidUntil         pgtype.Timestamptz `json:"valid_until"`
+	Source             string             `json:"source"`
+	ApprovalInstanceID string             `json:"approval_instance_id"`
+	CreatedBy          string             `json:"created_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
 type AuthzPermissionSetAssignment struct {
@@ -457,17 +486,6 @@ type Permission struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
-type PermissionSet struct {
-	ID                   string             `json:"id"`
-	TenantID             string             `json:"tenant_id"`
-	Name                 string             `json:"name"`
-	Description          string             `json:"description"`
-	Permissions          []byte             `json:"permissions"`
-	SourceTemplateKey    string             `json:"source_template_key"`
-	SourcePackageVersion string             `json:"source_package_version"`
-	CreatedAt            pgtype.Timestamptz `json:"created_at"`
-}
-
 type PermissionPackage struct {
 	ID              string             `json:"id"`
 	ApplicationCode string             `json:"application_code"`
@@ -487,6 +505,17 @@ type PermissionPackageImport struct {
 	ImportedAt    pgtype.Timestamptz `json:"imported_at"`
 	ImportedBy    string             `json:"imported_by"`
 	ArtifactIDMap []byte             `json:"artifact_id_map"`
+}
+
+type PermissionSet struct {
+	ID                   string             `json:"id"`
+	TenantID             string             `json:"tenant_id"`
+	Name                 string             `json:"name"`
+	Description          string             `json:"description"`
+	Permissions          []byte             `json:"permissions"`
+	SourceTemplateKey    string             `json:"source_template_key"`
+	SourcePackageVersion string             `json:"source_package_version"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 }
 
 type PermissionSetItem struct {
@@ -571,19 +600,6 @@ type UserGroupTemplate struct {
 	Name        string `json:"name"`
 	Content     []byte `json:"content"`
 	Version     string `json:"version"`
-}
-
-type AuthzGroupMembership struct {
-	ID                 string             `json:"id"`
-	TenantID           string             `json:"tenant_id"`
-	UserGroupID        string             `json:"user_group_id"`
-	AccountID          string             `json:"account_id"`
-	ValidFrom          pgtype.Timestamptz `json:"valid_from"`
-	ValidUntil         pgtype.Timestamptz `json:"valid_until"`
-	Source             string             `json:"source"`
-	ApprovalInstanceID string             `json:"approval_instance_id"`
-	CreatedBy          string             `json:"created_by"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
 type UserIdentity struct {

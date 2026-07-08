@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/platform/ehrms"
 	"nexus-pro-be/internal/repository"
 	"nexus-pro-be/internal/repository/memory"
 	"nexus-pro-be/internal/service"
@@ -70,6 +71,20 @@ func TestRouteApprovalPolicyUsesMatchedHTTPRoute(t *testing.T) {
 	}
 	if mismatched.RequiresApproval {
 		t.Fatalf("unexpected approval requirement for unmatched HTTP route: %+v", mismatched)
+	}
+
+	attendanceImport, err := svc.Authz().Check(ctx, domain.CheckRequest{
+		ApplicationCode: "attendance",
+		ResourceType:    "clock",
+		Action:          "import",
+		RouteMethod:     http.MethodPost,
+		RoutePath:       "/v1/attendance/ehrms/sync",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !attendanceImport.RequiresApproval || attendanceImport.RiskLevel != string(domain.RiskHigh) || attendanceImport.ApprovalReason != "route_policy" {
+		t.Fatalf("expected eHRMS attendance sync route to require high-risk approval, got %+v", attendanceImport)
 	}
 }
 
@@ -3605,7 +3620,7 @@ func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
 
 	result, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v result=%+v", err, result)
 	}
 	if result.Fetched != 1 || result.Created != 1 || result.Updated != 0 || result.DepartmentsUpserted != 1 || result.Mode != "upsert" {
 		t.Fatalf("unexpected eHRMS sync result: %+v", result)
@@ -3702,7 +3717,7 @@ func TestSyncEHRMSEmployeesUpdatesExistingAndPreservesLocalEmail(t *testing.T) {
 
 	result, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("%v result=%+v", err, result)
 	}
 	if result.Created != 0 || result.Updated != 1 {
 		t.Fatalf("expected one eHRMS update, got %+v", result)
@@ -3736,6 +3751,210 @@ func TestSyncEHRMSEmployeesHidesUpstreamFetchDetails(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "secret-value") || strings.Contains(err.Error(), "upstream 500") {
 		t.Fatalf("eHRMS fetch error leaked upstream detail: %v", err)
+	}
+}
+
+// TestSyncEHRMSEmployeesMapsEnglishAliasesToDatabase 驗證 eHRMS 英文別名欄位會落到對應資料表。
+func TestSyncEHRMSEmployeesMapsEnglishAliasesToDatabase(t *testing.T) {
+	rows := []domain.EHRMSEmployeeRecord{{
+		"emp_id":          "IK0028",
+		"gender":          "女",
+		"name_en":         "Test IK0028",
+		"name_zh":         "測試員工IK0028",
+		"birthday":        "1990/01/01",
+		"job_code":        "0901",
+		"dept_code":       "M010102",
+		"education":       "-",
+		"hire_date":       "2008/07/01",
+		"last_name":       "IK0028",
+		"first_name":      "Test",
+		"shift_attr":      "固定班",
+		"shift_name":      "正常班",
+		"leave_group":     "-",
+		"national_id":     "A580392764",
+		"nationality":     "中華民國",
+		"passport_no":     "-",
+		"work_status":     "離職",
+		"dept_name_en":    "MarTech Div.(TW)-KOL Radar E2E-Sales 2(已關閉)",
+		"dept_name_zh":    "行銷科技事業處-網紅行銷事業-業務二(已關閉)",
+		"job_title_en":    "Manager",
+		"job_title_zh":    "經理",
+		"identity_type":   "一般員工",
+		"probation_end":   "2008/09/28",
+		"clock_required":  "是",
+		"direct_indirect": "間接",
+		"seniority_start": "2008/07/01",
+	}}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "import", Scope: "all"},
+		{Resource: "hr.employee", Action: "read", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{rows: rows}})
+	ctx.ApprovalConfirmed = true
+
+	result, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Created != 1 || result.DepartmentsUpserted != 1 {
+		t.Fatalf("unexpected eHRMS sync result: %+v", result)
+	}
+
+	unit, ok, err := store.GetOrgUnit(context.Background(), "tenant-1", "M010102")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || unit.Code != "M010102" {
+		t.Fatalf("expected org unit from dept_code, got ok=%v unit=%+v", ok, unit)
+	}
+
+	employee, ok, err := store.GetEmployeeByEmployeeNo(context.Background(), "tenant-1", "IK0028")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatal("expected employee to be created")
+	}
+	if employee.Name != "測試員工IK0028" || employee.OrgUnitID != "M010102" || employee.Position != "經理" || employee.Status != "resigned" {
+		t.Fatalf("unexpected employee hot fields: %+v", employee)
+	}
+	if employee.PositionID == "" {
+		t.Fatalf("expected position to be linked in positions table, employee=%+v", employee)
+	}
+	if employee.BasicInfo["gender"] != "女" || employee.BasicInfo["national_id"] != "A580392764" {
+		t.Fatalf("unexpected basic_info: %+v", employee.BasicInfo)
+	}
+	if employee.BasicInfo["passport_no"] != nil && employee.BasicInfo["passport_no"] != "" {
+		t.Fatalf("expected placeholder passport_no to be empty, got %+v", employee.BasicInfo["passport_no"])
+	}
+	if employee.EmploymentInfo["org_unit_name"] == nil || employee.EmploymentInfo["position_code"] != "0901" {
+		t.Fatalf("unexpected employment_info: %+v", employee.EmploymentInfo)
+	}
+	if employee.EmploymentInfo["leave_group"] != nil && employee.EmploymentInfo["leave_group"] != "" {
+		t.Fatalf("expected placeholder leave_group to be empty, got %+v", employee.EmploymentInfo["leave_group"])
+	}
+	if employee.EducationMilitaryInfo["highest_education"] != nil && employee.EducationMilitaryInfo["highest_education"] != "" {
+		t.Fatalf("expected placeholder education to be empty, got %+v", employee.EducationMilitaryInfo["highest_education"])
+	}
+
+	position, ok, err := store.GetPosition(context.Background(), "tenant-1", employee.PositionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || position.Name != "經理" {
+		t.Fatalf("expected position record for job_title_zh, got ok=%v position=%+v", ok, position)
+	}
+}
+
+// TestSyncEHRMSAttendanceUpsertsDailySummaries 驗證 eHRMS 考勤同步 writes 日彙總 without GPS 打卡。
+func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
+	rows := []domain.EHRMSAttendanceRecord{{
+		"emp_id":      "IKM017",
+		"date":        "2026-06-08",
+		"shift_start": "09:00",
+		"shift_end":   "18:00",
+		"shift_hours": "8",
+		"daily_hours": "8",
+		"clock_hours": "8",
+	}, {
+		"emp_id":      "MISSING",
+		"date":        "2026-06-08",
+		"shift_start": "09:00",
+		"shift_end":   "18:00",
+		"clock_hours": "8",
+	}}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "attendance.clock", Action: "import", Scope: "all"},
+		{Resource: "attendance.clock", Action: "read", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{attendanceRows: rows}})
+	ctx.ApprovalConfirmed = true
+	now := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	if err := store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-ehrms",
+		TenantID:         "tenant-1",
+		EmployeeNo:       "IKM017",
+		Name:             "測試員工",
+		Status:           "active",
+		EmploymentStatus: "active",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.Attendance().SyncEHRMSAttendance(ctx, domain.EHRMSAttendanceSyncInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Fetched != 2 || result.Created != 1 || result.Updated != 0 || result.Skipped != 1 || result.Failed != 0 || result.Mode != "upsert" {
+		t.Fatalf("unexpected eHRMS attendance sync result: %+v", result)
+	}
+	summaries, err := store.ListAttendanceDailySummaries(context.Background(), "tenant-1", domain.AttendanceDailySummaryQuery{EmployeeID: "emp-ehrms", FromDate: "2026-06-08", ToDate: "2026-06-08"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summaries) != 1 {
+		t.Fatalf("expected one daily summary, got %+v", summaries)
+	}
+	got := summaries[0]
+	if got.EmployeeID != "emp-ehrms" || got.WorkDate != "2026-06-08" || got.ShiftStart != "09:00" || got.ShiftEnd != "18:00" || got.ClockHours != 8 || got.ExternalRef != "IKM017:2026-06-08" || got.Source != "ehrms" {
+		t.Fatalf("unexpected daily summary mapping: %+v", got)
+	}
+	clocks, err := store.ListAttendanceClockRecords(context.Background(), "tenant-1", domain.AttendanceClockRecordQuery{EmployeeID: "emp-ehrms"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(clocks) != 0 {
+		t.Fatalf("eHRMS daily summaries must not create GPS clock records, got %+v", clocks)
+	}
+
+	result, err = svc.Attendance().SyncEHRMSAttendance(ctx, domain.EHRMSAttendanceSyncInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Created != 0 || result.Updated != 1 || result.Skipped != 1 {
+		t.Fatalf("expected idempotent upsert on second sync, got %+v", result)
+	}
+}
+
+// TestSyncEHRMSAttendanceCountsInvalidRows 驗證 eHRMS 考勤同步 counts invalid rows without aborting batch。
+func TestSyncEHRMSAttendanceCountsInvalidRows(t *testing.T) {
+	rows := []domain.EHRMSAttendanceRecord{{
+		"emp_id":      "IKM018",
+		"date":        "bad-date",
+		"shift_start": "bad-time",
+		"clock_hours": "oops",
+	}}
+	_, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "attendance.clock", Action: "import", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{attendanceRows: rows}})
+	ctx.ApprovalConfirmed = true
+
+	result, err := svc.Attendance().SyncEHRMSAttendance(ctx, domain.EHRMSAttendanceSyncInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Fetched != 1 || result.Failed != 1 || len(result.RowErrors) == 0 {
+		t.Fatalf("expected invalid row to be counted, got %+v", result)
+	}
+}
+
+// TestSyncEHRMSAttendanceHidesUpstreamFetchDetails 驗證 eHRMS 考勤 hides upstream fetch details。
+func TestSyncEHRMSAttendanceHidesUpstreamFetchDetails(t *testing.T) {
+	_, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "attendance.clock", Action: "import", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{attendanceErr: errors.New("upstream 500: token=secret-value")}})
+	ctx.ApprovalConfirmed = true
+
+	_, err := svc.Attendance().SyncEHRMSAttendance(ctx, domain.EHRMSAttendanceSyncInput{})
+	if err == nil {
+		t.Fatal("expected eHRMS attendance fetch failure")
+	}
+	appErr, ok := domain.AsAppError(err)
+	if !ok || appErr.Code != "bad_request" || appErr.Message != "fetch eHRMS attendance failed" {
+		t.Fatalf("expected sanitized bad_request, got %v", err)
+	}
+	if strings.Contains(err.Error(), "secret-value") || strings.Contains(err.Error(), "upstream 500") {
+		t.Fatalf("eHRMS attendance fetch error leaked upstream detail: %v", err)
 	}
 }
 
@@ -5420,13 +5639,20 @@ func (p *recordingIdentityProvisioner) EnsureUser(_ context.Context, input domai
 }
 
 type fakeEHRMSClient struct {
-	rows []domain.EHRMSEmployeeRecord
-	err  error
+	rows           []domain.EHRMSEmployeeRecord
+	attendanceRows []domain.EHRMSAttendanceRecord
+	err            error
+	attendanceErr  error
 }
 
 // ListEmployees 驗證員工。
 func (c fakeEHRMSClient) ListEmployees(context.Context) ([]domain.EHRMSEmployeeRecord, error) {
-	return c.rows, c.err
+	return ehrms.NormalizeEmployeeRecords(c.rows), c.err
+}
+
+// ListAttendance 驗證考勤。
+func (c fakeEHRMSClient) ListAttendance(context.Context) ([]domain.EHRMSAttendanceRecord, error) {
+	return c.attendanceRows, c.attendanceErr
 }
 
 // PutObject 驗證 put 物件。

@@ -82,6 +82,46 @@ func TestWorkspaceAttendanceBuildsLeaveAndClockMatrices(t *testing.T) {
 	}
 }
 
+// TestWorkspaceAttendanceUsesEHRMSDailySummaries 驗證工作區考勤 uses eHRMS 日彙總 without 打卡時間。
+func TestWorkspaceAttendanceUsesEHRMSDailySummaries(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+	if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{
+		ID:          "ads-1",
+		TenantID:    "tenant-1",
+		EmployeeID:  "emp-1",
+		WorkDate:    "2026-06-10",
+		ShiftStart:  "09:00",
+		ShiftEnd:    "18:00",
+		ShiftHours:  8,
+		DailyHours:  8,
+		ClockHours:  8,
+		Source:      "ehrms",
+		ExternalRef: "IKL001:2026-06-10",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.Workspace().WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attendanceCell := got.Attendance.Rows[0].Cells[9]
+	if attendanceCell.Type != "work" || attendanceCell.Hours != 8 || attendanceCell.Label != "eHRMS" {
+		t.Fatalf("expected eHRMS summary to mark attendance cell, got %+v", attendanceCell)
+	}
+	clockCell := got.Clock.Rows[0].Cells[9]
+	if clockCell.Type != "work" || clockCell.In != "" || clockCell.Out != "" || clockCell.Abnormal {
+		t.Fatalf("expected eHRMS summary to mark clock cell without precise times, got %+v", clockCell)
+	}
+	if got.Attendance.Rows[0].Summary.AttendedHours < 8 {
+		t.Fatalf("expected eHRMS summary hours to count as attended, got %+v", got.Attendance.Rows[0].Summary)
+	}
+}
+
 // TestWorkspaceAttendanceCountsOnlyApprovedLeaveAndOvertime 驗證工時統計只計已核准的請假與加班。
 func TestWorkspaceAttendanceCountsOnlyApprovedLeaveAndOvertime(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)

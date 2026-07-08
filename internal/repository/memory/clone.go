@@ -331,6 +331,9 @@ func copyAttendanceClockRecord(v AttendanceClockRecord) AttendanceClockRecord {
 	return v
 }
 
+// copyAttendanceDailySummary 複製考勤日彙總。
+func copyAttendanceDailySummary(v AttendanceDailySummary) AttendanceDailySummary { return v }
+
 // copyAttendanceCorrectionRequest 複製考勤 correction 請求。
 func copyAttendanceCorrectionRequest(v AttendanceCorrectionRequest) AttendanceCorrectionRequest {
 	if v.ReviewedAt != nil {
