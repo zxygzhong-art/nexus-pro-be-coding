@@ -449,7 +449,7 @@ func (q *Queries) GetAccount(ctx context.Context, arg GetAccountParams) (Account
 }
 
 const getAssumableRole = `-- name: GetAssumableRole :one
-SELECT id, tenant_id, name, description, permission_set_ids, trusted, trust_policy, permission_boundary, session_duration_seconds, created_at FROM assumable_roles
+SELECT id, tenant_id, name, description, permission_set_ids, trusted, trust_policy, permission_boundary, session_duration_seconds, source_template_key, source_package_version, created_at FROM assumable_roles
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -471,6 +471,8 @@ func (q *Queries) GetAssumableRole(ctx context.Context, arg GetAssumableRolePara
 		&i.TrustPolicy,
 		&i.PermissionBoundary,
 		&i.SessionDurationSeconds,
+		&i.SourceTemplateKey,
+		&i.SourcePackageVersion,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -1170,7 +1172,7 @@ func (q *Queries) GetOvertimeRequestByFormInstanceID(ctx context.Context, arg Ge
 }
 
 const getPermissionSet = `-- name: GetPermissionSet :one
-SELECT id, tenant_id, name, description, permissions, created_at FROM permission_sets
+SELECT id, tenant_id, name, description, permissions, source_template_key, source_package_version, created_at FROM permission_sets
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -1188,6 +1190,8 @@ func (q *Queries) GetPermissionSet(ctx context.Context, arg GetPermissionSetPara
 		&i.Name,
 		&i.Description,
 		&i.Permissions,
+		&i.SourceTemplateKey,
+		&i.SourcePackageVersion,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -1268,7 +1272,7 @@ func (q *Queries) GetTenant(ctx context.Context, id string) (Tenant, error) {
 }
 
 const getUserGroup = `-- name: GetUserGroup :one
-SELECT id, tenant_id, name, description, member_account_ids, permission_set_ids, version, created_at FROM user_groups
+SELECT id, tenant_id, name, description, member_account_ids, permission_set_ids, source_template_key, source_package_version, version, created_at FROM user_groups
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -1287,6 +1291,8 @@ func (q *Queries) GetUserGroup(ctx context.Context, arg GetUserGroupParams) (Use
 		&i.Description,
 		&i.MemberAccountIds,
 		&i.PermissionSetIds,
+		&i.SourceTemplateKey,
+		&i.SourcePackageVersion,
 		&i.Version,
 		&i.CreatedAt,
 	)
@@ -1625,7 +1631,7 @@ func (q *Queries) ListAgentRunsPageByAccount(ctx context.Context, arg ListAgentR
 }
 
 const listAssumableRoles = `-- name: ListAssumableRoles :many
-SELECT id, tenant_id, name, description, permission_set_ids, trusted, trust_policy, permission_boundary, session_duration_seconds, created_at FROM assumable_roles
+SELECT id, tenant_id, name, description, permission_set_ids, trusted, trust_policy, permission_boundary, session_duration_seconds, source_template_key, source_package_version, created_at FROM assumable_roles
 WHERE tenant_id = $1
 ORDER BY created_at ASC
 `
@@ -1649,6 +1655,8 @@ func (q *Queries) ListAssumableRoles(ctx context.Context, tenantID string) ([]As
 			&i.TrustPolicy,
 			&i.PermissionBoundary,
 			&i.SessionDurationSeconds,
+			&i.SourceTemplateKey,
+			&i.SourcePackageVersion,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -2825,7 +2833,7 @@ func (q *Queries) ListPendingAssigneeStageInstanceIDs(ctx context.Context, arg L
 }
 
 const listPermissionSets = `-- name: ListPermissionSets :many
-SELECT id, tenant_id, name, description, permissions, created_at FROM permission_sets
+SELECT id, tenant_id, name, description, permissions, source_template_key, source_package_version, created_at FROM permission_sets
 WHERE tenant_id = $1
 ORDER BY created_at ASC
 `
@@ -2845,6 +2853,8 @@ func (q *Queries) ListPermissionSets(ctx context.Context, tenantID string) ([]Pe
 			&i.Name,
 			&i.Description,
 			&i.Permissions,
+			&i.SourceTemplateKey,
+			&i.SourcePackageVersion,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -2967,7 +2977,7 @@ func (q *Queries) ListTenants(ctx context.Context) ([]Tenant, error) {
 }
 
 const listUserGroups = `-- name: ListUserGroups :many
-SELECT id, tenant_id, name, description, member_account_ids, permission_set_ids, version, created_at FROM user_groups
+SELECT id, tenant_id, name, description, member_account_ids, permission_set_ids, source_template_key, source_package_version, version, created_at FROM user_groups
 WHERE tenant_id = $1
 ORDER BY created_at ASC
 `
@@ -2988,7 +2998,215 @@ func (q *Queries) ListUserGroups(ctx context.Context, tenantID string) ([]UserGr
 			&i.Description,
 			&i.MemberAccountIds,
 			&i.PermissionSetIds,
+			&i.SourceTemplateKey,
+			&i.SourcePackageVersion,
 			&i.Version,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const upsertGroupMembership = `-- name: UpsertGroupMembership :one
+INSERT INTO authz_group_memberships (
+    id, tenant_id, user_group_id, account_id, valid_from, valid_until,
+    source, approval_instance_id, created_by, created_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6, $7,
+    $8, $9, $10
+)
+ON CONFLICT (tenant_id, user_group_id, account_id) DO UPDATE SET
+    valid_from = EXCLUDED.valid_from,
+    valid_until = EXCLUDED.valid_until,
+    source = EXCLUDED.source,
+    approval_instance_id = EXCLUDED.approval_instance_id,
+    created_by = EXCLUDED.created_by
+RETURNING id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at
+`
+
+type UpsertGroupMembershipParams struct {
+	ID                 string             `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	UserGroupID        string             `json:"user_group_id"`
+	AccountID          string             `json:"account_id"`
+	ValidFrom          pgtype.Timestamptz `json:"valid_from"`
+	ValidUntil         pgtype.Timestamptz `json:"valid_until"`
+	Source             string             `json:"source"`
+	ApprovalInstanceID string             `json:"approval_instance_id"`
+	CreatedBy          string             `json:"created_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) UpsertGroupMembership(ctx context.Context, arg UpsertGroupMembershipParams) (AuthzGroupMembership, error) {
+	row := q.db.QueryRow(ctx, upsertGroupMembership,
+		arg.ID,
+		arg.TenantID,
+		arg.UserGroupID,
+		arg.AccountID,
+		arg.ValidFrom,
+		arg.ValidUntil,
+		arg.Source,
+		arg.ApprovalInstanceID,
+		arg.CreatedBy,
+		arg.CreatedAt,
+	)
+	var i AuthzGroupMembership
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.UserGroupID,
+		&i.AccountID,
+		&i.ValidFrom,
+		&i.ValidUntil,
+		&i.Source,
+		&i.ApprovalInstanceID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const deleteGroupMembership = `-- name: DeleteGroupMembership :one
+DELETE FROM authz_group_memberships
+WHERE tenant_id = $1 AND user_group_id = $2 AND account_id = $3
+RETURNING id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at
+`
+
+type DeleteGroupMembershipParams struct {
+	TenantID    string `json:"tenant_id"`
+	UserGroupID string `json:"user_group_id"`
+	AccountID   string `json:"account_id"`
+}
+
+func (q *Queries) DeleteGroupMembership(ctx context.Context, arg DeleteGroupMembershipParams) (AuthzGroupMembership, error) {
+	row := q.db.QueryRow(ctx, deleteGroupMembership, arg.TenantID, arg.UserGroupID, arg.AccountID)
+	var i AuthzGroupMembership
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.UserGroupID,
+		&i.AccountID,
+		&i.ValidFrom,
+		&i.ValidUntil,
+		&i.Source,
+		&i.ApprovalInstanceID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getGroupMembership = `-- name: GetGroupMembership :one
+SELECT id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at FROM authz_group_memberships
+WHERE tenant_id = $1 AND user_group_id = $2 AND account_id = $3
+`
+
+type GetGroupMembershipParams struct {
+	TenantID    string `json:"tenant_id"`
+	UserGroupID string `json:"user_group_id"`
+	AccountID   string `json:"account_id"`
+}
+
+func (q *Queries) GetGroupMembership(ctx context.Context, arg GetGroupMembershipParams) (AuthzGroupMembership, error) {
+	row := q.db.QueryRow(ctx, getGroupMembership, arg.TenantID, arg.UserGroupID, arg.AccountID)
+	var i AuthzGroupMembership
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.UserGroupID,
+		&i.AccountID,
+		&i.ValidFrom,
+		&i.ValidUntil,
+		&i.Source,
+		&i.ApprovalInstanceID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const listGroupMembershipsForGroup = `-- name: ListGroupMembershipsForGroup :many
+SELECT id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at FROM authz_group_memberships
+WHERE tenant_id = $1 AND user_group_id = $2
+ORDER BY created_at ASC
+`
+
+type ListGroupMembershipsForGroupParams struct {
+	TenantID    string `json:"tenant_id"`
+	UserGroupID string `json:"user_group_id"`
+}
+
+func (q *Queries) ListGroupMembershipsForGroup(ctx context.Context, arg ListGroupMembershipsForGroupParams) ([]AuthzGroupMembership, error) {
+	rows, err := q.db.Query(ctx, listGroupMembershipsForGroup, arg.TenantID, arg.UserGroupID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthzGroupMembership
+	for rows.Next() {
+		var i AuthzGroupMembership
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.UserGroupID,
+			&i.AccountID,
+			&i.ValidFrom,
+			&i.ValidUntil,
+			&i.Source,
+			&i.ApprovalInstanceID,
+			&i.CreatedBy,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listActiveGroupMembershipsForAccount = `-- name: ListActiveGroupMembershipsForAccount :many
+SELECT id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at FROM authz_group_memberships
+WHERE tenant_id = $1
+  AND account_id = $2
+  AND valid_from <= $3
+  AND (valid_until IS NULL OR valid_until >= $3)
+ORDER BY created_at ASC
+`
+
+type ListActiveGroupMembershipsForAccountParams struct {
+	TenantID  string             `json:"tenant_id"`
+	AccountID string             `json:"account_id"`
+	At        pgtype.Timestamptz `json:"at"`
+}
+
+func (q *Queries) ListActiveGroupMembershipsForAccount(ctx context.Context, arg ListActiveGroupMembershipsForAccountParams) ([]AuthzGroupMembership, error) {
+	rows, err := q.db.Query(ctx, listActiveGroupMembershipsForAccount, arg.TenantID, arg.AccountID, arg.At)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthzGroupMembership
+	for rows.Next() {
+		var i AuthzGroupMembership
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.UserGroupID,
+			&i.AccountID,
+			&i.ValidFrom,
+			&i.ValidUntil,
+			&i.Source,
+			&i.ApprovalInstanceID,
+			&i.CreatedBy,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -3447,9 +3665,9 @@ func (q *Queries) UpsertAgentRun(ctx context.Context, arg UpsertAgentRunParams) 
 const upsertAssumableRole = `-- name: UpsertAssumableRole :one
 INSERT INTO assumable_roles (
     id, tenant_id, name, description, permission_set_ids, trusted,
-    trust_policy, permission_boundary, session_duration_seconds, created_at
+    trust_policy, permission_boundary, session_duration_seconds, source_template_key, source_package_version, created_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10
+    $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -3460,8 +3678,10 @@ ON CONFLICT (id) DO UPDATE SET
     trust_policy = EXCLUDED.trust_policy,
     permission_boundary = EXCLUDED.permission_boundary,
     session_duration_seconds = EXCLUDED.session_duration_seconds,
+    source_template_key = EXCLUDED.source_template_key,
+    source_package_version = EXCLUDED.source_package_version,
     created_at = EXCLUDED.created_at
-RETURNING id, tenant_id, name, description, permission_set_ids, trusted, trust_policy, permission_boundary, session_duration_seconds, created_at
+RETURNING id, tenant_id, name, description, permission_set_ids, trusted, trust_policy, permission_boundary, session_duration_seconds, source_template_key, source_package_version, created_at
 `
 
 type UpsertAssumableRoleParams struct {
@@ -3474,6 +3694,8 @@ type UpsertAssumableRoleParams struct {
 	Column7                []byte             `json:"column_7"`
 	Column8                []byte             `json:"column_8"`
 	SessionDurationSeconds int32              `json:"session_duration_seconds"`
+	SourceTemplateKey      string             `json:"source_template_key"`
+	SourcePackageVersion   string             `json:"source_package_version"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -3488,6 +3710,8 @@ func (q *Queries) UpsertAssumableRole(ctx context.Context, arg UpsertAssumableRo
 		arg.Column7,
 		arg.Column8,
 		arg.SessionDurationSeconds,
+		arg.SourceTemplateKey,
+		arg.SourcePackageVersion,
 		arg.CreatedAt,
 	)
 	var i AssumableRole
@@ -3501,6 +3725,8 @@ func (q *Queries) UpsertAssumableRole(ctx context.Context, arg UpsertAssumableRo
 		&i.TrustPolicy,
 		&i.PermissionBoundary,
 		&i.SessionDurationSeconds,
+		&i.SourceTemplateKey,
+		&i.SourcePackageVersion,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -4514,26 +4740,30 @@ func (q *Queries) UpsertOvertimeRequest(ctx context.Context, arg UpsertOvertimeR
 
 const upsertPermissionSet = `-- name: UpsertPermissionSet :one
 INSERT INTO permission_sets (
-    id, tenant_id, name, description, permissions, created_at
+    id, tenant_id, name, description, permissions, source_template_key, source_package_version, created_at
 ) VALUES (
-    $1, $2, $3, $4, $5::jsonb, $6
+    $1, $2, $3, $4, $5::jsonb, $6, $7, $8
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
     name = EXCLUDED.name,
     description = EXCLUDED.description,
     permissions = EXCLUDED.permissions,
+    source_template_key = EXCLUDED.source_template_key,
+    source_package_version = EXCLUDED.source_package_version,
     created_at = EXCLUDED.created_at
-RETURNING id, tenant_id, name, description, permissions, created_at
+RETURNING id, tenant_id, name, description, permissions, source_template_key, source_package_version, created_at
 `
 
 type UpsertPermissionSetParams struct {
-	ID          string             `json:"id"`
-	TenantID    string             `json:"tenant_id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	Column5     []byte             `json:"column_5"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ID                   string             `json:"id"`
+	TenantID             string             `json:"tenant_id"`
+	Name                 string             `json:"name"`
+	Description          string             `json:"description"`
+	Column5              []byte             `json:"column_5"`
+	SourceTemplateKey    string             `json:"source_template_key"`
+	SourcePackageVersion string             `json:"source_package_version"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) UpsertPermissionSet(ctx context.Context, arg UpsertPermissionSetParams) (PermissionSet, error) {
@@ -4543,6 +4773,8 @@ func (q *Queries) UpsertPermissionSet(ctx context.Context, arg UpsertPermissionS
 		arg.Name,
 		arg.Description,
 		arg.Column5,
+		arg.SourceTemplateKey,
+		arg.SourcePackageVersion,
 		arg.CreatedAt,
 	)
 	var i PermissionSet
@@ -4552,6 +4784,8 @@ func (q *Queries) UpsertPermissionSet(ctx context.Context, arg UpsertPermissionS
 		&i.Name,
 		&i.Description,
 		&i.Permissions,
+		&i.SourceTemplateKey,
+		&i.SourcePackageVersion,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -4709,10 +4943,10 @@ func (q *Queries) UpsertTenant(ctx context.Context, arg UpsertTenantParams) (Ten
 const upsertUserGroup = `-- name: UpsertUserGroup :one
 INSERT INTO user_groups (
     id, tenant_id, name, description, member_account_ids,
-    permission_set_ids, version, created_at
+    permission_set_ids, source_template_key, source_package_version, version, created_at
 ) VALUES (
     $1, $2, $3, $4, $5,
-    $6, 1, $7
+    $6, $7, $8, 1, $9
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -4720,21 +4954,25 @@ ON CONFLICT (id) DO UPDATE SET
     description = EXCLUDED.description,
     member_account_ids = EXCLUDED.member_account_ids,
     permission_set_ids = EXCLUDED.permission_set_ids,
+    source_template_key = EXCLUDED.source_template_key,
+    source_package_version = EXCLUDED.source_package_version,
     version = user_groups.version + 1,
     created_at = EXCLUDED.created_at
-WHERE $8::bigint = 0 OR user_groups.version = $8::bigint
-RETURNING id, tenant_id, name, description, member_account_ids, permission_set_ids, version, created_at
+WHERE $10::bigint = 0 OR user_groups.version = $10::bigint
+RETURNING id, tenant_id, name, description, member_account_ids, permission_set_ids, source_template_key, source_package_version, version, created_at
 `
 
 type UpsertUserGroupParams struct {
-	ID               string             `json:"id"`
-	TenantID         string             `json:"tenant_id"`
-	Name             string             `json:"name"`
-	Description      string             `json:"description"`
-	MemberAccountIds []string           `json:"member_account_ids"`
-	PermissionSetIds []string           `json:"permission_set_ids"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
-	ExpectedVersion  int64              `json:"expected_version"`
+	ID                   string             `json:"id"`
+	TenantID             string             `json:"tenant_id"`
+	Name                 string             `json:"name"`
+	Description          string             `json:"description"`
+	MemberAccountIds     []string           `json:"member_account_ids"`
+	PermissionSetIds     []string           `json:"permission_set_ids"`
+	SourceTemplateKey    string             `json:"source_template_key"`
+	SourcePackageVersion string             `json:"source_package_version"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	ExpectedVersion      int64              `json:"expected_version"`
 }
 
 // expected_version 語義同 UpsertAccount。
@@ -4746,6 +4984,8 @@ func (q *Queries) UpsertUserGroup(ctx context.Context, arg UpsertUserGroupParams
 		arg.Description,
 		arg.MemberAccountIds,
 		arg.PermissionSetIds,
+		arg.SourceTemplateKey,
+		arg.SourcePackageVersion,
 		arg.CreatedAt,
 		arg.ExpectedVersion,
 	)
@@ -4757,6 +4997,8 @@ func (q *Queries) UpsertUserGroup(ctx context.Context, arg UpsertUserGroupParams
 		&i.Description,
 		&i.MemberAccountIds,
 		&i.PermissionSetIds,
+		&i.SourceTemplateKey,
+		&i.SourcePackageVersion,
 		&i.Version,
 		&i.CreatedAt,
 	)

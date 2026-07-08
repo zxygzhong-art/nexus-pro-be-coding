@@ -999,43 +999,67 @@ paths:
   /v1/authz/check:
     post:
       summary: Check one authorization request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckRequest"
       responses:
         "200":
           description: Authorization decision
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/CheckResultDataResponse"
   /v1/authz/batch-check:
     post:
       summary: Check multiple authorization requests
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BatchCheckRequest"
       responses:
         "200":
           description: Batch authorization decisions
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/BatchCheckResultDataResponse"
   /v1/authz/explain:
     post:
       summary: Explain one authorization decision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CheckRequest"
       responses:
         "200":
           description: Authorization explanation
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/AuthzExplainDataResponse"
   /v1/authz/simulate:
     post:
       summary: Simulate one authorization decision
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthzSimulationRequest"
       responses:
         "200":
           description: Authorization simulation
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/AuthzSimulationDataResponse"
   /v1/iam/permissions:
     get:
       summary: List permissions
@@ -1078,6 +1102,87 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/IAMRoleBindingProjectionListDataResponse"
+  /v1/iam/permission-packages:
+    get:
+      summary: List registered permission packages
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200":
+          description: Permission package page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionPackagePageDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      summary: Register a draft permission package
+      parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PermissionPackageContent"
+      responses:
+        "201":
+          description: Registered permission package
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionPackageDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/iam/permission-packages/{id}/publish:
+    post:
+      summary: Publish a registered permission package version
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Published permission package
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionPackageDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/iam/permission-packages/{id}/import:
+    post:
+      summary: Import a published permission package into the current tenant
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Tenant import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PermissionPackageImportResultDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/iam/user-groups:
     get:
       summary: List user groups
@@ -1091,16 +1196,90 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/UserGroupPageDataResponse"
     post:
       summary: Create user group
+      parameters:
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserGroupInput"
       responses:
         "201":
           description: Created user group
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/UserGroupDataResponse"
+  /v1/iam/user-groups/{id}:
+    patch:
+      summary: Update user group
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserGroupInput"
+      responses:
+        "200":
+          description: Updated user group
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserGroupDataResponse"
+  /v1/iam/user-groups/{id}/members:
+    get:
+      summary: List user group members
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200":
+          description: User group member page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroupMembershipPageDataResponse"
+    post:
+      summary: Add user group member
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AddUserGroupMemberInput"
+      responses:
+        "201":
+          description: Created or updated user group membership
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GroupMembershipDataResponse"
+  /v1/iam/user-groups/{id}/members/{accountId}:
+    delete:
+      summary: Remove user group member
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/AccountID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "204":
+          description: User group member removed
   /v1/iam/permission-sets:
     get:
       summary: List permission sets
@@ -1147,6 +1326,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+  /v1/iam/applications:
+    get:
+      summary: List IAM applications
+      responses:
+        "200":
+          description: IAM application catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IAMApplicationListDataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /v1/iam/resource-types:
+    get:
+      summary: List IAM resource types
+      responses:
+        "200":
+          description: IAM resource type catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IAMResourceTypeListDataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
   /v1/iam/data-scopes:
     get:
       summary: List data scopes
@@ -1160,16 +1363,69 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/DataScopePageDataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
     post:
       summary: Create data scope
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DataScopeInput"
       responses:
         "201":
           description: Created data scope
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/DataScopeDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /v1/iam/data-scopes/{id}:
+    patch:
+      summary: Update data scope
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DataScopePatch"
+      responses:
+        "200":
+          description: Updated data scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataScopeDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+    delete:
+      summary: Delete data scope
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Deleted data scope
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataScopeDataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
   /v1/iam/field-policies:
     get:
       summary: List field policies
@@ -1185,16 +1441,107 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/FieldPolicyPageDataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
     post:
       summary: Create field policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FieldPolicyInput"
       responses:
         "201":
           description: Created field policy
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/FieldPolicyDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /v1/iam/field-policies/{id}:
+    patch:
+      summary: Update field policy
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/FieldPolicyPatch"
+      responses:
+        "200":
+          description: Updated field policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldPolicyDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      summary: Delete field policy
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Deleted field policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FieldPolicyDataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /v1/iam/outbox-events:
+    get:
+      summary: List IAM outbox events
+      parameters:
+        - {name: status, in: query, schema: {type: string, enum: [pending, processing, processed, failed]}}
+        - {name: event_type, in: query, schema: {type: string}}
+        - {name: last_error, in: query, schema: {type: string}}
+        - {name: has_error, in: query, schema: {type: boolean}}
+        - {name: retry_count, in: query, schema: {type: integer, minimum: 0}}
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/PageSize"
+        - $ref: "#/components/parameters/Sort"
+      responses:
+        "200":
+          description: Outbox event page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutboxEventPageDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /v1/iam/outbox-events/{id}/retry:
+    post:
+      summary: Retry a failed outbox event
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Outbox event reset to pending
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OutboxEventDataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
   /v1/iam/assumable-roles:
     get:
       summary: List assumable roles
@@ -2395,6 +2742,13 @@ components:
       description: Globally unique employee identifier; tenant_id still scopes ownership and authorization.
       schema:
         type: string
+    AccountID:
+      name: accountId
+      in: path
+      required: true
+      description: Account identifier to add to or remove from a user group.
+      schema:
+        type: string
   responses:
     ValidationError:
       description: Validation failed. Field errors include tab, field, code and message; import row errors include row_number.
@@ -2439,6 +2793,236 @@ components:
       properties:
         data:
           description: Successful response payload.
+    CheckResultDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/CheckResult"
+    BatchCheckResultDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/BatchCheckResult"
+    AuthzExplainDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/AuthzExplainResponse"
+    AuthzSimulationDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/AuthzSimulationResponse"
+    CheckRequest:
+      type: object
+      required: [action]
+      properties:
+        application_code: {type: string}
+        resource_type: {type: string}
+        resource_id: {type: string}
+        action: {type: string}
+        context:
+          type: object
+          additionalProperties: true
+        resource: {type: string}
+        target: {type: string}
+        scope: {type: string}
+        target_employee_id: {type: string}
+        route_method: {type: string}
+        route_path: {type: string}
+    CheckResult:
+      type: object
+      required: [allowed, action]
+      properties:
+        allowed: {type: boolean}
+        reason: {type: string}
+        matched_by:
+          type: array
+          items: {type: string}
+        matched_permissions:
+          type: array
+          items: {type: string}
+        missing_permissions:
+          type: array
+          items: {type: string}
+        permission_set_ids:
+          type: array
+          items: {type: string}
+        scope: {type: string}
+        effective_scope: {type: string}
+        conditions:
+          type: object
+          additionalProperties: true
+        field_policies:
+          type: object
+          additionalProperties:
+            type: string
+        assumed_role:
+          $ref: "#/components/schemas/AssumedRoleDecision"
+        permission_boundary:
+          type: object
+          additionalProperties: true
+        requires_approval: {type: boolean}
+        risk_level: {type: string}
+        approval_type: {type: string}
+        approval_reason: {type: string}
+        resource: {type: string}
+        application_code: {type: string}
+        resource_type: {type: string}
+        resource_id: {type: string}
+        action: {type: string}
+        target: {type: string}
+    BatchCheckRequest:
+      type: object
+      required: [checks]
+      properties:
+        checks:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckRequest"
+    BatchCheckResult:
+      type: object
+      required: [results]
+      properties:
+        results:
+          type: array
+          items:
+            $ref: "#/components/schemas/CheckResult"
+    AssumedRoleDecision:
+      type: object
+      required: [role_id]
+      properties:
+        session_id: {type: string}
+        role_id: {type: string}
+        name: {type: string}
+    AuthzExplainResponse:
+      type: object
+      required: [decision, evaluated_grants, scope_derivation]
+      properties:
+        decision:
+          $ref: "#/components/schemas/CheckResult"
+        evaluated_grants:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthzEvaluatedGrant"
+        deny_sources:
+          type: array
+          items: {type: string}
+        boundary_effects:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthzBoundaryEffect"
+        scope_derivation:
+          $ref: "#/components/schemas/AuthzScopeDerivation"
+    AuthzEvaluatedGrant:
+      type: object
+      required: [source, matched, excluded_by]
+      properties:
+        source: {type: string}
+        source_id: {type: string}
+        permission_set_id: {type: string}
+        permission: {type: string}
+        effect: {type: string, enum: [allow, deny]}
+        matched: {type: boolean}
+        scope: {type: string}
+        excluded_by:
+          type: string
+          nullable: true
+    AuthzBoundaryEffect:
+      type: object
+      required: [source, effect, matched]
+      properties:
+        source: {type: string}
+        permission: {type: string}
+        effect: {type: string}
+        matched: {type: boolean}
+        excluded_by: {type: string}
+    AuthzScopeDerivation:
+      type: object
+      properties:
+        normal: {type: string}
+        assumed: {type: string}
+        boundary: {type: string}
+        final: {type: string}
+        intersection_empty: {type: boolean}
+    AuthzSimulationRequest:
+      type: object
+      required: [check]
+      properties:
+        account_id:
+          type: string
+          description: Optional target account to simulate. Defaults to the authenticated account.
+        check:
+          $ref: "#/components/schemas/CheckRequest"
+        overrides:
+          $ref: "#/components/schemas/AuthzSimulationOverrides"
+    AuthzSimulationOverrides:
+      type: object
+      properties:
+        add_user_groups:
+          type: array
+          items: {type: string}
+        remove_user_groups:
+          type: array
+          items: {type: string}
+        add_permission_sets:
+          type: array
+          items: {type: string}
+        remove_permission_sets:
+          type: array
+          items: {type: string}
+        assume_role_id: {type: string}
+        permission_set_changes:
+          type: array
+          items:
+            $ref: "#/components/schemas/AuthzPermissionSetChange"
+    AuthzPermissionSetChange:
+      type: object
+      required: [permission_set_id]
+      properties:
+        permission_set_id: {type: string}
+        add_permissions:
+          type: array
+          items: {type: string}
+        remove_permissions:
+          type: array
+          items: {type: string}
+    AuthzSimulationResponse:
+      type: object
+      required: [before, after, diff]
+      properties:
+        before:
+          $ref: "#/components/schemas/CheckResult"
+        after:
+          $ref: "#/components/schemas/CheckResult"
+        diff:
+          $ref: "#/components/schemas/AuthzSimulationDiff"
+    AuthzSimulationDiff:
+      type: object
+      required: [allowed_changed, before_allowed, after_allowed, scope_changed]
+      properties:
+        allowed_changed: {type: boolean}
+        before_allowed: {type: boolean}
+        after_allowed: {type: boolean}
+        scope_changed: {type: boolean}
+        before_scope: {type: string}
+        after_scope: {type: string}
+        added_matched_by:
+          type: array
+          items: {type: string}
+        removed_matched_by:
+          type: array
+          items: {type: string}
+        added_matched_permissions:
+          type: array
+          items: {type: string}
+        removed_matched_permissions:
+          type: array
+          items: {type: string}
     IAMRoleProjectionListDataResponse:
       type: object
       required: [data]
@@ -2451,6 +3035,100 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/IAMRoleBindingProjectionPage"
+    PermissionPackagePageDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PermissionPackagePage"
+    PermissionPackageDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PermissionPackage"
+    PermissionPackageImportResultDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/PermissionPackageImportResult"
+    UserGroupPageDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/UserGroupPage"
+    UserGroupDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/UserGroup"
+    GroupMembershipPageDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/GroupMembershipPage"
+    GroupMembershipDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/GroupMembership"
+    IAMApplicationListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/IAMApplication"
+    IAMResourceTypeListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/IAMResourceType"
+    DataScopePageDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/DataScopePage"
+    DataScopeDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/DataScope"
+    FieldPolicyPageDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/FieldPolicyPage"
+    FieldPolicyDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/FieldPolicy"
+    OutboxEventPageDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/OutboxEventPage"
+    OutboxEventDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/OutboxEvent"
     IAMRoleProjectionPage:
       type: object
       required: [items, total, page, page_size, sort]
@@ -2475,6 +3153,457 @@ components:
         page: {type: integer}
         page_size: {type: integer}
         sort: {type: string}
+    PermissionPackagePage:
+      type: object
+      required: [items, total, page, page_size, sort]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermissionPackage"
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+        sort: {type: string}
+    UserGroupPage:
+      type: object
+      required: [items, total, page, page_size, sort]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserGroup"
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+        sort: {type: string}
+    GroupMembershipPage:
+      type: object
+      required: [items, total, page, page_size, sort]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/GroupMembership"
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+        sort: {type: string}
+    DataScopePage:
+      type: object
+      required: [items, total, page, page_size, sort]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/DataScope"
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+        sort: {type: string}
+    FieldPolicyPage:
+      type: object
+      required: [items, total, page, page_size, sort]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/FieldPolicy"
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+        sort: {type: string}
+    OutboxEventPage:
+      type: object
+      required: [items, total, page, page_size, sort]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/OutboxEvent"
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+        sort: {type: string}
+    IAMApplication:
+      type: object
+      required: [code, name]
+      properties:
+        code: {type: string}
+        name: {type: string}
+        description: {type: string}
+    IAMResourceType:
+      type: object
+      required: [application_code, resource_type, actions]
+      properties:
+        application_code: {type: string}
+        resource_type: {type: string}
+        actions:
+          type: array
+          items: {type: string}
+    DataScope:
+      type: object
+      required: [id, tenant_id, code, name, scope_type, created_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        code: {type: string}
+        name: {type: string}
+        scope_type: {type: string}
+        params:
+          type: object
+          additionalProperties: true
+        created_at: {type: string, format: date-time}
+    DataScopeInput:
+      type: object
+      required: [code, name, scope_type]
+      properties:
+        code: {type: string}
+        name: {type: string}
+        scope_type: {type: string}
+        params:
+          type: object
+          additionalProperties: true
+    DataScopePatch:
+      type: object
+      properties:
+        code: {type: string}
+        name: {type: string}
+        scope_type: {type: string}
+        params:
+          type: object
+          additionalProperties: true
+    FieldPolicy:
+      type: object
+      required: [id, tenant_id, application_code, resource_type, field_name, effect, created_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        application_code: {type: string}
+        resource_type: {type: string}
+        field_name: {type: string}
+        effect: {type: string, enum: [allow, deny, mask, hide, readonly]}
+        mask_strategy: {type: string}
+        permission_id: {type: string}
+        created_at: {type: string, format: date-time}
+    FieldPolicyInput:
+      type: object
+      required: [application_code, resource_type, field_name, effect]
+      properties:
+        application_code: {type: string}
+        resource_type: {type: string}
+        field_name: {type: string}
+        effect: {type: string, enum: [allow, deny, mask, hide, readonly]}
+        mask_strategy: {type: string}
+        permission_id: {type: string}
+    FieldPolicyPatch:
+      type: object
+      properties:
+        application_code: {type: string}
+        resource_type: {type: string}
+        field_name: {type: string}
+        effect: {type: string, enum: [allow, deny, mask, hide, readonly]}
+        mask_strategy: {type: string}
+        permission_id: {type: string}
+    OutboxEvent:
+      type: object
+      required: [id, tenant_id, event_type, status, retry_count, created_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        event_type: {type: string}
+        aggregate_type: {type: string}
+        aggregate_id: {type: string}
+        payload:
+          type: object
+          additionalProperties: true
+        status: {type: string, enum: [pending, processing, processed, failed]}
+        retry_count: {type: integer}
+        last_error: {type: string}
+        created_at: {type: string, format: date-time}
+        processed_at:
+          type: string
+          format: date-time
+          nullable: true
+    PermissionPackage:
+      type: object
+      required: [id, application_code, version, status, content, checksum, created_at]
+      properties:
+        id: {type: string}
+        application_code: {type: string}
+        version: {type: string}
+        status: {type: string, enum: [draft, published, deprecated]}
+        content:
+          $ref: "#/components/schemas/PermissionPackageContent"
+        checksum: {type: string}
+        created_at: {type: string, format: date-time}
+        published_at:
+          type: string
+          format: date-time
+          nullable: true
+    PermissionPackageImport:
+      type: object
+      required: [id, tenant_id, package_id, version, imported_at, imported_by, artifact_id_map]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        package_id: {type: string}
+        version: {type: string}
+        imported_at: {type: string, format: date-time}
+        imported_by: {type: string}
+        artifact_id_map:
+          type: object
+          additionalProperties: true
+    PermissionPackageImportDiff:
+      type: object
+      properties:
+        added_templates:
+          type: array
+          items: {type: string}
+        changed_templates:
+          type: array
+          items: {type: string}
+        orphaned_templates:
+          type: array
+          items: {type: string}
+    PermissionPackageImportResult:
+      type: object
+      required: [import, package, artifact_id_map, diff, imported]
+      properties:
+        import:
+          $ref: "#/components/schemas/PermissionPackageImport"
+        package:
+          $ref: "#/components/schemas/PermissionPackage"
+        artifact_id_map:
+          type: object
+          additionalProperties: true
+        diff:
+          $ref: "#/components/schemas/PermissionPackageImportDiff"
+        imported: {type: boolean}
+    PermissionPackageContent:
+      type: object
+      required: [application_code, version, resource_types, actions, permissions]
+      properties:
+        application_code: {type: string}
+        version: {type: string}
+        resource_types:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermissionPackageResourceType"
+        actions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermissionPackageAction"
+        permissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/IAMPermission"
+        menus:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermissionPackageMenu"
+        buttons:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermissionPackageButton"
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermissionPackageField"
+        data_scopes:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermissionPackageDataScope"
+        permission_set_templates:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermissionSetTemplateContent"
+        user_group_templates:
+          type: array
+          items:
+            $ref: "#/components/schemas/UserGroupTemplateContent"
+        assumable_role_templates:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssumableRoleTemplateContent"
+        fga_mappings:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermissionPackageFGAMapping"
+    PermissionPackageResourceType:
+      type: object
+      required: [application_code, resource_type, actions]
+      properties:
+        application_code: {type: string}
+        resource_type: {type: string}
+        actions:
+          type: array
+          items: {type: string}
+        name: {type: string}
+        description: {type: string}
+    PermissionPackageAction:
+      type: object
+      required: [action]
+      properties:
+        action: {type: string}
+        name: {type: string}
+        description: {type: string}
+        high_risk: {type: boolean}
+    PermissionPackageMenu:
+      type: object
+      required: [key, label]
+      properties:
+        key: {type: string}
+        label: {type: string}
+        path: {type: string}
+        icon: {type: string}
+        sort_order: {type: integer}
+        children:
+          type: array
+          items:
+            $ref: "#/components/schemas/PermissionPackageMenu"
+    PermissionPackageButton:
+      type: object
+      required: [key, resource, action]
+      properties:
+        key: {type: string}
+        resource: {type: string}
+        action: {type: string}
+        name: {type: string}
+        description: {type: string}
+        high_risk: {type: boolean}
+    PermissionPackageField:
+      type: object
+      required: [resource_type, field_name, effect]
+      properties:
+        resource_type: {type: string}
+        field_name: {type: string}
+        effect: {type: string, enum: [allow, deny, mask, hide, readonly]}
+        description: {type: string}
+    PermissionPackageDataScope:
+      type: object
+      required: [code, name, scope_type]
+      properties:
+        code: {type: string}
+        name: {type: string}
+        scope_type: {type: string}
+        params:
+          type: object
+          additionalProperties: true
+    PermissionSetTemplateContent:
+      type: object
+      required: [template_key, name, permissions]
+      properties:
+        template_key: {type: string}
+        name: {type: string}
+        description: {type: string}
+        permissions:
+          type: array
+          items:
+            $ref: "#/components/schemas/IAMPermission"
+    UserGroupTemplateContent:
+      type: object
+      required: [template_key, name, permission_set_template_keys]
+      properties:
+        template_key: {type: string}
+        name: {type: string}
+        description: {type: string}
+        permission_set_template_keys:
+          type: array
+          items: {type: string}
+    AssumableRoleTemplateContent:
+      type: object
+      required: [template_key, name, permission_set_template_keys, trusted]
+      properties:
+        template_key: {type: string}
+        name: {type: string}
+        description: {type: string}
+        permission_set_template_keys:
+          type: array
+          items: {type: string}
+        trusted: {type: boolean}
+        trust_policy:
+          type: object
+          additionalProperties: true
+        permission_boundary:
+          type: object
+          additionalProperties: true
+        session_duration_seconds: {type: integer}
+    PermissionPackageFGAMapping:
+      type: object
+      required: [resource_type, openfga_type]
+      properties:
+        resource_type: {type: string}
+        openfga_type: {type: string}
+    UserGroup:
+      type: object
+      required: [id, tenant_id, name, member_account_ids, permission_set_ids, version, created_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        member_account_ids:
+          type: array
+          items: {type: string}
+        permission_set_ids:
+          type: array
+          items: {type: string}
+        source_template_key: {type: string}
+        source_package_version: {type: string}
+        version: {type: integer, format: int64}
+        created_at: {type: string, format: date-time}
+    GroupMembership:
+      type: object
+      required: [id, tenant_id, user_group_id, account_id, valid_from, source, created_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        user_group_id: {type: string}
+        account_id: {type: string}
+        valid_from: {type: string, format: date-time}
+        valid_until:
+          type: string
+          format: date-time
+          nullable: true
+        source:
+          type: string
+          enum: [manual, import, template, approval, migration]
+        approval_instance_id: {type: string}
+        created_by: {type: string}
+        created_at: {type: string, format: date-time}
+    CreateUserGroupInput:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        description: {type: string}
+        permission_set_ids:
+          type: array
+          items: {type: string}
+        member_account_ids:
+          type: array
+          items: {type: string}
+    UpdateUserGroupInput:
+      type: object
+      properties:
+        name: {type: string}
+        description: {type: string}
+        permission_set_ids:
+          type: array
+          items: {type: string}
+    AddUserGroupMemberInput:
+      type: object
+      required: [account_id]
+      properties:
+        account_id: {type: string}
+        valid_until:
+          type: string
+          format: date-time
+        source:
+          type: string
+          enum: [manual, import, template, approval]
+        approval_instance_id: {type: string}
     IAMRoleProjection:
       type: object
       required: [id, tenant_id, name, permission_set_ids, permission_sets, trusted, created_at]
@@ -2498,6 +3627,8 @@ components:
           type: object
           additionalProperties: true
         session_duration_seconds: {type: integer}
+        source_template_key: {type: string}
+        source_package_version: {type: string}
         created_at: {type: string, format: date-time}
     IAMRoleBindingProjection:
       type: object
@@ -2528,6 +3659,8 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/IAMPermission"
+        source_template_key: {type: string}
+        source_package_version: {type: string}
         created_at: {type: string, format: date-time}
     IAMPermission:
       type: object

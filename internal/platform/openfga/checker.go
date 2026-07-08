@@ -119,7 +119,7 @@ func (c *Checker) WriteRelationshipTuples(ctx context.Context, changes []domain.
 	for _, change := range changes {
 		tuple := change.Tuple
 		key := map[string]string{
-			"user":     tuple.SubjectType + ":" + tuple.SubjectID,
+			"user":     openFGASubject(tuple.SubjectType, tuple.SubjectID),
 			"relation": tuple.Relation,
 			"object":   tuple.ObjectType + ":" + tuple.ObjectID,
 		}
@@ -155,6 +155,19 @@ func (c *Checker) WriteRelationshipTuples(ctx context.Context, changes []domain.
 		return err
 	}
 	return nil
+}
+
+func openFGASubject(subjectType, subjectID string) string {
+	subjectType = strings.TrimSpace(subjectType)
+	subjectID = strings.TrimSpace(subjectID)
+	if subjectType == "" || subjectID == "" {
+		return subjectType + ":" + subjectID
+	}
+	typ, relation, ok := strings.Cut(subjectType, "#")
+	if !ok || strings.TrimSpace(relation) == "" {
+		return subjectType + ":" + subjectID
+	}
+	return strings.TrimSpace(typ) + ":" + subjectID + "#" + strings.TrimSpace(relation)
 }
 
 // verifyAuthorizationModel 處理 verify 授權 model。

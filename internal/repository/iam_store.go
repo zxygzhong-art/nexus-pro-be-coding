@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"nexus-pro-be/internal/domain"
 )
@@ -11,6 +12,11 @@ type IAMStore interface {
 	UpsertUserGroup(context.Context, domain.UserGroup) error
 	GetUserGroup(ctx context.Context, tenantID, id string) (domain.UserGroup, bool, error)
 	ListUserGroups(ctx context.Context, tenantID string) ([]domain.UserGroup, error)
+	UpsertGroupMembership(context.Context, domain.GroupMembership) error
+	DeleteGroupMembership(ctx context.Context, tenantID, userGroupID, accountID string) (domain.GroupMembership, bool, error)
+	GetGroupMembership(ctx context.Context, tenantID, userGroupID, accountID string) (domain.GroupMembership, bool, error)
+	ListGroupMembershipsForGroup(ctx context.Context, tenantID, userGroupID string) ([]domain.GroupMembership, error)
+	ListActiveGroupMembershipsForAccount(ctx context.Context, tenantID, accountID string, at time.Time) ([]domain.GroupMembership, error)
 
 	UpsertPermissionSet(context.Context, domain.PermissionSet) error
 	GetPermissionSet(ctx context.Context, tenantID, id string) (domain.PermissionSet, bool, error)
@@ -24,6 +30,21 @@ type IAMStore interface {
 	UpsertMenuItem(context.Context, domain.MenuItem) error
 	ListMenuItems(ctx context.Context, tenantID string) ([]domain.MenuItem, error)
 
+	UpsertPermissionPackage(context.Context, domain.PermissionPackage) error
+	UpdatePermissionPackageStatus(ctx context.Context, id string, status domain.PermissionPackageStatus, publishedAt *time.Time) (domain.PermissionPackage, bool, error)
+	GetPermissionPackage(ctx context.Context, id string) (domain.PermissionPackage, bool, error)
+	GetPermissionPackageByApplicationVersion(ctx context.Context, applicationCode, version string) (domain.PermissionPackage, bool, error)
+	ListPermissionPackages(context.Context) ([]domain.PermissionPackage, error)
+	UpsertPermissionSetTemplate(context.Context, domain.PermissionSetTemplate) error
+	ListPermissionSetTemplates(ctx context.Context, packageID string) ([]domain.PermissionSetTemplate, error)
+	UpsertUserGroupTemplate(context.Context, domain.UserGroupTemplate) error
+	ListUserGroupTemplates(ctx context.Context, packageID string) ([]domain.UserGroupTemplate, error)
+	UpsertAssumableRoleTemplate(context.Context, domain.AssumableRoleTemplate) error
+	ListAssumableRoleTemplates(ctx context.Context, packageID string) ([]domain.AssumableRoleTemplate, error)
+	UpsertPermissionPackageImport(context.Context, domain.PermissionPackageImport) error
+	GetPermissionPackageImport(ctx context.Context, tenantID, packageID, version string) (domain.PermissionPackageImport, bool, error)
+	ListPermissionPackageImports(ctx context.Context, tenantID string) ([]domain.PermissionPackageImport, error)
+
 	UpsertPermissionSetAssignment(context.Context, domain.PermissionSetAssignment) error
 	ListPermissionSetAssignments(ctx context.Context, tenantID string) ([]domain.PermissionSetAssignment, error)
 	ListPermissionSetAssignmentsForPrincipal(ctx context.Context, tenantID, principalType, principalID string) ([]domain.PermissionSetAssignment, error)
@@ -31,9 +52,13 @@ type IAMStore interface {
 	UpsertDataScope(context.Context, domain.DataScope) error
 	GetDataScope(ctx context.Context, tenantID, id string) (domain.DataScope, bool, error)
 	ListDataScopes(ctx context.Context, tenantID string) ([]domain.DataScope, error)
+	UpdateDataScope(context.Context, domain.DataScope) error
+	DeleteDataScope(ctx context.Context, tenantID, id string) (domain.DataScope, bool, error)
 
 	UpsertFieldPolicy(context.Context, domain.FieldPolicy) error
+	GetFieldPolicy(ctx context.Context, tenantID, id string) (domain.FieldPolicy, bool, error)
 	ListFieldPolicies(ctx context.Context, tenantID, applicationCode, resourceType string) ([]domain.FieldPolicy, error)
+	DeleteFieldPolicy(ctx context.Context, tenantID, id string) (domain.FieldPolicy, bool, error)
 
 	UpsertAssumableRole(context.Context, domain.AssumableRole) error
 	GetAssumableRole(ctx context.Context, tenantID, id string) (domain.AssumableRole, bool, error)

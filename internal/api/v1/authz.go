@@ -95,25 +95,25 @@ func (c AuthzCtrl) explainAuthz(w http.ResponseWriter, r *http.Request, ctx doma
 	if err := readJSON(w, r, &input); err != nil {
 		return err
 	}
-	result, err := c.svc.Check(ctx, input)
+	result, err := c.svc.Explain(ctx, input)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, domain.AuthzExplainResponse{Decision: result, Explain: result.Reason})
+	writeJSON(w, http.StatusOK, result)
 	return nil
 }
 
 // simulateAuthz 處理授權的 HTTP 請求。
 func (c AuthzCtrl) simulateAuthz(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.CheckRequest
+	var input domain.AuthzSimulationRequest
 	if err := readJSON(w, r, &input); err != nil {
 		return err
 	}
-	result, err := c.svc.Check(ctx, input)
+	result, err := c.svc.Simulate(ctx, input)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, domain.AuthzSimulationResponse{Decision: result, Simulated: true})
+	writeJSON(w, http.StatusOK, result)
 	return nil
 }
 

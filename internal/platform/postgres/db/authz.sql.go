@@ -142,6 +142,73 @@ func (q *Queries) GetAuthzDataScope(ctx context.Context, arg GetAuthzDataScopePa
 	return i, err
 }
 
+const updateAuthzDataScope = `-- name: UpdateAuthzDataScope :one
+UPDATE authz_data_scopes
+SET code = $3,
+    name = $4,
+    scope_type = $5,
+    params = $6::jsonb
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, code, name, scope_type, params, created_at
+`
+
+type UpdateAuthzDataScopeParams struct {
+	TenantID  string `json:"tenant_id"`
+	ID        string `json:"id"`
+	Code      string `json:"code"`
+	Name      string `json:"name"`
+	ScopeType string `json:"scope_type"`
+	Column6   []byte `json:"column_6"`
+}
+
+func (q *Queries) UpdateAuthzDataScope(ctx context.Context, arg UpdateAuthzDataScopeParams) (AuthzDataScope, error) {
+	row := q.db.QueryRow(ctx, updateAuthzDataScope,
+		arg.TenantID,
+		arg.ID,
+		arg.Code,
+		arg.Name,
+		arg.ScopeType,
+		arg.Column6,
+	)
+	var i AuthzDataScope
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Code,
+		&i.Name,
+		&i.ScopeType,
+		&i.Params,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const deleteAuthzDataScope = `-- name: DeleteAuthzDataScope :one
+DELETE FROM authz_data_scopes
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, code, name, scope_type, params, created_at
+`
+
+type DeleteAuthzDataScopeParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) DeleteAuthzDataScope(ctx context.Context, arg DeleteAuthzDataScopeParams) (AuthzDataScope, error) {
+	row := q.db.QueryRow(ctx, deleteAuthzDataScope, arg.TenantID, arg.ID)
+	var i AuthzDataScope
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Code,
+		&i.Name,
+		&i.ScopeType,
+		&i.Params,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getAuthzPermissionVersion = `-- name: GetAuthzPermissionVersion :one
 SELECT tenant_id, version, updated_at FROM authz_permission_versions
 WHERE tenant_id = $1
@@ -238,11 +305,38 @@ func (q *Queries) ListAuthzDataScopes(ctx context.Context, tenantID string) ([]A
 	return items, nil
 }
 
+const getAuthzFieldPolicy = `-- name: GetAuthzFieldPolicy :one
+SELECT id, tenant_id, application_code, resource_type, field_name, effect, mask_strategy, permission_id, created_at FROM authz_field_policies
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetAuthzFieldPolicyParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetAuthzFieldPolicy(ctx context.Context, arg GetAuthzFieldPolicyParams) (AuthzFieldPolicy, error) {
+	row := q.db.QueryRow(ctx, getAuthzFieldPolicy, arg.TenantID, arg.ID)
+	var i AuthzFieldPolicy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ApplicationCode,
+		&i.ResourceType,
+		&i.FieldName,
+		&i.Effect,
+		&i.MaskStrategy,
+		&i.PermissionID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const listAuthzFieldPolicies = `-- name: ListAuthzFieldPolicies :many
 SELECT id, tenant_id, application_code, resource_type, field_name, effect, mask_strategy, permission_id, created_at FROM authz_field_policies
 WHERE tenant_id = $1
-  AND application_code = $2
-  AND resource_type = $3
+  AND ($2::text = '' OR application_code = $2)
+  AND ($3::text = '' OR resource_type = $3)
 ORDER BY field_name ASC
 `
 
@@ -280,6 +374,34 @@ func (q *Queries) ListAuthzFieldPolicies(ctx context.Context, arg ListAuthzField
 		return nil, err
 	}
 	return items, nil
+}
+
+const deleteAuthzFieldPolicy = `-- name: DeleteAuthzFieldPolicy :one
+DELETE FROM authz_field_policies
+WHERE tenant_id = $1 AND id = $2
+RETURNING id, tenant_id, application_code, resource_type, field_name, effect, mask_strategy, permission_id, created_at
+`
+
+type DeleteAuthzFieldPolicyParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) DeleteAuthzFieldPolicy(ctx context.Context, arg DeleteAuthzFieldPolicyParams) (AuthzFieldPolicy, error) {
+	row := q.db.QueryRow(ctx, deleteAuthzFieldPolicy, arg.TenantID, arg.ID)
+	var i AuthzFieldPolicy
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ApplicationCode,
+		&i.ResourceType,
+		&i.FieldName,
+		&i.Effect,
+		&i.MaskStrategy,
+		&i.PermissionID,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const listAuthzPermissionSetAssignments = `-- name: ListAuthzPermissionSetAssignments :many

@@ -9,6 +9,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/utils"
+	"reflect"
 	"strings"
 	"time"
 )
@@ -59,6 +60,74 @@ func (c AuthzService) BatchCheck(ctx RequestContext, req BatchCheckRequest) (res
 	return BatchCheckResult{Results: results}, nil
 }
 
+// Explain 解釋單筆授權決策。
+func (c AuthzService) Explain(ctx RequestContext, req CheckRequest) (result AuthzExplainResponse, err error) {
+	ctx, span := startServiceSpan(ctx, "service.authz.explain", authzSpanAttributes(req)...)
+	defer func() {
+		setAuthzSpanResult(span, result.Decision)
+		finishServiceSpan(span, err)
+	}()
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return AuthzExplainResponse{}, err
+	}
+	req = normalizeCheckRequest(req)
+	grants, setIDs, assumedRole, boundary, err := c.collectAuthzGrants(ctx, account)
+	if err != nil {
+		return AuthzExplainResponse{}, err
+	}
+	trace := &authzTrace{}
+	decision, err := c.evaluateAuthzDecision(ctx, account, req, grants, setIDs, assumedRole, boundary, trace)
+	if err != nil {
+		return AuthzExplainResponse{}, err
+	}
+	result = trace.response(decision)
+	if err := c.auditAuthzGovernance(ctx, "iam.authz.explain", "normal", account.ID, req, nil, decision, nil); err != nil {
+		return AuthzExplainResponse{}, err
+	}
+	return result, nil
+}
+
+// Simulate 模擬套用授權覆蓋後的決策差異。
+func (c AuthzService) Simulate(ctx RequestContext, req AuthzSimulationRequest) (result AuthzSimulationResponse, err error) {
+	ctx, span := startServiceSpan(ctx, "service.authz.simulate", authzSpanAttributes(req.Check)...)
+	defer func() {
+		setAuthzSpanResult(span, result.After)
+		finishServiceSpan(span, err)
+	}()
+	targetCtx, account, err := c.resolveSimulationAccount(ctx, req.AccountID)
+	if err != nil {
+		return AuthzSimulationResponse{}, err
+	}
+	check := normalizeCheckRequest(req.Check)
+	baseGrants, baseSetIDs, baseAssumedRole, baseBoundary, err := c.collectAuthzGrants(targetCtx, account)
+	if err != nil {
+		return AuthzSimulationResponse{}, err
+	}
+	before, err := c.evaluateAuthzDecision(targetCtx, account, check, baseGrants, baseSetIDs, baseAssumedRole, baseBoundary, nil)
+	if err != nil {
+		return AuthzSimulationResponse{}, err
+	}
+	opts, err := simulationOverridesToGrantOptions(req.Overrides)
+	if err != nil {
+		return AuthzSimulationResponse{}, err
+	}
+	grants, setIDs, assumedRole, boundary, err := c.collectAuthzGrantsWithOptions(targetCtx, account, opts)
+	if err != nil {
+		return AuthzSimulationResponse{}, err
+	}
+	after, err := c.evaluateAuthzDecision(targetCtx, account, check, grants, setIDs, assumedRole, boundary, nil)
+	if err != nil {
+		return AuthzSimulationResponse{}, err
+	}
+	diff := authzSimulationDiff(before, after)
+	result = AuthzSimulationResponse{Before: before, After: after, Diff: diff}
+	if err := c.auditAuthzGovernance(ctx, "iam.authz.simulate", "high", account.ID, check, &req.Overrides, after, diff); err != nil {
+		return AuthzSimulationResponse{}, err
+	}
+	return result, nil
+}
+
 // shouldAuditRouteAuthzCheck 處理 should 稽核路由授權 check 的服務流程。
 func (c AuthzService) shouldAuditRouteAuthzCheck(ctx RequestContext, result CheckResult) bool {
 	if !result.Allowed {
@@ -77,12 +146,98 @@ func (c AuthzService) ValidateApprovalInstance(ctx RequestContext, req CheckRequ
 	return c.Service.ValidateApprovalInstance(ctx, req)
 }
 
+func (c AuthzService) resolveSimulationAccount(ctx RequestContext, accountID string) (RequestContext, Account, error) {
+	targetCtx := ctx
+	accountID = strings.TrimSpace(accountID)
+	if accountID != "" {
+		targetCtx.AccountID = accountID
+		if accountID != ctx.AccountID {
+			targetCtx.AssumedRoleSessionID = ""
+			targetCtx.AssumedRoleID = ""
+		}
+	}
+	account, _, err := c.resolveAccount(targetCtx)
+	if err != nil {
+		return RequestContext{}, Account{}, err
+	}
+	return targetCtx, account, nil
+}
+
+func (c AuthzService) auditAuthzGovernance(ctx RequestContext, action, severity, targetAccountID string, req CheckRequest, overrides *AuthzSimulationOverrides, decision CheckResult, diff any) error {
+	details := map[string]any{
+		"target_account_id": targetAccountID,
+		"check":             authzCheckAuditSummary(req),
+	}
+	if overrides != nil {
+		details["overrides"] = authzOverridesAuditSummary(*overrides)
+	}
+	if diff != nil {
+		details["diff"] = diff
+	}
+	return c.audit(ctx, action, "authz", targetAccountID, severity, auditDecisionDetails(ctx, decision, details))
+}
+
+func authzCheckAuditSummary(req CheckRequest) map[string]any {
+	req = normalizeCheckRequest(req)
+	return map[string]any{
+		"application_code":   req.ApplicationCode,
+		"resource_type":      req.ResourceType,
+		"resource":           req.Resource,
+		"resource_id":        req.ResourceID,
+		"action":             req.Action,
+		"target":             req.Target,
+		"target_employee_id": req.TargetEmployeeID,
+		"route_method":       req.RouteMethod,
+		"route_path":         req.RoutePath,
+	}
+}
+
+func authzOverridesAuditSummary(overrides AuthzSimulationOverrides) map[string]any {
+	return map[string]any{
+		"add_user_groups":             uniqueStrings(overrides.AddUserGroups),
+		"remove_user_groups":          uniqueStrings(overrides.RemoveUserGroups),
+		"add_permission_sets":         uniqueStrings(overrides.AddPermissionSets),
+		"remove_permission_sets":      uniqueStrings(overrides.RemovePermissionSets),
+		"assume_role_id":              strings.TrimSpace(overrides.AssumeRoleID),
+		"permission_set_change_count": len(overrides.PermissionSetChanges),
+	}
+}
+
 type authzGrant struct {
 	Permission      Permission
 	PermissionSetID string
 	Source          string
+	SourceKind      authzGrantSourceKind
 	Effect          string
 	DataScope       *DataScope
+}
+
+type authzGrantSourceKind string
+
+const (
+	authzGrantSourceNormal  authzGrantSourceKind = "normal"
+	authzGrantSourceAssumed authzGrantSourceKind = "assumed"
+)
+
+type authzGrantCollectionOptions struct {
+	addUserGroupIDs        []string
+	removeUserGroupIDs     map[string]struct{}
+	addPermissionSetIDs    []string
+	removePermissionSetIDs map[string]struct{}
+	assumeRoleID           string
+	permissionSetChanges   map[string]authzPermissionSetMutation
+}
+
+type authzPermissionSetMutation struct {
+	addPermissions    []Permission
+	removePermissions []string
+}
+
+type authzTrace struct {
+	evaluatedGrants []domain.AuthzEvaluatedGrant
+	denySources     []string
+	boundaryEffects []domain.AuthzBoundaryEffect
+	scopeDerivation domain.AuthzScopeDerivation
 }
 
 // evaluateAuthz 處理 evaluate 授權的服務流程。
@@ -111,33 +266,64 @@ func (c *Service) evaluateAuthz(ctx RequestContext, account Account, req CheckRe
 		return result
 	}
 
+	result, err := c.evaluateAuthzDecision(ctx, account, req, grants, setIDs, assumedRole, boundary, nil)
+	if err != nil {
+		return CheckResult{}, err
+	}
+	return cacheResult(result), nil
+}
+
+func (c *Service) evaluateAuthzDecision(ctx RequestContext, account Account, req CheckRequest, grants []authzGrant, setIDs []string, assumedRole *AssumedRoleDecision, boundary map[string]any, trace *authzTrace) (CheckResult, error) {
+	req = normalizeCheckRequest(req)
 	matched := make([]string, 0)
 	matchedBy := make([]string, 0)
 	deniedBy := make([]string, 0)
 	relationshipDeniedBy := make([]string, 0)
-	var chosenScope Scope
-	var chosenConditions map[string]any
+	var normalScope Scope
+	var normalConditions map[string]any
+	var normalMatched bool
+	var assumedScope Scope
+	var assumedConditions map[string]any
+	var assumedMatched bool
 	requiresApproval, riskLevel, approvalType, approvalReason := approvalPolicyForRoute(req)
 	permissionKey := permissionKey(req.ApplicationCode, req.ResourceType, req.Action)
 
 	for _, grant := range grants {
 		if !permissionMatches(grant.Permission, req, account) {
+			if trace != nil {
+				trace.addGrant(grant, false, "", "")
+			}
 			continue
 		}
 		source := grant.Source
 		if source == "" {
 			source = grant.PermissionSetID
 		}
-		if permissionEffect(grant) == "deny" {
+		effect := permissionEffect(grant)
+		if effect == "deny" {
 			deniedBy = append(deniedBy, source)
+			if trace != nil {
+				trace.addGrant(grant, true, "explicit_deny", "")
+				trace.addDenySource(source)
+			}
 			continue
 		}
 		if policyDenies(boundary, permissionKey) {
 			deniedBy = append(deniedBy, "permission_boundary")
+			if trace != nil {
+				trace.addGrant(grant, true, "permission_boundary", "")
+				trace.addDenySource("permission_boundary")
+				trace.addBoundaryEffect(permissionKey, "deny", true)
+			}
 			continue
 		}
 		if !policyAllows(boundary, permissionKey) {
 			deniedBy = append(deniedBy, "permission_boundary")
+			if trace != nil {
+				trace.addGrant(grant, true, "permission_boundary", "")
+				trace.addDenySource("permission_boundary")
+				trace.addBoundaryEffect(permissionKey, "allow_missing", true)
+			}
 			continue
 		}
 		if relation := relationshipConstraint(grant.Permission); relation != "" {
@@ -147,6 +333,9 @@ func (c *Service) evaluateAuthz(ctx RequestContext, account Account, req CheckRe
 			}
 			if !allowed {
 				relationshipDeniedBy = append(relationshipDeniedBy, label)
+				if trace != nil {
+					trace.addGrant(grant, true, "relationship", "")
+				}
 				continue
 			}
 			matchedBy = append(matchedBy, label)
@@ -167,28 +356,80 @@ func (c *Service) evaluateAuthz(ctx RequestContext, account Account, req CheckRe
 		if err != nil {
 			return CheckResult{}, err
 		}
-		chosenScope, chosenConditions = chooseScope(chosenScope, chosenConditions, scope, conditions)
+		if trace != nil {
+			trace.addGrant(grant, true, "", scope)
+		}
+		switch grant.SourceKind {
+		case authzGrantSourceAssumed:
+			assumedMatched = true
+			assumedScope, assumedConditions = chooseScope(assumedScope, assumedConditions, scope, conditions)
+		default:
+			normalMatched = true
+			normalScope, normalConditions = chooseScope(normalScope, normalConditions, scope, conditions)
+		}
 	}
 	if c.relationships != nil && len(matched) == 0 && req.ResourceID != "" {
 		object := relationshipObject(req)
-		allowed, err := c.relationships.CheckRelationship(goContext(ctx), domain.RelationshipCheck{
-			TenantID: ctx.TenantID,
-			Subject:  "account:" + account.ID,
-			Relation: string(req.Action),
-			Object:   object,
-		})
+		switch {
+		case policyDenies(boundary, permissionKey):
+			deniedBy = append(deniedBy, "permission_boundary")
+			if trace != nil {
+				trace.addDenySource("permission_boundary")
+				trace.addBoundaryEffect(permissionKey, "deny", true)
+			}
+		case !policyAllows(boundary, permissionKey):
+			deniedBy = append(deniedBy, "permission_boundary")
+			if trace != nil {
+				trace.addDenySource("permission_boundary")
+				trace.addBoundaryEffect(permissionKey, "allow_missing", true)
+			}
+		default:
+			allowed, err := c.relationships.CheckRelationship(goContext(ctx), domain.RelationshipCheck{
+				TenantID: ctx.TenantID,
+				Subject:  "account:" + account.ID,
+				Relation: string(req.Action),
+				Object:   object,
+			})
+			if err != nil {
+				return CheckResult{}, err
+			}
+			if allowed {
+				matched = append(matched, "openfga:"+object+"#"+string(req.Action))
+				matchedBy = append(matchedBy, "openfga")
+				normalMatched = true
+				normalScope, normalConditions = chooseScope(normalScope, normalConditions, ScopeObject, map[string]any{
+					"tenant_id": ctx.TenantID,
+					"object":    object,
+					"relation":  req.Action,
+				})
+			}
+		}
+	}
+
+	chosenScope, chosenConditions := normalScope, normalConditions
+	scopeIntersectionEmpty := false
+	if assumedRole != nil {
+		if !normalMatched || !assumedMatched {
+			scopeIntersectionEmpty = true
+		} else {
+			chosenScope, chosenConditions, scopeIntersectionEmpty = intersectScopes(normalScope, normalConditions, assumedScope, assumedConditions)
+		}
+	}
+	var boundaryScope Scope
+	if !scopeIntersectionEmpty {
+		boundaryScope, boundaryConditions, hasBoundaryScope, err := c.boundaryScopeDecision(ctx, account, boundary)
 		if err != nil {
 			return CheckResult{}, err
 		}
-		if allowed {
-			matched = append(matched, "openfga:"+object+"#"+string(req.Action))
-			matchedBy = append(matchedBy, "openfga")
-			chosenScope, chosenConditions = chooseScope(chosenScope, chosenConditions, ScopeObject, map[string]any{
-				"tenant_id": ctx.TenantID,
-				"object":    object,
-				"relation":  req.Action,
-			})
+		if hasBoundaryScope {
+			if trace != nil {
+				trace.addBoundaryEffect(permissionKey, "scope", true)
+			}
+			chosenScope, chosenConditions, scopeIntersectionEmpty = intersectScopes(chosenScope, chosenConditions, boundaryScope, boundaryConditions)
 		}
+	}
+	if trace != nil {
+		trace.setScopeDerivation(normalScope, assumedScope, boundaryScope, chosenScope, scopeIntersectionEmpty)
 	}
 
 	matchedPermissions := uniqueStrings(matched)
@@ -225,35 +466,58 @@ func (c *Service) evaluateAuthz(ctx RequestContext, account Account, req CheckRe
 		result.Allowed = false
 		result.Reason = "explicit deny"
 		result.MissingPermissions = []string{permissionKey}
-		return cacheResult(result), nil
+		return result, nil
 	}
 	if len(matched) == 0 {
 		if len(relationshipDeniedBy) > 0 {
 			result.Reason = "relationship denied"
 			result.MissingPermissions = []string{permissionKey}
 			result.MatchedBy = uniqueStrings(relationshipDeniedBy)
-			return cacheResult(result), nil
+			return result, nil
 		}
 		result.Reason = "missing permission"
 		result.MissingPermissions = []string{permissionKey}
-		return cacheResult(result), nil
+		return result, nil
+	}
+	if scopeIntersectionEmpty {
+		result.Allowed = false
+		result.Reason = "scope intersection empty"
+		result.MissingPermissions = []string{permissionKey}
+		return result, nil
 	}
 	result.Reason = "matched permission"
-	return cacheResult(result), nil
+	return result, nil
 }
 
 // collectAuthzGrants 處理 collect 授權 grants 的服務流程。
 func (c *Service) collectAuthzGrants(ctx RequestContext, account Account) ([]authzGrant, []string, *AssumedRoleDecision, map[string]any, error) {
+	return c.collectAuthzGrantsWithOptions(ctx, account, authzGrantCollectionOptions{})
+}
+
+func (c *Service) collectAuthzGrantsWithOptions(ctx RequestContext, account Account, opts authzGrantCollectionOptions) ([]authzGrant, []string, *AssumedRoleDecision, map[string]any, error) {
 	grants := make([]authzGrant, 0)
 	setIDs := make([]string, 0)
 
-	addSet := func(setID, source, effect string, scope *DataScope) error {
+	addSet := func(setID, source, effect string, scope *DataScope, sourceKind authzGrantSourceKind) error {
+		setID = strings.TrimSpace(setID)
+		if setID == "" {
+			return nil
+		}
+		if _, removed := opts.removePermissionSetIDs[setID]; removed {
+			return nil
+		}
 		set, ok, err := c.store.GetPermissionSet(goContext(ctx), ctx.TenantID, setID)
 		if err != nil {
 			return err
 		}
 		if !ok {
 			return nil
+		}
+		if sourceKind == "" {
+			sourceKind = authzGrantSourceNormal
+		}
+		if mutation, ok := opts.permissionSetChanges[set.ID]; ok {
+			set.Permissions = applyPermissionSetMutation(set.Permissions, mutation)
 		}
 		setIDs = append(setIDs, set.ID)
 		for _, perm := range set.Permissions {
@@ -262,13 +526,14 @@ func (c *Service) collectAuthzGrants(ctx RequestContext, account Account) ([]aut
 				Permission:      perm,
 				PermissionSetID: set.ID,
 				Source:          source,
+				SourceKind:      sourceKind,
 				Effect:          utils.FirstNonEmpty(effect, "allow"),
 				DataScope:       scope,
 			})
 		}
 		return nil
 	}
-	addAssignments := func(principalType, principalID, sourcePrefix string) error {
+	addAssignments := func(principalType, principalID, sourcePrefix string, sourceKind authzGrantSourceKind) error {
 		assignments, err := c.store.ListPermissionSetAssignmentsForPrincipal(goContext(ctx), ctx.TenantID, principalType, principalID)
 		if err != nil {
 			return err
@@ -285,7 +550,7 @@ func (c *Service) collectAuthzGrants(ctx RequestContext, account Account) ([]aut
 				}
 				scope = &v
 			}
-			if err := addSet(assignment.PermissionSetID, sourcePrefix+":"+principalID+":"+assignment.PermissionSetID, assignment.Effect, scope); err != nil {
+			if err := addSet(assignment.PermissionSetID, sourcePrefix+":"+principalID+":"+assignment.PermissionSetID, assignment.Effect, scope, sourceKind); err != nil {
 				return err
 			}
 		}
@@ -293,35 +558,84 @@ func (c *Service) collectAuthzGrants(ctx RequestContext, account Account) ([]aut
 	}
 
 	for _, id := range account.DirectPermissionSetIDs {
-		if err := addSet(id, "direct:"+id, "allow", nil); err != nil {
+		if err := addSet(id, "direct:"+id, "allow", nil, authzGrantSourceNormal); err != nil {
 			return nil, nil, nil, nil, err
 		}
 	}
-	if err := addAssignments("account", account.ID, "account"); err != nil {
+	if err := addAssignments("account", account.ID, "account", authzGrantSourceNormal); err != nil {
 		return nil, nil, nil, nil, err
 	}
+	for _, id := range opts.addPermissionSetIDs {
+		if err := addSet(id, "simulation:permission_set:"+strings.TrimSpace(id), "allow", nil, authzGrantSourceNormal); err != nil {
+			return nil, nil, nil, nil, err
+		}
+	}
 
-	for _, groupID := range account.UserGroupIDs {
-		group, ok, err := c.store.GetUserGroup(goContext(ctx), ctx.TenantID, groupID)
+	groups, err := c.activeUserGroupsForAccount(ctx, account)
+	if err != nil {
+		return nil, nil, nil, nil, err
+	}
+	groupSeen := map[string]struct{}{}
+	filteredGroups := make([]UserGroup, 0, len(groups)+len(opts.addUserGroupIDs))
+	for _, group := range groups {
+		if _, removed := opts.removeUserGroupIDs[group.ID]; removed {
+			continue
+		}
+		if _, ok := groupSeen[group.ID]; ok {
+			continue
+		}
+		groupSeen[group.ID] = struct{}{}
+		filteredGroups = append(filteredGroups, group)
+	}
+	for _, id := range opts.addUserGroupIDs {
+		id = strings.TrimSpace(id)
+		if id == "" {
+			continue
+		}
+		if _, removed := opts.removeUserGroupIDs[id]; removed {
+			continue
+		}
+		if _, ok := groupSeen[id]; ok {
+			continue
+		}
+		group, ok, err := c.store.GetUserGroup(goContext(ctx), ctx.TenantID, id)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
 		if !ok {
-			continue
+			return nil, nil, nil, nil, NotFound("user group", id)
 		}
+		groupSeen[id] = struct{}{}
+		filteredGroups = append(filteredGroups, group)
+	}
+	for _, group := range filteredGroups {
 		for _, id := range group.PermissionSetIDs {
-			if err := addSet(id, "group:"+group.ID+":"+id, "allow", nil); err != nil {
+			if err := addSet(id, "group:"+group.ID+":"+id, "allow", nil, authzGrantSourceNormal); err != nil {
 				return nil, nil, nil, nil, err
 			}
 		}
-		if err := addAssignments("user_group", group.ID, "group"); err != nil {
+		if err := addAssignments("user_group", group.ID, "group", authzGrantSourceNormal); err != nil {
 			return nil, nil, nil, nil, err
 		}
 	}
 
-	role, session, err := c.activeAssumableRole(ctx, account)
-	if err != nil {
-		return nil, nil, nil, nil, err
+	var role *AssumableRole
+	var session *AssumableRoleSession
+	if strings.TrimSpace(opts.assumeRoleID) != "" {
+		item, ok, err := c.store.GetAssumableRole(goContext(ctx), ctx.TenantID, strings.TrimSpace(opts.assumeRoleID))
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		if !ok {
+			return nil, nil, nil, nil, NotFound("assumable role", strings.TrimSpace(opts.assumeRoleID))
+		}
+		role = &item
+	} else {
+		var err error
+		role, session, err = c.activeAssumableRole(ctx, account)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
 	}
 	var assumed *AssumedRoleDecision
 	boundary := map[string]any(nil)
@@ -329,11 +643,11 @@ func (c *Service) collectAuthzGrants(ctx RequestContext, account Account) ([]aut
 		assumed = &AssumedRoleDecision{RoleID: role.ID, Name: role.Name}
 		boundary = utils.CopyStringMap(role.PermissionBoundary)
 		for _, id := range role.PermissionSetIDs {
-			if err := addSet(id, "assumable_role:"+role.ID+":"+id, "allow", nil); err != nil {
+			if err := addSet(id, "assumable_role:"+role.ID+":"+id, "allow", nil, authzGrantSourceAssumed); err != nil {
 				return nil, nil, nil, nil, err
 			}
 		}
-		if err := addAssignments("assumable_role", role.ID, "assumable_role"); err != nil {
+		if err := addAssignments("assumable_role", role.ID, "assumable_role", authzGrantSourceAssumed); err != nil {
 			return nil, nil, nil, nil, err
 		}
 	}
@@ -348,6 +662,301 @@ func (c *Service) collectAuthzGrants(ctx RequestContext, account Account) ([]aut
 	}
 
 	return grants, uniqueStrings(setIDs), assumed, boundary, nil
+}
+
+func simulationOverridesToGrantOptions(overrides AuthzSimulationOverrides) (authzGrantCollectionOptions, error) {
+	opts := authzGrantCollectionOptions{
+		addUserGroupIDs:        uniqueStrings(overrides.AddUserGroups),
+		removeUserGroupIDs:     stringsToSet(overrides.RemoveUserGroups),
+		addPermissionSetIDs:    uniqueStrings(overrides.AddPermissionSets),
+		removePermissionSetIDs: stringsToSet(overrides.RemovePermissionSets),
+		assumeRoleID:           strings.TrimSpace(overrides.AssumeRoleID),
+		permissionSetChanges:   map[string]authzPermissionSetMutation{},
+	}
+	for _, change := range overrides.PermissionSetChanges {
+		setID := strings.TrimSpace(change.PermissionSetID)
+		if setID == "" {
+			return authzGrantCollectionOptions{}, BadRequest("permission_set_id is required for permission_set_changes")
+		}
+		mutation := opts.permissionSetChanges[setID]
+		for _, label := range change.AddPermissions {
+			perm, err := permissionFromSimulationLabel(label)
+			if err != nil {
+				return authzGrantCollectionOptions{}, err
+			}
+			mutation.addPermissions = append(mutation.addPermissions, perm)
+		}
+		mutation.removePermissions = append(mutation.removePermissions, change.RemovePermissions...)
+		opts.permissionSetChanges[setID] = mutation
+	}
+	if len(opts.permissionSetChanges) == 0 {
+		opts.permissionSetChanges = nil
+	}
+	return opts, nil
+}
+
+func applyPermissionSetMutation(existing []Permission, mutation authzPermissionSetMutation) []Permission {
+	out := make([]Permission, 0, len(existing)+len(mutation.addPermissions))
+	for _, perm := range existing {
+		if permissionRemovedBySimulation(perm, mutation.removePermissions) {
+			continue
+		}
+		out = append(out, perm)
+	}
+	for _, perm := range mutation.addPermissions {
+		if permissionRemovedBySimulation(perm, mutation.removePermissions) {
+			continue
+		}
+		if permissionSliceContains(out, perm) {
+			continue
+		}
+		out = append(out, perm)
+	}
+	return out
+}
+
+func permissionRemovedBySimulation(perm Permission, removeLabels []string) bool {
+	if len(removeLabels) == 0 {
+		return false
+	}
+	label := permissionLabel(perm)
+	key := permissionKey(normalizePermission(perm).ApplicationCode, normalizePermission(perm).ResourceType, normalizePermission(perm).Action)
+	for _, remove := range removeLabels {
+		remove = strings.TrimSpace(remove)
+		if remove == "" {
+			continue
+		}
+		if permissionLabelMatches(label, remove) || permissionKeyMatches(key, remove) {
+			return true
+		}
+	}
+	return false
+}
+
+func permissionSliceContains(items []Permission, want Permission) bool {
+	wantLabel := permissionLabel(want)
+	for _, item := range items {
+		if permissionLabel(item) == wantLabel {
+			return true
+		}
+	}
+	return false
+}
+
+func permissionFromSimulationLabel(label string) (Permission, error) {
+	label = strings.TrimSpace(label)
+	if label == "" {
+		return Permission{}, BadRequest("permission label is required")
+	}
+	base, scope, _ := strings.Cut(label, "#")
+	base, target, _ := strings.Cut(base, ":")
+	parts := strings.Split(base, ".")
+	if len(parts) < 2 {
+		return Permission{}, BadRequest("permission label must use resource.action format")
+	}
+	action := parts[len(parts)-1]
+	resource := strings.Join(parts[:len(parts)-1], ".")
+	if strings.TrimSpace(resource) == "" || strings.TrimSpace(action) == "" {
+		return Permission{}, BadRequest("permission label must use resource.action format")
+	}
+	app, resourceType := splitResource(resource)
+	return normalizePermission(Permission{
+		ApplicationCode: app,
+		ResourceType:    resourceType,
+		Resource:        resource,
+		Action:          Action(action),
+		Target:          target,
+		Scope:           Scope(scope),
+		Effect:          "allow",
+	}), nil
+}
+
+func authzSimulationDiff(before, after CheckResult) AuthzSimulationDiff {
+	return AuthzSimulationDiff{
+		AllowedChanged:            before.Allowed != after.Allowed,
+		BeforeAllowed:             before.Allowed,
+		AfterAllowed:              after.Allowed,
+		ScopeChanged:              before.EffectiveScope != after.EffectiveScope,
+		BeforeScope:               before.EffectiveScope,
+		AfterScope:                after.EffectiveScope,
+		AddedMatchedBy:            addedStrings(before.MatchedBy, after.MatchedBy),
+		RemovedMatchedBy:          removedStrings(before.MatchedBy, after.MatchedBy),
+		AddedMatchedPermissions:   addedStrings(before.MatchedPermissions, after.MatchedPermissions),
+		RemovedMatchedPermissions: removedStrings(before.MatchedPermissions, after.MatchedPermissions),
+	}
+}
+
+func addedStrings(before, after []string) []string {
+	seen := stringsToSet(before)
+	out := make([]string, 0)
+	for _, item := range after {
+		if strings.TrimSpace(item) == "" {
+			continue
+		}
+		if _, ok := seen[item]; !ok {
+			out = append(out, item)
+		}
+	}
+	return uniqueStrings(out)
+}
+
+func removedStrings(before, after []string) []string {
+	seen := stringsToSet(after)
+	out := make([]string, 0)
+	for _, item := range before {
+		if strings.TrimSpace(item) == "" {
+			continue
+		}
+		if _, ok := seen[item]; !ok {
+			out = append(out, item)
+		}
+	}
+	return uniqueStrings(out)
+}
+
+func stringsToSet(values []string) map[string]struct{} {
+	out := map[string]struct{}{}
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		out[value] = struct{}{}
+	}
+	return out
+}
+
+func (t *authzTrace) addGrant(grant authzGrant, matched bool, excludedBy string, scope Scope) {
+	if t == nil {
+		return
+	}
+	source, sourceID := authzTraceGrantSource(grant.Source, grant.PermissionSetID)
+	if scope == "" {
+		scope = authzGrantScope(grant)
+	}
+	var excluded *string
+	if excludedBy != "" {
+		value := excludedBy
+		excluded = &value
+	}
+	t.evaluatedGrants = append(t.evaluatedGrants, domain.AuthzEvaluatedGrant{
+		Source:          source,
+		SourceID:        sourceID,
+		PermissionSetID: grant.PermissionSetID,
+		Permission:      permissionLabel(grant.Permission),
+		Effect:          permissionEffect(grant),
+		Matched:         matched,
+		Scope:           scope,
+		ExcludedBy:      excluded,
+	})
+}
+
+func (t *authzTrace) addDenySource(source string) {
+	if t == nil {
+		return
+	}
+	t.denySources = append(t.denySources, source)
+}
+
+func (t *authzTrace) addBoundaryEffect(permission, effect string, matched bool) {
+	if t == nil {
+		return
+	}
+	t.boundaryEffects = append(t.boundaryEffects, domain.AuthzBoundaryEffect{
+		Source:     "permission_boundary",
+		Permission: permission,
+		Effect:     effect,
+		Matched:    matched,
+		ExcludedBy: "permission_boundary",
+	})
+}
+
+func (t *authzTrace) setScopeDerivation(normal, assumed, boundary, final Scope, intersectionEmpty bool) {
+	if t == nil {
+		return
+	}
+	t.scopeDerivation = domain.AuthzScopeDerivation{
+		Normal:            normal,
+		Assumed:           assumed,
+		Boundary:          boundary,
+		Final:             final,
+		IntersectionEmpty: intersectionEmpty,
+	}
+}
+
+func (t *authzTrace) response(decision CheckResult) AuthzExplainResponse {
+	if t == nil {
+		return AuthzExplainResponse{Decision: decision, EvaluatedGrants: []domain.AuthzEvaluatedGrant{}}
+	}
+	evaluatedGrants := t.evaluatedGrants
+	if evaluatedGrants == nil {
+		evaluatedGrants = []domain.AuthzEvaluatedGrant{}
+	}
+	return AuthzExplainResponse{
+		Decision:        decision,
+		EvaluatedGrants: evaluatedGrants,
+		DenySources:     uniqueStrings(t.denySources),
+		BoundaryEffects: uniqueBoundaryEffects(t.boundaryEffects),
+		ScopeDerivation: t.scopeDerivation,
+	}
+}
+
+func uniqueBoundaryEffects(items []domain.AuthzBoundaryEffect) []domain.AuthzBoundaryEffect {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := map[string]struct{}{}
+	out := make([]domain.AuthzBoundaryEffect, 0, len(items))
+	for _, item := range items {
+		key := item.Source + "|" + item.Permission + "|" + item.Effect + "|" + fmt.Sprint(item.Matched) + "|" + item.ExcludedBy
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func authzGrantScope(grant authzGrant) Scope {
+	if grant.DataScope != nil {
+		return Scope(grant.DataScope.ScopeType)
+	}
+	if grant.Permission.Scope != "" {
+		return grant.Permission.Scope
+	}
+	return ScopeAll
+}
+
+func authzTraceGrantSource(source, permissionSetID string) (string, string) {
+	if source == "" {
+		return "permission_set", permissionSetID
+	}
+	parts := strings.Split(source, ":")
+	switch parts[0] {
+	case "direct":
+		return "direct", valueAt(parts, 1, permissionSetID)
+	case "account":
+		return "account", valueAt(parts, 1, "")
+	case "group":
+		return "user_group", valueAt(parts, 1, "")
+	case "assumable_role":
+		return "assumable_role", valueAt(parts, 1, "")
+	case "simulation":
+		if len(parts) >= 3 && parts[1] == "permission_set" {
+			return "simulation_permission_set", parts[2]
+		}
+		return "simulation", strings.Join(parts[1:], ":")
+	default:
+		return parts[0], strings.Join(parts[1:], ":")
+	}
+}
+
+func valueAt(values []string, index int, fallback string) string {
+	if index >= 0 && index < len(values) && values[index] != "" {
+		return values[index]
+	}
+	return fallback
 }
 
 // activeAssumableRole 處理啟用中 assumable 角色的服務流程。
@@ -996,6 +1605,263 @@ func mergeScopeConditions(current, candidate map[string]any) map[string]any {
 		return nil
 	}
 	return out
+}
+
+// intersectScopes 以 AND 語義收斂兩個資料範圍。
+func intersectScopes(leftScope Scope, leftConditions map[string]any, rightScope Scope, rightConditions map[string]any) (Scope, map[string]any, bool) {
+	if rightScope == "" {
+		return leftScope, utils.CopyStringMap(leftConditions), false
+	}
+	if leftScope == "" {
+		return rightScope, utils.CopyStringMap(rightConditions), false
+	}
+	outConditions, empty := intersectScopeConditions(leftConditions, rightConditions)
+	if empty {
+		return narrowerScope(leftScope, rightScope), outConditions, true
+	}
+	outScope := narrowerScope(leftScope, rightScope)
+	if requiresCustomIntersectionScope(leftScope, rightScope, outScope, outConditions) {
+		outScope = ScopeCustomCondition
+		if outConditions == nil {
+			outConditions = map[string]any{}
+		}
+		outConditions["scope"] = ScopeCustomCondition
+		delete(outConditions, "scope_check")
+		delete(outConditions, "scope_check_scope")
+	}
+	return outScope, outConditions, false
+}
+
+// narrowerScope 回傳交集後較窄的枚舉範圍。
+func narrowerScope(left, right Scope) Scope {
+	if left == "" {
+		return right
+	}
+	if right == "" {
+		return left
+	}
+	leftRank := scopeRank(left)
+	rightRank := scopeRank(right)
+	if rightRank < leftRank {
+		return right
+	}
+	if leftRank < rightRank {
+		return left
+	}
+	if left == right {
+		return left
+	}
+	if left == ScopeTenant && right == ScopeAll {
+		return left
+	}
+	if right == ScopeTenant && left == ScopeAll {
+		return right
+	}
+	return left
+}
+
+// intersectScopeConditions 合併兩組條件；同 key 結構化條件取交集，不同 key 保留為 AND。
+func intersectScopeConditions(left, right map[string]any) (map[string]any, bool) {
+	out := utils.CopyStringMap(left)
+	if out == nil {
+		out = map[string]any{}
+	}
+	for key, value := range right {
+		if isScopeMetadataKey(key) {
+			if _, exists := out[key]; !exists {
+				out[key] = value
+			}
+			continue
+		}
+		if isStructuredScopeConditionKey(key) {
+			rightValues := stringSliceFromAny(value)
+			if len(rightValues) == 0 {
+				return out, true
+			}
+			if existing, exists := out[key]; exists {
+				leftValues := stringSliceFromAny(existing)
+				if len(leftValues) == 0 {
+					return out, true
+				}
+				intersection := intersectStringSlices(leftValues, rightValues)
+				if len(intersection) == 0 {
+					out[key] = []string{}
+					return out, true
+				}
+				out[key] = intersection
+				continue
+			}
+			out[key] = uniqueStrings(rightValues)
+			continue
+		}
+		if existing, exists := out[key]; exists {
+			if key == "tenant_id" && fmt.Sprint(existing) != fmt.Sprint(value) {
+				return out, true
+			}
+			if !reflect.DeepEqual(existing, value) {
+				return out, true
+			}
+			continue
+		}
+		out[key] = value
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return out, false
+}
+
+func requiresCustomIntersectionScope(left, right, out Scope, conditions map[string]any) bool {
+	if out == ScopeCustomCondition {
+		return true
+	}
+	if left != "" && right != "" && left != right && scopeRank(left) == scopeRank(right) {
+		return true
+	}
+	restrictiveKeys := 0
+	for _, key := range []string{"employee_ids", "org_unit_ids", "account_ids", "employee_statuses", "statuses"} {
+		if len(stringSliceFromAny(conditions[key])) > 0 {
+			restrictiveKeys++
+		}
+	}
+	return restrictiveKeys > 1
+}
+
+func isScopeMetadataKey(key string) bool {
+	switch key {
+	case "scope", "scope_check", "scope_check_scope":
+		return true
+	default:
+		return false
+	}
+}
+
+func isStructuredScopeConditionKey(key string) bool {
+	switch key {
+	case "employee_ids", "org_unit_ids", "account_ids", "employee_statuses", "statuses":
+		return true
+	default:
+		return false
+	}
+}
+
+func intersectStringSlices(left, right []string) []string {
+	if len(left) == 0 || len(right) == 0 {
+		return nil
+	}
+	allowed := map[string]struct{}{}
+	for _, value := range left {
+		if strings.TrimSpace(value) != "" {
+			allowed[value] = struct{}{}
+		}
+	}
+	out := make([]string, 0)
+	for _, value := range right {
+		if strings.TrimSpace(value) == "" {
+			continue
+		}
+		if _, ok := allowed[value]; ok {
+			out = append(out, value)
+		}
+	}
+	return uniqueStrings(out)
+}
+
+// boundaryScopeDecision 解析 permission boundary/session policy 中的資料範圍約束。
+func (c *Service) boundaryScopeDecision(ctx RequestContext, account Account, boundary map[string]any) (Scope, map[string]any, bool, error) {
+	if len(boundary) == 0 {
+		return "", nil, false, nil
+	}
+	scope, params, ok := boundaryScopeSpec(boundary)
+	if !ok {
+		return "", nil, false, nil
+	}
+	if scope == "" {
+		scope = ScopeCustomCondition
+	}
+	conditions, err := c.scopeConditions(ctx, account, scope, params)
+	if err != nil {
+		return "", nil, false, err
+	}
+	return scope, conditions, true, nil
+}
+
+func boundaryScopeSpec(boundary map[string]any) (Scope, map[string]any, bool) {
+	params := map[string]any{}
+	if conditions, ok := mapFromAny(boundary["conditions"]); ok {
+		for key, value := range conditions {
+			params[key] = value
+		}
+	}
+	scope := scopeFromAny(boundary["scope"])
+	if scope == "" {
+		scope = scopeFromAny(boundary["scope_type"])
+	}
+	if dataScope, ok := mapFromAny(boundary["data_scope"]); ok {
+		if nestedScope := scopeFromAny(dataScope["scope"]); nestedScope != "" {
+			scope = nestedScope
+		}
+		if nestedScope := scopeFromAny(dataScope["scope_type"]); nestedScope != "" {
+			scope = nestedScope
+		}
+		if nestedParams, ok := mapFromAny(dataScope["params"]); ok {
+			for key, value := range nestedParams {
+				params[key] = value
+			}
+		}
+		for key, value := range dataScope {
+			if isBoundaryScopeParamKey(key) {
+				params[key] = value
+			}
+		}
+	}
+	for key, value := range boundary {
+		if isBoundaryScopeParamKey(key) {
+			params[key] = value
+		}
+	}
+	if scope == "" && len(params) == 0 {
+		return "", nil, false
+	}
+	return scope, params, true
+}
+
+func isBoundaryScopeParamKey(key string) bool {
+	if isStructuredScopeConditionKey(key) {
+		return true
+	}
+	switch key {
+	case "scope_check", "scope_check_scope":
+		return true
+	default:
+		return false
+	}
+}
+
+func scopeFromAny(value any) Scope {
+	switch v := value.(type) {
+	case Scope:
+		return v
+	case string:
+		return Scope(strings.TrimSpace(v))
+	default:
+		return ""
+	}
+}
+
+func mapFromAny(value any) (map[string]any, bool) {
+	switch v := value.(type) {
+	case map[string]any:
+		return v, true
+	case map[string]string:
+		out := make(map[string]any, len(v))
+		for key, item := range v {
+			out[key] = item
+		}
+		return out, true
+	default:
+		return nil, false
+	}
 }
 
 // scopeRank 處理範圍 rank。

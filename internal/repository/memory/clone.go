@@ -1,6 +1,9 @@
 package memory
 
-import "nexus-pro-be/internal/utils"
+import (
+	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/utils"
+)
 
 // copyPermissions 複製權限。
 func copyPermissions(src []Permission) []Permission {
@@ -42,9 +45,120 @@ func copyUserGroup(v UserGroup) UserGroup {
 	return v
 }
 
+// copyGroupMembership 複製使用者群組成員關係。
+func copyGroupMembership(v GroupMembership) GroupMembership {
+	if v.ValidUntil != nil {
+		t := *v.ValidUntil
+		v.ValidUntil = &t
+	}
+	return v
+}
+
 // copyPermissionSet 複製權限集合。
 func copyPermissionSet(v PermissionSet) PermissionSet {
 	v.Permissions = copyPermissions(v.Permissions)
+	return v
+}
+
+// copyPermissionPackage 複製權限包。
+func copyPermissionPackage(v PermissionPackage) PermissionPackage {
+	v.Content = copyPermissionPackageContent(v.Content)
+	if v.PublishedAt != nil {
+		t := *v.PublishedAt
+		v.PublishedAt = &t
+	}
+	return v
+}
+
+// copyPermissionPackageContent 複製權限包內容。
+func copyPermissionPackageContent(v PermissionPackageContent) PermissionPackageContent {
+	if len(v.ResourceTypes) > 0 {
+		v.ResourceTypes = append([]domain.PermissionPackageResourceType(nil), v.ResourceTypes...)
+		for i := range v.ResourceTypes {
+			v.ResourceTypes[i].Actions = utils.CopyStrings(v.ResourceTypes[i].Actions)
+		}
+	}
+	if len(v.Actions) > 0 {
+		v.Actions = append([]domain.PermissionPackageAction(nil), v.Actions...)
+	}
+	v.Permissions = copyPermissions(v.Permissions)
+	if len(v.Menus) > 0 {
+		v.Menus = copyPermissionPackageMenus(v.Menus)
+	}
+	if len(v.Buttons) > 0 {
+		v.Buttons = append([]domain.PermissionPackageButton(nil), v.Buttons...)
+	}
+	if len(v.Fields) > 0 {
+		v.Fields = append([]domain.PermissionPackageField(nil), v.Fields...)
+	}
+	if len(v.DataScopes) > 0 {
+		v.DataScopes = append([]domain.PermissionPackageDataScope(nil), v.DataScopes...)
+		for i := range v.DataScopes {
+			v.DataScopes[i].Params = utils.CopyStringMap(v.DataScopes[i].Params)
+		}
+	}
+	if len(v.PermissionSetTemplates) > 0 {
+		v.PermissionSetTemplates = append([]domain.PermissionSetTemplateContent(nil), v.PermissionSetTemplates...)
+		for i := range v.PermissionSetTemplates {
+			v.PermissionSetTemplates[i].Permissions = copyPermissions(v.PermissionSetTemplates[i].Permissions)
+		}
+	}
+	if len(v.UserGroupTemplates) > 0 {
+		v.UserGroupTemplates = append([]domain.UserGroupTemplateContent(nil), v.UserGroupTemplates...)
+		for i := range v.UserGroupTemplates {
+			v.UserGroupTemplates[i].PermissionSetTemplateKeys = utils.CopyStrings(v.UserGroupTemplates[i].PermissionSetTemplateKeys)
+		}
+	}
+	if len(v.AssumableRoleTemplates) > 0 {
+		v.AssumableRoleTemplates = append([]domain.AssumableRoleTemplateContent(nil), v.AssumableRoleTemplates...)
+		for i := range v.AssumableRoleTemplates {
+			v.AssumableRoleTemplates[i].PermissionSetTemplateKeys = utils.CopyStrings(v.AssumableRoleTemplates[i].PermissionSetTemplateKeys)
+			v.AssumableRoleTemplates[i].TrustPolicy = utils.CopyStringMap(v.AssumableRoleTemplates[i].TrustPolicy)
+			v.AssumableRoleTemplates[i].PermissionBoundary = utils.CopyStringMap(v.AssumableRoleTemplates[i].PermissionBoundary)
+		}
+	}
+	if len(v.FGAMappings) > 0 {
+		v.FGAMappings = append([]domain.PermissionPackageFGAMapping(nil), v.FGAMappings...)
+	}
+	return v
+}
+
+// copyPermissionPackageMenus 複製權限包選單。
+func copyPermissionPackageMenus(src []domain.PermissionPackageMenu) []domain.PermissionPackageMenu {
+	if len(src) == 0 {
+		return nil
+	}
+	dst := make([]domain.PermissionPackageMenu, len(src))
+	for i, item := range src {
+		item.Children = copyPermissionPackageMenus(item.Children)
+		dst[i] = item
+	}
+	return dst
+}
+
+// copyPermissionSetTemplate 複製權限集合模板。
+func copyPermissionSetTemplate(v PermissionSetTemplate) PermissionSetTemplate {
+	v.Content.Permissions = copyPermissions(v.Content.Permissions)
+	return v
+}
+
+// copyUserGroupTemplate 複製使用者群組模板。
+func copyUserGroupTemplate(v UserGroupTemplate) UserGroupTemplate {
+	v.Content.PermissionSetTemplateKeys = utils.CopyStrings(v.Content.PermissionSetTemplateKeys)
+	return v
+}
+
+// copyAssumableRoleTemplate 複製可承擔角色模板。
+func copyAssumableRoleTemplate(v AssumableRoleTemplate) AssumableRoleTemplate {
+	v.Content.PermissionSetTemplateKeys = utils.CopyStrings(v.Content.PermissionSetTemplateKeys)
+	v.Content.TrustPolicy = utils.CopyStringMap(v.Content.TrustPolicy)
+	v.Content.PermissionBoundary = utils.CopyStringMap(v.Content.PermissionBoundary)
+	return v
+}
+
+// copyPermissionPackageImport 複製權限包導入記錄。
+func copyPermissionPackageImport(v PermissionPackageImport) PermissionPackageImport {
+	v.ArtifactIDMap = utils.CopyStringMap(v.ArtifactIDMap)
 	return v
 }
 

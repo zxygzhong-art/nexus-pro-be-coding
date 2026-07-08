@@ -14,20 +14,35 @@ import (
 )
 
 const (
-	openFGATypeTenant    = "tenant"
-	openFGATypeOrgUnit   = "org_unit"
-	openFGATypeUserGroup = "user_group"
-	openFGATypeEmployee  = "hr.employee"
+	openFGATypeTenant        = "tenant"
+	openFGATypeOrgUnit       = "org_unit"
+	openFGATypeUserGroup     = "user_group"
+	openFGATypeEmployee      = "hr.employee"
+	openFGATypeAssumableRole = "assumable_role"
+	openFGATypeAgentTool     = "agent_tool"
 
-	openFGARelationTenantMember      = "member"
-	openFGARelationOrgUnitParent     = "parent"
-	openFGARelationOrgUnitMember     = "member"
-	openFGARelationOrgUnitManager    = "manager"
-	openFGARelationUserGroupMember   = "member"
-	openFGARelationEmployeeOrg       = "org"
-	openFGARelationOrgUnitMemberTree = "member_recursive"
-	openFGASubjectTypeAccount        = "account"
-	openFGASubjectTypeOrgUnit        = "org_unit"
+	openFGARelationTenant              = "tenant"
+	openFGARelationTenantMember        = "member"
+	openFGARelationTenantAdmin         = "admin"
+	openFGARelationTenantSecurityAdmin = "security_admin"
+	openFGARelationOrgUnitParent       = "parent"
+	openFGARelationOrgUnitMember       = "member"
+	openFGARelationOrgUnitManager      = "manager"
+	openFGARelationOrgUnitMemberTree   = "member_recursive"
+	openFGARelationUserGroupMember     = "member"
+	openFGARelationUserGroupManager    = "manager"
+	openFGARelationEmployeeOrg         = "org"
+	openFGARelationTrustedUser         = "trusted_user"
+	openFGARelationTrustedGroup        = "trusted_group"
+	openFGARelationApprover            = "approver"
+	openFGARelationCanAssume           = "can_assume"
+	openFGARelationRunner              = "runner"
+	openFGARelationCanRun              = "can_run"
+	openFGARelationCanExecuteHighRisk  = "can_execute_high_risk"
+	openFGASubjectTypeAccount          = "account"
+	openFGASubjectTypeOrgUnit          = "org_unit"
+	openFGASubjectTypeTenant           = "tenant"
+	openFGASubjectTypeUserGroupMember  = "user_group#member"
 )
 
 // OpenFGABackfillInput 定義 OpenFGA tuple backfill 輸入。
@@ -45,6 +60,50 @@ type OpenFGABackfillResult struct {
 	SkippedTuples int    `json:"skipped_tuples"`
 	OutboxEvents  int    `json:"outbox_events"`
 	DryRun        bool   `json:"dry_run"`
+}
+
+// OpenFGAGrantRelationshipInput 定義手工授權 OpenFGA tuple 輸入。
+type OpenFGAGrantRelationshipInput struct {
+	TenantID    string
+	ObjectType  string
+	ObjectID    string
+	Relation    string
+	SubjectType string
+	SubjectID   string
+	DryRun      bool
+	Logger      *slog.Logger
+}
+
+// OpenFGAGrantRelationshipResult 定義手工授權 OpenFGA tuple 結果。
+type OpenFGAGrantRelationshipResult struct {
+	TenantID     string `json:"tenant_id"`
+	ObjectType   string `json:"object_type"`
+	ObjectID     string `json:"object_id"`
+	Relation     string `json:"relation"`
+	SubjectType  string `json:"subject_type"`
+	SubjectID    string `json:"subject_id"`
+	Created      bool   `json:"created"`
+	Skipped      bool   `json:"skipped"`
+	OutboxEvents int    `json:"outbox_events"`
+	DryRun       bool   `json:"dry_run"`
+}
+
+// OpenFGAGrantTenantAdminInput 定義租戶管理員 tuple 手工授權輸入。
+type OpenFGAGrantTenantAdminInput struct {
+	TenantID  string
+	AccountID string
+	DryRun    bool
+	Logger    *slog.Logger
+}
+
+// OpenFGAGrantAgentToolInput 定義 agent tool tuple 手工授權輸入。
+type OpenFGAGrantAgentToolInput struct {
+	TenantID  string
+	ToolID    string
+	AccountID string
+	Relation  string
+	DryRun    bool
+	Logger    *slog.Logger
 }
 
 // OpenFGABackfillTuples 依租戶來源資料補齊 OpenFGA relationship tuple。
@@ -163,6 +222,7 @@ func (c *Service) desiredOpenFGATuples(ctx context.Context, tenantID string) ([]
 		return nil, err
 	}
 	for _, unit := range orgUnits {
+		add(openFGATypeOrgUnit, unit.ID, openFGARelationTenant, openFGASubjectTypeTenant, tenant.ID)
 		add(openFGATypeOrgUnit, unit.ID, openFGARelationOrgUnitParent, openFGASubjectTypeOrgUnit, unit.ParentID)
 	}
 
@@ -193,7 +253,184 @@ func (c *Service) desiredOpenFGATuples(ctx context.Context, tenantID string) ([]
 		}
 	}
 
+	roles, err := c.store.ListAssumableRoles(ctx, tenant.ID)
+	if err != nil {
+		return nil, err
+	}
+	for _, role := range roles {
+		for _, tuple := range assumableRoleRelationshipTuples(RequestContext{TenantID: tenant.ID}, role, now) {
+			out = append(out, tuple)
+		}
+	}
+
+	for _, toolID := range defaultAgentToolIDs() {
+		add(openFGATypeAgentTool, toolID, openFGARelationTenant, openFGASubjectTypeTenant, tenant.ID)
+	}
+
 	return dedupeAndSortRelationshipTuples(out), nil
+}
+
+// OpenFGAGrantTenantAdmin 手工授予 tenant#admin。
+func (c *Service) OpenFGAGrantTenantAdmin(ctx context.Context, input OpenFGAGrantTenantAdminInput) (OpenFGAGrantRelationshipResult, error) {
+	return c.openFGAGrantTenantAccountRelation(ctx, input, openFGARelationTenantAdmin)
+}
+
+// OpenFGAGrantTenantSecurityAdmin 手工授予 tenant#security_admin。
+func (c *Service) OpenFGAGrantTenantSecurityAdmin(ctx context.Context, input OpenFGAGrantTenantAdminInput) (OpenFGAGrantRelationshipResult, error) {
+	return c.openFGAGrantTenantAccountRelation(ctx, input, openFGARelationTenantSecurityAdmin)
+}
+
+// OpenFGAGrantAgentTool 手工授予 agent_tool runner/approver。
+func (c *Service) OpenFGAGrantAgentTool(ctx context.Context, input OpenFGAGrantAgentToolInput) (OpenFGAGrantRelationshipResult, error) {
+	tenantID := strings.TrimSpace(input.TenantID)
+	toolID := strings.TrimSpace(input.ToolID)
+	accountID := strings.TrimSpace(input.AccountID)
+	relation := strings.TrimSpace(input.Relation)
+	if relation == "" {
+		relation = openFGARelationRunner
+	}
+	if relation != openFGARelationRunner && relation != openFGARelationApprover {
+		return OpenFGAGrantRelationshipResult{}, BadRequest("relation must be runner or approver")
+	}
+	if toolID == "" {
+		return OpenFGAGrantRelationshipResult{}, BadRequest("tool_id is required")
+	}
+	if err := c.validateOpenFGATenantAccount(ctx, tenantID, accountID); err != nil {
+		return OpenFGAGrantRelationshipResult{}, err
+	}
+	return c.OpenFGAGrantRelationship(ctx, OpenFGAGrantRelationshipInput{
+		TenantID:    tenantID,
+		ObjectType:  openFGATypeAgentTool,
+		ObjectID:    toolID,
+		Relation:    relation,
+		SubjectType: openFGASubjectTypeAccount,
+		SubjectID:   accountID,
+		DryRun:      input.DryRun,
+		Logger:      input.Logger,
+	})
+}
+
+// OpenFGAGrantRelationship 寫入單筆手工 OpenFGA tuple，保持冪等。
+func (c *Service) OpenFGAGrantRelationship(ctx context.Context, input OpenFGAGrantRelationshipInput) (OpenFGAGrantRelationshipResult, error) {
+	tenantID := strings.TrimSpace(input.TenantID)
+	if tenantID == "" {
+		return OpenFGAGrantRelationshipResult{}, BadRequest("tenant_id is required")
+	}
+	if c == nil || c.store == nil {
+		return OpenFGAGrantRelationshipResult{}, BadRequest("service store is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	logger := input.Logger
+	if logger == nil {
+		logger = c.logger
+	}
+	if logger == nil {
+		logger = slog.Default()
+	}
+	result := OpenFGAGrantRelationshipResult{
+		TenantID:    tenantID,
+		ObjectType:  strings.TrimSpace(input.ObjectType),
+		ObjectID:    strings.TrimSpace(input.ObjectID),
+		Relation:    strings.TrimSpace(input.Relation),
+		SubjectType: strings.TrimSpace(input.SubjectType),
+		SubjectID:   strings.TrimSpace(input.SubjectID),
+		DryRun:      input.DryRun,
+	}
+	err := repository.WithinTenantTransaction(ctx, c.store, tenantID, func(store repository.Store) error {
+		next := *c
+		next.store = store
+		tuple := normalizeAuthzRelationshipTuple(RequestContext{Context: ctx, TenantID: tenantID}, domain.AuthzRelationshipTuple{
+			TenantID:    tenantID,
+			ObjectType:  result.ObjectType,
+			ObjectID:    result.ObjectID,
+			Relation:    result.Relation,
+			SubjectType: result.SubjectType,
+			SubjectID:   result.SubjectID,
+		}, next.Now())
+		if tuple.ObjectType == "" || tuple.ObjectID == "" || tuple.Relation == "" || tuple.SubjectType == "" || tuple.SubjectID == "" {
+			return BadRequest("object_type, object_id, relation, subject_type and subject_id are required")
+		}
+		exists, err := next.relationshipTupleExists(ctx, tuple)
+		if err != nil {
+			return err
+		}
+		if exists {
+			result.Skipped = true
+			return nil
+		}
+		result.Created = true
+		if input.DryRun {
+			return nil
+		}
+		if err := next.applyRelationshipTupleChange(RequestContext{Context: ctx, TenantID: tenantID}, domain.AuthzRelationshipTupleChange{
+			Operation: domain.AuthzRelationshipTupleWrite,
+			Tuple:     tuple,
+		}); err != nil {
+			return err
+		}
+		result.OutboxEvents = 1
+		return nil
+	})
+	if err != nil {
+		return OpenFGAGrantRelationshipResult{}, err
+	}
+	logger.InfoContext(ctx, "openfga relationship tuple grant completed",
+		"tenant_id", result.TenantID,
+		"object_type", result.ObjectType,
+		"object_id", result.ObjectID,
+		"relation", result.Relation,
+		"subject_type", result.SubjectType,
+		"subject_id", result.SubjectID,
+		"created", result.Created,
+		"skipped", result.Skipped,
+		"dry_run", result.DryRun,
+	)
+	return result, nil
+}
+
+func (c *Service) openFGAGrantTenantAccountRelation(ctx context.Context, input OpenFGAGrantTenantAdminInput, relation string) (OpenFGAGrantRelationshipResult, error) {
+	tenantID := strings.TrimSpace(input.TenantID)
+	accountID := strings.TrimSpace(input.AccountID)
+	if err := c.validateOpenFGATenantAccount(ctx, tenantID, accountID); err != nil {
+		return OpenFGAGrantRelationshipResult{}, err
+	}
+	return c.OpenFGAGrantRelationship(ctx, OpenFGAGrantRelationshipInput{
+		TenantID:    tenantID,
+		ObjectType:  openFGATypeTenant,
+		ObjectID:    tenantID,
+		Relation:    relation,
+		SubjectType: openFGASubjectTypeAccount,
+		SubjectID:   accountID,
+		DryRun:      input.DryRun,
+		Logger:      input.Logger,
+	})
+}
+
+func (c *Service) validateOpenFGATenantAccount(ctx context.Context, tenantID, accountID string) error {
+	tenantID = strings.TrimSpace(tenantID)
+	accountID = strings.TrimSpace(accountID)
+	if tenantID == "" {
+		return BadRequest("tenant_id is required")
+	}
+	if accountID == "" {
+		return BadRequest("account_id is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if _, ok, err := c.store.GetTenant(ctx, tenantID); err != nil {
+		return err
+	} else if !ok {
+		return NotFound("tenant", tenantID)
+	}
+	if _, ok, err := c.store.GetAccount(ctx, tenantID, accountID); err != nil {
+		return err
+	} else if !ok {
+		return NotFound("account", accountID)
+	}
+	return nil
 }
 
 // applyRelationshipTupleChange 寫入本地 tuple 並產生 OpenFGA outbox 事件。
@@ -261,10 +498,16 @@ func (c *Service) syncAccountTenantMembershipTuple(ctx RequestContext, before, a
 
 // syncOrgUnitRelationshipTuples 同步 org_unit parent tuple。
 func (c *Service) syncOrgUnitRelationshipTuples(ctx RequestContext, before, after OrgUnit) error {
-	changes := make([]domain.AuthzRelationshipTupleChange, 0, 2)
+	changes := make([]domain.AuthzRelationshipTupleChange, 0, 4)
 	objectID := strings.TrimSpace(after.ID)
 	if objectID == "" {
 		objectID = strings.TrimSpace(before.ID)
+	}
+	if before.TenantID != "" && before.TenantID != after.TenantID {
+		changes = append(changes, relationshipTupleChange(ctx, domain.AuthzRelationshipTupleDelete, openFGATypeOrgUnit, objectID, openFGARelationTenant, openFGASubjectTypeTenant, before.TenantID, c.Now()))
+	}
+	if after.TenantID != "" && before.TenantID != after.TenantID {
+		changes = append(changes, relationshipTupleChange(ctx, domain.AuthzRelationshipTupleWrite, openFGATypeOrgUnit, objectID, openFGARelationTenant, openFGASubjectTypeTenant, after.TenantID, c.Now()))
 	}
 	if before.ParentID != "" && before.ParentID != after.ParentID {
 		changes = append(changes, relationshipTupleChange(ctx, domain.AuthzRelationshipTupleDelete, openFGATypeOrgUnit, objectID, openFGARelationOrgUnitParent, openFGASubjectTypeOrgUnit, before.ParentID, c.Now()))
@@ -278,6 +521,91 @@ func (c *Service) syncOrgUnitRelationshipTuples(ctx RequestContext, before, afte
 		}
 	}
 	return nil
+}
+
+// syncAssumableRoleRelationshipTuples 同步 assumable_role tenant/trust tuples。
+func (c *Service) syncAssumableRoleRelationshipTuples(ctx RequestContext, before, after AssumableRole) error {
+	now := c.Now()
+	beforeTuples := assumableRoleRelationshipTuples(ctx, before, now)
+	afterTuples := assumableRoleRelationshipTuples(ctx, after, now)
+	beforeByKey := map[string]domain.AuthzRelationshipTuple{}
+	afterByKey := map[string]domain.AuthzRelationshipTuple{}
+	for _, tuple := range beforeTuples {
+		beforeByKey[relationshipTupleIdentity(tuple)] = tuple
+	}
+	for _, tuple := range afterTuples {
+		afterByKey[relationshipTupleIdentity(tuple)] = tuple
+	}
+	changes := make([]domain.AuthzRelationshipTupleChange, 0, len(beforeByKey)+len(afterByKey))
+	for key, tuple := range beforeByKey {
+		if _, ok := afterByKey[key]; !ok {
+			changes = append(changes, domain.AuthzRelationshipTupleChange{Operation: domain.AuthzRelationshipTupleDelete, Tuple: tuple})
+		}
+	}
+	for key, tuple := range afterByKey {
+		if _, ok := beforeByKey[key]; !ok {
+			changes = append(changes, domain.AuthzRelationshipTupleChange{Operation: domain.AuthzRelationshipTupleWrite, Tuple: tuple})
+		}
+	}
+	for _, change := range dedupeRelationshipTupleChanges(changes) {
+		if err := c.applyRelationshipTupleChange(ctx, change); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func assumableRoleRelationshipTuples(ctx RequestContext, role AssumableRole, now time.Time) []domain.AuthzRelationshipTuple {
+	if strings.TrimSpace(role.ID) == "" {
+		return nil
+	}
+	tenantID := strings.TrimSpace(role.TenantID)
+	if tenantID == "" {
+		tenantID = strings.TrimSpace(ctx.TenantID)
+	}
+	if tenantID == "" {
+		return nil
+	}
+	out := make([]domain.AuthzRelationshipTuple, 0)
+	add := func(relation, subjectType, subjectID string) {
+		subjectID = strings.TrimSpace(subjectID)
+		if subjectID == "" {
+			return
+		}
+		out = append(out, domain.AuthzRelationshipTuple{
+			ID:          utils.NewID("rel"),
+			TenantID:    tenantID,
+			ObjectType:  openFGATypeAssumableRole,
+			ObjectID:    role.ID,
+			Relation:    relation,
+			SubjectType: subjectType,
+			SubjectID:   subjectID,
+			CreatedAt:   now,
+		})
+	}
+	add(openFGARelationTenant, openFGASubjectTypeTenant, tenantID)
+	if !role.Trusted {
+		return dedupeAndSortRelationshipTuples(out)
+	}
+	for _, accountID := range trustPolicyAccountIDs(role.TrustPolicy) {
+		add(openFGARelationTrustedUser, openFGASubjectTypeAccount, accountID)
+	}
+	for _, groupID := range trustPolicyUserGroupIDs(role.TrustPolicy) {
+		add(openFGARelationTrustedGroup, openFGASubjectTypeUserGroupMember, groupID)
+	}
+	return dedupeAndSortRelationshipTuples(out)
+}
+
+func trustPolicyAccountIDs(policy map[string]any) []string {
+	return uniqueStrings(append(stringSliceFromAny(policy["accounts"]), stringSliceFromAny(policy["account_ids"])...))
+}
+
+func trustPolicyUserGroupIDs(policy map[string]any) []string {
+	return uniqueStrings(append(stringSliceFromAny(policy["user_groups"]), stringSliceFromAny(policy["user_group_ids"])...))
+}
+
+func defaultAgentToolIDs() []string {
+	return []string{"knowledge.search"}
 }
 
 // syncUserGroupRelationshipTuples 同步 user_group#member tuple。

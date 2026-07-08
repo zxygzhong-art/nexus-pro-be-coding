@@ -90,6 +90,14 @@ const (
 	ErrorCodeDataScopeDenied ErrorCode = 20044
 	// ErrorCodeApprovalRequired 說明此處的錯誤處理語義。
 	ErrorCodeApprovalRequired ErrorCode = 20045
+	// ErrorCodeCrossTenantDenied 說明此處的錯誤處理語義。
+	ErrorCodeCrossTenantDenied ErrorCode = 20046
+	// ErrorCodePermissionPackageInvalid 說明此處的錯誤處理語義。
+	ErrorCodePermissionPackageInvalid ErrorCode = 20047
+	// ErrorCodePermissionPackageVersionConflict 說明此處的錯誤處理語義。
+	ErrorCodePermissionPackageVersionConflict ErrorCode = 20048
+	// ErrorCodePermissionPackageStateConflict 說明此處的錯誤處理語義。
+	ErrorCodePermissionPackageStateConflict ErrorCode = 20049
 	// ErrorCodeNotFound 說明此處的錯誤處理語義。
 	ErrorCodeNotFound ErrorCode = 10050
 	// ErrorCodeConflict 說明此處的錯誤處理語義。
@@ -151,6 +159,8 @@ func reasonErrorCode(reason string) (ErrorCode, bool) {
 		return ErrorCodeDataScopeDenied, true
 	case "approval_required":
 		return ErrorCodeApprovalRequired, true
+	case "cross_tenant_denied":
+		return ErrorCodeCrossTenantDenied, true
 	default:
 		return 0, false
 	}

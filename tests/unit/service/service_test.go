@@ -373,6 +373,8 @@ func TestAssumableRoleSessionPolicyCanOnlyShrink(t *testing.T) {
 		Name:     "Assume Roles",
 		Permissions: []domain.Permission{
 			{Resource: "iam.assumable_role", Action: "assume", Target: "role-hr", Scope: "all"},
+			{Resource: "hr.employee", Action: "read", Scope: "all"},
+			{Resource: "hr.employee", Action: "export", Scope: "all"},
 		},
 		CreatedAt: now,
 	})
@@ -496,6 +498,7 @@ func TestAssumableRoleSessionBypassesAuthzSnapshot(t *testing.T) {
 		Name:     "Assume Roles",
 		Permissions: []domain.Permission{
 			{Resource: "iam.assumable_role", Action: "assume", Target: "role-hr", Scope: "all"},
+			{Resource: "hr.employee", Action: "read", Scope: "all"},
 		},
 		CreatedAt: now,
 	})

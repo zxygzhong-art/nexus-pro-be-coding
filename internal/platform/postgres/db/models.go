@@ -45,7 +45,18 @@ type AssumableRole struct {
 	TrustPolicy            []byte             `json:"trust_policy"`
 	PermissionBoundary     []byte             `json:"permission_boundary"`
 	SessionDurationSeconds int32              `json:"session_duration_seconds"`
+	SourceTemplateKey      string             `json:"source_template_key"`
+	SourcePackageVersion   string             `json:"source_package_version"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
+}
+
+type AssumableRoleTemplate struct {
+	ID          string `json:"id"`
+	PackageID   string `json:"package_id"`
+	TemplateKey string `json:"template_key"`
+	Name        string `json:"name"`
+	Content     []byte `json:"content"`
+	Version     string `json:"version"`
 }
 
 type AttendanceClockRecord struct {
@@ -447,12 +458,35 @@ type Permission struct {
 }
 
 type PermissionSet struct {
-	ID          string             `json:"id"`
-	TenantID    string             `json:"tenant_id"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	Permissions []byte             `json:"permissions"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ID                   string             `json:"id"`
+	TenantID             string             `json:"tenant_id"`
+	Name                 string             `json:"name"`
+	Description          string             `json:"description"`
+	Permissions          []byte             `json:"permissions"`
+	SourceTemplateKey    string             `json:"source_template_key"`
+	SourcePackageVersion string             `json:"source_package_version"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type PermissionPackage struct {
+	ID              string             `json:"id"`
+	ApplicationCode string             `json:"application_code"`
+	Version         string             `json:"version"`
+	Status          string             `json:"status"`
+	Content         []byte             `json:"content"`
+	Checksum        string             `json:"checksum"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	PublishedAt     pgtype.Timestamptz `json:"published_at"`
+}
+
+type PermissionPackageImport struct {
+	ID            string             `json:"id"`
+	TenantID      string             `json:"tenant_id"`
+	PackageID     string             `json:"package_id"`
+	Version       string             `json:"version"`
+	ImportedAt    pgtype.Timestamptz `json:"imported_at"`
+	ImportedBy    string             `json:"imported_by"`
+	ArtifactIDMap []byte             `json:"artifact_id_map"`
 }
 
 type PermissionSetItem struct {
@@ -461,6 +495,15 @@ type PermissionSetItem struct {
 	PermissionSetID string             `json:"permission_set_id"`
 	PermissionID    string             `json:"permission_id"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type PermissionSetTemplate struct {
+	ID          string `json:"id"`
+	PackageID   string `json:"package_id"`
+	TemplateKey string `json:"template_key"`
+	Name        string `json:"name"`
+	Content     []byte `json:"content"`
+	Version     string `json:"version"`
 }
 
 type PlatformTaskItem struct {
@@ -509,14 +552,38 @@ type Tenant struct {
 }
 
 type UserGroup struct {
-	ID               string             `json:"id"`
-	TenantID         string             `json:"tenant_id"`
-	Name             string             `json:"name"`
-	Description      string             `json:"description"`
-	MemberAccountIds []string           `json:"member_account_ids"`
-	PermissionSetIds []string           `json:"permission_set_ids"`
-	Version          int64              `json:"version"`
-	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	ID                   string             `json:"id"`
+	TenantID             string             `json:"tenant_id"`
+	Name                 string             `json:"name"`
+	Description          string             `json:"description"`
+	MemberAccountIds     []string           `json:"member_account_ids"`
+	PermissionSetIds     []string           `json:"permission_set_ids"`
+	SourceTemplateKey    string             `json:"source_template_key"`
+	SourcePackageVersion string             `json:"source_package_version"`
+	Version              int64              `json:"version"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+type UserGroupTemplate struct {
+	ID          string `json:"id"`
+	PackageID   string `json:"package_id"`
+	TemplateKey string `json:"template_key"`
+	Name        string `json:"name"`
+	Content     []byte `json:"content"`
+	Version     string `json:"version"`
+}
+
+type AuthzGroupMembership struct {
+	ID                 string             `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	UserGroupID        string             `json:"user_group_id"`
+	AccountID          string             `json:"account_id"`
+	ValidFrom          pgtype.Timestamptz `json:"valid_from"`
+	ValidUntil         pgtype.Timestamptz `json:"valid_until"`
+	Source             string             `json:"source"`
+	ApprovalInstanceID string             `json:"approval_instance_id"`
+	CreatedBy          string             `json:"created_by"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
 type UserIdentity struct {

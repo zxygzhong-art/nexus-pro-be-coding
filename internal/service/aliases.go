@@ -10,10 +10,31 @@ type (
 	IdentityResolution                 = domain.IdentityResolution
 	UserIdentity                       = domain.UserIdentity
 	UserGroup                          = domain.UserGroup
+	GroupMembership                    = domain.GroupMembership
 	PermissionSet                      = domain.PermissionSet
 	Permission                         = domain.Permission
 	PermissionType                     = domain.PermissionType
 	PermissionCatalogItem              = domain.PermissionCatalogItem
+	PermissionPackage                  = domain.PermissionPackage
+	PermissionPackageContent           = domain.PermissionPackageContent
+	PermissionPackageResourceType      = domain.PermissionPackageResourceType
+	PermissionPackageAction            = domain.PermissionPackageAction
+	PermissionPackageMenu              = domain.PermissionPackageMenu
+	PermissionPackageButton            = domain.PermissionPackageButton
+	PermissionPackageField             = domain.PermissionPackageField
+	PermissionPackageDataScope         = domain.PermissionPackageDataScope
+	PermissionPackageFGAMapping        = domain.PermissionPackageFGAMapping
+	PermissionSetTemplateContent       = domain.PermissionSetTemplateContent
+	UserGroupTemplateContent           = domain.UserGroupTemplateContent
+	AssumableRoleTemplateContent       = domain.AssumableRoleTemplateContent
+	PermissionSetTemplate              = domain.PermissionSetTemplate
+	UserGroupTemplate                  = domain.UserGroupTemplate
+	AssumableRoleTemplate              = domain.AssumableRoleTemplate
+	PermissionPackageImport            = domain.PermissionPackageImport
+	PermissionPackageImportDiff        = domain.PermissionPackageImportDiff
+	PermissionPackageImportResult      = domain.PermissionPackageImportResult
+	IAMApplication                     = domain.IAMApplication
+	IAMResourceType                    = domain.IAMResourceType
 	MenuItem                           = domain.MenuItem
 	PermissionSetItem                  = domain.PermissionSetItem
 	PermissionSetAssignment            = domain.PermissionSetAssignment
@@ -171,7 +192,11 @@ type (
 	MenuListResponse                   = domain.MenuListResponse
 	AssumeRoleResponse                 = domain.AssumeRoleResponse
 	AuthzExplainResponse               = domain.AuthzExplainResponse
+	AuthzSimulationRequest             = domain.AuthzSimulationRequest
+	AuthzSimulationOverrides           = domain.AuthzSimulationOverrides
+	AuthzPermissionSetChange           = domain.AuthzPermissionSetChange
 	AuthzSimulationResponse            = domain.AuthzSimulationResponse
+	AuthzSimulationDiff                = domain.AuthzSimulationDiff
 	IAMRoleProjection                  = domain.IAMRoleProjection
 	IAMRoleBindingProjection           = domain.IAMRoleBindingProjection
 )
@@ -179,19 +204,25 @@ type (
 // Domain 說明此處的程式契約。
 type (
 	CreateUserGroupInput                    = domain.CreateUserGroupInput
+	UpdateUserGroupInput                    = domain.UpdateUserGroupInput
+	AddUserGroupMemberInput                 = domain.AddUserGroupMemberInput
 	CreatePermissionSetInput                = domain.CreatePermissionSetInput
 	CreatePermissionSetAssignmentInput      = domain.CreatePermissionSetAssignmentInput
 	CreateFieldPolicyInput                  = domain.CreateFieldPolicyInput
+	UpdateFieldPolicyInput                  = domain.UpdateFieldPolicyInput
 	CreateDataScopeInput                    = domain.CreateDataScopeInput
+	UpdateDataScopeInput                    = domain.UpdateDataScopeInput
+	OutboxEventQuery                        = domain.OutboxEventQuery
 	CreateAssumableRoleInput                = domain.CreateAssumableRoleInput
+	UpdateAssumableRoleInput                = domain.UpdateAssumableRoleInput
 	AssumeRoleInput                         = domain.AssumeRoleInput
 	CreateOrgUnitInput                      = domain.CreateOrgUnitInput
 	CreatePositionInput                     = domain.CreatePositionInput
 	UpdatePositionInput                     = domain.UpdatePositionInput
 	CreateEmployeeInput                     = domain.CreateEmployeeInput
 	UpdateEmployeeInput                     = domain.UpdateEmployeeInput
-	CreateEmploymentContractInput          = domain.CreateEmploymentContractInput
-	UpdateEmploymentContractInput          = domain.UpdateEmploymentContractInput
+	CreateEmploymentContractInput           = domain.CreateEmploymentContractInput
+	UpdateEmploymentContractInput           = domain.UpdateEmploymentContractInput
 	EmployeePreviewResponse                 = domain.EmployeePreviewResponse
 	EmployeeAvatarInput                     = domain.EmployeeAvatarInput
 	EmployeeImportPreviewInput              = domain.EmployeeImportPreviewInput
@@ -247,9 +278,10 @@ const (
 	EffectAllow = domain.EffectAllow
 	EffectDeny  = domain.EffectDeny
 
-	SeverityLow    = domain.SeverityLow
-	SeverityMedium = domain.SeverityMedium
-	SeverityHigh   = domain.SeverityHigh
+	SeverityLow      = domain.SeverityLow
+	SeverityMedium   = domain.SeverityMedium
+	SeverityHigh     = domain.SeverityHigh
+	SeverityCritical = domain.SeverityCritical
 
 	PrincipalTypeAccount       = domain.PrincipalTypeAccount
 	PrincipalTypeUserGroup     = domain.PrincipalTypeUserGroup
@@ -295,6 +327,10 @@ const (
 	PermissionTypeField  = domain.PermissionTypeField
 	PermissionTypeScope  = domain.PermissionTypeScope
 
+	PermissionPackageStatusDraft      = domain.PermissionPackageStatusDraft
+	PermissionPackageStatusPublished  = domain.PermissionPackageStatusPublished
+	PermissionPackageStatusDeprecated = domain.PermissionPackageStatusDeprecated
+
 	ResourceEmployee                  = domain.ResourceEmployee
 	ResourceEmployeeImport            = domain.ResourceEmployeeImport
 	ResourceOrgUnit                   = domain.ResourceOrgUnit
@@ -308,10 +344,14 @@ const (
 	ResourceAttendanceCorrection      = domain.ResourceAttendanceCorrection
 	ResourceUserGroup                 = domain.ResourceUserGroup
 	ResourcePermission                = domain.ResourcePermission
+	ResourcePermissionPackage         = domain.ResourcePermissionPackage
 	ResourcePermissionSet             = domain.ResourcePermissionSet
 	ResourcePermissionAssign          = domain.ResourcePermissionAssign
 	ResourceDataScope                 = domain.ResourceDataScope
 	ResourceFieldPolicy               = domain.ResourceFieldPolicy
+	ResourceApplication               = domain.ResourceApplication
+	ResourceResourceType              = domain.ResourceResourceType
+	ResourceOutboxEvent               = domain.ResourceOutboxEvent
 	ResourceAssumableRole             = domain.ResourceAssumableRole
 	ResourceTool                      = domain.ResourceTool
 	ResourceEmployeeCollection        = domain.ResourceEmployeeCollection

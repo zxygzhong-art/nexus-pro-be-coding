@@ -31,7 +31,13 @@ func (s *Store) cloneLocked() *Store {
 		accounts:               cloneNestedMap(s.accounts, copyAccount),
 		userIdentities:         cloneNestedMap(s.userIdentities, copyUserIdentity),
 		userGroups:             cloneNestedMap(s.userGroups, copyUserGroup),
+		groupMemberships:       cloneNestedMap(s.groupMemberships, copyGroupMembership),
 		permissionSets:         cloneNestedMap(s.permissionSets, copyPermissionSet),
+		permissionPackages:     cloneMap(s.permissionPackages, copyPermissionPackage),
+		permissionSetTemplates: cloneNestedMap(s.permissionSetTemplates, copyPermissionSetTemplate),
+		userGroupTemplates:     cloneNestedMap(s.userGroupTemplates, copyUserGroupTemplate),
+		assumableRoleTemplates: cloneNestedMap(s.assumableRoleTemplates, copyAssumableRoleTemplate),
+		permissionImports:      cloneNestedMap(s.permissionImports, copyPermissionPackageImport),
 		permissionCatalog:      cloneNestedMap(s.permissionCatalog, copyPermissionCatalogItem),
 		menuItems:              cloneNestedMap(s.menuItems, copyMenuItem),
 		permissionSetItems:     cloneNestedMap(s.permissionSetItems, copyPermissionSetItem),
@@ -80,7 +86,13 @@ func (s *Store) replaceLocked(next *Store) {
 	s.accounts = next.accounts
 	s.userIdentities = next.userIdentities
 	s.userGroups = next.userGroups
+	s.groupMemberships = next.groupMemberships
 	s.permissionSets = next.permissionSets
+	s.permissionPackages = next.permissionPackages
+	s.permissionSetTemplates = next.permissionSetTemplates
+	s.userGroupTemplates = next.userGroupTemplates
+	s.assumableRoleTemplates = next.assumableRoleTemplates
+	s.permissionImports = next.permissionImports
 	s.permissionCatalog = next.permissionCatalog
 	s.menuItems = next.menuItems
 	s.permissionSetItems = next.permissionSetItems

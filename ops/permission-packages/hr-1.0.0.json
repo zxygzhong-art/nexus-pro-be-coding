@@ -1,0 +1,1623 @@
+{
+  "application_code": "hr",
+  "version": "1.0.0",
+  "resource_types": [
+    {
+      "application_code": "agent",
+      "resource_type": "run",
+      "actions": [
+        "create",
+        "read"
+      ]
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "clock",
+      "actions": [
+        "create",
+        "read"
+      ]
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "correction",
+      "actions": [
+        "approve",
+        "create",
+        "read",
+        "update"
+      ]
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "leave",
+      "actions": [
+        "create",
+        "read",
+        "update"
+      ]
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "shift",
+      "actions": [
+        "create",
+        "read",
+        "update"
+      ]
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "shift_assignment",
+      "actions": [
+        "create",
+        "read"
+      ]
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "worksite",
+      "actions": [
+        "create",
+        "read",
+        "update"
+      ]
+    },
+    {
+      "application_code": "audit",
+      "resource_type": "audit_log",
+      "actions": [
+        "read"
+      ]
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "actions": [
+        "create",
+        "delete",
+        "export",
+        "import",
+        "invite",
+        "read",
+        "status_transition",
+        "update",
+        "update_status"
+      ]
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employment_contract",
+      "actions": [
+        "create",
+        "delete",
+        "read",
+        "update"
+      ]
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "org_unit",
+      "actions": [
+        "create",
+        "read"
+      ]
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "position",
+      "actions": [
+        "create",
+        "delete",
+        "read",
+        "update"
+      ]
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "application",
+      "actions": [
+        "read"
+      ]
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "assumable_role",
+      "actions": [
+        "assume",
+        "create",
+        "read"
+      ]
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "authz",
+      "actions": [
+        "check",
+        "explain",
+        "simulate"
+      ]
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "data_scope",
+      "actions": [
+        "create",
+        "delete",
+        "read",
+        "update"
+      ]
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "field_policy",
+      "actions": [
+        "create",
+        "delete",
+        "read",
+        "update"
+      ]
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "outbox_event",
+      "actions": [
+        "read",
+        "update"
+      ]
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission",
+      "actions": [
+        "read"
+      ]
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_package",
+      "actions": [
+        "create",
+        "import",
+        "publish",
+        "read"
+      ]
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_set",
+      "actions": [
+        "create",
+        "read"
+      ]
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_set_assignment",
+      "actions": [
+        "create",
+        "delete",
+        "read",
+        "update"
+      ]
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "resource_type",
+      "actions": [
+        "read"
+      ]
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "user_group",
+      "actions": [
+        "create",
+        "read",
+        "update"
+      ]
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "actions": [
+        "create",
+        "delete",
+        "read",
+        "update"
+      ]
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "actions": [
+        "approve",
+        "delete",
+        "read",
+        "submit",
+        "update"
+      ]
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_template",
+      "actions": [
+        "create",
+        "delete",
+        "read",
+        "update"
+      ]
+    }
+  ],
+  "actions": [
+    {
+      "action": "approve",
+      "high_risk": true
+    },
+    {
+      "action": "assume",
+      "high_risk": true
+    },
+    {
+      "action": "check"
+    },
+    {
+      "action": "create",
+      "high_risk": true
+    },
+    {
+      "action": "delete",
+      "high_risk": true
+    },
+    {
+      "action": "explain"
+    },
+    {
+      "action": "export",
+      "high_risk": true
+    },
+    {
+      "action": "import",
+      "high_risk": true
+    },
+    {
+      "action": "invite",
+      "high_risk": true
+    },
+    {
+      "action": "publish",
+      "high_risk": true
+    },
+    {
+      "action": "read",
+      "high_risk": true
+    },
+    {
+      "action": "simulate",
+      "high_risk": true
+    },
+    {
+      "action": "status_transition",
+      "high_risk": true
+    },
+    {
+      "action": "submit"
+    },
+    {
+      "action": "update",
+      "high_risk": true
+    },
+    {
+      "action": "update_status",
+      "high_risk": true
+    }
+  ],
+  "permissions": [
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "read"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "authz",
+      "resource": "iam.authz",
+      "action": "check"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "authz",
+      "resource": "iam.authz",
+      "action": "check"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "authz",
+      "resource": "iam.authz",
+      "action": "explain"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "authz",
+      "resource": "iam.authz",
+      "action": "simulate",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "application",
+      "resource": "iam.application",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "resource_type",
+      "resource": "iam.resource_type",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission",
+      "resource": "iam.permission",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_package",
+      "resource": "iam.permission_package",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_package",
+      "resource": "iam.permission_package",
+      "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_package",
+      "resource": "iam.permission_package",
+      "action": "publish",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_package",
+      "resource": "iam.permission_package",
+      "action": "import",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "assumable_role",
+      "resource": "iam.assumable_role",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_set_assignment",
+      "resource": "iam.permission_set_assignment",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "user_group",
+      "resource": "iam.user_group",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "user_group",
+      "resource": "iam.user_group",
+      "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "user_group",
+      "resource": "iam.user_group",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "user_group",
+      "resource": "iam.user_group",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "user_group",
+      "resource": "iam.user_group",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "user_group",
+      "resource": "iam.user_group",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_set",
+      "resource": "iam.permission_set",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_set",
+      "resource": "iam.permission_set",
+      "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_set_assignment",
+      "resource": "iam.permission_set_assignment",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_set_assignment",
+      "resource": "iam.permission_set_assignment",
+      "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "data_scope",
+      "resource": "iam.data_scope",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "data_scope",
+      "resource": "iam.data_scope",
+      "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "data_scope",
+      "resource": "iam.data_scope",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "data_scope",
+      "resource": "iam.data_scope",
+      "action": "delete",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "field_policy",
+      "resource": "iam.field_policy",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "field_policy",
+      "resource": "iam.field_policy",
+      "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "field_policy",
+      "resource": "iam.field_policy",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "field_policy",
+      "resource": "iam.field_policy",
+      "action": "delete",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "outbox_event",
+      "resource": "iam.outbox_event",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "outbox_event",
+      "resource": "iam.outbox_event",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "assumable_role",
+      "resource": "iam.assumable_role",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "assumable_role",
+      "resource": "iam.assumable_role",
+      "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "assumable_role",
+      "resource": "iam.assumable_role",
+      "action": "assume",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "position",
+      "resource": "hr.position",
+      "action": "read"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "position",
+      "resource": "hr.position",
+      "action": "create"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "position",
+      "resource": "hr.position",
+      "action": "read"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "position",
+      "resource": "hr.position",
+      "action": "update"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "position",
+      "resource": "hr.position",
+      "action": "delete",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "read"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "read"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "create"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "create"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "update"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "update"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "update"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "update"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "read"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "read"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "read"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "import",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "import",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "import",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "export",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "export",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "delete",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "delete",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "update_status",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "invite",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "status_transition",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employment_contract",
+      "resource": "hr.employment_contract",
+      "action": "read",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employment_contract",
+      "resource": "hr.employment_contract",
+      "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employment_contract",
+      "resource": "hr.employment_contract",
+      "action": "read",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employment_contract",
+      "resource": "hr.employment_contract",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employment_contract",
+      "resource": "hr.employment_contract",
+      "action": "delete",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "org_unit",
+      "resource": "hr.org_unit",
+      "action": "read"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "org_unit",
+      "resource": "hr.org_unit",
+      "action": "create"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "leave",
+      "resource": "attendance.leave",
+      "action": "read"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "leave",
+      "resource": "attendance.leave",
+      "action": "read"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "leave",
+      "resource": "attendance.leave",
+      "action": "create"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "leave",
+      "resource": "attendance.leave",
+      "action": "read"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "leave",
+      "resource": "attendance.leave",
+      "action": "create"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "leave",
+      "resource": "attendance.leave",
+      "action": "read"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "leave",
+      "resource": "attendance.leave",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "worksite",
+      "resource": "attendance.worksite",
+      "action": "read"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "worksite",
+      "resource": "attendance.worksite",
+      "action": "create"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "worksite",
+      "resource": "attendance.worksite",
+      "action": "update"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "shift",
+      "resource": "attendance.shift",
+      "action": "read"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "shift",
+      "resource": "attendance.shift",
+      "action": "create"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "shift",
+      "resource": "attendance.shift",
+      "action": "update"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "shift_assignment",
+      "resource": "attendance.shift_assignment",
+      "action": "read"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "shift_assignment",
+      "resource": "attendance.shift_assignment",
+      "action": "create"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "clock",
+      "resource": "attendance.clock",
+      "action": "read"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "clock",
+      "resource": "attendance.clock",
+      "action": "read"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "clock",
+      "resource": "attendance.clock",
+      "action": "create"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "correction",
+      "resource": "attendance.correction",
+      "action": "read"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "correction",
+      "resource": "attendance.correction",
+      "action": "create"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "correction",
+      "resource": "attendance.correction",
+      "action": "approve",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "correction",
+      "resource": "attendance.correction",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "read"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "read"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "read"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "read"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "create"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "update"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "delete"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "create"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "update"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "delete"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "update"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "read"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "read"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "update"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "update"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "read"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "read"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "read"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "read"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "update"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "read"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "clock",
+      "resource": "attendance.clock",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_set_assignment",
+      "resource": "iam.permission_set_assignment",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_set_assignment",
+      "resource": "iam.permission_set_assignment",
+      "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_set_assignment",
+      "resource": "iam.permission_set_assignment",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_set_assignment",
+      "resource": "iam.permission_set_assignment",
+      "action": "delete",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_template",
+      "resource": "workflow.form_template",
+      "action": "read"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_template",
+      "resource": "workflow.form_template",
+      "action": "create"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_template",
+      "resource": "workflow.form_template",
+      "action": "update"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_template",
+      "resource": "workflow.form_template",
+      "action": "delete",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "audit",
+      "resource_type": "audit_log",
+      "resource": "audit.audit_log",
+      "action": "read"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "read"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_template",
+      "resource": "workflow.form_template",
+      "action": "read"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_template",
+      "resource": "workflow.form_template",
+      "action": "create"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "resource": "workflow.form_instance",
+      "action": "read"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "resource": "workflow.form_instance",
+      "action": "read"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "resource": "workflow.form_instance",
+      "action": "update"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "resource": "workflow.form_instance",
+      "action": "submit"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "resource": "workflow.form_instance",
+      "action": "read"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "resource": "workflow.form_instance",
+      "action": "read"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "resource": "workflow.form_instance",
+      "action": "update"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "resource": "workflow.form_instance",
+      "action": "delete"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "resource": "workflow.form_instance",
+      "action": "submit"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "resource": "workflow.form_instance",
+      "action": "approve"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "resource": "workflow.form_instance",
+      "action": "update"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "resource": "workflow.form_instance",
+      "action": "update"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "resource": "workflow.form_instance",
+      "action": "update"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "resource": "workflow.form_instance",
+      "action": "submit"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "run",
+      "resource": "agent.run",
+      "action": "read"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "run",
+      "resource": "agent.run",
+      "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "audit",
+      "resource_type": "audit_log",
+      "resource": "audit.audit_log",
+      "action": "read"
+    }
+  ],
+  "menus": [
+    {
+      "key": "workbench",
+      "label": "工作台",
+      "path": "/"
+    },
+    {
+      "key": "hr",
+      "label": "HR 主資料",
+      "path": "/workspace",
+      "children": [
+        {
+          "key": "hr.employees",
+          "label": "員工",
+          "path": "/workspace/employees"
+        },
+        {
+          "key": "hr.org_units",
+          "label": "組織",
+          "path": "/workspace/organization",
+          "sort_order": 1
+        },
+        {
+          "key": "attendance",
+          "label": "假勤",
+          "path": "/workspace/attendance",
+          "children": [
+            {
+              "key": "attendance.clock",
+              "label": "上下班打卡",
+              "path": "/workspace/clock"
+            },
+            {
+              "key": "attendance.corrections",
+              "label": "補卡申請",
+              "path": "/workspace/clock",
+              "sort_order": 1
+            },
+            {
+              "key": "attendance.leave",
+              "label": "請假申請",
+              "path": "/workspace/leave-policy",
+              "sort_order": 2
+            },
+            {
+              "key": "attendance.worksites",
+              "label": "辦公地點",
+              "path": "/workspace/leave-policy",
+              "sort_order": 3
+            },
+            {
+              "key": "attendance.shifts",
+              "label": "班次規則",
+              "path": "/workspace/leave-policy",
+              "sort_order": 4
+            },
+            {
+              "key": "attendance.shift_assignments",
+              "label": "員工排班",
+              "path": "/workspace/leave-policy",
+              "sort_order": 5
+            }
+          ],
+          "sort_order": 2
+        }
+      ],
+      "sort_order": 1
+    },
+    {
+      "key": "workflow",
+      "label": "表單審批",
+      "path": "/workspace/forms",
+      "children": [
+        {
+          "key": "workflow.forms",
+          "label": "動態表單",
+          "path": "/workspace/forms"
+        },
+        {
+          "key": "workflow.instances",
+          "label": "流程實例",
+          "path": "/workspace/forms",
+          "sort_order": 1
+        }
+      ],
+      "sort_order": 2
+    },
+    {
+      "key": "iam",
+      "label": "權限中心",
+      "path": "/workspace/admins",
+      "children": [
+        {
+          "key": "iam.user_groups",
+          "label": "使用者群組",
+          "path": "/iam/user-groups"
+        },
+        {
+          "key": "iam.permission_sets",
+          "label": "權限集合",
+          "path": "/workspace/admins",
+          "sort_order": 1
+        },
+        {
+          "key": "iam.assumable_roles",
+          "label": "可承擔身分",
+          "path": "/iam/assumable-roles",
+          "sort_order": 2
+        }
+      ],
+      "sort_order": 3
+    },
+    {
+      "key": "agents",
+      "label": "AI Agent",
+      "path": "/agents",
+      "children": [
+        {
+          "key": "agents.runs",
+          "label": "Agent Runs",
+          "path": "/agents/runs"
+        }
+      ],
+      "sort_order": 4
+    },
+    {
+      "key": "audit",
+      "label": "審計中心",
+      "path": "/workspace/audit-log",
+      "sort_order": 5
+    }
+  ],
+  "buttons": [],
+  "fields": [
+    {
+      "resource_type": "employee",
+      "field_name": "basic_info.national_id",
+      "effect": "mask",
+      "description": "Mask sensitive employee identity fields by default."
+    }
+  ],
+  "data_scopes": [
+    {
+      "code": "hr_all",
+      "name": "HR 全部資料",
+      "scope_type": "all"
+    },
+    {
+      "code": "hr_self",
+      "name": "HR 本人資料",
+      "scope_type": "self"
+    }
+  ],
+  "permission_set_templates": [
+    {
+      "template_key": "hr_employee_base",
+      "name": "員工基礎權限",
+      "description": "員工自助入口與本人資料讀取。",
+      "permissions": [
+        {
+          "application_code": "platform",
+          "resource_type": "me",
+          "resource": "me",
+          "action": "read",
+          "scope": "self",
+          "menu_key": "workbench"
+        },
+        {
+          "application_code": "hr",
+          "resource_type": "employee",
+          "resource": "hr.employee",
+          "action": "read",
+          "scope": "self",
+          "menu_key": "hr.employees"
+        },
+        {
+          "application_code": "attendance",
+          "resource_type": "clock",
+          "resource": "attendance.clock",
+          "action": "create",
+          "scope": "self",
+          "menu_key": "attendance.clock"
+        },
+        {
+          "application_code": "attendance",
+          "resource_type": "leave",
+          "resource": "attendance.leave",
+          "action": "create",
+          "scope": "self",
+          "menu_key": "attendance.leave"
+        }
+      ]
+    },
+    {
+      "template_key": "hr_management",
+      "name": "HR 管理權限",
+      "description": "HR 主資料、組織、假勤與權限管理常用操作。",
+      "permissions": [
+        {
+          "application_code": "hr",
+          "resource_type": "employee",
+          "resource": "hr.employee",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "hr.employees"
+        },
+        {
+          "application_code": "hr",
+          "resource_type": "employee",
+          "resource": "hr.employee",
+          "action": "create",
+          "scope": "all",
+          "menu_key": "hr.employees"
+        },
+        {
+          "application_code": "hr",
+          "resource_type": "employee",
+          "resource": "hr.employee",
+          "action": "update",
+          "scope": "all",
+          "menu_key": "hr.employees"
+        },
+        {
+          "application_code": "hr",
+          "resource_type": "employee",
+          "resource": "hr.employee",
+          "action": "export",
+          "scope": "all",
+          "menu_key": "hr.employees"
+        },
+        {
+          "application_code": "hr",
+          "resource_type": "employee",
+          "resource": "hr.employee",
+          "action": "import",
+          "scope": "all",
+          "menu_key": "hr.employees"
+        },
+        {
+          "application_code": "hr",
+          "resource_type": "org_unit",
+          "resource": "hr.org_unit",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "hr.org_units"
+        },
+        {
+          "application_code": "hr",
+          "resource_type": "org_unit",
+          "resource": "hr.org_unit",
+          "action": "create",
+          "scope": "all",
+          "menu_key": "hr.org_units"
+        },
+        {
+          "application_code": "hr",
+          "resource_type": "org_unit",
+          "resource": "hr.org_unit",
+          "action": "update",
+          "scope": "all",
+          "menu_key": "hr.org_units"
+        },
+        {
+          "application_code": "attendance",
+          "resource_type": "leave",
+          "resource": "attendance.leave",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "attendance.leave"
+        },
+        {
+          "application_code": "attendance",
+          "resource_type": "clock",
+          "resource": "attendance.clock",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "attendance.clock"
+        },
+        {
+          "application_code": "attendance",
+          "resource_type": "correction",
+          "resource": "attendance.correction",
+          "action": "approve",
+          "scope": "all",
+          "menu_key": "attendance.corrections"
+        },
+        {
+          "application_code": "iam",
+          "resource_type": "permission_set",
+          "resource": "iam.permission_set",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "iam.permission_sets"
+        },
+        {
+          "application_code": "iam",
+          "resource_type": "permission_set_assignment",
+          "resource": "iam.permission_set_assignment",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "iam.permission_sets"
+        }
+      ]
+    },
+    {
+      "template_key": "platform_readonly_troubleshooting",
+      "name": "平台唯讀排障權限",
+      "description": "平台與審計唯讀排障用權限集合。",
+      "permissions": [
+        {
+          "application_code": "platform",
+          "resource_type": "me",
+          "resource": "me",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "workbench"
+        },
+        {
+          "application_code": "audit",
+          "resource_type": "log",
+          "resource": "audit.log",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "audit"
+        },
+        {
+          "application_code": "iam",
+          "resource_type": "permission",
+          "resource": "iam.permission",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "iam.permission_sets"
+        },
+        {
+          "application_code": "iam",
+          "resource_type": "permission_set",
+          "resource": "iam.permission_set",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "iam.permission_sets"
+        }
+      ]
+    }
+  ],
+  "user_group_templates": [
+    {
+      "template_key": "employees",
+      "name": "員工基礎組",
+      "description": "所有員工的基礎自助權限組。",
+      "permission_set_template_keys": [
+        "hr_employee_base"
+      ]
+    },
+    {
+      "template_key": "hr_managers",
+      "name": "HR 管理組",
+      "description": "HR 管理人員常用權限組。",
+      "permission_set_template_keys": [
+        "hr_management"
+      ]
+    }
+  ],
+  "assumable_role_templates": [
+    {
+      "template_key": "platform_readonly_troubleshooter",
+      "name": "平台只讀排障",
+      "description": "短時承擔的唯讀排障角色。",
+      "permission_set_template_keys": [
+        "platform_readonly_troubleshooting"
+      ],
+      "trusted": true,
+      "trust_policy": {
+        "purpose": "troubleshooting",
+        "require_approval": true
+      },
+      "permission_boundary": {
+        "effect": "allow_readonly"
+      },
+      "session_duration_seconds": 3600
+    }
+  ],
+  "fga_mappings": [
+    {
+      "resource_type": "employee",
+      "openfga_type": "employee"
+    },
+    {
+      "resource_type": "org_unit",
+      "openfga_type": "org_unit"
+    },
+    {
+      "resource_type": "permission_set_assignment",
+      "openfga_type": "permission_set_assignment"
+    },
+    {
+      "resource_type": "assumable_role",
+      "openfga_type": "assumable_role"
+    }
+  ]
+}

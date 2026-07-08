@@ -12,4 +12,5 @@ type AccountStore interface {
 	GetAccount(ctx context.Context, tenantID, id string) (domain.Account, bool, error)
 	ListAccounts(ctx context.Context, tenantID string) ([]domain.Account, error)
 	AddAccountGroup(ctx context.Context, tenantID, accountID, groupID string) error
+	RemoveAccountGroup(ctx context.Context, tenantID, accountID, groupID string) error
 }

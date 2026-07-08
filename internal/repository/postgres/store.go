@@ -250,17 +250,38 @@ func (s *Store) AddAccountGroup(execCtx context.Context, tenantID, accountID, gr
 	return s.UpsertAccount(execCtx, account)
 }
 
+// RemoveAccountGroup 從儲存層處理 remove 帳號群組。
+func (s *Store) RemoveAccountGroup(execCtx context.Context, tenantID, accountID, groupID string) error {
+	account, ok, err := s.GetAccount(execCtx, tenantID, accountID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	next := make([]string, 0, len(account.UserGroupIDs))
+	for _, id := range account.UserGroupIDs {
+		if id != groupID {
+			next = append(next, id)
+		}
+	}
+	account.UserGroupIDs = next
+	return s.UpsertAccount(execCtx, account)
+}
+
 // UpsertUserGroup 從儲存層處理 upsert 使用者群組。Version > 0 時執行樂觀鎖檢查。
 func (s *Store) UpsertUserGroup(execCtx context.Context, v domain.UserGroup) error {
 	_, err := s.q.UpsertUserGroup(execCtx, sqlc.UpsertUserGroupParams{
-		ID:               v.ID,
-		TenantID:         v.TenantID,
-		Name:             v.Name,
-		Description:      v.Description,
-		MemberAccountIds: textArray(v.MemberAccountIDs),
-		PermissionSetIds: textArray(v.PermissionSetIDs),
-		CreatedAt:        timestamptz(v.CreatedAt),
-		ExpectedVersion:  v.Version,
+		ID:                   v.ID,
+		TenantID:             v.TenantID,
+		Name:                 v.Name,
+		Description:          v.Description,
+		MemberAccountIds:     textArray(v.MemberAccountIDs),
+		PermissionSetIds:     textArray(v.PermissionSetIDs),
+		SourceTemplateKey:    v.SourceTemplateKey,
+		SourcePackageVersion: v.SourcePackageVersion,
+		CreatedAt:            timestamptz(v.CreatedAt),
+		ExpectedVersion:      v.Version,
 	})
 	if isNotFound(err) {
 		return domain.Conflict("user group was modified concurrently")
@@ -289,15 +310,91 @@ func (s *Store) ListUserGroups(execCtx context.Context, tenantID string) ([]doma
 	return mapSlice(items, fromUserGroup), nil
 }
 
+// UpsertGroupMembership 從儲存層處理 upsert 使用者群組成員關係。
+func (s *Store) UpsertGroupMembership(execCtx context.Context, v domain.GroupMembership) error {
+	_, err := s.q.UpsertGroupMembership(tenantContext(execCtx, v.TenantID), sqlc.UpsertGroupMembershipParams{
+		ID:                 v.ID,
+		TenantID:           v.TenantID,
+		UserGroupID:        v.UserGroupID,
+		AccountID:          v.AccountID,
+		ValidFrom:          timestamptz(v.ValidFrom),
+		ValidUntil:         nullableTimestamptz(v.ValidUntil),
+		Source:             v.Source,
+		ApprovalInstanceID: v.ApprovalInstanceID,
+		CreatedBy:          v.CreatedBy,
+		CreatedAt:          timestamptz(v.CreatedAt),
+	})
+	return err
+}
+
+// DeleteGroupMembership 從儲存層刪除使用者群組成員關係。
+func (s *Store) DeleteGroupMembership(execCtx context.Context, tenantID, userGroupID, accountID string) (domain.GroupMembership, bool, error) {
+	v, err := s.q.DeleteGroupMembership(tenantContext(execCtx, tenantID), sqlc.DeleteGroupMembershipParams{
+		TenantID:    tenantID,
+		UserGroupID: userGroupID,
+		AccountID:   accountID,
+	})
+	if isNotFound(err) {
+		return domain.GroupMembership{}, false, nil
+	}
+	if err != nil {
+		return domain.GroupMembership{}, false, err
+	}
+	return fromGroupMembership(v), true, nil
+}
+
+// GetGroupMembership 從儲存層取得使用者群組成員關係。
+func (s *Store) GetGroupMembership(execCtx context.Context, tenantID, userGroupID, accountID string) (domain.GroupMembership, bool, error) {
+	v, err := s.q.GetGroupMembership(tenantContext(execCtx, tenantID), sqlc.GetGroupMembershipParams{
+		TenantID:    tenantID,
+		UserGroupID: userGroupID,
+		AccountID:   accountID,
+	})
+	if isNotFound(err) {
+		return domain.GroupMembership{}, false, nil
+	}
+	if err != nil {
+		return domain.GroupMembership{}, false, err
+	}
+	return fromGroupMembership(v), true, nil
+}
+
+// ListGroupMembershipsForGroup 從儲存層列出使用者群組成員關係。
+func (s *Store) ListGroupMembershipsForGroup(execCtx context.Context, tenantID, userGroupID string) ([]domain.GroupMembership, error) {
+	items, err := s.q.ListGroupMembershipsForGroup(tenantContext(execCtx, tenantID), sqlc.ListGroupMembershipsForGroupParams{
+		TenantID:    tenantID,
+		UserGroupID: userGroupID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromGroupMembership), nil
+}
+
+// ListActiveGroupMembershipsForAccount 從儲存層列出帳號有效使用者群組成員關係。
+func (s *Store) ListActiveGroupMembershipsForAccount(execCtx context.Context, tenantID, accountID string, at time.Time) ([]domain.GroupMembership, error) {
+	items, err := s.q.ListActiveGroupMembershipsForAccount(tenantContext(execCtx, tenantID), sqlc.ListActiveGroupMembershipsForAccountParams{
+		TenantID:  tenantID,
+		AccountID: accountID,
+		At:        timestamptz(at),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromGroupMembership), nil
+}
+
 // UpsertPermissionSet 從儲存層處理 upsert 權限集合。
 func (s *Store) UpsertPermissionSet(execCtx context.Context, v domain.PermissionSet) error {
 	_, err := s.q.UpsertPermissionSet(execCtx, sqlc.UpsertPermissionSetParams{
-		ID:          v.ID,
-		TenantID:    v.TenantID,
-		Name:        v.Name,
-		Description: v.Description,
-		Column5:     mustJSON(v.Permissions),
-		CreatedAt:   timestamptz(v.CreatedAt),
+		ID:                   v.ID,
+		TenantID:             v.TenantID,
+		Name:                 v.Name,
+		Description:          v.Description,
+		Column5:              mustJSON(v.Permissions),
+		SourceTemplateKey:    v.SourceTemplateKey,
+		SourcePackageVersion: v.SourcePackageVersion,
+		CreatedAt:            timestamptz(v.CreatedAt),
 	})
 	return err
 }
@@ -428,6 +525,175 @@ func (s *Store) ListMenuItems(execCtx context.Context, tenantID string) ([]domai
 	return mapSlice(items, fromMenuItem), nil
 }
 
+// UpsertPermissionPackage 從儲存層處理 upsert 權限包。
+func (s *Store) UpsertPermissionPackage(execCtx context.Context, v domain.PermissionPackage) error {
+	_, err := s.q.UpsertPermissionPackage(execCtx, sqlc.UpsertPermissionPackageParams{
+		ID:              v.ID,
+		ApplicationCode: v.ApplicationCode,
+		Version:         v.Version,
+		Status:          string(v.Status),
+		Content:         mustJSON(v.Content),
+		Checksum:        v.Checksum,
+		CreatedAt:       timestamptz(v.CreatedAt),
+		PublishedAt:     nullableTimestamptz(v.PublishedAt),
+	})
+	return err
+}
+
+// UpdatePermissionPackageStatus 從儲存層更新權限包狀態。
+func (s *Store) UpdatePermissionPackageStatus(execCtx context.Context, id string, status domain.PermissionPackageStatus, publishedAt *time.Time) (domain.PermissionPackage, bool, error) {
+	v, err := s.q.UpdatePermissionPackageStatus(execCtx, sqlc.UpdatePermissionPackageStatusParams{
+		ID:          id,
+		Status:      string(status),
+		PublishedAt: nullableTimestamptz(publishedAt),
+	})
+	if isNotFound(err) {
+		return domain.PermissionPackage{}, false, nil
+	}
+	if err != nil {
+		return domain.PermissionPackage{}, false, err
+	}
+	return fromPermissionPackage(v), true, nil
+}
+
+// GetPermissionPackage 從儲存層取得權限包。
+func (s *Store) GetPermissionPackage(execCtx context.Context, id string) (domain.PermissionPackage, bool, error) {
+	v, err := s.q.GetPermissionPackage(execCtx, id)
+	if isNotFound(err) {
+		return domain.PermissionPackage{}, false, nil
+	}
+	if err != nil {
+		return domain.PermissionPackage{}, false, err
+	}
+	return fromPermissionPackage(v), true, nil
+}
+
+// GetPermissionPackageByApplicationVersion 從儲存層取得權限包 by application/version。
+func (s *Store) GetPermissionPackageByApplicationVersion(execCtx context.Context, applicationCode, version string) (domain.PermissionPackage, bool, error) {
+	v, err := s.q.GetPermissionPackageByApplicationVersion(execCtx, sqlc.GetPermissionPackageByApplicationVersionParams{ApplicationCode: applicationCode, Version: version})
+	if isNotFound(err) {
+		return domain.PermissionPackage{}, false, nil
+	}
+	if err != nil {
+		return domain.PermissionPackage{}, false, err
+	}
+	return fromPermissionPackage(v), true, nil
+}
+
+// ListPermissionPackages 從儲存層列出權限包。
+func (s *Store) ListPermissionPackages(execCtx context.Context) ([]domain.PermissionPackage, error) {
+	items, err := s.q.ListPermissionPackages(execCtx)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromPermissionPackage), nil
+}
+
+// UpsertPermissionSetTemplate 從儲存層處理 upsert 權限集合模板。
+func (s *Store) UpsertPermissionSetTemplate(execCtx context.Context, v domain.PermissionSetTemplate) error {
+	_, err := s.q.UpsertPermissionSetTemplate(execCtx, sqlc.UpsertPermissionSetTemplateParams{
+		ID:          v.ID,
+		PackageID:   v.PackageID,
+		TemplateKey: v.TemplateKey,
+		Name:        v.Name,
+		Content:     mustJSON(v.Content),
+		Version:     v.Version,
+	})
+	return err
+}
+
+// ListPermissionSetTemplates 從儲存層列出權限集合模板。
+func (s *Store) ListPermissionSetTemplates(execCtx context.Context, packageID string) ([]domain.PermissionSetTemplate, error) {
+	items, err := s.q.ListPermissionSetTemplates(execCtx, packageID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromPermissionSetTemplate), nil
+}
+
+// UpsertUserGroupTemplate 從儲存層處理 upsert 使用者群組模板。
+func (s *Store) UpsertUserGroupTemplate(execCtx context.Context, v domain.UserGroupTemplate) error {
+	_, err := s.q.UpsertUserGroupTemplate(execCtx, sqlc.UpsertUserGroupTemplateParams{
+		ID:          v.ID,
+		PackageID:   v.PackageID,
+		TemplateKey: v.TemplateKey,
+		Name:        v.Name,
+		Content:     mustJSON(v.Content),
+		Version:     v.Version,
+	})
+	return err
+}
+
+// ListUserGroupTemplates 從儲存層列出使用者群組模板。
+func (s *Store) ListUserGroupTemplates(execCtx context.Context, packageID string) ([]domain.UserGroupTemplate, error) {
+	items, err := s.q.ListUserGroupTemplates(execCtx, packageID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromUserGroupTemplate), nil
+}
+
+// UpsertAssumableRoleTemplate 從儲存層處理 upsert 可承擔角色模板。
+func (s *Store) UpsertAssumableRoleTemplate(execCtx context.Context, v domain.AssumableRoleTemplate) error {
+	_, err := s.q.UpsertAssumableRoleTemplate(execCtx, sqlc.UpsertAssumableRoleTemplateParams{
+		ID:          v.ID,
+		PackageID:   v.PackageID,
+		TemplateKey: v.TemplateKey,
+		Name:        v.Name,
+		Content:     mustJSON(v.Content),
+		Version:     v.Version,
+	})
+	return err
+}
+
+// ListAssumableRoleTemplates 從儲存層列出可承擔角色模板。
+func (s *Store) ListAssumableRoleTemplates(execCtx context.Context, packageID string) ([]domain.AssumableRoleTemplate, error) {
+	items, err := s.q.ListAssumableRoleTemplates(execCtx, packageID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAssumableRoleTemplate), nil
+}
+
+// UpsertPermissionPackageImport 從儲存層處理 upsert 權限包導入記錄。
+func (s *Store) UpsertPermissionPackageImport(execCtx context.Context, v domain.PermissionPackageImport) error {
+	_, err := s.q.UpsertPermissionPackageImport(tenantContext(execCtx, v.TenantID), sqlc.UpsertPermissionPackageImportParams{
+		ID:            v.ID,
+		TenantID:      v.TenantID,
+		PackageID:     v.PackageID,
+		Version:       v.Version,
+		ImportedAt:    timestamptz(v.ImportedAt),
+		ImportedBy:    v.ImportedBy,
+		ArtifactIDMap: mustJSON(v.ArtifactIDMap),
+	})
+	return err
+}
+
+// GetPermissionPackageImport 從儲存層取得權限包導入記錄。
+func (s *Store) GetPermissionPackageImport(execCtx context.Context, tenantID, packageID, version string) (domain.PermissionPackageImport, bool, error) {
+	v, err := s.q.GetPermissionPackageImport(tenantContext(execCtx, tenantID), sqlc.GetPermissionPackageImportParams{
+		TenantID:  tenantID,
+		PackageID: packageID,
+		Version:   version,
+	})
+	if isNotFound(err) {
+		return domain.PermissionPackageImport{}, false, nil
+	}
+	if err != nil {
+		return domain.PermissionPackageImport{}, false, err
+	}
+	return fromPermissionPackageImport(v), true, nil
+}
+
+// ListPermissionPackageImports 從儲存層列出租戶權限包導入記錄。
+func (s *Store) ListPermissionPackageImports(execCtx context.Context, tenantID string) ([]domain.PermissionPackageImport, error) {
+	items, err := s.q.ListPermissionPackageImports(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromPermissionPackageImport), nil
+}
+
 // UpsertPermissionSetAssignment 從儲存層處理 upsert 權限集合指派。
 func (s *Store) UpsertPermissionSetAssignment(execCtx context.Context, v domain.PermissionSetAssignment) error {
 	_, err := s.q.UpsertAuthzPermissionSetAssignment(execCtx, sqlc.UpsertAuthzPermissionSetAssignmentParams{
@@ -503,6 +769,31 @@ func (s *Store) ListDataScopes(execCtx context.Context, tenantID string) ([]doma
 	return mapSlice(items, fromDataScope), nil
 }
 
+// UpdateDataScope 從儲存層更新資料範圍。
+func (s *Store) UpdateDataScope(execCtx context.Context, v domain.DataScope) error {
+	_, err := s.q.UpdateAuthzDataScope(tenantContext(execCtx, v.TenantID), sqlc.UpdateAuthzDataScopeParams{
+		TenantID:  v.TenantID,
+		ID:        v.ID,
+		Code:      v.Code,
+		Name:      v.Name,
+		ScopeType: v.ScopeType,
+		Column6:   mustJSON(v.Params),
+	})
+	return err
+}
+
+// DeleteDataScope 從儲存層刪除資料範圍。
+func (s *Store) DeleteDataScope(execCtx context.Context, tenantID, id string) (domain.DataScope, bool, error) {
+	v, err := s.q.DeleteAuthzDataScope(tenantContext(execCtx, tenantID), sqlc.DeleteAuthzDataScopeParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.DataScope{}, false, nil
+	}
+	if err != nil {
+		return domain.DataScope{}, false, err
+	}
+	return fromDataScope(v), true, nil
+}
+
 // UpsertFieldPolicy 從儲存層處理 upsert 欄位政策。
 func (s *Store) UpsertFieldPolicy(execCtx context.Context, v domain.FieldPolicy) error {
 	_, err := s.q.UpsertAuthzFieldPolicy(execCtx, sqlc.UpsertAuthzFieldPolicyParams{
@@ -519,9 +810,21 @@ func (s *Store) UpsertFieldPolicy(execCtx context.Context, v domain.FieldPolicy)
 	return err
 }
 
+// GetFieldPolicy 從儲存層取得欄位政策。
+func (s *Store) GetFieldPolicy(execCtx context.Context, tenantID, id string) (domain.FieldPolicy, bool, error) {
+	v, err := s.q.GetAuthzFieldPolicy(tenantContext(execCtx, tenantID), sqlc.GetAuthzFieldPolicyParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.FieldPolicy{}, false, nil
+	}
+	if err != nil {
+		return domain.FieldPolicy{}, false, err
+	}
+	return fromFieldPolicy(v), true, nil
+}
+
 // ListFieldPolicies 從儲存層列出欄位政策。
 func (s *Store) ListFieldPolicies(execCtx context.Context, tenantID, applicationCode, resourceType string) ([]domain.FieldPolicy, error) {
-	items, err := s.q.ListAuthzFieldPolicies(execCtx, sqlc.ListAuthzFieldPoliciesParams{
+	items, err := s.q.ListAuthzFieldPolicies(tenantContext(execCtx, tenantID), sqlc.ListAuthzFieldPoliciesParams{
 		TenantID:        tenantID,
 		ApplicationCode: applicationCode,
 		ResourceType:    resourceType,
@@ -530,6 +833,18 @@ func (s *Store) ListFieldPolicies(execCtx context.Context, tenantID, application
 		return nil, err
 	}
 	return mapSlice(items, fromFieldPolicy), nil
+}
+
+// DeleteFieldPolicy 從儲存層刪除欄位政策。
+func (s *Store) DeleteFieldPolicy(execCtx context.Context, tenantID, id string) (domain.FieldPolicy, bool, error) {
+	v, err := s.q.DeleteAuthzFieldPolicy(tenantContext(execCtx, tenantID), sqlc.DeleteAuthzFieldPolicyParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.FieldPolicy{}, false, nil
+	}
+	if err != nil {
+		return domain.FieldPolicy{}, false, err
+	}
+	return fromFieldPolicy(v), true, nil
 }
 
 // UpsertAssumableRole 從儲存層處理 upsert assumable 角色。
@@ -548,6 +863,8 @@ func (s *Store) UpsertAssumableRole(execCtx context.Context, v domain.AssumableR
 		Column7:                mustJSON(v.TrustPolicy),
 		Column8:                mustJSON(v.PermissionBoundary),
 		SessionDurationSeconds: int32(duration),
+		SourceTemplateKey:      v.SourceTemplateKey,
+		SourcePackageVersion:   v.SourcePackageVersion,
 		CreatedAt:              timestamptz(v.CreatedAt),
 	})
 	return err
@@ -2294,6 +2611,54 @@ func jsonPermissions(b []byte) []domain.Permission {
 	return jsoncodec.Permissions(b)
 }
 
+// jsonPermissionPackageContent 處理 JSON 權限包內容。
+func jsonPermissionPackageContent(b []byte) domain.PermissionPackageContent {
+	if len(b) == 0 {
+		return domain.PermissionPackageContent{}
+	}
+	var out domain.PermissionPackageContent
+	if err := json.Unmarshal(b, &out); err != nil {
+		return domain.PermissionPackageContent{}
+	}
+	return out
+}
+
+// jsonPermissionSetTemplateContent 處理 JSON 權限集合模板內容。
+func jsonPermissionSetTemplateContent(b []byte) domain.PermissionSetTemplateContent {
+	if len(b) == 0 {
+		return domain.PermissionSetTemplateContent{}
+	}
+	var out domain.PermissionSetTemplateContent
+	if err := json.Unmarshal(b, &out); err != nil {
+		return domain.PermissionSetTemplateContent{}
+	}
+	return out
+}
+
+// jsonUserGroupTemplateContent 處理 JSON 使用者群組模板內容。
+func jsonUserGroupTemplateContent(b []byte) domain.UserGroupTemplateContent {
+	if len(b) == 0 {
+		return domain.UserGroupTemplateContent{}
+	}
+	var out domain.UserGroupTemplateContent
+	if err := json.Unmarshal(b, &out); err != nil {
+		return domain.UserGroupTemplateContent{}
+	}
+	return out
+}
+
+// jsonAssumableRoleTemplateContent 處理 JSON 可承擔角色模板內容。
+func jsonAssumableRoleTemplateContent(b []byte) domain.AssumableRoleTemplateContent {
+	if len(b) == 0 {
+		return domain.AssumableRoleTemplateContent{}
+	}
+	var out domain.AssumableRoleTemplateContent
+	if err := json.Unmarshal(b, &out); err != nil {
+		return domain.AssumableRoleTemplateContent{}
+	}
+	return out
+}
+
 // jsonRefs 處理 JSON refs。
 func jsonRefs(b []byte) []domain.Reference {
 	if len(b) == 0 {
@@ -2356,26 +2721,46 @@ func fromUserIdentity(v sqlc.UserIdentity) domain.UserIdentity {
 // fromUserGroup 轉換使用者群組。
 func fromUserGroup(v sqlc.UserGroup) domain.UserGroup {
 	return domain.UserGroup{
-		ID:               v.ID,
-		TenantID:         v.TenantID,
-		Name:             v.Name,
-		Description:      v.Description,
-		MemberAccountIDs: utils.CopyStrings(v.MemberAccountIds),
-		PermissionSetIDs: utils.CopyStrings(v.PermissionSetIds),
-		Version:          v.Version,
-		CreatedAt:        timeFrom(v.CreatedAt),
+		ID:                   v.ID,
+		TenantID:             v.TenantID,
+		Name:                 v.Name,
+		Description:          v.Description,
+		MemberAccountIDs:     utils.CopyStrings(v.MemberAccountIds),
+		PermissionSetIDs:     utils.CopyStrings(v.PermissionSetIds),
+		SourceTemplateKey:    v.SourceTemplateKey,
+		SourcePackageVersion: v.SourcePackageVersion,
+		Version:              v.Version,
+		CreatedAt:            timeFrom(v.CreatedAt),
+	}
+}
+
+// fromGroupMembership 轉換使用者群組成員關係。
+func fromGroupMembership(v sqlc.AuthzGroupMembership) domain.GroupMembership {
+	return domain.GroupMembership{
+		ID:                 v.ID,
+		TenantID:           v.TenantID,
+		UserGroupID:        v.UserGroupID,
+		AccountID:          v.AccountID,
+		ValidFrom:          timeFrom(v.ValidFrom),
+		ValidUntil:         timePtrFrom(v.ValidUntil),
+		Source:             v.Source,
+		ApprovalInstanceID: v.ApprovalInstanceID,
+		CreatedBy:          v.CreatedBy,
+		CreatedAt:          timeFrom(v.CreatedAt),
 	}
 }
 
 // fromPermissionSet 轉換權限集合。
 func fromPermissionSet(v sqlc.PermissionSet) domain.PermissionSet {
 	return domain.PermissionSet{
-		ID:          v.ID,
-		TenantID:    v.TenantID,
-		Name:        v.Name,
-		Description: v.Description,
-		Permissions: jsonPermissions(v.Permissions),
-		CreatedAt:   timeFrom(v.CreatedAt),
+		ID:                   v.ID,
+		TenantID:             v.TenantID,
+		Name:                 v.Name,
+		Description:          v.Description,
+		Permissions:          jsonPermissions(v.Permissions),
+		SourceTemplateKey:    v.SourceTemplateKey,
+		SourcePackageVersion: v.SourcePackageVersion,
+		CreatedAt:            timeFrom(v.CreatedAt),
 	}
 }
 
@@ -2409,6 +2794,69 @@ func fromMenuItem(v sqlc.MenuItem) domain.MenuItem {
 		ParentKey: v.ParentKey,
 		SortOrder: int(v.SortOrder),
 		CreatedAt: timeFrom(v.CreatedAt),
+	}
+}
+
+// fromPermissionPackage 轉換權限包。
+func fromPermissionPackage(v sqlc.PermissionPackage) domain.PermissionPackage {
+	return domain.PermissionPackage{
+		ID:              v.ID,
+		ApplicationCode: v.ApplicationCode,
+		Version:         v.Version,
+		Status:          domain.PermissionPackageStatus(v.Status),
+		Content:         jsonPermissionPackageContent(v.Content),
+		Checksum:        v.Checksum,
+		CreatedAt:       timeFrom(v.CreatedAt),
+		PublishedAt:     timePtrFrom(v.PublishedAt),
+	}
+}
+
+// fromPermissionSetTemplate 轉換權限集合模板。
+func fromPermissionSetTemplate(v sqlc.PermissionSetTemplate) domain.PermissionSetTemplate {
+	return domain.PermissionSetTemplate{
+		ID:          v.ID,
+		PackageID:   v.PackageID,
+		TemplateKey: v.TemplateKey,
+		Name:        v.Name,
+		Content:     jsonPermissionSetTemplateContent(v.Content),
+		Version:     v.Version,
+	}
+}
+
+// fromUserGroupTemplate 轉換使用者群組模板。
+func fromUserGroupTemplate(v sqlc.UserGroupTemplate) domain.UserGroupTemplate {
+	return domain.UserGroupTemplate{
+		ID:          v.ID,
+		PackageID:   v.PackageID,
+		TemplateKey: v.TemplateKey,
+		Name:        v.Name,
+		Content:     jsonUserGroupTemplateContent(v.Content),
+		Version:     v.Version,
+	}
+}
+
+// fromAssumableRoleTemplate 轉換可承擔角色模板。
+func fromAssumableRoleTemplate(v sqlc.AssumableRoleTemplate) domain.AssumableRoleTemplate {
+	return domain.AssumableRoleTemplate{
+		ID:          v.ID,
+		PackageID:   v.PackageID,
+		TemplateKey: v.TemplateKey,
+		Name:        v.Name,
+		Content:     jsonAssumableRoleTemplateContent(v.Content),
+		Version:     v.Version,
+	}
+}
+
+// fromPermissionPackageImport 轉換權限包導入記錄。
+func fromPermissionPackageImport(v sqlc.PermissionPackageImport) domain.PermissionPackageImport {
+	return domain.PermissionPackageImport{
+		ID:            v.ID,
+		TenantID:      v.TenantID,
+		PackageID:     v.PackageID,
+		Version:       v.Version,
+		ImportedAt:    timeFrom(v.ImportedAt),
+		ImportedBy:    v.ImportedBy,
+		ArtifactIDMap: jsonMap(v.ArtifactIDMap),
 	}
 }
 
@@ -2480,6 +2928,8 @@ func fromAssumableRole(v sqlc.AssumableRole) domain.AssumableRole {
 		TrustPolicy:            jsonMap(v.TrustPolicy),
 		PermissionBoundary:     jsonMap(v.PermissionBoundary),
 		SessionDurationSeconds: int(v.SessionDurationSeconds),
+		SourceTemplateKey:      v.SourceTemplateKey,
+		SourcePackageVersion:   v.SourcePackageVersion,
 		CreatedAt:              timeFrom(v.CreatedAt),
 	}
 }

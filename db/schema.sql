@@ -39,12 +39,35 @@ CREATE TABLE user_groups (
     description text NOT NULL DEFAULT '',
     member_account_ids text[] NOT NULL DEFAULT '{}',
     permission_set_ids text[] NOT NULL DEFAULT '{}',
+    source_template_key text NOT NULL DEFAULT '',
+    source_package_version text NOT NULL DEFAULT '',
     version bigint NOT NULL DEFAULT 1,
     created_at timestamptz NOT NULL,
     CONSTRAINT user_groups_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX user_groups_tenant_id_idx ON user_groups (tenant_id);
+CREATE INDEX user_groups_source_template_idx ON user_groups (tenant_id, source_template_key) WHERE source_template_key <> '';
+
+CREATE TABLE authz_group_memberships (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    user_group_id text NOT NULL,
+    account_id text NOT NULL,
+    valid_from timestamptz NOT NULL,
+    valid_until timestamptz,
+    source text NOT NULL DEFAULT 'manual' CHECK (source IN ('manual', 'import', 'template', 'approval', 'migration')),
+    approval_instance_id text NOT NULL DEFAULT '',
+    created_by text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    CONSTRAINT authz_group_memberships_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT authz_group_memberships_unique_idx UNIQUE (tenant_id, user_group_id, account_id),
+    CONSTRAINT authz_group_memberships_group_fk FOREIGN KEY (tenant_id, user_group_id) REFERENCES user_groups (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT authz_group_memberships_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX authz_group_memberships_group_idx ON authz_group_memberships (tenant_id, user_group_id, created_at);
+CREATE INDEX authz_group_memberships_account_active_idx ON authz_group_memberships (tenant_id, account_id, valid_from, valid_until);
 
 CREATE TABLE permission_sets (
     id text PRIMARY KEY,
@@ -52,11 +75,14 @@ CREATE TABLE permission_sets (
     name text NOT NULL,
     description text NOT NULL DEFAULT '',
     permissions jsonb NOT NULL DEFAULT '[]'::jsonb,
+    source_template_key text NOT NULL DEFAULT '',
+    source_package_version text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
     CONSTRAINT permission_sets_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX permission_sets_tenant_id_idx ON permission_sets (tenant_id);
+CREATE INDEX permission_sets_source_template_idx ON permission_sets (tenant_id, source_template_key) WHERE source_template_key <> '';
 
 CREATE TABLE permissions (
     id text PRIMARY KEY,
@@ -121,11 +147,74 @@ CREATE TABLE assumable_roles (
     trust_policy jsonb NOT NULL DEFAULT '{}'::jsonb,
     permission_boundary jsonb NOT NULL DEFAULT '{}'::jsonb,
     session_duration_seconds integer NOT NULL DEFAULT 28800 CHECK (session_duration_seconds > 0),
+    source_template_key text NOT NULL DEFAULT '',
+    source_package_version text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
     CONSTRAINT assumable_roles_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX assumable_roles_tenant_id_idx ON assumable_roles (tenant_id);
+CREATE INDEX assumable_roles_source_template_idx ON assumable_roles (tenant_id, source_template_key) WHERE source_template_key <> '';
+
+-- Permission package registry and templates are platform-global immutable snapshots.
+-- Tenant isolation is enforced on permission_package_imports and instantiated tenant artifacts.
+CREATE TABLE permission_packages (
+    id text PRIMARY KEY,
+    application_code text NOT NULL,
+    version text NOT NULL,
+    status text NOT NULL CHECK (status IN ('draft', 'published', 'deprecated')),
+    content jsonb NOT NULL,
+    checksum text NOT NULL,
+    created_at timestamptz NOT NULL,
+    published_at timestamptz,
+    CONSTRAINT permission_packages_application_version_idx UNIQUE (application_code, version)
+);
+
+CREATE INDEX permission_packages_application_idx ON permission_packages (application_code, status, version);
+
+CREATE TABLE permission_set_templates (
+    id text PRIMARY KEY,
+    package_id text NOT NULL REFERENCES permission_packages(id) ON DELETE CASCADE,
+    template_key text NOT NULL,
+    name text NOT NULL,
+    content jsonb NOT NULL DEFAULT '{}'::jsonb,
+    version text NOT NULL,
+    CONSTRAINT permission_set_templates_package_key_idx UNIQUE (package_id, template_key)
+);
+
+CREATE TABLE user_group_templates (
+    id text PRIMARY KEY,
+    package_id text NOT NULL REFERENCES permission_packages(id) ON DELETE CASCADE,
+    template_key text NOT NULL,
+    name text NOT NULL,
+    content jsonb NOT NULL DEFAULT '{}'::jsonb,
+    version text NOT NULL,
+    CONSTRAINT user_group_templates_package_key_idx UNIQUE (package_id, template_key)
+);
+
+CREATE TABLE assumable_role_templates (
+    id text PRIMARY KEY,
+    package_id text NOT NULL REFERENCES permission_packages(id) ON DELETE CASCADE,
+    template_key text NOT NULL,
+    name text NOT NULL,
+    content jsonb NOT NULL DEFAULT '{}'::jsonb,
+    version text NOT NULL,
+    CONSTRAINT assumable_role_templates_package_key_idx UNIQUE (package_id, template_key)
+);
+
+CREATE TABLE permission_package_imports (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    package_id text NOT NULL REFERENCES permission_packages(id) ON DELETE RESTRICT,
+    version text NOT NULL,
+    imported_at timestamptz NOT NULL,
+    imported_by text NOT NULL DEFAULT '',
+    artifact_id_map jsonb NOT NULL DEFAULT '{}'::jsonb,
+    CONSTRAINT permission_package_imports_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT permission_package_imports_unique_idx UNIQUE (tenant_id, package_id, version)
+);
+
+CREATE INDEX permission_package_imports_tenant_idx ON permission_package_imports (tenant_id, imported_at DESC);
 
 CREATE TABLE user_identities (
     id text PRIMARY KEY,
@@ -855,6 +944,8 @@ ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accounts FORCE ROW LEVEL SECURITY;
 ALTER TABLE user_groups ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_groups FORCE ROW LEVEL SECURITY;
+ALTER TABLE authz_group_memberships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE authz_group_memberships FORCE ROW LEVEL SECURITY;
 ALTER TABLE permission_sets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE permission_sets FORCE ROW LEVEL SECURITY;
 ALTER TABLE permissions ENABLE ROW LEVEL SECURITY;
@@ -865,6 +956,8 @@ ALTER TABLE permission_set_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE permission_set_items FORCE ROW LEVEL SECURITY;
 ALTER TABLE assumable_roles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE assumable_roles FORCE ROW LEVEL SECURITY;
+ALTER TABLE permission_package_imports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE permission_package_imports FORCE ROW LEVEL SECURITY;
 ALTER TABLE user_identities ENABLE ROW LEVEL SECURITY;
 ALTER TABLE user_identities FORCE ROW LEVEL SECURITY;
 ALTER TABLE authz_data_scopes ENABLE ROW LEVEL SECURITY;
@@ -940,11 +1033,13 @@ ALTER TABLE audit_logs FORCE ROW LEVEL SECURITY;
 
 CREATE POLICY tenant_isolation_accounts ON accounts USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_user_groups ON user_groups USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_authz_group_memberships ON authz_group_memberships USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_permission_sets ON permission_sets USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_permissions ON permissions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_menu_items ON menu_items USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_permission_set_items ON permission_set_items USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_assumable_roles ON assumable_roles USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_permission_package_imports ON permission_package_imports USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_user_identities ON user_identities USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_authz_data_scopes ON authz_data_scopes USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_authz_field_policies ON authz_field_policies USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));

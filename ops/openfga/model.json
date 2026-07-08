@@ -13,11 +13,31 @@
       "relations": {
         "member": {
           "this": {}
+        },
+        "admin": {
+          "this": {}
+        },
+        "security_admin": {
+          "this": {}
         }
       },
       "metadata": {
         "relations": {
           "member": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          },
+          "admin": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          },
+          "security_admin": {
             "directly_related_user_types": [
               {
                 "type": "account"
@@ -30,6 +50,9 @@
     {
       "type": "org_unit",
       "relations": {
+        "tenant": {
+          "this": {}
+        },
         "parent": {
           "this": {}
         },
@@ -59,10 +82,74 @@
               }
             ]
           }
+        },
+        "viewer": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "member"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "manager"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "tupleset": {
+                    "relation": "parent"
+                  },
+                  "computedUserset": {
+                    "relation": "viewer"
+                  }
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "tupleset": {
+                    "relation": "tenant"
+                  },
+                  "computedUserset": {
+                    "relation": "admin"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "editor": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "manager"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "tupleset": {
+                    "relation": "tenant"
+                  },
+                  "computedUserset": {
+                    "relation": "admin"
+                  }
+                }
+              }
+            ]
+          }
         }
       },
       "metadata": {
         "relations": {
+          "tenant": {
+            "directly_related_user_types": [
+              {
+                "type": "tenant"
+              }
+            ]
+          },
           "parent": {
             "directly_related_user_types": [
               {
@@ -92,11 +179,199 @@
       "relations": {
         "member": {
           "this": {}
+        },
+        "manager": {
+          "this": {}
         }
       },
       "metadata": {
         "relations": {
           "member": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          },
+          "manager": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "assumable_role",
+      "relations": {
+        "tenant": {
+          "this": {}
+        },
+        "trusted_user": {
+          "this": {}
+        },
+        "trusted_group": {
+          "this": {}
+        },
+        "approver": {
+          "this": {}
+        },
+        "can_assume": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "trusted_user"
+                }
+              },
+              {
+                "computedUserset": {
+                  "relation": "trusted_group"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "tupleset": {
+                    "relation": "tenant"
+                  },
+                  "computedUserset": {
+                    "relation": "admin"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "can_approve": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "approver"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "tupleset": {
+                    "relation": "tenant"
+                  },
+                  "computedUserset": {
+                    "relation": "security_admin"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "tenant": {
+            "directly_related_user_types": [
+              {
+                "type": "tenant"
+              }
+            ]
+          },
+          "trusted_user": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          },
+          "trusted_group": {
+            "directly_related_user_types": [
+              {
+                "type": "user_group",
+                "relation": "member"
+              }
+            ]
+          },
+          "approver": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "type": "agent_tool",
+      "relations": {
+        "tenant": {
+          "this": {}
+        },
+        "runner": {
+          "this": {}
+        },
+        "approver": {
+          "this": {}
+        },
+        "can_run": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "runner"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "tupleset": {
+                    "relation": "tenant"
+                  },
+                  "computedUserset": {
+                    "relation": "admin"
+                  }
+                }
+              }
+            ]
+          }
+        },
+        "can_execute_high_risk": {
+          "union": {
+            "child": [
+              {
+                "computedUserset": {
+                  "relation": "approver"
+                }
+              },
+              {
+                "tupleToUserset": {
+                  "tupleset": {
+                    "relation": "tenant"
+                  },
+                  "computedUserset": {
+                    "relation": "security_admin"
+                  }
+                }
+              }
+            ]
+          }
+        }
+      },
+      "metadata": {
+        "relations": {
+          "tenant": {
+            "directly_related_user_types": [
+              {
+                "type": "tenant"
+              }
+            ]
+          },
+          "runner": {
+            "directly_related_user_types": [
+              {
+                "type": "account"
+              }
+            ]
+          },
+          "approver": {
             "directly_related_user_types": [
               {
                 "type": "account"

@@ -9,6 +9,10 @@ type RequestContext struct {
 	AccountID            string
 	AssumedRoleID        string
 	AssumedRoleSessionID string
+	RouteApplicationCode string
+	RouteResourceType    string
+	RouteAction          string
+	RoutePath            string
 	RequestID            string
 	TraceID              string
 	SpanID               string

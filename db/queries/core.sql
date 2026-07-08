@@ -56,10 +56,10 @@ ORDER BY created_at ASC;
 -- expected_version 語義同 UpsertAccount。
 INSERT INTO user_groups (
     id, tenant_id, name, description, member_account_ids,
-    permission_set_ids, version, created_at
+    permission_set_ids, source_template_key, source_package_version, version, created_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(name), sqlc.arg(description), sqlc.arg(member_account_ids),
-    sqlc.arg(permission_set_ids), 1, sqlc.arg(created_at)
+    sqlc.arg(permission_set_ids), sqlc.arg(source_template_key), sqlc.arg(source_package_version), 1, sqlc.arg(created_at)
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -67,6 +67,8 @@ ON CONFLICT (id) DO UPDATE SET
     description = EXCLUDED.description,
     member_account_ids = EXCLUDED.member_account_ids,
     permission_set_ids = EXCLUDED.permission_set_ids,
+    source_template_key = EXCLUDED.source_template_key,
+    source_package_version = EXCLUDED.source_package_version,
     version = user_groups.version + 1,
     created_at = EXCLUDED.created_at
 WHERE sqlc.arg(expected_version)::bigint = 0 OR user_groups.version = sqlc.arg(expected_version)::bigint
@@ -81,17 +83,58 @@ SELECT * FROM user_groups
 WHERE tenant_id = $1
 ORDER BY created_at ASC;
 
+-- name: UpsertGroupMembership :one
+INSERT INTO authz_group_memberships (
+    id, tenant_id, user_group_id, account_id, valid_from, valid_until,
+    source, approval_instance_id, created_by, created_at
+) VALUES (
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(user_group_id), sqlc.arg(account_id),
+    sqlc.arg(valid_from), sqlc.narg(valid_until), sqlc.arg(source),
+    sqlc.arg(approval_instance_id), sqlc.arg(created_by), sqlc.arg(created_at)
+)
+ON CONFLICT (tenant_id, user_group_id, account_id) DO UPDATE SET
+    valid_from = EXCLUDED.valid_from,
+    valid_until = EXCLUDED.valid_until,
+    source = EXCLUDED.source,
+    approval_instance_id = EXCLUDED.approval_instance_id,
+    created_by = EXCLUDED.created_by
+RETURNING *;
+
+-- name: DeleteGroupMembership :one
+DELETE FROM authz_group_memberships
+WHERE tenant_id = $1 AND user_group_id = $2 AND account_id = $3
+RETURNING *;
+
+-- name: GetGroupMembership :one
+SELECT * FROM authz_group_memberships
+WHERE tenant_id = $1 AND user_group_id = $2 AND account_id = $3;
+
+-- name: ListGroupMembershipsForGroup :many
+SELECT * FROM authz_group_memberships
+WHERE tenant_id = $1 AND user_group_id = $2
+ORDER BY created_at ASC;
+
+-- name: ListActiveGroupMembershipsForAccount :many
+SELECT * FROM authz_group_memberships
+WHERE tenant_id = $1
+  AND account_id = $2
+  AND valid_from <= $3
+  AND (valid_until IS NULL OR valid_until >= $3)
+ORDER BY created_at ASC;
+
 -- name: UpsertPermissionSet :one
 INSERT INTO permission_sets (
-    id, tenant_id, name, description, permissions, created_at
+    id, tenant_id, name, description, permissions, source_template_key, source_package_version, created_at
 ) VALUES (
-    $1, $2, $3, $4, $5::jsonb, $6
+    $1, $2, $3, $4, $5::jsonb, $6, $7, $8
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
     name = EXCLUDED.name,
     description = EXCLUDED.description,
     permissions = EXCLUDED.permissions,
+    source_template_key = EXCLUDED.source_template_key,
+    source_package_version = EXCLUDED.source_package_version,
     created_at = EXCLUDED.created_at
 RETURNING *;
 
@@ -107,9 +150,9 @@ ORDER BY created_at ASC;
 -- name: UpsertAssumableRole :one
 INSERT INTO assumable_roles (
     id, tenant_id, name, description, permission_set_ids, trusted,
-    trust_policy, permission_boundary, session_duration_seconds, created_at
+    trust_policy, permission_boundary, session_duration_seconds, source_template_key, source_package_version, created_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10
+    $1, $2, $3, $4, $5, $6, $7::jsonb, $8::jsonb, $9, $10, $11, $12
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -120,6 +163,8 @@ ON CONFLICT (id) DO UPDATE SET
     trust_policy = EXCLUDED.trust_policy,
     permission_boundary = EXCLUDED.permission_boundary,
     session_duration_seconds = EXCLUDED.session_duration_seconds,
+    source_template_key = EXCLUDED.source_template_key,
+    source_package_version = EXCLUDED.source_package_version,
     created_at = EXCLUDED.created_at
 RETURNING *;
 

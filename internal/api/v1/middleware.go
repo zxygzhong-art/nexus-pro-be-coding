@@ -3,6 +3,7 @@ package v1
 import (
 	"net/http"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -58,6 +59,11 @@ func (a *API) ginHandle(resource, action string, next HandlerFunc, authz routeAu
 			a.writeError(c.Writer, c.Request, err)
 			return
 		}
+		ctx = requestContextWithRoute(ctx, c.Request.Method, c.FullPath(), resource, action)
+		if err := a.rejectCrossTenantRequest(ctx, c.Request); err != nil {
+			a.writeError(c.Writer, c.Request, err)
+			return
+		}
 		c.Set("tenant_id", ctx.TenantID)
 		c.Set("account_id", ctx.AccountID)
 		c.Set("trace_id", ctx.TraceID)
@@ -72,6 +78,63 @@ func (a *API) ginHandle(resource, action string, next HandlerFunc, authz routeAu
 			return
 		}
 	}
+}
+
+// requestContextWithRoute 附加路由政策元資料供後續稽核 details 使用。
+func requestContextWithRoute(ctx domain.RequestContext, method, path, resource, action string) domain.RequestContext {
+	for _, policy := range domain.DefaultRoutePolicies {
+		if strings.EqualFold(policy.Method, method) && policy.Path == path {
+			ctx.RouteApplicationCode = policy.ApplicationCode
+			ctx.RouteResourceType = policy.ResourceType
+			ctx.RouteAction = policy.Action
+			ctx.RoutePath = policy.Path
+			return ctx
+		}
+	}
+	app, resourceType := routeResourceParts(resource)
+	ctx.RouteApplicationCode = app
+	ctx.RouteResourceType = resourceType
+	ctx.RouteAction = strings.TrimSpace(action)
+	ctx.RoutePath = strings.TrimSpace(path)
+	return ctx
+}
+
+// rejectCrossTenantRequest 拒絕顯式目標租戶與 token 租戶不一致的請求並寫安全稽核。
+func (a *API) rejectCrossTenantRequest(ctx domain.RequestContext, r *http.Request) error {
+	targetTenantID := requestTargetTenantID(r)
+	if targetTenantID == "" || targetTenantID == ctx.TenantID {
+		return nil
+	}
+	details := map[string]any{
+		"result":           "denied",
+		"reason_code":      "cross_tenant_denied",
+		"token_tenant_id":  ctx.TenantID,
+		"target_tenant_id": targetTenantID,
+		"method":           r.Method,
+		"path":             r.URL.Path,
+	}
+	if a.audit != nil {
+		_ = a.audit.RecordSecurityEvent(ctx, "security.cross_tenant.denied", "tenant", targetTenantID, details)
+	}
+	return domain.ForbiddenReason("cross_tenant_denied", "cross-tenant access denied")
+}
+
+// requestTargetTenantID 解析相容入口中顯式宣告的目標租戶。
+func requestTargetTenantID(r *http.Request) string {
+	return strings.TrimSpace(r.URL.Query().Get("tenant_id"))
+}
+
+// routeResourceParts 拆分 route binder 的 resource 字串。
+func routeResourceParts(resource string) (string, string) {
+	resource = strings.TrimSpace(resource)
+	if resource == "" {
+		return "platform", ""
+	}
+	parts := strings.SplitN(resource, ".", 2)
+	if len(parts) == 2 {
+		return parts[0], parts[1]
+	}
+	return "platform", resource
 }
 
 // requestLogger 處理請求 logger。

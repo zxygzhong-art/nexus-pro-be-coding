@@ -23,25 +23,43 @@ type MeFacade interface {
 type AuthzFacade interface {
 	Check(RequestContext, CheckRequest) (CheckResult, error)
 	BatchCheck(RequestContext, BatchCheckRequest) (BatchCheckResult, error)
+	Explain(RequestContext, CheckRequest) (AuthzExplainResponse, error)
+	Simulate(RequestContext, AuthzSimulationRequest) (AuthzSimulationResponse, error)
 	AuditDecision(RequestContext, CheckRequest, CheckResult) error
 	ValidateApprovalInstance(RequestContext, CheckRequest) error
 }
 
 // IAMFacade 定義 IAM facade 的行為契約。
 type IAMFacade interface {
+	ListApplications(RequestContext) ([]IAMApplication, error)
+	ListResourceTypes(RequestContext) ([]IAMResourceType, error)
 	ListPermissionPage(RequestContext, PageRequest) (PageResponse[Permission], error)
+	ListPermissionPackagePage(RequestContext, PageRequest) (PageResponse[PermissionPackage], error)
+	RegisterPermissionPackage(RequestContext, PermissionPackageContent) (PermissionPackage, error)
+	PublishPermissionPackage(RequestContext, string) (PermissionPackage, error)
+	ImportPermissionPackage(RequestContext, string) (PermissionPackageImportResult, error)
 	ListRolePage(RequestContext, PageRequest) (PageResponse[IAMRoleProjection], error)
 	ListRoleBindingPage(RequestContext, PageRequest) (PageResponse[IAMRoleBindingProjection], error)
 	ListUserGroupPage(RequestContext, PageRequest) (PageResponse[UserGroup], error)
 	CreateUserGroup(RequestContext, CreateUserGroupInput) (UserGroup, error)
+	UpdateUserGroup(RequestContext, string, UpdateUserGroupInput) (UserGroup, error)
+	ListUserGroupMemberPage(RequestContext, string, PageRequest) (PageResponse[GroupMembership], error)
+	AddUserGroupMember(RequestContext, string, AddUserGroupMemberInput) (GroupMembership, error)
+	RemoveUserGroupMember(RequestContext, string, string) error
 	ListPermissionSetPage(RequestContext, PageRequest) (PageResponse[PermissionSet], error)
 	CreatePermissionSet(RequestContext, CreatePermissionSetInput) (PermissionSet, error)
 	ListPermissionSetAssignmentPage(RequestContext, PageRequest) (PageResponse[PermissionSetAssignment], error)
 	CreatePermissionSetAssignment(RequestContext, CreatePermissionSetAssignmentInput) (PermissionSetAssignment, error)
 	ListDataScopePage(RequestContext, PageRequest) (PageResponse[DataScope], error)
 	CreateDataScope(RequestContext, CreateDataScopeInput) (DataScope, error)
+	UpdateDataScope(RequestContext, string, UpdateDataScopeInput) (DataScope, error)
+	DeleteDataScope(RequestContext, string) (DataScope, error)
 	ListFieldPolicyPage(RequestContext, string, string, PageRequest) (PageResponse[FieldPolicy], error)
 	CreateFieldPolicy(RequestContext, CreateFieldPolicyInput) (FieldPolicy, error)
+	UpdateFieldPolicy(RequestContext, string, UpdateFieldPolicyInput) (FieldPolicy, error)
+	DeleteFieldPolicy(RequestContext, string) (FieldPolicy, error)
+	ListOutboxEventPage(RequestContext, OutboxEventQuery, PageRequest) (PageResponse[OutboxEvent], error)
+	RetryOutboxEvent(RequestContext, string) (OutboxEvent, error)
 	ListAssumableRolePage(RequestContext, PageRequest) (PageResponse[AssumableRole], error)
 	CreateAssumableRole(RequestContext, CreateAssumableRoleInput) (AssumableRole, error)
 	AssumeRole(RequestContext, string, AssumeRoleInput) (AssumeRoleResponse, error)
@@ -183,6 +201,7 @@ type NotificationFacade interface {
 // AuditFacade 定義稽核 facade 的行為契約。
 type AuditFacade interface {
 	ListLogPage(RequestContext, PageRequest) (PageResponse[AuditLog], error)
+	RecordSecurityEvent(RequestContext, string, string, string, map[string]any) error
 }
 
 var (

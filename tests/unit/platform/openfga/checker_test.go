@@ -3,6 +3,7 @@ package openfga_test
 import (
 	"context"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -11,6 +12,12 @@ import (
 	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/platform/openfga"
 )
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
 
 // TestPingUsesHealthEndpoint 驗證 uses 健康檢查 endpoint。
 func TestPingUsesHealthEndpoint(t *testing.T) {
@@ -145,6 +152,16 @@ func TestWriteRelationshipTuplesPostsWritesAndDeletes(t *testing.T) {
 				SubjectID:   "acct-old",
 			},
 		},
+		{
+			Operation: domain.AuthzRelationshipTupleWrite,
+			Tuple: domain.AuthzRelationshipTuple{
+				ObjectType:  "assumable_role",
+				ObjectID:    "role-1",
+				Relation:    "trusted_group",
+				SubjectType: "user_group#member",
+				SubjectID:   "ug-1",
+			},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -157,8 +174,48 @@ func TestWriteRelationshipTuplesPostsWritesAndDeletes(t *testing.T) {
 	if writes[0].(map[string]any)["user"] != "account:acct-1" || writes[0].(map[string]any)["object"] != "hr.employee:emp-1" {
 		t.Fatalf("unexpected writes payload: %+v", gotPayload["writes"])
 	}
+	if writes[1].(map[string]any)["user"] != "user_group:ug-1#member" || writes[1].(map[string]any)["relation"] != "trusted_group" {
+		t.Fatalf("unexpected userset write payload: %+v", gotPayload["writes"])
+	}
 	if deletes[0].(map[string]any)["user"] != "account:acct-old" || deletes[0].(map[string]any)["relation"] != "owner" {
 		t.Fatalf("unexpected deletes payload: %+v", gotPayload["deletes"])
+	}
+}
+
+// TestWriteRelationshipTuplesFormatsUsersetSubject 驗證 userset subject 不需啟動 httptest server。
+func TestWriteRelationshipTuplesFormatsUsersetSubject(t *testing.T) {
+	var gotPayload map[string]any
+	client := &http.Client{Transport: roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		if err := json.NewDecoder(req.Body).Decode(&gotPayload); err != nil {
+			t.Fatal(err)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{},
+			Body:       io.NopCloser(strings.NewReader(`{}`)),
+			Request:    req,
+		}, nil
+	})}
+	checker := openfga.NewChecker("http://openfga.test", "store-1", client)
+
+	err := checker.WriteRelationshipTuples(context.Background(), []domain.AuthzRelationshipTupleChange{
+		{
+			Operation: domain.AuthzRelationshipTupleWrite,
+			Tuple: domain.AuthzRelationshipTuple{
+				ObjectType:  "assumable_role",
+				ObjectID:    "role-1",
+				Relation:    "trusted_group",
+				SubjectType: "user_group#member",
+				SubjectID:   "ug-1",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	writes := gotPayload["writes"].(map[string]any)["tuple_keys"].([]any)
+	if writes[0].(map[string]any)["user"] != "user_group:ug-1#member" {
+		t.Fatalf("unexpected userset subject payload: %+v", gotPayload)
 	}
 }
 

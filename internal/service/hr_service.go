@@ -161,6 +161,9 @@ func (c HRService) exportEmployees(ctx RequestContext, query EmployeeQuery) ([]E
 	if len(items) > maxEmployeeExportRows {
 		return nil, CheckResult{}, employeeExportLimitError()
 	}
+	if err := c.auditSensitiveEmployeeRead(ctx, decision, items, ""); err != nil {
+		return nil, CheckResult{}, err
+	}
 	if err := c.audit(ctx, "hr.employee.export", string(ResourceEmployeeCollection), "", string(SeverityHigh), auditDecisionDetails(ctx, decision, map[string]any{
 		"filters":           query,
 		"row_count":         len(items),
@@ -374,6 +377,9 @@ func (c HRService) QueryEmployees(ctx RequestContext, query EmployeeQuery) (Page
 		}
 		sortEmployees(items, query.Sort)
 		page := utils.PageResponse(items, PageRequest{Page: query.Page, PageSize: query.PageSize, Sort: query.Sort})
+		if err := c.auditSensitiveEmployeeRead(ctx, decision, page.Items, ""); err != nil {
+			return PageResponse[Employee]{}, err
+		}
 		if err := authzAudit.Commit(ctx); err != nil {
 			return PageResponse[Employee]{}, err
 		}
@@ -385,6 +391,9 @@ func (c HRService) QueryEmployees(ctx RequestContext, query EmployeeQuery) (Page
 	}
 	items, err = c.applyEmployeeDecision(ctx, account, items, decision)
 	if err != nil {
+		return PageResponse[Employee]{}, err
+	}
+	if err := c.auditSensitiveEmployeeRead(ctx, decision, items, ""); err != nil {
 		return PageResponse[Employee]{}, err
 	}
 	if err := authzAudit.Commit(ctx); err != nil {
@@ -419,6 +428,9 @@ func (c HRService) GetEmployee(ctx RequestContext, id string) (Employee, error) 
 	}
 	if len(visible) == 0 {
 		return Employee{}, forbiddenDataScope("employee is outside data scope")
+	}
+	if err := c.auditSensitiveEmployeeRead(ctx, decision, visible, visible[0].ID); err != nil {
+		return Employee{}, err
 	}
 	return visible[0], nil
 }
@@ -2010,6 +2022,135 @@ func restrictedEmployeeFieldPolicies(policies map[string]string) map[string][]st
 		return nil
 	}
 	return out
+}
+
+// auditSensitiveEmployeeRead 寫入員工敏感欄位明文讀取稽核。
+func (c HRService) auditSensitiveEmployeeRead(ctx RequestContext, decision CheckResult, items []Employee, target string) error {
+	fields := visibleSensitiveEmployeeFields(decision, items)
+	if len(fields) == 0 {
+		return nil
+	}
+	details := auditDecisionDetails(ctx, decision, map[string]any{
+		"fields": fields,
+		"count":  len(items),
+	})
+	resource := string(ResourceEmployeeCollection)
+	if strings.TrimSpace(target) != "" {
+		resource = string(ResourceEmployee)
+		details["resource_id"] = target
+	} else {
+		ids, truncated := employeeAuditResourceIDs(items, 50)
+		details["resource_ids"] = ids
+		if truncated {
+			details["resource_ids_truncated"] = true
+		}
+	}
+	return c.audit(ctx, "hr.employee.sensitive_field.read", resource, target, string(SeverityHigh), details)
+}
+
+// visibleSensitiveEmployeeFields 回傳本次響應中以明文返回的預設敏感欄位。
+func visibleSensitiveEmployeeFields(decision CheckResult, items []Employee) []string {
+	defaults := defaultFieldPolicies(AppHR, ResourceEmployee)
+	fields := make([]string, 0, len(defaults))
+	for field, defaultEffect := range defaults {
+		if !employeeFieldPolicyRestrictsRead(defaultEffect) {
+			continue
+		}
+		if employeeFieldPolicyRestrictsRead(decision.FieldPolicies[field]) {
+			continue
+		}
+		if employeeItemsHaveFieldValue(items, field) {
+			fields = append(fields, field)
+		}
+	}
+	sort.Strings(fields)
+	return fields
+}
+
+func employeeFieldPolicyRestrictsRead(effect string) bool {
+	switch strings.TrimSpace(effect) {
+	case "mask", "hide", "deny":
+		return true
+	default:
+		return false
+	}
+}
+
+func employeeItemsHaveFieldValue(items []Employee, field string) bool {
+	for _, item := range items {
+		if employeeFieldHasValue(item, field) {
+			return true
+		}
+	}
+	return false
+}
+
+func employeeFieldHasValue(item Employee, field string) bool {
+	switch field {
+	case "personal_email":
+		return stringHasVisibleValue(item.PersonalEmail)
+	case "phone":
+		return stringHasVisibleValue(item.Phone)
+	case "insurance_info":
+		return len(item.InsuranceInfo) > 0
+	default:
+		return mapFieldHasVisibleValue(item.BasicInfo, field) ||
+			mapFieldHasVisibleValue(item.ContactInfo, field) ||
+			mapFieldHasVisibleValue(item.InsuranceInfo, field) ||
+			mapFieldHasVisibleValue(item.EmploymentInfo, field) ||
+			mapFieldHasVisibleValue(item.EducationMilitaryInfo, field)
+	}
+}
+
+func mapFieldHasVisibleValue(values map[string]any, field string) bool {
+	if len(values) == 0 {
+		return false
+	}
+	value, ok := values[field]
+	if !ok {
+		return false
+	}
+	switch v := value.(type) {
+	case nil:
+		return false
+	case string:
+		return stringHasVisibleValue(v)
+	case []any:
+		return len(v) > 0
+	case map[string]any:
+		return len(v) > 0
+	default:
+		return true
+	}
+}
+
+func stringHasVisibleValue(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && value != "****"
+}
+
+func employeeAuditResourceIDs(items []Employee, limit int) ([]string, bool) {
+	if limit <= 0 {
+		limit = 50
+	}
+	ids := make([]string, 0, minInt(len(items), limit))
+	for _, item := range items {
+		if item.ID == "" {
+			continue
+		}
+		ids = append(ids, item.ID)
+		if len(ids) >= limit {
+			return ids, len(items) > len(ids)
+		}
+	}
+	return ids, false
+}
+
+func minInt(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
 }
 
 // employeeImportInputFromRecord 處理員工 import 輸入 來源 record。

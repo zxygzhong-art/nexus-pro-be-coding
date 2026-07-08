@@ -34,6 +34,11 @@ func (c AuditService) ListLogPage(ctx RequestContext, page PageRequest) (PageRes
 	return utils.PageResponseFromStore(items, total, page), nil
 }
 
+// RecordSecurityEvent 寫入不經授權檢查的安全邊界稽核事件。
+func (c AuditService) RecordSecurityEvent(ctx RequestContext, action, resource, target string, details map[string]any) error {
+	return c.audit(ctx, action, resource, target, string(SeverityCritical), details)
+}
+
 // requireAuditAuthz 處理 require 稽核授權的服務流程。
 func (c AuditService) requireAuditAuthz(ctx RequestContext) (Account, CheckResult, error) {
 	account, decision, _, err := c.Authorize(ctx, CheckRequest{Resource: "audit.log", Action: ActionRead}, AuditTarget{})

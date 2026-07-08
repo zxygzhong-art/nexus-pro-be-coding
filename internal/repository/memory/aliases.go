@@ -8,8 +8,15 @@ type (
 	Account                         = domain.Account
 	UserIdentity                    = domain.UserIdentity
 	UserGroup                       = domain.UserGroup
+	GroupMembership                 = domain.GroupMembership
 	PermissionSet                   = domain.PermissionSet
 	Permission                      = domain.Permission
+	PermissionPackage               = domain.PermissionPackage
+	PermissionPackageContent        = domain.PermissionPackageContent
+	PermissionSetTemplate           = domain.PermissionSetTemplate
+	UserGroupTemplate               = domain.UserGroupTemplate
+	AssumableRoleTemplate           = domain.AssumableRoleTemplate
+	PermissionPackageImport         = domain.PermissionPackageImport
 	PermissionCatalogItem           = domain.PermissionCatalogItem
 	MenuItem                        = domain.MenuItem
 	PermissionSetItem               = domain.PermissionSetItem

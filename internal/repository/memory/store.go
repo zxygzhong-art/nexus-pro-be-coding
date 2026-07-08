@@ -22,7 +22,13 @@ type Store struct {
 	accounts               map[string]map[string]Account
 	userIdentities         map[string]map[string]UserIdentity
 	userGroups             map[string]map[string]UserGroup
+	groupMemberships       map[string]map[string]GroupMembership
 	permissionSets         map[string]map[string]PermissionSet
+	permissionPackages     map[string]PermissionPackage
+	permissionSetTemplates map[string]map[string]PermissionSetTemplate
+	userGroupTemplates     map[string]map[string]UserGroupTemplate
+	assumableRoleTemplates map[string]map[string]AssumableRoleTemplate
+	permissionImports      map[string]map[string]PermissionPackageImport
 	permissionCatalog      map[string]map[string]PermissionCatalogItem
 	menuItems              map[string]map[string]MenuItem
 	permissionSetItems     map[string]map[string]PermissionSetItem
@@ -71,7 +77,13 @@ func NewStore() *Store {
 		accounts:               map[string]map[string]Account{},
 		userIdentities:         map[string]map[string]UserIdentity{},
 		userGroups:             map[string]map[string]UserGroup{},
+		groupMemberships:       map[string]map[string]GroupMembership{},
 		permissionSets:         map[string]map[string]PermissionSet{},
+		permissionPackages:     map[string]PermissionPackage{},
+		permissionSetTemplates: map[string]map[string]PermissionSetTemplate{},
+		userGroupTemplates:     map[string]map[string]UserGroupTemplate{},
+		assumableRoleTemplates: map[string]map[string]AssumableRoleTemplate{},
+		permissionImports:      map[string]map[string]PermissionPackageImport{},
 		permissionCatalog:      map[string]map[string]PermissionCatalogItem{},
 		menuItems:              map[string]map[string]MenuItem{},
 		permissionSetItems:     map[string]map[string]PermissionSetItem{},
@@ -253,6 +265,74 @@ func (s *Store) ListUserGroups(_ context.Context, tenantID string) ([]UserGroup,
 	return out, nil
 }
 
+// UpsertGroupMembership 從儲存層處理 upsert 使用者群組成員關係。
+func (s *Store) UpsertGroupMembership(_ context.Context, v GroupMembership) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := groupMembershipKey(v.UserGroupID, v.AccountID)
+	if existing, ok := getNested(s.groupMemberships, v.TenantID, key); ok && v.ID == "" {
+		v.ID = existing.ID
+	}
+	putNested(s.groupMemberships, v.TenantID, key, copyGroupMembership(v))
+	return nil
+}
+
+// DeleteGroupMembership 從儲存層刪除使用者群組成員關係。
+func (s *Store) DeleteGroupMembership(_ context.Context, tenantID, userGroupID, accountID string) (GroupMembership, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := groupMembershipKey(userGroupID, accountID)
+	bucket := s.groupMemberships[tenantID]
+	if bucket == nil {
+		return GroupMembership{}, false, nil
+	}
+	v, ok := bucket[key]
+	if !ok {
+		return GroupMembership{}, false, nil
+	}
+	delete(bucket, key)
+	return copyGroupMembership(v), true, nil
+}
+
+// GetGroupMembership 從儲存層取得使用者群組成員關係。
+func (s *Store) GetGroupMembership(_ context.Context, tenantID, userGroupID, accountID string) (GroupMembership, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.groupMemberships, tenantID, groupMembershipKey(userGroupID, accountID))
+	if !ok {
+		return GroupMembership{}, false, nil
+	}
+	return copyGroupMembership(v), true, nil
+}
+
+// ListGroupMembershipsForGroup 從儲存層列出使用者群組成員關係。
+func (s *Store) ListGroupMembershipsForGroup(_ context.Context, tenantID, userGroupID string) ([]GroupMembership, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]GroupMembership, 0)
+	for _, item := range s.groupMemberships[tenantID] {
+		if item.UserGroupID == userGroupID {
+			out = append(out, copyGroupMembership(item))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+// ListActiveGroupMembershipsForAccount 從儲存層列出帳號有效使用者群組成員關係。
+func (s *Store) ListActiveGroupMembershipsForAccount(_ context.Context, tenantID, accountID string, at time.Time) ([]GroupMembership, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]GroupMembership, 0)
+	for _, item := range s.groupMemberships[tenantID] {
+		if item.AccountID == accountID && membershipActiveAt(item, at) {
+			out = append(out, copyGroupMembership(item))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
 // UpsertPermissionSet 從儲存層處理 upsert 權限集合。
 func (s *Store) UpsertPermissionSet(_ context.Context, v PermissionSet) error {
 	s.mu.Lock()
@@ -402,6 +482,157 @@ func (s *Store) ListMenuItems(_ context.Context, tenantID string) ([]MenuItem, e
 	return out, nil
 }
 
+// UpsertPermissionPackage 從儲存層處理 upsert 權限包。
+func (s *Store) UpsertPermissionPackage(_ context.Context, v PermissionPackage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.permissionPackages[v.ID] = copyPermissionPackage(v)
+	return nil
+}
+
+// UpdatePermissionPackageStatus 從儲存層更新權限包狀態。
+func (s *Store) UpdatePermissionPackageStatus(_ context.Context, id string, status domain.PermissionPackageStatus, publishedAt *time.Time) (PermissionPackage, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, ok := s.permissionPackages[id]
+	if !ok {
+		return PermissionPackage{}, false, nil
+	}
+	current.Status = status
+	if publishedAt != nil {
+		t := *publishedAt
+		current.PublishedAt = &t
+	} else {
+		current.PublishedAt = nil
+	}
+	s.permissionPackages[id] = copyPermissionPackage(current)
+	return copyPermissionPackage(current), true, nil
+}
+
+// GetPermissionPackage 從儲存層取得權限包。
+func (s *Store) GetPermissionPackage(_ context.Context, id string) (PermissionPackage, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := s.permissionPackages[id]
+	if !ok {
+		return PermissionPackage{}, false, nil
+	}
+	return copyPermissionPackage(v), true, nil
+}
+
+// GetPermissionPackageByApplicationVersion 從儲存層取得權限包 by application/version。
+func (s *Store) GetPermissionPackageByApplicationVersion(_ context.Context, applicationCode, version string) (PermissionPackage, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, item := range s.permissionPackages {
+		if item.ApplicationCode == applicationCode && item.Version == version {
+			return copyPermissionPackage(item), true, nil
+		}
+	}
+	return PermissionPackage{}, false, nil
+}
+
+// ListPermissionPackages 從儲存層列出權限包。
+func (s *Store) ListPermissionPackages(_ context.Context) ([]PermissionPackage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]PermissionPackage, 0, len(s.permissionPackages))
+	for _, item := range s.permissionPackages {
+		out = append(out, copyPermissionPackage(item))
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ApplicationCode != out[j].ApplicationCode {
+			return out[i].ApplicationCode < out[j].ApplicationCode
+		}
+		return out[i].Version < out[j].Version
+	})
+	return out, nil
+}
+
+// UpsertPermissionSetTemplate 從儲存層處理 upsert 權限集合模板。
+func (s *Store) UpsertPermissionSetTemplate(_ context.Context, v PermissionSetTemplate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.permissionSetTemplates, v.PackageID, v.TemplateKey, copyPermissionSetTemplate(v))
+	return nil
+}
+
+// ListPermissionSetTemplates 從儲存層列出權限集合模板。
+func (s *Store) ListPermissionSetTemplates(_ context.Context, packageID string) ([]PermissionSetTemplate, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.permissionSetTemplates[packageID], copyPermissionSetTemplate)
+	sort.Slice(out, func(i, j int) bool { return out[i].TemplateKey < out[j].TemplateKey })
+	return out, nil
+}
+
+// UpsertUserGroupTemplate 從儲存層處理 upsert 使用者群組模板。
+func (s *Store) UpsertUserGroupTemplate(_ context.Context, v UserGroupTemplate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.userGroupTemplates, v.PackageID, v.TemplateKey, copyUserGroupTemplate(v))
+	return nil
+}
+
+// ListUserGroupTemplates 從儲存層列出使用者群組模板。
+func (s *Store) ListUserGroupTemplates(_ context.Context, packageID string) ([]UserGroupTemplate, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.userGroupTemplates[packageID], copyUserGroupTemplate)
+	sort.Slice(out, func(i, j int) bool { return out[i].TemplateKey < out[j].TemplateKey })
+	return out, nil
+}
+
+// UpsertAssumableRoleTemplate 從儲存層處理 upsert 可承擔角色模板。
+func (s *Store) UpsertAssumableRoleTemplate(_ context.Context, v AssumableRoleTemplate) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.assumableRoleTemplates, v.PackageID, v.TemplateKey, copyAssumableRoleTemplate(v))
+	return nil
+}
+
+// ListAssumableRoleTemplates 從儲存層列出可承擔角色模板。
+func (s *Store) ListAssumableRoleTemplates(_ context.Context, packageID string) ([]AssumableRoleTemplate, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.assumableRoleTemplates[packageID], copyAssumableRoleTemplate)
+	sort.Slice(out, func(i, j int) bool { return out[i].TemplateKey < out[j].TemplateKey })
+	return out, nil
+}
+
+// UpsertPermissionPackageImport 從儲存層處理 upsert 權限包導入記錄。
+func (s *Store) UpsertPermissionPackageImport(_ context.Context, v PermissionPackageImport) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.permissionImports, v.TenantID, permissionPackageImportKey(v.PackageID, v.Version), copyPermissionPackageImport(v))
+	return nil
+}
+
+// GetPermissionPackageImport 從儲存層取得權限包導入記錄。
+func (s *Store) GetPermissionPackageImport(_ context.Context, tenantID, packageID, version string) (PermissionPackageImport, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.permissionImports, tenantID, permissionPackageImportKey(packageID, version))
+	if !ok {
+		return PermissionPackageImport{}, false, nil
+	}
+	return copyPermissionPackageImport(v), true, nil
+}
+
+// ListPermissionPackageImports 從儲存層列出租戶權限包導入記錄。
+func (s *Store) ListPermissionPackageImports(_ context.Context, tenantID string) ([]PermissionPackageImport, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.permissionImports[tenantID], copyPermissionPackageImport)
+	sort.Slice(out, func(i, j int) bool { return out[i].ImportedAt.Before(out[j].ImportedAt) })
+	return out, nil
+}
+
+// permissionPackageImportKey 處理權限包導入 key。
+func permissionPackageImportKey(packageID, version string) string {
+	return packageID + "\x00" + version
+}
+
 // UpsertPermissionSetAssignment 從儲存層處理 upsert 權限集合指派。
 func (s *Store) UpsertPermissionSetAssignment(_ context.Context, v PermissionSetAssignment) error {
 	s.mu.Lock()
@@ -469,6 +700,26 @@ func (s *Store) ListDataScopes(_ context.Context, tenantID string) ([]DataScope,
 	return out, nil
 }
 
+// UpdateDataScope 從儲存層更新資料範圍。
+func (s *Store) UpdateDataScope(_ context.Context, v DataScope) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.dataScopes, v.TenantID, v.ID, copyDataScope(v))
+	return nil
+}
+
+// DeleteDataScope 從儲存層刪除資料範圍。
+func (s *Store) DeleteDataScope(_ context.Context, tenantID, id string) (DataScope, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := getNested(s.dataScopes, tenantID, id)
+	if !ok {
+		return DataScope{}, false, nil
+	}
+	delete(s.dataScopes[tenantID], id)
+	return copyDataScope(v), true, nil
+}
+
 // UpsertFieldPolicy 從儲存層處理 upsert 欄位政策。
 func (s *Store) UpsertFieldPolicy(_ context.Context, v FieldPolicy) error {
 	s.mu.Lock()
@@ -477,18 +728,41 @@ func (s *Store) UpsertFieldPolicy(_ context.Context, v FieldPolicy) error {
 	return nil
 }
 
+// GetFieldPolicy 從儲存層取得欄位政策。
+func (s *Store) GetFieldPolicy(_ context.Context, tenantID, id string) (FieldPolicy, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.fieldPolicies, tenantID, id)
+	if !ok {
+		return FieldPolicy{}, false, nil
+	}
+	return copyFieldPolicy(v), true, nil
+}
+
 // ListFieldPolicies 從儲存層列出欄位政策。
 func (s *Store) ListFieldPolicies(_ context.Context, tenantID, applicationCode, resourceType string) ([]FieldPolicy, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]FieldPolicy, 0)
 	for _, v := range s.fieldPolicies[tenantID] {
-		if v.ApplicationCode == applicationCode && v.ResourceType == resourceType {
+		if (applicationCode == "" || v.ApplicationCode == applicationCode) && (resourceType == "" || v.ResourceType == resourceType) {
 			out = append(out, copyFieldPolicy(v))
 		}
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].FieldName < out[j].FieldName })
 	return out, nil
+}
+
+// DeleteFieldPolicy 從儲存層刪除欄位政策。
+func (s *Store) DeleteFieldPolicy(_ context.Context, tenantID, id string) (FieldPolicy, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := getNested(s.fieldPolicies, tenantID, id)
+	if !ok {
+		return FieldPolicy{}, false, nil
+	}
+	delete(s.fieldPolicies[tenantID], id)
+	return copyFieldPolicy(v), true, nil
 }
 
 // UpsertAssumableRole 從儲存層處理 upsert assumable 角色。
@@ -2247,6 +2521,39 @@ func (s *Store) AddAccountGroup(_ context.Context, tenantID, accountID, groupID 
 		accountBucket[accountID] = account
 	}
 	return nil
+}
+
+// RemoveAccountGroup 從儲存層處理 remove 帳號群組。
+func (s *Store) RemoveAccountGroup(_ context.Context, tenantID, accountID, groupID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	accountBucket := s.accounts[tenantID]
+	account, ok := accountBucket[accountID]
+	if !ok {
+		return nil
+	}
+	next := make([]string, 0, len(account.UserGroupIDs))
+	for _, id := range account.UserGroupIDs {
+		if id != groupID {
+			next = append(next, id)
+		}
+	}
+	account.UserGroupIDs = next
+	accountBucket[accountID] = account
+	return nil
+}
+
+// groupMembershipKey 取得使用者群組成員關係 key。
+func groupMembershipKey(userGroupID, accountID string) string {
+	return userGroupID + "\x00" + accountID
+}
+
+// membershipActiveAt 判斷群組成員關係在指定時間是否有效。
+func membershipActiveAt(v GroupMembership, at time.Time) bool {
+	if !v.ValidFrom.IsZero() && v.ValidFrom.After(at) {
+		return false
+	}
+	return v.ValidUntil == nil || !v.ValidUntil.Before(at)
 }
 
 // putNested 處理 put nested。

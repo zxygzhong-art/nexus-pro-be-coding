@@ -36,16 +36,18 @@ func TestAuthorizationModelContainsOrgScopeTypes(t *testing.T) {
 	for _, def := range model.TypeDefinitions {
 		types[def.Type] = def.Relations
 	}
-	for _, typ := range []string{"tenant", "org_unit", "user_group", "hr.employee"} {
+	for _, typ := range []string{"tenant", "org_unit", "user_group", "assumable_role", "agent_tool", "hr.employee"} {
 		if _, ok := types[typ]; !ok {
 			t.Fatalf("expected type %q in model", typ)
 		}
 	}
 	for typ, relations := range map[string][]string{
-		"tenant":      {"member"},
-		"org_unit":    {"parent", "member", "manager", "member_recursive"},
-		"user_group":  {"member"},
-		"hr.employee": {"owner", "manager", "org", "read"},
+		"tenant":         {"member", "admin", "security_admin"},
+		"org_unit":       {"tenant", "parent", "member", "manager", "member_recursive", "viewer", "editor"},
+		"user_group":     {"member", "manager"},
+		"assumable_role": {"tenant", "trusted_user", "trusted_group", "approver", "can_assume", "can_approve"},
+		"agent_tool":     {"tenant", "runner", "approver", "can_run", "can_execute_high_risk"},
+		"hr.employee":    {"owner", "manager", "org", "read"},
 	} {
 		for _, relation := range relations {
 			if _, ok := types[typ][relation]; !ok {

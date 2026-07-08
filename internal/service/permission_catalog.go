@@ -13,6 +13,9 @@ import (
 
 // SyncPermissionCatalogForAllTenants 將程式宣告的權限與選單 catalog 同步到所有租戶。
 func (c *Service) SyncPermissionCatalogForAllTenants(ctx context.Context) error {
+	if err := c.ensureBuiltinPermissionPackage(ctx); err != nil {
+		return err
+	}
 	tenants, err := c.store.ListTenants(ctx)
 	if err != nil {
 		return err
@@ -30,6 +33,9 @@ func (c *Service) SyncPermissionCatalog(ctx context.Context, tenantID string) er
 	tenantID = strings.TrimSpace(tenantID)
 	if tenantID == "" {
 		return BadRequest("tenant id is required")
+	}
+	if err := c.ensureBuiltinPermissionPackage(ctx); err != nil {
+		return err
 	}
 	now := c.Now()
 	if ctx == nil {
@@ -54,12 +60,17 @@ func (c *Service) upsertPermissionSetWithItems(ctx RequestContext, set Permissio
 
 // syncPermissionCatalogForTenant 同步租戶權限 catalog、選單 catalog，並回填權限集合項。
 func syncPermissionCatalogForTenant(ctx context.Context, store repository.Store, tenantID string, now time.Time) error {
-	for _, item := range defaultPermissionCatalogItems(tenantID, now) {
+	return syncPermissionCatalogFromPackageForTenant(ctx, store, tenantID, DefaultHRPermissionPackageContent(), now)
+}
+
+// syncPermissionCatalogFromPackageForTenant 從權限包內容同步租戶權限 catalog、選單 catalog，並回填權限集合項。
+func syncPermissionCatalogFromPackageForTenant(ctx context.Context, store repository.IAMStore, tenantID string, content PermissionPackageContent, now time.Time) error {
+	for _, item := range permissionCatalogItemsFromPackage(tenantID, content, now) {
 		if err := store.UpsertPermissionCatalogItem(ctx, item); err != nil {
 			return err
 		}
 	}
-	for _, item := range defaultMenuItems(tenantID, now) {
+	for _, item := range menuItemsFromPermissionPackage(tenantID, content.Menus, now) {
 		if err := store.UpsertMenuItem(ctx, item); err != nil {
 			return err
 		}
@@ -76,8 +87,73 @@ func syncPermissionCatalogForTenant(ctx context.Context, store repository.Store,
 	return nil
 }
 
+// permissionCatalogItemsFromPackage 由權限包內容產生租戶 catalog 項。
+func permissionCatalogItemsFromPackage(tenantID string, content PermissionPackageContent, now time.Time) []PermissionCatalogItem {
+	permissions := normalizePermissions(content.Permissions)
+	out := make([]PermissionCatalogItem, 0, len(permissions)+countPermissionPackageMenus(content.Menus))
+	for _, permission := range permissions {
+		out = append(out, permissionCatalogItemFromPermission(tenantID, permission, now))
+	}
+	for _, menu := range menuItemsFromPermissionPackage(tenantID, content.Menus, now) {
+		out = append(out, PermissionCatalogItem{
+			ID:             stableCatalogID("perm", tenantID, string(PermissionTypeMenu), menu.Key),
+			TenantID:       tenantID,
+			Application:    applicationForMenuKey(menu.Key),
+			Resource:       menu.Key,
+			Action:         string(ActionRead),
+			PermissionType: PermissionTypeMenu,
+			MenuKey:        menu.Key,
+			Name:           menu.Label,
+			Description:    "Menu visibility: " + menu.Key,
+			Severity:       string(SeverityLow),
+			CreatedAt:      now,
+		})
+	}
+	return out
+}
+
+// menuItemsFromPermissionPackage 扁平化權限包選單。
+func menuItemsFromPermissionPackage(tenantID string, nodes []PermissionPackageMenu, now time.Time) []MenuItem {
+	out := make([]MenuItem, 0, countPermissionPackageMenus(nodes))
+	appendPermissionPackageMenuItems(&out, tenantID, "", nodes, now)
+	return out
+}
+
+// appendPermissionPackageMenuItems 附加扁平化權限包選單。
+func appendPermissionPackageMenuItems(out *[]MenuItem, tenantID, parentKey string, nodes []PermissionPackageMenu, now time.Time) {
+	for index, node := range nodes {
+		sortOrder := node.SortOrder
+		if sortOrder == 0 {
+			sortOrder = index
+		}
+		item := MenuItem{
+			ID:        stableCatalogID("menu", tenantID, node.Key),
+			TenantID:  tenantID,
+			Key:       node.Key,
+			Label:     node.Label,
+			Path:      node.Path,
+			Icon:      node.Icon,
+			ParentKey: parentKey,
+			SortOrder: sortOrder,
+			CreatedAt: now,
+		}
+		*out = append(*out, item)
+		appendPermissionPackageMenuItems(out, tenantID, node.Key, node.Children, now)
+	}
+}
+
+// countPermissionPackageMenus 計算權限包選單節點數。
+func countPermissionPackageMenus(nodes []PermissionPackageMenu) int {
+	total := 0
+	for _, node := range nodes {
+		total++
+		total += countPermissionPackageMenus(node.Children)
+	}
+	return total
+}
+
 // syncPermissionSetItems 將權限集合內的權限映射到 catalog 項並替換關聯表。
-func syncPermissionSetItems(ctx context.Context, store repository.Store, set PermissionSet, now time.Time) (int, error) {
+func syncPermissionSetItems(ctx context.Context, store repository.IAMStore, set PermissionSet, now time.Time) (int, error) {
 	permissions := normalizePermissions(set.Permissions)
 	items := make([]PermissionSetItem, 0, len(permissions))
 	seen := map[string]struct{}{}

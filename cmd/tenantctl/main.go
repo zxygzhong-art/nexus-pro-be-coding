@@ -38,6 +38,12 @@ func run(args []string) error {
 		return runProvision(args[1:])
 	case "openfga-backfill":
 		return runOpenFGABackfill(args[1:])
+	case "openfga-grant-tenant-admin":
+		return runOpenFGAGrantTenantAdmin(args[1:], false)
+	case "openfga-grant-tenant-security-admin":
+		return runOpenFGAGrantTenantAdmin(args[1:], true)
+	case "openfga-grant-agent-tool":
+		return runOpenFGAGrantAgentTool(args[1:])
 	default:
 		printUsage(os.Stderr)
 		return fmt.Errorf("unknown command %q", args[0])
@@ -110,6 +116,98 @@ func runProvision(args []string) error {
 	return encoder.Encode(result)
 }
 
+// runOpenFGAGrantTenantAdmin 執行 tenant admin/security_admin tuple 手工授權。
+func runOpenFGAGrantTenantAdmin(args []string, securityAdmin bool) error {
+	command := "tenantctl openfga-grant-tenant-admin"
+	if securityAdmin {
+		command = "tenantctl openfga-grant-tenant-security-admin"
+	}
+	fs := flag.NewFlagSet(command, flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	tenantID := fs.String("tenant-id", "", "tenant id")
+	accountID := fs.String("account-id", "", "account id to grant")
+	databaseURL := fs.String("database-url", strings.TrimSpace(os.Getenv("DATABASE_URL")), "Postgres database URL")
+	timeout := fs.Duration("timeout", 30*time.Second, "operation timeout")
+	dryRun := fs.Bool("dry-run", false, "compute the tuple without writing local tuples or outbox events")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	svc, logger, closeFn, err := tenantctlService(*databaseURL)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	input := service.OpenFGAGrantTenantAdminInput{
+		TenantID:  *tenantID,
+		AccountID: *accountID,
+		DryRun:    *dryRun,
+		Logger:    logger,
+	}
+	var result service.OpenFGAGrantRelationshipResult
+	if securityAdmin {
+		result, err = svc.OpenFGAGrantTenantSecurityAdmin(ctx, input)
+	} else {
+		result, err = svc.OpenFGAGrantTenantAdmin(ctx, input)
+	}
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(result)
+}
+
+// runOpenFGAGrantAgentTool 執行 agent_tool runner/approver tuple 手工授權。
+func runOpenFGAGrantAgentTool(args []string) error {
+	fs := flag.NewFlagSet("tenantctl openfga-grant-agent-tool", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	tenantID := fs.String("tenant-id", "", "tenant id")
+	toolID := fs.String("tool-id", "", "agent tool id, for example knowledge.search")
+	accountID := fs.String("account-id", "", "account id to grant")
+	relation := fs.String("relation", "runner", "agent_tool relation: runner or approver")
+	databaseURL := fs.String("database-url", strings.TrimSpace(os.Getenv("DATABASE_URL")), "Postgres database URL")
+	timeout := fs.Duration("timeout", 30*time.Second, "operation timeout")
+	dryRun := fs.Bool("dry-run", false, "compute the tuple without writing local tuples or outbox events")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	svc, logger, closeFn, err := tenantctlService(*databaseURL)
+	if err != nil {
+		return err
+	}
+	defer closeFn()
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	result, err := svc.OpenFGAGrantAgentTool(ctx, service.OpenFGAGrantAgentToolInput{
+		TenantID:  *tenantID,
+		ToolID:    *toolID,
+		AccountID: *accountID,
+		Relation:  *relation,
+		DryRun:    *dryRun,
+		Logger:    logger,
+	})
+	if err != nil {
+		return err
+	}
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(result)
+}
+
 // runOpenFGABackfill 執行 OpenFGA relationship tuple backfill。
 func runOpenFGABackfill(args []string) error {
 	fs := flag.NewFlagSet("tenantctl openfga-backfill", flag.ContinueOnError)
@@ -154,6 +252,21 @@ func runOpenFGABackfill(args []string) error {
 	return encoder.Encode(result)
 }
 
+func tenantctlService(databaseURL string) (*service.Service, *slog.Logger, func(), error) {
+	if strings.TrimSpace(databaseURL) == "" {
+		return nil, nil, nil, errors.New("DATABASE_URL or --database-url is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	pool, err := postgresplatform.OpenPool(ctx, databaseURL)
+	cancel()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	svc := service.New(postgresrepo.NewStore(pool), service.Options{Logger: logger})
+	return svc, logger, pool.Close, nil
+}
+
 // ensureKeycloakAdmin 透過 Keycloak Admin API 建立或更新首管理員。
 func ensureKeycloakAdmin(ctx context.Context, input service.TenantProvisionInput, sendInvite bool) (domain.ProvisionedIdentity, error) {
 	if strings.TrimSpace(input.IdentityProvider) != "" && input.IdentityProvider != domain.IdentityProviderKeycloak {
@@ -195,6 +308,9 @@ func printUsage(out *os.File) {
   tenantctl provision --tenant-id <id> --tenant-name <name> --admin-email <email> --keycloak-sub <subject>
   tenantctl provision --tenant-id <id> --tenant-name <name> --admin-email <email> --provision-keycloak
   tenantctl openfga-backfill --tenant-id <id>
+  tenantctl openfga-grant-tenant-admin --tenant-id <id> --account-id <account-id>
+  tenantctl openfga-grant-tenant-security-admin --tenant-id <id> --account-id <account-id>
+  tenantctl openfga-grant-agent-tool --tenant-id <id> --tool-id <tool-id> --account-id <account-id> [--relation runner|approver]
 
 Required environment:
   DATABASE_URL

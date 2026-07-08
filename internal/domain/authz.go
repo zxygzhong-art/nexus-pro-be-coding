@@ -76,6 +76,21 @@ const (
 	AppAudit      ApplicationCode = "audit"
 )
 
+// DefaultApplications 保存預設 application 目錄。
+var DefaultApplications = []struct {
+	Code        ApplicationCode
+	Name        string
+	Description string
+}{
+	{Code: AppPlatform, Name: "Platform", Description: "Personal portal and platform aggregate APIs."},
+	{Code: AppHR, Name: "HR", Description: "People domain and employee management APIs."},
+	{Code: AppIAM, Name: "IAM", Description: "Identity and access management APIs."},
+	{Code: AppAttendance, Name: "Attendance", Description: "Attendance, leave and clocking APIs."},
+	{Code: AppAgent, Name: "Agent", Description: "AI agent runtime APIs."},
+	{Code: AppWorkflow, Name: "Workflow", Description: "Workflow and form APIs."},
+	{Code: AppAudit, Name: "Audit", Description: "Audit log APIs."},
+}
+
 // 下列常數定義此模組使用的固定值。
 const (
 	ResourceEmployee                  ResourceType = "employee"
@@ -91,10 +106,14 @@ const (
 	ResourceAttendanceCorrection      ResourceType = "correction"
 	ResourceUserGroup                 ResourceType = "user_group"
 	ResourcePermission                ResourceType = "permission"
+	ResourcePermissionPackage         ResourceType = "permission_package"
 	ResourcePermissionSet             ResourceType = "permission_set"
 	ResourcePermissionAssign          ResourceType = "permission_set_assignment"
 	ResourceDataScope                 ResourceType = "data_scope"
 	ResourceFieldPolicy               ResourceType = "field_policy"
+	ResourceApplication               ResourceType = "application"
+	ResourceResourceType              ResourceType = "resource_type"
+	ResourceOutboxEvent               ResourceType = "outbox_event"
 	ResourceAssumableRole             ResourceType = "assumable_role"
 	ResourceTool                      ResourceType = "tool"
 	ResourceEmployeeCollection        ResourceType = "employee_collection"
@@ -210,19 +229,35 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "authz.batch_check", Method: "POST", Path: "/v1/authz/batch-check", ApplicationCode: "iam", ResourceType: "authz", Action: "check"},
 	{Name: "authz.explain", Method: "POST", Path: "/v1/authz/explain", ApplicationCode: "iam", ResourceType: "authz", Action: "explain"},
 	{Name: "authz.simulate", Method: "POST", Path: "/v1/authz/simulate", ApplicationCode: "iam", ResourceType: "authz", Action: "simulate", RiskLevel: RiskHigh},
+	{Name: "iam.application.read", Method: "GET", Path: "/v1/iam/applications", ApplicationCode: "iam", ResourceType: "application", Action: "read"},
+	{Name: "iam.resource_type.read", Method: "GET", Path: "/v1/iam/resource-types", ApplicationCode: "iam", ResourceType: "resource_type", Action: "read"},
 	{Name: "iam.permission.read", Method: "GET", Path: "/v1/iam/permissions", ApplicationCode: "iam", ResourceType: "permission", Action: "read"},
+	{Name: "iam.permission_package.read", Method: "GET", Path: "/v1/iam/permission-packages", ApplicationCode: "iam", ResourceType: "permission_package", Action: "read"},
+	{Name: "iam.permission_package.create", Method: "POST", Path: "/v1/iam/permission-packages", ApplicationCode: "iam", ResourceType: "permission_package", Action: "create", RiskLevel: RiskHigh},
+	{Name: "iam.permission_package.publish", Method: "POST", Path: "/v1/iam/permission-packages/:id/publish", ApplicationCode: "iam", ResourceType: "permission_package", Action: "publish", RiskLevel: RiskHigh},
+	{Name: "iam.permission_package.import", Method: "POST", Path: "/v1/iam/permission-packages/:id/import", ApplicationCode: "iam", ResourceType: "permission_package", Action: "import", RiskLevel: RiskHigh},
 	{Name: "iam.roles.read", Method: "GET", Path: "/v1/iam/roles", ApplicationCode: "iam", ResourceType: "assumable_role", Action: "read"},
 	{Name: "iam.role_bindings.read", Method: "GET", Path: "/v1/iam/role-bindings", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "read"},
 	{Name: "iam.user_group.read", Method: "GET", Path: "/v1/iam/user-groups", ApplicationCode: "iam", ResourceType: "user_group", Action: "read"},
 	{Name: "iam.user_group.create", Method: "POST", Path: "/v1/iam/user-groups", ApplicationCode: "iam", ResourceType: "user_group", Action: "create", RiskLevel: RiskHigh},
+	{Name: "iam.user_group.update", Method: "PATCH", Path: "/v1/iam/user-groups/:id", ApplicationCode: "iam", ResourceType: "user_group", Action: "update", RiskLevel: RiskHigh},
+	{Name: "iam.user_group.members.read", Method: "GET", Path: "/v1/iam/user-groups/:id/members", ApplicationCode: "iam", ResourceType: "user_group", Action: "read"},
+	{Name: "iam.user_group.members.add", Method: "POST", Path: "/v1/iam/user-groups/:id/members", ApplicationCode: "iam", ResourceType: "user_group", Action: "update", RiskLevel: RiskHigh},
+	{Name: "iam.user_group.members.remove", Method: "DELETE", Path: "/v1/iam/user-groups/:id/members/:accountId", ApplicationCode: "iam", ResourceType: "user_group", Action: "update", RiskLevel: RiskHigh},
 	{Name: "iam.permission_set.read", Method: "GET", Path: "/v1/iam/permission-sets", ApplicationCode: "iam", ResourceType: "permission_set", Action: "read"},
 	{Name: "iam.permission_set.create", Method: "POST", Path: "/v1/iam/permission-sets", ApplicationCode: "iam", ResourceType: "permission_set", Action: "create", RiskLevel: RiskHigh},
 	{Name: "iam.permission_assignment.read", Method: "GET", Path: "/v1/iam/permission-set-assignments", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "read"},
 	{Name: "iam.permission_assignment.create", Method: "POST", Path: "/v1/iam/permission-set-assignments", ApplicationCode: "iam", ResourceType: "permission_set_assignment", Action: "create", RiskLevel: RiskHigh},
 	{Name: "iam.data_scope.read", Method: "GET", Path: "/v1/iam/data-scopes", ApplicationCode: "iam", ResourceType: "data_scope", Action: "read"},
 	{Name: "iam.data_scope.create", Method: "POST", Path: "/v1/iam/data-scopes", ApplicationCode: "iam", ResourceType: "data_scope", Action: "create", RiskLevel: RiskHigh},
+	{Name: "iam.data_scope.update", Method: "PATCH", Path: "/v1/iam/data-scopes/:id", ApplicationCode: "iam", ResourceType: "data_scope", Action: "update", RiskLevel: RiskHigh},
+	{Name: "iam.data_scope.delete", Method: "DELETE", Path: "/v1/iam/data-scopes/:id", ApplicationCode: "iam", ResourceType: "data_scope", Action: "delete", RiskLevel: RiskHigh},
 	{Name: "iam.field_policy.read", Method: "GET", Path: "/v1/iam/field-policies", ApplicationCode: "iam", ResourceType: "field_policy", Action: "read"},
 	{Name: "iam.field_policy.create", Method: "POST", Path: "/v1/iam/field-policies", ApplicationCode: "iam", ResourceType: "field_policy", Action: "create", RiskLevel: RiskHigh},
+	{Name: "iam.field_policy.update", Method: "PATCH", Path: "/v1/iam/field-policies/:id", ApplicationCode: "iam", ResourceType: "field_policy", Action: "update", RiskLevel: RiskHigh},
+	{Name: "iam.field_policy.delete", Method: "DELETE", Path: "/v1/iam/field-policies/:id", ApplicationCode: "iam", ResourceType: "field_policy", Action: "delete", RiskLevel: RiskHigh},
+	{Name: "iam.outbox_event.read", Method: "GET", Path: "/v1/iam/outbox-events", ApplicationCode: "iam", ResourceType: "outbox_event", Action: "read"},
+	{Name: "iam.outbox_event.retry", Method: "POST", Path: "/v1/iam/outbox-events/:id/retry", ApplicationCode: "iam", ResourceType: "outbox_event", Action: "update", RiskLevel: RiskHigh},
 	{Name: "iam.assumable_role.read", Method: "GET", Path: "/v1/iam/assumable-roles", ApplicationCode: "iam", ResourceType: "assumable_role", Action: "read"},
 	{Name: "iam.assumable_role.create", Method: "POST", Path: "/v1/iam/assumable-roles", ApplicationCode: "iam", ResourceType: "assumable_role", Action: "create", RiskLevel: RiskHigh},
 	{Name: "iam.assumable_role.assume", Method: "POST", Path: "/v1/iam/assumable-roles/:id/assume", ApplicationCode: "iam", ResourceType: "assumable_role", Action: "assume", RiskLevel: RiskHigh},

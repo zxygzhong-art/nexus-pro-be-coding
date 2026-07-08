@@ -1,6 +1,7 @@
 package service
 
 import (
+	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/utils"
 	"sort"
 	"strings"
@@ -261,6 +262,10 @@ func (g authzToolGateway) Call(ctx RequestContext, call AgentToolCall) (AgentToo
 	if !decision.Allowed {
 		return AgentToolResult{Name: call.Name, Decision: decision}, Forbidden("agent tool call denied: " + decision.Reason)
 	}
+	decision, err = g.applyOpenFGAAgentToolDecision(ctx, account, req, decision)
+	if err != nil {
+		return AgentToolResult{Name: call.Name, Decision: decision}, err
+	}
 	if decision.RequiresApproval {
 		if err := g.service.confirmApproval(ctx, req); err != nil {
 			return AgentToolResult{Name: call.Name, Decision: decision}, err
@@ -276,6 +281,61 @@ func (g authzToolGateway) Call(ctx RequestContext, call AgentToolCall) (AgentToo
 	result.Name = call.Name
 	result.Decision = decision
 	return result, nil
+}
+
+func (g authzToolGateway) applyOpenFGAAgentToolDecision(ctx RequestContext, account Account, req CheckRequest, decision CheckResult) (CheckResult, error) {
+	if g.service == nil || !g.service.openFGAScopeChecksAvailable() {
+		return decision, nil
+	}
+	toolID := strings.TrimSpace(req.ResourceID)
+	if toolID == "" {
+		return decision, nil
+	}
+	object := openFGATypeAgentTool + ":" + toolID
+	subject := openFGASubjectTypeAccount + ":" + account.ID
+	allowed, err := g.service.relationships.CheckRelationship(goContext(ctx), domain.RelationshipCheck{
+		TenantID: ctx.TenantID,
+		Subject:  subject,
+		Relation: openFGARelationCanRun,
+		Object:   object,
+	})
+	if err != nil {
+		g.service.logWarn(ctx, "openfga agent tool can_run check failed; falling back to authz decision",
+			"tool_id", toolID,
+			"error", err,
+		)
+		return decision, nil
+	}
+	if !allowed {
+		decision.Allowed = false
+		decision.Reason = "relationship denied"
+		decision.MissingPermissions = uniqueStrings(append(decision.MissingPermissions, openFGATypeAgentTool+"."+openFGARelationCanRun))
+		return decision, Forbidden("agent tool can_run relationship denied")
+	}
+	decision.MatchedBy = uniqueStrings(append(decision.MatchedBy, "openfga:"+object+"#"+openFGARelationCanRun))
+	if !decision.RequiresApproval {
+		return decision, nil
+	}
+	highRiskAllowed, err := g.service.relationships.CheckRelationship(goContext(ctx), domain.RelationshipCheck{
+		TenantID: ctx.TenantID,
+		Subject:  subject,
+		Relation: openFGARelationCanExecuteHighRisk,
+		Object:   object,
+	})
+	if err != nil {
+		g.service.logWarn(ctx, "openfga agent tool high-risk check failed; falling back to approval flow",
+			"tool_id", toolID,
+			"error", err,
+		)
+		return decision, nil
+	}
+	if highRiskAllowed {
+		decision.MatchedBy = uniqueStrings(append(decision.MatchedBy, "openfga:"+object+"#"+openFGARelationCanExecuteHighRisk))
+		decision.RequiresApproval = false
+		decision.ApprovalType = ""
+		decision.ApprovalReason = ""
+	}
+	return decision, nil
 }
 
 // answerAgentPrompt 處理 answer agent prompt 的服務流程。

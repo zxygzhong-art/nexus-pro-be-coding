@@ -412,16 +412,11 @@ func (c *Service) resolveAccess(ctx RequestContext, account Account) ([]Permissi
 		}
 	}
 
-	groups := make([]UserGroup, 0)
-	for _, groupID := range account.UserGroupIDs {
-		group, ok, err := c.store.GetUserGroup(goContext(ctx), ctx.TenantID, groupID)
-		if err != nil {
-			return nil, nil, nil, err
-		}
-		if !ok {
-			continue
-		}
-		groups = append(groups, group)
+	groups, err := c.activeUserGroupsForAccount(ctx, account)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	for _, group := range groups {
 		for _, id := range group.PermissionSetIDs {
 			permissionSetIDs[id] = struct{}{}
 		}
@@ -462,7 +457,6 @@ func (c *Service) resolveAccess(ctx RequestContext, account Account) ([]Permissi
 	sort.Strings(setIDs)
 
 	permissionSets := make([]PermissionSet, 0, len(setIDs))
-	permissions := make([]Permission, 0)
 	for _, id := range setIDs {
 		set, ok, err := c.store.GetPermissionSet(goContext(ctx), ctx.TenantID, id)
 		if err != nil {
@@ -472,10 +466,74 @@ func (c *Service) resolveAccess(ctx RequestContext, account Account) ([]Permissi
 			continue
 		}
 		permissionSets = append(permissionSets, set)
-		permissions = append(permissions, set.Permissions...)
 	}
+	grants, _, assumed, boundary, err := c.collectAuthzGrants(ctx, account)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	permissions := effectiveAccessPermissionsFromGrants(grants, boundary, assumed != nil)
 
 	return permissions, permissionSets, groups, nil
+}
+
+// activeUserGroupsForAccount 以成員關係表解析帳號目前有效的使用者群組。
+func (c *Service) activeUserGroupsForAccount(ctx RequestContext, account Account) ([]UserGroup, error) {
+	at := c.Now()
+	memberships, err := c.store.ListActiveGroupMembershipsForAccount(goContext(ctx), ctx.TenantID, account.ID, at)
+	if err != nil {
+		return nil, err
+	}
+	groups := make([]UserGroup, 0, len(memberships)+len(account.UserGroupIDs))
+	seen := map[string]struct{}{}
+	addGroup := func(groupID string) error {
+		if _, ok := seen[groupID]; ok {
+			return nil
+		}
+		group, ok, err := c.store.GetUserGroup(goContext(ctx), ctx.TenantID, groupID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return nil
+		}
+		seen[groupID] = struct{}{}
+		groups = append(groups, group)
+		return nil
+	}
+	for _, membership := range memberships {
+		if err := addGroup(membership.UserGroupID); err != nil {
+			return nil, err
+		}
+	}
+	for _, groupID := range account.UserGroupIDs {
+		if _, ok := seen[groupID]; ok {
+			continue
+		}
+		membership, ok, err := c.store.GetGroupMembership(goContext(ctx), ctx.TenantID, groupID, account.ID)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			if groupMembershipActiveAt(membership, at) {
+				if err := addGroup(groupID); err != nil {
+					return nil, err
+				}
+			}
+			continue
+		}
+		if err := addGroup(groupID); err != nil {
+			return nil, err
+		}
+	}
+	return groups, nil
+}
+
+// groupMembershipActiveAt 判斷群組成員關係在指定時間是否有效。
+func groupMembershipActiveAt(membership GroupMembership, at time.Time) bool {
+	if !membership.ValidFrom.IsZero() && membership.ValidFrom.After(at) {
+		return false
+	}
+	return membership.ValidUntil == nil || !membership.ValidUntil.Before(at)
 }
 
 // audit 處理稽核的服務流程。
@@ -577,6 +635,21 @@ func auditDetailsWithContext(ctx RequestContext, details map[string]any) map[str
 	if ctx.TenantID != "" {
 		out["tenant_id"] = ctx.TenantID
 	}
+	if ctx.RouteApplicationCode != "" {
+		out["application_code"] = ctx.RouteApplicationCode
+	}
+	if ctx.RouteResourceType != "" {
+		out["resource_type"] = ctx.RouteResourceType
+	}
+	if ctx.RouteAction != "" {
+		out["route_action"] = ctx.RouteAction
+	}
+	if ctx.RoutePath != "" {
+		out["route_path"] = ctx.RoutePath
+	}
+	if ctx.AssumedRoleSessionID != "" {
+		out["assumed_role_session_id"] = ctx.AssumedRoleSessionID
+	}
 	if ctx.ApprovalInstanceID != "" {
 		out["approval_method"] = "workflow_approval"
 		out["approval_instance_id"] = ctx.ApprovalInstanceID
@@ -590,6 +663,12 @@ func auditDetailsWithContext(ctx RequestContext, details map[string]any) map[str
 func auditDecisionDetails(ctx RequestContext, decision CheckResult, details map[string]any) map[string]any {
 	out := auditDetailsWithContext(ctx, details)
 	out["authz_decision"] = decision.Allowed
+	if decision.ApplicationCode != "" {
+		out["application_code"] = decision.ApplicationCode
+	}
+	if decision.ResourceType != "" {
+		out["resource_type"] = decision.ResourceType
+	}
 	if _, ok := out["reason"]; ok {
 		out["authz_reason"] = decision.Reason
 	} else {
@@ -700,4 +779,63 @@ func capabilitiesFromPermissions(perms []Permission) []string {
 		out = append(out, permissionLabel(perm))
 	}
 	return out
+}
+
+func effectiveAccessPermissionsFromGrants(grants []authzGrant, boundary map[string]any, requireAssumed bool) []Permission {
+	normalAllowed := map[string]struct{}{}
+	assumedAllowed := map[string]struct{}{}
+	denied := make([]string, 0)
+	for _, grant := range grants {
+		perm := normalizePermission(grant.Permission)
+		key := permissionKey(perm.ApplicationCode, perm.ResourceType, perm.Action)
+		if permissionEffect(grant) == "deny" {
+			denied = append(denied, key)
+			continue
+		}
+		if policyDenies(boundary, key) || !policyAllows(boundary, key) {
+			continue
+		}
+		if grant.SourceKind == authzGrantSourceAssumed {
+			assumedAllowed[key] = struct{}{}
+			continue
+		}
+		normalAllowed[key] = struct{}{}
+	}
+
+	out := make([]Permission, 0, len(grants))
+	seen := map[string]struct{}{}
+	for _, grant := range grants {
+		perm := normalizePermission(grant.Permission)
+		key := permissionKey(perm.ApplicationCode, perm.ResourceType, perm.Action)
+		if permissionEffect(grant) == "deny" {
+			continue
+		}
+		if policyDenies(boundary, key) || !policyAllows(boundary, key) || permissionKeyDenied(key, denied) {
+			continue
+		}
+		if requireAssumed {
+			if _, ok := normalAllowed[key]; !ok {
+				continue
+			}
+			if _, ok := assumedAllowed[key]; !ok {
+				continue
+			}
+		}
+		label := permissionLabel(perm)
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		out = append(out, perm)
+	}
+	return out
+}
+
+func permissionKeyDenied(key string, denied []string) bool {
+	for _, pattern := range denied {
+		if permissionKeyMatches(key, pattern) {
+			return true
+		}
+	}
+	return false
 }

@@ -40,6 +40,20 @@ ORDER BY code ASC;
 SELECT * FROM authz_data_scopes
 WHERE tenant_id = $1 AND id = $2;
 
+-- name: UpdateAuthzDataScope :one
+UPDATE authz_data_scopes
+SET code = $3,
+    name = $4,
+    scope_type = $5,
+    params = $6::jsonb
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
+-- name: DeleteAuthzDataScope :one
+DELETE FROM authz_data_scopes
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
 -- name: UpsertAuthzFieldPolicy :one
 INSERT INTO authz_field_policies (
     id, tenant_id, application_code, resource_type, field_name,
@@ -56,12 +70,21 @@ ON CONFLICT (id) DO UPDATE SET
     permission_id = EXCLUDED.permission_id
 RETURNING *;
 
+-- name: GetAuthzFieldPolicy :one
+SELECT * FROM authz_field_policies
+WHERE tenant_id = $1 AND id = $2;
+
 -- name: ListAuthzFieldPolicies :many
 SELECT * FROM authz_field_policies
 WHERE tenant_id = $1
-  AND application_code = $2
-  AND resource_type = $3
+  AND ($2::text = '' OR application_code = $2)
+  AND ($3::text = '' OR resource_type = $3)
 ORDER BY field_name ASC;
+
+-- name: DeleteAuthzFieldPolicy :one
+DELETE FROM authz_field_policies
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
 
 -- name: UpsertAuthzPermissionSetAssignment :one
 INSERT INTO authz_permission_set_assignments (
