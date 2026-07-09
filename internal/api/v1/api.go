@@ -34,6 +34,8 @@ type API struct {
 	corsAllowedOrigins  []string
 	trustedProxies      []string
 	rateLimiter         RateLimiter
+	rateLimitFailClosed bool
+	disableSwagger      bool
 	metrics             *apiMetrics
 }
 
@@ -57,6 +59,10 @@ type Options struct {
 	TrustedProxies []string
 	// RateLimiter 非 nil 時會啟用每個 client IP 的請求限流。
 	RateLimiter RateLimiter
+	// RateLimitFailClosed 為 true 時，限流後端錯誤會拒絕請求（503），而非放行。
+	RateLimitFailClosed bool
+	// DisableSwagger 為 true 時不註冊 /swagger 與 /openapi.yaml（production 預設關閉）。
+	DisableSwagger bool
 }
 
 // New 建立 API v1 的主要物件。
@@ -80,6 +86,8 @@ func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
 		corsAllowedOrigins:  cfg.CORSAllowedOrigins,
 		trustedProxies:      cfg.TrustedProxies,
 		rateLimiter:         cfg.RateLimiter,
+		rateLimitFailClosed: cfg.RateLimitFailClosed,
+		disableSwagger:      cfg.DisableSwagger,
 		metrics:             newAPIMetrics(),
 	}
 	if app != nil {

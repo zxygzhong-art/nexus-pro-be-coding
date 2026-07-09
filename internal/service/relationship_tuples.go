@@ -605,7 +605,16 @@ func trustPolicyUserGroupIDs(policy map[string]any) []string {
 }
 
 func defaultAgentToolIDs() []string {
-	return []string{"knowledge.search"}
+	return []string{
+		"knowledge.search",
+		"get_my_profile",
+		"list_employees",
+		"get_employee",
+		"my_leave_balances",
+		"my_clock_records",
+		"my_pending_reviews",
+		"workspace_insights",
+	}
 }
 
 // syncUserGroupRelationshipTuples 同步 user_group#member tuple。

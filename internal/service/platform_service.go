@@ -32,18 +32,37 @@ func (c PlatformService) Home(ctx RequestContext) (PlatformHomeResponse, error) 
 	if err != nil {
 		return PlatformHomeResponse{}, err
 	}
+	assistants, err := c.publishedPlatformAssistants(ctx, 6, PlatformAssistantsQuery{})
+	if err != nil {
+		return PlatformHomeResponse{}, err
+	}
+	if len(assistants) == 0 {
+		assistants = firstPlatformAssistants(6)
+	}
 	return PlatformHomeResponse{
-		Assistants:   firstPlatformAssistants(6),
+		Assistants:   assistants,
 		FormColumns:  platformHomeFormColumns(),
 		ClockSummary: clockSummary,
 	}, nil
 }
 
 // ListAssistants 列出助理的服務流程。
-func (c PlatformService) ListAssistants(_ RequestContext, query PlatformAssistantsQuery) (PlatformAssistantsResponse, error) {
+func (c PlatformService) ListAssistants(ctx RequestContext, query PlatformAssistantsQuery) (PlatformAssistantsResponse, error) {
+	items, err := c.publishedPlatformAssistants(ctx, 0, query)
+	if err != nil {
+		return PlatformAssistantsResponse{}, err
+	}
+	if len(items) > 0 {
+		return PlatformAssistantsResponse{
+			Data:         items,
+			Total:        len(items),
+			ChatMessages: platformAssistantMessages(),
+			QuickPrompts: []string{"推薦客訴處理助理", "月度業績分析", "幫我擬週報", "新人 onboarding", "出差交通建議"},
+		}, nil
+	}
 	tag := strings.ToLower(strings.TrimSpace(query.Tag))
 	search := strings.ToLower(strings.TrimSpace(query.Search))
-	items := make([]PlatformAssistant, 0)
+	items = make([]PlatformAssistant, 0)
 	for _, assistant := range platformAssistantCatalog() {
 		if tag != "" && tag != "all" && assistant.Tag != tag {
 			continue
@@ -59,6 +78,36 @@ func (c PlatformService) ListAssistants(_ RequestContext, query PlatformAssistan
 		ChatMessages: platformAssistantMessages(),
 		QuickPrompts: []string{"推薦客訴處理助理", "月度業績分析", "幫我擬週報", "新人 onboarding", "出差交通建議"},
 	}, nil
+}
+
+func (c PlatformService) publishedPlatformAssistants(ctx RequestContext, limit int, query PlatformAssistantsQuery) ([]PlatformAssistant, error) {
+	agents, err := c.store.ListPublishedAgentDefinitions(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	tag := strings.ToLower(strings.TrimSpace(query.Tag))
+	search := strings.ToLower(strings.TrimSpace(query.Search))
+	items := make([]PlatformAssistant, 0, len(agents))
+	for _, agent := range agents {
+		assistant := PlatformAssistant{
+			ID:    agent.ID,
+			Emoji: agent.Emoji,
+			Title: agent.Name,
+			Desc:  agent.Description,
+			Tag:   string(agent.Category),
+		}
+		if tag != "" && tag != "all" && assistant.Tag != tag {
+			continue
+		}
+		if search != "" && !strings.Contains(strings.ToLower(assistant.Title+" "+assistant.Desc+" "+assistant.Tag), search) {
+			continue
+		}
+		items = append(items, assistant)
+		if limit > 0 && len(items) >= limit {
+			break
+		}
+	}
+	return items, nil
 }
 
 // Forms 處理表單的服務流程。
@@ -773,6 +822,7 @@ func workspaceFormDesignInputFromTemplate(template FormTemplate) SaveWorkspaceFo
 		Category: platformTemplateCategory(template),
 		Desc:     platformTemplateDesc(template),
 		Enabled:  &enabled,
+		FormKind: firstNonEmpty(platformTemplateFormKind(template.Schema), defaultFormKindForTemplateKey(template.Key)),
 		Fields:   platformTemplateFields(template.Schema),
 		Stages:   platformTemplateStages(template.Schema),
 	}
@@ -785,10 +835,12 @@ func workspaceFormDesignSchema(base map[string]any, input SaveWorkspaceFormDesig
 		schema = map[string]any{"type": "object"}
 	}
 	fields := input.Fields
+	stages := input.Stages
+	// Soft-delete / incomplete legacy rows may still rely on contract defaults.
+	// Create/Update paths validate non-empty stages before calling this helper.
 	if len(fields) == 0 {
 		fields = platformFormBuilderContract().Fields
 	}
-	stages := input.Stages
 	if len(stages) == 0 {
 		stages = platformFormBuilderContract().Stages
 	}
@@ -798,6 +850,7 @@ func workspaceFormDesignSchema(base map[string]any, input SaveWorkspaceFormDesig
 		"desc":       strings.TrimSpace(input.Desc),
 		"enabled":    enabled,
 		"deleted":    deleted,
+		"form_kind":  firstNonEmpty(strings.TrimSpace(input.FormKind), platformTemplateFormKind(base)),
 		"updated_at": updatedAt.UTC().Format(time.RFC3339),
 		"fields":     fields,
 		"stages":     stages,
@@ -848,6 +901,50 @@ func platformTemplateCategory(template FormTemplate) string {
 		return category
 	}
 	return platformFormCategory(template.Key)
+}
+
+// platformTemplateFormKind 處理平台範本 form kind。
+func platformTemplateFormKind(schema map[string]any) string {
+	if kind := platformDesignString(platformTemplateDesign(schema), "form_kind"); kind != "" {
+		return kind
+	}
+	return ""
+}
+
+func defaultFormKindForTemplateKey(key string) string {
+	switch strings.TrimSpace(key) {
+	case "leave-request", "field-leave":
+		return "hybrid"
+	case "leave-cancel":
+		return "system"
+	default:
+		return "custom"
+	}
+}
+
+var lockedLeaveCoreFieldIDs = map[string]struct{}{
+	"leave_type": {},
+	"start_at":   {},
+	"end_at":     {},
+	"hours":      {},
+	"proxy":      {},
+	"reason":     {},
+}
+
+func lockedFieldIDsForTemplate(templateKey, formKind string) map[string]struct{} {
+	kind := strings.TrimSpace(formKind)
+	if kind == "" {
+		kind = defaultFormKindForTemplateKey(templateKey)
+	}
+	if kind != "system" && kind != "hybrid" {
+		return nil
+	}
+	switch strings.TrimSpace(templateKey) {
+	case "leave-request", "field-leave", "leave-cancel":
+		return lockedLeaveCoreFieldIDs
+	default:
+		return nil
+	}
 }
 
 // platformTemplateDesc 處理平台範本 desc。
@@ -940,8 +1037,9 @@ func platformFormBuilderContract() PlatformFormBuilderContract {
 			{Key: "upload", Label: "附件", Icon: "paperclip"},
 		},
 		Fields: []PlatformFormBuilderField{
-			{ID: "field-title", Type: "text", Label: "申請主旨", Placeholder: "請輸入申請主旨", Required: true},
-			{ID: "field-reason", Type: "textarea", Label: "申請原因", Placeholder: "請描述原因", Required: true},
+			{ID: "subject", Type: "text", Label: "申請主旨", Placeholder: "請填寫申請主旨", Required: true},
+			{ID: "needed_at", Type: "datetime", Label: "需求日期", Placeholder: "選擇日期", Required: true},
+			{ID: "description", Type: "textarea", Label: "申請說明", Placeholder: "請填寫申請內容", Required: true},
 		},
 		Stages: []PlatformFormBuilderStage{
 			{ID: "stage-manager", Type: "approver", Label: "直屬主管", Detail: "依員工主管關係自動帶入", Config: map[string]any{"role": "manager"}},

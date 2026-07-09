@@ -151,6 +151,110 @@ func (c IAMService) UpdateUserGroup(ctx RequestContext, id string, input UpdateU
 	return next, nil
 }
 
+// DeleteUserGroup 刪除使用者群組；若仍有成員、指派或 trust_policy 引用則拒絕。
+func (c IAMService) DeleteUserGroup(ctx RequestContext, id string) (UserGroup, error) {
+	if _, _, err := c.requireIAMAuthz(ctx, ResourceUserGroup, ActionDelete, id); err != nil {
+		return UserGroup{}, err
+	}
+	group, ok, err := c.store.GetUserGroup(goContext(ctx), ctx.TenantID, strings.TrimSpace(id))
+	if err != nil {
+		return UserGroup{}, err
+	}
+	if !ok {
+		return UserGroup{}, NotFound("user group", id)
+	}
+	if err := c.ensureUserGroupDeletable(ctx, group); err != nil {
+		return UserGroup{}, err
+	}
+	if err := c.withTransaction(ctx, func(tx IAMService) error {
+		memberships, err := tx.store.ListGroupMembershipsForGroup(goContext(ctx), ctx.TenantID, group.ID)
+		if err != nil {
+			return err
+		}
+		for _, membership := range memberships {
+			if _, _, err := tx.store.DeleteGroupMembership(goContext(ctx), ctx.TenantID, membership.UserGroupID, membership.AccountID); err != nil {
+				return err
+			}
+		}
+		if err := tx.Service.syncUserGroupRelationshipTuples(ctx, group, UserGroup{ID: group.ID, TenantID: group.TenantID}); err != nil {
+			return err
+		}
+		accounts, err := tx.store.ListAccounts(goContext(ctx), ctx.TenantID)
+		if err != nil {
+			return err
+		}
+		for _, account := range accounts {
+			if !utils.ContainsString(account.UserGroupIDs, group.ID) {
+				continue
+			}
+			if err := tx.store.RemoveAccountGroup(goContext(ctx), ctx.TenantID, account.ID, group.ID); err != nil {
+				return err
+			}
+		}
+		deleted, ok, err := tx.store.DeleteUserGroup(goContext(ctx), ctx.TenantID, group.ID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("user group", id)
+		}
+		if err := tx.touchAuthzConfig(ctx, "iam.user_group.delete", map[string]any{"user_group_id": deleted.ID}); err != nil {
+			return err
+		}
+		return tx.audit(ctx, "iam.user_group.delete", "user_group", deleted.ID, "high", map[string]any{
+			"name": deleted.Name,
+		})
+	}); err != nil {
+		return UserGroup{}, err
+	}
+	c.logWarn(ctx, "user group deleted", "user_group_id", group.ID)
+	return group, nil
+}
+
+// ensureUserGroupDeletable 檢查使用者群組是否仍有成員、指派或 trust_policy 引用。
+func (c IAMService) ensureUserGroupDeletable(ctx RequestContext, group UserGroup) error {
+	if len(group.MemberAccountIDs) > 0 {
+		return Conflict("user group still has members")
+	}
+	memberships, err := c.store.ListGroupMembershipsForGroup(goContext(ctx), ctx.TenantID, group.ID)
+	if err != nil {
+		return err
+	}
+	if len(memberships) > 0 {
+		return Conflict("user group still has members")
+	}
+	now := c.Now()
+	assignments, err := c.store.ListPermissionSetAssignments(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return err
+	}
+	for _, assignment := range assignments {
+		if assignment.PrincipalType == string(PrincipalTypeUserGroup) && assignment.PrincipalID == group.ID && permissionSetAssignmentActive(assignment, now) {
+			return Conflict("user group has active permission set assignments")
+		}
+	}
+	roles, err := c.store.ListAssumableRoles(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return err
+	}
+	for _, role := range roles {
+		if assumableRoleTrustPolicyReferencesUserGroup(role, group.ID) {
+			return Conflict("user group is referenced by assumable role trust policy")
+		}
+	}
+	return nil
+}
+
+// assumableRoleTrustPolicyReferencesUserGroup 判斷 trust_policy 是否引用指定使用者群組。
+func assumableRoleTrustPolicyReferencesUserGroup(role AssumableRole, groupID string) bool {
+	if len(role.TrustPolicy) == 0 {
+		return false
+	}
+	allowed := stringSet(append(stringSliceFromAny(role.TrustPolicy["user_groups"]), stringSliceFromAny(role.TrustPolicy["user_group_ids"])...))
+	_, ok := allowed[groupID]
+	return ok
+}
+
 // ListUserGroupMemberPage 列出使用者群組成員分頁。
 func (c IAMService) ListUserGroupMemberPage(ctx RequestContext, groupID string, page PageRequest) (PageResponse[GroupMembership], error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceUserGroup, ActionRead, groupID); err != nil {

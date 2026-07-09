@@ -21,6 +21,8 @@ type Client struct {
 }
 
 const maxEmployeesResponseBytes = 10 << 20
+const maxDepartmentsResponseBytes = 5 << 20
+const maxPositionsResponseBytes = 5 << 20
 const maxAttendanceResponseBytes = 20 << 20
 
 // NewClient 建立 client。
@@ -64,27 +66,9 @@ func (c *Client) Ping(ctx context.Context) error {
 
 // ListEmployees 列出員工。
 func (c *Client) ListEmployees(ctx context.Context) ([]domain.EHRMSEmployeeRecord, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/employees", nil)
+	body, err := c.getJSON(ctx, "/employees", maxEmployeesResponseBytes, "employees")
 	if err != nil {
 		return nil, err
-	}
-	req.Header.Set("X-API-Key", c.apiKey)
-	req.Header.Set("Accept", "application/json")
-	resp, err := c.httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("ehrms employees returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxEmployeesResponseBytes+1))
-	if err != nil {
-		return nil, fmt.Errorf("read ehrms employees: %w", err)
-	}
-	if len(body) > maxEmployeesResponseBytes {
-		return nil, fmt.Errorf("ehrms employees response exceeds %d bytes", maxEmployeesResponseBytes)
 	}
 	var rows []domain.EHRMSEmployeeRecord
 	if err := json.Unmarshal(body, &rows); err != nil {
@@ -93,9 +77,59 @@ func (c *Client) ListEmployees(ctx context.Context) ([]domain.EHRMSEmployeeRecor
 	return normalizeEmployeeRecords(rows), nil
 }
 
+// ListDepartments 列出部門組織樹。
+func (c *Client) ListDepartments(ctx context.Context) ([]domain.EHRMSDepartmentRecord, error) {
+	body, err := c.getJSON(ctx, "/departments", maxDepartmentsResponseBytes, "departments")
+	if err != nil {
+		return nil, err
+	}
+	raw, err := decodeJSONObjectRows(body, "departments")
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]domain.EHRMSDepartmentRecord, 0, len(raw))
+	for _, row := range raw {
+		rows = append(rows, domain.EHRMSDepartmentRecord(stringRecordFromJSON(row)))
+	}
+	return normalizeDepartmentRecords(rows), nil
+}
+
+// ListPositions 列出崗位清單。
+func (c *Client) ListPositions(ctx context.Context) ([]domain.EHRMSPositionRecord, error) {
+	body, err := c.getJSON(ctx, "/positions", maxPositionsResponseBytes, "positions")
+	if err != nil {
+		return nil, err
+	}
+	raw, err := decodeJSONObjectRows(body, "positions")
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]domain.EHRMSPositionRecord, 0, len(raw))
+	for _, row := range raw {
+		rows = append(rows, domain.EHRMSPositionRecord(stringRecordFromJSON(row)))
+	}
+	return normalizePositionRecords(rows), nil
+}
+
 // ListAttendance 列出考勤日彙總。
 func (c *Client) ListAttendance(ctx context.Context) ([]domain.EHRMSAttendanceRecord, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/attendance", nil)
+	body, err := c.getJSON(ctx, "/attendance", maxAttendanceResponseBytes, "attendance")
+	if err != nil {
+		return nil, err
+	}
+	raw, err := decodeJSONObjectRows(body, "attendance")
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]domain.EHRMSAttendanceRecord, 0, len(raw))
+	for _, row := range raw {
+		rows = append(rows, domain.EHRMSAttendanceRecord(stringRecordFromJSON(row)))
+	}
+	return normalizeAttendanceRecords(rows), nil
+}
+
+func (c *Client) getJSON(ctx context.Context, path string, maxBytes int, label string) ([]byte, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -108,24 +142,24 @@ func (c *Client) ListAttendance(ctx context.Context) ([]domain.EHRMSAttendanceRe
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("ehrms attendance returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, fmt.Errorf("ehrms %s returned %d: %s", label, resp.StatusCode, strings.TrimSpace(string(body)))
 	}
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxAttendanceResponseBytes+1))
+	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxBytes)+1))
 	if err != nil {
-		return nil, fmt.Errorf("read ehrms attendance: %w", err)
+		return nil, fmt.Errorf("read ehrms %s: %w", label, err)
 	}
-	if len(body) > maxAttendanceResponseBytes {
-		return nil, fmt.Errorf("ehrms attendance response exceeds %d bytes", maxAttendanceResponseBytes)
+	if len(body) > maxBytes {
+		return nil, fmt.Errorf("ehrms %s response exceeds %d bytes", label, maxBytes)
 	}
+	return body, nil
+}
+
+func decodeJSONObjectRows(body []byte, label string) ([]map[string]any, error) {
 	decoder := json.NewDecoder(strings.NewReader(string(body)))
 	decoder.UseNumber()
 	var raw []map[string]any
 	if err := decoder.Decode(&raw); err != nil {
-		return nil, fmt.Errorf("decode ehrms attendance: %w", err)
+		return nil, fmt.Errorf("decode ehrms %s: %w", label, err)
 	}
-	rows := make([]domain.EHRMSAttendanceRecord, 0, len(raw))
-	for _, row := range raw {
-		rows = append(rows, domain.EHRMSAttendanceRecord(stringRecordFromJSON(row)))
-	}
-	return normalizeAttendanceRecords(rows), nil
+	return raw, nil
 }

@@ -3603,6 +3603,7 @@ func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
 		"員工編號":     "IKM001",
 		"中文姓名":     "測試員工",
 		"英文姓名":     "Test Employee",
+		"email":      "test.employee@ikala.ai",
 		"到職日期":     "2026/06/01",
 		"在職狀態":     "在職",
 		"部門代碼":     "M0101",
@@ -3640,8 +3641,15 @@ func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
 	if !ok {
 		t.Fatal("expected eHRMS employee to be created")
 	}
-	if employee.Name != "測試員工" || employee.CompanyEmail != "" || employee.OrgUnitID != "M0101" || employee.Position != "工程師" || employee.PositionID != "0704" || employee.Status != "active" || employee.Category != "full_time" {
+	if employee.Name != "測試員工" || employee.CompanyEmail != "test.employee@ikala.ai" || employee.OrgUnitID != "M0101" || employee.Position != "工程師" || employee.PositionID != "0704" || employee.Status != "active" || employee.Category != "full_time" {
 		t.Fatalf("unexpected eHRMS employee mapping: %+v", employee)
+	}
+	if employee.AccountID == "" {
+		t.Fatal("expected eHRMS sync to create pending_invite account from email")
+	}
+	account, ok, err := store.GetAccount(context.Background(), "tenant-1", employee.AccountID)
+	if err != nil || !ok || account.Email != "test.employee@ikala.ai" || account.Status != "pending_invite" {
+		t.Fatalf("expected pending_invite account for email SSO invite, ok=%v account=%+v err=%v", ok, account, err)
 	}
 	if employee.BasicInfo["national_id"] != "A123456789" || employee.EmploymentInfo["position"] != "工程師" || employee.EducationMilitaryInfo["school_name"] != "Nexus University" {
 		t.Fatalf("expected eHRMS profile sections to be preserved, got basic=%+v employment=%+v education=%+v", employee.BasicInfo, employee.EmploymentInfo, employee.EducationMilitaryInfo)
@@ -3684,8 +3692,8 @@ func TestSyncEHRMSEmployeesRequiresImportPermissionEvenWhenApproved(t *testing.T
 	}
 }
 
-// TestSyncEHRMSEmployeesUpdatesExistingAndPreservesLocalEmail 驗證 eHRMS 員工 updates existing and preserves 本機 email。
-func TestSyncEHRMSEmployeesUpdatesExistingAndPreservesLocalEmail(t *testing.T) {
+// TestSyncEHRMSEmployeesClearsLocalEmailWhenUpstreamEmpty 驗證上游無 email 時以 EHRMS 覆蓋清空本機 email。
+func TestSyncEHRMSEmployeesClearsLocalEmailWhenUpstreamEmpty(t *testing.T) {
 	rows := []domain.EHRMSEmployeeRecord{{
 		"員工編號":   "IKM002",
 		"中文姓名":   "更新員工",
@@ -3730,8 +3738,141 @@ func TestSyncEHRMSEmployeesUpdatesExistingAndPreservesLocalEmail(t *testing.T) {
 	if !ok {
 		t.Fatal("expected existing employee to remain")
 	}
-	if employee.Name != "更新員工" || employee.CompanyEmail != "local@example.com" || employee.Status != "leave_suspended" || employee.Category != "part_time" {
+	if employee.Name != "更新員工" || employee.CompanyEmail != "" || employee.Status != "leave_suspended" || employee.Category != "part_time" {
 		t.Fatalf("unexpected updated employee: %+v", employee)
+	}
+	if employee.AccountID != "" {
+		t.Fatalf("expected no account when upstream email is empty, got account_id=%s", employee.AccountID)
+	}
+}
+
+// TestSyncEHRMSEmployeesOverwritesLocalEmailAndCreatesPendingInvite 驗證上游 email 覆蓋本機並建立 pending_invite + Keycloak invite。
+func TestSyncEHRMSEmployeesOverwritesLocalEmailAndCreatesPendingInvite(t *testing.T) {
+	provisioner := &recordingIdentityProvisioner{}
+	rows := []domain.EHRMSEmployeeRecord{{
+		"員工編號":   "IKM003",
+		"中文姓名":   "覆蓋員工",
+		"email":    "ehrms@ikala.ai",
+		"到職日期":   "2026/06/01",
+		"在職狀態":   "在職",
+		"部門代碼":   "M0303",
+		"部門中文名稱": "Ops",
+		"職務代碼":   "0704",
+		"職務中文名稱": "工程師",
+		"身份類別名稱": "一般員工",
+		"身份證號":   "C123456789",
+	}}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "import", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{rows: rows}, IdentityProvisioner: provisioner})
+	ctx.ApprovalConfirmed = true
+	now := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
+	if err := store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-overwrite",
+		TenantID:         "tenant-1",
+		EmployeeNo:       "IKM003",
+		Name:             "舊員工",
+		CompanyEmail:     "local@example.com",
+		Status:           "active",
+		EmploymentStatus: "active",
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{})
+	if err != nil {
+		t.Fatalf("%v result=%+v", err, result)
+	}
+	if result.Updated != 1 {
+		t.Fatalf("expected one update, got %+v", result)
+	}
+	employee, ok, err := store.GetEmployee(context.Background(), "tenant-1", "emp-overwrite")
+	if err != nil || !ok {
+		t.Fatalf("expected employee, ok=%v err=%v", ok, err)
+	}
+	if employee.CompanyEmail != "ehrms@ikala.ai" || employee.AccountID == "" {
+		t.Fatalf("expected EHRMS email overwrite and account, got %+v", employee)
+	}
+	account, ok, err := store.GetAccount(context.Background(), "tenant-1", employee.AccountID)
+	if err != nil || !ok || account.Email != "ehrms@ikala.ai" || account.Status != "pending_invite" {
+		t.Fatalf("expected pending_invite account, ok=%v account=%+v err=%v", ok, account, err)
+	}
+	if len(provisioner.inputs) != 1 || !provisioner.inputs[0].SendInvite || provisioner.inputs[0].Email != "ehrms@ikala.ai" {
+		t.Fatalf("expected Keycloak invite provisioning, got %+v", provisioner.inputs)
+	}
+	identities, err := store.ListUserIdentities(context.Background(), "tenant-1", employee.AccountID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(identities) != 1 || identities[0].Email != "ehrms@ikala.ai" {
+		t.Fatalf("expected keycloak identity binding, got %+v", identities)
+	}
+}
+
+// TestSyncEHRMSEmployeesFailsEntireBatchOnDuplicateEmail 驗證批次內重複 email 整批失敗。
+func TestSyncEHRMSEmployeesFailsEntireBatchOnDuplicateEmail(t *testing.T) {
+	rows := []domain.EHRMSEmployeeRecord{
+		{
+			"員工編號":   "E1",
+			"中文姓名":   "員工一",
+			"email":    "dup@ikala.ai",
+			"到職日期":   "2026/06/01",
+			"在職狀態":   "在職",
+			"部門代碼":   "C01",
+			"部門中文名稱": "Corporate",
+			"職務代碼":   "0704",
+			"職務中文名稱": "工程師",
+			"身份類別名稱": "一般員工",
+			"身份證號":   "A123456789",
+		},
+		{
+			"員工編號":   "E2",
+			"中文姓名":   "員工二",
+			"email":    "dup@ikala.ai",
+			"到職日期":   "2026/06/01",
+			"在職狀態":   "在職",
+			"部門代碼":   "C01",
+			"部門中文名稱": "Corporate",
+			"職務代碼":   "0901",
+			"職務中文名稱": "經理",
+			"身份類別名稱": "一般員工",
+			"身份證號":   "A223456789",
+		},
+	}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "import", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{rows: rows}})
+	ctx.ApprovalConfirmed = true
+
+	result, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{})
+	if err == nil {
+		t.Fatal("expected duplicate email batch to fail")
+	}
+	appErr, ok := domain.AsAppError(err)
+	if !ok || appErr.Code != "import_validation_failed" {
+		t.Fatalf("expected import_validation_failed, got %v", err)
+	}
+	if result.Failed != 2 {
+		t.Fatalf("expected failed=2, got %+v", result)
+	}
+	foundDup := false
+	for _, rowErr := range result.RowErrors {
+		if rowErr.Field == "company_email" && rowErr.Code == "duplicate_in_file" {
+			foundDup = true
+			break
+		}
+	}
+	if !foundDup {
+		t.Fatalf("expected company_email duplicate_in_file, got %+v", result.RowErrors)
+	}
+	employees, err := store.ListEmployees(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(employees) != 0 {
+		t.Fatalf("duplicate email batch should not write employees, got %+v", employees)
 	}
 }
 
@@ -3775,6 +3916,7 @@ func TestSyncEHRMSEmployeesMapsEnglishAliasesToDatabase(t *testing.T) {
 		"national_id":     "A580392764",
 		"nationality":     "中華民國",
 		"passport_no":     "-",
+		"school_zh":       "Nexus University",
 		"work_status":     "離職",
 		"dept_name_en":    "MarTech Div.(TW)-KOL Radar E2E-Sales 2(已關閉)",
 		"dept_name_zh":    "行銷科技事業處-網紅行銷事業-業務二(已關閉)",
@@ -3807,6 +3949,9 @@ func TestSyncEHRMSEmployeesMapsEnglishAliasesToDatabase(t *testing.T) {
 	if !ok || unit.Code != "M010102" {
 		t.Fatalf("expected org unit from dept_code, got ok=%v unit=%+v", ok, unit)
 	}
+	if unit.NameEN != "MarTech Div.(TW)-KOL Radar E2E-Sales 2(已關閉)" || unit.Source != "ehrms" || unit.UpdatedAt.IsZero() {
+		t.Fatalf("expected eHRMS org metadata, got %+v", unit)
+	}
 
 	employee, ok, err := store.GetEmployeeByEmployeeNo(context.Background(), "tenant-1", "IK0028")
 	if err != nil {
@@ -3836,6 +3981,9 @@ func TestSyncEHRMSEmployeesMapsEnglishAliasesToDatabase(t *testing.T) {
 	if employee.EducationMilitaryInfo["highest_education"] != nil && employee.EducationMilitaryInfo["highest_education"] != "" {
 		t.Fatalf("expected placeholder education to be empty, got %+v", employee.EducationMilitaryInfo["highest_education"])
 	}
+	if employee.EducationMilitaryInfo["school_name"] != "Nexus University" {
+		t.Fatalf("expected school_zh to map to school_name, got %+v", employee.EducationMilitaryInfo)
+	}
 
 	position, ok, err := store.GetPosition(context.Background(), "tenant-1", employee.PositionID)
 	if err != nil {
@@ -3843,6 +3991,9 @@ func TestSyncEHRMSEmployeesMapsEnglishAliasesToDatabase(t *testing.T) {
 	}
 	if !ok || position.Name != "經理" || position.Code != "0901" {
 		t.Fatalf("expected position record for job_code, got ok=%v position=%+v", ok, position)
+	}
+	if position.NameEN != "Manager" || position.Source != "ehrms" {
+		t.Fatalf("expected eHRMS position metadata, got %+v", position)
 	}
 }
 
@@ -3852,64 +4003,112 @@ func TestSyncEHRMSEmployeesBuildsOrgHierarchyAndPositions(t *testing.T) {
 		{
 			"員工編號":   "E1",
 			"中文姓名":   "員工一",
+			"email":    "e1@ikala.ai",
 			"到職日期":   "2026/06/01",
 			"在職狀態":   "在職",
 			"部門代碼":   "C01",
 			"部門中文名稱": "Corporate",
+			"部門英文名稱": "Corporate EN",
 			"職務代碼":   "0901",
 			"職務中文名稱": "經理",
+			"職務英文名稱": "Manager",
 			"身份類別名稱": "一般員工",
 			"身份證號":   "A123456789",
 		},
 		{
 			"員工編號":   "E2",
 			"中文姓名":   "員工二",
+			"email":    "e2@ikala.ai",
 			"到職日期":   "2026/06/01",
 			"在職狀態":   "在職",
 			"部門代碼":   "C0101",
 			"部門中文名稱": "Sales",
+			"部門英文名稱": "Sales EN",
 			"職務代碼":   "0704",
 			"職務中文名稱": "工程師",
+			"職務英文名稱": "Engineer",
 			"身份類別名稱": "一般員工",
 			"身份證號":   "A223456789",
 		},
 	}
+	departmentRows := []domain.EHRMSDepartmentRecord{
+		{"code": "C01", "name": "Corporate", "name_en": "Corporate EN", "parent_code": "", "closed": "false", "depth": "0"},
+		{"code": "C0101", "name": "Sales", "name_en": "Sales EN", "parent_code": "C01", "closed": "false", "depth": "1"},
+		{"code": "C0199", "name": "Empty Closed", "name_en": "Empty Closed EN", "parent_code": "C01", "closed": "true", "depth": "1", "headcount": "0"},
+	}
+	positionRows := []domain.EHRMSPositionRecord{
+		{"job_code": "0901", "job_title_zh": "經理", "job_title_en": "Manager"},
+		{"job_code": "0704", "job_title_zh": "工程師", "job_title_en": "Engineer"},
+		{"job_code": "0501", "job_title_zh": "實習生", "job_title_en": "Intern"},
+	}
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.employee", Action: "import", Scope: "all"},
 		{Resource: "hr.employee", Action: "read", Scope: "all"},
-	}, service.Options{EHRMSClient: fakeEHRMSClient{rows: rows}})
+	}, service.Options{EHRMSClient: fakeEHRMSClient{rows: rows, departmentRows: departmentRows, positionRows: positionRows}})
 	ctx.ApprovalConfirmed = true
 
 	result, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.DepartmentsUpserted != 2 || result.PositionsUpserted != 2 {
+	if result.DepartmentsUpserted != 3 || result.PositionsUpserted != 3 {
 		t.Fatalf("unexpected sync counts: %+v", result)
 	}
 	child, ok, err := store.GetOrgUnit(context.Background(), "tenant-1", "C0101")
 	if err != nil || !ok || child.ParentID != "C01" {
 		t.Fatalf("expected child org unit parent, got ok=%v unit=%+v err=%v", ok, child, err)
 	}
+	if child.NameEN != "Sales EN" || child.Source != "ehrms" || child.UpdatedAt.IsZero() || child.Closed {
+		t.Fatalf("expected child org metadata, got %+v", child)
+	}
+	closed, ok, err := store.GetOrgUnit(context.Background(), "tenant-1", "C0199")
+	if err != nil || !ok || !closed.Closed || closed.ParentID != "C01" {
+		t.Fatalf("expected empty closed department upserted, ok=%v unit=%+v err=%v", ok, closed, err)
+	}
 	position, ok, err := store.GetPosition(context.Background(), "tenant-1", "0704")
-	if err != nil || !ok || position.Name != "工程師" {
+	if err != nil || !ok || position.Name != "工程師" || position.NameEN != "Engineer" || position.Source != "ehrms" {
 		t.Fatalf("expected synced position, got ok=%v position=%+v err=%v", ok, position, err)
+	}
+	intern, ok, err := store.GetPosition(context.Background(), "tenant-1", "0501")
+	if err != nil || !ok || intern.Name != "實習生" {
+		t.Fatalf("expected position from /positions without employees, ok=%v position=%+v err=%v", ok, intern, err)
 	}
 }
 
 // TestSyncEHRMSAttendanceUpsertsDailySummaries 驗證 eHRMS 考勤同步 writes 日彙總 without GPS 打卡。
 func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
 	rows := []domain.EHRMSAttendanceRecord{{
-		"emp_id":      "IKM017",
-		"date":        "2026-06-08",
-		"shift_start": "09:00",
-		"shift_end":   "18:00",
-		"shift_hours": "8",
-		"daily_hours": "8",
-		"clock_hours": "8",
+		"emp_id":           "IKM017",
+		"date":             "2026-06-10",
+		"shift_start":      "09:00",
+		"shift_end":        "18:00",
+		"shift_hours":      "8",
+		"daily_hours":      "8",
+		"clock_hours":      "8",
+		"clock_start":      "2026-06-10 09:01",
+		"clock_end":        "18:02:00",
+		"attend_start":     "09:00",
+		"attend_end":       "18:00",
+		"attend_hours":     "8",
+		"attend_counted":   "V",
+		"leave_type":       "特休",
+		"leave_start":      "13:00",
+		"leave_end":        "15:00",
+		"leave_hours":      "2",
+		"leave_counted":    "是",
+		"leave2_type":      "病假",
+		"leave2_start":     "16:00",
+		"leave2_end":       "17:00",
+		"leave2_hours":     "1",
+		"leave2_counted":   "1",
+		"overtime_start":   "18:30",
+		"overtime_end":     "20:00",
+		"overtime_hours":   "1.5",
+		"overtime_counted": "true",
+		"name_zh":          "測試員工",
 	}, {
 		"emp_id":      "MISSING",
-		"date":        "2026-06-08",
+		"date":        "2026-06-10",
 		"shift_start": "09:00",
 		"shift_end":   "18:00",
 		"clock_hours": "8",
@@ -3940,7 +4139,7 @@ func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
 	if result.Fetched != 2 || result.Created != 1 || result.Updated != 0 || result.Skipped != 1 || result.Failed != 0 || result.Mode != "upsert" {
 		t.Fatalf("unexpected eHRMS attendance sync result: %+v", result)
 	}
-	summaries, err := store.ListAttendanceDailySummaries(context.Background(), "tenant-1", domain.AttendanceDailySummaryQuery{EmployeeID: "emp-ehrms", FromDate: "2026-06-08", ToDate: "2026-06-08"})
+	summaries, err := store.ListAttendanceDailySummaries(context.Background(), "tenant-1", domain.AttendanceDailySummaryQuery{EmployeeID: "emp-ehrms", FromDate: "2026-06-10", ToDate: "2026-06-10"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3948,8 +4147,23 @@ func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
 		t.Fatalf("expected one daily summary, got %+v", summaries)
 	}
 	got := summaries[0]
-	if got.EmployeeID != "emp-ehrms" || got.WorkDate != "2026-06-08" || got.ShiftStart != "09:00" || got.ShiftEnd != "18:00" || got.ClockHours != 8 || got.ExternalRef != "IKM017:2026-06-08" || got.Source != "ehrms" {
+	if got.EmployeeID != "emp-ehrms" || got.WorkDate != "2026-06-10" || got.ShiftStart != "09:00" || got.ShiftEnd != "18:00" || got.ClockHours != 8 || got.ExternalRef != "IKM017:2026-06-10" || got.Source != "ehrms" {
 		t.Fatalf("unexpected daily summary mapping: %+v", got)
+	}
+	if got.ClockStart != "09:01" || got.ClockEnd != "18:02" || got.AttendStart != "09:00" || got.AttendEnd != "18:00" || got.AttendHours != 8 || !got.AttendCounted {
+		t.Fatalf("unexpected clock/attend mapping: %+v", got)
+	}
+	if got.LeaveType != "特休" || got.LeaveStart != "13:00" || got.LeaveEnd != "15:00" || got.LeaveHours != 2 || !got.LeaveCounted {
+		t.Fatalf("unexpected leave mapping: %+v", got)
+	}
+	if got.Leave2Type != "病假" || got.Leave2Start != "16:00" || got.Leave2End != "17:00" || got.Leave2Hours != 1 || !got.Leave2Counted {
+		t.Fatalf("unexpected second leave mapping: %+v", got)
+	}
+	if got.OvertimeStart != "18:30" || got.OvertimeEnd != "20:00" || got.OvertimeHours != 1.5 || !got.OvertimeCounted {
+		t.Fatalf("unexpected overtime mapping: %+v", got)
+	}
+	if got.Payload["name_zh"] != "測試員工" || got.Payload["clock_start"] != "2026-06-10 09:01" || got.Payload["leave_type"] != "特休" {
+		t.Fatalf("expected normalized payload to preserve source fields, got %+v", got.Payload)
 	}
 	clocks, err := store.ListAttendanceClockRecords(context.Background(), "tenant-1", domain.AttendanceClockRecordQuery{EmployeeID: "emp-ehrms"})
 	if err != nil {
@@ -3957,6 +4171,20 @@ func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
 	}
 	if len(clocks) != 0 {
 		t.Fatalf("eHRMS daily summaries must not create GPS clock records, got %+v", clocks)
+	}
+	leaves, err := store.ListLeaveRequests(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(leaves) != 0 {
+		t.Fatalf("eHRMS daily summaries must not create leave requests, got %+v", leaves)
+	}
+	overtimes, err := store.ListOvertimeRequestsByQuery(context.Background(), "tenant-1", domain.OvertimeRequestQuery{EmployeeIDs: []string{"emp-ehrms"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(overtimes) != 0 {
+		t.Fatalf("eHRMS daily summaries must not create overtime requests, got %+v", overtimes)
 	}
 
 	result, err = svc.Attendance().SyncEHRMSAttendance(ctx, domain.EHRMSAttendanceSyncInput{})
@@ -5154,6 +5382,37 @@ func TestCreateOrgUnitPathDoesNotDuplicateParent(t *testing.T) {
 	}
 }
 
+// TestUpdateOrgUnitManagerPosition 驗證組織單位可綁定主管崗。
+func TestUpdateOrgUnitManagerPosition(t *testing.T) {
+	svc, ctx := newServiceFixture([]domain.Permission{
+		{Resource: "hr.org_unit", Action: "create", Scope: "all"},
+		{Resource: "hr.org_unit", Action: "update", Scope: "all"},
+		{Resource: "hr.org_unit", Action: "read", Scope: "all"},
+		{Resource: "hr.position", Action: "create", Scope: "all"},
+		{Resource: "hr.position", Action: "read", Scope: "all"},
+	})
+	root, err := svc.HR().CreateOrgUnit(ctx, domain.CreateOrgUnitInput{Name: "Root"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	position, err := svc.HR().CreatePosition(ctx, domain.CreatePositionInput{
+		Code: "ROOT-HEAD", Name: "Root Head", OrgUnitID: root.ID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	managerPositionID := position.ID
+	updated, err := svc.HR().UpdateOrgUnit(ctx, root.ID, domain.UpdateOrgUnitInput{
+		ManagerPositionID: &managerPositionID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ManagerPositionID != position.ID {
+		t.Fatalf("expected manager position %s, got %s", position.ID, updated.ManagerPositionID)
+	}
+}
+
 // TestPlatformTaskMutationsPersistAndProject 驗證平台任務 mutations persist and project。
 func TestPlatformTaskMutationsPersistAndProject(t *testing.T) {
 	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
@@ -5372,7 +5631,7 @@ func TestPlatformWorkspaceFormDesignMutationsPersistTemplateSchema(t *testing.T)
 			{ID: "field-subject", Type: "text", Label: "Subject", Placeholder: "Subject", Required: true},
 		},
 		Stages: []domain.PlatformFormBuilderStage{
-			{ID: "stage-manager", Type: "approver", Label: "Manager", Detail: "Manager approves"},
+			{ID: "stage-manager", Type: "approver", Label: "Manager", Detail: "Manager approves", Config: map[string]any{"role": "manager"}},
 		},
 	})
 	if err != nil {
@@ -5399,8 +5658,8 @@ func TestPlatformWorkspaceFormDesignMutationsPersistTemplateSchema(t *testing.T)
 		Desc:    &nextDesc,
 		Enabled: &disabled,
 		Stages: &[]domain.PlatformFormBuilderStage{
-			{ID: "stage-finance", Type: "approver", Label: "Finance", Detail: "Finance approves"},
-			{ID: "stage-hr", Type: "notify", Label: "HR", Detail: "Notify HR"},
+			{ID: "stage-finance", Type: "approver", Label: "Finance", Detail: "Finance approves", Config: map[string]any{"role": "finance"}},
+			{ID: "stage-hr", Type: "notify", Label: "HR", Detail: "Notify HR", Config: map[string]any{"role": "hr"}},
 		},
 	})
 	if err != nil {
@@ -5691,10 +5950,14 @@ func (p *recordingIdentityProvisioner) EnsureUser(_ context.Context, input domai
 }
 
 type fakeEHRMSClient struct {
-	rows           []domain.EHRMSEmployeeRecord
-	attendanceRows []domain.EHRMSAttendanceRecord
-	err            error
-	attendanceErr  error
+	rows              []domain.EHRMSEmployeeRecord
+	departmentRows    []domain.EHRMSDepartmentRecord
+	positionRows      []domain.EHRMSPositionRecord
+	attendanceRows    []domain.EHRMSAttendanceRecord
+	err               error
+	departmentsErr    error
+	positionsErr      error
+	attendanceErr     error
 }
 
 // ListEmployees 驗證員工。
@@ -5702,9 +5965,92 @@ func (c fakeEHRMSClient) ListEmployees(context.Context) ([]domain.EHRMSEmployeeR
 	return ehrms.NormalizeEmployeeRecords(c.rows), c.err
 }
 
+// ListDepartments 驗證部門。
+func (c fakeEHRMSClient) ListDepartments(context.Context) ([]domain.EHRMSDepartmentRecord, error) {
+	if len(c.departmentRows) > 0 || c.departmentsErr != nil {
+		return ehrms.NormalizeDepartmentRecords(c.departmentRows), c.departmentsErr
+	}
+	return ehrmsDepartmentsFromEmployees(c.rows), c.departmentsErr
+}
+
+// ListPositions 驗證崗位。
+func (c fakeEHRMSClient) ListPositions(context.Context) ([]domain.EHRMSPositionRecord, error) {
+	if len(c.positionRows) > 0 || c.positionsErr != nil {
+		return ehrms.NormalizePositionRecords(c.positionRows), c.positionsErr
+	}
+	return ehrmsPositionsFromEmployees(c.rows), c.positionsErr
+}
+
 // ListAttendance 驗證考勤。
 func (c fakeEHRMSClient) ListAttendance(context.Context) ([]domain.EHRMSAttendanceRecord, error) {
 	return ehrms.NormalizeAttendanceRecords(c.attendanceRows), c.attendanceErr
+}
+
+func ehrmsDepartmentsFromEmployees(rows []domain.EHRMSEmployeeRecord) []domain.EHRMSDepartmentRecord {
+	normalized := ehrms.NormalizeEmployeeRecords(rows)
+	byCode := map[string]domain.EHRMSDepartmentRecord{}
+	codes := map[string]struct{}{}
+	for _, row := range normalized {
+		code := strings.TrimSpace(firstNonEmpty(row["部門代碼"], row["dept_code"]))
+		if code == "" {
+			continue
+		}
+		codes[code] = struct{}{}
+		byCode[code] = domain.EHRMSDepartmentRecord{
+			"部門代碼":   code,
+			"部門中文名稱": firstNonEmpty(row["部門中文名稱"], row["dept_name_zh"]),
+			"部門英文名稱": firstNonEmpty(row["部門英文名稱"], row["dept_name_en"]),
+		}
+	}
+	out := make([]domain.EHRMSDepartmentRecord, 0, len(byCode))
+	for code, record := range byCode {
+		parent := ""
+		for length := len(code) - 1; length > 0; length-- {
+			prefix := code[:length]
+			if _, ok := codes[prefix]; ok {
+				parent = prefix
+				break
+			}
+		}
+		if parent != "" {
+			record["上級部門代碼"] = parent
+		}
+		out = append(out, record)
+	}
+	return out
+}
+
+func ehrmsPositionsFromEmployees(rows []domain.EHRMSEmployeeRecord) []domain.EHRMSPositionRecord {
+	normalized := ehrms.NormalizeEmployeeRecords(rows)
+	byCode := map[string]domain.EHRMSPositionRecord{}
+	for _, row := range normalized {
+		code := strings.TrimSpace(firstNonEmpty(row["職務代碼"], row["job_code"]))
+		if code == "" {
+			continue
+		}
+		if _, ok := byCode[code]; ok {
+			continue
+		}
+		byCode[code] = domain.EHRMSPositionRecord{
+			"職務代碼":   code,
+			"職務中文名稱": firstNonEmpty(row["職務中文名稱"], row["job_title_zh"]),
+			"職務英文名稱": firstNonEmpty(row["職務英文名稱"], row["job_title_en"]),
+		}
+	}
+	out := make([]domain.EHRMSPositionRecord, 0, len(byCode))
+	for _, record := range byCode {
+		out = append(out, record)
+	}
+	return out
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 // PutObject 驗證 put 物件。

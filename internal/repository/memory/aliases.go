@@ -50,6 +50,13 @@ type (
 	PlatformTaskTodoRecord          = domain.PlatformTaskTodoRecord
 	Reference                       = domain.Reference
 	AgentRun                        = domain.AgentRun
+	AgentModel                      = domain.AgentModel
+	AgentDefinition                 = domain.AgentDefinition
+	AgentDefinitionVersion          = domain.AgentDefinitionVersion
+	AgentAudit                      = domain.AgentAudit
+	AgentSession                    = domain.AgentSession
+	AgentSessionMessage             = domain.AgentSessionMessage
+	AgentMemory                     = domain.AgentMemory
 	Notification                    = domain.Notification
 	NotificationRecipient           = domain.NotificationRecipient
 	NotificationItem                = domain.NotificationItem

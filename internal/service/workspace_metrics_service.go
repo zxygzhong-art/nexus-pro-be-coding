@@ -505,6 +505,128 @@ func workspaceEmployeeLevel(id string, employees map[string]Employee, memo map[s
 	return level
 }
 
+// workspaceDerivedManagersByOrgUnit 依組織單元主管崗推導預設主管。
+// 多 incumbent 時取員工編號/ID 字典序最小者作為 primary。
+func workspaceDerivedManagersByOrgUnit(units []OrgUnit, positions []Position, employees []Employee) map[string]string {
+	activePositions := map[string]Position{}
+	for _, position := range positions {
+		if position.Status == string(PositionStatusDisabled) {
+			continue
+		}
+		activePositions[position.ID] = position
+	}
+	incumbentsByPosition := map[string][]Employee{}
+	for _, employee := range employees {
+		if strings.TrimSpace(employee.PositionID) == "" {
+			continue
+		}
+		if !workspaceEmployeeIsActive(employee) {
+			continue
+		}
+		incumbentsByPosition[employee.PositionID] = append(incumbentsByPosition[employee.PositionID], employee)
+	}
+	for positionID, incumbents := range incumbentsByPosition {
+		sort.SliceStable(incumbents, func(i, j int) bool {
+			left := workspaceEmployeeDisplayID(incumbents[i])
+			right := workspaceEmployeeDisplayID(incumbents[j])
+			if left != right {
+				return left < right
+			}
+			return incumbents[i].ID < incumbents[j].ID
+		})
+		incumbentsByPosition[positionID] = incumbents
+	}
+	unitsByID := map[string]OrgUnit{}
+	for _, unit := range units {
+		unitsByID[unit.ID] = unit
+	}
+	out := map[string]string{}
+	memo := map[string]string{}
+	var resolve func(orgUnitID string, seen map[string]struct{}) string
+	resolve = func(orgUnitID string, seen map[string]struct{}) string {
+		orgUnitID = strings.TrimSpace(orgUnitID)
+		if orgUnitID == "" {
+			return ""
+		}
+		if managerID, ok := memo[orgUnitID]; ok {
+			return managerID
+		}
+		if _, exists := seen[orgUnitID]; exists {
+			return ""
+		}
+		seen[orgUnitID] = struct{}{}
+		unit, ok := unitsByID[orgUnitID]
+		if !ok {
+			memo[orgUnitID] = ""
+			return ""
+		}
+		if positionID := strings.TrimSpace(unit.ManagerPositionID); positionID != "" {
+			if _, ok := activePositions[positionID]; ok {
+				if incumbents := incumbentsByPosition[positionID]; len(incumbents) > 0 {
+					memo[orgUnitID] = incumbents[0].ID
+					return incumbents[0].ID
+				}
+			}
+		}
+		managerID := resolve(unit.ParentID, seen)
+		memo[orgUnitID] = managerID
+		return managerID
+	}
+	for _, unit := range units {
+		out[unit.ID] = resolve(unit.ID, map[string]struct{}{})
+	}
+	return out
+}
+
+func workspaceEffectiveManager(employee Employee, derivedManagers map[string]string) (string, string) {
+	if override := strings.TrimSpace(employee.ManagerEmployeeID); override != "" {
+		return override, "override"
+	}
+	if derived := strings.TrimSpace(derivedManagers[employee.OrgUnitID]); derived != "" && derived != employee.ID {
+		return derived, "org_unit"
+	}
+	return "", "none"
+}
+
+func workspaceEffectiveEmployeeLevel(id string, parents map[string]string, employees map[string]Employee, memo map[string]int) int {
+	if level, ok := memo[id]; ok {
+		return level
+	}
+	if _, ok := employees[id]; !ok {
+		memo[id] = 1
+		return 1
+	}
+	seen := map[string]struct{}{id: {}}
+	level := 1
+	managerID := parents[id]
+	for managerID != "" {
+		if _, exists := seen[managerID]; exists {
+			break
+		}
+		seen[managerID] = struct{}{}
+		if _, ok := employees[managerID]; !ok {
+			break
+		}
+		level++
+		managerID = parents[managerID]
+	}
+	memo[id] = level
+	return level
+}
+
+func workspaceEmployeeIsActive(employee Employee) bool {
+	status := strings.TrimSpace(employee.EmploymentStatus)
+	if status == "" {
+		status = strings.TrimSpace(string(employee.Status))
+	}
+	switch status {
+	case string(EmployeeStatusResigned), string(EmployeeStatusDeleted), "inactive", "disabled":
+		return false
+	default:
+		return true
+	}
+}
+
 // workspaceMonthlyTurnover 處理工作區每月人員異動。
 func workspaceMonthlyTurnover(employees []Employee, orgs map[string]workspaceOrgInfo, start time.Time, end time.Time, now time.Time) WorkspaceTurnoverMonthly {
 	stats := workspaceMovementByDept(employees, orgs, start, end, time.Date(start.Year(), 1, 1, 0, 0, 0, 0, time.UTC))

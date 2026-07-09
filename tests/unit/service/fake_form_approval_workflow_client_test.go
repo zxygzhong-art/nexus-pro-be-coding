@@ -9,11 +9,13 @@ import (
 )
 
 type fakeFormApprovalWorkflowClient struct {
-	service *service.Service
-	started map[string]domain.FormApprovalWorkflowStart
-	missing map[string]bool
-	starts  []domain.FormApprovalWorkflowStart
-	signals []domain.FormApprovalWorkflowSignal
+	service   *service.Service
+	started   map[string]domain.FormApprovalWorkflowStart
+	missing   map[string]bool
+	starts    []domain.FormApprovalWorkflowStart
+	signals   []domain.FormApprovalWorkflowSignal
+	startErr  error
+	failStart bool
 }
 
 func newServiceWithFakeFormApprovalWorkflows(store repository.Store, options service.Options) (*service.Service, *fakeFormApprovalWorkflowClient) {
@@ -29,6 +31,12 @@ func newServiceWithFakeFormApprovalWorkflows(store repository.Store, options ser
 
 func (c *fakeFormApprovalWorkflowClient) StartFormApprovalWorkflow(_ context.Context, start domain.FormApprovalWorkflowStart) error {
 	c.starts = append(c.starts, start)
+	if c.failStart {
+		if c.startErr != nil {
+			return c.startErr
+		}
+		return domain.E(503, "temporal_workflow_unavailable", "forced temporal start failure")
+	}
 	c.started[domain.FormApprovalWorkflowID(start.TenantID, start.FormInstanceID)] = start
 	return nil
 }

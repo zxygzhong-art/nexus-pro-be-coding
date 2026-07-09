@@ -222,6 +222,7 @@ type PlatformFormDesignForm struct {
 	Enabled        bool                       `json:"enabled"`
 	AddedThisMonth bool                       `json:"added_this_month"`
 	UpdatedAt      string                     `json:"updated_at"`
+	FormKind       string                     `json:"form_kind,omitempty"`
 	Fields         []PlatformFormBuilderField `json:"fields,omitempty"`
 	Stages         []PlatformFormBuilderStage `json:"stages,omitempty"`
 }
@@ -248,13 +249,24 @@ type PlatformFormBuilderFieldType struct {
 	Icon  string `json:"icon"`
 }
 
+// PlatformFormBuilderFieldOption 定義表單欄位選項。
+type PlatformFormBuilderFieldOption struct {
+	Label string `json:"label"`
+	Value string `json:"value"`
+}
+
 // PlatformFormBuilderField 定義平台表單 builder 欄位的資料結構。
 type PlatformFormBuilderField struct {
-	ID          string `json:"id"`
-	Type        string `json:"type"`
-	Label       string `json:"label"`
-	Placeholder string `json:"placeholder"`
-	Required    bool   `json:"required"`
+	ID             string                           `json:"id"`
+	Type           string                           `json:"type"`
+	Label          string                           `json:"label"`
+	Placeholder    string                           `json:"placeholder"`
+	Required       bool                             `json:"required"`
+	DefaultValue   any                              `json:"default_value,omitempty"`
+	LayoutColumns  []string                         `json:"layout_columns,omitempty"`
+	Options        []PlatformFormBuilderFieldOption `json:"options,omitempty"`
+	ParentLayoutID string                           `json:"parent_layout_id,omitempty"`
+	SlotIndex      *int                             `json:"slot_index,omitempty"`
 }
 
 // PlatformFormBuilderStage 定義平台表單 builder stage 的資料結構。
@@ -301,6 +313,7 @@ type SaveWorkspaceFormDesignInput struct {
 	Category string                     `json:"category,omitempty"`
 	Desc     string                     `json:"desc,omitempty"`
 	Enabled  *bool                      `json:"enabled,omitempty"`
+	FormKind string                     `json:"form_kind,omitempty"`
 	Fields   []PlatformFormBuilderField `json:"fields,omitempty"`
 	Stages   []PlatformFormBuilderStage `json:"stages,omitempty"`
 }
@@ -312,6 +325,7 @@ type UpdateWorkspaceFormDesignInput struct {
 	Category *string                     `json:"category,omitempty"`
 	Desc     *string                     `json:"desc,omitempty"`
 	Enabled  *bool                       `json:"enabled,omitempty"`
+	FormKind *string                     `json:"form_kind,omitempty"`
 	Fields   *[]PlatformFormBuilderField `json:"fields,omitempty"`
 	Stages   *[]PlatformFormBuilderStage `json:"stages,omitempty"`
 }

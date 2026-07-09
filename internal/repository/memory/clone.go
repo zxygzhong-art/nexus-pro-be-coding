@@ -299,9 +299,30 @@ func copyAttendancePolicy(v AttendancePolicy) AttendancePolicy {
 	v.WorkTime.WeekendOptions = utils.CopyStrings(v.WorkTime.WeekendOptions)
 	v.WorkTime.CycleStartOptions = utils.CopyStrings(v.WorkTime.CycleStartOptions)
 	v.WorkTime.CycleEndOptions = utils.CopyStrings(v.WorkTime.CycleEndOptions)
+	if v.EffectiveFrom != nil {
+		t := *v.EffectiveFrom
+		v.EffectiveFrom = &t
+	}
 	if len(v.LeaveTypes) > 0 {
 		next := make([]AttendanceLeaveType, len(v.LeaveTypes))
-		copy(next, v.LeaveTypes)
+		for i, item := range v.LeaveTypes {
+			next[i] = item
+			if item.ProofAfterHours != nil {
+				h := *item.ProofAfterHours
+				next[i].ProofAfterHours = &h
+			}
+			if len(item.Entitlements) > 0 {
+				ents := make([]domain.LeaveEntitlementRule, len(item.Entitlements))
+				copy(ents, item.Entitlements)
+				for j := range ents {
+					if item.Entitlements[j].TenureMaxYears != nil {
+						max := *item.Entitlements[j].TenureMaxYears
+						ents[j].TenureMaxYears = &max
+					}
+				}
+				next[i].Entitlements = ents
+			}
+		}
 		v.LeaveTypes = next
 	}
 	return v
@@ -332,7 +353,10 @@ func copyAttendanceClockRecord(v AttendanceClockRecord) AttendanceClockRecord {
 }
 
 // copyAttendanceDailySummary 複製考勤日彙總。
-func copyAttendanceDailySummary(v AttendanceDailySummary) AttendanceDailySummary { return v }
+func copyAttendanceDailySummary(v AttendanceDailySummary) AttendanceDailySummary {
+	v.Payload = utils.CopyStringMap(v.Payload)
+	return v
+}
 
 // copyAttendanceCorrectionRequest 複製考勤 correction 請求。
 func copyAttendanceCorrectionRequest(v AttendanceCorrectionRequest) AttendanceCorrectionRequest {
@@ -368,6 +392,72 @@ func copyPlatformTaskTodoRecord(v PlatformTaskTodoRecord) PlatformTaskTodoRecord
 func copyAgentRun(v AgentRun) AgentRun {
 	v.References = copyRefs(v.References)
 	v.ToolDecisions = copyCheckResults(v.ToolDecisions)
+	return v
+}
+
+// copyAgentModel 複製 agent 模型。
+func copyAgentModel(v AgentModel) AgentModel {
+	if v.LastTestedAt != nil {
+		t := *v.LastTestedAt
+		v.LastTestedAt = &t
+	}
+	return v
+}
+
+// copyAgentDefinition 複製 agent 定義。
+func copyAgentDefinition(v AgentDefinition) AgentDefinition {
+	v.Tools = utils.CopyStrings(v.Tools)
+	v.VisibilityTargets = utils.CopyStrings(v.VisibilityTargets)
+	v.Versions = copyAgentDefinitionVersions(v.Versions)
+	v.Usage.TopPrompts = utils.CopyStrings(v.Usage.TopPrompts)
+	if v.Usage.LastRunAt != nil {
+		t := *v.Usage.LastRunAt
+		v.Usage.LastRunAt = &t
+	}
+	return v
+}
+
+// copyAgentDefinitionVersion 複製 agent 版本。
+func copyAgentDefinitionVersion(v AgentDefinitionVersion) AgentDefinitionVersion {
+	v.Tools = utils.CopyStrings(v.Tools)
+	return v
+}
+
+func copyAgentDefinitionVersions(src []AgentDefinitionVersion) []AgentDefinitionVersion {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]AgentDefinitionVersion, len(src))
+	for i, item := range src {
+		out[i] = copyAgentDefinitionVersion(item)
+	}
+	return out
+}
+
+// copyAgentAudit 複製 agent audit。
+func copyAgentAudit(v AgentAudit) AgentAudit { return v }
+
+// copyAgentSession 複製 agent session。
+func copyAgentSession(v AgentSession) AgentSession {
+	if v.LastMessageAt != nil {
+		t := *v.LastMessageAt
+		v.LastMessageAt = &t
+	}
+	return v
+}
+
+// copyAgentSessionMessage 複製 agent session message。
+func copyAgentSessionMessage(v AgentSessionMessage) AgentSessionMessage {
+	v.Metadata = utils.CopyStringMap(v.Metadata)
+	return v
+}
+
+// copyAgentMemory 複製 agent memory。
+func copyAgentMemory(v AgentMemory) AgentMemory {
+	if v.ExpiresAt != nil {
+		t := *v.ExpiresAt
+		v.ExpiresAt = &t
+	}
 	return v
 }
 

@@ -159,8 +159,11 @@ const (
 	WorkflowAssigneeStatusRejected = "rejected"
 	WorkflowAssigneeStatusReturned = "returned"
 
-	WorkflowFormStatusInReview = "in_review"
-	WorkflowFormStatusReturned = "returned"
+	WorkflowFormStatusInReview            = "in_review"
+	WorkflowFormStatusReturned            = "returned"
+	WorkflowFormStatusWorkflowStartFailed = "workflow_start_failed"
+
+	WorkflowRunStatusStartFailed = "start_failed"
 )
 
 // WorkflowStageConfig 定義流程節點可執行設定。

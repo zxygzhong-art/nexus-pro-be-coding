@@ -92,20 +92,34 @@ const (
 
 // OrgUnit 定義組織單位的資料結構。
 type OrgUnit struct {
-	ID        string    `json:"id"`
-	TenantID  string    `json:"tenant_id"`
-	Code      string    `json:"code,omitempty"`
-	Name      string    `json:"name"`
-	ParentID  string    `json:"parent_id,omitempty"`
-	Path      []string  `json:"path,omitempty"`
-	CreatedAt time.Time `json:"created_at"`
+	ID                string    `json:"id"`
+	TenantID          string    `json:"tenant_id"`
+	Code              string    `json:"code,omitempty"`
+	Name              string    `json:"name"`
+	NameEN            string    `json:"name_en,omitempty"`
+	ParentID          string    `json:"parent_id,omitempty"`
+	Path              []string  `json:"path,omitempty"`
+	ManagerPositionID string    `json:"manager_position_id,omitempty"`
+	Source            string    `json:"source,omitempty"`
+	Closed            bool      `json:"closed,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
 }
 
 // CreateOrgUnitInput 定義組織單位輸入的資料結構。
 type CreateOrgUnitInput struct {
-	Code     string `json:"code,omitempty"`
-	Name     string `json:"name"`
-	ParentID string `json:"parent_id,omitempty"`
+	Code              string `json:"code,omitempty"`
+	Name              string `json:"name"`
+	ParentID          string `json:"parent_id,omitempty"`
+	ManagerPositionID string `json:"manager_position_id,omitempty"`
+}
+
+// UpdateOrgUnitInput 定義組織單位 patch 輸入的資料結構。
+type UpdateOrgUnitInput struct {
+	Code              *string `json:"code,omitempty"`
+	Name              *string `json:"name,omitempty"`
+	ParentID          *string `json:"parent_id,omitempty"`
+	ManagerPositionID *string `json:"manager_position_id,omitempty"`
 }
 
 // Position 定義崗位的資料結構。
@@ -114,10 +128,12 @@ type Position struct {
 	TenantID    string    `json:"tenant_id"`
 	Code        string    `json:"code"`
 	Name        string    `json:"name"`
+	NameEN      string    `json:"name_en,omitempty"`
 	OrgUnitID   string    `json:"org_unit_id,omitempty"`
 	Level       string    `json:"level,omitempty"`
 	Status      string    `json:"status"`
 	Description string    `json:"description,omitempty"`
+	Source      string    `json:"source,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
 }
@@ -490,6 +506,12 @@ type EmployeeImportConfirmInput struct {
 
 // EHRMSEmployeeRecord 表示 eHRMS 員工 record。
 type EHRMSEmployeeRecord map[string]string
+
+// EHRMSDepartmentRecord 表示 eHRMS 部門 record。
+type EHRMSDepartmentRecord map[string]string
+
+// EHRMSPositionRecord 表示 eHRMS 崗位 record。
+type EHRMSPositionRecord map[string]string
 
 // EHRMSEmployeeSyncInput 定義 eHRMS 員工 sync 輸入的資料結構。
 type EHRMSEmployeeSyncInput struct {

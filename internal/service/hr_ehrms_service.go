@@ -40,6 +40,9 @@ const (
 	ehrmsFieldShiftType       = "員工班別屬性"
 	ehrmsFieldDirectIndirect  = "直接/間接員工"
 	ehrmsFieldLeaveGroup      = "休假群組"
+	ehrmsFieldCompanyEmail    = "公司信箱"
+	ehrmsFieldParentDeptCode  = "上級部門代碼"
+	ehrmsFieldDeptClosed      = "部門已關閉"
 )
 
 type ehrmsEmployeeWrite struct {
@@ -63,6 +66,16 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 	if err != nil {
 		return EHRMSEmployeeSyncResponse{}, err
 	}
+	departmentRecords, err := c.ehrmsClient.ListDepartments(goContext(ctx))
+	if err != nil {
+		c.logWarn(ctx, "eHRMS department fetch failed", "error", err)
+		return EHRMSEmployeeSyncResponse{}, BadRequest("fetch eHRMS departments failed")
+	}
+	positionRecords, err := c.ehrmsClient.ListPositions(goContext(ctx))
+	if err != nil {
+		c.logWarn(ctx, "eHRMS position fetch failed", "error", err)
+		return EHRMSEmployeeSyncResponse{}, BadRequest("fetch eHRMS positions failed")
+	}
 	records, err := c.ehrmsClient.ListEmployees(goContext(ctx))
 	if err != nil {
 		c.logWarn(ctx, "eHRMS employee fetch failed", "error", err)
@@ -70,8 +83,9 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 	}
 	response := EHRMSEmployeeSyncResponse{Fetched: len(records), Mode: mode}
 	now := c.Now()
-	departments := ehrmsOrgUnits(ctx.TenantID, records, now)
-	positions := ehrmsPositions(ctx.TenantID, records, now)
+	departments := ehrmsOrgUnitsFromDepartments(ctx.TenantID, departmentRecords, now)
+	positions := ehrmsPositionsFromRecords(ctx.TenantID, positionRecords, now)
+	provisionQueued := false
 	var validationErr error
 	if err := c.withTransaction(ctx, func(tx HRService) error {
 		for _, unit := range departments {
@@ -108,6 +122,10 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 		created, updated := 0, 0
 		results = make([]BatchEmployeeResult, 0, len(writes))
 		for _, item := range writes {
+			accountCreated, err := tx.ensureEHRMSEmployeeAccount(ctx, &item.employee)
+			if err != nil {
+				return err
+			}
 			if err := tx.store.UpsertEmployee(goContext(ctx), item.employee); err != nil {
 				return err
 			}
@@ -116,6 +134,12 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 			}
 			if err := tx.linkEmployeeAccount(ctx, item.employee); err != nil {
 				return err
+			}
+			if accountCreated && item.employee.AccountID != "" {
+				if err := tx.provisionEmployeeIdentityFromAccountID(ctx, item.employee, item.employee.AccountID, true); err != nil {
+					return err
+				}
+				provisionQueued = true
 			}
 			eventType := string(EventEmployeeCreated)
 			action := "created"
@@ -126,13 +150,28 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 			} else {
 				created++
 			}
-			if err := tx.appendEmployeeEvent(ctx, eventType, item.employee.ID, map[string]any{
+			eventPayload := map[string]any{
 				"employee_id": item.employee.ID,
 				"employee_no": item.employee.EmployeeNo,
 				"source":      "ehrms",
 				"action":      action,
-			}); err != nil {
+			}
+			if item.employee.AccountID != "" {
+				eventPayload["account_id"] = item.employee.AccountID
+				eventPayload["account_policy"] = string(EmployeeAccountPolicyCreatePendingInvite)
+			}
+			if err := tx.appendEmployeeEvent(ctx, eventType, item.employee.ID, eventPayload); err != nil {
 				return err
+			}
+			if accountCreated && item.employee.AccountID != "" {
+				if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeInvited), item.employee.ID, map[string]any{
+					"employee_id":    item.employee.ID,
+					"account_id":     item.employee.AccountID,
+					"account_policy": string(EmployeeAccountPolicyCreatePendingInvite),
+					"source":         "ehrms",
+				}); err != nil {
+					return err
+				}
 			}
 			results = append(results, BatchEmployeeResult{RowNumber: item.rowNumber, EmployeeID: item.employee.ID, Success: true, Action: action, Message: action})
 		}
@@ -174,6 +213,9 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 	if validationErr != nil {
 		return response, validationErr
 	}
+	if provisionQueued {
+		c.runIdentityProvisioningFastPath(ctx)
+	}
 	c.logInfo(ctx, "eHRMS employee sync completed",
 		"fetched", response.Fetched,
 		"created", response.Created,
@@ -192,6 +234,7 @@ func (c HRService) prepareEHRMSSyncWrites(ctx RequestContext, account Account, d
 	results := make([]BatchEmployeeResult, 0)
 	seenEmployeeNos := map[string]int{}
 	seenNationalIDs := map[string]int{}
+	seenCompanyEmails := map[string]int{}
 	lookup, err := c.ehrmsValidationLookup(ctx)
 	if err != nil {
 		return nil, nil, nil, err
@@ -202,7 +245,7 @@ func (c HRService) prepareEHRMSSyncWrites(ctx RequestContext, account Account, d
 		if err != nil {
 			return nil, nil, nil, err
 		}
-		errors = append(errors, ehrmsBatchErrors(rowNumber, employee, seenEmployeeNos, seenNationalIDs)...)
+		errors = append(errors, ehrmsBatchErrors(rowNumber, employee, seenEmployeeNos, seenNationalIDs, seenCompanyEmails)...)
 		existing, ok, err := c.store.GetEmployeeByEmployeeNo(goContext(ctx), ctx.TenantID, employee.EmployeeNo)
 		if err != nil {
 			return nil, nil, nil, err
@@ -252,9 +295,11 @@ func (c HRService) prepareEHRMSSyncWrites(ctx RequestContext, account Account, d
 func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmployeeRecord, rowNumber int) (Employee, []RowError, error) {
 	status := normalizeEmployeeStatus(ehrmsValue(record, ehrmsFieldEmployeeStatus))
 	positionCode := ehrmsValue(record, ehrmsFieldPositionCode)
+	companyEmail := strings.ToLower(strings.TrimSpace(ehrmsValue(record, ehrmsFieldCompanyEmail)))
 	input := CreateEmployeeInput{
 		EmployeeNo:       ehrmsValue(record, ehrmsFieldEmployeeNo),
 		Name:             ehrmsValue(record, ehrmsFieldName),
+		CompanyEmail:     companyEmail,
 		OrgUnitID:        ehrmsValue(record, ehrmsFieldDepartmentCode),
 		PositionID:       positionCode,
 		Position:         utils.FirstNonEmpty(ehrmsValue(record, ehrmsFieldPositionName), positionCode),
@@ -273,6 +318,7 @@ func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmploy
 			"national_id":        ehrmsValue(record, ehrmsFieldNationalID),
 			"passport_no":        ehrmsValue(record, ehrmsFieldPassportNo),
 			"identity_type_name": ehrmsValue(record, ehrmsFieldIdentityType),
+			"company_email":      companyEmail,
 			"source":             "ehrms",
 		},
 		EmploymentInfo: map[string]any{
@@ -442,15 +488,9 @@ func (idx employeeUniqueIndex) fieldErrors(employee Employee) []FieldError {
 	return fields
 }
 
-// ehrmsOrgUnits 從員工資料彙整組織單位，並依部門代碼推導上級關係。
-func ehrmsOrgUnits(tenantID string, records []EHRMSEmployeeRecord, now time.Time) []OrgUnit {
-	codes := map[string]struct{}{}
-	for _, record := range records {
-		if code := ehrmsValue(record, ehrmsFieldDepartmentCode); code != "" {
-			codes[code] = struct{}{}
-		}
-	}
-	unitsByID := make(map[string]OrgUnit, len(codes))
+// ehrmsOrgUnitsFromDepartments 從 eHRMS /departments 建立組織單位（含空部門與 closed）。
+func ehrmsOrgUnitsFromDepartments(tenantID string, records []EHRMSDepartmentRecord, now time.Time) []OrgUnit {
+	unitsByID := make(map[string]OrgUnit, len(records))
 	for _, record := range records {
 		code := ehrmsValue(record, ehrmsFieldDepartmentCode)
 		if code == "" {
@@ -462,20 +502,29 @@ func ehrmsOrgUnits(tenantID string, records []EHRMSEmployeeRecord, now time.Time
 			TenantID:  tenantID,
 			Code:      code,
 			Name:      name,
-			ParentID:  ehrmsInferParentDeptCode(code, codes),
+			NameEN:    ehrmsValue(record, ehrmsFieldDepartmentEN),
+			ParentID:  ehrmsValue(record, ehrmsFieldParentDeptCode),
+			Closed:    ehrmsBool(record, ehrmsFieldDeptClosed),
 			CreatedAt: now,
+			UpdatedAt: now,
+			Source:    "ehrms",
 		}
 	}
 	for code := range unitsByID {
 		unit := unitsByID[code]
+		if unit.ParentID != "" {
+			if _, ok := unitsByID[unit.ParentID]; !ok {
+				unit.ParentID = ""
+			}
+		}
 		unit.Path = ehrmsOrgUnitPath(code, unitsByID)
 		unitsByID[code] = unit
 	}
 	return ehrmsSortedOrgUnits(unitsByID)
 }
 
-// ehrmsPositions 從員工資料彙整崗位目錄。
-func ehrmsPositions(tenantID string, records []EHRMSEmployeeRecord, now time.Time) []Position {
+// ehrmsPositionsFromRecords 從 eHRMS /positions 建立崗位目錄。
+func ehrmsPositionsFromRecords(tenantID string, records []EHRMSPositionRecord, now time.Time) []Position {
 	byCode := map[string]Position{}
 	for _, record := range records {
 		code := ehrmsValue(record, ehrmsFieldPositionCode)
@@ -491,7 +540,9 @@ func ehrmsPositions(tenantID string, records []EHRMSEmployeeRecord, now time.Tim
 			TenantID:  tenantID,
 			Code:      code,
 			Name:      name,
+			NameEN:    ehrmsValue(record, ehrmsFieldPositionEN),
 			Status:    string(PositionStatusActive),
+			Source:    "ehrms",
 			CreatedAt: now,
 			UpdatedAt: now,
 		}
@@ -506,6 +557,49 @@ func ehrmsPositions(tenantID string, records []EHRMSEmployeeRecord, now time.Tim
 		positions = append(positions, byCode[id])
 	}
 	return positions
+}
+
+// ehrmsOrgUnits 從員工資料彙整組織單位（測試與相容保留）。
+func ehrmsOrgUnits(tenantID string, records []EHRMSEmployeeRecord, now time.Time) []OrgUnit {
+	deptRecords := make([]EHRMSDepartmentRecord, 0, len(records))
+	codes := map[string]struct{}{}
+	for _, record := range records {
+		code := ehrmsValue(record, ehrmsFieldDepartmentCode)
+		if code == "" {
+			continue
+		}
+		codes[code] = struct{}{}
+		deptRecords = append(deptRecords, EHRMSDepartmentRecord{
+			ehrmsFieldDepartmentCode: code,
+			ehrmsFieldDepartmentName: ehrmsValue(record, ehrmsFieldDepartmentName),
+			ehrmsFieldDepartmentEN:   ehrmsValue(record, ehrmsFieldDepartmentEN),
+		})
+	}
+	for i, record := range deptRecords {
+		code := ehrmsValue(record, ehrmsFieldDepartmentCode)
+		parent := ehrmsInferParentDeptCode(code, codes)
+		if parent != "" {
+			deptRecords[i][ehrmsFieldParentDeptCode] = parent
+		}
+	}
+	return ehrmsOrgUnitsFromDepartments(tenantID, deptRecords, now)
+}
+
+// ehrmsPositions 從員工資料彙整崗位目錄（測試與相容保留）。
+func ehrmsPositions(tenantID string, records []EHRMSEmployeeRecord, now time.Time) []Position {
+	positionRecords := make([]EHRMSPositionRecord, 0, len(records))
+	for _, record := range records {
+		code := ehrmsValue(record, ehrmsFieldPositionCode)
+		if code == "" {
+			continue
+		}
+		positionRecords = append(positionRecords, EHRMSPositionRecord{
+			ehrmsFieldPositionCode: code,
+			ehrmsFieldPositionName: ehrmsValue(record, ehrmsFieldPositionName),
+			ehrmsFieldPositionEN:   ehrmsValue(record, ehrmsFieldPositionEN),
+		})
+	}
+	return ehrmsPositionsFromRecords(tenantID, positionRecords, now)
 }
 
 // ehrmsInferParentDeptCode 以最長有效前綴推導上級部門代碼。
@@ -576,6 +670,7 @@ func ehrmsMergeEmployee(existing Employee, candidate Employee) Employee {
 	next := existing
 	next.EmployeeNo = candidate.EmployeeNo
 	next.Name = candidate.Name
+	next.CompanyEmail = candidate.CompanyEmail
 	next.OrgUnitID = candidate.OrgUnitID
 	next.Position = candidate.Position
 	next.PositionID = candidate.PositionID
@@ -587,8 +682,90 @@ func ehrmsMergeEmployee(existing Employee, candidate Employee) Employee {
 	next.BasicInfo = mergeEmployeeImportMap(next.BasicInfo, candidate.BasicInfo)
 	next.EmploymentInfo = mergeEmployeeImportMap(next.EmploymentInfo, candidate.EmploymentInfo)
 	next.EducationMilitaryInfo = mergeEmployeeImportMap(next.EducationMilitaryInfo, candidate.EducationMilitaryInfo)
+	if next.BasicInfo == nil {
+		next.BasicInfo = map[string]any{}
+	}
+	// EHRMS email 以 upstream 為準（含空值覆蓋），不受 merge 跳過空字串影響。
+	next.BasicInfo["company_email"] = candidate.CompanyEmail
 	next.UpdatedAt = candidate.UpdatedAt
 	return next
+}
+
+// ensureEHRMSEmployeeAccount 依公司信箱建立 pending_invite 帳號，並供 Keycloak invite 開通。
+func (c HRService) ensureEHRMSEmployeeAccount(ctx RequestContext, employee *Employee) (bool, error) {
+	email := strings.ToLower(strings.TrimSpace(employee.CompanyEmail))
+	employee.CompanyEmail = email
+	if email == "" || employeeTerminalStatus(employeeStatus(*employee)) {
+		return false, nil
+	}
+	if employee.AccountID != "" {
+		account, ok, err := c.store.GetAccount(goContext(ctx), ctx.TenantID, employee.AccountID)
+		if err != nil {
+			return false, err
+		}
+		if ok {
+			before := account
+			account.Email = email
+			account.DisplayName = utils.FirstNonEmpty(account.DisplayName, employee.Name)
+			account.EmployeeID = employee.ID
+			if err := c.ensureAccountEmailAvailableForAccount(ctx, email, account.ID); err != nil {
+				return false, err
+			}
+			if err := c.store.UpsertAccount(goContext(ctx), account); err != nil {
+				return false, err
+			}
+			return false, c.Service.syncAccountTenantMembershipTuple(ctx, before, account)
+		}
+	}
+	if existing, ok, err := c.findAccountByEmail(ctx, email); err != nil {
+		return false, err
+	} else if ok {
+		before := existing
+		existing.EmployeeID = employee.ID
+		existing.DisplayName = utils.FirstNonEmpty(existing.DisplayName, employee.Name)
+		existing.Email = email
+		if err := c.store.UpsertAccount(goContext(ctx), existing); err != nil {
+			return false, err
+		}
+		if err := c.Service.syncAccountTenantMembershipTuple(ctx, before, existing); err != nil {
+			return false, err
+		}
+		employee.AccountID = existing.ID
+		return false, nil
+	}
+	if err := c.ensureAccountEmailAvailable(ctx, email); err != nil {
+		return false, err
+	}
+	account := Account{
+		ID:          utils.NewID("acct"),
+		TenantID:    ctx.TenantID,
+		DisplayName: employee.Name,
+		Email:       email,
+		EmployeeID:  employee.ID,
+		Status:      string(AccountStatusPendingInvite),
+		CreatedAt:   c.Now(),
+	}
+	if err := c.store.UpsertAccount(goContext(ctx), account); err != nil {
+		return false, err
+	}
+	if err := c.Service.syncAccountTenantMembershipTuple(ctx, Account{}, account); err != nil {
+		return false, err
+	}
+	employee.AccountID = account.ID
+	return true, nil
+}
+
+func (c HRService) findAccountByEmail(ctx RequestContext, email string) (Account, bool, error) {
+	accounts, err := c.store.ListAccounts(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return Account{}, false, err
+	}
+	for _, account := range accounts {
+		if strings.EqualFold(strings.TrimSpace(account.Email), email) {
+			return account, true, nil
+		}
+	}
+	return Account{}, false, nil
 }
 
 // ehrmsEmployeeCategory 處理 eHRMS 員工分類。
@@ -606,8 +783,8 @@ func ehrmsEmployeeCategory(record EHRMSEmployeeRecord) string {
 }
 
 // ehrmsBatchErrors 處理 eHRMS 批次錯誤。
-func ehrmsBatchErrors(rowNumber int, employee Employee, employeeNos map[string]int, nationalIDs map[string]int) []RowError {
-	errors := make([]RowError, 0, 2)
+func ehrmsBatchErrors(rowNumber int, employee Employee, employeeNos map[string]int, nationalIDs map[string]int, companyEmails map[string]int) []RowError {
+	errors := make([]RowError, 0, 3)
 	if employeeNo := strings.TrimSpace(employee.EmployeeNo); employeeNo != "" {
 		if firstRow, ok := employeeNos[employeeNo]; ok {
 			errors = append(errors, RowError{Row: rowNumber, Field: "employee_no", Code: "duplicate_in_file", Message: fmt.Sprintf("employee_no is duplicated with row %d", firstRow)})
@@ -622,7 +799,24 @@ func ehrmsBatchErrors(rowNumber int, employee Employee, employeeNos map[string]i
 			nationalIDs[nationalID] = rowNumber
 		}
 	}
+	if email := strings.ToLower(strings.TrimSpace(employee.CompanyEmail)); email != "" {
+		if firstRow, ok := companyEmails[email]; ok {
+			errors = append(errors, RowError{Row: rowNumber, Field: "company_email", Code: "duplicate_in_file", Message: fmt.Sprintf("company_email is duplicated with row %d", firstRow)})
+		} else {
+			companyEmails[email] = rowNumber
+		}
+	}
 	return errors
+}
+
+func ehrmsBool(record map[string]string, key string) bool {
+	value := strings.TrimSpace(strings.ToLower(ehrmsValue(record, key)))
+	switch value {
+	case "1", "true", "t", "yes", "y", "v", "是":
+		return true
+	default:
+		return false
+	}
 }
 
 // fieldErrorsToRowErrors 處理欄位錯誤 to 列錯誤。
@@ -638,7 +832,7 @@ func fieldErrorsToRowErrors(rowNumber int, fields []FieldError) []RowError {
 }
 
 // ehrmsValue 處理 eHRMS value。
-func ehrmsValue(record EHRMSEmployeeRecord, key string) string {
+func ehrmsValue(record map[string]string, key string) string {
 	if len(record) == 0 {
 		return ""
 	}

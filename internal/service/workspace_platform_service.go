@@ -76,6 +76,12 @@ func (c WorkspaceService) CreateWorkspaceFormDesign(ctx RequestContext, input Sa
 	if strings.TrimSpace(input.Name) == "" {
 		return PlatformFormDesign{}, BadRequest("name is required")
 	}
+	if err := validateWorkspaceFormDesignInput(input.Fields, input.Stages); err != nil {
+		return PlatformFormDesign{}, err
+	}
+	if err := validateSystemFormFieldLocks(key, input.FormKind, input.Fields); err != nil {
+		return PlatformFormDesign{}, err
+	}
 	_, decision, authzAudit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppWorkflow, ResourceType: ResourceType("form_template"), ResourceID: key, Action: ActionCreate},
 		AuditTarget{Event: "platform.workspace.form_design.create", Resource: "form_template", Target: key},
@@ -169,6 +175,9 @@ func (c WorkspaceService) UpdateWorkspaceFormDesign(ctx RequestContext, id strin
 		if input.Enabled != nil {
 			next.Enabled = input.Enabled
 		}
+		if input.FormKind != nil {
+			next.FormKind = strings.TrimSpace(*input.FormKind)
+		}
 		if input.Fields != nil {
 			next.Fields = *input.Fields
 		}
@@ -177,6 +186,16 @@ func (c WorkspaceService) UpdateWorkspaceFormDesign(ctx RequestContext, id strin
 		}
 		if strings.TrimSpace(next.Name) == "" {
 			return BadRequest("name is required")
+		}
+		// Only enforce design contract when fields/stages are explicitly patched.
+		// Enable/disable and metadata-only updates should not block on legacy templates.
+		if input.Fields != nil || input.Stages != nil {
+			if err := validateWorkspaceFormDesignInput(next.Fields, next.Stages); err != nil {
+				return err
+			}
+			if err := validateSystemFormFieldLocks(template.Key, next.FormKind, next.Fields); err != nil {
+				return err
+			}
 		}
 		enabled := true
 		if next.Enabled != nil {
@@ -266,6 +285,7 @@ func (c WorkspaceService) formDesign(ctx RequestContext) (PlatformFormDesign, er
 			Enabled:        platformTemplateEnabled(template.Schema),
 			AddedThisMonth: sameYearMonth(template.CreatedAt, c.Now()),
 			UpdatedAt:      platformTemplateUpdatedAt(template.Schema, template.CreatedAt),
+			FormKind:       firstNonEmpty(platformTemplateFormKind(template.Schema), defaultFormKindForTemplateKey(template.Key)),
 			Fields:         platformTemplateFields(template.Schema),
 			Stages:         platformTemplateStages(template.Schema),
 		})

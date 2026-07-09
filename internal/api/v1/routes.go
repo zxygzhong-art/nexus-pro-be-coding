@@ -74,7 +74,9 @@ func (r apiRouteBinder) Handle(resource, action string, next HandlerFunc, option
 // RegisterRoutes 註冊路由。
 func (a *API) RegisterRoutes(router *gin.Engine) {
 	routes := apiRouteBinder{api: a}
-	SwaggerCtrl{}.RegisterRoutes(router)
+	if !a.disableSwagger {
+		SwaggerCtrl{}.RegisterRoutes(router)
+	}
 	HealthCtrl{readinessChecks: a.readinessChecks}.RegisterRoutes(router)
 
 	v1 := router.Group("/v1")
@@ -86,6 +88,7 @@ func (a *API) RegisterRoutes(router *gin.Engine) {
 	AttendanceCtrl{routes: routes, svc: a.attendance}.RegisterRoutes(v1)
 	PlatformCtrl{routes: routes, svc: a.platform}.RegisterRoutes(v1)
 	WorkspaceCtrl{routes: routes, svc: a.workspace}.RegisterRoutes(v1)
+	WorkspaceAgentCtrl{routes: routes, svc: a.agent}.RegisterRoutes(v1)
 	WorkflowCtrl{routes: routes, svc: a.workflow}.RegisterRoutes(v1)
 	AgentCtrl{routes: routes, svc: a.agent}.RegisterRoutes(v1)
 	NotificationCtrl{routes: routes, svc: a.notification}.RegisterRoutes(v1)

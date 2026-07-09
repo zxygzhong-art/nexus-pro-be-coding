@@ -70,6 +70,7 @@ func (c HRCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	org := router.Group("/org")
 	org.GET("/units", c.routes.Handle("hr.org_unit", "read", c.listOrgUnits))
 	org.POST("/units", c.routes.Handle("hr.org_unit", "create", c.createOrgUnit))
+	org.PATCH("/units/:id", c.routes.Handle("hr.org_unit", "update", c.updateOrgUnit, ResourceID(PathParamID)))
 }
 
 // listEmployees 處理員工的 HTTP 請求。
@@ -511,6 +512,20 @@ func (c HRCtrl) createOrgUnit(w http.ResponseWriter, r *http.Request, ctx domain
 		return err
 	}
 	writeJSON(w, http.StatusCreated, item)
+	return nil
+}
+
+// updateOrgUnit 處理更新組織單位的 HTTP 請求。
+func (c HRCtrl) updateOrgUnit(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.UpdateOrgUnitInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.UpdateOrgUnit(ctx, r.PathValue(PathParamID), input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 

@@ -77,13 +77,25 @@ func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (
 	if mode == "" {
 		mode = "policy_qa"
 	}
+	agentID := strings.TrimSpace(input.AgentID)
+	prompt := strings.TrimSpace(input.Prompt)
+	if agentID != "" {
+		definition, err := c.publishedAgentDefinition(ctx, agentID)
+		if err != nil {
+			return AgentRun{}, err
+		}
+		if definition.SystemPrompt != "" {
+			prompt = strings.TrimSpace(definition.SystemPrompt) + "\n\nUser: " + prompt
+		}
+	}
 
 	run := AgentRun{
 		ID:        utils.NewID("arun"),
 		TenantID:  ctx.TenantID,
 		AccountID: account.ID,
+		AgentID:   agentID,
 		Mode:      mode,
-		Prompt:    strings.TrimSpace(input.Prompt),
+		Prompt:    prompt,
 		Status:    string(AgentRunStatusQueued),
 		CreatedAt: c.Now(),
 		UpdatedAt: c.Now(),
@@ -341,4 +353,15 @@ func (g authzToolGateway) applyOpenFGAAgentToolDecision(ctx RequestContext, acco
 // answerAgentPrompt 處理 answer agent prompt 的服務流程。
 func (c *Service) answerAgentPrompt(ctx RequestContext, prompt string) (string, []Reference, error) {
 	return "当前租户没有可检索的知识库内容，已为你创建占位 Agent Run。", nil, nil
+}
+
+func (c AgentService) publishedAgentDefinition(ctx RequestContext, id string) (domain.AgentDefinition, error) {
+	agent, ok, err := c.store.GetAgentDefinition(goContext(ctx), ctx.TenantID, strings.TrimSpace(id))
+	if err != nil {
+		return domain.AgentDefinition{}, err
+	}
+	if !ok || agent.Status != domain.AgentDefinitionStatusPublished {
+		return domain.AgentDefinition{}, NotFound("published agent definition", id)
+	}
+	return agent, nil
 }

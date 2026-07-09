@@ -310,6 +310,18 @@ func (s *Store) ListUserGroups(execCtx context.Context, tenantID string) ([]doma
 	return mapSlice(items, fromUserGroup), nil
 }
 
+// DeleteUserGroup 從儲存層刪除使用者群組。
+func (s *Store) DeleteUserGroup(execCtx context.Context, tenantID, id string) (domain.UserGroup, bool, error) {
+	v, err := s.q.DeleteUserGroup(tenantContext(execCtx, tenantID), sqlc.DeleteUserGroupParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.UserGroup{}, false, nil
+	}
+	if err != nil {
+		return domain.UserGroup{}, false, err
+	}
+	return fromUserGroup(v), true, nil
+}
+
 // UpsertGroupMembership 從儲存層處理 upsert 使用者群組成員關係。
 func (s *Store) UpsertGroupMembership(execCtx context.Context, v domain.GroupMembership) error {
 	_, err := s.q.UpsertGroupMembership(tenantContext(execCtx, v.TenantID), sqlc.UpsertGroupMembershipParams{
@@ -418,6 +430,24 @@ func (s *Store) ListPermissionSets(execCtx context.Context, tenantID string) ([]
 		return nil, err
 	}
 	return mapSlice(items, fromPermissionSet), nil
+}
+
+// DeletePermissionSet 從儲存層刪除權限集合。
+func (s *Store) DeletePermissionSet(execCtx context.Context, tenantID, id string) (domain.PermissionSet, bool, error) {
+	if err := s.q.DeletePermissionSetItemsForSet(execCtx, sqlc.DeletePermissionSetItemsForSetParams{
+		TenantID:        tenantID,
+		PermissionSetID: id,
+	}); err != nil {
+		return domain.PermissionSet{}, false, err
+	}
+	v, err := s.q.DeletePermissionSet(tenantContext(execCtx, tenantID), sqlc.DeletePermissionSetParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.PermissionSet{}, false, nil
+	}
+	if err != nil {
+		return domain.PermissionSet{}, false, err
+	}
+	return fromPermissionSet(v), true, nil
 }
 
 // ReplacePermissionSetItems 從儲存層替換權限集合項。
@@ -903,6 +933,24 @@ func (s *Store) ListAssumableRoles(execCtx context.Context, tenantID string) ([]
 	return mapSlice(items, fromAssumableRole), nil
 }
 
+// DeleteAssumableRole 從儲存層刪除 assumable 角色。
+func (s *Store) DeleteAssumableRole(execCtx context.Context, tenantID, id string) (domain.AssumableRole, bool, error) {
+	if err := s.q.DeleteAuthzAssumableRoleSessionsForRole(execCtx, sqlc.DeleteAuthzAssumableRoleSessionsForRoleParams{
+		TenantID:        tenantID,
+		AssumableRoleID: id,
+	}); err != nil {
+		return domain.AssumableRole{}, false, err
+	}
+	v, err := s.q.DeleteAssumableRole(tenantContext(execCtx, tenantID), sqlc.DeleteAssumableRoleParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.AssumableRole{}, false, nil
+	}
+	if err != nil {
+		return domain.AssumableRole{}, false, err
+	}
+	return fromAssumableRole(v), true, nil
+}
+
 // UpsertAssumableRoleSession 從儲存層處理 upsert assumable 角色 session。
 func (s *Store) UpsertAssumableRoleSession(execCtx context.Context, v domain.AssumableRoleSession) error {
 	_, err := s.q.CreateAuthzAssumableRoleSession(execCtx, sqlc.CreateAuthzAssumableRoleSessionParams{
@@ -930,16 +978,36 @@ func (s *Store) GetActiveAssumableRoleSession(execCtx context.Context, tenantID,
 	return fromAssumableRoleSession(v), true, nil
 }
 
+// ListActiveAssumableRoleSessionsForRole 從儲存層列出角色啟用中 session。
+func (s *Store) ListActiveAssumableRoleSessionsForRole(execCtx context.Context, tenantID, roleID string) ([]domain.AssumableRoleSession, error) {
+	items, err := s.q.ListActiveAuthzAssumableRoleSessionsForRole(execCtx, sqlc.ListActiveAuthzAssumableRoleSessionsForRoleParams{
+		TenantID:        tenantID,
+		AssumableRoleID: roleID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAssumableRoleSession), nil
+}
+
 // UpsertOrgUnit 從儲存層處理 upsert 組織單位。
 func (s *Store) UpsertOrgUnit(execCtx context.Context, v domain.OrgUnit) error {
+	if v.UpdatedAt.IsZero() {
+		v.UpdatedAt = v.CreatedAt
+	}
 	_, err := s.q.UpsertOrgUnit(execCtx, sqlc.UpsertOrgUnitParams{
-		ID:        v.ID,
-		TenantID:  v.TenantID,
-		Code:      v.Code,
-		Name:      v.Name,
-		ParentID:  v.ParentID,
-		Path:      utils.CopyStrings(v.Path),
-		CreatedAt: timestamptz(v.CreatedAt),
+		ID:                v.ID,
+		TenantID:          v.TenantID,
+		Code:              v.Code,
+		Name:              v.Name,
+		NameEn:            v.NameEN,
+		ParentID:          v.ParentID,
+		Path:              utils.CopyStrings(v.Path),
+		ManagerPositionID: v.ManagerPositionID,
+		Source:            v.Source,
+		Closed:            v.Closed,
+		CreatedAt:         timestamptz(v.CreatedAt),
+		UpdatedAt:         timestamptz(v.UpdatedAt),
 	})
 	return err
 }
@@ -972,10 +1040,12 @@ func (s *Store) UpsertPosition(execCtx context.Context, v domain.Position) error
 		TenantID:    v.TenantID,
 		Code:        v.Code,
 		Name:        v.Name,
+		NameEn:      v.NameEN,
 		OrgUnitID:   v.OrgUnitID,
 		Level:       v.Level,
 		Status:      v.Status,
 		Description: v.Description,
+		Source:      v.Source,
 		CreatedAt:   timestamptz(v.CreatedAt),
 		UpdatedAt:   timestamptz(v.UpdatedAt),
 	})
@@ -1406,11 +1476,17 @@ func (s *Store) ListEmploymentContractsByEmployee(execCtx context.Context, tenan
 
 // UpsertAttendancePolicy 從儲存層處理 upsert 考勤政策。
 func (s *Store) UpsertAttendancePolicy(execCtx context.Context, v domain.AttendancePolicy) error {
+	version := v.Version
+	if version <= 0 {
+		version = 1
+	}
 	_, err := s.q.UpsertAttendancePolicy(execCtx, sqlc.UpsertAttendancePolicyParams{
 		ID:                 v.ID,
 		TenantID:           v.TenantID,
 		WorkTime:           mustJSON(v.WorkTime),
 		LeaveTypes:         mustJSON(v.LeaveTypes),
+		Version:            int32(version),
+		EffectiveFrom:      nullableTimestamptz(v.EffectiveFrom),
 		UpdatedByAccountID: v.UpdatedByAccountID,
 		CreatedAt:          timestamptz(v.CreatedAt),
 		UpdatedAt:          timestamptz(v.UpdatedAt),
@@ -1432,12 +1508,23 @@ func (s *Store) GetAttendancePolicy(execCtx context.Context, tenantID string) (d
 
 // UpsertLeaveBalance 從儲存層處理 upsert 請假 balance。
 func (s *Store) UpsertLeaveBalance(execCtx context.Context, v domain.LeaveBalance) error {
+	source := strings.TrimSpace(v.Source)
+	if source == "" {
+		source = "legacy"
+	}
 	_, err := s.q.UpsertLeaveBalance(execCtx, sqlc.UpsertLeaveBalanceParams{
 		ID:             v.ID,
 		TenantID:       v.TenantID,
 		EmployeeID:     v.EmployeeID,
 		LeaveType:      v.LeaveType,
 		RemainingHours: v.RemainingHours,
+		PeriodStart:    v.PeriodStart,
+		PeriodEnd:      v.PeriodEnd,
+		GrantedHours:   v.GrantedHours,
+		UsedHours:      v.UsedHours,
+		Source:         source,
+		PolicyVersion:  int32(v.PolicyVersion),
+		ProrateRatio:   float8Ptr(v.ProrateRatio),
 		UpdatedAt:      timestamptz(v.UpdatedAt),
 	})
 	return err
@@ -1790,19 +1877,40 @@ func (s *Store) ListAttendanceClockRecords(execCtx context.Context, tenantID str
 // UpsertAttendanceDailySummary 從儲存層處理 upsert 考勤日彙總。
 func (s *Store) UpsertAttendanceDailySummary(execCtx context.Context, v domain.AttendanceDailySummary) error {
 	_, err := s.q.UpsertAttendanceDailySummary(execCtx, sqlc.UpsertAttendanceDailySummaryParams{
-		ID:          v.ID,
-		TenantID:    v.TenantID,
-		EmployeeID:  v.EmployeeID,
-		WorkDate:    v.WorkDate,
-		ShiftStart:  v.ShiftStart,
-		ShiftEnd:    v.ShiftEnd,
-		ShiftHours:  v.ShiftHours,
-		DailyHours:  v.DailyHours,
-		ClockHours:  v.ClockHours,
-		Source:      v.Source,
-		ExternalRef: v.ExternalRef,
-		CreatedAt:   timestamptz(v.CreatedAt),
-		UpdatedAt:   timestamptz(v.UpdatedAt),
+		ID:              v.ID,
+		TenantID:        v.TenantID,
+		EmployeeID:      v.EmployeeID,
+		WorkDate:        v.WorkDate,
+		ShiftStart:      v.ShiftStart,
+		ShiftEnd:        v.ShiftEnd,
+		ShiftHours:      v.ShiftHours,
+		DailyHours:      v.DailyHours,
+		ClockHours:      v.ClockHours,
+		ClockStart:      v.ClockStart,
+		ClockEnd:        v.ClockEnd,
+		AttendStart:     v.AttendStart,
+		AttendEnd:       v.AttendEnd,
+		AttendHours:     v.AttendHours,
+		AttendCounted:   v.AttendCounted,
+		LeaveType:       v.LeaveType,
+		LeaveStart:      v.LeaveStart,
+		LeaveEnd:        v.LeaveEnd,
+		LeaveHours:      v.LeaveHours,
+		LeaveCounted:    v.LeaveCounted,
+		Leave2Type:      v.Leave2Type,
+		Leave2Start:     v.Leave2Start,
+		Leave2End:       v.Leave2End,
+		Leave2Hours:     v.Leave2Hours,
+		Leave2Counted:   v.Leave2Counted,
+		OvertimeStart:   v.OvertimeStart,
+		OvertimeEnd:     v.OvertimeEnd,
+		OvertimeHours:   v.OvertimeHours,
+		OvertimeCounted: v.OvertimeCounted,
+		Column30:        mustJSON(v.Payload),
+		Source:          v.Source,
+		ExternalRef:     v.ExternalRef,
+		CreatedAt:       timestamptz(v.CreatedAt),
+		UpdatedAt:       timestamptz(v.UpdatedAt),
 	})
 	if isUniqueConstraint(err, "attendance_daily_summaries_employee_date_idx") {
 		return domain.Conflict("attendance daily summary already exists")
@@ -2201,11 +2309,13 @@ func (s *Store) UpsertAgentRun(execCtx context.Context, v domain.AgentRun) error
 		ID:        v.ID,
 		TenantID:  v.TenantID,
 		AccountID: v.AccountID,
+		AgentID:   nullableText(v.AgentID),
+		SessionID: v.SessionID,
 		Mode:      v.Mode,
 		Prompt:    v.Prompt,
 		Answer:    v.Answer,
 		Status:    v.Status,
-		Column8:   mustJSON(v.References),
+		Column10:  mustJSON(v.References),
 		CreatedAt: timestamptz(v.CreatedAt),
 		UpdatedAt: timestamptz(v.UpdatedAt),
 	})
@@ -2267,6 +2377,253 @@ func (s *Store) ListAgentRunPageByAccount(execCtx context.Context, tenantID, acc
 		return nil, 0, err
 	}
 	return mapSlice(items, fromAgentRun), int(total), nil
+}
+
+// UpsertAgentModel 從儲存層處理 upsert agent 模型。
+func (s *Store) UpsertAgentModel(execCtx context.Context, v domain.AgentModel) error {
+	_, err := s.q.UpsertAgentModel(tenantContext(execCtx, v.TenantID), sqlc.UpsertAgentModelParams{
+		ID:              v.ID,
+		TenantID:        v.TenantID,
+		Name:            v.Name,
+		Provider:        v.Provider,
+		ModelName:       v.ModelName,
+		LitellmModel:    v.LiteLLMModel,
+		IsDefault:       v.IsDefault,
+		Status:          string(v.Status),
+		FallbackModelID: nullableText(v.FallbackModelID),
+		TimeoutSeconds:  int32(v.TimeoutSeconds),
+		MonthlyQuota:    v.MonthlyQuota,
+		UsedQuota:       v.UsedQuota,
+		LastTestedAt:    nullableTimestamptz(v.LastTestedAt),
+		LastTestStatus:  v.LastTestStatus,
+		LastTestMessage: v.LastTestMessage,
+		CreatedAt:       timestamptz(v.CreatedAt),
+		UpdatedAt:       timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+// GetAgentModel 從儲存層取得 agent 模型。
+func (s *Store) GetAgentModel(execCtx context.Context, tenantID, id string) (domain.AgentModel, bool, error) {
+	v, err := s.q.GetAgentModel(tenantContext(execCtx, tenantID), sqlc.GetAgentModelParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.AgentModel{}, false, nil
+	}
+	if err != nil {
+		return domain.AgentModel{}, false, err
+	}
+	return fromAgentModel(v), true, nil
+}
+
+// ListAgentModels 從儲存層列出 agent 模型。
+func (s *Store) ListAgentModels(execCtx context.Context, tenantID string) ([]domain.AgentModel, error) {
+	items, err := s.q.ListAgentModels(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAgentModel), nil
+}
+
+// DeleteAgentModel 從儲存層刪除 agent 模型。
+func (s *Store) DeleteAgentModel(execCtx context.Context, tenantID, id string) (domain.AgentModel, bool, error) {
+	v, err := s.q.DeleteAgentModel(tenantContext(execCtx, tenantID), sqlc.DeleteAgentModelParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.AgentModel{}, false, nil
+	}
+	if err != nil {
+		return domain.AgentModel{}, false, err
+	}
+	return fromAgentModel(v), true, nil
+}
+
+// ClearDefaultAgentModel 從儲存層清除其他預設模型。
+func (s *Store) ClearDefaultAgentModel(execCtx context.Context, tenantID, exceptID string) error {
+	return s.q.ClearDefaultAgentModel(tenantContext(execCtx, tenantID), sqlc.ClearDefaultAgentModelParams{TenantID: tenantID, ExceptID: exceptID})
+}
+
+// UpdateAgentModelTestResult 從儲存層更新模型測試結果。
+func (s *Store) UpdateAgentModelTestResult(execCtx context.Context, tenantID, id, status, message string, testedAt time.Time) (domain.AgentModel, bool, error) {
+	v, err := s.q.UpdateAgentModelTestResult(tenantContext(execCtx, tenantID), sqlc.UpdateAgentModelTestResultParams{
+		TenantID:        tenantID,
+		ID:              id,
+		LastTestStatus:  status,
+		LastTestMessage: message,
+		LastTestedAt:    timestamptz(testedAt),
+		UpdatedAt:       timestamptz(testedAt),
+	})
+	if isNotFound(err) {
+		return domain.AgentModel{}, false, nil
+	}
+	if err != nil {
+		return domain.AgentModel{}, false, err
+	}
+	return fromAgentModel(v), true, nil
+}
+
+// CountAgentDefinitionsByModel 從儲存層統計使用模型的 agent。
+func (s *Store) CountAgentDefinitionsByModel(execCtx context.Context, tenantID, modelID string) (int, error) {
+	count, err := s.q.CountAgentDefinitionsByModel(tenantContext(execCtx, tenantID), sqlc.CountAgentDefinitionsByModelParams{TenantID: tenantID, ModelID: modelID})
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
+// UpsertAgentDefinition 從儲存層處理 upsert agent 定義。
+func (s *Store) UpsertAgentDefinition(execCtx context.Context, v domain.AgentDefinition) error {
+	_, err := s.q.UpsertAgentDefinition(tenantContext(execCtx, v.TenantID), sqlc.UpsertAgentDefinitionParams{
+		ID:                 v.ID,
+		TenantID:           v.TenantID,
+		Name:               v.Name,
+		Description:        v.Description,
+		Emoji:              v.Emoji,
+		Category:           string(v.Category),
+		ModelID:            v.ModelID,
+		FallbackModelID:    nullableText(v.FallbackModelID),
+		SystemPrompt:       v.SystemPrompt,
+		Tools:              mustJSON(v.Tools),
+		Status:             string(v.Status),
+		Visibility:         string(v.Visibility),
+		VisibilityTargets:  mustJSON(v.VisibilityTargets),
+		TimeoutSeconds:     int32(v.TimeoutSeconds),
+		Version:            int32(v.Version),
+		UsageTotalRuns:     v.Usage.TotalRuns,
+		UsageSuccessRuns:   v.Usage.SuccessRuns,
+		UsageFailedRuns:    v.Usage.FailedRuns,
+		UsageAvgLatencyMs:  int32(v.Usage.AvgLatencyMs),
+		UsageLastRunAt:     nullableTimestamptz(v.Usage.LastRunAt),
+		UsageTopPrompts:    mustJSON(v.Usage.TopPrompts),
+		CreatedByAccountID: nullableText(v.CreatedByAccountID),
+		UpdatedByAccountID: nullableText(v.UpdatedByAccountID),
+		CreatedAt:          timestamptz(v.CreatedAt),
+		UpdatedAt:          timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+// GetAgentDefinition 從儲存層取得 agent 定義。
+func (s *Store) GetAgentDefinition(execCtx context.Context, tenantID, id string) (domain.AgentDefinition, bool, error) {
+	v, err := s.q.GetAgentDefinition(tenantContext(execCtx, tenantID), sqlc.GetAgentDefinitionParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.AgentDefinition{}, false, nil
+	}
+	if err != nil {
+		return domain.AgentDefinition{}, false, err
+	}
+	return fromAgentDefinition(v), true, nil
+}
+
+// ListAgentDefinitions 從儲存層列出 agent 定義。
+func (s *Store) ListAgentDefinitions(execCtx context.Context, tenantID string) ([]domain.AgentDefinition, error) {
+	items, err := s.q.ListAgentDefinitions(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAgentDefinition), nil
+}
+
+// ListPublishedAgentDefinitions 從儲存層列出已發布 agent 定義。
+func (s *Store) ListPublishedAgentDefinitions(execCtx context.Context, tenantID string) ([]domain.AgentDefinition, error) {
+	items, err := s.q.ListPublishedAgentDefinitions(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAgentDefinition), nil
+}
+
+// DeleteAgentDefinition 從儲存層刪除 agent 定義。
+func (s *Store) DeleteAgentDefinition(execCtx context.Context, tenantID, id string) (domain.AgentDefinition, bool, error) {
+	v, err := s.q.DeleteAgentDefinition(tenantContext(execCtx, tenantID), sqlc.DeleteAgentDefinitionParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.AgentDefinition{}, false, nil
+	}
+	if err != nil {
+		return domain.AgentDefinition{}, false, err
+	}
+	return fromAgentDefinition(v), true, nil
+}
+
+// UpdateAgentDefinitionUsage 從儲存層更新 agent usage。
+func (s *Store) UpdateAgentDefinitionUsage(execCtx context.Context, tenantID, id string, success bool, latencyMs int, prompt string, runAt time.Time) (domain.AgentDefinition, bool, error) {
+	v, err := s.q.UpdateAgentDefinitionUsage(tenantContext(execCtx, tenantID), sqlc.UpdateAgentDefinitionUsageParams{
+		TenantID:  tenantID,
+		ID:        id,
+		Success:   success,
+		LatencyMs: int32(latencyMs),
+		Prompt:    prompt,
+		RunAt:     timestamptz(runAt),
+	})
+	if isNotFound(err) {
+		return domain.AgentDefinition{}, false, nil
+	}
+	if err != nil {
+		return domain.AgentDefinition{}, false, err
+	}
+	return fromAgentDefinition(v), true, nil
+}
+
+// InsertAgentDefinitionVersion 從儲存層新增 agent 版本。
+func (s *Store) InsertAgentDefinitionVersion(execCtx context.Context, v domain.AgentDefinitionVersion) error {
+	_, err := s.q.InsertAgentDefinitionVersion(tenantContext(execCtx, v.TenantID), sqlc.InsertAgentDefinitionVersionParams{
+		ID:                 v.ID,
+		TenantID:           v.TenantID,
+		AgentID:            v.AgentID,
+		Version:            int32(v.Version),
+		SystemPrompt:       v.SystemPrompt,
+		Tools:              mustJSON(v.Tools),
+		ModelID:            v.ModelID,
+		Note:               v.Note,
+		CreatedByAccountID: nullableText(v.CreatedByAccountID),
+		CreatedAt:          timestamptz(v.CreatedAt),
+	})
+	return err
+}
+
+// ListAgentDefinitionVersions 從儲存層列出 agent 版本。
+func (s *Store) ListAgentDefinitionVersions(execCtx context.Context, tenantID, agentID string) ([]domain.AgentDefinitionVersion, error) {
+	items, err := s.q.ListAgentDefinitionVersions(tenantContext(execCtx, tenantID), sqlc.ListAgentDefinitionVersionsParams{TenantID: tenantID, AgentID: agentID})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAgentDefinitionVersion), nil
+}
+
+// GetAgentDefinitionVersion 從儲存層取得 agent 版本。
+func (s *Store) GetAgentDefinitionVersion(execCtx context.Context, tenantID, agentID string, version int) (domain.AgentDefinitionVersion, bool, error) {
+	v, err := s.q.GetAgentDefinitionVersion(tenantContext(execCtx, tenantID), sqlc.GetAgentDefinitionVersionParams{TenantID: tenantID, AgentID: agentID, Version: int32(version)})
+	if isNotFound(err) {
+		return domain.AgentDefinitionVersion{}, false, nil
+	}
+	if err != nil {
+		return domain.AgentDefinitionVersion{}, false, err
+	}
+	return fromAgentDefinitionVersion(v), true, nil
+}
+
+// InsertAgentAudit 從儲存層新增 agent audit。
+func (s *Store) InsertAgentAudit(execCtx context.Context, v domain.AgentAudit) error {
+	_, err := s.q.InsertAgentAudit(tenantContext(execCtx, v.TenantID), sqlc.InsertAgentAuditParams{
+		ID:               v.ID,
+		TenantID:         v.TenantID,
+		EntityType:       v.EntityType,
+		EntityID:         v.EntityID,
+		EntityName:       v.EntityName,
+		Action:           v.Action,
+		ActorAccountID:   nullableText(v.ActorAccountID),
+		ActorDisplayName: v.ActorDisplayName,
+		Detail:           v.Detail,
+		CreatedAt:        timestamptz(v.CreatedAt),
+	})
+	return err
+}
+
+// ListAgentAudits 從儲存層列出 agent audit。
+func (s *Store) ListAgentAudits(execCtx context.Context, tenantID string) ([]domain.AgentAudit, error) {
+	items, err := s.q.ListAgentAudits(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAgentAudit), nil
 }
 
 // UpsertNotification 從儲存層處理 upsert 系統通知。
@@ -2510,6 +2867,25 @@ func (s *Store) ListOutboxEvents(execCtx context.Context, tenantID string) ([]do
 	return mapSlice(items, fromOutboxEvent), nil
 }
 
+// ClaimOutboxEvents atomically claims dispatchable outbox events for a worker.
+func (s *Store) ClaimOutboxEvents(execCtx context.Context, tenantID string, limit, maxRetries int) ([]domain.OutboxEvent, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+	if maxRetries <= 0 {
+		maxRetries = 1
+	}
+	items, err := s.q.ClaimOutboxEvents(tenantContext(execCtx, tenantID), sqlc.ClaimOutboxEventsParams{
+		TenantID:   tenantID,
+		MaxRetries: int32(maxRetries),
+		BatchLimit: int32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromOutboxEvent), nil
+}
+
 // UpdateOutboxEvent 從儲存層更新 outbox 事件處理狀態。
 func (s *Store) UpdateOutboxEvent(execCtx context.Context, v domain.OutboxEvent) error {
 	_, err := s.q.UpdateOutboxEvent(tenantContext(execCtx, v.TenantID), sqlc.UpdateOutboxEventParams{
@@ -2548,6 +2924,23 @@ func nullableTimestamptz(t *time.Time) pgtype.Timestamptz {
 		return pgtype.Timestamptz{}
 	}
 	return timestamptz(*t)
+}
+
+// float8Ptr 轉換 *float64 為 pgtype.Float8。
+func float8Ptr(v *float64) pgtype.Float8 {
+	if v == nil {
+		return pgtype.Float8{}
+	}
+	return pgtype.Float8{Float64: *v, Valid: true}
+}
+
+// float64PtrFrom 轉換 pgtype.Float8 為 *float64。
+func float64PtrFrom(v pgtype.Float8) *float64 {
+	if !v.Valid {
+		return nil
+	}
+	out := v.Float64
+	return &out
 }
 
 // nullableText 處理 nullable text。
@@ -2633,6 +3026,18 @@ func mustJSON(v any) []byte {
 // jsonMap 處理 JSON map。
 func jsonMap(b []byte) map[string]any {
 	return jsoncodec.Map(b)
+}
+
+// jsonStrings 處理 JSON 字串陣列。
+func jsonStrings(b []byte) []string {
+	if len(b) == 0 {
+		return nil
+	}
+	var out []string
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil
+	}
+	return out
 }
 
 // jsonEmployeeExperiences 處理 JSON 員工 experiences。
@@ -3028,13 +3433,18 @@ func fromAssumableRoleSession(v sqlc.AuthzAssumableRoleSession) domain.Assumable
 // fromOrgUnit 轉換組織單位。
 func fromOrgUnit(v sqlc.OrgUnit) domain.OrgUnit {
 	return domain.OrgUnit{
-		ID:        v.ID,
-		TenantID:  v.TenantID,
-		Code:      v.Code,
-		Name:      v.Name,
-		ParentID:  v.ParentID,
-		Path:      utils.CopyStrings(v.Path),
-		CreatedAt: timeFrom(v.CreatedAt),
+		ID:                v.ID,
+		TenantID:          v.TenantID,
+		Code:              v.Code,
+		Name:              v.Name,
+		NameEN:            v.NameEn,
+		ParentID:          v.ParentID,
+		Path:              utils.CopyStrings(v.Path),
+		ManagerPositionID: v.ManagerPositionID,
+		Source:            v.Source,
+		Closed:            v.Closed,
+		CreatedAt:         timeFrom(v.CreatedAt),
+		UpdatedAt:         timeFrom(v.UpdatedAt),
 	}
 }
 
@@ -3045,10 +3455,12 @@ func fromPosition(v sqlc.Position) domain.Position {
 		TenantID:    v.TenantID,
 		Code:        v.Code,
 		Name:        v.Name,
+		NameEN:      v.NameEn,
 		OrgUnitID:   v.OrgUnitID,
 		Level:       v.Level,
 		Status:      v.Status,
 		Description: v.Description,
+		Source:      v.Source,
 		CreatedAt:   timeFrom(v.CreatedAt),
 		UpdatedAt:   timeFrom(v.UpdatedAt),
 	}
@@ -3151,6 +3563,8 @@ func fromAttendancePolicy(v sqlc.AttendancePolicy) domain.AttendancePolicy {
 		TenantID:           v.TenantID,
 		WorkTime:           jsonAttendancePolicyWorkTime(v.WorkTime),
 		LeaveTypes:         jsonAttendanceLeaveTypes(v.LeaveTypes),
+		Version:            int(v.Version),
+		EffectiveFrom:      timePtrFrom(v.EffectiveFrom),
 		UpdatedByAccountID: v.UpdatedByAccountID,
 		CreatedAt:          timeFrom(v.CreatedAt),
 		UpdatedAt:          timeFrom(v.UpdatedAt),
@@ -3165,6 +3579,13 @@ func fromLeaveBalance(v sqlc.LeaveBalance) domain.LeaveBalance {
 		EmployeeID:     v.EmployeeID,
 		LeaveType:      v.LeaveType,
 		RemainingHours: v.RemainingHours,
+		PeriodStart:    v.PeriodStart,
+		PeriodEnd:      v.PeriodEnd,
+		GrantedHours:   v.GrantedHours,
+		UsedHours:      v.UsedHours,
+		Source:         v.Source,
+		PolicyVersion:  int(v.PolicyVersion),
+		ProrateRatio:   float64PtrFrom(v.ProrateRatio),
 		UpdatedAt:      timeFrom(v.UpdatedAt),
 	}
 }
@@ -3265,19 +3686,40 @@ func fromAttendanceClockRecord(v sqlc.AttendanceClockRecord) domain.AttendanceCl
 // fromAttendanceDailySummary 轉換考勤日彙總。
 func fromAttendanceDailySummary(v sqlc.AttendanceDailySummary) domain.AttendanceDailySummary {
 	return domain.AttendanceDailySummary{
-		ID:          v.ID,
-		TenantID:    v.TenantID,
-		EmployeeID:  v.EmployeeID,
-		WorkDate:    v.WorkDate,
-		ShiftStart:  v.ShiftStart,
-		ShiftEnd:    v.ShiftEnd,
-		ShiftHours:  v.ShiftHours,
-		DailyHours:  v.DailyHours,
-		ClockHours:  v.ClockHours,
-		Source:      v.Source,
-		ExternalRef: v.ExternalRef,
-		CreatedAt:   timeFrom(v.CreatedAt),
-		UpdatedAt:   timeFrom(v.UpdatedAt),
+		ID:              v.ID,
+		TenantID:        v.TenantID,
+		EmployeeID:      v.EmployeeID,
+		WorkDate:        v.WorkDate,
+		ShiftStart:      v.ShiftStart,
+		ShiftEnd:        v.ShiftEnd,
+		ShiftHours:      v.ShiftHours,
+		DailyHours:      v.DailyHours,
+		ClockHours:      v.ClockHours,
+		ClockStart:      v.ClockStart,
+		ClockEnd:        v.ClockEnd,
+		AttendStart:     v.AttendStart,
+		AttendEnd:       v.AttendEnd,
+		AttendHours:     v.AttendHours,
+		AttendCounted:   v.AttendCounted,
+		LeaveType:       v.LeaveType,
+		LeaveStart:      v.LeaveStart,
+		LeaveEnd:        v.LeaveEnd,
+		LeaveHours:      v.LeaveHours,
+		LeaveCounted:    v.LeaveCounted,
+		Leave2Type:      v.Leave2Type,
+		Leave2Start:     v.Leave2Start,
+		Leave2End:       v.Leave2End,
+		Leave2Hours:     v.Leave2Hours,
+		Leave2Counted:   v.Leave2Counted,
+		OvertimeStart:   v.OvertimeStart,
+		OvertimeEnd:     v.OvertimeEnd,
+		OvertimeHours:   v.OvertimeHours,
+		OvertimeCounted: v.OvertimeCounted,
+		Payload:         jsonMap(v.Payload),
+		Source:          v.Source,
+		ExternalRef:     v.ExternalRef,
+		CreatedAt:       timeFrom(v.CreatedAt),
+		UpdatedAt:       timeFrom(v.UpdatedAt),
 	}
 }
 
@@ -3390,6 +3832,8 @@ func fromAgentRun(v sqlc.AgentRun) domain.AgentRun {
 		ID:         v.ID,
 		TenantID:   v.TenantID,
 		AccountID:  v.AccountID,
+		AgentID:    textFrom(v.AgentID),
+		SessionID:  v.SessionID,
 		Mode:       v.Mode,
 		Prompt:     v.Prompt,
 		Answer:     v.Answer,
@@ -3397,6 +3841,94 @@ func fromAgentRun(v sqlc.AgentRun) domain.AgentRun {
 		References: jsonRefs(v.ReferenceItems),
 		CreatedAt:  timeFrom(v.CreatedAt),
 		UpdatedAt:  timeFrom(v.UpdatedAt),
+	}
+}
+
+// fromAgentModel 轉換 agent 模型。
+func fromAgentModel(v sqlc.AgentModel) domain.AgentModel {
+	return domain.AgentModel{
+		ID:              v.ID,
+		TenantID:        v.TenantID,
+		Name:            v.Name,
+		Provider:        v.Provider,
+		ModelName:       v.ModelName,
+		LiteLLMModel:    v.LitellmModel,
+		IsDefault:       v.IsDefault,
+		Status:          domain.AgentModelStatus(v.Status),
+		FallbackModelID: textFrom(v.FallbackModelID),
+		TimeoutSeconds:  int(v.TimeoutSeconds),
+		MonthlyQuota:    v.MonthlyQuota,
+		UsedQuota:       v.UsedQuota,
+		LastTestedAt:    timePtrFrom(v.LastTestedAt),
+		LastTestStatus:  v.LastTestStatus,
+		LastTestMessage: v.LastTestMessage,
+		CreatedAt:       timeFrom(v.CreatedAt),
+		UpdatedAt:       timeFrom(v.UpdatedAt),
+	}
+}
+
+// fromAgentDefinition 轉換 agent 定義。
+func fromAgentDefinition(v sqlc.AgentDefinition) domain.AgentDefinition {
+	return domain.AgentDefinition{
+		ID:                v.ID,
+		TenantID:          v.TenantID,
+		Name:              v.Name,
+		Description:       v.Description,
+		Emoji:             v.Emoji,
+		Category:          domain.AgentCategory(v.Category),
+		ModelID:           v.ModelID,
+		FallbackModelID:   textFrom(v.FallbackModelID),
+		SystemPrompt:      v.SystemPrompt,
+		Tools:             jsonStrings(v.Tools),
+		Status:            domain.AgentDefinitionStatus(v.Status),
+		Visibility:        domain.AgentVisibility(v.Visibility),
+		VisibilityTargets: jsonStrings(v.VisibilityTargets),
+		TimeoutSeconds:    int(v.TimeoutSeconds),
+		Version:           int(v.Version),
+		Usage: domain.AgentUsageStats{
+			TotalRuns:    v.UsageTotalRuns,
+			SuccessRuns:  v.UsageSuccessRuns,
+			FailedRuns:   v.UsageFailedRuns,
+			AvgLatencyMs: int(v.UsageAvgLatencyMs),
+			LastRunAt:    timePtrFrom(v.UsageLastRunAt),
+			TopPrompts:   jsonStrings(v.UsageTopPrompts),
+		},
+		CreatedByAccountID: textFrom(v.CreatedByAccountID),
+		UpdatedByAccountID: textFrom(v.UpdatedByAccountID),
+		CreatedAt:          timeFrom(v.CreatedAt),
+		UpdatedAt:          timeFrom(v.UpdatedAt),
+	}
+}
+
+// fromAgentDefinitionVersion 轉換 agent 定義版本。
+func fromAgentDefinitionVersion(v sqlc.AgentDefinitionVersion) domain.AgentDefinitionVersion {
+	return domain.AgentDefinitionVersion{
+		ID:                 v.ID,
+		TenantID:           v.TenantID,
+		AgentID:            v.AgentID,
+		Version:            int(v.Version),
+		SystemPrompt:       v.SystemPrompt,
+		Tools:              jsonStrings(v.Tools),
+		ModelID:            v.ModelID,
+		Note:               v.Note,
+		CreatedByAccountID: textFrom(v.CreatedByAccountID),
+		CreatedAt:          timeFrom(v.CreatedAt),
+	}
+}
+
+// fromAgentAudit 轉換 agent audit。
+func fromAgentAudit(v sqlc.AgentAudit) domain.AgentAudit {
+	return domain.AgentAudit{
+		ID:               v.ID,
+		TenantID:         v.TenantID,
+		EntityType:       v.EntityType,
+		EntityID:         v.EntityID,
+		EntityName:       v.EntityName,
+		Action:           v.Action,
+		ActorAccountID:   textFrom(v.ActorAccountID),
+		ActorDisplayName: v.ActorDisplayName,
+		Detail:           v.Detail,
+		CreatedAt:        timeFrom(v.CreatedAt),
 	}
 }
 

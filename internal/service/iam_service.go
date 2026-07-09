@@ -5,6 +5,7 @@ import (
 	"nexus-pro-be/internal/utils"
 	"sort"
 	"strings"
+	"time"
 )
 
 // IAMService 定義 IAM 服務的資料結構。
@@ -200,6 +201,109 @@ func (c IAMService) UpdatePermissionSet(ctx RequestContext, id string, input Upd
 		return PermissionSet{}, err
 	}
 	return next, nil
+}
+
+// DeletePermissionSet 刪除權限集合；若仍被引用或有有效指派則拒絕。
+func (c IAMService) DeletePermissionSet(ctx RequestContext, id string) (PermissionSet, error) {
+	if _, _, err := c.requireIAMAuthz(ctx, ResourcePermissionSet, ActionDelete, id); err != nil {
+		return PermissionSet{}, err
+	}
+	current, ok, err := c.store.GetPermissionSet(goContext(ctx), ctx.TenantID, strings.TrimSpace(id))
+	if err != nil {
+		return PermissionSet{}, err
+	}
+	if !ok {
+		return PermissionSet{}, NotFound("permission set", id)
+	}
+	if err := c.ensurePermissionSetDeletable(ctx, current.ID); err != nil {
+		return PermissionSet{}, err
+	}
+	if err := c.withTransaction(ctx, func(tx IAMService) error {
+		assignments, err := tx.store.ListPermissionSetAssignments(goContext(ctx), ctx.TenantID)
+		if err != nil {
+			return err
+		}
+		for _, assignment := range assignments {
+			if assignment.PermissionSetID != current.ID {
+				continue
+			}
+			if _, ok, err := tx.store.DeletePermissionSetAssignment(goContext(ctx), ctx.TenantID, assignment.ID); err != nil {
+				return err
+			} else if !ok {
+				continue
+			}
+		}
+		deleted, ok, err := tx.store.DeletePermissionSet(goContext(ctx), ctx.TenantID, current.ID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("permission set", id)
+		}
+		if err := tx.touchAuthzConfig(ctx, "iam.permission_set.delete", map[string]any{"permission_set_id": deleted.ID}); err != nil {
+			return err
+		}
+		return tx.audit(ctx, "iam.permission_set.delete", "permission_set", deleted.ID, "high", map[string]any{
+			"name": deleted.Name,
+		})
+	}); err != nil {
+		return PermissionSet{}, err
+	}
+	c.logWarn(ctx, "permission set deleted", "permission_set_id", current.ID)
+	return current, nil
+}
+
+// ensurePermissionSetDeletable 檢查權限集合是否仍被引用或有有效指派。
+func (c IAMService) ensurePermissionSetDeletable(ctx RequestContext, permissionSetID string) error {
+	now := c.Now()
+	assignments, err := c.store.ListPermissionSetAssignments(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return err
+	}
+	for _, assignment := range assignments {
+		if assignment.PermissionSetID == permissionSetID && permissionSetAssignmentActive(assignment, now) {
+			return Conflict("permission set has active assignments")
+		}
+	}
+	groups, err := c.store.ListUserGroups(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return err
+	}
+	for _, group := range groups {
+		if utils.ContainsString(group.PermissionSetIDs, permissionSetID) {
+			return Conflict("permission set is referenced by user groups")
+		}
+	}
+	roles, err := c.store.ListAssumableRoles(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return err
+	}
+	for _, role := range roles {
+		if utils.ContainsString(role.PermissionSetIDs, permissionSetID) {
+			return Conflict("permission set is referenced by assumable roles")
+		}
+	}
+	accounts, err := c.store.ListAccounts(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return err
+	}
+	for _, account := range accounts {
+		if utils.ContainsString(account.DirectPermissionSetIDs, permissionSetID) {
+			return Conflict("permission set is referenced by accounts")
+		}
+	}
+	return nil
+}
+
+// permissionSetAssignmentActive 判斷指派在指定時間是否有效。
+func permissionSetAssignmentActive(assignment PermissionSetAssignment, now time.Time) bool {
+	if assignment.StartsAt != nil && assignment.StartsAt.After(now) {
+		return false
+	}
+	if assignment.ExpiresAt != nil && !assignment.ExpiresAt.After(now) {
+		return false
+	}
+	return true
 }
 
 // ListIamAccountPage 列出 IAM 帳號分頁。

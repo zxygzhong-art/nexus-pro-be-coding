@@ -19,112 +19,126 @@ type Store struct {
 
 	tenants map[string]Tenant
 
-	accounts               map[string]map[string]Account
-	userIdentities         map[string]map[string]UserIdentity
-	userGroups             map[string]map[string]UserGroup
-	groupMemberships       map[string]map[string]GroupMembership
-	permissionSets         map[string]map[string]PermissionSet
-	permissionPackages     map[string]PermissionPackage
-	permissionSetTemplates map[string]map[string]PermissionSetTemplate
-	userGroupTemplates     map[string]map[string]UserGroupTemplate
-	assumableRoleTemplates map[string]map[string]AssumableRoleTemplate
-	permissionImports      map[string]map[string]PermissionPackageImport
-	permissionCatalog      map[string]map[string]PermissionCatalogItem
-	menuItems              map[string]map[string]MenuItem
-	permissionSetItems     map[string]map[string]PermissionSetItem
-	assignments            map[string]map[string]PermissionSetAssignment
-	dataScopes             map[string]map[string]DataScope
-	fieldPolicies          map[string]map[string]FieldPolicy
-	assumableRoles         map[string]map[string]AssumableRole
-	roleSessions           map[string]map[string]AssumableRoleSession
-	orgUnits               map[string]map[string]OrgUnit
-	positions              map[string]map[string]Position
-	employees              map[string]map[string]Employee
-	employeeNoSequences    map[string]map[string]int
-	employeeImports        map[string]map[string]EmployeeImportSession
-	employmentContracts    map[string]map[string]EmploymentContract
-	attendancePolicies     map[string]AttendancePolicy
-	leaveBalances          map[string]map[string]LeaveBalance
-	leaveRequests          map[string]map[string]LeaveRequest
-	attendanceWorksites    map[string]map[string]AttendanceWorksite
-	attendanceShifts       map[string]map[string]AttendanceShift
-	attendanceAssignments  map[string]map[string]AttendanceShiftAssignment
-	attendanceClockRecords map[string]map[string]AttendanceClockRecord
-	attendanceSummaries    map[string]map[string]AttendanceDailySummary
-	attendanceCorrections  map[string]map[string]AttendanceCorrectionRequest
-	overtimeRequests       map[string]map[string]OvertimeRequest
-	formTemplates          map[string]map[string]FormTemplate
-	formInstances          map[string]map[string]FormInstance
-	workflowRuns           map[string]map[string]domain.WorkflowRun
-	workflowStageInstances map[string]map[string]domain.WorkflowStageInstance
-	workflowStageAssignees map[string]map[string]domain.WorkflowStageAssignee
-	workflowActions        map[string][]domain.WorkflowAction
-	platformTaskItems      map[string]map[string]PlatformTaskRecordItem
-	platformTaskTodos      map[string]map[string]PlatformTaskTodoRecord
-	agentRuns              map[string]map[string]AgentRun
-	notifications          map[string]map[string]Notification
-	notificationRecipients map[string]map[string]NotificationRecipient
-	auditLogs              map[string][]AuditLog
-	permissionVersions     map[string]int64
-	identityOutbox         map[string][]IdentityProvisioningOutboxEvent
-	outboxEvents           map[string][]OutboxEvent
-	relationshipTuples     map[string]map[string]AuthzRelationshipTuple
+	accounts                map[string]map[string]Account
+	userIdentities          map[string]map[string]UserIdentity
+	userGroups              map[string]map[string]UserGroup
+	groupMemberships        map[string]map[string]GroupMembership
+	permissionSets          map[string]map[string]PermissionSet
+	permissionPackages      map[string]PermissionPackage
+	permissionSetTemplates  map[string]map[string]PermissionSetTemplate
+	userGroupTemplates      map[string]map[string]UserGroupTemplate
+	assumableRoleTemplates  map[string]map[string]AssumableRoleTemplate
+	permissionImports       map[string]map[string]PermissionPackageImport
+	permissionCatalog       map[string]map[string]PermissionCatalogItem
+	menuItems               map[string]map[string]MenuItem
+	permissionSetItems      map[string]map[string]PermissionSetItem
+	assignments             map[string]map[string]PermissionSetAssignment
+	dataScopes              map[string]map[string]DataScope
+	fieldPolicies           map[string]map[string]FieldPolicy
+	assumableRoles          map[string]map[string]AssumableRole
+	roleSessions            map[string]map[string]AssumableRoleSession
+	orgUnits                map[string]map[string]OrgUnit
+	positions               map[string]map[string]Position
+	employees               map[string]map[string]Employee
+	employeeNoSequences     map[string]map[string]int
+	employeeImports         map[string]map[string]EmployeeImportSession
+	employmentContracts     map[string]map[string]EmploymentContract
+	attendancePolicies      map[string]AttendancePolicy
+	leaveBalances           map[string]map[string]LeaveBalance
+	leaveRequests           map[string]map[string]LeaveRequest
+	attendanceWorksites     map[string]map[string]AttendanceWorksite
+	attendanceShifts        map[string]map[string]AttendanceShift
+	attendanceAssignments   map[string]map[string]AttendanceShiftAssignment
+	attendanceClockRecords  map[string]map[string]AttendanceClockRecord
+	attendanceSummaries     map[string]map[string]AttendanceDailySummary
+	attendanceCorrections   map[string]map[string]AttendanceCorrectionRequest
+	overtimeRequests        map[string]map[string]OvertimeRequest
+	formTemplates           map[string]map[string]FormTemplate
+	formInstances           map[string]map[string]FormInstance
+	workflowRuns            map[string]map[string]domain.WorkflowRun
+	workflowStageInstances  map[string]map[string]domain.WorkflowStageInstance
+	workflowStageAssignees  map[string]map[string]domain.WorkflowStageAssignee
+	workflowActions         map[string][]domain.WorkflowAction
+	platformTaskItems       map[string]map[string]PlatformTaskRecordItem
+	platformTaskTodos       map[string]map[string]PlatformTaskTodoRecord
+	agentRuns               map[string]map[string]AgentRun
+	agentModels             map[string]map[string]AgentModel
+	agentDefinitions        map[string]map[string]AgentDefinition
+	agentDefinitionVersions map[string]map[string]AgentDefinitionVersion
+	agentAudits             map[string][]AgentAudit
+	agentSessions           map[string]map[string]AgentSession
+	agentSessionMessages    map[string]map[string]AgentSessionMessage
+	agentMemories           map[string]map[string]AgentMemory
+	notifications           map[string]map[string]Notification
+	notificationRecipients  map[string]map[string]NotificationRecipient
+	auditLogs               map[string][]AuditLog
+	permissionVersions      map[string]int64
+	identityOutbox          map[string][]IdentityProvisioningOutboxEvent
+	outboxEvents            map[string][]OutboxEvent
+	relationshipTuples      map[string]map[string]AuthzRelationshipTuple
 }
 
 // NewStore 建立儲存層。
 func NewStore() *Store {
 	return &Store{
-		tenants:                map[string]Tenant{},
-		accounts:               map[string]map[string]Account{},
-		userIdentities:         map[string]map[string]UserIdentity{},
-		userGroups:             map[string]map[string]UserGroup{},
-		groupMemberships:       map[string]map[string]GroupMembership{},
-		permissionSets:         map[string]map[string]PermissionSet{},
-		permissionPackages:     map[string]PermissionPackage{},
-		permissionSetTemplates: map[string]map[string]PermissionSetTemplate{},
-		userGroupTemplates:     map[string]map[string]UserGroupTemplate{},
-		assumableRoleTemplates: map[string]map[string]AssumableRoleTemplate{},
-		permissionImports:      map[string]map[string]PermissionPackageImport{},
-		permissionCatalog:      map[string]map[string]PermissionCatalogItem{},
-		menuItems:              map[string]map[string]MenuItem{},
-		permissionSetItems:     map[string]map[string]PermissionSetItem{},
-		assignments:            map[string]map[string]PermissionSetAssignment{},
-		dataScopes:             map[string]map[string]DataScope{},
-		fieldPolicies:          map[string]map[string]FieldPolicy{},
-		assumableRoles:         map[string]map[string]AssumableRole{},
-		roleSessions:           map[string]map[string]AssumableRoleSession{},
-		orgUnits:               map[string]map[string]OrgUnit{},
-		positions:              map[string]map[string]Position{},
-		employees:              map[string]map[string]Employee{},
-		employeeNoSequences:    map[string]map[string]int{},
-		employeeImports:        map[string]map[string]EmployeeImportSession{},
-		employmentContracts:    map[string]map[string]EmploymentContract{},
-		attendancePolicies:     map[string]AttendancePolicy{},
-		leaveBalances:          map[string]map[string]LeaveBalance{},
-		leaveRequests:          map[string]map[string]LeaveRequest{},
-		attendanceWorksites:    map[string]map[string]AttendanceWorksite{},
-		attendanceShifts:       map[string]map[string]AttendanceShift{},
-		attendanceAssignments:  map[string]map[string]AttendanceShiftAssignment{},
-		attendanceClockRecords: map[string]map[string]AttendanceClockRecord{},
-		attendanceSummaries:    map[string]map[string]AttendanceDailySummary{},
-		attendanceCorrections:  map[string]map[string]AttendanceCorrectionRequest{},
-		overtimeRequests:       map[string]map[string]OvertimeRequest{},
-		formTemplates:          map[string]map[string]FormTemplate{},
-		formInstances:          map[string]map[string]FormInstance{},
-		workflowRuns:           map[string]map[string]domain.WorkflowRun{},
-		workflowStageInstances: map[string]map[string]domain.WorkflowStageInstance{},
-		workflowStageAssignees: map[string]map[string]domain.WorkflowStageAssignee{},
-		workflowActions:        map[string][]domain.WorkflowAction{},
-		platformTaskItems:      map[string]map[string]PlatformTaskRecordItem{},
-		platformTaskTodos:      map[string]map[string]PlatformTaskTodoRecord{},
-		agentRuns:              map[string]map[string]AgentRun{},
-		notifications:          map[string]map[string]Notification{},
-		notificationRecipients: map[string]map[string]NotificationRecipient{},
-		auditLogs:              map[string][]AuditLog{},
-		permissionVersions:     map[string]int64{},
-		identityOutbox:         map[string][]IdentityProvisioningOutboxEvent{},
-		outboxEvents:           map[string][]OutboxEvent{},
-		relationshipTuples:     map[string]map[string]AuthzRelationshipTuple{},
+		tenants:                 map[string]Tenant{},
+		accounts:                map[string]map[string]Account{},
+		userIdentities:          map[string]map[string]UserIdentity{},
+		userGroups:              map[string]map[string]UserGroup{},
+		groupMemberships:        map[string]map[string]GroupMembership{},
+		permissionSets:          map[string]map[string]PermissionSet{},
+		permissionPackages:      map[string]PermissionPackage{},
+		permissionSetTemplates:  map[string]map[string]PermissionSetTemplate{},
+		userGroupTemplates:      map[string]map[string]UserGroupTemplate{},
+		assumableRoleTemplates:  map[string]map[string]AssumableRoleTemplate{},
+		permissionImports:       map[string]map[string]PermissionPackageImport{},
+		permissionCatalog:       map[string]map[string]PermissionCatalogItem{},
+		menuItems:               map[string]map[string]MenuItem{},
+		permissionSetItems:      map[string]map[string]PermissionSetItem{},
+		assignments:             map[string]map[string]PermissionSetAssignment{},
+		dataScopes:              map[string]map[string]DataScope{},
+		fieldPolicies:           map[string]map[string]FieldPolicy{},
+		assumableRoles:          map[string]map[string]AssumableRole{},
+		roleSessions:            map[string]map[string]AssumableRoleSession{},
+		orgUnits:                map[string]map[string]OrgUnit{},
+		positions:               map[string]map[string]Position{},
+		employees:               map[string]map[string]Employee{},
+		employeeNoSequences:     map[string]map[string]int{},
+		employeeImports:         map[string]map[string]EmployeeImportSession{},
+		employmentContracts:     map[string]map[string]EmploymentContract{},
+		attendancePolicies:      map[string]AttendancePolicy{},
+		leaveBalances:           map[string]map[string]LeaveBalance{},
+		leaveRequests:           map[string]map[string]LeaveRequest{},
+		attendanceWorksites:     map[string]map[string]AttendanceWorksite{},
+		attendanceShifts:        map[string]map[string]AttendanceShift{},
+		attendanceAssignments:   map[string]map[string]AttendanceShiftAssignment{},
+		attendanceClockRecords:  map[string]map[string]AttendanceClockRecord{},
+		attendanceSummaries:     map[string]map[string]AttendanceDailySummary{},
+		attendanceCorrections:   map[string]map[string]AttendanceCorrectionRequest{},
+		overtimeRequests:        map[string]map[string]OvertimeRequest{},
+		formTemplates:           map[string]map[string]FormTemplate{},
+		formInstances:           map[string]map[string]FormInstance{},
+		workflowRuns:            map[string]map[string]domain.WorkflowRun{},
+		workflowStageInstances:  map[string]map[string]domain.WorkflowStageInstance{},
+		workflowStageAssignees:  map[string]map[string]domain.WorkflowStageAssignee{},
+		workflowActions:         map[string][]domain.WorkflowAction{},
+		platformTaskItems:       map[string]map[string]PlatformTaskRecordItem{},
+		platformTaskTodos:       map[string]map[string]PlatformTaskTodoRecord{},
+		agentRuns:               map[string]map[string]AgentRun{},
+		agentModels:             map[string]map[string]AgentModel{},
+		agentDefinitions:        map[string]map[string]AgentDefinition{},
+		agentDefinitionVersions: map[string]map[string]AgentDefinitionVersion{},
+		agentAudits:             map[string][]AgentAudit{},
+		agentSessions:           map[string]map[string]AgentSession{},
+		agentSessionMessages:    map[string]map[string]AgentSessionMessage{},
+		agentMemories:           map[string]map[string]AgentMemory{},
+		notifications:           map[string]map[string]Notification{},
+		notificationRecipients:  map[string]map[string]NotificationRecipient{},
+		auditLogs:               map[string][]AuditLog{},
+		permissionVersions:      map[string]int64{},
+		identityOutbox:          map[string][]IdentityProvisioningOutboxEvent{},
+		outboxEvents:            map[string][]OutboxEvent{},
+		relationshipTuples:      map[string]map[string]AuthzRelationshipTuple{},
 	}
 }
 
@@ -267,6 +281,18 @@ func (s *Store) ListUserGroups(_ context.Context, tenantID string) ([]UserGroup,
 	return out, nil
 }
 
+// DeleteUserGroup 從儲存層刪除使用者群組。
+func (s *Store) DeleteUserGroup(_ context.Context, tenantID, id string) (UserGroup, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := getNested(s.userGroups, tenantID, id)
+	if !ok {
+		return UserGroup{}, false, nil
+	}
+	delete(s.userGroups[tenantID], id)
+	return copyUserGroup(v), true, nil
+}
+
 // UpsertGroupMembership 從儲存層處理 upsert 使用者群組成員關係。
 func (s *Store) UpsertGroupMembership(_ context.Context, v GroupMembership) error {
 	s.mu.Lock()
@@ -361,6 +387,25 @@ func (s *Store) ListPermissionSets(_ context.Context, tenantID string) ([]Permis
 	out := copyNestedValues(s.permissionSets[tenantID], copyPermissionSet)
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
 	return out, nil
+}
+
+// DeletePermissionSet 從儲存層刪除權限集合。
+func (s *Store) DeletePermissionSet(_ context.Context, tenantID, id string) (PermissionSet, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := getNested(s.permissionSets, tenantID, id)
+	if !ok {
+		return PermissionSet{}, false, nil
+	}
+	if bucket := s.permissionSetItems[tenantID]; bucket != nil {
+		for itemID, item := range bucket {
+			if item.PermissionSetID == id {
+				delete(bucket, itemID)
+			}
+		}
+	}
+	delete(s.permissionSets[tenantID], id)
+	return copyPermissionSet(v), true, nil
 }
 
 // ReplacePermissionSetItems 從儲存層替換權限集合項。
@@ -807,6 +852,25 @@ func (s *Store) ListAssumableRoles(_ context.Context, tenantID string) ([]Assuma
 	return out, nil
 }
 
+// DeleteAssumableRole 從儲存層刪除 assumable 角色。
+func (s *Store) DeleteAssumableRole(_ context.Context, tenantID, id string) (AssumableRole, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := getNested(s.assumableRoles, tenantID, id)
+	if !ok {
+		return AssumableRole{}, false, nil
+	}
+	if bucket := s.roleSessions[tenantID]; bucket != nil {
+		for sessionID, session := range bucket {
+			if session.AssumableRoleID == id {
+				delete(bucket, sessionID)
+			}
+		}
+	}
+	delete(s.assumableRoles[tenantID], id)
+	return copyAssumableRole(v), true, nil
+}
+
 // UpsertAssumableRoleSession 從儲存層處理 upsert assumable 角色 session。
 func (s *Store) UpsertAssumableRoleSession(_ context.Context, v AssumableRoleSession) error {
 	s.mu.Lock()
@@ -830,10 +894,32 @@ func (s *Store) GetActiveAssumableRoleSession(_ context.Context, tenantID, id st
 	return copyAssumableRoleSession(v), true, nil
 }
 
+// ListActiveAssumableRoleSessionsForRole 從儲存層列出角色啟用中 session。
+func (s *Store) ListActiveAssumableRoleSessionsForRole(_ context.Context, tenantID, roleID string) ([]AssumableRoleSession, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := nowUTC()
+	out := make([]AssumableRoleSession, 0)
+	for _, v := range s.roleSessions[tenantID] {
+		if v.AssumableRoleID != roleID {
+			continue
+		}
+		if v.RevokedAt != nil || !v.ExpiresAt.After(now) {
+			continue
+		}
+		out = append(out, copyAssumableRoleSession(v))
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
 // UpsertOrgUnit 從儲存層處理 upsert 組織單位。
 func (s *Store) UpsertOrgUnit(_ context.Context, v OrgUnit) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if v.UpdatedAt.IsZero() {
+		v.UpdatedAt = v.CreatedAt
+	}
 	putNested(s.orgUnits, v.TenantID, v.ID, copyOrgUnit(v))
 	return nil
 }
@@ -1464,6 +1550,7 @@ func (s *Store) ReserveLeaveBalance(_ context.Context, tenantID, employeeID, lea
 			return copyLeaveBalance(balance), false, true, nil
 		}
 		balance.RemainingHours -= hours
+		balance.UsedHours += hours
 		balance.UpdatedAt = updatedAt
 		s.leaveBalances[tenantID][id] = copyLeaveBalance(balance)
 		return copyLeaveBalance(balance), true, true, nil
@@ -1481,6 +1568,11 @@ func (s *Store) ReleaseLeaveBalance(_ context.Context, tenantID, employeeID, lea
 			continue
 		}
 		balance.RemainingHours += hours
+		if balance.UsedHours > hours {
+			balance.UsedHours -= hours
+		} else {
+			balance.UsedHours = 0
+		}
 		balance.UpdatedAt = updatedAt
 		s.leaveBalances[tenantID][id] = copyLeaveBalance(balance)
 		return copyLeaveBalance(balance), true, nil
@@ -2251,6 +2343,458 @@ func (s *Store) ListAgentRunPageByAccount(ctx context.Context, tenantID, account
 	return paginateMemory(items, page.Page, page.PageSize), total, nil
 }
 
+// UpsertAgentModel 從儲存層處理 upsert agent 模型。
+func (s *Store) UpsertAgentModel(_ context.Context, v AgentModel) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if v.IsDefault {
+		for id, item := range s.agentModels[v.TenantID] {
+			if id != v.ID {
+				item.IsDefault = false
+				s.agentModels[v.TenantID][id] = copyAgentModel(item)
+			}
+		}
+	}
+	putNested(s.agentModels, v.TenantID, v.ID, copyAgentModel(v))
+	return nil
+}
+
+// GetAgentModel 從儲存層取得 agent 模型。
+func (s *Store) GetAgentModel(_ context.Context, tenantID, id string) (AgentModel, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.agentModels, tenantID, id)
+	if !ok {
+		return AgentModel{}, false, nil
+	}
+	return copyAgentModel(v), true, nil
+}
+
+// ListAgentModels 從儲存層列出 agent 模型。
+func (s *Store) ListAgentModels(_ context.Context, tenantID string) ([]AgentModel, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.agentModels[tenantID], copyAgentModel)
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].IsDefault != out[j].IsDefault {
+			return out[i].IsDefault
+		}
+		if out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].UpdatedAt.After(out[j].UpdatedAt)
+	})
+	return out, nil
+}
+
+// DeleteAgentModel 從儲存層刪除 agent 模型。
+func (s *Store) DeleteAgentModel(_ context.Context, tenantID, id string) (AgentModel, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := getNested(s.agentModels, tenantID, id)
+	if !ok {
+		return AgentModel{}, false, nil
+	}
+	delete(s.agentModels[tenantID], id)
+	return copyAgentModel(v), true, nil
+}
+
+// ClearDefaultAgentModel 從儲存層清除其他預設模型。
+func (s *Store) ClearDefaultAgentModel(_ context.Context, tenantID, exceptID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, item := range s.agentModels[tenantID] {
+		if id == exceptID {
+			continue
+		}
+		item.IsDefault = false
+		s.agentModels[tenantID][id] = copyAgentModel(item)
+	}
+	return nil
+}
+
+// UpdateAgentModelTestResult 從儲存層更新模型測試結果。
+func (s *Store) UpdateAgentModelTestResult(_ context.Context, tenantID, id, status, message string, testedAt time.Time) (AgentModel, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := getNested(s.agentModels, tenantID, id)
+	if !ok {
+		return AgentModel{}, false, nil
+	}
+	t := testedAt.UTC()
+	v.LastTestedAt = &t
+	v.LastTestStatus = status
+	v.LastTestMessage = message
+	v.UpdatedAt = testedAt.UTC()
+	s.agentModels[tenantID][id] = copyAgentModel(v)
+	return copyAgentModel(v), true, nil
+}
+
+// CountAgentDefinitionsByModel 從儲存層統計使用模型的 agent。
+func (s *Store) CountAgentDefinitionsByModel(_ context.Context, tenantID, modelID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, item := range s.agentDefinitions[tenantID] {
+		if item.ModelID == modelID || item.FallbackModelID == modelID {
+			count++
+		}
+	}
+	return count, nil
+}
+
+// UpsertAgentDefinition 從儲存層處理 upsert agent 定義。
+func (s *Store) UpsertAgentDefinition(_ context.Context, v AgentDefinition) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.agentDefinitions, v.TenantID, v.ID, copyAgentDefinition(v))
+	return nil
+}
+
+// GetAgentDefinition 從儲存層取得 agent 定義。
+func (s *Store) GetAgentDefinition(_ context.Context, tenantID, id string) (AgentDefinition, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.agentDefinitions, tenantID, id)
+	if !ok {
+		return AgentDefinition{}, false, nil
+	}
+	return copyAgentDefinition(v), true, nil
+}
+
+// ListAgentDefinitions 從儲存層列出 agent 定義。
+func (s *Store) ListAgentDefinitions(_ context.Context, tenantID string) ([]AgentDefinition, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.agentDefinitions[tenantID], copyAgentDefinition)
+	sortAgentDefinitions(out)
+	return out, nil
+}
+
+// ListPublishedAgentDefinitions 從儲存層列出已發布 agent 定義。
+func (s *Store) ListPublishedAgentDefinitions(ctx context.Context, tenantID string) ([]AgentDefinition, error) {
+	items, err := s.ListAgentDefinitions(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]AgentDefinition, 0, len(items))
+	for _, item := range items {
+		if item.Status == domain.AgentDefinitionStatusPublished {
+			out = append(out, item)
+		}
+	}
+	return out, nil
+}
+
+// DeleteAgentDefinition 從儲存層刪除 agent 定義。
+func (s *Store) DeleteAgentDefinition(_ context.Context, tenantID, id string) (AgentDefinition, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := getNested(s.agentDefinitions, tenantID, id)
+	if !ok {
+		return AgentDefinition{}, false, nil
+	}
+	delete(s.agentDefinitions[tenantID], id)
+	return copyAgentDefinition(v), true, nil
+}
+
+// UpdateAgentDefinitionUsage 從儲存層更新 agent usage。
+func (s *Store) UpdateAgentDefinitionUsage(_ context.Context, tenantID, id string, success bool, latencyMs int, prompt string, runAt time.Time) (AgentDefinition, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := getNested(s.agentDefinitions, tenantID, id)
+	if !ok {
+		return AgentDefinition{}, false, nil
+	}
+	totalBefore := v.Usage.TotalRuns
+	v.Usage.TotalRuns++
+	if success {
+		v.Usage.SuccessRuns++
+	} else {
+		v.Usage.FailedRuns++
+	}
+	if latencyMs > 0 {
+		v.Usage.AvgLatencyMs = int((int64(v.Usage.AvgLatencyMs)*totalBefore + int64(latencyMs)) / v.Usage.TotalRuns)
+	}
+	t := runAt.UTC()
+	v.Usage.LastRunAt = &t
+	prompt = strings.TrimSpace(prompt)
+	if prompt != "" {
+		v.Usage.TopPrompts = append([]string{prompt}, v.Usage.TopPrompts...)
+		if len(v.Usage.TopPrompts) > 5 {
+			v.Usage.TopPrompts = v.Usage.TopPrompts[:5]
+		}
+	}
+	v.UpdatedAt = runAt.UTC()
+	s.agentDefinitions[tenantID][id] = copyAgentDefinition(v)
+	return copyAgentDefinition(v), true, nil
+}
+
+// InsertAgentDefinitionVersion 從儲存層新增 agent 版本。
+func (s *Store) InsertAgentDefinitionVersion(_ context.Context, v AgentDefinitionVersion) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.agentDefinitionVersions, v.TenantID, agentDefinitionVersionKey(v.AgentID, v.Version), copyAgentDefinitionVersion(v))
+	return nil
+}
+
+// ListAgentDefinitionVersions 從儲存層列出 agent 版本。
+func (s *Store) ListAgentDefinitionVersions(_ context.Context, tenantID, agentID string) ([]AgentDefinitionVersion, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]AgentDefinitionVersion, 0)
+	for _, item := range s.agentDefinitionVersions[tenantID] {
+		if item.AgentID == agentID {
+			out = append(out, copyAgentDefinitionVersion(item))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].Version > out[j].Version })
+	return out, nil
+}
+
+// GetAgentDefinitionVersion 從儲存層取得 agent 版本。
+func (s *Store) GetAgentDefinitionVersion(_ context.Context, tenantID, agentID string, version int) (AgentDefinitionVersion, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.agentDefinitionVersions, tenantID, agentDefinitionVersionKey(agentID, version))
+	if !ok {
+		return AgentDefinitionVersion{}, false, nil
+	}
+	return copyAgentDefinitionVersion(v), true, nil
+}
+
+// InsertAgentAudit 從儲存層新增 agent audit。
+func (s *Store) InsertAgentAudit(_ context.Context, v AgentAudit) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.agentAudits[v.TenantID] = append(s.agentAudits[v.TenantID], copyAgentAudit(v))
+	return nil
+}
+
+// ListAgentAudits 從儲存層列出 agent audit。
+func (s *Store) ListAgentAudits(_ context.Context, tenantID string) ([]AgentAudit, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	src := s.agentAudits[tenantID]
+	out := make([]AgentAudit, 0, len(src))
+	for _, item := range src {
+		out = append(out, copyAgentAudit(item))
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID > out[j].ID
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
+// UpsertAgentSession 從儲存層處理 upsert agent 會話。
+func (s *Store) UpsertAgentSession(_ context.Context, v AgentSession) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.agentSessions, v.TenantID, v.ID, copyAgentSession(v))
+	return nil
+}
+
+// GetAgentSession 從儲存層取得 agent 會話。
+func (s *Store) GetAgentSession(_ context.Context, tenantID, id string) (AgentSession, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.agentSessions, tenantID, id)
+	if !ok {
+		return AgentSession{}, false, nil
+	}
+	return copyAgentSession(v), true, nil
+}
+
+// ListAgentSessionsByAccount 從儲存層列出 account 的 agent 會話。
+func (s *Store) ListAgentSessionsByAccount(_ context.Context, tenantID, accountID, status, agentID string) ([]AgentSession, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]AgentSession, 0)
+	for _, item := range s.agentSessions[tenantID] {
+		if item.AccountID != accountID {
+			continue
+		}
+		if status != "" && string(item.Status) != status {
+			continue
+		}
+		if agentID != "" && item.AgentID != agentID {
+			continue
+		}
+		out = append(out, copyAgentSession(item))
+	}
+	sortAgentSessions(out)
+	return out, nil
+}
+
+// DeleteAgentSession 從儲存層刪除 agent 會話。
+func (s *Store) DeleteAgentSession(_ context.Context, tenantID, id string) (AgentSession, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := getNested(s.agentSessions, tenantID, id)
+	if !ok {
+		return AgentSession{}, false, nil
+	}
+	delete(s.agentSessions[tenantID], id)
+	for messageID, message := range s.agentSessionMessages[tenantID] {
+		if message.SessionID == id {
+			delete(s.agentSessionMessages[tenantID], messageID)
+		}
+	}
+	return copyAgentSession(v), true, nil
+}
+
+// InsertAgentSessionMessage 從儲存層新增 agent 會話訊息。
+func (s *Store) InsertAgentSessionMessage(_ context.Context, v AgentSessionMessage) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.agentSessionMessages, v.TenantID, v.ID, copyAgentSessionMessage(v))
+	return nil
+}
+
+// ListAgentSessionMessages 從儲存層列出 agent 會話訊息。
+func (s *Store) ListAgentSessionMessages(_ context.Context, tenantID, sessionID string) ([]AgentSessionMessage, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]AgentSessionMessage, 0)
+	for _, item := range s.agentSessionMessages[tenantID] {
+		if item.SessionID == sessionID {
+			out = append(out, copyAgentSessionMessage(item))
+		}
+	}
+	sortAgentSessionMessages(out)
+	return out, nil
+}
+
+// ListRecentAgentSessionMessages 從儲存層列出最近 agent 會話訊息。
+func (s *Store) ListRecentAgentSessionMessages(ctx context.Context, tenantID, sessionID string, limit int) ([]AgentSessionMessage, error) {
+	items, err := s.ListAgentSessionMessages(ctx, tenantID, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	if limit > 0 && len(items) > limit {
+		items = items[len(items)-limit:]
+	}
+	return items, nil
+}
+
+// UpsertAgentMemory 從儲存層處理 upsert agent 記憶。
+func (s *Store) UpsertAgentMemory(_ context.Context, v AgentMemory) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.agentMemories, v.TenantID, v.ID, copyAgentMemory(v))
+	return nil
+}
+
+// GetAgentMemory 從儲存層取得 agent 記憶。
+func (s *Store) GetAgentMemory(_ context.Context, tenantID, id string) (AgentMemory, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.agentMemories, tenantID, id)
+	if !ok || agentMemoryExpired(v, time.Now().UTC()) {
+		return AgentMemory{}, false, nil
+	}
+	return copyAgentMemory(v), true, nil
+}
+
+// ListAgentMemoriesByAccount 從儲存層列出 account 的 agent 記憶。
+func (s *Store) ListAgentMemoriesByAccount(_ context.Context, tenantID, accountID, agentID, sessionID string, limit int) ([]AgentMemory, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	now := time.Now().UTC()
+	out := make([]AgentMemory, 0)
+	for _, item := range s.agentMemories[tenantID] {
+		if item.AccountID != accountID || agentMemoryExpired(item, now) {
+			continue
+		}
+		if agentID != "" && item.AgentID != "" && item.AgentID != agentID {
+			continue
+		}
+		if sessionID != "" && item.SessionID != sessionID {
+			continue
+		}
+		out = append(out, copyAgentMemory(item))
+	}
+	sortAgentMemories(out)
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+// DeleteAgentMemory 從儲存層刪除 agent 記憶。
+func (s *Store) DeleteAgentMemory(_ context.Context, tenantID, id string) (AgentMemory, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := getNested(s.agentMemories, tenantID, id)
+	if !ok {
+		return AgentMemory{}, false, nil
+	}
+	delete(s.agentMemories[tenantID], id)
+	return copyAgentMemory(v), true, nil
+}
+
+func sortAgentDefinitions(items []AgentDefinition) {
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Status != items[j].Status {
+			return items[i].Status < items[j].Status
+		}
+		if items[i].UpdatedAt.Equal(items[j].UpdatedAt) {
+			return items[i].ID < items[j].ID
+		}
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	})
+}
+
+func sortAgentSessions(items []AgentSession) {
+	sort.SliceStable(items, func(i, j int) bool {
+		left := agentSessionSortTime(items[i])
+		right := agentSessionSortTime(items[j])
+		if left.Equal(right) {
+			return items[i].ID > items[j].ID
+		}
+		return left.After(right)
+	})
+}
+
+func agentSessionSortTime(v AgentSession) time.Time {
+	if v.LastMessageAt != nil {
+		return v.LastMessageAt.UTC()
+	}
+	return v.UpdatedAt.UTC()
+}
+
+func sortAgentSessionMessages(items []AgentSessionMessage) {
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].ID < items[j].ID
+		}
+		return items[i].CreatedAt.Before(items[j].CreatedAt)
+	})
+}
+
+func sortAgentMemories(items []AgentMemory) {
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Importance != items[j].Importance {
+			return items[i].Importance > items[j].Importance
+		}
+		if items[i].UpdatedAt.Equal(items[j].UpdatedAt) {
+			return items[i].ID > items[j].ID
+		}
+		return items[i].UpdatedAt.After(items[j].UpdatedAt)
+	})
+}
+
+func agentMemoryExpired(v AgentMemory, now time.Time) bool {
+	return v.ExpiresAt != nil && !v.ExpiresAt.After(now)
+}
+
+func agentDefinitionVersionKey(agentID string, version int) string {
+	return agentID + "\x00" + strconv.Itoa(version)
+}
+
 // UpsertNotification 從儲存層處理 upsert 系統通知。
 func (s *Store) UpsertNotification(_ context.Context, v Notification) error {
 	s.mu.Lock()
@@ -2580,6 +3124,51 @@ func (s *Store) ListOutboxEvents(_ context.Context, tenantID string) ([]OutboxEv
 		out = append(out, copyOutboxEvent(v))
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	return out, nil
+}
+
+// ClaimOutboxEvents atomically claims dispatchable outbox events for a worker.
+func (s *Store) ClaimOutboxEvents(_ context.Context, tenantID string, limit, maxRetries int) ([]OutboxEvent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if limit <= 0 {
+		return nil, nil
+	}
+	if maxRetries <= 0 {
+		maxRetries = 1
+	}
+	events := s.outboxEvents[tenantID]
+	type ranked struct {
+		idx int
+		ev  OutboxEvent
+	}
+	candidates := make([]ranked, 0, len(events))
+	for i, event := range events {
+		if event.RetryCount >= maxRetries {
+			continue
+		}
+		switch event.Status {
+		case "pending", "failed":
+			candidates = append(candidates, ranked{idx: i, ev: event})
+		}
+	}
+	sort.Slice(candidates, func(i, j int) bool {
+		if candidates[i].ev.CreatedAt.Equal(candidates[j].ev.CreatedAt) {
+			return candidates[i].ev.ID < candidates[j].ev.ID
+		}
+		return candidates[i].ev.CreatedAt.Before(candidates[j].ev.CreatedAt)
+	})
+	if len(candidates) > limit {
+		candidates = candidates[:limit]
+	}
+	out := make([]OutboxEvent, 0, len(candidates))
+	for _, item := range candidates {
+		events[item.idx].Status = "processing"
+		events[item.idx].LastError = ""
+		events[item.idx].ProcessedAt = nil
+		out = append(out, copyOutboxEvent(events[item.idx]))
+	}
+	s.outboxEvents[tenantID] = events
 	return out, nil
 }
 

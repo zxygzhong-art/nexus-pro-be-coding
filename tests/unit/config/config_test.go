@@ -60,6 +60,70 @@ func TestOpenFGAScopeCheckConfig(t *testing.T) {
 	}
 }
 
+// TestAgentChatConfig 驗證 Agent Chat 與 LiteLLM 組態。
+func TestAgentChatConfig(t *testing.T) {
+	t.Setenv("AGENT_CHAT_ENABLED", "")
+	t.Setenv("LITELLM_BASE_URL", "")
+	t.Setenv("LITELLM_API_KEY", "")
+	t.Setenv("AGENT_MODEL_NAME", "")
+	t.Setenv("AGENT_CHAT_TIMEOUT_SECONDS", "")
+
+	cfg, err := config.LoadE()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.AgentChatEnabled {
+		t.Fatal("expected agent chat to be disabled by default")
+	}
+	if cfg.LiteLLMBaseURL != "http://127.0.0.1:4000" {
+		t.Fatalf("unexpected LiteLLM default base URL: %q", cfg.LiteLLMBaseURL)
+	}
+	if cfg.AgentChatTimeout != time.Minute {
+		t.Fatalf("unexpected chat timeout: %s", cfg.AgentChatTimeout)
+	}
+
+	t.Setenv("AGENT_CHAT_ENABLED", "true")
+	t.Setenv("LITELLM_BASE_URL", "http://litellm:4000")
+	t.Setenv("LITELLM_API_KEY", "test-key")
+	t.Setenv("AGENT_MODEL_NAME", "openai/gpt-4.1-mini")
+	t.Setenv("AGENT_CHAT_TIMEOUT_SECONDS", "30")
+
+	cfg, err = config.LoadE()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.AgentChatEnabled || cfg.LiteLLMBaseURL != "http://litellm:4000" || cfg.LiteLLMAPIKey != "test-key" || cfg.AgentModelName != "openai/gpt-4.1-mini" || cfg.AgentChatTimeout != 30*time.Second {
+		t.Fatalf("unexpected agent chat config: %+v", cfg)
+	}
+}
+
+// TestProductionAgentChatRequiresLiteLLMConfig 驗證 production 開啟 chat 時必須配置 LiteLLM。
+func TestProductionAgentChatRequiresLiteLLMConfig(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+	t.Setenv("DATABASE_URL", "postgres://nexus:nexus@example.com:5432/nexus?sslmode=require")
+	t.Setenv("KEYCLOAK_ISSUER_URL", "https://keycloak.example/realms/nexus")
+	t.Setenv("KEYCLOAK_CLIENT_ID", "nexus-api")
+	t.Setenv("OPENFGA_API_URL", "https://openfga.example")
+	t.Setenv("OPENFGA_STORE_ID", "store")
+	t.Setenv("OPENFGA_MODEL_ID", "model")
+	t.Setenv("TEMPORAL_HOST_PORT", "temporal:7233")
+	t.Setenv("OBJECT_STORE_PROVIDER", "local")
+	t.Setenv("OBJECT_STORE_DIR", "/tmp/nexus-objects")
+	t.Setenv("AGENT_CHAT_ENABLED", "true")
+	t.Setenv("LITELLM_BASE_URL", "")
+	t.Setenv("LITELLM_API_KEY", "")
+	t.Setenv("AGENT_MODEL_NAME", "")
+
+	cfg, err := config.LoadE()
+	if err != nil {
+		t.Fatal(err)
+	}
+	err = cfg.ValidateStartup()
+	if err == nil || !strings.Contains(err.Error(), "LITELLM_API_KEY is required when AGENT_CHAT_ENABLED=true") || !strings.Contains(err.Error(), "AGENT_MODEL_NAME is required when AGENT_CHAT_ENABLED=true") {
+		t.Fatalf("expected missing production LiteLLM config errors, got %v", err)
+	}
+}
+
 // TestTemporalConfig 驗證 Temporal workflow engine 組態。
 func TestTemporalConfig(t *testing.T) {
 	cfg := config.Load()
@@ -327,6 +391,61 @@ func TestValidateStartupAcceptsProductionMinimum(t *testing.T) {
 
 	if err := cfg.ValidateStartup(); err != nil {
 		t.Fatalf("expected production minimum config to validate, got %v", err)
+	}
+}
+
+// TestValidateStartupRejectsProductionSFTPGoWithoutHostKey 驗證 production sftpgo 必須提供 host key。
+func TestValidateStartupRejectsProductionSFTPGoWithoutHostKey(t *testing.T) {
+	cfg := config.Config{
+		Env:                        "production",
+		DatabaseURL:                "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=require",
+		KeycloakIssuerURL:          "https://issuer.example/realms/nexus",
+		KeycloakClientID:           "nexus-api",
+		OpenFGAAPIURL:              "https://openfga.example",
+		OpenFGAStoreID:             "store-1",
+		OpenFGAModelID:             "model-1",
+		TemporalHostPort:           "temporal:7233",
+		TemporalNamespace:          "default",
+		TemporalTaskQueue:          "nexus-workflows",
+		ObjectStoreProvider:        "sftpgo",
+		ObjectStoreEndpoint:        "sftp://sftp.example:22",
+		ObjectStoreBucket:          "nexus-hr-imports",
+		ObjectStoreAccessKeyID:     "nexus",
+		ObjectStoreSecretAccessKey: "secret",
+	}
+	err := cfg.ValidateStartup()
+	if err == nil {
+		t.Fatal("expected missing SFTP host key to fail production validation")
+	}
+	if !strings.Contains(err.Error(), "OBJECT_STORE_SFTP_HOST_KEY") {
+		t.Fatalf("expected host key error, got %v", err)
+	}
+}
+
+// TestValidateStartupRejectsProductionSFTPInsecureSkip 驗證 production 不可跳過 host key。
+func TestValidateStartupRejectsProductionSFTPInsecureSkip(t *testing.T) {
+	cfg := config.Config{
+		Env:                                "production",
+		DatabaseURL:                        "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=require",
+		KeycloakIssuerURL:                  "https://issuer.example/realms/nexus",
+		KeycloakClientID:                   "nexus-api",
+		OpenFGAAPIURL:                      "https://openfga.example",
+		OpenFGAStoreID:                     "store-1",
+		OpenFGAModelID:                     "model-1",
+		TemporalHostPort:                   "temporal:7233",
+		TemporalNamespace:                  "default",
+		TemporalTaskQueue:                  "nexus-workflows",
+		ObjectStoreProvider:                "sftpgo",
+		ObjectStoreEndpoint:                "sftp://sftp.example:22",
+		ObjectStoreBucket:                  "nexus-hr-imports",
+		ObjectStoreAccessKeyID:             "nexus",
+		ObjectStoreSecretAccessKey:         "secret",
+		ObjectStoreSFTPHostKey:             "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKtftesttesttesttesttesttesttesttesttesttest",
+		ObjectStoreSFTPInsecureSkipHostKey: true,
+	}
+	err := cfg.ValidateStartup()
+	if err == nil {
+		t.Fatal("expected insecure skip host key to fail production validation")
 	}
 }
 

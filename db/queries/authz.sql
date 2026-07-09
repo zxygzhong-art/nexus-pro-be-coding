@@ -141,6 +141,19 @@ WHERE tenant_id = $1
   AND revoked_at IS NULL
   AND expires_at > now();
 
+-- name: ListActiveAuthzAssumableRoleSessionsForRole :many
+SELECT * FROM authz_assumable_role_sessions
+WHERE tenant_id = $1
+  AND assumable_role_id = $2
+  AND revoked_at IS NULL
+  AND expires_at > now()
+ORDER BY created_at ASC;
+
+-- name: DeleteAuthzAssumableRoleSessionsForRole :exec
+DELETE FROM authz_assumable_role_sessions
+WHERE tenant_id = $1
+  AND assumable_role_id = $2;
+
 -- name: RevokeAuthzAssumableRoleSession :one
 UPDATE authz_assumable_role_sessions
 SET revoked_at = $3

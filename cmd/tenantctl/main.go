@@ -227,6 +227,13 @@ func runTemporalBackfillFormWorkflows(args []string) error {
 			result.Items = append(result.Items, resultItem)
 			continue
 		}
+		if err := restoreFormApprovalAfterTemporalBackfill(ctx, store, result.TenantID, item, run, ok); err != nil {
+			result.Failed++
+			resultItem.Action = "error"
+			resultItem.Error = err.Error()
+			result.Items = append(result.Items, resultItem)
+			continue
+		}
 		result.Started++
 		result.Items = append(result.Items, resultItem)
 	}
@@ -712,7 +719,7 @@ func firstNonEmpty(values ...string) string {
 
 func temporalBackfillCandidateStatus(status string) bool {
 	switch strings.TrimSpace(strings.ToLower(status)) {
-	case "submitted", "in_review", "pending", "pending_review":
+	case "submitted", "in_review", "pending", "pending_review", domain.WorkflowFormStatusWorkflowStartFailed:
 		return true
 	default:
 		return false
@@ -726,6 +733,37 @@ func temporalBackfillTerminalRunStatus(status string) bool {
 	default:
 		return false
 	}
+}
+
+func restoreFormApprovalAfterTemporalBackfill(
+	ctx context.Context,
+	store *postgresrepo.Store,
+	tenantID string,
+	item domain.FormInstance,
+	run domain.WorkflowRun,
+	hasRun bool,
+) error {
+	now := time.Now().UTC()
+	changed := false
+	if strings.EqualFold(strings.TrimSpace(item.Status), domain.WorkflowFormStatusWorkflowStartFailed) {
+		item.Status = domain.WorkflowFormStatusInReview
+		item.UpdatedAt = now
+		changed = true
+	}
+	if changed {
+		if err := store.UpsertFormInstance(ctx, item); err != nil {
+			return err
+		}
+	}
+	if hasRun && strings.EqualFold(strings.TrimSpace(run.Status), domain.WorkflowRunStatusStartFailed) {
+		run.Status = domain.WorkflowRunStatusRunning
+		run.UpdatedAt = now
+		if err := store.UpsertWorkflowRun(ctx, run); err != nil {
+			return err
+		}
+	}
+	_ = tenantID
+	return nil
 }
 
 func temporalBackfillWorkflowActive(ctx context.Context, client sdkclient.Client, tenantID, formInstanceID string) (bool, error) {

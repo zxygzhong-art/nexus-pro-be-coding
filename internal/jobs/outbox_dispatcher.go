@@ -24,6 +24,14 @@ type RelationshipTupleWriter interface {
 	WriteRelationshipTuples(context.Context, []domain.AuthzRelationshipTupleChange) error
 }
 
+// NoopRelationshipTupleWriter 在未配置 OpenFGA 時接受 Write 並直接成功。
+type NoopRelationshipTupleWriter struct{}
+
+// WriteRelationshipTuples 以 no-op 方式接受關係 tuple 變更。
+func (NoopRelationshipTupleWriter) WriteRelationshipTuples(context.Context, []domain.AuthzRelationshipTupleChange) error {
+	return nil
+}
+
 // OutboxDispatchOptions 定義 outbox dispatcher 選項的資料結構。
 type OutboxDispatchOptions struct {
 	BatchSize  int
@@ -105,16 +113,22 @@ func (p *OutboxDispatcher) ProcessTenant(ctx context.Context, tenantID string, o
 	if p == nil || p.store == nil {
 		return 0, errors.New("outbox dispatcher requires store")
 	}
-	events, err := p.store.ListOutboxEvents(ctx, tenantID)
+	events, err := p.store.ClaimOutboxEvents(ctx, tenantID, opts.BatchSize, opts.MaxRetries)
 	if err != nil {
 		return 0, err
 	}
 	processed := 0
 	for _, event := range events {
-		if processed >= opts.BatchSize {
-			break
-		}
-		if !p.isDispatchableEvent(event, opts.MaxRetries) {
+		if !p.isDispatchableEventType(event) {
+			// Park unsupported types as processing with an explanatory error so the
+			// next claim (pending|failed only) does not thrash them every tick.
+			// Reset to pending when a handler/publisher is later registered.
+			event.Status = "processing"
+			event.LastError = truncateOutboxError("no handler registered for outbox event type " + event.EventType)
+			event.ProcessedAt = nil
+			if err := p.store.UpdateOutboxEvent(ctx, event); err != nil {
+				return processed, err
+			}
 			continue
 		}
 		if err := p.processEvent(ctx, event); err != nil {
@@ -127,13 +141,6 @@ func (p *OutboxDispatcher) ProcessTenant(ctx context.Context, tenantID string, o
 
 // processEvent 處理事件。
 func (p *OutboxDispatcher) processEvent(ctx context.Context, event domain.OutboxEvent) error {
-	event.Status = "processing"
-	event.LastError = ""
-	event.ProcessedAt = nil
-	if err := p.store.UpdateOutboxEvent(ctx, event); err != nil {
-		return err
-	}
-
 	err := p.dispatchEvent(ctx, event)
 	now := p.now().UTC()
 	event.ProcessedAt = &now
@@ -199,20 +206,25 @@ func normalizeOutboxDispatchOptions(opts OutboxDispatchOptions) OutboxDispatchOp
 	return opts
 }
 
-// isDispatchableEvent 判斷事件是否可派發。
-// NATS 啟用時改由 subject mapping 決定是否可發布;無映射事件保持 pending。
-func (p *OutboxDispatcher) isDispatchableEvent(event domain.OutboxEvent, maxRetries int) bool {
+// isDispatchableEventType 判斷事件類型是否有可用 handler（狀態/重試由 Claim 過濾）。
+// NATS 啟用時改由 subject mapping 決定是否可發布;無映射事件保持不可派發。
+func (p *OutboxDispatcher) isDispatchableEventType(event domain.OutboxEvent) bool {
 	if p != nil && p.publisher != nil {
-		if _, err := domain.EventSubjectForType(event.EventType); err != nil {
-			return false
-		}
-	} else if !isOpenFGARelationshipEvent(event.EventType) {
-		return false
+		_, err := domain.EventSubjectForType(event.EventType)
+		return err == nil
 	}
+	return isOpenFGARelationshipEvent(event.EventType)
+}
+
+// isDispatchableEvent 判斷事件是否可派發（含狀態與重試上限；供測試與相容路徑使用）。
+func (p *OutboxDispatcher) isDispatchableEvent(event domain.OutboxEvent, maxRetries int) bool {
 	if event.RetryCount >= maxRetries {
 		return false
 	}
-	return event.Status == "pending" || event.Status == "failed" || event.Status == "processing"
+	if event.Status != "pending" && event.Status != "failed" && event.Status != "processing" {
+		return false
+	}
+	return p.isDispatchableEventType(event)
 }
 
 // isOpenFGARelationshipEvent 判斷是否為open fga 關係事件。

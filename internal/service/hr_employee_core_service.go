@@ -885,7 +885,11 @@ func (c HRService) linkEmployeeAccount(ctx RequestContext, employee Employee) er
 		before := account
 		account.EmployeeID = employee.ID
 		account.DisplayName = utils.FirstNonEmpty(account.DisplayName, employee.Name)
-		account.Email = utils.FirstNonEmpty(account.Email, employee.CompanyEmail)
+		if email := strings.TrimSpace(employee.CompanyEmail); email != "" {
+			account.Email = email
+		} else {
+			account.Email = utils.FirstNonEmpty(account.Email, employee.CompanyEmail)
+		}
 		if err := c.store.UpsertAccount(goContext(ctx), account); err != nil {
 			return err
 		}

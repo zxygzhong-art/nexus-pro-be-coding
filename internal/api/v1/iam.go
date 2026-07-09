@@ -32,12 +32,14 @@ func (c IAMCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	iam.GET("/user-groups", c.routes.Handle("iam.user_group", "read", c.listUserGroups))
 	iam.POST("/user-groups", c.routes.Handle("iam.user_group", "create", c.createUserGroup))
 	iam.PATCH("/user-groups/:id", c.routes.Handle("iam.user_group", "update", c.updateUserGroup, ResourceID(PathParamID)))
+	iam.DELETE("/user-groups/:id", c.routes.Handle("iam.user_group", "delete", c.deleteUserGroup, ResourceID(PathParamID)))
 	iam.GET("/user-groups/:id/members", c.routes.Handle("iam.user_group", "read", c.listUserGroupMembers, ResourceID(PathParamID)))
 	iam.POST("/user-groups/:id/members", c.routes.Handle("iam.user_group", "update", c.addUserGroupMember, ResourceID(PathParamID)))
 	iam.DELETE("/user-groups/:id/members/:accountId", c.routes.Handle("iam.user_group", "update", c.removeUserGroupMember, ResourceID(PathParamID), PathParam("accountId")))
 	iam.GET("/permission-sets", c.routes.Handle("iam.permission_set", "read", c.listPermissionSets))
 	iam.POST("/permission-sets", c.routes.Handle("iam.permission_set", "create", c.createPermissionSet))
 	iam.PATCH("/permission-sets/:id", c.routes.Handle("iam.permission_set", "update", c.updatePermissionSet, ResourceID(PathParamID)))
+	iam.DELETE("/permission-sets/:id", c.routes.Handle("iam.permission_set", "delete", c.deletePermissionSet, ResourceID(PathParamID)))
 	iam.GET("/accounts", c.routes.Handle("iam.account", "read", c.listAccounts))
 	iam.GET("/permission-set-assignments", c.routes.Handle("iam.permission_set_assignment", "read", c.listPermissionSetAssignments))
 	iam.POST("/permission-set-assignments", c.routes.Handle("iam.permission_set_assignment", "create", c.createPermissionSetAssignment))
@@ -54,6 +56,8 @@ func (c IAMCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	iam.POST("/outbox-events/:id/retry", c.routes.Handle("iam.outbox_event", "update", c.retryOutboxEvent, ResourceID(PathParamID)))
 	iam.GET("/assumable-roles", c.routes.Handle("iam.assumable_role", "read", c.listAssumableRoles))
 	iam.POST("/assumable-roles", c.routes.Handle("iam.assumable_role", "create", c.createAssumableRole))
+	iam.PATCH("/assumable-roles/:id", c.routes.Handle("iam.assumable_role", "update", c.updateAssumableRole, ResourceID(PathParamID)))
+	iam.DELETE("/assumable-roles/:id", c.routes.Handle("iam.assumable_role", "delete", c.deleteAssumableRole, ResourceID(PathParamID)))
 	iam.POST("/assumable-roles/:id/assume", c.routes.Handle("iam.assumable_role", "assume", c.assumeRole, ResourceID(PathParamID)))
 }
 
@@ -209,6 +213,16 @@ func (c IAMCtrl) updateUserGroup(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
+// deleteUserGroup 處理使用者群組刪除的 HTTP 請求。
+func (c IAMCtrl) deleteUserGroup(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.DeleteUserGroup(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
 // listUserGroupMembers 處理使用者群組成員列表的 HTTP 請求。
 func (c IAMCtrl) listUserGroupMembers(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
@@ -281,6 +295,16 @@ func (c IAMCtrl) updatePermissionSet(w http.ResponseWriter, r *http.Request, ctx
 		return err
 	}
 	item, err := c.svc.UpdatePermissionSet(ctx, r.PathValue(PathParamID), input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// deletePermissionSet 處理權限集合刪除的 HTTP 請求。
+func (c IAMCtrl) deletePermissionSet(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.DeletePermissionSet(ctx, r.PathValue(PathParamID))
 	if err != nil {
 		return err
 	}
@@ -526,6 +550,30 @@ func (c IAMCtrl) createAssumableRole(w http.ResponseWriter, r *http.Request, ctx
 		return err
 	}
 	writeJSON(w, http.StatusCreated, item)
+	return nil
+}
+
+// updateAssumableRole 處理 assumable 角色更新的 HTTP 請求。
+func (c IAMCtrl) updateAssumableRole(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.UpdateAssumableRoleInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.UpdateAssumableRole(ctx, r.PathValue(PathParamID), input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// deleteAssumableRole 處理 assumable 角色刪除的 HTTP 請求。
+func (c IAMCtrl) deleteAssumableRole(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.DeleteAssumableRole(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 

@@ -22,6 +22,9 @@ type Service struct {
 	authzSnapshot         AuthzSnapshotCache
 	relationships         RelationshipChecker
 	openFGAScopeChecks    bool
+	agentChatEnabled      bool
+	agentChatRuntime      AgentChatRuntime
+	agentChatTimeout      time.Duration
 	objectStore           ObjectStore
 	ehrmsClient           EHRMSClient
 	identityProvisioner   IdentityProvisioner
@@ -35,6 +38,9 @@ type Options struct {
 	AuthzSnapshot         AuthzSnapshotCache
 	Relationships         RelationshipChecker
 	OpenFGAScopeChecks    bool
+	AgentChatEnabled      bool
+	AgentChatRuntime      AgentChatRuntime
+	AgentChatTimeout      time.Duration
 	ObjectStore           ObjectStore
 	EHRMSClient           EHRMSClient
 	IdentityProvisioner   IdentityProvisioner
@@ -49,6 +55,8 @@ type RelationshipChecker interface {
 // EHRMSClient 定義 eHRMS client 的行為契約。
 type EHRMSClient interface {
 	ListEmployees(context.Context) ([]domain.EHRMSEmployeeRecord, error)
+	ListDepartments(context.Context) ([]domain.EHRMSDepartmentRecord, error)
+	ListPositions(context.Context) ([]domain.EHRMSPositionRecord, error)
 	ListAttendance(context.Context) ([]domain.EHRMSAttendanceRecord, error)
 }
 
@@ -84,6 +92,9 @@ func New(store repository.Store, options ...Options) *Service {
 		authzSnapshot:         cfg.AuthzSnapshot,
 		relationships:         cfg.Relationships,
 		openFGAScopeChecks:    cfg.OpenFGAScopeChecks,
+		agentChatEnabled:      cfg.AgentChatEnabled,
+		agentChatRuntime:      cfg.AgentChatRuntime,
+		agentChatTimeout:      cfg.AgentChatTimeout,
 		objectStore:           firstObjectStore(cfg.ObjectStore),
 		ehrmsClient:           cfg.EHRMSClient,
 		identityProvisioner:   cfg.IdentityProvisioner,

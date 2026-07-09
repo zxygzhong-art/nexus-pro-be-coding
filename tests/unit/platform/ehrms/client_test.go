@@ -48,3 +48,36 @@ func TestListAttendanceFetchesAndNormalizesEnglishFields(t *testing.T) {
 		t.Fatalf("expected normalized attendance fields, got %+v", row)
 	}
 }
+
+func TestListDepartmentsAndPositions(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/departments", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"code":"C01","name":"Root","parent_code":null,"closed":false,"depth":0},{"code":"C0101","name":"Child","parent_code":"C01","closed":true,"depth":1}]`))
+	})
+	mux.HandleFunc("/positions", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"job_code":"0704","job_title_zh":"工程師","job_title_en":"Engineer","headcount":3}]`))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client, err := ehrms.NewClient(server.URL, "secret", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	departments, err := client.ListDepartments(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(departments) != 2 || departments[1]["部門代碼"] != "C0101" || departments[1]["上級部門代碼"] != "C01" || departments[1]["部門已關閉"] != "true" {
+		t.Fatalf("unexpected departments: %+v", departments)
+	}
+	positions, err := client.ListPositions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(positions) != 1 || positions[0]["職務代碼"] != "0704" || positions[0]["職務中文名稱"] != "工程師" {
+		t.Fatalf("unexpected positions: %+v", positions)
+	}
+}

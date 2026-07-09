@@ -51,6 +51,11 @@ func DefaultHRPermissionPackageContent() PermissionPackageContent {
 					{Resource: "hr.employee", Action: ActionRead, Scope: ScopeSelf, MenuKey: "hr.employees"},
 					{Resource: "attendance.clock", Action: ActionCreate, Scope: ScopeSelf, MenuKey: "attendance.clock"},
 					{Resource: "attendance.leave", Action: ActionCreate, Scope: ScopeSelf, MenuKey: "attendance.leave"},
+					agentToolPermission("knowledge.search"),
+					agentToolPermission("get_my_profile"),
+					agentToolPermission("my_leave_balances"),
+					agentToolPermission("my_clock_records"),
+					agentToolPermission("my_pending_reviews"),
 				},
 			},
 			{
@@ -71,6 +76,24 @@ func DefaultHRPermissionPackageContent() PermissionPackageContent {
 					{Resource: "attendance.correction", Action: ActionApprove, Scope: ScopeAll, MenuKey: "attendance.corrections"},
 					{Resource: "iam.permission_set", Action: ActionRead, Scope: ScopeAll, MenuKey: "iam.permission_sets"},
 					{Resource: "iam.permission_set_assignment", Action: ActionRead, Scope: ScopeAll, MenuKey: "iam.permission_sets"},
+					{Resource: "agent.run", Action: ActionRead, Scope: ScopeAll, MenuKey: "agents.runs"},
+					{Resource: "agent.run", Action: ActionCreate, Scope: ScopeAll, MenuKey: "agents.runs"},
+					{Resource: "agent.model", Action: ActionRead, Scope: ScopeAll, MenuKey: "agents.runs"},
+					{Resource: "agent.model", Action: ActionCreate, Scope: ScopeAll, MenuKey: "agents.runs"},
+					{Resource: "agent.model", Action: ActionUpdate, Scope: ScopeAll, MenuKey: "agents.runs"},
+					{Resource: "agent.model", Action: ActionDelete, Scope: ScopeAll, MenuKey: "agents.runs"},
+					{Resource: "agent.definition", Action: ActionRead, Scope: ScopeAll, MenuKey: "agents.runs"},
+					{Resource: "agent.definition", Action: ActionCreate, Scope: ScopeAll, MenuKey: "agents.runs"},
+					{Resource: "agent.definition", Action: ActionUpdate, Scope: ScopeAll, MenuKey: "agents.runs"},
+					{Resource: "agent.definition", Action: ActionDelete, Scope: ScopeAll, MenuKey: "agents.runs"},
+					agentToolPermission("knowledge.search"),
+					agentToolPermission("get_my_profile"),
+					agentToolPermission("list_employees"),
+					agentToolPermission("get_employee"),
+					agentToolPermission("my_leave_balances"),
+					agentToolPermission("my_clock_records"),
+					agentToolPermission("my_pending_reviews"),
+					agentToolPermission("workspace_insights"),
 				},
 			},
 			{
@@ -118,6 +141,10 @@ func DefaultHRPermissionPackageContent() PermissionPackageContent {
 			{ResourceType: "assumable_role", OpenFGAType: "assumable_role"},
 		},
 	}
+}
+
+func agentToolPermission(toolID string) Permission {
+	return Permission{Resource: "agent.tool", Action: ActionCall, Target: toolID, Scope: ScopeAll, MenuKey: "agents.runs"}
 }
 
 // DefaultHRPermissionPackage 回傳內置 HR 權限包快照。

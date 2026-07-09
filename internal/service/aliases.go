@@ -54,6 +54,8 @@ type (
 	EmployeeImportSession              = domain.EmployeeImportSession
 	EmployeeImportRow                  = domain.EmployeeImportRow
 	EHRMSEmployeeRecord                = domain.EHRMSEmployeeRecord
+	EHRMSDepartmentRecord              = domain.EHRMSDepartmentRecord
+	EHRMSPositionRecord                = domain.EHRMSPositionRecord
 	EHRMSEmployeeSyncResponse          = domain.EHRMSEmployeeSyncResponse
 	BatchEmployeeResponse              = domain.BatchEmployeeResponse
 	BatchEmployeeResult                = domain.BatchEmployeeResult
@@ -73,6 +75,9 @@ type (
 	AttendancePolicyResponse           = domain.AttendancePolicyResponse
 	AttendancePolicyWorkTime           = domain.AttendancePolicyWorkTime
 	AttendanceLeaveType                = domain.AttendanceLeaveType
+	LeaveEntitlementRule               = domain.LeaveEntitlementRule
+	GrantLeaveBalancesInput            = domain.GrantLeaveBalancesInput
+	GrantLeaveBalancesResult           = domain.GrantLeaveBalancesResult
 	PlatformAssistant                  = domain.PlatformAssistant
 	PlatformFormItem                   = domain.PlatformFormItem
 	PlatformFormColumn                 = domain.PlatformFormColumn
@@ -99,6 +104,7 @@ type (
 	PlatformFormBuilderContract        = domain.PlatformFormBuilderContract
 	PlatformFormBuilderLayout          = domain.PlatformFormBuilderLayout
 	PlatformFormBuilderFieldType       = domain.PlatformFormBuilderFieldType
+	PlatformFormBuilderFieldOption     = domain.PlatformFormBuilderFieldOption
 	PlatformFormBuilderField           = domain.PlatformFormBuilderField
 	PlatformFormBuilderStage           = domain.PlatformFormBuilderStage
 	PlatformWorkspaceResponse          = domain.PlatformWorkspaceResponse
@@ -150,6 +156,23 @@ type (
 	Reference                          = domain.Reference
 	AgentRun                           = domain.AgentRun
 	AgentRunStatus                     = domain.AgentRunStatus
+	AgentModel                         = domain.AgentModel
+	AgentModelStatus                   = domain.AgentModelStatus
+	AgentDefinition                    = domain.AgentDefinition
+	AgentDefinitionStatus              = domain.AgentDefinitionStatus
+	AgentDefinitionVersion             = domain.AgentDefinitionVersion
+	AgentUsageStats                    = domain.AgentUsageStats
+	AgentAudit                         = domain.AgentAudit
+	AgentSession                       = domain.AgentSession
+	AgentSessionMessage                = domain.AgentSessionMessage
+	AgentMemory                        = domain.AgentMemory
+	AgentToolMeta                      = domain.AgentToolMeta
+	AgentTemplate                      = domain.AgentTemplate
+	AgentCategory                      = domain.AgentCategory
+	AgentVisibility                    = domain.AgentVisibility
+	AgentTrialResult                   = domain.AgentTrialResult
+	AgentBundle                        = domain.AgentBundle
+	ImportAgentBundleResult            = domain.ImportAgentBundleResult
 	Notification                       = domain.Notification
 	NotificationRecipient              = domain.NotificationRecipient
 	NotificationItem                   = domain.NotificationItem
@@ -216,6 +239,7 @@ type (
 	UpdateAssumableRoleInput                = domain.UpdateAssumableRoleInput
 	AssumeRoleInput                         = domain.AssumeRoleInput
 	CreateOrgUnitInput                      = domain.CreateOrgUnitInput
+	UpdateOrgUnitInput                      = domain.UpdateOrgUnitInput
 	CreatePositionInput                     = domain.CreatePositionInput
 	UpdatePositionInput                     = domain.UpdatePositionInput
 	CreateEmployeeInput                     = domain.CreateEmployeeInput
@@ -267,6 +291,18 @@ type (
 	WorkspaceAttendanceQuery                = domain.WorkspaceAttendanceQuery
 	WorkspaceAuditLogQuery                  = domain.WorkspaceAuditLogQuery
 	CreateAgentRunInput                     = domain.CreateAgentRunInput
+	ListAgentSessionsQuery                  = domain.ListAgentSessionsQuery
+	CreateAgentSessionInput                 = domain.CreateAgentSessionInput
+	UpdateAgentSessionInput                 = domain.UpdateAgentSessionInput
+	ListAgentMemoriesQuery                  = domain.ListAgentMemoriesQuery
+	CreateAgentMemoryInput                  = domain.CreateAgentMemoryInput
+	UpdateAgentMemoryInput                  = domain.UpdateAgentMemoryInput
+	CreateAgentModelInput                   = domain.CreateAgentModelInput
+	UpdateAgentModelInput                   = domain.UpdateAgentModelInput
+	CreateAgentDefinitionInput              = domain.CreateAgentDefinitionInput
+	UpdateAgentDefinitionInput              = domain.UpdateAgentDefinitionInput
+	RollbackAgentDefinitionInput            = domain.RollbackAgentDefinitionInput
+	AgentTrialInput                         = domain.AgentTrialInput
 )
 
 // 下列常數定義此模組使用的固定值。
@@ -355,6 +391,8 @@ const (
 	ResourceOutboxEvent               = domain.ResourceOutboxEvent
 	ResourceAssumableRole             = domain.ResourceAssumableRole
 	ResourceTool                      = domain.ResourceTool
+	ResourceDefinition                = domain.ResourceDefinition
+	ResourceModel                     = domain.ResourceModel
 	ResourceEmployeeCollection        = domain.ResourceEmployeeCollection
 	ResourceFormInstance              = domain.ResourceFormInstance
 	ResourceNotification              = domain.ResourceNotification

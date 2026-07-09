@@ -334,6 +334,7 @@ func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (
 		return FormInstance{}, err
 	}
 	if err := c.startTemporalFormApprovalWorkflow(ctx, instance); err != nil {
+		_ = c.markFormApprovalWorkflowStartFailed(ctx, instance, err)
 		return FormInstance{}, err
 	}
 	return instance, nil
@@ -356,6 +357,9 @@ func (c WorkflowService) submitNewForm(ctx RequestContext, templateKey string, p
 			return NotFound("form template", templateKey)
 		}
 		if err := validateWorkflowTemplateSubmittable(nextTemplate); err != nil {
+			return err
+		}
+		if err := validateFormSubmissionPayload(nextTemplate, payload); err != nil {
 			return err
 		}
 		now := tx.Now()
@@ -383,6 +387,9 @@ func (c WorkflowService) submitNewForm(ctx RequestContext, templateKey string, p
 		}
 		return nil
 	}); err != nil {
+		return FormInstance{}, err
+	}
+	if _, err := c.Service.Attendance().createLeaveRequestFromSubmittedForm(ctx, instance, template.Key, instance.Payload); err != nil {
 		return FormInstance{}, err
 	}
 	c.logInfo(ctx, "form submitted",
@@ -429,9 +436,16 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 		if err := validateWorkflowTemplateSubmittable(template); err != nil {
 			return err
 		}
+		effectivePayload := next.Payload
+		if payload != nil {
+			effectivePayload = workflowPayload(payload)
+		}
+		if err := validateFormSubmissionPayload(template, effectivePayload); err != nil {
+			return err
+		}
 		now := tx.Now()
 		if payload != nil {
-			next.Payload = workflowPayload(payload)
+			next.Payload = effectivePayload
 		}
 		next.SubmittedAt = now
 		next.UpdatedAt = now
@@ -456,6 +470,13 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 		return nil
 	}); err != nil {
 		return FormInstance{}, err
+	}
+	if template, ok, err := c.store.GetFormTemplate(goContext(ctx), ctx.TenantID, instance.TemplateID); err != nil {
+		return FormInstance{}, err
+	} else if ok {
+		if _, err := c.Service.Attendance().createLeaveRequestFromSubmittedForm(ctx, instance, template.Key, instance.Payload); err != nil {
+			return FormInstance{}, err
+		}
 	}
 	return instance, nil
 }

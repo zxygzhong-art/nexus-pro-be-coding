@@ -74,6 +74,9 @@ func (c WorkflowService) ActOnWorkflowStage(ctx RequestContext, formInstanceID, 
 	if action == "" {
 		return domain.FormInstance{}, BadRequest("action is required")
 	}
+	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionUpdate, formInstanceID); err != nil {
+		return domain.FormInstance{}, err
+	}
 	instance, run, stageInstance, stages, err := c.loadActiveWorkflowStage(ctx, formInstanceID)
 	if err != nil {
 		return domain.FormInstance{}, err

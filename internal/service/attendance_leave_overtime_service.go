@@ -55,6 +55,15 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 	if input.Hours <= 0 {
 		return LeaveRequest{}, BadRequest("hours must be greater than zero")
 	}
+	policy, err := c.loadAttendancePolicyResponse(ctx)
+	if err != nil {
+		return LeaveRequest{}, err
+	}
+	leaveTypeCode := normalizeLeaveTypeCode(input.LeaveType)
+	leaveType, ok := findLeaveTypeInPolicy(policy, leaveTypeCode)
+	if !ok || !leaveType.Active {
+		return LeaveRequest{}, BadRequest("unknown leave type")
+	}
 	startAt, err := utils.ParseDateTime(input.StartAt)
 	if err != nil {
 		return LeaveRequest{}, BadRequest("start_at must be RFC3339 or YYYY-MM-DD")
@@ -69,9 +78,10 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 	var req LeaveRequest
 	requestID := utils.NewID("lr")
 	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
-		balance, err := tx.reserveLeaveBalance(ctx, employeeID, input.LeaveType, input.Hours)
-		if err != nil {
-			return err
+		if leaveType.RequiresBalance {
+			if _, err := tx.reserveLeaveBalance(ctx, employeeID, leaveTypeCode, input.Hours); err != nil {
+				return err
+			}
 		}
 		template, ok, err := tx.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, "leave-request")
 		if err != nil {
@@ -99,7 +109,7 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 			Payload: map[string]any{
 				"employee_id":          employeeID,
 				"leave_request_id":     requestID,
-				"leave_type":           input.LeaveType,
+				"leave_type":           leaveTypeCode,
 				"linked_resource_id":   requestID,
 				"linked_resource_type": "attendance.leave_request",
 				"start_at":             startAt.Format(time.RFC3339),
@@ -117,7 +127,7 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 			ID:             requestID,
 			TenantID:       ctx.TenantID,
 			EmployeeID:     employeeID,
-			LeaveType:      strings.TrimSpace(input.LeaveType),
+			LeaveType:      leaveTypeCode,
 			StartAt:        startAt,
 			EndAt:          endAt,
 			Hours:          input.Hours,
@@ -129,13 +139,14 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 		if err := tx.store.UpsertLeaveRequest(goContext(ctx), req); err != nil {
 			return err
 		}
-		if err := tx.audit(ctx, "attendance.leave_balance.reserve", "leave_balance", balance.ID, "medium", map[string]any{
-			"employee_id":     employeeID,
-			"leave_type":      balance.LeaveType,
-			"reserved_hours":  input.Hours,
-			"remaining_hours": balance.RemainingHours,
-		}); err != nil {
-			return err
+		if leaveType.RequiresBalance {
+			if err := tx.audit(ctx, "attendance.leave_balance.reserve", "leave_balance", employeeID+"|"+leaveTypeCode, "medium", map[string]any{
+				"employee_id":    employeeID,
+				"leave_type":     leaveTypeCode,
+				"reserved_hours": input.Hours,
+			}); err != nil {
+				return err
+			}
 		}
 		if err := tx.audit(ctx, "attendance.leave_request.create", "leave_request", req.ID, "medium", map[string]any{"leave_type": req.LeaveType, "hours": req.Hours}); err != nil {
 			return err
@@ -212,8 +223,14 @@ func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance
 		return BadRequest("approved leave request cannot be changed by workflow")
 	}
 	if leaveRequestStatusReleasesBalance(previousStatus, nextStatus) {
-		if _, err := c.releaseLeaveBalance(ctx, request.EmployeeID, request.LeaveType, request.Hours); err != nil {
+		policy, err := c.loadAttendancePolicyResponse(ctx)
+		if err != nil {
 			return err
+		}
+		if leaveType, ok := findLeaveTypeInPolicy(policy, request.LeaveType); ok && leaveType.RequiresBalance {
+			if _, err := c.releaseLeaveBalance(ctx, request.EmployeeID, request.LeaveType, request.Hours); err != nil {
+				return err
+			}
 		}
 	}
 	request.Status = nextStatus
@@ -657,7 +674,12 @@ func (c AttendanceService) creditCompensatoryLeaveBalance(ctx RequestContext, em
 	if hours <= 0 {
 		return nil
 	}
-	if _, found, err := c.store.ReleaseLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, compensatoryLeaveType, hours, c.Now()); err != nil {
+	policy, err := c.loadAttendancePolicyResponse(ctx)
+	if err != nil {
+		return err
+	}
+	leaveType := compensatoryLeaveTypeCode(policy)
+	if _, found, err := c.store.ReleaseLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, leaveType, hours, c.Now()); err != nil {
 		return err
 	} else if found {
 		return nil
@@ -666,8 +688,10 @@ func (c AttendanceService) creditCompensatoryLeaveBalance(ctx RequestContext, em
 		ID:             utils.NewID("lb"),
 		TenantID:       ctx.TenantID,
 		EmployeeID:     employeeID,
-		LeaveType:      compensatoryLeaveType,
+		LeaveType:      leaveType,
 		RemainingHours: hours,
+		GrantedHours:   hours,
+		Source:         "overtime",
 		UpdatedAt:      c.Now(),
 	})
 }

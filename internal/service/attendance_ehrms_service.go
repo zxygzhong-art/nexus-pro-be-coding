@@ -11,15 +11,35 @@ import (
 )
 
 const (
-	ehrmsAttendanceFieldEmployeeNo = "員工編號"
-	ehrmsAttendanceFieldDate       = "日期"
-	ehrmsAttendanceFieldShiftStart = "班別開始"
-	ehrmsAttendanceFieldShiftEnd   = "班別結束"
-	ehrmsAttendanceFieldShiftHours = "班別工時"
-	ehrmsAttendanceFieldDailyHours = "應出勤工時"
-	ehrmsAttendanceFieldClockHours = "刷卡工時"
-	ehrmsAttendanceSource          = "ehrms"
-	defaultEHRMSAttendanceSyncWindow = 30 * 24 * time.Hour
+	ehrmsAttendanceFieldEmployeeNo      = "員工編號"
+	ehrmsAttendanceFieldDate            = "日期"
+	ehrmsAttendanceFieldShiftStart      = "班別開始"
+	ehrmsAttendanceFieldShiftEnd        = "班別結束"
+	ehrmsAttendanceFieldShiftHours      = "班別工時"
+	ehrmsAttendanceFieldDailyHours      = "應出勤工時"
+	ehrmsAttendanceFieldClockHours      = "刷卡工時"
+	ehrmsAttendanceFieldClockStart      = "clock_start"
+	ehrmsAttendanceFieldClockEnd        = "clock_end"
+	ehrmsAttendanceFieldAttendStart     = "attend_start"
+	ehrmsAttendanceFieldAttendEnd       = "attend_end"
+	ehrmsAttendanceFieldAttendHours     = "attend_hours"
+	ehrmsAttendanceFieldAttendCounted   = "attend_counted"
+	ehrmsAttendanceFieldLeaveType       = "leave_type"
+	ehrmsAttendanceFieldLeaveStart      = "leave_start"
+	ehrmsAttendanceFieldLeaveEnd        = "leave_end"
+	ehrmsAttendanceFieldLeaveHours      = "leave_hours"
+	ehrmsAttendanceFieldLeaveCounted    = "leave_counted"
+	ehrmsAttendanceFieldLeave2Type      = "leave2_type"
+	ehrmsAttendanceFieldLeave2Start     = "leave2_start"
+	ehrmsAttendanceFieldLeave2End       = "leave2_end"
+	ehrmsAttendanceFieldLeave2Hours     = "leave2_hours"
+	ehrmsAttendanceFieldLeave2Counted   = "leave2_counted"
+	ehrmsAttendanceFieldOvertimeStart   = "overtime_start"
+	ehrmsAttendanceFieldOvertimeEnd     = "overtime_end"
+	ehrmsAttendanceFieldOvertimeHours   = "overtime_hours"
+	ehrmsAttendanceFieldOvertimeCounted = "overtime_counted"
+	ehrmsAttendanceSource               = "ehrms"
+	defaultEHRMSAttendanceSyncWindow    = 30 * 24 * time.Hour
 )
 
 // SyncEHRMSAttendance 同步 eHRMS 考勤日彙總。
@@ -180,20 +200,55 @@ func (c AttendanceService) ehrmsAttendanceSummaryCandidate(ctx RequestContext, r
 	if !ok {
 		errors = append(errors, RowError{Row: rowNumber, Field: "clock_hours", Code: "invalid", Message: "clock_hours must be a number"})
 	}
+	clockStart := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldClockStart, rowNumber, &errors)
+	clockEnd := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldClockEnd, rowNumber, &errors)
+	attendStart := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldAttendStart, rowNumber, &errors)
+	attendEnd := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldAttendEnd, rowNumber, &errors)
+	leaveStart := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldLeaveStart, rowNumber, &errors)
+	leaveEnd := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldLeaveEnd, rowNumber, &errors)
+	leave2Start := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldLeave2Start, rowNumber, &errors)
+	leave2End := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldLeave2End, rowNumber, &errors)
+	overtimeStart := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldOvertimeStart, rowNumber, &errors)
+	overtimeEnd := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldOvertimeEnd, rowNumber, &errors)
+	attendHours := ehrmsAttendanceHoursField(record, ehrmsAttendanceFieldAttendHours, rowNumber, &errors)
+	leaveHours := ehrmsAttendanceHoursField(record, ehrmsAttendanceFieldLeaveHours, rowNumber, &errors)
+	leave2Hours := ehrmsAttendanceHoursField(record, ehrmsAttendanceFieldLeave2Hours, rowNumber, &errors)
+	overtimeHours := ehrmsAttendanceHoursField(record, ehrmsAttendanceFieldOvertimeHours, rowNumber, &errors)
 	now := c.Now()
 	return AttendanceDailySummary{
-		ID:          utils.NewID("ads"),
-		TenantID:    ctx.TenantID,
-		WorkDate:    workDate,
-		ShiftStart:  shiftStart,
-		ShiftEnd:    shiftEnd,
-		ShiftHours:  shiftHours,
-		DailyHours:  dailyHours,
-		ClockHours:  clockHours,
-		Source:      ehrmsAttendanceSource,
-		ExternalRef: fmt.Sprintf("%s:%s", employeeNo, workDate),
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:              utils.NewID("ads"),
+		TenantID:        ctx.TenantID,
+		WorkDate:        workDate,
+		ShiftStart:      shiftStart,
+		ShiftEnd:        shiftEnd,
+		ShiftHours:      shiftHours,
+		DailyHours:      dailyHours,
+		ClockHours:      clockHours,
+		ClockStart:      clockStart,
+		ClockEnd:        clockEnd,
+		AttendStart:     attendStart,
+		AttendEnd:       attendEnd,
+		AttendHours:     attendHours,
+		AttendCounted:   ehrmsAttendanceBoolValue(record, ehrmsAttendanceFieldAttendCounted),
+		LeaveType:       ehrmsAttendanceValue(record, ehrmsAttendanceFieldLeaveType),
+		LeaveStart:      leaveStart,
+		LeaveEnd:        leaveEnd,
+		LeaveHours:      leaveHours,
+		LeaveCounted:    ehrmsAttendanceBoolValue(record, ehrmsAttendanceFieldLeaveCounted),
+		Leave2Type:      ehrmsAttendanceValue(record, ehrmsAttendanceFieldLeave2Type),
+		Leave2Start:     leave2Start,
+		Leave2End:       leave2End,
+		Leave2Hours:     leave2Hours,
+		Leave2Counted:   ehrmsAttendanceBoolValue(record, ehrmsAttendanceFieldLeave2Counted),
+		OvertimeStart:   overtimeStart,
+		OvertimeEnd:     overtimeEnd,
+		OvertimeHours:   overtimeHours,
+		OvertimeCounted: ehrmsAttendanceBoolValue(record, ehrmsAttendanceFieldOvertimeCounted),
+		Payload:         ehrmsAttendancePayload(record),
+		Source:          ehrmsAttendanceSource,
+		ExternalRef:     fmt.Sprintf("%s:%s", employeeNo, workDate),
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}, employeeNo, errors
 }
 
@@ -259,7 +314,7 @@ func normalizeEHRMSAttendanceTime(value string) string {
 	if value == "" {
 		return ""
 	}
-	for _, layout := range []string{"15:04", "15:04:05"} {
+	for _, layout := range []string{"15:04", "15:04:05", "2006-01-02 15:04", "2006-01-02 15:04:05"} {
 		if parsed, err := time.Parse(layout, value); err == nil {
 			return parsed.Format("15:04")
 		}
@@ -277,6 +332,43 @@ func parseEHRMSAttendanceHours(value string) (float64, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+func ehrmsAttendanceTimeField(record domain.EHRMSAttendanceRecord, key string, rowNumber int, errors *[]RowError) string {
+	raw := ehrmsAttendanceValue(record, key)
+	value := normalizeEHRMSAttendanceTime(raw)
+	if raw != "" && value == "" {
+		*errors = append(*errors, RowError{Row: rowNumber, Field: key, Code: "invalid", Message: key + " must be HH:MM"})
+	}
+	return value
+}
+
+func ehrmsAttendanceHoursField(record domain.EHRMSAttendanceRecord, key string, rowNumber int, errors *[]RowError) float64 {
+	value, ok := parseEHRMSAttendanceHours(ehrmsAttendanceValue(record, key))
+	if !ok {
+		*errors = append(*errors, RowError{Row: rowNumber, Field: key, Code: "invalid", Message: key + " must be a number"})
+	}
+	return value
+}
+
+func ehrmsAttendanceBoolValue(record domain.EHRMSAttendanceRecord, key string) bool {
+	switch strings.ToLower(strings.TrimSpace(ehrmsAttendanceValue(record, key))) {
+	case "v", "true", "1", "是":
+		return true
+	default:
+		return false
+	}
+}
+
+func ehrmsAttendancePayload(record domain.EHRMSAttendanceRecord) map[string]any {
+	if len(record) == 0 {
+		return map[string]any{}
+	}
+	out := make(map[string]any, len(record))
+	for key, value := range record {
+		out[key] = normalizeEHRMSPlaceholder(value)
+	}
+	return out
 }
 
 func ehrmsAttendanceValue(record domain.EHRMSAttendanceRecord, key string) string {
@@ -301,6 +393,46 @@ func ehrmsAttendanceValue(record domain.EHRMSAttendanceRecord, key string) strin
 		return strings.TrimSpace(record["daily_hours"])
 	case ehrmsAttendanceFieldClockHours:
 		return strings.TrimSpace(record["clock_hours"])
+	case ehrmsAttendanceFieldClockStart:
+		return strings.TrimSpace(record["clock_start"])
+	case ehrmsAttendanceFieldClockEnd:
+		return strings.TrimSpace(record["clock_end"])
+	case ehrmsAttendanceFieldAttendStart:
+		return strings.TrimSpace(record["attend_start"])
+	case ehrmsAttendanceFieldAttendEnd:
+		return strings.TrimSpace(record["attend_end"])
+	case ehrmsAttendanceFieldAttendHours:
+		return strings.TrimSpace(record["attend_hours"])
+	case ehrmsAttendanceFieldAttendCounted:
+		return strings.TrimSpace(record["attend_counted"])
+	case ehrmsAttendanceFieldLeaveType:
+		return strings.TrimSpace(record["leave_type"])
+	case ehrmsAttendanceFieldLeaveStart:
+		return strings.TrimSpace(record["leave_start"])
+	case ehrmsAttendanceFieldLeaveEnd:
+		return strings.TrimSpace(record["leave_end"])
+	case ehrmsAttendanceFieldLeaveHours:
+		return strings.TrimSpace(record["leave_hours"])
+	case ehrmsAttendanceFieldLeaveCounted:
+		return strings.TrimSpace(record["leave_counted"])
+	case ehrmsAttendanceFieldLeave2Type:
+		return strings.TrimSpace(record["leave2_type"])
+	case ehrmsAttendanceFieldLeave2Start:
+		return strings.TrimSpace(record["leave2_start"])
+	case ehrmsAttendanceFieldLeave2End:
+		return strings.TrimSpace(record["leave2_end"])
+	case ehrmsAttendanceFieldLeave2Hours:
+		return strings.TrimSpace(record["leave2_hours"])
+	case ehrmsAttendanceFieldLeave2Counted:
+		return strings.TrimSpace(record["leave2_counted"])
+	case ehrmsAttendanceFieldOvertimeStart:
+		return strings.TrimSpace(record["overtime_start"])
+	case ehrmsAttendanceFieldOvertimeEnd:
+		return strings.TrimSpace(record["overtime_end"])
+	case ehrmsAttendanceFieldOvertimeHours:
+		return strings.TrimSpace(record["overtime_hours"])
+	case ehrmsAttendanceFieldOvertimeCounted:
+		return strings.TrimSpace(record["overtime_counted"])
 	default:
 		return ""
 	}

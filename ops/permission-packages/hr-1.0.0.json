@@ -11,10 +11,31 @@
       ]
     },
     {
+      "application_code": "agent",
+      "resource_type": "model",
+      "actions": [
+        "create",
+        "delete",
+        "read",
+        "update"
+      ]
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "definition",
+      "actions": [
+        "create",
+        "delete",
+        "read",
+        "update"
+      ]
+    },
+    {
       "application_code": "attendance",
       "resource_type": "clock",
       "actions": [
         "create",
+        "import",
         "read"
       ]
     },
@@ -115,6 +136,13 @@
     },
     {
       "application_code": "iam",
+      "resource_type": "account",
+      "actions": [
+        "read"
+      ]
+    },
+    {
+      "application_code": "iam",
       "resource_type": "application",
       "actions": [
         "read"
@@ -188,7 +216,8 @@
       "resource_type": "permission_set",
       "actions": [
         "create",
-        "read"
+        "read",
+        "update"
       ]
     },
     {
@@ -196,6 +225,7 @@
       "resource_type": "permission_set_assignment",
       "actions": [
         "create",
+        "delete",
         "read"
       ]
     },
@@ -460,6 +490,19 @@
     },
     {
       "application_code": "iam",
+      "resource_type": "permission_set",
+      "resource": "iam.permission_set",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "account",
+      "resource": "iam.account",
+      "action": "read"
+    },
+    {
+      "application_code": "iam",
       "resource_type": "permission_set_assignment",
       "resource": "iam.permission_set_assignment",
       "action": "read"
@@ -469,6 +512,13 @@
       "resource_type": "permission_set_assignment",
       "resource": "iam.permission_set_assignment",
       "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "iam",
+      "resource_type": "permission_set_assignment",
+      "resource": "iam.permission_set_assignment",
+      "action": "delete",
       "risk_level": "high"
     },
     {
@@ -880,6 +930,13 @@
       "resource_type": "clock",
       "resource": "attendance.clock",
       "action": "create"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "clock",
+      "resource": "attendance.clock",
+      "action": "import",
+      "risk_level": "high"
     },
     {
       "application_code": "attendance",
@@ -1186,6 +1243,60 @@
       "risk_level": "high"
     },
     {
+      "application_code": "agent",
+      "resource_type": "model",
+      "resource": "agent.model",
+      "action": "read"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "model",
+      "resource": "agent.model",
+      "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "model",
+      "resource": "agent.model",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "model",
+      "resource": "agent.model",
+      "action": "delete",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "definition",
+      "resource": "agent.definition",
+      "action": "read"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "definition",
+      "resource": "agent.definition",
+      "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "definition",
+      "resource": "agent.definition",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "definition",
+      "resource": "agent.definition",
+      "action": "delete",
+      "risk_level": "high"
+    },
+    {
       "application_code": "audit",
       "resource_type": "audit_log",
       "resource": "audit.audit_log",
@@ -1210,9 +1321,21 @@
         },
         {
           "key": "hr.org_units",
-          "label": "組織",
-          "path": "/workspace/organization",
+          "label": "組織單元",
+          "path": "/workspace/org-units",
           "sort_order": 1
+        },
+        {
+          "key": "hr.positions",
+          "label": "崗位",
+          "path": "/workspace/positions",
+          "sort_order": 2
+        },
+        {
+          "key": "hr.reporting",
+          "label": "匯報關係",
+          "path": "/workspace/organization",
+          "sort_order": 3
         },
         {
           "key": "attendance",
@@ -1255,7 +1378,7 @@
               "sort_order": 5
             }
           ],
-          "sort_order": 2
+          "sort_order": 4
         }
       ],
       "sort_order": 1
@@ -1374,6 +1497,41 @@
           "action": "create",
           "scope": "self",
           "menu_key": "attendance.leave"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "knowledge.search",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "get_my_profile",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "my_leave_balances",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "my_clock_records",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "my_pending_reviews",
+          "scope": "all",
+          "menu_key": "agents.runs"
         }
       ]
     },
@@ -1459,6 +1617,62 @@
           "action": "read",
           "scope": "all",
           "menu_key": "iam.permission_sets"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "knowledge.search",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "get_my_profile",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "list_employees",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "get_employee",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "my_leave_balances",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "my_clock_records",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "my_pending_reviews",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "workspace_insights",
+          "scope": "all",
+          "menu_key": "agents.runs"
         }
       ]
     },

@@ -12,6 +12,13 @@ type LeaveBalance struct {
 	EmployeeID     string    `json:"employee_id"`
 	LeaveType      string    `json:"leave_type"`
 	RemainingHours float64   `json:"remaining_hours"`
+	PeriodStart    string    `json:"period_start,omitempty"`
+	PeriodEnd      string    `json:"period_end,omitempty"`
+	GrantedHours   float64   `json:"granted_hours,omitempty"`
+	UsedHours      float64   `json:"used_hours,omitempty"`
+	Source         string    `json:"source,omitempty"`
+	PolicyVersion  int       `json:"policy_version,omitempty"`
+	ProrateRatio   *float64  `json:"prorate_ratio,omitempty"`
 	UpdatedAt      time.Time `json:"updated_at"`
 }
 
@@ -155,19 +162,40 @@ type AttendanceClockRecord struct {
 
 // AttendanceDailySummary 定義考勤日彙總的資料結構。
 type AttendanceDailySummary struct {
-	ID          string    `json:"id"`
-	TenantID    string    `json:"tenant_id"`
-	EmployeeID  string    `json:"employee_id"`
-	WorkDate    string    `json:"work_date"`
-	ShiftStart  string    `json:"shift_start,omitempty"`
-	ShiftEnd    string    `json:"shift_end,omitempty"`
-	ShiftHours  float64   `json:"shift_hours,omitempty"`
-	DailyHours  float64   `json:"daily_hours,omitempty"`
-	ClockHours  float64   `json:"clock_hours,omitempty"`
-	Source      string    `json:"source"`
-	ExternalRef string    `json:"external_ref"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID              string         `json:"id"`
+	TenantID        string         `json:"tenant_id"`
+	EmployeeID      string         `json:"employee_id"`
+	WorkDate        string         `json:"work_date"`
+	ShiftStart      string         `json:"shift_start,omitempty"`
+	ShiftEnd        string         `json:"shift_end,omitempty"`
+	ShiftHours      float64        `json:"shift_hours,omitempty"`
+	DailyHours      float64        `json:"daily_hours,omitempty"`
+	ClockHours      float64        `json:"clock_hours,omitempty"`
+	ClockStart      string         `json:"clock_start,omitempty"`
+	ClockEnd        string         `json:"clock_end,omitempty"`
+	AttendStart     string         `json:"attend_start,omitempty"`
+	AttendEnd       string         `json:"attend_end,omitempty"`
+	AttendHours     float64        `json:"attend_hours,omitempty"`
+	AttendCounted   bool           `json:"attend_counted,omitempty"`
+	LeaveType       string         `json:"leave_type,omitempty"`
+	LeaveStart      string         `json:"leave_start,omitempty"`
+	LeaveEnd        string         `json:"leave_end,omitempty"`
+	LeaveHours      float64        `json:"leave_hours,omitempty"`
+	LeaveCounted    bool           `json:"leave_counted,omitempty"`
+	Leave2Type      string         `json:"leave2_type,omitempty"`
+	Leave2Start     string         `json:"leave2_start,omitempty"`
+	Leave2End       string         `json:"leave2_end,omitempty"`
+	Leave2Hours     float64        `json:"leave2_hours,omitempty"`
+	Leave2Counted   bool           `json:"leave2_counted,omitempty"`
+	OvertimeStart   string         `json:"overtime_start,omitempty"`
+	OvertimeEnd     string         `json:"overtime_end,omitempty"`
+	OvertimeHours   float64        `json:"overtime_hours,omitempty"`
+	OvertimeCounted bool           `json:"overtime_counted,omitempty"`
+	Payload         map[string]any `json:"payload,omitempty"`
+	Source          string         `json:"source"`
+	ExternalRef     string         `json:"external_ref"`
+	CreatedAt       time.Time      `json:"created_at"`
+	UpdatedAt       time.Time      `json:"updated_at"`
 }
 
 // AttendanceCorrectionRequest 定義考勤 correction 請求的資料結構。
@@ -205,6 +233,7 @@ type AttendanceClockStatus struct {
 type AttendancePolicyResponse struct {
 	WorkTime   AttendancePolicyWorkTime `json:"work_time"`
 	LeaveTypes []AttendanceLeaveType    `json:"leave_types"`
+	Version    int                      `json:"version,omitempty"`
 }
 
 // AttendancePolicy 定義考勤政策的資料結構。
@@ -213,6 +242,8 @@ type AttendancePolicy struct {
 	TenantID           string                   `json:"tenant_id"`
 	WorkTime           AttendancePolicyWorkTime `json:"work_time"`
 	LeaveTypes         []AttendanceLeaveType    `json:"leave_types"`
+	Version            int                      `json:"version,omitempty"`
+	EffectiveFrom      *time.Time               `json:"effective_from,omitempty"`
 	UpdatedByAccountID string                   `json:"updated_by_account_id,omitempty"`
 	CreatedAt          time.Time                `json:"created_at"`
 	UpdatedAt          time.Time                `json:"updated_at"`
@@ -233,19 +264,63 @@ type AttendancePolicyWorkTime struct {
 	CycleEndOptions   []string `json:"cycle_end_options"`
 }
 
+// Leave grant modes.
+const (
+	LeaveGrantModeAnnualGrant    = "annual_grant"
+	LeaveGrantModeEvent          = "event"
+	LeaveGrantModeOvertimeCredit = "overtime_credit"
+	LeaveGrantModeUnlimited      = "unlimited"
+)
+
+// LeaveEntitlementRule 定義假別額度檔位規則。
+type LeaveEntitlementRule struct {
+	JobLevel       string `json:"job_level"`
+	TenureMinYears int    `json:"tenure_min_years"`
+	TenureMaxYears *int   `json:"tenure_max_years,omitempty"`
+	QuotaHours     float64 `json:"quota_hours"`
+	Prorate        bool    `json:"prorate"`
+	Priority       int     `json:"priority"`
+}
+
 // AttendanceLeaveType 定義考勤請假 type 的資料結構。
 type AttendanceLeaveType struct {
-	Code  string `json:"code"`
-	Name  string `json:"name"`
-	Quota string `json:"quota"`
-	Rule  string `json:"rule"`
-	Proof string `json:"proof"`
+	Code            string                 `json:"code"`
+	Name            string                 `json:"name"`
+	Quota           string                 `json:"quota"`
+	Rule            string                 `json:"rule"`
+	Proof           string                 `json:"proof"`
+	Unit            string                 `json:"unit,omitempty"`
+	GrantMode       string                 `json:"grant_mode,omitempty"`
+	RequiresBalance bool                   `json:"requires_balance"`
+	PaidRatio       float64                `json:"paid_ratio,omitempty"`
+	ProofAfterHours *float64               `json:"proof_after_hours,omitempty"`
+	Active          bool                   `json:"active"`
+	Entitlements    []LeaveEntitlementRule `json:"entitlements,omitempty"`
 }
 
 // UpdateAttendancePolicyInput 定義考勤政策輸入的資料結構。
 type UpdateAttendancePolicyInput struct {
 	WorkTime   AttendancePolicyWorkTime `json:"work_time"`
 	LeaveTypes []AttendanceLeaveType    `json:"leave_types"`
+}
+
+// GrantLeaveBalancesInput 定義發放請假餘額輸入。
+type GrantLeaveBalancesInput struct {
+	EmployeeID  string `json:"employee_id,omitempty"`
+	PeriodStart string `json:"period_start,omitempty"`
+	PeriodEnd   string `json:"period_end,omitempty"`
+}
+
+// GrantLeaveBalancesResult 定義發放請假餘額結果。
+type GrantLeaveBalancesResult struct {
+	Granted   int        `json:"granted"`
+	Updated   int        `json:"updated"`
+	Skipped   int        `json:"skipped"`
+	Failed    int        `json:"failed"`
+	PeriodStart string   `json:"period_start"`
+	PeriodEnd   string   `json:"period_end"`
+	PolicyVersion int    `json:"policy_version"`
+	RowErrors []RowError `json:"row_errors,omitempty"`
 }
 
 // Validate 驗證目前流程。

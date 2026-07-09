@@ -83,6 +83,11 @@ SELECT * FROM user_groups
 WHERE tenant_id = $1
 ORDER BY created_at ASC;
 
+-- name: DeleteUserGroup :one
+DELETE FROM user_groups
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
 -- name: UpsertGroupMembership :one
 INSERT INTO authz_group_memberships (
     id, tenant_id, user_group_id, account_id, valid_from, valid_until,
@@ -147,6 +152,11 @@ SELECT * FROM permission_sets
 WHERE tenant_id = $1
 ORDER BY created_at ASC;
 
+-- name: DeletePermissionSet :one
+DELETE FROM permission_sets
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
 -- name: UpsertAssumableRole :one
 INSERT INTO assumable_roles (
     id, tenant_id, name, description, permission_set_ids, trusted,
@@ -177,19 +187,29 @@ SELECT * FROM assumable_roles
 WHERE tenant_id = $1
 ORDER BY created_at ASC;
 
+-- name: DeleteAssumableRole :one
+DELETE FROM assumable_roles
+WHERE tenant_id = $1 AND id = $2
+RETURNING *;
+
 -- name: UpsertOrgUnit :one
 INSERT INTO org_units (
-    id, tenant_id, code, name, parent_id, path, created_at
+    id, tenant_id, code, name, name_en, parent_id, path, manager_position_id, source, closed, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
     code = EXCLUDED.code,
     name = EXCLUDED.name,
+    name_en = EXCLUDED.name_en,
     parent_id = EXCLUDED.parent_id,
     path = EXCLUDED.path,
-    created_at = EXCLUDED.created_at
+    manager_position_id = EXCLUDED.manager_position_id,
+    source = EXCLUDED.source,
+    closed = EXCLUDED.closed,
+    created_at = EXCLUDED.created_at,
+    updated_at = EXCLUDED.updated_at
 RETURNING *;
 
 -- name: GetOrgUnit :one
@@ -438,6 +458,25 @@ SELECT * FROM outbox_events
 WHERE tenant_id = $1
 ORDER BY created_at ASC, id ASC;
 
+-- name: ClaimOutboxEvents :many
+-- Atomically claim a batch of dispatchable outbox rows for multi-replica workers.
+UPDATE outbox_events AS claimed
+SET status = 'processing',
+    last_error = '',
+    processed_at = NULL
+WHERE claimed.tenant_id = sqlc.arg(tenant_id)
+  AND claimed.id IN (
+    SELECT candidate.id
+    FROM outbox_events AS candidate
+    WHERE candidate.tenant_id = sqlc.arg(tenant_id)
+      AND candidate.status IN ('pending', 'failed')
+      AND candidate.retry_count < sqlc.arg(max_retries)
+    ORDER BY candidate.created_at ASC, candidate.id ASC
+    FOR UPDATE SKIP LOCKED
+    LIMIT sqlc.arg(batch_limit)
+  )
+RETURNING claimed.*;
+
 -- name: UpdateOutboxEvent :one
 UPDATE outbox_events
 SET status = $3,
@@ -450,16 +489,19 @@ RETURNING *;
 
 -- name: UpsertAttendancePolicy :one
 INSERT INTO attendance_policies (
-    id, tenant_id, work_time, leave_types, updated_by_account_id, created_at, updated_at
+    id, tenant_id, work_time, leave_types, version, effective_from, updated_by_account_id, created_at, updated_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(work_time)::jsonb,
-    sqlc.arg(leave_types)::jsonb, sqlc.arg(updated_by_account_id),
+    sqlc.arg(leave_types)::jsonb, sqlc.arg(version), sqlc.narg(effective_from),
+    sqlc.arg(updated_by_account_id),
     sqlc.arg(created_at), sqlc.arg(updated_at)
 )
 ON CONFLICT (tenant_id) DO UPDATE SET
     id = EXCLUDED.id,
     work_time = EXCLUDED.work_time,
     leave_types = EXCLUDED.leave_types,
+    version = EXCLUDED.version,
+    effective_from = EXCLUDED.effective_from,
     updated_by_account_id = EXCLUDED.updated_by_account_id,
     updated_at = EXCLUDED.updated_at
 RETURNING *;
@@ -470,15 +512,26 @@ WHERE tenant_id = sqlc.arg(tenant_id);
 
 -- name: UpsertLeaveBalance :one
 INSERT INTO leave_balances (
-    id, tenant_id, employee_id, leave_type, remaining_hours, updated_at
+    id, tenant_id, employee_id, leave_type, remaining_hours,
+    period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio,
+    updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9, $10, $11, $12,
+    $13
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
     employee_id = EXCLUDED.employee_id,
     leave_type = EXCLUDED.leave_type,
     remaining_hours = EXCLUDED.remaining_hours,
+    period_start = EXCLUDED.period_start,
+    period_end = EXCLUDED.period_end,
+    granted_hours = EXCLUDED.granted_hours,
+    used_hours = EXCLUDED.used_hours,
+    source = EXCLUDED.source,
+    policy_version = EXCLUDED.policy_version,
+    prorate_ratio = EXCLUDED.prorate_ratio,
     updated_at = EXCLUDED.updated_at
 RETURNING *;
 
@@ -494,6 +547,7 @@ ORDER BY updated_at ASC;
 -- name: ReserveLeaveBalance :one
 UPDATE leave_balances
 SET remaining_hours = remaining_hours - sqlc.arg(hours)::double precision,
+    used_hours = used_hours + sqlc.arg(hours)::double precision,
     updated_at = sqlc.arg(updated_at)::timestamptz
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND employee_id = sqlc.arg(employee_id)
@@ -504,6 +558,7 @@ RETURNING *;
 -- name: ReleaseLeaveBalance :one
 UPDATE leave_balances
 SET remaining_hours = remaining_hours + sqlc.arg(hours)::double precision,
+    used_hours = GREATEST(0, used_hours - sqlc.arg(hours)::double precision),
     updated_at = sqlc.arg(updated_at)::timestamptz
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND employee_id = sqlc.arg(employee_id)
@@ -923,9 +978,15 @@ ORDER BY clocked_at DESC, created_at DESC, id ASC;
 -- name: UpsertAttendanceDailySummary :one
 INSERT INTO attendance_daily_summaries (
     id, tenant_id, employee_id, work_date, shift_start, shift_end,
-    shift_hours, daily_hours, clock_hours, source, external_ref, created_at, updated_at
+    shift_hours, daily_hours, clock_hours, clock_start, clock_end, attend_start,
+    attend_end, attend_hours, attend_counted, leave_type, leave_start, leave_end,
+    leave_hours, leave_counted, leave2_type, leave2_start, leave2_end, leave2_hours,
+    leave2_counted, overtime_start, overtime_end, overtime_hours, overtime_counted,
+    payload, source, external_ref, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+    $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
+    $25, $26, $27, $28, $29, $30::jsonb, $31, $32, $33, $34
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -936,6 +997,27 @@ ON CONFLICT (id) DO UPDATE SET
     shift_hours = EXCLUDED.shift_hours,
     daily_hours = EXCLUDED.daily_hours,
     clock_hours = EXCLUDED.clock_hours,
+    clock_start = EXCLUDED.clock_start,
+    clock_end = EXCLUDED.clock_end,
+    attend_start = EXCLUDED.attend_start,
+    attend_end = EXCLUDED.attend_end,
+    attend_hours = EXCLUDED.attend_hours,
+    attend_counted = EXCLUDED.attend_counted,
+    leave_type = EXCLUDED.leave_type,
+    leave_start = EXCLUDED.leave_start,
+    leave_end = EXCLUDED.leave_end,
+    leave_hours = EXCLUDED.leave_hours,
+    leave_counted = EXCLUDED.leave_counted,
+    leave2_type = EXCLUDED.leave2_type,
+    leave2_start = EXCLUDED.leave2_start,
+    leave2_end = EXCLUDED.leave2_end,
+    leave2_hours = EXCLUDED.leave2_hours,
+    leave2_counted = EXCLUDED.leave2_counted,
+    overtime_start = EXCLUDED.overtime_start,
+    overtime_end = EXCLUDED.overtime_end,
+    overtime_hours = EXCLUDED.overtime_hours,
+    overtime_counted = EXCLUDED.overtime_counted,
+    payload = EXCLUDED.payload,
     source = EXCLUDED.source,
     external_ref = EXCLUDED.external_ref,
     updated_at = EXCLUDED.updated_at
@@ -1120,14 +1202,16 @@ WHERE tenant_id = sqlc.arg(tenant_id)
 
 -- name: UpsertAgentRun :one
 INSERT INTO agent_runs (
-    id, tenant_id, account_id, mode, prompt, answer,
+    id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer,
     status, reference_items, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
     account_id = EXCLUDED.account_id,
+    agent_id = EXCLUDED.agent_id,
+    session_id = EXCLUDED.session_id,
     mode = EXCLUDED.mode,
     prompt = EXCLUDED.prompt,
     answer = EXCLUDED.answer,

@@ -307,7 +307,7 @@ func assertTenantProvisionIdentityAvailable(ctx context.Context, store repositor
 
 // tenantProvisionAdminPermissions 回傳首管理員可見選單與全域操作權限。
 func tenantProvisionAdminPermissions() []domain.Permission {
-	return []domain.Permission{
+	permissions := []domain.Permission{
 		{Resource: "*", Action: "*", Scope: domain.ScopeAll, MenuKey: "workbench"},
 		{Resource: "me", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "workbench"},
 		{Resource: "me", Action: domain.ActionCreate, Scope: domain.ScopeAll, MenuKey: "workbench"},
@@ -373,10 +373,21 @@ func tenantProvisionAdminPermissions() []domain.Permission {
 		{Resource: "iam.assumable_role", Action: domain.ActionAssume, Target: "*", Scope: domain.ScopeAll, MenuKey: "iam.assumable_roles"},
 		{Resource: "agent.run", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
 		{Resource: "agent.run", Action: domain.ActionCreate, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
-		{Resource: "agent.tool", Action: domain.ActionCall, Target: "knowledge.search", Scope: domain.ScopeAll, MenuKey: "agents.runs"},
+		{Resource: "agent.model", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
+		{Resource: "agent.model", Action: domain.ActionCreate, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
+		{Resource: "agent.model", Action: domain.ActionUpdate, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
+		{Resource: "agent.model", Action: domain.ActionDelete, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
+		{Resource: "agent.definition", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
+		{Resource: "agent.definition", Action: domain.ActionCreate, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
+		{Resource: "agent.definition", Action: domain.ActionUpdate, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
+		{Resource: "agent.definition", Action: domain.ActionDelete, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
 		{Resource: "audit.log", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "audit"},
 		{Resource: "audit.audit_log", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "audit"},
 	}
+	for _, toolID := range defaultAgentToolIDs() {
+		permissions = append(permissions, domain.Permission{Resource: "agent.tool", Action: domain.ActionCall, Target: toolID, Scope: domain.ScopeAll, MenuKey: "agents.runs"})
+	}
+	return permissions
 }
 
 // defaultTenantProvisionAdminName 從 email 推導預設管理員名稱。

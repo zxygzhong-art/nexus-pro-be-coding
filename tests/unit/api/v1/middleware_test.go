@@ -183,6 +183,22 @@ func TestRateLimitFailsOpenWhenLimiterErrors(t *testing.T) {
 	}
 }
 
+// TestRateLimitFailsClosedWhenConfigured 驗證 RATE_LIMIT_FAIL_CLOSED 時限流器錯誤拒絕請求。
+func TestRateLimitFailsClosedWhenConfigured(t *testing.T) {
+	handler := newMiddlewareTestAPI(v1api.Options{
+		RateLimiter:         failingRateLimiter{},
+		RateLimitFailClosed: true,
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected limiter failure to fail closed with 503, got %d", rec.Code)
+	}
+}
+
 // TestMetricsEndpointExposesRequestMetrics 驗證指標 endpoint exposes 請求指標。
 func TestMetricsEndpointExposesRequestMetrics(t *testing.T) {
 	api := v1api.New(service.New(memory.NewStore()), nil, v1api.Options{})

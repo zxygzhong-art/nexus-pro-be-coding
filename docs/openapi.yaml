@@ -1239,6 +1239,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UserGroupDataResponse"
+    delete:
+      summary: Delete user group
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Deleted user group
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserGroupDataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
   /v1/iam/user-groups/{id}/members:
     get:
       summary: List user group members
@@ -1321,6 +1338,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+    delete:
+      summary: Delete permission set
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Deleted permission set
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
   /v1/iam/accounts:
     get:
       summary: List IAM accounts
@@ -1612,6 +1646,40 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+  /v1/iam/assumable-roles/{id}:
+    patch:
+      summary: Update assumable role
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Updated assumable role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      summary: Delete assumable role
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Deleted assumable role
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
   /v1/iam/assumable-roles/{id}/assume:
     post:
       summary: Assume a role
@@ -1643,6 +1711,22 @@ paths:
       responses:
         "201":
           description: Created organization unit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+  /v1/org/units/{id}:
+    patch:
+      summary: Update organization unit
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Updated organization unit
           content:
             application/json:
               schema:
@@ -1736,6 +1820,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AttendancePolicyDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/attendance/leave-balances/grant:
+    post:
+      summary: Grant leave balances from attendance policy entitlements
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GrantLeaveBalancesRequest"
+      responses:
+        "200":
+          description: Leave balance grant result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/GrantLeaveBalancesDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -2231,6 +2335,253 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agent-models:
+    get:
+      summary: List workspace agent models
+      responses:
+        "200":
+          description: Agent model list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      summary: Create workspace agent model
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        "201":
+          description: Created agent model
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agent-models/{id}:
+    patch:
+      summary: Update workspace agent model
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        "200":
+          description: Updated agent model
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      summary: Delete workspace agent model
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Deleted agent model
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agent-models/{id}/test:
+    post:
+      summary: Test workspace agent model connection
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Tested agent model
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agents:
+    get:
+      summary: List workspace agents
+      responses:
+        "200":
+          description: Agent definition list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      summary: Create workspace agent
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        "201":
+          description: Created agent definition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agents/{id}:
+    patch:
+      summary: Update workspace agent
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        "200":
+          description: Updated agent definition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    delete:
+      summary: Delete workspace agent
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Deleted agent definition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agents/{id}/trial:
+    post:
+      summary: Trial workspace agent
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        "200":
+          description: Agent trial result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agents/{id}/rollback:
+    post:
+      summary: Roll back workspace agent to a previous version
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        "200":
+          description: Rolled-back agent definition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agents/templates:
+    get:
+      summary: List workspace agent templates
+      responses:
+        "200":
+          description: Agent templates
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agents/tools:
+    get:
+      summary: List workspace agent tools
+      responses:
+        "200":
+          description: Agent tools
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agents/audits:
+    get:
+      summary: List workspace agent audits
+      responses:
+        "200":
+          description: Agent audits
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agents/bundle:
+    get:
+      summary: Export workspace agent bundle
+      responses:
+        "200":
+          description: Agent bundle
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      summary: Import workspace agent bundle
+      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      responses:
+        "201":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/workspace/employees:
     get:
       summary: Get workspace employee table
@@ -2662,6 +3013,173 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+  /v1/agents/chat:
+    post:
+      summary: Stream agent chat
+      description: Streams a single assistant chat turn as server-sent events. Disabled deployments return 503 with reason_code `agent_chat_disabled`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [message]
+              properties:
+                agent_id: {type: string, description: Optional published workspace Agent definition to bind this turn}
+                session_id: {type: string}
+                message: {type: string}
+                mode:
+                  type: string
+                  default: assistant_chat
+      responses:
+        "200":
+          description: SSE stream with session, message_delta, tool_call, tool_result, analysis_result, done, and error events.
+          content:
+            text/event-stream:
+              schema:
+                type: string
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "503":
+          description: Agent chat is disabled or not configured.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/agents/sessions:
+    get:
+      summary: List agent sessions
+      responses:
+        "200":
+          description: Agent session list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      summary: Create agent session
+      responses:
+        "201":
+          description: Created agent session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /v1/agents/sessions/{id}:
+    get:
+      summary: Get agent session
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Agent session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      summary: Update agent session
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Updated agent session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      summary: Delete agent session
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Deleted agent session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /v1/agents/sessions/{id}/messages:
+    get:
+      summary: List agent session messages
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Agent session messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /v1/agents/memories:
+    get:
+      summary: List agent memories
+      responses:
+        "200":
+          description: Agent memory list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      summary: Create agent memory
+      responses:
+        "201":
+          description: Created agent memory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /v1/agents/memories/{id}:
+    patch:
+      summary: Update agent memory
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Updated agent memory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      summary: Delete agent memory
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Deleted agent memory
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
   /v1/audit-logs:
     get:
       summary: List audit logs
@@ -4372,6 +4890,12 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/AttendancePolicy"
+    GrantLeaveBalancesDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/GrantLeaveBalancesResult"
     WorkspaceOverviewDataResponse:
       type: object
       required: [data]
@@ -4416,6 +4940,7 @@ components:
       type: object
       required: [work_time, leave_types]
       properties:
+        version: {type: integer}
         work_time:
           type: object
           required: [standard_start, standard_end, break_start, break_end, weekend, cycle_start, cycle_end, time_options, weekend_options, cycle_start_options, cycle_end_options]
@@ -4442,14 +4967,57 @@ components:
         leave_types:
           type: array
           items:
-            type: object
-            required: [code, name, quota, rule, proof]
-            properties:
-              code: {type: string}
-              name: {type: string}
-              quota: {type: string}
-              rule: {type: string}
-              proof: {type: string}
+            $ref: "#/components/schemas/AttendanceLeaveType"
+    AttendanceLeaveType:
+      type: object
+      required: [code, name, quota, rule, proof]
+      properties:
+        code: {type: string}
+        name: {type: string}
+        quota: {type: string}
+        rule: {type: string}
+        proof: {type: string}
+        unit: {type: string, enum: [day, hour]}
+        grant_mode: {type: string, enum: [annual_grant, event, overtime_credit, unlimited]}
+        requires_balance: {type: boolean}
+        paid_ratio: {type: number}
+        proof_after_hours: {type: number, nullable: true}
+        active: {type: boolean}
+        entitlements:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeaveEntitlementRule"
+    LeaveEntitlementRule:
+      type: object
+      required: [job_level, tenure_min_years, quota_hours, prorate, priority]
+      properties:
+        job_level: {type: string}
+        tenure_min_years: {type: integer}
+        tenure_max_years: {type: integer, nullable: true}
+        quota_hours: {type: number}
+        prorate: {type: boolean}
+        priority: {type: integer}
+    GrantLeaveBalancesRequest:
+      type: object
+      properties:
+        employee_id: {type: string}
+        period_start: {type: string, format: date}
+        period_end: {type: string, format: date}
+    GrantLeaveBalancesResult:
+      type: object
+      required: [granted, updated, skipped, failed, period_start, period_end, policy_version]
+      properties:
+        granted: {type: integer}
+        updated: {type: integer}
+        skipped: {type: integer}
+        failed: {type: integer}
+        period_start: {type: string}
+        period_end: {type: string}
+        policy_version: {type: integer}
+        row_errors:
+          type: array
+          items:
+            $ref: "#/components/schemas/RowError"
     UpdateAttendancePolicyRequest:
       allOf:
         - $ref: "#/components/schemas/AttendancePolicy"

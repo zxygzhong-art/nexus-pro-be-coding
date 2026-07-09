@@ -80,14 +80,17 @@ type WorkspaceOrganizationResponse struct {
 
 // WorkspaceOrganizationRow 定義工作區 organization 列的資料結構。
 type WorkspaceOrganizationRow struct {
-	ID        string `json:"id"`
-	NameZH    string `json:"name_zh"`
-	NameEN    string `json:"name_en"`
-	Dept      string `json:"dept"`
-	Title     string `json:"title"`
-	Level     int    `json:"level"`
-	IsManager bool   `json:"is_manager"`
-	ParentID  string `json:"parent_id"`
+	ID            string `json:"id"`
+	NameZH        string `json:"name_zh"`
+	NameEN        string `json:"name_en"`
+	Dept          string `json:"dept"`
+	Title         string `json:"title"`
+	Level         int    `json:"level"`
+	IsManager     bool   `json:"is_manager"`
+	ParentID      string `json:"parent_id"`
+	OrgUnitID     string `json:"org_unit_id,omitempty"`
+	ManagerSource string `json:"manager_source,omitempty"`
+	IsOverride    bool   `json:"is_override,omitempty"`
 }
 
 // WorkspaceTurnoverQuery 定義工作區人員異動查詢的資料結構。

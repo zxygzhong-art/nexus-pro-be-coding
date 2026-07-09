@@ -15,6 +15,7 @@ import (
 	"nexus-pro-be/internal/jobs"
 	platformauth "nexus-pro-be/internal/platform/auth"
 	"nexus-pro-be/internal/platform/ehrms"
+	platformllm "nexus-pro-be/internal/platform/llm"
 	"nexus-pro-be/internal/platform/natsbus"
 	"nexus-pro-be/internal/platform/objectstore"
 	openfgaclient "nexus-pro-be/internal/platform/openfga"
@@ -195,11 +196,38 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		AuthzSnapshot:      authzSnapshotModule.cache,
 		Relationships:      relationshipModule.checker,
 		OpenFGAScopeChecks: cfg.OpenFGAScopeCheckEnabled,
+		AgentChatEnabled:   cfg.AgentChatEnabled,
+		AgentChatTimeout:   cfg.AgentChatTimeout,
 		ObjectStore:        objectStoreModule.store,
 		FormApprovalWorkflows: temporalplatform.NewFormApprovalClient(
 			temporalModule.client,
 			cfg.TemporalTaskQueue,
 		),
+	}
+	if cfg.AgentChatEnabled {
+		agentModel, err := platformllm.NewLiteLLM(platformllm.LiteLLMConfig{
+			BaseURL: cfg.LiteLLMBaseURL,
+			APIKey:  cfg.LiteLLMAPIKey,
+			Model:   cfg.AgentModelName,
+		})
+		if err != nil {
+			logStartupFailure(logger, "agent_chat_model", err)
+			shutdownStartedModules(shutdowns, logger)
+			return nil, err
+		}
+		agentRuntime, err := service.NewADKAgentChatRuntime(agentModel)
+		if err != nil {
+			// Default builds omit the ADK runtime (-tags adk). Keep the API up and
+			// leave chat disabled instead of failing the whole process.
+			logger.Warn("agent chat runtime unavailable; continuing with AGENT_CHAT disabled",
+				"error", err.Error(),
+				"hint", "rebuild with -tags adk after google.golang.org/adk/v2 dependencies are available",
+			)
+			serviceOptions.AgentChatEnabled = false
+			serviceOptions.AgentChatRuntime = nil
+		} else {
+			serviceOptions.AgentChatRuntime = agentRuntime
+		}
 	}
 	tokenResolvers := make([]platformauth.TokenResolver, 0, 2)
 
@@ -257,6 +285,8 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		CORSAllowedOrigins:    cfg.CORSAllowedOrigins,
 		TrustedProxies:        cfg.TrustedProxies,
 		RateLimiter:           configuredRateLimiter(cfg, authzSnapshotModule.client, logger),
+		RateLimitFailClosed:   cfg.RateLimitFailClosed,
+		DisableSwagger:        !cfg.SwaggerEnabled,
 	}
 
 	keycloakResolver, keycloakReadiness, keycloakDependency := configureKeycloakModule(cfg, authHTTPClient, logger)
@@ -510,13 +540,14 @@ func startObjectStoreModule(ctx context.Context, cfg config.Config, logger *slog
 	case "sftpgo":
 		startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		objectStore, err := objectstore.NewSFTPGo(startupCtx, objectstore.SFTPGoOptions{
-			Provider:   cfg.ObjectStoreProvider,
-			Endpoint:   cfg.ObjectStoreEndpoint,
-			Root:       cfg.ObjectStoreBucket,
-			Username:   cfg.ObjectStoreAccessKeyID,
-			Password:   cfg.ObjectStoreSecretAccessKey,
-			HostKey:    cfg.ObjectStoreSFTPHostKey,
-			CreateRoot: cfg.ObjectStoreCreateBucket,
+			Provider:            cfg.ObjectStoreProvider,
+			Endpoint:            cfg.ObjectStoreEndpoint,
+			Root:                cfg.ObjectStoreBucket,
+			Username:            cfg.ObjectStoreAccessKeyID,
+			Password:            cfg.ObjectStoreSecretAccessKey,
+			HostKey:             cfg.ObjectStoreSFTPHostKey,
+			InsecureSkipHostKey: cfg.ObjectStoreSFTPInsecureSkipHostKey,
+			CreateRoot:          cfg.ObjectStoreCreateBucket,
 		})
 		cancel()
 		if err != nil {
@@ -830,18 +861,30 @@ func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Lo
 		}()
 		logger.Info("openfga event consumer started")
 	}
-	if r.relationshipWriter != nil || r.eventPublisher != nil {
-		// NATS 關閉時只有 OpenFGA writer 完整設定才執行;NATS 開啟時 dispatcher 發布到 JetStream。
-		dispatcher := jobs.NewOutboxDispatcher(r.store, r.relationshipWriter, logger)
+	if r.store != nil {
+		writer := r.relationshipWriter
+		usingNoopWriter := false
+		if writer == nil && r.eventPublisher == nil {
+			writer = jobs.NoopRelationshipTupleWriter{}
+			usingNoopWriter = true
+		}
+		dispatcher := jobs.NewOutboxDispatcher(r.store, writer, logger)
 		if r.eventPublisher != nil {
 			dispatcher.WithEventPublisher(r.eventPublisher)
+		}
+		if usingNoopWriter {
+			if hasPendingOutboxEvents(ctx, r.store) {
+				logger.Warn("outbox has pending events but OpenFGA is not configured; dispatcher will mark relationship events succeeded via noop writer")
+			}
+			logger.Info("outbox dispatcher started with noop writer")
+		} else {
+			logger.Info("outbox dispatcher started", "nats_enabled", r.eventPublisher != nil, "openfga_writer", r.relationshipWriter != nil)
 		}
 		r.workers.Add(1)
 		go func() {
 			defer r.workers.Done()
 			dispatcher.Run(ctx, jobs.OutboxDispatchOptions{})
 		}()
-		logger.Info("outbox dispatcher started", "nats_enabled", r.eventPublisher != nil)
 	}
 	if r.ehrmsSyncScheduler != nil {
 		r.workers.Add(1)
@@ -867,6 +910,29 @@ func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Lo
 		}()
 		logger.Info("identity provisioning outbox worker started")
 	}
+}
+
+// hasPendingOutboxEvents 檢查是否存在 pending/failed outbox 事件。
+func hasPendingOutboxEvents(ctx context.Context, store repository.Store) bool {
+	if store == nil {
+		return false
+	}
+	tenants, err := store.ListTenants(ctx)
+	if err != nil {
+		return false
+	}
+	for _, tenant := range tenants {
+		events, err := store.ListOutboxEvents(ctx, tenant.ID)
+		if err != nil {
+			continue
+		}
+		for _, event := range events {
+			if event.Status == "pending" || event.Status == "failed" {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // waitForBackgroundWorkers 處理 wait for background worker。

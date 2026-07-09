@@ -12,6 +12,7 @@ type IAMStore interface {
 	UpsertUserGroup(context.Context, domain.UserGroup) error
 	GetUserGroup(ctx context.Context, tenantID, id string) (domain.UserGroup, bool, error)
 	ListUserGroups(ctx context.Context, tenantID string) ([]domain.UserGroup, error)
+	DeleteUserGroup(ctx context.Context, tenantID, id string) (domain.UserGroup, bool, error)
 	UpsertGroupMembership(context.Context, domain.GroupMembership) error
 	DeleteGroupMembership(ctx context.Context, tenantID, userGroupID, accountID string) (domain.GroupMembership, bool, error)
 	GetGroupMembership(ctx context.Context, tenantID, userGroupID, accountID string) (domain.GroupMembership, bool, error)
@@ -21,6 +22,7 @@ type IAMStore interface {
 	UpsertPermissionSet(context.Context, domain.PermissionSet) error
 	GetPermissionSet(ctx context.Context, tenantID, id string) (domain.PermissionSet, bool, error)
 	ListPermissionSets(ctx context.Context, tenantID string) ([]domain.PermissionSet, error)
+	DeletePermissionSet(ctx context.Context, tenantID, id string) (domain.PermissionSet, bool, error)
 	ReplacePermissionSetItems(ctx context.Context, tenantID, permissionSetID string, items []domain.PermissionSetItem) error
 	ListPermissionSetItemsForSet(ctx context.Context, tenantID, permissionSetID string) ([]domain.PermissionSetItem, error)
 
@@ -64,6 +66,8 @@ type IAMStore interface {
 	UpsertAssumableRole(context.Context, domain.AssumableRole) error
 	GetAssumableRole(ctx context.Context, tenantID, id string) (domain.AssumableRole, bool, error)
 	ListAssumableRoles(ctx context.Context, tenantID string) ([]domain.AssumableRole, error)
+	DeleteAssumableRole(ctx context.Context, tenantID, id string) (domain.AssumableRole, bool, error)
 	UpsertAssumableRoleSession(context.Context, domain.AssumableRoleSession) error
 	GetActiveAssumableRoleSession(ctx context.Context, tenantID, id string) (domain.AssumableRoleSession, bool, error)
+	ListActiveAssumableRoleSessionsForRole(ctx context.Context, tenantID, roleID string) ([]domain.AssumableRoleSession, error)
 }

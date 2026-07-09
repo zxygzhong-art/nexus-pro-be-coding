@@ -16,13 +16,14 @@ import (
 
 // SFTPGoOptions defines the SFTPGo-backed object store settings.
 type SFTPGoOptions struct {
-	Provider   string
-	Endpoint   string
-	Root       string
-	Username   string
-	Password   string
-	HostKey    string
-	CreateRoot bool
+	Provider            string
+	Endpoint            string
+	Root                string
+	Username            string
+	Password            string
+	HostKey             string
+	InsecureSkipHostKey bool
+	CreateRoot          bool
 }
 
 // SFTPGo stores objects through SFTPGo's SFTP endpoint.
@@ -50,7 +51,7 @@ func NewSFTPGo(ctx context.Context, opts SFTPGoOptions) (*SFTPGo, error) {
 	if opts.Password == "" {
 		return nil, errors.New("object store password is required")
 	}
-	config, err := newSFTPGoSSHConfig(username, opts.Password, opts.HostKey)
+	config, err := newSFTPGoSSHConfig(username, opts.Password, opts.HostKey, opts.InsecureSkipHostKey)
 	if err != nil {
 		return nil, err
 	}
@@ -201,17 +202,20 @@ func cleanSFTPGoRoot(root string) (string, error) {
 	return "/" + relativeRoot, nil
 }
 
-func newSFTPGoSSHConfig(username, password, hostKey string) (*ssh.ClientConfig, error) {
+func newSFTPGoSSHConfig(username, password, hostKey string, insecureSkipHostKey bool) (*ssh.ClientConfig, error) {
 	hostKey = strings.TrimSpace(hostKey)
 	var callback ssh.HostKeyCallback
-	if hostKey == "" {
-		callback = ssh.InsecureIgnoreHostKey()
-	} else {
+	switch {
+	case hostKey != "":
 		parsed, _, _, _, err := ssh.ParseAuthorizedKey([]byte(hostKey))
 		if err != nil {
 			return nil, fmt.Errorf("parse OBJECT_STORE_SFTP_HOST_KEY: %w", err)
 		}
 		callback = ssh.FixedHostKey(parsed)
+	case insecureSkipHostKey:
+		callback = ssh.InsecureIgnoreHostKey()
+	default:
+		return nil, errors.New("OBJECT_STORE_SFTP_HOST_KEY is required unless OBJECT_STORE_SFTP_INSECURE_SKIP_HOST_KEY=true")
 	}
 	return &ssh.ClientConfig{
 		User:            username,

@@ -54,6 +54,28 @@ services:
     networks:
       - observability
 
+  litellm:
+    profiles: ["litellm", "all"]
+    image: ${LITELLM_IMAGE:-ghcr.io/berriai/litellm:main-latest}
+    container_name: litellm
+    restart: unless-stopped
+    command:
+      - "--config"
+      - "/app/config.yaml"
+      - "--port"
+      - "${LITELLM_INTERNAL_PORT:-4000}"
+    environment:
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      AGENT_MODEL_NAME: ${AGENT_MODEL_NAME:-openai/gpt-4.1-mini}
+      LITELLM_UPSTREAM_MODEL: ${LITELLM_UPSTREAM_MODEL:-openai/gpt-4.1-mini}
+    ports:
+      - "${LITELLM_BIND_HOST:-127.0.0.1}:${LITELLM_HOST_PORT:-4000}:${LITELLM_INTERNAL_PORT:-4000}"
+    volumes:
+      - ./litellm/config.yaml:/app/config.yaml:ro
+    networks:
+      - observability
+
   grafana:
     profiles: ["grafana", "all"]
     image: ${GRAFANA_IMAGE}

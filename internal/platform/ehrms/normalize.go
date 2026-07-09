@@ -38,16 +38,56 @@ var employeeFieldAliases = map[string]string{
 	"direct_indirect": "直接/間接員工",
 	"leave_group":     "休假群組",
 	"school_name":     "學校名稱(中文)",
+	"school_zh":       "學校名稱(中文)",
+	"email":           "公司信箱",
+}
+
+var departmentFieldAliases = map[string]string{
+	"code":        "部門代碼",
+	"name":        "部門中文名稱",
+	"name_zh":     "部門中文名稱",
+	"name_en":     "部門英文名稱",
+	"parent_code": "上級部門代碼",
+	"depth":       "部門層級",
+	"closed":      "部門已關閉",
+	"headcount":   "部門人數",
+}
+
+var positionFieldAliases = map[string]string{
+	"job_code":     "職務代碼",
+	"job_title_zh": "職務中文名稱",
+	"job_title_en": "職務英文名稱",
+	"headcount":    "職務人數",
 }
 
 var attendanceFieldAliases = map[string]string{
-	"emp_id":      "員工編號",
-	"date":        "日期",
-	"shift_start": "班別開始",
-	"shift_end":   "班別結束",
-	"shift_hours": "班別工時",
-	"daily_hours": "應出勤工時",
-	"clock_hours": "刷卡工時",
+	"emp_id":           "員工編號",
+	"date":             "日期",
+	"shift_start":      "班別開始",
+	"shift_end":        "班別結束",
+	"shift_hours":      "班別工時",
+	"daily_hours":      "應出勤工時",
+	"clock_hours":      "刷卡工時",
+	"clock_start":      "clock_start",
+	"clock_end":        "clock_end",
+	"attend_start":     "attend_start",
+	"attend_end":       "attend_end",
+	"attend_hours":     "attend_hours",
+	"attend_counted":   "attend_counted",
+	"leave_type":       "leave_type",
+	"leave_start":      "leave_start",
+	"leave_end":        "leave_end",
+	"leave_hours":      "leave_hours",
+	"leave_counted":    "leave_counted",
+	"leave2_type":      "leave2_type",
+	"leave2_start":     "leave2_start",
+	"leave2_end":       "leave2_end",
+	"leave2_hours":     "leave2_hours",
+	"leave2_counted":   "leave2_counted",
+	"overtime_start":   "overtime_start",
+	"overtime_end":     "overtime_end",
+	"overtime_hours":   "overtime_hours",
+	"overtime_counted": "overtime_counted",
 }
 
 // NormalizeEmployeeRecords 將上游 JSON 欄位別名合併為服務層使用的 canonical key。
@@ -67,27 +107,52 @@ func normalizeEmployeeRecords(rows []domain.EHRMSEmployeeRecord) []domain.EHRMSE
 }
 
 func normalizeEmployeeRecord(row domain.EHRMSEmployeeRecord) domain.EHRMSEmployeeRecord {
-	if len(row) == 0 {
-		return row
-	}
-	normalized := domain.EHRMSEmployeeRecord{}
-	for key, value := range row {
-		normalized[key] = value
-	}
-	for alias, canonical := range employeeFieldAliases {
-		if strings.TrimSpace(normalized[canonical]) != "" {
-			continue
-		}
-		if value := strings.TrimSpace(normalized[alias]); value != "" {
-			normalized[canonical] = value
-		}
-	}
-	return normalized
+	return domain.EHRMSEmployeeRecord(applyFieldAliases(map[string]string(row), employeeFieldAliases))
+}
+
+// NormalizeDepartmentRecords 將上游部門 JSON 欄位別名合併為服務層使用的 canonical key。
+func NormalizeDepartmentRecords(rows []domain.EHRMSDepartmentRecord) []domain.EHRMSDepartmentRecord {
+	return normalizeDepartmentRecords(rows)
+}
+
+// NormalizePositionRecords 將上游崗位 JSON 欄位別名合併為服務層使用的 canonical key。
+func NormalizePositionRecords(rows []domain.EHRMSPositionRecord) []domain.EHRMSPositionRecord {
+	return normalizePositionRecords(rows)
 }
 
 // NormalizeAttendanceRecords 將上游考勤 JSON 欄位別名合併為服務層使用的 canonical key。
 func NormalizeAttendanceRecords(rows []domain.EHRMSAttendanceRecord) []domain.EHRMSAttendanceRecord {
 	return normalizeAttendanceRecords(rows)
+}
+
+func normalizeDepartmentRecords(rows []domain.EHRMSDepartmentRecord) []domain.EHRMSDepartmentRecord {
+	if len(rows) == 0 {
+		return rows
+	}
+	out := make([]domain.EHRMSDepartmentRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, normalizeDepartmentRecord(row))
+	}
+	return out
+}
+
+func normalizeDepartmentRecord(row domain.EHRMSDepartmentRecord) domain.EHRMSDepartmentRecord {
+	return domain.EHRMSDepartmentRecord(applyFieldAliases(map[string]string(row), departmentFieldAliases))
+}
+
+func normalizePositionRecords(rows []domain.EHRMSPositionRecord) []domain.EHRMSPositionRecord {
+	if len(rows) == 0 {
+		return rows
+	}
+	out := make([]domain.EHRMSPositionRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, normalizePositionRecord(row))
+	}
+	return out
+}
+
+func normalizePositionRecord(row domain.EHRMSPositionRecord) domain.EHRMSPositionRecord {
+	return domain.EHRMSPositionRecord(applyFieldAliases(map[string]string(row), positionFieldAliases))
 }
 
 func normalizeAttendanceRecords(rows []domain.EHRMSAttendanceRecord) []domain.EHRMSAttendanceRecord {
@@ -102,14 +167,18 @@ func normalizeAttendanceRecords(rows []domain.EHRMSAttendanceRecord) []domain.EH
 }
 
 func normalizeAttendanceRecord(row domain.EHRMSAttendanceRecord) domain.EHRMSAttendanceRecord {
+	return domain.EHRMSAttendanceRecord(applyFieldAliases(map[string]string(row), attendanceFieldAliases))
+}
+
+func applyFieldAliases(row map[string]string, aliases map[string]string) map[string]string {
 	if len(row) == 0 {
 		return row
 	}
-	normalized := domain.EHRMSAttendanceRecord{}
+	normalized := make(map[string]string, len(row)+len(aliases))
 	for key, value := range row {
 		normalized[key] = value
 	}
-	for alias, canonical := range attendanceFieldAliases {
+	for alias, canonical := range aliases {
 		if strings.TrimSpace(normalized[canonical]) != "" {
 			continue
 		}

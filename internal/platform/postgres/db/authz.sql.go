@@ -57,6 +57,22 @@ func (q *Queries) CreateAuthzAssumableRoleSession(ctx context.Context, arg Creat
 	return i, err
 }
 
+const deleteAuthzAssumableRoleSessionsForRole = `-- name: DeleteAuthzAssumableRoleSessionsForRole :exec
+DELETE FROM authz_assumable_role_sessions
+WHERE tenant_id = $1
+  AND assumable_role_id = $2
+`
+
+type DeleteAuthzAssumableRoleSessionsForRoleParams struct {
+	TenantID        string `json:"tenant_id"`
+	AssumableRoleID string `json:"assumable_role_id"`
+}
+
+func (q *Queries) DeleteAuthzAssumableRoleSessionsForRole(ctx context.Context, arg DeleteAuthzAssumableRoleSessionsForRoleParams) error {
+	_, err := q.db.Exec(ctx, deleteAuthzAssumableRoleSessionsForRole, arg.TenantID, arg.AssumableRoleID)
+	return err
+}
+
 const deleteAuthzDataScope = `-- name: DeleteAuthzDataScope :one
 DELETE FROM authz_data_scopes
 WHERE tenant_id = $1 AND id = $2
@@ -313,6 +329,49 @@ func (q *Queries) IncrementAuthzPermissionVersion(ctx context.Context, arg Incre
 	var i AuthzPermissionVersion
 	err := row.Scan(&i.TenantID, &i.Version, &i.UpdatedAt)
 	return i, err
+}
+
+const listActiveAuthzAssumableRoleSessionsForRole = `-- name: ListActiveAuthzAssumableRoleSessionsForRole :many
+SELECT id, tenant_id, account_id, assumable_role_id, session_policy, expires_at, revoked_at, created_at FROM authz_assumable_role_sessions
+WHERE tenant_id = $1
+  AND assumable_role_id = $2
+  AND revoked_at IS NULL
+  AND expires_at > now()
+ORDER BY created_at ASC
+`
+
+type ListActiveAuthzAssumableRoleSessionsForRoleParams struct {
+	TenantID        string `json:"tenant_id"`
+	AssumableRoleID string `json:"assumable_role_id"`
+}
+
+func (q *Queries) ListActiveAuthzAssumableRoleSessionsForRole(ctx context.Context, arg ListActiveAuthzAssumableRoleSessionsForRoleParams) ([]AuthzAssumableRoleSession, error) {
+	rows, err := q.db.Query(ctx, listActiveAuthzAssumableRoleSessionsForRole, arg.TenantID, arg.AssumableRoleID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuthzAssumableRoleSession
+	for rows.Next() {
+		var i AuthzAssumableRoleSession
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.AccountID,
+			&i.AssumableRoleID,
+			&i.SessionPolicy,
+			&i.ExpiresAt,
+			&i.RevokedAt,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAuthzDataScopes = `-- name: ListAuthzDataScopes :many

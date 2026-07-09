@@ -26,6 +26,7 @@ func (c AttendanceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	attendance.POST("/overtime-requests", c.routes.Handle("attendance.leave", "create", c.createOvertimeRequest))
 	attendance.GET("/policies/current", c.routes.Handle("attendance.leave", "read", c.currentPolicy))
 	attendance.PATCH("/policies/current", c.routes.Handle("attendance.leave", "update", c.updatePolicy))
+	attendance.POST("/leave-balances/grant", c.routes.Handle("attendance.leave", "update", c.grantLeaveBalances))
 	attendance.GET("/worksites", c.routes.Handle("attendance.worksite", "read", c.listWorksites))
 	attendance.POST("/worksites", c.routes.Handle("attendance.worksite", "create", c.createWorksite))
 	attendance.PATCH("/worksites", c.routes.Handle("attendance.worksite", "update", c.updateWorksite))
@@ -131,6 +132,20 @@ func (c AttendanceCtrl) updatePolicy(w http.ResponseWriter, r *http.Request, ctx
 		return err
 	}
 	item, err := c.svc.UpdateAttendancePolicy(ctx, input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// grantLeaveBalances 處理請假餘額發放的 HTTP 請求。
+func (c AttendanceCtrl) grantLeaveBalances(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.GrantLeaveBalancesInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.GrantLeaveBalances(ctx, input)
 	if err != nil {
 		return err
 	}

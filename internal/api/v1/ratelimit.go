@@ -21,7 +21,13 @@ func (a *API) rateLimit(limiter RateLimiter) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		allowed, err := limiter.Allow(c.Request.Context(), c.ClientIP())
 		if err != nil {
-			// 限流後端不可用時採 fail open，避免拖垮 API。
+			if a.rateLimitFailClosed {
+				a.logger.Warn("rate limiter unavailable, rejecting request", "client_ip", c.ClientIP(), "error", err)
+				c.Abort()
+				a.writeError(c.Writer, c.Request, domain.E(503, "rate_limiter_unavailable", "request rate limiter is temporarily unavailable"))
+				return
+			}
+			// 預設 fail open，避免限流後端故障拖垮 API。
 			a.logger.Warn("rate limiter unavailable, allowing request", "client_ip", c.ClientIP(), "error", err)
 			c.Next()
 			return

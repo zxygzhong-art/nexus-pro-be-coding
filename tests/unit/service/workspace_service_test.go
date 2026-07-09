@@ -40,9 +40,24 @@ func TestWorkspaceOverviewAggregatesVisibleHRAndAttendance(t *testing.T) {
 func TestWorkspaceOrganizationBuildsManagerTree(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
-	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-eng", TenantID: "tenant-1", Name: "產品開發部", Path: []string{"ou-eng"}, CreatedAt: now})
-	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-manager", EmployeeNo: "IKL001", Name: "王偉", OrgUnitID: "ou-eng", Position: "VP Engineering", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
-	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-child", EmployeeNo: "IKL002", Name: "張琪", OrgUnitID: "ou-eng", ManagerEmployeeID: "emp-manager", Position: "Engineer", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	_ = store.UpsertPosition(context.Background(), domain.Position{
+		ID: "pos-eng-dir", TenantID: "tenant-1", Code: "ENG-DIR", Name: "Engineering Director",
+		OrgUnitID: "ou-eng", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now,
+	})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{
+		ID: "ou-eng", TenantID: "tenant-1", Name: "產品開發部", Path: []string{"ou-eng"},
+		ManagerPositionID: "pos-eng-dir", CreatedAt: now, UpdatedAt: now,
+	})
+	insertWorkspaceEmployee(t, store, domain.Employee{
+		ID: "emp-manager", EmployeeNo: "IKL001", Name: "王偉", OrgUnitID: "ou-eng",
+		PositionID: "pos-eng-dir", Position: "VP Engineering", Status: "active", EmploymentStatus: "active",
+		CreatedAt: now, UpdatedAt: now,
+	})
+	insertWorkspaceEmployee(t, store, domain.Employee{
+		ID: "emp-child", EmployeeNo: "IKL002", Name: "張琪", OrgUnitID: "ou-eng",
+		Position: "Engineer", Status: "active", EmploymentStatus: "active",
+		CreatedAt: now, UpdatedAt: now,
+	})
 
 	got, err := svc.Workspace().WorkspaceOrganization(ctx)
 	if err != nil {
@@ -56,6 +71,53 @@ func TestWorkspaceOrganizationBuildsManagerTree(t *testing.T) {
 	}
 	if got.Rows[1].ID != "IKL002" || got.Rows[1].ParentID != "IKL001" || got.Rows[1].Level != 2 {
 		t.Fatalf("unexpected child row: %+v", got.Rows[1])
+	}
+	if got.Rows[1].ManagerSource != "org_unit" || got.Rows[1].IsOverride {
+		t.Fatalf("expected derived org_unit manager, got %+v", got.Rows[1])
+	}
+}
+
+// TestWorkspaceOrganizationOverrideBeatsOrgUnitManager 驗證覆蓋主管優先於組織單元主管崗。
+func TestWorkspaceOrganizationOverrideBeatsOrgUnitManager(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	_ = store.UpsertPosition(context.Background(), domain.Position{
+		ID: "pos-eng-dir", TenantID: "tenant-1", Code: "ENG-DIR", Name: "Engineering Director",
+		OrgUnitID: "ou-eng", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now,
+	})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{
+		ID: "ou-eng", TenantID: "tenant-1", Name: "產品開發部", Path: []string{"ou-eng"},
+		ManagerPositionID: "pos-eng-dir", CreatedAt: now, UpdatedAt: now,
+	})
+	insertWorkspaceEmployee(t, store, domain.Employee{
+		ID: "emp-manager", EmployeeNo: "IKL001", Name: "王偉", OrgUnitID: "ou-eng",
+		PositionID: "pos-eng-dir", Position: "VP Engineering", Status: "active", EmploymentStatus: "active",
+		CreatedAt: now, UpdatedAt: now,
+	})
+	insertWorkspaceEmployee(t, store, domain.Employee{
+		ID: "emp-override", EmployeeNo: "IKL099", Name: "代理主管", OrgUnitID: "ou-eng",
+		Position: "Acting Lead", Status: "active", EmploymentStatus: "active",
+		CreatedAt: now, UpdatedAt: now,
+	})
+	insertWorkspaceEmployee(t, store, domain.Employee{
+		ID: "emp-child", EmployeeNo: "IKL002", Name: "張琪", OrgUnitID: "ou-eng",
+		ManagerEmployeeID: "emp-override", Position: "Engineer", Status: "active", EmploymentStatus: "active",
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	got, err := svc.Workspace().WorkspaceOrganization(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var child domain.WorkspaceOrganizationRow
+	for _, row := range got.Rows {
+		if row.ID == "IKL002" {
+			child = row
+			break
+		}
+	}
+	if child.ParentID != "IKL099" || child.ManagerSource != "override" || !child.IsOverride {
+		t.Fatalf("expected override manager, got %+v", child)
 	}
 }
 

@@ -360,23 +360,33 @@ CREATE TABLE org_units (
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     code text NOT NULL DEFAULT '',
     name text NOT NULL,
+    name_en text NOT NULL DEFAULT '',
     parent_id text NOT NULL DEFAULT '',
     path text[] NOT NULL DEFAULT '{}',
-    created_at timestamptz NOT NULL
+    manager_position_id text NOT NULL DEFAULT '',
+    source text NOT NULL DEFAULT '',
+    closed boolean NOT NULL DEFAULT false,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
 );
 
 CREATE INDEX org_units_tenant_id_idx ON org_units (tenant_id);
 CREATE INDEX org_units_path_idx ON org_units USING gin (path);
+CREATE INDEX org_units_tenant_manager_position_idx
+    ON org_units (tenant_id, manager_position_id)
+    WHERE manager_position_id <> '';
 
 CREATE TABLE positions (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     code text NOT NULL,
     name text NOT NULL,
+    name_en text NOT NULL DEFAULT '',
     org_unit_id text NOT NULL DEFAULT '',
     level text NOT NULL DEFAULT '',
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
     description text NOT NULL DEFAULT '',
+    source text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     CONSTRAINT positions_tenant_id_id_idx UNIQUE (tenant_id, id),
@@ -404,6 +414,30 @@ $$ LANGUAGE plpgsql;
 CREATE TRIGGER positions_reference_check
 BEFORE INSERT OR UPDATE OF tenant_id, org_unit_id ON positions
 FOR EACH ROW EXECUTE FUNCTION validate_position_references();
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION validate_org_unit_manager_position()
+RETURNS trigger AS $$
+BEGIN
+    IF NEW.manager_position_id <> '' AND NOT EXISTS (
+        SELECT 1
+        FROM positions
+        WHERE tenant_id = NEW.tenant_id
+          AND id = NEW.manager_position_id
+          AND (org_unit_id = '' OR org_unit_id = NEW.id)
+    ) THEN
+        RAISE EXCEPTION 'org unit manager_position_id % does not exist in tenant % for org unit %',
+            NEW.manager_position_id, NEW.tenant_id, NEW.id
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+-- +goose StatementEnd
+
+CREATE TRIGGER org_units_manager_position_check
+BEFORE INSERT OR UPDATE OF tenant_id, id, manager_position_id ON org_units
+FOR EACH ROW EXECUTE FUNCTION validate_org_unit_manager_position();
 
 CREATE TABLE employees (
     id text PRIMARY KEY,
@@ -561,6 +595,8 @@ CREATE TABLE attendance_policies (
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     work_time jsonb NOT NULL DEFAULT '{}'::jsonb,
     leave_types jsonb NOT NULL DEFAULT '[]'::jsonb,
+    version integer NOT NULL DEFAULT 1,
+    effective_from timestamptz,
     updated_by_account_id text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
@@ -574,6 +610,13 @@ CREATE TABLE leave_balances (
     employee_id text NOT NULL,
     leave_type text NOT NULL,
     remaining_hours double precision NOT NULL,
+    period_start text NOT NULL DEFAULT '',
+    period_end text NOT NULL DEFAULT '',
+    granted_hours double precision NOT NULL DEFAULT 0,
+    used_hours double precision NOT NULL DEFAULT 0,
+    source text NOT NULL DEFAULT 'legacy',
+    policy_version integer NOT NULL DEFAULT 0,
+    prorate_ratio double precision,
     updated_at timestamptz NOT NULL,
     CONSTRAINT leave_balances_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id)
 );
@@ -794,6 +837,27 @@ CREATE TABLE attendance_daily_summaries (
     shift_hours double precision NOT NULL DEFAULT 0,
     daily_hours double precision NOT NULL DEFAULT 0,
     clock_hours double precision NOT NULL DEFAULT 0,
+    clock_start text NOT NULL DEFAULT '',
+    clock_end text NOT NULL DEFAULT '',
+    attend_start text NOT NULL DEFAULT '',
+    attend_end text NOT NULL DEFAULT '',
+    attend_hours double precision NOT NULL DEFAULT 0,
+    attend_counted boolean NOT NULL DEFAULT false,
+    leave_type text NOT NULL DEFAULT '',
+    leave_start text NOT NULL DEFAULT '',
+    leave_end text NOT NULL DEFAULT '',
+    leave_hours double precision NOT NULL DEFAULT 0,
+    leave_counted boolean NOT NULL DEFAULT false,
+    leave2_type text NOT NULL DEFAULT '',
+    leave2_start text NOT NULL DEFAULT '',
+    leave2_end text NOT NULL DEFAULT '',
+    leave2_hours double precision NOT NULL DEFAULT 0,
+    leave2_counted boolean NOT NULL DEFAULT false,
+    overtime_start text NOT NULL DEFAULT '',
+    overtime_end text NOT NULL DEFAULT '',
+    overtime_hours double precision NOT NULL DEFAULT 0,
+    overtime_counted boolean NOT NULL DEFAULT false,
+    payload jsonb NOT NULL DEFAULT '{}'::jsonb,
     source text NOT NULL DEFAULT 'manual',
     external_ref text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
@@ -885,10 +949,108 @@ CREATE TABLE platform_task_todos (
 
 CREATE INDEX platform_task_todos_tenant_account_status_idx ON platform_task_todos (tenant_id, account_id, status, created_at ASC);
 
+CREATE TABLE agent_models (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name text NOT NULL,
+    provider text NOT NULL DEFAULT 'openai',
+    model_name text NOT NULL,
+    litellm_model text NOT NULL,
+    is_default boolean NOT NULL DEFAULT false,
+    status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+    fallback_model_id text,
+    timeout_seconds integer NOT NULL DEFAULT 60 CHECK (timeout_seconds > 0),
+    monthly_quota bigint NOT NULL DEFAULT 100000 CHECK (monthly_quota >= 0),
+    used_quota bigint NOT NULL DEFAULT 0 CHECK (used_quota >= 0),
+    last_tested_at timestamptz,
+    last_test_status text NOT NULL DEFAULT 'untested' CHECK (last_test_status IN ('ok', 'failed', 'untested')),
+    last_test_message text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT agent_models_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT agent_models_fallback_fk FOREIGN KEY (tenant_id, fallback_model_id) REFERENCES agent_models (tenant_id, id)
+);
+
+CREATE INDEX agent_models_tenant_name_idx ON agent_models (tenant_id, name);
+CREATE UNIQUE INDEX agent_models_tenant_default_uidx ON agent_models (tenant_id) WHERE is_default = true;
+
+CREATE TABLE agent_definitions (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    name text NOT NULL,
+    description text NOT NULL DEFAULT '',
+    emoji text NOT NULL DEFAULT 'AI',
+    category text NOT NULL DEFAULT 'workflow' CHECK (category IN ('workflow', 'doc', 'analytics', 'it')),
+    model_id text NOT NULL,
+    fallback_model_id text,
+    system_prompt text NOT NULL DEFAULT '',
+    tools jsonb NOT NULL DEFAULT '[]'::jsonb,
+    status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
+    visibility text NOT NULL DEFAULT 'all' CHECK (visibility IN ('all', 'department', 'role')),
+    visibility_targets jsonb NOT NULL DEFAULT '[]'::jsonb,
+    timeout_seconds integer NOT NULL DEFAULT 60 CHECK (timeout_seconds > 0),
+    version integer NOT NULL DEFAULT 1 CHECK (version > 0),
+    usage_total_runs bigint NOT NULL DEFAULT 0,
+    usage_success_runs bigint NOT NULL DEFAULT 0,
+    usage_failed_runs bigint NOT NULL DEFAULT 0,
+    usage_avg_latency_ms integer NOT NULL DEFAULT 0,
+    usage_last_run_at timestamptz,
+    usage_top_prompts jsonb NOT NULL DEFAULT '[]'::jsonb,
+    created_by_account_id text,
+    updated_by_account_id text,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT agent_definitions_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT agent_definitions_model_fk FOREIGN KEY (tenant_id, model_id) REFERENCES agent_models (tenant_id, id),
+    CONSTRAINT agent_definitions_fallback_model_fk FOREIGN KEY (tenant_id, fallback_model_id) REFERENCES agent_models (tenant_id, id),
+    CONSTRAINT agent_definitions_created_by_fk FOREIGN KEY (tenant_id, created_by_account_id) REFERENCES accounts (tenant_id, id),
+    CONSTRAINT agent_definitions_updated_by_fk FOREIGN KEY (tenant_id, updated_by_account_id) REFERENCES accounts (tenant_id, id)
+);
+
+CREATE INDEX agent_definitions_tenant_status_idx ON agent_definitions (tenant_id, status, updated_at DESC);
+CREATE INDEX agent_definitions_tenant_name_idx ON agent_definitions (tenant_id, name);
+
+CREATE TABLE agent_definition_versions (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    agent_id text NOT NULL,
+    version integer NOT NULL CHECK (version > 0),
+    system_prompt text NOT NULL DEFAULT '',
+    tools jsonb NOT NULL DEFAULT '[]'::jsonb,
+    model_id text NOT NULL,
+    note text NOT NULL DEFAULT '',
+    created_by_account_id text,
+    created_at timestamptz NOT NULL,
+    CONSTRAINT agent_definition_versions_unique UNIQUE (tenant_id, agent_id, version),
+    CONSTRAINT agent_definition_versions_agent_fk FOREIGN KEY (tenant_id, agent_id) REFERENCES agent_definitions (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT agent_definition_versions_model_fk FOREIGN KEY (tenant_id, model_id) REFERENCES agent_models (tenant_id, id),
+    CONSTRAINT agent_definition_versions_created_by_fk FOREIGN KEY (tenant_id, created_by_account_id) REFERENCES accounts (tenant_id, id)
+);
+
+CREATE INDEX agent_definition_versions_agent_idx ON agent_definition_versions (tenant_id, agent_id, version DESC);
+
+CREATE TABLE agent_audits (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    entity_type text NOT NULL CHECK (entity_type IN ('agent', 'model')),
+    entity_id text NOT NULL,
+    entity_name text NOT NULL DEFAULT '',
+    action text NOT NULL,
+    actor_account_id text,
+    actor_display_name text NOT NULL DEFAULT '',
+    detail text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    CONSTRAINT agent_audits_actor_fk FOREIGN KEY (tenant_id, actor_account_id) REFERENCES accounts (tenant_id, id)
+);
+
+CREATE INDEX agent_audits_tenant_created_at_idx ON agent_audits (tenant_id, created_at DESC, id DESC);
+
 CREATE TABLE agent_runs (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     account_id text NOT NULL,
+    agent_id text,
+    session_id text NOT NULL DEFAULT '',
     mode text NOT NULL,
     prompt text NOT NULL,
     answer text NOT NULL DEFAULT '',
@@ -902,6 +1064,67 @@ CREATE TABLE agent_runs (
 CREATE INDEX agent_runs_tenant_id_idx ON agent_runs (tenant_id);
 CREATE INDEX agent_runs_account_id_idx ON agent_runs (account_id);
 CREATE INDEX agent_runs_tenant_account_created_at_idx ON agent_runs (tenant_id, account_id, created_at DESC);
+CREATE INDEX agent_runs_tenant_agent_id_idx ON agent_runs (tenant_id, agent_id, created_at DESC);
+
+CREATE TABLE agent_sessions (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    account_id text NOT NULL,
+    agent_id text,
+    title text NOT NULL DEFAULT '',
+    status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'archived')),
+    last_message_at timestamptz,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT agent_sessions_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT agent_sessions_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id)
+);
+
+CREATE INDEX agent_sessions_tenant_account_updated_idx
+    ON agent_sessions (tenant_id, account_id, status, updated_at DESC, id DESC);
+CREATE INDEX agent_sessions_tenant_agent_idx
+    ON agent_sessions (tenant_id, agent_id, updated_at DESC);
+
+CREATE TABLE agent_session_messages (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    session_id text NOT NULL,
+    role text NOT NULL CHECK (role IN ('user', 'assistant', 'system', 'tool')),
+    content text NOT NULL DEFAULT '',
+    run_id text,
+    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
+    created_at timestamptz NOT NULL,
+    CONSTRAINT agent_session_messages_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT agent_session_messages_session_fk
+        FOREIGN KEY (tenant_id, session_id) REFERENCES agent_sessions (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX agent_session_messages_session_created_idx
+    ON agent_session_messages (tenant_id, session_id, created_at ASC, id ASC);
+
+CREATE TABLE agent_memories (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    account_id text NOT NULL,
+    agent_id text,
+    session_id text,
+    key text NOT NULL DEFAULT '',
+    content text NOT NULL,
+    source text NOT NULL DEFAULT 'auto' CHECK (source IN ('auto', 'manual')),
+    importance integer NOT NULL DEFAULT 1 CHECK (importance >= 1 AND importance <= 5),
+    expires_at timestamptz,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT agent_memories_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT agent_memories_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id),
+    CONSTRAINT agent_memories_session_fk
+        FOREIGN KEY (tenant_id, session_id) REFERENCES agent_sessions (tenant_id, id) ON DELETE SET NULL
+);
+
+CREATE INDEX agent_memories_tenant_account_idx
+    ON agent_memories (tenant_id, account_id, updated_at DESC, id DESC);
+CREATE INDEX agent_memories_tenant_agent_idx
+    ON agent_memories (tenant_id, account_id, agent_id, importance DESC, updated_at DESC);
 
 CREATE TABLE notifications (
     id text PRIMARY KEY,
@@ -971,10 +1194,8 @@ CREATE TABLE audit_logs (
 CREATE INDEX audit_logs_tenant_id_created_at_idx ON audit_logs (tenant_id, created_at DESC);
 CREATE INDEX audit_logs_actor_account_id_idx ON audit_logs (actor_account_id);
 
-
 ALTER TABLE tenants ENABLE ROW LEVEL SECURITY;
 ALTER TABLE tenants FORCE ROW LEVEL SECURITY;
-
 ALTER TABLE accounts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE accounts FORCE ROW LEVEL SECURITY;
 ALTER TABLE user_groups ENABLE ROW LEVEL SECURITY;
@@ -1057,8 +1278,23 @@ ALTER TABLE platform_task_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform_task_items FORCE ROW LEVEL SECURITY;
 ALTER TABLE platform_task_todos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform_task_todos FORCE ROW LEVEL SECURITY;
+ALTER TABLE agent_models ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_models FORCE ROW LEVEL SECURITY;
+ALTER TABLE agent_definitions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_definitions FORCE ROW LEVEL SECURITY;
+ALTER TABLE agent_definition_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_definition_versions FORCE ROW LEVEL SECURITY;
+ALTER TABLE agent_audits ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_audits FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs FORCE ROW LEVEL SECURITY;
+ALTER TABLE agent_sessions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_sessions FORCE ROW LEVEL SECURITY;
+ALTER TABLE agent_session_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_session_messages FORCE ROW LEVEL SECURITY;
+ALTER TABLE agent_memories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_memories FORCE ROW LEVEL SECURITY;
+
 ALTER TABLE notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE notifications FORCE ROW LEVEL SECURITY;
 ALTER TABLE notification_recipients ENABLE ROW LEVEL SECURITY;
@@ -1067,7 +1303,6 @@ ALTER TABLE outbox_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE outbox_events FORCE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE audit_logs FORCE ROW LEVEL SECURITY;
-
 
 -- tenants table 沒有 tenant_id 欄位；每一列以自身 id 隔離。
 CREATE POLICY tenant_isolation_tenants ON tenants USING (id = current_setting('app.tenant_id', true)) WITH CHECK (id = current_setting('app.tenant_id', true));
@@ -1123,7 +1358,15 @@ CREATE POLICY tenant_isolation_attendance_correction_requests ON attendance_corr
 CREATE POLICY tenant_isolation_overtime_requests ON overtime_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_platform_task_items ON platform_task_items USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_platform_task_todos ON platform_task_todos USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_agent_models ON agent_models USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_agent_definitions ON agent_definitions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_agent_definition_versions ON agent_definition_versions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_agent_audits ON agent_audits USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_runs ON agent_runs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_agent_sessions ON agent_sessions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_agent_session_messages ON agent_session_messages USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_agent_memories ON agent_memories USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
 CREATE POLICY tenant_isolation_notifications ON notifications USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_notification_recipients ON notification_recipients USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_outbox_events ON outbox_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -1135,7 +1378,14 @@ DROP TABLE IF EXISTS audit_logs;
 DROP TABLE IF EXISTS outbox_events;
 DROP TABLE IF EXISTS notification_recipients;
 DROP TABLE IF EXISTS notifications;
+DROP TABLE IF EXISTS agent_memories;
+DROP TABLE IF EXISTS agent_session_messages;
+DROP TABLE IF EXISTS agent_sessions;
 DROP TABLE IF EXISTS agent_runs;
+DROP TABLE IF EXISTS agent_audits;
+DROP TABLE IF EXISTS agent_definition_versions;
+DROP TABLE IF EXISTS agent_definitions;
+DROP TABLE IF EXISTS agent_models;
 DROP TABLE IF EXISTS platform_task_todos;
 DROP TABLE IF EXISTS platform_task_items;
 DROP TABLE IF EXISTS overtime_requests;
@@ -1184,5 +1434,6 @@ DROP TABLE IF EXISTS accounts;
 DROP TABLE IF EXISTS tenants;
 DROP FUNCTION IF EXISTS validate_employee_position_reference();
 DROP FUNCTION IF EXISTS validate_employee_references();
+DROP FUNCTION IF EXISTS validate_org_unit_manager_position();
 DROP FUNCTION IF EXISTS validate_position_references();
 DROP FUNCTION IF EXISTS validate_authz_assignment_references();

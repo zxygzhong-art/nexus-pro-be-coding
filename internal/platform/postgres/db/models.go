@@ -22,10 +22,101 @@ type Account struct {
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 }
 
+type AgentAudit struct {
+	ID               string             `json:"id"`
+	TenantID         string             `json:"tenant_id"`
+	EntityType       string             `json:"entity_type"`
+	EntityID         string             `json:"entity_id"`
+	EntityName       string             `json:"entity_name"`
+	Action           string             `json:"action"`
+	ActorAccountID   pgtype.Text        `json:"actor_account_id"`
+	ActorDisplayName string             `json:"actor_display_name"`
+	Detail           string             `json:"detail"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
+type AgentDefinition struct {
+	ID                 string             `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	Name               string             `json:"name"`
+	Description        string             `json:"description"`
+	Emoji              string             `json:"emoji"`
+	Category           string             `json:"category"`
+	ModelID            string             `json:"model_id"`
+	FallbackModelID    pgtype.Text        `json:"fallback_model_id"`
+	SystemPrompt       string             `json:"system_prompt"`
+	Tools              []byte             `json:"tools"`
+	Status             string             `json:"status"`
+	Visibility         string             `json:"visibility"`
+	VisibilityTargets  []byte             `json:"visibility_targets"`
+	TimeoutSeconds     int32              `json:"timeout_seconds"`
+	Version            int32              `json:"version"`
+	UsageTotalRuns     int64              `json:"usage_total_runs"`
+	UsageSuccessRuns   int64              `json:"usage_success_runs"`
+	UsageFailedRuns    int64              `json:"usage_failed_runs"`
+	UsageAvgLatencyMs  int32              `json:"usage_avg_latency_ms"`
+	UsageLastRunAt     pgtype.Timestamptz `json:"usage_last_run_at"`
+	UsageTopPrompts    []byte             `json:"usage_top_prompts"`
+	CreatedByAccountID pgtype.Text        `json:"created_by_account_id"`
+	UpdatedByAccountID pgtype.Text        `json:"updated_by_account_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AgentDefinitionVersion struct {
+	ID                 string             `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	AgentID            string             `json:"agent_id"`
+	Version            int32              `json:"version"`
+	SystemPrompt       string             `json:"system_prompt"`
+	Tools              []byte             `json:"tools"`
+	ModelID            string             `json:"model_id"`
+	Note               string             `json:"note"`
+	CreatedByAccountID pgtype.Text        `json:"created_by_account_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type AgentMemory struct {
+	ID         string             `json:"id"`
+	TenantID   string             `json:"tenant_id"`
+	AccountID  string             `json:"account_id"`
+	AgentID    pgtype.Text        `json:"agent_id"`
+	SessionID  pgtype.Text        `json:"session_id"`
+	Key        string             `json:"key"`
+	Content    string             `json:"content"`
+	Source     string             `json:"source"`
+	Importance int32              `json:"importance"`
+	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AgentModel struct {
+	ID              string             `json:"id"`
+	TenantID        string             `json:"tenant_id"`
+	Name            string             `json:"name"`
+	Provider        string             `json:"provider"`
+	ModelName       string             `json:"model_name"`
+	LitellmModel    string             `json:"litellm_model"`
+	IsDefault       bool               `json:"is_default"`
+	Status          string             `json:"status"`
+	FallbackModelID pgtype.Text        `json:"fallback_model_id"`
+	TimeoutSeconds  int32              `json:"timeout_seconds"`
+	MonthlyQuota    int64              `json:"monthly_quota"`
+	UsedQuota       int64              `json:"used_quota"`
+	LastTestedAt    pgtype.Timestamptz `json:"last_tested_at"`
+	LastTestStatus  string             `json:"last_test_status"`
+	LastTestMessage string             `json:"last_test_message"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type AgentRun struct {
 	ID             string             `json:"id"`
 	TenantID       string             `json:"tenant_id"`
 	AccountID      string             `json:"account_id"`
+	AgentID        pgtype.Text        `json:"agent_id"`
+	SessionID      string             `json:"session_id"`
 	Mode           string             `json:"mode"`
 	Prompt         string             `json:"prompt"`
 	Answer         string             `json:"answer"`
@@ -33,6 +124,29 @@ type AgentRun struct {
 	ReferenceItems []byte             `json:"reference_items"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AgentSession struct {
+	ID            string             `json:"id"`
+	TenantID      string             `json:"tenant_id"`
+	AccountID     string             `json:"account_id"`
+	AgentID       pgtype.Text        `json:"agent_id"`
+	Title         string             `json:"title"`
+	Status        string             `json:"status"`
+	LastMessageAt pgtype.Timestamptz `json:"last_message_at"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AgentSessionMessage struct {
+	ID        string             `json:"id"`
+	TenantID  string             `json:"tenant_id"`
+	SessionID string             `json:"session_id"`
+	Role      string             `json:"role"`
+	Content   string             `json:"content"`
+	RunID     pgtype.Text        `json:"run_id"`
+	Metadata  []byte             `json:"metadata"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
 type AssumableRole struct {
@@ -101,19 +215,40 @@ type AttendanceCorrectionRequest struct {
 }
 
 type AttendanceDailySummary struct {
-	ID          string             `json:"id"`
-	TenantID    string             `json:"tenant_id"`
-	EmployeeID  string             `json:"employee_id"`
-	WorkDate    string             `json:"work_date"`
-	ShiftStart  string             `json:"shift_start"`
-	ShiftEnd    string             `json:"shift_end"`
-	ShiftHours  float64            `json:"shift_hours"`
-	DailyHours  float64            `json:"daily_hours"`
-	ClockHours  float64            `json:"clock_hours"`
-	Source      string             `json:"source"`
-	ExternalRef string             `json:"external_ref"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID              string             `json:"id"`
+	TenantID        string             `json:"tenant_id"`
+	EmployeeID      string             `json:"employee_id"`
+	WorkDate        string             `json:"work_date"`
+	ShiftStart      string             `json:"shift_start"`
+	ShiftEnd        string             `json:"shift_end"`
+	ShiftHours      float64            `json:"shift_hours"`
+	DailyHours      float64            `json:"daily_hours"`
+	ClockHours      float64            `json:"clock_hours"`
+	ClockStart      string             `json:"clock_start"`
+	ClockEnd        string             `json:"clock_end"`
+	AttendStart     string             `json:"attend_start"`
+	AttendEnd       string             `json:"attend_end"`
+	AttendHours     float64            `json:"attend_hours"`
+	AttendCounted   bool               `json:"attend_counted"`
+	LeaveType       string             `json:"leave_type"`
+	LeaveStart      string             `json:"leave_start"`
+	LeaveEnd        string             `json:"leave_end"`
+	LeaveHours      float64            `json:"leave_hours"`
+	LeaveCounted    bool               `json:"leave_counted"`
+	Leave2Type      string             `json:"leave2_type"`
+	Leave2Start     string             `json:"leave2_start"`
+	Leave2End       string             `json:"leave2_end"`
+	Leave2Hours     float64            `json:"leave2_hours"`
+	Leave2Counted   bool               `json:"leave2_counted"`
+	OvertimeStart   string             `json:"overtime_start"`
+	OvertimeEnd     string             `json:"overtime_end"`
+	OvertimeHours   float64            `json:"overtime_hours"`
+	OvertimeCounted bool               `json:"overtime_counted"`
+	Payload         []byte             `json:"payload"`
+	Source          string             `json:"source"`
+	ExternalRef     string             `json:"external_ref"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
 type AttendancePolicy struct {
@@ -121,6 +256,8 @@ type AttendancePolicy struct {
 	TenantID           string             `json:"tenant_id"`
 	WorkTime           []byte             `json:"work_time"`
 	LeaveTypes         []byte             `json:"leave_types"`
+	Version            int32              `json:"version"`
+	EffectiveFrom      pgtype.Timestamptz `json:"effective_from"`
 	UpdatedByAccountID string             `json:"updated_by_account_id"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
@@ -376,6 +513,13 @@ type LeaveBalance struct {
 	EmployeeID     string             `json:"employee_id"`
 	LeaveType      string             `json:"leave_type"`
 	RemainingHours float64            `json:"remaining_hours"`
+	PeriodStart    string             `json:"period_start"`
+	PeriodEnd      string             `json:"period_end"`
+	GrantedHours   float64            `json:"granted_hours"`
+	UsedHours      float64            `json:"used_hours"`
+	Source         string             `json:"source"`
+	PolicyVersion  int32              `json:"policy_version"`
+	ProrateRatio   pgtype.Float8      `json:"prorate_ratio"`
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
@@ -431,13 +575,18 @@ type NotificationRecipient struct {
 }
 
 type OrgUnit struct {
-	ID        string             `json:"id"`
-	TenantID  string             `json:"tenant_id"`
-	Code      string             `json:"code"`
-	Name      string             `json:"name"`
-	ParentID  string             `json:"parent_id"`
-	Path      []string           `json:"path"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ID                string             `json:"id"`
+	TenantID          string             `json:"tenant_id"`
+	Code              string             `json:"code"`
+	Name              string             `json:"name"`
+	NameEn            string             `json:"name_en"`
+	ParentID          string             `json:"parent_id"`
+	Path              []string           `json:"path"`
+	ManagerPositionID string             `json:"manager_position_id"`
+	Source            string             `json:"source"`
+	Closed            bool               `json:"closed"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type OutboxEvent struct {
@@ -566,10 +715,12 @@ type Position struct {
 	TenantID    string             `json:"tenant_id"`
 	Code        string             `json:"code"`
 	Name        string             `json:"name"`
+	NameEn      string             `json:"name_en"`
 	OrgUnitID   string             `json:"org_unit_id"`
 	Level       string             `json:"level"`
 	Status      string             `json:"status"`
 	Description string             `json:"description"`
+	Source      string             `json:"source"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
 }

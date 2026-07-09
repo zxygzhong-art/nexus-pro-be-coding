@@ -160,6 +160,73 @@ func (c IAMService) UpdateAssumableRole(ctx RequestContext, id string, input Upd
 	return next, nil
 }
 
+// DeleteAssumableRole 刪除 assumable 角色；若仍有啟用 session 則拒絕。
+func (c IAMService) DeleteAssumableRole(ctx RequestContext, id string) (AssumableRole, error) {
+	if _, _, err := c.requireIAMAuthz(ctx, ResourceAssumableRole, ActionDelete, id); err != nil {
+		return AssumableRole{}, err
+	}
+	role, ok, err := c.store.GetAssumableRole(goContext(ctx), ctx.TenantID, strings.TrimSpace(id))
+	if err != nil {
+		return AssumableRole{}, err
+	}
+	if !ok {
+		return AssumableRole{}, NotFound("assumable role", id)
+	}
+	sessions, err := c.store.ListActiveAssumableRoleSessionsForRole(goContext(ctx), ctx.TenantID, role.ID)
+	if err != nil {
+		return AssumableRole{}, err
+	}
+	if len(sessions) > 0 {
+		return AssumableRole{}, Conflict("assumable role has active sessions")
+	}
+	if err := c.withTransaction(ctx, func(tx IAMService) error {
+		assignments, err := tx.store.ListPermissionSetAssignmentsForPrincipal(goContext(ctx), ctx.TenantID, string(PrincipalTypeAssumableRole), role.ID)
+		if err != nil {
+			return err
+		}
+		for _, assignment := range assignments {
+			if _, ok, err := tx.store.DeletePermissionSetAssignment(goContext(ctx), ctx.TenantID, assignment.ID); err != nil {
+				return err
+			} else if !ok {
+				continue
+			}
+		}
+		if err := tx.Service.syncAssumableRoleRelationshipTuples(ctx, role, AssumableRole{}); err != nil {
+			return err
+		}
+		accounts, err := tx.store.ListAccounts(goContext(ctx), ctx.TenantID)
+		if err != nil {
+			return err
+		}
+		for _, account := range accounts {
+			if account.ActiveAssumableRoleID != role.ID {
+				continue
+			}
+			account.ActiveAssumableRoleID = ""
+			if err := tx.store.UpsertAccount(goContext(ctx), account); err != nil {
+				return err
+			}
+		}
+		deleted, ok, err := tx.store.DeleteAssumableRole(goContext(ctx), ctx.TenantID, role.ID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("assumable role", id)
+		}
+		if err := tx.touchAuthzConfig(ctx, "iam.assumable_role.delete", map[string]any{"assumable_role_id": deleted.ID}); err != nil {
+			return err
+		}
+		return tx.audit(ctx, "iam.assumable_role.delete", "assumable_role", deleted.ID, "high", map[string]any{
+			"name": deleted.Name,
+		})
+	}); err != nil {
+		return AssumableRole{}, err
+	}
+	c.logWarn(ctx, "assumable role deleted", "assumable_role_id", role.ID)
+	return role, nil
+}
+
 // AssumeRole 建立 assumed role session角色的服務流程。
 func (c IAMService) AssumeRole(ctx RequestContext, roleID string, input AssumeRoleInput) (AssumeRoleResponse, error) {
 	account, _, err := c.requireIAMAuthz(ctx, ResourceAssumableRole, ActionAssume, roleID)

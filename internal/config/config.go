@@ -35,9 +35,12 @@ type Config struct {
 	// An 說明此處的程式契約。
 	MetricsAddr string
 
-	RateLimitEnabled bool
-	RateLimitRPS     int
-	RateLimitBurst   int
+	RateLimitEnabled    bool
+	RateLimitRPS        int
+	RateLimitBurst      int
+	RateLimitFailClosed bool
+
+	SwaggerEnabled bool
 
 	KeycloakIssuerURL         string
 	KeycloakClientID          string
@@ -62,16 +65,24 @@ type Config struct {
 	NATSStream         string
 	NATSConsumerPrefix string
 
-	ObjectStoreProvider        string
-	ObjectStoreDir             string
-	ObjectStoreEndpoint        string
-	ObjectStoreBucket          string
-	ObjectStoreRegion          string
-	ObjectStoreAccessKeyID     string
-	ObjectStoreSecretAccessKey string
-	ObjectStoreSFTPHostKey     string
-	ObjectStoreUseSSL          bool
-	ObjectStoreCreateBucket    bool
+	LiteLLMBaseURL   string
+	LiteLLMAPIKey    string
+	LiteLLMMasterKey string
+	AgentModelName   string
+	AgentChatEnabled bool
+	AgentChatTimeout time.Duration
+
+	ObjectStoreProvider                string
+	ObjectStoreDir                     string
+	ObjectStoreEndpoint                string
+	ObjectStoreBucket                  string
+	ObjectStoreRegion                  string
+	ObjectStoreAccessKeyID             string
+	ObjectStoreSecretAccessKey         string
+	ObjectStoreSFTPHostKey             string
+	ObjectStoreSFTPInsecureSkipHostKey bool
+	ObjectStoreUseSSL                  bool
+	ObjectStoreCreateBucket            bool
 
 	EHRMSBaseURL        string
 	EHRMSAPIKey         string
@@ -147,6 +158,17 @@ func (c Config) ValidateStartup() error {
 			problems = append(problems, problem)
 		}
 	}
+	if c.AgentChatEnabled {
+		if strings.TrimSpace(c.LiteLLMBaseURL) == "" {
+			problems = append(problems, "LITELLM_BASE_URL is required when AGENT_CHAT_ENABLED=true")
+		}
+		if strings.TrimSpace(c.LiteLLMAPIKey) == "" {
+			problems = append(problems, "LITELLM_API_KEY is required when AGENT_CHAT_ENABLED=true")
+		}
+		if strings.TrimSpace(c.AgentModelName) == "" {
+			problems = append(problems, "AGENT_MODEL_NAME is required when AGENT_CHAT_ENABLED=true")
+		}
+	}
 	switch normalizeObjectStoreProvider(c.ObjectStoreProvider, c.ObjectStoreDir, c.ObjectStoreEndpoint, c.ObjectStoreBucket) {
 	case "sftpgo":
 		if strings.TrimSpace(c.ObjectStoreEndpoint) == "" {
@@ -160,6 +182,12 @@ func (c Config) ValidateStartup() error {
 		}
 		if strings.TrimSpace(c.ObjectStoreSecretAccessKey) == "" {
 			problems = append(problems, "OBJECT_STORE_SECRET_ACCESS_KEY is required as the SFTPGo password")
+		}
+		if c.ObjectStoreSFTPInsecureSkipHostKey {
+			problems = append(problems, "OBJECT_STORE_SFTP_INSECURE_SKIP_HOST_KEY must not be enabled in production")
+		}
+		if strings.TrimSpace(c.ObjectStoreSFTPHostKey) == "" {
+			problems = append(problems, "OBJECT_STORE_SFTP_HOST_KEY is required in production when OBJECT_STORE_PROVIDER=sftpgo")
 		}
 	case "local":
 		if strings.TrimSpace(c.ObjectStoreDir) == "" {
@@ -207,9 +235,12 @@ func LoadE() (Config, error) {
 		TrustedProxies: splitCommaList(os.Getenv("TRUSTED_PROXIES")),
 		MetricsAddr:    envAllowEmpty("METRICS_ADDR", "127.0.0.1:9091"),
 
-		RateLimitEnabled: envBool("RATE_LIMIT_ENABLED", false, &problems),
-		RateLimitRPS:     envInt("RATE_LIMIT_RPS", 20, &problems),
-		RateLimitBurst:   envInt("RATE_LIMIT_BURST", 40, &problems),
+		RateLimitEnabled:    envBool("RATE_LIMIT_ENABLED", false, &problems),
+		RateLimitRPS:        envInt("RATE_LIMIT_RPS", 20, &problems),
+		RateLimitBurst:      envInt("RATE_LIMIT_BURST", 40, &problems),
+		RateLimitFailClosed: envBool("RATE_LIMIT_FAIL_CLOSED", false, &problems),
+
+		SwaggerEnabled: envBool("SWAGGER_ENABLED", appEnv != "production", &problems),
 
 		KeycloakIssuerURL:         strings.TrimSpace(os.Getenv("KEYCLOAK_ISSUER_URL")),
 		KeycloakClientID:          strings.TrimSpace(os.Getenv("KEYCLOAK_CLIENT_ID")),
@@ -234,16 +265,24 @@ func LoadE() (Config, error) {
 		NATSStream:         env("NATS_STREAM", "NEXUS_EVENTS"),
 		NATSConsumerPrefix: env("NATS_CONSUMER_PREFIX", "nexus"),
 
-		ObjectStoreProvider:        objectStoreProvider,
-		ObjectStoreDir:             strings.TrimSpace(os.Getenv("OBJECT_STORE_DIR")),
-		ObjectStoreEndpoint:        strings.TrimSpace(os.Getenv("OBJECT_STORE_ENDPOINT")),
-		ObjectStoreBucket:          strings.TrimSpace(os.Getenv("OBJECT_STORE_BUCKET")),
-		ObjectStoreRegion:          env("OBJECT_STORE_REGION", "us-east-1"),
-		ObjectStoreAccessKeyID:     strings.TrimSpace(os.Getenv("OBJECT_STORE_ACCESS_KEY_ID")),
-		ObjectStoreSecretAccessKey: os.Getenv("OBJECT_STORE_SECRET_ACCESS_KEY"),
-		ObjectStoreSFTPHostKey:     strings.TrimSpace(os.Getenv("OBJECT_STORE_SFTP_HOST_KEY")),
-		ObjectStoreUseSSL:          envBool("OBJECT_STORE_USE_SSL", false, &problems),
-		ObjectStoreCreateBucket:    envBool("OBJECT_STORE_CREATE_BUCKET", false, &problems),
+		LiteLLMBaseURL:   env("LITELLM_BASE_URL", "http://127.0.0.1:4000"),
+		LiteLLMAPIKey:    os.Getenv("LITELLM_API_KEY"),
+		LiteLLMMasterKey: os.Getenv("LITELLM_MASTER_KEY"),
+		AgentModelName:   strings.TrimSpace(os.Getenv("AGENT_MODEL_NAME")),
+		AgentChatEnabled: envBool("AGENT_CHAT_ENABLED", false, &problems),
+		AgentChatTimeout: time.Duration(envInt("AGENT_CHAT_TIMEOUT_SECONDS", 60, &problems)) * time.Second,
+
+		ObjectStoreProvider:                objectStoreProvider,
+		ObjectStoreDir:                     strings.TrimSpace(os.Getenv("OBJECT_STORE_DIR")),
+		ObjectStoreEndpoint:                strings.TrimSpace(os.Getenv("OBJECT_STORE_ENDPOINT")),
+		ObjectStoreBucket:                  strings.TrimSpace(os.Getenv("OBJECT_STORE_BUCKET")),
+		ObjectStoreRegion:                  env("OBJECT_STORE_REGION", "us-east-1"),
+		ObjectStoreAccessKeyID:             strings.TrimSpace(os.Getenv("OBJECT_STORE_ACCESS_KEY_ID")),
+		ObjectStoreSecretAccessKey:         os.Getenv("OBJECT_STORE_SECRET_ACCESS_KEY"),
+		ObjectStoreSFTPHostKey:             strings.TrimSpace(os.Getenv("OBJECT_STORE_SFTP_HOST_KEY")),
+		ObjectStoreSFTPInsecureSkipHostKey: envBool("OBJECT_STORE_SFTP_INSECURE_SKIP_HOST_KEY", false, &problems),
+		ObjectStoreUseSSL:                  envBool("OBJECT_STORE_USE_SSL", false, &problems),
+		ObjectStoreCreateBucket:            envBool("OBJECT_STORE_CREATE_BUCKET", false, &problems),
 
 		EHRMSBaseURL:        strings.TrimSpace(os.Getenv("EHRMS_BASE_URL")),
 		EHRMSAPIKey:         os.Getenv("EHRMS_API_KEY"),

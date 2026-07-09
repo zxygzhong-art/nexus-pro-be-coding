@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/repository/memory"
 	"nexus-pro-be/internal/service"
 )
 
@@ -95,5 +96,145 @@ func TestReturnFormUsesTemporalSignal(t *testing.T) {
 	run, ok, err := store.GetWorkflowRunByFormInstance(t.Context(), "tenant-1", instance.ID)
 	if err != nil || !ok || run.Status != domain.WorkflowRunStatusReturned {
 		t.Fatalf("expected returned workflow run, got ok=%v err=%v run=%+v", ok, err, run)
+	}
+}
+
+func TestCustomFormDesignSubmitApproveRoundTrip(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	svc, applicantCtx, store, _ := newWorkflowEngineFixtureWithFake(t, now, "acct-admin")
+	_ = store.UpsertPermissionSet(t.Context(), domain.PermissionSet{
+		ID:       "ps-workspace-forms",
+		TenantID: "tenant-1",
+		Name:     "Workspace Forms",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_template", Action: "read", Scope: "all"},
+			{Resource: "workflow.form_template", Action: "create", Scope: "all"},
+			{Resource: "workflow.form_template", Action: "update", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "update", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	admin := domain.Account{
+		ID:                     "acct-forms-admin",
+		TenantID:               "tenant-1",
+		DisplayName:            "Forms Admin",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workspace-forms"},
+		CreatedAt:              now,
+	}
+	_ = store.UpsertAccount(t.Context(), admin)
+	adminCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: admin.ID, ApprovalConfirmed: true}
+
+	_, err := svc.Workspace().CreateWorkspaceFormDesign(adminCtx, domain.SaveWorkspaceFormDesignInput{
+		ID:       "custom-ot",
+		Name:     "Custom OT",
+		Category: "出勤相關",
+		Enabled:  boolPtr(true),
+		Fields: []domain.PlatformFormBuilderField{
+			{ID: "field-hours", Type: "number", Label: "時數", Placeholder: "0", Required: true},
+			{ID: "field-reason", Type: "textarea", Label: "原因", Placeholder: "請描述", Required: true},
+		},
+		Stages: []domain.PlatformFormBuilderStage{
+			{ID: "stage-manager", Type: "approver", Label: "Manager", Detail: "Manager approves", Config: map[string]any{"account_ids": []any{"acct-admin"}}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.Workflow().SubmitForm(applicantCtx, domain.SubmitFormInput{
+		TemplateKey: "custom-ot",
+		Payload:     map[string]any{"field-hours": 8},
+	})
+	if err == nil {
+		t.Fatal("expected required field validation failure")
+	}
+	var appErr *domain.AppError
+	if !errors.As(err, &appErr) || appErr.Status != 400 {
+		t.Fatalf("expected 400 validation error, got %T %v", err, err)
+	}
+
+	instance, err := svc.Workflow().SubmitForm(applicantCtx, domain.SubmitFormInput{
+		TemplateKey: "custom-ot",
+		Payload: map[string]any{
+			"field-hours":  8,
+			"field-reason": "project deadline",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if instance.Status != domain.WorkflowFormStatusInReview {
+		t.Fatalf("expected in_review, got %+v", instance)
+	}
+
+	approved, err := svc.Workflow().ApproveForm(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}, instance.ID, domain.ApproveFormInput{Reason: "ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approved.Status != "approved" {
+		t.Fatalf("expected approved, got %+v", approved)
+	}
+}
+
+func TestCreateWorkspaceFormDesignRejectsMissingStageConfig(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(t.Context(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(t.Context(), domain.PermissionSet{
+		ID:       "ps-workspace-forms",
+		TenantID: "tenant-1",
+		Name:     "Workspace Forms",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_template", Action: "create", Scope: "all"},
+			{Resource: "workflow.form_template", Action: "read", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
+	_ = store.UpsertAccount(t.Context(), domain.Account{
+		ID:                     "acct-forms",
+		TenantID:               "tenant-1",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workspace-forms"},
+		CreatedAt:              now,
+	})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+	_, err := svc.Workspace().CreateWorkspaceFormDesign(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-forms"}, domain.SaveWorkspaceFormDesignInput{
+		Name: "Broken Flow",
+		Stages: []domain.PlatformFormBuilderStage{
+			{ID: "stage-1", Type: "approver", Label: "Manager", Detail: "no config"},
+		},
+	})
+	if err == nil {
+		t.Fatal("expected missing stage config validation error")
+	}
+}
+
+func TestSubmitFormMarksWorkflowStartFailedWhenTemporalUnavailable(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	svc, applicantCtx, store, fakeTemporal := newWorkflowEngineFixtureWithFake(t, now, "acct-admin")
+	fakeTemporal.failStart = true
+
+	_, err := svc.Workflow().SubmitForm(applicantCtx, domain.SubmitFormInput{
+		TemplateKey: "leave-request",
+		Payload:     map[string]any{"desc": "temporal down"},
+	})
+	if err == nil {
+		t.Fatal("expected temporal start failure")
+	}
+
+	instances, listErr := store.ListFormInstances(t.Context(), "tenant-1")
+	if listErr != nil {
+		t.Fatal(listErr)
+	}
+	if len(instances) != 1 {
+		t.Fatalf("expected one form instance, got %d", len(instances))
+	}
+	if instances[0].Status != domain.WorkflowFormStatusWorkflowStartFailed {
+		t.Fatalf("expected workflow_start_failed, got %+v", instances[0])
+	}
+	run, ok, runErr := store.GetWorkflowRunByFormInstance(t.Context(), "tenant-1", instances[0].ID)
+	if runErr != nil || !ok || run.Status != domain.WorkflowRunStatusStartFailed {
+		t.Fatalf("expected start_failed run, got ok=%v err=%v run=%+v", ok, runErr, run)
 	}
 }

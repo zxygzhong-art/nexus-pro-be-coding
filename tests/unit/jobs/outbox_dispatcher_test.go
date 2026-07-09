@@ -3,6 +3,7 @@ package jobs_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -137,8 +138,8 @@ func TestOutboxDispatcherSkipsEventsWithoutHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if events[0].Status != "pending" {
-		t.Fatalf("expected domain event to stay pending, got %+v", events[0])
+	if events[0].Status != "processing" || !strings.Contains(events[0].LastError, "no handler registered") {
+		t.Fatalf("expected unhandled domain event to be parked as processing, got %+v", events[0])
 	}
 }
 
@@ -221,8 +222,50 @@ func TestOutboxDispatcherKeepsUnmappedEventsPendingInNATSMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if events[0].Status != "pending" {
-		t.Fatalf("expected unmapped event to stay pending, got %+v", events[0])
+	if events[0].Status != "processing" || !strings.Contains(events[0].LastError, "no handler registered") {
+		t.Fatalf("expected unmapped event to be parked as processing, got %+v", events[0])
+	}
+}
+
+// TestOutboxDispatcherClaimIsExclusiveAcrossWorkers 驗證同一事件不會被兩個 worker 重複處理。
+func TestOutboxDispatcherClaimIsExclusiveAcrossWorkers(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 6, 17, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.AppendOutboxEvent(ctx, domain.OutboxEvent{
+		ID:            "outbox-1",
+		TenantID:      "tenant-1",
+		EventType:     string(domain.EventOpenFGARelationshipWrite),
+		AggregateType: domain.OutboxAggregateAuthz,
+		Payload: map[string]any{
+			"object_type":  "hr.employee",
+			"object_id":    "emp-1",
+			"relation":     "owner",
+			"subject_type": "account",
+			"subject_id":   "acct-1",
+		},
+		Status:    "pending",
+		CreatedAt: now,
+	})
+	writerA := &recordingTupleWriter{}
+	writerB := &recordingTupleWriter{}
+	dispatcherA := jobs.NewOutboxDispatcher(store, writerA, nil)
+	dispatcherB := jobs.NewOutboxDispatcher(store, writerB, nil)
+
+	processedA, err := dispatcherA.ProcessTenant(ctx, "tenant-1", jobs.OutboxDispatchOptions{BatchSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	processedB, err := dispatcherB.ProcessTenant(ctx, "tenant-1", jobs.OutboxDispatchOptions{BatchSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processedA != 1 || processedB != 0 {
+		t.Fatalf("processed A/B = %d/%d, want 1/0", processedA, processedB)
+	}
+	if len(writerA.changes) != 1 || len(writerB.changes) != 0 {
+		t.Fatalf("expected exclusive claim, got writerA=%d writerB=%d", len(writerA.changes), len(writerB.changes))
 	}
 }
 

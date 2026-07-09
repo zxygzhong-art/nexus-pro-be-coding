@@ -1,0 +1,8 @@
+model_list:
+  - model_name: ${AGENT_MODEL_NAME:-openai/gpt-4.1-mini}
+    litellm_params:
+      model: ${LITELLM_UPSTREAM_MODEL:-openai/gpt-4.1-mini}
+      api_key: ${OPENAI_API_KEY}
+
+general_settings:
+  master_key: ${LITELLM_MASTER_KEY}

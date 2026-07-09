@@ -105,36 +105,51 @@ func (c WorkspaceService) WorkspaceOrganization(ctx RequestContext) (WorkspaceOr
 	if err != nil {
 		return WorkspaceOrganizationResponse{}, err
 	}
+	positions, err := c.store.ListPositions(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return WorkspaceOrganizationResponse{}, err
+	}
 	orgNames := workspaceOrgNames(units)
 	displayIDs := workspaceEmployeeDisplayIDs(employees)
 	byID := map[string]Employee{}
-	managerIDs := map[string]struct{}{}
 	for _, employee := range employees {
 		byID[employee.ID] = employee
-		if employee.ManagerEmployeeID != "" {
-			managerIDs[employee.ManagerEmployeeID] = struct{}{}
+	}
+	derivedManagers := workspaceDerivedManagersByOrgUnit(units, positions, employees)
+	effectiveParents := map[string]string{}
+	managerIDs := map[string]struct{}{}
+	for _, employee := range employees {
+		parentID, source := workspaceEffectiveManager(employee, derivedManagers)
+		effectiveParents[employee.ID] = parentID
+		if parentID != "" {
+			managerIDs[parentID] = struct{}{}
 		}
+		_ = source
 	}
 	rows := make([]WorkspaceOrganizationRow, 0, len(employees))
 	levelMemo := map[string]int{}
 	for _, employee := range employees {
 		displayID := displayIDs[employee.ID]
+		managerID, source := workspaceEffectiveManager(employee, derivedManagers)
 		parentID := workspaceParentNone
-		if employee.ManagerEmployeeID != "" {
-			if managerDisplayID, ok := displayIDs[employee.ManagerEmployeeID]; ok {
+		if managerID != "" {
+			if managerDisplayID, ok := displayIDs[managerID]; ok {
 				parentID = managerDisplayID
 			}
 		}
 		_, isManager := managerIDs[employee.ID]
 		rows = append(rows, WorkspaceOrganizationRow{
-			ID:        displayID,
-			NameZH:    employee.Name,
-			NameEN:    workspaceEmployeeNameEN(employee),
-			Dept:      workspaceOrgName(orgNames, employee.OrgUnitID),
-			Title:     employee.Position,
-			Level:     workspaceEmployeeLevel(employee.ID, byID, levelMemo),
-			IsManager: isManager,
-			ParentID:  parentID,
+			ID:            displayID,
+			NameZH:        employee.Name,
+			NameEN:        workspaceEmployeeNameEN(employee),
+			Dept:          workspaceOrgName(orgNames, employee.OrgUnitID),
+			Title:         employee.Position,
+			Level:         workspaceEffectiveEmployeeLevel(employee.ID, effectiveParents, byID, levelMemo),
+			IsManager:     isManager,
+			ParentID:      parentID,
+			OrgUnitID:     employee.OrgUnitID,
+			ManagerSource: source,
+			IsOverride:    source == "override",
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {

@@ -46,12 +46,24 @@ func newWorkflowEngineFixtureWithFake(t *testing.T, now time.Time, reviewerAccou
 		DirectPermissionSetIDs: []string{"ps-workflow-applicant"},
 		CreatedAt:              now,
 	})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-workflow-reviewer",
+		TenantID: "tenant-1",
+		Name:     "Workflow Reviewer",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_instance", Action: "update", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "read", Scope: "all"},
+			{Resource: "workflow.form_instance", Action: "approve", Scope: "all"},
+		},
+		CreatedAt: now,
+	})
 	_ = store.UpsertAccount(context.Background(), domain.Account{
-		ID:          reviewerAccountID,
-		TenantID:    "tenant-1",
-		DisplayName: "Reviewer",
-		Status:      "active",
-		CreatedAt:   now,
+		ID:                     reviewerAccountID,
+		TenantID:               "tenant-1",
+		DisplayName:            "Reviewer",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workflow-reviewer"},
+		CreatedAt:              now,
 	})
 	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
 		ID:        "ft-leave",

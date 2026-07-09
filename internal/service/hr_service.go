@@ -50,12 +50,14 @@ func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (
 	var unit OrgUnit
 	if err := c.withTransaction(ctx, func(tx HRService) error {
 		next := OrgUnit{
-			ID:        utils.NewID("ou"),
-			TenantID:  ctx.TenantID,
-			Code:      strings.TrimSpace(input.Code),
-			Name:      strings.TrimSpace(input.Name),
-			ParentID:  strings.TrimSpace(input.ParentID),
-			CreatedAt: tx.Now(),
+			ID:                utils.NewID("ou"),
+			TenantID:          ctx.TenantID,
+			Code:              strings.TrimSpace(input.Code),
+			Name:              strings.TrimSpace(input.Name),
+			ParentID:          strings.TrimSpace(input.ParentID),
+			ManagerPositionID: strings.TrimSpace(input.ManagerPositionID),
+			CreatedAt:         tx.Now(),
+			UpdatedAt:         tx.Now(),
 		}
 		if next.ParentID != "" {
 			parent, ok, err := tx.store.GetOrgUnit(goContext(ctx), ctx.TenantID, next.ParentID)
@@ -69,6 +71,9 @@ func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (
 		} else {
 			next.Path = []string{next.ID}
 		}
+		if err := tx.validateOrgUnitManagerPosition(ctx, next); err != nil {
+			return err
+		}
 		if err := tx.store.UpsertOrgUnit(goContext(ctx), next); err != nil {
 			return err
 		}
@@ -78,7 +83,10 @@ func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (
 		if err := tx.touchAuthzConfig(ctx, "org.unit.upsert", map[string]any{"org_unit_id": next.ID, "parent_id": next.ParentID}); err != nil {
 			return err
 		}
-		if err := tx.audit(ctx, "org.unit.create", "org_unit", next.ID, "medium", map[string]any{"name": next.Name}); err != nil {
+		if err := tx.audit(ctx, "org.unit.create", "org_unit", next.ID, "medium", map[string]any{
+			"name":                next.Name,
+			"manager_position_id": next.ManagerPositionID,
+		}); err != nil {
 			return err
 		}
 		unit = next
@@ -89,9 +97,178 @@ func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (
 	c.logInfo(ctx, "org unit created",
 		"org_unit_id", unit.ID,
 		"parent_id", unit.ParentID,
+		"manager_position_id", unit.ManagerPositionID,
 		"code", unit.Code,
 	)
 	return unit, nil
+}
+
+// UpdateOrgUnit 更新組織單位的服務流程。
+func (c HRService) UpdateOrgUnit(ctx RequestContext, id string, input UpdateOrgUnitInput) (OrgUnit, error) {
+	orgUnitID := strings.TrimSpace(id)
+	if orgUnitID == "" {
+		return OrgUnit{}, BadRequest("org unit id is required")
+	}
+	if _, _, err := c.Service.requireServiceAuthz(ctx, AppHR, ResourceOrgUnit, ActionUpdate, orgUnitID); err != nil {
+		return OrgUnit{}, err
+	}
+	var unit OrgUnit
+	if err := c.withTransaction(ctx, func(tx HRService) error {
+		current, ok, err := tx.store.GetOrgUnit(goContext(ctx), ctx.TenantID, orgUnitID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("org unit", orgUnitID)
+		}
+		before := current
+		next := current
+		next.UpdatedAt = tx.Now()
+		if input.Code != nil {
+			next.Code = strings.TrimSpace(*input.Code)
+		}
+		if input.Name != nil {
+			name := strings.TrimSpace(*input.Name)
+			if name == "" {
+				return BadRequest("org unit name is required")
+			}
+			next.Name = name
+		}
+		parentChanged := false
+		if input.ParentID != nil {
+			parentID := strings.TrimSpace(*input.ParentID)
+			if parentID == next.ID {
+				return BadRequest("org unit cannot be its own parent")
+			}
+			if parentID != next.ParentID {
+				parentChanged = true
+				next.ParentID = parentID
+			}
+		}
+		if input.ManagerPositionID != nil {
+			next.ManagerPositionID = strings.TrimSpace(*input.ManagerPositionID)
+		}
+		if parentChanged {
+			if err := tx.rebuildOrgUnitPaths(ctx, &next); err != nil {
+				return err
+			}
+		}
+		if err := tx.validateOrgUnitManagerPosition(ctx, next); err != nil {
+			return err
+		}
+		if err := tx.store.UpsertOrgUnit(goContext(ctx), next); err != nil {
+			return err
+		}
+		if parentChanged {
+			if err := tx.updateOrgUnitDescendantPaths(ctx, before, next); err != nil {
+				return err
+			}
+		}
+		if err := tx.Service.syncOrgUnitRelationshipTuples(ctx, before, next); err != nil {
+			return err
+		}
+		if err := tx.touchAuthzConfig(ctx, "org.unit.upsert", map[string]any{
+			"org_unit_id":         next.ID,
+			"parent_id":           next.ParentID,
+			"manager_position_id": next.ManagerPositionID,
+		}); err != nil {
+			return err
+		}
+		if err := tx.audit(ctx, "org.unit.update", "org_unit", next.ID, "medium", map[string]any{
+			"before_parent_id":           before.ParentID,
+			"after_parent_id":            next.ParentID,
+			"before_manager_position_id": before.ManagerPositionID,
+			"after_manager_position_id":  next.ManagerPositionID,
+		}); err != nil {
+			return err
+		}
+		unit = next
+		return nil
+	}); err != nil {
+		return OrgUnit{}, err
+	}
+	return unit, nil
+}
+
+func (c HRService) validateOrgUnitManagerPosition(ctx RequestContext, unit OrgUnit) error {
+	positionID := strings.TrimSpace(unit.ManagerPositionID)
+	if positionID == "" {
+		return nil
+	}
+	position, ok, err := c.store.GetPosition(goContext(ctx), ctx.TenantID, positionID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return NotFound("position", positionID)
+	}
+	if position.Status == string(PositionStatusDisabled) {
+		return BadRequest("manager position is disabled")
+	}
+	if position.OrgUnitID != "" && position.OrgUnitID != unit.ID {
+		return BadRequest("manager position must belong to the same org unit")
+	}
+	return nil
+}
+
+func (c HRService) rebuildOrgUnitPaths(ctx RequestContext, unit *OrgUnit) error {
+	if unit.ParentID == "" {
+		unit.Path = []string{unit.ID}
+		return nil
+	}
+	parent, ok, err := c.store.GetOrgUnit(goContext(ctx), ctx.TenantID, unit.ParentID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return NotFound("org unit", unit.ParentID)
+	}
+	for _, pathID := range parent.Path {
+		if pathID == unit.ID {
+			return BadRequest("org unit parent would create a cycle")
+		}
+	}
+	unit.Path = append(utils.CopyStrings(parent.Path), unit.ID)
+	return nil
+}
+
+func (c HRService) updateOrgUnitDescendantPaths(ctx RequestContext, before, next OrgUnit) error {
+	units, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return err
+	}
+	oldPrefix := utils.CopyStrings(before.Path)
+	newPrefix := utils.CopyStrings(next.Path)
+	for _, unit := range units {
+		if unit.ID == next.ID {
+			continue
+		}
+		if !orgUnitPathHasPrefix(unit.Path, oldPrefix) {
+			continue
+		}
+		updated := unit
+		updated.Path = append(utils.CopyStrings(newPrefix), unit.Path[len(oldPrefix):]...)
+		updated.UpdatedAt = c.Now()
+		if err := c.store.UpsertOrgUnit(goContext(ctx), updated); err != nil {
+			return err
+		}
+		if err := c.Service.syncOrgUnitRelationshipTuples(ctx, unit, updated); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func orgUnitPathHasPrefix(path, prefix []string) bool {
+	if len(path) < len(prefix) {
+		return false
+	}
+	for i := range prefix {
+		if path[i] != prefix[i] {
+			return false
+		}
+	}
+	return true
 }
 
 // ListEmployees 列出員工的服務流程。
