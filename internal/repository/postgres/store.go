@@ -2776,6 +2776,65 @@ func (s *Store) ListAuditLogPage(execCtx context.Context, tenantID string, page 
 	return mapSlice(items, fromAuditLog), int(total), nil
 }
 
+// ListAuditLogPageFiltered 從儲存層篩選並列出稽核 log 分頁。
+func (s *Store) ListAuditLogPageFiltered(execCtx context.Context, tenantID string, query domain.WorkspaceAuditLogQuery, page domain.PageRequest) ([]domain.AuditLog, int, error) {
+	page = utils.NormalizePageRequest(page)
+	params := auditLogFilterParams(tenantID, query, page)
+	total, err := s.q.CountAuditLogsFiltered(tenantContext(execCtx, tenantID), sqlc.CountAuditLogsFilteredParams{
+		TenantID:   params.TenantID,
+		OperatorID: params.OperatorID,
+		HasFrom:    params.HasFrom,
+		FromTime:   params.FromTime,
+		HasTo:      params.HasTo,
+		ToTime:     params.ToTime,
+		Type:       params.Type,
+		Keyword:    params.Keyword,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	items, err := s.q.ListAuditLogsFilteredPage(tenantContext(execCtx, tenantID), params)
+	if err != nil {
+		return nil, 0, err
+	}
+	return mapSlice(items, fromAuditLog), int(total), nil
+}
+
+func auditLogFilterParams(tenantID string, query domain.WorkspaceAuditLogQuery, page domain.PageRequest) sqlc.ListAuditLogsFilteredPageParams {
+	from, hasFrom := auditLogFilterTime(query.From, false)
+	to, hasTo := auditLogFilterTime(query.To, true)
+	return sqlc.ListAuditLogsFilteredPageParams{
+		TenantID:    tenantID,
+		OperatorID:  strings.TrimSpace(query.OperatorID),
+		HasFrom:     hasFrom,
+		FromTime:    pgtype.Timestamptz{Time: from, Valid: hasFrom},
+		HasTo:       hasTo,
+		ToTime:      pgtype.Timestamptz{Time: to, Valid: hasTo},
+		Type:        strings.TrimSpace(query.Type),
+		Keyword:     strings.TrimSpace(query.Keyword),
+		Sort:        page.Sort,
+		OffsetCount: int32((page.Page - 1) * page.PageSize),
+		LimitCount:  int32(page.PageSize),
+	}
+}
+
+func auditLogFilterTime(value string, endExclusive bool) (time.Time, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Time{}, false
+	}
+	if parsed, err := time.Parse(time.RFC3339, trimmed); err == nil {
+		return parsed, true
+	}
+	if parsed, err := time.Parse(time.DateOnly, trimmed); err == nil {
+		if endExclusive {
+			return parsed.AddDate(0, 0, 1), true
+		}
+		return parsed, true
+	}
+	return time.Time{}, false
+}
+
 // GetPermissionVersion 從儲存層取得權限 version。
 func (s *Store) GetPermissionVersion(execCtx context.Context, tenantID string) (int64, error) {
 	v, err := s.q.GetAuthzPermissionVersion(tenantContext(execCtx, tenantID), tenantID)

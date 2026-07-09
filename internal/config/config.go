@@ -16,12 +16,22 @@ type Config struct {
 	HTTPAddr string
 	LogLevel string
 
+	// DatabaseURL is derived from DB_HOST/DB_PORT/DB_USERNAME/DB_PASSWORD/DB_NAME/DB_SSLMODE.
 	DatabaseURL       string
+	DBHost            string
+	DBPort            string
+	DBUsername        string
+	DBPassword        string
+	DBName            string
+	DBSSLMode         string
 	DBMaxConns        int
 	DBMinConns        int
 	DBMaxConnLifetime time.Duration
 
+	// RedisAddr is derived from REDIS_HOST/REDIS_PORT.
 	RedisAddr     string
+	RedisHost     string
+	RedisPort     string
 	RedisPassword string
 	RedisDB       int
 
@@ -56,7 +66,7 @@ type Config struct {
 	OpenFGAModelID           string
 	OpenFGAScopeCheckEnabled bool
 
-	TemporalHostPort  string
+	TemporalBaseURL   string
 	TemporalNamespace string
 	TemporalTaskQueue string
 
@@ -114,13 +124,13 @@ func (c Config) ValidateStartup() error {
 	}
 	problems := []string{}
 	if strings.TrimSpace(c.DatabaseURL) == "" {
-		problems = append(problems, "DATABASE_URL is required")
-	} else if problem := productionDatabaseSSLProblem(c.DatabaseURL); problem != "" {
+		problems = append(problems, "DB_HOST, DB_USERNAME, and DB_NAME are required")
+	} else if problem := productionDatabaseSSLProblem(c.DBSSLMode); problem != "" {
 		problems = append(problems, problem)
 	}
 	if strings.TrimSpace(c.KeycloakIssuerURL) == "" {
-		problems = append(problems, "KEYCLOAK_ISSUER_URL is required")
-	} else if problem := productionHTTPSURLProblem("KEYCLOAK_ISSUER_URL", c.KeycloakIssuerURL); problem != "" {
+		problems = append(problems, "KEYCLOAK_BASE_URL is required")
+	} else if problem := productionHTTPSURLProblem("KEYCLOAK_BASE_URL", c.KeycloakIssuerURL); problem != "" {
 		problems = append(problems, problem)
 	}
 	if strings.TrimSpace(c.KeycloakClientID) == "" {
@@ -140,8 +150,8 @@ func (c Config) ValidateStartup() error {
 		}
 	}
 	if strings.TrimSpace(c.OpenFGAAPIURL) == "" {
-		problems = append(problems, "OPENFGA_API_URL is required")
-	} else if problem := productionHTTPSURLProblem("OPENFGA_API_URL", c.OpenFGAAPIURL); problem != "" {
+		problems = append(problems, "OPENFGA_BASE_URL is required")
+	} else if problem := productionHTTPSURLProblem("OPENFGA_BASE_URL", c.OpenFGAAPIURL); problem != "" {
 		problems = append(problems, problem)
 	}
 	if strings.TrimSpace(c.OpenFGAStoreID) == "" {
@@ -153,8 +163,8 @@ func (c Config) ValidateStartup() error {
 	problems = append(problems, temporalConfigProblems(c)...)
 	if c.NATSEnabled {
 		if strings.TrimSpace(c.NATSURL) == "" {
-			problems = append(problems, "NATS_URL is required when NATS_ENABLED=true")
-		} else if problem := natsURLProblem("NATS_URL", c.NATSURL); problem != "" {
+			problems = append(problems, "NATS_BASE_URL is required when NATS_ENABLED=true")
+		} else if problem := natsURLProblem("NATS_BASE_URL", c.NATSURL); problem != "" {
 			problems = append(problems, problem)
 		}
 	}
@@ -172,22 +182,30 @@ func (c Config) ValidateStartup() error {
 	switch normalizeObjectStoreProvider(c.ObjectStoreProvider, c.ObjectStoreDir, c.ObjectStoreEndpoint, c.ObjectStoreBucket) {
 	case "sftpgo":
 		if strings.TrimSpace(c.ObjectStoreEndpoint) == "" {
-			problems = append(problems, "OBJECT_STORE_ENDPOINT is required")
+			problems = append(problems, "SFTPGO_BASE_URL is required")
+		} else if problem := sftpgoEndpointProblem(c.ObjectStoreEndpoint); problem != "" {
+			problems = append(problems, problem)
 		}
 		if strings.TrimSpace(c.ObjectStoreBucket) == "" {
-			problems = append(problems, "OBJECT_STORE_BUCKET is required as the SFTPGo root directory")
+			problems = append(problems, "SFTPGO_ROOT_BUCKET or OBJECT_STORE_BUCKET is required as the SFTPGo root directory")
 		}
 		if strings.TrimSpace(c.ObjectStoreAccessKeyID) == "" {
-			problems = append(problems, "OBJECT_STORE_ACCESS_KEY_ID is required as the SFTPGo username")
+			problems = append(problems, "SFTPGO_USERNAME or OBJECT_STORE_ACCESS_KEY_ID is required as the SFTPGo username")
 		}
 		if strings.TrimSpace(c.ObjectStoreSecretAccessKey) == "" {
-			problems = append(problems, "OBJECT_STORE_SECRET_ACCESS_KEY is required as the SFTPGo password")
+			problems = append(problems, "SFTPGO_PASSWORD or OBJECT_STORE_SECRET_ACCESS_KEY is required as the SFTPGo password")
 		}
-		if c.ObjectStoreSFTPInsecureSkipHostKey {
-			problems = append(problems, "OBJECT_STORE_SFTP_INSECURE_SKIP_HOST_KEY must not be enabled in production")
-		}
-		if strings.TrimSpace(c.ObjectStoreSFTPHostKey) == "" {
-			problems = append(problems, "OBJECT_STORE_SFTP_HOST_KEY is required in production when OBJECT_STORE_PROVIDER=sftpgo")
+		if isSFTPGoHTTPEndpoint(c.ObjectStoreEndpoint) {
+			if problem := productionHTTPSURLProblem("SFTPGO_BASE_URL", c.ObjectStoreEndpoint); problem != "" {
+				problems = append(problems, problem)
+			}
+		} else {
+			if c.ObjectStoreSFTPInsecureSkipHostKey {
+				problems = append(problems, "OBJECT_STORE_SFTP_INSECURE_SKIP_HOST_KEY must not be enabled in production")
+			}
+			if strings.TrimSpace(c.ObjectStoreSFTPHostKey) == "" {
+				problems = append(problems, "OBJECT_STORE_SFTP_HOST_KEY is required in production when OBJECT_STORE_PROVIDER=sftpgo uses sftp://")
+			}
 		}
 	case "local":
 		if strings.TrimSpace(c.ObjectStoreDir) == "" {
@@ -217,16 +235,36 @@ func Load() Config {
 func LoadE() (Config, error) {
 	appEnv := env("APP_ENV", "development")
 	problems := []string{}
-	objectStoreProvider := normalizeObjectStoreProvider(os.Getenv("OBJECT_STORE_PROVIDER"), os.Getenv("OBJECT_STORE_DIR"), os.Getenv("OBJECT_STORE_ENDPOINT"), os.Getenv("OBJECT_STORE_BUCKET"))
+	sftpgoBaseURL := strings.TrimSpace(os.Getenv("SFTPGO_BASE_URL"))
+	objectStoreBucket := firstNonEmptyEnv("SFTPGO_ROOT_BUCKET", "OBJECT_STORE_BUCKET")
+	objectStoreAccessKeyID := firstNonEmptyEnv("SFTPGO_USERNAME", "OBJECT_STORE_ACCESS_KEY_ID")
+	objectStoreSecretAccessKey := firstNonEmptyEnv("SFTPGO_PASSWORD", "OBJECT_STORE_SECRET_ACCESS_KEY")
+	objectStoreProvider := normalizeObjectStoreProvider(os.Getenv("OBJECT_STORE_PROVIDER"), os.Getenv("OBJECT_STORE_DIR"), sftpgoBaseURL, objectStoreBucket)
+	dbHost := strings.TrimSpace(os.Getenv("DB_HOST"))
+	dbPort := env("DB_PORT", "5432")
+	dbUsername := strings.TrimSpace(os.Getenv("DB_USERNAME"))
+	dbPassword := os.Getenv("DB_PASSWORD")
+	dbName := strings.TrimSpace(os.Getenv("DB_NAME"))
+	dbSSLMode := env("DB_SSLMODE", "disable")
+	redisHost := strings.TrimSpace(os.Getenv("REDIS_HOST"))
+	redisPort := env("REDIS_PORT", "6379")
 	cfg := Config{
 		Env:               appEnv,
 		HTTPAddr:          env("HTTP_ADDR", ":8080"),
 		LogLevel:          env("LOG_LEVEL", "info"),
-		DatabaseURL:       strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		DBHost:            dbHost,
+		DBPort:            dbPort,
+		DBUsername:        dbUsername,
+		DBPassword:        dbPassword,
+		DBName:            dbName,
+		DBSSLMode:         dbSSLMode,
+		DatabaseURL:       BuildDatabaseURL(dbHost, dbPort, dbUsername, dbPassword, dbName, dbSSLMode),
 		DBMaxConns:        envInt("DB_MAX_CONNS", 10, &problems),
 		DBMinConns:        envInt("DB_MIN_CONNS", 1, &problems),
 		DBMaxConnLifetime: envDuration("DB_MAX_CONN_LIFETIME", time.Hour, &problems),
-		RedisAddr:         strings.TrimSpace(os.Getenv("REDIS_ADDR")),
+		RedisHost:         redisHost,
+		RedisPort:         redisPort,
+		RedisAddr:         buildRedisAddr(redisHost, redisPort),
 		RedisPassword:     os.Getenv("REDIS_PASSWORD"),
 		RedisDB:           envInt("REDIS_DB", 0, &problems),
 
@@ -242,7 +280,7 @@ func LoadE() (Config, error) {
 
 		SwaggerEnabled: envBool("SWAGGER_ENABLED", appEnv != "production", &problems),
 
-		KeycloakIssuerURL:         strings.TrimSpace(os.Getenv("KEYCLOAK_ISSUER_URL")),
+		KeycloakIssuerURL:         strings.TrimSpace(os.Getenv("KEYCLOAK_BASE_URL")),
 		KeycloakClientID:          strings.TrimSpace(os.Getenv("KEYCLOAK_CLIENT_ID")),
 		KeycloakProvisionUsers:    envBool("KEYCLOAK_PROVISION_USERS", false, &problems),
 		KeycloakAdminClientID:     strings.TrimSpace(os.Getenv("KEYCLOAK_ADMIN_CLIENT_ID")),
@@ -251,17 +289,17 @@ func LoadE() (Config, error) {
 		KeycloakInviteClientID:    env("KEYCLOAK_INVITE_CLIENT_ID", strings.TrimSpace(os.Getenv("KEYCLOAK_CLIENT_ID"))),
 		KeycloakInviteRedirectURL: strings.TrimSpace(os.Getenv("KEYCLOAK_INVITE_REDIRECT_URL")),
 
-		OpenFGAAPIURL:            strings.TrimSpace(os.Getenv("OPENFGA_API_URL")),
+		OpenFGAAPIURL:            strings.TrimSpace(os.Getenv("OPENFGA_BASE_URL")),
 		OpenFGAStoreID:           strings.TrimSpace(os.Getenv("OPENFGA_STORE_ID")),
 		OpenFGAModelID:           strings.TrimSpace(os.Getenv("OPENFGA_MODEL_ID")),
 		OpenFGAScopeCheckEnabled: envBool("OPENFGA_SCOPE_CHECK_ENABLED", false, &problems),
 
-		TemporalHostPort:  envAllowEmpty("TEMPORAL_HOST_PORT", "127.0.0.1:27233"),
+		TemporalBaseURL:   envAllowEmpty("TEMPORAL_BASE_URL", "127.0.0.1:27233"),
 		TemporalNamespace: env("TEMPORAL_NAMESPACE", "default"),
 		TemporalTaskQueue: env("TEMPORAL_TASK_QUEUE", "nexus-workflows"),
 
 		NATSEnabled:        envBool("NATS_ENABLED", false, &problems),
-		NATSURL:            env("NATS_URL", "nats://127.0.0.1:24222"),
+		NATSURL:            env("NATS_BASE_URL", "nats://127.0.0.1:24222"),
 		NATSStream:         env("NATS_STREAM", "NEXUS_EVENTS"),
 		NATSConsumerPrefix: env("NATS_CONSUMER_PREFIX", "nexus"),
 
@@ -274,11 +312,11 @@ func LoadE() (Config, error) {
 
 		ObjectStoreProvider:                objectStoreProvider,
 		ObjectStoreDir:                     strings.TrimSpace(os.Getenv("OBJECT_STORE_DIR")),
-		ObjectStoreEndpoint:                strings.TrimSpace(os.Getenv("OBJECT_STORE_ENDPOINT")),
-		ObjectStoreBucket:                  strings.TrimSpace(os.Getenv("OBJECT_STORE_BUCKET")),
+		ObjectStoreEndpoint:                sftpgoBaseURL,
+		ObjectStoreBucket:                  objectStoreBucket,
 		ObjectStoreRegion:                  env("OBJECT_STORE_REGION", "us-east-1"),
-		ObjectStoreAccessKeyID:             strings.TrimSpace(os.Getenv("OBJECT_STORE_ACCESS_KEY_ID")),
-		ObjectStoreSecretAccessKey:         os.Getenv("OBJECT_STORE_SECRET_ACCESS_KEY"),
+		ObjectStoreAccessKeyID:             objectStoreAccessKeyID,
+		ObjectStoreSecretAccessKey:         objectStoreSecretAccessKey,
 		ObjectStoreSFTPHostKey:             strings.TrimSpace(os.Getenv("OBJECT_STORE_SFTP_HOST_KEY")),
 		ObjectStoreSFTPInsecureSkipHostKey: envBool("OBJECT_STORE_SFTP_INSECURE_SKIP_HOST_KEY", false, &problems),
 		ObjectStoreUseSSL:                  envBool("OBJECT_STORE_USE_SSL", false, &problems),
@@ -303,7 +341,7 @@ func LoadE() (Config, error) {
 
 		OTelEnabled:              envBool("OTEL_ENABLED", false, &problems),
 		OTelServiceName:          env("OTEL_SERVICE_NAME", "nexus-pro-be"),
-		OTelExporterOTLPEndpoint: env("OTEL_EXPORTER_OTLP_ENDPOINT", "localhost:4317"),
+		OTelExporterOTLPEndpoint: env("OTEL_BASE_URL", "localhost:4317"),
 		OTelExporterOTLPInsecure: envBool("OTEL_EXPORTER_OTLP_INSECURE", true, &problems),
 	}
 	if cfg.EHRMSAttendanceSyncTenantID == "" {
@@ -336,8 +374,8 @@ func keycloakProvisioningConfigProblems(c Config) []string {
 		return problems
 	}
 	if strings.TrimSpace(c.KeycloakIssuerURL) == "" {
-		problems = append(problems, "KEYCLOAK_ISSUER_URL is required when KEYCLOAK_PROVISION_USERS=true")
-	} else if problem := httpURLProblem("KEYCLOAK_ISSUER_URL", c.KeycloakIssuerURL); problem != "" {
+		problems = append(problems, "KEYCLOAK_BASE_URL is required when KEYCLOAK_PROVISION_USERS=true")
+	} else if problem := httpURLProblem("KEYCLOAK_BASE_URL", c.KeycloakIssuerURL); problem != "" {
 		problems = append(problems, problem)
 	}
 	if strings.TrimSpace(c.KeycloakAdminClientID) == "" {
@@ -436,8 +474,8 @@ func ehrmsAttendanceSyncConfigProblems(c Config) []string {
 // temporalConfigProblems 處理 Temporal 組態 problems。
 func temporalConfigProblems(c Config) []string {
 	problems := []string{}
-	if strings.TrimSpace(c.TemporalHostPort) == "" {
-		problems = append(problems, "TEMPORAL_HOST_PORT is required")
+	if strings.TrimSpace(c.TemporalBaseURL) == "" {
+		problems = append(problems, "TEMPORAL_BASE_URL is required")
 	}
 	if strings.TrimSpace(c.TemporalNamespace) == "" {
 		problems = append(problems, "TEMPORAL_NAMESPACE is required")
@@ -506,20 +544,65 @@ func httpURLProblem(name string, raw string) string {
 	return ""
 }
 
-// productionDatabaseSSLProblem 處理 production database ssl problem。
-func productionDatabaseSSLProblem(raw string) string {
-	parsed, err := url.Parse(strings.TrimSpace(raw))
-	if err != nil {
-		return "DATABASE_URL must be a valid URL in production"
+// buildRedisAddr builds host:port from discrete REDIS_* fields.
+func buildRedisAddr(host, port string) string {
+	host = strings.TrimSpace(host)
+	if host == "" {
+		return ""
 	}
-	switch strings.ToLower(strings.TrimSpace(parsed.Query().Get("sslmode"))) {
+	if strings.TrimSpace(port) == "" {
+		port = "6379"
+	}
+	return net.JoinHostPort(host, port)
+}
+
+// BuildDatabaseURL builds a Postgres DSN from discrete DB_* fields.
+func BuildDatabaseURL(host, port, username, password, name, sslmode string) string {
+	host = strings.TrimSpace(host)
+	username = strings.TrimSpace(username)
+	name = strings.TrimSpace(name)
+	if host == "" || username == "" || name == "" {
+		return ""
+	}
+	if strings.TrimSpace(port) == "" {
+		port = "5432"
+	}
+	if strings.TrimSpace(sslmode) == "" {
+		sslmode = "disable"
+	}
+	u := &url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(username, password),
+		Host:   net.JoinHostPort(host, port),
+		Path:   "/" + name,
+	}
+	q := url.Values{}
+	q.Set("sslmode", sslmode)
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
+// DatabaseURLFromEnv builds a Postgres DSN from DB_* environment variables.
+func DatabaseURLFromEnv() string {
+	return BuildDatabaseURL(
+		os.Getenv("DB_HOST"),
+		env("DB_PORT", "5432"),
+		os.Getenv("DB_USERNAME"),
+		os.Getenv("DB_PASSWORD"),
+		os.Getenv("DB_NAME"),
+		env("DB_SSLMODE", "disable"),
+	)
+}
+
+// productionDatabaseSSLProblem 處理 production database ssl problem。
+func productionDatabaseSSLProblem(sslmode string) string {
+	switch strings.ToLower(strings.TrimSpace(sslmode)) {
 	case "require", "verify-ca", "verify-full":
 		return ""
 	case "":
-		// pgx 預設 sslmode=prefer，可能靜默退回明文連線。
-		return "DATABASE_URL must set sslmode=require, verify-ca, or verify-full in production"
+		return "DB_SSLMODE must be require, verify-ca, or verify-full in production"
 	default:
-		return "DATABASE_URL must not use a non-TLS sslmode in production (require, verify-ca, or verify-full)"
+		return "DB_SSLMODE must not use a non-TLS mode in production (require, verify-ca, or verify-full)"
 	}
 }
 
@@ -570,6 +653,48 @@ func normalizeObjectStoreProvider(provider, dir, endpoint, bucket string) string
 		return "local"
 	}
 	return "memory"
+}
+
+// firstNonEmptyEnv returns the first non-empty environment value among keys.
+func firstNonEmptyEnv(keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+// isSFTPGoHTTPEndpoint reports whether the SFTPGo endpoint uses HTTP(S).
+func isSFTPGoHTTPEndpoint(endpoint string) bool {
+	parsed, err := url.Parse(strings.TrimSpace(endpoint))
+	if err != nil {
+		return false
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https":
+		return true
+	default:
+		return false
+	}
+}
+
+// sftpgoEndpointProblem validates SFTPGo endpoint schemes.
+func sftpgoEndpointProblem(endpoint string) string {
+	value := strings.TrimSpace(endpoint)
+	if value == "" {
+		return ""
+	}
+	parsed, err := url.Parse(value)
+	if err != nil || parsed.Host == "" {
+		return "SFTPGO_BASE_URL must be a valid http(s) or sftp URL"
+	}
+	switch strings.ToLower(parsed.Scheme) {
+	case "http", "https", "sftp":
+		return ""
+	default:
+		return "SFTPGO_BASE_URL must use http, https, or sftp"
+	}
 }
 
 // splitCommaList 拆分comma 列表。

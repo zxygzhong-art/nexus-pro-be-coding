@@ -1,6 +1,6 @@
 -- Patch demo tenant form templates with executable workflow stages for live E2E.
 -- Run after migrations:
---   psql "$DATABASE_URL" -f tools/db/patch-demo-workflow-templates.sql
+--   psql "postgres://$DB_USERNAME:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME?sslmode=${DB_SSLMODE:-disable}" -f tools/db/patch-demo-workflow-templates.sql
 
 UPDATE form_templates
 SET schema = schema || '{

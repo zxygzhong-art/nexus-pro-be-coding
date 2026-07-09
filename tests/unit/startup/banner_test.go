@@ -16,7 +16,7 @@ func TestRenderIncludesRuntimeAndDependencies(t *testing.T) {
 		Repository: "postgresql",
 		Dependencies: []startup.Dependency{
 			{Name: "PostgreSQL", Status: "connected", Target: "postgres://nexus@localhost:5432/nexus_pro_be", Detail: "repository backend"},
-			{Name: "Redis", Status: "skipped", Target: "REDIS_ADDR not set", Detail: "authz snapshots disabled"},
+			{Name: "Redis", Status: "skipped", Target: "REDIS_HOST not set", Detail: "authz snapshots disabled"},
 		},
 	})
 

@@ -88,8 +88,8 @@ func runTemporalBackfillFormWorkflows(args []string) error {
 	fs := flag.NewFlagSet("tenantctl temporal-backfill-form-workflows", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	tenantID := fs.String("tenant-id", "", "tenant id to backfill")
-	databaseURL := fs.String("database-url", strings.TrimSpace(os.Getenv("DATABASE_URL")), "Postgres database URL")
-	temporalHostPort := fs.String("temporal-host-port", firstNonEmpty(os.Getenv("TEMPORAL_HOST_PORT"), "127.0.0.1:27233"), "Temporal host:port")
+	databaseURL := fs.String("database-url", config.DatabaseURLFromEnv(), "Postgres database URL")
+	temporalBaseURL := fs.String("temporal-base-url", firstNonEmpty(os.Getenv("TEMPORAL_BASE_URL"), "127.0.0.1:27233"), "Temporal base URL (host:port)")
 	temporalNamespace := fs.String("temporal-namespace", firstNonEmpty(os.Getenv("TEMPORAL_NAMESPACE"), "default"), "Temporal namespace")
 	temporalTaskQueue := fs.String("temporal-task-queue", firstNonEmpty(os.Getenv("TEMPORAL_TASK_QUEUE"), "nexus-workflows"), "Temporal task queue")
 	timeout := fs.Duration("timeout", 5*time.Minute, "operation timeout")
@@ -107,10 +107,10 @@ func runTemporalBackfillFormWorkflows(args []string) error {
 		return errors.New("--tenant-id is required")
 	}
 	if strings.TrimSpace(*databaseURL) == "" {
-		return errors.New("DATABASE_URL or --database-url is required")
+		return errors.New("DB_HOST/DB_USERNAME/DB_NAME or --database-url is required")
 	}
-	if !*dryRun && strings.TrimSpace(*temporalHostPort) == "" {
-		return errors.New("TEMPORAL_HOST_PORT or --temporal-host-port is required")
+	if !*dryRun && strings.TrimSpace(*temporalBaseURL) == "" {
+		return errors.New("TEMPORAL_BASE_URL or --temporal-base-url is required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
@@ -136,7 +136,7 @@ func runTemporalBackfillFormWorkflows(args []string) error {
 	var temporalClient sdkclient.Client
 	if !*dryRun {
 		client, err := temporalplatform.Dial(ctx, temporalplatform.Config{
-			HostPort:  *temporalHostPort,
+			HostPort:  *temporalBaseURL,
 			Namespace: *temporalNamespace,
 			TaskQueue: *temporalTaskQueue,
 		})
@@ -262,7 +262,7 @@ func runProvision(args []string) error {
 	keycloakSub := fs.String("keycloak-sub", "", "existing Keycloak user id / OIDC subject")
 	provisionKeycloak := fs.Bool("provision-keycloak", false, "ensure the admin user in Keycloak before writing backend records")
 	sendInvite := fs.Bool("send-invite", false, "mark Keycloak user with UPDATE_PASSWORD required action")
-	databaseURL := fs.String("database-url", strings.TrimSpace(os.Getenv("DATABASE_URL")), "Postgres database URL")
+	databaseURL := fs.String("database-url", config.DatabaseURLFromEnv(), "Postgres database URL")
 	timeout := fs.Duration("timeout", 30*time.Second, "operation timeout")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -283,7 +283,7 @@ func runProvision(args []string) error {
 		IdentitySubject:  *keycloakSub,
 	}
 	if strings.TrimSpace(*databaseURL) == "" {
-		return errors.New("DATABASE_URL or --database-url is required")
+		return errors.New("DB_HOST/DB_USERNAME/DB_NAME or --database-url is required")
 	}
 	if !*provisionKeycloak && strings.TrimSpace(input.IdentitySubject) == "" {
 		return errors.New("--keycloak-sub or --provision-keycloak is required")
@@ -325,7 +325,7 @@ func runOpenFGAGrantTenantAdmin(args []string, securityAdmin bool) error {
 	fs.SetOutput(os.Stderr)
 	tenantID := fs.String("tenant-id", "", "tenant id")
 	accountID := fs.String("account-id", "", "account id to grant")
-	databaseURL := fs.String("database-url", strings.TrimSpace(os.Getenv("DATABASE_URL")), "Postgres database URL")
+	databaseURL := fs.String("database-url", config.DatabaseURLFromEnv(), "Postgres database URL")
 	timeout := fs.Duration("timeout", 30*time.Second, "operation timeout")
 	dryRun := fs.Bool("dry-run", false, "compute the tuple without writing local tuples or outbox events")
 	if err := fs.Parse(args); err != nil {
@@ -372,7 +372,7 @@ func runOpenFGAGrantAgentTool(args []string) error {
 	toolID := fs.String("tool-id", "", "agent tool id, for example knowledge.search")
 	accountID := fs.String("account-id", "", "account id to grant")
 	relation := fs.String("relation", "runner", "agent_tool relation: runner or approver")
-	databaseURL := fs.String("database-url", strings.TrimSpace(os.Getenv("DATABASE_URL")), "Postgres database URL")
+	databaseURL := fs.String("database-url", config.DatabaseURLFromEnv(), "Postgres database URL")
 	timeout := fs.Duration("timeout", 30*time.Second, "operation timeout")
 	dryRun := fs.Bool("dry-run", false, "compute the tuple without writing local tuples or outbox events")
 	if err := fs.Parse(args); err != nil {
@@ -414,7 +414,7 @@ func runEHRMSSyncEmployees(args []string) error {
 	tenantID := fs.String("tenant-id", strings.TrimSpace(os.Getenv("EHRMS_SYNC_TENANT_ID")), "tenant id")
 	accountID := fs.String("account-id", strings.TrimSpace(os.Getenv("EHRMS_SYNC_ACCOUNT_ID")), "service account id with hr.employee.import")
 	mode := fs.String("mode", firstNonEmpty(strings.TrimSpace(os.Getenv("EHRMS_SYNC_MODE")), "upsert"), "sync mode: create, update, or upsert")
-	databaseURL := fs.String("database-url", strings.TrimSpace(os.Getenv("DATABASE_URL")), "Postgres database URL")
+	databaseURL := fs.String("database-url", config.DatabaseURLFromEnv(), "Postgres database URL")
 	timeout := fs.Duration("timeout", 10*time.Minute, "operation timeout")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -432,7 +432,7 @@ func runEHRMSSyncEmployees(args []string) error {
 		return errors.New("--account-id or EHRMS_SYNC_ACCOUNT_ID is required")
 	}
 	if strings.TrimSpace(*databaseURL) == "" {
-		return errors.New("DATABASE_URL or --database-url is required")
+		return errors.New("DB_HOST/DB_USERNAME/DB_NAME or --database-url is required")
 	}
 	cfg, err := config.LoadE()
 	if err != nil {
@@ -442,7 +442,7 @@ func runEHRMSSyncEmployees(args []string) error {
 		return errors.New("EHRMS_BASE_URL and EHRMS_API_KEY are required")
 	}
 	if strings.TrimSpace(cfg.OpenFGAAPIURL) == "" || strings.TrimSpace(cfg.OpenFGAStoreID) == "" || strings.TrimSpace(cfg.OpenFGAModelID) == "" {
-		return errors.New("OPENFGA_API_URL, OPENFGA_STORE_ID, and OPENFGA_MODEL_ID are required")
+		return errors.New("OPENFGA_BASE_URL, OPENFGA_STORE_ID, and OPENFGA_MODEL_ID are required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
@@ -491,7 +491,7 @@ func runEHRMSSyncAttendance(args []string) error {
 	accountID := fs.String("account-id", firstNonEmpty(strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID")), strings.TrimSpace(os.Getenv("EHRMS_SYNC_ACCOUNT_ID"))), "service account id with attendance.clock.import")
 	mode := fs.String("mode", firstNonEmpty(strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_MODE")), "upsert"), "sync mode: create, update, or upsert")
 	since := fs.String("since", strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_SINCE")), "optional YYYY-MM-DD lower bound")
-	databaseURL := fs.String("database-url", strings.TrimSpace(os.Getenv("DATABASE_URL")), "Postgres database URL")
+	databaseURL := fs.String("database-url", config.DatabaseURLFromEnv(), "Postgres database URL")
 	timeout := fs.Duration("timeout", 10*time.Minute, "operation timeout")
 	if err := fs.Parse(args); err != nil {
 		if errors.Is(err, flag.ErrHelp) {
@@ -509,7 +509,7 @@ func runEHRMSSyncAttendance(args []string) error {
 		return errors.New("--account-id or EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID/EHRMS_SYNC_ACCOUNT_ID is required")
 	}
 	if strings.TrimSpace(*databaseURL) == "" {
-		return errors.New("DATABASE_URL or --database-url is required")
+		return errors.New("DB_HOST/DB_USERNAME/DB_NAME or --database-url is required")
 	}
 	cfg, err := config.LoadE()
 	if err != nil {
@@ -519,7 +519,7 @@ func runEHRMSSyncAttendance(args []string) error {
 		return errors.New("EHRMS_BASE_URL and EHRMS_API_KEY are required")
 	}
 	if strings.TrimSpace(cfg.OpenFGAAPIURL) == "" || strings.TrimSpace(cfg.OpenFGAStoreID) == "" || strings.TrimSpace(cfg.OpenFGAModelID) == "" {
-		return errors.New("OPENFGA_API_URL, OPENFGA_STORE_ID, and OPENFGA_MODEL_ID are required")
+		return errors.New("OPENFGA_BASE_URL, OPENFGA_STORE_ID, and OPENFGA_MODEL_ID are required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
@@ -560,7 +560,7 @@ func runOpenFGABackfill(args []string) error {
 	fs := flag.NewFlagSet("tenantctl openfga-backfill", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)
 	tenantID := fs.String("tenant-id", "", "tenant id to backfill")
-	databaseURL := fs.String("database-url", strings.TrimSpace(os.Getenv("DATABASE_URL")), "Postgres database URL")
+	databaseURL := fs.String("database-url", config.DatabaseURLFromEnv(), "Postgres database URL")
 	timeout := fs.Duration("timeout", 5*time.Minute, "operation timeout")
 	dryRun := fs.Bool("dry-run", false, "compute missing tuples without writing local tuples or outbox events")
 	if err := fs.Parse(args); err != nil {
@@ -576,7 +576,7 @@ func runOpenFGABackfill(args []string) error {
 		return errors.New("--tenant-id is required")
 	}
 	if strings.TrimSpace(*databaseURL) == "" {
-		return errors.New("DATABASE_URL or --database-url is required")
+		return errors.New("DB_HOST/DB_USERNAME/DB_NAME or --database-url is required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
 	defer cancel()
@@ -601,7 +601,7 @@ func runOpenFGABackfill(args []string) error {
 
 func tenantctlService(databaseURL string) (*service.Service, *slog.Logger, func(), error) {
 	if strings.TrimSpace(databaseURL) == "" {
-		return nil, nil, nil, errors.New("DATABASE_URL or --database-url is required")
+		return nil, nil, nil, errors.New("DB_HOST/DB_USERNAME/DB_NAME or --database-url is required")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	pool, err := postgresplatform.OpenPool(ctx, databaseURL)
@@ -624,7 +624,7 @@ func ensureKeycloakAdmin(ctx context.Context, input service.TenantProvisionInput
 		return domain.ProvisionedIdentity{}, err
 	}
 	cfg := auth.KeycloakAdminConfig{
-		IssuerURL:         strings.TrimSpace(os.Getenv("KEYCLOAK_ISSUER_URL")),
+		IssuerURL:         strings.TrimSpace(os.Getenv("KEYCLOAK_BASE_URL")),
 		ClientID:          strings.TrimSpace(os.Getenv("KEYCLOAK_ADMIN_CLIENT_ID")),
 		ClientSecret:      os.Getenv("KEYCLOAK_ADMIN_CLIENT_SECRET"),
 		SendInviteEmail:   envBool("KEYCLOAK_SEND_INVITE_EMAIL"),
@@ -663,15 +663,15 @@ func printUsage(out *os.File) {
   tenantctl ehrms-sync-attendance [--tenant-id <id>] [--account-id <account-id>] [--mode upsert] [--since YYYY-MM-DD]
 
 Required environment:
-  DATABASE_URL
-  TEMPORAL_HOST_PORT
+  DB_HOST / DB_PORT / DB_USERNAME / DB_PASSWORD / DB_NAME
+  TEMPORAL_BASE_URL
   TEMPORAL_NAMESPACE
   TEMPORAL_TASK_QUEUE
 
 Required for ehrms-sync-employees:
   EHRMS_BASE_URL
   EHRMS_API_KEY
-  OPENFGA_API_URL
+  OPENFGA_BASE_URL
   OPENFGA_STORE_ID
   OPENFGA_MODEL_ID
   EHRMS_SYNC_TENANT_ID (or --tenant-id)
@@ -680,14 +680,14 @@ Required for ehrms-sync-employees:
 Required for ehrms-sync-attendance:
   EHRMS_BASE_URL
   EHRMS_API_KEY
-  OPENFGA_API_URL
+  OPENFGA_BASE_URL
   OPENFGA_STORE_ID
   OPENFGA_MODEL_ID
   EHRMS_ATTENDANCE_SYNC_TENANT_ID or EHRMS_SYNC_TENANT_ID (or --tenant-id)
   EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID or EHRMS_SYNC_ACCOUNT_ID (or --account-id)
 
 Required for --provision-keycloak:
-  KEYCLOAK_ISSUER_URL
+  KEYCLOAK_BASE_URL
   KEYCLOAK_ADMIN_CLIENT_ID
   KEYCLOAK_ADMIN_CLIENT_SECRET
 

@@ -153,7 +153,7 @@ func (c AgentService) DeleteModel(ctx RequestContext, id string) (domain.AgentMo
 	return model, nil
 }
 
-// TestModel 執行本地 mock 連通測試並寫回 last_test_*。
+// TestModel 執行本地模型設定檢查並寫回 last_test_*；不宣稱外部 provider 已連通。
 func (c AgentService) TestModel(ctx RequestContext, id string) (domain.AgentModel, error) {
 	account, _, err := c.requireAgentAuthz(ctx, ResourceModel, ActionUpdate, id)
 	if err != nil {
@@ -164,7 +164,7 @@ func (c AgentService) TestModel(ctx RequestContext, id string) (domain.AgentMode
 		return domain.AgentModel{}, err
 	}
 	status := "ok"
-	message := "mock connection ok"
+	message := "local configuration check ok; provider connectivity not verified"
 	if model.Status == domain.AgentModelStatusDisabled {
 		status = "failed"
 		message = "model is disabled"
@@ -382,7 +382,7 @@ func (c AgentService) Trial(ctx RequestContext, id string, input domain.AgentTri
 	if message == "" {
 		return domain.AgentTrialResult{}, BadRequest("message is required")
 	}
-	reply, err := c.trialReply(ctx, agent, model, message)
+	reply, toolsUsed, err := c.trialReply(ctx, agent, model, message)
 	if err != nil {
 		return domain.AgentTrialResult{}, err
 	}
@@ -398,36 +398,47 @@ func (c AgentService) Trial(ctx RequestContext, id string, input domain.AgentTri
 	if err := c.recordAgentAdminAudit(ctx, account, "agent", agent.ID, agent.Name, "trial", "agent trial executed"); err != nil {
 		return domain.AgentTrialResult{}, err
 	}
-	return domain.AgentTrialResult{Reply: reply, LatencyMs: latencyMs, ToolsUsed: agent.Tools, ModelName: model.ModelName}, nil
+	return domain.AgentTrialResult{Reply: reply, LatencyMs: latencyMs, ToolsUsed: toolsUsed, ModelName: model.ModelName}, nil
 }
 
-// trialReply 優先使用已注入的 AgentChatRuntime，否則回退 mock 回覆。
-func (c AgentService) trialReply(ctx RequestContext, agent domain.AgentDefinition, model domain.AgentModel, message string) (string, error) {
+// trialReply 優先使用已注入的 AgentChatRuntime，並只回報 runtime 實際成功呼叫的工具。
+func (c AgentService) trialReply(ctx RequestContext, agent domain.AgentDefinition, model domain.AgentModel, message string) (string, []string, error) {
 	if c.agentChatRuntime == nil {
-		return fmt.Sprintf("[%s] mock reply using %s: %s", agent.Name, model.ModelName, message), nil
+		return fmt.Sprintf("[%s] mock reply using %s: %s", agent.Name, model.ModelName, message), []string{}, nil
 	}
 	var answer strings.Builder
+	toolsUsed := make([]string, 0)
+	seenTools := map[string]struct{}{}
+	emit := func(_ context.Context, event domain.AgentChatEvent) error {
+		if event.Event == domain.AgentChatEventMessageDelta {
+			answer.WriteString(event.Delta)
+			return nil
+		}
+		if event.Event == domain.AgentChatEventToolResult && event.Status == "ok" && strings.TrimSpace(event.Name) != "" {
+			if _, exists := seenTools[event.Name]; !exists {
+				seenTools[event.Name] = struct{}{}
+				toolsUsed = append(toolsUsed, event.Name)
+			}
+		}
+		return nil
+	}
+	baseCtx := WithAgentRequestContext(goContext(ctx), ctx)
 	req := AgentChatRuntimeRequest{
 		RequestContext: ctx,
 		RunID:          "trial-" + agent.ID,
 		SessionID:      "trial-" + agent.ID,
 		Message:        message,
 		Mode:           "trial",
-		Tools:          map[string]AgentReadOnlyTool{},
+		Tools:          c.filteredAgentReadOnlyTools(ctx, agent.Tools, true, emit),
 	}
-	if err := c.agentChatRuntime.RunAgentChat(goContext(ctx), req, func(_ context.Context, event domain.AgentChatEvent) error {
-		if event.Event == domain.AgentChatEventMessageDelta {
-			answer.WriteString(event.Delta)
-		}
-		return nil
-	}); err != nil {
-		return "", err
+	if err := c.agentChatRuntime.RunAgentChat(baseCtx, req, emit); err != nil {
+		return "", []string{}, err
 	}
 	reply := strings.TrimSpace(answer.String())
 	if reply == "" {
-		return fmt.Sprintf("[%s] mock reply using %s: %s", agent.Name, model.ModelName, message), nil
+		return fmt.Sprintf("[%s] mock reply using %s: %s", agent.Name, model.ModelName, message), toolsUsed, nil
 	}
-	return reply, nil
+	return reply, toolsUsed, nil
 }
 
 // RollbackDefinition 以歷史版本建立新的目前版本。
@@ -569,25 +580,54 @@ func (c AgentService) ImportBundle(ctx RequestContext, bundle domain.AgentBundle
 		return domain.ImportAgentBundleResult{}, err
 	}
 	result := domain.ImportAgentBundleResult{}
-	for _, model := range bundle.Models {
-		model.TenantID = ctx.TenantID
-		model.CreatedAt = nonZeroTime(model.CreatedAt, c.Now())
-		model.UpdatedAt = c.Now()
-		if err := c.store.UpsertAgentModel(goContext(ctx), model); err != nil {
-			return result, err
-		}
-		result.Models++
+	importedModelIDs, err := agentModelIDsFromBundle(bundle.Models)
+	if err != nil {
+		return result, err
 	}
-	for _, agent := range bundle.Agents {
-		agent.TenantID = ctx.TenantID
-		agent.CreatedAt = nonZeroTime(agent.CreatedAt, c.Now())
-		agent.UpdatedAt = c.Now()
-		if err := c.store.UpsertAgentDefinition(goContext(ctx), agent); err != nil {
-			return result, err
+	if err := c.withTenantTransaction(ctx, func(tx *Service) error {
+		agentSvc := tx.Agent()
+		for _, model := range bundle.Models {
+			model.ID = strings.TrimSpace(model.ID)
+			model.TenantID = ctx.TenantID
+			model.CreatedAt = nonZeroTime(model.CreatedAt, tx.Now())
+			model.UpdatedAt = tx.Now()
+			normalized, err := agentSvc.normalizeAgentModelForImport(ctx, model, importedModelIDs)
+			if err != nil {
+				return err
+			}
+			if err := agentSvc.store.UpsertAgentModel(goContext(ctx), normalized); err != nil {
+				return err
+			}
+			result.Models++
 		}
-		result.Agents++
+		for _, agent := range bundle.Agents {
+			agent.ID = strings.TrimSpace(agent.ID)
+			if agent.ID == "" {
+				return BadRequest("agent id is required")
+			}
+			agent.TenantID = ctx.TenantID
+			agent.CreatedAt = nonZeroTime(agent.CreatedAt, tx.Now())
+			agent.UpdatedAt = tx.Now()
+			if strings.TrimSpace(agent.CreatedByAccountID) == "" {
+				agent.CreatedByAccountID = account.ID
+			}
+			agent.UpdatedByAccountID = account.ID
+			normalized, err := agentSvc.normalizeAgentDefinitionForImport(ctx, agent, importedModelIDs)
+			if err != nil {
+				return err
+			}
+			if err := agentSvc.store.UpsertAgentDefinition(goContext(ctx), normalized); err != nil {
+				return err
+			}
+			if err := agentSvc.ensureImportedAgentVersion(ctx, normalized, account.ID); err != nil {
+				return err
+			}
+			result.Agents++
+		}
+		return agentSvc.recordAgentAdminAudit(ctx, account, "agent", "bundle", "bundle", "import", "bundle imported")
+	}); err != nil {
+		return result, err
 	}
-	_ = c.recordAgentAdminAudit(ctx, account, "agent", "bundle", "bundle", "import", "bundle imported")
 	return result, nil
 }
 
@@ -622,6 +662,10 @@ func (c AgentService) currentAgentDefinition(ctx RequestContext, id string) (dom
 }
 
 func (c AgentService) normalizeAgentModel(ctx RequestContext, model domain.AgentModel) (domain.AgentModel, error) {
+	return c.normalizeAgentModelForImport(ctx, model, nil)
+}
+
+func (c AgentService) normalizeAgentModelForImport(ctx RequestContext, model domain.AgentModel, importedModelIDs map[string]struct{}) (domain.AgentModel, error) {
 	model.Name = strings.TrimSpace(model.Name)
 	if model.Name == "" {
 		return domain.AgentModel{}, BadRequest("name is required")
@@ -654,7 +698,7 @@ func (c AgentService) normalizeAgentModel(ctx RequestContext, model domain.Agent
 		model.LastTestStatus = "untested"
 	}
 	if model.FallbackModelID != "" {
-		if _, err := c.currentAgentModel(ctx, model.FallbackModelID); err != nil {
+		if err := c.requireAgentModelReference(ctx, model.FallbackModelID, importedModelIDs); err != nil {
 			return domain.AgentModel{}, err
 		}
 	}
@@ -662,15 +706,19 @@ func (c AgentService) normalizeAgentModel(ctx RequestContext, model domain.Agent
 }
 
 func (c AgentService) normalizeAgentDefinition(ctx RequestContext, agent domain.AgentDefinition) (domain.AgentDefinition, error) {
+	return c.normalizeAgentDefinitionForImport(ctx, agent, nil)
+}
+
+func (c AgentService) normalizeAgentDefinitionForImport(ctx RequestContext, agent domain.AgentDefinition, importedModelIDs map[string]struct{}) (domain.AgentDefinition, error) {
 	agent.Name = strings.TrimSpace(agent.Name)
 	if agent.Name == "" {
 		return domain.AgentDefinition{}, BadRequest("name is required")
 	}
-	if _, err := c.currentAgentModel(ctx, agent.ModelID); err != nil {
+	if err := c.requireAgentModelReference(ctx, agent.ModelID, importedModelIDs); err != nil {
 		return domain.AgentDefinition{}, err
 	}
 	if agent.FallbackModelID != "" {
-		if _, err := c.currentAgentModel(ctx, agent.FallbackModelID); err != nil {
+		if err := c.requireAgentModelReference(ctx, agent.FallbackModelID, importedModelIDs); err != nil {
 			return domain.AgentDefinition{}, err
 		}
 	}
@@ -708,8 +756,60 @@ func (c AgentService) normalizeAgentDefinition(ctx RequestContext, agent domain.
 		agent.Version = 1
 	}
 	agent.Tools = uniqueStrings(agent.Tools)
+	if err := validateAgentTools(agent.Tools); err != nil {
+		return domain.AgentDefinition{}, err
+	}
 	agent.VisibilityTargets = uniqueStrings(agent.VisibilityTargets)
 	return agent, nil
+}
+
+func (c AgentService) requireAgentModelReference(ctx RequestContext, id string, importedModelIDs map[string]struct{}) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return BadRequest("model_id is required")
+	}
+	if _, ok := importedModelIDs[id]; ok {
+		return nil
+	}
+	_, err := c.currentAgentModel(ctx, id)
+	return err
+}
+
+func agentModelIDsFromBundle(models []domain.AgentModel) (map[string]struct{}, error) {
+	ids := make(map[string]struct{}, len(models))
+	for _, model := range models {
+		id := strings.TrimSpace(model.ID)
+		if id == "" {
+			return nil, BadRequest("model id is required")
+		}
+		ids[id] = struct{}{}
+	}
+	return ids, nil
+}
+
+func validateAgentTools(tools []string) error {
+	if len(tools) == 0 {
+		return nil
+	}
+	catalog := map[string]struct{}{}
+	for _, tool := range agentToolCatalog() {
+		catalog[tool.Value] = struct{}{}
+	}
+	for _, tool := range tools {
+		if _, ok := catalog[tool]; !ok {
+			return BadRequest("agent tool is invalid: " + tool)
+		}
+	}
+	return nil
+}
+
+func (c AgentService) ensureImportedAgentVersion(ctx RequestContext, agent domain.AgentDefinition, actorID string) error {
+	if _, ok, err := c.store.GetAgentDefinitionVersion(goContext(ctx), ctx.TenantID, agent.ID, agent.Version); err != nil {
+		return err
+	} else if ok {
+		return nil
+	}
+	return c.snapshotAgentDefinition(ctx, agent, actorID, "imported bundle")
 }
 
 func (c AgentService) snapshotAgentDefinition(ctx RequestContext, agent domain.AgentDefinition, actorID, note string) error {

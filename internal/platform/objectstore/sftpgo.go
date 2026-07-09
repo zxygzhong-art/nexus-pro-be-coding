@@ -34,6 +34,34 @@ type SFTPGo struct {
 	config   *ssh.ClientConfig
 }
 
+// ObjectStore is the shared object store surface used by bootstrap.
+type ObjectStore interface {
+	PutObject(ctx context.Context, key string, contentType string, data []byte) error
+	DeleteObject(ctx context.Context, key string) error
+	Provider() string
+	Bucket() string
+}
+
+// NewSFTPGoStore creates an SFTPGo-backed object store using HTTP or SFTP.
+func NewSFTPGoStore(ctx context.Context, opts SFTPGoOptions) (ObjectStore, error) {
+	endpoint := strings.TrimSpace(opts.Endpoint)
+	if strings.Contains(endpoint, "://") {
+		parsed, err := url.Parse(endpoint)
+		if err != nil {
+			return nil, err
+		}
+		switch strings.ToLower(parsed.Scheme) {
+		case "http", "https":
+			return NewSFTPGoHTTP(ctx, opts)
+		case "sftp":
+			return NewSFTPGo(ctx, opts)
+		default:
+			return nil, errors.New("object store endpoint must use http, https, or sftp")
+		}
+	}
+	return NewSFTPGo(ctx, opts)
+}
+
 // NewSFTPGo creates an object store backed by SFTPGo.
 func NewSFTPGo(ctx context.Context, opts SFTPGoOptions) (*SFTPGo, error) {
 	endpoint, err := normalizeSFTPGoEndpoint(opts.Endpoint)

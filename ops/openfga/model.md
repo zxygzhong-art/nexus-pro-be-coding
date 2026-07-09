@@ -102,7 +102,7 @@ This file documents `ops/openfga/model.json`. Apply the JSON model with
 2. Apply the model:
 
    ```sh
-   make openfga-apply-model OPENFGA_API_URL=http://127.0.0.1:24081 OPENFGA_STORE_ID=<store-id>
+   make openfga-apply-model OPENFGA_BASE_URL=http://127.0.0.1:24081 OPENFGA_STORE_ID=<store-id>
    ```
 
 3. Update the API environment with the returned model ID:
@@ -128,7 +128,7 @@ This file documents `ops/openfga/model.json`. Apply the JSON model with
    go run ./cmd/tenantctl openfga-grant-agent-tool --tenant-id <tenant-id> --tool-id knowledge.search --account-id <account-id> --relation approver
    ```
 
-6. Start the API with `OPENFGA_API_URL`, `OPENFGA_STORE_ID`, and
+6. Start the API with `OPENFGA_BASE_URL`, `OPENFGA_STORE_ID`, and
    `OPENFGA_MODEL_ID`. Readiness verifies the configured model ID.
 7. Enable FGA-backed checks only after the model ID is updated and backfill is
    complete:

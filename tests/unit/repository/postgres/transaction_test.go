@@ -3,6 +3,7 @@ package postgres_test
 import (
 	"context"
 	"errors"
+	"nexus-pro-be/internal/config"
 	"os"
 	"testing"
 	"time"
@@ -105,9 +106,9 @@ func TestListTenantsInjectsSystemTaskScope(t *testing.T) {
 // openPostgresIntegrationPool 驗證 open Postgres integration pool。
 func openPostgresIntegrationPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := os.Getenv("DATABASE_URL")
+	dsn := config.DatabaseURLFromEnv()
 	if dsn == "" {
-		t.Skip("DATABASE_URL is not set; skipping postgres integration test")
+		t.Skip("DB_* is not set; skipping postgres integration test")
 	}
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {

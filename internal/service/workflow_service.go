@@ -323,8 +323,8 @@ func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (
 	}
 	var instance FormInstance
 	var err error
-	if existing, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, idOrTemplateKey); err != nil {
-		return FormInstance{}, err
+	if existing, ok, lookupErr := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, idOrTemplateKey); lookupErr != nil {
+		return FormInstance{}, lookupErr
 	} else if ok {
 		instance, err = c.submitExistingDraft(ctx, existing.ID, input.Payload)
 	} else {
@@ -751,8 +751,8 @@ func normalizeFormInstanceStatusFilter(status string) (string, error) {
 		return "", nil
 	case "draft", "drafts":
 		return workflowFormStatusDraft, nil
-	case "pending", "pending_review", "pending-review", "submitted":
-		return workflowFormStatusSubmitted, nil
+	case "pending", "pending_review", "pending-review", "submitted", "in_review", "in-review":
+		return workflowFormStatusInReview, nil
 	case "approved":
 		return workflowFormStatusApproved, nil
 	case "rejected", "reject":

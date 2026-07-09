@@ -51,7 +51,7 @@
   - unit baseline：`GOCACHE=$PWD/.gocache go test ./tests/unit/...`
 - 需要擴大驗證時再執行 `GOCACHE=$PWD/.gocache go test ./...` 或 `make test`；除非任務明確需要，不預設做耗時全量檢查。
 - 本專案不會自動載入 `.env`；本地啟動前需要手動匯出環境，常用方式是 `set -a; source .env; set +a`。
-- 最快的無外部依賴 smoke 可以不設定 `DATABASE_URL` / `REDIS_ADDR`，啟動後檢查 `/healthz`、`/v1/me`、`/swagger/index.html`、`/openapi.yaml`。
+- 最快的無外部依賴 smoke 可以不設定 `DB_*` / `REDIS_*`，啟動後檢查 `/healthz`、`/v1/me`、`/swagger/index.html`、`/openapi.yaml`。
 - 不要預設啟動依賴 Docker 的本地服務，除非任務明確需要整合驗證。
 
 ## Git 與工作區

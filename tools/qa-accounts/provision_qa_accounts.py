@@ -16,15 +16,16 @@ Requirements:
   - Postgres migrated (make migrate-up)
 
 Usage:
-  export DATABASE_URL='postgres://nexus:nexus@127.0.0.1:5432/nexus_pro_be?sslmode=disable'
-  export KEYCLOAK_BASE_URL='http://127.0.0.1:8080'
+  export DB_HOST=127.0.0.1 DB_PORT=5432 DB_USERNAME=nexus DB_PASSWORD=nexus DB_NAME=nexus_pro_be
+  export KEYCLOAK_BASE_URL='http://127.0.0.1:8080/realms/nexus-pro'
   ./provision_qa_accounts.py                 # provision + verify
   ./provision_qa_accounts.py --verify-only   # only run login verification
   ./provision_qa_accounts.py --print-matrix  # print the account matrix and exit
 
-Environment variables (all optional except DATABASE_URL):
-  DATABASE_URL           Postgres connection string (required unless --verify-only/--print-matrix)
-  KEYCLOAK_BASE_URL      default http://127.0.0.1:8080
+Environment variables (all optional except DB_*):
+  DB_HOST/DB_PORT/DB_USERNAME/DB_PASSWORD/DB_NAME/DB_SSLMODE
+                         Postgres connection fields (required unless --verify-only/--print-matrix)
+  KEYCLOAK_BASE_URL      issuer or server root; default http://127.0.0.1:8080
   KEYCLOAK_REALM         default nexus-pro
   KEYCLOAK_ADMIN_USER    master realm admin username, default admin
   KEYCLOAK_ADMIN_PASS    master realm admin password, default admin
@@ -51,7 +52,6 @@ import urllib.request
 # Configuration
 # ---------------------------------------------------------------------------
 
-KC_BASE = os.environ.get("KEYCLOAK_BASE_URL", "http://127.0.0.1:8080").rstrip("/")
 KC_REALM = os.environ.get("KEYCLOAK_REALM", "nexus-pro")
 KC_ADMIN_USER = os.environ.get("KEYCLOAK_ADMIN_USER", "admin")
 KC_ADMIN_PASS = os.environ.get("KEYCLOAK_ADMIN_PASS", "admin")
@@ -62,7 +62,31 @@ TENANT_ID = os.environ.get("QA_TENANT_ID", "qa")
 TENANT_NAME = os.environ.get("QA_TENANT_NAME", "QA Tenant")
 QA_PASSWORD = os.environ.get("QA_PASSWORD", "QaTest123!")
 API_BASE = os.environ.get("API_BASE_URL", "").rstrip("/")
-DATABASE_URL = os.environ.get("DATABASE_URL", "")
+
+def build_database_url() -> str:
+    host = os.environ.get("DB_HOST", "").strip()
+    user = os.environ.get("DB_USERNAME", "").strip()
+    name = os.environ.get("DB_NAME", "").strip()
+    if not host or not user or not name:
+        return ""
+    port = os.environ.get("DB_PORT", "5432").strip() or "5432"
+    password = os.environ.get("DB_PASSWORD", "")
+    sslmode = os.environ.get("DB_SSLMODE", "disable").strip() or "disable"
+    user_enc = urllib.parse.quote(user, safe="")
+    password_enc = urllib.parse.quote(password, safe="")
+    return f"postgres://{user_enc}:{password_enc}@{host}:{port}/{name}?sslmode={sslmode}"
+
+
+def keycloak_server_base(raw: str) -> str:
+    value = raw.rstrip("/")
+    marker = "/realms/"
+    if marker in value:
+        return value.split(marker, 1)[0]
+    return value
+
+KC_BASE_RAW = os.environ.get("KEYCLOAK_BASE_URL", "http://127.0.0.1:8080")
+KC_BASE = keycloak_server_base(KC_BASE_RAW)
+DATABASE_URL = build_database_url()
 
 ROOT_ORG_ID = f"ou-{TENANT_ID}-root"
 
@@ -636,7 +660,7 @@ def main():
         return
 
     if not DATABASE_URL:
-        die("DATABASE_URL is required")
+        die("DB_HOST, DB_USERNAME, and DB_NAME are required")
 
     print(f"=== 1/4 Keycloak admin 登录（{KC_BASE}, realm={KC_REALM}）===")
     token = kc_admin_token()

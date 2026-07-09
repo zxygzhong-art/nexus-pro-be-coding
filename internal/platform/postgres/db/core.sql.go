@@ -221,6 +221,80 @@ func (q *Queries) CountAuditLogs(ctx context.Context, tenantID string) (int64, e
 	return count, err
 }
 
+const countAuditLogsFiltered = `-- name: CountAuditLogsFiltered :one
+SELECT count(*)
+FROM audit_logs al
+LEFT JOIN accounts a ON a.tenant_id = al.tenant_id AND a.id = al.actor_account_id
+LEFT JOIN employees e ON e.tenant_id = al.tenant_id AND e.id = a.employee_id
+WHERE al.tenant_id = $1
+  AND (
+    $2::text = ''
+    OR lower(al.actor_account_id) = lower($2::text)
+    OR lower(coalesce(a.id, '')) = lower($2::text)
+    OR lower(coalesce(a.employee_id, '')) = lower($2::text)
+    OR lower(coalesce(a.display_name, '')) = lower($2::text)
+    OR lower(coalesce(a.email, '')) = lower($2::text)
+    OR lower(coalesce(e.id, '')) = lower($2::text)
+    OR lower(coalesce(e.employee_no, '')) = lower($2::text)
+    OR lower(coalesce(e.name, '')) = lower($2::text)
+  )
+  AND (NOT $3::bool OR al.created_at >= $4)
+  AND (NOT $5::bool OR al.created_at < $6)
+  AND (
+    $7::text = ''
+    OR lower(
+      CASE
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%employee%' THEN '員工管理'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%org%' OR lower(al.resource || ' ' || al.action) LIKE '%position%' THEN '組織架構'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%attendance%' OR lower(al.resource || ' ' || al.action) LIKE '%leave%' THEN '假勤制度'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%form%' OR lower(al.resource || ' ' || al.action) LIKE '%workflow%' THEN '表單設計'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%iam%' OR lower(al.resource || ' ' || al.action) LIKE '%authz%' OR lower(al.resource || ' ' || al.action) LIKE '%admin%' THEN '管理員設定'
+        ELSE '系統'
+      END || ' ' || al.resource || ' ' || al.action
+    ) LIKE '%' || lower($7::text) || '%'
+  )
+  AND (
+    $8::text = ''
+    OR lower(
+      coalesce(a.display_name, '') || ' ' ||
+      coalesce(a.email, '') || ' ' ||
+      coalesce(e.employee_no, '') || ' ' ||
+      coalesce(e.name, '') || ' ' ||
+      al.action || ' ' ||
+      al.resource || ' ' ||
+      coalesce(al.target, '') || ' ' ||
+      coalesce(al.details::text, '')
+    ) LIKE '%' || lower($8::text) || '%'
+  )
+`
+
+type CountAuditLogsFilteredParams struct {
+	TenantID   string             `json:"tenant_id"`
+	OperatorID string             `json:"operator_id"`
+	HasFrom    bool               `json:"has_from"`
+	FromTime   pgtype.Timestamptz `json:"from_time"`
+	HasTo      bool               `json:"has_to"`
+	ToTime     pgtype.Timestamptz `json:"to_time"`
+	Type       string             `json:"type"`
+	Keyword    string             `json:"keyword"`
+}
+
+func (q *Queries) CountAuditLogsFiltered(ctx context.Context, arg CountAuditLogsFilteredParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAuditLogsFiltered,
+		arg.TenantID,
+		arg.OperatorID,
+		arg.HasFrom,
+		arg.FromTime,
+		arg.HasTo,
+		arg.ToTime,
+		arg.Type,
+		arg.Keyword,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const countEmployeesFiltered = `-- name: CountEmployeesFiltered :one
 SELECT count(*) FROM employees
 LEFT JOIN accounts
@@ -2433,6 +2507,117 @@ type ListAuditLogsPageParams struct {
 func (q *Queries) ListAuditLogsPage(ctx context.Context, arg ListAuditLogsPageParams) ([]AuditLog, error) {
 	rows, err := q.db.Query(ctx, listAuditLogsPage,
 		arg.TenantID,
+		arg.Sort,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditLog
+	for rows.Next() {
+		var i AuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ActorAccountID,
+			&i.Action,
+			&i.Resource,
+			&i.Target,
+			&i.Result,
+			&i.TraceID,
+			&i.Severity,
+			&i.Details,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditLogsFilteredPage = `-- name: ListAuditLogsFilteredPage :many
+SELECT al.id, al.tenant_id, al.actor_account_id, al.action, al.resource, al.target, al.result, al.trace_id, al.severity, al.details, al.created_at
+FROM audit_logs al
+LEFT JOIN accounts a ON a.tenant_id = al.tenant_id AND a.id = al.actor_account_id
+LEFT JOIN employees e ON e.tenant_id = al.tenant_id AND e.id = a.employee_id
+WHERE al.tenant_id = $1
+  AND (
+    $2::text = ''
+    OR lower(al.actor_account_id) = lower($2::text)
+    OR lower(coalesce(a.id, '')) = lower($2::text)
+    OR lower(coalesce(a.employee_id, '')) = lower($2::text)
+    OR lower(coalesce(a.display_name, '')) = lower($2::text)
+    OR lower(coalesce(a.email, '')) = lower($2::text)
+    OR lower(coalesce(e.id, '')) = lower($2::text)
+    OR lower(coalesce(e.employee_no, '')) = lower($2::text)
+    OR lower(coalesce(e.name, '')) = lower($2::text)
+  )
+  AND (NOT $3::bool OR al.created_at >= $4)
+  AND (NOT $5::bool OR al.created_at < $6)
+  AND (
+    $7::text = ''
+    OR lower(
+      CASE
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%employee%' THEN '員工管理'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%org%' OR lower(al.resource || ' ' || al.action) LIKE '%position%' THEN '組織架構'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%attendance%' OR lower(al.resource || ' ' || al.action) LIKE '%leave%' THEN '假勤制度'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%form%' OR lower(al.resource || ' ' || al.action) LIKE '%workflow%' THEN '表單設計'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%iam%' OR lower(al.resource || ' ' || al.action) LIKE '%authz%' OR lower(al.resource || ' ' || al.action) LIKE '%admin%' THEN '管理員設定'
+        ELSE '系統'
+      END || ' ' || al.resource || ' ' || al.action
+    ) LIKE '%' || lower($7::text) || '%'
+  )
+  AND (
+    $8::text = ''
+    OR lower(
+      coalesce(a.display_name, '') || ' ' ||
+      coalesce(a.email, '') || ' ' ||
+      coalesce(e.employee_no, '') || ' ' ||
+      coalesce(e.name, '') || ' ' ||
+      al.action || ' ' ||
+      al.resource || ' ' ||
+      coalesce(al.target, '') || ' ' ||
+      coalesce(al.details::text, '')
+    ) LIKE '%' || lower($8::text) || '%'
+  )
+ORDER BY
+  CASE WHEN $9::text = 'created_at_asc' THEN al.created_at END ASC,
+  al.created_at DESC,
+  al.id ASC
+LIMIT $11::int
+OFFSET $10::int
+`
+
+type ListAuditLogsFilteredPageParams struct {
+	TenantID    string             `json:"tenant_id"`
+	OperatorID  string             `json:"operator_id"`
+	HasFrom     bool               `json:"has_from"`
+	FromTime    pgtype.Timestamptz `json:"from_time"`
+	HasTo       bool               `json:"has_to"`
+	ToTime      pgtype.Timestamptz `json:"to_time"`
+	Type        string             `json:"type"`
+	Keyword     string             `json:"keyword"`
+	Sort        string             `json:"sort"`
+	OffsetCount int32              `json:"offset_count"`
+	LimitCount  int32              `json:"limit_count"`
+}
+
+func (q *Queries) ListAuditLogsFilteredPage(ctx context.Context, arg ListAuditLogsFilteredPageParams) ([]AuditLog, error) {
+	rows, err := q.db.Query(ctx, listAuditLogsFilteredPage,
+		arg.TenantID,
+		arg.OperatorID,
+		arg.HasFrom,
+		arg.FromTime,
+		arg.HasTo,
+		arg.ToTime,
+		arg.Type,
+		arg.Keyword,
 		arg.Sort,
 		arg.OffsetCount,
 		arg.LimitCount,

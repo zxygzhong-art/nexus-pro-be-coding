@@ -74,7 +74,7 @@ func (c WorkflowService) signalTemporalFormApprovalWorkflow(ctx RequestContext, 
 	if id == "" {
 		return domain.FormInstance{}, BadRequest("id is required")
 	}
-	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionUpdate, id); err != nil {
+	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, workflowSignalAuthzAction(action), workflowSignalAuthzResourceID(action, id)); err != nil {
 		return domain.FormInstance{}, err
 	}
 	if c.formApprovalWorkflows == nil {
@@ -249,13 +249,17 @@ func (c WorkflowService) RecordTemporalFormApprovalReminder(ctx RequestContext, 
 }
 
 func (c WorkflowService) withdrawTemporalFormApproval(ctx RequestContext, formInstanceID, reason string) (domain.FormInstance, error) {
-	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionUpdate, formInstanceID); err != nil {
+	account, decision, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionUpdate, "")
+	if err != nil {
 		return domain.FormInstance{}, err
 	}
 	var instance domain.FormInstance
 	if err := c.withTransaction(ctx, func(tx WorkflowService) error {
 		current, run, stageInstance, _, err := tx.loadActiveWorkflowStage(ctx, formInstanceID)
 		if err != nil {
+			return err
+		}
+		if err := requireFormInstanceVisible(current, account, decision); err != nil {
 			return err
 		}
 		now := tx.Now()
@@ -291,6 +295,26 @@ func (c WorkflowService) withdrawTemporalFormApproval(ctx RequestContext, formIn
 		return domain.FormInstance{}, err
 	}
 	return instance, nil
+}
+
+// workflowSignalAuthzAction maps review signals to their policy action before side effects run.
+func workflowSignalAuthzAction(action string) Action {
+	switch strings.TrimSpace(strings.ToLower(action)) {
+	case domain.FormApprovalWorkflowActionApprove, domain.FormApprovalWorkflowActionReject, domain.FormApprovalWorkflowActionReturn:
+		return ActionApprove
+	default:
+		return ActionUpdate
+	}
+}
+
+// workflowSignalAuthzResourceID defers withdraw ownership checks until the form projection is loaded.
+func workflowSignalAuthzResourceID(action, id string) string {
+	switch strings.TrimSpace(strings.ToLower(action)) {
+	case domain.FormApprovalWorkflowActionWithdraw:
+		return ""
+	default:
+		return id
+	}
 }
 
 func (c WorkflowService) waitTemporalFormApprovalProjection(ctx RequestContext, before domain.FormApprovalProjection, expectedStatus string) (domain.FormApprovalProjection, error) {

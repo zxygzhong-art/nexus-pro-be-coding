@@ -160,8 +160,8 @@ func (c WorkflowCtrl) submitForm(w http.ResponseWriter, r *http.Request, ctx dom
 	if err := readJSON(w, r, &input); err != nil {
 		return err
 	}
-	if input.TemplateKey == "" {
-		input.TemplateKey = r.PathValue(PathParamID)
+	if pathID := strings.TrimSpace(r.PathValue(PathParamID)); pathID != "" {
+		input.TemplateKey = pathID
 	}
 	item, err := c.svc.SubmitForm(ctx, input)
 	if err != nil {

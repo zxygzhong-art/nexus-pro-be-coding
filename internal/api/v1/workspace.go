@@ -1,6 +1,7 @@
 package v1
 
 import (
+	"mime"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -27,7 +28,9 @@ func (c WorkspaceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace.GET("/organization", c.routes.Handle("hr.employee", "read", c.organization))
 	workspace.PATCH("/organization/employees/:id/manager", c.routes.Handle("hr.employee", "update", c.updateOrganizationManager, PathParam(PathParamID)))
 	workspace.GET("/attendance", c.routes.Handle("attendance.clock", "read", c.attendance))
+	workspace.GET("/attendance/export", c.routes.Handle("attendance.clock", "export", c.exportAttendanceCSV))
 	workspace.GET("/turnover", c.routes.Handle("hr.employee", "read", c.turnover))
+	workspace.GET("/turnover/export", c.routes.Handle("hr.employee", "export", c.exportTurnoverCSV))
 	workspace.GET("/forms", c.routes.Handle("workflow.form_template", "read", c.formDesign))
 	workspace.POST("/forms", c.routes.Handle("workflow.form_template", "create", c.createFormDesign))
 	workspace.PATCH("/forms/:id", c.routes.Handle("workflow.form_template", "update", c.updateFormDesign, PathParam(PathParamID)))
@@ -119,6 +122,26 @@ func (c WorkspaceCtrl) turnover(w http.ResponseWriter, r *http.Request, ctx doma
 	return nil
 }
 
+// exportTurnoverCSV 處理人員異動 CSV 匯出。
+func (c WorkspaceCtrl) exportTurnoverCSV(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	annualYear := workspaceIntQuery(r, "annual_year")
+	if annualYear <= 0 {
+		annualYear = workspaceIntQuery(r, "annualYear")
+	}
+	raw, filename, err := c.svc.ExportWorkspaceTurnoverCSV(ctx, domain.WorkspaceTurnoverQuery{
+		Year:       workspaceIntQuery(r, "year"),
+		Month:      workspaceIntQuery(r, "month"),
+		AnnualYear: annualYear,
+	}, strings.TrimSpace(r.URL.Query().Get("kind")))
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	_, _ = w.Write(raw)
+	return nil
+}
+
 // attendance 處理考勤的 HTTP 請求。
 func (c WorkspaceCtrl) attendance(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{
@@ -129,6 +152,21 @@ func (c WorkspaceCtrl) attendance(w http.ResponseWriter, r *http.Request, ctx do
 		return err
 	}
 	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// exportAttendanceCSV 處理考勤 CSV 匯出。
+func (c WorkspaceCtrl) exportAttendanceCSV(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	raw, filename, err := c.svc.ExportWorkspaceAttendanceCSV(ctx, domain.WorkspaceAttendanceQuery{
+		Year:  workspaceIntQuery(r, "year"),
+		Month: workspaceIntQuery(r, "month"),
+	}, strings.TrimSpace(r.URL.Query().Get("kind")))
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": filename}))
+	_, _ = w.Write(raw)
 	return nil
 }
 

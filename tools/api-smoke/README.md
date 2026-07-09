@@ -2,10 +2,10 @@
 
 `full_api_smoke.py` runs the public HTTP API smoke suite and a multi-role authorization matrix.
 
-The smoke suite starts `go run ./cmd/api` against the configured PostgreSQL database and uses Keycloak password-grant login for three DB-backed roles. `DATABASE_URL` must point at a database that already contains the test accounts, and every request is sent with a real Bearer token:
+The smoke suite starts `go run ./cmd/api` against the configured PostgreSQL database and uses Keycloak password-grant login for three DB-backed roles. `DB_*` must point at a database that already contains the test accounts, and every request is sent with a real Bearer token:
 
 ```bash
-export SMOKE_KEYCLOAK_ISSUER_URL="http://localhost:18080/realms/nexus-pro"
+export SMOKE_KEYCLOAK_BASE_URL="http://localhost:18080/realms/nexus-pro"
 export SMOKE_KEYCLOAK_CLIENT_ID="nexus-pro-connect-api"
 
 export SMOKE_ADMIN_USERNAME="local-admin"

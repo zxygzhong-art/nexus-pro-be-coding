@@ -31,7 +31,7 @@ def env(name: str) -> str:
         raise SystemExit(f"missing env {name}")
     return value
 
-issuer = env("KEYCLOAK_ISSUER_URL").rstrip("/")
+issuer = env("KEYCLOAK_BASE_URL").rstrip("/")
 client_id = os.environ.get("KEYCLOAK_CLIENT_ID", "nexus-pro-connect-api")
 username = env("SMOKE_ADMIN_USERNAME")
 password = env("SMOKE_ADMIN_PASSWORD")

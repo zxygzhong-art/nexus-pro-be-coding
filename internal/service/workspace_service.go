@@ -1,10 +1,14 @@
 package service
 
 import (
+	"bytes"
+	"encoding/csv"
 	"fmt"
 	"nexus-pro-be/internal/repository"
 	"nexus-pro-be/internal/utils"
 	"sort"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -257,6 +261,247 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	}, nil
 }
 
+// ExportWorkspaceAttendanceCSV 匯出工作區考勤 CSV。
+func (c WorkspaceService) ExportWorkspaceAttendanceCSV(ctx RequestContext, query WorkspaceAttendanceQuery, kind string) ([]byte, string, error) {
+	item, err := c.WorkspaceAttendance(ctx, query)
+	if err != nil {
+		return nil, "", err
+	}
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		kind = "attendance"
+	}
+	var rows [][]string
+	switch kind {
+	case "attendance":
+		rows = workspaceAttendanceCSVRows(item)
+	case "clock":
+		rows = workspaceClockCSVRows(item)
+	case "abnormal":
+		rows = workspaceClockAbnormalCSVRows(item)
+	default:
+		return nil, "", BadRequest("invalid workspace attendance export kind")
+	}
+	if err := c.audit(ctx, "workspace.attendance.export", string(ResourceAttendanceClock), "", string(SeverityHigh), map[string]any{
+		"year": item.Year, "month": item.Month, "kind": kind, "row_count": workspaceCSVDataRows(rows),
+	}); err != nil {
+		return nil, "", err
+	}
+	raw, err := workspaceCSV(rows)
+	if err != nil {
+		return nil, "", err
+	}
+	return raw, fmt.Sprintf("workspace-attendance-%s-%04d-%02d.csv", kind, item.Year, item.Month), nil
+}
+
+// ExportWorkspaceTurnoverCSV 匯出工作區人員異動 CSV。
+func (c WorkspaceService) ExportWorkspaceTurnoverCSV(ctx RequestContext, query WorkspaceTurnoverQuery, kind string) ([]byte, string, error) {
+	item, err := c.WorkspaceTurnover(ctx, query)
+	if err != nil {
+		return nil, "", err
+	}
+	kind = strings.TrimSpace(kind)
+	if kind == "" {
+		kind = "monthly"
+	}
+	var rows [][]string
+	var year, month int
+	switch kind {
+	case "monthly":
+		year, month = item.Monthly.Year, item.Monthly.Month
+		rows = workspaceTurnoverMonthlyCSVRows(item.Monthly)
+	case "annual":
+		year = item.Annual.Year
+		rows = workspaceTurnoverAnnualCSVRows(item.Annual)
+	default:
+		return nil, "", BadRequest("invalid workspace turnover export kind")
+	}
+	if err := c.audit(ctx, "workspace.turnover.export", string(ResourceEmployeeCollection), "", string(SeverityHigh), map[string]any{
+		"year": year, "month": month, "kind": kind, "row_count": workspaceCSVDataRows(rows),
+	}); err != nil {
+		return nil, "", err
+	}
+	raw, err := workspaceCSV(rows)
+	if err != nil {
+		return nil, "", err
+	}
+	if kind == "annual" {
+		return raw, fmt.Sprintf("workspace-turnover-annual-%04d.csv", year), nil
+	}
+	return raw, fmt.Sprintf("workspace-turnover-monthly-%04d-%02d.csv", year, month), nil
+}
+
+func workspaceAttendanceCSVRows(item WorkspaceAttendanceResponse) [][]string {
+	header := []string{"員工編號", "部門", "姓名", "英文名", "應出勤天數", "應出勤時數", "實出勤時數", "請假時數", "加班時數", "扣除時數"}
+	for _, date := range item.Dates {
+		header = append(header, fmt.Sprintf("%d/%d", date.M, date.D))
+	}
+	rows := [][]string{header}
+	for _, row := range item.Attendance.Rows {
+		record := []string{
+			row.Employee.ID,
+			row.Employee.Dept,
+			row.Employee.NameZH,
+			row.Employee.NameEN,
+			strconv.Itoa(row.Summary.WorkDays),
+			workspaceFloat(row.Summary.DueHours),
+			workspaceFloat(row.Summary.AttendedHours),
+			workspaceFloat(row.Summary.LeaveHours),
+			workspaceFloat(row.Summary.OvertimeHours),
+			workspaceFloat(row.Summary.DeductHours),
+		}
+		for _, cell := range row.Cells {
+			record = append(record, workspaceAttendanceCellLabel(cell))
+		}
+		rows = append(rows, record)
+	}
+	return rows
+}
+
+func workspaceClockCSVRows(item WorkspaceAttendanceResponse) [][]string {
+	header := []string{"員工編號", "部門", "姓名", "英文名", "日期", "星期", "上班打卡", "上班地點", "下班打卡", "下班地點", "備註"}
+	rows := [][]string{header}
+	for _, row := range item.Clock.Rows {
+		for i, cell := range row.Cells {
+			if i >= len(item.Dates) {
+				continue
+			}
+			date := item.Dates[i]
+			if cell.Type != "work" && !(cell.Type == "leave" && cell.Hours == 4) {
+				continue
+			}
+			rows = append(rows, []string{
+				row.Employee.ID,
+				row.Employee.Dept,
+				row.Employee.NameZH,
+				row.Employee.NameEN,
+				fmt.Sprintf("%d/%d", date.M, date.D),
+				strconv.Itoa(date.DOW),
+				cell.In,
+				cell.InLoc,
+				cell.Out,
+				cell.OutLoc,
+				workspaceClockNote(cell),
+			})
+		}
+	}
+	return rows
+}
+
+func workspaceClockAbnormalCSVRows(item WorkspaceAttendanceResponse) [][]string {
+	header := []string{"員工編號", "部門", "姓名", "英文名", "日期", "星期", "上班打卡", "上班地點", "下班打卡", "下班地點", "異常原因"}
+	rows := [][]string{header}
+	for _, row := range item.Clock.Abnormals {
+		rows = append(rows, []string{
+			row.Employee.ID,
+			row.Employee.Dept,
+			row.Employee.NameZH,
+			row.Employee.NameEN,
+			fmt.Sprintf("%d/%d", row.Date.M, row.Date.D),
+			strconv.Itoa(row.Date.DOW),
+			row.Record.In,
+			row.Record.InLoc,
+			row.Record.Out,
+			row.Record.OutLoc,
+			firstNonEmpty(row.Record.Reason, "需補卡"),
+		})
+	}
+	return rows
+}
+
+func workspaceTurnoverMonthlyCSVRows(item WorkspaceTurnoverMonthly) [][]string {
+	rows := [][]string{append([]string(nil), item.CSVHeaders...)}
+	for _, row := range item.Rows {
+		rows = append(rows, []string{
+			row.BU,
+			row.Dept,
+			strconv.Itoa(row.Prev),
+			strconv.Itoa(row.Hires),
+			strconv.Itoa(row.Resigned),
+			strconv.Itoa(row.Layoff),
+			strconv.Itoa(row.OnLeave),
+			strconv.Itoa(row.End),
+			row.MonthRate,
+			row.YTDRate,
+		})
+	}
+	return rows
+}
+
+func workspaceTurnoverAnnualCSVRows(item WorkspaceTurnoverAnnual) [][]string {
+	rows := [][]string{append([]string(nil), item.CSVHeaders...)}
+	for _, row := range item.Rows {
+		rows = append(rows, []string{
+			row.BU,
+			strconv.Itoa(row.Base),
+			strconv.Itoa(row.Hires),
+			strconv.Itoa(row.Resigned),
+			strconv.Itoa(row.Layoff),
+			strconv.Itoa(row.OnLeave),
+			strconv.Itoa(row.End),
+			row.Rate,
+		})
+	}
+	return rows
+}
+
+func workspaceCSV(rows [][]string) ([]byte, error) {
+	var buf bytes.Buffer
+	buf.Write([]byte{0xEF, 0xBB, 0xBF})
+	w := csv.NewWriter(&buf)
+	for _, row := range rows {
+		record := make([]string, 0, len(row))
+		for _, cell := range row {
+			record = append(record, neutralizeSpreadsheetCell(cell))
+		}
+		if err := w.Write(record); err != nil {
+			return nil, err
+		}
+	}
+	w.Flush()
+	if err := w.Error(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+func workspaceCSVDataRows(rows [][]string) int {
+	if len(rows) == 0 {
+		return 0
+	}
+	return len(rows) - 1
+}
+
+func workspaceAttendanceCellLabel(cell WorkspaceDayCell) string {
+	if cell.Holiday != "" {
+		return cell.Holiday
+	}
+	if cell.Leave != "" {
+		return firstNonEmpty(cell.Label, cell.Leave)
+	}
+	if cell.Label != "" {
+		return cell.Label
+	}
+	if cell.Hours > 0 {
+		return workspaceFloat(cell.Hours)
+	}
+	return ""
+}
+
+func workspaceClockNote(cell WorkspaceDayCell) string {
+	if cell.Abnormal {
+		return fmt.Sprintf("打卡異常:%s（需補卡）", firstNonEmpty(cell.Reason, "需補卡"))
+	}
+	if cell.Type == "leave" {
+		return fmt.Sprintf("%s（半天）", firstNonEmpty(cell.Label, "請假"))
+	}
+	return ""
+}
+
+func workspaceFloat(value float64) string {
+	return strconv.FormatFloat(value, 'f', -1, 64)
+}
+
 // WorkspaceAuditLogs 處理工作區稽核 logs 的服務流程。
 func (c WorkspaceService) WorkspaceAuditLogs(ctx RequestContext, query WorkspaceAuditLogQuery, page PageRequest) (PageResponse[WorkspaceAuditLog], error) {
 	if _, _, _, err := c.Authorize(ctx, CheckRequest{Resource: "audit.log", Action: ActionRead}, AuditTarget{Event: "workspace.audit_log.query", Resource: "audit_log"}); err != nil {
@@ -290,21 +535,16 @@ func (c WorkspaceService) WorkspaceAuditLogs(ctx RequestContext, query Workspace
 		}
 		return utils.PageResponseFromStore(projected, total, page), nil
 	}
-	logs, err := c.store.ListAuditLogs(goContext(ctx), ctx.TenantID)
+	page = utils.NormalizePageRequest(page)
+	logs, total, err := c.store.ListAuditLogPageFiltered(goContext(ctx), ctx.TenantID, query, page)
 	if err != nil {
 		return PageResponse[WorkspaceAuditLog]{}, err
 	}
 	projected := make([]WorkspaceAuditLog, 0, len(logs))
 	for _, log := range logs {
-		if !workspaceAuditLogMatches(log, query, accountByID, employeeByID) {
-			continue
-		}
 		projected = append(projected, workspaceAuditLogProjection(log, accountByID, employeeByID))
 	}
-	sort.SliceStable(projected, func(i, j int) bool {
-		return projected[i].Time > projected[j].Time
-	})
-	return utils.PageResponse(projected, page), nil
+	return utils.PageResponseFromStore(projected, total, page), nil
 }
 
 // visibleWorkspaceEmployees 處理可見工作區員工的服務流程。

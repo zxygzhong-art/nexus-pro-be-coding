@@ -298,7 +298,7 @@ SSO 流程使用授权码 + PKCE，回调地址为 `/api/auth/keycloak/callback`
 
 ```bash
 # 必填（认证路由执行期校验）
-KEYCLOAK_ISSUER_URL=http://127.0.0.1:8080/realms/nexus-pro
+KEYCLOAK_BASE_URL=http://127.0.0.1:8080/realms/nexus-pro
 KEYCLOAK_CLIENT_ID=nexus-pro-connect-api
 
 # confidential client 才需要
@@ -333,7 +333,7 @@ Token 存储：
 **基础 OIDC 校验（必填，生产环境启动时强制）：**
 
 ```bash
-KEYCLOAK_ISSUER_URL=http://127.0.0.1:8080/realms/nexus-pro
+KEYCLOAK_BASE_URL=http://127.0.0.1:8080/realms/nexus-pro
 KEYCLOAK_CLIENT_ID=nexus-pro-connect-api
 ```
 
@@ -371,7 +371,7 @@ pnpm dev
 
 ```bash
 cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be
-# 确保 KEYCLOAK_ISSUER_URL / KEYCLOAK_CLIENT_ID 已设置
+# 确保 KEYCLOAK_BASE_URL / KEYCLOAK_CLIENT_ID 已设置
 go run ./cmd/api
 ```
 
@@ -383,7 +383,7 @@ curl -s -H "Authorization: Bearer $TOKEN" http://localhost:18080/v1/...
 ### 10.3 Smoke test
 
 ```bash
-export SMOKE_KEYCLOAK_ISSUER_URL="http://127.0.0.1:8080/realms/nexus-pro"
+export SMOKE_KEYCLOAK_BASE_URL="http://127.0.0.1:8080/realms/nexus-pro"
 export SMOKE_KEYCLOAK_CLIENT_ID="nexus-pro-connect-api"
 export SMOKE_ADMIN_USERNAME="local-admin"
 export SMOKE_ADMIN_PASSWORD="..."
@@ -394,7 +394,7 @@ tools/api-smoke/full_api_smoke.py
 
 - [ ] `KEYCLOAK_COMMAND=start`（非 `start-dev`）
 - [ ] 管理员密码、client secret 已轮换
-- [ ] `KEYCLOAK_ISSUER_URL` 使用 `https://` 公网地址
+- [ ] `KEYCLOAK_BASE_URL` 使用 `https://` 公网地址
 - [ ] redirect URI / Web origins 仅包含正式域名
 - [ ] SMTP 已配置（若启用邀请邮件或忘记密码）
 - [ ] Direct access grants 按安全策略评估（密码登录依赖此开关；可仅保留 SSO）
@@ -412,7 +412,7 @@ tools/api-smoke/full_api_smoke.py
 
 ### 后端返回 401「invalid bearer token」
 
-1. 检查 `KEYCLOAK_ISSUER_URL` 与 token 中 `iss` 完全一致（无尾部 `/`）
+1. 检查 `KEYCLOAK_BASE_URL` 与 token 中 `iss` 完全一致（无尾部 `/`）
 2. 检查 token `aud` 是否包含 `KEYCLOAK_CLIENT_ID`
 3. 检查 token 是否包含 `tenant_id` 和 `sub`（或 `account_id`）——通常是 **Protocol Mapper 未配置**
 4. 检查 token 是否过期
@@ -427,7 +427,7 @@ tools/api-smoke/full_api_smoke.py
 
 1. 确认 `KEYCLOAK_ADMIN_CLIENT_ID` / `SECRET` 正确
 2. 确认 service account 已分配 `realm-management → manage-users`
-3. 确认 `KEYCLOAK_ISSUER_URL` 格式为 `http(s)://host/realms/nexus-pro`
+3. 确认 `KEYCLOAK_BASE_URL` 格式为 `http(s)://host/realms/nexus-pro`
 
 ### Issuer 端口不一致
 

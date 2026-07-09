@@ -1,5 +1,5 @@
 -- QA fixes: traditional Chinese labels, dedupe templates, shift assignment.
---   psql "$DATABASE_URL" -f tools/db/patch-demo-qa-fixes.sql
+--   psql "postgres://$DB_USERNAME:$DB_PASSWORD@$DB_HOST:$DB_PORT/$DB_NAME?sslmode=${DB_SSLMODE:-disable}" -f tools/db/patch-demo-qa-fixes.sql
 
 BEGIN;
 

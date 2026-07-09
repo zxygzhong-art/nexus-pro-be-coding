@@ -8,11 +8,11 @@ This project uses PostgreSQL with `pgxpool` and `sqlc`.
 make migrate-up
 ```
 
-Integration tests read PostgreSQL configuration directly from the `DATABASE_URL`
+Integration tests read PostgreSQL configuration from discrete `DB_*` fields
 environment variable:
 
 ```sh
-DATABASE_URL=postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable go test ./tests/integration/postgres
+DB_HOST=localhost DB_PORT=5432 DB_USERNAME=nexus DB_PASSWORD=nexus DB_NAME=nexus_pro_be DB_SSLMODE=disable go test ./tests/integration/postgres
 ```
 
 ## Generate query code

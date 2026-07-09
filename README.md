@@ -44,7 +44,7 @@ The repository root contains a multi-stage `Dockerfile` (Go builder, distroless 
 docker compose --profile api up -d --build api
 ```
 
-Inside the compose network, point `DATABASE_URL` and `REDIS_ADDR` at the service names (`postgres:5432`, `redis:6379`) instead of `localhost`.
+Inside the compose network, point `DB_HOST` / `REDIS_HOST` at the service names (`postgres`, `redis`) instead of `localhost`.
 
 Application logs are structured JSON written directly to stdout / console. Request logs include `trace_id`, `request_id`, `tenant_id`, `account_id`, method, path, status, elapsed time, and client IP.
 
@@ -53,7 +53,7 @@ OpenTelemetry tracing is disabled by default. To send traces directly to local T
 ```sh
 export OTEL_ENABLED=true
 export OTEL_SERVICE_NAME=nexus-pro-be
-export OTEL_EXPORTER_OTLP_ENDPOINT=localhost:24317
+export OTEL_BASE_URL=localhost:24317
 export OTEL_EXPORTER_OTLP_INSECURE=true
 export METRICS_ADDR=0.0.0.0:9091
 go run ./cmd/api
@@ -84,7 +84,7 @@ docker compose --profile temporal --env-file .env up -d temporal temporal-ui tem
 Then configure Temporal before startup:
 
 ```sh
-export TEMPORAL_HOST_PORT=127.0.0.1:27233
+export TEMPORAL_BASE_URL=127.0.0.1:27233
 export TEMPORAL_NAMESPACE=default
 export TEMPORAL_TASK_QUEUE=nexus-workflows
 go run ./cmd/api
@@ -116,7 +116,7 @@ Then enable the API integration:
 
 ```sh
 export NATS_ENABLED=true
-export NATS_URL=nats://127.0.0.1:24222
+export NATS_BASE_URL=nats://127.0.0.1:24222
 export NATS_STREAM=NEXUS_EVENTS
 export NATS_CONSUMER_PREFIX=nexus
 go run ./cmd/api
@@ -145,7 +145,7 @@ Generated files live in `internal/platform/postgres/db`.
 Run the API:
 
 ```sh
-export DATABASE_URL='postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable'
+export DB_HOST=localhost DB_PORT=5432 DB_USERNAME=nexus DB_PASSWORD=nexus DB_NAME=nexus_pro_be DB_SSLMODE=disable
 go run ./cmd/api
 ```
 
@@ -161,7 +161,7 @@ curl http://127.0.0.1:9091/metrics
 
 Connection pool sizing is configurable through `DB_MAX_CONNS` (default `10`), `DB_MIN_CONNS` (default `1`), and `DB_MAX_CONN_LIFETIME` (default `1h`).
 
-In production (`APP_ENV=production`), startup validation requires `DATABASE_URL` to set `sslmode=require`, `verify-ca`, or `verify-full`; `sslmode=disable` or an unspecified `sslmode` is rejected.
+In production (`APP_ENV=production`), startup validation requires `DB_SSLMODE` to be `require`, `verify-ca`, or `verify-full`; `disable` or an unspecified mode is rejected.
 
 ### CORS
 
@@ -169,7 +169,7 @@ CORS is disabled unless `CORS_ALLOWED_ORIGINS` is set to a comma-separated list 
 
 ### Rate Limiting
 
-Set `RATE_LIMIT_ENABLED=true` to rate limit requests per client IP. `RATE_LIMIT_RPS` (default `20`) is the sustained request rate and `RATE_LIMIT_BURST` (default `40`) the tolerated burst. When `REDIS_ADDR` is configured the limiter uses a shared Redis fixed-window counter so limits hold across replicas; otherwise an in-process token bucket is used. Rejected requests receive `429` with error code `10070`. The limiter fails open if Redis becomes unavailable. Note that the API trusts no proxy headers by default, so behind a reverse proxy set `TRUSTED_PROXIES` to a comma-separated list of proxy CIDRs/IPs (for example `10.0.0.0/8,192.168.1.1`) so client IPs used in logs and rate limiting are derived from `X-Forwarded-For` safely; when unset, the peer address is used.
+Set `RATE_LIMIT_ENABLED=true` to rate limit requests per client IP. `RATE_LIMIT_RPS` (default `20`) is the sustained request rate and `RATE_LIMIT_BURST` (default `40`) the tolerated burst. When `REDIS_HOST` is configured the limiter uses a shared Redis fixed-window counter so limits hold across replicas; otherwise an in-process token bucket is used. Rejected requests receive `429` with error code `10070`. The limiter fails open if Redis becomes unavailable. Note that the API trusts no proxy headers by default, so behind a reverse proxy set `TRUSTED_PROXIES` to a comma-separated list of proxy CIDRs/IPs (for example `10.0.0.0/8,192.168.1.1`) so client IPs used in logs and rate limiting are derived from `X-Forwarded-For` safely; when unset, the peer address is used.
 
 Swagger UI is available at `http://127.0.0.1:18080/swagger/index.html`, backed by the embedded OpenAPI spec at `http://127.0.0.1:18080/openapi.yaml`.
 
@@ -231,7 +231,7 @@ Project code-organization preferences are documented in `docs/code-organization.
 
 The API runtime uses PostgreSQL as the source of truth:
 
-- PostgreSQL-backed repository is required through `DATABASE_URL`.
+- PostgreSQL-backed repository is required through `DB_HOST` / `DB_USERNAME` / `DB_NAME`.
 - In-memory repository remains available only for focused tests.
 
 The project has the production persistence foundation in place:
@@ -255,8 +255,8 @@ Current scope:
 
 - Authz schema tables for applications, permission catalog, normalized group memberships, permission-set assignments, data scopes, field policies, policy conditions, assumable-role sessions, and relationship tuples for future OpenFGA sync.
 - `internal/domain/authz` defines default route policy metadata and high-risk markers used by the service-level authorization path.
-- `KEYCLOAK_*` enables Keycloak/OIDC bearer-token validation. In production, `KEYCLOAK_ISSUER_URL` and `KEYCLOAK_CLIENT_ID` are required at startup; enabling `KEYCLOAK_PROVISION_USERS` additionally requires `KEYCLOAK_ADMIN_CLIENT_ID` and `KEYCLOAK_ADMIN_CLIENT_SECRET`.
-- `OPENFGA_*` enables relationship checks and starts the relationship tuple outbox worker. In production, `OPENFGA_API_URL`, `OPENFGA_STORE_ID`, and `OPENFGA_MODEL_ID` are required at startup because relation-scoped permissions depend on this adapter.
+- `KEYCLOAK_*` enables Keycloak/OIDC bearer-token validation. In production, `KEYCLOAK_BASE_URL` and `KEYCLOAK_CLIENT_ID` are required at startup; enabling `KEYCLOAK_PROVISION_USERS` additionally requires `KEYCLOAK_ADMIN_CLIENT_ID` and `KEYCLOAK_ADMIN_CLIENT_SECRET`.
+- `OPENFGA_*` enables relationship checks and starts the relationship tuple outbox worker. In production, `OPENFGA_BASE_URL`, `OPENFGA_STORE_ID`, and `OPENFGA_MODEL_ID` are required at startup because relation-scoped permissions depend on this adapter.
 - `OPENFGA_SCOPE_CHECK_ENABLED=true` switches department and department-subtree data-scope filtering to OpenFGA checks after the model and tuple backfill are ready. The default is `false`, which keeps the existing SQL scope path.
 - `ops/openfga/model.json` is the versioned authorization model. Apply it explicitly with `make openfga-apply-model`, then set `OPENFGA_MODEL_ID` to the returned `authorization_model_id`; the API readiness check verifies that model ID.
 - Employee authz-subject changes emit local relationship tuples and OpenFGA write/delete outbox events with retryable status tracking.

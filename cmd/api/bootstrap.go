@@ -392,7 +392,7 @@ func startRepositoryModule(ctx context.Context, cfg config.Config, logger *slog.
 		readiness: map[string]v1api.ReadinessCheck{},
 	}
 	if cfg.DatabaseURL == "" {
-		err := errors.New("DATABASE_URL is required")
+		err := errors.New("DB_HOST, DB_USERNAME, and DB_NAME are required")
 		logger.Error("postgres connection failed", "error", err)
 		return result, err
 	}
@@ -432,11 +432,11 @@ func startAuthzSnapshotModule(ctx context.Context, cfg config.Config, logger *sl
 		dependencies: []startup.Dependency{{
 			Name:   "Redis",
 			Status: "skipped",
-			Target: "REDIS_ADDR not set",
+			Target: "REDIS_HOST not set",
 			Detail: "authz snapshots disabled",
 		}},
 	}
-	if cfg.RedisAddr == "" {
+	if cfg.RedisHost == "" {
 		return result, nil
 	}
 
@@ -494,7 +494,7 @@ func startRelationshipModule(cfg config.Config, logger *slog.Logger) relationshi
 	if cfg.OpenFGAAPIURL != "" || cfg.OpenFGAStoreID != "" || cfg.OpenFGAModelID != "" {
 		missing := []string{}
 		if cfg.OpenFGAAPIURL == "" {
-			missing = append(missing, "OPENFGA_API_URL")
+			missing = append(missing, "OPENFGA_BASE_URL")
 		}
 		if cfg.OpenFGAStoreID == "" {
 			missing = append(missing, "OPENFGA_STORE_ID")
@@ -539,7 +539,7 @@ func startObjectStoreModule(ctx context.Context, cfg config.Config, logger *slog
 		})
 	case "sftpgo":
 		startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
-		objectStore, err := objectstore.NewSFTPGo(startupCtx, objectstore.SFTPGoOptions{
+		objectStore, err := objectstore.NewSFTPGoStore(startupCtx, objectstore.SFTPGoOptions{
 			Provider:            cfg.ObjectStoreProvider,
 			Endpoint:            cfg.ObjectStoreEndpoint,
 			Root:                cfg.ObjectStoreBucket,
@@ -578,40 +578,40 @@ func startTemporalModule(ctx context.Context, cfg config.Config, logger *slog.Lo
 	result := temporalModule{
 		readiness: map[string]v1api.ReadinessCheck{},
 	}
-	if strings.TrimSpace(cfg.TemporalHostPort) == "" {
-		err := errors.New("TEMPORAL_HOST_PORT is required")
+	if strings.TrimSpace(cfg.TemporalBaseURL) == "" {
+		err := errors.New("TEMPORAL_BASE_URL is required")
 		result.dependencies = []startup.Dependency{{
 			Name:   "Temporal",
 			Status: "incomplete",
 			Target: "",
-			Detail: startup.Missing("TEMPORAL_HOST_PORT"),
+			Detail: startup.Missing("TEMPORAL_BASE_URL"),
 		}}
 		logger.Error("temporal startup failed", "error", err)
 		return result, err
 	}
 	startupCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	client, err := temporalplatform.Dial(startupCtx, temporalplatform.Config{
-		HostPort:  cfg.TemporalHostPort,
+		HostPort:  cfg.TemporalBaseURL,
 		Namespace: cfg.TemporalNamespace,
 		TaskQueue: cfg.TemporalTaskQueue,
 	})
 	cancel()
 	if err != nil {
-		logger.Error("temporal connection failed", "host_port", cfg.TemporalHostPort, "namespace", cfg.TemporalNamespace, "error", err)
+		logger.Error("temporal connection failed", "base_url", cfg.TemporalBaseURL, "namespace", cfg.TemporalNamespace, "error", err)
 		result.dependencies = []startup.Dependency{{
 			Name:   "Temporal",
 			Status: "unavailable",
-			Target: cfg.TemporalHostPort,
+			Target: cfg.TemporalBaseURL,
 			Detail: err.Error(),
 		}}
 		return result, err
 	}
-	logger.Info("temporal connected", "host_port", cfg.TemporalHostPort, "namespace", cfg.TemporalNamespace, "task_queue", cfg.TemporalTaskQueue)
+	logger.Info("temporal connected", "base_url", cfg.TemporalBaseURL, "namespace", cfg.TemporalNamespace, "task_queue", cfg.TemporalTaskQueue)
 	result.client = client
 	result.dependencies = []startup.Dependency{{
 		Name:   "Temporal",
 		Status: "connected",
-		Target: cfg.TemporalHostPort,
+		Target: cfg.TemporalBaseURL,
 		Detail: "namespace=" + cfg.TemporalNamespace + " task_queue=" + cfg.TemporalTaskQueue,
 	}}
 	result.readiness["temporal"] = func(ctx context.Context) error {
@@ -686,7 +686,7 @@ func configureKeycloakModule(cfg config.Config, client *http.Client, logger *slo
 	if cfg.KeycloakIssuerURL != "" || cfg.KeycloakClientID != "" {
 		missing := []string{}
 		if cfg.KeycloakIssuerURL == "" {
-			missing = append(missing, "KEYCLOAK_ISSUER_URL")
+			missing = append(missing, "KEYCLOAK_BASE_URL")
 		}
 		if cfg.KeycloakClientID == "" {
 			missing = append(missing, "KEYCLOAK_CLIENT_ID")
@@ -718,7 +718,7 @@ func configuredKeycloakProvisioner(cfg config.Config, client *http.Client, logge
 	}
 	missing := []string{}
 	if strings.TrimSpace(cfg.KeycloakIssuerURL) == "" {
-		missing = append(missing, "KEYCLOAK_ISSUER_URL")
+		missing = append(missing, "KEYCLOAK_BASE_URL")
 	}
 	if strings.TrimSpace(cfg.KeycloakAdminClientID) == "" {
 		missing = append(missing, "KEYCLOAK_ADMIN_CLIENT_ID")

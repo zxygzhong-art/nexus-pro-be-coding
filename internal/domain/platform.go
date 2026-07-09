@@ -106,6 +106,8 @@ type PlatformTaskItem struct {
 	Product  string  `json:"product"`
 	Hours    float64 `json:"hours"`
 	Note     string  `json:"note"`
+	Source   string  `json:"source,omitempty"`
+	ReadOnly bool    `json:"read_only,omitempty"`
 }
 
 // PlatformTaskRecord 定義平台任務 record 的資料結構。
@@ -118,10 +120,14 @@ type PlatformTaskRecord struct {
 
 // PlatformTaskTodo 定義平台任務待辦的資料結構。
 type PlatformTaskTodo struct {
-	ID   string `json:"id"`
-	Text string `json:"text"`
-	Done bool   `json:"done"`
-	Date string `json:"date"`
+	ID       string `json:"id"`
+	Text     string `json:"text"`
+	Done     bool   `json:"done"`
+	Date     string `json:"date"`
+	WorkDate string `json:"work_date,omitempty"`
+	DueDate  string `json:"due_date,omitempty"`
+	Source   string `json:"source,omitempty"`
+	ReadOnly bool   `json:"read_only,omitempty"`
 }
 
 // PlatformTaskRecordItem 定義平台任務 record 項目的資料結構。

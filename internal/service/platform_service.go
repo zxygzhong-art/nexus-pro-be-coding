@@ -575,10 +575,10 @@ func (c PlatformService) taskProjection(ctx RequestContext) ([]PlatformTaskRecor
 			recordsByDate[date] = record
 		}
 		hours := 1.0
-		item := PlatformTaskItem{ID: run.ID, Title: run.Prompt, Category: "AI", Product: "Nexus", Hours: hours, Note: run.Status}
+		item := PlatformTaskItem{ID: run.ID, Title: run.Prompt, Category: "AI", Product: "Nexus", Hours: hours, Note: run.Status, Source: "agent_run", ReadOnly: true}
 		record.Items = append(record.Items, item)
 		record.TotalHours += hours
-		todos = append(todos, PlatformTaskTodo{ID: "todo-" + run.ID, Text: run.Prompt, Done: run.Status == string(AgentRunStatusCompleted), Date: run.CreatedAt.Format("01/02")})
+		todos = append(todos, PlatformTaskTodo{ID: "todo-" + run.ID, Text: run.Prompt, Done: run.Status == string(AgentRunStatusCompleted), Date: run.CreatedAt.Format("01/02"), Source: "agent_run", ReadOnly: true})
 	}
 	records := make([]PlatformTaskRecord, 0, len(recordsByDate))
 	for _, record := range recordsByDate {
@@ -705,10 +705,12 @@ func platformTaskItemFromRecord(item PlatformTaskRecordItem) PlatformTaskItem {
 // platformTaskTodoFromRecord 處理平台任務待辦 來源 record。
 func platformTaskTodoFromRecord(todo PlatformTaskTodoRecord) PlatformTaskTodo {
 	return PlatformTaskTodo{
-		ID:   todo.ID,
-		Text: todo.Text,
-		Done: todo.Status == "done",
-		Date: platformTaskTodoDate(todo),
+		ID:       todo.ID,
+		Text:     todo.Text,
+		Done:     todo.Status == "done",
+		Date:     platformTaskTodoDate(todo),
+		WorkDate: todo.DueDate,
+		DueDate:  todo.DueDate,
 	}
 }
 

@@ -76,7 +76,12 @@ jobs:
 
       - name: Repository tests
         env:
-          DATABASE_URL: postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: nexus
+          DB_PASSWORD: nexus
+          DB_NAME: nexus_pro_be
+          DB_SSLMODE: disable
         run: GOCACHE=$PWD/.gocache go test ./tests/unit/repository/postgres
 
   integration:
@@ -109,10 +114,22 @@ jobs:
 
       - name: Run migrations
         env:
-          DATABASE_URL: postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable
-        run: go run github.com/pressly/goose/v3/cmd/goose@v3.27.2 -dir db/migrations postgres "$DATABASE_URL" up
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: nexus
+          DB_PASSWORD: nexus
+          DB_NAME: nexus_pro_be
+          DB_SSLMODE: disable
+        run: |
+          DATABASE_URL="postgres://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSLMODE}"
+          go run github.com/pressly/goose/v3/cmd/goose@v3.27.2 -dir db/migrations postgres "$DATABASE_URL" up
 
       - name: Integration tests
         env:
-          DATABASE_URL: postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=disable
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: nexus
+          DB_PASSWORD: nexus
+          DB_NAME: nexus_pro_be
+          DB_SSLMODE: disable
         run: GOCACHE=$PWD/.gocache go test ./tests/integration/postgres

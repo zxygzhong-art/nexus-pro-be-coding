@@ -23,7 +23,7 @@ func TestLogLevelDefaultsToInfo(t *testing.T) {
 func TestOpenTelemetryConfig(t *testing.T) {
 	t.Setenv("OTEL_ENABLED", "true")
 	t.Setenv("OTEL_SERVICE_NAME", "nexus-test")
-	t.Setenv("OTEL_EXPORTER_OTLP_ENDPOINT", "tempo:4317")
+	t.Setenv("OTEL_BASE_URL", "tempo:4317")
 	t.Setenv("OTEL_EXPORTER_OTLP_INSECURE", "false")
 
 	cfg := config.Load()
@@ -100,13 +100,18 @@ func TestAgentChatConfig(t *testing.T) {
 // TestProductionAgentChatRequiresLiteLLMConfig 驗證 production 開啟 chat 時必須配置 LiteLLM。
 func TestProductionAgentChatRequiresLiteLLMConfig(t *testing.T) {
 	t.Setenv("APP_ENV", "production")
-	t.Setenv("DATABASE_URL", "postgres://nexus:nexus@example.com:5432/nexus?sslmode=require")
-	t.Setenv("KEYCLOAK_ISSUER_URL", "https://keycloak.example/realms/nexus")
+	t.Setenv("DB_HOST", "example.com")
+	t.Setenv("DB_PORT", "5432")
+	t.Setenv("DB_USERNAME", "nexus")
+	t.Setenv("DB_PASSWORD", "nexus")
+	t.Setenv("DB_NAME", "nexus")
+	t.Setenv("DB_SSLMODE", "require")
+	t.Setenv("KEYCLOAK_BASE_URL", "https://keycloak.example/realms/nexus")
 	t.Setenv("KEYCLOAK_CLIENT_ID", "nexus-api")
-	t.Setenv("OPENFGA_API_URL", "https://openfga.example")
+	t.Setenv("OPENFGA_BASE_URL", "https://openfga.example")
 	t.Setenv("OPENFGA_STORE_ID", "store")
 	t.Setenv("OPENFGA_MODEL_ID", "model")
-	t.Setenv("TEMPORAL_HOST_PORT", "temporal:7233")
+	t.Setenv("TEMPORAL_BASE_URL", "temporal:7233")
 	t.Setenv("OBJECT_STORE_PROVIDER", "local")
 	t.Setenv("OBJECT_STORE_DIR", "/tmp/nexus-objects")
 	t.Setenv("AGENT_CHAT_ENABLED", "true")
@@ -127,29 +132,29 @@ func TestProductionAgentChatRequiresLiteLLMConfig(t *testing.T) {
 // TestTemporalConfig 驗證 Temporal workflow engine 組態。
 func TestTemporalConfig(t *testing.T) {
 	cfg := config.Load()
-	if cfg.TemporalHostPort != "127.0.0.1:27233" || cfg.TemporalNamespace != "default" || cfg.TemporalTaskQueue != "nexus-workflows" {
+	if cfg.TemporalBaseURL != "127.0.0.1:27233" || cfg.TemporalNamespace != "default" || cfg.TemporalTaskQueue != "nexus-workflows" {
 		t.Fatalf("unexpected Temporal defaults: %+v", cfg)
 	}
 
-	t.Setenv("TEMPORAL_HOST_PORT", "temporal:7233")
+	t.Setenv("TEMPORAL_BASE_URL", "temporal:7233")
 	t.Setenv("TEMPORAL_NAMESPACE", "tenant-workflows")
 	t.Setenv("TEMPORAL_TASK_QUEUE", "tenant-queue")
 	cfg, err := config.LoadE()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.TemporalHostPort != "temporal:7233" || cfg.TemporalNamespace != "tenant-workflows" || cfg.TemporalTaskQueue != "tenant-queue" {
+	if cfg.TemporalBaseURL != "temporal:7233" || cfg.TemporalNamespace != "tenant-workflows" || cfg.TemporalTaskQueue != "tenant-queue" {
 		t.Fatalf("unexpected Temporal config: %+v", cfg)
 	}
 }
 
 // TestTemporalConfigRequiresRequiredFields 驗證 Temporal 必填組態。
 func TestTemporalConfigRequiresRequiredFields(t *testing.T) {
-	t.Setenv("TEMPORAL_HOST_PORT", "")
+	t.Setenv("TEMPORAL_BASE_URL", "")
 
 	_, err := config.LoadE()
-	if err == nil || !strings.Contains(err.Error(), "TEMPORAL_HOST_PORT is required") {
-		t.Fatalf("expected missing TEMPORAL_HOST_PORT error, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "TEMPORAL_BASE_URL is required") {
+		t.Fatalf("expected missing TEMPORAL_BASE_URL error, got %v", err)
 	}
 }
 
@@ -164,7 +169,7 @@ func TestNATSConfig(t *testing.T) {
 	}
 
 	t.Setenv("NATS_ENABLED", "true")
-	t.Setenv("NATS_URL", "nats://nats:4222")
+	t.Setenv("NATS_BASE_URL", "nats://nats:4222")
 	t.Setenv("NATS_STREAM", "CUSTOM_EVENTS")
 	t.Setenv("NATS_CONSUMER_PREFIX", "custom")
 	cfg, err := config.LoadE()
@@ -190,23 +195,22 @@ func TestObjectStoreDirConfig(t *testing.T) {
 	}
 }
 
-// TestSFTPGoObjectStoreConfig 驗證 SFTPGo 物件儲存層組態。
+// TestSFTPGoObjectStoreConfig 驗證 SFTPGo HTTP/HTTPS 物件儲存層組態。
 func TestSFTPGoObjectStoreConfig(t *testing.T) {
 	t.Setenv("OBJECT_STORE_PROVIDER", "sftpgo")
-	t.Setenv("OBJECT_STORE_ENDPOINT", "sftp://localhost:2022")
-	t.Setenv("OBJECT_STORE_BUCKET", "nexus-hr-imports")
-	t.Setenv("OBJECT_STORE_ACCESS_KEY_ID", "nexus")
-	t.Setenv("OBJECT_STORE_SECRET_ACCESS_KEY", "nexus-sftpgo-password")
-	t.Setenv("OBJECT_STORE_SFTP_HOST_KEY", "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKtftesttesttesttesttesttesttesttesttesttest")
+	t.Setenv("SFTPGO_BASE_URL", "https://sftpgo.example.com")
+	t.Setenv("SFTPGO_ROOT_BUCKET", "nexus-bucket")
+	t.Setenv("SFTPGO_USERNAME", "nexus-service")
+	t.Setenv("SFTPGO_PASSWORD", "nexus-service")
 	t.Setenv("OBJECT_STORE_CREATE_BUCKET", "true")
 
 	cfg := config.Load()
 
-	if cfg.ObjectStoreProvider != "sftpgo" || cfg.ObjectStoreEndpoint != "sftp://localhost:2022" || cfg.ObjectStoreBucket != "nexus-hr-imports" {
+	if cfg.ObjectStoreProvider != "sftpgo" || cfg.ObjectStoreEndpoint != "https://sftpgo.example.com" || cfg.ObjectStoreBucket != "nexus-bucket" {
 		t.Fatalf("unexpected sftpgo config: %+v", cfg)
 	}
-	if cfg.ObjectStoreSFTPHostKey == "" {
-		t.Fatal("expected OBJECT_STORE_SFTP_HOST_KEY to be loaded")
+	if cfg.ObjectStoreAccessKeyID != "nexus-service" || cfg.ObjectStoreSecretAccessKey != "nexus-service" {
+		t.Fatalf("unexpected sftpgo credentials: user=%q pass=%q", cfg.ObjectStoreAccessKeyID, cfg.ObjectStoreSecretAccessKey)
 	}
 	if !cfg.ObjectStoreCreateBucket {
 		t.Fatal("expected OBJECT_STORE_CREATE_BUCKET to be true")
@@ -336,7 +340,7 @@ func TestEHRMSAttendanceSyncConfigValidatesSince(t *testing.T) {
 
 // TestKeycloakProvisioningConfig 驗證 Keycloak 開通組態。
 func TestKeycloakProvisioningConfig(t *testing.T) {
-	t.Setenv("KEYCLOAK_ISSUER_URL", "https://issuer.example/realms/nexus")
+	t.Setenv("KEYCLOAK_BASE_URL", "https://issuer.example/realms/nexus")
 	t.Setenv("KEYCLOAK_CLIENT_ID", "nexus-api")
 	t.Setenv("KEYCLOAK_PROVISION_USERS", "true")
 	t.Setenv("KEYCLOAK_ADMIN_CLIENT_ID", "nexus-admin")
@@ -355,7 +359,7 @@ func TestKeycloakProvisioningConfig(t *testing.T) {
 
 // TestKeycloakProvisioningConfigRequiresAdminCredentials 驗證 Keycloak 開通組態 requires 管理員 credentials。
 func TestKeycloakProvisioningConfigRequiresAdminCredentials(t *testing.T) {
-	t.Setenv("KEYCLOAK_ISSUER_URL", "https://issuer.example/realms/nexus")
+	t.Setenv("KEYCLOAK_BASE_URL", "https://issuer.example/realms/nexus")
 	t.Setenv("KEYCLOAK_PROVISION_USERS", "true")
 
 	_, err := config.LoadE()
@@ -378,12 +382,13 @@ func TestValidateStartupAcceptsProductionMinimum(t *testing.T) {
 	cfg := config.Config{
 		Env:               "production",
 		DatabaseURL:       "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=require",
+		DBSSLMode:         "require",
 		KeycloakIssuerURL: "https://issuer.example/realms/nexus",
 		KeycloakClientID:  "nexus-api",
 		OpenFGAAPIURL:     "https://openfga.example",
 		OpenFGAStoreID:    "store-1",
 		OpenFGAModelID:    "model-1",
-		TemporalHostPort:  "temporal:7233",
+		TemporalBaseURL:  "temporal:7233",
 		TemporalNamespace: "default",
 		TemporalTaskQueue: "nexus-workflows",
 		ObjectStoreDir:    "/var/lib/nexus-pro-be/objects",
@@ -394,23 +399,24 @@ func TestValidateStartupAcceptsProductionMinimum(t *testing.T) {
 	}
 }
 
-// TestValidateStartupRejectsProductionSFTPGoWithoutHostKey 驗證 production sftpgo 必須提供 host key。
+// TestValidateStartupRejectsProductionSFTPGoWithoutHostKey 驗證 production sftp:// 必須提供 host key。
 func TestValidateStartupRejectsProductionSFTPGoWithoutHostKey(t *testing.T) {
 	cfg := config.Config{
 		Env:                        "production",
 		DatabaseURL:                "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=require",
+		DBSSLMode:                  "require",
 		KeycloakIssuerURL:          "https://issuer.example/realms/nexus",
 		KeycloakClientID:           "nexus-api",
 		OpenFGAAPIURL:              "https://openfga.example",
 		OpenFGAStoreID:             "store-1",
 		OpenFGAModelID:             "model-1",
-		TemporalHostPort:           "temporal:7233",
+		TemporalBaseURL:           "temporal:7233",
 		TemporalNamespace:          "default",
 		TemporalTaskQueue:          "nexus-workflows",
 		ObjectStoreProvider:        "sftpgo",
 		ObjectStoreEndpoint:        "sftp://sftp.example:22",
-		ObjectStoreBucket:          "nexus-hr-imports",
-		ObjectStoreAccessKeyID:     "nexus",
+		ObjectStoreBucket:          "nexus-bucket",
+		ObjectStoreAccessKeyID:     "nexus-service",
 		ObjectStoreSecretAccessKey: "secret",
 	}
 	err := cfg.ValidateStartup()
@@ -422,23 +428,53 @@ func TestValidateStartupRejectsProductionSFTPGoWithoutHostKey(t *testing.T) {
 	}
 }
 
+// TestValidateStartupRejectsProductionSFTPGoHTTPWithoutTLS 驗證 production HTTP SFTPGo 必須使用 https。
+func TestValidateStartupRejectsProductionSFTPGoHTTPWithoutTLS(t *testing.T) {
+	cfg := config.Config{
+		Env:                        "production",
+		DatabaseURL:                "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=require",
+		DBSSLMode:                  "require",
+		KeycloakIssuerURL:          "https://issuer.example/realms/nexus",
+		KeycloakClientID:           "nexus-api",
+		OpenFGAAPIURL:              "https://openfga.example",
+		OpenFGAStoreID:             "store-1",
+		OpenFGAModelID:             "model-1",
+		TemporalBaseURL:            "temporal:7233",
+		TemporalNamespace:          "default",
+		TemporalTaskQueue:          "nexus-workflows",
+		ObjectStoreProvider:        "sftpgo",
+		ObjectStoreEndpoint:        "http://sftpgo:8080",
+		ObjectStoreBucket:          "nexus-bucket",
+		ObjectStoreAccessKeyID:     "nexus-service",
+		ObjectStoreSecretAccessKey: "secret",
+	}
+	err := cfg.ValidateStartup()
+	if err == nil {
+		t.Fatal("expected cleartext SFTPGO_BASE_URL to fail production validation")
+	}
+	if !strings.Contains(err.Error(), "SFTPGO_BASE_URL") {
+		t.Fatalf("expected SFTPGO_BASE_URL https error, got %v", err)
+	}
+}
+
 // TestValidateStartupRejectsProductionSFTPInsecureSkip 驗證 production 不可跳過 host key。
 func TestValidateStartupRejectsProductionSFTPInsecureSkip(t *testing.T) {
 	cfg := config.Config{
 		Env:                                "production",
 		DatabaseURL:                        "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=require",
+		DBSSLMode:                          "require",
 		KeycloakIssuerURL:                  "https://issuer.example/realms/nexus",
 		KeycloakClientID:                   "nexus-api",
 		OpenFGAAPIURL:                      "https://openfga.example",
 		OpenFGAStoreID:                     "store-1",
 		OpenFGAModelID:                     "model-1",
-		TemporalHostPort:                   "temporal:7233",
+		TemporalBaseURL:                   "temporal:7233",
 		TemporalNamespace:                  "default",
 		TemporalTaskQueue:                  "nexus-workflows",
 		ObjectStoreProvider:                "sftpgo",
 		ObjectStoreEndpoint:                "sftp://sftp.example:22",
-		ObjectStoreBucket:                  "nexus-hr-imports",
-		ObjectStoreAccessKeyID:             "nexus",
+		ObjectStoreBucket:                  "nexus-bucket",
+		ObjectStoreAccessKeyID:             "nexus-service",
 		ObjectStoreSecretAccessKey:         "secret",
 		ObjectStoreSFTPHostKey:             "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIKtftesttesttesttesttesttesttesttesttesttest",
 		ObjectStoreSFTPInsecureSkipHostKey: true,
@@ -454,6 +490,7 @@ func TestValidateStartupRejectsCleartextProductionSecurityURLs(t *testing.T) {
 	cfg := config.Config{
 		Env:               "production",
 		DatabaseURL:       "postgres://nexus:nexus@localhost:5432/nexus_pro_be?sslmode=require",
+		DBSSLMode:         "require",
 		KeycloakIssuerURL: "http://issuer.example/realms/nexus",
 		KeycloakClientID:  "nexus-api",
 		OpenFGAAPIURL:     "http://openfga.example",
@@ -466,7 +503,7 @@ func TestValidateStartupRejectsCleartextProductionSecurityURLs(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected cleartext production security URL validation error")
 	}
-	for _, want := range []string{"KEYCLOAK_ISSUER_URL", "OPENFGA_API_URL"} {
+	for _, want := range []string{"KEYCLOAK_BASE_URL", "OPENFGA_BASE_URL"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected validation error to mention %s, got %v", want, err)
 		}
@@ -481,7 +518,7 @@ func TestValidateStartupRejectsMissingProductionDependencies(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected production config validation error")
 	}
-	for _, want := range []string{"DATABASE_URL", "KEYCLOAK_ISSUER_URL", "KEYCLOAK_CLIENT_ID", "OPENFGA_API_URL", "OPENFGA_STORE_ID", "OPENFGA_MODEL_ID", "TEMPORAL_HOST_PORT", "TEMPORAL_NAMESPACE", "TEMPORAL_TASK_QUEUE", "OBJECT_STORE_PROVIDER"} {
+	for _, want := range []string{"DB_HOST, DB_USERNAME, and DB_NAME", "KEYCLOAK_BASE_URL", "KEYCLOAK_CLIENT_ID", "OPENFGA_BASE_URL", "OPENFGA_STORE_ID", "OPENFGA_MODEL_ID", "TEMPORAL_BASE_URL", "TEMPORAL_NAMESPACE", "TEMPORAL_TASK_QUEUE", "OBJECT_STORE_PROVIDER"} {
 		if !strings.Contains(err.Error(), want) {
 			t.Fatalf("expected validation error to mention %s, got %v", want, err)
 		}
@@ -492,32 +529,34 @@ func TestValidateStartupRejectsMissingProductionDependencies(t *testing.T) {
 func TestValidateStartupRejectsProductionDatabaseWithoutSSL(t *testing.T) {
 	base := config.Config{
 		Env:               "production",
+		DatabaseURL:       "postgres://nexus:nexus@db.internal:5432/nexus_pro_be?sslmode=require",
+		DBSSLMode:         "require",
 		KeycloakIssuerURL: "https://issuer.example/realms/nexus",
 		KeycloakClientID:  "nexus-api",
 		OpenFGAAPIURL:     "https://openfga.example",
 		OpenFGAStoreID:    "store-1",
 		OpenFGAModelID:    "model-1",
-		TemporalHostPort:  "temporal:7233",
+		TemporalBaseURL:  "temporal:7233",
 		TemporalNamespace: "default",
 		TemporalTaskQueue: "nexus-workflows",
 		ObjectStoreDir:    "/var/lib/nexus-pro-be/objects",
 	}
-	for name, databaseURL := range map[string]string{
-		"sslmode disable": "postgres://nexus:nexus@db.internal:5432/nexus_pro_be?sslmode=disable",
-		"sslmode missing": "postgres://nexus:nexus@db.internal:5432/nexus_pro_be",
-		"sslmode prefer":  "postgres://nexus:nexus@db.internal:5432/nexus_pro_be?sslmode=prefer",
-		"sslmode allow":   "postgres://nexus:nexus@db.internal:5432/nexus_pro_be?sslmode=allow",
+	for name, sslmode := range map[string]string{
+		"sslmode disable": "disable",
+		"sslmode missing": "",
+		"sslmode prefer":  "prefer",
+		"sslmode allow":   "allow",
 	} {
 		cfg := base
-		cfg.DatabaseURL = databaseURL
+		cfg.DBSSLMode = sslmode
 		err := cfg.ValidateStartup()
-		if err == nil || !strings.Contains(err.Error(), "DATABASE_URL") || !strings.Contains(err.Error(), "sslmode") {
-			t.Fatalf("%s: expected production DATABASE_URL sslmode error, got %v", name, err)
+		if err == nil || !strings.Contains(err.Error(), "DB_SSLMODE") {
+			t.Fatalf("%s: expected production DB_SSLMODE error, got %v", name, err)
 		}
 	}
 	for _, sslmode := range []string{"require", "verify-ca", "verify-full"} {
 		cfg := base
-		cfg.DatabaseURL = "postgres://nexus:nexus@db.internal:5432/nexus_pro_be?sslmode=" + sslmode
+		cfg.DBSSLMode = sslmode
 		if err := cfg.ValidateStartup(); err != nil {
 			t.Fatalf("expected sslmode=%s to validate in production, got %v", sslmode, err)
 		}
@@ -529,6 +568,7 @@ func TestValidateStartupRejectsProductionTemporalWithoutHost(t *testing.T) {
 	cfg := config.Config{
 		Env:               "production",
 		DatabaseURL:       "postgres://nexus:nexus@db.internal:5432/nexus_pro_be?sslmode=require",
+		DBSSLMode:         "require",
 		KeycloakIssuerURL: "https://issuer.example/realms/nexus",
 		KeycloakClientID:  "nexus-api",
 		OpenFGAAPIURL:     "https://openfga.example",
@@ -540,7 +580,7 @@ func TestValidateStartupRejectsProductionTemporalWithoutHost(t *testing.T) {
 	}
 
 	err := cfg.ValidateStartup()
-	if err == nil || !strings.Contains(err.Error(), "TEMPORAL_HOST_PORT") {
+	if err == nil || !strings.Contains(err.Error(), "TEMPORAL_BASE_URL") {
 		t.Fatalf("expected production Temporal host validation error, got %v", err)
 	}
 }
@@ -550,12 +590,13 @@ func TestValidateStartupRejectsProductionNATSInvalidURL(t *testing.T) {
 	cfg := config.Config{
 		Env:               "production",
 		DatabaseURL:       "postgres://nexus:nexus@db.internal:5432/nexus_pro_be?sslmode=require",
+		DBSSLMode:         "require",
 		KeycloakIssuerURL: "https://issuer.example/realms/nexus",
 		KeycloakClientID:  "nexus-api",
 		OpenFGAAPIURL:     "https://openfga.example",
 		OpenFGAStoreID:    "store-1",
 		OpenFGAModelID:    "model-1",
-		TemporalHostPort:  "temporal:7233",
+		TemporalBaseURL:  "temporal:7233",
 		TemporalNamespace: "default",
 		TemporalTaskQueue: "nexus-workflows",
 		ObjectStoreDir:    "/var/lib/nexus-pro-be/objects",
@@ -564,7 +605,7 @@ func TestValidateStartupRejectsProductionNATSInvalidURL(t *testing.T) {
 	}
 
 	err := cfg.ValidateStartup()
-	if err == nil || !strings.Contains(err.Error(), "NATS_URL") {
+	if err == nil || !strings.Contains(err.Error(), "NATS_BASE_URL") {
 		t.Fatalf("expected production NATS URL validation error, got %v", err)
 	}
 }

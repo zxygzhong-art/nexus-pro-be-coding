@@ -1,14 +1,16 @@
 # SFTPGo Object Store Deployment
 
-本仓库默认使用 SFTPGo 的 SFTP endpoint 作为后端业务文件存储。所有可调项统一在 [../.env](../.env)。不要直接改 `generated/*.yaml`，那些文件由 [../render-configs.sh](../render-configs.sh) 生成。
+本仓库默认使用 SFTPGo 的 HTTP/HTTPS REST API 作为后端业务文件存储。所有可调项统一在 [../.env](../.env)。不要直接改 `generated/*.yaml`，那些文件由 [../render-configs.sh](../render-configs.sh) 生成。
 
-## Remote Root
+## Config
 
 | 变量 | 用途 |
 | --- | --- |
-| `OBJECT_STORE_BUCKET` | 后端业务文件、导入文件等远端根目录，默认 `nexus-hr-imports` |
-
-`OBJECT_STORE_BUCKET` 这个名字沿用既有后端接口语义；在 SFTPGo 下它不是 bucket，而是远端目录。
+| `OBJECT_STORE_PROVIDER=sftpgo` | 启用 SFTPGo 对象存储 |
+| `SFTPGO_BASE_URL` | HTTP/HTTPS endpoint；本地可用 `http://`，production 用 `https://` |
+| `SFTPGO_ROOT_BUCKET` | 远端根目录，默认 `nexus-bucket` |
+| `SFTPGO_USERNAME` / `SFTPGO_PASSWORD` | 后端连接账号 |
+| `OBJECT_STORE_CREATE_BUCKET` | 启动时是否自动创建根目录 |
 
 ## Start SFTPGo
 
@@ -20,9 +22,9 @@ COMPOSE_PROFILES=sftpgo docker compose --env-file .env up -d sftpgo
 SFTPGo 默认入口：
 
 ```text
-SFTP: sftp://127.0.0.1:22022
-User: nexus
-Pass: nexus-sftpgo-password
+HTTP: http://127.0.0.1:28080
+User: nexus-service
+Pass: nexus-service
 ```
 
 这些账号只适合本地开发。生产环境必须在 [../.env](../.env) 中换成强密码，并限制网络入口。
@@ -39,46 +41,42 @@ set +a
 go run ./cmd/api
 ```
 
-宿主机直接运行后端时使用 `.env` 里的默认值：
+宿主机直接运行后端时使用：
 
 ```bash
 OBJECT_STORE_PROVIDER=sftpgo
-OBJECT_STORE_ENDPOINT=sftp://127.0.0.1:22022
-OBJECT_STORE_BUCKET=nexus-hr-imports
-OBJECT_STORE_REGION=
-OBJECT_STORE_ACCESS_KEY_ID=nexus
-OBJECT_STORE_SECRET_ACCESS_KEY=nexus-sftpgo-password
-OBJECT_STORE_SFTP_HOST_KEY=
-OBJECT_STORE_USE_SSL=false
 OBJECT_STORE_CREATE_BUCKET=true
+SFTPGO_BASE_URL=http://127.0.0.1:28080
+SFTPGO_ROOT_BUCKET=nexus-bucket
+SFTPGO_USERNAME=nexus-service
+SFTPGO_PASSWORD=nexus-service
 ```
 
-如果后端也跑在同一个 Docker network，endpoint 改成容器名：
+如果后端也跑在同一个 Docker network：
 
 ```bash
-OBJECT_STORE_ENDPOINT=sftp://sftpgo:2022
+SFTPGO_BASE_URL=http://sftpgo:8080
 ```
 
-后端会按 `OBJECT_STORE_PROVIDER=sftpgo` 初始化 SFTP client。`OBJECT_STORE_ACCESS_KEY_ID` 是 SFTPGo username，`OBJECT_STORE_SECRET_ACCESS_KEY` 是 password。`OBJECT_STORE_CREATE_BUCKET=true` 时，后端启动会确保 `OBJECT_STORE_BUCKET` 对应的远端根目录存在。
+production 示例：
+
+```bash
+SFTPGO_BASE_URL=https://sftpgo.example.com
+```
 
 ## Verify
-
-确认 SFTPGo 可连接：
 
 ```bash
 cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
 docker compose --env-file .env exec sftpgo sftpgo ping
+curl -u nexus-service:nexus-service http://127.0.0.1:28080/api/v2/user/token
 ```
 
-启动后端时，日志里应看到 SFTPGo object store 已启用，root 为 `.env` 中的 `OBJECT_STORE_BUCKET`。
+启动后端时，日志里应看到 SFTPGo object store 已启用，root 为 `SFTPGO_ROOT_BUCKET`。
 
 ## Production Notes
 
-生产环境建议：
-
-- 使用强密码或改为 SSH key 认证。
-- 填写 `OBJECT_STORE_SFTP_HOST_KEY`，避免后端信任任意 host key。
+- 使用强密码。
+- `SFTPGO_BASE_URL` 使用 `https://`。
 - 给 SFTPGo 数据卷做持久化、备份和恢复演练。
 - 按租户隔离要求评估是否需要独立账号或独立根目录。
-
-当前后端适配器使用 username/password 连接 SFTPGo。如果要改成 SSH private key 认证，需要另外扩展配置和代码路径。

@@ -20,6 +20,9 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 	if payload == nil {
 		payload = map[string]any{}
 	}
+	if !workflowLeavePayloadHasLinkedFields(payload) {
+		return LeaveRequest{}, nil
+	}
 	if existingID := strings.TrimSpace(stringFromAny(payload["leave_request_id"])); existingID != "" {
 		if existing, ok, err := c.store.GetLeaveRequest(goContext(ctx), ctx.TenantID, existingID); err != nil {
 			return LeaveRequest{}, err
@@ -158,4 +161,20 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 		"hours", req.Hours,
 	)
 	return req, nil
+}
+
+// workflowLeavePayloadHasLinkedFields avoids treating generic workflow payloads as attendance leave requests.
+func workflowLeavePayloadHasLinkedFields(payload map[string]any) bool {
+	for _, key := range []string{
+		"leave_request_id", "leaveRequestId",
+		"employee_id", "employeeId",
+		"leave_type", "leaveType", "leave_name", "leaveName",
+		"hours", "leave_hours", "leaveHours", "hours_requested", "hoursRequested",
+		"start_at", "startAt", "end_at", "endAt",
+	} {
+		if strings.TrimSpace(stringFromAny(payload[key])) != "" {
+			return true
+		}
+	}
+	return false
 }

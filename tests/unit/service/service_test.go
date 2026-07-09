@@ -3603,7 +3603,7 @@ func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
 		"員工編號":     "IKM001",
 		"中文姓名":     "測試員工",
 		"英文姓名":     "Test Employee",
-		"email":      "test.employee@ikala.ai",
+		"email":    "test.employee@ikala.ai",
 		"到職日期":     "2026/06/01",
 		"在職狀態":     "在職",
 		"部門代碼":     "M0101",
@@ -3752,7 +3752,7 @@ func TestSyncEHRMSEmployeesOverwritesLocalEmailAndCreatesPendingInvite(t *testin
 	rows := []domain.EHRMSEmployeeRecord{{
 		"員工編號":   "IKM003",
 		"中文姓名":   "覆蓋員工",
-		"email":    "ehrms@ikala.ai",
+		"email":  "ehrms@ikala.ai",
 		"到職日期":   "2026/06/01",
 		"在職狀態":   "在職",
 		"部門代碼":   "M0303",
@@ -3817,7 +3817,7 @@ func TestSyncEHRMSEmployeesFailsEntireBatchOnDuplicateEmail(t *testing.T) {
 		{
 			"員工編號":   "E1",
 			"中文姓名":   "員工一",
-			"email":    "dup@ikala.ai",
+			"email":  "dup@ikala.ai",
 			"到職日期":   "2026/06/01",
 			"在職狀態":   "在職",
 			"部門代碼":   "C01",
@@ -3830,7 +3830,7 @@ func TestSyncEHRMSEmployeesFailsEntireBatchOnDuplicateEmail(t *testing.T) {
 		{
 			"員工編號":   "E2",
 			"中文姓名":   "員工二",
-			"email":    "dup@ikala.ai",
+			"email":  "dup@ikala.ai",
 			"到職日期":   "2026/06/01",
 			"在職狀態":   "在職",
 			"部門代碼":   "C01",
@@ -4003,7 +4003,7 @@ func TestSyncEHRMSEmployeesBuildsOrgHierarchyAndPositions(t *testing.T) {
 		{
 			"員工編號":   "E1",
 			"中文姓名":   "員工一",
-			"email":    "e1@ikala.ai",
+			"email":  "e1@ikala.ai",
 			"到職日期":   "2026/06/01",
 			"在職狀態":   "在職",
 			"部門代碼":   "C01",
@@ -4018,7 +4018,7 @@ func TestSyncEHRMSEmployeesBuildsOrgHierarchyAndPositions(t *testing.T) {
 		{
 			"員工編號":   "E2",
 			"中文姓名":   "員工二",
-			"email":    "e2@ikala.ai",
+			"email":  "e2@ikala.ai",
 			"到職日期":   "2026/06/01",
 			"在職狀態":   "在職",
 			"部門代碼":   "C0101",
@@ -5488,7 +5488,7 @@ func TestPlatformTaskMutationsPersistAndProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if todo.Done || todo.Date != "07/02" {
+	if todo.Done || todo.Date != "07/02" || todo.WorkDate != "2026/07/02" || todo.DueDate != "2026/07/02" {
 		t.Fatalf("unexpected created todo: %+v", todo)
 	}
 
@@ -5514,6 +5514,37 @@ func TestPlatformTaskMutationsPersistAndProject(t *testing.T) {
 	projectedTodo := findPlatformTaskTodo(t, tasks.Todos, todo.ID)
 	if !projectedTodo.Done {
 		t.Fatalf("expected converted todo to be done, got %+v", projectedTodo)
+	}
+
+	if err := store.UpsertAgentRun(context.Background(), domain.AgentRun{
+		ID:        "run-platform-readonly",
+		TenantID:  "tenant-1",
+		AccountID: "acct-1",
+		Mode:      "assistant_chat",
+		Prompt:    "Summarize my tasks",
+		Status:    string(domain.AgentRunStatusCompleted),
+		CreatedAt: now.Add(2 * time.Hour),
+		UpdatedAt: now.Add(2 * time.Hour),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	tasks, err = svc.Platform().Tasks(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentRecord := findPlatformTaskRecord(t, tasks.Records, "2026/07/01")
+	var agentItem domain.PlatformTaskItem
+	for _, item := range agentRecord.Items {
+		if item.ID == "run-platform-readonly" {
+			agentItem = item
+		}
+	}
+	if !agentItem.ReadOnly || agentItem.Source != "agent_run" {
+		t.Fatalf("expected agent run task item to be read-only, got %+v", agentItem)
+	}
+	agentTodo := findPlatformTaskTodo(t, tasks.Todos, "todo-run-platform-readonly")
+	if !agentTodo.ReadOnly || agentTodo.Source != "agent_run" {
+		t.Fatalf("expected agent run todo to be read-only, got %+v", agentTodo)
 	}
 
 	deletedTodo, err := svc.Platform().DeleteTaskTodo(ctx, todo.ID)
@@ -5950,14 +5981,14 @@ func (p *recordingIdentityProvisioner) EnsureUser(_ context.Context, input domai
 }
 
 type fakeEHRMSClient struct {
-	rows              []domain.EHRMSEmployeeRecord
-	departmentRows    []domain.EHRMSDepartmentRecord
-	positionRows      []domain.EHRMSPositionRecord
-	attendanceRows    []domain.EHRMSAttendanceRecord
-	err               error
-	departmentsErr    error
-	positionsErr      error
-	attendanceErr     error
+	rows           []domain.EHRMSEmployeeRecord
+	departmentRows []domain.EHRMSDepartmentRecord
+	positionRows   []domain.EHRMSPositionRecord
+	attendanceRows []domain.EHRMSAttendanceRecord
+	err            error
+	departmentsErr error
+	positionsErr   error
+	attendanceErr  error
 }
 
 // ListEmployees 驗證員工。

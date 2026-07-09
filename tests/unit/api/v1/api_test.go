@@ -44,6 +44,53 @@ func newTestAPI(authenticated bool) http.Handler {
 	return v1api.New(service.New(store), nil, options).Routes()
 }
 
+func newTestAPIWithFormApprovalWorkflows(authenticated bool) http.Handler {
+	store := memory.NewStore()
+	populateDemoFixture(store)
+	fake := &apiFakeFormApprovalWorkflowClient{started: map[string]domain.FormApprovalWorkflowStart{}}
+	svc := service.New(store, service.Options{FormApprovalWorkflows: fake})
+	fake.service = svc
+	options := v1api.Options{}
+	if authenticated {
+		options.TokenResolver = staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo"}, ok: true}
+	}
+	return v1api.New(svc, nil, options).Routes()
+}
+
+type apiFakeFormApprovalWorkflowClient struct {
+	service *service.Service
+	started map[string]domain.FormApprovalWorkflowStart
+}
+
+func (c *apiFakeFormApprovalWorkflowClient) StartFormApprovalWorkflow(_ context.Context, start domain.FormApprovalWorkflowStart) error {
+	c.started[domain.FormApprovalWorkflowID(start.TenantID, start.FormInstanceID)] = start
+	return nil
+}
+
+func (c *apiFakeFormApprovalWorkflowClient) SignalFormApprovalWorkflow(ctx context.Context, signal domain.FormApprovalWorkflowSignal) error {
+	workflowID := domain.FormApprovalWorkflowID(signal.TenantID, signal.FormInstanceID)
+	if _, ok := c.started[workflowID]; !ok {
+		projection, err := c.service.Workflow().LoadTemporalFormApprovalProjection(domain.RequestContext{
+			Context:  ctx,
+			TenantID: signal.TenantID,
+		}, signal.FormInstanceID)
+		if err != nil {
+			return err
+		}
+		if projection.RunID == "" {
+			return domain.ErrFormApprovalWorkflowNotFound
+		}
+	}
+	_, err := c.service.Workflow().ApplyTemporalFormApprovalSignal(domain.RequestContext{
+		Context:   ctx,
+		TenantID:  signal.TenantID,
+		AccountID: signal.AccountID,
+		RequestID: signal.RequestID,
+		TraceID:   signal.TraceID,
+	}, signal)
+	return err
+}
+
 // newTestAPIForAccountNow builds an authenticated API with deterministic time for endpoint tests.
 func newTestAPIForAccountNow(accountID string, now time.Time, mutateStore func(*memory.Store)) http.Handler {
 	store := memory.NewStore()
@@ -1408,7 +1455,7 @@ func TestEmployeeCreateStatusAndDeleteContract(t *testing.T) {
 
 // TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes 驗證員工 preview avatar 範本 and 流程核准路由。
 func TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes(t *testing.T) {
-	handler := newTestAPI(true)
+	handler := newTestAPIWithFormApprovalWorkflows(true)
 
 	previewReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/preview", strings.NewReader(`{}`))
 	previewReq.Header.Set("Content-Type", "application/json")
@@ -1482,7 +1529,17 @@ func TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes(t *testing.T) {
 		t.Fatalf("expected avatar metadata removed, got %+v", withoutAvatar.BasicInfo)
 	}
 
-	submitReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/leave-request/submit", strings.NewReader(`{"payload":{"application_code":"hr","resource_type":"employee","action":"export","filters":{"employment_status":"active"}}}`))
+	templateReqBody := `{"key":"approval-evidence","name":"Approval Evidence","schema":{"type":"object","properties":{"subject":{"type":"string"}},"workspace_design":{"stages":[{"id":"stage-admin","type":"approver","label":"審核","detail":"由管理員審核","config":{"account_ids":["acct-admin"]}}]}}}`
+	createTemplateReq := httptest.NewRequest(http.MethodPost, "/v1/forms/templates", strings.NewReader(templateReqBody))
+	createTemplateReq.Header.Set("Content-Type", "application/json")
+	createTemplateRec := httptest.NewRecorder()
+	handler.ServeHTTP(createTemplateRec, createTemplateReq)
+	if createTemplateRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for workflow template create, got %d: %s", createTemplateRec.Code, createTemplateRec.Body.String())
+	}
+
+	workflowApprovalPayload := `{"payload":{"application_code":"hr","resource_type":"employee","action":"export","filters":{"employment_status":"active"},"subject":"approval evidence test"}}`
+	submitReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/approval-evidence/submit", strings.NewReader(workflowApprovalPayload))
 	submitReq.Header.Set("Content-Type", "application/json")
 	submitRec := httptest.NewRecorder()
 	handler.ServeHTTP(submitRec, submitReq)
@@ -1490,6 +1547,25 @@ func TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes(t *testing.T) {
 		t.Fatalf("expected 201 for workflow form submit, got %d: %s", submitRec.Code, submitRec.Body.String())
 	}
 	form := decodeData[domain.FormInstance](t, submitRec.Body.Bytes())
+	draftReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/drafts", strings.NewReader(`{"template_key":"approval-evidence","payload":{"application_code":"hr","resource_type":"employee","action":"export","subject":"draft approval evidence test"}}`))
+	draftReq.Header.Set("Content-Type", "application/json")
+	draftRec := httptest.NewRecorder()
+	handler.ServeHTTP(draftRec, draftReq)
+	if draftRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for workflow draft create, got %d: %s", draftRec.Code, draftRec.Body.String())
+	}
+	draft := decodeData[domain.FormInstance](t, draftRec.Body.Bytes())
+	submitDraftReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/"+draft.ID+"/submit", strings.NewReader(workflowApprovalPayload))
+	submitDraftReq.Header.Set("Content-Type", "application/json")
+	submitDraftRec := httptest.NewRecorder()
+	handler.ServeHTTP(submitDraftRec, submitDraftReq)
+	if submitDraftRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for workflow draft submit, got %d: %s", submitDraftRec.Code, submitDraftRec.Body.String())
+	}
+	submittedDraft := decodeData[domain.FormInstance](t, submitDraftRec.Body.Bytes())
+	if submittedDraft.ID != draft.ID || submittedDraft.Status != "in_review" {
+		t.Fatalf("expected draft id to be submitted in place, draft=%s got %+v", draft.ID, submittedDraft)
+	}
 	approveReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/"+form.ID+"/approve", strings.NewReader(`{"reason":"frontend approval"}`))
 	approveReq.Header.Set("Content-Type", "application/json")
 	approveRec := httptest.NewRecorder()

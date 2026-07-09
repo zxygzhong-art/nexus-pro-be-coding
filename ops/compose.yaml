@@ -109,12 +109,15 @@ services:
       - ${SFTPGO_PASSWORD}
       - "--sftpd-port"
       - "${SFTPGO_SFTP_INTERNAL_PORT}"
+      - "--httpd-port"
+      - "${SFTPGO_HTTP_INTERNAL_PORT}"
       - "--permissions"
       - "*"
       - "--log-level"
       - info
     ports:
       - "${SFTPGO_SFTP_BIND_HOST}:${SFTPGO_SFTP_HOST_PORT}:${SFTPGO_SFTP_INTERNAL_PORT}"
+      - "${SFTPGO_HTTP_BIND_HOST}:${SFTPGO_HTTP_HOST_PORT}:${SFTPGO_HTTP_INTERNAL_PORT}"
     volumes:
       - sftpgo-data:/srv/sftpgo/data
     networks:

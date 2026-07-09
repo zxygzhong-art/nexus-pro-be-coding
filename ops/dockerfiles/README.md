@@ -61,7 +61,8 @@ SFTPGo 單獨執行範例：
 docker volume create sftpgo-data
 docker run -d --name sftpgo --network observability \
   -p 22022:2022 \
+  -p 28080:8080 \
   -v sftpgo-data:/srv/sftpgo/data \
   nexus-pro-be/sftpgo:v2.6.6 \
-  portable --directory /srv/sftpgo/data --username nexus --password nexus-sftpgo-password --sftpd-port 2022 --permissions '*'
+  portable --directory /srv/sftpgo/data --username nexus-service --password nexus-service --sftpd-port 2022 --httpd-port 8080 --permissions '*'
 ```

@@ -4,6 +4,7 @@ import (
 	"nexus-pro-be/internal/domain"
 	"sort"
 	"strings"
+	"time"
 )
 
 func (c WorkspaceService) Workspace(ctx RequestContext) (PlatformWorkspaceResponse, error) {
@@ -337,7 +338,7 @@ func (c WorkspaceService) Insights(ctx RequestContext, query PlatformInsightsQue
 	if month == "" {
 		month = c.Now().Format("2006-01")
 	}
-	overview, err := c.WorkspaceOverview(ctx, WorkspaceOverviewQuery{})
+	overview, err := c.WorkspaceOverview(ctx, workspaceOverviewQueryFromInsightMonth(month))
 	if err != nil {
 		return PlatformInsightsResponse{}, err
 	}
@@ -346,11 +347,19 @@ func (c WorkspaceService) Insights(ctx RequestContext, query PlatformInsightsQue
 		Reports: c.insightReports(month, overview),
 		AIPanel: PlatformInsightsAIPanel{
 			Messages: []PlatformChatMessage{
-				{ID: "im1", Role: "assistant", Avatar: "🤖", Content: "已根據目前後端資料產生人力、業務與財務報表摘要。"},
+				{ID: "im1", Role: "assistant", Avatar: "🤖", Content: "已根據目前後端資料產生人力與出勤報表摘要；業務與財務資料源尚未接入。"},
 			},
-			QuickPrompts: []string{"本月重點", "異常部門", "請假排行", "生成摘要"},
+			QuickPrompts: []string{"本月重點", "異常部門", "請假排行", "資料源狀態"},
 		},
 	}, nil
+}
+
+func workspaceOverviewQueryFromInsightMonth(month string) WorkspaceOverviewQuery {
+	parsed, err := time.Parse("2006-01", strings.TrimSpace(month))
+	if err != nil {
+		return WorkspaceOverviewQuery{}
+	}
+	return WorkspaceOverviewQuery{Year: parsed.Year(), Month: int(parsed.Month())}
 }
 
 // insightReports 處理 insight reports 的服務流程。
@@ -365,6 +374,8 @@ func (c WorkspaceService) insightReports(month string, overview WorkspaceOvervie
 				{"id": "dept-total-hours", "label": "估算工時", "value": active * 8, "unit": "h", "variant": "primary"},
 				{"id": "leave-days", "label": "今日請假", "value": overview.Attendance.Leave, "unit": "人", "variant": "warning"},
 				{"id": "checked-in", "label": "已上班", "value": overview.Attendance.CheckedIn, "unit": "人", "variant": "success"},
+				{"id": "hires", "label": "本月新進", "value": hires, "unit": "人", "variant": "success"},
+				{"id": "separations", "label": "本月離職", "value": separations, "unit": "人", "variant": "warning"},
 			},
 			"leave_chart": []map[string]any{
 				{"id": "leave", "label": "請假", "value": overview.Attendance.Leave, "max": maxInt(active, 1), "tone": "warning", "active": true},
@@ -388,22 +399,20 @@ func (c WorkspaceService) insightReports(month string, overview WorkspaceOvervie
 			"members": []map[string]any{},
 		},
 		"sales": map[string]any{
-			"title": "業務摘要",
-			"metrics": []map[string]any{
-				{"id": "pipeline", "label": "Pipeline", "value": "NT$ 0", "variant": "primary"},
-				{"id": "won", "label": "已成交", "value": "NT$ 0", "variant": "success"},
-			},
-			"trend_bars": []map[string]any{{"id": month, "label": month, "value": 0, "max": 1, "tone": "primary", "active": true}},
-			"clients":    []map[string]any{},
+			"title":         "業務摘要",
+			"source_status": "not_connected",
+			"caveat":        "業務 CRM / 銷售資料源尚未接入，暫不展示 pipeline、成交金額或客戶列表。",
+			"metrics":       []map[string]any{},
+			"trend_bars":    []map[string]any{},
+			"clients":       []map[string]any{},
 		},
 		"finance": map[string]any{
-			"title": "財務摘要",
-			"metrics": []map[string]any{
-				{"id": "hires", "label": "本月新進", "value": hires, "unit": "人", "variant": "success"},
-				{"id": "separations", "label": "本月離職", "value": separations, "unit": "人", "variant": "warning"},
-			},
-			"monthly_bars": []map[string]any{{"id": month, "label": month, "income": hires, "expense": separations, "active": true}},
-			"departments":  []map[string]any{},
+			"title":         "財務摘要",
+			"source_status": "not_connected",
+			"caveat":        "財務系統資料源尚未接入，暫不展示收入、支出、淨利或部門收支。",
+			"metrics":       []map[string]any{},
+			"monthly_bars":  []map[string]any{},
+			"departments":   []map[string]any{},
 		},
 	}
 }

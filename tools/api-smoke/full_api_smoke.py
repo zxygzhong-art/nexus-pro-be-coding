@@ -139,7 +139,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--tenant", default="demo", help="Tenant id for the default request context.")
     parser.add_argument("--account", default="acct-admin", help="Account id for the default request context.")
     parser.add_argument("--skip-role-matrix", action="store_true", help="Skip the multi-role HTTP authorization matrix.")
-    parser.add_argument("--keycloak-issuer-url", default=env_first("SMOKE_KEYCLOAK_ISSUER_URL", "KEYCLOAK_ISSUER_URL"), help="OIDC issuer URL for real login mode.")
+    parser.add_argument("--keycloak-issuer-url", default=env_first("SMOKE_KEYCLOAK_BASE_URL", "KEYCLOAK_BASE_URL"), help="OIDC issuer URL for real login mode.")
     parser.add_argument("--keycloak-token-url", default=env_first("SMOKE_KEYCLOAK_TOKEN_URL"), help="Token endpoint override for real login mode.")
     parser.add_argument("--keycloak-client-id", default=env_first("SMOKE_KEYCLOAK_CLIENT_ID", "KEYCLOAK_CLIENT_ID", fallback=DEFAULT_KEYCLOAK_CLIENT_ID), help="OIDC client id for real login mode.")
     parser.add_argument("--keycloak-client-secret", default=env_first("SMOKE_KEYCLOAK_CLIENT_SECRET", "KEYCLOAK_CLIENT_SECRET"), help="Optional OIDC client secret.")
@@ -157,9 +157,9 @@ def parse_args() -> argparse.Namespace:
 
 def start_server(port: int, args: argparse.Namespace) -> tuple[subprocess.Popen[str], list[str]]:
     env = os.environ.copy()
-    if not env_first("DATABASE_URL"):
-        raise SmokeFailure("DATABASE_URL is required because smoke accounts must come from the database")
-    for key in ("REDIS_ADDR", "OPENFGA_API_URL", "OPENFGA_STORE_ID"):
+    if not (env_first("DB_HOST") and env_first("DB_USERNAME") and env_first("DB_NAME")):
+        raise SmokeFailure("DB_HOST, DB_USERNAME, and DB_NAME are required because smoke accounts must come from the database")
+    for key in ("REDIS_HOST", "OPENFGA_BASE_URL", "OPENFGA_STORE_ID"):
         env.pop(key, None)
     env.update(
         {
@@ -171,8 +171,8 @@ def start_server(port: int, args: argparse.Namespace) -> tuple[subprocess.Popen[
         }
     )
     if not args.keycloak_issuer_url:
-        raise SmokeFailure("--keycloak-issuer-url or SMOKE_KEYCLOAK_ISSUER_URL is required")
-    env["KEYCLOAK_ISSUER_URL"] = args.keycloak_issuer_url
+        raise SmokeFailure("--keycloak-issuer-url or SMOKE_KEYCLOAK_BASE_URL is required")
+    env["KEYCLOAK_BASE_URL"] = args.keycloak_issuer_url
     env["KEYCLOAK_CLIENT_ID"] = args.keycloak_client_id
     proc = subprocess.Popen(
         ["go", "run", "./cmd/api"],
@@ -470,7 +470,7 @@ def keycloak_token_url(args: argparse.Namespace) -> str:
     if args.keycloak_token_url:
         return args.keycloak_token_url
     if not args.keycloak_issuer_url:
-        raise SmokeFailure("--keycloak-issuer-url or SMOKE_KEYCLOAK_ISSUER_URL is required in keycloak mode")
+        raise SmokeFailure("--keycloak-issuer-url or SMOKE_KEYCLOAK_BASE_URL is required in keycloak mode")
     discovery_url = args.keycloak_issuer_url.rstrip("/") + "/.well-known/openid-configuration"
     discovery = request(discovery_url, "GET", "", headers={})
     if discovery.status != 200 or not isinstance(discovery.json_body, dict) or not discovery.json_body.get("token_endpoint"):

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"nexus-pro-be/internal/config"
 	"os"
 	"sort"
 	"strings"
@@ -641,9 +642,9 @@ func TestAttendanceClockHTTPPostgresFieldPolicy(t *testing.T) {
 // openIntegrationPool 驗證 open integration pool。
 func openIntegrationPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
-	dsn := strings.TrimSpace(os.Getenv("DATABASE_URL"))
+	dsn := config.DatabaseURLFromEnv()
 	if dsn == "" {
-		t.Skip("DATABASE_URL is not set; skipping postgres integration test")
+		t.Skip("DB_* is not set; skipping postgres integration test")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -678,7 +679,7 @@ func requireRLSCapableUser(t *testing.T, pool *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	if bypassesRLS {
-		t.Skip("current DATABASE_URL user bypasses RLS; use a non-superuser role to run RLS integration checks")
+		t.Skip("current DB user bypasses RLS; use a non-superuser role to run RLS integration checks")
 	}
 }
 

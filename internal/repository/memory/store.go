@@ -3011,6 +3011,127 @@ func (s *Store) ListAuditLogPage(ctx context.Context, tenantID string, page Page
 	return paginateMemory(items, page.Page, page.PageSize), total, nil
 }
 
+// ListAuditLogPageFiltered 從儲存層篩選並列出稽核 log 分頁。
+func (s *Store) ListAuditLogPageFiltered(_ context.Context, tenantID string, query domain.WorkspaceAuditLogQuery, page PageRequest) ([]AuditLog, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	accounts := s.accounts[tenantID]
+	employees := s.employees[tenantID]
+	from, hasFrom := auditLogFilterTime(query.From, false)
+	to, hasTo := auditLogFilterTime(query.To, true)
+	out := make([]AuditLog, 0, len(s.auditLogs[tenantID]))
+	for _, log := range s.auditLogs[tenantID] {
+		if hasFrom && log.CreatedAt.Before(from) {
+			continue
+		}
+		if hasTo && !log.CreatedAt.Before(to) {
+			continue
+		}
+		account := accounts[log.ActorAccountID]
+		employee := employees[account.EmployeeID]
+		if !auditLogOperatorMatches(log, account, employee, query.OperatorID) {
+			continue
+		}
+		if !auditLogTypeMatches(log, query.Type) {
+			continue
+		}
+		if !auditLogKeywordMatches(log, account, employee, query.Keyword) {
+			continue
+		}
+		out = append(out, copyAuditLog(log))
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		switch page.Sort {
+		case "created_at_asc":
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		default:
+			return out[i].CreatedAt.After(out[j].CreatedAt)
+		}
+	})
+	page = utils.NormalizePageRequest(page)
+	total := len(out)
+	return paginateMemory(out, page.Page, page.PageSize), total, nil
+}
+
+func auditLogFilterTime(value string, endExclusive bool) (time.Time, bool) {
+	trimmed := strings.TrimSpace(value)
+	if trimmed == "" {
+		return time.Time{}, false
+	}
+	if parsed, err := time.Parse(time.RFC3339, trimmed); err == nil {
+		if endExclusive {
+			return parsed, true
+		}
+		return parsed, true
+	}
+	if parsed, err := time.Parse(time.DateOnly, trimmed); err == nil {
+		if endExclusive {
+			return parsed.AddDate(0, 0, 1), true
+		}
+		return parsed, true
+	}
+	return time.Time{}, false
+}
+
+func auditLogOperatorMatches(log AuditLog, account Account, employee Employee, value string) bool {
+	needle := strings.ToLower(strings.TrimSpace(value))
+	if needle == "" {
+		return true
+	}
+	for _, candidate := range []string{log.ActorAccountID, account.ID, account.EmployeeID, account.DisplayName, account.Email, employee.ID, employee.EmployeeNo, employee.Name} {
+		if strings.ToLower(strings.TrimSpace(candidate)) == needle {
+			return true
+		}
+	}
+	return false
+}
+
+func auditLogTypeMatches(log AuditLog, value string) bool {
+	needle := strings.ToLower(strings.TrimSpace(value))
+	if needle == "" {
+		return true
+	}
+	haystack := strings.ToLower(strings.Join([]string{auditLogWorkspaceType(log), log.Resource, log.Action}, " "))
+	return strings.Contains(haystack, needle)
+}
+
+func auditLogKeywordMatches(log AuditLog, account Account, employee Employee, value string) bool {
+	needle := strings.ToLower(strings.TrimSpace(value))
+	if needle == "" {
+		return true
+	}
+	haystack := strings.ToLower(strings.Join([]string{
+		account.DisplayName,
+		account.Email,
+		employee.EmployeeNo,
+		employee.Name,
+		auditLogWorkspaceType(log),
+		log.Action,
+		log.Resource,
+		log.Target,
+		fmt.Sprint(log.Details),
+	}, " "))
+	return strings.Contains(haystack, needle)
+}
+
+func auditLogWorkspaceType(log AuditLog) string {
+	text := strings.ToLower(strings.Join([]string{log.Resource, log.Action}, " "))
+	switch {
+	case strings.Contains(text, "employee"):
+		return "員工管理"
+	case strings.Contains(text, "org") || strings.Contains(text, "position"):
+		return "組織架構"
+	case strings.Contains(text, "attendance") || strings.Contains(text, "leave"):
+		return "假勤制度"
+	case strings.Contains(text, "form") || strings.Contains(text, "workflow"):
+		return "表單設計"
+	case strings.Contains(text, "iam") || strings.Contains(text, "authz") || strings.Contains(text, "admin"):
+		return "管理員設定"
+	default:
+		return "系統"
+	}
+}
+
 // GetPermissionVersion 從儲存層取得權限 version。
 func (s *Store) GetPermissionVersion(_ context.Context, tenantID string) (int64, error) {
 	s.mu.RLock()

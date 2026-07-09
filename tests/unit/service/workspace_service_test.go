@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,6 +35,61 @@ func TestWorkspaceOverviewAggregatesVisibleHRAndAttendance(t *testing.T) {
 	if len(got.TodoCategories) == 0 || got.TodoCategories[0].Key != "onboarding" || got.TodoCategories[0].Count != 1 {
 		t.Fatalf("unexpected todo categories: %+v", got.TodoCategories)
 	}
+}
+
+func TestWorkspaceInsightsUsesRequestedMonthForOverviewMetrics(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-may", EmployeeNo: "IKL101", Name: "May Hire", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 5, 15, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-jun", EmployeeNo: "IKL102", Name: "June Hire", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 6, 2, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+
+	may, err := svc.Workspace().Insights(ctx, domain.PlatformInsightsQuery{Month: "2026-05"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	june, err := svc.Workspace().Insights(ctx, domain.PlatformInsightsQuery{Month: "2026-06"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mayDeptTasks := may.Reports["dept_tasks"].(map[string]any)
+	juneDeptTasks := june.Reports["dept_tasks"].(map[string]any)
+	mayHires := insightMetricValueByID(t, mayDeptTasks, "hires")
+	juneHires := insightMetricValueByID(t, juneDeptTasks, "hires")
+	if may.Month != "2026-05" || mayHires != 1 {
+		t.Fatalf("expected May insights to use May overview metrics, got month=%s dept_tasks=%+v", may.Month, mayDeptTasks)
+	}
+	if june.Month != "2026-06" || juneHires != 1 {
+		t.Fatalf("expected June insights to use June overview metrics, got month=%s dept_tasks=%+v", june.Month, juneDeptTasks)
+	}
+}
+
+func TestWorkspaceInsightsMarksSalesAndFinanceAsNotConnected(t *testing.T) {
+	_, svc, ctx := newWorkspaceFixture(t)
+	got, err := svc.Workspace().Insights(ctx, domain.PlatformInsightsQuery{Month: "2026-06"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"sales", "finance"} {
+		report := got.Reports[key].(map[string]any)
+		if report["source_status"] != "not_connected" || report["caveat"] == "" {
+			t.Fatalf("expected %s report to be marked not_connected with caveat, got %+v", key, report)
+		}
+		if metrics := report["metrics"].([]map[string]any); len(metrics) != 0 {
+			t.Fatalf("expected %s metrics to be empty until data source is connected, got %+v", key, metrics)
+		}
+	}
+}
+
+func insightMetricValueByID(t *testing.T, report map[string]any, id string) any {
+	t.Helper()
+	metrics := report["metrics"].([]map[string]any)
+	for _, metric := range metrics {
+		if metric["id"] == id {
+			return metric["value"]
+		}
+	}
+	t.Fatalf("metric %s not found in %+v", id, report)
+	return nil
 }
 
 // TestWorkspaceOrganizationBuildsManagerTree 驗證工作區 organization builds 主管 tree。
@@ -141,6 +197,35 @@ func TestWorkspaceAttendanceBuildsLeaveAndClockMatrices(t *testing.T) {
 	}
 	if len(got.Clock.Abnormals) != 1 || got.Clock.Abnormals[0].Record.Reason != "缺下班卡" {
 		t.Fatalf("unexpected clock abnormals: %+v", got.Clock.Abnormals)
+	}
+}
+
+func TestWorkspaceAttendanceCSVExportNeutralizesSpreadsheetFormulas(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	insertWorkspaceEmployee(t, store, domain.Employee{
+		ID: "emp-formula", EmployeeNo: "IKL099", Name: "=cmd", CompanyEmail: "formula@example.com",
+		Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)),
+		CreatedAt: now, UpdatedAt: now,
+	})
+
+	raw, filename, err := svc.Workspace().ExportWorkspaceAttendanceCSV(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 6}, "attendance")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body := string(raw)
+	if filename != "workspace-attendance-attendance-2026-06.csv" {
+		t.Fatalf("unexpected filename %q", filename)
+	}
+	if !strings.HasPrefix(body, "\ufeff") {
+		gotPrefix := body
+		if len(gotPrefix) > 4 {
+			gotPrefix = gotPrefix[:4]
+		}
+		t.Fatalf("expected UTF-8 BOM, got %q", gotPrefix)
+	}
+	if !strings.Contains(body, ",'=cmd,") {
+		t.Fatalf("expected formula cell to be neutralized, got %q", body)
 	}
 }
 

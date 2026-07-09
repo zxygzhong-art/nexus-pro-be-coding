@@ -237,8 +237,9 @@ func TestAuthzExplainDecisionMatchesCheck(t *testing.T) {
 	}
 }
 
+// authzExplainTestNow 保持測試 session 在 memory store 的即時 clock 下仍為 active。
 func authzExplainTestNow() time.Time {
-	return time.Date(2026, 7, 8, 9, 0, 0, 0, time.UTC)
+	return time.Now().UTC().Truncate(time.Second)
 }
 
 func seedAuthzExplainTenant(store *memory.Store, now time.Time) {
