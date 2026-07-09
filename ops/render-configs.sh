@@ -38,6 +38,8 @@ required_vars=(
   PROMETHEUS_SCRAPE_INTERVAL
   PROMETHEUS_EVALUATION_INTERVAL
   TEMPORAL_FORCE_SEARCH_ATTRIBUTES_CACHE_REFRESH
+  SFTPGO_USERNAME
+  SFTPGO_PASSWORD
 )
 
 for var_name in "${required_vars[@]}"; do
@@ -47,7 +49,10 @@ for var_name in "${required_vars[@]}"; do
   fi
 done
 
-mkdir -p "${GENERATED_DIR}/grafana/provisioning/datasources" "${GENERATED_DIR}/temporal/dynamicconfig"
+mkdir -p \
+  "${GENERATED_DIR}/grafana/provisioning/datasources" \
+  "${GENERATED_DIR}/temporal/dynamicconfig" \
+  "${GENERATED_DIR}/sftpgo"
 legacy_config="${GENERATED_DIR}/otel"col.yaml
 legacy_log_store="${GENERATED_DIR}/lo"ki.yaml
 legacy_log_agent="${GENERATED_DIR}/prom"tail.yaml
@@ -141,5 +146,25 @@ system.forceSearchAttributesCacheRefreshOnRead:
   - value: ${TEMPORAL_FORCE_SEARCH_ATTRIBUTES_CACHE_REFRESH}
     constraints: {}
 EOF
+
+python3 - <<'PY' > "${GENERATED_DIR}/sftpgo/loaddata.json"
+import json
+import os
+
+username = os.environ["SFTPGO_USERNAME"]
+password = os.environ["SFTPGO_PASSWORD"]
+payload = {
+    "users": [
+        {
+            "status": 1,
+            "username": username,
+            "password": password,
+            "home_dir": f"/srv/sftpgo/data/{username}",
+            "permissions": {"/": ["*"]},
+        }
+    ]
+}
+print(json.dumps(payload, indent=2))
+PY
 
 echo "generated configs under ${GENERATED_DIR}"

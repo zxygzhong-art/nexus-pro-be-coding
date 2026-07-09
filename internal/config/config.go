@@ -78,7 +78,6 @@ type Config struct {
 	LiteLLMBaseURL   string
 	LiteLLMAPIKey    string
 	LiteLLMMasterKey string
-	AgentModelName   string
 	AgentChatEnabled bool
 	AgentChatTimeout time.Duration
 
@@ -174,9 +173,6 @@ func (c Config) ValidateStartup() error {
 		}
 		if strings.TrimSpace(c.LiteLLMAPIKey) == "" {
 			problems = append(problems, "LITELLM_API_KEY is required when AGENT_CHAT_ENABLED=true")
-		}
-		if strings.TrimSpace(c.AgentModelName) == "" {
-			problems = append(problems, "AGENT_MODEL_NAME is required when AGENT_CHAT_ENABLED=true")
 		}
 	}
 	switch normalizeObjectStoreProvider(c.ObjectStoreProvider, c.ObjectStoreDir, c.ObjectStoreEndpoint, c.ObjectStoreBucket) {
@@ -306,7 +302,6 @@ func LoadE() (Config, error) {
 		LiteLLMBaseURL:   env("LITELLM_BASE_URL", "http://127.0.0.1:4000"),
 		LiteLLMAPIKey:    os.Getenv("LITELLM_API_KEY"),
 		LiteLLMMasterKey: os.Getenv("LITELLM_MASTER_KEY"),
-		AgentModelName:   strings.TrimSpace(os.Getenv("AGENT_MODEL_NAME")),
 		AgentChatEnabled: envBool("AGENT_CHAT_ENABLED", false, &problems),
 		AgentChatTimeout: time.Duration(envInt("AGENT_CHAT_TIMEOUT_SECONDS", 60, &problems)) * time.Second,
 

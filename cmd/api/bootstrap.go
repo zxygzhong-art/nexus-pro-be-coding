@@ -204,11 +204,24 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 			cfg.TemporalTaskQueue,
 		),
 	}
+	if strings.TrimSpace(cfg.LiteLLMBaseURL) != "" && (strings.TrimSpace(cfg.LiteLLMAPIKey) != "" || strings.TrimSpace(cfg.LiteLLMMasterKey) != "") {
+		liteLLMAdmin, err := platformllm.NewLiteLLMAdminClient(platformllm.LiteLLMAdminConfig{
+			BaseURL:   cfg.LiteLLMBaseURL,
+			APIKey:    cfg.LiteLLMAPIKey,
+			MasterKey: cfg.LiteLLMMasterKey,
+			Client:    authHTTPClient,
+		})
+		if err != nil {
+			logStartupFailure(logger, "litellm_admin", err)
+			shutdownStartedModules(shutdowns, logger)
+			return nil, err
+		}
+		serviceOptions.LiteLLMAdmin = liteLLMAdmin
+	}
 	if cfg.AgentChatEnabled {
 		agentModel, err := platformllm.NewLiteLLM(platformllm.LiteLLMConfig{
 			BaseURL: cfg.LiteLLMBaseURL,
 			APIKey:  cfg.LiteLLMAPIKey,
-			Model:   cfg.AgentModelName,
 		})
 		if err != nil {
 			logStartupFailure(logger, "agent_chat_model", err)

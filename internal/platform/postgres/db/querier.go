@@ -15,6 +15,7 @@ type Querier interface {
 	// Atomically claim a batch of dispatchable outbox rows for multi-replica workers.
 	ClaimOutboxEvents(ctx context.Context, arg ClaimOutboxEventsParams) ([]OutboxEvent, error)
 	ClearDefaultAgentModel(ctx context.Context, arg ClearDefaultAgentModelParams) error
+	CountActiveAgentRunsBySession(ctx context.Context, arg CountActiveAgentRunsBySessionParams) (int64, error)
 	CountAgentDefinitionsByModel(ctx context.Context, arg CountAgentDefinitionsByModelParams) (int64, error)
 	CountAgentRuns(ctx context.Context, tenantID string) (int64, error)
 	CountAgentRunsByAccount(ctx context.Context, arg CountAgentRunsByAccountParams) (int64, error)

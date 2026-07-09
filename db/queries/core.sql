@@ -1280,6 +1280,52 @@ ORDER BY created_at DESC;
 SELECT count(*) FROM audit_logs
 WHERE tenant_id = $1;
 
+-- name: CountAuditLogsFiltered :one
+SELECT count(*)
+FROM audit_logs al
+LEFT JOIN accounts a ON a.tenant_id = al.tenant_id AND a.id = al.actor_account_id
+LEFT JOIN employees e ON e.tenant_id = al.tenant_id AND e.id = a.employee_id
+WHERE al.tenant_id = sqlc.arg(tenant_id)
+  AND (
+    sqlc.arg(operator_id)::text = ''
+    OR lower(al.actor_account_id) = lower(sqlc.arg(operator_id)::text)
+    OR lower(coalesce(a.id, '')) = lower(sqlc.arg(operator_id)::text)
+    OR lower(coalesce(a.employee_id, '')) = lower(sqlc.arg(operator_id)::text)
+    OR lower(coalesce(a.display_name, '')) = lower(sqlc.arg(operator_id)::text)
+    OR lower(coalesce(a.email, '')) = lower(sqlc.arg(operator_id)::text)
+    OR lower(coalesce(e.id, '')) = lower(sqlc.arg(operator_id)::text)
+    OR lower(coalesce(e.employee_no, '')) = lower(sqlc.arg(operator_id)::text)
+    OR lower(coalesce(e.name, '')) = lower(sqlc.arg(operator_id)::text)
+  )
+  AND (NOT sqlc.arg(has_from)::bool OR al.created_at >= sqlc.arg(from_time))
+  AND (NOT sqlc.arg(has_to)::bool OR al.created_at < sqlc.arg(to_time))
+  AND (
+    sqlc.arg(type)::text = ''
+    OR lower(
+      CASE
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%employee%' THEN '員工管理'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%org%' OR lower(al.resource || ' ' || al.action) LIKE '%position%' THEN '組織架構'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%attendance%' OR lower(al.resource || ' ' || al.action) LIKE '%leave%' THEN '假勤制度'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%form%' OR lower(al.resource || ' ' || al.action) LIKE '%workflow%' THEN '表單設計'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%iam%' OR lower(al.resource || ' ' || al.action) LIKE '%authz%' OR lower(al.resource || ' ' || al.action) LIKE '%admin%' THEN '管理員設定'
+        ELSE '系統'
+      END || ' ' || al.resource || ' ' || al.action
+    ) LIKE '%' || lower(sqlc.arg(type)::text) || '%'
+  )
+  AND (
+    sqlc.arg(keyword)::text = ''
+    OR lower(
+      coalesce(a.display_name, '') || ' ' ||
+      coalesce(a.email, '') || ' ' ||
+      coalesce(e.employee_no, '') || ' ' ||
+      coalesce(e.name, '') || ' ' ||
+      al.action || ' ' ||
+      al.resource || ' ' ||
+      coalesce(al.target, '') || ' ' ||
+      coalesce(al.details::text, '')
+    ) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
+  );
+
 -- name: ListAuditLogsPage :many
 SELECT * FROM audit_logs
 WHERE tenant_id = sqlc.arg(tenant_id)
@@ -1287,5 +1333,57 @@ ORDER BY
   CASE WHEN sqlc.arg(sort)::text = 'created_at_asc' THEN created_at END ASC,
   created_at DESC,
   id ASC
+LIMIT sqlc.arg(limit_count)::int
+OFFSET sqlc.arg(offset_count)::int;
+
+-- name: ListAuditLogsFilteredPage :many
+SELECT al.id, al.tenant_id, al.actor_account_id, al.action, al.resource, al.target, al.result, al.trace_id, al.severity, al.details, al.created_at
+FROM audit_logs al
+LEFT JOIN accounts a ON a.tenant_id = al.tenant_id AND a.id = al.actor_account_id
+LEFT JOIN employees e ON e.tenant_id = al.tenant_id AND e.id = a.employee_id
+WHERE al.tenant_id = sqlc.arg(tenant_id)
+  AND (
+    sqlc.arg(operator_id)::text = ''
+    OR lower(al.actor_account_id) = lower(sqlc.arg(operator_id)::text)
+    OR lower(coalesce(a.id, '')) = lower(sqlc.arg(operator_id)::text)
+    OR lower(coalesce(a.employee_id, '')) = lower(sqlc.arg(operator_id)::text)
+    OR lower(coalesce(a.display_name, '')) = lower(sqlc.arg(operator_id)::text)
+    OR lower(coalesce(a.email, '')) = lower(sqlc.arg(operator_id)::text)
+    OR lower(coalesce(e.id, '')) = lower(sqlc.arg(operator_id)::text)
+    OR lower(coalesce(e.employee_no, '')) = lower(sqlc.arg(operator_id)::text)
+    OR lower(coalesce(e.name, '')) = lower(sqlc.arg(operator_id)::text)
+  )
+  AND (NOT sqlc.arg(has_from)::bool OR al.created_at >= sqlc.arg(from_time))
+  AND (NOT sqlc.arg(has_to)::bool OR al.created_at < sqlc.arg(to_time))
+  AND (
+    sqlc.arg(type)::text = ''
+    OR lower(
+      CASE
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%employee%' THEN '員工管理'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%org%' OR lower(al.resource || ' ' || al.action) LIKE '%position%' THEN '組織架構'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%attendance%' OR lower(al.resource || ' ' || al.action) LIKE '%leave%' THEN '假勤制度'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%form%' OR lower(al.resource || ' ' || al.action) LIKE '%workflow%' THEN '表單設計'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%iam%' OR lower(al.resource || ' ' || al.action) LIKE '%authz%' OR lower(al.resource || ' ' || al.action) LIKE '%admin%' THEN '管理員設定'
+        ELSE '系統'
+      END || ' ' || al.resource || ' ' || al.action
+    ) LIKE '%' || lower(sqlc.arg(type)::text) || '%'
+  )
+  AND (
+    sqlc.arg(keyword)::text = ''
+    OR lower(
+      coalesce(a.display_name, '') || ' ' ||
+      coalesce(a.email, '') || ' ' ||
+      coalesce(e.employee_no, '') || ' ' ||
+      coalesce(e.name, '') || ' ' ||
+      al.action || ' ' ||
+      al.resource || ' ' ||
+      coalesce(al.target, '') || ' ' ||
+      coalesce(al.details::text, '')
+    ) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
+  )
+ORDER BY
+  CASE WHEN sqlc.arg(sort)::text = 'created_at_asc' THEN al.created_at END ASC,
+  al.created_at DESC,
+  al.id ASC
 LIMIT sqlc.arg(limit_count)::int
 OFFSET sqlc.arg(offset_count)::int;

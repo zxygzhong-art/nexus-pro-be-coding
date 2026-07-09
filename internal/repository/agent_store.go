@@ -39,6 +39,7 @@ type AgentStore interface {
 	InsertAgentSessionMessage(context.Context, domain.AgentSessionMessage) error
 	ListAgentSessionMessages(ctx context.Context, tenantID, sessionID string) ([]domain.AgentSessionMessage, error)
 	ListRecentAgentSessionMessages(ctx context.Context, tenantID, sessionID string, limit int) ([]domain.AgentSessionMessage, error)
+	CountActiveAgentRunsBySession(ctx context.Context, tenantID, sessionID string) (int, error)
 	UpsertAgentMemory(context.Context, domain.AgentMemory) error
 	GetAgentMemory(ctx context.Context, tenantID, id string) (domain.AgentMemory, bool, error)
 	ListAgentMemoriesByAccount(ctx context.Context, tenantID, accountID, agentID, sessionID string, limit int) ([]domain.AgentMemory, error)

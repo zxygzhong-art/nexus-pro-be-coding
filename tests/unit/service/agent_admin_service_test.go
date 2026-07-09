@@ -159,6 +159,38 @@ func TestAgentAdminBlocksDeletingModelInUse(t *testing.T) {
 	}
 }
 
+func TestAgentAdminSyncAndTestModelUseLiteLLMAdmin(t *testing.T) {
+	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentAdminAccount(t, store, now)
+	liteLLM := &fakeLiteLLMAdmin{}
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, LiteLLMAdmin: liteLLM})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", ApprovalConfirmed: true}
+
+	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
+		Name:         "GPT 4.1",
+		ModelName:    "gpt-4.1",
+		LiteLLMModel: "openai/gpt-4.1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	model, err = svc.Agent().SyncModel(ctx, model.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if liteLLM.synced != 1 || model.LastTestStatus != "ok" || !strings.Contains(model.LastTestMessage, "synced") {
+		t.Fatalf("expected sync to update status and call client, model=%+v calls=%d", model, liteLLM.synced)
+	}
+	model, err = svc.Agent().TestModel(ctx, model.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if liteLLM.tested != 1 || model.LastTestStatus != "ok" || !strings.Contains(model.LastTestMessage, "responded") {
+		t.Fatalf("expected test to update status and call client, model=%+v calls=%d", model, liteLLM.tested)
+	}
+}
+
 func TestAgentAdminImportBundleNormalizesAndSnapshots(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -293,4 +325,19 @@ type agentAdminFakeRuntime struct {
 
 func (f agentAdminFakeRuntime) RunAgentChat(ctx context.Context, req service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
 	return f.run(ctx, req, emit)
+}
+
+type fakeLiteLLMAdmin struct {
+	synced int
+	tested int
+}
+
+func (f *fakeLiteLLMAdmin) SyncModel(_ context.Context, model domain.AgentModel) (string, error) {
+	f.synced++
+	return "synced " + model.LiteLLMModel, nil
+}
+
+func (f *fakeLiteLLMAdmin) TestModel(_ context.Context, model domain.AgentModel) (string, error) {
+	f.tested++
+	return "responded " + model.LiteLLMModel, nil
 }

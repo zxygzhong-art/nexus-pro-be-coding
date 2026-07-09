@@ -2680,6 +2680,22 @@ func (s *Store) ListRecentAgentSessionMessages(ctx context.Context, tenantID, se
 	return items, nil
 }
 
+// CountActiveAgentRunsBySession 從儲存層統計會話中的未完成 agent run。
+func (s *Store) CountActiveAgentRunsBySession(_ context.Context, tenantID, sessionID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, item := range s.agentRuns[tenantID] {
+		if item.SessionID != sessionID {
+			continue
+		}
+		if item.Status == string(domain.AgentRunStatusQueued) || item.Status == string(domain.AgentRunStatusRunning) {
+			count++
+		}
+	}
+	return count, nil
+}
+
 // UpsertAgentMemory 從儲存層處理 upsert agent 記憶。
 func (s *Store) UpsertAgentMemory(_ context.Context, v AgentMemory) error {
 	s.mu.Lock()

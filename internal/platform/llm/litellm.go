@@ -18,8 +18,9 @@ import (
 type LiteLLMConfig struct {
 	BaseURL string
 	APIKey  string
-	Model   string
 }
+
+const liteLLMFallbackModelName = "nexus-agent-fallback"
 
 // LiteLLM implements ADK model.LLM using the official OpenAI Go SDK.
 type LiteLLM struct {
@@ -35,15 +36,12 @@ func NewLiteLLM(cfg LiteLLMConfig) (*LiteLLM, error) {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return nil, errors.New("litellm api key is required")
 	}
-	if strings.TrimSpace(cfg.Model) == "" {
-		return nil, errors.New("agent model name is required")
-	}
 	return &LiteLLM{
 		client: openai.NewClient(
 			option.WithAPIKey(cfg.APIKey),
 			option.WithBaseURL(strings.TrimRight(cfg.BaseURL, "/")),
 		),
-		model: strings.TrimSpace(cfg.Model),
+		model: liteLLMFallbackModelName,
 	}, nil
 }
 

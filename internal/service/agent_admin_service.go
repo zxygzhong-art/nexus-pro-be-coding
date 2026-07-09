@@ -153,7 +153,39 @@ func (c AgentService) DeleteModel(ctx RequestContext, id string) (domain.AgentMo
 	return model, nil
 }
 
-// TestModel 執行本地模型設定檢查並寫回 last_test_*；不宣稱外部 provider 已連通。
+// SyncModel 將本地模型別名同步到 LiteLLM，並寫回最近一次同步狀態。
+func (c AgentService) SyncModel(ctx RequestContext, id string) (domain.AgentModel, error) {
+	account, _, err := c.requireAgentAuthz(ctx, ResourceModel, ActionUpdate, id)
+	if err != nil {
+		return domain.AgentModel{}, err
+	}
+	model, err := c.currentAgentModel(ctx, id)
+	if err != nil {
+		return domain.AgentModel{}, err
+	}
+	if model.Status == domain.AgentModelStatusDisabled {
+		return c.updateAgentModelTestResult(ctx, account, model, "failed", "model is disabled; sync skipped", "sync")
+	}
+	if c.liteLLMAdmin == nil {
+		message := "LiteLLM admin client is not configured"
+		updated, updateErr := c.updateAgentModelTestResult(ctx, account, model, "failed", message, "sync")
+		if updateErr != nil {
+			return domain.AgentModel{}, updateErr
+		}
+		return updated, domain.E(503, "service_unavailable", message)
+	}
+	message, err := c.liteLLMAdmin.SyncModel(goContext(ctx), model)
+	if err != nil {
+		updated, updateErr := c.updateAgentModelTestResult(ctx, account, model, "failed", err.Error(), "sync")
+		if updateErr != nil {
+			return domain.AgentModel{}, updateErr
+		}
+		return updated, domain.E(502, "bad_gateway", err.Error())
+	}
+	return c.updateAgentModelTestResult(ctx, account, model, "ok", message, "sync")
+}
+
+// TestModel 執行 LiteLLM 路由探測並寫回 last_test_*。
 func (c AgentService) TestModel(ctx RequestContext, id string) (domain.AgentModel, error) {
 	account, _, err := c.requireAgentAuthz(ctx, ResourceModel, ActionUpdate, id)
 	if err != nil {
@@ -164,22 +196,33 @@ func (c AgentService) TestModel(ctx RequestContext, id string) (domain.AgentMode
 		return domain.AgentModel{}, err
 	}
 	status := "ok"
-	message := "local configuration check ok; provider connectivity not verified"
+	message := "local configuration check ok; LiteLLM client is not configured"
 	if model.Status == domain.AgentModelStatusDisabled {
 		status = "failed"
 		message = "model is disabled"
+	} else if c.liteLLMAdmin != nil {
+		if result, testErr := c.liteLLMAdmin.TestModel(goContext(ctx), model); testErr != nil {
+			status = "failed"
+			message = testErr.Error()
+		} else {
+			message = result
+		}
 	}
-	model, ok, err := c.store.UpdateAgentModelTestResult(goContext(ctx), ctx.TenantID, model.ID, status, message, c.Now())
+	return c.updateAgentModelTestResult(ctx, account, model, status, message, "test")
+}
+
+func (c AgentService) updateAgentModelTestResult(ctx RequestContext, account Account, model domain.AgentModel, status, message, action string) (domain.AgentModel, error) {
+	updated, ok, err := c.store.UpdateAgentModelTestResult(goContext(ctx), ctx.TenantID, model.ID, status, message, c.Now())
 	if err != nil {
 		return domain.AgentModel{}, err
 	}
 	if !ok {
-		return domain.AgentModel{}, NotFound("agent model", id)
+		return domain.AgentModel{}, NotFound("agent model", model.ID)
 	}
-	if err := c.recordAgentAdminAudit(ctx, account, "model", model.ID, model.Name, "test", message); err != nil {
+	if err := c.recordAgentAdminAudit(ctx, account, "model", updated.ID, updated.Name, action, message); err != nil {
 		return domain.AgentModel{}, err
 	}
-	return model, nil
+	return updated, nil
 }
 
 // ListDefinitions 列出工作區 Agent。

@@ -101,6 +101,18 @@ func (s *Store) ListRecentAgentSessionMessages(execCtx context.Context, tenantID
 	return mapSlice(items, fromAgentSessionMessage), nil
 }
 
+// CountActiveAgentRunsBySession 從儲存層統計會話中的未完成 agent run。
+func (s *Store) CountActiveAgentRunsBySession(execCtx context.Context, tenantID, sessionID string) (int, error) {
+	count, err := s.q.CountActiveAgentRunsBySession(tenantContext(execCtx, tenantID), sqlc.CountActiveAgentRunsBySessionParams{
+		TenantID:  tenantID,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return int(count), nil
+}
+
 // UpsertAgentMemory 從儲存層處理 upsert agent 記憶。
 func (s *Store) UpsertAgentMemory(execCtx context.Context, v domain.AgentMemory) error {
 	_, err := s.q.UpsertAgentMemory(tenantContext(execCtx, v.TenantID), sqlc.UpsertAgentMemoryParams{

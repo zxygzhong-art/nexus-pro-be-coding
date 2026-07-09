@@ -65,7 +65,6 @@ func TestAgentChatConfig(t *testing.T) {
 	t.Setenv("AGENT_CHAT_ENABLED", "")
 	t.Setenv("LITELLM_BASE_URL", "")
 	t.Setenv("LITELLM_API_KEY", "")
-	t.Setenv("AGENT_MODEL_NAME", "")
 	t.Setenv("AGENT_CHAT_TIMEOUT_SECONDS", "")
 
 	cfg, err := config.LoadE()
@@ -85,14 +84,13 @@ func TestAgentChatConfig(t *testing.T) {
 	t.Setenv("AGENT_CHAT_ENABLED", "true")
 	t.Setenv("LITELLM_BASE_URL", "http://litellm:4000")
 	t.Setenv("LITELLM_API_KEY", "test-key")
-	t.Setenv("AGENT_MODEL_NAME", "openai/gpt-4.1-mini")
 	t.Setenv("AGENT_CHAT_TIMEOUT_SECONDS", "30")
 
 	cfg, err = config.LoadE()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.AgentChatEnabled || cfg.LiteLLMBaseURL != "http://litellm:4000" || cfg.LiteLLMAPIKey != "test-key" || cfg.AgentModelName != "openai/gpt-4.1-mini" || cfg.AgentChatTimeout != 30*time.Second {
+	if !cfg.AgentChatEnabled || cfg.LiteLLMBaseURL != "http://litellm:4000" || cfg.LiteLLMAPIKey != "test-key" || cfg.AgentChatTimeout != 30*time.Second {
 		t.Fatalf("unexpected agent chat config: %+v", cfg)
 	}
 }
@@ -117,14 +115,13 @@ func TestProductionAgentChatRequiresLiteLLMConfig(t *testing.T) {
 	t.Setenv("AGENT_CHAT_ENABLED", "true")
 	t.Setenv("LITELLM_BASE_URL", "")
 	t.Setenv("LITELLM_API_KEY", "")
-	t.Setenv("AGENT_MODEL_NAME", "")
 
 	cfg, err := config.LoadE()
 	if err != nil {
 		t.Fatal(err)
 	}
 	err = cfg.ValidateStartup()
-	if err == nil || !strings.Contains(err.Error(), "LITELLM_API_KEY is required when AGENT_CHAT_ENABLED=true") || !strings.Contains(err.Error(), "AGENT_MODEL_NAME is required when AGENT_CHAT_ENABLED=true") {
+	if err == nil || !strings.Contains(err.Error(), "LITELLM_API_KEY is required when AGENT_CHAT_ENABLED=true") {
 		t.Fatalf("expected missing production LiteLLM config errors, got %v", err)
 	}
 }
@@ -388,7 +385,7 @@ func TestValidateStartupAcceptsProductionMinimum(t *testing.T) {
 		OpenFGAAPIURL:     "https://openfga.example",
 		OpenFGAStoreID:    "store-1",
 		OpenFGAModelID:    "model-1",
-		TemporalBaseURL:  "temporal:7233",
+		TemporalBaseURL:   "temporal:7233",
 		TemporalNamespace: "default",
 		TemporalTaskQueue: "nexus-workflows",
 		ObjectStoreDir:    "/var/lib/nexus-pro-be/objects",
@@ -410,7 +407,7 @@ func TestValidateStartupRejectsProductionSFTPGoWithoutHostKey(t *testing.T) {
 		OpenFGAAPIURL:              "https://openfga.example",
 		OpenFGAStoreID:             "store-1",
 		OpenFGAModelID:             "model-1",
-		TemporalBaseURL:           "temporal:7233",
+		TemporalBaseURL:            "temporal:7233",
 		TemporalNamespace:          "default",
 		TemporalTaskQueue:          "nexus-workflows",
 		ObjectStoreProvider:        "sftpgo",
@@ -468,7 +465,7 @@ func TestValidateStartupRejectsProductionSFTPInsecureSkip(t *testing.T) {
 		OpenFGAAPIURL:                      "https://openfga.example",
 		OpenFGAStoreID:                     "store-1",
 		OpenFGAModelID:                     "model-1",
-		TemporalBaseURL:                   "temporal:7233",
+		TemporalBaseURL:                    "temporal:7233",
 		TemporalNamespace:                  "default",
 		TemporalTaskQueue:                  "nexus-workflows",
 		ObjectStoreProvider:                "sftpgo",
@@ -536,7 +533,7 @@ func TestValidateStartupRejectsProductionDatabaseWithoutSSL(t *testing.T) {
 		OpenFGAAPIURL:     "https://openfga.example",
 		OpenFGAStoreID:    "store-1",
 		OpenFGAModelID:    "model-1",
-		TemporalBaseURL:  "temporal:7233",
+		TemporalBaseURL:   "temporal:7233",
 		TemporalNamespace: "default",
 		TemporalTaskQueue: "nexus-workflows",
 		ObjectStoreDir:    "/var/lib/nexus-pro-be/objects",
@@ -596,7 +593,7 @@ func TestValidateStartupRejectsProductionNATSInvalidURL(t *testing.T) {
 		OpenFGAAPIURL:     "https://openfga.example",
 		OpenFGAStoreID:    "store-1",
 		OpenFGAModelID:    "model-1",
-		TemporalBaseURL:  "temporal:7233",
+		TemporalBaseURL:   "temporal:7233",
 		TemporalNamespace: "default",
 		TemporalTaskQueue: "nexus-workflows",
 		ObjectStoreDir:    "/var/lib/nexus-pro-be/objects",

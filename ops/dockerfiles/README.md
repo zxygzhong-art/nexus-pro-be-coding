@@ -55,14 +55,22 @@ docker build --build-arg SFTPGO_IMAGE="${SFTPGO_IMAGE}" -f dockerfiles/sftpgo/Do
 docker network create observability
 ```
 
-SFTPGo 單獨執行範例：
+SFTPGo 單獨執行範例（完整 `serve` 模式，啟用 REST API）：
 
 ```bash
+./render-configs.sh
 docker volume create sftpgo-data
+docker volume create sftpgo-home
 docker run -d --name sftpgo --network observability \
   -p 22022:2022 \
   -p 28080:8080 \
+  -e SFTPGO_SFTPD__BINDINGS__0__PORT=2022 \
+  -e SFTPGO_HTTPD__BINDINGS__0__PORT=8080 \
+  -e SFTPGO_HTTPD__BINDINGS__0__ENABLE_REST_API=true \
+  -e SFTPGO_DATA_PROVIDER__USERS_BASE_DIR=/srv/sftpgo/data \
   -v sftpgo-data:/srv/sftpgo/data \
+  -v sftpgo-home:/var/lib/sftpgo \
+  -v "$(pwd)/generated/sftpgo/loaddata.json:/etc/sftpgo/loaddata.json:ro" \
   nexus-pro-be/sftpgo:v2.6.6 \
-  portable --directory /srv/sftpgo/data --username nexus-service --password nexus-service --sftpd-port 2022 --httpd-port 8080 --permissions '*'
+  sftpgo serve --config-dir /var/lib/sftpgo --loaddata-from /etc/sftpgo/loaddata.json --loaddata-mode 0
 ```

@@ -62,6 +62,12 @@ SELECT * FROM (
 ) recent
 ORDER BY created_at ASC, id ASC;
 
+-- name: CountActiveAgentRunsBySession :one
+SELECT count(*) FROM agent_runs
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND session_id = sqlc.arg(session_id)
+  AND status IN ('queued', 'running');
+
 -- name: UpsertAgentMemory :one
 INSERT INTO agent_memories (
     id, tenant_id, account_id, agent_id, session_id, key, content,

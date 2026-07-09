@@ -2399,6 +2399,26 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agent-models/{id}/sync:
+    post:
+      summary: Sync workspace agent model to LiteLLM
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Synced agent model
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "502": {$ref: "#/components/responses/InternalError"}
+        "503": {$ref: "#/components/responses/InternalError"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/workspace/agent-models/{id}/test:
     post:
       summary: Test workspace agent model connection
@@ -3113,6 +3133,25 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /v1/agents/sessions/{id}/clear-context:
+    post:
+      summary: Clear agent session context without deleting visible history
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/ApprovalConfirmed"
+        - $ref: "#/components/parameters/ApprovalInstanceID"
+      responses:
+        "200":
+          description: Updated agent session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
   /v1/agents/sessions/{id}/messages:
     get:
       summary: List agent session messages

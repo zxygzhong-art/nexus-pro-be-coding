@@ -5,6 +5,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"iter"
 	"strings"
 
 	adkagent "google.golang.org/adk/v2/agent"
@@ -43,10 +44,14 @@ func (r *ADKAgentChatRuntime) RunAgentChat(ctx context.Context, req AgentChatRun
 	if err != nil {
 		return err
 	}
+	llm := model.LLM(r.model)
+	if modelName := strings.TrimSpace(req.ModelName); modelName != "" {
+		llm = modelOverrideLLM{base: r.model, name: modelName}
+	}
 	agent, err := llmagent.New(llmagent.Config{
 		Name:        "nexus_hr_assistant",
 		Description: "Nexus Pro HR/OA assistant",
-		Model:       r.model,
+		Model:       llm,
 		Instruction: agentChatInstruction,
 		Tools:       tools,
 	})
@@ -82,6 +87,27 @@ func (r *ADKAgentChatRuntime) RunAgentChat(ctx context.Context, req AgentChatRun
 		}
 	}
 	return nil
+}
+
+type modelOverrideLLM struct {
+	base model.LLM
+	name string
+}
+
+func (m modelOverrideLLM) Name() string {
+	if strings.TrimSpace(m.name) != "" {
+		return strings.TrimSpace(m.name)
+	}
+	return m.base.Name()
+}
+
+func (m modelOverrideLLM) GenerateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {
+	if req != nil && strings.TrimSpace(m.name) != "" {
+		cloned := *req
+		cloned.Model = strings.TrimSpace(m.name)
+		req = &cloned
+	}
+	return m.base.GenerateContent(ctx, req, stream)
 }
 
 func adkTools(src map[string]AgentReadOnlyTool) ([]tool.Tool, error) {

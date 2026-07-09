@@ -23,6 +23,7 @@ func (c WorkspaceAgentCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace.POST("/agent-models", c.routes.Handle("agent.model", "create", c.createModel))
 	workspace.PATCH("/agent-models/:id", c.routes.Handle("agent.model", "update", c.updateModel, ResourceID(PathParamID)))
 	workspace.DELETE("/agent-models/:id", c.routes.Handle("agent.model", "delete", c.deleteModel, ResourceID(PathParamID)))
+	workspace.POST("/agent-models/:id/sync", c.routes.Handle("agent.model", "update", c.syncModel, ResourceID(PathParamID)))
 	workspace.POST("/agent-models/:id/test", c.routes.Handle("agent.model", "update", c.testModel, ResourceID(PathParamID)))
 
 	workspace.GET("/agents/templates", c.routes.Handle("agent.definition", "read", c.templates))
@@ -84,6 +85,15 @@ func (c WorkspaceAgentCtrl) deleteModel(w http.ResponseWriter, r *http.Request, 
 
 func (c WorkspaceAgentCtrl) testModel(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.TestModel(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+func (c WorkspaceAgentCtrl) syncModel(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.SyncModel(ctx, r.PathValue(PathParamID))
 	if err != nil {
 		return err
 	}

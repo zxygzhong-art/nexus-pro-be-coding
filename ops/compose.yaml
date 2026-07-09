@@ -67,7 +67,6 @@ services:
     environment:
       LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      AGENT_MODEL_NAME: ${AGENT_MODEL_NAME:-openai/gpt-4.1-mini}
       LITELLM_UPSTREAM_MODEL: ${LITELLM_UPSTREAM_MODEL:-openai/gpt-4.1-mini}
     ports:
       - "${LITELLM_BIND_HOST:-127.0.0.1}:${LITELLM_HOST_PORT:-4000}:${LITELLM_INTERNAL_PORT:-4000}"
@@ -100,26 +99,27 @@ services:
     container_name: sftpgo-object-store
     restart: unless-stopped
     command:
-      - portable
-      - "--directory"
-      - /srv/sftpgo/data
-      - "--username"
-      - ${SFTPGO_USERNAME}
-      - "--password"
-      - ${SFTPGO_PASSWORD}
-      - "--sftpd-port"
-      - "${SFTPGO_SFTP_INTERNAL_PORT}"
-      - "--httpd-port"
-      - "${SFTPGO_HTTP_INTERNAL_PORT}"
-      - "--permissions"
-      - "*"
-      - "--log-level"
-      - info
+      - sftpgo
+      - serve
+      - --config-dir
+      - /var/lib/sftpgo
+      - --loaddata-from
+      - /etc/sftpgo/loaddata.json
+      - --loaddata-mode
+      - "0"
+    environment:
+      SFTPGO_SFTPD__BINDINGS__0__PORT: ${SFTPGO_SFTP_INTERNAL_PORT}
+      SFTPGO_HTTPD__BINDINGS__0__PORT: ${SFTPGO_HTTP_INTERNAL_PORT}
+      SFTPGO_HTTPD__BINDINGS__0__ENABLE_REST_API: "true"
+      SFTPGO_HTTPD__BINDINGS__0__ENABLE_WEB_CLIENT: "true"
+      SFTPGO_DATA_PROVIDER__USERS_BASE_DIR: /srv/sftpgo/data
     ports:
       - "${SFTPGO_SFTP_BIND_HOST}:${SFTPGO_SFTP_HOST_PORT}:${SFTPGO_SFTP_INTERNAL_PORT}"
       - "${SFTPGO_HTTP_BIND_HOST}:${SFTPGO_HTTP_HOST_PORT}:${SFTPGO_HTTP_INTERNAL_PORT}"
     volumes:
       - sftpgo-data:/srv/sftpgo/data
+      - sftpgo-home:/var/lib/sftpgo
+      - ./generated/sftpgo/loaddata.json:/etc/sftpgo/loaddata.json:ro
     networks:
       - observability
 
@@ -333,5 +333,6 @@ volumes:
   prometheus-data:
   tempo-data:
   sftpgo-data:
+  sftpgo-home:
   redis-data:
   nats-data:

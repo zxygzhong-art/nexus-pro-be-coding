@@ -21,6 +21,7 @@ type AgentChatRuntimeRequest struct {
 	RequestContext domain.RequestContext
 	RunID          string
 	SessionID      string
+	ModelName      string
 	Message        string
 	History        []domain.AgentSessionMessage
 	Memories       []domain.AgentMemory
@@ -66,6 +67,7 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 	var configuredTools []string
 	limitTools := false
 	systemPrompt := ""
+	modelName := ""
 	if agentID != "" {
 		definition, err := c.publishedAgentDefinition(ctx, agentID)
 		if err != nil {
@@ -74,6 +76,14 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		limitTools = true
 		configuredTools = definition.Tools
 		systemPrompt = strings.TrimSpace(definition.SystemPrompt)
+		model, err := c.currentAgentModel(ctx, definition.ModelID)
+		if err != nil {
+			return AgentRun{}, err
+		}
+		modelName = strings.TrimSpace(model.LiteLLMModel)
+		if modelName == "" {
+			modelName = strings.TrimSpace(model.ModelName)
+		}
 	}
 	mode := strings.TrimSpace(input.Mode)
 	if mode == "" {
@@ -95,7 +105,10 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 			return AgentRun{}, BadRequest("agent session is archived")
 		}
 	}
-	history, err := c.store.ListRecentAgentSessionMessages(goContext(ctx), ctx.TenantID, sessionID, agentSessionHistoryLimit)
+	if err := c.ensureNoActiveAgentRun(ctx, sessionID); err != nil {
+		return AgentRun{}, err
+	}
+	history, err := c.agentChatHistoryForSession(ctx, sessionID)
 	if err != nil {
 		return AgentRun{}, err
 	}
@@ -167,6 +180,7 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		RequestContext: ctx,
 		RunID:          run.ID,
 		SessionID:      sessionID,
+		ModelName:      modelName,
 		Message:        runtimeMessage,
 		History:        history,
 		Memories:       memories,
@@ -206,6 +220,52 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		return run, err
 	}
 	return run, nil
+}
+
+func (c AgentService) ensureNoActiveAgentRun(ctx RequestContext, sessionID string) error {
+	count, err := c.store.CountActiveAgentRunsBySession(goContext(ctx), ctx.TenantID, strings.TrimSpace(sessionID))
+	if err != nil {
+		return err
+	}
+	if count > 0 {
+		return Conflict("agent session already has an active chat run")
+	}
+	return nil
+}
+
+func (c AgentService) agentChatHistoryForSession(ctx RequestContext, sessionID string) ([]domain.AgentSessionMessage, error) {
+	items, err := c.store.ListAgentSessionMessages(goContext(ctx), ctx.TenantID, strings.TrimSpace(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	lastClearIndex := -1
+	for idx, item := range items {
+		if isAgentContextClearMessage(item) {
+			lastClearIndex = idx
+		}
+	}
+	if lastClearIndex >= 0 {
+		items = items[lastClearIndex+1:]
+	}
+	filtered := make([]domain.AgentSessionMessage, 0, len(items))
+	for _, item := range items {
+		if item.Role == domain.AgentMessageRoleSystem && isAgentContextClearMessage(item) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	if len(filtered) > agentSessionHistoryLimit {
+		filtered = filtered[len(filtered)-agentSessionHistoryLimit:]
+	}
+	return filtered, nil
+}
+
+func isAgentContextClearMessage(item domain.AgentSessionMessage) bool {
+	if item.Role != domain.AgentMessageRoleSystem || item.Metadata == nil {
+		return false
+	}
+	event, _ := item.Metadata["event"].(string)
+	return event == agentContextClearedEvent
 }
 
 func (c AgentService) createAgentSessionForChat(ctx RequestContext, accountID, agentID, title string) (domain.AgentSession, error) {

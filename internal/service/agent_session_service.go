@@ -12,6 +12,7 @@ const (
 	agentSessionHistoryLimit = 12
 	agentMemoryContextLimit  = 8
 	agentMemoryListLimit     = 50
+	agentContextClearedEvent = "context_cleared"
 )
 
 // ListSessions 列出目前帳號的 agent 會話。
@@ -76,6 +77,42 @@ func (c AgentService) UpdateSession(ctx RequestContext, id string, input domain.
 		session.Status = status
 	}
 	session.UpdatedAt = c.Now()
+	if err := c.store.UpsertAgentSession(goContext(ctx), session); err != nil {
+		return domain.AgentSession{}, err
+	}
+	return session, nil
+}
+
+// ClearSessionContext 清除後續 chat 使用的上下文，但保留可見歷史訊息。
+func (c AgentService) ClearSessionContext(ctx RequestContext, id string) (domain.AgentSession, error) {
+	account, _, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionCreate, strings.TrimSpace(id))
+	if err != nil {
+		return domain.AgentSession{}, err
+	}
+	session, err := c.currentAgentSession(ctx, account.ID, id)
+	if err != nil {
+		return domain.AgentSession{}, err
+	}
+	if session.Status != domain.AgentSessionStatusActive {
+		return domain.AgentSession{}, BadRequest("agent session is archived")
+	}
+	if err := c.ensureNoActiveAgentRun(ctx, session.ID); err != nil {
+		return domain.AgentSession{}, err
+	}
+	now := c.Now()
+	if err := c.store.InsertAgentSessionMessage(goContext(ctx), domain.AgentSessionMessage{
+		ID:        utils.NewID("amsg"),
+		TenantID:  ctx.TenantID,
+		SessionID: session.ID,
+		Role:      domain.AgentMessageRoleSystem,
+		Content:   "Context cleared",
+		Metadata:  map[string]any{"event": agentContextClearedEvent},
+		CreatedAt: now,
+	}); err != nil {
+		return domain.AgentSession{}, err
+	}
+	session.LastMessageAt = &now
+	session.UpdatedAt = now
 	if err := c.store.UpsertAgentSession(goContext(ctx), session); err != nil {
 		return domain.AgentSession{}, err
 	}

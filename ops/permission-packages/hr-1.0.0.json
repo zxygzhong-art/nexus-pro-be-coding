@@ -37,6 +37,7 @@
       "resource_type": "clock",
       "actions": [
         "create",
+        "export",
         "import",
         "read"
       ]
@@ -1139,10 +1140,24 @@
       "action": "read"
     },
     {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "export",
+      "risk_level": "high"
+    },
+    {
       "application_code": "attendance",
       "resource_type": "clock",
       "resource": "attendance.clock",
       "action": "read"
+    },
+    {
+      "application_code": "attendance",
+      "resource_type": "clock",
+      "resource": "attendance.clock",
+      "action": "export",
+      "risk_level": "high"
     },
     {
       "application_code": "workflow",
@@ -1206,6 +1221,13 @@
       "resource_type": "model",
       "resource": "agent.model",
       "action": "delete",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "model",
+      "resource": "agent.model",
+      "action": "update",
       "risk_level": "high"
     },
     {
@@ -1425,6 +1447,13 @@
       "resource_type": "run",
       "resource": "agent.run",
       "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "run",
+      "resource": "agent.run",
+      "action": "create",
       "risk_level": "high"
     },
     {

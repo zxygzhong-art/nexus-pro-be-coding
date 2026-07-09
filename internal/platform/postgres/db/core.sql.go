@@ -2486,61 +2486,6 @@ func (q *Queries) ListAuditLogs(ctx context.Context, tenantID string) ([]AuditLo
 	return items, nil
 }
 
-const listAuditLogsPage = `-- name: ListAuditLogsPage :many
-SELECT id, tenant_id, actor_account_id, action, resource, target, result, trace_id, severity, details, created_at FROM audit_logs
-WHERE tenant_id = $1
-ORDER BY
-  CASE WHEN $2::text = 'created_at_asc' THEN created_at END ASC,
-  created_at DESC,
-  id ASC
-LIMIT $4::int
-OFFSET $3::int
-`
-
-type ListAuditLogsPageParams struct {
-	TenantID    string `json:"tenant_id"`
-	Sort        string `json:"sort"`
-	OffsetCount int32  `json:"offset_count"`
-	LimitCount  int32  `json:"limit_count"`
-}
-
-func (q *Queries) ListAuditLogsPage(ctx context.Context, arg ListAuditLogsPageParams) ([]AuditLog, error) {
-	rows, err := q.db.Query(ctx, listAuditLogsPage,
-		arg.TenantID,
-		arg.Sort,
-		arg.OffsetCount,
-		arg.LimitCount,
-	)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AuditLog
-	for rows.Next() {
-		var i AuditLog
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.ActorAccountID,
-			&i.Action,
-			&i.Resource,
-			&i.Target,
-			&i.Result,
-			&i.TraceID,
-			&i.Severity,
-			&i.Details,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listAuditLogsFilteredPage = `-- name: ListAuditLogsFilteredPage :many
 SELECT al.id, al.tenant_id, al.actor_account_id, al.action, al.resource, al.target, al.result, al.trace_id, al.severity, al.details, al.created_at
 FROM audit_logs al
@@ -2618,6 +2563,61 @@ func (q *Queries) ListAuditLogsFilteredPage(ctx context.Context, arg ListAuditLo
 		arg.ToTime,
 		arg.Type,
 		arg.Keyword,
+		arg.Sort,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AuditLog
+	for rows.Next() {
+		var i AuditLog
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ActorAccountID,
+			&i.Action,
+			&i.Resource,
+			&i.Target,
+			&i.Result,
+			&i.TraceID,
+			&i.Severity,
+			&i.Details,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAuditLogsPage = `-- name: ListAuditLogsPage :many
+SELECT id, tenant_id, actor_account_id, action, resource, target, result, trace_id, severity, details, created_at FROM audit_logs
+WHERE tenant_id = $1
+ORDER BY
+  CASE WHEN $2::text = 'created_at_asc' THEN created_at END ASC,
+  created_at DESC,
+  id ASC
+LIMIT $4::int
+OFFSET $3::int
+`
+
+type ListAuditLogsPageParams struct {
+	TenantID    string `json:"tenant_id"`
+	Sort        string `json:"sort"`
+	OffsetCount int32  `json:"offset_count"`
+	LimitCount  int32  `json:"limit_count"`
+}
+
+func (q *Queries) ListAuditLogsPage(ctx context.Context, arg ListAuditLogsPageParams) ([]AuditLog, error) {
+	rows, err := q.db.Query(ctx, listAuditLogsPage,
+		arg.TenantID,
 		arg.Sort,
 		arg.OffsetCount,
 		arg.LimitCount,

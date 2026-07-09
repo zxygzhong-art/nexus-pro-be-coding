@@ -29,6 +29,7 @@ func (c AgentCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	agents.POST("/sessions", c.routes.Handle("agent.run", "create", c.createAgentSession))
 	agents.GET("/sessions/:id", c.routes.Handle("agent.run", "read", c.getAgentSession, ResourceID(PathParamID)))
 	agents.PATCH("/sessions/:id", c.routes.Handle("agent.run", "update", c.updateAgentSession, ResourceID(PathParamID)))
+	agents.POST("/sessions/:id/clear-context", c.routes.Handle("agent.run", "create", c.clearAgentSessionContext, ResourceID(PathParamID)))
 	agents.DELETE("/sessions/:id", c.routes.Handle("agent.run", "delete", c.deleteAgentSession, ResourceID(PathParamID)))
 	agents.GET("/sessions/:id/messages", c.routes.Handle("agent.run", "read", c.listAgentSessionMessages, ResourceID(PathParamID)))
 	agents.GET("/memories", c.routes.Handle("agent.run", "read", c.listAgentMemories))
@@ -110,6 +111,16 @@ func (c AgentCtrl) updateAgentSession(w http.ResponseWriter, r *http.Request, ct
 		return err
 	}
 	item, err := c.svc.UpdateSession(ctx, r.PathValue(PathParamID), input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// clearAgentSessionContext 處理清除 agent 會話上下文的 HTTP 請求。
+func (c AgentCtrl) clearAgentSessionContext(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.ClearSessionContext(ctx, r.PathValue(PathParamID))
 	if err != nil {
 		return err
 	}

@@ -11,6 +11,25 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countActiveAgentRunsBySession = `-- name: CountActiveAgentRunsBySession :one
+SELECT count(*) FROM agent_runs
+WHERE tenant_id = $1
+  AND session_id = $2
+  AND status IN ('queued', 'running')
+`
+
+type CountActiveAgentRunsBySessionParams struct {
+	TenantID  string `json:"tenant_id"`
+	SessionID string `json:"session_id"`
+}
+
+func (q *Queries) CountActiveAgentRunsBySession(ctx context.Context, arg CountActiveAgentRunsBySessionParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countActiveAgentRunsBySession, arg.TenantID, arg.SessionID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteAgentMemory = `-- name: DeleteAgentMemory :one
 DELETE FROM agent_memories
 WHERE tenant_id = $1

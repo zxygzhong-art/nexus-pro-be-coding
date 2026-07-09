@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -129,6 +130,84 @@ func TestAgentChatToolRequiresAgentToolPermission(t *testing.T) {
 	}
 	if run.Status != string(domain.AgentRunStatusFailed) || run.Answer == "" {
 		t.Fatalf("expected failed run to be persisted with error answer, got %+v", run)
+	}
+}
+
+func TestAgentChatBlocksActiveRunInSameSession(t *testing.T) {
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentChatAccount(t, store, now, []domain.Permission{
+		{Resource: "agent.run", Action: "create", Scope: "all"},
+	})
+	svc := service.New(store, service.Options{
+		Now:              func() time.Time { return now },
+		AgentChatEnabled: true,
+		AgentChatRuntime: fakeAgentChatRuntime{run: func(context.Context, service.AgentChatRuntimeRequest, service.AgentChatEmitFunc) error {
+			t.Fatal("runtime should not be called while an active run exists")
+			return nil
+		}},
+	})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	session, err := svc.Agent().CreateSession(ctx, domain.CreateAgentSessionInput{Title: "Busy"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAgentRun(context.Background(), domain.AgentRun{
+		ID:        "active-run",
+		TenantID:  "tenant-1",
+		AccountID: "acct-1",
+		SessionID: session.ID,
+		Mode:      "assistant_chat",
+		Prompt:    "busy",
+		Status:    string(domain.AgentRunStatusRunning),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{SessionID: session.ID, Message: "hi"}, nil); err == nil {
+		t.Fatal("expected active run conflict")
+	}
+}
+
+func TestAgentChatClearContextDropsPreviousHistoryFromPrompt(t *testing.T) {
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentChatAccount(t, store, now, []domain.Permission{
+		{Resource: "agent.run", Action: "create", Scope: "all"},
+	})
+	call := 0
+	runtime := fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
+		call++
+		if call == 2 {
+			if len(req.History) != 0 {
+				t.Fatalf("expected history after clear to be empty, got %+v", req.History)
+			}
+			if strings.Contains(req.Message, "first question") || strings.Contains(req.Message, "first answer") {
+				t.Fatalf("prompt retained history before clear: %s", req.Message)
+			}
+		}
+		answer := "first answer"
+		if call == 2 {
+			answer = "second answer"
+		}
+		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: answer})
+	}}
+	svc := service.New(store, service.Options{
+		Now:              func() time.Time { return now },
+		AgentChatEnabled: true,
+		AgentChatRuntime: runtime,
+	})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	first, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "first question"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Agent().ClearSessionContext(ctx, first.SessionID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{SessionID: first.SessionID, Message: "second question"}, nil); err != nil {
+		t.Fatal(err)
 	}
 }
 

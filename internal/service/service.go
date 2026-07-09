@@ -25,6 +25,7 @@ type Service struct {
 	agentChatEnabled      bool
 	agentChatRuntime      AgentChatRuntime
 	agentChatTimeout      time.Duration
+	liteLLMAdmin          LiteLLMAdminClient
 	objectStore           ObjectStore
 	ehrmsClient           EHRMSClient
 	identityProvisioner   IdentityProvisioner
@@ -41,10 +42,17 @@ type Options struct {
 	AgentChatEnabled      bool
 	AgentChatRuntime      AgentChatRuntime
 	AgentChatTimeout      time.Duration
+	LiteLLMAdmin          LiteLLMAdminClient
 	ObjectStore           ObjectStore
 	EHRMSClient           EHRMSClient
 	IdentityProvisioner   IdentityProvisioner
 	FormApprovalWorkflows FormApprovalWorkflowClient
+}
+
+// LiteLLMAdminClient 定義 LiteLLM 管理與探測 client 行為契約。
+type LiteLLMAdminClient interface {
+	SyncModel(context.Context, domain.AgentModel) (string, error)
+	TestModel(context.Context, domain.AgentModel) (string, error)
 }
 
 // RelationshipChecker 定義關係 checker 的行為契約。
@@ -95,6 +103,7 @@ func New(store repository.Store, options ...Options) *Service {
 		agentChatEnabled:      cfg.AgentChatEnabled,
 		agentChatRuntime:      cfg.AgentChatRuntime,
 		agentChatTimeout:      cfg.AgentChatTimeout,
+		liteLLMAdmin:          cfg.LiteLLMAdmin,
 		objectStore:           firstObjectStore(cfg.ObjectStore),
 		ehrmsClient:           cfg.EHRMSClient,
 		identityProvisioner:   cfg.IdentityProvisioner,

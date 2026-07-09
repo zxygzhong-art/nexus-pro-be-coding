@@ -93,6 +93,7 @@ COMPOSE_PROFILES=redis docker compose --env-file .env up -d redis
 
 ```bash
 cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+./render-configs.sh
 COMPOSE_PROFILES=sftpgo docker compose --env-file .env up -d sftpgo
 ```
 
