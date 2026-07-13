@@ -88,8 +88,12 @@ func (c WorkflowService) ActOnWorkflowStage(ctx RequestContext, formInstanceID, 
 	if !workflowAssigneeCanAct(assignees, ctx.AccountID) {
 		return domain.FormInstance{}, Forbidden("current account is not an active assignee for this stage")
 	}
+	stageDefinition := workflowStageByID(stages, stageInstance.StageID)
 	now := c.Now()
 	err = c.withTransaction(ctx, func(tx WorkflowService) error {
+		if err := tx.validateWorkflowActorEligibility(ctx, instance, run, stageDefinition, action); err != nil {
+			return err
+		}
 		if err := tx.recordWorkflowAction(ctx, run, stageInstance, action, comment, now); err != nil {
 			return err
 		}
@@ -399,6 +403,12 @@ func (c WorkflowService) activateApprovalStage(ctx RequestContext, run domain.Wo
 	if err != nil {
 		return err
 	}
+	if stage.Config.RequireDistinctApprover {
+		assigneeIDs, err = c.filterPreviouslyApprovedAssignees(ctx, run.ID, assigneeIDs)
+		if err != nil {
+			return err
+		}
+	}
 	if len(assigneeIDs) == 0 {
 		return BadRequest("workflow stage has no resolvable assignees: " + stage.Label)
 	}
@@ -447,6 +457,27 @@ func (c WorkflowService) activateApprovalStage(ctx RequestContext, run domain.Wo
 		template = domain.FormTemplate{ID: run.TemplateID}
 	}
 	return c.notifyWorkflowPendingApprovers(ctx, instance, template, applicant, stage, assigneeIDs)
+}
+
+// filterPreviouslyApprovedAssignees prevents all-mode stages from waiting on ineligible prior reviewers.
+func (c WorkflowService) filterPreviouslyApprovedAssignees(ctx RequestContext, runID string, accountIDs []string) ([]string, error) {
+	actions, err := c.store.ListWorkflowActionsByRun(goContext(ctx), ctx.TenantID, runID)
+	if err != nil {
+		return nil, err
+	}
+	previousApprovers := map[string]struct{}{}
+	for _, action := range actions {
+		if action.Action == "approve" {
+			previousApprovers[action.AccountID] = struct{}{}
+		}
+	}
+	filtered := make([]string, 0, len(accountIDs))
+	for _, accountID := range accountIDs {
+		if _, alreadyApproved := previousApprovers[accountID]; !alreadyApproved {
+			filtered = append(filtered, accountID)
+		}
+	}
+	return uniqueWorkflowRecipientIDs(filtered), nil
 }
 
 func (c WorkflowService) handleWorkflowApprove(ctx RequestContext, instance domain.FormInstance, run domain.WorkflowRun, stageInstance domain.WorkflowStageInstance, stages []domain.WorkflowStageDefinition, assignees []domain.WorkflowStageAssignee, comment string, now time.Time) error {
@@ -629,6 +660,9 @@ func (c WorkflowService) resolveWorkflowAssignees(ctx RequestContext, applicant 
 	if len(stage.Config.AccountIDs) > 0 {
 		return uniqueWorkflowRecipientIDs(stage.Config.AccountIDs), nil
 	}
+	if len(stage.Config.UserGroupIDs) > 0 {
+		return c.resolveWorkflowGroupAssignees(ctx, applicant.ID, stage.Config.UserGroupIDs)
+	}
 	employee, err := c.resolveWorkflowApplicantEmployee(ctx, applicant)
 	if err != nil {
 		return nil, err
@@ -673,6 +707,71 @@ func (c WorkflowService) resolveWorkflowAssignees(ctx RequestContext, applicant 
 	default:
 		return c.accountIDsForEmployeeIDs(ctx, []string{employee.ManagerEmployeeID})
 	}
+}
+
+// resolveWorkflowGroupAssignees snapshots only currently active, non-applicant group members.
+func (c WorkflowService) resolveWorkflowGroupAssignees(ctx RequestContext, applicantAccountID string, groupIDs []string) ([]string, error) {
+	now := c.Now()
+	accountIDs := make([]string, 0)
+	for _, groupID := range uniqueWorkflowRecipientIDs(groupIDs) {
+		memberships, err := c.store.ListGroupMembershipsForGroup(goContext(ctx), ctx.TenantID, groupID)
+		if err != nil {
+			return nil, err
+		}
+		for _, membership := range memberships {
+			if membership.AccountID == applicantAccountID || !groupMembershipActiveAt(membership, now) {
+				continue
+			}
+			account, ok, err := c.store.GetAccount(goContext(ctx), ctx.TenantID, membership.AccountID)
+			if err != nil {
+				return nil, err
+			}
+			if !ok || account.Status != string(domain.AccountStatusActive) {
+				continue
+			}
+			accountIDs = append(accountIDs, membership.AccountID)
+		}
+	}
+	return uniqueWorkflowRecipientIDs(accountIDs), nil
+}
+
+// validateWorkflowActorEligibility rechecks dynamic group eligibility and segregation before every action.
+func (c WorkflowService) validateWorkflowActorEligibility(ctx RequestContext, instance domain.FormInstance, run domain.WorkflowRun, stage domain.WorkflowStageDefinition, action string) error {
+	if len(stage.Config.UserGroupIDs) > 0 {
+		if ctx.AccountID == instance.ApplicantAccountID {
+			return Forbidden("applicant cannot act as a group approver")
+		}
+		eligible, err := c.resolveWorkflowGroupAssignees(ctx, instance.ApplicantAccountID, stage.Config.UserGroupIDs)
+		if err != nil {
+			return err
+		}
+		if !workflowRecipientContains(eligible, ctx.AccountID) {
+			return Forbidden("current account is no longer an eligible member of the approval group")
+		}
+	}
+	if action != "approve" || !stage.Config.RequireDistinctApprover {
+		return nil
+	}
+	actions, err := c.store.ListWorkflowActionsByRun(goContext(ctx), ctx.TenantID, run.ID)
+	if err != nil {
+		return err
+	}
+	for _, prior := range actions {
+		if prior.AccountID == ctx.AccountID && prior.Action == "approve" && prior.StageInstanceID != run.CurrentStageInstanceID {
+			return Forbidden("current account already approved an earlier workflow stage")
+		}
+	}
+	return nil
+}
+
+// workflowRecipientContains reports whether an account is present in a normalized recipient list.
+func workflowRecipientContains(accountIDs []string, accountID string) bool {
+	for _, candidate := range accountIDs {
+		if candidate == accountID {
+			return true
+		}
+	}
+	return false
 }
 
 func (c WorkflowService) resolveWorkflowApplicantEmployee(ctx RequestContext, applicant domain.Account) (domain.Employee, error) {

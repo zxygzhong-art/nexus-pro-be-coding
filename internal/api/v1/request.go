@@ -47,17 +47,6 @@ func newRequestID() string {
 	return "req_" + strconv.FormatInt(time.Now().UTC().UnixNano(), 10)
 }
 
-// approvalConfirmed 處理核准 confirmed。
-func approvalConfirmed(r *http.Request) bool {
-	value := strings.TrimSpace(r.Header.Get("X-Approval-Confirmed"))
-	return strings.EqualFold(value, "true") || value == "1"
-}
-
-// approvalConfirmed 處理核准 confirmed。
-func (a *API) approvalConfirmed(r *http.Request) bool {
-	return a.allowApprovalHeader && approvalConfirmed(r)
-}
-
 // pageRequestFromRequest 處理分頁請求 來源 請求。
 func pageRequestFromRequest(r *http.Request) (domain.PageRequest, error) {
 	values := r.URL.Query()

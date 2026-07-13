@@ -8,7 +8,6 @@ type AgentDefinitionStatus string
 const (
 	AgentDefinitionStatusDraft     AgentDefinitionStatus = "draft"
 	AgentDefinitionStatusPublished AgentDefinitionStatus = "published"
-	AgentDefinitionStatusArchived  AgentDefinitionStatus = "archived"
 )
 
 // AgentModelStatus 表示模型啟用狀態。
@@ -46,9 +45,12 @@ type AgentModel struct {
 	Provider        string           `json:"provider"`
 	ModelName       string           `json:"model_name"`
 	LiteLLMModel    string           `json:"litellm_model"`
-	IsDefault       bool             `json:"is_default"`
+	APIBaseURL      string           `json:"api_base_url,omitempty"`
+	APIKey          string           `json:"-"`
+	APIKeySet       bool             `json:"api_key_set"`
+	APIKeyPreview   string           `json:"api_key_preview,omitempty"`
+	RateLimitRPM    int              `json:"rate_limit_rpm"`
 	Status          AgentModelStatus `json:"status"`
-	FallbackModelID string           `json:"fallback_model_id,omitempty"`
 	TimeoutSeconds  int              `json:"timeout_seconds"`
 	MonthlyQuota    int64            `json:"monthly_quota"`
 	UsedQuota       int64            `json:"used_quota"`
@@ -92,7 +94,6 @@ type AgentDefinition struct {
 	Emoji              string                   `json:"emoji"`
 	Category           AgentCategory            `json:"category"`
 	ModelID            string                   `json:"model_id"`
-	FallbackModelID    string                   `json:"fallback_model_id,omitempty"`
 	SystemPrompt       string                   `json:"system_prompt"`
 	Tools              []string                 `json:"tools"`
 	Status             AgentDefinitionStatus    `json:"status"`
@@ -131,41 +132,32 @@ type AgentToolMeta struct {
 	RequiredPermission string `json:"required_permission"`
 }
 
-// AgentTemplate 定義可一鍵建立的模板。
-type AgentTemplate struct {
-	ID           string        `json:"id"`
-	Name         string        `json:"name"`
-	Description  string        `json:"description"`
-	Emoji        string        `json:"emoji"`
-	Category     AgentCategory `json:"category"`
-	SystemPrompt string        `json:"system_prompt"`
-	Tools        []string      `json:"tools"`
-}
-
 // CreateAgentModelInput 定義建立模型輸入。
 type CreateAgentModelInput struct {
-	Name            string `json:"name"`
-	Provider        string `json:"provider"`
-	ModelName       string `json:"model_name"`
-	LiteLLMModel    string `json:"litellm_model"`
-	IsDefault       bool   `json:"is_default"`
-	Status          string `json:"status"`
-	FallbackModelID string `json:"fallback_model_id"`
-	TimeoutSeconds  int    `json:"timeout_seconds"`
-	MonthlyQuota    int64  `json:"monthly_quota"`
+	Name           string `json:"name"`
+	Provider       string `json:"provider"`
+	ModelName      string `json:"model_name"`
+	LiteLLMModel   string `json:"litellm_model"`
+	APIBaseURL     string `json:"api_base_url"`
+	APIKey         string `json:"api_key"`
+	RateLimitRPM   int    `json:"rate_limit_rpm"`
+	Status         string `json:"status"`
+	TimeoutSeconds int    `json:"timeout_seconds"`
+	MonthlyQuota   int64  `json:"monthly_quota"`
 }
 
 // UpdateAgentModelInput 定義更新模型輸入。
 type UpdateAgentModelInput struct {
-	Name            *string `json:"name"`
-	Provider        *string `json:"provider"`
-	ModelName       *string `json:"model_name"`
-	LiteLLMModel    *string `json:"litellm_model"`
-	IsDefault       *bool   `json:"is_default"`
-	Status          *string `json:"status"`
-	FallbackModelID *string `json:"fallback_model_id"`
-	TimeoutSeconds  *int    `json:"timeout_seconds"`
-	MonthlyQuota    *int64  `json:"monthly_quota"`
+	Name           *string `json:"name"`
+	Provider       *string `json:"provider"`
+	ModelName      *string `json:"model_name"`
+	LiteLLMModel   *string `json:"litellm_model"`
+	APIBaseURL     *string `json:"api_base_url"`
+	APIKey         *string `json:"api_key"`
+	RateLimitRPM   *int    `json:"rate_limit_rpm"`
+	Status         *string `json:"status"`
+	TimeoutSeconds *int    `json:"timeout_seconds"`
+	MonthlyQuota   *int64  `json:"monthly_quota"`
 }
 
 // CreateAgentDefinitionInput 定義建立 Agent 輸入。
@@ -175,14 +167,11 @@ type CreateAgentDefinitionInput struct {
 	Emoji             string   `json:"emoji"`
 	Category          string   `json:"category"`
 	ModelID           string   `json:"model_id"`
-	FallbackModelID   string   `json:"fallback_model_id"`
 	SystemPrompt      string   `json:"system_prompt"`
 	Tools             []string `json:"tools"`
-	Status            string   `json:"status"`
 	Visibility        string   `json:"visibility"`
 	VisibilityTargets []string `json:"visibility_targets"`
 	TimeoutSeconds    int      `json:"timeout_seconds"`
-	TemplateID        string   `json:"template_id"`
 }
 
 // UpdateAgentDefinitionInput 定義更新 Agent 輸入。
@@ -192,10 +181,8 @@ type UpdateAgentDefinitionInput struct {
 	Emoji             *string  `json:"emoji"`
 	Category          *string  `json:"category"`
 	ModelID           *string  `json:"model_id"`
-	FallbackModelID   *string  `json:"fallback_model_id"`
 	SystemPrompt      *string  `json:"system_prompt"`
 	Tools             []string `json:"tools"`
-	Status            *string  `json:"status"`
 	Visibility        *string  `json:"visibility"`
 	VisibilityTargets []string `json:"visibility_targets"`
 	TimeoutSeconds    *int     `json:"timeout_seconds"`
@@ -218,17 +205,4 @@ type AgentTrialResult struct {
 	LatencyMs int      `json:"latency_ms"`
 	ToolsUsed []string `json:"tools_used"`
 	ModelName string   `json:"model_name"`
-}
-
-// AgentBundle 定義匯入匯出包。
-type AgentBundle struct {
-	ExportedAt time.Time         `json:"exported_at"`
-	Agents     []AgentDefinition `json:"agents"`
-	Models     []AgentModel      `json:"models"`
-}
-
-// ImportAgentBundleResult 定義匯入結果。
-type ImportAgentBundleResult struct {
-	Agents int `json:"agents"`
-	Models int `json:"models"`
 }

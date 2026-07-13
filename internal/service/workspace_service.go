@@ -105,6 +105,7 @@ func (c WorkspaceService) WorkspaceOrganization(ctx RequestContext) (WorkspaceOr
 	if err != nil {
 		return WorkspaceOrganizationResponse{}, err
 	}
+	employees = workspaceOrganizationEmployees(employees)
 	units, err := c.Service.HR().ListOrgUnits(ctx)
 	if err != nil {
 		return WorkspaceOrganizationResponse{}, err
@@ -119,11 +120,11 @@ func (c WorkspaceService) WorkspaceOrganization(ctx RequestContext) (WorkspaceOr
 	for _, employee := range employees {
 		byID[employee.ID] = employee
 	}
-	derivedManagers := workspaceDerivedManagersByOrgUnit(units, positions, employees)
+	derivedManagers, orgUnitsByID := workspaceDerivedManagersByOrgUnit(units, positions, employees)
 	effectiveParents := map[string]string{}
 	managerIDs := map[string]struct{}{}
 	for _, employee := range employees {
-		parentID, source := workspaceEffectiveManager(employee, derivedManagers)
+		parentID, source, _ := workspaceEffectiveManager(employee, derivedManagers, orgUnitsByID)
 		effectiveParents[employee.ID] = parentID
 		if parentID != "" {
 			managerIDs[parentID] = struct{}{}
@@ -134,7 +135,7 @@ func (c WorkspaceService) WorkspaceOrganization(ctx RequestContext) (WorkspaceOr
 	levelMemo := map[string]int{}
 	for _, employee := range employees {
 		displayID := displayIDs[employee.ID]
-		managerID, source := workspaceEffectiveManager(employee, derivedManagers)
+		managerID, source, managerIssue := workspaceEffectiveManager(employee, derivedManagers, orgUnitsByID)
 		parentID := workspaceParentNone
 		if managerID != "" {
 			if managerDisplayID, ok := displayIDs[managerID]; ok {
@@ -154,6 +155,7 @@ func (c WorkspaceService) WorkspaceOrganization(ctx RequestContext) (WorkspaceOr
 			OrgUnitID:     employee.OrgUnitID,
 			ManagerSource: source,
 			IsOverride:    source == "override",
+			ManagerIssue:  managerIssue,
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -184,6 +186,11 @@ func (c WorkspaceService) WorkspaceTurnover(ctx RequestContext, query WorkspaceT
 	if err != nil {
 		return WorkspaceTurnoverResponse{}, err
 	}
+	positions, err := c.store.ListPositions(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return WorkspaceTurnoverResponse{}, err
+	}
+	employees = workspaceTurnoverEligibleEmployees(employees, units, positions)
 	orgs := workspaceOrgCatalog(units)
 	monthly := workspaceMonthlyTurnover(employees, orgs, start, end, now)
 	annual := workspaceAnnualTurnover(employees, orgs, annualYear, now)
@@ -199,13 +206,6 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 		return WorkspaceAttendanceResponse{}, err
 	}
 	units, err := c.Service.HR().ListOrgUnits(ctx)
-	if err != nil {
-		return WorkspaceAttendanceResponse{}, err
-	}
-	leaves, err := c.Service.Attendance().listLeaveRequestsByQuery(ctx, LeaveRequestQuery{
-		FromDate: start.Format(time.DateOnly),
-		ToDate:   end.AddDate(0, 0, -1).Format(time.DateOnly),
-	})
 	if err != nil {
 		return WorkspaceAttendanceResponse{}, err
 	}
@@ -241,7 +241,7 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	orgNames := workspaceOrgNames(units)
 	cards := workspaceEmployeeCards(employees, orgNames)
 	monthEmployees := workspaceEmployeesPresentInRange(employees, start, end)
-	leaveByEmployeeDate := workspaceLeaveCells(workspaceFilterLeaves(leaves, start, end), start, end)
+	leaveByEmployeeDate := workspaceSummaryLeaveCells(summaries)
 	overtimeByEmployeeDate := workspaceOvertimeCells(overtimes, start, end)
 	summaryByEmployeeDate := workspaceSummaryCells(summaries)
 	clockByEmployeeDate := workspaceClockCells(clocks, summaries, worksites, leaveByEmployeeDate, overtimeByEmployeeDate)

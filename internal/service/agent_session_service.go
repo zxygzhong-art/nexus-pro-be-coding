@@ -30,12 +30,18 @@ func (c AgentService) CreateSession(ctx RequestContext, input domain.CreateAgent
 	if err != nil {
 		return domain.AgentSession{}, err
 	}
+	agentID := strings.TrimSpace(input.AgentID)
+	if agentID != "" {
+		if _, err := c.publishedAgentDefinition(ctx, agentID); err != nil {
+			return domain.AgentSession{}, err
+		}
+	}
 	now := c.Now()
 	session := domain.AgentSession{
 		ID:        utils.NewID("asess"),
 		TenantID:  ctx.TenantID,
 		AccountID: account.ID,
-		AgentID:   strings.TrimSpace(input.AgentID),
+		AgentID:   agentID,
 		Title:     strings.TrimSpace(input.Title),
 		Status:    domain.AgentSessionStatusActive,
 		CreatedAt: now,

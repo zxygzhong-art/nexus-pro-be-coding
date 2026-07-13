@@ -278,11 +278,6 @@ func (g authzToolGateway) Call(ctx RequestContext, call AgentToolCall) (AgentToo
 	if err != nil {
 		return AgentToolResult{Name: call.Name, Decision: decision}, err
 	}
-	if decision.RequiresApproval {
-		if err := g.service.confirmApproval(ctx, req); err != nil {
-			return AgentToolResult{Name: call.Name, Decision: decision}, err
-		}
-	}
 	if call.Execute == nil {
 		return AgentToolResult{Name: call.Name, Decision: decision}, nil
 	}
@@ -325,28 +320,6 @@ func (g authzToolGateway) applyOpenFGAAgentToolDecision(ctx RequestContext, acco
 		return decision, Forbidden("agent tool can_run relationship denied")
 	}
 	decision.MatchedBy = uniqueStrings(append(decision.MatchedBy, "openfga:"+object+"#"+openFGARelationCanRun))
-	if !decision.RequiresApproval {
-		return decision, nil
-	}
-	highRiskAllowed, err := g.service.relationships.CheckRelationship(goContext(ctx), domain.RelationshipCheck{
-		TenantID: ctx.TenantID,
-		Subject:  subject,
-		Relation: openFGARelationCanExecuteHighRisk,
-		Object:   object,
-	})
-	if err != nil {
-		g.service.logWarn(ctx, "openfga agent tool high-risk check failed; falling back to approval flow",
-			"tool_id", toolID,
-			"error", err,
-		)
-		return decision, nil
-	}
-	if highRiskAllowed {
-		decision.MatchedBy = uniqueStrings(append(decision.MatchedBy, "openfga:"+object+"#"+openFGARelationCanExecuteHighRisk))
-		decision.RequiresApproval = false
-		decision.ApprovalType = ""
-		decision.ApprovalReason = ""
-	}
 	return decision, nil
 }
 
@@ -361,6 +334,17 @@ func (c AgentService) publishedAgentDefinition(ctx RequestContext, id string) (d
 		return domain.AgentDefinition{}, err
 	}
 	if !ok || agent.Status != domain.AgentDefinitionStatusPublished {
+		return domain.AgentDefinition{}, NotFound("published agent definition", id)
+	}
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return domain.AgentDefinition{}, err
+	}
+	visible, err := c.agentDefinitionVisibleToAccount(ctx, account, agent)
+	if err != nil {
+		return domain.AgentDefinition{}, err
+	}
+	if !visible {
 		return domain.AgentDefinition{}, NotFound("published agent definition", id)
 	}
 	return agent, nil

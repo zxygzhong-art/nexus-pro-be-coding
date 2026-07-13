@@ -37,6 +37,51 @@ func TestWorkspaceOverviewAggregatesVisibleHRAndAttendance(t *testing.T) {
 	}
 }
 
+// TestWorkspaceTurnoverFiltersClosedPositionsAndOrgUnits 驗證在職分析排除已停用崗位與已關閉組織。
+func TestWorkspaceTurnoverFiltersClosedPositionsAndOrgUnits(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	for _, unit := range []domain.OrgUnit{
+		{ID: "ou-active", TenantID: "tenant-1", Name: "啟用部門", Path: []string{"ou-active"}, CreatedAt: now, UpdatedAt: now},
+		{ID: "ou-closed", TenantID: "tenant-1", Name: "已關閉部門", Path: []string{"ou-closed"}, Closed: true, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := store.UpsertOrgUnit(context.Background(), unit); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, position := range []domain.Position{
+		{ID: "pos-active", TenantID: "tenant-1", Code: "ACTIVE", Name: "啟用崗位", OrgUnitID: "ou-active", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now},
+		{ID: "pos-disabled", TenantID: "tenant-1", Code: "DISABLED", Name: "停用崗位", OrgUnitID: "ou-active", Status: string(domain.PositionStatusDisabled), CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := store.UpsertPosition(context.Background(), position); err != nil {
+			t.Fatal(err)
+		}
+	}
+	hireDate := time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-active", EmployeeNo: "E001", Name: "啟用員工", OrgUnitID: "ou-active", PositionID: "pos-active", Status: "active", EmploymentStatus: "active", HireDate: &hireDate, CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-disabled-position", EmployeeNo: "E002", Name: "停用崗位員工", OrgUnitID: "ou-active", PositionID: "pos-disabled", Status: "active", EmploymentStatus: "active", HireDate: &hireDate, CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-closed-org", EmployeeNo: "E003", Name: "關閉組織員工", OrgUnitID: "ou-closed", PositionID: "pos-active", Status: "active", EmploymentStatus: "active", HireDate: &hireDate, CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-unassigned", EmployeeNo: "E004", Name: "未分配員工", Status: "active", EmploymentStatus: "active", HireDate: &hireDate, CreatedAt: now, UpdatedAt: now})
+
+	got, err := svc.Workspace().WorkspaceTurnover(ctx, domain.WorkspaceTurnoverQuery{Year: 2026, Month: 6, AnnualYear: 2026})
+	if err != nil {
+		t.Fatal(err)
+	}
+	monthlyTotal := got.Monthly.Rows[len(got.Monthly.Rows)-1]
+	if monthlyTotal.RowType != "total" || monthlyTotal.End != 2 {
+		t.Fatalf("expected only active and unassigned employees in monthly total, got %+v", monthlyTotal)
+	}
+	for _, row := range got.Monthly.Rows {
+		if row.Dept == "已關閉部門" {
+			t.Fatalf("closed org unit leaked into monthly rows: %+v", row)
+		}
+	}
+	annualTotal := got.Annual.Rows[len(got.Annual.Rows)-1]
+	if annualTotal.BU != "總計" || annualTotal.End != 2 {
+		t.Fatalf("expected only active and unassigned employees in annual total, got %+v", annualTotal)
+	}
+}
+
 func TestWorkspaceInsightsUsesRequestedMonthForOverviewMetrics(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
@@ -60,6 +105,47 @@ func TestWorkspaceInsightsUsesRequestedMonthForOverviewMetrics(t *testing.T) {
 	}
 	if june.Month != "2026-06" || juneHires != 1 {
 		t.Fatalf("expected June insights to use June overview metrics, got month=%s dept_tasks=%+v", june.Month, juneDeptTasks)
+	}
+}
+
+// TestWorkspaceInsightsProjectsAttendanceMembers 驗證洞察成員明細來自真實月度假勤矩陣。
+func TestWorkspaceInsightsProjectsAttendanceMembers(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-2", EmployeeNo: "IKL002", Name: "張琪", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+	if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{
+		ID: "sum-leave", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10",
+		LeaveType: "annual", LeaveHours: 8, LeaveCounted: true, Source: "ehrms",
+		ExternalRef: "IKL001:2026-06-10", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.Workspace().Insights(ctx, domain.PlatformInsightsQuery{Month: "2026-06"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report := got.Reports["dept_tasks"].(map[string]any)
+	members := report["members"].([]map[string]any)
+	if len(members) != 2 {
+		t.Fatalf("expected two attendance members, got %+v", members)
+	}
+	if members[0]["id"] != "IKL001" || members[0]["leave_days"] != float64(1) || members[0]["leave_type"] != "特休假" {
+		t.Fatalf("unexpected first member projection: %+v", members[0])
+	}
+	if members[0]["primary_product"] != "—" || members[0]["task_count"] != 0 || len(members[0]["tasks"].([]map[string]any)) != 0 {
+		t.Fatalf("unsourced task data must stay empty, got %+v", members[0])
+	}
+	memberHours := report["member_hours"].([]map[string]any)
+	leaveChart := report["leave_chart"].([]map[string]any)
+	if len(memberHours) != 2 || len(leaveChart) != 1 || leaveChart[0]["id"] != "IKL001" {
+		t.Fatalf("unexpected member charts: hours=%+v leave=%+v", memberHours, leaveChart)
+	}
+	totalHours := insightMetricValueByID(t, report, "dept-total-hours").(float64)
+	wantTotal := members[0]["hours"].(float64) + members[1]["hours"].(float64)
+	if totalHours != wantTotal {
+		t.Fatalf("expected total hours %.1f from member rows, got %.1f", wantTotal, totalHours)
 	}
 }
 
@@ -133,6 +219,115 @@ func TestWorkspaceOrganizationBuildsManagerTree(t *testing.T) {
 	}
 }
 
+// TestWorkspaceOrganizationExcludesDepartedEmployees 驗證組織架構排除離職員工。
+func TestWorkspaceOrganizationExcludesDepartedEmployees(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-active", EmployeeNo: "IKL001", Name: "在職員工", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-resigned", EmployeeNo: "IKL002", Name: "離職員工", Status: "resigned", EmploymentStatus: "resigned", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-deleted", EmployeeNo: "IKL003", Name: "已刪除員工", Status: "deleted", EmploymentStatus: "deleted", CreatedAt: now, UpdatedAt: now})
+
+	got, err := svc.Workspace().WorkspaceOrganization(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Rows) != 1 || got.Rows[0].ID != "IKL001" {
+		t.Fatalf("expected only active employee in organization, got %+v", got.Rows)
+	}
+}
+
+// TestWorkspaceOrganizationFallsBackWhenOverrideManagerDeparted 驗證人工主管離職後回退至組織單元主管。
+func TestWorkspaceOrganizationFallsBackWhenOverrideManagerDeparted(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	_ = store.UpsertPosition(context.Background(), domain.Position{ID: "pos-manager", TenantID: "tenant-1", Code: "MGR", Name: "Manager", OrgUnitID: "ou-1", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "產品部", Path: []string{"ou-1"}, ManagerPositionID: "pos-manager", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-manager", EmployeeNo: "IKL001", Name: "現任主管", OrgUnitID: "ou-1", PositionID: "pos-manager", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-resigned-manager", EmployeeNo: "IKL002", Name: "離職主管", OrgUnitID: "ou-1", Status: "resigned", EmploymentStatus: "resigned", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-member", EmployeeNo: "IKL003", Name: "成員", OrgUnitID: "ou-1", ManagerEmployeeID: "emp-resigned-manager", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+
+	got, err := svc.Workspace().WorkspaceOrganization(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]domain.WorkspaceOrganizationRow{}
+	for _, row := range got.Rows {
+		rows[row.ID] = row
+	}
+	if len(rows) != 2 || rows["IKL003"].ParentID != "IKL001" || rows["IKL003"].ManagerSource != "org_unit" {
+		t.Fatalf("expected departed override to fall back to org unit manager, got %+v", got.Rows)
+	}
+}
+
+// TestWorkspaceOrganizationManagerReportsToParentUnitManager 驗證單元主管會向父級單元主管匯報。
+func TestWorkspaceOrganizationManagerReportsToParentUnitManager(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	for _, position := range []domain.Position{
+		{ID: "pos-root-manager", TenantID: "tenant-1", Code: "ROOT-MGR", Name: "Root Manager", OrgUnitID: "ou-root", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now},
+		{ID: "pos-child-manager", TenantID: "tenant-1", Code: "CHILD-MGR", Name: "Child Manager", OrgUnitID: "ou-child", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := store.UpsertPosition(context.Background(), position); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, unit := range []domain.OrgUnit{
+		{ID: "ou-root", TenantID: "tenant-1", Name: "公司", Path: []string{"ou-root"}, ManagerPositionID: "pos-root-manager", CreatedAt: now, UpdatedAt: now},
+		{ID: "ou-child", TenantID: "tenant-1", Name: "產品部", ParentID: "ou-root", Path: []string{"ou-root", "ou-child"}, ManagerPositionID: "pos-child-manager", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := store.UpsertOrgUnit(context.Background(), unit); err != nil {
+			t.Fatal(err)
+		}
+	}
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-root", EmployeeNo: "IKL001", Name: "總主管", OrgUnitID: "ou-root", PositionID: "pos-root-manager", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-child-manager", EmployeeNo: "IKL002", Name: "產品主管", OrgUnitID: "ou-child", PositionID: "pos-child-manager", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-child", EmployeeNo: "IKL003", Name: "產品成員", OrgUnitID: "ou-child", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+
+	got, err := svc.Workspace().WorkspaceOrganization(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]domain.WorkspaceOrganizationRow{}
+	for _, row := range got.Rows {
+		rows[row.ID] = row
+	}
+	if rows["IKL002"].ParentID != "IKL001" || rows["IKL002"].Level != 2 {
+		t.Fatalf("expected child unit manager to report to root manager, got %+v", rows["IKL002"])
+	}
+	if rows["IKL003"].ParentID != "IKL002" || rows["IKL003"].Level != 3 {
+		t.Fatalf("expected child member to report to child unit manager, got %+v", rows["IKL003"])
+	}
+}
+
+// TestWorkspaceOrganizationReportsManagerConfigurationIssue 驗證主管崗空缺時仍回退並回報配置異常。
+func TestWorkspaceOrganizationReportsManagerConfigurationIssue(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	_ = store.UpsertPosition(context.Background(), domain.Position{ID: "pos-root-manager", TenantID: "tenant-1", Code: "ROOT-MGR", Name: "Root Manager", OrgUnitID: "ou-root", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now})
+	_ = store.UpsertPosition(context.Background(), domain.Position{ID: "pos-empty-manager", TenantID: "tenant-1", Code: "EMPTY-MGR", Name: "Empty Manager", OrgUnitID: "ou-child", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-root", TenantID: "tenant-1", Name: "公司", Path: []string{"ou-root"}, ManagerPositionID: "pos-root-manager", CreatedAt: now, UpdatedAt: now})
+	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-child", TenantID: "tenant-1", Name: "產品部", ParentID: "ou-root", Path: []string{"ou-root", "ou-child"}, ManagerPositionID: "pos-empty-manager", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-root", EmployeeNo: "IKL001", Name: "總主管", OrgUnitID: "ou-root", PositionID: "pos-root-manager", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-child", EmployeeNo: "IKL002", Name: "產品成員", OrgUnitID: "ou-child", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+
+	got, err := svc.Workspace().WorkspaceOrganization(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, row := range got.Rows {
+		if row.ID == "IKL002" {
+			found = true
+			if row.ParentID != "IKL001" || row.ManagerIssue != "manager_position_unstaffed" {
+				t.Fatalf("expected ancestor fallback with unstaffed warning, got %+v", row)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("expected child employee row")
+	}
+}
+
 // TestWorkspaceOrganizationOverrideBeatsOrgUnitManager 驗證覆蓋主管優先於組織單元主管崗。
 func TestWorkspaceOrganizationOverrideBeatsOrgUnitManager(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
@@ -182,7 +377,7 @@ func TestWorkspaceAttendanceBuildsLeaveAndClockMatrices(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", CompanyEmail: "wei@example.com", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
-	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lv-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", StartAt: time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 10, 23, 0, 0, 0, time.UTC), Hours: 8, Status: "approved", CreatedAt: now})
+	_ = store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "sum-leave", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", LeaveType: "annual", LeaveHours: 8, LeaveCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-10", CreatedAt: now, UpdatedAt: now})
 	_ = store.UpsertAttendanceClockRecord(context.Background(), domain.AttendanceClockRecord{ID: "clk-in", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", Direction: "clock_in", ClockedAt: time.Date(2026, 6, 11, 9, 0, 0, 0, time.UTC), RecordStatus: "accepted", Source: "geofence", CreatedAt: now})
 
 	got, err := svc.Workspace().WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 6})
@@ -197,6 +392,100 @@ func TestWorkspaceAttendanceBuildsLeaveAndClockMatrices(t *testing.T) {
 	}
 	if len(got.Clock.Abnormals) != 1 || got.Clock.Abnormals[0].Record.Reason != "缺下班卡" {
 		t.Fatalf("unexpected clock abnormals: %+v", got.Clock.Abnormals)
+	}
+}
+
+// TestWorkspaceAttendanceNormalizesEHRMSLeaveTypes 驗證 eHRMS 假別名稱穩定映射且非請假明細不進入矩陣。
+func TestWorkspaceAttendanceNormalizesEHRMSLeaveTypes(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+	types := []struct {
+		leaveType string
+		code      string
+	}{
+		{leaveType: "Additional Leave", code: "彈"},
+		{leaveType: "Full Pay Sick Leave", code: "病"},
+		{leaveType: "Half Pay Sick Leave", code: "半"},
+		{leaveType: "Menstruation Leave", code: "理"},
+		{leaveType: "Personal Leave", code: "事"},
+		{leaveType: "Compensatory Leave", code: "補"},
+		{leaveType: "特休假", code: "特"},
+		{leaveType: "Future Leave Type", code: "其"},
+	}
+	workdays := []int{1, 2, 3, 4, 5, 8, 9, 10}
+	for i, item := range types {
+		workDate := time.Date(2026, 6, workdays[i], 0, 0, 0, 0, time.UTC).Format(time.DateOnly)
+		if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "sum-" + workDate, TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: workDate, LeaveType: item.leaveType, LeaveHours: 8, LeaveCounted: true, Source: "ehrms", ExternalRef: "IKL001:" + workDate, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := svc.Workspace().WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := got.Attendance.Rows[0]
+	for i, item := range types {
+		if cell := row.Cells[workdays[i]-1]; cell.Type != "leave" || cell.Leave != item.code {
+			t.Fatalf("leave type %q expected code %q, got %+v", item.leaveType, item.code, cell)
+		}
+	}
+}
+
+// TestWorkspaceAttendanceUsesDailyLeaveFactsInsteadOfLeaveRanges 驗證矩陣只使用每日假勤，不展開請假區間或推算未來日期。
+func TestWorkspaceAttendanceUsesDailyLeaveFactsInsteadOfLeaveRanges(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 7, 10, 9, 0, 0, 0, time.UTC)
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKM229", Name: "測試員工", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	if err := store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{
+		ID: "lv-cross-weekend", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual",
+		StartAt: time.Date(2026, 7, 9, 9, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 7, 14, 17, 0, 0, 0, time.UTC),
+		Hours: 28, Status: "approved", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{
+		ID: "sum-ikm229-0709", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-07-09",
+		LeaveType: "annual", LeaveHours: 7, LeaveCounted: true,
+		Source: "ehrms", ExternalRef: "IKM229:2026-07-09", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.Workspace().WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := got.Attendance.Rows[0]
+	if cell := row.Cells[8]; cell.Type != "leave" || cell.Hours != 7 || cell.Leave != "特" {
+		t.Fatalf("expected July 9 daily fact only, got %+v", cell)
+	}
+	for _, day := range []int{10, 13, 14} {
+		if cell := row.Cells[day-1]; cell.Type == "leave" {
+			t.Fatalf("leave range must not synthesize day %d, got %+v", day, cell)
+		}
+	}
+	if row.Summary.LeaveHours != 7 {
+		t.Fatalf("expected exact daily leave total, got %+v", row.Summary)
+	}
+}
+
+// TestWorkspaceAttendanceExcludesUndatedResignedEmployees 驗證離職狀態但缺少離職日的人員不污染當月矩陣。
+func TestWorkspaceAttendanceExcludesUndatedResignedEmployees(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-active", EmployeeNo: "E001", Name: "Active", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-resigned-undated", EmployeeNo: "E002", Name: "Undated", Status: "resigned", EmploymentStatus: "resigned", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-resigned-before", EmployeeNo: "E003", Name: "Before", Status: "resigned", EmploymentStatus: "resigned", ResignDate: ptrTime(time.Date(2026, 5, 31, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-resigned-during", EmployeeNo: "E004", Name: "During", Status: "resigned", EmploymentStatus: "resigned", ResignDate: ptrTime(time.Date(2026, 6, 15, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+
+	got, err := svc.Workspace().WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Attendance.Rows) != 2 || got.Attendance.Rows[0].Employee.ID != "E001" || got.Attendance.Rows[1].Employee.ID != "E004" {
+		t.Fatalf("expected active and in-month resigned employees only, got %+v", got.Attendance.Rows)
 	}
 }
 
@@ -244,6 +533,8 @@ func TestWorkspaceAttendanceUsesEHRMSDailySummaries(t *testing.T) {
 		ShiftHours:  8,
 		DailyHours:  8,
 		ClockHours:  8,
+		ClockStart:  "09:00",
+		ClockEnd:    "18:00",
 		Source:      "ehrms",
 		ExternalRef: "IKL001:2026-06-10",
 		CreatedAt:   now,
@@ -261,22 +552,47 @@ func TestWorkspaceAttendanceUsesEHRMSDailySummaries(t *testing.T) {
 		t.Fatalf("expected eHRMS summary to mark attendance cell, got %+v", attendanceCell)
 	}
 	clockCell := got.Clock.Rows[0].Cells[9]
-	if clockCell.Type != "work" || clockCell.In != "" || clockCell.Out != "" || clockCell.Abnormal {
-		t.Fatalf("expected eHRMS summary to mark clock cell without precise times, got %+v", clockCell)
+	if clockCell.Type != "work" || clockCell.In != "09:00" || clockCell.Out != "18:00" || clockCell.Abnormal {
+		t.Fatalf("expected eHRMS summary to project clock times, got %+v", clockCell)
 	}
 	if got.Attendance.Rows[0].Summary.AttendedHours < 8 {
 		t.Fatalf("expected eHRMS summary hours to count as attended, got %+v", got.Attendance.Rows[0].Summary)
 	}
 }
 
-// TestWorkspaceAttendanceCountsOnlyApprovedLeaveAndOvertime 驗證工時統計只計已核准的請假與加班。
-func TestWorkspaceAttendanceCountsOnlyApprovedLeaveAndOvertime(t *testing.T) {
+// TestWorkspaceAttendanceMarksIncompleteEHRMSClockSummaryAbnormal 驗證 eHRMS 缺少下班卡時會保留上班時間並列入異常。
+func TestWorkspaceAttendanceMarksIncompleteEHRMSClockSummaryAbnormal(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{
+		ID: "ads-incomplete", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10",
+		DailyHours: 8, ClockHours: 4, ClockStart: "09:00", Source: "ehrms", ExternalRef: "IKL001:2026-06-10", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.Workspace().WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cell := got.Clock.Rows[0].Cells[9]
+	if cell.In != "09:00" || cell.Out != "" || !cell.Abnormal || cell.Reason != "缺下班卡" {
+		t.Fatalf("expected incomplete eHRMS clock summary to be abnormal, got %+v", cell)
+	}
+	if got.Clock.Summary.AbnormalDays != 1 || got.Clock.Summary.AbnormalPeople != 1 || got.Clock.Summary.NormalDays != 0 {
+		t.Fatalf("unexpected clock summary: %+v", got.Clock.Summary)
+	}
+}
+
+// TestWorkspaceAttendanceCountsDailyLeaveAndApprovedOvertime 驗證工時統計計入每日假勤與已核准加班，不讀取請假區間。
+func TestWorkspaceAttendanceCountsDailyLeaveAndApprovedOvertime(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
-	// pending 請假不應計入工時扣減。
-	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lv-pending", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", StartAt: time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 10, 23, 0, 0, 0, time.UTC), Hours: 8, Status: "pending_approval", CreatedAt: now})
-	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lv-approved", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", StartAt: time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 11, 23, 0, 0, 0, time.UTC), Hours: 8, Status: "approved", CreatedAt: now})
+	// 請假區間不再參與每日工時矩陣；每日彙總的兩段假勤才是唯一來源。
+	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lv-approved", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", StartAt: time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 12, 23, 0, 0, 0, time.UTC), Hours: 24, Status: "approved", CreatedAt: now})
+	_ = store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "sum-leave", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", LeaveType: "annual", LeaveHours: 4, LeaveCounted: true, Leave2Type: "personal", Leave2Hours: 4, Leave2Counted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-11", CreatedAt: now, UpdatedAt: now})
 	// 只有 approved 加班會累計時數。
 	_ = store.UpsertOvertimeRequest(context.Background(), domain.OvertimeRequest{ID: "ot-approved", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-12", StartAt: time.Date(2026, 6, 12, 18, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 12, 21, 0, 0, 0, time.UTC), Hours: 3, OvertimeType: "weekday", CompensationType: "leave", Status: "approved", CreatedAt: now, UpdatedAt: now})
 	_ = store.UpsertOvertimeRequest(context.Background(), domain.OvertimeRequest{ID: "ot-pending", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-13", StartAt: time.Date(2026, 6, 13, 18, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 13, 20, 0, 0, 0, time.UTC), Hours: 2, OvertimeType: "weekday", CompensationType: "leave", Status: "pending_approval", CreatedAt: now, UpdatedAt: now})
@@ -287,10 +603,10 @@ func TestWorkspaceAttendanceCountsOnlyApprovedLeaveAndOvertime(t *testing.T) {
 	}
 	row := got.Attendance.Rows[0]
 	if cell := row.Cells[9]; cell.Type == "leave" {
-		t.Fatalf("pending leave should not create a leave cell, got %+v", cell)
+		t.Fatalf("leave request range should not create a leave cell, got %+v", cell)
 	}
 	if cell := row.Cells[10]; cell.Type != "leave" || cell.Hours != 8 {
-		t.Fatalf("approved leave should create a leave cell, got %+v", cell)
+		t.Fatalf("two daily leave segments should create one exact 8-hour cell, got %+v", cell)
 	}
 	if cell := row.Cells[11]; cell.Overtime != 3 {
 		t.Fatalf("approved overtime should mark the day cell, got %+v", cell)
@@ -310,13 +626,13 @@ func TestWorkspaceAttendanceCountsOnlyApprovedLeaveAndOvertime(t *testing.T) {
 	}
 }
 
-// TestWorkspaceClockShortHoursExemptedByApprovedLeave 驗證核准請假可豁免工時不足異常。
-func TestWorkspaceClockShortHoursExemptedByApprovedLeave(t *testing.T) {
+// TestWorkspaceClockShortHoursExemptedByDailyLeave 驗證每日假勤可豁免工時不足異常。
+func TestWorkspaceClockShortHoursExemptedByDailyLeave(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
-	// 半天請假 + 半天出勤：工時 4 小時但有 4 小時核准請假，不應標記異常。
-	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lv-half", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", StartAt: time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 10, 12, 0, 0, 0, time.UTC), Hours: 4, Status: "approved", CreatedAt: now})
+	// 半天假勤 + 半天出勤：工时不足由同日每日假勤补足，不应标记异常。
+	_ = store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "sum-half", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", LeaveType: "annual", LeaveHours: 4, LeaveCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-10", CreatedAt: now, UpdatedAt: now})
 	_ = store.UpsertAttendanceClockRecord(context.Background(), domain.AttendanceClockRecord{ID: "clk-in", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_in", ClockedAt: time.Date(2026, 6, 10, 13, 0, 0, 0, time.UTC), RecordStatus: "accepted", Source: "geofence", CreatedAt: now})
 	_ = store.UpsertAttendanceClockRecord(context.Background(), domain.AttendanceClockRecord{ID: "clk-out", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_out", ClockedAt: time.Date(2026, 6, 10, 18, 0, 0, 0, time.UTC), RecordStatus: "accepted", Source: "geofence", CreatedAt: now})
 
@@ -369,7 +685,7 @@ func TestCurrentAttendancePolicyReturnsDefaultCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.WorkTime.StandardStart != "09:00" || got.WorkTime.StandardEnd != "18:00" {
+	if got.WorkTime.ClockMode != "flexible" || got.WorkTime.FlexibleClockInEarliest != "00:00" || got.WorkTime.FlexibleClockOutLatest != "23:30" || got.WorkTime.StandardStart != "09:00" || got.WorkTime.StandardEnd != "17:00" {
 		t.Fatalf("unexpected work time: %+v", got.WorkTime)
 	}
 	if len(got.WorkTime.TimeOptions) != 48 || len(got.LeaveTypes) != 14 {
@@ -380,16 +696,18 @@ func TestCurrentAttendancePolicyReturnsDefaultCatalog(t *testing.T) {
 // TestUpdateAttendancePolicyPersistsWorkspaceSettings 驗證考勤政策 persists 工作區 settings。
 func TestUpdateAttendancePolicyPersistsWorkspaceSettings(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
-	ctx.ApprovalConfirmed = true
 	input := domain.UpdateAttendancePolicyInput{
 		WorkTime: domain.AttendancePolicyWorkTime{
-			StandardStart: "08:30",
-			StandardEnd:   "17:30",
-			BreakStart:    "12:30",
-			BreakEnd:      "13:30",
-			Weekend:       "週日",
-			CycleStart:    "5 日",
-			CycleEnd:      "次月 4 日",
+			ClockMode:               "fixed",
+			FlexibleClockInEarliest: "08:00",
+			FlexibleClockOutLatest:  "20:00",
+			StandardStart:           "08:30",
+			StandardEnd:             "17:30",
+			BreakStart:              "12:30",
+			BreakEnd:                "13:30",
+			Weekend:                 "週日",
+			CycleStart:              "5 日",
+			CycleEnd:                "次月 4 日",
 		},
 		LeaveTypes: []domain.AttendanceLeaveType{
 			{Code: "特", Name: "特休假", Quota: "20 天 / 年", Rule: "可遞延一年", Proof: "—"},
@@ -401,14 +719,14 @@ func TestUpdateAttendancePolicyPersistsWorkspaceSettings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.WorkTime.StandardStart != "08:30" || got.WorkTime.Weekend != "週日" || len(got.LeaveTypes) != 2 {
+	if got.WorkTime.ClockMode != "fixed" || got.WorkTime.StandardStart != "08:30" || got.WorkTime.Weekend != "週日" || len(got.LeaveTypes) != 2 {
 		t.Fatalf("unexpected updated policy: %+v", got)
 	}
 	stored, ok, err := store.GetAttendancePolicy(context.Background(), "tenant-1")
 	if err != nil || !ok {
 		t.Fatalf("policy was not stored: ok=%v err=%v", ok, err)
 	}
-	if stored.UpdatedByAccountID != "acct-1" || stored.WorkTime.CycleEnd != "次月 4 日" {
+	if stored.UpdatedByAccountID != "acct-1" || stored.WorkTime.ClockMode != "fixed" || stored.WorkTime.FlexibleClockInEarliest != "08:00" || stored.WorkTime.FlexibleClockOutLatest != "20:00" || stored.WorkTime.CycleEnd != "次月 4 日" {
 		t.Fatalf("unexpected stored policy: %+v", stored)
 	}
 	workspace, err := svc.Workspace().Workspace(ctx)
@@ -460,12 +778,15 @@ func TestWorkspaceAuditLogsFiltersAndProjects(t *testing.T) {
 	_ = store.AppendAuditLog(context.Background(), domain.AuditLog{ID: "audit-1", TenantID: "tenant-1", ActorAccountID: "acct-1", Action: "hr.employee.create", Resource: "hr.employee", Target: "emp-2", Severity: "medium", Details: map[string]any{"name": "張琪"}, CreatedAt: now})
 	_ = store.AppendAuditLog(context.Background(), domain.AuditLog{ID: "audit-2", TenantID: "tenant-1", ActorAccountID: "acct-1", Action: "attendance.shift.update", Resource: "attendance.shift", Target: "shift-1", Severity: "medium", CreatedAt: now.Add(-24 * time.Hour)})
 
-	got, err := service.New(store).Workspace().WorkspaceAuditLogs(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}, domain.WorkspaceAuditLogQuery{Type: "員工管理", Keyword: "張琪"}, domain.PageRequest{Page: 1, PageSize: 10})
+	got, err := service.New(store).Workspace().WorkspaceAuditLogs(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.WorkspaceAuditLogQuery{Type: "員工管理", Keyword: "張琪"}, domain.PageRequest{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if got.Total != 1 || got.Items[0].ID != "audit-1" || got.Items[0].Operator != "王偉" {
 		t.Fatalf("unexpected audit projection: %+v", got)
+	}
+	if got.Items[0].Time != "2026-06-10T08:00:00Z" {
+		t.Fatalf("expected RFC3339 UTC audit time, got %q", got.Items[0].Time)
 	}
 }
 

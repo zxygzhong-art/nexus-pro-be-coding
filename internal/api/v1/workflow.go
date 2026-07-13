@@ -23,6 +23,7 @@ func (c WorkflowCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	forms.POST("/templates", c.routes.Handle("workflow.form_template", "create", c.createFormTemplate))
 
 	workflows := router.Group("/workflows")
+	workflows.GET("/form-data-sources", c.routes.Handle("workflow.form_instance", "read", c.formDataSources))
 	workflows.GET("/forms", c.routes.Handle("workflow.form_instance", "read", c.listFormInstances))
 	workflows.GET("/reviews", c.routes.Handle("workflow.form_instance", "read", c.reviewQueue))
 	workflows.POST("/reviews/bulk-action", c.routes.Handle("workflow.form_instance", "update", c.bulkReviewForms))
@@ -37,6 +38,16 @@ func (c WorkflowCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workflows.POST("/forms/:id/return", c.routes.Handle("workflow.form_instance", "update", c.returnForm, ResourceID(PathParamID)))
 	workflows.POST("/forms/:id/cancel", c.routes.Handle("workflow.form_instance", "update", c.cancelForm, PathParam(PathParamID)))
 	workflows.POST("/forms/:id/duplicate", c.routes.Handle("workflow.form_instance", "submit", c.duplicateForm, PathParam(PathParamID)))
+}
+
+// formDataSources 回傳表單設計與填寫共用的受控資料源目錄。
+func (c WorkflowCtrl) formDataSources(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.FormDataSources(ctx)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
 }
 
 // listFormTemplates 處理表單範本的 HTTP 請求。

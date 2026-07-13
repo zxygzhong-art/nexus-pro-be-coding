@@ -95,10 +95,36 @@ func (c MeService) ListMenus(ctx RequestContext) ([]MenuNode, error) {
 
 // menuKeysFromPermissions 處理 menu keys 來源 權限。
 func menuKeysFromPermissions(perms []Permission) []string {
+	effectivePermissionKeys := map[string]struct{}{}
+	for _, perm := range perms {
+		perm = normalizePermission(perm)
+		if permissionCanAuthorizeRequest(perm) {
+			effectivePermissionKeys[permissionKey(perm.ApplicationCode, perm.ResourceType, perm.Action)] = struct{}{}
+		}
+	}
 	keys := make([]string, 0, len(perms))
 	for _, perm := range perms {
-		if perm.MenuKey != "" {
-			keys = append(keys, perm.MenuKey)
+		menuKey := strings.TrimSpace(perm.MenuKey)
+		if menuKey == "" && perm.PermissionType == PermissionTypeMenu {
+			menuKey = strings.TrimSpace(perm.Resource)
+		}
+		if menuKey == "" {
+			continue
+		}
+		primaryRead, ok := menuPrimaryReadPermissionKey(menuKey)
+		if !ok {
+			normalized := normalizePermission(perm)
+			if !permissionCanAuthorizeRequest(normalized) || normalized.Action != ActionRead {
+				continue
+			}
+			primaryRead = permissionKey(normalized.ApplicationCode, normalized.ResourceType, normalized.Action)
+		}
+		if _, effective := effectivePermissionKeys[primaryRead]; !effective {
+			continue
+		}
+		keys = append(keys, menuKey)
+		if canonical := canonicalPageMenuKey(menuKey); canonical != menuKey {
+			keys = append(keys, canonical)
 		}
 	}
 	return keys
@@ -163,48 +189,59 @@ func menuNodesFromChildren(parentKey string, children map[string][]MenuItem, vis
 var defaultMenuCatalog = []MenuNode{
 	{Key: "workbench", Label: "工作台", Path: "/"},
 	{
+		Key:   "workspace",
+		Label: "工作區設定",
+		Path:  "/workspace",
+		Children: []MenuNode{
+			{Key: "workspace.overview", Label: "概覽", Path: "/workspace/overview"},
+			{Key: "hr.employees", Label: "員工", Path: "/workspace/employees"},
+			{Key: "hr.org_units", Label: "組織單元", Path: "/workspace/org-units"},
+			{Key: "hr.positions", Label: "崗位", Path: "/workspace/positions"},
+			{Key: "hr.organization", Label: "組織架構", Path: "/workspace/organization"},
+			{Key: "hr.turnover", Label: "在職分析", Path: "/workspace/turnover"},
+			{Key: "attendance.overview", Label: "工時統計", Path: "/workspace/attendance"},
+			{Key: "attendance.clock", Label: "打卡時間", Path: "/workspace/clock"},
+			{Key: "attendance.leave_policy", Label: "假勤制度", Path: "/workspace/leave-policy"},
+			{Key: "workflow.forms", Label: "表單設計", Path: "/workspace/forms"},
+			{Key: "agents.models", Label: "模型設定", Path: "/workspace/agent-models"},
+			{Key: "agents.definitions", Label: "Agent 管理", Path: "/workspace/agents"},
+			{Key: "iam.members", Label: "成員權限", Path: "/workspace/iam/members"},
+			{Key: "iam.user_groups", Label: "使用者群組", Path: "/workspace/iam/user-groups"},
+			{Key: "iam.permission_sets", Label: "權限集合", Path: "/workspace/iam/permission-sets"},
+			{Key: "iam.assignments", Label: "權限指派", Path: "/workspace/iam/assignments"},
+			{Key: "iam.assumable_roles", Label: "可承擔角色", Path: "/workspace/iam/roles"},
+			{Key: "iam.policies", Label: "數據策略", Path: "/workspace/iam/policies"},
+			{Key: "audit.logs", Label: "操作紀錄", Path: "/workspace/audit-log"},
+		},
+	},
+	{
 		Key:   "hr",
 		Label: "HR 主資料",
 		Path:  "/workspace",
 		Children: []MenuNode{
-			{Key: "hr.employees", Label: "員工", Path: "/workspace/employees"},
-			{Key: "hr.org_units", Label: "組織單元", Path: "/workspace/org-units"},
-			{Key: "hr.positions", Label: "崗位", Path: "/workspace/positions"},
 			{Key: "hr.reporting", Label: "匯報關係", Path: "/workspace/organization"},
-			{
-				Key:   "attendance",
-				Label: "假勤",
-				Path:  "/workspace/attendance",
-				Children: []MenuNode{
-					{Key: "attendance.clock", Label: "上下班打卡", Path: "/workspace/clock"},
-					{Key: "attendance.corrections", Label: "補卡申請", Path: "/workspace/clock"},
-					{Key: "attendance.leave", Label: "請假申請", Path: "/workspace/leave-policy"},
-					{Key: "attendance.worksites", Label: "辦公地點", Path: "/workspace/leave-policy"},
-					{Key: "attendance.shifts", Label: "班次規則", Path: "/workspace/leave-policy"},
-					{Key: "attendance.shift_assignments", Label: "員工排班", Path: "/workspace/leave-policy"},
-				},
-			},
+		},
+	},
+	{
+		Key:   "attendance",
+		Label: "假勤自助",
+		Path:  "/workspace/attendance",
+		Children: []MenuNode{
+			{Key: "attendance.corrections", Label: "補卡申請", Path: "/workspace/clock"},
+			{Key: "attendance.leave", Label: "請假申請", Path: "/workspace/leave-policy"},
+			{Key: "attendance.worksites", Label: "辦公地點", Path: "/workspace/leave-policy"},
+			{Key: "attendance.shifts", Label: "班次規則", Path: "/workspace/leave-policy"},
 		},
 	},
 	{
 		Key:   "workflow",
 		Label: "表單審批",
-		Path:  "/workspace/forms",
+		Path:  "/forms",
 		Children: []MenuNode{
-			{Key: "workflow.forms", Label: "動態表單", Path: "/workspace/forms"},
-			{Key: "workflow.instances", Label: "流程實例", Path: "/workspace/forms"},
+			{Key: "workflow.instances", Label: "流程實例", Path: "/forms"},
 		},
 	},
-	{
-		Key:   "iam",
-		Label: "權限中心",
-		Path:  "/iam/permission-sets",
-		Children: []MenuNode{
-			{Key: "iam.user_groups", Label: "使用者群組", Path: "/iam/user-groups"},
-			{Key: "iam.permission_sets", Label: "權限集合", Path: "/iam/permission-sets"},
-			{Key: "iam.assumable_roles", Label: "可承擔身分", Path: "/iam/assumable-roles"},
-		},
-	},
+	{Key: "iam", Label: "權限中心", Path: "/workspace/iam/permission-sets"},
 	{
 		Key:   "agents",
 		Label: "AI Agent",
@@ -213,11 +250,7 @@ var defaultMenuCatalog = []MenuNode{
 			{Key: "agents.runs", Label: "Agent Runs", Path: "/agents/runs"},
 		},
 	},
-	{
-		Key:   "audit",
-		Label: "審計中心",
-		Path:  "/workspace/audit-log",
-	},
+	{Key: "audit", Label: "審計中心", Path: "/workspace/audit-log"},
 }
 
 func (c MeService) enrichEmployeeProfile(ctx RequestContext, employee Employee) Employee {

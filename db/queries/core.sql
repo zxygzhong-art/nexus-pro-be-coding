@@ -219,7 +219,7 @@ WHERE tenant_id = $1 AND id = $2;
 -- name: ListOrgUnits :many
 SELECT * FROM org_units
 WHERE tenant_id = $1
-ORDER BY created_at ASC;
+ORDER BY closed ASC, code ASC, name ASC, created_at ASC, id ASC;
 
 -- name: UpsertEmployee :one
 INSERT INTO employees (
@@ -287,7 +287,18 @@ WHERE tenant_id = sqlc.arg(tenant_id)
 -- name: ListEmployees :many
 SELECT * FROM employees
 WHERE tenant_id = $1
-ORDER BY created_at ASC, id ASC;
+ORDER BY
+  CASE coalesce(nullif(employment_status, ''), status)
+    WHEN 'active' THEN 0
+    WHEN 'probation' THEN 1
+    WHEN 'leave_suspended' THEN 2
+    WHEN 'onboarding' THEN 3
+    WHEN 'resigned' THEN 4
+    WHEN 'deleted' THEN 5
+    ELSE 6
+  END ASC,
+  created_at ASC,
+  id ASC;
 
 -- name: ListEmployeesFiltered :many
 SELECT employees.* FROM employees
@@ -322,6 +333,15 @@ WHERE employees.tenant_id = sqlc.arg(tenant_id)
   )
   AND (sqlc.arg(category)::text = '' OR employees.category = sqlc.arg(category))
 ORDER BY
+  CASE coalesce(nullif(employees.employment_status, ''), employees.status)
+    WHEN 'active' THEN 0
+    WHEN 'probation' THEN 1
+    WHEN 'leave_suspended' THEN 2
+    WHEN 'onboarding' THEN 3
+    WHEN 'resigned' THEN 4
+    WHEN 'deleted' THEN 5
+    ELSE 6
+  END ASC,
   CASE WHEN sqlc.arg(sort)::text = 'created_at_desc' THEN employees.created_at END DESC,
   CASE WHEN sqlc.arg(sort)::text = 'hire_date_desc' THEN employees.hire_date END DESC NULLS LAST,
   CASE WHEN sqlc.arg(sort)::text = 'hire_date_asc' THEN employees.hire_date END ASC NULLS LAST,
@@ -394,6 +414,15 @@ WHERE employees.tenant_id = sqlc.arg(tenant_id)
   )
   AND (sqlc.arg(category)::text = '' OR employees.category = sqlc.arg(category))
 ORDER BY
+  CASE coalesce(nullif(employees.employment_status, ''), employees.status)
+    WHEN 'active' THEN 0
+    WHEN 'probation' THEN 1
+    WHEN 'leave_suspended' THEN 2
+    WHEN 'onboarding' THEN 3
+    WHEN 'resigned' THEN 4
+    WHEN 'deleted' THEN 5
+    ELSE 6
+  END ASC,
   CASE WHEN sqlc.arg(sort)::text = 'created_at_desc' THEN employees.created_at END DESC,
   CASE WHEN sqlc.arg(sort)::text = 'hire_date_desc' THEN employees.hire_date END DESC NULLS LAST,
   CASE WHEN sqlc.arg(sort)::text = 'hire_date_asc' THEN employees.hire_date END ASC NULLS LAST,
@@ -520,10 +549,7 @@ INSERT INTO leave_balances (
     $6, $7, $8, $9, $10, $11, $12,
     $13
 )
-ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    employee_id = EXCLUDED.employee_id,
-    leave_type = EXCLUDED.leave_type,
+ON CONFLICT (tenant_id, employee_id, leave_type) DO UPDATE SET
     remaining_hours = EXCLUDED.remaining_hours,
     period_start = EXCLUDED.period_start,
     period_end = EXCLUDED.period_end,
@@ -567,17 +593,21 @@ RETURNING *;
 
 -- name: UpsertFormTemplate :one
 INSERT INTO form_templates (
-    id, tenant_id, key, name, description, schema, created_at
+    id, tenant_id, key, name, description, schema, status, current_version, created_at, updated_at, deleted_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6::jsonb, $7
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(key), sqlc.arg(name), sqlc.arg(description), sqlc.arg(schema)::jsonb,
+    sqlc.arg(status), sqlc.arg(current_version), sqlc.arg(created_at), sqlc.arg(updated_at), sqlc.narg(deleted_at)
 )
 ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
     key = EXCLUDED.key,
     name = EXCLUDED.name,
     description = EXCLUDED.description,
     schema = EXCLUDED.schema,
-    created_at = EXCLUDED.created_at
+    status = EXCLUDED.status,
+    current_version = EXCLUDED.current_version,
+    updated_at = EXCLUDED.updated_at,
+    deleted_at = EXCLUDED.deleted_at
+WHERE form_templates.tenant_id = EXCLUDED.tenant_id
 RETURNING *;
 
 -- name: GetFormTemplate :one
@@ -593,18 +623,38 @@ SELECT * FROM form_templates
 WHERE tenant_id = $1
 ORDER BY created_at ASC;
 
+-- name: InsertFormTemplateVersion :exec
+INSERT INTO form_template_versions (
+    id, tenant_id, template_id, version, schema, status, created_at, published_at
+) VALUES (
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(template_id), sqlc.arg(version), sqlc.arg(schema)::jsonb,
+    sqlc.arg(status), sqlc.arg(created_at), sqlc.narg(published_at)
+)
+ON CONFLICT (tenant_id, template_id, version) DO NOTHING;
+
+-- name: GetFormTemplateVersion :one
+SELECT * FROM form_template_versions
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND id = sqlc.arg(id);
+
+-- name: GetFormTemplateVersionByNumber :one
+SELECT * FROM form_template_versions
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND template_id = sqlc.arg(template_id)
+  AND version = sqlc.arg(version);
+
 -- name: UpsertFormInstance :one
 -- expected_version 語義同 UpsertAccount。
 INSERT INTO form_instances (
-    id, tenant_id, template_id, applicant_account_id, status,
+    id, tenant_id, template_id, template_version_id, applicant_account_id, status,
     payload, submitted_at, approved_by, current_run_id, version, updated_at
 ) VALUES (
-    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(template_id), sqlc.arg(applicant_account_id), sqlc.arg(status),
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(template_id), sqlc.arg(template_version_id), sqlc.arg(applicant_account_id), sqlc.arg(status),
     sqlc.arg(payload)::jsonb, sqlc.arg(submitted_at), sqlc.arg(approved_by), sqlc.arg(current_run_id), 1, sqlc.arg(updated_at)
 )
 ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
     template_id = EXCLUDED.template_id,
+    template_version_id = EXCLUDED.template_version_id,
     applicant_account_id = EXCLUDED.applicant_account_id,
     status = EXCLUDED.status,
     payload = EXCLUDED.payload,
@@ -613,7 +663,8 @@ ON CONFLICT (id) DO UPDATE SET
     current_run_id = EXCLUDED.current_run_id,
     version = form_instances.version + 1,
     updated_at = EXCLUDED.updated_at
-WHERE sqlc.arg(expected_version)::bigint = 0 OR form_instances.version = sqlc.arg(expected_version)::bigint
+WHERE form_instances.tenant_id = EXCLUDED.tenant_id
+  AND (sqlc.arg(expected_version)::bigint = 0 OR form_instances.version = sqlc.arg(expected_version)::bigint)
 RETURNING *;
 
 -- name: GetFormInstance :one
@@ -670,6 +721,41 @@ ORDER BY
   fi.id ASC
 LIMIT sqlc.arg(limit_count)::int
 OFFSET sqlc.arg(offset_count)::int;
+
+-- name: DeleteFormInstanceFieldValues :exec
+DELETE FROM form_instance_field_values
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND form_instance_id = sqlc.arg(form_instance_id);
+
+-- name: InsertFormInstanceFieldValue :exec
+INSERT INTO form_instance_field_values (
+    tenant_id, form_instance_id, template_id, template_version_id, field_id, value_type,
+    value_text, value_number, value_boolean, value_date, value_timestamp, value_json, created_at
+) VALUES (
+    sqlc.arg(tenant_id), sqlc.arg(form_instance_id), sqlc.arg(template_id), sqlc.arg(template_version_id),
+    sqlc.arg(field_id), sqlc.arg(value_type), NULLIF(sqlc.arg(value_text)::text, ''),
+    NULLIF(sqlc.arg(value_number)::text, '')::numeric, sqlc.narg(value_boolean),
+    NULLIF(sqlc.arg(value_date)::text, '')::date, NULLIF(sqlc.arg(value_timestamp)::text, '')::timestamptz,
+    CASE WHEN sqlc.arg(value_json)::text = '' THEN NULL ELSE sqlc.arg(value_json)::jsonb END,
+    sqlc.arg(created_at)
+)
+ON CONFLICT (tenant_id, form_instance_id, field_id) DO UPDATE SET
+    template_id = EXCLUDED.template_id,
+    template_version_id = EXCLUDED.template_version_id,
+    value_type = EXCLUDED.value_type,
+    value_text = EXCLUDED.value_text,
+    value_number = EXCLUDED.value_number,
+    value_boolean = EXCLUDED.value_boolean,
+    value_date = EXCLUDED.value_date,
+    value_timestamp = EXCLUDED.value_timestamp,
+    value_json = EXCLUDED.value_json,
+    created_at = EXCLUDED.created_at;
+
+-- name: ListFormInstanceFieldValues :many
+SELECT * FROM form_instance_field_values
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND form_instance_id = sqlc.arg(form_instance_id)
+ORDER BY field_id ASC;
 
 -- name: DeleteFormInstance :exec
 DELETE FROM form_instances

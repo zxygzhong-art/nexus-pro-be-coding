@@ -120,6 +120,7 @@ type UpdateOrgUnitInput struct {
 	Name              *string `json:"name,omitempty"`
 	ParentID          *string `json:"parent_id,omitempty"`
 	ManagerPositionID *string `json:"manager_position_id,omitempty"`
+	Closed            *bool   `json:"closed,omitempty"`
 }
 
 // Position 定義崗位的資料結構。
@@ -523,12 +524,25 @@ type EHRMSEmployeeSyncResponse struct {
 	Fetched             int                   `json:"fetched"`
 	Created             int                   `json:"created"`
 	Updated             int                   `json:"updated"`
+	Skipped             int                   `json:"skipped"`
 	Failed              int                   `json:"failed"`
 	DepartmentsUpserted int                   `json:"departments_upserted"`
 	PositionsUpserted   int                   `json:"positions_upserted"`
 	Mode                string                `json:"mode"`
 	Results             []BatchEmployeeResult `json:"results,omitempty"`
 	RowErrors           []RowError            `json:"row_errors,omitempty"`
+}
+
+// EHRMSOrgUnitSyncResponse 定義 eHRMS 組織單位 sync 回應。
+type EHRMSOrgUnitSyncResponse struct {
+	Fetched  int `json:"fetched"`
+	Upserted int `json:"upserted"`
+}
+
+// EHRMSPositionSyncResponse 定義 eHRMS 崗位 sync 回應。
+type EHRMSPositionSyncResponse struct {
+	Fetched  int `json:"fetched"`
+	Upserted int `json:"upserted"`
 }
 
 // BatchDeleteEmployeesInput 定義批次 delete 員工輸入的資料結構。
@@ -945,6 +959,26 @@ func EmployeeStatuses(includeDeleted bool) []string {
 		statuses = append(statuses, string(EmployeeStatusDeleted))
 	}
 	return statuses
+}
+
+// EmployeeStatusSortRank 回傳員工狀態排序權重；數值越小越優先。
+func EmployeeStatusSortRank(raw string) int {
+	switch NormalizeEmployeeStatus(raw) {
+	case string(EmployeeStatusActive):
+		return 0
+	case string(EmployeeStatusProbation):
+		return 1
+	case string(EmployeeStatusLeaveSuspended):
+		return 2
+	case string(EmployeeStatusOnboarding):
+		return 3
+	case string(EmployeeStatusResigned):
+		return 4
+	case string(EmployeeStatusDeleted):
+		return 5
+	default:
+		return 6
+	}
 }
 
 // ParseEmployeeCategory 解析員工分類。

@@ -26,6 +26,37 @@ func TestParseWorkflowStagesFromTemplateUsesExplicitAssignees(t *testing.T) {
 	}
 }
 
+// TestParseWorkflowStagesFromTemplateUsesIamGroups verifies group safety flags survive template parsing.
+func TestParseWorkflowStagesFromTemplateUsesIamGroups(t *testing.T) {
+	template := domain.FormTemplate{
+		ID:       "ft-group",
+		TenantID: "tenant-1",
+		Key:      "group-approval",
+		Schema: map[string]any{
+			"workspace_design": map[string]any{
+				"enabled": true,
+				"stages": []map[string]any{{
+					"id": "stage-group", "type": "approver", "label": "IAM group",
+					"config": map[string]any{
+						"user_group_ids":            []any{"ug-finance", "ug-security"},
+						"exclude_applicant":         true,
+						"require_distinct_approver": true,
+					},
+				}},
+			},
+		},
+	}
+
+	stages := service.ParseWorkflowStagesFromTemplate(template)
+	if len(stages) != 1 {
+		t.Fatalf("expected one stage, got %d", len(stages))
+	}
+	config := stages[0].Config
+	if len(config.UserGroupIDs) != 2 || !config.ExcludeApplicant || !config.RequireDistinctApprover {
+		t.Fatalf("expected IAM group safety config, got %+v", config)
+	}
+}
+
 func TestWorkflowSubmitCreatesInReviewRun(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	svc, ctx, store := newWorkflowEngineFixture(t, now, "acct-admin")
@@ -123,7 +154,7 @@ func TestCustomFormDesignSubmitApproveRoundTrip(t *testing.T) {
 		CreatedAt:              now,
 	}
 	_ = store.UpsertAccount(t.Context(), admin)
-	adminCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: admin.ID, ApprovalConfirmed: true}
+	adminCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: admin.ID}
 
 	_, err := svc.Workspace().CreateWorkspaceFormDesign(adminCtx, domain.SaveWorkspaceFormDesignInput{
 		ID:       "custom-ot",

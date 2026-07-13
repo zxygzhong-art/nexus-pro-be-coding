@@ -52,6 +52,56 @@ func TestPermissionCatalogSeedIsIdempotent(t *testing.T) {
 	}
 }
 
+// TestPermissionCatalogGroupsRouteAPIsUnderCanonicalPages 驗證 route action 維持 API 型別並帶 canonical menu key。
+func TestPermissionCatalogGroupsRouteAPIsUnderCanonicalPages(t *testing.T) {
+	now := time.Date(2026, 7, 7, 9, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	if err := service.New(store, service.Options{Now: func() time.Time { return now }}).SyncPermissionCatalog(context.Background(), "tenant-1"); err != nil {
+		t.Fatal(err)
+	}
+	items, err := store.ListPermissionCatalogItems(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, expected := range []struct {
+		resource string
+		action   string
+		menuKey  string
+	}{
+		{resource: "hr.employee", action: "create", menuKey: "hr.employees"},
+		{resource: "attendance.clock", action: "read", menuKey: "attendance.clock"},
+		{resource: "agent.model", action: "update", menuKey: "agents.models"},
+		{resource: "audit.audit_log", action: "read", menuKey: "audit.logs"},
+	} {
+		found := false
+		for _, item := range items {
+			if item.Resource != expected.resource || item.Action != expected.action || item.PermissionType != domain.PermissionTypeAPI {
+				continue
+			}
+			found = true
+			if item.MenuKey != expected.menuKey {
+				t.Fatalf("expected %s:%s under %s, got %+v", expected.resource, expected.action, expected.menuKey, item)
+			}
+		}
+		if !found {
+			t.Fatalf("expected API catalog item %s:%s", expected.resource, expected.action)
+		}
+	}
+	for _, menuKey := range []string{"workflow.instances", "agents.runs", "attendance.corrections", "attendance.worksites"} {
+		found := false
+		for _, item := range items {
+			if item.PermissionType == domain.PermissionTypeMenu && item.MenuKey == menuKey {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Fatalf("expected legacy business menu %s to remain in catalog", menuKey)
+		}
+	}
+}
+
 // TestListPermissionsUsesCatalogWhenPresent 驗證權限列表優先讀 DB catalog。
 func TestListPermissionsUsesCatalogWhenPresent(t *testing.T) {
 	now := time.Date(2026, 7, 7, 9, 0, 0, 0, time.UTC)
@@ -107,8 +157,8 @@ func TestListMenusUsesDBAndFallsBackToDefaultCatalog(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(menus) != 1 || menus[0].Key != "audit" {
-			t.Fatalf("expected fallback default audit menu, got %+v", menus)
+		if !permissionCatalogHasMenuNode(menus, "audit.logs") || !permissionCatalogHasMenuNode(menus, "audit") {
+			t.Fatalf("expected fallback canonical and legacy audit menus, got %+v", menus)
 		}
 	})
 
@@ -131,6 +181,22 @@ func TestListMenusUsesDBAndFallsBackToDefaultCatalog(t *testing.T) {
 			t.Fatalf("expected DB menu tree, got %+v", menus)
 		}
 	})
+}
+
+// TestLegacyBusinessMenusRemainVisible 驗證 business workflow 與 Agent 自助入口未被 canonical workspace menu 取代。
+func TestLegacyBusinessMenusRemainVisible(t *testing.T) {
+	now := time.Date(2026, 7, 7, 9, 0, 0, 0, time.UTC)
+	for _, menuKey := range []string{"workflow.instances", "agents.runs"} {
+		t.Run(menuKey, func(t *testing.T) {
+			menus, err := service.New(menuFixtureStore(now, menuKey)).Me().ListMenus(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !permissionCatalogHasMenuNode(menus, menuKey) {
+				t.Fatalf("expected legacy business menu %s in /me/menus, got %+v", menuKey, menus)
+			}
+		})
+	}
 }
 
 // TestCreatePermissionSetDoubleWritesPermissionSetItems 驗證權限集合建立會雙寫關聯表。
@@ -156,7 +222,7 @@ func TestCreatePermissionSetDoubleWritesPermissionSetItems(t *testing.T) {
 	})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
 
-	set, err := svc.IAM().CreatePermissionSet(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}, domain.CreatePermissionSetInput{
+	set, err := svc.IAM().CreatePermissionSet(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.CreatePermissionSetInput{
 		Name: "HR Reader",
 		Permissions: []domain.Permission{
 			{Resource: "hr.employee", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "hr.employees"},
@@ -186,12 +252,22 @@ func TestCreatePermissionSetDoubleWritesPermissionSetItems(t *testing.T) {
 func menuFixtureStore(now time.Time, menuKey string) *memory.Store {
 	store := memory.NewStore()
 	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	menuPermission := domain.Permission{Resource: "me", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: menuKey}
+	switch menuKey {
+	case "audit":
+		menuPermission.Resource = "audit.audit_log"
+	case "workflow.instances":
+		menuPermission.Resource = "workflow.form_instance"
+	case "agents.runs":
+		menuPermission.Resource = "agent.run"
+	}
 	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
 		ID:       "ps-menu",
 		TenantID: "tenant-1",
 		Name:     "Menu",
 		Permissions: []domain.Permission{
-			{Resource: "me", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: menuKey},
+			{Resource: "me", Action: domain.ActionRead, Scope: domain.ScopeAll},
+			menuPermission,
 		},
 		CreatedAt: now,
 	})
@@ -203,4 +279,14 @@ func menuFixtureStore(now time.Time, menuKey string) *memory.Store {
 		CreatedAt:              now,
 	})
 	return store
+}
+
+// permissionCatalogHasMenuNode 遞迴檢查 menu tree 是否含指定 key。
+func permissionCatalogHasMenuNode(nodes []domain.MenuNode, expected string) bool {
+	for _, node := range nodes {
+		if node.Key == expected || permissionCatalogHasMenuNode(node.Children, expected) {
+			return true
+		}
+	}
+	return false
 }

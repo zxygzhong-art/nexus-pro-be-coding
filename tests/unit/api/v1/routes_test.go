@@ -142,6 +142,8 @@ func TestDocumentedJSONSuccessResponsesUseDataEnvelope(t *testing.T) {
 		"POST /v1/hr/employees/import/preview 201":         "EmployeeImportSessionDataResponse",
 		"POST /v1/hr/employees/import/{id}/confirm 200":    "EmployeeImportSessionDataResponse",
 		"POST /v1/hr/employees/ehrms/sync 200":             "EHRMSEmployeeSyncDataResponse",
+		"POST /v1/hr/positions/ehrms/sync 200":             "EHRMSPositionSyncDataResponse",
+		"POST /v1/org/units/ehrms/sync 200":                "EHRMSOrgUnitSyncDataResponse",
 		"POST /v1/attendance/ehrms/sync 200":               "EHRMSAttendanceSyncDataResponse",
 		"POST /v1/hr/employees/export 200":                 "EmployeeExportDataResponse",
 		"POST /v1/hr/employees/batch-delete 200":           "BatchEmployeeDataResponse",

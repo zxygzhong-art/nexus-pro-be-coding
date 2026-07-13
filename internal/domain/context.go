@@ -16,6 +16,4 @@ type RequestContext struct {
 	RequestID            string
 	TraceID              string
 	SpanID               string
-	ApprovalConfirmed    bool
-	ApprovalInstanceID   string
 }

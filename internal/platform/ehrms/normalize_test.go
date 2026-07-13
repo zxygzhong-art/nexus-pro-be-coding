@@ -56,3 +56,27 @@ func TestNormalizeDepartmentAndPositionRecords(t *testing.T) {
 		t.Fatalf("unexpected position normalize: %+v", positions[0])
 	}
 }
+
+func TestNormalizeLeaveRecords(t *testing.T) {
+	t.Parallel()
+	balances := normalizeLeaveBalanceRecords([]domain.EHRMSLeaveBalanceRecord{{
+		"emp_id":      "IKM017",
+		"leave_type":  "annual",
+		"remaining":   "8",
+		"expire_date": "2026-12-31",
+	}})
+	if balances[0]["員工編號"] != "IKM017" || balances[0]["假別"] != "annual" || balances[0]["餘額"] != "8" || balances[0]["到期日"] != "2026-12-31" {
+		t.Fatalf("unexpected leave balance normalize: %+v", balances[0])
+	}
+	details := normalizeLeaveDetailRecords([]domain.EHRMSLeaveDetailRecord{{
+		"emp_id":     "IKM017",
+		"date":       "2026-06-11",
+		"leave_type": "annual",
+		"start":      "09:00",
+		"end":        "13:00",
+		"hours":      "4",
+	}})
+	if details[0]["員工編號"] != "IKM017" || details[0]["日期"] != "2026-06-11" || details[0]["開始時間"] != "09:00" || details[0]["時數"] != "4" {
+		t.Fatalf("unexpected leave detail normalize: %+v", details[0])
+	}
+}

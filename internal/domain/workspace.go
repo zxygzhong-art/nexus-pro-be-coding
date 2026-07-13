@@ -91,6 +91,7 @@ type WorkspaceOrganizationRow struct {
 	OrgUnitID     string `json:"org_unit_id,omitempty"`
 	ManagerSource string `json:"manager_source,omitempty"`
 	IsOverride    bool   `json:"is_override,omitempty"`
+	ManagerIssue  string `json:"manager_issue,omitempty"`
 }
 
 // WorkspaceTurnoverQuery 定義工作區人員異動查詢的資料結構。

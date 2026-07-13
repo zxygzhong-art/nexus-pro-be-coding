@@ -4,13 +4,29 @@ import "time"
 
 // FormTemplate 定義表單範本的資料結構。
 type FormTemplate struct {
+	ID             string         `json:"id"`
+	TenantID       string         `json:"tenant_id"`
+	Key            string         `json:"key"`
+	Name           string         `json:"name"`
+	Description    string         `json:"description,omitempty"`
+	Schema         map[string]any `json:"schema,omitempty"`
+	Status         string         `json:"status"`
+	CurrentVersion int            `json:"current_version"`
+	CreatedAt      time.Time      `json:"created_at"`
+	UpdatedAt      time.Time      `json:"updated_at"`
+	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
+}
+
+// FormTemplateVersion 保存不可變的表單資料契約快照。
+type FormTemplateVersion struct {
 	ID          string         `json:"id"`
 	TenantID    string         `json:"tenant_id"`
-	Key         string         `json:"key"`
-	Name        string         `json:"name"`
-	Description string         `json:"description,omitempty"`
+	TemplateID  string         `json:"template_id"`
+	Version     int            `json:"version"`
 	Schema      map[string]any `json:"schema,omitempty"`
+	Status      string         `json:"status"`
 	CreatedAt   time.Time      `json:"created_at"`
+	PublishedAt *time.Time     `json:"published_at,omitempty"`
 }
 
 // FormInstance 定義表單實例的資料結構。
@@ -18,6 +34,7 @@ type FormInstance struct {
 	ID                 string         `json:"id"`
 	TenantID           string         `json:"tenant_id"`
 	TemplateID         string         `json:"template_id"`
+	TemplateVersionID  string         `json:"template_version_id"`
 	ApplicantAccountID string         `json:"applicant_account_id"`
 	Status             string         `json:"status"`
 	Payload            map[string]any `json:"payload,omitempty"`
@@ -26,6 +43,23 @@ type FormInstance struct {
 	CurrentRunID       string         `json:"current_run_id,omitempty"`
 	Version            int64          `json:"version"`
 	UpdatedAt          time.Time      `json:"updated_at"`
+}
+
+// FormInstanceFieldValue 保存可統計欄位的類型化投影。
+type FormInstanceFieldValue struct {
+	TenantID          string    `json:"tenant_id"`
+	FormInstanceID    string    `json:"form_instance_id"`
+	TemplateID        string    `json:"template_id"`
+	TemplateVersionID string    `json:"template_version_id"`
+	FieldID           string    `json:"field_id"`
+	ValueType         string    `json:"value_type"`
+	ValueText         string    `json:"value_text,omitempty"`
+	ValueNumber       string    `json:"value_number,omitempty"`
+	ValueBoolean      *bool     `json:"value_boolean,omitempty"`
+	ValueDate         string    `json:"value_date,omitempty"`
+	ValueTimestamp    string    `json:"value_timestamp,omitempty"`
+	ValueJSON         []byte    `json:"value_json,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 // FormInstanceQuery 定義表單實例查詢的資料結構。
@@ -61,6 +95,27 @@ type CreateFormTemplateInput struct {
 type SubmitFormInput struct {
 	TemplateKey string         `json:"template_key"`
 	Payload     map[string]any `json:"payload,omitempty"`
+}
+
+// FormDataSourceField 描述可在表單設計器選用的資料欄位。
+type FormDataSourceField struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+	Type  string `json:"type"`
+}
+
+// FormDataSource 描述一個受租戶與權限約束的表單資料源。
+type FormDataSource struct {
+	ID      string                   `json:"id"`
+	Label   string                   `json:"label"`
+	Kind    string                   `json:"kind"`
+	Fields  []FormDataSourceField    `json:"fields"`
+	Records []map[string]interface{} `json:"records"`
+}
+
+// FormDataSourceCatalogResponse 回傳設計與執行階段共用的資料源目錄。
+type FormDataSourceCatalogResponse struct {
+	DataSources []FormDataSource `json:"data_sources"`
 }
 
 // ApproveFormInput 定義表單輸入的資料結構。
@@ -168,17 +223,20 @@ const (
 
 // WorkflowStageConfig 定義流程節點可執行設定。
 type WorkflowStageConfig struct {
-	Role             string   `json:"role,omitempty"`
-	RelativeLevel    int      `json:"relative_level,omitempty"`
-	Mode             string   `json:"mode,omitempty"`
-	Field            string   `json:"field,omitempty"`
-	Operator         string   `json:"operator,omitempty"`
-	Value            string   `json:"value,omitempty"`
-	RemindAfterHours int      `json:"remind_after_hours,omitempty"`
-	Levels           []int    `json:"levels,omitempty"`
-	TrueNextStageID  string   `json:"true_next_stage_id,omitempty"`
-	FalseNextStageID string   `json:"false_next_stage_id,omitempty"`
-	AccountIDs       []string `json:"account_ids,omitempty"`
+	Role                    string   `json:"role,omitempty"`
+	RelativeLevel           int      `json:"relative_level,omitempty"`
+	Mode                    string   `json:"mode,omitempty"`
+	Field                   string   `json:"field,omitempty"`
+	Operator                string   `json:"operator,omitempty"`
+	Value                   string   `json:"value,omitempty"`
+	RemindAfterHours        int      `json:"remind_after_hours,omitempty"`
+	Levels                  []int    `json:"levels,omitempty"`
+	TrueNextStageID         string   `json:"true_next_stage_id,omitempty"`
+	FalseNextStageID        string   `json:"false_next_stage_id,omitempty"`
+	AccountIDs              []string `json:"account_ids,omitempty"`
+	UserGroupIDs            []string `json:"user_group_ids,omitempty"`
+	ExcludeApplicant        bool     `json:"exclude_applicant,omitempty"`
+	RequireDistinctApprover bool     `json:"require_distinct_approver,omitempty"`
 }
 
 // WorkflowStageDefinition 定義從 template 解析出的流程節點。

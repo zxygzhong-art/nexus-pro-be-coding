@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"strings"
-	"time"
 
 	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/utils"
@@ -35,33 +35,31 @@ func (c AgentService) CreateModel(ctx RequestContext, input domain.CreateAgentMo
 	}
 	now := c.Now()
 	model, err := c.normalizeAgentModel(ctx, domain.AgentModel{
-		ID:              utils.NewID("amodel"),
-		TenantID:        ctx.TenantID,
-		Name:            input.Name,
-		Provider:        input.Provider,
-		ModelName:       input.ModelName,
-		LiteLLMModel:    input.LiteLLMModel,
-		IsDefault:       input.IsDefault,
-		Status:          domain.AgentModelStatus(input.Status),
-		FallbackModelID: input.FallbackModelID,
-		TimeoutSeconds:  input.TimeoutSeconds,
-		MonthlyQuota:    input.MonthlyQuota,
-		LastTestStatus:  "untested",
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		ID:             utils.NewID("amodel"),
+		TenantID:       ctx.TenantID,
+		Name:           input.Name,
+		Provider:       input.Provider,
+		ModelName:      input.ModelName,
+		LiteLLMModel:   input.LiteLLMModel,
+		APIBaseURL:     input.APIBaseURL,
+		APIKey:         input.APIKey,
+		RateLimitRPM:   input.RateLimitRPM,
+		Status:         domain.AgentModelStatus(input.Status),
+		TimeoutSeconds: input.TimeoutSeconds,
+		MonthlyQuota:   input.MonthlyQuota,
+		LastTestStatus: "untested",
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	})
 	if err != nil {
 		return domain.AgentModel{}, err
 	}
-	if model.IsDefault {
-		if err := c.store.ClearDefaultAgentModel(goContext(ctx), ctx.TenantID, model.ID); err != nil {
-			return domain.AgentModel{}, err
+	if err := c.withTransaction(ctx, func(tx AgentService) error {
+		if err := tx.store.UpsertAgentModel(goContext(ctx), model); err != nil {
+			return err
 		}
-	}
-	if err := c.store.UpsertAgentModel(goContext(ctx), model); err != nil {
-		return domain.AgentModel{}, err
-	}
-	if err := c.recordAgentAdminAudit(ctx, account, "model", model.ID, model.Name, "create", "model created"); err != nil {
+		return tx.recordAgentAdminAudit(ctx, account, "model", model.ID, model.Name, "create", "model created")
+	}); err != nil {
 		return domain.AgentModel{}, err
 	}
 	return model, nil
@@ -89,14 +87,17 @@ func (c AgentService) UpdateModel(ctx RequestContext, id string, input domain.Up
 	if input.LiteLLMModel != nil {
 		model.LiteLLMModel = *input.LiteLLMModel
 	}
-	if input.IsDefault != nil {
-		model.IsDefault = *input.IsDefault
+	if input.APIBaseURL != nil {
+		model.APIBaseURL = *input.APIBaseURL
+	}
+	if input.APIKey != nil {
+		model.APIKey = *input.APIKey
+	}
+	if input.RateLimitRPM != nil {
+		model.RateLimitRPM = *input.RateLimitRPM
 	}
 	if input.Status != nil {
 		model.Status = domain.AgentModelStatus(*input.Status)
-	}
-	if input.FallbackModelID != nil {
-		model.FallbackModelID = *input.FallbackModelID
 	}
 	if input.TimeoutSeconds != nil {
 		model.TimeoutSeconds = *input.TimeoutSeconds
@@ -109,15 +110,12 @@ func (c AgentService) UpdateModel(ctx RequestContext, id string, input domain.Up
 	if err != nil {
 		return domain.AgentModel{}, err
 	}
-	if model.IsDefault {
-		if err := c.store.ClearDefaultAgentModel(goContext(ctx), ctx.TenantID, model.ID); err != nil {
-			return domain.AgentModel{}, err
+	if err := c.withTransaction(ctx, func(tx AgentService) error {
+		if err := tx.store.UpsertAgentModel(goContext(ctx), model); err != nil {
+			return err
 		}
-	}
-	if err := c.store.UpsertAgentModel(goContext(ctx), model); err != nil {
-		return domain.AgentModel{}, err
-	}
-	if err := c.recordAgentAdminAudit(ctx, account, "model", model.ID, model.Name, "update", "model updated"); err != nil {
+		return tx.recordAgentAdminAudit(ctx, account, "model", model.ID, model.Name, "update", "model updated")
+	}); err != nil {
 		return domain.AgentModel{}, err
 	}
 	return model, nil
@@ -133,24 +131,29 @@ func (c AgentService) DeleteModel(ctx RequestContext, id string) (domain.AgentMo
 	if id == "" {
 		return domain.AgentModel{}, BadRequest("id is required")
 	}
-	count, err := c.store.CountAgentDefinitionsByModel(goContext(ctx), ctx.TenantID, id)
-	if err != nil {
-		return domain.AgentModel{}, err
-	}
-	if count > 0 {
-		return domain.AgentModel{}, Conflict("agent model is used by agent definitions")
-	}
-	model, ok, err := c.store.DeleteAgentModel(goContext(ctx), ctx.TenantID, id)
-	if err != nil {
-		return domain.AgentModel{}, err
-	}
-	if !ok {
-		return domain.AgentModel{}, NotFound("agent model", id)
-	}
-	if err := c.recordAgentAdminAudit(ctx, account, "model", model.ID, model.Name, "delete", "model deleted"); err != nil {
-		return domain.AgentModel{}, err
-	}
-	return model, nil
+	var deleted domain.AgentModel
+	err = c.withTransaction(ctx, func(tx AgentService) error {
+		count, err := tx.store.CountAgentDefinitionsByModel(goContext(ctx), ctx.TenantID, id)
+		if err != nil {
+			return err
+		}
+		if count > 0 {
+			return Conflict("agent model is used by agent definitions")
+		}
+		model, ok, err := tx.store.DeleteAgentModel(goContext(ctx), ctx.TenantID, id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("agent model", id)
+		}
+		if err := tx.recordAgentAdminAudit(ctx, account, "model", model.ID, model.Name, "delete", "model deleted"); err != nil {
+			return err
+		}
+		deleted = model
+		return nil
+	})
+	return deleted, err
 }
 
 // SyncModel 將本地模型別名同步到 LiteLLM，並寫回最近一次同步狀態。
@@ -212,17 +215,22 @@ func (c AgentService) TestModel(ctx RequestContext, id string) (domain.AgentMode
 }
 
 func (c AgentService) updateAgentModelTestResult(ctx RequestContext, account Account, model domain.AgentModel, status, message, action string) (domain.AgentModel, error) {
-	updated, ok, err := c.store.UpdateAgentModelTestResult(goContext(ctx), ctx.TenantID, model.ID, status, message, c.Now())
-	if err != nil {
-		return domain.AgentModel{}, err
-	}
-	if !ok {
-		return domain.AgentModel{}, NotFound("agent model", model.ID)
-	}
-	if err := c.recordAgentAdminAudit(ctx, account, "model", updated.ID, updated.Name, action, message); err != nil {
-		return domain.AgentModel{}, err
-	}
-	return updated, nil
+	var updated domain.AgentModel
+	err := c.withTransaction(ctx, func(tx AgentService) error {
+		next, ok, err := tx.store.UpdateAgentModelTestResult(goContext(ctx), ctx.TenantID, model.ID, status, message, c.Now())
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("agent model", model.ID)
+		}
+		if err := tx.recordAgentAdminAudit(ctx, account, "model", next.ID, next.Name, action, message); err != nil {
+			return err
+		}
+		updated = next
+		return nil
+	})
+	return updated, err
 }
 
 // ListDefinitions 列出工作區 Agent。
@@ -230,7 +238,17 @@ func (c AgentService) ListDefinitions(ctx RequestContext) ([]domain.AgentDefinit
 	if _, _, err := c.requireAgentAuthz(ctx, ResourceDefinition, ActionRead, ""); err != nil {
 		return nil, err
 	}
-	return c.store.ListAgentDefinitions(goContext(ctx), ctx.TenantID)
+	items, err := c.store.ListAgentDefinitions(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	for index := range items {
+		items[index], err = c.definitionWithVersions(ctx, items[index])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return items, nil
 }
 
 // GetDefinition 取得工作區 Agent。
@@ -238,7 +256,21 @@ func (c AgentService) GetDefinition(ctx RequestContext, id string) (domain.Agent
 	if _, _, err := c.requireAgentAuthz(ctx, ResourceDefinition, ActionRead, id); err != nil {
 		return domain.AgentDefinition{}, err
 	}
-	return c.currentAgentDefinition(ctx, id)
+	agent, err := c.currentAgentDefinition(ctx, id)
+	if err != nil {
+		return domain.AgentDefinition{}, err
+	}
+	return c.definitionWithVersions(ctx, agent)
+}
+
+// definitionWithVersions 補齊獨立儲存的版本快照，讓真實 Postgres 回應與管理 UI 契約一致。
+func (c AgentService) definitionWithVersions(ctx RequestContext, agent domain.AgentDefinition) (domain.AgentDefinition, error) {
+	versions, err := c.store.ListAgentDefinitionVersions(goContext(ctx), ctx.TenantID, agent.ID)
+	if err != nil {
+		return domain.AgentDefinition{}, err
+	}
+	agent.Versions = versions
+	return agent, nil
 }
 
 // CreateDefinition 建立工作區 Agent。
@@ -246,30 +278,6 @@ func (c AgentService) CreateDefinition(ctx RequestContext, input domain.CreateAg
 	account, _, err := c.requireAgentAuthz(ctx, ResourceDefinition, ActionCreate, "")
 	if err != nil {
 		return domain.AgentDefinition{}, err
-	}
-	if strings.TrimSpace(input.TemplateID) != "" {
-		template, ok := findAgentTemplate(input.TemplateID)
-		if !ok {
-			return domain.AgentDefinition{}, BadRequest("template_id is invalid")
-		}
-		if strings.TrimSpace(input.Name) == "" {
-			input.Name = template.Name
-		}
-		if strings.TrimSpace(input.Description) == "" {
-			input.Description = template.Description
-		}
-		if strings.TrimSpace(input.Emoji) == "" {
-			input.Emoji = template.Emoji
-		}
-		if strings.TrimSpace(input.Category) == "" {
-			input.Category = string(template.Category)
-		}
-		if strings.TrimSpace(input.SystemPrompt) == "" {
-			input.SystemPrompt = template.SystemPrompt
-		}
-		if len(input.Tools) == 0 {
-			input.Tools = template.Tools
-		}
 	}
 	now := c.Now()
 	agent, err := c.normalizeAgentDefinition(ctx, domain.AgentDefinition{
@@ -280,10 +288,9 @@ func (c AgentService) CreateDefinition(ctx RequestContext, input domain.CreateAg
 		Emoji:              input.Emoji,
 		Category:           domain.AgentCategory(input.Category),
 		ModelID:            input.ModelID,
-		FallbackModelID:    input.FallbackModelID,
 		SystemPrompt:       input.SystemPrompt,
 		Tools:              input.Tools,
-		Status:             domain.AgentDefinitionStatus(input.Status),
+		Status:             domain.AgentDefinitionStatusDraft,
 		Visibility:         domain.AgentVisibility(input.Visibility),
 		VisibilityTargets:  input.VisibilityTargets,
 		TimeoutSeconds:     input.TimeoutSeconds,
@@ -296,19 +303,21 @@ func (c AgentService) CreateDefinition(ctx RequestContext, input domain.CreateAg
 	if err != nil {
 		return domain.AgentDefinition{}, err
 	}
-	if err := c.store.UpsertAgentDefinition(goContext(ctx), agent); err != nil {
-		return domain.AgentDefinition{}, err
-	}
-	if err := c.snapshotAgentDefinition(ctx, agent, account.ID, "initial version"); err != nil {
-		return domain.AgentDefinition{}, err
-	}
-	if err := c.recordAgentAdminAudit(ctx, account, "agent", agent.ID, agent.Name, "create", "agent created"); err != nil {
+	if err := c.withTransaction(ctx, func(tx AgentService) error {
+		if err := tx.store.UpsertAgentDefinition(goContext(ctx), agent); err != nil {
+			return err
+		}
+		if err := tx.snapshotAgentDefinition(ctx, agent, account.ID, "initial version"); err != nil {
+			return err
+		}
+		return tx.recordAgentAdminAudit(ctx, account, "agent", agent.ID, agent.Name, "create", "agent created")
+	}); err != nil {
 		return domain.AgentDefinition{}, err
 	}
 	return agent, nil
 }
 
-// UpdateDefinition 更新工作區 Agent；prompt/tools/model/status 變動會建立新版本。
+// UpdateDefinition 更新工作區 Agent；prompt/tools/model 變動會建立新版本，發布狀態僅能透過專用接口流轉。
 func (c AgentService) UpdateDefinition(ctx RequestContext, id string, input domain.UpdateAgentDefinitionInput) (domain.AgentDefinition, error) {
 	account, _, err := c.requireAgentAuthz(ctx, ResourceDefinition, ActionUpdate, id)
 	if err != nil {
@@ -318,7 +327,7 @@ func (c AgentService) UpdateDefinition(ctx RequestContext, id string, input doma
 	if err != nil {
 		return domain.AgentDefinition{}, err
 	}
-	beforePrompt, beforeModel, beforeStatus := agent.SystemPrompt, agent.ModelID, agent.Status
+	beforePrompt, beforeModel := agent.SystemPrompt, agent.ModelID
 	beforeTools := strings.Join(agent.Tools, "\x00")
 	if input.Name != nil {
 		agent.Name = *input.Name
@@ -335,17 +344,11 @@ func (c AgentService) UpdateDefinition(ctx RequestContext, id string, input doma
 	if input.ModelID != nil {
 		agent.ModelID = *input.ModelID
 	}
-	if input.FallbackModelID != nil {
-		agent.FallbackModelID = *input.FallbackModelID
-	}
 	if input.SystemPrompt != nil {
 		agent.SystemPrompt = *input.SystemPrompt
 	}
 	if input.Tools != nil {
 		agent.Tools = input.Tools
-	}
-	if input.Status != nil {
-		agent.Status = domain.AgentDefinitionStatus(*input.Status)
 	}
 	if input.Visibility != nil {
 		agent.Visibility = domain.AgentVisibility(*input.Visibility)
@@ -358,7 +361,7 @@ func (c AgentService) UpdateDefinition(ctx RequestContext, id string, input doma
 	}
 	agent.UpdatedByAccountID = account.ID
 	agent.UpdatedAt = c.Now()
-	versionChanged := beforePrompt != agent.SystemPrompt || beforeModel != agent.ModelID || beforeTools != strings.Join(agent.Tools, "\x00") || beforeStatus != agent.Status
+	versionChanged := beforePrompt != agent.SystemPrompt || beforeModel != agent.ModelID || beforeTools != strings.Join(agent.Tools, "\x00")
 	if versionChanged {
 		agent.Version++
 	}
@@ -366,19 +369,58 @@ func (c AgentService) UpdateDefinition(ctx RequestContext, id string, input doma
 	if err != nil {
 		return domain.AgentDefinition{}, err
 	}
-	if err := c.store.UpsertAgentDefinition(goContext(ctx), agent); err != nil {
+	note := strings.TrimSpace(input.VersionNote)
+	if note == "" {
+		note = "updated"
+	}
+	if err := c.withTransaction(ctx, func(tx AgentService) error {
+		if err := tx.store.UpsertAgentDefinition(goContext(ctx), agent); err != nil {
+			return err
+		}
+		if versionChanged {
+			if err := tx.snapshotAgentDefinition(ctx, agent, account.ID, note); err != nil {
+				return err
+			}
+		}
+		return tx.recordAgentAdminAudit(ctx, account, "agent", agent.ID, agent.Name, "update", "agent updated")
+	}); err != nil {
 		return domain.AgentDefinition{}, err
 	}
-	if versionChanged {
-		note := strings.TrimSpace(input.VersionNote)
-		if note == "" {
-			note = "updated"
-		}
-		if err := c.snapshotAgentDefinition(ctx, agent, account.ID, note); err != nil {
-			return domain.AgentDefinition{}, err
-		}
+	return agent, nil
+}
+
+// PublishDefinition 將工作區 Agent 發布到可試用與助理列表。
+func (c AgentService) PublishDefinition(ctx RequestContext, id string) (domain.AgentDefinition, error) {
+	return c.transitionDefinitionPublishStatus(ctx, id, domain.AgentDefinitionStatusPublished, "publish", "agent published")
+}
+
+// UnpublishDefinition 停止發布工作區 Agent，並保留 draft 狀態供後續編輯。
+func (c AgentService) UnpublishDefinition(ctx RequestContext, id string) (domain.AgentDefinition, error) {
+	return c.transitionDefinitionPublishStatus(ctx, id, domain.AgentDefinitionStatusDraft, "unpublish", "agent unpublished")
+}
+
+func (c AgentService) transitionDefinitionPublishStatus(ctx RequestContext, id string, status domain.AgentDefinitionStatus, action, detail string) (domain.AgentDefinition, error) {
+	account, _, err := c.requireAgentAuthz(ctx, ResourceDefinition, ActionUpdate, id)
+	if err != nil {
+		return domain.AgentDefinition{}, err
 	}
-	if err := c.recordAgentAdminAudit(ctx, account, "agent", agent.ID, agent.Name, "update", "agent updated"); err != nil {
+	agent, err := c.currentAgentDefinition(ctx, id)
+	if err != nil {
+		return domain.AgentDefinition{}, err
+	}
+	agent.Status = status
+	agent.UpdatedByAccountID = account.ID
+	agent.UpdatedAt = c.Now()
+	agent, err = c.normalizeAgentDefinition(ctx, agent)
+	if err != nil {
+		return domain.AgentDefinition{}, err
+	}
+	if err := c.withTransaction(ctx, func(tx AgentService) error {
+		if err := tx.store.UpsertAgentDefinition(goContext(ctx), agent); err != nil {
+			return err
+		}
+		return tx.recordAgentAdminAudit(ctx, account, "agent", agent.ID, agent.Name, action, detail)
+	}); err != nil {
 		return domain.AgentDefinition{}, err
 	}
 	return agent, nil
@@ -390,17 +432,30 @@ func (c AgentService) DeleteDefinition(ctx RequestContext, id string) (domain.Ag
 	if err != nil {
 		return domain.AgentDefinition{}, err
 	}
-	agent, ok, err := c.store.DeleteAgentDefinition(goContext(ctx), ctx.TenantID, strings.TrimSpace(id))
-	if err != nil {
-		return domain.AgentDefinition{}, err
-	}
-	if !ok {
-		return domain.AgentDefinition{}, NotFound("agent definition", id)
-	}
-	if err := c.recordAgentAdminAudit(ctx, account, "agent", agent.ID, agent.Name, "delete", "agent deleted"); err != nil {
-		return domain.AgentDefinition{}, err
-	}
-	return agent, nil
+	id = strings.TrimSpace(id)
+	var deleted domain.AgentDefinition
+	err = c.withTransaction(ctx, func(tx AgentService) error {
+		agent, err := tx.currentAgentDefinition(ctx, id)
+		if err != nil {
+			return err
+		}
+		if agent.Status == domain.AgentDefinitionStatusPublished {
+			return Conflict("published agent definition must be unpublished before deletion")
+		}
+		agent, ok, err := tx.store.DeleteAgentDefinition(goContext(ctx), ctx.TenantID, id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("agent definition", id)
+		}
+		if err := tx.recordAgentAdminAudit(ctx, account, "agent", agent.ID, agent.Name, "delete", "agent deleted"); err != nil {
+			return err
+		}
+		deleted = agent
+		return nil
+	})
+	return deleted, err
 }
 
 // Trial 試用 Agent；若已注入 AgentChatRuntime 則走真實 runtime，否則回退 mock。
@@ -425,21 +480,27 @@ func (c AgentService) Trial(ctx RequestContext, id string, input domain.AgentTri
 	if message == "" {
 		return domain.AgentTrialResult{}, BadRequest("message is required")
 	}
-	reply, toolsUsed, err := c.trialReply(ctx, agent, model, message)
-	if err != nil {
-		return domain.AgentTrialResult{}, err
-	}
+	reply, toolsUsed, trialErr := c.trialReply(ctx, agent, model, message)
 	latencyMs := int(c.Now().Sub(start).Milliseconds())
 	if latencyMs <= 0 {
 		latencyMs = 1
 	}
-	if _, ok, err := c.store.UpdateAgentDefinitionUsage(goContext(ctx), ctx.TenantID, agent.ID, true, latencyMs, message, c.Now()); err != nil {
-		return domain.AgentTrialResult{}, err
-	} else if !ok {
-		return domain.AgentTrialResult{}, NotFound("agent definition", id)
+	auditDetail := "agent trial executed"
+	if trialErr != nil {
+		auditDetail = "agent trial failed"
 	}
-	if err := c.recordAgentAdminAudit(ctx, account, "agent", agent.ID, agent.Name, "trial", "agent trial executed"); err != nil {
+	if err := c.withTransaction(ctx, func(tx AgentService) error {
+		if _, ok, err := tx.store.UpdateAgentDefinitionUsage(goContext(ctx), ctx.TenantID, agent.ID, trialErr == nil, latencyMs, message, c.Now()); err != nil {
+			return err
+		} else if !ok {
+			return NotFound("agent definition", id)
+		}
+		return tx.recordAgentAdminAudit(ctx, account, "agent", agent.ID, agent.Name, "trial", auditDetail)
+	}); err != nil {
 		return domain.AgentTrialResult{}, err
+	}
+	if trialErr != nil {
+		return domain.AgentTrialResult{}, trialErr
 	}
 	return domain.AgentTrialResult{Reply: reply, LatencyMs: latencyMs, ToolsUsed: toolsUsed, ModelName: model.ModelName}, nil
 }
@@ -465,12 +526,19 @@ func (c AgentService) trialReply(ctx RequestContext, agent domain.AgentDefinitio
 		}
 		return nil
 	}
-	baseCtx := WithAgentRequestContext(goContext(ctx), ctx)
+	baseCtx, cancel := context.WithTimeout(goContext(ctx), effectiveAgentRuntimeTimeout(agent.TimeoutSeconds, model.TimeoutSeconds))
+	defer cancel()
+	baseCtx = WithAgentRequestContext(baseCtx, ctx)
+	modelName := strings.TrimSpace(model.LiteLLMModel)
+	if modelName == "" {
+		modelName = strings.TrimSpace(model.ModelName)
+	}
 	req := AgentChatRuntimeRequest{
 		RequestContext: ctx,
 		RunID:          "trial-" + agent.ID,
 		SessionID:      "trial-" + agent.ID,
-		Message:        message,
+		ModelName:      modelName,
+		Message:        buildAgentRuntimeMessage(agent.SystemPrompt, nil, nil, message),
 		Mode:           "trial",
 		Tools:          c.filteredAgentReadOnlyTools(ctx, agent.Tools, true, emit),
 	}
@@ -511,50 +579,19 @@ func (c AgentService) RollbackDefinition(ctx RequestContext, id string, input do
 	if err != nil {
 		return domain.AgentDefinition{}, err
 	}
-	if err := c.store.UpsertAgentDefinition(goContext(ctx), agent); err != nil {
-		return domain.AgentDefinition{}, err
-	}
-	if err := c.snapshotAgentDefinition(ctx, agent, account.ID, fmt.Sprintf("rollback to v%d", input.Version)); err != nil {
-		return domain.AgentDefinition{}, err
-	}
-	if err := c.recordAgentAdminAudit(ctx, account, "agent", agent.ID, agent.Name, "rollback", fmt.Sprintf("rollback to v%d", input.Version)); err != nil {
+	detail := fmt.Sprintf("rollback to v%d", input.Version)
+	if err := c.withTransaction(ctx, func(tx AgentService) error {
+		if err := tx.store.UpsertAgentDefinition(goContext(ctx), agent); err != nil {
+			return err
+		}
+		if err := tx.snapshotAgentDefinition(ctx, agent, account.ID, detail); err != nil {
+			return err
+		}
+		return tx.recordAgentAdminAudit(ctx, account, "agent", agent.ID, agent.Name, "rollback", detail)
+	}); err != nil {
 		return domain.AgentDefinition{}, err
 	}
 	return agent, nil
-}
-
-// ListDefinitionVersions 列出 Agent 版本。
-func (c AgentService) ListDefinitionVersions(ctx RequestContext, id string) ([]domain.AgentDefinitionVersion, error) {
-	if _, _, err := c.requireAgentAuthz(ctx, ResourceDefinition, ActionRead, id); err != nil {
-		return nil, err
-	}
-	return c.store.ListAgentDefinitionVersions(goContext(ctx), ctx.TenantID, strings.TrimSpace(id))
-}
-
-// ListAgentAudits 列出 Agent 管理審計。
-func (c AgentService) ListAgentAudits(ctx RequestContext) ([]domain.AgentAudit, error) {
-	if _, _, err := c.requireAgentAuthz(ctx, ResourceDefinition, ActionRead, ""); err != nil {
-		return nil, err
-	}
-	return c.store.ListAgentAudits(goContext(ctx), ctx.TenantID)
-}
-
-// ListAudits 列出 Agent 管理審計。
-func (c AgentService) ListAudits(ctx RequestContext) ([]domain.AgentAudit, error) {
-	return c.ListAgentAudits(ctx)
-}
-
-// Templates 回傳靜態 Agent 模板。
-func (c AgentService) Templates(ctx RequestContext) ([]domain.AgentTemplate, error) {
-	if _, _, err := c.requireAgentAuthz(ctx, ResourceDefinition, ActionRead, ""); err != nil {
-		return nil, err
-	}
-	return agentTemplates(), nil
-}
-
-// ListTemplates 回傳靜態 Agent 模板。
-func (c AgentService) ListTemplates(ctx RequestContext) ([]domain.AgentTemplate, error) {
-	return c.Templates(ctx)
 }
 
 // Tools 回傳靜態可用工具目錄。
@@ -564,29 +601,6 @@ func (c AgentService) Tools(ctx RequestContext) ([]domain.AgentToolMeta, error) 
 	}
 	return agentToolCatalog(), nil
 }
-
-// ListTools 回傳靜態可用工具目錄。
-func (c AgentService) ListTools(ctx RequestContext) ([]domain.AgentToolMeta, error) {
-	return c.Tools(ctx)
-}
-
-func agentTemplates() []domain.AgentTemplate {
-	return []domain.AgentTemplate{
-		{ID: "hr-helper", Name: "HR Helper", Description: "Answer HR policy and workflow questions.", Emoji: "HR", Category: domain.AgentCategoryWorkflow, SystemPrompt: "You are a helpful HR assistant.", Tools: []string{"get_my_profile", "my_leave_balances"}},
-		{ID: "analytics", Name: "Analytics Partner", Description: "Summarize workspace insights.", Emoji: "AI", Category: domain.AgentCategoryAnalytics, SystemPrompt: "You summarize operational data clearly.", Tools: []string{"workspace_insights"}},
-	}
-}
-
-func findAgentTemplate(id string) (domain.AgentTemplate, bool) {
-	id = strings.TrimSpace(id)
-	for _, template := range agentTemplates() {
-		if template.ID == id {
-			return template, true
-		}
-	}
-	return domain.AgentTemplate{}, false
-}
-
 func agentToolCatalog() []domain.AgentToolMeta {
 	return []domain.AgentToolMeta{
 		{Value: "knowledge.search", Label: "Knowledge Search", Description: "Search tenant knowledge content.", Readonly: true, RequiredPermission: "agent.tool.call:knowledge.search"},
@@ -598,80 +612,6 @@ func agentToolCatalog() []domain.AgentToolMeta {
 		{Value: "my_pending_reviews", Label: "My Pending Reviews", Description: "Read pending workflow reviews.", Readonly: true, RequiredPermission: "agent.tool.call:my_pending_reviews"},
 		{Value: "workspace_insights", Label: "Workspace Insights", Description: "Read workspace insight reports.", Readonly: true, RequiredPermission: "agent.tool.call:workspace_insights"},
 	}
-}
-
-// ExportBundle 匯出 Agent 管理設定。
-func (c AgentService) ExportBundle(ctx RequestContext) (domain.AgentBundle, error) {
-	if _, _, err := c.requireAgentAuthz(ctx, ResourceDefinition, ActionRead, ""); err != nil {
-		return domain.AgentBundle{}, err
-	}
-	agents, err := c.store.ListAgentDefinitions(goContext(ctx), ctx.TenantID)
-	if err != nil {
-		return domain.AgentBundle{}, err
-	}
-	models, err := c.store.ListAgentModels(goContext(ctx), ctx.TenantID)
-	if err != nil {
-		return domain.AgentBundle{}, err
-	}
-	return domain.AgentBundle{ExportedAt: c.Now(), Agents: agents, Models: models}, nil
-}
-
-// ImportBundle 匯入 Agent 管理設定。
-func (c AgentService) ImportBundle(ctx RequestContext, bundle domain.AgentBundle) (domain.ImportAgentBundleResult, error) {
-	account, _, err := c.requireAgentAuthz(ctx, ResourceDefinition, ActionCreate, "")
-	if err != nil {
-		return domain.ImportAgentBundleResult{}, err
-	}
-	result := domain.ImportAgentBundleResult{}
-	importedModelIDs, err := agentModelIDsFromBundle(bundle.Models)
-	if err != nil {
-		return result, err
-	}
-	if err := c.withTenantTransaction(ctx, func(tx *Service) error {
-		agentSvc := tx.Agent()
-		for _, model := range bundle.Models {
-			model.ID = strings.TrimSpace(model.ID)
-			model.TenantID = ctx.TenantID
-			model.CreatedAt = nonZeroTime(model.CreatedAt, tx.Now())
-			model.UpdatedAt = tx.Now()
-			normalized, err := agentSvc.normalizeAgentModelForImport(ctx, model, importedModelIDs)
-			if err != nil {
-				return err
-			}
-			if err := agentSvc.store.UpsertAgentModel(goContext(ctx), normalized); err != nil {
-				return err
-			}
-			result.Models++
-		}
-		for _, agent := range bundle.Agents {
-			agent.ID = strings.TrimSpace(agent.ID)
-			if agent.ID == "" {
-				return BadRequest("agent id is required")
-			}
-			agent.TenantID = ctx.TenantID
-			agent.CreatedAt = nonZeroTime(agent.CreatedAt, tx.Now())
-			agent.UpdatedAt = tx.Now()
-			if strings.TrimSpace(agent.CreatedByAccountID) == "" {
-				agent.CreatedByAccountID = account.ID
-			}
-			agent.UpdatedByAccountID = account.ID
-			normalized, err := agentSvc.normalizeAgentDefinitionForImport(ctx, agent, importedModelIDs)
-			if err != nil {
-				return err
-			}
-			if err := agentSvc.store.UpsertAgentDefinition(goContext(ctx), normalized); err != nil {
-				return err
-			}
-			if err := agentSvc.ensureImportedAgentVersion(ctx, normalized, account.ID); err != nil {
-				return err
-			}
-			result.Agents++
-		}
-		return agentSvc.recordAgentAdminAudit(ctx, account, "agent", "bundle", "bundle", "import", "bundle imported")
-	}); err != nil {
-		return result, err
-	}
-	return result, nil
 }
 
 func (c AgentService) currentAgentModel(ctx RequestContext, id string) (domain.AgentModel, error) {
@@ -705,10 +645,6 @@ func (c AgentService) currentAgentDefinition(ctx RequestContext, id string) (dom
 }
 
 func (c AgentService) normalizeAgentModel(ctx RequestContext, model domain.AgentModel) (domain.AgentModel, error) {
-	return c.normalizeAgentModelForImport(ctx, model, nil)
-}
-
-func (c AgentService) normalizeAgentModelForImport(ctx RequestContext, model domain.AgentModel, importedModelIDs map[string]struct{}) (domain.AgentModel, error) {
 	model.Name = strings.TrimSpace(model.Name)
 	if model.Name == "" {
 		return domain.AgentModel{}, BadRequest("name is required")
@@ -725,6 +661,24 @@ func (c AgentService) normalizeAgentModelForImport(ctx RequestContext, model dom
 	if model.LiteLLMModel == "" {
 		model.LiteLLMModel = model.ModelName
 	}
+	model.APIBaseURL = strings.TrimRight(strings.TrimSpace(model.APIBaseURL), "/")
+	model.APIKey = strings.TrimSpace(model.APIKey)
+	if model.APIKey == "" {
+		return domain.AgentModel{}, BadRequest("api_key is required")
+	}
+	if agentModelProviderRequiresBaseURL(model.Provider) {
+		if model.APIBaseURL == "" {
+			return domain.AgentModel{}, BadRequest("api_base_url is required for custom provider")
+		}
+		if parsed, err := url.ParseRequestURI(model.APIBaseURL); err != nil || parsed.Scheme == "" || parsed.Host == "" {
+			return domain.AgentModel{}, BadRequest("api_base_url must be a valid absolute URL")
+		}
+	}
+	if model.RateLimitRPM < 0 {
+		return domain.AgentModel{}, BadRequest("rate_limit_rpm must be greater than or equal to 0")
+	}
+	model.APIKeySet = model.APIKey != ""
+	model.APIKeyPreview = maskAgentModelAPIKey(model.APIKey)
 	if model.Status == "" {
 		model.Status = domain.AgentModelStatusActive
 	}
@@ -740,30 +694,36 @@ func (c AgentService) normalizeAgentModelForImport(ctx RequestContext, model dom
 	if model.LastTestStatus == "" {
 		model.LastTestStatus = "untested"
 	}
-	if model.FallbackModelID != "" {
-		if err := c.requireAgentModelReference(ctx, model.FallbackModelID, importedModelIDs); err != nil {
-			return domain.AgentModel{}, err
-		}
-	}
 	return model, nil
 }
 
-func (c AgentService) normalizeAgentDefinition(ctx RequestContext, agent domain.AgentDefinition) (domain.AgentDefinition, error) {
-	return c.normalizeAgentDefinitionForImport(ctx, agent, nil)
+func agentModelProviderRequiresBaseURL(provider string) bool {
+	switch strings.ToLower(strings.TrimSpace(provider)) {
+	case "custom", "openai-compatible", "openai_compatible", "compatible":
+		return true
+	default:
+		return false
+	}
 }
 
-func (c AgentService) normalizeAgentDefinitionForImport(ctx RequestContext, agent domain.AgentDefinition, importedModelIDs map[string]struct{}) (domain.AgentDefinition, error) {
+func maskAgentModelAPIKey(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 4 {
+		return "****"
+	}
+	return "****" + value[len(value)-4:]
+}
+
+func (c AgentService) normalizeAgentDefinition(ctx RequestContext, agent domain.AgentDefinition) (domain.AgentDefinition, error) {
 	agent.Name = strings.TrimSpace(agent.Name)
 	if agent.Name == "" {
 		return domain.AgentDefinition{}, BadRequest("name is required")
 	}
-	if err := c.requireAgentModelReference(ctx, agent.ModelID, importedModelIDs); err != nil {
+	if err := c.requireAgentModelReference(ctx, agent.ModelID); err != nil {
 		return domain.AgentDefinition{}, err
-	}
-	if agent.FallbackModelID != "" {
-		if err := c.requireAgentModelReference(ctx, agent.FallbackModelID, importedModelIDs); err != nil {
-			return domain.AgentDefinition{}, err
-		}
 	}
 	if strings.TrimSpace(string(agent.Category)) == "" {
 		agent.Category = domain.AgentCategoryWorkflow
@@ -780,9 +740,9 @@ func (c AgentService) normalizeAgentDefinitionForImport(ctx RequestContext, agen
 		agent.Status = domain.AgentDefinitionStatusDraft
 	}
 	switch agent.Status {
-	case domain.AgentDefinitionStatusDraft, domain.AgentDefinitionStatusPublished, domain.AgentDefinitionStatusArchived:
+	case domain.AgentDefinitionStatusDraft, domain.AgentDefinitionStatusPublished:
 	default:
-		return domain.AgentDefinition{}, BadRequest("status must be draft, published, or archived")
+		return domain.AgentDefinition{}, BadRequest("status must be draft or published")
 	}
 	if agent.Visibility == "" {
 		agent.Visibility = domain.AgentVisibilityAll
@@ -803,31 +763,51 @@ func (c AgentService) normalizeAgentDefinitionForImport(ctx RequestContext, agen
 		return domain.AgentDefinition{}, err
 	}
 	agent.VisibilityTargets = uniqueStrings(agent.VisibilityTargets)
+	if err := c.validateAgentVisibilityTargets(ctx, &agent); err != nil {
+		return domain.AgentDefinition{}, err
+	}
 	return agent, nil
 }
 
-func (c AgentService) requireAgentModelReference(ctx RequestContext, id string, importedModelIDs map[string]struct{}) error {
+// validateAgentVisibilityTargets 驗證可見範圍目標存在於目前租戶，並封閉空白 scoped 設定。
+func (c AgentService) validateAgentVisibilityTargets(ctx RequestContext, agent *domain.AgentDefinition) error {
+	if agent.Visibility == domain.AgentVisibilityAll {
+		agent.VisibilityTargets = []string{}
+		return nil
+	}
+	if len(agent.VisibilityTargets) == 0 {
+		return BadRequest("visibility_targets is required for scoped visibility")
+	}
+	for _, targetID := range agent.VisibilityTargets {
+		switch agent.Visibility {
+		case domain.AgentVisibilityDepartment:
+			_, ok, err := c.Service.store.GetOrgUnit(goContext(ctx), ctx.TenantID, targetID)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return BadRequest("visibility target org unit does not exist: " + targetID)
+			}
+		case domain.AgentVisibilityRole:
+			_, ok, err := c.Service.store.GetAssumableRole(goContext(ctx), ctx.TenantID, targetID)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return BadRequest("visibility target role does not exist: " + targetID)
+			}
+		}
+	}
+	return nil
+}
+
+func (c AgentService) requireAgentModelReference(ctx RequestContext, id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return BadRequest("model_id is required")
 	}
-	if _, ok := importedModelIDs[id]; ok {
-		return nil
-	}
 	_, err := c.currentAgentModel(ctx, id)
 	return err
-}
-
-func agentModelIDsFromBundle(models []domain.AgentModel) (map[string]struct{}, error) {
-	ids := make(map[string]struct{}, len(models))
-	for _, model := range models {
-		id := strings.TrimSpace(model.ID)
-		if id == "" {
-			return nil, BadRequest("model id is required")
-		}
-		ids[id] = struct{}{}
-	}
-	return ids, nil
 }
 
 func validateAgentTools(tools []string) error {
@@ -844,15 +824,6 @@ func validateAgentTools(tools []string) error {
 		}
 	}
 	return nil
-}
-
-func (c AgentService) ensureImportedAgentVersion(ctx RequestContext, agent domain.AgentDefinition, actorID string) error {
-	if _, ok, err := c.store.GetAgentDefinitionVersion(goContext(ctx), ctx.TenantID, agent.ID, agent.Version); err != nil {
-		return err
-	} else if ok {
-		return nil
-	}
-	return c.snapshotAgentDefinition(ctx, agent, actorID, "imported bundle")
 }
 
 func (c AgentService) snapshotAgentDefinition(ctx RequestContext, agent domain.AgentDefinition, actorID, note string) error {
@@ -890,11 +861,4 @@ func (c AgentService) recordAgentAdminAudit(ctx RequestContext, account Account,
 		payload["raw"] = string(raw)
 	}
 	return c.audit(ctx, "ai.agent."+entityType+"."+action, "agent_"+entityType, entityID, "high", payload)
-}
-
-func nonZeroTime(value, fallback time.Time) time.Time {
-	if value.IsZero() {
-		return fallback
-	}
-	return value
 }

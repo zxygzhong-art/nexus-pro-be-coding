@@ -1,13 +1,15 @@
 -- name: UpsertAgentModel :one
 INSERT INTO agent_models (
     id, tenant_id, name, provider, model_name, litellm_model,
-    is_default, status, fallback_model_id, timeout_seconds,
+    api_base_url, api_key, rate_limit_rpm,
+    status, timeout_seconds,
     monthly_quota, used_quota, last_tested_at, last_test_status,
     last_test_message, created_at, updated_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(name), sqlc.arg(provider),
-    sqlc.arg(model_name), sqlc.arg(litellm_model), sqlc.arg(is_default),
-    sqlc.arg(status), sqlc.arg(fallback_model_id), sqlc.arg(timeout_seconds),
+    sqlc.arg(model_name), sqlc.arg(litellm_model), sqlc.arg(api_base_url),
+    sqlc.arg(api_key), sqlc.arg(rate_limit_rpm), sqlc.arg(status),
+    sqlc.arg(timeout_seconds),
     sqlc.arg(monthly_quota), sqlc.arg(used_quota), sqlc.arg(last_tested_at),
     sqlc.arg(last_test_status), sqlc.arg(last_test_message),
     sqlc.arg(created_at), sqlc.arg(updated_at)
@@ -18,9 +20,10 @@ ON CONFLICT (id) DO UPDATE SET
     provider = EXCLUDED.provider,
     model_name = EXCLUDED.model_name,
     litellm_model = EXCLUDED.litellm_model,
-    is_default = EXCLUDED.is_default,
+    api_base_url = EXCLUDED.api_base_url,
+    api_key = EXCLUDED.api_key,
+    rate_limit_rpm = EXCLUDED.rate_limit_rpm,
     status = EXCLUDED.status,
-    fallback_model_id = EXCLUDED.fallback_model_id,
     timeout_seconds = EXCLUDED.timeout_seconds,
     monthly_quota = EXCLUDED.monthly_quota,
     used_quota = EXCLUDED.used_quota,
@@ -39,21 +42,13 @@ WHERE tenant_id = sqlc.arg(tenant_id)
 -- name: ListAgentModels :many
 SELECT * FROM agent_models
 WHERE tenant_id = sqlc.arg(tenant_id)
-ORDER BY is_default DESC, updated_at DESC, id ASC;
+ORDER BY updated_at DESC, id ASC;
 
 -- name: DeleteAgentModel :one
 DELETE FROM agent_models
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND id = sqlc.arg(id)
 RETURNING *;
-
--- name: ClearDefaultAgentModel :exec
-UPDATE agent_models
-SET is_default = false,
-    updated_at = now()
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id <> sqlc.arg(except_id)
-  AND is_default = true;
 
 -- name: UpdateAgentModelTestResult :one
 UPDATE agent_models
@@ -68,18 +63,18 @@ RETURNING *;
 -- name: CountAgentDefinitionsByModel :one
 SELECT count(*) FROM agent_definitions
 WHERE tenant_id = sqlc.arg(tenant_id)
-  AND (model_id = sqlc.arg(model_id) OR fallback_model_id = sqlc.arg(model_id));
+  AND model_id = sqlc.arg(model_id);
 
 -- name: UpsertAgentDefinition :one
 INSERT INTO agent_definitions (
-    id, tenant_id, name, description, emoji, category, model_id, fallback_model_id,
+    id, tenant_id, name, description, emoji, category, model_id,
     system_prompt, tools, status, visibility, visibility_targets, timeout_seconds,
     version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms,
     usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id,
     created_at, updated_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(name), sqlc.arg(description),
-    sqlc.arg(emoji), sqlc.arg(category), sqlc.arg(model_id), sqlc.arg(fallback_model_id),
+    sqlc.arg(emoji), sqlc.arg(category), sqlc.arg(model_id),
     sqlc.arg(system_prompt), sqlc.arg(tools)::jsonb, sqlc.arg(status), sqlc.arg(visibility),
     sqlc.arg(visibility_targets)::jsonb, sqlc.arg(timeout_seconds), sqlc.arg(version),
     sqlc.arg(usage_total_runs), sqlc.arg(usage_success_runs), sqlc.arg(usage_failed_runs),
@@ -94,7 +89,6 @@ ON CONFLICT (id) DO UPDATE SET
     emoji = EXCLUDED.emoji,
     category = EXCLUDED.category,
     model_id = EXCLUDED.model_id,
-    fallback_model_id = EXCLUDED.fallback_model_id,
     system_prompt = EXCLUDED.system_prompt,
     tools = EXCLUDED.tools,
     status = EXCLUDED.status,

@@ -88,8 +88,6 @@ const (
 	ErrorCodeButtonDenied ErrorCode = 20043
 	// ErrorCodeDataScopeDenied 說明此處的錯誤處理語義。
 	ErrorCodeDataScopeDenied ErrorCode = 20044
-	// ErrorCodeApprovalRequired 說明此處的錯誤處理語義。
-	ErrorCodeApprovalRequired ErrorCode = 20045
 	// ErrorCodeCrossTenantDenied 說明此處的錯誤處理語義。
 	ErrorCodeCrossTenantDenied ErrorCode = 20046
 	// ErrorCodePermissionPackageInvalid 說明此處的錯誤處理語義。
@@ -157,8 +155,6 @@ func reasonErrorCode(reason string) (ErrorCode, bool) {
 		return ErrorCodeFieldDenied, true
 	case "data_scope_denied":
 		return ErrorCodeDataScopeDenied, true
-	case "approval_required":
-		return ErrorCodeApprovalRequired, true
 	case "cross_tenant_denied":
 		return ErrorCodeCrossTenantDenied, true
 	default:

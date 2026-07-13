@@ -2,10 +2,22 @@ package service
 
 import (
 	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/utils"
 	"sort"
 	"strings"
 	"time"
 )
+
+// workspaceFormTemplateStatus 將設計器啟用狀態投影成模板生命週期。
+func workspaceFormTemplateStatus(enabled, deleted bool) string {
+	if deleted {
+		return "archived"
+	}
+	if enabled {
+		return "published"
+	}
+	return "draft"
+}
 
 func (c WorkspaceService) Workspace(ctx RequestContext) (PlatformWorkspaceResponse, error) {
 	auditLogs, err := c.workspaceAuditLogsForAggregate(ctx)
@@ -31,9 +43,6 @@ func (c WorkspaceService) Workspace(ctx RequestContext) (PlatformWorkspaceRespon
 func (c WorkspaceService) workspaceAuditLogsForAggregate(ctx RequestContext) ([]WorkspaceAuditLog, error) {
 	auditLogs, err := c.WorkspaceAuditLogs(ctx, WorkspaceAuditLogQuery{}, PageRequest{Page: 1, PageSize: 50, Sort: "created_at_desc"})
 	if err != nil {
-		if appErr, ok := domain.AsAppError(err); ok && appErr.ReasonCode == "approval_required" {
-			return []WorkspaceAuditLog{}, nil
-		}
 		return nil, err
 	}
 	return auditLogs.Items, nil
@@ -104,23 +113,28 @@ func (c WorkspaceService) CreateWorkspaceFormDesign(ctx RequestContext, input Sa
 		if input.Enabled != nil {
 			enabled = *input.Enabled
 		}
-		templateID := "ft-" + key
+		templateID := utils.NewID("ft")
 		createdAt := now
+		currentVersion := 1
 		if exists {
 			templateID = current.ID
 			createdAt = current.CreatedAt
+			currentVersion = max(current.CurrentVersion, 1) + 1
 			if createdAt.IsZero() {
 				createdAt = now
 			}
 		}
 		template := FormTemplate{
-			ID:          templateID,
-			TenantID:    ctx.TenantID,
-			Key:         key,
-			Name:        strings.TrimSpace(input.Name),
-			Description: strings.TrimSpace(input.Desc),
-			Schema:      workspaceFormDesignSchema(nil, input, enabled, false, now),
-			CreatedAt:   createdAt,
+			ID:             templateID,
+			TenantID:       ctx.TenantID,
+			Key:            key,
+			Name:           strings.TrimSpace(input.Name),
+			Description:    strings.TrimSpace(input.Desc),
+			Schema:         workspaceFormDesignSchema(nil, input, enabled, false, now),
+			Status:         workspaceFormTemplateStatus(enabled, false),
+			CurrentVersion: currentVersion,
+			CreatedAt:      createdAt,
+			UpdatedAt:      now,
 		}
 		if err := workspace.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
 			return err
@@ -197,14 +211,24 @@ func (c WorkspaceService) UpdateWorkspaceFormDesign(ctx RequestContext, id strin
 			if err := validateSystemFormFieldLocks(template.Key, next.FormKind, next.Fields); err != nil {
 				return err
 			}
+			if input.Fields != nil && template.Status == "published" {
+				if err := validatePublishedFormFieldIdentity(platformTemplateFields(template.Key, template.Schema), next.Fields); err != nil {
+					return err
+				}
+			}
 		}
 		enabled := true
 		if next.Enabled != nil {
 			enabled = *next.Enabled
 		}
+		now := workspace.Now()
 		template.Name = strings.TrimSpace(next.Name)
 		template.Description = strings.TrimSpace(next.Desc)
-		template.Schema = workspaceFormDesignSchema(template.Schema, next, enabled, false, workspace.Now())
+		template.Schema = workspaceFormDesignSchema(template.Schema, next, enabled, false, now)
+		template.Status = workspaceFormTemplateStatus(enabled, false)
+		template.CurrentVersion = max(template.CurrentVersion, 1) + 1
+		template.UpdatedAt = now
+		template.DeletedAt = nil
 		if err := workspace.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
 			return err
 		}
@@ -247,7 +271,12 @@ func (c WorkspaceService) DeleteWorkspaceFormDesign(ctx RequestContext, id strin
 		next := workspaceFormDesignInputFromTemplate(template)
 		disabled := false
 		next.Enabled = &disabled
-		template.Schema = workspaceFormDesignSchema(template.Schema, next, false, true, workspace.Now())
+		now := workspace.Now()
+		template.Schema = workspaceFormDesignSchema(template.Schema, next, false, true, now)
+		template.Status = workspaceFormTemplateStatus(false, true)
+		template.CurrentVersion = max(template.CurrentVersion, 1) + 1
+		template.UpdatedAt = now
+		template.DeletedAt = &now
 		if err := workspace.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
 			return err
 		}
@@ -287,7 +316,7 @@ func (c WorkspaceService) formDesign(ctx RequestContext) (PlatformFormDesign, er
 			AddedThisMonth: sameYearMonth(template.CreatedAt, c.Now()),
 			UpdatedAt:      platformTemplateUpdatedAt(template.Schema, template.CreatedAt),
 			FormKind:       firstNonEmpty(platformTemplateFormKind(template.Schema), defaultFormKindForTemplateKey(template.Key)),
-			Fields:         platformTemplateFields(template.Schema),
+			Fields:         platformTemplateFields(template.Key, template.Schema),
 			Stages:         platformTemplateStages(template.Schema),
 		})
 	}
@@ -338,13 +367,18 @@ func (c WorkspaceService) Insights(ctx RequestContext, query PlatformInsightsQue
 	if month == "" {
 		month = c.Now().Format("2006-01")
 	}
-	overview, err := c.WorkspaceOverview(ctx, workspaceOverviewQueryFromInsightMonth(month))
+	period := workspaceOverviewQueryFromInsightMonth(month)
+	overview, err := c.WorkspaceOverview(ctx, period)
+	if err != nil {
+		return PlatformInsightsResponse{}, err
+	}
+	attendance, err := c.WorkspaceAttendance(ctx, WorkspaceAttendanceQuery{Year: period.Year, Month: period.Month})
 	if err != nil {
 		return PlatformInsightsResponse{}, err
 	}
 	return PlatformInsightsResponse{
-		Month:   month,
-		Reports: c.insightReports(month, overview),
+		Month:   overview.Month,
+		Reports: c.insightReports(overview, attendance),
 		AIPanel: PlatformInsightsAIPanel{
 			Messages: []PlatformChatMessage{
 				{ID: "im1", Role: "assistant", Avatar: "🤖", Content: "已根據目前後端資料產生人力與出勤報表摘要；業務與財務資料源尚未接入。"},
@@ -354,6 +388,7 @@ func (c WorkspaceService) Insights(ctx RequestContext, query PlatformInsightsQue
 	}, nil
 }
 
+// workspaceOverviewQueryFromInsightMonth 將報表月份轉成共用工作區查詢期間。
 func workspaceOverviewQueryFromInsightMonth(month string) WorkspaceOverviewQuery {
 	parsed, err := time.Parse("2006-01", strings.TrimSpace(month))
 	if err != nil {
@@ -363,40 +398,27 @@ func workspaceOverviewQueryFromInsightMonth(month string) WorkspaceOverviewQuery
 }
 
 // insightReports 處理 insight reports 的服務流程。
-func (c WorkspaceService) insightReports(month string, overview WorkspaceOverviewResponse) map[string]any {
-	active := overview.HRSummary.Active
+func (c WorkspaceService) insightReports(overview WorkspaceOverviewResponse, attendance WorkspaceAttendanceResponse) map[string]any {
+	members, memberHours, leaveChart, totalHours := insightAttendanceMembers(attendance)
+	memberCount := len(members)
+	leaveDays := attendance.Attendance.Summary.LeaveHours / workspaceDayHours
 	hires := overview.HRSummary.Hires
 	separations := overview.HRSummary.Separations
 	return map[string]any{
 		"dept_tasks": map[string]any{
-			"title": "部門任務與出勤摘要",
+			"title": "部門工時與出勤摘要",
 			"metrics": []map[string]any{
-				{"id": "dept-total-hours", "label": "估算工時", "value": active * 8, "unit": "h", "variant": "primary"},
-				{"id": "leave-days", "label": "今日請假", "value": overview.Attendance.Leave, "unit": "人", "variant": "warning"},
-				{"id": "checked-in", "label": "已上班", "value": overview.Attendance.CheckedIn, "unit": "人", "variant": "success"},
+				{"id": "dept-total-hours", "label": "本月工時", "value": totalHours, "unit": "h", "variant": "primary"},
+				{"id": "leave-days", "label": "本月請假", "value": leaveDays, "unit": "天", "variant": "warning"},
+				{"id": "members", "label": "成員數", "value": memberCount, "unit": "人"},
 				{"id": "hires", "label": "本月新進", "value": hires, "unit": "人", "variant": "success"},
 				{"id": "separations", "label": "本月離職", "value": separations, "unit": "人", "variant": "warning"},
 			},
-			"leave_chart": []map[string]any{
-				{"id": "leave", "label": "請假", "value": overview.Attendance.Leave, "max": maxInt(active, 1), "tone": "warning", "active": true},
-				{"id": "absent", "label": "未到", "value": overview.Attendance.Absent, "max": maxInt(active, 1), "tone": "danger"},
-			},
-			"member_hours": []map[string]any{
-				{"id": "team", "label": "全公司", "value": active * 8, "max": maxInt(active*8, 1), "tone": "primary"},
-			},
-			"product_distribution": []map[string]any{{
-				"id":       "nexus",
-				"label":    "Nexus",
-				"total":    active * 8,
-				"segments": []map[string]any{{"id": "oa", "label": "OA", "value": active * 8, "tone": "primary"}},
-			}},
-			"category_distribution": []map[string]any{{
-				"id":       "work",
-				"label":    "工作類型",
-				"total":    active * 8,
-				"segments": []map[string]any{{"id": "operation", "label": "營運", "value": active * 8, "tone": "info"}},
-			}},
-			"members": []map[string]any{},
+			"leave_chart":           leaveChart,
+			"member_hours":          memberHours,
+			"product_distribution":  []map[string]any{},
+			"category_distribution": []map[string]any{},
+			"members":               members,
 		},
 		"sales": map[string]any{
 			"title":         "業務摘要",
@@ -417,6 +439,96 @@ func (c WorkspaceService) insightReports(month string, overview WorkspaceOvervie
 	}
 }
 
+type insightMemberBar struct {
+	ID     string
+	Label  string
+	Avatar string
+	Value  float64
+}
+
+// insightAttendanceMembers 將既有月度出勤矩陣投影成洞察成員、工時與請假圖表。
+func insightAttendanceMembers(attendance WorkspaceAttendanceResponse) ([]map[string]any, []map[string]any, []map[string]any, float64) {
+	members := make([]map[string]any, 0, len(attendance.Attendance.Rows))
+	hourBars := make([]insightMemberBar, 0, len(attendance.Attendance.Rows))
+	leaveBars := make([]insightMemberBar, 0, len(attendance.Attendance.Rows))
+	totalHours := 0.0
+	for _, row := range attendance.Attendance.Rows {
+		name := utils.FirstNonEmpty(row.Employee.NameZH, row.Employee.NameEN, row.Employee.ID)
+		leaveDays := row.Summary.LeaveHours / workspaceDayHours
+		member := map[string]any{
+			"id":              row.Employee.ID,
+			"name":            name,
+			"avatar":          row.Employee.Avatar,
+			"hours":           row.Summary.AttendedHours,
+			"leave_days":      leaveDays,
+			"primary_product": "—",
+			"task_count":      0,
+			"products":        0,
+			"tasks":           []map[string]any{},
+		}
+		if leaveType := insightMemberLeaveType(row.Summary.LeaveByType, attendance.LeaveLegend); leaveType != "" {
+			member["leave_type"] = leaveType
+		}
+		members = append(members, member)
+		hourBars = append(hourBars, insightMemberBar{ID: row.Employee.ID, Label: name, Avatar: row.Employee.Avatar, Value: row.Summary.AttendedHours})
+		if leaveDays > 0 {
+			leaveBars = append(leaveBars, insightMemberBar{ID: row.Employee.ID, Label: name, Avatar: row.Employee.Avatar, Value: leaveDays})
+		}
+		totalHours += row.Summary.AttendedHours
+	}
+	sort.SliceStable(members, func(i, j int) bool { return members[i]["id"].(string) < members[j]["id"].(string) })
+	return members, insightTopMemberBars(hourBars, "primary", "h"), insightTopMemberBars(leaveBars, "warning", " 天"), totalHours
+}
+
+// insightTopMemberBars 取前八名成員並補齊一致的圖表比例基準。
+func insightTopMemberBars(items []insightMemberBar, tone string, unit string) []map[string]any {
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].Value != items[j].Value {
+			return items[i].Value > items[j].Value
+		}
+		return items[i].ID < items[j].ID
+	})
+	if len(items) > 8 {
+		items = items[:8]
+	}
+	maxValue := 1.0
+	if len(items) > 0 && items[0].Value > maxValue {
+		maxValue = items[0].Value
+	}
+	out := make([]map[string]any, 0, len(items))
+	for _, item := range items {
+		out = append(out, map[string]any{
+			"id": item.ID, "label": item.Label, "avatar": item.Avatar,
+			"value": item.Value, "max": maxValue, "meta": workspaceFloat(item.Value) + unit, "tone": tone,
+		})
+	}
+	return out
+}
+
+// insightMemberLeaveType 將成員假別時數轉成穩定、可讀的假別摘要。
+func insightMemberLeaveType(leaveByType map[string]float64, legend []WorkspaceLeaveLegendItem) string {
+	labels := make(map[string]string, len(legend))
+	for _, item := range legend {
+		labels[item.Code] = item.Label
+	}
+	codes := make([]string, 0, len(leaveByType))
+	for code, hours := range leaveByType {
+		if hours > 0 {
+			codes = append(codes, code)
+		}
+	}
+	sort.SliceStable(codes, func(i, j int) bool {
+		if leaveByType[codes[i]] != leaveByType[codes[j]] {
+			return leaveByType[codes[i]] > leaveByType[codes[j]]
+		}
+		return codes[i] < codes[j]
+	})
+	for i, code := range codes {
+		codes[i] = firstNonEmpty(labels[code], code)
+	}
+	return strings.Join(codes, "、")
+}
+
 // UpdateWorkspaceOrganizationManager 更新工作區 organization 主管的服務流程。
 func (c WorkspaceService) UpdateWorkspaceOrganizationManager(ctx RequestContext, displayID string, input UpdateWorkspaceOrganizationManagerInput) (WorkspaceOrganizationResponse, error) {
 	if input.ParentID == nil {
@@ -426,6 +538,7 @@ func (c WorkspaceService) UpdateWorkspaceOrganizationManager(ctx RequestContext,
 	if err != nil {
 		return WorkspaceOrganizationResponse{}, err
 	}
+	visibleEmployees = workspaceOrganizationEmployees(visibleEmployees)
 	employee, ok := workspaceEmployeeByDisplayID(visibleEmployees, displayID)
 	if !ok {
 		return WorkspaceOrganizationResponse{}, NotFound("employee", strings.TrimSpace(displayID))

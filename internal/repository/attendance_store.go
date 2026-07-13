@@ -32,7 +32,6 @@ type AttendanceStore interface {
 	UpsertAttendanceShift(context.Context, domain.AttendanceShift) error
 	GetAttendanceShift(ctx context.Context, tenantID, id string) (domain.AttendanceShift, bool, error)
 	ListAttendanceShifts(ctx context.Context, tenantID string) ([]domain.AttendanceShift, error)
-
 	UpsertAttendanceShiftAssignment(context.Context, domain.AttendanceShiftAssignment) error
 	ListAttendanceShiftAssignments(ctx context.Context, tenantID string) ([]domain.AttendanceShiftAssignment, error)
 	FindEffectiveAttendanceShiftAssignment(ctx context.Context, tenantID, employeeID string, at time.Time) (domain.AttendanceShiftAssignment, bool, error)

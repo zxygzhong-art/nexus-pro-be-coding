@@ -96,6 +96,56 @@ func TestNewSFTPGoStoreSelectsHTTP(t *testing.T) {
 	}
 }
 
+// TestNewSFTPGoHTTPTreatsExistingDirectoryAsSuccess verifies CreateRoot is idempotent
+// when SFTPGo returns 500 for an already-existing directory.
+func TestNewSFTPGoHTTPTreatsExistingDirectoryAsSuccess(t *testing.T) {
+	var createCalls, listCalls int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/user/token":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"access_token":"token-1","expires_at":"` + time.Now().Add(time.Hour).Format(time.RFC3339) + `"}`))
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v2/user/dirs":
+			createCalls++
+			if r.URL.Query().Get("path") != "/nexus-bucket" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write([]byte(`{"error":"failure","message":"Unable to create directory \"/nexus-bucket\""}`))
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/user/dirs":
+			listCalls++
+			if r.URL.Query().Get("path") != "/nexus-bucket" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`[]`))
+		default:
+			w.WriteHeader(http.StatusNotFound)
+		}
+	}))
+	defer server.Close()
+
+	_, err := NewSFTPGoStore(context.Background(), SFTPGoOptions{
+		Endpoint:   server.URL,
+		Root:       "nexus-bucket",
+		Username:   "nexus-service",
+		Password:   "nexus-service",
+		CreateRoot: true,
+	})
+	if err != nil {
+		t.Fatalf("NewSFTPGoStore() error = %v", err)
+	}
+	if createCalls != 1 {
+		t.Fatalf("createCalls = %d, want 1", createCalls)
+	}
+	if listCalls != 1 {
+		t.Fatalf("listCalls = %d, want 1", listCalls)
+	}
+}
+
 // TestNewSFTPGoStoreRejectsUnsupportedScheme verifies unsupported schemes fail fast.
 func TestNewSFTPGoStoreRejectsUnsupportedScheme(t *testing.T) {
 	_, err := NewSFTPGoStore(context.Background(), SFTPGoOptions{

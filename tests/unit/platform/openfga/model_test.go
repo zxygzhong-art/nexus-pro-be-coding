@@ -46,7 +46,7 @@ func TestAuthorizationModelContainsOrgScopeTypes(t *testing.T) {
 		"org_unit":       {"tenant", "parent", "member", "manager", "member_recursive", "viewer", "editor"},
 		"user_group":     {"member", "manager"},
 		"assumable_role": {"tenant", "trusted_user", "trusted_group", "approver", "can_assume", "can_approve"},
-		"agent_tool":     {"tenant", "runner", "approver", "can_run", "can_execute_high_risk"},
+		"agent_tool":     {"tenant", "runner", "can_run"},
 		"hr.employee":    {"owner", "manager", "org", "read"},
 	} {
 		for _, relation := range relations {

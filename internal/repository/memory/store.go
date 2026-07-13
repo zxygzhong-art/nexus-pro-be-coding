@@ -54,7 +54,9 @@ type Store struct {
 	attendanceCorrections   map[string]map[string]AttendanceCorrectionRequest
 	overtimeRequests        map[string]map[string]OvertimeRequest
 	formTemplates           map[string]map[string]FormTemplate
+	formTemplateVersions    map[string]map[string]FormTemplateVersion
 	formInstances           map[string]map[string]FormInstance
+	formInstanceFieldValues map[string]map[string][]FormInstanceFieldValue
 	workflowRuns            map[string]map[string]domain.WorkflowRun
 	workflowStageInstances  map[string]map[string]domain.WorkflowStageInstance
 	workflowStageAssignees  map[string]map[string]domain.WorkflowStageAssignee
@@ -76,6 +78,9 @@ type Store struct {
 	identityOutbox          map[string][]IdentityProvisioningOutboxEvent
 	outboxEvents            map[string][]OutboxEvent
 	relationshipTuples      map[string]map[string]AuthzRelationshipTuple
+	ehrmsSyncRuns           map[string]map[string]domain.EHRMSSyncRun
+	ehrmsSyncRunSteps       map[string]map[string]domain.EHRMSSyncRunStep
+	ehrmsSyncLocks          map[string]bool
 }
 
 // NewStore 建立儲存層。
@@ -117,7 +122,9 @@ func NewStore() *Store {
 		attendanceCorrections:   map[string]map[string]AttendanceCorrectionRequest{},
 		overtimeRequests:        map[string]map[string]OvertimeRequest{},
 		formTemplates:           map[string]map[string]FormTemplate{},
+		formTemplateVersions:    map[string]map[string]FormTemplateVersion{},
 		formInstances:           map[string]map[string]FormInstance{},
+		formInstanceFieldValues: map[string]map[string][]FormInstanceFieldValue{},
 		workflowRuns:            map[string]map[string]domain.WorkflowRun{},
 		workflowStageInstances:  map[string]map[string]domain.WorkflowStageInstance{},
 		workflowStageAssignees:  map[string]map[string]domain.WorkflowStageAssignee{},
@@ -139,6 +146,9 @@ func NewStore() *Store {
 		identityOutbox:          map[string][]IdentityProvisioningOutboxEvent{},
 		outboxEvents:            map[string][]OutboxEvent{},
 		relationshipTuples:      map[string]map[string]AuthzRelationshipTuple{},
+		ehrmsSyncRuns:           map[string]map[string]domain.EHRMSSyncRun{},
+		ehrmsSyncRunSteps:       map[string]map[string]domain.EHRMSSyncRunStep{},
+		ehrmsSyncLocks:          map[string]bool{},
 	}
 }
 
@@ -940,7 +950,21 @@ func (s *Store) ListOrgUnits(_ context.Context, tenantID string) ([]OrgUnit, err
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := copyNestedValues(s.orgUnits[tenantID], copyOrgUnit)
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.Before(out[j].CreatedAt) })
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Closed != out[j].Closed {
+			return !out[i].Closed
+		}
+		if out[i].Code != out[j].Code {
+			return out[i].Code < out[j].Code
+		}
+		if out[i].Name != out[j].Name {
+			return out[i].Name < out[j].Name
+		}
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
 	return out, nil
 }
 
@@ -1099,12 +1123,7 @@ func (s *Store) ListEmployees(_ context.Context, tenantID string) ([]Employee, e
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := copyNestedValues(s.employees[tenantID], copyEmployee)
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
-			return out[i].ID < out[j].ID
-		}
-		return out[i].CreatedAt.Before(out[j].CreatedAt)
-	})
+	sortMemoryEmployees(out, "created_at_asc")
 	return out, nil
 }
 
@@ -1303,6 +1322,11 @@ func normalizeMemoryEmployeeCategory(value string) string {
 func sortMemoryEmployees(items []Employee, sortKey string) {
 	sort.SliceStable(items, func(i, j int) bool {
 		a, b := items[i], items[j]
+		leftRank := domain.EmployeeStatusSortRank(utils.FirstNonEmpty(a.EmploymentStatus, a.Status))
+		rightRank := domain.EmployeeStatusSortRank(utils.FirstNonEmpty(b.EmploymentStatus, b.Status))
+		if leftRank != rightRank {
+			return leftRank < rightRank
+		}
 		switch sortKey {
 		case "created_at_desc":
 			if a.CreatedAt.Equal(b.CreatedAt) {
@@ -1513,6 +1537,12 @@ func (s *Store) GetAttendancePolicy(_ context.Context, tenantID string) (Attenda
 func (s *Store) UpsertLeaveBalance(_ context.Context, v LeaveBalance) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	for id, existing := range s.leaveBalances[v.TenantID] {
+		if existing.EmployeeID == v.EmployeeID && existing.LeaveType == v.LeaveType {
+			v.ID = id
+			break
+		}
+	}
 	putNested(s.leaveBalances, v.TenantID, v.ID, copyLeaveBalance(v))
 	return nil
 }
@@ -1710,7 +1740,7 @@ func (s *Store) ListAttendanceShifts(_ context.Context, tenantID string) ([]Atte
 	return out, nil
 }
 
-// UpsertAttendanceShiftAssignment 從儲存層處理 upsert 考勤班別指派。
+// UpsertAttendanceShiftAssignment 儲存員工班別指派。
 func (s *Store) UpsertAttendanceShiftAssignment(_ context.Context, v AttendanceShiftAssignment) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -1718,7 +1748,7 @@ func (s *Store) UpsertAttendanceShiftAssignment(_ context.Context, v AttendanceS
 	return nil
 }
 
-// ListAttendanceShiftAssignments 從儲存層列出考勤班別指派。
+// ListAttendanceShiftAssignments 列出租戶的員工班別指派。
 func (s *Store) ListAttendanceShiftAssignments(_ context.Context, tenantID string) ([]AttendanceShiftAssignment, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -1727,25 +1757,18 @@ func (s *Store) ListAttendanceShiftAssignments(_ context.Context, tenantID strin
 	return out, nil
 }
 
-// FindEffectiveAttendanceShiftAssignment 從儲存層處理 find effective 考勤班別指派。
+// FindEffectiveAttendanceShiftAssignment 取得指定時點生效的員工排班。
 func (s *Store) FindEffectiveAttendanceShiftAssignment(_ context.Context, tenantID, employeeID string, at time.Time) (AttendanceShiftAssignment, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	var best AttendanceShiftAssignment
 	found := false
 	for _, item := range s.attendanceAssignments[tenantID] {
-		if item.EmployeeID != employeeID || !strings.EqualFold(item.Status, "active") {
-			continue
-		}
-		if item.EffectiveFrom.After(at) {
-			continue
-		}
-		if item.EffectiveTo != nil && item.EffectiveTo.Before(at) {
+		if item.EmployeeID != employeeID || !strings.EqualFold(item.Status, "active") || item.EffectiveFrom.After(at) || (item.EffectiveTo != nil && item.EffectiveTo.Before(at)) {
 			continue
 		}
 		if !found || item.EffectiveFrom.After(best.EffectiveFrom) {
-			best = item
-			found = true
+			best, found = item, true
 		}
 	}
 	if !found {
@@ -2039,7 +2062,31 @@ func memoryCorrectionMatches(item AttendanceCorrectionRequest, query domain.Atte
 func (s *Store) UpsertFormTemplate(_ context.Context, v FormTemplate) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if strings.TrimSpace(v.Status) == "" {
+		v.Status = "published"
+	}
+	if v.CurrentVersion <= 0 {
+		v.CurrentVersion = 1
+	}
+	if v.CreatedAt.IsZero() {
+		v.CreatedAt = time.Now().UTC()
+	}
+	if v.UpdatedAt.IsZero() {
+		v.UpdatedAt = v.CreatedAt
+	}
 	putNested(s.formTemplates, v.TenantID, v.ID, copyFormTemplate(v))
+	versionKey := fmt.Sprintf("%s:%d", v.ID, v.CurrentVersion)
+	if _, exists := getNested(s.formTemplateVersions, v.TenantID, versionKey); !exists {
+		version := FormTemplateVersion{
+			ID: utils.NewID("ftv"), TenantID: v.TenantID, TemplateID: v.ID, Version: v.CurrentVersion,
+			Schema: utils.CopyStringMap(v.Schema), Status: v.Status, CreatedAt: v.UpdatedAt,
+		}
+		if v.Status == "published" {
+			publishedAt := v.UpdatedAt
+			version.PublishedAt = &publishedAt
+		}
+		putNested(s.formTemplateVersions, v.TenantID, versionKey, version)
+	}
 	return nil
 }
 
@@ -2076,10 +2123,55 @@ func (s *Store) ListFormTemplates(_ context.Context, tenantID string) ([]FormTem
 	return out, nil
 }
 
+// InsertFormTemplateVersion 寫入不可變表單版本。
+func (s *Store) InsertFormTemplateVersion(_ context.Context, v FormTemplateVersion) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := fmt.Sprintf("%s:%d", v.TemplateID, v.Version)
+	if _, exists := getNested(s.formTemplateVersions, v.TenantID, key); exists {
+		return nil
+	}
+	putNested(s.formTemplateVersions, v.TenantID, key, copyFormTemplateVersion(v))
+	return nil
+}
+
+// GetFormTemplateVersion 依版本 ID 取得不可變快照。
+func (s *Store) GetFormTemplateVersion(_ context.Context, tenantID, id string) (FormTemplateVersion, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, version := range s.formTemplateVersions[tenantID] {
+		if version.ID == id {
+			return copyFormTemplateVersion(version), true, nil
+		}
+	}
+	return FormTemplateVersion{}, false, nil
+}
+
+// GetFormTemplateVersionByNumber 依模板與版本號取得不可變快照。
+func (s *Store) GetFormTemplateVersionByNumber(_ context.Context, tenantID, templateID string, version int) (FormTemplateVersion, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.formTemplateVersions, tenantID, fmt.Sprintf("%s:%d", templateID, version))
+	if !ok {
+		return FormTemplateVersion{}, false, nil
+	}
+	return copyFormTemplateVersion(v), true, nil
+}
+
 // UpsertFormInstance 從儲存層處理 upsert 表單實例。Version > 0 時執行樂觀鎖檢查。
 func (s *Store) UpsertFormInstance(_ context.Context, v FormInstance) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if strings.TrimSpace(v.TemplateVersionID) == "" {
+		template, ok := getNested(s.formTemplates, v.TenantID, v.TemplateID)
+		if ok {
+			version, versionExists := getNested(s.formTemplateVersions, v.TenantID, fmt.Sprintf("%s:%d", v.TemplateID, template.CurrentVersion))
+			if !versionExists {
+				return fmt.Errorf("form template version %s:%d not found", v.TemplateID, template.CurrentVersion)
+			}
+			v.TemplateVersionID = version.ID
+		}
+	}
 	existing, ok := getNested(s.formInstances, v.TenantID, v.ID)
 	if ok {
 		if v.Version > 0 && existing.Version != v.Version {
@@ -2157,11 +2249,31 @@ func (s *Store) ListFormInstancePageByQuery(ctx context.Context, tenantID string
 	return paginateMemory(items, page.Page, page.PageSize), total, nil
 }
 
+// ReplaceFormInstanceFieldValues 替換單一表單實例的可統計欄位投影。
+func (s *Store) ReplaceFormInstanceFieldValues(_ context.Context, tenantID, formInstanceID string, values []FormInstanceFieldValue) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.formInstanceFieldValues, tenantID, formInstanceID, copyFormInstanceFieldValues(values))
+	return nil
+}
+
+// ListFormInstanceFieldValues 列出單一表單實例的欄位投影。
+func (s *Store) ListFormInstanceFieldValues(_ context.Context, tenantID, formInstanceID string) ([]FormInstanceFieldValue, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	values, ok := getNested(s.formInstanceFieldValues, tenantID, formInstanceID)
+	if !ok {
+		return []FormInstanceFieldValue{}, nil
+	}
+	return copyFormInstanceFieldValues(values), nil
+}
+
 // DeleteFormInstance 從儲存層刪除表單實例。
 func (s *Store) DeleteFormInstance(_ context.Context, tenantID, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.formInstances[tenantID], id)
+	delete(s.formInstanceFieldValues[tenantID], id)
 	return nil
 }
 
@@ -2347,14 +2459,6 @@ func (s *Store) ListAgentRunPageByAccount(ctx context.Context, tenantID, account
 func (s *Store) UpsertAgentModel(_ context.Context, v AgentModel) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if v.IsDefault {
-		for id, item := range s.agentModels[v.TenantID] {
-			if id != v.ID {
-				item.IsDefault = false
-				s.agentModels[v.TenantID][id] = copyAgentModel(item)
-			}
-		}
-	}
 	putNested(s.agentModels, v.TenantID, v.ID, copyAgentModel(v))
 	return nil
 }
@@ -2376,9 +2480,6 @@ func (s *Store) ListAgentModels(_ context.Context, tenantID string) ([]AgentMode
 	defer s.mu.RUnlock()
 	out := copyNestedValues(s.agentModels[tenantID], copyAgentModel)
 	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].IsDefault != out[j].IsDefault {
-			return out[i].IsDefault
-		}
 		if out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
 			return out[i].ID < out[j].ID
 		}
@@ -2397,20 +2498,6 @@ func (s *Store) DeleteAgentModel(_ context.Context, tenantID, id string) (AgentM
 	}
 	delete(s.agentModels[tenantID], id)
 	return copyAgentModel(v), true, nil
-}
-
-// ClearDefaultAgentModel 從儲存層清除其他預設模型。
-func (s *Store) ClearDefaultAgentModel(_ context.Context, tenantID, exceptID string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, item := range s.agentModels[tenantID] {
-		if id == exceptID {
-			continue
-		}
-		item.IsDefault = false
-		s.agentModels[tenantID][id] = copyAgentModel(item)
-	}
-	return nil
 }
 
 // UpdateAgentModelTestResult 從儲存層更新模型測試結果。
@@ -2436,7 +2523,7 @@ func (s *Store) CountAgentDefinitionsByModel(_ context.Context, tenantID, modelI
 	defer s.mu.RUnlock()
 	count := 0
 	for _, item := range s.agentDefinitions[tenantID] {
-		if item.ModelID == modelID || item.FallbackModelID == modelID {
+		if item.ModelID == modelID {
 			count++
 		}
 	}

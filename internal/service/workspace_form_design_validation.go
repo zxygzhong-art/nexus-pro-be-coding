@@ -26,6 +26,11 @@ var allowedWorkspaceFormRoles = map[string]struct{}{
 	"ceo":       {},
 }
 
+var allowedFormAnalyticsRoles = map[string]struct{}{"dimension": {}, "measure": {}}
+var allowedFormAggregations = map[string]struct{}{"count": {}, "sum": {}, "avg": {}, "min": {}, "max": {}}
+var allowedFormSecurityClassifications = map[string]struct{}{"public": {}, "internal": {}, "confidential": {}, "restricted": {}}
+var allowedFormSecurityMasking = map[string]struct{}{"none": {}, "partial": {}, "full": {}}
+
 // validateWorkspaceFormDesignInput 驗證自訂表單設計的欄位與流程節點。
 func validateWorkspaceFormDesignInput(fields []domain.PlatformFormBuilderField, stages []domain.PlatformFormBuilderStage) error {
 	fieldErrors := make([]domain.FieldError, 0)
@@ -62,6 +67,10 @@ func validateWorkspaceFormDesignInput(fields []domain.PlatformFormBuilderField, 
 				Message: "field label is required",
 			})
 		}
+		if binding := field.Binding; binding != nil {
+			fieldErrors = append(fieldErrors, validateFormFieldBinding(id, field.Type, *binding)...)
+		}
+		fieldErrors = append(fieldErrors, validateFormFieldAnalyticsAndSecurity(id, field)...)
 	}
 
 	if len(stages) == 0 {
@@ -117,11 +126,11 @@ func validateWorkspaceFormDesignInput(fields []domain.PlatformFormBuilderField, 
 			hasApproverStage = true
 			fallthrough
 		case "notify":
-			if len(config.AccountIDs) == 0 && strings.TrimSpace(config.Role) == "" {
+			if len(config.AccountIDs) == 0 && len(config.UserGroupIDs) == 0 && strings.TrimSpace(config.Role) == "" {
 				fieldErrors = append(fieldErrors, domain.FieldError{
 					Field:   prefix + ".config",
 					Code:    "required",
-					Message: "stage config must include role or account_ids",
+					Message: "stage config must include role, account_ids, or user_group_ids",
 				})
 			}
 			if role := strings.TrimSpace(config.Role); role != "" {
@@ -157,6 +166,70 @@ func validateWorkspaceFormDesignInput(fields []domain.PlatformFormBuilderField, 
 	return nil
 }
 
+// validatePublishedFormFieldIdentity 禁止已發布模板移除欄位或改變既有 ID/type。
+func validatePublishedFormFieldIdentity(previous, next []domain.PlatformFormBuilderField) error {
+	nextByID := make(map[string]domain.PlatformFormBuilderField, len(next))
+	for _, field := range next {
+		nextByID[strings.TrimSpace(field.ID)] = field
+	}
+	errors := make([]domain.FieldError, 0)
+	for _, field := range previous {
+		id := strings.TrimSpace(field.ID)
+		nextField, exists := nextByID[id]
+		if !exists {
+			errors = append(errors, domain.FieldError{Field: "fields." + id + ".id", Code: "locked", Message: "published field id cannot be removed or changed"})
+			continue
+		}
+		if strings.TrimSpace(nextField.Type) != strings.TrimSpace(field.Type) {
+			errors = append(errors, domain.FieldError{Field: "fields." + id + ".type", Code: "locked", Message: "published field type cannot be changed"})
+		}
+	}
+	if len(errors) > 0 {
+		return ValidationFailed("published form field identity is immutable", errors)
+	}
+	return nil
+}
+
+// validateFormFieldAnalyticsAndSecurity 驗證欄位統計與敏感度契約。
+func validateFormFieldAnalyticsAndSecurity(fieldID string, field domain.PlatformFormBuilderField) []domain.FieldError {
+	errors := make([]domain.FieldError, 0)
+	if analytics := field.Analytics; analytics != nil {
+		role := strings.TrimSpace(analytics.Role)
+		if analytics.Reportable && role == "" {
+			errors = append(errors, domain.FieldError{Field: "fields." + fieldID + ".analytics.role", Code: "required", Message: "reportable field must declare dimension or measure role"})
+		} else if role != "" {
+			if _, ok := allowedFormAnalyticsRoles[role]; !ok {
+				errors = append(errors, domain.FieldError{Field: "fields." + fieldID + ".analytics.role", Code: "invalid", Message: "analytics role must be dimension or measure"})
+			}
+		}
+		for _, aggregation := range analytics.Aggregations {
+			aggregation = strings.TrimSpace(aggregation)
+			if _, ok := allowedFormAggregations[aggregation]; !ok {
+				errors = append(errors, domain.FieldError{Field: "fields." + fieldID + ".analytics.aggregations", Code: "invalid", Message: "unsupported analytics aggregation"})
+				continue
+			}
+			if (aggregation == "sum" || aggregation == "avg") && strings.TrimSpace(field.Type) != "number" {
+				errors = append(errors, domain.FieldError{Field: "fields." + fieldID + ".analytics.aggregations", Code: "invalid", Message: "sum and avg require a number field"})
+			}
+		}
+	}
+	if security := field.Security; security != nil {
+		classification := strings.TrimSpace(security.Classification)
+		if classification != "" {
+			if _, ok := allowedFormSecurityClassifications[classification]; !ok {
+				errors = append(errors, domain.FieldError{Field: "fields." + fieldID + ".security.classification", Code: "invalid", Message: "unsupported security classification"})
+			}
+		}
+		masking := strings.TrimSpace(security.Masking)
+		if masking != "" {
+			if _, ok := allowedFormSecurityMasking[masking]; !ok {
+				errors = append(errors, domain.FieldError{Field: "fields." + fieldID + ".security.masking", Code: "invalid", Message: "unsupported masking mode"})
+			}
+		}
+	}
+	return errors
+}
+
 // validateSystemFormFieldLocks 確保系統/半系統表單的核心欄位 ID 不被刪除。
 func validateSystemFormFieldLocks(templateKey, formKind string, fields []domain.PlatformFormBuilderField) error {
 	locked := lockedFieldIDsForTemplate(templateKey, formKind)
@@ -189,21 +262,30 @@ func validateSystemFormFieldLocks(templateKey, formKind string, fields []domain.
 
 // validateFormSubmissionPayload 依 template fields 驗證提交 payload。
 // 僅在 schema 明確宣告 fields 時校驗；未宣告時不套用 builder contract 預設欄位，避免誤傷舊模板。
-func validateFormSubmissionPayload(template domain.FormTemplate, payload map[string]any) error {
+func (c WorkflowService) validateFormSubmissionPayload(ctx RequestContext, template domain.FormTemplate, payload map[string]any) (map[string]any, error) {
+	normalized, err := c.normalizeLeaveSubmissionHours(ctx, template.Key, workflowPayload(payload))
+	if err != nil {
+		return nil, err
+	}
 	design := platformTemplateDesign(template.Schema)
 	if design == nil {
-		return nil
+		return normalized, nil
 	}
 	rawFields, hasFields := design["fields"]
 	if !hasFields {
-		return nil
+		return normalized, nil
 	}
 	fields, ok := platformDecodeSlice[domain.PlatformFormBuilderField](rawFields)
 	if !ok || len(fields) == 0 {
-		return nil
+		return normalized, nil
 	}
-	if payload == nil {
-		payload = map[string]any{}
+	var catalog domain.FormDataSourceCatalogResponse
+	if formFieldsHaveBindings(fields) {
+		var err error
+		catalog, err = c.loadFormDataSources(ctx)
+		if err != nil {
+			return nil, err
+		}
 	}
 	fieldErrors := make([]domain.FieldError, 0)
 	for _, field := range fields {
@@ -211,7 +293,18 @@ func validateFormSubmissionPayload(template domain.FormTemplate, payload map[str
 		if id == "" || strings.EqualFold(strings.TrimSpace(field.Type), "layout") {
 			continue
 		}
-		value, exists := payload[id]
+		value, exists := normalized[id]
+		if field.Binding != nil {
+			boundValue, boundExists, bindingError := validateAndResolveBoundSubmissionValue(catalog, *field.Binding, value, exists)
+			if bindingError != "" {
+				fieldErrors = append(fieldErrors, domain.FieldError{Field: id, Code: "invalid_binding_value", Message: bindingError})
+				continue
+			}
+			if boundExists {
+				normalized[id] = boundValue
+				value, exists = boundValue, true
+			}
+		}
 		if !exists || isEmptyFormPayloadValue(value) {
 			if field.Required {
 				fieldErrors = append(fieldErrors, domain.FieldError{
@@ -231,9 +324,111 @@ func validateFormSubmissionPayload(template domain.FormTemplate, payload map[str
 		}
 	}
 	if len(fieldErrors) > 0 {
-		return ValidationFailed("form submission validation failed", fieldErrors)
+		return nil, ValidationFailed("form submission validation failed", fieldErrors)
 	}
-	return nil
+	return normalized, nil
+}
+
+// normalizeLeaveSubmissionHours makes attendance policy the server-side source of truth for leave hours.
+func (c WorkflowService) normalizeLeaveSubmissionHours(ctx RequestContext, templateKey string, payload map[string]any) (map[string]any, error) {
+	if _, linked := leaveLinkedTemplateKeys[strings.TrimSpace(templateKey)]; !linked || !workflowLeavePayloadHasLinkedFields(payload) {
+		return payload, nil
+	}
+
+	startRaw := utils.FirstNonEmpty(stringFromAny(payload["start_at"]), stringFromAny(payload["startAt"]))
+	endRaw := utils.FirstNonEmpty(stringFromAny(payload["end_at"]), stringFromAny(payload["endAt"]))
+	fieldErrors := make([]domain.FieldError, 0, 2)
+	if startRaw == "" {
+		fieldErrors = append(fieldErrors, domain.FieldError{Field: "start_at", Code: "required", Message: "start time is required"})
+	}
+	if endRaw == "" {
+		fieldErrors = append(fieldErrors, domain.FieldError{Field: "end_at", Code: "required", Message: "end time is required"})
+	}
+	if len(fieldErrors) > 0 {
+		return nil, ValidationFailed("leave time validation failed", fieldErrors)
+	}
+
+	startAt, startErr := utils.ParseDateTime(startRaw)
+	endAt, endErr := utils.ParseDateTime(endRaw)
+	if startErr != nil {
+		fieldErrors = append(fieldErrors, domain.FieldError{Field: "start_at", Code: "invalid", Message: "start time must be RFC3339"})
+	}
+	if endErr != nil {
+		fieldErrors = append(fieldErrors, domain.FieldError{Field: "end_at", Code: "invalid", Message: "end time must be RFC3339"})
+	}
+	if len(fieldErrors) > 0 {
+		return nil, ValidationFailed("leave time validation failed", fieldErrors)
+	}
+	if !endAt.After(startAt) {
+		return nil, ValidationFailed("leave time validation failed", []domain.FieldError{{
+			Field: "end_at", Code: "invalid_range", Message: "end time must be after start time",
+		}})
+	}
+
+	policy, err := c.Service.Attendance().loadAttendancePolicyResponse(ctx)
+	if err != nil {
+		return nil, err
+	}
+	hours := calculateLeaveHoursWithinPolicy(startAt, endAt, policy.WorkTime)
+	if hours <= 0 {
+		return nil, ValidationFailed("leave time validation failed", []domain.FieldError{{
+			Field: "hours", Code: "outside_work_time", Message: "selected time does not include working hours",
+		}})
+	}
+	payload["hours"] = hours
+	return payload, nil
+}
+
+// formFieldsHaveBindings 避免沒有資料綁定的舊表單產生額外查詢。
+func formFieldsHaveBindings(fields []domain.PlatformFormBuilderField) bool {
+	for _, field := range fields {
+		if field.Binding != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// validateAndResolveBoundSubmissionValue 重新解析 object 綁定並驗證 collection 選項。
+func validateAndResolveBoundSubmissionValue(catalog domain.FormDataSourceCatalogResponse, binding domain.PlatformFormBuilderFieldBinding, value any, exists bool) (any, bool, string) {
+	source, ok := formDataSourceByID(catalog, strings.TrimSpace(binding.SourceID))
+	if !ok {
+		return nil, false, "bound data source is unavailable"
+	}
+	valueField := strings.TrimSpace(binding.ValueField)
+	if source.Kind == "object" {
+		if len(source.Records) == 0 {
+			return nil, false, "bound data source has no current record"
+		}
+		resolved, ok := source.Records[0][valueField]
+		if !ok {
+			return nil, false, "bound field is unavailable"
+		}
+		return resolved, true, ""
+	}
+	if !exists || isEmptyFormPayloadValue(value) {
+		return value, exists, ""
+	}
+	allowed := make(map[string]struct{}, len(source.Records))
+	for _, record := range source.Records {
+		allowed[dataSourceString(record[valueField])] = struct{}{}
+	}
+	values := []string{dataSourceString(value)}
+	switch typed := value.(type) {
+	case []string:
+		values = typed
+	case []any:
+		values = make([]string, 0, len(typed))
+		for _, item := range typed {
+			values = append(values, dataSourceString(item))
+		}
+	}
+	for _, item := range values {
+		if _, ok := allowed[item]; !ok {
+			return nil, false, "selected value is not present in the bound data source"
+		}
+	}
+	return value, true, ""
 }
 
 func isEmptyFormPayloadValue(value any) bool {

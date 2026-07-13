@@ -58,11 +58,7 @@ This file documents `ops/openfga/model.json`. Apply the JSON model with
     built-in tool is `knowledge.search`.
   - `runner`: direct `account` allowed to run the tool. Grant it explicitly with
     `tenantctl openfga-grant-agent-tool --relation runner`.
-  - `approver`: direct `account` allowed to execute high-risk tool calls without
-    the fallback approval confirmation. Grant it explicitly with
-    `tenantctl openfga-grant-agent-tool --relation approver`.
   - `can_run`: `runner` or tenant `admin`.
-  - `can_execute_high_risk`: `approver` or tenant `security_admin`.
 
 - `hr.employee`
   - `owner`: existing direct owner account relation.
@@ -91,10 +87,9 @@ This file documents `ops/openfga/model.json`. Apply the JSON model with
 - Assumable role checks remain guarded by the same switch. When enabled,
   `assumable_role#can_assume` is checked after the existing trust-policy
   whitelist; OpenFGA errors fall back to the whitelist path.
-- Agent tool checks also use the same switch. `agent_tool#can_run` is a hard
-  gate when OpenFGA is available; high-risk tool calls check
-  `agent_tool#can_execute_high_risk` and otherwise continue through the existing
-  approval flow.
+- Agent tool checks also use the same switch. `agent_tool#can_run` is the object
+  relationship gate when OpenFGA is available; risk level is retained only for
+  audit classification and does not add a second approval gate.
 
 ## Model Upgrade Flow
 
@@ -124,8 +119,7 @@ This file documents `ops/openfga/model.json`. Apply the JSON model with
    ```sh
    go run ./cmd/tenantctl openfga-grant-tenant-admin --tenant-id <tenant-id> --account-id <account-id>
    go run ./cmd/tenantctl openfga-grant-tenant-security-admin --tenant-id <tenant-id> --account-id <account-id>
-   go run ./cmd/tenantctl openfga-grant-agent-tool --tenant-id <tenant-id> --tool-id knowledge.search --account-id <account-id> --relation runner
-   go run ./cmd/tenantctl openfga-grant-agent-tool --tenant-id <tenant-id> --tool-id knowledge.search --account-id <account-id> --relation approver
+   go run ./cmd/tenantctl openfga-grant-agent-tool --tenant-id <tenant-id> --tool-id knowledge.search --account-id <account-id>
    ```
 
 6. Start the API with `OPENFGA_BASE_URL`, `OPENFGA_STORE_ID`, and

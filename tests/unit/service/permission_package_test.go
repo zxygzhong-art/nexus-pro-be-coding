@@ -222,7 +222,7 @@ func permissionPackageFixture(now time.Time) (*memory.Store, *service.Service, d
 		CreatedAt:              now,
 	})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 	return store, svc, ctx
 }
 

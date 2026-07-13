@@ -18,7 +18,6 @@ type AgentStore interface {
 	GetAgentModel(ctx context.Context, tenantID, id string) (domain.AgentModel, bool, error)
 	ListAgentModels(ctx context.Context, tenantID string) ([]domain.AgentModel, error)
 	DeleteAgentModel(ctx context.Context, tenantID, id string) (domain.AgentModel, bool, error)
-	ClearDefaultAgentModel(ctx context.Context, tenantID, exceptID string) error
 	UpdateAgentModelTestResult(ctx context.Context, tenantID, id, status, message string, testedAt time.Time) (domain.AgentModel, bool, error)
 	CountAgentDefinitionsByModel(ctx context.Context, tenantID, modelID string) (int, error)
 	UpsertAgentDefinition(context.Context, domain.AgentDefinition) error

@@ -461,6 +461,22 @@ func (q *Queries) DeleteFormInstance(ctx context.Context, arg DeleteFormInstance
 	return err
 }
 
+const deleteFormInstanceFieldValues = `-- name: DeleteFormInstanceFieldValues :exec
+DELETE FROM form_instance_field_values
+WHERE tenant_id = $1
+  AND form_instance_id = $2
+`
+
+type DeleteFormInstanceFieldValuesParams struct {
+	TenantID       string `json:"tenant_id"`
+	FormInstanceID string `json:"form_instance_id"`
+}
+
+func (q *Queries) DeleteFormInstanceFieldValues(ctx context.Context, arg DeleteFormInstanceFieldValuesParams) error {
+	_, err := q.db.Exec(ctx, deleteFormInstanceFieldValues, arg.TenantID, arg.FormInstanceID)
+	return err
+}
+
 const deleteGroupMembership = `-- name: DeleteGroupMembership :one
 DELETE FROM authz_group_memberships
 WHERE tenant_id = $1 AND user_group_id = $2 AND account_id = $3
@@ -1278,7 +1294,7 @@ func (q *Queries) GetEmployeeImportSession(ctx context.Context, arg GetEmployeeI
 }
 
 const getFormInstance = `-- name: GetFormInstance :one
-SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at FROM form_instances
+SELECT id, tenant_id, template_id, template_version_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at FROM form_instances
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -1294,6 +1310,7 @@ func (q *Queries) GetFormInstance(ctx context.Context, arg GetFormInstanceParams
 		&i.ID,
 		&i.TenantID,
 		&i.TemplateID,
+		&i.TemplateVersionID,
 		&i.ApplicantAccountID,
 		&i.Status,
 		&i.Payload,
@@ -1307,7 +1324,7 @@ func (q *Queries) GetFormInstance(ctx context.Context, arg GetFormInstanceParams
 }
 
 const getFormTemplate = `-- name: GetFormTemplate :one
-SELECT id, tenant_id, key, name, description, schema, created_at FROM form_templates
+SELECT id, tenant_id, key, name, description, schema, status, current_version, created_at, updated_at, deleted_at FROM form_templates
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -1326,13 +1343,17 @@ func (q *Queries) GetFormTemplate(ctx context.Context, arg GetFormTemplateParams
 		&i.Name,
 		&i.Description,
 		&i.Schema,
+		&i.Status,
+		&i.CurrentVersion,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
 
 const getFormTemplateByKey = `-- name: GetFormTemplateByKey :one
-SELECT id, tenant_id, key, name, description, schema, created_at FROM form_templates
+SELECT id, tenant_id, key, name, description, schema, status, current_version, created_at, updated_at, deleted_at FROM form_templates
 WHERE tenant_id = $1 AND key = $2
 `
 
@@ -1351,7 +1372,67 @@ func (q *Queries) GetFormTemplateByKey(ctx context.Context, arg GetFormTemplateB
 		&i.Name,
 		&i.Description,
 		&i.Schema,
+		&i.Status,
+		&i.CurrentVersion,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
+	)
+	return i, err
+}
+
+const getFormTemplateVersion = `-- name: GetFormTemplateVersion :one
+SELECT id, tenant_id, template_id, version, schema, status, created_at, published_at FROM form_template_versions
+WHERE tenant_id = $1
+  AND id = $2
+`
+
+type GetFormTemplateVersionParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetFormTemplateVersion(ctx context.Context, arg GetFormTemplateVersionParams) (FormTemplateVersion, error) {
+	row := q.db.QueryRow(ctx, getFormTemplateVersion, arg.TenantID, arg.ID)
+	var i FormTemplateVersion
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.TemplateID,
+		&i.Version,
+		&i.Schema,
+		&i.Status,
+		&i.CreatedAt,
+		&i.PublishedAt,
+	)
+	return i, err
+}
+
+const getFormTemplateVersionByNumber = `-- name: GetFormTemplateVersionByNumber :one
+SELECT id, tenant_id, template_id, version, schema, status, created_at, published_at FROM form_template_versions
+WHERE tenant_id = $1
+  AND template_id = $2
+  AND version = $3
+`
+
+type GetFormTemplateVersionByNumberParams struct {
+	TenantID   string `json:"tenant_id"`
+	TemplateID string `json:"template_id"`
+	Version    int32  `json:"version"`
+}
+
+func (q *Queries) GetFormTemplateVersionByNumber(ctx context.Context, arg GetFormTemplateVersionByNumberParams) (FormTemplateVersion, error) {
+	row := q.db.QueryRow(ctx, getFormTemplateVersionByNumber, arg.TenantID, arg.TemplateID, arg.Version)
+	var i FormTemplateVersion
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.TemplateID,
+		&i.Version,
+		&i.Schema,
+		&i.Status,
+		&i.CreatedAt,
+		&i.PublishedAt,
 	)
 	return i, err
 }
@@ -1753,6 +1834,101 @@ func (q *Queries) GetWorkflowStageInstance(ctx context.Context, arg GetWorkflowS
 		&i.CompletedAt,
 	)
 	return i, err
+}
+
+const insertFormInstanceFieldValue = `-- name: InsertFormInstanceFieldValue :exec
+INSERT INTO form_instance_field_values (
+    tenant_id, form_instance_id, template_id, template_version_id, field_id, value_type,
+    value_text, value_number, value_boolean, value_date, value_timestamp, value_json, created_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, NULLIF($7::text, ''),
+    NULLIF($8::text, '')::numeric, $9,
+    NULLIF($10::text, '')::date, NULLIF($11::text, '')::timestamptz,
+    CASE WHEN $12::text = '' THEN NULL ELSE $12::jsonb END,
+    $13
+)
+ON CONFLICT (tenant_id, form_instance_id, field_id) DO UPDATE SET
+    template_id = EXCLUDED.template_id,
+    template_version_id = EXCLUDED.template_version_id,
+    value_type = EXCLUDED.value_type,
+    value_text = EXCLUDED.value_text,
+    value_number = EXCLUDED.value_number,
+    value_boolean = EXCLUDED.value_boolean,
+    value_date = EXCLUDED.value_date,
+    value_timestamp = EXCLUDED.value_timestamp,
+    value_json = EXCLUDED.value_json,
+    created_at = EXCLUDED.created_at
+`
+
+type InsertFormInstanceFieldValueParams struct {
+	TenantID          string             `json:"tenant_id"`
+	FormInstanceID    string             `json:"form_instance_id"`
+	TemplateID        string             `json:"template_id"`
+	TemplateVersionID string             `json:"template_version_id"`
+	FieldID           string             `json:"field_id"`
+	ValueType         string             `json:"value_type"`
+	ValueText         string             `json:"value_text"`
+	ValueNumber       string             `json:"value_number"`
+	ValueBoolean      pgtype.Bool        `json:"value_boolean"`
+	ValueDate         string             `json:"value_date"`
+	ValueTimestamp    string             `json:"value_timestamp"`
+	ValueJson         string             `json:"value_json"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) InsertFormInstanceFieldValue(ctx context.Context, arg InsertFormInstanceFieldValueParams) error {
+	_, err := q.db.Exec(ctx, insertFormInstanceFieldValue,
+		arg.TenantID,
+		arg.FormInstanceID,
+		arg.TemplateID,
+		arg.TemplateVersionID,
+		arg.FieldID,
+		arg.ValueType,
+		arg.ValueText,
+		arg.ValueNumber,
+		arg.ValueBoolean,
+		arg.ValueDate,
+		arg.ValueTimestamp,
+		arg.ValueJson,
+		arg.CreatedAt,
+	)
+	return err
+}
+
+const insertFormTemplateVersion = `-- name: InsertFormTemplateVersion :exec
+INSERT INTO form_template_versions (
+    id, tenant_id, template_id, version, schema, status, created_at, published_at
+) VALUES (
+    $1, $2, $3, $4, $5::jsonb,
+    $6, $7, $8
+)
+ON CONFLICT (tenant_id, template_id, version) DO NOTHING
+`
+
+type InsertFormTemplateVersionParams struct {
+	ID          string             `json:"id"`
+	TenantID    string             `json:"tenant_id"`
+	TemplateID  string             `json:"template_id"`
+	Version     int32              `json:"version"`
+	Schema      []byte             `json:"schema"`
+	Status      string             `json:"status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	PublishedAt pgtype.Timestamptz `json:"published_at"`
+}
+
+func (q *Queries) InsertFormTemplateVersion(ctx context.Context, arg InsertFormTemplateVersionParams) error {
+	_, err := q.db.Exec(ctx, insertFormTemplateVersion,
+		arg.ID,
+		arg.TenantID,
+		arg.TemplateID,
+		arg.Version,
+		arg.Schema,
+		arg.Status,
+		arg.CreatedAt,
+		arg.PublishedAt,
+	)
+	return err
 }
 
 const insertWorkflowAction = `-- name: InsertWorkflowAction :one
@@ -2655,7 +2831,18 @@ func (q *Queries) ListAuditLogsPage(ctx context.Context, arg ListAuditLogsPagePa
 const listEmployees = `-- name: ListEmployees :many
 SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1
-ORDER BY created_at ASC, id ASC
+ORDER BY
+  CASE coalesce(nullif(employment_status, ''), status)
+    WHEN 'active' THEN 0
+    WHEN 'probation' THEN 1
+    WHEN 'leave_suspended' THEN 2
+    WHEN 'onboarding' THEN 3
+    WHEN 'resigned' THEN 4
+    WHEN 'deleted' THEN 5
+    ELSE 6
+  END ASC,
+  created_at ASC,
+  id ASC
 `
 
 func (q *Queries) ListEmployees(ctx context.Context, tenantID string) ([]Employee, error) {
@@ -2737,6 +2924,15 @@ WHERE employees.tenant_id = $1
   )
   AND ($5::text = '' OR employees.category = $5)
 ORDER BY
+  CASE coalesce(nullif(employees.employment_status, ''), employees.status)
+    WHEN 'active' THEN 0
+    WHEN 'probation' THEN 1
+    WHEN 'leave_suspended' THEN 2
+    WHEN 'onboarding' THEN 3
+    WHEN 'resigned' THEN 4
+    WHEN 'deleted' THEN 5
+    ELSE 6
+  END ASC,
   CASE WHEN $6::text = 'created_at_desc' THEN employees.created_at END DESC,
   CASE WHEN $6::text = 'hire_date_desc' THEN employees.hire_date END DESC NULLS LAST,
   CASE WHEN $6::text = 'hire_date_asc' THEN employees.hire_date END ASC NULLS LAST,
@@ -2839,6 +3035,15 @@ WHERE employees.tenant_id = $1
   )
   AND ($5::text = '' OR employees.category = $5)
 ORDER BY
+  CASE coalesce(nullif(employees.employment_status, ''), employees.status)
+    WHEN 'active' THEN 0
+    WHEN 'probation' THEN 1
+    WHEN 'leave_suspended' THEN 2
+    WHEN 'onboarding' THEN 3
+    WHEN 'resigned' THEN 4
+    WHEN 'deleted' THEN 5
+    ELSE 6
+  END ASC,
   CASE WHEN $6::text = 'created_at_desc' THEN employees.created_at END DESC,
   CASE WHEN $6::text = 'hire_date_desc' THEN employees.hire_date END DESC NULLS LAST,
   CASE WHEN $6::text = 'hire_date_asc' THEN employees.hire_date END ASC NULLS LAST,
@@ -2914,8 +3119,54 @@ func (q *Queries) ListEmployeesFilteredPage(ctx context.Context, arg ListEmploye
 	return items, nil
 }
 
+const listFormInstanceFieldValues = `-- name: ListFormInstanceFieldValues :many
+SELECT tenant_id, form_instance_id, template_id, template_version_id, field_id, value_type, value_text, value_number, value_boolean, value_date, value_timestamp, value_json, created_at FROM form_instance_field_values
+WHERE tenant_id = $1
+  AND form_instance_id = $2
+ORDER BY field_id ASC
+`
+
+type ListFormInstanceFieldValuesParams struct {
+	TenantID       string `json:"tenant_id"`
+	FormInstanceID string `json:"form_instance_id"`
+}
+
+func (q *Queries) ListFormInstanceFieldValues(ctx context.Context, arg ListFormInstanceFieldValuesParams) ([]FormInstanceFieldValue, error) {
+	rows, err := q.db.Query(ctx, listFormInstanceFieldValues, arg.TenantID, arg.FormInstanceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FormInstanceFieldValue
+	for rows.Next() {
+		var i FormInstanceFieldValue
+		if err := rows.Scan(
+			&i.TenantID,
+			&i.FormInstanceID,
+			&i.TemplateID,
+			&i.TemplateVersionID,
+			&i.FieldID,
+			&i.ValueType,
+			&i.ValueText,
+			&i.ValueNumber,
+			&i.ValueBoolean,
+			&i.ValueDate,
+			&i.ValueTimestamp,
+			&i.ValueJson,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listFormInstancePageByQuery = `-- name: ListFormInstancePageByQuery :many
-SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at FROM form_instances fi
+SELECT id, tenant_id, template_id, template_version_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at FROM form_instances fi
 WHERE fi.tenant_id = $1
   AND ($2::text = '' OR fi.status = $2)
   AND ($3::text = '' OR fi.template_id = $3)
@@ -2967,6 +3218,7 @@ func (q *Queries) ListFormInstancePageByQuery(ctx context.Context, arg ListFormI
 			&i.ID,
 			&i.TenantID,
 			&i.TemplateID,
+			&i.TemplateVersionID,
 			&i.ApplicantAccountID,
 			&i.Status,
 			&i.Payload,
@@ -2987,7 +3239,7 @@ func (q *Queries) ListFormInstancePageByQuery(ctx context.Context, arg ListFormI
 }
 
 const listFormInstances = `-- name: ListFormInstances :many
-SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at FROM form_instances
+SELECT id, tenant_id, template_id, template_version_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at FROM form_instances
 WHERE tenant_id = $1
 ORDER BY submitted_at ASC
 `
@@ -3005,6 +3257,7 @@ func (q *Queries) ListFormInstances(ctx context.Context, tenantID string) ([]For
 			&i.ID,
 			&i.TenantID,
 			&i.TemplateID,
+			&i.TemplateVersionID,
 			&i.ApplicantAccountID,
 			&i.Status,
 			&i.Payload,
@@ -3025,7 +3278,7 @@ func (q *Queries) ListFormInstances(ctx context.Context, tenantID string) ([]For
 }
 
 const listFormInstancesByQuery = `-- name: ListFormInstancesByQuery :many
-SELECT id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at FROM form_instances fi
+SELECT id, tenant_id, template_id, template_version_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at FROM form_instances fi
 WHERE fi.tenant_id = $1
   AND ($2::text = '' OR fi.status = $2)
   AND ($3::text = '' OR fi.template_id = $3)
@@ -3066,6 +3319,7 @@ func (q *Queries) ListFormInstancesByQuery(ctx context.Context, arg ListFormInst
 			&i.ID,
 			&i.TenantID,
 			&i.TemplateID,
+			&i.TemplateVersionID,
 			&i.ApplicantAccountID,
 			&i.Status,
 			&i.Payload,
@@ -3086,7 +3340,7 @@ func (q *Queries) ListFormInstancesByQuery(ctx context.Context, arg ListFormInst
 }
 
 const listFormTemplates = `-- name: ListFormTemplates :many
-SELECT id, tenant_id, key, name, description, schema, created_at FROM form_templates
+SELECT id, tenant_id, key, name, description, schema, status, current_version, created_at, updated_at, deleted_at FROM form_templates
 WHERE tenant_id = $1
 ORDER BY created_at ASC
 `
@@ -3107,7 +3361,11 @@ func (q *Queries) ListFormTemplates(ctx context.Context, tenantID string) ([]For
 			&i.Name,
 			&i.Description,
 			&i.Schema,
+			&i.Status,
+			&i.CurrentVersion,
 			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.DeletedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -3365,7 +3623,7 @@ func (q *Queries) ListLeaveRequestsByQuery(ctx context.Context, arg ListLeaveReq
 const listOrgUnits = `-- name: ListOrgUnits :many
 SELECT id, tenant_id, code, name, name_en, parent_id, path, manager_position_id, source, closed, created_at, updated_at FROM org_units
 WHERE tenant_id = $1
-ORDER BY created_at ASC
+ORDER BY closed ASC, code ASC, name ASC, created_at ASC, id ASC
 `
 
 func (q *Queries) ListOrgUnits(ctx context.Context, tenantID string) ([]OrgUnit, error) {
@@ -4284,9 +4542,9 @@ type UpsertAttendanceClockRecordParams struct {
 	ID                  string             `json:"id"`
 	TenantID            string             `json:"tenant_id"`
 	EmployeeID          string             `json:"employee_id"`
-	ShiftAssignmentID   string             `json:"shift_assignment_id"`
-	ShiftID             string             `json:"shift_id"`
-	WorksiteID          string             `json:"worksite_id"`
+	ShiftAssignmentID   pgtype.Text        `json:"shift_assignment_id"`
+	ShiftID             pgtype.Text        `json:"shift_id"`
+	WorksiteID          pgtype.Text        `json:"worksite_id"`
 	WorkDate            string             `json:"work_date"`
 	Direction           string             `json:"direction"`
 	ClockedAt           pgtype.Timestamptz `json:"clocked_at"`
@@ -5070,15 +5328,15 @@ func (q *Queries) UpsertEmployeeImportSession(ctx context.Context, arg UpsertEmp
 
 const upsertFormInstance = `-- name: UpsertFormInstance :one
 INSERT INTO form_instances (
-    id, tenant_id, template_id, applicant_account_id, status,
+    id, tenant_id, template_id, template_version_id, applicant_account_id, status,
     payload, submitted_at, approved_by, current_run_id, version, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5,
-    $6::jsonb, $7, $8, $9, 1, $10
+    $1, $2, $3, $4, $5, $6,
+    $7::jsonb, $8, $9, $10, 1, $11
 )
 ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
     template_id = EXCLUDED.template_id,
+    template_version_id = EXCLUDED.template_version_id,
     applicant_account_id = EXCLUDED.applicant_account_id,
     status = EXCLUDED.status,
     payload = EXCLUDED.payload,
@@ -5087,14 +5345,16 @@ ON CONFLICT (id) DO UPDATE SET
     current_run_id = EXCLUDED.current_run_id,
     version = form_instances.version + 1,
     updated_at = EXCLUDED.updated_at
-WHERE $11::bigint = 0 OR form_instances.version = $11::bigint
-RETURNING id, tenant_id, template_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at
+WHERE form_instances.tenant_id = EXCLUDED.tenant_id
+  AND ($12::bigint = 0 OR form_instances.version = $12::bigint)
+RETURNING id, tenant_id, template_id, template_version_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at
 `
 
 type UpsertFormInstanceParams struct {
 	ID                 string             `json:"id"`
 	TenantID           string             `json:"tenant_id"`
 	TemplateID         string             `json:"template_id"`
+	TemplateVersionID  string             `json:"template_version_id"`
 	ApplicantAccountID string             `json:"applicant_account_id"`
 	Status             string             `json:"status"`
 	Payload            []byte             `json:"payload"`
@@ -5111,6 +5371,7 @@ func (q *Queries) UpsertFormInstance(ctx context.Context, arg UpsertFormInstance
 		arg.ID,
 		arg.TenantID,
 		arg.TemplateID,
+		arg.TemplateVersionID,
 		arg.ApplicantAccountID,
 		arg.Status,
 		arg.Payload,
@@ -5125,6 +5386,7 @@ func (q *Queries) UpsertFormInstance(ctx context.Context, arg UpsertFormInstance
 		&i.ID,
 		&i.TenantID,
 		&i.TemplateID,
+		&i.TemplateVersionID,
 		&i.ApplicantAccountID,
 		&i.Status,
 		&i.Payload,
@@ -5139,28 +5401,36 @@ func (q *Queries) UpsertFormInstance(ctx context.Context, arg UpsertFormInstance
 
 const upsertFormTemplate = `-- name: UpsertFormTemplate :one
 INSERT INTO form_templates (
-    id, tenant_id, key, name, description, schema, created_at
+    id, tenant_id, key, name, description, schema, status, current_version, created_at, updated_at, deleted_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6::jsonb, $7
+    $1, $2, $3, $4, $5, $6::jsonb,
+    $7, $8, $9, $10, $11
 )
 ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
     key = EXCLUDED.key,
     name = EXCLUDED.name,
     description = EXCLUDED.description,
     schema = EXCLUDED.schema,
-    created_at = EXCLUDED.created_at
-RETURNING id, tenant_id, key, name, description, schema, created_at
+    status = EXCLUDED.status,
+    current_version = EXCLUDED.current_version,
+    updated_at = EXCLUDED.updated_at,
+    deleted_at = EXCLUDED.deleted_at
+WHERE form_templates.tenant_id = EXCLUDED.tenant_id
+RETURNING id, tenant_id, key, name, description, schema, status, current_version, created_at, updated_at, deleted_at
 `
 
 type UpsertFormTemplateParams struct {
-	ID          string             `json:"id"`
-	TenantID    string             `json:"tenant_id"`
-	Key         string             `json:"key"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
-	Column6     []byte             `json:"column_6"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	Key            string             `json:"key"`
+	Name           string             `json:"name"`
+	Description    string             `json:"description"`
+	Schema         []byte             `json:"schema"`
+	Status         string             `json:"status"`
+	CurrentVersion int32              `json:"current_version"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
 }
 
 func (q *Queries) UpsertFormTemplate(ctx context.Context, arg UpsertFormTemplateParams) (FormTemplate, error) {
@@ -5170,8 +5440,12 @@ func (q *Queries) UpsertFormTemplate(ctx context.Context, arg UpsertFormTemplate
 		arg.Key,
 		arg.Name,
 		arg.Description,
-		arg.Column6,
+		arg.Schema,
+		arg.Status,
+		arg.CurrentVersion,
 		arg.CreatedAt,
+		arg.UpdatedAt,
+		arg.DeletedAt,
 	)
 	var i FormTemplate
 	err := row.Scan(
@@ -5181,7 +5455,11 @@ func (q *Queries) UpsertFormTemplate(ctx context.Context, arg UpsertFormTemplate
 		&i.Name,
 		&i.Description,
 		&i.Schema,
+		&i.Status,
+		&i.CurrentVersion,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.DeletedAt,
 	)
 	return i, err
 }
@@ -5256,10 +5534,7 @@ INSERT INTO leave_balances (
     $6, $7, $8, $9, $10, $11, $12,
     $13
 )
-ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    employee_id = EXCLUDED.employee_id,
-    leave_type = EXCLUDED.leave_type,
+ON CONFLICT (tenant_id, employee_id, leave_type) DO UPDATE SET
     remaining_hours = EXCLUDED.remaining_hours,
     period_start = EXCLUDED.period_start,
     period_end = EXCLUDED.period_end,

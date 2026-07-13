@@ -43,7 +43,6 @@ type AgentDefinition struct {
 	Emoji              string             `json:"emoji"`
 	Category           string             `json:"category"`
 	ModelID            string             `json:"model_id"`
-	FallbackModelID    pgtype.Text        `json:"fallback_model_id"`
 	SystemPrompt       string             `json:"system_prompt"`
 	Tools              []byte             `json:"tools"`
 	Status             string             `json:"status"`
@@ -98,9 +97,10 @@ type AgentModel struct {
 	Provider        string             `json:"provider"`
 	ModelName       string             `json:"model_name"`
 	LitellmModel    string             `json:"litellm_model"`
-	IsDefault       bool               `json:"is_default"`
+	ApiBaseUrl      string             `json:"api_base_url"`
+	ApiKey          string             `json:"api_key"`
+	RateLimitRpm    int32              `json:"rate_limit_rpm"`
 	Status          string             `json:"status"`
-	FallbackModelID pgtype.Text        `json:"fallback_model_id"`
 	TimeoutSeconds  int32              `json:"timeout_seconds"`
 	MonthlyQuota    int64              `json:"monthly_quota"`
 	UsedQuota       int64              `json:"used_quota"`
@@ -177,9 +177,9 @@ type AttendanceClockRecord struct {
 	ID                  string             `json:"id"`
 	TenantID            string             `json:"tenant_id"`
 	EmployeeID          string             `json:"employee_id"`
-	ShiftAssignmentID   string             `json:"shift_assignment_id"`
-	ShiftID             string             `json:"shift_id"`
-	WorksiteID          string             `json:"worksite_id"`
+	ShiftAssignmentID   pgtype.Text        `json:"shift_assignment_id"`
+	ShiftID             pgtype.Text        `json:"shift_id"`
+	WorksiteID          pgtype.Text        `json:"worksite_id"`
 	WorkDate            string             `json:"work_date"`
 	Direction           string             `json:"direction"`
 	ClockedAt           pgtype.Timestamptz `json:"clocked_at"`
@@ -395,6 +395,47 @@ type AuthzRelationshipTuple struct {
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 }
 
+type EhrmsSyncRun struct {
+	ID           string             `json:"id"`
+	TenantID     string             `json:"tenant_id"`
+	AccountID    string             `json:"account_id"`
+	SyncType     string             `json:"sync_type"`
+	TriggerType  string             `json:"trigger_type"`
+	Status       string             `json:"status"`
+	CurrentStep  string             `json:"current_step"`
+	Mode         string             `json:"mode"`
+	SinceDate    string             `json:"since_date"`
+	Attempt      int32              `json:"attempt"`
+	MaxAttempts  int32              `json:"max_attempts"`
+	RetryOfRunID string             `json:"retry_of_run_id"`
+	RequestID    string             `json:"request_id"`
+	TraceID      string             `json:"trace_id"`
+	ErrorCode    string             `json:"error_code"`
+	ErrorMessage string             `json:"error_message"`
+	Retryable    bool               `json:"retryable"`
+	NextRetryAt  pgtype.Timestamptz `json:"next_retry_at"`
+	Summary      []byte             `json:"summary"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type EhrmsSyncRunStep struct {
+	ID           string             `json:"id"`
+	TenantID     string             `json:"tenant_id"`
+	RunID        string             `json:"run_id"`
+	Step         string             `json:"step"`
+	Sequence     int32              `json:"sequence"`
+	Status       string             `json:"status"`
+	Attempt      int32              `json:"attempt"`
+	ErrorCode    string             `json:"error_code"`
+	ErrorMessage string             `json:"error_message"`
+	Summary      []byte             `json:"summary"`
+	StartedAt    pgtype.Timestamptz `json:"started_at"`
+	FinishedAt   pgtype.Timestamptz `json:"finished_at"`
+}
+
 type Employee struct {
 	ID                    string             `json:"id"`
 	TenantID              string             `json:"tenant_id"`
@@ -470,6 +511,7 @@ type FormInstance struct {
 	ID                 string             `json:"id"`
 	TenantID           string             `json:"tenant_id"`
 	TemplateID         string             `json:"template_id"`
+	TemplateVersionID  string             `json:"template_version_id"`
 	ApplicantAccountID string             `json:"applicant_account_id"`
 	Status             string             `json:"status"`
 	Payload            []byte             `json:"payload"`
@@ -480,14 +522,45 @@ type FormInstance struct {
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
+type FormInstanceFieldValue struct {
+	TenantID          string             `json:"tenant_id"`
+	FormInstanceID    string             `json:"form_instance_id"`
+	TemplateID        string             `json:"template_id"`
+	TemplateVersionID string             `json:"template_version_id"`
+	FieldID           string             `json:"field_id"`
+	ValueType         string             `json:"value_type"`
+	ValueText         pgtype.Text        `json:"value_text"`
+	ValueNumber       pgtype.Numeric     `json:"value_number"`
+	ValueBoolean      pgtype.Bool        `json:"value_boolean"`
+	ValueDate         pgtype.Date        `json:"value_date"`
+	ValueTimestamp    pgtype.Timestamptz `json:"value_timestamp"`
+	ValueJson         []byte             `json:"value_json"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
 type FormTemplate struct {
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	Key            string             `json:"key"`
+	Name           string             `json:"name"`
+	Description    string             `json:"description"`
+	Schema         []byte             `json:"schema"`
+	Status         string             `json:"status"`
+	CurrentVersion int32              `json:"current_version"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type FormTemplateVersion struct {
 	ID          string             `json:"id"`
 	TenantID    string             `json:"tenant_id"`
-	Key         string             `json:"key"`
-	Name        string             `json:"name"`
-	Description string             `json:"description"`
+	TemplateID  string             `json:"template_id"`
+	Version     int32              `json:"version"`
 	Schema      []byte             `json:"schema"`
+	Status      string             `json:"status"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	PublishedAt pgtype.Timestamptz `json:"published_at"`
 }
 
 type IdentityProvisioningOutbox struct {

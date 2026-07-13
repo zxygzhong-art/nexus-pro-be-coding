@@ -117,12 +117,29 @@ func SortLeaveBalances(items []domain.LeaveBalance, sort string) []domain.LeaveB
 }
 
 var orgUnitComparators = comparators[domain.OrgUnit]{
-	"created_at_asc":  func(a, b domain.OrgUnit) bool { return a.CreatedAt.Before(b.CreatedAt) },
-	"created_at_desc": func(a, b domain.OrgUnit) bool { return a.CreatedAt.After(b.CreatedAt) },
-	"name_asc":        func(a, b domain.OrgUnit) bool { return a.Name < b.Name },
+	"created_at_asc":  orgUnitLess(func(a, b domain.OrgUnit) bool { return a.CreatedAt.Before(b.CreatedAt) }),
+	"created_at_desc": orgUnitLess(func(a, b domain.OrgUnit) bool { return a.CreatedAt.After(b.CreatedAt) }),
+	"name_asc":        orgUnitLess(func(a, b domain.OrgUnit) bool { return a.Name < b.Name }),
+	"code_asc":        orgUnitLess(orgUnitCodeThenName),
+}
+
+func orgUnitCodeThenName(a, b domain.OrgUnit) bool {
+	if a.Code != b.Code {
+		return a.Code < b.Code
+	}
+	return a.Name < b.Name
+}
+
+func orgUnitLess(secondary func(a, b domain.OrgUnit) bool) func(a, b domain.OrgUnit) bool {
+	return func(a, b domain.OrgUnit) bool {
+		if a.Closed != b.Closed {
+			return !a.Closed
+		}
+		return secondary(a, b)
+	}
 }
 
 // SortOrgUnits 排序組織單位。
 func SortOrgUnits(items []domain.OrgUnit, sort string) []domain.OrgUnit {
-	return sortBy(items, sort, orgUnitComparators, "created_at_desc")
+	return sortBy(items, sort, orgUnitComparators, "code_asc")
 }

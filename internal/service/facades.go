@@ -26,7 +26,6 @@ type AuthzFacade interface {
 	Explain(RequestContext, CheckRequest) (AuthzExplainResponse, error)
 	Simulate(RequestContext, AuthzSimulationRequest) (AuthzSimulationResponse, error)
 	AuditDecision(RequestContext, CheckRequest, CheckResult) error
-	ValidateApprovalInstance(RequestContext, CheckRequest) error
 }
 
 // IAMFacade 定義 IAM facade 的行為契約。
@@ -93,6 +92,8 @@ type HRFacade interface {
 	PreviewEmployeeImport(RequestContext, EmployeeImportPreviewInput) (EmployeeImportSession, error)
 	ConfirmEmployeeImport(RequestContext, string, EmployeeImportConfirmInput) (EmployeeImportSession, error)
 	SyncEHRMSEmployees(RequestContext, EHRMSEmployeeSyncInput) (EHRMSEmployeeSyncResponse, error)
+	SyncEHRMSOrgUnits(RequestContext) (EHRMSOrgUnitSyncResponse, error)
+	SyncEHRMSPositions(RequestContext) (EHRMSPositionSyncResponse, error)
 	ExportEmployeesCSV(RequestContext, EmployeeQuery) ([]byte, string, error)
 	ExportEmployees(RequestContext, ...EmployeeQuery) ([]Employee, error)
 	BatchDeleteEmployees(RequestContext, BatchDeleteEmployeesInput) (BatchEmployeeResponse, error)
@@ -138,6 +139,14 @@ type AttendanceFacade interface {
 	RejectAttendanceCorrection(RequestContext, string, ReviewAttendanceCorrectionInput) (AttendanceCorrectionRequest, error)
 }
 
+// EHRMSFacade 提供同步運行查詢與人工恢復操作。
+type EHRMSFacade interface {
+	StartSync(RequestContext, StartEHRMSSyncInput) (EHRMSSyncRunDetail, error)
+	ListSyncRunPage(RequestContext, PageRequest) (PageResponse[EHRMSSyncRun], error)
+	GetSyncRun(RequestContext, string) (EHRMSSyncRunDetail, error)
+	RetrySyncRun(RequestContext, string, RetryEHRMSSyncRunInput) (EHRMSSyncRunDetail, error)
+}
+
 // PlatformFacade 定義平台 facade 的行為契約。
 type PlatformFacade interface {
 	Home(RequestContext) (PlatformHomeResponse, error)
@@ -174,6 +183,7 @@ type WorkspaceFacade interface {
 
 // WorkflowFacade 定義流程 facade 的行為契約。
 type WorkflowFacade interface {
+	FormDataSources(RequestContext) (FormDataSourceCatalogResponse, error)
 	ListFormTemplatePage(RequestContext, PageRequest) (PageResponse[FormTemplate], error)
 	CreateFormTemplate(RequestContext, CreateFormTemplateInput) (FormTemplate, error)
 	ListFormInstancePage(RequestContext, FormInstanceQuery, PageRequest) (PageResponse[FormInstance], error)
@@ -219,18 +229,12 @@ type AgentFacade interface {
 	GetDefinition(RequestContext, string) (domain.AgentDefinition, error)
 	CreateDefinition(RequestContext, domain.CreateAgentDefinitionInput) (domain.AgentDefinition, error)
 	UpdateDefinition(RequestContext, string, domain.UpdateAgentDefinitionInput) (domain.AgentDefinition, error)
+	PublishDefinition(RequestContext, string) (domain.AgentDefinition, error)
+	UnpublishDefinition(RequestContext, string) (domain.AgentDefinition, error)
 	DeleteDefinition(RequestContext, string) (domain.AgentDefinition, error)
 	Trial(RequestContext, string, domain.AgentTrialInput) (domain.AgentTrialResult, error)
 	RollbackDefinition(RequestContext, string, domain.RollbackAgentDefinitionInput) (domain.AgentDefinition, error)
-	ListDefinitionVersions(RequestContext, string) ([]domain.AgentDefinitionVersion, error)
-	ListTemplates(RequestContext) ([]domain.AgentTemplate, error)
-	Templates(RequestContext) ([]domain.AgentTemplate, error)
-	ListTools(RequestContext) ([]domain.AgentToolMeta, error)
 	Tools(RequestContext) ([]domain.AgentToolMeta, error)
-	ListAudits(RequestContext) ([]domain.AgentAudit, error)
-	ListAgentAudits(RequestContext) ([]domain.AgentAudit, error)
-	ExportBundle(RequestContext) (domain.AgentBundle, error)
-	ImportBundle(RequestContext, domain.AgentBundle) (domain.ImportAgentBundleResult, error)
 }
 
 // NotificationFacade 定義系統通知 facade 的行為契約。

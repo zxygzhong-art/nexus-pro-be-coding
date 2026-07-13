@@ -256,7 +256,7 @@ func TestPlatformHomeEndpointReturnsHomeProjection(t *testing.T) {
 	if len(body.Assistants) == 0 || len(body.FormColumns) == 0 {
 		t.Fatalf("expected assistants and form columns in home projection, got %+v", body)
 	}
-	if body.ClockSummary.Location != "Demo HQ" || body.ClockSummary.CheckedOutAt != nil {
+	if body.ClockSummary.CheckedOutAt != nil {
 		t.Fatalf("unexpected clock summary: %+v", body.ClockSummary)
 	}
 }
@@ -291,8 +291,8 @@ func TestAttendanceClockRecordCreateRejectsInvalidBody(t *testing.T) {
 	}
 }
 
-// TestAttendanceClockRecordDuplicatePunchIsRecordedAsRejected 驗證重複打卡 returns rejected record idempotently。
-func TestAttendanceClockRecordDuplicatePunchIsRecordedAsRejected(t *testing.T) {
+// TestAttendanceClockRecordDuplicatePunchReturnsConflict 驗證重複打卡不會新增打卡紀錄。
+func TestAttendanceClockRecordDuplicatePunchReturnsConflict(t *testing.T) {
 	now := time.Date(2026, 7, 2, 8, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
 	handler := newTestAPIForAccountNow("acct-employee", now, nil)
 	body := `{"direction":"clock_in","latitude":25.033964,"longitude":121.564468,"accuracy_meters":10,"location_source":"browser_geolocation"}`
@@ -313,12 +313,8 @@ func TestAttendanceClockRecordDuplicatePunchIsRecordedAsRejected(t *testing.T) {
 	secondReq.Header.Set("Content-Type", "application/json")
 	secondRec := httptest.NewRecorder()
 	handler.ServeHTTP(secondRec, secondReq)
-	if secondRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for duplicate clock in rejection record, got %d: %s", secondRec.Code, secondRec.Body.String())
-	}
-	second := decodeData[domain.AttendanceClockRecord](t, secondRec.Body.Bytes())
-	if second.RecordStatus != "rejected" || second.RejectionReason != "duplicate" {
-		t.Fatalf("expected duplicate clock in to be recorded as rejected duplicate, got %+v", second)
+	if secondRec.Code != http.StatusConflict {
+		t.Fatalf("expected 409 for duplicate clock in, got %d: %s", secondRec.Code, secondRec.Body.String())
 	}
 }
 
@@ -945,8 +941,8 @@ func TestAuthzCheckReturnsTargetSchema(t *testing.T) {
 	if !result.Allowed || result.ApplicationCode != "hr" || result.ResourceType != "employee" || result.ResourceID != "emp-employee" {
 		t.Fatalf("unexpected authz result: %+v", result)
 	}
-	if !result.RequiresApproval {
-		t.Fatalf("expected export check to require approval, got %+v", result)
+	if result.RiskLevel != string(domain.RiskCritical) {
+		t.Fatalf("expected export check to retain critical audit risk, got %+v", result)
 	}
 	if len(result.MatchedBy) == 0 || len(result.PermissionSetIDs) == 0 {
 		t.Fatalf("expected matched sources and permission sets, got %+v", result)
@@ -958,7 +954,6 @@ func TestCreatePermissionSetAssignmentEndpointWritesAssignment(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodPost, "/v1/iam/permission-set-assignments", strings.NewReader(`{"principal_type":"account","principal_id":"acct-employee","permission_set_id":"ps-audit"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Approval-Confirmed", "true")
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -990,8 +985,8 @@ func TestReadJSONRejectsMultipleValues(t *testing.T) {
 	}
 }
 
-// TestHighRiskRouteRequiresApprovalConfirmation 驗證 high risk 路由 requires 核准 confirmation。
-func TestHighRiskRouteRequiresApprovalConfirmation(t *testing.T) {
+// TestHighRiskRouteUsesGrantedPermissionWithoutApprovalHeader 驗證高風險路由只依既有權限決定是否放行。
+func TestHighRiskRouteUsesGrantedPermissionWithoutApprovalHeader(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodPost, "/v1/iam/user-groups", strings.NewReader(`{"name":"Finance Admin"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -999,17 +994,13 @@ func TestHighRiskRouteRequiresApprovalConfirmation(t *testing.T) {
 
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for high-risk route without confirmation, got %d: %s", rec.Code, rec.Body.String())
-	}
-	errPayload := decodeError(t, rec.Body.Bytes())
-	if errPayload.ReasonCode != "approval_required" {
-		t.Fatalf("expected approval_required reason code, got %+v", errPayload)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected granted high-risk route to succeed without approval header, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
-// TestHighRiskRouteAllowsConfirmedRequest 驗證 high risk 路由 allows confirmed 請求。
-func TestHighRiskRouteAllowsConfirmedRequest(t *testing.T) {
+// TestLegacyApprovalHeaderDoesNotChangeAuthorization 驗證舊審批 header 不再參與授權決策。
+func TestLegacyApprovalHeaderDoesNotChangeAuthorization(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodPost, "/v1/iam/user-groups", strings.NewReader(`{"name":"Finance Admin"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -1019,12 +1010,12 @@ func TestHighRiskRouteAllowsConfirmedRequest(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for confirmed high-risk route, got %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("expected legacy approval header to be ignored, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
-// TestEHRMSEmployeeSyncRouteRequiresApprovalConfirmation 驗證 eHRMS 員工 sync 路由 requires 核准 confirmation。
-func TestEHRMSEmployeeSyncRouteRequiresApprovalConfirmation(t *testing.T) {
+// TestEHRMSEmployeeSyncRouteReachesServiceWithoutApprovalHeader 驗證有權限的同步請求直接進入業務服務。
+func TestEHRMSEmployeeSyncRouteReachesServiceWithoutApprovalHeader(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/ehrms/sync", strings.NewReader(`{"mode":"upsert"}`))
 	req.Header.Set("Content-Type", "application/json")
@@ -1032,52 +1023,13 @@ func TestEHRMSEmployeeSyncRouteRequiresApprovalConfirmation(t *testing.T) {
 
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for unconfirmed eHRMS sync, got %d: %s", rec.Code, rec.Body.String())
-	}
-	errPayload := decodeError(t, rec.Body.Bytes())
-	if errPayload.ReasonCode != "approval_required" {
-		t.Fatalf("expected approval_required reason code, got %+v", errPayload)
-	}
-
-	confirmedReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/ehrms/sync", strings.NewReader(`{"mode":"upsert"}`))
-	confirmedReq.Header.Set("Content-Type", "application/json")
-	confirmedReq.Header.Set("X-Approval-Confirmed", "true")
-	confirmedRec := httptest.NewRecorder()
-
-	handler.ServeHTTP(confirmedRec, confirmedReq)
-
-	if confirmedRec.Code != http.StatusBadRequest {
-		t.Fatalf("expected confirmed eHRMS sync to reach service configuration check, got %d: %s", confirmedRec.Code, confirmedRec.Body.String())
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected sync to reach service configuration check without approval header, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
-// TestHighRiskRouteCanDisableApprovalHeader 驗證 high risk 路由 can disable 核准 header。
-func TestHighRiskRouteCanDisableApprovalHeader(t *testing.T) {
-	store := memory.NewStore()
-	populateDemoFixture(store)
-	handler := v1api.New(service.New(store), nil, v1api.Options{
-		TokenResolver:         staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo"}, ok: true},
-		DisableApprovalHeader: true,
-	}).Routes()
-	req := httptest.NewRequest(http.MethodPost, "/v1/iam/user-groups", strings.NewReader(`{"name":"Finance Admin"}`))
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Approval-Confirmed", "true")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 when approval header is disabled, got %d: %s", rec.Code, rec.Body.String())
-	}
-	errPayload := decodeError(t, rec.Body.Bytes())
-	if errPayload.ReasonCode != "approval_required" {
-		t.Fatalf("expected approval_required reason code, got %+v", errPayload)
-	}
-}
-
-// TestAuditLogRouteAllowsReadWithoutApprovalConfirmation 驗證稽核 log 只讀列表無需額外核准。
-func TestAuditLogRouteAllowsReadWithoutApprovalConfirmation(t *testing.T) {
+// TestAuditLogRouteAllowsGrantedRead 驗證稽核列表依 read 權限直接放行。
+func TestAuditLogRouteAllowsGrantedRead(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodGet, "/v1/audit-logs", nil)
 	rec := httptest.NewRecorder()
@@ -1085,7 +1037,7 @@ func TestAuditLogRouteAllowsReadWithoutApprovalConfirmation(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for audit log route without confirmation, got %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("expected 200 for granted audit log read, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -1129,7 +1081,6 @@ func TestAssumeRoleEndpointReturnsCreatedTypedResponse(t *testing.T) {
 	handler := newTestAPI(true)
 	createReq := httptest.NewRequest(http.MethodPost, "/v1/iam/assumable-roles", strings.NewReader(`{"name":"Audit Assume","trusted":true,"trust_policy":{"accounts":["acct-admin"]},"permission_boundary":{"allow":["audit.log.read","iam.permission_set.read"]},"permission_set_ids":["ps-audit"],"session_duration_seconds":3600}`))
 	createReq.Header.Set("Content-Type", "application/json")
-	createReq.Header.Set("X-Approval-Confirmed", "true")
 	createRec := httptest.NewRecorder()
 	handler.ServeHTTP(createRec, createReq)
 	if createRec.Code != http.StatusCreated {
@@ -1139,7 +1090,6 @@ func TestAssumeRoleEndpointReturnsCreatedTypedResponse(t *testing.T) {
 
 	assumeReq := httptest.NewRequest(http.MethodPost, "/v1/iam/assumable-roles/"+role.ID+"/assume", strings.NewReader(`{"reason":"test"}`))
 	assumeReq.Header.Set("Content-Type", "application/json")
-	assumeReq.Header.Set("X-Approval-Confirmed", "true")
 	assumeRec := httptest.NewRecorder()
 	handler.ServeHTTP(assumeRec, assumeReq)
 	if assumeRec.Code != http.StatusCreated {
@@ -1159,7 +1109,6 @@ func TestBatchDeleteEmployeesReturnsMultiStatusOnRowFailure(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/batch-delete", strings.NewReader(`{"employee_ids":["emp-employee","emp-missing"],"reason":"cleanup"}`))
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Approval-Confirmed", "true")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusMultiStatus {
@@ -1221,7 +1170,6 @@ func TestEmployeeListDetailAndCSVExportEndpoints(t *testing.T) {
 	}
 
 	exportReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/export", nil)
-	exportReq.Header.Set("X-Approval-Confirmed", "true")
 	exportRec := httptest.NewRecorder()
 	handler.ServeHTTP(exportRec, exportReq)
 	if exportRec.Code != http.StatusOK {
@@ -1244,7 +1192,6 @@ func TestEmployeeExportAuditUsesOpenTelemetryTraceID(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/export", nil)
 	req.Header.Set("X-Request-ID", "req-export-trace")
-	req.Header.Set("X-Approval-Confirmed", "true")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
@@ -1285,7 +1232,6 @@ func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
 	})
 	previewReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/preview", strings.NewReader(string(payload)))
 	previewReq.Header.Set("Content-Type", "application/json")
-	previewReq.Header.Set("X-Approval-Confirmed", "true")
 	previewRec := httptest.NewRecorder()
 
 	handler.ServeHTTP(previewRec, previewReq)
@@ -1300,7 +1246,6 @@ func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
 
 	confirmReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/"+session.ID+"/confirm", strings.NewReader(`{"mode":"create"}`))
 	confirmReq.Header.Set("Content-Type", "application/json")
-	confirmReq.Header.Set("X-Approval-Confirmed", "true")
 	confirmRec := httptest.NewRecorder()
 	handler.ServeHTTP(confirmRec, confirmReq)
 	if confirmRec.Code != http.StatusOK {
@@ -1309,7 +1254,6 @@ func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
 
 	duplicatePreviewReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/preview", strings.NewReader(string(payload)))
 	duplicatePreviewReq.Header.Set("Content-Type", "application/json")
-	duplicatePreviewReq.Header.Set("X-Approval-Confirmed", "true")
 	duplicatePreviewRec := httptest.NewRecorder()
 	handler.ServeHTTP(duplicatePreviewRec, duplicatePreviewReq)
 	if duplicatePreviewRec.Code != http.StatusCreated {
@@ -1318,7 +1262,6 @@ func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
 	duplicateSession := decodeData[domain.EmployeeImportSession](t, duplicatePreviewRec.Body.Bytes())
 	duplicateConfirmReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/"+duplicateSession.ID+"/confirm", strings.NewReader(`{"mode":"create"}`))
 	duplicateConfirmReq.Header.Set("Content-Type", "application/json")
-	duplicateConfirmReq.Header.Set("X-Approval-Confirmed", "true")
 	duplicateConfirmRec := httptest.NewRecorder()
 	handler.ServeHTTP(duplicateConfirmRec, duplicateConfirmReq)
 	if duplicateConfirmRec.Code != http.StatusBadRequest {
@@ -1369,7 +1312,6 @@ func TestEmployeeImportPreviewRejectsOversizedMultipartBody(t *testing.T) {
 	}
 	req := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/preview", body)
 	req.Header.Set("Content-Type", writer.FormDataContentType())
-	req.Header.Set("X-Approval-Confirmed", "true")
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -1407,15 +1349,6 @@ func TestEmployeeCreateStatusAndDeleteContract(t *testing.T) {
 	statusReq.Header.Set("Content-Type", "application/json")
 	statusRec := httptest.NewRecorder()
 	handler.ServeHTTP(statusRec, statusReq)
-	if statusRec.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for unconfirmed high-risk status patch, got %d: %s", statusRec.Code, statusRec.Body.String())
-	}
-
-	statusReq = httptest.NewRequest(http.MethodPatch, "/v1/hr/employees/"+created.ID+"/status", strings.NewReader(`{"status":"試用中"}`))
-	statusReq.Header.Set("Content-Type", "application/json")
-	statusReq.Header.Set("X-Approval-Confirmed", "true")
-	statusRec = httptest.NewRecorder()
-	handler.ServeHTTP(statusRec, statusReq)
 	if statusRec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for status patch, got %d: %s", statusRec.Code, statusRec.Body.String())
 	}
@@ -1426,7 +1359,6 @@ func TestEmployeeCreateStatusAndDeleteContract(t *testing.T) {
 
 	resignReq := httptest.NewRequest(http.MethodPatch, "/v1/hr/employees/"+created.ID+"/status", strings.NewReader(`{"status":"resigned"}`))
 	resignReq.Header.Set("Content-Type", "application/json")
-	resignReq.Header.Set("X-Approval-Confirmed", "true")
 	resignRec := httptest.NewRecorder()
 	handler.ServeHTTP(resignRec, resignReq)
 	if resignRec.Code != http.StatusBadRequest {
@@ -1434,7 +1366,6 @@ func TestEmployeeCreateStatusAndDeleteContract(t *testing.T) {
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/hr/employees/"+created.ID, nil)
-	deleteReq.Header.Set("X-Approval-Confirmed", "true")
 	deleteRec := httptest.NewRecorder()
 	handler.ServeHTTP(deleteRec, deleteReq)
 	if deleteRec.Code != http.StatusOK {
@@ -1478,7 +1409,7 @@ func TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes(t *testing.T) {
 	}
 	created := decodeData[domain.EmployeeDetail](t, createRec.Body.Bytes())
 
-	updatePreviewReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/"+created.ID+"/preview", strings.NewReader(`{"position":"Lead Engineer"}`))
+	updatePreviewReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/"+created.ID+"/preview", strings.NewReader(`{"name":"Updated Route Person"}`))
 	updatePreviewReq.Header.Set("Content-Type", "application/json")
 	updatePreviewRec := httptest.NewRecorder()
 	handler.ServeHTTP(updatePreviewRec, updatePreviewReq)
@@ -1486,8 +1417,16 @@ func TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes(t *testing.T) {
 		t.Fatalf("expected 200 for employee update preview, got %d: %s", updatePreviewRec.Code, updatePreviewRec.Body.String())
 	}
 	updatePreview := decodeData[domain.EmployeePreviewResponse](t, updatePreviewRec.Body.Bytes())
-	if !updatePreview.Valid || updatePreview.Employee.Position != "Lead Engineer" || updatePreview.Detail.Sections.EmploymentInfo.Position != "Lead Engineer" || updatePreview.Diff["position"] == nil {
+	if !updatePreview.Valid || updatePreview.Employee.Name != "Updated Route Person" || updatePreview.Diff["name"] == nil {
 		t.Fatalf("expected update preview diff, got %+v", updatePreview)
+	}
+
+	nonBasicUpdateReq := httptest.NewRequest(http.MethodPatch, "/v1/hr/employees/"+created.ID, strings.NewReader(`{"position":"Lead Engineer"}`))
+	nonBasicUpdateReq.Header.Set("Content-Type", "application/json")
+	nonBasicUpdateRec := httptest.NewRecorder()
+	handler.ServeHTTP(nonBasicUpdateRec, nonBasicUpdateReq)
+	if nonBasicUpdateRec.Code != http.StatusBadRequest || !strings.Contains(nonBasicUpdateRec.Body.String(), "basic_info_only") {
+		t.Fatalf("expected non-basic employee update rejection, got %d: %s", nonBasicUpdateRec.Code, nonBasicUpdateRec.Body.String())
 	}
 
 	templateReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/import/template?format=csv", nil)
@@ -1591,11 +1530,10 @@ func TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes(t *testing.T) {
 	}
 
 	exportReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/export?employment_status=active", nil)
-	exportReq.Header.Set("X-Approval-Instance-ID", form.ID)
 	exportRec := httptest.NewRecorder()
 	handler.ServeHTTP(exportRec, exportReq)
 	if exportRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for approval instance export, got %d: %s", exportRec.Code, exportRec.Body.String())
+		t.Fatalf("expected 200 for permission-authorized export, got %d: %s", exportRec.Code, exportRec.Body.String())
 	}
 }
 

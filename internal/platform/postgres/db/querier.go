@@ -14,7 +14,6 @@ type Querier interface {
 	AppendOutboxEvent(ctx context.Context, arg AppendOutboxEventParams) (OutboxEvent, error)
 	// Atomically claim a batch of dispatchable outbox rows for multi-replica workers.
 	ClaimOutboxEvents(ctx context.Context, arg ClaimOutboxEventsParams) ([]OutboxEvent, error)
-	ClearDefaultAgentModel(ctx context.Context, arg ClearDefaultAgentModelParams) error
 	CountActiveAgentRunsBySession(ctx context.Context, arg CountActiveAgentRunsBySessionParams) (int64, error)
 	CountAgentDefinitionsByModel(ctx context.Context, arg CountAgentDefinitionsByModelParams) (int64, error)
 	CountAgentRuns(ctx context.Context, tenantID string) (int64, error)
@@ -38,6 +37,7 @@ type Querier interface {
 	DeleteAuthzPermissionSetAssignment(ctx context.Context, arg DeleteAuthzPermissionSetAssignmentParams) (AuthzPermissionSetAssignment, error)
 	DeleteAuthzRelationshipTuple(ctx context.Context, arg DeleteAuthzRelationshipTupleParams) error
 	DeleteFormInstance(ctx context.Context, arg DeleteFormInstanceParams) error
+	DeleteFormInstanceFieldValues(ctx context.Context, arg DeleteFormInstanceFieldValuesParams) error
 	DeleteGroupMembership(ctx context.Context, arg DeleteGroupMembershipParams) (AuthzGroupMembership, error)
 	DeleteMenuItem(ctx context.Context, arg DeleteMenuItemParams) error
 	DeletePermissionCatalogItem(ctx context.Context, arg DeletePermissionCatalogItemParams) error
@@ -77,6 +77,8 @@ type Querier interface {
 	GetFormInstance(ctx context.Context, arg GetFormInstanceParams) (FormInstance, error)
 	GetFormTemplate(ctx context.Context, arg GetFormTemplateParams) (FormTemplate, error)
 	GetFormTemplateByKey(ctx context.Context, arg GetFormTemplateByKeyParams) (FormTemplate, error)
+	GetFormTemplateVersion(ctx context.Context, arg GetFormTemplateVersionParams) (FormTemplateVersion, error)
+	GetFormTemplateVersionByNumber(ctx context.Context, arg GetFormTemplateVersionByNumberParams) (FormTemplateVersion, error)
 	GetGroupMembership(ctx context.Context, arg GetGroupMembershipParams) (AuthzGroupMembership, error)
 	GetLeaveBalance(ctx context.Context, arg GetLeaveBalanceParams) (LeaveBalance, error)
 	GetLeaveRequest(ctx context.Context, arg GetLeaveRequestParams) (LeaveRequest, error)
@@ -103,6 +105,8 @@ type Querier interface {
 	InsertAgentAudit(ctx context.Context, arg InsertAgentAuditParams) (AgentAudit, error)
 	InsertAgentDefinitionVersion(ctx context.Context, arg InsertAgentDefinitionVersionParams) (AgentDefinitionVersion, error)
 	InsertAgentSessionMessage(ctx context.Context, arg InsertAgentSessionMessageParams) (AgentSessionMessage, error)
+	InsertFormInstanceFieldValue(ctx context.Context, arg InsertFormInstanceFieldValueParams) error
+	InsertFormTemplateVersion(ctx context.Context, arg InsertFormTemplateVersionParams) error
 	InsertWorkflowAction(ctx context.Context, arg InsertWorkflowActionParams) (WorkflowAction, error)
 	ListAccounts(ctx context.Context, tenantID string) ([]Account, error)
 	ListActiveAuthzAssumableRoleSessionsForRole(ctx context.Context, arg ListActiveAuthzAssumableRoleSessionsForRoleParams) ([]AuthzAssumableRoleSession, error)
@@ -139,6 +143,7 @@ type Querier interface {
 	ListEmployeesFilteredPage(ctx context.Context, arg ListEmployeesFilteredPageParams) ([]Employee, error)
 	ListEmploymentContracts(ctx context.Context, tenantID string) ([]EmploymentContract, error)
 	ListEmploymentContractsByEmployee(ctx context.Context, arg ListEmploymentContractsByEmployeeParams) ([]EmploymentContract, error)
+	ListFormInstanceFieldValues(ctx context.Context, arg ListFormInstanceFieldValuesParams) ([]FormInstanceFieldValue, error)
 	ListFormInstancePageByQuery(ctx context.Context, arg ListFormInstancePageByQueryParams) ([]FormInstance, error)
 	ListFormInstances(ctx context.Context, tenantID string) ([]FormInstance, error)
 	ListFormInstancesByQuery(ctx context.Context, arg ListFormInstancesByQueryParams) ([]FormInstance, error)

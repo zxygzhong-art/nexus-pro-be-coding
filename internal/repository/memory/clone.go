@@ -337,7 +337,7 @@ func copyAttendanceWorksite(v AttendanceWorksite) AttendanceWorksite { return v 
 // copyAttendanceShift 複製考勤班別。
 func copyAttendanceShift(v AttendanceShift) AttendanceShift { return v }
 
-// copyAttendanceShiftAssignment 複製考勤班別指派。
+// copyAttendanceShiftAssignment 複製員工班別指派。
 func copyAttendanceShiftAssignment(v AttendanceShiftAssignment) AttendanceShiftAssignment {
 	if v.EffectiveTo != nil {
 		t := *v.EffectiveTo
@@ -373,6 +373,20 @@ func copyOvertimeRequest(v OvertimeRequest) OvertimeRequest { return v }
 // copyFormTemplate 複製表單範本。
 func copyFormTemplate(v FormTemplate) FormTemplate {
 	v.Schema = utils.CopyStringMap(v.Schema)
+	if v.DeletedAt != nil {
+		t := *v.DeletedAt
+		v.DeletedAt = &t
+	}
+	return v
+}
+
+// copyFormTemplateVersion 複製不可變表單版本。
+func copyFormTemplateVersion(v FormTemplateVersion) FormTemplateVersion {
+	v.Schema = utils.CopyStringMap(v.Schema)
+	if v.PublishedAt != nil {
+		t := *v.PublishedAt
+		v.PublishedAt = &t
+	}
 	return v
 }
 
@@ -380,6 +394,20 @@ func copyFormTemplate(v FormTemplate) FormTemplate {
 func copyFormInstance(v FormInstance) FormInstance {
 	v.Payload = utils.CopyStringMap(v.Payload)
 	return v
+}
+
+// copyFormInstanceFieldValues 複製類型化欄位投影。
+func copyFormInstanceFieldValues(values []FormInstanceFieldValue) []FormInstanceFieldValue {
+	out := make([]FormInstanceFieldValue, len(values))
+	for index, value := range values {
+		out[index] = value
+		if value.ValueBoolean != nil {
+			booleanValue := *value.ValueBoolean
+			out[index].ValueBoolean = &booleanValue
+		}
+		out[index].ValueJSON = append([]byte(nil), value.ValueJSON...)
+	}
+	return out
 }
 
 // copyPlatformTaskRecordItem 複製平台任務 record 項目。

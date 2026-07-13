@@ -12,7 +12,6 @@ import (
 // TestHRPositionCRUDSoftDisablesPosition 驗證崗位 CRUD 與刪除策略。
 func TestHRPositionCRUDSoftDisablesPosition(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, hrPositionContractPermissions())
-	ctx.ApprovalConfirmed = true
 
 	created, err := svc.HR().CreatePosition(ctx, domain.CreatePositionInput{
 		Code:        "eng",
@@ -61,6 +60,36 @@ func TestHRPositionCRUDSoftDisablesPosition(t *testing.T) {
 	}
 }
 
+// TestManagerPositionCannotMoveOrDisable 验证主管岗位必须保留在所属组织且保持启用。
+func TestManagerPositionCannotMoveOrDisable(t *testing.T) {
+	permissions := append(hrPositionContractPermissions(),
+		domain.Permission{Resource: "hr.org_unit", Action: "create", Scope: "all"},
+		domain.Permission{Resource: "hr.org_unit", Action: "update", Scope: "all"},
+	)
+	_, svc, ctx := newEmployeeFeatureFixture(t, permissions)
+	other, err := svc.HR().CreateOrgUnit(ctx, domain.CreateOrgUnitInput{Name: "Other"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	position, err := svc.HR().CreatePosition(ctx, domain.CreatePositionInput{
+		Code: "HQ-HEAD", Name: "HQ Head", OrgUnitID: "ou-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	positionID := position.ID
+	if _, err := svc.HR().UpdateOrgUnit(ctx, "ou-1", domain.UpdateOrgUnitInput{ManagerPositionID: &positionID}); err != nil {
+		t.Fatal(err)
+	}
+	otherID := other.ID
+	if _, err := svc.HR().UpdatePosition(ctx, position.ID, domain.UpdatePositionInput{OrgUnitID: &otherID}); err == nil {
+		t.Fatal("expected moving a manager position to fail")
+	}
+	if _, err := svc.HR().DeletePosition(ctx, position.ID); err == nil {
+		t.Fatal("expected disabling a manager position to fail")
+	}
+}
+
 // TestBackfillEmployeePositionsFromStringsDeduplicatesByName 驗證既有 position 字串可回填為崗位實體。
 func TestBackfillEmployeePositionsFromStringsDeduplicatesByName(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, hrPositionContractPermissions())
@@ -104,7 +133,6 @@ func TestBackfillEmployeePositionsFromStringsDeduplicatesByName(t *testing.T) {
 // TestEmploymentContractStatusTransitionsAndAudit 驗證合約狀態流轉與審計。
 func TestEmploymentContractStatusTransitionsAndAudit(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, hrPositionContractPermissions())
-	ctx.ApprovalConfirmed = true
 	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
 	if err := store.UpsertEmployee(context.Background(), domain.Employee{
 		ID:        "emp-contract",

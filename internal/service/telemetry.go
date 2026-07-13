@@ -80,12 +80,8 @@ func setAuthzSpanResult(span trace.Span, result CheckResult) {
 	if result.EffectiveScope != "" {
 		attrs = append(attrs, attribute.String("authz.effective_scope", string(result.EffectiveScope)))
 	}
-	if result.RequiresApproval {
-		attrs = append(attrs,
-			attribute.Bool("authz.requires_approval", result.RequiresApproval),
-			attribute.String("authz.risk_level", result.RiskLevel),
-			attribute.String("authz.approval_type", result.ApprovalType),
-		)
+	if result.RiskLevel != "" {
+		attrs = append(attrs, attribute.String("authz.risk_level", result.RiskLevel))
 	}
 	span.SetAttributes(attrs...)
 }

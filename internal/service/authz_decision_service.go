@@ -89,7 +89,7 @@ func (c *Service) evaluateAuthzDecision(ctx RequestContext, account Account, req
 	var assumedScope Scope
 	var assumedConditions map[string]any
 	var assumedMatched bool
-	requiresApproval, riskLevel, approvalType, approvalReason := approvalPolicyForRoute(req)
+	riskLevel := riskLevelForRoute(req)
 	permissionKey := permissionKey(req.ApplicationCode, req.ResourceType, req.Action)
 
 	for _, grant := range grants {
@@ -147,14 +147,7 @@ func (c *Service) evaluateAuthzDecision(ctx RequestContext, account Account, req
 		matched = append(matched, permissionLabel(grant.Permission))
 		matchedBy = append(matchedBy, source)
 		if isHighRiskPermission(grant.Permission) {
-			requiresApproval = true
 			riskLevel = maxRiskLevel(riskLevel, grant.Permission.RiskLevel)
-			if approvalType == "" {
-				approvalType = approvalTypeForRisk(grant.Permission.RiskLevel)
-			}
-			if approvalReason == "" {
-				approvalReason = "permission_risk"
-			}
 		}
 		scope, conditions, err := c.conditionsForGrant(ctx, account, grant, req)
 		if err != nil {
@@ -252,10 +245,7 @@ func (c *Service) evaluateAuthzDecision(ctx RequestContext, account Account, req
 		Conditions:         chosenConditions,
 		FieldPolicies:      fieldPolicies,
 		PermissionBoundary: boundary,
-		RequiresApproval:   requiresApproval && len(matched) > 0,
 		RiskLevel:          riskLevel,
-		ApprovalType:       approvalType,
-		ApprovalReason:     approvalReason,
 		Resource:           req.Resource,
 		ApplicationCode:    req.ApplicationCode,
 		ResourceType:       req.ResourceType,
@@ -326,14 +316,23 @@ func (c *Service) collectAuthzGrantsWithOptions(ctx RequestContext, account Acco
 		setIDs = append(setIDs, set.ID)
 		for _, perm := range set.Permissions {
 			perm = normalizePermission(perm)
-			grants = append(grants, authzGrant{
+			grant := authzGrant{
 				Permission:      perm,
 				PermissionSetID: set.ID,
 				Source:          source,
 				SourceKind:      sourceKind,
 				Effect:          utils.FirstNonEmpty(effect, "allow"),
 				DataScope:       scope,
-			})
+			}
+			grants = append(grants, grant)
+			for _, expanded := range expandPageMenuPermission(perm) {
+				if permissionEffect(grant) == "deny" && isPageBootstrapPermission(expanded) {
+					continue
+				}
+				expandedGrant := grant
+				expandedGrant.Permission = expanded
+				grants = append(grants, expandedGrant)
+			}
 		}
 		return nil
 	}

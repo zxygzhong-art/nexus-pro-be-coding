@@ -81,6 +81,10 @@ func (c PlatformService) ListAssistants(ctx RequestContext, query PlatformAssist
 }
 
 func (c PlatformService) publishedPlatformAssistants(ctx RequestContext, limit int, query PlatformAssistantsQuery) ([]PlatformAssistant, error) {
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
 	agents, err := c.store.ListPublishedAgentDefinitions(goContext(ctx), ctx.TenantID)
 	if err != nil {
 		return nil, err
@@ -89,12 +93,20 @@ func (c PlatformService) publishedPlatformAssistants(ctx RequestContext, limit i
 	search := strings.ToLower(strings.TrimSpace(query.Search))
 	items := make([]PlatformAssistant, 0, len(agents))
 	for _, agent := range agents {
+		visible, err := c.agentDefinitionVisibleToAccount(ctx, account, agent)
+		if err != nil {
+			return nil, err
+		}
+		if !visible {
+			continue
+		}
 		assistant := PlatformAssistant{
-			ID:    agent.ID,
-			Emoji: agent.Emoji,
-			Title: agent.Name,
-			Desc:  agent.Description,
-			Tag:   string(agent.Category),
+			ID:       agent.ID,
+			Emoji:    agent.Emoji,
+			Title:    agent.Name,
+			Desc:     agent.Description,
+			Tag:      string(agent.Category),
+			Runnable: true,
 		}
 		if tag != "" && tag != "all" && assistant.Tag != tag {
 			continue
@@ -430,15 +442,35 @@ func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employe
 	if err != nil {
 		return 0, 0, 0, 0
 	}
+	type monthlyClockPair struct {
+		clockIn  *AttendanceClockRecord
+		clockOut *AttendanceClockRecord
+	}
 	days := map[string]struct{}{}
+	pairs := map[string]monthlyClockPair{}
 	for _, record := range records {
-		if record.EmployeeID != employeeID || record.Direction != clockDirectionIn || record.RecordStatus != clockRecordStatusAccepted {
+		if record.EmployeeID != employeeID || record.RecordStatus != clockRecordStatusAccepted {
 			continue
 		}
-		if !record.ClockedAt.Before(start) && record.ClockedAt.Before(end) {
+		pair := pairs[record.WorkDate]
+		switch record.Direction {
+		case clockDirectionIn:
+			current := record
+			pair.clockIn = &current
 			days[record.WorkDate] = struct{}{}
+		case clockDirectionOut:
+			current := record
+			pair.clockOut = &current
+		}
+		pairs[record.WorkDate] = pair
+	}
+	monthlyHours := 0.0
+	for _, pair := range pairs {
+		if pair.clockIn != nil && pair.clockOut != nil && pair.clockOut.ClockedAt.After(pair.clockIn.ClockedAt) {
+			monthlyHours += pair.clockOut.ClockedAt.Sub(pair.clockIn.ClockedAt).Hours()
 		}
 	}
+	monthlyHours = math.Round(monthlyHours*10) / 10
 	leaveHours := 0.0
 	leaves, err := c.store.ListLeaveRequestsByQuery(goContext(ctx), ctx.TenantID, LeaveRequestQuery{
 		EmployeeIDs: []string{employeeID},
@@ -469,7 +501,7 @@ func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employe
 			overtimeHours += overtime.Hours
 		}
 	}
-	return len(days), float64(len(days))*workspaceDayHours + overtimeHours, leaveHours / workspaceDayHours, overtimeHours
+	return len(days), monthlyHours, leaveHours / workspaceDayHours, overtimeHours
 }
 
 // formInstances 處理表單實例的服務流程。
@@ -825,7 +857,7 @@ func workspaceFormDesignInputFromTemplate(template FormTemplate) SaveWorkspaceFo
 		Desc:     platformTemplateDesc(template),
 		Enabled:  &enabled,
 		FormKind: firstNonEmpty(platformTemplateFormKind(template.Schema), defaultFormKindForTemplateKey(template.Key)),
-		Fields:   platformTemplateFields(template.Schema),
+		Fields:   platformTemplateFields(template.Key, template.Schema),
 		Stages:   platformTemplateStages(template.Schema),
 	}
 }
@@ -967,12 +999,61 @@ func platformTemplateUpdatedAt(schema map[string]any, fallback time.Time) string
 	return platformTime(fallback)
 }
 
-// platformTemplateFields 處理平台範本欄位。
-func platformTemplateFields(schema map[string]any) []PlatformFormBuilderField {
-	if fields, ok := platformDecodeSlice[PlatformFormBuilderField](platformTemplateDesign(schema)["fields"]); ok {
+// platformTemplateFields 依範本類型處理已儲存欄位與舊資料 fallback。
+func platformTemplateFields(templateKey string, schema map[string]any) []PlatformFormBuilderField {
+	fields, ok := platformDecodeSlice[PlatformFormBuilderField](platformTemplateDesign(schema)["fields"])
+	isLeaveTemplate := lockedFieldIDsForTemplate(templateKey, defaultFormKindForTemplateKey(templateKey)) != nil
+	if ok && len(fields) > 0 && !(isLeaveTemplate && isLegacyGenericBuilderFields(fields)) {
 		return fields
 	}
+	if isLeaveTemplate {
+		return platformLeaveRequestBuilderFields()
+	}
 	return platformFormBuilderContract().Fields
+}
+
+// isLegacyGenericBuilderFields 辨識舊版後端誤套給請假單的三欄通用 schema。
+func isLegacyGenericBuilderFields(fields []PlatformFormBuilderField) bool {
+	legacyIDs := []string{"subject", "needed_at", "description"}
+	if len(fields) != len(legacyIDs) {
+		return false
+	}
+	for index, field := range fields {
+		if strings.TrimSpace(field.ID) != legacyIDs[index] {
+			return false
+		}
+	}
+	return true
+}
+
+// platformLeaveRequestBuilderFields 建立設計器與執行期共用的請假申請單標準欄位。
+func platformLeaveRequestBuilderFields() []PlatformFormBuilderField {
+	slot := func(value int) *int { return &value }
+	binding := func(sourceID, valueField, labelField string) *PlatformFormBuilderFieldBinding {
+		return &PlatformFormBuilderFieldBinding{SourceID: sourceID, ValueField: valueField, LabelField: labelField}
+	}
+	return []PlatformFormBuilderField{
+		{ID: "section-applicant", Type: "section-title", Label: "申請人資料"},
+		{ID: "layout-applicant", Type: "layout", Label: "申請人列", Placeholder: "分欄容器：1fr / 1fr", LayoutColumns: []string{"1fr", "1fr"}},
+		{ID: "applicant_name", Type: "autofill", Label: "申請人", Placeholder: "登入者自動帶入", Binding: binding("current_user", "display_name", ""), ParentLayoutID: "layout-applicant", SlotIndex: slot(0)},
+		{ID: "applicant_employee_no", Type: "autofill", Label: "申請人員工編號", Placeholder: "依申請人自動帶入", Binding: binding("current_user", "employee_no", ""), ParentLayoutID: "layout-applicant", SlotIndex: slot(1)},
+		{ID: "layout-org", Type: "layout", Label: "組織列", Placeholder: "分欄容器：1fr / 1fr", LayoutColumns: []string{"1fr", "1fr"}},
+		{ID: "applicant_dept", Type: "autofill", Label: "部門", Placeholder: "依申請人自動帶入", Binding: binding("current_user", "department_name", ""), ParentLayoutID: "layout-org", SlotIndex: slot(0)},
+		{ID: "applicant_title", Type: "autofill", Label: "職稱", Placeholder: "依申請人自動帶入", Binding: binding("current_user", "position_name", ""), ParentLayoutID: "layout-org", SlotIndex: slot(1)},
+		{ID: "layout-proxy", Type: "layout", Label: "代理人列", Placeholder: "分欄容器：1fr / 1fr", LayoutColumns: []string{"1fr", "1fr"}},
+		{ID: "proxy", Type: "select", Label: "代理人", Placeholder: "請選擇代理人", Required: true, Binding: binding("employees", "id", "name"), ParentLayoutID: "layout-proxy", SlotIndex: slot(0)},
+		{ID: "proxy_id", Type: "autofill", Label: "代理人員工編號", Placeholder: "依代理人自動帶入", ParentLayoutID: "layout-proxy", SlotIndex: slot(1)},
+		{ID: "section-content", Type: "section-title", Label: "申請內容"},
+		{ID: "leave_type", Type: "select", Label: "假勤名稱", Placeholder: "請選擇", Required: true, DefaultValue: "annual", Binding: binding("leave_types", "code", "name")},
+		{ID: "layout-range", Type: "layout", Label: "時段列", Placeholder: "分欄容器：1fr / 1fr", LayoutColumns: []string{"1fr", "1fr"}},
+		{ID: "start_at", Type: "datetime", Label: "開始時間", Placeholder: "選擇日期時間", Required: true, ParentLayoutID: "layout-range", SlotIndex: slot(0)},
+		{ID: "end_at", Type: "datetime", Label: "結束時間", Placeholder: "選擇日期時間", Required: true, ParentLayoutID: "layout-range", SlotIndex: slot(1)},
+		{ID: "layout-hours", Type: "layout", Label: "時數列", Placeholder: "分欄容器：1fr / 1fr / 1fr", LayoutColumns: []string{"1fr", "1fr", "1fr"}},
+		{ID: "hours_taken", Type: "autofill", Label: "已休時數", Placeholder: "0", ParentLayoutID: "layout-hours", SlotIndex: slot(0)},
+		{ID: "hours_remaining", Type: "autofill", Label: "未休時數", Placeholder: "0", ParentLayoutID: "layout-hours", SlotIndex: slot(1)},
+		{ID: "hours", Type: "number", Label: "請假時數", Placeholder: "0", Required: true, ParentLayoutID: "layout-hours", SlotIndex: slot(2)},
+		{ID: "reason", Type: "textarea", Label: "請假原因", Placeholder: "請填寫請假事由", Required: true},
+	}
 }
 
 // platformTemplateStages 處理平台範本 stages。
@@ -1268,13 +1349,14 @@ func clockTime(record *AttendanceClockRecord) *string {
 	if record == nil {
 		return nil
 	}
-	text := record.ClockedAt.Format("15:04")
+	text := record.ClockedAt.In(attendanceClockLocation).Format("15:04")
 	return &text
 }
 
 // platformDateLabel 處理平台日期 label。
 func platformDateLabel(t time.Time) string {
-	return fmt.Sprintf("%s %s", t.Format(platformDateLayout), platformWeekday(t))
+	local := t.In(attendanceClockLocation)
+	return fmt.Sprintf("%s %s", local.Format(platformDateLayout), platformWeekday(local))
 }
 
 // platformWeekday 處理平台星期。
@@ -1285,10 +1367,7 @@ func platformWeekday(t time.Time) string {
 
 // platformTime 處理平台時間。
 func platformTime(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format("2006/01/02 15:04")
+	return apiTimestamp(t)
 }
 
 // sameYearMonth 處理 same year 月份。

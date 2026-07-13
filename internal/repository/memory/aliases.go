@@ -45,7 +45,9 @@ type (
 	AttendanceCorrectionRequest     = domain.AttendanceCorrectionRequest
 	OvertimeRequest                 = domain.OvertimeRequest
 	FormTemplate                    = domain.FormTemplate
+	FormTemplateVersion             = domain.FormTemplateVersion
 	FormInstance                    = domain.FormInstance
+	FormInstanceFieldValue          = domain.FormInstanceFieldValue
 	PlatformTaskRecordItem          = domain.PlatformTaskRecordItem
 	PlatformTaskTodoRecord          = domain.PlatformTaskTodoRecord
 	Reference                       = domain.Reference

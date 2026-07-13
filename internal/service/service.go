@@ -2,9 +2,7 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"log/slog"
-	"reflect"
 	"sort"
 	"strings"
 	"time"
@@ -22,9 +20,7 @@ type Service struct {
 	authzSnapshot         AuthzSnapshotCache
 	relationships         RelationshipChecker
 	openFGAScopeChecks    bool
-	agentChatEnabled      bool
 	agentChatRuntime      AgentChatRuntime
-	agentChatTimeout      time.Duration
 	liteLLMAdmin          LiteLLMAdminClient
 	objectStore           ObjectStore
 	ehrmsClient           EHRMSClient
@@ -39,9 +35,7 @@ type Options struct {
 	AuthzSnapshot         AuthzSnapshotCache
 	Relationships         RelationshipChecker
 	OpenFGAScopeChecks    bool
-	AgentChatEnabled      bool
 	AgentChatRuntime      AgentChatRuntime
-	AgentChatTimeout      time.Duration
 	LiteLLMAdmin          LiteLLMAdminClient
 	ObjectStore           ObjectStore
 	EHRMSClient           EHRMSClient
@@ -66,6 +60,8 @@ type EHRMSClient interface {
 	ListDepartments(context.Context) ([]domain.EHRMSDepartmentRecord, error)
 	ListPositions(context.Context) ([]domain.EHRMSPositionRecord, error)
 	ListAttendance(context.Context) ([]domain.EHRMSAttendanceRecord, error)
+	ListLeaveBalances(context.Context) ([]domain.EHRMSLeaveBalanceRecord, error)
+	ListLeaveDetails(context.Context) ([]domain.EHRMSLeaveDetailRecord, error)
 }
 
 // IdentityProvisioner 定義身分 provisioner 的行為契約。
@@ -100,9 +96,7 @@ func New(store repository.Store, options ...Options) *Service {
 		authzSnapshot:         cfg.AuthzSnapshot,
 		relationships:         cfg.Relationships,
 		openFGAScopeChecks:    cfg.OpenFGAScopeChecks,
-		agentChatEnabled:      cfg.AgentChatEnabled,
 		agentChatRuntime:      cfg.AgentChatRuntime,
-		agentChatTimeout:      cfg.AgentChatTimeout,
 		liteLLMAdmin:          cfg.LiteLLMAdmin,
 		objectStore:           firstObjectStore(cfg.ObjectStore),
 		ehrmsClient:           cfg.EHRMSClient,
@@ -248,116 +242,7 @@ func (c *Service) Authorize(ctx RequestContext, req CheckRequest, audit AuditTar
 		)
 		return Account{}, decision, AuthzAudit{}, forbiddenAuthz(decision)
 	}
-	if decision.RequiresApproval {
-		if err := c.confirmApproval(ctx, req); err == nil {
-			return account, decision, done, nil
-		} else if ctx.ApprovalInstanceID != "" {
-			_ = c.auditAuthzTarget(ctx, audit, decision)
-			return Account{}, decision, AuthzAudit{}, err
-		}
-		_ = c.auditAuthzTarget(ctx, audit, decision)
-		c.logWarn(ctx, "authorization requires approval",
-			"application_code", req.ApplicationCode,
-			"resource_type", req.ResourceType,
-			"resource_id", req.ResourceID,
-			"action", req.Action,
-			"risk_level", decision.RiskLevel,
-			"approval_type", decision.ApprovalType,
-			"approval_reason", decision.ApprovalReason,
-		)
-		return Account{}, decision, AuthzAudit{}, domain.ForbiddenReason("approval_required", "high-risk action requires approval")
-	}
 	return account, decision, done, nil
-}
-
-// ValidateApprovalInstance 驗證核准實例的服務流程。
-func (c *Service) ValidateApprovalInstance(ctx RequestContext, req CheckRequest) error {
-	return c.validateApprovalInstance(ctx, normalizeCheckRequest(req))
-}
-
-// confirmApproval 確認核准的服務流程。
-func (c *Service) confirmApproval(ctx RequestContext, req CheckRequest) error {
-	if ctx.ApprovalInstanceID != "" {
-		return c.ValidateApprovalInstance(ctx, req)
-	}
-	if ctx.ApprovalConfirmed {
-		return nil
-	}
-	return domain.ForbiddenReason("approval_required", "high-risk action requires approval")
-}
-
-// validateApprovalInstance 驗證核准實例的服務流程。
-func (c *Service) validateApprovalInstance(ctx RequestContext, req CheckRequest) error {
-	instance, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, ctx.ApprovalInstanceID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return domain.ForbiddenReason("approval_required", "approval instance not found")
-	}
-	if instance.ApplicantAccountID != ctx.AccountID {
-		return domain.ForbiddenReason("approval_required", "approval instance does not belong to current account")
-	}
-	if !strings.EqualFold(instance.Status, "approved") {
-		return domain.ForbiddenReason("approval_required", "approval instance is not approved")
-	}
-	payload := instance.Payload
-	if !approvalPayloadMatches(payload, "application_code", string(req.ApplicationCode)) {
-		return domain.ForbiddenReason("approval_required", "approval application_code does not match request")
-	}
-	resourceMatches := approvalPayloadMatches(payload, "resource_type", string(req.ResourceType))
-	if req.Resource != "" {
-		resourceMatches = resourceMatches || approvalPayloadMatches(payload, "resource", req.Resource)
-	}
-	if !resourceMatches {
-		return domain.ForbiddenReason("approval_required", "approval resource does not match request")
-	}
-	if !approvalPayloadMatches(payload, "action", string(req.Action)) {
-		return domain.ForbiddenReason("approval_required", "approval action does not match request")
-	}
-	target := utils.FirstNonEmpty(req.ResourceID, req.Target, req.TargetEmployeeID)
-	if target != "" && !approvalPayloadMatchesAny(payload, target, "target", "resource_id", "employee_id", "session_id") {
-		return domain.ForbiddenReason("approval_required", "approval target does not match request")
-	}
-	if filters, ok := req.Context["filters"]; ok {
-		payloadFilters, hasFilters := payload["filters"]
-		if !hasFilters || !approvalPayloadValueMatches(payloadFilters, filters) {
-			return domain.ForbiddenReason("approval_required", "approval filters do not match request")
-		}
-	}
-	return nil
-}
-
-// approvalPayloadMatches 處理核准 payload matches。
-func approvalPayloadMatches(payload map[string]any, key, expected string) bool {
-	if strings.TrimSpace(expected) == "" {
-		return true
-	}
-	value, ok := payload[key]
-	if !ok {
-		return false
-	}
-	return strings.EqualFold(strings.TrimSpace(stringFromAny(value)), strings.TrimSpace(expected))
-}
-
-// approvalPayloadMatchesAny 處理核准 payload matches any。
-func approvalPayloadMatchesAny(payload map[string]any, expected string, keys ...string) bool {
-	for _, key := range keys {
-		if value, ok := payload[key]; ok && strings.EqualFold(strings.TrimSpace(stringFromAny(value)), strings.TrimSpace(expected)) {
-			return true
-		}
-	}
-	return false
-}
-
-// approvalPayloadValueMatches 處理核准 payload value matches。
-func approvalPayloadValueMatches(actual, expected any) bool {
-	actualJSON, actualErr := json.Marshal(actual)
-	expectedJSON, expectedErr := json.Marshal(expected)
-	if actualErr == nil && expectedErr == nil {
-		return string(actualJSON) == string(expectedJSON)
-	}
-	return reflect.DeepEqual(actual, expected)
 }
 
 // stringFromAny 處理字串 來源 any。
@@ -420,10 +305,7 @@ func shouldAuditAuthzDecision(decision CheckResult) bool {
 	if !decision.Allowed {
 		return true
 	}
-	if decision.RequiresApproval {
-		return true
-	}
-	return decision.Action != ActionRead
+	return decision.Action != ActionRead || decision.RiskLevel == string(domain.RiskHigh) || decision.RiskLevel == string(domain.RiskCritical)
 }
 
 // resolveAccess 解析 access 的服務流程。
@@ -594,17 +476,9 @@ func auditResultFromDetails(details map[string]any) string {
 	if result := strings.TrimSpace(stringFromAny(details["result"])); result != "" {
 		return result
 	}
-	if reasonCode := strings.TrimSpace(stringFromAny(details["reason_code"])); reasonCode == "approval_required" {
-		return "approval_required"
-	}
 	if allowed, ok := details["authz_decision"].(bool); ok {
 		if !allowed {
 			return "denied"
-		}
-		if requiresApproval, ok := details["requires_approval"].(bool); ok && requiresApproval {
-			if strings.TrimSpace(stringFromAny(details["approval_method"])) == "" {
-				return "approval_required"
-			}
 		}
 		return "allowed"
 	}
@@ -623,9 +497,6 @@ func forbiddenDataScope(message string) error {
 
 // authzReasonCode 處理授權 reason 碼。
 func authzReasonCode(decision CheckResult) string {
-	if decision.Reason == "approval_required" {
-		return "approval_required"
-	}
 	switch decision.Reason {
 	case "missing permission":
 		switch decision.Action {
@@ -680,12 +551,6 @@ func auditDetailsWithContext(ctx RequestContext, details map[string]any) map[str
 	if ctx.AssumedRoleSessionID != "" {
 		out["assumed_role_session_id"] = ctx.AssumedRoleSessionID
 	}
-	if ctx.ApprovalInstanceID != "" {
-		out["approval_method"] = "workflow_approval"
-		out["approval_instance_id"] = ctx.ApprovalInstanceID
-	} else if ctx.ApprovalConfirmed {
-		out["approval_method"] = "header_confirmation"
-	}
 	return out
 }
 
@@ -710,10 +575,7 @@ func auditDecisionDetails(ctx RequestContext, decision CheckResult, details map[
 	out["permission_boundary"] = decision.PermissionBoundary
 	out["data_scope"] = decision.Scope
 	out["field_policies"] = decision.FieldPolicies
-	out["requires_approval"] = decision.RequiresApproval
 	out["risk_level"] = decision.RiskLevel
-	out["approval_type"] = decision.ApprovalType
-	out["approval_reason"] = decision.ApprovalReason
 	return out
 }
 
@@ -721,6 +583,13 @@ func auditDecisionDetails(ctx RequestContext, decision CheckResult, details map[
 func permissionMatches(perm Permission, req CheckRequest, account Account) bool {
 	perm = normalizePermission(perm)
 	req = normalizeCheckRequest(req)
+	switch perm.PermissionType {
+	case "", PermissionTypeAPI, PermissionTypeButton:
+	case PermissionTypeMenu, PermissionTypeField, PermissionTypeScope:
+		return false
+	default:
+		return false
+	}
 	if !wildcardMatch(req.Resource, perm.Resource) {
 		return false
 	}
@@ -811,12 +680,16 @@ func capabilitiesFromPermissions(perms []Permission) []string {
 	return out
 }
 
+// effectiveAccessPermissionsFromGrants 回傳套用 deny、boundary 與 assumed-role 交集後的有效權限。
 func effectiveAccessPermissionsFromGrants(grants []authzGrant, boundary map[string]any, requireAssumed bool) []Permission {
 	normalAllowed := map[string]struct{}{}
 	assumedAllowed := map[string]struct{}{}
 	denied := make([]string, 0)
 	for _, grant := range grants {
 		perm := normalizePermission(grant.Permission)
+		if !permissionCanAuthorizeRequest(perm) {
+			continue
+		}
 		key := permissionKey(perm.ApplicationCode, perm.ResourceType, perm.Action)
 		if permissionEffect(grant) == "deny" {
 			denied = append(denied, key)
@@ -834,8 +707,12 @@ func effectiveAccessPermissionsFromGrants(grants []authzGrant, boundary map[stri
 
 	out := make([]Permission, 0, len(grants))
 	seen := map[string]struct{}{}
+	effectivePermissionKeys := map[string]struct{}{}
 	for _, grant := range grants {
 		perm := normalizePermission(grant.Permission)
+		if !permissionCanAuthorizeRequest(perm) {
+			continue
+		}
 		key := permissionKey(perm.ApplicationCode, perm.ResourceType, perm.Action)
 		if permissionEffect(grant) == "deny" {
 			continue
@@ -851,7 +728,31 @@ func effectiveAccessPermissionsFromGrants(grants []authzGrant, boundary map[stri
 				continue
 			}
 		}
-		label := permissionLabel(perm)
+		effectivePermissionKeys[key] = struct{}{}
+		label := effectivePermissionIdentity(perm)
+		if _, ok := seen[label]; ok {
+			continue
+		}
+		seen[label] = struct{}{}
+		out = append(out, perm)
+	}
+	for _, grant := range grants {
+		perm := normalizePermission(grant.Permission)
+		if perm.PermissionType != PermissionTypeMenu || permissionEffect(grant) == "deny" {
+			continue
+		}
+		menuKey := strings.TrimSpace(perm.MenuKey)
+		if menuKey == "" {
+			menuKey = strings.TrimSpace(perm.Resource)
+		}
+		primaryRead, ok := menuPrimaryReadPermissionKey(menuKey)
+		if !ok {
+			continue
+		}
+		if _, effective := effectivePermissionKeys[primaryRead]; !effective {
+			continue
+		}
+		label := effectivePermissionIdentity(perm)
 		if _, ok := seen[label]; ok {
 			continue
 		}
@@ -859,6 +760,25 @@ func effectiveAccessPermissionsFromGrants(grants []authzGrant, boundary map[stri
 		out = append(out, perm)
 	}
 	return out
+}
+
+// permissionCanAuthorizeRequest 限制只有 API、button 與舊版未標型別權限可參與 API 授權。
+func permissionCanAuthorizeRequest(permission Permission) bool {
+	switch permission.PermissionType {
+	case "", PermissionTypeAPI, PermissionTypeButton:
+		return true
+	default:
+		return false
+	}
+}
+
+// effectivePermissionIdentity 避免 menu grant 與同名 API grant 在 /me 回應互相覆蓋。
+func effectivePermissionIdentity(permission Permission) string {
+	return strings.Join([]string{
+		string(permission.PermissionType),
+		permissionLabel(permission),
+		canonicalPageMenuKey(permission.MenuKey),
+	}, "|")
 }
 
 func permissionKeyDenied(key string, denied []string) bool {

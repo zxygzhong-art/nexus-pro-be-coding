@@ -67,7 +67,6 @@ func TestCreateLeaveRequestRejectsUnknownLeaveType(t *testing.T) {
 func TestGrantLeaveBalancesProratesAnnualByHireDate(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store, svc, ctx := newLeavePolicyEngineFixture(t, now)
-	ctx.ApprovalConfirmed = true
 	hire := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{
 		ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active",
@@ -109,7 +108,6 @@ func TestGrantLeaveBalancesProratesAnnualByHireDate(t *testing.T) {
 func TestGrantLeaveBalancesUsesSeniorEntitlement(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store, svc, ctx := newLeavePolicyEngineFixture(t, now)
-	ctx.ApprovalConfirmed = true
 	hire := time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC)
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{
 		ID: "emp-senior", TenantID: "tenant-1", Name: "Senior", Status: "active",
@@ -144,7 +142,6 @@ func TestGrantLeaveBalancesUsesSeniorEntitlement(t *testing.T) {
 func TestGrantLeaveBalancesFailsWithoutHireDate(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store, svc, ctx := newLeavePolicyEngineFixture(t, now)
-	ctx.ApprovalConfirmed = true
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{
 		ID: "emp-no-hire", TenantID: "tenant-1", Name: "No Hire", Status: "active",
 		EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now,
@@ -175,7 +172,6 @@ func TestGrantLeaveBalancesFailsWithoutHireDate(t *testing.T) {
 func TestUpdateAttendancePolicyIncrementsVersion(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	_, svc, ctx := newLeavePolicyEngineFixture(t, now)
-	ctx.ApprovalConfirmed = true
 	input := domain.UpdateAttendancePolicyInput{
 		WorkTime: domain.AttendancePolicyWorkTime{
 			StandardStart: "09:00",

@@ -47,7 +47,5 @@ func (a *API) requestContext(r *http.Request) (domain.RequestContext, error) {
 		RequestID:            requestID,
 		TraceID:              traceID,
 		SpanID:               spanID,
-		ApprovalConfirmed:    a.approvalConfirmed(r),
-		ApprovalInstanceID:   strings.TrimSpace(r.Header.Get("X-Approval-Instance-ID")),
 	}, nil
 }

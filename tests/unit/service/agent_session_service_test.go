@@ -33,10 +33,9 @@ func TestAgentSessionChatPersistsMessagesAndAutoMemory(t *testing.T) {
 	}
 	svc := service.New(store, service.Options{
 		Now:              func() time.Time { return now },
-		AgentChatEnabled: true,
 		AgentChatRuntime: runtime,
 	})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
 	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "记住我喜欢特休"}, func(context.Context, domain.AgentChatEvent) error { return nil })
 	if err != nil {

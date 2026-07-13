@@ -63,7 +63,9 @@ func (s *Store) cloneLocked() *Store {
 		attendanceCorrections:   cloneNestedMap(s.attendanceCorrections, copyAttendanceCorrectionRequest),
 		overtimeRequests:        cloneNestedMap(s.overtimeRequests, copyOvertimeRequest),
 		formTemplates:           cloneNestedMap(s.formTemplates, copyFormTemplate),
+		formTemplateVersions:    cloneNestedMap(s.formTemplateVersions, copyFormTemplateVersion),
 		formInstances:           cloneNestedMap(s.formInstances, copyFormInstance),
+		formInstanceFieldValues: cloneNestedMap(s.formInstanceFieldValues, copyFormInstanceFieldValues),
 		workflowRuns:            cloneNestedMap(s.workflowRuns, copyWorkflowRun),
 		workflowStageInstances:  cloneNestedMap(s.workflowStageInstances, copyWorkflowStageInstance),
 		workflowStageAssignees:  cloneNestedMap(s.workflowStageAssignees, copyWorkflowStageAssignee),
@@ -85,6 +87,9 @@ func (s *Store) cloneLocked() *Store {
 		identityOutbox:          cloneSliceMap(s.identityOutbox, func(v IdentityProvisioningOutboxEvent) IdentityProvisioningOutboxEvent { return v }),
 		outboxEvents:            cloneSliceMap(s.outboxEvents, copyOutboxEvent),
 		relationshipTuples:      cloneNestedMap(s.relationshipTuples, func(v AuthzRelationshipTuple) AuthzRelationshipTuple { return v }),
+		ehrmsSyncRuns:           cloneNestedMap(s.ehrmsSyncRuns, copyEHRMSSyncRun),
+		ehrmsSyncRunSteps:       cloneNestedMap(s.ehrmsSyncRunSteps, copyEHRMSSyncRunStep),
+		ehrmsSyncLocks:          cloneMap(s.ehrmsSyncLocks, func(v bool) bool { return v }),
 	}
 }
 
@@ -126,7 +131,9 @@ func (s *Store) replaceLocked(next *Store) {
 	s.attendanceCorrections = next.attendanceCorrections
 	s.overtimeRequests = next.overtimeRequests
 	s.formTemplates = next.formTemplates
+	s.formTemplateVersions = next.formTemplateVersions
 	s.formInstances = next.formInstances
+	s.formInstanceFieldValues = next.formInstanceFieldValues
 	s.workflowRuns = next.workflowRuns
 	s.workflowStageInstances = next.workflowStageInstances
 	s.workflowStageAssignees = next.workflowStageAssignees
@@ -148,6 +155,8 @@ func (s *Store) replaceLocked(next *Store) {
 	s.identityOutbox = next.identityOutbox
 	s.outboxEvents = next.outboxEvents
 	s.relationshipTuples = next.relationshipTuples
+	s.ehrmsSyncRuns = next.ehrmsSyncRuns
+	s.ehrmsSyncRunSteps = next.ehrmsSyncRunSteps
 }
 
 // cloneMap 複製 map。

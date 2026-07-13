@@ -329,6 +329,22 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/hr/positions/ehrms/sync:
+    post:
+      summary: Sync positions from configured eHRMS
+      responses:
+        "200":
+          description: eHRMS position sync summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EHRMSPositionSyncDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/positions/{id}:
     get:
       summary: Get position
@@ -373,8 +389,6 @@ paths:
     delete:
       summary: Disable position
       parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
         - $ref: "#/components/parameters/ID"
       responses:
         "200":
@@ -697,9 +711,6 @@ paths:
   /v1/hr/employees/ehrms/sync:
     post:
       summary: Sync employees from configured eHRMS
-      parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       requestBody:
         content:
           application/json:
@@ -718,12 +729,80 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/ehrms/sync-runs:
+    get:
+      summary: List eHRMS sync runs
+      parameters:
+        - {name: page, in: query, schema: {type: integer, minimum: 1}}
+        - {name: page_size, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
+      responses:
+        "200":
+          description: Paginated sync runs
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EHRMSSyncRunPageDataResponse"}
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/ehrms/sync:
+    post:
+      summary: Start a tracked manual eHRMS sync
+      requestBody:
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/StartEHRMSSyncRequest"}
+      responses:
+        "200":
+          description: Completed tracked sync run
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EHRMSSyncRunDetailDataResponse"}
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/ehrms/sync-runs/{id}:
+    get:
+      summary: Get an eHRMS sync run and its steps
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: Sync run detail
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EHRMSSyncRunDetailDataResponse"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/ehrms/sync-runs/{id}/retry:
+    post:
+      summary: Retry a failed or partial eHRMS sync run
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/RetryEHRMSSyncRunRequest"}
+      responses:
+        "200":
+          description: Retried sync run detail
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/EHRMSSyncRunDetailDataResponse"}
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees/export:
     get:
       summary: Export employees as CSV
       parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
         - {name: keyword, in: query, schema: {type: string}}
         - {name: department_id, in: query, schema: {type: string}}
         - {name: employment_status, in: query, schema: {type: string}}
@@ -743,9 +822,6 @@ paths:
         "500": {$ref: "#/components/responses/InternalError"}
     post:
       summary: Export filtered employees as JSON
-      parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       requestBody:
         content:
           application/json:
@@ -767,9 +843,6 @@ paths:
   /v1/hr/employees/batch-delete:
     post:
       summary: Soft delete employees in batch
-      parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       requestBody:
         required: true
         content:
@@ -871,8 +944,6 @@ paths:
     get:
       summary: List employment contracts for an employee
       parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
         - $ref: "#/components/parameters/EmployeeID"
       responses:
         "200":
@@ -890,8 +961,6 @@ paths:
     post:
       summary: Create employment contract for an employee
       parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
         - $ref: "#/components/parameters/EmployeeID"
       requestBody:
         required: true
@@ -916,8 +985,6 @@ paths:
     get:
       summary: Get employment contract
       parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
         - $ref: "#/components/parameters/ID"
       responses:
         "200":
@@ -935,8 +1002,6 @@ paths:
     patch:
       summary: Patch employment contract
       parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
         - $ref: "#/components/parameters/ID"
       requestBody:
         required: true
@@ -960,8 +1025,6 @@ paths:
     delete:
       summary: Terminate employment contract
       parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
         - $ref: "#/components/parameters/ID"
       responses:
         "200":
@@ -1126,9 +1189,6 @@ paths:
         "500": {$ref: "#/components/responses/InternalError"}
     post:
       summary: Register a draft permission package
-      parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       requestBody:
         required: true
         content:
@@ -1152,8 +1212,6 @@ paths:
       summary: Publish a registered permission package version
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Published permission package
@@ -1172,8 +1230,6 @@ paths:
       summary: Import a published permission package into the current tenant
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Tenant import result
@@ -1203,9 +1259,6 @@ paths:
                 $ref: "#/components/schemas/UserGroupPageDataResponse"
     post:
       summary: Create user group
-      parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       requestBody:
         required: true
         content:
@@ -1224,8 +1277,6 @@ paths:
       summary: Update user group
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       requestBody:
         required: true
         content:
@@ -1243,8 +1294,6 @@ paths:
       summary: Delete user group
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Deleted user group
@@ -1275,8 +1324,6 @@ paths:
       summary: Add user group member
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       requestBody:
         required: true
         content:
@@ -1296,8 +1343,6 @@ paths:
       parameters:
         - $ref: "#/components/parameters/ID"
         - $ref: "#/components/parameters/AccountID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "204":
           description: User group member removed
@@ -1329,8 +1374,6 @@ paths:
       summary: Update permission set
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Updated permission set
@@ -1342,8 +1385,6 @@ paths:
       summary: Delete permission set
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Deleted permission set
@@ -1398,8 +1439,6 @@ paths:
       summary: Delete permission set assignment
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Deleted permission set assignment
@@ -1471,8 +1510,6 @@ paths:
       summary: Update data scope
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       requestBody:
         required: true
         content:
@@ -1495,8 +1532,6 @@ paths:
       summary: Delete data scope
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Deleted data scope
@@ -1548,8 +1583,6 @@ paths:
       summary: Update field policy
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       requestBody:
         required: true
         content:
@@ -1571,8 +1604,6 @@ paths:
       summary: Delete field policy
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Deleted field policy
@@ -1610,8 +1641,6 @@ paths:
       summary: Retry a failed outbox event
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Outbox event reset to pending
@@ -1651,8 +1680,6 @@ paths:
       summary: Update assumable role
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Updated assumable role
@@ -1667,8 +1694,6 @@ paths:
       summary: Delete assumable role
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Deleted assumable role
@@ -1715,6 +1740,22 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+  /v1/org/units/ehrms/sync:
+    post:
+      summary: Sync organization units from configured eHRMS
+      responses:
+        "200":
+          description: eHRMS organization unit sync summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EHRMSOrgUnitSyncDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/org/units/{id}:
     patch:
       summary: Update organization unit
@@ -1724,6 +1765,20 @@ paths:
           required: true
           schema:
             type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code: {type: string}
+                name: {type: string}
+                parent_id: {type: string}
+                manager_position_id: {type: string}
+                closed:
+                  type: boolean
+                  description: Closing an organization unit also closes all descendants; a child cannot reopen while an ancestor remains closed.
       responses:
         "200":
           description: Updated organization unit
@@ -1964,7 +2019,7 @@ paths:
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/attendance/shift-assignments:
     get:
-      summary: List attendance shift assignments
+      summary: List optional attendance shift assignments
       parameters:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/PageSize"
@@ -1981,7 +2036,7 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
     post:
-      summary: Create attendance shift assignment
+      summary: Create optional attendance shift assignment
       requestBody:
         required: true
         content:
@@ -2063,8 +2118,6 @@ paths:
   /v1/attendance/ehrms/sync:
     post:
       summary: Sync attendance daily summaries from configured eHRMS
-      parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
       requestBody:
         required: false
         content:
@@ -2131,8 +2184,6 @@ paths:
       summary: Approve attendance correction and create manual accepted clock record
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       requestBody:
         required: false
         content:
@@ -2157,8 +2208,6 @@ paths:
       summary: Reject attendance correction without creating a clock record
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       requestBody:
         required: false
         content:
@@ -2243,6 +2292,25 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/turnover/export:
+    get:
+      summary: Export workspace employment turnover analysis as CSV
+      parameters:
+        - {name: year, in: query, schema: {type: integer, minimum: 1970}}
+        - {name: month, in: query, schema: {type: integer, minimum: 1, maximum: 12}}
+        - {name: annual_year, in: query, schema: {type: integer, minimum: 1970}}
+        - {name: annualYear, in: query, deprecated: true, schema: {type: integer, minimum: 1970}}
+        - {name: kind, in: query, schema: {type: string, enum: [monthly, annual], default: monthly}}
+      responses:
+        "200":
+          description: Turnover CSV export
+          content:
+            text/csv:
+              schema: {type: string, format: binary}
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/workspace/attendance:
     get:
       summary: Get workspace monthly attendance and clock matrices
@@ -2256,6 +2324,23 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/WorkspaceAttendanceDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/attendance/export:
+    get:
+      summary: Export workspace attendance matrices as CSV
+      parameters:
+        - {name: year, in: query, schema: {type: integer, minimum: 1970}}
+        - {name: month, in: query, schema: {type: integer, minimum: 1, maximum: 12}}
+        - {name: kind, in: query, schema: {type: string, enum: [attendance, clock, abnormal], default: attendance}}
+      responses:
+        "200":
+          description: Attendance CSV export
+          content:
+            text/csv:
+              schema: {type: string, format: binary}
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -2321,8 +2406,6 @@ paths:
       summary: Soft-delete one workspace form-builder template
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Refreshed workspace form design settings
@@ -2385,8 +2468,6 @@ paths:
       summary: Delete workspace agent model
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Deleted agent model
@@ -2404,8 +2485,6 @@ paths:
       summary: Sync workspace agent model to LiteLLM
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Synced agent model
@@ -2485,11 +2564,41 @@ paths:
       summary: Delete workspace agent
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Deleted agent definition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agents/{id}/publish:
+    post:
+      summary: Publish workspace agent
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Published agent definition
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agents/{id}/unpublish:
+    post:
+      summary: Stop publishing workspace agent
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Unpublished agent definition
           content:
             application/json:
               schema:
@@ -2521,8 +2630,6 @@ paths:
       summary: Roll back workspace agent to a previous version
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
       responses:
         "200":
@@ -2536,19 +2643,6 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
-  /v1/workspace/agents/templates:
-    get:
-      summary: List workspace agent templates
-      responses:
-        "200":
-          description: Agent templates
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
   /v1/workspace/agents/tools:
     get:
       summary: List workspace agent tools
@@ -2559,46 +2653,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/workspace/agents/audits:
-    get:
-      summary: List workspace agent audits
-      responses:
-        "200":
-          description: Agent audits
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/workspace/agents/bundle:
-    get:
-      summary: Export workspace agent bundle
-      responses:
-        "200":
-          description: Agent bundle
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    post:
-      summary: Import workspace agent bundle
-      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
-      responses:
-        "201":
-          description: Import result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
@@ -2676,8 +2730,6 @@ paths:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Workspace audit-log page
@@ -2877,7 +2929,7 @@ paths:
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/workflows/forms/{id}/approve:
     post:
-      summary: Approve a workflow form instance for high-risk action confirmation
+      summary: Approve the current business workflow form stage
       parameters:
         - $ref: "#/components/parameters/ID"
       requestBody:
@@ -3139,8 +3191,6 @@ paths:
       summary: Clear agent session context without deleting visible history
       parameters:
         - $ref: "#/components/parameters/ID"
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
       responses:
         "200":
           description: Updated agent session
@@ -3223,8 +3273,6 @@ paths:
     get:
       summary: List audit logs
       parameters:
-        - $ref: "#/components/parameters/ApprovalConfirmed"
-        - $ref: "#/components/parameters/ApprovalInstanceID"
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
@@ -3268,18 +3316,6 @@ components:
       in: query
       schema:
         type: string
-    ApprovalConfirmed:
-      name: X-Approval-Confirmed
-      in: header
-      schema:
-        type: boolean
-      description: Required for high-risk actions when no approved workflow instance is supplied.
-    ApprovalInstanceID:
-      name: X-Approval-Instance-ID
-      in: header
-      schema:
-        type: string
-      description: Approved workflow instance bound to the high-risk action target or filters.
     EmployeeID:
       name: id
       in: path
@@ -3308,7 +3344,7 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
     Forbidden:
-      description: Permission, menu, button, field, data-scope, or high-risk approval was denied.
+      description: Permission, menu, button, field, or data-scope access was denied.
       content:
         application/json:
           schema:
@@ -3411,10 +3447,7 @@ components:
         permission_boundary:
           type: object
           additionalProperties: true
-        requires_approval: {type: boolean}
         risk_level: {type: string}
-        approval_type: {type: string}
-        approval_reason: {type: string}
         resource: {type: string}
         application_code: {type: string}
         resource_type: {type: string}
@@ -4337,7 +4370,7 @@ components:
         type: {type: string}
         name: {type: string}
         role: {type: string}
-        time: {type: string}
+        time: {type: string, format: date-time}
         comment: {type: string}
     PlatformHomeDataResponse:
       type: object
@@ -4438,13 +4471,14 @@ components:
           $ref: "#/components/schemas/PlatformClockSummary"
     PlatformAssistant:
       type: object
-      required: [id, emoji, title, desc]
+      required: [id, emoji, title, desc, runnable]
       properties:
         id: {type: string}
         emoji: {type: string}
         title: {type: string}
         desc: {type: string}
         tag: {type: string, enum: [workflow, doc, analytics, it]}
+        runnable: {type: boolean, description: True only when id references a published AgentDefinition that can be used for runtime chat}
     PlatformFormColumn:
       type: object
       required: [title, emoji, items]
@@ -4682,6 +4716,27 @@ components:
         label: {type: string}
         placeholder: {type: string}
         required: {type: boolean}
+        analytics:
+          $ref: "#/components/schemas/PlatformFormBuilderFieldAnalytics"
+        security:
+          $ref: "#/components/schemas/PlatformFormBuilderFieldSecurity"
+    PlatformFormBuilderFieldAnalytics:
+      type: object
+      required: [reportable]
+      properties:
+        reportable: {type: boolean}
+        role: {type: string, enum: [dimension, measure]}
+        aggregations:
+          type: array
+          items: {type: string, enum: [count, sum, avg, min, max]}
+        filterable: {type: boolean}
+        groupable: {type: boolean}
+    PlatformFormBuilderFieldSecurity:
+      type: object
+      properties:
+        classification: {type: string, enum: [public, internal, confidential, restricted]}
+        masking: {type: string, enum: [none, partial, full]}
+        agent_access: {type: boolean}
     PlatformFormBuilderStage:
       type: object
       required: [id, type, label, detail]
@@ -4753,6 +4808,36 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/EHRMSEmployeeSyncResponse"
+    EHRMSSyncRunPageDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [items, total, page, page_size, sort]
+          properties:
+            items: {type: array, items: {$ref: "#/components/schemas/EHRMSSyncRun"}}
+            total: {type: integer}
+            page: {type: integer}
+            page_size: {type: integer}
+            sort: {type: string}
+    EHRMSSyncRunDetailDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: "#/components/schemas/EHRMSSyncRunDetail"}
+    EHRMSOrgUnitSyncDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EHRMSOrgUnitSyncResponse"
+    EHRMSPositionSyncDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EHRMSPositionSyncResponse"
     EmployeeExportDataResponse:
       type: object
       required: [data]
@@ -4982,8 +5067,12 @@ components:
         version: {type: integer}
         work_time:
           type: object
-          required: [standard_start, standard_end, break_start, break_end, weekend, cycle_start, cycle_end, time_options, weekend_options, cycle_start_options, cycle_end_options]
+          required: [require_worksite, clock_mode, flexible_clock_in_earliest, flexible_clock_out_latest, standard_start, standard_end, break_start, break_end, weekend, cycle_start, cycle_end, time_options, weekend_options, cycle_start_options, cycle_end_options]
           properties:
+            require_worksite: {type: boolean, default: true}
+            clock_mode: {type: string, enum: [flexible, fixed], default: flexible}
+            flexible_clock_in_earliest: {type: string, default: "00:00"}
+            flexible_clock_out_latest: {type: string, default: "23:30"}
             standard_start: {type: string}
             standard_end: {type: string}
             break_start: {type: string}
@@ -5165,6 +5254,12 @@ components:
               level: {type: integer}
               is_manager: {type: boolean}
               parent_id: {type: string}
+              org_unit_id: {type: string}
+              manager_source: {type: string, enum: [override, org_unit, none]}
+              is_override: {type: boolean}
+              manager_issue:
+                type: string
+                enum: [org_unit_missing, org_unit_not_found, org_unit_cycle, manager_position_missing, manager_position_invalid, manager_position_unstaffed, manager_position_multiple]
     WorkspaceTurnover:
       type: object
       required: [monthly, annual]
@@ -5207,7 +5302,7 @@ components:
       required: [id, time, operator, type, action, detail]
       properties:
         id: {type: string}
-        time: {type: string}
+        time: {type: string, format: date-time}
         operator: {type: string}
         type:
           type: string
@@ -5306,7 +5401,7 @@ components:
         status: {type: string, enum: [active, inactive]}
     AttendanceShiftAssignment:
       type: object
-      description: Persisted tenant resource. id is globally unique across tenants; tenant_id scopes ownership and authorization.
+      description: Optional scheduling metadata; GPS clocking does not require it.
       required: [id, tenant_id, employee_id, shift_id, worksite_id, effective_from, status, created_at, updated_at]
       properties:
         id: {type: string}
@@ -5335,17 +5430,13 @@ components:
       properties:
         employee_id: {type: string}
         work_date: {type: string, format: date}
-        assignment:
-          $ref: "#/components/schemas/AttendanceShiftAssignment"
-        shift:
-          $ref: "#/components/schemas/AttendanceShift"
         worksite:
           $ref: "#/components/schemas/AttendanceWorksite"
         clock_in:
           $ref: "#/components/schemas/AttendanceClockRecord"
         clock_out:
           $ref: "#/components/schemas/AttendanceClockRecord"
-        next_action: {type: string, enum: [clock_in, clock_out, complete, no_assignment]}
+        next_action: {type: string, enum: [clock_in, clock_out, complete]}
     AttendanceClockRecord:
       type: object
       description: Persisted tenant resource. id is globally unique across tenants; tenant_id scopes ownership and authorization.
@@ -5354,9 +5445,9 @@ components:
         id: {type: string}
         tenant_id: {type: string}
         employee_id: {type: string}
-        shift_assignment_id: {type: string}
-        shift_id: {type: string}
-        worksite_id: {type: string}
+        shift_assignment_id: {type: string, nullable: true}
+        shift_id: {type: string, nullable: true}
+        worksite_id: {type: string, nullable: true}
         work_date: {type: string, format: date}
         direction: {type: string, enum: [clock_in, clock_out]}
         clocked_at: {type: string, format: date-time}
@@ -5376,8 +5467,11 @@ components:
           type: number
           format: double
           description: Sensitive GPS evidence; response value may be redacted to 0 by attendance clock field policy.
-        record_status: {type: string, enum: [accepted, rejected]}
-        rejection_reason: {type: string, enum: [duplicate, invalid_sequence, low_location_accuracy, outside_geofence, outside_time_window]}
+        record_status:
+          type: string
+          enum: [accepted, abnormal, rejected]
+          description: abnormal means the attempt was recorded as an anomaly but does not occupy the effective clock slot, so a flexible clock-out can be retried.
+        rejection_reason: {type: string, enum: [duplicate, invalid_sequence, low_location_accuracy, outside_geofence, outside_time_window, insufficient_work_hours]}
         source: {type: string, enum: [geofence, manual_correction]}
         device_id:
           type: string
@@ -5915,31 +6009,12 @@ components:
           items: {$ref: "#/components/schemas/EmployeeExperience"}
     EmployeePatch:
       type: object
-      description: Omitted scalar fields and omitted sections are preserved. Object sections are merged key-by-key. internal_experiences is replaced as a whole when provided.
+      description: Employee edit only accepts basic information. Omitted fields are preserved and basic_info is merged key-by-key.
       properties:
         employee_no: {type: string}
         name: {type: string}
         company_email: {type: string, format: email}
-        personal_email: {type: string, format: email}
-        phone: {type: string}
-        org_unit_id: {type: string}
-        account_id: {type: string}
-        position_id:
-          type: string
-          description: Optional position entity id. When supplied, employee.position is synchronized from the position name.
-        position: {type: string}
-        category:
-          $ref: "#/components/schemas/EmployeeCategory"
-        hire_date: {type: string}
-        resign_date: {type: string}
         basic_info: {$ref: "#/components/schemas/EmployeeBasicInfo"}
-        employment_info: {$ref: "#/components/schemas/EmployeeEmploymentInfo"}
-        education_military_info: {$ref: "#/components/schemas/EmployeeEducationMilitaryInfo"}
-        contact_info: {$ref: "#/components/schemas/EmployeeContactInfo"}
-        insurance_info: {$ref: "#/components/schemas/EmployeeInsuranceInfo"}
-        internal_experiences:
-          type: array
-          items: {$ref: "#/components/schemas/EmployeeExperience"}
     EmployeeQuery:
       type: object
       properties:
@@ -6130,6 +6205,7 @@ components:
         fetched: {type: integer}
         created: {type: integer}
         updated: {type: integer}
+        skipped: {type: integer}
         failed: {type: integer}
         departments_upserted: {type: integer}
         positions_upserted: {type: integer}
@@ -6142,6 +6218,16 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SyncRowError"
+    EHRMSOrgUnitSyncResponse:
+      type: object
+      properties:
+        fetched: {type: integer}
+        upserted: {type: integer}
+    EHRMSPositionSyncResponse:
+      type: object
+      properties:
+        fetched: {type: integer}
+        upserted: {type: integer}
     EHRMSAttendanceSyncResponse:
       type: object
       properties:
@@ -6150,6 +6236,15 @@ components:
         updated: {type: integer}
         skipped: {type: integer}
         failed: {type: integer}
+        leave_balances_fetched: {type: integer}
+        leave_balances_upserted: {type: integer}
+        leave_balances_skipped: {type: integer}
+        leave_balances_failed: {type: integer}
+        leave_details_fetched: {type: integer}
+        leave_details_created: {type: integer}
+        leave_details_updated: {type: integer}
+        leave_details_skipped: {type: integer}
+        leave_details_failed: {type: integer}
         mode: {type: string, enum: [create, update, upsert]}
         since: {type: string, format: date}
         results:
@@ -6160,6 +6255,66 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SyncRowError"
+    RetryEHRMSSyncRunRequest:
+      type: object
+      properties:
+        mode: {type: string, enum: [create, update, upsert]}
+        since: {type: string, format: date}
+    StartEHRMSSyncRequest:
+      type: object
+      properties:
+        mode: {type: string, enum: [create, update, upsert]}
+        since: {type: string, format: date}
+        include_attendance: {type: boolean, default: false}
+    EHRMSSyncRun:
+      type: object
+      required: [id, tenant_id, account_id, sync_type, trigger_type, status, mode, attempt, max_attempts, retryable, started_at, created_at, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        account_id: {type: string}
+        sync_type: {type: string, enum: [pipeline, employees, attendance]}
+        trigger_type: {type: string, enum: [scheduled, manual, retry, cli]}
+        status: {type: string, enum: [running, succeeded, partial, failed, skipped]}
+        current_step: {type: string}
+        mode: {type: string, enum: [create, update, upsert]}
+        since: {type: string, format: date}
+        attempt: {type: integer}
+        max_attempts: {type: integer}
+        retry_of_run_id: {type: string}
+        request_id: {type: string}
+        trace_id: {type: string}
+        error_code: {type: string}
+        error_message: {type: string}
+        retryable: {type: boolean}
+        next_retry_at: {type: string, format: date-time}
+        summary: {type: object, additionalProperties: true}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    EHRMSSyncRunStep:
+      type: object
+      required: [id, tenant_id, run_id, step, sequence, status, attempt, started_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        run_id: {type: string}
+        step: {type: string}
+        sequence: {type: integer}
+        status: {type: string, enum: [running, succeeded, partial, failed, skipped]}
+        attempt: {type: integer}
+        error_code: {type: string}
+        error_message: {type: string}
+        summary: {type: object, additionalProperties: true}
+        started_at: {type: string, format: date-time}
+        finished_at: {type: string, format: date-time}
+    EHRMSSyncRunDetail:
+      type: object
+      required: [run, steps]
+      properties:
+        run: {$ref: "#/components/schemas/EHRMSSyncRun"}
+        steps: {type: array, items: {$ref: "#/components/schemas/EHRMSSyncRunStep"}}
     BatchEmployeeResponse:
       type: object
       properties:
@@ -6284,7 +6439,6 @@ components:
                 - button_denied
                 - field_denied
                 - data_scope_denied
-                - approval_required
             field_errors:
               type: array
               items:

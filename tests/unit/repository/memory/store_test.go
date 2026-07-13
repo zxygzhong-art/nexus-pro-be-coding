@@ -38,6 +38,38 @@ func TestNextEmployeeNoIncrementsAcrossCalls(t *testing.T) {
 	}
 }
 
+// TestEHRMSSyncRunStorePersistsAndLocks 驗證同步運行儲存與非阻塞互斥。
+func TestEHRMSSyncRunStorePersistsAndLocks(t *testing.T) {
+	store := memory.NewStore()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	run := domain.EHRMSSyncRun{ID: "run-1", TenantID: "tenant-1", AccountID: "acct-1", SyncType: "pipeline", TriggerType: "scheduled", Status: "running", Mode: "upsert", Attempt: 1, MaxAttempts: 1, StartedAt: now, CreatedAt: now, UpdatedAt: now}
+	if err := store.UpsertEHRMSSyncRun(ctx, run); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok, err := store.GetEHRMSSyncRun(ctx, "tenant-1", "run-1"); err != nil || !ok || got.Status != "running" {
+		t.Fatalf("got=%+v ok=%v err=%v", got, ok, err)
+	}
+
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		acquired, err := store.WithEHRMSSyncLock(ctx, "tenant-1", "pipeline", func() error { close(entered); <-release; return nil })
+		if err != nil || !acquired {
+			t.Errorf("first lock acquired=%v err=%v", acquired, err)
+		}
+	}()
+	<-entered
+	acquired, err := store.WithEHRMSSyncLock(ctx, "tenant-1", "pipeline", func() error { return nil })
+	if err != nil || acquired {
+		t.Fatalf("second lock acquired=%v err=%v", acquired, err)
+	}
+	close(release)
+	<-done
+}
+
 // TestListEmployeePageByQueryMatchesMemoryFiltering 驗證員工分頁 by 查詢 matches memory filtering。
 func TestListEmployeePageByQueryMatchesMemoryFiltering(t *testing.T) {
 	store := memory.NewStore()
@@ -155,6 +187,39 @@ func TestAttendanceClockRecordAcceptedUniqueInvariant(t *testing.T) {
 	duplicate.RejectionReason = "duplicate"
 	if err := store.UpsertAttendanceClockRecord(ctx, duplicate); err != nil {
 		t.Fatalf("expected rejected duplicate attempt to be stored, got %v", err)
+	}
+}
+
+// TestUpsertLeaveBalanceUsesEmployeeAndTypeIdentity 驗證餘額 upsert 與 PostgreSQL 唯一鍵語義一致。
+func TestUpsertLeaveBalanceUsesEmployeeAndTypeIdentity(t *testing.T) {
+	store := memory.NewStore()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	first := domain.LeaveBalance{
+		ID: "policy-balance", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual",
+		RemainingHours: 8, Source: "policy", UpdatedAt: now,
+	}
+	if err := store.UpsertLeaveBalance(ctx, first); err != nil {
+		t.Fatal(err)
+	}
+	fromEHRMS := first
+	fromEHRMS.ID = "ehrms-balance"
+	fromEHRMS.RemainingHours = 24
+	fromEHRMS.Source = "ehrms"
+	fromEHRMS.UpdatedAt = now.Add(time.Minute)
+	if err := store.UpsertLeaveBalance(ctx, fromEHRMS); err != nil {
+		t.Fatal(err)
+	}
+
+	balances, err := store.ListLeaveBalances(ctx, "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(balances) != 1 {
+		t.Fatalf("expected one balance for employee/type identity, got %+v", balances)
+	}
+	if balances[0].ID != first.ID || balances[0].RemainingHours != 24 || balances[0].Source != "ehrms" {
+		t.Fatalf("expected existing balance identity with eHRMS values, got %+v", balances[0])
 	}
 }
 

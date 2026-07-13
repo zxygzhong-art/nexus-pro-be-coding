@@ -121,20 +121,12 @@ func (c AuthzService) Simulate(ctx RequestContext, req AuthzSimulationRequest) (
 
 // shouldAuditRouteAuthzCheck 處理 should 稽核路由授權 check 的服務流程。
 func (c AuthzService) shouldAuditRouteAuthzCheck(ctx RequestContext, result CheckResult) bool {
-	if !result.Allowed {
-		return true
-	}
-	return result.RequiresApproval && ctx.ApprovalInstanceID == "" && !ctx.ApprovalConfirmed
+	return !result.Allowed
 }
 
 // AuditDecision 處理稽核決策的服務流程。
 func (c AuthzService) AuditDecision(ctx RequestContext, req CheckRequest, result CheckResult) error {
 	return c.auditAuthzTarget(ctx, AuditTarget{}.fromRequest(req), result)
-}
-
-// ValidateApprovalInstance 驗證核准實例的服務流程。
-func (c AuthzService) ValidateApprovalInstance(ctx RequestContext, req CheckRequest) error {
-	return c.Service.ValidateApprovalInstance(ctx, req)
 }
 
 func (c AuthzService) resolveSimulationAccount(ctx RequestContext, accountID string) (RequestContext, Account, error) {

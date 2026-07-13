@@ -4,6 +4,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"nexus-pro-be/internal/domain"
 )
@@ -29,35 +30,50 @@ const (
 )
 
 var legacyLeaveTypeCodeMap = map[string]string{
-	"病":      leaveTypeCodeSickFull,
-	"彈":      leaveTypeCodeFlexible,
-	"事":      leaveTypeCodePersonal,
-	"照":      leaveTypeCodeFamilyCare,
-	"半":      leaveTypeCodeSickHalf,
-	"理":      leaveTypeCodeMenstrual,
-	"婚":      leaveTypeCodeMarriage,
-	"產":      leaveTypeCodeMaternity,
-	"陪":      leaveTypeCodePaternity,
-	"喪":      leaveTypeCodeBereavement,
-	"公":      leaveTypeCodeOfficial,
-	"檢":      leaveTypeCodePrenatal,
-	"補":      leaveTypeCodeCompensatory,
-	"特":      leaveTypeCodeAnnual,
-	"特休假":    leaveTypeCodeAnnual,
-	"事假":     leaveTypeCodePersonal,
-	"全薪病假":   leaveTypeCodeSickFull,
-	"半薪病假":   leaveTypeCodeSickHalf,
-	"家庭照顧假":  leaveTypeCodeFamilyCare,
-	"生理假":    leaveTypeCodeMenstrual,
-	"婚假":     leaveTypeCodeMarriage,
-	"喪假":     leaveTypeCodeBereavement,
-	"八週產假":   leaveTypeCodeMaternity,
-	"陪產假":    leaveTypeCodePaternity,
-	"產檢假":    leaveTypeCodePrenatal,
-	"公假":     leaveTypeCodeOfficial,
-	"補休假":    leaveTypeCodeCompensatory,
-	"彈性休假":   leaveTypeCodeFlexible,
-	"外勤":     leaveTypeCodeOfficial,
+	"病":     leaveTypeCodeSickFull,
+	"彈":     leaveTypeCodeFlexible,
+	"事":     leaveTypeCodePersonal,
+	"照":     leaveTypeCodeFamilyCare,
+	"半":     leaveTypeCodeSickHalf,
+	"理":     leaveTypeCodeMenstrual,
+	"婚":     leaveTypeCodeMarriage,
+	"產":     leaveTypeCodeMaternity,
+	"陪":     leaveTypeCodePaternity,
+	"喪":     leaveTypeCodeBereavement,
+	"公":     leaveTypeCodeOfficial,
+	"檢":     leaveTypeCodePrenatal,
+	"補":     leaveTypeCodeCompensatory,
+	"特":     leaveTypeCodeAnnual,
+	"特休假":   leaveTypeCodeAnnual,
+	"事假":    leaveTypeCodePersonal,
+	"全薪病假":  leaveTypeCodeSickFull,
+	"半薪病假":  leaveTypeCodeSickHalf,
+	"家庭照顧假": leaveTypeCodeFamilyCare,
+	"生理假":   leaveTypeCodeMenstrual,
+	"婚假":    leaveTypeCodeMarriage,
+	"喪假":    leaveTypeCodeBereavement,
+	"八週產假":  leaveTypeCodeMaternity,
+	"陪產假":   leaveTypeCodePaternity,
+	"產檢假":   leaveTypeCodePrenatal,
+	"公假":    leaveTypeCodeOfficial,
+	"補休假":   leaveTypeCodeCompensatory,
+	"彈性休假":  leaveTypeCodeFlexible,
+	"外勤":    leaveTypeCodeOfficial,
+}
+
+var ehrmsLeaveTypeCodeMap = map[string]string{
+	"additional leave":    leaveTypeCodeFlexible,
+	"annual leave":        leaveTypeCodeAnnual,
+	"compensatory leave":  leaveTypeCodeCompensatory,
+	"full pay sick leave": leaveTypeCodeSickFull,
+	"half pay sick leave": leaveTypeCodeSickHalf,
+	"menstruation leave":  leaveTypeCodeMenstrual,
+	"personal leave":      leaveTypeCodePersonal,
+	"paid_sick":           leaveTypeCodeSickFull,
+	"sick":                leaveTypeCodeSickFull,
+	"flex":                leaveTypeCodeFlexible,
+	"half_sick":           leaveTypeCodeSickHalf,
+	"prenatal_check":      leaveTypeCodePrenatal,
 }
 
 // CurrentAttendancePolicy 處理目前考勤政策的服務流程。
@@ -99,11 +115,14 @@ func (c AttendanceService) UpdateAttendancePolicy(ctx RequestContext, input Upda
 			return err
 		}
 		if err := tx.audit(ctx, "attendance.policy.update", string(ResourceLeave), next.ID, string(SeverityHigh), auditDecisionDetails(ctx, decision, map[string]any{
-			"leave_type_count": len(next.LeaveTypes),
-			"standard_start":   next.WorkTime.StandardStart,
-			"standard_end":     next.WorkTime.StandardEnd,
-			"weekend":          next.WorkTime.Weekend,
-			"version":          next.Version,
+			"leave_type_count":           len(next.LeaveTypes),
+			"clock_mode":                 next.WorkTime.ClockMode,
+			"flexible_clock_in_earliest": next.WorkTime.FlexibleClockInEarliest,
+			"flexible_clock_out_latest":  next.WorkTime.FlexibleClockOutLatest,
+			"standard_start":             next.WorkTime.StandardStart,
+			"standard_end":               next.WorkTime.StandardEnd,
+			"weekend":                    next.WorkTime.Weekend,
+			"version":                    next.Version,
 		})); err != nil {
 			return err
 		}
@@ -150,17 +169,21 @@ func (c AttendanceService) attendancePolicyFromInput(ctx RequestContext, account
 func defaultAttendancePolicyResponse() AttendancePolicyResponse {
 	return AttendancePolicyResponse{
 		WorkTime: AttendancePolicyWorkTime{
-			StandardStart:     "09:00",
-			StandardEnd:       "18:00",
-			BreakStart:        "12:00",
-			BreakEnd:          "13:00",
-			Weekend:           "週六、週日",
-			CycleStart:        "1 日",
-			CycleEnd:          "本月 月底（最後一日）",
-			TimeOptions:       attendancePolicyTimeOptions(),
-			WeekendOptions:    attendancePolicyWeekendOptions(),
-			CycleStartOptions: attendancePolicyCycleStartOptions(),
-			CycleEndOptions:   attendancePolicyCycleEndOptions(),
+			RequireWorksite:         true,
+			ClockMode:               clockModeFlexible,
+			FlexibleClockInEarliest: "00:00",
+			FlexibleClockOutLatest:  "23:30",
+			StandardStart:           "09:00",
+			StandardEnd:             "17:00",
+			BreakStart:              "12:00",
+			BreakEnd:                "13:00",
+			Weekend:                 "週六、週日",
+			CycleStart:              "1 日",
+			CycleEnd:                "本月 月底（最後一日）",
+			TimeOptions:             attendancePolicyTimeOptions(),
+			WeekendOptions:          attendancePolicyWeekendOptions(),
+			CycleStartOptions:       attendancePolicyCycleStartOptions(),
+			CycleEndOptions:         attendancePolicyCycleEndOptions(),
 		},
 		LeaveTypes: attendancePolicyLeaveTypes(),
 		Version:    1,
@@ -185,17 +208,30 @@ func attendancePolicyResponse(policy AttendancePolicy) AttendancePolicyResponse 
 func normalizeAttendancePolicyWorkTime(workTime AttendancePolicyWorkTime) AttendancePolicyWorkTime {
 	defaults := defaultAttendancePolicyResponse().WorkTime
 	out := AttendancePolicyWorkTime{
-		StandardStart:     strings.TrimSpace(workTime.StandardStart),
-		StandardEnd:       strings.TrimSpace(workTime.StandardEnd),
-		BreakStart:        strings.TrimSpace(workTime.BreakStart),
-		BreakEnd:          strings.TrimSpace(workTime.BreakEnd),
-		Weekend:           strings.TrimSpace(workTime.Weekend),
-		CycleStart:        strings.TrimSpace(workTime.CycleStart),
-		CycleEnd:          strings.TrimSpace(workTime.CycleEnd),
-		TimeOptions:       defaults.TimeOptions,
-		WeekendOptions:    defaults.WeekendOptions,
-		CycleStartOptions: defaults.CycleStartOptions,
-		CycleEndOptions:   defaults.CycleEndOptions,
+		RequireWorksite:         workTime.RequireWorksite,
+		ClockMode:               strings.ToLower(strings.TrimSpace(workTime.ClockMode)),
+		FlexibleClockInEarliest: strings.TrimSpace(workTime.FlexibleClockInEarliest),
+		FlexibleClockOutLatest:  strings.TrimSpace(workTime.FlexibleClockOutLatest),
+		StandardStart:           strings.TrimSpace(workTime.StandardStart),
+		StandardEnd:             strings.TrimSpace(workTime.StandardEnd),
+		BreakStart:              strings.TrimSpace(workTime.BreakStart),
+		BreakEnd:                strings.TrimSpace(workTime.BreakEnd),
+		Weekend:                 strings.TrimSpace(workTime.Weekend),
+		CycleStart:              strings.TrimSpace(workTime.CycleStart),
+		CycleEnd:                strings.TrimSpace(workTime.CycleEnd),
+		TimeOptions:             defaults.TimeOptions,
+		WeekendOptions:          defaults.WeekendOptions,
+		CycleStartOptions:       defaults.CycleStartOptions,
+		CycleEndOptions:         defaults.CycleEndOptions,
+	}
+	if out.ClockMode == "" {
+		out.ClockMode = defaults.ClockMode
+	}
+	if out.FlexibleClockInEarliest == "" {
+		out.FlexibleClockInEarliest = defaults.FlexibleClockInEarliest
+	}
+	if out.FlexibleClockOutLatest == "" {
+		out.FlexibleClockOutLatest = defaults.FlexibleClockOutLatest
 	}
 	if out.StandardStart == "" {
 		out.StandardStart = defaults.StandardStart
@@ -345,8 +381,17 @@ func normalizeLeaveEntitlements(items []domain.LeaveEntitlementRule) []domain.Le
 
 // validateAttendancePolicy 驗證考勤政策。
 func validateAttendancePolicy(policy AttendancePolicy) error {
+	if policy.WorkTime.ClockMode != clockModeFlexible && policy.WorkTime.ClockMode != clockModeFixed {
+		return BadRequest("clock_mode must be flexible or fixed")
+	}
 	if !stringInSlice(policy.WorkTime.StandardStart, policy.WorkTime.TimeOptions) || !stringInSlice(policy.WorkTime.StandardEnd, policy.WorkTime.TimeOptions) {
 		return BadRequest("standard time must use a configured time option")
+	}
+	if !stringInSlice(policy.WorkTime.FlexibleClockInEarliest, policy.WorkTime.TimeOptions) || !stringInSlice(policy.WorkTime.FlexibleClockOutLatest, policy.WorkTime.TimeOptions) {
+		return BadRequest("flexible clock range must use configured time options")
+	}
+	if parseHHMMMinutes(policy.WorkTime.FlexibleClockInEarliest) > parseHHMMMinutes(policy.WorkTime.FlexibleClockOutLatest) {
+		return BadRequest("flexible clock earliest time must not be later than latest time")
 	}
 	if !stringInSlice(policy.WorkTime.BreakStart, policy.WorkTime.TimeOptions) || !stringInSlice(policy.WorkTime.BreakEnd, policy.WorkTime.TimeOptions) {
 		return BadRequest("break time must use a configured time option")
@@ -431,12 +476,17 @@ func defaultPaidRatioForLeaveType(code string) float64 {
 	return 1
 }
 
+// normalizeLeaveTypeCode 將內部、舊版與 eHRMS 假別名稱統一為政策使用的 canonical code。
 func normalizeLeaveTypeCode(code string) string {
 	code = strings.TrimSpace(code)
 	if mapped, ok := legacyLeaveTypeCodeMap[code]; ok {
 		return mapped
 	}
-	return strings.ToLower(code)
+	normalized := strings.ToLower(code)
+	if mapped, ok := ehrmsLeaveTypeCodeMap[normalized]; ok {
+		return mapped
+	}
+	return normalized
 }
 
 func findLeaveTypeInPolicy(policy AttendancePolicyResponse, code string) (AttendanceLeaveType, bool) {
@@ -474,6 +524,59 @@ func standardDayHours(work AttendancePolicyWorkTime) float64 {
 		return 8
 	}
 	return hours
+}
+
+// calculateLeaveHoursWithinPolicy clips leave to each workday and subtracts overlapping break time.
+func calculateLeaveHoursWithinPolicy(startAt, endAt time.Time, work AttendancePolicyWorkTime) float64 {
+	if !endAt.After(startAt) {
+		return 0
+	}
+	standardStart := parseHHMMMinutes(work.StandardStart)
+	standardEnd := parseHHMMMinutes(work.StandardEnd)
+	breakStart := parseHHMMMinutes(work.BreakStart)
+	breakEnd := parseHHMMMinutes(work.BreakEnd)
+	if standardStart < 0 || standardEnd <= standardStart {
+		return 0
+	}
+
+	localStart := startAt.In(attendanceClockLocation)
+	localEnd := endAt.In(attendanceClockLocation)
+	lastDay := time.Date(localEnd.Year(), localEnd.Month(), localEnd.Day(), 0, 0, 0, 0, attendanceClockLocation)
+	totalHours := 0.0
+	for day := time.Date(localStart.Year(), localStart.Month(), localStart.Day(), 0, 0, 0, 0, attendanceClockLocation); !day.After(lastDay); day = day.AddDate(0, 0, 1) {
+		workStartAt := day.Add(time.Duration(standardStart) * time.Minute)
+		workEndAt := day.Add(time.Duration(standardEnd) * time.Minute)
+		clippedStartAt := workStartAt
+		if localStart.After(clippedStartAt) {
+			clippedStartAt = localStart
+		}
+		clippedEndAt := workEndAt
+		if localEnd.Before(clippedEndAt) {
+			clippedEndAt = localEnd
+		}
+		if !clippedEndAt.After(clippedStartAt) {
+			continue
+		}
+
+		dayHours := clippedEndAt.Sub(clippedStartAt).Hours()
+		if breakStart >= 0 && breakEnd > breakStart {
+			breakStartAt := day.Add(time.Duration(breakStart) * time.Minute)
+			breakEndAt := day.Add(time.Duration(breakEnd) * time.Minute)
+			overlapStartAt := breakStartAt
+			if clippedStartAt.After(overlapStartAt) {
+				overlapStartAt = clippedStartAt
+			}
+			overlapEndAt := breakEndAt
+			if clippedEndAt.Before(overlapEndAt) {
+				overlapEndAt = clippedEndAt
+			}
+			if overlapEndAt.After(overlapStartAt) {
+				dayHours -= overlapEndAt.Sub(overlapStartAt).Hours()
+			}
+		}
+		totalHours += math.Max(0, dayHours)
+	}
+	return math.Round(totalHours*100) / 100
 }
 
 func parseHHMMMinutes(value string) int {

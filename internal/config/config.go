@@ -78,8 +78,6 @@ type Config struct {
 	LiteLLMBaseURL   string
 	LiteLLMAPIKey    string
 	LiteLLMMasterKey string
-	AgentChatEnabled bool
-	AgentChatTimeout time.Duration
 
 	ObjectStoreProvider                string
 	ObjectStoreDir                     string
@@ -165,14 +163,6 @@ func (c Config) ValidateStartup() error {
 			problems = append(problems, "NATS_BASE_URL is required when NATS_ENABLED=true")
 		} else if problem := natsURLProblem("NATS_BASE_URL", c.NATSURL); problem != "" {
 			problems = append(problems, problem)
-		}
-	}
-	if c.AgentChatEnabled {
-		if strings.TrimSpace(c.LiteLLMBaseURL) == "" {
-			problems = append(problems, "LITELLM_BASE_URL is required when AGENT_CHAT_ENABLED=true")
-		}
-		if strings.TrimSpace(c.LiteLLMAPIKey) == "" {
-			problems = append(problems, "LITELLM_API_KEY is required when AGENT_CHAT_ENABLED=true")
 		}
 	}
 	switch normalizeObjectStoreProvider(c.ObjectStoreProvider, c.ObjectStoreDir, c.ObjectStoreEndpoint, c.ObjectStoreBucket) {
@@ -302,8 +292,6 @@ func LoadE() (Config, error) {
 		LiteLLMBaseURL:   env("LITELLM_BASE_URL", "http://127.0.0.1:4000"),
 		LiteLLMAPIKey:    os.Getenv("LITELLM_API_KEY"),
 		LiteLLMMasterKey: os.Getenv("LITELLM_MASTER_KEY"),
-		AgentChatEnabled: envBool("AGENT_CHAT_ENABLED", false, &problems),
-		AgentChatTimeout: time.Duration(envInt("AGENT_CHAT_TIMEOUT_SECONDS", 60, &problems)) * time.Second,
 
 		ObjectStoreProvider:                objectStoreProvider,
 		ObjectStoreDir:                     strings.TrimSpace(os.Getenv("OBJECT_STORE_DIR")),
@@ -432,23 +420,30 @@ func ehrmsSyncConfigProblems(c Config) []string {
 	return problems
 }
 
-// ehrmsAttendanceSyncConfigProblems 處理 eHRMS 考勤 sync 組態 problems。
+// ehrmsAttendanceSyncConfigProblems 僅在考勤同步啟用時校驗其獨立配置。
+// interval 最小值僅在 attendance-only（未開員工 sync）相容路徑強制。
 func ehrmsAttendanceSyncConfigProblems(c Config) []string {
 	if !c.EHRMSAttendanceSyncEnabled {
 		return nil
 	}
+	attendanceOnly := !c.EHRMSSyncEnabled
 	problems := []string{}
-	if strings.TrimSpace(c.EHRMSBaseURL) == "" {
-		problems = append(problems, "EHRMS_BASE_URL is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
-	}
-	if strings.TrimSpace(c.EHRMSAPIKey) == "" {
-		problems = append(problems, "EHRMS_API_KEY is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
-	}
-	if strings.TrimSpace(c.EHRMSAttendanceSyncTenantID) == "" {
-		problems = append(problems, "EHRMS_ATTENDANCE_SYNC_TENANT_ID is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
-	}
-	if strings.TrimSpace(c.EHRMSAttendanceSyncAccountID) == "" {
-		problems = append(problems, "EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
+	if attendanceOnly {
+		if strings.TrimSpace(c.EHRMSBaseURL) == "" {
+			problems = append(problems, "EHRMS_BASE_URL is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
+		}
+		if strings.TrimSpace(c.EHRMSAPIKey) == "" {
+			problems = append(problems, "EHRMS_API_KEY is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
+		}
+		if strings.TrimSpace(c.EHRMSAttendanceSyncTenantID) == "" {
+			problems = append(problems, "EHRMS_ATTENDANCE_SYNC_TENANT_ID is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
+		}
+		if strings.TrimSpace(c.EHRMSAttendanceSyncAccountID) == "" {
+			problems = append(problems, "EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
+		}
+		if c.EHRMSAttendanceSyncInterval > 0 && c.EHRMSAttendanceSyncInterval < 30*24*time.Hour {
+			problems = append(problems, "EHRMS_ATTENDANCE_SYNC_INTERVAL must be at least 720h (30 days)")
+		}
 	}
 	switch strings.ToLower(strings.TrimSpace(c.EHRMSAttendanceSyncMode)) {
 	case "", "create", "update", "upsert":
@@ -459,9 +454,6 @@ func ehrmsAttendanceSyncConfigProblems(c Config) []string {
 		if _, err := time.Parse(time.DateOnly, since); err != nil {
 			problems = append(problems, "EHRMS_ATTENDANCE_SYNC_SINCE must be YYYY-MM-DD")
 		}
-	}
-	if c.EHRMSAttendanceSyncInterval > 0 && c.EHRMSAttendanceSyncInterval < 30*24*time.Hour {
-		problems = append(problems, "EHRMS_ATTENDANCE_SYNC_INTERVAL must be at least 720h (30 days)")
 	}
 	return problems
 }

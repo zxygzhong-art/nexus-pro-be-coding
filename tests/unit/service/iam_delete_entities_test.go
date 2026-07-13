@@ -32,7 +32,7 @@ func TestDeletePermissionSetHappyPathAndConflictWhenReferenced(t *testing.T) {
 		ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-admin"}, CreatedAt: now,
 	})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
 	if _, err := svc.IAM().DeletePermissionSet(ctx, "ps-used"); err == nil {
 		t.Fatal("expected conflict when permission set referenced by user group")
@@ -72,7 +72,7 @@ func TestDeletePermissionSetConflictOnActiveAssignment(t *testing.T) {
 		PermissionSetID: "ps-bound", Effect: "allow", CreatedAt: now,
 	})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
 	if _, err := svc.IAM().DeletePermissionSet(ctx, "ps-bound"); err == nil {
 		t.Fatal("expected conflict when permission set has active assignments")
@@ -101,7 +101,7 @@ func TestDeleteUserGroupHappyPathAndConflictWhenMembers(t *testing.T) {
 		ID: "acct-2", TenantID: "tenant-1", Status: "active", UserGroupIDs: []string{"ug-members"}, CreatedAt: now,
 	})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
 	if _, err := svc.IAM().DeleteUserGroup(ctx, "ug-members"); err == nil {
 		t.Fatal("expected conflict when user group has members")
@@ -142,7 +142,7 @@ func TestDeleteUserGroupConflictWhenTrustPolicyReferences(t *testing.T) {
 		ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-admin"}, CreatedAt: now,
 	})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
 	if _, err := svc.IAM().DeleteUserGroup(ctx, "ug-trusted"); err == nil {
 		t.Fatal("expected conflict when user group referenced by trust policy")
@@ -174,10 +174,10 @@ func TestDeleteAssumableRoleHappyPathAndConflictWhenActiveSession(t *testing.T) 
 	})
 	_ = store.UpsertAssumableRoleSession(context.Background(), domain.AssumableRoleSession{
 		ID: "sess-1", TenantID: "tenant-1", AccountID: "acct-1", AssumableRoleID: "ar-active",
-		ExpiresAt: now.Add(time.Hour), CreatedAt: now,
+		ExpiresAt: time.Now().UTC().Add(time.Hour), CreatedAt: now,
 	})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
 	if _, err := svc.IAM().DeleteAssumableRole(ctx, "ar-active"); err == nil {
 		t.Fatal("expected conflict when assumable role has active sessions")

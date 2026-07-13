@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"nexus-pro-be/internal/config"
-	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -146,6 +145,28 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 	if !found || !reserved || updated.RemainingHours != 8 {
 		t.Fatalf("expected trimmed leave type to reserve hours, got found=%v reserved=%v balance=%+v", found, reserved, updated)
 	}
+
+	ehrmsBalance := balance
+	ehrmsBalance.ID = "ehrms_" + suffix
+	ehrmsBalance.RemainingHours = 24
+	ehrmsBalance.Source = "ehrms"
+	ehrmsBalance.UpdatedAt = now.Add(2 * time.Minute)
+	if err := store.UpsertLeaveBalance(ctx, ehrmsBalance); err != nil {
+		t.Fatalf("expected employee/type conflict to update existing balance: %v", err)
+	}
+	balances, err := store.ListLeaveBalances(ctx, tenantA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched := make([]domain.LeaveBalance, 0, 1)
+	for _, item := range balances {
+		if item.EmployeeID == empA && item.LeaveType == "annual" {
+			matched = append(matched, item)
+		}
+	}
+	if len(matched) != 1 || matched[0].ID != balance.ID || matched[0].RemainingHours != 24 || matched[0].Source != "ehrms" {
+		t.Fatalf("expected one updated balance preserving original id, got %+v", matched)
+	}
 }
 
 // TestHRCoreCRUDPostgresAcceptanceSemantics 驗證 HR core crud Postgres acceptance semantics。
@@ -190,7 +211,7 @@ func TestHRCoreCRUDPostgresAcceptanceSemantics(t *testing.T) {
 		t.Fatal(err)
 	}
 	app := service.New(store)
-	reqCtx := domain.RequestContext{TenantID: tenantA, AccountID: accountID, RequestID: "it-" + suffix, ApprovalConfirmed: true}
+	reqCtx := domain.RequestContext{TenantID: tenantA, AccountID: accountID, RequestID: "it-" + suffix}
 
 	created, err := app.HR().CreateEmployee(reqCtx, validEmployeeCreateInput(suffix, "Integration One", "one_"+suffix+"@example.com"))
 	if err != nil {
@@ -444,7 +465,6 @@ func TestEmployeeHTTPPostgresAcceptanceTraceAuthzAndFieldPolicy(t *testing.T) {
 
 	exportReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/export", nil)
 	addIntegrationHeaders(exportReq, tenantID, hrAccountID, "req-"+suffix+"-export")
-	exportReq.Header.Set("X-Approval-Confirmed", "true")
 	exportRec := httptest.NewRecorder()
 	handler.ServeHTTP(exportRec, exportReq)
 	if exportRec.Code != http.StatusOK {
@@ -480,7 +500,6 @@ func TestEmployeeHTTPPostgresAcceptanceTraceAuthzAndFieldPolicy(t *testing.T) {
 	deleteReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/batch-delete", strings.NewReader(`{"employee_ids":["`+employeeID+`"],"reason":"integration cleanup"}`))
 	addIntegrationHeaders(deleteReq, tenantID, hrAccountID, "req-"+suffix+"-delete")
 	deleteReq.Header.Set("Content-Type", "application/json")
-	deleteReq.Header.Set("X-Approval-Confirmed", "true")
 	deleteRec := httptest.NewRecorder()
 	handler.ServeHTTP(deleteRec, deleteReq)
 	if deleteRec.Code != http.StatusOK {
@@ -517,7 +536,6 @@ func TestAttendanceClockHTTPPostgresFieldPolicy(t *testing.T) {
 	adminAccountID := "acct_" + suffix + "_admin"
 	worksiteID := "aws_" + suffix
 	shiftID := "ash_" + suffix
-	assignmentID := "asa_" + suffix
 
 	if err := store.UpsertTenant(ctx, domain.Tenant{ID: tenantID, Name: tenantID, CreatedAt: now}); err != nil {
 		t.Fatal(err)
@@ -563,9 +581,6 @@ func TestAttendanceClockHTTPPostgresFieldPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := store.UpsertAttendanceShift(ctx, domain.AttendanceShift{ID: shiftID, TenantID: tenantID, Name: "Day Shift", ClockInStart: "08:00", ClockInEnd: "10:00", ClockOutStart: "17:00", ClockOutEnd: "19:00", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.UpsertAttendanceShiftAssignment(ctx, domain.AttendanceShiftAssignment{ID: assignmentID, TenantID: tenantID, EmployeeID: employeeID, ShiftID: shiftID, WorksiteID: worksiteID, EffectiveFrom: clockNow.Add(-24 * time.Hour), Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 

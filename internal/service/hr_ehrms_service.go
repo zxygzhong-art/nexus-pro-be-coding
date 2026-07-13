@@ -6,7 +6,6 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/utils"
 )
 
@@ -52,6 +51,86 @@ type ehrmsEmployeeWrite struct {
 	update    bool
 }
 
+// SyncEHRMSOrgUnits 僅同步 eHRMS 組織單位（部門）。
+func (c HRService) SyncEHRMSOrgUnits(ctx RequestContext) (EHRMSOrgUnitSyncResponse, error) {
+	if c.ehrmsClient == nil {
+		return EHRMSOrgUnitSyncResponse{}, BadRequest("eHRMS is not configured")
+	}
+	_, _, authzAudit, err := c.Service.Authorize(ctx,
+		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceOrgUnit, Action: ActionCreate},
+		AuditTarget{Event: "hr.org_unit.ehrms.sync", Resource: string(ResourceOrgUnit)},
+	)
+	if err != nil {
+		return EHRMSOrgUnitSyncResponse{}, err
+	}
+	departmentRecords, err := c.ehrmsClient.ListDepartments(goContext(ctx))
+	if err != nil {
+		c.logWarn(ctx, "eHRMS department fetch failed", "error", err)
+		return EHRMSOrgUnitSyncResponse{}, ehrmsFetchError("departments", err)
+	}
+	departments := ehrmsOrgUnitsFromDepartments(ctx.TenantID, departmentRecords, c.Now())
+	response := EHRMSOrgUnitSyncResponse{Fetched: len(departmentRecords)}
+	if err := c.withTransaction(ctx, func(tx HRService) error {
+		upserted, err := tx.upsertEHRMSOrgUnits(ctx, departments)
+		if err != nil {
+			return err
+		}
+		response.Upserted = upserted
+		if err := tx.audit(ctx, "hr.org_unit.ehrms.sync", string(ResourceOrgUnit), "ehrms", string(SeverityHigh), map[string]any{
+			"source":   "ehrms",
+			"fetched":  response.Fetched,
+			"upserted": upserted,
+		}); err != nil {
+			return err
+		}
+		return authzAudit.CommitWith(ctx, tx.Service)
+	}); err != nil {
+		return EHRMSOrgUnitSyncResponse{}, err
+	}
+	c.logInfo(ctx, "eHRMS org unit sync completed", "fetched", response.Fetched, "upserted", response.Upserted)
+	return response, nil
+}
+
+// SyncEHRMSPositions 僅同步 eHRMS 崗位。
+func (c HRService) SyncEHRMSPositions(ctx RequestContext) (EHRMSPositionSyncResponse, error) {
+	if c.ehrmsClient == nil {
+		return EHRMSPositionSyncResponse{}, BadRequest("eHRMS is not configured")
+	}
+	_, _, authzAudit, err := c.Service.Authorize(ctx,
+		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourcePosition, Action: ActionCreate},
+		AuditTarget{Event: "hr.position.ehrms.sync", Resource: string(ResourcePosition)},
+	)
+	if err != nil {
+		return EHRMSPositionSyncResponse{}, err
+	}
+	positionRecords, err := c.ehrmsClient.ListPositions(goContext(ctx))
+	if err != nil {
+		c.logWarn(ctx, "eHRMS position fetch failed", "error", err)
+		return EHRMSPositionSyncResponse{}, ehrmsFetchError("positions", err)
+	}
+	positions := ehrmsPositionsFromRecords(ctx.TenantID, positionRecords, c.Now())
+	response := EHRMSPositionSyncResponse{Fetched: len(positionRecords)}
+	if err := c.withTransaction(ctx, func(tx HRService) error {
+		upserted, err := tx.upsertEHRMSPositions(ctx, positions)
+		if err != nil {
+			return err
+		}
+		response.Upserted = upserted
+		if err := tx.audit(ctx, "hr.position.ehrms.sync", string(ResourcePosition), "ehrms", string(SeverityHigh), map[string]any{
+			"source":   "ehrms",
+			"fetched":  response.Fetched,
+			"upserted": upserted,
+		}); err != nil {
+			return err
+		}
+		return authzAudit.CommitWith(ctx, tx.Service)
+	}); err != nil {
+		return EHRMSPositionSyncResponse{}, err
+	}
+	c.logInfo(ctx, "eHRMS position sync completed", "fetched", response.Fetched, "upserted", response.Upserted)
+	return response, nil
+}
+
 // SyncEHRMSEmployees 同步 eHRMS 員工的服務流程。
 func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyncInput) (EHRMSEmployeeSyncResponse, error) {
 	if c.ehrmsClient == nil {
@@ -69,58 +148,42 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 	departmentRecords, err := c.ehrmsClient.ListDepartments(goContext(ctx))
 	if err != nil {
 		c.logWarn(ctx, "eHRMS department fetch failed", "error", err)
-		return EHRMSEmployeeSyncResponse{}, BadRequest("fetch eHRMS departments failed")
+		return EHRMSEmployeeSyncResponse{}, ehrmsFetchError("departments", err)
 	}
 	positionRecords, err := c.ehrmsClient.ListPositions(goContext(ctx))
 	if err != nil {
 		c.logWarn(ctx, "eHRMS position fetch failed", "error", err)
-		return EHRMSEmployeeSyncResponse{}, BadRequest("fetch eHRMS positions failed")
+		return EHRMSEmployeeSyncResponse{}, ehrmsFetchError("positions", err)
 	}
 	records, err := c.ehrmsClient.ListEmployees(goContext(ctx))
 	if err != nil {
 		c.logWarn(ctx, "eHRMS employee fetch failed", "error", err)
-		return EHRMSEmployeeSyncResponse{}, BadRequest("fetch eHRMS employees failed")
+		return EHRMSEmployeeSyncResponse{}, ehrmsFetchError("employees", err)
 	}
 	response := EHRMSEmployeeSyncResponse{Fetched: len(records), Mode: mode}
 	now := c.Now()
 	departments := ehrmsOrgUnitsFromDepartments(ctx.TenantID, departmentRecords, now)
 	positions := ehrmsPositionsFromRecords(ctx.TenantID, positionRecords, now)
 	provisionQueued := false
-	var validationErr error
 	if err := c.withTransaction(ctx, func(tx HRService) error {
-		for _, unit := range departments {
-			before, ok, err := tx.store.GetOrgUnit(goContext(ctx), ctx.TenantID, unit.ID)
-			if err != nil {
-				return err
-			}
-			if err := tx.store.UpsertOrgUnit(goContext(ctx), unit); err != nil {
-				return err
-			}
-			if !ok {
-				before = OrgUnit{}
-			}
-			if err := tx.Service.syncOrgUnitRelationshipTuples(ctx, before, unit); err != nil {
-				return err
-			}
+		c.logInfo(ctx, "eHRMS sync step started", "step", "departments", "fetched", len(departmentRecords))
+		if _, err := tx.upsertEHRMSOrgUnits(ctx, departments); err != nil {
+			return err
 		}
-		for _, position := range positions {
-			if err := tx.store.UpsertPosition(goContext(ctx), position); err != nil {
-				return err
-			}
+		c.logInfo(ctx, "eHRMS sync step completed", "step", "departments", "upserted", len(departments))
+		c.logInfo(ctx, "eHRMS sync step started", "step", "positions", "fetched", len(positionRecords))
+		if _, err := tx.upsertEHRMSPositions(ctx, positions); err != nil {
+			return err
 		}
-		writes, rowErrors, results, err := tx.prepareEHRMSSyncWrites(ctx, account, decision, records, mode)
+		c.logInfo(ctx, "eHRMS sync step completed", "step", "positions", "upserted", len(positions))
+		c.logInfo(ctx, "eHRMS sync step started", "step", "employees", "fetched", len(records))
+		writes, rowErrors, skippedResults, err := tx.prepareEHRMSSyncWrites(ctx, account, decision, records, mode)
 		if err != nil {
 			return err
 		}
-		if len(rowErrors) > 0 {
-			response.Failed = len(records)
-			response.RowErrors = rowErrors
-			response.Results = results
-			validationErr = domain.ImportValidationFailed("eHRMS employee sync contains invalid rows", rowErrors)
-			return validationErr
-		}
 		created, updated := 0, 0
-		results = make([]BatchEmployeeResult, 0, len(writes))
+		results := make([]BatchEmployeeResult, 0, len(writes)+len(skippedResults))
+		results = append(results, skippedResults...)
 		for _, item := range writes {
 			accountCreated, err := tx.ensureEHRMSEmployeeAccount(ctx, &item.employee)
 			if err != nil {
@@ -175,16 +238,29 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 			}
 			results = append(results, BatchEmployeeResult{RowNumber: item.rowNumber, EmployeeID: item.employee.ID, Success: true, Action: action, Message: action})
 		}
+		sort.SliceStable(results, func(i, j int) bool {
+			return results[i].RowNumber < results[j].RowNumber
+		})
 		response.Created = created
 		response.Updated = updated
+		response.Failed = len(skippedResults)
+		response.RowErrors = rowErrors
 		response.DepartmentsUpserted = len(departments)
 		response.PositionsUpserted = len(positions)
 		response.Results = results
+		c.logInfo(ctx, "eHRMS sync step completed",
+			"step", "employees",
+			"created", created,
+			"updated", updated,
+			"failed", len(skippedResults),
+			"mode", mode,
+		)
 		if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeImported), "ehrms", map[string]any{
 			"source":               "ehrms",
 			"fetched":              response.Fetched,
 			"created":              created,
 			"updated":              updated,
+			"failed":               len(skippedResults),
 			"departments_upserted": len(departments),
 			"positions_upserted":   len(positions),
 			"mode":                 mode,
@@ -196,6 +272,7 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 			"fetched":              response.Fetched,
 			"created":              created,
 			"updated":              updated,
+			"skipped":              response.Skipped,
 			"failed":               response.Failed,
 			"departments_upserted": len(departments),
 			"positions_upserted":   len(positions),
@@ -205,13 +282,7 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 		}
 		return authzAudit.CommitWith(ctx, tx.Service)
 	}); err != nil {
-		if validationErr != nil {
-			return response, validationErr
-		}
 		return EHRMSEmployeeSyncResponse{}, err
-	}
-	if validationErr != nil {
-		return response, validationErr
 	}
 	if provisionQueued {
 		c.runIdentityProvisioningFastPath(ctx)
@@ -220,6 +291,7 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 		"fetched", response.Fetched,
 		"created", response.Created,
 		"updated", response.Updated,
+		"skipped", response.Skipped,
 		"departments_upserted", response.DepartmentsUpserted,
 		"positions_upserted", response.PositionsUpserted,
 		"mode", mode,
@@ -280,7 +352,21 @@ func (c HRService) prepareEHRMSSyncWrites(ctx RequestContext, account Account, d
 		}
 		if len(errors) > 0 {
 			rowErrors = append(rowErrors, errors...)
-			results = append(results, BatchEmployeeResult{RowNumber: rowNumber, Success: false, Code: "import_validation_failed", Message: firstRowErrorMessage(errors)})
+			c.logWarn(ctx, "eHRMS employee sync row skipped",
+				"row", rowNumber,
+				"employee_no", employee.EmployeeNo,
+				"code", errors[0].Code,
+				"field", errors[0].Field,
+				"message", firstRowErrorMessage(errors),
+				"error_count", len(errors),
+			)
+			results = append(results, BatchEmployeeResult{
+				RowNumber: rowNumber,
+				Success:   false,
+				Action:    "failed",
+				Code:      errors[0].Code,
+				Message:   firstRowErrorMessage(errors),
+			})
 			continue
 		}
 		if len(employee.InternalExperiences) == 0 {
@@ -488,6 +574,94 @@ func (idx employeeUniqueIndex) fieldErrors(employee Employee) []FieldError {
 	return fields
 }
 
+func (c HRService) upsertEHRMSOrgUnits(ctx RequestContext, departments []OrgUnit) (int, error) {
+	departments, err := c.attachEHRMSRootsToCanonicalRoot(ctx, departments)
+	if err != nil {
+		return 0, err
+	}
+	for _, unit := range departments {
+		before, ok, err := c.store.GetOrgUnit(goContext(ctx), ctx.TenantID, unit.ID)
+		if err != nil {
+			return 0, err
+		}
+		if ok && unit.ManagerPositionID == "" {
+			unit.ManagerPositionID = before.ManagerPositionID
+		}
+		if err := c.store.UpsertOrgUnit(goContext(ctx), unit); err != nil {
+			return 0, err
+		}
+		if !ok {
+			before = OrgUnit{}
+		}
+		if err := c.Service.syncOrgUnitRelationshipTuples(ctx, before, unit); err != nil {
+			return 0, err
+		}
+	}
+	return len(departments), nil
+}
+
+// attachEHRMSRootsToCanonicalRoot 將 eHRMS 的多個根部門收斂到租戶唯一根節點下。
+func (c HRService) attachEHRMSRootsToCanonicalRoot(ctx RequestContext, departments []OrgUnit) ([]OrgUnit, error) {
+	if len(departments) == 0 {
+		return departments, nil
+	}
+	existing, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	rootID := ""
+	rootClosed := false
+	for _, unit := range existing {
+		if strings.TrimSpace(unit.ParentID) == "" {
+			rootID = unit.ID
+			rootClosed = unit.Closed
+			break
+		}
+	}
+	if rootID == "" {
+		for _, unit := range departments {
+			if strings.TrimSpace(unit.ParentID) == "" {
+				rootID = unit.ID
+				rootClosed = unit.Closed
+				break
+			}
+		}
+	}
+	if rootID == "" {
+		return nil, Conflict("organization must have exactly one top-level org unit")
+	}
+	out := make([]OrgUnit, 0, len(departments))
+	for _, unit := range departments {
+		if unit.ID != rootID && (len(unit.Path) == 0 || unit.Path[0] != rootID) {
+			unit.Path = append([]string{rootID}, unit.Path...)
+		}
+		if unit.ID != rootID && strings.TrimSpace(unit.ParentID) == "" {
+			unit.ParentID = rootID
+		}
+		if unit.ID != rootID && rootClosed {
+			unit.Closed = true
+		}
+		out = append(out, unit)
+	}
+	return out, nil
+}
+
+func (c HRService) upsertEHRMSPositions(ctx RequestContext, positions []Position) (int, error) {
+	for _, position := range positions {
+		before, ok, err := c.store.GetPosition(goContext(ctx), ctx.TenantID, position.ID)
+		if err != nil {
+			return 0, err
+		}
+		if ok && position.OrgUnitID == "" {
+			position.OrgUnitID = before.OrgUnitID
+		}
+		if err := c.store.UpsertPosition(goContext(ctx), position); err != nil {
+			return 0, err
+		}
+	}
+	return len(positions), nil
+}
+
 // ehrmsOrgUnitsFromDepartments 從 eHRMS /departments 建立組織單位（含空部門與 closed）。
 func ehrmsOrgUnitsFromDepartments(tenantID string, records []EHRMSDepartmentRecord, now time.Time) []OrgUnit {
 	unitsByID := make(map[string]OrgUnit, len(records))
@@ -496,15 +670,22 @@ func ehrmsOrgUnitsFromDepartments(tenantID string, records []EHRMSDepartmentReco
 		if code == "" {
 			continue
 		}
-		name := utils.FirstNonEmpty(ehrmsValue(record, ehrmsFieldDepartmentName), ehrmsValue(record, ehrmsFieldDepartmentEN), code)
+		rawName := utils.FirstNonEmpty(ehrmsValue(record, ehrmsFieldDepartmentName), ehrmsValue(record, ehrmsFieldDepartmentEN), code)
+		rawNameEN := ehrmsValue(record, ehrmsFieldDepartmentEN)
+		name, nameClosed := ehrmsCleanDepartmentName(rawName)
+		nameEN, nameENClosed := ehrmsCleanDepartmentName(rawNameEN)
+		closed := ehrmsBool(record, ehrmsFieldDeptClosed) || nameClosed || nameENClosed
+		if name == "" {
+			name = code
+		}
 		unitsByID[code] = OrgUnit{
 			ID:        code,
 			TenantID:  tenantID,
 			Code:      code,
 			Name:      name,
-			NameEN:    ehrmsValue(record, ehrmsFieldDepartmentEN),
+			NameEN:    nameEN,
 			ParentID:  ehrmsValue(record, ehrmsFieldParentDeptCode),
-			Closed:    ehrmsBool(record, ehrmsFieldDeptClosed),
+			Closed:    closed,
 			CreatedAt: now,
 			UpdatedAt: now,
 			Source:    "ehrms",
@@ -519,6 +700,12 @@ func ehrmsOrgUnitsFromDepartments(tenantID string, records []EHRMSDepartmentReco
 		}
 		unit.Path = ehrmsOrgUnitPath(code, unitsByID)
 		unitsByID[code] = unit
+	}
+	for _, unit := range ehrmsSortedOrgUnits(unitsByID) {
+		if parent, ok := unitsByID[unit.ParentID]; ok && parent.Closed {
+			unit.Closed = true
+			unitsByID[unit.ID] = unit
+		}
 	}
 	return ehrmsSortedOrgUnits(unitsByID)
 }
@@ -817,6 +1004,30 @@ func ehrmsBool(record map[string]string, key string) bool {
 	default:
 		return false
 	}
+}
+
+// ehrmsCleanDepartmentName 移除名稱中的「已關閉」標記，並回傳是否因此判定為關閉。
+func ehrmsCleanDepartmentName(name string) (string, bool) {
+	trimmed := strings.TrimSpace(name)
+	if trimmed == "" {
+		return "", false
+	}
+	closed := false
+	suffixes := []string{"(已關閉)", "（已關閉）", "(已关闭)", "（已关闭）"}
+	for {
+		changed := false
+		for _, suffix := range suffixes {
+			if strings.HasSuffix(trimmed, suffix) {
+				trimmed = strings.TrimSpace(strings.TrimSuffix(trimmed, suffix))
+				closed = true
+				changed = true
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+	return trimmed, closed
 }
 
 // fieldErrorsToRowErrors 處理欄位錯誤 to 列錯誤。

@@ -26,6 +26,7 @@ func (c HRService) ListOrgUnits(ctx RequestContext) ([]OrgUnit, error) {
 	if err != nil {
 		return nil, err
 	}
+	units = inheritClosedOrgUnitState(units)
 	return c.filterOrgUnitsByDecision(ctx, account, decision, units)
 }
 
@@ -68,6 +69,11 @@ func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (
 				return NotFound("org unit", next.ParentID)
 			}
 			next.Path = append(utils.CopyStrings(parent.Path), next.ID)
+			units, err := tx.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+			if err != nil {
+				return err
+			}
+			next.Closed = orgUnitHasClosedAncestor(next, units)
 		} else {
 			next.Path = []string{next.ID}
 		}
@@ -75,6 +81,9 @@ func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (
 			return err
 		}
 		if err := tx.store.UpsertOrgUnit(goContext(ctx), next); err != nil {
+			return err
+		}
+		if err := tx.assignManagerPositionOrgUnit(ctx, next); err != nil {
 			return err
 		}
 		if err := tx.Service.syncOrgUnitRelationshipTuples(ctx, OrgUnit{}, next); err != nil {
@@ -148,10 +157,23 @@ func (c HRService) UpdateOrgUnit(ctx RequestContext, id string, input UpdateOrgU
 		if input.ManagerPositionID != nil {
 			next.ManagerPositionID = strings.TrimSpace(*input.ManagerPositionID)
 		}
+		if input.Closed != nil {
+			next.Closed = *input.Closed
+		}
 		if parentChanged {
 			if err := tx.rebuildOrgUnitPaths(ctx, &next); err != nil {
 				return err
 			}
+		}
+		units, err := tx.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+		if err != nil {
+			return err
+		}
+		if orgUnitHasClosedAncestor(next, units) {
+			if input.Closed != nil && !*input.Closed {
+				return BadRequest("org unit cannot be reopened while an ancestor is closed")
+			}
+			next.Closed = true
 		}
 		if err := tx.validateOrgUnitManagerPosition(ctx, next); err != nil {
 			return err
@@ -159,8 +181,16 @@ func (c HRService) UpdateOrgUnit(ctx RequestContext, id string, input UpdateOrgU
 		if err := tx.store.UpsertOrgUnit(goContext(ctx), next); err != nil {
 			return err
 		}
+		if err := tx.assignManagerPositionOrgUnit(ctx, next); err != nil {
+			return err
+		}
 		if parentChanged {
 			if err := tx.updateOrgUnitDescendantPaths(ctx, before, next); err != nil {
+				return err
+			}
+		}
+		if next.Closed {
+			if err := tx.closeOrgUnitDescendants(ctx, next); err != nil {
 				return err
 			}
 		}
@@ -179,6 +209,8 @@ func (c HRService) UpdateOrgUnit(ctx RequestContext, id string, input UpdateOrgU
 			"after_parent_id":            next.ParentID,
 			"before_manager_position_id": before.ManagerPositionID,
 			"after_manager_position_id":  next.ManagerPositionID,
+			"before_closed":              before.Closed,
+			"after_closed":               next.Closed,
 		}); err != nil {
 			return err
 		}
@@ -188,6 +220,102 @@ func (c HRService) UpdateOrgUnit(ctx RequestContext, id string, input UpdateOrgU
 		return OrgUnit{}, err
 	}
 	return unit, nil
+}
+
+// assignManagerPositionOrgUnit 将主管岗位归属同步到当前组织单元。
+func (c HRService) assignManagerPositionOrgUnit(ctx RequestContext, unit OrgUnit) error {
+	positionID := strings.TrimSpace(unit.ManagerPositionID)
+	if positionID == "" {
+		return nil
+	}
+	position, ok, err := c.store.GetPosition(goContext(ctx), ctx.TenantID, positionID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return NotFound("position", positionID)
+	}
+	if position.OrgUnitID == unit.ID {
+		return nil
+	}
+	if position.OrgUnitID != "" {
+		return BadRequest("manager position must belong to the same org unit")
+	}
+	position.OrgUnitID = unit.ID
+	position.UpdatedAt = c.Now()
+	if err := c.store.UpsertPosition(goContext(ctx), position); err != nil {
+		return err
+	}
+	return c.audit(ctx, "hr.position.org_unit.assign", string(ResourcePosition), position.ID, string(SeverityMedium), map[string]any{
+		"org_unit_id": unit.ID,
+		"source":      "org_unit_manager_position",
+	})
+}
+
+// inheritClosedOrgUnitState 在读取投影中保证关闭状态沿祖先链向下继承。
+func inheritClosedOrgUnitState(units []OrgUnit) []OrgUnit {
+	byID := make(map[string]OrgUnit, len(units))
+	for _, unit := range units {
+		byID[unit.ID] = unit
+	}
+	out := make([]OrgUnit, len(units))
+	for index, unit := range units {
+		current := unit
+		seen := map[string]struct{}{unit.ID: {}}
+		for parentID := strings.TrimSpace(unit.ParentID); parentID != ""; {
+			if _, exists := seen[parentID]; exists {
+				break
+			}
+			seen[parentID] = struct{}{}
+			parent, ok := byID[parentID]
+			if !ok {
+				break
+			}
+			if parent.Closed {
+				current.Closed = true
+				break
+			}
+			parentID = strings.TrimSpace(parent.ParentID)
+		}
+		out[index] = current
+	}
+	return out
+}
+
+// orgUnitHasClosedAncestor 判断目标组织单元的任一祖先是否已关闭。
+func orgUnitHasClosedAncestor(unit OrgUnit, units []OrgUnit) bool {
+	byID := make(map[string]OrgUnit, len(units))
+	for _, candidate := range units {
+		byID[candidate.ID] = candidate
+	}
+	for _, ancestorID := range unit.Path {
+		if ancestorID == unit.ID {
+			continue
+		}
+		if ancestor, ok := byID[ancestorID]; ok && ancestor.Closed {
+			return true
+		}
+	}
+	return false
+}
+
+// closeOrgUnitDescendants 将关闭状态递归写入目标组织单元的全部后代。
+func (c HRService) closeOrgUnitDescendants(ctx RequestContext, parent OrgUnit) error {
+	units, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return err
+	}
+	for _, unit := range units {
+		if unit.ID == parent.ID || unit.Closed || !orgUnitPathHasPrefix(unit.Path, parent.Path) {
+			continue
+		}
+		unit.Closed = true
+		unit.UpdatedAt = c.Now()
+		if err := c.store.UpsertOrgUnit(goContext(ctx), unit); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c HRService) validateOrgUnitManagerPosition(ctx RequestContext, unit OrgUnit) error {
@@ -207,6 +335,20 @@ func (c HRService) validateOrgUnitManagerPosition(ctx RequestContext, unit OrgUn
 	}
 	if position.OrgUnitID != "" && position.OrgUnitID != unit.ID {
 		return BadRequest("manager position must belong to the same org unit")
+	}
+	if position.OrgUnitID == "" {
+		employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+		if err != nil {
+			return err
+		}
+		for _, employee := range employees {
+			if strings.TrimSpace(employee.PositionID) != position.ID || strings.TrimSpace(employee.OrgUnitID) == "" {
+				continue
+			}
+			if employee.OrgUnitID != unit.ID {
+				return BadRequest("manager position is shared with employees in another org unit")
+			}
+		}
 	}
 	return nil
 }
@@ -304,6 +446,7 @@ func (c HRService) exportEmployees(ctx RequestContext, query EmployeeQuery) ([]E
 	if err != nil {
 		return nil, CheckResult{}, err
 	}
+	decision.FieldPolicies = employeeExportFieldPolicies(decision.FieldPolicies)
 	scopedQuery, err := c.employeeQueryWithDecisionScope(ctx, account, query, decision)
 	if err != nil {
 		return nil, CheckResult{}, err
@@ -339,6 +482,20 @@ func (c HRService) exportEmployees(ctx RequestContext, query EmployeeQuery) ([]E
 		"scope", decision.EffectiveScope,
 	)
 	return items, decision, nil
+}
+
+// employeeExportFieldPolicies 保留欄位拒絕規則，但讓具備匯出權限的公司信箱維持可用原值。
+func employeeExportFieldPolicies(policies map[string]string) map[string]string {
+	if strings.TrimSpace(policies["company_email"]) != "mask" {
+		return policies
+	}
+	out := make(map[string]string, len(policies)-1)
+	for field, effect := range policies {
+		if field != "company_email" {
+			out[field] = effect
+		}
+	}
+	return out
 }
 
 // DeleteEmployee 刪除員工的服務流程。
@@ -577,6 +734,7 @@ func (c HRService) GetEmployee(ctx RequestContext, id string) (Employee, error) 
 	if !decision.Allowed {
 		return Employee{}, forbiddenAuthz(decision)
 	}
+	decision.FieldPolicies = employeeDetailFieldPolicies(decision.FieldPolicies)
 	employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, id)
 	if err != nil {
 		return Employee{}, err
@@ -595,6 +753,23 @@ func (c HRService) GetEmployee(ctx RequestContext, id string) (Employee, error) 
 		return Employee{}, err
 	}
 	return visible[0], nil
+}
+
+// employeeDetailFieldPolicies 讓授權後的詳情讀取回傳可用原值，同時保留 hide 與 deny 限制。
+func employeeDetailFieldPolicies(policies map[string]string) map[string]string {
+	if len(policies) == 0 {
+		return policies
+	}
+	out := make(map[string]string, len(policies))
+	for field, effect := range policies {
+		if strings.TrimSpace(effect) != "mask" {
+			out[field] = effect
+		}
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }
 
 // CreateEmployeeAggregate 建立員工 aggregate 的服務流程。

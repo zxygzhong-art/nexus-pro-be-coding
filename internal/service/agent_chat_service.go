@@ -3,12 +3,27 @@ package service
 import (
 	"context"
 	"strings"
+	"time"
 
 	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/utils"
 )
 
 type agentChatContextKey struct{}
+
+const defaultChatRuntimeTimeout = 60 * time.Second
+
+// effectiveAgentRuntimeTimeout 取 Agent 與模型中較嚴格的正值逾時，避免任一設定被 runtime 忽略。
+func effectiveAgentRuntimeTimeout(agentSeconds, modelSeconds int) time.Duration {
+	seconds := agentSeconds
+	if seconds <= 0 || modelSeconds > 0 && modelSeconds < seconds {
+		seconds = modelSeconds
+	}
+	if seconds <= 0 {
+		return defaultChatRuntimeTimeout
+	}
+	return time.Duration(seconds) * time.Second
+}
 
 // AgentReadOnlyTool 定義 agent runtime 可呼叫的只讀工具。
 type AgentReadOnlyTool func(context.Context, map[string]any) (map[string]any, error)
@@ -50,7 +65,7 @@ func AgentRequestContextFromContext(ctx context.Context) (domain.RequestContext,
 
 // Chat 執行流式 agent chat。
 func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit AgentChatEmitFunc) (AgentRun, error) {
-	if !c.agentChatEnabled || c.agentChatRuntime == nil {
+	if c.agentChatRuntime == nil {
 		err := domain.E(503, "service_unavailable", "agent chat is disabled")
 		err.ReasonCode = "agent_chat_disabled"
 		return AgentRun{}, err
@@ -64,10 +79,26 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		return AgentRun{}, BadRequest("message is required")
 	}
 	agentID := strings.TrimSpace(input.AgentID)
+	sessionID := strings.TrimSpace(input.SessionID)
+	if sessionID != "" {
+		session, err := c.currentAgentSession(ctx, account.ID, sessionID)
+		if err != nil {
+			return AgentRun{}, err
+		}
+		if session.Status != domain.AgentSessionStatusActive {
+			return AgentRun{}, BadRequest("agent session is archived")
+		}
+		boundAgentID := strings.TrimSpace(session.AgentID)
+		if agentID != "" && agentID != boundAgentID {
+			return AgentRun{}, BadRequest("agent id does not match the session")
+		}
+		agentID = boundAgentID
+	}
 	var configuredTools []string
 	limitTools := false
 	systemPrompt := ""
 	modelName := ""
+	runtimeTimeout := defaultChatRuntimeTimeout
 	if agentID != "" {
 		definition, err := c.publishedAgentDefinition(ctx, agentID)
 		if err != nil {
@@ -84,26 +115,18 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		if modelName == "" {
 			modelName = strings.TrimSpace(model.ModelName)
 		}
+		runtimeTimeout = effectiveAgentRuntimeTimeout(definition.TimeoutSeconds, model.TimeoutSeconds)
 	}
 	mode := strings.TrimSpace(input.Mode)
 	if mode == "" {
 		mode = "assistant_chat"
 	}
-	sessionID := strings.TrimSpace(input.SessionID)
 	if sessionID == "" {
 		session, err := c.createAgentSessionForChat(ctx, account.ID, agentID, agentSessionTitleFromMessage(userMessage))
 		if err != nil {
 			return AgentRun{}, err
 		}
 		sessionID = session.ID
-	} else {
-		session, err := c.currentAgentSession(ctx, account.ID, sessionID)
-		if err != nil {
-			return AgentRun{}, err
-		}
-		if session.Status != domain.AgentSessionStatusActive {
-			return AgentRun{}, BadRequest("agent session is archived")
-		}
 	}
 	if err := c.ensureNoActiveAgentRun(ctx, sessionID); err != nil {
 		return AgentRun{}, err
@@ -156,11 +179,9 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		emit = func(context.Context, domain.AgentChatEvent) error { return nil }
 	}
 	baseCtx := goContext(ctx)
-	if c.agentChatTimeout > 0 {
-		var cancel context.CancelFunc
-		baseCtx, cancel = context.WithTimeout(baseCtx, c.agentChatTimeout)
-		defer cancel()
-	}
+	var cancel context.CancelFunc
+	baseCtx, cancel = context.WithTimeout(baseCtx, runtimeTimeout)
+	defer cancel()
 	baseCtx = WithAgentRequestContext(baseCtx, ctx)
 	if err := emit(baseCtx, domain.AgentChatEvent{Event: domain.AgentChatEventSession, SessionID: sessionID, RunID: run.ID}); err != nil {
 		_ = c.failRun(ctx, run, err)
@@ -510,6 +531,7 @@ func (c AgentService) agentReadOnlyTools(reqCtx RequestContext, emit AgentChatEm
 		}
 	}
 	return map[string]AgentReadOnlyTool{
+		"knowledge.search":   tool("knowledge.search", c.toolKnowledgeSearch),
 		"get_my_profile":     tool("get_my_profile", c.toolGetMyProfile),
 		"list_employees":     tool("list_employees", c.toolListEmployees),
 		"get_employee":       tool("get_employee", c.toolGetEmployee),
@@ -518,6 +540,22 @@ func (c AgentService) agentReadOnlyTools(reqCtx RequestContext, emit AgentChatEm
 		"my_pending_reviews": tool("my_pending_reviews", c.toolMyPendingReviews),
 		"workspace_insights": tool("workspace_insights", c.toolWorkspaceInsights),
 	}
+}
+
+// toolKnowledgeSearch 維持工具目錄與 runtime registry 一致，並沿用目前租戶知識查詢入口。
+func (c AgentService) toolKnowledgeSearch(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
+	query := strings.TrimSpace(stringFromAny(args["query"]))
+	if query == "" {
+		query = strings.TrimSpace(stringFromAny(args["text"]))
+	}
+	if query == "" {
+		return nil, BadRequest("query is required")
+	}
+	answer, references, err := c.answerAgentPrompt(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"answer": answer, "references": references}, nil
 }
 
 func (c AgentService) toolGetMyProfile(ctx domain.RequestContext, _ map[string]any) (map[string]any, error) {

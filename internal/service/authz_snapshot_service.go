@@ -18,21 +18,20 @@ type AuthzSnapshotCache interface {
 // authzSnapshotKey 處理授權快照 key 的服務流程。
 func (c *Service) authzSnapshotKey(ctx RequestContext, account Account, req CheckRequest, version int64) string {
 	payload, _ := json.Marshal(map[string]any{
-		"tenant_id":                 ctx.TenantID,
-		"account_id":                account.ID,
-		"assumed_role_session_id":   ctx.AssumedRoleSessionID,
-		"permission_version":        version,
-		"application_code":          req.ApplicationCode,
-		"resource_type":             req.ResourceType,
-		"resource_id":               req.ResourceID,
-		"resource":                  req.Resource,
-		"action":                    req.Action,
-		"target":                    req.Target,
-		"target_employee_id":        req.TargetEmployeeID,
-		"route_method":              req.RouteMethod,
-		"route_path":                req.RoutePath,
-		"context":                   req.Context,
-		"approval_confirmation_set": ctx.ApprovalConfirmed,
+		"tenant_id":               ctx.TenantID,
+		"account_id":              account.ID,
+		"assumed_role_session_id": ctx.AssumedRoleSessionID,
+		"permission_version":      version,
+		"application_code":        req.ApplicationCode,
+		"resource_type":           req.ResourceType,
+		"resource_id":             req.ResourceID,
+		"resource":                req.Resource,
+		"action":                  req.Action,
+		"target":                  req.Target,
+		"target_employee_id":      req.TargetEmployeeID,
+		"route_method":            req.RouteMethod,
+		"route_path":              req.RoutePath,
+		"context":                 req.Context,
 	})
 	sum := sha1.Sum(payload)
 	return fmt.Sprintf("authz:snapshot:%s:%s", ctx.TenantID, hex.EncodeToString(sum[:]))

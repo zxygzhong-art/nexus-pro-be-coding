@@ -9,7 +9,7 @@ import (
 
 const (
 	corsAllowedMethods = "GET, POST, PATCH, DELETE, OPTIONS"
-	corsAllowedHeaders = "Authorization, Content-Type, X-Request-ID, X-Approval-Confirmed, X-Approval-Instance-ID, X-Assumable-Role-Session-ID"
+	corsAllowedHeaders = "Authorization, Content-Type, X-Request-ID, X-Assumable-Role-Session-ID"
 )
 
 // corsMiddleware 處理 CORS middleware。

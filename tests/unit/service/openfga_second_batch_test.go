@@ -33,7 +33,7 @@ func TestAssumableRoleTrustPolicyEmitsOpenFGATupleDiff(t *testing.T) {
 		CreatedAt:              now,
 	})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
 	role, err := svc.IAM().CreateAssumableRole(ctx, domain.CreateAssumableRoleInput{
 		Name:               "Ops Role",
@@ -84,7 +84,7 @@ func TestAssumeRoleOpenFGACanAssumeGate(t *testing.T) {
 	now := time.Date(2026, 7, 8, 10, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
 	seedAssumableRoleFGAFixture(t, store, now)
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 	checkKey := relationshipCheckKey("account:acct-1", "can_assume", "assumable_role:role-hr")
 
 	allowChecker := &mappedRelationshipChecker{allowed: map[string]bool{checkKey: true}}
@@ -114,11 +114,10 @@ func TestAssumeRoleOpenFGACanAssumeGate(t *testing.T) {
 	}
 }
 
-func TestAgentToolOpenFGACanRunAndHighRiskGate(t *testing.T) {
+func TestAgentToolOpenFGACanRunGate(t *testing.T) {
 	now := time.Date(2026, 7, 8, 10, 0, 0, 0, time.UTC)
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 	canRunKey := relationshipCheckKey("account:acct-1", "can_run", "agent_tool:knowledge.search")
-	highRiskKey := relationshipCheckKey("account:acct-1", "can_execute_high_risk", "agent_tool:knowledge.search")
 
 	deniedStore := memory.NewStore()
 	seedAgentToolFGAFixture(t, deniedStore, now, true)
@@ -130,29 +129,15 @@ func TestAgentToolOpenFGACanRunAndHighRiskGate(t *testing.T) {
 		t.Fatalf("expected can_run check, got %+v", denyChecker.checks)
 	}
 
-	highRiskStore := memory.NewStore()
-	seedAgentToolFGAFixture(t, highRiskStore, now, true)
-	approvalChecker := &mappedRelationshipChecker{allowed: map[string]bool{canRunKey: true}}
-	run, err := service.New(highRiskStore, service.Options{Relationships: approvalChecker, OpenFGAScopeChecks: true}).Agent().CreateRun(ctx, domain.CreateAgentRunInput{Prompt: "search"})
+	allowedStore := memory.NewStore()
+	seedAgentToolFGAFixture(t, allowedStore, now, true)
+	allowedChecker := &mappedRelationshipChecker{allowed: map[string]bool{canRunKey: true}}
+	run, err := service.New(allowedStore, service.Options{Relationships: allowedChecker, OpenFGAScopeChecks: true}).Agent().CreateRun(ctx, domain.CreateAgentRunInput{Prompt: "search"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(run.ToolDecisions) != 1 || !run.ToolDecisions[0].RequiresApproval {
-		t.Fatalf("expected high-risk tool to keep approval requirement without can_execute tuple, got %+v", run.ToolDecisions)
-	}
-	if !relationshipCheckSeen(approvalChecker.checks, "can_execute_high_risk", "agent_tool:knowledge.search") {
-		t.Fatalf("expected high-risk OpenFGA check, got %+v", approvalChecker.checks)
-	}
-
-	approverStore := memory.NewStore()
-	seedAgentToolFGAFixture(t, approverStore, now, true)
-	approverChecker := &mappedRelationshipChecker{allowed: map[string]bool{canRunKey: true, highRiskKey: true}}
-	run, err = service.New(approverStore, service.Options{Relationships: approverChecker, OpenFGAScopeChecks: true}).Agent().CreateRun(ctx, domain.CreateAgentRunInput{Prompt: "search"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(run.ToolDecisions) != 1 || run.ToolDecisions[0].RequiresApproval {
-		t.Fatalf("expected can_execute_high_risk to clear approval requirement, got %+v", run.ToolDecisions)
+	if len(run.ToolDecisions) != 1 || run.ToolDecisions[0].RiskLevel != string(domain.RiskHigh) {
+		t.Fatalf("expected allowed high-risk tool to retain audit risk level, got %+v", run.ToolDecisions)
 	}
 
 	disabledStore := memory.NewStore()

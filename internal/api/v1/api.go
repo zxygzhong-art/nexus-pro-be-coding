@@ -21,13 +21,13 @@ type API struct {
 	iam                 service.IAMFacade
 	hr                  service.HRFacade
 	attendance          service.AttendanceFacade
+	ehrms               service.EHRMSFacade
 	platform            service.PlatformFacade
 	workspace           service.WorkspaceFacade
 	workflow            service.WorkflowFacade
 	agent               service.AgentFacade
 	notification        service.NotificationFacade
 	audit               service.AuditFacade
-	allowApprovalHeader bool
 	tokenResolver       TokenResolver
 	telemetryService    string
 	readinessChecks     map[string]ReadinessCheck
@@ -47,10 +47,9 @@ type ReadinessCheck func(context.Context) error
 
 // Options 定義選項的資料結構。
 type Options struct {
-	DisableApprovalHeader bool
-	TokenResolver         TokenResolver
-	TelemetryServiceName  string
-	ReadinessChecks       map[string]ReadinessCheck
+	TokenResolver        TokenResolver
+	TelemetryServiceName string
+	ReadinessChecks      map[string]ReadinessCheck
 	// CORSAllowedOrigins 啟用只接受精確來源比對的 CORS middleware。
 	// 空值表示不輸出 CORS headers，維持既有行為。
 	CORSAllowedOrigins []string
@@ -79,7 +78,6 @@ func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
 	}
 	api := &API{
 		logger:              logger,
-		allowApprovalHeader: !cfg.DisableApprovalHeader,
 		tokenResolver:       cfg.TokenResolver,
 		telemetryService:    cfg.TelemetryServiceName,
 		readinessChecks:     copyReadinessChecks(cfg.ReadinessChecks),
@@ -97,6 +95,7 @@ func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
 		api.iam = app.IAM()
 		api.hr = app.HR()
 		api.attendance = app.Attendance()
+		api.ehrms = app.EHRMS()
 		api.platform = app.Platform()
 		api.workspace = app.Workspace()
 		api.workflow = app.Workflow()

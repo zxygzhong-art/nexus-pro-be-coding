@@ -217,10 +217,11 @@ func permissionCatalogItemFromPermission(tenantID string, permission Permission,
 	permission = normalizePermission(permission)
 	permissionType := permission.PermissionType
 	if permissionType == "" {
-		permissionType = PermissionTypeButton
-		if permission.MenuKey == "" {
-			permissionType = PermissionTypeAPI
-		}
+		permissionType = PermissionTypeAPI
+	}
+	menuKey := canonicalPageMenuKey(permission.MenuKey)
+	if menuKey == "" {
+		menuKey = canonicalMenuKeyForPermission(permission)
 	}
 	application := string(permission.ApplicationCode)
 	resource := strings.TrimSpace(permission.Resource)
@@ -247,7 +248,7 @@ func permissionCatalogItemFromPermission(tenantID string, permission Permission,
 		Resource:       resource,
 		Action:         action,
 		PermissionType: permissionType,
-		MenuKey:        strings.TrimSpace(permission.MenuKey),
+		MenuKey:        menuKey,
 		Name:           name,
 		Description:    strings.TrimSpace(permission.Description),
 		HighRisk:       permission.HighRisk || isHighRiskPermission(permission),

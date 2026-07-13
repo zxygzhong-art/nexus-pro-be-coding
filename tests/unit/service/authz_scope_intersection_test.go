@@ -350,7 +350,7 @@ func seedAuthzScopeAssumableRole(store *memory.Store, now time.Time, boundary ma
 func assumeScopeTestRole(t *testing.T, svc *service.Service) domain.AssumeRoleResponse {
 	t.Helper()
 	session, err := svc.IAM().AssumeRole(
-		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true},
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		"role-hr",
 		domain.AssumeRoleInput{Reason: "scope intersection test"},
 	)

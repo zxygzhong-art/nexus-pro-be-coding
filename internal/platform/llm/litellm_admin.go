@@ -61,11 +61,21 @@ func (c *LiteLLMAdminClient) SyncModel(ctx context.Context, model domain.AgentMo
 	if upstream == "" {
 		upstream = alias
 	}
+	params := map[string]any{
+		"model": upstream,
+	}
+	if apiKey := strings.TrimSpace(model.APIKey); apiKey != "" {
+		params["api_key"] = apiKey
+	}
+	if apiBase := strings.TrimSpace(model.APIBaseURL); apiBase != "" {
+		params["api_base"] = apiBase
+	}
+	if model.RateLimitRPM > 0 {
+		params["rpm"] = model.RateLimitRPM
+	}
 	payload := map[string]any{
-		"model_name": alias,
-		"litellm_params": map[string]any{
-			"model": upstream,
-		},
+		"model_name":     alias,
+		"litellm_params": params,
 		"model_info": map[string]any{
 			"id":        model.ID,
 			"tenant_id": model.TenantID,

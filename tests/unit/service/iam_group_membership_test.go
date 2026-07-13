@@ -42,7 +42,7 @@ func TestUserGroupMemberAddRemoveAffectsAuthorizationAndAudits(t *testing.T) {
 		AuthzSnapshot: cache,
 	})
 	userCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-user"}
-	adminCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", ApprovalConfirmed: true}
+	adminCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 	req := domain.CheckRequest{Resource: "hr.employee", Action: "read"}
 
 	before, err := svc.Authz().Check(userCtx, req)
@@ -203,7 +203,7 @@ func TestCreateUserGroupExpandsMemberAccountIDsToMemberships(t *testing.T) {
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
 
 	group, err := svc.IAM().CreateUserGroup(
-		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", ApprovalConfirmed: true},
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"},
 		domain.CreateUserGroupInput{
 			Name:             "Created Group",
 			PermissionSetIDs: []string{"ps-group"},

@@ -9,23 +9,22 @@ import (
 )
 
 type (
-	Tenant                    = domain.Tenant
-	Account                   = domain.Account
-	UserIdentity              = domain.UserIdentity
-	UserGroup                 = domain.UserGroup
-	PermissionSet             = domain.PermissionSet
-	Permission                = domain.Permission
-	OrgUnit                   = domain.OrgUnit
-	Employee                  = domain.Employee
-	LeaveBalance              = domain.LeaveBalance
-	AttendanceWorksite        = domain.AttendanceWorksite
-	AttendanceShift           = domain.AttendanceShift
-	AttendanceShiftAssignment = domain.AttendanceShiftAssignment
-	LeaveRequest              = domain.LeaveRequest
-	AttendanceClockRecord     = domain.AttendanceClockRecord
-	FormTemplate              = domain.FormTemplate
-	PlatformFormColumn        = domain.PlatformFormColumn
-	PlatformFormItem          = domain.PlatformFormItem
+	Tenant                = domain.Tenant
+	Account               = domain.Account
+	UserIdentity          = domain.UserIdentity
+	UserGroup             = domain.UserGroup
+	PermissionSet         = domain.PermissionSet
+	Permission            = domain.Permission
+	OrgUnit               = domain.OrgUnit
+	Employee              = domain.Employee
+	LeaveBalance          = domain.LeaveBalance
+	AttendanceWorksite    = domain.AttendanceWorksite
+	AttendanceShift       = domain.AttendanceShift
+	LeaveRequest          = domain.LeaveRequest
+	AttendanceClockRecord = domain.AttendanceClockRecord
+	FormTemplate          = domain.FormTemplate
+	PlatformFormColumn    = domain.PlatformFormColumn
+	PlatformFormItem      = domain.PlatformFormItem
 )
 
 const (
@@ -72,8 +71,6 @@ func populateDemoFixture(store repository.Store) {
 			{Resource: "attendance.shift", Action: "read", Scope: "all", MenuKey: "attendance.shifts"},
 			{Resource: "attendance.shift", Action: "create", Scope: "all", MenuKey: "attendance.shifts"},
 			{Resource: "attendance.shift", Action: "update", Scope: "all", MenuKey: "attendance.shifts"},
-			{Resource: "attendance.shift_assignment", Action: "read", Scope: "all", MenuKey: "attendance.shift_assignments"},
-			{Resource: "attendance.shift_assignment", Action: "create", Scope: "all", MenuKey: "attendance.shift_assignments"},
 			{Resource: "attendance.clock", Action: "read", Scope: "all", MenuKey: "attendance.clock"},
 			{Resource: "attendance.clock", Action: "create", Scope: "all", MenuKey: "attendance.clock"},
 			{Resource: "attendance.correction", Action: "read", Scope: "all", MenuKey: "attendance.corrections"},
@@ -214,8 +211,6 @@ func populateDemoFixture(store repository.Store) {
 			{Resource: "attendance.shift", Action: "read", Scope: "all", MenuKey: "attendance.shifts"},
 			{Resource: "attendance.shift", Action: "create", Scope: "all", MenuKey: "attendance.shifts"},
 			{Resource: "attendance.shift", Action: "update", Scope: "all", MenuKey: "attendance.shifts"},
-			{Resource: "attendance.shift_assignment", Action: "read", Scope: "all", MenuKey: "attendance.shift_assignments"},
-			{Resource: "attendance.shift_assignment", Action: "create", Scope: "all", MenuKey: "attendance.shift_assignments"},
 			{Resource: "attendance.clock", Action: "read", Scope: "all", MenuKey: "attendance.clock"},
 			{Resource: "attendance.clock", Action: "create", Scope: "all", MenuKey: "attendance.clock"},
 			{Resource: "attendance.correction", Action: "read", Scope: "all", MenuKey: "attendance.corrections"},
@@ -912,30 +907,6 @@ func populateDemoFixture(store repository.Store) {
 		CreatedAt:              now,
 		UpdatedAt:              now,
 	})
-	for _, employeeID := range []string{
-		"emp-admin",
-		"emp-employee",
-		"emp-audit",
-		"emp-hr-manager",
-		"emp-hr-readonly",
-		"emp-attendance-manager",
-		"emp-workflow-approver",
-		"emp-security-admin",
-		"emp-insights-viewer",
-		"emp-zxy1",
-	} {
-		_ = store.UpsertAttendanceShiftAssignment(ctx, AttendanceShiftAssignment{
-			ID:            "asa-" + employeeID,
-			TenantID:      "demo",
-			EmployeeID:    employeeID,
-			ShiftID:       "ash-day",
-			WorksiteID:    "aws-demo-hq",
-			EffectiveFrom: now.Add(-30 * 24 * time.Hour),
-			Status:        "active",
-			CreatedAt:     now,
-			UpdatedAt:     now,
-		})
-	}
 	dashboardDate := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	_ = store.UpsertLeaveRequest(ctx, LeaveRequest{
 		ID:         "lr-demo-hr-readonly-20260701",
@@ -951,80 +922,72 @@ func populateDemoFixture(store repository.Store) {
 	})
 	for _, record := range []AttendanceClockRecord{
 		{
-			ID:                "acr-emp-admin-20260701-in",
-			TenantID:          "demo",
-			EmployeeID:        "emp-admin",
-			ShiftAssignmentID: "asa-emp-admin",
-			ShiftID:           "ash-day",
-			WorksiteID:        "aws-demo-hq",
-			WorkDate:          "2026-07-01",
-			Direction:         fixtureClockDirectionIn,
-			ClockedAt:         dashboardDate.Add(8*time.Hour + 55*time.Minute),
-			Latitude:          25.033964,
-			Longitude:         121.564468,
-			AccuracyMeters:    12,
-			DistanceMeters:    0,
-			RecordStatus:      fixtureClockRecordAccepted,
-			Source:            fixtureClockSourceGeofence,
-			DeviceID:          fixtureClockDeviceDashboard,
-			CreatedAt:         now.Add(10 * time.Minute),
+			ID:             "acr-emp-admin-20260701-in",
+			TenantID:       "demo",
+			EmployeeID:     "emp-admin",
+			WorksiteID:     "aws-demo-hq",
+			WorkDate:       "2026-07-01",
+			Direction:      fixtureClockDirectionIn,
+			ClockedAt:      dashboardDate.Add(8*time.Hour + 55*time.Minute),
+			Latitude:       25.033964,
+			Longitude:      121.564468,
+			AccuracyMeters: 12,
+			DistanceMeters: 0,
+			RecordStatus:   fixtureClockRecordAccepted,
+			Source:         fixtureClockSourceGeofence,
+			DeviceID:       fixtureClockDeviceDashboard,
+			CreatedAt:      now.Add(10 * time.Minute),
 		},
 		{
-			ID:                "acr-emp-admin-20260701-out",
-			TenantID:          "demo",
-			EmployeeID:        "emp-admin",
-			ShiftAssignmentID: "asa-emp-admin",
-			ShiftID:           "ash-day",
-			WorksiteID:        "aws-demo-hq",
-			WorkDate:          "2026-07-01",
-			Direction:         fixtureClockDirectionOut,
-			ClockedAt:         dashboardDate.Add(18 * time.Hour),
-			Latitude:          25.033964,
-			Longitude:         121.564468,
-			AccuracyMeters:    18,
-			DistanceMeters:    0,
-			RecordStatus:      fixtureClockRecordAccepted,
-			Source:            fixtureClockSourceGeofence,
-			DeviceID:          fixtureClockDeviceDashboard,
-			CreatedAt:         now.Add(10*time.Minute + 30*time.Second),
+			ID:             "acr-emp-admin-20260701-out",
+			TenantID:       "demo",
+			EmployeeID:     "emp-admin",
+			WorksiteID:     "aws-demo-hq",
+			WorkDate:       "2026-07-01",
+			Direction:      fixtureClockDirectionOut,
+			ClockedAt:      dashboardDate.Add(18 * time.Hour),
+			Latitude:       25.033964,
+			Longitude:      121.564468,
+			AccuracyMeters: 18,
+			DistanceMeters: 0,
+			RecordStatus:   fixtureClockRecordAccepted,
+			Source:         fixtureClockSourceGeofence,
+			DeviceID:       fixtureClockDeviceDashboard,
+			CreatedAt:      now.Add(10*time.Minute + 30*time.Second),
 		},
 		{
-			ID:                "acr-emp-hr-manager-20260701-in",
-			TenantID:          "demo",
-			EmployeeID:        "emp-hr-manager",
-			ShiftAssignmentID: "asa-emp-hr-manager",
-			ShiftID:           "ash-day",
-			WorksiteID:        "aws-demo-hq",
-			WorkDate:          "2026-07-01",
-			Direction:         fixtureClockDirectionIn,
-			ClockedAt:         dashboardDate.Add(9*time.Hour + 5*time.Minute),
-			Latitude:          25.033964,
-			Longitude:         121.564468,
-			AccuracyMeters:    20,
-			DistanceMeters:    0,
-			RecordStatus:      fixtureClockRecordAccepted,
-			Source:            fixtureClockSourceGeofence,
-			DeviceID:          fixtureClockDeviceDashboard,
-			CreatedAt:         now.Add(11 * time.Minute),
+			ID:             "acr-emp-hr-manager-20260701-in",
+			TenantID:       "demo",
+			EmployeeID:     "emp-hr-manager",
+			WorksiteID:     "aws-demo-hq",
+			WorkDate:       "2026-07-01",
+			Direction:      fixtureClockDirectionIn,
+			ClockedAt:      dashboardDate.Add(9*time.Hour + 5*time.Minute),
+			Latitude:       25.033964,
+			Longitude:      121.564468,
+			AccuracyMeters: 20,
+			DistanceMeters: 0,
+			RecordStatus:   fixtureClockRecordAccepted,
+			Source:         fixtureClockSourceGeofence,
+			DeviceID:       fixtureClockDeviceDashboard,
+			CreatedAt:      now.Add(11 * time.Minute),
 		},
 		{
-			ID:                "acr-emp-attendance-manager-20260701-in",
-			TenantID:          "demo",
-			EmployeeID:        "emp-attendance-manager",
-			ShiftAssignmentID: "asa-emp-attendance-manager",
-			ShiftID:           "ash-day",
-			WorksiteID:        "aws-demo-hq",
-			WorkDate:          "2026-07-01",
-			Direction:         fixtureClockDirectionIn,
-			ClockedAt:         dashboardDate.Add(8*time.Hour + 48*time.Minute),
-			Latitude:          25.033964,
-			Longitude:         121.564468,
-			AccuracyMeters:    9,
-			DistanceMeters:    0,
-			RecordStatus:      fixtureClockRecordAccepted,
-			Source:            fixtureClockSourceGeofence,
-			DeviceID:          fixtureClockDeviceDashboard,
-			CreatedAt:         now.Add(12 * time.Minute),
+			ID:             "acr-emp-attendance-manager-20260701-in",
+			TenantID:       "demo",
+			EmployeeID:     "emp-attendance-manager",
+			WorksiteID:     "aws-demo-hq",
+			WorkDate:       "2026-07-01",
+			Direction:      fixtureClockDirectionIn,
+			ClockedAt:      dashboardDate.Add(8*time.Hour + 48*time.Minute),
+			Latitude:       25.033964,
+			Longitude:      121.564468,
+			AccuracyMeters: 9,
+			DistanceMeters: 0,
+			RecordStatus:   fixtureClockRecordAccepted,
+			Source:         fixtureClockSourceGeofence,
+			DeviceID:       fixtureClockDeviceDashboard,
+			CreatedAt:      now.Add(12 * time.Minute),
 		},
 	} {
 		_ = store.UpsertAttendanceClockRecord(ctx, record)

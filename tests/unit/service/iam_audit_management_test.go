@@ -30,8 +30,6 @@ func TestAuditDetailsIncludeRouteApplicationAndAssumedSession(t *testing.T) {
 		RoutePath:            "/v1/iam/field-policies/:id",
 		RequestID:            "req-audit-context",
 		TraceID:              "trace-audit-context",
-		ApprovalConfirmed:    true,
-		ApprovalInstanceID:   "",
 	}
 	if err := svc.Audit().RecordSecurityEvent(ctx, "security.cross_tenant.denied", "tenant", "tenant-2", map[string]any{"result": "denied"}); err != nil {
 		t.Fatal(err)
@@ -148,7 +146,7 @@ func TestIAMFieldPolicyUpdateDeleteAuditsAndInvalidatesPermissionVersion(t *test
 		CreatedAt:       now,
 	})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
 	effect := "hide"
 	updated, err := svc.IAM().UpdateFieldPolicy(ctx, "fp-1", domain.UpdateFieldPolicyInput{Effect: &effect})
@@ -198,7 +196,7 @@ func TestIAMDataScopeUpdateDeleteAuditsAndInvalidatesPermissionVersion(t *testin
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-iam"}, CreatedAt: now})
 	_ = store.UpsertDataScope(context.Background(), domain.DataScope{ID: "ds-1", TenantID: "tenant-1", Code: "dept", Name: "Department", ScopeType: string(domain.ScopeDepartment), CreatedAt: now})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
 	name := "Department Subtree"
 	scopeType := string(domain.ScopeDepartmentSubtree)
@@ -250,7 +248,7 @@ func TestIAMOutboxEventsFilterAndRetry(t *testing.T) {
 	_ = store.AppendOutboxEvent(context.Background(), domain.OutboxEvent{ID: "outbox-failed", TenantID: "tenant-1", EventType: string(domain.EventOpenFGARelationshipWrite), Status: "failed", RetryCount: 3, LastError: "openfga unavailable", CreatedAt: now})
 	_ = store.AppendOutboxEvent(context.Background(), domain.OutboxEvent{ID: "outbox-pending", TenantID: "tenant-1", EventType: "tenant.provisioned", Status: "pending", CreatedAt: now.Add(time.Minute)})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 	hasError := true
 
 	page, err := svc.IAM().ListOutboxEventPage(ctx, domain.OutboxEventQuery{Status: "failed", LastError: "unavailable", HasError: &hasError}, domain.PageRequest{Page: 1, PageSize: 10})

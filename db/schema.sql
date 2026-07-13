@@ -620,17 +620,38 @@ CREATE TABLE form_templates (
     name text NOT NULL,
     description text NOT NULL DEFAULT '',
     schema jsonb NOT NULL DEFAULT '{}'::jsonb,
+    status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
+    current_version integer NOT NULL DEFAULT 1 CHECK (current_version > 0),
     created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    deleted_at timestamptz,
     CONSTRAINT form_templates_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX form_templates_tenant_id_idx ON form_templates (tenant_id);
 CREATE UNIQUE INDEX form_templates_tenant_key_idx ON form_templates (tenant_id, key);
 
+CREATE TABLE form_template_versions (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    template_id text NOT NULL,
+    version integer NOT NULL CHECK (version > 0),
+    schema jsonb NOT NULL DEFAULT '{}'::jsonb,
+    status text NOT NULL CHECK (status IN ('draft', 'published', 'archived')),
+    created_at timestamptz NOT NULL,
+    published_at timestamptz,
+    CONSTRAINT form_template_versions_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT form_template_versions_template_fk FOREIGN KEY (tenant_id, template_id) REFERENCES form_templates (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT form_template_versions_tenant_template_version_idx UNIQUE (tenant_id, template_id, version)
+);
+
+CREATE INDEX form_template_versions_tenant_template_idx ON form_template_versions (tenant_id, template_id, version DESC);
+
 CREATE TABLE form_instances (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     template_id text NOT NULL,
+    template_version_id text NOT NULL,
     applicant_account_id text NOT NULL,
     status text NOT NULL,
     payload jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -641,12 +662,41 @@ CREATE TABLE form_instances (
     updated_at timestamptz NOT NULL,
     CONSTRAINT form_instances_tenant_id_id_idx UNIQUE (tenant_id, id),
     CONSTRAINT form_instances_template_fk FOREIGN KEY (tenant_id, template_id) REFERENCES form_templates (tenant_id, id),
+    CONSTRAINT form_instances_template_version_fk FOREIGN KEY (tenant_id, template_version_id) REFERENCES form_template_versions (tenant_id, id),
     CONSTRAINT form_instances_applicant_account_fk FOREIGN KEY (tenant_id, applicant_account_id) REFERENCES accounts (tenant_id, id)
 );
 
 CREATE INDEX form_instances_tenant_id_idx ON form_instances (tenant_id);
 CREATE INDEX form_instances_template_id_idx ON form_instances (template_id);
 CREATE INDEX form_instances_tenant_applicant_status_idx ON form_instances (tenant_id, applicant_account_id, status, submitted_at DESC);
+CREATE INDEX form_instances_tenant_template_status_submitted_idx ON form_instances (tenant_id, template_id, status, submitted_at DESC);
+
+CREATE TABLE form_instance_field_values (
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    form_instance_id text NOT NULL,
+    template_id text NOT NULL,
+    template_version_id text NOT NULL,
+    field_id text NOT NULL,
+    value_type text NOT NULL CHECK (value_type IN ('text', 'number', 'boolean', 'date', 'timestamp', 'json')),
+    value_text text,
+    value_number numeric,
+    value_boolean boolean,
+    value_date date,
+    value_timestamp timestamptz,
+    value_json jsonb,
+    created_at timestamptz NOT NULL,
+    PRIMARY KEY (tenant_id, form_instance_id, field_id),
+    CONSTRAINT form_instance_field_values_instance_fk FOREIGN KEY (tenant_id, form_instance_id) REFERENCES form_instances (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT form_instance_field_values_template_fk FOREIGN KEY (tenant_id, template_id) REFERENCES form_templates (tenant_id, id),
+    CONSTRAINT form_instance_field_values_template_version_fk FOREIGN KEY (tenant_id, template_version_id) REFERENCES form_template_versions (tenant_id, id)
+);
+
+CREATE INDEX form_instance_field_values_text_idx ON form_instance_field_values (tenant_id, template_id, field_id, value_text);
+CREATE INDEX form_instance_field_values_number_idx ON form_instance_field_values (tenant_id, template_id, field_id, value_number);
+CREATE INDEX form_instance_field_values_boolean_idx ON form_instance_field_values (tenant_id, template_id, field_id, value_boolean);
+CREATE INDEX form_instance_field_values_date_idx ON form_instance_field_values (tenant_id, template_id, field_id, value_date);
+CREATE INDEX form_instance_field_values_timestamp_idx ON form_instance_field_values (tenant_id, template_id, field_id, value_timestamp);
+CREATE INDEX form_instance_field_values_created_idx ON form_instance_field_values (tenant_id, template_id, field_id, created_at DESC);
 
 CREATE TABLE workflow_runs (
     id text PRIMARY KEY,
@@ -789,9 +839,9 @@ CREATE TABLE attendance_clock_records (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     employee_id text NOT NULL,
-    shift_assignment_id text NOT NULL,
-    shift_id text NOT NULL,
-    worksite_id text NOT NULL,
+    shift_assignment_id text,
+    shift_id text,
+    worksite_id text,
     work_date text NOT NULL,
     direction text NOT NULL,
     clocked_at timestamptz NOT NULL,
@@ -945,9 +995,10 @@ CREATE TABLE agent_models (
     provider text NOT NULL DEFAULT 'openai',
     model_name text NOT NULL,
     litellm_model text NOT NULL,
-    is_default boolean NOT NULL DEFAULT false,
+    api_base_url text NOT NULL DEFAULT '',
+    api_key text NOT NULL DEFAULT '',
+    rate_limit_rpm integer NOT NULL DEFAULT 0 CHECK (rate_limit_rpm >= 0),
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
-    fallback_model_id text,
     timeout_seconds integer NOT NULL DEFAULT 60 CHECK (timeout_seconds > 0),
     monthly_quota bigint NOT NULL DEFAULT 100000 CHECK (monthly_quota >= 0),
     used_quota bigint NOT NULL DEFAULT 0 CHECK (used_quota >= 0),
@@ -956,12 +1007,10 @@ CREATE TABLE agent_models (
     last_test_message text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
-    CONSTRAINT agent_models_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT agent_models_fallback_fk FOREIGN KEY (tenant_id, fallback_model_id) REFERENCES agent_models (tenant_id, id)
+    CONSTRAINT agent_models_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX agent_models_tenant_name_idx ON agent_models (tenant_id, name);
-CREATE UNIQUE INDEX agent_models_tenant_default_uidx ON agent_models (tenant_id) WHERE is_default = true;
 
 CREATE TABLE agent_definitions (
     id text PRIMARY KEY,
@@ -971,10 +1020,9 @@ CREATE TABLE agent_definitions (
     emoji text NOT NULL DEFAULT 'AI',
     category text NOT NULL DEFAULT 'workflow' CHECK (category IN ('workflow', 'doc', 'analytics', 'it')),
     model_id text NOT NULL,
-    fallback_model_id text,
     system_prompt text NOT NULL DEFAULT '',
     tools jsonb NOT NULL DEFAULT '[]'::jsonb,
-    status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
+    status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
     visibility text NOT NULL DEFAULT 'all' CHECK (visibility IN ('all', 'department', 'role')),
     visibility_targets jsonb NOT NULL DEFAULT '[]'::jsonb,
     timeout_seconds integer NOT NULL DEFAULT 60 CHECK (timeout_seconds > 0),
@@ -991,7 +1039,6 @@ CREATE TABLE agent_definitions (
     updated_at timestamptz NOT NULL,
     CONSTRAINT agent_definitions_tenant_id_id_idx UNIQUE (tenant_id, id),
     CONSTRAINT agent_definitions_model_fk FOREIGN KEY (tenant_id, model_id) REFERENCES agent_models (tenant_id, id),
-    CONSTRAINT agent_definitions_fallback_model_fk FOREIGN KEY (tenant_id, fallback_model_id) REFERENCES agent_models (tenant_id, id),
     CONSTRAINT agent_definitions_created_by_fk FOREIGN KEY (tenant_id, created_by_account_id) REFERENCES accounts (tenant_id, id),
     CONSTRAINT agent_definitions_updated_by_fk FOREIGN KEY (tenant_id, updated_by_account_id) REFERENCES accounts (tenant_id, id)
 );
@@ -1054,6 +1101,9 @@ CREATE INDEX agent_runs_tenant_id_idx ON agent_runs (tenant_id);
 CREATE INDEX agent_runs_account_id_idx ON agent_runs (account_id);
 CREATE INDEX agent_runs_tenant_account_created_at_idx ON agent_runs (tenant_id, account_id, created_at DESC);
 CREATE INDEX agent_runs_tenant_agent_id_idx ON agent_runs (tenant_id, agent_id, created_at DESC);
+CREATE UNIQUE INDEX agent_runs_active_session_unique
+    ON agent_runs (tenant_id, session_id)
+    WHERE session_id <> '' AND status IN ('queued', 'running');
 
 CREATE TABLE agent_sessions (
     id text PRIMARY KEY,
@@ -1237,8 +1287,12 @@ ALTER TABLE leave_balances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_balances FORCE ROW LEVEL SECURITY;
 ALTER TABLE form_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE form_templates FORCE ROW LEVEL SECURITY;
+ALTER TABLE form_template_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE form_template_versions FORCE ROW LEVEL SECURITY;
 ALTER TABLE form_instances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE form_instances FORCE ROW LEVEL SECURITY;
+ALTER TABLE form_instance_field_values ENABLE ROW LEVEL SECURITY;
+ALTER TABLE form_instance_field_values FORCE ROW LEVEL SECURITY;
 ALTER TABLE workflow_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE workflow_runs FORCE ROW LEVEL SECURITY;
 ALTER TABLE workflow_stage_instances ENABLE ROW LEVEL SECURITY;
@@ -1332,7 +1386,9 @@ CREATE POLICY system_task_employment_contracts ON employment_contracts USING (cu
 CREATE POLICY tenant_isolation_attendance_policies ON attendance_policies USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_balances ON leave_balances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_form_templates ON form_templates USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_form_template_versions ON form_template_versions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_form_instances ON form_instances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_form_instance_field_values ON form_instance_field_values USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_workflow_runs ON workflow_runs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_workflow_stage_instances ON workflow_stage_instances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_workflow_stage_assignees ON workflow_stage_assignees USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -1360,3 +1416,56 @@ CREATE POLICY tenant_isolation_notifications ON notifications USING (tenant_id =
 CREATE POLICY tenant_isolation_notification_recipients ON notification_recipients USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_outbox_events ON outbox_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_audit_logs ON audit_logs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
+CREATE TABLE ehrms_sync_runs (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    account_id text NOT NULL,
+    sync_type text NOT NULL CHECK (sync_type IN ('pipeline', 'employees', 'attendance')),
+    trigger_type text NOT NULL CHECK (trigger_type IN ('scheduled', 'manual', 'retry', 'cli')),
+    status text NOT NULL CHECK (status IN ('running', 'succeeded', 'partial', 'failed', 'skipped')),
+    current_step text NOT NULL DEFAULT '',
+    mode text NOT NULL DEFAULT 'upsert',
+    since_date text NOT NULL DEFAULT '',
+    attempt integer NOT NULL DEFAULT 1 CHECK (attempt > 0),
+    max_attempts integer NOT NULL DEFAULT 1 CHECK (max_attempts > 0),
+    retry_of_run_id text NOT NULL DEFAULT '',
+    request_id text NOT NULL DEFAULT '',
+    trace_id text NOT NULL DEFAULT '',
+    error_code text NOT NULL DEFAULT '',
+    error_message text NOT NULL DEFAULT '',
+    retryable boolean NOT NULL DEFAULT false,
+    next_retry_at timestamptz,
+    summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+    started_at timestamptz NOT NULL,
+    finished_at timestamptz,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
+);
+
+CREATE INDEX ehrms_sync_runs_tenant_started_idx ON ehrms_sync_runs (tenant_id, started_at DESC, id DESC);
+
+CREATE TABLE ehrms_sync_run_steps (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    run_id text NOT NULL REFERENCES ehrms_sync_runs(id) ON DELETE CASCADE,
+    step text NOT NULL,
+    sequence integer NOT NULL,
+    status text NOT NULL CHECK (status IN ('running', 'succeeded', 'partial', 'failed', 'skipped')),
+    attempt integer NOT NULL DEFAULT 1 CHECK (attempt > 0),
+    error_code text NOT NULL DEFAULT '',
+    error_message text NOT NULL DEFAULT '',
+    summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+    started_at timestamptz NOT NULL,
+    finished_at timestamptz,
+    UNIQUE (tenant_id, run_id, step, attempt)
+);
+
+CREATE INDEX ehrms_sync_run_steps_run_idx ON ehrms_sync_run_steps (tenant_id, run_id, sequence, attempt);
+
+ALTER TABLE ehrms_sync_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ehrms_sync_runs FORCE ROW LEVEL SECURITY;
+ALTER TABLE ehrms_sync_run_steps ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ehrms_sync_run_steps FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation_ehrms_sync_runs ON ehrms_sync_runs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_ehrms_sync_run_steps ON ehrms_sync_run_steps USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));

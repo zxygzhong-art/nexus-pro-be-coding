@@ -28,7 +28,6 @@ from typing import Any, Callable
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-APPROVAL_HEADER = {"X-Approval-Confirmed": "true"}
 DEFAULT_KEYCLOAK_CLIENT_ID = "nexus-pro-connect-api"
 DEFAULT_ROLE_ACCOUNTS = {
     "admin": ("demo", "acct-admin"),
@@ -556,21 +555,12 @@ def build_cases() -> list[Case]:
             check=expect_data_object,
         ),
         Case(
-            "authz simulate requires approval",
-            "POST",
-            "/v1/authz/simulate",
-            403,
-            route_key="POST /v1/authz/simulate",
-            json_body=authz_export_check,
-        ),
-        Case(
-            "authz simulate confirmed",
+            "authz simulate",
             "POST",
             "/v1/authz/simulate",
             200,
             route_key="POST /v1/authz/simulate",
             json_body=authz_export_check,
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
         ),
         *list_cases(),
@@ -580,19 +570,11 @@ def build_cases() -> list[Case]:
         *workflow_cases(),
         *agent_cases(),
         Case(
-            "audit logs require approval",
-            "GET",
-            "/v1/audit-logs",
-            403,
-            route_key="GET /v1/audit-logs",
-        ),
-        Case(
-            "audit logs confirmed",
+            "audit logs",
             "GET",
             "/v1/audit-logs?page=1&page_size=5",
             200,
             route_key="GET /v1/audit-logs",
-            headers=APPROVAL_HEADER,
             check=expect_page,
         ),
     ]
@@ -631,11 +613,10 @@ def build_role_matrix_cases() -> list[MatrixCase]:
             {"admin": 200, "employee": 403, "audit": 200},
         ),
         MatrixCase(
-            "audit logs high-risk read",
+            "audit logs read",
             "GET",
             "/v1/audit-logs?page=1&page_size=5",
             {"admin": 200, "employee": 403, "audit": 200},
-            headers=APPROVAL_HEADER,
         ),
         MatrixCase(
             "agent run list",
@@ -656,7 +637,6 @@ def build_role_matrix_cases() -> list[MatrixCase]:
             "/v1/iam/user-groups",
             {"admin": 201, "employee": 403, "audit": 403},
             json_body=lambda c: {"name": "Matrix Group " + c["suffix"]},
-            headers=APPROVAL_HEADER,
         ),
         MatrixCase(
             "create leave request",
@@ -671,7 +651,6 @@ def build_role_matrix_cases() -> list[MatrixCase]:
             "/v1/agents/runs",
             {"admin": 201, "employee": 201, "audit": 403},
             json_body={"mode": "policy_qa", "prompt": "Matrix role check"},
-            headers=APPROVAL_HEADER,
         ),
     ]
 
@@ -707,21 +686,12 @@ def list_cases() -> list[Case]:
 def iam_write_cases() -> list[Case]:
     return [
         Case(
-            "create user group needs approval",
-            "POST",
-            "/v1/iam/user-groups",
-            403,
-            "POST /v1/iam/user-groups",
-            json_body=lambda c: {"name": "Smoke Group " + c["suffix"]},
-        ),
-        Case(
-            "create user group confirmed",
+            "create user group",
             "POST",
             "/v1/iam/user-groups",
             201,
             "POST /v1/iam/user-groups",
             json_body=lambda c: {"name": "Smoke Group " + c["suffix"], "member_account_ids": ["acct-employee"]},
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
             capture=capture_id("user_group_id"),
         ),
@@ -735,7 +705,6 @@ def iam_write_cases() -> list[Case]:
                 "name": "Smoke Permission Set " + c["suffix"],
                 "permissions": [{"resource": "me", "action": "read", "scope": "all", "menu_key": "workbench"}],
             },
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
             capture=capture_id("permission_set_id"),
         ),
@@ -751,7 +720,6 @@ def iam_write_cases() -> list[Case]:
                 "permission_set_id": c["permission_set_id"],
                 "effect": "allow",
             },
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
             capture=capture_id("permission_assignment_id"),
         ),
@@ -767,7 +735,6 @@ def iam_write_cases() -> list[Case]:
                 "scope_type": "department",
                 "params": {"department_ids": ["ou-hq"]},
             },
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
             capture=capture_id("data_scope_id"),
         ),
@@ -784,7 +751,6 @@ def iam_write_cases() -> list[Case]:
                 "effect": "mask",
                 "mask_strategy": "partial",
             },
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
             capture=capture_id("field_policy_id"),
         ),
@@ -802,7 +768,6 @@ def iam_write_cases() -> list[Case]:
                 "permission_set_ids": ["ps-audit"],
                 "session_duration_seconds": 3600,
             },
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
             capture=capture_id("assumable_role_id"),
         ),
@@ -813,7 +778,6 @@ def iam_write_cases() -> list[Case]:
             201,
             "POST /v1/iam/assumable-roles/{id}/assume",
             json_body={"reason": "smoke test"},
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
             capture=capture_id("assume_session_id", source_key="session_id"),
         ),
@@ -920,41 +884,30 @@ def hr_cases() -> list[Case]:
             check=expect_preview_valid,
         ),
         Case(
-            "employee direct status needs approval",
-            "PATCH",
-            lambda c: "/v1/hr/employees/" + urllib.parse.quote(c["employee_id"]) + "/status",
-            403,
-            "PATCH /v1/hr/employees/{id}/status",
-            json_body={"status": "probation"},
-        ),
-        Case(
-            "employee direct status confirmed",
+            "employee direct status",
             "PATCH",
             lambda c: "/v1/hr/employees/" + urllib.parse.quote(c["employee_id"]) + "/status",
             200,
             "PATCH /v1/hr/employees/{id}/status",
             json_body={"status": "probation"},
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
         ),
         Case(
-            "employee lifecycle transition confirmed",
+            "employee lifecycle transition",
             "POST",
             lambda c: "/v1/hr/employees/" + urllib.parse.quote(c["employee_id"]) + "/status-transition",
             200,
             "POST /v1/hr/employees/{id}/status-transition",
             json_body={"status": "leave_suspended", "reason": "smoke boundary", "start_date": "2026-07-01", "end_date": "2026-07-02"},
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
         ),
         Case(
-            "invite employee confirmed",
+            "invite employee",
             "POST",
             lambda c: "/v1/hr/employees/" + urllib.parse.quote(c["employee_id"]) + "/invite",
             200,
             "POST /v1/hr/employees/{id}/invite",
             json_body=lambda c: {"email": f"smoke.invite.{c['suffix']}@example.com"},
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
         ),
         Case(
@@ -965,9 +918,8 @@ def hr_cases() -> list[Case]:
             "DELETE /v1/hr/employees/{id}/avatar",
             check=expect_employee_avatar_absent,
         ),
-        Case("employee export needs approval", "GET", "/v1/hr/employees/export", 403, "GET /v1/hr/employees/export"),
-        Case("employee export csv", "GET", "/v1/hr/employees/export", 200, "GET /v1/hr/employees/export", headers=APPROVAL_HEADER, check=expect_text("Demo Admin")),
-        Case("employee export json", "POST", "/v1/hr/employees/export", 200, "POST /v1/hr/employees/export", json_body={"page": 1, "page_size": 5}, headers=APPROVAL_HEADER, check=expect_page),
+        Case("employee export csv", "GET", "/v1/hr/employees/export", 200, "GET /v1/hr/employees/export", check=expect_text("Demo Admin")),
+        Case("employee export json", "POST", "/v1/hr/employees/export", 200, "POST /v1/hr/employees/export", json_body={"page": 1, "page_size": 5}, check=expect_page),
         Case(
             "employee import preview",
             "POST",
@@ -978,7 +930,6 @@ def hr_cases() -> list[Case]:
                 "filename": "employees.csv",
                 "content": f"Employee No,Name,Email,Department,Position,Category,Phone,Status,Hire Date,Manager Employee ID\nSMK{c['suffix']},Import {c['suffix']},smoke.import.{c['suffix']}@example.com,ou-hq,Recruiter,full_time,0911888999,active,2026-06-01,\n",
             },
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
             capture=capture_id("import_session_id"),
         ),
@@ -989,7 +940,6 @@ def hr_cases() -> list[Case]:
             200,
             "POST /v1/hr/employees/import/{id}/confirm",
             json_body={"mode": "create"},
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
         ),
         Case(
@@ -999,7 +949,6 @@ def hr_cases() -> list[Case]:
             207,
             "POST /v1/hr/employees/batch-delete",
             json_body=lambda c: {"employee_ids": [c["delete_employee_id"], "emp-smoke-missing"], "reason": "smoke cleanup"},
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
         ),
         Case(
@@ -1008,7 +957,6 @@ def hr_cases() -> list[Case]:
             lambda c: "/v1/hr/employees/" + urllib.parse.quote(c["employee_id"]),
             200,
             "DELETE /v1/hr/employees/{id}",
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
         ),
     ]
@@ -1074,21 +1022,12 @@ def workflow_cases() -> list[Case]:
 def agent_cases() -> list[Case]:
     return [
         Case(
-            "create agent run needs approval",
-            "POST",
-            "/v1/agents/runs",
-            403,
-            "POST /v1/agents/runs",
-            json_body={"prompt": "What is the leave policy?"},
-        ),
-        Case(
-            "create agent run confirmed",
+            "create agent run",
             "POST",
             "/v1/agents/runs",
             201,
             "POST /v1/agents/runs",
             json_body={"mode": "policy_qa", "prompt": "What is the leave policy?"},
-            headers=APPROVAL_HEADER,
             check=expect_data_object,
             capture=capture_id("agent_run_id"),
         ),

@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"nexus-pro-be/internal/config"
-	"os"
 	"testing"
 	"time"
 

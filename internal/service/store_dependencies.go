@@ -39,6 +39,7 @@ type attendanceStore interface {
 type workflowStore interface {
 	repository.AccountStore
 	repository.EmployeeStore
+	repository.IAMStore
 	repository.WorkflowStore
 	repository.NotificationStore
 }
@@ -76,5 +77,12 @@ func (c AttendanceService) withTransaction(ctx RequestContext, fn func(Attendanc
 func (c WorkflowService) withTransaction(ctx RequestContext, fn func(WorkflowService) error) error {
 	return c.Service.withTenantTransaction(ctx, func(tx *Service) error {
 		return fn(tx.Workflow())
+	})
+}
+
+// withTransaction 讓 Agent 寫入與其管理稽核在同一租戶交易中完成。
+func (c AgentService) withTransaction(ctx RequestContext, fn func(AgentService) error) error {
+	return c.Service.withTenantTransaction(ctx, func(tx *Service) error {
+		return fn(tx.Agent())
 	})
 }

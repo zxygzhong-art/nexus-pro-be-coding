@@ -163,7 +163,39 @@ func (s *SFTPGoHTTP) ensureDir(ctx context.Context, dir string) error {
 	if resp.StatusCode == http.StatusCreated || resp.StatusCode == http.StatusConflict || resp.StatusCode == http.StatusOK {
 		return nil
 	}
-	return sftpgoHTTPStatusError("create directory", resp)
+	// SFTPGo returns 500 ("file exists") when the directory already exists instead of 409.
+	createErr := sftpgoHTTPStatusError("create directory", resp)
+	exists, checkErr := s.dirExists(ctx, dir)
+	if checkErr == nil && exists {
+		return nil
+	}
+	return createErr
+}
+
+func (s *SFTPGoHTTP) dirExists(ctx context.Context, dir string) (bool, error) {
+	dir = path.Clean(dir)
+	if dir == "." || dir == "/" {
+		return true, nil
+	}
+	query := url.Values{}
+	query.Set("path", dir)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.apiURL("/user/dirs")+"?"+query.Encode(), nil)
+	if err != nil {
+		return false, err
+	}
+	resp, err := s.doAuthorized(ctx, req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	switch resp.StatusCode {
+	case http.StatusOK:
+		return true, nil
+	case http.StatusNotFound, http.StatusBadRequest:
+		return false, nil
+	default:
+		return false, sftpgoHTTPStatusError("stat directory", resp)
+	}
 }
 
 func (s *SFTPGoHTTP) pathForKey(key string) (string, error) {

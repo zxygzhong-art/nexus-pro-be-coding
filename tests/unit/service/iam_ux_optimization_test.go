@@ -35,7 +35,7 @@ func TestIAMPermissionSetUpdateAuditsAndReplacesItems(t *testing.T) {
 	})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-admin"}, CreatedAt: now})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
 	name := "People Admin"
 	description := "updated description"
@@ -98,7 +98,7 @@ func TestIAMPermissionSetAssignmentDeleteAuditsAndInvalidatesPermissionVersion(t
 		CreatedAt:       now,
 	})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
 	deleted, err := svc.IAM().DeletePermissionSetAssignment(ctx, "psa-1")
 	if err != nil {

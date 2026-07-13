@@ -333,23 +333,23 @@ func isHighRiskPermission(perm Permission) bool {
 	return perm.RiskLevel == "high" || perm.RiskLevel == "critical"
 }
 
-// approvalPolicyForRoute 處理核准政策 for 路由。
-func approvalPolicyForRoute(req CheckRequest) (bool, string, string, string) {
+// riskLevelForRoute 回傳與目前授權請求匹配的路由風險分級。
+func riskLevelForRoute(req CheckRequest) string {
 	reqResource := strings.TrimSpace(req.Resource)
 	if req.RouteMethod != "" || req.RoutePath != "" {
 		for _, policy := range domain.DefaultRoutePolicies {
 			if routePolicyMatchesHTTPRoute(req, policy, reqResource) {
-				return approvalPolicyDecision(policy)
+				return normalizedRiskLevel(policy.RiskLevel)
 			}
 		}
-		return false, string(domain.RiskNormal), "", ""
+		return string(domain.RiskNormal)
 	}
 	for _, policy := range domain.DefaultRoutePolicies {
 		if strings.EqualFold(policy.Action, string(req.Action)) && routePolicyMatchesRequest(req, policy, reqResource) {
-			return approvalPolicyDecision(policy)
+			return normalizedRiskLevel(policy.RiskLevel)
 		}
 	}
-	return false, string(domain.RiskNormal), "", ""
+	return string(domain.RiskNormal)
 }
 
 // routePolicyMatchesHTTPRoute 處理路由政策 matches HTTP 路由。
@@ -374,13 +374,12 @@ func routePolicyMatchesRequest(req CheckRequest, policy domain.RoutePolicy, reqR
 	return strings.EqualFold(reqResource, legacyRouteResourceName(policy.ApplicationCode, policy.ResourceType))
 }
 
-// approvalPolicyDecision 處理核准政策決策。
-func approvalPolicyDecision(policy domain.RoutePolicy) (bool, string, string, string) {
-	risk := string(policy.RiskLevel)
-	if policy.RiskLevel == domain.RiskHigh || policy.RiskLevel == domain.RiskCritical {
-		return true, risk, approvalTypeForRisk(risk), "route_policy"
+// normalizedRiskLevel 保證未標記風險的路由以 normal 分級寫入授權結果。
+func normalizedRiskLevel(risk domain.RiskLevel) string {
+	if risk == "" {
+		return string(domain.RiskNormal)
 	}
-	return false, risk, "", ""
+	return string(risk)
 }
 
 // legacyRouteResourceName 處理 legacy 路由 resource 名稱。
@@ -389,18 +388,6 @@ func legacyRouteResourceName(applicationCode, resourceType string) string {
 		return "audit.log"
 	}
 	return routeResourceName(ApplicationCode(applicationCode), ResourceType(resourceType))
-}
-
-// approvalTypeForRisk 處理核准 type for risk。
-func approvalTypeForRisk(risk string) string {
-	switch risk {
-	case string(domain.RiskCritical):
-		return "approval"
-	case string(domain.RiskHigh):
-		return "confirmation"
-	default:
-		return ""
-	}
 }
 
 // maxRiskLevel 取得較大值risk level。

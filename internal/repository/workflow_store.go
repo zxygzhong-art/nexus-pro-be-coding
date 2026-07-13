@@ -12,12 +12,17 @@ type WorkflowStore interface {
 	GetFormTemplate(ctx context.Context, tenantID, id string) (domain.FormTemplate, bool, error)
 	GetFormTemplateByKey(ctx context.Context, tenantID, key string) (domain.FormTemplate, bool, error)
 	ListFormTemplates(ctx context.Context, tenantID string) ([]domain.FormTemplate, error)
+	InsertFormTemplateVersion(context.Context, domain.FormTemplateVersion) error
+	GetFormTemplateVersion(ctx context.Context, tenantID, id string) (domain.FormTemplateVersion, bool, error)
+	GetFormTemplateVersionByNumber(ctx context.Context, tenantID, templateID string, version int) (domain.FormTemplateVersion, bool, error)
 
 	UpsertFormInstance(context.Context, domain.FormInstance) error
 	GetFormInstance(ctx context.Context, tenantID, id string) (domain.FormInstance, bool, error)
 	ListFormInstances(ctx context.Context, tenantID string) ([]domain.FormInstance, error)
 	ListFormInstancesByQuery(ctx context.Context, tenantID string, query domain.FormInstanceQuery) ([]domain.FormInstance, error)
 	ListFormInstancePageByQuery(ctx context.Context, tenantID string, query domain.FormInstanceQuery, page domain.PageRequest) ([]domain.FormInstance, int, error)
+	ReplaceFormInstanceFieldValues(ctx context.Context, tenantID, formInstanceID string, values []domain.FormInstanceFieldValue) error
+	ListFormInstanceFieldValues(ctx context.Context, tenantID, formInstanceID string) ([]domain.FormInstanceFieldValue, error)
 	DeleteFormInstance(ctx context.Context, tenantID, id string) error
 
 	UpsertWorkflowRun(context.Context, domain.WorkflowRun) error

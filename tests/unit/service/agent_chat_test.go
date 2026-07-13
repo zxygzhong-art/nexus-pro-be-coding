@@ -27,18 +27,20 @@ func TestAgentChatUsesInjectedRuntimeAndPersistsRun(t *testing.T) {
 			if req.RunID == "" || req.SessionID == "" {
 				t.Fatalf("expected run and session ids, got %+v", req)
 			}
+			if _, ok := req.Tools["knowledge.search"]; !ok {
+				t.Fatalf("tool catalog entry knowledge.search is missing from runtime tools: %+v", req.Tools)
+			}
 			return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "您好，已完成分析。"})
 		},
 	}
 	svc := service.New(store, service.Options{
 		Now:              func() time.Time { return now },
-		AgentChatEnabled: true,
 		AgentChatRuntime: runtime,
 	})
 	events := []domain.AgentChatEvent{}
 
 	run, err := svc.Agent().Chat(
-		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true},
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		domain.AgentChatInput{Message: "帮我看一下资料", Mode: "assistant_chat"},
 		func(_ context.Context, event domain.AgentChatEvent) error {
 			events = append(events, event)
@@ -89,12 +91,11 @@ func TestAgentChatReadOnlyToolsUseRequestContext(t *testing.T) {
 	}
 	svc := service.New(store, service.Options{
 		Now:              func() time.Time { return now },
-		AgentChatEnabled: true,
 		AgentChatRuntime: runtime,
 	})
 
 	if _, err := svc.Agent().Chat(
-		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true},
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		domain.AgentChatInput{Message: "我的资料"},
 		func(context.Context, domain.AgentChatEvent) error { return nil },
 	); err != nil {
@@ -116,12 +117,11 @@ func TestAgentChatToolRequiresAgentToolPermission(t *testing.T) {
 	}
 	svc := service.New(store, service.Options{
 		Now:              func() time.Time { return now },
-		AgentChatEnabled: true,
 		AgentChatRuntime: runtime,
 	})
 
 	run, err := svc.Agent().Chat(
-		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true},
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		domain.AgentChatInput{Message: "我的资料"},
 		func(context.Context, domain.AgentChatEvent) error { return nil },
 	)
@@ -140,14 +140,13 @@ func TestAgentChatBlocksActiveRunInSameSession(t *testing.T) {
 		{Resource: "agent.run", Action: "create", Scope: "all"},
 	})
 	svc := service.New(store, service.Options{
-		Now:              func() time.Time { return now },
-		AgentChatEnabled: true,
+		Now: func() time.Time { return now },
 		AgentChatRuntime: fakeAgentChatRuntime{run: func(context.Context, service.AgentChatRuntimeRequest, service.AgentChatEmitFunc) error {
 			t.Fatal("runtime should not be called while an active run exists")
 			return nil
 		}},
 	})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 	session, err := svc.Agent().CreateSession(ctx, domain.CreateAgentSessionInput{Title: "Busy"})
 	if err != nil {
 		t.Fatal(err)
@@ -167,6 +166,56 @@ func TestAgentChatBlocksActiveRunInSameSession(t *testing.T) {
 	}
 	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{SessionID: session.ID, Message: "hi"}, nil); err == nil {
 		t.Fatal("expected active run conflict")
+	}
+}
+
+func TestAgentChatUsesSessionBoundAgentAndRejectsAgentSwitch(t *testing.T) {
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentChatAccount(t, store, now, []domain.Permission{
+		{Resource: "agent.run", Action: "create", Scope: "all"},
+	})
+	if err := store.UpsertAgentModel(context.Background(), domain.AgentModel{
+		ID: "model-bound", TenantID: "tenant-1", Name: "Bound Model", ModelName: "gpt-bound",
+		LiteLLMModel: "openai/gpt-bound", Status: domain.AgentModelStatusActive, TimeoutSeconds: 45,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAgentDefinition(context.Background(), domain.AgentDefinition{
+		ID: "agent-bound", TenantID: "tenant-1", Name: "Bound Agent", ModelID: "model-bound",
+		SystemPrompt: "Bound system prompt", Status: domain.AgentDefinitionStatusPublished,
+		Visibility: domain.AgentVisibilityAll, TimeoutSeconds: 30, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAgentSession(context.Background(), domain.AgentSession{
+		ID: "session-bound", TenantID: "tenant-1", AccountID: "acct-1", AgentID: "agent-bound",
+		Title: "Bound conversation", Status: domain.AgentSessionStatusActive, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runtimeCalls := 0
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
+		runtimeCalls++
+		if req.ModelName != "openai/gpt-bound" || !strings.Contains(req.Message, "Bound system prompt") {
+			t.Fatalf("session did not restore its bound agent config: %+v", req)
+		}
+		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "bound answer"})
+	}}})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
+	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{SessionID: "session-bound", Message: "continue"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if run.AgentID != "agent-bound" || runtimeCalls != 1 {
+		t.Fatalf("expected bound agent run, got run=%+v calls=%d", run, runtimeCalls)
+	}
+	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{SessionID: "session-bound", AgentID: "other-agent", Message: "switch"}, nil); err == nil {
+		t.Fatal("expected switching the agent bound to an existing session to fail")
+	}
+	if runtimeCalls != 1 {
+		t.Fatalf("runtime ran for a mismatched agent: %d", runtimeCalls)
 	}
 }
 
@@ -195,10 +244,9 @@ func TestAgentChatClearContextDropsPreviousHistoryFromPrompt(t *testing.T) {
 	}}
 	svc := service.New(store, service.Options{
 		Now:              func() time.Time { return now },
-		AgentChatEnabled: true,
 		AgentChatRuntime: runtime,
 	})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 	first, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "first question"}, nil)
 	if err != nil {
 		t.Fatal(err)

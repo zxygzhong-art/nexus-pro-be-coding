@@ -584,7 +584,7 @@ func (c AttendanceService) applyCorrectionWorkflowReview(ctx RequestContext, ins
 	current.ReviewedAt = &now
 	current.UpdatedAt = now
 	if nextStatus == correctionStatusApproved {
-		assignment, shift, worksite, err := c.attendanceAssignmentBundle(ctx, current.EmployeeID, current.RequestedClockedAt)
+		worksite, err := c.firstActiveAttendanceWorksite(ctx)
 		if err != nil {
 			return err
 		}
@@ -597,8 +597,6 @@ func (c AttendanceService) applyCorrectionWorkflowReview(ctx RequestContext, ins
 			ID:                  utils.NewID("acr"),
 			TenantID:            ctx.TenantID,
 			EmployeeID:          current.EmployeeID,
-			ShiftAssignmentID:   assignment.ID,
-			ShiftID:             shift.ID,
 			WorksiteID:          worksite.ID,
 			WorkDate:            current.WorkDate,
 			Direction:           current.Direction,

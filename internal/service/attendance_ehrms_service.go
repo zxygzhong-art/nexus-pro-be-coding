@@ -1,6 +1,7 @@
 package service
 
 import (
+	"crypto/sha1"
 	"fmt"
 	"strconv"
 	"strings"
@@ -40,6 +41,25 @@ const (
 	ehrmsAttendanceFieldOvertimeCounted = "overtime_counted"
 	ehrmsAttendanceSource               = "ehrms"
 	defaultEHRMSAttendanceSyncWindow    = 30 * 24 * time.Hour
+
+	ehrmsLeaveBalanceFieldEmployeeNo  = "員工編號"
+	ehrmsLeaveBalanceFieldYear        = "年度"
+	ehrmsLeaveBalanceFieldLeaveType   = "假別"
+	ehrmsLeaveBalanceFieldUnit        = "單位"
+	ehrmsLeaveBalanceFieldQuota       = "額度"
+	ehrmsLeaveBalanceFieldUsed        = "已使用"
+	ehrmsLeaveBalanceFieldRemaining   = "餘額"
+	ehrmsLeaveBalanceFieldGrantStart  = "發放起始日"
+	ehrmsLeaveBalanceFieldExpireDate  = "到期日"
+	ehrmsLeaveBalanceFieldCarryIn     = "遞延餘額"
+	ehrmsLeaveBalanceFieldCarryExpire = "遞延到期日"
+
+	ehrmsLeaveDetailFieldEmployeeNo = "員工編號"
+	ehrmsLeaveDetailFieldDate       = "日期"
+	ehrmsLeaveDetailFieldLeaveType  = "假別"
+	ehrmsLeaveDetailFieldStart      = "開始時間"
+	ehrmsLeaveDetailFieldEnd        = "結束時間"
+	ehrmsLeaveDetailFieldHours      = "時數"
 )
 
 // SyncEHRMSAttendance 同步 eHRMS 考勤日彙總。
@@ -65,9 +85,25 @@ func (c AttendanceService) SyncEHRMSAttendance(ctx RequestContext, input EHRMSAt
 	records, err := c.ehrmsClient.ListAttendance(goContext(ctx))
 	if err != nil {
 		c.logWarn(ctx, "eHRMS attendance fetch failed", "error", err)
-		return EHRMSAttendanceSyncResponse{}, BadRequest("fetch eHRMS attendance failed")
+		return EHRMSAttendanceSyncResponse{}, ehrmsFetchError("attendance", err)
 	}
-	response := EHRMSAttendanceSyncResponse{Fetched: len(records), Mode: mode, Since: since}
+	leaveBalances, err := c.ehrmsClient.ListLeaveBalances(goContext(ctx))
+	if err != nil {
+		c.logWarn(ctx, "eHRMS leave balance fetch failed", "error", err)
+		return EHRMSAttendanceSyncResponse{}, ehrmsFetchError("leave balances", err)
+	}
+	leaveDetails, err := c.ehrmsClient.ListLeaveDetails(goContext(ctx))
+	if err != nil {
+		c.logWarn(ctx, "eHRMS leave detail fetch failed", "error", err)
+		return EHRMSAttendanceSyncResponse{}, ehrmsFetchError("leave details", err)
+	}
+	response := EHRMSAttendanceSyncResponse{
+		Fetched:              len(records),
+		LeaveBalancesFetched: len(leaveBalances),
+		LeaveDetailsFetched:  len(leaveDetails),
+		Mode:                 mode,
+		Since:                since,
+	}
 	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
 		for idx, record := range records {
 			result := tx.syncEHRMSAttendanceRecord(ctx, record, idx+1, mode, since)
@@ -84,15 +120,52 @@ func (c AttendanceService) SyncEHRMSAttendance(ctx RequestContext, input EHRMSAt
 				response.Failed++
 			}
 		}
+		for idx, record := range leaveBalances {
+			result := tx.syncEHRMSLeaveBalanceRecord(ctx, record, idx+1)
+			response.Results = append(response.Results, result.result)
+			response.RowErrors = append(response.RowErrors, result.rowErrors...)
+			switch result.action {
+			case "upserted":
+				response.LeaveBalancesUpserted++
+			case "skipped":
+				response.LeaveBalancesSkipped++
+			case "failed":
+				response.LeaveBalancesFailed++
+			}
+		}
+		for idx, record := range leaveDetails {
+			result := tx.syncEHRMSLeaveDetailRecord(ctx, record, idx+1, mode, since)
+			response.Results = append(response.Results, result.result)
+			response.RowErrors = append(response.RowErrors, result.rowErrors...)
+			switch result.action {
+			case "created":
+				response.LeaveDetailsCreated++
+			case "updated":
+				response.LeaveDetailsUpdated++
+			case "skipped":
+				response.LeaveDetailsSkipped++
+			case "failed":
+				response.LeaveDetailsFailed++
+			}
+		}
 		if err := tx.audit(ctx, "attendance.ehrms.sync", string(ResourceAttendanceClock), "ehrms", string(SeverityHigh), map[string]any{
-			"source":  ehrmsAttendanceSource,
-			"fetched": response.Fetched,
-			"created": response.Created,
-			"updated": response.Updated,
-			"skipped": response.Skipped,
-			"failed":  response.Failed,
-			"mode":    mode,
-			"since":   since,
+			"source":                  ehrmsAttendanceSource,
+			"fetched":                 response.Fetched,
+			"created":                 response.Created,
+			"updated":                 response.Updated,
+			"skipped":                 response.Skipped,
+			"failed":                  response.Failed,
+			"leave_balances_fetched":  response.LeaveBalancesFetched,
+			"leave_balances_upserted": response.LeaveBalancesUpserted,
+			"leave_balances_skipped":  response.LeaveBalancesSkipped,
+			"leave_balances_failed":   response.LeaveBalancesFailed,
+			"leave_details_fetched":   response.LeaveDetailsFetched,
+			"leave_details_created":   response.LeaveDetailsCreated,
+			"leave_details_updated":   response.LeaveDetailsUpdated,
+			"leave_details_skipped":   response.LeaveDetailsSkipped,
+			"leave_details_failed":    response.LeaveDetailsFailed,
+			"mode":                    mode,
+			"since":                   since,
 		}); err != nil {
 			return err
 		}
@@ -107,6 +180,13 @@ func (c AttendanceService) SyncEHRMSAttendance(ctx RequestContext, input EHRMSAt
 		"updated", response.Updated,
 		"skipped", response.Skipped,
 		"failed", response.Failed,
+		"leave_balances_fetched", response.LeaveBalancesFetched,
+		"leave_balances_upserted", response.LeaveBalancesUpserted,
+		"leave_details_fetched", response.LeaveDetailsFetched,
+		"leave_details_created", response.LeaveDetailsCreated,
+		"leave_details_updated", response.LeaveDetailsUpdated,
+		"leave_details_skipped", response.LeaveDetailsSkipped,
+		"leave_details_failed", response.LeaveDetailsFailed,
 		"mode", mode,
 		"since", since,
 	)
@@ -165,6 +245,70 @@ func (c AttendanceService) syncEHRMSAttendanceRecord(ctx RequestContext, record 
 	}
 	action := "created"
 	if update {
+		action = "updated"
+	}
+	return ehrmsAttendanceSyncResult{action: action, result: BatchEmployeeResult{RowNumber: rowNumber, EmployeeID: employee.ID, Success: true, Action: action, Message: action}}
+}
+
+func (c AttendanceService) syncEHRMSLeaveBalanceRecord(ctx RequestContext, record domain.EHRMSLeaveBalanceRecord, rowNumber int) ehrmsAttendanceSyncResult {
+	balance, employeeNo, errors := c.ehrmsLeaveBalanceCandidate(ctx, record, rowNumber)
+	if len(errors) > 0 {
+		return ehrmsAttendanceFailed(rowNumber, errors)
+	}
+	employee, ok, err := c.store.GetEmployeeByEmployeeNo(goContext(ctx), ctx.TenantID, employeeNo)
+	if err != nil {
+		return ehrmsAttendanceFailed(rowNumber, []RowError{{Row: rowNumber, Field: "employee_no", Code: "store_error", Message: err.Error()}})
+	}
+	if !ok {
+		return ehrmsAttendanceSkipped(rowNumber, "", "employee_not_found", "employee_no was not found for eHRMS leave balance sync")
+	}
+	balance.EmployeeID = employee.ID
+	balance.ID = ehrmsStableID("ehrms-lb", ctx.TenantID, employee.EmployeeNo, balance.LeaveType)
+	if err := c.store.UpsertLeaveBalance(goContext(ctx), balance); err != nil {
+		return ehrmsAttendanceFailed(rowNumber, []RowError{{Row: rowNumber, Field: "leave_type", Code: "store_error", Message: err.Error()}})
+	}
+	return ehrmsAttendanceSyncResult{action: "upserted", result: BatchEmployeeResult{RowNumber: rowNumber, EmployeeID: employee.ID, Success: true, Action: "upserted", Message: "upserted"}}
+}
+
+func (c AttendanceService) syncEHRMSLeaveDetailRecord(ctx RequestContext, record domain.EHRMSLeaveDetailRecord, rowNumber int, mode string, since string) ehrmsAttendanceSyncResult {
+	request, employeeNo, workDate, errors := c.ehrmsLeaveDetailCandidate(ctx, record, rowNumber)
+	if len(errors) > 0 {
+		return ehrmsAttendanceFailed(rowNumber, errors)
+	}
+	if since != "" && workDate < since {
+		return ehrmsAttendanceSkipped(rowNumber, "", "before_since", "leave detail is before since date")
+	}
+	employee, ok, err := c.store.GetEmployeeByEmployeeNo(goContext(ctx), ctx.TenantID, employeeNo)
+	if err != nil {
+		return ehrmsAttendanceFailed(rowNumber, []RowError{{Row: rowNumber, Field: "employee_no", Code: "store_error", Message: err.Error()}})
+	}
+	if !ok {
+		return ehrmsAttendanceSkipped(rowNumber, "", "employee_not_found", "employee_no was not found for eHRMS leave detail sync")
+	}
+	request.EmployeeID = employee.ID
+	request.ID = ehrmsStableID("ehrms-lr", ctx.TenantID, employee.EmployeeNo, workDate, request.LeaveType, request.StartAt.Format(time.RFC3339), request.EndAt.Format(time.RFC3339))
+	existing, exists, err := c.store.GetLeaveRequest(goContext(ctx), ctx.TenantID, request.ID)
+	if err != nil {
+		return ehrmsAttendanceFailed(rowNumber, []RowError{{Row: rowNumber, Field: "leave_detail", Code: "store_error", Message: err.Error()}})
+	}
+	switch mode {
+	case employeeImportModeCreate:
+		if exists {
+			return ehrmsAttendanceFailed(rowNumber, []RowError{{Row: rowNumber, Field: "leave_detail", Code: "unique", Message: "leave detail already exists"}})
+		}
+	case employeeImportModeUpdate:
+		if !exists {
+			return ehrmsAttendanceFailed(rowNumber, []RowError{{Row: rowNumber, Field: "leave_detail", Code: "not_found", Message: "leave detail was not found for eHRMS sync"}})
+		}
+	}
+	if exists {
+		request.CreatedAt = existing.CreatedAt
+	}
+	if err := c.store.UpsertLeaveRequest(goContext(ctx), request); err != nil {
+		return ehrmsAttendanceFailed(rowNumber, []RowError{{Row: rowNumber, Field: "leave_detail", Code: "store_error", Message: err.Error()}})
+	}
+	action := "created"
+	if exists {
 		action = "updated"
 	}
 	return ehrmsAttendanceSyncResult{action: action, result: BatchEmployeeResult{RowNumber: rowNumber, EmployeeID: employee.ID, Success: true, Action: action, Message: action}}
@@ -252,6 +396,94 @@ func (c AttendanceService) ehrmsAttendanceSummaryCandidate(ctx RequestContext, r
 	}, employeeNo, errors
 }
 
+func (c AttendanceService) ehrmsLeaveBalanceCandidate(ctx RequestContext, record domain.EHRMSLeaveBalanceRecord, rowNumber int) (LeaveBalance, string, []RowError) {
+	errors := make([]RowError, 0)
+	employeeNo := ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldEmployeeNo)
+	leaveType := ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldLeaveType)
+	if employeeNo == "" {
+		errors = append(errors, RowError{Row: rowNumber, Field: "employee_no", Code: "required", Message: "employee_no is required"})
+	}
+	if leaveType == "" {
+		errors = append(errors, RowError{Row: rowNumber, Field: "leave_type", Code: "required", Message: "leave_type is required"})
+	}
+	unit := strings.ToLower(ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldUnit))
+	quota, ok := parseEHRMSLeaveBalanceNumber(ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldQuota), unit)
+	if !ok {
+		errors = append(errors, RowError{Row: rowNumber, Field: "quota", Code: "invalid", Message: "quota must be a number"})
+	}
+	used, ok := parseEHRMSLeaveBalanceNumber(ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldUsed), unit)
+	if !ok {
+		errors = append(errors, RowError{Row: rowNumber, Field: "used", Code: "invalid", Message: "used must be a number"})
+	}
+	remainingRaw := ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldRemaining)
+	remaining, ok := parseEHRMSLeaveBalanceNumber(remainingRaw, unit)
+	if !ok {
+		errors = append(errors, RowError{Row: rowNumber, Field: "remaining", Code: "invalid", Message: "remaining must be a number"})
+	}
+	if strings.TrimSpace(remainingRaw) == "" && quota > 0 {
+		remaining = quota - used
+		if remaining < 0 {
+			remaining = 0
+		}
+	}
+	periodStart := normalizeEHRMSAttendanceDate(ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldGrantStart))
+	periodEnd := normalizeEHRMSAttendanceDate(ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldExpireDate))
+	now := c.Now()
+	return LeaveBalance{
+		TenantID:       ctx.TenantID,
+		LeaveType:      leaveType,
+		RemainingHours: remaining,
+		PeriodStart:    periodStart,
+		PeriodEnd:      periodEnd,
+		GrantedHours:   quota,
+		UsedHours:      used,
+		Source:         ehrmsAttendanceSource,
+		UpdatedAt:      now,
+	}, employeeNo, errors
+}
+
+func (c AttendanceService) ehrmsLeaveDetailCandidate(ctx RequestContext, record domain.EHRMSLeaveDetailRecord, rowNumber int) (LeaveRequest, string, string, []RowError) {
+	errors := make([]RowError, 0)
+	employeeNo := ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldEmployeeNo)
+	workDate := normalizeEHRMSAttendanceDate(ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldDate))
+	leaveType := ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldLeaveType)
+	if employeeNo == "" {
+		errors = append(errors, RowError{Row: rowNumber, Field: "employee_no", Code: "required", Message: "employee_no is required"})
+	}
+	if workDate == "" {
+		errors = append(errors, RowError{Row: rowNumber, Field: "date", Code: "invalid", Message: "date must be YYYY-MM-DD"})
+	}
+	if leaveType == "" {
+		errors = append(errors, RowError{Row: rowNumber, Field: "leave_type", Code: "required", Message: "leave_type is required"})
+	}
+	startAt, ok := parseEHRMSLeaveDetailDateTime(workDate, ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldStart))
+	if !ok {
+		errors = append(errors, RowError{Row: rowNumber, Field: "start", Code: "invalid", Message: "start must be HH:MM or datetime"})
+	}
+	endAt, ok := parseEHRMSLeaveDetailDateTime(workDate, ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldEnd))
+	if !ok {
+		errors = append(errors, RowError{Row: rowNumber, Field: "end", Code: "invalid", Message: "end must be HH:MM or datetime"})
+	}
+	if !startAt.IsZero() && !endAt.IsZero() && !endAt.After(startAt) {
+		errors = append(errors, RowError{Row: rowNumber, Field: "end", Code: "invalid", Message: "end must be after start"})
+	}
+	hours, ok := parseEHRMSAttendanceHours(ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldHours))
+	if !ok || hours <= 0 {
+		errors = append(errors, RowError{Row: rowNumber, Field: "hours", Code: "invalid", Message: "hours must be greater than zero"})
+	}
+	now := c.Now()
+	return LeaveRequest{
+		TenantID:  ctx.TenantID,
+		LeaveType: leaveType,
+		StartAt:   startAt,
+		EndAt:     endAt,
+		Hours:     hours,
+		Reason:    "eHRMS leave detail",
+		Status:    "approved",
+		CreatedAt: now,
+	}, employeeNo, workDate, errors
+}
+
 func ehrmsAttendanceFailed(rowNumber int, errors []RowError) ehrmsAttendanceSyncResult {
 	return ehrmsAttendanceSyncResult{
 		action:    "failed",
@@ -332,6 +564,37 @@ func parseEHRMSAttendanceHours(value string) (float64, bool) {
 		return 0, false
 	}
 	return n, true
+}
+
+func parseEHRMSLeaveBalanceNumber(value string, unit string) (float64, bool) {
+	n, ok := parseEHRMSAttendanceHours(value)
+	if !ok {
+		return 0, false
+	}
+	switch strings.ToLower(strings.TrimSpace(unit)) {
+	case "days", "day":
+		return n * 8, true
+	default:
+		return n, true
+	}
+}
+
+func parseEHRMSLeaveDetailDateTime(workDate string, value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if workDate == "" || value == "" {
+		return time.Time{}, false
+	}
+	for _, layout := range []string{time.RFC3339, "2006-01-02 15:04:05", "2006-01-02 15:04", "2006/01/02 15:04:05", "2006/01/02 15:04"} {
+		if parsed, err := time.ParseInLocation(layout, value, attendanceClockLocation); err == nil {
+			return parsed, true
+		}
+	}
+	for _, layout := range []string{"15:04:05", "15:04"} {
+		if parsed, err := time.ParseInLocation(time.DateOnly+" "+layout, workDate+" "+value, attendanceClockLocation); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func ehrmsAttendanceTimeField(record domain.EHRMSAttendanceRecord, key string, rowNumber int, errors *[]RowError) string {
@@ -436,4 +699,69 @@ func ehrmsAttendanceValue(record domain.EHRMSAttendanceRecord, key string) strin
 	default:
 		return ""
 	}
+}
+
+func ehrmsLeaveBalanceValue(record domain.EHRMSLeaveBalanceRecord, key string) string {
+	if len(record) == 0 {
+		return ""
+	}
+	if value := strings.TrimSpace(record[key]); value != "" {
+		return value
+	}
+	switch key {
+	case ehrmsLeaveBalanceFieldEmployeeNo:
+		return strings.TrimSpace(record["emp_id"])
+	case ehrmsLeaveBalanceFieldYear:
+		return strings.TrimSpace(record["year"])
+	case ehrmsLeaveBalanceFieldLeaveType:
+		return strings.TrimSpace(record["leave_type"])
+	case ehrmsLeaveBalanceFieldUnit:
+		return strings.TrimSpace(record["unit"])
+	case ehrmsLeaveBalanceFieldQuota:
+		return strings.TrimSpace(record["quota"])
+	case ehrmsLeaveBalanceFieldUsed:
+		return strings.TrimSpace(record["used"])
+	case ehrmsLeaveBalanceFieldRemaining:
+		return strings.TrimSpace(record["remaining"])
+	case ehrmsLeaveBalanceFieldGrantStart:
+		return strings.TrimSpace(record["grant_start"])
+	case ehrmsLeaveBalanceFieldExpireDate:
+		return strings.TrimSpace(record["expire_date"])
+	case ehrmsLeaveBalanceFieldCarryIn:
+		return strings.TrimSpace(record["carry_in"])
+	case ehrmsLeaveBalanceFieldCarryExpire:
+		return strings.TrimSpace(record["carry_expire"])
+	default:
+		return ""
+	}
+}
+
+func ehrmsLeaveDetailValue(record domain.EHRMSLeaveDetailRecord, key string) string {
+	if len(record) == 0 {
+		return ""
+	}
+	if value := strings.TrimSpace(record[key]); value != "" {
+		return value
+	}
+	switch key {
+	case ehrmsLeaveDetailFieldEmployeeNo:
+		return strings.TrimSpace(record["emp_id"])
+	case ehrmsLeaveDetailFieldDate:
+		return strings.TrimSpace(record["date"])
+	case ehrmsLeaveDetailFieldLeaveType:
+		return strings.TrimSpace(record["leave_type"])
+	case ehrmsLeaveDetailFieldStart:
+		return strings.TrimSpace(record["start"])
+	case ehrmsLeaveDetailFieldEnd:
+		return strings.TrimSpace(record["end"])
+	case ehrmsLeaveDetailFieldHours:
+		return strings.TrimSpace(record["hours"])
+	default:
+		return ""
+	}
+}
+
+func ehrmsStableID(prefix string, parts ...string) string {
+	h := sha1.Sum([]byte(strings.Join(parts, "|")))
+	return fmt.Sprintf("%s-%x", strings.TrimSpace(prefix), h[:10])
 }

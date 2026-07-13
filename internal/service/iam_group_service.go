@@ -302,10 +302,6 @@ func (c IAMService) AddUserGroupMember(ctx RequestContext, groupID string, input
 		return GroupMembership{}, err
 	}
 	now := c.Now()
-	approvalID := strings.TrimSpace(input.ApprovalInstanceID)
-	if approvalID == "" {
-		approvalID = ctx.ApprovalInstanceID
-	}
 	membership := GroupMembership{
 		ID:                 utils.NewID("ugm"),
 		TenantID:           ctx.TenantID,
@@ -314,7 +310,7 @@ func (c IAMService) AddUserGroupMember(ctx RequestContext, groupID string, input
 		ValidFrom:          now,
 		ValidUntil:         validUntil,
 		Source:             source,
-		ApprovalInstanceID: approvalID,
+		ApprovalInstanceID: strings.TrimSpace(input.ApprovalInstanceID),
 		CreatedBy:          ctx.AccountID,
 		CreatedAt:          now,
 	}

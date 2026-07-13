@@ -2,6 +2,8 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -16,19 +18,19 @@ func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 	store := memory.NewStore()
 	seedAgentAdminAccount(t, store, now)
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
 	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
 		Name:         "GPT 4.1",
 		Provider:     "openai",
 		ModelName:    "gpt-4.1",
 		LiteLLMModel: "openai/gpt-4.1",
-		IsDefault:    true,
+		APIKey:       "sk-test",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if model.Status != domain.AgentModelStatusActive || !model.IsDefault || model.TimeoutSeconds <= 0 {
+	if model.Status != domain.AgentModelStatusActive || model.TimeoutSeconds <= 0 {
 		t.Fatalf("unexpected model defaults: %+v", model)
 	}
 
@@ -47,17 +49,29 @@ func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 	}
 
 	updatedPrompt := "You are a careful HR helper."
-	status := string(domain.AgentDefinitionStatusPublished)
 	agent, err = svc.Agent().UpdateDefinition(ctx, agent.ID, domain.UpdateAgentDefinitionInput{
 		SystemPrompt: &updatedPrompt,
-		Status:       &status,
-		VersionNote:  "publish careful prompt",
+		VersionNote:  "careful prompt",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	if agent.Status != domain.AgentDefinitionStatusDraft || agent.Version != 2 {
+		t.Fatalf("expected draft version 2 after config update, got %+v", agent)
+	}
+	agent, err = svc.Agent().PublishDefinition(ctx, agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if agent.Status != domain.AgentDefinitionStatusPublished || agent.Version != 2 {
-		t.Fatalf("expected published version 2, got %+v", agent)
+		t.Fatalf("expected published agent without version bump, got %+v", agent)
+	}
+	listed, err := svc.Agent().ListDefinitions(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listed) != 1 || len(listed[0].Versions) != 2 {
+		t.Fatalf("expected list response to include stored version history, got %+v", listed)
 	}
 
 	trial, err := svc.Agent().Trial(ctx, agent.ID, domain.AgentTrialInput{Message: "How do I request leave?"})
@@ -85,6 +99,23 @@ func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 	if rolledBack.Version != 3 || rolledBack.SystemPrompt != "You are an HR helper." {
 		t.Fatalf("expected rollback to create version 3 from v1, got %+v", rolledBack)
 	}
+	unpublished, err := svc.Agent().UnpublishDefinition(ctx, agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if unpublished.Status != domain.AgentDefinitionStatusDraft || unpublished.Version != 3 {
+		t.Fatalf("expected unpublish to keep version and return draft, got %+v", unpublished)
+	}
+	deleted, err := svc.Agent().DeleteDefinition(ctx, agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted.ID != agent.ID {
+		t.Fatalf("expected unpublished agent to be deleted, got %+v", deleted)
+	}
+	if _, err := svc.Agent().DeleteModel(ctx, model.ID); err != nil {
+		t.Fatalf("expected unused model to be deleted with its audit: %v", err)
+	}
 }
 
 func TestAgentAdminTrialReportsOnlyActuallyUsedTools(t *testing.T) {
@@ -92,6 +123,9 @@ func TestAgentAdminTrialReportsOnlyActuallyUsedTools(t *testing.T) {
 	store := memory.NewStore()
 	seedAgentAdminAccount(t, store, now)
 	runtime := agentAdminFakeRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
+		if req.ModelName != "openai/gpt-4.1" || !strings.Contains(req.Message, "You are an HR helper.") {
+			t.Fatalf("trial did not apply its configured model and system prompt: %+v", req)
+		}
 		tool, ok := req.Tools["get_my_profile"]
 		if !ok {
 			t.Fatalf("expected get_my_profile to be available in trial tools: %+v", req.Tools)
@@ -106,24 +140,27 @@ func TestAgentAdminTrialReportsOnlyActuallyUsedTools(t *testing.T) {
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "profile checked"})
 	}}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
 	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
 		Name:         "GPT 4.1",
 		ModelName:    "gpt-4.1",
 		LiteLLMModel: "openai/gpt-4.1",
-		IsDefault:    true,
+		APIKey:       "sk-test",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	status := string(domain.AgentDefinitionStatusPublished)
 	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
-		Name:    "HR Helper",
-		ModelID: model.ID,
-		Tools:   []string{"get_my_profile", "my_leave_balances"},
-		Status:  status,
+		Name:         "HR Helper",
+		ModelID:      model.ID,
+		SystemPrompt: "You are an HR helper.",
+		Tools:        []string{"get_my_profile", "my_leave_balances"},
 	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err = svc.Agent().PublishDefinition(ctx, agent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -140,14 +177,48 @@ func TestAgentAdminTrialReportsOnlyActuallyUsedTools(t *testing.T) {
 	}
 }
 
+func TestAgentAdminTrialRecordsRuntimeFailure(t *testing.T) {
+	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentAdminAccount(t, store, now)
+	svc := service.New(store, service.Options{
+		Now: func() time.Time { return now },
+		AgentChatRuntime: agentAdminFakeRuntime{run: func(context.Context, service.AgentChatRuntimeRequest, service.AgentChatEmitFunc) error {
+			return errors.New("runtime unavailable")
+		}},
+	})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
+	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Model", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{Name: "Failure counter", ModelID: model.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.Agent().PublishDefinition(ctx, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.Agent().Trial(ctx, agent.ID, domain.AgentTrialInput{Message: "fail"}); err == nil {
+		t.Fatal("expected runtime failure")
+	}
+	stored, ok, err := store.GetAgentDefinition(context.Background(), "tenant-1", agent.ID)
+	if err != nil || !ok {
+		t.Fatalf("expected stored agent, ok=%v err=%v", ok, err)
+	}
+	if stored.Usage.TotalRuns != 1 || stored.Usage.FailedRuns != 1 || stored.Usage.SuccessRuns != 0 {
+		t.Fatalf("expected failed trial usage to be recorded, got %+v", stored.Usage)
+	}
+}
+
 func TestAgentAdminBlocksDeletingModelInUse(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
 	store := memory.NewStore()
 	seedAgentAdminAccount(t, store, now)
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
-	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Default", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1"})
+	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Default", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -159,18 +230,45 @@ func TestAgentAdminBlocksDeletingModelInUse(t *testing.T) {
 	}
 }
 
+func TestAgentAdminBlocksDeletingPublishedAgent(t *testing.T) {
+	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentAdminAccount(t, store, now)
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
+	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Default", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{Name: "Published", ModelID: model.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err = svc.Agent().PublishDefinition(ctx, agent.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Agent().DeleteDefinition(ctx, agent.ID); err == nil {
+		t.Fatal("expected published agent deletion to require unpublish first")
+	}
+	if stored, ok, err := store.GetAgentDefinition(context.Background(), "tenant-1", agent.ID); err != nil || !ok || stored.Status != domain.AgentDefinitionStatusPublished {
+		t.Fatalf("published agent changed after blocked deletion: ok=%v err=%v agent=%+v", ok, err, stored)
+	}
+}
+
 func TestAgentAdminSyncAndTestModelUseLiteLLMAdmin(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
 	store := memory.NewStore()
 	seedAgentAdminAccount(t, store, now)
 	liteLLM := &fakeLiteLLMAdmin{}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, LiteLLMAdmin: liteLLM})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
 	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
 		Name:         "GPT 4.1",
 		ModelName:    "gpt-4.1",
 		LiteLLMModel: "openai/gpt-4.1",
+		APIKey:       "sk-test",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -191,93 +289,66 @@ func TestAgentAdminSyncAndTestModelUseLiteLLMAdmin(t *testing.T) {
 	}
 }
 
-func TestAgentAdminImportBundleNormalizesAndSnapshots(t *testing.T) {
+func TestAgentAdminModelCredentialsNormalizeAndHideAPIKey(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
 	store := memory.NewStore()
 	seedAgentAdminAccount(t, store, now)
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", ApprovalConfirmed: true}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
-	result, err := svc.Agent().ImportBundle(ctx, domain.AgentBundle{
-		Models: []domain.AgentModel{
-			{
-				ID:              "model-primary",
-				Name:            "Primary",
-				ModelName:       "gpt-4.1",
-				LiteLLMModel:    "openai/gpt-4.1",
-				FallbackModelID: "model-fallback",
-			},
-			{
-				ID:           "model-fallback",
-				Name:         "Fallback",
-				ModelName:    "gpt-4.1-mini",
-				LiteLLMModel: "openai/gpt-4.1-mini",
-			},
-		},
-		Agents: []domain.AgentDefinition{
-			{
-				ID:           "agent-imported",
-				Name:         "Imported Agent",
-				ModelID:      "model-primary",
-				SystemPrompt: "Use verified tools only.",
-				Tools:        []string{"get_my_profile", "get_my_profile"},
-				Status:       domain.AgentDefinitionStatusPublished,
-			},
-		},
+	_, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
+		Name:         "OpenRouter Gemma",
+		Provider:     "custom",
+		ModelName:    "openrouter/google/gemma-3-27b-it",
+		LiteLLMModel: "openrouter/google/gemma-3-27b-it",
+		APIKey:       "sk-openrouter-test",
+	})
+	if err == nil || !strings.Contains(err.Error(), "api_base_url") {
+		t.Fatalf("expected custom provider to require api_base_url, got %v", err)
+	}
+
+	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
+		Name:         "OpenRouter Gemma",
+		Provider:     "custom",
+		ModelName:    "openrouter/google/gemma-3-27b-it",
+		LiteLLMModel: "openrouter/google/gemma-3-27b-it",
+		APIBaseURL:   " https://openrouter.ai/api/v1/ ",
+		APIKey:       " sk-openrouter-test ",
+		RateLimitRPM: 100,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Models != 2 || result.Agents != 1 {
-		t.Fatalf("unexpected import result: %+v", result)
+	if model.APIBaseURL != "https://openrouter.ai/api/v1" || model.APIKey != "sk-openrouter-test" || model.RateLimitRPM != 100 {
+		t.Fatalf("expected normalized credential fields, got %+v", model)
 	}
-	agent, err := svc.Agent().GetDefinition(ctx, "agent-imported")
+	if !model.APIKeySet || model.APIKeyPreview != "****test" {
+		t.Fatalf("expected API key state and preview, got %+v", model)
+	}
+	encoded, err := json.Marshal(model)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if agent.TenantID != "tenant-1" || agent.Version != 1 || len(agent.Tools) != 1 {
-		t.Fatalf("expected normalized imported agent, got %+v", agent)
+	if strings.Contains(string(encoded), "sk-openrouter-test") {
+		t.Fatalf("API key leaked in JSON response: %s", string(encoded))
 	}
-	versions, err := svc.Agent().ListDefinitionVersions(ctx, "agent-imported")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(versions) != 1 || versions[0].Note != "imported bundle" {
-		t.Fatalf("expected imported version snapshot, got %+v", versions)
-	}
-}
 
-func TestAgentAdminImportBundleRejectsInvalidAgentWithoutPartialWrite(t *testing.T) {
-	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
-	store := memory.NewStore()
-	seedAgentAdminAccount(t, store, now)
-	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", ApprovalConfirmed: true}
-
-	_, err := svc.Agent().ImportBundle(ctx, domain.AgentBundle{
-		Models: []domain.AgentModel{{
-			ID:           "model-imported",
-			Name:         "Imported",
-			ModelName:    "gpt-4.1",
-			LiteLLMModel: "openai/gpt-4.1",
-		}},
-		Agents: []domain.AgentDefinition{{
-			ID:           "agent-bad-tool",
-			Name:         "Bad Tool Agent",
-			ModelID:      "model-imported",
-			SystemPrompt: "bad",
-			Tools:        []string{"unknown_tool"},
-		}},
-	})
-	if err == nil {
-		t.Fatal("expected invalid tool to reject import")
-	}
-	models, err := svc.Agent().ListModels(ctx)
+	nextName := "OpenRouter Gemma 27B"
+	updated, err := svc.Agent().UpdateModel(ctx, model.ID, domain.UpdateAgentModelInput{Name: &nextName})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(models) != 0 {
-		t.Fatalf("expected failed import to roll back models, got %+v", models)
+	if updated.Name != nextName || updated.APIKey != "sk-openrouter-test" || !updated.APIKeySet {
+		t.Fatalf("expected update without api_key to preserve secret, got %+v", updated)
+	}
+
+	blankKey := ""
+	if _, err := svc.Agent().UpdateModel(ctx, model.ID, domain.UpdateAgentModelInput{APIKey: &blankKey}); err == nil {
+		t.Fatal("expected blank api_key update to be rejected")
+	}
+	negativeRPM := -1
+	if _, err := svc.Agent().UpdateModel(ctx, model.ID, domain.UpdateAgentModelInput{RateLimitRPM: &negativeRPM}); err == nil {
+		t.Fatal("expected negative rate_limit_rpm update to be rejected")
 	}
 }
 

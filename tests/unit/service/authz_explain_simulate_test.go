@@ -103,7 +103,7 @@ func TestAuthzExplainShowsBoundaryExcludedGrant(t *testing.T) {
 	})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
 	session, err := svc.IAM().AssumeRole(
-		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", ApprovalConfirmed: true},
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		"role-support",
 		domain.AssumeRoleInput{Reason: "explain boundary"},
 	)

@@ -90,6 +90,29 @@ var attendanceFieldAliases = map[string]string{
 	"overtime_counted": "overtime_counted",
 }
 
+var leaveBalanceFieldAliases = map[string]string{
+	"emp_id":       "員工編號",
+	"year":         "年度",
+	"leave_type":   "假別",
+	"unit":         "單位",
+	"quota":        "額度",
+	"used":         "已使用",
+	"remaining":    "餘額",
+	"grant_start":  "發放起始日",
+	"expire_date":  "到期日",
+	"carry_in":     "遞延餘額",
+	"carry_expire": "遞延到期日",
+}
+
+var leaveDetailFieldAliases = map[string]string{
+	"emp_id":     "員工編號",
+	"date":       "日期",
+	"leave_type": "假別",
+	"start":      "開始時間",
+	"end":        "結束時間",
+	"hours":      "時數",
+}
+
 // NormalizeEmployeeRecords 將上游 JSON 欄位別名合併為服務層使用的 canonical key。
 func NormalizeEmployeeRecords(rows []domain.EHRMSEmployeeRecord) []domain.EHRMSEmployeeRecord {
 	return normalizeEmployeeRecords(rows)
@@ -123,6 +146,16 @@ func NormalizePositionRecords(rows []domain.EHRMSPositionRecord) []domain.EHRMSP
 // NormalizeAttendanceRecords 將上游考勤 JSON 欄位別名合併為服務層使用的 canonical key。
 func NormalizeAttendanceRecords(rows []domain.EHRMSAttendanceRecord) []domain.EHRMSAttendanceRecord {
 	return normalizeAttendanceRecords(rows)
+}
+
+// NormalizeLeaveBalanceRecords 將上游假別餘額 JSON 欄位別名合併為服務層使用的 canonical key。
+func NormalizeLeaveBalanceRecords(rows []domain.EHRMSLeaveBalanceRecord) []domain.EHRMSLeaveBalanceRecord {
+	return normalizeLeaveBalanceRecords(rows)
+}
+
+// NormalizeLeaveDetailRecords 將上游已休明細 JSON 欄位別名合併為服務層使用的 canonical key。
+func NormalizeLeaveDetailRecords(rows []domain.EHRMSLeaveDetailRecord) []domain.EHRMSLeaveDetailRecord {
+	return normalizeLeaveDetailRecords(rows)
 }
 
 func normalizeDepartmentRecords(rows []domain.EHRMSDepartmentRecord) []domain.EHRMSDepartmentRecord {
@@ -168,6 +201,36 @@ func normalizeAttendanceRecords(rows []domain.EHRMSAttendanceRecord) []domain.EH
 
 func normalizeAttendanceRecord(row domain.EHRMSAttendanceRecord) domain.EHRMSAttendanceRecord {
 	return domain.EHRMSAttendanceRecord(applyFieldAliases(map[string]string(row), attendanceFieldAliases))
+}
+
+func normalizeLeaveBalanceRecords(rows []domain.EHRMSLeaveBalanceRecord) []domain.EHRMSLeaveBalanceRecord {
+	if len(rows) == 0 {
+		return rows
+	}
+	out := make([]domain.EHRMSLeaveBalanceRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, normalizeLeaveBalanceRecord(row))
+	}
+	return out
+}
+
+func normalizeLeaveBalanceRecord(row domain.EHRMSLeaveBalanceRecord) domain.EHRMSLeaveBalanceRecord {
+	return domain.EHRMSLeaveBalanceRecord(applyFieldAliases(map[string]string(row), leaveBalanceFieldAliases))
+}
+
+func normalizeLeaveDetailRecords(rows []domain.EHRMSLeaveDetailRecord) []domain.EHRMSLeaveDetailRecord {
+	if len(rows) == 0 {
+		return rows
+	}
+	out := make([]domain.EHRMSLeaveDetailRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, normalizeLeaveDetailRecord(row))
+	}
+	return out
+}
+
+func normalizeLeaveDetailRecord(row domain.EHRMSLeaveDetailRecord) domain.EHRMSLeaveDetailRecord {
+	return domain.EHRMSLeaveDetailRecord(applyFieldAliases(map[string]string(row), leaveDetailFieldAliases))
 }
 
 func applyFieldAliases(row map[string]string, aliases map[string]string) map[string]string {

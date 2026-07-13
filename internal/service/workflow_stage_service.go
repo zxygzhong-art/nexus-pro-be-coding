@@ -48,7 +48,7 @@ func DeserializeWorkflowStages(raw string) []domain.WorkflowStageDefinition {
 
 func normalizeWorkflowStageDefinition(stage domain.PlatformFormBuilderStage) domain.WorkflowStageDefinition {
 	config := workflowStageConfigFromMap(stage.Config)
-	if config.Role == "" && len(config.AccountIDs) == 0 && config.Field == "" {
+	if config.Role == "" && len(config.AccountIDs) == 0 && len(config.UserGroupIDs) == 0 && config.Field == "" {
 		config = inferWorkflowStageConfig(stage)
 	}
 	return domain.WorkflowStageDefinition{
@@ -65,13 +65,15 @@ func workflowStageConfigFromMap(values map[string]any) domain.WorkflowStageConfi
 		return domain.WorkflowStageConfig{}
 	}
 	config := domain.WorkflowStageConfig{
-		Role:             stringFromAny(values["role"]),
-		Mode:             stringFromAny(values["mode"]),
-		Field:            stringFromAny(values["field"]),
-		Operator:         stringFromAny(values["operator"]),
-		Value:            stringFromAny(values["value"]),
-		TrueNextStageID:  stringFromAny(values["true_next_stage_id"]),
-		FalseNextStageID: stringFromAny(values["false_next_stage_id"]),
+		Role:                    stringFromAny(values["role"]),
+		Mode:                    stringFromAny(values["mode"]),
+		Field:                   stringFromAny(values["field"]),
+		Operator:                stringFromAny(values["operator"]),
+		Value:                   stringFromAny(values["value"]),
+		TrueNextStageID:         stringFromAny(values["true_next_stage_id"]),
+		FalseNextStageID:        stringFromAny(values["false_next_stage_id"]),
+		ExcludeApplicant:        workflowBoolFromAny(values["exclude_applicant"]),
+		RequireDistinctApprover: workflowBoolFromAny(values["require_distinct_approver"]),
 	}
 	if level := workflowIntFromAny(values["relative_level"]); level > 0 {
 		config.RelativeLevel = level
@@ -81,13 +83,8 @@ func workflowStageConfigFromMap(values map[string]any) domain.WorkflowStageConfi
 	} else if hours := workflowIntFromAny(values["remindAfterHours"]); hours > 0 {
 		config.RemindAfterHours = hours
 	}
-	if ids, ok := values["account_ids"].([]any); ok {
-		for _, item := range ids {
-			if id := strings.TrimSpace(stringFromAny(item)); id != "" {
-				config.AccountIDs = append(config.AccountIDs, id)
-			}
-		}
-	}
+	config.AccountIDs = uniqueWorkflowRecipientIDs(stringSliceFromAny(values["account_ids"]))
+	config.UserGroupIDs = uniqueWorkflowRecipientIDs(stringSliceFromAny(values["user_group_ids"]))
 	if levels, ok := values["levels"].([]any); ok {
 		for _, item := range levels {
 			if level := workflowIntFromAny(item); level > 0 {
@@ -96,6 +93,19 @@ func workflowStageConfigFromMap(values map[string]any) domain.WorkflowStageConfi
 		}
 	}
 	return config
+}
+
+// workflowBoolFromAny normalizes persisted workflow flags from JSON-compatible values.
+func workflowBoolFromAny(value any) bool {
+	switch typed := value.(type) {
+	case bool:
+		return typed
+	case string:
+		parsed, err := strconv.ParseBool(strings.TrimSpace(typed))
+		return err == nil && parsed
+	default:
+		return false
+	}
 }
 
 func inferWorkflowStageConfig(stage domain.PlatformFormBuilderStage) domain.WorkflowStageConfig {

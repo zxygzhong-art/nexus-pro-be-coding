@@ -129,7 +129,7 @@ func DefaultHRPermissionPackageContent() PermissionPackageContent {
 				Description:               "短時承擔的唯讀排障角色。",
 				PermissionSetTemplateKeys: []string{"platform_readonly_troubleshooting"},
 				Trusted:                   true,
-				TrustPolicy:               map[string]any{"require_approval": true, "purpose": "troubleshooting"},
+				TrustPolicy:               map[string]any{"purpose": "troubleshooting"},
 				PermissionBoundary:        map[string]any{"effect": "allow_readonly"},
 				SessionDurationSeconds:    3600,
 			},

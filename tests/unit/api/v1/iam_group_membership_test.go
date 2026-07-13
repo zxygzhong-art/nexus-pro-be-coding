@@ -14,7 +14,6 @@ func TestUserGroupMemberRoutes(t *testing.T) {
 
 	patchReq := httptest.NewRequest(http.MethodPatch, "/v1/iam/user-groups/ug-employee", strings.NewReader(`{"description":"Updated"}`))
 	patchReq.Header.Set("Content-Type", "application/json")
-	patchReq.Header.Set("X-Approval-Confirmed", "true")
 	patchRec := httptest.NewRecorder()
 	handler.ServeHTTP(patchRec, patchReq)
 	if patchRec.Code != http.StatusOK {
@@ -27,7 +26,6 @@ func TestUserGroupMemberRoutes(t *testing.T) {
 
 	addReq := httptest.NewRequest(http.MethodPost, "/v1/iam/user-groups/ug-employee/members", strings.NewReader(`{"account_id":"acct-admin","source":"manual"}`))
 	addReq.Header.Set("Content-Type", "application/json")
-	addReq.Header.Set("X-Approval-Confirmed", "true")
 	addRec := httptest.NewRecorder()
 	handler.ServeHTTP(addRec, addReq)
 	if addRec.Code != http.StatusCreated {
@@ -50,7 +48,6 @@ func TestUserGroupMemberRoutes(t *testing.T) {
 	}
 
 	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/iam/user-groups/ug-employee/members/acct-admin", nil)
-	deleteReq.Header.Set("X-Approval-Confirmed", "true")
 	deleteRec := httptest.NewRecorder()
 	handler.ServeHTTP(deleteRec, deleteReq)
 	if deleteRec.Code != http.StatusNoContent {

@@ -76,12 +76,11 @@ func (s *EHRMSAttendanceSyncScheduler) SyncOnce(ctx context.Context, opts EHRMSA
 	}
 	requestID := "ehrms-attendance-sync-" + s.now().UTC().Format("20060102T150405Z")
 	return s.service.SyncEHRMSAttendance(domain.RequestContext{
-		Context:           ctx,
-		TenantID:          opts.TenantID,
-		AccountID:         opts.AccountID,
-		RequestID:         requestID,
-		TraceID:           requestID,
-		ApprovalConfirmed: true,
+		Context:   ctx,
+		TenantID:  opts.TenantID,
+		AccountID: opts.AccountID,
+		RequestID: requestID,
+		TraceID:   requestID,
 	}, domain.EHRMSAttendanceSyncInput{Mode: opts.Mode, Since: opts.Since})
 }
 

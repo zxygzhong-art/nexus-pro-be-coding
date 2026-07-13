@@ -20,10 +20,33 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// RequestError 保留上游失敗分類，但不要求服務層暴露回應內容。
+type RequestError struct {
+	Operation  string
+	StatusCode int
+	Cause      error
+}
+
+func (e *RequestError) Error() string {
+	if e.StatusCode > 0 {
+		return fmt.Sprintf("ehrms %s returned %d", e.Operation, e.StatusCode)
+	}
+	return fmt.Sprintf("ehrms %s request failed", e.Operation)
+}
+
+func (e *RequestError) Unwrap() error { return e.Cause }
+
+// Temporary 表示有限重試可能成功的網路或上游錯誤。
+func (e *RequestError) Temporary() bool {
+	return e.StatusCode == 0 || e.StatusCode == http.StatusTooManyRequests || e.StatusCode >= 500
+}
+
 const maxEmployeesResponseBytes = 10 << 20
 const maxDepartmentsResponseBytes = 5 << 20
 const maxPositionsResponseBytes = 5 << 20
 const maxAttendanceResponseBytes = 20 << 20
+const maxLeaveBalancesResponseBytes = 10 << 20
+const maxLeaveDetailsResponseBytes = 10 << 20
 
 // NewClient 建立 client。
 func NewClient(baseURL string, apiKey string, httpClient *http.Client) (*Client, error) {
@@ -128,6 +151,40 @@ func (c *Client) ListAttendance(ctx context.Context) ([]domain.EHRMSAttendanceRe
 	return normalizeAttendanceRecords(rows), nil
 }
 
+// ListLeaveBalances 列出假別餘額。
+func (c *Client) ListLeaveBalances(ctx context.Context) ([]domain.EHRMSLeaveBalanceRecord, error) {
+	body, err := c.getJSON(ctx, "/leave-balance", maxLeaveBalancesResponseBytes, "leave balances")
+	if err != nil {
+		return nil, err
+	}
+	raw, err := decodeJSONObjectRows(body, "leave balances")
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]domain.EHRMSLeaveBalanceRecord, 0, len(raw))
+	for _, row := range raw {
+		rows = append(rows, domain.EHRMSLeaveBalanceRecord(stringRecordFromJSON(row)))
+	}
+	return normalizeLeaveBalanceRecords(rows), nil
+}
+
+// ListLeaveDetails 列出已休逐筆明細。
+func (c *Client) ListLeaveDetails(ctx context.Context) ([]domain.EHRMSLeaveDetailRecord, error) {
+	body, err := c.getJSON(ctx, "/leave-detail", maxLeaveDetailsResponseBytes, "leave details")
+	if err != nil {
+		return nil, err
+	}
+	raw, err := decodeJSONObjectRows(body, "leave details")
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]domain.EHRMSLeaveDetailRecord, 0, len(raw))
+	for _, row := range raw {
+		rows = append(rows, domain.EHRMSLeaveDetailRecord(stringRecordFromJSON(row)))
+	}
+	return normalizeLeaveDetailRecords(rows), nil
+}
+
 func (c *Client) getJSON(ctx context.Context, path string, maxBytes int, label string) ([]byte, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
@@ -137,12 +194,12 @@ func (c *Client) getJSON(ctx context.Context, path string, maxBytes int, label s
 	req.Header.Set("Accept", "application/json")
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, err
+		return nil, &RequestError{Operation: label, Cause: err}
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
-		return nil, fmt.Errorf("ehrms %s returned %d: %s", label, resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, &RequestError{Operation: label, StatusCode: resp.StatusCode, Cause: fmt.Errorf("upstream response: %s", strings.TrimSpace(string(body)))}
 	}
 	body, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxBytes)+1))
 	if err != nil {

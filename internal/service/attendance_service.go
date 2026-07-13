@@ -15,13 +15,17 @@ const (
 	clockDirectionOut = "clock_out"
 
 	clockRecordStatusAccepted = "accepted"
+	clockRecordStatusAbnormal = "abnormal"
 	clockRecordStatusRejected = "rejected"
+	clockModeFlexible         = "flexible"
+	clockModeFixed            = "fixed"
 
-	clockRejectionDuplicate       = "duplicate"
-	clockRejectionInvalidSequence = "invalid_sequence"
-	clockRejectionLowAccuracy     = "low_location_accuracy"
-	clockRejectionOutsideGeofence = "outside_geofence"
-	clockRejectionOutsideWindow   = "outside_time_window"
+	clockRejectionDuplicate             = "duplicate"
+	clockRejectionInvalidSequence       = "invalid_sequence"
+	clockRejectionLowAccuracy           = "low_location_accuracy"
+	clockRejectionOutsideGeofence       = "outside_geofence"
+	clockRejectionOutsideWindow         = "outside_time_window"
+	clockRejectionInsufficientWorkHours = "insufficient_work_hours"
 
 	clockSourceGeofence         = "geofence"
 	clockSourceManualCorrection = "manual_correction"

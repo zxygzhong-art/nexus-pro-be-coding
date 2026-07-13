@@ -309,9 +309,6 @@
         "runner": {
           "this": {}
         },
-        "approver": {
-          "this": {}
-        },
         "can_run": {
           "union": {
             "child": [
@@ -332,27 +329,6 @@
               }
             ]
           }
-        },
-        "can_execute_high_risk": {
-          "union": {
-            "child": [
-              {
-                "computedUserset": {
-                  "relation": "approver"
-                }
-              },
-              {
-                "tupleToUserset": {
-                  "tupleset": {
-                    "relation": "tenant"
-                  },
-                  "computedUserset": {
-                    "relation": "security_admin"
-                  }
-                }
-              }
-            ]
-          }
         }
       },
       "metadata": {
@@ -365,13 +341,6 @@
             ]
           },
           "runner": {
-            "directly_related_user_types": [
-              {
-                "type": "account"
-              }
-            ]
-          },
-          "approver": {
             "directly_related_user_types": [
               {
                 "type": "account"

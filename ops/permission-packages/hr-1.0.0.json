@@ -415,21 +415,21 @@
       "resource_type": "permission_package",
       "resource": "iam.permission_package",
       "action": "create",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
       "resource_type": "permission_package",
       "resource": "iam.permission_package",
       "action": "publish",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
       "resource_type": "permission_package",
       "resource": "iam.permission_package",
       "action": "import",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
@@ -454,21 +454,21 @@
       "resource_type": "user_group",
       "resource": "iam.user_group",
       "action": "create",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
       "resource_type": "user_group",
       "resource": "iam.user_group",
       "action": "update",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
       "resource_type": "user_group",
       "resource": "iam.user_group",
       "action": "delete",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
@@ -481,14 +481,14 @@
       "resource_type": "user_group",
       "resource": "iam.user_group",
       "action": "update",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
       "resource_type": "user_group",
       "resource": "iam.user_group",
       "action": "update",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
@@ -501,21 +501,21 @@
       "resource_type": "permission_set",
       "resource": "iam.permission_set",
       "action": "create",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
       "resource_type": "permission_set",
       "resource": "iam.permission_set",
       "action": "update",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
       "resource_type": "permission_set",
       "resource": "iam.permission_set",
       "action": "delete",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
@@ -534,14 +534,14 @@
       "resource_type": "permission_set_assignment",
       "resource": "iam.permission_set_assignment",
       "action": "create",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
       "resource_type": "permission_set_assignment",
       "resource": "iam.permission_set_assignment",
       "action": "delete",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
@@ -554,21 +554,21 @@
       "resource_type": "data_scope",
       "resource": "iam.data_scope",
       "action": "create",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
       "resource_type": "data_scope",
       "resource": "iam.data_scope",
       "action": "update",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
       "resource_type": "data_scope",
       "resource": "iam.data_scope",
       "action": "delete",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
@@ -581,21 +581,21 @@
       "resource_type": "field_policy",
       "resource": "iam.field_policy",
       "action": "create",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
       "resource_type": "field_policy",
       "resource": "iam.field_policy",
       "action": "update",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
       "resource_type": "field_policy",
       "resource": "iam.field_policy",
       "action": "delete",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
@@ -621,28 +621,28 @@
       "resource_type": "assumable_role",
       "resource": "iam.assumable_role",
       "action": "create",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
       "resource_type": "assumable_role",
       "resource": "iam.assumable_role",
       "action": "update",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
       "resource_type": "assumable_role",
       "resource": "iam.assumable_role",
       "action": "delete",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
       "resource_type": "assumable_role",
       "resource": "iam.assumable_role",
       "action": "assume",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
@@ -655,6 +655,13 @@
       "resource_type": "position",
       "resource": "hr.position",
       "action": "create"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "position",
+      "resource": "hr.position",
+      "action": "create",
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
@@ -746,56 +753,56 @@
       "resource_type": "employee",
       "resource": "hr.employee",
       "action": "import",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
       "resource_type": "employee",
       "resource": "hr.employee",
       "action": "import",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
       "resource_type": "employee",
       "resource": "hr.employee",
       "action": "import",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
       "resource_type": "employee",
       "resource": "hr.employee",
       "action": "export",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
       "resource_type": "employee",
       "resource": "hr.employee",
       "action": "export",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
       "resource_type": "employee",
       "resource": "hr.employee",
       "action": "delete",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
       "resource_type": "employee",
       "resource": "hr.employee",
       "action": "delete",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
       "resource_type": "employee",
       "resource": "hr.employee",
       "action": "update_status",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
@@ -809,42 +816,42 @@
       "resource_type": "employee",
       "resource": "hr.employee",
       "action": "status_transition",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
       "resource_type": "employment_contract",
       "resource": "hr.employment_contract",
       "action": "read",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
       "resource_type": "employment_contract",
       "resource": "hr.employment_contract",
       "action": "create",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
       "resource_type": "employment_contract",
       "resource": "hr.employment_contract",
       "action": "read",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
       "resource_type": "employment_contract",
       "resource": "hr.employment_contract",
       "action": "update",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
       "resource_type": "employment_contract",
       "resource": "hr.employment_contract",
       "action": "delete",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
@@ -857,6 +864,13 @@
       "resource_type": "org_unit",
       "resource": "hr.org_unit",
       "action": "create"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "org_unit",
+      "resource": "hr.org_unit",
+      "action": "create",
+      "risk_level": "critical"
     },
     {
       "application_code": "hr",
@@ -875,7 +889,7 @@
       "resource_type": "leave",
       "resource": "attendance.leave",
       "action": "update",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "attendance",
@@ -912,7 +926,7 @@
       "resource_type": "leave",
       "resource": "attendance.leave",
       "action": "update",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "attendance",
@@ -985,7 +999,7 @@
       "resource_type": "clock",
       "resource": "attendance.clock",
       "action": "import",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "attendance",
@@ -1144,7 +1158,7 @@
       "resource_type": "employee",
       "resource": "hr.employee",
       "action": "export",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "attendance",
@@ -1157,7 +1171,7 @@
       "resource_type": "clock",
       "resource": "attendance.clock",
       "action": "export",
-      "risk_level": "high"
+      "risk_level": "critical"
     },
     {
       "application_code": "workflow",
@@ -1260,6 +1274,20 @@
       "application_code": "agent",
       "resource_type": "definition",
       "resource": "agent.definition",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "definition",
+      "resource": "agent.definition",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "definition",
+      "resource": "agent.definition",
       "action": "delete",
       "risk_level": "high"
     },
@@ -1281,31 +1309,6 @@
       "resource_type": "definition",
       "resource": "agent.definition",
       "action": "read"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "definition",
-      "resource": "agent.definition",
-      "action": "read"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "definition",
-      "resource": "agent.definition",
-      "action": "read"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "definition",
-      "resource": "agent.definition",
-      "action": "read"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "definition",
-      "resource": "agent.definition",
-      "action": "create",
-      "risk_level": "high"
     },
     {
       "application_code": "workflow",
@@ -1413,28 +1416,13 @@
       "application_code": "agent",
       "resource_type": "run",
       "resource": "agent.run",
-      "action": "create",
-      "risk_level": "high"
+      "action": "create"
     },
     {
       "application_code": "agent",
       "resource_type": "run",
       "resource": "agent.run",
-      "action": "create",
-      "risk_level": "high"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "read"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "create",
-      "risk_level": "high"
+      "action": "create"
     },
     {
       "application_code": "agent",
@@ -1446,22 +1434,31 @@
       "application_code": "agent",
       "resource_type": "run",
       "resource": "agent.run",
-      "action": "update",
-      "risk_level": "high"
+      "action": "create"
     },
     {
       "application_code": "agent",
       "resource_type": "run",
       "resource": "agent.run",
-      "action": "create",
-      "risk_level": "high"
+      "action": "read"
     },
     {
       "application_code": "agent",
       "resource_type": "run",
       "resource": "agent.run",
-      "action": "delete",
-      "risk_level": "high"
+      "action": "update"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "run",
+      "resource": "agent.run",
+      "action": "create"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "run",
+      "resource": "agent.run",
+      "action": "delete"
     },
     {
       "application_code": "agent",
@@ -1479,22 +1476,19 @@
       "application_code": "agent",
       "resource_type": "run",
       "resource": "agent.run",
-      "action": "create",
-      "risk_level": "high"
+      "action": "create"
     },
     {
       "application_code": "agent",
       "resource_type": "run",
       "resource": "agent.run",
-      "action": "update",
-      "risk_level": "high"
+      "action": "update"
     },
     {
       "application_code": "agent",
       "resource_type": "run",
       "resource": "agent.run",
-      "action": "delete",
-      "risk_level": "high"
+      "action": "delete"
     },
     {
       "application_code": "audit",
@@ -1510,122 +1504,188 @@
       "path": "/"
     },
     {
-      "key": "hr",
-      "label": "HR 主資料",
+      "key": "workspace",
+      "label": "工作區設定",
       "path": "/workspace",
       "children": [
         {
+          "key": "workspace.overview",
+          "label": "概覽",
+          "path": "/workspace/overview"
+        },
+        {
           "key": "hr.employees",
           "label": "員工",
-          "path": "/workspace/employees"
+          "path": "/workspace/employees",
+          "sort_order": 1
         },
         {
           "key": "hr.org_units",
           "label": "組織單元",
           "path": "/workspace/org-units",
-          "sort_order": 1
+          "sort_order": 2
         },
         {
           "key": "hr.positions",
           "label": "崗位",
           "path": "/workspace/positions",
-          "sort_order": 2
-        },
-        {
-          "key": "hr.reporting",
-          "label": "匯報關係",
-          "path": "/workspace/organization",
           "sort_order": 3
         },
         {
-          "key": "attendance",
-          "label": "假勤",
-          "path": "/workspace/attendance",
-          "children": [
-            {
-              "key": "attendance.clock",
-              "label": "上下班打卡",
-              "path": "/workspace/clock"
-            },
-            {
-              "key": "attendance.corrections",
-              "label": "補卡申請",
-              "path": "/workspace/clock",
-              "sort_order": 1
-            },
-            {
-              "key": "attendance.leave",
-              "label": "請假申請",
-              "path": "/workspace/leave-policy",
-              "sort_order": 2
-            },
-            {
-              "key": "attendance.worksites",
-              "label": "辦公地點",
-              "path": "/workspace/leave-policy",
-              "sort_order": 3
-            },
-            {
-              "key": "attendance.shifts",
-              "label": "班次規則",
-              "path": "/workspace/leave-policy",
-              "sort_order": 4
-            },
-            {
-              "key": "attendance.shift_assignments",
-              "label": "員工排班",
-              "path": "/workspace/leave-policy",
-              "sort_order": 5
-            }
-          ],
+          "key": "hr.organization",
+          "label": "組織架構",
+          "path": "/workspace/organization",
           "sort_order": 4
+        },
+        {
+          "key": "hr.turnover",
+          "label": "在職分析",
+          "path": "/workspace/turnover",
+          "sort_order": 5
+        },
+        {
+          "key": "attendance.overview",
+          "label": "工時統計",
+          "path": "/workspace/attendance",
+          "sort_order": 6
+        },
+        {
+          "key": "attendance.clock",
+          "label": "打卡時間",
+          "path": "/workspace/clock",
+          "sort_order": 7
+        },
+        {
+          "key": "attendance.leave_policy",
+          "label": "假勤制度",
+          "path": "/workspace/leave-policy",
+          "sort_order": 8
+        },
+        {
+          "key": "workflow.forms",
+          "label": "表單設計",
+          "path": "/workspace/forms",
+          "sort_order": 9
+        },
+        {
+          "key": "agents.models",
+          "label": "模型設定",
+          "path": "/workspace/agent-models",
+          "sort_order": 10
+        },
+        {
+          "key": "agents.definitions",
+          "label": "Agent 管理",
+          "path": "/workspace/agents",
+          "sort_order": 11
+        },
+        {
+          "key": "iam.members",
+          "label": "成員權限",
+          "path": "/workspace/iam/members",
+          "sort_order": 12
+        },
+        {
+          "key": "iam.user_groups",
+          "label": "使用者群組",
+          "path": "/workspace/iam/user-groups",
+          "sort_order": 13
+        },
+        {
+          "key": "iam.permission_sets",
+          "label": "權限集合",
+          "path": "/workspace/iam/permission-sets",
+          "sort_order": 14
+        },
+        {
+          "key": "iam.assignments",
+          "label": "權限指派",
+          "path": "/workspace/iam/assignments",
+          "sort_order": 15
+        },
+        {
+          "key": "iam.assumable_roles",
+          "label": "可承擔角色",
+          "path": "/workspace/iam/roles",
+          "sort_order": 16
+        },
+        {
+          "key": "iam.policies",
+          "label": "數據策略",
+          "path": "/workspace/iam/policies",
+          "sort_order": 17
+        },
+        {
+          "key": "audit.logs",
+          "label": "操作紀錄",
+          "path": "/workspace/audit-log",
+          "sort_order": 18
         }
       ],
       "sort_order": 1
     },
     {
-      "key": "workflow",
-      "label": "表單審批",
-      "path": "/workspace/forms",
+      "key": "hr",
+      "label": "HR 主資料",
+      "path": "/workspace",
       "children": [
         {
-          "key": "workflow.forms",
-          "label": "動態表單",
-          "path": "/workspace/forms"
-        },
-        {
-          "key": "workflow.instances",
-          "label": "流程實例",
-          "path": "/workspace/forms",
-          "sort_order": 1
+          "key": "hr.reporting",
+          "label": "匯報關係",
+          "path": "/workspace/organization"
         }
       ],
       "sort_order": 2
     },
     {
-      "key": "iam",
-      "label": "權限中心",
-      "path": "/iam/permission-sets",
+      "key": "attendance",
+      "label": "假勤自助",
+      "path": "/workspace/attendance",
       "children": [
         {
-          "key": "iam.user_groups",
-          "label": "使用者群組",
-          "path": "/iam/user-groups"
+          "key": "attendance.corrections",
+          "label": "補卡申請",
+          "path": "/workspace/clock"
         },
         {
-          "key": "iam.permission_sets",
-          "label": "權限集合",
-          "path": "/iam/permission-sets",
+          "key": "attendance.leave",
+          "label": "請假申請",
+          "path": "/workspace/leave-policy",
           "sort_order": 1
         },
         {
-          "key": "iam.assumable_roles",
-          "label": "可承擔身分",
-          "path": "/iam/assumable-roles",
+          "key": "attendance.worksites",
+          "label": "辦公地點",
+          "path": "/workspace/leave-policy",
           "sort_order": 2
+        },
+        {
+          "key": "attendance.shifts",
+          "label": "班次規則",
+          "path": "/workspace/leave-policy",
+          "sort_order": 3
         }
       ],
       "sort_order": 3
+    },
+    {
+      "key": "workflow",
+      "label": "表單審批",
+      "path": "/forms",
+      "children": [
+        {
+          "key": "workflow.instances",
+          "label": "流程實例",
+          "path": "/forms"
+        }
+      ],
+      "sort_order": 4
+    },
+    {
+      "key": "iam",
+      "label": "權限中心",
+      "path": "/workspace/iam/permission-sets",
+      "sort_order": 5
     },
     {
       "key": "agents",
@@ -1638,13 +1698,13 @@
           "path": "/agents/runs"
         }
       ],
-      "sort_order": 4
+      "sort_order": 6
     },
     {
       "key": "audit",
       "label": "審計中心",
       "path": "/workspace/audit-log",
-      "sort_order": 5
+      "sort_order": 7
     }
   ],
   "buttons": [],
@@ -1996,8 +2056,7 @@
       ],
       "trusted": true,
       "trust_policy": {
-        "purpose": "troubleshooting",
-        "require_approval": true
+        "purpose": "troubleshooting"
       },
       "permission_boundary": {
         "effect": "allow_readonly"

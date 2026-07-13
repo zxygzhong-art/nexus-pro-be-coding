@@ -103,6 +103,9 @@ func (c HRService) DeletePosition(ctx RequestContext, id string) (Position, erro
 		}
 		next.Status = string(PositionStatusDisabled)
 		next.UpdatedAt = tx.Now()
+		if err := tx.validatePosition(ctx, next); err != nil {
+			return err
+		}
 		if err := tx.store.UpsertPosition(goContext(ctx), next); err != nil {
 			return err
 		}
@@ -369,6 +372,37 @@ func (c HRService) validatePosition(ctx RequestContext, position Position) error
 			return err
 		} else if !ok {
 			fields = append(fields, FieldError{Field: "org_unit_id", Code: "not_found", Message: "org unit not found"})
+		}
+	}
+	units, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return err
+	}
+	for _, unit := range units {
+		if strings.TrimSpace(unit.ManagerPositionID) != position.ID {
+			continue
+		}
+		if position.Status == string(PositionStatusDisabled) {
+			fields = append(fields, FieldError{Field: "status", Code: "in_use", Message: "manager position cannot be disabled"})
+		}
+		if position.OrgUnitID != unit.ID {
+			fields = append(fields, FieldError{Field: "org_unit_id", Code: "in_use", Message: "manager position must remain in its org unit"})
+		}
+		break
+	}
+	if position.OrgUnitID != "" {
+		employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+		if err != nil {
+			return err
+		}
+		for _, employee := range employees {
+			if strings.TrimSpace(employee.PositionID) != position.ID || strings.TrimSpace(employee.OrgUnitID) == "" {
+				continue
+			}
+			if employee.OrgUnitID != position.OrgUnitID {
+				fields = append(fields, FieldError{Field: "org_unit_id", Code: "in_use", Message: "position is used by employees in another org unit"})
+				break
+			}
 		}
 	}
 	if existing, ok, err := c.store.GetPositionByCode(goContext(ctx), ctx.TenantID, position.Code); err != nil {

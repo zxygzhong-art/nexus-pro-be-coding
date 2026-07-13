@@ -69,14 +69,18 @@ func (c WorkflowService) CreateFormTemplate(ctx RequestContext, input CreateForm
 	if strings.TrimSpace(input.Key) == "" || strings.TrimSpace(input.Name) == "" {
 		return FormTemplate{}, BadRequest("template key and name are required")
 	}
+	now := c.Now()
 	tpl := FormTemplate{
-		ID:          utils.NewID("ft"),
-		TenantID:    ctx.TenantID,
-		Key:         strings.TrimSpace(input.Key),
-		Name:        strings.TrimSpace(input.Name),
-		Description: strings.TrimSpace(input.Description),
-		Schema:      utils.CopyStringMap(input.Schema),
-		CreatedAt:   c.Now(),
+		ID:             utils.NewID("ft"),
+		TenantID:       ctx.TenantID,
+		Key:            strings.TrimSpace(input.Key),
+		Name:           strings.TrimSpace(input.Name),
+		Description:    strings.TrimSpace(input.Description),
+		Schema:         utils.CopyStringMap(input.Schema),
+		Status:         "published",
+		CurrentVersion: 1,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 	if err := c.store.UpsertFormTemplate(goContext(ctx), tpl); err != nil {
 		return FormTemplate{}, err
@@ -183,11 +187,17 @@ func (c WorkflowService) SaveFormDraft(ctx RequestContext, input SaveFormDraftIn
 	if !ok {
 		return FormInstance{}, NotFound("form template", templateKey)
 	}
+	version, err := c.currentFormTemplateVersion(ctx, template)
+	if err != nil {
+		return FormInstance{}, err
+	}
+	template = formTemplateAtVersion(template, version)
 	now := c.Now()
 	instance := FormInstance{
 		ID:                 utils.NewID("fi"),
 		TenantID:           ctx.TenantID,
 		TemplateID:         template.ID,
+		TemplateVersionID:  version.ID,
 		ApplicantAccountID: account.ID,
 		Status:             workflowFormStatusDraft,
 		Payload:            workflowPayload(input.Payload),
@@ -195,6 +205,9 @@ func (c WorkflowService) SaveFormDraft(ctx RequestContext, input SaveFormDraftIn
 		UpdatedAt:          now,
 	}
 	if err := c.store.UpsertFormInstance(goContext(ctx), instance); err != nil {
+		return FormInstance{}, err
+	}
+	if err := c.replaceFormInstanceFieldProjection(ctx, template, instance); err != nil {
 		return FormInstance{}, err
 	}
 	if err := c.audit(ctx, "workflow.form.draft.create", "form_instance", instance.ID, "low", map[string]any{"template_key": template.Key}); err != nil {
@@ -246,10 +259,30 @@ func (c WorkflowService) UpdateFormDraft(ctx RequestContext, id string, input Up
 				return NotFound("form template", templateKey)
 			}
 			next.TemplateID = template.ID
+			version, err := tx.currentFormTemplateVersion(ctx, template)
+			if err != nil {
+				return err
+			}
+			next.TemplateVersionID = version.ID
 		}
+		template, ok, err := tx.store.GetFormTemplate(goContext(ctx), ctx.TenantID, next.TemplateID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("form template", next.TemplateID)
+		}
+		version, err := tx.formTemplateVersionForInstance(ctx, template, next)
+		if err != nil {
+			return err
+		}
+		template = formTemplateAtVersion(template, version)
 		next.Payload = workflowPayload(input.Payload)
 		next.UpdatedAt = tx.Now()
 		if err := tx.store.UpsertFormInstance(goContext(ctx), next); err != nil {
+			return err
+		}
+		if err := tx.replaceFormInstanceFieldProjection(ctx, template, next); err != nil {
 			return err
 		}
 		if err := tx.audit(ctx, "workflow.form.draft.update", string(ResourceFormInstance), next.ID, string(SeverityLow), map[string]any{
@@ -359,7 +392,13 @@ func (c WorkflowService) submitNewForm(ctx RequestContext, templateKey string, p
 		if err := validateWorkflowTemplateSubmittable(nextTemplate); err != nil {
 			return err
 		}
-		if err := validateFormSubmissionPayload(nextTemplate, payload); err != nil {
+		version, err := tx.currentFormTemplateVersion(ctx, nextTemplate)
+		if err != nil {
+			return err
+		}
+		nextTemplate = formTemplateAtVersion(nextTemplate, version)
+		normalizedPayload, err := tx.validateFormSubmissionPayload(ctx, nextTemplate, payload)
+		if err != nil {
 			return err
 		}
 		now := tx.Now()
@@ -367,13 +406,17 @@ func (c WorkflowService) submitNewForm(ctx RequestContext, templateKey string, p
 			ID:                 utils.NewID("fi"),
 			TenantID:           ctx.TenantID,
 			TemplateID:         nextTemplate.ID,
+			TemplateVersionID:  version.ID,
 			ApplicantAccountID: account.ID,
 			Status:             workflowFormStatusDraft,
-			Payload:            workflowPayload(payload),
+			Payload:            normalizedPayload,
 			SubmittedAt:        now,
 			UpdatedAt:          now,
 		}
 		if err := tx.store.UpsertFormInstance(goContext(ctx), next); err != nil {
+			return err
+		}
+		if err := tx.replaceFormInstanceFieldProjection(ctx, nextTemplate, next); err != nil {
 			return err
 		}
 		started, err := tx.initWorkflowRun(ctx, next, nextTemplate, account)
@@ -433,6 +476,11 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 		if !ok {
 			return NotFound("form template", next.TemplateID)
 		}
+		version, err := tx.formTemplateVersionForInstance(ctx, template, next)
+		if err != nil {
+			return err
+		}
+		template = formTemplateAtVersion(template, version)
 		if err := validateWorkflowTemplateSubmittable(template); err != nil {
 			return err
 		}
@@ -440,16 +488,19 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 		if payload != nil {
 			effectivePayload = workflowPayload(payload)
 		}
-		if err := validateFormSubmissionPayload(template, effectivePayload); err != nil {
+		normalizedPayload, err := tx.validateFormSubmissionPayload(ctx, template, effectivePayload)
+		if err != nil {
 			return err
 		}
+		effectivePayload = normalizedPayload
 		now := tx.Now()
-		if payload != nil {
-			next.Payload = effectivePayload
-		}
+		next.Payload = effectivePayload
 		next.SubmittedAt = now
 		next.UpdatedAt = now
 		if err := tx.store.UpsertFormInstance(goContext(ctx), next); err != nil {
+			return err
+		}
+		if err := tx.replaceFormInstanceFieldProjection(ctx, template, next); err != nil {
 			return err
 		}
 		started, err := tx.initWorkflowRun(ctx, next, template, account)
@@ -919,7 +970,7 @@ func workflowReviewTime(item FormInstance) string {
 	if t.IsZero() {
 		return ""
 	}
-	return t.UTC().Format("2006/01/02 15:04")
+	return apiTimestamp(t)
 }
 
 // normalizeWorkflowPendingStatus 正規化流程 pending 狀態。

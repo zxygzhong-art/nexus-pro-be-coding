@@ -38,7 +38,6 @@ const (
 	openFGARelationCanAssume           = "can_assume"
 	openFGARelationRunner              = "runner"
 	openFGARelationCanRun              = "can_run"
-	openFGARelationCanExecuteHighRisk  = "can_execute_high_risk"
 	openFGASubjectTypeAccount          = "account"
 	openFGASubjectTypeOrgUnit          = "org_unit"
 	openFGASubjectTypeTenant           = "tenant"
@@ -101,7 +100,6 @@ type OpenFGAGrantAgentToolInput struct {
 	TenantID  string
 	ToolID    string
 	AccountID string
-	Relation  string
 	DryRun    bool
 	Logger    *slog.Logger
 }
@@ -280,18 +278,11 @@ func (c *Service) OpenFGAGrantTenantSecurityAdmin(ctx context.Context, input Ope
 	return c.openFGAGrantTenantAccountRelation(ctx, input, openFGARelationTenantSecurityAdmin)
 }
 
-// OpenFGAGrantAgentTool 手工授予 agent_tool runner/approver。
+// OpenFGAGrantAgentTool 手工授予 agent_tool runner 關係。
 func (c *Service) OpenFGAGrantAgentTool(ctx context.Context, input OpenFGAGrantAgentToolInput) (OpenFGAGrantRelationshipResult, error) {
 	tenantID := strings.TrimSpace(input.TenantID)
 	toolID := strings.TrimSpace(input.ToolID)
 	accountID := strings.TrimSpace(input.AccountID)
-	relation := strings.TrimSpace(input.Relation)
-	if relation == "" {
-		relation = openFGARelationRunner
-	}
-	if relation != openFGARelationRunner && relation != openFGARelationApprover {
-		return OpenFGAGrantRelationshipResult{}, BadRequest("relation must be runner or approver")
-	}
 	if toolID == "" {
 		return OpenFGAGrantRelationshipResult{}, BadRequest("tool_id is required")
 	}
@@ -302,7 +293,7 @@ func (c *Service) OpenFGAGrantAgentTool(ctx context.Context, input OpenFGAGrantA
 		TenantID:    tenantID,
 		ObjectType:  openFGATypeAgentTool,
 		ObjectID:    toolID,
-		Relation:    relation,
+		Relation:    openFGARelationRunner,
 		SubjectType: openFGASubjectTypeAccount,
 		SubjectID:   accountID,
 		DryRun:      input.DryRun,

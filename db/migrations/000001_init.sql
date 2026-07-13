@@ -800,9 +800,9 @@ CREATE TABLE attendance_clock_records (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     employee_id text NOT NULL,
-    shift_assignment_id text NOT NULL,
-    shift_id text NOT NULL,
-    worksite_id text NOT NULL,
+    shift_assignment_id text,
+    shift_id text,
+    worksite_id text,
     work_date text NOT NULL,
     direction text NOT NULL,
     clocked_at timestamptz NOT NULL,
@@ -956,9 +956,10 @@ CREATE TABLE agent_models (
     provider text NOT NULL DEFAULT 'openai',
     model_name text NOT NULL,
     litellm_model text NOT NULL,
-    is_default boolean NOT NULL DEFAULT false,
+    api_base_url text NOT NULL DEFAULT '',
+    api_key text NOT NULL DEFAULT '',
+    rate_limit_rpm integer NOT NULL DEFAULT 0 CHECK (rate_limit_rpm >= 0),
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
-    fallback_model_id text,
     timeout_seconds integer NOT NULL DEFAULT 60 CHECK (timeout_seconds > 0),
     monthly_quota bigint NOT NULL DEFAULT 100000 CHECK (monthly_quota >= 0),
     used_quota bigint NOT NULL DEFAULT 0 CHECK (used_quota >= 0),
@@ -967,12 +968,10 @@ CREATE TABLE agent_models (
     last_test_message text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
-    CONSTRAINT agent_models_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT agent_models_fallback_fk FOREIGN KEY (tenant_id, fallback_model_id) REFERENCES agent_models (tenant_id, id)
+    CONSTRAINT agent_models_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
 CREATE INDEX agent_models_tenant_name_idx ON agent_models (tenant_id, name);
-CREATE UNIQUE INDEX agent_models_tenant_default_uidx ON agent_models (tenant_id) WHERE is_default = true;
 
 CREATE TABLE agent_definitions (
     id text PRIMARY KEY,
@@ -982,10 +981,9 @@ CREATE TABLE agent_definitions (
     emoji text NOT NULL DEFAULT 'AI',
     category text NOT NULL DEFAULT 'workflow' CHECK (category IN ('workflow', 'doc', 'analytics', 'it')),
     model_id text NOT NULL,
-    fallback_model_id text,
     system_prompt text NOT NULL DEFAULT '',
     tools jsonb NOT NULL DEFAULT '[]'::jsonb,
-    status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
+    status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
     visibility text NOT NULL DEFAULT 'all' CHECK (visibility IN ('all', 'department', 'role')),
     visibility_targets jsonb NOT NULL DEFAULT '[]'::jsonb,
     timeout_seconds integer NOT NULL DEFAULT 60 CHECK (timeout_seconds > 0),
@@ -1002,7 +1000,6 @@ CREATE TABLE agent_definitions (
     updated_at timestamptz NOT NULL,
     CONSTRAINT agent_definitions_tenant_id_id_idx UNIQUE (tenant_id, id),
     CONSTRAINT agent_definitions_model_fk FOREIGN KEY (tenant_id, model_id) REFERENCES agent_models (tenant_id, id),
-    CONSTRAINT agent_definitions_fallback_model_fk FOREIGN KEY (tenant_id, fallback_model_id) REFERENCES agent_models (tenant_id, id),
     CONSTRAINT agent_definitions_created_by_fk FOREIGN KEY (tenant_id, created_by_account_id) REFERENCES accounts (tenant_id, id),
     CONSTRAINT agent_definitions_updated_by_fk FOREIGN KEY (tenant_id, updated_by_account_id) REFERENCES accounts (tenant_id, id)
 );
@@ -1065,6 +1062,9 @@ CREATE INDEX agent_runs_tenant_id_idx ON agent_runs (tenant_id);
 CREATE INDEX agent_runs_account_id_idx ON agent_runs (account_id);
 CREATE INDEX agent_runs_tenant_account_created_at_idx ON agent_runs (tenant_id, account_id, created_at DESC);
 CREATE INDEX agent_runs_tenant_agent_id_idx ON agent_runs (tenant_id, agent_id, created_at DESC);
+CREATE UNIQUE INDEX agent_runs_active_session_unique
+    ON agent_runs (tenant_id, session_id)
+    WHERE session_id <> '' AND status IN ('queued', 'running');
 
 CREATE TABLE agent_sessions (
     id text PRIMARY KEY,
@@ -1372,8 +1372,63 @@ CREATE POLICY tenant_isolation_notification_recipients ON notification_recipient
 CREATE POLICY tenant_isolation_outbox_events ON outbox_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_audit_logs ON audit_logs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 
+CREATE TABLE ehrms_sync_runs (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    account_id text NOT NULL,
+    sync_type text NOT NULL CHECK (sync_type IN ('pipeline', 'employees', 'attendance')),
+    trigger_type text NOT NULL CHECK (trigger_type IN ('scheduled', 'manual', 'retry', 'cli')),
+    status text NOT NULL CHECK (status IN ('running', 'succeeded', 'partial', 'failed', 'skipped')),
+    current_step text NOT NULL DEFAULT '',
+    mode text NOT NULL DEFAULT 'upsert',
+    since_date text NOT NULL DEFAULT '',
+    attempt integer NOT NULL DEFAULT 1 CHECK (attempt > 0),
+    max_attempts integer NOT NULL DEFAULT 1 CHECK (max_attempts > 0),
+    retry_of_run_id text NOT NULL DEFAULT '',
+    request_id text NOT NULL DEFAULT '',
+    trace_id text NOT NULL DEFAULT '',
+    error_code text NOT NULL DEFAULT '',
+    error_message text NOT NULL DEFAULT '',
+    retryable boolean NOT NULL DEFAULT false,
+    next_retry_at timestamptz,
+    summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+    started_at timestamptz NOT NULL,
+    finished_at timestamptz,
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL
+);
+
+CREATE INDEX ehrms_sync_runs_tenant_started_idx ON ehrms_sync_runs (tenant_id, started_at DESC, id DESC);
+
+CREATE TABLE ehrms_sync_run_steps (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    run_id text NOT NULL REFERENCES ehrms_sync_runs(id) ON DELETE CASCADE,
+    step text NOT NULL,
+    sequence integer NOT NULL,
+    status text NOT NULL CHECK (status IN ('running', 'succeeded', 'partial', 'failed', 'skipped')),
+    attempt integer NOT NULL DEFAULT 1 CHECK (attempt > 0),
+    error_code text NOT NULL DEFAULT '',
+    error_message text NOT NULL DEFAULT '',
+    summary jsonb NOT NULL DEFAULT '{}'::jsonb,
+    started_at timestamptz NOT NULL,
+    finished_at timestamptz,
+    UNIQUE (tenant_id, run_id, step, attempt)
+);
+
+CREATE INDEX ehrms_sync_run_steps_run_idx ON ehrms_sync_run_steps (tenant_id, run_id, sequence, attempt);
+
+ALTER TABLE ehrms_sync_runs ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ehrms_sync_runs FORCE ROW LEVEL SECURITY;
+ALTER TABLE ehrms_sync_run_steps ENABLE ROW LEVEL SECURITY;
+ALTER TABLE ehrms_sync_run_steps FORCE ROW LEVEL SECURITY;
+CREATE POLICY tenant_isolation_ehrms_sync_runs ON ehrms_sync_runs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_ehrms_sync_run_steps ON ehrms_sync_run_steps USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+
 -- +goose Down
 
+DROP TABLE IF EXISTS ehrms_sync_run_steps;
+DROP TABLE IF EXISTS ehrms_sync_runs;
 DROP TABLE IF EXISTS audit_logs;
 DROP TABLE IF EXISTS outbox_events;
 DROP TABLE IF EXISTS notification_recipients;

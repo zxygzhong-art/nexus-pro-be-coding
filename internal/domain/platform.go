@@ -4,11 +4,12 @@ import "time"
 
 // PlatformAssistant 定義平台助理的資料結構。
 type PlatformAssistant struct {
-	ID    string `json:"id"`
-	Emoji string `json:"emoji"`
-	Title string `json:"title"`
-	Desc  string `json:"desc"`
-	Tag   string `json:"tag,omitempty"`
+	ID       string `json:"id"`
+	Emoji    string `json:"emoji"`
+	Title    string `json:"title"`
+	Desc     string `json:"desc"`
+	Tag      string `json:"tag,omitempty"`
+	Runnable bool   `json:"runnable"`
 }
 
 // PlatformFormItem 定義平台表單項目的資料結構。
@@ -261,18 +262,44 @@ type PlatformFormBuilderFieldOption struct {
 	Value string `json:"value"`
 }
 
+// PlatformFormBuilderFieldBinding 定義欄位與受控資料源的持久化綁定。
+type PlatformFormBuilderFieldBinding struct {
+	SourceID   string `json:"source_id"`
+	ValueField string `json:"value_field"`
+	LabelField string `json:"label_field,omitempty"`
+}
+
+// PlatformFormBuilderFieldAnalytics 定義欄位可用的統計語意。
+type PlatformFormBuilderFieldAnalytics struct {
+	Reportable   bool     `json:"reportable"`
+	Role         string   `json:"role,omitempty"`
+	Aggregations []string `json:"aggregations,omitempty"`
+	Filterable   bool     `json:"filterable,omitempty"`
+	Groupable    bool     `json:"groupable,omitempty"`
+}
+
+// PlatformFormBuilderFieldSecurity 定義欄位敏感度與 Agent 可見性。
+type PlatformFormBuilderFieldSecurity struct {
+	Classification string `json:"classification,omitempty"`
+	Masking        string `json:"masking,omitempty"`
+	AgentAccess    bool   `json:"agent_access,omitempty"`
+}
+
 // PlatformFormBuilderField 定義平台表單 builder 欄位的資料結構。
 type PlatformFormBuilderField struct {
-	ID             string                           `json:"id"`
-	Type           string                           `json:"type"`
-	Label          string                           `json:"label"`
-	Placeholder    string                           `json:"placeholder"`
-	Required       bool                             `json:"required"`
-	DefaultValue   any                              `json:"default_value,omitempty"`
-	LayoutColumns  []string                         `json:"layout_columns,omitempty"`
-	Options        []PlatformFormBuilderFieldOption `json:"options,omitempty"`
-	ParentLayoutID string                           `json:"parent_layout_id,omitempty"`
-	SlotIndex      *int                             `json:"slot_index,omitempty"`
+	ID             string                             `json:"id"`
+	Type           string                             `json:"type"`
+	Label          string                             `json:"label"`
+	Placeholder    string                             `json:"placeholder"`
+	Required       bool                               `json:"required"`
+	DefaultValue   any                                `json:"default_value,omitempty"`
+	LayoutColumns  []string                           `json:"layout_columns,omitempty"`
+	Options        []PlatformFormBuilderFieldOption   `json:"options,omitempty"`
+	Binding        *PlatformFormBuilderFieldBinding   `json:"binding,omitempty"`
+	Analytics      *PlatformFormBuilderFieldAnalytics `json:"analytics,omitempty"`
+	Security       *PlatformFormBuilderFieldSecurity  `json:"security,omitempty"`
+	ParentLayoutID string                             `json:"parent_layout_id,omitempty"`
+	SlotIndex      *int                               `json:"slot_index,omitempty"`
 }
 
 // PlatformFormBuilderStage 定義平台表單 builder stage 的資料結構。

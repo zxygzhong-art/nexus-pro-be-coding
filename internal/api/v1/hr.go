@@ -34,6 +34,7 @@ func (c HRCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	positions := hr.Group("/positions")
 	positions.GET("", c.routes.Handle("hr.position", "read", c.listPositions))
 	positions.POST("", c.routes.Handle("hr.position", "create", c.createPosition))
+	positions.POST("/ehrms/sync", c.routes.Handle("hr.position", "create", c.syncEHRMSPositions))
 	positions.GET("/:id", c.routes.Handle("hr.position", "read", c.getPosition, ResourceID(PathParamID)))
 	positions.PATCH("/:id", c.routes.Handle("hr.position", "update", c.updatePosition, ResourceID(PathParamID)))
 	positions.DELETE("/:id", c.routes.Handle("hr.position", "delete", c.deletePosition, ResourceID(PathParamID)))
@@ -70,6 +71,7 @@ func (c HRCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	org := router.Group("/org")
 	org.GET("/units", c.routes.Handle("hr.org_unit", "read", c.listOrgUnits))
 	org.POST("/units", c.routes.Handle("hr.org_unit", "create", c.createOrgUnit))
+	org.POST("/units/ehrms/sync", c.routes.Handle("hr.org_unit", "create", c.syncEHRMSOrgUnits))
 	org.PATCH("/units/:id", c.routes.Handle("hr.org_unit", "update", c.updateOrgUnit, ResourceID(PathParamID)))
 }
 
@@ -131,6 +133,9 @@ func (c HRCtrl) updateEmployee(w http.ResponseWriter, r *http.Request, ctx domai
 	if err := readJSON(w, r, &input); err != nil {
 		return err
 	}
+	if err := input.ValidateBasicInfoOnly(); err != nil {
+		return err
+	}
 	item, err := c.svc.UpdateEmployee(ctx, r.PathValue(PathParamID), input)
 	if err != nil {
 		return err
@@ -143,6 +148,9 @@ func (c HRCtrl) updateEmployee(w http.ResponseWriter, r *http.Request, ctx domai
 func (c HRCtrl) previewUpdateEmployee(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.UpdateEmployeeInput
 	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	if err := input.ValidateBasicInfoOnly(); err != nil {
 		return err
 	}
 	item, err := c.svc.PreviewUpdateEmployee(ctx, r.PathValue(PathParamID), input)
@@ -287,6 +295,26 @@ func (c HRCtrl) syncEHRMSEmployees(w http.ResponseWriter, r *http.Request, ctx d
 		return err
 	}
 	result, err := c.svc.SyncEHRMSEmployees(ctx, input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, result)
+	return nil
+}
+
+// syncEHRMSOrgUnits 處理 eHRMS 組織單位同步的 HTTP 請求。
+func (c HRCtrl) syncEHRMSOrgUnits(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	result, err := c.svc.SyncEHRMSOrgUnits(ctx)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, result)
+	return nil
+}
+
+// syncEHRMSPositions 處理 eHRMS 崗位同步的 HTTP 請求。
+func (c HRCtrl) syncEHRMSPositions(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	result, err := c.svc.SyncEHRMSPositions(ctx)
 	if err != nil {
 		return err
 	}

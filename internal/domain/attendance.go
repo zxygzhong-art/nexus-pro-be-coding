@@ -122,7 +122,7 @@ type AttendanceShift struct {
 	UpdatedAt              time.Time `json:"updated_at"`
 }
 
-// AttendanceShiftAssignment 定義考勤班別指派的資料結構。
+// AttendanceShiftAssignment 定義可選的考勤班別指派。
 type AttendanceShiftAssignment struct {
 	ID            string     `json:"id"`
 	TenantID      string     `json:"tenant_id"`
@@ -219,14 +219,12 @@ type AttendanceCorrectionRequest struct {
 
 // AttendanceClockStatus 定義考勤打卡狀態的資料結構。
 type AttendanceClockStatus struct {
-	EmployeeID string                     `json:"employee_id"`
-	WorkDate   string                     `json:"work_date"`
-	Assignment *AttendanceShiftAssignment `json:"assignment,omitempty"`
-	Shift      *AttendanceShift           `json:"shift,omitempty"`
-	Worksite   *AttendanceWorksite        `json:"worksite,omitempty"`
-	ClockIn    *AttendanceClockRecord     `json:"clock_in,omitempty"`
-	ClockOut   *AttendanceClockRecord     `json:"clock_out,omitempty"`
-	NextAction string                     `json:"next_action"`
+	EmployeeID string                 `json:"employee_id"`
+	WorkDate   string                 `json:"work_date"`
+	Worksite   *AttendanceWorksite    `json:"worksite,omitempty"`
+	ClockIn    *AttendanceClockRecord `json:"clock_in,omitempty"`
+	ClockOut   *AttendanceClockRecord `json:"clock_out,omitempty"`
+	NextAction string                 `json:"next_action"`
 }
 
 // AttendancePolicyResponse 定義考勤政策回應的資料結構。
@@ -251,17 +249,21 @@ type AttendancePolicy struct {
 
 // AttendancePolicyWorkTime 定義考勤政策 work 時間的資料結構。
 type AttendancePolicyWorkTime struct {
-	StandardStart     string   `json:"standard_start"`
-	StandardEnd       string   `json:"standard_end"`
-	BreakStart        string   `json:"break_start"`
-	BreakEnd          string   `json:"break_end"`
-	Weekend           string   `json:"weekend"`
-	CycleStart        string   `json:"cycle_start"`
-	CycleEnd          string   `json:"cycle_end"`
-	TimeOptions       []string `json:"time_options"`
-	WeekendOptions    []string `json:"weekend_options"`
-	CycleStartOptions []string `json:"cycle_start_options"`
-	CycleEndOptions   []string `json:"cycle_end_options"`
+	RequireWorksite         bool     `json:"require_worksite"`
+	ClockMode               string   `json:"clock_mode"`
+	FlexibleClockInEarliest string   `json:"flexible_clock_in_earliest"`
+	FlexibleClockOutLatest  string   `json:"flexible_clock_out_latest"`
+	StandardStart           string   `json:"standard_start"`
+	StandardEnd             string   `json:"standard_end"`
+	BreakStart              string   `json:"break_start"`
+	BreakEnd                string   `json:"break_end"`
+	Weekend                 string   `json:"weekend"`
+	CycleStart              string   `json:"cycle_start"`
+	CycleEnd                string   `json:"cycle_end"`
+	TimeOptions             []string `json:"time_options"`
+	WeekendOptions          []string `json:"weekend_options"`
+	CycleStartOptions       []string `json:"cycle_start_options"`
+	CycleEndOptions         []string `json:"cycle_end_options"`
 }
 
 // Leave grant modes.
@@ -274,9 +276,9 @@ const (
 
 // LeaveEntitlementRule 定義假別額度檔位規則。
 type LeaveEntitlementRule struct {
-	JobLevel       string `json:"job_level"`
-	TenureMinYears int    `json:"tenure_min_years"`
-	TenureMaxYears *int   `json:"tenure_max_years,omitempty"`
+	JobLevel       string  `json:"job_level"`
+	TenureMinYears int     `json:"tenure_min_years"`
+	TenureMaxYears *int    `json:"tenure_max_years,omitempty"`
 	QuotaHours     float64 `json:"quota_hours"`
 	Prorate        bool    `json:"prorate"`
 	Priority       int     `json:"priority"`
@@ -313,18 +315,21 @@ type GrantLeaveBalancesInput struct {
 
 // GrantLeaveBalancesResult 定義發放請假餘額結果。
 type GrantLeaveBalancesResult struct {
-	Granted   int        `json:"granted"`
-	Updated   int        `json:"updated"`
-	Skipped   int        `json:"skipped"`
-	Failed    int        `json:"failed"`
-	PeriodStart string   `json:"period_start"`
-	PeriodEnd   string   `json:"period_end"`
-	PolicyVersion int    `json:"policy_version"`
-	RowErrors []RowError `json:"row_errors,omitempty"`
+	Granted       int        `json:"granted"`
+	Updated       int        `json:"updated"`
+	Skipped       int        `json:"skipped"`
+	Failed        int        `json:"failed"`
+	PeriodStart   string     `json:"period_start"`
+	PeriodEnd     string     `json:"period_end"`
+	PolicyVersion int        `json:"policy_version"`
+	RowErrors     []RowError `json:"row_errors,omitempty"`
 }
 
 // Validate 驗證目前流程。
 func (in UpdateAttendancePolicyInput) Validate() error {
+	if mode := strings.ToLower(strings.TrimSpace(in.WorkTime.ClockMode)); mode != "" && mode != "flexible" && mode != "fixed" {
+		return BadRequest("clock_mode must be flexible or fixed")
+	}
 	if strings.TrimSpace(in.WorkTime.StandardStart) == "" || strings.TrimSpace(in.WorkTime.StandardEnd) == "" {
 		return BadRequest("standard_start and standard_end are required")
 	}
@@ -391,7 +396,7 @@ type UpdateAttendanceShiftInput struct {
 	Status                 *string `json:"status,omitempty"`
 }
 
-// CreateAttendanceShiftAssignmentInput 定義考勤班別指派輸入的資料結構。
+// CreateAttendanceShiftAssignmentInput 定義可選的班別指派輸入。
 type CreateAttendanceShiftAssignmentInput struct {
 	EmployeeID    string `json:"employee_id"`
 	ShiftID       string `json:"shift_id"`
@@ -434,6 +439,12 @@ type AttendanceDailySummaryQuery struct {
 // EHRMSAttendanceRecord 表示 eHRMS 考勤 record。
 type EHRMSAttendanceRecord map[string]string
 
+// EHRMSLeaveBalanceRecord 表示 eHRMS 假別餘額 record。
+type EHRMSLeaveBalanceRecord map[string]string
+
+// EHRMSLeaveDetailRecord 表示 eHRMS 已休逐筆明細 record。
+type EHRMSLeaveDetailRecord map[string]string
+
 // EHRMSAttendanceSyncInput 定義 eHRMS 考勤 sync 輸入的資料結構。
 type EHRMSAttendanceSyncInput struct {
 	Mode  string `json:"mode,omitempty"`
@@ -442,15 +453,24 @@ type EHRMSAttendanceSyncInput struct {
 
 // EHRMSAttendanceSyncResponse 定義 eHRMS 考勤 sync 回應的資料結構。
 type EHRMSAttendanceSyncResponse struct {
-	Fetched   int                   `json:"fetched"`
-	Created   int                   `json:"created"`
-	Updated   int                   `json:"updated"`
-	Skipped   int                   `json:"skipped"`
-	Failed    int                   `json:"failed"`
-	Mode      string                `json:"mode"`
-	Since     string                `json:"since,omitempty"`
-	Results   []BatchEmployeeResult `json:"results,omitempty"`
-	RowErrors []RowError            `json:"row_errors,omitempty"`
+	Fetched               int                   `json:"fetched"`
+	Created               int                   `json:"created"`
+	Updated               int                   `json:"updated"`
+	Skipped               int                   `json:"skipped"`
+	Failed                int                   `json:"failed"`
+	LeaveBalancesFetched  int                   `json:"leave_balances_fetched"`
+	LeaveBalancesUpserted int                   `json:"leave_balances_upserted"`
+	LeaveBalancesSkipped  int                   `json:"leave_balances_skipped"`
+	LeaveBalancesFailed   int                   `json:"leave_balances_failed"`
+	LeaveDetailsFetched   int                   `json:"leave_details_fetched"`
+	LeaveDetailsCreated   int                   `json:"leave_details_created"`
+	LeaveDetailsUpdated   int                   `json:"leave_details_updated"`
+	LeaveDetailsSkipped   int                   `json:"leave_details_skipped"`
+	LeaveDetailsFailed    int                   `json:"leave_details_failed"`
+	Mode                  string                `json:"mode"`
+	Since                 string                `json:"since,omitempty"`
+	Results               []BatchEmployeeResult `json:"results,omitempty"`
+	RowErrors             []RowError            `json:"row_errors,omitempty"`
 }
 
 // CreateAttendanceCorrectionInput 定義考勤 correction 輸入的資料結構。

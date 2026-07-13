@@ -62,6 +62,37 @@ func (in CreateEmployeeInput) Validate() error {
 	return nil
 }
 
+// ValidateBasicInfoOnly 驗證員工管理編輯只包含基本資料欄位。
+func (in UpdateEmployeeInput) ValidateBasicInfoOnly() error {
+	fields := make([]FieldError, 0)
+	add := func(tab, field string, present bool) {
+		if present {
+			fields = append(fields, FieldError{Tab: tab, Field: field, Code: "basic_info_only", Message: field + " cannot be updated from employee edit"})
+		}
+	}
+	add("basic_info", "personal_email", in.PersonalEmail != nil)
+	add("contact_info", "phone", in.Phone != nil)
+	add("basic_info", "account_id", in.AccountID != nil)
+	add("employment_info", "org_unit_id", in.OrgUnitID != nil)
+	add("employment_info", "manager_employee_id", in.ManagerEmployeeID != nil)
+	add("employment_info", "position_id", in.PositionID != nil)
+	add("employment_info", "position", in.Position != nil)
+	add("employment_info", "category", in.Category != nil)
+	add("employment_info", "status", in.Status != nil)
+	add("employment_info", "employment_status", in.EmploymentStatus != nil)
+	add("employment_info", "hire_date", in.HireDate != nil)
+	add("employment_info", "resign_date", in.ResignDate != nil)
+	add("employment_info", "employment_info", in.EmploymentInfo != nil)
+	add("education_military_info", "education_military_info", in.EducationMilitaryInfo != nil)
+	add("contact_info", "contact_info", in.ContactInfo != nil)
+	add("insurance_info", "insurance_info", in.InsuranceInfo != nil)
+	add("employment_info", "internal_experiences", in.InternalExperiences != nil)
+	if len(fields) > 0 {
+		return ValidationFailed("employee edit only supports basic information", fields)
+	}
+	return nil
+}
+
 // Validate 驗證目前流程。
 func (in UpdateEmployeeStatusInput) Validate() error {
 	if err := validateEmployeeStatusInput(in.Status, "employee status validation failed"); err != nil {

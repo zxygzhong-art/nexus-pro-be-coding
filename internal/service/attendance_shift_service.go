@@ -195,7 +195,7 @@ func (c AttendanceService) UpdateAttendanceShift(ctx RequestContext, input Updat
 	return item, nil
 }
 
-// ListAttendanceShiftAssignmentPage 列出考勤班別指派分頁的服務流程。
+// ListAttendanceShiftAssignmentPage 列出可選的員工班別指派。
 func (c AttendanceService) ListAttendanceShiftAssignmentPage(ctx RequestContext, page PageRequest) (PageResponse[AttendanceShiftAssignment], error) {
 	account, decision, err := c.requireAttendanceAuthz(ctx, ResourceAttendanceShiftAssignment, ActionRead, "")
 	if err != nil {
@@ -212,7 +212,7 @@ func (c AttendanceService) ListAttendanceShiftAssignmentPage(ctx RequestContext,
 	return utils.PageResponse(items, page), nil
 }
 
-// CreateAttendanceShiftAssignment 建立考勤班別指派的服務流程。
+// CreateAttendanceShiftAssignment 建立可選的員工班別指派。
 func (c AttendanceService) CreateAttendanceShiftAssignment(ctx RequestContext, input CreateAttendanceShiftAssignmentInput) (AttendanceShiftAssignment, error) {
 	account, decision, err := c.requireAttendanceAuthz(ctx, ResourceAttendanceShiftAssignment, ActionCreate, "")
 	if err != nil {
@@ -263,18 +263,7 @@ func (c AttendanceService) CreateAttendanceShiftAssignment(ctx RequestContext, i
 		return AttendanceShiftAssignment{}, err
 	}
 	now := c.Now()
-	item := AttendanceShiftAssignment{
-		ID:            utils.NewID("asa"),
-		TenantID:      ctx.TenantID,
-		EmployeeID:    employeeID,
-		ShiftID:       shift.ID,
-		WorksiteID:    worksite.ID,
-		EffectiveFrom: effectiveFrom,
-		EffectiveTo:   effectiveTo,
-		Status:        status,
-		CreatedAt:     now,
-		UpdatedAt:     now,
-	}
+	item := AttendanceShiftAssignment{ID: utils.NewID("asa"), TenantID: ctx.TenantID, EmployeeID: employeeID, ShiftID: shift.ID, WorksiteID: worksite.ID, EffectiveFrom: effectiveFrom, EffectiveTo: effectiveTo, Status: status, CreatedAt: now, UpdatedAt: now}
 	if err := c.store.UpsertAttendanceShiftAssignment(goContext(ctx), item); err != nil {
 		return AttendanceShiftAssignment{}, err
 	}
@@ -284,7 +273,7 @@ func (c AttendanceService) CreateAttendanceShiftAssignment(ctx RequestContext, i
 	return item, nil
 }
 
-// ensureNoOverlappingActiveShiftAssignment 確保no overlapping 啟用中班別指派的服務流程。
+// ensureNoOverlappingActiveShiftAssignment 防止啟用中的排班區間重疊。
 func (c AttendanceService) ensureNoOverlappingActiveShiftAssignment(ctx RequestContext, employeeID string, effectiveFrom time.Time, effectiveTo *time.Time, status string) error {
 	if !strings.EqualFold(status, attendanceStatusActive) {
 		return nil
@@ -294,17 +283,14 @@ func (c AttendanceService) ensureNoOverlappingActiveShiftAssignment(ctx RequestC
 		return err
 	}
 	for _, item := range items {
-		if item.EmployeeID != employeeID || !strings.EqualFold(item.Status, attendanceStatusActive) {
-			continue
-		}
-		if attendanceAssignmentRangesOverlap(effectiveFrom, effectiveTo, item.EffectiveFrom, item.EffectiveTo) {
+		if item.EmployeeID == employeeID && strings.EqualFold(item.Status, attendanceStatusActive) && attendanceAssignmentRangesOverlap(effectiveFrom, effectiveTo, item.EffectiveFrom, item.EffectiveTo) {
 			return BadRequest("active shift assignment overlaps existing assignment")
 		}
 	}
 	return nil
 }
 
-// attendanceAssignmentRangesOverlap 處理考勤指派 ranges overlap。
+// attendanceAssignmentRangesOverlap 判斷兩個排班生效區間是否重疊。
 func attendanceAssignmentRangesOverlap(leftFrom time.Time, leftTo *time.Time, rightFrom time.Time, rightTo *time.Time) bool {
 	if rightTo != nil && rightTo.Before(leftFrom) {
 		return false

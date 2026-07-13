@@ -60,69 +60,28 @@ func TestOpenFGAScopeCheckConfig(t *testing.T) {
 	}
 }
 
-// TestAgentChatConfig 驗證 Agent Chat 與 LiteLLM 組態。
-func TestAgentChatConfig(t *testing.T) {
-	t.Setenv("AGENT_CHAT_ENABLED", "")
+// TestLiteLLMConfig 驗證 LiteLLM 組態。
+func TestLiteLLMConfig(t *testing.T) {
 	t.Setenv("LITELLM_BASE_URL", "")
 	t.Setenv("LITELLM_API_KEY", "")
-	t.Setenv("AGENT_CHAT_TIMEOUT_SECONDS", "")
 
 	cfg, err := config.LoadE()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if cfg.AgentChatEnabled {
-		t.Fatal("expected agent chat to be disabled by default")
-	}
 	if cfg.LiteLLMBaseURL != "http://127.0.0.1:4000" {
 		t.Fatalf("unexpected LiteLLM default base URL: %q", cfg.LiteLLMBaseURL)
 	}
-	if cfg.AgentChatTimeout != time.Minute {
-		t.Fatalf("unexpected chat timeout: %s", cfg.AgentChatTimeout)
-	}
 
-	t.Setenv("AGENT_CHAT_ENABLED", "true")
 	t.Setenv("LITELLM_BASE_URL", "http://litellm:4000")
 	t.Setenv("LITELLM_API_KEY", "test-key")
-	t.Setenv("AGENT_CHAT_TIMEOUT_SECONDS", "30")
 
 	cfg, err = config.LoadE()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !cfg.AgentChatEnabled || cfg.LiteLLMBaseURL != "http://litellm:4000" || cfg.LiteLLMAPIKey != "test-key" || cfg.AgentChatTimeout != 30*time.Second {
-		t.Fatalf("unexpected agent chat config: %+v", cfg)
-	}
-}
-
-// TestProductionAgentChatRequiresLiteLLMConfig 驗證 production 開啟 chat 時必須配置 LiteLLM。
-func TestProductionAgentChatRequiresLiteLLMConfig(t *testing.T) {
-	t.Setenv("APP_ENV", "production")
-	t.Setenv("DB_HOST", "example.com")
-	t.Setenv("DB_PORT", "5432")
-	t.Setenv("DB_USERNAME", "nexus")
-	t.Setenv("DB_PASSWORD", "nexus")
-	t.Setenv("DB_NAME", "nexus")
-	t.Setenv("DB_SSLMODE", "require")
-	t.Setenv("KEYCLOAK_BASE_URL", "https://keycloak.example/realms/nexus")
-	t.Setenv("KEYCLOAK_CLIENT_ID", "nexus-api")
-	t.Setenv("OPENFGA_BASE_URL", "https://openfga.example")
-	t.Setenv("OPENFGA_STORE_ID", "store")
-	t.Setenv("OPENFGA_MODEL_ID", "model")
-	t.Setenv("TEMPORAL_BASE_URL", "temporal:7233")
-	t.Setenv("OBJECT_STORE_PROVIDER", "local")
-	t.Setenv("OBJECT_STORE_DIR", "/tmp/nexus-objects")
-	t.Setenv("AGENT_CHAT_ENABLED", "true")
-	t.Setenv("LITELLM_BASE_URL", "")
-	t.Setenv("LITELLM_API_KEY", "")
-
-	cfg, err := config.LoadE()
-	if err != nil {
-		t.Fatal(err)
-	}
-	err = cfg.ValidateStartup()
-	if err == nil || !strings.Contains(err.Error(), "LITELLM_API_KEY is required when AGENT_CHAT_ENABLED=true") {
-		t.Fatalf("expected missing production LiteLLM config errors, got %v", err)
+	if cfg.LiteLLMBaseURL != "http://litellm:4000" || cfg.LiteLLMAPIKey != "test-key" {
+		t.Fatalf("unexpected LiteLLM config: %+v", cfg)
 	}
 }
 
@@ -315,6 +274,42 @@ func TestEHRMSAttendanceSyncConfigValidatesMinimumInterval(t *testing.T) {
 	_, err := config.LoadE()
 	if err == nil || !strings.Contains(err.Error(), "EHRMS_ATTENDANCE_SYNC_INTERVAL must be at least 720h") {
 		t.Fatalf("expected minimum attendance sync interval error, got %v", err)
+	}
+}
+
+// TestEHRMSPipelineSkipsAttendanceIntervalMinimum 驗證 pipeline 啟用時不強制考勤 interval 最小值。
+func TestEHRMSPipelineSkipsAttendanceIntervalMinimum(t *testing.T) {
+	t.Setenv("EHRMS_BASE_URL", "https://ehrms.example")
+	t.Setenv("EHRMS_API_KEY", "test-key")
+	t.Setenv("EHRMS_SYNC_ENABLED", "true")
+	t.Setenv("EHRMS_SYNC_TENANT_ID", "tenant-1")
+	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "true")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_INTERVAL", "24h")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_SINCE", "2026-06-01")
+
+	cfg, err := config.LoadE()
+	if err != nil {
+		t.Fatalf("expected pipeline config to load without attendance interval minimum, got %v", err)
+	}
+	if !cfg.EHRMSSyncEnabled || cfg.EHRMSAttendanceSyncInterval != 24*time.Hour {
+		t.Fatalf("unexpected pipeline config: %+v", cfg)
+	}
+}
+
+// TestEHRMSPipelineIgnoresDisabledAttendanceSemantics 驗證關閉考勤時不校驗其 mode 與 since。
+func TestEHRMSPipelineIgnoresDisabledAttendanceSemantics(t *testing.T) {
+	t.Setenv("EHRMS_BASE_URL", "https://ehrms.example")
+	t.Setenv("EHRMS_API_KEY", "test-key")
+	t.Setenv("EHRMS_SYNC_ENABLED", "true")
+	t.Setenv("EHRMS_SYNC_TENANT_ID", "tenant-1")
+	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "false")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_MODE", "disabled-value")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_SINCE", "not-a-date")
+
+	if _, err := config.LoadE(); err != nil {
+		t.Fatalf("expected disabled attendance options to be ignored, got %v", err)
 	}
 }
 

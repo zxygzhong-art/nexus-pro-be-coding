@@ -57,10 +57,6 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 	if leaveTypeRaw == "" {
 		return LeaveRequest{}, BadRequest("leave_type is required")
 	}
-	hours := workflowPayloadNumber(payload, "hours", "leave_hours", "leaveHours", "hours_requested", "hoursRequested")
-	if hours <= 0 {
-		return LeaveRequest{}, BadRequest("hours must be greater than zero")
-	}
 	startRaw := utils.FirstNonEmpty(stringFromAny(payload["start_at"]), stringFromAny(payload["startAt"]))
 	endRaw := utils.FirstNonEmpty(stringFromAny(payload["end_at"]), stringFromAny(payload["endAt"]))
 	if startRaw == "" || endRaw == "" {
@@ -81,6 +77,10 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 	policy, err := c.loadAttendancePolicyResponse(ctx)
 	if err != nil {
 		return LeaveRequest{}, err
+	}
+	hours := calculateLeaveHoursWithinPolicy(startAt, endAt, policy.WorkTime)
+	if hours <= 0 {
+		return LeaveRequest{}, BadRequest("selected time does not include working hours")
 	}
 	leaveTypeCode := normalizeLeaveTypeCode(leaveTypeRaw)
 	leaveType, ok := findLeaveTypeInPolicy(policy, leaveTypeCode)

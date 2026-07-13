@@ -77,12 +77,11 @@ func (s *EHRMSEmployeeSyncScheduler) SyncOnce(ctx context.Context, opts EHRMSEmp
 	}
 	requestID := "ehrms-sync-" + s.now().UTC().Format("20060102T150405Z")
 	return s.service.SyncEHRMSEmployees(domain.RequestContext{
-		Context:           ctx,
-		TenantID:          opts.TenantID,
-		AccountID:         opts.AccountID,
-		RequestID:         requestID,
-		TraceID:           requestID,
-		ApprovalConfirmed: true,
+		Context:   ctx,
+		TenantID:  opts.TenantID,
+		AccountID: opts.AccountID,
+		RequestID: requestID,
+		TraceID:   requestID,
 	}, domain.EHRMSEmployeeSyncInput{Mode: opts.Mode})
 }
 
@@ -97,6 +96,7 @@ func (s *EHRMSEmployeeSyncScheduler) syncAndLog(ctx context.Context, opts EHRMSE
 		"fetched", result.Fetched,
 		"created", result.Created,
 		"updated", result.Updated,
+		"skipped", result.Skipped,
 		"failed", result.Failed,
 		"departments_upserted", result.DepartmentsUpserted,
 		"positions_upserted", result.PositionsUpserted,

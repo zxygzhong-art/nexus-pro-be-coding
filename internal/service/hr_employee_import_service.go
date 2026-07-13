@@ -14,7 +14,6 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/utils"
 )
 
@@ -479,20 +478,6 @@ func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImpor
 		)
 		return EmployeeImportSession{}, forbiddenAuthz(decision)
 	}
-	if decision.RequiresApproval {
-		if err := c.confirmApproval(ctx, req); err != nil {
-			_ = c.auditAuthzDecision(ctx, "hr.employee.import.preview", "employee_import_session", "", decision)
-			if ctx.ApprovalInstanceID != "" {
-				return EmployeeImportSession{}, err
-			}
-			c.logWarn(ctx, "employee import preview requires approval",
-				"risk_level", decision.RiskLevel,
-				"approval_type", decision.ApprovalType,
-				"approval_reason", decision.ApprovalReason,
-			)
-			return EmployeeImportSession{}, domain.ForbiddenReason("approval_required", "high-risk action requires approval")
-		}
-	}
 	authzAudit := AuthzAudit{service: c.Service, target: AuditTarget{Event: "hr.employee.import.preview", Resource: string(ResourceEmployeeImport)}, decision: decision}
 	filename := safeImportFilename(input.Filename)
 	raw := []byte(input.Content)
@@ -601,21 +586,6 @@ func (c HRService) ConfirmEmployeeImport(ctx RequestContext, sessionID string, i
 			"missing_permissions", decision.MissingPermissions,
 		)
 		return EmployeeImportSession{}, forbiddenAuthz(decision)
-	}
-	if decision.RequiresApproval {
-		if err := c.confirmApproval(ctx, req); err != nil {
-			_ = c.auditAuthzDecision(ctx, "hr.employee.import.confirm", "employee_import_session", sessionID, decision)
-			if ctx.ApprovalInstanceID != "" {
-				return EmployeeImportSession{}, err
-			}
-			c.logWarn(ctx, "employee import confirmation requires approval",
-				"session_id", sessionID,
-				"risk_level", decision.RiskLevel,
-				"approval_type", decision.ApprovalType,
-				"approval_reason", decision.ApprovalReason,
-			)
-			return EmployeeImportSession{}, domain.ForbiddenReason("approval_required", "high-risk action requires approval")
-		}
 	}
 	authzAudit := AuthzAudit{service: c.Service, target: AuditTarget{Event: "hr.employee.import.confirm", Resource: string(ResourceEmployeeImport), Target: sessionID}, decision: decision}
 	mode, err := normalizeEmployeeImportMode(input.Mode)

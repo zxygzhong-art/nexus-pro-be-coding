@@ -17,7 +17,7 @@ func withWorkflowReview(payload map[string]any, kind, accountID, comment string,
 		"type":       kind,
 		"account_id": accountID,
 		"comment":    strings.TrimSpace(comment),
-		"time":       at.UTC().Format("2006/01/02 15:04"),
+		"time":       apiTimestamp(at),
 	}
 	return next
 }

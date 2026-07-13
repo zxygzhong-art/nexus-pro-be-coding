@@ -1768,24 +1768,13 @@ func (s *Store) ListAttendanceShifts(execCtx context.Context, tenantID string) (
 	return mapSlice(items, fromAttendanceShift), nil
 }
 
-// UpsertAttendanceShiftAssignment 從儲存層處理 upsert 考勤班別指派。
+// UpsertAttendanceShiftAssignment 儲存員工班別指派。
 func (s *Store) UpsertAttendanceShiftAssignment(execCtx context.Context, v domain.AttendanceShiftAssignment) error {
-	_, err := s.q.UpsertAttendanceShiftAssignment(execCtx, sqlc.UpsertAttendanceShiftAssignmentParams{
-		ID:            v.ID,
-		TenantID:      v.TenantID,
-		EmployeeID:    v.EmployeeID,
-		ShiftID:       v.ShiftID,
-		WorksiteID:    v.WorksiteID,
-		EffectiveFrom: timestamptz(v.EffectiveFrom),
-		EffectiveTo:   nullableTimestamptz(v.EffectiveTo),
-		Status:        v.Status,
-		CreatedAt:     timestamptz(v.CreatedAt),
-		UpdatedAt:     timestamptz(v.UpdatedAt),
-	})
+	_, err := s.q.UpsertAttendanceShiftAssignment(execCtx, sqlc.UpsertAttendanceShiftAssignmentParams{ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, ShiftID: v.ShiftID, WorksiteID: v.WorksiteID, EffectiveFrom: timestamptz(v.EffectiveFrom), EffectiveTo: nullableTimestamptz(v.EffectiveTo), Status: v.Status, CreatedAt: timestamptz(v.CreatedAt), UpdatedAt: timestamptz(v.UpdatedAt)})
 	return err
 }
 
-// ListAttendanceShiftAssignments 從儲存層列出考勤班別指派。
+// ListAttendanceShiftAssignments 列出租戶的員工班別指派。
 func (s *Store) ListAttendanceShiftAssignments(execCtx context.Context, tenantID string) ([]domain.AttendanceShiftAssignment, error) {
 	items, err := s.q.ListAttendanceShiftAssignments(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -1794,13 +1783,9 @@ func (s *Store) ListAttendanceShiftAssignments(execCtx context.Context, tenantID
 	return mapSlice(items, fromAttendanceShiftAssignment), nil
 }
 
-// FindEffectiveAttendanceShiftAssignment 從儲存層處理 find effective 考勤班別指派。
+// FindEffectiveAttendanceShiftAssignment 取得指定時點生效的員工排班。
 func (s *Store) FindEffectiveAttendanceShiftAssignment(execCtx context.Context, tenantID, employeeID string, at time.Time) (domain.AttendanceShiftAssignment, bool, error) {
-	v, err := s.q.FindEffectiveAttendanceShiftAssignment(execCtx, sqlc.FindEffectiveAttendanceShiftAssignmentParams{
-		TenantID:      tenantID,
-		EmployeeID:    employeeID,
-		EffectiveFrom: timestamptz(at),
-	})
+	v, err := s.q.FindEffectiveAttendanceShiftAssignment(execCtx, sqlc.FindEffectiveAttendanceShiftAssignmentParams{TenantID: tenantID, EmployeeID: employeeID, EffectiveFrom: timestamptz(at)})
 	if isNotFound(err) {
 		return domain.AttendanceShiftAssignment{}, false, nil
 	}
@@ -1816,9 +1801,9 @@ func (s *Store) UpsertAttendanceClockRecord(execCtx context.Context, v domain.At
 		ID:                  v.ID,
 		TenantID:            v.TenantID,
 		EmployeeID:          v.EmployeeID,
-		ShiftAssignmentID:   v.ShiftAssignmentID,
-		ShiftID:             v.ShiftID,
-		WorksiteID:          v.WorksiteID,
+		ShiftAssignmentID:   nullableText(v.ShiftAssignmentID),
+		ShiftID:             nullableText(v.ShiftID),
+		WorksiteID:          nullableText(v.WorksiteID),
 		WorkDate:            v.WorkDate,
 		Direction:           v.Direction,
 		ClockedAt:           timestamptz(v.ClockedAt),
@@ -2084,16 +2069,32 @@ func (s *Store) ListOvertimeRequestsByQuery(execCtx context.Context, tenantID st
 
 // UpsertFormTemplate 從儲存層處理 upsert 表單範本。
 func (s *Store) UpsertFormTemplate(execCtx context.Context, v domain.FormTemplate) error {
+	v = normalizeFormTemplate(v)
 	_, err := s.q.UpsertFormTemplate(execCtx, sqlc.UpsertFormTemplateParams{
-		ID:          v.ID,
-		TenantID:    v.TenantID,
-		Key:         v.Key,
-		Name:        v.Name,
-		Description: v.Description,
-		Column6:     mustJSON(v.Schema),
-		CreatedAt:   timestamptz(v.CreatedAt),
+		ID:             v.ID,
+		TenantID:       v.TenantID,
+		Key:            v.Key,
+		Name:           v.Name,
+		Description:    v.Description,
+		Schema:         mustJSON(v.Schema),
+		Status:         v.Status,
+		CurrentVersion: int32(v.CurrentVersion),
+		CreatedAt:      timestamptz(v.CreatedAt),
+		UpdatedAt:      timestamptz(v.UpdatedAt),
+		DeletedAt:      nullableTimestamptz(v.DeletedAt),
 	})
-	return err
+	if err != nil {
+		return err
+	}
+	version := domain.FormTemplateVersion{
+		ID: utils.NewID("ftv"), TenantID: v.TenantID, TemplateID: v.ID,
+		Version: v.CurrentVersion, Schema: v.Schema, Status: v.Status, CreatedAt: v.UpdatedAt,
+	}
+	if v.Status == "published" {
+		publishedAt := v.UpdatedAt
+		version.PublishedAt = &publishedAt
+	}
+	return s.InsertFormTemplateVersion(execCtx, version)
 }
 
 // GetFormTemplate 從儲存層取得表單範本。
@@ -2129,12 +2130,61 @@ func (s *Store) ListFormTemplates(execCtx context.Context, tenantID string) ([]d
 	return mapSlice(items, fromFormTemplate), nil
 }
 
+// InsertFormTemplateVersion 寫入不可變的表單版本；相同版本存在時保留原快照。
+func (s *Store) InsertFormTemplateVersion(execCtx context.Context, v domain.FormTemplateVersion) error {
+	return s.q.InsertFormTemplateVersion(execCtx, sqlc.InsertFormTemplateVersionParams{
+		ID: v.ID, TenantID: v.TenantID, TemplateID: v.TemplateID, Version: int32(v.Version),
+		Schema: mustJSON(v.Schema), Status: v.Status, CreatedAt: timestamptz(v.CreatedAt),
+		PublishedAt: nullableTimestamptz(v.PublishedAt),
+	})
+}
+
+// GetFormTemplateVersion 依版本 ID 取得不可變快照。
+func (s *Store) GetFormTemplateVersion(execCtx context.Context, tenantID, id string) (domain.FormTemplateVersion, bool, error) {
+	v, err := s.q.GetFormTemplateVersion(tenantContext(execCtx, tenantID), sqlc.GetFormTemplateVersionParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.FormTemplateVersion{}, false, nil
+	}
+	if err != nil {
+		return domain.FormTemplateVersion{}, false, err
+	}
+	return fromFormTemplateVersion(v), true, nil
+}
+
+// GetFormTemplateVersionByNumber 依模板與版本號取得不可變快照。
+func (s *Store) GetFormTemplateVersionByNumber(execCtx context.Context, tenantID, templateID string, version int) (domain.FormTemplateVersion, bool, error) {
+	v, err := s.q.GetFormTemplateVersionByNumber(tenantContext(execCtx, tenantID), sqlc.GetFormTemplateVersionByNumberParams{
+		TenantID: tenantID, TemplateID: templateID, Version: int32(version),
+	})
+	if isNotFound(err) {
+		return domain.FormTemplateVersion{}, false, nil
+	}
+	if err != nil {
+		return domain.FormTemplateVersion{}, false, err
+	}
+	return fromFormTemplateVersion(v), true, nil
+}
+
 // UpsertFormInstance 從儲存層處理 upsert 表單實例。Version > 0 時執行樂觀鎖檢查。
 func (s *Store) UpsertFormInstance(execCtx context.Context, v domain.FormInstance) error {
+	if strings.TrimSpace(v.TemplateVersionID) == "" {
+		template, err := s.q.GetFormTemplate(tenantContext(execCtx, v.TenantID), sqlc.GetFormTemplateParams{TenantID: v.TenantID, ID: v.TemplateID})
+		if err != nil {
+			return err
+		}
+		version, err := s.q.GetFormTemplateVersionByNumber(tenantContext(execCtx, v.TenantID), sqlc.GetFormTemplateVersionByNumberParams{
+			TenantID: v.TenantID, TemplateID: v.TemplateID, Version: template.CurrentVersion,
+		})
+		if err != nil {
+			return err
+		}
+		v.TemplateVersionID = version.ID
+	}
 	_, err := s.q.UpsertFormInstance(tenantContext(execCtx, v.TenantID), sqlc.UpsertFormInstanceParams{
 		ID:                 v.ID,
 		TenantID:           v.TenantID,
 		TemplateID:         v.TemplateID,
+		TemplateVersionID:  v.TemplateVersionID,
 		ApplicantAccountID: v.ApplicantAccountID,
 		Status:             v.Status,
 		Payload:            mustJSON(v.Payload),
@@ -2210,6 +2260,35 @@ func (s *Store) ListFormInstancePageByQuery(execCtx context.Context, tenantID st
 		return nil, 0, err
 	}
 	return mapSlice(items, fromFormInstance), int(total), nil
+}
+
+// ReplaceFormInstanceFieldValues 替換單一表單實例的可統計欄位投影。
+func (s *Store) ReplaceFormInstanceFieldValues(execCtx context.Context, tenantID, formInstanceID string, values []domain.FormInstanceFieldValue) error {
+	execCtx = tenantContext(execCtx, tenantID)
+	if err := s.q.DeleteFormInstanceFieldValues(execCtx, sqlc.DeleteFormInstanceFieldValuesParams{TenantID: tenantID, FormInstanceID: formInstanceID}); err != nil {
+		return err
+	}
+	for _, value := range values {
+		if err := s.q.InsertFormInstanceFieldValue(execCtx, sqlc.InsertFormInstanceFieldValueParams{
+			TenantID: value.TenantID, FormInstanceID: value.FormInstanceID, TemplateID: value.TemplateID,
+			TemplateVersionID: value.TemplateVersionID, FieldID: value.FieldID, ValueType: value.ValueType,
+			ValueText: value.ValueText, ValueNumber: value.ValueNumber, ValueBoolean: nullableBool(value.ValueBoolean),
+			ValueDate: value.ValueDate, ValueTimestamp: value.ValueTimestamp, ValueJson: string(value.ValueJSON),
+			CreatedAt: timestamptz(value.CreatedAt),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListFormInstanceFieldValues 列出單一表單實例的欄位投影。
+func (s *Store) ListFormInstanceFieldValues(execCtx context.Context, tenantID, formInstanceID string) ([]domain.FormInstanceFieldValue, error) {
+	items, err := s.q.ListFormInstanceFieldValues(tenantContext(execCtx, tenantID), sqlc.ListFormInstanceFieldValuesParams{TenantID: tenantID, FormInstanceID: formInstanceID})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromFormInstanceFieldValue), nil
 }
 
 // DeleteFormInstance 從儲存層刪除表單實例。
@@ -2388,9 +2467,10 @@ func (s *Store) UpsertAgentModel(execCtx context.Context, v domain.AgentModel) e
 		Provider:        v.Provider,
 		ModelName:       v.ModelName,
 		LitellmModel:    v.LiteLLMModel,
-		IsDefault:       v.IsDefault,
+		ApiBaseUrl:      v.APIBaseURL,
+		ApiKey:          v.APIKey,
+		RateLimitRpm:    int32(v.RateLimitRPM),
 		Status:          string(v.Status),
-		FallbackModelID: nullableText(v.FallbackModelID),
 		TimeoutSeconds:  int32(v.TimeoutSeconds),
 		MonthlyQuota:    v.MonthlyQuota,
 		UsedQuota:       v.UsedQuota,
@@ -2436,11 +2516,6 @@ func (s *Store) DeleteAgentModel(execCtx context.Context, tenantID, id string) (
 	return fromAgentModel(v), true, nil
 }
 
-// ClearDefaultAgentModel 從儲存層清除其他預設模型。
-func (s *Store) ClearDefaultAgentModel(execCtx context.Context, tenantID, exceptID string) error {
-	return s.q.ClearDefaultAgentModel(tenantContext(execCtx, tenantID), sqlc.ClearDefaultAgentModelParams{TenantID: tenantID, ExceptID: exceptID})
-}
-
 // UpdateAgentModelTestResult 從儲存層更新模型測試結果。
 func (s *Store) UpdateAgentModelTestResult(execCtx context.Context, tenantID, id, status, message string, testedAt time.Time) (domain.AgentModel, bool, error) {
 	v, err := s.q.UpdateAgentModelTestResult(tenantContext(execCtx, tenantID), sqlc.UpdateAgentModelTestResultParams{
@@ -2479,7 +2554,6 @@ func (s *Store) UpsertAgentDefinition(execCtx context.Context, v domain.AgentDef
 		Emoji:              v.Emoji,
 		Category:           string(v.Category),
 		ModelID:            v.ModelID,
-		FallbackModelID:    nullableText(v.FallbackModelID),
 		SystemPrompt:       v.SystemPrompt,
 		Tools:              mustJSON(v.Tools),
 		Status:             string(v.Status),
@@ -2985,6 +3059,31 @@ func nullableTimestamptz(t *time.Time) pgtype.Timestamptz {
 	return timestamptz(*t)
 }
 
+// nullableBool 轉換可選布林值。
+func nullableBool(v *bool) pgtype.Bool {
+	if v == nil {
+		return pgtype.Bool{}
+	}
+	return pgtype.Bool{Bool: *v, Valid: true}
+}
+
+// normalizeFormTemplate 補齊舊種子資料尚未提供的版本欄位。
+func normalizeFormTemplate(v domain.FormTemplate) domain.FormTemplate {
+	if strings.TrimSpace(v.Status) == "" {
+		v.Status = "published"
+	}
+	if v.CurrentVersion <= 0 {
+		v.CurrentVersion = 1
+	}
+	if v.CreatedAt.IsZero() {
+		v.CreatedAt = time.Now().UTC()
+	}
+	if v.UpdatedAt.IsZero() {
+		v.UpdatedAt = v.CreatedAt
+	}
+	return v
+}
+
 // float8Ptr 轉換 *float64 為 pgtype.Float8。
 func float8Ptr(v *float64) pgtype.Float8 {
 	if v == nil {
@@ -3075,6 +3174,43 @@ func timePtrFrom(v pgtype.Timestamptz) *time.Time {
 	}
 	t := v.Time.UTC()
 	return &t
+}
+
+// boolPtrFrom 轉換 nullable boolean。
+func boolPtrFrom(v pgtype.Bool) *bool {
+	if !v.Valid {
+		return nil
+	}
+	out := v.Bool
+	return &out
+}
+
+// numericTextFrom 保留 PostgreSQL numeric 的精確十進位表示。
+func numericTextFrom(v pgtype.Numeric) string {
+	if !v.Valid {
+		return ""
+	}
+	raw, err := v.MarshalJSON()
+	if err != nil {
+		return ""
+	}
+	return string(raw)
+}
+
+// dateTextFrom 轉換 nullable date。
+func dateTextFrom(v pgtype.Date) string {
+	if !v.Valid {
+		return ""
+	}
+	return v.Time.Format("2006-01-02")
+}
+
+// timestampTextFrom 轉換 nullable timestamp。
+func timestampTextFrom(v pgtype.Timestamptz) string {
+	if !v.Valid {
+		return ""
+	}
+	return v.Time.UTC().Format(time.RFC3339Nano)
 }
 
 // mustJSON 處理 must JSON。
@@ -3700,20 +3836,9 @@ func fromAttendanceShift(v sqlc.AttendanceShift) domain.AttendanceShift {
 	}
 }
 
-// fromAttendanceShiftAssignment 轉換考勤班別指派。
+// fromAttendanceShiftAssignment 轉換員工班別指派。
 func fromAttendanceShiftAssignment(v sqlc.AttendanceShiftAssignment) domain.AttendanceShiftAssignment {
-	return domain.AttendanceShiftAssignment{
-		ID:            v.ID,
-		TenantID:      v.TenantID,
-		EmployeeID:    v.EmployeeID,
-		ShiftID:       v.ShiftID,
-		WorksiteID:    v.WorksiteID,
-		EffectiveFrom: timeFrom(v.EffectiveFrom),
-		EffectiveTo:   timePtrFrom(v.EffectiveTo),
-		Status:        v.Status,
-		CreatedAt:     timeFrom(v.CreatedAt),
-		UpdatedAt:     timeFrom(v.UpdatedAt),
-	}
+	return domain.AttendanceShiftAssignment{ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, ShiftID: v.ShiftID, WorksiteID: v.WorksiteID, EffectiveFrom: timeFrom(v.EffectiveFrom), EffectiveTo: timePtrFrom(v.EffectiveTo), Status: v.Status, CreatedAt: timeFrom(v.CreatedAt), UpdatedAt: timeFrom(v.UpdatedAt)}
 }
 
 // fromAttendanceClockRecord 轉換考勤打卡 record。
@@ -3722,9 +3847,9 @@ func fromAttendanceClockRecord(v sqlc.AttendanceClockRecord) domain.AttendanceCl
 		ID:                  v.ID,
 		TenantID:            v.TenantID,
 		EmployeeID:          v.EmployeeID,
-		ShiftAssignmentID:   v.ShiftAssignmentID,
-		ShiftID:             v.ShiftID,
-		WorksiteID:          v.WorksiteID,
+		ShiftAssignmentID:   textFrom(v.ShiftAssignmentID),
+		ShiftID:             textFrom(v.ShiftID),
+		WorksiteID:          textFrom(v.WorksiteID),
 		WorkDate:            v.WorkDate,
 		Direction:           v.Direction,
 		ClockedAt:           timeFrom(v.ClockedAt),
@@ -3826,13 +3951,25 @@ func fromOvertimeRequest(v sqlc.OvertimeRequest) domain.OvertimeRequest {
 // fromFormTemplate 轉換表單範本。
 func fromFormTemplate(v sqlc.FormTemplate) domain.FormTemplate {
 	return domain.FormTemplate{
-		ID:          v.ID,
-		TenantID:    v.TenantID,
-		Key:         v.Key,
-		Name:        v.Name,
-		Description: v.Description,
-		Schema:      jsonMap(v.Schema),
-		CreatedAt:   timeFrom(v.CreatedAt),
+		ID:             v.ID,
+		TenantID:       v.TenantID,
+		Key:            v.Key,
+		Name:           v.Name,
+		Description:    v.Description,
+		Schema:         jsonMap(v.Schema),
+		Status:         v.Status,
+		CurrentVersion: int(v.CurrentVersion),
+		CreatedAt:      timeFrom(v.CreatedAt),
+		UpdatedAt:      timeFrom(v.UpdatedAt),
+		DeletedAt:      timePtrFrom(v.DeletedAt),
+	}
+}
+
+// fromFormTemplateVersion 轉換不可變表單版本。
+func fromFormTemplateVersion(v sqlc.FormTemplateVersion) domain.FormTemplateVersion {
+	return domain.FormTemplateVersion{
+		ID: v.ID, TenantID: v.TenantID, TemplateID: v.TemplateID, Version: int(v.Version),
+		Schema: jsonMap(v.Schema), Status: v.Status, CreatedAt: timeFrom(v.CreatedAt), PublishedAt: timePtrFrom(v.PublishedAt),
 	}
 }
 
@@ -3842,6 +3979,7 @@ func fromFormInstance(v sqlc.FormInstance) domain.FormInstance {
 		ID:                 v.ID,
 		TenantID:           v.TenantID,
 		TemplateID:         v.TemplateID,
+		TemplateVersionID:  v.TemplateVersionID,
 		ApplicantAccountID: v.ApplicantAccountID,
 		Status:             v.Status,
 		Payload:            jsonMap(v.Payload),
@@ -3850,6 +3988,17 @@ func fromFormInstance(v sqlc.FormInstance) domain.FormInstance {
 		CurrentRunID:       v.CurrentRunID,
 		Version:            v.Version,
 		UpdatedAt:          timeFrom(v.UpdatedAt),
+	}
+}
+
+// fromFormInstanceFieldValue 轉換類型化欄位投影。
+func fromFormInstanceFieldValue(v sqlc.FormInstanceFieldValue) domain.FormInstanceFieldValue {
+	return domain.FormInstanceFieldValue{
+		TenantID: v.TenantID, FormInstanceID: v.FormInstanceID, TemplateID: v.TemplateID,
+		TemplateVersionID: v.TemplateVersionID, FieldID: v.FieldID, ValueType: v.ValueType,
+		ValueText: textFrom(v.ValueText), ValueNumber: numericTextFrom(v.ValueNumber), ValueBoolean: boolPtrFrom(v.ValueBoolean),
+		ValueDate: dateTextFrom(v.ValueDate), ValueTimestamp: timestampTextFrom(v.ValueTimestamp),
+		ValueJSON: append([]byte(nil), v.ValueJson...), CreatedAt: timeFrom(v.CreatedAt),
 	}
 }
 
@@ -3912,9 +4061,12 @@ func fromAgentModel(v sqlc.AgentModel) domain.AgentModel {
 		Provider:        v.Provider,
 		ModelName:       v.ModelName,
 		LiteLLMModel:    v.LitellmModel,
-		IsDefault:       v.IsDefault,
+		APIBaseURL:      v.ApiBaseUrl,
+		APIKey:          v.ApiKey,
+		APIKeySet:       strings.TrimSpace(v.ApiKey) != "",
+		APIKeyPreview:   maskStoredSecret(v.ApiKey),
+		RateLimitRPM:    int(v.RateLimitRpm),
 		Status:          domain.AgentModelStatus(v.Status),
-		FallbackModelID: textFrom(v.FallbackModelID),
 		TimeoutSeconds:  int(v.TimeoutSeconds),
 		MonthlyQuota:    v.MonthlyQuota,
 		UsedQuota:       v.UsedQuota,
@@ -3924,6 +4076,17 @@ func fromAgentModel(v sqlc.AgentModel) domain.AgentModel {
 		CreatedAt:       timeFrom(v.CreatedAt),
 		UpdatedAt:       timeFrom(v.UpdatedAt),
 	}
+}
+
+func maskStoredSecret(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if len(value) <= 4 {
+		return "****"
+	}
+	return "****" + value[len(value)-4:]
 }
 
 // fromAgentDefinition 轉換 agent 定義。
@@ -3936,7 +4099,6 @@ func fromAgentDefinition(v sqlc.AgentDefinition) domain.AgentDefinition {
 		Emoji:             v.Emoji,
 		Category:          domain.AgentCategory(v.Category),
 		ModelID:           v.ModelID,
-		FallbackModelID:   textFrom(v.FallbackModelID),
 		SystemPrompt:      v.SystemPrompt,
 		Tools:             jsonStrings(v.Tools),
 		Status:            domain.AgentDefinitionStatus(v.Status),

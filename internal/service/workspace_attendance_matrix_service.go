@@ -47,6 +47,7 @@ func workspaceLeaveLegend() []WorkspaceLeaveLegendItem {
 		{Code: "檢", Label: "產檢假"},
 		{Code: "補", Label: "補休假"},
 		{Code: "特", Label: "特休假"},
+		{Code: "其", Label: "其他假別"},
 	}
 }
 
@@ -95,7 +96,7 @@ func workspaceAuditLogProjection(log AuditLog, accounts map[string]Account, empl
 	employee := employees[account.EmployeeID]
 	return WorkspaceAuditLog{
 		ID:       log.ID,
-		Time:     log.CreatedAt.UTC().Format("2006/01/02 15:04"),
+		Time:     apiTimestamp(log.CreatedAt),
 		Operator: workspaceAuditOperator(log, account, employee),
 		Type:     workspaceAuditType(log),
 		Action:   workspaceAuditAction(log),
@@ -164,38 +165,31 @@ func workspaceParseAuditTime(value string, exclusiveEnd bool) (time.Time, bool) 
 	return time.Time{}, false
 }
 
-// workspaceLeaveCells 處理工作區請假儲存格。
-func workspaceLeaveCells(leaves []LeaveRequest, start time.Time, end time.Time) map[string]map[string]workspaceLeaveCell {
+// workspaceSummaryLeaveCells 直接投影 eHRMS 每日假勤事實，避免從請假區間推算日期或分攤時數。
+func workspaceSummaryLeaveCells(summaries []AttendanceDailySummary) map[string]map[string]workspaceLeaveCell {
 	out := map[string]map[string]workspaceLeaveCell{}
-	for _, leave := range leaves {
-		if leave.EmployeeID == "" {
+	for _, summary := range summaries {
+		if summary.EmployeeID == "" || summary.WorkDate == "" {
 			continue
 		}
-		first := maxTime(workspaceDateOnly(leave.StartAt), start)
-		last := minTime(workspaceDateOnly(leave.EndAt), end.AddDate(0, 0, -1))
-		if last.Before(first) {
-			continue
+		cell := workspaceLeaveCell{}
+		if summary.LeaveCounted && summary.LeaveHours > 0 {
+			cell.Code, cell.Label = workspaceLeaveCodeLabel(summary.LeaveType)
+			cell.Hours = summary.LeaveHours
 		}
-		days := int(last.Sub(first).Hours()/24) + 1
-		hours := leave.Hours
-		if hours <= 0 {
-			hours = float64(days) * workspaceDayHours
-		}
-		hoursPerDay := math.Min(workspaceDayHours, hours/float64(days))
-		code, label := workspaceLeaveCodeLabel(leave.LeaveType)
-		if out[leave.EmployeeID] == nil {
-			out[leave.EmployeeID] = map[string]workspaceLeaveCell{}
-		}
-		for day := first; !day.After(last); day = day.AddDate(0, 0, 1) {
-			key := day.Format(time.DateOnly)
-			cell := out[leave.EmployeeID][key]
+		if summary.Leave2Counted && summary.Leave2Hours > 0 {
 			if cell.Code == "" {
-				cell.Code = code
-				cell.Label = label
+				cell.Code, cell.Label = workspaceLeaveCodeLabel(summary.Leave2Type)
 			}
-			cell.Hours += hoursPerDay
-			out[leave.EmployeeID][key] = cell
+			cell.Hours += summary.Leave2Hours
 		}
+		if cell.Hours <= 0 {
+			continue
+		}
+		if out[summary.EmployeeID] == nil {
+			out[summary.EmployeeID] = map[string]workspaceLeaveCell{}
+		}
+		out[summary.EmployeeID][summary.WorkDate] = cell
 	}
 	return out
 }
@@ -269,18 +263,18 @@ func workspaceClockCells(clocks []AttendanceClockRecord, summaries []AttendanceD
 		for date, p := range byDate {
 			cell := workspaceClockCell{}
 			if p.in != nil {
-				cell.In = p.in.ClockedAt.Format("15:04")
+				cell.In = p.in.ClockedAt.In(attendanceClockLocation).Format("15:04")
 				cell.InLoc = utils.FirstNonEmpty(worksiteNames[p.in.WorksiteID], p.in.WorksiteID)
 			}
 			if p.out != nil {
-				cell.Out = p.out.ClockedAt.Format("15:04")
+				cell.Out = p.out.ClockedAt.In(attendanceClockLocation).Format("15:04")
 				cell.OutLoc = utils.FirstNonEmpty(worksiteNames[p.out.WorksiteID], p.out.WorksiteID)
 			}
 			switch {
-			case p.in != nil && p.in.RecordStatus == clockRecordStatusRejected:
+			case p.in != nil && p.in.RejectionReason != "":
 				cell.Abnormal = true
 				cell.Reason = utils.FirstNonEmpty(p.in.RejectionReason, "上班卡未通過")
-			case p.out != nil && p.out.RecordStatus == clockRecordStatusRejected:
+			case p.out != nil && p.out.RejectionReason != "":
 				cell.Abnormal = true
 				cell.Reason = utils.FirstNonEmpty(p.out.RejectionReason, "下班卡未通過")
 			case p.in == nil && p.out != nil:
@@ -290,7 +284,7 @@ func workspaceClockCells(clocks []AttendanceClockRecord, summaries []AttendanceD
 				cell.Abnormal = true
 				cell.Reason = "缺下班卡"
 			case p.in != nil && p.out != nil && p.out.ClockedAt.Sub(p.in.ClockedAt).Hours() < workspaceDayHours:
-				if !workspaceShortHoursExempted(employeeID, date, p.out.ClockedAt.Sub(p.in.ClockedAt).Hours(), leaveCells, overtimeCells) {
+				if !workspaceShortHoursExempted(employeeID, date, p.out.ClockedAt.Sub(p.in.ClockedAt).Hours(), workspaceDayHours, leaveCells, overtimeCells) {
 					cell.Abnormal = true
 					cell.Reason = "工時未滿 8 小時"
 				}
@@ -299,7 +293,7 @@ func workspaceClockCells(clocks []AttendanceClockRecord, summaries []AttendanceD
 		}
 	}
 	for _, summary := range summaries {
-		if summary.EmployeeID == "" || summary.WorkDate == "" || summary.ClockHours <= 0 {
+		if summary.EmployeeID == "" || summary.WorkDate == "" {
 			continue
 		}
 		if out[summary.EmployeeID] == nil {
@@ -308,18 +302,50 @@ func workspaceClockCells(clocks []AttendanceClockRecord, summaries []AttendanceD
 		if _, exists := out[summary.EmployeeID][summary.WorkDate]; exists {
 			continue
 		}
-		out[summary.EmployeeID][summary.WorkDate] = workspaceClockCell{}
+		cell, ok := workspaceClockCellFromSummary(summary, leaveCells, overtimeCells)
+		if !ok {
+			continue
+		}
+		out[summary.EmployeeID][summary.WorkDate] = cell
 	}
 	return out
 }
 
-// workspaceShortHoursExempted 判斷工時不足是否可由核准的請假或加班豁免。
-func workspaceShortHoursExempted(employeeID string, date string, workedHours float64, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64) bool {
+// workspaceClockCellFromSummary 將 eHRMS 日彙總的打卡時間與缺卡、工時不足狀態投影到工作區矩陣。
+func workspaceClockCellFromSummary(summary AttendanceDailySummary, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64) (workspaceClockCell, bool) {
+	clockIn := utils.FirstNonEmpty(summary.ClockStart, summary.AttendStart)
+	clockOut := utils.FirstNonEmpty(summary.ClockEnd, summary.AttendEnd)
+	if clockIn == "" && clockOut == "" && summary.ClockHours <= 0 {
+		return workspaceClockCell{}, false
+	}
+	cell := workspaceClockCell{In: clockIn, Out: clockOut}
+	switch {
+	case clockIn == "" && clockOut != "":
+		cell.Abnormal = true
+		cell.Reason = "缺上班卡"
+	case clockIn != "" && clockOut == "":
+		cell.Abnormal = true
+		cell.Reason = "缺下班卡"
+	default:
+		expectedHours := summary.DailyHours
+		if expectedHours <= 0 {
+			expectedHours = summary.ShiftHours
+		}
+		if expectedHours > 0 && summary.ClockHours+0.01 < expectedHours && !workspaceShortHoursExempted(summary.EmployeeID, summary.WorkDate, summary.ClockHours, expectedHours, leaveCells, overtimeCells) {
+			cell.Abnormal = true
+			cell.Reason = "工時未達應出勤時數"
+		}
+	}
+	return cell, true
+}
+
+// workspaceShortHoursExempted 判斷工時不足是否可由核准的請假或加班補足當日應出勤時數。
+func workspaceShortHoursExempted(employeeID string, date string, workedHours float64, expectedHours float64, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64) bool {
 	leaveHours := 0.0
 	if cell, ok := leaveCells[employeeID][date]; ok {
 		leaveHours = cell.Hours
 	}
-	if workedHours+leaveHours >= workspaceDayHours {
+	if workedHours+leaveHours >= expectedHours {
 		return true
 	}
 	// 週末或假日的打卡若對應核准加班，不視為工時異常。
@@ -493,33 +519,31 @@ func workspaceHolidayCount(dates []WorkspaceDate) int {
 
 // workspaceLeaveCodeLabel 處理工作區請假碼 label。
 func workspaceLeaveCodeLabel(leaveType string) (string, string) {
-	normalized := strings.ToLower(strings.TrimSpace(leaveType))
+	normalized := normalizeLeaveTypeCode(leaveType)
 	labels := map[string]WorkspaceLeaveLegendItem{
-		"paid_sick":      {Code: "病", Label: "全薪病假"},
-		"sick":           {Code: "病", Label: "全薪病假"},
-		"flex":           {Code: "彈", Label: "彈性休假"},
-		"personal":       {Code: "事", Label: "事假"},
-		"family_care":    {Code: "照", Label: "家庭照顧假"},
-		"half_sick":      {Code: "半", Label: "半薪病假"},
-		"menstrual":      {Code: "理", Label: "生理假"},
-		"marriage":       {Code: "婚", Label: "婚假"},
-		"maternity":      {Code: "產", Label: "八週產假"},
-		"paternity":      {Code: "陪", Label: "陪產假"},
-		"bereavement":    {Code: "喪", Label: "喪假"},
-		"official":       {Code: "公", Label: "公假"},
-		"prenatal_check": {Code: "檢", Label: "產檢假"},
-		"compensatory":   {Code: "補", Label: "補休假"},
-		"annual":         {Code: "特", Label: "特休假"},
+		leaveTypeCodeSickFull:     {Code: "病", Label: "全薪病假"},
+		leaveTypeCodeFlexible:     {Code: "彈", Label: "彈性休假"},
+		leaveTypeCodePersonal:     {Code: "事", Label: "事假"},
+		leaveTypeCodeFamilyCare:   {Code: "照", Label: "家庭照顧假"},
+		leaveTypeCodeSickHalf:     {Code: "半", Label: "半薪病假"},
+		leaveTypeCodeMenstrual:    {Code: "理", Label: "生理假"},
+		leaveTypeCodeMarriage:     {Code: "婚", Label: "婚假"},
+		leaveTypeCodeMaternity:    {Code: "產", Label: "八週產假"},
+		leaveTypeCodePaternity:    {Code: "陪", Label: "陪產假"},
+		leaveTypeCodeBereavement:  {Code: "喪", Label: "喪假"},
+		leaveTypeCodeOfficial:     {Code: "公", Label: "公假"},
+		leaveTypeCodePrenatal:     {Code: "檢", Label: "產檢假"},
+		leaveTypeCodeCompensatory: {Code: "補", Label: "補休假"},
+		leaveTypeCodeAnnual:       {Code: "特", Label: "特休假"},
 	}
 	if item, ok := labels[normalized]; ok {
 		return item.Code, item.Label
 	}
 	trimmed := strings.TrimSpace(leaveType)
 	if trimmed == "" {
-		return "假", "請假"
+		return "其", "其他假別"
 	}
-	runes := []rune(trimmed)
-	return string(runes[0]), trimmed
+	return "其", trimmed
 }
 
 // workspaceEmployeeNameEN 處理工作區員工名稱 en。
