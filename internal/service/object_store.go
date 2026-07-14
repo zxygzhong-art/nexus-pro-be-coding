@@ -2,12 +2,14 @@ package service
 
 import (
 	"context"
+	"errors"
 	"sync"
 )
 
 // ObjectStore 定義物件儲存層的行為契約。
 type ObjectStore interface {
 	PutObject(ctx context.Context, key string, contentType string, data []byte) error
+	GetObject(ctx context.Context, key string) ([]byte, error)
 }
 
 type objectStoreDescriptor interface {
@@ -57,18 +59,17 @@ func (s *MemoryObjectStore) Bucket() string {
 	return ""
 }
 
-// GetObject 從儲存層取得物件。
-func (s *MemoryObjectStore) GetObject(key string) (StoredObject, bool) {
+// GetObject returns a defensive copy of an in-memory object.
+func (s *MemoryObjectStore) GetObject(_ context.Context, key string) ([]byte, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	object, ok := s.objects[key]
 	if !ok {
-		return StoredObject{}, false
+		return nil, errors.New("object not found")
 	}
 	data := make([]byte, len(object.Data))
 	copy(data, object.Data)
-	object.Data = data
-	return object, true
+	return data, nil
 }
 
 // DeleteObject 從儲存層刪除物件。

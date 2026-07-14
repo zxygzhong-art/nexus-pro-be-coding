@@ -40,7 +40,6 @@ func (c AgentService) CreateModel(ctx RequestContext, input domain.CreateAgentMo
 		Name:           input.Name,
 		Provider:       input.Provider,
 		ModelName:      input.ModelName,
-		LiteLLMModel:   input.LiteLLMModel,
 		APIBaseURL:     input.APIBaseURL,
 		APIKey:         input.APIKey,
 		RateLimitRPM:   input.RateLimitRPM,
@@ -48,6 +47,7 @@ func (c AgentService) CreateModel(ctx RequestContext, input domain.CreateAgentMo
 		TimeoutSeconds: input.TimeoutSeconds,
 		MonthlyQuota:   input.MonthlyQuota,
 		LastTestStatus: "untested",
+		SyncStatus:     domain.AgentModelSyncStatusPending,
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	})
@@ -56,6 +56,9 @@ func (c AgentService) CreateModel(ctx RequestContext, input domain.CreateAgentMo
 	}
 	if err := c.withTransaction(ctx, func(tx AgentService) error {
 		if err := tx.store.UpsertAgentModel(goContext(ctx), model); err != nil {
+			return err
+		}
+		if err := tx.appendAgentModelSyncEvent(ctx, model.ID, domain.EventAgentModelUpsert); err != nil {
 			return err
 		}
 		return tx.recordAgentAdminAudit(ctx, account, "model", model.ID, model.Name, "create", "model created")
@@ -84,9 +87,6 @@ func (c AgentService) UpdateModel(ctx RequestContext, id string, input domain.Up
 	if input.ModelName != nil {
 		model.ModelName = *input.ModelName
 	}
-	if input.LiteLLMModel != nil {
-		model.LiteLLMModel = *input.LiteLLMModel
-	}
 	if input.APIBaseURL != nil {
 		model.APIBaseURL = *input.APIBaseURL
 	}
@@ -106,12 +106,17 @@ func (c AgentService) UpdateModel(ctx RequestContext, id string, input domain.Up
 		model.MonthlyQuota = *input.MonthlyQuota
 	}
 	model.UpdatedAt = c.Now()
+	model.SyncStatus = domain.AgentModelSyncStatusPending
+	model.LastSyncError = ""
 	model, err = c.normalizeAgentModel(ctx, model)
 	if err != nil {
 		return domain.AgentModel{}, err
 	}
 	if err := c.withTransaction(ctx, func(tx AgentService) error {
 		if err := tx.store.UpsertAgentModel(goContext(ctx), model); err != nil {
+			return err
+		}
+		if err := tx.appendAgentModelSyncEvent(ctx, model.ID, domain.EventAgentModelUpsert); err != nil {
 			return err
 		}
 		return tx.recordAgentAdminAudit(ctx, account, "model", model.ID, model.Name, "update", "model updated")
@@ -138,7 +143,7 @@ func (c AgentService) DeleteModel(ctx RequestContext, id string) (domain.AgentMo
 			return err
 		}
 		if count > 0 {
-			return Conflict("agent model is used by agent definitions")
+			return Conflict("agent model is used by agent definitions").WithReasonCode("agent_model_in_use")
 		}
 		model, ok, err := tx.store.DeleteAgentModel(goContext(ctx), ctx.TenantID, id)
 		if err != nil {
@@ -146,6 +151,9 @@ func (c AgentService) DeleteModel(ctx RequestContext, id string) (domain.AgentMo
 		}
 		if !ok {
 			return NotFound("agent model", id)
+		}
+		if err := tx.appendAgentModelSyncEvent(ctx, model.ID, domain.EventAgentModelDelete); err != nil {
+			return err
 		}
 		if err := tx.recordAgentAdminAudit(ctx, account, "model", model.ID, model.Name, "delete", "model deleted"); err != nil {
 			return err
@@ -166,26 +174,28 @@ func (c AgentService) SyncModel(ctx RequestContext, id string) (domain.AgentMode
 	if err != nil {
 		return domain.AgentModel{}, err
 	}
-	if model.Status == domain.AgentModelStatusDisabled {
-		return c.updateAgentModelTestResult(ctx, account, model, "failed", "model is disabled; sync skipped", "sync")
-	}
 	if c.liteLLMAdmin == nil {
 		message := "LiteLLM admin client is not configured"
-		updated, updateErr := c.updateAgentModelTestResult(ctx, account, model, "failed", message, "sync")
+		updated, updateErr := c.updateAgentModelSyncResult(ctx, account, model, domain.AgentModelSyncStatusFailed, message, false)
 		if updateErr != nil {
 			return domain.AgentModel{}, updateErr
 		}
-		return updated, domain.E(503, "service_unavailable", message)
+		return updated, domain.E(503, "service_unavailable", "LiteLLM synchronization is temporarily unavailable").WithReasonCode("agent_runtime_unavailable")
 	}
-	message, err := c.liteLLMAdmin.SyncModel(goContext(ctx), model)
+	var message string
+	if model.Status == domain.AgentModelStatusDisabled {
+		message, err = c.liteLLMAdmin.DeleteModel(goContext(ctx), model.ID)
+	} else {
+		message, err = c.liteLLMAdmin.SyncModel(goContext(ctx), model)
+	}
 	if err != nil {
-		updated, updateErr := c.updateAgentModelTestResult(ctx, account, model, "failed", err.Error(), "sync")
+		updated, updateErr := c.updateAgentModelSyncResult(ctx, account, model, domain.AgentModelSyncStatusFailed, err.Error(), false)
 		if updateErr != nil {
 			return domain.AgentModel{}, updateErr
 		}
-		return updated, domain.E(502, "bad_gateway", err.Error())
+		return updated, domain.E(502, "bad_gateway", "LiteLLM synchronization failed").WithReasonCode("agent_runtime_unavailable")
 	}
-	return c.updateAgentModelTestResult(ctx, account, model, "ok", message, "sync")
+	return c.updateAgentModelSyncResult(ctx, account, model, domain.AgentModelSyncStatusSynced, message, true)
 }
 
 // TestModel 執行 LiteLLM 路由探測並寫回 last_test_*。
@@ -225,6 +235,35 @@ func (c AgentService) updateAgentModelTestResult(ctx RequestContext, account Acc
 			return NotFound("agent model", model.ID)
 		}
 		if err := tx.recordAgentAdminAudit(ctx, account, "model", next.ID, next.Name, action, message); err != nil {
+			return err
+		}
+		updated = next
+		return nil
+	})
+	return updated, err
+}
+
+// updateAgentModelSyncResult 獨立寫回 LiteLLM 同步狀態，不覆蓋連通性測試結果。
+func (c AgentService) updateAgentModelSyncResult(ctx RequestContext, account Account, model domain.AgentModel, status domain.AgentModelSyncStatus, message string, succeeded bool) (domain.AgentModel, error) {
+	var updated domain.AgentModel
+	err := c.withTransaction(ctx, func(tx AgentService) error {
+		now := c.Now()
+		lastSyncedAt := model.LastSyncedAt
+		configHash := model.SyncedConfigHash
+		lastError := message
+		if succeeded {
+			lastSyncedAt = &now
+			configHash = domain.AgentModelSyncConfigHash(model)
+			lastError = ""
+		}
+		next, ok, err := tx.store.UpdateAgentModelSyncResult(goContext(ctx), ctx.TenantID, model.ID, status, lastError, configHash, lastSyncedAt, now)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("agent model", model.ID)
+		}
+		if err := tx.recordAgentAdminAudit(ctx, account, "model", next.ID, next.Name, "sync", message); err != nil {
 			return err
 		}
 		updated = next
@@ -288,8 +327,11 @@ func (c AgentService) CreateDefinition(ctx RequestContext, input domain.CreateAg
 		Emoji:              input.Emoji,
 		Category:           domain.AgentCategory(input.Category),
 		ModelID:            input.ModelID,
+		MainAgentRole:      input.MainAgentRole,
+		SubAgents:          input.SubAgents,
 		SystemPrompt:       input.SystemPrompt,
 		Tools:              input.Tools,
+		KnowledgeBaseIDs:   input.KnowledgeBaseIDs,
 		Status:             domain.AgentDefinitionStatusDraft,
 		Visibility:         domain.AgentVisibility(input.Visibility),
 		VisibilityTargets:  input.VisibilityTargets,
@@ -327,8 +369,7 @@ func (c AgentService) UpdateDefinition(ctx RequestContext, id string, input doma
 	if err != nil {
 		return domain.AgentDefinition{}, err
 	}
-	beforePrompt, beforeModel := agent.SystemPrompt, agent.ModelID
-	beforeTools := strings.Join(agent.Tools, "\x00")
+	beforeRuntimeConfig := agentDefinitionRuntimeSignature(agent)
 	if input.Name != nil {
 		agent.Name = *input.Name
 	}
@@ -344,11 +385,20 @@ func (c AgentService) UpdateDefinition(ctx RequestContext, id string, input doma
 	if input.ModelID != nil {
 		agent.ModelID = *input.ModelID
 	}
+	if input.MainAgentRole != nil {
+		agent.MainAgentRole = *input.MainAgentRole
+	}
+	if input.SubAgents != nil {
+		agent.SubAgents = input.SubAgents
+	}
 	if input.SystemPrompt != nil {
 		agent.SystemPrompt = *input.SystemPrompt
 	}
 	if input.Tools != nil {
 		agent.Tools = input.Tools
+	}
+	if input.KnowledgeBaseIDs != nil {
+		agent.KnowledgeBaseIDs = input.KnowledgeBaseIDs
 	}
 	if input.Visibility != nil {
 		agent.Visibility = domain.AgentVisibility(*input.Visibility)
@@ -361,13 +411,13 @@ func (c AgentService) UpdateDefinition(ctx RequestContext, id string, input doma
 	}
 	agent.UpdatedByAccountID = account.ID
 	agent.UpdatedAt = c.Now()
-	versionChanged := beforePrompt != agent.SystemPrompt || beforeModel != agent.ModelID || beforeTools != strings.Join(agent.Tools, "\x00")
-	if versionChanged {
-		agent.Version++
-	}
 	agent, err = c.normalizeAgentDefinition(ctx, agent)
 	if err != nil {
 		return domain.AgentDefinition{}, err
+	}
+	versionChanged := beforeRuntimeConfig != agentDefinitionRuntimeSignature(agent)
+	if versionChanged {
+		agent.Version++
 	}
 	note := strings.TrimSpace(input.VersionNote)
 	if note == "" {
@@ -409,6 +459,9 @@ func (c AgentService) transitionDefinitionPublishStatus(ctx RequestContext, id s
 		return domain.AgentDefinition{}, err
 	}
 	agent.Status = status
+	if status == domain.AgentDefinitionStatusPublished {
+		agent.PublishedVersion = agent.Version
+	}
 	agent.UpdatedByAccountID = account.ID
 	agent.UpdatedAt = c.Now()
 	agent, err = c.normalizeAgentDefinition(ctx, agent)
@@ -440,7 +493,7 @@ func (c AgentService) DeleteDefinition(ctx RequestContext, id string) (domain.Ag
 			return err
 		}
 		if agent.Status == domain.AgentDefinitionStatusPublished {
-			return Conflict("published agent definition must be unpublished before deletion")
+			return Conflict("published agent definition must be unpublished before deletion").WithReasonCode("agent_definition_published")
 		}
 		agent, ok, err := tx.store.DeleteAgentDefinition(goContext(ctx), ctx.TenantID, id)
 		if err != nil {
@@ -464,7 +517,7 @@ func (c AgentService) Trial(ctx RequestContext, id string, input domain.AgentTri
 	if err != nil {
 		return domain.AgentTrialResult{}, err
 	}
-	agent, err := c.currentAgentDefinition(ctx, id)
+	agent, err := c.publishedAgentDefinition(ctx, id)
 	if err != nil {
 		return domain.AgentTrialResult{}, err
 	}
@@ -480,7 +533,7 @@ func (c AgentService) Trial(ctx RequestContext, id string, input domain.AgentTri
 	if message == "" {
 		return domain.AgentTrialResult{}, BadRequest("message is required")
 	}
-	reply, toolsUsed, trialErr := c.trialReply(ctx, agent, model, message)
+	reply, toolsUsed, agentsUsed, trialErr := c.trialReply(ctx, agent, model, message)
 	latencyMs := int(c.Now().Sub(start).Milliseconds())
 	if latencyMs <= 0 {
 		latencyMs = 1
@@ -500,21 +553,29 @@ func (c AgentService) Trial(ctx RequestContext, id string, input domain.AgentTri
 		return domain.AgentTrialResult{}, err
 	}
 	if trialErr != nil {
-		return domain.AgentTrialResult{}, trialErr
+		return domain.AgentTrialResult{}, domain.E(503, "service_unavailable", "agent runtime is temporarily unavailable").WithReasonCode("agent_runtime_unavailable")
 	}
-	return domain.AgentTrialResult{Reply: reply, LatencyMs: latencyMs, ToolsUsed: toolsUsed, ModelName: model.ModelName}, nil
+	return domain.AgentTrialResult{Reply: reply, LatencyMs: latencyMs, ToolsUsed: toolsUsed, AgentsUsed: agentsUsed, ModelName: model.ModelName}, nil
 }
 
 // trialReply 優先使用已注入的 AgentChatRuntime，並只回報 runtime 實際成功呼叫的工具。
-func (c AgentService) trialReply(ctx RequestContext, agent domain.AgentDefinition, model domain.AgentModel, message string) (string, []string, error) {
+func (c AgentService) trialReply(ctx RequestContext, agent domain.AgentDefinition, model domain.AgentModel, message string) (string, []string, []string, error) {
 	if c.agentChatRuntime == nil {
-		return fmt.Sprintf("[%s] mock reply using %s: %s", agent.Name, model.ModelName, message), []string{}, nil
+		return fmt.Sprintf("[%s] mock reply using %s: %s", agent.Name, model.ModelName, message), []string{}, []string{agent.Name}, nil
 	}
 	var answer strings.Builder
 	toolsUsed := make([]string, 0)
+	agentsUsed := make([]string, 0)
 	seenTools := map[string]struct{}{}
+	seenAgents := map[string]struct{}{}
 	emit := func(_ context.Context, event domain.AgentChatEvent) error {
-		if event.Event == domain.AgentChatEventMessageDelta {
+		if agentName := strings.TrimSpace(event.AgentName); agentName != "" {
+			if _, exists := seenAgents[agentName]; !exists {
+				seenAgents[agentName] = struct{}{}
+				agentsUsed = append(agentsUsed, agentName)
+			}
+		}
+		if event.Event == domain.AgentChatEventMessageDelta && (len(agent.SubAgents) == 0 || event.AgentName == "" || event.AgentName == agent.Name) {
 			answer.WriteString(event.Delta)
 			return nil
 		}
@@ -526,30 +587,48 @@ func (c AgentService) trialReply(ctx RequestContext, agent domain.AgentDefinitio
 		}
 		return nil
 	}
-	baseCtx, cancel := context.WithTimeout(goContext(ctx), effectiveAgentRuntimeTimeout(agent.TimeoutSeconds, model.TimeoutSeconds))
+	runtimeTimeout := effectiveAgentRuntimeTimeout(agent.TimeoutSeconds, model.TimeoutSeconds)
+	resolvedSubAgents, runtimeTimeout, err := c.resolveAgentTeamMembers(ctx, agent.SubAgents, runtimeTimeout)
+	if err != nil {
+		return "", []string{}, []string{}, err
+	}
+	baseCtx, cancel := context.WithTimeout(goContext(ctx), runtimeTimeout)
 	defer cancel()
 	baseCtx = WithAgentRequestContext(baseCtx, ctx)
 	modelName := strings.TrimSpace(model.LiteLLMModel)
 	if modelName == "" {
 		modelName = strings.TrimSpace(model.ModelName)
 	}
+	runtimeSubAgents := make([]AgentChatSubAgentRuntimeRequest, 0, len(resolvedSubAgents))
+	for _, member := range resolvedSubAgents {
+		runtimeSubAgents = append(runtimeSubAgents, AgentChatSubAgentRuntimeRequest{
+			ID:        member.ID,
+			Name:      member.Name,
+			Role:      member.Role,
+			ModelName: member.ModelName,
+			Tools:     c.filteredReadonlyAgentTools(ctx, member.ToolNames, true, emit, member.KnowledgeBaseIDs),
+		})
+	}
 	req := AgentChatRuntimeRequest{
 		RequestContext: ctx,
 		RunID:          "trial-" + agent.ID,
 		SessionID:      "trial-" + agent.ID,
+		AgentName:      agent.Name,
+		AgentRole:      agent.MainAgentRole,
 		ModelName:      modelName,
 		Message:        buildAgentRuntimeMessage(agent.SystemPrompt, nil, nil, message),
 		Mode:           "trial",
-		Tools:          c.filteredAgentReadOnlyTools(ctx, agent.Tools, true, emit),
+		Tools:          c.filteredReadonlyAgentTools(ctx, agent.Tools, true, emit, agent.KnowledgeBaseIDs),
+		SubAgents:      runtimeSubAgents,
 	}
 	if err := c.agentChatRuntime.RunAgentChat(baseCtx, req, emit); err != nil {
-		return "", []string{}, err
+		return "", []string{}, agentsUsed, err
 	}
 	reply := strings.TrimSpace(answer.String())
 	if reply == "" {
-		return fmt.Sprintf("[%s] mock reply using %s: %s", agent.Name, model.ModelName, message), toolsUsed, nil
+		return fmt.Sprintf("[%s] mock reply using %s: %s", agent.Name, model.ModelName, message), toolsUsed, agentsUsed, nil
 	}
-	return reply, toolsUsed, nil
+	return reply, toolsUsed, agentsUsed, nil
 }
 
 // RollbackDefinition 以歷史版本建立新的目前版本。
@@ -571,7 +650,10 @@ func (c AgentService) RollbackDefinition(ctx RequestContext, id string, input do
 	}
 	agent.SystemPrompt = version.SystemPrompt
 	agent.Tools = version.Tools
+	agent.KnowledgeBaseIDs = version.KnowledgeBaseIDs
 	agent.ModelID = version.ModelID
+	agent.MainAgentRole = version.MainAgentRole
+	agent.SubAgents = version.SubAgents
 	agent.Version++
 	agent.UpdatedByAccountID = account.ID
 	agent.UpdatedAt = c.Now()
@@ -596,11 +678,242 @@ func (c AgentService) RollbackDefinition(ctx RequestContext, id string, input do
 
 // Tools 回傳靜態可用工具目錄。
 func (c AgentService) Tools(ctx RequestContext) ([]domain.AgentToolMeta, error) {
-	if _, _, err := c.requireAgentAuthz(ctx, ResourceDefinition, ActionRead, ""); err != nil {
+	if _, _, err := c.requireAgentAuthz(ctx, ResourceTool, ActionRead, ""); err != nil {
 		return nil, err
 	}
 	return agentToolCatalog(), nil
 }
+
+// ListExternalTools returns external tool registrations owned by the current tenant.
+func (c AgentService) ListExternalTools(ctx RequestContext) ([]domain.AgentExternalTool, error) {
+	if _, _, err := c.requireAgentAuthz(ctx, ResourceTool, ActionRead, ""); err != nil {
+		return nil, err
+	}
+	return c.store.ListAgentExternalTools(goContext(ctx), ctx.TenantID)
+}
+
+// CreateExternalTool registers connection metadata without enabling runtime calls.
+func (c AgentService) CreateExternalTool(ctx RequestContext, input domain.CreateAgentExternalToolInput) (domain.AgentExternalTool, error) {
+	account, _, err := c.requireAgentAuthz(ctx, ResourceTool, ActionCreate, "")
+	if err != nil {
+		return domain.AgentExternalTool{}, err
+	}
+	name := strings.TrimSpace(input.Name)
+	if name == "" {
+		return domain.AgentExternalTool{}, BadRequest("name is required")
+	}
+	if len([]rune(name)) > 120 {
+		return domain.AgentExternalTool{}, BadRequest("name must not exceed 120 characters")
+	}
+	description := strings.TrimSpace(input.Description)
+	if len([]rune(description)) > 500 {
+		return domain.AgentExternalTool{}, BadRequest("description must not exceed 500 characters")
+	}
+	kind := strings.ToLower(strings.TrimSpace(input.Kind))
+	if kind == "" {
+		kind = "mcp"
+	}
+	if kind != "mcp" && kind != "http" {
+		return domain.AgentExternalTool{}, BadRequest("kind must be mcp or http")
+	}
+	transport, err := normalizeExternalToolTransport(kind, input.Transport)
+	if err != nil {
+		return domain.AgentExternalTool{}, err
+	}
+	endpointURL, err := normalizeExternalToolEndpoint(input.EndpointURL)
+	if err != nil {
+		return domain.AgentExternalTool{}, err
+	}
+	auth, err := normalizeExternalToolAuth(input)
+	if err != nil {
+		return domain.AgentExternalTool{}, err
+	}
+	now := c.Now()
+	id := utils.NewID("atool")
+	credentialCiphertext := ""
+	if auth.secret != "" {
+		if c.agentToolCredentials == nil {
+			return domain.AgentExternalTool{}, domain.E(503, "service_unavailable", "external tool credential storage is not configured")
+		}
+		credentialCiphertext, err = c.agentToolCredentials.Encrypt([]byte(auth.secret), externalToolCredentialAAD(ctx.TenantID, id))
+		if err != nil {
+			return domain.AgentExternalTool{}, domain.E(500, "internal_error", "failed to protect external tool credential")
+		}
+	}
+	item := domain.AgentExternalTool{
+		ID:                   id,
+		TenantID:             ctx.TenantID,
+		Name:                 name,
+		Description:          description,
+		Kind:                 kind,
+		Transport:            transport,
+		EndpointURL:          endpointURL,
+		AuthType:             auth.authType,
+		AuthHeaderName:       auth.headerName,
+		AuthUsername:         auth.username,
+		AuthSecretCiphertext: credentialCiphertext,
+		CredentialSet:        credentialCiphertext != "",
+		CreatedByAccountID:   account.ID,
+		CreatedAt:            now,
+	}
+	if err := c.withTransaction(ctx, func(tx AgentService) error {
+		if err := tx.store.InsertAgentExternalTool(goContext(ctx), item); err != nil {
+			return err
+		}
+		return tx.recordAgentAdminAudit(ctx, account, "external_tool", item.ID, item.Name, "create", "external tool registered")
+	}); err != nil {
+		return domain.AgentExternalTool{}, err
+	}
+	return item, nil
+}
+
+// DeleteExternalTool removes external tool metadata from the current tenant.
+func (c AgentService) DeleteExternalTool(ctx RequestContext, id string) (domain.AgentExternalTool, error) {
+	account, _, err := c.requireAgentAuthz(ctx, ResourceTool, ActionDelete, id)
+	if err != nil {
+		return domain.AgentExternalTool{}, err
+	}
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.AgentExternalTool{}, BadRequest("id is required")
+	}
+	var deleted domain.AgentExternalTool
+	err = c.withTransaction(ctx, func(tx AgentService) error {
+		item, ok, err := tx.store.DeleteAgentExternalTool(goContext(ctx), ctx.TenantID, id)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("agent external tool", id)
+		}
+		if err := tx.recordAgentAdminAudit(ctx, account, "external_tool", item.ID, item.Name, "delete", "external tool deleted"); err != nil {
+			return err
+		}
+		deleted = item
+		return nil
+	})
+	return deleted, err
+}
+
+type normalizedExternalToolAuth struct {
+	authType   string
+	headerName string
+	username   string
+	secret     string
+}
+
+// normalizeExternalToolTransport keeps MCP transport explicit while HTTP APIs use their native transport.
+func normalizeExternalToolTransport(kind, value string) (string, error) {
+	transport := strings.ToLower(strings.TrimSpace(value))
+	if kind == "http" {
+		if transport == "" || transport == "http" {
+			return "http", nil
+		}
+		return "", BadRequest("transport must be http when kind is http")
+	}
+	if transport == "" || transport == "http" {
+		transport = "streamable_http"
+	}
+	if transport != "sse" && transport != "streamable_http" {
+		return "", BadRequest("transport must be sse or streamable_http when kind is mcp")
+	}
+	return transport, nil
+}
+
+// normalizeExternalToolAuth validates supported credential shapes without logging or returning the secret.
+func normalizeExternalToolAuth(input domain.CreateAgentExternalToolInput) (normalizedExternalToolAuth, error) {
+	authType := strings.ToLower(strings.TrimSpace(input.AuthType))
+	if authType == "" {
+		authType = "none"
+	}
+	headerName := strings.TrimSpace(input.AuthHeaderName)
+	username := strings.TrimSpace(input.AuthUsername)
+	secret := input.AuthSecret
+	if len(secret) > 8192 {
+		return normalizedExternalToolAuth{}, BadRequest("auth_secret must not exceed 8192 bytes")
+	}
+	switch authType {
+	case "none":
+		if headerName != "" || username != "" || secret != "" {
+			return normalizedExternalToolAuth{}, BadRequest("authentication fields require an auth_type")
+		}
+	case "bearer":
+		if secret == "" {
+			return normalizedExternalToolAuth{}, BadRequest("auth_secret is required for bearer authentication")
+		}
+		if headerName != "" || username != "" {
+			return normalizedExternalToolAuth{}, BadRequest("bearer authentication does not accept auth_header_name or auth_username")
+		}
+	case "api_key":
+		if headerName == "" {
+			headerName = "X-API-Key"
+		}
+		if len(headerName) > 100 || !validHTTPHeaderName(headerName) {
+			return normalizedExternalToolAuth{}, BadRequest("auth_header_name must be a valid HTTP header name")
+		}
+		if secret == "" {
+			return normalizedExternalToolAuth{}, BadRequest("auth_secret is required for api_key authentication")
+		}
+		if username != "" {
+			return normalizedExternalToolAuth{}, BadRequest("api_key authentication does not accept auth_username")
+		}
+	case "basic":
+		if username == "" {
+			return normalizedExternalToolAuth{}, BadRequest("auth_username is required for basic authentication")
+		}
+		if len([]rune(username)) > 200 {
+			return normalizedExternalToolAuth{}, BadRequest("auth_username must not exceed 200 characters")
+		}
+		if secret == "" {
+			return normalizedExternalToolAuth{}, BadRequest("auth_secret is required for basic authentication")
+		}
+		if headerName != "" {
+			return normalizedExternalToolAuth{}, BadRequest("basic authentication does not accept auth_header_name")
+		}
+	default:
+		return normalizedExternalToolAuth{}, BadRequest("auth_type must be none, bearer, api_key, or basic")
+	}
+	return normalizedExternalToolAuth{authType: authType, headerName: headerName, username: username, secret: secret}, nil
+}
+
+// validHTTPHeaderName applies the RFC token character set used by HTTP header field names.
+func validHTTPHeaderName(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') || (char >= '0' && char <= '9') {
+			continue
+		}
+		switch char {
+		case '!', '#', '$', '%', '&', '\'', '*', '+', '-', '.', '^', '_', '`', '|', '~':
+			continue
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// externalToolCredentialAAD binds ciphertext to one tenant and tool identifier.
+func externalToolCredentialAAD(tenantID, toolID string) []byte {
+	return []byte(tenantID + "\x00" + toolID)
+}
+
+// normalizeExternalToolEndpoint accepts explicit HTTP(S) endpoints and rejects embedded credentials.
+func normalizeExternalToolEndpoint(value string) (string, error) {
+	raw := strings.TrimSpace(value)
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Host == "" || (parsed.Scheme != "http" && parsed.Scheme != "https") {
+		return "", BadRequest("endpoint_url must be an absolute http or https URL")
+	}
+	if parsed.User != nil {
+		return "", BadRequest("endpoint_url must not contain embedded credentials")
+	}
+	parsed.Fragment = ""
+	return parsed.String(), nil
+}
+
 func agentToolCatalog() []domain.AgentToolMeta {
 	return []domain.AgentToolMeta{
 		{Value: "knowledge.search", Label: "Knowledge Search", Description: "Search tenant knowledge content.", Readonly: true, RequiredPermission: "agent.tool.call:knowledge.search"},
@@ -611,6 +924,19 @@ func agentToolCatalog() []domain.AgentToolMeta {
 		{Value: "my_clock_records", Label: "My Clock Records", Description: "Read current account clock records.", Readonly: true, RequiredPermission: "agent.tool.call:my_clock_records"},
 		{Value: "my_pending_reviews", Label: "My Pending Reviews", Description: "Read pending workflow reviews.", Readonly: true, RequiredPermission: "agent.tool.call:my_pending_reviews"},
 		{Value: "workspace_insights", Label: "Workspace Insights", Description: "Read workspace insight reports.", Readonly: true, RequiredPermission: "agent.tool.call:workspace_insights"},
+		{Value: "list_published_form_templates", Label: "Published Forms", Description: "List published forms available to the current account.", Readonly: true, RequiredPermission: "agent.tool.call:list_published_form_templates"},
+		{Value: "get_published_form_template", Label: "Form Schema", Description: "Read an Agent-safe form schema and data sources.", Readonly: true, RequiredPermission: "agent.tool.call:get_published_form_template"},
+		{Value: "create_form_draft", Label: "Create Form Draft", Description: "Create a reversible form draft for the current account.", Readonly: false, RequiredPermission: "agent.tool.call:create_form_draft"},
+		{Value: "update_form_draft", Label: "Update Form Draft", Description: "Update a reversible form draft owned by the current account.", Readonly: false, RequiredPermission: "agent.tool.call:update_form_draft"},
+		{Value: "preview_form_submission", Label: "Preview Form Submission", Description: "Validate a draft and prepare explicit user confirmation.", Readonly: true, RequiredPermission: "agent.tool.call:preview_form_submission"},
+		{Value: "prepare_bulk_review", Label: "Prepare Bulk Review", Description: "Prepare a fixed review batch for explicit user confirmation.", Readonly: true, RequiredPermission: "agent.tool.call:prepare_bulk_review"},
+		{Value: "form.get_capabilities", Label: "Form Builder Capabilities", Description: "Read controlled form schema, widgets, data-source metadata, and workflow roles.", Readonly: true, RequiredPermission: "agent.tool.call:form.get_capabilities"},
+		{Value: "form.get_data_source_schema", Label: "Form Data Source Schema", Description: "Read metadata-only data-source fields for form authoring.", Readonly: true, RequiredPermission: "agent.tool.call:form.get_data_source_schema"},
+		{Value: "form.create_draft", Label: "Create Form Definition Draft", Description: "Create a reversible Agent-authored form definition draft.", Readonly: false, RequiredPermission: "agent.tool.call:form.create_draft"},
+		{Value: "form.update_draft", Label: "Update Form Definition Draft", Description: "Update an Agent-authored form definition draft with revision protection.", Readonly: false, RequiredPermission: "agent.tool.call:form.update_draft"},
+		{Value: "form.validate_draft", Label: "Validate Form Definition Draft", Description: "Validate and compile a controlled form definition draft.", Readonly: true, RequiredPermission: "agent.tool.call:form.validate_draft"},
+		{Value: "form.preview_draft", Label: "Preview Form Definition Draft", Description: "Preview a controlled form definition draft.", Readonly: true, RequiredPermission: "agent.tool.call:form.preview_draft"},
+		{Value: "form.simulate_workflow", Label: "Simulate Form Workflow", Description: "Simulate the form approval path without starting a real workflow.", Readonly: true, RequiredPermission: "agent.tool.call:form.simulate_workflow"},
 	}
 }
 
@@ -657,10 +983,7 @@ func (c AgentService) normalizeAgentModel(ctx RequestContext, model domain.Agent
 	if model.ModelName == "" {
 		return domain.AgentModel{}, BadRequest("model_name is required")
 	}
-	model.LiteLLMModel = strings.TrimSpace(model.LiteLLMModel)
-	if model.LiteLLMModel == "" {
-		model.LiteLLMModel = model.ModelName
-	}
+	model.LiteLLMModel = domain.AgentModelLiteLLMAlias(model.ID)
 	model.APIBaseURL = strings.TrimRight(strings.TrimSpace(model.APIBaseURL), "/")
 	model.APIKey = strings.TrimSpace(model.APIKey)
 	if model.APIKey == "" {
@@ -694,7 +1017,24 @@ func (c AgentService) normalizeAgentModel(ctx RequestContext, model domain.Agent
 	if model.LastTestStatus == "" {
 		model.LastTestStatus = "untested"
 	}
+	if model.SyncStatus == "" {
+		model.SyncStatus = domain.AgentModelSyncStatusPending
+	}
 	return model, nil
+}
+
+// appendAgentModelSyncEvent 在模型資料交易內追加不含密鑰的 LiteLLM 同步事件。
+func (c AgentService) appendAgentModelSyncEvent(ctx RequestContext, modelID string, eventType domain.EventType) error {
+	return c.store.AppendOutboxEvent(goContext(ctx), domain.OutboxEvent{
+		ID:            utils.NewID("outbox"),
+		TenantID:      ctx.TenantID,
+		EventType:     string(eventType),
+		AggregateType: domain.OutboxAggregateAgentModel,
+		AggregateID:   modelID,
+		Payload:       map[string]any{"model_id": modelID},
+		Status:        "pending",
+		CreatedAt:     c.Now(),
+	})
 }
 
 func agentModelProviderRequiresBaseURL(provider string) bool {
@@ -758,15 +1098,85 @@ func (c AgentService) normalizeAgentDefinition(ctx RequestContext, agent domain.
 	if agent.Version <= 0 {
 		agent.Version = 1
 	}
+	if agent.PublishedVersion < 0 || agent.PublishedVersion > agent.Version {
+		return domain.AgentDefinition{}, BadRequest("published_version must reference an existing version")
+	}
+	agent.MainAgentRole = strings.TrimSpace(agent.MainAgentRole)
+	if agent.MainAgentRole == "" {
+		agent.MainAgentRole = "理解使用者目标，按子 Agent 的职责进行委派，并验证与汇总最终结果。"
+	}
 	agent.Tools = uniqueStrings(agent.Tools)
 	if err := validateAgentTools(agent.Tools); err != nil {
 		return domain.AgentDefinition{}, err
+	}
+	agent.KnowledgeBaseIDs = uniqueStrings(agent.KnowledgeBaseIDs)
+	if err := c.validateKnowledgeBaseReferences(ctx, agent.KnowledgeBaseIDs); err != nil {
+		return domain.AgentDefinition{}, err
+	}
+	if len(agent.SubAgents) > 6 {
+		return domain.AgentDefinition{}, BadRequest("sub_agents supports at most 6 members")
+	}
+	seenMemberIDs := map[string]struct{}{}
+	seenMemberNames := map[string]struct{}{}
+	for index := range agent.SubAgents {
+		member := &agent.SubAgents[index]
+		member.ID = strings.TrimSpace(member.ID)
+		if member.ID == "" {
+			member.ID = utils.NewID("asub")
+		}
+		member.Name = strings.TrimSpace(member.Name)
+		if member.Name == "" {
+			return domain.AgentDefinition{}, BadRequest("sub agent name is required")
+		}
+		member.Role = strings.TrimSpace(member.Role)
+		if member.Role == "" {
+			return domain.AgentDefinition{}, BadRequest("sub agent role is required")
+		}
+		member.ModelID = strings.TrimSpace(member.ModelID)
+		if member.ModelID == "" {
+			member.ModelID = agent.ModelID
+		}
+		if err := c.requireAgentModelReference(ctx, member.ModelID); err != nil {
+			return domain.AgentDefinition{}, err
+		}
+		member.Tools = uniqueStrings(member.Tools)
+		if err := validateAgentTools(member.Tools); err != nil {
+			return domain.AgentDefinition{}, err
+		}
+		member.KnowledgeBaseIDs = uniqueStrings(member.KnowledgeBaseIDs)
+		if err := c.validateKnowledgeBaseReferences(ctx, member.KnowledgeBaseIDs); err != nil {
+			return domain.AgentDefinition{}, err
+		}
+		if _, exists := seenMemberIDs[member.ID]; exists {
+			return domain.AgentDefinition{}, BadRequest("sub agent id must be unique")
+		}
+		nameKey := strings.ToLower(member.Name)
+		if _, exists := seenMemberNames[nameKey]; exists {
+			return domain.AgentDefinition{}, BadRequest("sub agent name must be unique")
+		}
+		seenMemberIDs[member.ID] = struct{}{}
+		seenMemberNames[nameKey] = struct{}{}
 	}
 	agent.VisibilityTargets = uniqueStrings(agent.VisibilityTargets)
 	if err := c.validateAgentVisibilityTargets(ctx, &agent); err != nil {
 		return domain.AgentDefinition{}, err
 	}
 	return agent, nil
+}
+
+// validateKnowledgeBaseReferences 保證 Agent 只能綁定目前租戶存在的知識庫。
+func (c AgentService) validateKnowledgeBaseReferences(ctx RequestContext, ids []string) error {
+	for _, id := range ids {
+		if _, _, err := c.requireAgentAuthz(ctx, knowledgeBaseResource, ActionRead, id); err != nil {
+			return err
+		}
+		if _, ok, err := c.store.GetKnowledgeBase(goContext(ctx), ctx.TenantID, id); err != nil {
+			return err
+		} else if !ok {
+			return BadRequest("knowledge base does not exist: " + id)
+		}
+	}
+	return nil
 }
 
 // validateAgentVisibilityTargets 驗證可見範圍目標存在於目前租戶，並封閉空白 scoped 設定。
@@ -832,13 +1242,30 @@ func (c AgentService) snapshotAgentDefinition(ctx RequestContext, agent domain.A
 		TenantID:           ctx.TenantID,
 		AgentID:            agent.ID,
 		Version:            agent.Version,
+		MainAgentRole:      agent.MainAgentRole,
+		SubAgents:          agent.SubAgents,
 		SystemPrompt:       agent.SystemPrompt,
 		Tools:              agent.Tools,
+		KnowledgeBaseIDs:   agent.KnowledgeBaseIDs,
 		ModelID:            agent.ModelID,
 		Note:               note,
 		CreatedByAccountID: actorID,
 		CreatedAt:          c.Now(),
 	})
+}
+
+// agentDefinitionRuntimeSignature 生成会影响真实执行的稳定配置签名。
+func agentDefinitionRuntimeSignature(agent domain.AgentDefinition) string {
+	payload := struct {
+		MainAgentRole    string                   `json:"main_agent_role"`
+		SubAgents        []domain.AgentTeamMember `json:"sub_agents"`
+		SystemPrompt     string                   `json:"system_prompt"`
+		Tools            []string                 `json:"tools"`
+		KnowledgeBaseIDs []string                 `json:"knowledge_base_ids"`
+		ModelID          string                   `json:"model_id"`
+	}{agent.MainAgentRole, agent.SubAgents, agent.SystemPrompt, agent.Tools, agent.KnowledgeBaseIDs, agent.ModelID}
+	encoded, _ := json.Marshal(payload)
+	return string(encoded)
 }
 
 func (c AgentService) recordAgentAdminAudit(ctx RequestContext, account Account, entityType, entityID, entityName, action, detail string) error {

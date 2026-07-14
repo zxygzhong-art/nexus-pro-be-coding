@@ -54,12 +54,22 @@ func (c *Service) getAuthzSnapshot(ctx context.Context, key string) (CheckResult
 	return result, true
 }
 
-// setAuthzSnapshot 處理集合授權快照的服務流程。
-func (c *Service) setAuthzSnapshot(ctx context.Context, key string, result CheckResult) {
+// setAuthzSnapshot 依最早授權期限限制 allow 快照壽命，避免過期權限繼續生效。
+func (c *Service) setAuthzSnapshot(ctx context.Context, key string, result CheckResult, validUntil *time.Time) {
 	if c.authzSnapshot == nil {
 		return
 	}
-	_ = c.authzSnapshot.SetAuthzSnapshot(ctx, key, result, 5*time.Minute)
+	ttl := 5 * time.Minute
+	if validUntil != nil {
+		remaining := validUntil.Sub(c.Now())
+		if remaining <= 0 {
+			return
+		}
+		if remaining < ttl {
+			ttl = remaining
+		}
+	}
+	_ = c.authzSnapshot.SetAuthzSnapshot(ctx, key, result, ttl)
 }
 
 // invalidateAuthzSnapshots 處理 invalidate 授權 snapshots 的服務流程。

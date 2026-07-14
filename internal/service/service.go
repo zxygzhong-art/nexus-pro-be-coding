@@ -22,10 +22,12 @@ type Service struct {
 	openFGAScopeChecks    bool
 	agentChatRuntime      AgentChatRuntime
 	liteLLMAdmin          LiteLLMAdminClient
+	knowledgeEmbedder     KnowledgeEmbedder
 	objectStore           ObjectStore
 	ehrmsClient           EHRMSClient
 	identityProvisioner   IdentityProvisioner
 	formApprovalWorkflows FormApprovalWorkflowClient
+	agentToolCredentials  AgentToolCredentialCipher
 }
 
 // Options 定義選項的資料結構。
@@ -37,16 +39,32 @@ type Options struct {
 	OpenFGAScopeChecks    bool
 	AgentChatRuntime      AgentChatRuntime
 	LiteLLMAdmin          LiteLLMAdminClient
+	KnowledgeEmbedder     KnowledgeEmbedder
 	ObjectStore           ObjectStore
 	EHRMSClient           EHRMSClient
 	IdentityProvisioner   IdentityProvisioner
 	FormApprovalWorkflows FormApprovalWorkflowClient
+	AgentToolCredentials  AgentToolCredentialCipher
+}
+
+// AgentToolCredentialCipher encrypts external-tool credentials with contextual associated data.
+type AgentToolCredentialCipher interface {
+	Encrypt(plaintext, associatedData []byte) (string, error)
+	Decrypt(ciphertext string, associatedData []byte) ([]byte, error)
 }
 
 // LiteLLMAdminClient 定義 LiteLLM 管理與探測 client 行為契約。
 type LiteLLMAdminClient interface {
 	SyncModel(context.Context, domain.AgentModel) (string, error)
+	DeleteModel(context.Context, string) (string, error)
+	ListManagedModelIDs(context.Context) ([]string, error)
 	TestModel(context.Context, domain.AgentModel) (string, error)
+}
+
+// KnowledgeEmbedder generates vectors through a stable public model alias.
+type KnowledgeEmbedder interface {
+	Model() string
+	Embed(context.Context, []string) ([][]float32, error)
 }
 
 // RelationshipChecker 定義關係 checker 的行為契約。
@@ -98,10 +116,12 @@ func New(store repository.Store, options ...Options) *Service {
 		openFGAScopeChecks:    cfg.OpenFGAScopeChecks,
 		agentChatRuntime:      cfg.AgentChatRuntime,
 		liteLLMAdmin:          cfg.LiteLLMAdmin,
+		knowledgeEmbedder:     cfg.KnowledgeEmbedder,
 		objectStore:           firstObjectStore(cfg.ObjectStore),
 		ehrmsClient:           cfg.EHRMSClient,
 		identityProvisioner:   cfg.IdentityProvisioner,
 		formApprovalWorkflows: cfg.FormApprovalWorkflows,
+		agentToolCredentials:  cfg.AgentToolCredentials,
 	}
 }
 
@@ -390,15 +410,23 @@ func (c *Service) resolveAccess(ctx RequestContext, account Account) ([]Permissi
 
 // activeUserGroupsForAccount 以成員關係表解析帳號目前有效的使用者群組。
 func (c *Service) activeUserGroupsForAccount(ctx RequestContext, account Account) ([]UserGroup, error) {
+	groups, _, err := c.activeUserGroupsForAccountWithExpiries(ctx, account)
+	return groups, err
+}
+
+// activeUserGroupsForAccountWithExpiries 同時回傳群組成員關係期限，供授權快照限制 TTL。
+func (c *Service) activeUserGroupsForAccountWithExpiries(ctx RequestContext, account Account) ([]UserGroup, map[string]*time.Time, error) {
 	at := c.Now()
 	memberships, err := c.store.ListActiveGroupMembershipsForAccount(goContext(ctx), ctx.TenantID, account.ID, at)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	groups := make([]UserGroup, 0, len(memberships)+len(account.UserGroupIDs))
 	seen := map[string]struct{}{}
-	addGroup := func(groupID string) error {
+	expiries := map[string]*time.Time{}
+	addGroup := func(groupID string, validUntil *time.Time) error {
 		if _, ok := seen[groupID]; ok {
+			expiries[groupID] = earliestExpiry(expiries[groupID], validUntil)
 			return nil
 		}
 		group, ok, err := c.store.GetUserGroup(goContext(ctx), ctx.TenantID, groupID)
@@ -409,12 +437,13 @@ func (c *Service) activeUserGroupsForAccount(ctx RequestContext, account Account
 			return nil
 		}
 		seen[groupID] = struct{}{}
+		expiries[groupID] = validUntil
 		groups = append(groups, group)
 		return nil
 	}
 	for _, membership := range memberships {
-		if err := addGroup(membership.UserGroupID); err != nil {
-			return nil, err
+		if err := addGroup(membership.UserGroupID, membership.ValidUntil); err != nil {
+			return nil, nil, err
 		}
 	}
 	for _, groupID := range account.UserGroupIDs {
@@ -423,21 +452,21 @@ func (c *Service) activeUserGroupsForAccount(ctx RequestContext, account Account
 		}
 		membership, ok, err := c.store.GetGroupMembership(goContext(ctx), ctx.TenantID, groupID, account.ID)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		if ok {
 			if groupMembershipActiveAt(membership, at) {
-				if err := addGroup(groupID); err != nil {
-					return nil, err
+				if err := addGroup(groupID, membership.ValidUntil); err != nil {
+					return nil, nil, err
 				}
 			}
 			continue
 		}
-		if err := addGroup(groupID); err != nil {
-			return nil, err
+		if err := addGroup(groupID, nil); err != nil {
+			return nil, nil, err
 		}
 	}
-	return groups, nil
+	return groups, expiries, nil
 }
 
 // groupMembershipActiveAt 判斷群組成員關係在指定時間是否有效。

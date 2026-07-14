@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -199,6 +200,69 @@ func TestPermissionPackageUpgradeImportReportsDiffWithoutDeletingTenantCustomiza
 	}
 }
 
+// TestPermissionPackageUpgradeConvergesManagedSecurityArtifacts 驗證新版權限包會收斂既有 managed set、scope 與 role。
+func TestPermissionPackageUpgradeConvergesManagedSecurityArtifacts(t *testing.T) {
+	now := time.Now().UTC()
+	store, svc, ctx := permissionPackageFixture(now)
+	initial := testPermissionPackageContent("1.0.0")
+	initial.AssumableRoleTemplates[0].PermissionBoundary = map[string]any{"allow": []string{"hr.employee.read"}}
+	first := registerAndPublishPackage(t, svc, ctx, initial)
+	if _, err := svc.IAM().ImportPermissionPackage(ctx, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	roles, _ := store.ListAssumableRoles(context.Background(), "tenant-1")
+	role, ok := findAssumableRoleBySource(roles, "support_readonly")
+	if !ok {
+		t.Fatal("expected imported role")
+	}
+	activeUntil := now.Add(time.Hour)
+	_ = store.UpsertAssumableRoleSession(context.Background(), domain.AssumableRoleSession{
+		ID: "session-old-package", TenantID: "tenant-1", AccountID: "acct-admin", AssumableRoleID: role.ID,
+		ExpiresAt: activeUntil, CreatedAt: now,
+	})
+
+	upgraded := testPermissionPackageContent("1.1.0")
+	upgraded.PermissionSetTemplates[0].Name = "Base Reader Narrowed"
+	upgraded.PermissionSetTemplates[0].Permissions[0].Scope = domain.ScopeSelf
+	upgraded.DataScopes[0].ScopeType = string(domain.ScopeSelf)
+	upgraded.AssumableRoleTemplates[0].Trusted = false
+	upgraded.AssumableRoleTemplates[0].PermissionBoundary = map[string]any{"allow": []string{"hr.employee.read"}}
+	upgraded.AssumableRoleTemplates[0].SessionDurationSeconds = 300
+	second := registerAndPublishPackage(t, svc, ctx, upgraded)
+	if _, err := svc.IAM().ImportPermissionPackage(ctx, second.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	sets, _ := store.ListPermissionSets(context.Background(), "tenant-1")
+	set, ok := findPermissionSetBySource(sets, "base_reader")
+	if !ok || set.Name != "Base Reader Narrowed" || set.SourcePackageVersion != "1.1.0" || len(set.Permissions) != 1 || set.Permissions[0].Scope != domain.ScopeSelf {
+		t.Fatalf("expected managed permission set to converge, got %+v", set)
+	}
+	scopes, _ := store.ListDataScopes(context.Background(), "tenant-1")
+	if len(scopes) != 1 || scopes[0].ScopeType != string(domain.ScopeSelf) {
+		t.Fatalf("expected managed data scope to converge, got %+v", scopes)
+	}
+	roles, _ = store.ListAssumableRoles(context.Background(), "tenant-1")
+	role, ok = findAssumableRoleBySource(roles, "support_readonly")
+	if !ok || role.Trusted || role.SessionDurationSeconds != 300 || role.SourcePackageVersion != "1.1.0" {
+		t.Fatalf("expected managed role to converge, got %+v", role)
+	}
+	if _, active, err := store.GetActiveAssumableRoleSession(context.Background(), "tenant-1", "session-old-package"); err != nil || active {
+		t.Fatalf("expected prior managed-role session to be revoked, active=%v err=%v", active, err)
+	}
+}
+
+// TestTenantPermissionDoesNotAuthorizeGlobalPackageRegistryWrite 驗證租戶 IAM 權限不能單獨寫入全域 registry。
+func TestTenantPermissionDoesNotAuthorizeGlobalPackageRegistryWrite(t *testing.T) {
+	now := time.Now().UTC()
+	store, _, ctx := permissionPackageFixture(now)
+	ctx.PlatformAdmin = false
+	_, err := service.New(store, service.Options{Now: func() time.Time { return now }}).IAM().RegisterPermissionPackage(ctx, testPermissionPackageContent("9.9.9"))
+	if err == nil || !strings.Contains(err.Error(), "global permission package registry") {
+		t.Fatalf("expected tenant-local permission to be insufficient for registry write, got %v", err)
+	}
+}
+
 func permissionPackageFixture(now time.Time) (*memory.Store, *service.Service, domain.RequestContext) {
 	store := memory.NewStore()
 	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
@@ -222,7 +286,7 @@ func permissionPackageFixture(now time.Time) (*memory.Store, *service.Service, d
 		CreatedAt:              now,
 	})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin", PlatformAdmin: true}
 	return store, svc, ctx
 }
 

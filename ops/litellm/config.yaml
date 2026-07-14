@@ -1,7 +1,11 @@
 model_list:
-  - model_name: openai/gpt-4.1-mini
+  - model_name: nexus-agent-fallback
     litellm_params:
       model: os.environ/LITELLM_UPSTREAM_MODEL
+      api_key: os.environ/OPENAI_API_KEY
+  - model_name: nexus-pro-embedding
+    litellm_params:
+      model: os.environ/LITELLM_EMBEDDING_UPSTREAM_MODEL
       api_key: os.environ/OPENAI_API_KEY
 
 general_settings:

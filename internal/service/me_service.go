@@ -3,6 +3,8 @@ package service
 import (
 	"sort"
 	"strings"
+
+	"nexus-pro-be/internal/utils"
 )
 
 // MeService 定義 me 服務的資料結構。
@@ -36,15 +38,11 @@ func (c MeService) Resolve(ctx RequestContext) (MeResponse, error) {
 	}
 
 	var employee *Employee
-	if account.EmployeeID != "" {
-		v, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, account.EmployeeID)
-		if err != nil {
-			return MeResponse{}, err
-		}
-		if ok {
-			emp := c.enrichEmployeeProfile(ctx, v)
-			employee = &emp
-		}
+	if v, ok, err := c.employeeForAccount(ctx, account); err != nil {
+		return MeResponse{}, err
+	} else if ok {
+		emp := c.enrichEmployeeProfile(ctx, v)
+		employee = &emp
 	}
 
 	role, _, err := c.activeAssumableRole(ctx, account)
@@ -70,6 +68,106 @@ func (c MeService) Resolve(ctx RequestContext) (MeResponse, error) {
 		EffectiveMenuKeys:    effectiveMenuKeys,
 		Capabilities:         capabilities,
 	}, nil
+}
+
+// UpdateProfile applies the allowlisted self-service fields to the current user's linked employee.
+func (c MeService) UpdateProfile(ctx RequestContext, input UpdateMeProfileInput) (MeResponse, error) {
+	account, _, authzAudit, err := c.Authorize(ctx,
+		CheckRequest{Resource: "me", Action: ActionUpdate, Scope: ScopeSelf},
+		AuditTarget{Event: "me.profile.update", Resource: "me"},
+	)
+	if err != nil {
+		return MeResponse{}, err
+	}
+	if err := c.withTransaction(ctx, func(tx MeService) error {
+		next, ok, err := tx.employeeForAccount(ctx, account)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("employee profile", account.ID)
+		}
+		authzAudit.target.Target = next.ID
+		next.BasicInfo = utils.CopyStringMap(next.BasicInfo)
+		next.ContactInfo = utils.CopyStringMap(next.ContactInfo)
+		changedFields := applyMeProfilePatch(&next, input)
+		if len(changedFields) > 0 {
+			next.UpdatedAt = tx.Now()
+			if err := tx.store.UpsertEmployee(goContext(ctx), next); err != nil {
+				return err
+			}
+			if err := tx.Service.HR().appendEmployeeEvent(ctx, string(EventEmployeeUpdated), next.ID, map[string]any{
+				"employee_id":    next.ID,
+				"source":         "self_service",
+				"changed_fields": changedFields,
+			}); err != nil {
+				return err
+			}
+			if err := tx.audit(ctx, "platform.me.profile.update", string(ResourceEmployee), next.ID, string(SeverityMedium), map[string]any{
+				"changed_fields": changedFields,
+			}); err != nil {
+				return err
+			}
+		}
+		return authzAudit.CommitWith(ctx, tx.Service)
+	}); err != nil {
+		return MeResponse{}, err
+	}
+	return c.Resolve(ctx)
+}
+
+// employeeForAccount resolves both modern account.employee_id links and legacy employee.account_id links.
+func (c MeService) employeeForAccount(ctx RequestContext, account Account) (Employee, bool, error) {
+	if employeeID := strings.TrimSpace(account.EmployeeID); employeeID != "" {
+		employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, employeeID)
+		if err != nil || ok {
+			return employee, ok, err
+		}
+	}
+	return c.store.GetEmployeeByAccountID(goContext(ctx), ctx.TenantID, account.ID)
+}
+
+// applyMeProfilePatch updates only fields explicitly present in the self-service request.
+func applyMeProfilePatch(employee *Employee, input UpdateMeProfileInput) []string {
+	changedFields := make([]string, 0, 5)
+	if input.EnglishName != nil {
+		value := strings.TrimSpace(*input.EnglishName)
+		if stringFromAny(employee.BasicInfo["name_en"]) != value || stringFromAny(employee.BasicInfo["name_en_source"]) != "self" {
+			changedFields = append(changedFields, "english_name")
+		}
+		employee.BasicInfo["name_en"] = value
+		employee.BasicInfo["name_en_source"] = "self"
+	}
+	if input.MobilePhone != nil {
+		value := strings.TrimSpace(*input.MobilePhone)
+		if employee.Phone != value || stringFromAny(employee.ContactInfo["mobile_phone"]) != value {
+			changedFields = append(changedFields, "mobile_phone")
+		}
+		employee.Phone = value
+		employee.ContactInfo["mobile_phone"] = value
+	}
+	if input.Extension != nil {
+		value := strings.TrimSpace(*input.Extension)
+		if stringFromAny(employee.ContactInfo["extension"]) != value {
+			changedFields = append(changedFields, "extension")
+		}
+		employee.ContactInfo["extension"] = value
+	}
+	if input.Slack != nil {
+		value := strings.TrimSpace(*input.Slack)
+		if stringFromAny(employee.ContactInfo["slack"]) != value {
+			changedFields = append(changedFields, "slack")
+		}
+		employee.ContactInfo["slack"] = value
+	}
+	if input.EmergencyContactName != nil {
+		value := strings.TrimSpace(*input.EmergencyContactName)
+		if stringFromAny(employee.ContactInfo["emergency_contact_name"]) != value {
+			changedFields = append(changedFields, "emergency_contact_name")
+		}
+		employee.ContactInfo["emergency_contact_name"] = value
+	}
+	return changedFields
 }
 
 // ListMenus 列出 menus 的服務流程。
@@ -205,6 +303,8 @@ var defaultMenuCatalog = []MenuNode{
 			{Key: "workflow.forms", Label: "表單設計", Path: "/workspace/forms"},
 			{Key: "agents.models", Label: "模型設定", Path: "/workspace/agent-models"},
 			{Key: "agents.definitions", Label: "Agent 管理", Path: "/workspace/agents"},
+			{Key: "agents.knowledge_bases", Label: "知識庫", Path: "/workspace/knowledge-bases"},
+			{Key: "agents.tools", Label: "工具與整合", Path: "/workspace/agent-tools"},
 			{Key: "iam.members", Label: "成員權限", Path: "/workspace/iam/members"},
 			{Key: "iam.user_groups", Label: "使用者群組", Path: "/workspace/iam/user-groups"},
 			{Key: "iam.permission_sets", Label: "權限集合", Path: "/workspace/iam/permission-sets"},

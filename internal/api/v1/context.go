@@ -10,12 +10,14 @@ import (
 // requestContext 處理請求 context。
 func (a *API) requestContext(r *http.Request) (domain.RequestContext, error) {
 	var tenantID, accountID string
+	var platformAdmin bool
 	// 由 token 推導出的身分是 request context 唯一可信來源。
 	tokenCtx, ok, err := a.tokenResolver.Resolve(r)
 	if err != nil {
 		return domain.RequestContext{}, err
 	}
 	if ok {
+		platformAdmin = authenticatedPlatformAdmin(tokenCtx)
 		if a.identity != nil {
 			resolved, err := a.identity.ResolveAuthenticatedPrincipal(r.Context(), tokenCtx)
 			if err != nil {
@@ -43,9 +45,31 @@ func (a *API) requestContext(r *http.Request) (domain.RequestContext, error) {
 		Context:              r.Context(),
 		TenantID:             tenantID,
 		AccountID:            accountID,
+		PlatformAdmin:        platformAdmin,
 		AssumedRoleSessionID: strings.TrimSpace(r.Header.Get("X-Assumable-Role-Session-ID")),
 		RequestID:            requestID,
 		TraceID:              traceID,
 		SpanID:               spanID,
 	}, nil
+}
+
+// authenticatedPlatformAdmin 只從已驗證 token 的專用 claim 或 realm role 推導全域管理員。
+func authenticatedPlatformAdmin(principal domain.AuthenticatedPrincipal) bool {
+	if value, ok := principal.Claims["platform_admin"].(bool); ok && value {
+		return true
+	}
+	realmAccess, ok := principal.Claims["realm_access"].(map[string]any)
+	if !ok {
+		return false
+	}
+	roles, ok := realmAccess["roles"].([]any)
+	if !ok {
+		return false
+	}
+	for _, role := range roles {
+		if value, ok := role.(string); ok && strings.TrimSpace(value) == "nexus-platform-admin" {
+			return true
+		}
+	}
+	return false
 }

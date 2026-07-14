@@ -10,15 +10,16 @@ import (
 // UpsertAgentSession 從儲存層處理 upsert agent 會話。
 func (s *Store) UpsertAgentSession(execCtx context.Context, v domain.AgentSession) error {
 	_, err := s.q.UpsertAgentSession(tenantContext(execCtx, v.TenantID), sqlc.UpsertAgentSessionParams{
-		ID:            v.ID,
-		TenantID:      v.TenantID,
-		AccountID:     v.AccountID,
-		AgentID:       nullableText(v.AgentID),
-		Title:         v.Title,
-		Status:        string(v.Status),
-		LastMessageAt: nullableTimestamptz(v.LastMessageAt),
-		CreatedAt:     timestamptz(v.CreatedAt),
-		UpdatedAt:     timestamptz(v.UpdatedAt),
+		ID:             v.ID,
+		TenantID:       v.TenantID,
+		AccountID:      v.AccountID,
+		AgentID:        nullableText(v.AgentID),
+		Title:          v.Title,
+		Status:         string(v.Status),
+		ContextVersion: v.ContextVersion,
+		LastMessageAt:  nullableTimestamptz(v.LastMessageAt),
+		CreatedAt:      timestamptz(v.CreatedAt),
+		UpdatedAt:      timestamptz(v.UpdatedAt),
 	})
 	return err
 }
@@ -26,6 +27,18 @@ func (s *Store) UpsertAgentSession(execCtx context.Context, v domain.AgentSessio
 // GetAgentSession 從儲存層取得 agent 會話。
 func (s *Store) GetAgentSession(execCtx context.Context, tenantID, id string) (domain.AgentSession, bool, error) {
 	v, err := s.q.GetAgentSession(tenantContext(execCtx, tenantID), sqlc.GetAgentSessionParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.AgentSession{}, false, nil
+	}
+	if err != nil {
+		return domain.AgentSession{}, false, err
+	}
+	return fromAgentSession(v), true, nil
+}
+
+// GetAgentSessionForUpdate locks an agent session for a context-version write transaction.
+func (s *Store) GetAgentSessionForUpdate(execCtx context.Context, tenantID, id string) (domain.AgentSession, bool, error) {
+	v, err := s.q.GetAgentSessionForUpdate(tenantContext(execCtx, tenantID), sqlc.GetAgentSessionForUpdateParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
 		return domain.AgentSession{}, false, nil
 	}
@@ -64,14 +77,15 @@ func (s *Store) DeleteAgentSession(execCtx context.Context, tenantID, id string)
 // InsertAgentSessionMessage 從儲存層新增 agent 會話訊息。
 func (s *Store) InsertAgentSessionMessage(execCtx context.Context, v domain.AgentSessionMessage) error {
 	_, err := s.q.InsertAgentSessionMessage(tenantContext(execCtx, v.TenantID), sqlc.InsertAgentSessionMessageParams{
-		ID:        v.ID,
-		TenantID:  v.TenantID,
-		SessionID: v.SessionID,
-		Role:      string(v.Role),
-		Content:   v.Content,
-		RunID:     nullableText(v.RunID),
-		Metadata:  mustJSON(v.Metadata),
-		CreatedAt: timestamptz(v.CreatedAt),
+		ID:             v.ID,
+		TenantID:       v.TenantID,
+		SessionID:      v.SessionID,
+		Role:           string(v.Role),
+		Content:        v.Content,
+		RunID:          nullableText(v.RunID),
+		ContextVersion: v.ContextVersion,
+		Metadata:       mustJSON(v.Metadata),
+		CreatedAt:      timestamptz(v.CreatedAt),
 	})
 	return err
 }
@@ -176,28 +190,30 @@ func (s *Store) DeleteAgentMemory(execCtx context.Context, tenantID, id string) 
 
 func fromAgentSession(v sqlc.AgentSession) domain.AgentSession {
 	return domain.AgentSession{
-		ID:            v.ID,
-		TenantID:      v.TenantID,
-		AccountID:     v.AccountID,
-		AgentID:       textFrom(v.AgentID),
-		Title:         v.Title,
-		Status:        domain.AgentSessionStatus(v.Status),
-		LastMessageAt: timePtrFrom(v.LastMessageAt),
-		CreatedAt:     timeFrom(v.CreatedAt),
-		UpdatedAt:     timeFrom(v.UpdatedAt),
+		ID:             v.ID,
+		TenantID:       v.TenantID,
+		AccountID:      v.AccountID,
+		AgentID:        textFrom(v.AgentID),
+		Title:          v.Title,
+		Status:         domain.AgentSessionStatus(v.Status),
+		ContextVersion: v.ContextVersion,
+		LastMessageAt:  timePtrFrom(v.LastMessageAt),
+		CreatedAt:      timeFrom(v.CreatedAt),
+		UpdatedAt:      timeFrom(v.UpdatedAt),
 	}
 }
 
 func fromAgentSessionMessage(v sqlc.AgentSessionMessage) domain.AgentSessionMessage {
 	return domain.AgentSessionMessage{
-		ID:        v.ID,
-		TenantID:  v.TenantID,
-		SessionID: v.SessionID,
-		Role:      domain.AgentMessageRole(v.Role),
-		Content:   v.Content,
-		RunID:     textFrom(v.RunID),
-		Metadata:  jsonMap(v.Metadata),
-		CreatedAt: timeFrom(v.CreatedAt),
+		ID:             v.ID,
+		TenantID:       v.TenantID,
+		SessionID:      v.SessionID,
+		Role:           domain.AgentMessageRole(v.Role),
+		Content:        v.Content,
+		RunID:          textFrom(v.RunID),
+		ContextVersion: v.ContextVersion,
+		Metadata:       jsonMap(v.Metadata),
+		CreatedAt:      timeFrom(v.CreatedAt),
 	}
 }
 

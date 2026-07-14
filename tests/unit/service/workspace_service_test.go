@@ -433,7 +433,7 @@ func TestWorkspaceAttendanceNormalizesEHRMSLeaveTypes(t *testing.T) {
 	}
 }
 
-// TestWorkspaceAttendanceUsesDailyLeaveFactsInsteadOfLeaveRanges 驗證矩陣只使用每日假勤，不展開請假區間或推算未來日期。
+// TestWorkspaceAttendanceMergesApprovedLocalLeaveWithDailyFacts 驗證矩陣即時合併已核准本地請假，且不重複計算每日假勤。
 func TestWorkspaceAttendanceUsesDailyLeaveFactsInsteadOfLeaveRanges(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 7, 10, 9, 0, 0, 0, time.UTC)
@@ -462,12 +462,12 @@ func TestWorkspaceAttendanceUsesDailyLeaveFactsInsteadOfLeaveRanges(t *testing.T
 		t.Fatalf("expected July 9 daily fact only, got %+v", cell)
 	}
 	for _, day := range []int{10, 13, 14} {
-		if cell := row.Cells[day-1]; cell.Type == "leave" {
-			t.Fatalf("leave range must not synthesize day %d, got %+v", day, cell)
+		if cell := row.Cells[day-1]; cell.Type != "leave" || cell.Hours != 7 || cell.Leave != "特" {
+			t.Fatalf("approved local leave should cover business day %d, got %+v", day, cell)
 		}
 	}
-	if row.Summary.LeaveHours != 7 {
-		t.Fatalf("expected exact daily leave total, got %+v", row.Summary)
+	if row.Summary.LeaveHours != 28 {
+		t.Fatalf("expected merged leave total without duplicate July 9, got %+v", row.Summary)
 	}
 }
 
@@ -585,12 +585,12 @@ func TestWorkspaceAttendanceMarksIncompleteEHRMSClockSummaryAbnormal(t *testing.
 	}
 }
 
-// TestWorkspaceAttendanceCountsDailyLeaveAndApprovedOvertime 驗證工時統計計入每日假勤與已核准加班，不讀取請假區間。
+// TestWorkspaceAttendanceCountsApprovedLeaveAndOvertime 驗證工時統計合併每日假勤、本地核准請假與核准加班。
 func TestWorkspaceAttendanceCountsDailyLeaveAndApprovedOvertime(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
-	// 請假區間不再參與每日工時矩陣；每日彙總的兩段假勤才是唯一來源。
+	// 本地核准請假與 eHRMS 每日事實合併，同一天取較完整的時數，避免重複累加。
 	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lv-approved", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", StartAt: time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 12, 23, 0, 0, 0, time.UTC), Hours: 24, Status: "approved", CreatedAt: now})
 	_ = store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "sum-leave", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", LeaveType: "annual", LeaveHours: 4, LeaveCounted: true, Leave2Type: "personal", Leave2Hours: 4, Leave2Counted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-11", CreatedAt: now, UpdatedAt: now})
 	// 只有 approved 加班會累計時數。
@@ -602,8 +602,8 @@ func TestWorkspaceAttendanceCountsDailyLeaveAndApprovedOvertime(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := got.Attendance.Rows[0]
-	if cell := row.Cells[9]; cell.Type == "leave" {
-		t.Fatalf("leave request range should not create a leave cell, got %+v", cell)
+	if cell := row.Cells[9]; cell.Type != "leave" || cell.Hours != 7 {
+		t.Fatalf("approved local leave should create a leave cell, got %+v", cell)
 	}
 	if cell := row.Cells[10]; cell.Type != "leave" || cell.Hours != 8 {
 		t.Fatalf("two daily leave segments should create one exact 8-hour cell, got %+v", cell)
@@ -614,10 +614,10 @@ func TestWorkspaceAttendanceCountsDailyLeaveAndApprovedOvertime(t *testing.T) {
 	if cell := row.Cells[12]; cell.Overtime != 0 {
 		t.Fatalf("pending overtime should not mark the day cell, got %+v", cell)
 	}
-	if row.Summary.LeaveHours != 8 || row.Summary.OvertimeHours != 3 {
+	if row.Summary.LeaveHours != 22 || row.Summary.OvertimeHours != 3 {
 		t.Fatalf("unexpected summary hours: %+v", row.Summary)
 	}
-	expectedAttended := row.Summary.DueHours - 8 + 3
+	expectedAttended := row.Summary.DueHours - 22 + 3
 	if row.Summary.AttendedHours != expectedAttended {
 		t.Fatalf("expected attended hours %v, got %v", expectedAttended, row.Summary.AttendedHours)
 	}

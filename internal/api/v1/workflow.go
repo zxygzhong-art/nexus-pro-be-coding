@@ -18,6 +18,20 @@ type WorkflowCtrl struct {
 
 // RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c WorkflowCtrl) RegisterRoutes(router *gin.RouterGroup) {
+	builder := router.Group("/form-builder")
+	builder.GET("/capabilities", c.routes.Handle("workflow.form_definition_draft", "read", c.formBuilderCapabilities))
+	builder.GET("/data-sources", c.routes.Handle("workflow.form_definition_draft", "read", c.formBuilderCapabilities))
+	builder.GET("/workflow-targets", c.routes.Handle("workflow.form_definition_draft", "read", c.formBuilderCapabilities))
+	builder.GET("/drafts", c.routes.Handle("workflow.form_definition_draft", "read", c.listFormDefinitionDrafts))
+	builder.POST("/drafts", c.routes.Handle("workflow.form_definition_draft", "create", c.createFormDefinitionDraft))
+	builder.GET("/drafts/:id", c.routes.Handle("workflow.form_definition_draft", "read", c.getFormDefinitionDraft, ResourceID(PathParamID)))
+	builder.PATCH("/drafts/:id", c.routes.Handle("workflow.form_definition_draft", "update", c.updateFormDefinitionDraft, ResourceID(PathParamID)))
+	builder.POST("/drafts/:id/validate", c.routes.Handle("workflow.form_definition_draft", "read", c.validateFormDefinitionDraft, ResourceID(PathParamID)))
+	builder.POST("/drafts/:id/preview", c.routes.Handle("workflow.form_definition_draft", "read", c.previewFormDefinitionDraft, ResourceID(PathParamID)))
+	builder.POST("/drafts/:id/simulate", c.routes.Handle("workflow.form_definition_draft", "read", c.simulateFormDefinitionWorkflow, ResourceID(PathParamID)))
+	builder.POST("/drafts/:id/submit-review", c.routes.Handle("workflow.form_definition_draft", "submit", c.submitFormDefinitionDraftForReview, ResourceID(PathParamID)))
+	builder.POST("/drafts/:id/publish", c.routes.Handle("workflow.form_definition_draft", "approve", c.publishFormDefinitionDraft, ResourceID(PathParamID)))
+
 	forms := router.Group("/forms")
 	forms.GET("/templates", c.routes.Handle("workflow.form_template", "read", c.listFormTemplates))
 	forms.POST("/templates", c.routes.Handle("workflow.form_template", "create", c.createFormTemplate))
@@ -38,6 +52,141 @@ func (c WorkflowCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workflows.POST("/forms/:id/return", c.routes.Handle("workflow.form_instance", "update", c.returnForm, ResourceID(PathParamID)))
 	workflows.POST("/forms/:id/cancel", c.routes.Handle("workflow.form_instance", "update", c.cancelForm, PathParam(PathParamID)))
 	workflows.POST("/forms/:id/duplicate", c.routes.Handle("workflow.form_instance", "submit", c.duplicateForm, PathParam(PathParamID)))
+}
+
+// formBuilderCapabilities 回传 Agent 创作所需的统一能力目录。
+func (c WorkflowCtrl) formBuilderCapabilities(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.FormBuilderCapabilities(ctx)
+	if err != nil {
+		return err
+	}
+	path := r.URL.Path
+	if strings.HasSuffix(path, "/data-sources") {
+		item.WorkflowTargets = nil
+		item.FieldTypes = nil
+		item.Widgets = nil
+	}
+	if strings.HasSuffix(path, "/workflow-targets") {
+		item.DataSources = nil
+		item.FieldTypes = nil
+		item.Widgets = nil
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// listFormDefinitionDrafts 列出 Agent/管理员可见的表单定义草稿。
+func (c WorkflowCtrl) listFormDefinitionDrafts(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	owner := ""
+	if r.URL.Query().Get("owner") == "mine" {
+		owner = ctx.AccountID
+	}
+	items, err := c.svc.ListFormDefinitionDrafts(ctx, owner, strings.TrimSpace(r.URL.Query().Get("status")))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, items)
+	return nil
+}
+
+// createFormDefinitionDraft 建立受控表单定义草稿。
+func (c WorkflowCtrl) createFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.CreateFormDefinitionDraftInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.CreateFormDefinitionDraft(ctx, input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, item)
+	return nil
+}
+
+// getFormDefinitionDraft 取得单个草稿。
+func (c WorkflowCtrl) getFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.GetFormDefinitionDraft(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// updateFormDefinitionDraft 更新草稿并执行 revision 检查。
+func (c WorkflowCtrl) updateFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.UpdateFormDefinitionDraftInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.UpdateFormDefinitionDraft(ctx, r.PathValue(PathParamID), input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// validateFormDefinitionDraft 执行确定性验证。
+func (c WorkflowCtrl) validateFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.ValidateFormDefinitionDraft(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// previewFormDefinitionDraft 回传预览 contract。
+func (c WorkflowCtrl) previewFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.PreviewFormDefinitionDraft(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// simulateFormDefinitionWorkflow 静态模拟审批路径。
+func (c WorkflowCtrl) simulateFormDefinitionWorkflow(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.SimulateFormDefinitionWorkflow(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// submitFormDefinitionDraftForReview 把草稿送入管理员审核队列。
+func (c WorkflowCtrl) submitFormDefinitionDraftForReview(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input struct {
+		Revision int64 `json:"revision"`
+	}
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.SubmitFormDefinitionDraftForReview(ctx, r.PathValue(PathParamID), input.Revision)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// publishFormDefinitionDraft 在管理员确认后发布 compiled schema。
+func (c WorkflowCtrl) publishFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input struct {
+		Revision int64 `json:"revision"`
+	}
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.PublishFormDefinitionDraft(ctx, r.PathValue(PathParamID), input.Revision)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
 }
 
 // formDataSources 回傳表單設計與填寫共用的受控資料源目錄。

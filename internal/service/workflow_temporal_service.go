@@ -11,7 +11,7 @@ import (
 
 func (c WorkflowService) startTemporalFormApprovalWorkflow(ctx RequestContext, instance domain.FormInstance) error {
 	if c.formApprovalWorkflows == nil {
-		return domain.E(503, "temporal_workflow_unavailable", "temporal form approval workflow client is required")
+		return domain.E(503, "temporal_workflow_unavailable", "temporal form approval workflow client is required").WithReasonCode("temporal_workflow_unavailable")
 	}
 	if strings.TrimSpace(instance.ID) == "" {
 		return BadRequest("form_instance_id is required")
@@ -78,7 +78,7 @@ func (c WorkflowService) signalTemporalFormApprovalWorkflow(ctx RequestContext, 
 		return domain.FormInstance{}, err
 	}
 	if c.formApprovalWorkflows == nil {
-		return domain.FormInstance{}, domain.E(503, "temporal_workflow_unavailable", "temporal form approval workflow client is required")
+		return domain.FormInstance{}, domain.E(503, "temporal_workflow_unavailable", "temporal form approval workflow client is required").WithReasonCode("temporal_workflow_unavailable")
 	}
 	before, err := c.LoadTemporalFormApprovalProjection(ctx, id)
 	if err != nil {
@@ -95,7 +95,7 @@ func (c WorkflowService) signalTemporalFormApprovalWorkflow(ctx RequestContext, 
 	}
 	if err := c.formApprovalWorkflows.SignalFormApprovalWorkflow(goContext(ctx), signal); err != nil {
 		if errors.Is(err, domain.ErrFormApprovalWorkflowNotFound) {
-			return domain.FormInstance{}, domain.E(404, "workflow_not_found", "form approval workflow for form instance "+id+" was not found; run tenantctl temporal-backfill-form-workflows before retrying")
+			return domain.FormInstance{}, domain.E(404, "workflow_not_found", "form approval workflow is not available for this form instance").WithReasonCode("workflow_not_found")
 		}
 		return domain.FormInstance{}, err
 	}

@@ -19,14 +19,10 @@ OPENFGA_STORE_ID ?=
 OPENFGA_MODEL_ID ?=
 OPENFGA_MODEL_FILE ?= ops/openfga/model.json
 
-.PHONY: dev dev-adk test unit-test ci-local sqlc tenant-provision require-database require-openfga-store require-openfga-model-id db-create migrate-up migrate-down migrate-status migrate-validate openfga-apply-model openfga-check-model
+.PHONY: dev test unit-test ci-local sqlc tenant-provision require-database require-openfga-store require-openfga-model-id db-create migrate-up migrate-down migrate-status migrate-validate openfga-apply-model openfga-check-model
 
 dev:
 	$(GO) run ./cmd/api
-
-# Agent chat 真實 ADK + LiteLLM runtime（需先 go get google.golang.org/adk/v2 相關依賴）。
-dev-adk:
-	$(GO) run -tags adk ./cmd/api
 
 tenant-provision: require-database
 	$(GO) run ./cmd/tenantctl provision --database-url "$(DATABASE_URL)" $(TENANT_PROVISION_FLAGS)

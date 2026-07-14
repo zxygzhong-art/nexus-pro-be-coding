@@ -54,10 +54,24 @@ func (c *Service) fieldPolicyDecision(ctx RequestContext, applicationCode Applic
 		return nil, err
 	}
 	out := defaultFieldPolicies(applicationCode, resourceType)
+	if len(policies) == 0 {
+		if len(out) == 0 {
+			return nil, nil
+		}
+		return out, nil
+	}
+	catalogItems, err := c.store.ListPermissionCatalogItems(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	catalogLabels := make(map[string]string, len(catalogItems))
+	for _, item := range catalogItems {
+		catalogLabels[item.ID] = strings.TrimSpace(item.Resource) + "." + strings.TrimSpace(item.Action)
+	}
 	explicitRestrictions := map[string]string{}
 	explicitAllows := map[string]struct{}{}
 	for _, policy := range policies {
-		if !fieldPolicyApplies(policy, permissionKey, matchedPermissions) {
+		if !fieldPolicyApplies(policy, permissionKey, matchedPermissions, catalogLabels) {
 			continue
 		}
 		field := strings.TrimSpace(policy.FieldName)
@@ -124,11 +138,14 @@ func defaultFieldPolicies(applicationCode ApplicationCode, resourceType Resource
 	}
 }
 
-// fieldPolicyApplies 處理欄位政策 applies。
-func fieldPolicyApplies(policy FieldPolicy, permissionKey string, matchedPermissions []string) bool {
+// fieldPolicyApplies 同時接受 catalog ID 與既有 label/pattern，確保 UI 保存的 ID 可在 runtime 命中。
+func fieldPolicyApplies(policy FieldPolicy, permissionKey string, matchedPermissions []string, catalogLabels map[string]string) bool {
 	policyPermission := strings.TrimSpace(policy.PermissionID)
 	if policyPermission == "" {
 		return true
+	}
+	if catalogLabel := strings.TrimSpace(catalogLabels[policyPermission]); catalogLabel != "" {
+		policyPermission = catalogLabel
 	}
 	if permissionLabelMatches(permissionKey, policyPermission) {
 		return true

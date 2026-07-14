@@ -1806,6 +1806,7 @@ func (s *Store) UpsertAttendanceClockRecord(execCtx context.Context, v domain.At
 		WorksiteID:          nullableText(v.WorksiteID),
 		WorkDate:            v.WorkDate,
 		Direction:           v.Direction,
+		ClientEventID:       v.ClientEventID,
 		ClockedAt:           timestamptz(v.ClockedAt),
 		Latitude:            v.Latitude,
 		Longitude:           v.Longitude,
@@ -1815,24 +1816,49 @@ func (s *Store) UpsertAttendanceClockRecord(execCtx context.Context, v domain.At
 		RejectionReason:     v.RejectionReason,
 		Source:              v.Source,
 		DeviceID:            v.DeviceID,
-		Column18:            mustJSON(v.DeviceInfo),
+		Column19:            mustJSON(v.DeviceInfo),
 		CorrectionRequestID: v.CorrectionRequestID,
+		Voided:              v.Voided,
+		VoidedAt:            nullableTimestamptz(v.VoidedAt),
+		VoidedByAccountID:   v.VoidedByAccountID,
+		VoidReason:          v.VoidReason,
 		CreatedAt:           timestamptz(v.CreatedAt),
 	})
-	if isUniqueConstraint(err, "attendance_clock_records_one_accepted_idx") {
-		return domain.Conflict("accepted clock record already exists")
+	if isUniqueConstraint(err, "attendance_clock_records_client_event_idx") {
+		return domain.Conflict("attendance clock client event already exists")
 	}
 	return err
 }
 
-// GetAcceptedAttendanceClockRecord 從儲存層取得 accepted 考勤打卡 record。
-func (s *Store) GetAcceptedAttendanceClockRecord(execCtx context.Context, tenantID, employeeID, workDate, direction string) (domain.AttendanceClockRecord, bool, error) {
-	v, err := s.q.GetAcceptedAttendanceClockRecord(execCtx, sqlc.GetAcceptedAttendanceClockRecordParams{
-		TenantID:   tenantID,
-		EmployeeID: employeeID,
-		WorkDate:   workDate,
-		Direction:  direction,
-	})
+// GetAttendanceClockRecordByClientEventID 依客戶端事件識別碼取得考勤打卡 record。
+func (s *Store) GetAttendanceClockRecordByClientEventID(execCtx context.Context, tenantID, clientEventID string) (domain.AttendanceClockRecord, bool, error) {
+	if strings.TrimSpace(clientEventID) == "" {
+		return domain.AttendanceClockRecord{}, false, nil
+	}
+	v, err := s.q.GetAttendanceClockRecordByClientEventID(execCtx, sqlc.GetAttendanceClockRecordByClientEventIDParams{TenantID: tenantID, ClientEventID: clientEventID})
+	return attendanceClockRecordResult(v, err)
+}
+
+// GetEarliestAcceptedAttendanceClockIn 取得未作廢的最早 accepted 上班卡。
+func (s *Store) GetEarliestAcceptedAttendanceClockIn(execCtx context.Context, tenantID, employeeID, workDate string) (domain.AttendanceClockRecord, bool, error) {
+	v, err := s.q.GetEarliestAcceptedAttendanceClockIn(execCtx, sqlc.GetEarliestAcceptedAttendanceClockInParams{TenantID: tenantID, EmployeeID: employeeID, WorkDate: workDate})
+	return attendanceClockRecordResult(v, err)
+}
+
+// GetLatestAcceptedAttendanceClockOut 取得未作廢的最晚 accepted 下班卡。
+func (s *Store) GetLatestAcceptedAttendanceClockOut(execCtx context.Context, tenantID, employeeID, workDate string) (domain.AttendanceClockRecord, bool, error) {
+	v, err := s.q.GetLatestAcceptedAttendanceClockOut(execCtx, sqlc.GetLatestAcceptedAttendanceClockOutParams{TenantID: tenantID, EmployeeID: employeeID, WorkDate: workDate})
+	return attendanceClockRecordResult(v, err)
+}
+
+// GetLatestAcceptedAttendanceClockRecord 取得未作廢的當日最新 accepted 打卡。
+func (s *Store) GetLatestAcceptedAttendanceClockRecord(execCtx context.Context, tenantID, employeeID, workDate string) (domain.AttendanceClockRecord, bool, error) {
+	v, err := s.q.GetLatestAcceptedAttendanceClockRecord(execCtx, sqlc.GetLatestAcceptedAttendanceClockRecordParams{TenantID: tenantID, EmployeeID: employeeID, WorkDate: workDate})
+	return attendanceClockRecordResult(v, err)
+}
+
+// attendanceClockRecordResult 將 SQLC 單筆打卡查詢轉為 repository optional result。
+func attendanceClockRecordResult(v sqlc.AttendanceClockRecord, err error) (domain.AttendanceClockRecord, bool, error) {
 	if isNotFound(err) {
 		return domain.AttendanceClockRecord{}, false, nil
 	}
@@ -1947,22 +1973,29 @@ func (s *Store) ListAttendanceDailySummaries(execCtx context.Context, tenantID s
 
 // UpsertAttendanceCorrectionRequest 從儲存層處理 upsert 考勤 correction 請求。
 func (s *Store) UpsertAttendanceCorrectionRequest(execCtx context.Context, v domain.AttendanceCorrectionRequest) error {
+	correctionType := strings.TrimSpace(v.CorrectionType)
+	if correctionType == "" {
+		correctionType = "add_record"
+	}
 	_, err := s.q.UpsertAttendanceCorrectionRequest(execCtx, sqlc.UpsertAttendanceCorrectionRequestParams{
-		ID:                  v.ID,
-		TenantID:            v.TenantID,
-		EmployeeID:          v.EmployeeID,
-		Direction:           v.Direction,
-		RequestedClockedAt:  timestamptz(v.RequestedClockedAt),
-		WorkDate:            v.WorkDate,
-		Reason:              v.Reason,
-		Status:              v.Status,
-		FormInstanceID:      v.FormInstanceID,
-		ClockRecordID:       v.ClockRecordID,
-		ReviewedByAccountID: v.ReviewedByAccountID,
-		ReviewReason:        v.ReviewReason,
-		ReviewedAt:          nullableTimestamptz(v.ReviewedAt),
-		CreatedAt:           timestamptz(v.CreatedAt),
-		UpdatedAt:           timestamptz(v.UpdatedAt),
+		ID:                       v.ID,
+		TenantID:                 v.TenantID,
+		EmployeeID:               v.EmployeeID,
+		Direction:                v.Direction,
+		RequestedClockedAt:       timestamptz(v.RequestedClockedAt),
+		WorkDate:                 v.WorkDate,
+		CorrectionType:           correctionType,
+		TargetClockRecordID:      v.TargetClockRecordID,
+		ReplacementClockRecordID: v.ReplacementClockRecordID,
+		Reason:                   v.Reason,
+		Status:                   v.Status,
+		FormInstanceID:           v.FormInstanceID,
+		ClockRecordID:            v.ClockRecordID,
+		ReviewedByAccountID:      v.ReviewedByAccountID,
+		ReviewReason:             v.ReviewReason,
+		ReviewedAt:               nullableTimestamptz(v.ReviewedAt),
+		CreatedAt:                timestamptz(v.CreatedAt),
+		UpdatedAt:                timestamptz(v.UpdatedAt),
 	})
 	return err
 }
@@ -2065,6 +2098,58 @@ func (s *Store) ListOvertimeRequestsByQuery(execCtx context.Context, tenantID st
 		return nil, err
 	}
 	return mapSlice(items, fromOvertimeRequest), nil
+}
+
+// UpsertFormDefinitionDraft 保存草稿，並由 SQL 條件保護 revision 樂觀鎖。
+func (s *Store) UpsertFormDefinitionDraft(execCtx context.Context, v domain.FormDefinitionDraft) error {
+	if v.Revision <= 0 {
+		v.Revision = 1
+	}
+	_, err := s.q.UpsertFormDefinitionDraft(execCtx, sqlc.UpsertFormDefinitionDraftParams{
+		ID: v.ID, TenantID: v.TenantID, OwnerAccountID: v.OwnerAccountID, BaseTemplateID: v.BaseTemplateID,
+		SchemaVersion: int32(v.SchemaVersion), AuthoringSchema: mustJSON(v.AuthoringSchema), CompiledSchema: mustJSON(v.CompiledSchema),
+		Status: string(v.Status), Revision: v.Revision, Source: v.Source, AgentID: v.AgentID, AgentRunID: v.AgentRunID,
+		AgentSessionID: v.AgentSessionID, ToolCallID: v.ToolCallID, ValidationResult: mustJSON(v.ValidationResult),
+		SubmittedAt: nullableTimestamptz(v.SubmittedAt), PublishedTemplateID: v.PublishedTemplateID,
+		CreatedAt: timestamptz(v.CreatedAt), UpdatedAt: timestamptz(v.UpdatedAt),
+	})
+	if isNotFound(err) {
+		return domain.Conflict("form definition draft was modified concurrently")
+	}
+	return err
+}
+
+// GetFormDefinitionDraft 取得租戶內的表單定義草稿。
+func (s *Store) GetFormDefinitionDraft(execCtx context.Context, tenantID, id string) (domain.FormDefinitionDraft, bool, error) {
+	v, err := s.q.GetFormDefinitionDraft(tenantContext(execCtx, tenantID), sqlc.GetFormDefinitionDraftParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.FormDefinitionDraft{}, false, nil
+	}
+	if err != nil {
+		return domain.FormDefinitionDraft{}, false, err
+	}
+	return fromFormDefinitionDraft(v), true, nil
+}
+
+// GetFormDefinitionDraftByAgentCall 以 Agent run 与 tool call 保证重试幂等。
+func (s *Store) GetFormDefinitionDraftByAgentCall(execCtx context.Context, tenantID, agentRunID, toolCallID string) (domain.FormDefinitionDraft, bool, error) {
+	v, err := s.q.GetFormDefinitionDraftByAgentCall(tenantContext(execCtx, tenantID), sqlc.GetFormDefinitionDraftByAgentCallParams{TenantID: tenantID, AgentRunID: agentRunID, ToolCallID: toolCallID})
+	if isNotFound(err) {
+		return domain.FormDefinitionDraft{}, false, nil
+	}
+	if err != nil {
+		return domain.FormDefinitionDraft{}, false, err
+	}
+	return fromFormDefinitionDraft(v), true, nil
+}
+
+// ListFormDefinitionDrafts 列出指定拥有者与状态的草稿。
+func (s *Store) ListFormDefinitionDrafts(execCtx context.Context, tenantID, ownerAccountID, status string) ([]domain.FormDefinitionDraft, error) {
+	items, err := s.q.ListFormDefinitionDrafts(tenantContext(execCtx, tenantID), sqlc.ListFormDefinitionDraftsParams{TenantID: tenantID, OwnerAccountID: ownerAccountID, Status: status})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromFormDefinitionDraft), nil
 }
 
 // UpsertFormTemplate 從儲存層處理 upsert 表單範本。
@@ -2461,24 +2546,28 @@ func (s *Store) ListAgentRunPageByAccount(execCtx context.Context, tenantID, acc
 // UpsertAgentModel 從儲存層處理 upsert agent 模型。
 func (s *Store) UpsertAgentModel(execCtx context.Context, v domain.AgentModel) error {
 	_, err := s.q.UpsertAgentModel(tenantContext(execCtx, v.TenantID), sqlc.UpsertAgentModelParams{
-		ID:              v.ID,
-		TenantID:        v.TenantID,
-		Name:            v.Name,
-		Provider:        v.Provider,
-		ModelName:       v.ModelName,
-		LitellmModel:    v.LiteLLMModel,
-		ApiBaseUrl:      v.APIBaseURL,
-		ApiKey:          v.APIKey,
-		RateLimitRpm:    int32(v.RateLimitRPM),
-		Status:          string(v.Status),
-		TimeoutSeconds:  int32(v.TimeoutSeconds),
-		MonthlyQuota:    v.MonthlyQuota,
-		UsedQuota:       v.UsedQuota,
-		LastTestedAt:    nullableTimestamptz(v.LastTestedAt),
-		LastTestStatus:  v.LastTestStatus,
-		LastTestMessage: v.LastTestMessage,
-		CreatedAt:       timestamptz(v.CreatedAt),
-		UpdatedAt:       timestamptz(v.UpdatedAt),
+		ID:               v.ID,
+		TenantID:         v.TenantID,
+		Name:             v.Name,
+		Provider:         v.Provider,
+		ModelName:        v.ModelName,
+		LitellmModel:     v.LiteLLMModel,
+		ApiBaseUrl:       v.APIBaseURL,
+		ApiKey:           v.APIKey,
+		RateLimitRpm:     int32(v.RateLimitRPM),
+		Status:           string(v.Status),
+		TimeoutSeconds:   int32(v.TimeoutSeconds),
+		MonthlyQuota:     v.MonthlyQuota,
+		UsedQuota:        v.UsedQuota,
+		LastTestedAt:     nullableTimestamptz(v.LastTestedAt),
+		LastTestStatus:   v.LastTestStatus,
+		LastTestMessage:  v.LastTestMessage,
+		SyncStatus:       string(v.SyncStatus),
+		LastSyncedAt:     nullableTimestamptz(v.LastSyncedAt),
+		LastSyncError:    v.LastSyncError,
+		SyncedConfigHash: v.SyncedConfigHash,
+		CreatedAt:        timestamptz(v.CreatedAt),
+		UpdatedAt:        timestamptz(v.UpdatedAt),
 	})
 	return err
 }
@@ -2535,6 +2624,26 @@ func (s *Store) UpdateAgentModelTestResult(execCtx context.Context, tenantID, id
 	return fromAgentModel(v), true, nil
 }
 
+// UpdateAgentModelSyncResult 從儲存層更新模型同步結果。
+func (s *Store) UpdateAgentModelSyncResult(execCtx context.Context, tenantID, id string, status domain.AgentModelSyncStatus, lastError, configHash string, syncedAt *time.Time, updatedAt time.Time) (domain.AgentModel, bool, error) {
+	v, err := s.q.UpdateAgentModelSyncResult(tenantContext(execCtx, tenantID), sqlc.UpdateAgentModelSyncResultParams{
+		TenantID:         tenantID,
+		ID:               id,
+		SyncStatus:       string(status),
+		LastSyncedAt:     nullableTimestamptz(syncedAt),
+		LastSyncError:    lastError,
+		SyncedConfigHash: configHash,
+		UpdatedAt:        timestamptz(updatedAt),
+	})
+	if isNotFound(err) {
+		return domain.AgentModel{}, false, nil
+	}
+	if err != nil {
+		return domain.AgentModel{}, false, err
+	}
+	return fromAgentModel(v), true, nil
+}
+
 // CountAgentDefinitionsByModel 從儲存層統計使用模型的 agent。
 func (s *Store) CountAgentDefinitionsByModel(execCtx context.Context, tenantID, modelID string) (int, error) {
 	count, err := s.q.CountAgentDefinitionsByModel(tenantContext(execCtx, tenantID), sqlc.CountAgentDefinitionsByModelParams{TenantID: tenantID, ModelID: modelID})
@@ -2542,6 +2651,47 @@ func (s *Store) CountAgentDefinitionsByModel(execCtx context.Context, tenantID, 
 		return 0, err
 	}
 	return int(count), nil
+}
+
+// InsertAgentExternalTool persists one tenant-scoped external tool registration.
+func (s *Store) InsertAgentExternalTool(execCtx context.Context, item domain.AgentExternalTool) error {
+	_, err := s.q.InsertAgentExternalTool(tenantContext(execCtx, item.TenantID), sqlc.InsertAgentExternalToolParams{
+		ID:                   item.ID,
+		TenantID:             item.TenantID,
+		Name:                 item.Name,
+		Description:          item.Description,
+		Kind:                 item.Kind,
+		Transport:            item.Transport,
+		EndpointUrl:          item.EndpointURL,
+		AuthType:             item.AuthType,
+		AuthHeaderName:       item.AuthHeaderName,
+		AuthUsername:         item.AuthUsername,
+		AuthSecretCiphertext: item.AuthSecretCiphertext,
+		CreatedByAccountID:   nullableText(item.CreatedByAccountID),
+		CreatedAt:            timestamptz(item.CreatedAt),
+	})
+	return err
+}
+
+// ListAgentExternalTools returns external tools for one tenant.
+func (s *Store) ListAgentExternalTools(execCtx context.Context, tenantID string) ([]domain.AgentExternalTool, error) {
+	items, err := s.q.ListAgentExternalTools(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromAgentExternalTool), nil
+}
+
+// DeleteAgentExternalTool deletes one tenant-scoped external tool registration.
+func (s *Store) DeleteAgentExternalTool(execCtx context.Context, tenantID, id string) (domain.AgentExternalTool, bool, error) {
+	item, err := s.q.DeleteAgentExternalTool(tenantContext(execCtx, tenantID), sqlc.DeleteAgentExternalToolParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.AgentExternalTool{}, false, nil
+	}
+	if err != nil {
+		return domain.AgentExternalTool{}, false, err
+	}
+	return fromAgentExternalTool(item), true, nil
 }
 
 // UpsertAgentDefinition 從儲存層處理 upsert agent 定義。
@@ -2554,13 +2704,17 @@ func (s *Store) UpsertAgentDefinition(execCtx context.Context, v domain.AgentDef
 		Emoji:              v.Emoji,
 		Category:           string(v.Category),
 		ModelID:            v.ModelID,
+		MainAgentRole:      v.MainAgentRole,
+		SubAgents:          mustJSON(v.SubAgents),
 		SystemPrompt:       v.SystemPrompt,
 		Tools:              mustJSON(v.Tools),
+		KnowledgeBaseIds:   mustJSON(v.KnowledgeBaseIDs),
 		Status:             string(v.Status),
 		Visibility:         string(v.Visibility),
 		VisibilityTargets:  mustJSON(v.VisibilityTargets),
 		TimeoutSeconds:     int32(v.TimeoutSeconds),
 		Version:            int32(v.Version),
+		PublishedVersion:   int32(v.PublishedVersion),
 		UsageTotalRuns:     v.Usage.TotalRuns,
 		UsageSuccessRuns:   v.Usage.SuccessRuns,
 		UsageFailedRuns:    v.Usage.FailedRuns,
@@ -2643,8 +2797,11 @@ func (s *Store) InsertAgentDefinitionVersion(execCtx context.Context, v domain.A
 		TenantID:           v.TenantID,
 		AgentID:            v.AgentID,
 		Version:            int32(v.Version),
+		MainAgentRole:      v.MainAgentRole,
+		SubAgents:          mustJSON(v.SubAgents),
 		SystemPrompt:       v.SystemPrompt,
 		Tools:              mustJSON(v.Tools),
+		KnowledgeBaseIds:   mustJSON(v.KnowledgeBaseIDs),
 		ModelID:            v.ModelID,
 		Note:               v.Note,
 		CreatedByAccountID: nullableText(v.CreatedByAccountID),
@@ -3229,6 +3386,18 @@ func jsonStrings(b []byte) []string {
 		return nil
 	}
 	var out []string
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
+// jsonAgentTeamMembers 将数据库中的 Team 成员快照还原为领域结构。
+func jsonAgentTeamMembers(b []byte) []domain.AgentTeamMember {
+	if len(b) == 0 {
+		return nil
+	}
+	var out []domain.AgentTeamMember
 	if err := json.Unmarshal(b, &out); err != nil {
 		return nil
 	}
@@ -3852,6 +4021,7 @@ func fromAttendanceClockRecord(v sqlc.AttendanceClockRecord) domain.AttendanceCl
 		WorksiteID:          textFrom(v.WorksiteID),
 		WorkDate:            v.WorkDate,
 		Direction:           v.Direction,
+		ClientEventID:       v.ClientEventID,
 		ClockedAt:           timeFrom(v.ClockedAt),
 		Latitude:            v.Latitude,
 		Longitude:           v.Longitude,
@@ -3863,6 +4033,10 @@ func fromAttendanceClockRecord(v sqlc.AttendanceClockRecord) domain.AttendanceCl
 		DeviceID:            v.DeviceID,
 		DeviceInfo:          jsonMap(v.DeviceInfo),
 		CorrectionRequestID: v.CorrectionRequestID,
+		Voided:              v.Voided,
+		VoidedAt:            timePtrFrom(v.VoidedAt),
+		VoidedByAccountID:   v.VoidedByAccountID,
+		VoidReason:          v.VoidReason,
 		CreatedAt:           timeFrom(v.CreatedAt),
 	}
 }
@@ -3910,21 +4084,24 @@ func fromAttendanceDailySummary(v sqlc.AttendanceDailySummary) domain.Attendance
 // fromAttendanceCorrectionRequest 轉換考勤 correction 請求。
 func fromAttendanceCorrectionRequest(v sqlc.AttendanceCorrectionRequest) domain.AttendanceCorrectionRequest {
 	return domain.AttendanceCorrectionRequest{
-		ID:                  v.ID,
-		TenantID:            v.TenantID,
-		EmployeeID:          v.EmployeeID,
-		Direction:           v.Direction,
-		RequestedClockedAt:  timeFrom(v.RequestedClockedAt),
-		WorkDate:            v.WorkDate,
-		Reason:              v.Reason,
-		Status:              v.Status,
-		FormInstanceID:      v.FormInstanceID,
-		ClockRecordID:       v.ClockRecordID,
-		ReviewedByAccountID: v.ReviewedByAccountID,
-		ReviewReason:        v.ReviewReason,
-		ReviewedAt:          timePtrFrom(v.ReviewedAt),
-		CreatedAt:           timeFrom(v.CreatedAt),
-		UpdatedAt:           timeFrom(v.UpdatedAt),
+		ID:                       v.ID,
+		TenantID:                 v.TenantID,
+		EmployeeID:               v.EmployeeID,
+		Direction:                v.Direction,
+		RequestedClockedAt:       timeFrom(v.RequestedClockedAt),
+		WorkDate:                 v.WorkDate,
+		CorrectionType:           v.CorrectionType,
+		TargetClockRecordID:      v.TargetClockRecordID,
+		ReplacementClockRecordID: v.ReplacementClockRecordID,
+		Reason:                   v.Reason,
+		Status:                   v.Status,
+		FormInstanceID:           v.FormInstanceID,
+		ClockRecordID:            v.ClockRecordID,
+		ReviewedByAccountID:      v.ReviewedByAccountID,
+		ReviewReason:             v.ReviewReason,
+		ReviewedAt:               timePtrFrom(v.ReviewedAt),
+		CreatedAt:                timeFrom(v.CreatedAt),
+		UpdatedAt:                timeFrom(v.UpdatedAt),
 	}
 }
 
@@ -3945,6 +4122,30 @@ func fromOvertimeRequest(v sqlc.OvertimeRequest) domain.OvertimeRequest {
 		FormInstanceID:   v.FormInstanceID,
 		CreatedAt:        timeFrom(v.CreatedAt),
 		UpdatedAt:        timeFrom(v.UpdatedAt),
+	}
+}
+
+// fromFormDefinitionDraft 轉換表單定義草稿。
+func fromFormDefinitionDraft(v sqlc.FormDefinitionDraft) domain.FormDefinitionDraft {
+	var authoring domain.FormDefinitionSchemaV2
+	if err := json.Unmarshal(v.AuthoringSchema, &authoring); err != nil {
+		authoring = domain.FormDefinitionSchemaV2{}
+	}
+	var compiled map[string]any
+	if err := json.Unmarshal(v.CompiledSchema, &compiled); err != nil {
+		compiled = map[string]any{}
+	}
+	var validation domain.FormDefinitionValidation
+	if err := json.Unmarshal(v.ValidationResult, &validation); err != nil {
+		validation = domain.FormDefinitionValidation{}
+	}
+	return domain.FormDefinitionDraft{
+		ID: v.ID, TenantID: v.TenantID, OwnerAccountID: v.OwnerAccountID, BaseTemplateID: v.BaseTemplateID,
+		SchemaVersion: int(v.SchemaVersion), AuthoringSchema: authoring, CompiledSchema: compiled,
+		Status: domain.FormDefinitionDraftStatus(v.Status), Revision: v.Revision, Source: v.Source,
+		AgentID: v.AgentID, AgentRunID: v.AgentRunID, AgentSessionID: v.AgentSessionID, ToolCallID: v.ToolCallID,
+		ValidationResult: validation, SubmittedAt: timePtrFrom(v.SubmittedAt), PublishedTemplateID: v.PublishedTemplateID,
+		CreatedAt: timeFrom(v.CreatedAt), UpdatedAt: timeFrom(v.UpdatedAt),
 	}
 }
 
@@ -4055,26 +4256,50 @@ func fromAgentRun(v sqlc.AgentRun) domain.AgentRun {
 // fromAgentModel 轉換 agent 模型。
 func fromAgentModel(v sqlc.AgentModel) domain.AgentModel {
 	return domain.AgentModel{
-		ID:              v.ID,
-		TenantID:        v.TenantID,
-		Name:            v.Name,
-		Provider:        v.Provider,
-		ModelName:       v.ModelName,
-		LiteLLMModel:    v.LitellmModel,
-		APIBaseURL:      v.ApiBaseUrl,
-		APIKey:          v.ApiKey,
-		APIKeySet:       strings.TrimSpace(v.ApiKey) != "",
-		APIKeyPreview:   maskStoredSecret(v.ApiKey),
-		RateLimitRPM:    int(v.RateLimitRpm),
-		Status:          domain.AgentModelStatus(v.Status),
-		TimeoutSeconds:  int(v.TimeoutSeconds),
-		MonthlyQuota:    v.MonthlyQuota,
-		UsedQuota:       v.UsedQuota,
-		LastTestedAt:    timePtrFrom(v.LastTestedAt),
-		LastTestStatus:  v.LastTestStatus,
-		LastTestMessage: v.LastTestMessage,
-		CreatedAt:       timeFrom(v.CreatedAt),
-		UpdatedAt:       timeFrom(v.UpdatedAt),
+		ID:               v.ID,
+		TenantID:         v.TenantID,
+		Name:             v.Name,
+		Provider:         v.Provider,
+		ModelName:        v.ModelName,
+		LiteLLMModel:     v.LitellmModel,
+		APIBaseURL:       v.ApiBaseUrl,
+		APIKey:           v.ApiKey,
+		APIKeySet:        strings.TrimSpace(v.ApiKey) != "",
+		APIKeyPreview:    maskStoredSecret(v.ApiKey),
+		RateLimitRPM:     int(v.RateLimitRpm),
+		Status:           domain.AgentModelStatus(v.Status),
+		TimeoutSeconds:   int(v.TimeoutSeconds),
+		MonthlyQuota:     v.MonthlyQuota,
+		UsedQuota:        v.UsedQuota,
+		LastTestedAt:     timePtrFrom(v.LastTestedAt),
+		LastTestStatus:   v.LastTestStatus,
+		LastTestMessage:  v.LastTestMessage,
+		SyncStatus:       domain.AgentModelSyncStatus(v.SyncStatus),
+		LastSyncedAt:     timePtrFrom(v.LastSyncedAt),
+		LastSyncError:    v.LastSyncError,
+		SyncedConfigHash: v.SyncedConfigHash,
+		CreatedAt:        timeFrom(v.CreatedAt),
+		UpdatedAt:        timeFrom(v.UpdatedAt),
+	}
+}
+
+// fromAgentExternalTool maps generated database fields into the domain contract.
+func fromAgentExternalTool(v sqlc.AgentExternalTool) domain.AgentExternalTool {
+	return domain.AgentExternalTool{
+		ID:                   v.ID,
+		TenantID:             v.TenantID,
+		Name:                 v.Name,
+		Description:          v.Description,
+		Kind:                 v.Kind,
+		Transport:            v.Transport,
+		EndpointURL:          v.EndpointUrl,
+		AuthType:             v.AuthType,
+		AuthHeaderName:       v.AuthHeaderName,
+		AuthUsername:         v.AuthUsername,
+		AuthSecretCiphertext: v.AuthSecretCiphertext,
+		CredentialSet:        v.AuthSecretCiphertext != "",
+		CreatedByAccountID:   textFrom(v.CreatedByAccountID),
+		CreatedAt:            timeFrom(v.CreatedAt),
 	}
 }
 
@@ -4099,13 +4324,17 @@ func fromAgentDefinition(v sqlc.AgentDefinition) domain.AgentDefinition {
 		Emoji:             v.Emoji,
 		Category:          domain.AgentCategory(v.Category),
 		ModelID:           v.ModelID,
+		MainAgentRole:     v.MainAgentRole,
+		SubAgents:         jsonAgentTeamMembers(v.SubAgents),
 		SystemPrompt:      v.SystemPrompt,
 		Tools:             jsonStrings(v.Tools),
+		KnowledgeBaseIDs:  jsonStrings(v.KnowledgeBaseIds),
 		Status:            domain.AgentDefinitionStatus(v.Status),
 		Visibility:        domain.AgentVisibility(v.Visibility),
 		VisibilityTargets: jsonStrings(v.VisibilityTargets),
 		TimeoutSeconds:    int(v.TimeoutSeconds),
 		Version:           int(v.Version),
+		PublishedVersion:  int(v.PublishedVersion),
 		Usage: domain.AgentUsageStats{
 			TotalRuns:    v.UsageTotalRuns,
 			SuccessRuns:  v.UsageSuccessRuns,
@@ -4128,8 +4357,11 @@ func fromAgentDefinitionVersion(v sqlc.AgentDefinitionVersion) domain.AgentDefin
 		TenantID:           v.TenantID,
 		AgentID:            v.AgentID,
 		Version:            int(v.Version),
+		MainAgentRole:      v.MainAgentRole,
+		SubAgents:          jsonAgentTeamMembers(v.SubAgents),
 		SystemPrompt:       v.SystemPrompt,
 		Tools:              jsonStrings(v.Tools),
+		KnowledgeBaseIDs:   jsonStrings(v.KnowledgeBaseIds),
 		ModelID:            v.ModelID,
 		Note:               v.Note,
 		CreatedByAccountID: textFrom(v.CreatedByAccountID),

@@ -11,10 +11,61 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const countAgentDefinitionsByKnowledgeBase = `-- name: CountAgentDefinitionsByKnowledgeBase :one
+SELECT (
+    SELECT count(*) FROM agent_definitions
+    WHERE agent_definitions.tenant_id = $1
+      AND (
+        agent_definitions.knowledge_base_ids ? $2::text
+        OR EXISTS (
+            SELECT 1 FROM jsonb_array_elements(agent_definitions.sub_agents) member
+            WHERE COALESCE(member->'knowledge_base_ids', '[]'::jsonb) ? $2::text
+        )
+      )
+) + (
+    SELECT count(*) FROM agent_definition_versions
+    WHERE agent_definition_versions.tenant_id = $1
+      AND (
+        agent_definition_versions.knowledge_base_ids ? $2::text
+        OR EXISTS (
+            SELECT 1 FROM jsonb_array_elements(agent_definition_versions.sub_agents) member
+            WHERE COALESCE(member->'knowledge_base_ids', '[]'::jsonb) ? $2::text
+        )
+      )
+)
+`
+
+type CountAgentDefinitionsByKnowledgeBaseParams struct {
+	TenantID        string `json:"tenant_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+}
+
+func (q *Queries) CountAgentDefinitionsByKnowledgeBase(ctx context.Context, arg CountAgentDefinitionsByKnowledgeBaseParams) (int32, error) {
+	row := q.db.QueryRow(ctx, countAgentDefinitionsByKnowledgeBase, arg.TenantID, arg.KnowledgeBaseID)
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const countAgentDefinitionsByModel = `-- name: CountAgentDefinitionsByModel :one
-SELECT count(*) FROM agent_definitions
-WHERE tenant_id = $1
-  AND model_id = $2
+SELECT (
+    SELECT count(*) FROM agent_definitions
+    WHERE agent_definitions.tenant_id = $1
+      AND (
+        agent_definitions.model_id = $2
+        OR EXISTS (
+            SELECT 1 FROM jsonb_array_elements(agent_definitions.sub_agents) member
+            WHERE member->>'model_id' = $2
+        )
+      )
+) + (
+    SELECT count(*) FROM agent_definition_versions
+    WHERE agent_definition_versions.tenant_id = $1
+      AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements(agent_definition_versions.sub_agents) member
+        WHERE member->>'model_id' = $2
+      )
+)
 `
 
 type CountAgentDefinitionsByModelParams struct {
@@ -22,18 +73,18 @@ type CountAgentDefinitionsByModelParams struct {
 	ModelID  string `json:"model_id"`
 }
 
-func (q *Queries) CountAgentDefinitionsByModel(ctx context.Context, arg CountAgentDefinitionsByModelParams) (int64, error) {
+func (q *Queries) CountAgentDefinitionsByModel(ctx context.Context, arg CountAgentDefinitionsByModelParams) (int32, error) {
 	row := q.db.QueryRow(ctx, countAgentDefinitionsByModel, arg.TenantID, arg.ModelID)
-	var count int64
-	err := row.Scan(&count)
-	return count, err
+	var column_1 int32
+	err := row.Scan(&column_1)
+	return column_1, err
 }
 
 const deleteAgentDefinition = `-- name: DeleteAgentDefinition :one
 DELETE FROM agent_definitions
 WHERE tenant_id = $1
   AND id = $2
-RETURNING id, tenant_id, name, description, emoji, category, model_id, system_prompt, tools, status, visibility, visibility_targets, timeout_seconds, version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at
+RETURNING id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at
 `
 
 type DeleteAgentDefinitionParams struct {
@@ -52,13 +103,17 @@ func (q *Queries) DeleteAgentDefinition(ctx context.Context, arg DeleteAgentDefi
 		&i.Emoji,
 		&i.Category,
 		&i.ModelID,
+		&i.MainAgentRole,
+		&i.SubAgents,
 		&i.SystemPrompt,
 		&i.Tools,
+		&i.KnowledgeBaseIds,
 		&i.Status,
 		&i.Visibility,
 		&i.VisibilityTargets,
 		&i.TimeoutSeconds,
 		&i.Version,
+		&i.PublishedVersion,
 		&i.UsageTotalRuns,
 		&i.UsageSuccessRuns,
 		&i.UsageFailedRuns,
@@ -73,11 +128,44 @@ func (q *Queries) DeleteAgentDefinition(ctx context.Context, arg DeleteAgentDefi
 	return i, err
 }
 
+const deleteAgentExternalTool = `-- name: DeleteAgentExternalTool :one
+DELETE FROM agent_external_tools
+WHERE tenant_id = $1
+  AND id = $2
+RETURNING id, tenant_id, name, description, kind, transport, endpoint_url, auth_type, auth_header_name, auth_username, auth_secret_ciphertext, created_by_account_id, created_at
+`
+
+type DeleteAgentExternalToolParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) DeleteAgentExternalTool(ctx context.Context, arg DeleteAgentExternalToolParams) (AgentExternalTool, error) {
+	row := q.db.QueryRow(ctx, deleteAgentExternalTool, arg.TenantID, arg.ID)
+	var i AgentExternalTool
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.Description,
+		&i.Kind,
+		&i.Transport,
+		&i.EndpointUrl,
+		&i.AuthType,
+		&i.AuthHeaderName,
+		&i.AuthUsername,
+		&i.AuthSecretCiphertext,
+		&i.CreatedByAccountID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const deleteAgentModel = `-- name: DeleteAgentModel :one
 DELETE FROM agent_models
 WHERE tenant_id = $1
   AND id = $2
-RETURNING id, tenant_id, name, provider, model_name, litellm_model, api_base_url, api_key, rate_limit_rpm, status, timeout_seconds, monthly_quota, used_quota, last_tested_at, last_test_status, last_test_message, created_at, updated_at
+RETURNING id, tenant_id, name, provider, model_name, litellm_model, api_base_url, api_key, rate_limit_rpm, status, timeout_seconds, monthly_quota, used_quota, last_tested_at, last_test_status, last_test_message, sync_status, last_synced_at, last_sync_error, synced_config_hash, created_at, updated_at
 `
 
 type DeleteAgentModelParams struct {
@@ -105,6 +193,10 @@ func (q *Queries) DeleteAgentModel(ctx context.Context, arg DeleteAgentModelPara
 		&i.LastTestedAt,
 		&i.LastTestStatus,
 		&i.LastTestMessage,
+		&i.SyncStatus,
+		&i.LastSyncedAt,
+		&i.LastSyncError,
+		&i.SyncedConfigHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -112,7 +204,7 @@ func (q *Queries) DeleteAgentModel(ctx context.Context, arg DeleteAgentModelPara
 }
 
 const getAgentDefinition = `-- name: GetAgentDefinition :one
-SELECT id, tenant_id, name, description, emoji, category, model_id, system_prompt, tools, status, visibility, visibility_targets, timeout_seconds, version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at FROM agent_definitions
+SELECT id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at FROM agent_definitions
 WHERE tenant_id = $1
   AND id = $2
 `
@@ -133,13 +225,17 @@ func (q *Queries) GetAgentDefinition(ctx context.Context, arg GetAgentDefinition
 		&i.Emoji,
 		&i.Category,
 		&i.ModelID,
+		&i.MainAgentRole,
+		&i.SubAgents,
 		&i.SystemPrompt,
 		&i.Tools,
+		&i.KnowledgeBaseIds,
 		&i.Status,
 		&i.Visibility,
 		&i.VisibilityTargets,
 		&i.TimeoutSeconds,
 		&i.Version,
+		&i.PublishedVersion,
 		&i.UsageTotalRuns,
 		&i.UsageSuccessRuns,
 		&i.UsageFailedRuns,
@@ -155,7 +251,7 @@ func (q *Queries) GetAgentDefinition(ctx context.Context, arg GetAgentDefinition
 }
 
 const getAgentDefinitionVersion = `-- name: GetAgentDefinitionVersion :one
-SELECT id, tenant_id, agent_id, version, system_prompt, tools, model_id, note, created_by_account_id, created_at FROM agent_definition_versions
+SELECT id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, tools, knowledge_base_ids, model_id, note, created_by_account_id, created_at FROM agent_definition_versions
 WHERE tenant_id = $1
   AND agent_id = $2
   AND version = $3
@@ -175,8 +271,11 @@ func (q *Queries) GetAgentDefinitionVersion(ctx context.Context, arg GetAgentDef
 		&i.TenantID,
 		&i.AgentID,
 		&i.Version,
+		&i.MainAgentRole,
+		&i.SubAgents,
 		&i.SystemPrompt,
 		&i.Tools,
+		&i.KnowledgeBaseIds,
 		&i.ModelID,
 		&i.Note,
 		&i.CreatedByAccountID,
@@ -186,7 +285,7 @@ func (q *Queries) GetAgentDefinitionVersion(ctx context.Context, arg GetAgentDef
 }
 
 const getAgentModel = `-- name: GetAgentModel :one
-SELECT id, tenant_id, name, provider, model_name, litellm_model, api_base_url, api_key, rate_limit_rpm, status, timeout_seconds, monthly_quota, used_quota, last_tested_at, last_test_status, last_test_message, created_at, updated_at FROM agent_models
+SELECT id, tenant_id, name, provider, model_name, litellm_model, api_base_url, api_key, rate_limit_rpm, status, timeout_seconds, monthly_quota, used_quota, last_tested_at, last_test_status, last_test_message, sync_status, last_synced_at, last_sync_error, synced_config_hash, created_at, updated_at FROM agent_models
 WHERE tenant_id = $1
   AND id = $2
 `
@@ -216,6 +315,10 @@ func (q *Queries) GetAgentModel(ctx context.Context, arg GetAgentModelParams) (A
 		&i.LastTestedAt,
 		&i.LastTestStatus,
 		&i.LastTestMessage,
+		&i.SyncStatus,
+		&i.LastSyncedAt,
+		&i.LastSyncError,
+		&i.SyncedConfigHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -278,14 +381,14 @@ func (q *Queries) InsertAgentAudit(ctx context.Context, arg InsertAgentAuditPara
 
 const insertAgentDefinitionVersion = `-- name: InsertAgentDefinitionVersion :one
 INSERT INTO agent_definition_versions (
-    id, tenant_id, agent_id, version, system_prompt, tools, model_id, note,
+    id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, tools, knowledge_base_ids, model_id, note,
     created_by_account_id, created_at
 ) VALUES (
     $1, $2, $3, $4,
-    $5, $6::jsonb, $7, $8,
-    $9, $10
+    $5, $6::jsonb, $7, $8::jsonb, $9::jsonb, $10, $11,
+    $12, $13
 )
-RETURNING id, tenant_id, agent_id, version, system_prompt, tools, model_id, note, created_by_account_id, created_at
+RETURNING id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, tools, knowledge_base_ids, model_id, note, created_by_account_id, created_at
 `
 
 type InsertAgentDefinitionVersionParams struct {
@@ -293,8 +396,11 @@ type InsertAgentDefinitionVersionParams struct {
 	TenantID           string             `json:"tenant_id"`
 	AgentID            string             `json:"agent_id"`
 	Version            int32              `json:"version"`
+	MainAgentRole      string             `json:"main_agent_role"`
+	SubAgents          []byte             `json:"sub_agents"`
 	SystemPrompt       string             `json:"system_prompt"`
 	Tools              []byte             `json:"tools"`
+	KnowledgeBaseIds   []byte             `json:"knowledge_base_ids"`
 	ModelID            string             `json:"model_id"`
 	Note               string             `json:"note"`
 	CreatedByAccountID pgtype.Text        `json:"created_by_account_id"`
@@ -307,8 +413,11 @@ func (q *Queries) InsertAgentDefinitionVersion(ctx context.Context, arg InsertAg
 		arg.TenantID,
 		arg.AgentID,
 		arg.Version,
+		arg.MainAgentRole,
+		arg.SubAgents,
 		arg.SystemPrompt,
 		arg.Tools,
+		arg.KnowledgeBaseIds,
 		arg.ModelID,
 		arg.Note,
 		arg.CreatedByAccountID,
@@ -320,10 +429,77 @@ func (q *Queries) InsertAgentDefinitionVersion(ctx context.Context, arg InsertAg
 		&i.TenantID,
 		&i.AgentID,
 		&i.Version,
+		&i.MainAgentRole,
+		&i.SubAgents,
 		&i.SystemPrompt,
 		&i.Tools,
+		&i.KnowledgeBaseIds,
 		&i.ModelID,
 		&i.Note,
+		&i.CreatedByAccountID,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const insertAgentExternalTool = `-- name: InsertAgentExternalTool :one
+INSERT INTO agent_external_tools (
+    id, tenant_id, name, description, kind, transport, endpoint_url,
+    auth_type, auth_header_name, auth_username, auth_secret_ciphertext,
+    created_by_account_id, created_at
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9,
+    $10, $11, $12, $13
+)
+RETURNING id, tenant_id, name, description, kind, transport, endpoint_url, auth_type, auth_header_name, auth_username, auth_secret_ciphertext, created_by_account_id, created_at
+`
+
+type InsertAgentExternalToolParams struct {
+	ID                   string             `json:"id"`
+	TenantID             string             `json:"tenant_id"`
+	Name                 string             `json:"name"`
+	Description          string             `json:"description"`
+	Kind                 string             `json:"kind"`
+	Transport            string             `json:"transport"`
+	EndpointUrl          string             `json:"endpoint_url"`
+	AuthType             string             `json:"auth_type"`
+	AuthHeaderName       string             `json:"auth_header_name"`
+	AuthUsername         string             `json:"auth_username"`
+	AuthSecretCiphertext string             `json:"auth_secret_ciphertext"`
+	CreatedByAccountID   pgtype.Text        `json:"created_by_account_id"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) InsertAgentExternalTool(ctx context.Context, arg InsertAgentExternalToolParams) (AgentExternalTool, error) {
+	row := q.db.QueryRow(ctx, insertAgentExternalTool,
+		arg.ID,
+		arg.TenantID,
+		arg.Name,
+		arg.Description,
+		arg.Kind,
+		arg.Transport,
+		arg.EndpointUrl,
+		arg.AuthType,
+		arg.AuthHeaderName,
+		arg.AuthUsername,
+		arg.AuthSecretCiphertext,
+		arg.CreatedByAccountID,
+		arg.CreatedAt,
+	)
+	var i AgentExternalTool
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.Description,
+		&i.Kind,
+		&i.Transport,
+		&i.EndpointUrl,
+		&i.AuthType,
+		&i.AuthHeaderName,
+		&i.AuthUsername,
+		&i.AuthSecretCiphertext,
 		&i.CreatedByAccountID,
 		&i.CreatedAt,
 	)
@@ -368,7 +544,7 @@ func (q *Queries) ListAgentAudits(ctx context.Context, tenantID string) ([]Agent
 }
 
 const listAgentDefinitionVersions = `-- name: ListAgentDefinitionVersions :many
-SELECT id, tenant_id, agent_id, version, system_prompt, tools, model_id, note, created_by_account_id, created_at FROM agent_definition_versions
+SELECT id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, tools, knowledge_base_ids, model_id, note, created_by_account_id, created_at FROM agent_definition_versions
 WHERE tenant_id = $1
   AND agent_id = $2
 ORDER BY version DESC
@@ -393,8 +569,11 @@ func (q *Queries) ListAgentDefinitionVersions(ctx context.Context, arg ListAgent
 			&i.TenantID,
 			&i.AgentID,
 			&i.Version,
+			&i.MainAgentRole,
+			&i.SubAgents,
 			&i.SystemPrompt,
 			&i.Tools,
+			&i.KnowledgeBaseIds,
 			&i.ModelID,
 			&i.Note,
 			&i.CreatedByAccountID,
@@ -411,7 +590,7 @@ func (q *Queries) ListAgentDefinitionVersions(ctx context.Context, arg ListAgent
 }
 
 const listAgentDefinitions = `-- name: ListAgentDefinitions :many
-SELECT id, tenant_id, name, description, emoji, category, model_id, system_prompt, tools, status, visibility, visibility_targets, timeout_seconds, version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at FROM agent_definitions
+SELECT id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at FROM agent_definitions
 WHERE tenant_id = $1
 ORDER BY status ASC, updated_at DESC, id ASC
 `
@@ -433,13 +612,17 @@ func (q *Queries) ListAgentDefinitions(ctx context.Context, tenantID string) ([]
 			&i.Emoji,
 			&i.Category,
 			&i.ModelID,
+			&i.MainAgentRole,
+			&i.SubAgents,
 			&i.SystemPrompt,
 			&i.Tools,
+			&i.KnowledgeBaseIds,
 			&i.Status,
 			&i.Visibility,
 			&i.VisibilityTargets,
 			&i.TimeoutSeconds,
 			&i.Version,
+			&i.PublishedVersion,
 			&i.UsageTotalRuns,
 			&i.UsageSuccessRuns,
 			&i.UsageFailedRuns,
@@ -461,8 +644,48 @@ func (q *Queries) ListAgentDefinitions(ctx context.Context, tenantID string) ([]
 	return items, nil
 }
 
+const listAgentExternalTools = `-- name: ListAgentExternalTools :many
+SELECT id, tenant_id, name, description, kind, transport, endpoint_url, auth_type, auth_header_name, auth_username, auth_secret_ciphertext, created_by_account_id, created_at FROM agent_external_tools
+WHERE tenant_id = $1
+ORDER BY created_at DESC, id ASC
+`
+
+func (q *Queries) ListAgentExternalTools(ctx context.Context, tenantID string) ([]AgentExternalTool, error) {
+	rows, err := q.db.Query(ctx, listAgentExternalTools, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AgentExternalTool
+	for rows.Next() {
+		var i AgentExternalTool
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Name,
+			&i.Description,
+			&i.Kind,
+			&i.Transport,
+			&i.EndpointUrl,
+			&i.AuthType,
+			&i.AuthHeaderName,
+			&i.AuthUsername,
+			&i.AuthSecretCiphertext,
+			&i.CreatedByAccountID,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAgentModels = `-- name: ListAgentModels :many
-SELECT id, tenant_id, name, provider, model_name, litellm_model, api_base_url, api_key, rate_limit_rpm, status, timeout_seconds, monthly_quota, used_quota, last_tested_at, last_test_status, last_test_message, created_at, updated_at FROM agent_models
+SELECT id, tenant_id, name, provider, model_name, litellm_model, api_base_url, api_key, rate_limit_rpm, status, timeout_seconds, monthly_quota, used_quota, last_tested_at, last_test_status, last_test_message, sync_status, last_synced_at, last_sync_error, synced_config_hash, created_at, updated_at FROM agent_models
 WHERE tenant_id = $1
 ORDER BY updated_at DESC, id ASC
 `
@@ -493,6 +716,10 @@ func (q *Queries) ListAgentModels(ctx context.Context, tenantID string) ([]Agent
 			&i.LastTestedAt,
 			&i.LastTestStatus,
 			&i.LastTestMessage,
+			&i.SyncStatus,
+			&i.LastSyncedAt,
+			&i.LastSyncError,
+			&i.SyncedConfigHash,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -507,7 +734,7 @@ func (q *Queries) ListAgentModels(ctx context.Context, tenantID string) ([]Agent
 }
 
 const listPublishedAgentDefinitions = `-- name: ListPublishedAgentDefinitions :many
-SELECT id, tenant_id, name, description, emoji, category, model_id, system_prompt, tools, status, visibility, visibility_targets, timeout_seconds, version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at FROM agent_definitions
+SELECT id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at FROM agent_definitions
 WHERE tenant_id = $1
   AND status = 'published'
 ORDER BY updated_at DESC, id ASC
@@ -530,13 +757,17 @@ func (q *Queries) ListPublishedAgentDefinitions(ctx context.Context, tenantID st
 			&i.Emoji,
 			&i.Category,
 			&i.ModelID,
+			&i.MainAgentRole,
+			&i.SubAgents,
 			&i.SystemPrompt,
 			&i.Tools,
+			&i.KnowledgeBaseIds,
 			&i.Status,
 			&i.Visibility,
 			&i.VisibilityTargets,
 			&i.TimeoutSeconds,
 			&i.Version,
+			&i.PublishedVersion,
 			&i.UsageTotalRuns,
 			&i.UsageSuccessRuns,
 			&i.UsageFailedRuns,
@@ -586,7 +817,7 @@ SET usage_total_runs = usage_total_runs + 1,
     updated_at = $3
 WHERE tenant_id = $5
   AND id = $6
-RETURNING id, tenant_id, name, description, emoji, category, model_id, system_prompt, tools, status, visibility, visibility_targets, timeout_seconds, version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at
+RETURNING id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at
 `
 
 type UpdateAgentDefinitionUsageParams struct {
@@ -616,13 +847,17 @@ func (q *Queries) UpdateAgentDefinitionUsage(ctx context.Context, arg UpdateAgen
 		&i.Emoji,
 		&i.Category,
 		&i.ModelID,
+		&i.MainAgentRole,
+		&i.SubAgents,
 		&i.SystemPrompt,
 		&i.Tools,
+		&i.KnowledgeBaseIds,
 		&i.Status,
 		&i.Visibility,
 		&i.VisibilityTargets,
 		&i.TimeoutSeconds,
 		&i.Version,
+		&i.PublishedVersion,
 		&i.UsageTotalRuns,
 		&i.UsageSuccessRuns,
 		&i.UsageFailedRuns,
@@ -637,6 +872,66 @@ func (q *Queries) UpdateAgentDefinitionUsage(ctx context.Context, arg UpdateAgen
 	return i, err
 }
 
+const updateAgentModelSyncResult = `-- name: UpdateAgentModelSyncResult :one
+UPDATE agent_models
+SET sync_status = $1,
+    last_synced_at = $2,
+    last_sync_error = $3,
+    synced_config_hash = $4,
+    updated_at = $5
+WHERE tenant_id = $6
+  AND id = $7
+RETURNING id, tenant_id, name, provider, model_name, litellm_model, api_base_url, api_key, rate_limit_rpm, status, timeout_seconds, monthly_quota, used_quota, last_tested_at, last_test_status, last_test_message, sync_status, last_synced_at, last_sync_error, synced_config_hash, created_at, updated_at
+`
+
+type UpdateAgentModelSyncResultParams struct {
+	SyncStatus       string             `json:"sync_status"`
+	LastSyncedAt     pgtype.Timestamptz `json:"last_synced_at"`
+	LastSyncError    string             `json:"last_sync_error"`
+	SyncedConfigHash string             `json:"synced_config_hash"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	TenantID         string             `json:"tenant_id"`
+	ID               string             `json:"id"`
+}
+
+func (q *Queries) UpdateAgentModelSyncResult(ctx context.Context, arg UpdateAgentModelSyncResultParams) (AgentModel, error) {
+	row := q.db.QueryRow(ctx, updateAgentModelSyncResult,
+		arg.SyncStatus,
+		arg.LastSyncedAt,
+		arg.LastSyncError,
+		arg.SyncedConfigHash,
+		arg.UpdatedAt,
+		arg.TenantID,
+		arg.ID,
+	)
+	var i AgentModel
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Name,
+		&i.Provider,
+		&i.ModelName,
+		&i.LitellmModel,
+		&i.ApiBaseUrl,
+		&i.ApiKey,
+		&i.RateLimitRpm,
+		&i.Status,
+		&i.TimeoutSeconds,
+		&i.MonthlyQuota,
+		&i.UsedQuota,
+		&i.LastTestedAt,
+		&i.LastTestStatus,
+		&i.LastTestMessage,
+		&i.SyncStatus,
+		&i.LastSyncedAt,
+		&i.LastSyncError,
+		&i.SyncedConfigHash,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const updateAgentModelTestResult = `-- name: UpdateAgentModelTestResult :one
 UPDATE agent_models
 SET last_tested_at = $1,
@@ -645,7 +940,7 @@ SET last_tested_at = $1,
     updated_at = $4
 WHERE tenant_id = $5
   AND id = $6
-RETURNING id, tenant_id, name, provider, model_name, litellm_model, api_base_url, api_key, rate_limit_rpm, status, timeout_seconds, monthly_quota, used_quota, last_tested_at, last_test_status, last_test_message, created_at, updated_at
+RETURNING id, tenant_id, name, provider, model_name, litellm_model, api_base_url, api_key, rate_limit_rpm, status, timeout_seconds, monthly_quota, used_quota, last_tested_at, last_test_status, last_test_message, sync_status, last_synced_at, last_sync_error, synced_config_hash, created_at, updated_at
 `
 
 type UpdateAgentModelTestResultParams struct {
@@ -684,6 +979,10 @@ func (q *Queries) UpdateAgentModelTestResult(ctx context.Context, arg UpdateAgen
 		&i.LastTestedAt,
 		&i.LastTestStatus,
 		&i.LastTestMessage,
+		&i.SyncStatus,
+		&i.LastSyncedAt,
+		&i.LastSyncError,
+		&i.SyncedConfigHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -693,19 +992,19 @@ func (q *Queries) UpdateAgentModelTestResult(ctx context.Context, arg UpdateAgen
 const upsertAgentDefinition = `-- name: UpsertAgentDefinition :one
 INSERT INTO agent_definitions (
     id, tenant_id, name, description, emoji, category, model_id,
-    system_prompt, tools, status, visibility, visibility_targets, timeout_seconds,
-    version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms,
+    main_agent_role, sub_agents, system_prompt, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds,
+    version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms,
     usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id,
     created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4,
     $5, $6, $7,
-    $8, $9::jsonb, $10, $11,
-    $12::jsonb, $13, $14,
-    $15, $16, $17,
-    $18, $19, $20::jsonb,
-    $21, $22,
-    $23, $24
+    $8, $9::jsonb, $10, $11::jsonb, $12::jsonb, $13, $14,
+    $15::jsonb, $16, $17, $18,
+    $19, $20, $21,
+    $22, $23, $24::jsonb,
+    $25, $26,
+    $27, $28
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -714,13 +1013,17 @@ ON CONFLICT (id) DO UPDATE SET
     emoji = EXCLUDED.emoji,
     category = EXCLUDED.category,
     model_id = EXCLUDED.model_id,
+	main_agent_role = EXCLUDED.main_agent_role,
+	sub_agents = EXCLUDED.sub_agents,
     system_prompt = EXCLUDED.system_prompt,
     tools = EXCLUDED.tools,
+    knowledge_base_ids = EXCLUDED.knowledge_base_ids,
     status = EXCLUDED.status,
     visibility = EXCLUDED.visibility,
     visibility_targets = EXCLUDED.visibility_targets,
     timeout_seconds = EXCLUDED.timeout_seconds,
     version = EXCLUDED.version,
+	published_version = EXCLUDED.published_version,
     usage_total_runs = EXCLUDED.usage_total_runs,
     usage_success_runs = EXCLUDED.usage_success_runs,
     usage_failed_runs = EXCLUDED.usage_failed_runs,
@@ -731,7 +1034,7 @@ ON CONFLICT (id) DO UPDATE SET
     updated_by_account_id = EXCLUDED.updated_by_account_id,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, name, description, emoji, category, model_id, system_prompt, tools, status, visibility, visibility_targets, timeout_seconds, version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at
+RETURNING id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at
 `
 
 type UpsertAgentDefinitionParams struct {
@@ -742,13 +1045,17 @@ type UpsertAgentDefinitionParams struct {
 	Emoji              string             `json:"emoji"`
 	Category           string             `json:"category"`
 	ModelID            string             `json:"model_id"`
+	MainAgentRole      string             `json:"main_agent_role"`
+	SubAgents          []byte             `json:"sub_agents"`
 	SystemPrompt       string             `json:"system_prompt"`
 	Tools              []byte             `json:"tools"`
+	KnowledgeBaseIds   []byte             `json:"knowledge_base_ids"`
 	Status             string             `json:"status"`
 	Visibility         string             `json:"visibility"`
 	VisibilityTargets  []byte             `json:"visibility_targets"`
 	TimeoutSeconds     int32              `json:"timeout_seconds"`
 	Version            int32              `json:"version"`
+	PublishedVersion   int32              `json:"published_version"`
 	UsageTotalRuns     int64              `json:"usage_total_runs"`
 	UsageSuccessRuns   int64              `json:"usage_success_runs"`
 	UsageFailedRuns    int64              `json:"usage_failed_runs"`
@@ -770,13 +1077,17 @@ func (q *Queries) UpsertAgentDefinition(ctx context.Context, arg UpsertAgentDefi
 		arg.Emoji,
 		arg.Category,
 		arg.ModelID,
+		arg.MainAgentRole,
+		arg.SubAgents,
 		arg.SystemPrompt,
 		arg.Tools,
+		arg.KnowledgeBaseIds,
 		arg.Status,
 		arg.Visibility,
 		arg.VisibilityTargets,
 		arg.TimeoutSeconds,
 		arg.Version,
+		arg.PublishedVersion,
 		arg.UsageTotalRuns,
 		arg.UsageSuccessRuns,
 		arg.UsageFailedRuns,
@@ -797,13 +1108,17 @@ func (q *Queries) UpsertAgentDefinition(ctx context.Context, arg UpsertAgentDefi
 		&i.Emoji,
 		&i.Category,
 		&i.ModelID,
+		&i.MainAgentRole,
+		&i.SubAgents,
 		&i.SystemPrompt,
 		&i.Tools,
+		&i.KnowledgeBaseIds,
 		&i.Status,
 		&i.Visibility,
 		&i.VisibilityTargets,
 		&i.TimeoutSeconds,
 		&i.Version,
+		&i.PublishedVersion,
 		&i.UsageTotalRuns,
 		&i.UsageSuccessRuns,
 		&i.UsageFailedRuns,
@@ -824,7 +1139,8 @@ INSERT INTO agent_models (
     api_base_url, api_key, rate_limit_rpm,
     status, timeout_seconds,
     monthly_quota, used_quota, last_tested_at, last_test_status,
-    last_test_message, created_at, updated_at
+    last_test_message, sync_status, last_synced_at, last_sync_error,
+    synced_config_hash, created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4,
     $5, $6, $7,
@@ -832,7 +1148,9 @@ INSERT INTO agent_models (
     $11,
     $12, $13, $14,
     $15, $16,
-    $17, $18
+    $17, $18, $19,
+    $20,
+    $21, $22
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -850,30 +1168,38 @@ ON CONFLICT (id) DO UPDATE SET
     last_tested_at = EXCLUDED.last_tested_at,
     last_test_status = EXCLUDED.last_test_status,
     last_test_message = EXCLUDED.last_test_message,
+    sync_status = EXCLUDED.sync_status,
+    last_synced_at = EXCLUDED.last_synced_at,
+    last_sync_error = EXCLUDED.last_sync_error,
+    synced_config_hash = EXCLUDED.synced_config_hash,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, name, provider, model_name, litellm_model, api_base_url, api_key, rate_limit_rpm, status, timeout_seconds, monthly_quota, used_quota, last_tested_at, last_test_status, last_test_message, created_at, updated_at
+RETURNING id, tenant_id, name, provider, model_name, litellm_model, api_base_url, api_key, rate_limit_rpm, status, timeout_seconds, monthly_quota, used_quota, last_tested_at, last_test_status, last_test_message, sync_status, last_synced_at, last_sync_error, synced_config_hash, created_at, updated_at
 `
 
 type UpsertAgentModelParams struct {
-	ID              string             `json:"id"`
-	TenantID        string             `json:"tenant_id"`
-	Name            string             `json:"name"`
-	Provider        string             `json:"provider"`
-	ModelName       string             `json:"model_name"`
-	LitellmModel    string             `json:"litellm_model"`
-	ApiBaseUrl      string             `json:"api_base_url"`
-	ApiKey          string             `json:"api_key"`
-	RateLimitRpm    int32              `json:"rate_limit_rpm"`
-	Status          string             `json:"status"`
-	TimeoutSeconds  int32              `json:"timeout_seconds"`
-	MonthlyQuota    int64              `json:"monthly_quota"`
-	UsedQuota       int64              `json:"used_quota"`
-	LastTestedAt    pgtype.Timestamptz `json:"last_tested_at"`
-	LastTestStatus  string             `json:"last_test_status"`
-	LastTestMessage string             `json:"last_test_message"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ID               string             `json:"id"`
+	TenantID         string             `json:"tenant_id"`
+	Name             string             `json:"name"`
+	Provider         string             `json:"provider"`
+	ModelName        string             `json:"model_name"`
+	LitellmModel     string             `json:"litellm_model"`
+	ApiBaseUrl       string             `json:"api_base_url"`
+	ApiKey           string             `json:"api_key"`
+	RateLimitRpm     int32              `json:"rate_limit_rpm"`
+	Status           string             `json:"status"`
+	TimeoutSeconds   int32              `json:"timeout_seconds"`
+	MonthlyQuota     int64              `json:"monthly_quota"`
+	UsedQuota        int64              `json:"used_quota"`
+	LastTestedAt     pgtype.Timestamptz `json:"last_tested_at"`
+	LastTestStatus   string             `json:"last_test_status"`
+	LastTestMessage  string             `json:"last_test_message"`
+	SyncStatus       string             `json:"sync_status"`
+	LastSyncedAt     pgtype.Timestamptz `json:"last_synced_at"`
+	LastSyncError    string             `json:"last_sync_error"`
+	SyncedConfigHash string             `json:"synced_config_hash"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) UpsertAgentModel(ctx context.Context, arg UpsertAgentModelParams) (AgentModel, error) {
@@ -894,6 +1220,10 @@ func (q *Queries) UpsertAgentModel(ctx context.Context, arg UpsertAgentModelPara
 		arg.LastTestedAt,
 		arg.LastTestStatus,
 		arg.LastTestMessage,
+		arg.SyncStatus,
+		arg.LastSyncedAt,
+		arg.LastSyncError,
+		arg.SyncedConfigHash,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -915,6 +1245,10 @@ func (q *Queries) UpsertAgentModel(ctx context.Context, arg UpsertAgentModelPara
 		&i.LastTestedAt,
 		&i.LastTestStatus,
 		&i.LastTestMessage,
+		&i.SyncStatus,
+		&i.LastSyncedAt,
+		&i.LastSyncError,
+		&i.SyncedConfigHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

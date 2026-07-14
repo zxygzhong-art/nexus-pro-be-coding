@@ -36,9 +36,6 @@ func (c PlatformService) Home(ctx RequestContext) (PlatformHomeResponse, error) 
 	if err != nil {
 		return PlatformHomeResponse{}, err
 	}
-	if len(assistants) == 0 {
-		assistants = firstPlatformAssistants(6)
-	}
 	return PlatformHomeResponse{
 		Assistants:   assistants,
 		FormColumns:  platformHomeFormColumns(),
@@ -51,26 +48,6 @@ func (c PlatformService) ListAssistants(ctx RequestContext, query PlatformAssist
 	items, err := c.publishedPlatformAssistants(ctx, 0, query)
 	if err != nil {
 		return PlatformAssistantsResponse{}, err
-	}
-	if len(items) > 0 {
-		return PlatformAssistantsResponse{
-			Data:         items,
-			Total:        len(items),
-			ChatMessages: platformAssistantMessages(),
-			QuickPrompts: []string{"推薦客訴處理助理", "月度業績分析", "幫我擬週報", "新人 onboarding", "出差交通建議"},
-		}, nil
-	}
-	tag := strings.ToLower(strings.TrimSpace(query.Tag))
-	search := strings.ToLower(strings.TrimSpace(query.Search))
-	items = make([]PlatformAssistant, 0)
-	for _, assistant := range platformAssistantCatalog() {
-		if tag != "" && tag != "all" && assistant.Tag != tag {
-			continue
-		}
-		if search != "" && !strings.Contains(strings.ToLower(assistant.Title+" "+assistant.Desc+" "+assistant.Tag), search) {
-			continue
-		}
-		items = append(items, assistant)
 	}
 	return PlatformAssistantsResponse{
 		Data:         items,
@@ -442,35 +419,17 @@ func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employe
 	if err != nil {
 		return 0, 0, 0, 0
 	}
-	type monthlyClockPair struct {
-		clockIn  *AttendanceClockRecord
-		clockOut *AttendanceClockRecord
-	}
 	days := map[string]struct{}{}
-	pairs := map[string]monthlyClockPair{}
+	recordsByDate := map[string][]AttendanceClockRecord{}
 	for _, record := range records {
-		if record.EmployeeID != employeeID || record.RecordStatus != clockRecordStatusAccepted {
+		if record.EmployeeID != employeeID || record.RecordStatus != clockRecordStatusAccepted || record.Voided {
 			continue
 		}
-		pair := pairs[record.WorkDate]
-		switch record.Direction {
-		case clockDirectionIn:
-			current := record
-			pair.clockIn = &current
+		recordsByDate[record.WorkDate] = append(recordsByDate[record.WorkDate], record)
+		if record.Direction == clockDirectionIn {
 			days[record.WorkDate] = struct{}{}
-		case clockDirectionOut:
-			current := record
-			pair.clockOut = &current
-		}
-		pairs[record.WorkDate] = pair
-	}
-	monthlyHours := 0.0
-	for _, pair := range pairs {
-		if pair.clockIn != nil && pair.clockOut != nil && pair.clockOut.ClockedAt.After(pair.clockIn.ClockedAt) {
-			monthlyHours += pair.clockOut.ClockedAt.Sub(pair.clockIn.ClockedAt).Hours()
 		}
 	}
-	monthlyHours = math.Round(monthlyHours*10) / 10
 	leaveHours := 0.0
 	leaves, err := c.store.ListLeaveRequestsByQuery(goContext(ctx), ctx.TenantID, LeaveRequestQuery{
 		EmployeeIDs: []string{employeeID},
@@ -486,6 +445,16 @@ func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employe
 			leaveHours += leave.Hours
 		}
 	}
+	monthlyHours := 0.0
+	if policy, policyErr := c.Service.Attendance().loadAttendancePolicyResponse(ctx); policyErr == nil {
+		for workDate, dayRecords := range recordsByDate {
+			projection := projectAttendanceDay(dayRecords, leaves, workDate, policy.WorkTime, now)
+			if projection.ClockIn != nil && projection.ClockOut != nil {
+				monthlyHours += float64(projection.WorkedMinutes) / 60
+			}
+		}
+	}
+	monthlyHours = math.Round(monthlyHours*10) / 10
 	overtimeHours := 0.0
 	overtimes, err := c.store.ListOvertimeRequestsByQuery(goContext(ctx), ctx.TenantID, OvertimeRequestQuery{
 		EmployeeIDs: []string{employeeID},
@@ -578,10 +547,6 @@ func (c PlatformService) taskProjection(ctx RequestContext) ([]PlatformTaskRecor
 	if err != nil {
 		return nil, nil, err
 	}
-	runs, err := c.store.ListAgentRunsByAccount(goContext(ctx), ctx.TenantID, account.ID)
-	if err != nil {
-		return nil, nil, err
-	}
 	recordsByDate := map[string]*PlatformTaskRecord{}
 	todos := make([]PlatformTaskTodo, 0)
 	for _, item := range taskItems {
@@ -595,22 +560,6 @@ func (c PlatformService) taskProjection(ctx RequestContext) ([]PlatformTaskRecor
 	}
 	for _, todo := range taskTodos {
 		todos = append(todos, platformTaskTodoFromRecord(todo))
-	}
-	for _, run := range runs {
-		if run.AccountID != account.ID {
-			continue
-		}
-		date := run.CreatedAt.Format(platformDateLayout)
-		record := recordsByDate[date]
-		if record == nil {
-			record = &PlatformTaskRecord{Date: date, Weekday: platformWeekday(run.CreatedAt), Items: []PlatformTaskItem{}}
-			recordsByDate[date] = record
-		}
-		hours := 1.0
-		item := PlatformTaskItem{ID: run.ID, Title: run.Prompt, Category: "AI", Product: "Nexus", Hours: hours, Note: run.Status, Source: "agent_run", ReadOnly: true}
-		record.Items = append(record.Items, item)
-		record.TotalHours += hours
-		todos = append(todos, PlatformTaskTodo{ID: "todo-" + run.ID, Text: run.Prompt, Done: run.Status == string(AgentRunStatusCompleted), Date: run.CreatedAt.Format("01/02"), Source: "agent_run", ReadOnly: true})
 	}
 	records := make([]PlatformTaskRecord, 0, len(recordsByDate))
 	for _, record := range recordsByDate {
@@ -1041,7 +990,7 @@ func platformLeaveRequestBuilderFields() []PlatformFormBuilderField {
 		{ID: "applicant_dept", Type: "autofill", Label: "部門", Placeholder: "依申請人自動帶入", Binding: binding("current_user", "department_name", ""), ParentLayoutID: "layout-org", SlotIndex: slot(0)},
 		{ID: "applicant_title", Type: "autofill", Label: "職稱", Placeholder: "依申請人自動帶入", Binding: binding("current_user", "position_name", ""), ParentLayoutID: "layout-org", SlotIndex: slot(1)},
 		{ID: "layout-proxy", Type: "layout", Label: "代理人列", Placeholder: "分欄容器：1fr / 1fr", LayoutColumns: []string{"1fr", "1fr"}},
-		{ID: "proxy", Type: "select", Label: "代理人", Placeholder: "請選擇代理人", Required: true, Binding: binding("employees", "id", "name"), ParentLayoutID: "layout-proxy", SlotIndex: slot(0)},
+		{ID: "proxy", Type: "select", Label: "代理人", Placeholder: "不需要時可留空", Binding: binding("employees", "id", "name"), ParentLayoutID: "layout-proxy", SlotIndex: slot(0)},
 		{ID: "proxy_id", Type: "autofill", Label: "代理人員工編號", Placeholder: "依代理人自動帶入", ParentLayoutID: "layout-proxy", SlotIndex: slot(1)},
 		{ID: "section-content", Type: "section-title", Label: "申請內容"},
 		{ID: "leave_type", Type: "select", Label: "假勤名稱", Placeholder: "請選擇", Required: true, DefaultValue: "annual", Binding: binding("leave_types", "code", "name")},
@@ -1130,29 +1079,6 @@ func platformFormBuilderContract() PlatformFormBuilderContract {
 			{ID: "stage-notify", Type: "notify", Label: "通知申請人", Detail: "簽核完成後發送通知", Config: map[string]any{"role": "applicant"}},
 		},
 	}
-}
-
-// platformAssistantCatalog 處理平台助理目錄。
-func platformAssistantCatalog() []PlatformAssistant {
-	return []PlatformAssistant{
-		{ID: "employee-care", Emoji: "🙋", Title: "員工疑難雜症助理", Desc: "提供員工諮詢、申訴與 IT 報修引導。", Tag: "workflow"},
-		{ID: "sales-analytics", Emoji: "📈", Title: "業務報表分析", Desc: "解讀銷售數據並抓取成長或衰退訊號。", Tag: "analytics"},
-		{ID: "product-catalog", Emoji: "📖", Title: "產品目錄助理", Desc: "查詢產品規格並產出提案摘要。", Tag: "doc"},
-		{ID: "recruiting", Emoji: "🤝", Title: "招聘獵頭助理", Desc: "協助產生 JD、篩選履歷與安排面試。", Tag: "workflow"},
-		{ID: "training-mentor", Emoji: "🎓", Title: "培訓學長姐", Desc: "推薦入職訓練清單並解答內部作業規範。", Tag: "doc"},
-		{ID: "legal-contract", Emoji: "⚖️", Title: "合約法務顧問", Desc: "掃描合約風險並比對版本差異。", Tag: "doc"},
-		{ID: "project-manager", Emoji: "🏗️", Title: "專案進度管家", Desc: "彙整專案里程碑並產出週報。", Tag: "workflow"},
-		{ID: "security", Emoji: "🛡️", Title: "資安風控官", Desc: "提醒異常登入與資安宣導。", Tag: "it"},
-	}
-}
-
-// firstPlatformAssistants 取得第一個平台助理。
-func firstPlatformAssistants(limit int) []PlatformAssistant {
-	items := platformAssistantCatalog()
-	if limit > 0 && len(items) > limit {
-		return append([]PlatformAssistant(nil), items[:limit]...)
-	}
-	return append([]PlatformAssistant(nil), items...)
 }
 
 // platformAssistantMessages 處理平台助理 messages。

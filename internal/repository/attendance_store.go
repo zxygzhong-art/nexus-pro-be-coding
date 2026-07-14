@@ -37,7 +37,10 @@ type AttendanceStore interface {
 	FindEffectiveAttendanceShiftAssignment(ctx context.Context, tenantID, employeeID string, at time.Time) (domain.AttendanceShiftAssignment, bool, error)
 
 	UpsertAttendanceClockRecord(context.Context, domain.AttendanceClockRecord) error
-	GetAcceptedAttendanceClockRecord(ctx context.Context, tenantID, employeeID, workDate, direction string) (domain.AttendanceClockRecord, bool, error)
+	GetAttendanceClockRecordByClientEventID(ctx context.Context, tenantID, clientEventID string) (domain.AttendanceClockRecord, bool, error)
+	GetEarliestAcceptedAttendanceClockIn(ctx context.Context, tenantID, employeeID, workDate string) (domain.AttendanceClockRecord, bool, error)
+	GetLatestAcceptedAttendanceClockOut(ctx context.Context, tenantID, employeeID, workDate string) (domain.AttendanceClockRecord, bool, error)
+	GetLatestAcceptedAttendanceClockRecord(ctx context.Context, tenantID, employeeID, workDate string) (domain.AttendanceClockRecord, bool, error)
 	ListAttendanceClockRecords(ctx context.Context, tenantID string, query domain.AttendanceClockRecordQuery) ([]domain.AttendanceClockRecord, error)
 
 	UpsertAttendanceDailySummary(context.Context, domain.AttendanceDailySummary) error

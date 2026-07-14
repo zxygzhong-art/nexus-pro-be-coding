@@ -10,12 +10,17 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
-// TestPageMenuGrantExpandsToDeclaredActionsAndMeResponse 驗證頁面授權、依賴唯讀與 /me 輸出形成閉環。
-func TestPageMenuGrantExpandsToDeclaredActionsAndMeResponse(t *testing.T) {
+// TestExplicitPageActionsAuthorizeAndPopulateMeResponse 驗證明確 action 授權與 /me 導覽輸出形成閉環。
+func TestExplicitPageActionsAuthorizeAndPopulateMeResponse(t *testing.T) {
 	now := pagePermissionTestNow()
 	store := pagePermissionTestStore(now)
 	pagePermissionUpsertSet(store, now, "ps-employees-page", []domain.Permission{
-		pagePermissionMenu("hr.employees"),
+		pagePermissionAPI("workbench", "me", domain.ActionRead),
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionRead),
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionCreate),
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionExport),
+		pagePermissionAPI("hr.employees", "hr.org_unit", domain.ActionRead),
+		pagePermissionAPI("hr.employees", "hr.position", domain.ActionRead),
 	})
 	pagePermissionUpsertAccount(store, now, []string{"ps-employees-page"})
 	svc := service.New(store)
@@ -33,7 +38,7 @@ func TestPageMenuGrantExpandsToDeclaredActionsAndMeResponse(t *testing.T) {
 			t.Fatal(err)
 		}
 		if !result.Allowed {
-			t.Fatalf("expected page grant to allow %s:%s, got %+v", check.Resource, check.Action, result)
+			t.Fatalf("expected explicit action to allow %s:%s, got %+v", check.Resource, check.Action, result)
 		}
 	}
 	for _, check := range []domain.CheckRequest{
@@ -56,16 +61,114 @@ func TestPageMenuGrantExpandsToDeclaredActionsAndMeResponse(t *testing.T) {
 	if !pagePermissionHasMenuKey(me.EffectiveMenuKeys, "hr.employees") {
 		t.Fatalf("expected canonical page key in /me, got %+v", me.EffectiveMenuKeys)
 	}
-	if !pagePermissionHasPermission(me.EffectivePermissions, domain.PermissionTypeMenu, "hr.employees", domain.ActionRead) {
-		t.Fatalf("expected original menu grant in /me, got %+v", me.EffectivePermissions)
-	}
 	if !pagePermissionHasPermission(me.EffectivePermissions, domain.PermissionTypeAPI, "hr.employee", domain.ActionCreate) {
-		t.Fatalf("expected synthesized API grant in /me, got %+v", me.EffectivePermissions)
+		t.Fatalf("expected explicit API grant in /me, got %+v", me.EffectivePermissions)
 	}
 }
 
-// TestCanonicalWorkspacePagesAuthorizeTheirPrimaryOperations 驗證每個 canonical workspace 頁面都有明確主操作映射。
-func TestCanonicalWorkspacePagesAuthorizeTheirPrimaryOperations(t *testing.T) {
+// TestPageMenuGrantDoesNotAuthorizeAPIWithoutExplicitAction 驗證 menu 僅控制導覽，不會合成 API 權限。
+func TestPageMenuGrantDoesNotAuthorizeAPIWithoutExplicitAction(t *testing.T) {
+	now := pagePermissionTestNow()
+	store := pagePermissionTestStore(now)
+	pagePermissionUpsertSet(store, now, "ps-menu-only", []domain.Permission{
+		pagePermissionMenu("iam.members"),
+	})
+	pagePermissionUpsertAccount(store, now, []string{"ps-menu-only"})
+
+	result, err := service.New(store).Authz().Check(pagePermissionTestContext(), domain.CheckRequest{
+		Resource: "iam.permission_set_assignment",
+		Action:   domain.ActionCreate,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Allowed {
+		t.Fatalf("expected menu-only grant not to authorize API action, got %+v", result)
+	}
+}
+
+// TestEmployeeBaseFormAssistantPermissionsStayMinimal verifies employees can run visible Agents without authoring or admin grants.
+func TestEmployeeBaseFormAssistantPermissionsStayMinimal(t *testing.T) {
+	content := service.DefaultHRPermissionPackageContent()
+	var employeeBase *domain.PermissionSetTemplateContent
+	for index := range content.PermissionSetTemplates {
+		if content.PermissionSetTemplates[index].TemplateKey == "hr_employee_base" {
+			employeeBase = &content.PermissionSetTemplates[index]
+			break
+		}
+	}
+	if employeeBase == nil {
+		t.Fatal("hr_employee_base permission template is missing")
+	}
+	authoringTools := map[string]struct{}{
+		"form.get_capabilities": {}, "form.get_data_source_schema": {}, "form.create_draft": {},
+		"form.update_draft": {}, "form.validate_draft": {}, "form.preview_draft": {}, "form.simulate_workflow": {},
+	}
+	for _, permission := range employeeBase.Permissions {
+		switch permission.Resource {
+		case "agent.definition", "agent.model", "workflow.form_definition_draft":
+			t.Fatalf("employee base must not include authoring or Agent administration permission: %+v", permission)
+		case "agent.run":
+			if permission.Action != domain.ActionRead && permission.Action != domain.ActionCreate {
+				t.Fatalf("employee base must only read or create its Agent runtime state: %+v", permission)
+			}
+		case "agent.tool":
+			if _, forbidden := authoringTools[permission.Target]; forbidden {
+				t.Fatalf("employee base must not call form definition authoring tool %q", permission.Target)
+			}
+		}
+	}
+
+	now := pagePermissionTestNow()
+	store := pagePermissionTestStore(now)
+	pagePermissionUpsertSet(store, now, "ps-employee-base", employeeBase.Permissions)
+	pagePermissionUpsertAccount(store, now, []string{"ps-employee-base"})
+	svc := service.New(store)
+	ctx := pagePermissionTestContext()
+	for _, check := range []domain.CheckRequest{
+		{Resource: "agent.run", Action: domain.ActionRead},
+		{Resource: "agent.run", Action: domain.ActionCreate},
+		{Resource: "agent.tool", Action: domain.ActionCall, Target: "list_published_form_templates"},
+		{Resource: "agent.tool", Action: domain.ActionCall, Target: "get_published_form_template"},
+		{Resource: "agent.tool", Action: domain.ActionCall, Target: "create_form_draft"},
+		{Resource: "agent.tool", Action: domain.ActionCall, Target: "update_form_draft"},
+		{Resource: "agent.tool", Action: domain.ActionCall, Target: "preview_form_submission"},
+	} {
+		result, err := svc.Authz().Check(ctx, check)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !result.Allowed {
+			t.Fatalf("expected employee Form Assistant permission %s:%s:%s, got %+v", check.Resource, check.Action, check.Target, result)
+		}
+	}
+	for _, check := range []domain.CheckRequest{
+		{Resource: "agent.run", Action: domain.ActionUpdate},
+		{Resource: "agent.run", Action: domain.ActionDelete},
+		{Resource: "agent.definition", Action: domain.ActionRead},
+		{Resource: "agent.model", Action: domain.ActionRead},
+		{Resource: "workflow.form_definition_draft", Action: domain.ActionCreate},
+		{Resource: "agent.tool", Action: domain.ActionCall, Target: "form.create_draft"},
+	} {
+		result, err := svc.Authz().Check(ctx, check)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if result.Allowed {
+			t.Fatalf("expected employee permission to remain denied for %s:%s:%s, got %+v", check.Resource, check.Action, check.Target, result)
+		}
+	}
+	me, err := svc.Me().Resolve(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pagePermissionHasMenuKey(me.EffectiveMenuKeys, "agents.runs") {
+		t.Fatalf("expected Agent runtime read permission to expose agents.runs, got %+v", me.EffectiveMenuKeys)
+	}
+}
+
+// TestCanonicalWorkspacePageActionsDeriveNavigation 驗證每個 canonical workspace 頁面的明確 action 可推導導覽。
+func TestCanonicalWorkspacePageActionsDeriveNavigation(t *testing.T) {
 	tests := []struct {
 		menuKey         string
 		primaryResource string
@@ -99,7 +202,11 @@ func TestCanonicalWorkspacePagesAuthorizeTheirPrimaryOperations(t *testing.T) {
 		t.Run(test.menuKey, func(t *testing.T) {
 			now := pagePermissionTestNow()
 			store := pagePermissionTestStore(now)
-			pagePermissionUpsertSet(store, now, "ps-page", []domain.Permission{pagePermissionMenu(test.menuKey)})
+			pagePermissionUpsertSet(store, now, "ps-page", []domain.Permission{
+				pagePermissionAPI("workbench", "me", domain.ActionRead),
+				pagePermissionAPI(test.menuKey, test.primaryResource, domain.ActionRead),
+				pagePermissionAPI(test.menuKey, test.resource, test.action),
+			})
 			pagePermissionUpsertAccount(store, now, []string{"ps-page"})
 			result, err := service.New(store).Authz().Check(pagePermissionTestContext(), domain.CheckRequest{
 				Resource: test.resource,
@@ -109,7 +216,7 @@ func TestCanonicalWorkspacePagesAuthorizeTheirPrimaryOperations(t *testing.T) {
 				t.Fatal(err)
 			}
 			if !result.Allowed {
-				t.Fatalf("expected %s page to allow %s:%s, got %+v", test.menuKey, test.resource, test.action, result)
+				t.Fatalf("expected explicit %s action to allow %s:%s, got %+v", test.menuKey, test.resource, test.action, result)
 			}
 			primaryRead, err := service.New(store).Authz().Check(pagePermissionTestContext(), domain.CheckRequest{
 				Resource: test.primaryResource,
@@ -119,7 +226,14 @@ func TestCanonicalWorkspacePagesAuthorizeTheirPrimaryOperations(t *testing.T) {
 				t.Fatal(err)
 			}
 			if !primaryRead.Allowed {
-				t.Fatalf("expected %s bundle to define primary read %s:read, got %+v", test.menuKey, test.primaryResource, primaryRead)
+				t.Fatalf("expected %s to include primary read %s:read, got %+v", test.menuKey, test.primaryResource, primaryRead)
+			}
+			me, err := service.New(store).Me().Resolve(pagePermissionTestContext())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !pagePermissionHasMenuKey(me.EffectiveMenuKeys, test.menuKey) {
+				t.Fatalf("expected explicit primary read to expose %s, got %+v", test.menuKey, me.EffectiveMenuKeys)
 			}
 		})
 	}
@@ -191,12 +305,18 @@ func TestLegacyMenuAliasesNeverExpandIntoAPIAccess(t *testing.T) {
 	}
 }
 
-// TestPageMenuExplicitDenyOverridesExpandedAllow 驗證 deny assignment 會覆蓋頁面展開出的所有 allow。
-func TestPageMenuExplicitDenyOverridesExpandedAllow(t *testing.T) {
+// TestExplicitActionDenyOverridesAllow 驗證 deny assignment 會覆蓋相同的明確 action allow。
+func TestExplicitActionDenyOverridesAllow(t *testing.T) {
 	now := pagePermissionTestNow()
 	store := pagePermissionTestStore(now)
-	pagePermissionUpsertSet(store, now, "ps-page-allow", []domain.Permission{pagePermissionMenu("hr.employees")})
-	pagePermissionUpsertSet(store, now, "ps-page-deny", []domain.Permission{pagePermissionMenu("hr.employees")})
+	pagePermissionUpsertSet(store, now, "ps-page-allow", []domain.Permission{
+		pagePermissionAPI("workbench", "me", domain.ActionRead),
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionRead),
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionCreate),
+	})
+	pagePermissionUpsertSet(store, now, "ps-page-deny", []domain.Permission{
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionCreate),
+	})
 	pagePermissionUpsertAccount(store, now, []string{"ps-page-allow"})
 	_ = store.UpsertPermissionSetAssignment(context.Background(), domain.PermissionSetAssignment{
 		ID:              "assign-page-deny",
@@ -217,22 +337,26 @@ func TestPageMenuExplicitDenyOverridesExpandedAllow(t *testing.T) {
 		t.Fatal(err)
 	}
 	if result.Allowed || result.Reason != "explicit deny" {
-		t.Fatalf("expected expanded deny to override page allow, got %+v", result)
+		t.Fatalf("expected explicit deny to override action allow, got %+v", result)
 	}
 	me, err := svc.Me().Resolve(pagePermissionTestContext())
 	if err != nil {
 		t.Fatalf("page deny must not deny the shared /me bootstrap: %v", err)
 	}
-	if pagePermissionHasMenuKey(me.EffectiveMenuKeys, "hr.employees") {
-		t.Fatalf("expected fully denied page to be hidden from /me, got %+v", me.EffectiveMenuKeys)
+	if !pagePermissionHasMenuKey(me.EffectiveMenuKeys, "hr.employees") {
+		t.Fatalf("expected page to remain visible while primary read survives, got %+v", me.EffectiveMenuKeys)
 	}
 }
 
-// TestPageMenuHidesWhenPrimaryReadIsDenied 驗證 write 尚可執行時，主 read deny 仍會隱藏頁面與原 menu grant。
-func TestPageMenuHidesWhenPrimaryReadIsDenied(t *testing.T) {
+// TestPageHidesWhenPrimaryReadIsDenied 驗證 write 尚可執行時，主 read deny 仍會隱藏頁面。
+func TestPageHidesWhenPrimaryReadIsDenied(t *testing.T) {
 	now := pagePermissionTestNow()
 	store := pagePermissionTestStore(now)
-	pagePermissionUpsertSet(store, now, "ps-page-allow", []domain.Permission{pagePermissionMenu("hr.employees")})
+	pagePermissionUpsertSet(store, now, "ps-page-allow", []domain.Permission{
+		pagePermissionAPI("workbench", "me", domain.ActionRead),
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionRead),
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionCreate),
+	})
 	pagePermissionUpsertSet(store, now, "ps-read-deny", []domain.Permission{{
 		Resource: "hr.employee", Action: domain.ActionRead, Scope: domain.ScopeAll, PermissionType: domain.PermissionTypeAPI,
 	}})
@@ -270,22 +394,19 @@ func TestPageMenuHidesWhenPrimaryReadIsDenied(t *testing.T) {
 	if pagePermissionHasMenuKey(me.EffectiveMenuKeys, "hr.employees") {
 		t.Fatalf("expected page key hidden without primary read, got %+v", me.EffectiveMenuKeys)
 	}
-	if pagePermissionHasPermission(me.EffectivePermissions, domain.PermissionTypeMenu, "hr.employees", domain.ActionRead) {
-		t.Fatalf("expected original menu grant hidden without primary read, got %+v", me.EffectivePermissions)
-	}
 	if !pagePermissionHasPermission(me.EffectivePermissions, domain.PermissionTypeAPI, "hr.employee", domain.ActionCreate) {
 		t.Fatalf("expected surviving create permission in /me, got %+v", me.EffectivePermissions)
 	}
 }
 
-// TestPageMenuGrantPreservesAssignmentDataScope 驗證頁面展開沿用 assignment data scope。
-func TestPageMenuGrantPreservesAssignmentDataScope(t *testing.T) {
+// TestExplicitPageActionPreservesAssignmentDataScope 驗證明確 action 沿用 assignment data scope。
+func TestExplicitPageActionPreservesAssignmentDataScope(t *testing.T) {
 	now := pagePermissionTestNow()
 	store := pagePermissionTestStore(now)
 	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "OU 1", Path: []string{"ou-1"}, CreatedAt: now})
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee 1", OrgUnitID: "ou-1", Status: "active", CreatedAt: now})
 	_ = store.UpsertDataScope(context.Background(), domain.DataScope{ID: "ds-department", TenantID: "tenant-1", Code: "department", Name: "Department", ScopeType: string(domain.ScopeDepartment), CreatedAt: now})
-	pagePermissionUpsertSet(store, now, "ps-page", []domain.Permission{pagePermissionMenu("hr.employees")})
+	pagePermissionUpsertSet(store, now, "ps-page", []domain.Permission{pagePermissionAPI("hr.employees", "hr.employee", domain.ActionRead)})
 	pagePermissionUpsertAccount(store, now, nil)
 	_ = store.UpsertPermissionSetAssignment(context.Background(), domain.PermissionSetAssignment{
 		ID:              "assign-page-scope",
@@ -306,19 +427,25 @@ func TestPageMenuGrantPreservesAssignmentDataScope(t *testing.T) {
 		t.Fatal(err)
 	}
 	if !result.Allowed || result.Scope != domain.ScopeDepartment {
-		t.Fatalf("expected expanded permission to keep department scope, got %+v", result)
+		t.Fatalf("expected explicit permission to keep department scope, got %+v", result)
 	}
 }
 
-// TestPageMenuGrantPreservesAssumedRoleBoundary 驗證頁面展開不繞過 assumed-role permission boundary。
-func TestPageMenuGrantPreservesAssumedRoleBoundary(t *testing.T) {
+// TestExplicitPageActionPreservesAssumedRoleBoundary 驗證明確 action 不繞過 assumed-role permission boundary。
+func TestExplicitPageActionPreservesAssumedRoleBoundary(t *testing.T) {
 	now := pagePermissionTestNow()
 	store := pagePermissionTestStore(now)
 	pagePermissionUpsertSet(store, now, "ps-base", []domain.Permission{
 		{Resource: "iam.assumable_role", Action: domain.ActionAssume, Target: "role-page", Scope: domain.ScopeAll},
-		pagePermissionMenu("hr.employees"),
+		pagePermissionAPI("workbench", "me", domain.ActionRead),
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionRead),
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionCreate),
 	})
-	pagePermissionUpsertSet(store, now, "ps-role-page", []domain.Permission{pagePermissionMenu("hr.employees")})
+	pagePermissionUpsertSet(store, now, "ps-role-page", []domain.Permission{
+		pagePermissionAPI("workbench", "me", domain.ActionRead),
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionRead),
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionCreate),
+	})
 	pagePermissionUpsertAccount(store, now, []string{"ps-base"})
 	_ = store.UpsertAssumableRole(context.Background(), domain.AssumableRole{
 		ID:                     "role-page",
@@ -351,7 +478,7 @@ func TestPageMenuGrantPreservesAssumedRoleBoundary(t *testing.T) {
 		t.Fatal(err)
 	}
 	if create.Allowed {
-		t.Fatalf("expected boundary to reject synthesized create, got %+v", create)
+		t.Fatalf("expected boundary to reject explicit create, got %+v", create)
 	}
 	me, err := svc.Me().Resolve(ctx)
 	if err != nil {
@@ -365,15 +492,21 @@ func TestPageMenuGrantPreservesAssumedRoleBoundary(t *testing.T) {
 	}
 }
 
-// TestPageMenuBoundaryWithOnlyWriteHidesPage 驗證 boundary 僅放行 write 時不會把 write 誤當頁面可見依據。
-func TestPageMenuBoundaryWithOnlyWriteHidesPage(t *testing.T) {
+// TestPageBoundaryWithOnlyWriteHidesPage 驗證 boundary 僅放行 write 時不會把 write 誤當頁面可見依據。
+func TestPageBoundaryWithOnlyWriteHidesPage(t *testing.T) {
 	now := pagePermissionTestNow()
 	store := pagePermissionTestStore(now)
 	pagePermissionUpsertSet(store, now, "ps-base", []domain.Permission{
 		{Resource: "iam.assumable_role", Action: domain.ActionAssume, Target: "role-write", Scope: domain.ScopeAll},
-		pagePermissionMenu("hr.employees"),
+		pagePermissionAPI("workbench", "me", domain.ActionRead),
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionRead),
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionCreate),
 	})
-	pagePermissionUpsertSet(store, now, "ps-role-page", []domain.Permission{pagePermissionMenu("hr.employees")})
+	pagePermissionUpsertSet(store, now, "ps-role-page", []domain.Permission{
+		pagePermissionAPI("workbench", "me", domain.ActionRead),
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionRead),
+		pagePermissionAPI("hr.employees", "hr.employee", domain.ActionCreate),
+	})
 	pagePermissionUpsertAccount(store, now, []string{"ps-base"})
 	_ = store.UpsertAssumableRole(context.Background(), domain.AssumableRole{
 		ID:                     "role-write",
@@ -415,7 +548,7 @@ func TestPageMenuBoundaryWithOnlyWriteHidesPage(t *testing.T) {
 
 // pagePermissionTestNow 回傳固定測試時間。
 func pagePermissionTestNow() time.Time {
-	return time.Date(2026, 7, 10, 9, 0, 0, 0, time.UTC)
+	return time.Date(2030, 7, 10, 9, 0, 0, 0, time.UTC)
 }
 
 // pagePermissionTestStore 建立頁面授權測試 tenant。
@@ -443,6 +576,13 @@ func pagePermissionUpsertAccount(store *memory.Store, now time.Time, permissionS
 func pagePermissionMenu(menuKey string) domain.Permission {
 	return domain.Permission{
 		Resource: menuKey, Action: domain.ActionRead, Scope: domain.ScopeAll, PermissionType: domain.PermissionTypeMenu, MenuKey: menuKey,
+	}
+}
+
+// pagePermissionAPI 建立帶 menuKey 的明確 API action，供授權與導覽推導測試共用。
+func pagePermissionAPI(menuKey, resource string, action domain.Action) domain.Permission {
+	return domain.Permission{
+		Resource: resource, Action: action, Scope: domain.ScopeAll, PermissionType: domain.PermissionTypeAPI, MenuKey: menuKey,
 	}
 }
 

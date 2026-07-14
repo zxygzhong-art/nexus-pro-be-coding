@@ -48,14 +48,27 @@ func DefaultHRPermissionPackageContent() PermissionPackageContent {
 				Description: "員工自助入口與本人資料讀取。",
 				Permissions: []Permission{
 					{Resource: "me", Action: ActionRead, Scope: ScopeSelf, MenuKey: "workbench"},
+					{Resource: "me", Action: ActionUpdate, Scope: ScopeSelf, MenuKey: "workbench"},
 					{Resource: "hr.employee", Action: ActionRead, Scope: ScopeSelf, MenuKey: "hr.employees"},
 					{Resource: "attendance.clock", Action: ActionCreate, Scope: ScopeSelf, MenuKey: "attendance.clock"},
 					{Resource: "attendance.leave", Action: ActionCreate, Scope: ScopeSelf, MenuKey: "attendance.leave"},
+					{Resource: "workflow.form_template", Action: ActionRead, Scope: ScopeAll, MenuKey: "workflow.forms"},
+					{Resource: "workflow.form_instance", Action: ActionRead, Scope: ScopeSelf, MenuKey: "workflow.instances"},
+					{Resource: "workflow.form_instance", Action: ActionSubmit, Scope: ScopeSelf, MenuKey: "workflow.instances"},
+					{Resource: "workflow.form_instance", Action: ActionUpdate, Scope: ScopeSelf, MenuKey: "workflow.instances"},
+					{Resource: "agent.run", Action: ActionRead, Scope: ScopeSelf, MenuKey: "agents.runs"},
+					{Resource: "agent.run", Action: ActionCreate, Scope: ScopeSelf, MenuKey: "agents.runs"},
 					agentToolPermission("knowledge.search"),
 					agentToolPermission("get_my_profile"),
 					agentToolPermission("my_leave_balances"),
 					agentToolPermission("my_clock_records"),
 					agentToolPermission("my_pending_reviews"),
+					agentToolPermission("list_published_form_templates"),
+					agentToolPermission("get_published_form_template"),
+					agentToolPermission("create_form_draft"),
+					agentToolPermission("update_form_draft"),
+					agentToolPermission("preview_form_submission"),
+					agentToolPermission("prepare_bulk_review"),
 				},
 			},
 			{
@@ -74,6 +87,16 @@ func DefaultHRPermissionPackageContent() PermissionPackageContent {
 					{Resource: "attendance.leave", Action: ActionRead, Scope: ScopeAll, MenuKey: "attendance.leave"},
 					{Resource: "attendance.clock", Action: ActionRead, Scope: ScopeAll, MenuKey: "attendance.clock"},
 					{Resource: "attendance.correction", Action: ActionApprove, Scope: ScopeAll, MenuKey: "attendance.corrections"},
+					{Resource: "workflow.form_template", Action: ActionRead, Scope: ScopeAll, MenuKey: "workflow.forms"},
+					{Resource: "workflow.form_instance", Action: ActionRead, Scope: ScopeAll, MenuKey: "workflow.instances"},
+					{Resource: "workflow.form_instance", Action: ActionSubmit, Scope: ScopeSelf, MenuKey: "workflow.instances"},
+					{Resource: "workflow.form_instance", Action: ActionUpdate, Scope: ScopeAll, MenuKey: "workflow.instances"},
+					{Resource: "workflow.form_instance", Action: ActionApprove, Scope: ScopeAll, MenuKey: "workflow.instances"},
+					{Resource: "workflow.form_definition_draft", Action: ActionRead, Scope: ScopeAll, MenuKey: "workflow.forms"},
+					{Resource: "workflow.form_definition_draft", Action: ActionCreate, Scope: ScopeAll, MenuKey: "workflow.forms"},
+					{Resource: "workflow.form_definition_draft", Action: ActionUpdate, Scope: ScopeAll, MenuKey: "workflow.forms"},
+					{Resource: "workflow.form_definition_draft", Action: ActionSubmit, Scope: ScopeAll, MenuKey: "workflow.forms"},
+					{Resource: "workflow.form_definition_draft", Action: ActionApprove, Scope: ScopeAll, MenuKey: "workflow.forms"},
 					{Resource: "iam.permission_set", Action: ActionRead, Scope: ScopeAll, MenuKey: "iam.permission_sets"},
 					{Resource: "iam.permission_set_assignment", Action: ActionRead, Scope: ScopeAll, MenuKey: "iam.permission_sets"},
 					{Resource: "agent.run", Action: ActionRead, Scope: ScopeAll, MenuKey: "agents.runs"},
@@ -86,6 +109,11 @@ func DefaultHRPermissionPackageContent() PermissionPackageContent {
 					{Resource: "agent.definition", Action: ActionCreate, Scope: ScopeAll, MenuKey: "agents.runs"},
 					{Resource: "agent.definition", Action: ActionUpdate, Scope: ScopeAll, MenuKey: "agents.runs"},
 					{Resource: "agent.definition", Action: ActionDelete, Scope: ScopeAll, MenuKey: "agents.runs"},
+					{Resource: "agent.knowledge_base", Action: ActionRead, Scope: ScopeAll, MenuKey: "agents.knowledge_bases"},
+					{Resource: "agent.knowledge_base", Action: ActionCreate, Scope: ScopeAll, MenuKey: "agents.knowledge_bases"},
+					{Resource: "agent.knowledge_base", Action: ActionUpdate, Scope: ScopeAll, MenuKey: "agents.knowledge_bases"},
+					{Resource: "agent.knowledge_base", Action: ActionDelete, Scope: ScopeAll, MenuKey: "agents.knowledge_bases"},
+					{Resource: "agent.tool", Action: ActionRead, Scope: ScopeAll, MenuKey: "agents.tools"},
 					agentToolPermission("knowledge.search"),
 					agentToolPermission("get_my_profile"),
 					agentToolPermission("list_employees"),
@@ -94,6 +122,19 @@ func DefaultHRPermissionPackageContent() PermissionPackageContent {
 					agentToolPermission("my_clock_records"),
 					agentToolPermission("my_pending_reviews"),
 					agentToolPermission("workspace_insights"),
+					agentToolPermission("list_published_form_templates"),
+					agentToolPermission("get_published_form_template"),
+					agentToolPermission("create_form_draft"),
+					agentToolPermission("update_form_draft"),
+					agentToolPermission("preview_form_submission"),
+					agentToolPermission("prepare_bulk_review"),
+					agentToolPermission("form.get_capabilities"),
+					agentToolPermission("form.get_data_source_schema"),
+					agentToolPermission("form.create_draft"),
+					agentToolPermission("form.update_draft"),
+					agentToolPermission("form.validate_draft"),
+					agentToolPermission("form.preview_draft"),
+					agentToolPermission("form.simulate_workflow"),
 				},
 			},
 			{
@@ -250,6 +291,9 @@ func (c IAMService) RegisterPermissionPackage(ctx RequestContext, content Permis
 	if _, _, err := c.requireIAMAuthz(ctx, ResourcePermissionPackage, ActionCreate, ""); err != nil {
 		return PermissionPackage{}, err
 	}
+	if err := c.requireGlobalPermissionPackageWrite(ctx); err != nil {
+		return PermissionPackage{}, err
+	}
 	content = normalizePermissionPackageContent(content)
 	if err := ValidatePermissionPackageContent(content); err != nil {
 		return PermissionPackage{}, permissionPackageValidationError(err)
@@ -292,6 +336,9 @@ func (c IAMService) PublishPermissionPackage(ctx RequestContext, id string) (Per
 	if _, _, err := c.requireIAMAuthz(ctx, ResourcePermissionPackage, Action("publish"), id); err != nil {
 		return PermissionPackage{}, err
 	}
+	if err := c.requireGlobalPermissionPackageWrite(ctx); err != nil {
+		return PermissionPackage{}, err
+	}
 	id = strings.TrimSpace(id)
 	pkg, ok, err := c.store.GetPermissionPackage(goContext(ctx), id)
 	if err != nil {
@@ -328,6 +375,14 @@ func (c IAMService) PublishPermissionPackage(ctx RequestContext, id string) (Per
 		return PermissionPackage{}, err
 	}
 	return pkg, nil
+}
+
+// requireGlobalPermissionPackageWrite 僅接受由已驗證 token 推導出的平台管理員身分。
+func (c IAMService) requireGlobalPermissionPackageWrite(ctx RequestContext) error {
+	if !ctx.PlatformAdmin {
+		return Forbidden("global permission package registry write is not authorized")
+	}
+	return nil
 }
 
 // ImportPermissionPackage 將已發布權限包導入當前租戶。
@@ -494,13 +549,30 @@ func (c IAMService) ensurePackageDataScope(ctx RequestContext, pkg PermissionPac
 	if err != nil {
 		return "", err
 	}
+	expectedID := stablePermissionTemplateID("ds", ctx.TenantID, pkg.ApplicationCode, tpl.Code)
 	for _, item := range existing {
 		if item.Code == code {
+			if item.ID != expectedID {
+				return item.ID, nil
+			}
+			next := item
+			next.Name = strings.TrimSpace(tpl.Name)
+			next.ScopeType = strings.TrimSpace(tpl.ScopeType)
+			next.Params = utils.CopyStringMap(tpl.Params)
+			if next.Name == "" {
+				next.Name = code
+			}
+			if next.ScopeType == "" {
+				next.ScopeType = code
+			}
+			if err := c.store.UpsertDataScope(goContext(ctx), next); err != nil {
+				return "", err
+			}
 			return item.ID, nil
 		}
 	}
 	scope := DataScope{
-		ID:        stablePermissionTemplateID("ds", ctx.TenantID, pkg.ApplicationCode, tpl.Code),
+		ID:        expectedID,
 		TenantID:  ctx.TenantID,
 		Code:      code,
 		Name:      strings.TrimSpace(tpl.Name),
@@ -522,8 +594,24 @@ func (c IAMService) ensurePackageDataScope(ctx RequestContext, pkg PermissionPac
 
 func (c IAMService) ensurePackagePermissionSet(ctx RequestContext, pkg PermissionPackage, tpl PermissionSetTemplateContent) (PermissionSet, error) {
 	existing, err := c.findPermissionSetByTemplate(ctx, pkg, tpl.TemplateKey)
-	if err != nil || existing.ID != "" {
+	if err != nil {
 		return existing, err
+	}
+	if existing.ID != "" {
+		if existing.SourceTemplateKey != tpl.TemplateKey {
+			return existing, nil
+		}
+		existing.Name = strings.TrimSpace(tpl.Name)
+		existing.Description = strings.TrimSpace(tpl.Description)
+		existing.Permissions = normalizePermissions(tpl.Permissions)
+		existing.SourcePackageVersion = pkg.Version
+		if existing.Name == "" {
+			existing.Name = tpl.TemplateKey
+		}
+		if _, err := c.upsertPermissionSetWithItems(ctx, existing); err != nil {
+			return PermissionSet{}, err
+		}
+		return existing, nil
 	}
 	set := PermissionSet{
 		ID:                   stablePermissionTemplateID("ps", ctx.TenantID, pkg.ApplicationCode, tpl.TemplateKey),
@@ -565,12 +653,32 @@ func (c IAMService) findPermissionSetByTemplate(ctx RequestContext, pkg Permissi
 
 func (c IAMService) ensurePackageUserGroup(ctx RequestContext, pkg PermissionPackage, tpl UserGroupTemplateContent, permissionSetIDs map[string]string) (UserGroup, error) {
 	existing, err := c.findUserGroupByTemplate(ctx, pkg, tpl.TemplateKey)
-	if err != nil || existing.ID != "" {
+	if err != nil {
 		return existing, err
 	}
 	setIDs, err := permissionSetIDsForTemplateKeys(tpl.PermissionSetTemplateKeys, permissionSetIDs)
 	if err != nil {
 		return UserGroup{}, err
+	}
+	if existing.ID != "" {
+		if existing.SourceTemplateKey != tpl.TemplateKey {
+			return existing, nil
+		}
+		before := existing
+		existing.Name = strings.TrimSpace(tpl.Name)
+		existing.Description = strings.TrimSpace(tpl.Description)
+		existing.PermissionSetIDs = setIDs
+		existing.SourcePackageVersion = pkg.Version
+		if existing.Name == "" {
+			existing.Name = tpl.TemplateKey
+		}
+		if err := c.store.UpsertUserGroup(goContext(ctx), existing); err != nil {
+			return UserGroup{}, err
+		}
+		if err := c.Service.syncUserGroupRelationshipTuples(ctx, before, existing); err != nil {
+			return UserGroup{}, err
+		}
+		return existing, nil
 	}
 	group := UserGroup{
 		ID:                   stablePermissionTemplateID("ug", ctx.TenantID, pkg.ApplicationCode, tpl.TemplateKey),
@@ -615,7 +723,7 @@ func (c IAMService) findUserGroupByTemplate(ctx RequestContext, pkg PermissionPa
 
 func (c IAMService) ensurePackageAssumableRole(ctx RequestContext, pkg PermissionPackage, tpl AssumableRoleTemplateContent, permissionSetIDs map[string]string) (AssumableRole, error) {
 	existing, err := c.findAssumableRoleByTemplate(ctx, pkg, tpl.TemplateKey)
-	if err != nil || existing.ID != "" {
+	if err != nil {
 		return existing, err
 	}
 	setIDs, err := permissionSetIDsForTemplateKeys(tpl.PermissionSetTemplateKeys, permissionSetIDs)
@@ -625,6 +733,33 @@ func (c IAMService) ensurePackageAssumableRole(ctx RequestContext, pkg Permissio
 	duration := tpl.SessionDurationSeconds
 	if duration <= 0 {
 		duration = defaultAssumableRoleSessionSeconds
+	}
+	if existing.ID != "" {
+		if existing.SourceTemplateKey != tpl.TemplateKey {
+			return existing, nil
+		}
+		before := existing
+		existing.Name = strings.TrimSpace(tpl.Name)
+		existing.Description = strings.TrimSpace(tpl.Description)
+		existing.PermissionSetIDs = setIDs
+		existing.Trusted = tpl.Trusted
+		existing.TrustPolicy = utils.CopyStringMap(tpl.TrustPolicy)
+		existing.PermissionBoundary = utils.CopyStringMap(tpl.PermissionBoundary)
+		existing.SessionDurationSeconds = duration
+		existing.SourcePackageVersion = pkg.Version
+		if existing.Name == "" {
+			existing.Name = tpl.TemplateKey
+		}
+		if err := c.store.UpsertAssumableRole(goContext(ctx), existing); err != nil {
+			return AssumableRole{}, err
+		}
+		if err := c.Service.syncAssumableRoleRelationshipTuples(ctx, before, existing); err != nil {
+			return AssumableRole{}, err
+		}
+		if err := c.revokePackageRoleSessions(ctx, existing.ID); err != nil {
+			return AssumableRole{}, err
+		}
+		return existing, nil
 	}
 	role := AssumableRole{
 		ID:                     stablePermissionTemplateID("ar", ctx.TenantID, pkg.ApplicationCode, tpl.TemplateKey),
@@ -647,6 +782,22 @@ func (c IAMService) ensurePackageAssumableRole(ctx RequestContext, pkg Permissio
 		return AssumableRole{}, err
 	}
 	return role, nil
+}
+
+// revokePackageRoleSessions 讓權限包角色的收斂變更立即終止舊 session。
+func (c IAMService) revokePackageRoleSessions(ctx RequestContext, roleID string) error {
+	sessions, err := c.store.ListActiveAssumableRoleSessionsForRole(goContext(ctx), ctx.TenantID, roleID)
+	if err != nil {
+		return err
+	}
+	now := c.Now()
+	for _, session := range sessions {
+		session.RevokedAt = &now
+		if err := c.store.UpsertAssumableRoleSession(goContext(ctx), session); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (c IAMService) findAssumableRoleByTemplate(ctx RequestContext, pkg PermissionPackage, templateKey string) (AssumableRole, error) {

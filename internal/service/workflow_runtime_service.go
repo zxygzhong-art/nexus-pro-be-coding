@@ -86,7 +86,7 @@ func (c WorkflowService) ActOnWorkflowStage(ctx RequestContext, formInstanceID, 
 		return domain.FormInstance{}, err
 	}
 	if !workflowAssigneeCanAct(assignees, ctx.AccountID) {
-		return domain.FormInstance{}, Forbidden("current account is not an active assignee for this stage")
+		return domain.FormInstance{}, Forbidden("current account is not an active assignee for this stage").WithReasonCode("workflow_not_assignee")
 	}
 	stageDefinition := workflowStageByID(stages, stageInstance.StageID)
 	now := c.Now()
@@ -246,14 +246,14 @@ func (c WorkflowService) loadActiveWorkflowStage(ctx RequestContext, formInstanc
 		return domain.FormInstance{}, domain.WorkflowRun{}, domain.WorkflowStageInstance{}, nil, err
 	}
 	if !ok || run.Status != domain.WorkflowRunStatusRunning || run.CurrentStageInstanceID == "" {
-		return domain.FormInstance{}, domain.WorkflowRun{}, domain.WorkflowStageInstance{}, nil, BadRequest("form instance has no active workflow stage")
+		return domain.FormInstance{}, domain.WorkflowRun{}, domain.WorkflowStageInstance{}, nil, BadRequest("form instance has no active workflow stage").WithReasonCode("workflow_stage_unavailable")
 	}
 	stageInstance, ok, err := c.store.GetWorkflowStageInstance(goContext(ctx), ctx.TenantID, run.CurrentStageInstanceID)
 	if err != nil {
 		return domain.FormInstance{}, domain.WorkflowRun{}, domain.WorkflowStageInstance{}, nil, err
 	}
 	if !ok || stageInstance.Status != domain.WorkflowStageStatusActive {
-		return domain.FormInstance{}, domain.WorkflowRun{}, domain.WorkflowStageInstance{}, nil, BadRequest("workflow stage is not active")
+		return domain.FormInstance{}, domain.WorkflowRun{}, domain.WorkflowStageInstance{}, nil, BadRequest("workflow stage is not active").WithReasonCode("workflow_stage_unavailable")
 	}
 	return instance, run, stageInstance, DeserializeWorkflowStages(run.StageDefinitionsJSON), nil
 }
@@ -410,7 +410,7 @@ func (c WorkflowService) activateApprovalStage(ctx RequestContext, run domain.Wo
 		}
 	}
 	if len(assigneeIDs) == 0 {
-		return BadRequest("workflow stage has no resolvable assignees: " + stage.Label)
+		return BadRequest("workflow stage has no resolvable assignees: " + stage.Label).WithReasonCode("workflow_stage_unavailable")
 	}
 	now := c.Now()
 	stageInstance := domain.WorkflowStageInstance{
@@ -739,14 +739,14 @@ func (c WorkflowService) resolveWorkflowGroupAssignees(ctx RequestContext, appli
 func (c WorkflowService) validateWorkflowActorEligibility(ctx RequestContext, instance domain.FormInstance, run domain.WorkflowRun, stage domain.WorkflowStageDefinition, action string) error {
 	if len(stage.Config.UserGroupIDs) > 0 {
 		if ctx.AccountID == instance.ApplicantAccountID {
-			return Forbidden("applicant cannot act as a group approver")
+			return Forbidden("applicant cannot act as a group approver").WithReasonCode("workflow_not_assignee")
 		}
 		eligible, err := c.resolveWorkflowGroupAssignees(ctx, instance.ApplicantAccountID, stage.Config.UserGroupIDs)
 		if err != nil {
 			return err
 		}
 		if !workflowRecipientContains(eligible, ctx.AccountID) {
-			return Forbidden("current account is no longer an eligible member of the approval group")
+			return Forbidden("current account is no longer an eligible member of the approval group").WithReasonCode("workflow_not_assignee")
 		}
 	}
 	if action != "approve" || !stage.Config.RequireDistinctApprover {
@@ -758,7 +758,7 @@ func (c WorkflowService) validateWorkflowActorEligibility(ctx RequestContext, in
 	}
 	for _, prior := range actions {
 		if prior.AccountID == ctx.AccountID && prior.Action == "approve" && prior.StageInstanceID != run.CurrentStageInstanceID {
-			return Forbidden("current account already approved an earlier workflow stage")
+			return Forbidden("current account already approved an earlier workflow stage").WithReasonCode("workflow_not_assignee")
 		}
 	}
 	return nil

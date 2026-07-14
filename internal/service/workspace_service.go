@@ -232,6 +232,18 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	if err != nil {
 		return WorkspaceAttendanceResponse{}, err
 	}
+	leaves, err := c.Service.Attendance().listLeaveRequestsByQuery(ctx, LeaveRequestQuery{
+		Status:   "approved",
+		FromDate: start.Format(time.DateOnly),
+		ToDate:   end.AddDate(0, 0, -1).Format(time.DateOnly),
+	})
+	if err != nil {
+		return WorkspaceAttendanceResponse{}, err
+	}
+	policy, err := c.Service.Attendance().loadAttendancePolicyResponse(ctx)
+	if err != nil {
+		return WorkspaceAttendanceResponse{}, err
+	}
 	worksites, err := c.store.ListAttendanceWorksites(goContext(ctx), ctx.TenantID)
 	if err != nil {
 		return WorkspaceAttendanceResponse{}, err
@@ -242,6 +254,7 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	cards := workspaceEmployeeCards(employees, orgNames)
 	monthEmployees := workspaceEmployeesPresentInRange(employees, start, end)
 	leaveByEmployeeDate := workspaceSummaryLeaveCells(summaries)
+	leaveByEmployeeDate = workspaceMergeApprovedLeaveCells(leaveByEmployeeDate, leaves, policy.WorkTime, start, end)
 	overtimeByEmployeeDate := workspaceOvertimeCells(overtimes, start, end)
 	summaryByEmployeeDate := workspaceSummaryCells(summaries)
 	clockByEmployeeDate := workspaceClockCells(clocks, summaries, worksites, leaveByEmployeeDate, overtimeByEmployeeDate)

@@ -19,6 +19,7 @@ type Store interface {
 	WorkflowStore
 	TaskStore
 	AgentStore
+	KnowledgeStore
 	NotificationStore
 	AuditStore
 	AuthzEventStore

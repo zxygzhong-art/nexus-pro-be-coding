@@ -2,6 +2,28 @@ package domain
 
 import "strings"
 
+// Validate rejects oversized self-service profile values while allowing fields to be cleared.
+func (in UpdateMeProfileInput) Validate() error {
+	if in.EnglishName == nil && in.MobilePhone == nil && in.Extension == nil && in.Slack == nil && in.EmergencyContactName == nil {
+		return ValidationFailed("profile validation failed", []FieldError{{Field: "profile", Code: "at_least_one", Message: "at least one profile field is required"}})
+	}
+	fields := make([]FieldError, 0)
+	validateOptionalProfileLength := func(field string, value *string, max int) {
+		if value != nil && len([]rune(strings.TrimSpace(*value))) > max {
+			fields = append(fields, FieldError{Field: field, Code: "max_length", Message: field + " exceeds maximum length"})
+		}
+	}
+	validateOptionalProfileLength("english_name", in.EnglishName, 100)
+	validateOptionalProfileLength("mobile_phone", in.MobilePhone, 32)
+	validateOptionalProfileLength("extension", in.Extension, 16)
+	validateOptionalProfileLength("slack", in.Slack, 80)
+	validateOptionalProfileLength("emergency_contact_name", in.EmergencyContactName, 100)
+	if len(fields) > 0 {
+		return ValidationFailed("profile validation failed", fields)
+	}
+	return nil
+}
+
 // Validate 驗證目前流程。
 func (in CreateEmployeeInput) Validate() error {
 	fields := make([]FieldError, 0)

@@ -34,6 +34,15 @@ func (e *AppError) WithPublicCode(code ErrorCode) *AppError {
 	return e
 }
 
+// WithReasonCode attaches a semantic reason and its public numeric mapping when one exists.
+func (e *AppError) WithReasonCode(reasonCode string) *AppError {
+	e.ReasonCode = reasonCode
+	if code, ok := reasonErrorCode(reasonCode); ok {
+		e.PublicCode = code
+	}
+	return e
+}
+
 // NumericCode 處理 numeric 碼。
 func (e *AppError) NumericCode() ErrorCode {
 	if e.PublicCode != 0 {

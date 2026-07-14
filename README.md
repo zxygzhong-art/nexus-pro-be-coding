@@ -69,6 +69,12 @@ go run ./cmd/api
 
 Set `LOG_LEVEL=debug`, `info`, `warn`, or `error` to tune application log verbosity.
 
+### Agent Chat Runtime
+
+The default `go run ./cmd/api`, `go test`, and Docker build all compile the real ADK Agent runtime and LiteLLM adapter. No build tag is required. Set `LITELLM_BASE_URL` and `LITELLM_API_KEY` to enable chat at runtime; when the API key is absent, the rest of the API stays available and agent chat returns `agent_chat_disabled`.
+
+Authenticated external Agent tools require `AGENT_TOOL_CREDENTIAL_ENCRYPTION_KEY`, a standard-base64 encoded 32-byte key (`openssl rand -base64 32`). The API rejects credential-bearing registrations when this key is absent or invalid; secrets are encrypted before persistence and never returned by list/create/delete responses.
+
 ### Temporal Workflow Engine
 
 Temporal is a required runtime dependency for form approval. Form submit starts a Temporal workflow, and approve / reject / return / withdraw API actions only send Temporal signals. The existing `form_instances` and `workflow_runs` tables remain the query projection used by the API, updated by workflow activities. There is no API fallback to the legacy synchronous state machine when a workflow execution is missing.
@@ -189,6 +195,8 @@ Prefix allocation:
 | `6xxxx` | Agent errors |
 
 Within a prefix, keep low numbers for generic fallbacks and reserve narrower ranges for more specific cases. Do not reuse a retired code with a different meaning. The top-level `error.code` is numeric; `reason_code`, `field_errors[].code`, and `row_errors[].field_errors[].code` remain semantic strings for diagnostics and UI copy.
+
+Expected business failures must be returned as `domain.AppError`. Generic bad-request, not-found, and conflict errors are assigned to the owning Attendance (`4xxxx`), Workflow (`5xxxx`), or Agent (`6xxxx`) range at the API route boundary; important recovery cases should additionally set a semantic `reason_code` and a dedicated numeric code. Raw repository, dependency, and panic errors remain `10000` with a safe message and `trace_id`; never expose database or upstream response details to clients.
 
 Run the minimal validation suite:
 

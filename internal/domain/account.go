@@ -27,6 +27,15 @@ type Account struct {
 	CreatedAt              time.Time `json:"created_at"`
 }
 
+// UpdateMeProfileInput defines the self-service profile fields an authenticated user may change.
+type UpdateMeProfileInput struct {
+	EnglishName          *string `json:"english_name,omitempty"`
+	MobilePhone          *string `json:"mobile_phone,omitempty"`
+	Extension            *string `json:"extension,omitempty"`
+	Slack                *string `json:"slack,omitempty"`
+	EmergencyContactName *string `json:"emergency_contact_name,omitempty"`
+}
+
 // AuthenticatedPrincipal 定義 authenticated principal 的資料結構。
 type AuthenticatedPrincipal struct {
 	Provider   string         `json:"provider"`

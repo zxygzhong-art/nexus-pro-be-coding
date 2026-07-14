@@ -33,6 +33,16 @@
       ]
     },
     {
+      "application_code": "agent",
+      "resource_type": "tool",
+      "actions": [
+        "call",
+        "create",
+        "delete",
+        "read"
+      ]
+    },
+    {
       "application_code": "attendance",
       "resource_type": "clock",
       "actions": [
@@ -265,6 +275,17 @@
     },
     {
       "application_code": "workflow",
+      "resource_type": "form_definition_draft",
+      "actions": [
+        "approve",
+        "create",
+        "read",
+        "submit",
+        "update"
+      ]
+    },
+    {
+      "application_code": "workflow",
       "resource_type": "form_instance",
       "actions": [
         "approve",
@@ -337,7 +358,8 @@
       "high_risk": true
     },
     {
-      "action": "submit"
+      "action": "submit",
+      "high_risk": true
     },
     {
       "action": "update",
@@ -773,6 +795,32 @@
       "application_code": "hr",
       "resource_type": "employee",
       "resource": "hr.employee",
+      "action": "read"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "import",
+      "risk_level": "critical"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "read"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
+      "action": "import",
+      "risk_level": "critical"
+    },
+    {
+      "application_code": "hr",
+      "resource_type": "employee",
+      "resource": "hr.employee",
       "action": "export",
       "risk_level": "critical"
     },
@@ -1311,6 +1359,26 @@
       "action": "read"
     },
     {
+      "application_code": "agent",
+      "resource_type": "tool",
+      "resource": "agent.tool",
+      "action": "read"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "tool",
+      "resource": "agent.tool",
+      "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "tool",
+      "resource": "agent.tool",
+      "action": "delete",
+      "risk_level": "high"
+    },
+    {
       "application_code": "workflow",
       "resource_type": "form_template",
       "resource": "workflow.form_template",
@@ -1321,6 +1389,87 @@
       "resource_type": "form_template",
       "resource": "workflow.form_template",
       "action": "create"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_definition_draft",
+      "resource": "workflow.form_definition_draft",
+      "action": "read"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_definition_draft",
+      "resource": "workflow.form_definition_draft",
+      "action": "read"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_definition_draft",
+      "resource": "workflow.form_definition_draft",
+      "action": "read"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_definition_draft",
+      "resource": "workflow.form_definition_draft",
+      "action": "read"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_definition_draft",
+      "resource": "workflow.form_definition_draft",
+      "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_definition_draft",
+      "resource": "workflow.form_definition_draft",
+      "action": "read"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_definition_draft",
+      "resource": "workflow.form_definition_draft",
+      "action": "update"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_definition_draft",
+      "resource": "workflow.form_definition_draft",
+      "action": "read"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_definition_draft",
+      "resource": "workflow.form_definition_draft",
+      "action": "read"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_definition_draft",
+      "resource": "workflow.form_definition_draft",
+      "action": "read"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_definition_draft",
+      "resource": "workflow.form_definition_draft",
+      "action": "submit",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_definition_draft",
+      "resource": "workflow.form_definition_draft",
+      "action": "approve",
+      "risk_level": "critical"
+    },
+    {
+      "application_code": "workflow",
+      "resource_type": "form_instance",
+      "resource": "workflow.form_instance",
+      "action": "read"
     },
     {
       "application_code": "workflow",
@@ -1423,6 +1572,13 @@
       "resource_type": "run",
       "resource": "agent.run",
       "action": "create"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "run",
+      "resource": "agent.run",
+      "action": "create",
+      "risk_level": "high"
     },
     {
       "application_code": "agent",
@@ -1741,6 +1897,12 @@
           "menu_key": "workbench"
         },
         {
+          "resource": "me",
+          "action": "update",
+          "scope": "self",
+          "menu_key": "workbench"
+        },
+        {
           "resource": "hr.employee",
           "action": "read",
           "scope": "self",
@@ -1757,6 +1919,42 @@
           "action": "create",
           "scope": "self",
           "menu_key": "attendance.leave"
+        },
+        {
+          "resource": "workflow.form_template",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "workflow.forms"
+        },
+        {
+          "resource": "workflow.form_instance",
+          "action": "read",
+          "scope": "self",
+          "menu_key": "workflow.instances"
+        },
+        {
+          "resource": "workflow.form_instance",
+          "action": "submit",
+          "scope": "self",
+          "menu_key": "workflow.instances"
+        },
+        {
+          "resource": "workflow.form_instance",
+          "action": "update",
+          "scope": "self",
+          "menu_key": "workflow.instances"
+        },
+        {
+          "resource": "agent.run",
+          "action": "read",
+          "scope": "self",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.run",
+          "action": "create",
+          "scope": "self",
+          "menu_key": "agents.runs"
         },
         {
           "resource": "agent.tool",
@@ -1790,6 +1988,48 @@
           "resource": "agent.tool",
           "action": "call",
           "target": "my_pending_reviews",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "list_published_form_templates",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "get_published_form_template",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "create_form_draft",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "update_form_draft",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "preview_form_submission",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "prepare_bulk_review",
           "scope": "all",
           "menu_key": "agents.runs"
         }
@@ -1867,6 +2107,66 @@
           "menu_key": "attendance.corrections"
         },
         {
+          "resource": "workflow.form_template",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "workflow.forms"
+        },
+        {
+          "resource": "workflow.form_instance",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "workflow.instances"
+        },
+        {
+          "resource": "workflow.form_instance",
+          "action": "submit",
+          "scope": "self",
+          "menu_key": "workflow.instances"
+        },
+        {
+          "resource": "workflow.form_instance",
+          "action": "update",
+          "scope": "all",
+          "menu_key": "workflow.instances"
+        },
+        {
+          "resource": "workflow.form_instance",
+          "action": "approve",
+          "scope": "all",
+          "menu_key": "workflow.instances"
+        },
+        {
+          "resource": "workflow.form_definition_draft",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "workflow.forms"
+        },
+        {
+          "resource": "workflow.form_definition_draft",
+          "action": "create",
+          "scope": "all",
+          "menu_key": "workflow.forms"
+        },
+        {
+          "resource": "workflow.form_definition_draft",
+          "action": "update",
+          "scope": "all",
+          "menu_key": "workflow.forms"
+        },
+        {
+          "resource": "workflow.form_definition_draft",
+          "action": "submit",
+          "scope": "all",
+          "menu_key": "workflow.forms"
+        },
+        {
+          "resource": "workflow.form_definition_draft",
+          "action": "approve",
+          "scope": "all",
+          "menu_key": "workflow.forms"
+        },
+        {
           "resource": "iam.permission_set",
           "action": "read",
           "scope": "all",
@@ -1940,6 +2240,24 @@
         },
         {
           "resource": "agent.tool",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "create",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "delete",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
           "action": "call",
           "target": "knowledge.search",
           "scope": "all",
@@ -1991,6 +2309,97 @@
           "resource": "agent.tool",
           "action": "call",
           "target": "workspace_insights",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "list_published_form_templates",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "get_published_form_template",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "create_form_draft",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "update_form_draft",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "preview_form_submission",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "prepare_bulk_review",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "form.get_capabilities",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "form.get_data_source_schema",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "form.create_draft",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "form.update_draft",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "form.validate_draft",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "form.preview_draft",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "form.simulate_workflow",
           "scope": "all",
           "menu_key": "agents.runs"
         }

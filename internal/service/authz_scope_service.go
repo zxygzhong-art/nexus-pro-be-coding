@@ -202,11 +202,24 @@ func (c *Service) scopeConditions(ctx RequestContext, account Account, scope Sco
 			return nil, forbiddenDataScope("assigned_org_units scope requires org_unit_ids")
 		}
 	case ScopeCustomCondition:
+		if !hasEffectiveCustomScopeFilter(out) {
+			return nil, forbiddenDataScope("custom_condition has no supported effective filter")
+		}
 		out["scope"] = ScopeCustomCondition
 	default:
 		out["scope"] = scope
 	}
 	return out, nil
+}
+
+// hasEffectiveCustomScopeFilter 判斷 custom scope 是否至少包含一個可執行的限制條件。
+func hasEffectiveCustomScopeFilter(conditions map[string]any) bool {
+	for _, key := range []string{"employee_ids", "org_unit_ids", "employee_statuses", "statuses"} {
+		if len(stringSliceFromAny(conditions[key])) > 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // openFGAScopeChecksAvailable 判斷 FGA 資料範圍 check 是否可用。
@@ -444,6 +457,9 @@ func filterEmployeesByConditions(items []Employee, conditions map[string]any) []
 	employeeAllowed := stringSet(employeeIDs)
 	orgAllowed := stringSet(orgUnitIDs)
 	statusAllowed := stringSet(statuses)
+	if len(employeeAllowed) == 0 && len(orgAllowed) == 0 && len(statusAllowed) == 0 {
+		return []Employee{}
+	}
 	out := make([]Employee, 0, len(items))
 	for _, item := range items {
 		if len(employeeAllowed) > 0 {

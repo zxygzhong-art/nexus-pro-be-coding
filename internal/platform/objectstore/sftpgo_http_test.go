@@ -71,6 +71,12 @@ func TestNewSFTPGoStoreSelectsHTTP(t *testing.T) {
 				return
 			}
 			w.WriteHeader(http.StatusCreated)
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v2/user/files":
+			if got := r.Header.Get("Authorization"); got != "Bearer token-1" || r.URL.Query().Get("path") != "/nexus-bucket/imports/a.txt" {
+				w.WriteHeader(http.StatusBadRequest)
+				return
+			}
+			_, _ = w.Write([]byte("hello"))
 		default:
 			w.WriteHeader(http.StatusNotFound)
 		}
@@ -93,6 +99,10 @@ func TestNewSFTPGoStoreSelectsHTTP(t *testing.T) {
 	}
 	if err := httpStore.PutObject(context.Background(), "imports/a.txt", "text/plain", []byte("hello")); err != nil {
 		t.Fatalf("PutObject() error = %v", err)
+	}
+	raw, err := httpStore.GetObject(context.Background(), "imports/a.txt")
+	if err != nil || string(raw) != "hello" {
+		t.Fatalf("GetObject() content = %q, error = %v", raw, err)
 	}
 }
 

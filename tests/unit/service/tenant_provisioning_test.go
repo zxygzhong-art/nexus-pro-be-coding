@@ -47,6 +47,14 @@ func TestProvisionTenantCreatesUsableAdmin(t *testing.T) {
 	if err != nil || !ok || root.Code != "ROOT" || len(root.Path) != 1 || root.Path[0] != root.ID {
 		t.Fatalf("expected root org unit, root=%+v ok=%v err=%v", root, ok, err)
 	}
+	leaveTemplate, ok, err := store.GetFormTemplateByKey(context.Background(), "tenant-acme", "leave-request")
+	if err != nil || !ok || leaveTemplate.Status != "published" || leaveTemplate.CurrentVersion != 1 {
+		t.Fatalf("expected published default leave template, template=%+v ok=%v err=%v", leaveTemplate, ok, err)
+	}
+	stages := service.ParseWorkflowStagesFromTemplate(leaveTemplate)
+	if len(stages) != 1 || stages[0].Config.Role != "manager" {
+		t.Fatalf("expected manager approval stage, stages=%+v", stages)
+	}
 	permissionSet, ok, err := store.GetPermissionSet(context.Background(), "tenant-acme", result.AdminPermissionSetID)
 	if err != nil || !ok || !hasPermission(permissionSet.Permissions, "hr.employee", domain.ActionDelete, "hr.employees") {
 		t.Fatalf("expected admin permission set, permissionSet=%+v ok=%v err=%v", permissionSet, ok, err)
@@ -90,6 +98,14 @@ func TestProvisionTenantIsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	leaveTemplate, ok, err := store.GetFormTemplateByKey(context.Background(), "tenant-acme", "leave-request")
+	if err != nil || !ok {
+		t.Fatalf("expected default leave template, template=%+v ok=%v err=%v", leaveTemplate, ok, err)
+	}
+	leaveTemplate.Name = "Acme Leave Request"
+	if err := store.UpsertFormTemplate(context.Background(), leaveTemplate); err != nil {
+		t.Fatal(err)
+	}
 	second, err := svc.ProvisionTenant(context.Background(), input)
 	if err != nil {
 		t.Fatal(err)
@@ -104,6 +120,10 @@ func TestProvisionTenantIsIdempotent(t *testing.T) {
 	identities, err := store.ListUserIdentities(context.Background(), "tenant-acme", second.AdminAccountID)
 	if err != nil || len(identities) != 1 {
 		t.Fatalf("expected one identity after rerun, identities=%+v err=%v", identities, err)
+	}
+	leaveTemplates, err := store.ListFormTemplates(context.Background(), "tenant-acme")
+	if err != nil || len(leaveTemplates) != 1 || leaveTemplates[0].Name != "Acme Leave Request" {
+		t.Fatalf("expected rerun to preserve one customized leave template, templates=%+v err=%v", leaveTemplates, err)
 	}
 	events, err := store.ListOutboxEvents(context.Background(), "tenant-acme")
 	if err != nil {

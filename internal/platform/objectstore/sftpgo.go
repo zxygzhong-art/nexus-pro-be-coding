@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"path"
@@ -37,9 +38,32 @@ type SFTPGo struct {
 // ObjectStore is the shared object store surface used by bootstrap.
 type ObjectStore interface {
 	PutObject(ctx context.Context, key string, contentType string, data []byte) error
+	GetObject(ctx context.Context, key string) ([]byte, error)
 	DeleteObject(ctx context.Context, key string) error
 	Provider() string
 	Bucket() string
+}
+
+// GetObject reads an object from SFTPGo's SFTP endpoint.
+func (s *SFTPGo) GetObject(ctx context.Context, key string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	objectPath, err := s.pathForKey(key)
+	if err != nil {
+		return nil, err
+	}
+	var data []byte
+	err = s.withClient(ctx, func(client *sftp.Client) error {
+		file, err := client.Open(objectPath)
+		if err != nil {
+			return err
+		}
+		defer file.Close()
+		data, err = io.ReadAll(file)
+		return err
+	})
+	return data, err
 }
 
 // NewSFTPGoStore creates an SFTPGo-backed object store using HTTP or SFTP.

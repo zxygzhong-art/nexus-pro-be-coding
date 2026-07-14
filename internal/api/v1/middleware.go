@@ -74,9 +74,66 @@ func (a *API) ginHandle(resource, action string, next HandlerFunc, authz routeAu
 			return
 		}
 		if err := next(c.Writer, c.Request, ctx); err != nil {
-			a.writeError(c.Writer, c.Request, err)
+			a.writeError(c.Writer, c.Request, businessRouteError(resource, err))
 			return
 		}
+	}
+}
+
+// businessRouteError assigns module fallbacks only to expected application errors.
+func businessRouteError(resource string, err error) error {
+	appErr, ok := domain.AsAppError(err)
+	if !ok {
+		return err
+	}
+	if !isGenericApplicationError(appErr) {
+		return err
+	}
+	code := routeFallbackErrorCode(resource, appErr.Code)
+	if code == 0 {
+		return err
+	}
+	return appErr.WithPublicCode(code)
+}
+
+// isGenericApplicationError prevents route fallbacks from overwriting a specific public code.
+func isGenericApplicationError(appErr *domain.AppError) bool {
+	switch appErr.Code {
+	case "bad_request":
+		return appErr.PublicCode == domain.ErrorCodeBadRequest
+	case "validation_failed":
+		return appErr.PublicCode == domain.ErrorCodeValidationFailed
+	case "not_found":
+		return appErr.PublicCode == domain.ErrorCodeNotFound
+	case "conflict":
+		return appErr.PublicCode == domain.ErrorCodeConflict
+	default:
+		return false
+	}
+}
+
+// routeFallbackErrorCode keeps generic bad-request/not-found/conflict errors inside their owning module range.
+func routeFallbackErrorCode(resource, kind string) domain.ErrorCode {
+	var badRequest, notFound, conflict domain.ErrorCode
+	switch {
+	case strings.HasPrefix(resource, "attendance."):
+		badRequest, notFound, conflict = domain.ErrorCodeAttendanceBadRequest, domain.ErrorCodeAttendanceNotFound, domain.ErrorCodeAttendanceConflict
+	case strings.HasPrefix(resource, "workflow."):
+		badRequest, notFound, conflict = domain.ErrorCodeWorkflowBadRequest, domain.ErrorCodeWorkflowNotFound, domain.ErrorCodeWorkflowConflict
+	case strings.HasPrefix(resource, "agent."):
+		badRequest, notFound, conflict = domain.ErrorCodeAgentBadRequest, domain.ErrorCodeAgentNotFound, domain.ErrorCodeAgentConflict
+	default:
+		return 0
+	}
+	switch kind {
+	case "bad_request", "validation_failed":
+		return badRequest
+	case "not_found":
+		return notFound
+	case "conflict":
+		return conflict
+	default:
+		return 0
 	}
 }
 

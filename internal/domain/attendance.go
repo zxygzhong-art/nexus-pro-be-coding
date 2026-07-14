@@ -146,6 +146,7 @@ type AttendanceClockRecord struct {
 	WorksiteID          string         `json:"worksite_id,omitempty"`
 	WorkDate            string         `json:"work_date"`
 	Direction           string         `json:"direction"`
+	ClientEventID       string         `json:"client_event_id,omitempty"`
 	ClockedAt           time.Time      `json:"clocked_at"`
 	Latitude            float64        `json:"latitude"`
 	Longitude           float64        `json:"longitude"`
@@ -157,6 +158,10 @@ type AttendanceClockRecord struct {
 	DeviceID            string         `json:"device_id,omitempty"`
 	DeviceInfo          map[string]any `json:"device_info,omitempty"`
 	CorrectionRequestID string         `json:"correction_request_id,omitempty"`
+	Voided              bool           `json:"voided,omitempty"`
+	VoidedAt            *time.Time     `json:"voided_at,omitempty"`
+	VoidedByAccountID   string         `json:"voided_by_account_id,omitempty"`
+	VoidReason          string         `json:"void_reason,omitempty"`
 	CreatedAt           time.Time      `json:"created_at"`
 }
 
@@ -200,31 +205,43 @@ type AttendanceDailySummary struct {
 
 // AttendanceCorrectionRequest 定義考勤 correction 請求的資料結構。
 type AttendanceCorrectionRequest struct {
-	ID                  string     `json:"id"`
-	TenantID            string     `json:"tenant_id"`
-	EmployeeID          string     `json:"employee_id"`
-	Direction           string     `json:"direction"`
-	RequestedClockedAt  time.Time  `json:"requested_clocked_at"`
-	WorkDate            string     `json:"work_date"`
-	Reason              string     `json:"reason"`
-	Status              string     `json:"status"`
-	FormInstanceID      string     `json:"form_instance_id,omitempty"`
-	ClockRecordID       string     `json:"clock_record_id,omitempty"`
-	ReviewedByAccountID string     `json:"reviewed_by_account_id,omitempty"`
-	ReviewReason        string     `json:"review_reason,omitempty"`
-	ReviewedAt          *time.Time `json:"reviewed_at,omitempty"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
+	ID                       string     `json:"id"`
+	TenantID                 string     `json:"tenant_id"`
+	EmployeeID               string     `json:"employee_id"`
+	Direction                string     `json:"direction"`
+	RequestedClockedAt       time.Time  `json:"requested_clocked_at"`
+	WorkDate                 string     `json:"work_date"`
+	CorrectionType           string     `json:"correction_type"`
+	TargetClockRecordID      string     `json:"target_clock_record_id,omitempty"`
+	ReplacementClockRecordID string     `json:"replacement_clock_record_id,omitempty"`
+	Reason                   string     `json:"reason"`
+	Status                   string     `json:"status"`
+	FormInstanceID           string     `json:"form_instance_id,omitempty"`
+	ClockRecordID            string     `json:"clock_record_id,omitempty"`
+	ReviewedByAccountID      string     `json:"reviewed_by_account_id,omitempty"`
+	ReviewReason             string     `json:"review_reason,omitempty"`
+	ReviewedAt               *time.Time `json:"reviewed_at,omitempty"`
+	CreatedAt                time.Time  `json:"created_at"`
+	UpdatedAt                time.Time  `json:"updated_at"`
 }
 
 // AttendanceClockStatus 定義考勤打卡狀態的資料結構。
 type AttendanceClockStatus struct {
-	EmployeeID string                 `json:"employee_id"`
-	WorkDate   string                 `json:"work_date"`
-	Worksite   *AttendanceWorksite    `json:"worksite,omitempty"`
-	ClockIn    *AttendanceClockRecord `json:"clock_in,omitempty"`
-	ClockOut   *AttendanceClockRecord `json:"clock_out,omitempty"`
-	NextAction string                 `json:"next_action"`
+	EmployeeID           string                 `json:"employee_id"`
+	WorkDate             string                 `json:"work_date"`
+	Worksite             *AttendanceWorksite    `json:"worksite,omitempty"`
+	ClockIn              *AttendanceClockRecord `json:"clock_in,omitempty"`
+	ClockOut             *AttendanceClockRecord `json:"clock_out,omitempty"`
+	LastPunch            *AttendanceClockRecord `json:"last_punch,omitempty"`
+	PunchCount           int                    `json:"punch_count"`
+	NextAction           string                 `json:"next_action"`
+	CanClockIn           bool                   `json:"can_clock_in"`
+	CanClockOut          bool                   `json:"can_clock_out"`
+	WorkedMinutes        int                    `json:"worked_minutes"`
+	ApprovedLeaveMinutes int                    `json:"approved_leave_minutes"`
+	RequiredMinutes      int                    `json:"required_minutes"`
+	DayStatus            string                 `json:"day_status"`
+	AnomalyReasons       []string               `json:"anomaly_reasons,omitempty"`
 }
 
 // AttendancePolicyResponse 定義考勤政策回應的資料結構。
@@ -410,6 +427,7 @@ type CreateAttendanceShiftAssignmentInput struct {
 type CreateAttendanceClockRecordInput struct {
 	EmployeeID     string         `json:"employee_id,omitempty"`
 	Direction      string         `json:"direction"`
+	ClientEventID  string         `json:"client_event_id,omitempty"`
 	Latitude       float64        `json:"latitude"`
 	Longitude      float64        `json:"longitude"`
 	AccuracyMeters float64        `json:"accuracy_meters,omitempty"`
@@ -475,10 +493,12 @@ type EHRMSAttendanceSyncResponse struct {
 
 // CreateAttendanceCorrectionInput 定義考勤 correction 輸入的資料結構。
 type CreateAttendanceCorrectionInput struct {
-	EmployeeID         string `json:"employee_id,omitempty"`
-	Direction          string `json:"direction"`
-	RequestedClockedAt string `json:"requested_clocked_at"`
-	Reason             string `json:"reason"`
+	EmployeeID          string `json:"employee_id,omitempty"`
+	CorrectionType      string `json:"correction_type,omitempty"`
+	TargetClockRecordID string `json:"target_clock_record_id,omitempty"`
+	Direction           string `json:"direction,omitempty"`
+	RequestedClockedAt  string `json:"requested_clocked_at,omitempty"`
+	Reason              string `json:"reason"`
 }
 
 // ReviewAttendanceCorrectionInput 定義審核考勤 correction 輸入的資料結構。

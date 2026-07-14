@@ -595,17 +595,16 @@ func trustPolicyUserGroupIDs(policy map[string]any) []string {
 	return uniqueStrings(append(stringSliceFromAny(policy["user_groups"]), stringSliceFromAny(policy["user_group_ids"])...))
 }
 
+// defaultAgentToolIDs derives provisioning tuples from the runtime catalog to prevent authorization drift.
 func defaultAgentToolIDs() []string {
-	return []string{
-		"knowledge.search",
-		"get_my_profile",
-		"list_employees",
-		"get_employee",
-		"my_leave_balances",
-		"my_clock_records",
-		"my_pending_reviews",
-		"workspace_insights",
+	items := agentToolCatalog()
+	ids := make([]string, 0, len(items))
+	for _, item := range items {
+		if id := strings.TrimSpace(item.Value); id != "" {
+			ids = append(ids, id)
+		}
 	}
+	return uniqueStrings(ids)
 }
 
 // syncUserGroupRelationshipTuples 同步 user_group#member tuple。

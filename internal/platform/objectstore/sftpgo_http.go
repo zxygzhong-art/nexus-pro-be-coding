@@ -104,6 +104,32 @@ func (s *SFTPGoHTTP) PutObject(ctx context.Context, key string, contentType stri
 	return nil
 }
 
+// GetObject downloads an object through SFTPGo's user REST API.
+func (s *SFTPGoHTTP) GetObject(ctx context.Context, key string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	objectPath, err := s.pathForKey(key)
+	if err != nil {
+		return nil, err
+	}
+	query := url.Values{}
+	query.Set("path", objectPath)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s.apiURL("/user/files")+"?"+query.Encode(), nil)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := s.doAuthorized(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, sftpgoHTTPStatusError("download object", resp)
+	}
+	return io.ReadAll(resp.Body)
+}
+
 // DeleteObject removes an object from SFTPGo over HTTP.
 func (s *SFTPGoHTTP) DeleteObject(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {

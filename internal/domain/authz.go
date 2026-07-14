@@ -121,6 +121,7 @@ const (
 	ResourceModel                     ResourceType = "model"
 	ResourceEmployeeCollection        ResourceType = "employee_collection"
 	ResourceFormInstance              ResourceType = "form_instance"
+	ResourceFormDefinitionDraft       ResourceType = "form_definition_draft"
 	ResourceNotification              ResourceType = "notification"
 )
 
@@ -227,6 +228,7 @@ func splitResourceName(resource string) (string, string) {
 // DefaultRoutePolicies 保存預設路由政策。
 var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "me.read", Method: "GET", Path: "/v1/me", ApplicationCode: "platform", ResourceType: "me", Action: "read"},
+	{Name: "me.profile.update", Method: "PATCH", Path: "/v1/me/profile", ApplicationCode: "platform", ResourceType: "me", Action: "update"},
 	{Name: "me.menus", Method: "GET", Path: "/v1/me/menus", ApplicationCode: "platform", ResourceType: "me", Action: "read"},
 	{Name: "authz.check", Method: "POST", Path: "/v1/authz/check", ApplicationCode: "iam", ResourceType: "authz", Action: "check"},
 	{Name: "authz.batch_check", Method: "POST", Path: "/v1/authz/batch-check", ApplicationCode: "iam", ResourceType: "authz", Action: "check"},
@@ -371,6 +373,16 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "workspace.agent_model.delete", Method: "DELETE", Path: "/v1/workspace/agent-models/:id", ApplicationCode: "agent", ResourceType: "model", Action: "delete", RiskLevel: RiskHigh},
 	{Name: "workspace.agent_model.sync", Method: "POST", Path: "/v1/workspace/agent-models/:id/sync", ApplicationCode: "agent", ResourceType: "model", Action: "update", RiskLevel: RiskHigh},
 	{Name: "workspace.agent_model.test", Method: "POST", Path: "/v1/workspace/agent-models/:id/test", ApplicationCode: "agent", ResourceType: "model", Action: "update"},
+	{Name: "workspace.knowledge_base.read", Method: "GET", Path: "/v1/workspace/knowledge-bases", ApplicationCode: "agent", ResourceType: "knowledge_base", Action: "read"},
+	{Name: "workspace.knowledge_base.create", Method: "POST", Path: "/v1/workspace/knowledge-bases", ApplicationCode: "agent", ResourceType: "knowledge_base", Action: "create", RiskLevel: RiskHigh},
+	{Name: "workspace.knowledge_base.get", Method: "GET", Path: "/v1/workspace/knowledge-bases/:id", ApplicationCode: "agent", ResourceType: "knowledge_base", Action: "read"},
+	{Name: "workspace.knowledge_base.update", Method: "PATCH", Path: "/v1/workspace/knowledge-bases/:id", ApplicationCode: "agent", ResourceType: "knowledge_base", Action: "update", RiskLevel: RiskHigh},
+	{Name: "workspace.knowledge_base.delete", Method: "DELETE", Path: "/v1/workspace/knowledge-bases/:id", ApplicationCode: "agent", ResourceType: "knowledge_base", Action: "delete", RiskLevel: RiskHigh},
+	{Name: "workspace.knowledge_document.read", Method: "GET", Path: "/v1/workspace/knowledge-bases/:id/documents", ApplicationCode: "agent", ResourceType: "knowledge_base", Action: "read"},
+	{Name: "workspace.knowledge_document.create", Method: "POST", Path: "/v1/workspace/knowledge-bases/:id/documents", ApplicationCode: "agent", ResourceType: "knowledge_base", Action: "update", RiskLevel: RiskHigh},
+	{Name: "workspace.knowledge_document.update", Method: "PATCH", Path: "/v1/workspace/knowledge-bases/:id/documents/:document_id", ApplicationCode: "agent", ResourceType: "knowledge_base", Action: "update", RiskLevel: RiskHigh},
+	{Name: "workspace.knowledge_document.delete", Method: "DELETE", Path: "/v1/workspace/knowledge-bases/:id/documents/:document_id", ApplicationCode: "agent", ResourceType: "knowledge_base", Action: "update", RiskLevel: RiskHigh},
+	{Name: "workspace.knowledge_base.search", Method: "POST", Path: "/v1/workspace/knowledge-bases/:id/search", ApplicationCode: "agent", ResourceType: "knowledge_base", Action: "read"},
 	{Name: "workspace.agent_definition.read", Method: "GET", Path: "/v1/workspace/agents", ApplicationCode: "agent", ResourceType: "definition", Action: "read"},
 	{Name: "workspace.agent_definition.create", Method: "POST", Path: "/v1/workspace/agents", ApplicationCode: "agent", ResourceType: "definition", Action: "create", RiskLevel: RiskHigh},
 	{Name: "workspace.agent_definition.update", Method: "PATCH", Path: "/v1/workspace/agents/:id", ApplicationCode: "agent", ResourceType: "definition", Action: "update", RiskLevel: RiskHigh},
@@ -379,9 +391,25 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "workspace.agent_definition.delete", Method: "DELETE", Path: "/v1/workspace/agents/:id", ApplicationCode: "agent", ResourceType: "definition", Action: "delete", RiskLevel: RiskHigh},
 	{Name: "workspace.agent_definition.trial", Method: "POST", Path: "/v1/workspace/agents/:id/trial", ApplicationCode: "agent", ResourceType: "definition", Action: "update"},
 	{Name: "workspace.agent_definition.rollback", Method: "POST", Path: "/v1/workspace/agents/:id/rollback", ApplicationCode: "agent", ResourceType: "definition", Action: "update", RiskLevel: RiskHigh},
-	{Name: "workspace.agent_definition.tools", Method: "GET", Path: "/v1/workspace/agents/tools", ApplicationCode: "agent", ResourceType: "definition", Action: "read"},
+	{Name: "workspace.agent_definition.tools", Method: "GET", Path: "/v1/workspace/agents/tools", ApplicationCode: "agent", ResourceType: "tool", Action: "read"},
+	{Name: "workspace.agent_external_tool.read", Method: "GET", Path: "/v1/workspace/agents/external-tools", ApplicationCode: "agent", ResourceType: "tool", Action: "read"},
+	{Name: "workspace.agent_external_tool.create", Method: "POST", Path: "/v1/workspace/agents/external-tools", ApplicationCode: "agent", ResourceType: "tool", Action: "create", RiskLevel: RiskHigh},
+	{Name: "workspace.agent_external_tool.delete", Method: "DELETE", Path: "/v1/workspace/agents/external-tools/:id", ApplicationCode: "agent", ResourceType: "tool", Action: "delete", RiskLevel: RiskHigh},
 	{Name: "workflow.form_template.read", Method: "GET", Path: "/v1/forms/templates", ApplicationCode: "workflow", ResourceType: "form_template", Action: "read"},
 	{Name: "workflow.form_template.create", Method: "POST", Path: "/v1/forms/templates", ApplicationCode: "workflow", ResourceType: "form_template", Action: "create"},
+	{Name: "workflow.form_builder.capabilities", Method: "GET", Path: "/v1/form-builder/capabilities", ApplicationCode: "workflow", ResourceType: "form_definition_draft", Action: "read"},
+	{Name: "workflow.form_builder.data_sources", Method: "GET", Path: "/v1/form-builder/data-sources", ApplicationCode: "workflow", ResourceType: "form_definition_draft", Action: "read"},
+	{Name: "workflow.form_builder.workflow_targets", Method: "GET", Path: "/v1/form-builder/workflow-targets", ApplicationCode: "workflow", ResourceType: "form_definition_draft", Action: "read"},
+	{Name: "workflow.form_definition_draft.read", Method: "GET", Path: "/v1/form-builder/drafts", ApplicationCode: "workflow", ResourceType: "form_definition_draft", Action: "read"},
+	{Name: "workflow.form_definition_draft.create", Method: "POST", Path: "/v1/form-builder/drafts", ApplicationCode: "workflow", ResourceType: "form_definition_draft", Action: "create", RiskLevel: RiskHigh},
+	{Name: "workflow.form_definition_draft.detail", Method: "GET", Path: "/v1/form-builder/drafts/:id", ApplicationCode: "workflow", ResourceType: "form_definition_draft", Action: "read"},
+	{Name: "workflow.form_definition_draft.update", Method: "PATCH", Path: "/v1/form-builder/drafts/:id", ApplicationCode: "workflow", ResourceType: "form_definition_draft", Action: "update"},
+	{Name: "workflow.form_definition_draft.validate", Method: "POST", Path: "/v1/form-builder/drafts/:id/validate", ApplicationCode: "workflow", ResourceType: "form_definition_draft", Action: "read"},
+	{Name: "workflow.form_definition_draft.preview", Method: "POST", Path: "/v1/form-builder/drafts/:id/preview", ApplicationCode: "workflow", ResourceType: "form_definition_draft", Action: "read"},
+	{Name: "workflow.form_definition_draft.simulate", Method: "POST", Path: "/v1/form-builder/drafts/:id/simulate", ApplicationCode: "workflow", ResourceType: "form_definition_draft", Action: "read"},
+	{Name: "workflow.form_definition_draft.submit_review", Method: "POST", Path: "/v1/form-builder/drafts/:id/submit-review", ApplicationCode: "workflow", ResourceType: "form_definition_draft", Action: "submit", RiskLevel: RiskHigh},
+	{Name: "workflow.form_definition_draft.publish", Method: "POST", Path: "/v1/form-builder/drafts/:id/publish", ApplicationCode: "workflow", ResourceType: "form_definition_draft", Action: "approve", RiskLevel: RiskCritical},
+	{Name: "workflow.form_data_sources.read", Method: "GET", Path: "/v1/workflows/form-data-sources", ApplicationCode: "workflow", ResourceType: "form_instance", Action: "read"},
 	{Name: "workflow.form_instance.read", Method: "GET", Path: "/v1/workflows/forms", ApplicationCode: "workflow", ResourceType: "form_instance", Action: "read"},
 	{Name: "workflow.review_queue.read", Method: "GET", Path: "/v1/workflows/reviews", ApplicationCode: "workflow", ResourceType: "form_instance", Action: "read"},
 	{Name: "workflow.review_queue.bulk_action", Method: "POST", Path: "/v1/workflows/reviews/bulk-action", ApplicationCode: "workflow", ResourceType: "form_instance", Action: "update"},
@@ -399,6 +427,7 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "agent.run.read", Method: "GET", Path: "/v1/agents/runs", ApplicationCode: "agent", ResourceType: "run", Action: "read"},
 	{Name: "agent.run.create", Method: "POST", Path: "/v1/agents/runs", ApplicationCode: "agent", ResourceType: "run", Action: "create"},
 	{Name: "agent.run.chat", Method: "POST", Path: "/v1/agents/chat", ApplicationCode: "agent", ResourceType: "run", Action: "create"},
+	{Name: "agent.confirmation.execute", Method: "POST", Path: "/v1/agents/confirmations/:id/execute", ApplicationCode: "agent", ResourceType: "run", Action: "create", RiskLevel: RiskHigh},
 	{Name: "agent.session.read", Method: "GET", Path: "/v1/agents/sessions", ApplicationCode: "agent", ResourceType: "run", Action: "read"},
 	{Name: "agent.session.create", Method: "POST", Path: "/v1/agents/sessions", ApplicationCode: "agent", ResourceType: "run", Action: "create"},
 	{Name: "agent.session.detail", Method: "GET", Path: "/v1/agents/sessions/:id", ApplicationCode: "agent", ResourceType: "run", Action: "read"},
@@ -406,6 +435,10 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "agent.session.clear_context", Method: "POST", Path: "/v1/agents/sessions/:id/clear-context", ApplicationCode: "agent", ResourceType: "run", Action: "create"},
 	{Name: "agent.session.delete", Method: "DELETE", Path: "/v1/agents/sessions/:id", ApplicationCode: "agent", ResourceType: "run", Action: "delete"},
 	{Name: "agent.session.messages", Method: "GET", Path: "/v1/agents/sessions/:id/messages", ApplicationCode: "agent", ResourceType: "run", Action: "read"},
+	{Name: "agent.session.files", Method: "GET", Path: "/v1/agents/sessions/:id/files", ApplicationCode: "agent", ResourceType: "run", Action: "read"},
+	{Name: "agent.session.file_upload", Method: "POST", Path: "/v1/agents/sessions/:id/files", ApplicationCode: "agent", ResourceType: "run", Action: "create"},
+	{Name: "agent.session.file_download", Method: "GET", Path: "/v1/agents/sessions/:id/files/:file_id", ApplicationCode: "agent", ResourceType: "run", Action: "read"},
+	{Name: "agent.session.file_delete", Method: "DELETE", Path: "/v1/agents/sessions/:id/files/:file_id", ApplicationCode: "agent", ResourceType: "run", Action: "create"},
 	{Name: "agent.memory.read", Method: "GET", Path: "/v1/agents/memories", ApplicationCode: "agent", ResourceType: "run", Action: "read"},
 	{Name: "agent.memory.create", Method: "POST", Path: "/v1/agents/memories", ApplicationCode: "agent", ResourceType: "run", Action: "create"},
 	{Name: "agent.memory.update", Method: "PATCH", Path: "/v1/agents/memories/:id", ApplicationCode: "agent", ResourceType: "run", Action: "update"},

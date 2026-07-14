@@ -7,6 +7,7 @@ type RequestContext struct {
 	Context              context.Context
 	TenantID             string
 	AccountID            string
+	PlatformAdmin        bool
 	AssumedRoleID        string
 	AssumedRoleSessionID string
 	RouteApplicationCode string

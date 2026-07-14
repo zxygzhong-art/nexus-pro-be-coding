@@ -21,6 +21,7 @@ import (
 	openfgaclient "nexus-pro-be/internal/platform/openfga"
 	"nexus-pro-be/internal/platform/postgres"
 	redisstore "nexus-pro-be/internal/platform/redis"
+	platformsecret "nexus-pro-be/internal/platform/secret"
 	"nexus-pro-be/internal/platform/telemetry"
 	temporalplatform "nexus-pro-be/internal/platform/temporal"
 	"nexus-pro-be/internal/repository"
@@ -48,6 +49,7 @@ type apiRuntime struct {
 	identityProvisioningOutbox *jobs.IdentityProvisioningOutboxProcessor
 	openFGAConsumer            *jobs.OpenFGAConsumer
 	openFGAConsumerOptions     jobs.OpenFGAConsumerOptions
+	liteLLMModelSyncer         *jobs.LiteLLMModelSyncer
 	shutdowns                  []moduleShutdown
 	workers                    sync.WaitGroup
 }
@@ -191,6 +193,7 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	}
 
 	authHTTPClient := &http.Client{Timeout: 5 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}
+	modelHTTPClient := &http.Client{Timeout: 30 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}
 	serviceOptions := service.Options{
 		Logger:             logger,
 		AuthzSnapshot:      authzSnapshotModule.cache,
@@ -202,8 +205,18 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 			cfg.TemporalTaskQueue,
 		),
 	}
+	if strings.TrimSpace(cfg.AgentToolCredentialEncryptionKey) != "" {
+		credentialCipher, err := platformsecret.NewAESGCMCipher(cfg.AgentToolCredentialEncryptionKey)
+		if err != nil {
+			logStartupFailure(logger, "agent_tool_credentials", err)
+			shutdownStartedModules(shutdowns, logger)
+			return nil, err
+		}
+		serviceOptions.AgentToolCredentials = credentialCipher
+	}
+	var liteLLMAdmin service.LiteLLMAdminClient
 	if strings.TrimSpace(cfg.LiteLLMBaseURL) != "" && (strings.TrimSpace(cfg.LiteLLMAPIKey) != "" || strings.TrimSpace(cfg.LiteLLMMasterKey) != "") {
-		liteLLMAdmin, err := platformllm.NewLiteLLMAdminClient(platformllm.LiteLLMAdminConfig{
+		adminClient, err := platformllm.NewLiteLLMAdminClient(platformllm.LiteLLMAdminConfig{
 			BaseURL:   cfg.LiteLLMBaseURL,
 			APIKey:    cfg.LiteLLMAPIKey,
 			MasterKey: cfg.LiteLLMMasterKey,
@@ -214,9 +227,20 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 			shutdownStartedModules(shutdowns, logger)
 			return nil, err
 		}
-		serviceOptions.LiteLLMAdmin = liteLLMAdmin
+		liteLLMAdmin = adminClient
+		serviceOptions.LiteLLMAdmin = adminClient
 	}
 	if strings.TrimSpace(cfg.LiteLLMBaseURL) != "" && strings.TrimSpace(cfg.LiteLLMAPIKey) != "" {
+		embeddingClient, err := platformllm.NewLiteLLMEmbeddingClient(platformllm.LiteLLMEmbeddingConfig{
+			BaseURL: cfg.LiteLLMBaseURL, APIKey: cfg.LiteLLMAPIKey,
+			Model: cfg.LiteLLMEmbeddingModel, Client: modelHTTPClient,
+		})
+		if err != nil {
+			logStartupFailure(logger, "knowledge_embedding", err)
+			shutdownStartedModules(shutdowns, logger)
+			return nil, err
+		}
+		serviceOptions.KnowledgeEmbedder = embeddingClient
 		agentModel, err := platformllm.NewLiteLLM(platformllm.LiteLLMConfig{
 			BaseURL: cfg.LiteLLMBaseURL,
 			APIKey:  cfg.LiteLLMAPIKey,
@@ -228,16 +252,11 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		}
 		agentRuntime, err := service.NewADKAgentChatRuntime(agentModel)
 		if err != nil {
-			// Default builds omit the ADK runtime (-tags adk). Keep the API up and
-			// leave chat disabled instead of failing the whole process.
-			logger.Warn("agent chat runtime unavailable; continuing with chat disabled",
-				"error", err.Error(),
-				"hint", "rebuild with -tags adk after google.golang.org/adk/v2 dependencies are available",
-			)
-			serviceOptions.AgentChatRuntime = nil
-		} else {
-			serviceOptions.AgentChatRuntime = agentRuntime
+			logStartupFailure(logger, "agent_chat_runtime", err)
+			shutdownStartedModules(shutdowns, logger)
+			return nil, err
 		}
+		serviceOptions.AgentChatRuntime = agentRuntime
 	}
 	tokenResolvers := make([]platformauth.TokenResolver, 0, 2)
 
@@ -263,6 +282,7 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	serviceOptions.EHRMSClient = ehrmsClient
 
 	app := service.New(store, serviceOptions)
+	liteLLMModelSyncer := jobs.NewLiteLLMModelSyncer(store, liteLLMAdmin, logger)
 	if err := app.SyncPermissionCatalogForAllTenants(ctx); err != nil {
 		logStartupFailure(logger, "permission_catalog_sync", err)
 		shutdownStartedModules(shutdowns, logger)
@@ -354,6 +374,7 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		ehrmsPipelineOptions:     ehrmsPipelineOptions,
 		ehrmsAttendanceScheduler: ehrmsAttendanceScheduler,
 		ehrmsAttendanceOptions:   ehrmsAttendanceOptions,
+		liteLLMModelSyncer:       liteLLMModelSyncer,
 		shutdowns:                shutdowns,
 	}
 	if natsModule.client != nil {
@@ -919,6 +940,9 @@ func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Lo
 			usingNoopWriter = true
 		}
 		dispatcher := jobs.NewOutboxDispatcher(r.store, writer, logger)
+		if r.liteLLMModelSyncer != nil {
+			dispatcher.WithAgentModelSyncHandler(r.liteLLMModelSyncer)
+		}
 		if r.eventPublisher != nil {
 			dispatcher.WithEventPublisher(r.eventPublisher)
 		}
@@ -935,6 +959,14 @@ func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Lo
 			defer r.workers.Done()
 			dispatcher.Run(ctx, jobs.OutboxDispatchOptions{})
 		}()
+	}
+	if r.liteLLMModelSyncer != nil && r.liteLLMModelSyncer.Configured() {
+		r.workers.Add(1)
+		go func() {
+			defer r.workers.Done()
+			r.liteLLMModelSyncer.Run(ctx, jobs.LiteLLMModelSyncOptions{})
+		}()
+		logger.Info("LiteLLM model reconciler started", "interval", "5m")
 	}
 	if r.ehrmsPipelineScheduler != nil {
 		r.workers.Add(1)

@@ -95,6 +95,11 @@ func (c *KeycloakAdminClient) EnsureUser(ctx context.Context, input domain.Ident
 	if err != nil {
 		return domain.ProvisionedIdentity{}, err
 	}
+	if ok {
+		if err := validateKeycloakUserOwnership(input, user.Attributes); err != nil {
+			return domain.ProvisionedIdentity{}, err
+		}
+	}
 	payload := keycloakUserRepresentation{
 		Username:      email,
 		Email:         email,
@@ -119,6 +124,16 @@ func (c *KeycloakAdminClient) EnsureUser(ctx context.Context, input domain.Ident
 	}
 	createdID, err := c.createUser(ctx, token, payload)
 	if err != nil {
+		return domain.ProvisionedIdentity{}, err
+	}
+	createdUser, found, err := c.findUserByEmail(ctx, token, email)
+	if err != nil {
+		return domain.ProvisionedIdentity{}, err
+	}
+	if !found || createdUser.ID != createdID {
+		return domain.ProvisionedIdentity{}, errors.New("keycloak user ownership could not be verified after creation")
+	}
+	if err := validateKeycloakUserOwnership(input, createdUser.Attributes); err != nil {
 		return domain.ProvisionedIdentity{}, err
 	}
 	if input.SendInvite && c.sendInviteEmail {
@@ -184,6 +199,29 @@ func keycloakProvisioningAttributes(input domain.IdentityProvisioningInput, exis
 	set("employee_id", input.EmployeeID)
 	set("employee_no", input.EmployeeNo)
 	return attrs
+}
+
+// validateKeycloakUserOwnership 在任何 PUT 或本地綁定前驗證 realm-global 使用者仍屬於相同 tenant/account。
+func validateKeycloakUserOwnership(input domain.IdentityProvisioningInput, attributes map[string][]string) error {
+	existingTenant := firstKeycloakAttribute(attributes, "tenant_id")
+	if existingTenant != "" && existingTenant != strings.TrimSpace(input.TenantID) {
+		return errors.New("keycloak user is already owned by another tenant")
+	}
+	existingAccount := firstKeycloakAttribute(attributes, "account_id")
+	if existingAccount != "" && existingAccount != strings.TrimSpace(input.AccountID) {
+		return errors.New("keycloak user is already owned by another account")
+	}
+	return nil
+}
+
+// firstKeycloakAttribute 取得 Keycloak 單值 ownership attribute。
+func firstKeycloakAttribute(attributes map[string][]string, key string) string {
+	for _, value := range attributes[key] {
+		if value = strings.TrimSpace(value); value != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 // copyKeycloakAttributes 複製 Keycloak attributes。
@@ -273,6 +311,7 @@ func (c *KeycloakAdminClient) findUserByEmail(ctx context.Context, token string,
 	query := endpoint.Query()
 	query.Set("email", email)
 	query.Set("exact", "true")
+	query.Set("briefRepresentation", "false")
 	endpoint.RawQuery = query.Encode()
 	var users []keycloakUserRepresentation
 	if err := c.doJSON(ctx, http.MethodGet, endpoint.String(), token, nil, &users); err != nil {

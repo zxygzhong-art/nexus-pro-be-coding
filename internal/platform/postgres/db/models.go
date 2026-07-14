@@ -6,6 +6,7 @@ package db
 
 import (
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/pgvector/pgvector-go"
 )
 
 type Account struct {
@@ -43,13 +44,17 @@ type AgentDefinition struct {
 	Emoji              string             `json:"emoji"`
 	Category           string             `json:"category"`
 	ModelID            string             `json:"model_id"`
+	MainAgentRole      string             `json:"main_agent_role"`
+	SubAgents          []byte             `json:"sub_agents"`
 	SystemPrompt       string             `json:"system_prompt"`
 	Tools              []byte             `json:"tools"`
+	KnowledgeBaseIds   []byte             `json:"knowledge_base_ids"`
 	Status             string             `json:"status"`
 	Visibility         string             `json:"visibility"`
 	VisibilityTargets  []byte             `json:"visibility_targets"`
 	TimeoutSeconds     int32              `json:"timeout_seconds"`
 	Version            int32              `json:"version"`
+	PublishedVersion   int32              `json:"published_version"`
 	UsageTotalRuns     int64              `json:"usage_total_runs"`
 	UsageSuccessRuns   int64              `json:"usage_success_runs"`
 	UsageFailedRuns    int64              `json:"usage_failed_runs"`
@@ -67,12 +72,31 @@ type AgentDefinitionVersion struct {
 	TenantID           string             `json:"tenant_id"`
 	AgentID            string             `json:"agent_id"`
 	Version            int32              `json:"version"`
+	MainAgentRole      string             `json:"main_agent_role"`
+	SubAgents          []byte             `json:"sub_agents"`
 	SystemPrompt       string             `json:"system_prompt"`
 	Tools              []byte             `json:"tools"`
+	KnowledgeBaseIds   []byte             `json:"knowledge_base_ids"`
 	ModelID            string             `json:"model_id"`
 	Note               string             `json:"note"`
 	CreatedByAccountID pgtype.Text        `json:"created_by_account_id"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+}
+
+type AgentExternalTool struct {
+	ID                   string             `json:"id"`
+	TenantID             string             `json:"tenant_id"`
+	Name                 string             `json:"name"`
+	Description          string             `json:"description"`
+	Kind                 string             `json:"kind"`
+	Transport            string             `json:"transport"`
+	EndpointUrl          string             `json:"endpoint_url"`
+	AuthType             string             `json:"auth_type"`
+	AuthHeaderName       string             `json:"auth_header_name"`
+	AuthUsername         string             `json:"auth_username"`
+	AuthSecretCiphertext string             `json:"auth_secret_ciphertext"`
+	CreatedByAccountID   pgtype.Text        `json:"created_by_account_id"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 }
 
 type AgentMemory struct {
@@ -90,25 +114,37 @@ type AgentMemory struct {
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 }
 
+type AgentMessageAttachment struct {
+	TenantID  string             `json:"tenant_id"`
+	MessageID string             `json:"message_id"`
+	FileID    string             `json:"file_id"`
+	Ordinal   int32              `json:"ordinal"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
 type AgentModel struct {
-	ID              string             `json:"id"`
-	TenantID        string             `json:"tenant_id"`
-	Name            string             `json:"name"`
-	Provider        string             `json:"provider"`
-	ModelName       string             `json:"model_name"`
-	LitellmModel    string             `json:"litellm_model"`
-	ApiBaseUrl      string             `json:"api_base_url"`
-	ApiKey          string             `json:"api_key"`
-	RateLimitRpm    int32              `json:"rate_limit_rpm"`
-	Status          string             `json:"status"`
-	TimeoutSeconds  int32              `json:"timeout_seconds"`
-	MonthlyQuota    int64              `json:"monthly_quota"`
-	UsedQuota       int64              `json:"used_quota"`
-	LastTestedAt    pgtype.Timestamptz `json:"last_tested_at"`
-	LastTestStatus  string             `json:"last_test_status"`
-	LastTestMessage string             `json:"last_test_message"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ID               string             `json:"id"`
+	TenantID         string             `json:"tenant_id"`
+	Name             string             `json:"name"`
+	Provider         string             `json:"provider"`
+	ModelName        string             `json:"model_name"`
+	LitellmModel     string             `json:"litellm_model"`
+	ApiBaseUrl       string             `json:"api_base_url"`
+	ApiKey           string             `json:"api_key"`
+	RateLimitRpm     int32              `json:"rate_limit_rpm"`
+	Status           string             `json:"status"`
+	TimeoutSeconds   int32              `json:"timeout_seconds"`
+	MonthlyQuota     int64              `json:"monthly_quota"`
+	UsedQuota        int64              `json:"used_quota"`
+	LastTestedAt     pgtype.Timestamptz `json:"last_tested_at"`
+	LastTestStatus   string             `json:"last_test_status"`
+	LastTestMessage  string             `json:"last_test_message"`
+	SyncStatus       string             `json:"sync_status"`
+	LastSyncedAt     pgtype.Timestamptz `json:"last_synced_at"`
+	LastSyncError    string             `json:"last_sync_error"`
+	SyncedConfigHash string             `json:"synced_config_hash"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 type AgentRun struct {
@@ -127,26 +163,38 @@ type AgentRun struct {
 }
 
 type AgentSession struct {
-	ID            string             `json:"id"`
-	TenantID      string             `json:"tenant_id"`
-	AccountID     string             `json:"account_id"`
-	AgentID       pgtype.Text        `json:"agent_id"`
-	Title         string             `json:"title"`
-	Status        string             `json:"status"`
-	LastMessageAt pgtype.Timestamptz `json:"last_message_at"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	AccountID      string             `json:"account_id"`
+	AgentID        pgtype.Text        `json:"agent_id"`
+	Title          string             `json:"title"`
+	Status         string             `json:"status"`
+	ContextVersion int64              `json:"context_version"`
+	LastMessageAt  pgtype.Timestamptz `json:"last_message_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AgentSessionFile struct {
+	TenantID       string             `json:"tenant_id"`
+	SessionID      string             `json:"session_id"`
+	FileID         string             `json:"file_id"`
+	ContextVersion int64              `json:"context_version"`
+	State          string             `json:"state"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type AgentSessionMessage struct {
-	ID        string             `json:"id"`
-	TenantID  string             `json:"tenant_id"`
-	SessionID string             `json:"session_id"`
-	Role      string             `json:"role"`
-	Content   string             `json:"content"`
-	RunID     pgtype.Text        `json:"run_id"`
-	Metadata  []byte             `json:"metadata"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	SessionID      string             `json:"session_id"`
+	Role           string             `json:"role"`
+	Content        string             `json:"content"`
+	RunID          pgtype.Text        `json:"run_id"`
+	ContextVersion int64              `json:"context_version"`
+	Metadata       []byte             `json:"metadata"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type AssumableRole struct {
@@ -182,6 +230,7 @@ type AttendanceClockRecord struct {
 	WorksiteID          pgtype.Text        `json:"worksite_id"`
 	WorkDate            string             `json:"work_date"`
 	Direction           string             `json:"direction"`
+	ClientEventID       string             `json:"client_event_id"`
 	ClockedAt           pgtype.Timestamptz `json:"clocked_at"`
 	Latitude            float64            `json:"latitude"`
 	Longitude           float64            `json:"longitude"`
@@ -193,25 +242,32 @@ type AttendanceClockRecord struct {
 	DeviceID            string             `json:"device_id"`
 	DeviceInfo          []byte             `json:"device_info"`
 	CorrectionRequestID string             `json:"correction_request_id"`
+	Voided              bool               `json:"voided"`
+	VoidedAt            pgtype.Timestamptz `json:"voided_at"`
+	VoidedByAccountID   string             `json:"voided_by_account_id"`
+	VoidReason          string             `json:"void_reason"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 }
 
 type AttendanceCorrectionRequest struct {
-	ID                  string             `json:"id"`
-	TenantID            string             `json:"tenant_id"`
-	EmployeeID          string             `json:"employee_id"`
-	Direction           string             `json:"direction"`
-	RequestedClockedAt  pgtype.Timestamptz `json:"requested_clocked_at"`
-	WorkDate            string             `json:"work_date"`
-	Reason              string             `json:"reason"`
-	Status              string             `json:"status"`
-	FormInstanceID      string             `json:"form_instance_id"`
-	ClockRecordID       string             `json:"clock_record_id"`
-	ReviewedByAccountID string             `json:"reviewed_by_account_id"`
-	ReviewReason        string             `json:"review_reason"`
-	ReviewedAt          pgtype.Timestamptz `json:"reviewed_at"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	ID                       string             `json:"id"`
+	TenantID                 string             `json:"tenant_id"`
+	EmployeeID               string             `json:"employee_id"`
+	Direction                string             `json:"direction"`
+	RequestedClockedAt       pgtype.Timestamptz `json:"requested_clocked_at"`
+	WorkDate                 string             `json:"work_date"`
+	CorrectionType           string             `json:"correction_type"`
+	TargetClockRecordID      string             `json:"target_clock_record_id"`
+	ReplacementClockRecordID string             `json:"replacement_clock_record_id"`
+	Reason                   string             `json:"reason"`
+	Status                   string             `json:"status"`
+	FormInstanceID           string             `json:"form_instance_id"`
+	ClockRecordID            string             `json:"clock_record_id"`
+	ReviewedByAccountID      string             `json:"reviewed_by_account_id"`
+	ReviewReason             string             `json:"review_reason"`
+	ReviewedAt               pgtype.Timestamptz `json:"reviewed_at"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
 }
 
 type AttendanceDailySummary struct {
@@ -507,6 +563,57 @@ type EmploymentContract struct {
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
 }
 
+type FileAsset struct {
+	ID                 string             `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	CreatedByAccountID string             `json:"created_by_account_id"`
+	OriginalFilename   string             `json:"original_filename"`
+	ObjectProvider     string             `json:"object_provider"`
+	ObjectBucket       string             `json:"object_bucket"`
+	ObjectKey          string             `json:"object_key"`
+	ContentType        string             `json:"content_type"`
+	SizeBytes          int64              `json:"size_bytes"`
+	Sha256             string             `json:"sha256"`
+	ScanStatus         string             `json:"scan_status"`
+	ParseStatus        string             `json:"parse_status"`
+	RetentionClass     string             `json:"retention_class"`
+	ExpiresAt          pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt          pgtype.Timestamptz `json:"deleted_at"`
+}
+
+type FileChunk struct {
+	ID        string             `json:"id"`
+	TenantID  string             `json:"tenant_id"`
+	FileID    string             `json:"file_id"`
+	Ordinal   int32              `json:"ordinal"`
+	Content   string             `json:"content"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type FormDefinitionDraft struct {
+	ID                  string             `json:"id"`
+	TenantID            string             `json:"tenant_id"`
+	OwnerAccountID      string             `json:"owner_account_id"`
+	BaseTemplateID      string             `json:"base_template_id"`
+	SchemaVersion       int32              `json:"schema_version"`
+	AuthoringSchema     []byte             `json:"authoring_schema"`
+	CompiledSchema      []byte             `json:"compiled_schema"`
+	Status              string             `json:"status"`
+	Revision            int64              `json:"revision"`
+	Source              string             `json:"source"`
+	AgentID             string             `json:"agent_id"`
+	AgentRunID          string             `json:"agent_run_id"`
+	AgentSessionID      string             `json:"agent_session_id"`
+	ToolCallID          string             `json:"tool_call_id"`
+	ValidationResult    []byte             `json:"validation_result"`
+	SubmittedAt         pgtype.Timestamptz `json:"submitted_at"`
+	PublishedTemplateID string             `json:"published_template_id"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
 type FormInstance struct {
 	ID                 string             `json:"id"`
 	TenantID           string             `json:"tenant_id"`
@@ -578,6 +685,55 @@ type IdentityProvisioningOutbox struct {
 	LastError   string             `json:"last_error"`
 	CreatedAt   pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeBasis struct {
+	ID                 string             `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	Name               string             `json:"name"`
+	Description        string             `json:"description"`
+	ChunkMode          string             `json:"chunk_mode"`
+	ChunkSize          int32              `json:"chunk_size"`
+	ChunkOverlap       int32              `json:"chunk_overlap"`
+	CreatedByAccountID pgtype.Text        `json:"created_by_account_id"`
+	UpdatedByAccountID pgtype.Text        `json:"updated_by_account_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeDocument struct {
+	ID                 string             `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	KnowledgeBaseID    string             `json:"knowledge_base_id"`
+	Title              string             `json:"title"`
+	Content            string             `json:"content"`
+	SourceType         string             `json:"source_type"`
+	OriginalFilename   string             `json:"original_filename"`
+	ContentType        string             `json:"content_type"`
+	SizeBytes          int64              `json:"size_bytes"`
+	Sha256             string             `json:"sha256"`
+	ObjectProvider     string             `json:"object_provider"`
+	ObjectBucket       string             `json:"object_bucket"`
+	ObjectKey          string             `json:"object_key"`
+	ParseStatus        string             `json:"parse_status"`
+	ParseError         string             `json:"parse_error"`
+	CreatedByAccountID pgtype.Text        `json:"created_by_account_id"`
+	UpdatedByAccountID pgtype.Text        `json:"updated_by_account_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type KnowledgeDocumentChunk struct {
+	ID                  string             `json:"id"`
+	TenantID            string             `json:"tenant_id"`
+	KnowledgeBaseID     string             `json:"knowledge_base_id"`
+	DocumentID          string             `json:"document_id"`
+	Ordinal             int32              `json:"ordinal"`
+	Content             string             `json:"content"`
+	EmbeddingModel      string             `json:"embedding_model"`
+	EmbeddingDimensions int32              `json:"embedding_dimensions"`
+	Embedding           pgvector.Vector    `json:"embedding"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 }
 
 type LeaveBalance struct {

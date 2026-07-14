@@ -49,6 +49,25 @@ func (s *Local) PutObject(ctx context.Context, key string, _ string, data []byte
 	return os.WriteFile(path, copyData, 0o644)
 }
 
+// GetObject reads an object from the configured local root.
+func (s *Local) GetObject(ctx context.Context, key string) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	path, err := s.pathForKey(key)
+	if err != nil {
+		return nil, err
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	return data, nil
+}
+
 // Provider 處理提供者。
 func (s *Local) Provider() string {
 	return "local"

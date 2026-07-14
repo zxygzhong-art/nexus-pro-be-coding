@@ -34,6 +34,10 @@ const (
 	correctionStatusApproved = "approved"
 	correctionStatusRejected = "rejected"
 
+	correctionTypeAddRecord     = "add_record"
+	correctionTypeVoidRecord    = "void_record"
+	correctionTypeReplaceRecord = "replace_record"
+
 	overtimeTypeWeekday = "weekday"
 	overtimeTypeHoliday = "holiday"
 

@@ -62,6 +62,41 @@ const (
 	ErrorCodeEmploymentContractInvalidStatus ErrorCode = 30041
 	// ErrorCodeEmploymentContractInvalidTransition 說明此處的錯誤處理語義。
 	ErrorCodeEmploymentContractInvalidTransition ErrorCode = 30042
+
+	// Attendance errors use 4xxxx so clients can distinguish attendance failures.
+	ErrorCodeAttendanceBadRequest             ErrorCode = 40001
+	ErrorCodeAttendanceDuplicateClockEvent    ErrorCode = 40020
+	ErrorCodeAttendanceClockSequenceConflict  ErrorCode = 40021
+	ErrorCodeAttendanceWorksiteRequired       ErrorCode = 40022
+	ErrorCodeAttendanceOutsideWorksite        ErrorCode = 40023
+	ErrorCodeAttendanceLocationAccuracyLow    ErrorCode = 40024
+	ErrorCodeAttendanceShiftRequired          ErrorCode = 40025
+	ErrorCodeAttendanceCorrectionInvalidState ErrorCode = 40030
+	ErrorCodeAttendanceNotFound               ErrorCode = 40050
+	ErrorCodeAttendanceConflict               ErrorCode = 40060
+
+	// Workflow errors use 5xxxx so clients can render workflow-specific recovery copy.
+	ErrorCodeWorkflowBadRequest         ErrorCode = 50001
+	ErrorCodeWorkflowInvalidState       ErrorCode = 50020
+	ErrorCodeWorkflowNotAssignee        ErrorCode = 50021
+	ErrorCodeWorkflowStageUnavailable   ErrorCode = 50022
+	ErrorCodeWorkflowRuntimeUnavailable ErrorCode = 50030
+	ErrorCodeWorkflowNotFound           ErrorCode = 50050
+	ErrorCodeWorkflowConflict           ErrorCode = 50060
+
+	// Agent errors use 6xxxx so model, session, confirmation, and knowledge failures stay actionable.
+	ErrorCodeAgentBadRequest          ErrorCode = 60001
+	ErrorCodeAgentModelInUse          ErrorCode = 60020
+	ErrorCodeAgentDefinitionPublished ErrorCode = 60021
+	ErrorCodeAgentSessionArchived     ErrorCode = 60022
+	ErrorCodeAgentChatRunActive       ErrorCode = 60023
+	ErrorCodeAgentKnowledgeBaseInUse  ErrorCode = 60024
+	ErrorCodeAgentConfirmationInvalid ErrorCode = 60025
+	ErrorCodeAgentConfirmationExpired ErrorCode = 60026
+	ErrorCodeAgentChatDisabled        ErrorCode = 60030
+	ErrorCodeAgentRuntimeUnavailable  ErrorCode = 60031
+	ErrorCodeAgentNotFound            ErrorCode = 60050
+	ErrorCodeAgentConflict            ErrorCode = 60060
 	// ErrorCodeUnauthorized 說明此處的錯誤處理語義。
 	ErrorCodeUnauthorized ErrorCode = 10030
 	// ErrorCodeAccountInactive 說明此處的錯誤處理語義。
@@ -123,6 +158,10 @@ func appErrorCode(kind string) ErrorCode {
 		return ErrorCodeConflict
 	case "too_many_requests":
 		return ErrorCodeTooManyRequests
+	case "temporal_workflow_unavailable":
+		return ErrorCodeWorkflowRuntimeUnavailable
+	case "workflow_not_found":
+		return ErrorCodeWorkflowNotFound
 	default:
 		return ErrorCodeInternal
 	}
@@ -157,6 +196,48 @@ func reasonErrorCode(reason string) (ErrorCode, bool) {
 		return ErrorCodeDataScopeDenied, true
 	case "cross_tenant_denied":
 		return ErrorCodeCrossTenantDenied, true
+	case "attendance_client_event_conflict":
+		return ErrorCodeAttendanceDuplicateClockEvent, true
+	case "attendance_clock_sequence_conflict":
+		return ErrorCodeAttendanceClockSequenceConflict, true
+	case "attendance_worksite_required":
+		return ErrorCodeAttendanceWorksiteRequired, true
+	case "attendance_outside_worksite":
+		return ErrorCodeAttendanceOutsideWorksite, true
+	case "attendance_location_accuracy_low":
+		return ErrorCodeAttendanceLocationAccuracyLow, true
+	case "attendance_shift_required":
+		return ErrorCodeAttendanceShiftRequired, true
+	case "attendance_correction_invalid_state":
+		return ErrorCodeAttendanceCorrectionInvalidState, true
+	case "workflow_invalid_state":
+		return ErrorCodeWorkflowInvalidState, true
+	case "workflow_not_assignee":
+		return ErrorCodeWorkflowNotAssignee, true
+	case "workflow_stage_unavailable":
+		return ErrorCodeWorkflowStageUnavailable, true
+	case "temporal_workflow_unavailable":
+		return ErrorCodeWorkflowRuntimeUnavailable, true
+	case "workflow_not_found":
+		return ErrorCodeWorkflowNotFound, true
+	case "agent_model_in_use":
+		return ErrorCodeAgentModelInUse, true
+	case "agent_definition_published":
+		return ErrorCodeAgentDefinitionPublished, true
+	case "agent_session_archived":
+		return ErrorCodeAgentSessionArchived, true
+	case "agent_chat_run_active":
+		return ErrorCodeAgentChatRunActive, true
+	case "knowledge_base_in_use":
+		return ErrorCodeAgentKnowledgeBaseInUse, true
+	case "agent_confirmation_invalid":
+		return ErrorCodeAgentConfirmationInvalid, true
+	case "agent_confirmation_expired":
+		return ErrorCodeAgentConfirmationExpired, true
+	case "agent_chat_disabled":
+		return ErrorCodeAgentChatDisabled, true
+	case "agent_runtime_unavailable":
+		return ErrorCodeAgentRuntimeUnavailable, true
 	default:
 		return 0, false
 	}

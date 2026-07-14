@@ -12,24 +12,25 @@ import (
 // configureWorkflowGroupStage replaces the fixture template with IAM group based approval stages.
 func configureWorkflowGroupStage(t *testing.T, store workflowFixtureStore, stages []map[string]any, now time.Time) {
 	t.Helper()
-	if err := store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
-		ID:       "ft-leave",
-		TenantID: "tenant-1",
-		Key:      "leave-request",
-		Name:     "请假申请单",
-		Schema: map[string]any{
-			"workspace_design": map[string]any{
-				"enabled": true,
-				"stages":  stages,
-			},
+	template, ok, err := store.GetFormTemplate(context.Background(), "tenant-1", "ft-leave")
+	if err != nil || !ok {
+		t.Fatalf("workflow template lookup failed ok=%v err=%v", ok, err)
+	}
+	template.CurrentVersion++
+	template.Schema = map[string]any{
+		"workspace_design": map[string]any{
+			"enabled": true,
+			"stages":  stages,
 		},
-		CreatedAt: now,
-	}); err != nil {
+	}
+	template.UpdatedAt = now
+	if err := store.UpsertFormTemplate(context.Background(), template); err != nil {
 		t.Fatal(err)
 	}
 }
 
 type workflowFixtureStore interface {
+	GetFormTemplate(context.Context, string, string) (domain.FormTemplate, bool, error)
 	UpsertFormTemplate(context.Context, domain.FormTemplate) error
 }
 

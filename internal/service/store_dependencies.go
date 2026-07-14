@@ -6,6 +6,7 @@ type meStore interface {
 	repository.IAMStore
 	repository.EmployeeStore
 	repository.OrgStore
+	repository.AuditStore
 }
 
 type identityStore interface {
@@ -46,10 +47,19 @@ type workflowStore interface {
 
 type agentStore interface {
 	repository.AgentStore
+	repository.KnowledgeStore
+	repository.OutboxStore
 }
 
 type auditStore interface {
 	repository.AuditStore
+}
+
+// withTransaction 附加 transaction 的服務流程。
+func (c MeService) withTransaction(ctx RequestContext, fn func(MeService) error) error {
+	return c.Service.withTenantTransaction(ctx, func(tx *Service) error {
+		return fn(tx.Me())
+	})
 }
 
 // withTransaction 附加 transaction 的服務流程。

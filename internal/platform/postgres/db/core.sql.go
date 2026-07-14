@@ -634,56 +634,6 @@ func (q *Queries) FindEffectiveAttendanceShiftAssignment(ctx context.Context, ar
 	return i, err
 }
 
-const getAcceptedAttendanceClockRecord = `-- name: GetAcceptedAttendanceClockRecord :one
-SELECT id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id, work_date, direction, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, created_at FROM attendance_clock_records
-WHERE tenant_id = $1
-  AND employee_id = $2
-  AND work_date = $3
-  AND direction = $4
-  AND record_status = 'accepted'
-LIMIT 1
-`
-
-type GetAcceptedAttendanceClockRecordParams struct {
-	TenantID   string `json:"tenant_id"`
-	EmployeeID string `json:"employee_id"`
-	WorkDate   string `json:"work_date"`
-	Direction  string `json:"direction"`
-}
-
-func (q *Queries) GetAcceptedAttendanceClockRecord(ctx context.Context, arg GetAcceptedAttendanceClockRecordParams) (AttendanceClockRecord, error) {
-	row := q.db.QueryRow(ctx, getAcceptedAttendanceClockRecord,
-		arg.TenantID,
-		arg.EmployeeID,
-		arg.WorkDate,
-		arg.Direction,
-	)
-	var i AttendanceClockRecord
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.EmployeeID,
-		&i.ShiftAssignmentID,
-		&i.ShiftID,
-		&i.WorksiteID,
-		&i.WorkDate,
-		&i.Direction,
-		&i.ClockedAt,
-		&i.Latitude,
-		&i.Longitude,
-		&i.AccuracyMeters,
-		&i.DistanceMeters,
-		&i.RecordStatus,
-		&i.RejectionReason,
-		&i.Source,
-		&i.DeviceID,
-		&i.DeviceInfo,
-		&i.CorrectionRequestID,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const getAccount = `-- name: GetAccount :one
 SELECT id, tenant_id, display_name, email, employee_id, status, user_group_ids, direct_permission_set_ids, active_assumable_role_id, version, created_at FROM accounts
 WHERE tenant_id = $1 AND id = $2
@@ -743,8 +693,54 @@ func (q *Queries) GetAssumableRole(ctx context.Context, arg GetAssumableRolePara
 	return i, err
 }
 
+const getAttendanceClockRecordByClientEventID = `-- name: GetAttendanceClockRecordByClientEventID :one
+SELECT id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id, work_date, direction, client_event_id, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, voided, voided_at, voided_by_account_id, void_reason, created_at FROM attendance_clock_records
+WHERE tenant_id = $1
+  AND client_event_id = $2
+  AND client_event_id <> ''
+LIMIT 1
+`
+
+type GetAttendanceClockRecordByClientEventIDParams struct {
+	TenantID      string `json:"tenant_id"`
+	ClientEventID string `json:"client_event_id"`
+}
+
+func (q *Queries) GetAttendanceClockRecordByClientEventID(ctx context.Context, arg GetAttendanceClockRecordByClientEventIDParams) (AttendanceClockRecord, error) {
+	row := q.db.QueryRow(ctx, getAttendanceClockRecordByClientEventID, arg.TenantID, arg.ClientEventID)
+	var i AttendanceClockRecord
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.ShiftAssignmentID,
+		&i.ShiftID,
+		&i.WorksiteID,
+		&i.WorkDate,
+		&i.Direction,
+		&i.ClientEventID,
+		&i.ClockedAt,
+		&i.Latitude,
+		&i.Longitude,
+		&i.AccuracyMeters,
+		&i.DistanceMeters,
+		&i.RecordStatus,
+		&i.RejectionReason,
+		&i.Source,
+		&i.DeviceID,
+		&i.DeviceInfo,
+		&i.CorrectionRequestID,
+		&i.Voided,
+		&i.VoidedAt,
+		&i.VoidedByAccountID,
+		&i.VoidReason,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getAttendanceCorrectionRequest = `-- name: GetAttendanceCorrectionRequest :one
-SELECT id, tenant_id, employee_id, direction, requested_clocked_at, work_date, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at FROM attendance_correction_requests
+SELECT id, tenant_id, employee_id, direction, requested_clocked_at, work_date, correction_type, target_clock_record_id, replacement_clock_record_id, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at FROM attendance_correction_requests
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -763,6 +759,9 @@ func (q *Queries) GetAttendanceCorrectionRequest(ctx context.Context, arg GetAtt
 		&i.Direction,
 		&i.RequestedClockedAt,
 		&i.WorkDate,
+		&i.CorrectionType,
+		&i.TargetClockRecordID,
+		&i.ReplacementClockRecordID,
 		&i.Reason,
 		&i.Status,
 		&i.FormInstanceID,
@@ -777,7 +776,7 @@ func (q *Queries) GetAttendanceCorrectionRequest(ctx context.Context, arg GetAtt
 }
 
 const getAttendanceCorrectionRequestByFormInstanceID = `-- name: GetAttendanceCorrectionRequestByFormInstanceID :one
-SELECT id, tenant_id, employee_id, direction, requested_clocked_at, work_date, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at FROM attendance_correction_requests
+SELECT id, tenant_id, employee_id, direction, requested_clocked_at, work_date, correction_type, target_clock_record_id, replacement_clock_record_id, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at FROM attendance_correction_requests
 WHERE tenant_id = $1 AND form_instance_id = $2
 LIMIT 1
 `
@@ -797,6 +796,9 @@ func (q *Queries) GetAttendanceCorrectionRequestByFormInstanceID(ctx context.Con
 		&i.Direction,
 		&i.RequestedClockedAt,
 		&i.WorkDate,
+		&i.CorrectionType,
+		&i.TargetClockRecordID,
+		&i.ReplacementClockRecordID,
 		&i.Reason,
 		&i.Status,
 		&i.FormInstanceID,
@@ -993,6 +995,57 @@ func (q *Queries) GetAttendanceWorksite(ctx context.Context, arg GetAttendanceWo
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getEarliestAcceptedAttendanceClockIn = `-- name: GetEarliestAcceptedAttendanceClockIn :one
+SELECT id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id, work_date, direction, client_event_id, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, voided, voided_at, voided_by_account_id, void_reason, created_at FROM attendance_clock_records
+WHERE tenant_id = $1
+  AND employee_id = $2
+  AND work_date = $3
+  AND direction = 'clock_in'
+  AND record_status = 'accepted'
+  AND voided = false
+ORDER BY clocked_at ASC, created_at ASC, id ASC
+LIMIT 1
+`
+
+type GetEarliestAcceptedAttendanceClockInParams struct {
+	TenantID   string `json:"tenant_id"`
+	EmployeeID string `json:"employee_id"`
+	WorkDate   string `json:"work_date"`
+}
+
+func (q *Queries) GetEarliestAcceptedAttendanceClockIn(ctx context.Context, arg GetEarliestAcceptedAttendanceClockInParams) (AttendanceClockRecord, error) {
+	row := q.db.QueryRow(ctx, getEarliestAcceptedAttendanceClockIn, arg.TenantID, arg.EmployeeID, arg.WorkDate)
+	var i AttendanceClockRecord
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.ShiftAssignmentID,
+		&i.ShiftID,
+		&i.WorksiteID,
+		&i.WorkDate,
+		&i.Direction,
+		&i.ClientEventID,
+		&i.ClockedAt,
+		&i.Latitude,
+		&i.Longitude,
+		&i.AccuracyMeters,
+		&i.DistanceMeters,
+		&i.RecordStatus,
+		&i.RejectionReason,
+		&i.Source,
+		&i.DeviceID,
+		&i.DeviceInfo,
+		&i.CorrectionRequestID,
+		&i.Voided,
+		&i.VoidedAt,
+		&i.VoidedByAccountID,
+		&i.VoidReason,
+		&i.CreatedAt,
 	)
 	return i, err
 }
@@ -1293,6 +1346,80 @@ func (q *Queries) GetEmployeeImportSession(ctx context.Context, arg GetEmployeeI
 	return i, err
 }
 
+const getFormDefinitionDraft = `-- name: GetFormDefinitionDraft :one
+SELECT id, tenant_id, owner_account_id, base_template_id, schema_version, authoring_schema, compiled_schema, status, revision, source, agent_id, agent_run_id, agent_session_id, tool_call_id, validation_result, submitted_at, published_template_id, created_at, updated_at FROM form_definition_drafts WHERE tenant_id = $1 AND id = $2
+`
+
+type GetFormDefinitionDraftParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetFormDefinitionDraft(ctx context.Context, arg GetFormDefinitionDraftParams) (FormDefinitionDraft, error) {
+	row := q.db.QueryRow(ctx, getFormDefinitionDraft, arg.TenantID, arg.ID)
+	var i FormDefinitionDraft
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.OwnerAccountID,
+		&i.BaseTemplateID,
+		&i.SchemaVersion,
+		&i.AuthoringSchema,
+		&i.CompiledSchema,
+		&i.Status,
+		&i.Revision,
+		&i.Source,
+		&i.AgentID,
+		&i.AgentRunID,
+		&i.AgentSessionID,
+		&i.ToolCallID,
+		&i.ValidationResult,
+		&i.SubmittedAt,
+		&i.PublishedTemplateID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getFormDefinitionDraftByAgentCall = `-- name: GetFormDefinitionDraftByAgentCall :one
+SELECT id, tenant_id, owner_account_id, base_template_id, schema_version, authoring_schema, compiled_schema, status, revision, source, agent_id, agent_run_id, agent_session_id, tool_call_id, validation_result, submitted_at, published_template_id, created_at, updated_at FROM form_definition_drafts
+WHERE tenant_id = $1 AND agent_run_id = $2 AND tool_call_id = $3
+`
+
+type GetFormDefinitionDraftByAgentCallParams struct {
+	TenantID   string `json:"tenant_id"`
+	AgentRunID string `json:"agent_run_id"`
+	ToolCallID string `json:"tool_call_id"`
+}
+
+func (q *Queries) GetFormDefinitionDraftByAgentCall(ctx context.Context, arg GetFormDefinitionDraftByAgentCallParams) (FormDefinitionDraft, error) {
+	row := q.db.QueryRow(ctx, getFormDefinitionDraftByAgentCall, arg.TenantID, arg.AgentRunID, arg.ToolCallID)
+	var i FormDefinitionDraft
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.OwnerAccountID,
+		&i.BaseTemplateID,
+		&i.SchemaVersion,
+		&i.AuthoringSchema,
+		&i.CompiledSchema,
+		&i.Status,
+		&i.Revision,
+		&i.Source,
+		&i.AgentID,
+		&i.AgentRunID,
+		&i.AgentSessionID,
+		&i.ToolCallID,
+		&i.ValidationResult,
+		&i.SubmittedAt,
+		&i.PublishedTemplateID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getFormInstance = `-- name: GetFormInstance :one
 SELECT id, tenant_id, template_id, template_version_id, applicant_account_id, status, payload, submitted_at, approved_by, current_run_id, version, updated_at FROM form_instances
 WHERE tenant_id = $1 AND id = $2
@@ -1461,6 +1588,107 @@ func (q *Queries) GetGroupMembership(ctx context.Context, arg GetGroupMembership
 		&i.Source,
 		&i.ApprovalInstanceID,
 		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getLatestAcceptedAttendanceClockOut = `-- name: GetLatestAcceptedAttendanceClockOut :one
+SELECT id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id, work_date, direction, client_event_id, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, voided, voided_at, voided_by_account_id, void_reason, created_at FROM attendance_clock_records
+WHERE tenant_id = $1
+  AND employee_id = $2
+  AND work_date = $3
+  AND direction = 'clock_out'
+  AND record_status = 'accepted'
+  AND voided = false
+ORDER BY clocked_at DESC, created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLatestAcceptedAttendanceClockOutParams struct {
+	TenantID   string `json:"tenant_id"`
+	EmployeeID string `json:"employee_id"`
+	WorkDate   string `json:"work_date"`
+}
+
+func (q *Queries) GetLatestAcceptedAttendanceClockOut(ctx context.Context, arg GetLatestAcceptedAttendanceClockOutParams) (AttendanceClockRecord, error) {
+	row := q.db.QueryRow(ctx, getLatestAcceptedAttendanceClockOut, arg.TenantID, arg.EmployeeID, arg.WorkDate)
+	var i AttendanceClockRecord
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.ShiftAssignmentID,
+		&i.ShiftID,
+		&i.WorksiteID,
+		&i.WorkDate,
+		&i.Direction,
+		&i.ClientEventID,
+		&i.ClockedAt,
+		&i.Latitude,
+		&i.Longitude,
+		&i.AccuracyMeters,
+		&i.DistanceMeters,
+		&i.RecordStatus,
+		&i.RejectionReason,
+		&i.Source,
+		&i.DeviceID,
+		&i.DeviceInfo,
+		&i.CorrectionRequestID,
+		&i.Voided,
+		&i.VoidedAt,
+		&i.VoidedByAccountID,
+		&i.VoidReason,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getLatestAcceptedAttendanceClockRecord = `-- name: GetLatestAcceptedAttendanceClockRecord :one
+SELECT id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id, work_date, direction, client_event_id, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, voided, voided_at, voided_by_account_id, void_reason, created_at FROM attendance_clock_records
+WHERE tenant_id = $1
+  AND employee_id = $2
+  AND work_date = $3
+  AND record_status = 'accepted'
+  AND voided = false
+ORDER BY clocked_at DESC, created_at DESC, id DESC
+LIMIT 1
+`
+
+type GetLatestAcceptedAttendanceClockRecordParams struct {
+	TenantID   string `json:"tenant_id"`
+	EmployeeID string `json:"employee_id"`
+	WorkDate   string `json:"work_date"`
+}
+
+func (q *Queries) GetLatestAcceptedAttendanceClockRecord(ctx context.Context, arg GetLatestAcceptedAttendanceClockRecordParams) (AttendanceClockRecord, error) {
+	row := q.db.QueryRow(ctx, getLatestAcceptedAttendanceClockRecord, arg.TenantID, arg.EmployeeID, arg.WorkDate)
+	var i AttendanceClockRecord
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.ShiftAssignmentID,
+		&i.ShiftID,
+		&i.WorksiteID,
+		&i.WorkDate,
+		&i.Direction,
+		&i.ClientEventID,
+		&i.ClockedAt,
+		&i.Latitude,
+		&i.Longitude,
+		&i.AccuracyMeters,
+		&i.DistanceMeters,
+		&i.RecordStatus,
+		&i.RejectionReason,
+		&i.Source,
+		&i.DeviceID,
+		&i.DeviceInfo,
+		&i.CorrectionRequestID,
+		&i.Voided,
+		&i.VoidedAt,
+		&i.VoidedByAccountID,
+		&i.VoidReason,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -2299,7 +2527,7 @@ func (q *Queries) ListAssumableRoles(ctx context.Context, tenantID string) ([]As
 }
 
 const listAttendanceClockRecords = `-- name: ListAttendanceClockRecords :many
-SELECT id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id, work_date, direction, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, created_at FROM attendance_clock_records
+SELECT id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id, work_date, direction, client_event_id, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, voided, voided_at, voided_by_account_id, void_reason, created_at FROM attendance_clock_records
 WHERE tenant_id = $1
   AND ($2::text = '' OR employee_id = $2)
   AND ($3::text = '' OR work_date >= $3)
@@ -2346,6 +2574,7 @@ func (q *Queries) ListAttendanceClockRecords(ctx context.Context, arg ListAttend
 			&i.WorksiteID,
 			&i.WorkDate,
 			&i.Direction,
+			&i.ClientEventID,
 			&i.ClockedAt,
 			&i.Latitude,
 			&i.Longitude,
@@ -2357,6 +2586,10 @@ func (q *Queries) ListAttendanceClockRecords(ctx context.Context, arg ListAttend
 			&i.DeviceID,
 			&i.DeviceInfo,
 			&i.CorrectionRequestID,
+			&i.Voided,
+			&i.VoidedAt,
+			&i.VoidedByAccountID,
+			&i.VoidReason,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -2370,7 +2603,7 @@ func (q *Queries) ListAttendanceClockRecords(ctx context.Context, arg ListAttend
 }
 
 const listAttendanceCorrectionRequests = `-- name: ListAttendanceCorrectionRequests :many
-SELECT id, tenant_id, employee_id, direction, requested_clocked_at, work_date, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at FROM attendance_correction_requests
+SELECT id, tenant_id, employee_id, direction, requested_clocked_at, work_date, correction_type, target_clock_record_id, replacement_clock_record_id, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at FROM attendance_correction_requests
 WHERE tenant_id = $1
   AND ($2::text = '' OR employee_id = $2)
   AND ($3::text = '' OR work_date >= $3)
@@ -2412,6 +2645,9 @@ func (q *Queries) ListAttendanceCorrectionRequests(ctx context.Context, arg List
 			&i.Direction,
 			&i.RequestedClockedAt,
 			&i.WorkDate,
+			&i.CorrectionType,
+			&i.TargetClockRecordID,
+			&i.ReplacementClockRecordID,
 			&i.Reason,
 			&i.Status,
 			&i.FormInstanceID,
@@ -3106,6 +3342,60 @@ func (q *Queries) ListEmployeesFilteredPage(ctx context.Context, arg ListEmploye
 			&i.ContactInfo,
 			&i.InsuranceInfo,
 			&i.InternalExperiences,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listFormDefinitionDrafts = `-- name: ListFormDefinitionDrafts :many
+SELECT id, tenant_id, owner_account_id, base_template_id, schema_version, authoring_schema, compiled_schema, status, revision, source, agent_id, agent_run_id, agent_session_id, tool_call_id, validation_result, submitted_at, published_template_id, created_at, updated_at FROM form_definition_drafts
+WHERE tenant_id = $1
+  AND ($2::text = '' OR owner_account_id = $2::text)
+  AND ($3::text = '' OR status = $3::text)
+ORDER BY updated_at DESC
+`
+
+type ListFormDefinitionDraftsParams struct {
+	TenantID       string `json:"tenant_id"`
+	OwnerAccountID string `json:"owner_account_id"`
+	Status         string `json:"status"`
+}
+
+func (q *Queries) ListFormDefinitionDrafts(ctx context.Context, arg ListFormDefinitionDraftsParams) ([]FormDefinitionDraft, error) {
+	rows, err := q.db.Query(ctx, listFormDefinitionDrafts, arg.TenantID, arg.OwnerAccountID, arg.Status)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []FormDefinitionDraft
+	for rows.Next() {
+		var i FormDefinitionDraft
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.OwnerAccountID,
+			&i.BaseTemplateID,
+			&i.SchemaVersion,
+			&i.AuthoringSchema,
+			&i.CompiledSchema,
+			&i.Status,
+			&i.Revision,
+			&i.Source,
+			&i.AgentID,
+			&i.AgentRunID,
+			&i.AgentSessionID,
+			&i.ToolCallID,
+			&i.ValidationResult,
+			&i.SubmittedAt,
+			&i.PublishedTemplateID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -4508,12 +4798,14 @@ func (q *Queries) UpsertAssumableRole(ctx context.Context, arg UpsertAssumableRo
 const upsertAttendanceClockRecord = `-- name: UpsertAttendanceClockRecord :one
 INSERT INTO attendance_clock_records (
     id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id,
-    work_date, direction, clocked_at, latitude, longitude, accuracy_meters,
+    work_date, direction, client_event_id, clocked_at, latitude, longitude, accuracy_meters,
     distance_meters, record_status, rejection_reason, source, device_id,
-    device_info, correction_request_id, created_at
+    device_info, correction_request_id, voided, voided_at, voided_by_account_id,
+    void_reason, created_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-    $13, $14, $15, $16, $17, $18::jsonb, $19, $20
+    $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, $22, $23,
+    $24, $25
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -4523,6 +4815,7 @@ ON CONFLICT (id) DO UPDATE SET
     worksite_id = EXCLUDED.worksite_id,
     work_date = EXCLUDED.work_date,
     direction = EXCLUDED.direction,
+    client_event_id = EXCLUDED.client_event_id,
     clocked_at = EXCLUDED.clocked_at,
     latitude = EXCLUDED.latitude,
     longitude = EXCLUDED.longitude,
@@ -4534,8 +4827,12 @@ ON CONFLICT (id) DO UPDATE SET
     device_id = EXCLUDED.device_id,
     device_info = EXCLUDED.device_info,
     correction_request_id = EXCLUDED.correction_request_id,
+    voided = EXCLUDED.voided,
+    voided_at = EXCLUDED.voided_at,
+    voided_by_account_id = EXCLUDED.voided_by_account_id,
+    void_reason = EXCLUDED.void_reason,
     created_at = EXCLUDED.created_at
-RETURNING id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id, work_date, direction, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, created_at
+RETURNING id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id, work_date, direction, client_event_id, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, voided, voided_at, voided_by_account_id, void_reason, created_at
 `
 
 type UpsertAttendanceClockRecordParams struct {
@@ -4547,6 +4844,7 @@ type UpsertAttendanceClockRecordParams struct {
 	WorksiteID          pgtype.Text        `json:"worksite_id"`
 	WorkDate            string             `json:"work_date"`
 	Direction           string             `json:"direction"`
+	ClientEventID       string             `json:"client_event_id"`
 	ClockedAt           pgtype.Timestamptz `json:"clocked_at"`
 	Latitude            float64            `json:"latitude"`
 	Longitude           float64            `json:"longitude"`
@@ -4556,8 +4854,12 @@ type UpsertAttendanceClockRecordParams struct {
 	RejectionReason     string             `json:"rejection_reason"`
 	Source              string             `json:"source"`
 	DeviceID            string             `json:"device_id"`
-	Column18            []byte             `json:"column_18"`
+	Column19            []byte             `json:"column_19"`
 	CorrectionRequestID string             `json:"correction_request_id"`
+	Voided              bool               `json:"voided"`
+	VoidedAt            pgtype.Timestamptz `json:"voided_at"`
+	VoidedByAccountID   string             `json:"voided_by_account_id"`
+	VoidReason          string             `json:"void_reason"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -4571,6 +4873,7 @@ func (q *Queries) UpsertAttendanceClockRecord(ctx context.Context, arg UpsertAtt
 		arg.WorksiteID,
 		arg.WorkDate,
 		arg.Direction,
+		arg.ClientEventID,
 		arg.ClockedAt,
 		arg.Latitude,
 		arg.Longitude,
@@ -4580,8 +4883,12 @@ func (q *Queries) UpsertAttendanceClockRecord(ctx context.Context, arg UpsertAtt
 		arg.RejectionReason,
 		arg.Source,
 		arg.DeviceID,
-		arg.Column18,
+		arg.Column19,
 		arg.CorrectionRequestID,
+		arg.Voided,
+		arg.VoidedAt,
+		arg.VoidedByAccountID,
+		arg.VoidReason,
 		arg.CreatedAt,
 	)
 	var i AttendanceClockRecord
@@ -4594,6 +4901,7 @@ func (q *Queries) UpsertAttendanceClockRecord(ctx context.Context, arg UpsertAtt
 		&i.WorksiteID,
 		&i.WorkDate,
 		&i.Direction,
+		&i.ClientEventID,
 		&i.ClockedAt,
 		&i.Latitude,
 		&i.Longitude,
@@ -4605,6 +4913,10 @@ func (q *Queries) UpsertAttendanceClockRecord(ctx context.Context, arg UpsertAtt
 		&i.DeviceID,
 		&i.DeviceInfo,
 		&i.CorrectionRequestID,
+		&i.Voided,
+		&i.VoidedAt,
+		&i.VoidedByAccountID,
+		&i.VoidReason,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -4613,10 +4925,12 @@ func (q *Queries) UpsertAttendanceClockRecord(ctx context.Context, arg UpsertAtt
 const upsertAttendanceCorrectionRequest = `-- name: UpsertAttendanceCorrectionRequest :one
 INSERT INTO attendance_correction_requests (
     id, tenant_id, employee_id, direction, requested_clocked_at, work_date,
-    reason, status, form_instance_id, clock_record_id, reviewed_by_account_id,
+    correction_type, target_clock_record_id, replacement_clock_record_id, reason,
+    status, form_instance_id, clock_record_id, reviewed_by_account_id,
     review_reason, reviewed_at, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+    $15, $16, $17, $18
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -4624,6 +4938,9 @@ ON CONFLICT (id) DO UPDATE SET
     direction = EXCLUDED.direction,
     requested_clocked_at = EXCLUDED.requested_clocked_at,
     work_date = EXCLUDED.work_date,
+    correction_type = EXCLUDED.correction_type,
+    target_clock_record_id = EXCLUDED.target_clock_record_id,
+    replacement_clock_record_id = EXCLUDED.replacement_clock_record_id,
     reason = EXCLUDED.reason,
     status = EXCLUDED.status,
     form_instance_id = EXCLUDED.form_instance_id,
@@ -4633,25 +4950,28 @@ ON CONFLICT (id) DO UPDATE SET
     reviewed_at = EXCLUDED.reviewed_at,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, employee_id, direction, requested_clocked_at, work_date, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at
+RETURNING id, tenant_id, employee_id, direction, requested_clocked_at, work_date, correction_type, target_clock_record_id, replacement_clock_record_id, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at
 `
 
 type UpsertAttendanceCorrectionRequestParams struct {
-	ID                  string             `json:"id"`
-	TenantID            string             `json:"tenant_id"`
-	EmployeeID          string             `json:"employee_id"`
-	Direction           string             `json:"direction"`
-	RequestedClockedAt  pgtype.Timestamptz `json:"requested_clocked_at"`
-	WorkDate            string             `json:"work_date"`
-	Reason              string             `json:"reason"`
-	Status              string             `json:"status"`
-	FormInstanceID      string             `json:"form_instance_id"`
-	ClockRecordID       string             `json:"clock_record_id"`
-	ReviewedByAccountID string             `json:"reviewed_by_account_id"`
-	ReviewReason        string             `json:"review_reason"`
-	ReviewedAt          pgtype.Timestamptz `json:"reviewed_at"`
-	CreatedAt           pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+	ID                       string             `json:"id"`
+	TenantID                 string             `json:"tenant_id"`
+	EmployeeID               string             `json:"employee_id"`
+	Direction                string             `json:"direction"`
+	RequestedClockedAt       pgtype.Timestamptz `json:"requested_clocked_at"`
+	WorkDate                 string             `json:"work_date"`
+	CorrectionType           string             `json:"correction_type"`
+	TargetClockRecordID      string             `json:"target_clock_record_id"`
+	ReplacementClockRecordID string             `json:"replacement_clock_record_id"`
+	Reason                   string             `json:"reason"`
+	Status                   string             `json:"status"`
+	FormInstanceID           string             `json:"form_instance_id"`
+	ClockRecordID            string             `json:"clock_record_id"`
+	ReviewedByAccountID      string             `json:"reviewed_by_account_id"`
+	ReviewReason             string             `json:"review_reason"`
+	ReviewedAt               pgtype.Timestamptz `json:"reviewed_at"`
+	CreatedAt                pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) UpsertAttendanceCorrectionRequest(ctx context.Context, arg UpsertAttendanceCorrectionRequestParams) (AttendanceCorrectionRequest, error) {
@@ -4662,6 +4982,9 @@ func (q *Queries) UpsertAttendanceCorrectionRequest(ctx context.Context, arg Ups
 		arg.Direction,
 		arg.RequestedClockedAt,
 		arg.WorkDate,
+		arg.CorrectionType,
+		arg.TargetClockRecordID,
+		arg.ReplacementClockRecordID,
 		arg.Reason,
 		arg.Status,
 		arg.FormInstanceID,
@@ -4680,6 +5003,9 @@ func (q *Queries) UpsertAttendanceCorrectionRequest(ctx context.Context, arg Ups
 		&i.Direction,
 		&i.RequestedClockedAt,
 		&i.WorkDate,
+		&i.CorrectionType,
+		&i.TargetClockRecordID,
+		&i.ReplacementClockRecordID,
 		&i.Reason,
 		&i.Status,
 		&i.FormInstanceID,
@@ -5322,6 +5648,109 @@ func (q *Queries) UpsertEmployeeImportSession(ctx context.Context, arg UpsertEmp
 		&i.CreatedAt,
 		&i.ExpiresAt,
 		&i.ConfirmedAt,
+	)
+	return i, err
+}
+
+const upsertFormDefinitionDraft = `-- name: UpsertFormDefinitionDraft :one
+INSERT INTO form_definition_drafts (
+    id, tenant_id, owner_account_id, base_template_id, schema_version, authoring_schema, compiled_schema,
+    status, revision, source, agent_id, agent_run_id, agent_session_id, tool_call_id,
+    validation_result, submitted_at, published_template_id, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6::jsonb, $7::jsonb, $8, $9,
+    $10, $11, $12, $13, $14,
+    $15::jsonb, $16, $17,
+    $18, $19
+)
+ON CONFLICT (id) DO UPDATE SET
+    owner_account_id = EXCLUDED.owner_account_id,
+    base_template_id = EXCLUDED.base_template_id,
+    schema_version = EXCLUDED.schema_version,
+    authoring_schema = EXCLUDED.authoring_schema,
+    compiled_schema = EXCLUDED.compiled_schema,
+    status = EXCLUDED.status,
+    revision = form_definition_drafts.revision + 1,
+    source = EXCLUDED.source,
+    agent_id = EXCLUDED.agent_id,
+    agent_run_id = EXCLUDED.agent_run_id,
+    agent_session_id = EXCLUDED.agent_session_id,
+    tool_call_id = EXCLUDED.tool_call_id,
+    validation_result = EXCLUDED.validation_result,
+    submitted_at = EXCLUDED.submitted_at,
+    published_template_id = EXCLUDED.published_template_id,
+    updated_at = EXCLUDED.updated_at
+WHERE form_definition_drafts.tenant_id = EXCLUDED.tenant_id
+  AND form_definition_drafts.revision = $9
+RETURNING id, tenant_id, owner_account_id, base_template_id, schema_version, authoring_schema, compiled_schema, status, revision, source, agent_id, agent_run_id, agent_session_id, tool_call_id, validation_result, submitted_at, published_template_id, created_at, updated_at
+`
+
+type UpsertFormDefinitionDraftParams struct {
+	ID                  string             `json:"id"`
+	TenantID            string             `json:"tenant_id"`
+	OwnerAccountID      string             `json:"owner_account_id"`
+	BaseTemplateID      string             `json:"base_template_id"`
+	SchemaVersion       int32              `json:"schema_version"`
+	AuthoringSchema     []byte             `json:"authoring_schema"`
+	CompiledSchema      []byte             `json:"compiled_schema"`
+	Status              string             `json:"status"`
+	Revision            int64              `json:"revision"`
+	Source              string             `json:"source"`
+	AgentID             string             `json:"agent_id"`
+	AgentRunID          string             `json:"agent_run_id"`
+	AgentSessionID      string             `json:"agent_session_id"`
+	ToolCallID          string             `json:"tool_call_id"`
+	ValidationResult    []byte             `json:"validation_result"`
+	SubmittedAt         pgtype.Timestamptz `json:"submitted_at"`
+	PublishedTemplateID string             `json:"published_template_id"`
+	CreatedAt           pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertFormDefinitionDraft(ctx context.Context, arg UpsertFormDefinitionDraftParams) (FormDefinitionDraft, error) {
+	row := q.db.QueryRow(ctx, upsertFormDefinitionDraft,
+		arg.ID,
+		arg.TenantID,
+		arg.OwnerAccountID,
+		arg.BaseTemplateID,
+		arg.SchemaVersion,
+		arg.AuthoringSchema,
+		arg.CompiledSchema,
+		arg.Status,
+		arg.Revision,
+		arg.Source,
+		arg.AgentID,
+		arg.AgentRunID,
+		arg.AgentSessionID,
+		arg.ToolCallID,
+		arg.ValidationResult,
+		arg.SubmittedAt,
+		arg.PublishedTemplateID,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	var i FormDefinitionDraft
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.OwnerAccountID,
+		&i.BaseTemplateID,
+		&i.SchemaVersion,
+		&i.AuthoringSchema,
+		&i.CompiledSchema,
+		&i.Status,
+		&i.Revision,
+		&i.Source,
+		&i.AgentID,
+		&i.AgentRunID,
+		&i.AgentSessionID,
+		&i.ToolCallID,
+		&i.ValidationResult,
+		&i.SubmittedAt,
+		&i.PublishedTemplateID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }

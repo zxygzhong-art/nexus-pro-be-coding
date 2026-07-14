@@ -28,6 +28,10 @@ func TestLocalPutObjectWritesInsideRoot(t *testing.T) {
 	if string(raw) != "hello" {
 		t.Fatalf("stored content = %q, want hello", string(raw))
 	}
+	stored, err := store.GetObject(context.Background(), "imports/session/raw.csv")
+	if err != nil || string(stored) != "hello" {
+		t.Fatalf("GetObject() content = %q, error = %v", stored, err)
+	}
 }
 
 // TestLocalPutObjectRejectsEscapingKeys 驗證本機 put 物件 rejects escaping keys。

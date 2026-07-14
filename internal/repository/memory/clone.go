@@ -1,9 +1,30 @@
 package memory
 
 import (
+	"encoding/json"
+
 	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/utils"
 )
+
+// copyKnowledgeDocumentChunk copies the embedding to keep memory transactions isolated.
+func copyKnowledgeDocumentChunk(v KnowledgeDocumentChunk) KnowledgeDocumentChunk {
+	v.Embedding = append([]float32(nil), v.Embedding...)
+	return v
+}
+
+// copyFormDefinitionDraft 複製草稿及其巢狀 schema，避免 memory store 暴露可變引用。
+func copyFormDefinitionDraft(v domain.FormDefinitionDraft) domain.FormDefinitionDraft {
+	raw, err := json.Marshal(v)
+	if err != nil {
+		return v
+	}
+	var out domain.FormDefinitionDraft
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return v
+	}
+	return out
+}
 
 // copyPermissions 複製權限。
 func copyPermissions(src []Permission) []Permission {
@@ -349,6 +370,10 @@ func copyAttendanceShiftAssignment(v AttendanceShiftAssignment) AttendanceShiftA
 // copyAttendanceClockRecord 複製考勤打卡 record。
 func copyAttendanceClockRecord(v AttendanceClockRecord) AttendanceClockRecord {
 	v.DeviceInfo = utils.CopyStringMap(v.DeviceInfo)
+	if v.VoidedAt != nil {
+		t := *v.VoidedAt
+		v.VoidedAt = &t
+	}
 	return v
 }
 
@@ -429,12 +454,18 @@ func copyAgentModel(v AgentModel) AgentModel {
 		t := *v.LastTestedAt
 		v.LastTestedAt = &t
 	}
+	if v.LastSyncedAt != nil {
+		t := *v.LastSyncedAt
+		v.LastSyncedAt = &t
+	}
 	return v
 }
 
 // copyAgentDefinition 複製 agent 定義。
 func copyAgentDefinition(v AgentDefinition) AgentDefinition {
 	v.Tools = utils.CopyStrings(v.Tools)
+	v.KnowledgeBaseIDs = utils.CopyStrings(v.KnowledgeBaseIDs)
+	v.SubAgents = copyAgentTeamMembers(v.SubAgents)
 	v.VisibilityTargets = utils.CopyStrings(v.VisibilityTargets)
 	v.Versions = copyAgentDefinitionVersions(v.Versions)
 	v.Usage.TopPrompts = utils.CopyStrings(v.Usage.TopPrompts)
@@ -448,7 +479,23 @@ func copyAgentDefinition(v AgentDefinition) AgentDefinition {
 // copyAgentDefinitionVersion 複製 agent 版本。
 func copyAgentDefinitionVersion(v AgentDefinitionVersion) AgentDefinitionVersion {
 	v.Tools = utils.CopyStrings(v.Tools)
+	v.KnowledgeBaseIDs = utils.CopyStrings(v.KnowledgeBaseIDs)
+	v.SubAgents = copyAgentTeamMembers(v.SubAgents)
 	return v
+}
+
+// copyAgentTeamMembers 深复制 Team 成员及其工具集合。
+func copyAgentTeamMembers(src []AgentTeamMember) []AgentTeamMember {
+	if len(src) == 0 {
+		return nil
+	}
+	out := make([]AgentTeamMember, len(src))
+	copy(out, src)
+	for i := range out {
+		out[i].Tools = utils.CopyStrings(out[i].Tools)
+		out[i].KnowledgeBaseIDs = utils.CopyStrings(out[i].KnowledgeBaseIDs)
+	}
+	return out
 }
 
 func copyAgentDefinitionVersions(src []AgentDefinitionVersion) []AgentDefinitionVersion {
@@ -477,6 +524,18 @@ func copyAgentSession(v AgentSession) AgentSession {
 // copyAgentSessionMessage 複製 agent session message。
 func copyAgentSessionMessage(v AgentSessionMessage) AgentSessionMessage {
 	v.Metadata = utils.CopyStringMap(v.Metadata)
+	if v.Attachments != nil {
+		v.Attachments = append([]domain.AgentSessionFile(nil), v.Attachments...)
+	}
+	return v
+}
+
+// copyAgentSessionFile copies nullable retention metadata.
+func copyAgentSessionFile(v domain.AgentSessionFile) domain.AgentSessionFile {
+	if v.ExpiresAt != nil {
+		expiresAt := *v.ExpiresAt
+		v.ExpiresAt = &expiresAt
+	}
 	return v
 }
 

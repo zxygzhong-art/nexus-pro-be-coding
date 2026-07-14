@@ -120,3 +120,45 @@ func TestKeycloakAdminClientEnsureUserCreatesAndInvites(t *testing.T) {
 		t.Fatalf("expected keycloak user creation and invite, created=%v invite_sent=%v", created, inviteSent)
 	}
 }
+
+// TestKeycloakAdminClientRejectsCrossTenantExistingEmail 驗證共享 realm 不會覆寫其他 tenant 的 ownership attributes。
+func TestKeycloakAdminClientRejectsCrossTenantExistingEmail(t *testing.T) {
+	updated := false
+	mux := http.NewServeMux()
+	mux.HandleFunc("/realms/nexus/protocol/openid-connect/token", func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{"access_token": "admin-token", "expires_in": 60})
+	})
+	mux.HandleFunc("/admin/realms/nexus/users", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected users method %s", r.Method)
+		}
+		_ = json.NewEncoder(w).Encode([]map[string]any{{
+			"id": "kc-other", "username": "shared@example.com", "email": "shared@example.com",
+			"attributes": map[string][]string{"tenant_id": {"tenant-other"}, "account_id": {"acct-other"}},
+		}})
+	})
+	mux.HandleFunc("/admin/realms/nexus/users/kc-other", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPut {
+			updated = true
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client, err := platformauth.NewKeycloakAdminClient(platformauth.KeycloakAdminConfig{
+		IssuerURL: server.URL + "/realms/nexus", ClientID: "admin-client", ClientSecret: "admin-secret",
+	}, server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = client.EnsureUser(context.Background(), domain.IdentityProvisioningInput{
+		TenantID: "tenant-1", AccountID: "acct-1", Email: "shared@example.com", Enabled: true,
+	})
+	if err == nil {
+		t.Fatal("expected cross-tenant email ownership conflict")
+	}
+	if updated {
+		t.Fatal("expected ownership conflict before any Keycloak PUT")
+	}
+}

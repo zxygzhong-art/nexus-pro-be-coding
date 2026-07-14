@@ -2,7 +2,7 @@
 
 本目錄是本地基礎設施與可觀測性服務的統一入口。所有執行期設定集中在一個檔案：[`.env`](.env)。不要直接修改產生出來的 YAML 檔。
 
-這套堆疊包含 Grafana、Tempo、Prometheus、Keycloak、OpenFGA、Temporal、NATS JetStream、Redis、PostgreSQL 和 SFTPGo，所有映像都使用固定版本標籤。SFTPGo 是後端預設使用的業務文件儲存。
+這套堆疊包含 Grafana、Tempo、Prometheus、Keycloak、OpenFGA、Temporal、NATS JetStream、Redis、帶 pgvector 的 PostgreSQL、LiteLLM 和 SFTPGo，所有映像都使用固定版本標籤。SFTPGo 是後端預設使用的業務文件儲存。
 
 ## 啟動
 
@@ -37,6 +37,7 @@ Keycloak 部署與前後端對接說明請看 [docs/keycloak.md](docs/keycloak.m
 ```text
 全域
 PostgreSQL
+LiteLLM
 Redis
 Keycloak
 OpenFGA
@@ -65,6 +66,7 @@ Grafana
 | 服務 | Profile | Compose 服務名稱 |
 | --- | --- | --- |
 | PostgreSQL | `postgres` | `postgres` |
+| LiteLLM | `litellm` | `litellm` |
 | Redis | `redis` | `redis` |
 | Keycloak | `keycloak` | `keycloak` |
 | OpenFGA | `openfga` | `openfga`, `openfga-migrate` |
@@ -88,6 +90,17 @@ COMPOSE_PROFILES=postgres docker compose --env-file .env up -d postgres
 cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
 COMPOSE_PROFILES=redis docker compose --env-file .env up -d redis
 ```
+
+只部署 LiteLLM（PostgreSQL 已存在，且已建立 `LITELLM_DB_NAME` 指定的 database）：
+
+```bash
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+COMPOSE_PROFILES=litellm docker compose --env-file .env up -d --no-deps litellm
+```
+
+模型設定頁透過 LiteLLM 的 `/model/new`、`/model/update` 與 `/model/delete` 管理動態路由，因此 LiteLLM 必須同時具備 `DATABASE_URL` 與 `STORE_MODEL_IN_DB=True`。Compose 會依 PostgreSQL 連線設定自動組出 `DATABASE_URL`，並由 `LITELLM_STORE_MODEL_IN_DB` 控制寫入開關。
+
+知識庫使用 PostgreSQL 的 `vector` extension 保存文件分塊向量，後端只呼叫 LiteLLM 公共 alias `nexus-pro-embedding`。`LITELLM_EMBEDDING_UPSTREAM_MODEL` 可替換實際 embedding 模型，不需要修改後端；若替換後向量維度改變，舊文件需重新儲存或執行後續 reindex 才會進入新維度的檢索結果。
 
 只部署 SFTPGo：
 
@@ -147,6 +160,7 @@ COMPOSE_PROFILES=grafana docker compose --env-file .env up -d --no-deps grafana
 - NATS JetStream：`NATS_IMAGE`
 - Redis：`REDIS_IMAGE`
 - PostgreSQL：`POSTGRES_IMAGE`
+- LiteLLM：`LITELLM_IMAGE`
 - SFTPGo：`SFTPGO_IMAGE`
 
 ## 本地 URL

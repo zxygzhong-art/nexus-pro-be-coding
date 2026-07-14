@@ -94,6 +94,9 @@ func (c *Service) ProvisionTenant(ctx context.Context, input TenantProvisionInpu
 		if err := tx.UpsertTenant(ctx, domain.Tenant{ID: normalized.TenantID, Name: normalized.TenantName, CreatedAt: now}); err != nil {
 			return err
 		}
+		if _, err := ensureTenantDefaultFormTemplates(ctx, tx, normalized.TenantID, now); err != nil {
+			return err
+		}
 		if err := syncPermissionCatalogForTenant(ctx, tx, normalized.TenantID, now); err != nil {
 			return err
 		}
@@ -181,6 +184,81 @@ func (c *Service) ProvisionTenant(ctx context.Context, input TenantProvisionInpu
 	}
 	c.invalidateAuthzSnapshots(ctx, normalized.TenantID)
 	return result, nil
+}
+
+// EnsureTenantDefaultFormTemplates 幂等补齐既有租户缺少的内建表单，不覆盖管理员已配置的同 key 模板。
+func (c *Service) EnsureTenantDefaultFormTemplates(ctx context.Context, tenantID string) (int, error) {
+	tenantID = strings.TrimSpace(tenantID)
+	if tenantID == "" {
+		return 0, BadRequest("tenant_id is required")
+	}
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	created := 0
+	err := repository.WithinTenantTransaction(ctx, c.store, tenantID, func(tx repository.Store) error {
+		if _, ok, err := tx.GetTenant(ctx, tenantID); err != nil {
+			return err
+		} else if !ok {
+			return NotFound("tenant", tenantID)
+		}
+		var err error
+		created, err = ensureTenantDefaultFormTemplates(ctx, tx, tenantID, c.Now())
+		return err
+	})
+	return created, err
+}
+
+// ensureTenantDefaultFormTemplates 只建立缺失的默认模板，保留租户对现有模板的停用、删除与自定义配置。
+func ensureTenantDefaultFormTemplates(ctx context.Context, store repository.Store, tenantID string, now time.Time) (int, error) {
+	if _, exists, err := store.GetFormTemplateByKey(ctx, tenantID, "leave-request"); err != nil {
+		return 0, err
+	} else if exists {
+		return 0, nil
+	}
+	if err := store.UpsertFormTemplate(ctx, tenantDefaultLeaveFormTemplate(tenantID, now)); err != nil {
+		return 0, err
+	}
+	return 1, nil
+}
+
+// tenantDefaultLeaveFormTemplate 建立 Agent、表单中心与工作流共用的可提交请假模板。
+func tenantDefaultLeaveFormTemplate(tenantID string, now time.Time) domain.FormTemplate {
+	return domain.FormTemplate{
+		ID:             fmt.Sprintf("ft-%s-%s-leave-request", safeTenantProvisionSlug(tenantID), shortTenantProvisionHash(tenantID)),
+		TenantID:       tenantID,
+		Key:            "leave-request",
+		Name:           "請假申請單",
+		Description:    "特休、事假、病假與其他假別申請",
+		Status:         "published",
+		CurrentVersion: 1,
+		Schema: map[string]any{
+			"type": "object",
+			"properties": map[string]any{
+				"leave_type": map[string]any{"type": "string"},
+				"start_at":   map[string]any{"type": "string", "format": "date-time"},
+				"end_at":     map[string]any{"type": "string", "format": "date-time"},
+				"hours":      map[string]any{"type": "number"},
+				"proxy":      map[string]any{"type": "string"},
+				"reason":     map[string]any{"type": "string"},
+			},
+			"required": []string{"leave_type", "start_at", "end_at", "hours", "reason"},
+			platformFormDesignSchemaKey: map[string]any{
+				"enabled":   true,
+				"form_kind": "hybrid",
+				"category":  "人事考勤類",
+				"icon":      "🗓️",
+				"desc":      "特休 / 事假 / 病假 / 公假",
+				"fields":    platformLeaveRequestBuilderFields(),
+				"stages": []domain.PlatformFormBuilderStage{{
+					ID: "stage-manager", Type: "approver", Label: "直屬主管",
+					Detail: "依員工主管關係自動帶入", Config: map[string]any{"role": "manager"},
+				}},
+			},
+		},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
 }
 
 // normalizeTenantProvisionInput 正規化租戶開通輸入。
@@ -353,6 +431,11 @@ func tenantProvisionAdminPermissions() []domain.Permission {
 		{Resource: "workflow.form_instance", Action: domain.ActionApprove, Scope: domain.ScopeAll, MenuKey: "workflow.instances"},
 		{Resource: "workflow.form_instance", Action: domain.ActionUpdate, Scope: domain.ScopeAll, MenuKey: "workflow.instances"},
 		{Resource: "workflow.form_instance", Action: domain.ActionDelete, Scope: domain.ScopeAll, MenuKey: "workflow.instances"},
+		{Resource: "workflow.form_definition_draft", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "workflow.forms"},
+		{Resource: "workflow.form_definition_draft", Action: domain.ActionCreate, Scope: domain.ScopeAll, MenuKey: "workflow.forms"},
+		{Resource: "workflow.form_definition_draft", Action: domain.ActionUpdate, Scope: domain.ScopeAll, MenuKey: "workflow.forms"},
+		{Resource: "workflow.form_definition_draft", Action: domain.ActionSubmit, Scope: domain.ScopeAll, MenuKey: "workflow.forms"},
+		{Resource: "workflow.form_definition_draft", Action: domain.ActionApprove, Scope: domain.ScopeAll, MenuKey: "workflow.forms"},
 		{Resource: "iam.permission", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "iam.permission_sets"},
 		{Resource: "iam.user_group", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "iam.user_groups"},
 		{Resource: "iam.user_group", Action: domain.ActionCreate, Scope: domain.ScopeAll, MenuKey: "iam.user_groups"},
@@ -381,6 +464,11 @@ func tenantProvisionAdminPermissions() []domain.Permission {
 		{Resource: "agent.definition", Action: domain.ActionCreate, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
 		{Resource: "agent.definition", Action: domain.ActionUpdate, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
 		{Resource: "agent.definition", Action: domain.ActionDelete, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
+		{Resource: "agent.knowledge_base", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "agents.knowledge_bases"},
+		{Resource: "agent.knowledge_base", Action: domain.ActionCreate, Scope: domain.ScopeAll, MenuKey: "agents.knowledge_bases"},
+		{Resource: "agent.knowledge_base", Action: domain.ActionUpdate, Scope: domain.ScopeAll, MenuKey: "agents.knowledge_bases"},
+		{Resource: "agent.knowledge_base", Action: domain.ActionDelete, Scope: domain.ScopeAll, MenuKey: "agents.knowledge_bases"},
+		{Resource: "agent.tool", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "agents.tools"},
 		{Resource: "audit.log", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "audit"},
 		{Resource: "audit.audit_log", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "audit"},
 	}

@@ -78,15 +78,14 @@ func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (
 		mode = "policy_qa"
 	}
 	agentID := strings.TrimSpace(input.AgentID)
-	prompt := strings.TrimSpace(input.Prompt)
+	userPrompt := strings.TrimSpace(input.Prompt)
+	knowledgeBaseIDs := []string{}
 	if agentID != "" {
 		definition, err := c.publishedAgentDefinition(ctx, agentID)
 		if err != nil {
 			return AgentRun{}, err
 		}
-		if definition.SystemPrompt != "" {
-			prompt = strings.TrimSpace(definition.SystemPrompt) + "\n\nUser: " + prompt
-		}
+		knowledgeBaseIDs = definition.KnowledgeBaseIDs
 	}
 
 	run := AgentRun{
@@ -95,7 +94,7 @@ func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (
 		AccountID: account.ID,
 		AgentID:   agentID,
 		Mode:      mode,
-		Prompt:    prompt,
+		Prompt:    userPrompt,
 		Status:    string(AgentRunStatusQueued),
 		CreatedAt: c.Now(),
 		UpdatedAt: c.Now(),
@@ -121,7 +120,7 @@ func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (
 			Action:          ActionCall,
 		},
 		Execute: func() (AgentToolResult, error) {
-			answer, refs, err := c.answerAgentPrompt(ctx, run.Prompt)
+			answer, refs, err := c.answerAgentPrompt(ctx, userPrompt, knowledgeBaseIDs)
 			if err != nil {
 				return AgentToolResult{}, err
 			}
@@ -307,11 +306,11 @@ func (g authzToolGateway) applyOpenFGAAgentToolDecision(ctx RequestContext, acco
 		Object:   object,
 	})
 	if err != nil {
-		g.service.logWarn(ctx, "openfga agent tool can_run check failed; falling back to authz decision",
+		g.service.logWarn(ctx, "openfga agent tool can_run check failed; denying tool run",
 			"tool_id", toolID,
 			"error", err,
 		)
-		return decision, nil
+		return decision, Forbidden("agent tool can_run relationship check unavailable")
 	}
 	if !allowed {
 		decision.Allowed = false
@@ -323,9 +322,20 @@ func (g authzToolGateway) applyOpenFGAAgentToolDecision(ctx RequestContext, acco
 	return decision, nil
 }
 
-// answerAgentPrompt 處理 answer agent prompt 的服務流程。
-func (c *Service) answerAgentPrompt(ctx RequestContext, prompt string) (string, []Reference, error) {
-	return "当前租户没有可检索的知识库内容，已为你创建占位 Agent Run。", nil, nil
+// answerAgentPrompt 僅在 Agent 綁定的知識庫中搜尋並回傳可追溯引用。
+func (c *Service) answerAgentPrompt(ctx RequestContext, prompt string, knowledgeBaseIDs []string) (string, []Reference, error) {
+	result, err := c.Agent().SearchKnowledge(ctx, domain.KnowledgeSearchInput{Query: prompt, KnowledgeBaseIDs: knowledgeBaseIDs})
+	if err != nil {
+		return "", nil, err
+	}
+	if len(result.Hits) == 0 {
+		return "当前 Agent 绑定的知识库中没有匹配内容。", nil, nil
+	}
+	references := make([]Reference, 0, len(result.Hits))
+	for _, hit := range result.Hits {
+		references = append(references, Reference{Title: hit.Title, Snippet: hit.Snippet, Source: hit.Source})
+	}
+	return result.Hits[0].Snippet, references, nil
 }
 
 func (c AgentService) publishedAgentDefinition(ctx RequestContext, id string) (domain.AgentDefinition, error) {
@@ -346,6 +356,20 @@ func (c AgentService) publishedAgentDefinition(ctx RequestContext, id string) (d
 	}
 	if !visible {
 		return domain.AgentDefinition{}, NotFound("published agent definition", id)
+	}
+	publishedVersion := agent.PublishedVersion
+	if publishedVersion <= 0 {
+		publishedVersion = agent.Version
+	}
+	if snapshot, found, snapshotErr := c.store.GetAgentDefinitionVersion(goContext(ctx), ctx.TenantID, agent.ID, publishedVersion); snapshotErr != nil {
+		return domain.AgentDefinition{}, snapshotErr
+	} else if found {
+		agent.MainAgentRole = snapshot.MainAgentRole
+		agent.SubAgents = snapshot.SubAgents
+		agent.SystemPrompt = snapshot.SystemPrompt
+		agent.Tools = snapshot.Tools
+		agent.KnowledgeBaseIDs = snapshot.KnowledgeBaseIDs
+		agent.ModelID = snapshot.ModelID
 	}
 	return agent, nil
 }

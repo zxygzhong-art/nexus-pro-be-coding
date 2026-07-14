@@ -6,6 +6,7 @@ import "nexus-pro-be/internal/domain"
 type (
 	Tenant                             = domain.Tenant
 	Account                            = domain.Account
+	UpdateMeProfileInput               = domain.UpdateMeProfileInput
 	AuthenticatedPrincipal             = domain.AuthenticatedPrincipal
 	IdentityResolution                 = domain.IdentityResolution
 	UserIdentity                       = domain.UserIdentity
@@ -52,6 +53,13 @@ type (
 	EmployeeStats                      = domain.EmployeeStats
 	EmployeeOptions                    = domain.EmployeeOptions
 	FormDataSourceCatalogResponse      = domain.FormDataSourceCatalogResponse
+	FormDefinitionDraft                = domain.FormDefinitionDraft
+	FormDefinitionSchemaV2             = domain.FormDefinitionSchemaV2
+	FormBuilderCapabilitiesResponse    = domain.FormBuilderCapabilitiesResponse
+	FormBuilderDataSourceMetadata      = domain.FormBuilderDataSourceMetadata
+	FormBuilderWorkflowTarget          = domain.FormBuilderWorkflowTarget
+	FormDefinitionPreview              = domain.FormDefinitionPreview
+	FormWorkflowSimulation             = domain.FormWorkflowSimulation
 	EmployeeImportSession              = domain.EmployeeImportSession
 	EmployeeImportRow                  = domain.EmployeeImportRow
 	EHRMSEmployeeRecord                = domain.EHRMSEmployeeRecord
@@ -175,6 +183,8 @@ type (
 	AgentSessionMessage                = domain.AgentSessionMessage
 	AgentMemory                        = domain.AgentMemory
 	AgentToolMeta                      = domain.AgentToolMeta
+	AgentExternalTool                  = domain.AgentExternalTool
+	CreateAgentExternalToolInput       = domain.CreateAgentExternalToolInput
 	AgentCategory                      = domain.AgentCategory
 	AgentVisibility                    = domain.AgentVisibility
 	AgentTrialResult                   = domain.AgentTrialResult
@@ -306,6 +316,7 @@ type (
 	UpdateAgentModelInput                   = domain.UpdateAgentModelInput
 	CreateAgentDefinitionInput              = domain.CreateAgentDefinitionInput
 	UpdateAgentDefinitionInput              = domain.UpdateAgentDefinitionInput
+	AgentTeamMember                         = domain.AgentTeamMember
 	RollbackAgentDefinitionInput            = domain.RollbackAgentDefinitionInput
 	AgentTrialInput                         = domain.AgentTrialInput
 )
@@ -400,6 +411,7 @@ const (
 	ResourceModel                     = domain.ResourceModel
 	ResourceEmployeeCollection        = domain.ResourceEmployeeCollection
 	ResourceFormInstance              = domain.ResourceFormInstance
+	ResourceFormDefinitionDraft       = domain.ResourceFormDefinitionDraft
 	ResourceNotification              = domain.ResourceNotification
 
 	AccountStatusActive        = domain.AccountStatusActive

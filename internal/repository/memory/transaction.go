@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 
+	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/repository"
 )
 
@@ -74,22 +75,35 @@ func (s *Store) cloneLocked() *Store {
 		platformTaskTodos:       cloneNestedMap(s.platformTaskTodos, copyPlatformTaskTodoRecord),
 		agentRuns:               cloneNestedMap(s.agentRuns, copyAgentRun),
 		agentModels:             cloneNestedMap(s.agentModels, copyAgentModel),
+		agentExternalTools:      cloneNestedMap(s.agentExternalTools, func(v AgentExternalTool) AgentExternalTool { return v }),
 		agentDefinitions:        cloneNestedMap(s.agentDefinitions, copyAgentDefinition),
 		agentDefinitionVersions: cloneNestedMap(s.agentDefinitionVersions, copyAgentDefinitionVersion),
 		agentAudits:             cloneSliceMap(s.agentAudits, copyAgentAudit),
+		knowledgeBases:          cloneNestedMap(s.knowledgeBases, func(v KnowledgeBase) KnowledgeBase { return v }),
+		knowledgeDocuments:      cloneNestedMap(s.knowledgeDocuments, func(v KnowledgeDocument) KnowledgeDocument { return v }),
+		knowledgeDocumentChunks: cloneNestedMap(s.knowledgeDocumentChunks, copyKnowledgeDocumentChunk),
 		agentSessions:           cloneNestedMap(s.agentSessions, copyAgentSession),
 		agentSessionMessages:    cloneNestedMap(s.agentSessionMessages, copyAgentSessionMessage),
-		agentMemories:           cloneNestedMap(s.agentMemories, copyAgentMemory),
-		notifications:           cloneNestedMap(s.notifications, copyNotification),
-		notificationRecipients:  cloneNestedMap(s.notificationRecipients, copyNotificationRecipient),
-		auditLogs:               cloneSliceMap(s.auditLogs, copyAuditLog),
-		permissionVersions:      cloneMap(s.permissionVersions, func(v int64) int64 { return v }),
-		identityOutbox:          cloneSliceMap(s.identityOutbox, func(v IdentityProvisioningOutboxEvent) IdentityProvisioningOutboxEvent { return v }),
-		outboxEvents:            cloneSliceMap(s.outboxEvents, copyOutboxEvent),
-		relationshipTuples:      cloneNestedMap(s.relationshipTuples, func(v AuthzRelationshipTuple) AuthzRelationshipTuple { return v }),
-		ehrmsSyncRuns:           cloneNestedMap(s.ehrmsSyncRuns, copyEHRMSSyncRun),
-		ehrmsSyncRunSteps:       cloneNestedMap(s.ehrmsSyncRunSteps, copyEHRMSSyncRunStep),
-		ehrmsSyncLocks:          cloneMap(s.ehrmsSyncLocks, func(v bool) bool { return v }),
+		agentSessionFiles:       cloneNestedMap(s.agentSessionFiles, copyAgentSessionFile),
+		agentFileChunks:         cloneNestedMap(s.agentFileChunks, func(v []string) []string { return append([]string(nil), v...) }),
+		agentMessageAttachments: cloneNestedMap(s.agentMessageAttachments, func(v []domain.AgentMessageAttachment) []domain.AgentMessageAttachment {
+			out := append([]domain.AgentMessageAttachment(nil), v...)
+			for index := range out {
+				out[index].File = copyAgentSessionFile(out[index].File)
+			}
+			return out
+		}),
+		agentMemories:          cloneNestedMap(s.agentMemories, copyAgentMemory),
+		notifications:          cloneNestedMap(s.notifications, copyNotification),
+		notificationRecipients: cloneNestedMap(s.notificationRecipients, copyNotificationRecipient),
+		auditLogs:              cloneSliceMap(s.auditLogs, copyAuditLog),
+		permissionVersions:     cloneMap(s.permissionVersions, func(v int64) int64 { return v }),
+		identityOutbox:         cloneSliceMap(s.identityOutbox, func(v IdentityProvisioningOutboxEvent) IdentityProvisioningOutboxEvent { return v }),
+		outboxEvents:           cloneSliceMap(s.outboxEvents, copyOutboxEvent),
+		relationshipTuples:     cloneNestedMap(s.relationshipTuples, func(v AuthzRelationshipTuple) AuthzRelationshipTuple { return v }),
+		ehrmsSyncRuns:          cloneNestedMap(s.ehrmsSyncRuns, copyEHRMSSyncRun),
+		ehrmsSyncRunSteps:      cloneNestedMap(s.ehrmsSyncRunSteps, copyEHRMSSyncRunStep),
+		ehrmsSyncLocks:         cloneMap(s.ehrmsSyncLocks, func(v bool) bool { return v }),
 	}
 }
 
@@ -142,11 +156,18 @@ func (s *Store) replaceLocked(next *Store) {
 	s.platformTaskTodos = next.platformTaskTodos
 	s.agentRuns = next.agentRuns
 	s.agentModels = next.agentModels
+	s.agentExternalTools = next.agentExternalTools
 	s.agentDefinitions = next.agentDefinitions
 	s.agentDefinitionVersions = next.agentDefinitionVersions
 	s.agentAudits = next.agentAudits
+	s.knowledgeBases = next.knowledgeBases
+	s.knowledgeDocuments = next.knowledgeDocuments
+	s.knowledgeDocumentChunks = next.knowledgeDocumentChunks
 	s.agentSessions = next.agentSessions
 	s.agentSessionMessages = next.agentSessionMessages
+	s.agentSessionFiles = next.agentSessionFiles
+	s.agentFileChunks = next.agentFileChunks
+	s.agentMessageAttachments = next.agentMessageAttachments
 	s.agentMemories = next.agentMemories
 	s.notifications = next.notifications
 	s.notificationRecipients = next.notificationRecipients

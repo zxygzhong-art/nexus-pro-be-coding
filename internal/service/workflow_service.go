@@ -149,7 +149,10 @@ func (c WorkflowService) ReviewQueue(ctx RequestContext) (WorkflowReviewQueueRes
 		if strings.EqualFold(item.Status, workflowFormStatusDraft) {
 			continue
 		}
-		projected := c.reviewItem(item, templates[item.TemplateID], accounts[item.ApplicantAccountID], employees[item.ApplicantAccountID])
+		projected, err := c.reviewItem(ctx, item, templates[item.TemplateID], accounts[item.ApplicantAccountID], employees[item.ApplicantAccountID])
+		if err != nil {
+			return WorkflowReviewQueueResponse{}, err
+		}
 		status := normalizeWorkflowStatus(item.Status)
 		switch status {
 		case "approved", "rejected", "cancelled", "canceled":
@@ -878,21 +881,29 @@ func (c WorkflowService) employeeByAccountMap(ctx RequestContext) (map[string]Em
 	return out, nil
 }
 
-// reviewItem 處理審核項目的服務流程。
-func (c WorkflowService) reviewItem(item FormInstance, template FormTemplate, account Account, employee Employee) WorkflowReviewItem {
+// reviewItem 使用實例綁定的不可變模板版本建立審核契約。
+func (c WorkflowService) reviewItem(ctx RequestContext, item FormInstance, template FormTemplate, account Account, employee Employee) (WorkflowReviewItem, error) {
+	version, err := c.formTemplateVersionForInstance(ctx, template, item)
+	if err != nil {
+		return WorkflowReviewItem{}, err
+	}
+	versionedTemplate := formTemplateAtVersion(template, version)
 	status := normalizeWorkflowStatus(item.Status)
 	title := utils.FirstNonEmpty(template.Name, template.Key, item.TemplateID, "审批申请")
 	return WorkflowReviewItem{
-		ID:         item.ID,
-		Status:     workflowReviewStatus(status),
-		StatusText: workflowReviewStatusText(status),
-		Title:      title,
-		Who:        workflowApplicantLabel(account, employee),
-		Desc:       workflowReviewDescription(item.Payload),
-		Time:       workflowReviewTime(item),
-		ReviewLog:  workflowReviewLog(item.Payload),
-		Instance:   item,
-	}
+		ID:          item.ID,
+		TemplateKey: template.Key,
+		FormKind:    firstNonEmpty(platformTemplateFormKind(versionedTemplate.Schema), defaultFormKindForTemplateKey(template.Key)),
+		Fields:      platformTemplateFields(template.Key, versionedTemplate.Schema),
+		Status:      workflowReviewStatus(status),
+		StatusText:  workflowReviewStatusText(status),
+		Title:       title,
+		Who:         workflowApplicantLabel(account, employee),
+		Desc:        workflowReviewDescription(item.Payload),
+		Time:        workflowReviewTime(item),
+		ReviewLog:   workflowReviewLog(item.Payload),
+		Instance:    item,
+	}, nil
 }
 
 // normalizeWorkflowStatus 正規化流程狀態。

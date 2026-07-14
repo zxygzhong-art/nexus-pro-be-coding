@@ -38,14 +38,15 @@ func (c AgentService) CreateSession(ctx RequestContext, input domain.CreateAgent
 	}
 	now := c.Now()
 	session := domain.AgentSession{
-		ID:        utils.NewID("asess"),
-		TenantID:  ctx.TenantID,
-		AccountID: account.ID,
-		AgentID:   agentID,
-		Title:     strings.TrimSpace(input.Title),
-		Status:    domain.AgentSessionStatusActive,
-		CreatedAt: now,
-		UpdatedAt: now,
+		ID:             utils.NewID("asess"),
+		TenantID:       ctx.TenantID,
+		AccountID:      account.ID,
+		AgentID:        agentID,
+		Title:          strings.TrimSpace(input.Title),
+		Status:         domain.AgentSessionStatusActive,
+		ContextVersion: 1,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 	if err := c.store.UpsertAgentSession(goContext(ctx), session); err != nil {
 		return domain.AgentSession{}, err
@@ -68,58 +69,65 @@ func (c AgentService) UpdateSession(ctx RequestContext, id string, input domain.
 	if err != nil {
 		return domain.AgentSession{}, err
 	}
-	session, err := c.currentAgentSession(ctx, account.ID, id)
-	if err != nil {
-		return domain.AgentSession{}, err
-	}
-	if input.Title != nil {
-		session.Title = strings.TrimSpace(*input.Title)
-	}
-	if input.Status != nil {
-		status := domain.AgentSessionStatus(strings.TrimSpace(*input.Status))
-		if status != domain.AgentSessionStatusActive && status != domain.AgentSessionStatusArchived {
-			return domain.AgentSession{}, BadRequest("status must be active or archived")
+	var session domain.AgentSession
+	if err := c.withTransaction(ctx, func(tx AgentService) error {
+		locked, err := tx.lockCurrentAgentSession(ctx, account.ID, id)
+		if err != nil {
+			return err
 		}
-		session.Status = status
-	}
-	session.UpdatedAt = c.Now()
-	if err := c.store.UpsertAgentSession(goContext(ctx), session); err != nil {
+		if input.Title != nil {
+			locked.Title = strings.TrimSpace(*input.Title)
+		}
+		if input.Status != nil {
+			status := domain.AgentSessionStatus(strings.TrimSpace(*input.Status))
+			if status != domain.AgentSessionStatusActive && status != domain.AgentSessionStatusArchived {
+				return BadRequest("status must be active or archived")
+			}
+			locked.Status = status
+		}
+		locked.UpdatedAt = c.Now()
+		if err := tx.store.UpsertAgentSession(goContext(ctx), locked); err != nil {
+			return err
+		}
+		session = locked
+		return nil
+	}); err != nil {
 		return domain.AgentSession{}, err
 	}
 	return session, nil
 }
 
-// ClearSessionContext 清除後續 chat 使用的上下文，但保留可見歷史訊息。
+// ClearSessionContext advances the visible context partition without deleting audit history.
 func (c AgentService) ClearSessionContext(ctx RequestContext, id string) (domain.AgentSession, error) {
 	account, _, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionCreate, strings.TrimSpace(id))
 	if err != nil {
 		return domain.AgentSession{}, err
 	}
-	session, err := c.currentAgentSession(ctx, account.ID, id)
-	if err != nil {
-		return domain.AgentSession{}, err
-	}
-	if session.Status != domain.AgentSessionStatusActive {
-		return domain.AgentSession{}, BadRequest("agent session is archived")
-	}
-	if err := c.ensureNoActiveAgentRun(ctx, session.ID); err != nil {
-		return domain.AgentSession{}, err
-	}
-	now := c.Now()
-	if err := c.store.InsertAgentSessionMessage(goContext(ctx), domain.AgentSessionMessage{
-		ID:        utils.NewID("amsg"),
-		TenantID:  ctx.TenantID,
-		SessionID: session.ID,
-		Role:      domain.AgentMessageRoleSystem,
-		Content:   "Context cleared",
-		Metadata:  map[string]any{"event": agentContextClearedEvent},
-		CreatedAt: now,
+	var session domain.AgentSession
+	if err := c.withTransaction(ctx, func(tx AgentService) error {
+		locked, err := tx.lockCurrentAgentSession(ctx, account.ID, id)
+		if err != nil {
+			return err
+		}
+		if locked.Status != domain.AgentSessionStatusActive {
+			return BadRequest("agent session is archived").WithReasonCode("agent_session_archived")
+		}
+		if err := tx.ensureNoActiveAgentRun(ctx, locked.ID); err != nil {
+			return err
+		}
+		if locked.ContextVersion <= 0 {
+			locked.ContextVersion = 1
+		}
+		locked.ContextVersion++
+		locked.Title = "新对话"
+		locked.LastMessageAt = nil
+		locked.UpdatedAt = c.Now()
+		if err := tx.store.UpsertAgentSession(goContext(ctx), locked); err != nil {
+			return err
+		}
+		session = locked
+		return nil
 	}); err != nil {
-		return domain.AgentSession{}, err
-	}
-	session.LastMessageAt = &now
-	session.UpdatedAt = now
-	if err := c.store.UpsertAgentSession(goContext(ctx), session); err != nil {
 		return domain.AgentSession{}, err
 	}
 	return session, nil
@@ -154,7 +162,22 @@ func (c AgentService) ListSessionMessages(ctx RequestContext, sessionID string) 
 	if _, err := c.currentAgentSession(ctx, account.ID, sessionID); err != nil {
 		return nil, err
 	}
-	return c.store.ListAgentSessionMessages(goContext(ctx), ctx.TenantID, strings.TrimSpace(sessionID))
+	messages, err := c.store.ListAgentSessionMessages(goContext(ctx), ctx.TenantID, strings.TrimSpace(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	attachments, err := c.store.ListCurrentAgentMessageAttachments(goContext(ctx), ctx.TenantID, strings.TrimSpace(sessionID))
+	if err != nil {
+		return nil, err
+	}
+	byMessage := make(map[string][]domain.AgentSessionFile)
+	for _, attachment := range attachments {
+		byMessage[attachment.MessageID] = append(byMessage[attachment.MessageID], attachment.File)
+	}
+	for index := range messages {
+		messages[index].Attachments = byMessage[messages[index].ID]
+	}
+	return messages, nil
 }
 
 // ListMemories 列出目前帳號的 agent 記憶。
@@ -163,7 +186,17 @@ func (c AgentService) ListMemories(ctx RequestContext, query domain.ListAgentMem
 	if err != nil {
 		return nil, err
 	}
-	return c.store.ListAgentMemoriesByAccount(goContext(ctx), ctx.TenantID, account.ID, strings.TrimSpace(query.AgentID), strings.TrimSpace(query.SessionID), agentMemoryListLimit)
+	items, err := c.store.ListAgentMemoriesByAccount(goContext(ctx), ctx.TenantID, account.ID, strings.TrimSpace(query.AgentID), strings.TrimSpace(query.SessionID), agentMemoryListLimit)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.AgentMemory, 0, len(items))
+	for _, item := range items {
+		if item.Key != agentConfirmationMemoryKey {
+			out = append(out, item)
+		}
+	}
+	return out, nil
 }
 
 // CreateMemory 建立人工 agent 記憶。
@@ -257,6 +290,22 @@ func (c AgentService) currentAgentSession(ctx RequestContext, accountID, id stri
 		return domain.AgentSession{}, BadRequest("id is required")
 	}
 	session, ok, err := c.store.GetAgentSession(goContext(ctx), ctx.TenantID, id)
+	if err != nil {
+		return domain.AgentSession{}, err
+	}
+	if !ok || session.AccountID != accountID {
+		return domain.AgentSession{}, NotFound("agent session", id)
+	}
+	return session, nil
+}
+
+// lockCurrentAgentSession serializes writes that must preserve the current context partition.
+func (c AgentService) lockCurrentAgentSession(ctx RequestContext, accountID, id string) (domain.AgentSession, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return domain.AgentSession{}, BadRequest("id is required")
+	}
+	session, ok, err := c.store.GetAgentSessionForUpdate(goContext(ctx), ctx.TenantID, id)
 	if err != nil {
 		return domain.AgentSession{}, err
 	}

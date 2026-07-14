@@ -1049,6 +1049,27 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+  /v1/me/profile:
+    patch:
+      summary: Update current employee self-service profile fields
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMeProfileRequest"
+      responses:
+        "200":
+          description: Updated current account profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/me/menus:
     get:
       summary: List current account menus
@@ -1188,7 +1209,8 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
     post:
-      summary: Register a draft permission package
+      summary: Register a draft permission package (platform-global authorizer required)
+      description: Requires the tenant package-create permission and a verified token with platform_admin=true or the nexus-platform-admin realm role.
       requestBody:
         required: true
         content:
@@ -1209,7 +1231,8 @@ paths:
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/iam/permission-packages/{id}/publish:
     post:
-      summary: Publish a registered permission package version
+      summary: Publish a registered permission package version (platform-global authorizer required)
+      description: Requires the tenant package-publish permission and a verified token with platform_admin=true or the nexus-platform-admin realm role.
       parameters:
         - $ref: "#/components/parameters/ID"
       responses:
@@ -2418,6 +2441,176 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/knowledge-bases:
+    get:
+      summary: List tenant knowledge bases
+      responses:
+        "200":
+          description: Knowledge base list with document counts
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/KnowledgeBaseListResponse"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+    post:
+      summary: Create a tenant knowledge base
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateKnowledgeBaseRequest"}
+      responses:
+        "201":
+          description: Created knowledge base
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/KnowledgeBase"}
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /v1/workspace/knowledge-bases/{id}:
+    get:
+      summary: Get a tenant knowledge base
+      parameters: [{$ref: "#/components/parameters/ID"}]
+      responses:
+        "200":
+          description: Knowledge base
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/KnowledgeBase"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    patch:
+      summary: Update a tenant knowledge base
+      parameters: [{$ref: "#/components/parameters/ID"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateKnowledgeBaseRequest"}
+      responses:
+        "200":
+          description: Updated knowledge base
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/KnowledgeBase"}
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      summary: Delete an unbound tenant knowledge base and its documents
+      parameters: [{$ref: "#/components/parameters/ID"}]
+      responses:
+        "200":
+          description: Deleted knowledge base
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/KnowledgeBase"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+  /v1/workspace/knowledge-bases/{id}/documents:
+    get:
+      summary: List manual and uploaded sources in a knowledge base
+      parameters: [{$ref: "#/components/parameters/ID"}]
+      responses:
+        "200":
+          description: Knowledge source list
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/KnowledgeDocumentListResponse"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      summary: Create a manual text source or upload a text/PDF file
+      parameters: [{$ref: "#/components/parameters/ID"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/CreateKnowledgeDocumentRequest"}
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: UTF-8 text or text-based PDF, up to 20 MB. Scanned PDFs require OCR and are rejected.
+                title:
+                  type: string
+                  maxLength: 120
+                  description: Optional display title; defaults to the filename without extension.
+      responses:
+        "201":
+          description: Created and indexed knowledge source
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/KnowledgeDocument"}
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /v1/workspace/knowledge-bases/{id}/documents/{document_id}:
+    patch:
+      summary: Update a manual text document
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - {name: document_id, in: path, required: true, schema: {type: string}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateKnowledgeDocumentRequest"}
+      responses:
+        "200":
+          description: Updated manual text document
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/KnowledgeDocument"}
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      summary: Delete a manual or uploaded knowledge source
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - {name: document_id, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: Deleted manual text document
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/KnowledgeDocument"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /v1/workspace/knowledge-bases/{id}/search:
+    post:
+      summary: Test semantic vector search within one knowledge base
+      description: Embeds the query through the public LiteLLM alias nexus-pro-embedding and performs cosine retrieval over pgvector chunks.
+      parameters: [{$ref: "#/components/parameters/ID"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/KnowledgeSearchRequest"}
+      responses:
+        "200":
+          description: Search hits with document citations
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/KnowledgeSearchResponse"}
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
   /v1/workspace/agent-models:
     get:
       summary: List workspace agent models
@@ -2529,7 +2722,7 @@ paths:
         "500": {$ref: "#/components/responses/InternalError"}
     post:
       summary: Create workspace agent
-      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/CreateAgentDefinitionRequest"}}}}
       responses:
         "201":
           description: Created agent definition
@@ -2547,7 +2740,7 @@ paths:
       summary: Update workspace agent
       parameters:
         - $ref: "#/components/parameters/ID"
-      requestBody: {required: true, content: {application/json: {schema: {type: object}}}}
+      requestBody: {required: true, content: {application/json: {schema: {$ref: "#/components/schemas/UpdateAgentDefinitionRequest"}}}}
       responses:
         "200":
           description: Updated agent definition
@@ -2656,6 +2849,55 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agents/external-tools:
+    get:
+      summary: List workspace external agent tools
+      responses:
+        "200":
+          description: Tenant-managed external tool registrations
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentExternalToolListDataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+    post:
+      summary: Register a workspace external agent tool
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAgentExternalToolRequest"
+      responses:
+        "201":
+          description: Registered external tool
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentExternalToolDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+        "503": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agents/external-tools/{id}:
+    delete:
+      summary: Delete a workspace external agent tool
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Deleted external tool
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentExternalToolDataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/workspace/employees:
     get:
       summary: Get workspace employee table
@@ -2741,6 +2983,149 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/form-builder/capabilities:
+    get:
+      summary: Read Agent-safe form builder capabilities
+      responses:
+        "200":
+          description: Schema v2 field, widget, metadata-only data source, and workflow target capabilities
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+  /v1/form-builder/data-sources:
+    get:
+      summary: Read metadata-only form data source schemas
+      responses:
+        "200":
+          description: Data source fields without tenant business records
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+  /v1/form-builder/workflow-targets:
+    get:
+      summary: Read allowed workflow target roles
+      responses:
+        "200":
+          description: Workflow target role catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+  /v1/form-builder/drafts:
+    get:
+      summary: List form definition drafts
+      parameters:
+        - {name: owner, in: query, schema: {type: string, enum: [mine, all]}}
+        - {name: status, in: query, schema: {type: string, enum: [draft, review_pending, rejected, published]}}
+      responses:
+        "200":
+          description: Form definition drafts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+    post:
+      summary: Create a controlled form definition draft
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateFormDefinitionDraftRequest"
+      responses:
+        "201":
+          description: Created draft
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DataResponse"}
+  /v1/form-builder/drafts/{id}:
+    get:
+      summary: Get a form definition draft
+      parameters: [{$ref: "#/components/parameters/ID"}]
+      responses:
+        "200":
+          description: Form definition draft
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DataResponse"}
+    patch:
+      summary: Update a form definition draft with optimistic revision
+      parameters: [{$ref: "#/components/parameters/ID"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: "#/components/schemas/UpdateFormDefinitionDraftRequest"}
+      responses:
+        "200":
+          description: Updated draft
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DataResponse"}
+  /v1/form-builder/drafts/{id}/validate:
+    post:
+      summary: Validate and compile a form definition draft
+      parameters: [{$ref: "#/components/parameters/ID"}]
+      responses:
+        "200":
+          description: Validation and runtime preview
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DataResponse"}
+  /v1/form-builder/drafts/{id}/preview:
+    post:
+      summary: Preview a form definition draft
+      parameters: [{$ref: "#/components/parameters/ID"}]
+      responses:
+        "200":
+          description: Preview
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DataResponse"}
+  /v1/form-builder/drafts/{id}/simulate:
+    post:
+      summary: Simulate the workflow path without starting a run
+      parameters: [{$ref: "#/components/parameters/ID"}]
+      responses:
+        "200":
+          description: Workflow simulation
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DataResponse"}
+  /v1/form-builder/drafts/{id}/submit-review:
+    post:
+      summary: Submit a valid draft for administrator review
+      parameters: [{$ref: "#/components/parameters/ID"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [revision], properties: {revision: {type: integer, format: int64}}}
+      responses:
+        "200":
+          description: Review-pending draft
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DataResponse"}
+  /v1/form-builder/drafts/{id}/publish:
+    post:
+      summary: Administrator-confirmed publish into the existing form runtime
+      parameters: [{$ref: "#/components/parameters/ID"}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {type: object, required: [revision], properties: {revision: {type: integer, format: int64}}}
+      responses:
+        "200":
+          description: Published draft
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/DataResponse"}
   /v1/forms/templates:
     get:
       summary: List form templates
@@ -2764,6 +3149,19 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+  /v1/workflows/form-data-sources:
+    get:
+      summary: List permission-filtered form data sources
+      responses:
+        "200":
+          description: Form data source catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/workflows/forms:
     get:
       summary: List workflow form instances
@@ -2796,7 +3194,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/WorkflowReviewQueueDataResponse"
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
@@ -3095,17 +3493,27 @@ paths:
           application/json:
             schema:
               type: object
-              required: [message]
+              anyOf:
+                - required: [message]
+                - required: [attachment_ids]
               properties:
                 agent_id: {type: string, description: Optional published workspace Agent definition to bind this turn}
                 session_id: {type: string}
                 message: {type: string}
+                attachment_ids:
+                  type: array
+                  maxItems: 8
+                  uniqueItems: true
+                  items: {type: string}
+                  description: Current-context session file IDs to bind to the persisted user message.
                 mode:
                   type: string
+                  enum: [assistant_chat, assistant_recommendation]
                   default: assistant_chat
+                  description: Use assistant_recommendation to recommend only assistants visible to the current account.
       responses:
         "200":
-          description: SSE stream with session, message_delta, tool_call, tool_result, analysis_result, done, and error events.
+          description: SSE stream with session, message_delta, tool_call, tool_result, analysis_result, confirmation_required, done, and error events.
           content:
             text/event-stream:
               schema:
@@ -3119,6 +3527,32 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+  /v1/agents/confirmations/{id}/execute:
+    post:
+      summary: Execute a prepared one-time Agent confirmation
+      description: Revalidates ownership, resource versions, current workflow stage, and business authorization before submitting a form or executing a fixed review batch.
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+      responses:
+        "200":
+          description: Confirmation execution result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/agents/sessions:
     get:
       summary: List agent sessions
@@ -3188,7 +3622,8 @@ paths:
         "409": {$ref: "#/components/responses/Conflict"}
   /v1/agents/sessions/{id}/clear-context:
     post:
-      summary: Clear agent session context without deleting visible history
+      summary: Clear agent session context and hide previous messages and files
+      description: Advances context_version. Previous records remain available only for retention and audit processing, not through regular session APIs.
       parameters:
         - $ref: "#/components/parameters/ID"
       responses:
@@ -3217,6 +3652,79 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
+  /v1/agents/sessions/{id}/files:
+    get:
+      summary: List files in the current session context
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Current-context session files
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    post:
+      summary: Upload a UTF-8 text file into the current session context
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: Supported UTF-8 text file, at most 10MB.
+      responses:
+        "201":
+          description: Staged session file
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /v1/agents/sessions/{id}/files/{file_id}:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+      - name: file_id
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      summary: Download a file from the current session context
+      responses:
+        "200":
+          description: Authorized file bytes
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      summary: Delete an unsent draft file from the current session context
+      responses:
+        "200":
+          description: Deleted draft file metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
   /v1/agents/memories:
     get:
       summary: List agent memories
@@ -3374,6 +3882,280 @@ components:
       properties:
         data:
           description: Successful response payload.
+    AgentExternalTool:
+      type: object
+      required: [id, tenant_id, name, description, kind, transport, endpoint_url, auth_type, credential_set, created_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        name: {type: string, maxLength: 120}
+        description: {type: string, maxLength: 500}
+        kind: {type: string, enum: [mcp, http]}
+        transport: {type: string, enum: [sse, streamable_http, http]}
+        endpoint_url: {type: string, format: uri}
+        auth_type: {type: string, enum: [none, bearer, api_key, basic]}
+        auth_header_name: {type: string, maxLength: 100}
+        auth_username: {type: string, maxLength: 200}
+        credential_set: {type: boolean}
+        created_by_account_id: {type: string}
+        created_at: {type: string, format: date-time}
+    CreateAgentExternalToolRequest:
+      type: object
+      required: [name, kind, endpoint_url]
+      properties:
+        name: {type: string, maxLength: 120}
+        description: {type: string, maxLength: 500}
+        kind: {type: string, enum: [mcp, http]}
+        transport:
+          type: string
+          enum: [sse, streamable_http, http]
+          description: MCP accepts sse or streamable_http; HTTP APIs use http. Defaults from kind for backward compatibility.
+        endpoint_url: {type: string, format: uri}
+        auth_type: {type: string, enum: [none, bearer, api_key, basic], default: none}
+        auth_header_name:
+          type: string
+          maxLength: 100
+          description: Header name for api_key authentication; defaults to X-API-Key.
+        auth_username: {type: string, maxLength: 200, description: Username for basic authentication.}
+        auth_secret:
+          type: string
+          format: password
+          writeOnly: true
+          maxLength: 8192
+          description: Required for bearer, api_key, and basic authentication; encrypted before persistence and never returned.
+    AgentExternalToolListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/AgentExternalTool"}}
+        total: {type: integer, minimum: 0}
+    AgentExternalToolDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: "#/components/schemas/AgentExternalTool"}
+    AgentExternalToolListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: "#/components/schemas/AgentExternalToolListResponse"}
+    KnowledgeBase:
+      type: object
+      required: [id, tenant_id, name, description, chunk_mode, chunk_size, chunk_overlap, document_count, created_at, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        chunk_mode: {type: string, enum: [auto, paragraph, fixed]}
+        chunk_size: {type: integer, minimum: 200, maximum: 4000}
+        chunk_overlap: {type: integer, minimum: 0, description: Must be smaller than chunk_size.}
+        document_count: {type: integer, minimum: 0}
+        created_by_account_id: {type: string}
+        updated_by_account_id: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    KnowledgeBaseListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/KnowledgeBase"}}
+        total: {type: integer, minimum: 0}
+    CreateKnowledgeBaseRequest:
+      type: object
+      required: [name]
+      properties:
+        name: {type: string}
+        description: {type: string}
+        chunk_mode: {type: string, enum: [auto, paragraph, fixed], default: auto}
+        chunk_size: {type: integer, minimum: 200, maximum: 4000, default: 1200}
+        chunk_overlap: {type: integer, minimum: 0, default: 200, description: Must be smaller than chunk_size.}
+    UpdateKnowledgeBaseRequest:
+      type: object
+      properties:
+        name: {type: string}
+        description: {type: string}
+        chunk_mode: {type: string, enum: [auto, paragraph, fixed]}
+        chunk_size: {type: integer, minimum: 200, maximum: 4000}
+        chunk_overlap: {type: integer, minimum: 0, description: Must be smaller than chunk_size. Changing chunk settings rebuilds all existing embeddings atomically.}
+    KnowledgeDocument:
+      type: object
+      required: [id, tenant_id, knowledge_base_id, title, content, source_type, original_filename, content_type, size_bytes, sha256, object_provider, object_bucket, parse_status, parse_error, created_at, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        knowledge_base_id: {type: string}
+        title: {type: string}
+        content: {type: string, maxLength: 1000000, description: Extracted indexable text.}
+        source_type: {type: string, enum: [manual, text, pdf]}
+        original_filename: {type: string}
+        content_type: {type: string}
+        size_bytes: {type: integer, format: int64, minimum: 0}
+        sha256: {type: string}
+        object_provider: {type: string}
+        object_bucket: {type: string}
+        parse_status: {type: string, enum: [ready, failed]}
+        parse_error: {type: string}
+        created_by_account_id: {type: string}
+        updated_by_account_id: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    KnowledgeDocumentListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/KnowledgeDocument"}}
+        total: {type: integer, minimum: 0}
+    CreateKnowledgeDocumentRequest:
+      type: object
+      required: [title, content]
+      properties:
+        title: {type: string}
+        content: {type: string, maxLength: 200000}
+    UpdateKnowledgeDocumentRequest:
+      type: object
+      properties:
+        title: {type: string}
+        content: {type: string, maxLength: 200000}
+    KnowledgeSearchRequest:
+      type: object
+      required: [query]
+      properties:
+        query: {type: string}
+        limit: {type: integer, minimum: 1, maximum: 50, default: 10}
+    KnowledgeSearchHit:
+      type: object
+      required: [knowledge_base_id, knowledge_base_name, document_id, title, snippet, source, score]
+      properties:
+        knowledge_base_id: {type: string}
+        knowledge_base_name: {type: string}
+        document_id: {type: string}
+        title: {type: string}
+        snippet: {type: string}
+        source: {type: string, example: "knowledge://kb_123/kdoc_456#chunk=1"}
+        score: {type: number, format: double, minimum: -1, maximum: 1, description: Cosine similarity returned by pgvector.}
+    KnowledgeSearchResponse:
+      type: object
+      required: [items, total, query, semantics]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/KnowledgeSearchHit"}}
+        total: {type: integer, minimum: 0}
+        query: {type: string}
+        semantics: {type: string}
+    AgentTeamMember:
+      type: object
+      required: [id, name, role, model_id, tools, knowledge_base_ids]
+      properties:
+        id: {type: string}
+        name: {type: string}
+        role: {type: string}
+        model_id: {type: string}
+        tools: {type: array, items: {type: string}}
+        knowledge_base_ids: {type: array, items: {type: string}}
+    CreateAgentDefinitionRequest:
+      type: object
+      required: [name, model_id]
+      properties:
+        name: {type: string}
+        description: {type: string}
+        emoji: {type: string}
+        category: {type: string, enum: [workflow, doc, analytics, it]}
+        model_id: {type: string}
+        main_agent_role: {type: string}
+        sub_agents: {type: array, items: {$ref: "#/components/schemas/AgentTeamMember"}}
+        system_prompt: {type: string}
+        tools: {type: array, items: {type: string}}
+        knowledge_base_ids: {type: array, items: {type: string}}
+        visibility: {type: string, enum: [all, department, role]}
+        visibility_targets: {type: array, items: {type: string}}
+        timeout_seconds: {type: integer, minimum: 1}
+    UpdateAgentDefinitionRequest:
+      type: object
+      properties:
+        name: {type: string}
+        description: {type: string}
+        emoji: {type: string}
+        category: {type: string, enum: [workflow, doc, analytics, it]}
+        model_id: {type: string}
+        main_agent_role: {type: string}
+        sub_agents: {type: array, items: {$ref: "#/components/schemas/AgentTeamMember"}}
+        system_prompt: {type: string}
+        tools: {type: array, items: {type: string}}
+        knowledge_base_ids: {type: array, items: {type: string}}
+        visibility: {type: string, enum: [all, department, role]}
+        visibility_targets: {type: array, items: {type: string}}
+        timeout_seconds: {type: integer, minimum: 1}
+        version_note: {type: string}
+    AgentDefinitionVersion:
+      type: object
+      required: [id, tenant_id, agent_id, version, sub_agents, tools, knowledge_base_ids]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        agent_id: {type: string}
+        version: {type: integer, minimum: 1}
+        main_agent_role: {type: string}
+        sub_agents: {type: array, items: {$ref: "#/components/schemas/AgentTeamMember"}}
+        system_prompt: {type: string}
+        tools: {type: array, items: {type: string}}
+        knowledge_base_ids: {type: array, items: {type: string}}
+        model_id: {type: string}
+        note: {type: string}
+        created_at: {type: string, format: date-time}
+    FormBuilderCapabilitiesResponse:
+      type: object
+      required: [schema_version, field_types, widgets, data_sources, workflow_targets]
+      properties:
+        schema_version: {type: integer, enum: [2]}
+        field_types: {type: array, items: {type: string}}
+        widgets: {type: array, items: {type: string}}
+        data_sources: {type: array, items: {type: object, additionalProperties: true}}
+        workflow_targets: {type: array, items: {type: object, additionalProperties: true}}
+    FormDefinitionDraft:
+      type: object
+      required: [id, tenant_id, owner_account_id, schema_version, authoring_schema, status, revision, validation_result]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        owner_account_id: {type: string}
+        schema_version: {type: integer, enum: [2]}
+        authoring_schema: {type: object, additionalProperties: true}
+        compiled_schema: {type: object, additionalProperties: true}
+        status: {type: string, enum: [draft, review_pending, rejected, published]}
+        revision: {type: integer, format: int64}
+        source: {type: string}
+        validation_result: {type: object, additionalProperties: true}
+        published_template_id: {type: string}
+        updated_at: {type: string, format: date-time}
+    CreateFormDefinitionDraftRequest:
+      type: object
+      required: [schema]
+      properties:
+        schema: {type: object, additionalProperties: true}
+        base_template_id: {type: string}
+        source: {type: string}
+        agent_id: {type: string}
+        agent_run_id: {type: string}
+        agent_session_id: {type: string}
+        tool_call_id: {type: string}
+    UpdateFormDefinitionDraftRequest:
+      type: object
+      required: [revision, schema]
+      properties:
+        revision: {type: integer, format: int64}
+        schema: {type: object, additionalProperties: true}
+    FormDefinitionPreview:
+      type: object
+      required: [draft, validation]
+      properties:
+        draft: {$ref: "#/components/schemas/FormDefinitionDraft"}
+        validation: {type: object, additionalProperties: true}
+        compiled_schema: {type: object, additionalProperties: true}
+    FormWorkflowSimulation:
+      type: object
+      required: [stages]
+      properties:
+        stages: {type: array, items: {type: object, additionalProperties: true}}
     CheckResultDataResponse:
       type: object
       required: [data]
@@ -4198,8 +4980,7 @@ components:
           format: date-time
         source:
           type: string
-          enum: [manual, import, template, approval]
-        approval_instance_id: {type: string}
+          enum: [manual]
     IAMRoleProjection:
       type: object
       required: [id, tenant_id, name, permission_set_ids, permission_sets, trusted, created_at]
@@ -4315,6 +5096,62 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/WorkflowFormStateResponse"
+    WorkflowReviewQueueDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/WorkflowReviewQueueResponse"
+    WorkflowReviewQueueResponse:
+      type: object
+      required: [pending_review, already_reviewed, notified]
+      properties:
+        pending_review:
+          type: array
+          items: {$ref: "#/components/schemas/WorkflowReviewItem"}
+        already_reviewed:
+          type: array
+          items: {$ref: "#/components/schemas/WorkflowReviewItem"}
+        notified:
+          type: array
+          items: {$ref: "#/components/schemas/WorkflowReviewItem"}
+    WorkflowReviewItem:
+      type: object
+      required: [id, template_key, form_kind, fields, status, status_text, title, desc, time, instance]
+      properties:
+        id: {type: string}
+        template_key: {type: string}
+        form_kind: {type: string, enum: [system, hybrid, custom]}
+        fields:
+          type: array
+          items: {$ref: "#/components/schemas/PlatformFormBuilderField"}
+        status: {type: string}
+        status_text: {type: string}
+        title: {type: string}
+        who: {type: string}
+        desc: {type: string}
+        time: {type: string, format: date-time}
+        review_log:
+          type: array
+          items: {$ref: "#/components/schemas/WorkflowReviewLogItem"}
+        instance:
+          $ref: "#/components/schemas/WorkflowFormInstance"
+    WorkflowFormInstance:
+      type: object
+      required: [id, tenant_id, template_id, template_version_id, applicant_account_id, status, submitted_at, version, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        template_id: {type: string}
+        template_version_id: {type: string}
+        applicant_account_id: {type: string}
+        status: {type: string}
+        payload: {type: object, additionalProperties: true}
+        submitted_at: {type: string, format: date-time}
+        approved_by: {type: string}
+        current_run_id: {type: string}
+        version: {type: integer, format: int64}
+        updated_at: {type: string, format: date-time}
     WorkflowFormStateResponse:
       type: object
       required: [form_instance_id, can_act, steps]
@@ -5426,7 +6263,7 @@ components:
         status: {type: string, enum: [active, inactive]}
     AttendanceClockStatus:
       type: object
-      required: [employee_id, work_date, next_action]
+      required: [employee_id, work_date, punch_count, next_action, can_clock_in, can_clock_out, worked_minutes, approved_leave_minutes, required_minutes, day_status]
       properties:
         employee_id: {type: string}
         work_date: {type: string, format: date}
@@ -5436,7 +6273,19 @@ components:
           $ref: "#/components/schemas/AttendanceClockRecord"
         clock_out:
           $ref: "#/components/schemas/AttendanceClockRecord"
-        next_action: {type: string, enum: [clock_in, clock_out, complete]}
+        last_punch:
+          $ref: "#/components/schemas/AttendanceClockRecord"
+        punch_count: {type: integer, minimum: 0}
+        next_action: {type: string, enum: [clock_in, clock_out]}
+        can_clock_in: {type: boolean}
+        can_clock_out: {type: boolean}
+        worked_minutes: {type: integer, minimum: 0}
+        approved_leave_minutes: {type: integer, minimum: 0}
+        required_minutes: {type: integer, minimum: 0}
+        day_status: {type: string, enum: [not_started, working, complete, pending_leave, abnormal]}
+        anomaly_reasons:
+          type: array
+          items: {type: string}
     AttendanceClockRecord:
       type: object
       description: Persisted tenant resource. id is globally unique across tenants; tenant_id scopes ownership and authorization.
@@ -5450,6 +6299,7 @@ components:
         worksite_id: {type: string, nullable: true}
         work_date: {type: string, format: date}
         direction: {type: string, enum: [clock_in, clock_out]}
+        client_event_id: {type: string, description: Client-generated idempotency key scoped to the tenant.}
         clocked_at: {type: string, format: date-time}
         latitude:
           type: number
@@ -5470,7 +6320,7 @@ components:
         record_status:
           type: string
           enum: [accepted, abnormal, rejected]
-          description: abnormal means the attempt was recorded as an anomaly but does not occupy the effective clock slot, so a flexible clock-out can be retried.
+          description: Static evidence validity. Time-window and insufficient-hours anomalies are derived from the daily projection; accepted raw punches remain eligible until voided.
         rejection_reason: {type: string, enum: [duplicate, invalid_sequence, low_location_accuracy, outside_geofence, outside_time_window, insufficient_work_hours]}
         source: {type: string, enum: [geofence, manual_correction]}
         device_id:
@@ -5481,6 +6331,10 @@ components:
           additionalProperties: true
           description: Sensitive device evidence; response value may be hidden by attendance clock field policy.
         correction_request_id: {type: string}
+        voided: {type: boolean, description: Preserves the raw punch but excludes it from daily projection.}
+        voided_at: {type: string, format: date-time}
+        voided_by_account_id: {type: string}
+        void_reason: {type: string}
         created_at: {type: string, format: date-time}
     CreateAttendanceClockRecordRequest:
       type: object
@@ -5490,6 +6344,7 @@ components:
           type: string
           description: Optional compatibility field; when provided it must match the current account's employee_id.
         direction: {type: string, enum: [clock_in, clock_out]}
+        client_event_id: {type: string, description: Recommended idempotency key generated once per user punch action.}
         latitude: {type: number, format: double}
         longitude: {type: number, format: double}
         accuracy_meters:
@@ -5505,11 +6360,14 @@ components:
     AttendanceCorrection:
       type: object
       description: Persisted tenant resource. id is globally unique across tenants; tenant_id scopes ownership and authorization.
-      required: [id, tenant_id, employee_id, direction, requested_clocked_at, work_date, reason, status, created_at, updated_at]
+      required: [id, tenant_id, employee_id, correction_type, direction, requested_clocked_at, work_date, reason, status, created_at, updated_at]
       properties:
         id: {type: string}
         tenant_id: {type: string}
         employee_id: {type: string}
+        correction_type: {type: string, enum: [add_record, void_record, replace_record]}
+        target_clock_record_id: {type: string}
+        replacement_clock_record_id: {type: string}
         direction: {type: string, enum: [clock_in, clock_out]}
         requested_clocked_at: {type: string, format: date-time}
         work_date: {type: string, format: date}
@@ -5524,9 +6382,12 @@ components:
         updated_at: {type: string, format: date-time}
     CreateAttendanceCorrectionRequest:
       type: object
-      required: [direction, requested_clocked_at, reason]
+      description: add_record requires direction and requested_clocked_at; void_record requires target_clock_record_id; replace_record requires all three.
+      required: [reason]
       properties:
         employee_id: {type: string}
+        correction_type: {type: string, enum: [add_record, void_record, replace_record], default: add_record}
+        target_clock_record_id: {type: string}
         direction: {type: string, enum: [clock_in, clock_out]}
         requested_clocked_at: {type: string}
         reason: {type: string}
@@ -5904,6 +6765,7 @@ components:
       additionalProperties: true
       properties:
         name: {type: string}
+        name_en: {type: string}
         company_email: {type: string, format: email}
         personal_email: {type: string, format: email}
         nationality_type: {type: string, enum: [local, foreign]}
@@ -5955,11 +6817,23 @@ components:
       properties:
         mobile_phone: {type: string}
         phone: {type: string}
+        extension: {type: string}
+        slack: {type: string}
         address: {type: string}
         communication_address: {type: string}
         emergency_contact_relation: {type: string}
         emergency_contact_name: {type: string}
         emergency_contact_phone: {type: string}
+    UpdateMeProfileRequest:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      properties:
+        english_name: {type: string, maxLength: 100}
+        mobile_phone: {type: string, maxLength: 32}
+        extension: {type: string, maxLength: 16}
+        slack: {type: string, maxLength: 80}
+        emergency_contact_name: {type: string, maxLength: 100}
     EmployeeInsuranceInfoSection:
       type: object
       additionalProperties: true
@@ -6408,7 +7282,10 @@ components:
                 - 20042
                 - 20043
                 - 20044
-                - 20045
+                - 20046
+                - 20047
+                - 20048
+                - 20049
                 - 30010
                 - 30011
                 - 30012
@@ -6423,6 +7300,35 @@ components:
                 - 30040
                 - 30041
                 - 30042
+                - 40001
+                - 40020
+                - 40021
+                - 40022
+                - 40023
+                - 40024
+                - 40025
+                - 40030
+                - 40050
+                - 40060
+                - 50001
+                - 50020
+                - 50021
+                - 50022
+                - 50030
+                - 50050
+                - 50060
+                - 60001
+                - 60020
+                - 60021
+                - 60022
+                - 60023
+                - 60024
+                - 60025
+                - 60026
+                - 60030
+                - 60031
+                - 60050
+                - 60060
             message: {type: string}
             reason_code:
               type: string
@@ -6439,6 +7345,28 @@ components:
                 - button_denied
                 - field_denied
                 - data_scope_denied
+                - cross_tenant_denied
+                - attendance_client_event_conflict
+                - attendance_clock_sequence_conflict
+                - attendance_worksite_required
+                - attendance_outside_worksite
+                - attendance_location_accuracy_low
+                - attendance_shift_required
+                - attendance_correction_invalid_state
+                - workflow_invalid_state
+                - workflow_not_assignee
+                - workflow_stage_unavailable
+                - temporal_workflow_unavailable
+                - workflow_not_found
+                - agent_model_in_use
+                - agent_definition_published
+                - agent_session_archived
+                - agent_chat_run_active
+                - knowledge_base_in_use
+                - agent_confirmation_invalid
+                - agent_confirmation_expired
+                - agent_chat_disabled
+                - agent_runtime_unavailable
             field_errors:
               type: array
               items:

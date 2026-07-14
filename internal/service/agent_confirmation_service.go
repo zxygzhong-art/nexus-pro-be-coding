@@ -1,0 +1,730 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/utils"
+)
+
+const (
+	agentConfirmationTTL           = 10 * time.Minute
+	agentBulkReviewLimit           = 20
+	agentConfirmationFormSubmit    = "form_submit"
+	agentConfirmationBulkReview    = "workflow_bulk_review"
+	agentConfirmationStatusDone    = "completed"
+	agentConfirmationStatusPartial = "partial"
+	agentConfirmationMemoryKey     = "__agent_confirmation__"
+)
+
+type agentConfirmationExpectedReview struct {
+	FormInstanceID      string
+	FormInstanceVersion int64
+	WorkflowRunID       string
+	StageInstanceID     string
+}
+
+type agentConfirmationAction struct {
+	Public               domain.AgentConfirmation
+	TenantID             string
+	AccountID            string
+	DraftID              string
+	ExpectedDraftVersion int64
+	Payload              map[string]any
+	ReviewAction         string
+	ReviewReason         string
+	Reviews              []agentConfirmationExpectedReview
+}
+
+// ExecuteConfirmation 在重新驗證資源版本與操作者後執行一次性 Agent 操作。
+func (c AgentService) ExecuteConfirmation(ctx RequestContext, id string, _ domain.ExecuteAgentConfirmationInput) (domain.AgentConfirmationExecution, error) {
+	if _, _, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionCreate, ""); err != nil {
+		return domain.AgentConfirmationExecution{}, err
+	}
+	action, err := c.takeAgentConfirmation(ctx, id)
+	if err != nil {
+		return domain.AgentConfirmationExecution{}, err
+	}
+
+	var result domain.AgentConfirmationExecution
+	switch action.Public.Kind {
+	case agentConfirmationFormSubmit:
+		result, err = c.executeConfirmedFormSubmission(ctx, action)
+	case agentConfirmationBulkReview:
+		result, err = c.executeConfirmedBulkReview(ctx, action)
+	default:
+		err = BadRequest("unsupported agent confirmation kind")
+	}
+	if err != nil {
+		c.restoreRetryableAgentConfirmation(ctx, action, err)
+		return domain.AgentConfirmationExecution{}, err
+	}
+	if err := c.audit(ctx, "agent.confirmation.execute", "agent_confirmation", action.Public.ID, "high", map[string]any{
+		"kind":   action.Public.Kind,
+		"action": action.Public.Action,
+		"count":  len(action.Reviews),
+	}); err != nil {
+		return domain.AgentConfirmationExecution{}, err
+	}
+	return result, nil
+}
+
+// restoreRetryableAgentConfirmation 恢復尚未成功的短效操作，並保留原始 TTL 與業務錯誤。
+func (c AgentService) restoreRetryableAgentConfirmation(ctx RequestContext, action agentConfirmationAction, executionErr error) {
+	if !agentConfirmationExecutionRetryable(executionErr) || !action.Public.ExpiresAt.After(c.Now()) {
+		return
+	}
+	if err := c.saveAgentConfirmation(ctx, action); err != nil {
+		c.logWarn(ctx, "agent confirmation restore failed",
+			"confirmation_id", action.Public.ID,
+			"kind", action.Public.Kind,
+			"error_type", fmt.Sprintf("%T", err),
+		)
+	}
+}
+
+// agentConfirmationExecutionRetryable 僅接受明確的伺服器端、逾時或暫時性基礎設施錯誤。
+func agentConfirmationExecutionRetryable(err error) bool {
+	if err == nil {
+		return false
+	}
+	if appErr, ok := domain.AsAppError(err); ok {
+		return appErr.Status >= 500
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	var timeout interface{ Timeout() bool }
+	if errors.As(err, &timeout) && timeout.Timeout() {
+		return true
+	}
+	var temporary interface{ Temporary() bool }
+	return errors.As(err, &temporary) && temporary.Temporary()
+}
+
+// saveAgentConfirmation 复用持久化 Agent memory 存放短效内部记录，支持多实例执行。
+func (c AgentService) saveAgentConfirmation(ctx RequestContext, action agentConfirmationAction) error {
+	raw, err := json.Marshal(action)
+	if err != nil {
+		return err
+	}
+	expiresAt := action.Public.ExpiresAt
+	return c.store.UpsertAgentMemory(goContext(ctx), domain.AgentMemory{
+		ID: action.Public.ID, TenantID: ctx.TenantID, AccountID: ctx.AccountID,
+		Key: agentConfirmationMemoryKey, Content: string(raw), Source: domain.AgentMemorySourceAuto,
+		Importance: 1, ExpiresAt: &expiresAt, CreatedAt: c.Now(), UpdatedAt: c.Now(),
+	})
+}
+
+// takeAgentConfirmation 验证归属后原子删除并解析一次性确认，拒绝过期与重放。
+func (c AgentService) takeAgentConfirmation(ctx RequestContext, id string) (agentConfirmationAction, error) {
+	id = strings.TrimSpace(id)
+	memory, ok, err := c.store.GetAgentMemory(goContext(ctx), ctx.TenantID, id)
+	if err != nil {
+		return agentConfirmationAction{}, err
+	}
+	if !ok || memory.AccountID != ctx.AccountID || memory.Key != agentConfirmationMemoryKey {
+		return agentConfirmationAction{}, NotFound("agent confirmation", id)
+	}
+	claimed, ok, err := c.store.DeleteAgentMemory(goContext(ctx), ctx.TenantID, id)
+	if err != nil {
+		return agentConfirmationAction{}, err
+	}
+	if !ok {
+		return agentConfirmationAction{}, Conflict("agent confirmation was already used").WithReasonCode("agent_confirmation_invalid")
+	}
+	var action agentConfirmationAction
+	if err := json.Unmarshal([]byte(claimed.Content), &action); err != nil {
+		return agentConfirmationAction{}, Conflict("agent confirmation is invalid").WithReasonCode("agent_confirmation_invalid")
+	}
+	if action.TenantID != ctx.TenantID || action.AccountID != ctx.AccountID {
+		return agentConfirmationAction{}, NotFound("agent confirmation", id)
+	}
+	if !action.Public.ExpiresAt.After(c.Now()) {
+		return agentConfirmationAction{}, Conflict("agent confirmation has expired").WithReasonCode("agent_confirmation_expired")
+	}
+	return action, nil
+}
+
+// executeConfirmedFormSubmission 防止草稿在預覽後被修改或換人提交。
+func (c AgentService) executeConfirmedFormSubmission(ctx RequestContext, action agentConfirmationAction) (domain.AgentConfirmationExecution, error) {
+	current, ok, err := c.Service.store.GetFormInstance(goContext(ctx), ctx.TenantID, action.DraftID)
+	if err != nil {
+		return domain.AgentConfirmationExecution{}, err
+	}
+	if !ok || current.ApplicantAccountID != ctx.AccountID {
+		return domain.AgentConfirmationExecution{}, NotFound("form instance", action.DraftID)
+	}
+	if current.Version != action.ExpectedDraftVersion || !strings.EqualFold(current.Status, workflowFormStatusDraft) {
+		return domain.AgentConfirmationExecution{}, Conflict("form draft changed after confirmation preview")
+	}
+	instance, err := c.Workflow().SubmitForm(ctx, domain.SubmitFormInput{TemplateKey: current.ID, Payload: action.Payload})
+	if err != nil {
+		return domain.AgentConfirmationExecution{}, err
+	}
+	return domain.AgentConfirmationExecution{
+		ConfirmationID: action.Public.ID,
+		Kind:           action.Public.Kind,
+		Status:         agentConfirmationStatusDone,
+		FormInstance:   &instance,
+	}, nil
+}
+
+// executeConfirmedBulkReview 固定批次與節點版本，任一單據過期時整批不執行。
+func (c AgentService) executeConfirmedBulkReview(ctx RequestContext, action agentConfirmationAction) (domain.AgentConfirmationExecution, error) {
+	ids := make([]string, 0, len(action.Reviews))
+	for _, expected := range action.Reviews {
+		instance, ok, err := c.Service.store.GetFormInstance(goContext(ctx), ctx.TenantID, expected.FormInstanceID)
+		if err != nil {
+			return domain.AgentConfirmationExecution{}, err
+		}
+		if !ok || instance.Version != expected.FormInstanceVersion || instance.CurrentRunID != expected.WorkflowRunID {
+			return domain.AgentConfirmationExecution{}, Conflict("review item changed after confirmation preview: " + expected.FormInstanceID)
+		}
+		run, ok, err := c.Service.store.GetWorkflowRunByFormInstance(goContext(ctx), ctx.TenantID, expected.FormInstanceID)
+		if err != nil {
+			return domain.AgentConfirmationExecution{}, err
+		}
+		if !ok || run.ID != expected.WorkflowRunID || run.CurrentStageInstanceID != expected.StageInstanceID {
+			return domain.AgentConfirmationExecution{}, Conflict("review stage changed after confirmation preview: " + expected.FormInstanceID)
+		}
+		ids = append(ids, expected.FormInstanceID)
+	}
+	bulk, err := c.Workflow().BulkReviewForms(ctx, domain.BulkReviewFormsInput{
+		FormInstanceIDs: ids,
+		Action:          action.ReviewAction,
+		Reason:          action.ReviewReason,
+	})
+	if err != nil {
+		return domain.AgentConfirmationExecution{}, err
+	}
+	status := agentConfirmationStatusDone
+	for _, item := range bulk.Results {
+		if !item.Success {
+			status = agentConfirmationStatusPartial
+			break
+		}
+	}
+	return domain.AgentConfirmationExecution{
+		ConfirmationID: action.Public.ID,
+		Kind:           action.Public.Kind,
+		Status:         status,
+		BulkReview:     &bulk,
+	}, nil
+}
+
+// toolListPublishedFormTemplates 列出 Agent 可用且可提交的已發佈表單。
+func (c AgentService) toolListPublishedFormTemplates(ctx domain.RequestContext, _ map[string]any) (map[string]any, error) {
+	templates, err := c.Workflow().ListFormTemplates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]map[string]any, 0, len(templates))
+	for _, template := range templates {
+		if !agentTemplatePublished(template) || validateWorkflowTemplateSubmittable(template) != nil {
+			continue
+		}
+		items = append(items, map[string]any{
+			"id": template.ID, "key": template.Key, "name": template.Name,
+			"description": template.Description, "current_version": template.CurrentVersion,
+		})
+	}
+	return map[string]any{"items": items, "total": len(items)}, nil
+}
+
+// toolGetPublishedFormTemplate 回傳 Agent 可填欄位、選項資料源與審批路徑。
+func (c AgentService) toolGetPublishedFormTemplate(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
+	template, err := c.agentPublishedFormTemplate(ctx, stringFromAny(args["template_key"]))
+	if err != nil {
+		return nil, err
+	}
+	fields := agentAccessibleFormFields(template)
+	dataSources, err := c.agentFormDataSources(ctx, fields)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"template": map[string]any{
+			"id": template.ID, "key": template.Key, "name": template.Name,
+			"description": template.Description, "version": template.CurrentVersion,
+			"fields": fields, "approval_path": agentApprovalPath(template),
+		},
+		"data_sources": dataSources,
+	}, nil
+}
+
+// toolCreateFormDraft 建立可撤銷草稿，且只接受 schema 明確允許 Agent 存取的欄位。
+func (c AgentService) toolCreateFormDraft(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
+	template, err := c.agentPublishedFormTemplate(ctx, stringFromAny(args["template_key"]))
+	if err != nil {
+		return nil, err
+	}
+	payload, err := toolPayload(args)
+	if err != nil {
+		return nil, err
+	}
+	payload, normalizedFields, err := c.prepareAgentFormDraftPayload(ctx, template, payload)
+	if err != nil {
+		return nil, err
+	}
+	instance, err := c.Workflow().SaveFormDraft(ctx, domain.SaveFormDraftInput{
+		TemplateKey: template.Key,
+		Payload:     payload,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"draft":             instance,
+		"normalized_fields": normalizedFields,
+		"next_step":         "tell the user about any defaulted or recalculated fields, then call preview_form_submission after all required fields are filled",
+	}, nil
+}
+
+// toolUpdateFormDraft 更新本人草稿，避免 Agent 覆寫未授權欄位。
+func (c AgentService) toolUpdateFormDraft(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
+	draftID := strings.TrimSpace(stringFromAny(args["draft_id"]))
+	if draftID == "" {
+		return nil, BadRequest("draft_id is required")
+	}
+	current, ok, err := c.Service.store.GetFormInstance(goContext(ctx), ctx.TenantID, draftID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || current.ApplicantAccountID != ctx.AccountID {
+		return nil, NotFound("form instance", draftID)
+	}
+	template, ok, err := c.Service.store.GetFormTemplate(goContext(ctx), ctx.TenantID, current.TemplateID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, NotFound("form template", current.TemplateID)
+	}
+	payload, err := toolPayload(args)
+	if err != nil {
+		return nil, err
+	}
+	payload, normalizedFields, err := c.prepareAgentFormDraftPayload(ctx, template, payload)
+	if err != nil {
+		return nil, err
+	}
+	instance, err := c.Workflow().UpdateFormDraft(ctx, draftID, domain.UpdateFormDraftInput{Payload: payload})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"draft":             instance,
+		"normalized_fields": normalizedFields,
+		"next_step":         "tell the user about any defaulted or recalculated fields, then call preview_form_submission after all required fields are filled",
+	}, nil
+}
+
+// toolPreviewFormSubmission 驗證草稿並產生一次性提交確認，不直接啟動流程。
+func (c AgentService) toolPreviewFormSubmission(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
+	draftID := strings.TrimSpace(stringFromAny(args["draft_id"]))
+	if draftID == "" {
+		return nil, BadRequest("draft_id is required")
+	}
+	workflow := c.Workflow()
+	account, _, err := workflow.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionSubmit, "")
+	if err != nil {
+		return nil, err
+	}
+	instance, ok, err := c.Service.store.GetFormInstance(goContext(ctx), ctx.TenantID, draftID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || instance.ApplicantAccountID != account.ID {
+		return nil, NotFound("form instance", draftID)
+	}
+	if !strings.EqualFold(instance.Status, workflowFormStatusDraft) {
+		return nil, BadRequest("only draft form instances can be submitted")
+	}
+	template, ok, err := c.Service.store.GetFormTemplate(goContext(ctx), ctx.TenantID, instance.TemplateID)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, NotFound("form template", instance.TemplateID)
+	}
+	version, err := workflow.formTemplateVersionForInstance(ctx, template, instance)
+	if err != nil {
+		return nil, err
+	}
+	template = formTemplateAtVersion(template, version)
+	if err := validateWorkflowTemplateSubmittable(template); err != nil {
+		return nil, err
+	}
+	normalized, err := workflow.validateFormSubmissionPayload(ctx, template, instance.Payload)
+	if err != nil {
+		return nil, err
+	}
+	confirmation, err := c.newFormSubmissionConfirmation(ctx, template, instance, normalized)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"confirmation": confirmation, "normalized_payload": normalized}, nil
+}
+
+// toolPrepareBulkReview 固定待審單據、動作與當前節點，等待主管明確確認。
+func (c AgentService) toolPrepareBulkReview(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
+	action, _, err := normalizeBulkReviewAction(stringFromAny(args["action"]))
+	if err != nil {
+		return nil, err
+	}
+	reason := strings.TrimSpace(stringFromAny(args["reason"]))
+	if action != domain.FormApprovalWorkflowActionApprove && reason == "" {
+		return nil, BadRequest("reason is required for reject or return")
+	}
+	queue, err := c.Workflow().ReviewQueue(ctx)
+	if err != nil {
+		return nil, err
+	}
+	pending := make(map[string]domain.WorkflowReviewItem, len(queue.PendingReview))
+	for _, item := range queue.PendingReview {
+		pending[item.ID] = item
+	}
+	ids := uniqueStrings(stringSliceFromAny(args["form_instance_ids"]))
+	if len(ids) == 0 {
+		for _, item := range queue.PendingReview {
+			ids = append(ids, item.ID)
+			if len(ids) == agentBulkReviewLimit {
+				break
+			}
+		}
+	}
+	if len(ids) == 0 {
+		return nil, BadRequest("there are no pending review items")
+	}
+	if len(ids) > agentBulkReviewLimit {
+		return nil, BadRequest(fmt.Sprintf("at most %d review items can be confirmed at once", agentBulkReviewLimit))
+	}
+	confirmation, err := c.newBulkReviewConfirmation(ctx, pending, ids, action, reason)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"confirmation": confirmation, "count": len(ids)}, nil
+}
+
+// newFormSubmissionConfirmation 建立與草稿版本綁定的提交確認卡。
+func (c AgentService) newFormSubmissionConfirmation(ctx domain.RequestContext, template domain.FormTemplate, instance domain.FormInstance, payload map[string]any) (*domain.AgentConfirmation, error) {
+	id, err := utils.NewSecretID("aconf")
+	if err != nil {
+		return nil, err
+	}
+	rows, err := c.agentPayloadRows(ctx, template, payload)
+	if err != nil {
+		return nil, err
+	}
+	confirmation := domain.AgentConfirmation{
+		ID: id, Kind: agentConfirmationFormSubmit, Title: "確認提交「" + template.Name + "」",
+		Description: "提交後將啟動審批流程；送出前請確認以下資料。",
+		Action:      "submit", ActionLabel: "確認並提交",
+		Rows: append(rows, domain.AgentAnalysisRow{
+			Label: "審批流程", Value: strings.Join(agentApprovalPath(template), " → "),
+		}),
+		ExpiresAt: c.Now().Add(agentConfirmationTTL),
+	}
+	if err := c.saveAgentConfirmation(ctx, agentConfirmationAction{
+		Public: confirmation, TenantID: ctx.TenantID, AccountID: ctx.AccountID,
+		DraftID: instance.ID, ExpectedDraftVersion: instance.Version, Payload: utils.CopyStringMap(payload),
+	}); err != nil {
+		return nil, err
+	}
+	return &confirmation, nil
+}
+
+// newBulkReviewConfirmation 建立固定 ID 與節點版本的批次審批確認卡。
+func (c AgentService) newBulkReviewConfirmation(ctx domain.RequestContext, pending map[string]domain.WorkflowReviewItem, ids []string, action, reason string) (*domain.AgentConfirmation, error) {
+	id, err := utils.NewSecretID("aconf")
+	if err != nil {
+		return nil, err
+	}
+	items := make([]domain.AgentConfirmationItem, 0, len(ids))
+	expected := make([]agentConfirmationExpectedReview, 0, len(ids))
+	for _, formID := range ids {
+		item, ok := pending[formID]
+		if !ok {
+			return nil, BadRequest("form instance is not pending for current reviewer: " + formID)
+		}
+		run, ok, err := c.Service.store.GetWorkflowRunByFormInstance(goContext(ctx), ctx.TenantID, formID)
+		if err != nil {
+			return nil, err
+		}
+		if !ok || strings.TrimSpace(run.CurrentStageInstanceID) == "" {
+			return nil, Conflict("form instance has no active workflow stage: " + formID)
+		}
+		items = append(items, domain.AgentConfirmationItem{
+			ID: formID, Title: item.Title, Subtitle: item.Who, Status: item.StatusText,
+			Rows: []domain.AgentAnalysisRow{{Label: "摘要", Value: item.Desc}, {Label: "申请时间", Value: item.Time}},
+		})
+		expected = append(expected, agentConfirmationExpectedReview{
+			FormInstanceID: formID, FormInstanceVersion: item.Instance.Version,
+			WorkflowRunID: run.ID, StageInstanceID: run.CurrentStageInstanceID,
+		})
+	}
+	label := map[string]string{"approve": "批准", "reject": "拒绝", "return": "退回"}[action]
+	rows := []domain.AgentAnalysisRow{{Label: "操作", Value: label}, {Label: "单据数量", Value: fmt.Sprintf("%d", len(items))}}
+	if reason != "" {
+		rows = append(rows, domain.AgentAnalysisRow{Label: "意见", Value: reason})
+	}
+	confirmation := domain.AgentConfirmation{
+		ID: id, Kind: agentConfirmationBulkReview, Title: "确认批量" + label,
+		Description: "系统将在执行前重新检查每笔单据的当前审批人与节点版本。",
+		Action:      action, ActionLabel: fmt.Sprintf("确认%s %d 笔", label, len(items)),
+		Rows: rows, Items: items, ExpiresAt: c.Now().Add(agentConfirmationTTL),
+	}
+	if err := c.saveAgentConfirmation(ctx, agentConfirmationAction{
+		Public: confirmation, TenantID: ctx.TenantID, AccountID: ctx.AccountID,
+		ReviewAction: action, ReviewReason: reason, Reviews: expected,
+	}); err != nil {
+		return nil, err
+	}
+	return &confirmation, nil
+}
+
+// agentPublishedFormTemplate 以 key 或 ID 尋找可提交的已發佈表單。
+func (c AgentService) agentPublishedFormTemplate(ctx domain.RequestContext, keyOrID string) (domain.FormTemplate, error) {
+	keyOrID = strings.TrimSpace(keyOrID)
+	if keyOrID == "" {
+		return domain.FormTemplate{}, BadRequest("template_key is required")
+	}
+	templates, err := c.Workflow().ListFormTemplates(ctx)
+	if err != nil {
+		return domain.FormTemplate{}, err
+	}
+	for _, template := range templates {
+		if template.Key != keyOrID && template.ID != keyOrID {
+			continue
+		}
+		if !agentTemplatePublished(template) {
+			return domain.FormTemplate{}, BadRequest("form template is not published")
+		}
+		if err := validateWorkflowTemplateSubmittable(template); err != nil {
+			return domain.FormTemplate{}, err
+		}
+		return template, nil
+	}
+	return domain.FormTemplate{}, NotFound("form template", keyOrID)
+}
+
+// agentTemplatePublished 相容舊資料空狀態，並拒絕明確未發佈的模板。
+func agentTemplatePublished(template domain.FormTemplate) bool {
+	status := strings.TrimSpace(strings.ToLower(template.Status))
+	return status == "" || status == "published"
+}
+
+// agentAccessibleFormFields 排除布局欄位與 schema 明確禁止 Agent 存取的欄位。
+func agentAccessibleFormFields(template domain.FormTemplate) []domain.PlatformFormBuilderField {
+	fields := platformTemplateFields(template.Key, template.Schema)
+	out := make([]domain.PlatformFormBuilderField, 0, len(fields))
+	for _, field := range fields {
+		kind := strings.TrimSpace(strings.ToLower(field.Type))
+		if kind == "layout" || kind == "section-title" || strings.TrimSpace(field.ID) == "" {
+			continue
+		}
+		if field.Security != nil && !field.Security.AgentAccess {
+			continue
+		}
+		out = append(out, field)
+	}
+	return out
+}
+
+// sanitizeAgentFormPayload 防止模型注入 schema 外或禁止 Agent 存取的欄位。
+func sanitizeAgentFormPayload(template domain.FormTemplate, payload map[string]any) map[string]any {
+	allowed := make(map[string]struct{})
+	for _, field := range agentAccessibleFormFields(template) {
+		allowed[field.ID] = struct{}{}
+	}
+	out := make(map[string]any, len(allowed))
+	for key, value := range payload {
+		if _, ok := allowed[key]; ok {
+			out[key] = value
+		}
+	}
+	return out
+}
+
+// prepareAgentFormDraftPayload 保留欄位白名單，並依租戶考勤政策補齊缺失的請假時間。
+func (c AgentService) prepareAgentFormDraftPayload(ctx domain.RequestContext, template domain.FormTemplate, payload map[string]any) (map[string]any, []string, error) {
+	filtered := sanitizeAgentFormPayload(template, payload)
+	if _, linked := leaveLinkedTemplateKeys[strings.TrimSpace(template.Key)]; !linked {
+		return filtered, nil, nil
+	}
+
+	startRaw := strings.TrimSpace(stringFromAny(filtered["start_at"]))
+	endRaw := strings.TrimSpace(stringFromAny(filtered["end_at"]))
+	if startRaw != "" && endRaw != "" {
+		normalized, err := c.Workflow().normalizeLeaveSubmissionHours(ctx, template.Key, filtered)
+		if err != nil {
+			return nil, nil, err
+		}
+		return normalized, []string{"hours"}, nil
+	}
+
+	workDate := c.Now().In(attendanceClockLocation).Format(time.DateOnly)
+	providedRaw := utils.FirstNonEmpty(startRaw, endRaw)
+	if providedRaw != "" {
+		providedAt, err := utils.ParseDateTime(providedRaw)
+		if err != nil {
+			return filtered, nil, nil
+		}
+		workDate = providedAt.In(attendanceClockLocation).Format(time.DateOnly)
+	}
+
+	policy, err := c.Attendance().loadAttendancePolicyResponse(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	schedule, _ := attendanceScheduleIntervals(workDate, policy.WorkTime)
+	if len(schedule) == 0 {
+		return nil, nil, ValidationFailed("leave time defaulting failed", []domain.FieldError{{
+			Field: "start_at", Code: "invalid_work_schedule", Message: "attendance standard work time is invalid",
+		}})
+	}
+
+	normalizedFields := make([]string, 0, 3)
+	if startRaw == "" {
+		filtered["start_at"] = schedule[0].Start.Format(time.RFC3339)
+		normalizedFields = append(normalizedFields, "start_at")
+	}
+	if endRaw == "" {
+		filtered["end_at"] = schedule[0].End.Format(time.RFC3339)
+		normalizedFields = append(normalizedFields, "end_at")
+	}
+	filtered, err = c.Workflow().normalizeLeaveSubmissionHours(ctx, template.Key, filtered)
+	if err != nil {
+		return nil, nil, err
+	}
+	normalizedFields = append(normalizedFields, "hours")
+	return filtered, normalizedFields, nil
+}
+
+// toolPayload 僅接受結構化 payload object，避免鬆散字串被當成表單內容。
+func toolPayload(args map[string]any) (map[string]any, error) {
+	if args == nil {
+		return nil, BadRequest("payload is required")
+	}
+	payload, ok := args["payload"].(map[string]any)
+	if !ok {
+		return nil, BadRequest("payload must be an object")
+	}
+	return payload, nil
+}
+
+func (c AgentService) agentFormDataSources(ctx domain.RequestContext, fields []domain.PlatformFormBuilderField) ([]domain.FormDataSource, error) {
+	used := map[string]map[string]struct{}{}
+	for _, field := range fields {
+		if field.Binding != nil {
+			sourceID := strings.TrimSpace(field.Binding.SourceID)
+			if used[sourceID] == nil {
+				used[sourceID] = map[string]struct{}{}
+			}
+			used[sourceID][strings.TrimSpace(field.Binding.ValueField)] = struct{}{}
+			if labelField := strings.TrimSpace(field.Binding.LabelField); labelField != "" {
+				used[sourceID][labelField] = struct{}{}
+			}
+		}
+	}
+	if len(used) == 0 {
+		return []domain.FormDataSource{}, nil
+	}
+	catalog, err := c.Workflow().FormDataSources(ctx)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.FormDataSource, 0, len(used))
+	for _, source := range catalog.DataSources {
+		allowed, ok := used[source.ID]
+		if !ok {
+			continue
+		}
+		filtered := domain.FormDataSource{ID: source.ID, Label: source.Label, Kind: source.Kind}
+		for _, field := range source.Fields {
+			if _, ok := allowed[field.Key]; ok {
+				filtered.Fields = append(filtered.Fields, field)
+			}
+		}
+		for _, record := range source.Records {
+			values := make(map[string]interface{}, len(allowed))
+			for key := range allowed {
+				if value, ok := record[key]; ok {
+					values[key] = value
+				}
+			}
+			filtered.Records = append(filtered.Records, values)
+		}
+		out = append(out, filtered)
+	}
+	return out, nil
+}
+
+// agentApprovalPath 將模板節點投影成確認卡可讀的審批路徑。
+func agentApprovalPath(template domain.FormTemplate) []string {
+	stages := ParseWorkflowStagesFromTemplate(template)
+	out := make([]string, 0, len(stages))
+	for _, stage := range stages {
+		if label := strings.TrimSpace(stage.Label); label != "" {
+			out = append(out, label)
+		}
+	}
+	return out
+}
+
+// agentPayloadRows 依 schema 順序產生確認摘要，并将受控选项值解析成人类可读标签。
+func (c AgentService) agentPayloadRows(ctx domain.RequestContext, template domain.FormTemplate, payload map[string]any) ([]domain.AgentAnalysisRow, error) {
+	fields := agentAccessibleFormFields(template)
+	sources, err := c.agentFormDataSources(ctx, fields)
+	if err != nil {
+		return nil, err
+	}
+	sourceByID := make(map[string]domain.FormDataSource, len(sources))
+	for _, source := range sources {
+		sourceByID[source.ID] = source
+	}
+	rows := make([]domain.AgentAnalysisRow, 0, len(payload))
+	for _, field := range fields {
+		value, ok := payload[field.ID]
+		if !ok || isEmptyFormPayloadValue(value) {
+			continue
+		}
+		display := agentDisplayValue(value)
+		for _, option := range field.Options {
+			if option.Value == display {
+				display = utils.FirstNonEmpty(option.Label, display)
+				break
+			}
+		}
+		if field.Binding != nil && strings.TrimSpace(field.Binding.LabelField) != "" {
+			if source, ok := sourceByID[strings.TrimSpace(field.Binding.SourceID)]; ok {
+				for _, record := range source.Records {
+					if agentDisplayValue(record[field.Binding.ValueField]) == agentDisplayValue(value) {
+						display = utils.FirstNonEmpty(agentDisplayValue(record[field.Binding.LabelField]), display)
+						break
+					}
+				}
+			}
+		}
+		rows = append(rows, domain.AgentAnalysisRow{Label: utils.FirstNonEmpty(field.Label, field.ID), Value: display})
+	}
+	return rows, nil
+}
+
+// agentDisplayValue 將結構化欄位值穩定轉成確認卡文字。
+func agentDisplayValue(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	raw, err := json.Marshal(value)
+	if err == nil {
+		return string(raw)
+	}
+	return fmt.Sprint(value)
+}

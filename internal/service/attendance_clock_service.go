@@ -31,34 +31,25 @@ func (c AttendanceService) AttendanceClockStatus(ctx RequestContext) (Attendance
 	}
 	now := c.Now()
 	workDate := attendanceWorkDate(now)
-	status := AttendanceClockStatus{EmployeeID: account.EmployeeID, WorkDate: workDate}
-	if record, ok, err := c.store.GetAcceptedAttendanceClockRecord(goContext(ctx), ctx.TenantID, account.EmployeeID, workDate, clockDirectionIn); err != nil {
+	projection, err := c.loadAttendanceDayProjection(ctx, account.EmployeeID, workDate, now)
+	if err != nil {
 		return AttendanceClockStatus{}, err
-	} else if ok {
-		status.ClockIn = &record
 	}
-	if record, ok, err := c.store.GetAcceptedAttendanceClockRecord(goContext(ctx), ctx.TenantID, account.EmployeeID, workDate, clockDirectionOut); err != nil {
-		return AttendanceClockStatus{}, err
-	} else if ok {
-		status.ClockOut = &record
-	}
-	// 當日尚無紀錄時，保留跨日下班後的前一工作日狀態。
-	if status.ClockIn == nil && status.ClockOut == nil {
+	// 只有实际跨午夜班次仍在下班窗口内时，状态才沿用前一工作日。
+	if _, shift, hasShift, shiftErr := c.optionalAttendanceShift(ctx, account.EmployeeID, now); shiftErr != nil {
+		return AttendanceClockStatus{}, shiftErr
+	} else if hasShift && clockOutBelongsToPreviousWorkDate(shift, now) {
 		previousWorkDate := attendanceWorkDate(now.Add(-24 * time.Hour))
-		if record, ok, lookupErr := c.store.GetAcceptedAttendanceClockRecord(goContext(ctx), ctx.TenantID, account.EmployeeID, previousWorkDate, clockDirectionIn); lookupErr != nil {
+		previous, lookupErr := c.loadAttendanceDayProjection(ctx, account.EmployeeID, previousWorkDate, now)
+		if lookupErr != nil {
 			return AttendanceClockStatus{}, lookupErr
-		} else if ok {
-			status.WorkDate = previousWorkDate
-			status.ClockIn = &record
 		}
-		if record, ok, lookupErr := c.store.GetAcceptedAttendanceClockRecord(goContext(ctx), ctx.TenantID, account.EmployeeID, previousWorkDate, clockDirectionOut); lookupErr != nil {
-			return AttendanceClockStatus{}, lookupErr
-		} else if ok {
-			status.ClockOut = &record
+		if previous.ClockIn != nil {
+			projection = previous
+			workDate = previousWorkDate
 		}
 	}
-	status.NextAction = nextClockAction(status.ClockIn, status.ClockOut)
-	return status, nil
+	return attendanceClockStatusFromProjection(account.EmployeeID, workDate, projection), nil
 }
 
 // CreateAttendanceClockRecord 建立考勤打卡 record 的服務流程。
@@ -108,6 +99,19 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 	if input.AccuracyMeters < 0 {
 		return AttendanceClockRecord{}, BadRequest("accuracy_meters must be greater than or equal to zero")
 	}
+	clientEventID := strings.TrimSpace(input.ClientEventID)
+	if clientEventID != "" {
+		existing, ok, lookupErr := c.store.GetAttendanceClockRecordByClientEventID(goContext(ctx), ctx.TenantID, clientEventID)
+		if lookupErr != nil {
+			return AttendanceClockRecord{}, lookupErr
+		}
+		if ok {
+			if existing.EmployeeID != employeeID {
+				return AttendanceClockRecord{}, Conflict("client_event_id already exists").WithReasonCode("attendance_client_event_conflict")
+			}
+			return applyAttendanceClockFieldPolicy(existing, decision.FieldPolicies), nil
+		}
+	}
 	now := c.Now()
 	policy, err := c.loadAttendancePolicyResponse(ctx)
 	if err != nil {
@@ -131,29 +135,11 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 	}
 	recordStatus := clockRecordStatusAccepted
 	rejectionReason := ""
-	clockInRecord, hasClockIn, err := c.store.GetAcceptedAttendanceClockRecord(goContext(ctx), ctx.TenantID, employeeID, workDate, clockDirectionIn)
+	_, hasClockIn, err := c.store.GetEarliestAcceptedAttendanceClockIn(goContext(ctx), ctx.TenantID, employeeID, workDate)
 	if err != nil {
 		return AttendanceClockRecord{}, err
 	}
-	// 跨日下班無當日上班卡時，歸屬到前一個有效上班日。
-	if direction == clockDirectionOut && !hasClockIn {
-		previousWorkDate := attendanceWorkDate(now.Add(-24 * time.Hour))
-		if previousClockIn, previousHasClockIn, lookupErr := c.store.GetAcceptedAttendanceClockRecord(goContext(ctx), ctx.TenantID, employeeID, previousWorkDate, clockDirectionIn); lookupErr != nil {
-			return AttendanceClockRecord{}, lookupErr
-		} else if previousHasClockIn {
-			workDate = previousWorkDate
-			clockInRecord = previousClockIn
-			hasClockIn = true
-		}
-	}
-	_, hasClockOut, err := c.store.GetAcceptedAttendanceClockRecord(goContext(ctx), ctx.TenantID, employeeID, workDate, clockDirectionOut)
-	if err != nil {
-		return AttendanceClockRecord{}, err
-	}
-	if (direction == clockDirectionIn && hasClockIn) || (direction == clockDirectionOut && hasClockOut) {
-		return AttendanceClockRecord{}, Conflict("accepted clock record already exists")
-	}
-	rejectionReason = clockRejectionReason(direction, worksite, input.AccuracyMeters, distance, hasClockIn, hasClockOut, policy.WorkTime.RequireWorksite)
+	rejectionReason = clockRejectionReason(direction, worksite, input.AccuracyMeters, distance, hasClockIn, policy.WorkTime.RequireWorksite)
 	if rejectionReason == "" {
 		outsideWindow, windowErr := clockOutsideConfiguredWindow(direction, shift, hasShift, policy.WorkTime, now)
 		if windowErr != nil {
@@ -161,18 +147,14 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 		}
 		if outsideWindow {
 			rejectionReason = clockRejectionOutsideWindow
-		} else if policy.WorkTime.ClockMode == clockModeFlexible && clockHasInsufficientWorkHours(direction, clockInRecord, hasClockIn, now, policy.WorkTime) {
-			rejectionReason = clockRejectionInsufficientWorkHours
 		}
 	}
 	if rejectionReason != "" {
-		switch {
-		case clockTimeAnomalyCountsAsPunch(direction, policy.WorkTime.ClockMode, rejectionReason):
-			// 固定异常卡及弹性异常上班卡仍推进当天考勤状态。
-		case clockRetryableFlexibleClockOut(direction, policy.WorkTime.ClockMode, rejectionReason):
-			recordStatus = clockRecordStatusAbnormal
-		default:
+		switch rejectionReason {
+		case clockRejectionDuplicate, clockRejectionInvalidSequence, clockRejectionOutsideGeofence, clockRejectionLowAccuracy:
 			recordStatus = clockRecordStatusRejected
+		default:
+			// 时间与工时异常属于日投影的软异常，原始卡仍保留为有效卡。
 		}
 	}
 	deviceInfo := utils.CopyStringMap(input.DeviceInfo)
@@ -191,6 +173,7 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 		WorksiteID:        worksite.ID,
 		WorkDate:          workDate,
 		Direction:         direction,
+		ClientEventID:     clientEventID,
 		ClockedAt:         now,
 		Latitude:          input.Latitude,
 		Longitude:         input.Longitude,
@@ -204,12 +187,13 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 		CreatedAt:         now,
 	}
 	if err := c.store.UpsertAttendanceClockRecord(goContext(ctx), record); err != nil {
-		if acceptedClockConflict(err) && record.RecordStatus == clockRecordStatusAccepted {
-			return AttendanceClockRecord{}, Conflict("accepted clock record already exists")
+		if clientEventID != "" {
+			existing, ok, lookupErr := c.store.GetAttendanceClockRecordByClientEventID(goContext(ctx), ctx.TenantID, clientEventID)
+			if lookupErr == nil && ok && existing.EmployeeID == employeeID {
+				return applyAttendanceClockFieldPolicy(existing, decision.FieldPolicies), nil
+			}
 		}
-		if err != nil {
-			return AttendanceClockRecord{}, err
-		}
+		return AttendanceClockRecord{}, err
 	}
 	if err := c.audit(ctx, "attendance.clock_record.create", string(ResourceAttendanceClock), record.ID, string(SeverityMedium), map[string]any{
 		"employee_id":      record.EmployeeID,
@@ -275,13 +259,39 @@ func (c AttendanceService) CreateAttendanceCorrection(ctx RequestContext, input 
 	} else if !ok {
 		return AttendanceCorrectionRequest{}, NotFound("employee", employeeID)
 	}
-	direction, err := normalizeClockDirection(input.Direction)
+	correctionType, err := normalizeAttendanceCorrectionType(input.CorrectionType)
 	if err != nil {
 		return AttendanceCorrectionRequest{}, err
 	}
-	requestedAt, err := utils.ParseDateTime(input.RequestedClockedAt)
-	if err != nil {
-		return AttendanceCorrectionRequest{}, BadRequest("requested_clocked_at must be RFC3339 or YYYY-MM-DD")
+	targetRecordID := strings.TrimSpace(input.TargetClockRecordID)
+	var targetRecord AttendanceClockRecord
+	if correctionType != correctionTypeAddRecord {
+		if targetRecordID == "" {
+			return AttendanceCorrectionRequest{}, BadRequest("target_clock_record_id is required")
+		}
+		targetRecord, err = c.findAttendanceClockRecord(ctx, employeeID, targetRecordID)
+		if err != nil {
+			return AttendanceCorrectionRequest{}, err
+		}
+		if targetRecord.Voided {
+			return AttendanceCorrectionRequest{}, BadRequest("target clock record is already voided").WithReasonCode("attendance_correction_invalid_state")
+		}
+	}
+	direction := targetRecord.Direction
+	requestedAt := targetRecord.ClockedAt
+	workDate := targetRecord.WorkDate
+	if correctionType != correctionTypeVoidRecord {
+		direction, err = normalizeClockDirection(input.Direction)
+		if err != nil {
+			return AttendanceCorrectionRequest{}, err
+		}
+		requestedAt, err = utils.ParseDateTime(input.RequestedClockedAt)
+		if err != nil {
+			return AttendanceCorrectionRequest{}, BadRequest("requested_clocked_at must be RFC3339 or YYYY-MM-DD")
+		}
+		if correctionType == correctionTypeAddRecord {
+			workDate = attendanceWorkDate(requestedAt)
+		}
 	}
 	reason := strings.TrimSpace(input.Reason)
 	if reason == "" {
@@ -313,13 +323,15 @@ func (c AttendanceService) CreateAttendanceCorrection(ctx RequestContext, input 
 			ApplicantAccountID: account.ID,
 			Status:             "submitted",
 			Payload: map[string]any{
-				"application_code":     string(AppAttendance),
-				"resource_type":        string(ResourceAttendanceCorrection),
-				"action":               string(ActionCreate),
-				"employee_id":          employeeID,
-				"direction":            direction,
-				"requested_clocked_at": requestedAt.Format(time.RFC3339),
-				"reason":               reason,
+				"application_code":       string(AppAttendance),
+				"resource_type":          string(ResourceAttendanceCorrection),
+				"action":                 string(ActionCreate),
+				"employee_id":            employeeID,
+				"correction_type":        correctionType,
+				"target_clock_record_id": targetRecordID,
+				"direction":              direction,
+				"requested_clocked_at":   requestedAt.Format(time.RFC3339),
+				"reason":                 reason,
 			},
 			SubmittedAt: tx.Now(),
 			UpdatedAt:   tx.Now(),
@@ -328,17 +340,19 @@ func (c AttendanceService) CreateAttendanceCorrection(ctx RequestContext, input 
 			return err
 		}
 		correction = AttendanceCorrectionRequest{
-			ID:                 utils.NewID("acorr"),
-			TenantID:           ctx.TenantID,
-			EmployeeID:         employeeID,
-			Direction:          direction,
-			RequestedClockedAt: requestedAt,
-			WorkDate:           attendanceWorkDate(requestedAt),
-			Reason:             reason,
-			Status:             correctionStatusPending,
-			FormInstanceID:     instance.ID,
-			CreatedAt:          tx.Now(),
-			UpdatedAt:          tx.Now(),
+			ID:                  utils.NewID("acorr"),
+			TenantID:            ctx.TenantID,
+			EmployeeID:          employeeID,
+			CorrectionType:      correctionType,
+			TargetClockRecordID: targetRecordID,
+			Direction:           direction,
+			RequestedClockedAt:  requestedAt,
+			WorkDate:            workDate,
+			Reason:              reason,
+			Status:              correctionStatusPending,
+			FormInstanceID:      instance.ID,
+			CreatedAt:           tx.Now(),
+			UpdatedAt:           tx.Now(),
 		}
 		if err := tx.store.UpsertAttendanceCorrectionRequest(goContext(ctx), correction); err != nil {
 			return err
@@ -495,13 +509,109 @@ func normalizeClockDirection(value string) (string, error) {
 	}
 }
 
+// normalizeAttendanceCorrectionType keeps the legacy add-record request as the default.
+func normalizeAttendanceCorrectionType(value string) (string, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", correctionTypeAddRecord:
+		return correctionTypeAddRecord, nil
+	case correctionTypeVoidRecord:
+		return correctionTypeVoidRecord, nil
+	case correctionTypeReplaceRecord:
+		return correctionTypeReplaceRecord, nil
+	default:
+		return "", BadRequest("correction_type must be add_record, void_record, or replace_record")
+	}
+}
+
+// findAttendanceClockRecord locates a raw employee punch without hiding voided audit history.
+func (c AttendanceService) findAttendanceClockRecord(ctx RequestContext, employeeID, recordID string) (AttendanceClockRecord, error) {
+	records, err := c.store.ListAttendanceClockRecords(goContext(ctx), ctx.TenantID, AttendanceClockRecordQuery{EmployeeID: employeeID})
+	if err != nil {
+		return AttendanceClockRecord{}, err
+	}
+	for _, record := range records {
+		if record.ID == recordID {
+			return record, nil
+		}
+	}
+	return AttendanceClockRecord{}, NotFound("attendance clock record", recordID)
+}
+
+// applyApprovedAttendanceCorrection preserves the target raw punch and applies add, void, or replace atomically.
+func (c AttendanceService) applyApprovedAttendanceCorrection(ctx RequestContext, current *AttendanceCorrectionRequest, reviewerID, voidReason string, now time.Time) error {
+	correctionType, err := normalizeAttendanceCorrectionType(current.CorrectionType)
+	if err != nil {
+		return err
+	}
+	current.CorrectionType = correctionType
+	if correctionType == correctionTypeVoidRecord || correctionType == correctionTypeReplaceRecord {
+		target, err := c.findAttendanceClockRecord(ctx, current.EmployeeID, current.TargetClockRecordID)
+		if err != nil {
+			return err
+		}
+		if target.Voided {
+			return BadRequest("target clock record is already voided").WithReasonCode("attendance_correction_invalid_state")
+		}
+		if !strings.EqualFold(target.RecordStatus, clockRecordStatusAccepted) {
+			return BadRequest("only accepted clock records can be voided").WithReasonCode("attendance_correction_invalid_state")
+		}
+		target.Voided = true
+		target.VoidedAt = &now
+		target.VoidedByAccountID = reviewerID
+		target.VoidReason = strings.TrimSpace(voidReason)
+		if target.VoidReason == "" {
+			target.VoidReason = current.Reason
+		}
+		if err := c.store.UpsertAttendanceClockRecord(goContext(ctx), target); err != nil {
+			return err
+		}
+	}
+	if correctionType == correctionTypeVoidRecord {
+		return nil
+	}
+	if current.Direction == clockDirectionIn {
+		if _, exists, err := c.store.GetEarliestAcceptedAttendanceClockIn(goContext(ctx), ctx.TenantID, current.EmployeeID, current.WorkDate); err != nil {
+			return err
+		} else if exists {
+			return Conflict("accepted clock-in record already exists").WithReasonCode("attendance_clock_sequence_conflict")
+		}
+	}
+	worksite, err := c.firstActiveAttendanceWorksite(ctx)
+	if err != nil {
+		return err
+	}
+	record := AttendanceClockRecord{
+		ID:                  utils.NewID("acr"),
+		TenantID:            ctx.TenantID,
+		EmployeeID:          current.EmployeeID,
+		WorksiteID:          worksite.ID,
+		WorkDate:            current.WorkDate,
+		Direction:           current.Direction,
+		ClockedAt:           current.RequestedClockedAt,
+		Latitude:            worksite.Latitude,
+		Longitude:           worksite.Longitude,
+		RecordStatus:        clockRecordStatusAccepted,
+		Source:              clockSourceManualCorrection,
+		CorrectionRequestID: current.ID,
+		CreatedAt:           now,
+	}
+	if err := c.store.UpsertAttendanceClockRecord(goContext(ctx), record); err != nil {
+		return err
+	}
+	current.ClockRecordID = record.ID
+	if correctionType == correctionTypeReplaceRecord {
+		current.ReplacementClockRecordID = record.ID
+	}
+	return nil
+}
+
 // clockRejectionReason 處理打卡 rejection reason。
-func clockRejectionReason(direction string, worksite AttendanceWorksite, accuracyMeters, distanceMeters float64, hasClockIn, hasClockOut, requireWorksite bool) string {
+func clockRejectionReason(direction string, worksite AttendanceWorksite, accuracyMeters, distanceMeters float64, hasClockIn, requireWorksite bool) string {
 	if direction == clockDirectionOut && !hasClockIn {
 		return clockRejectionInvalidSequence
 	}
-	if direction == clockDirectionIn && hasClockOut {
-		return clockRejectionInvalidSequence
+	if direction == clockDirectionIn && hasClockIn {
+		return clockRejectionDuplicate
 	}
 	if requireWorksite && distanceMeters > float64(worksite.RadiusMeters) {
 		return clockRejectionOutsideGeofence
@@ -510,16 +620,6 @@ func clockRejectionReason(direction string, worksite AttendanceWorksite, accurac
 		return clockRejectionLowAccuracy
 	}
 	return ""
-}
-
-// clockHasInsufficientWorkHours 以两次打卡的实际间隔校验弹性工时是否达标。
-func clockHasInsufficientWorkHours(direction string, clockIn AttendanceClockRecord, hasClockIn bool, at time.Time, workTime AttendancePolicyWorkTime) bool {
-	if direction != clockDirectionOut || !hasClockIn {
-		return false
-	}
-	requiredHours := standardDayHours(workTime)
-	actualHours := at.Sub(clockIn.ClockedAt).Hours()
-	return actualHours < requiredHours
 }
 
 // clockOutsideConfiguredWindow 判斷固定制遲到/早退或彈性制超出設定範圍的時間異常。
@@ -570,22 +670,6 @@ func clockOutsideFixedShiftBoundary(direction string, shift AttendanceShift, at 
 		return minute > end+shift.LateGraceMinutes, nil
 	}
 	return minute < start-shift.EarlyLeaveGraceMinutes, nil
-}
-
-// clockTimeAnomalyCountsAsPunch 保留可推进考勤状态的异常卡，并让弹性异常下班继续可重打。
-func clockTimeAnomalyCountsAsPunch(direction, clockMode, rejectionReason string) bool {
-	if rejectionReason != clockRejectionOutsideWindow {
-		return false
-	}
-	return direction == clockDirectionIn || clockMode == clockModeFixed
-}
-
-// clockRetryableFlexibleClockOut 把弹性制时间异常下班记录为异常尝试，不占用有效下班卡。
-func clockRetryableFlexibleClockOut(direction, clockMode, rejectionReason string) bool {
-	if direction != clockDirectionOut || clockMode != clockModeFlexible {
-		return false
-	}
-	return rejectionReason == clockRejectionOutsideWindow || rejectionReason == clockRejectionInsufficientWorkHours
 }
 
 // clockWindowMinutes 取得指定打卡方向的班次起讫分钟。
@@ -674,7 +758,7 @@ func (c AttendanceService) optionalAttendanceShift(ctx RequestContext, employeeI
 		return AttendanceShiftAssignment{}, AttendanceShift{}, false, err
 	}
 	if !ok || !strings.EqualFold(shift.Status, attendanceStatusActive) {
-		return AttendanceShiftAssignment{}, AttendanceShift{}, false, BadRequest("attendance shift is required")
+		return AttendanceShiftAssignment{}, AttendanceShift{}, false, BadRequest("attendance shift is required").WithReasonCode("attendance_shift_required")
 	}
 	return assignment, shift, true, nil
 }
@@ -697,7 +781,7 @@ func (c AttendanceService) nearestActiveAttendanceWorksite(ctx RequestContext, l
 		}
 	}
 	if selected.ID == "" {
-		return AttendanceWorksite{}, 0, BadRequest("attendance worksite is required")
+		return AttendanceWorksite{}, 0, BadRequest("attendance worksite is required").WithReasonCode("attendance_worksite_required")
 	}
 	return selected, selectedDistance, nil
 }
@@ -713,7 +797,7 @@ func (c AttendanceService) firstActiveAttendanceWorksite(ctx RequestContext) (At
 			return item, nil
 		}
 	}
-	return AttendanceWorksite{}, BadRequest("attendance worksite is required")
+	return AttendanceWorksite{}, BadRequest("attendance worksite is required").WithReasonCode("attendance_worksite_required")
 }
 
 // haversineMeters 處理 haversine meters。
@@ -726,23 +810,6 @@ func haversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
 	rLat2 := toRad(lat2)
 	a := math.Sin(dLat/2)*math.Sin(dLat/2) + math.Cos(rLat1)*math.Cos(rLat2)*math.Sin(dLon/2)*math.Sin(dLon/2)
 	return earthRadiusMeters * 2 * math.Atan2(math.Sqrt(a), math.Sqrt(1-a))
-}
-
-// nextClockAction 處理 next 打卡 action。
-func nextClockAction(clockIn, clockOut *AttendanceClockRecord) string {
-	if clockIn == nil {
-		return clockDirectionIn
-	}
-	if clockOut == nil {
-		return clockDirectionOut
-	}
-	return "complete"
-}
-
-// acceptedClockConflict 處理 accepted 打卡衝突。
-func acceptedClockConflict(err error) bool {
-	appErr, ok := AsAppError(err)
-	return ok && appErr.Code == "conflict" && strings.Contains(appErr.Message, "accepted clock record")
 }
 
 // normalizeClockRecordQuery 正規化打卡 record 查詢。
@@ -837,7 +904,7 @@ func (c AttendanceService) reviewAttendanceCorrection(ctx RequestContext, id, ne
 			return NotFound("attendance correction", id)
 		}
 		if !strings.EqualFold(current.Status, correctionStatusPending) {
-			return BadRequest("correction request is not pending")
+			return BadRequest("correction request is not pending").WithReasonCode("attendance_correction_invalid_state")
 		}
 		now := tx.Now()
 		reviewReason := strings.TrimSpace(input.Reason)
@@ -847,36 +914,9 @@ func (c AttendanceService) reviewAttendanceCorrection(ctx RequestContext, id, ne
 		current.ReviewedAt = &now
 		current.UpdatedAt = now
 		if nextStatus == correctionStatusApproved {
-			worksite, err := tx.firstActiveAttendanceWorksite(ctx)
-			if err != nil {
+			if err := tx.applyApprovedAttendanceCorrection(ctx, &current, account.ID, reviewReason, now); err != nil {
 				return err
 			}
-			if _, exists, err := tx.store.GetAcceptedAttendanceClockRecord(goContext(ctx), ctx.TenantID, current.EmployeeID, current.WorkDate, current.Direction); err != nil {
-				return err
-			} else if exists {
-				return Conflict("accepted clock record already exists")
-			}
-			record := AttendanceClockRecord{
-				ID:                  utils.NewID("acr"),
-				TenantID:            ctx.TenantID,
-				EmployeeID:          current.EmployeeID,
-				WorksiteID:          worksite.ID,
-				WorkDate:            current.WorkDate,
-				Direction:           current.Direction,
-				ClockedAt:           current.RequestedClockedAt,
-				Latitude:            worksite.Latitude,
-				Longitude:           worksite.Longitude,
-				AccuracyMeters:      0,
-				DistanceMeters:      0,
-				RecordStatus:        clockRecordStatusAccepted,
-				Source:              clockSourceManualCorrection,
-				CorrectionRequestID: current.ID,
-				CreatedAt:           now,
-			}
-			if err := tx.store.UpsertAttendanceClockRecord(goContext(ctx), record); err != nil {
-				return err
-			}
-			current.ClockRecordID = record.ID
 		}
 		if current.FormInstanceID != "" {
 			instance, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, current.FormInstanceID)

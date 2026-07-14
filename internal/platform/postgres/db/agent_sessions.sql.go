@@ -66,7 +66,7 @@ const deleteAgentSession = `-- name: DeleteAgentSession :one
 DELETE FROM agent_sessions
 WHERE tenant_id = $1
   AND id = $2
-RETURNING id, tenant_id, account_id, agent_id, title, status, last_message_at, created_at, updated_at
+RETURNING id, tenant_id, account_id, agent_id, title, status, context_version, last_message_at, created_at, updated_at
 `
 
 type DeleteAgentSessionParams struct {
@@ -84,6 +84,7 @@ func (q *Queries) DeleteAgentSession(ctx context.Context, arg DeleteAgentSession
 		&i.AgentID,
 		&i.Title,
 		&i.Status,
+		&i.ContextVersion,
 		&i.LastMessageAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -123,7 +124,7 @@ func (q *Queries) GetAgentMemory(ctx context.Context, arg GetAgentMemoryParams) 
 }
 
 const getAgentSession = `-- name: GetAgentSession :one
-SELECT id, tenant_id, account_id, agent_id, title, status, last_message_at, created_at, updated_at FROM agent_sessions
+SELECT id, tenant_id, account_id, agent_id, title, status, context_version, last_message_at, created_at, updated_at FROM agent_sessions
 WHERE tenant_id = $1
   AND id = $2
 `
@@ -143,6 +144,37 @@ func (q *Queries) GetAgentSession(ctx context.Context, arg GetAgentSessionParams
 		&i.AgentID,
 		&i.Title,
 		&i.Status,
+		&i.ContextVersion,
+		&i.LastMessageAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAgentSessionForUpdate = `-- name: GetAgentSessionForUpdate :one
+SELECT id, tenant_id, account_id, agent_id, title, status, context_version, last_message_at, created_at, updated_at FROM agent_sessions
+WHERE tenant_id = $1
+  AND id = $2
+FOR UPDATE
+`
+
+type GetAgentSessionForUpdateParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetAgentSessionForUpdate(ctx context.Context, arg GetAgentSessionForUpdateParams) (AgentSession, error) {
+	row := q.db.QueryRow(ctx, getAgentSessionForUpdate, arg.TenantID, arg.ID)
+	var i AgentSession
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.AgentID,
+		&i.Title,
+		&i.Status,
+		&i.ContextVersion,
 		&i.LastMessageAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -152,23 +184,24 @@ func (q *Queries) GetAgentSession(ctx context.Context, arg GetAgentSessionParams
 
 const insertAgentSessionMessage = `-- name: InsertAgentSessionMessage :one
 INSERT INTO agent_session_messages (
-    id, tenant_id, session_id, role, content, run_id, metadata, created_at
+    id, tenant_id, session_id, role, content, run_id, context_version, metadata, created_at
 ) VALUES (
     $1, $2, $3, $4,
-    $5, $6, $7::jsonb, $8
+    $5, $6, $7, $8::jsonb, $9
 )
-RETURNING id, tenant_id, session_id, role, content, run_id, metadata, created_at
+RETURNING id, tenant_id, session_id, role, content, run_id, context_version, metadata, created_at
 `
 
 type InsertAgentSessionMessageParams struct {
-	ID        string             `json:"id"`
-	TenantID  string             `json:"tenant_id"`
-	SessionID string             `json:"session_id"`
-	Role      string             `json:"role"`
-	Content   string             `json:"content"`
-	RunID     pgtype.Text        `json:"run_id"`
-	Metadata  []byte             `json:"metadata"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	SessionID      string             `json:"session_id"`
+	Role           string             `json:"role"`
+	Content        string             `json:"content"`
+	RunID          pgtype.Text        `json:"run_id"`
+	ContextVersion int64              `json:"context_version"`
+	Metadata       []byte             `json:"metadata"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) InsertAgentSessionMessage(ctx context.Context, arg InsertAgentSessionMessageParams) (AgentSessionMessage, error) {
@@ -179,6 +212,7 @@ func (q *Queries) InsertAgentSessionMessage(ctx context.Context, arg InsertAgent
 		arg.Role,
 		arg.Content,
 		arg.RunID,
+		arg.ContextVersion,
 		arg.Metadata,
 		arg.CreatedAt,
 	)
@@ -190,6 +224,7 @@ func (q *Queries) InsertAgentSessionMessage(ctx context.Context, arg InsertAgent
 		&i.Role,
 		&i.Content,
 		&i.RunID,
+		&i.ContextVersion,
 		&i.Metadata,
 		&i.CreatedAt,
 	)
@@ -255,10 +290,15 @@ func (q *Queries) ListAgentMemoriesByAccount(ctx context.Context, arg ListAgentM
 }
 
 const listAgentSessionMessages = `-- name: ListAgentSessionMessages :many
-SELECT id, tenant_id, session_id, role, content, run_id, metadata, created_at FROM agent_session_messages
-WHERE tenant_id = $1
-  AND session_id = $2
-ORDER BY created_at ASC, id ASC
+SELECT messages.id, messages.tenant_id, messages.session_id, messages.role, messages.content, messages.run_id, messages.context_version, messages.metadata, messages.created_at
+FROM agent_session_messages messages
+JOIN agent_sessions sessions
+  ON sessions.tenant_id = messages.tenant_id
+ AND sessions.id = messages.session_id
+WHERE messages.tenant_id = $1
+  AND messages.session_id = $2
+  AND messages.context_version = sessions.context_version
+ORDER BY messages.created_at ASC, messages.id ASC
 `
 
 type ListAgentSessionMessagesParams struct {
@@ -282,6 +322,7 @@ func (q *Queries) ListAgentSessionMessages(ctx context.Context, arg ListAgentSes
 			&i.Role,
 			&i.Content,
 			&i.RunID,
+			&i.ContextVersion,
 			&i.Metadata,
 			&i.CreatedAt,
 		); err != nil {
@@ -296,7 +337,7 @@ func (q *Queries) ListAgentSessionMessages(ctx context.Context, arg ListAgentSes
 }
 
 const listAgentSessionsByAccount = `-- name: ListAgentSessionsByAccount :many
-SELECT id, tenant_id, account_id, agent_id, title, status, last_message_at, created_at, updated_at FROM agent_sessions
+SELECT id, tenant_id, account_id, agent_id, title, status, context_version, last_message_at, created_at, updated_at FROM agent_sessions
 WHERE tenant_id = $1
   AND account_id = $2
   AND ($3::text = '' OR status = $3)
@@ -332,6 +373,7 @@ func (q *Queries) ListAgentSessionsByAccount(ctx context.Context, arg ListAgentS
 			&i.AgentID,
 			&i.Title,
 			&i.Status,
+			&i.ContextVersion,
 			&i.LastMessageAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -347,11 +389,16 @@ func (q *Queries) ListAgentSessionsByAccount(ctx context.Context, arg ListAgentS
 }
 
 const listRecentAgentSessionMessages = `-- name: ListRecentAgentSessionMessages :many
-SELECT id, tenant_id, session_id, role, content, run_id, metadata, created_at FROM (
-    SELECT id, tenant_id, session_id, role, content, run_id, metadata, created_at FROM agent_session_messages
-    WHERE tenant_id = $1
-      AND session_id = $2
-    ORDER BY created_at DESC, id DESC
+SELECT id, tenant_id, session_id, role, content, run_id, context_version, metadata, created_at FROM (
+    SELECT messages.id, messages.tenant_id, messages.session_id, messages.role, messages.content, messages.run_id, messages.context_version, messages.metadata, messages.created_at
+    FROM agent_session_messages messages
+    JOIN agent_sessions sessions
+      ON sessions.tenant_id = messages.tenant_id
+     AND sessions.id = messages.session_id
+    WHERE messages.tenant_id = $1
+      AND messages.session_id = $2
+      AND messages.context_version = sessions.context_version
+    ORDER BY messages.created_at DESC, messages.id DESC
     LIMIT $3::int
 ) recent
 ORDER BY created_at ASC, id ASC
@@ -379,6 +426,7 @@ func (q *Queries) ListRecentAgentSessionMessages(ctx context.Context, arg ListRe
 			&i.Role,
 			&i.Content,
 			&i.RunID,
+			&i.ContextVersion,
 			&i.Metadata,
 			&i.CreatedAt,
 		); err != nil {
@@ -467,11 +515,11 @@ func (q *Queries) UpsertAgentMemory(ctx context.Context, arg UpsertAgentMemoryPa
 const upsertAgentSession = `-- name: UpsertAgentSession :one
 INSERT INTO agent_sessions (
     id, tenant_id, account_id, agent_id, title, status,
-    last_message_at, created_at, updated_at
+    context_version, last_message_at, created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4,
-    $5, $6, $7,
-    $8, $9
+    $5, $6, $7, $8,
+    $9, $10
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -479,22 +527,24 @@ ON CONFLICT (id) DO UPDATE SET
     agent_id = EXCLUDED.agent_id,
     title = EXCLUDED.title,
     status = EXCLUDED.status,
+    context_version = EXCLUDED.context_version,
     last_message_at = EXCLUDED.last_message_at,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, account_id, agent_id, title, status, last_message_at, created_at, updated_at
+RETURNING id, tenant_id, account_id, agent_id, title, status, context_version, last_message_at, created_at, updated_at
 `
 
 type UpsertAgentSessionParams struct {
-	ID            string             `json:"id"`
-	TenantID      string             `json:"tenant_id"`
-	AccountID     string             `json:"account_id"`
-	AgentID       pgtype.Text        `json:"agent_id"`
-	Title         string             `json:"title"`
-	Status        string             `json:"status"`
-	LastMessageAt pgtype.Timestamptz `json:"last_message_at"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	AccountID      string             `json:"account_id"`
+	AgentID        pgtype.Text        `json:"agent_id"`
+	Title          string             `json:"title"`
+	Status         string             `json:"status"`
+	ContextVersion int64              `json:"context_version"`
+	LastMessageAt  pgtype.Timestamptz `json:"last_message_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) UpsertAgentSession(ctx context.Context, arg UpsertAgentSessionParams) (AgentSession, error) {
@@ -505,6 +555,7 @@ func (q *Queries) UpsertAgentSession(ctx context.Context, arg UpsertAgentSession
 		arg.AgentID,
 		arg.Title,
 		arg.Status,
+		arg.ContextVersion,
 		arg.LastMessageAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -517,6 +568,7 @@ func (q *Queries) UpsertAgentSession(ctx context.Context, arg UpsertAgentSession
 		&i.AgentID,
 		&i.Title,
 		&i.Status,
+		&i.ContextVersion,
 		&i.LastMessageAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,

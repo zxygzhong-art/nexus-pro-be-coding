@@ -49,6 +49,9 @@ func (c IAMService) CreatePermissionSetAssignment(ctx RequestContext, input Crea
 	if principalType == "" || principalID == "" || permissionSetID == "" {
 		return PermissionSetAssignment{}, BadRequest("principal_type, principal_id and permission_set_id are required")
 	}
+	if strings.TrimSpace(input.ConditionID) != "" {
+		return PermissionSetAssignment{}, BadRequest("condition_id is not supported until an assignment condition evaluator is configured")
+	}
 	if err := c.validatePermissionSetAssignmentPrincipal(ctx, principalType, principalID); err != nil {
 		return PermissionSetAssignment{}, err
 	}
@@ -88,7 +91,7 @@ func (c IAMService) CreatePermissionSetAssignment(ctx RequestContext, input Crea
 		PermissionSetID: permissionSetID,
 		Effect:          effect,
 		DataScopeID:     dataScopeID,
-		ConditionID:     strings.TrimSpace(input.ConditionID),
+		ConditionID:     "",
 		StartsAt:        startsAt,
 		ExpiresAt:       expiresAt,
 		CreatedAt:       c.Now(),
@@ -224,6 +227,9 @@ func (c IAMService) CreateDataScope(ctx RequestContext, input CreateDataScopeInp
 	if !validDataScopeType(scopeType) {
 		return DataScope{}, BadRequest("unsupported data scope type")
 	}
+	if err := validateDataScopeParams(scopeType, input.Params); err != nil {
+		return DataScope{}, err
+	}
 	scope := DataScope{
 		ID:        utils.NewID("ds"),
 		TenantID:  ctx.TenantID,
@@ -289,6 +295,9 @@ func (c IAMService) UpdateDataScope(ctx RequestContext, id string, input UpdateD
 	}
 	if input.Params != nil {
 		next.Params = utils.CopyStringMap(input.Params)
+	}
+	if err := validateDataScopeParams(next.ScopeType, next.Params); err != nil {
+		return DataScope{}, err
 	}
 	if err := c.ensureDataScopeCodeAvailable(ctx, next.Code, next.ID); err != nil {
 		return DataScope{}, err
@@ -618,6 +627,27 @@ func validDataScopeType(scopeType string) bool {
 	default:
 		return false
 	}
+}
+
+// validateDataScopeParams 限制 custom_condition 使用 runtime 真正支援的結構化篩選鍵。
+func validateDataScopeParams(scopeType string, params map[string]any) error {
+	if Scope(strings.TrimSpace(scopeType)) != ScopeCustomCondition {
+		return nil
+	}
+	allowedKeys := map[string]struct{}{
+		"employee_ids": {}, "org_unit_ids": {}, "employee_statuses": {}, "statuses": {},
+	}
+	for key := range params {
+		if _, ok := allowedKeys[strings.TrimSpace(key)]; !ok {
+			return BadRequest("custom_condition params support only employee_ids, org_unit_ids, employee_statuses or statuses")
+		}
+	}
+	for key := range allowedKeys {
+		if len(stringSliceFromAny(params[key])) > 0 {
+			return nil
+		}
+	}
+	return BadRequest("custom_condition requires at least one non-empty structured filter")
 }
 
 // ListAssumableRoles 列出 assumable 角色的服務流程。

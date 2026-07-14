@@ -19,7 +19,11 @@ type AgentStore interface {
 	ListAgentModels(ctx context.Context, tenantID string) ([]domain.AgentModel, error)
 	DeleteAgentModel(ctx context.Context, tenantID, id string) (domain.AgentModel, bool, error)
 	UpdateAgentModelTestResult(ctx context.Context, tenantID, id, status, message string, testedAt time.Time) (domain.AgentModel, bool, error)
+	UpdateAgentModelSyncResult(ctx context.Context, tenantID, id string, status domain.AgentModelSyncStatus, lastError, configHash string, syncedAt *time.Time, updatedAt time.Time) (domain.AgentModel, bool, error)
 	CountAgentDefinitionsByModel(ctx context.Context, tenantID, modelID string) (int, error)
+	InsertAgentExternalTool(context.Context, domain.AgentExternalTool) error
+	ListAgentExternalTools(ctx context.Context, tenantID string) ([]domain.AgentExternalTool, error)
+	DeleteAgentExternalTool(ctx context.Context, tenantID, id string) (domain.AgentExternalTool, bool, error)
 	UpsertAgentDefinition(context.Context, domain.AgentDefinition) error
 	GetAgentDefinition(ctx context.Context, tenantID, id string) (domain.AgentDefinition, bool, error)
 	ListAgentDefinitions(ctx context.Context, tenantID string) ([]domain.AgentDefinition, error)
@@ -33,11 +37,23 @@ type AgentStore interface {
 	ListAgentAudits(ctx context.Context, tenantID string) ([]domain.AgentAudit, error)
 	UpsertAgentSession(context.Context, domain.AgentSession) error
 	GetAgentSession(ctx context.Context, tenantID, id string) (domain.AgentSession, bool, error)
+	GetAgentSessionForUpdate(ctx context.Context, tenantID, id string) (domain.AgentSession, bool, error)
 	ListAgentSessionsByAccount(ctx context.Context, tenantID, accountID, status, agentID string) ([]domain.AgentSession, error)
 	DeleteAgentSession(ctx context.Context, tenantID, id string) (domain.AgentSession, bool, error)
 	InsertAgentSessionMessage(context.Context, domain.AgentSessionMessage) error
 	ListAgentSessionMessages(ctx context.Context, tenantID, sessionID string) ([]domain.AgentSessionMessage, error)
 	ListRecentAgentSessionMessages(ctx context.Context, tenantID, sessionID string, limit int) ([]domain.AgentSessionMessage, error)
+	UpsertAgentFileAsset(context.Context, domain.AgentSessionFile) error
+	InsertAgentFileChunks(ctx context.Context, tenantID, fileID string, chunks []string, createdAt time.Time) error
+	ListAgentFileChunks(ctx context.Context, tenantID, fileID string) ([]string, error)
+	InsertAgentSessionFile(context.Context, domain.AgentSessionFile) error
+	GetCurrentAgentSessionFile(ctx context.Context, tenantID, sessionID, fileID string) (domain.AgentSessionFile, bool, error)
+	ListCurrentAgentSessionFiles(ctx context.Context, tenantID, sessionID string) ([]domain.AgentSessionFile, error)
+	MarkAgentSessionFileAttached(ctx context.Context, tenantID, sessionID, fileID string, updatedAt time.Time) error
+	InsertAgentMessageAttachment(ctx context.Context, tenantID, messageID, fileID string, ordinal int, createdAt time.Time) error
+	ListCurrentAgentMessageAttachments(ctx context.Context, tenantID, sessionID string) ([]domain.AgentMessageAttachment, error)
+	DeleteCurrentDraftAgentSessionFile(ctx context.Context, tenantID, sessionID, fileID string) (bool, error)
+	DeleteAgentFileAsset(ctx context.Context, tenantID, fileID string) error
 	CountActiveAgentRunsBySession(ctx context.Context, tenantID, sessionID string) (int, error)
 	UpsertAgentMemory(context.Context, domain.AgentMemory) error
 	GetAgentMemory(ctx context.Context, tenantID, id string) (domain.AgentMemory, bool, error)

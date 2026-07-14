@@ -194,6 +194,40 @@ func workspaceSummaryLeaveCells(summaries []AttendanceDailySummary) map[string]m
 	return out
 }
 
+// workspaceMergeApprovedLeaveCells merges local approved leave without double-counting an eHRMS daily fact.
+func workspaceMergeApprovedLeaveCells(existing map[string]map[string]workspaceLeaveCell, leaves []LeaveRequest, workTime AttendancePolicyWorkTime, start, end time.Time) map[string]map[string]workspaceLeaveCell {
+	for day := start; day.Before(end); day = day.AddDate(0, 0, 1) {
+		if day.Weekday() == time.Saturday || day.Weekday() == time.Sunday {
+			continue
+		}
+		date := day.Format(time.DateOnly)
+		schedule, breaks := attendanceScheduleIntervals(date, workTime)
+		for _, leave := range leaves {
+			if leave.EmployeeID == "" || !strings.EqualFold(strings.TrimSpace(leave.Status), "approved") {
+				continue
+			}
+			approved, _ := attendanceLeaveIntervals([]LeaveRequest{leave}, schedule, breaks)
+			hours := float64(intervalMinutes(approved)) / 60
+			if hours <= 0 {
+				continue
+			}
+			if existing[leave.EmployeeID] == nil {
+				existing[leave.EmployeeID] = map[string]workspaceLeaveCell{}
+			}
+			cell := existing[leave.EmployeeID][date]
+			if cell.Code == "" {
+				cell.Code, cell.Label = workspaceLeaveCodeLabel(leave.LeaveType)
+			}
+			// eHRMS and local workflow can describe the same leave, so use the larger daily fact.
+			if hours > cell.Hours {
+				cell.Hours = hours
+			}
+			existing[leave.EmployeeID][date] = cell
+		}
+	}
+	return existing
+}
+
 // workspaceOvertimeCells 處理工作區加班儲存格。僅累計核准加班的每日時數。
 func workspaceOvertimeCells(overtimes []OvertimeRequest, start time.Time, end time.Time) map[string]map[string]float64 {
 	out := map[string]map[string]float64{}
@@ -234,7 +268,7 @@ func workspaceClockCells(clocks []AttendanceClockRecord, summaries []AttendanceD
 	}
 	pairs := map[string]map[string]*pair{}
 	for _, record := range clocks {
-		if record.EmployeeID == "" || record.WorkDate == "" {
+		if record.EmployeeID == "" || record.WorkDate == "" || record.Voided || !strings.EqualFold(record.RecordStatus, clockRecordStatusAccepted) {
 			continue
 		}
 		if pairs[record.EmployeeID] == nil {

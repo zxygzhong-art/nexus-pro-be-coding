@@ -243,7 +243,7 @@ func (c IAMService) AssumeRole(ctx RequestContext, roleID string, input AssumeRo
 	if strings.TrimSpace(input.Reason) == "" {
 		return AssumeRoleResponse{}, BadRequest("assume role reason is required")
 	}
-	trusted, err := c.trustPolicyAllowsAccount(account, role)
+	trusted, err := c.trustPolicyAllowsAccount(ctx, account, role)
 	if err != nil {
 		return AssumeRoleResponse{}, err
 	}
@@ -256,10 +256,11 @@ func (c IAMService) AssumeRole(ctx RequestContext, roleID string, input AssumeRo
 	}
 	if allowed, checked, err := c.openFGAAssumeRoleAllows(ctx, account, role); checked {
 		if err != nil {
-			c.logWarn(ctx, "openfga assume role check failed; falling back to trust policy",
+			c.logWarn(ctx, "openfga assume role check failed; denying role assumption",
 				"assumable_role_id", role.ID,
 				"error", err,
 			)
+			return AssumeRoleResponse{}, Forbidden("openfga role assumption check unavailable")
 		} else if !allowed {
 			c.logWarn(ctx, "assume role denied by openfga",
 				"assumable_role_id", role.ID,
@@ -355,8 +356,8 @@ func effectiveAssumableRoleSessionDuration(roleSeconds int, requestedMinutes int
 	return time.Duration(requestedMinutes) * time.Minute, nil
 }
 
-// trustPolicyAllowsAccount 處理 trust 政策 allows 帳號的服務流程。
-func (c IAMService) trustPolicyAllowsAccount(account Account, role AssumableRole) (bool, error) {
+// trustPolicyAllowsAccount 只使用目前有效的群組成員關係判斷角色信任。
+func (c IAMService) trustPolicyAllowsAccount(ctx RequestContext, account Account, role AssumableRole) (bool, error) {
 	if !role.Trusted || len(role.TrustPolicy) == 0 {
 		return false, nil
 	}
@@ -365,8 +366,12 @@ func (c IAMService) trustPolicyAllowsAccount(account Account, role AssumableRole
 		return true, nil
 	}
 	allowedGroups := stringSet(append(stringSliceFromAny(role.TrustPolicy["user_groups"]), stringSliceFromAny(role.TrustPolicy["user_group_ids"])...))
-	for _, groupID := range account.UserGroupIDs {
-		if _, ok := allowedGroups[groupID]; ok {
+	activeGroups, err := c.activeUserGroupsForAccount(ctx, account)
+	if err != nil {
+		return false, err
+	}
+	for _, group := range activeGroups {
+		if _, ok := allowedGroups[group.ID]; ok {
 			return true, nil
 		}
 	}

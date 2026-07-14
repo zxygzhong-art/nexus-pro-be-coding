@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -53,6 +54,7 @@ type Store struct {
 	attendanceSummaries     map[string]map[string]AttendanceDailySummary
 	attendanceCorrections   map[string]map[string]AttendanceCorrectionRequest
 	overtimeRequests        map[string]map[string]OvertimeRequest
+	formDefinitionDrafts    map[string]map[string]domain.FormDefinitionDraft
 	formTemplates           map[string]map[string]FormTemplate
 	formTemplateVersions    map[string]map[string]FormTemplateVersion
 	formInstances           map[string]map[string]FormInstance
@@ -65,11 +67,18 @@ type Store struct {
 	platformTaskTodos       map[string]map[string]PlatformTaskTodoRecord
 	agentRuns               map[string]map[string]AgentRun
 	agentModels             map[string]map[string]AgentModel
+	agentExternalTools      map[string]map[string]AgentExternalTool
 	agentDefinitions        map[string]map[string]AgentDefinition
 	agentDefinitionVersions map[string]map[string]AgentDefinitionVersion
 	agentAudits             map[string][]AgentAudit
+	knowledgeBases          map[string]map[string]KnowledgeBase
+	knowledgeDocuments      map[string]map[string]KnowledgeDocument
+	knowledgeDocumentChunks map[string]map[string]KnowledgeDocumentChunk
 	agentSessions           map[string]map[string]AgentSession
 	agentSessionMessages    map[string]map[string]AgentSessionMessage
+	agentSessionFiles       map[string]map[string]domain.AgentSessionFile
+	agentFileChunks         map[string]map[string][]string
+	agentMessageAttachments map[string]map[string][]domain.AgentMessageAttachment
 	agentMemories           map[string]map[string]AgentMemory
 	notifications           map[string]map[string]Notification
 	notificationRecipients  map[string]map[string]NotificationRecipient
@@ -121,6 +130,7 @@ func NewStore() *Store {
 		attendanceSummaries:     map[string]map[string]AttendanceDailySummary{},
 		attendanceCorrections:   map[string]map[string]AttendanceCorrectionRequest{},
 		overtimeRequests:        map[string]map[string]OvertimeRequest{},
+		formDefinitionDrafts:    map[string]map[string]domain.FormDefinitionDraft{},
 		formTemplates:           map[string]map[string]FormTemplate{},
 		formTemplateVersions:    map[string]map[string]FormTemplateVersion{},
 		formInstances:           map[string]map[string]FormInstance{},
@@ -133,11 +143,18 @@ func NewStore() *Store {
 		platformTaskTodos:       map[string]map[string]PlatformTaskTodoRecord{},
 		agentRuns:               map[string]map[string]AgentRun{},
 		agentModels:             map[string]map[string]AgentModel{},
+		agentExternalTools:      map[string]map[string]AgentExternalTool{},
 		agentDefinitions:        map[string]map[string]AgentDefinition{},
 		agentDefinitionVersions: map[string]map[string]AgentDefinitionVersion{},
 		agentAudits:             map[string][]AgentAudit{},
+		knowledgeBases:          map[string]map[string]KnowledgeBase{},
+		knowledgeDocuments:      map[string]map[string]KnowledgeDocument{},
+		knowledgeDocumentChunks: map[string]map[string]KnowledgeDocumentChunk{},
 		agentSessions:           map[string]map[string]AgentSession{},
 		agentSessionMessages:    map[string]map[string]AgentSessionMessage{},
+		agentSessionFiles:       map[string]map[string]domain.AgentSessionFile{},
+		agentFileChunks:         map[string]map[string][]string{},
+		agentMessageAttachments: map[string]map[string][]domain.AgentMessageAttachment{},
 		agentMemories:           map[string]map[string]AgentMemory{},
 		notifications:           map[string]map[string]Notification{},
 		notificationRecipients:  map[string]map[string]NotificationRecipient{},
@@ -1781,10 +1798,10 @@ func (s *Store) FindEffectiveAttendanceShiftAssignment(_ context.Context, tenant
 func (s *Store) UpsertAttendanceClockRecord(_ context.Context, v AttendanceClockRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if strings.EqualFold(v.RecordStatus, "accepted") {
+	if strings.TrimSpace(v.ClientEventID) != "" {
 		for _, item := range s.attendanceClockRecords[v.TenantID] {
-			if item.ID != v.ID && item.EmployeeID == v.EmployeeID && item.WorkDate == v.WorkDate && item.Direction == v.Direction && strings.EqualFold(item.RecordStatus, "accepted") {
-				return domain.Conflict("accepted clock record already exists")
+			if item.ID != v.ID && item.ClientEventID == v.ClientEventID {
+				return domain.Conflict("attendance clock client event already exists")
 			}
 		}
 	}
@@ -1792,16 +1809,66 @@ func (s *Store) UpsertAttendanceClockRecord(_ context.Context, v AttendanceClock
 	return nil
 }
 
-// GetAcceptedAttendanceClockRecord 從儲存層取得 accepted 考勤打卡 record。
-func (s *Store) GetAcceptedAttendanceClockRecord(_ context.Context, tenantID, employeeID, workDate, direction string) (AttendanceClockRecord, bool, error) {
+// GetAttendanceClockRecordByClientEventID 依客戶端事件識別碼取得考勤打卡 record。
+func (s *Store) GetAttendanceClockRecordByClientEventID(_ context.Context, tenantID, clientEventID string) (AttendanceClockRecord, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	for _, item := range s.attendanceClockRecords[tenantID] {
-		if item.EmployeeID == employeeID && item.WorkDate == workDate && item.Direction == direction && item.RecordStatus == "accepted" {
+		if clientEventID != "" && item.ClientEventID == clientEventID {
 			return copyAttendanceClockRecord(item), true, nil
 		}
 	}
 	return AttendanceClockRecord{}, false, nil
+}
+
+// GetEarliestAcceptedAttendanceClockIn 取得未作廢的最早 accepted 上班卡。
+func (s *Store) GetEarliestAcceptedAttendanceClockIn(_ context.Context, tenantID, employeeID, workDate string) (AttendanceClockRecord, bool, error) {
+	return s.getAcceptedAttendanceClockBoundary(tenantID, employeeID, workDate, "clock_in", false)
+}
+
+// GetLatestAcceptedAttendanceClockOut 取得未作廢的最晚 accepted 下班卡。
+func (s *Store) GetLatestAcceptedAttendanceClockOut(_ context.Context, tenantID, employeeID, workDate string) (AttendanceClockRecord, bool, error) {
+	return s.getAcceptedAttendanceClockBoundary(tenantID, employeeID, workDate, "clock_out", true)
+}
+
+// GetLatestAcceptedAttendanceClockRecord 取得未作廢的當日最新 accepted 打卡。
+func (s *Store) GetLatestAcceptedAttendanceClockRecord(_ context.Context, tenantID, employeeID, workDate string) (AttendanceClockRecord, bool, error) {
+	return s.getAcceptedAttendanceClockBoundary(tenantID, employeeID, workDate, "", true)
+}
+
+// getAcceptedAttendanceClockBoundary 依穩定排序取得 accepted 打卡邊界。
+func (s *Store) getAcceptedAttendanceClockBoundary(tenantID, employeeID, workDate, direction string, latest bool) (AttendanceClockRecord, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var boundary AttendanceClockRecord
+	found := false
+	for _, item := range s.attendanceClockRecords[tenantID] {
+		if item.EmployeeID != employeeID || item.WorkDate != workDate || item.RecordStatus != "accepted" || item.Voided {
+			continue
+		}
+		if direction != "" && item.Direction != direction {
+			continue
+		}
+		if !found || attendanceClockRecordComesBefore(item, boundary) != latest {
+			boundary = item
+			found = true
+		}
+	}
+	if !found {
+		return AttendanceClockRecord{}, false, nil
+	}
+	return copyAttendanceClockRecord(boundary), true, nil
+}
+
+// attendanceClockRecordComesBefore 比較打卡時間並以建立時間及 ID 穩定決勝。
+func attendanceClockRecordComesBefore(left, right AttendanceClockRecord) bool {
+	if !left.ClockedAt.Equal(right.ClockedAt) {
+		return left.ClockedAt.Before(right.ClockedAt)
+	}
+	if !left.CreatedAt.Equal(right.CreatedAt) {
+		return left.CreatedAt.Before(right.CreatedAt)
+	}
+	return left.ID < right.ID
 }
 
 // ListAttendanceClockRecords 從儲存層列出考勤打卡 records。
@@ -1883,6 +1950,9 @@ func (s *Store) ListAttendanceDailySummaries(_ context.Context, tenantID string,
 func (s *Store) UpsertAttendanceCorrectionRequest(_ context.Context, v AttendanceCorrectionRequest) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if strings.TrimSpace(v.CorrectionType) == "" {
+		v.CorrectionType = "add_record"
+	}
 	putNested(s.attendanceCorrections, v.TenantID, v.ID, copyAttendanceCorrectionRequest(v))
 	return nil
 }
@@ -2056,6 +2126,70 @@ func memoryCorrectionMatches(item AttendanceCorrectionRequest, query domain.Atte
 		return false
 	}
 	return true
+}
+
+// UpsertFormDefinitionDraft 保存表單定義草稿並執行 revision 樂觀鎖。
+func (s *Store) UpsertFormDefinitionDraft(_ context.Context, v domain.FormDefinitionDraft) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	existing, ok := getNested(s.formDefinitionDrafts, v.TenantID, v.ID)
+	if ok {
+		if v.Revision > 0 && existing.Revision != v.Revision {
+			return domain.Conflict("form definition draft was modified concurrently")
+		}
+		v.Revision = existing.Revision + 1
+	} else if v.Revision <= 0 {
+		v.Revision = 1
+	}
+	if v.CreatedAt.IsZero() {
+		v.CreatedAt = time.Now().UTC()
+	}
+	if v.UpdatedAt.IsZero() {
+		v.UpdatedAt = v.CreatedAt
+	}
+	putNested(s.formDefinitionDrafts, v.TenantID, v.ID, copyFormDefinitionDraft(v))
+	return nil
+}
+
+// GetFormDefinitionDraft 取得租戶內的表單定義草稿。
+func (s *Store) GetFormDefinitionDraft(_ context.Context, tenantID, id string) (domain.FormDefinitionDraft, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.formDefinitionDrafts, tenantID, id)
+	if !ok {
+		return domain.FormDefinitionDraft{}, false, nil
+	}
+	return copyFormDefinitionDraft(v), true, nil
+}
+
+// GetFormDefinitionDraftByAgentCall 以 Agent run/tool call 实现幂等重试。
+func (s *Store) GetFormDefinitionDraftByAgentCall(_ context.Context, tenantID, agentRunID, toolCallID string) (domain.FormDefinitionDraft, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, v := range s.formDefinitionDrafts[tenantID] {
+		if agentRunID != "" && toolCallID != "" && v.AgentRunID == agentRunID && v.ToolCallID == toolCallID {
+			return copyFormDefinitionDraft(v), true, nil
+		}
+	}
+	return domain.FormDefinitionDraft{}, false, nil
+}
+
+// ListFormDefinitionDrafts 列出指定拥有者与状态的草稿。
+func (s *Store) ListFormDefinitionDrafts(_ context.Context, tenantID, ownerAccountID, status string) ([]domain.FormDefinitionDraft, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := make([]domain.FormDefinitionDraft, 0)
+	for _, v := range s.formDefinitionDrafts[tenantID] {
+		if ownerAccountID != "" && v.OwnerAccountID != ownerAccountID {
+			continue
+		}
+		if status != "" && string(v.Status) != status {
+			continue
+		}
+		items = append(items, copyFormDefinitionDraft(v))
+	}
+	sort.Slice(items, func(i, j int) bool { return items[i].UpdatedAt.After(items[j].UpdatedAt) })
+	return items, nil
 }
 
 // UpsertFormTemplate 從儲存層處理 upsert 表單範本。
@@ -2517,6 +2651,27 @@ func (s *Store) UpdateAgentModelTestResult(_ context.Context, tenantID, id, stat
 	return copyAgentModel(v), true, nil
 }
 
+// UpdateAgentModelSyncResult 從儲存層更新模型同步結果。
+func (s *Store) UpdateAgentModelSyncResult(_ context.Context, tenantID, id string, status AgentModelSyncStatus, lastError, configHash string, syncedAt *time.Time, updatedAt time.Time) (AgentModel, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := getNested(s.agentModels, tenantID, id)
+	if !ok {
+		return AgentModel{}, false, nil
+	}
+	v.SyncStatus = status
+	v.LastSyncError = lastError
+	v.SyncedConfigHash = configHash
+	v.LastSyncedAt = nil
+	if syncedAt != nil {
+		t := syncedAt.UTC()
+		v.LastSyncedAt = &t
+	}
+	v.UpdatedAt = updatedAt.UTC()
+	s.agentModels[tenantID][id] = copyAgentModel(v)
+	return copyAgentModel(v), true, nil
+}
+
 // CountAgentDefinitionsByModel 從儲存層統計使用模型的 agent。
 func (s *Store) CountAgentDefinitionsByModel(_ context.Context, tenantID, modelID string) (int, error) {
 	s.mu.RLock()
@@ -2525,9 +2680,58 @@ func (s *Store) CountAgentDefinitionsByModel(_ context.Context, tenantID, modelI
 	for _, item := range s.agentDefinitions[tenantID] {
 		if item.ModelID == modelID {
 			count++
+			continue
+		}
+		for _, member := range item.SubAgents {
+			if member.ModelID == modelID {
+				count++
+				break
+			}
+		}
+	}
+	for _, item := range s.agentDefinitionVersions[tenantID] {
+		for _, member := range item.SubAgents {
+			if member.ModelID == modelID {
+				count++
+				break
+			}
 		}
 	}
 	return count, nil
+}
+
+// InsertAgentExternalTool stores one tenant-scoped external tool registration.
+func (s *Store) InsertAgentExternalTool(_ context.Context, item AgentExternalTool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.agentExternalTools, item.TenantID, item.ID, item)
+	return nil
+}
+
+// ListAgentExternalTools returns external tools in newest-first order.
+func (s *Store) ListAgentExternalTools(_ context.Context, tenantID string) ([]AgentExternalTool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.agentExternalTools[tenantID], func(v AgentExternalTool) AgentExternalTool { return v })
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].CreatedAt.After(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
+// DeleteAgentExternalTool deletes one tenant-scoped external tool registration.
+func (s *Store) DeleteAgentExternalTool(_ context.Context, tenantID, id string) (AgentExternalTool, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := getNested(s.agentExternalTools, tenantID, id)
+	if !ok {
+		return AgentExternalTool{}, false, nil
+	}
+	delete(s.agentExternalTools[tenantID], id)
+	return item, true, nil
 }
 
 // UpsertAgentDefinition 從儲存層處理 upsert agent 定義。
@@ -2680,6 +2884,9 @@ func (s *Store) ListAgentAudits(_ context.Context, tenantID string) ([]AgentAudi
 func (s *Store) UpsertAgentSession(_ context.Context, v AgentSession) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if v.ContextVersion <= 0 {
+		v.ContextVersion = 1
+	}
 	putNested(s.agentSessions, v.TenantID, v.ID, copyAgentSession(v))
 	return nil
 }
@@ -2693,6 +2900,11 @@ func (s *Store) GetAgentSession(_ context.Context, tenantID, id string) (AgentSe
 		return AgentSession{}, false, nil
 	}
 	return copyAgentSession(v), true, nil
+}
+
+// GetAgentSessionForUpdate reads a session while the memory transaction holds the root lock.
+func (s *Store) GetAgentSessionForUpdate(ctx context.Context, tenantID, id string) (AgentSession, bool, error) {
+	return s.GetAgentSession(ctx, tenantID, id)
 }
 
 // ListAgentSessionsByAccount 從儲存層列出 account 的 agent 會話。
@@ -2728,6 +2940,13 @@ func (s *Store) DeleteAgentSession(_ context.Context, tenantID, id string) (Agen
 	for messageID, message := range s.agentSessionMessages[tenantID] {
 		if message.SessionID == id {
 			delete(s.agentSessionMessages[tenantID], messageID)
+			delete(s.agentMessageAttachments[tenantID], messageID)
+		}
+	}
+	for fileID, file := range s.agentSessionFiles[tenantID] {
+		if file.SessionID == id {
+			delete(s.agentSessionFiles[tenantID], fileID)
+			delete(s.agentFileChunks[tenantID], fileID)
 		}
 	}
 	return copyAgentSession(v), true, nil
@@ -2737,6 +2956,11 @@ func (s *Store) DeleteAgentSession(_ context.Context, tenantID, id string) (Agen
 func (s *Store) InsertAgentSessionMessage(_ context.Context, v AgentSessionMessage) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if v.ContextVersion <= 0 {
+		if session, ok := getNested(s.agentSessions, v.TenantID, v.SessionID); ok {
+			v.ContextVersion = session.ContextVersion
+		}
+	}
 	putNested(s.agentSessionMessages, v.TenantID, v.ID, copyAgentSessionMessage(v))
 	return nil
 }
@@ -2746,8 +2970,12 @@ func (s *Store) ListAgentSessionMessages(_ context.Context, tenantID, sessionID 
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]AgentSessionMessage, 0)
+	session, sessionOK := getNested(s.agentSessions, tenantID, sessionID)
+	if !sessionOK {
+		return out, nil
+	}
 	for _, item := range s.agentSessionMessages[tenantID] {
-		if item.SessionID == sessionID {
+		if item.SessionID == sessionID && item.ContextVersion == session.ContextVersion {
 			out = append(out, copyAgentSessionMessage(item))
 		}
 	}
@@ -2765,6 +2993,173 @@ func (s *Store) ListRecentAgentSessionMessages(ctx context.Context, tenantID, se
 		items = items[len(items)-limit:]
 	}
 	return items, nil
+}
+
+// UpsertAgentFileAsset persists file metadata for a staged session file.
+func (s *Store) UpsertAgentFileAsset(_ context.Context, file domain.AgentSessionFile) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.agentSessionFiles, file.TenantID, file.ID, copyAgentSessionFile(file))
+	return nil
+}
+
+// InsertAgentFileChunks stores parsed text in source order.
+func (s *Store) InsertAgentFileChunks(_ context.Context, tenantID, fileID string, chunks []string, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.agentFileChunks[tenantID] == nil {
+		s.agentFileChunks[tenantID] = map[string][]string{}
+	}
+	s.agentFileChunks[tenantID][fileID] = append([]string(nil), chunks...)
+	return nil
+}
+
+// ListAgentFileChunks returns a defensive copy of parsed text chunks.
+func (s *Store) ListAgentFileChunks(_ context.Context, tenantID, fileID string) ([]string, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return append([]string(nil), s.agentFileChunks[tenantID][fileID]...), nil
+}
+
+// InsertAgentSessionFile records the current session and context binding.
+func (s *Store) InsertAgentSessionFile(_ context.Context, file domain.AgentSessionFile) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.agentSessionFiles, file.TenantID, file.ID, copyAgentSessionFile(file))
+	return nil
+}
+
+// GetCurrentAgentSessionFile resolves files only from the visible context version.
+func (s *Store) GetCurrentAgentSessionFile(_ context.Context, tenantID, sessionID, fileID string) (domain.AgentSessionFile, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session, sessionOK := getNested(s.agentSessions, tenantID, sessionID)
+	file, fileOK := getNested(s.agentSessionFiles, tenantID, fileID)
+	if !sessionOK || !fileOK || file.SessionID != sessionID || file.ContextVersion != session.ContextVersion {
+		return domain.AgentSessionFile{}, false, nil
+	}
+	return copyAgentSessionFile(file), true, nil
+}
+
+// ListCurrentAgentSessionFiles lists files from the visible context version.
+func (s *Store) ListCurrentAgentSessionFiles(_ context.Context, tenantID, sessionID string) ([]domain.AgentSessionFile, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session, ok := getNested(s.agentSessions, tenantID, sessionID)
+	if !ok {
+		return []domain.AgentSessionFile{}, nil
+	}
+	out := make([]domain.AgentSessionFile, 0)
+	for _, file := range s.agentSessionFiles[tenantID] {
+		if file.SessionID == sessionID && file.ContextVersion == session.ContextVersion {
+			out = append(out, copyAgentSessionFile(file))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
+// MarkAgentSessionFileAttached moves a draft file into persisted message history.
+func (s *Store) MarkAgentSessionFileAttached(_ context.Context, tenantID, sessionID, fileID string, updatedAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, sessionOK := getNested(s.agentSessions, tenantID, sessionID)
+	file, fileOK := getNested(s.agentSessionFiles, tenantID, fileID)
+	if !sessionOK || !fileOK || file.SessionID != sessionID || file.ContextVersion != session.ContextVersion {
+		return errors.New("agent session file not found")
+	}
+	file.State = "attached"
+	file.UpdatedAt = updatedAt
+	putNested(s.agentSessionFiles, tenantID, fileID, copyAgentSessionFile(file))
+	return nil
+}
+
+// InsertAgentMessageAttachment records the exact message/file relation.
+func (s *Store) InsertAgentMessageAttachment(_ context.Context, tenantID, messageID, fileID string, ordinal int, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	file, ok := getNested(s.agentSessionFiles, tenantID, fileID)
+	if !ok {
+		return errors.New("agent session file not found")
+	}
+	if s.agentMessageAttachments[tenantID] == nil {
+		s.agentMessageAttachments[tenantID] = map[string][]domain.AgentMessageAttachment{}
+	}
+	items := s.agentMessageAttachments[tenantID][messageID]
+	for _, item := range items {
+		if item.File.ID == fileID {
+			return nil
+		}
+	}
+	s.agentMessageAttachments[tenantID][messageID] = append(items, domain.AgentMessageAttachment{
+		MessageID: messageID, Ordinal: ordinal, File: copyAgentSessionFile(file),
+	})
+	return nil
+}
+
+// ListCurrentAgentMessageAttachments returns attachment provenance for visible messages only.
+func (s *Store) ListCurrentAgentMessageAttachments(_ context.Context, tenantID, sessionID string) ([]domain.AgentMessageAttachment, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	session, ok := getNested(s.agentSessions, tenantID, sessionID)
+	if !ok {
+		return []domain.AgentMessageAttachment{}, nil
+	}
+	out := make([]domain.AgentMessageAttachment, 0)
+	for messageID, items := range s.agentMessageAttachments[tenantID] {
+		message, messageOK := getNested(s.agentSessionMessages, tenantID, messageID)
+		if !messageOK || message.SessionID != sessionID || message.ContextVersion != session.ContextVersion {
+			continue
+		}
+		for _, item := range items {
+			copyItem := item
+			copyItem.File = copyAgentSessionFile(item.File)
+			out = append(out, copyItem)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].MessageID == out[j].MessageID {
+			return out[i].Ordinal < out[j].Ordinal
+		}
+		return out[i].MessageID < out[j].MessageID
+	})
+	return out, nil
+}
+
+// DeleteCurrentDraftAgentSessionFile removes only an unsent file from the visible context.
+func (s *Store) DeleteCurrentDraftAgentSessionFile(_ context.Context, tenantID, sessionID, fileID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, sessionOK := getNested(s.agentSessions, tenantID, sessionID)
+	file, fileOK := getNested(s.agentSessionFiles, tenantID, fileID)
+	if !sessionOK || !fileOK || file.SessionID != sessionID || file.ContextVersion != session.ContextVersion || file.State != "draft" {
+		return false, nil
+	}
+	delete(s.agentSessionFiles[tenantID], fileID)
+	return true, nil
+}
+
+// DeleteAgentFileAsset removes in-memory metadata, chunks, and stale attachment entries.
+func (s *Store) DeleteAgentFileAsset(_ context.Context, tenantID, fileID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.agentSessionFiles[tenantID], fileID)
+	delete(s.agentFileChunks[tenantID], fileID)
+	for messageID, items := range s.agentMessageAttachments[tenantID] {
+		filtered := items[:0]
+		for _, item := range items {
+			if item.File.ID != fileID {
+				filtered = append(filtered, item)
+			}
+		}
+		s.agentMessageAttachments[tenantID][messageID] = filtered
+	}
+	return nil
 }
 
 // CountActiveAgentRunsBySession 從儲存層統計會話中的未完成 agent run。
@@ -2791,12 +3186,12 @@ func (s *Store) UpsertAgentMemory(_ context.Context, v AgentMemory) error {
 	return nil
 }
 
-// GetAgentMemory 從儲存層取得 agent 記憶。
+// GetAgentMemory 按租戶與 ID 取得原始記憶，讓服務層使用同一時鐘判斷單筆記憶是否過期。
 func (s *Store) GetAgentMemory(_ context.Context, tenantID, id string) (AgentMemory, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	v, ok := getNested(s.agentMemories, tenantID, id)
-	if !ok || agentMemoryExpired(v, time.Now().UTC()) {
+	if !ok {
 		return AgentMemory{}, false, nil
 	}
 	return copyAgentMemory(v), true, nil

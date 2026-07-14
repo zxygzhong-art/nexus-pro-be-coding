@@ -855,6 +855,8 @@ func normalizeEHRMSSyncMode(mode string) (string, error) {
 // ehrmsMergeEmployee 處理 eHRMS merge 員工。
 func ehrmsMergeEmployee(existing Employee, candidate Employee) Employee {
 	next := existing
+	selfNameEN := next.BasicInfo["name_en"]
+	nameENSource := stringFromAny(next.BasicInfo["name_en_source"])
 	next.EmployeeNo = candidate.EmployeeNo
 	next.Name = candidate.Name
 	next.CompanyEmail = candidate.CompanyEmail
@@ -867,6 +869,10 @@ func ehrmsMergeEmployee(existing Employee, candidate Employee) Employee {
 	next.HireDate = candidate.HireDate
 	next.ResignDate = candidate.ResignDate
 	next.BasicInfo = mergeEmployeeImportMap(next.BasicInfo, candidate.BasicInfo)
+	if nameENSource == "self" {
+		next.BasicInfo["name_en"] = selfNameEN
+		next.BasicInfo["name_en_source"] = "self"
+	}
 	next.EmploymentInfo = mergeEmployeeImportMap(next.EmploymentInfo, candidate.EmploymentInfo)
 	next.EducationMilitaryInfo = mergeEmployeeImportMap(next.EducationMilitaryInfo, candidate.EducationMilitaryInfo)
 	if next.BasicInfo == nil {

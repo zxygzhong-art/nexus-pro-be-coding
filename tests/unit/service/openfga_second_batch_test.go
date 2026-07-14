@@ -101,8 +101,8 @@ func TestAssumeRoleOpenFGACanAssumeGate(t *testing.T) {
 	}
 
 	errorChecker := &mappedRelationshipChecker{allowed: map[string]bool{}, err: errors.New("model not ready")}
-	if _, err := service.New(store, service.Options{Relationships: errorChecker, OpenFGAScopeChecks: true}).IAM().AssumeRole(ctx, "role-hr", domain.AssumeRoleInput{Reason: "fallback"}); err != nil {
-		t.Fatalf("expected OpenFGA error to fall back to trust policy, got %v", err)
+	if _, err := service.New(store, service.Options{Relationships: errorChecker, OpenFGAScopeChecks: true}).IAM().AssumeRole(ctx, "role-hr", domain.AssumeRoleInput{Reason: "fail closed"}); err == nil {
+		t.Fatal("expected OpenFGA error to deny role assumption")
 	}
 
 	disabledChecker := &mappedRelationshipChecker{allowed: map[string]bool{}}
@@ -127,6 +127,13 @@ func TestAgentToolOpenFGACanRunGate(t *testing.T) {
 	}
 	if !relationshipCheckSeen(denyChecker.checks, "can_run", "agent_tool:knowledge.search") {
 		t.Fatalf("expected can_run check, got %+v", denyChecker.checks)
+	}
+
+	errorStore := memory.NewStore()
+	seedAgentToolFGAFixture(t, errorStore, now, true)
+	errorChecker := &mappedRelationshipChecker{allowed: map[string]bool{}, err: errors.New("model not ready")}
+	if _, err := service.New(errorStore, service.Options{Relationships: errorChecker, OpenFGAScopeChecks: true}).Agent().CreateRun(ctx, domain.CreateAgentRunInput{Prompt: "search"}); err == nil {
+		t.Fatal("expected OpenFGA can_run error to fail closed")
 	}
 
 	allowedStore := memory.NewStore()
@@ -183,12 +190,14 @@ func TestOpenFGABackfillIncludesAssumableRoleAndAgentToolTuples(t *testing.T) {
 		!relationshipTupleExists(roleTuples, "trusted_group", "user_group#member", "ug-1") {
 		t.Fatalf("expected assumable_role backfill tuples, got %+v", roleTuples)
 	}
-	toolTuples, err := store.ListAuthzRelationshipTuplesForObject(context.Background(), "tenant-1", "agent_tool", "knowledge.search")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !relationshipTupleExists(toolTuples, "tenant", "tenant", "tenant-1") {
-		t.Fatalf("expected agent_tool tenant backfill tuple, got %+v", toolTuples)
+	for _, toolID := range []string{"knowledge.search", "form.get_capabilities", "form.simulate_workflow"} {
+		toolTuples, err := store.ListAuthzRelationshipTuplesForObject(context.Background(), "tenant-1", "agent_tool", toolID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !relationshipTupleExists(toolTuples, "tenant", "tenant", "tenant-1") {
+			t.Fatalf("expected agent_tool %q tenant backfill tuple, got %+v", toolID, toolTuples)
+		}
 	}
 }
 
@@ -231,6 +240,7 @@ func seedAssumableRoleFGAFixture(t *testing.T, store *memory.Store, now time.Tim
 		},
 		CreatedAt: now,
 	})
+	_ = store.UpsertUserGroup(context.Background(), domain.UserGroup{ID: "ug-trusted", TenantID: "tenant-1", Name: "Trusted", CreatedAt: now})
 	_ = store.UpsertAccount(context.Background(), domain.Account{
 		ID:                     "acct-1",
 		TenantID:               "tenant-1",

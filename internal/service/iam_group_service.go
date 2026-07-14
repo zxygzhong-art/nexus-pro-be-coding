@@ -297,10 +297,13 @@ func (c IAMService) AddUserGroupMember(ctx RequestContext, groupID string, input
 	if err != nil {
 		return GroupMembership{}, BadRequest("valid_until must be RFC3339 or YYYY-MM-DD")
 	}
-	source, err := normalizeGroupMembershipSource(input.Source)
-	if err != nil {
-		return GroupMembership{}, err
+	if source := strings.TrimSpace(input.Source); source != "" && source != "manual" {
+		return GroupMembership{}, BadRequest("direct group membership changes must use source manual")
 	}
+	if strings.TrimSpace(input.ApprovalInstanceID) != "" {
+		return GroupMembership{}, BadRequest("approval_instance_id must be supplied by a verified workflow integration")
+	}
+	source := "manual"
 	now := c.Now()
 	membership := GroupMembership{
 		ID:                 utils.NewID("ugm"),
@@ -310,7 +313,7 @@ func (c IAMService) AddUserGroupMember(ctx RequestContext, groupID string, input
 		ValidFrom:          now,
 		ValidUntil:         validUntil,
 		Source:             source,
-		ApprovalInstanceID: strings.TrimSpace(input.ApprovalInstanceID),
+		ApprovalInstanceID: "",
 		CreatedBy:          ctx.AccountID,
 		CreatedAt:          now,
 	}

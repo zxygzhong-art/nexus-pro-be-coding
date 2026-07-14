@@ -10,6 +10,25 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
+// TestPlatformAssistantsDoNotFallbackToStaticCatalog 驗證未發布 Agent 時不洩漏靜態假清單。
+func TestPlatformAssistantsDoNotFallbackToStaticCatalog(t *testing.T) {
+	now := time.Date(2026, 7, 13, 11, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentChatAccount(t, store, now, []domain.Permission{{Resource: "agent.run", Action: "create", Scope: "all"}})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+
+	response, err := svc.Platform().ListAssistants(
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
+		domain.PlatformAssistantsQuery{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Total != 0 || len(response.Data) != 0 {
+		t.Fatalf("expected an empty managed assistant list, got %+v", response.Data)
+	}
+}
+
 func TestPublishedAssistantsEnforceDepartmentVisibility(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
 	store := memory.NewStore()

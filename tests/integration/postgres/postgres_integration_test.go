@@ -89,6 +89,65 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 		}
 	}
 
+	t.Run("attendance multi-punch boundaries are deterministic", func(t *testing.T) {
+		workDate := "2026-06-10"
+		base := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+		records := []domain.AttendanceClockRecord{
+			{ID: "acr_" + suffix + "_in_first", TenantID: tenantA, EmployeeID: empA, WorkDate: workDate, Direction: "clock_in", ClientEventID: "evt_" + suffix + "_in_first", ClockedAt: base, RecordStatus: "accepted", Source: "geofence", CreatedAt: base},
+			{ID: "acr_" + suffix + "_in_middle", TenantID: tenantA, EmployeeID: empA, WorkDate: workDate, Direction: "clock_in", ClientEventID: "evt_" + suffix + "_in_middle", ClockedAt: base.Add(4 * time.Hour), RecordStatus: "accepted", Source: "geofence", CreatedAt: base.Add(4 * time.Hour)},
+			{ID: "acr_" + suffix + "_out_middle", TenantID: tenantA, EmployeeID: empA, WorkDate: workDate, Direction: "clock_out", ClientEventID: "evt_" + suffix + "_out_middle", ClockedAt: base.Add(2 * time.Hour), RecordStatus: "accepted", Source: "geofence", CreatedAt: base.Add(2 * time.Hour)},
+			{ID: "acr_" + suffix + "_out_last", TenantID: tenantA, EmployeeID: empA, WorkDate: workDate, Direction: "clock_out", ClientEventID: "evt_" + suffix + "_out_last", ClockedAt: base.Add(10 * time.Hour), RecordStatus: "accepted", Source: "geofence", CreatedAt: base.Add(10 * time.Hour)},
+			{ID: "acr_" + suffix + "_out_voided", TenantID: tenantA, EmployeeID: empA, WorkDate: workDate, Direction: "clock_out", ClientEventID: "evt_" + suffix + "_out_voided", ClockedAt: base.Add(11 * time.Hour), RecordStatus: "accepted", Source: "geofence", Voided: true, CreatedAt: base.Add(11 * time.Hour)},
+		}
+		for _, record := range records {
+			if err := store.UpsertAttendanceClockRecord(ctx, record); err != nil {
+				t.Fatal(err)
+			}
+		}
+
+		duplicateEvent := records[0]
+		duplicateEvent.ID += "_duplicate"
+		if err := store.UpsertAttendanceClockRecord(ctx, duplicateEvent); err == nil {
+			t.Fatal("expected duplicate client_event_id to conflict")
+		}
+		byEvent, ok, err := store.GetAttendanceClockRecordByClientEventID(ctx, tenantA, records[2].ClientEventID)
+		if err != nil || !ok || byEvent.ID != records[2].ID {
+			t.Fatalf("expected client event lookup, ok=%v record=%+v err=%v", ok, byEvent, err)
+		}
+		earliest, ok, err := store.GetEarliestAcceptedAttendanceClockIn(ctx, tenantA, empA, workDate)
+		if err != nil || !ok || earliest.ID != records[0].ID {
+			t.Fatalf("expected earliest clock-in, ok=%v record=%+v err=%v", ok, earliest, err)
+		}
+		latestOut, ok, err := store.GetLatestAcceptedAttendanceClockOut(ctx, tenantA, empA, workDate)
+		if err != nil || !ok || latestOut.ID != records[3].ID {
+			t.Fatalf("expected latest non-voided clock-out, ok=%v record=%+v err=%v", ok, latestOut, err)
+		}
+		latest, ok, err := store.GetLatestAcceptedAttendanceClockRecord(ctx, tenantA, empA, workDate)
+		if err != nil || !ok || latest.ID != records[3].ID {
+			t.Fatalf("expected latest non-voided clock record, ok=%v record=%+v err=%v", ok, latest, err)
+		}
+
+		correction := domain.AttendanceCorrectionRequest{
+			ID: "acorr_" + suffix, TenantID: tenantA, EmployeeID: empA,
+			Direction: "clock_out", RequestedClockedAt: base.Add(10 * time.Hour), WorkDate: workDate,
+			CorrectionType: "replace_record", TargetClockRecordID: records[2].ID,
+			Reason: "replace mistaken punch", Status: "pending", CreatedAt: base, UpdatedAt: base,
+		}
+		if err := store.UpsertAttendanceCorrectionRequest(ctx, correction); err != nil {
+			t.Fatal(err)
+		}
+		correction.ReplacementClockRecordID = records[3].ID
+		correction.Status = "approved"
+		correction.UpdatedAt = base.Add(time.Minute)
+		if err := store.UpsertAttendanceCorrectionRequest(ctx, correction); err != nil {
+			t.Fatal(err)
+		}
+		storedCorrection, ok, err := store.GetAttendanceCorrectionRequest(ctx, tenantA, correction.ID)
+		if err != nil || !ok || storedCorrection.CorrectionType != "replace_record" || storedCorrection.TargetClockRecordID != records[2].ID || storedCorrection.ReplacementClockRecordID != records[3].ID {
+			t.Fatalf("expected correction audit links to round-trip, ok=%v correction=%+v err=%v", ok, storedCorrection, err)
+		}
+	})
+
 	sentinel := errors.New("rollback sentinel")
 	rolledBackID := "emp_" + suffix + "_rollback"
 	err = store.WithTenantTransaction(ctx, tenantA, func(tx repository.Store) error {
@@ -598,7 +657,7 @@ func TestAttendanceClockHTTPPostgresFieldPolicy(t *testing.T) {
 	if created.Latitude != 0 || created.Longitude != 0 || created.AccuracyMeters != 0 || created.DeviceID != "" || created.DeviceInfo != nil {
 		t.Fatalf("expected create response to hide GPS and device evidence, got %+v", created)
 	}
-	raw, ok, err := store.GetAcceptedAttendanceClockRecord(ctx, tenantID, employeeID, created.WorkDate, "clock_in")
+	raw, ok, err := store.GetEarliestAcceptedAttendanceClockIn(ctx, tenantID, employeeID, created.WorkDate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -651,6 +710,68 @@ func TestAttendanceClockHTTPPostgresFieldPolicy(t *testing.T) {
 	visible := allowedPage.Items[0]
 	if visible.Latitude != raw.Latitude || visible.Longitude != raw.Longitude || visible.AccuracyMeters != 12 || visible.DeviceID != "phone-1" || visible.DeviceInfo["location_source"] != "gps" || visible.DeviceInfo["os"] != "ios" {
 		t.Fatalf("expected allow field policies to reveal GPS and device evidence, got %+v", visible)
+	}
+}
+
+// TestPostgresKnowledgeVectorSearch verifies pgvector persistence, ranking, and dimension isolation.
+func TestPostgresKnowledgeVectorSearch(t *testing.T) {
+	pool := openIntegrationPool(t)
+	defer pool.Close()
+	requireMigratedSchema(t, pool)
+	var chunksReady bool
+	if err := pool.QueryRow(context.Background(), "select to_regclass('public.knowledge_document_chunks') is not null").Scan(&chunksReady); err != nil {
+		t.Fatal(err)
+	}
+	if !chunksReady {
+		t.Skip("knowledge vector schema is not migrated")
+	}
+	store := postgresrepo.NewStore(pool)
+	ctx := context.Background()
+	now := time.Now().UTC()
+	suffix := now.Format("150405000000")
+	tenantID := "tenant_vector_" + suffix
+	baseID := "kb_vector_" + suffix
+	documentID := "kdoc_vector_" + suffix
+	if err := store.UpsertTenant(ctx, domain.Tenant{ID: tenantID, Name: tenantID, CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	err := store.WithTenantTransaction(ctx, tenantID, func(tx repository.Store) error {
+		if err := tx.UpsertKnowledgeBase(ctx, domain.KnowledgeBase{ID: baseID, TenantID: tenantID, Name: "Policies", ChunkMode: "fixed", ChunkSize: 500, ChunkOverlap: 50, CreatedAt: now, UpdatedAt: now}); err != nil {
+			return err
+		}
+		if err := tx.UpsertKnowledgeDocument(ctx, domain.KnowledgeDocument{
+			ID: documentID, TenantID: tenantID, KnowledgeBaseID: baseID, Title: "Leave", Content: "Annual leave", SourceType: "text",
+			OriginalFilename: "leave.md", ContentType: "text/markdown", SizeBytes: 12, SHA256: "fixture-sha",
+			ObjectProvider: "memory", ObjectKey: "knowledge/leave.md", ParseStatus: "ready", CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			return err
+		}
+		return tx.ReplaceKnowledgeDocumentChunks(ctx, tenantID, documentID, []domain.KnowledgeDocumentChunk{
+			{ID: "kchunk_" + suffix + "_leave", TenantID: tenantID, KnowledgeBaseID: baseID, DocumentID: documentID, Ordinal: 0, Content: "Annual leave policy", EmbeddingModel: "nexus-pro-embedding", EmbeddingDimensions: 2, Embedding: []float32{1, 0}, CreatedAt: now},
+			{ID: "kchunk_" + suffix + "_payroll", TenantID: tenantID, KnowledgeBaseID: baseID, DocumentID: documentID, Ordinal: 1, Content: "Payroll schedule", EmbeddingModel: "nexus-pro-embedding", EmbeddingDimensions: 2, Embedding: []float32{0, 1}, CreatedAt: now},
+		})
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedBase, ok, err := store.GetKnowledgeBase(ctx, tenantID, baseID)
+	if err != nil || !ok || storedBase.ChunkMode != "fixed" || storedBase.ChunkSize != 500 || storedBase.ChunkOverlap != 50 {
+		t.Fatalf("knowledge chunk configuration did not round-trip: base=%+v ok=%v err=%v", storedBase, ok, err)
+	}
+	storedDocument, ok, err := store.GetKnowledgeDocument(ctx, tenantID, baseID, documentID)
+	if err != nil || !ok || storedDocument.SourceType != "text" || storedDocument.OriginalFilename != "leave.md" || storedDocument.ObjectKey != "knowledge/leave.md" {
+		t.Fatalf("knowledge upload metadata did not round-trip: document=%+v ok=%v err=%v", storedDocument, ok, err)
+	}
+	matches, err := store.SearchKnowledgeDocumentChunks(ctx, tenantID, []string{baseID}, "nexus-pro-embedding", []float32{1, 0}, 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(matches) != 2 || matches[0].Ordinal != 0 || matches[0].Score < 0.99 {
+		t.Fatalf("unexpected pgvector ranking: %+v", matches)
+	}
+	dimensionMismatch, err := store.SearchKnowledgeDocumentChunks(ctx, tenantID, []string{baseID}, "nexus-pro-embedding", []float32{1, 0, 0}, 5)
+	if err != nil || len(dimensionMismatch) != 0 {
+		t.Fatalf("expected dimension-isolated empty result, matches=%+v err=%v", dimensionMismatch, err)
 	}
 }
 

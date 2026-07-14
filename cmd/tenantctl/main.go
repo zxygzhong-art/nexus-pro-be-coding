@@ -45,6 +45,8 @@ func run(args []string) error {
 	switch args[0] {
 	case "provision":
 		return runProvision(args[1:])
+	case "ensure-default-form-templates":
+		return runEnsureDefaultFormTemplates(args[1:])
 	case "openfga-backfill":
 		return runOpenFGABackfill(args[1:])
 	case "temporal-backfill-form-workflows":
@@ -65,6 +67,42 @@ func run(args []string) error {
 		printUsage(os.Stderr)
 		return fmt.Errorf("unknown command %q", args[0])
 	}
+}
+
+// runEnsureDefaultFormTemplates 幂等补齐既有租户缺少的内建表单模板。
+func runEnsureDefaultFormTemplates(args []string) error {
+	fs := flag.NewFlagSet("tenantctl ensure-default-form-templates", flag.ContinueOnError)
+	fs.SetOutput(os.Stderr)
+	tenantID := fs.String("tenant-id", "", "tenant id to backfill")
+	databaseURL := fs.String("database-url", config.DatabaseURLFromEnv(), "Postgres database URL")
+	timeout := fs.Duration("timeout", 30*time.Second, "operation timeout")
+	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if fs.NArg() > 0 {
+		return fmt.Errorf("unexpected arguments: %s", strings.Join(fs.Args(), " "))
+	}
+	if strings.TrimSpace(*tenantID) == "" {
+		return errors.New("--tenant-id is required")
+	}
+	if strings.TrimSpace(*databaseURL) == "" {
+		return errors.New("DB_HOST/DB_USERNAME/DB_NAME or --database-url is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), *timeout)
+	defer cancel()
+	pool, err := postgresplatform.OpenPool(ctx, *databaseURL)
+	if err != nil {
+		return err
+	}
+	defer pool.Close()
+	created, err := service.New(postgresrepo.NewStore(pool)).EnsureTenantDefaultFormTemplates(ctx, *tenantID)
+	if err != nil {
+		return err
+	}
+	return json.NewEncoder(os.Stdout).Encode(map[string]any{"tenant_id": strings.TrimSpace(*tenantID), "created": created})
 }
 
 type temporalBackfillFormWorkflowsResult struct {
@@ -738,8 +776,9 @@ func ensureKeycloakAdmin(ctx context.Context, input service.TenantProvisionInput
 // printUsage 輸出 tenantctl 用法。
 func printUsage(out *os.File) {
 	fmt.Fprintln(out, `Usage:
-  tenantctl provision --tenant-id <id> --tenant-name <name> --admin-email <email> --keycloak-sub <subject>
-  tenantctl provision --tenant-id <id> --tenant-name <name> --admin-email <email> --provision-keycloak
+	  tenantctl provision --tenant-id <id> --tenant-name <name> --admin-email <email> --keycloak-sub <subject>
+	  tenantctl provision --tenant-id <id> --tenant-name <name> --admin-email <email> --provision-keycloak
+	  tenantctl ensure-default-form-templates --tenant-id <id>
   tenantctl openfga-backfill --tenant-id <id>
   tenantctl temporal-backfill-form-workflows --tenant-id <id> [--dry-run]
   tenantctl openfga-grant-tenant-admin --tenant-id <id> --account-id <account-id>

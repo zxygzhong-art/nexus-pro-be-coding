@@ -16,6 +16,7 @@ type IdentityFacade interface {
 // MeFacade 定義 me facade 的行為契約。
 type MeFacade interface {
 	Resolve(RequestContext) (MeResponse, error)
+	UpdateProfile(RequestContext, UpdateMeProfileInput) (MeResponse, error)
 	ListMenus(RequestContext) ([]MenuNode, error)
 }
 
@@ -184,6 +185,16 @@ type WorkspaceFacade interface {
 // WorkflowFacade 定義流程 facade 的行為契約。
 type WorkflowFacade interface {
 	FormDataSources(RequestContext) (FormDataSourceCatalogResponse, error)
+	FormBuilderCapabilities(RequestContext) (domain.FormBuilderCapabilitiesResponse, error)
+	ListFormDefinitionDrafts(RequestContext, string, string) ([]domain.FormDefinitionDraft, error)
+	GetFormDefinitionDraft(RequestContext, string) (domain.FormDefinitionDraft, error)
+	CreateFormDefinitionDraft(RequestContext, domain.CreateFormDefinitionDraftInput) (domain.FormDefinitionDraft, error)
+	UpdateFormDefinitionDraft(RequestContext, string, domain.UpdateFormDefinitionDraftInput) (domain.FormDefinitionDraft, error)
+	ValidateFormDefinitionDraft(RequestContext, string) (domain.FormDefinitionPreview, error)
+	PreviewFormDefinitionDraft(RequestContext, string) (domain.FormDefinitionPreview, error)
+	SimulateFormDefinitionWorkflow(RequestContext, string) (domain.FormWorkflowSimulation, error)
+	SubmitFormDefinitionDraftForReview(RequestContext, string, int64) (domain.FormDefinitionDraft, error)
+	PublishFormDefinitionDraft(RequestContext, string, int64) (domain.FormDefinitionDraft, error)
 	ListFormTemplatePage(RequestContext, PageRequest) (PageResponse[FormTemplate], error)
 	CreateFormTemplate(RequestContext, CreateFormTemplateInput) (FormTemplate, error)
 	ListFormInstancePage(RequestContext, FormInstanceQuery, PageRequest) (PageResponse[FormInstance], error)
@@ -207,6 +218,7 @@ type AgentFacade interface {
 	ListRunPage(RequestContext, PageRequest) (PageResponse[AgentRun], error)
 	CreateRun(RequestContext, CreateAgentRunInput) (AgentRun, error)
 	Chat(RequestContext, domain.AgentChatInput, AgentChatEmitFunc) (AgentRun, error)
+	ExecuteConfirmation(RequestContext, string, domain.ExecuteAgentConfirmationInput) (domain.AgentConfirmationExecution, error)
 	ListSessions(RequestContext, domain.ListAgentSessionsQuery) ([]domain.AgentSession, error)
 	CreateSession(RequestContext, domain.CreateAgentSessionInput) (domain.AgentSession, error)
 	GetSession(RequestContext, string) (domain.AgentSession, error)
@@ -214,6 +226,10 @@ type AgentFacade interface {
 	ClearSessionContext(RequestContext, string) (domain.AgentSession, error)
 	DeleteSession(RequestContext, string) (domain.AgentSession, error)
 	ListSessionMessages(RequestContext, string) ([]domain.AgentSessionMessage, error)
+	UploadSessionFile(RequestContext, string, domain.UploadAgentSessionFileInput) (domain.AgentSessionFile, error)
+	ListSessionFiles(RequestContext, string) ([]domain.AgentSessionFile, error)
+	DownloadSessionFile(RequestContext, string, string) (domain.AgentSessionFileDownload, error)
+	DeleteSessionFile(RequestContext, string, string) (domain.AgentSessionFile, error)
 	ListMemories(RequestContext, domain.ListAgentMemoriesQuery) ([]domain.AgentMemory, error)
 	CreateMemory(RequestContext, domain.CreateAgentMemoryInput) (domain.AgentMemory, error)
 	UpdateMemory(RequestContext, string, domain.UpdateAgentMemoryInput) (domain.AgentMemory, error)
@@ -225,6 +241,17 @@ type AgentFacade interface {
 	DeleteModel(RequestContext, string) (domain.AgentModel, error)
 	SyncModel(RequestContext, string) (domain.AgentModel, error)
 	TestModel(RequestContext, string) (domain.AgentModel, error)
+	ListKnowledgeBases(RequestContext) ([]domain.KnowledgeBase, error)
+	GetKnowledgeBase(RequestContext, string) (domain.KnowledgeBase, error)
+	CreateKnowledgeBase(RequestContext, domain.CreateKnowledgeBaseInput) (domain.KnowledgeBase, error)
+	UpdateKnowledgeBase(RequestContext, string, domain.UpdateKnowledgeBaseInput) (domain.KnowledgeBase, error)
+	DeleteKnowledgeBase(RequestContext, string) (domain.KnowledgeBase, error)
+	ListKnowledgeDocuments(RequestContext, string) ([]domain.KnowledgeDocument, error)
+	CreateKnowledgeDocument(RequestContext, string, domain.CreateKnowledgeDocumentInput) (domain.KnowledgeDocument, error)
+	UploadKnowledgeDocument(RequestContext, string, domain.UploadKnowledgeDocumentInput) (domain.KnowledgeDocument, error)
+	UpdateKnowledgeDocument(RequestContext, string, string, domain.UpdateKnowledgeDocumentInput) (domain.KnowledgeDocument, error)
+	DeleteKnowledgeDocument(RequestContext, string, string) (domain.KnowledgeDocument, error)
+	SearchKnowledge(RequestContext, domain.KnowledgeSearchInput) (domain.KnowledgeSearchResult, error)
 	ListDefinitions(RequestContext) ([]domain.AgentDefinition, error)
 	GetDefinition(RequestContext, string) (domain.AgentDefinition, error)
 	CreateDefinition(RequestContext, domain.CreateAgentDefinitionInput) (domain.AgentDefinition, error)
@@ -235,6 +262,9 @@ type AgentFacade interface {
 	Trial(RequestContext, string, domain.AgentTrialInput) (domain.AgentTrialResult, error)
 	RollbackDefinition(RequestContext, string, domain.RollbackAgentDefinitionInput) (domain.AgentDefinition, error)
 	Tools(RequestContext) ([]domain.AgentToolMeta, error)
+	ListExternalTools(RequestContext) ([]domain.AgentExternalTool, error)
+	CreateExternalTool(RequestContext, domain.CreateAgentExternalToolInput) (domain.AgentExternalTool, error)
+	DeleteExternalTool(RequestContext, string) (domain.AgentExternalTool, error)
 }
 
 // NotificationFacade 定義系統通知 facade 的行為契約。

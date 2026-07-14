@@ -168,25 +168,46 @@ func TestWithTenantTransactionRollsBackPanic(t *testing.T) {
 	})
 }
 
-// TestAttendanceClockRecordAcceptedUniqueInvariant 驗證考勤打卡 record accepted unique invariant。
-func TestAttendanceClockRecordAcceptedUniqueInvariant(t *testing.T) {
+// TestAttendanceClockRecordMultiPunchBoundariesAndIdempotency 驗證多次打卡邊界、作廢排除及客戶端事件冪等性。
+func TestAttendanceClockRecordMultiPunchBoundariesAndIdempotency(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()
-	now := time.Now()
-	first := domain.AttendanceClockRecord{ID: "acr-1", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_in", ClockedAt: now, RecordStatus: "accepted", Source: "geofence", CreatedAt: now}
-	if err := store.UpsertAttendanceClockRecord(ctx, first); err != nil {
-		t.Fatal(err)
+	base := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	records := []domain.AttendanceClockRecord{
+		{ID: "acr-in-first", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_in", ClientEventID: "evt-in-first", ClockedAt: base, RecordStatus: "accepted", Source: "geofence", CreatedAt: base},
+		{ID: "acr-out-middle", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_out", ClientEventID: "evt-out-middle", ClockedAt: base.Add(2 * time.Hour), RecordStatus: "accepted", Source: "geofence", CreatedAt: base.Add(2 * time.Hour)},
+		{ID: "acr-in-middle", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_in", ClientEventID: "evt-in-middle", ClockedAt: base.Add(4 * time.Hour), RecordStatus: "accepted", Source: "geofence", CreatedAt: base.Add(4 * time.Hour)},
+		{ID: "acr-out-last", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_out", ClientEventID: "evt-out-last", ClockedAt: base.Add(10 * time.Hour), RecordStatus: "accepted", Source: "geofence", CreatedAt: base.Add(10 * time.Hour)},
+		{ID: "acr-out-last-z", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_out", ClientEventID: "evt-out-last-z", ClockedAt: base.Add(10 * time.Hour), RecordStatus: "accepted", Source: "geofence", CreatedAt: base.Add(10 * time.Hour)},
+		{ID: "acr-out-voided", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_out", ClientEventID: "evt-out-voided", ClockedAt: base.Add(11 * time.Hour), RecordStatus: "accepted", Source: "geofence", Voided: true, CreatedAt: base.Add(11 * time.Hour)},
 	}
-	duplicate := first
-	duplicate.ID = "acr-2"
-	err := store.UpsertAttendanceClockRecord(ctx, duplicate)
+	for _, record := range records {
+		if err := store.UpsertAttendanceClockRecord(ctx, record); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	duplicateEvent := records[0]
+	duplicateEvent.ID = "acr-duplicate-event"
+	err := store.UpsertAttendanceClockRecord(ctx, duplicateEvent)
 	if appErr, ok := domain.AsAppError(err); !ok || appErr.Code != "conflict" {
-		t.Fatalf("expected accepted duplicate conflict, got %v", err)
+		t.Fatalf("expected client event conflict, got %v", err)
 	}
-	duplicate.RecordStatus = "rejected"
-	duplicate.RejectionReason = "duplicate"
-	if err := store.UpsertAttendanceClockRecord(ctx, duplicate); err != nil {
-		t.Fatalf("expected rejected duplicate attempt to be stored, got %v", err)
+	byEvent, ok, err := store.GetAttendanceClockRecordByClientEventID(ctx, "tenant-1", "evt-out-middle")
+	if err != nil || !ok || byEvent.ID != "acr-out-middle" {
+		t.Fatalf("expected idempotency lookup, ok=%v record=%+v err=%v", ok, byEvent, err)
+	}
+	earliestIn, ok, err := store.GetEarliestAcceptedAttendanceClockIn(ctx, "tenant-1", "emp-1", "2026-06-10")
+	if err != nil || !ok || earliestIn.ID != "acr-in-first" {
+		t.Fatalf("expected earliest clock-in, ok=%v record=%+v err=%v", ok, earliestIn, err)
+	}
+	latestOut, ok, err := store.GetLatestAcceptedAttendanceClockOut(ctx, "tenant-1", "emp-1", "2026-06-10")
+	if err != nil || !ok || latestOut.ID != "acr-out-last-z" {
+		t.Fatalf("expected latest non-voided clock-out, ok=%v record=%+v err=%v", ok, latestOut, err)
+	}
+	latest, ok, err := store.GetLatestAcceptedAttendanceClockRecord(ctx, "tenant-1", "emp-1", "2026-06-10")
+	if err != nil || !ok || latest.ID != "acr-out-last-z" {
+		t.Fatalf("expected latest non-voided clock record, ok=%v record=%+v err=%v", ok, latest, err)
 	}
 }
 

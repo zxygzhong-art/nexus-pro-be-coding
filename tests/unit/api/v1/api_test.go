@@ -291,8 +291,8 @@ func TestAttendanceClockRecordCreateRejectsInvalidBody(t *testing.T) {
 	}
 }
 
-// TestAttendanceClockRecordDuplicatePunchReturnsConflict 驗證重複打卡不會新增打卡紀錄。
-func TestAttendanceClockRecordDuplicatePunchReturnsConflict(t *testing.T) {
+// TestAttendanceClockRecordDuplicatePunchReturnsRejectedAudit 驗證重複打卡會留下拒絕原因供審計。
+func TestAttendanceClockRecordDuplicatePunchReturnsRejectedAudit(t *testing.T) {
 	now := time.Date(2026, 7, 2, 8, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
 	handler := newTestAPIForAccountNow("acct-employee", now, nil)
 	body := `{"direction":"clock_in","latitude":25.033964,"longitude":121.564468,"accuracy_meters":10,"location_source":"browser_geolocation"}`
@@ -313,8 +313,12 @@ func TestAttendanceClockRecordDuplicatePunchReturnsConflict(t *testing.T) {
 	secondReq.Header.Set("Content-Type", "application/json")
 	secondRec := httptest.NewRecorder()
 	handler.ServeHTTP(secondRec, secondReq)
-	if secondRec.Code != http.StatusConflict {
-		t.Fatalf("expected 409 for duplicate clock in, got %d: %s", secondRec.Code, secondRec.Body.String())
+	if secondRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201 for rejected duplicate audit record, got %d: %s", secondRec.Code, secondRec.Body.String())
+	}
+	second := decodeData[domain.AttendanceClockRecord](t, secondRec.Body.Bytes())
+	if second.RecordStatus != "rejected" || second.RejectionReason != "duplicate" {
+		t.Fatalf("expected rejected duplicate clock in, got %+v", second)
 	}
 }
 

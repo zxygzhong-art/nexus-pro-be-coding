@@ -178,15 +178,18 @@ type WorkflowReviewLogItem struct {
 
 // WorkflowReviewItem 定義流程審核項目的資料結構。
 type WorkflowReviewItem struct {
-	ID         string                  `json:"id"`
-	Status     string                  `json:"status"`
-	StatusText string                  `json:"status_text"`
-	Title      string                  `json:"title"`
-	Who        string                  `json:"who,omitempty"`
-	Desc       string                  `json:"desc"`
-	Time       string                  `json:"time"`
-	ReviewLog  []WorkflowReviewLogItem `json:"review_log,omitempty"`
-	Instance   FormInstance            `json:"instance"`
+	ID          string                     `json:"id"`
+	TemplateKey string                     `json:"template_key"`
+	FormKind    string                     `json:"form_kind"`
+	Fields      []PlatformFormBuilderField `json:"fields"`
+	Status      string                     `json:"status"`
+	StatusText  string                     `json:"status_text"`
+	Title       string                     `json:"title"`
+	Who         string                     `json:"who,omitempty"`
+	Desc        string                     `json:"desc"`
+	Time        string                     `json:"time"`
+	ReviewLog   []WorkflowReviewLogItem    `json:"review_log,omitempty"`
+	Instance    FormInstance               `json:"instance"`
 }
 
 // WorkflowReviewQueueResponse 定義流程審核佇列回應的資料結構。

@@ -42,6 +42,15 @@ func TestOpenTelemetryConfig(t *testing.T) {
 	}
 }
 
+// TestAgentToolCredentialEncryptionConfig verifies the external-tool key is loaded without transformation.
+func TestAgentToolCredentialEncryptionConfig(t *testing.T) {
+	t.Setenv("AGENT_TOOL_CREDENTIAL_ENCRYPTION_KEY", "ZmFrZS1rZXk=")
+	cfg := config.Load()
+	if cfg.AgentToolCredentialEncryptionKey != "ZmFrZS1rZXk=" {
+		t.Fatalf("unexpected agent tool credential key: %q", cfg.AgentToolCredentialEncryptionKey)
+	}
+}
+
 // TestOpenFGAScopeCheckConfig 驗證 OpenFGA scope check 開關。
 func TestOpenFGAScopeCheckConfig(t *testing.T) {
 	t.Setenv("OPENFGA_SCOPE_CHECK_ENABLED", "")

@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -12,6 +14,8 @@ import (
 	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/service"
 )
+
+const pathParamAgentFileID = "file_id"
 
 // AgentCtrl 定義 agent ctrl 的資料結構。
 type AgentCtrl struct {
@@ -25,6 +29,7 @@ func (c AgentCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	agents.GET("/runs", c.routes.Handle("agent.run", "read", c.listAgentRuns))
 	agents.POST("/runs", c.routes.Handle("agent.run", "create", c.createAgentRun))
 	agents.POST("/chat", c.routes.Handle("agent.run", "create", c.chatAgent))
+	agents.POST("/confirmations/:id/execute", c.routes.Handle("agent.run", "create", c.executeAgentConfirmation, PathParam(PathParamID)))
 	agents.GET("/sessions", c.routes.Handle("agent.run", "read", c.listAgentSessions))
 	agents.POST("/sessions", c.routes.Handle("agent.run", "create", c.createAgentSession))
 	agents.GET("/sessions/:id", c.routes.Handle("agent.run", "read", c.getAgentSession, ResourceID(PathParamID)))
@@ -32,10 +37,28 @@ func (c AgentCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	agents.POST("/sessions/:id/clear-context", c.routes.Handle("agent.run", "create", c.clearAgentSessionContext, ResourceID(PathParamID)))
 	agents.DELETE("/sessions/:id", c.routes.Handle("agent.run", "delete", c.deleteAgentSession, ResourceID(PathParamID)))
 	agents.GET("/sessions/:id/messages", c.routes.Handle("agent.run", "read", c.listAgentSessionMessages, ResourceID(PathParamID)))
+	agents.GET("/sessions/:id/files", c.routes.Handle("agent.run", "read", c.listAgentSessionFiles, ResourceID(PathParamID)))
+	agents.POST("/sessions/:id/files", c.routes.Handle("agent.run", "create", c.uploadAgentSessionFile, ResourceID(PathParamID)))
+	agents.GET("/sessions/:id/files/:file_id", c.routes.Handle("agent.run", "read", c.downloadAgentSessionFile, ResourceID(PathParamID), PathParam(pathParamAgentFileID)))
+	agents.DELETE("/sessions/:id/files/:file_id", c.routes.Handle("agent.run", "create", c.deleteAgentSessionFile, ResourceID(PathParamID), PathParam(pathParamAgentFileID)))
 	agents.GET("/memories", c.routes.Handle("agent.run", "read", c.listAgentMemories))
 	agents.POST("/memories", c.routes.Handle("agent.run", "create", c.createAgentMemory))
 	agents.PATCH("/memories/:id", c.routes.Handle("agent.run", "update", c.updateAgentMemory, ResourceID(PathParamID)))
 	agents.DELETE("/memories/:id", c.routes.Handle("agent.run", "delete", c.deleteAgentMemory, ResourceID(PathParamID)))
+}
+
+// executeAgentConfirmation 執行使用者在 Agent 卡片上明確確認的一次性操作。
+func (c AgentCtrl) executeAgentConfirmation(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.ExecuteAgentConfirmationInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	result, err := c.svc.ExecuteConfirmation(ctx, r.PathValue(PathParamID), input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, result)
+	return nil
 }
 
 // listAgentRuns 處理 agent 執行紀錄的 HTTP 請求。
@@ -239,6 +262,65 @@ func (c AgentCtrl) chatAgent(w http.ResponseWriter, r *http.Request, ctx domain.
 		}
 		return err
 	}
+	return nil
+}
+
+// uploadAgentSessionFile stages a UTF-8 text attachment in the current context version.
+func (c AgentCtrl) uploadAgentSessionFile(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	r.Body = http.MaxBytesReader(w, r.Body, 11<<20)
+	if err := r.ParseMultipartForm(11 << 20); err != nil {
+		return domain.BadRequest("invalid multipart form: " + err.Error())
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		return domain.BadRequest("file is required")
+	}
+	defer file.Close()
+	content, err := io.ReadAll(io.LimitReader(file, (10<<20)+1))
+	if err != nil {
+		return domain.BadRequest("read conversation file: " + err.Error())
+	}
+	item, err := c.svc.UploadSessionFile(ctx, r.PathValue(PathParamID), domain.UploadAgentSessionFileInput{
+		Filename: header.Filename, ContentType: header.Header.Get("Content-Type"), Content: content,
+	})
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, item)
+	return nil
+}
+
+// listAgentSessionFiles lists files visible in the current context version.
+func (c AgentCtrl) listAgentSessionFiles(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	items, err := c.svc.ListSessionFiles(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	return nil
+}
+
+// downloadAgentSessionFile proxies authorized object bytes without exposing SFTPGo credentials or keys.
+func (c AgentCtrl) downloadAgentSessionFile(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	download, err := c.svc.DownloadSessionFile(ctx, r.PathValue(PathParamID), r.PathValue(pathParamAgentFileID))
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", download.File.ContentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": download.File.OriginalFilename}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write(download.Content)
+	return err
+}
+
+// deleteAgentSessionFile deletes only a draft that has not been attached to a message.
+func (c AgentCtrl) deleteAgentSessionFile(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.DeleteSessionFile(ctx, r.PathValue(PathParamID), r.PathValue(pathParamAgentFileID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 

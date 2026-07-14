@@ -193,8 +193,8 @@ func TestCheckRequiresSpecificTarget(t *testing.T) {
 	}
 }
 
-// TestCreateAgentRunReturnsPlaceholderWithoutKnowledgeArticles 驗證 agent 執行在沒有知識文章表時回傳占位回答。
-func TestCreateAgentRunReturnsPlaceholderWithoutKnowledgeArticles(t *testing.T) {
+// TestCreateAgentRunReturnsNoMatchWithoutBoundKnowledge verifies the fail-closed empty binding behavior.
+func TestCreateAgentRunReturnsNoMatchWithoutBoundKnowledge(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
 	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
@@ -215,15 +215,22 @@ func TestCreateAgentRunReturnsPlaceholderWithoutKnowledgeArticles(t *testing.T) 
 		DirectPermissionSetIDs: []string{"ps-agent"},
 		CreatedAt:              now,
 	})
+	_ = store.UpsertAgentDefinition(context.Background(), domain.AgentDefinition{
+		ID: "agent-1", TenantID: "tenant-1", Name: "Test Agent", SystemPrompt: "Internal system prompt",
+		Status: domain.AgentDefinitionStatusPublished, Visibility: domain.AgentVisibilityAll, CreatedAt: now, UpdatedAt: now,
+	})
 
-	run, err := service.New(store).Agent().CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.CreateAgentRunInput{Prompt: "请"})
+	run, err := service.New(store).Agent().CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.CreateAgentRunInput{AgentID: "agent-1", Prompt: "请"})
 	if err != nil {
 		t.Fatal(err)
+	}
+	if run.Prompt != "请" {
+		t.Fatalf("expected persisted prompt to contain only the user input, got %q", run.Prompt)
 	}
 	if len(run.References) != 0 {
 		t.Fatalf("expected no knowledge references, got %+v", run.References)
 	}
-	if !strings.Contains(run.Answer, "没有可检索的知识库内容") {
+	if !strings.Contains(run.Answer, "没有匹配内容") {
 		t.Fatalf("unexpected placeholder answer: %s", run.Answer)
 	}
 	if len(run.ToolDecisions) != 1 || !run.ToolDecisions[0].Allowed {
@@ -1241,6 +1248,10 @@ func TestEmployeeExportAppliesPermissionScopedFieldPoliciesToJSONAndCSV(t *testi
 		},
 		CreatedAt: now,
 	})
+	_ = store.UpsertPermissionCatalogItem(context.Background(), domain.PermissionCatalogItem{
+		ID: "perm-export", TenantID: "tenant-1", Application: "hr", Resource: "hr.employee", Action: "export",
+		PermissionType: domain.PermissionTypeAPI, Name: "Employee export", CreatedAt: now,
+	})
 	_ = store.UpsertFieldPolicy(context.Background(), domain.FieldPolicy{
 		ID:              "fp-export-phone",
 		TenantID:        "tenant-1",
@@ -1248,7 +1259,7 @@ func TestEmployeeExportAppliesPermissionScopedFieldPoliciesToJSONAndCSV(t *testi
 		ResourceType:    "employee",
 		FieldName:       "phone",
 		Effect:          "hide",
-		PermissionID:    "hr.employee.export",
+		PermissionID:    "perm-export",
 		CreatedAt:       now,
 	})
 	_ = store.UpsertFieldPolicy(context.Background(), domain.FieldPolicy{
@@ -1547,7 +1558,7 @@ func TestSelfScopedLeaveReadOnlyReturnsCurrentEmployeeItems(t *testing.T) {
 	}
 }
 
-// TestAttendanceClockRecordsAcceptedRejectedAndDuplicate 驗證考勤打卡 records accepted rejected and duplicate。
+// TestAttendanceClockRecordsAcceptedRejectedAndRepeated 驗證有效、拒絕及重複打卡都保留逐筆記錄。
 func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
 	store, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
 
@@ -1568,7 +1579,7 @@ func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
 	if accepted.Latitude != 0 || accepted.Longitude != 0 || accepted.DeviceID != "" || accepted.DeviceInfo != nil {
 		t.Fatalf("expected create response to hide clock location evidence, got %+v", accepted)
 	}
-	stored, ok, err := store.GetAcceptedAttendanceClockRecord(context.Background(), "tenant-1", "emp-1", accepted.WorkDate, "clock_in")
+	stored, ok, err := store.GetEarliestAcceptedAttendanceClockIn(context.Background(), "tenant-1", "emp-1", accepted.WorkDate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1593,13 +1604,13 @@ func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
 	}
 
 	setNow(attendanceFixtureClockInTime().Add(30 * time.Minute))
-	_, err = svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+	repeated, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
 		Direction: "clock_in",
 		Latitude:  25.033964,
 		Longitude: 121.564468,
 	})
-	if err == nil || !strings.Contains(err.Error(), "accepted clock record already exists") {
-		t.Fatalf("expected duplicate clock-in conflict, got %v", err)
+	if err != nil || repeated.RecordStatus != "rejected" || repeated.RejectionReason != "duplicate" {
+		t.Fatalf("expected repeated clock-in to be stored as rejected duplicate, got record=%+v err=%v", repeated, err)
 	}
 
 	setNow(attendanceFixtureClockOutTime())
@@ -1607,12 +1618,88 @@ func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.NextAction != "clock_out" || status.ClockIn == nil || status.ClockOut != nil {
+	if status.NextAction != "clock_out" || status.ClockIn == nil || status.ClockOut != nil || status.PunchCount != 1 || status.CanClockIn {
 		t.Fatalf("unexpected clock status: %+v", status)
 	}
 }
 
-// TestAttendanceClockRejectsInsufficientWorkHoursAndAllowsRetry 驗證弹性工时不足时保留异常记录且仍可重新打卡。
+// TestAttendanceClockClientEventIDIsIdempotent 驗證網路重試不會重複建立原始打卡事件。
+func TestAttendanceClockClientEventIDIsIdempotent(t *testing.T) {
+	store, svc, employeeCtx, _, _ := newAttendanceFixture(t)
+	input := domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_in",
+		ClientEventID:  "punch-event-1",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	}
+	first, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retried, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if retried.ID != first.ID {
+		t.Fatalf("idempotent retry created a different record: first=%s retry=%s", first.ID, retried.ID)
+	}
+	records, err := store.ListAttendanceClockRecords(context.Background(), "tenant-1", domain.AttendanceClockRecordQuery{EmployeeID: "emp-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("idempotent retry stored %d records, want 1", len(records))
+	}
+}
+
+// TestAttendanceClockOneHourPlusApprovedLeaveCompletesDay 驗證工作一小時後請假可正常打下班卡。
+func TestAttendanceClockOneHourPlusApprovedLeaveCompletesDay(t *testing.T) {
+	store, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
+	clockInAt := attendanceFixtureClockInTime()
+	if _, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_in",
+		ClientEventID:  "one-hour-in",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{
+		ID:         "leave-rest-of-day",
+		TenantID:   "tenant-1",
+		EmployeeID: "emp-1",
+		LeaveType:  "annual",
+		StartAt:    clockInAt.Add(time.Hour),
+		EndAt:      clockInAt.Add(9 * time.Hour),
+		Hours:      7,
+		Status:     "approved",
+		CreatedAt:  clockInAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	setNow(clockInAt.Add(time.Hour))
+	clockOut, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_out",
+		ClientEventID:  "one-hour-out",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	})
+	if err != nil || clockOut.RecordStatus != "accepted" {
+		t.Fatalf("one-hour clock-out should be accepted, record=%+v err=%v", clockOut, err)
+	}
+	status, err := svc.Attendance().AttendanceClockStatus(employeeCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.DayStatus != "complete" || status.WorkedMinutes != 60 || status.WorkedMinutes+status.ApprovedLeaveMinutes != status.RequiredMinutes || status.ClockOut == nil {
+		t.Fatalf("approved leave should complete the day projection, got %+v", status)
+	}
+}
+
+// TestAttendanceClockKeepsEarlyAndFinalClockOut 驗證彈性工時不足由日投影標記，後續下班卡可更新尾卡。
 func TestAttendanceClockRejectsInsufficientWorkHoursAndAllowsRetry(t *testing.T) {
 	store, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
 	clockInAt := attendanceFixtureClockInTime()
@@ -1637,15 +1724,15 @@ func TestAttendanceClockRejectsInsufficientWorkHoursAndAllowsRetry(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if tooShort.RecordStatus != "abnormal" || tooShort.RejectionReason != "insufficient_work_hours" {
-		t.Fatalf("expected insufficient_work_hours abnormal attempt, got %+v", tooShort)
+	if tooShort.RecordStatus != "accepted" || tooShort.RejectionReason != "" {
+		t.Fatalf("expected early clock-out to remain an accepted raw punch, got %+v", tooShort)
 	}
 	status, err := svc.Attendance().AttendanceClockStatus(employeeCtx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.NextAction != "clock_out" || status.ClockIn == nil || status.ClockOut != nil {
-		t.Fatalf("expected clock-out retry to remain available, got %+v", status)
+	if status.NextAction != "clock_out" || status.ClockIn == nil || status.ClockOut == nil || status.DayStatus != "abnormal" || status.CanClockIn || !status.CanClockOut {
+		t.Fatalf("expected early clock-out to produce an abnormal day projection, got %+v", status)
 	}
 	records, err := store.ListAttendanceClockRecords(context.Background(), "tenant-1", domain.AttendanceClockRecordQuery{EmployeeID: "emp-1", FromDate: clockIn.WorkDate, ToDate: clockIn.WorkDate})
 	if err != nil {
@@ -1655,7 +1742,7 @@ func TestAttendanceClockRejectsInsufficientWorkHoursAndAllowsRetry(t *testing.T)
 		t.Fatalf("expected accepted clock-in and abnormal audit attempt, got %+v", records)
 	}
 
-	setNow(clockInAt.Add(8 * time.Hour))
+	setNow(clockInAt.Add(9 * time.Hour))
 	clockOut, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
 		Direction:      "clock_out",
 		Latitude:       25.033964,
@@ -1672,7 +1759,7 @@ func TestAttendanceClockRejectsInsufficientWorkHoursAndAllowsRetry(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.NextAction != "complete" || status.ClockOut == nil {
+	if status.NextAction != "clock_out" || status.ClockOut == nil || status.DayStatus != "complete" || status.CanClockIn || !status.CanClockOut {
 		t.Fatalf("expected completed status after valid retry, got %+v", status)
 	}
 
@@ -1709,18 +1796,18 @@ func TestAttendanceClockUsesElapsedHoursInsteadOfFixedClockOutTime(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if early.RecordStatus != "abnormal" || early.RejectionReason != "insufficient_work_hours" {
-		t.Fatalf("expected insufficient flexible hours to stay abnormal, got %+v", early)
+	if early.RecordStatus != "accepted" || early.RejectionReason != "" {
+		t.Fatalf("expected short flexible clock-out to remain accepted raw evidence, got %+v", early)
 	}
 	status, err := svc.Attendance().AttendanceClockStatus(employeeCtx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.NextAction != "clock_out" || status.ClockOut != nil {
-		t.Fatalf("expected early clock-out to remain retryable, got %+v", status)
+	if status.NextAction != "clock_out" || status.ClockOut == nil || status.DayStatus != "abnormal" || status.CanClockIn || !status.CanClockOut {
+		t.Fatalf("expected early clock-out to remain visible as an abnormal day, got %+v", status)
 	}
 
-	setNow(clockInAt.Add(8 * time.Hour))
+	setNow(clockInAt.Add(9 * time.Hour))
 	valid, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
 		Direction:      "clock_out",
 		Latitude:       25.033964,
@@ -1774,13 +1861,14 @@ func TestAttendanceClockFixedModeRecordsLateAndEarlyPunchesAsAcceptedAnomalies(t
 	if late.RecordStatus != "accepted" || late.RejectionReason != "outside_time_window" {
 		t.Fatalf("expected fixed-mode late clock-in to be recorded as anomaly, got %+v", late)
 	}
-	if _, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+	secondIn, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
 		Direction:      "clock_in",
 		Latitude:       25.033964,
 		Longitude:      121.564468,
 		AccuracyMeters: 12,
-	}); err == nil || !strings.Contains(err.Error(), "accepted clock record already exists") {
-		t.Fatalf("expected duplicate fixed-mode clock-in conflict, got %v", err)
+	})
+	if err != nil || secondIn.RecordStatus != "rejected" || secondIn.RejectionReason != "duplicate" {
+		t.Fatalf("expected repeated fixed-mode clock-in to be rejected, got record=%+v err=%v", secondIn, err)
 	}
 
 	setNow(clockInAt.Add(8 * time.Hour))
@@ -1800,19 +1888,19 @@ func TestAttendanceClockFixedModeRecordsLateAndEarlyPunchesAsAcceptedAnomalies(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.NextAction != "complete" || status.ClockIn == nil || status.ClockOut == nil {
-		t.Fatalf("expected fixed-mode anomaly punches to complete attendance, got %+v", status)
+	if status.NextAction != "clock_out" || status.ClockIn == nil || status.ClockOut == nil || status.DayStatus != "abnormal" || status.CanClockIn || !status.CanClockOut {
+		t.Fatalf("expected fixed-mode punches to produce an abnormal daily projection, got %+v", status)
 	}
 
 	setNow(clockInAt.Add(9 * time.Hour))
-	_, err = svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+	finalOut, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
 		Direction:      "clock_out",
 		Latitude:       25.033964,
 		Longitude:      121.564468,
 		AccuracyMeters: 12,
 	})
-	if err == nil || !strings.Contains(err.Error(), "accepted clock record already exists") {
-		t.Fatalf("expected fixed-mode duplicate clock-out conflict, got %v", err)
+	if err != nil || finalOut.RecordStatus != "accepted" {
+		t.Fatalf("expected later fixed-mode clock-out to be stored, got record=%+v err=%v", finalOut, err)
 	}
 }
 
@@ -1857,13 +1945,14 @@ func TestAttendanceClockFlexibleBoundsKeepAbnormalClockOutRetryable(t *testing.T
 	if earlyIn.RecordStatus != "accepted" || earlyIn.RejectionReason != "outside_time_window" {
 		t.Fatalf("expected early flexible clock-in to be recorded as anomaly, got %+v", earlyIn)
 	}
-	if _, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+	secondIn, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
 		Direction:      "clock_in",
 		Latitude:       25.033964,
 		Longitude:      121.564468,
 		AccuracyMeters: 12,
-	}); err == nil || !strings.Contains(err.Error(), "accepted clock record already exists") {
-		t.Fatalf("expected duplicate flexible clock-in conflict, got %v", err)
+	})
+	if err != nil || secondIn.RecordStatus != "rejected" || secondIn.RejectionReason != "duplicate" {
+		t.Fatalf("expected repeated flexible clock-in to be rejected, got record=%+v err=%v", secondIn, err)
 	}
 
 	setNow(base.Add(11*time.Hour + 30*time.Minute))
@@ -1876,15 +1965,74 @@ func TestAttendanceClockFlexibleBoundsKeepAbnormalClockOutRetryable(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if lateOut.RecordStatus != "abnormal" || lateOut.RejectionReason != "outside_time_window" {
-		t.Fatalf("expected late flexible clock-out to stay retryable, got %+v", lateOut)
+	if lateOut.RecordStatus != "accepted" || lateOut.RejectionReason != "outside_time_window" {
+		t.Fatalf("expected late flexible clock-out to remain accepted raw evidence, got %+v", lateOut)
 	}
 	status, err := svc.Attendance().AttendanceClockStatus(employeeCtx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.NextAction != "clock_out" || status.ClockIn == nil || status.ClockOut != nil {
-		t.Fatalf("expected flexible abnormal clock-out retry to remain available, got %+v", status)
+	if status.NextAction != "clock_out" || status.ClockIn == nil || status.ClockOut == nil || status.DayStatus != "abnormal" || status.CanClockIn || !status.CanClockOut {
+		t.Fatalf("expected flexible bounds anomaly in daily projection, got %+v", status)
+	}
+}
+
+// TestAttendanceClockResetsNormalWorkDateAfterMidnight verifies a normal shift never inherits yesterday's punch state.
+func TestAttendanceClockResetsNormalWorkDateAfterMidnight(t *testing.T) {
+	store, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
+	now := attendanceFixtureClockInTime()
+	_ = store.UpsertAttendanceShiftAssignment(context.Background(), domain.AttendanceShiftAssignment{
+		ID:            "asa-day-1",
+		TenantID:      "tenant-1",
+		EmployeeID:    "emp-1",
+		ShiftID:       "ash-1",
+		WorksiteID:    "aws-1",
+		EffectiveFrom: now.Add(-24 * time.Hour),
+		Status:        "active",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
+	if _, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_in",
+		ClientEventID:  "normal-day-in",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	setNow(attendanceFixtureClockOutTime())
+	if _, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_out",
+		ClientEventID:  "normal-day-out",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	setNow(attendanceFixtureClockOutTime().Add(8 * time.Hour))
+	status, err := svc.Attendance().AttendanceClockStatus(employeeCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.WorkDate != "2026-06-11" || status.ClockIn != nil || status.ClockOut != nil || status.NextAction != "clock_in" || !status.CanClockIn || status.CanClockOut {
+		t.Fatalf("expected a fresh normal work date after midnight, got %+v", status)
+	}
+
+	clockOut, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_out",
+		ClientEventID:  "normal-next-day-out",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clockOut.WorkDate != "2026-06-11" || clockOut.RecordStatus != "rejected" || clockOut.RejectionReason != "invalid_sequence" {
+		t.Fatalf("expected next-day clock-out to require a new clock-in, got %+v", clockOut)
 	}
 }
 
@@ -1943,7 +2091,7 @@ func TestAttendanceClockReadAppliesFieldPolicyToGPSAndDeviceInfo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw, ok, err := store.GetAcceptedAttendanceClockRecord(context.Background(), "tenant-1", "emp-1", created.WorkDate, "clock_in")
+	raw, ok, err := store.GetEarliestAcceptedAttendanceClockIn(context.Background(), "tenant-1", "emp-1", created.WorkDate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2044,6 +2192,17 @@ func TestAttendanceClockSupportsOvernightShiftWorkDate(t *testing.T) {
 		CreatedAt:     now,
 		UpdatedAt:     now,
 	})
+	_ = store.UpsertAttendanceShiftAssignment(context.Background(), domain.AttendanceShiftAssignment{
+		ID:            "asa-night-1",
+		TenantID:      "tenant-1",
+		EmployeeID:    "emp-1",
+		ShiftID:       "ash-1",
+		WorksiteID:    "aws-1",
+		EffectiveFrom: now.Add(-24 * time.Hour),
+		Status:        "active",
+		CreatedAt:     now,
+		UpdatedAt:     now,
+	})
 
 	setNow(time.Date(2026, 6, 10, 14, 30, 0, 0, time.UTC))
 	clockIn, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
@@ -2076,7 +2235,7 @@ func TestAttendanceClockSupportsOvernightShiftWorkDate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.WorkDate != "2026-06-10" || status.NextAction != "complete" || status.ClockIn == nil || status.ClockOut == nil {
+	if status.WorkDate != "2026-06-10" || status.NextAction != "clock_out" || status.ClockIn == nil || status.ClockOut == nil || status.CanClockIn || !status.CanClockOut {
 		t.Fatalf("expected completed night-shift status for previous work date, got %+v", status)
 	}
 }
@@ -2130,7 +2289,7 @@ func TestAttendanceCorrectionApproveCreatesManualRecordAndRejectDoesNot(t *testi
 	if approved.Status != "approved" || approved.ClockRecordID == "" {
 		t.Fatalf("expected approved correction with manual record, got %+v", approved)
 	}
-	record, ok, err := store.GetAcceptedAttendanceClockRecord(context.Background(), "tenant-1", "emp-1", approved.WorkDate, "clock_in")
+	record, ok, err := store.GetEarliestAcceptedAttendanceClockIn(context.Background(), "tenant-1", "emp-1", approved.WorkDate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2153,10 +2312,63 @@ func TestAttendanceCorrectionApproveCreatesManualRecordAndRejectDoesNot(t *testi
 	if rejected.Status != "rejected" || rejected.ClockRecordID != "" {
 		t.Fatalf("expected rejected correction without record, got %+v", rejected)
 	}
-	if _, ok, err := store.GetAcceptedAttendanceClockRecord(context.Background(), "tenant-1", "emp-1", rejected.WorkDate, "clock_out"); err != nil {
+	if _, ok, err := store.GetLatestAcceptedAttendanceClockOut(context.Background(), "tenant-1", "emp-1", rejected.WorkDate); err != nil {
 		t.Fatal(err)
 	} else if ok {
 		t.Fatal("rejecting a correction should not create an accepted clock-out record")
+	}
+}
+
+// TestAttendanceCorrectionReplaceVoidsTargetAndCreatesReplacement 驗證誤卡保留審計但不再參與首尾投影。
+func TestAttendanceCorrectionReplaceVoidsTargetAndCreatesReplacement(t *testing.T) {
+	store, svc, employeeCtx, adminCtx, _ := newAttendanceFixture(t)
+	target, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_in",
+		ClientEventID:  "mistaken-clock-in",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacementAt := attendanceFixtureClockInTime().Add(15 * time.Minute)
+	pending, err := svc.Attendance().CreateAttendanceCorrection(employeeCtx, domain.CreateAttendanceCorrectionInput{
+		CorrectionType:      "replace_record",
+		TargetClockRecordID: target.ID,
+		Direction:           "clock_in",
+		RequestedClockedAt:  replacementAt.Format(time.RFC3339),
+		Reason:              "selected the wrong punch time",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := svc.Attendance().ApproveAttendanceCorrection(adminCtx, pending.ID, domain.ReviewAttendanceCorrectionInput{Reason: "verified"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approved.ReplacementClockRecordID == "" || approved.TargetClockRecordID != target.ID {
+		t.Fatalf("replacement audit links missing: %+v", approved)
+	}
+	records, err := store.ListAttendanceClockRecords(context.Background(), "tenant-1", domain.AttendanceClockRecordQuery{EmployeeID: "emp-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var original, replacement domain.AttendanceClockRecord
+	for _, record := range records {
+		switch record.ID {
+		case target.ID:
+			original = record
+		case approved.ReplacementClockRecordID:
+			replacement = record
+		}
+	}
+	if !original.Voided || original.VoidReason != "verified" || replacement.RecordStatus != "accepted" {
+		t.Fatalf("unexpected replace result: original=%+v replacement=%+v", original, replacement)
+	}
+	boundary, ok, err := store.GetEarliestAcceptedAttendanceClockIn(context.Background(), "tenant-1", "emp-1", target.WorkDate)
+	if err != nil || !ok || boundary.ID != replacement.ID {
+		t.Fatalf("effective boundary should use replacement, ok=%v err=%v record=%+v", ok, err, boundary)
 	}
 }
 
@@ -2378,7 +2590,7 @@ func TestCorrectionWorkflowApproveCreatesClockRecord(t *testing.T) {
 	if stored.Status != "approved" || stored.ClockRecordID == "" {
 		t.Fatalf("expected workflow-approved correction with clock record, got %+v", stored)
 	}
-	record, ok, err := store.GetAcceptedAttendanceClockRecord(context.Background(), "tenant-1", "emp-1", stored.WorkDate, "clock_in")
+	record, ok, err := store.GetEarliestAcceptedAttendanceClockIn(context.Background(), "tenant-1", "emp-1", stored.WorkDate)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -2439,7 +2651,7 @@ func TestCorrectionWorkflowRejectMarksRejectedWithoutRecord(t *testing.T) {
 	if stored.Status != "rejected" || stored.ClockRecordID != "" {
 		t.Fatalf("expected workflow-rejected correction without record, got %+v", stored)
 	}
-	if _, ok, err := store.GetAcceptedAttendanceClockRecord(context.Background(), "tenant-1", "emp-1", stored.WorkDate, "clock_in"); err != nil {
+	if _, ok, err := store.GetEarliestAcceptedAttendanceClockIn(context.Background(), "tenant-1", "emp-1", stored.WorkDate); err != nil {
 		t.Fatal(err)
 	} else if ok {
 		t.Fatal("workflow rejection should not create an accepted clock record")
@@ -2827,23 +3039,39 @@ func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
 		DirectPermissionSetIDs: []string{"ps-workflow-applicant"},
 		CreatedAt:              now,
 	})
+	originalSchema := workflowEnabledTemplateSchema("acct-admin")
+	originalDesign := originalSchema["workspace_design"].(map[string]any)
+	originalDesign["form_kind"] = "custom"
+	originalDesign["fields"] = []map[string]any{{
+		"id": "frozen_reason", "type": "textarea", "label": "原始事由", "placeholder": "填写原始事由", "required": true,
+	}}
 	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
 		ID:        "ft-leave",
 		TenantID:  "tenant-1",
 		Key:       "leave-request",
 		Name:      "请假申请单",
-		Schema:    workflowEnabledTemplateSchema("acct-admin"),
+		Schema:    originalSchema,
 		CreatedAt: now,
 	})
 	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
 	applicantCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-applicant"}
 	submitted, err := svc.Workflow().SubmitForm(applicantCtx, domain.SubmitFormInput{
 		TemplateKey: "leave-request",
-		Payload:     map[string]any{"desc": "申请一天特休", "notify_account_ids": []any{"acct-admin"}},
+		Payload:     map[string]any{"desc": "申请一天特休", "frozen_reason": "申请一天特休", "notify_account_ids": []any{"acct-admin"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	currentSchema := workflowEnabledTemplateSchema("acct-admin")
+	currentDesign := currentSchema["workspace_design"].(map[string]any)
+	currentDesign["form_kind"] = "hybrid"
+	currentDesign["fields"] = []map[string]any{{
+		"id": "current_reason", "type": "textarea", "label": "当前事由", "placeholder": "填写当前事由", "required": true,
+	}}
+	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
+		ID: "ft-leave", TenantID: "tenant-1", Key: "leave-request", Name: "请假申请单",
+		Schema: currentSchema, Status: "published", CurrentVersion: 2, CreatedAt: now, UpdatedAt: now.Add(2 * time.Hour),
+	})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
 	queue, err := svc.Workflow().ReviewQueue(ctx)
@@ -2855,6 +3083,9 @@ func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
 	}
 	if queue.PendingReview[0].Title != "请假申请单" || queue.PendingReview[0].Desc != "申请一天特休" {
 		t.Fatalf("unexpected review projection: %+v", queue.PendingReview[0])
+	}
+	if item := queue.PendingReview[0]; item.TemplateKey != "leave-request" || item.FormKind != "custom" || len(item.Fields) != 1 || item.Fields[0].ID != "frozen_reason" || item.Instance.ID != submitted.ID {
+		t.Fatalf("expected review contract from frozen template version, got %+v", item)
 	}
 	if queue.PendingReview[0].Time != "2026-06-10T09:00:00Z" {
 		t.Fatalf("expected RFC3339 UTC review time, got %q", queue.PendingReview[0].Time)
@@ -2884,6 +3115,14 @@ func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
 	}
 	if got := queue.AlreadyReviewed[0].ReviewLog; len(got) != 1 || got[0].Type != "reject" || got[0].Comment != "missing attachment" {
 		t.Fatalf("unexpected review log: %+v", got)
+	}
+
+	_ = store.UpsertFormInstance(context.Background(), domain.FormInstance{
+		ID: "fi-missing-version", TenantID: "tenant-1", TemplateID: "ft-leave", TemplateVersionID: "ftv-missing",
+		ApplicantAccountID: "acct-applicant", Status: "submitted", SubmittedAt: now, UpdatedAt: now,
+	})
+	if _, err := svc.Workflow().ReviewQueue(ctx); err == nil {
+		t.Fatal("expected review queue to return a missing template version error")
 	}
 }
 
@@ -5447,6 +5686,84 @@ func TestCreatePermissionSetAssignmentRejectsDanglingReferences(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "principal_type") {
 		t.Fatalf("expected unsupported principal type to be rejected, got %v", err)
 	}
+
+	_, err = svc.IAM().CreatePermissionSetAssignment(ctx, domain.CreatePermissionSetAssignmentInput{
+		PrincipalType:   "account",
+		PrincipalID:     "acct-target",
+		PermissionSetID: "ps-read",
+		ConditionID:     "condition-not-implemented",
+	})
+	if err == nil || !strings.Contains(err.Error(), "condition_id is not supported") {
+		t.Fatalf("expected unsupported condition to be rejected instead of becoming unconditional, got %v", err)
+	}
+}
+
+// TestLegacyConditionalAllowDoesNotGrantUnconditionalAccess 驗證既有 conditional allow 在缺少 evaluator 時保持不生效。
+func TestLegacyConditionalAllowDoesNotGrantUnconditionalAccess(t *testing.T) {
+	now := time.Now().UTC()
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID: "ps-read", TenantID: "tenant-1", Name: "Read", CreatedAt: now,
+		Permissions: []domain.Permission{{Resource: "hr.employee", Action: "read", Scope: "all"}},
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-target", TenantID: "tenant-1", Status: "active", CreatedAt: now})
+	_ = store.UpsertPermissionSetAssignment(context.Background(), domain.PermissionSetAssignment{
+		ID: "assign-conditional", TenantID: "tenant-1", PrincipalType: "account", PrincipalID: "acct-target",
+		PermissionSetID: "ps-read", Effect: "allow", ConditionID: "legacy-condition", CreatedAt: now,
+	})
+
+	result, err := service.New(store).Authz().Check(
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-target"},
+		domain.CheckRequest{Resource: "hr.employee", Action: "read"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Allowed {
+		t.Fatalf("expected unevaluated conditional allow to stay inactive, got %+v", result)
+	}
+}
+
+// TestCustomConditionRejectsUnsupportedExpressionAndLegacyScopeFailsClosed 驗證 custom scope 只接受可執行的結構化條件。
+func TestCustomConditionRejectsUnsupportedExpressionAndLegacyScopeFailsClosed(t *testing.T) {
+	now := time.Now().UTC()
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID: "ps-admin", TenantID: "tenant-1", Name: "Policy Admin", CreatedAt: now,
+		Permissions: []domain.Permission{{Resource: "iam.data_scope", Action: "create", Scope: "all"}},
+	})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID: "ps-read", TenantID: "tenant-1", Name: "Read", CreatedAt: now,
+		Permissions: []domain.Permission{{Resource: "hr.employee", Action: "read", Scope: "all"}},
+	})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-admin", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-admin"}, CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-user", TenantID: "tenant-1", Status: "active", CreatedAt: now})
+	svc := service.New(store)
+
+	_, err := svc.IAM().CreateDataScope(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}, domain.CreateDataScopeInput{
+		Code: "unsupported", Name: "Unsupported", ScopeType: "custom_condition", Params: map[string]any{"expression": "employee.status == 'active'"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "support only") {
+		t.Fatalf("expected expression-only custom scope to be rejected, got %v", err)
+	}
+
+	_ = store.UpsertDataScope(context.Background(), domain.DataScope{
+		ID: "ds-legacy", TenantID: "tenant-1", Code: "legacy", Name: "Legacy", ScopeType: "custom_condition",
+		Params: map[string]any{"expression": "employee.status == 'active'"}, CreatedAt: now,
+	})
+	_ = store.UpsertPermissionSetAssignment(context.Background(), domain.PermissionSetAssignment{
+		ID: "assign-legacy", TenantID: "tenant-1", PrincipalType: "account", PrincipalID: "acct-user",
+		PermissionSetID: "ps-read", Effect: "allow", DataScopeID: "ds-legacy", CreatedAt: now,
+	})
+	result, err := svc.Authz().Check(
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-user"},
+		domain.CheckRequest{Resource: "hr.employee", Action: "read"},
+	)
+	if err == nil || result.Allowed {
+		t.Fatalf("expected legacy ineffective custom scope to fail closed, result=%+v err=%v", result, err)
+	}
 }
 
 // TestMissingAssignmentDataScopeDoesNotBecomeUnscopedGrant 驗證 missing 指派資料範圍 does not become unscoped grant。
@@ -5750,19 +6067,17 @@ func TestPlatformTaskMutationsPersistAndProject(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agentRecord := findPlatformTaskRecord(t, tasks.Records, "2026/07/01")
-	var agentItem domain.PlatformTaskItem
-	for _, item := range agentRecord.Items {
-		if item.ID == "run-platform-readonly" {
-			agentItem = item
+	for _, record := range tasks.Records {
+		for _, item := range record.Items {
+			if item.ID == "run-platform-readonly" || item.Source == "agent_run" {
+				t.Fatalf("agent run must not project as a task item: %+v", item)
+			}
 		}
 	}
-	if !agentItem.ReadOnly || agentItem.Source != "agent_run" {
-		t.Fatalf("expected agent run task item to be read-only, got %+v", agentItem)
-	}
-	agentTodo := findPlatformTaskTodo(t, tasks.Todos, "todo-run-platform-readonly")
-	if !agentTodo.ReadOnly || agentTodo.Source != "agent_run" {
-		t.Fatalf("expected agent run todo to be read-only, got %+v", agentTodo)
+	for _, todo := range tasks.Todos {
+		if todo.ID == "todo-run-platform-readonly" || todo.Source == "agent_run" {
+			t.Fatalf("agent run must not project as a task todo: %+v", todo)
+		}
 	}
 
 	deletedTodo, err := svc.Platform().DeleteTaskTodo(ctx, todo.ID)
@@ -6348,6 +6663,10 @@ func (s *recordingObjectStore) PutObject(_ context.Context, key string, _ string
 	return nil
 }
 
+func (s *recordingObjectStore) GetObject(_ context.Context, key string) ([]byte, error) {
+	return nil, fmt.Errorf("object %s not recorded for download", key)
+}
+
 // DeleteObject 驗證物件。
 func (s *recordingObjectStore) DeleteObject(_ context.Context, key string) error {
 	s.deleted = append(s.deleted, key)
@@ -6422,23 +6741,47 @@ func validInsuranceInfo() map[string]any {
 }
 
 type recordingAuthzSnapshot struct {
-	values map[string]domain.CheckResult
-	gets   int
-	sets   int
+	values      map[string]domain.CheckResult
+	expirations map[string]time.Time
+	ttls        []time.Duration
+	now         func() time.Time
+	gets        int
+	sets        int
 }
 
 // GetAuthzSnapshot 驗證授權快照。
 func (s *recordingAuthzSnapshot) GetAuthzSnapshot(_ context.Context, key string) (domain.CheckResult, bool, error) {
 	s.gets++
+	if expiresAt, ok := s.expirations[key]; ok && !expiresAt.After(s.currentTime()) {
+		delete(s.values, key)
+		delete(s.expirations, key)
+		return domain.CheckResult{}, false, nil
+	}
 	result, ok := s.values[key]
 	return result, ok, nil
 }
 
 // SetAuthzSnapshot 驗證集合授權快照。
-func (s *recordingAuthzSnapshot) SetAuthzSnapshot(_ context.Context, key string, result domain.CheckResult, _ time.Duration) error {
+func (s *recordingAuthzSnapshot) SetAuthzSnapshot(_ context.Context, key string, result domain.CheckResult, ttl time.Duration) error {
 	s.sets++
+	if s.values == nil {
+		s.values = map[string]domain.CheckResult{}
+	}
+	if s.expirations == nil {
+		s.expirations = map[string]time.Time{}
+	}
 	s.values[key] = result
+	s.expirations[key] = s.currentTime().Add(ttl)
+	s.ttls = append(s.ttls, ttl)
 	return nil
+}
+
+// currentTime 回傳快照測試使用的可控時鐘。
+func (s *recordingAuthzSnapshot) currentTime() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
 }
 
 // InvalidateTenant 驗證 invalidate 租戶。
@@ -6446,6 +6789,7 @@ func (s *recordingAuthzSnapshot) InvalidateTenant(_ context.Context, tenantID st
 	for key := range s.values {
 		if strings.Contains(key, tenantID) {
 			delete(s.values, key)
+			delete(s.expirations, key)
 		}
 	}
 	return nil

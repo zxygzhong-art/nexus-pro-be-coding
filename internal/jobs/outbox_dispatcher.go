@@ -24,6 +24,11 @@ type RelationshipTupleWriter interface {
 	WriteRelationshipTuples(context.Context, []domain.AuthzRelationshipTupleChange) error
 }
 
+// AgentModelSyncHandler 定義模型 outbox 事件的本地處理器。
+type AgentModelSyncHandler interface {
+	HandleAgentModelSyncEvent(context.Context, domain.OutboxEvent) error
+}
+
 // NoopRelationshipTupleWriter 在未配置 OpenFGA 時接受 Write 並直接成功。
 type NoopRelationshipTupleWriter struct{}
 
@@ -44,8 +49,18 @@ type OutboxDispatcher struct {
 	store     repository.Store
 	writer    RelationshipTupleWriter
 	publisher natsbus.EventPublisher
+	modelSync AgentModelSyncHandler
 	logger    *slog.Logger
 	now       func() time.Time
+}
+
+// WithAgentModelSyncHandler 註冊不經 NATS 的 LiteLLM 模型同步 handler。
+func (p *OutboxDispatcher) WithAgentModelSyncHandler(handler AgentModelSyncHandler) *OutboxDispatcher {
+	if p == nil {
+		return p
+	}
+	p.modelSync = handler
+	return p
 }
 
 // NewOutboxDispatcher 建立統一 outbox dispatcher。
@@ -144,6 +159,12 @@ func (p *OutboxDispatcher) processEvent(ctx context.Context, event domain.Outbox
 	err := p.dispatchEvent(ctx, event)
 	now := p.now().UTC()
 	event.ProcessedAt = &now
+	if errors.Is(err, ErrLiteLLMModelSyncNotConfigured) {
+		event.Status = "pending"
+		event.ProcessedAt = nil
+		event.LastError = truncateOutboxError(err.Error())
+		return p.store.UpdateOutboxEvent(ctx, event)
+	}
 	if err != nil {
 		event.Status = "failed"
 		event.RetryCount++
@@ -157,6 +178,12 @@ func (p *OutboxDispatcher) processEvent(ctx context.Context, event domain.Outbox
 
 // dispatchEvent 依事件類型路由到對應 handler。
 func (p *OutboxDispatcher) dispatchEvent(ctx context.Context, event domain.OutboxEvent) error {
+	if isAgentModelSyncEvent(event.EventType) {
+		if p.modelSync == nil {
+			return errors.New("outbox dispatcher requires agent model sync handler")
+		}
+		return p.modelSync.HandleAgentModelSyncEvent(ctx, event)
+	}
 	if p.publisher != nil {
 		subject, err := domain.EventSubjectForType(event.EventType)
 		if err != nil {
@@ -209,11 +236,19 @@ func normalizeOutboxDispatchOptions(opts OutboxDispatchOptions) OutboxDispatchOp
 // isDispatchableEventType 判斷事件類型是否有可用 handler（狀態/重試由 Claim 過濾）。
 // NATS 啟用時改由 subject mapping 決定是否可發布;無映射事件保持不可派發。
 func (p *OutboxDispatcher) isDispatchableEventType(event domain.OutboxEvent) bool {
+	if isAgentModelSyncEvent(event.EventType) {
+		return p != nil && p.modelSync != nil
+	}
 	if p != nil && p.publisher != nil {
 		_, err := domain.EventSubjectForType(event.EventType)
 		return err == nil
 	}
 	return isOpenFGARelationshipEvent(event.EventType)
+}
+
+// isAgentModelSyncEvent 判斷是否為 LiteLLM 模型同步事件。
+func isAgentModelSyncEvent(eventType string) bool {
+	return eventType == string(domain.EventAgentModelUpsert) || eventType == string(domain.EventAgentModelDelete)
 }
 
 // isDispatchableEvent 判斷事件是否可派發（含狀態與重試上限；供測試與相容路徑使用）。

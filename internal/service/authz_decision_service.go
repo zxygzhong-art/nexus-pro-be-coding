@@ -5,6 +5,7 @@ import (
 	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/utils"
 	"strings"
+	"time"
 )
 
 type authzGrant struct {
@@ -14,6 +15,7 @@ type authzGrant struct {
 	SourceKind      authzGrantSourceKind
 	Effect          string
 	DataScope       *DataScope
+	ExpiresAt       *time.Time
 }
 
 type authzGrantSourceKind string
@@ -64,8 +66,8 @@ func (c *Service) evaluateAuthz(ctx RequestContext, account Account, req CheckRe
 	}
 
 	cacheResult := func(result CheckResult) CheckResult {
-		if useSnapshot {
-			c.setAuthzSnapshot(goContext(ctx), snapshotKey, result)
+		if useSnapshot && result.Allowed {
+			c.setAuthzSnapshot(goContext(ctx), snapshotKey, result, earliestAuthzGrantExpiry(grants))
 		}
 		return result
 	}
@@ -292,7 +294,7 @@ func (c *Service) collectAuthzGrantsWithOptions(ctx RequestContext, account Acco
 	grants := make([]authzGrant, 0)
 	setIDs := make([]string, 0)
 
-	addSet := func(setID, source, effect string, scope *DataScope, sourceKind authzGrantSourceKind) error {
+	addSet := func(setID, source, effect string, scope *DataScope, sourceKind authzGrantSourceKind, expiresAt *time.Time) error {
 		setID = strings.TrimSpace(setID)
 		if setID == "" {
 			return nil
@@ -323,25 +325,24 @@ func (c *Service) collectAuthzGrantsWithOptions(ctx RequestContext, account Acco
 				SourceKind:      sourceKind,
 				Effect:          utils.FirstNonEmpty(effect, "allow"),
 				DataScope:       scope,
+				ExpiresAt:       expiresAt,
 			}
 			grants = append(grants, grant)
-			for _, expanded := range expandPageMenuPermission(perm) {
-				if permissionEffect(grant) == "deny" && isPageBootstrapPermission(expanded) {
-					continue
-				}
-				expandedGrant := grant
-				expandedGrant.Permission = expanded
-				grants = append(grants, expandedGrant)
-			}
 		}
 		return nil
 	}
-	addAssignments := func(principalType, principalID, sourcePrefix string, sourceKind authzGrantSourceKind) error {
+	addAssignments := func(principalType, principalID, sourcePrefix string, sourceKind authzGrantSourceKind, inheritedExpiry *time.Time) error {
 		assignments, err := c.store.ListPermissionSetAssignmentsForPrincipal(goContext(ctx), ctx.TenantID, principalType, principalID)
 		if err != nil {
 			return err
 		}
 		for _, assignment := range assignments {
+			if !permissionSetAssignmentActive(assignment, c.Now()) {
+				continue
+			}
+			if strings.TrimSpace(assignment.ConditionID) != "" && strings.TrimSpace(assignment.Effect) != "deny" {
+				continue
+			}
 			var scope *DataScope
 			if assignment.DataScopeID != "" {
 				v, ok, err := c.store.GetDataScope(goContext(ctx), ctx.TenantID, assignment.DataScopeID)
@@ -353,7 +354,7 @@ func (c *Service) collectAuthzGrantsWithOptions(ctx RequestContext, account Acco
 				}
 				scope = &v
 			}
-			if err := addSet(assignment.PermissionSetID, sourcePrefix+":"+principalID+":"+assignment.PermissionSetID, assignment.Effect, scope, sourceKind); err != nil {
+			if err := addSet(assignment.PermissionSetID, sourcePrefix+":"+principalID+":"+assignment.PermissionSetID, assignment.Effect, scope, sourceKind, earliestExpiry(inheritedExpiry, assignment.ExpiresAt)); err != nil {
 				return err
 			}
 		}
@@ -361,20 +362,20 @@ func (c *Service) collectAuthzGrantsWithOptions(ctx RequestContext, account Acco
 	}
 
 	for _, id := range account.DirectPermissionSetIDs {
-		if err := addSet(id, "direct:"+id, "allow", nil, authzGrantSourceNormal); err != nil {
+		if err := addSet(id, "direct:"+id, "allow", nil, authzGrantSourceNormal, nil); err != nil {
 			return nil, nil, nil, nil, err
 		}
 	}
-	if err := addAssignments("account", account.ID, "account", authzGrantSourceNormal); err != nil {
+	if err := addAssignments("account", account.ID, "account", authzGrantSourceNormal, nil); err != nil {
 		return nil, nil, nil, nil, err
 	}
 	for _, id := range opts.addPermissionSetIDs {
-		if err := addSet(id, "simulation:permission_set:"+strings.TrimSpace(id), "allow", nil, authzGrantSourceNormal); err != nil {
+		if err := addSet(id, "simulation:permission_set:"+strings.TrimSpace(id), "allow", nil, authzGrantSourceNormal, nil); err != nil {
 			return nil, nil, nil, nil, err
 		}
 	}
 
-	groups, err := c.activeUserGroupsForAccount(ctx, account)
+	groups, groupExpiries, err := c.activeUserGroupsForAccountWithExpiries(ctx, account)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
@@ -412,12 +413,13 @@ func (c *Service) collectAuthzGrantsWithOptions(ctx RequestContext, account Acco
 		filteredGroups = append(filteredGroups, group)
 	}
 	for _, group := range filteredGroups {
+		groupExpiry := groupExpiries[group.ID]
 		for _, id := range group.PermissionSetIDs {
-			if err := addSet(id, "group:"+group.ID+":"+id, "allow", nil, authzGrantSourceNormal); err != nil {
+			if err := addSet(id, "group:"+group.ID+":"+id, "allow", nil, authzGrantSourceNormal, groupExpiry); err != nil {
 				return nil, nil, nil, nil, err
 			}
 		}
-		if err := addAssignments("user_group", group.ID, "group", authzGrantSourceNormal); err != nil {
+		if err := addAssignments("user_group", group.ID, "group", authzGrantSourceNormal, groupExpiry); err != nil {
 			return nil, nil, nil, nil, err
 		}
 	}
@@ -446,11 +448,11 @@ func (c *Service) collectAuthzGrantsWithOptions(ctx RequestContext, account Acco
 		assumed = &AssumedRoleDecision{RoleID: role.ID, Name: role.Name}
 		boundary = utils.CopyStringMap(role.PermissionBoundary)
 		for _, id := range role.PermissionSetIDs {
-			if err := addSet(id, "assumable_role:"+role.ID+":"+id, "allow", nil, authzGrantSourceAssumed); err != nil {
+			if err := addSet(id, "assumable_role:"+role.ID+":"+id, "allow", nil, authzGrantSourceAssumed, nil); err != nil {
 				return nil, nil, nil, nil, err
 			}
 		}
-		if err := addAssignments("assumable_role", role.ID, "assumable_role", authzGrantSourceAssumed); err != nil {
+		if err := addAssignments("assumable_role", role.ID, "assumable_role", authzGrantSourceAssumed, nil); err != nil {
 			return nil, nil, nil, nil, err
 		}
 	}
@@ -465,6 +467,26 @@ func (c *Service) collectAuthzGrantsWithOptions(ctx RequestContext, account Acco
 	}
 
 	return grants, uniqueStrings(setIDs), assumed, boundary, nil
+}
+
+// earliestExpiry 回傳兩個有效期限中較早的一個，避免繼承授權延長上層期限。
+func earliestExpiry(left, right *time.Time) *time.Time {
+	if left == nil {
+		return right
+	}
+	if right == nil || left.Before(*right) {
+		return left
+	}
+	return right
+}
+
+// earliestAuthzGrantExpiry 取得本次決策所有來源中最早的授權失效時間。
+func earliestAuthzGrantExpiry(grants []authzGrant) *time.Time {
+	var earliest *time.Time
+	for _, grant := range grants {
+		earliest = earliestExpiry(earliest, grant.ExpiresAt)
+	}
+	return earliest
 }
 
 func simulationOverridesToGrantOptions(overrides AuthzSimulationOverrides) (authzGrantCollectionOptions, error) {

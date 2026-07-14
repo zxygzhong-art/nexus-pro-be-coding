@@ -30,27 +30,30 @@ const (
 
 // AgentSession 定義 Agent 對話會話。
 type AgentSession struct {
-	ID            string             `json:"id"`
-	TenantID      string             `json:"tenant_id"`
-	AccountID     string             `json:"account_id"`
-	AgentID       string             `json:"agent_id,omitempty"`
-	Title         string             `json:"title"`
-	Status        AgentSessionStatus `json:"status"`
-	LastMessageAt *time.Time         `json:"last_message_at,omitempty"`
-	CreatedAt     time.Time          `json:"created_at"`
-	UpdatedAt     time.Time          `json:"updated_at"`
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	AccountID      string             `json:"account_id"`
+	AgentID        string             `json:"agent_id,omitempty"`
+	Title          string             `json:"title"`
+	Status         AgentSessionStatus `json:"status"`
+	ContextVersion int64              `json:"context_version"`
+	LastMessageAt  *time.Time         `json:"last_message_at,omitempty"`
+	CreatedAt      time.Time          `json:"created_at"`
+	UpdatedAt      time.Time          `json:"updated_at"`
 }
 
 // AgentSessionMessage 定義會話訊息。
 type AgentSessionMessage struct {
-	ID        string           `json:"id"`
-	TenantID  string           `json:"tenant_id"`
-	SessionID string           `json:"session_id"`
-	Role      AgentMessageRole `json:"role"`
-	Content   string           `json:"content"`
-	RunID     string           `json:"run_id,omitempty"`
-	Metadata  map[string]any   `json:"metadata,omitempty"`
-	CreatedAt time.Time        `json:"created_at"`
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	SessionID      string             `json:"session_id"`
+	Role           AgentMessageRole   `json:"role"`
+	Content        string             `json:"content"`
+	RunID          string             `json:"run_id,omitempty"`
+	ContextVersion int64              `json:"context_version"`
+	Metadata       map[string]any     `json:"metadata,omitempty"`
+	Attachments    []AgentSessionFile `json:"attachments,omitempty"`
+	CreatedAt      time.Time          `json:"created_at"`
 }
 
 // AgentMemory 定義簡單記憶條目。

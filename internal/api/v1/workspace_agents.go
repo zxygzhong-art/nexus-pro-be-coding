@@ -18,6 +18,16 @@ type WorkspaceAgentCtrl struct {
 // RegisterRoutes 註冊工作區 Agent 管理路由。
 func (c WorkspaceAgentCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace := router.Group("/workspace")
+	workspace.GET("/knowledge-bases", c.routes.Handle("agent.knowledge_base", "read", c.listKnowledgeBases))
+	workspace.POST("/knowledge-bases", c.routes.Handle("agent.knowledge_base", "create", c.createKnowledgeBase))
+	workspace.GET("/knowledge-bases/:id", c.routes.Handle("agent.knowledge_base", "read", c.getKnowledgeBase, ResourceID(PathParamID)))
+	workspace.PATCH("/knowledge-bases/:id", c.routes.Handle("agent.knowledge_base", "update", c.updateKnowledgeBase, ResourceID(PathParamID)))
+	workspace.DELETE("/knowledge-bases/:id", c.routes.Handle("agent.knowledge_base", "delete", c.deleteKnowledgeBase, ResourceID(PathParamID)))
+	workspace.GET("/knowledge-bases/:id/documents", c.routes.Handle("agent.knowledge_base", "read", c.listKnowledgeDocuments, ResourceID(PathParamID)))
+	workspace.POST("/knowledge-bases/:id/documents", c.routes.Handle("agent.knowledge_base", "update", c.createKnowledgeDocument, ResourceID(PathParamID)))
+	workspace.PATCH("/knowledge-bases/:id/documents/:document_id", c.routes.Handle("agent.knowledge_base", "update", c.updateKnowledgeDocument, ResourceID(PathParamID), PathParam(pathParamDocumentID)))
+	workspace.DELETE("/knowledge-bases/:id/documents/:document_id", c.routes.Handle("agent.knowledge_base", "update", c.deleteKnowledgeDocument, ResourceID(PathParamID), PathParam(pathParamDocumentID)))
+	workspace.POST("/knowledge-bases/:id/search", c.routes.Handle("agent.knowledge_base", "read", c.searchKnowledgeBase, ResourceID(PathParamID)))
 
 	workspace.GET("/agent-models", c.routes.Handle("agent.model", "read", c.listModels))
 	workspace.POST("/agent-models", c.routes.Handle("agent.model", "create", c.createModel))
@@ -26,7 +36,10 @@ func (c WorkspaceAgentCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace.POST("/agent-models/:id/sync", c.routes.Handle("agent.model", "update", c.syncModel, ResourceID(PathParamID)))
 	workspace.POST("/agent-models/:id/test", c.routes.Handle("agent.model", "update", c.testModel, ResourceID(PathParamID)))
 
-	workspace.GET("/agents/tools", c.routes.Handle("agent.definition", "read", c.tools))
+	workspace.GET("/agents/tools", c.routes.Handle("agent.tool", "read", c.tools))
+	workspace.GET("/agents/external-tools", c.routes.Handle("agent.tool", "read", c.listExternalTools))
+	workspace.POST("/agents/external-tools", c.routes.Handle("agent.tool", "create", c.createExternalTool))
+	workspace.DELETE("/agents/external-tools/:id", c.routes.Handle("agent.tool", "delete", c.deleteExternalTool, ResourceID(PathParamID)))
 	workspace.GET("/agents", c.routes.Handle("agent.definition", "read", c.listDefinitions))
 	workspace.POST("/agents", c.routes.Handle("agent.definition", "create", c.createDefinition))
 	workspace.PATCH("/agents/:id", c.routes.Handle("agent.definition", "update", c.updateDefinition, ResourceID(PathParamID)))
@@ -193,5 +206,39 @@ func (c WorkspaceAgentCtrl) tools(w http.ResponseWriter, _ *http.Request, ctx do
 		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	return nil
+}
+
+// listExternalTools returns tenant-managed external tool registrations.
+func (c WorkspaceAgentCtrl) listExternalTools(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
+	items, err := c.svc.ListExternalTools(ctx)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	return nil
+}
+
+// createExternalTool registers external tool metadata without activating runtime execution.
+func (c WorkspaceAgentCtrl) createExternalTool(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.CreateAgentExternalToolInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.CreateExternalTool(ctx, input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, item)
+	return nil
+}
+
+// deleteExternalTool removes one tenant-owned external tool registration.
+func (c WorkspaceAgentCtrl) deleteExternalTool(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.DeleteExternalTool(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
 	return nil
 }

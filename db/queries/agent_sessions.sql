@@ -1,10 +1,10 @@
 -- name: UpsertAgentSession :one
 INSERT INTO agent_sessions (
     id, tenant_id, account_id, agent_id, title, status,
-    last_message_at, created_at, updated_at
+    context_version, last_message_at, created_at, updated_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(account_id), sqlc.arg(agent_id),
-    sqlc.arg(title), sqlc.arg(status), sqlc.arg(last_message_at),
+    sqlc.arg(title), sqlc.arg(status), sqlc.arg(context_version), sqlc.arg(last_message_at),
     sqlc.arg(created_at), sqlc.arg(updated_at)
 )
 ON CONFLICT (id) DO UPDATE SET
@@ -13,6 +13,7 @@ ON CONFLICT (id) DO UPDATE SET
     agent_id = EXCLUDED.agent_id,
     title = EXCLUDED.title,
     status = EXCLUDED.status,
+    context_version = EXCLUDED.context_version,
     last_message_at = EXCLUDED.last_message_at,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
@@ -22,6 +23,12 @@ RETURNING *;
 SELECT * FROM agent_sessions
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND id = sqlc.arg(id);
+
+-- name: GetAgentSessionForUpdate :one
+SELECT * FROM agent_sessions
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND id = sqlc.arg(id)
+FOR UPDATE;
 
 -- name: ListAgentSessionsByAccount :many
 SELECT * FROM agent_sessions
@@ -39,25 +46,35 @@ RETURNING *;
 
 -- name: InsertAgentSessionMessage :one
 INSERT INTO agent_session_messages (
-    id, tenant_id, session_id, role, content, run_id, metadata, created_at
+    id, tenant_id, session_id, role, content, run_id, context_version, metadata, created_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(session_id), sqlc.arg(role),
-    sqlc.arg(content), sqlc.arg(run_id), sqlc.arg(metadata)::jsonb, sqlc.arg(created_at)
+    sqlc.arg(content), sqlc.arg(run_id), sqlc.arg(context_version), sqlc.arg(metadata)::jsonb, sqlc.arg(created_at)
 )
 RETURNING *;
 
 -- name: ListAgentSessionMessages :many
-SELECT * FROM agent_session_messages
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND session_id = sqlc.arg(session_id)
-ORDER BY created_at ASC, id ASC;
+SELECT messages.*
+FROM agent_session_messages messages
+JOIN agent_sessions sessions
+  ON sessions.tenant_id = messages.tenant_id
+ AND sessions.id = messages.session_id
+WHERE messages.tenant_id = sqlc.arg(tenant_id)
+  AND messages.session_id = sqlc.arg(session_id)
+  AND messages.context_version = sessions.context_version
+ORDER BY messages.created_at ASC, messages.id ASC;
 
 -- name: ListRecentAgentSessionMessages :many
 SELECT * FROM (
-    SELECT * FROM agent_session_messages
-    WHERE tenant_id = sqlc.arg(tenant_id)
-      AND session_id = sqlc.arg(session_id)
-    ORDER BY created_at DESC, id DESC
+    SELECT messages.*
+    FROM agent_session_messages messages
+    JOIN agent_sessions sessions
+      ON sessions.tenant_id = messages.tenant_id
+     AND sessions.id = messages.session_id
+    WHERE messages.tenant_id = sqlc.arg(tenant_id)
+      AND messages.session_id = sqlc.arg(session_id)
+      AND messages.context_version = sessions.context_version
+    ORDER BY messages.created_at DESC, messages.id DESC
     LIMIT sqlc.arg(limit_count)::int
 ) recent
 ORDER BY created_at ASC, id ASC;

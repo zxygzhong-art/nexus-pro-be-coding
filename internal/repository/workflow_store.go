@@ -8,6 +8,11 @@ import (
 
 // WorkflowStore 定義流程與運行時儲存層的行為契約。
 type WorkflowStore interface {
+	UpsertFormDefinitionDraft(context.Context, domain.FormDefinitionDraft) error
+	GetFormDefinitionDraft(ctx context.Context, tenantID, id string) (domain.FormDefinitionDraft, bool, error)
+	GetFormDefinitionDraftByAgentCall(ctx context.Context, tenantID, agentRunID, toolCallID string) (domain.FormDefinitionDraft, bool, error)
+	ListFormDefinitionDrafts(ctx context.Context, tenantID, ownerAccountID, status string) ([]domain.FormDefinitionDraft, error)
+
 	UpsertFormTemplate(context.Context, domain.FormTemplate) error
 	GetFormTemplate(ctx context.Context, tenantID, id string) (domain.FormTemplate, bool, error)
 	GetFormTemplateByKey(ctx context.Context, tenantID, key string) (domain.FormTemplate, bool, error)

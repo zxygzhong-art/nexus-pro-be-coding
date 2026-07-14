@@ -591,6 +591,53 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND lower(leave_type) = lower(sqlc.arg(leave_type)::text)
 RETURNING *;
 
+-- name: UpsertFormDefinitionDraft :one
+INSERT INTO form_definition_drafts (
+    id, tenant_id, owner_account_id, base_template_id, schema_version, authoring_schema, compiled_schema,
+    status, revision, source, agent_id, agent_run_id, agent_session_id, tool_call_id,
+    validation_result, submitted_at, published_template_id, created_at, updated_at
+) VALUES (
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(owner_account_id), sqlc.arg(base_template_id), sqlc.arg(schema_version),
+    sqlc.arg(authoring_schema)::jsonb, sqlc.arg(compiled_schema)::jsonb, sqlc.arg(status), sqlc.arg(revision),
+    sqlc.arg(source), sqlc.arg(agent_id), sqlc.arg(agent_run_id), sqlc.arg(agent_session_id), sqlc.arg(tool_call_id),
+    sqlc.arg(validation_result)::jsonb, sqlc.narg(submitted_at), sqlc.arg(published_template_id),
+    sqlc.arg(created_at), sqlc.arg(updated_at)
+)
+ON CONFLICT (id) DO UPDATE SET
+    owner_account_id = EXCLUDED.owner_account_id,
+    base_template_id = EXCLUDED.base_template_id,
+    schema_version = EXCLUDED.schema_version,
+    authoring_schema = EXCLUDED.authoring_schema,
+    compiled_schema = EXCLUDED.compiled_schema,
+    status = EXCLUDED.status,
+    revision = form_definition_drafts.revision + 1,
+    source = EXCLUDED.source,
+    agent_id = EXCLUDED.agent_id,
+    agent_run_id = EXCLUDED.agent_run_id,
+    agent_session_id = EXCLUDED.agent_session_id,
+    tool_call_id = EXCLUDED.tool_call_id,
+    validation_result = EXCLUDED.validation_result,
+    submitted_at = EXCLUDED.submitted_at,
+    published_template_id = EXCLUDED.published_template_id,
+    updated_at = EXCLUDED.updated_at
+WHERE form_definition_drafts.tenant_id = EXCLUDED.tenant_id
+  AND form_definition_drafts.revision = sqlc.arg(revision)
+RETURNING *;
+
+-- name: GetFormDefinitionDraft :one
+SELECT * FROM form_definition_drafts WHERE tenant_id = $1 AND id = $2;
+
+-- name: GetFormDefinitionDraftByAgentCall :one
+SELECT * FROM form_definition_drafts
+WHERE tenant_id = $1 AND agent_run_id = $2 AND tool_call_id = $3;
+
+-- name: ListFormDefinitionDrafts :many
+SELECT * FROM form_definition_drafts
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.arg(owner_account_id)::text = '' OR owner_account_id = sqlc.arg(owner_account_id)::text)
+  AND (sqlc.arg(status)::text = '' OR status = sqlc.arg(status)::text)
+ORDER BY updated_at DESC;
+
 -- name: UpsertFormTemplate :one
 INSERT INTO form_templates (
     id, tenant_id, key, name, description, schema, status, current_version, created_at, updated_at, deleted_at
@@ -1012,12 +1059,14 @@ LIMIT 1;
 -- name: UpsertAttendanceClockRecord :one
 INSERT INTO attendance_clock_records (
     id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id,
-    work_date, direction, clocked_at, latitude, longitude, accuracy_meters,
+    work_date, direction, client_event_id, clocked_at, latitude, longitude, accuracy_meters,
     distance_meters, record_status, rejection_reason, source, device_id,
-    device_info, correction_request_id, created_at
+    device_info, correction_request_id, voided, voided_at, voided_by_account_id,
+    void_reason, created_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-    $13, $14, $15, $16, $17, $18::jsonb, $19, $20
+    $13, $14, $15, $16, $17, $18, $19::jsonb, $20, $21, $22, $23,
+    $24, $25
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -1027,6 +1076,7 @@ ON CONFLICT (id) DO UPDATE SET
     worksite_id = EXCLUDED.worksite_id,
     work_date = EXCLUDED.work_date,
     direction = EXCLUDED.direction,
+    client_event_id = EXCLUDED.client_event_id,
     clocked_at = EXCLUDED.clocked_at,
     latitude = EXCLUDED.latitude,
     longitude = EXCLUDED.longitude,
@@ -1038,16 +1088,50 @@ ON CONFLICT (id) DO UPDATE SET
     device_id = EXCLUDED.device_id,
     device_info = EXCLUDED.device_info,
     correction_request_id = EXCLUDED.correction_request_id,
+    voided = EXCLUDED.voided,
+    voided_at = EXCLUDED.voided_at,
+    voided_by_account_id = EXCLUDED.voided_by_account_id,
+    void_reason = EXCLUDED.void_reason,
     created_at = EXCLUDED.created_at
 RETURNING *;
 
--- name: GetAcceptedAttendanceClockRecord :one
+-- name: GetAttendanceClockRecordByClientEventID :one
+SELECT * FROM attendance_clock_records
+WHERE tenant_id = $1
+  AND client_event_id = $2
+  AND client_event_id <> ''
+LIMIT 1;
+
+-- name: GetEarliestAcceptedAttendanceClockIn :one
 SELECT * FROM attendance_clock_records
 WHERE tenant_id = $1
   AND employee_id = $2
   AND work_date = $3
-  AND direction = $4
+  AND direction = 'clock_in'
   AND record_status = 'accepted'
+  AND voided = false
+ORDER BY clocked_at ASC, created_at ASC, id ASC
+LIMIT 1;
+
+-- name: GetLatestAcceptedAttendanceClockOut :one
+SELECT * FROM attendance_clock_records
+WHERE tenant_id = $1
+  AND employee_id = $2
+  AND work_date = $3
+  AND direction = 'clock_out'
+  AND record_status = 'accepted'
+  AND voided = false
+ORDER BY clocked_at DESC, created_at DESC, id DESC
+LIMIT 1;
+
+-- name: GetLatestAcceptedAttendanceClockRecord :one
+SELECT * FROM attendance_clock_records
+WHERE tenant_id = $1
+  AND employee_id = $2
+  AND work_date = $3
+  AND record_status = 'accepted'
+  AND voided = false
+ORDER BY clocked_at DESC, created_at DESC, id DESC
 LIMIT 1;
 
 -- name: ListAttendanceClockRecords :many
@@ -1131,10 +1215,12 @@ ORDER BY work_date ASC, employee_id ASC, id ASC;
 -- name: UpsertAttendanceCorrectionRequest :one
 INSERT INTO attendance_correction_requests (
     id, tenant_id, employee_id, direction, requested_clocked_at, work_date,
-    reason, status, form_instance_id, clock_record_id, reviewed_by_account_id,
+    correction_type, target_clock_record_id, replacement_clock_record_id, reason,
+    status, form_instance_id, clock_record_id, reviewed_by_account_id,
     review_reason, reviewed_at, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
+    $15, $16, $17, $18
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -1142,6 +1228,9 @@ ON CONFLICT (id) DO UPDATE SET
     direction = EXCLUDED.direction,
     requested_clocked_at = EXCLUDED.requested_clocked_at,
     work_date = EXCLUDED.work_date,
+    correction_type = EXCLUDED.correction_type,
+    target_clock_record_id = EXCLUDED.target_clock_record_id,
+    replacement_clock_record_id = EXCLUDED.replacement_clock_record_id,
     reason = EXCLUDED.reason,
     status = EXCLUDED.status,
     form_instance_id = EXCLUDED.form_instance_id,

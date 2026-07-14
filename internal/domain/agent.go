@@ -46,10 +46,11 @@ type CreateAgentRunInput struct {
 
 // AgentChatInput 定義流式 agent chat 請求。
 type AgentChatInput struct {
-	SessionID string `json:"session_id,omitempty"`
-	Message   string `json:"message"`
-	Mode      string `json:"mode,omitempty"`
-	AgentID   string `json:"agent_id,omitempty"`
+	SessionID     string   `json:"session_id,omitempty"`
+	Message       string   `json:"message"`
+	Mode          string   `json:"mode,omitempty"`
+	AgentID       string   `json:"agent_id,omitempty"`
+	AttachmentIDs []string `json:"attachment_ids,omitempty"`
 }
 
 // AgentChatEventName 表示 SSE agent chat 事件名稱。
@@ -62,6 +63,7 @@ const (
 	AgentChatEventToolCall       AgentChatEventName = "tool_call"
 	AgentChatEventToolResult     AgentChatEventName = "tool_result"
 	AgentChatEventAnalysisResult AgentChatEventName = "analysis_result"
+	AgentChatEventConfirmation   AgentChatEventName = "confirmation_required"
 	AgentChatEventDone           AgentChatEventName = "done"
 	AgentChatEventError          AgentChatEventName = "error"
 )
@@ -74,13 +76,17 @@ type AgentAnalysisRow struct {
 
 // AgentChatEvent 定義流式 agent chat 事件資料。
 type AgentChatEvent struct {
-	Event     AgentChatEventName `json:"-"`
-	SessionID string             `json:"session_id,omitempty"`
-	RunID     string             `json:"run_id,omitempty"`
-	Delta     string             `json:"delta,omitempty"`
-	Name      string             `json:"name,omitempty"`
-	Status    string             `json:"status,omitempty"`
-	Title     string             `json:"title,omitempty"`
-	Rows      []AgentAnalysisRow `json:"rows,omitempty"`
-	Message   string             `json:"message,omitempty"`
+	Event        AgentChatEventName `json:"-"`
+	AgentName    string             `json:"agent_name,omitempty"`
+	AgentBranch  string             `json:"agent_branch,omitempty"`
+	SessionID    string             `json:"session_id,omitempty"`
+	RunID        string             `json:"run_id,omitempty"`
+	Delta        string             `json:"delta,omitempty"`
+	Name         string             `json:"name,omitempty"`
+	Status       string             `json:"status,omitempty"`
+	Title        string             `json:"title,omitempty"`
+	Rows         []AgentAnalysisRow `json:"rows,omitempty"`
+	Message      string             `json:"message,omitempty"`
+	Data         map[string]any     `json:"data,omitempty"`
+	Confirmation *AgentConfirmation `json:"confirmation,omitempty"`
 }

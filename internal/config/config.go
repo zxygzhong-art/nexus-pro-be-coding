@@ -75,9 +75,12 @@ type Config struct {
 	NATSStream         string
 	NATSConsumerPrefix string
 
-	LiteLLMBaseURL   string
-	LiteLLMAPIKey    string
-	LiteLLMMasterKey string
+	LiteLLMBaseURL        string
+	LiteLLMAPIKey         string
+	LiteLLMMasterKey      string
+	LiteLLMEmbeddingModel string
+
+	AgentToolCredentialEncryptionKey string
 
 	ObjectStoreProvider                string
 	ObjectStoreDir                     string
@@ -289,9 +292,12 @@ func LoadE() (Config, error) {
 		NATSStream:         env("NATS_STREAM", "NEXUS_EVENTS"),
 		NATSConsumerPrefix: env("NATS_CONSUMER_PREFIX", "nexus"),
 
-		LiteLLMBaseURL:   env("LITELLM_BASE_URL", "http://127.0.0.1:4000"),
-		LiteLLMAPIKey:    os.Getenv("LITELLM_API_KEY"),
-		LiteLLMMasterKey: os.Getenv("LITELLM_MASTER_KEY"),
+		LiteLLMBaseURL:        env("LITELLM_BASE_URL", "http://127.0.0.1:4000"),
+		LiteLLMAPIKey:         os.Getenv("LITELLM_API_KEY"),
+		LiteLLMMasterKey:      os.Getenv("LITELLM_MASTER_KEY"),
+		LiteLLMEmbeddingModel: env("LITELLM_EMBEDDING_MODEL", "nexus-pro-embedding"),
+
+		AgentToolCredentialEncryptionKey: strings.TrimSpace(os.Getenv("AGENT_TOOL_CREDENTIAL_ENCRYPTION_KEY")),
 
 		ObjectStoreProvider:                objectStoreProvider,
 		ObjectStoreDir:                     strings.TrimSpace(os.Getenv("OBJECT_STORE_DIR")),

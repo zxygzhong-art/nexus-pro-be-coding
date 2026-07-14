@@ -584,34 +584,9 @@ func (c AttendanceService) applyCorrectionWorkflowReview(ctx RequestContext, ins
 	current.ReviewedAt = &now
 	current.UpdatedAt = now
 	if nextStatus == correctionStatusApproved {
-		worksite, err := c.firstActiveAttendanceWorksite(ctx)
-		if err != nil {
+		if err := c.applyApprovedAttendanceCorrection(ctx, &current, strings.TrimSpace(ctx.AccountID), current.ReviewReason, now); err != nil {
 			return err
 		}
-		if _, exists, err := c.store.GetAcceptedAttendanceClockRecord(goContext(ctx), ctx.TenantID, current.EmployeeID, current.WorkDate, current.Direction); err != nil {
-			return err
-		} else if exists {
-			return Conflict("accepted clock record already exists")
-		}
-		record := AttendanceClockRecord{
-			ID:                  utils.NewID("acr"),
-			TenantID:            ctx.TenantID,
-			EmployeeID:          current.EmployeeID,
-			WorksiteID:          worksite.ID,
-			WorkDate:            current.WorkDate,
-			Direction:           current.Direction,
-			ClockedAt:           current.RequestedClockedAt,
-			Latitude:            worksite.Latitude,
-			Longitude:           worksite.Longitude,
-			RecordStatus:        clockRecordStatusAccepted,
-			Source:              clockSourceManualCorrection,
-			CorrectionRequestID: current.ID,
-			CreatedAt:           now,
-		}
-		if err := c.store.UpsertAttendanceClockRecord(goContext(ctx), record); err != nil {
-			return err
-		}
-		current.ClockRecordID = record.ID
 	}
 	if err := c.store.UpsertAttendanceCorrectionRequest(goContext(ctx), current); err != nil {
 		return err

@@ -56,8 +56,16 @@ var pagePermissionBundles = map[string][]pagePermissionResource{
 	"agents.definitions": {
 		{applicationCode: AppAgent, resourceType: ResourceDefinition, actions: []Action{ActionRead, ActionCreate, ActionUpdate, ActionDelete}},
 		{applicationCode: AppAgent, resourceType: ResourceModel, actions: []Action{ActionRead}},
+		{applicationCode: AppAgent, resourceType: ResourceTool, actions: []Action{ActionRead}},
+		{applicationCode: AppAgent, resourceType: ResourceType("knowledge_base"), actions: []Action{ActionRead}},
 		{applicationCode: AppHR, resourceType: ResourceOrgUnit, actions: []Action{ActionRead}},
 		{applicationCode: AppIAM, resourceType: ResourceAssumableRole, actions: []Action{ActionRead}},
+	},
+	"agents.knowledge_bases": {
+		{applicationCode: AppAgent, resourceType: ResourceType("knowledge_base"), actions: []Action{ActionRead, ActionCreate, ActionUpdate, ActionDelete}},
+	},
+	"agents.tools": {
+		{applicationCode: AppAgent, resourceType: ResourceTool, actions: []Action{ActionRead}},
 	},
 	"iam.members": {
 		{applicationCode: AppIAM, resourceType: ResourcePermissionAssign, actions: []Action{ActionRead, ActionCreate, ActionDelete}},
@@ -130,60 +138,6 @@ func canonicalPageMenuKey(menuKey string) string {
 	return menuKey
 }
 
-// expandPageMenuPermission 將頁面權限展開成經路由政策驗證的具體 API 權限。
-func expandPageMenuPermission(permission Permission) []Permission {
-	permission = normalizePermission(permission)
-	if permission.PermissionType != PermissionTypeMenu {
-		return nil
-	}
-	menuKey := strings.TrimSpace(permission.MenuKey)
-	if menuKey == "" {
-		menuKey = strings.TrimSpace(permission.Resource)
-	}
-	resources, ok := pagePermissionBundles[menuKey]
-	if !ok {
-		return nil
-	}
-	if _, ok := pagePermissionPrimaryRead(menuKey); !ok {
-		return nil
-	}
-	canonicalMenuKey := canonicalPageMenuKey(menuKey)
-	resources = append([]pagePermissionResource{
-		{applicationCode: AppPlatform, resourceType: ResourceType("me"), actions: []Action{ActionRead}},
-	}, resources...)
-	out := make([]Permission, 0)
-	seen := map[string]struct{}{}
-	for _, resource := range resources {
-		for _, action := range resource.actions {
-			riskLevel, ok := routePermissionRiskLevel(resource.applicationCode, resource.resourceType, action)
-			if !ok {
-				continue
-			}
-			key := permissionKey(resource.applicationCode, resource.resourceType, action)
-			if _, exists := seen[key]; exists {
-				continue
-			}
-			seen[key] = struct{}{}
-			menuKey := canonicalMenuKey
-			if canonicalMenuKey != "workbench" && resource.applicationCode == AppPlatform && resource.resourceType == ResourceType("me") && action == ActionRead {
-				menuKey = ""
-			}
-			out = append(out, Permission{
-				ApplicationCode: resource.applicationCode,
-				ResourceType:    resource.resourceType,
-				PermissionType:  PermissionTypeAPI,
-				Resource:        routeResourceName(resource.applicationCode, resource.resourceType),
-				Action:          action,
-				Scope:           permission.Scope,
-				Effect:          permission.Effect,
-				RiskLevel:       riskLevel,
-				MenuKey:         menuKey,
-			})
-		}
-	}
-	return out
-}
-
 // pagePermissionPrimaryRead 推導頁面主資源的 read 權限，缺少時整個 bundle fail closed。
 func pagePermissionPrimaryRead(menuKey string) (string, bool) {
 	canonicalMenuKey := canonicalPageMenuKey(menuKey)
@@ -212,12 +166,6 @@ func menuPrimaryReadPermissionKey(menuKey string) (string, bool) {
 	}
 	primaryRead, ok := legacyMenuPrimaryReads[menuKey]
 	return primaryRead, ok
-}
-
-// isPageBootstrapPermission 辨識讓頁面權限可獨立讀取 /me 的共同唯讀依賴。
-func isPageBootstrapPermission(permission Permission) bool {
-	permission = normalizePermission(permission)
-	return permission.ApplicationCode == AppPlatform && permission.ResourceType == ResourceType("me") && permission.Action == ActionRead
 }
 
 // routePermissionRiskLevel 驗證 resource/action 確實存在於路由政策並回傳最高風險分級。
@@ -270,6 +218,12 @@ func canonicalMenuKeyForPermission(permission Permission) string {
 		return "agents.models"
 	case strings.HasPrefix(key, "agent.definition."):
 		return "agents.definitions"
+	case strings.HasPrefix(key, "agent.knowledge_base."):
+		return "agents.knowledge_bases"
+	case key == "agent.tool.read":
+		return "agents.tools"
+	case strings.HasPrefix(key, "agent.tool."):
+		return "agents.runs"
 	case strings.HasPrefix(key, "agent.run."):
 		return "agents.runs"
 	case strings.HasPrefix(key, "iam.user_group."):
