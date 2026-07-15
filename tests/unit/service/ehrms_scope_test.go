@@ -36,6 +36,32 @@ func TestEHRMSBulkSyncRejectsScopedGrantsBeforeFetch(t *testing.T) {
 			},
 		},
 		{
+			name:       "employees self scope",
+			permission: domain.Permission{Resource: "hr.employee", Action: "import", Scope: domain.ScopeSelf},
+			client: fakeEHRMSClient{
+				departmentsErr: errors.New("scoped request must not fetch departments for employee sync"),
+				positionsErr:   errors.New("scoped request must not fetch positions for employee sync"),
+				err:            errors.New("scoped request must not fetch employees"),
+			},
+			run: func(svc *service.Service, ctx domain.RequestContext) error {
+				_, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{})
+				return err
+			},
+		},
+		{
+			name:       "employees department scope",
+			permission: domain.Permission{Resource: "hr.employee", Action: "import", Scope: domain.ScopeDepartment},
+			client: fakeEHRMSClient{
+				departmentsErr: errors.New("department-scoped request must not fetch departments for employee sync"),
+				positionsErr:   errors.New("department-scoped request must not fetch positions for employee sync"),
+				err:            errors.New("department-scoped request must not fetch employees"),
+			},
+			run: func(svc *service.Service, ctx domain.RequestContext) error {
+				_, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{})
+				return err
+			},
+		},
+		{
 			name:       "attendance",
 			permission: domain.Permission{Resource: "attendance.clock", Action: "import", Scope: domain.ScopeSelf},
 			client:     fakeEHRMSClient{attendanceErr: errors.New("scoped request must not fetch attendance")},

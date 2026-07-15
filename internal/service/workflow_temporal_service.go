@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"errors"
 	"strings"
 	"time"
@@ -32,12 +33,34 @@ func (c WorkflowService) startTemporalFormApprovalWorkflow(ctx RequestContext, i
 	return c.formApprovalWorkflows.StartFormApprovalWorkflow(goContext(ctx), start)
 }
 
-// markFormApprovalWorkflowStartFailed compensates a committed submit when Temporal start fails.
-// The instance is marked workflow_start_failed so operators can backfill instead of leaving a silent in_review orphan.
-func (c WorkflowService) markFormApprovalWorkflowStartFailed(ctx RequestContext, instance domain.FormInstance, startErr error) error {
-	return c.withTransaction(ctx, func(tx WorkflowService) error {
-		return tx.markFormApprovalWorkflowStartFailedInTransaction(ctx, instance, startErr)
+// compensateFormApprovalWorkflowStartFailure closes committed projections before returning a Temporal start error.
+func (c WorkflowService) compensateFormApprovalWorkflowStartFailure(ctx RequestContext, instance domain.FormInstance, startErr error) error {
+	compensationContext, cancel := context.WithTimeout(context.WithoutCancel(goContext(ctx)), 5*time.Second)
+	defer cancel()
+	compensationRequestContext := ctx
+	compensationRequestContext.Context = compensationContext
+	compensationErr := c.withTransaction(compensationRequestContext, func(tx WorkflowService) error {
+		attendance := tx.Service.Attendance()
+		if _, ok, err := attendance.store.GetLeaveRequestByFormInstanceID(compensationContext, ctx.TenantID, instance.ID); err != nil {
+			return err
+		} else if ok {
+			if err := attendance.applyLeaveWorkflowReview(compensationRequestContext, instance, "cancel", "cancelled"); err != nil {
+				return err
+			}
+		}
+		if _, ok, err := attendance.store.GetOvertimeRequestByFormInstanceID(compensationContext, ctx.TenantID, instance.ID); err != nil {
+			return err
+		} else if ok {
+			if err := attendance.applyOvertimeWorkflowReview(compensationRequestContext, instance, "cancel", "cancelled"); err != nil {
+				return err
+			}
+		}
+		return tx.markFormApprovalWorkflowStartFailedInTransaction(compensationRequestContext, instance, startErr)
 	})
+	if compensationErr != nil {
+		return errors.Join(startErr, compensationErr)
+	}
+	return startErr
 }
 
 // markFormApprovalWorkflowStartFailedInTransaction persists start-failure state inside the caller's transaction.

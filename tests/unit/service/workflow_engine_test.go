@@ -902,15 +902,29 @@ func TestCreateWorkspaceFormDesignRejectsMissingStageConfig(t *testing.T) {
 	}
 }
 
+// TestSubmitFormMarksWorkflowStartFailedWhenTemporalUnavailable verifies standard leave submissions restore reservations.
 func TestSubmitFormMarksWorkflowStartFailedWhenTemporalUnavailable(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	svc, applicantCtx, store, fakeTemporal := newWorkflowEngineFixtureWithFake(t, now, "acct-admin")
+	if err := store.UpsertLeaveBalance(t.Context(), domain.LeaveBalance{
+		ID: "lb-standard-retry", TenantID: "tenant-1", EmployeeID: "emp-applicant", LeaveType: "annual",
+		RemainingHours: 16, GrantedHours: 16, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	input := domain.SubmitFormInput{
+		TemplateKey: "leave-request",
+		Payload: map[string]any{
+			"leave_type": "annual",
+			"start_at":   "2026-06-11T09:00:00+08:00",
+			"end_at":     "2026-06-11T17:00:00+08:00",
+			"hours":      8,
+			"reason":     "temporal down",
+		},
+	}
 	fakeTemporal.failStart = true
 
-	_, err := svc.Workflow().SubmitForm(applicantCtx, domain.SubmitFormInput{
-		TemplateKey: "leave-request",
-		Payload:     map[string]any{"desc": "temporal down"},
-	})
+	_, err := svc.Workflow().SubmitForm(applicantCtx, input)
 	if err == nil {
 		t.Fatal("expected temporal start failure")
 	}
@@ -928,5 +942,81 @@ func TestSubmitFormMarksWorkflowStartFailedWhenTemporalUnavailable(t *testing.T)
 	run, ok, runErr := store.GetWorkflowRunByFormInstance(t.Context(), "tenant-1", instances[0].ID)
 	if runErr != nil || !ok || run.Status != domain.WorkflowRunStatusStartFailed {
 		t.Fatalf("expected start_failed run, got ok=%v err=%v run=%+v", ok, runErr, run)
+	}
+	failedRequest, ok, requestErr := store.GetLeaveRequestByFormInstanceID(t.Context(), "tenant-1", instances[0].ID)
+	if requestErr != nil || !ok || failedRequest.Status != "cancelled" {
+		t.Fatalf("expected cancelled leave projection, got ok=%v err=%v request=%+v", ok, requestErr, failedRequest)
+	}
+	balance, ok, balanceErr := store.GetLeaveBalance(t.Context(), "tenant-1", "lb-standard-retry")
+	if balanceErr != nil || !ok || balance.RemainingHours != 16 || balance.UsedHours != 0 {
+		t.Fatalf("expected failed start to restore leave balance, got ok=%v err=%v balance=%+v", ok, balanceErr, balance)
+	}
+
+	fakeTemporal.failStart = false
+	retried, err := svc.Workflow().SubmitForm(applicantCtx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retriedRequest, ok, requestErr := store.GetLeaveRequestByFormInstanceID(t.Context(), "tenant-1", retried.ID)
+	if requestErr != nil || !ok || retriedRequest.Status != "pending_approval" || retriedRequest.ID == failedRequest.ID {
+		t.Fatalf("expected independent pending retry, got ok=%v err=%v failed=%+v retried=%+v", ok, requestErr, failedRequest, retriedRequest)
+	}
+	balance, ok, balanceErr = store.GetLeaveBalance(t.Context(), "tenant-1", "lb-standard-retry")
+	if balanceErr != nil || !ok || balance.RemainingHours != 16-retriedRequest.Hours || balance.UsedHours != retriedRequest.Hours {
+		t.Fatalf("expected one active reservation after retry, got ok=%v err=%v balance=%+v", ok, balanceErr, balance)
+	}
+	failedRequest, ok, requestErr = store.GetLeaveRequestByFormInstanceID(t.Context(), "tenant-1", instances[0].ID)
+	if requestErr != nil || !ok || failedRequest.Status != "cancelled" {
+		t.Fatalf("expected failed leave projection to remain cancelled, got ok=%v err=%v request=%+v", ok, requestErr, failedRequest)
+	}
+}
+
+// TestSubmitOvertimeStartFailureCancelsProjectionBeforeRetry verifies standard overtime failures are not actionable.
+func TestSubmitOvertimeStartFailureCancelsProjectionBeforeRetry(t *testing.T) {
+	now := time.Date(2026, 7, 15, 8, 0, 0, 0, time.UTC)
+	svc, applicantCtx, store, fakeTemporal := newWorkflowEngineFixtureWithFake(t, now, "acct-admin")
+	if err := store.UpsertFormTemplate(t.Context(), domain.FormTemplate{
+		ID: "ft-standard-overtime", TenantID: "tenant-1", Key: "overtime-approval", Name: "Overtime",
+		Schema: workflowEnabledTemplateSchema("acct-admin"), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	input := domain.SubmitFormInput{
+		TemplateKey: "overtime-approval",
+		Payload: map[string]any{
+			"start_at":          "2026-07-16T18:00:00+08:00",
+			"end_at":            "2026-07-16T21:00:00+08:00",
+			"hours":             3,
+			"overtime_type":     "weekday",
+			"compensation_type": "leave",
+			"reason":            "temporal retry compensation",
+		},
+	}
+	fakeTemporal.failStart = true
+
+	if _, err := svc.Workflow().SubmitForm(applicantCtx, input); err == nil {
+		t.Fatal("expected standard overtime Temporal start failure")
+	}
+	instances, err := store.ListFormInstances(t.Context(), "tenant-1")
+	if err != nil || len(instances) != 1 {
+		t.Fatalf("expected one compensated form, count=%d err=%v", len(instances), err)
+	}
+	failedRequest, ok, requestErr := store.GetOvertimeRequestByFormInstanceID(t.Context(), "tenant-1", instances[0].ID)
+	if requestErr != nil || !ok || failedRequest.Status != "cancelled" {
+		t.Fatalf("expected cancelled overtime projection, got ok=%v err=%v request=%+v", ok, requestErr, failedRequest)
+	}
+
+	fakeTemporal.failStart = false
+	retried, err := svc.Workflow().SubmitForm(applicantCtx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retriedRequest, ok, requestErr := store.GetOvertimeRequestByFormInstanceID(t.Context(), "tenant-1", retried.ID)
+	if requestErr != nil || !ok || retriedRequest.Status != "pending_approval" || retriedRequest.ID == failedRequest.ID {
+		t.Fatalf("expected independent pending retry, got ok=%v err=%v failed=%+v retried=%+v", ok, requestErr, failedRequest, retriedRequest)
+	}
+	failedRequest, ok, requestErr = store.GetOvertimeRequestByFormInstanceID(t.Context(), "tenant-1", instances[0].ID)
+	if requestErr != nil || !ok || failedRequest.Status != "cancelled" {
+		t.Fatalf("expected failed overtime projection to remain cancelled, got ok=%v err=%v request=%+v", ok, requestErr, failedRequest)
 	}
 }

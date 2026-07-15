@@ -137,7 +137,7 @@ func (c HRService) SyncEHRMSPositions(ctx RequestContext) (EHRMSPositionSyncResp
 	return response, nil
 }
 
-// SyncEHRMSEmployees 同步 eHRMS 員工的服務流程。
+// SyncEHRMSEmployees synchronizes tenant-wide employee data only for tenant-wide grants.
 func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyncInput) (EHRMSEmployeeSyncResponse, error) {
 	if c.ehrmsClient == nil {
 		return EHRMSEmployeeSyncResponse{}, BadRequest("eHRMS is not configured")
@@ -149,6 +149,9 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 	req := CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, Action: ActionImport}
 	account, decision, authzAudit, err := c.Service.Authorize(ctx, req, AuditTarget{Event: "hr.employee.ehrms.sync", Resource: string(ResourceEmployee)})
 	if err != nil {
+		return EHRMSEmployeeSyncResponse{}, err
+	}
+	if err := requireTenantWideEHRMSSyncScope(decision); err != nil {
 		return EHRMSEmployeeSyncResponse{}, err
 	}
 	departmentRecords, err := c.ehrmsClient.ListDepartments(goContext(ctx))

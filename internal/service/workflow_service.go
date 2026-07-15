@@ -454,7 +454,7 @@ func (c WorkflowService) DeleteFormDraft(ctx RequestContext, id string) (FormIns
 	return deleted, nil
 }
 
-// SubmitForm 提交表單的服務流程。
+// SubmitForm persists a canonical submission and compensates projections when Temporal cannot start.
 func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (FormInstance, error) {
 	idOrTemplateKey := strings.TrimSpace(input.TemplateKey)
 	if idOrTemplateKey == "" {
@@ -472,9 +472,8 @@ func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (
 	if err != nil {
 		return FormInstance{}, err
 	}
-	if err := c.startTemporalFormApprovalWorkflow(ctx, instance); err != nil {
-		_ = c.markFormApprovalWorkflowStartFailed(ctx, instance, err)
-		return FormInstance{}, err
+	if startErr := c.startTemporalFormApprovalWorkflow(ctx, instance); startErr != nil {
+		return FormInstance{}, c.compensateFormApprovalWorkflowStartFailure(ctx, instance, startErr)
 	}
 	return instance, nil
 }

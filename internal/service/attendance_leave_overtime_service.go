@@ -1,8 +1,6 @@
 package service
 
 import (
-	"context"
-	"errors"
 	"sort"
 	"strings"
 	"time"
@@ -49,38 +47,10 @@ func (c AttendanceService) submitAttendanceCompatibilityForm(ctx RequestContext,
 	if err != nil {
 		return FormInstance{}, err
 	}
-	if err := workflow.startTemporalFormApprovalWorkflow(ctx, instance); err != nil {
-		compensationContext, cancel := context.WithTimeout(context.WithoutCancel(goContext(ctx)), 5*time.Second)
-		defer cancel()
-		compensationRequestContext := ctx
-		compensationRequestContext.Context = compensationContext
-		if compensationErr := c.compensateAttendanceCompatibilityWorkflowStartFailure(compensationRequestContext, instance, err); compensationErr != nil {
-			return FormInstance{}, errors.Join(err, compensationErr)
-		}
-		return FormInstance{}, err
+	if startErr := workflow.startTemporalFormApprovalWorkflow(ctx, instance); startErr != nil {
+		return FormInstance{}, workflow.compensateFormApprovalWorkflowStartFailure(ctx, instance, startErr)
 	}
 	return instance, nil
-}
-
-// compensateAttendanceCompatibilityWorkflowStartFailure cancels attendance projections and restores leave balance atomically.
-func (c AttendanceService) compensateAttendanceCompatibilityWorkflowStartFailure(ctx RequestContext, instance FormInstance, startErr error) error {
-	return c.withTransaction(ctx, func(tx AttendanceService) error {
-		if _, ok, err := tx.store.GetLeaveRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID); err != nil {
-			return err
-		} else if ok {
-			if err := tx.applyLeaveWorkflowReview(ctx, instance, "cancel", "cancelled"); err != nil {
-				return err
-			}
-		}
-		if _, ok, err := tx.store.GetOvertimeRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID); err != nil {
-			return err
-		} else if ok {
-			if err := tx.applyOvertimeWorkflowReview(ctx, instance, "cancel", "cancelled"); err != nil {
-				return err
-			}
-		}
-		return tx.Service.Workflow().markFormApprovalWorkflowStartFailedInTransaction(ctx, instance, startErr)
-	})
 }
 
 // reserveLeaveBalanceIfAvailable degrades a missing or insufficient balance to a no-balance request.
