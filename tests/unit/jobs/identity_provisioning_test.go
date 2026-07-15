@@ -54,6 +54,28 @@ func pendingProvisioningEvent(id string, createdAt time.Time) domain.IdentityPro
 	}
 }
 
+// TestIdentityProvisioningOutboxClaimLeasesEachEventOnce verifies duplicate workers cannot claim one live lease.
+func TestIdentityProvisioningOutboxClaimLeasesEachEventOnce(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 14, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	if err := store.AppendIdentityProvisioningOutboxEvent(ctx, pendingProvisioningEvent("idp-claim", now)); err != nil {
+		t.Fatal(err)
+	}
+	first, err := store.ClaimIdentityProvisioningOutboxEvents(ctx, "tenant-1", 1, 5, now, now.Add(time.Minute))
+	if err != nil || len(first) != 1 || first[0].Status != domain.IdentityProvisioningStatusProcessing {
+		t.Fatalf("expected first worker to claim event, events=%+v err=%v", first, err)
+	}
+	second, err := store.ClaimIdentityProvisioningOutboxEvents(ctx, "tenant-1", 1, 5, now, now.Add(time.Minute))
+	if err != nil || len(second) != 0 {
+		t.Fatalf("expected live lease to hide event from second worker, events=%+v err=%v", second, err)
+	}
+	reclaimed, err := store.ClaimIdentityProvisioningOutboxEvents(ctx, "tenant-1", 1, 5, now.Add(2*time.Minute), now.Add(3*time.Minute))
+	if err != nil || len(reclaimed) != 1 {
+		t.Fatalf("expected expired lease to be reclaimable, events=%+v err=%v", reclaimed, err)
+	}
+}
+
 // TestIdentityProvisioningOutboxProcessorRetriesWithBackoffUntilSuccess 驗證身分開通 outbox processor retries with backoff until success。
 func TestIdentityProvisioningOutboxProcessorRetriesWithBackoffUntilSuccess(t *testing.T) {
 	ctx := context.Background()

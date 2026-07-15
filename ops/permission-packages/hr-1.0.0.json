@@ -14,6 +14,16 @@
     },
     {
       "application_code": "agent",
+      "resource_type": "knowledge_base",
+      "actions": [
+        "create",
+        "delete",
+        "read",
+        "update"
+      ]
+    },
+    {
+      "application_code": "agent",
       "resource_type": "model",
       "actions": [
         "create",
@@ -36,7 +46,6 @@
       "application_code": "agent",
       "resource_type": "tool",
       "actions": [
-        "call",
         "create",
         "delete",
         "read"
@@ -376,6 +385,12 @@
       "resource_type": "me",
       "resource": "me",
       "action": "read"
+    },
+    {
+      "application_code": "platform",
+      "resource_type": "me",
+      "resource": "me",
+      "action": "update"
     },
     {
       "application_code": "platform",
@@ -1300,6 +1315,72 @@
     },
     {
       "application_code": "agent",
+      "resource_type": "knowledge_base",
+      "resource": "agent.knowledge_base",
+      "action": "read"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "knowledge_base",
+      "resource": "agent.knowledge_base",
+      "action": "create",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "knowledge_base",
+      "resource": "agent.knowledge_base",
+      "action": "read"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "knowledge_base",
+      "resource": "agent.knowledge_base",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "knowledge_base",
+      "resource": "agent.knowledge_base",
+      "action": "delete",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "knowledge_base",
+      "resource": "agent.knowledge_base",
+      "action": "read"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "knowledge_base",
+      "resource": "agent.knowledge_base",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "knowledge_base",
+      "resource": "agent.knowledge_base",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "knowledge_base",
+      "resource": "agent.knowledge_base",
+      "action": "update",
+      "risk_level": "high"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "knowledge_base",
+      "resource": "agent.knowledge_base",
+      "action": "read"
+    },
+    {
+      "application_code": "agent",
       "resource_type": "definition",
       "resource": "agent.definition",
       "action": "read"
@@ -1354,8 +1435,8 @@
     },
     {
       "application_code": "agent",
-      "resource_type": "definition",
-      "resource": "agent.definition",
+      "resource_type": "tool",
+      "resource": "agent.tool",
       "action": "read"
     },
     {
@@ -1638,6 +1719,30 @@
       "application_code": "agent",
       "resource_type": "run",
       "resource": "agent.run",
+      "action": "read"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "run",
+      "resource": "agent.run",
+      "action": "create"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "run",
+      "resource": "agent.run",
+      "action": "read"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "run",
+      "resource": "agent.run",
+      "action": "create"
+    },
+    {
+      "application_code": "agent",
+      "resource_type": "run",
+      "resource": "agent.run",
       "action": "update"
     },
     {
@@ -1736,46 +1841,58 @@
           "sort_order": 11
         },
         {
+          "key": "agents.knowledge_bases",
+          "label": "知識庫",
+          "path": "/workspace/knowledge-bases",
+          "sort_order": 12
+        },
+        {
+          "key": "agents.tools",
+          "label": "工具與整合",
+          "path": "/workspace/agent-tools",
+          "sort_order": 13
+        },
+        {
           "key": "iam.members",
           "label": "成員權限",
           "path": "/workspace/iam/members",
-          "sort_order": 12
+          "sort_order": 14
         },
         {
           "key": "iam.user_groups",
           "label": "使用者群組",
           "path": "/workspace/iam/user-groups",
-          "sort_order": 13
+          "sort_order": 15
         },
         {
           "key": "iam.permission_sets",
           "label": "權限集合",
           "path": "/workspace/iam/permission-sets",
-          "sort_order": 14
+          "sort_order": 16
         },
         {
           "key": "iam.assignments",
           "label": "權限指派",
           "path": "/workspace/iam/assignments",
-          "sort_order": 15
+          "sort_order": 17
         },
         {
           "key": "iam.assumable_roles",
           "label": "可承擔角色",
           "path": "/workspace/iam/roles",
-          "sort_order": 16
+          "sort_order": 18
         },
         {
           "key": "iam.policies",
           "label": "數據策略",
           "path": "/workspace/iam/policies",
-          "sort_order": 17
+          "sort_order": 19
         },
         {
           "key": "audit.logs",
           "label": "操作紀錄",
           "path": "/workspace/audit-log",
-          "sort_order": 18
+          "sort_order": 20
         }
       ],
       "sort_order": 1
@@ -1916,6 +2033,12 @@
         },
         {
           "resource": "attendance.leave",
+          "action": "read",
+          "scope": "self",
+          "menu_key": "attendance.leave"
+        },
+        {
+          "resource": "attendance.leave",
           "action": "create",
           "scope": "self",
           "menu_key": "attendance.leave"
@@ -1980,7 +2103,28 @@
         {
           "resource": "agent.tool",
           "action": "call",
+          "target": "check_leave_eligibility",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
           "target": "my_clock_records",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "my_attendance_summary",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "my_form_history",
           "scope": "all",
           "menu_key": "agents.runs"
         },
@@ -2239,22 +2383,34 @@
           "menu_key": "agents.runs"
         },
         {
+          "resource": "agent.knowledge_base",
+          "action": "read",
+          "scope": "all",
+          "menu_key": "agents.knowledge_bases"
+        },
+        {
+          "resource": "agent.knowledge_base",
+          "action": "create",
+          "scope": "all",
+          "menu_key": "agents.knowledge_bases"
+        },
+        {
+          "resource": "agent.knowledge_base",
+          "action": "update",
+          "scope": "all",
+          "menu_key": "agents.knowledge_bases"
+        },
+        {
+          "resource": "agent.knowledge_base",
+          "action": "delete",
+          "scope": "all",
+          "menu_key": "agents.knowledge_bases"
+        },
+        {
           "resource": "agent.tool",
           "action": "read",
           "scope": "all",
-          "menu_key": "agents.runs"
-        },
-        {
-          "resource": "agent.tool",
-          "action": "create",
-          "scope": "all",
-          "menu_key": "agents.runs"
-        },
-        {
-          "resource": "agent.tool",
-          "action": "delete",
-          "scope": "all",
-          "menu_key": "agents.runs"
+          "menu_key": "agents.tools"
         },
         {
           "resource": "agent.tool",
@@ -2294,7 +2450,28 @@
         {
           "resource": "agent.tool",
           "action": "call",
+          "target": "check_leave_eligibility",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
           "target": "my_clock_records",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "my_attendance_summary",
+          "scope": "all",
+          "menu_key": "agents.runs"
+        },
+        {
+          "resource": "agent.tool",
+          "action": "call",
+          "target": "my_form_history",
           "scope": "all",
           "menu_key": "agents.runs"
         },

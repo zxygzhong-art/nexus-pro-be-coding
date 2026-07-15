@@ -22,6 +22,8 @@ docker compose --env-file .env up -d
 
 Keycloak 部署與前後端對接說明請看 [docs/keycloak.md](docs/keycloak.md)。
 
+後端全部第三方服務的必需/可選邊界、交付變數和上線驗收清單請看 [docs/backend-third-party-services.md](docs/backend-third-party-services.md)。
+
 ## Dockerfile 邊界
 
 單服務 Dockerfile 會刻意保持很小，只固定基礎映像，並宣告標準 port。

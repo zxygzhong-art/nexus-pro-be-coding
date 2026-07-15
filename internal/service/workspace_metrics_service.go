@@ -477,35 +477,6 @@ func workspaceManagerCycle(employees []Employee, employeeID, managerID string) b
 	return false
 }
 
-// workspaceEmployeeLevel 處理工作區員工 level。
-func workspaceEmployeeLevel(id string, employees map[string]Employee, memo map[string]int) int {
-	if level, ok := memo[id]; ok {
-		return level
-	}
-	employee, ok := employees[id]
-	if !ok || employee.ManagerEmployeeID == "" {
-		memo[id] = 1
-		return 1
-	}
-	seen := map[string]struct{}{id: {}}
-	level := 1
-	managerID := employee.ManagerEmployeeID
-	for managerID != "" {
-		if _, exists := seen[managerID]; exists {
-			break
-		}
-		seen[managerID] = struct{}{}
-		manager, ok := employees[managerID]
-		if !ok {
-			break
-		}
-		level++
-		managerID = manager.ManagerEmployeeID
-	}
-	memo[id] = level
-	return level
-}
-
 // workspaceDerivedManager 記錄組織單元的直接主管與配置異常。
 type workspaceDerivedManager struct {
 	EmployeeID string

@@ -6,6 +6,7 @@ import (
 	"iter"
 	"strings"
 
+	"github.com/google/jsonschema-go/jsonschema"
 	adkagent "google.golang.org/adk/v2/agent"
 	"google.golang.org/adk/v2/agent/llmagent"
 	"google.golang.org/adk/v2/model"
@@ -22,9 +23,11 @@ const agentChatInstruction = `你是 Nexus Pro 的中文 HR/OA 助理。
 必须通过提供的工具读取员工、考勤、表单、审批和工作区数据，不要编造业务资料。
 你可以创建或更新可撤销的表单草稿。提交表单只能调用 preview_form_submission 生成确认卡；批准、拒绝或退回只能调用 prepare_bulk_review 生成确认卡。确认卡出现前后都不得声称操作已经完成。
 高影响操作由使用者在确认卡上明确点击后由服务端执行，你不能绕过确认、扩大批次或代替非当前审批人操作。
-工具不可用、资料不足或权限不足时，请明确说明缺少的信息或能力边界。`
+工具不可用、资料不足或权限不足时，请明确说明缺少的信息或能力边界。
+最终答复使用简洁的 GitHub Flavored Markdown。查询或摘要型答复先给一句结论；多条记录使用有序列表，每条记录的标题单独成行，字段使用缩进的无序列表；少量汇总指标使用无序列表或表格。
+每个列表项必须实际换行，不要把多条记录或多个字段挤在同一段。除非使用者明确要求或后续操作必需，不要展示内部 ID。`
 
-// ADKAgentChatRuntime runs an ADK root agent and its optional task sub-agents.
+// ADKAgentChatRuntime runs an ADK root agent and its optional delegated sub-agents.
 type ADKAgentChatRuntime struct {
 	model    model.LLM
 	sessions session.Service
@@ -63,7 +66,7 @@ func (r *ADKAgentChatRuntime) RunAgentChat(ctx context.Context, req AgentChatRun
 			Name:        technicalName,
 			Description: strings.TrimSpace(member.Role),
 			Model:       memberLLM,
-			Mode:        llmagent.ModeTask,
+			Mode:        llmagent.ModeSingleTurn,
 			Instruction: subAgentInstruction(member),
 			Tools:       memberTools,
 		})
@@ -122,7 +125,7 @@ func (r *ADKAgentChatRuntime) RunAgentChat(ctx context.Context, req AgentChatRun
 	return nil
 }
 
-// rootAgentInstruction 让主 Agent 只在需要时委派，并始终负责最终验证与汇总。
+// rootAgentInstruction 讓主 Agent 只在需要時委派，並始終負責最終驗證與彙總。
 func rootAgentInstruction(role string, subAgentCount int) string {
 	role = strings.TrimSpace(role)
 	if role == "" {
@@ -135,7 +138,7 @@ func rootAgentInstruction(role string, subAgentCount int) string {
 	return instruction
 }
 
-// subAgentInstruction 将成员职责与平台安全边界组合为独立任务提示。
+// subAgentInstruction 將成員職責與平台安全邊界組合為獨立任務提示。
 func subAgentInstruction(member AgentChatSubAgentRuntimeRequest) string {
 	return agentChatInstruction + "\n\n你是 Team 中的子 Agent「" + strings.TrimSpace(member.Name) + "」。你的职责是：" + strings.TrimSpace(member.Role) + "\n只处理被主 Agent 委派的任务，使用可用工具取得事实，并把可验证结果返回主 Agent。"
 }
@@ -168,6 +171,7 @@ func adkTools(src map[string]AgentTool) ([]tool.Tool, error) {
 		t, err := functiontool.New[map[string]any, map[string]any](functiontool.Config{
 			Name:        name,
 			Description: agentToolDescription(name),
+			InputSchema: agentToolInputSchema(name),
 		}, func(ctx adkagent.Context, args map[string]any) (map[string]any, error) {
 			return fn(ctx, args)
 		})
@@ -177,6 +181,91 @@ func adkTools(src map[string]AgentTool) ([]tool.Tool, error) {
 		out = append(out, t)
 	}
 	return out, nil
+}
+
+// agentToolInputSchema gives the model required fields and enums for high-value business tools.
+func agentToolInputSchema(name string) *jsonschema.Schema {
+	stringProperty := func(description string) *jsonschema.Schema {
+		return &jsonschema.Schema{Type: "string", Description: description}
+	}
+	numberProperty := func(description string) *jsonschema.Schema {
+		return &jsonschema.Schema{Type: "number", Description: description}
+	}
+	integerProperty := func(description string) *jsonschema.Schema {
+		return &jsonschema.Schema{Type: "integer", Description: description}
+	}
+	objectProperty := func(description string) *jsonschema.Schema {
+		return &jsonschema.Schema{Type: "object", Description: description}
+	}
+	arrayProperty := func(items *jsonschema.Schema, description string) *jsonschema.Schema {
+		return &jsonschema.Schema{Type: "array", Items: items, Description: description}
+	}
+	object := func(properties map[string]*jsonschema.Schema, required ...string) *jsonschema.Schema {
+		return &jsonschema.Schema{Type: "object", Properties: properties, Required: required}
+	}
+
+	switch name {
+	case "get_my_profile", "my_leave_balances", "my_attendance_summary", "my_pending_reviews", "list_published_form_templates", "form.get_capabilities", "form.get_data_source_schema":
+		return object(map[string]*jsonschema.Schema{})
+	case "knowledge.search":
+		return object(map[string]*jsonschema.Schema{"query": stringProperty("Tenant knowledge search query.")}, "query")
+	case "list_employees", "my_clock_records":
+		return object(map[string]*jsonschema.Schema{"limit": integerProperty("Maximum number of rows to return.")})
+	case "my_form_history":
+		return object(map[string]*jsonschema.Schema{
+			"template_key": stringProperty("Optional form template key, for example leave-request."),
+			"status":       stringProperty("Optional application status such as draft, pending, approved, rejected, returned, or cancelled."),
+			"limit":        integerProperty("Maximum number of rows to return."),
+		})
+	case "get_employee":
+		return object(map[string]*jsonschema.Schema{"employee_id": stringProperty("Employee ID.")}, "employee_id")
+	case "workspace_insights":
+		return object(map[string]*jsonschema.Schema{"month": stringProperty("Optional month in YYYY-MM format.")})
+	case "check_leave_eligibility":
+		return object(map[string]*jsonschema.Schema{
+			"leave_type": stringProperty("Leave type code returned by the active policy."),
+			"date":       stringProperty("Requested date in YYYY-MM-DD or RFC3339 format."),
+			"hours":      numberProperty("Requested leave hours; must be greater than zero."),
+		}, "leave_type", "date", "hours")
+	case "get_published_form_template":
+		return object(map[string]*jsonschema.Schema{"template_key": stringProperty("Published form template key.")}, "template_key")
+	case "create_form_draft":
+		return object(map[string]*jsonschema.Schema{
+			"template_key": stringProperty("Published form template key."),
+			"payload":      objectProperty("Field ID to value map matching the published template."),
+		}, "template_key", "payload")
+	case "update_form_draft":
+		return object(map[string]*jsonschema.Schema{
+			"draft_id": stringProperty("Existing form instance draft ID."),
+			"payload":  objectProperty("Complete field ID to value map matching the published template."),
+		}, "draft_id", "payload")
+	case "preview_form_submission":
+		return object(map[string]*jsonschema.Schema{"draft_id": stringProperty("Form instance draft ID.")}, "draft_id")
+	case "prepare_bulk_review":
+		action := stringProperty("Review action.")
+		action.Enum = []any{"approve", "reject", "return"}
+		return object(map[string]*jsonschema.Schema{
+			"action":            action,
+			"form_instance_ids": arrayProperty(stringProperty("Form instance ID."), "Optional fixed review batch."),
+			"reason":            stringProperty("Required business reason for reject or return."),
+		}, "action")
+	case "form.create_draft":
+		return object(map[string]*jsonschema.Schema{
+			"schema":       objectProperty("Controlled form definition schema."),
+			"agent_run_id": stringProperty("Optional Agent run provenance ID."),
+			"tool_call_id": stringProperty("Optional tool call provenance ID."),
+		}, "schema")
+	case "form.update_draft":
+		return object(map[string]*jsonschema.Schema{
+			"draft_id": stringProperty("Form definition draft ID."),
+			"revision": integerProperty("Expected current revision."),
+			"schema":   objectProperty("Complete controlled form definition schema."),
+		}, "draft_id", "revision", "schema")
+	case "form.validate_draft", "form.preview_draft", "form.simulate_workflow":
+		return object(map[string]*jsonschema.Schema{"draft_id": stringProperty("Form definition draft ID.")}, "draft_id")
+	default:
+		return object(map[string]*jsonschema.Schema{})
+	}
 }
 
 func emitADKEvent(ctx context.Context, event *session.Event, agentLabels map[string]string, emit AgentChatEmitFunc) error {

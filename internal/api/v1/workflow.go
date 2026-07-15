@@ -54,7 +54,7 @@ func (c WorkflowCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workflows.POST("/forms/:id/duplicate", c.routes.Handle("workflow.form_instance", "submit", c.duplicateForm, PathParam(PathParamID)))
 }
 
-// formBuilderCapabilities 回传 Agent 创作所需的统一能力目录。
+// formBuilderCapabilities 回傳 Agent 創作所需的統一能力目錄。
 func (c WorkflowCtrl) formBuilderCapabilities(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.FormBuilderCapabilities(ctx)
 	if err != nil {
@@ -75,7 +75,7 @@ func (c WorkflowCtrl) formBuilderCapabilities(w http.ResponseWriter, r *http.Req
 	return nil
 }
 
-// listFormDefinitionDrafts 列出 Agent/管理员可见的表单定义草稿。
+// listFormDefinitionDrafts 列出 Agent/管理員可見的表單定義草稿。
 func (c WorkflowCtrl) listFormDefinitionDrafts(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	owner := ""
 	if r.URL.Query().Get("owner") == "mine" {
@@ -89,7 +89,7 @@ func (c WorkflowCtrl) listFormDefinitionDrafts(w http.ResponseWriter, r *http.Re
 	return nil
 }
 
-// createFormDefinitionDraft 建立受控表单定义草稿。
+// createFormDefinitionDraft 建立受控表單定義草稿。
 func (c WorkflowCtrl) createFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateFormDefinitionDraftInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -103,7 +103,7 @@ func (c WorkflowCtrl) createFormDefinitionDraft(w http.ResponseWriter, r *http.R
 	return nil
 }
 
-// getFormDefinitionDraft 取得单个草稿。
+// getFormDefinitionDraft 取得單個草稿。
 func (c WorkflowCtrl) getFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.GetFormDefinitionDraft(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -113,7 +113,7 @@ func (c WorkflowCtrl) getFormDefinitionDraft(w http.ResponseWriter, r *http.Requ
 	return nil
 }
 
-// updateFormDefinitionDraft 更新草稿并执行 revision 检查。
+// updateFormDefinitionDraft 更新草稿並執行 revision 檢查。
 func (c WorkflowCtrl) updateFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.UpdateFormDefinitionDraftInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -127,7 +127,7 @@ func (c WorkflowCtrl) updateFormDefinitionDraft(w http.ResponseWriter, r *http.R
 	return nil
 }
 
-// validateFormDefinitionDraft 执行确定性验证。
+// validateFormDefinitionDraft 執行確定性驗證。
 func (c WorkflowCtrl) validateFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.ValidateFormDefinitionDraft(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -137,7 +137,7 @@ func (c WorkflowCtrl) validateFormDefinitionDraft(w http.ResponseWriter, r *http
 	return nil
 }
 
-// previewFormDefinitionDraft 回传预览 contract。
+// previewFormDefinitionDraft 回傳預覽 contract。
 func (c WorkflowCtrl) previewFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.PreviewFormDefinitionDraft(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -147,7 +147,7 @@ func (c WorkflowCtrl) previewFormDefinitionDraft(w http.ResponseWriter, r *http.
 	return nil
 }
 
-// simulateFormDefinitionWorkflow 静态模拟审批路径。
+// simulateFormDefinitionWorkflow 靜態模擬審批路徑。
 func (c WorkflowCtrl) simulateFormDefinitionWorkflow(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.SimulateFormDefinitionWorkflow(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -157,7 +157,7 @@ func (c WorkflowCtrl) simulateFormDefinitionWorkflow(w http.ResponseWriter, r *h
 	return nil
 }
 
-// submitFormDefinitionDraftForReview 把草稿送入管理员审核队列。
+// submitFormDefinitionDraftForReview 把草稿送入管理員審核隊列。
 func (c WorkflowCtrl) submitFormDefinitionDraftForReview(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input struct {
 		Revision int64 `json:"revision"`
@@ -173,7 +173,7 @@ func (c WorkflowCtrl) submitFormDefinitionDraftForReview(w http.ResponseWriter, 
 	return nil
 }
 
-// publishFormDefinitionDraft 在管理员确认后发布 compiled schema。
+// publishFormDefinitionDraft 在管理員確認後發佈 compiled schema。
 func (c WorkflowCtrl) publishFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input struct {
 		Revision int64 `json:"revision"`

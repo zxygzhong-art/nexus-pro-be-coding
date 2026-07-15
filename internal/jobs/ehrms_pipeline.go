@@ -9,7 +9,6 @@ import (
 
 	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/repository"
-	"nexus-pro-be/internal/utils"
 )
 
 // EHRMSPipelineOptions 定義 eHRMS 有序同步 pipeline 選項。
@@ -26,8 +25,6 @@ type EHRMSPipelineOptions struct {
 	AttendanceSince      string
 	AttendanceTenant     string
 	AttendanceAccount    string
-	TriggerType          string
-	RetryOfRunID         string
 	RetryAttempts        int
 	RetryBaseDelay       time.Duration
 }
@@ -43,7 +40,7 @@ type EHRMSPipelineScheduler struct {
 	employees  *EHRMSEmployeeSyncScheduler
 	attendance *EHRMSAttendanceSyncScheduler
 	logger     *slog.Logger
-	runStore   repository.EHRMSSyncStore
+	locker     repository.EHRMSSyncLocker
 	sleep      func(context.Context, time.Duration) error
 }
 
@@ -60,10 +57,10 @@ func NewEHRMSPipelineScheduler(employees EHRMSEmployeeSyncService, attendance EH
 	}
 }
 
-// WithRunStore 啟用持久化運行記錄、互斥與有限重試。
-func (s *EHRMSPipelineScheduler) WithRunStore(store repository.EHRMSSyncStore) *EHRMSPipelineScheduler {
+// WithSyncLocker 啟用跨執行個體的同租戶同步互斥，不保存同步運行資料。
+func (s *EHRMSPipelineScheduler) WithSyncLocker(locker repository.EHRMSSyncLocker) *EHRMSPipelineScheduler {
 	if s != nil {
-		s.runStore = store
+		s.locker = locker
 	}
 	return s
 }
@@ -100,32 +97,50 @@ func (s *EHRMSPipelineScheduler) Run(ctx context.Context, opts EHRMSPipelineOpti
 // SyncOnce 依序同步員工（含部門/崗位）再同步考勤，並在前置員工同步失敗時停止。
 func (s *EHRMSPipelineScheduler) SyncOnce(ctx context.Context, opts EHRMSPipelineOptions) (EHRMSPipelineResult, error) {
 	opts = normalizeEHRMSPipelineOptions(opts)
-	if s == nil || s.runStore == nil {
-		result, _, err := s.syncOnceAttempt(ctx, opts, nil)
+	var result EHRMSPipelineResult
+	execute := func() error {
+		var lastErr error
+		for attempt := 1; attempt <= opts.RetryAttempts; attempt++ {
+			attemptResult, err := s.syncOnceAttempt(ctx, opts)
+			result = attemptResult
+			lastErr = err
+			if err == nil || !pipelineRetryable(err) || attempt == opts.RetryAttempts {
+				return lastErr
+			}
+			delay := ehrmsRetryDelay(opts.RetryBaseDelay, attempt)
+			s.logger.WarnContext(ctx, "eHRMS pipeline retry scheduled", "attempt", attempt+1, "delay", delay, "error", err)
+			if err := s.sleep(ctx, delay); err != nil {
+				return err
+			}
+		}
+		return lastErr
+	}
+	if s == nil || s.locker == nil {
+		return result, execute()
+	}
+	acquired, err := s.locker.WithEHRMSSyncLock(ctx, strings.TrimSpace(opts.EmployeeTenantID), "ehrms", execute)
+	if err != nil {
 		return result, err
 	}
-	return s.syncOnceTracked(ctx, opts)
+	if !acquired {
+		return result, errors.New("another eHRMS sync is already running")
+	}
+	return result, nil
 }
 
-// syncOnceAttempt 執行一次無重試的 pipeline 並回報失敗步驟。
-func (s *EHRMSPipelineScheduler) syncOnceAttempt(ctx context.Context, opts EHRMSPipelineOptions, stepHook func(string)) (EHRMSPipelineResult, string, error) {
+// syncOnceAttempt 執行一次無重試的 pipeline。
+func (s *EHRMSPipelineScheduler) syncOnceAttempt(ctx context.Context, opts EHRMSPipelineOptions) (EHRMSPipelineResult, error) {
 	var result EHRMSPipelineResult
-	if stepHook != nil {
-		stepHook("employees")
-	}
 	employees, err := s.syncEmployeesOnce(ctx, opts)
 	result.Employees = employees
 	if err != nil {
-		return result, "employees", err
+		return result, err
 	}
 	if !opts.AttendanceEnabled {
-		return result, "", nil
+		return result, nil
 	}
 	if s.attendance == nil {
-		return result, "attendance", errors.New("eHRMS pipeline scheduler requires attendance service when attendance sync is enabled")
-	}
-	if stepHook != nil {
-		stepHook("attendance")
+		return result, errors.New("eHRMS pipeline scheduler requires attendance service when attendance sync is enabled")
 	}
 
 	s.logger.InfoContext(ctx, "eHRMS pipeline step started", "step", "attendance")
@@ -140,7 +155,7 @@ func (s *EHRMSPipelineScheduler) syncOnceAttempt(ctx context.Context, opts EHRMS
 	result.Attendance = attendance
 	if err != nil {
 		s.logger.WarnContext(ctx, "eHRMS pipeline step failed", "step", "attendance", "error", err)
-		return result, "attendance", err
+		return result, err
 	}
 	s.logger.InfoContext(ctx, "eHRMS pipeline step completed",
 		"step", "attendance",
@@ -152,96 +167,7 @@ func (s *EHRMSPipelineScheduler) syncOnceAttempt(ctx context.Context, opts EHRMS
 		"mode", attendance.Mode,
 		"since", attendance.Since,
 	)
-	return result, "", nil
-}
-
-func (s *EHRMSPipelineScheduler) syncOnceTracked(ctx context.Context, opts EHRMSPipelineOptions) (EHRMSPipelineResult, error) {
-	now := time.Now().UTC()
-	requestID := "ehrms-pipeline-" + now.Format("20060102T150405.000000000Z")
-	run := domain.EHRMSSyncRun{ID: utils.NewID("esr"), TenantID: strings.TrimSpace(opts.EmployeeTenantID), AccountID: strings.TrimSpace(opts.EmployeeAccountID), SyncType: "pipeline", TriggerType: opts.TriggerType, Status: domain.EHRMSSyncRunStatusRunning, Mode: opts.EmployeeMode, Since: opts.AttendanceSince, Attempt: 1, MaxAttempts: opts.RetryAttempts, RetryOfRunID: opts.RetryOfRunID, RequestID: requestID, TraceID: requestID, StartedAt: now, CreatedAt: now, UpdatedAt: now}
-	if run.TriggerType == "" {
-		run.TriggerType = "scheduled"
-	}
-	if err := s.runStore.UpsertEHRMSSyncRun(ctx, run); err != nil {
-		return EHRMSPipelineResult{}, err
-	}
-	var result EHRMSPipelineResult
-	acquired, execErr := s.runStore.WithEHRMSSyncLock(ctx, run.TenantID, "ehrms", func() error {
-		var lastErr error
-		for attempt := 1; attempt <= opts.RetryAttempts; attempt++ {
-			run.Attempt, run.UpdatedAt, run.NextRetryAt = attempt, time.Now().UTC(), nil
-			_ = s.runStore.UpsertEHRMSSyncRun(ctx, run)
-			attemptResult, failedStep, err := s.syncOnceAttempt(ctx, opts, func(step string) {
-				run.CurrentStep, run.UpdatedAt = step, time.Now().UTC()
-				_ = s.runStore.UpsertEHRMSSyncRun(ctx, run)
-			})
-			result = attemptResult
-			s.recordAttemptSteps(ctx, &run, attempt, failedStep, attemptResult, err, opts.AttendanceEnabled)
-			lastErr = err
-			if err == nil || !pipelineRetryable(err) || attempt == opts.RetryAttempts {
-				break
-			}
-			delay := ehrmsRetryDelay(opts.RetryBaseDelay, attempt)
-			next := time.Now().UTC().Add(delay)
-			run.NextRetryAt, run.ErrorCode, run.ErrorMessage, run.Retryable = &next, "temporary_failure", safePipelineError(err), true
-			_ = s.runStore.UpsertEHRMSSyncRun(ctx, run)
-			if err := s.sleep(ctx, delay); err != nil {
-				lastErr = err
-				break
-			}
-		}
-		return lastErr
-	})
-	finished := time.Now().UTC()
-	if !acquired && execErr != nil {
-		run.Status, run.ErrorCode, run.ErrorMessage = domain.EHRMSSyncRunStatusFailed, "lock_failed", safePipelineError(execErr)
-	} else if !acquired {
-		run.Status, run.ErrorCode, run.ErrorMessage = domain.EHRMSSyncRunStatusSkipped, "sync_in_progress", "another eHRMS sync is already running"
-	} else if execErr != nil {
-		run.Status, run.ErrorCode, run.ErrorMessage, run.Retryable = domain.EHRMSSyncRunStatusFailed, pipelineErrorCode(execErr), safePipelineError(execErr), pipelineRetryable(execErr)
-	} else if pipelinePartial(result) {
-		run.Status = domain.EHRMSSyncRunStatusPartial
-	} else {
-		run.Status = domain.EHRMSSyncRunStatusSucceeded
-	}
-	run.CurrentStep, run.NextRetryAt, run.FinishedAt, run.UpdatedAt = "", nil, &finished, finished
-	run.Summary = pipelineSummary(result)
-	if err := s.runStore.UpsertEHRMSSyncRun(ctx, run); err != nil && execErr == nil {
-		execErr = err
-	}
-	if !acquired && execErr == nil {
-		execErr = errors.New("another eHRMS sync is already running")
-	}
-	return result, execErr
-}
-
-func (s *EHRMSPipelineScheduler) recordAttemptSteps(ctx context.Context, run *domain.EHRMSSyncRun, attempt int, failedStep string, result EHRMSPipelineResult, runErr error, attendanceEnabled bool) {
-	now := time.Now().UTC()
-	employeeStatus := domain.EHRMSSyncRunStatusSucceeded
-	if failedStep == "employees" {
-		employeeStatus = domain.EHRMSSyncRunStatusFailed
-	} else if result.Employees.Failed > 0 {
-		employeeStatus = domain.EHRMSSyncRunStatusPartial
-	}
-	employee := domain.EHRMSSyncRunStep{ID: utils.NewID("ess"), TenantID: run.TenantID, RunID: run.ID, Step: "employees", Sequence: 1, Status: employeeStatus, Attempt: attempt, Summary: employeePipelineSummary(result.Employees), StartedAt: now, FinishedAt: &now}
-	if failedStep == "employees" {
-		employee.ErrorCode, employee.ErrorMessage = pipelineErrorCode(runErr), safePipelineError(runErr)
-	}
-	_ = s.runStore.UpsertEHRMSSyncRunStep(ctx, employee)
-	if failedStep == "employees" || !attendanceEnabled {
-		return
-	}
-	attendanceStatus := domain.EHRMSSyncRunStatusSucceeded
-	if failedStep == "attendance" {
-		attendanceStatus = domain.EHRMSSyncRunStatusFailed
-	} else if attendanceFailedCount(result.Attendance) > 0 {
-		attendanceStatus = domain.EHRMSSyncRunStatusPartial
-	}
-	attendance := domain.EHRMSSyncRunStep{ID: utils.NewID("ess"), TenantID: run.TenantID, RunID: run.ID, Step: "attendance", Sequence: 2, Status: attendanceStatus, Attempt: attempt, Summary: attendancePipelineSummary(result.Attendance), StartedAt: now, FinishedAt: &now}
-	if failedStep == "attendance" {
-		attendance.ErrorCode, attendance.ErrorMessage = pipelineErrorCode(runErr), safePipelineError(runErr)
-	}
-	_ = s.runStore.UpsertEHRMSSyncRunStep(ctx, attendance)
+	return result, nil
 }
 
 // syncEmployeesOnce 執行 pipeline 的員工前置步驟並記錄結構化結果。
@@ -364,39 +290,4 @@ func pipelineRetryable(err error) bool {
 	}
 	message := strings.ToLower(err.Error())
 	return strings.Contains(message, "fetch ehrms") || strings.Contains(message, "timeout") || strings.Contains(message, "temporar") || strings.Contains(message, "connection") || strings.Contains(message, "unavailable")
-}
-
-func pipelineErrorCode(err error) string {
-	if err == nil {
-		return ""
-	}
-	if pipelineRetryable(err) {
-		return "temporary_failure"
-	}
-	return "sync_failed"
-}
-func safePipelineError(err error) string {
-	if err == nil {
-		return ""
-	}
-	message := err.Error()
-	if len(message) > 500 {
-		message = message[:500]
-	}
-	return message
-}
-func attendanceFailedCount(v domain.EHRMSAttendanceSyncResponse) int {
-	return v.Failed + v.LeaveBalancesFailed + v.LeaveDetailsFailed
-}
-func pipelinePartial(v EHRMSPipelineResult) bool {
-	return v.Employees.Failed > 0 || attendanceFailedCount(v.Attendance) > 0
-}
-func employeePipelineSummary(v domain.EHRMSEmployeeSyncResponse) map[string]any {
-	return map[string]any{"fetched": v.Fetched, "created": v.Created, "updated": v.Updated, "skipped": v.Skipped, "failed": v.Failed, "departments_upserted": v.DepartmentsUpserted, "positions_upserted": v.PositionsUpserted}
-}
-func attendancePipelineSummary(v domain.EHRMSAttendanceSyncResponse) map[string]any {
-	return map[string]any{"fetched": v.Fetched, "created": v.Created, "updated": v.Updated, "skipped": v.Skipped, "failed": v.Failed, "leave_balances_failed": v.LeaveBalancesFailed, "leave_details_failed": v.LeaveDetailsFailed}
-}
-func pipelineSummary(v EHRMSPipelineResult) map[string]any {
-	return map[string]any{"employees": employeePipelineSummary(v.Employees), "attendance": attendancePipelineSummary(v.Attendance)}
 }

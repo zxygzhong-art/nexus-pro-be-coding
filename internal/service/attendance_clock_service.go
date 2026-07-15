@@ -35,7 +35,7 @@ func (c AttendanceService) AttendanceClockStatus(ctx RequestContext) (Attendance
 	if err != nil {
 		return AttendanceClockStatus{}, err
 	}
-	// 只有实际跨午夜班次仍在下班窗口内时，状态才沿用前一工作日。
+	// 只有實際跨午夜班次仍在下班窗口內時，狀態才沿用前一工作日。
 	if _, shift, hasShift, shiftErr := c.optionalAttendanceShift(ctx, account.EmployeeID, now); shiftErr != nil {
 		return AttendanceClockStatus{}, shiftErr
 	} else if hasShift && clockOutBelongsToPreviousWorkDate(shift, now) {
@@ -154,7 +154,7 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 		case clockRejectionDuplicate, clockRejectionInvalidSequence, clockRejectionOutsideGeofence, clockRejectionLowAccuracy:
 			recordStatus = clockRecordStatusRejected
 		default:
-			// 时间与工时异常属于日投影的软异常，原始卡仍保留为有效卡。
+			// 時間與工時異常屬於日投影的軟異常，原始卡仍保留為有效卡。
 		}
 	}
 	deviceInfo := utils.CopyStringMap(input.DeviceInfo)
@@ -672,7 +672,7 @@ func clockOutsideFixedShiftBoundary(direction string, shift AttendanceShift, at 
 	return minute < start-shift.EarlyLeaveGraceMinutes, nil
 }
 
-// clockWindowMinutes 取得指定打卡方向的班次起讫分钟。
+// clockWindowMinutes 取得指定打卡方向的班次起訖分鐘。
 func clockWindowMinutes(direction string, shift AttendanceShift) (int, int, error) {
 	startField, endField := "clock_in_start", "clock_in_end"
 	startValue, endValue := shift.ClockInStart, shift.ClockInEnd
@@ -691,7 +691,7 @@ func clockWindowMinutes(direction string, shift AttendanceShift) (int, int, erro
 	return start, end, nil
 }
 
-// parseClockWindowMinute 将 HH:MM 班次时间转换为当天分钟数。
+// parseClockWindowMinute 將 HH:MM 班次時間轉換為當天分鐘數。
 func parseClockWindowMinute(value, field string) (int, error) {
 	parsed, err := parseClockWindowTime(value, field)
 	if err != nil {
@@ -700,7 +700,7 @@ func parseClockWindowMinute(value, field string) (int, error) {
 	return parsed.Hour()*60 + parsed.Minute(), nil
 }
 
-// clockMinuteOfDay 取得业务时区的当天分钟数。
+// clockMinuteOfDay 取得業務時區的當天分鐘數。
 func clockMinuteOfDay(at time.Time) int {
 	local := at.In(attendanceClockLocation)
 	return local.Hour()*60 + local.Minute()
@@ -722,7 +722,7 @@ func attendanceWorkDate(at time.Time) string {
 	return at.In(attendanceClockLocation).Format("2006-01-02")
 }
 
-// attendanceWorkDateForClock 让跨午夜班次的下班卡归属前一工作日。
+// attendanceWorkDateForClock 讓跨午夜班次的下班卡歸屬前一工作日。
 func attendanceWorkDateForClock(direction string, shift AttendanceShift, at time.Time) string {
 	if direction == clockDirectionOut && clockOutBelongsToPreviousWorkDate(shift, at) {
 		return at.In(attendanceClockLocation).AddDate(0, 0, -1).Format(time.DateOnly)
@@ -730,7 +730,7 @@ func attendanceWorkDateForClock(direction string, shift AttendanceShift, at time
 	return attendanceWorkDate(at)
 }
 
-// clockOutBelongsToPreviousWorkDate 判断跨午夜班次的下班卡日期归属。
+// clockOutBelongsToPreviousWorkDate 判斷跨午夜班次的下班卡日期歸屬。
 func clockOutBelongsToPreviousWorkDate(shift AttendanceShift, at time.Time) bool {
 	inStart, _, err := clockWindowMinutes(clockDirectionIn, shift)
 	if err != nil {
@@ -747,7 +747,7 @@ func clockOutBelongsToPreviousWorkDate(shift AttendanceShift, at time.Time) bool
 	return minute >= outStart || minute <= outEnd
 }
 
-// optionalAttendanceShift 读取有效排班；未排班时回退到全局考勤政策。
+// optionalAttendanceShift 讀取有效排班；未排班時回退到全局考勤政策。
 func (c AttendanceService) optionalAttendanceShift(ctx RequestContext, employeeID string, at time.Time) (AttendanceShiftAssignment, AttendanceShift, bool, error) {
 	assignment, ok, err := c.store.FindEffectiveAttendanceShiftAssignment(goContext(ctx), ctx.TenantID, employeeID, at)
 	if err != nil || !ok {

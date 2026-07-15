@@ -317,10 +317,20 @@ func (c IAMService) ListIamAccountPage(ctx RequestContext, keyword string, page 
 	}
 	normalizedKeyword := strings.ToLower(strings.TrimSpace(keyword))
 	items := make([]IamAccountProjection, 0, len(accounts))
+	at := c.Now()
 	for _, account := range accounts {
 		if normalizedKeyword != "" && !accountMatchesKeyword(account, normalizedKeyword) {
 			continue
 		}
+		memberships, err := c.store.ListActiveGroupMembershipsForAccount(goContext(ctx), ctx.TenantID, account.ID, at)
+		if err != nil {
+			return PageResponse[IamAccountProjection]{}, err
+		}
+		account.UserGroupIDs = make([]string, 0, len(memberships))
+		for _, membership := range memberships {
+			account.UserGroupIDs = append(account.UserGroupIDs, membership.UserGroupID)
+		}
+		account.UserGroupIDs = uniqueStrings(account.UserGroupIDs)
 		items = append(items, iamAccountProjectionFromAccount(account))
 	}
 	items = utils.SortIamAccountProjections(items, page.Sort)

@@ -7,7 +7,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
-// TestClosingOrgUnitClosesDescendants 验证父组织关闭会递归关闭全部后代。
+// TestClosingOrgUnitClosesDescendants 驗證父組織關閉會遞歸關閉全部後代。
 func TestClosingOrgUnitClosesDescendants(t *testing.T) {
 	svc, ctx := newServiceFixture([]domain.Permission{
 		{Resource: "hr.org_unit", Action: "create", Scope: "all"},
@@ -45,7 +45,7 @@ func TestClosingOrgUnitClosesDescendants(t *testing.T) {
 	}
 }
 
-// TestClosedAncestorBlocksChildReopen 验证父组织关闭时子组织不能单独重新启用。
+// TestClosedAncestorBlocksChildReopen 驗證父組織關閉時子組織不能單獨重新啟用。
 func TestClosedAncestorBlocksChildReopen(t *testing.T) {
 	svc, ctx := newServiceFixture([]domain.Permission{
 		{Resource: "hr.org_unit", Action: "create", Scope: "all"},
@@ -69,7 +69,7 @@ func TestClosedAncestorBlocksChildReopen(t *testing.T) {
 	}
 }
 
-// TestCreateOrgUnitUnderClosedParentInheritsClosed 验证关闭父级下新建的组织单元自动关闭。
+// TestCreateOrgUnitUnderClosedParentInheritsClosed 驗證關閉父級下新建的組織單元自動關閉。
 func TestCreateOrgUnitUnderClosedParentInheritsClosed(t *testing.T) {
 	svc, ctx := newServiceFixture([]domain.Permission{
 		{Resource: "hr.org_unit", Action: "create", Scope: "all"},
@@ -92,7 +92,7 @@ func TestCreateOrgUnitUnderClosedParentInheritsClosed(t *testing.T) {
 	}
 }
 
-// TestAssignManagerPositionUpdatesPositionOrgUnit 验证主管岗位绑定会同步岗位所属组织单元。
+// TestAssignManagerPositionUpdatesPositionOrgUnit 驗證主管崗位綁定會同步崗位所屬組織單元。
 func TestAssignManagerPositionUpdatesPositionOrgUnit(t *testing.T) {
 	svc, ctx := newServiceFixture([]domain.Permission{
 		{Resource: "hr.org_unit", Action: "create", Scope: "all"},
@@ -121,7 +121,7 @@ func TestAssignManagerPositionUpdatesPositionOrgUnit(t *testing.T) {
 	}
 }
 
-// TestCreateOrgUnitWithManagerPositionUpdatesPositionOrgUnit 验证创建组织时绑定主管岗位也会同步归属。
+// TestCreateOrgUnitWithManagerPositionUpdatesPositionOrgUnit 驗證創建組織時綁定主管崗位也會同步歸屬。
 func TestCreateOrgUnitWithManagerPositionUpdatesPositionOrgUnit(t *testing.T) {
 	svc, ctx := newServiceFixture([]domain.Permission{
 		{Resource: "hr.org_unit", Action: "create", Scope: "all"},
@@ -145,7 +145,7 @@ func TestCreateOrgUnitWithManagerPositionUpdatesPositionOrgUnit(t *testing.T) {
 	}
 }
 
-// TestAssignSharedPositionAsManagerIsRejected 验证跨组织共用岗位不能被收窄为单一组织的主管岗。
+// TestAssignSharedPositionAsManagerIsRejected 驗證跨組織共用崗位不能被收窄為單一組織的主管崗。
 func TestAssignSharedPositionAsManagerIsRejected(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.org_unit", Action: "create", Scope: "all"},

@@ -179,6 +179,47 @@ func (q *Queries) ClaimOutboxEvents(ctx context.Context, arg ClaimOutboxEventsPa
 	return items, nil
 }
 
+const closeGroupMembership = `-- name: CloseGroupMembership :one
+UPDATE authz_group_memberships
+SET valid_until = $1
+WHERE tenant_id = $2
+  AND user_group_id = $3
+  AND account_id = $4
+  AND valid_from <= $1
+  AND (valid_until IS NULL OR valid_until > $1)
+RETURNING id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at
+`
+
+type CloseGroupMembershipParams struct {
+	ValidUntil  pgtype.Timestamptz `json:"valid_until"`
+	TenantID    string             `json:"tenant_id"`
+	UserGroupID string             `json:"user_group_id"`
+	AccountID   string             `json:"account_id"`
+}
+
+func (q *Queries) CloseGroupMembership(ctx context.Context, arg CloseGroupMembershipParams) (AuthzGroupMembership, error) {
+	row := q.db.QueryRow(ctx, closeGroupMembership,
+		arg.ValidUntil,
+		arg.TenantID,
+		arg.UserGroupID,
+		arg.AccountID,
+	)
+	var i AuthzGroupMembership
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.UserGroupID,
+		&i.AccountID,
+		&i.ValidFrom,
+		&i.ValidUntil,
+		&i.Source,
+		&i.ApprovalInstanceID,
+		&i.CreatedBy,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const countAgentRuns = `-- name: CountAgentRuns :one
 SELECT count(*) FROM agent_runs
 WHERE tenant_id = $1
@@ -1567,6 +1608,8 @@ func (q *Queries) GetFormTemplateVersionByNumber(ctx context.Context, arg GetFor
 const getGroupMembership = `-- name: GetGroupMembership :one
 SELECT id, tenant_id, user_group_id, account_id, valid_from, valid_until, source, approval_instance_id, created_by, created_at FROM authz_group_memberships
 WHERE tenant_id = $1 AND user_group_id = $2 AND account_id = $3
+ORDER BY valid_from DESC, created_at DESC
+LIMIT 1
 `
 
 type GetGroupMembershipParams struct {
@@ -1726,7 +1769,7 @@ func (q *Queries) GetLeaveBalance(ctx context.Context, arg GetLeaveBalanceParams
 }
 
 const getLeaveRequest = `-- name: GetLeaveRequest :one
-SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, created_at FROM leave_requests
+SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at FROM leave_requests
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -1749,13 +1792,14 @@ func (q *Queries) GetLeaveRequest(ctx context.Context, arg GetLeaveRequestParams
 		&i.Reason,
 		&i.Status,
 		&i.FormInstanceID,
+		&i.LeaveBalanceID,
 		&i.CreatedAt,
 	)
 	return i, err
 }
 
 const getLeaveRequestByFormInstanceID = `-- name: GetLeaveRequestByFormInstanceID :one
-SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, created_at FROM leave_requests
+SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at FROM leave_requests
 WHERE tenant_id = $1 AND form_instance_id = $2
 LIMIT 1
 `
@@ -1779,6 +1823,7 @@ func (q *Queries) GetLeaveRequestByFormInstanceID(ctx context.Context, arg GetLe
 		&i.Reason,
 		&i.Status,
 		&i.FormInstanceID,
+		&i.LeaveBalanceID,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -2070,10 +2115,13 @@ INSERT INTO form_instance_field_values (
     value_text, value_number, value_boolean, value_date, value_timestamp, value_json, created_at
 ) VALUES (
     $1, $2, $3, $4,
-    $5, $6, NULLIF($7::text, ''),
-    NULLIF($8::text, '')::numeric, $9,
-    NULLIF($10::text, '')::date, NULLIF($11::text, '')::timestamptz,
-    CASE WHEN $12::text = '' THEN NULL ELSE $12::jsonb END,
+    $5, $6,
+    CASE WHEN $6::text = 'text' THEN $7::text ELSE NULL END,
+    CASE WHEN $6::text = 'number' THEN NULLIF($8::text, '')::numeric ELSE NULL END,
+    CASE WHEN $6::text = 'boolean' THEN $9 ELSE NULL END,
+    CASE WHEN $6::text = 'date' THEN NULLIF($10::text, '')::date ELSE NULL END,
+    CASE WHEN $6::text = 'timestamp' THEN NULLIF($11::text, '')::timestamptz ELSE NULL END,
+    CASE WHEN $6::text = 'json' AND $12::text <> '' THEN $12::jsonb ELSE NULL END,
     $13
 )
 ON CONFLICT (tenant_id, form_instance_id, field_id) DO UPDATE SET
@@ -2098,7 +2146,7 @@ type InsertFormInstanceFieldValueParams struct {
 	ValueType         string             `json:"value_type"`
 	ValueText         string             `json:"value_text"`
 	ValueNumber       string             `json:"value_number"`
-	ValueBoolean      pgtype.Bool        `json:"value_boolean"`
+	ValueBoolean      interface{}        `json:"value_boolean"`
 	ValueDate         string             `json:"value_date"`
 	ValueTimestamp    string             `json:"value_timestamp"`
 	ValueJson         string             `json:"value_json"`
@@ -2247,7 +2295,7 @@ SELECT id, tenant_id, user_group_id, account_id, valid_from, valid_until, source
 WHERE tenant_id = $1
   AND account_id = $2
   AND valid_from <= $3
-  AND (valid_until IS NULL OR valid_until >= $3)
+  AND (valid_until IS NULL OR valid_until > $3)
 ORDER BY created_at ASC
 `
 
@@ -3750,7 +3798,7 @@ func (q *Queries) ListLeaveBalances(ctx context.Context, tenantID string) ([]Lea
 }
 
 const listLeaveRequestPageByQuery = `-- name: ListLeaveRequestPageByQuery :many
-SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, created_at FROM leave_requests
+SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at FROM leave_requests
 WHERE tenant_id = $1
   AND (coalesce(cardinality($2::text[]), 0) = 0 OR employee_id = ANY($2::text[]))
   AND ($3::text = '' OR lower(status) = lower($3::text))
@@ -3804,6 +3852,7 @@ func (q *Queries) ListLeaveRequestPageByQuery(ctx context.Context, arg ListLeave
 			&i.Reason,
 			&i.Status,
 			&i.FormInstanceID,
+			&i.LeaveBalanceID,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -3817,7 +3866,7 @@ func (q *Queries) ListLeaveRequestPageByQuery(ctx context.Context, arg ListLeave
 }
 
 const listLeaveRequests = `-- name: ListLeaveRequests :many
-SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, created_at FROM leave_requests
+SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at FROM leave_requests
 WHERE tenant_id = $1
 ORDER BY created_at ASC
 `
@@ -3842,6 +3891,7 @@ func (q *Queries) ListLeaveRequests(ctx context.Context, tenantID string) ([]Lea
 			&i.Reason,
 			&i.Status,
 			&i.FormInstanceID,
+			&i.LeaveBalanceID,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -3855,7 +3905,7 @@ func (q *Queries) ListLeaveRequests(ctx context.Context, tenantID string) ([]Lea
 }
 
 const listLeaveRequestsByQuery = `-- name: ListLeaveRequestsByQuery :many
-SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, created_at FROM leave_requests
+SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at FROM leave_requests
 WHERE tenant_id = $1
   AND (coalesce(cardinality($2::text[]), 0) = 0 OR employee_id = ANY($2::text[]))
   AND ($3::text = '' OR lower(status) = lower($3::text))
@@ -3898,6 +3948,7 @@ func (q *Queries) ListLeaveRequestsByQuery(ctx context.Context, arg ListLeaveReq
 			&i.Reason,
 			&i.Status,
 			&i.FormInstanceID,
+			&i.LeaveBalanceID,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err
@@ -4446,8 +4497,8 @@ func (q *Queries) NextEmployeeNoSequence(ctx context.Context, arg NextEmployeeNo
 
 const releaseLeaveBalance = `-- name: ReleaseLeaveBalance :one
 UPDATE leave_balances
-SET remaining_hours = remaining_hours + $1::double precision,
-    used_hours = GREATEST(0, used_hours - $1::double precision),
+SET remaining_hours = remaining_hours + $1::numeric(12,2),
+    used_hours = GREATEST(0, used_hours - $1::numeric(12,2)),
     updated_at = $2::timestamptz
 WHERE tenant_id = $3
   AND employee_id = $4
@@ -4456,7 +4507,7 @@ RETURNING id, tenant_id, employee_id, leave_type, remaining_hours, period_start,
 `
 
 type ReleaseLeaveBalanceParams struct {
-	Hours      float64            `json:"hours"`
+	Hours      pgtype.Numeric     `json:"hours"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 	TenantID   string             `json:"tenant_id"`
 	EmployeeID string             `json:"employee_id"`
@@ -4490,24 +4541,70 @@ func (q *Queries) ReleaseLeaveBalance(ctx context.Context, arg ReleaseLeaveBalan
 	return i, err
 }
 
+const releaseLeaveBalanceByID = `-- name: ReleaseLeaveBalanceByID :one
+UPDATE leave_balances
+SET remaining_hours = remaining_hours + $1::numeric(12,2),
+    used_hours = GREATEST(0, used_hours - $1::numeric(12,2)),
+    updated_at = $2::timestamptz
+WHERE tenant_id = $3
+  AND id = $4
+RETURNING id, tenant_id, employee_id, leave_type, remaining_hours, period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio, updated_at
+`
+
+type ReleaseLeaveBalanceByIDParams struct {
+	Hours     pgtype.Numeric     `json:"hours"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	TenantID  string             `json:"tenant_id"`
+	BalanceID string             `json:"balance_id"`
+}
+
+func (q *Queries) ReleaseLeaveBalanceByID(ctx context.Context, arg ReleaseLeaveBalanceByIDParams) (LeaveBalance, error) {
+	row := q.db.QueryRow(ctx, releaseLeaveBalanceByID,
+		arg.Hours,
+		arg.UpdatedAt,
+		arg.TenantID,
+		arg.BalanceID,
+	)
+	var i LeaveBalance
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.LeaveType,
+		&i.RemainingHours,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.GrantedHours,
+		&i.UsedHours,
+		&i.Source,
+		&i.PolicyVersion,
+		&i.ProrateRatio,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const reserveLeaveBalance = `-- name: ReserveLeaveBalance :one
 UPDATE leave_balances
-SET remaining_hours = remaining_hours - $1::double precision,
-    used_hours = used_hours + $1::double precision,
+SET remaining_hours = remaining_hours - $1::numeric(12,2),
+    used_hours = used_hours + $1::numeric(12,2),
     updated_at = $2::timestamptz
 WHERE tenant_id = $3
   AND employee_id = $4
   AND lower(leave_type) = lower($5::text)
-  AND remaining_hours >= $1::double precision
+  AND (NULLIF(period_start::text, '') IS NULL OR NULLIF(period_start::text, '')::date <= $6::date)
+  AND (NULLIF(period_end::text, '') IS NULL OR NULLIF(period_end::text, '')::date >= $6::date)
+  AND remaining_hours >= $1::numeric(12,2)
 RETURNING id, tenant_id, employee_id, leave_type, remaining_hours, period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio, updated_at
 `
 
 type ReserveLeaveBalanceParams struct {
-	Hours      float64            `json:"hours"`
+	Hours      pgtype.Numeric     `json:"hours"`
 	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
 	TenantID   string             `json:"tenant_id"`
 	EmployeeID string             `json:"employee_id"`
 	LeaveType  string             `json:"leave_type"`
+	AsOf       pgtype.Date        `json:"as_of"`
 }
 
 func (q *Queries) ReserveLeaveBalance(ctx context.Context, arg ReserveLeaveBalanceParams) (LeaveBalance, error) {
@@ -4517,6 +4614,7 @@ func (q *Queries) ReserveLeaveBalance(ctx context.Context, arg ReserveLeaveBalan
 		arg.TenantID,
 		arg.EmployeeID,
 		arg.LeaveType,
+		arg.AsOf,
 	)
 	var i LeaveBalance
 	err := row.Scan(
@@ -4599,7 +4697,6 @@ ON CONFLICT (id) DO UPDATE SET
     email = EXCLUDED.email,
     employee_id = EXCLUDED.employee_id,
     status = EXCLUDED.status,
-    user_group_ids = EXCLUDED.user_group_ids,
     direct_permission_set_ids = EXCLUDED.direct_permission_set_ids,
     active_assumable_role_id = EXCLUDED.active_assumable_role_id,
     version = accounts.version + 1,
@@ -4682,7 +4779,7 @@ type UpsertAgentRunParams struct {
 	TenantID  string             `json:"tenant_id"`
 	AccountID string             `json:"account_id"`
 	AgentID   pgtype.Text        `json:"agent_id"`
-	SessionID string             `json:"session_id"`
+	SessionID pgtype.Text        `json:"session_id"`
 	Mode      string             `json:"mode"`
 	Prompt    string             `json:"prompt"`
 	Answer    string             `json:"answer"`
@@ -5902,7 +5999,7 @@ INSERT INTO authz_group_memberships (
     $5, $6, $7,
     $8, $9, $10
 )
-ON CONFLICT (tenant_id, user_group_id, account_id) DO UPDATE SET
+ON CONFLICT (id) DO UPDATE SET
     valid_from = EXCLUDED.valid_from,
     valid_until = EXCLUDED.valid_until,
     source = EXCLUDED.source,
@@ -5959,14 +6056,12 @@ INSERT INTO leave_balances (
     period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio,
     updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5,
-    $6, $7, $8, $9, $10, $11, $12,
+    $1, $2, $3, $4, $5::numeric(12,2),
+    $6, $7, $8::numeric(12,2), $9::numeric(12,2), $10, $11, $12,
     $13
 )
-ON CONFLICT (tenant_id, employee_id, leave_type) DO UPDATE SET
+ON CONFLICT (tenant_id, employee_id, leave_type, period_start, period_end) DO UPDATE SET
     remaining_hours = EXCLUDED.remaining_hours,
-    period_start = EXCLUDED.period_start,
-    period_end = EXCLUDED.period_end,
     granted_hours = EXCLUDED.granted_hours,
     used_hours = EXCLUDED.used_hours,
     source = EXCLUDED.source,
@@ -5981,11 +6076,11 @@ type UpsertLeaveBalanceParams struct {
 	TenantID       string             `json:"tenant_id"`
 	EmployeeID     string             `json:"employee_id"`
 	LeaveType      string             `json:"leave_type"`
-	RemainingHours float64            `json:"remaining_hours"`
-	PeriodStart    string             `json:"period_start"`
-	PeriodEnd      string             `json:"period_end"`
-	GrantedHours   float64            `json:"granted_hours"`
-	UsedHours      float64            `json:"used_hours"`
+	RemainingHours pgtype.Numeric     `json:"remaining_hours"`
+	PeriodStart    pgtype.Date        `json:"period_start"`
+	PeriodEnd      pgtype.Date        `json:"period_end"`
+	GrantedHours   pgtype.Numeric     `json:"granted_hours"`
+	UsedHours      pgtype.Numeric     `json:"used_hours"`
 	Source         string             `json:"source"`
 	PolicyVersion  int32              `json:"policy_version"`
 	ProrateRatio   pgtype.Float8      `json:"prorate_ratio"`
@@ -6030,9 +6125,10 @@ func (q *Queries) UpsertLeaveBalance(ctx context.Context, arg UpsertLeaveBalance
 const upsertLeaveRequest = `-- name: UpsertLeaveRequest :one
 INSERT INTO leave_requests (
     id, tenant_id, employee_id, leave_type, start_at, end_at,
-    hours, reason, status, form_instance_id, created_at
+    hours, reason, status, form_instance_id, leave_balance_id, created_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10, $11, $12
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -6044,8 +6140,9 @@ ON CONFLICT (id) DO UPDATE SET
     reason = EXCLUDED.reason,
     status = EXCLUDED.status,
     form_instance_id = EXCLUDED.form_instance_id,
+    leave_balance_id = EXCLUDED.leave_balance_id,
     created_at = EXCLUDED.created_at
-RETURNING id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, created_at
+RETURNING id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at
 `
 
 type UpsertLeaveRequestParams struct {
@@ -6059,6 +6156,7 @@ type UpsertLeaveRequestParams struct {
 	Reason         string             `json:"reason"`
 	Status         string             `json:"status"`
 	FormInstanceID string             `json:"form_instance_id"`
+	LeaveBalanceID pgtype.Text        `json:"leave_balance_id"`
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -6074,6 +6172,7 @@ func (q *Queries) UpsertLeaveRequest(ctx context.Context, arg UpsertLeaveRequest
 		arg.Reason,
 		arg.Status,
 		arg.FormInstanceID,
+		arg.LeaveBalanceID,
 		arg.CreatedAt,
 	)
 	var i LeaveRequest
@@ -6088,6 +6187,7 @@ func (q *Queries) UpsertLeaveRequest(ctx context.Context, arg UpsertLeaveRequest
 		&i.Reason,
 		&i.Status,
 		&i.FormInstanceID,
+		&i.LeaveBalanceID,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -6455,7 +6555,6 @@ ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
     name = EXCLUDED.name,
     description = EXCLUDED.description,
-    member_account_ids = EXCLUDED.member_account_ids,
     permission_set_ids = EXCLUDED.permission_set_ids,
     source_template_key = EXCLUDED.source_template_key,
     source_package_version = EXCLUDED.source_package_version,
@@ -6513,7 +6612,7 @@ INSERT INTO workflow_runs (
     id, tenant_id, form_instance_id, template_id, version, status,
     current_stage_instance_id, stage_definitions_json, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -6535,8 +6634,8 @@ type UpsertWorkflowRunParams struct {
 	TemplateID             string             `json:"template_id"`
 	Version                int32              `json:"version"`
 	Status                 string             `json:"status"`
-	CurrentStageInstanceID string             `json:"current_stage_instance_id"`
-	StageDefinitionsJson   string             `json:"stage_definitions_json"`
+	CurrentStageInstanceID pgtype.Text        `json:"current_stage_instance_id"`
+	Column8                []byte             `json:"column_8"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 }
@@ -6550,7 +6649,7 @@ func (q *Queries) UpsertWorkflowRun(ctx context.Context, arg UpsertWorkflowRunPa
 		arg.Version,
 		arg.Status,
 		arg.CurrentStageInstanceID,
-		arg.StageDefinitionsJson,
+		arg.Column8,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)

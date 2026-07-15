@@ -1056,7 +1056,7 @@ func ehrmsValue(record map[string]string, key string) string {
 	return normalizeEHRMSPlaceholder(record[key])
 }
 
-// normalizeEHRMSPlaceholder 將上游占位值視為空值。
+// normalizeEHRMSPlaceholder 將上游佔位值視為空值。
 func normalizeEHRMSPlaceholder(value string) string {
 	value = strings.TrimSpace(value)
 	switch strings.ToLower(value) {

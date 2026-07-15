@@ -1,16 +1,29 @@
 package service
 
 import (
-	"nexus-pro-be/internal/utils"
 	"strings"
 	"time"
+
+	"nexus-pro-be/internal/utils"
 )
 
+// ListUserGroups returns groups with membership rows as the authoritative current member source.
 func (c IAMService) ListUserGroups(ctx RequestContext) ([]UserGroup, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceUserGroup, ActionRead, ""); err != nil {
 		return nil, err
 	}
-	return c.store.ListUserGroups(goContext(ctx), ctx.TenantID)
+	groups, err := c.store.ListUserGroups(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	at := c.Now()
+	for i := range groups {
+		groups[i], err = c.userGroupWithActiveMembers(ctx, groups[i], at)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return groups, nil
 }
 
 // ListUserGroupPage 列出使用者群組分頁的服務流程。
@@ -57,7 +70,9 @@ func (c IAMService) CreateUserGroup(ctx RequestContext, input CreateUserGroupInp
 		CreatedAt:        c.Now(),
 	}
 	if err := c.withTransaction(ctx, func(tx IAMService) error {
-		if err := tx.store.UpsertUserGroup(goContext(ctx), group); err != nil {
+		storedGroup := group
+		storedGroup.MemberAccountIDs = nil
+		if err := tx.store.UpsertUserGroup(goContext(ctx), storedGroup); err != nil {
 			return err
 		}
 		for _, accountID := range group.MemberAccountIDs {
@@ -76,11 +91,6 @@ func (c IAMService) CreateUserGroup(ctx RequestContext, input CreateUserGroupInp
 		}
 		if err := tx.Service.syncUserGroupRelationshipTuples(ctx, UserGroup{}, group); err != nil {
 			return err
-		}
-		for _, accountID := range group.MemberAccountIDs {
-			if err := tx.store.AddAccountGroup(goContext(ctx), ctx.TenantID, accountID, group.ID); err != nil {
-				return err
-			}
 		}
 		if err := tx.touchAuthzConfig(ctx, "iam.user_group.upsert", map[string]any{"user_group_id": group.ID}); err != nil {
 			return err
@@ -108,6 +118,10 @@ func (c IAMService) UpdateUserGroup(ctx RequestContext, id string, input UpdateU
 	}
 	if !ok {
 		return UserGroup{}, NotFound("user group", id)
+	}
+	group, err = c.userGroupWithActiveMembers(ctx, group, c.Now())
+	if err != nil {
+		return UserGroup{}, err
 	}
 	next := group
 	if input.Name != nil {
@@ -163,33 +177,16 @@ func (c IAMService) DeleteUserGroup(ctx RequestContext, id string) (UserGroup, e
 	if !ok {
 		return UserGroup{}, NotFound("user group", id)
 	}
+	group, err = c.userGroupWithActiveMembers(ctx, group, c.Now())
+	if err != nil {
+		return UserGroup{}, err
+	}
 	if err := c.ensureUserGroupDeletable(ctx, group); err != nil {
 		return UserGroup{}, err
 	}
 	if err := c.withTransaction(ctx, func(tx IAMService) error {
-		memberships, err := tx.store.ListGroupMembershipsForGroup(goContext(ctx), ctx.TenantID, group.ID)
-		if err != nil {
-			return err
-		}
-		for _, membership := range memberships {
-			if _, _, err := tx.store.DeleteGroupMembership(goContext(ctx), ctx.TenantID, membership.UserGroupID, membership.AccountID); err != nil {
-				return err
-			}
-		}
 		if err := tx.Service.syncUserGroupRelationshipTuples(ctx, group, UserGroup{ID: group.ID, TenantID: group.TenantID}); err != nil {
 			return err
-		}
-		accounts, err := tx.store.ListAccounts(goContext(ctx), ctx.TenantID)
-		if err != nil {
-			return err
-		}
-		for _, account := range accounts {
-			if !utils.ContainsString(account.UserGroupIDs, group.ID) {
-				continue
-			}
-			if err := tx.store.RemoveAccountGroup(goContext(ctx), ctx.TenantID, account.ID, group.ID); err != nil {
-				return err
-			}
 		}
 		deleted, ok, err := tx.store.DeleteUserGroup(goContext(ctx), ctx.TenantID, group.ID)
 		if err != nil {
@@ -213,15 +210,14 @@ func (c IAMService) DeleteUserGroup(ctx RequestContext, id string) (UserGroup, e
 
 // ensureUserGroupDeletable 檢查使用者群組是否仍有成員、指派或 trust_policy 引用。
 func (c IAMService) ensureUserGroupDeletable(ctx RequestContext, group UserGroup) error {
-	if len(group.MemberAccountIDs) > 0 {
-		return Conflict("user group still has members")
-	}
 	memberships, err := c.store.ListGroupMembershipsForGroup(goContext(ctx), ctx.TenantID, group.ID)
 	if err != nil {
 		return err
 	}
-	if len(memberships) > 0 {
-		return Conflict("user group still has members")
+	for _, membership := range memberships {
+		if groupMembershipActiveAt(membership, c.Now()) {
+			return Conflict("user group still has members")
+		}
 	}
 	now := c.Now()
 	assignments, err := c.store.ListPermissionSetAssignments(goContext(ctx), ctx.TenantID)
@@ -269,7 +265,13 @@ func (c IAMService) ListUserGroupMemberPage(ctx RequestContext, groupID string, 
 	if err != nil {
 		return PageResponse[GroupMembership]{}, err
 	}
-	return utils.PageResponse(items, page), nil
+	active := make([]GroupMembership, 0, len(items))
+	for _, item := range items {
+		if groupMembershipActiveAt(item, c.Now()) {
+			active = append(active, item)
+		}
+	}
+	return utils.PageResponse(active, page), nil
 }
 
 // AddUserGroupMember 新增或更新使用者群組成員。
@@ -288,6 +290,10 @@ func (c IAMService) AddUserGroupMember(ctx RequestContext, groupID string, input
 	if !ok {
 		return GroupMembership{}, NotFound("user group", groupID)
 	}
+	group, err = c.userGroupWithActiveMembers(ctx, group, c.Now())
+	if err != nil {
+		return GroupMembership{}, err
+	}
 	if _, ok, err := c.store.GetAccount(goContext(ctx), ctx.TenantID, accountID); err != nil {
 		return GroupMembership{}, err
 	} else if !ok {
@@ -305,6 +311,9 @@ func (c IAMService) AddUserGroupMember(ctx RequestContext, groupID string, input
 	}
 	source := "manual"
 	now := c.Now()
+	if validUntil != nil && !now.Before(*validUntil) {
+		return GroupMembership{}, BadRequest("valid_until must be later than valid_from")
+	}
 	membership := GroupMembership{
 		ID:                 utils.NewID("ugm"),
 		TenantID:           ctx.TenantID,
@@ -317,16 +326,17 @@ func (c IAMService) AddUserGroupMember(ctx RequestContext, groupID string, input
 		CreatedBy:          ctx.AccountID,
 		CreatedAt:          now,
 	}
+	if current, exists, err := c.store.GetGroupMembership(goContext(ctx), ctx.TenantID, group.ID, accountID); err != nil {
+		return GroupMembership{}, err
+	} else if exists && groupMembershipActiveAt(current, now) {
+		membership.ID = current.ID
+		membership.ValidFrom = current.ValidFrom
+		membership.CreatedAt = current.CreatedAt
+	}
 	after := group
 	after.MemberAccountIDs = uniqueStrings(append(after.MemberAccountIDs, accountID))
 	if err := c.withTransaction(ctx, func(tx IAMService) error {
 		if err := tx.store.UpsertGroupMembership(goContext(ctx), membership); err != nil {
-			return err
-		}
-		if err := tx.store.UpsertUserGroup(goContext(ctx), after); err != nil {
-			return err
-		}
-		if err := tx.store.AddAccountGroup(goContext(ctx), ctx.TenantID, accountID, group.ID); err != nil {
 			return err
 		}
 		if err := tx.Service.syncUserGroupRelationshipTuples(ctx, group, after); err != nil {
@@ -371,24 +381,24 @@ func (c IAMService) RemoveUserGroupMember(ctx RequestContext, groupID, accountID
 	if !ok {
 		return NotFound("user group", groupID)
 	}
+	group, err = c.userGroupWithActiveMembers(ctx, group, c.Now())
+	if err != nil {
+		return err
+	}
 	after := group
 	after.MemberAccountIDs = removeString(after.MemberAccountIDs, accountID)
 	existing, membershipExists, err := c.store.GetGroupMembership(goContext(ctx), ctx.TenantID, groupID, accountID)
 	if err != nil {
 		return err
 	}
-	if !membershipExists && !utils.ContainsString(group.MemberAccountIDs, accountID) {
+	if !membershipExists || !groupMembershipActiveAt(existing, c.Now()) {
 		return NotFound("group membership", accountID)
 	}
 	if err := c.withTransaction(ctx, func(tx IAMService) error {
-		if _, _, err := tx.store.DeleteGroupMembership(goContext(ctx), ctx.TenantID, groupID, accountID); err != nil {
+		if _, ok, err := tx.store.CloseGroupMembership(goContext(ctx), ctx.TenantID, groupID, accountID, tx.Now()); err != nil {
 			return err
-		}
-		if err := tx.store.UpsertUserGroup(goContext(ctx), after); err != nil {
-			return err
-		}
-		if err := tx.store.RemoveAccountGroup(goContext(ctx), ctx.TenantID, accountID, groupID); err != nil {
-			return err
+		} else if !ok {
+			return NotFound("group membership", accountID)
 		}
 		if err := tx.Service.syncUserGroupRelationshipTuples(ctx, group, after); err != nil {
 			return err
@@ -413,18 +423,20 @@ func (c IAMService) RemoveUserGroupMember(ctx RequestContext, groupID, accountID
 	return nil
 }
 
-// normalizeGroupMembershipSource 正規化使用者群組成員來源。
-func normalizeGroupMembershipSource(value string) (string, error) {
-	source := strings.TrimSpace(value)
-	if source == "" {
-		source = "manual"
+// userGroupWithActiveMembers rebuilds the compatibility projection from membership history.
+func (c IAMService) userGroupWithActiveMembers(ctx RequestContext, group UserGroup, at time.Time) (UserGroup, error) {
+	memberships, err := c.store.ListGroupMembershipsForGroup(goContext(ctx), ctx.TenantID, group.ID)
+	if err != nil {
+		return UserGroup{}, err
 	}
-	switch source {
-	case "manual", "import", "template", "approval":
-		return source, nil
-	default:
-		return "", BadRequest("source must be manual, import, template or approval")
+	members := make([]string, 0, len(memberships))
+	for _, membership := range memberships {
+		if groupMembershipActiveAt(membership, at) {
+			members = append(members, membership.AccountID)
+		}
 	}
+	group.MemberAccountIDs = uniqueStrings(members)
+	return group, nil
 }
 
 // groupMembershipAuditDetails 建立群組成員審計 details。

@@ -11,36 +11,6 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const deleteMenuItem = `-- name: DeleteMenuItem :exec
-DELETE FROM menu_items
-WHERE tenant_id = $1 AND id = $2
-`
-
-type DeleteMenuItemParams struct {
-	TenantID string `json:"tenant_id"`
-	ID       string `json:"id"`
-}
-
-func (q *Queries) DeleteMenuItem(ctx context.Context, arg DeleteMenuItemParams) error {
-	_, err := q.db.Exec(ctx, deleteMenuItem, arg.TenantID, arg.ID)
-	return err
-}
-
-const deletePermissionCatalogItem = `-- name: DeletePermissionCatalogItem :exec
-DELETE FROM permissions
-WHERE tenant_id = $1 AND id = $2
-`
-
-type DeletePermissionCatalogItemParams struct {
-	TenantID string `json:"tenant_id"`
-	ID       string `json:"id"`
-}
-
-func (q *Queries) DeletePermissionCatalogItem(ctx context.Context, arg DeletePermissionCatalogItemParams) error {
-	_, err := q.db.Exec(ctx, deletePermissionCatalogItem, arg.TenantID, arg.ID)
-	return err
-}
-
 const deletePermissionSetItemsForSet = `-- name: DeletePermissionSetItemsForSet :exec
 DELETE FROM permission_set_items
 WHERE tenant_id = $1 AND permission_set_id = $2
@@ -162,38 +132,6 @@ func (q *Queries) ListPermissionCatalogItems(ctx context.Context, tenantID strin
 			&i.Description,
 			&i.HighRisk,
 			&i.Severity,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
-const listPermissionSetItems = `-- name: ListPermissionSetItems :many
-SELECT id, tenant_id, permission_set_id, permission_id, created_at FROM permission_set_items
-WHERE tenant_id = $1
-ORDER BY created_at ASC
-`
-
-func (q *Queries) ListPermissionSetItems(ctx context.Context, tenantID string) ([]PermissionSetItem, error) {
-	rows, err := q.db.Query(ctx, listPermissionSetItems, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []PermissionSetItem
-	for rows.Next() {
-		var i PermissionSetItem
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.PermissionSetID,
-			&i.PermissionID,
 			&i.CreatedAt,
 		); err != nil {
 			return nil, err

@@ -68,10 +68,6 @@ type (
 	EHRMSEmployeeSyncResponse          = domain.EHRMSEmployeeSyncResponse
 	EHRMSOrgUnitSyncResponse           = domain.EHRMSOrgUnitSyncResponse
 	EHRMSPositionSyncResponse          = domain.EHRMSPositionSyncResponse
-	EHRMSSyncRun                       = domain.EHRMSSyncRun
-	EHRMSSyncRunDetail                 = domain.EHRMSSyncRunDetail
-	RetryEHRMSSyncRunInput             = domain.RetryEHRMSSyncRunInput
-	StartEHRMSSyncInput                = domain.StartEHRMSSyncInput
 	BatchEmployeeResponse              = domain.BatchEmployeeResponse
 	BatchEmployeeResult                = domain.BatchEmployeeResult
 	LeaveBalance                       = domain.LeaveBalance
@@ -178,7 +174,6 @@ type (
 	AgentDefinitionStatus              = domain.AgentDefinitionStatus
 	AgentDefinitionVersion             = domain.AgentDefinitionVersion
 	AgentUsageStats                    = domain.AgentUsageStats
-	AgentAudit                         = domain.AgentAudit
 	AgentSession                       = domain.AgentSession
 	AgentSessionMessage                = domain.AgentSessionMessage
 	AgentMemory                        = domain.AgentMemory

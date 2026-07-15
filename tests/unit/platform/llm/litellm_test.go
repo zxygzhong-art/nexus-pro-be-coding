@@ -88,7 +88,7 @@ func TestLiteLLMGenerateContentStream(t *testing.T) {
 	}
 }
 
-// TestLiteLLMGenerateContentToolCall 验证系统指令、工具声明与函数调用不会在适配层丢失。
+// TestLiteLLMGenerateContentToolCall 驗證系統指令、工具聲明與函數調用不會在適配層丟失。
 func TestLiteLLMGenerateContentToolCall(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -146,7 +146,7 @@ func TestLiteLLMGenerateContentToolCall(t *testing.T) {
 	}
 }
 
-// TestLiteLLMGenerateContentStreamToolCall 验证流式参数片段会聚合为一次完整 ADK 工具调用。
+// TestLiteLLMGenerateContentStreamToolCall 驗證流式參數片段會聚合為一次完整 ADK 工具調用。
 func TestLiteLLMGenerateContentStreamToolCall(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -174,7 +174,7 @@ func TestLiteLLMGenerateContentStreamToolCall(t *testing.T) {
 	}
 }
 
-// TestLiteLLMADKToolLoop 验证流式 tool call、tool response 与下一轮生成可以完整闭环。
+// TestLiteLLMADKToolLoop 驗證流式 tool call、tool response 與下一輪生成可以完整閉環。
 func TestLiteLLMADKToolLoop(t *testing.T) {
 	callCount := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -256,7 +256,168 @@ func TestLiteLLMADKToolLoop(t *testing.T) {
 	}
 }
 
-// writeToolCallResponse 输出一个 OpenAI-compatible 函数调用回应。
+// TestLiteLLMADKParallelToolLoop 驗證同一 assistant 回合的多個工具調用會緊鄰配對響應。
+func TestLiteLLMADKParallelToolLoop(t *testing.T) {
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		callCount++
+		var body struct {
+			Messages []struct {
+				Role       string `json:"role"`
+				ToolCallID string `json:"tool_call_id"`
+				ToolCalls  []struct {
+					ID string `json:"id"`
+				} `json:"tool_calls"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		if callCount == 1 {
+			response := map[string]any{
+				"id": "chatcmpl-parallel", "object": "chat.completion", "created": 1, "model": "test-model",
+				"choices": []map[string]any{{
+					"index": 0,
+					"message": map[string]any{"role": "assistant", "content": "", "tool_calls": []map[string]any{
+						{"id": "call-list", "type": "function", "function": map[string]any{"name": "list_published_form_templates", "arguments": `{}`}},
+						{"id": "call-balance", "type": "function", "function": map[string]any{"name": "get_leave_balance", "arguments": `{}`}},
+					}},
+					"finish_reason": "tool_calls",
+				}},
+			}
+			raw, err := json.Marshal(response)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _ = w.Write(raw)
+			return
+		}
+
+		assistantIndex := -1
+		for i, message := range body.Messages {
+			if message.Role == "assistant" && len(message.ToolCalls) == 2 {
+				assistantIndex = i
+				break
+			}
+		}
+		if assistantIndex < 0 || len(body.Messages) < assistantIndex+3 {
+			t.Fatalf("parallel assistant call was not preserved: %+v", body.Messages)
+		}
+		responses := body.Messages[assistantIndex+1 : assistantIndex+3]
+		gotIDs := map[string]bool{}
+		for _, message := range responses {
+			if message.Role != "tool" || message.ToolCallID == "" {
+				t.Fatalf("tool responses must immediately follow the assistant call: %+v", body.Messages)
+			}
+			gotIDs[message.ToolCallID] = true
+		}
+		if !gotIDs["call-list"] || !gotIDs["call-balance"] {
+			t.Fatalf("tool response IDs do not match assistant calls: %+v", body.Messages)
+		}
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-final","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"已取得请假表单和假期余额。"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	modelClient, err := llm.NewLiteLLM(llm.LiteLLMConfig{BaseURL: server.URL, APIKey: "test-key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	runtime, err := service.NewADKAgentChatRuntime(modelClient)
+	if err != nil {
+		t.Fatal(err)
+	}
+	executed := make(chan string, 2)
+	tools := map[string]service.AgentTool{
+		"list_published_form_templates": func(context.Context, map[string]any) (map[string]any, error) {
+			executed <- "list_published_form_templates"
+			return map[string]any{"items": []map[string]any{{"key": "leave-request"}}}, nil
+		},
+		"get_leave_balance": func(context.Context, map[string]any) (map[string]any, error) {
+			executed <- "get_leave_balance"
+			return map[string]any{"annual_hours": 40}, nil
+		},
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err = runtime.RunAgentChat(ctx, service.AgentChatRuntimeRequest{
+		RequestContext: domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
+		SessionID:      "session-parallel",
+		ModelName:      "test-model",
+		Message:        "帮我确认请假表单和余额",
+		Tools:          tools,
+	}, func(context.Context, domain.AgentChatEvent) error { return nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	close(executed)
+	gotTools := map[string]bool{}
+	for name := range executed {
+		gotTools[name] = true
+	}
+	if !gotTools["list_published_form_templates"] || !gotTools["get_leave_balance"] {
+		t.Fatalf("parallel tools did not both execute: %+v", gotTools)
+	}
+	if callCount != 2 {
+		t.Fatalf("unexpected model call count: %d", callCount)
+	}
+}
+
+// TestLiteLLMRetryAfterUnresolvedParallelToolCalls 驗證失敗回合不會汙染同一 session 的重試消息。
+func TestLiteLLMRetryAfterUnresolvedParallelToolCalls(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []struct {
+				Role      string `json:"role"`
+				Content   string `json:"content"`
+				ToolCalls []struct {
+					ID string `json:"id"`
+				} `json:"tool_calls"`
+			} `json:"messages"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		for _, message := range body.Messages {
+			if len(message.ToolCalls) > 0 {
+				http.Error(w, "unresolved tool call history reached the provider", http.StatusBadRequest)
+				return
+			}
+		}
+		last := body.Messages[len(body.Messages)-1]
+		if last.Role != "user" || last.Content != "重试请假" {
+			t.Fatalf("latest user retry was not preserved: %+v", body.Messages)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-retry","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"可以继续处理。"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+
+	modelClient, err := llm.NewLiteLLM(llm.LiteLLMConfig{BaseURL: server.URL, APIKey: "test-key"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := userRequest("第一次请假", "test-model")
+	danglingCalls := &genai.Content{Role: "model", Parts: []*genai.Part{
+		{FunctionCall: &genai.FunctionCall{ID: "call-profile", Name: "get_my_profile", Args: map[string]any{}}},
+		{FunctionCall: &genai.FunctionCall{ID: "call-balance", Name: "my_leave_balances", Args: map[string]any{}}},
+	}}
+	request.Contents = append(request.Contents, danglingCalls, genai.NewContentFromText("重试请假", "user"))
+
+	var response *model.LLMResponse
+	for item, err := range modelClient.GenerateContent(context.Background(), request, false) {
+		if err != nil {
+			t.Fatal(err)
+		}
+		response = item
+	}
+	if textFromResponse(response) != "可以继续处理。" {
+		t.Fatalf("unexpected retry response: %+v", response)
+	}
+}
+
+// writeToolCallResponse 輸出一個 OpenAI-compatible 函數調用回應。
 func writeToolCallResponse(t *testing.T, w http.ResponseWriter, id, name, arguments string) {
 	t.Helper()
 	chunk := map[string]any{
@@ -276,7 +437,7 @@ func writeToolCallResponse(t *testing.T, w http.ResponseWriter, id, name, argume
 	_, _ = w.Write(raw)
 }
 
-// userRequest 建立可选择模型覆写的 ADK 请求，覆盖默认与租户模型 alias 两条路径。
+// userRequest 建立可選擇模型覆寫的 ADK 請求，覆蓋默認與租戶模型 alias 兩條路徑。
 func userRequest(text, modelName string) *model.LLMRequest {
 	return &model.LLMRequest{
 		Model: modelName,
@@ -287,7 +448,7 @@ func userRequest(text, modelName string) *model.LLMRequest {
 	}
 }
 
-// textFromResponse 读取 ADK 回应的第一个文字片段。
+// textFromResponse 讀取 ADK 回應的第一個文字片段。
 func textFromResponse(resp *model.LLMResponse) string {
 	if resp == nil || resp.Content == nil || len(resp.Content.Parts) == 0 || resp.Content.Parts[0] == nil {
 		return ""

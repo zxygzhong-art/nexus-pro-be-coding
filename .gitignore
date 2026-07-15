@@ -4,10 +4,13 @@
 !ops/.env
 
 bin/
+/api
 tmp/
 dist/
 coverage.out
 logs/*.log
 .gocache/
+__pycache__/
+*.py[cod]
 
 .DS_Store

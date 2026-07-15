@@ -15,6 +15,7 @@ const (
 	identityProvisioningMaxErrorLength     = 500
 	identityProvisioningRetryBackoffBase   = 30 * time.Second
 	identityProvisioningRetryBackoffMaxCap = 10 * time.Minute
+	identityProvisioningClaimLease         = 5 * time.Minute
 )
 
 // provisionEmployeeAccountIdentity 開通員工帳號身分的服務流程。
@@ -28,18 +29,19 @@ func (c HRService) provisionEmployeeAccountIdentity(ctx RequestContext, employee
 	}
 	now := c.Now()
 	return c.Service.store.AppendIdentityProvisioningOutboxEvent(goContext(ctx), domain.IdentityProvisioningOutboxEvent{
-		ID:          utils.NewID("idp"),
-		TenantID:    ctx.TenantID,
-		AccountID:   account.ID,
-		EmployeeID:  employee.ID,
-		EmployeeNo:  employee.EmployeeNo,
-		Email:       email,
-		DisplayName: utils.FirstNonEmpty(account.DisplayName, employee.Name),
-		Enabled:     account.Status != string(AccountStatusDisabled),
-		SendInvite:  sendInvite,
-		Status:      domain.IdentityProvisioningStatusPending,
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:            utils.NewID("idp"),
+		TenantID:      ctx.TenantID,
+		AccountID:     account.ID,
+		EmployeeID:    employee.ID,
+		EmployeeNo:    employee.EmployeeNo,
+		Email:         email,
+		DisplayName:   utils.FirstNonEmpty(account.DisplayName, employee.Name),
+		Enabled:       account.Status != string(AccountStatusDisabled),
+		SendInvite:    sendInvite,
+		Status:        domain.IdentityProvisioningStatusPending,
+		NextAttemptAt: now,
+		CreatedAt:     now,
+		UpdatedAt:     now,
 	})
 }
 
@@ -80,18 +82,13 @@ func (c *Service) ProcessIdentityProvisioningOutbox(ctx context.Context, tenantI
 	if maxRetries <= 0 {
 		maxRetries = identityProvisioningDefaultMaxRetries
 	}
-	events, err := c.store.ListPendingIdentityProvisioningOutboxEvents(ctx, tenantID)
+	now := c.Now()
+	events, err := c.store.ClaimIdentityProvisioningOutboxEvents(ctx, tenantID, batchSize, maxRetries, now, now.Add(identityProvisioningClaimLease))
 	if err != nil {
 		return 0, err
 	}
 	processed := 0
 	for _, event := range events {
-		if processed >= batchSize {
-			break
-		}
-		if !c.identityProvisioningEventDue(event) {
-			continue
-		}
 		if err := c.processIdentityProvisioningEvent(ctx, event, maxRetries); err != nil {
 			return processed, err
 		}
@@ -164,6 +161,7 @@ func (c *Service) processIdentityProvisioningEvent(ctx context.Context, event do
 	}
 	event.Status = domain.IdentityProvisioningStatusSucceeded
 	event.LastError = ""
+	event.ClaimExpiresAt = nil
 	event.UpdatedAt = c.Now()
 	return c.store.UpdateIdentityProvisioningOutboxEvent(ctx, event)
 }
@@ -177,6 +175,8 @@ func (c *Service) recordIdentityProvisioningRetry(ctx context.Context, event dom
 		event.Status = domain.IdentityProvisioningStatusFailed
 	}
 	event.UpdatedAt = c.Now()
+	event.NextAttemptAt = event.UpdatedAt.Add(identityProvisioningBackoff(event.RetryCount))
+	event.ClaimExpiresAt = nil
 	c.logger.WarnContext(ctx, "identity provisioning attempt failed",
 		"tenant_id", event.TenantID,
 		"account_id", event.AccountID,
@@ -192,6 +192,7 @@ func (c *Service) recordIdentityProvisioningRetry(ctx context.Context, event dom
 func (c *Service) recordIdentityProvisioningFailure(ctx context.Context, event domain.IdentityProvisioningOutboxEvent, message string) error {
 	event.Status = domain.IdentityProvisioningStatusFailed
 	event.LastError = truncateIdentityProvisioningError(message)
+	event.ClaimExpiresAt = nil
 	event.UpdatedAt = c.Now()
 	c.logger.WarnContext(ctx, "identity provisioning failed permanently",
 		"tenant_id", event.TenantID,

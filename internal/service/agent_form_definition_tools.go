@@ -8,7 +8,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
-// toolFormGetCapabilities 只读取表单创作能力，不返回租户业务记录。
+// toolFormGetCapabilities 只讀取表單創作能力，不返回租戶業務記錄。
 func (c AgentService) toolFormGetCapabilities(ctx domain.RequestContext, _ map[string]any) (map[string]any, error) {
 	capabilities, err := c.Workflow().FormBuilderCapabilities(ctx)
 	if err != nil {
@@ -17,7 +17,7 @@ func (c AgentService) toolFormGetCapabilities(ctx domain.RequestContext, _ map[s
 	return map[string]any{"capabilities": capabilities}, nil
 }
 
-// toolFormGetDataSourceSchema 返回 metadata-only 数据源 schema，避免 Agent 读取整租户记录。
+// toolFormGetDataSourceSchema 返回 metadata-only 數據源 schema，避免 Agent 讀取整租戶記錄。
 func (c AgentService) toolFormGetDataSourceSchema(ctx domain.RequestContext, _ map[string]any) (map[string]any, error) {
 	capabilities, err := c.Workflow().FormBuilderCapabilities(ctx)
 	if err != nil {
@@ -26,7 +26,7 @@ func (c AgentService) toolFormGetDataSourceSchema(ctx domain.RequestContext, _ m
 	return map[string]any{"data_sources": capabilities.DataSources}, nil
 }
 
-// toolFormCreateDraft 把自然语言产出的结构化 schema 保存为受控草稿，不提供发布能力。
+// toolFormCreateDraft 把自然語言產出的結構化 schema 保存為受控草稿，不提供發佈能力。
 func (c AgentService) toolFormCreateDraft(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
 	schema, err := formDefinitionSchemaArg(args)
 	if err != nil {
@@ -41,7 +41,7 @@ func (c AgentService) toolFormCreateDraft(ctx domain.RequestContext, args map[st
 	return map[string]any{"draft": draft, "next_step": "call form.validate_draft, then ask the employee to submit the draft for review"}, nil
 }
 
-// toolFormUpdateDraft 更新 Agent 自己创建的定义草稿并要求 revision。
+// toolFormUpdateDraft 更新 Agent 自己創建的定義草稿並要求 revision。
 func (c AgentService) toolFormUpdateDraft(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
 	id := strings.TrimSpace(stringFromAny(args["draft_id"]))
 	if id == "" {
@@ -62,7 +62,7 @@ func (c AgentService) toolFormUpdateDraft(ctx domain.RequestContext, args map[st
 	return map[string]any{"draft": draft, "next_step": "call form.validate_draft before asking for review"}, nil
 }
 
-// toolFormValidateDraft 返回结构化错误与编译结果，不修改发布状态。
+// toolFormValidateDraft 返回結構化錯誤與編譯結果，不修改發佈狀態。
 func (c AgentService) toolFormValidateDraft(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
 	id := strings.TrimSpace(stringFromAny(args["draft_id"]))
 	if id == "" {
@@ -75,7 +75,7 @@ func (c AgentService) toolFormValidateDraft(ctx domain.RequestContext, args map[
 	return map[string]any{"draft": preview.Draft, "validation": preview.Validation, "compiled_schema": preview.CompiledSchema}, nil
 }
 
-// toolFormPreviewDraft 提供前端可复用的预览数据。
+// toolFormPreviewDraft 提供前端可複用的預覽數據。
 func (c AgentService) toolFormPreviewDraft(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
 	id := strings.TrimSpace(stringFromAny(args["draft_id"]))
 	if id == "" {
@@ -88,7 +88,7 @@ func (c AgentService) toolFormPreviewDraft(ctx domain.RequestContext, args map[s
 	return map[string]any{"preview": preview}, nil
 }
 
-// toolFormSimulateWorkflow 返回审批路径模拟，不启动真实 Temporal/workflow run。
+// toolFormSimulateWorkflow 返回審批路徑模擬，不啟動真實 Temporal/workflow run。
 func (c AgentService) toolFormSimulateWorkflow(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
 	id := strings.TrimSpace(stringFromAny(args["draft_id"]))
 	if id == "" {
@@ -101,7 +101,7 @@ func (c AgentService) toolFormSimulateWorkflow(ctx domain.RequestContext, args m
 	return map[string]any{"simulation": simulation}, nil
 }
 
-// formDefinitionSchemaArg 解析 Agent 传入的 schema object，拒绝自由文本 schema。
+// formDefinitionSchemaArg 解析 Agent 傳入的 schema object，拒絕自由文本 schema。
 func formDefinitionSchemaArg(args map[string]any) (domain.FormDefinitionSchemaV2, error) {
 	raw, ok := args["schema"]
 	if !ok {
@@ -121,7 +121,7 @@ func formDefinitionSchemaArg(args map[string]any) (domain.FormDefinitionSchemaV2
 	return schema, nil
 }
 
-// int64FromAny 解析 JSON number 与字符串形式的 revision。
+// int64FromAny 解析 JSON number 與字符串形式的 revision。
 func int64FromAny(value any) int64 {
 	switch typed := value.(type) {
 	case int:

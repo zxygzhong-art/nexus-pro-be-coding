@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/repository"
 	postgresrepo "nexus-pro-be/internal/repository/postgres"
 	"nexus-pro-be/internal/service"
 )
@@ -77,13 +78,15 @@ func TestPostgresWorkflowRuntimeSemantics(t *testing.T) {
 		CreatedAt:              now,
 		UpdatedAt:              now,
 	}
-	if err := store.UpsertWorkflowRun(ctx, run); err != nil {
-		t.Fatal(err)
-	}
 	started := now
-	if err := store.UpsertWorkflowStageInstance(ctx, domain.WorkflowStageInstance{
-		ID: stageA, TenantID: tenantA, RunID: runA, StageID: "s1", StageType: "approver",
-		Label: "主管審核", Status: domain.WorkflowStageStatusActive, Sequence: 0, StartedAt: &started,
+	if err := store.WithTenantTransaction(ctx, tenantA, func(tx repository.Store) error {
+		if err := tx.UpsertWorkflowRun(ctx, run); err != nil {
+			return err
+		}
+		return tx.UpsertWorkflowStageInstance(ctx, domain.WorkflowStageInstance{
+			ID: stageA, TenantID: tenantA, RunID: runA, StageID: "s1", StageType: "approver",
+			Label: "主管審核", Status: domain.WorkflowStageStatusActive, Sequence: 0, StartedAt: &started,
+		})
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -97,6 +100,12 @@ func TestPostgresWorkflowRuntimeSemantics(t *testing.T) {
 		AccountID: accountA, Action: "submit", CreatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
+	}
+	if err := store.InsertWorkflowAction(ctx, domain.WorkflowAction{
+		ID: "wfa_" + suffix + "_system", TenantID: tenantA, RunID: runA, StageInstanceID: stageA,
+		AccountID: "system", Action: "auto_condition", CreatedAt: now.Add(time.Millisecond),
+	}); err != nil {
+		t.Fatalf("system workflow action must not require a synthetic account row: %v", err)
 	}
 
 	gotRun, ok, err := store.GetWorkflowRunByFormInstance(ctx, tenantA, formA)
@@ -135,8 +144,8 @@ func TestPostgresWorkflowRuntimeSemantics(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(actions) != 1 || actions[0].Action != "submit" {
-		t.Fatalf("expected submit action, got %+v", actions)
+	if len(actions) != 2 || actions[0].Action != "submit" || actions[1].AccountID != "system" {
+		t.Fatalf("expected user and system workflow actions, got %+v", actions)
 	}
 
 	instance, ok, err := store.GetFormInstance(ctx, tenantA, formA)
@@ -211,7 +220,10 @@ func TestPostgresWorkflowSubmitApproveServiceSemantics(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	svc := service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }})
+	svc := newIntegrationServiceWithFormApprovalWorkflows(
+		store,
+		service.Options{Now: func() time.Time { return now.Add(time.Hour) }},
+	)
 	applicantCtx := domain.RequestContext{TenantID: tenantID, AccountID: applicantID}
 	approverCtx := domain.RequestContext{TenantID: tenantID, AccountID: approverID}
 

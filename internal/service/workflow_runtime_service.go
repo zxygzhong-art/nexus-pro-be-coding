@@ -123,19 +123,30 @@ func (c WorkflowService) ActOnWorkflowStage(ctx RequestContext, formInstanceID, 
 
 // GetWorkflowFormState 回傳單據流程運行狀態。
 func (c WorkflowService) GetWorkflowFormState(ctx RequestContext, formInstanceID string) (domain.WorkflowFormStateResponse, error) {
-	_, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, formInstanceID)
+	account, decision, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
+	if err != nil {
+		return domain.WorkflowFormStateResponse{}, err
+	}
+	instance, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, formInstanceID)
 	if err != nil {
 		return domain.WorkflowFormStateResponse{}, err
 	}
 	if !ok {
 		return domain.WorkflowFormStateResponse{}, NotFound("form instance", formInstanceID)
 	}
+	if err := requireFormInstanceVisible(instance, account, decision); err != nil {
+		return domain.WorkflowFormStateResponse{}, err
+	}
 	run, ok, err := c.store.GetWorkflowRunByFormInstance(goContext(ctx), ctx.TenantID, formInstanceID)
 	if err != nil {
 		return domain.WorkflowFormStateResponse{}, err
 	}
 	if !ok {
-		return domain.WorkflowFormStateResponse{FormInstanceID: formInstanceID, Steps: []domain.WorkflowFormStep{}}, nil
+		return domain.WorkflowFormStateResponse{
+			FormInstanceID: formInstanceID,
+			FormStatus:     instance.Status,
+			Steps:          []domain.WorkflowFormStep{},
+		}, nil
 	}
 	stages := DeserializeWorkflowStages(run.StageDefinitionsJSON)
 	stageInstances, err := c.store.ListWorkflowStageInstancesByRun(goContext(ctx), ctx.TenantID, run.ID)
@@ -222,6 +233,7 @@ func (c WorkflowService) GetWorkflowFormState(ctx RequestContext, formInstanceID
 	}
 	return domain.WorkflowFormStateResponse{
 		FormInstanceID:    formInstanceID,
+		FormStatus:        instance.Status,
 		RunID:             run.ID,
 		RunStatus:         run.Status,
 		CurrentStageID:    currentStageID,

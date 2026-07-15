@@ -15,7 +15,7 @@ func TestPlatformAssistantsDoNotFallbackToStaticCatalog(t *testing.T) {
 	now := time.Date(2026, 7, 13, 11, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
 	seedAgentChatAccount(t, store, now, []domain.Permission{{Resource: "agent.run", Action: "create", Scope: "all"}})
-	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 
 	response, err := svc.Platform().ListAssistants(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
@@ -26,6 +26,55 @@ func TestPlatformAssistantsDoNotFallbackToStaticCatalog(t *testing.T) {
 	}
 	if response.Total != 0 || len(response.Data) != 0 {
 		t.Fatalf("expected an empty managed assistant list, got %+v", response.Data)
+	}
+}
+
+// TestPlatformAssistantsUsePublishedConversationExperience keeps draft edits out of the runtime assistant page.
+func TestPlatformAssistantsUsePublishedConversationExperience(t *testing.T) {
+	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentAdminAccount(t, store, now)
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
+	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
+		Name: "Model", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
+		Name: "Leave Agent", ModelID: model.ID, WelcomeMessage: "Published welcome", SuggestedQuestions: []string{"Published question"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = svc.Agent().PublishDefinition(ctx, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	draftWelcome := "Draft welcome"
+	if _, err = svc.Agent().UpdateDefinition(ctx, agent.ID, domain.UpdateAgentDefinitionInput{
+		WelcomeMessage: &draftWelcome, SuggestedQuestions: []string{"Draft question"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	response, err := svc.Platform().ListAssistants(ctx, domain.PlatformAssistantsQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Data) != 1 || response.Data[0].WelcomeMessage != "Published welcome" || len(response.Data[0].SuggestedQuestions) != 1 || response.Data[0].SuggestedQuestions[0] != "Published question" {
+		t.Fatalf("expected deployed conversation experience, got %+v", response.Data)
+	}
+
+	if _, err = svc.Agent().PublishDefinition(ctx, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	response, err = svc.Platform().ListAssistants(ctx, domain.PlatformAssistantsQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if response.Data[0].WelcomeMessage != "Draft welcome" || response.Data[0].SuggestedQuestions[0] != "Draft question" {
+		t.Fatalf("expected newly deployed conversation experience, got %+v", response.Data[0])
 	}
 }
 
@@ -76,7 +125,7 @@ func TestAgentDefinitionScopedVisibilityRequiresExistingTargets(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
 	store := memory.NewStore()
 	seedAgentAdminAccount(t, store, now)
-	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Model", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test"})
 	if err != nil {
@@ -112,7 +161,7 @@ func TestPublishedAssistantsRequireActiveAssumableRoleForRoleVisibility(t *testi
 	}); err != nil {
 		t.Fatal(err)
 	}
-	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 	withoutRole, err := svc.Platform().ListAssistants(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.PlatformAssistantsQuery{})
 	if err != nil {
 		t.Fatal(err)

@@ -80,7 +80,7 @@ func TestTenantResourceIDsStayGloballyUniqueContract(t *testing.T) {
 		// 樂觀鎖:三張熱點表的 upsert 必須帶 expected_version 檢查。
 		"WHERE sqlc.arg(expected_version)::bigint = 0 OR accounts.version = sqlc.arg(expected_version)::bigint",
 		"WHERE sqlc.arg(expected_version)::bigint = 0 OR user_groups.version = sqlc.arg(expected_version)::bigint",
-		"WHERE sqlc.arg(expected_version)::bigint = 0 OR form_instances.version = sqlc.arg(expected_version)::bigint",
+		"AND (sqlc.arg(expected_version)::bigint = 0 OR form_instances.version = sqlc.arg(expected_version)::bigint)",
 	}
 	for _, item := range requiredQueries {
 		if !strings.Contains(core, item) && !strings.Contains(authz, item) {
@@ -89,5 +89,44 @@ func TestTenantResourceIDsStayGloballyUniqueContract(t *testing.T) {
 	}
 	if !strings.Contains(openAPI, "Identifiers for persisted tenant resources are globally unique across tenants.") {
 		t.Fatal("expected OpenAPI to document globally unique persisted resource identifiers")
+	}
+}
+
+// TestRelationshipHardeningStaysInSchema verifies typed workflow data and tenant-safe foreign keys.
+func TestRelationshipHardeningStaysInSchema(t *testing.T) {
+	raw, err := os.ReadFile("../../../db/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := string(raw)
+	required := []string{
+		"stage_definitions_json jsonb NOT NULL DEFAULT '[]'::jsonb",
+		"CONSTRAINT user_identities_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE",
+		"CONSTRAINT workflow_actions_stage_fk FOREIGN KEY (tenant_id, run_id, stage_instance_id) REFERENCES workflow_stage_instances (tenant_id, run_id, id) ON DELETE CASCADE",
+		"CONSTRAINT form_instances_template_version_fk FOREIGN KEY (tenant_id, template_id, template_version_id)",
+		"CONSTRAINT form_instance_field_values_one_value_check CHECK",
+		"CONSTRAINT agent_runs_agent_fk FOREIGN KEY (tenant_id, agent_id) REFERENCES agent_definitions (tenant_id, id) ON DELETE SET NULL (agent_id)",
+		"ADD CONSTRAINT agent_runs_session_fk FOREIGN KEY (tenant_id, session_id) REFERENCES agent_sessions (tenant_id, id) ON DELETE SET NULL (session_id)",
+		"FOREIGN KEY (tenant_id, run_id) REFERENCES agent_runs (tenant_id, id) ON DELETE SET NULL (run_id)",
+		"FOREIGN KEY (tenant_id, session_id) REFERENCES agent_sessions (tenant_id, id) ON DELETE SET NULL (session_id)",
+	}
+	for _, item := range required {
+		if !strings.Contains(schema, item) {
+			t.Fatalf("expected relationship-hardening schema fragment %q", item)
+		}
+	}
+	if strings.Contains(schema, "owner_account_id text NOT NULL REFERENCES accounts(id)") {
+		t.Fatal("form_definition_drafts must not keep the redundant global owner foreign key")
+	}
+	if strings.Contains(schema, "workflow_actions_account_fk") {
+		t.Fatal("workflow action actors may use the system sentinel and must not require an account row")
+	}
+	for _, redundantIndex := range []string{
+		"permission_set_items_tenant_set_idx",
+		"authz_relationship_tuples_object_idx",
+	} {
+		if strings.Contains(schema, redundantIndex) {
+			t.Fatalf("schema must not recreate redundant prefix index %q", redundantIndex)
+		}
 	}
 }

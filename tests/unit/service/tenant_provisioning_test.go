@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -54,6 +55,19 @@ func TestProvisionTenantCreatesUsableAdmin(t *testing.T) {
 	stages := service.ParseWorkflowStagesFromTemplate(leaveTemplate)
 	if len(stages) != 1 || stages[0].Config.Role != "manager" {
 		t.Fatalf("expected manager approval stage, stages=%+v", stages)
+	}
+	templates, err := store.ListFormTemplates(context.Background(), "tenant-acme")
+	if err != nil || len(templates) != 6 {
+		t.Fatalf("expected six common form templates, templates=%+v err=%v", templates, err)
+	}
+	for key, requiredField := range map[string]string{
+		"leave-request": "leave_type", "overtime-approval": "overtime_type", "punch-fix": "correction_type",
+		"job-change": "change_types", "headcount-request": "openings", "resignation": "separation_type",
+	} {
+		template, ok, getErr := store.GetFormTemplateByKey(context.Background(), "tenant-acme", key)
+		if getErr != nil || !ok || template.Status != "published" || !templateHasBuilderField(template, requiredField) {
+			t.Fatalf("expected published %s template with %s field, template=%+v ok=%v err=%v", key, requiredField, template, ok, getErr)
+		}
 	}
 	permissionSet, ok, err := store.GetPermissionSet(context.Background(), "tenant-acme", result.AdminPermissionSetID)
 	if err != nil || !ok || !hasPermission(permissionSet.Permissions, "hr.employee", domain.ActionDelete, "hr.employees") {
@@ -121,9 +135,13 @@ func TestProvisionTenantIsIdempotent(t *testing.T) {
 	if err != nil || len(identities) != 1 {
 		t.Fatalf("expected one identity after rerun, identities=%+v err=%v", identities, err)
 	}
-	leaveTemplates, err := store.ListFormTemplates(context.Background(), "tenant-acme")
-	if err != nil || len(leaveTemplates) != 1 || leaveTemplates[0].Name != "Acme Leave Request" {
-		t.Fatalf("expected rerun to preserve one customized leave template, templates=%+v err=%v", leaveTemplates, err)
+	templates, err := store.ListFormTemplates(context.Background(), "tenant-acme")
+	if err != nil || len(templates) != 6 {
+		t.Fatalf("expected rerun to preserve six default templates, templates=%+v err=%v", templates, err)
+	}
+	preservedLeave, ok, err := store.GetFormTemplateByKey(context.Background(), "tenant-acme", "leave-request")
+	if err != nil || !ok || preservedLeave.Name != "Acme Leave Request" {
+		t.Fatalf("expected rerun to preserve customized leave template, template=%+v ok=%v err=%v", preservedLeave, ok, err)
 	}
 	events, err := store.ListOutboxEvents(context.Background(), "tenant-acme")
 	if err != nil {
@@ -136,6 +154,57 @@ func TestProvisionTenantIsIdempotent(t *testing.T) {
 	if relationshipEvents == 0 || relationshipEvents != len(events)-2 {
 		t.Fatalf("expected relationship events only from the first run, events=%+v", events)
 	}
+}
+
+// TestEnsureTenantDefaultFormTemplatesBackfillsOnlyMissingForms 驗證補建不覆蓋既有同 key 範本。
+func TestEnsureTenantDefaultFormTemplatesBackfillsOnlyMissingForms(t *testing.T) {
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	if err := store.UpsertTenant(context.Background(), domain.Tenant{ID: "demo", Name: "Demo", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
+		ID: "ft-custom-leave", TenantID: "demo", Key: "leave-request", Name: "自訂請假單",
+		Schema: map[string]any{"type": "object"}, Status: "published", CurrentVersion: 3, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+
+	created, err := svc.EnsureTenantDefaultFormTemplates(context.Background(), "demo")
+	if err != nil || created != 5 {
+		t.Fatalf("expected five missing templates, created=%d err=%v", created, err)
+	}
+	leave, ok, err := store.GetFormTemplateByKey(context.Background(), "demo", "leave-request")
+	if err != nil || !ok || leave.Name != "自訂請假單" || leave.CurrentVersion != 3 {
+		t.Fatalf("expected customized leave template to remain unchanged, template=%+v ok=%v err=%v", leave, ok, err)
+	}
+	created, err = svc.EnsureTenantDefaultFormTemplates(context.Background(), "demo")
+	if err != nil || created != 0 {
+		t.Fatalf("expected idempotent second backfill, created=%d err=%v", created, err)
+	}
+}
+
+// templateHasBuilderField 檢查 workspace design 是否包含指定表單元件欄位。
+func templateHasBuilderField(template domain.FormTemplate, fieldID string) bool {
+	design, ok := template.Schema["workspace_design"].(map[string]any)
+	if !ok {
+		return false
+	}
+	raw, err := json.Marshal(design["fields"])
+	if err != nil {
+		return false
+	}
+	var fields []domain.PlatformFormBuilderField
+	if err := json.Unmarshal(raw, &fields); err != nil {
+		return false
+	}
+	for _, field := range fields {
+		if field.ID == fieldID {
+			return true
+		}
+	}
+	return false
 }
 
 // hasPermission 檢查權限集合是否包含指定權限。

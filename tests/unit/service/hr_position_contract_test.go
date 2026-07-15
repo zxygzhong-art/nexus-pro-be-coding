@@ -60,7 +60,7 @@ func TestHRPositionCRUDSoftDisablesPosition(t *testing.T) {
 	}
 }
 
-// TestManagerPositionCannotMoveOrDisable 验证主管岗位必须保留在所属组织且保持启用。
+// TestManagerPositionCannotMoveOrDisable 驗證主管崗位必須保留在所屬組織且保持啟用。
 func TestManagerPositionCannotMoveOrDisable(t *testing.T) {
 	permissions := append(hrPositionContractPermissions(),
 		domain.Permission{Resource: "hr.org_unit", Action: "create", Scope: "all"},

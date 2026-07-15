@@ -42,12 +42,12 @@ func TestOpenTelemetryConfig(t *testing.T) {
 	}
 }
 
-// TestAgentToolCredentialEncryptionConfig verifies the external-tool key is loaded without transformation.
-func TestAgentToolCredentialEncryptionConfig(t *testing.T) {
-	t.Setenv("AGENT_TOOL_CREDENTIAL_ENCRYPTION_KEY", "ZmFrZS1rZXk=")
+// TestEncryptionKeyConfig verifies the shared encryption key is loaded without transformation.
+func TestEncryptionKeyConfig(t *testing.T) {
+	t.Setenv("ENCRYPTION_KEY", "ZmFrZS1rZXk=")
 	cfg := config.Load()
-	if cfg.AgentToolCredentialEncryptionKey != "ZmFrZS1rZXk=" {
-		t.Fatalf("unexpected agent tool credential key: %q", cfg.AgentToolCredentialEncryptionKey)
+	if cfg.EncryptionKey != "ZmFrZS1rZXk=" {
+		t.Fatalf("unexpected encryption key: %q", cfg.EncryptionKey)
 	}
 }
 
@@ -375,6 +375,26 @@ func TestValidateStartupAllowsDevelopmentDefaults(t *testing.T) {
 
 	if err := cfg.ValidateStartup(); err != nil {
 		t.Fatalf("expected development defaults to validate, got %v", err)
+	}
+}
+
+// TestValidateStartupRejectsUnknownEnvironment prevents APP_ENV typos from bypassing production checks.
+func TestValidateStartupRejectsUnknownEnvironment(t *testing.T) {
+	cfg := config.Config{Env: "prodution"}
+
+	err := cfg.ValidateStartup()
+	if err == nil || !strings.Contains(err.Error(), "APP_ENV") {
+		t.Fatalf("expected unknown APP_ENV to fail startup validation, got %v", err)
+	}
+}
+
+// TestValidateStartupAppliesProductionChecksToStaging keeps pre-production behavior aligned with production.
+func TestValidateStartupAppliesProductionChecksToStaging(t *testing.T) {
+	cfg := config.Config{Env: "staging"}
+
+	err := cfg.ValidateStartup()
+	if err == nil || !strings.Contains(err.Error(), "DB_HOST, DB_USERNAME, and DB_NAME") {
+		t.Fatalf("expected staging to use production startup checks, got %v", err)
 	}
 }
 
@@ -723,6 +743,19 @@ func TestRateLimitConfig(t *testing.T) {
 	}
 	if !cfg.RateLimitEnabled || cfg.RateLimitRPS != 50 || cfg.RateLimitBurst != 100 {
 		t.Fatalf("unexpected rate limit config: %+v", cfg)
+	}
+}
+
+// TestRateLimitConfigDefaultsToFailClosedInProduction secures the production image without changing local defaults.
+func TestRateLimitConfigDefaultsToFailClosedInProduction(t *testing.T) {
+	t.Setenv("APP_ENV", "production")
+
+	cfg, err := config.LoadE()
+	if err != nil {
+		t.Fatalf("expected production rate limit defaults to load, got %v", err)
+	}
+	if !cfg.RateLimitEnabled || !cfg.RateLimitFailClosed {
+		t.Fatalf("expected production rate limiting to default on and fail closed, got %+v", cfg)
 	}
 }
 

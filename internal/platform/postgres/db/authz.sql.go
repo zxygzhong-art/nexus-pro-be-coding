@@ -620,35 +620,6 @@ func (q *Queries) ListUserIdentities(ctx context.Context, arg ListUserIdentities
 	return items, nil
 }
 
-const revokeAuthzAssumableRoleSession = `-- name: RevokeAuthzAssumableRoleSession :one
-UPDATE authz_assumable_role_sessions
-SET revoked_at = $3
-WHERE tenant_id = $1 AND id = $2
-RETURNING id, tenant_id, account_id, assumable_role_id, session_policy, expires_at, revoked_at, created_at
-`
-
-type RevokeAuthzAssumableRoleSessionParams struct {
-	TenantID  string             `json:"tenant_id"`
-	ID        string             `json:"id"`
-	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
-}
-
-func (q *Queries) RevokeAuthzAssumableRoleSession(ctx context.Context, arg RevokeAuthzAssumableRoleSessionParams) (AuthzAssumableRoleSession, error) {
-	row := q.db.QueryRow(ctx, revokeAuthzAssumableRoleSession, arg.TenantID, arg.ID, arg.RevokedAt)
-	var i AuthzAssumableRoleSession
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.AccountID,
-		&i.AssumableRoleID,
-		&i.SessionPolicy,
-		&i.ExpiresAt,
-		&i.RevokedAt,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const updateAuthzDataScope = `-- name: UpdateAuthzDataScope :one
 UPDATE authz_data_scopes
 SET code = $3,

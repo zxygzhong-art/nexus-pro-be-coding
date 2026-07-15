@@ -2,6 +2,8 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,10 +14,11 @@ import (
 )
 
 func TestAgentCreatesDraftAndRequiresConfirmationBeforeSubmission(t *testing.T) {
-	now := time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC)
+	now := time.Now().UTC().Truncate(time.Second)
 	store := memory.NewStore()
 	seedAgentConfirmationAccount(t, store, now, "acct-employee", []domain.Permission{
 		{Resource: "agent.run", Action: "create", Scope: "all"},
+		{Resource: "agent.run", Action: "read", Scope: "all"},
 		agentToolTestPermission("create_form_draft"),
 		agentToolTestPermission("preview_form_submission"),
 		{Resource: "workflow.form_template", Action: "read", Scope: "all"},
@@ -61,6 +64,30 @@ func TestAgentCreatesDraftAndRequiresConfirmationBeforeSubmission(t *testing.T) 
 	if run.Status != string(domain.AgentRunStatusCompleted) || confirmation == nil || confirmation.Kind != "form_submit" {
 		t.Fatalf("expected a completed chat with submit confirmation, run=%+v confirmation=%+v", run, confirmation)
 	}
+	messages, err := svc.Agent().ListSessionMessages(ctx, run.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	artifactNames := map[string]int{}
+	for _, message := range messages {
+		raw, _ := message.Metadata["agent_artifact_json"].(string)
+		if raw == "" {
+			continue
+		}
+		var artifact map[string]any
+		if err := json.Unmarshal([]byte(raw), &artifact); err != nil {
+			t.Fatalf("invalid persisted artifact: %v", err)
+		}
+		if name, _ := artifact["name"].(string); name != "" {
+			artifactNames[name]++
+		}
+		if event, _ := artifact["event"].(string); event != "" {
+			artifactNames[event]++
+		}
+	}
+	if artifactNames["create_form_draft"] != 1 || artifactNames["confirmation_required"] != 1 {
+		t.Fatalf("expected replayable draft and pending confirmation artifacts, got %v", artifactNames)
+	}
 	drafts, err := store.ListFormInstances(context.Background(), "tenant-1")
 	if err != nil || len(drafts) != 1 || drafts[0].Status != "draft" {
 		t.Fatalf("preview must not submit the form, forms=%+v err=%v", drafts, err)
@@ -72,6 +99,16 @@ func TestAgentCreatesDraftAndRequiresConfirmationBeforeSubmission(t *testing.T) 
 	}
 	if executed.FormInstance == nil || executed.FormInstance.Status != "in_review" {
 		t.Fatalf("expected confirmed draft to enter workflow, got %+v", executed)
+	}
+	messages, err = svc.Agent().ListSessionMessages(ctx, run.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, message := range messages {
+		raw, _ := message.Metadata["agent_artifact_json"].(string)
+		if raw != "" && strings.Contains(raw, "confirmation_required") {
+			t.Fatal("consumed confirmation must not be restored from session history")
+		}
 	}
 	if _, err := svc.Agent().ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
 		t.Fatal("expected one-time confirmation replay to be rejected")
@@ -90,9 +127,21 @@ func TestAgentLeaveDraftDefaultsMissingTimes(t *testing.T) {
 		{Resource: "workflow.form_instance", Action: "submit", Scope: "self"},
 		{Resource: "workflow.form_instance", Action: "read", Scope: "self"},
 	})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{
+		ID: "emp-proxy", TenantID: "tenant-1", Name: "Demo", EmployeeNo: "E-PROXY", Status: "active", CreatedAt: now,
+	})
+	leaveSchema := workflowEnabledTemplateSchema()
+	leaveSchema["workspace_design"].(map[string]any)["fields"] = []map[string]any{
+		{"id": "proxy", "type": "select", "label": "代理人", "binding": map[string]any{"source_id": "employees", "label_field": "name", "value_field": "id"}},
+		{"id": "leave_type", "type": "select", "label": "假勤名稱", "required": true, "binding": map[string]any{"source_id": "leave_types", "label_field": "name", "value_field": "code"}},
+		{"id": "start_at", "type": "datetime", "label": "開始時間", "required": true},
+		{"id": "end_at", "type": "datetime", "label": "結束時間", "required": true},
+		{"id": "hours", "type": "number", "label": "請假時數", "required": true},
+		{"id": "reason", "type": "textarea", "label": "請假原因", "required": true},
+	}
 	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
 		ID: "ft-leave-default", TenantID: "tenant-1", Key: "leave-request", Name: "请假申请单",
-		Status: "published", Schema: workflowEnabledTemplateSchema(), CreatedAt: now, UpdatedAt: now,
+		Status: "published", Schema: leaveSchema, CreatedAt: now, UpdatedAt: now,
 	})
 	if err := store.UpsertAttendancePolicy(context.Background(), domain.AttendancePolicy{
 		ID: "current", TenantID: "tenant-1", Version: 1,
@@ -114,7 +163,7 @@ func TestAgentLeaveDraftDefaultsMissingTimes(t *testing.T) {
 	runtime := fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, _ service.AgentChatEmitFunc) error {
 		result, err := req.Tools["create_form_draft"](ctx, map[string]any{
 			"template_key": "leave-request",
-			"payload":      map[string]any{"leave_type": "annual", "reason": "家庭安排"},
+			"payload":      map[string]any{"leave_type": "annual", "reason": "家庭安排", "proxy": "Demo"},
 		})
 		if err != nil {
 			return err
@@ -128,6 +177,7 @@ func TestAgentLeaveDraftDefaultsMissingTimes(t *testing.T) {
 			"template_key": "leave-request",
 			"payload": map[string]any{
 				"leave_type": "annual", "reason": "已指定时间", "hours": float64(9),
+				"proxy":    "emp-proxy",
 				"start_at": "2026-07-20T09:00:00+08:00", "end_at": "2026-07-20T18:00:00+08:00",
 			},
 		})
@@ -153,8 +203,11 @@ func TestAgentLeaveDraftDefaultsMissingTimes(t *testing.T) {
 	if got := draft.Payload["hours"]; got != float64(8) {
 		t.Fatalf("expected policy-derived eight leave hours, got %v", got)
 	}
-	if len(normalizedFields) != 3 {
-		t.Fatalf("expected start_at, end_at, and hours normalization to be disclosed, got %v", normalizedFields)
+	if draft.Payload["proxy"] != "emp-proxy" {
+		t.Fatalf("expected the unique proxy label to normalize to its employee ID, got %v", draft.Payload["proxy"])
+	}
+	if len(normalizedFields) != 4 {
+		t.Fatalf("expected proxy, start_at, end_at, and hours normalization to be disclosed, got %v", normalizedFields)
 	}
 	if len(explicitNormalizedFields) != 1 || explicitNormalizedFields[0] != "hours" || explicitDraft.Payload["start_at"] != "2026-07-20T09:00:00+08:00" || explicitDraft.Payload["end_at"] != "2026-07-20T18:00:00+08:00" || explicitDraft.Payload["hours"] != float64(8) {
 		t.Fatalf("expected explicit leave times to remain unchanged and hours to be recalculated, draft=%v normalized=%v", explicitDraft.Payload, explicitNormalizedFields)

@@ -540,7 +540,7 @@ func (c IAMService) ListOutboxEventPage(ctx RequestContext, query OutboxEventQue
 	return utils.PageResponse(items, page), nil
 }
 
-// RetryOutboxEvent 將失敗 outbox 事件重置為待處理。
+// RetryOutboxEvent resets failed or parked outbox events after the dispatch path is ready.
 func (c IAMService) RetryOutboxEvent(ctx RequestContext, id string) (OutboxEvent, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceOutboxEvent, ActionUpdate, id); err != nil {
 		return OutboxEvent{}, err
@@ -552,8 +552,8 @@ func (c IAMService) RetryOutboxEvent(ctx RequestContext, id string) (OutboxEvent
 	if !ok {
 		return OutboxEvent{}, NotFound("outbox event", id)
 	}
-	if event.Status != "failed" {
-		return OutboxEvent{}, Conflict("only failed outbox events can be retried")
+	if event.Status != "failed" && event.Status != "parked" {
+		return OutboxEvent{}, Conflict("only failed or parked outbox events can be retried")
 	}
 	next := event
 	next.Status = "pending"

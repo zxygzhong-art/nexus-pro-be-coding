@@ -63,6 +63,7 @@ func (s *Store) cloneLocked() *Store {
 		attendanceSummaries:     cloneNestedMap(s.attendanceSummaries, copyAttendanceDailySummary),
 		attendanceCorrections:   cloneNestedMap(s.attendanceCorrections, copyAttendanceCorrectionRequest),
 		overtimeRequests:        cloneNestedMap(s.overtimeRequests, copyOvertimeRequest),
+		formDefinitionDrafts:    cloneNestedMap(s.formDefinitionDrafts, copyFormDefinitionDraft),
 		formTemplates:           cloneNestedMap(s.formTemplates, copyFormTemplate),
 		formTemplateVersions:    cloneNestedMap(s.formTemplateVersions, copyFormTemplateVersion),
 		formInstances:           cloneNestedMap(s.formInstances, copyFormInstance),
@@ -78,7 +79,6 @@ func (s *Store) cloneLocked() *Store {
 		agentExternalTools:      cloneNestedMap(s.agentExternalTools, func(v AgentExternalTool) AgentExternalTool { return v }),
 		agentDefinitions:        cloneNestedMap(s.agentDefinitions, copyAgentDefinition),
 		agentDefinitionVersions: cloneNestedMap(s.agentDefinitionVersions, copyAgentDefinitionVersion),
-		agentAudits:             cloneSliceMap(s.agentAudits, copyAgentAudit),
 		knowledgeBases:          cloneNestedMap(s.knowledgeBases, func(v KnowledgeBase) KnowledgeBase { return v }),
 		knowledgeDocuments:      cloneNestedMap(s.knowledgeDocuments, func(v KnowledgeDocument) KnowledgeDocument { return v }),
 		knowledgeDocumentChunks: cloneNestedMap(s.knowledgeDocumentChunks, copyKnowledgeDocumentChunk),
@@ -101,8 +101,6 @@ func (s *Store) cloneLocked() *Store {
 		identityOutbox:         cloneSliceMap(s.identityOutbox, func(v IdentityProvisioningOutboxEvent) IdentityProvisioningOutboxEvent { return v }),
 		outboxEvents:           cloneSliceMap(s.outboxEvents, copyOutboxEvent),
 		relationshipTuples:     cloneNestedMap(s.relationshipTuples, func(v AuthzRelationshipTuple) AuthzRelationshipTuple { return v }),
-		ehrmsSyncRuns:          cloneNestedMap(s.ehrmsSyncRuns, copyEHRMSSyncRun),
-		ehrmsSyncRunSteps:      cloneNestedMap(s.ehrmsSyncRunSteps, copyEHRMSSyncRunStep),
 		ehrmsSyncLocks:         cloneMap(s.ehrmsSyncLocks, func(v bool) bool { return v }),
 	}
 }
@@ -144,6 +142,7 @@ func (s *Store) replaceLocked(next *Store) {
 	s.attendanceSummaries = next.attendanceSummaries
 	s.attendanceCorrections = next.attendanceCorrections
 	s.overtimeRequests = next.overtimeRequests
+	s.formDefinitionDrafts = next.formDefinitionDrafts
 	s.formTemplates = next.formTemplates
 	s.formTemplateVersions = next.formTemplateVersions
 	s.formInstances = next.formInstances
@@ -159,7 +158,6 @@ func (s *Store) replaceLocked(next *Store) {
 	s.agentExternalTools = next.agentExternalTools
 	s.agentDefinitions = next.agentDefinitions
 	s.agentDefinitionVersions = next.agentDefinitionVersions
-	s.agentAudits = next.agentAudits
 	s.knowledgeBases = next.knowledgeBases
 	s.knowledgeDocuments = next.knowledgeDocuments
 	s.knowledgeDocumentChunks = next.knowledgeDocumentChunks
@@ -176,8 +174,6 @@ func (s *Store) replaceLocked(next *Store) {
 	s.identityOutbox = next.identityOutbox
 	s.outboxEvents = next.outboxEvents
 	s.relationshipTuples = next.relationshipTuples
-	s.ehrmsSyncRuns = next.ehrmsSyncRuns
-	s.ehrmsSyncRunSteps = next.ehrmsSyncRunSteps
 }
 
 // cloneMap 複製 map。

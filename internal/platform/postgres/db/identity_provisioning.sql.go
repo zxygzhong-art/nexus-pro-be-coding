@@ -15,28 +15,32 @@ const appendIdentityProvisioningOutboxEvent = `-- name: AppendIdentityProvisioni
 INSERT INTO identity_provisioning_outbox (
     id, tenant_id, account_id, employee_id, employee_no, email,
     display_name, enabled, send_invite, status, retry_count,
-    last_error, created_at, updated_at
+    last_error, next_attempt_at, claim_expires_at, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+    $1, $2, $3, $4, $5, $6,
+    $7, $8, $9, $10, $11,
+    $12, $13, $14, $15, $16
 )
-RETURNING id, tenant_id, account_id, employee_id, employee_no, email, display_name, enabled, send_invite, status, retry_count, last_error, created_at, updated_at
+RETURNING id, tenant_id, account_id, employee_id, employee_no, email, display_name, enabled, send_invite, status, retry_count, last_error, next_attempt_at, claim_expires_at, created_at, updated_at
 `
 
 type AppendIdentityProvisioningOutboxEventParams struct {
-	ID          string             `json:"id"`
-	TenantID    string             `json:"tenant_id"`
-	AccountID   string             `json:"account_id"`
-	EmployeeID  string             `json:"employee_id"`
-	EmployeeNo  string             `json:"employee_no"`
-	Email       string             `json:"email"`
-	DisplayName string             `json:"display_name"`
-	Enabled     bool               `json:"enabled"`
-	SendInvite  bool               `json:"send_invite"`
-	Status      string             `json:"status"`
-	RetryCount  int32              `json:"retry_count"`
-	LastError   string             `json:"last_error"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	AccountID      string             `json:"account_id"`
+	EmployeeID     string             `json:"employee_id"`
+	EmployeeNo     string             `json:"employee_no"`
+	Email          string             `json:"email"`
+	DisplayName    string             `json:"display_name"`
+	Enabled        bool               `json:"enabled"`
+	SendInvite     bool               `json:"send_invite"`
+	Status         string             `json:"status"`
+	RetryCount     int32              `json:"retry_count"`
+	LastError      string             `json:"last_error"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	ClaimExpiresAt pgtype.Timestamptz `json:"claim_expires_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) AppendIdentityProvisioningOutboxEvent(ctx context.Context, arg AppendIdentityProvisioningOutboxEventParams) (IdentityProvisioningOutbox, error) {
@@ -53,6 +57,8 @@ func (q *Queries) AppendIdentityProvisioningOutboxEvent(ctx context.Context, arg
 		arg.Status,
 		arg.RetryCount,
 		arg.LastError,
+		arg.NextAttemptAt,
+		arg.ClaimExpiresAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -70,14 +76,91 @@ func (q *Queries) AppendIdentityProvisioningOutboxEvent(ctx context.Context, arg
 		&i.Status,
 		&i.RetryCount,
 		&i.LastError,
+		&i.NextAttemptAt,
+		&i.ClaimExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
 }
 
+const claimIdentityProvisioningOutboxEvents = `-- name: ClaimIdentityProvisioningOutboxEvents :many
+WITH candidates AS (
+    SELECT id
+    FROM identity_provisioning_outbox
+    WHERE tenant_id = $3
+      AND identity_provisioning_outbox.retry_count < $4
+      AND (
+        (identity_provisioning_outbox.status = 'pending' AND identity_provisioning_outbox.next_attempt_at <= $2)
+        OR (identity_provisioning_outbox.status = 'processing' AND identity_provisioning_outbox.claim_expires_at <= $2)
+      )
+    ORDER BY identity_provisioning_outbox.next_attempt_at ASC, identity_provisioning_outbox.created_at ASC
+    FOR UPDATE SKIP LOCKED
+    LIMIT $5
+)
+UPDATE identity_provisioning_outbox AS event
+SET status = 'processing',
+    claim_expires_at = $1,
+    updated_at = $2
+FROM candidates
+WHERE event.tenant_id = $3
+  AND event.id = candidates.id
+RETURNING event.id, event.tenant_id, event.account_id, event.employee_id, event.employee_no, event.email, event.display_name, event.enabled, event.send_invite, event.status, event.retry_count, event.last_error, event.next_attempt_at, event.claim_expires_at, event.created_at, event.updated_at
+`
+
+type ClaimIdentityProvisioningOutboxEventsParams struct {
+	LeaseUntil pgtype.Timestamptz `json:"lease_until"`
+	ClaimedAt  pgtype.Timestamptz `json:"claimed_at"`
+	TenantID   string             `json:"tenant_id"`
+	MaxRetries int32              `json:"max_retries"`
+	BatchSize  int32              `json:"batch_size"`
+}
+
+func (q *Queries) ClaimIdentityProvisioningOutboxEvents(ctx context.Context, arg ClaimIdentityProvisioningOutboxEventsParams) ([]IdentityProvisioningOutbox, error) {
+	rows, err := q.db.Query(ctx, claimIdentityProvisioningOutboxEvents,
+		arg.LeaseUntil,
+		arg.ClaimedAt,
+		arg.TenantID,
+		arg.MaxRetries,
+		arg.BatchSize,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []IdentityProvisioningOutbox
+	for rows.Next() {
+		var i IdentityProvisioningOutbox
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.AccountID,
+			&i.EmployeeID,
+			&i.EmployeeNo,
+			&i.Email,
+			&i.DisplayName,
+			&i.Enabled,
+			&i.SendInvite,
+			&i.Status,
+			&i.RetryCount,
+			&i.LastError,
+			&i.NextAttemptAt,
+			&i.ClaimExpiresAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listPendingIdentityProvisioningOutboxEvents = `-- name: ListPendingIdentityProvisioningOutboxEvents :many
-SELECT id, tenant_id, account_id, employee_id, employee_no, email, display_name, enabled, send_invite, status, retry_count, last_error, created_at, updated_at FROM identity_provisioning_outbox
+SELECT id, tenant_id, account_id, employee_id, employee_no, email, display_name, enabled, send_invite, status, retry_count, last_error, next_attempt_at, claim_expires_at, created_at, updated_at FROM identity_provisioning_outbox
 WHERE tenant_id = $1 AND status = 'pending'
 ORDER BY created_at ASC
 `
@@ -104,6 +187,8 @@ func (q *Queries) ListPendingIdentityProvisioningOutboxEvents(ctx context.Contex
 			&i.Status,
 			&i.RetryCount,
 			&i.LastError,
+			&i.NextAttemptAt,
+			&i.ClaimExpiresAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -122,19 +207,23 @@ UPDATE identity_provisioning_outbox
 SET status = $3,
     retry_count = $4,
     last_error = $5,
-    updated_at = $6
+    next_attempt_at = $6,
+    claim_expires_at = $7,
+    updated_at = $8
 WHERE tenant_id = $1
   AND id = $2
-RETURNING id, tenant_id, account_id, employee_id, employee_no, email, display_name, enabled, send_invite, status, retry_count, last_error, created_at, updated_at
+RETURNING id, tenant_id, account_id, employee_id, employee_no, email, display_name, enabled, send_invite, status, retry_count, last_error, next_attempt_at, claim_expires_at, created_at, updated_at
 `
 
 type UpdateIdentityProvisioningOutboxEventParams struct {
-	TenantID   string             `json:"tenant_id"`
-	ID         string             `json:"id"`
-	Status     string             `json:"status"`
-	RetryCount int32              `json:"retry_count"`
-	LastError  string             `json:"last_error"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+	TenantID       string             `json:"tenant_id"`
+	ID             string             `json:"id"`
+	Status         string             `json:"status"`
+	RetryCount     int32              `json:"retry_count"`
+	LastError      string             `json:"last_error"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	ClaimExpiresAt pgtype.Timestamptz `json:"claim_expires_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) UpdateIdentityProvisioningOutboxEvent(ctx context.Context, arg UpdateIdentityProvisioningOutboxEventParams) (IdentityProvisioningOutbox, error) {
@@ -144,6 +233,8 @@ func (q *Queries) UpdateIdentityProvisioningOutboxEvent(ctx context.Context, arg
 		arg.Status,
 		arg.RetryCount,
 		arg.LastError,
+		arg.NextAttemptAt,
+		arg.ClaimExpiresAt,
 		arg.UpdatedAt,
 	)
 	var i IdentityProvisioningOutbox
@@ -160,6 +251,8 @@ func (q *Queries) UpdateIdentityProvisioningOutboxEvent(ctx context.Context, arg
 		&i.Status,
 		&i.RetryCount,
 		&i.LastError,
+		&i.NextAttemptAt,
+		&i.ClaimExpiresAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

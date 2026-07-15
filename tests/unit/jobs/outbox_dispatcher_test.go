@@ -138,8 +138,8 @@ func TestOutboxDispatcherSkipsEventsWithoutHandler(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if events[0].Status != "processing" || !strings.Contains(events[0].LastError, "no handler registered") {
-		t.Fatalf("expected unhandled domain event to be parked as processing, got %+v", events[0])
+	if events[0].Status != "parked" || !strings.Contains(events[0].LastError, "no handler registered") {
+		t.Fatalf("expected unhandled domain event to be parked explicitly, got %+v", events[0])
 	}
 }
 
@@ -222,8 +222,8 @@ func TestOutboxDispatcherKeepsUnmappedEventsPendingInNATSMode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if events[0].Status != "processing" || !strings.Contains(events[0].LastError, "no handler registered") {
-		t.Fatalf("expected unmapped event to be parked as processing, got %+v", events[0])
+	if events[0].Status != "parked" || !strings.Contains(events[0].LastError, "no handler registered") {
+		t.Fatalf("expected unmapped event to be parked explicitly, got %+v", events[0])
 	}
 }
 

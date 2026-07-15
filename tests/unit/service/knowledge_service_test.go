@@ -270,7 +270,7 @@ func newKnowledgeFixture(t *testing.T, now time.Time) (*memory.Store, *service.S
 		t.Fatal(err)
 	}
 	return store, service.New(store, service.Options{
-		Now: func() time.Time { return now }, KnowledgeEmbedder: deterministicKnowledgeEmbedder{},
+		Now: func() time.Time { return now }, KnowledgeEmbedder: deterministicKnowledgeEmbedder{}, CredentialCipher: newTestCredentialCipher(t),
 	}), domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 }
 

@@ -100,6 +100,7 @@ func TestDeleteUserGroupHappyPathAndConflictWhenMembers(t *testing.T) {
 	_ = store.UpsertAccount(context.Background(), domain.Account{
 		ID: "acct-2", TenantID: "tenant-1", Status: "active", UserGroupIDs: []string{"ug-members"}, CreatedAt: now,
 	})
+	seedActiveGroupMembership(t, store, "tenant-1", "ug-members", "acct-2", now)
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 

@@ -66,7 +66,7 @@ COMPOSE_PROFILES=keycloak docker compose --env-file .env up -d --no-deps keycloa
 
 | 变量 | 默认值 | 说明 |
 | --- | --- | --- |
-| `KEYCLOAK_IMAGE` | `quay.io/keycloak/keycloak:26.6.4` | 固定版本，不使用 `latest` |
+| `KEYCLOAK_IMAGE` | `quay.io/keycloak/keycloak:26.7.0` | 固定版本，不使用 `latest` |
 | `KEYCLOAK_HTTP_HOST_PORT` | `8080` | 对宿主机的 HTTP 端口 |
 | `KEYCLOAK_COMMAND` | `start-dev` | 本地开发模式 |
 | `KEYCLOAK_DB_NAME` | `keycloak` | PostgreSQL 数据库名（initdb 自动创建） |

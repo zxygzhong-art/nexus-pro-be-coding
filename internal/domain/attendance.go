@@ -34,6 +34,7 @@ type LeaveRequest struct {
 	Reason         string    `json:"reason,omitempty"`
 	Status         string    `json:"status"`
 	FormInstanceID string    `json:"form_instance_id,omitempty"`
+	LeaveBalanceID string    `json:"leave_balance_id,omitempty"`
 	CreatedAt      time.Time `json:"created_at"`
 }
 

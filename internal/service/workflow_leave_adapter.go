@@ -12,7 +12,7 @@ var leaveLinkedTemplateKeys = map[string]struct{}{
 	"field-leave":   {},
 }
 
-// createLeaveRequestFromSubmittedForm 將已提交的請假表單實例連結到考勤請假單並預扣餘額。
+// createLeaveRequestFromSubmittedForm links leave data inside the caller's submission transaction.
 func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContext, instance FormInstance, templateKey string, payload map[string]any) (LeaveRequest, error) {
 	if _, ok := leaveLinkedTemplateKeys[strings.TrimSpace(templateKey)]; !ok {
 		return LeaveRequest{}, nil
@@ -90,76 +90,67 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 
 	reason := utils.FirstNonEmpty(stringFromAny(payload["reason"]), stringFromAny(payload["description"]))
 	requestID := utils.NewID("lr")
-	var req LeaveRequest
-	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
-		if leaveType.RequiresBalance {
-			if _, err := tx.reserveLeaveBalance(ctx, employeeID, leaveTypeCode, hours); err != nil {
-				return err
-			}
+	leaveBalanceID := ""
+	if leaveType.RequiresBalance {
+		balance, err := c.reserveLeaveBalance(ctx, employeeID, leaveTypeCode, hours, startAt)
+		if err != nil {
+			return LeaveRequest{}, err
 		}
-		req = LeaveRequest{
-			ID:             requestID,
-			TenantID:       ctx.TenantID,
-			EmployeeID:     employeeID,
-			LeaveType:      leaveTypeCode,
-			StartAt:        startAt,
-			EndAt:          endAt,
-			Hours:          hours,
-			Reason:         strings.TrimSpace(reason),
-			Status:         "pending_approval",
-			FormInstanceID: instance.ID,
-			CreatedAt:      tx.Now(),
-		}
-		if err := tx.store.UpsertLeaveRequest(goContext(ctx), req); err != nil {
-			return err
-		}
+		leaveBalanceID = balance.ID
+	}
+	req := LeaveRequest{
+		ID:             requestID,
+		TenantID:       ctx.TenantID,
+		EmployeeID:     employeeID,
+		LeaveType:      leaveTypeCode,
+		StartAt:        startAt,
+		EndAt:          endAt,
+		Hours:          hours,
+		Reason:         strings.TrimSpace(reason),
+		Status:         "pending_approval",
+		FormInstanceID: instance.ID,
+		LeaveBalanceID: leaveBalanceID,
+		CreatedAt:      c.Now(),
+	}
+	if err := c.store.UpsertLeaveRequest(goContext(ctx), req); err != nil {
+		return LeaveRequest{}, err
+	}
 
-		nextPayload := utils.CopyStringMap(instance.Payload)
-		if nextPayload == nil {
-			nextPayload = map[string]any{}
-		}
-		nextPayload["employee_id"] = employeeID
-		nextPayload["leave_request_id"] = requestID
-		nextPayload["leave_type"] = leaveTypeCode
-		nextPayload["linked_resource_id"] = requestID
-		nextPayload["linked_resource_type"] = "attendance.leave_request"
-		nextPayload["start_at"] = startAt.Format(time.RFC3339)
-		nextPayload["end_at"] = endAt.Format(time.RFC3339)
-		nextPayload["hours"] = hours
-		nextPayload["reason"] = strings.TrimSpace(reason)
-		instance.Payload = nextPayload
-		instance.UpdatedAt = tx.Now()
-		if err := tx.store.UpsertFormInstance(goContext(ctx), instance); err != nil {
-			return err
-		}
-		if leaveType.RequiresBalance {
-			if err := tx.audit(ctx, "attendance.leave_balance.reserve", "leave_balance", employeeID+"|"+leaveTypeCode, "medium", map[string]any{
-				"employee_id":    employeeID,
-				"leave_type":     leaveTypeCode,
-				"reserved_hours": hours,
-			}); err != nil {
-				return err
-			}
-		}
-		if err := tx.audit(ctx, "attendance.leave_request.create", "leave_request", req.ID, "medium", map[string]any{
-			"leave_type":       req.LeaveType,
-			"hours":            req.Hours,
-			"form_instance_id": instance.ID,
-			"source":           "workflow.form.submit",
+	nextPayload := utils.CopyStringMap(instance.Payload)
+	if nextPayload == nil {
+		nextPayload = map[string]any{}
+	}
+	nextPayload["employee_id"] = employeeID
+	nextPayload["leave_request_id"] = requestID
+	nextPayload["leave_type"] = leaveTypeCode
+	nextPayload["linked_resource_id"] = requestID
+	nextPayload["linked_resource_type"] = "attendance.leave_request"
+	nextPayload["start_at"] = startAt.Format(time.RFC3339)
+	nextPayload["end_at"] = endAt.Format(time.RFC3339)
+	nextPayload["hours"] = hours
+	nextPayload["reason"] = strings.TrimSpace(reason)
+	instance.Payload = nextPayload
+	instance.UpdatedAt = c.Now()
+	if err := c.store.UpsertFormInstance(goContext(ctx), instance); err != nil {
+		return LeaveRequest{}, err
+	}
+	if leaveType.RequiresBalance {
+		if err := c.audit(ctx, "attendance.leave_balance.reserve", "leave_balance", employeeID+"|"+leaveTypeCode, "medium", map[string]any{
+			"employee_id":    employeeID,
+			"leave_type":     leaveTypeCode,
+			"reserved_hours": hours,
 		}); err != nil {
-			return err
+			return LeaveRequest{}, err
 		}
-		return nil
+	}
+	if err := c.audit(ctx, "attendance.leave_request.create", "leave_request", req.ID, "medium", map[string]any{
+		"leave_type":       req.LeaveType,
+		"hours":            req.Hours,
+		"form_instance_id": instance.ID,
+		"source":           "workflow.form.submit",
 	}); err != nil {
 		return LeaveRequest{}, err
 	}
-	c.logInfo(ctx, "leave request linked from form submit",
-		"leave_request_id", req.ID,
-		"form_instance_id", instance.ID,
-		"template_key", templateKey,
-		"leave_type", req.LeaveType,
-		"hours", req.Hours,
-	)
 	return req, nil
 }
 

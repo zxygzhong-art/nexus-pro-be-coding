@@ -41,34 +41,12 @@ func TestEHRMSEmployeeSyncSchedulerSyncOnceUsesConfiguredActor(t *testing.T) {
 	}
 }
 
-// TestEHRMSPipelinePersistsPartialRun 驗證單列失敗會形成可查詢的 partial 運行。
-func TestEHRMSPipelinePersistsPartialRun(t *testing.T) {
-	store := memory.NewStore()
-	employees := &recordingEHRMSSyncService{result: domain.EHRMSEmployeeSyncResponse{Fetched: 2, Created: 1, Failed: 1, Mode: "upsert"}}
-	scheduler := jobs.NewEHRMSPipelineScheduler(employees, &recordingEHRMSAttendanceSyncService{}, nil).WithRunStore(store)
-
-	if _, err := scheduler.SyncOnce(context.Background(), jobs.EHRMSPipelineOptions{EmployeeTenantID: "tenant-1", EmployeeAccountID: "acct-1", EmployeeMode: "upsert"}); err != nil {
-		t.Fatal(err)
-	}
-	runs, total, err := store.ListEHRMSSyncRuns(context.Background(), "tenant-1", domain.PageRequest{})
-	if err != nil || total != 1 || len(runs) != 1 {
-		t.Fatalf("unexpected runs total=%d items=%+v err=%v", total, runs, err)
-	}
-	if runs[0].Status != domain.EHRMSSyncRunStatusPartial || runs[0].Summary["employees"] == nil {
-		t.Fatalf("unexpected partial run: %+v", runs[0])
-	}
-	steps, err := store.ListEHRMSSyncRunSteps(context.Background(), "tenant-1", runs[0].ID)
-	if err != nil || len(steps) != 1 || steps[0].Status != domain.EHRMSSyncRunStatusPartial {
-		t.Fatalf("unexpected steps: %+v err=%v", steps, err)
-	}
-}
-
-// TestEHRMSPipelineRetriesTemporaryFailure 驗證暫時錯誤會有限重試並持久化 attempts。
+// TestEHRMSPipelineRetriesTemporaryFailure 驗證暫時錯誤會有限重試而不依賴運行記錄。
 func TestEHRMSPipelineRetriesTemporaryFailure(t *testing.T) {
 	store := memory.NewStore()
 	var calls []string
 	employees := &recordingEHRMSSyncService{err: errors.New("fetch eHRMS employees failed: unavailable"), calls: &calls}
-	scheduler := jobs.NewEHRMSPipelineScheduler(employees, &recordingEHRMSAttendanceSyncService{}, nil).WithRunStore(store)
+	scheduler := jobs.NewEHRMSPipelineScheduler(employees, &recordingEHRMSAttendanceSyncService{}, nil).WithSyncLocker(store)
 
 	_, err := scheduler.SyncOnce(context.Background(), jobs.EHRMSPipelineOptions{EmployeeTenantID: "tenant-1", EmployeeAccountID: "acct-1", RetryAttempts: 3, RetryBaseDelay: time.Nanosecond})
 	if err == nil {
@@ -76,14 +54,6 @@ func TestEHRMSPipelineRetriesTemporaryFailure(t *testing.T) {
 	}
 	if len(calls) != 3 {
 		t.Fatalf("employee calls = %d, want 3", len(calls))
-	}
-	runs, _, _ := store.ListEHRMSSyncRuns(context.Background(), "tenant-1", domain.PageRequest{})
-	if len(runs) != 1 || runs[0].Status != domain.EHRMSSyncRunStatusFailed || runs[0].Attempt != 3 || !runs[0].Retryable {
-		t.Fatalf("unexpected failed run: %+v", runs)
-	}
-	steps, _ := store.ListEHRMSSyncRunSteps(context.Background(), "tenant-1", runs[0].ID)
-	if len(steps) != 3 {
-		t.Fatalf("steps = %d, want one employee step per attempt", len(steps))
 	}
 }
 

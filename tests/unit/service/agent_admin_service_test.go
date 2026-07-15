@@ -15,11 +15,20 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
+func newTestCredentialCipher(t *testing.T) service.CredentialCipher {
+	t.Helper()
+	cipher, err := platformsecret.NewAESGCMCipher(base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return cipher
+}
+
 func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
 	store := memory.NewStore()
 	seedAgentAdminAccount(t, store, now)
-	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
 	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
@@ -37,11 +46,13 @@ func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 	}
 
 	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
-		Name:         "HR Helper",
-		Description:  "Answers HR questions",
-		ModelID:      model.ID,
-		SystemPrompt: "You are an HR helper.",
-		Tools:        []string{"get_my_profile"},
+		Name:               "HR Helper",
+		Description:        "Answers HR questions",
+		ModelID:            model.ID,
+		SystemPrompt:       "You are an HR helper.",
+		WelcomeMessage:     "Welcome v1",
+		SuggestedQuestions: []string{"Question v1"},
+		Tools:              []string{"get_my_profile"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -51,9 +62,12 @@ func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 	}
 
 	updatedPrompt := "You are a careful HR helper."
+	updatedWelcome := "Welcome v2"
 	agent, err = svc.Agent().UpdateDefinition(ctx, agent.ID, domain.UpdateAgentDefinitionInput{
-		SystemPrompt: &updatedPrompt,
-		VersionNote:  "careful prompt",
+		SystemPrompt:       &updatedPrompt,
+		WelcomeMessage:     &updatedWelcome,
+		SuggestedQuestions: []string{"Question v2"},
+		VersionNote:        "careful prompt",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -98,7 +112,7 @@ func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if rolledBack.Version != 3 || rolledBack.SystemPrompt != "You are an HR helper." {
+	if rolledBack.Version != 3 || rolledBack.SystemPrompt != "You are an HR helper." || rolledBack.WelcomeMessage != "Welcome v1" || len(rolledBack.SuggestedQuestions) != 1 || rolledBack.SuggestedQuestions[0] != "Question v1" {
 		t.Fatalf("expected rollback to create version 3 from v1, got %+v", rolledBack)
 	}
 	unpublished, err := svc.Agent().UnpublishDefinition(ctx, agent.ID)
@@ -145,7 +159,7 @@ func TestAgentAdminTrialReportsOnlyActuallyUsedTools(t *testing.T) {
 		}
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "profile checked"})
 	}}
-	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
 	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
@@ -192,7 +206,7 @@ func TestAgentExternalToolRegistryLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentToolCredentials: credentialCipher})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: credentialCipher})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
 	created, err := svc.Agent().CreateExternalTool(ctx, domain.CreateAgentExternalToolInput{
@@ -261,7 +275,7 @@ func TestAgentExternalToolRegistryLifecycle(t *testing.T) {
 	}
 }
 
-// TestAgentTeamPublishSnapshotStaysStable 验证自动更新不会越过已发布版本影响线上 Team。
+// TestAgentTeamPublishSnapshotStaysStable 驗證自動更新不會越過已發佈版本影響線上 Team。
 func TestAgentTeamPublishSnapshotStaysStable(t *testing.T) {
 	now := time.Date(2026, 7, 13, 12, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -276,7 +290,7 @@ func TestAgentTeamPublishSnapshotStaysStable(t *testing.T) {
 		}
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, AgentName: req.AgentName, Delta: "root summary"})
 	}}
-	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
 	rootModel, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Root", ModelName: "root-model", APIKey: "sk-root"})
@@ -352,7 +366,8 @@ func TestAgentAdminTrialRecordsRuntimeFailure(t *testing.T) {
 	store := memory.NewStore()
 	seedAgentAdminAccount(t, store, now)
 	svc := service.New(store, service.Options{
-		Now: func() time.Time { return now },
+		Now:              func() time.Time { return now },
+		CredentialCipher: newTestCredentialCipher(t),
 		AgentChatRuntime: agentAdminFakeRuntime{run: func(context.Context, service.AgentChatRuntimeRequest, service.AgentChatEmitFunc) error {
 			return errors.New("runtime unavailable")
 		}},
@@ -385,7 +400,7 @@ func TestAgentAdminBlocksDeletingModelInUse(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
 	store := memory.NewStore()
 	seedAgentAdminAccount(t, store, now)
-	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
 	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Default", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test"})
@@ -406,7 +421,7 @@ func TestAgentAdminBlocksDeletingPublishedAgent(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
 	store := memory.NewStore()
 	seedAgentAdminAccount(t, store, now)
-	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Default", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test"})
 	if err != nil {
@@ -435,7 +450,7 @@ func TestAgentAdminSyncAndTestModelUseLiteLLMAdmin(t *testing.T) {
 	store := memory.NewStore()
 	seedAgentAdminAccount(t, store, now)
 	liteLLM := &fakeLiteLLMAdmin{}
-	svc := service.New(store, service.Options{Now: func() time.Time { return now }, LiteLLMAdmin: liteLLM})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, LiteLLMAdmin: liteLLM, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
 	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
@@ -470,7 +485,7 @@ func TestAgentAdminModelCredentialsNormalizeAndHideAPIKey(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
 	store := memory.NewStore()
 	seedAgentAdminAccount(t, store, now)
-	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
 	_, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
@@ -501,6 +516,13 @@ func TestAgentAdminModelCredentialsNormalizeAndHideAPIKey(t *testing.T) {
 	}
 	if !model.APIKeySet || model.APIKeyPreview != "****test" {
 		t.Fatalf("expected API key state and preview, got %+v", model)
+	}
+	stored, ok, err := store.GetAgentModel(context.Background(), "tenant-1", model.ID)
+	if err != nil || !ok {
+		t.Fatalf("expected encrypted model row, ok=%v err=%v", ok, err)
+	}
+	if stored.APIKey != "" || stored.APIKeyCiphertext == "" || strings.Contains(stored.APIKeyCiphertext, "sk-openrouter-test") {
+		t.Fatalf("model repository leaked plaintext credential: %+v", stored)
 	}
 	encoded, err := json.Marshal(model)
 	if err != nil {

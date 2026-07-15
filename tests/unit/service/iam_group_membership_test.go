@@ -122,6 +122,14 @@ func TestUserGroupMemberAddRemoveAffectsAuthorizationAndAudits(t *testing.T) {
 	if afterRemove.Allowed {
 		t.Fatalf("expected user permission to be revoked after remove, got %+v", afterRemove)
 	}
+	account, _, _ = store.GetAccount(context.Background(), "tenant-1", "acct-user")
+	if containsTestString(account.UserGroupIDs, "ug-1") {
+		t.Fatalf("expected authoritative membership close to rebuild account projection, got %+v", account.UserGroupIDs)
+	}
+	history, err := store.ListGroupMembershipsForGroup(context.Background(), "tenant-1", "ug-1")
+	if err != nil || len(history) != 1 || history[0].ValidUntil == nil {
+		t.Fatalf("expected membership removal to preserve a closed history row, history=%+v err=%v", history, err)
+	}
 	tuples, err = store.ListAuthzRelationshipTuplesForObject(context.Background(), "tenant-1", "user_group", "ug-1")
 	if err != nil {
 		t.Fatal(err)
@@ -140,6 +148,15 @@ func TestUserGroupMemberAddRemoveAffectsAuthorizationAndAudits(t *testing.T) {
 	if removeLog.Severity != "high" || removeLog.Details["account_id"] != "acct-user" || removeLog.Details["valid_until"] == "" {
 		t.Fatalf("unexpected remove audit details: %+v", removeLog)
 	}
+
+	now = now.Add(time.Minute)
+	if _, err := svc.IAM().AddUserGroupMember(adminCtx, "ug-1", domain.AddUserGroupMemberInput{AccountID: "acct-user"}); err != nil {
+		t.Fatal(err)
+	}
+	history, err = store.ListGroupMembershipsForGroup(context.Background(), "tenant-1", "ug-1")
+	if err != nil || len(history) != 2 {
+		t.Fatalf("expected rejoin to append a non-overlapping history row, history=%+v err=%v", history, err)
+	}
 }
 
 // TestGroupMembershipExpiryCapsAllowSnapshot 驗證群組授權快照不會活得比成員關係更久。
@@ -152,10 +169,17 @@ func TestGroupMembershipExpiryCapsAllowSnapshot(t *testing.T) {
 		ID: "ps-group", TenantID: "tenant-1", Name: "Group Grants", CreatedAt: now,
 		Permissions: []domain.Permission{{Resource: "hr.employee", Action: "read", Scope: "all"}},
 	})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID: "ps-admin", TenantID: "tenant-1", Name: "IAM Reader", CreatedAt: now,
+		Permissions: []domain.Permission{
+			{Resource: "iam.user_group", Action: "read", Scope: "all"},
+			{Resource: "iam.account", Action: "read", Scope: "all"},
+		},
+	})
 	_ = store.UpsertUserGroup(context.Background(), domain.UserGroup{
 		ID: "ug-1", TenantID: "tenant-1", Name: "Temporary Readers", PermissionSetIDs: []string{"ps-group"}, CreatedAt: now,
 	})
-	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-user", TenantID: "tenant-1", Status: "active", CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-user", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-admin"}, CreatedAt: now})
 	_ = store.UpsertGroupMembership(context.Background(), domain.GroupMembership{
 		ID: "ugm-1", TenantID: "tenant-1", UserGroupID: "ug-1", AccountID: "acct-user",
 		ValidFrom: now.Add(-time.Hour), ValidUntil: &validUntil, Source: "manual", CreatedAt: now,
@@ -183,6 +207,20 @@ func TestGroupMembershipExpiryCapsAllowSnapshot(t *testing.T) {
 	}
 	if denied.Allowed {
 		t.Fatalf("expected expired membership not to survive cached allow, got %+v", denied)
+	}
+	groups, err := svc.IAM().ListUserGroups(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups) != 1 || len(groups[0].MemberAccountIDs) != 0 {
+		t.Fatalf("expected group read projection to exclude expired memberships, got %+v", groups)
+	}
+	accounts, err := svc.IAM().ListIamAccountPage(ctx, "", domain.PageRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(accounts.Items) != 1 || len(accounts.Items[0].UserGroupIDs) != 0 {
+		t.Fatalf("expected account read projection to exclude expired memberships, got %+v", accounts.Items)
 	}
 }
 

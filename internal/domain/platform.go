@@ -4,12 +4,14 @@ import "time"
 
 // PlatformAssistant 定義平台助理的資料結構。
 type PlatformAssistant struct {
-	ID       string `json:"id"`
-	Emoji    string `json:"emoji"`
-	Title    string `json:"title"`
-	Desc     string `json:"desc"`
-	Tag      string `json:"tag,omitempty"`
-	Runnable bool   `json:"runnable"`
+	ID                 string   `json:"id"`
+	Emoji              string   `json:"emoji"`
+	Title              string   `json:"title"`
+	Desc               string   `json:"desc"`
+	Tag                string   `json:"tag,omitempty"`
+	WelcomeMessage     string   `json:"welcome_message"`
+	SuggestedQuestions []string `json:"suggested_questions"`
+	Runnable           bool     `json:"runnable"`
 }
 
 // PlatformFormItem 定義平台表單項目的資料結構。

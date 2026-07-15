@@ -35,7 +35,6 @@ ON CONFLICT (id) DO UPDATE SET
     email = EXCLUDED.email,
     employee_id = EXCLUDED.employee_id,
     status = EXCLUDED.status,
-    user_group_ids = EXCLUDED.user_group_ids,
     direct_permission_set_ids = EXCLUDED.direct_permission_set_ids,
     active_assumable_role_id = EXCLUDED.active_assumable_role_id,
     version = accounts.version + 1,
@@ -65,7 +64,6 @@ ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
     name = EXCLUDED.name,
     description = EXCLUDED.description,
-    member_account_ids = EXCLUDED.member_account_ids,
     permission_set_ids = EXCLUDED.permission_set_ids,
     source_template_key = EXCLUDED.source_template_key,
     source_package_version = EXCLUDED.source_package_version,
@@ -97,12 +95,22 @@ INSERT INTO authz_group_memberships (
     sqlc.arg(valid_from), sqlc.narg(valid_until), sqlc.arg(source),
     sqlc.arg(approval_instance_id), sqlc.arg(created_by), sqlc.arg(created_at)
 )
-ON CONFLICT (tenant_id, user_group_id, account_id) DO UPDATE SET
+ON CONFLICT (id) DO UPDATE SET
     valid_from = EXCLUDED.valid_from,
     valid_until = EXCLUDED.valid_until,
     source = EXCLUDED.source,
     approval_instance_id = EXCLUDED.approval_instance_id,
     created_by = EXCLUDED.created_by
+RETURNING *;
+
+-- name: CloseGroupMembership :one
+UPDATE authz_group_memberships
+SET valid_until = sqlc.arg(valid_until)
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND user_group_id = sqlc.arg(user_group_id)
+  AND account_id = sqlc.arg(account_id)
+  AND valid_from <= sqlc.arg(valid_until)
+  AND (valid_until IS NULL OR valid_until > sqlc.arg(valid_until))
 RETURNING *;
 
 -- name: DeleteGroupMembership :one
@@ -112,7 +120,9 @@ RETURNING *;
 
 -- name: GetGroupMembership :one
 SELECT * FROM authz_group_memberships
-WHERE tenant_id = $1 AND user_group_id = $2 AND account_id = $3;
+WHERE tenant_id = $1 AND user_group_id = $2 AND account_id = $3
+ORDER BY valid_from DESC, created_at DESC
+LIMIT 1;
 
 -- name: ListGroupMembershipsForGroup :many
 SELECT * FROM authz_group_memberships
@@ -124,7 +134,7 @@ SELECT * FROM authz_group_memberships
 WHERE tenant_id = $1
   AND account_id = $2
   AND valid_from <= $3
-  AND (valid_until IS NULL OR valid_until >= $3)
+  AND (valid_until IS NULL OR valid_until > $3)
 ORDER BY created_at ASC;
 
 -- name: UpsertPermissionSet :one
@@ -545,14 +555,12 @@ INSERT INTO leave_balances (
     period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio,
     updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5,
-    $6, $7, $8, $9, $10, $11, $12,
-    $13
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(leave_type), sqlc.arg(remaining_hours)::numeric(12,2),
+    sqlc.narg(period_start), sqlc.narg(period_end), sqlc.arg(granted_hours)::numeric(12,2), sqlc.arg(used_hours)::numeric(12,2), sqlc.arg(source), sqlc.arg(policy_version), sqlc.arg(prorate_ratio),
+    sqlc.arg(updated_at)
 )
-ON CONFLICT (tenant_id, employee_id, leave_type) DO UPDATE SET
+ON CONFLICT (tenant_id, employee_id, leave_type, period_start, period_end) DO UPDATE SET
     remaining_hours = EXCLUDED.remaining_hours,
-    period_start = EXCLUDED.period_start,
-    period_end = EXCLUDED.period_end,
     granted_hours = EXCLUDED.granted_hours,
     used_hours = EXCLUDED.used_hours,
     source = EXCLUDED.source,
@@ -572,19 +580,30 @@ ORDER BY updated_at ASC;
 
 -- name: ReserveLeaveBalance :one
 UPDATE leave_balances
-SET remaining_hours = remaining_hours - sqlc.arg(hours)::double precision,
-    used_hours = used_hours + sqlc.arg(hours)::double precision,
+SET remaining_hours = remaining_hours - sqlc.arg(hours)::numeric(12,2),
+    used_hours = used_hours + sqlc.arg(hours)::numeric(12,2),
     updated_at = sqlc.arg(updated_at)::timestamptz
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND employee_id = sqlc.arg(employee_id)
   AND lower(leave_type) = lower(sqlc.arg(leave_type)::text)
-  AND remaining_hours >= sqlc.arg(hours)::double precision
+  AND (NULLIF(period_start::text, '') IS NULL OR NULLIF(period_start::text, '')::date <= sqlc.arg(as_of)::date)
+  AND (NULLIF(period_end::text, '') IS NULL OR NULLIF(period_end::text, '')::date >= sqlc.arg(as_of)::date)
+  AND remaining_hours >= sqlc.arg(hours)::numeric(12,2)
+RETURNING *;
+
+-- name: ReleaseLeaveBalanceByID :one
+UPDATE leave_balances
+SET remaining_hours = remaining_hours + sqlc.arg(hours)::numeric(12,2),
+    used_hours = GREATEST(0, used_hours - sqlc.arg(hours)::numeric(12,2)),
+    updated_at = sqlc.arg(updated_at)::timestamptz
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND id = sqlc.arg(balance_id)
 RETURNING *;
 
 -- name: ReleaseLeaveBalance :one
 UPDATE leave_balances
-SET remaining_hours = remaining_hours + sqlc.arg(hours)::double precision,
-    used_hours = GREATEST(0, used_hours - sqlc.arg(hours)::double precision),
+SET remaining_hours = remaining_hours + sqlc.arg(hours)::numeric(12,2),
+    used_hours = GREATEST(0, used_hours - sqlc.arg(hours)::numeric(12,2)),
     updated_at = sqlc.arg(updated_at)::timestamptz
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND employee_id = sqlc.arg(employee_id)
@@ -780,10 +799,13 @@ INSERT INTO form_instance_field_values (
     value_text, value_number, value_boolean, value_date, value_timestamp, value_json, created_at
 ) VALUES (
     sqlc.arg(tenant_id), sqlc.arg(form_instance_id), sqlc.arg(template_id), sqlc.arg(template_version_id),
-    sqlc.arg(field_id), sqlc.arg(value_type), NULLIF(sqlc.arg(value_text)::text, ''),
-    NULLIF(sqlc.arg(value_number)::text, '')::numeric, sqlc.narg(value_boolean),
-    NULLIF(sqlc.arg(value_date)::text, '')::date, NULLIF(sqlc.arg(value_timestamp)::text, '')::timestamptz,
-    CASE WHEN sqlc.arg(value_json)::text = '' THEN NULL ELSE sqlc.arg(value_json)::jsonb END,
+    sqlc.arg(field_id), sqlc.arg(value_type),
+    CASE WHEN sqlc.arg(value_type)::text = 'text' THEN sqlc.arg(value_text)::text ELSE NULL END,
+    CASE WHEN sqlc.arg(value_type)::text = 'number' THEN NULLIF(sqlc.arg(value_number)::text, '')::numeric ELSE NULL END,
+    CASE WHEN sqlc.arg(value_type)::text = 'boolean' THEN sqlc.narg(value_boolean) ELSE NULL END,
+    CASE WHEN sqlc.arg(value_type)::text = 'date' THEN NULLIF(sqlc.arg(value_date)::text, '')::date ELSE NULL END,
+    CASE WHEN sqlc.arg(value_type)::text = 'timestamp' THEN NULLIF(sqlc.arg(value_timestamp)::text, '')::timestamptz ELSE NULL END,
+    CASE WHEN sqlc.arg(value_type)::text = 'json' AND sqlc.arg(value_json)::text <> '' THEN sqlc.arg(value_json)::jsonb ELSE NULL END,
     sqlc.arg(created_at)
 )
 ON CONFLICT (tenant_id, form_instance_id, field_id) DO UPDATE SET
@@ -811,9 +833,10 @@ WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id);
 -- name: UpsertLeaveRequest :one
 INSERT INTO leave_requests (
     id, tenant_id, employee_id, leave_type, start_at, end_at,
-    hours, reason, status, form_instance_id, created_at
+    hours, reason, status, form_instance_id, leave_balance_id, created_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(leave_type), sqlc.arg(start_at), sqlc.arg(end_at),
+    sqlc.arg(hours), sqlc.arg(reason), sqlc.arg(status), sqlc.arg(form_instance_id), sqlc.narg(leave_balance_id), sqlc.arg(created_at)
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -825,6 +848,7 @@ ON CONFLICT (id) DO UPDATE SET
     reason = EXCLUDED.reason,
     status = EXCLUDED.status,
     form_instance_id = EXCLUDED.form_instance_id,
+    leave_balance_id = EXCLUDED.leave_balance_id,
     created_at = EXCLUDED.created_at
 RETURNING *;
 
@@ -878,7 +902,7 @@ INSERT INTO workflow_runs (
     id, tenant_id, form_instance_id, template_id, version, status,
     current_stage_instance_id, stage_definitions_json, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
+    $1, $2, $3, $4, $5, $6, $7, $8::jsonb, $9, $10
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,

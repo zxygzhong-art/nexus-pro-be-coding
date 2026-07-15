@@ -73,7 +73,7 @@ Set `LOG_LEVEL=debug`, `info`, `warn`, or `error` to tune application log verbos
 
 The default `go run ./cmd/api`, `go test`, and Docker build all compile the real ADK Agent runtime and LiteLLM adapter. No build tag is required. Set `LITELLM_BASE_URL` and `LITELLM_API_KEY` to enable chat at runtime; when the API key is absent, the rest of the API stays available and agent chat returns `agent_chat_disabled`.
 
-Authenticated external Agent tools require `AGENT_TOOL_CREDENTIAL_ENCRYPTION_KEY`, a standard-base64 encoded 32-byte key (`openssl rand -base64 32`). The API rejects credential-bearing registrations when this key is absent or invalid; secrets are encrypted before persistence and never returned by list/create/delete responses.
+Agent model API keys, MCP/external-tool credentials, and other persisted secrets use `ENCRYPTION_KEY`, a standard-base64 encoded 32-byte key (`openssl rand -base64 32`). The API rejects credential-bearing writes when this key is absent or invalid; secrets are encrypted before persistence, bound to their tenant and resource ID, and never returned by JSON responses.
 
 ### Temporal Workflow Engine
 
@@ -145,6 +145,169 @@ make sqlc
 ```
 
 Generated files live in `internal/platform/postgres/db`.
+
+## Tenant Provisioning
+
+Run tenant provisioning after the business database migrations. Creating the tables alone intentionally leaves tenant-scoped permission and account tables empty because the migration does not yet know the tenant ID or the first administrator identity.
+
+Provisioning is transactional and creates or updates the following tenant resources:
+
+- the tenant and its root organization unit
+- the first active administrator account and employee record
+- the Keycloak/OIDC identity binding for the administrator
+- the tenant permission and menu catalog
+- a `Platform Admin` permission set directly assigned to the administrator
+- six default common form templates for leave, overtime, punch correction, job change, headcount, and resignation
+- the authorization permission version and relationship/outbox events
+
+Provisioning uses stable generated IDs and is safe to rerun with the same tenant and identity. A successful rerun does not duplicate the tenant, administrator, employee, root organization, permission set, identity binding, or default form templates. It does increment the permission version and append a new `tenant.provisioned` event.
+
+### 1. Load the database environment and migrate
+
+The application and CLI read environment variables directly; they do not load `.env` automatically.
+
+```sh
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be
+test -f .env || cp .env.example .env
+
+set -a
+source ./.env
+set +a
+
+make migrate-up
+make migrate-status
+```
+
+At minimum, `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_NAME`, and `DB_SSLMODE` must describe the target business database. In production, use `DB_SSLMODE=require`, `verify-ca`, or `verify-full` as appropriate.
+
+### 2. Choose the administrator identity path
+
+Use one of the following mutually exclusive paths:
+
+1. Bind an existing Keycloak user with `--keycloak-sub`.
+2. Let `tenantctl` create or update the Keycloak user with `--provision-keycloak`.
+
+The tenant ID should be stable because it is persisted as `tenant_id` and used by authorization, RLS, identity binding, and token claims. Keycloak should have protocol mappers that expose the user attributes `tenant_id` and `account_id` as token claims; see [ops/docs/keycloak.md](ops/docs/keycloak.md).
+
+#### Path A: bind an existing Keycloak user
+
+Obtain the immutable Keycloak user ID/OIDC `sub` from the Keycloak Admin Console or a verified access token. Do not use the username or email as `--keycloak-sub`.
+
+Ensure the existing Keycloak user belongs to the same tenant and that its token contains the expected `tenant_id` claim, then run:
+
+```sh
+export KEYCLOAK_USER_ID='replace-with-keycloak-user-id'
+
+make tenant-provision \
+  TENANT_PROVISION_FLAGS="--tenant-id tenant-acme --tenant-name 'Acme Corp' --admin-email admin@acme.example --admin-name 'Acme Admin' --admin-employee-no ADMIN001 --keycloak-sub ${KEYCLOAK_USER_ID}"
+```
+
+This path only creates the local binding. It does not modify the existing Keycloak user's attributes, password, or required actions.
+
+#### Path B: create or update the administrator in Keycloak
+
+Configure a Keycloak service-account client with permission to manage users:
+
+```sh
+export KEYCLOAK_BASE_URL=https://keycloak.example.com/realms/nexus-pro
+export KEYCLOAK_ADMIN_CLIENT_ID=nexus-pro-admin
+export KEYCLOAK_ADMIN_CLIENT_SECRET='replace-with-service-account-secret'
+```
+
+Then run:
+
+```sh
+make tenant-provision \
+  TENANT_PROVISION_FLAGS='--tenant-id tenant-acme --tenant-name "Acme Corp" --admin-email admin@acme.example --admin-name "Acme Admin" --admin-employee-no ADMIN001 --provision-keycloak'
+```
+
+`--provision-keycloak` finds the Keycloak user by email, validates that it is not owned by another tenant/account, and writes the generated `tenant_id`, `account_id`, `employee_id`, and `employee_no` attributes. The one-time CLI flag works independently of `KEYCLOAK_PROVISION_USERS`; that environment switch controls later employee create/import/invite flows in the running API.
+
+The CLI does not set an initial password. For a newly created user, either set a password in the Keycloak Admin Console or enable the invite flow:
+
+```sh
+export KEYCLOAK_SEND_INVITE_EMAIL=true
+export KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api
+export KEYCLOAK_INVITE_REDIRECT_URL=https://app.example.com/login
+
+make tenant-provision \
+  TENANT_PROVISION_FLAGS='--tenant-id tenant-acme --tenant-name "Acme Corp" --admin-email admin@acme.example --admin-name "Acme Admin" --admin-employee-no ADMIN001 --provision-keycloak --send-invite'
+```
+
+`--send-invite` adds the Keycloak `UPDATE_PASSWORD` required action. The email is sent only when `KEYCLOAK_SEND_INVITE_EMAIL=true` and Keycloak SMTP is configured; otherwise set the password or trigger the required-actions email from Keycloak manually.
+
+### Provision command options
+
+| Option | Required | Default / meaning |
+| --- | --- | --- |
+| `--tenant-id` | Yes | Stable tenant ID used in storage and auth context |
+| `--tenant-name` | No | Defaults to `tenant-id` |
+| `--admin-email` | Yes | Lowercased and used for the local account and Keycloak lookup |
+| `--admin-name` | No | Defaults to the email local part |
+| `--admin-employee-no` | No | Defaults to `ADMIN001` |
+| `--provider` | No | Defaults to `keycloak` |
+| `--keycloak-sub` | Path A | Existing immutable Keycloak user ID/OIDC subject |
+| `--provision-keycloak` | Path B | Creates or updates the user through the Keycloak Admin API |
+| `--send-invite` | No | Adds `UPDATE_PASSWORD`; combine with invite email configuration to send mail |
+| `--database-url` | No | Derived from `DB_*` variables by the Make target |
+| `--timeout` | No | Defaults to `30s` |
+
+The command prints a JSON result containing the stable IDs needed for later operations, including `tenant_id`, `root_org_unit_id`, `admin_account_id`, `admin_employee_id`, `admin_permission_set_id`, `identity_subject`, and `permission_version`. Save this output with the deployment record, but do not treat it as a credentials file.
+
+### 3. Start the API and verify the administrator
+
+Start the API with the same database and Keycloak configuration:
+
+```sh
+go run ./cmd/api
+```
+
+The API startup registers the built-in permission package and synchronizes the permission/menu catalog for existing tenants. Check dependency readiness:
+
+```sh
+curl --fail http://127.0.0.1:18080/readyz
+```
+
+After obtaining an access token for the administrator, verify the resolved tenant, account, and effective menus:
+
+```sh
+export ACCESS_TOKEN='replace-with-administrator-access-token'
+curl --fail \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  http://127.0.0.1:18080/v1/me
+```
+
+The response should resolve to the provisioned tenant/account and include administrator menus such as `workbench`, `hr.employees`, `iam.permission_sets`, and `audit`.
+
+### 4. Import the optional built-in permission templates
+
+Tenant provisioning currently creates the directly assigned `Platform Admin` permission set and the complete permission catalog. It does not automatically instantiate the built-in package templates for `員工基礎權限`, `HR 管理權限`, and `平台唯讀排障權限`, or their user groups/data scopes.
+
+After the API is running, list the registered packages and import the built-in package when those reusable templates are needed:
+
+```sh
+curl --fail \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  http://127.0.0.1:18080/v1/iam/permission-packages
+
+export PERMISSION_PACKAGE_ID='replace-with-package-id-from-the-list-response'
+
+curl --fail -X POST \
+  -H "Authorization: Bearer ${ACCESS_TOKEN}" \
+  "http://127.0.0.1:18080/v1/iam/permission-packages/${PERMISSION_PACKAGE_ID}/import"
+```
+
+Package import is idempotent for the same tenant, package ID, and version. It creates the package-defined permission sets, user groups, data scopes, and assumable roles without assigning ordinary employees to privileged groups automatically.
+
+### Troubleshooting
+
+- `relation ... does not exist`: run `make migrate-up` against the same `DB_*` target used by `tenantctl`.
+- `DB_HOST/DB_USERNAME/DB_NAME ... required`: load `.env` with `set -a; source ./.env; set +a`, or pass the database variables explicitly.
+- `keycloak issuer url must include /realms/{realm}`: set `KEYCLOAK_BASE_URL` to the realm issuer URL, not the Keycloak server root.
+- `keycloak admin client ... required`: set `KEYCLOAK_ADMIN_CLIENT_ID` and `KEYCLOAK_ADMIN_CLIENT_SECRET` for `--provision-keycloak`.
+- `keycloak user is already owned by another tenant/account`: do not rebind that realm-global user; use the correct existing tenant or a different Keycloak user.
+- `external identity is not linked to a local account`: confirm that the token `sub` matches `identity_subject` and that its `tenant_id` identifies the provisioned tenant.
+- `authenticated tenant/account context is required`: verify the Keycloak protocol mappers and inspect the access token claims before retrying.
 
 ## Development
 

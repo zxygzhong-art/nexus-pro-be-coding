@@ -78,10 +78,13 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 	var req LeaveRequest
 	requestID := utils.NewID("lr")
 	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
+		leaveBalanceID := ""
 		if leaveType.RequiresBalance {
-			if _, err := tx.reserveLeaveBalance(ctx, employeeID, leaveTypeCode, input.Hours); err != nil {
+			balance, err := tx.reserveLeaveBalance(ctx, employeeID, leaveTypeCode, input.Hours, startAt)
+			if err != nil {
 				return err
 			}
+			leaveBalanceID = balance.ID
 		}
 		template, ok, err := tx.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, "leave-request")
 		if err != nil {
@@ -134,6 +137,7 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 			Reason:         strings.TrimSpace(input.Reason),
 			Status:         "pending_approval",
 			FormInstanceID: instance.ID,
+			LeaveBalanceID: leaveBalanceID,
 			CreatedAt:      tx.Now(),
 		}
 		if err := tx.store.UpsertLeaveRequest(goContext(ctx), req); err != nil {
@@ -167,8 +171,8 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 }
 
 // reserveLeaveBalance 保留請假 balance 的服務流程。
-func (c AttendanceService) reserveLeaveBalance(ctx RequestContext, employeeID, leaveType string, hours float64) (LeaveBalance, error) {
-	balance, reserved, found, err := c.store.ReserveLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, leaveType, hours, c.Now())
+func (c AttendanceService) reserveLeaveBalance(ctx RequestContext, employeeID, leaveType string, hours float64, asOf time.Time) (LeaveBalance, error) {
+	balance, reserved, found, err := c.store.ReserveLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, leaveType, hours, asOf, c.Now())
 	if err != nil {
 		return LeaveBalance{}, err
 	}
@@ -182,7 +186,16 @@ func (c AttendanceService) reserveLeaveBalance(ctx RequestContext, employeeID, l
 }
 
 // releaseLeaveBalance 釋放請假 balance 的服務流程。
-func (c AttendanceService) releaseLeaveBalance(ctx RequestContext, employeeID, leaveType string, hours float64) (LeaveBalance, error) {
+func (c AttendanceService) releaseLeaveBalance(ctx RequestContext, balanceID, employeeID, leaveType string, hours float64) (LeaveBalance, error) {
+	if strings.TrimSpace(balanceID) != "" {
+		balance, found, err := c.store.ReleaseLeaveBalanceByID(goContext(ctx), ctx.TenantID, balanceID, hours, c.Now())
+		if err != nil {
+			return LeaveBalance{}, err
+		}
+		if found {
+			return balance, nil
+		}
+	}
 	balance, found, err := c.store.ReleaseLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, leaveType, hours, c.Now())
 	if err != nil {
 		return LeaveBalance{}, err
@@ -228,7 +241,7 @@ func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance
 			return err
 		}
 		if leaveType, ok := findLeaveTypeInPolicy(policy, request.LeaveType); ok && leaveType.RequiresBalance {
-			if _, err := c.releaseLeaveBalance(ctx, request.EmployeeID, request.LeaveType, request.Hours); err != nil {
+			if _, err := c.releaseLeaveBalance(ctx, request.LeaveBalanceID, request.EmployeeID, request.LeaveType, request.Hours); err != nil {
 				return err
 			}
 		}

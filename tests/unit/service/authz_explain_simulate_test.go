@@ -44,6 +44,7 @@ func TestAuthzExplainIncludesAllowChainAndDenySources(t *testing.T) {
 		CreatedAt:       now,
 	})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", UserGroupIDs: []string{"group.hr-managers"}, CreatedAt: now})
+	seedActiveGroupMembership(t, store, "tenant-1", "group.hr-managers", "acct-1", now)
 
 	result, err := service.New(store, service.Options{Now: func() time.Time { return now }}).Authz().Explain(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},

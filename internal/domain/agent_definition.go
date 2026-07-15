@@ -56,6 +56,7 @@ type AgentModel struct {
 	LiteLLMModel     string               `json:"litellm_model"`
 	APIBaseURL       string               `json:"api_base_url,omitempty"`
 	APIKey           string               `json:"-"`
+	APIKeyCiphertext string               `json:"-"`
 	APIKeySet        bool                 `json:"api_key_set"`
 	APIKeyPreview    string               `json:"api_key_preview,omitempty"`
 	RateLimitRPM     int                  `json:"rate_limit_rpm"`
@@ -83,6 +84,8 @@ type AgentDefinitionVersion struct {
 	MainAgentRole      string            `json:"main_agent_role"`
 	SubAgents          []AgentTeamMember `json:"sub_agents"`
 	SystemPrompt       string            `json:"system_prompt"`
+	WelcomeMessage     string            `json:"welcome_message"`
+	SuggestedQuestions []string          `json:"suggested_questions"`
 	Tools              []string          `json:"tools"`
 	KnowledgeBaseIDs   []string          `json:"knowledge_base_ids"`
 	ModelID            string            `json:"model_id"`
@@ -91,7 +94,7 @@ type AgentDefinitionVersion struct {
 	CreatedAt          time.Time         `json:"created_at"`
 }
 
-// AgentTeamMember 定义由主 Agent 调度的子 Agent 配置。
+// AgentTeamMember 定義由主 Agent 調度的子 Agent 配置。
 type AgentTeamMember struct {
 	ID               string   `json:"id"`
 	Name             string   `json:"name"`
@@ -123,6 +126,8 @@ type AgentDefinition struct {
 	MainAgentRole      string                   `json:"main_agent_role"`
 	SubAgents          []AgentTeamMember        `json:"sub_agents"`
 	SystemPrompt       string                   `json:"system_prompt"`
+	WelcomeMessage     string                   `json:"welcome_message"`
+	SuggestedQuestions []string                 `json:"suggested_questions"`
 	Tools              []string                 `json:"tools"`
 	KnowledgeBaseIDs   []string                 `json:"knowledge_base_ids"`
 	Status             AgentDefinitionStatus    `json:"status"`
@@ -137,20 +142,6 @@ type AgentDefinition struct {
 	UpdatedByAccountID string                   `json:"updated_by_account_id,omitempty"`
 	CreatedAt          time.Time                `json:"created_at"`
 	UpdatedAt          time.Time                `json:"updated_at"`
-}
-
-// AgentAudit 定義 Agent/模型變更紀錄。
-type AgentAudit struct {
-	ID               string    `json:"id"`
-	TenantID         string    `json:"tenant_id"`
-	EntityType       string    `json:"entity_type"`
-	EntityID         string    `json:"entity_id"`
-	EntityName       string    `json:"entity_name"`
-	Action           string    `json:"action"`
-	ActorAccountID   string    `json:"actor_account_id,omitempty"`
-	ActorDisplayName string    `json:"actor_display_name"`
-	Detail           string    `json:"detail"`
-	CreatedAt        time.Time `json:"created_at"`
 }
 
 // AgentToolMeta 定義工具說明。
@@ -223,37 +214,41 @@ type UpdateAgentModelInput struct {
 
 // CreateAgentDefinitionInput 定義建立 Agent 輸入。
 type CreateAgentDefinitionInput struct {
-	Name              string            `json:"name"`
-	Description       string            `json:"description"`
-	Emoji             string            `json:"emoji"`
-	Category          string            `json:"category"`
-	ModelID           string            `json:"model_id"`
-	MainAgentRole     string            `json:"main_agent_role"`
-	SubAgents         []AgentTeamMember `json:"sub_agents"`
-	SystemPrompt      string            `json:"system_prompt"`
-	Tools             []string          `json:"tools"`
-	KnowledgeBaseIDs  []string          `json:"knowledge_base_ids"`
-	Visibility        string            `json:"visibility"`
-	VisibilityTargets []string          `json:"visibility_targets"`
-	TimeoutSeconds    int               `json:"timeout_seconds"`
+	Name               string            `json:"name"`
+	Description        string            `json:"description"`
+	Emoji              string            `json:"emoji"`
+	Category           string            `json:"category"`
+	ModelID            string            `json:"model_id"`
+	MainAgentRole      string            `json:"main_agent_role"`
+	SubAgents          []AgentTeamMember `json:"sub_agents"`
+	SystemPrompt       string            `json:"system_prompt"`
+	WelcomeMessage     string            `json:"welcome_message"`
+	SuggestedQuestions []string          `json:"suggested_questions"`
+	Tools              []string          `json:"tools"`
+	KnowledgeBaseIDs   []string          `json:"knowledge_base_ids"`
+	Visibility         string            `json:"visibility"`
+	VisibilityTargets  []string          `json:"visibility_targets"`
+	TimeoutSeconds     int               `json:"timeout_seconds"`
 }
 
 // UpdateAgentDefinitionInput 定義更新 Agent 輸入。
 type UpdateAgentDefinitionInput struct {
-	Name              *string           `json:"name"`
-	Description       *string           `json:"description"`
-	Emoji             *string           `json:"emoji"`
-	Category          *string           `json:"category"`
-	ModelID           *string           `json:"model_id"`
-	MainAgentRole     *string           `json:"main_agent_role"`
-	SubAgents         []AgentTeamMember `json:"sub_agents"`
-	SystemPrompt      *string           `json:"system_prompt"`
-	Tools             []string          `json:"tools"`
-	KnowledgeBaseIDs  []string          `json:"knowledge_base_ids"`
-	Visibility        *string           `json:"visibility"`
-	VisibilityTargets []string          `json:"visibility_targets"`
-	TimeoutSeconds    *int              `json:"timeout_seconds"`
-	VersionNote       string            `json:"version_note"`
+	Name               *string           `json:"name"`
+	Description        *string           `json:"description"`
+	Emoji              *string           `json:"emoji"`
+	Category           *string           `json:"category"`
+	ModelID            *string           `json:"model_id"`
+	MainAgentRole      *string           `json:"main_agent_role"`
+	SubAgents          []AgentTeamMember `json:"sub_agents"`
+	SystemPrompt       *string           `json:"system_prompt"`
+	WelcomeMessage     *string           `json:"welcome_message"`
+	SuggestedQuestions []string          `json:"suggested_questions"`
+	Tools              []string          `json:"tools"`
+	KnowledgeBaseIDs   []string          `json:"knowledge_base_ids"`
+	Visibility         *string           `json:"visibility"`
+	VisibilityTargets  []string          `json:"visibility_targets"`
+	TimeoutSeconds     *int              `json:"timeout_seconds"`
+	VersionNote        string            `json:"version_note"`
 }
 
 // RollbackAgentDefinitionInput 定義回滾輸入。

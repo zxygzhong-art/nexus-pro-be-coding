@@ -33,8 +33,6 @@ type AgentStore interface {
 	InsertAgentDefinitionVersion(context.Context, domain.AgentDefinitionVersion) error
 	ListAgentDefinitionVersions(ctx context.Context, tenantID, agentID string) ([]domain.AgentDefinitionVersion, error)
 	GetAgentDefinitionVersion(ctx context.Context, tenantID, agentID string, version int) (domain.AgentDefinitionVersion, bool, error)
-	InsertAgentAudit(context.Context, domain.AgentAudit) error
-	ListAgentAudits(ctx context.Context, tenantID string) ([]domain.AgentAudit, error)
 	UpsertAgentSession(context.Context, domain.AgentSession) error
 	GetAgentSession(ctx context.Context, tenantID, id string) (domain.AgentSession, bool, error)
 	GetAgentSessionForUpdate(ctx context.Context, tenantID, id string) (domain.AgentSession, bool, error)
@@ -54,6 +52,7 @@ type AgentStore interface {
 	ListCurrentAgentMessageAttachments(ctx context.Context, tenantID, sessionID string) ([]domain.AgentMessageAttachment, error)
 	DeleteCurrentDraftAgentSessionFile(ctx context.Context, tenantID, sessionID, fileID string) (bool, error)
 	DeleteAgentFileAsset(ctx context.Context, tenantID, fileID string) error
+	FailStaleAgentRunsBySession(ctx context.Context, tenantID, sessionID string, staleBefore, failedAt time.Time, reason string) (int, error)
 	CountActiveAgentRunsBySession(ctx context.Context, tenantID, sessionID string) (int, error)
 	UpsertAgentMemory(context.Context, domain.AgentMemory) error
 	GetAgentMemory(ctx context.Context, tenantID, id string) (domain.AgentMemory, bool, error)

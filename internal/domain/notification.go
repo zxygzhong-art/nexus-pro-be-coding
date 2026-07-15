@@ -73,7 +73,7 @@ type NotificationListQuery struct {
 	CursorID        string
 }
 
-// NotificationListResponse 包裝一頁游標結果與 header badge metadata。
+// NotificationListResponse 包裝一頁遊標結果與 header badge metadata。
 type NotificationListResponse struct {
 	Items       []NotificationItem     `json:"items"`
 	NextCursor  string                 `json:"next_cursor,omitempty"`

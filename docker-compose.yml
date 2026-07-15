@@ -20,7 +20,7 @@ services:
         condition: service_healthy
 
   postgres:
-    image: postgres:17
+    image: pgvector/pgvector:0.8.5-pg17-bookworm
     environment:
       POSTGRES_USER: nexus
       POSTGRES_PASSWORD: nexus

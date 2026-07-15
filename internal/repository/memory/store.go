@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -70,7 +71,6 @@ type Store struct {
 	agentExternalTools      map[string]map[string]AgentExternalTool
 	agentDefinitions        map[string]map[string]AgentDefinition
 	agentDefinitionVersions map[string]map[string]AgentDefinitionVersion
-	agentAudits             map[string][]AgentAudit
 	knowledgeBases          map[string]map[string]KnowledgeBase
 	knowledgeDocuments      map[string]map[string]KnowledgeDocument
 	knowledgeDocumentChunks map[string]map[string]KnowledgeDocumentChunk
@@ -87,8 +87,6 @@ type Store struct {
 	identityOutbox          map[string][]IdentityProvisioningOutboxEvent
 	outboxEvents            map[string][]OutboxEvent
 	relationshipTuples      map[string]map[string]AuthzRelationshipTuple
-	ehrmsSyncRuns           map[string]map[string]domain.EHRMSSyncRun
-	ehrmsSyncRunSteps       map[string]map[string]domain.EHRMSSyncRunStep
 	ehrmsSyncLocks          map[string]bool
 }
 
@@ -146,7 +144,6 @@ func NewStore() *Store {
 		agentExternalTools:      map[string]map[string]AgentExternalTool{},
 		agentDefinitions:        map[string]map[string]AgentDefinition{},
 		agentDefinitionVersions: map[string]map[string]AgentDefinitionVersion{},
-		agentAudits:             map[string][]AgentAudit{},
 		knowledgeBases:          map[string]map[string]KnowledgeBase{},
 		knowledgeDocuments:      map[string]map[string]KnowledgeDocument{},
 		knowledgeDocumentChunks: map[string]map[string]KnowledgeDocumentChunk{},
@@ -163,8 +160,6 @@ func NewStore() *Store {
 		identityOutbox:          map[string][]IdentityProvisioningOutboxEvent{},
 		outboxEvents:            map[string][]OutboxEvent{},
 		relationshipTuples:      map[string]map[string]AuthzRelationshipTuple{},
-		ehrmsSyncRuns:           map[string]map[string]domain.EHRMSSyncRun{},
-		ehrmsSyncRunSteps:       map[string]map[string]domain.EHRMSSyncRunStep{},
 		ehrmsSyncLocks:          map[string]bool{},
 	}
 }
@@ -324,11 +319,11 @@ func (s *Store) DeleteUserGroup(_ context.Context, tenantID, id string) (UserGro
 func (s *Store) UpsertGroupMembership(_ context.Context, v GroupMembership) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key := groupMembershipKey(v.UserGroupID, v.AccountID)
-	if existing, ok := getNested(s.groupMemberships, v.TenantID, key); ok && v.ID == "" {
-		v.ID = existing.ID
+	if v.ID == "" {
+		v.ID = groupMembershipKey(v.UserGroupID, v.AccountID)
 	}
-	putNested(s.groupMemberships, v.TenantID, key, copyGroupMembership(v))
+	putNested(s.groupMemberships, v.TenantID, v.ID, copyGroupMembership(v))
+	s.refreshGroupMembershipProjectionLocked(v.TenantID, v.UserGroupID, v.AccountID, v.ValidFrom)
 	return nil
 }
 
@@ -336,25 +331,63 @@ func (s *Store) UpsertGroupMembership(_ context.Context, v GroupMembership) erro
 func (s *Store) DeleteGroupMembership(_ context.Context, tenantID, userGroupID, accountID string) (GroupMembership, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	key := groupMembershipKey(userGroupID, accountID)
 	bucket := s.groupMemberships[tenantID]
 	if bucket == nil {
 		return GroupMembership{}, false, nil
 	}
-	v, ok := bucket[key]
-	if !ok {
+	var v GroupMembership
+	found := false
+	for key, candidate := range bucket {
+		if candidate.UserGroupID == userGroupID && candidate.AccountID == accountID {
+			if !found || candidate.ValidFrom.After(v.ValidFrom) {
+				v = candidate
+				found = true
+			}
+			delete(bucket, key)
+		}
+	}
+	if !found {
 		return GroupMembership{}, false, nil
 	}
-	delete(bucket, key)
+	s.refreshGroupMembershipProjectionLocked(tenantID, userGroupID, accountID, time.Now())
 	return copyGroupMembership(v), true, nil
+}
+
+// CloseGroupMembership ends the active membership interval without deleting history.
+func (s *Store) CloseGroupMembership(_ context.Context, tenantID, userGroupID, accountID string, validUntil time.Time) (GroupMembership, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var selectedKey string
+	var selected GroupMembership
+	for key, candidate := range s.groupMemberships[tenantID] {
+		if candidate.UserGroupID == userGroupID && candidate.AccountID == accountID && membershipActiveAt(candidate, validUntil) {
+			if selectedKey == "" || candidate.ValidFrom.After(selected.ValidFrom) {
+				selectedKey, selected = key, candidate
+			}
+		}
+	}
+	if selectedKey == "" {
+		return GroupMembership{}, false, nil
+	}
+	until := validUntil
+	selected.ValidUntil = &until
+	s.groupMemberships[tenantID][selectedKey] = selected
+	s.refreshGroupMembershipProjectionLocked(tenantID, userGroupID, accountID, validUntil)
+	return copyGroupMembership(selected), true, nil
 }
 
 // GetGroupMembership 從儲存層取得使用者群組成員關係。
 func (s *Store) GetGroupMembership(_ context.Context, tenantID, userGroupID, accountID string) (GroupMembership, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	v, ok := getNested(s.groupMemberships, tenantID, groupMembershipKey(userGroupID, accountID))
-	if !ok {
+	var v GroupMembership
+	found := false
+	for _, candidate := range s.groupMemberships[tenantID] {
+		if candidate.UserGroupID == userGroupID && candidate.AccountID == accountID && (!found || candidate.ValidFrom.After(v.ValidFrom)) {
+			v, found = candidate, true
+		}
+	}
+	if !found {
 		return GroupMembership{}, false, nil
 	}
 	return copyGroupMembership(v), true, nil
@@ -1554,8 +1587,12 @@ func (s *Store) GetAttendancePolicy(_ context.Context, tenantID string) (Attenda
 func (s *Store) UpsertLeaveBalance(_ context.Context, v LeaveBalance) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	v.LeaveType = strings.ToLower(strings.TrimSpace(v.LeaveType))
+	v.RemainingHours = roundLeaveHours(v.RemainingHours)
+	v.GrantedHours = roundLeaveHours(v.GrantedHours)
+	v.UsedHours = roundLeaveHours(v.UsedHours)
 	for id, existing := range s.leaveBalances[v.TenantID] {
-		if existing.EmployeeID == v.EmployeeID && existing.LeaveType == v.LeaveType {
+		if existing.EmployeeID == v.EmployeeID && strings.EqualFold(existing.LeaveType, v.LeaveType) && existing.PeriodStart == v.PeriodStart && existing.PeriodEnd == v.PeriodEnd {
 			v.ID = id
 			break
 		}
@@ -1585,7 +1622,7 @@ func (s *Store) ListLeaveBalances(_ context.Context, tenantID string) ([]LeaveBa
 }
 
 // ReserveLeaveBalance 從儲存層保留請假 balance。
-func (s *Store) ReserveLeaveBalance(_ context.Context, tenantID, employeeID, leaveType string, hours float64, updatedAt time.Time) (LeaveBalance, bool, bool, error) {
+func (s *Store) ReserveLeaveBalance(_ context.Context, tenantID, employeeID, leaveType string, hours float64, asOf, updatedAt time.Time) (LeaveBalance, bool, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	leaveType = strings.TrimSpace(leaveType)
@@ -1593,16 +1630,37 @@ func (s *Store) ReserveLeaveBalance(_ context.Context, tenantID, employeeID, lea
 		if balance.EmployeeID != employeeID || !strings.EqualFold(balance.LeaveType, leaveType) {
 			continue
 		}
+		asOfDate := asOf.Format("2006-01-02")
+		if (balance.PeriodStart != "" && balance.PeriodStart > asOfDate) || (balance.PeriodEnd != "" && balance.PeriodEnd < asOfDate) {
+			continue
+		}
+		hours = roundLeaveHours(hours)
 		if balance.RemainingHours < hours {
 			return copyLeaveBalance(balance), false, true, nil
 		}
-		balance.RemainingHours -= hours
-		balance.UsedHours += hours
+		balance.RemainingHours = roundLeaveHours(balance.RemainingHours - hours)
+		balance.UsedHours = roundLeaveHours(balance.UsedHours + hours)
 		balance.UpdatedAt = updatedAt
 		s.leaveBalances[tenantID][id] = copyLeaveBalance(balance)
 		return copyLeaveBalance(balance), true, true, nil
 	}
 	return LeaveBalance{}, false, false, nil
+}
+
+// ReleaseLeaveBalanceByID restores the exact balance projection reserved by a request.
+func (s *Store) ReleaseLeaveBalanceByID(_ context.Context, tenantID, balanceID string, hours float64, updatedAt time.Time) (LeaveBalance, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	balance, ok := s.leaveBalances[tenantID][balanceID]
+	if !ok {
+		return LeaveBalance{}, false, nil
+	}
+	hours = roundLeaveHours(hours)
+	balance.RemainingHours = roundLeaveHours(balance.RemainingHours + hours)
+	balance.UsedHours = roundLeaveHours(math.Max(0, balance.UsedHours-hours))
+	balance.UpdatedAt = updatedAt
+	s.leaveBalances[tenantID][balanceID] = copyLeaveBalance(balance)
+	return copyLeaveBalance(balance), true, nil
 }
 
 // ReleaseLeaveBalance 從儲存層釋放請假 balance。
@@ -1614,9 +1672,10 @@ func (s *Store) ReleaseLeaveBalance(_ context.Context, tenantID, employeeID, lea
 		if balance.EmployeeID != employeeID || !strings.EqualFold(balance.LeaveType, leaveType) {
 			continue
 		}
-		balance.RemainingHours += hours
+		hours = roundLeaveHours(hours)
+		balance.RemainingHours = roundLeaveHours(balance.RemainingHours + hours)
 		if balance.UsedHours > hours {
-			balance.UsedHours -= hours
+			balance.UsedHours = roundLeaveHours(balance.UsedHours - hours)
 		} else {
 			balance.UsedHours = 0
 		}
@@ -1625,6 +1684,10 @@ func (s *Store) ReleaseLeaveBalance(_ context.Context, tenantID, employeeID, lea
 		return copyLeaveBalance(balance), true, nil
 	}
 	return LeaveBalance{}, false, nil
+}
+
+func roundLeaveHours(value float64) float64 {
+	return math.Round(value*100) / 100
 }
 
 // UpsertLeaveRequest 從儲存層處理 upsert 請假請求。
@@ -2162,7 +2225,7 @@ func (s *Store) GetFormDefinitionDraft(_ context.Context, tenantID, id string) (
 	return copyFormDefinitionDraft(v), true, nil
 }
 
-// GetFormDefinitionDraftByAgentCall 以 Agent run/tool call 实现幂等重试。
+// GetFormDefinitionDraftByAgentCall 以 Agent run/tool call 實現冪等重試。
 func (s *Store) GetFormDefinitionDraftByAgentCall(_ context.Context, tenantID, agentRunID, toolCallID string) (domain.FormDefinitionDraft, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2174,7 +2237,7 @@ func (s *Store) GetFormDefinitionDraftByAgentCall(_ context.Context, tenantID, a
 	return domain.FormDefinitionDraft{}, false, nil
 }
 
-// ListFormDefinitionDrafts 列出指定拥有者与状态的草稿。
+// ListFormDefinitionDrafts 列出指定擁有者與狀態的草稿。
 func (s *Store) ListFormDefinitionDrafts(_ context.Context, tenantID, ownerAccountID, status string) ([]domain.FormDefinitionDraft, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2854,32 +2917,6 @@ func (s *Store) GetAgentDefinitionVersion(_ context.Context, tenantID, agentID s
 	return copyAgentDefinitionVersion(v), true, nil
 }
 
-// InsertAgentAudit 從儲存層新增 agent audit。
-func (s *Store) InsertAgentAudit(_ context.Context, v AgentAudit) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.agentAudits[v.TenantID] = append(s.agentAudits[v.TenantID], copyAgentAudit(v))
-	return nil
-}
-
-// ListAgentAudits 從儲存層列出 agent audit。
-func (s *Store) ListAgentAudits(_ context.Context, tenantID string) ([]AgentAudit, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	src := s.agentAudits[tenantID]
-	out := make([]AgentAudit, 0, len(src))
-	for _, item := range src {
-		out = append(out, copyAgentAudit(item))
-	}
-	sort.SliceStable(out, func(i, j int) bool {
-		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
-			return out[i].ID > out[j].ID
-		}
-		return out[i].CreatedAt.After(out[j].CreatedAt)
-	})
-	return out, nil
-}
-
 // UpsertAgentSession 從儲存層處理 upsert agent 會話。
 func (s *Store) UpsertAgentSession(_ context.Context, v AgentSession) error {
 	s.mu.Lock()
@@ -3162,6 +3199,29 @@ func (s *Store) DeleteAgentFileAsset(_ context.Context, tenantID, fileID string)
 	return nil
 }
 
+// FailStaleAgentRunsBySession closes interrupted runs so they no longer lock the conversation.
+func (s *Store) FailStaleAgentRunsBySession(_ context.Context, tenantID, sessionID string, staleBefore, failedAt time.Time, reason string) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	count := 0
+	for id, item := range s.agentRuns[tenantID] {
+		if item.SessionID != sessionID || !item.UpdatedAt.Before(staleBefore) {
+			continue
+		}
+		if item.Status != string(domain.AgentRunStatusQueued) && item.Status != string(domain.AgentRunStatusRunning) {
+			continue
+		}
+		item.Status = string(domain.AgentRunStatusFailed)
+		if strings.TrimSpace(item.Answer) == "" {
+			item.Answer = reason
+		}
+		item.UpdatedAt = failedAt
+		s.agentRuns[tenantID][id] = copyAgentRun(item)
+		count++
+	}
+	return count, nil
+}
+
 // CountActiveAgentRunsBySession 從儲存層統計會話中的未完成 agent run。
 func (s *Store) CountActiveAgentRunsBySession(_ context.Context, tenantID, sessionID string) (int, error) {
 	s.mu.RLock()
@@ -3364,7 +3424,7 @@ func (s *Store) CountUnreadNotifications(_ context.Context, tenantID, accountID 
 	return count, nil
 }
 
-// CountNotificationTones 從儲存層統計目前帳號可見通知的 tone 分布。
+// CountNotificationTones 從儲存層統計目前帳號可見通知的 tone 分佈。
 func (s *Store) CountNotificationTones(_ context.Context, tenantID, accountID string) (NotificationToneCounts, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -3444,7 +3504,7 @@ func memoryNotificationVisible(item Notification, now time.Time) bool {
 	return item.ExpiresAt == nil || item.ExpiresAt.After(now)
 }
 
-// memoryNotificationAfterCursor 只保留早於倒序游標的通知列。
+// memoryNotificationAfterCursor 只保留早於倒序遊標的通知列。
 func memoryNotificationAfterCursor(item Notification, query domain.NotificationListQuery) bool {
 	return item.CreatedAt.Before(query.CursorCreatedAt) || (item.CreatedAt.Equal(query.CursorCreatedAt) && item.ID < query.CursorID)
 }
@@ -3691,8 +3751,49 @@ func (s *Store) ListAuthzRelationshipTuplesForObject(_ context.Context, tenantID
 func (s *Store) AppendIdentityProvisioningOutboxEvent(_ context.Context, v IdentityProvisioningOutboxEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if v.NextAttemptAt.IsZero() {
+		v.NextAttemptAt = v.CreatedAt
+	}
 	s.identityOutbox[v.TenantID] = append(s.identityOutbox[v.TenantID], v)
 	return nil
+}
+
+// ClaimIdentityProvisioningOutboxEvents atomically leases due events to one worker.
+func (s *Store) ClaimIdentityProvisioningOutboxEvents(_ context.Context, tenantID string, batchSize, maxRetries int, claimedAt, leaseUntil time.Time) ([]IdentityProvisioningOutboxEvent, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	indices := make([]int, 0)
+	for i, event := range s.identityOutbox[tenantID] {
+		if event.RetryCount >= maxRetries {
+			continue
+		}
+		due := event.Status == domain.IdentityProvisioningStatusPending && !event.NextAttemptAt.After(claimedAt)
+		stale := event.Status == domain.IdentityProvisioningStatusProcessing && event.ClaimExpiresAt != nil && !event.ClaimExpiresAt.After(claimedAt)
+		if due || stale {
+			indices = append(indices, i)
+		}
+	}
+	sort.Slice(indices, func(i, j int) bool {
+		left, right := s.identityOutbox[tenantID][indices[i]], s.identityOutbox[tenantID][indices[j]]
+		if left.NextAttemptAt.Equal(right.NextAttemptAt) {
+			return left.CreatedAt.Before(right.CreatedAt)
+		}
+		return left.NextAttemptAt.Before(right.NextAttemptAt)
+	})
+	if batchSize < len(indices) {
+		indices = indices[:batchSize]
+	}
+	out := make([]IdentityProvisioningOutboxEvent, 0, len(indices))
+	for _, index := range indices {
+		event := s.identityOutbox[tenantID][index]
+		event.Status = domain.IdentityProvisioningStatusProcessing
+		event.UpdatedAt = claimedAt
+		expires := leaseUntil
+		event.ClaimExpiresAt = &expires
+		s.identityOutbox[tenantID][index] = event
+		out = append(out, event)
+	}
+	return out, nil
 }
 
 // ListPendingIdentityProvisioningOutboxEvents 從儲存層列出 pending 身分開通 outbox 事件。
@@ -3852,7 +3953,47 @@ func membershipActiveAt(v GroupMembership, at time.Time) bool {
 	if !v.ValidFrom.IsZero() && v.ValidFrom.After(at) {
 		return false
 	}
-	return v.ValidUntil == nil || !v.ValidUntil.Before(at)
+	return v.ValidUntil == nil || at.Before(*v.ValidUntil)
+}
+
+// refreshGroupMembershipProjectionLocked rebuilds legacy arrays from the authoritative membership relation.
+func (s *Store) refreshGroupMembershipProjectionLocked(tenantID, userGroupID, accountID string, at time.Time) {
+	if group, ok := s.userGroups[tenantID][userGroupID]; ok {
+		members := make([]string, 0)
+		for _, membership := range s.groupMemberships[tenantID] {
+			if membership.UserGroupID == userGroupID && membershipActiveAt(membership, at) {
+				members = append(members, membership.AccountID)
+			}
+		}
+		group.MemberAccountIDs = uniqueSortedStrings(members)
+		group.Version++
+		s.userGroups[tenantID][userGroupID] = group
+	}
+	if account, ok := s.accounts[tenantID][accountID]; ok {
+		groups := make([]string, 0)
+		for _, membership := range s.groupMemberships[tenantID] {
+			if membership.AccountID == accountID && membershipActiveAt(membership, at) {
+				groups = append(groups, membership.UserGroupID)
+			}
+		}
+		account.UserGroupIDs = uniqueSortedStrings(groups)
+		account.Version++
+		s.accounts[tenantID][accountID] = account
+	}
+}
+
+func uniqueSortedStrings(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	sort.Strings(out)
+	return out
 }
 
 // putNested 處理 put nested。

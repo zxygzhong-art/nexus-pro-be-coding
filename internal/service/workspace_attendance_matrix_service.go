@@ -51,36 +51,6 @@ func workspaceLeaveLegend() []WorkspaceLeaveLegendItem {
 	}
 }
 
-// workspaceAuditLogMatches 處理工作區稽核 log matches。
-func workspaceAuditLogMatches(log AuditLog, query WorkspaceAuditLogQuery, accounts map[string]Account, employees map[string]Employee) bool {
-	if from, ok := workspaceParseAuditTime(query.From, false); ok && log.CreatedAt.Before(from) {
-		return false
-	}
-	if to, ok := workspaceParseAuditTime(query.To, true); ok && !log.CreatedAt.Before(to) {
-		return false
-	}
-	account := accounts[log.ActorAccountID]
-	employee := employees[account.EmployeeID]
-	projected := workspaceAuditLogProjection(log, accounts, employees)
-	operatorID := strings.TrimSpace(query.OperatorID)
-	if operatorID != "" && operatorID != log.ActorAccountID && operatorID != account.EmployeeID && operatorID != workspaceEmployeeDisplayID(employee) && operatorID != projected.Operator {
-		return false
-	}
-	if filterType := strings.ToLower(strings.TrimSpace(query.Type)); filterType != "" {
-		haystack := strings.ToLower(strings.Join([]string{projected.Type, log.Resource, log.Action}, " "))
-		if !strings.Contains(haystack, filterType) {
-			return false
-		}
-	}
-	if keyword := strings.ToLower(strings.TrimSpace(query.Keyword)); keyword != "" {
-		haystack := strings.ToLower(strings.Join([]string{projected.Operator, projected.Type, projected.Action, projected.Detail, log.Resource, log.Target, log.Action}, " "))
-		if !strings.Contains(haystack, keyword) {
-			return false
-		}
-	}
-	return true
-}
-
 // workspaceAuditLogQueryEmpty 處理工作區稽核 log 查詢空值。
 func workspaceAuditLogQueryEmpty(query WorkspaceAuditLogQuery) bool {
 	return strings.TrimSpace(query.OperatorID) == "" &&
@@ -145,24 +115,6 @@ func workspaceAuditDetail(log AuditLog) string {
 		}
 	}
 	return utils.FirstNonEmpty(log.Result, log.TraceID)
-}
-
-// workspaceParseAuditTime 處理工作區 parse 稽核時間。
-func workspaceParseAuditTime(value string, exclusiveEnd bool) (time.Time, bool) {
-	value = strings.TrimSpace(value)
-	if value == "" {
-		return time.Time{}, false
-	}
-	if parsed, err := time.Parse(time.DateOnly, value); err == nil {
-		if exclusiveEnd {
-			parsed = parsed.AddDate(0, 0, 1)
-		}
-		return parsed.UTC(), true
-	}
-	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
-		return parsed.UTC(), true
-	}
-	return time.Time{}, false
 }
 
 // workspaceSummaryLeaveCells 直接投影 eHRMS 每日假勤事實，避免從請假區間推算日期或分攤時數。
@@ -743,22 +695,6 @@ func sortedKeys[T any](values map[string]T) []string {
 // maxInt 取得較大值整數。
 func maxInt(a int, b int) int {
 	if a > b {
-		return a
-	}
-	return b
-}
-
-// maxTime 取得較大值時間。
-func maxTime(a time.Time, b time.Time) time.Time {
-	if a.After(b) {
-		return a
-	}
-	return b
-}
-
-// minTime 取得較小值時間。
-func minTime(a time.Time, b time.Time) time.Time {
-	if a.Before(b) {
 		return a
 	}
 	return b

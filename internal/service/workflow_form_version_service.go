@@ -154,7 +154,7 @@ func formProjectionJSON(value domain.FormInstanceFieldValue, rawValue any) (doma
 	return value, true
 }
 
-// isStructuralFormFieldType 判斷不會出現在提交 payload 的布局欄位。
+// isStructuralFormFieldType 判斷不會出現在提交 payload 的佈局欄位。
 func isStructuralFormFieldType(fieldType string) bool {
 	switch strings.TrimSpace(fieldType) {
 	case "layout", "section-title", "divider", "html":

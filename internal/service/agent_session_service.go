@@ -159,7 +159,8 @@ func (c AgentService) ListSessionMessages(ctx RequestContext, sessionID string) 
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.currentAgentSession(ctx, account.ID, sessionID); err != nil {
+	session, err := c.currentAgentSession(ctx, account.ID, sessionID)
+	if err != nil {
 		return nil, err
 	}
 	messages, err := c.store.ListAgentSessionMessages(goContext(ctx), ctx.TenantID, strings.TrimSpace(sessionID))
@@ -177,6 +178,11 @@ func (c AgentService) ListSessionMessages(ctx RequestContext, sessionID string) 
 	for index := range messages {
 		messages[index].Attachments = byMessage[messages[index].ID]
 	}
+	confirmations, err := c.pendingAgentConfirmationMessages(ctx, account.ID, session)
+	if err != nil {
+		return nil, err
+	}
+	messages = append(messages, confirmations...)
 	return messages, nil
 }
 

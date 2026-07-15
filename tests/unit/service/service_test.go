@@ -1772,7 +1772,7 @@ func TestAttendanceClockRejectsInsufficientWorkHoursAndAllowsRetry(t *testing.T)
 	}
 }
 
-// TestAttendanceClockUsesElapsedHoursInsteadOfFixedClockOutTime 验证弹性打卡只依实际工时判定。
+// TestAttendanceClockUsesElapsedHoursInsteadOfFixedClockOutTime 驗證彈性打卡只依實際工時判定。
 func TestAttendanceClockUsesElapsedHoursInsteadOfFixedClockOutTime(t *testing.T) {
 	_, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
 	clockInAt := attendanceFixtureClockInTime()
@@ -1822,7 +1822,7 @@ func TestAttendanceClockUsesElapsedHoursInsteadOfFixedClockOutTime(t *testing.T)
 	}
 }
 
-// TestAttendanceClockFixedModeRecordsLateAndEarlyPunchesAsAcceptedAnomalies 验证固定打卡迟到早退仍会完成打卡。
+// TestAttendanceClockFixedModeRecordsLateAndEarlyPunchesAsAcceptedAnomalies 驗證固定打卡遲到早退仍會完成打卡。
 func TestAttendanceClockFixedModeRecordsLateAndEarlyPunchesAsAcceptedAnomalies(t *testing.T) {
 	store, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
 	clockInAt := attendanceFixtureClockInTime()
@@ -1904,7 +1904,7 @@ func TestAttendanceClockFixedModeRecordsLateAndEarlyPunchesAsAcceptedAnomalies(t
 	}
 }
 
-// TestAttendanceClockFlexibleBoundsKeepAbnormalClockOutRetryable 验证弹性范围异常上班不可重复、异常下班可重打。
+// TestAttendanceClockFlexibleBoundsKeepAbnormalClockOutRetryable 驗證彈性範圍異常上班不可重複、異常下班可重打。
 func TestAttendanceClockFlexibleBoundsKeepAbnormalClockOutRetryable(t *testing.T) {
 	store, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
 	base := attendanceFixtureClockInTime()
@@ -4304,7 +4304,7 @@ func TestSyncEHRMSEmployeesOverwritesLocalEmailAndCreatesPendingInvite(t *testin
 	}
 }
 
-// TestSyncEHRMSEmployeesSkipsInvalidRowsAndWritesValidOnes 驗證校驗失敗列會跳過，其餘列仍可入庫。
+// TestSyncEHRMSEmployeesFailsInvalidRowsAndWritesValidOnes verifies row failures without aborting the batch.
 func TestSyncEHRMSEmployeesSkipsInvalidRowsAndWritesValidOnes(t *testing.T) {
 	rows := []domain.EHRMSEmployeeRecord{
 		{
@@ -4368,7 +4368,7 @@ func TestSyncEHRMSEmployeesSkipsInvalidRowsAndWritesValidOnes(t *testing.T) {
 	if err != nil {
 		t.Fatalf("expected invalid rows to be skipped, got %v", err)
 	}
-	if result.Fetched != 4 || result.Created != 2 || result.Updated != 0 || result.Skipped != 2 || result.Failed != 0 {
+	if result.Fetched != 4 || result.Created != 2 || result.Updated != 0 || result.Skipped != 0 || result.Failed != 2 {
 		t.Fatalf("unexpected sync result: %+v", result)
 	}
 	foundDup := false
@@ -4384,14 +4384,14 @@ func TestSyncEHRMSEmployeesSkipsInvalidRowsAndWritesValidOnes(t *testing.T) {
 	if !foundDup || !foundRequired {
 		t.Fatalf("expected duplicate_in_file and required row errors, got %+v", result.RowErrors)
 	}
-	skipped := 0
+	failed := 0
 	for _, item := range result.Results {
-		if item.Action == "skipped" {
-			skipped++
+		if item.Action == "failed" {
+			failed++
 		}
 	}
-	if skipped != 2 {
-		t.Fatalf("expected 2 skipped results, got %+v", result.Results)
+	if failed != 2 {
+		t.Fatalf("expected 2 failed results, got %+v", result.Results)
 	}
 	employees, err := store.ListEmployees(context.Background(), "tenant-1")
 	if err != nil {
@@ -4653,6 +4653,7 @@ func TestSyncEHRMSEmployeesBuildsOrgHierarchyAndPositions(t *testing.T) {
 
 // TestSyncEHRMSAttendanceUpsertsDailySummaries 驗證 eHRMS 考勤同步 writes 日彙總 without GPS 打卡。
 func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
+	syncNow := time.Date(2026, 6, 20, 8, 0, 0, 0, time.UTC)
 	rows := []domain.EHRMSAttendanceRecord{{
 		"emp_id":           "IKM017",
 		"date":             "2026-06-10",
@@ -4692,7 +4693,7 @@ func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "attendance.clock", Action: "import", Scope: "all"},
 		{Resource: "attendance.clock", Action: "read", Scope: "all"},
-	}, service.Options{EHRMSClient: fakeEHRMSClient{attendanceRows: rows}})
+	}, service.Options{EHRMSClient: fakeEHRMSClient{attendanceRows: rows}, Now: func() time.Time { return syncNow }})
 	now := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
 	if err := store.UpsertEmployee(context.Background(), domain.Employee{
 		ID:               "emp-ehrms",
@@ -4773,6 +4774,7 @@ func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
 
 // TestSyncEHRMSAttendanceUpsertsLeaveBalancesAndDetails 驗證 eHRMS 假別餘額與明細同步。
 func TestSyncEHRMSAttendanceUpsertsLeaveBalancesAndDetails(t *testing.T) {
+	syncNow := time.Date(2026, 6, 20, 8, 0, 0, 0, time.UTC)
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "attendance.clock", Action: "import", Scope: "all"},
 	}, service.Options{EHRMSClient: fakeEHRMSClient{
@@ -4795,7 +4797,7 @@ func TestSyncEHRMSAttendanceUpsertsLeaveBalancesAndDetails(t *testing.T) {
 			"end":        "13:00",
 			"hours":      "4",
 		}},
-	}})
+	}, Now: func() time.Time { return syncNow }})
 	now := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
 	if err := store.UpsertEmployee(context.Background(), domain.Employee{
 		ID:               "emp-ehrms",

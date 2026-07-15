@@ -29,6 +29,9 @@ func TestCreateLeaveRequestAcceptsLegacyLeaveTypeCode(t *testing.T) {
 	if created.LeaveType != "annual" {
 		t.Fatalf("expected normalized leave type annual, got %s", created.LeaveType)
 	}
+	if created.LeaveBalanceID != "lb-1" {
+		t.Fatalf("expected request to retain the exact reserved balance id, got %+v", created)
+	}
 }
 
 func TestCreateLeaveRequestAllowsUnlimitedWithoutBalance(t *testing.T) {

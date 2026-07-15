@@ -140,14 +140,6 @@ type AttendanceFacade interface {
 	RejectAttendanceCorrection(RequestContext, string, ReviewAttendanceCorrectionInput) (AttendanceCorrectionRequest, error)
 }
 
-// EHRMSFacade 提供同步運行查詢與人工恢復操作。
-type EHRMSFacade interface {
-	StartSync(RequestContext, StartEHRMSSyncInput) (EHRMSSyncRunDetail, error)
-	ListSyncRunPage(RequestContext, PageRequest) (PageResponse[EHRMSSyncRun], error)
-	GetSyncRun(RequestContext, string) (EHRMSSyncRunDetail, error)
-	RetrySyncRun(RequestContext, string, RetryEHRMSSyncRunInput) (EHRMSSyncRunDetail, error)
-}
-
 // PlatformFacade 定義平台 facade 的行為契約。
 type PlatformFacade interface {
 	Home(RequestContext) (PlatformHomeResponse, error)

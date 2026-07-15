@@ -463,6 +463,7 @@ func copyAgentModel(v AgentModel) AgentModel {
 
 // copyAgentDefinition 複製 agent 定義。
 func copyAgentDefinition(v AgentDefinition) AgentDefinition {
+	v.SuggestedQuestions = utils.CopyStrings(v.SuggestedQuestions)
 	v.Tools = utils.CopyStrings(v.Tools)
 	v.KnowledgeBaseIDs = utils.CopyStrings(v.KnowledgeBaseIDs)
 	v.SubAgents = copyAgentTeamMembers(v.SubAgents)
@@ -478,13 +479,14 @@ func copyAgentDefinition(v AgentDefinition) AgentDefinition {
 
 // copyAgentDefinitionVersion 複製 agent 版本。
 func copyAgentDefinitionVersion(v AgentDefinitionVersion) AgentDefinitionVersion {
+	v.SuggestedQuestions = utils.CopyStrings(v.SuggestedQuestions)
 	v.Tools = utils.CopyStrings(v.Tools)
 	v.KnowledgeBaseIDs = utils.CopyStrings(v.KnowledgeBaseIDs)
 	v.SubAgents = copyAgentTeamMembers(v.SubAgents)
 	return v
 }
 
-// copyAgentTeamMembers 深复制 Team 成员及其工具集合。
+// copyAgentTeamMembers 深複製 Team 成員及其工具集合。
 func copyAgentTeamMembers(src []AgentTeamMember) []AgentTeamMember {
 	if len(src) == 0 {
 		return nil
@@ -508,9 +510,6 @@ func copyAgentDefinitionVersions(src []AgentDefinitionVersion) []AgentDefinition
 	}
 	return out
 }
-
-// copyAgentAudit 複製 agent audit。
-func copyAgentAudit(v AgentAudit) AgentAudit { return v }
 
 // copyAgentSession 複製 agent session。
 func copyAgentSession(v AgentSession) AgentSession {

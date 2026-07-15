@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"time"
 
 	"nexus-pro-be/internal/domain"
 	sqlc "nexus-pro-be/internal/platform/postgres/db"
@@ -115,11 +116,28 @@ func (s *Store) ListRecentAgentSessionMessages(execCtx context.Context, tenantID
 	return mapSlice(items, fromAgentSessionMessage), nil
 }
 
+// FailStaleAgentRunsBySession closes interrupted runs without touching a live run inside its timeout window.
+func (s *Store) FailStaleAgentRunsBySession(execCtx context.Context, tenantID, sessionID string, staleBefore, failedAt time.Time, reason string) (int, error) {
+	result, err := s.db.Exec(tenantContext(execCtx, tenantID), `
+UPDATE agent_runs
+SET status = 'failed',
+    answer = CASE WHEN btrim(answer) = '' THEN $4 ELSE answer END,
+    updated_at = $5
+WHERE tenant_id = $1
+  AND session_id = $2
+  AND status IN ('queued', 'running')
+  AND updated_at < $3`, tenantID, sessionID, staleBefore, reason, failedAt)
+	if err != nil {
+		return 0, err
+	}
+	return int(result.RowsAffected()), nil
+}
+
 // CountActiveAgentRunsBySession 從儲存層統計會話中的未完成 agent run。
 func (s *Store) CountActiveAgentRunsBySession(execCtx context.Context, tenantID, sessionID string) (int, error) {
 	count, err := s.q.CountActiveAgentRunsBySession(tenantContext(execCtx, tenantID), sqlc.CountActiveAgentRunsBySessionParams{
 		TenantID:  tenantID,
-		SessionID: sessionID,
+		SessionID: nullableText(sessionID),
 	})
 	if err != nil {
 		return 0, err

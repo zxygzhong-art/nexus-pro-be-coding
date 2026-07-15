@@ -154,12 +154,6 @@ DELETE FROM authz_assumable_role_sessions
 WHERE tenant_id = $1
   AND assumable_role_id = $2;
 
--- name: RevokeAuthzAssumableRoleSession :one
-UPDATE authz_assumable_role_sessions
-SET revoked_at = $3
-WHERE tenant_id = $1 AND id = $2
-RETURNING *;
-
 -- name: UpsertAuthzRelationshipTuple :one
 INSERT INTO authz_relationship_tuples (
     id, tenant_id, object_type, object_id, relation,

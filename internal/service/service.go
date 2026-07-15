@@ -27,7 +27,7 @@ type Service struct {
 	ehrmsClient           EHRMSClient
 	identityProvisioner   IdentityProvisioner
 	formApprovalWorkflows FormApprovalWorkflowClient
-	agentToolCredentials  AgentToolCredentialCipher
+	credentialCipher      CredentialCipher
 }
 
 // Options 定義選項的資料結構。
@@ -44,11 +44,11 @@ type Options struct {
 	EHRMSClient           EHRMSClient
 	IdentityProvisioner   IdentityProvisioner
 	FormApprovalWorkflows FormApprovalWorkflowClient
-	AgentToolCredentials  AgentToolCredentialCipher
+	CredentialCipher      CredentialCipher
 }
 
-// AgentToolCredentialCipher encrypts external-tool credentials with contextual associated data.
-type AgentToolCredentialCipher interface {
+// CredentialCipher encrypts persisted secrets with contextual associated data.
+type CredentialCipher interface {
 	Encrypt(plaintext, associatedData []byte) (string, error)
 	Decrypt(ciphertext string, associatedData []byte) ([]byte, error)
 }
@@ -121,7 +121,7 @@ func New(store repository.Store, options ...Options) *Service {
 		ehrmsClient:           cfg.EHRMSClient,
 		identityProvisioner:   cfg.IdentityProvisioner,
 		formApprovalWorkflows: cfg.FormApprovalWorkflows,
-		agentToolCredentials:  cfg.AgentToolCredentials,
+		credentialCipher:      cfg.CredentialCipher,
 	}
 }
 
@@ -446,26 +446,6 @@ func (c *Service) activeUserGroupsForAccountWithExpiries(ctx RequestContext, acc
 			return nil, nil, err
 		}
 	}
-	for _, groupID := range account.UserGroupIDs {
-		if _, ok := seen[groupID]; ok {
-			continue
-		}
-		membership, ok, err := c.store.GetGroupMembership(goContext(ctx), ctx.TenantID, groupID, account.ID)
-		if err != nil {
-			return nil, nil, err
-		}
-		if ok {
-			if groupMembershipActiveAt(membership, at) {
-				if err := addGroup(groupID, membership.ValidUntil); err != nil {
-					return nil, nil, err
-				}
-			}
-			continue
-		}
-		if err := addGroup(groupID, nil); err != nil {
-			return nil, nil, err
-		}
-	}
 	return groups, expiries, nil
 }
 
@@ -474,7 +454,7 @@ func groupMembershipActiveAt(membership GroupMembership, at time.Time) bool {
 	if !membership.ValidFrom.IsZero() && membership.ValidFrom.After(at) {
 		return false
 	}
-	return membership.ValidUntil == nil || !membership.ValidUntil.Before(at)
+	return membership.ValidUntil == nil || at.Before(*membership.ValidUntil)
 }
 
 // audit 處理稽核的服務流程。

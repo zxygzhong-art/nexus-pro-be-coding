@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
+	"strconv"
 	"strings"
 	"time"
 
@@ -193,23 +195,39 @@ func (s *Store) ListUserIdentities(execCtx context.Context, tenantID, accountID 
 
 // AppendIdentityProvisioningOutboxEvent 從儲存層附加身分開通 outbox 事件。
 func (s *Store) AppendIdentityProvisioningOutboxEvent(execCtx context.Context, v domain.IdentityProvisioningOutboxEvent) error {
+	if v.NextAttemptAt.IsZero() {
+		v.NextAttemptAt = v.CreatedAt
+	}
 	_, err := s.q.AppendIdentityProvisioningOutboxEvent(tenantContext(execCtx, v.TenantID), sqlc.AppendIdentityProvisioningOutboxEventParams{
-		ID:          v.ID,
-		TenantID:    v.TenantID,
-		AccountID:   v.AccountID,
-		EmployeeID:  v.EmployeeID,
-		EmployeeNo:  v.EmployeeNo,
-		Email:       v.Email,
-		DisplayName: v.DisplayName,
-		Enabled:     v.Enabled,
-		SendInvite:  v.SendInvite,
-		Status:      v.Status,
-		RetryCount:  int32(v.RetryCount),
-		LastError:   v.LastError,
-		CreatedAt:   timestamptz(v.CreatedAt),
-		UpdatedAt:   timestamptz(v.UpdatedAt),
+		ID:             v.ID,
+		TenantID:       v.TenantID,
+		AccountID:      v.AccountID,
+		EmployeeID:     v.EmployeeID,
+		EmployeeNo:     v.EmployeeNo,
+		Email:          v.Email,
+		DisplayName:    v.DisplayName,
+		Enabled:        v.Enabled,
+		SendInvite:     v.SendInvite,
+		Status:         v.Status,
+		RetryCount:     int32(v.RetryCount),
+		LastError:      v.LastError,
+		NextAttemptAt:  timestamptz(v.NextAttemptAt),
+		ClaimExpiresAt: nullableTimestamptz(v.ClaimExpiresAt),
+		CreatedAt:      timestamptz(v.CreatedAt),
+		UpdatedAt:      timestamptz(v.UpdatedAt),
 	})
 	return err
+}
+
+// ClaimIdentityProvisioningOutboxEvents atomically leases due events to one worker.
+func (s *Store) ClaimIdentityProvisioningOutboxEvents(execCtx context.Context, tenantID string, batchSize, maxRetries int, claimedAt, leaseUntil time.Time) ([]domain.IdentityProvisioningOutboxEvent, error) {
+	items, err := s.q.ClaimIdentityProvisioningOutboxEvents(tenantContext(execCtx, tenantID), sqlc.ClaimIdentityProvisioningOutboxEventsParams{
+		TenantID: tenantID, MaxRetries: int32(maxRetries), ClaimedAt: timestamptz(claimedAt), BatchSize: int32(batchSize), LeaseUntil: timestamptz(leaseUntil),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromIdentityProvisioningOutboxEvent), nil
 }
 
 // ListPendingIdentityProvisioningOutboxEvents 從儲存層列出 pending 身分開通 outbox 事件。
@@ -224,12 +242,14 @@ func (s *Store) ListPendingIdentityProvisioningOutboxEvents(execCtx context.Cont
 // UpdateIdentityProvisioningOutboxEvent 從儲存層更新身分開通 outbox 事件。
 func (s *Store) UpdateIdentityProvisioningOutboxEvent(execCtx context.Context, v domain.IdentityProvisioningOutboxEvent) error {
 	_, err := s.q.UpdateIdentityProvisioningOutboxEvent(tenantContext(execCtx, v.TenantID), sqlc.UpdateIdentityProvisioningOutboxEventParams{
-		TenantID:   v.TenantID,
-		ID:         v.ID,
-		Status:     v.Status,
-		RetryCount: int32(v.RetryCount),
-		LastError:  v.LastError,
-		UpdatedAt:  timestamptz(v.UpdatedAt),
+		TenantID:       v.TenantID,
+		ID:             v.ID,
+		Status:         v.Status,
+		RetryCount:     int32(v.RetryCount),
+		LastError:      v.LastError,
+		NextAttemptAt:  timestamptz(v.NextAttemptAt),
+		ClaimExpiresAt: nullableTimestamptz(v.ClaimExpiresAt),
+		UpdatedAt:      timestamptz(v.UpdatedAt),
 	})
 	return err
 }
@@ -345,6 +365,20 @@ func (s *Store) DeleteGroupMembership(execCtx context.Context, tenantID, userGro
 		TenantID:    tenantID,
 		UserGroupID: userGroupID,
 		AccountID:   accountID,
+	})
+	if isNotFound(err) {
+		return domain.GroupMembership{}, false, nil
+	}
+	if err != nil {
+		return domain.GroupMembership{}, false, err
+	}
+	return fromGroupMembership(v), true, nil
+}
+
+// CloseGroupMembership ends the active membership interval without deleting history.
+func (s *Store) CloseGroupMembership(execCtx context.Context, tenantID, userGroupID, accountID string, validUntil time.Time) (domain.GroupMembership, bool, error) {
+	v, err := s.q.CloseGroupMembership(tenantContext(execCtx, tenantID), sqlc.CloseGroupMembershipParams{
+		TenantID: tenantID, UserGroupID: userGroupID, AccountID: accountID, ValidUntil: timestamptz(validUntil),
 	})
 	if isNotFound(err) {
 		return domain.GroupMembership{}, false, nil
@@ -1508,20 +1542,41 @@ func (s *Store) GetAttendancePolicy(execCtx context.Context, tenantID string) (d
 
 // UpsertLeaveBalance 從儲存層處理 upsert 請假 balance。
 func (s *Store) UpsertLeaveBalance(execCtx context.Context, v domain.LeaveBalance) error {
+	v.LeaveType = strings.ToLower(strings.TrimSpace(v.LeaveType))
 	source := strings.TrimSpace(v.Source)
 	if source == "" {
 		source = "legacy"
 	}
-	_, err := s.q.UpsertLeaveBalance(execCtx, sqlc.UpsertLeaveBalanceParams{
+	remainingHours, err := numericFromFloat64(v.RemainingHours)
+	if err != nil {
+		return err
+	}
+	grantedHours, err := numericFromFloat64(v.GrantedHours)
+	if err != nil {
+		return err
+	}
+	usedHours, err := numericFromFloat64(v.UsedHours)
+	if err != nil {
+		return err
+	}
+	periodStart, err := nullableDate(v.PeriodStart)
+	if err != nil {
+		return err
+	}
+	periodEnd, err := nullableDate(v.PeriodEnd)
+	if err != nil {
+		return err
+	}
+	_, err = s.q.UpsertLeaveBalance(execCtx, sqlc.UpsertLeaveBalanceParams{
 		ID:             v.ID,
 		TenantID:       v.TenantID,
 		EmployeeID:     v.EmployeeID,
 		LeaveType:      v.LeaveType,
-		RemainingHours: v.RemainingHours,
-		PeriodStart:    v.PeriodStart,
-		PeriodEnd:      v.PeriodEnd,
-		GrantedHours:   v.GrantedHours,
-		UsedHours:      v.UsedHours,
+		RemainingHours: remainingHours,
+		PeriodStart:    periodStart,
+		PeriodEnd:      periodEnd,
+		GrantedHours:   grantedHours,
+		UsedHours:      usedHours,
 		Source:         source,
 		PolicyVersion:  int32(v.PolicyVersion),
 		ProrateRatio:   float8Ptr(v.ProrateRatio),
@@ -1552,13 +1607,18 @@ func (s *Store) ListLeaveBalances(execCtx context.Context, tenantID string) ([]d
 }
 
 // ReserveLeaveBalance 從儲存層保留請假 balance。
-func (s *Store) ReserveLeaveBalance(execCtx context.Context, tenantID, employeeID, leaveType string, hours float64, updatedAt time.Time) (domain.LeaveBalance, bool, bool, error) {
+func (s *Store) ReserveLeaveBalance(execCtx context.Context, tenantID, employeeID, leaveType string, hours float64, asOf, updatedAt time.Time) (domain.LeaveBalance, bool, bool, error) {
 	leaveType = strings.TrimSpace(leaveType)
+	numericHours, err := numericFromFloat64(hours)
+	if err != nil {
+		return domain.LeaveBalance{}, false, false, err
+	}
 	v, err := s.q.ReserveLeaveBalance(tenantContext(execCtx, tenantID), sqlc.ReserveLeaveBalanceParams{
 		TenantID:   tenantID,
 		EmployeeID: employeeID,
 		LeaveType:  leaveType,
-		Hours:      hours,
+		Hours:      numericHours,
+		AsOf:       pgtype.Date{Time: asOf, Valid: true},
 		UpdatedAt:  timestamptz(updatedAt),
 	})
 	if err == nil {
@@ -1572,21 +1632,50 @@ func (s *Store) ReserveLeaveBalance(execCtx context.Context, tenantID, employeeI
 		return domain.LeaveBalance{}, false, false, listErr
 	}
 	for _, item := range items {
-		if item.EmployeeID == employeeID && strings.EqualFold(item.LeaveType, strings.TrimSpace(leaveType)) {
-			return fromLeaveBalance(item), false, true, nil
+		balance := fromLeaveBalance(item)
+		if balance.EmployeeID == employeeID && strings.EqualFold(balance.LeaveType, strings.TrimSpace(leaveType)) && leaveBalanceIncludesDate(balance, asOf) {
+			return balance, false, true, nil
 		}
 	}
 	return domain.LeaveBalance{}, false, false, nil
 }
 
+// leaveBalanceIncludesDate checks whether a balance period covers the requested date.
+func leaveBalanceIncludesDate(balance domain.LeaveBalance, at time.Time) bool {
+	date := at.Format("2006-01-02")
+	return (balance.PeriodStart == "" || balance.PeriodStart <= date) && (balance.PeriodEnd == "" || balance.PeriodEnd >= date)
+}
+
+// ReleaseLeaveBalanceByID restores the exact balance projection reserved by a request.
+func (s *Store) ReleaseLeaveBalanceByID(execCtx context.Context, tenantID, balanceID string, hours float64, updatedAt time.Time) (domain.LeaveBalance, bool, error) {
+	numericHours, err := numericFromFloat64(hours)
+	if err != nil {
+		return domain.LeaveBalance{}, false, err
+	}
+	v, err := s.q.ReleaseLeaveBalanceByID(tenantContext(execCtx, tenantID), sqlc.ReleaseLeaveBalanceByIDParams{
+		TenantID: tenantID, BalanceID: balanceID, Hours: numericHours, UpdatedAt: timestamptz(updatedAt),
+	})
+	if isNotFound(err) {
+		return domain.LeaveBalance{}, false, nil
+	}
+	if err != nil {
+		return domain.LeaveBalance{}, false, err
+	}
+	return fromLeaveBalance(v), true, nil
+}
+
 // ReleaseLeaveBalance 從儲存層釋放請假 balance。
 func (s *Store) ReleaseLeaveBalance(execCtx context.Context, tenantID, employeeID, leaveType string, hours float64, updatedAt time.Time) (domain.LeaveBalance, bool, error) {
 	leaveType = strings.TrimSpace(leaveType)
+	numericHours, err := numericFromFloat64(hours)
+	if err != nil {
+		return domain.LeaveBalance{}, false, err
+	}
 	v, err := s.q.ReleaseLeaveBalance(tenantContext(execCtx, tenantID), sqlc.ReleaseLeaveBalanceParams{
 		TenantID:   tenantID,
 		EmployeeID: employeeID,
 		LeaveType:  leaveType,
-		Hours:      hours,
+		Hours:      numericHours,
 		UpdatedAt:  timestamptz(updatedAt),
 	})
 	if isNotFound(err) {
@@ -1611,6 +1700,7 @@ func (s *Store) UpsertLeaveRequest(execCtx context.Context, v domain.LeaveReques
 		Reason:         v.Reason,
 		Status:         v.Status,
 		FormInstanceID: v.FormInstanceID,
+		LeaveBalanceID: nullableText(v.LeaveBalanceID),
 		CreatedAt:      timestamptz(v.CreatedAt),
 	})
 	return err
@@ -1771,6 +1861,9 @@ func (s *Store) ListAttendanceShifts(execCtx context.Context, tenantID string) (
 // UpsertAttendanceShiftAssignment 儲存員工班別指派。
 func (s *Store) UpsertAttendanceShiftAssignment(execCtx context.Context, v domain.AttendanceShiftAssignment) error {
 	_, err := s.q.UpsertAttendanceShiftAssignment(execCtx, sqlc.UpsertAttendanceShiftAssignmentParams{ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, ShiftID: v.ShiftID, WorksiteID: v.WorksiteID, EffectiveFrom: timestamptz(v.EffectiveFrom), EffectiveTo: nullableTimestamptz(v.EffectiveTo), Status: v.Status, CreatedAt: timestamptz(v.CreatedAt), UpdatedAt: timestamptz(v.UpdatedAt)})
+	if isExclusionConstraint(err, "attendance_shift_assignments_active_no_overlap") {
+		return domain.Conflict("active shift assignment overlaps existing assignment")
+	}
 	return err
 }
 
@@ -2131,7 +2224,7 @@ func (s *Store) GetFormDefinitionDraft(execCtx context.Context, tenantID, id str
 	return fromFormDefinitionDraft(v), true, nil
 }
 
-// GetFormDefinitionDraftByAgentCall 以 Agent run 与 tool call 保证重试幂等。
+// GetFormDefinitionDraftByAgentCall 以 Agent run 與 tool call 保證重試冪等。
 func (s *Store) GetFormDefinitionDraftByAgentCall(execCtx context.Context, tenantID, agentRunID, toolCallID string) (domain.FormDefinitionDraft, bool, error) {
 	v, err := s.q.GetFormDefinitionDraftByAgentCall(tenantContext(execCtx, tenantID), sqlc.GetFormDefinitionDraftByAgentCallParams{TenantID: tenantID, AgentRunID: agentRunID, ToolCallID: toolCallID})
 	if isNotFound(err) {
@@ -2143,7 +2236,7 @@ func (s *Store) GetFormDefinitionDraftByAgentCall(execCtx context.Context, tenan
 	return fromFormDefinitionDraft(v), true, nil
 }
 
-// ListFormDefinitionDrafts 列出指定拥有者与状态的草稿。
+// ListFormDefinitionDrafts 列出指定擁有者與狀態的草稿。
 func (s *Store) ListFormDefinitionDrafts(execCtx context.Context, tenantID, ownerAccountID, status string) ([]domain.FormDefinitionDraft, error) {
 	items, err := s.q.ListFormDefinitionDrafts(tenantContext(execCtx, tenantID), sqlc.ListFormDefinitionDraftsParams{TenantID: tenantID, OwnerAccountID: ownerAccountID, Status: status})
 	if err != nil {
@@ -2474,7 +2567,7 @@ func (s *Store) UpsertAgentRun(execCtx context.Context, v domain.AgentRun) error
 		TenantID:  v.TenantID,
 		AccountID: v.AccountID,
 		AgentID:   nullableText(v.AgentID),
-		SessionID: v.SessionID,
+		SessionID: nullableText(v.SessionID),
 		Mode:      v.Mode,
 		Prompt:    v.Prompt,
 		Answer:    v.Answer,
@@ -2553,7 +2646,8 @@ func (s *Store) UpsertAgentModel(execCtx context.Context, v domain.AgentModel) e
 		ModelName:        v.ModelName,
 		LitellmModel:     v.LiteLLMModel,
 		ApiBaseUrl:       v.APIBaseURL,
-		ApiKey:           v.APIKey,
+		ApiKeyCiphertext: v.APIKeyCiphertext,
+		ApiKeyPreview:    v.APIKeyPreview,
 		RateLimitRpm:     int32(v.RateLimitRPM),
 		Status:           string(v.Status),
 		TimeoutSeconds:   int32(v.TimeoutSeconds),
@@ -2707,6 +2801,8 @@ func (s *Store) UpsertAgentDefinition(execCtx context.Context, v domain.AgentDef
 		MainAgentRole:      v.MainAgentRole,
 		SubAgents:          mustJSON(v.SubAgents),
 		SystemPrompt:       v.SystemPrompt,
+		WelcomeMessage:     v.WelcomeMessage,
+		SuggestedQuestions: mustJSON(v.SuggestedQuestions),
 		Tools:              mustJSON(v.Tools),
 		KnowledgeBaseIds:   mustJSON(v.KnowledgeBaseIDs),
 		Status:             string(v.Status),
@@ -2800,6 +2896,8 @@ func (s *Store) InsertAgentDefinitionVersion(execCtx context.Context, v domain.A
 		MainAgentRole:      v.MainAgentRole,
 		SubAgents:          mustJSON(v.SubAgents),
 		SystemPrompt:       v.SystemPrompt,
+		WelcomeMessage:     v.WelcomeMessage,
+		SuggestedQuestions: mustJSON(v.SuggestedQuestions),
 		Tools:              mustJSON(v.Tools),
 		KnowledgeBaseIds:   mustJSON(v.KnowledgeBaseIDs),
 		ModelID:            v.ModelID,
@@ -2829,32 +2927,6 @@ func (s *Store) GetAgentDefinitionVersion(execCtx context.Context, tenantID, age
 		return domain.AgentDefinitionVersion{}, false, err
 	}
 	return fromAgentDefinitionVersion(v), true, nil
-}
-
-// InsertAgentAudit 從儲存層新增 agent audit。
-func (s *Store) InsertAgentAudit(execCtx context.Context, v domain.AgentAudit) error {
-	_, err := s.q.InsertAgentAudit(tenantContext(execCtx, v.TenantID), sqlc.InsertAgentAuditParams{
-		ID:               v.ID,
-		TenantID:         v.TenantID,
-		EntityType:       v.EntityType,
-		EntityID:         v.EntityID,
-		EntityName:       v.EntityName,
-		Action:           v.Action,
-		ActorAccountID:   nullableText(v.ActorAccountID),
-		ActorDisplayName: v.ActorDisplayName,
-		Detail:           v.Detail,
-		CreatedAt:        timestamptz(v.CreatedAt),
-	})
-	return err
-}
-
-// ListAgentAudits 從儲存層列出 agent audit。
-func (s *Store) ListAgentAudits(execCtx context.Context, tenantID string) ([]domain.AgentAudit, error) {
-	items, err := s.q.ListAgentAudits(tenantContext(execCtx, tenantID), tenantID)
-	if err != nil {
-		return nil, err
-	}
-	return mapSlice(items, fromAgentAudit), nil
 }
 
 // UpsertNotification 從儲存層處理 upsert 系統通知。
@@ -2917,7 +2989,7 @@ func (s *Store) CountUnreadNotifications(execCtx context.Context, tenantID, acco
 	return int(count), nil
 }
 
-// CountNotificationTones 從儲存層統計目前帳號可見通知的 tone 分布。
+// CountNotificationTones 從儲存層統計目前帳號可見通知的 tone 分佈。
 func (s *Store) CountNotificationTones(execCtx context.Context, tenantID, accountID string) (domain.NotificationToneCounts, error) {
 	counts, err := s.q.CountNotificationTones(tenantContext(execCtx, tenantID), sqlc.CountNotificationTonesParams{TenantID: tenantID, AccountID: accountID})
 	if err != nil {
@@ -3200,6 +3272,12 @@ func isUniqueConstraint(err error, constraint string) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == constraint
 }
 
+// isExclusionConstraint identifies a specific PostgreSQL exclusion violation.
+func isExclusionConstraint(err error, constraint string) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "23P01" && pgErr.ConstraintName == constraint
+}
+
 // timestamptz 處理 timestamptz。
 func timestamptz(t time.Time) pgtype.Timestamptz {
 	if t.IsZero() {
@@ -3354,6 +3432,37 @@ func numericTextFrom(v pgtype.Numeric) string {
 	return string(raw)
 }
 
+// numericFromFloat64 converts API float input into the fixed two-decimal database representation.
+func numericFromFloat64(value float64) (pgtype.Numeric, error) {
+	if math.IsNaN(value) || math.IsInf(value, 0) {
+		return pgtype.Numeric{}, fmt.Errorf("numeric value must be finite")
+	}
+	var out pgtype.Numeric
+	if err := out.Scan(strconv.FormatFloat(value, 'f', 2, 64)); err != nil {
+		return pgtype.Numeric{}, err
+	}
+	return out, nil
+}
+
+// float64FromNumeric maps fixed-precision storage back to the existing API contract.
+func float64FromNumeric(value pgtype.Numeric) float64 {
+	parsed, _ := strconv.ParseFloat(numericTextFrom(value), 64)
+	return parsed
+}
+
+// nullableDate parses the canonical YYYY-MM-DD policy period representation.
+func nullableDate(value string) (pgtype.Date, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return pgtype.Date{}, nil
+	}
+	parsed, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return pgtype.Date{}, fmt.Errorf("date must use YYYY-MM-DD: %w", err)
+	}
+	return pgtype.Date{Time: parsed, Valid: true}, nil
+}
+
 // dateTextFrom 轉換 nullable date。
 func dateTextFrom(v pgtype.Date) string {
 	if !v.Valid {
@@ -3392,7 +3501,7 @@ func jsonStrings(b []byte) []string {
 	return out
 }
 
-// jsonAgentTeamMembers 将数据库中的 Team 成员快照还原为领域结构。
+// jsonAgentTeamMembers 將數據庫中的 Team 成員快照還原為領域結構。
 func jsonAgentTeamMembers(b []byte) []domain.AgentTeamMember {
 	if len(b) == 0 {
 		return nil
@@ -3942,11 +4051,11 @@ func fromLeaveBalance(v sqlc.LeaveBalance) domain.LeaveBalance {
 		TenantID:       v.TenantID,
 		EmployeeID:     v.EmployeeID,
 		LeaveType:      v.LeaveType,
-		RemainingHours: v.RemainingHours,
-		PeriodStart:    v.PeriodStart,
-		PeriodEnd:      v.PeriodEnd,
-		GrantedHours:   v.GrantedHours,
-		UsedHours:      v.UsedHours,
+		RemainingHours: float64FromNumeric(v.RemainingHours),
+		PeriodStart:    dateTextFrom(v.PeriodStart),
+		PeriodEnd:      dateTextFrom(v.PeriodEnd),
+		GrantedHours:   float64FromNumeric(v.GrantedHours),
+		UsedHours:      float64FromNumeric(v.UsedHours),
 		Source:         v.Source,
 		PolicyVersion:  int(v.PolicyVersion),
 		ProrateRatio:   float64PtrFrom(v.ProrateRatio),
@@ -3967,6 +4076,7 @@ func fromLeaveRequest(v sqlc.LeaveRequest) domain.LeaveRequest {
 		Reason:         v.Reason,
 		Status:         v.Status,
 		FormInstanceID: v.FormInstanceID,
+		LeaveBalanceID: textFrom(v.LeaveBalanceID),
 		CreatedAt:      timeFrom(v.CreatedAt),
 	}
 }
@@ -4242,7 +4352,7 @@ func fromAgentRun(v sqlc.AgentRun) domain.AgentRun {
 		TenantID:   v.TenantID,
 		AccountID:  v.AccountID,
 		AgentID:    textFrom(v.AgentID),
-		SessionID:  v.SessionID,
+		SessionID:  textFrom(v.SessionID),
 		Mode:       v.Mode,
 		Prompt:     v.Prompt,
 		Answer:     v.Answer,
@@ -4263,9 +4373,9 @@ func fromAgentModel(v sqlc.AgentModel) domain.AgentModel {
 		ModelName:        v.ModelName,
 		LiteLLMModel:     v.LitellmModel,
 		APIBaseURL:       v.ApiBaseUrl,
-		APIKey:           v.ApiKey,
-		APIKeySet:        strings.TrimSpace(v.ApiKey) != "",
-		APIKeyPreview:    maskStoredSecret(v.ApiKey),
+		APIKeyCiphertext: v.ApiKeyCiphertext,
+		APIKeySet:        strings.TrimSpace(v.ApiKeyCiphertext) != "",
+		APIKeyPreview:    v.ApiKeyPreview,
 		RateLimitRPM:     int(v.RateLimitRpm),
 		Status:           domain.AgentModelStatus(v.Status),
 		TimeoutSeconds:   int(v.TimeoutSeconds),
@@ -4317,24 +4427,26 @@ func maskStoredSecret(value string) string {
 // fromAgentDefinition 轉換 agent 定義。
 func fromAgentDefinition(v sqlc.AgentDefinition) domain.AgentDefinition {
 	return domain.AgentDefinition{
-		ID:                v.ID,
-		TenantID:          v.TenantID,
-		Name:              v.Name,
-		Description:       v.Description,
-		Emoji:             v.Emoji,
-		Category:          domain.AgentCategory(v.Category),
-		ModelID:           v.ModelID,
-		MainAgentRole:     v.MainAgentRole,
-		SubAgents:         jsonAgentTeamMembers(v.SubAgents),
-		SystemPrompt:      v.SystemPrompt,
-		Tools:             jsonStrings(v.Tools),
-		KnowledgeBaseIDs:  jsonStrings(v.KnowledgeBaseIds),
-		Status:            domain.AgentDefinitionStatus(v.Status),
-		Visibility:        domain.AgentVisibility(v.Visibility),
-		VisibilityTargets: jsonStrings(v.VisibilityTargets),
-		TimeoutSeconds:    int(v.TimeoutSeconds),
-		Version:           int(v.Version),
-		PublishedVersion:  int(v.PublishedVersion),
+		ID:                 v.ID,
+		TenantID:           v.TenantID,
+		Name:               v.Name,
+		Description:        v.Description,
+		Emoji:              v.Emoji,
+		Category:           domain.AgentCategory(v.Category),
+		ModelID:            v.ModelID,
+		MainAgentRole:      v.MainAgentRole,
+		SubAgents:          jsonAgentTeamMembers(v.SubAgents),
+		SystemPrompt:       v.SystemPrompt,
+		WelcomeMessage:     v.WelcomeMessage,
+		SuggestedQuestions: jsonStrings(v.SuggestedQuestions),
+		Tools:              jsonStrings(v.Tools),
+		KnowledgeBaseIDs:   jsonStrings(v.KnowledgeBaseIds),
+		Status:             domain.AgentDefinitionStatus(v.Status),
+		Visibility:         domain.AgentVisibility(v.Visibility),
+		VisibilityTargets:  jsonStrings(v.VisibilityTargets),
+		TimeoutSeconds:     int(v.TimeoutSeconds),
+		Version:            int(v.Version),
+		PublishedVersion:   int(v.PublishedVersion),
 		Usage: domain.AgentUsageStats{
 			TotalRuns:    v.UsageTotalRuns,
 			SuccessRuns:  v.UsageSuccessRuns,
@@ -4360,28 +4472,14 @@ func fromAgentDefinitionVersion(v sqlc.AgentDefinitionVersion) domain.AgentDefin
 		MainAgentRole:      v.MainAgentRole,
 		SubAgents:          jsonAgentTeamMembers(v.SubAgents),
 		SystemPrompt:       v.SystemPrompt,
+		WelcomeMessage:     v.WelcomeMessage,
+		SuggestedQuestions: jsonStrings(v.SuggestedQuestions),
 		Tools:              jsonStrings(v.Tools),
 		KnowledgeBaseIDs:   jsonStrings(v.KnowledgeBaseIds),
 		ModelID:            v.ModelID,
 		Note:               v.Note,
 		CreatedByAccountID: textFrom(v.CreatedByAccountID),
 		CreatedAt:          timeFrom(v.CreatedAt),
-	}
-}
-
-// fromAgentAudit 轉換 agent audit。
-func fromAgentAudit(v sqlc.AgentAudit) domain.AgentAudit {
-	return domain.AgentAudit{
-		ID:               v.ID,
-		TenantID:         v.TenantID,
-		EntityType:       v.EntityType,
-		EntityID:         v.EntityID,
-		EntityName:       v.EntityName,
-		Action:           v.Action,
-		ActorAccountID:   textFrom(v.ActorAccountID),
-		ActorDisplayName: v.ActorDisplayName,
-		Detail:           v.Detail,
-		CreatedAt:        timeFrom(v.CreatedAt),
 	}
 }
 
@@ -4430,20 +4528,22 @@ func fromAuditLog(v sqlc.AuditLog) domain.AuditLog {
 // fromIdentityProvisioningOutboxEvent 轉換身分開通 outbox 事件。
 func fromIdentityProvisioningOutboxEvent(v sqlc.IdentityProvisioningOutbox) domain.IdentityProvisioningOutboxEvent {
 	return domain.IdentityProvisioningOutboxEvent{
-		ID:          v.ID,
-		TenantID:    v.TenantID,
-		AccountID:   v.AccountID,
-		EmployeeID:  v.EmployeeID,
-		EmployeeNo:  v.EmployeeNo,
-		Email:       v.Email,
-		DisplayName: v.DisplayName,
-		Enabled:     v.Enabled,
-		SendInvite:  v.SendInvite,
-		Status:      v.Status,
-		RetryCount:  int(v.RetryCount),
-		LastError:   v.LastError,
-		CreatedAt:   timeFrom(v.CreatedAt),
-		UpdatedAt:   timeFrom(v.UpdatedAt),
+		ID:             v.ID,
+		TenantID:       v.TenantID,
+		AccountID:      v.AccountID,
+		EmployeeID:     v.EmployeeID,
+		EmployeeNo:     v.EmployeeNo,
+		Email:          v.Email,
+		DisplayName:    v.DisplayName,
+		Enabled:        v.Enabled,
+		SendInvite:     v.SendInvite,
+		Status:         v.Status,
+		RetryCount:     int(v.RetryCount),
+		LastError:      v.LastError,
+		NextAttemptAt:  timeFrom(v.NextAttemptAt),
+		ClaimExpiresAt: timePtrFrom(v.ClaimExpiresAt),
+		CreatedAt:      timeFrom(v.CreatedAt),
+		UpdatedAt:      timeFrom(v.UpdatedAt),
 	}
 }
 

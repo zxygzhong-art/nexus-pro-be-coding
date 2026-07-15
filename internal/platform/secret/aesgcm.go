@@ -22,10 +22,10 @@ type AESGCMCipher struct {
 func NewAESGCMCipher(encodedKey string) (*AESGCMCipher, error) {
 	key, err := base64.StdEncoding.DecodeString(strings.TrimSpace(encodedKey))
 	if err != nil {
-		return nil, fmt.Errorf("AGENT_TOOL_CREDENTIAL_ENCRYPTION_KEY must be standard base64: %w", err)
+		return nil, fmt.Errorf("ENCRYPTION_KEY must be standard base64: %w", err)
 	}
 	if len(key) != 32 {
-		return nil, fmt.Errorf("AGENT_TOOL_CREDENTIAL_ENCRYPTION_KEY must decode to 32 bytes, got %d", len(key))
+		return nil, fmt.Errorf("ENCRYPTION_KEY must decode to 32 bytes, got %d", len(key))
 	}
 	block, err := aes.NewCipher(key)
 	if err != nil {

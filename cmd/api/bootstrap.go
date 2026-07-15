@@ -35,6 +35,9 @@ import (
 	temporalclient "go.temporal.io/sdk/client"
 )
 
+// apiWriteTimeout covers the UI-supported 300-second model timeout plus stream teardown.
+const apiWriteTimeout = 6 * time.Minute
+
 type apiRuntime struct {
 	server                     *http.Server
 	metricsServer              *http.Server
@@ -205,14 +208,15 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 			cfg.TemporalTaskQueue,
 		),
 	}
-	if strings.TrimSpace(cfg.AgentToolCredentialEncryptionKey) != "" {
-		credentialCipher, err := platformsecret.NewAESGCMCipher(cfg.AgentToolCredentialEncryptionKey)
+	var credentialCipher service.CredentialCipher
+	if strings.TrimSpace(cfg.EncryptionKey) != "" {
+		credentialCipher, err = platformsecret.NewAESGCMCipher(cfg.EncryptionKey)
 		if err != nil {
-			logStartupFailure(logger, "agent_tool_credentials", err)
+			logStartupFailure(logger, "credential_encryption", err)
 			shutdownStartedModules(shutdowns, logger)
 			return nil, err
 		}
-		serviceOptions.AgentToolCredentials = credentialCipher
+		serviceOptions.CredentialCipher = credentialCipher
 	}
 	var liteLLMAdmin service.LiteLLMAdminClient
 	if strings.TrimSpace(cfg.LiteLLMBaseURL) != "" && (strings.TrimSpace(cfg.LiteLLMAPIKey) != "" || strings.TrimSpace(cfg.LiteLLMMasterKey) != "") {
@@ -282,7 +286,7 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	serviceOptions.EHRMSClient = ehrmsClient
 
 	app := service.New(store, serviceOptions)
-	liteLLMModelSyncer := jobs.NewLiteLLMModelSyncer(store, liteLLMAdmin, logger)
+	liteLLMModelSyncer := jobs.NewLiteLLMModelSyncer(store, liteLLMAdmin, logger).WithCredentialCipher(credentialCipher)
 	if err := app.SyncPermissionCatalogForAllTenants(ctx); err != nil {
 		logStartupFailure(logger, "permission_catalog_sync", err)
 		shutdownStartedModules(shutdowns, logger)
@@ -307,7 +311,7 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	}})
 	ehrmsPipelineScheduler, ehrmsPipelineOptions, ehrmsPipelineDependency := configuredEHRMSPipelineScheduler(cfg, app.HR(), app.Attendance(), ehrmsClient != nil, logger)
 	if ehrmsPipelineScheduler != nil {
-		ehrmsPipelineScheduler.WithRunStore(store)
+		ehrmsPipelineScheduler.WithSyncLocker(store)
 	}
 	report.Dependencies = append(report.Dependencies, ehrmsPipelineDependency)
 	var ehrmsAttendanceScheduler *jobs.EHRMSAttendanceSyncScheduler
@@ -360,7 +364,7 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		Handler:           apiInstance.Routes(),
 		ReadTimeout:       15 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      apiWriteTimeout,
 		IdleTimeout:       60 * time.Second,
 	}
 
@@ -858,7 +862,6 @@ func configuredEHRMSPipelineScheduler(cfg config.Config, employees jobs.EHRMSEmp
 		AttendanceSince:      cfg.EHRMSAttendanceSyncSince,
 		AttendanceTenant:     cfg.EHRMSAttendanceSyncTenantID,
 		AttendanceAccount:    cfg.EHRMSAttendanceSyncAccountID,
-		TriggerType:          "scheduled",
 		RetryAttempts:        4,
 		RetryBaseDelay:       time.Minute,
 	}

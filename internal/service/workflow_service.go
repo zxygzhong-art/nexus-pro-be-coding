@@ -82,10 +82,12 @@ func (c WorkflowService) CreateFormTemplate(ctx RequestContext, input CreateForm
 		CreatedAt:      now,
 		UpdatedAt:      now,
 	}
-	if err := c.store.UpsertFormTemplate(goContext(ctx), tpl); err != nil {
-		return FormTemplate{}, err
-	}
-	if err := c.audit(ctx, "workflow.form_template.create", "form_template", tpl.ID, "medium", map[string]any{"key": tpl.Key}); err != nil {
+	if err := c.withTransaction(ctx, func(tx WorkflowService) error {
+		if err := tx.store.UpsertFormTemplate(goContext(ctx), tpl); err != nil {
+			return err
+		}
+		return tx.audit(ctx, "workflow.form_template.create", "form_template", tpl.ID, "medium", map[string]any{"key": tpl.Key})
+	}); err != nil {
 		return FormTemplate{}, err
 	}
 	c.logInfo(ctx, "form template created",
@@ -207,13 +209,15 @@ func (c WorkflowService) SaveFormDraft(ctx RequestContext, input SaveFormDraftIn
 		SubmittedAt:        now,
 		UpdatedAt:          now,
 	}
-	if err := c.store.UpsertFormInstance(goContext(ctx), instance); err != nil {
-		return FormInstance{}, err
-	}
-	if err := c.replaceFormInstanceFieldProjection(ctx, template, instance); err != nil {
-		return FormInstance{}, err
-	}
-	if err := c.audit(ctx, "workflow.form.draft.create", "form_instance", instance.ID, "low", map[string]any{"template_key": template.Key}); err != nil {
+	if err := c.withTransaction(ctx, func(tx WorkflowService) error {
+		if err := tx.store.UpsertFormInstance(goContext(ctx), instance); err != nil {
+			return err
+		}
+		if err := tx.replaceFormInstanceFieldProjection(ctx, template, instance); err != nil {
+			return err
+		}
+		return tx.audit(ctx, "workflow.form.draft.create", "form_instance", instance.ID, "low", map[string]any{"template_key": template.Key})
+	}); err != nil {
 		return FormInstance{}, err
 	}
 	c.logInfo(ctx, "form draft saved",
@@ -384,6 +388,7 @@ func (c WorkflowService) submitNewForm(ctx RequestContext, templateKey string, p
 	}
 	var instance FormInstance
 	var template FormTemplate
+	var linkedLeaveRequest LeaveRequest
 	if err := c.withTransaction(ctx, func(tx WorkflowService) error {
 		nextTemplate, ok, err := tx.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, templateKey)
 		if err != nil {
@@ -428,6 +433,21 @@ func (c WorkflowService) submitNewForm(ctx RequestContext, templateKey string, p
 		}
 		instance = started
 		template = nextTemplate
+		linked, err := tx.Service.Attendance().createLeaveRequestFromSubmittedForm(ctx, instance, template.Key, instance.Payload)
+		if err != nil {
+			return err
+		}
+		linkedLeaveRequest = linked
+		if linked.ID != "" {
+			updated, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, instance.ID)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return NotFound("form instance", instance.ID)
+			}
+			instance = updated
+		}
 		if err := tx.audit(ctx, "workflow.form.submit", "form_instance", instance.ID, "medium", map[string]any{"template_key": nextTemplate.Key}); err != nil {
 			return err
 		}
@@ -435,8 +455,14 @@ func (c WorkflowService) submitNewForm(ctx RequestContext, templateKey string, p
 	}); err != nil {
 		return FormInstance{}, err
 	}
-	if _, err := c.Service.Attendance().createLeaveRequestFromSubmittedForm(ctx, instance, template.Key, instance.Payload); err != nil {
-		return FormInstance{}, err
+	if linkedLeaveRequest.ID != "" {
+		c.logInfo(ctx, "leave request linked from form submit",
+			"leave_request_id", linkedLeaveRequest.ID,
+			"form_instance_id", instance.ID,
+			"template_key", template.Key,
+			"leave_type", linkedLeaveRequest.LeaveType,
+			"hours", linkedLeaveRequest.Hours,
+		)
 	}
 	c.logInfo(ctx, "form submitted",
 		"form_instance_id", instance.ID,
@@ -457,6 +483,8 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 		return FormInstance{}, err
 	}
 	var instance FormInstance
+	var template FormTemplate
+	var linkedLeaveRequest LeaveRequest
 	if err := c.withTransaction(ctx, func(tx WorkflowService) error {
 		next, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, id)
 		if err != nil {
@@ -470,20 +498,23 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 		}
 		status := normalizeWorkflowStatus(next.Status)
 		if status != workflowFormStatusDraft && status != workflowFormStatusReturned {
+			if status == workflowFormStatusInReview || status == workflowFormStatusSubmitted {
+				return Conflict("form instance has already been submitted").WithReasonCode("workflow_form_already_submitted")
+			}
 			return BadRequest("only draft or returned form instances can be submitted by id")
 		}
-		template, ok, err := tx.store.GetFormTemplate(goContext(ctx), ctx.TenantID, next.TemplateID)
+		nextTemplate, ok, err := tx.store.GetFormTemplate(goContext(ctx), ctx.TenantID, next.TemplateID)
 		if err != nil {
 			return err
 		}
 		if !ok {
 			return NotFound("form template", next.TemplateID)
 		}
-		version, err := tx.formTemplateVersionForInstance(ctx, template, next)
+		version, err := tx.formTemplateVersionForInstance(ctx, nextTemplate, next)
 		if err != nil {
 			return err
 		}
-		template = formTemplateAtVersion(template, version)
+		template = formTemplateAtVersion(nextTemplate, version)
 		if err := validateWorkflowTemplateSubmittable(template); err != nil {
 			return err
 		}
@@ -521,16 +552,33 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 			return err
 		}
 		instance = started
+		linked, err := tx.Service.Attendance().createLeaveRequestFromSubmittedForm(ctx, instance, template.Key, instance.Payload)
+		if err != nil {
+			return err
+		}
+		linkedLeaveRequest = linked
+		if linked.ID != "" {
+			updated, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, instance.ID)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return NotFound("form instance", instance.ID)
+			}
+			instance = updated
+		}
 		return nil
 	}); err != nil {
 		return FormInstance{}, err
 	}
-	if template, ok, err := c.store.GetFormTemplate(goContext(ctx), ctx.TenantID, instance.TemplateID); err != nil {
-		return FormInstance{}, err
-	} else if ok {
-		if _, err := c.Service.Attendance().createLeaveRequestFromSubmittedForm(ctx, instance, template.Key, instance.Payload); err != nil {
-			return FormInstance{}, err
-		}
+	if linkedLeaveRequest.ID != "" {
+		c.logInfo(ctx, "leave request linked from form submit",
+			"leave_request_id", linkedLeaveRequest.ID,
+			"form_instance_id", instance.ID,
+			"template_key", template.Key,
+			"leave_type", linkedLeaveRequest.LeaveType,
+			"hours", linkedLeaveRequest.Hours,
+		)
 	}
 	return instance, nil
 }

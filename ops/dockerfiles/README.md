@@ -22,15 +22,15 @@ set +a
 docker build --build-arg POSTGRES_IMAGE="${POSTGRES_IMAGE}" -f dockerfiles/postgres/Dockerfile -t nexus-pro-be/postgres:18.4 .
 docker build --build-arg REDIS_IMAGE="${REDIS_IMAGE}" -f dockerfiles/redis/Dockerfile -t nexus-pro-be/redis:8.8.0 .
 docker build --build-arg GRAFANA_IMAGE="${GRAFANA_IMAGE}" -f dockerfiles/grafana/Dockerfile -t nexus-pro-be/grafana:13.1.0 .
-docker build --build-arg KEYCLOAK_IMAGE="${KEYCLOAK_IMAGE}" -f dockerfiles/keycloak/Dockerfile -t nexus-pro-be/keycloak:26.6.4 .
+docker build --build-arg KEYCLOAK_IMAGE="${KEYCLOAK_IMAGE}" -f dockerfiles/keycloak/Dockerfile -t nexus-pro-be/keycloak:26.7.0 .
 docker build --build-arg OPENFGA_IMAGE="${OPENFGA_IMAGE}" -f dockerfiles/openfga/Dockerfile -t nexus-pro-be/openfga:v1.18.1 .
 docker build --build-arg TEMPORAL_IMAGE="${TEMPORAL_IMAGE}" -f dockerfiles/temporal/Dockerfile -t nexus-pro-be/temporal:1.29.7 .
-docker build --build-arg TEMPORAL_UI_IMAGE="${TEMPORAL_UI_IMAGE}" -f dockerfiles/temporal-ui/Dockerfile -t nexus-pro-be/temporal-ui:2.51.1 .
-docker build --build-arg TEMPORAL_ADMIN_TOOLS_IMAGE="${TEMPORAL_ADMIN_TOOLS_IMAGE}" -f dockerfiles/temporal-admin-tools/Dockerfile -t nexus-pro-be/temporal-admin-tools:1.29.7-tctl-1.18.4-cli-1.7.2 .
+docker build --build-arg TEMPORAL_UI_IMAGE="${TEMPORAL_UI_IMAGE}" -f dockerfiles/temporal-ui/Dockerfile -t nexus-pro-be/temporal-ui:2.52.1 .
+docker build --build-arg TEMPORAL_ADMIN_TOOLS_IMAGE="${TEMPORAL_ADMIN_TOOLS_IMAGE}" -f dockerfiles/temporal-admin-tools/Dockerfile -t nexus-pro-be/temporal-admin-tools:1.31.2 .
 docker build --build-arg NATS_IMAGE="${NATS_IMAGE}" -f dockerfiles/nats/Dockerfile -t nexus-pro-be/nats:2.14.3 .
 docker build --build-arg TEMPO_IMAGE="${TEMPO_IMAGE}" -f dockerfiles/tempo/Dockerfile -t nexus-pro-be/tempo:3.0.2 .
-docker build --build-arg PROMETHEUS_IMAGE="${PROMETHEUS_IMAGE}" -f dockerfiles/prometheus/Dockerfile -t nexus-pro-be/prometheus:v3.13.0 .
-docker build --build-arg SFTPGO_IMAGE="${SFTPGO_IMAGE}" -f dockerfiles/sftpgo/Dockerfile -t nexus-pro-be/sftpgo:v2.6.6 .
+docker build --build-arg PROMETHEUS_IMAGE="${PROMETHEUS_IMAGE}" -f dockerfiles/prometheus/Dockerfile -t nexus-pro-be/prometheus:v3.13.1 .
+docker build --build-arg SFTPGO_IMAGE="${SFTPGO_IMAGE}" -f dockerfiles/sftpgo/Dockerfile -t nexus-pro-be/sftpgo:v2.7.4 .
 ```
 
 建置參數按服務分組放在 [../.env](../.env)。例如 `POSTGRES_IMAGE` 在 PostgreSQL 區塊，`SFTPGO_IMAGE` 在 SFTPGo 區塊。
@@ -71,6 +71,6 @@ docker run -d --name sftpgo --network observability \
   -v sftpgo-data:/srv/sftpgo/data \
   -v sftpgo-home:/var/lib/sftpgo \
   -v "$(pwd)/generated/sftpgo/loaddata.json:/etc/sftpgo/loaddata.json:ro" \
-  nexus-pro-be/sftpgo:v2.6.6 \
+  nexus-pro-be/sftpgo:v2.7.4 \
   sftpgo serve --config-dir /var/lib/sftpgo --loaddata-from /etc/sftpgo/loaddata.json --loaddata-mode 0
 ```

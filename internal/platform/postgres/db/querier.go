@@ -12,8 +12,10 @@ type Querier interface {
 	AppendAuditLog(ctx context.Context, arg AppendAuditLogParams) (AuditLog, error)
 	AppendIdentityProvisioningOutboxEvent(ctx context.Context, arg AppendIdentityProvisioningOutboxEventParams) (IdentityProvisioningOutbox, error)
 	AppendOutboxEvent(ctx context.Context, arg AppendOutboxEventParams) (OutboxEvent, error)
+	ClaimIdentityProvisioningOutboxEvents(ctx context.Context, arg ClaimIdentityProvisioningOutboxEventsParams) ([]IdentityProvisioningOutbox, error)
 	// Atomically claim a batch of dispatchable outbox rows for multi-replica workers.
 	ClaimOutboxEvents(ctx context.Context, arg ClaimOutboxEventsParams) ([]OutboxEvent, error)
+	CloseGroupMembership(ctx context.Context, arg CloseGroupMembershipParams) (AuthzGroupMembership, error)
 	CountActiveAgentRunsBySession(ctx context.Context, arg CountActiveAgentRunsBySessionParams) (int64, error)
 	CountAgentDefinitionsByKnowledgeBase(ctx context.Context, arg CountAgentDefinitionsByKnowledgeBaseParams) (int32, error)
 	CountAgentDefinitionsByModel(ctx context.Context, arg CountAgentDefinitionsByModelParams) (int32, error)
@@ -47,8 +49,6 @@ type Querier interface {
 	DeleteKnowledgeBase(ctx context.Context, arg DeleteKnowledgeBaseParams) (KnowledgeBasis, error)
 	DeleteKnowledgeDocument(ctx context.Context, arg DeleteKnowledgeDocumentParams) (KnowledgeDocument, error)
 	DeleteKnowledgeDocumentChunks(ctx context.Context, arg DeleteKnowledgeDocumentChunksParams) error
-	DeleteMenuItem(ctx context.Context, arg DeleteMenuItemParams) error
-	DeletePermissionCatalogItem(ctx context.Context, arg DeletePermissionCatalogItemParams) error
 	DeletePermissionSet(ctx context.Context, arg DeletePermissionSetParams) (PermissionSet, error)
 	DeletePermissionSetItemsForSet(ctx context.Context, arg DeletePermissionSetItemsForSetParams) error
 	DeletePlatformTaskItem(ctx context.Context, arg DeletePlatformTaskItemParams) error
@@ -119,7 +119,6 @@ type Querier interface {
 	GetWorkflowRun(ctx context.Context, arg GetWorkflowRunParams) (WorkflowRun, error)
 	GetWorkflowStageInstance(ctx context.Context, arg GetWorkflowStageInstanceParams) (WorkflowStageInstance, error)
 	IncrementAuthzPermissionVersion(ctx context.Context, arg IncrementAuthzPermissionVersionParams) (AuthzPermissionVersion, error)
-	InsertAgentAudit(ctx context.Context, arg InsertAgentAuditParams) (AgentAudit, error)
 	InsertAgentDefinitionVersion(ctx context.Context, arg InsertAgentDefinitionVersionParams) (AgentDefinitionVersion, error)
 	InsertAgentExternalTool(ctx context.Context, arg InsertAgentExternalToolParams) (AgentExternalTool, error)
 	InsertAgentMessageAttachment(ctx context.Context, arg InsertAgentMessageAttachmentParams) (AgentMessageAttachment, error)
@@ -132,7 +131,6 @@ type Querier interface {
 	ListAccounts(ctx context.Context, tenantID string) ([]Account, error)
 	ListActiveAuthzAssumableRoleSessionsForRole(ctx context.Context, arg ListActiveAuthzAssumableRoleSessionsForRoleParams) ([]AuthzAssumableRoleSession, error)
 	ListActiveGroupMembershipsForAccount(ctx context.Context, arg ListActiveGroupMembershipsForAccountParams) ([]AuthzGroupMembership, error)
-	ListAgentAudits(ctx context.Context, tenantID string) ([]AgentAudit, error)
 	ListAgentDefinitionVersions(ctx context.Context, arg ListAgentDefinitionVersionsParams) ([]AgentDefinitionVersion, error)
 	ListAgentDefinitions(ctx context.Context, tenantID string) ([]AgentDefinition, error)
 	ListAgentExternalTools(ctx context.Context, tenantID string) ([]AgentExternalTool, error)
@@ -191,7 +189,6 @@ type Querier interface {
 	ListPermissionCatalogItems(ctx context.Context, tenantID string) ([]Permission, error)
 	ListPermissionPackageImports(ctx context.Context, tenantID string) ([]PermissionPackageImport, error)
 	ListPermissionPackages(ctx context.Context) ([]PermissionPackage, error)
-	ListPermissionSetItems(ctx context.Context, tenantID string) ([]PermissionSetItem, error)
 	ListPermissionSetItemsForSet(ctx context.Context, arg ListPermissionSetItemsForSetParams) ([]PermissionSetItem, error)
 	ListPermissionSetTemplates(ctx context.Context, packageID string) ([]PermissionSetTemplate, error)
 	ListPermissionSets(ctx context.Context, tenantID string) ([]PermissionSet, error)
@@ -213,8 +210,8 @@ type Querier interface {
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (MarkNotificationReadRow, error)
 	NextEmployeeNoSequence(ctx context.Context, arg NextEmployeeNoSequenceParams) (int32, error)
 	ReleaseLeaveBalance(ctx context.Context, arg ReleaseLeaveBalanceParams) (LeaveBalance, error)
+	ReleaseLeaveBalanceByID(ctx context.Context, arg ReleaseLeaveBalanceByIDParams) (LeaveBalance, error)
 	ReserveLeaveBalance(ctx context.Context, arg ReserveLeaveBalanceParams) (LeaveBalance, error)
-	RevokeAuthzAssumableRoleSession(ctx context.Context, arg RevokeAuthzAssumableRoleSessionParams) (AuthzAssumableRoleSession, error)
 	SearchKnowledgeDocumentChunks(ctx context.Context, arg SearchKnowledgeDocumentChunksParams) ([]SearchKnowledgeDocumentChunksRow, error)
 	UpdateAgentDefinitionUsage(ctx context.Context, arg UpdateAgentDefinitionUsageParams) (AgentDefinition, error)
 	UpdateAgentModelSyncResult(ctx context.Context, arg UpdateAgentModelSyncResultParams) (AgentModel, error)

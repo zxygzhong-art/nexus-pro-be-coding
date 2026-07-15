@@ -61,6 +61,7 @@ func TestAssumedRoleIntersectsNormalDepartmentSubtreeWithAssignedOrgUnits(t *tes
 		UserGroupIDs:           []string{"grp-hr"},
 		CreatedAt:              now,
 	})
+	seedActiveGroupMembership(t, store, "tenant-1", "grp-hr", "acct-1", now)
 	seedAuthzScopeAssumableRole(store, now, map[string]any{"allow": []string{"hr.employee.read"}})
 
 	svc := service.New(store)
@@ -171,6 +172,8 @@ func TestNormalUserGroupScopesStillUnionWithoutAssumedSession(t *testing.T) {
 		UserGroupIDs: []string{"grp-dept", "grp-tenant"},
 		CreatedAt:    now,
 	})
+	seedActiveGroupMembership(t, store, "tenant-1", "grp-dept", "acct-1", now)
+	seedActiveGroupMembership(t, store, "tenant-1", "grp-tenant", "acct-1", now)
 
 	result, err := service.New(store).Authz().Check(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},

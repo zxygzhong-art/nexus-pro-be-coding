@@ -121,7 +121,7 @@ func (m *LiteLLM) generateStream(ctx context.Context, req *model.LLMRequest) ite
 	}
 }
 
-// params 将 ADK 的系统指令、对话与函数声明完整映射到 OpenAI Chat Completions。
+// params 將 ADK 的系統指令、對話與函數聲明完整映射到 OpenAI Chat Completions。
 func (m *LiteLLM) params(req *model.LLMRequest) (openai.ChatCompletionNewParams, map[string]string, error) {
 	modelName := m.model
 	if req != nil && strings.TrimSpace(req.Model) != "" {
@@ -142,7 +142,7 @@ func (m *LiteLLM) params(req *model.LLMRequest) (openai.ChatCompletionNewParams,
 	}, aliases, nil
 }
 
-// contentsToMessages 保留函数调用 ID 与函数回应，使 ADK 能执行多轮工具循环。
+// contentsToMessages 保留函數調用 ID 與函數回應，使 ADK 能執行多輪工具循環。
 func contentsToMessages(req *model.LLMRequest) ([]openai.ChatCompletionMessageParamUnion, error) {
 	messages := make([]openai.ChatCompletionMessageParamUnion, 0)
 	if req != nil && req.Config != nil && req.Config.SystemInstruction != nil {
@@ -153,7 +153,9 @@ func contentsToMessages(req *model.LLMRequest) ([]openai.ChatCompletionMessagePa
 	if req == nil {
 		return append(messages, openai.UserMessage("")), nil
 	}
-	callIDsByName := map[string]string{}
+	validCallIDs := map[string]struct{}{}
+	callIDsByName := map[string][]string{}
+	consumedCallIDs := map[string]struct{}{}
 	for contentIndex, content := range req.Contents {
 		if content == nil {
 			continue
@@ -162,6 +164,7 @@ func contentsToMessages(req *model.LLMRequest) ([]openai.ChatCompletionMessagePa
 		role := strings.ToLower(strings.TrimSpace(content.Role))
 		if role == "model" || role == "assistant" {
 			message := openai.AssistantMessage(text)
+			calls := make([]functionCallRef, 0)
 			for partIndex, part := range content.Parts {
 				if part == nil || part.FunctionCall == nil {
 					continue
@@ -175,6 +178,7 @@ func contentsToMessages(req *model.LLMRequest) ([]openai.ChatCompletionMessagePa
 				if err != nil {
 					return nil, fmt.Errorf("marshal function call %s: %w", call.Name, err)
 				}
+				calls = append(calls, functionCallRef{ID: callID, Name: call.Name})
 				message.OfAssistant.ToolCalls = append(message.OfAssistant.ToolCalls, openai.ChatCompletionMessageToolCallParam{
 					ID: callID,
 					Function: openai.ChatCompletionMessageToolCallFunctionParam{
@@ -182,10 +186,41 @@ func contentsToMessages(req *model.LLMRequest) ([]openai.ChatCompletionMessagePa
 						Arguments: string(arguments),
 					},
 				})
-				callIDsByName[call.Name] = callID
+			}
+			if len(calls) > 0 && !hasCompleteFunctionResponses(req.Contents, contentIndex, calls) {
+				if strings.TrimSpace(text) != "" {
+					messages = append(messages, openai.AssistantMessage(text))
+				}
+				continue
+			}
+			for _, call := range calls {
+				validCallIDs[call.ID] = struct{}{}
+				callIDsByName[call.Name] = append(callIDsByName[call.Name], call.ID)
 			}
 			messages = append(messages, message)
 			continue
+		}
+		for _, part := range content.Parts {
+			if part == nil || part.FunctionResponse == nil {
+				continue
+			}
+			response := part.FunctionResponse
+			callID := strings.TrimSpace(response.ID)
+			if callID == "" {
+				callID = firstUnconsumedCallID(callIDsByName[response.Name], consumedCallIDs)
+			}
+			if _, ok := validCallIDs[callID]; !ok {
+				continue
+			}
+			if _, consumed := consumedCallIDs[callID]; consumed {
+				continue
+			}
+			payload, err := json.Marshal(response.Response)
+			if err != nil {
+				return nil, fmt.Errorf("marshal function response %s: %w", response.Name, err)
+			}
+			messages = append(messages, openai.ToolMessage(string(payload), callID))
+			consumedCallIDs[callID] = struct{}{}
 		}
 		if text != "" {
 			switch role {
@@ -195,24 +230,6 @@ func contentsToMessages(req *model.LLMRequest) ([]openai.ChatCompletionMessagePa
 				messages = append(messages, openai.UserMessage(text))
 			}
 		}
-		for _, part := range content.Parts {
-			if part == nil || part.FunctionResponse == nil {
-				continue
-			}
-			response := part.FunctionResponse
-			callID := strings.TrimSpace(response.ID)
-			if callID == "" {
-				callID = callIDsByName[response.Name]
-			}
-			if callID == "" {
-				return nil, fmt.Errorf("function response %s is missing its call id", response.Name)
-			}
-			payload, err := json.Marshal(response.Response)
-			if err != nil {
-				return nil, fmt.Errorf("marshal function response %s: %w", response.Name, err)
-			}
-			messages = append(messages, openai.ToolMessage(string(payload), callID))
-		}
 	}
 	if len(messages) == 0 {
 		messages = append(messages, openai.UserMessage(""))
@@ -220,7 +237,72 @@ func contentsToMessages(req *model.LLMRequest) ([]openai.ChatCompletionMessagePa
 	return messages, nil
 }
 
-// openAITools 将 ADK JSON Schema 声明转换为 OpenAI 函数工具，并记录安全名称映射。
+type functionCallRef struct {
+	ID   string
+	Name string
+}
+
+// hasCompleteFunctionResponses 只保留能在下一條普通消息前完整配對的工具調用組。
+func hasCompleteFunctionResponses(contents []*genai.Content, callIndex int, calls []functionCallRef) bool {
+	expected := make(map[string]string, len(calls))
+	matched := make(map[string]struct{}, len(calls))
+	for _, call := range calls {
+		expected[call.ID] = call.Name
+	}
+	for index := callIndex + 1; index < len(contents); index++ {
+		content := contents[index]
+		if content == nil {
+			continue
+		}
+		responseCount := 0
+		for _, part := range content.Parts {
+			if part == nil || part.FunctionResponse == nil {
+				continue
+			}
+			responseCount++
+			response := part.FunctionResponse
+			callID := strings.TrimSpace(response.ID)
+			if callID == "" {
+				callID = firstMatchingCallID(calls, response.Name, matched)
+			}
+			if _, ok := expected[callID]; ok {
+				matched[callID] = struct{}{}
+			}
+		}
+		if len(matched) == len(expected) {
+			return true
+		}
+		if responseCount == 0 {
+			return false
+		}
+	}
+	return false
+}
+
+// firstMatchingCallID 依原始調用順序為缺少 ID 的函數回應補上同名調用 ID。
+func firstMatchingCallID(calls []functionCallRef, name string, used map[string]struct{}) string {
+	for _, call := range calls {
+		if call.Name != name {
+			continue
+		}
+		if _, ok := used[call.ID]; !ok {
+			return call.ID
+		}
+	}
+	return ""
+}
+
+// firstUnconsumedCallID 返回尚未生成 tool message 的第一個調用 ID。
+func firstUnconsumedCallID(callIDs []string, consumed map[string]struct{}) string {
+	for _, callID := range callIDs {
+		if _, ok := consumed[callID]; !ok {
+			return callID
+		}
+	}
+	return ""
+}
+
+// openAITools 將 ADK JSON Schema 聲明轉換為 OpenAI 函數工具，並記錄安全名稱映射。
 func openAITools(req *model.LLMRequest) ([]openai.ChatCompletionToolParam, map[string]string, error) {
 	aliases := map[string]string{}
 	if req == nil || req.Config == nil {
@@ -251,7 +333,7 @@ func openAITools(req *model.LLMRequest) ([]openai.ChatCompletionToolParam, map[s
 	return tools, aliases, nil
 }
 
-// functionParameters 通过 JSON 边界兼容 ADK 的标准 Schema 与 JSON Schema 两种声明。
+// functionParameters 通過 JSON 邊界兼容 ADK 的標準 Schema 與 JSON Schema 兩種聲明。
 func functionParameters(declaration *genai.FunctionDeclaration) (shared.FunctionParameters, error) {
 	schema := declaration.ParametersJsonSchema
 	if schema == nil {
@@ -268,10 +350,43 @@ func functionParameters(declaration *genai.FunctionDeclaration) (shared.Function
 	if err := json.Unmarshal(raw, &parameters); err != nil {
 		return nil, err
 	}
+	normalizeOpenAIJSONSchema(map[string]any(parameters))
 	return parameters, nil
 }
 
-// openAIToolName 为含点号或过长的 ADK 工具生成稳定的 OpenAI 合法别名。
+// normalizeOpenAIJSONSchema converts ADK/GenAI uppercase schema types to OpenAI JSON Schema types.
+func normalizeOpenAIJSONSchema(value any) {
+	switch typed := value.(type) {
+	case map[string]any:
+		if rawType, ok := typed["type"]; ok {
+			typed["type"] = normalizeOpenAIJSONSchemaType(rawType)
+		}
+		for _, child := range typed {
+			normalizeOpenAIJSONSchema(child)
+		}
+	case []any:
+		for _, child := range typed {
+			normalizeOpenAIJSONSchema(child)
+		}
+	}
+}
+
+// normalizeOpenAIJSONSchemaType normalizes both single and union JSON Schema type declarations.
+func normalizeOpenAIJSONSchemaType(value any) any {
+	switch typed := value.(type) {
+	case string:
+		return strings.ToLower(strings.TrimSpace(typed))
+	case []any:
+		for index, item := range typed {
+			if typeName, ok := item.(string); ok {
+				typed[index] = strings.ToLower(strings.TrimSpace(typeName))
+			}
+		}
+	}
+	return value
+}
+
+// openAIToolName 為含點號或過長的 ADK 工具生成穩定的 OpenAI 合法別名。
 func openAIToolName(name string) string {
 	name = strings.TrimSpace(name)
 	if openAIToolNamePattern.MatchString(name) {
@@ -305,7 +420,7 @@ func contentText(content *genai.Content) string {
 	return out.String()
 }
 
-// llmResponseFromMessage 将 OpenAI 的文本或函数调用恢复成 ADK 可执行回应。
+// llmResponseFromMessage 將 OpenAI 的文本或函數調用恢復成 ADK 可執行回應。
 func llmResponseFromMessage(message openai.ChatCompletionMessage, aliases map[string]string) (*model.LLMResponse, error) {
 	parts := make([]*genai.Part, 0, 1+len(message.ToolCalls))
 	if message.Content != "" {

@@ -50,7 +50,7 @@ func (c *Service) SyncPermissionCatalog(ctx context.Context, tenantID string) er
 	return nil
 }
 
-// upsertPermissionSetWithItems 寫入權限集合 JSONB，並雙寫 normalized permission_set_items。
+// upsertPermissionSetWithItems writes the JSON authoring source and rebuilds its normalized projection in one transaction.
 func (c *Service) upsertPermissionSetWithItems(ctx RequestContext, set PermissionSet) (int, error) {
 	if err := c.store.UpsertPermissionSet(goContext(ctx), set); err != nil {
 		return 0, err
@@ -304,40 +304,6 @@ func applicationForMenuKey(key string) string {
 	default:
 		return string(AppPlatform)
 	}
-}
-
-// permissionFromCatalogItem 將 catalog 項轉為舊 Permission 回應形狀。
-func permissionFromCatalogItem(item PermissionCatalogItem) Permission {
-	app, resourceType := splitResource(item.Resource)
-	if item.Application != "" {
-		app = ApplicationCode(item.Application)
-	}
-	return Permission{
-		ID:              item.ID,
-		TenantID:        item.TenantID,
-		ApplicationCode: app,
-		ResourceType:    resourceType,
-		PermissionType:  item.PermissionType,
-		Resource:        item.Resource,
-		Action:          Action(item.Action),
-		RiskLevel:       riskLevelFromCatalogItem(item),
-		Severity:        item.Severity,
-		MenuKey:         item.MenuKey,
-		Name:            item.Name,
-		Description:     item.Description,
-		HighRisk:        item.HighRisk,
-	}
-}
-
-// riskLevelFromCatalogItem 保留既有 permission risk_level 回應欄位。
-func riskLevelFromCatalogItem(item PermissionCatalogItem) string {
-	if item.HighRisk {
-		if item.Severity == string(domain.SeverityCritical) {
-			return string(domain.RiskCritical)
-		}
-		return string(domain.RiskHigh)
-	}
-	return ""
 }
 
 // stableCatalogID 建立跨啟動穩定且全域唯一的 catalog ID。

@@ -2,15 +2,18 @@ package jobs
 
 import (
 	"context"
+	"encoding/base64"
 	"testing"
 	"time"
 
 	"nexus-pro-be/internal/domain"
+	platformsecret "nexus-pro-be/internal/platform/secret"
 	"nexus-pro-be/internal/repository/memory"
 )
 
 type fakeLiteLLMModelAdmin struct {
 	synced  []string
+	apiKeys []string
 	deleted []string
 	remote  []string
 	err     error
@@ -24,7 +27,45 @@ func (f *fakeLiteLLMModelAdmin) ListManagedModelIDs(context.Context) ([]string, 
 // SyncModel 記錄背景 upsert 呼叫。
 func (f *fakeLiteLLMModelAdmin) SyncModel(_ context.Context, model domain.AgentModel) (string, error) {
 	f.synced = append(f.synced, model.ID)
+	f.apiKeys = append(f.apiKeys, model.APIKey)
 	return "synced", f.err
+}
+
+// TestLiteLLMModelSyncerDecryptsCredentialOnlyAtDispatch verifies persisted ciphertext is opened just in time.
+func TestLiteLLMModelSyncerDecryptsCredentialOnlyAtDispatch(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStore()
+	now := time.Date(2026, 7, 14, 8, 0, 0, 0, time.UTC)
+	cipher, err := platformsecret.NewAESGCMCipher(base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext, err := cipher.Encrypt([]byte("sk-upstream"), domain.AgentModelCredentialAAD("tenant-1", "amodel-encrypted"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-1", Name: "Tenant", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAgentModel(ctx, domain.AgentModel{
+		ID: "amodel-encrypted", TenantID: "tenant-1", Name: "Encrypted", Provider: "openai",
+		ModelName: "gpt-4.1-mini", LiteLLMModel: domain.AgentModelLiteLLMAlias("amodel-encrypted"),
+		APIKeyCiphertext: ciphertext, APIKeySet: true, Status: domain.AgentModelStatusActive,
+		SyncStatus: domain.AgentModelSyncStatusPending, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	admin := &fakeLiteLLMModelAdmin{}
+	if _, err := NewLiteLLMModelSyncer(store, admin, nil).WithCredentialCipher(cipher).ReconcileAll(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if len(admin.apiKeys) != 1 || admin.apiKeys[0] != "sk-upstream" {
+		t.Fatalf("expected just-in-time plaintext credential, got %+v", admin.apiKeys)
+	}
+	stored, ok, err := store.GetAgentModel(ctx, "tenant-1", "amodel-encrypted")
+	if err != nil || !ok || stored.APIKey != "" || stored.APIKeyCiphertext != ciphertext {
+		t.Fatalf("persisted model credential changed or leaked: model=%+v ok=%v err=%v", stored, ok, err)
+	}
 }
 
 // DeleteModel 記錄背景 delete 呼叫。
@@ -68,6 +109,32 @@ func TestLiteLLMModelSyncerReconcileAllUpsertsActiveAndDeletesDisabled(t *testin
 		if stored.SyncStatus != domain.AgentModelSyncStatusSynced || stored.LastSyncedAt == nil || stored.SyncedConfigHash == "" {
 			t.Fatalf("unexpected sync result for %s: %+v", model.ID, stored)
 		}
+	}
+}
+
+// TestLiteLLMModelSyncerDoesNotOverwriteRouteWithoutCredential protects legacy databases during credential migration.
+func TestLiteLLMModelSyncerDoesNotOverwriteRouteWithoutCredential(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStore()
+	now := time.Date(2026, 7, 14, 8, 0, 0, 0, time.UTC)
+	if err := store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-1", Name: "Tenant", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAgentModel(ctx, domain.AgentModel{
+		ID: "amodel-legacy", TenantID: "tenant-1", Name: "Legacy", Provider: "openai",
+		ModelName: "gpt-4.1-mini", LiteLLMModel: domain.AgentModelLiteLLMAlias("amodel-legacy"),
+		Status: domain.AgentModelStatusActive, SyncStatus: domain.AgentModelSyncStatusSynced, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	admin := &fakeLiteLLMModelAdmin{}
+	syncer := NewLiteLLMModelSyncer(store, admin, nil)
+	processed, err := syncer.ReconcileAll(ctx)
+	if processed != 1 || err == nil {
+		t.Fatalf("expected missing credential to fail closed, processed=%d err=%v", processed, err)
+	}
+	if len(admin.synced) != 0 {
+		t.Fatalf("missing credential must not overwrite LiteLLM, synced=%v", admin.synced)
 	}
 }
 

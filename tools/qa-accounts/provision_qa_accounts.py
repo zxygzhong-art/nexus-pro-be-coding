@@ -285,7 +285,7 @@ ACCOUNTS = [
         "permission_sets": ["ps-qa-employee"],
         "account_status": "disabled",
         "employee_status": "active",
-        "expect_login": True,  # Keycloak 会发 token，但后端 API 应拒绝
+        "expect_login": True,  # Keycloak 會發 token，但後端 API 應拒絕
         "expect_api_ok": False,
         "desc": "账号已停用：Keycloak 可取得 token，但业务 API 应拒绝（account_inactive）",
     },
@@ -318,7 +318,7 @@ ACCOUNTS = [
         "name": "QA Keycloak Only",
         "employee_no": "",
         "permission_sets": [],
-        "account_status": None,  # 不写 DB：仅存在于 Keycloak，无 user_identities 绑定
+        "account_status": None,  # 不寫 DB：僅存在於 Keycloak，無 user_identities 綁定
         "employee_status": None,
         "expect_login": True,
         "expect_api_ok": False,

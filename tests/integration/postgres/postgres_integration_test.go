@@ -16,6 +16,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/propagation"
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
@@ -197,7 +198,7 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 	if err := store.UpsertLeaveBalance(ctx, balance); err != nil {
 		t.Fatal(err)
 	}
-	updated, reserved, found, err := store.ReserveLeaveBalance(ctx, tenantA, empA, " annual ", 8, now.Add(time.Minute))
+	updated, reserved, found, err := store.ReserveLeaveBalance(ctx, tenantA, empA, " annual ", 8, now, now.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -993,10 +994,13 @@ func installIntegrationSpanRecorder(t *testing.T) *tracetest.SpanRecorder {
 	t.Helper()
 	recorder := tracetest.NewSpanRecorder()
 	provider := sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(recorder))
-	previous := otel.GetTracerProvider()
+	previousProvider := otel.GetTracerProvider()
+	previousPropagator := otel.GetTextMapPropagator()
 	otel.SetTracerProvider(provider)
+	otel.SetTextMapPropagator(propagation.TraceContext{})
 	t.Cleanup(func() {
-		otel.SetTracerProvider(previous)
+		otel.SetTracerProvider(previousProvider)
+		otel.SetTextMapPropagator(previousPropagator)
 		_ = provider.Shutdown(context.Background())
 	})
 	return recorder

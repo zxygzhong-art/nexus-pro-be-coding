@@ -20,8 +20,8 @@ func (s *Store) UpsertWorkflowRun(execCtx context.Context, v domain.WorkflowRun)
 		TemplateID:             v.TemplateID,
 		Version:                int32(v.Version),
 		Status:                 v.Status,
-		CurrentStageInstanceID: v.CurrentStageInstanceID,
-		StageDefinitionsJson:   v.StageDefinitionsJSON,
+		CurrentStageInstanceID: nullableText(v.CurrentStageInstanceID),
+		Column8:                []byte(v.StageDefinitionsJSON),
 		CreatedAt:              timestamptz(v.CreatedAt),
 		UpdatedAt:              timestamptz(v.UpdatedAt),
 	})
@@ -173,8 +173,8 @@ func fromWorkflowRun(v sqlc.WorkflowRun) domain.WorkflowRun {
 		TemplateID:             v.TemplateID,
 		Version:                int(v.Version),
 		Status:                 v.Status,
-		CurrentStageInstanceID: v.CurrentStageInstanceID,
-		StageDefinitionsJSON:   v.StageDefinitionsJson,
+		CurrentStageInstanceID: textFrom(v.CurrentStageInstanceID),
+		StageDefinitionsJSON:   string(v.StageDefinitionsJson),
 		CreatedAt:              timeFrom(v.CreatedAt),
 		UpdatedAt:              timeFrom(v.UpdatedAt),
 	}

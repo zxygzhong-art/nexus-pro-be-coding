@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"unicode/utf8"
 
 	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/utils"
@@ -54,8 +55,12 @@ func (c AgentService) CreateModel(ctx RequestContext, input domain.CreateAgentMo
 	if err != nil {
 		return domain.AgentModel{}, err
 	}
+	storedModel, err := c.protectAgentModelCredential(model)
+	if err != nil {
+		return domain.AgentModel{}, err
+	}
 	if err := c.withTransaction(ctx, func(tx AgentService) error {
-		if err := tx.store.UpsertAgentModel(goContext(ctx), model); err != nil {
+		if err := tx.store.UpsertAgentModel(goContext(ctx), storedModel); err != nil {
 			return err
 		}
 		if err := tx.appendAgentModelSyncEvent(ctx, model.ID, domain.EventAgentModelUpsert); err != nil {
@@ -112,8 +117,12 @@ func (c AgentService) UpdateModel(ctx RequestContext, id string, input domain.Up
 	if err != nil {
 		return domain.AgentModel{}, err
 	}
+	storedModel, err := c.protectAgentModelCredential(model)
+	if err != nil {
+		return domain.AgentModel{}, err
+	}
 	if err := c.withTransaction(ctx, func(tx AgentService) error {
-		if err := tx.store.UpsertAgentModel(goContext(ctx), model); err != nil {
+		if err := tx.store.UpsertAgentModel(goContext(ctx), storedModel); err != nil {
 			return err
 		}
 		if err := tx.appendAgentModelSyncEvent(ctx, model.ID, domain.EventAgentModelUpsert); err != nil {
@@ -330,6 +339,8 @@ func (c AgentService) CreateDefinition(ctx RequestContext, input domain.CreateAg
 		MainAgentRole:      input.MainAgentRole,
 		SubAgents:          input.SubAgents,
 		SystemPrompt:       input.SystemPrompt,
+		WelcomeMessage:     input.WelcomeMessage,
+		SuggestedQuestions: input.SuggestedQuestions,
 		Tools:              input.Tools,
 		KnowledgeBaseIDs:   input.KnowledgeBaseIDs,
 		Status:             domain.AgentDefinitionStatusDraft,
@@ -393,6 +404,12 @@ func (c AgentService) UpdateDefinition(ctx RequestContext, id string, input doma
 	}
 	if input.SystemPrompt != nil {
 		agent.SystemPrompt = *input.SystemPrompt
+	}
+	if input.WelcomeMessage != nil {
+		agent.WelcomeMessage = *input.WelcomeMessage
+	}
+	if input.SuggestedQuestions != nil {
+		agent.SuggestedQuestions = input.SuggestedQuestions
 	}
 	if input.Tools != nil {
 		agent.Tools = input.Tools
@@ -649,6 +666,8 @@ func (c AgentService) RollbackDefinition(ctx RequestContext, id string, input do
 		return domain.AgentDefinition{}, NotFound("agent definition version", fmt.Sprintf("%s:%d", id, input.Version))
 	}
 	agent.SystemPrompt = version.SystemPrompt
+	agent.WelcomeMessage = version.WelcomeMessage
+	agent.SuggestedQuestions = version.SuggestedQuestions
 	agent.Tools = version.Tools
 	agent.KnowledgeBaseIDs = version.KnowledgeBaseIDs
 	agent.ModelID = version.ModelID
@@ -732,10 +751,10 @@ func (c AgentService) CreateExternalTool(ctx RequestContext, input domain.Create
 	id := utils.NewID("atool")
 	credentialCiphertext := ""
 	if auth.secret != "" {
-		if c.agentToolCredentials == nil {
+		if c.credentialCipher == nil {
 			return domain.AgentExternalTool{}, domain.E(503, "service_unavailable", "external tool credential storage is not configured")
 		}
-		credentialCiphertext, err = c.agentToolCredentials.Encrypt([]byte(auth.secret), externalToolCredentialAAD(ctx.TenantID, id))
+		credentialCiphertext, err = c.credentialCipher.Encrypt([]byte(auth.secret), externalToolCredentialAAD(ctx.TenantID, id))
 		if err != nil {
 			return domain.AgentExternalTool{}, domain.E(500, "internal_error", "failed to protect external tool credential")
 		}
@@ -921,7 +940,10 @@ func agentToolCatalog() []domain.AgentToolMeta {
 		{Value: "list_employees", Label: "List Employees", Description: "Read employee summaries.", Readonly: true, RequiredPermission: "agent.tool.call:list_employees"},
 		{Value: "get_employee", Label: "Get Employee", Description: "Read one employee summary.", Readonly: true, RequiredPermission: "agent.tool.call:get_employee"},
 		{Value: "my_leave_balances", Label: "My Leave Balances", Description: "Read current account leave balances.", Readonly: true, RequiredPermission: "agent.tool.call:my_leave_balances"},
+		{Value: "check_leave_eligibility", Label: "Check Leave Eligibility", Description: "Check current employee leave eligibility against policy and balance.", Readonly: true, RequiredPermission: "agent.tool.call:check_leave_eligibility"},
 		{Value: "my_clock_records", Label: "My Clock Records", Description: "Read current account clock records.", Readonly: true, RequiredPermission: "agent.tool.call:my_clock_records"},
+		{Value: "my_attendance_summary", Label: "My Attendance Summary", Description: "Read the current employee's monthly attendance summary.", Readonly: true, RequiredPermission: "agent.tool.call:my_attendance_summary"},
+		{Value: "my_form_history", Label: "My Form History", Description: "Read the current account's own form application history.", Readonly: true, RequiredPermission: "agent.tool.call:my_form_history"},
 		{Value: "my_pending_reviews", Label: "My Pending Reviews", Description: "Read pending workflow reviews.", Readonly: true, RequiredPermission: "agent.tool.call:my_pending_reviews"},
 		{Value: "workspace_insights", Label: "Workspace Insights", Description: "Read workspace insight reports.", Readonly: true, RequiredPermission: "agent.tool.call:workspace_insights"},
 		{Value: "list_published_form_templates", Label: "Published Forms", Description: "List published forms available to the current account.", Readonly: true, RequiredPermission: "agent.tool.call:list_published_form_templates"},
@@ -952,6 +974,35 @@ func (c AgentService) currentAgentModel(ctx RequestContext, id string) (domain.A
 	if !ok {
 		return domain.AgentModel{}, NotFound("agent model", id)
 	}
+	if strings.TrimSpace(model.APIKeyCiphertext) != "" {
+		if c.credentialCipher == nil {
+			return domain.AgentModel{}, domain.E(503, "service_unavailable", "agent model credential storage is not configured")
+		}
+		plaintext, err := c.credentialCipher.Decrypt(model.APIKeyCiphertext, domain.AgentModelCredentialAAD(model.TenantID, model.ID))
+		if err != nil {
+			return domain.AgentModel{}, domain.E(500, "internal_error", "failed to open agent model credential")
+		}
+		model.APIKey = string(plaintext)
+	}
+	return model, nil
+}
+
+// protectAgentModelCredential encrypts an API key before the model reaches any repository implementation.
+func (c AgentService) protectAgentModelCredential(model domain.AgentModel) (domain.AgentModel, error) {
+	if strings.TrimSpace(model.APIKey) == "" {
+		return domain.AgentModel{}, BadRequest("api_key is required")
+	}
+	if c.credentialCipher == nil {
+		return domain.AgentModel{}, domain.E(503, "service_unavailable", "agent model credential storage is not configured")
+	}
+	ciphertext, err := c.credentialCipher.Encrypt([]byte(model.APIKey), domain.AgentModelCredentialAAD(model.TenantID, model.ID))
+	if err != nil {
+		return domain.AgentModel{}, domain.E(500, "internal_error", "failed to protect agent model credential")
+	}
+	model.APIKeyCiphertext = ciphertext
+	model.APIKeyPreview = maskAgentModelAPIKey(model.APIKey)
+	model.APIKeySet = true
+	model.APIKey = ""
 	return model, nil
 }
 
@@ -1075,6 +1126,19 @@ func (c AgentService) normalizeAgentDefinition(ctx RequestContext, agent domain.
 	}
 	if strings.TrimSpace(agent.Emoji) == "" {
 		agent.Emoji = "AI"
+	}
+	agent.WelcomeMessage = strings.TrimSpace(agent.WelcomeMessage)
+	if utf8.RuneCountInString(agent.WelcomeMessage) > 1000 {
+		return domain.AgentDefinition{}, BadRequest("welcome_message supports at most 1000 characters")
+	}
+	agent.SuggestedQuestions = uniqueStrings(agent.SuggestedQuestions)
+	if len(agent.SuggestedQuestions) > 3 {
+		return domain.AgentDefinition{}, BadRequest("suggested_questions supports at most 3 items")
+	}
+	for _, question := range agent.SuggestedQuestions {
+		if utf8.RuneCountInString(question) > 100 {
+			return domain.AgentDefinition{}, BadRequest("each suggested question supports at most 100 characters")
+		}
 	}
 	if agent.Status == "" {
 		agent.Status = domain.AgentDefinitionStatusDraft
@@ -1245,6 +1309,8 @@ func (c AgentService) snapshotAgentDefinition(ctx RequestContext, agent domain.A
 		MainAgentRole:      agent.MainAgentRole,
 		SubAgents:          agent.SubAgents,
 		SystemPrompt:       agent.SystemPrompt,
+		WelcomeMessage:     agent.WelcomeMessage,
+		SuggestedQuestions: agent.SuggestedQuestions,
 		Tools:              agent.Tools,
 		KnowledgeBaseIDs:   agent.KnowledgeBaseIDs,
 		ModelID:            agent.ModelID,
@@ -1254,36 +1320,31 @@ func (c AgentService) snapshotAgentDefinition(ctx RequestContext, agent domain.A
 	})
 }
 
-// agentDefinitionRuntimeSignature 生成会影响真实执行的稳定配置签名。
+// agentDefinitionRuntimeSignature 生成會影響真實執行的穩定配置簽名。
 func agentDefinitionRuntimeSignature(agent domain.AgentDefinition) string {
 	payload := struct {
-		MainAgentRole    string                   `json:"main_agent_role"`
-		SubAgents        []domain.AgentTeamMember `json:"sub_agents"`
-		SystemPrompt     string                   `json:"system_prompt"`
-		Tools            []string                 `json:"tools"`
-		KnowledgeBaseIDs []string                 `json:"knowledge_base_ids"`
-		ModelID          string                   `json:"model_id"`
-	}{agent.MainAgentRole, agent.SubAgents, agent.SystemPrompt, agent.Tools, agent.KnowledgeBaseIDs, agent.ModelID}
+		MainAgentRole      string                   `json:"main_agent_role"`
+		SubAgents          []domain.AgentTeamMember `json:"sub_agents"`
+		SystemPrompt       string                   `json:"system_prompt"`
+		WelcomeMessage     string                   `json:"welcome_message"`
+		SuggestedQuestions []string                 `json:"suggested_questions"`
+		Tools              []string                 `json:"tools"`
+		KnowledgeBaseIDs   []string                 `json:"knowledge_base_ids"`
+		ModelID            string                   `json:"model_id"`
+	}{agent.MainAgentRole, agent.SubAgents, agent.SystemPrompt, agent.WelcomeMessage, agent.SuggestedQuestions, agent.Tools, agent.KnowledgeBaseIDs, agent.ModelID}
 	encoded, _ := json.Marshal(payload)
 	return string(encoded)
 }
 
+// recordAgentAdminAudit writes Agent administration events to the canonical audit log.
 func (c AgentService) recordAgentAdminAudit(ctx RequestContext, account Account, entityType, entityID, entityName, action, detail string) error {
-	if err := c.store.InsertAgentAudit(goContext(ctx), domain.AgentAudit{
-		ID:               utils.NewID("aaud"),
-		TenantID:         ctx.TenantID,
-		EntityType:       entityType,
-		EntityID:         entityID,
-		EntityName:       entityName,
-		Action:           action,
-		ActorAccountID:   account.ID,
-		ActorDisplayName: account.DisplayName,
-		Detail:           detail,
-		CreatedAt:        c.Now(),
-	}); err != nil {
-		return err
+	payload := map[string]any{
+		"entity_type":        entityType,
+		"entity_id":          entityID,
+		"entity_name":        entityName,
+		"actor_display_name": account.DisplayName,
+		"detail":             detail,
 	}
-	payload := map[string]any{"entity_type": entityType, "entity_id": entityID, "entity_name": entityName, "detail": detail}
 	if raw, err := json.Marshal(payload); err == nil {
 		payload["raw"] = string(raw)
 	}

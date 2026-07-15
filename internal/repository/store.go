@@ -24,7 +24,7 @@ type Store interface {
 	AuditStore
 	AuthzEventStore
 	OutboxStore
-	EHRMSSyncStore
+	EHRMSSyncLocker
 }
 
 // TenantTransactor 定義租戶 transactor 的行為契約。

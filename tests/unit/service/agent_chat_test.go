@@ -215,6 +215,187 @@ func TestAgentChatReadOnlyToolsUseRequestContext(t *testing.T) {
 	}
 }
 
+// TestAgentChatLeaveBalanceMissingIsNotZero verifies missing balance rows remain explicitly uninitialized.
+func TestAgentChatLeaveBalanceMissingIsNotZero(t *testing.T) {
+	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentChatAccount(t, store, now, agentLeaveToolPermissions("self"))
+	runtime := fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
+		balances, err := req.Tools["my_leave_balances"](ctx, nil)
+		if err != nil {
+			return err
+		}
+		if balances["employee_id"] != "emp-1" || balances["initialized"] != false || balances["status"] != "not_initialized" || balances["total"] != 0 {
+			t.Fatalf("missing balance rows were not reported as uninitialized: %+v", balances)
+		}
+		eligibility, err := req.Tools["check_leave_eligibility"](ctx, map[string]any{
+			"leave_type": "事假", "date": "2026-07-15", "hours": float64(8),
+		})
+		if err != nil {
+			return err
+		}
+		if eligibility["eligible"] != false || eligibility["balance_initialized"] != false || eligibility["status"] != "balance_not_initialized" {
+			t.Fatalf("missing personal leave balance was treated as a numeric zero: %+v", eligibility)
+		}
+		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
+	}}
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
+	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申请事假"}, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAgentChatLeaveEligibilityRejectsRealZeroBalance verifies an initialized zero is insufficient, not missing.
+func TestAgentChatLeaveEligibilityRejectsRealZeroBalance(t *testing.T) {
+	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentChatAccount(t, store, now, agentLeaveToolPermissions("self"))
+	if err := store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{
+		ID: "lb-personal", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "personal", RemainingHours: 0, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runtime := fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
+		eligibility, err := req.Tools["check_leave_eligibility"](ctx, map[string]any{
+			"leave_type": "personal", "date": "2026-07-15", "hours": float64(8),
+		})
+		if err != nil {
+			return err
+		}
+		if eligibility["eligible"] != false || eligibility["balance_initialized"] != true || eligibility["status"] != "insufficient_balance" || eligibility["remaining_hours"] != float64(0) {
+			t.Fatalf("real zero balance was not reported as insufficient: %+v", eligibility)
+		}
+		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
+	}}
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
+	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申请事假"}, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAgentChatLeaveEligibilityAcceptsSufficientBalance verifies policy and balance produce a positive decision.
+func TestAgentChatLeaveEligibilityAcceptsSufficientBalance(t *testing.T) {
+	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentChatAccount(t, store, now, agentLeaveToolPermissions("self"))
+	if err := store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{
+		ID: "lb-personal", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "personal", RemainingHours: 16, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	runtime := fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
+		eligibility, err := req.Tools["check_leave_eligibility"](ctx, map[string]any{
+			"leave_type": "事假", "date": "2026-07-15", "hours": float64(8),
+		})
+		if err != nil {
+			return err
+		}
+		if eligibility["eligible"] != true || eligibility["balance_initialized"] != true || eligibility["status"] != "eligible" || eligibility["remaining_hours"] != float64(16) {
+			t.Fatalf("sufficient personal leave balance was rejected: %+v", eligibility)
+		}
+		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
+	}}
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
+	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申请事假"}, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAgentChatLeaveBalanceAdminScopeStaysSelfOnly verifies broad attendance permission cannot widen a my-* tool.
+func TestAgentChatLeaveBalanceAdminScopeStaysSelfOnly(t *testing.T) {
+	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentChatAccount(t, store, now, agentLeaveToolPermissions("all"))
+	if err := store.UpsertEmployee(context.Background(), domain.Employee{
+		ID: "emp-2", TenantID: "tenant-1", Name: "Other Employee", Status: "active", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, balance := range []domain.LeaveBalance{
+		{ID: "lb-self", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 8, UpdatedAt: now},
+		{ID: "lb-other", TenantID: "tenant-1", EmployeeID: "emp-2", LeaveType: "annual", RemainingHours: 80, UpdatedAt: now},
+	} {
+		if err := store.UpsertLeaveBalance(context.Background(), balance); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runtime := fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
+		result, err := req.Tools["my_leave_balances"](ctx, nil)
+		if err != nil {
+			return err
+		}
+		items, ok := result["items"].([]domain.LeaveBalance)
+		if !ok || len(items) != 1 || items[0].EmployeeID != "emp-1" || result["total"] != 1 {
+			t.Fatalf("admin-scoped my_leave_balances leaked another employee: %+v", result)
+		}
+		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
+	}}
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
+	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "查询我的余额"}, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestAgentChatAttendanceSummaryAndFormHistoryStaySelfScoped verifies consolidated attendance queries never widen to another account.
+func TestAgentChatAttendanceSummaryAndFormHistoryStaySelfScoped(t *testing.T) {
+	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentChatAccount(t, store, now, []domain.Permission{
+		{Resource: "agent.run", Action: "create", Scope: "all"},
+		{Resource: "agent.tool", Action: "call", Target: "my_attendance_summary", Scope: "all"},
+		{Resource: "agent.tool", Action: "call", Target: "my_form_history", Scope: "all"},
+		{Resource: "attendance.clock", Action: "read", Scope: "self"},
+		{Resource: "attendance.leave", Action: "read", Scope: "self"},
+		{Resource: "workflow.form_template", Action: "read", Scope: "all"},
+		{Resource: "workflow.form_instance", Action: "read", Scope: "self"},
+	})
+	if err := store.UpsertAccount(context.Background(), domain.Account{
+		ID: "acct-2", TenantID: "tenant-1", DisplayName: "Other User", EmployeeID: "emp-2", Status: "active", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertEmployee(context.Background(), domain.Employee{
+		ID: "emp-2", TenantID: "tenant-1", Name: "Other Employee", AccountID: "acct-2", Status: "active", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
+		ID: "ft-leave", TenantID: "tenant-1", Key: "leave-request", Name: "Leave Request", Status: "published", CurrentVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, instance := range []domain.FormInstance{
+		{ID: "fi-self", TenantID: "tenant-1", TemplateID: "ft-leave", ApplicantAccountID: "acct-1", Status: "approved", Payload: map[string]any{"hours": 8}, SubmittedAt: now, UpdatedAt: now},
+		{ID: "fi-other", TenantID: "tenant-1", TemplateID: "ft-leave", ApplicantAccountID: "acct-2", Status: "approved", Payload: map[string]any{"hours": 80}, SubmittedAt: now, UpdatedAt: now},
+	} {
+		if err := store.UpsertFormInstance(context.Background(), instance); err != nil {
+			t.Fatal(err)
+		}
+	}
+	runtime := fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
+		summary, err := req.Tools["my_attendance_summary"](ctx, nil)
+		if err != nil {
+			return err
+		}
+		if summary["month"] != "2026-07" || summary["worked_hours"] != float64(0) {
+			t.Fatalf("unexpected attendance summary: %+v", summary)
+		}
+		history, err := req.Tools["my_form_history"](ctx, map[string]any{"template_key": "leave-request"})
+		if err != nil {
+			return err
+		}
+		items, ok := history["items"].([]map[string]any)
+		if !ok || len(items) != 1 || items[0]["id"] != "fi-self" || history["total"] != 1 {
+			t.Fatalf("form history leaked another account or lost the self item: %+v", history)
+		}
+		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
+	}}
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
+	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "查看本月考勤和历史请假"}, nil); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAgentChatToolRequiresAgentToolPermission(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -279,6 +460,61 @@ func TestAgentChatBlocksActiveRunInSameSession(t *testing.T) {
 	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{SessionID: session.ID, Message: "hi"}, nil); err == nil {
 		t.Fatal("expected active run conflict")
 	}
+}
+
+func TestAgentChatRecoversStaleRunInSameSession(t *testing.T) {
+	now := time.Date(2026, 7, 14, 12, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentChatAccount(t, store, now, []domain.Permission{
+		{Resource: "agent.run", Action: "create", Scope: "all"},
+	})
+	runtimeCalls := 0
+	svc := service.New(store, service.Options{
+		Now: func() time.Time { return now },
+		AgentChatRuntime: fakeAgentChatRuntime{run: func(ctx context.Context, _ service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
+			runtimeCalls++
+			return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "recovered"})
+		}},
+	})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
+	session, err := svc.Agent().CreateSession(ctx, domain.CreateAgentSessionInput{Title: "Interrupted"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAgentRun(context.Background(), domain.AgentRun{
+		ID:        "stale-run",
+		TenantID:  "tenant-1",
+		AccountID: "acct-1",
+		SessionID: session.ID,
+		Mode:      "assistant_chat",
+		Prompt:    "old message",
+		Status:    string(domain.AgentRunStatusRunning),
+		CreatedAt: now.Add(-2 * time.Minute),
+		UpdatedAt: now.Add(-2 * time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{SessionID: session.ID, Message: "retry"}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtimeCalls != 1 || run.Status != string(domain.AgentRunStatusCompleted) || run.Answer != "recovered" {
+		t.Fatalf("expected the conversation to recover, run=%+v calls=%d", run, runtimeCalls)
+	}
+	runs, err := store.ListAgentRunsByAccount(context.Background(), "tenant-1", "acct-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range runs {
+		if item.ID == "stale-run" {
+			if item.Status != string(domain.AgentRunStatusFailed) || item.Answer != "agent chat was interrupted before completion" {
+				t.Fatalf("expected stale run to be failed with an interruption reason, got %+v", item)
+			}
+			return
+		}
+	}
+	t.Fatal("stale run was not persisted")
 }
 
 func TestAgentChatUsesSessionBoundAgentAndRejectsAgentSwitch(t *testing.T) {
@@ -558,5 +794,15 @@ func seedAgentChatAccount(t *testing.T, store *memory.Store, now time.Time, perm
 		CreatedAt:              now,
 	}); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// agentLeaveToolPermissions returns the business and tool permissions needed by leave-tool tests.
+func agentLeaveToolPermissions(attendanceScope domain.Scope) []domain.Permission {
+	return []domain.Permission{
+		{Resource: "agent.run", Action: "create", Scope: "all"},
+		{Resource: "agent.tool", Action: "call", Target: "my_leave_balances", Scope: "all"},
+		{Resource: "agent.tool", Action: "call", Target: "check_leave_eligibility", Scope: "all"},
+		{Resource: "attendance.leave", Action: "read", Scope: attendanceScope},
 	}
 }

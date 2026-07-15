@@ -58,7 +58,6 @@ type (
 	AgentDefinition                 = domain.AgentDefinition
 	AgentTeamMember                 = domain.AgentTeamMember
 	AgentDefinitionVersion          = domain.AgentDefinitionVersion
-	AgentAudit                      = domain.AgentAudit
 	KnowledgeBase                   = domain.KnowledgeBase
 	KnowledgeDocument               = domain.KnowledgeDocument
 	KnowledgeDocumentChunk          = domain.KnowledgeDocumentChunk

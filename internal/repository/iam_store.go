@@ -15,6 +15,7 @@ type IAMStore interface {
 	DeleteUserGroup(ctx context.Context, tenantID, id string) (domain.UserGroup, bool, error)
 	UpsertGroupMembership(context.Context, domain.GroupMembership) error
 	DeleteGroupMembership(ctx context.Context, tenantID, userGroupID, accountID string) (domain.GroupMembership, bool, error)
+	CloseGroupMembership(ctx context.Context, tenantID, userGroupID, accountID string, validUntil time.Time) (domain.GroupMembership, bool, error)
 	GetGroupMembership(ctx context.Context, tenantID, userGroupID, accountID string) (domain.GroupMembership, bool, error)
 	ListGroupMembershipsForGroup(ctx context.Context, tenantID, userGroupID string) ([]domain.GroupMembership, error)
 	ListActiveGroupMembershipsForAccount(ctx context.Context, tenantID, accountID string, at time.Time) ([]domain.GroupMembership, error)

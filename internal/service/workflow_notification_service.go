@@ -7,33 +7,6 @@ import (
 	"nexus-pro-be/internal/utils"
 )
 
-// notifyWorkflowFormSubmitted 投遞表單提交後的明確知會通知。
-func (c WorkflowService) notifyWorkflowFormSubmitted(ctx RequestContext, instance FormInstance, template FormTemplate, applicant Account) error {
-	recipients := workflowNotificationRecipients(instance.Payload, instance.ApplicantAccountID)
-	if len(recipients) == 0 {
-		return nil
-	}
-	title := workflowNotificationTemplateTitle(template, instance)
-	body := workflowAccountLabel(applicant) + "提交了「" + title + "」。"
-	if desc := strings.TrimSpace(workflowReviewDescription(instance.Payload)); desc != "" {
-		body += " " + desc
-	}
-	return c.deliverWorkflowNotification(ctx, Notification{
-		ID:                 workflowNotificationID("submitted", instance.ID),
-		TenantID:           ctx.TenantID,
-		Tone:               "warning",
-		Category:           "workflow",
-		Title:              "有新的「" + title + "」表單待查看",
-		Body:               body,
-		StatusText:         "待處理",
-		LinkURL:            "/notifications?reviewId=" + instance.ID,
-		SourceType:         "workflow.form.submitted",
-		SourceID:           instance.ID,
-		CreatedByAccountID: applicant.ID,
-		CreatedAt:          workflowNotificationTime(instance, c.Now()),
-	}, recipients)
-}
-
 // notifyWorkflowFormReviewed 投遞表單審核結果給申請人。
 func (c WorkflowService) notifyWorkflowFormReviewed(ctx RequestContext, instance FormInstance, template FormTemplate, reviewer Account, kind, reason string) error {
 	if strings.TrimSpace(instance.ApplicantAccountID) == "" {
@@ -122,33 +95,6 @@ func workflowReviewNotificationCopy(kind, title string) (tone, statusText, notif
 		return "warning", "已退回", "你的「" + title + "」已退回補件", "已退回這筆申請"
 	default:
 		return "warning", "不通過", "你的「" + title + "」未通過", "未通過這筆申請"
-	}
-}
-
-// workflowNotificationRecipients 從 payload 中擷取明確列出的通知收件者。
-func workflowNotificationRecipients(payload map[string]any, excluded ...string) []string {
-	values := make([]string, 0)
-	for _, key := range workflowNotificationRecipientPayloadKeys {
-		values = append(values, workflowPayloadAccountIDs(payload[key])...)
-	}
-	return uniqueWorkflowRecipientIDs(values, excluded...)
-}
-
-// workflowPayloadAccountIDs 將 payload 欄位正規化為帳號 ID 清單。
-func workflowPayloadAccountIDs(value any) []string {
-	switch v := value.(type) {
-	case string:
-		return []string{v}
-	case []string:
-		return v
-	case []any:
-		out := make([]string, 0, len(v))
-		for _, item := range v {
-			out = append(out, stringFromAny(item))
-		}
-		return out
-	default:
-		return nil
 	}
 }
 

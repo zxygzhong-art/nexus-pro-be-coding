@@ -20,7 +20,7 @@ func (c *Service) Notifications() NotificationService {
 	return NotificationService{Service: c}
 }
 
-// ListNotifications 回傳目前帳號可見通知的一頁游標結果。
+// ListNotifications 回傳目前帳號可見通知的一頁遊標結果。
 func (c NotificationService) ListNotifications(ctx RequestContext, query NotificationListQuery) (NotificationListResponse, error) {
 	if _, _, err := c.resolveAccount(ctx); err != nil {
 		return NotificationListResponse{}, err
@@ -106,7 +106,7 @@ func (c NotificationService) MarkAllNotificationsRead(ctx RequestContext) (Notif
 	return NotificationReadAllResponse{UpdatedCount: updated, UnreadCount: unread}, nil
 }
 
-// normalizeNotificationListQuery 驗證篩選條件並解析游標。
+// normalizeNotificationListQuery 驗證篩選條件並解析遊標。
 func normalizeNotificationListQuery(query NotificationListQuery) (NotificationListQuery, error) {
 	query.Tone = strings.TrimSpace(query.Tone)
 	if query.Tone != "" && domain.NormalizeNotificationTone(query.Tone) == "" {
@@ -138,7 +138,7 @@ func encodeNotificationCursor(item NotificationItem) string {
 	return base64.RawURLEncoding.EncodeToString([]byte(raw))
 }
 
-// decodeNotificationCursor 解析 encodeNotificationCursor 產生的游標。
+// decodeNotificationCursor 解析 encodeNotificationCursor 產生的遊標。
 func decodeNotificationCursor(cursor string) (time.Time, string, error) {
 	decoded, err := base64.RawURLEncoding.DecodeString(cursor)
 	if err != nil {

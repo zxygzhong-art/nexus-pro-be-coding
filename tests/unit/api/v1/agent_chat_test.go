@@ -3,10 +3,13 @@ package v1_test
 import (
 	"bytes"
 	"context"
+	"io"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -67,6 +70,15 @@ func TestAgentChatEndpointStreamsSSE(t *testing.T) {
 	if ct := rec.Header().Get("Content-Type"); !strings.HasPrefix(ct, "text/event-stream") {
 		t.Fatalf("expected SSE content type, got %q", ct)
 	}
+	if cacheControl := rec.Header().Get("Cache-Control"); cacheControl != "no-cache, no-transform" {
+		t.Fatalf("expected streaming cache control, got %q", cacheControl)
+	}
+	if buffering := rec.Header().Get("X-Accel-Buffering"); buffering != "no" {
+		t.Fatalf("expected proxy buffering disabled, got %q", buffering)
+	}
+	if connection := rec.Header().Get("Connection"); connection != "" {
+		t.Fatalf("expected no hop-by-hop connection header, got %q", connection)
+	}
 	body := rec.Body.String()
 	for _, expected := range []string{
 		"event: session\n",
@@ -79,6 +91,138 @@ func TestAgentChatEndpointStreamsSSE(t *testing.T) {
 			t.Fatalf("expected SSE body to contain %q, got:\n%s", expected, body)
 		}
 	}
+}
+
+// TestAgentChatEndpointStreamsSSEOverHTTP1 exercises net/http chunk framing instead of only a response recorder.
+func TestAgentChatEndpointStreamsSSEOverHTTP1(t *testing.T) {
+	store := memory.NewStore()
+	populateDemoFixture(store)
+	runtime := apiFakeAgentChatRuntime{
+		run: func(ctx context.Context, req service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
+			return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "wire answer"})
+		},
+	}
+	handler := v1api.New(service.New(store, service.Options{AgentChatRuntime: runtime}), nil, v1api.Options{
+		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo", AccountID: "acct-admin"}, ok: true},
+	}).Routes()
+	server := httptest.NewServer(handler)
+	defer server.Close()
+
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/v1/agents/chat", strings.NewReader(`{"message":"wire probe"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := server.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read HTTP/1.1 SSE stream: %v", err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("expected 200 for HTTP/1.1 stream, got %d: %s", resp.StatusCode, body)
+	}
+	if len(resp.TransferEncoding) != 1 || resp.TransferEncoding[0] != "chunked" {
+		t.Fatalf("expected one chunked transfer encoding, got %v", resp.TransferEncoding)
+	}
+	if resp.Header.Get("Connection") != "" {
+		t.Fatalf("expected no upstream connection header, got %q", resp.Header.Get("Connection"))
+	}
+	if !strings.Contains(string(body), "event: message_delta\n") || !strings.Contains(string(body), `"delta":"wire answer"`) {
+		t.Fatalf("expected decoded SSE body, got:\n%s", body)
+	}
+}
+
+// TestAgentChatEndpointSerializesConcurrentSSEWrites verifies parallel tool events cannot corrupt the HTTP stream.
+func TestAgentChatEndpointSerializesConcurrentSSEWrites(t *testing.T) {
+	store := memory.NewStore()
+	populateDemoFixture(store)
+	runtime := apiFakeAgentChatRuntime{
+		run: func(ctx context.Context, req service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
+			const workers = 24
+			start := make(chan struct{})
+			errs := make(chan error, workers)
+			var wg sync.WaitGroup
+			for range workers {
+				wg.Add(1)
+				go func() {
+					defer wg.Done()
+					<-start
+					errs <- emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventToolCall, Name: "parallel_tool", Status: "started"})
+				}()
+			}
+			close(start)
+			wg.Wait()
+			close(errs)
+			for err := range errs {
+				if err != nil {
+					return err
+				}
+			}
+			return nil
+		},
+	}
+	handler := v1api.New(service.New(store, service.Options{AgentChatRuntime: runtime}), nil, v1api.Options{
+		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo", AccountID: "acct-admin"}, ok: true},
+	}).Routes()
+
+	recorder := newConcurrentWriteDetectingRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/v1/agents/chat", strings.NewReader(`{"message":"parallel wire probe"}`))
+	req.Header.Set("Content-Type", "application/json")
+	handler.ServeHTTP(recorder, req)
+
+	if recorder.overlapped.Load() {
+		t.Fatal("parallel agent events wrote to the HTTP response concurrently")
+	}
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "event: done\n") {
+		t.Fatalf("expected a completed SSE stream, got %d: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+type concurrentWriteDetectingRecorder struct {
+	*httptest.ResponseRecorder
+	activeWrites atomic.Int32
+	overlapped   atomic.Bool
+	recorderMu   sync.Mutex
+}
+
+// newConcurrentWriteDetectingRecorder builds a recorder that flags overlapping Write or Flush calls.
+func newConcurrentWriteDetectingRecorder() *concurrentWriteDetectingRecorder {
+	return &concurrentWriteDetectingRecorder{ResponseRecorder: httptest.NewRecorder()}
+}
+
+// Write widens the overlap window while keeping the underlying recorder internally safe.
+func (r *concurrentWriteDetectingRecorder) Write(payload []byte) (int, error) {
+	r.beginWrite()
+	defer r.endWrite()
+	r.recorderMu.Lock()
+	defer r.recorderMu.Unlock()
+	return r.ResponseRecorder.Write(payload)
+}
+
+// Flush participates in overlap detection because net/http chunk framing is finalized during flushes.
+func (r *concurrentWriteDetectingRecorder) Flush() {
+	r.beginWrite()
+	defer r.endWrite()
+	r.recorderMu.Lock()
+	defer r.recorderMu.Unlock()
+	r.ResponseRecorder.Flush()
+}
+
+// beginWrite records concurrent response activity and makes scheduling overlap deterministic.
+func (r *concurrentWriteDetectingRecorder) beginWrite() {
+	if r.activeWrites.Add(1) > 1 {
+		r.overlapped.Store(true)
+	}
+	time.Sleep(time.Millisecond)
+}
+
+// endWrite closes one response activity window.
+func (r *concurrentWriteDetectingRecorder) endWrite() {
+	r.activeWrites.Add(-1)
 }
 
 // TestAgentSessionFileEndpointsHidePreviousContext validates upload, authorized download, and clear visibility at the HTTP boundary.

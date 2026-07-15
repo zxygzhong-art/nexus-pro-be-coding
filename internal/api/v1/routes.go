@@ -86,7 +86,6 @@ func (a *API) RegisterRoutes(router *gin.Engine) {
 	IAMCtrl{routes: routes, svc: a.iam}.RegisterRoutes(v1)
 	HRCtrl{routes: routes, svc: a.hr}.RegisterRoutes(v1)
 	AttendanceCtrl{routes: routes, svc: a.attendance}.RegisterRoutes(v1)
-	EHRMSCtrl{routes: routes, svc: a.ehrms}.RegisterRoutes(v1)
 	PlatformCtrl{routes: routes, svc: a.platform}.RegisterRoutes(v1)
 	WorkspaceCtrl{routes: routes, svc: a.workspace}.RegisterRoutes(v1)
 	WorkspaceAgentCtrl{routes: routes, svc: a.agent}.RegisterRoutes(v1)

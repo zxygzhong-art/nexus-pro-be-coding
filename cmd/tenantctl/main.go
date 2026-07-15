@@ -69,7 +69,7 @@ func run(args []string) error {
 	}
 }
 
-// runEnsureDefaultFormTemplates 幂等补齐既有租户缺少的内建表单模板。
+// runEnsureDefaultFormTemplates 冪等補齊既有租戶缺少的內建表單模板。
 func runEnsureDefaultFormTemplates(args []string) error {
 	fs := flag.NewFlagSet("tenantctl ensure-default-form-templates", flag.ContinueOnError)
 	fs.SetOutput(os.Stderr)

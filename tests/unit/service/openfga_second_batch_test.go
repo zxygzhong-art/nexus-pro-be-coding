@@ -164,6 +164,7 @@ func TestOpenFGABackfillIncludesAssumableRoleAndAgentToolTuples(t *testing.T) {
 	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", CreatedAt: now})
 	_ = store.UpsertUserGroup(context.Background(), domain.UserGroup{ID: "ug-1", TenantID: "tenant-1", Name: "Trusted", MemberAccountIDs: []string{"acct-1"}, CreatedAt: now})
+	seedActiveGroupMembership(t, store, "tenant-1", "ug-1", "acct-1", now)
 	_ = store.UpsertAssumableRole(context.Background(), domain.AssumableRole{
 		ID:                 "role-hr",
 		TenantID:           "tenant-1",
@@ -249,6 +250,7 @@ func seedAssumableRoleFGAFixture(t *testing.T, store *memory.Store, now time.Tim
 		DirectPermissionSetIDs: []string{"ps-assume"},
 		CreatedAt:              now,
 	})
+	seedActiveGroupMembership(t, store, "tenant-1", "ug-trusted", "acct-1", now)
 	_ = store.UpsertAssumableRole(context.Background(), domain.AssumableRole{
 		ID:                 "role-hr",
 		TenantID:           "tenant-1",

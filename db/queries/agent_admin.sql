@@ -1,7 +1,7 @@
 -- name: UpsertAgentModel :one
 INSERT INTO agent_models (
     id, tenant_id, name, provider, model_name, litellm_model,
-    api_base_url, api_key, rate_limit_rpm,
+    api_base_url, api_key_ciphertext, api_key_preview, rate_limit_rpm,
     status, timeout_seconds,
     monthly_quota, used_quota, last_tested_at, last_test_status,
     last_test_message, sync_status, last_synced_at, last_sync_error,
@@ -9,7 +9,7 @@ INSERT INTO agent_models (
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(name), sqlc.arg(provider),
     sqlc.arg(model_name), sqlc.arg(litellm_model), sqlc.arg(api_base_url),
-    sqlc.arg(api_key), sqlc.arg(rate_limit_rpm), sqlc.arg(status),
+    sqlc.arg(api_key_ciphertext), sqlc.arg(api_key_preview), sqlc.arg(rate_limit_rpm), sqlc.arg(status),
     sqlc.arg(timeout_seconds),
     sqlc.arg(monthly_quota), sqlc.arg(used_quota), sqlc.arg(last_tested_at),
     sqlc.arg(last_test_status), sqlc.arg(last_test_message),
@@ -24,7 +24,8 @@ ON CONFLICT (id) DO UPDATE SET
     model_name = EXCLUDED.model_name,
     litellm_model = EXCLUDED.litellm_model,
     api_base_url = EXCLUDED.api_base_url,
-    api_key = EXCLUDED.api_key,
+    api_key_ciphertext = EXCLUDED.api_key_ciphertext,
+    api_key_preview = EXCLUDED.api_key_preview,
     rate_limit_rpm = EXCLUDED.rate_limit_rpm,
     status = EXCLUDED.status,
     timeout_seconds = EXCLUDED.timeout_seconds,
@@ -147,14 +148,14 @@ SELECT (
 -- name: UpsertAgentDefinition :one
 INSERT INTO agent_definitions (
     id, tenant_id, name, description, emoji, category, model_id,
-    main_agent_role, sub_agents, system_prompt, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds,
+    main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds,
     version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms,
     usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id,
     created_at, updated_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(name), sqlc.arg(description),
     sqlc.arg(emoji), sqlc.arg(category), sqlc.arg(model_id),
-    sqlc.arg(main_agent_role), sqlc.arg(sub_agents)::jsonb, sqlc.arg(system_prompt), sqlc.arg(tools)::jsonb, sqlc.arg(knowledge_base_ids)::jsonb, sqlc.arg(status), sqlc.arg(visibility),
+    sqlc.arg(main_agent_role), sqlc.arg(sub_agents)::jsonb, sqlc.arg(system_prompt), sqlc.arg(welcome_message), sqlc.arg(suggested_questions)::jsonb, sqlc.arg(tools)::jsonb, sqlc.arg(knowledge_base_ids)::jsonb, sqlc.arg(status), sqlc.arg(visibility),
     sqlc.arg(visibility_targets)::jsonb, sqlc.arg(timeout_seconds), sqlc.arg(version), sqlc.arg(published_version),
     sqlc.arg(usage_total_runs), sqlc.arg(usage_success_runs), sqlc.arg(usage_failed_runs),
     sqlc.arg(usage_avg_latency_ms), sqlc.arg(usage_last_run_at), sqlc.arg(usage_top_prompts)::jsonb,
@@ -169,8 +170,10 @@ ON CONFLICT (id) DO UPDATE SET
     category = EXCLUDED.category,
     model_id = EXCLUDED.model_id,
 	main_agent_role = EXCLUDED.main_agent_role,
-	sub_agents = EXCLUDED.sub_agents,
+    sub_agents = EXCLUDED.sub_agents,
     system_prompt = EXCLUDED.system_prompt,
+    welcome_message = EXCLUDED.welcome_message,
+    suggested_questions = EXCLUDED.suggested_questions,
     tools = EXCLUDED.tools,
     knowledge_base_ids = EXCLUDED.knowledge_base_ids,
     status = EXCLUDED.status,
@@ -245,11 +248,11 @@ RETURNING *;
 
 -- name: InsertAgentDefinitionVersion :one
 INSERT INTO agent_definition_versions (
-    id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, tools, knowledge_base_ids, model_id, note,
+    id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, tools, knowledge_base_ids, model_id, note,
     created_by_account_id, created_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(agent_id), sqlc.arg(version),
-    sqlc.arg(main_agent_role), sqlc.arg(sub_agents)::jsonb, sqlc.arg(system_prompt), sqlc.arg(tools)::jsonb, sqlc.arg(knowledge_base_ids)::jsonb, sqlc.arg(model_id), sqlc.arg(note),
+    sqlc.arg(main_agent_role), sqlc.arg(sub_agents)::jsonb, sqlc.arg(system_prompt), sqlc.arg(welcome_message), sqlc.arg(suggested_questions)::jsonb, sqlc.arg(tools)::jsonb, sqlc.arg(knowledge_base_ids)::jsonb, sqlc.arg(model_id), sqlc.arg(note),
     sqlc.arg(created_by_account_id), sqlc.arg(created_at)
 )
 RETURNING *;
@@ -265,19 +268,3 @@ SELECT * FROM agent_definition_versions
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND agent_id = sqlc.arg(agent_id)
   AND version = sqlc.arg(version);
-
--- name: InsertAgentAudit :one
-INSERT INTO agent_audits (
-    id, tenant_id, entity_type, entity_id, entity_name, action,
-    actor_account_id, actor_display_name, detail, created_at
-) VALUES (
-    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(entity_type), sqlc.arg(entity_id),
-    sqlc.arg(entity_name), sqlc.arg(action), sqlc.arg(actor_account_id),
-    sqlc.arg(actor_display_name), sqlc.arg(detail), sqlc.arg(created_at)
-)
-RETURNING *;
-
--- name: ListAgentAudits :many
-SELECT * FROM agent_audits
-WHERE tenant_id = sqlc.arg(tenant_id)
-ORDER BY created_at DESC, id DESC;

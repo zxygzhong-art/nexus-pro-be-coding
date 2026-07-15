@@ -50,7 +50,7 @@ func (c WorkflowService) FormBuilderCapabilities(ctx RequestContext) (domain.For
 	}, nil
 }
 
-// ListFormDefinitionDrafts 列出草稿；调用方通过 ownerAccountID 控制“我的草稿”或管理员全量视图。
+// ListFormDefinitionDrafts 列出草稿；調用方通過 ownerAccountID 控制“我的草稿”或管理員全量視圖。
 func (c WorkflowService) ListFormDefinitionDrafts(ctx RequestContext, ownerAccountID, status string) ([]domain.FormDefinitionDraft, error) {
 	if _, _, err := c.requireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionRead, ""); err != nil {
 		return nil, err
@@ -58,7 +58,7 @@ func (c WorkflowService) ListFormDefinitionDrafts(ctx RequestContext, ownerAccou
 	return c.store.ListFormDefinitionDrafts(goContext(ctx), ctx.TenantID, ownerAccountID, status)
 }
 
-// GetFormDefinitionDraft 取得单个草稿并执行资源级授权。
+// GetFormDefinitionDraft 取得單個草稿並執行資源級授權。
 func (c WorkflowService) GetFormDefinitionDraft(ctx RequestContext, id string) (domain.FormDefinitionDraft, error) {
 	_, decision, err := c.requireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionRead, id)
 	if err != nil {
@@ -77,7 +77,7 @@ func (c WorkflowService) GetFormDefinitionDraft(ctx RequestContext, id string) (
 	return draft, nil
 }
 
-// CreateFormDefinitionDraft 建立 Agent 可控、不可直接发布的表单定义草稿。
+// CreateFormDefinitionDraft 建立 Agent 可控、不可直接發佈的表單定義草稿。
 func (c WorkflowService) CreateFormDefinitionDraft(ctx RequestContext, input domain.CreateFormDefinitionDraftInput) (domain.FormDefinitionDraft, error) {
 	if _, _, err := c.requireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionCreate, ""); err != nil {
 		return domain.FormDefinitionDraft{}, err
@@ -100,7 +100,7 @@ func (c WorkflowService) CreateFormDefinitionDraft(ctx RequestContext, input dom
 	return c.GetFormDefinitionDraft(ctx, draft.ID)
 }
 
-// UpdateFormDefinitionDraft 更新草稿，必须携带当前 revision 以阻止 Agent 覆盖人工编辑。
+// UpdateFormDefinitionDraft 更新草稿，必須攜帶當前 revision 以阻止 Agent 覆蓋人工編輯。
 func (c WorkflowService) UpdateFormDefinitionDraft(ctx RequestContext, id string, input domain.UpdateFormDefinitionDraftInput) (domain.FormDefinitionDraft, error) {
 	_, decision, err := c.requireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionUpdate, id)
 	if err != nil {
@@ -132,7 +132,7 @@ func (c WorkflowService) UpdateFormDefinitionDraft(ctx RequestContext, id string
 	return c.GetFormDefinitionDraft(ctx, id)
 }
 
-// ValidateFormDefinitionDraft 只执行确定性校验与编译，不产生发布副作用。
+// ValidateFormDefinitionDraft 只執行確定性校驗與編譯，不產生髮布副作用。
 func (c WorkflowService) ValidateFormDefinitionDraft(ctx RequestContext, id string) (domain.FormDefinitionPreview, error) {
 	draft, err := c.GetFormDefinitionDraft(ctx, id)
 	if err != nil {
@@ -144,12 +144,12 @@ func (c WorkflowService) ValidateFormDefinitionDraft(ctx RequestContext, id stri
 	return domain.FormDefinitionPreview{Draft: draft, Validation: validation, CompiledSchema: compiled}, nil
 }
 
-// PreviewFormDefinitionDraft 提供 Agent 与前端复用的预览契约。
+// PreviewFormDefinitionDraft 提供 Agent 與前端複用的預覽契約。
 func (c WorkflowService) PreviewFormDefinitionDraft(ctx RequestContext, id string) (domain.FormDefinitionPreview, error) {
 	return c.ValidateFormDefinitionDraft(ctx, id)
 }
 
-// SimulateFormDefinitionWorkflow 只把流程节点解析成可读的审批序列，不启动真实工作流。
+// SimulateFormDefinitionWorkflow 只把流程節點解析成可讀的審批序列，不啟動真實工作流。
 func (c WorkflowService) SimulateFormDefinitionWorkflow(ctx RequestContext, id string) (domain.FormWorkflowSimulation, error) {
 	draft, err := c.GetFormDefinitionDraft(ctx, id)
 	if err != nil {
@@ -166,7 +166,7 @@ func (c WorkflowService) SimulateFormDefinitionWorkflow(ctx RequestContext, id s
 	return domain.FormWorkflowSimulation{Stages: stages}, nil
 }
 
-// SubmitFormDefinitionDraftForReview 把草稿送入管理员确认发布队列。
+// SubmitFormDefinitionDraftForReview 把草稿送入管理員確認發佈隊列。
 func (c WorkflowService) SubmitFormDefinitionDraftForReview(ctx RequestContext, id string, revision int64) (domain.FormDefinitionDraft, error) {
 	_, _, err := c.requireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionSubmit, id)
 	if err != nil {
@@ -197,7 +197,7 @@ func (c WorkflowService) SubmitFormDefinitionDraftForReview(ctx RequestContext, 
 	return c.GetFormDefinitionDraft(ctx, id)
 }
 
-// PublishFormDefinitionDraft 由管理员确认后把 compiled schema 写入既有 form_templates runtime。
+// PublishFormDefinitionDraft 由管理員確認後把 compiled schema 寫入既有 form_templates runtime。
 func (c WorkflowService) PublishFormDefinitionDraft(ctx RequestContext, id string, revision int64) (domain.FormDefinitionDraft, error) {
 	if _, _, err := c.requireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionApprove, id); err != nil {
 		return domain.FormDefinitionDraft{}, err
@@ -224,21 +224,25 @@ func (c WorkflowService) PublishFormDefinitionDraft(ctx RequestContext, id strin
 	key := firstNonEmpty(workspaceFormDesignSlug(draft.AuthoringSchema.Name), "form") + "-" + strings.TrimPrefix(draft.ID, "fdd_")
 	now := c.Now()
 	template := domain.FormTemplate{ID: templateID, TenantID: ctx.TenantID, Key: key, Name: draft.AuthoringSchema.Name, Description: draft.AuthoringSchema.Description, Schema: compiled, Status: "published", CurrentVersion: 1, CreatedAt: now, UpdatedAt: now}
-	if err := c.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
+	if err := c.withTransaction(ctx, func(tx WorkflowService) error {
+		if err := tx.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
+			return err
+		}
+		draft.CompiledSchema, draft.ValidationResult, draft.Status, draft.PublishedTemplateID, draft.UpdatedAt, draft.Revision = compiled, validation, domain.FormDefinitionDraftStatusPublished, templateID, now, revision
+		if err := tx.store.UpsertFormDefinitionDraft(goContext(ctx), draft); err != nil {
+			return err
+		}
+		return tx.audit(ctx, "workflow.form_definition_draft.publish", string(domain.ResourceFormDefinitionDraft), id, string(domain.SeverityHigh), map[string]any{"template_id": templateID})
+	}); err != nil {
 		return domain.FormDefinitionDraft{}, err
 	}
-	draft.CompiledSchema, draft.ValidationResult, draft.Status, draft.PublishedTemplateID, draft.UpdatedAt, draft.Revision = compiled, validation, domain.FormDefinitionDraftStatusPublished, templateID, now, revision
-	if err := c.store.UpsertFormDefinitionDraft(goContext(ctx), draft); err != nil {
-		return domain.FormDefinitionDraft{}, err
-	}
-	_ = c.audit(ctx, "workflow.form_definition_draft.publish", string(domain.ResourceFormDefinitionDraft), id, string(domain.SeverityHigh), map[string]any{"template_id": templateID})
 	return c.GetFormDefinitionDraft(ctx, id)
 }
 
-// formDefinitionTimePtr 建立 UTC 时间指针，避免生命周期更新时共享可变对象。
+// formDefinitionTimePtr 建立 UTC 時間指針，避免生命週期更新時共享可變對象。
 func formDefinitionTimePtr(value time.Time) *time.Time { value = value.UTC(); return &value }
 
-// formDefinitionUniqueStrings 保持流程角色顺序并去重。
+// formDefinitionUniqueStrings 保持流程角色順序並去重。
 func formDefinitionUniqueStrings(values []string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(values))

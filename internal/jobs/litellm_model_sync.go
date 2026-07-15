@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"nexus-pro-be/internal/domain"
@@ -30,10 +31,21 @@ type LiteLLMModelSyncOptions struct {
 
 // LiteLLMModelSyncer 消費模型 outbox 並定期以本地資料修復 LiteLLM registry。
 type LiteLLMModelSyncer struct {
-	store  repository.Store
-	client LiteLLMModelAdmin
+	store            repository.Store
+	client           LiteLLMModelAdmin
+	credentialCipher interface {
+		Decrypt(ciphertext string, associatedData []byte) ([]byte, error)
+	}
 	logger *slog.Logger
 	now    func() time.Time
+}
+
+// WithCredentialCipher enables just-in-time decryption of persisted model credentials.
+func (s *LiteLLMModelSyncer) WithCredentialCipher(cipher interface {
+	Decrypt(ciphertext string, associatedData []byte) ([]byte, error)
+}) *LiteLLMModelSyncer {
+	s.credentialCipher = cipher
+	return s
 }
 
 // NewLiteLLMModelSyncer 建立 LiteLLM 模型同步器。
@@ -145,6 +157,19 @@ func (s *LiteLLMModelSyncer) Run(ctx context.Context, opts LiteLLMModelSyncOptio
 
 // reconcileModel 依模型啟停狀態建立、更新或移除遠端路由並寫回結果。
 func (s *LiteLLMModelSyncer) reconcileModel(ctx context.Context, model domain.AgentModel) error {
+	if strings.TrimSpace(model.APIKeyCiphertext) != "" {
+		if s.credentialCipher == nil {
+			return errors.New("agent model credential cipher is not configured")
+		}
+		plaintext, err := s.credentialCipher.Decrypt(model.APIKeyCiphertext, domain.AgentModelCredentialAAD(model.TenantID, model.ID))
+		if err != nil {
+			return fmt.Errorf("decrypt agent model credential: %w", err)
+		}
+		model.APIKey = string(plaintext)
+	}
+	if model.Status != domain.AgentModelStatusDisabled && strings.TrimSpace(model.APIKey) == "" {
+		return errors.New("agent model credential is not configured; refusing to overwrite the existing LiteLLM route")
+	}
 	var syncErr error
 	if model.Status == domain.AgentModelStatusDisabled {
 		_, syncErr = s.client.DeleteModel(ctx, model.ID)

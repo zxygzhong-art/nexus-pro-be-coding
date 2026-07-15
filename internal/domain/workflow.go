@@ -319,6 +319,7 @@ type WorkflowFormStepAssignee struct {
 // WorkflowFormStateResponse 定義單據流程運行狀態回應。
 type WorkflowFormStateResponse struct {
 	FormInstanceID    string                  `json:"form_instance_id"`
+	FormStatus        string                  `json:"form_status"`
 	RunID             string                  `json:"run_id,omitempty"`
 	RunStatus         string                  `json:"run_status,omitempty"`
 	CurrentStageID    string                  `json:"current_stage_id,omitempty"`

@@ -222,7 +222,7 @@ func (c HRService) UpdateOrgUnit(ctx RequestContext, id string, input UpdateOrgU
 	return unit, nil
 }
 
-// assignManagerPositionOrgUnit 将主管岗位归属同步到当前组织单元。
+// assignManagerPositionOrgUnit 將主管崗位歸屬同步到當前組織單元。
 func (c HRService) assignManagerPositionOrgUnit(ctx RequestContext, unit OrgUnit) error {
 	positionID := strings.TrimSpace(unit.ManagerPositionID)
 	if positionID == "" {
@@ -252,7 +252,7 @@ func (c HRService) assignManagerPositionOrgUnit(ctx RequestContext, unit OrgUnit
 	})
 }
 
-// inheritClosedOrgUnitState 在读取投影中保证关闭状态沿祖先链向下继承。
+// inheritClosedOrgUnitState 在讀取投影中保證關閉狀態沿祖先鏈向下繼承。
 func inheritClosedOrgUnitState(units []OrgUnit) []OrgUnit {
 	byID := make(map[string]OrgUnit, len(units))
 	for _, unit := range units {
@@ -282,7 +282,7 @@ func inheritClosedOrgUnitState(units []OrgUnit) []OrgUnit {
 	return out
 }
 
-// orgUnitHasClosedAncestor 判断目标组织单元的任一祖先是否已关闭。
+// orgUnitHasClosedAncestor 判斷目標組織單元的任一祖先是否已關閉。
 func orgUnitHasClosedAncestor(unit OrgUnit, units []OrgUnit) bool {
 	byID := make(map[string]OrgUnit, len(units))
 	for _, candidate := range units {
@@ -299,7 +299,7 @@ func orgUnitHasClosedAncestor(unit OrgUnit, units []OrgUnit) bool {
 	return false
 }
 
-// closeOrgUnitDescendants 将关闭状态递归写入目标组织单元的全部后代。
+// closeOrgUnitDescendants 將關閉狀態遞歸寫入目標組織單元的全部後代。
 func (c HRService) closeOrgUnitDescendants(ctx RequestContext, parent OrgUnit) error {
 	units, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
 	if err != nil {

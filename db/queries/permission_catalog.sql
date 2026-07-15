@@ -27,10 +27,6 @@ SELECT * FROM permissions
 WHERE tenant_id = $1
 ORDER BY application ASC, resource ASC, action ASC, permission_type ASC;
 
--- name: DeletePermissionCatalogItem :exec
-DELETE FROM permissions
-WHERE tenant_id = $1 AND id = $2;
-
 -- name: UpsertMenuItem :one
 INSERT INTO menu_items (
     id, tenant_id, key, label, path, icon, parent_key, sort_order, created_at
@@ -51,10 +47,6 @@ SELECT * FROM menu_items
 WHERE tenant_id = $1
 ORDER BY parent_key ASC, sort_order ASC, key ASC;
 
--- name: DeleteMenuItem :exec
-DELETE FROM menu_items
-WHERE tenant_id = $1 AND id = $2;
-
 -- name: DeletePermissionSetItemsForSet :exec
 DELETE FROM permission_set_items
 WHERE tenant_id = $1 AND permission_set_id = $2;
@@ -68,11 +60,6 @@ INSERT INTO permission_set_items (
 ON CONFLICT (tenant_id, permission_set_id, permission_id) DO UPDATE SET
     created_at = permission_set_items.created_at
 RETURNING *;
-
--- name: ListPermissionSetItems :many
-SELECT * FROM permission_set_items
-WHERE tenant_id = $1
-ORDER BY created_at ASC;
 
 -- name: ListPermissionSetItemsForSet :many
 SELECT * FROM permission_set_items

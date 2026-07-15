@@ -37,6 +37,9 @@ jobs:
       - name: Unit tests
         run: GOCACHE=$PWD/.gocache go test ./tests/unit/...
 
+      - name: Package tests
+        run: GOCACHE=$PWD/.gocache go test ./internal/...
+
       - name: Validate migrations
         run: make migrate-validate
 
@@ -51,7 +54,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17
+        image: pgvector/pgvector:0.8.5-pg17-bookworm
         env:
           POSTGRES_DB: nexus_pro_be
           POSTGRES_USER: nexus
@@ -89,7 +92,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17
+        image: pgvector/pgvector:0.8.5-pg17-bookworm
         env:
           POSTGRES_DB: nexus_pro_be
           POSTGRES_USER: nexus

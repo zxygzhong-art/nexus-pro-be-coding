@@ -77,6 +77,108 @@ func TestWorkflowSubmitCreatesInReviewRun(t *testing.T) {
 	}
 }
 
+// TestWorkflowSubmitKeepsDraftWhenLeaveLinkingFails verifies workflow and leave writes share one transaction.
+func TestWorkflowSubmitKeepsDraftWhenLeaveLinkingFails(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	svc, ctx, store := newWorkflowEngineFixture(t, now, "acct-admin")
+	draft, err := svc.Workflow().SaveFormDraft(ctx, domain.SaveFormDraftInput{
+		TemplateKey: "leave-request",
+		Payload: map[string]any{
+			"leave_type": "annual",
+			"start_at":   "2026-06-11T09:00:00+08:00",
+			"end_at":     "2026-06-11T18:00:00+08:00",
+			"reason":     "transaction regression",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.Workflow().SubmitForm(ctx, domain.SubmitFormInput{TemplateKey: draft.ID, Payload: draft.Payload})
+	var appErr *domain.AppError
+	if !errors.As(err, &appErr) || appErr.Status != 400 || appErr.Message != "leave balance is required for this leave type" {
+		t.Fatalf("expected missing leave balance failure, got %T %v", err, err)
+	}
+	persisted, ok, err := store.GetFormInstance(t.Context(), "tenant-1", draft.ID)
+	if err != nil || !ok {
+		t.Fatalf("expected original draft to remain, ok=%v err=%v", ok, err)
+	}
+	if persisted.Status != "draft" || persisted.CurrentRunID != "" {
+		t.Fatalf("expected unchanged draft after rollback, got %+v", persisted)
+	}
+	if _, ok, err := store.GetWorkflowRunByFormInstance(t.Context(), "tenant-1", draft.ID); err != nil || ok {
+		t.Fatalf("workflow run must roll back with leave failure, ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := store.GetLeaveRequestByFormInstanceID(t.Context(), "tenant-1", draft.ID); err != nil || ok {
+		t.Fatalf("leave request must not survive failed submit, ok=%v err=%v", ok, err)
+	}
+}
+
+// TestWorkflowDuplicateSubmitReturnsConflict exposes a stable already-submitted contract to clients.
+func TestWorkflowDuplicateSubmitReturnsConflict(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	svc, ctx, _ := newWorkflowEngineFixture(t, now, "acct-admin")
+	draft, err := svc.Workflow().SaveFormDraft(ctx, domain.SaveFormDraftInput{
+		TemplateKey: "leave-request",
+		Payload:     map[string]any{"desc": "duplicate submit"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Workflow().SubmitForm(ctx, domain.SubmitFormInput{TemplateKey: draft.ID}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = svc.Workflow().SubmitForm(ctx, domain.SubmitFormInput{TemplateKey: draft.ID})
+	var appErr *domain.AppError
+	if !errors.As(err, &appErr) || appErr.Status != 409 || appErr.ReasonCode != "workflow_form_already_submitted" {
+		t.Fatalf("expected already-submitted conflict, got %T %v", err, err)
+	}
+}
+
+// TestWorkflowStateHonorsSelfScope prevents one employee from reading another employee's approval trail.
+func TestWorkflowStateHonorsSelfScope(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	svc, applicantCtx, store := newWorkflowEngineFixture(t, now, "acct-admin")
+
+	instance, err := svc.Workflow().SubmitForm(applicantCtx, domain.SubmitFormInput{
+		TemplateKey: "leave-request",
+		Payload:     map[string]any{"desc": "private approval trail"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = store.UpsertAccount(t.Context(), domain.Account{
+		ID:                     "acct-other-employee",
+		TenantID:               "tenant-1",
+		DisplayName:            "Other Employee",
+		EmployeeID:             "emp-other-employee",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-workflow-applicant"},
+		CreatedAt:              now,
+	})
+	_ = store.UpsertEmployee(t.Context(), domain.Employee{
+		ID:        "emp-other-employee",
+		TenantID:  "tenant-1",
+		Name:      "Other Employee",
+		AccountID: "acct-other-employee",
+		Status:    "active",
+		CreatedAt: now,
+	})
+
+	_, err = svc.Workflow().GetWorkflowFormState(
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-other-employee"},
+		instance.ID,
+	)
+	var appErr *domain.AppError
+	if !errors.As(err, &appErr) || appErr.Status != 404 {
+		t.Fatalf("expected scoped reader to receive not found, got %T %v", err, err)
+	}
+	if _, err := svc.Workflow().GetWorkflowFormState(applicantCtx, instance.ID); err != nil {
+		t.Fatalf("expected applicant to read own workflow state: %v", err)
+	}
+}
+
 func TestWorkflowTemporalSignalFailsWhenWorkflowMissing(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	svc, applicantCtx, _, fakeTemporal := newWorkflowEngineFixtureWithFake(t, now, "acct-admin")

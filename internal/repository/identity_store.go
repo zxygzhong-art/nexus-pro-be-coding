@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"nexus-pro-be/internal/domain"
 )
@@ -13,5 +14,6 @@ type IdentityStore interface {
 	ListUserIdentities(ctx context.Context, tenantID, accountID string) ([]domain.UserIdentity, error)
 	AppendIdentityProvisioningOutboxEvent(context.Context, domain.IdentityProvisioningOutboxEvent) error
 	ListPendingIdentityProvisioningOutboxEvents(ctx context.Context, tenantID string) ([]domain.IdentityProvisioningOutboxEvent, error)
+	ClaimIdentityProvisioningOutboxEvents(ctx context.Context, tenantID string, batchSize, maxRetries int, claimedAt, leaseUntil time.Time) ([]domain.IdentityProvisioningOutboxEvent, error)
 	UpdateIdentityProvisioningOutboxEvent(context.Context, domain.IdentityProvisioningOutboxEvent) error
 }

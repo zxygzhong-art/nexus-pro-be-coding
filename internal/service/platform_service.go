@@ -36,9 +36,13 @@ func (c PlatformService) Home(ctx RequestContext) (PlatformHomeResponse, error) 
 	if err != nil {
 		return PlatformHomeResponse{}, err
 	}
+	formColumns, err := c.platformFormCategories(ctx)
+	if err != nil {
+		return PlatformHomeResponse{}, err
+	}
 	return PlatformHomeResponse{
 		Assistants:   assistants,
-		FormColumns:  platformHomeFormColumns(),
+		FormColumns:  platformHomeFormColumns(formColumns),
 		ClockSummary: clockSummary,
 	}, nil
 }
@@ -77,13 +81,32 @@ func (c PlatformService) publishedPlatformAssistants(ctx RequestContext, limit i
 		if !visible {
 			continue
 		}
+		welcomeMessage := agent.WelcomeMessage
+		suggestedQuestions := agent.SuggestedQuestions
+		if agent.PublishedVersion > 0 {
+			snapshot, found, err := c.store.GetAgentDefinitionVersion(
+				goContext(ctx),
+				ctx.TenantID,
+				agent.ID,
+				agent.PublishedVersion,
+			)
+			if err != nil {
+				return nil, err
+			}
+			if found {
+				welcomeMessage = snapshot.WelcomeMessage
+				suggestedQuestions = snapshot.SuggestedQuestions
+			}
+		}
 		assistant := PlatformAssistant{
-			ID:       agent.ID,
-			Emoji:    agent.Emoji,
-			Title:    agent.Name,
-			Desc:     agent.Description,
-			Tag:      string(agent.Category),
-			Runnable: true,
+			ID:                 agent.ID,
+			Emoji:              agent.Emoji,
+			Title:              agent.Name,
+			Desc:               agent.Description,
+			Tag:                string(agent.Category),
+			WelcomeMessage:     welcomeMessage,
+			SuggestedQuestions: suggestedQuestions,
+			Runnable:           true,
 		}
 		if tag != "" && tag != "all" && assistant.Tag != tag {
 			continue
@@ -1089,15 +1112,14 @@ func platformAssistantMessages() []PlatformChatMessage {
 }
 
 // platformHomeFormColumns 處理平台首頁表單 columns。
-func platformHomeFormColumns() []PlatformFormColumn {
-	columns := platformFormColumns()
+func platformHomeFormColumns(columns []PlatformFormColumn) []PlatformFormColumn {
 	if len(columns) > 2 {
 		return append([]PlatformFormColumn(nil), columns[:2]...)
 	}
-	return columns
+	return append([]PlatformFormColumn(nil), columns...)
 }
 
-// platformFormCategories 依已啟用範本組裝表單分類；無範本時回退靜態清單。
+// platformFormCategories 依租戶已啟用範本組裝表單分類。
 func (c PlatformService) platformFormCategories(ctx RequestContext) ([]PlatformFormColumn, error) {
 	templates, err := c.store.ListFormTemplates(goContext(ctx), ctx.TenantID)
 	if err != nil {
@@ -1119,11 +1141,15 @@ func platformFormColumnsFromTemplates(templates []FormTemplate) []PlatformFormCo
 		enabled = append(enabled, template)
 	}
 	if len(enabled) == 0 {
-		return platformFormColumns()
+		return []PlatformFormColumn{}
 	}
 	grouped := map[string][]PlatformFormItem{}
+	categoryOrder := make([]string, 0)
 	for _, template := range enabled {
 		category := platformTemplateCategory(template)
+		if _, exists := grouped[category]; !exists {
+			categoryOrder = append(categoryOrder, category)
+		}
 		title := strings.TrimSpace(template.Name)
 		if title == "" {
 			title = template.Key
@@ -1149,14 +1175,14 @@ func platformFormColumnsFromTemplates(templates []FormTemplate) []PlatformFormCo
 		})
 		seen[column.Title] = struct{}{}
 	}
-	for category, items := range grouped {
+	for _, category := range categoryOrder {
 		if _, ok := seen[category]; ok {
 			continue
 		}
 		ordered = append(ordered, PlatformFormColumn{
 			Title: category,
 			Emoji: "📋",
-			Items: items,
+			Items: grouped[category],
 		})
 	}
 	return ordered

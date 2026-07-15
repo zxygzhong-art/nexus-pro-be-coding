@@ -471,7 +471,7 @@ func TestWorkspaceAttendanceUsesDailyLeaveFactsInsteadOfLeaveRanges(t *testing.T
 	}
 }
 
-// TestWorkspaceAttendanceExcludesUndatedResignedEmployees 驗證離職狀態但缺少離職日的人員不污染當月矩陣。
+// TestWorkspaceAttendanceExcludesUndatedResignedEmployees 驗證離職狀態但缺少離職日的人員不汙染當月矩陣。
 func TestWorkspaceAttendanceExcludesUndatedResignedEmployees(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
@@ -585,12 +585,12 @@ func TestWorkspaceAttendanceMarksIncompleteEHRMSClockSummaryAbnormal(t *testing.
 	}
 }
 
-// TestWorkspaceAttendanceCountsApprovedLeaveAndOvertime 驗證工時統計合併每日假勤、本地核准請假與核准加班。
+// TestWorkspaceAttendanceCountsApprovedLeaveAndOvertime 驗證工時統計合併每日假勤、本地核準請假與核准加班。
 func TestWorkspaceAttendanceCountsDailyLeaveAndApprovedOvertime(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
-	// 本地核准請假與 eHRMS 每日事實合併，同一天取較完整的時數，避免重複累加。
+	// 本地核準請假與 eHRMS 每日事實合併，同一天取較完整的時數，避免重複累加。
 	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lv-approved", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", StartAt: time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 12, 23, 0, 0, 0, time.UTC), Hours: 24, Status: "approved", CreatedAt: now})
 	_ = store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "sum-leave", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", LeaveType: "annual", LeaveHours: 4, LeaveCounted: true, Leave2Type: "personal", Leave2Hours: 4, Leave2Counted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-11", CreatedAt: now, UpdatedAt: now})
 	// 只有 approved 加班會累計時數。
@@ -631,7 +631,7 @@ func TestWorkspaceClockShortHoursExemptedByDailyLeave(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
-	// 半天假勤 + 半天出勤：工时不足由同日每日假勤补足，不应标记异常。
+	// 半天假勤 + 半天出勤：工時不足由同日每日假勤補足，不應標記異常。
 	_ = store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "sum-half", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", LeaveType: "annual", LeaveHours: 4, LeaveCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-10", CreatedAt: now, UpdatedAt: now})
 	_ = store.UpsertAttendanceClockRecord(context.Background(), domain.AttendanceClockRecord{ID: "clk-in", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_in", ClockedAt: time.Date(2026, 6, 10, 13, 0, 0, 0, time.UTC), RecordStatus: "accepted", Source: "geofence", CreatedAt: now})
 	_ = store.UpsertAttendanceClockRecord(context.Background(), domain.AttendanceClockRecord{ID: "clk-out", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_out", ClockedAt: time.Date(2026, 6, 10, 18, 0, 0, 0, time.UTC), RecordStatus: "accepted", Source: "geofence", CreatedAt: now})

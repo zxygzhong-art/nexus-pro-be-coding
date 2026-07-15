@@ -1,6 +1,7 @@
 
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS vector;
+CREATE EXTENSION IF NOT EXISTS btree_gist;
 
 CREATE TABLE tenants (
     id text PRIMARY KEY,
@@ -62,13 +63,72 @@ CREATE TABLE authz_group_memberships (
     created_by text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
     CONSTRAINT authz_group_memberships_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT authz_group_memberships_unique_idx UNIQUE (tenant_id, user_group_id, account_id),
+    CONSTRAINT authz_group_memberships_interval_check CHECK (valid_until IS NULL OR valid_until >= valid_from),
+    CONSTRAINT authz_group_memberships_no_overlap EXCLUDE USING gist (
+        tenant_id WITH =,
+        user_group_id WITH =,
+        account_id WITH =,
+        tstzrange(valid_from, valid_until, '[)') WITH &&
+    ),
     CONSTRAINT authz_group_memberships_group_fk FOREIGN KEY (tenant_id, user_group_id) REFERENCES user_groups (tenant_id, id) ON DELETE CASCADE,
     CONSTRAINT authz_group_memberships_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX authz_group_memberships_group_idx ON authz_group_memberships (tenant_id, user_group_id, created_at);
 CREATE INDEX authz_group_memberships_account_active_idx ON authz_group_memberships (tenant_id, account_id, valid_from, valid_until);
+
+CREATE FUNCTION refresh_group_membership_projection(p_tenant_id text, p_user_group_id text, p_account_id text)
+RETURNS void
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    UPDATE user_groups
+    SET member_account_ids = COALESCE((
+            SELECT array_agg(account_id ORDER BY account_id)
+            FROM authz_group_memberships
+            WHERE tenant_id = p_tenant_id
+              AND user_group_id = p_user_group_id
+              AND valid_from <= CURRENT_TIMESTAMP
+              AND (valid_until IS NULL OR valid_until > CURRENT_TIMESTAMP)
+        ), '{}'::text[]),
+        version = version + 1
+    WHERE tenant_id = p_tenant_id AND id = p_user_group_id;
+
+    UPDATE accounts
+    SET user_group_ids = COALESCE((
+            SELECT array_agg(user_group_id ORDER BY user_group_id)
+            FROM authz_group_memberships
+            WHERE tenant_id = p_tenant_id
+              AND account_id = p_account_id
+              AND valid_from <= CURRENT_TIMESTAMP
+              AND (valid_until IS NULL OR valid_until > CURRENT_TIMESTAMP)
+        ), '{}'::text[]),
+        version = version + 1
+    WHERE tenant_id = p_tenant_id AND id = p_account_id;
+END;
+$$;
+
+CREATE FUNCTION sync_group_membership_projections()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+	IF TG_OP = 'DELETE' OR (TG_OP = 'UPDATE' AND (OLD.tenant_id, OLD.user_group_id, OLD.account_id) IS DISTINCT FROM (NEW.tenant_id, NEW.user_group_id, NEW.account_id)) THEN
+        PERFORM refresh_group_membership_projection(OLD.tenant_id, OLD.user_group_id, OLD.account_id);
+    END IF;
+    IF TG_OP IN ('INSERT', 'UPDATE') THEN
+        PERFORM refresh_group_membership_projection(NEW.tenant_id, NEW.user_group_id, NEW.account_id);
+    END IF;
+	IF TG_OP = 'DELETE' THEN
+		RETURN OLD;
+	END IF;
+	RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER authz_group_memberships_projection_trigger
+AFTER INSERT OR UPDATE OR DELETE ON authz_group_memberships
+FOR EACH ROW EXECUTE FUNCTION sync_group_membership_projections();
 
 CREATE TABLE permission_sets (
     id text PRIMARY KEY,
@@ -135,7 +195,9 @@ CREATE TABLE permission_set_items (
     CONSTRAINT permission_set_items_permission_fk FOREIGN KEY (tenant_id, permission_id) REFERENCES permissions (tenant_id, id) ON DELETE CASCADE
 );
 
-CREATE INDEX permission_set_items_tenant_set_idx ON permission_set_items (tenant_id, permission_set_id);
+COMMENT ON COLUMN permission_sets.permissions IS 'Authoring source for the permission set contract; service transactions rebuild permission_set_items after each write.';
+COMMENT ON TABLE permission_set_items IS 'Normalized query projection derived from permission_sets.permissions; do not write independently from application flows.';
+
 CREATE INDEX permission_set_items_tenant_permission_idx ON permission_set_items (tenant_id, permission_id);
 
 CREATE TABLE assumable_roles (
@@ -224,7 +286,8 @@ CREATE TABLE user_identities (
     provider text NOT NULL,
     subject text NOT NULL,
     email text NOT NULL DEFAULT '',
-    created_at timestamptz NOT NULL
+    created_at timestamptz NOT NULL,
+    CONSTRAINT user_identities_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX user_identities_tenant_account_idx ON user_identities (tenant_id, account_id);
@@ -321,9 +384,6 @@ CREATE TABLE authz_relationship_tuples (
     created_at timestamptz NOT NULL
 );
 
-CREATE INDEX authz_relationship_tuples_object_idx ON authz_relationship_tuples (
-    tenant_id, object_type, object_id, relation
-);
 CREATE UNIQUE INDEX authz_relationship_tuples_unique_idx ON authz_relationship_tuples (
     tenant_id, object_type, object_id, relation, subject_type, subject_id
 );
@@ -344,14 +404,16 @@ CREATE TABLE identity_provisioning_outbox (
     display_name text NOT NULL DEFAULT '',
     enabled boolean NOT NULL DEFAULT true,
     send_invite boolean NOT NULL DEFAULT false,
-    status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'succeeded', 'failed')),
+    status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'succeeded', 'failed')),
     retry_count integer NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
     last_error text NOT NULL DEFAULT '',
+    next_attempt_at timestamptz NOT NULL,
+    claim_expires_at timestamptz,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL
 );
 
-CREATE INDEX identity_provisioning_outbox_tenant_status_idx ON identity_provisioning_outbox (tenant_id, status, created_at);
+CREATE INDEX identity_provisioning_outbox_tenant_status_idx ON identity_provisioning_outbox (tenant_id, status, next_attempt_at, created_at);
 
 CREATE TABLE org_units (
     id text PRIMARY KEY,
@@ -594,30 +656,121 @@ CREATE TABLE attendance_policies (
     CONSTRAINT attendance_policies_tenant_id_idx UNIQUE (tenant_id)
 );
 
+CREATE TABLE attendance_policy_versions (
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    version integer NOT NULL CHECK (version > 0),
+    policy_id text NOT NULL,
+    work_time jsonb NOT NULL,
+    leave_types jsonb NOT NULL,
+    effective_from timestamptz,
+    updated_by_account_id text NOT NULL DEFAULT '',
+    created_at timestamptz NOT NULL,
+    PRIMARY KEY (tenant_id, version)
+);
+
+CREATE FUNCTION snapshot_attendance_policy_version()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    INSERT INTO attendance_policy_versions (
+        tenant_id, version, policy_id, work_time, leave_types,
+        effective_from, updated_by_account_id, created_at
+    ) VALUES (
+        NEW.tenant_id, NEW.version, NEW.id, NEW.work_time, NEW.leave_types,
+        NEW.effective_from, NEW.updated_by_account_id, NEW.updated_at
+    )
+    ON CONFLICT (tenant_id, version) DO NOTHING;
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER attendance_policies_version_trigger
+AFTER INSERT OR UPDATE ON attendance_policies
+FOR EACH ROW EXECUTE FUNCTION snapshot_attendance_policy_version();
+
 CREATE TABLE leave_balances (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     employee_id text NOT NULL,
     leave_type text NOT NULL,
-    remaining_hours double precision NOT NULL,
-    period_start text NOT NULL DEFAULT '',
-    period_end text NOT NULL DEFAULT '',
-    granted_hours double precision NOT NULL DEFAULT 0,
-    used_hours double precision NOT NULL DEFAULT 0,
+    remaining_hours numeric(12,2) NOT NULL,
+    period_start date,
+    period_end date,
+    granted_hours numeric(12,2) NOT NULL DEFAULT 0,
+    used_hours numeric(12,2) NOT NULL DEFAULT 0,
     source text NOT NULL DEFAULT 'legacy',
     policy_version integer NOT NULL DEFAULT 0,
     prorate_ratio double precision,
     updated_at timestamptz NOT NULL,
+    CONSTRAINT leave_balances_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT leave_balances_employee_type_period_idx UNIQUE NULLS NOT DISTINCT (tenant_id, employee_id, leave_type, period_start, period_end),
+    CONSTRAINT leave_balances_period_check CHECK (period_start IS NULL OR period_end IS NULL OR period_end >= period_start),
+    CONSTRAINT leave_balances_nonnegative_check CHECK (remaining_hours >= 0 AND granted_hours >= 0 AND used_hours >= 0),
+    CONSTRAINT leave_balances_period_no_overlap EXCLUDE USING gist (
+        tenant_id WITH =,
+        employee_id WITH =,
+        leave_type WITH =,
+        daterange(period_start, period_end, '[]') WITH &&
+    ),
     CONSTRAINT leave_balances_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id)
 );
 
 CREATE INDEX leave_balances_tenant_id_idx ON leave_balances (tenant_id);
-CREATE UNIQUE INDEX leave_balances_tenant_employee_type_idx ON leave_balances (tenant_id, employee_id, leave_type);
+
+CREATE TABLE leave_balance_ledger (
+    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    tenant_id text NOT NULL,
+    balance_id text NOT NULL,
+    employee_id text NOT NULL,
+    leave_type text NOT NULL,
+    period_start date,
+    period_end date,
+    event_type text NOT NULL CHECK (event_type IN ('snapshot', 'reserve', 'release', 'adjustment')),
+    delta_hours numeric(12,2) NOT NULL,
+    remaining_hours numeric(12,2) NOT NULL,
+    granted_hours numeric(12,2) NOT NULL,
+    used_hours numeric(12,2) NOT NULL,
+    source text NOT NULL,
+    occurred_at timestamptz NOT NULL,
+    CONSTRAINT leave_balance_ledger_balance_fk FOREIGN KEY (tenant_id, balance_id) REFERENCES leave_balances (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX leave_balance_ledger_employee_period_idx ON leave_balance_ledger (tenant_id, employee_id, leave_type, period_start, occurred_at);
+
+CREATE FUNCTION append_leave_balance_ledger()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    ledger_event_type text;
+BEGIN
+    ledger_event_type := CASE
+        WHEN TG_OP = 'INSERT' THEN 'snapshot'
+        WHEN NEW.remaining_hours < OLD.remaining_hours THEN 'reserve'
+        WHEN NEW.remaining_hours > OLD.remaining_hours AND NEW.used_hours < OLD.used_hours THEN 'release'
+        ELSE 'adjustment'
+    END;
+    INSERT INTO leave_balance_ledger (
+        tenant_id, balance_id, employee_id, leave_type, period_start, period_end,
+        event_type, delta_hours, remaining_hours, granted_hours, used_hours, source, occurred_at
+    ) VALUES (
+        NEW.tenant_id, NEW.id, NEW.employee_id, NEW.leave_type, NEW.period_start, NEW.period_end,
+        ledger_event_type, NEW.remaining_hours - CASE WHEN TG_OP = 'INSERT' THEN 0 ELSE OLD.remaining_hours END,
+        NEW.remaining_hours, NEW.granted_hours, NEW.used_hours, NEW.source, NEW.updated_at
+    );
+    RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER leave_balances_ledger_trigger
+AFTER INSERT OR UPDATE ON leave_balances
+FOR EACH ROW EXECUTE FUNCTION append_leave_balance_ledger();
 
 CREATE TABLE form_definition_drafts (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    owner_account_id text NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+    owner_account_id text NOT NULL,
     base_template_id text NOT NULL DEFAULT '',
     schema_version integer NOT NULL CHECK (schema_version > 0),
     authoring_schema jsonb NOT NULL DEFAULT '{}'::jsonb,
@@ -635,7 +788,7 @@ CREATE TABLE form_definition_drafts (
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     CONSTRAINT form_definition_drafts_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT form_definition_drafts_owner_fk FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id)
+    CONSTRAINT form_definition_drafts_owner_fk FOREIGN KEY (tenant_id, owner_account_id) REFERENCES accounts (tenant_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX form_definition_drafts_tenant_status_updated_idx ON form_definition_drafts (tenant_id, status, updated_at DESC);
@@ -670,6 +823,7 @@ CREATE TABLE form_template_versions (
     created_at timestamptz NOT NULL,
     published_at timestamptz,
     CONSTRAINT form_template_versions_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT form_template_versions_tenant_template_id_idx UNIQUE (tenant_id, template_id, id),
     CONSTRAINT form_template_versions_template_fk FOREIGN KEY (tenant_id, template_id) REFERENCES form_templates (tenant_id, id) ON DELETE CASCADE,
     CONSTRAINT form_template_versions_tenant_template_version_idx UNIQUE (tenant_id, template_id, version)
 );
@@ -690,8 +844,9 @@ CREATE TABLE form_instances (
     version bigint NOT NULL DEFAULT 1,
     updated_at timestamptz NOT NULL,
     CONSTRAINT form_instances_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT form_instances_identity_idx UNIQUE (tenant_id, id, template_id, template_version_id),
     CONSTRAINT form_instances_template_fk FOREIGN KEY (tenant_id, template_id) REFERENCES form_templates (tenant_id, id),
-    CONSTRAINT form_instances_template_version_fk FOREIGN KEY (tenant_id, template_version_id) REFERENCES form_template_versions (tenant_id, id),
+    CONSTRAINT form_instances_template_version_fk FOREIGN KEY (tenant_id, template_id, template_version_id) REFERENCES form_template_versions (tenant_id, template_id, id),
     CONSTRAINT form_instances_applicant_account_fk FOREIGN KEY (tenant_id, applicant_account_id) REFERENCES accounts (tenant_id, id)
 );
 
@@ -715,9 +870,19 @@ CREATE TABLE form_instance_field_values (
     value_json jsonb,
     created_at timestamptz NOT NULL,
     PRIMARY KEY (tenant_id, form_instance_id, field_id),
-    CONSTRAINT form_instance_field_values_instance_fk FOREIGN KEY (tenant_id, form_instance_id) REFERENCES form_instances (tenant_id, id) ON DELETE CASCADE,
-    CONSTRAINT form_instance_field_values_template_fk FOREIGN KEY (tenant_id, template_id) REFERENCES form_templates (tenant_id, id),
-    CONSTRAINT form_instance_field_values_template_version_fk FOREIGN KEY (tenant_id, template_version_id) REFERENCES form_template_versions (tenant_id, id)
+    CONSTRAINT form_instance_field_values_instance_fk FOREIGN KEY (tenant_id, form_instance_id, template_id, template_version_id) REFERENCES form_instances (tenant_id, id, template_id, template_version_id) ON DELETE CASCADE,
+    CONSTRAINT form_instance_field_values_one_value_check CHECK (
+        num_nonnulls(value_text, value_number, value_boolean, value_date, value_timestamp, value_json) = 1
+        AND CASE value_type
+            WHEN 'text' THEN value_text IS NOT NULL
+            WHEN 'number' THEN value_number IS NOT NULL
+            WHEN 'boolean' THEN value_boolean IS NOT NULL
+            WHEN 'date' THEN value_date IS NOT NULL
+            WHEN 'timestamp' THEN value_timestamp IS NOT NULL
+            WHEN 'json' THEN value_json IS NOT NULL
+            ELSE false
+        END
+    )
 );
 
 CREATE INDEX form_instance_field_values_text_idx ON form_instance_field_values (tenant_id, template_id, field_id, value_text);
@@ -733,9 +898,9 @@ CREATE TABLE workflow_runs (
     form_instance_id text NOT NULL,
     template_id text NOT NULL,
     version integer NOT NULL,
-    status text NOT NULL,
-    current_stage_instance_id text NOT NULL DEFAULT '',
-    stage_definitions_json text NOT NULL DEFAULT '[]',
+    status text NOT NULL CHECK (status IN ('running', 'returned', 'completed', 'cancelled', 'start_failed')),
+    current_stage_instance_id text,
+    stage_definitions_json jsonb NOT NULL DEFAULT '[]'::jsonb,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     CONSTRAINT workflow_runs_tenant_id_id_idx UNIQUE (tenant_id, id),
@@ -750,14 +915,15 @@ CREATE TABLE workflow_stage_instances (
     tenant_id text NOT NULL,
     run_id text NOT NULL,
     stage_id text NOT NULL,
-    stage_type text NOT NULL,
+    stage_type text NOT NULL CHECK (stage_type IN ('notify', 'condition', 'approver', 'parallel')),
     label text NOT NULL,
-    status text NOT NULL,
+    status text NOT NULL CHECK (status IN ('pending', 'active', 'completed', 'skipped', 'rejected')),
     sequence integer NOT NULL,
     result jsonb NOT NULL DEFAULT '{}'::jsonb,
     started_at timestamptz,
     completed_at timestamptz,
     CONSTRAINT workflow_stage_instances_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT workflow_stage_instances_run_identity_idx UNIQUE (tenant_id, run_id, id),
     CONSTRAINT workflow_stage_instances_run_fk FOREIGN KEY (tenant_id, run_id) REFERENCES workflow_runs (tenant_id, id) ON DELETE CASCADE
 );
 
@@ -767,7 +933,7 @@ CREATE TABLE workflow_stage_assignees (
     tenant_id text NOT NULL,
     stage_instance_id text NOT NULL,
     account_id text NOT NULL,
-    status text NOT NULL,
+    status text NOT NULL CHECK (status IN ('pending', 'approved', 'rejected', 'returned')),
     PRIMARY KEY (tenant_id, stage_instance_id, account_id),
     CONSTRAINT workflow_stage_assignees_stage_fk FOREIGN KEY (tenant_id, stage_instance_id) REFERENCES workflow_stage_instances (tenant_id, id) ON DELETE CASCADE,
     CONSTRAINT workflow_stage_assignees_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id)
@@ -781,13 +947,20 @@ CREATE TABLE workflow_actions (
     run_id text NOT NULL,
     stage_instance_id text NOT NULL,
     account_id text NOT NULL,
-    action text NOT NULL,
+    action text NOT NULL CHECK (action IN ('submit', 'approve', 'reject', 'return', 'withdraw', 'notify', 'auto_condition')),
     comment text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
-    CONSTRAINT workflow_actions_run_fk FOREIGN KEY (tenant_id, run_id) REFERENCES workflow_runs (tenant_id, id) ON DELETE CASCADE
+    CONSTRAINT workflow_actions_run_fk FOREIGN KEY (tenant_id, run_id) REFERENCES workflow_runs (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT workflow_actions_stage_fk FOREIGN KEY (tenant_id, run_id, stage_instance_id) REFERENCES workflow_stage_instances (tenant_id, run_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX workflow_actions_run_created_idx ON workflow_actions (tenant_id, run_id, created_at);
+
+ALTER TABLE workflow_runs
+    ADD CONSTRAINT workflow_runs_current_stage_fk
+    FOREIGN KEY (tenant_id, id, current_stage_instance_id)
+    REFERENCES workflow_stage_instances (tenant_id, run_id, id)
+    DEFERRABLE INITIALLY DEFERRED;
 
 CREATE TABLE leave_requests (
     id text PRIMARY KEY,
@@ -800,8 +973,10 @@ CREATE TABLE leave_requests (
     reason text NOT NULL DEFAULT '',
     status text NOT NULL,
     form_instance_id text NOT NULL DEFAULT '',
+    leave_balance_id text,
     created_at timestamptz NOT NULL,
-    CONSTRAINT leave_requests_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id)
+    CONSTRAINT leave_requests_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
+    CONSTRAINT leave_requests_balance_fk FOREIGN KEY (tenant_id, leave_balance_id) REFERENCES leave_balances (tenant_id, id)
 );
 
 CREATE INDEX leave_requests_tenant_id_idx ON leave_requests (tenant_id);
@@ -851,10 +1026,16 @@ CREATE TABLE attendance_shift_assignments (
     worksite_id text NOT NULL,
     effective_from timestamptz NOT NULL,
     effective_to timestamptz,
-    status text NOT NULL DEFAULT 'active',
+    status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     CONSTRAINT attendance_shift_assignments_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT attendance_shift_assignments_interval_check CHECK (effective_to IS NULL OR effective_to >= effective_from),
+    CONSTRAINT attendance_shift_assignments_active_no_overlap EXCLUDE USING gist (
+        tenant_id WITH =,
+        employee_id WITH =,
+        tstzrange(effective_from, effective_to, '[]') WITH &&
+    ) WHERE (status = 'active'),
     CONSTRAINT attendance_shift_assignments_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
     CONSTRAINT attendance_shift_assignments_shift_fk FOREIGN KEY (tenant_id, shift_id) REFERENCES attendance_shifts (tenant_id, id),
     CONSTRAINT attendance_shift_assignments_worksite_fk FOREIGN KEY (tenant_id, worksite_id) REFERENCES attendance_worksites (tenant_id, id)
@@ -1035,7 +1216,8 @@ CREATE TABLE agent_models (
     model_name text NOT NULL,
     litellm_model text NOT NULL,
     api_base_url text NOT NULL DEFAULT '',
-    api_key text NOT NULL DEFAULT '',
+    api_key_ciphertext text NOT NULL DEFAULT '',
+    api_key_preview text NOT NULL DEFAULT '',
     rate_limit_rpm integer NOT NULL DEFAULT 0 CHECK (rate_limit_rpm >= 0),
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
     timeout_seconds integer NOT NULL DEFAULT 60 CHECK (timeout_seconds > 0),
@@ -1157,6 +1339,8 @@ CREATE TABLE agent_definitions (
 	main_agent_role text NOT NULL DEFAULT '',
 	sub_agents jsonb NOT NULL DEFAULT '[]'::jsonb,
     system_prompt text NOT NULL DEFAULT '',
+    welcome_message text NOT NULL DEFAULT '',
+    suggested_questions jsonb NOT NULL DEFAULT '[]'::jsonb,
     tools jsonb NOT NULL DEFAULT '[]'::jsonb,
     knowledge_base_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
     status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published')),
@@ -1192,6 +1376,8 @@ CREATE TABLE agent_definition_versions (
 	main_agent_role text NOT NULL DEFAULT '',
 	sub_agents jsonb NOT NULL DEFAULT '[]'::jsonb,
     system_prompt text NOT NULL DEFAULT '',
+    welcome_message text NOT NULL DEFAULT '',
+    suggested_questions jsonb NOT NULL DEFAULT '[]'::jsonb,
     tools jsonb NOT NULL DEFAULT '[]'::jsonb,
     knowledge_base_ids jsonb NOT NULL DEFAULT '[]'::jsonb,
     model_id text NOT NULL,
@@ -1206,28 +1392,12 @@ CREATE TABLE agent_definition_versions (
 
 CREATE INDEX agent_definition_versions_agent_idx ON agent_definition_versions (tenant_id, agent_id, version DESC);
 
-CREATE TABLE agent_audits (
-    id text PRIMARY KEY,
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    entity_type text NOT NULL CHECK (entity_type IN ('agent', 'model')),
-    entity_id text NOT NULL,
-    entity_name text NOT NULL DEFAULT '',
-    action text NOT NULL,
-    actor_account_id text,
-    actor_display_name text NOT NULL DEFAULT '',
-    detail text NOT NULL DEFAULT '',
-    created_at timestamptz NOT NULL,
-    CONSTRAINT agent_audits_actor_fk FOREIGN KEY (tenant_id, actor_account_id) REFERENCES accounts (tenant_id, id)
-);
-
-CREATE INDEX agent_audits_tenant_created_at_idx ON agent_audits (tenant_id, created_at DESC, id DESC);
-
 CREATE TABLE agent_runs (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     account_id text NOT NULL,
     agent_id text,
-    session_id text NOT NULL DEFAULT '',
+    session_id text,
     mode text NOT NULL,
     prompt text NOT NULL,
     answer text NOT NULL DEFAULT '',
@@ -1235,7 +1405,9 @@ CREATE TABLE agent_runs (
     reference_items jsonb NOT NULL DEFAULT '[]'::jsonb,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
-    CONSTRAINT agent_runs_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id)
+    CONSTRAINT agent_runs_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT agent_runs_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id),
+    CONSTRAINT agent_runs_agent_fk FOREIGN KEY (tenant_id, agent_id) REFERENCES agent_definitions (tenant_id, id) ON DELETE SET NULL (agent_id)
 );
 
 CREATE INDEX agent_runs_tenant_id_idx ON agent_runs (tenant_id);
@@ -1244,7 +1416,7 @@ CREATE INDEX agent_runs_tenant_account_created_at_idx ON agent_runs (tenant_id, 
 CREATE INDEX agent_runs_tenant_agent_id_idx ON agent_runs (tenant_id, agent_id, created_at DESC);
 CREATE UNIQUE INDEX agent_runs_active_session_unique
     ON agent_runs (tenant_id, session_id)
-    WHERE session_id <> '' AND status IN ('queued', 'running');
+    WHERE session_id IS NOT NULL AND status IN ('queued', 'running');
 
 CREATE TABLE agent_sessions (
     id text PRIMARY KEY,
@@ -1258,8 +1430,12 @@ CREATE TABLE agent_sessions (
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     CONSTRAINT agent_sessions_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT agent_sessions_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id)
+    CONSTRAINT agent_sessions_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id),
+    CONSTRAINT agent_sessions_agent_fk FOREIGN KEY (tenant_id, agent_id) REFERENCES agent_definitions (tenant_id, id) ON DELETE SET NULL (agent_id)
 );
+
+ALTER TABLE agent_runs
+    ADD CONSTRAINT agent_runs_session_fk FOREIGN KEY (tenant_id, session_id) REFERENCES agent_sessions (tenant_id, id) ON DELETE SET NULL (session_id);
 
 CREATE INDEX agent_sessions_tenant_account_updated_idx
     ON agent_sessions (tenant_id, account_id, status, updated_at DESC, id DESC);
@@ -1278,7 +1454,9 @@ CREATE TABLE agent_session_messages (
     created_at timestamptz NOT NULL,
     CONSTRAINT agent_session_messages_tenant_id_id_idx UNIQUE (tenant_id, id),
     CONSTRAINT agent_session_messages_session_fk
-        FOREIGN KEY (tenant_id, session_id) REFERENCES agent_sessions (tenant_id, id) ON DELETE CASCADE
+        FOREIGN KEY (tenant_id, session_id) REFERENCES agent_sessions (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT agent_session_messages_run_fk
+        FOREIGN KEY (tenant_id, run_id) REFERENCES agent_runs (tenant_id, id) ON DELETE SET NULL (run_id)
 );
 
 CREATE INDEX agent_session_messages_session_created_idx
@@ -1370,8 +1548,10 @@ CREATE TABLE agent_memories (
     updated_at timestamptz NOT NULL,
     CONSTRAINT agent_memories_tenant_id_id_idx UNIQUE (tenant_id, id),
     CONSTRAINT agent_memories_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id),
+    CONSTRAINT agent_memories_agent_fk
+        FOREIGN KEY (tenant_id, agent_id) REFERENCES agent_definitions (tenant_id, id) ON DELETE SET NULL (agent_id),
     CONSTRAINT agent_memories_session_fk
-        FOREIGN KEY (tenant_id, session_id) REFERENCES agent_sessions (tenant_id, id) ON DELETE SET NULL
+        FOREIGN KEY (tenant_id, session_id) REFERENCES agent_sessions (tenant_id, id) ON DELETE SET NULL (session_id)
 );
 
 CREATE INDEX agent_memories_tenant_account_idx
@@ -1421,7 +1601,7 @@ CREATE TABLE outbox_events (
     aggregate_type text NOT NULL DEFAULT '',
     aggregate_id text NOT NULL DEFAULT '',
     payload jsonb NOT NULL DEFAULT '{}'::jsonb,
-    status text NOT NULL DEFAULT 'pending',
+    status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'succeeded', 'failed', 'parked')),
     retry_count integer NOT NULL DEFAULT 0 CHECK (retry_count >= 0),
     last_error text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
@@ -1497,8 +1677,14 @@ ALTER TABLE employment_contracts ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employment_contracts FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_policies ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_policies FORCE ROW LEVEL SECURITY;
+ALTER TABLE attendance_policy_versions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE attendance_policy_versions FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_balances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_balances FORCE ROW LEVEL SECURITY;
+ALTER TABLE leave_balance_ledger ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leave_balance_ledger FORCE ROW LEVEL SECURITY;
+ALTER TABLE form_definition_drafts ENABLE ROW LEVEL SECURITY;
+ALTER TABLE form_definition_drafts FORCE ROW LEVEL SECURITY;
 ALTER TABLE form_templates ENABLE ROW LEVEL SECURITY;
 ALTER TABLE form_templates FORCE ROW LEVEL SECURITY;
 ALTER TABLE form_template_versions ENABLE ROW LEVEL SECURITY;
@@ -1549,8 +1735,6 @@ ALTER TABLE agent_definitions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_definitions FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_definition_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_definition_versions FORCE ROW LEVEL SECURITY;
-ALTER TABLE agent_audits ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent_audits FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_runs FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_sessions ENABLE ROW LEVEL SECURITY;
@@ -1607,14 +1791,15 @@ CREATE POLICY tenant_isolation_authz_permission_versions ON authz_permission_ver
 CREATE POLICY tenant_isolation_identity_provisioning_outbox ON identity_provisioning_outbox USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_org_units ON org_units USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_positions ON positions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY system_task_positions ON positions USING (current_setting('app.system_task', true) = 'on') WITH CHECK (current_setting('app.system_task', true) = 'on');
 CREATE POLICY tenant_isolation_employees ON employees USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_employee_number_sequences ON employee_number_sequences USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_employee_import_sessions ON employee_import_sessions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_employment_contracts ON employment_contracts USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY system_task_employment_contracts ON employment_contracts USING (current_setting('app.system_task', true) = 'on') WITH CHECK (current_setting('app.system_task', true) = 'on');
 CREATE POLICY tenant_isolation_attendance_policies ON attendance_policies USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_attendance_policy_versions ON attendance_policy_versions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_balances ON leave_balances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_leave_balance_ledger ON leave_balance_ledger USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_form_definition_drafts ON form_definition_drafts USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_form_templates ON form_templates USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_form_template_versions ON form_template_versions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_form_instances ON form_instances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -1640,7 +1825,6 @@ CREATE POLICY tenant_isolation_knowledge_documents ON knowledge_documents USING 
 CREATE POLICY tenant_isolation_knowledge_document_chunks ON knowledge_document_chunks USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_definitions ON agent_definitions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_definition_versions ON agent_definition_versions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_agent_audits ON agent_audits USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_runs ON agent_runs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_sessions ON agent_sessions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_session_messages ON agent_session_messages USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -1654,56 +1838,3 @@ CREATE POLICY tenant_isolation_notifications ON notifications USING (tenant_id =
 CREATE POLICY tenant_isolation_notification_recipients ON notification_recipients USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_outbox_events ON outbox_events USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_audit_logs ON audit_logs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-
-CREATE TABLE ehrms_sync_runs (
-    id text PRIMARY KEY,
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    account_id text NOT NULL,
-    sync_type text NOT NULL CHECK (sync_type IN ('pipeline', 'employees', 'attendance')),
-    trigger_type text NOT NULL CHECK (trigger_type IN ('scheduled', 'manual', 'retry', 'cli')),
-    status text NOT NULL CHECK (status IN ('running', 'succeeded', 'partial', 'failed', 'skipped')),
-    current_step text NOT NULL DEFAULT '',
-    mode text NOT NULL DEFAULT 'upsert',
-    since_date text NOT NULL DEFAULT '',
-    attempt integer NOT NULL DEFAULT 1 CHECK (attempt > 0),
-    max_attempts integer NOT NULL DEFAULT 1 CHECK (max_attempts > 0),
-    retry_of_run_id text NOT NULL DEFAULT '',
-    request_id text NOT NULL DEFAULT '',
-    trace_id text NOT NULL DEFAULT '',
-    error_code text NOT NULL DEFAULT '',
-    error_message text NOT NULL DEFAULT '',
-    retryable boolean NOT NULL DEFAULT false,
-    next_retry_at timestamptz,
-    summary jsonb NOT NULL DEFAULT '{}'::jsonb,
-    started_at timestamptz NOT NULL,
-    finished_at timestamptz,
-    created_at timestamptz NOT NULL,
-    updated_at timestamptz NOT NULL
-);
-
-CREATE INDEX ehrms_sync_runs_tenant_started_idx ON ehrms_sync_runs (tenant_id, started_at DESC, id DESC);
-
-CREATE TABLE ehrms_sync_run_steps (
-    id text PRIMARY KEY,
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    run_id text NOT NULL REFERENCES ehrms_sync_runs(id) ON DELETE CASCADE,
-    step text NOT NULL,
-    sequence integer NOT NULL,
-    status text NOT NULL CHECK (status IN ('running', 'succeeded', 'partial', 'failed', 'skipped')),
-    attempt integer NOT NULL DEFAULT 1 CHECK (attempt > 0),
-    error_code text NOT NULL DEFAULT '',
-    error_message text NOT NULL DEFAULT '',
-    summary jsonb NOT NULL DEFAULT '{}'::jsonb,
-    started_at timestamptz NOT NULL,
-    finished_at timestamptz,
-    UNIQUE (tenant_id, run_id, step, attempt)
-);
-
-CREATE INDEX ehrms_sync_run_steps_run_idx ON ehrms_sync_run_steps (tenant_id, run_id, sequence, attempt);
-
-ALTER TABLE ehrms_sync_runs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ehrms_sync_runs FORCE ROW LEVEL SECURITY;
-ALTER TABLE ehrms_sync_run_steps ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ehrms_sync_run_steps FORCE ROW LEVEL SECURITY;
-CREATE POLICY tenant_isolation_ehrms_sync_runs ON ehrms_sync_runs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_ehrms_sync_run_steps ON ehrms_sync_run_steps USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));

@@ -246,8 +246,14 @@ func (c *Service) desiredOpenFGATuples(ctx context.Context, tenantID string) ([]
 		return nil, err
 	}
 	for _, group := range groups {
-		for _, accountID := range group.MemberAccountIDs {
-			add(openFGATypeUserGroup, group.ID, openFGARelationUserGroupMember, openFGASubjectTypeAccount, accountID)
+		memberships, err := c.store.ListGroupMembershipsForGroup(ctx, tenant.ID, group.ID)
+		if err != nil {
+			return nil, err
+		}
+		for _, membership := range memberships {
+			if groupMembershipActiveAt(membership, now) {
+				add(openFGATypeUserGroup, group.ID, openFGARelationUserGroupMember, openFGASubjectTypeAccount, membership.AccountID)
+			}
 		}
 	}
 

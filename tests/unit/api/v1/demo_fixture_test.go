@@ -25,6 +25,7 @@ type (
 	FormTemplate          = domain.FormTemplate
 	PlatformFormColumn    = domain.PlatformFormColumn
 	PlatformFormItem      = domain.PlatformFormItem
+	AgentDefinition       = domain.AgentDefinition
 )
 
 const (
@@ -107,7 +108,10 @@ func populateDemoFixture(store repository.Store) {
 			{Resource: "agent.tool", Action: "call", Target: "list_employees", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "get_employee", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "my_leave_balances", Scope: "all", MenuKey: "agents.runs"},
+			{Resource: "agent.tool", Action: "call", Target: "check_leave_eligibility", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "my_clock_records", Scope: "all", MenuKey: "agents.runs"},
+			{Resource: "agent.tool", Action: "call", Target: "my_attendance_summary", Scope: "all", MenuKey: "agents.runs"},
+			{Resource: "agent.tool", Action: "call", Target: "my_form_history", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "my_pending_reviews", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "workspace_insights", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "list_published_form_templates", Scope: "all", MenuKey: "agents.runs"},
@@ -130,6 +134,7 @@ func populateDemoFixture(store repository.Store) {
 			{Resource: "me", Action: "update", Scope: "all", MenuKey: "workbench"},
 			{Resource: "me", Action: "delete", Scope: "all", MenuKey: "workbench"},
 			{Resource: "hr.employee", Action: "read", Scope: "self", MenuKey: "hr.employees"},
+			{Resource: "attendance.leave", Action: "read", Scope: "self", MenuKey: "attendance.leave"},
 			{Resource: "attendance.leave", Action: "create", Scope: "self", MenuKey: "attendance.leave"},
 			{Resource: "attendance.clock", Action: "read", Scope: "self", MenuKey: "attendance.clock"},
 			{Resource: "attendance.clock", Action: "create", Scope: "self", MenuKey: "attendance.clock"},
@@ -146,7 +151,10 @@ func populateDemoFixture(store repository.Store) {
 			{Resource: "agent.tool", Action: "call", Target: "knowledge.search", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "get_my_profile", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "my_leave_balances", Scope: "all", MenuKey: "agents.runs"},
+			{Resource: "agent.tool", Action: "call", Target: "check_leave_eligibility", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "my_clock_records", Scope: "all", MenuKey: "agents.runs"},
+			{Resource: "agent.tool", Action: "call", Target: "my_attendance_summary", Scope: "all", MenuKey: "agents.runs"},
+			{Resource: "agent.tool", Action: "call", Target: "my_form_history", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "my_pending_reviews", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "list_published_form_templates", Scope: "all", MenuKey: "agents.runs"},
 			{Resource: "agent.tool", Action: "call", Target: "get_published_form_template", Scope: "all", MenuKey: "agents.runs"},
@@ -1048,6 +1056,18 @@ func populateDemoFixture(store repository.Store) {
 			},
 		},
 		CreatedAt: now,
+	})
+	_ = store.UpsertAgentDefinition(ctx, AgentDefinition{
+		ID:          "agent-demo-assistant",
+		TenantID:    "demo",
+		Name:        "Demo Assistant",
+		Description: "Published assistant used by authenticated platform projections",
+		Emoji:       "🤖",
+		Category:    domain.AgentCategoryWorkflow,
+		Status:      domain.AgentDefinitionStatusPublished,
+		Visibility:  domain.AgentVisibilityAll,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	})
 	populateFixturePlatformFormTemplates(ctx, store, now)
 	_ = store.UpsertFormTemplate(ctx, FormTemplate{

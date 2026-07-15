@@ -19,8 +19,8 @@ WHERE tenant_id = $1
 `
 
 type CountActiveAgentRunsBySessionParams struct {
-	TenantID  string `json:"tenant_id"`
-	SessionID string `json:"session_id"`
+	TenantID  string      `json:"tenant_id"`
+	SessionID pgtype.Text `json:"session_id"`
 }
 
 func (q *Queries) CountActiveAgentRunsBySession(ctx context.Context, arg CountActiveAgentRunsBySessionParams) (int64, error) {

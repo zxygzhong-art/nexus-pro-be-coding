@@ -367,6 +367,8 @@ func (c AgentService) publishedAgentDefinition(ctx RequestContext, id string) (d
 		agent.MainAgentRole = snapshot.MainAgentRole
 		agent.SubAgents = snapshot.SubAgents
 		agent.SystemPrompt = snapshot.SystemPrompt
+		agent.WelcomeMessage = snapshot.WelcomeMessage
+		agent.SuggestedQuestions = snapshot.SuggestedQuestions
 		agent.Tools = snapshot.Tools
 		agent.KnowledgeBaseIDs = snapshot.KnowledgeBaseIDs
 		agent.ModelID = snapshot.ModelID

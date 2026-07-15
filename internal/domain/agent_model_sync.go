@@ -25,6 +25,11 @@ func AgentModelLiteLLMAlias(id string) string {
 	return "nexus-agent-model-" + id
 }
 
+// AgentModelCredentialAAD binds an encrypted API key to one tenant and model row.
+func AgentModelCredentialAAD(tenantID, modelID string) []byte {
+	return []byte(strings.TrimSpace(tenantID) + "\x00agent-model\x00" + strings.TrimSpace(modelID))
+}
+
 // AgentModelSyncConfigHash 計算會影響 LiteLLM 路由的設定摘要。
 func AgentModelSyncConfigHash(model AgentModel) string {
 	payload, _ := json.Marshal(struct {

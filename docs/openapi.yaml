@@ -729,76 +729,6 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "500": {$ref: "#/components/responses/InternalError"}
-  /v1/ehrms/sync-runs:
-    get:
-      summary: List eHRMS sync runs
-      parameters:
-        - {name: page, in: query, schema: {type: integer, minimum: 1}}
-        - {name: page_size, in: query, schema: {type: integer, minimum: 1, maximum: 100}}
-      responses:
-        "200":
-          description: Paginated sync runs
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/EHRMSSyncRunPageDataResponse"}
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/ehrms/sync:
-    post:
-      summary: Start a tracked manual eHRMS sync
-      requestBody:
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/StartEHRMSSyncRequest"}
-      responses:
-        "200":
-          description: Completed tracked sync run
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/EHRMSSyncRunDetailDataResponse"}
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/ehrms/sync-runs/{id}:
-    get:
-      summary: Get an eHRMS sync run and its steps
-      parameters:
-        - {name: id, in: path, required: true, schema: {type: string}}
-      responses:
-        "200":
-          description: Sync run detail
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/EHRMSSyncRunDetailDataResponse"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/ehrms/sync-runs/{id}/retry:
-    post:
-      summary: Retry a failed or partial eHRMS sync run
-      parameters:
-        - {name: id, in: path, required: true, schema: {type: string}}
-      requestBody:
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/RetryEHRMSSyncRunRequest"}
-      responses:
-        "200":
-          description: Retried sync run detail
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/EHRMSSyncRunDetailDataResponse"}
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees/export:
     get:
       summary: Export employees as CSV
@@ -4064,6 +3994,8 @@ components:
         main_agent_role: {type: string}
         sub_agents: {type: array, items: {$ref: "#/components/schemas/AgentTeamMember"}}
         system_prompt: {type: string}
+        welcome_message: {type: string, maxLength: 1000}
+        suggested_questions: {type: array, maxItems: 3, items: {type: string, maxLength: 100}}
         tools: {type: array, items: {type: string}}
         knowledge_base_ids: {type: array, items: {type: string}}
         visibility: {type: string, enum: [all, department, role]}
@@ -4080,6 +4012,8 @@ components:
         main_agent_role: {type: string}
         sub_agents: {type: array, items: {$ref: "#/components/schemas/AgentTeamMember"}}
         system_prompt: {type: string}
+        welcome_message: {type: string, maxLength: 1000}
+        suggested_questions: {type: array, maxItems: 3, items: {type: string, maxLength: 100}}
         tools: {type: array, items: {type: string}}
         knowledge_base_ids: {type: array, items: {type: string}}
         visibility: {type: string, enum: [all, department, role]}
@@ -4097,6 +4031,8 @@ components:
         main_agent_role: {type: string}
         sub_agents: {type: array, items: {$ref: "#/components/schemas/AgentTeamMember"}}
         system_prompt: {type: string}
+        welcome_message: {type: string}
+        suggested_questions: {type: array, items: {type: string}}
         tools: {type: array, items: {type: string}}
         knowledge_base_ids: {type: array, items: {type: string}}
         model_id: {type: string}
@@ -5154,9 +5090,12 @@ components:
         updated_at: {type: string, format: date-time}
     WorkflowFormStateResponse:
       type: object
-      required: [form_instance_id, can_act, steps]
+      required: [form_instance_id, form_status, can_act, steps]
       properties:
         form_instance_id: {type: string}
+        form_status:
+          type: string
+          enum: [draft, in_review, returned, approved, rejected, cancelled, submitted]
         run_id: {type: string}
         run_status:
           type: string
@@ -5308,13 +5247,15 @@ components:
           $ref: "#/components/schemas/PlatformClockSummary"
     PlatformAssistant:
       type: object
-      required: [id, emoji, title, desc, runnable]
+      required: [id, emoji, title, desc, welcome_message, suggested_questions, runnable]
       properties:
         id: {type: string}
         emoji: {type: string}
         title: {type: string}
         desc: {type: string}
         tag: {type: string, enum: [workflow, doc, analytics, it]}
+        welcome_message: {type: string}
+        suggested_questions: {type: array, items: {type: string}}
         runnable: {type: boolean, description: True only when id references a published AgentDefinition that can be used for runtime chat}
     PlatformFormColumn:
       type: object
@@ -5645,24 +5586,6 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/EHRMSEmployeeSyncResponse"
-    EHRMSSyncRunPageDataResponse:
-      type: object
-      required: [data]
-      properties:
-        data:
-          type: object
-          required: [items, total, page, page_size, sort]
-          properties:
-            items: {type: array, items: {$ref: "#/components/schemas/EHRMSSyncRun"}}
-            total: {type: integer}
-            page: {type: integer}
-            page_size: {type: integer}
-            sort: {type: string}
-    EHRMSSyncRunDetailDataResponse:
-      type: object
-      required: [data]
-      properties:
-        data: {$ref: "#/components/schemas/EHRMSSyncRunDetail"}
     EHRMSOrgUnitSyncDataResponse:
       type: object
       required: [data]
@@ -7129,66 +7052,6 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SyncRowError"
-    RetryEHRMSSyncRunRequest:
-      type: object
-      properties:
-        mode: {type: string, enum: [create, update, upsert]}
-        since: {type: string, format: date}
-    StartEHRMSSyncRequest:
-      type: object
-      properties:
-        mode: {type: string, enum: [create, update, upsert]}
-        since: {type: string, format: date}
-        include_attendance: {type: boolean, default: false}
-    EHRMSSyncRun:
-      type: object
-      required: [id, tenant_id, account_id, sync_type, trigger_type, status, mode, attempt, max_attempts, retryable, started_at, created_at, updated_at]
-      properties:
-        id: {type: string}
-        tenant_id: {type: string}
-        account_id: {type: string}
-        sync_type: {type: string, enum: [pipeline, employees, attendance]}
-        trigger_type: {type: string, enum: [scheduled, manual, retry, cli]}
-        status: {type: string, enum: [running, succeeded, partial, failed, skipped]}
-        current_step: {type: string}
-        mode: {type: string, enum: [create, update, upsert]}
-        since: {type: string, format: date}
-        attempt: {type: integer}
-        max_attempts: {type: integer}
-        retry_of_run_id: {type: string}
-        request_id: {type: string}
-        trace_id: {type: string}
-        error_code: {type: string}
-        error_message: {type: string}
-        retryable: {type: boolean}
-        next_retry_at: {type: string, format: date-time}
-        summary: {type: object, additionalProperties: true}
-        started_at: {type: string, format: date-time}
-        finished_at: {type: string, format: date-time}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
-    EHRMSSyncRunStep:
-      type: object
-      required: [id, tenant_id, run_id, step, sequence, status, attempt, started_at]
-      properties:
-        id: {type: string}
-        tenant_id: {type: string}
-        run_id: {type: string}
-        step: {type: string}
-        sequence: {type: integer}
-        status: {type: string, enum: [running, succeeded, partial, failed, skipped]}
-        attempt: {type: integer}
-        error_code: {type: string}
-        error_message: {type: string}
-        summary: {type: object, additionalProperties: true}
-        started_at: {type: string, format: date-time}
-        finished_at: {type: string, format: date-time}
-    EHRMSSyncRunDetail:
-      type: object
-      required: [run, steps]
-      properties:
-        run: {$ref: "#/components/schemas/EHRMSSyncRun"}
-        steps: {type: array, items: {$ref: "#/components/schemas/EHRMSSyncRunStep"}}
     BatchEmployeeResponse:
       type: object
       properties:

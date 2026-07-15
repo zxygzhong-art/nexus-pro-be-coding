@@ -8,6 +8,7 @@ import (
 	"mime"
 	"net/http"
 	"strings"
+	"sync"
 
 	"github.com/gin-gonic/gin"
 
@@ -233,6 +234,7 @@ func (c AgentCtrl) chatAgent(w http.ResponseWriter, r *http.Request, ctx domain.
 	if !ok {
 		return domain.E(http.StatusInternalServerError, "internal_error", "streaming is not supported")
 	}
+	var streamMu sync.Mutex
 	wroteHeader := false
 	writeStreamHeader := func() {
 		if wroteHeader {
@@ -240,12 +242,14 @@ func (c AgentCtrl) chatAgent(w http.ResponseWriter, r *http.Request, ctx domain.
 		}
 		header := w.Header()
 		header.Set("Content-Type", "text/event-stream; charset=utf-8")
-		header.Set("Cache-Control", "no-cache")
-		header.Set("Connection", "keep-alive")
+		header.Set("Cache-Control", "no-cache, no-transform")
+		header.Set("X-Accel-Buffering", "no")
 		w.WriteHeader(http.StatusOK)
 		wroteHeader = true
 	}
 	emit := func(_ context.Context, event domain.AgentChatEvent) error {
+		streamMu.Lock()
+		defer streamMu.Unlock()
 		writeStreamHeader()
 		if err := writeSSEEvent(w, event); err != nil {
 			return err
@@ -255,6 +259,8 @@ func (c AgentCtrl) chatAgent(w http.ResponseWriter, r *http.Request, ctx domain.
 	}
 	_, err := c.svc.Chat(ctx, input, emit)
 	if err != nil {
+		streamMu.Lock()
+		defer streamMu.Unlock()
 		if wroteHeader {
 			_ = writeSSEEvent(w, domain.AgentChatEvent{Event: domain.AgentChatEventError, Message: err.Error()})
 			flusher.Flush()

@@ -82,8 +82,12 @@ func TestWorkflowHTTPPostgresAcceptance(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	svc := newIntegrationServiceWithFormApprovalWorkflows(
+		store,
+		service.Options{Now: func() time.Time { return now.Add(time.Hour) }},
+	)
 	handler := v1api.New(
-		service.New(store, service.Options{Now: func() time.Time { return now.Add(time.Hour) }}),
+		svc,
 		nil,
 		v1api.Options{TokenResolver: integrationTokenResolver{}},
 	).Routes()

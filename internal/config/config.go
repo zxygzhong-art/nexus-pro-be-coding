@@ -80,7 +80,7 @@ type Config struct {
 	LiteLLMMasterKey      string
 	LiteLLMEmbeddingModel string
 
-	AgentToolCredentialEncryptionKey string
+	EncryptionKey string
 
 	ObjectStoreProvider                string
 	ObjectStoreDir                     string
@@ -117,10 +117,16 @@ type Config struct {
 	OTelExporterOTLPInsecure bool
 }
 
-// ValidateStartup 驗證 startup。
+// ValidateStartup rejects unknown environments and applies production safeguards to deployed stages.
 func (c Config) ValidateStartup() error {
-	if c.Env != "production" {
+	environment := strings.ToLower(strings.TrimSpace(c.Env))
+	switch environment {
+	case "development", "test":
 		return nil
+	case "production", "staging":
+		// Continue with the production-grade checks below.
+	default:
+		return fmt.Errorf("APP_ENV must be development, test, staging, or production")
 	}
 	problems := []string{}
 	if strings.TrimSpace(c.DatabaseURL) == "" {
@@ -223,6 +229,7 @@ func Load() Config {
 // LoadE 載入 e。
 func LoadE() (Config, error) {
 	appEnv := env("APP_ENV", "development")
+	productionLike := appEnv == "production" || appEnv == "staging"
 	problems := []string{}
 	sftpgoBaseURL := strings.TrimSpace(os.Getenv("SFTPGO_BASE_URL"))
 	objectStoreBucket := firstNonEmptyEnv("SFTPGO_ROOT_BUCKET", "OBJECT_STORE_BUCKET")
@@ -262,10 +269,10 @@ func LoadE() (Config, error) {
 		TrustedProxies: splitCommaList(os.Getenv("TRUSTED_PROXIES")),
 		MetricsAddr:    envAllowEmpty("METRICS_ADDR", "127.0.0.1:9091"),
 
-		RateLimitEnabled:    envBool("RATE_LIMIT_ENABLED", false, &problems),
+		RateLimitEnabled:    envBool("RATE_LIMIT_ENABLED", productionLike, &problems),
 		RateLimitRPS:        envInt("RATE_LIMIT_RPS", 20, &problems),
 		RateLimitBurst:      envInt("RATE_LIMIT_BURST", 40, &problems),
-		RateLimitFailClosed: envBool("RATE_LIMIT_FAIL_CLOSED", false, &problems),
+		RateLimitFailClosed: envBool("RATE_LIMIT_FAIL_CLOSED", productionLike, &problems),
 
 		SwaggerEnabled: envBool("SWAGGER_ENABLED", appEnv != "production", &problems),
 
@@ -297,7 +304,7 @@ func LoadE() (Config, error) {
 		LiteLLMMasterKey:      os.Getenv("LITELLM_MASTER_KEY"),
 		LiteLLMEmbeddingModel: env("LITELLM_EMBEDDING_MODEL", "nexus-pro-embedding"),
 
-		AgentToolCredentialEncryptionKey: strings.TrimSpace(os.Getenv("AGENT_TOOL_CREDENTIAL_ENCRYPTION_KEY")),
+		EncryptionKey: strings.TrimSpace(os.Getenv("ENCRYPTION_KEY")),
 
 		ObjectStoreProvider:                objectStoreProvider,
 		ObjectStoreDir:                     strings.TrimSpace(os.Getenv("OBJECT_STORE_DIR")),

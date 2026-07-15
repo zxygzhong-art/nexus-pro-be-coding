@@ -2,7 +2,9 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
+	"sync"
 	"time"
 
 	"nexus-pro-be/internal/domain"
@@ -11,12 +13,23 @@ import (
 
 type agentChatContextKey struct{}
 
+type agentChatExecutionContextKey struct{}
+
+type agentChatExecutionContext struct {
+	AgentID        string
+	SessionID      string
+	RunID          string
+	ContextVersion int64
+}
+
 const (
 	defaultChatRuntimeTimeout            = 60 * time.Second
+	staleAgentRunGracePeriod             = 30 * time.Second
+	interruptedAgentRunMessage           = "agent chat was interrupted before completion"
 	agentChatModeAssistantRecommendation = "assistant_recommendation"
 )
 
-// effectiveAgentRuntimeTimeout 统一沿用模型设置，Agent 定义中的旧值仅保留响应相容性。
+// effectiveAgentRuntimeTimeout 統一沿用模型設置，Agent 定義中的舊值僅保留響應相容性。
 func effectiveAgentRuntimeTimeout(_ int, modelSeconds int) time.Duration {
 	if modelSeconds <= 0 {
 		return defaultChatRuntimeTimeout
@@ -46,7 +59,7 @@ type AgentChatRuntimeRequest struct {
 	SubAgents      []AgentChatSubAgentRuntimeRequest
 }
 
-// AgentChatSubAgentRuntimeRequest 定义一个可由主 Agent 委派的运行时成员。
+// AgentChatSubAgentRuntimeRequest 定義一個可由主 Agent 委派的運行時成員。
 type AgentChatSubAgentRuntimeRequest struct {
 	ID        string
 	Name      string
@@ -81,6 +94,20 @@ func WithAgentRequestContext(ctx context.Context, reqCtx domain.RequestContext) 
 func AgentRequestContextFromContext(ctx context.Context) (domain.RequestContext, bool) {
 	reqCtx, ok := ctx.Value(agentChatContextKey{}).(domain.RequestContext)
 	return reqCtx, ok
+}
+
+// withAgentChatExecutionContext associates tool side effects with the exact visible conversation partition.
+func withAgentChatExecutionContext(ctx context.Context, execution agentChatExecutionContext) context.Context {
+	return context.WithValue(ctx, agentChatExecutionContextKey{}, execution)
+}
+
+// agentChatExecutionContextFromContext restores the session identity used by artifact and confirmation persistence.
+func agentChatExecutionContextFromContext(ctx context.Context) (agentChatExecutionContext, bool) {
+	if ctx == nil {
+		return agentChatExecutionContext{}, false
+	}
+	execution, ok := ctx.Value(agentChatExecutionContextKey{}).(agentChatExecutionContext)
+	return execution, ok
 }
 
 // Chat 執行流式 agent chat。
@@ -182,6 +209,9 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 			return AgentRun{}, err
 		}
 		sessionID = session.ID
+	}
+	if err := c.recoverStaleAgentRuns(ctx, sessionID, runtimeTimeout); err != nil {
+		return AgentRun{}, err
 	}
 	if err := c.ensureNoActiveAgentRun(ctx, sessionID); err != nil {
 		return AgentRun{}, err
@@ -294,18 +324,28 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 	baseCtx, cancel = context.WithTimeout(baseCtx, runtimeTimeout)
 	defer cancel()
 	baseCtx = WithAgentRequestContext(baseCtx, ctx)
+	baseCtx = withAgentChatExecutionContext(baseCtx, agentChatExecutionContext{
+		AgentID: agentID, SessionID: sessionID, RunID: run.ID, ContextVersion: session.ContextVersion,
+	})
 	if err := emit(baseCtx, domain.AgentChatEvent{Event: domain.AgentChatEventSession, SessionID: sessionID, RunID: run.ID}); err != nil {
 		_ = c.failRun(ctx, run, err)
 		return run, err
 	}
 	answer := strings.Builder{}
+	artifactEvents := make([]domain.AgentChatEvent, 0, 4)
+	var eventMu sync.Mutex
 	wrappedEmit := func(eventCtx context.Context, event domain.AgentChatEvent) error {
 		if event.Event == "" {
 			event.Event = domain.AgentChatEventMessageDelta
 		}
+		eventMu.Lock()
 		if event.Event == domain.AgentChatEventMessageDelta && (len(resolvedSubAgents) == 0 || event.AgentName == "" || event.AgentName == agentName) {
 			answer.WriteString(event.Delta)
 		}
+		if shouldPersistAgentArtifact(event) {
+			artifactEvents = append(artifactEvents, event)
+		}
+		eventMu.Unlock()
 		return emit(eventCtx, event)
 	}
 	runtimeSubAgents := make([]AgentChatSubAgentRuntimeRequest, 0, len(resolvedSubAgents))
@@ -354,8 +394,11 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		_ = c.store.UpsertAgentRun(goContext(ctx), failed)
 		return failed, runtimeErr
 	}
+	eventMu.Lock()
 	run.Answer = strings.TrimSpace(answer.String())
-	completedRun, err := c.completeAgentChat(ctx, account.ID, session, run, userMessage)
+	persistedArtifacts := append([]domain.AgentChatEvent(nil), artifactEvents...)
+	eventMu.Unlock()
+	completedRun, err := c.completeAgentChat(ctx, account.ID, session, run, userMessage, persistedArtifacts)
 	if err != nil {
 		_ = c.failRun(ctx, run, err)
 		return run, err
@@ -474,6 +517,37 @@ func (c AgentService) ensureNoActiveAgentRun(ctx RequestContext, sessionID strin
 	return nil
 }
 
+// recoverStaleAgentRuns releases a session after its previous process died before persisting a terminal status.
+func (c AgentService) recoverStaleAgentRuns(ctx RequestContext, sessionID string, runtimeTimeout time.Duration) error {
+	if strings.TrimSpace(sessionID) == "" {
+		return nil
+	}
+	if runtimeTimeout <= 0 {
+		runtimeTimeout = defaultChatRuntimeTimeout
+	}
+	now := c.Now()
+	staleBefore := now.Add(-(runtimeTimeout + staleAgentRunGracePeriod))
+	recovered, err := c.store.FailStaleAgentRunsBySession(
+		goContext(ctx),
+		ctx.TenantID,
+		strings.TrimSpace(sessionID),
+		staleBefore,
+		now,
+		interruptedAgentRunMessage,
+	)
+	if err != nil {
+		return err
+	}
+	if recovered > 0 {
+		c.logWarn(ctx, "stale agent runs recovered",
+			"session_id", sessionID,
+			"recovered_runs", recovered,
+			"stale_before", staleBefore,
+		)
+	}
+	return nil
+}
+
 func (c AgentService) agentChatHistoryForSession(ctx RequestContext, sessionID string) ([]domain.AgentSessionMessage, error) {
 	items, err := c.store.ListAgentSessionMessages(goContext(ctx), ctx.TenantID, strings.TrimSpace(sessionID))
 	if err != nil {
@@ -529,7 +603,7 @@ func (c AgentService) createAgentSessionForChat(ctx RequestContext, accountID, a
 }
 
 // completeAgentChat commits the assistant message, run status, and session timestamp under one context-version lock.
-func (c AgentService) completeAgentChat(ctx RequestContext, accountID string, expectedSession domain.AgentSession, run AgentRun, userMessage string) (AgentRun, error) {
+func (c AgentService) completeAgentChat(ctx RequestContext, accountID string, expectedSession domain.AgentSession, run AgentRun, userMessage string, artifacts []domain.AgentChatEvent) (AgentRun, error) {
 	previousStatus := run.Status
 	run.Status = string(AgentRunStatusCompleted)
 	run.UpdatedAt = c.Now()
@@ -542,6 +616,25 @@ func (c AgentService) completeAgentChat(ctx RequestContext, accountID string, ex
 		if session.ContextVersion != expectedSession.ContextVersion {
 			return Conflict("agent session context changed while the message was running").WithReasonCode("agent_session_context_changed")
 		}
+		for index, artifact := range artifacts {
+			metadata, err := agentArtifactMessageMetadata(artifact)
+			if err != nil {
+				return err
+			}
+			if err := tx.store.InsertAgentSessionMessage(goContext(ctx), domain.AgentSessionMessage{
+				ID:             utils.NewID("amsg"),
+				TenantID:       ctx.TenantID,
+				SessionID:      session.ID,
+				Role:           domain.AgentMessageRoleTool,
+				Content:        "",
+				RunID:          run.ID,
+				ContextVersion: session.ContextVersion,
+				Metadata:       metadata,
+				CreatedAt:      messageCreatedAt.Add(time.Duration(index) * time.Nanosecond),
+			}); err != nil {
+				return err
+			}
+		}
 		if err := tx.store.InsertAgentSessionMessage(goContext(ctx), domain.AgentSessionMessage{
 			ID:             utils.NewID("amsg"),
 			TenantID:       ctx.TenantID,
@@ -550,7 +643,7 @@ func (c AgentService) completeAgentChat(ctx RequestContext, accountID string, ex
 			Content:        run.Answer,
 			RunID:          run.ID,
 			ContextVersion: session.ContextVersion,
-			CreatedAt:      messageCreatedAt,
+			CreatedAt:      messageCreatedAt.Add(time.Duration(len(artifacts)) * time.Nanosecond),
 		}); err != nil {
 			return err
 		}
@@ -573,6 +666,31 @@ func (c AgentService) completeAgentChat(ctx RequestContext, accountID string, ex
 		"status", run.Status,
 	)
 	return run, nil
+}
+
+// shouldPersistAgentArtifact limits replay storage to UI-safe form artifacts already sent to the current user.
+func shouldPersistAgentArtifact(event domain.AgentChatEvent) bool {
+	if event.Event != domain.AgentChatEventToolResult || event.Status != "ok" || len(event.Data) == 0 {
+		return false
+	}
+	if event.Name == "get_published_form_template" || event.Name == "create_form_draft" || event.Name == "update_form_draft" {
+		return true
+	}
+	return strings.HasPrefix(event.Name, "form.")
+}
+
+// agentArtifactMessageMetadata serializes the event as an opaque JSON string so dynamic form field IDs stay unchanged.
+func agentArtifactMessageMetadata(event domain.AgentChatEvent) (map[string]any, error) {
+	raw, err := json.Marshal(map[string]any{
+		"event":  event.Event,
+		"name":   event.Name,
+		"status": event.Status,
+		"data":   event.Data,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"agent_artifact_json": string(raw)}, nil
 }
 
 func (c AgentService) rememberAgentPreferenceIfNeeded(ctx RequestContext, accountID, agentID, sessionID, message string) error {
@@ -734,7 +852,7 @@ func agentMessageRoleLabel(role domain.AgentMessageRole) string {
 	}
 }
 
-// resolveAgentTeamMembers 解析每个子 Agent 的模型路由，并以最慢模型的设置作为 Team 执行上限。
+// resolveAgentTeamMembers 解析每個子 Agent 的模型路由，並以最慢模型的設置作為 Team 執行上限。
 func (c AgentService) resolveAgentTeamMembers(ctx RequestContext, members []domain.AgentTeamMember, timeout time.Duration) ([]resolvedAgentTeamMember, time.Duration, error) {
 	out := make([]resolvedAgentTeamMember, 0, len(members))
 	for _, member := range members {
@@ -845,7 +963,10 @@ func (c AgentService) agentTools(reqCtx RequestContext, emit AgentChatEmitFunc, 
 		"list_employees":                tool("list_employees", c.toolListEmployees),
 		"get_employee":                  tool("get_employee", c.toolGetEmployee),
 		"my_leave_balances":             tool("my_leave_balances", c.toolMyLeaveBalances),
+		"check_leave_eligibility":       tool("check_leave_eligibility", c.toolCheckLeaveEligibility),
 		"my_clock_records":              tool("my_clock_records", c.toolMyClockRecords),
+		"my_attendance_summary":         tool("my_attendance_summary", c.toolMyAttendanceSummary),
+		"my_form_history":               tool("my_form_history", c.toolMyFormHistory),
 		"my_pending_reviews":            tool("my_pending_reviews", c.toolMyPendingReviews),
 		"workspace_insights":            tool("workspace_insights", c.toolWorkspaceInsights),
 		"list_published_form_templates": tool("list_published_form_templates", c.toolListPublishedFormTemplates),
@@ -871,8 +992,11 @@ func agentToolDescription(name string) string {
 		"get_my_profile":                "Read the current account and employee profile. No args.",
 		"list_employees":                "List employee summaries. Optional args: limit.",
 		"get_employee":                  "Read one employee. Args: employee_id.",
-		"my_leave_balances":             "Read current user's leave balances. No args.",
+		"my_leave_balances":             "Read only the current employee's leave balances. No args. initialized=false means balance data is missing, not zero; never claim zero balance from an empty items list.",
+		"check_leave_eligibility":       "Deterministically check whether the current employee can request one leave type under the active attendance policy and current balance. Args: leave_type, date (YYYY-MM-DD or RFC3339), and hours. Use this before creating a leave draft; do not infer eligibility from my_leave_balances.",
 		"my_clock_records":              "Read current user's clock records. Optional args: limit.",
+		"my_attendance_summary":         "Read the current employee's attendance summary for the current month, including attendance days, worked hours, approved leave days, approved overtime hours, and today's clock status. No args.",
+		"my_form_history":               "Read only the current account's form applications. Optional args: template_key, status, and limit. Use template_key=leave-request for leave history.",
 		"my_pending_reviews":            "Read workflow items the current account can review. No args.",
 		"workspace_insights":            "Read workspace insight reports. Optional args: month.",
 		"list_published_form_templates": "List published and enabled forms that can be submitted. No args.",
@@ -952,12 +1076,136 @@ func (c AgentService) toolGetEmployee(ctx domain.RequestContext, args map[string
 	return map[string]any{"id": employee.ID, "name": employee.Name, "employee_no": employee.EmployeeNo, "status": employee.Status, "position": employee.Position, "org_unit_id": employee.OrgUnitID}, nil
 }
 
+// toolMyLeaveBalances separates missing balance data from a real zero balance and never returns other employees.
 func (c AgentService) toolMyLeaveBalances(ctx domain.RequestContext, _ map[string]any) (map[string]any, error) {
-	page, err := c.Attendance().ListLeaveBalancePage(ctx, PageRequest{Page: 1, PageSize: 20})
+	employeeID, items, err := c.currentEmployeeLeaveBalances(ctx)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]any{"items": page.Items, "total": page.Total}, nil
+	initialized := len(items) > 0
+	status := "available"
+	message := "Current employee leave balance data is available."
+	if !initialized {
+		status = "not_initialized"
+		message = "Current employee leave balance data is not initialized. Do not treat missing data as a zero balance."
+	}
+	return map[string]any{
+		"employee_id": employeeID,
+		"initialized": initialized,
+		"status":      status,
+		"message":     message,
+		"items":       items,
+		"total":       len(items),
+	}, nil
+}
+
+// toolCheckLeaveEligibility applies the same policy and balance prerequisites used by leave submission.
+func (c AgentService) toolCheckLeaveEligibility(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
+	leaveTypeRaw := strings.TrimSpace(stringFromAny(args["leave_type"]))
+	if leaveTypeRaw == "" {
+		return nil, BadRequest("leave_type is required")
+	}
+	dateRaw := strings.TrimSpace(stringFromAny(args["date"]))
+	if dateRaw == "" {
+		return nil, BadRequest("date is required")
+	}
+	requestedDate, err := utils.ParseDate(dateRaw)
+	if err != nil {
+		return nil, BadRequest("date must be YYYY-MM-DD or RFC3339")
+	}
+	hours := floatFromToolArgs(args, "hours")
+	if hours <= 0 {
+		return nil, BadRequest("hours must be greater than zero")
+	}
+
+	employeeID, balances, err := c.currentEmployeeLeaveBalances(ctx)
+	if err != nil {
+		return nil, err
+	}
+	policy, err := c.Attendance().loadAttendancePolicyResponse(ctx)
+	if err != nil {
+		return nil, err
+	}
+	leaveTypeCode := normalizeLeaveTypeCode(leaveTypeRaw)
+	leaveType, supported := findLeaveTypeInPolicy(policy, leaveTypeCode)
+	result := map[string]any{
+		"employee_id":    employeeID,
+		"leave_type":     leaveTypeCode,
+		"requested_date": requestedDate.Format(time.DateOnly),
+		"required_hours": hours,
+		"supported":      supported && leaveType.Active,
+	}
+	if !supported || !leaveType.Active {
+		result["eligible"] = false
+		result["status"] = "unsupported_leave_type"
+		result["message"] = "The requested leave type is not active in the current attendance policy."
+		return result, nil
+	}
+
+	result["leave_type_name"] = leaveType.Name
+	result["balance_required"] = leaveType.RequiresBalance
+	if !leaveType.RequiresBalance {
+		result["balance_initialized"] = false
+		result["eligible"] = true
+		result["status"] = "eligible"
+		result["reason"] = "balance_not_required"
+		result["message"] = "The requested leave type does not require a balance."
+		return result, nil
+	}
+
+	var matched *LeaveBalance
+	for index := range balances {
+		if strings.EqualFold(strings.TrimSpace(balances[index].LeaveType), leaveTypeCode) {
+			matched = &balances[index]
+			break
+		}
+	}
+	if matched == nil {
+		result["balance_initialized"] = false
+		result["eligible"] = false
+		result["status"] = "balance_not_initialized"
+		result["message"] = "Balance data for the requested leave type is not initialized. Do not treat missing data as zero."
+		return result, nil
+	}
+
+	remaining := matched.RemainingHours
+	result["balance_initialized"] = true
+	result["remaining_hours"] = remaining
+	if remaining < hours {
+		result["eligible"] = false
+		result["status"] = "insufficient_balance"
+		result["shortfall_hours"] = hours - remaining
+		result["message"] = "The requested leave type has insufficient balance."
+		return result, nil
+	}
+	result["eligible"] = true
+	result["status"] = "eligible"
+	result["reason"] = "sufficient_balance"
+	result["message"] = "The requested leave type has sufficient balance."
+	return result, nil
+}
+
+// currentEmployeeLeaveBalances narrows any authorized attendance scope to the account's own employee record.
+func (c AgentService) currentEmployeeLeaveBalances(ctx domain.RequestContext) (string, []LeaveBalance, error) {
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	employeeID := strings.TrimSpace(account.EmployeeID)
+	if employeeID == "" {
+		return "", nil, BadRequest("current account is not linked to an employee")
+	}
+	items, err := c.Attendance().ListLeaveBalances(ctx)
+	if err != nil {
+		return "", nil, err
+	}
+	current := make([]LeaveBalance, 0, len(items))
+	for _, item := range items {
+		if item.EmployeeID == employeeID {
+			current = append(current, item)
+		}
+	}
+	return employeeID, current, nil
 }
 
 func (c AgentService) toolMyClockRecords(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
@@ -967,6 +1215,62 @@ func (c AgentService) toolMyClockRecords(ctx domain.RequestContext, args map[str
 		return nil, err
 	}
 	return map[string]any{"items": page.Items, "total": page.Total}, nil
+}
+
+// toolMyAttendanceSummary returns the same self-scoped monthly projection shown on the platform home page.
+func (c AgentService) toolMyAttendanceSummary(ctx domain.RequestContext, _ map[string]any) (map[string]any, error) {
+	summary, err := c.Platform().clockSummary(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{
+		"month":                   c.Now().Format("2006-01"),
+		"date_label":              summary.DateLabel,
+		"checked_in_at":           summary.CheckedInAt,
+		"checked_out_at":          summary.CheckedOutAt,
+		"location":                summary.Location,
+		"attendance_days":         summary.MonthlyAttendanceDays,
+		"worked_hours":            summary.MonthlyHours,
+		"approved_overtime_hours": summary.MonthlyOvertimeHours,
+		"approved_leave_days":     summary.LeaveDays,
+	}, nil
+}
+
+// toolMyFormHistory lists only the caller's applications and optionally narrows them to one published form type.
+func (c AgentService) toolMyFormHistory(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
+	limit := intFromToolArgs(args, "limit", 20, 50)
+	templateKey := strings.TrimSpace(stringFromAny(args["template_key"]))
+	status := strings.TrimSpace(stringFromAny(args["status"]))
+	page, err := c.Workflow().ListFormInstancePage(ctx, domain.FormInstanceQuery{
+		TemplateKey: templateKey,
+		Status:      status,
+		Mine:        true,
+	}, PageRequest{Page: 1, PageSize: limit, Sort: "submitted_at_desc"})
+	if err != nil {
+		return nil, err
+	}
+	templates, err := c.Workflow().ListFormTemplates(ctx)
+	if err != nil {
+		return nil, err
+	}
+	templateByID := make(map[string]domain.FormTemplate, len(templates))
+	for _, template := range templates {
+		templateByID[template.ID] = template
+	}
+	items := make([]map[string]any, 0, len(page.Items))
+	for _, instance := range page.Items {
+		template := templateByID[instance.TemplateID]
+		items = append(items, map[string]any{
+			"id":            instance.ID,
+			"template_key":  template.Key,
+			"template_name": template.Name,
+			"status":        instance.Status,
+			"payload":       instance.Payload,
+			"submitted_at":  instance.SubmittedAt,
+			"updated_at":    instance.UpdatedAt,
+		})
+	}
+	return map[string]any{"items": items, "total": page.Total}, nil
 }
 
 func (c AgentService) toolMyPendingReviews(ctx domain.RequestContext, _ map[string]any) (map[string]any, error) {
@@ -1001,4 +1305,23 @@ func intFromToolArgs(args map[string]any, key string, fallback int, max int) int
 		}
 	}
 	return fallback
+}
+
+// floatFromToolArgs reads JSON numeric tool arguments without accepting stringly typed values.
+func floatFromToolArgs(args map[string]any, key string) float64 {
+	if args == nil {
+		return 0
+	}
+	switch value := args[key].(type) {
+	case float64:
+		return value
+	case float32:
+		return float64(value)
+	case int:
+		return float64(value)
+	case int64:
+		return float64(value)
+	default:
+		return 0
+	}
 }

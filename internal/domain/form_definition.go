@@ -43,7 +43,7 @@ type FormDefinitionDraft struct {
 	UpdatedAt           time.Time                 `json:"updated_at"`
 }
 
-// FormDefinitionSchemaV2 是低代码表单的稳定 authoring contract；它不直接等于 runtime schema。
+// FormDefinitionSchemaV2 是低代碼表單的穩定 authoring contract；它不直接等於 runtime schema。
 type FormDefinitionSchemaV2 struct {
 	SchemaVersion int                     `json:"schemaVersion"`
 	Name          string                  `json:"name"`
@@ -54,7 +54,7 @@ type FormDefinitionSchemaV2 struct {
 	Workflow      FormWorkflowV2          `json:"workflow"`
 }
 
-// FormFieldDefinitionV2 描述一个与 runtime widget 解耦的字段。
+// FormFieldDefinitionV2 描述一個與 runtime widget 解耦的字段。
 type FormFieldDefinitionV2 struct {
 	ID           string                `json:"id"`
 	Label        string                `json:"label"`
@@ -71,20 +71,20 @@ type FormFieldDefinitionV2 struct {
 	Security     FormFieldSecurityV2   `json:"security,omitempty"`
 }
 
-// FormFieldOptionV2 描述静态选项。
+// FormFieldOptionV2 描述靜態選項。
 type FormFieldOptionV2 struct {
 	Label string `json:"label"`
 	Value string `json:"value"`
 }
 
-// FormFieldBindingV2 描述受控数据源绑定，仅允许 capability catalog 中的字段。
+// FormFieldBindingV2 描述受控數據源綁定，僅允許 capability catalog 中的字段。
 type FormFieldBindingV2 struct {
 	SourceID   string `json:"sourceId"`
 	ValueField string `json:"valueField"`
 	LabelField string `json:"labelField,omitempty"`
 }
 
-// FormFieldValidationV2 描述声明式校验规则；MVP 不执行任意表达式。
+// FormFieldValidationV2 描述聲明式校驗規則；MVP 不執行任意表達式。
 type FormFieldValidationV2 struct {
 	MinLength *int     `json:"minLength,omitempty"`
 	MaxLength *int     `json:"maxLength,omitempty"`
@@ -93,7 +93,7 @@ type FormFieldValidationV2 struct {
 	Pattern   string   `json:"pattern,omitempty"`
 }
 
-// FormFieldAnalyticsV2 描述可报表化的字段语意。
+// FormFieldAnalyticsV2 描述可報表化的字段語意。
 type FormFieldAnalyticsV2 struct {
 	Reportable   bool     `json:"reportable,omitempty"`
 	Role         string   `json:"role,omitempty"`
@@ -102,30 +102,30 @@ type FormFieldAnalyticsV2 struct {
 	Groupable    bool     `json:"groupable,omitempty"`
 }
 
-// FormFieldSecurityV2 描述字段敏感度与 Agent 可见性。
+// FormFieldSecurityV2 描述字段敏感度與 Agent 可見性。
 type FormFieldSecurityV2 struct {
 	Classification string `json:"classification,omitempty"`
 	Masking        string `json:"masking,omitempty"`
 	AgentAccess    bool   `json:"agentAccess,omitempty"`
 }
 
-// FormLayoutV2 保存布局顺序，不让 Agent 直接拼接 HTML/CSS。
+// FormLayoutV2 保存佈局順序，不讓 Agent 直接拼接 HTML/CSS。
 type FormLayoutV2 struct {
 	Rows []FormLayoutRowV2 `json:"rows"`
 }
 
-// FormLayoutRowV2 描述一行中的字段顺序。
+// FormLayoutRowV2 描述一行中的字段順序。
 type FormLayoutRowV2 struct {
 	ID       string   `json:"id,omitempty"`
 	FieldIDs []string `json:"fieldIds"`
 }
 
-// FormWorkflowV2 描述有限状态审批流程。
+// FormWorkflowV2 描述有限狀態審批流程。
 type FormWorkflowV2 struct {
 	Stages []FormWorkflowStageV2 `json:"stages"`
 }
 
-// FormWorkflowStageV2 描述一个受控流程节点。
+// FormWorkflowStageV2 描述一個受控流程節點。
 type FormWorkflowStageV2 struct {
 	ID     string         `json:"id"`
 	Type   string         `json:"type"`
@@ -134,13 +134,13 @@ type FormWorkflowStageV2 struct {
 	Config map[string]any `json:"config,omitempty"`
 }
 
-// FormDefinitionValidation 是可持久化、可被 Agent 读取的确定性验证结果。
+// FormDefinitionValidation 是可持久化、可被 Agent 讀取的確定性驗證結果。
 type FormDefinitionValidation struct {
 	Valid  bool         `json:"valid"`
 	Errors []FieldError `json:"errors,omitempty"`
 }
 
-// FormBuilderDataSourceMetadata 是不含业务记录的 Agent-safe 数据源能力描述。
+// FormBuilderDataSourceMetadata 是不含業務記錄的 Agent-safe 數據源能力描述。
 type FormBuilderDataSourceMetadata struct {
 	ID     string                `json:"id"`
 	Label  string                `json:"label"`
@@ -148,14 +148,14 @@ type FormBuilderDataSourceMetadata struct {
 	Fields []FormDataSourceField `json:"fields"`
 }
 
-// FormBuilderWorkflowTarget 描述可配置的审批目标角色。
+// FormBuilderWorkflowTarget 描述可配置的審批目標角色。
 type FormBuilderWorkflowTarget struct {
 	Role        string `json:"role"`
 	Label       string `json:"label"`
 	Description string `json:"description"`
 }
 
-// FormBuilderCapabilitiesResponse 是表单 Agent 创作所需的最小能力目录。
+// FormBuilderCapabilitiesResponse 是表單 Agent 創作所需的最小能力目錄。
 type FormBuilderCapabilitiesResponse struct {
 	SchemaVersion   int                             `json:"schema_version"`
 	FieldTypes      []string                        `json:"field_types"`
@@ -164,7 +164,7 @@ type FormBuilderCapabilitiesResponse struct {
 	WorkflowTargets []FormBuilderWorkflowTarget     `json:"workflow_targets"`
 }
 
-// CreateFormDefinitionDraftInput 建立受控表单定义草稿。
+// CreateFormDefinitionDraftInput 建立受控表單定義草稿。
 type CreateFormDefinitionDraftInput struct {
 	BaseTemplateID string                 `json:"base_template_id,omitempty"`
 	Schema         FormDefinitionSchemaV2 `json:"schema"`
@@ -175,7 +175,7 @@ type CreateFormDefinitionDraftInput struct {
 	ToolCallID     string                 `json:"tool_call_id,omitempty"`
 }
 
-// UpdateFormDefinitionDraftInput 更新草稿并要求调用方携带当前 revision。
+// UpdateFormDefinitionDraftInput 更新草稿並要求調用方攜帶當前 revision。
 type UpdateFormDefinitionDraftInput struct {
 	Revision       int64                  `json:"revision"`
 	Schema         FormDefinitionSchemaV2 `json:"schema"`
@@ -185,19 +185,19 @@ type UpdateFormDefinitionDraftInput struct {
 	ToolCallID     string                 `json:"tool_call_id,omitempty"`
 }
 
-// FormDefinitionPreview 返回校验、编译结果与有限流程模拟结果。
+// FormDefinitionPreview 返回校驗、編譯結果與有限流程模擬結果。
 type FormDefinitionPreview struct {
 	Draft          FormDefinitionDraft      `json:"draft"`
 	Validation     FormDefinitionValidation `json:"validation"`
 	CompiledSchema map[string]any           `json:"compiled_schema,omitempty"`
 }
 
-// FormWorkflowSimulation 是不写入运行时流程的静态模拟结果。
+// FormWorkflowSimulation 是不寫入運行時流程的靜態模擬結果。
 type FormWorkflowSimulation struct {
 	Stages []FormWorkflowSimulationStage `json:"stages"`
 }
 
-// FormWorkflowSimulationStage 描述模拟时的审批角色与顺序。
+// FormWorkflowSimulationStage 描述模擬時的審批角色與順序。
 type FormWorkflowSimulationStage struct {
 	ID          string   `json:"id"`
 	Label       string   `json:"label"`
@@ -215,7 +215,7 @@ var formDefinitionBindingFields = map[string]map[string]struct{}{
 	"leave_types":  {"code": {}, "name": {}, "unit": {}},
 }
 
-// ValidateFormDefinitionSchemaV2 执行不依赖数据库状态的结构校验。
+// ValidateFormDefinitionSchemaV2 執行不依賴數據庫狀態的結構校驗。
 func ValidateFormDefinitionSchemaV2(schema FormDefinitionSchemaV2) FormDefinitionValidation {
 	result := FormDefinitionValidation{Valid: true}
 	add := func(field, code, message string) {
@@ -314,7 +314,7 @@ func ValidateFormDefinitionSchemaV2(schema FormDefinitionSchemaV2) FormDefinitio
 	return result
 }
 
-// validateFormDefinitionBinding 限制 Agent 只能引用 capability catalog 暴露的资料源字段。
+// validateFormDefinitionBinding 限制 Agent 只能引用 capability catalog 暴露的資料源字段。
 func validateFormDefinitionBinding(add func(string, string, string), path string, field FormFieldDefinitionV2) {
 	sourceID := strings.TrimSpace(field.Binding.SourceID)
 	allowedFields, sourceOK := formDefinitionBindingFields[sourceID]
@@ -339,7 +339,7 @@ func validateFormDefinitionBinding(add func(string, string, string), path string
 	}
 }
 
-// CompileFormDefinitionSchemaV2 转换为现有 runtime 所需的 workspace_design schema。
+// CompileFormDefinitionSchemaV2 轉換為現有 runtime 所需的 workspace_design schema。
 func CompileFormDefinitionSchemaV2(schema FormDefinitionSchemaV2) (map[string]any, FormDefinitionValidation) {
 	validation := ValidateFormDefinitionSchemaV2(schema)
 	if !validation.Valid {

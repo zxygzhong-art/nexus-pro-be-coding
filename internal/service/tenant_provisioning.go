@@ -186,7 +186,7 @@ func (c *Service) ProvisionTenant(ctx context.Context, input TenantProvisionInpu
 	return result, nil
 }
 
-// EnsureTenantDefaultFormTemplates 幂等补齐既有租户缺少的内建表单，不覆盖管理员已配置的同 key 模板。
+// EnsureTenantDefaultFormTemplates 冪等補齊既有租戶缺少的內建表單，不覆蓋管理員已配置的同 key 模板。
 func (c *Service) EnsureTenantDefaultFormTemplates(ctx context.Context, tenantID string) (int, error) {
 	tenantID = strings.TrimSpace(tenantID)
 	if tenantID == "" {
@@ -209,56 +209,24 @@ func (c *Service) EnsureTenantDefaultFormTemplates(ctx context.Context, tenantID
 	return created, err
 }
 
-// ensureTenantDefaultFormTemplates 只建立缺失的默认模板，保留租户对现有模板的停用、删除与自定义配置。
+// ensureTenantDefaultFormTemplates 只建立缺失的默認模板，保留租戶對現有模板的停用、刪除與自定義配置。
 func ensureTenantDefaultFormTemplates(ctx context.Context, store repository.Store, tenantID string, now time.Time) (int, error) {
-	if _, exists, err := store.GetFormTemplateByKey(ctx, tenantID, "leave-request"); err != nil {
-		return 0, err
-	} else if exists {
-		return 0, nil
+	created := 0
+	for _, template := range tenantDefaultFormTemplates(tenantID, now) {
+		if err := validateWorkspaceFormDesignInput(platformTemplateFields(template.Key, template.Schema), platformTemplateStages(template.Schema)); err != nil {
+			return created, fmt.Errorf("validate default form template %s: %w", template.Key, err)
+		}
+		if _, exists, err := store.GetFormTemplateByKey(ctx, tenantID, template.Key); err != nil {
+			return created, err
+		} else if exists {
+			continue
+		}
+		if err := store.UpsertFormTemplate(ctx, template); err != nil {
+			return created, err
+		}
+		created++
 	}
-	if err := store.UpsertFormTemplate(ctx, tenantDefaultLeaveFormTemplate(tenantID, now)); err != nil {
-		return 0, err
-	}
-	return 1, nil
-}
-
-// tenantDefaultLeaveFormTemplate 建立 Agent、表单中心与工作流共用的可提交请假模板。
-func tenantDefaultLeaveFormTemplate(tenantID string, now time.Time) domain.FormTemplate {
-	return domain.FormTemplate{
-		ID:             fmt.Sprintf("ft-%s-%s-leave-request", safeTenantProvisionSlug(tenantID), shortTenantProvisionHash(tenantID)),
-		TenantID:       tenantID,
-		Key:            "leave-request",
-		Name:           "請假申請單",
-		Description:    "特休、事假、病假與其他假別申請",
-		Status:         "published",
-		CurrentVersion: 1,
-		Schema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"leave_type": map[string]any{"type": "string"},
-				"start_at":   map[string]any{"type": "string", "format": "date-time"},
-				"end_at":     map[string]any{"type": "string", "format": "date-time"},
-				"hours":      map[string]any{"type": "number"},
-				"proxy":      map[string]any{"type": "string"},
-				"reason":     map[string]any{"type": "string"},
-			},
-			"required": []string{"leave_type", "start_at", "end_at", "hours", "reason"},
-			platformFormDesignSchemaKey: map[string]any{
-				"enabled":   true,
-				"form_kind": "hybrid",
-				"category":  "人事考勤類",
-				"icon":      "🗓️",
-				"desc":      "特休 / 事假 / 病假 / 公假",
-				"fields":    platformLeaveRequestBuilderFields(),
-				"stages": []domain.PlatformFormBuilderStage{{
-					ID: "stage-manager", Type: "approver", Label: "直屬主管",
-					Detail: "依員工主管關係自動帶入", Config: map[string]any{"role": "manager"},
-				}},
-			},
-		},
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
+	return created, nil
 }
 
 // normalizeTenantProvisionInput 正規化租戶開通輸入。

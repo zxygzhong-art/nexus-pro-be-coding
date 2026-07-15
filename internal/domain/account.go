@@ -93,27 +93,30 @@ type ProvisionedIdentity struct {
 
 // 下列常數定義此模組使用的固定值。
 const (
-	IdentityProvisioningStatusPending   = "pending"
-	IdentityProvisioningStatusSucceeded = "succeeded"
-	IdentityProvisioningStatusFailed    = "failed"
+	IdentityProvisioningStatusPending    = "pending"
+	IdentityProvisioningStatusProcessing = "processing"
+	IdentityProvisioningStatusSucceeded  = "succeeded"
+	IdentityProvisioningStatusFailed     = "failed"
 )
 
 // IdentityProvisioningOutboxEvent 定義身分開通 outbox 事件的資料結構。
 type IdentityProvisioningOutboxEvent struct {
-	ID          string    `json:"id"`
-	TenantID    string    `json:"tenant_id"`
-	AccountID   string    `json:"account_id"`
-	EmployeeID  string    `json:"employee_id,omitempty"`
-	EmployeeNo  string    `json:"employee_no,omitempty"`
-	Email       string    `json:"email"`
-	DisplayName string    `json:"display_name,omitempty"`
-	Enabled     bool      `json:"enabled"`
-	SendInvite  bool      `json:"send_invite,omitempty"`
-	Status      string    `json:"status"`
-	RetryCount  int       `json:"retry_count"`
-	LastError   string    `json:"last_error,omitempty"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
+	ID             string     `json:"id"`
+	TenantID       string     `json:"tenant_id"`
+	AccountID      string     `json:"account_id"`
+	EmployeeID     string     `json:"employee_id,omitempty"`
+	EmployeeNo     string     `json:"employee_no,omitempty"`
+	Email          string     `json:"email"`
+	DisplayName    string     `json:"display_name,omitempty"`
+	Enabled        bool       `json:"enabled"`
+	SendInvite     bool       `json:"send_invite,omitempty"`
+	Status         string     `json:"status"`
+	RetryCount     int        `json:"retry_count"`
+	LastError      string     `json:"last_error,omitempty"`
+	NextAttemptAt  time.Time  `json:"next_attempt_at"`
+	ClaimExpiresAt *time.Time `json:"claim_expires_at,omitempty"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
 }
 
 // IdentityResolution 定義身分 resolution 的資料結構。

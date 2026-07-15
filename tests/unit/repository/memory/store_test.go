@@ -38,18 +38,10 @@ func TestNextEmployeeNoIncrementsAcrossCalls(t *testing.T) {
 	}
 }
 
-// TestEHRMSSyncRunStorePersistsAndLocks 驗證同步運行儲存與非阻塞互斥。
-func TestEHRMSSyncRunStorePersistsAndLocks(t *testing.T) {
+// TestEHRMSSyncLockerIsNonBlocking 驗證同步互斥不依賴運行資料儲存。
+func TestEHRMSSyncLockerIsNonBlocking(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()
-	now := time.Now().UTC()
-	run := domain.EHRMSSyncRun{ID: "run-1", TenantID: "tenant-1", AccountID: "acct-1", SyncType: "pipeline", TriggerType: "scheduled", Status: "running", Mode: "upsert", Attempt: 1, MaxAttempts: 1, StartedAt: now, CreatedAt: now, UpdatedAt: now}
-	if err := store.UpsertEHRMSSyncRun(ctx, run); err != nil {
-		t.Fatal(err)
-	}
-	if got, ok, err := store.GetEHRMSSyncRun(ctx, "tenant-1", "run-1"); err != nil || !ok || got.Status != "running" {
-		t.Fatalf("got=%+v ok=%v err=%v", got, ok, err)
-	}
 
 	entered := make(chan struct{})
 	release := make(chan struct{})
@@ -211,8 +203,8 @@ func TestAttendanceClockRecordMultiPunchBoundariesAndIdempotency(t *testing.T) {
 	}
 }
 
-// TestUpsertLeaveBalanceUsesEmployeeAndTypeIdentity 驗證餘額 upsert 與 PostgreSQL 唯一鍵語義一致。
-func TestUpsertLeaveBalanceUsesEmployeeAndTypeIdentity(t *testing.T) {
+// TestUpsertLeaveBalanceUsesEmployeeTypeAndPeriodIdentity verifies period balances stay independent.
+func TestUpsertLeaveBalanceUsesEmployeeTypeAndPeriodIdentity(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -241,6 +233,21 @@ func TestUpsertLeaveBalanceUsesEmployeeAndTypeIdentity(t *testing.T) {
 	}
 	if balances[0].ID != first.ID || balances[0].RemainingHours != 24 || balances[0].Source != "ehrms" {
 		t.Fatalf("expected existing balance identity with eHRMS values, got %+v", balances[0])
+	}
+
+	nextPeriod := first
+	nextPeriod.ID = "next-period"
+	nextPeriod.PeriodStart = "2027-01-01"
+	nextPeriod.PeriodEnd = "2027-12-31"
+	if err := store.UpsertLeaveBalance(ctx, nextPeriod); err != nil {
+		t.Fatal(err)
+	}
+	balances, err = store.ListLeaveBalances(ctx, "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(balances) != 2 {
+		t.Fatalf("expected a new balance identity for another period, got %+v", balances)
 	}
 }
 

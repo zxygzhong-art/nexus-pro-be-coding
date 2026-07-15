@@ -135,10 +135,10 @@ func (p *OutboxDispatcher) ProcessTenant(ctx context.Context, tenantID string, o
 	processed := 0
 	for _, event := range events {
 		if !p.isDispatchableEventType(event) {
-			// Park unsupported types as processing with an explanatory error so the
-			// next claim (pending|failed only) does not thrash them every tick.
+			// Park unsupported types explicitly so operators can distinguish them
+			// from events currently owned by a worker.
 			// Reset to pending when a handler/publisher is later registered.
-			event.Status = "processing"
+			event.Status = "parked"
 			event.LastError = truncateOutboxError("no handler registered for outbox event type " + event.EventType)
 			event.ProcessedAt = nil
 			if err := p.store.UpdateOutboxEvent(ctx, event); err != nil {
@@ -249,17 +249,6 @@ func (p *OutboxDispatcher) isDispatchableEventType(event domain.OutboxEvent) boo
 // isAgentModelSyncEvent 判斷是否為 LiteLLM 模型同步事件。
 func isAgentModelSyncEvent(eventType string) bool {
 	return eventType == string(domain.EventAgentModelUpsert) || eventType == string(domain.EventAgentModelDelete)
-}
-
-// isDispatchableEvent 判斷事件是否可派發（含狀態與重試上限；供測試與相容路徑使用）。
-func (p *OutboxDispatcher) isDispatchableEvent(event domain.OutboxEvent, maxRetries int) bool {
-	if event.RetryCount >= maxRetries {
-		return false
-	}
-	if event.Status != "pending" && event.Status != "failed" && event.Status != "processing" {
-		return false
-	}
-	return p.isDispatchableEventType(event)
 }
 
 // isOpenFGARelationshipEvent 判斷是否為open fga 關係事件。

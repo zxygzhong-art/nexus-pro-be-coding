@@ -13,6 +13,9 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/nexus-p
 FROM gcr.io/distroless/static-debian12:nonroot
 WORKDIR /app
 
+# Production images must never inherit development startup defaults.
+ENV APP_ENV=production
+
 COPY --from=builder /out/nexus-pro-be /app/nexus-pro-be
 
 EXPOSE 8080

@@ -33,6 +33,9 @@ type agentConfirmationAction struct {
 	Public               domain.AgentConfirmation
 	TenantID             string
 	AccountID            string
+	AgentID              string
+	SessionID            string
+	ContextVersion       int64
 	DraftID              string
 	ExpectedDraftVersion int64
 	Payload              map[string]any
@@ -107,8 +110,13 @@ func agentConfirmationExecutionRetryable(err error) bool {
 	return errors.As(err, &temporary) && temporary.Temporary()
 }
 
-// saveAgentConfirmation 复用持久化 Agent memory 存放短效内部记录，支持多实例执行。
+// saveAgentConfirmation 複用持久化 Agent memory 存放短效內部記錄，支持多實例執行。
 func (c AgentService) saveAgentConfirmation(ctx RequestContext, action agentConfirmationAction) error {
+	if execution, ok := agentChatExecutionContextFromContext(ctx.Context); ok {
+		action.AgentID = execution.AgentID
+		action.SessionID = execution.SessionID
+		action.ContextVersion = execution.ContextVersion
+	}
 	raw, err := json.Marshal(action)
 	if err != nil {
 		return err
@@ -116,12 +124,13 @@ func (c AgentService) saveAgentConfirmation(ctx RequestContext, action agentConf
 	expiresAt := action.Public.ExpiresAt
 	return c.store.UpsertAgentMemory(goContext(ctx), domain.AgentMemory{
 		ID: action.Public.ID, TenantID: ctx.TenantID, AccountID: ctx.AccountID,
+		AgentID: action.AgentID, SessionID: action.SessionID,
 		Key: agentConfirmationMemoryKey, Content: string(raw), Source: domain.AgentMemorySourceAuto,
 		Importance: 1, ExpiresAt: &expiresAt, CreatedAt: c.Now(), UpdatedAt: c.Now(),
 	})
 }
 
-// takeAgentConfirmation 验证归属后原子删除并解析一次性确认，拒绝过期与重放。
+// takeAgentConfirmation 驗證歸屬後原子刪除並解析一次性確認，拒絕過期與重放。
 func (c AgentService) takeAgentConfirmation(ctx RequestContext, id string) (agentConfirmationAction, error) {
 	id = strings.TrimSpace(id)
 	memory, ok, err := c.store.GetAgentMemory(goContext(ctx), ctx.TenantID, id)
@@ -145,10 +154,64 @@ func (c AgentService) takeAgentConfirmation(ctx RequestContext, id string) (agen
 	if action.TenantID != ctx.TenantID || action.AccountID != ctx.AccountID {
 		return agentConfirmationAction{}, NotFound("agent confirmation", id)
 	}
+	if action.SessionID != "" && action.ContextVersion > 0 {
+		session, sessionErr := c.currentAgentSession(ctx, ctx.AccountID, action.SessionID)
+		if sessionErr != nil {
+			return agentConfirmationAction{}, sessionErr
+		}
+		if session.ContextVersion != action.ContextVersion {
+			return agentConfirmationAction{}, Conflict("agent confirmation belongs to an earlier conversation context").WithReasonCode("agent_confirmation_invalid")
+		}
+	}
 	if !action.Public.ExpiresAt.After(c.Now()) {
 		return agentConfirmationAction{}, Conflict("agent confirmation has expired").WithReasonCode("agent_confirmation_expired")
 	}
 	return action, nil
+}
+
+// pendingAgentConfirmationMessages restores only unexpired, unconsumed confirmations owned by this session context.
+func (c AgentService) pendingAgentConfirmationMessages(ctx RequestContext, accountID string, session domain.AgentSession) ([]domain.AgentSessionMessage, error) {
+	memories, err := c.store.ListAgentMemoriesByAccount(
+		goContext(ctx), ctx.TenantID, accountID, session.AgentID, session.ID, agentBulkReviewLimit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	messages := make([]domain.AgentSessionMessage, 0, len(memories))
+	for _, memory := range memories {
+		if memory.Key != agentConfirmationMemoryKey {
+			continue
+		}
+		var action agentConfirmationAction
+		if err := json.Unmarshal([]byte(memory.Content), &action); err != nil {
+			continue
+		}
+		if action.ContextVersion > 0 && action.ContextVersion != session.ContextVersion {
+			continue
+		}
+		data := map[string]any{}
+		if action.DraftID != "" {
+			data["form_draft_id"] = action.DraftID
+		}
+		raw, err := json.Marshal(map[string]any{
+			"event":        domain.AgentChatEventConfirmation,
+			"confirmation": action.Public,
+			"data":         data,
+		})
+		if err != nil {
+			return nil, err
+		}
+		messages = append(messages, domain.AgentSessionMessage{
+			ID:             "pending-" + action.Public.ID,
+			TenantID:       ctx.TenantID,
+			SessionID:      session.ID,
+			Role:           domain.AgentMessageRoleTool,
+			ContextVersion: session.ContextVersion,
+			Metadata:       map[string]any{"agent_artifact_json": string(raw)},
+			CreatedAt:      memory.CreatedAt,
+		})
+	}
+	return messages, nil
 }
 
 // executeConfirmedFormSubmission 防止草稿在預覽後被修改或換人提交。
@@ -520,7 +583,7 @@ func agentTemplatePublished(template domain.FormTemplate) bool {
 	return status == "" || status == "published"
 }
 
-// agentAccessibleFormFields 排除布局欄位與 schema 明確禁止 Agent 存取的欄位。
+// agentAccessibleFormFields 排除佈局欄位與 schema 明確禁止 Agent 存取的欄位。
 func agentAccessibleFormFields(template domain.FormTemplate) []domain.PlatformFormBuilderField {
 	fields := platformTemplateFields(template.Key, template.Schema)
 	out := make([]domain.PlatformFormBuilderField, 0, len(fields))
@@ -552,11 +615,15 @@ func sanitizeAgentFormPayload(template domain.FormTemplate, payload map[string]a
 	return out
 }
 
-// prepareAgentFormDraftPayload 保留欄位白名單，並依租戶考勤政策補齊缺失的請假時間。
+// prepareAgentFormDraftPayload 保留欄位白名單，解析資料源標籤，並依租戶考勤政策補齊缺失的請假時間。
 func (c AgentService) prepareAgentFormDraftPayload(ctx domain.RequestContext, template domain.FormTemplate, payload map[string]any) (map[string]any, []string, error) {
 	filtered := sanitizeAgentFormPayload(template, payload)
+	filtered, normalizedFields, err := c.normalizeAgentBoundPayloadValues(ctx, template, filtered)
+	if err != nil {
+		return nil, nil, err
+	}
 	if _, linked := leaveLinkedTemplateKeys[strings.TrimSpace(template.Key)]; !linked {
-		return filtered, nil, nil
+		return filtered, normalizedFields, nil
 	}
 
 	startRaw := strings.TrimSpace(stringFromAny(filtered["start_at"]))
@@ -566,7 +633,7 @@ func (c AgentService) prepareAgentFormDraftPayload(ctx domain.RequestContext, te
 		if err != nil {
 			return nil, nil, err
 		}
-		return normalized, []string{"hours"}, nil
+		return normalized, append(normalizedFields, "hours"), nil
 	}
 
 	workDate := c.Now().In(attendanceClockLocation).Format(time.DateOnly)
@@ -590,7 +657,6 @@ func (c AgentService) prepareAgentFormDraftPayload(ctx domain.RequestContext, te
 		}})
 	}
 
-	normalizedFields := make([]string, 0, 3)
 	if startRaw == "" {
 		filtered["start_at"] = schedule[0].Start.Format(time.RFC3339)
 		normalizedFields = append(normalizedFields, "start_at")
@@ -605,6 +671,55 @@ func (c AgentService) prepareAgentFormDraftPayload(ctx domain.RequestContext, te
 	}
 	normalizedFields = append(normalizedFields, "hours")
 	return filtered, normalizedFields, nil
+}
+
+// normalizeAgentBoundPayloadValues resolves one unambiguous data-source label to its persisted value.
+func (c AgentService) normalizeAgentBoundPayloadValues(ctx domain.RequestContext, template domain.FormTemplate, payload map[string]any) (map[string]any, []string, error) {
+	fields := agentAccessibleFormFields(template)
+	sources, err := c.agentFormDataSources(ctx, fields)
+	if err != nil {
+		return nil, nil, err
+	}
+	sourceByID := make(map[string]domain.FormDataSource, len(sources))
+	for _, source := range sources {
+		sourceByID[source.ID] = source
+	}
+	normalizedFields := make([]string, 0, 2)
+	for _, field := range fields {
+		binding := field.Binding
+		if binding == nil || strings.TrimSpace(binding.LabelField) == "" {
+			continue
+		}
+		current, exists := payload[field.ID]
+		if !exists || isEmptyFormPayloadValue(current) {
+			continue
+		}
+		source, ok := sourceByID[strings.TrimSpace(binding.SourceID)]
+		if !ok {
+			continue
+		}
+		currentText := strings.TrimSpace(agentDisplayValue(current))
+		var matchedValue any
+		labelMatches := 0
+		valueExists := false
+		for _, record := range source.Records {
+			value := record[binding.ValueField]
+			if strings.TrimSpace(agentDisplayValue(value)) == currentText {
+				valueExists = true
+				break
+			}
+			label := strings.TrimSpace(agentDisplayValue(record[binding.LabelField]))
+			if label != "" && strings.EqualFold(label, currentText) {
+				matchedValue = value
+				labelMatches++
+			}
+		}
+		if !valueExists && labelMatches == 1 {
+			payload[field.ID] = matchedValue
+			normalizedFields = append(normalizedFields, field.ID)
+		}
+	}
+	return payload, normalizedFields, nil
 }
 
 // toolPayload 僅接受結構化 payload object，避免鬆散字串被當成表單內容。
@@ -678,7 +793,7 @@ func agentApprovalPath(template domain.FormTemplate) []string {
 	return out
 }
 
-// agentPayloadRows 依 schema 順序產生確認摘要，并将受控选项值解析成人类可读标签。
+// agentPayloadRows 依 schema 順序產生確認摘要，並將受控選項值解析成人類可讀標籤。
 func (c AgentService) agentPayloadRows(ctx domain.RequestContext, template domain.FormTemplate, payload map[string]any) ([]domain.AgentAnalysisRow, error) {
 	fields := agentAccessibleFormFields(template)
 	sources, err := c.agentFormDataSources(ctx, fields)
