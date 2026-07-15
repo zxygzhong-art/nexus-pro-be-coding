@@ -395,6 +395,58 @@ func TestWorkspaceAttendanceBuildsLeaveAndClockMatrices(t *testing.T) {
 	}
 }
 
+// TestWorkspaceAttendanceMarksOnlyPastEligibleMissingDaysAbsent verifies absence boundaries and raw clock evidence.
+func TestWorkspaceAttendanceMarksOnlyPastEligibleMissingDaysAbsent(t *testing.T) {
+	store, _, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 7, 10, 0, 30, 0, 0, time.UTC)
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-active", EmployeeNo: "E001", Name: "Active", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC))})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-mid-hire", EmployeeNo: "E002", Name: "Mid Hire", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 7, 8, 0, 0, 0, 0, time.UTC))})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-resigned", EmployeeNo: "E003", Name: "Resigned", Status: "resigned", EmploymentStatus: "resigned", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), ResignDate: ptrTime(time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC))})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-future-hire", EmployeeNo: "E004", Name: "Future Hire", Status: "onboarding", EmploymentStatus: "onboarding", HireDate: ptrTime(time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC))})
+	_ = store.UpsertAttendanceClockRecord(context.Background(), domain.AttendanceClockRecord{ID: "clk-in", TenantID: "tenant-1", EmployeeID: "emp-active", WorkDate: "2026-07-08", Direction: "clock_in", ClockedAt: time.Date(2026, 7, 8, 1, 0, 0, 0, time.UTC), RecordStatus: "accepted", Source: "geofence", CreatedAt: now})
+	_ = store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "summary", TenantID: "tenant-1", EmployeeID: "emp-active", WorkDate: "2026-07-09", ClockHours: 8, Source: "ehrms", ExternalRef: "E001:2026-07-09", CreatedAt: now, UpdatedAt: now})
+
+	got, err := svc.Workspace().WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows := map[string]domain.WorkspaceAttendanceRow{}
+	for _, row := range got.Attendance.Rows {
+		rows[row.Employee.ID] = row
+	}
+	if cell := rows["E001"].Cells[6]; cell.Type != "absence" || cell.Label != "缺勤" {
+		t.Fatalf("expected elapsed missing July 7 to be absent, got %+v", cell)
+	}
+	if cell := rows["E001"].Cells[7]; cell.Type != "work" || !cell.Recorded {
+		t.Fatalf("expected raw July 8 clock evidence to count as attendance, got %+v", cell)
+	}
+	if cell := rows["E001"].Cells[8]; cell.Type != "work" || !cell.Recorded || cell.Hours != 8 {
+		t.Fatalf("expected July 9 daily summary to count as attendance, got %+v", cell)
+	}
+	if cell := rows["E001"].Cells[9]; cell.Type != "work" || cell.Recorded {
+		t.Fatalf("expected current day to remain pending, got %+v", cell)
+	}
+	if cell := rows["E001"].Cells[12]; cell.Type != "work" || cell.Recorded {
+		t.Fatalf("expected future workday to remain pending, got %+v", cell)
+	}
+	if cell := rows["E002"].Cells[6]; cell.Type != "empty" {
+		t.Fatalf("expected pre-hire date to stay empty, got %+v", cell)
+	}
+	if cell := rows["E002"].Cells[7]; cell.Type != "absence" {
+		t.Fatalf("expected elapsed hire-date workday without facts to be absent, got %+v", cell)
+	}
+	if cell := rows["E003"].Cells[2]; cell.Type != "absence" {
+		t.Fatalf("expected pre-resignation workday without facts to be absent, got %+v", cell)
+	}
+	if cell := rows["E003"].Cells[5]; cell.Type != "empty" {
+		t.Fatalf("expected post-resignation date to stay empty, got %+v", cell)
+	}
+	if cell := rows["E004"].Cells[8]; cell.Type != "empty" {
+		t.Fatalf("expected onboarding pre-hire date to stay empty, got %+v", cell)
+	}
+}
+
 // TestWorkspaceAttendanceNormalizesEHRMSLeaveTypes 驗證 eHRMS 假別名稱穩定映射且非請假明細不進入矩陣。
 func TestWorkspaceAttendanceNormalizesEHRMSLeaveTypes(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)

@@ -329,29 +329,30 @@ func (c AgentService) CreateDefinition(ctx RequestContext, input domain.CreateAg
 	}
 	now := c.Now()
 	agent, err := c.normalizeAgentDefinition(ctx, domain.AgentDefinition{
-		ID:                 utils.NewID("adef"),
-		TenantID:           ctx.TenantID,
-		Name:               input.Name,
-		Description:        input.Description,
-		Emoji:              input.Emoji,
-		Category:           domain.AgentCategory(input.Category),
-		ModelID:            input.ModelID,
-		MainAgentRole:      input.MainAgentRole,
-		SubAgents:          input.SubAgents,
-		SystemPrompt:       input.SystemPrompt,
-		WelcomeMessage:     input.WelcomeMessage,
-		SuggestedQuestions: input.SuggestedQuestions,
-		Tools:              input.Tools,
-		KnowledgeBaseIDs:   input.KnowledgeBaseIDs,
-		Status:             domain.AgentDefinitionStatusDraft,
-		Visibility:         domain.AgentVisibility(input.Visibility),
-		VisibilityTargets:  input.VisibilityTargets,
-		TimeoutSeconds:     input.TimeoutSeconds,
-		Version:            1,
-		CreatedByAccountID: account.ID,
-		UpdatedByAccountID: account.ID,
-		CreatedAt:          now,
-		UpdatedAt:          now,
+		ID:                            utils.NewID("adef"),
+		TenantID:                      ctx.TenantID,
+		Name:                          input.Name,
+		Description:                   input.Description,
+		Emoji:                         input.Emoji,
+		Category:                      domain.AgentCategory(input.Category),
+		ModelID:                       input.ModelID,
+		MainAgentRole:                 input.MainAgentRole,
+		SubAgents:                     input.SubAgents,
+		SystemPrompt:                  input.SystemPrompt,
+		WelcomeMessage:                input.WelcomeMessage,
+		SuggestedQuestions:            input.SuggestedQuestions,
+		SuggestedQuestionTranslations: input.SuggestedQuestionTranslations,
+		Tools:                         input.Tools,
+		KnowledgeBaseIDs:              input.KnowledgeBaseIDs,
+		Status:                        domain.AgentDefinitionStatusDraft,
+		Visibility:                    domain.AgentVisibility(input.Visibility),
+		VisibilityTargets:             input.VisibilityTargets,
+		TimeoutSeconds:                input.TimeoutSeconds,
+		Version:                       1,
+		CreatedByAccountID:            account.ID,
+		UpdatedByAccountID:            account.ID,
+		CreatedAt:                     now,
+		UpdatedAt:                     now,
 	})
 	if err != nil {
 		return domain.AgentDefinition{}, err
@@ -410,6 +411,13 @@ func (c AgentService) UpdateDefinition(ctx RequestContext, id string, input doma
 	}
 	if input.SuggestedQuestions != nil {
 		agent.SuggestedQuestions = input.SuggestedQuestions
+		if input.SuggestedQuestionTranslations == nil {
+			agent.SuggestedQuestionTranslations = nil
+		}
+	}
+	if input.SuggestedQuestionTranslations != nil {
+		agent.SuggestedQuestionTranslations = input.SuggestedQuestionTranslations
+		agent.SuggestedQuestions = nil
 	}
 	if input.Tools != nil {
 		agent.Tools = input.Tools
@@ -668,6 +676,7 @@ func (c AgentService) RollbackDefinition(ctx RequestContext, id string, input do
 	agent.SystemPrompt = version.SystemPrompt
 	agent.WelcomeMessage = version.WelcomeMessage
 	agent.SuggestedQuestions = version.SuggestedQuestions
+	agent.SuggestedQuestionTranslations = version.SuggestedQuestionTranslations
 	agent.Tools = version.Tools
 	agent.KnowledgeBaseIDs = version.KnowledgeBaseIDs
 	agent.ModelID = version.ModelID
@@ -940,7 +949,7 @@ func agentToolCatalog() []domain.AgentToolMeta {
 		{Value: "list_employees", Label: "List Employees", Description: "Read employee summaries.", Readonly: true, RequiredPermission: "agent.tool.call:list_employees"},
 		{Value: "get_employee", Label: "Get Employee", Description: "Read one employee summary.", Readonly: true, RequiredPermission: "agent.tool.call:get_employee"},
 		{Value: "my_leave_balances", Label: "My Leave Balances", Description: "Read current account leave balances.", Readonly: true, RequiredPermission: "agent.tool.call:my_leave_balances"},
-		{Value: "check_leave_eligibility", Label: "Check Leave Eligibility", Description: "Check current employee leave eligibility against policy and balance.", Readonly: true, RequiredPermission: "agent.tool.call:check_leave_eligibility"},
+		{Value: "check_leave_eligibility", Label: "Check Leave Eligibility", Description: "Check leave policy and choose balance reservation or the non-blocking no-balance fallback.", Readonly: true, RequiredPermission: "agent.tool.call:check_leave_eligibility"},
 		{Value: "my_clock_records", Label: "My Clock Records", Description: "Read current account clock records.", Readonly: true, RequiredPermission: "agent.tool.call:my_clock_records"},
 		{Value: "my_attendance_summary", Label: "My Attendance Summary", Description: "Read the current employee's monthly attendance summary.", Readonly: true, RequiredPermission: "agent.tool.call:my_attendance_summary"},
 		{Value: "my_form_history", Label: "My Form History", Description: "Read the current account's own form application history.", Readonly: true, RequiredPermission: "agent.tool.call:my_form_history"},
@@ -1131,15 +1140,19 @@ func (c AgentService) normalizeAgentDefinition(ctx RequestContext, agent domain.
 	if utf8.RuneCountInString(agent.WelcomeMessage) > 1000 {
 		return domain.AgentDefinition{}, BadRequest("welcome_message supports at most 1000 characters")
 	}
-	agent.SuggestedQuestions = uniqueStrings(agent.SuggestedQuestions)
-	if len(agent.SuggestedQuestions) > 3 {
-		return domain.AgentDefinition{}, BadRequest("suggested_questions supports at most 3 items")
+	if len(agent.SuggestedQuestionTranslations) == 0 && len(agent.SuggestedQuestions) > 0 {
+		agent.SuggestedQuestionTranslations = localizedQuestionsFromLegacy(agent.SuggestedQuestions)
 	}
-	for _, question := range agent.SuggestedQuestions {
-		if utf8.RuneCountInString(question) > 100 {
-			return domain.AgentDefinition{}, BadRequest("each suggested question supports at most 100 characters")
-		}
+	translations, err := normalizeSuggestedQuestionTranslations(agent.SuggestedQuestionTranslations)
+	if err != nil {
+		return domain.AgentDefinition{}, err
 	}
+	agent.SuggestedQuestionTranslations = translations
+	agent.SuggestedQuestions = localizedSuggestedQuestions(
+		agent.SuggestedQuestionTranslations,
+		domain.DefaultPreferredLocale,
+		nil,
+	)
 	if agent.Status == "" {
 		agent.Status = domain.AgentDefinitionStatusDraft
 	}
@@ -1228,6 +1241,85 @@ func (c AgentService) normalizeAgentDefinition(ctx RequestContext, agent domain.
 	return agent, nil
 }
 
+// normalizeSuggestedQuestionTranslations validates supported locales while preserving question order.
+func normalizeSuggestedQuestionTranslations(
+	items []domain.LocalizedAgentSuggestedQuestion,
+) ([]domain.LocalizedAgentSuggestedQuestion, error) {
+	if len(items) > domain.MaxAgentSuggestedQuestions {
+		return nil, BadRequest(fmt.Sprintf(
+			"suggested_question_translations supports at most %d items",
+			domain.MaxAgentSuggestedQuestions,
+		))
+	}
+	result := make([]domain.LocalizedAgentSuggestedQuestion, 0, len(items))
+	for _, item := range items {
+		translations := make(map[string]string, len(item.Translations))
+		for locale, value := range item.Translations {
+			locale = strings.TrimSpace(locale)
+			if locale != domain.PreferredLocaleZHTW && locale != domain.PreferredLocaleENUS {
+				return nil, BadRequest("suggested question locale must be zh-TW or en-US")
+			}
+			value = strings.TrimSpace(value)
+			if value == "" {
+				continue
+			}
+			if utf8.RuneCountInString(value) > domain.MaxAgentSuggestedQuestionCharacters {
+				return nil, BadRequest(fmt.Sprintf(
+					"each suggested question translation supports at most %d characters",
+					domain.MaxAgentSuggestedQuestionCharacters,
+				))
+			}
+			translations[locale] = value
+		}
+		if len(translations) > 0 {
+			result = append(result, domain.LocalizedAgentSuggestedQuestion{Translations: translations})
+		}
+	}
+	return result, nil
+}
+
+// localizedQuestionsFromLegacy upgrades the previous default-language array without changing its order.
+func localizedQuestionsFromLegacy(values []string) []domain.LocalizedAgentSuggestedQuestion {
+	values = uniqueStrings(values)
+	result := make([]domain.LocalizedAgentSuggestedQuestion, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		result = append(result, domain.LocalizedAgentSuggestedQuestion{Translations: map[string]string{
+			domain.DefaultPreferredLocale: value,
+		}})
+	}
+	return result
+}
+
+// localizedSuggestedQuestions resolves the account locale with deterministic per-question fallback.
+func localizedSuggestedQuestions(
+	items []domain.LocalizedAgentSuggestedQuestion,
+	locale string,
+	fallback []string,
+) []string {
+	locale = domain.PreferredLocaleWithDefault(locale)
+	result := make([]string, 0, len(items))
+	for _, item := range items {
+		value := strings.TrimSpace(item.Translations[locale])
+		if value == "" {
+			value = strings.TrimSpace(item.Translations[domain.DefaultPreferredLocale])
+		}
+		if value == "" {
+			value = strings.TrimSpace(item.Translations[domain.PreferredLocaleENUS])
+		}
+		if value != "" {
+			result = append(result, value)
+		}
+	}
+	if len(result) == 0 {
+		return uniqueStrings(fallback)
+	}
+	return result
+}
+
 // validateKnowledgeBaseReferences 保證 Agent 只能綁定目前租戶存在的知識庫。
 func (c AgentService) validateKnowledgeBaseReferences(ctx RequestContext, ids []string) error {
 	for _, id := range ids {
@@ -1302,36 +1394,38 @@ func validateAgentTools(tools []string) error {
 
 func (c AgentService) snapshotAgentDefinition(ctx RequestContext, agent domain.AgentDefinition, actorID, note string) error {
 	return c.store.InsertAgentDefinitionVersion(goContext(ctx), domain.AgentDefinitionVersion{
-		ID:                 utils.NewID("adefv"),
-		TenantID:           ctx.TenantID,
-		AgentID:            agent.ID,
-		Version:            agent.Version,
-		MainAgentRole:      agent.MainAgentRole,
-		SubAgents:          agent.SubAgents,
-		SystemPrompt:       agent.SystemPrompt,
-		WelcomeMessage:     agent.WelcomeMessage,
-		SuggestedQuestions: agent.SuggestedQuestions,
-		Tools:              agent.Tools,
-		KnowledgeBaseIDs:   agent.KnowledgeBaseIDs,
-		ModelID:            agent.ModelID,
-		Note:               note,
-		CreatedByAccountID: actorID,
-		CreatedAt:          c.Now(),
+		ID:                            utils.NewID("adefv"),
+		TenantID:                      ctx.TenantID,
+		AgentID:                       agent.ID,
+		Version:                       agent.Version,
+		MainAgentRole:                 agent.MainAgentRole,
+		SubAgents:                     agent.SubAgents,
+		SystemPrompt:                  agent.SystemPrompt,
+		WelcomeMessage:                agent.WelcomeMessage,
+		SuggestedQuestions:            agent.SuggestedQuestions,
+		SuggestedQuestionTranslations: agent.SuggestedQuestionTranslations,
+		Tools:                         agent.Tools,
+		KnowledgeBaseIDs:              agent.KnowledgeBaseIDs,
+		ModelID:                       agent.ModelID,
+		Note:                          note,
+		CreatedByAccountID:            actorID,
+		CreatedAt:                     c.Now(),
 	})
 }
 
 // agentDefinitionRuntimeSignature 生成會影響真實執行的穩定配置簽名。
 func agentDefinitionRuntimeSignature(agent domain.AgentDefinition) string {
 	payload := struct {
-		MainAgentRole      string                   `json:"main_agent_role"`
-		SubAgents          []domain.AgentTeamMember `json:"sub_agents"`
-		SystemPrompt       string                   `json:"system_prompt"`
-		WelcomeMessage     string                   `json:"welcome_message"`
-		SuggestedQuestions []string                 `json:"suggested_questions"`
-		Tools              []string                 `json:"tools"`
-		KnowledgeBaseIDs   []string                 `json:"knowledge_base_ids"`
-		ModelID            string                   `json:"model_id"`
-	}{agent.MainAgentRole, agent.SubAgents, agent.SystemPrompt, agent.WelcomeMessage, agent.SuggestedQuestions, agent.Tools, agent.KnowledgeBaseIDs, agent.ModelID}
+		MainAgentRole                 string                                   `json:"main_agent_role"`
+		SubAgents                     []domain.AgentTeamMember                 `json:"sub_agents"`
+		SystemPrompt                  string                                   `json:"system_prompt"`
+		WelcomeMessage                string                                   `json:"welcome_message"`
+		SuggestedQuestions            []string                                 `json:"suggested_questions"`
+		SuggestedQuestionTranslations []domain.LocalizedAgentSuggestedQuestion `json:"suggested_question_translations"`
+		Tools                         []string                                 `json:"tools"`
+		KnowledgeBaseIDs              []string                                 `json:"knowledge_base_ids"`
+		ModelID                       string                                   `json:"model_id"`
+	}{agent.MainAgentRole, agent.SubAgents, agent.SystemPrompt, agent.WelcomeMessage, agent.SuggestedQuestions, agent.SuggestedQuestionTranslations, agent.Tools, agent.KnowledgeBaseIDs, agent.ModelID}
 	encoded, _ := json.Marshal(payload)
 	return string(encoded)
 }

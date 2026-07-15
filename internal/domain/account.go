@@ -1,6 +1,10 @@
 package domain
 
-import "time"
+import (
+	"errors"
+	"strings"
+	"time"
+)
 
 // AccountStatus 表示帳號狀態。
 type AccountStatus string
@@ -10,6 +14,12 @@ const (
 	AccountStatusActive        AccountStatus = "active"
 	AccountStatusDisabled      AccountStatus = "disabled"
 	AccountStatusPendingInvite AccountStatus = "pending_invite"
+)
+
+const (
+	PreferredLocaleZHTW    = "zh-TW"
+	PreferredLocaleENUS    = "en-US"
+	DefaultPreferredLocale = PreferredLocaleZHTW
 )
 
 // Account 定義帳號的資料結構。
@@ -23,6 +33,7 @@ type Account struct {
 	UserGroupIDs           []string  `json:"user_group_ids"`
 	DirectPermissionSetIDs []string  `json:"direct_permission_set_ids"`
 	ActiveAssumableRoleID  string    `json:"active_assumable_role_id,omitempty"`
+	PreferredLocale        string    `json:"preferred_locale"`
 	Version                int64     `json:"version"`
 	CreatedAt              time.Time `json:"created_at"`
 }
@@ -34,6 +45,67 @@ type UpdateMeProfileInput struct {
 	Extension            *string `json:"extension,omitempty"`
 	Slack                *string `json:"slack,omitempty"`
 	EmergencyContactName *string `json:"emergency_contact_name,omitempty"`
+}
+
+// UpdateMePreferencesInput contains account-level preferences owned by the authenticated user.
+type UpdateMePreferencesInput struct {
+	PreferredLocale string `json:"preferred_locale"`
+}
+
+// Validate accepts only locales supported by the current frontend message catalog.
+func (input UpdateMePreferencesInput) Validate() error {
+	if input.PreferredLocale == PreferredLocaleZHTW || input.PreferredLocale == PreferredLocaleENUS {
+		return nil
+	}
+	return ValidationFailed("account preferences are invalid", []FieldError{{
+		Field:   "preferred_locale",
+		Code:    "unsupported",
+		Message: "preferred locale must be one of zh-TW or en-US",
+	}})
+}
+
+// PreferredLocaleWithDefault preserves explicit values while defaulting legacy account inputs.
+func PreferredLocaleWithDefault(value string) string {
+	if strings.TrimSpace(value) == "" {
+		return DefaultPreferredLocale
+	}
+	return value
+}
+
+// ChangePasswordInput contains only the password values needed for one self-service update.
+type ChangePasswordInput struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+	Confirmation    string `json:"confirmation"`
+}
+
+// Validate rejects incomplete, oversized, mismatched, or no-op password changes before any identity-provider call.
+func (input ChangePasswordInput) Validate() error {
+	fields := make([]FieldError, 0, 3)
+	if input.CurrentPassword == "" {
+		fields = append(fields, FieldError{Field: "current_password", Code: "required", Message: "current password is required"})
+	} else if len(input.CurrentPassword) > 512 {
+		fields = append(fields, FieldError{Field: "current_password", Code: "invalid", Message: "current password is too long"})
+	}
+	if input.NewPassword == "" {
+		fields = append(fields, FieldError{Field: "new_password", Code: "required", Message: "new password is required"})
+	} else if len(input.NewPassword) > 512 {
+		fields = append(fields, FieldError{Field: "new_password", Code: "invalid", Message: "new password is too long"})
+	}
+	if input.Confirmation == "" {
+		fields = append(fields, FieldError{Field: "confirmation", Code: "required", Message: "password confirmation is required"})
+	} else if len(input.Confirmation) > 512 {
+		fields = append(fields, FieldError{Field: "confirmation", Code: "invalid", Message: "password confirmation is too long"})
+	} else if input.NewPassword != input.Confirmation {
+		fields = append(fields, FieldError{Field: "confirmation", Code: "invalid", Message: "password confirmation does not match"})
+	}
+	if input.CurrentPassword != "" && strings.TrimSpace(input.NewPassword) != "" && input.CurrentPassword == input.NewPassword {
+		fields = append(fields, FieldError{Field: "new_password", Code: "invalid", Message: "new password must differ from current password"})
+	}
+	if len(fields) > 0 {
+		return ValidationFailed("password change input is invalid", fields)
+	}
+	return nil
 }
 
 // AuthenticatedPrincipal 定義 authenticated principal 的資料結構。
@@ -90,6 +162,24 @@ type ProvisionedIdentity struct {
 	Subject  string `json:"subject"`
 	Email    string `json:"email,omitempty"`
 }
+
+// IdentityPasswordChangeInput binds a password update to the already resolved local identity owner.
+type IdentityPasswordChangeInput struct {
+	TenantID        string
+	AccountID       string
+	Subject         string
+	CurrentPassword string
+	NewPassword     string
+}
+
+var (
+	// ErrIdentityCurrentPasswordInvalid prevents adapters from leaking raw identity-provider failures.
+	ErrIdentityCurrentPasswordInvalid = errors.New("identity current password is invalid")
+	// ErrIdentityPasswordRejected identifies a new password rejected by the provider policy.
+	ErrIdentityPasswordRejected = errors.New("identity password was rejected")
+	// ErrIdentityPasswordUnavailable identifies missing credentials or an unavailable provider operation.
+	ErrIdentityPasswordUnavailable = errors.New("identity password change is unavailable")
+)
 
 // 下列常數定義此模組使用的固定值。
 const (

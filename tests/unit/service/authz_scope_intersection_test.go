@@ -187,6 +187,77 @@ func TestNormalUserGroupScopesStillUnionWithoutAssumedSession(t *testing.T) {
 	}
 }
 
+// TestAssumedRoleAllScopeIsIntersectionIdentity verifies that all preserves the final assumed-role scope.
+func TestAssumedRoleAllScopeIsIntersectionIdentity(t *testing.T) {
+	tests := []struct {
+		name         string
+		assumedScope domain.Scope
+	}{
+		{name: "self", assumedScope: domain.ScopeSelf},
+		{name: "tenant", assumedScope: domain.ScopeTenant},
+		{name: "all", assumedScope: domain.ScopeAll},
+		{name: "system", assumedScope: domain.ScopeSystem},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			now := authzScopeTestNow()
+			store := memory.NewStore()
+			seedAuthzScopeTenant(store, now)
+			_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+				ID:       "ps-base",
+				TenantID: "tenant-1",
+				Name:     "Base",
+				Permissions: []domain.Permission{
+					{Resource: "iam.assumable_role", Action: domain.ActionAssume, Target: "role-hr", Scope: domain.ScopeAll},
+					{Resource: "hr.employee", Action: domain.ActionRead, Scope: domain.ScopeAll},
+				},
+				CreatedAt: now,
+			})
+			_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+				ID:       "ps-role",
+				TenantID: "tenant-1",
+				Name:     "Role",
+				Permissions: []domain.Permission{
+					{Resource: "hr.employee", Action: domain.ActionRead, Scope: test.assumedScope},
+				},
+				CreatedAt: now,
+			})
+			_ = store.UpsertAccount(context.Background(), domain.Account{
+				ID:                     "acct-1",
+				TenantID:               "tenant-1",
+				EmployeeID:             "emp-1",
+				Status:                 "active",
+				DirectPermissionSetIDs: []string{"ps-base"},
+				CreatedAt:              now,
+			})
+			_ = store.UpsertAssumableRole(context.Background(), domain.AssumableRole{
+				ID:                     "role-hr",
+				TenantID:               "tenant-1",
+				Name:                   "HR",
+				Trusted:                true,
+				TrustPolicy:            map[string]any{"accounts": []string{"acct-1"}},
+				PermissionSetIDs:       []string{"ps-role"},
+				PermissionBoundary:     map[string]any{"allow": []string{"hr.employee.read"}},
+				SessionDurationSeconds: 3600,
+				CreatedAt:              now,
+			})
+
+			svc := service.New(store)
+			session := assumeScopeTestRole(t, svc)
+			result, err := svc.Authz().Check(
+				domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1", AssumedRoleSessionID: session.SessionID},
+				domain.CheckRequest{Resource: "hr.employee", Action: domain.ActionRead},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !result.Allowed || result.Scope != test.assumedScope {
+				t.Fatalf("expected all AND %s to keep %s, got %+v", test.assumedScope, test.assumedScope, result)
+			}
+		})
+	}
+}
+
 func TestAssumedRoleOrgUnitIntersectionEmptyDenies(t *testing.T) {
 	now := authzScopeTestNow()
 	store := memory.NewStore()

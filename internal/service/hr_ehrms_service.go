@@ -51,16 +51,19 @@ type ehrmsEmployeeWrite struct {
 	update    bool
 }
 
-// SyncEHRMSOrgUnits 僅同步 eHRMS 組織單位（部門）。
+// SyncEHRMSOrgUnits synchronizes the tenant-wide org catalog only for tenant-wide grants.
 func (c HRService) SyncEHRMSOrgUnits(ctx RequestContext) (EHRMSOrgUnitSyncResponse, error) {
 	if c.ehrmsClient == nil {
 		return EHRMSOrgUnitSyncResponse{}, BadRequest("eHRMS is not configured")
 	}
-	_, _, authzAudit, err := c.Service.Authorize(ctx,
+	_, decision, authzAudit, err := c.Service.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceOrgUnit, Action: ActionCreate},
 		AuditTarget{Event: "hr.org_unit.ehrms.sync", Resource: string(ResourceOrgUnit)},
 	)
 	if err != nil {
+		return EHRMSOrgUnitSyncResponse{}, err
+	}
+	if err := requireTenantWideEHRMSSyncScope(decision); err != nil {
 		return EHRMSOrgUnitSyncResponse{}, err
 	}
 	departmentRecords, err := c.ehrmsClient.ListDepartments(goContext(ctx))
@@ -68,10 +71,10 @@ func (c HRService) SyncEHRMSOrgUnits(ctx RequestContext) (EHRMSOrgUnitSyncRespon
 		c.logWarn(ctx, "eHRMS department fetch failed", "error", err)
 		return EHRMSOrgUnitSyncResponse{}, ehrmsFetchError("departments", err)
 	}
-	departments := ehrmsOrgUnitsFromDepartments(ctx.TenantID, departmentRecords, c.Now())
+	departments := EHRMSOrgUnitsFromDepartments(ctx.TenantID, departmentRecords, c.Now())
 	response := EHRMSOrgUnitSyncResponse{Fetched: len(departmentRecords)}
 	if err := c.withTransaction(ctx, func(tx HRService) error {
-		upserted, err := tx.upsertEHRMSOrgUnits(ctx, departments)
+		upserted, err := tx.UpsertEHRMSOrgUnits(ctx, departments)
 		if err != nil {
 			return err
 		}
@@ -91,16 +94,19 @@ func (c HRService) SyncEHRMSOrgUnits(ctx RequestContext) (EHRMSOrgUnitSyncRespon
 	return response, nil
 }
 
-// SyncEHRMSPositions 僅同步 eHRMS 崗位。
+// SyncEHRMSPositions synchronizes the tenant-wide position catalog only for tenant-wide grants.
 func (c HRService) SyncEHRMSPositions(ctx RequestContext) (EHRMSPositionSyncResponse, error) {
 	if c.ehrmsClient == nil {
 		return EHRMSPositionSyncResponse{}, BadRequest("eHRMS is not configured")
 	}
-	_, _, authzAudit, err := c.Service.Authorize(ctx,
+	_, decision, authzAudit, err := c.Service.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourcePosition, Action: ActionCreate},
 		AuditTarget{Event: "hr.position.ehrms.sync", Resource: string(ResourcePosition)},
 	)
 	if err != nil {
+		return EHRMSPositionSyncResponse{}, err
+	}
+	if err := requireTenantWideEHRMSSyncScope(decision); err != nil {
 		return EHRMSPositionSyncResponse{}, err
 	}
 	positionRecords, err := c.ehrmsClient.ListPositions(goContext(ctx))
@@ -108,10 +114,10 @@ func (c HRService) SyncEHRMSPositions(ctx RequestContext) (EHRMSPositionSyncResp
 		c.logWarn(ctx, "eHRMS position fetch failed", "error", err)
 		return EHRMSPositionSyncResponse{}, ehrmsFetchError("positions", err)
 	}
-	positions := ehrmsPositionsFromRecords(ctx.TenantID, positionRecords, c.Now())
+	positions := EHRMSPositionsFromRecords(ctx.TenantID, positionRecords, c.Now())
 	response := EHRMSPositionSyncResponse{Fetched: len(positionRecords)}
 	if err := c.withTransaction(ctx, func(tx HRService) error {
-		upserted, err := tx.upsertEHRMSPositions(ctx, positions)
+		upserted, err := tx.UpsertEHRMSPositions(ctx, positions)
 		if err != nil {
 			return err
 		}
@@ -162,17 +168,17 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 	}
 	response := EHRMSEmployeeSyncResponse{Fetched: len(records), Mode: mode}
 	now := c.Now()
-	departments := ehrmsOrgUnitsFromDepartments(ctx.TenantID, departmentRecords, now)
-	positions := ehrmsPositionsFromRecords(ctx.TenantID, positionRecords, now)
+	departments := EHRMSOrgUnitsFromDepartments(ctx.TenantID, departmentRecords, now)
+	positions := EHRMSPositionsFromRecords(ctx.TenantID, positionRecords, now)
 	provisionQueued := false
 	if err := c.withTransaction(ctx, func(tx HRService) error {
 		c.logInfo(ctx, "eHRMS sync step started", "step", "departments", "fetched", len(departmentRecords))
-		if _, err := tx.upsertEHRMSOrgUnits(ctx, departments); err != nil {
+		if _, err := tx.UpsertEHRMSOrgUnits(ctx, departments); err != nil {
 			return err
 		}
 		c.logInfo(ctx, "eHRMS sync step completed", "step", "departments", "upserted", len(departments))
 		c.logInfo(ctx, "eHRMS sync step started", "step", "positions", "fetched", len(positionRecords))
-		if _, err := tx.upsertEHRMSPositions(ctx, positions); err != nil {
+		if _, err := tx.UpsertEHRMSPositions(ctx, positions); err != nil {
 			return err
 		}
 		c.logInfo(ctx, "eHRMS sync step completed", "step", "positions", "upserted", len(positions))
@@ -334,7 +340,7 @@ func (c HRService) prepareEHRMSSyncWrites(ctx RequestContext, account Account, d
 			}
 		}
 		if ok {
-			employee = ehrmsMergeEmployee(existing, employee)
+			employee = EHRMSMergeEmployee(existing, employee)
 		}
 		if len(errors) == 0 {
 			validateErrors, err := c.validateEHRMSEmployee(ctx, employee, rowNumber, lookup)
@@ -574,7 +580,8 @@ func (idx employeeUniqueIndex) fieldErrors(employee Employee) []FieldError {
 	return fields
 }
 
-func (c HRService) upsertEHRMSOrgUnits(ctx RequestContext, departments []OrgUnit) (int, error) {
+// UpsertEHRMSOrgUnits persists normalized upstream departments while preserving local ownership fields.
+func (c HRService) UpsertEHRMSOrgUnits(ctx RequestContext, departments []OrgUnit) (int, error) {
 	departments, err := c.attachEHRMSRootsToCanonicalRoot(ctx, departments)
 	if err != nil {
 		return 0, err
@@ -646,7 +653,8 @@ func (c HRService) attachEHRMSRootsToCanonicalRoot(ctx RequestContext, departmen
 	return out, nil
 }
 
-func (c HRService) upsertEHRMSPositions(ctx RequestContext, positions []Position) (int, error) {
+// UpsertEHRMSPositions persists normalized upstream positions while preserving local organization assignments.
+func (c HRService) UpsertEHRMSPositions(ctx RequestContext, positions []Position) (int, error) {
 	for _, position := range positions {
 		before, ok, err := c.store.GetPosition(goContext(ctx), ctx.TenantID, position.ID)
 		if err != nil {
@@ -662,8 +670,8 @@ func (c HRService) upsertEHRMSPositions(ctx RequestContext, positions []Position
 	return len(positions), nil
 }
 
-// ehrmsOrgUnitsFromDepartments 從 eHRMS /departments 建立組織單位（含空部門與 closed）。
-func ehrmsOrgUnitsFromDepartments(tenantID string, records []EHRMSDepartmentRecord, now time.Time) []OrgUnit {
+// EHRMSOrgUnitsFromDepartments maps upstream department records into the canonical organization hierarchy.
+func EHRMSOrgUnitsFromDepartments(tenantID string, records []EHRMSDepartmentRecord, now time.Time) []OrgUnit {
 	unitsByID := make(map[string]OrgUnit, len(records))
 	for _, record := range records {
 		code := ehrmsValue(record, ehrmsFieldDepartmentCode)
@@ -672,8 +680,8 @@ func ehrmsOrgUnitsFromDepartments(tenantID string, records []EHRMSDepartmentReco
 		}
 		rawName := utils.FirstNonEmpty(ehrmsValue(record, ehrmsFieldDepartmentName), ehrmsValue(record, ehrmsFieldDepartmentEN), code)
 		rawNameEN := ehrmsValue(record, ehrmsFieldDepartmentEN)
-		name, nameClosed := ehrmsCleanDepartmentName(rawName)
-		nameEN, nameENClosed := ehrmsCleanDepartmentName(rawNameEN)
+		name, nameClosed := EHRMSCleanDepartmentName(rawName)
+		nameEN, nameENClosed := EHRMSCleanDepartmentName(rawNameEN)
 		closed := ehrmsBool(record, ehrmsFieldDeptClosed) || nameClosed || nameENClosed
 		if name == "" {
 			name = code
@@ -710,8 +718,8 @@ func ehrmsOrgUnitsFromDepartments(tenantID string, records []EHRMSDepartmentReco
 	return ehrmsSortedOrgUnits(unitsByID)
 }
 
-// ehrmsPositionsFromRecords 從 eHRMS /positions 建立崗位目錄。
-func ehrmsPositionsFromRecords(tenantID string, records []EHRMSPositionRecord, now time.Time) []Position {
+// EHRMSPositionsFromRecords maps upstream position records into the canonical position catalog.
+func EHRMSPositionsFromRecords(tenantID string, records []EHRMSPositionRecord, now time.Time) []Position {
 	byCode := map[string]Position{}
 	for _, record := range records {
 		code := ehrmsValue(record, ehrmsFieldPositionCode)
@@ -764,12 +772,12 @@ func ehrmsOrgUnits(tenantID string, records []EHRMSEmployeeRecord, now time.Time
 	}
 	for i, record := range deptRecords {
 		code := ehrmsValue(record, ehrmsFieldDepartmentCode)
-		parent := ehrmsInferParentDeptCode(code, codes)
+		parent := EHRMSInferParentDeptCode(code, codes)
 		if parent != "" {
 			deptRecords[i][ehrmsFieldParentDeptCode] = parent
 		}
 	}
-	return ehrmsOrgUnitsFromDepartments(tenantID, deptRecords, now)
+	return EHRMSOrgUnitsFromDepartments(tenantID, deptRecords, now)
 }
 
 // ehrmsPositions 從員工資料彙整崗位目錄（測試與相容保留）。
@@ -786,11 +794,11 @@ func ehrmsPositions(tenantID string, records []EHRMSEmployeeRecord, now time.Tim
 			ehrmsFieldPositionEN:   ehrmsValue(record, ehrmsFieldPositionEN),
 		})
 	}
-	return ehrmsPositionsFromRecords(tenantID, positionRecords, now)
+	return EHRMSPositionsFromRecords(tenantID, positionRecords, now)
 }
 
-// ehrmsInferParentDeptCode 以最長有效前綴推導上級部門代碼。
-func ehrmsInferParentDeptCode(code string, codes map[string]struct{}) string {
+// EHRMSInferParentDeptCode selects the longest existing department-code prefix as the parent.
+func EHRMSInferParentDeptCode(code string, codes map[string]struct{}) string {
 	for length := len(code) - 1; length > 0; length-- {
 		prefix := code[:length]
 		if _, ok := codes[prefix]; ok {
@@ -852,8 +860,8 @@ func normalizeEHRMSSyncMode(mode string) (string, error) {
 	}
 }
 
-// ehrmsMergeEmployee 處理 eHRMS merge 員工。
-func ehrmsMergeEmployee(existing Employee, candidate Employee) Employee {
+// EHRMSMergeEmployee merges upstream employee data without overwriting self-managed profile fields.
+func EHRMSMergeEmployee(existing Employee, candidate Employee) Employee {
 	next := existing
 	selfNameEN := next.BasicInfo["name_en"]
 	nameENSource := stringFromAny(next.BasicInfo["name_en_source"])
@@ -1012,8 +1020,8 @@ func ehrmsBool(record map[string]string, key string) bool {
 	}
 }
 
-// ehrmsCleanDepartmentName 移除名稱中的「已關閉」標記，並回傳是否因此判定為關閉。
-func ehrmsCleanDepartmentName(name string) (string, bool) {
+// EHRMSCleanDepartmentName strips upstream closed markers and reports the resulting closed state.
+func EHRMSCleanDepartmentName(name string) (string, bool) {
 	trimmed := strings.TrimSpace(name)
 	if trimmed == "" {
 		return "", false

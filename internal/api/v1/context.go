@@ -17,7 +17,7 @@ func (a *API) requestContext(r *http.Request) (domain.RequestContext, error) {
 		return domain.RequestContext{}, err
 	}
 	if ok {
-		platformAdmin = authenticatedPlatformAdmin(tokenCtx)
+		platformAdmin = AuthenticatedPlatformAdmin(tokenCtx)
 		if a.identity != nil {
 			resolved, err := a.identity.ResolveAuthenticatedPrincipal(r.Context(), tokenCtx)
 			if err != nil {
@@ -53,8 +53,8 @@ func (a *API) requestContext(r *http.Request) (domain.RequestContext, error) {
 	}, nil
 }
 
-// authenticatedPlatformAdmin 只從已驗證 token 的專用 claim 或 realm role 推導全域管理員。
-func authenticatedPlatformAdmin(principal domain.AuthenticatedPrincipal) bool {
+// AuthenticatedPlatformAdmin reports whether the authenticated principal has platform-wide administration authority.
+func AuthenticatedPlatformAdmin(principal domain.AuthenticatedPrincipal) bool {
 	if value, ok := principal.Claims["platform_admin"].(bool); ok && value {
 		return true
 	}

@@ -10,6 +10,15 @@ type pagePermissionResource struct {
 	applicationCode ApplicationCode
 	resourceType    ResourceType
 	actions         []Action
+	allowedScopes   []Scope
+}
+
+type menuPermissionRequirement struct {
+	applicationCode ApplicationCode
+	resourceType    ResourceType
+	action          Action
+	permissionKey   string
+	allowedScopes   []Scope
 }
 
 var pagePermissionBundles = map[string][]pagePermissionResource{
@@ -60,6 +69,14 @@ var pagePermissionBundles = map[string][]pagePermissionResource{
 		{applicationCode: AppAgent, resourceType: ResourceType("knowledge_base"), actions: []Action{ActionRead}},
 		{applicationCode: AppHR, resourceType: ResourceOrgUnit, actions: []Action{ActionRead}},
 		{applicationCode: AppIAM, resourceType: ResourceAssumableRole, actions: []Action{ActionRead}},
+	},
+	"agents.usage": {
+		{
+			applicationCode: AppAgent,
+			resourceType:    ResourceDefinition,
+			actions:         []Action{ActionRead},
+			allowedScopes:   []Scope{"", ScopeAll, ScopeTenant, ScopeSystem},
+		},
 	},
 	"agents.knowledge_bases": {
 		{applicationCode: AppAgent, resourceType: ResourceType("knowledge_base"), actions: []Action{ActionRead, ActionCreate, ActionUpdate, ActionDelete}},
@@ -138,12 +155,12 @@ func canonicalPageMenuKey(menuKey string) string {
 	return menuKey
 }
 
-// pagePermissionPrimaryRead 推導頁面主資源的 read 權限，缺少時整個 bundle fail closed。
-func pagePermissionPrimaryRead(menuKey string) (string, bool) {
+// pagePermissionPrimaryReadRequirement derives the API key and optional scope constraint for one page.
+func pagePermissionPrimaryReadRequirement(menuKey string) (menuPermissionRequirement, bool) {
 	canonicalMenuKey := canonicalPageMenuKey(menuKey)
 	resources, ok := pagePermissionBundles[canonicalMenuKey]
 	if !ok || len(resources) == 0 {
-		return "", false
+		return menuPermissionRequirement{}, false
 	}
 	primary := resources[0]
 	for _, action := range primary.actions {
@@ -151,21 +168,55 @@ func pagePermissionPrimaryRead(menuKey string) (string, bool) {
 			continue
 		}
 		if _, exists := routePermissionRiskLevel(primary.applicationCode, primary.resourceType, action); !exists {
-			return "", false
+			return menuPermissionRequirement{}, false
 		}
-		return permissionKey(primary.applicationCode, primary.resourceType, action), true
+		return menuPermissionRequirement{
+			applicationCode: primary.applicationCode,
+			resourceType:    primary.resourceType,
+			action:          action,
+			permissionKey:   permissionKey(primary.applicationCode, primary.resourceType, action),
+			allowedScopes:   primary.allowedScopes,
+		}, true
 	}
-	return "", false
+	return menuPermissionRequirement{}, false
 }
 
-// menuPrimaryReadPermissionKey 回傳 navigation menu 顯示所需的主 read 權限。
-func menuPrimaryReadPermissionKey(menuKey string) (string, bool) {
+// menuPrimaryReadRequirement returns the effective API requirement for navigation visibility.
+func menuPrimaryReadRequirement(menuKey string) (menuPermissionRequirement, bool) {
 	menuKey = strings.TrimSpace(menuKey)
-	if primaryRead, ok := pagePermissionPrimaryRead(menuKey); ok {
-		return primaryRead, true
+	if requirement, ok := pagePermissionPrimaryReadRequirement(menuKey); ok {
+		return requirement, true
 	}
 	primaryRead, ok := legacyMenuPrimaryReads[menuKey]
-	return primaryRead, ok
+	return menuPermissionRequirement{permissionKey: primaryRead}, ok
+}
+
+// permissionsSatisfyMenuRequirement keeps page visibility aligned with API scope requirements.
+func permissionsSatisfyMenuRequirement(permissions []Permission, requirement menuPermissionRequirement) bool {
+	for _, permission := range permissions {
+		permission = normalizePermission(permission)
+		if !permissionCanAuthorizeRequest(permission) ||
+			permissionKey(permission.ApplicationCode, permission.ResourceType, permission.Action) != requirement.permissionKey {
+			continue
+		}
+		if requirement.allowsScope(permission.Scope) {
+			return true
+		}
+	}
+	return false
+}
+
+// allowsScope applies the optional scope allowlist declared by a page requirement.
+func (r menuPermissionRequirement) allowsScope(scope Scope) bool {
+	if len(r.allowedScopes) == 0 {
+		return true
+	}
+	for _, allowedScope := range r.allowedScopes {
+		if scope == allowedScope {
+			return true
+		}
+	}
+	return false
 }
 
 // routePermissionRiskLevel 驗證 resource/action 確實存在於路由政策並回傳最高風險分級。

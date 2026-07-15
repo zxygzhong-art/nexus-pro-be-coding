@@ -7,6 +7,31 @@ import (
 	"nexus-pro-be/internal/utils"
 )
 
+var workflowServerOwnedPayloadTokens = map[string]struct{}{
+	"applicantaccountid":    {},
+	"approvalstatus":        {},
+	"approvedby":            {},
+	"currentrunid":          {},
+	"employeeid":            {},
+	"forminstanceid":        {},
+	"formstatus":            {},
+	"linkedresourceid":      {},
+	"linkedresourcestatus":  {},
+	"linkedresourcetype":    {},
+	"leaverequestid":        {},
+	"leaverequeststatus":    {},
+	"overtimerequestid":     {},
+	"overtimerequeststatus": {},
+	"reviewstatus":          {},
+	"serverstatus":          {},
+	"submittedat":           {},
+	"templateid":            {},
+	"templateversionid":     {},
+	"tenantid":              {},
+	"updatedat":             {},
+	"workflowstatus":        {},
+}
+
 // withWorkflowReview 附加流程審核。
 func withWorkflowReview(payload map[string]any, kind, accountID, comment string, at time.Time) map[string]any {
 	next := utils.CopyStringMap(payload)
@@ -29,6 +54,54 @@ func workflowPayload(payload map[string]any) map[string]any {
 		return map[string]any{}
 	}
 	return next
+}
+
+// workflowPayloadForNewInstance applies explicit frozen fields or legacy passthrough without server metadata.
+func workflowPayloadForNewInstance(template FormTemplate, payload map[string]any) map[string]any {
+	fields, hasExplicitFields := platformExplicitTemplateFields(template.Schema)
+	allowed := make(map[string]struct{})
+	for _, field := range fields {
+		id := strings.TrimSpace(field.ID)
+		if id == "" || isStructuralFormFieldType(field.Type) {
+			continue
+		}
+		allowed[id] = struct{}{}
+	}
+	for _, key := range workflowNotificationRecipientPayloadKeys {
+		allowed[key] = struct{}{}
+	}
+
+	next := make(map[string]any, len(allowed))
+	for key, value := range payload {
+		if workflowServerOwnsPayloadKey(key) {
+			continue
+		}
+		if hasExplicitFields {
+			if _, ok := allowed[key]; !ok {
+				continue
+			}
+		}
+		next[key] = value
+	}
+	return workflowPayload(next)
+}
+
+// workflowServerOwnsPayloadKey classifies linkage and workflow metadata that must never seed a new instance.
+func workflowServerOwnsPayloadKey(key string) bool {
+	key = strings.TrimSpace(key)
+	if key == "" {
+		return false
+	}
+	if strings.HasPrefix(key, "_") {
+		return true
+	}
+	token := strings.ToLower(key)
+	token = strings.NewReplacer("_", "", "-", "", ".", "").Replace(token)
+	if strings.HasPrefix(token, "linkedresource") {
+		return true
+	}
+	_, owned := workflowServerOwnedPayloadTokens[token]
+	return owned
 }
 
 // requireFormInstanceVisible 處理 require 表單實例可見。

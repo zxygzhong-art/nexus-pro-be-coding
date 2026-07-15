@@ -20,7 +20,36 @@ func (c MeCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	me := router.Group("/me")
 	me.GET("", c.routes.Handle("me", "read", c.getMe))
 	me.PATCH("/profile", c.routes.Handle("me", "update", c.updateProfile))
+	me.PATCH("/preferences", c.routes.Handle("me", "update", c.updatePreferences))
+	me.PUT("/password", c.routes.Handle("me", "update", c.changePassword))
 	me.GET("/menus", c.routes.Handle("me", "read", c.getMenus))
+}
+
+// updatePreferences updates only account-level settings owned by the authenticated user.
+func (c MeCtrl) updatePreferences(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.UpdateMePreferencesInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	me, err := c.svc.UpdatePreferences(ctx, input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, me)
+	return nil
+}
+
+// changePassword keeps the password payload inside the authenticated self-service boundary.
+func (c MeCtrl) changePassword(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.ChangePasswordInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	if err := c.svc.ChangePassword(ctx, input); err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"success": true})
+	return nil
 }
 
 // getMe 處理 me 的 HTTP 請求。

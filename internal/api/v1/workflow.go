@@ -38,18 +38,20 @@ func (c WorkflowCtrl) RegisterRoutes(router *gin.RouterGroup) {
 
 	workflows := router.Group("/workflows")
 	workflows.GET("/form-data-sources", c.routes.Handle("workflow.form_instance", "read", c.formDataSources))
+	workflows.GET("/form-templates/:key", c.routes.Handle("workflow.form_instance", "read", c.getRuntimeFormTemplate, PathParam("key")))
 	workflows.GET("/forms", c.routes.Handle("workflow.form_instance", "read", c.listFormInstances))
+	workflows.GET("/forms/:id", c.routes.Handle("workflow.form_instance", "read", c.getFormInstance, PathParam(PathParamID)))
 	workflows.GET("/reviews", c.routes.Handle("workflow.form_instance", "read", c.reviewQueue))
-	workflows.POST("/reviews/bulk-action", c.routes.Handle("workflow.form_instance", "update", c.bulkReviewForms))
+	workflows.POST("/reviews/bulk-action", c.routes.Handle("workflow.form_instance", "read", c.bulkReviewForms))
 	workflows.POST("/forms/drafts", c.routes.Handle("workflow.form_instance", "submit", c.saveFormDraft))
 	workflows.GET("/forms/:id/workflow", c.routes.Handle("workflow.form_instance", "read", c.getWorkflowFormState, PathParam(PathParamID)))
 	workflows.GET("/forms/:id/export", c.routes.Handle("workflow.form_instance", "read", c.exportForm, PathParam(PathParamID)))
 	workflows.PATCH("/forms/:id", c.routes.Handle("workflow.form_instance", "update", c.updateFormDraft, PathParam(PathParamID)))
 	workflows.DELETE("/forms/:id", c.routes.Handle("workflow.form_instance", "delete", c.deleteFormDraft, PathParam(PathParamID)))
 	workflows.POST("/forms/:id/submit", c.routes.Handle("workflow.form_instance", "submit", c.submitForm, PathParam(PathParamID)))
-	workflows.POST("/forms/:id/approve", c.routes.Handle("workflow.form_instance", "approve", c.approveForm, ResourceID(PathParamID)))
-	workflows.POST("/forms/:id/reject", c.routes.Handle("workflow.form_instance", "update", c.rejectForm, ResourceID(PathParamID)))
-	workflows.POST("/forms/:id/return", c.routes.Handle("workflow.form_instance", "update", c.returnForm, ResourceID(PathParamID)))
+	workflows.POST("/forms/:id/approve", c.routes.Handle("workflow.form_instance", "read", c.approveForm, PathParam(PathParamID)))
+	workflows.POST("/forms/:id/reject", c.routes.Handle("workflow.form_instance", "read", c.rejectForm, PathParam(PathParamID)))
+	workflows.POST("/forms/:id/return", c.routes.Handle("workflow.form_instance", "read", c.returnForm, PathParam(PathParamID)))
 	workflows.POST("/forms/:id/cancel", c.routes.Handle("workflow.form_instance", "update", c.cancelForm, PathParam(PathParamID)))
 	workflows.POST("/forms/:id/duplicate", c.routes.Handle("workflow.form_instance", "submit", c.duplicateForm, PathParam(PathParamID)))
 }
@@ -199,6 +201,16 @@ func (c WorkflowCtrl) formDataSources(w http.ResponseWriter, r *http.Request, ct
 	return nil
 }
 
+// getRuntimeFormTemplate returns the published versioned schema used by form fillers.
+func (c WorkflowCtrl) getRuntimeFormTemplate(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.GetRuntimeFormTemplate(ctx, r.PathValue("key"), strings.TrimSpace(r.URL.Query().Get("version_id")))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
 // listFormTemplates 處理表單範本的 HTTP 請求。
 func (c WorkflowCtrl) listFormTemplates(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
@@ -242,6 +254,16 @@ func (c WorkflowCtrl) listFormInstances(w http.ResponseWriter, r *http.Request, 
 		return err
 	}
 	writeJSON(w, http.StatusOK, items)
+	return nil
+}
+
+// getFormInstance returns one authorized submitted form with template metadata.
+func (c WorkflowCtrl) getFormInstance(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.GetFormInstanceDetail(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 

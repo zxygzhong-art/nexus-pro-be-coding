@@ -23,29 +23,17 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 	if !workflowLeavePayloadHasLinkedFields(payload) {
 		return LeaveRequest{}, nil
 	}
-	if existingID := strings.TrimSpace(stringFromAny(payload["leave_request_id"])); existingID != "" {
-		if existing, ok, err := c.store.GetLeaveRequest(goContext(ctx), ctx.TenantID, existingID); err != nil {
-			return LeaveRequest{}, err
-		} else if ok {
-			return existing, nil
-		}
+	employeeID, err := c.workflowApplicantEmployeeID(ctx, instance)
+	if err != nil {
+		return LeaveRequest{}, err
 	}
 	if existing, ok, err := c.store.GetLeaveRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID); err != nil {
 		return LeaveRequest{}, err
 	} else if ok {
+		if strings.TrimSpace(existing.EmployeeID) != employeeID {
+			return LeaveRequest{}, Conflict("linked leave request does not belong to the form applicant")
+		}
 		return existing, nil
-	}
-
-	account, _, err := c.resolveAccount(ctx)
-	if err != nil {
-		return LeaveRequest{}, err
-	}
-	employeeID := strings.TrimSpace(stringFromAny(payload["employee_id"]))
-	if employeeID == "" {
-		employeeID = account.EmployeeID
-	}
-	if employeeID == "" {
-		return LeaveRequest{}, BadRequest("employee_id is required")
 	}
 
 	leaveTypeRaw := utils.FirstNonEmpty(
@@ -74,46 +62,60 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 		return LeaveRequest{}, BadRequest("end_at must be after start_at")
 	}
 
-	policy, err := c.loadAttendancePolicyResponse(ctx)
+	evaluation, err := c.evaluateLeaveRequestRules(ctx, employeeID, leaveTypeRaw, startAt, endAt, 0)
 	if err != nil {
 		return LeaveRequest{}, err
 	}
-	hours := calculateLeaveHoursWithinPolicy(startAt, endAt, policy.WorkTime)
-	if hours <= 0 {
-		return LeaveRequest{}, BadRequest("selected time does not include working hours")
+	if !evaluation.Eligible {
+		return LeaveRequest{}, leaveEvaluationError(evaluation)
 	}
-	leaveTypeCode := normalizeLeaveTypeCode(leaveTypeRaw)
-	leaveType, ok := findLeaveTypeInPolicy(policy, leaveTypeCode)
-	if !ok || !leaveType.Active {
-		return LeaveRequest{}, BadRequest("unknown leave type")
-	}
+	leaveTypeCode := evaluation.LeaveType
+	hours := evaluation.Hours
 
 	reason := utils.FirstNonEmpty(stringFromAny(payload["reason"]), stringFromAny(payload["description"]))
 	requestID := utils.NewID("lr")
 	leaveBalanceID := ""
-	if leaveType.RequiresBalance {
-		balance, err := c.reserveLeaveBalance(ctx, employeeID, leaveTypeCode, hours, startAt)
+	if evaluation.BalanceRequired {
+		balance, fallbackReason, err := c.reserveLeaveBalanceIfAvailable(ctx, employeeID, leaveTypeCode, hours, startAt)
 		if err != nil {
 			return LeaveRequest{}, err
 		}
-		leaveBalanceID = balance.ID
+		if fallbackReason != "" {
+			evaluation.BalanceInitialized = fallbackReason != leaveEvaluationBalanceMissing
+			evaluation.AvailableHours = balance.RemainingHours
+			evaluation = applyLeaveBalanceFallback(evaluation, fallbackReason)
+		} else {
+			leaveBalanceID = balance.ID
+		}
 	}
 	req := LeaveRequest{
-		ID:             requestID,
-		TenantID:       ctx.TenantID,
-		EmployeeID:     employeeID,
-		LeaveType:      leaveTypeCode,
-		StartAt:        startAt,
-		EndAt:          endAt,
-		Hours:          hours,
-		Reason:         strings.TrimSpace(reason),
-		Status:         "pending_approval",
-		FormInstanceID: instance.ID,
-		LeaveBalanceID: leaveBalanceID,
-		CreatedAt:      c.Now(),
+		ID:                 requestID,
+		TenantID:           ctx.TenantID,
+		EmployeeID:         employeeID,
+		LeaveType:          leaveTypeCode,
+		LeaveTypeID:        evaluation.LeaveTypeID,
+		PolicyVersion:      evaluation.PolicyVersion,
+		RuleSnapshot:       leaveRuleSnapshotMap(evaluation.Rule),
+		EvaluationSnapshot: leaveEvaluationSnapshotMap(evaluation),
+		StartAt:            startAt,
+		EndAt:              endAt,
+		Hours:              hours,
+		Reason:             strings.TrimSpace(reason),
+		Status:             "pending_approval",
+		FormInstanceID:     instance.ID,
+		LeaveBalanceID:     leaveBalanceID,
+		CreatedAt:          c.Now(),
 	}
 	if err := c.store.UpsertLeaveRequest(goContext(ctx), req); err != nil {
 		return LeaveRequest{}, err
+	}
+	if leaveBalanceID != "" {
+		if err := c.store.UpsertLeaveRequestAllocation(goContext(ctx), LeaveRequestAllocation{
+			TenantID: ctx.TenantID, LeaveRequestID: req.ID, LeaveBalanceID: leaveBalanceID,
+			ReservedHours: req.Hours, CreatedAt: c.Now(),
+		}); err != nil {
+			return LeaveRequest{}, err
+		}
 	}
 
 	nextPayload := utils.CopyStringMap(instance.Payload)
@@ -134,7 +136,7 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 	if err := c.store.UpsertFormInstance(goContext(ctx), instance); err != nil {
 		return LeaveRequest{}, err
 	}
-	if leaveType.RequiresBalance {
+	if leaveBalanceID != "" {
 		if err := c.audit(ctx, "attendance.leave_balance.reserve", "leave_balance", employeeID+"|"+leaveTypeCode, "medium", map[string]any{
 			"employee_id":    employeeID,
 			"leave_type":     leaveTypeCode,
@@ -152,6 +154,26 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 		return LeaveRequest{}, err
 	}
 	return req, nil
+}
+
+// workflowApplicantEmployeeID derives leave ownership from the immutable form applicant.
+func (c AttendanceService) workflowApplicantEmployeeID(ctx RequestContext, instance FormInstance) (string, error) {
+	accountID := strings.TrimSpace(instance.ApplicantAccountID)
+	if accountID == "" {
+		return "", BadRequest("form applicant account is required")
+	}
+	account, ok, err := c.Service.store.GetAccount(goContext(ctx), ctx.TenantID, accountID)
+	if err != nil {
+		return "", err
+	}
+	if !ok {
+		return "", NotFound("account", accountID)
+	}
+	employeeID := strings.TrimSpace(account.EmployeeID)
+	if employeeID == "" {
+		return "", BadRequest("form applicant account is not linked to an employee")
+	}
+	return employeeID, nil
 }
 
 // workflowLeavePayloadHasLinkedFields avoids treating generic workflow payloads as attendance leave requests.

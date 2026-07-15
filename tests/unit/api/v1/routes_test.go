@@ -270,7 +270,7 @@ func openAPIRouteKeys(t *testing.T) map[string]struct{} {
 		}
 		method := strings.TrimSuffix(strings.TrimSpace(line), ":")
 		switch method {
-		case "get", "post", "patch", "delete":
+		case "get", "post", "put", "patch", "delete":
 			keys[strings.ToUpper(method)+" "+currentPath] = struct{}{}
 		}
 	}
@@ -301,7 +301,7 @@ func openAPISuccessJSONSchemaRefs(t *testing.T) map[string]string {
 		}
 		trimmed := strings.TrimSpace(line)
 		switch trimmed {
-		case "get:", "post:", "patch:", "delete:":
+		case "get:", "post:", "put:", "patch:", "delete:":
 			currentMethod = strings.ToUpper(strings.TrimSuffix(trimmed, ":"))
 			currentStatus = ""
 			inJSON = false
@@ -361,7 +361,7 @@ func openAPIRequestJSONSchemaRefs(t *testing.T) map[string]string {
 		}
 		trimmed := strings.TrimSpace(line)
 		switch trimmed {
-		case "get:", "post:", "patch:", "delete:":
+		case "get:", "post:", "put:", "patch:", "delete:":
 			currentMethod = strings.ToUpper(strings.TrimSuffix(trimmed, ":"))
 			inRequestBody = false
 			inJSON = false
@@ -411,7 +411,7 @@ func openAPIErrorResponseRefs(t *testing.T) map[string]string {
 		}
 		trimmed := strings.TrimSpace(line)
 		switch trimmed {
-		case "get:", "post:", "patch:", "delete:":
+		case "get:", "post:", "put:", "patch:", "delete:":
 			currentMethod = strings.ToUpper(strings.TrimSuffix(trimmed, ":"))
 			inResponses = false
 			continue

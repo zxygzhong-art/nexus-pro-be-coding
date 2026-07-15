@@ -340,6 +340,11 @@ type UpdateWorkspaceOrganizationManagerInput struct {
 	ParentID *string `json:"parent_id,omitempty"`
 }
 
+// UpdateWorkspaceOrganizationVisibilityInput 定義組織圖預覽可見性輸入。
+type UpdateWorkspaceOrganizationVisibilityInput struct {
+	ShowInOrgChart *bool `json:"show_in_org_chart,omitempty"`
+}
+
 // SaveWorkspaceFormDesignInput 定義工作區表單 design 輸入的資料結構。
 type SaveWorkspaceFormDesignInput struct {
 	ID       string                     `json:"id,omitempty"`

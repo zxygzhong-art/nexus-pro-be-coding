@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Run a full HTTP smoke pass over the public OpenAPI routes.
+"""Run behavioral and authentication-boundary checks over the OpenAPI routes.
 
 The default mode starts the API against the configured PostgreSQL database and
-uses header-based request context. Pass --base-url to run against an already
-started server instead.
+uses real Keycloak login profiles. Pass --base-url to run against an already
+started server, or --check-coverage to validate the route plan offline.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import dataclasses
 import json
 import os
 import pathlib
+import re
 import socket
 import subprocess
 import sys
@@ -28,6 +29,7 @@ from typing import Any, Callable
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
+OPENAPI_HTTP_METHODS = frozenset({"get", "put", "post", "delete", "options", "head", "patch", "trace"})
 DEFAULT_KEYCLOAK_CLIENT_ID = "nexus-pro-connect-api"
 DEFAULT_ROLE_ACCOUNTS = {
     "admin": ("demo", "acct-admin"),
@@ -101,6 +103,21 @@ class LoginProfile:
     account_id: str
 
 
+@dataclasses.dataclass(frozen=True)
+class CasePlan:
+    behavioral_cases: tuple[Case, ...]
+    auth_boundary_cases: tuple[Case, ...]
+    openapi_routes: frozenset[str]
+    behavioral_routes: frozenset[str]
+    auth_boundary_routes: frozenset[str]
+
+    # cases returns the execution order with deep checks before generated
+    # authentication-boundary checks.
+    @property
+    def cases(self) -> tuple[Case, ...]:
+        return self.behavioral_cases + self.auth_boundary_cases
+
+
 class SmokeFailure(Exception):
     pass
 
@@ -112,6 +129,11 @@ def main() -> int:
     logs: list[str] = []
 
     try:
+        if args.check_coverage:
+            plan = build_case_plan()
+            print("API smoke coverage plan is valid.")
+            print_coverage_summary(plan)
+            return 0
         if not base_url:
             port = free_port()
             base_url = f"http://127.0.0.1:{port}"
@@ -133,6 +155,7 @@ def main() -> int:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Full HTTP smoke test for nexus-pro-be APIs.")
     parser.add_argument("--base-url", help="Use an existing server instead of starting go run ./cmd/api.")
+    parser.add_argument("--check-coverage", action="store_true", help="Validate OpenAPI route coverage without DB, Keycloak, or HTTP calls.")
     parser.add_argument("--start-timeout", type=float, default=90.0, help="Seconds to wait for a started server.")
     parser.add_argument("--auth-mode", choices=("keycloak",), default="keycloak", help="Use real Keycloak password-grant login.")
     parser.add_argument("--tenant", default="demo", help="Tenant id for the default request context.")
@@ -223,6 +246,7 @@ def free_port() -> int:
 
 
 def run_cases(base_url: str, args: argparse.Namespace) -> None:
+    plan = build_case_plan()
     auth_profiles = build_auth_profiles(args)
     context: dict[str, Any] = {
         "suffix": str(int(time.time() * 1000)),
@@ -231,12 +255,8 @@ def run_cases(base_url: str, args: argparse.Namespace) -> None:
         "auth_profiles": auth_profiles,
     }
     failures: list[str] = []
-    cases = build_cases()
+    cases = plan.cases
     matrix_cases = [] if args.skip_role_matrix else build_role_matrix_cases()
-    covered = {case.route_key for case in cases if case.route_key}
-    missing = sorted(openapi_route_keys() - covered)
-    if missing:
-        raise SmokeFailure("script is missing OpenAPI routes: " + ", ".join(missing))
 
     start = time.time()
     total_checks = len(cases) + sum(len(case.expected) for case in matrix_cases)
@@ -267,7 +287,7 @@ def run_cases(base_url: str, args: argparse.Namespace) -> None:
 
     elapsed = time.time() - start
     print(f"\nSummary: {total_checks - len(failures)} passed, {len(failures)} failed, {elapsed:.1f}s")
-    print(f"OpenAPI route coverage: {len(covered)}/{len(openapi_route_keys())}")
+    print_coverage_summary(plan)
     if not args.skip_role_matrix:
         print(f"Role matrix coverage: {sum(len(case.expected) for case in matrix_cases)} checks across {len(auth_profiles)} profiles")
     if failures:
@@ -516,6 +536,76 @@ def env_first(*names: str, fallback: str = "") -> str:
         if value:
             return value
     return fallback
+
+
+# build_case_plan keeps business-level cases explicit while filling documented
+# route gaps with side-effect-free unauthenticated registration checks.
+def build_case_plan() -> CasePlan:
+    behavioral_cases = tuple(build_cases())
+    openapi_routes = frozenset(openapi_route_keys())
+    behavioral_routes = frozenset(case.route_key for case in behavioral_cases if case.route_key)
+    unknown_routes = behavioral_routes - openapi_routes
+    if unknown_routes:
+        raise SmokeFailure("behavioral cases reference undocumented routes: " + ", ".join(sorted(unknown_routes)))
+
+    auth_boundary_cases = tuple(build_auth_boundary_cases(openapi_routes - behavioral_routes))
+    auth_boundary_routes = frozenset(case.route_key for case in auth_boundary_cases if case.route_key)
+    missing_routes = openapi_routes - behavioral_routes - auth_boundary_routes
+    duplicate_routes = behavioral_routes & auth_boundary_routes
+    if missing_routes:
+        raise SmokeFailure("coverage plan is missing OpenAPI routes: " + ", ".join(sorted(missing_routes)))
+    if duplicate_routes:
+        raise SmokeFailure("generated auth-boundary cases overlap behavioral cases: " + ", ".join(sorted(duplicate_routes)))
+    if len(auth_boundary_routes) != len(auth_boundary_cases):
+        raise SmokeFailure("generated auth-boundary cases contain duplicate or missing route keys")
+
+    return CasePlan(
+        behavioral_cases=behavioral_cases,
+        auth_boundary_cases=auth_boundary_cases,
+        openapi_routes=openapi_routes,
+        behavioral_routes=behavioral_routes,
+        auth_boundary_routes=auth_boundary_routes,
+    )
+
+
+# build_auth_boundary_cases verifies route registration and mandatory
+# authentication without sending credentials or reaching mutation handlers.
+def build_auth_boundary_cases(route_keys: frozenset[str] | set[str]) -> list[Case]:
+    cases: list[Case] = []
+    for route_key in sorted(route_keys):
+        method, path = route_key.split(" ", 1)
+        if not path.startswith("/v1/"):
+            raise SmokeFailure(f"route {route_key} needs an explicit public-route contract case")
+        request_path = materialize_openapi_path(path)
+        cases.append(
+            Case(
+                name=f"auth boundary {method} {path}",
+                method=method,
+                path=request_path,
+                expected=401,
+                route_key=route_key,
+                auth=None,
+            )
+        )
+    return cases
+
+
+# materialize_openapi_path turns templates into routable sentinel paths while
+# preserving the documented route key used by static coverage checks.
+def materialize_openapi_path(path: str) -> str:
+    request_path = re.sub(r"\{[^/{}]+\}", "smoke-contract", path)
+    if "{" in request_path or "}" in request_path:
+        raise SmokeFailure(f"cannot materialize OpenAPI path template: {path}")
+    return request_path
+
+
+# print_coverage_summary distinguishes deep behavioral checks from generated
+# authentication-boundary checks so the reported coverage is not overstated.
+def print_coverage_summary(plan: CasePlan) -> None:
+    total = len(plan.openapi_routes)
+    print(f"Behavioral OpenAPI route coverage: {len(plan.behavioral_routes)}/{total}")
+    print(f"Generated auth-boundary route coverage: {len(plan.auth_boundary_routes)}/{total}")
+    print(f"Combined OpenAPI route coverage: {len(plan.behavioral_routes | plan.auth_boundary_routes)}/{total}")
 
 
 def build_cases() -> list[Case]:
@@ -1197,18 +1287,38 @@ def capture_id(context_key: str, source_key: str = "id") -> CaptureFunc:
     return capture
 
 
+# openapi_route_keys reads only Path Item operations so similarly named schema
+# fields cannot be mistaken for HTTP methods.
 def openapi_route_keys() -> set[str]:
     raw = (ROOT / "docs" / "openapi.yaml").read_text(encoding="utf-8")
+    return openapi_route_keys_from_text(raw)
+
+
+# openapi_route_keys_from_text performs the narrow YAML inventory needed by the
+# smoke runner without adding a parser dependency.
+def openapi_route_keys_from_text(raw: str) -> set[str]:
     keys: set[str] = set()
     current_path = ""
+    in_paths = False
     for line in raw.splitlines():
+        if line == "paths:":
+            in_paths = True
+            current_path = ""
+            continue
+        if in_paths and line and not line.startswith(" "):
+            in_paths = False
+            current_path = ""
+        if not in_paths:
+            continue
         if line.startswith("  /"):
             current_path = line.strip().removesuffix(":")
             continue
         if not current_path:
             continue
+        if len(line) - len(line.lstrip(" ")) != 4:
+            continue
         method = line.strip().removesuffix(":")
-        if method in {"get", "post", "patch", "delete"}:
+        if method in OPENAPI_HTTP_METHODS:
             keys.add(method.upper() + " " + current_path)
     return keys
 

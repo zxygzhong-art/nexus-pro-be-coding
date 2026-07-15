@@ -1,13 +1,23 @@
-package objectstore
+package objectstore_test
 
-import "testing"
+import (
+	"context"
+	"testing"
+
+	"nexus-pro-be/internal/platform/objectstore"
+)
 
 // TestSFTPGoPathForKeyRejectsEscapingKeys protects the remote root boundary.
 func TestSFTPGoPathForKeyRejectsEscapingKeys(t *testing.T) {
-	store := &SFTPGo{root: "/nexus-hr-imports"}
+	store, err := objectstore.NewSFTPGo(context.Background(), objectstore.SFTPGoOptions{
+		Endpoint: "sftpgo", Root: "nexus-hr-imports", Username: "nexus-service", Password: "secret", InsecureSkipHostKey: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	for _, key := range []string{"", "../escape", "imports/../../escape"} {
-		if _, err := store.pathForKey(key); err == nil {
+		if _, err := store.PathForKey(key); err == nil {
 			t.Fatalf("pathForKey(%q) error = nil, want error", key)
 		}
 	}
@@ -15,9 +25,14 @@ func TestSFTPGoPathForKeyRejectsEscapingKeys(t *testing.T) {
 
 // TestSFTPGoPathForKeyScopesKeysUnderRoot verifies object keys stay under the configured root.
 func TestSFTPGoPathForKeyScopesKeysUnderRoot(t *testing.T) {
-	store := &SFTPGo{root: "/nexus-hr-imports"}
+	store, err := objectstore.NewSFTPGo(context.Background(), objectstore.SFTPGoOptions{
+		Endpoint: "sftpgo", Root: "nexus-hr-imports", Username: "nexus-service", Password: "secret", InsecureSkipHostKey: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	got, err := store.pathForKey("/imports/session/raw.csv")
+	got, err := store.PathForKey("/imports/session/raw.csv")
 	if err != nil {
 		t.Fatalf("pathForKey() error = %v", err)
 	}
@@ -28,7 +43,7 @@ func TestSFTPGoPathForKeyScopesKeysUnderRoot(t *testing.T) {
 
 // TestNormalizeSFTPGoEndpointDefaultsPort verifies SFTPGo endpoints can omit the default SFTP port.
 func TestNormalizeSFTPGoEndpointDefaultsPort(t *testing.T) {
-	got, err := normalizeSFTPGoEndpoint("sftpgo")
+	got, err := objectstore.NormalizeSFTPGoEndpoint("sftpgo")
 	if err != nil {
 		t.Fatalf("normalizeSFTPGoEndpoint() error = %v", err)
 	}

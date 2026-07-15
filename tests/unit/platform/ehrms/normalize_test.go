@@ -1,14 +1,15 @@
-package ehrms
+package ehrms_test
 
 import (
 	"testing"
 
 	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/platform/ehrms"
 )
 
 func TestNormalizeEmployeeRecordsMapsEnglishAliases(t *testing.T) {
 	t.Parallel()
-	rows := normalizeEmployeeRecords([]domain.EHRMSEmployeeRecord{{
+	rows := ehrms.NormalizeEmployeeRecords([]domain.EHRMSEmployeeRecord{{
 		"emp_id":      "IKM001",
 		"name_zh":     "測試員工",
 		"work_status": "在職",
@@ -38,7 +39,7 @@ func TestNormalizeEmployeeRecordsMapsEnglishAliases(t *testing.T) {
 
 func TestNormalizeDepartmentAndPositionRecords(t *testing.T) {
 	t.Parallel()
-	departments := normalizeDepartmentRecords([]domain.EHRMSDepartmentRecord{{
+	departments := ehrms.NormalizeDepartmentRecords([]domain.EHRMSDepartmentRecord{{
 		"code":        "C0101",
 		"name":        "Sales",
 		"parent_code": "C01",
@@ -47,7 +48,7 @@ func TestNormalizeDepartmentAndPositionRecords(t *testing.T) {
 	if departments[0]["部門代碼"] != "C0101" || departments[0]["上級部門代碼"] != "C01" || departments[0]["部門已關閉"] != "true" {
 		t.Fatalf("unexpected department normalize: %+v", departments[0])
 	}
-	positions := normalizePositionRecords([]domain.EHRMSPositionRecord{{
+	positions := ehrms.NormalizePositionRecords([]domain.EHRMSPositionRecord{{
 		"job_code":     "0704",
 		"job_title_zh": "工程師",
 		"job_title_en": "Engineer",
@@ -59,7 +60,7 @@ func TestNormalizeDepartmentAndPositionRecords(t *testing.T) {
 
 func TestNormalizeLeaveRecords(t *testing.T) {
 	t.Parallel()
-	balances := normalizeLeaveBalanceRecords([]domain.EHRMSLeaveBalanceRecord{{
+	balances := ehrms.NormalizeLeaveBalanceRecords([]domain.EHRMSLeaveBalanceRecord{{
 		"emp_id":      "IKM017",
 		"leave_type":  "annual",
 		"remaining":   "8",
@@ -68,7 +69,7 @@ func TestNormalizeLeaveRecords(t *testing.T) {
 	if balances[0]["員工編號"] != "IKM017" || balances[0]["假別"] != "annual" || balances[0]["餘額"] != "8" || balances[0]["到期日"] != "2026-12-31" {
 		t.Fatalf("unexpected leave balance normalize: %+v", balances[0])
 	}
-	details := normalizeLeaveDetailRecords([]domain.EHRMSLeaveDetailRecord{{
+	details := ehrms.NormalizeLeaveDetailRecords([]domain.EHRMSLeaveDetailRecord{{
 		"emp_id":     "IKM017",
 		"date":       "2026-06-11",
 		"leave_type": "annual",

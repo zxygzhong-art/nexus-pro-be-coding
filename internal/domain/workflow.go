@@ -29,6 +29,20 @@ type FormTemplateVersion struct {
 	PublishedAt *time.Time     `json:"published_at,omitempty"`
 }
 
+// RuntimeFormTemplate is the immutable, published form contract used by form fillers.
+type RuntimeFormTemplate struct {
+	ID                string                     `json:"id"`
+	TemplateVersionID string                     `json:"template_version_id"`
+	Key               string                     `json:"key"`
+	Name              string                     `json:"name"`
+	Description       string                     `json:"description,omitempty"`
+	Version           int                        `json:"version"`
+	FormKind          string                     `json:"form_kind"`
+	Icon              string                     `json:"icon"`
+	Fields            []PlatformFormBuilderField `json:"fields"`
+	Stages            []PlatformFormBuilderStage `json:"stages"`
+}
+
 // FormInstance 定義表單實例的資料結構。
 type FormInstance struct {
 	ID                 string         `json:"id"`
@@ -43,6 +57,13 @@ type FormInstance struct {
 	CurrentRunID       string         `json:"current_run_id,omitempty"`
 	Version            int64          `json:"version"`
 	UpdatedAt          time.Time      `json:"updated_at"`
+}
+
+// FormInstanceDetail adds immutable template identity needed to render a submitted form.
+type FormInstanceDetail struct {
+	FormInstance
+	TemplateKey  string `json:"template_key,omitempty"`
+	TemplateName string `json:"template_name,omitempty"`
 }
 
 // FormInstanceFieldValue 保存可統計欄位的類型化投影。
@@ -73,8 +94,9 @@ type FormInstanceQuery struct {
 
 // SaveFormDraftInput 定義表單草稿輸入的資料結構。
 type SaveFormDraftInput struct {
-	TemplateKey string         `json:"template_key,omitempty"`
-	Payload     map[string]any `json:"payload,omitempty"`
+	TemplateKey       string         `json:"template_key,omitempty"`
+	TemplateVersionID string         `json:"template_version_id,omitempty"`
+	Payload           map[string]any `json:"payload,omitempty"`
 }
 
 // UpdateFormDraftInput 定義表單草稿輸入的資料結構。
@@ -93,8 +115,9 @@ type CreateFormTemplateInput struct {
 
 // SubmitFormInput 定義表單輸入的資料結構。
 type SubmitFormInput struct {
-	TemplateKey string         `json:"template_key"`
-	Payload     map[string]any `json:"payload,omitempty"`
+	TemplateKey       string         `json:"template_key"`
+	TemplateVersionID string         `json:"template_version_id,omitempty"`
+	Payload           map[string]any `json:"payload,omitempty"`
 }
 
 // FormDataSourceField 描述可在表單設計器選用的資料欄位。

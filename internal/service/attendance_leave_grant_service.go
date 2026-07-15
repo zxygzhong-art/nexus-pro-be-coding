@@ -57,7 +57,7 @@ func (c AttendanceService) GrantLeaveBalances(ctx RequestContext, input GrantLea
 	}
 	existingByKey := map[string]LeaveBalance{}
 	for _, balance := range existing {
-		key := balance.EmployeeID + "|" + strings.ToLower(balance.LeaveType)
+		key := leaveBalanceGrantKey(balance.EmployeeID, balance.LeaveType, balance.PeriodStart, balance.PeriodEnd)
 		existingByKey[key] = balance
 	}
 
@@ -98,8 +98,12 @@ func (c AttendanceService) GrantLeaveBalances(ctx RequestContext, input GrantLea
 					ratio = employmentRatioInPeriod(tenureStart, employee.ResignDate, periodStart, periodEnd)
 				}
 				granted := roundHalfHour(rule.QuotaHours * ratio)
-				key := employee.ID + "|" + strings.ToLower(leaveType.Code)
+				key := leaveBalanceGrantKey(employee.ID, leaveType.Code, result.PeriodStart, result.PeriodEnd)
 				current, exists := existingByKey[key]
+				if exists && strings.EqualFold(strings.TrimSpace(current.Source), ehrmsAttendanceSource) {
+					result.Skipped++
+					continue
+				}
 				used := 0.0
 				id := utils.NewID("lb")
 				if exists {
@@ -122,6 +126,7 @@ func (c AttendanceService) GrantLeaveBalances(ctx RequestContext, input GrantLea
 					TenantID:       ctx.TenantID,
 					EmployeeID:     employee.ID,
 					LeaveType:      leaveType.Code,
+					LeaveTypeID:    leaveType.ID,
 					RemainingHours: remaining,
 					PeriodStart:    result.PeriodStart,
 					PeriodEnd:      result.PeriodEnd,
@@ -155,6 +160,11 @@ func (c AttendanceService) GrantLeaveBalances(ctx RequestContext, input GrantLea
 		return GrantLeaveBalancesResult{}, err
 	}
 	return result, nil
+}
+
+// leaveBalanceGrantKey keeps policy grants isolated by entitlement period and source ownership.
+func leaveBalanceGrantKey(employeeID, leaveType, periodStart, periodEnd string) string {
+	return strings.Join([]string{strings.TrimSpace(employeeID), strings.ToLower(strings.TrimSpace(leaveType)), periodStart, periodEnd}, "|")
 }
 
 func resolveGrantPeriod(startRaw, endRaw string, now time.Time) (time.Time, time.Time, error) {

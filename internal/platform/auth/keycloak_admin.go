@@ -22,6 +22,7 @@ type KeycloakAdminConfig struct {
 	IssuerURL         string
 	ClientID          string
 	ClientSecret      string
+	LoginClientID     string
 	SendInviteEmail   bool
 	InviteClientID    string
 	InviteRedirectURL string
@@ -30,9 +31,11 @@ type KeycloakAdminConfig struct {
 // KeycloakAdminClient 定義 Keycloak 管理員 client 的資料結構。
 type KeycloakAdminClient struct {
 	tokenURL          string
+	logoutURL         string
 	usersURL          string
 	clientID          string
 	clientSecret      string
+	loginClientID     string
 	sendInviteEmail   bool
 	inviteClientID    string
 	inviteRedirectURL string
@@ -62,14 +65,54 @@ func NewKeycloakAdminClient(cfg KeycloakAdminConfig, client *http.Client) (*Keyc
 	}
 	return &KeycloakAdminClient{
 		tokenURL:          tokenURL,
+		logoutURL:         strings.TrimSuffix(tokenURL, "/token") + "/logout",
 		usersURL:          usersURL,
 		clientID:          strings.TrimSpace(cfg.ClientID),
 		clientSecret:      cfg.ClientSecret,
+		loginClientID:     strings.TrimSpace(cfg.LoginClientID),
 		sendInviteEmail:   cfg.SendInviteEmail,
 		inviteClientID:    strings.TrimSpace(cfg.InviteClientID),
 		inviteRedirectURL: strings.TrimSpace(cfg.InviteRedirectURL),
 		client:            client,
 	}, nil
+}
+
+// ChangePassword verifies the existing credential and resets only the already bound Keycloak subject.
+func (c *KeycloakAdminClient) ChangePassword(ctx context.Context, input domain.IdentityPasswordChangeInput) error {
+	if c == nil || c.loginClientID == "" {
+		return domain.ErrIdentityPasswordUnavailable
+	}
+	if strings.TrimSpace(input.Subject) == "" || strings.TrimSpace(input.TenantID) == "" || strings.TrimSpace(input.AccountID) == "" {
+		return domain.ErrIdentityPasswordUnavailable
+	}
+	if input.CurrentPassword == "" || input.NewPassword == "" {
+		return domain.ErrIdentityPasswordUnavailable
+	}
+	adminToken, err := c.adminToken(ctx)
+	if err != nil {
+		return err
+	}
+	user, err := c.getUserByID(ctx, adminToken, input.Subject)
+	if err != nil {
+		return err
+	}
+	if err := validateKeycloakUserOwnership(domain.IdentityProvisioningInput{
+		TenantID:  input.TenantID,
+		AccountID: input.AccountID,
+	}, user.Attributes); err != nil {
+		return err
+	}
+	username := strings.TrimSpace(user.Username)
+	if username == "" {
+		username = strings.TrimSpace(user.Email)
+	}
+	if username == "" {
+		return domain.ErrIdentityPasswordUnavailable
+	}
+	if err := c.verifyCurrentPassword(ctx, username, input.CurrentPassword); err != nil {
+		return err
+	}
+	return c.resetPassword(ctx, adminToken, input.Subject, input.NewPassword)
 }
 
 // Ping 檢查外部服務連線狀態。
@@ -326,6 +369,93 @@ func (c *KeycloakAdminClient) findUserByEmail(ctx context.Context, token string,
 		}
 	}
 	return keycloakUserRepresentation{}, false, nil
+}
+
+// getUserByID resolves the immutable Keycloak subject before any credential mutation.
+func (c *KeycloakAdminClient) getUserByID(ctx context.Context, token, userID string) (keycloakUserRepresentation, error) {
+	var user keycloakUserRepresentation
+	endpoint := strings.TrimRight(c.usersURL, "/") + "/" + url.PathEscape(strings.TrimSpace(userID))
+	if err := c.doJSON(ctx, http.MethodGet, endpoint, token, nil, &user); err != nil {
+		return keycloakUserRepresentation{}, err
+	}
+	if strings.TrimSpace(user.ID) == "" || user.ID != strings.TrimSpace(userID) {
+		return keycloakUserRepresentation{}, errors.New("keycloak user response subject mismatch")
+	}
+	return user, nil
+}
+
+// verifyCurrentPassword uses the login client and immediately closes the short-lived verification session.
+func (c *KeycloakAdminClient) verifyCurrentPassword(ctx context.Context, username, password string) error {
+	form := url.Values{}
+	form.Set("grant_type", "password")
+	form.Set("client_id", c.loginClientID)
+	form.Set("username", username)
+	form.Set("password", password)
+	form.Set("scope", "openid")
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.tokenURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusBadRequest || resp.StatusCode == http.StatusUnauthorized {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return domain.ErrIdentityCurrentPasswordInvalid
+	}
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return keycloakHTTPError("current password verification", resp)
+	}
+	var body struct {
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		return err
+	}
+	if strings.TrimSpace(body.RefreshToken) == "" {
+		return errors.New("keycloak password verification response missing refresh_token")
+	}
+	return c.closeVerificationSession(ctx, body.RefreshToken)
+}
+
+// closeVerificationSession prevents password verification from leaving an extra user session behind.
+func (c *KeycloakAdminClient) closeVerificationSession(ctx context.Context, refreshToken string) error {
+	form := url.Values{}
+	form.Set("client_id", c.loginClientID)
+	form.Set("refresh_token", refreshToken)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.logoutURL, strings.NewReader(form.Encode()))
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return keycloakHTTPError("password verification logout", resp)
+	}
+	_, _ = io.Copy(io.Discard, resp.Body)
+	return nil
+}
+
+// resetPassword applies Keycloak's password policy through the Admin REST credential endpoint.
+func (c *KeycloakAdminClient) resetPassword(ctx context.Context, token, userID, password string) error {
+	endpoint := strings.TrimRight(c.usersURL, "/") + "/" + url.PathEscape(strings.TrimSpace(userID)) + "/reset-password"
+	payload := struct {
+		Type      string `json:"type"`
+		Value     string `json:"value"`
+		Temporary bool   `json:"temporary"`
+	}{Type: "password", Value: password, Temporary: false}
+	status, _, err := c.doJSONWithStatus(ctx, http.MethodPut, endpoint, token, payload, nil)
+	if err != nil && status == http.StatusBadRequest {
+		return fmt.Errorf("%w: %v", domain.ErrIdentityPasswordRejected, err)
+	}
+	return err
 }
 
 // createUser 建立使用者。

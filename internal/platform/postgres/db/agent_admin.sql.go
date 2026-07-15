@@ -84,7 +84,7 @@ const deleteAgentDefinition = `-- name: DeleteAgentDefinition :one
 DELETE FROM agent_definitions
 WHERE tenant_id = $1
   AND id = $2
-RETURNING id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at
+RETURNING id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at
 `
 
 type DeleteAgentDefinitionParams struct {
@@ -108,6 +108,7 @@ func (q *Queries) DeleteAgentDefinition(ctx context.Context, arg DeleteAgentDefi
 		&i.SystemPrompt,
 		&i.WelcomeMessage,
 		&i.SuggestedQuestions,
+		&i.SuggestedQuestionTranslations,
 		&i.Tools,
 		&i.KnowledgeBaseIds,
 		&i.Status,
@@ -207,7 +208,7 @@ func (q *Queries) DeleteAgentModel(ctx context.Context, arg DeleteAgentModelPara
 }
 
 const getAgentDefinition = `-- name: GetAgentDefinition :one
-SELECT id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at FROM agent_definitions
+SELECT id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at FROM agent_definitions
 WHERE tenant_id = $1
   AND id = $2
 `
@@ -233,6 +234,7 @@ func (q *Queries) GetAgentDefinition(ctx context.Context, arg GetAgentDefinition
 		&i.SystemPrompt,
 		&i.WelcomeMessage,
 		&i.SuggestedQuestions,
+		&i.SuggestedQuestionTranslations,
 		&i.Tools,
 		&i.KnowledgeBaseIds,
 		&i.Status,
@@ -256,7 +258,7 @@ func (q *Queries) GetAgentDefinition(ctx context.Context, arg GetAgentDefinition
 }
 
 const getAgentDefinitionVersion = `-- name: GetAgentDefinitionVersion :one
-SELECT id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, tools, knowledge_base_ids, model_id, note, created_by_account_id, created_at FROM agent_definition_versions
+SELECT id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, model_id, note, created_by_account_id, created_at FROM agent_definition_versions
 WHERE tenant_id = $1
   AND agent_id = $2
   AND version = $3
@@ -281,6 +283,7 @@ func (q *Queries) GetAgentDefinitionVersion(ctx context.Context, arg GetAgentDef
 		&i.SystemPrompt,
 		&i.WelcomeMessage,
 		&i.SuggestedQuestions,
+		&i.SuggestedQuestionTranslations,
 		&i.Tools,
 		&i.KnowledgeBaseIds,
 		&i.ModelID,
@@ -335,32 +338,33 @@ func (q *Queries) GetAgentModel(ctx context.Context, arg GetAgentModelParams) (A
 
 const insertAgentDefinitionVersion = `-- name: InsertAgentDefinitionVersion :one
 INSERT INTO agent_definition_versions (
-    id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, tools, knowledge_base_ids, model_id, note,
+    id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, model_id, note,
     created_by_account_id, created_at
 ) VALUES (
     $1, $2, $3, $4,
-    $5, $6::jsonb, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12, $13,
-    $14, $15
+    $5, $6::jsonb, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, $13, $14,
+    $15, $16
 )
-RETURNING id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, tools, knowledge_base_ids, model_id, note, created_by_account_id, created_at
+RETURNING id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, model_id, note, created_by_account_id, created_at
 `
 
 type InsertAgentDefinitionVersionParams struct {
-	ID                 string             `json:"id"`
-	TenantID           string             `json:"tenant_id"`
-	AgentID            string             `json:"agent_id"`
-	Version            int32              `json:"version"`
-	MainAgentRole      string             `json:"main_agent_role"`
-	SubAgents          []byte             `json:"sub_agents"`
-	SystemPrompt       string             `json:"system_prompt"`
-	WelcomeMessage     string             `json:"welcome_message"`
-	SuggestedQuestions []byte             `json:"suggested_questions"`
-	Tools              []byte             `json:"tools"`
-	KnowledgeBaseIds   []byte             `json:"knowledge_base_ids"`
-	ModelID            string             `json:"model_id"`
-	Note               string             `json:"note"`
-	CreatedByAccountID pgtype.Text        `json:"created_by_account_id"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	ID                            string             `json:"id"`
+	TenantID                      string             `json:"tenant_id"`
+	AgentID                       string             `json:"agent_id"`
+	Version                       int32              `json:"version"`
+	MainAgentRole                 string             `json:"main_agent_role"`
+	SubAgents                     []byte             `json:"sub_agents"`
+	SystemPrompt                  string             `json:"system_prompt"`
+	WelcomeMessage                string             `json:"welcome_message"`
+	SuggestedQuestions            []byte             `json:"suggested_questions"`
+	SuggestedQuestionTranslations []byte             `json:"suggested_question_translations"`
+	Tools                         []byte             `json:"tools"`
+	KnowledgeBaseIds              []byte             `json:"knowledge_base_ids"`
+	ModelID                       string             `json:"model_id"`
+	Note                          string             `json:"note"`
+	CreatedByAccountID            pgtype.Text        `json:"created_by_account_id"`
+	CreatedAt                     pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) InsertAgentDefinitionVersion(ctx context.Context, arg InsertAgentDefinitionVersionParams) (AgentDefinitionVersion, error) {
@@ -374,6 +378,7 @@ func (q *Queries) InsertAgentDefinitionVersion(ctx context.Context, arg InsertAg
 		arg.SystemPrompt,
 		arg.WelcomeMessage,
 		arg.SuggestedQuestions,
+		arg.SuggestedQuestionTranslations,
 		arg.Tools,
 		arg.KnowledgeBaseIds,
 		arg.ModelID,
@@ -392,6 +397,7 @@ func (q *Queries) InsertAgentDefinitionVersion(ctx context.Context, arg InsertAg
 		&i.SystemPrompt,
 		&i.WelcomeMessage,
 		&i.SuggestedQuestions,
+		&i.SuggestedQuestionTranslations,
 		&i.Tools,
 		&i.KnowledgeBaseIds,
 		&i.ModelID,
@@ -467,7 +473,7 @@ func (q *Queries) InsertAgentExternalTool(ctx context.Context, arg InsertAgentEx
 }
 
 const listAgentDefinitionVersions = `-- name: ListAgentDefinitionVersions :many
-SELECT id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, tools, knowledge_base_ids, model_id, note, created_by_account_id, created_at FROM agent_definition_versions
+SELECT id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, model_id, note, created_by_account_id, created_at FROM agent_definition_versions
 WHERE tenant_id = $1
   AND agent_id = $2
 ORDER BY version DESC
@@ -497,6 +503,7 @@ func (q *Queries) ListAgentDefinitionVersions(ctx context.Context, arg ListAgent
 			&i.SystemPrompt,
 			&i.WelcomeMessage,
 			&i.SuggestedQuestions,
+			&i.SuggestedQuestionTranslations,
 			&i.Tools,
 			&i.KnowledgeBaseIds,
 			&i.ModelID,
@@ -515,7 +522,7 @@ func (q *Queries) ListAgentDefinitionVersions(ctx context.Context, arg ListAgent
 }
 
 const listAgentDefinitions = `-- name: ListAgentDefinitions :many
-SELECT id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at FROM agent_definitions
+SELECT id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at FROM agent_definitions
 WHERE tenant_id = $1
 ORDER BY status ASC, updated_at DESC, id ASC
 `
@@ -542,6 +549,7 @@ func (q *Queries) ListAgentDefinitions(ctx context.Context, tenantID string) ([]
 			&i.SystemPrompt,
 			&i.WelcomeMessage,
 			&i.SuggestedQuestions,
+			&i.SuggestedQuestionTranslations,
 			&i.Tools,
 			&i.KnowledgeBaseIds,
 			&i.Status,
@@ -662,7 +670,7 @@ func (q *Queries) ListAgentModels(ctx context.Context, tenantID string) ([]Agent
 }
 
 const listPublishedAgentDefinitions = `-- name: ListPublishedAgentDefinitions :many
-SELECT id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at FROM agent_definitions
+SELECT id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at FROM agent_definitions
 WHERE tenant_id = $1
   AND status = 'published'
 ORDER BY updated_at DESC, id ASC
@@ -690,6 +698,7 @@ func (q *Queries) ListPublishedAgentDefinitions(ctx context.Context, tenantID st
 			&i.SystemPrompt,
 			&i.WelcomeMessage,
 			&i.SuggestedQuestions,
+			&i.SuggestedQuestionTranslations,
 			&i.Tools,
 			&i.KnowledgeBaseIds,
 			&i.Status,
@@ -747,7 +756,7 @@ SET usage_total_runs = usage_total_runs + 1,
     updated_at = $3
 WHERE tenant_id = $5
   AND id = $6
-RETURNING id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at
+RETURNING id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at
 `
 
 type UpdateAgentDefinitionUsageParams struct {
@@ -782,6 +791,7 @@ func (q *Queries) UpdateAgentDefinitionUsage(ctx context.Context, arg UpdateAgen
 		&i.SystemPrompt,
 		&i.WelcomeMessage,
 		&i.SuggestedQuestions,
+		&i.SuggestedQuestionTranslations,
 		&i.Tools,
 		&i.KnowledgeBaseIds,
 		&i.Status,
@@ -926,19 +936,19 @@ func (q *Queries) UpdateAgentModelTestResult(ctx context.Context, arg UpdateAgen
 const upsertAgentDefinition = `-- name: UpsertAgentDefinition :one
 INSERT INTO agent_definitions (
     id, tenant_id, name, description, emoji, category, model_id,
-    main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds,
+    main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds,
     version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms,
     usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id,
     created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4,
     $5, $6, $7,
-    $8, $9::jsonb, $10, $11, $12::jsonb, $13::jsonb, $14::jsonb, $15, $16,
-    $17::jsonb, $18, $19, $20,
-    $21, $22, $23,
-    $24, $25, $26::jsonb,
-    $27, $28,
-    $29, $30
+    $8, $9::jsonb, $10, $11, $12::jsonb, $13::jsonb, $14::jsonb, $15::jsonb, $16, $17,
+    $18::jsonb, $19, $20, $21,
+    $22, $23, $24,
+    $25, $26, $27::jsonb,
+    $28, $29,
+    $30, $31
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -952,6 +962,7 @@ ON CONFLICT (id) DO UPDATE SET
     system_prompt = EXCLUDED.system_prompt,
     welcome_message = EXCLUDED.welcome_message,
     suggested_questions = EXCLUDED.suggested_questions,
+    suggested_question_translations = EXCLUDED.suggested_question_translations,
     tools = EXCLUDED.tools,
     knowledge_base_ids = EXCLUDED.knowledge_base_ids,
     status = EXCLUDED.status,
@@ -970,40 +981,41 @@ ON CONFLICT (id) DO UPDATE SET
     updated_by_account_id = EXCLUDED.updated_by_account_id,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at
+RETURNING id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms, usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id, created_at, updated_at
 `
 
 type UpsertAgentDefinitionParams struct {
-	ID                 string             `json:"id"`
-	TenantID           string             `json:"tenant_id"`
-	Name               string             `json:"name"`
-	Description        string             `json:"description"`
-	Emoji              string             `json:"emoji"`
-	Category           string             `json:"category"`
-	ModelID            string             `json:"model_id"`
-	MainAgentRole      string             `json:"main_agent_role"`
-	SubAgents          []byte             `json:"sub_agents"`
-	SystemPrompt       string             `json:"system_prompt"`
-	WelcomeMessage     string             `json:"welcome_message"`
-	SuggestedQuestions []byte             `json:"suggested_questions"`
-	Tools              []byte             `json:"tools"`
-	KnowledgeBaseIds   []byte             `json:"knowledge_base_ids"`
-	Status             string             `json:"status"`
-	Visibility         string             `json:"visibility"`
-	VisibilityTargets  []byte             `json:"visibility_targets"`
-	TimeoutSeconds     int32              `json:"timeout_seconds"`
-	Version            int32              `json:"version"`
-	PublishedVersion   int32              `json:"published_version"`
-	UsageTotalRuns     int64              `json:"usage_total_runs"`
-	UsageSuccessRuns   int64              `json:"usage_success_runs"`
-	UsageFailedRuns    int64              `json:"usage_failed_runs"`
-	UsageAvgLatencyMs  int32              `json:"usage_avg_latency_ms"`
-	UsageLastRunAt     pgtype.Timestamptz `json:"usage_last_run_at"`
-	UsageTopPrompts    []byte             `json:"usage_top_prompts"`
-	CreatedByAccountID pgtype.Text        `json:"created_by_account_id"`
-	UpdatedByAccountID pgtype.Text        `json:"updated_by_account_id"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ID                            string             `json:"id"`
+	TenantID                      string             `json:"tenant_id"`
+	Name                          string             `json:"name"`
+	Description                   string             `json:"description"`
+	Emoji                         string             `json:"emoji"`
+	Category                      string             `json:"category"`
+	ModelID                       string             `json:"model_id"`
+	MainAgentRole                 string             `json:"main_agent_role"`
+	SubAgents                     []byte             `json:"sub_agents"`
+	SystemPrompt                  string             `json:"system_prompt"`
+	WelcomeMessage                string             `json:"welcome_message"`
+	SuggestedQuestions            []byte             `json:"suggested_questions"`
+	SuggestedQuestionTranslations []byte             `json:"suggested_question_translations"`
+	Tools                         []byte             `json:"tools"`
+	KnowledgeBaseIds              []byte             `json:"knowledge_base_ids"`
+	Status                        string             `json:"status"`
+	Visibility                    string             `json:"visibility"`
+	VisibilityTargets             []byte             `json:"visibility_targets"`
+	TimeoutSeconds                int32              `json:"timeout_seconds"`
+	Version                       int32              `json:"version"`
+	PublishedVersion              int32              `json:"published_version"`
+	UsageTotalRuns                int64              `json:"usage_total_runs"`
+	UsageSuccessRuns              int64              `json:"usage_success_runs"`
+	UsageFailedRuns               int64              `json:"usage_failed_runs"`
+	UsageAvgLatencyMs             int32              `json:"usage_avg_latency_ms"`
+	UsageLastRunAt                pgtype.Timestamptz `json:"usage_last_run_at"`
+	UsageTopPrompts               []byte             `json:"usage_top_prompts"`
+	CreatedByAccountID            pgtype.Text        `json:"created_by_account_id"`
+	UpdatedByAccountID            pgtype.Text        `json:"updated_by_account_id"`
+	CreatedAt                     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt                     pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) UpsertAgentDefinition(ctx context.Context, arg UpsertAgentDefinitionParams) (AgentDefinition, error) {
@@ -1020,6 +1032,7 @@ func (q *Queries) UpsertAgentDefinition(ctx context.Context, arg UpsertAgentDefi
 		arg.SystemPrompt,
 		arg.WelcomeMessage,
 		arg.SuggestedQuestions,
+		arg.SuggestedQuestionTranslations,
 		arg.Tools,
 		arg.KnowledgeBaseIds,
 		arg.Status,
@@ -1053,6 +1066,7 @@ func (q *Queries) UpsertAgentDefinition(ctx context.Context, arg UpsertAgentDefi
 		&i.SystemPrompt,
 		&i.WelcomeMessage,
 		&i.SuggestedQuestions,
+		&i.SuggestedQuestionTranslations,
 		&i.Tools,
 		&i.KnowledgeBaseIds,
 		&i.Status,

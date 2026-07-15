@@ -33,8 +33,22 @@ type AgentRun struct {
 	Status        string        `json:"status"`
 	References    []Reference   `json:"references,omitempty"`
 	ToolDecisions []CheckResult `json:"tool_decisions,omitempty"`
+	LLMCallCount  int64         `json:"-"`
+	InputTokens   int64         `json:"-"`
+	CachedTokens  int64         `json:"-"`
+	OutputTokens  int64         `json:"-"`
+	TotalTokens   int64         `json:"-"`
+	UsageComplete bool          `json:"-"`
 	CreatedAt     time.Time     `json:"created_at"`
 	UpdatedAt     time.Time     `json:"updated_at"`
+}
+
+// AgentTokenUsage records one model response usage report.
+type AgentTokenUsage struct {
+	InputTokens  int64
+	CachedTokens int64
+	OutputTokens int64
+	TotalTokens  int64
 }
 
 // CreateAgentRunInput 定義 agent 執行輸入的資料結構。

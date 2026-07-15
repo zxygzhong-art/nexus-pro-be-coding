@@ -1,4 +1,4 @@
-package objectstore
+package objectstore_test
 
 import (
 	"bytes"
@@ -9,11 +9,13 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"nexus-pro-be/internal/platform/objectstore"
 )
 
 // TestNormalizeSFTPGoHTTPBaseURLAcceptsHTTP verifies HTTP endpoints are normalized.
 func TestNormalizeSFTPGoHTTPBaseURLAcceptsHTTP(t *testing.T) {
-	got, err := normalizeSFTPGoHTTPBaseURL("http://sftpgo:8080/")
+	got, err := objectstore.NormalizeSFTPGoHTTPBaseURL("http://sftpgo:8080/")
 	if err != nil {
 		t.Fatalf("normalizeSFTPGoHTTPBaseURL() error = %v", err)
 	}
@@ -24,8 +26,13 @@ func TestNormalizeSFTPGoHTTPBaseURLAcceptsHTTP(t *testing.T) {
 
 // TestSFTPGoHTTPPathForKeyScopesKeysUnderRoot verifies object keys stay under the configured root.
 func TestSFTPGoHTTPPathForKeyScopesKeysUnderRoot(t *testing.T) {
-	store := &SFTPGoHTTP{root: "/nexus-bucket"}
-	got, err := store.pathForKey("/imports/session/raw.csv")
+	store, err := objectstore.NewSFTPGoHTTP(context.Background(), objectstore.SFTPGoOptions{
+		Endpoint: "http://sftpgo:8080", Root: "nexus-bucket", Username: "nexus-service", Password: "secret",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := store.PathForKey("/imports/session/raw.csv")
 	if err != nil {
 		t.Fatalf("pathForKey() error = %v", err)
 	}
@@ -83,7 +90,7 @@ func TestNewSFTPGoStoreSelectsHTTP(t *testing.T) {
 	}))
 	defer server.Close()
 
-	store, err := NewSFTPGoStore(context.Background(), SFTPGoOptions{
+	store, err := objectstore.NewSFTPGoStore(context.Background(), objectstore.SFTPGoOptions{
 		Endpoint:   server.URL,
 		Root:       "nexus-bucket",
 		Username:   "nexus-service",
@@ -93,7 +100,7 @@ func TestNewSFTPGoStoreSelectsHTTP(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSFTPGoStore() error = %v", err)
 	}
-	httpStore, ok := store.(*SFTPGoHTTP)
+	httpStore, ok := store.(*objectstore.SFTPGoHTTP)
 	if !ok {
 		t.Fatalf("NewSFTPGoStore() type = %T, want *SFTPGoHTTP", store)
 	}
@@ -138,7 +145,7 @@ func TestNewSFTPGoHTTPTreatsExistingDirectoryAsSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	_, err := NewSFTPGoStore(context.Background(), SFTPGoOptions{
+	_, err := objectstore.NewSFTPGoStore(context.Background(), objectstore.SFTPGoOptions{
 		Endpoint:   server.URL,
 		Root:       "nexus-bucket",
 		Username:   "nexus-service",
@@ -158,7 +165,7 @@ func TestNewSFTPGoHTTPTreatsExistingDirectoryAsSuccess(t *testing.T) {
 
 // TestNewSFTPGoStoreRejectsUnsupportedScheme verifies unsupported schemes fail fast.
 func TestNewSFTPGoStoreRejectsUnsupportedScheme(t *testing.T) {
-	_, err := NewSFTPGoStore(context.Background(), SFTPGoOptions{
+	_, err := objectstore.NewSFTPGoStore(context.Background(), objectstore.SFTPGoOptions{
 		Endpoint: "ftp://sftpgo:21",
 		Root:     "nexus-bucket",
 		Username: "nexus-service",

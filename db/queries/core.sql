@@ -23,11 +23,11 @@ ORDER BY created_at ASC;
 INSERT INTO accounts (
     id, tenant_id, display_name, email, employee_id, status,
     user_group_ids, direct_permission_set_ids, active_assumable_role_id,
-    version, created_at
+    preferred_locale, version, created_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(display_name), sqlc.arg(email), sqlc.arg(employee_id), sqlc.arg(status),
     sqlc.arg(user_group_ids), sqlc.arg(direct_permission_set_ids), sqlc.arg(active_assumable_role_id),
-    1, sqlc.arg(created_at)
+    sqlc.arg(preferred_locale), 1, sqlc.arg(created_at)
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -37,6 +37,7 @@ ON CONFLICT (id) DO UPDATE SET
     status = EXCLUDED.status,
     direct_permission_set_ids = EXCLUDED.direct_permission_set_ids,
     active_assumable_role_id = EXCLUDED.active_assumable_role_id,
+    preferred_locale = EXCLUDED.preferred_locale,
     version = accounts.version + 1,
     created_at = EXCLUDED.created_at
 WHERE sqlc.arg(expected_version)::bigint = 0 OR accounts.version = sqlc.arg(expected_version)::bigint
@@ -45,6 +46,13 @@ RETURNING *;
 -- name: GetAccount :one
 SELECT * FROM accounts
 WHERE tenant_id = $1 AND id = $2;
+
+-- name: UpdateAccountPreferredLocale :one
+UPDATE accounts
+SET preferred_locale = sqlc.arg(preferred_locale),
+    version = version + 1
+WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id)
+RETURNING *;
 
 -- name: ListAccounts :many
 SELECT * FROM accounts
@@ -271,6 +279,12 @@ RETURNING *;
 -- name: GetEmployee :one
 SELECT * FROM employees
 WHERE tenant_id = $1 AND id = $2;
+
+-- name: UpdateEmployeeOrgChartVisibility :exec
+UPDATE employees
+SET show_in_org_chart = sqlc.arg(show_in_org_chart),
+    updated_at = sqlc.arg(updated_at)
+WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id);
 
 -- name: GetEmployeeByEmployeeNo :one
 SELECT * FROM employees
@@ -543,6 +557,7 @@ ON CONFLICT (tenant_id) DO UPDATE SET
     effective_from = EXCLUDED.effective_from,
     updated_by_account_id = EXCLUDED.updated_by_account_id,
     updated_at = EXCLUDED.updated_at
+WHERE attendance_policies.version < EXCLUDED.version
 RETURNING *;
 
 -- name: GetAttendancePolicy :one
@@ -551,15 +566,16 @@ WHERE tenant_id = sqlc.arg(tenant_id);
 
 -- name: UpsertLeaveBalance :one
 INSERT INTO leave_balances (
-    id, tenant_id, employee_id, leave_type, remaining_hours,
+    id, tenant_id, employee_id, leave_type, leave_type_id, remaining_hours,
     period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio,
     updated_at
 ) VALUES (
-    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(leave_type), sqlc.arg(remaining_hours)::numeric(12,2),
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(leave_type), sqlc.arg(leave_type_id), sqlc.arg(remaining_hours)::numeric(12,2),
     sqlc.narg(period_start), sqlc.narg(period_end), sqlc.arg(granted_hours)::numeric(12,2), sqlc.arg(used_hours)::numeric(12,2), sqlc.arg(source), sqlc.arg(policy_version), sqlc.arg(prorate_ratio),
     sqlc.arg(updated_at)
 )
 ON CONFLICT (tenant_id, employee_id, leave_type, period_start, period_end) DO UPDATE SET
+    leave_type_id = EXCLUDED.leave_type_id,
     remaining_hours = EXCLUDED.remaining_hours,
     granted_hours = EXCLUDED.granted_hours,
     used_hours = EXCLUDED.used_hours,
@@ -568,6 +584,87 @@ ON CONFLICT (tenant_id, employee_id, leave_type, period_start, period_end) DO UP
     prorate_ratio = EXCLUDED.prorate_ratio,
     updated_at = EXCLUDED.updated_at
 RETURNING *;
+
+-- name: GetLeaveTypeExternalMapping :one
+SELECT mapping.*, leave_type.code AS leave_type_code
+FROM leave_type_external_mappings mapping
+JOIN leave_types leave_type
+  ON leave_type.tenant_id = mapping.tenant_id AND leave_type.id = mapping.leave_type_id
+WHERE mapping.tenant_id = sqlc.arg(tenant_id)
+  AND lower(mapping.source) = lower(sqlc.arg(source)::text)
+  AND lower(mapping.external_code) = lower(sqlc.arg(external_code)::text)
+  AND (mapping.effective_from IS NULL OR mapping.effective_from <= sqlc.arg(as_of)::date)
+  AND (mapping.effective_to IS NULL OR mapping.effective_to > sqlc.arg(as_of)::date)
+ORDER BY mapping.effective_from DESC NULLS LAST, mapping.updated_at DESC
+LIMIT 1;
+
+-- name: ListLeaveTypeExternalMappings :many
+SELECT mapping.*, leave_type.code AS leave_type_code
+FROM leave_type_external_mappings mapping
+JOIN leave_types leave_type
+  ON leave_type.tenant_id = mapping.tenant_id AND leave_type.id = mapping.leave_type_id
+WHERE mapping.tenant_id = sqlc.arg(tenant_id)
+ORDER BY lower(mapping.source), lower(mapping.external_code), mapping.effective_from DESC NULLS LAST, mapping.updated_at DESC;
+
+-- name: UpsertLeaveTypeExternalMapping :exec
+INSERT INTO leave_type_external_mappings (
+    id, tenant_id, source, external_code, leave_type_id,
+    effective_from, effective_to, created_at, updated_at
+) VALUES (
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(source), sqlc.arg(external_code), sqlc.arg(leave_type_id),
+    sqlc.narg(effective_from), sqlc.narg(effective_to), sqlc.arg(created_at), sqlc.arg(updated_at)
+)
+ON CONFLICT (id) DO UPDATE SET
+    source = EXCLUDED.source,
+    external_code = EXCLUDED.external_code,
+    leave_type_id = EXCLUDED.leave_type_id,
+    effective_from = EXCLUDED.effective_from,
+    effective_to = EXCLUDED.effective_to,
+    updated_at = EXCLUDED.updated_at
+WHERE leave_type_external_mappings.tenant_id = EXCLUDED.tenant_id;
+
+-- name: EnsureLeaveTypeCatalog :exec
+INSERT INTO leave_types (
+    id, tenant_id, code, name, category, source_of_truth, status, created_at, updated_at
+) VALUES (
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(code), sqlc.arg(code),
+    'company', 'local_policy', 'active', sqlc.arg(created_at), sqlc.arg(updated_at)
+)
+ON CONFLICT (tenant_id, id) DO NOTHING;
+
+-- name: ExpireLeaveTypeExternalMapping :execrows
+UPDATE leave_type_external_mappings
+SET effective_to = GREATEST(coalesce(effective_from, sqlc.arg(effective_to)::date), sqlc.arg(effective_to)::date),
+    updated_at = sqlc.arg(updated_at)
+WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id);
+
+-- name: UpsertLeaveTypeSyncIssue :exec
+INSERT INTO leave_type_sync_issues (
+    id, tenant_id, source, external_code, issue_code, message,
+    occurrences, status, first_seen_at, last_seen_at, resolved_at
+) VALUES (
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(source), sqlc.arg(external_code), sqlc.arg(issue_code), sqlc.arg(message),
+    1, 'open', sqlc.arg(first_seen_at), sqlc.arg(last_seen_at), NULL
+)
+ON CONFLICT (tenant_id, source, external_code, issue_code) DO UPDATE SET
+    message = EXCLUDED.message,
+    occurrences = leave_type_sync_issues.occurrences + 1,
+    status = 'open',
+    last_seen_at = EXCLUDED.last_seen_at,
+    resolved_at = NULL;
+
+-- name: ListOpenLeaveTypeSyncIssues :many
+SELECT * FROM leave_type_sync_issues
+WHERE tenant_id = sqlc.arg(tenant_id) AND status = 'open'
+ORDER BY last_seen_at DESC, external_code ASC;
+
+-- name: ResolveLeaveTypeSyncIssues :exec
+UPDATE leave_type_sync_issues
+SET status = 'resolved', resolved_at = sqlc.arg(resolved_at), last_seen_at = sqlc.arg(resolved_at)
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND lower(source) = lower(sqlc.arg(source)::text)
+  AND lower(external_code) = lower(sqlc.arg(external_code)::text)
+  AND status = 'open';
 
 -- name: GetLeaveBalance :one
 SELECT * FROM leave_balances
@@ -832,16 +929,22 @@ WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id);
 
 -- name: UpsertLeaveRequest :one
 INSERT INTO leave_requests (
-    id, tenant_id, employee_id, leave_type, start_at, end_at,
+    id, tenant_id, employee_id, leave_type, leave_type_id, policy_version,
+    rule_snapshot, evaluation_snapshot, start_at, end_at,
     hours, reason, status, form_instance_id, leave_balance_id, created_at
 ) VALUES (
-    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(leave_type), sqlc.arg(start_at), sqlc.arg(end_at),
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(leave_type), sqlc.arg(leave_type_id), sqlc.arg(policy_version),
+    sqlc.arg(rule_snapshot)::jsonb, sqlc.arg(evaluation_snapshot)::jsonb, sqlc.arg(start_at), sqlc.arg(end_at),
     sqlc.arg(hours), sqlc.arg(reason), sqlc.arg(status), sqlc.arg(form_instance_id), sqlc.narg(leave_balance_id), sqlc.arg(created_at)
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
     employee_id = EXCLUDED.employee_id,
     leave_type = EXCLUDED.leave_type,
+    leave_type_id = EXCLUDED.leave_type_id,
+    policy_version = EXCLUDED.policy_version,
+    rule_snapshot = EXCLUDED.rule_snapshot,
+    evaluation_snapshot = EXCLUDED.evaluation_snapshot,
     start_at = EXCLUDED.start_at,
     end_at = EXCLUDED.end_at,
     hours = EXCLUDED.hours,
@@ -850,6 +953,17 @@ ON CONFLICT (id) DO UPDATE SET
     form_instance_id = EXCLUDED.form_instance_id,
     leave_balance_id = EXCLUDED.leave_balance_id,
     created_at = EXCLUDED.created_at
+RETURNING *;
+
+-- name: UpsertLeaveRequestAllocation :one
+INSERT INTO leave_request_allocations (
+    tenant_id, leave_request_id, leave_balance_id, reserved_hours, created_at
+) VALUES (
+    sqlc.arg(tenant_id), sqlc.arg(leave_request_id), sqlc.arg(leave_balance_id),
+    sqlc.arg(reserved_hours)::numeric(12,2), sqlc.arg(created_at)
+)
+ON CONFLICT (tenant_id, leave_request_id, leave_balance_id) DO UPDATE SET
+    reserved_hours = EXCLUDED.reserved_hours
 RETURNING *;
 
 -- name: GetLeaveRequest :one
@@ -1402,9 +1516,14 @@ WHERE tenant_id = sqlc.arg(tenant_id)
 -- name: UpsertAgentRun :one
 INSERT INTO agent_runs (
     id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer,
-    status, reference_items, created_at, updated_at
+    status, reference_items, llm_call_count, input_tokens, cached_tokens,
+    output_tokens, total_tokens, usage_complete, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(account_id), sqlc.arg(agent_id),
+    sqlc.arg(session_id), sqlc.arg(mode), sqlc.arg(prompt), sqlc.arg(answer),
+    sqlc.arg(status), sqlc.arg(reference_items)::jsonb, sqlc.arg(llm_call_count),
+    sqlc.arg(input_tokens), sqlc.arg(cached_tokens), sqlc.arg(output_tokens),
+    sqlc.arg(total_tokens), sqlc.arg(usage_complete), sqlc.arg(created_at), sqlc.arg(updated_at)
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -1416,6 +1535,12 @@ ON CONFLICT (id) DO UPDATE SET
     answer = EXCLUDED.answer,
     status = EXCLUDED.status,
     reference_items = EXCLUDED.reference_items,
+    llm_call_count = EXCLUDED.llm_call_count,
+    input_tokens = EXCLUDED.input_tokens,
+    cached_tokens = EXCLUDED.cached_tokens,
+    output_tokens = EXCLUDED.output_tokens,
+    total_tokens = EXCLUDED.total_tokens,
+    usage_complete = EXCLUDED.usage_complete,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
 RETURNING *;

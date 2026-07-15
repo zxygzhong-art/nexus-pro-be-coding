@@ -87,7 +87,7 @@ func (r *ADKAgentChatRuntime) RunAgentChat(ctx context.Context, req AgentChatRun
 		Description: "Nexus Pro HR/OA Team coordinator",
 		Model:       llm,
 		Mode:        llmagent.ModeChat,
-		Instruction: rootAgentInstruction(req.AgentRole, len(subAgents)),
+		Instruction: RootAgentInstruction(req.AgentRole, len(subAgents)),
 		Tools:       tools,
 		SubAgents:   subAgents,
 	})
@@ -115,7 +115,18 @@ func (r *ADKAgentChatRuntime) RunAgentChat(ctx context.Context, req AgentChatRun
 		if err != nil {
 			return err
 		}
-		if event == nil || event.Content == nil {
+		if event == nil {
+			continue
+		}
+		if event.UsageMetadata != nil && req.RecordUsage != nil {
+			req.RecordUsage(domain.AgentTokenUsage{
+				InputTokens:  int64(event.UsageMetadata.PromptTokenCount),
+				CachedTokens: int64(event.UsageMetadata.CachedContentTokenCount),
+				OutputTokens: int64(event.UsageMetadata.CandidatesTokenCount),
+				TotalTokens:  int64(event.UsageMetadata.TotalTokenCount),
+			})
+		}
+		if event.Content == nil {
 			continue
 		}
 		if err := emitADKEvent(ctx, event, agentLabels, emit); err != nil {
@@ -125,8 +136,8 @@ func (r *ADKAgentChatRuntime) RunAgentChat(ctx context.Context, req AgentChatRun
 	return nil
 }
 
-// rootAgentInstruction 讓主 Agent 只在需要時委派，並始終負責最終驗證與彙總。
-func rootAgentInstruction(role string, subAgentCount int) string {
+// RootAgentInstruction builds the user-facing instruction contract for the root agent.
+func RootAgentInstruction(role string, subAgentCount int) string {
 	role = strings.TrimSpace(role)
 	if role == "" {
 		role = "理解使用者目标，选择合适的能力完成任务，并验证最终答案。"

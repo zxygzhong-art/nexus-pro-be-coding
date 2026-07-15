@@ -46,8 +46,11 @@ type Store struct {
 	employeeImports         map[string]map[string]EmployeeImportSession
 	employmentContracts     map[string]map[string]EmploymentContract
 	attendancePolicies      map[string]AttendancePolicy
+	leaveTypeMappings       map[string]map[string]LeaveTypeExternalMapping
+	leaveTypeSyncIssues     map[string]map[string]LeaveTypeSyncIssue
 	leaveBalances           map[string]map[string]LeaveBalance
 	leaveRequests           map[string]map[string]LeaveRequest
+	leaveRequestAllocations map[string]map[string]LeaveRequestAllocation
 	attendanceWorksites     map[string]map[string]AttendanceWorksite
 	attendanceShifts        map[string]map[string]AttendanceShift
 	attendanceAssignments   map[string]map[string]AttendanceShiftAssignment
@@ -119,8 +122,11 @@ func NewStore() *Store {
 		employeeImports:         map[string]map[string]EmployeeImportSession{},
 		employmentContracts:     map[string]map[string]EmploymentContract{},
 		attendancePolicies:      map[string]AttendancePolicy{},
+		leaveTypeMappings:       map[string]map[string]LeaveTypeExternalMapping{},
+		leaveTypeSyncIssues:     map[string]map[string]LeaveTypeSyncIssue{},
 		leaveBalances:           map[string]map[string]LeaveBalance{},
 		leaveRequests:           map[string]map[string]LeaveRequest{},
+		leaveRequestAllocations: map[string]map[string]LeaveRequestAllocation{},
 		attendanceWorksites:     map[string]map[string]AttendanceWorksite{},
 		attendanceShifts:        map[string]map[string]AttendanceShift{},
 		attendanceAssignments:   map[string]map[string]AttendanceShiftAssignment{},
@@ -199,6 +205,7 @@ func (s *Store) ListTenants(_ context.Context) ([]Tenant, error) {
 func (s *Store) UpsertAccount(_ context.Context, v Account) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	v.PreferredLocale = domain.PreferredLocaleWithDefault(v.PreferredLocale)
 	existing, ok := getNested(s.accounts, v.TenantID, v.ID)
 	if ok {
 		if v.Version > 0 && existing.Version != v.Version {
@@ -210,6 +217,20 @@ func (s *Store) UpsertAccount(_ context.Context, v Account) error {
 	}
 	putNested(s.accounts, v.TenantID, v.ID, copyAccount(v))
 	return nil
+}
+
+// UpdateAccountPreferredLocale updates one self-service preference without rewriting unrelated account fields.
+func (s *Store) UpdateAccountPreferredLocale(_ context.Context, tenantID, id, preferredLocale string) (Account, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	account, ok := getNested(s.accounts, tenantID, id)
+	if !ok {
+		return Account{}, false, nil
+	}
+	account.PreferredLocale = preferredLocale
+	account.Version++
+	putNested(s.accounts, tenantID, id, copyAccount(account))
+	return copyAccount(account), true, nil
 }
 
 // GetAccount 從儲存層取得帳號。
@@ -1094,7 +1115,26 @@ func (s *Store) ListPositions(_ context.Context, tenantID string) ([]Position, e
 func (s *Store) UpsertEmployee(_ context.Context, v Employee) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if current, ok := getNested(s.employees, v.TenantID, v.ID); ok {
+		v.ShowInOrgChart = current.ShowInOrgChart
+	} else {
+		v.ShowInOrgChart = true
+	}
 	putNested(s.employees, v.TenantID, v.ID, copyEmployee(v))
+	return nil
+}
+
+// UpdateEmployeeOrgChartVisibility 更新員工在組織圖預覽中的可見性。
+func (s *Store) UpdateEmployeeOrgChartVisibility(_ context.Context, tenantID, id string, showInOrgChart bool, updatedAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	employee, ok := getNested(s.employees, tenantID, id)
+	if !ok {
+		return nil
+	}
+	employee.ShowInOrgChart = showInOrgChart
+	employee.UpdatedAt = updatedAt
+	putNested(s.employees, tenantID, id, employee)
 	return nil
 }
 
@@ -1568,6 +1608,9 @@ func sortEmploymentContracts(items []EmploymentContract) {
 func (s *Store) UpsertAttendancePolicy(_ context.Context, v AttendancePolicy) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if current, ok := s.attendancePolicies[v.TenantID]; ok && v.Version <= current.Version {
+		return domain.Conflict("attendance policy was modified concurrently")
+	}
 	s.attendancePolicies[v.TenantID] = copyAttendancePolicy(v)
 	return nil
 }
@@ -1583,11 +1626,132 @@ func (s *Store) GetAttendancePolicy(_ context.Context, tenantID string) (Attenda
 	return copyAttendancePolicy(v), true, nil
 }
 
+// GetLeaveTypeExternalMapping resolves the latest effective upstream alias.
+func (s *Store) GetLeaveTypeExternalMapping(_ context.Context, tenantID, source, externalCode string, asOf time.Time) (LeaveTypeExternalMapping, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	var selected LeaveTypeExternalMapping
+	found := false
+	for _, mapping := range s.leaveTypeMappings[tenantID] {
+		if !strings.EqualFold(mapping.Source, source) || !strings.EqualFold(mapping.ExternalCode, externalCode) {
+			continue
+		}
+		if mapping.EffectiveFrom != "" && mapping.EffectiveFrom > asOf.Format(time.DateOnly) {
+			continue
+		}
+		if mapping.EffectiveTo != "" && mapping.EffectiveTo <= asOf.Format(time.DateOnly) {
+			continue
+		}
+		if !found || mapping.EffectiveFrom > selected.EffectiveFrom || (mapping.EffectiveFrom == selected.EffectiveFrom && mapping.UpdatedAt.After(selected.UpdatedAt)) {
+			selected = mapping
+			found = true
+		}
+	}
+	return selected, found, nil
+}
+
+// ListLeaveTypeExternalMappings returns all mapping history for HR administration.
+func (s *Store) ListLeaveTypeExternalMappings(_ context.Context, tenantID string) ([]LeaveTypeExternalMapping, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]LeaveTypeExternalMapping, 0, len(s.leaveTypeMappings[tenantID]))
+	for _, mapping := range s.leaveTypeMappings[tenantID] {
+		out = append(out, mapping)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].Source != out[j].Source {
+			return out[i].Source < out[j].Source
+		}
+		if out[i].ExternalCode != out[j].ExternalCode {
+			return out[i].ExternalCode < out[j].ExternalCode
+		}
+		return out[i].EffectiveFrom > out[j].EffectiveFrom
+	})
+	return out, nil
+}
+
+// LockLeaveTypeExternalMappingKey is a no-op because memory transactions already serialize writers.
+func (s *Store) LockLeaveTypeExternalMappingKey(_ context.Context, _, _, _ string) error {
+	return nil
+}
+
+// UpsertLeaveTypeExternalMapping stores one effective upstream alias.
+func (s *Store) UpsertLeaveTypeExternalMapping(_ context.Context, mapping LeaveTypeExternalMapping) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.leaveTypeMappings, mapping.TenantID, mapping.ID, mapping)
+	return nil
+}
+
+// ExpireLeaveTypeExternalMapping ends one alias without removing its history.
+func (s *Store) ExpireLeaveTypeExternalMapping(_ context.Context, tenantID, id, effectiveTo string, updatedAt time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	mapping, ok := getNested(s.leaveTypeMappings, tenantID, id)
+	if !ok {
+		return false, nil
+	}
+	mapping.EffectiveTo = effectiveTo
+	mapping.UpdatedAt = updatedAt
+	putNested(s.leaveTypeMappings, tenantID, id, mapping)
+	return true, nil
+}
+
+// UpsertLeaveTypeSyncIssue records repeated unknown upstream codes as one actionable issue.
+func (s *Store) UpsertLeaveTypeSyncIssue(_ context.Context, issue LeaveTypeSyncIssue) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, existing := range s.leaveTypeSyncIssues[issue.TenantID] {
+		if strings.EqualFold(existing.Source, issue.Source) && strings.EqualFold(existing.ExternalCode, issue.ExternalCode) && existing.IssueCode == issue.IssueCode {
+			issue.ID = id
+			issue.FirstSeenAt = existing.FirstSeenAt
+			issue.Occurrences = existing.Occurrences + 1
+			break
+		}
+	}
+	issue.Status = "open"
+	issue.ResolvedAt = nil
+	putNested(s.leaveTypeSyncIssues, issue.TenantID, issue.ID, issue)
+	return nil
+}
+
+// ListOpenLeaveTypeSyncIssues returns unresolved HR mapping work.
+func (s *Store) ListOpenLeaveTypeSyncIssues(_ context.Context, tenantID string) ([]LeaveTypeSyncIssue, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]LeaveTypeSyncIssue, 0)
+	for _, issue := range s.leaveTypeSyncIssues[tenantID] {
+		if issue.Status == "open" {
+			out = append(out, issue)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].LastSeenAt.After(out[j].LastSeenAt) })
+	return out, nil
+}
+
+// ResolveLeaveTypeSyncIssues closes outstanding work after HR saves a mapping.
+func (s *Store) ResolveLeaveTypeSyncIssues(_ context.Context, tenantID, source, externalCode string, resolvedAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for id, issue := range s.leaveTypeSyncIssues[tenantID] {
+		if issue.Status == "open" && strings.EqualFold(issue.Source, source) && strings.EqualFold(issue.ExternalCode, externalCode) {
+			issue.Status = "resolved"
+			issue.ResolvedAt = &resolvedAt
+			issue.LastSeenAt = resolvedAt
+			putNested(s.leaveTypeSyncIssues, tenantID, id, issue)
+		}
+	}
+	return nil
+}
+
 // UpsertLeaveBalance 從儲存層處理 upsert 請假 balance。
 func (s *Store) UpsertLeaveBalance(_ context.Context, v LeaveBalance) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	v.LeaveType = strings.ToLower(strings.TrimSpace(v.LeaveType))
+	if strings.TrimSpace(v.LeaveTypeID) == "" {
+		v.LeaveTypeID = domain.StableLeaveTypeID(v.LeaveType)
+	}
 	v.RemainingHours = roundLeaveHours(v.RemainingHours)
 	v.GrantedHours = roundLeaveHours(v.GrantedHours)
 	v.UsedHours = roundLeaveHours(v.UsedHours)
@@ -1694,7 +1858,19 @@ func roundLeaveHours(value float64) float64 {
 func (s *Store) UpsertLeaveRequest(_ context.Context, v LeaveRequest) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if strings.TrimSpace(v.LeaveTypeID) == "" {
+		v.LeaveTypeID = domain.StableLeaveTypeID(v.LeaveType)
+	}
 	putNested(s.leaveRequests, v.TenantID, v.ID, copyLeaveRequest(v))
+	return nil
+}
+
+// UpsertLeaveRequestAllocation persists one request-to-balance reservation link.
+func (s *Store) UpsertLeaveRequestAllocation(_ context.Context, v LeaveRequestAllocation) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := v.LeaveRequestID + "|" + v.LeaveBalanceID
+	putNested(s.leaveRequestAllocations, v.TenantID, key, v)
 	return nil
 }
 
@@ -2963,6 +3139,290 @@ func (s *Store) ListAgentSessionsByAccount(_ context.Context, tenantID, accountI
 	}
 	sortAgentSessions(out)
 	return out, nil
+}
+
+// ListAgentUsageByAccount returns a filtered account usage page.
+func (s *Store) ListAgentUsageByAccount(_ context.Context, tenantID string, query domain.AgentAccountUsageQuery, page domain.PageRequest) ([]domain.AgentAccountUsage, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	all := s.agentUsageByAccountLocked(tenantID)
+	filtered := make([]domain.AgentAccountUsage, 0, len(all))
+	searchQuery := strings.ToLower(strings.TrimSpace(query.Query))
+	for _, item := range all {
+		if query.Status != "" && item.Status != query.Status {
+			continue
+		}
+		haystack := strings.ToLower(item.DisplayName + " " + item.Email + " " + item.AccountID)
+		if searchQuery != "" && !strings.Contains(haystack, searchQuery) {
+			continue
+		}
+		filtered = append(filtered, item)
+	}
+	sort.SliceStable(filtered, func(i, j int) bool {
+		return agentAccountUsageLess(filtered[i], filtered[j], page.Sort)
+	})
+	total := len(filtered)
+	start := (page.Page - 1) * page.PageSize
+	if start >= total {
+		return []domain.AgentAccountUsage{}, total, nil
+	}
+	end := start + page.PageSize
+	if end > total {
+		end = total
+	}
+	return filtered[start:end], total, nil
+}
+
+// GetAgentUsageByAccount returns one tenant account's aggregate usage.
+func (s *Store) GetAgentUsageByAccount(_ context.Context, tenantID, accountID string) (domain.AgentAccountUsage, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, item := range s.agentUsageByAccountLocked(tenantID) {
+		if item.AccountID == accountID {
+			return item, true, nil
+		}
+	}
+	return domain.AgentAccountUsage{}, false, nil
+}
+
+// GetAgentUsageSummary aggregates tenant-wide usage without applying list filters.
+func (s *Store) GetAgentUsageSummary(_ context.Context, tenantID string) (domain.AgentUsageSummary, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := s.agentUsageByAccountLocked(tenantID)
+	summary := domain.AgentUsageSummary{UserCount: len(items)}
+	for _, item := range items {
+		if item.SessionCount > 0 || item.MessageCount > 0 {
+			summary.UsersWithUsage++
+		}
+		summary.SessionCount += item.SessionCount
+		summary.MessageCount += item.MessageCount
+		summary.LLMCallCount += item.LLMCallCount
+		summary.InputTokens += item.InputTokens
+		summary.CachedTokens += item.CachedTokens
+		summary.OutputTokens += item.OutputTokens
+		summary.TotalTokens += item.TotalTokens
+		summary.ActualTokens += item.ActualTokens
+	}
+	return summary, nil
+}
+
+// agentUsageByAccountLocked builds account aggregates while the caller holds a read lock.
+func (s *Store) agentUsageByAccountLocked(tenantID string) []domain.AgentAccountUsage {
+
+	out := make([]domain.AgentAccountUsage, 0, len(s.accounts[tenantID]))
+	for _, account := range s.accounts[tenantID] {
+		item := domain.AgentAccountUsage{
+			AccountID:   account.ID,
+			DisplayName: account.DisplayName,
+			Email:       account.Email,
+			Status:      account.Status,
+		}
+		sessionIDs := make(map[string]struct{})
+		for _, session := range s.agentSessions[tenantID] {
+			if session.AccountID != account.ID {
+				continue
+			}
+			sessionIDs[session.ID] = struct{}{}
+			item.SessionCount++
+			activityAt := session.UpdatedAt
+			if session.LastMessageAt != nil && session.LastMessageAt.After(activityAt) {
+				activityAt = *session.LastMessageAt
+			}
+			if item.LastActiveAt == nil || activityAt.After(*item.LastActiveAt) {
+				activityCopy := activityAt
+				item.LastActiveAt = &activityCopy
+			}
+		}
+		for _, message := range s.agentSessionMessages[tenantID] {
+			if _, ok := sessionIDs[message.SessionID]; !ok {
+				continue
+			}
+			item.MessageCount++
+			if item.LastActiveAt == nil || message.CreatedAt.After(*item.LastActiveAt) {
+				activityCopy := message.CreatedAt
+				item.LastActiveAt = &activityCopy
+			}
+		}
+		for _, run := range s.agentRuns[tenantID] {
+			if run.AccountID != account.ID {
+				continue
+			}
+			item.LLMCallCount += run.LLMCallCount
+			item.InputTokens += run.InputTokens
+			item.CachedTokens += run.CachedTokens
+			item.OutputTokens += run.OutputTokens
+			item.TotalTokens += run.TotalTokens
+		}
+		item.ActualTokens = item.TotalTokens - item.CachedTokens
+		if item.ActualTokens < 0 {
+			item.ActualTokens = 0
+		}
+		out = append(out, item)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].SessionCount != out[j].SessionCount {
+			return out[i].SessionCount > out[j].SessionCount
+		}
+		if out[i].MessageCount != out[j].MessageCount {
+			return out[i].MessageCount > out[j].MessageCount
+		}
+		leftName := strings.ToLower(out[i].DisplayName)
+		rightName := strings.ToLower(out[j].DisplayName)
+		if leftName != rightName {
+			return leftName < rightName
+		}
+		return out[i].AccountID < out[j].AccountID
+	})
+	return out
+}
+
+// agentAccountUsageLess applies the API's supported server-side ordering with stable name ties.
+func agentAccountUsageLess(left, right domain.AgentAccountUsage, order string) bool {
+	switch order {
+	case "session_count_asc":
+		if left.SessionCount != right.SessionCount {
+			return left.SessionCount < right.SessionCount
+		}
+	case "session_count_desc", "usage_desc", "":
+		if left.SessionCount != right.SessionCount {
+			return left.SessionCount > right.SessionCount
+		}
+		if order == "usage_desc" || order == "" {
+			if left.MessageCount != right.MessageCount {
+				return left.MessageCount > right.MessageCount
+			}
+		}
+	case "message_count_asc":
+		if left.MessageCount != right.MessageCount {
+			return left.MessageCount < right.MessageCount
+		}
+	case "message_count_desc":
+		if left.MessageCount != right.MessageCount {
+			return left.MessageCount > right.MessageCount
+		}
+	case "total_tokens_asc":
+		if left.TotalTokens != right.TotalTokens {
+			return left.TotalTokens < right.TotalTokens
+		}
+	case "total_tokens_desc":
+		if left.TotalTokens != right.TotalTokens {
+			return left.TotalTokens > right.TotalTokens
+		}
+	case "cached_tokens_asc":
+		if left.CachedTokens != right.CachedTokens {
+			return left.CachedTokens < right.CachedTokens
+		}
+	case "cached_tokens_desc":
+		if left.CachedTokens != right.CachedTokens {
+			return left.CachedTokens > right.CachedTokens
+		}
+	case "actual_tokens_asc":
+		if left.ActualTokens != right.ActualTokens {
+			return left.ActualTokens < right.ActualTokens
+		}
+	case "actual_tokens_desc":
+		if left.ActualTokens != right.ActualTokens {
+			return left.ActualTokens > right.ActualTokens
+		}
+	case "last_active_at_asc":
+		if left.LastActiveAt == nil {
+			return false
+		}
+		if right.LastActiveAt == nil {
+			return true
+		}
+		if !left.LastActiveAt.Equal(*right.LastActiveAt) {
+			return left.LastActiveAt.Before(*right.LastActiveAt)
+		}
+	case "last_active_at_desc":
+		if left.LastActiveAt == nil {
+			return false
+		}
+		if right.LastActiveAt == nil {
+			return true
+		}
+		if !left.LastActiveAt.Equal(*right.LastActiveAt) {
+			return left.LastActiveAt.After(*right.LastActiveAt)
+		}
+	}
+	leftName, rightName := strings.ToLower(left.DisplayName), strings.ToLower(right.DisplayName)
+	if leftName != rightName {
+		return leftName < rightName
+	}
+	return left.AccountID < right.AccountID
+}
+
+// ListAgentUsageBySession returns paginated usage for one account's sessions.
+func (s *Store) ListAgentUsageBySession(_ context.Context, tenantID, accountID string, page domain.PageRequest) ([]domain.AgentSessionUsage, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	out := make([]domain.AgentSessionUsage, 0, len(s.agentSessions[tenantID]))
+	for _, session := range s.agentSessions[tenantID] {
+		if session.AccountID != accountID {
+			continue
+		}
+		lastActiveAt := session.UpdatedAt
+		if session.LastMessageAt != nil && session.LastMessageAt.After(lastActiveAt) {
+			lastActiveAt = *session.LastMessageAt
+		}
+		item := domain.AgentSessionUsage{
+			SessionID:    session.ID,
+			AccountID:    session.AccountID,
+			Title:        session.Title,
+			Status:       session.Status,
+			LastActiveAt: &lastActiveAt,
+		}
+		for _, message := range s.agentSessionMessages[tenantID] {
+			if message.SessionID != session.ID {
+				continue
+			}
+			item.MessageCount++
+			if message.CreatedAt.After(*item.LastActiveAt) {
+				activityCopy := message.CreatedAt
+				item.LastActiveAt = &activityCopy
+			}
+		}
+		for _, run := range s.agentRuns[tenantID] {
+			if run.SessionID != session.ID {
+				continue
+			}
+			item.LLMCallCount += run.LLMCallCount
+			item.InputTokens += run.InputTokens
+			item.CachedTokens += run.CachedTokens
+			item.OutputTokens += run.OutputTokens
+			item.TotalTokens += run.TotalTokens
+			if run.UpdatedAt.After(*item.LastActiveAt) {
+				activityCopy := run.UpdatedAt
+				item.LastActiveAt = &activityCopy
+			}
+		}
+		item.ActualTokens = item.TotalTokens - item.CachedTokens
+		if item.ActualTokens < 0 {
+			item.ActualTokens = 0
+		}
+		out = append(out, item)
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].LastActiveAt != nil && out[j].LastActiveAt != nil && !out[i].LastActiveAt.Equal(*out[j].LastActiveAt) {
+			return out[i].LastActiveAt.After(*out[j].LastActiveAt)
+		}
+		return out[i].SessionID > out[j].SessionID
+	})
+	total := len(out)
+	start := (page.Page - 1) * page.PageSize
+	if start > total {
+		start = total
+	}
+	end := start + page.PageSize
+	if end > total {
+		end = total
+	}
+	pageItems := make([]domain.AgentSessionUsage, end-start)
+	copy(pageItems, out[start:end])
+	return pageItems, total, nil
 }
 
 // DeleteAgentSession 從儲存層刪除 agent 會話。

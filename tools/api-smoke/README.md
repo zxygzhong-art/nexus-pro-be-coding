@@ -31,4 +31,15 @@ Each Keycloak user must emit access-token claims matching rows in the backend `u
 | employee | demo | acct-employee |
 | audit | demo | acct-audit |
 
-The script verifies those claims before calling the API. It then covers every OpenAPI route plus role expectations for HR, IAM, audit, attendance, and agent endpoints.
+The script verifies those claims before calling the API. Coverage is reported in separate categories:
+
+- **Behavioral coverage** contains hand-written success, validation, persistence, and response-shape checks.
+- **Generated auth-boundary coverage** sends no credentials or request body. It verifies that every remaining documented `/v1` route is registered and rejects unauthenticated requests before a handler can mutate state.
+- **Combined coverage** is the union of those two categories; it does not claim that every route has full business-behavior coverage.
+
+Validate the OpenAPI inventory and generated plan without PostgreSQL, Keycloak, or a running API:
+
+```bash
+python3 tools/api-smoke/full_api_smoke.py --check-coverage
+PYTHONDONTWRITEBYTECODE=1 python3 -m unittest discover -s tests/unit/tools/api-smoke -p 'test_*.py'
+```

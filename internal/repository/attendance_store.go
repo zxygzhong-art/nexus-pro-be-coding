@@ -11,6 +11,14 @@ import (
 type AttendanceStore interface {
 	UpsertAttendancePolicy(context.Context, domain.AttendancePolicy) error
 	GetAttendancePolicy(ctx context.Context, tenantID string) (domain.AttendancePolicy, bool, error)
+	GetLeaveTypeExternalMapping(ctx context.Context, tenantID, source, externalCode string, asOf time.Time) (domain.LeaveTypeExternalMapping, bool, error)
+	ListLeaveTypeExternalMappings(ctx context.Context, tenantID string) ([]domain.LeaveTypeExternalMapping, error)
+	LockLeaveTypeExternalMappingKey(ctx context.Context, tenantID, source, externalCode string) error
+	UpsertLeaveTypeExternalMapping(context.Context, domain.LeaveTypeExternalMapping) error
+	ExpireLeaveTypeExternalMapping(ctx context.Context, tenantID, id, effectiveTo string, updatedAt time.Time) (bool, error)
+	UpsertLeaveTypeSyncIssue(context.Context, domain.LeaveTypeSyncIssue) error
+	ListOpenLeaveTypeSyncIssues(ctx context.Context, tenantID string) ([]domain.LeaveTypeSyncIssue, error)
+	ResolveLeaveTypeSyncIssues(ctx context.Context, tenantID, source, externalCode string, resolvedAt time.Time) error
 
 	UpsertLeaveBalance(context.Context, domain.LeaveBalance) error
 	GetLeaveBalance(ctx context.Context, tenantID, id string) (domain.LeaveBalance, bool, error)
@@ -20,6 +28,7 @@ type AttendanceStore interface {
 	ReleaseLeaveBalanceByID(ctx context.Context, tenantID, balanceID string, hours float64, updatedAt time.Time) (domain.LeaveBalance, bool, error)
 
 	UpsertLeaveRequest(context.Context, domain.LeaveRequest) error
+	UpsertLeaveRequestAllocation(context.Context, domain.LeaveRequestAllocation) error
 	GetLeaveRequest(ctx context.Context, tenantID, id string) (domain.LeaveRequest, bool, error)
 	GetLeaveRequestByFormInstanceID(ctx context.Context, tenantID, formInstanceID string) (domain.LeaveRequest, bool, error)
 	ListLeaveRequests(ctx context.Context, tenantID string) ([]domain.LeaveRequest, error)

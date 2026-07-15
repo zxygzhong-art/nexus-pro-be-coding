@@ -264,7 +264,7 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	}
 	tokenResolvers := make([]platformauth.TokenResolver, 0, 2)
 
-	identityProvisioner, keycloakAdminReadiness, keycloakAdminDependency, err := configuredKeycloakProvisioner(cfg, authHTTPClient, logger)
+	identityProvisioner, identityPasswordChanger, keycloakAdminReadiness, keycloakAdminDependency, err := configuredKeycloakAdminClients(cfg, authHTTPClient, logger)
 	if err != nil {
 		logStartupFailure(logger, "keycloak_admin", err)
 		shutdownStartedModules(shutdowns, logger)
@@ -273,6 +273,11 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	report.Dependencies = append(report.Dependencies, keycloakAdminDependency)
 	if identityProvisioner != nil {
 		serviceOptions.IdentityProvisioner = identityProvisioner
+	}
+	if identityPasswordChanger != nil {
+		serviceOptions.IdentityPasswordChanger = identityPasswordChanger
+	}
+	if identityProvisioner != nil || identityPasswordChanger != nil {
 		readinessChecks["keycloak_admin"] = keycloakAdminReadiness
 	}
 
@@ -320,7 +325,7 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		var ehrmsAttendanceDependency startup.Dependency
 		ehrmsAttendanceScheduler, ehrmsAttendanceOptions, ehrmsAttendanceDependency = configuredEHRMSAttendanceSyncScheduler(cfg, app.Attendance(), ehrmsClient != nil, logger)
 		report.Dependencies = append(report.Dependencies, ehrmsAttendanceDependency)
-	} else if cfg.EHRMSAttendanceSyncEnabled {
+	} else if cfg.EHRMSSyncEnabled {
 		report.Dependencies = append(report.Dependencies, startup.Dependency{
 			Name:   "eHRMS Attendance Scheduler",
 			Status: "configured",
@@ -331,7 +336,7 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		report.Dependencies = append(report.Dependencies, startup.Dependency{
 			Name:   "eHRMS Attendance Scheduler",
 			Status: "skipped",
-			Target: "EHRMS_ATTENDANCE_SYNC_ENABLED=false",
+			Target: "EHRMS_SYNC_ENABLED=false",
 			Detail: "periodic attendance sync disabled",
 		})
 	}
@@ -762,14 +767,15 @@ func configureKeycloakModule(cfg config.Config, client *http.Client, logger *slo
 	}
 }
 
-// configuredKeycloakProvisioner 處理 configured Keycloak provisioner。
-func configuredKeycloakProvisioner(cfg config.Config, client *http.Client, logger *slog.Logger) (service.IdentityProvisioner, v1api.ReadinessCheck, startup.Dependency, error) {
-	if !cfg.KeycloakProvisionUsers {
-		return nil, nil, startup.Dependency{
+// configuredKeycloakAdminClients enables provisioning and self-service password updates from one least-privilege client.
+func configuredKeycloakAdminClients(cfg config.Config, client *http.Client, logger *slog.Logger) (service.IdentityProvisioner, service.IdentityPasswordChanger, v1api.ReadinessCheck, startup.Dependency, error) {
+	adminConfigured := strings.TrimSpace(cfg.KeycloakAdminClientID) != "" || strings.TrimSpace(cfg.KeycloakAdminClientSecret) != ""
+	if !cfg.KeycloakProvisionUsers && !adminConfigured {
+		return nil, nil, nil, startup.Dependency{
 			Name:   "Keycloak Admin",
 			Status: "skipped",
-			Target: "KEYCLOAK_PROVISION_USERS=false",
-			Detail: "user provisioning disabled",
+			Target: "KEYCLOAK_ADMIN_CLIENT_* not set",
+			Detail: "user provisioning and inline password change disabled",
 		}, nil
 	}
 	missing := []string{}
@@ -782,31 +788,39 @@ func configuredKeycloakProvisioner(cfg config.Config, client *http.Client, logge
 	if strings.TrimSpace(cfg.KeycloakAdminClientSecret) == "" {
 		missing = append(missing, "KEYCLOAK_ADMIN_CLIENT_SECRET")
 	}
-	if len(missing) > 0 {
-		err := errors.New("keycloak admin provisioning is enabled but incomplete")
-		dependency := startup.Dependency{Name: "Keycloak Admin", Status: "incomplete", Target: "disabled", Detail: startup.Missing(missing...)}
-		logger.Error("keycloak admin provisioning failed", "missing", missing, "error", err)
-		return nil, nil, dependency, err
+	if strings.TrimSpace(cfg.KeycloakClientID) == "" {
+		missing = append(missing, "KEYCLOAK_CLIENT_ID")
 	}
-	provisioner, err := platformauth.NewKeycloakAdminClient(platformauth.KeycloakAdminConfig{
+	if len(missing) > 0 {
+		err := errors.New("keycloak admin integration is enabled but incomplete")
+		dependency := startup.Dependency{Name: "Keycloak Admin", Status: "incomplete", Target: "disabled", Detail: startup.Missing(missing...)}
+		logger.Error("keycloak admin integration failed", "missing", missing, "error", err)
+		return nil, nil, nil, dependency, err
+	}
+	adminClient, err := platformauth.NewKeycloakAdminClient(platformauth.KeycloakAdminConfig{
 		IssuerURL:         cfg.KeycloakIssuerURL,
 		ClientID:          cfg.KeycloakAdminClientID,
 		ClientSecret:      cfg.KeycloakAdminClientSecret,
+		LoginClientID:     cfg.KeycloakClientID,
 		SendInviteEmail:   cfg.KeycloakSendInviteEmail,
 		InviteClientID:    cfg.KeycloakInviteClientID,
 		InviteRedirectURL: cfg.KeycloakInviteRedirectURL,
 	}, client)
 	if err != nil {
 		dependency := startup.Dependency{Name: "Keycloak Admin", Status: "invalid", Target: startup.SafeURL(cfg.KeycloakIssuerURL), Detail: err.Error()}
-		logger.Error("keycloak admin provisioning failed", "issuer", cfg.KeycloakIssuerURL, "error", err)
-		return nil, nil, dependency, err
+		logger.Error("keycloak admin integration failed", "issuer", cfg.KeycloakIssuerURL, "error", err)
+		return nil, nil, nil, dependency, err
 	}
-	logger.Info("keycloak admin provisioning enabled", "issuer", cfg.KeycloakIssuerURL, "client_id", cfg.KeycloakAdminClientID, "send_invite_email", cfg.KeycloakSendInviteEmail)
-	return provisioner, provisioner.Ping, startup.Dependency{
+	var provisioner service.IdentityProvisioner
+	if cfg.KeycloakProvisionUsers {
+		provisioner = adminClient
+	}
+	logger.Info("keycloak admin integration enabled", "issuer", cfg.KeycloakIssuerURL, "client_id", cfg.KeycloakAdminClientID, "user_provisioning", cfg.KeycloakProvisionUsers, "inline_password_change", true, "send_invite_email", cfg.KeycloakSendInviteEmail)
+	return provisioner, adminClient, adminClient.Ping, startup.Dependency{
 		Name:   "Keycloak Admin",
 		Status: "configured",
 		Target: startup.SafeURL(cfg.KeycloakIssuerURL),
-		Detail: "client=" + cfg.KeycloakAdminClientID,
+		Detail: "client=" + cfg.KeycloakAdminClientID + "; password_change=enabled",
 	}, nil
 }
 
@@ -855,9 +869,9 @@ func configuredEHRMSPipelineScheduler(cfg config.Config, employees jobs.EHRMSEmp
 		EmployeeMode:         cfg.EHRMSSyncMode,
 		EmployeeTenantID:     cfg.EHRMSSyncTenantID,
 		EmployeeAccountID:    cfg.EHRMSSyncAccountID,
-		AttendanceEnabled:    cfg.EHRMSAttendanceSyncEnabled,
+		AttendanceEnabled:    cfg.EHRMSSyncEnabled,
 		AttendanceInterval:   cfg.EHRMSAttendanceSyncInterval,
-		AttendanceRunOnStart: cfg.EHRMSAttendanceSyncRunOnStart,
+		AttendanceRunOnStart: cfg.EHRMSSyncRunOnStart,
 		AttendanceMode:       cfg.EHRMSAttendanceSyncMode,
 		AttendanceSince:      cfg.EHRMSAttendanceSyncSince,
 		AttendanceTenant:     cfg.EHRMSAttendanceSyncTenantID,
@@ -876,7 +890,7 @@ func configuredEHRMSPipelineScheduler(cfg config.Config, employees jobs.EHRMSEmp
 		mode = "upsert"
 	}
 	detail := "employee_interval=" + cfg.EHRMSSyncInterval.String() + " mode=" + mode + " steps=departments,positions,employees"
-	if cfg.EHRMSAttendanceSyncEnabled {
+	if cfg.EHRMSSyncEnabled {
 		detail += " attendance_interval=" + cfg.EHRMSAttendanceSyncInterval.String() + " attendance_after_employee=true"
 		if since := strings.TrimSpace(cfg.EHRMSAttendanceSyncSince); since != "" {
 			detail += " attendance_since=" + since
@@ -902,10 +916,10 @@ func configuredEHRMSAttendanceSyncScheduler(cfg config.Config, svc jobs.EHRMSAtt
 		AccountID:        cfg.EHRMSAttendanceSyncAccountID,
 		DefaultTenantID:  cfg.EHRMSSyncTenantID,
 		DefaultAccountID: cfg.EHRMSSyncAccountID,
-		RunOnStart:       cfg.EHRMSAttendanceSyncRunOnStart,
+		RunOnStart:       cfg.EHRMSSyncRunOnStart,
 	}
-	if !cfg.EHRMSAttendanceSyncEnabled {
-		return nil, opts, startup.Dependency{Name: "eHRMS Attendance Scheduler", Status: "skipped", Target: "EHRMS_ATTENDANCE_SYNC_ENABLED=false", Detail: "periodic attendance sync disabled"}
+	if !cfg.EHRMSSyncEnabled {
+		return nil, opts, startup.Dependency{Name: "eHRMS Attendance Scheduler", Status: "skipped", Target: "EHRMS_SYNC_ENABLED=false", Detail: "periodic attendance sync disabled"}
 	}
 	if !ehrmsConfigured {
 		return nil, opts, startup.Dependency{Name: "eHRMS Attendance Scheduler", Status: "incomplete", Target: "disabled", Detail: "eHRMS upstream is not configured"}

@@ -640,6 +640,62 @@ func (q *Queries) DeleteUserGroup(ctx context.Context, arg DeleteUserGroupParams
 	return i, err
 }
 
+const ensureLeaveTypeCatalog = `-- name: EnsureLeaveTypeCatalog :exec
+INSERT INTO leave_types (
+    id, tenant_id, code, name, category, source_of_truth, status, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $3,
+    'company', 'local_policy', 'active', $4, $5
+)
+ON CONFLICT (tenant_id, id) DO NOTHING
+`
+
+type EnsureLeaveTypeCatalogParams struct {
+	ID        string             `json:"id"`
+	TenantID  string             `json:"tenant_id"`
+	Code      string             `json:"code"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) EnsureLeaveTypeCatalog(ctx context.Context, arg EnsureLeaveTypeCatalogParams) error {
+	_, err := q.db.Exec(ctx, ensureLeaveTypeCatalog,
+		arg.ID,
+		arg.TenantID,
+		arg.Code,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const expireLeaveTypeExternalMapping = `-- name: ExpireLeaveTypeExternalMapping :execrows
+UPDATE leave_type_external_mappings
+SET effective_to = GREATEST(coalesce(effective_from, $1::date), $1::date),
+    updated_at = $2
+WHERE tenant_id = $3 AND id = $4
+`
+
+type ExpireLeaveTypeExternalMappingParams struct {
+	EffectiveTo pgtype.Date        `json:"effective_to"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+	TenantID    string             `json:"tenant_id"`
+	ID          string             `json:"id"`
+}
+
+func (q *Queries) ExpireLeaveTypeExternalMapping(ctx context.Context, arg ExpireLeaveTypeExternalMappingParams) (int64, error) {
+	result, err := q.db.Exec(ctx, expireLeaveTypeExternalMapping,
+		arg.EffectiveTo,
+		arg.UpdatedAt,
+		arg.TenantID,
+		arg.ID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
+}
+
 const findEffectiveAttendanceShiftAssignment = `-- name: FindEffectiveAttendanceShiftAssignment :one
 SELECT id, tenant_id, employee_id, shift_id, worksite_id, effective_from, effective_to, status, created_at, updated_at FROM attendance_shift_assignments
 WHERE tenant_id = $1
@@ -676,7 +732,7 @@ func (q *Queries) FindEffectiveAttendanceShiftAssignment(ctx context.Context, ar
 }
 
 const getAccount = `-- name: GetAccount :one
-SELECT id, tenant_id, display_name, email, employee_id, status, user_group_ids, direct_permission_set_ids, active_assumable_role_id, version, created_at FROM accounts
+SELECT id, tenant_id, display_name, email, employee_id, status, user_group_ids, direct_permission_set_ids, active_assumable_role_id, preferred_locale, version, created_at FROM accounts
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -698,6 +754,7 @@ func (q *Queries) GetAccount(ctx context.Context, arg GetAccountParams) (Account
 		&i.UserGroupIds,
 		&i.DirectPermissionSetIds,
 		&i.ActiveAssumableRoleID,
+		&i.PreferredLocale,
 		&i.Version,
 		&i.CreatedAt,
 	)
@@ -1092,7 +1149,7 @@ func (q *Queries) GetEarliestAcceptedAttendanceClockIn(ctx context.Context, arg 
 }
 
 const getEmployee = `-- name: GetEmployee :one
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, show_in_org_chart, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -1120,6 +1177,7 @@ func (q *Queries) GetEmployee(ctx context.Context, arg GetEmployeeParams) (Emplo
 		&i.Category,
 		&i.Status,
 		&i.EmploymentStatus,
+		&i.ShowInOrgChart,
 		&i.HireDate,
 		&i.ResignDate,
 		&i.BasicInfo,
@@ -1135,7 +1193,7 @@ func (q *Queries) GetEmployee(ctx context.Context, arg GetEmployeeParams) (Emplo
 }
 
 const getEmployeeByAccountID = `-- name: GetEmployeeByAccountID :one
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, show_in_org_chart, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1 AND account_id = $2 AND account_id <> ''
 `
 
@@ -1163,6 +1221,7 @@ func (q *Queries) GetEmployeeByAccountID(ctx context.Context, arg GetEmployeeByA
 		&i.Category,
 		&i.Status,
 		&i.EmploymentStatus,
+		&i.ShowInOrgChart,
 		&i.HireDate,
 		&i.ResignDate,
 		&i.BasicInfo,
@@ -1178,7 +1237,7 @@ func (q *Queries) GetEmployeeByAccountID(ctx context.Context, arg GetEmployeeByA
 }
 
 const getEmployeeByBasicInfoField = `-- name: GetEmployeeByBasicInfoField :one
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, show_in_org_chart, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1
   AND lower(coalesce(basic_info ->> $2::text, '')) = lower($3)
   AND coalesce(basic_info ->> $2::text, '') <> ''
@@ -1209,6 +1268,7 @@ func (q *Queries) GetEmployeeByBasicInfoField(ctx context.Context, arg GetEmploy
 		&i.Category,
 		&i.Status,
 		&i.EmploymentStatus,
+		&i.ShowInOrgChart,
 		&i.HireDate,
 		&i.ResignDate,
 		&i.BasicInfo,
@@ -1224,7 +1284,7 @@ func (q *Queries) GetEmployeeByBasicInfoField(ctx context.Context, arg GetEmploy
 }
 
 const getEmployeeByCompanyEmail = `-- name: GetEmployeeByCompanyEmail :one
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, show_in_org_chart, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1 AND lower(company_email) = lower($2) AND company_email <> ''
 `
 
@@ -1252,6 +1312,7 @@ func (q *Queries) GetEmployeeByCompanyEmail(ctx context.Context, arg GetEmployee
 		&i.Category,
 		&i.Status,
 		&i.EmploymentStatus,
+		&i.ShowInOrgChart,
 		&i.HireDate,
 		&i.ResignDate,
 		&i.BasicInfo,
@@ -1267,7 +1328,7 @@ func (q *Queries) GetEmployeeByCompanyEmail(ctx context.Context, arg GetEmployee
 }
 
 const getEmployeeByEmployeeNo = `-- name: GetEmployeeByEmployeeNo :one
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, show_in_org_chart, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1 AND employee_no = $2 AND employee_no <> ''
 `
 
@@ -1295,6 +1356,7 @@ func (q *Queries) GetEmployeeByEmployeeNo(ctx context.Context, arg GetEmployeeBy
 		&i.Category,
 		&i.Status,
 		&i.EmploymentStatus,
+		&i.ShowInOrgChart,
 		&i.HireDate,
 		&i.ResignDate,
 		&i.BasicInfo,
@@ -1310,7 +1372,7 @@ func (q *Queries) GetEmployeeByEmployeeNo(ctx context.Context, arg GetEmployeeBy
 }
 
 const getEmployeeByPersonalEmail = `-- name: GetEmployeeByPersonalEmail :one
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, show_in_org_chart, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1 AND lower(personal_email) = lower($2) AND personal_email <> ''
 `
 
@@ -1338,6 +1400,7 @@ func (q *Queries) GetEmployeeByPersonalEmail(ctx context.Context, arg GetEmploye
 		&i.Category,
 		&i.Status,
 		&i.EmploymentStatus,
+		&i.ShowInOrgChart,
 		&i.HireDate,
 		&i.ResignDate,
 		&i.BasicInfo,
@@ -1738,7 +1801,7 @@ func (q *Queries) GetLatestAcceptedAttendanceClockRecord(ctx context.Context, ar
 }
 
 const getLeaveBalance = `-- name: GetLeaveBalance :one
-SELECT id, tenant_id, employee_id, leave_type, remaining_hours, period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio, updated_at FROM leave_balances
+SELECT id, tenant_id, employee_id, leave_type, leave_type_id, remaining_hours, period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio, updated_at FROM leave_balances
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -1755,6 +1818,7 @@ func (q *Queries) GetLeaveBalance(ctx context.Context, arg GetLeaveBalanceParams
 		&i.TenantID,
 		&i.EmployeeID,
 		&i.LeaveType,
+		&i.LeaveTypeID,
 		&i.RemainingHours,
 		&i.PeriodStart,
 		&i.PeriodEnd,
@@ -1769,7 +1833,7 @@ func (q *Queries) GetLeaveBalance(ctx context.Context, arg GetLeaveBalanceParams
 }
 
 const getLeaveRequest = `-- name: GetLeaveRequest :one
-SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at FROM leave_requests
+SELECT id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at FROM leave_requests
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -1786,6 +1850,10 @@ func (q *Queries) GetLeaveRequest(ctx context.Context, arg GetLeaveRequestParams
 		&i.TenantID,
 		&i.EmployeeID,
 		&i.LeaveType,
+		&i.LeaveTypeID,
+		&i.PolicyVersion,
+		&i.RuleSnapshot,
+		&i.EvaluationSnapshot,
 		&i.StartAt,
 		&i.EndAt,
 		&i.Hours,
@@ -1799,7 +1867,7 @@ func (q *Queries) GetLeaveRequest(ctx context.Context, arg GetLeaveRequestParams
 }
 
 const getLeaveRequestByFormInstanceID = `-- name: GetLeaveRequestByFormInstanceID :one
-SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at FROM leave_requests
+SELECT id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at FROM leave_requests
 WHERE tenant_id = $1 AND form_instance_id = $2
 LIMIT 1
 `
@@ -1817,6 +1885,10 @@ func (q *Queries) GetLeaveRequestByFormInstanceID(ctx context.Context, arg GetLe
 		&i.TenantID,
 		&i.EmployeeID,
 		&i.LeaveType,
+		&i.LeaveTypeID,
+		&i.PolicyVersion,
+		&i.RuleSnapshot,
+		&i.EvaluationSnapshot,
 		&i.StartAt,
 		&i.EndAt,
 		&i.Hours,
@@ -1825,6 +1897,63 @@ func (q *Queries) GetLeaveRequestByFormInstanceID(ctx context.Context, arg GetLe
 		&i.FormInstanceID,
 		&i.LeaveBalanceID,
 		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const getLeaveTypeExternalMapping = `-- name: GetLeaveTypeExternalMapping :one
+SELECT mapping.id, mapping.tenant_id, mapping.source, mapping.external_code, mapping.leave_type_id, mapping.effective_from, mapping.effective_to, mapping.created_at, mapping.updated_at, leave_type.code AS leave_type_code
+FROM leave_type_external_mappings mapping
+JOIN leave_types leave_type
+  ON leave_type.tenant_id = mapping.tenant_id AND leave_type.id = mapping.leave_type_id
+WHERE mapping.tenant_id = $1
+  AND lower(mapping.source) = lower($2::text)
+  AND lower(mapping.external_code) = lower($3::text)
+  AND (mapping.effective_from IS NULL OR mapping.effective_from <= $4::date)
+  AND (mapping.effective_to IS NULL OR mapping.effective_to > $4::date)
+ORDER BY mapping.effective_from DESC NULLS LAST, mapping.updated_at DESC
+LIMIT 1
+`
+
+type GetLeaveTypeExternalMappingParams struct {
+	TenantID     string      `json:"tenant_id"`
+	Source       string      `json:"source"`
+	ExternalCode string      `json:"external_code"`
+	AsOf         pgtype.Date `json:"as_of"`
+}
+
+type GetLeaveTypeExternalMappingRow struct {
+	ID            string             `json:"id"`
+	TenantID      string             `json:"tenant_id"`
+	Source        string             `json:"source"`
+	ExternalCode  string             `json:"external_code"`
+	LeaveTypeID   string             `json:"leave_type_id"`
+	EffectiveFrom pgtype.Date        `json:"effective_from"`
+	EffectiveTo   pgtype.Date        `json:"effective_to"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	LeaveTypeCode string             `json:"leave_type_code"`
+}
+
+func (q *Queries) GetLeaveTypeExternalMapping(ctx context.Context, arg GetLeaveTypeExternalMappingParams) (GetLeaveTypeExternalMappingRow, error) {
+	row := q.db.QueryRow(ctx, getLeaveTypeExternalMapping,
+		arg.TenantID,
+		arg.Source,
+		arg.ExternalCode,
+		arg.AsOf,
+	)
+	var i GetLeaveTypeExternalMappingRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Source,
+		&i.ExternalCode,
+		&i.LeaveTypeID,
+		&i.EffectiveFrom,
+		&i.EffectiveTo,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LeaveTypeCode,
 	)
 	return i, err
 }
@@ -2253,7 +2382,7 @@ func (q *Queries) InsertWorkflowAction(ctx context.Context, arg InsertWorkflowAc
 }
 
 const listAccounts = `-- name: ListAccounts :many
-SELECT id, tenant_id, display_name, email, employee_id, status, user_group_ids, direct_permission_set_ids, active_assumable_role_id, version, created_at FROM accounts
+SELECT id, tenant_id, display_name, email, employee_id, status, user_group_ids, direct_permission_set_ids, active_assumable_role_id, preferred_locale, version, created_at FROM accounts
 WHERE tenant_id = $1
 ORDER BY created_at ASC
 `
@@ -2277,6 +2406,7 @@ func (q *Queries) ListAccounts(ctx context.Context, tenantID string) ([]Account,
 			&i.UserGroupIds,
 			&i.DirectPermissionSetIds,
 			&i.ActiveAssumableRoleID,
+			&i.PreferredLocale,
 			&i.Version,
 			&i.CreatedAt,
 		); err != nil {
@@ -2337,7 +2467,7 @@ func (q *Queries) ListActiveGroupMembershipsForAccount(ctx context.Context, arg 
 }
 
 const listAgentRuns = `-- name: ListAgentRuns :many
-SELECT id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer, status, reference_items, created_at, updated_at FROM agent_runs
+SELECT id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer, status, reference_items, llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens, usage_complete, created_at, updated_at FROM agent_runs
 WHERE tenant_id = $1
 ORDER BY created_at ASC
 `
@@ -2362,6 +2492,12 @@ func (q *Queries) ListAgentRuns(ctx context.Context, tenantID string) ([]AgentRu
 			&i.Answer,
 			&i.Status,
 			&i.ReferenceItems,
+			&i.LlmCallCount,
+			&i.InputTokens,
+			&i.CachedTokens,
+			&i.OutputTokens,
+			&i.TotalTokens,
+			&i.UsageComplete,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -2376,7 +2512,7 @@ func (q *Queries) ListAgentRuns(ctx context.Context, tenantID string) ([]AgentRu
 }
 
 const listAgentRunsByAccount = `-- name: ListAgentRunsByAccount :many
-SELECT id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer, status, reference_items, created_at, updated_at FROM agent_runs
+SELECT id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer, status, reference_items, llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens, usage_complete, created_at, updated_at FROM agent_runs
 WHERE tenant_id = $1
   AND account_id = $2
 ORDER BY created_at DESC, id ASC
@@ -2407,6 +2543,12 @@ func (q *Queries) ListAgentRunsByAccount(ctx context.Context, arg ListAgentRunsB
 			&i.Answer,
 			&i.Status,
 			&i.ReferenceItems,
+			&i.LlmCallCount,
+			&i.InputTokens,
+			&i.CachedTokens,
+			&i.OutputTokens,
+			&i.TotalTokens,
+			&i.UsageComplete,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -2421,7 +2563,7 @@ func (q *Queries) ListAgentRunsByAccount(ctx context.Context, arg ListAgentRunsB
 }
 
 const listAgentRunsPage = `-- name: ListAgentRunsPage :many
-SELECT id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer, status, reference_items, created_at, updated_at FROM agent_runs
+SELECT id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer, status, reference_items, llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens, usage_complete, created_at, updated_at FROM agent_runs
 WHERE tenant_id = $1
 ORDER BY
   CASE WHEN $2::text = 'created_at_asc' THEN created_at END ASC,
@@ -2463,6 +2605,12 @@ func (q *Queries) ListAgentRunsPage(ctx context.Context, arg ListAgentRunsPagePa
 			&i.Answer,
 			&i.Status,
 			&i.ReferenceItems,
+			&i.LlmCallCount,
+			&i.InputTokens,
+			&i.CachedTokens,
+			&i.OutputTokens,
+			&i.TotalTokens,
+			&i.UsageComplete,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -2477,7 +2625,7 @@ func (q *Queries) ListAgentRunsPage(ctx context.Context, arg ListAgentRunsPagePa
 }
 
 const listAgentRunsPageByAccount = `-- name: ListAgentRunsPageByAccount :many
-SELECT id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer, status, reference_items, created_at, updated_at FROM agent_runs
+SELECT id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer, status, reference_items, llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens, usage_complete, created_at, updated_at FROM agent_runs
 WHERE tenant_id = $1
   AND account_id = $2
 ORDER BY
@@ -2522,6 +2670,12 @@ func (q *Queries) ListAgentRunsPageByAccount(ctx context.Context, arg ListAgentR
 			&i.Answer,
 			&i.Status,
 			&i.ReferenceItems,
+			&i.LlmCallCount,
+			&i.InputTokens,
+			&i.CachedTokens,
+			&i.OutputTokens,
+			&i.TotalTokens,
+			&i.UsageComplete,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -3113,7 +3267,7 @@ func (q *Queries) ListAuditLogsPage(ctx context.Context, arg ListAuditLogsPagePa
 }
 
 const listEmployees = `-- name: ListEmployees :many
-SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
+SELECT id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, show_in_org_chart, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at FROM employees
 WHERE tenant_id = $1
 ORDER BY
   CASE coalesce(nullif(employment_status, ''), status)
@@ -3154,6 +3308,7 @@ func (q *Queries) ListEmployees(ctx context.Context, tenantID string) ([]Employe
 			&i.Category,
 			&i.Status,
 			&i.EmploymentStatus,
+			&i.ShowInOrgChart,
 			&i.HireDate,
 			&i.ResignDate,
 			&i.BasicInfo,
@@ -3176,7 +3331,7 @@ func (q *Queries) ListEmployees(ctx context.Context, tenantID string) ([]Employe
 }
 
 const listEmployeesFiltered = `-- name: ListEmployeesFiltered :many
-SELECT employees.id, employees.tenant_id, employees.employee_no, employees.name, employees.company_email, employees.personal_email, employees.phone, employees.org_unit_id, employees.account_id, employees.manager_employee_id, employees.position_id, employees.position, employees.category, employees.status, employees.employment_status, employees.hire_date, employees.resign_date, employees.basic_info, employees.employment_info, employees.education_military_info, employees.contact_info, employees.insurance_info, employees.internal_experiences, employees.created_at, employees.updated_at FROM employees
+SELECT employees.id, employees.tenant_id, employees.employee_no, employees.name, employees.company_email, employees.personal_email, employees.phone, employees.org_unit_id, employees.account_id, employees.manager_employee_id, employees.position_id, employees.position, employees.category, employees.status, employees.employment_status, employees.show_in_org_chart, employees.hire_date, employees.resign_date, employees.basic_info, employees.employment_info, employees.education_military_info, employees.contact_info, employees.insurance_info, employees.internal_experiences, employees.created_at, employees.updated_at FROM employees
 LEFT JOIN accounts
   ON accounts.tenant_id = employees.tenant_id
  AND accounts.id = employees.account_id
@@ -3265,6 +3420,7 @@ func (q *Queries) ListEmployeesFiltered(ctx context.Context, arg ListEmployeesFi
 			&i.Category,
 			&i.Status,
 			&i.EmploymentStatus,
+			&i.ShowInOrgChart,
 			&i.HireDate,
 			&i.ResignDate,
 			&i.BasicInfo,
@@ -3287,7 +3443,7 @@ func (q *Queries) ListEmployeesFiltered(ctx context.Context, arg ListEmployeesFi
 }
 
 const listEmployeesFilteredPage = `-- name: ListEmployeesFilteredPage :many
-SELECT employees.id, employees.tenant_id, employees.employee_no, employees.name, employees.company_email, employees.personal_email, employees.phone, employees.org_unit_id, employees.account_id, employees.manager_employee_id, employees.position_id, employees.position, employees.category, employees.status, employees.employment_status, employees.hire_date, employees.resign_date, employees.basic_info, employees.employment_info, employees.education_military_info, employees.contact_info, employees.insurance_info, employees.internal_experiences, employees.created_at, employees.updated_at FROM employees
+SELECT employees.id, employees.tenant_id, employees.employee_no, employees.name, employees.company_email, employees.personal_email, employees.phone, employees.org_unit_id, employees.account_id, employees.manager_employee_id, employees.position_id, employees.position, employees.category, employees.status, employees.employment_status, employees.show_in_org_chart, employees.hire_date, employees.resign_date, employees.basic_info, employees.employment_info, employees.education_military_info, employees.contact_info, employees.insurance_info, employees.internal_experiences, employees.created_at, employees.updated_at FROM employees
 LEFT JOIN accounts
   ON accounts.tenant_id = employees.tenant_id
  AND accounts.id = employees.account_id
@@ -3382,6 +3538,7 @@ func (q *Queries) ListEmployeesFilteredPage(ctx context.Context, arg ListEmploye
 			&i.Category,
 			&i.Status,
 			&i.EmploymentStatus,
+			&i.ShowInOrgChart,
 			&i.HireDate,
 			&i.ResignDate,
 			&i.BasicInfo,
@@ -3758,7 +3915,7 @@ func (q *Queries) ListGroupMembershipsForGroup(ctx context.Context, arg ListGrou
 }
 
 const listLeaveBalances = `-- name: ListLeaveBalances :many
-SELECT id, tenant_id, employee_id, leave_type, remaining_hours, period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio, updated_at FROM leave_balances
+SELECT id, tenant_id, employee_id, leave_type, leave_type_id, remaining_hours, period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio, updated_at FROM leave_balances
 WHERE tenant_id = $1
 ORDER BY updated_at ASC
 `
@@ -3777,6 +3934,7 @@ func (q *Queries) ListLeaveBalances(ctx context.Context, tenantID string) ([]Lea
 			&i.TenantID,
 			&i.EmployeeID,
 			&i.LeaveType,
+			&i.LeaveTypeID,
 			&i.RemainingHours,
 			&i.PeriodStart,
 			&i.PeriodEnd,
@@ -3798,7 +3956,7 @@ func (q *Queries) ListLeaveBalances(ctx context.Context, tenantID string) ([]Lea
 }
 
 const listLeaveRequestPageByQuery = `-- name: ListLeaveRequestPageByQuery :many
-SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at FROM leave_requests
+SELECT id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at FROM leave_requests
 WHERE tenant_id = $1
   AND (coalesce(cardinality($2::text[]), 0) = 0 OR employee_id = ANY($2::text[]))
   AND ($3::text = '' OR lower(status) = lower($3::text))
@@ -3846,6 +4004,10 @@ func (q *Queries) ListLeaveRequestPageByQuery(ctx context.Context, arg ListLeave
 			&i.TenantID,
 			&i.EmployeeID,
 			&i.LeaveType,
+			&i.LeaveTypeID,
+			&i.PolicyVersion,
+			&i.RuleSnapshot,
+			&i.EvaluationSnapshot,
 			&i.StartAt,
 			&i.EndAt,
 			&i.Hours,
@@ -3866,7 +4028,7 @@ func (q *Queries) ListLeaveRequestPageByQuery(ctx context.Context, arg ListLeave
 }
 
 const listLeaveRequests = `-- name: ListLeaveRequests :many
-SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at FROM leave_requests
+SELECT id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at FROM leave_requests
 WHERE tenant_id = $1
 ORDER BY created_at ASC
 `
@@ -3885,6 +4047,10 @@ func (q *Queries) ListLeaveRequests(ctx context.Context, tenantID string) ([]Lea
 			&i.TenantID,
 			&i.EmployeeID,
 			&i.LeaveType,
+			&i.LeaveTypeID,
+			&i.PolicyVersion,
+			&i.RuleSnapshot,
+			&i.EvaluationSnapshot,
 			&i.StartAt,
 			&i.EndAt,
 			&i.Hours,
@@ -3905,7 +4071,7 @@ func (q *Queries) ListLeaveRequests(ctx context.Context, tenantID string) ([]Lea
 }
 
 const listLeaveRequestsByQuery = `-- name: ListLeaveRequestsByQuery :many
-SELECT id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at FROM leave_requests
+SELECT id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at FROM leave_requests
 WHERE tenant_id = $1
   AND (coalesce(cardinality($2::text[]), 0) = 0 OR employee_id = ANY($2::text[]))
   AND ($3::text = '' OR lower(status) = lower($3::text))
@@ -3942,6 +4108,10 @@ func (q *Queries) ListLeaveRequestsByQuery(ctx context.Context, arg ListLeaveReq
 			&i.TenantID,
 			&i.EmployeeID,
 			&i.LeaveType,
+			&i.LeaveTypeID,
+			&i.PolicyVersion,
+			&i.RuleSnapshot,
+			&i.EvaluationSnapshot,
 			&i.StartAt,
 			&i.EndAt,
 			&i.Hours,
@@ -3950,6 +4120,97 @@ func (q *Queries) ListLeaveRequestsByQuery(ctx context.Context, arg ListLeaveReq
 			&i.FormInstanceID,
 			&i.LeaveBalanceID,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLeaveTypeExternalMappings = `-- name: ListLeaveTypeExternalMappings :many
+SELECT mapping.id, mapping.tenant_id, mapping.source, mapping.external_code, mapping.leave_type_id, mapping.effective_from, mapping.effective_to, mapping.created_at, mapping.updated_at, leave_type.code AS leave_type_code
+FROM leave_type_external_mappings mapping
+JOIN leave_types leave_type
+  ON leave_type.tenant_id = mapping.tenant_id AND leave_type.id = mapping.leave_type_id
+WHERE mapping.tenant_id = $1
+ORDER BY lower(mapping.source), lower(mapping.external_code), mapping.effective_from DESC NULLS LAST, mapping.updated_at DESC
+`
+
+type ListLeaveTypeExternalMappingsRow struct {
+	ID            string             `json:"id"`
+	TenantID      string             `json:"tenant_id"`
+	Source        string             `json:"source"`
+	ExternalCode  string             `json:"external_code"`
+	LeaveTypeID   string             `json:"leave_type_id"`
+	EffectiveFrom pgtype.Date        `json:"effective_from"`
+	EffectiveTo   pgtype.Date        `json:"effective_to"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	LeaveTypeCode string             `json:"leave_type_code"`
+}
+
+func (q *Queries) ListLeaveTypeExternalMappings(ctx context.Context, tenantID string) ([]ListLeaveTypeExternalMappingsRow, error) {
+	rows, err := q.db.Query(ctx, listLeaveTypeExternalMappings, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLeaveTypeExternalMappingsRow
+	for rows.Next() {
+		var i ListLeaveTypeExternalMappingsRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Source,
+			&i.ExternalCode,
+			&i.LeaveTypeID,
+			&i.EffectiveFrom,
+			&i.EffectiveTo,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.LeaveTypeCode,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOpenLeaveTypeSyncIssues = `-- name: ListOpenLeaveTypeSyncIssues :many
+SELECT id, tenant_id, source, external_code, issue_code, message, occurrences, status, first_seen_at, last_seen_at, resolved_at FROM leave_type_sync_issues
+WHERE tenant_id = $1 AND status = 'open'
+ORDER BY last_seen_at DESC, external_code ASC
+`
+
+func (q *Queries) ListOpenLeaveTypeSyncIssues(ctx context.Context, tenantID string) ([]LeaveTypeSyncIssue, error) {
+	rows, err := q.db.Query(ctx, listOpenLeaveTypeSyncIssues, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LeaveTypeSyncIssue
+	for rows.Next() {
+		var i LeaveTypeSyncIssue
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Source,
+			&i.ExternalCode,
+			&i.IssueCode,
+			&i.Message,
+			&i.Occurrences,
+			&i.Status,
+			&i.FirstSeenAt,
+			&i.LastSeenAt,
+			&i.ResolvedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -4503,7 +4764,7 @@ SET remaining_hours = remaining_hours + $1::numeric(12,2),
 WHERE tenant_id = $3
   AND employee_id = $4
   AND lower(leave_type) = lower($5::text)
-RETURNING id, tenant_id, employee_id, leave_type, remaining_hours, period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio, updated_at
+RETURNING id, tenant_id, employee_id, leave_type, leave_type_id, remaining_hours, period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio, updated_at
 `
 
 type ReleaseLeaveBalanceParams struct {
@@ -4528,6 +4789,7 @@ func (q *Queries) ReleaseLeaveBalance(ctx context.Context, arg ReleaseLeaveBalan
 		&i.TenantID,
 		&i.EmployeeID,
 		&i.LeaveType,
+		&i.LeaveTypeID,
 		&i.RemainingHours,
 		&i.PeriodStart,
 		&i.PeriodEnd,
@@ -4548,7 +4810,7 @@ SET remaining_hours = remaining_hours + $1::numeric(12,2),
     updated_at = $2::timestamptz
 WHERE tenant_id = $3
   AND id = $4
-RETURNING id, tenant_id, employee_id, leave_type, remaining_hours, period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio, updated_at
+RETURNING id, tenant_id, employee_id, leave_type, leave_type_id, remaining_hours, period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio, updated_at
 `
 
 type ReleaseLeaveBalanceByIDParams struct {
@@ -4571,6 +4833,7 @@ func (q *Queries) ReleaseLeaveBalanceByID(ctx context.Context, arg ReleaseLeaveB
 		&i.TenantID,
 		&i.EmployeeID,
 		&i.LeaveType,
+		&i.LeaveTypeID,
 		&i.RemainingHours,
 		&i.PeriodStart,
 		&i.PeriodEnd,
@@ -4595,7 +4858,7 @@ WHERE tenant_id = $3
   AND (NULLIF(period_start::text, '') IS NULL OR NULLIF(period_start::text, '')::date <= $6::date)
   AND (NULLIF(period_end::text, '') IS NULL OR NULLIF(period_end::text, '')::date >= $6::date)
   AND remaining_hours >= $1::numeric(12,2)
-RETURNING id, tenant_id, employee_id, leave_type, remaining_hours, period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio, updated_at
+RETURNING id, tenant_id, employee_id, leave_type, leave_type_id, remaining_hours, period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio, updated_at
 `
 
 type ReserveLeaveBalanceParams struct {
@@ -4622,6 +4885,7 @@ func (q *Queries) ReserveLeaveBalance(ctx context.Context, arg ReserveLeaveBalan
 		&i.TenantID,
 		&i.EmployeeID,
 		&i.LeaveType,
+		&i.LeaveTypeID,
 		&i.RemainingHours,
 		&i.PeriodStart,
 		&i.PeriodEnd,
@@ -4633,6 +4897,90 @@ func (q *Queries) ReserveLeaveBalance(ctx context.Context, arg ReserveLeaveBalan
 		&i.UpdatedAt,
 	)
 	return i, err
+}
+
+const resolveLeaveTypeSyncIssues = `-- name: ResolveLeaveTypeSyncIssues :exec
+UPDATE leave_type_sync_issues
+SET status = 'resolved', resolved_at = $1, last_seen_at = $1
+WHERE tenant_id = $2
+  AND lower(source) = lower($3::text)
+  AND lower(external_code) = lower($4::text)
+  AND status = 'open'
+`
+
+type ResolveLeaveTypeSyncIssuesParams struct {
+	ResolvedAt   pgtype.Timestamptz `json:"resolved_at"`
+	TenantID     string             `json:"tenant_id"`
+	Source       string             `json:"source"`
+	ExternalCode string             `json:"external_code"`
+}
+
+func (q *Queries) ResolveLeaveTypeSyncIssues(ctx context.Context, arg ResolveLeaveTypeSyncIssuesParams) error {
+	_, err := q.db.Exec(ctx, resolveLeaveTypeSyncIssues,
+		arg.ResolvedAt,
+		arg.TenantID,
+		arg.Source,
+		arg.ExternalCode,
+	)
+	return err
+}
+
+const updateAccountPreferredLocale = `-- name: UpdateAccountPreferredLocale :one
+UPDATE accounts
+SET preferred_locale = $1,
+    version = version + 1
+WHERE tenant_id = $2 AND id = $3
+RETURNING id, tenant_id, display_name, email, employee_id, status, user_group_ids, direct_permission_set_ids, active_assumable_role_id, preferred_locale, version, created_at
+`
+
+type UpdateAccountPreferredLocaleParams struct {
+	PreferredLocale string `json:"preferred_locale"`
+	TenantID        string `json:"tenant_id"`
+	ID              string `json:"id"`
+}
+
+func (q *Queries) UpdateAccountPreferredLocale(ctx context.Context, arg UpdateAccountPreferredLocaleParams) (Account, error) {
+	row := q.db.QueryRow(ctx, updateAccountPreferredLocale, arg.PreferredLocale, arg.TenantID, arg.ID)
+	var i Account
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.DisplayName,
+		&i.Email,
+		&i.EmployeeID,
+		&i.Status,
+		&i.UserGroupIds,
+		&i.DirectPermissionSetIds,
+		&i.ActiveAssumableRoleID,
+		&i.PreferredLocale,
+		&i.Version,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const updateEmployeeOrgChartVisibility = `-- name: UpdateEmployeeOrgChartVisibility :exec
+UPDATE employees
+SET show_in_org_chart = $1,
+    updated_at = $2
+WHERE tenant_id = $3 AND id = $4
+`
+
+type UpdateEmployeeOrgChartVisibilityParams struct {
+	ShowInOrgChart bool               `json:"show_in_org_chart"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	TenantID       string             `json:"tenant_id"`
+	ID             string             `json:"id"`
+}
+
+func (q *Queries) UpdateEmployeeOrgChartVisibility(ctx context.Context, arg UpdateEmployeeOrgChartVisibilityParams) error {
+	_, err := q.db.Exec(ctx, updateEmployeeOrgChartVisibility,
+		arg.ShowInOrgChart,
+		arg.UpdatedAt,
+		arg.TenantID,
+		arg.ID,
+	)
+	return err
 }
 
 const updateOutboxEvent = `-- name: UpdateOutboxEvent :one
@@ -4685,11 +5033,11 @@ const upsertAccount = `-- name: UpsertAccount :one
 INSERT INTO accounts (
     id, tenant_id, display_name, email, employee_id, status,
     user_group_ids, direct_permission_set_ids, active_assumable_role_id,
-    version, created_at
+    preferred_locale, version, created_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7, $8, $9,
-    1, $10
+    $10, 1, $11
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -4699,10 +5047,11 @@ ON CONFLICT (id) DO UPDATE SET
     status = EXCLUDED.status,
     direct_permission_set_ids = EXCLUDED.direct_permission_set_ids,
     active_assumable_role_id = EXCLUDED.active_assumable_role_id,
+    preferred_locale = EXCLUDED.preferred_locale,
     version = accounts.version + 1,
     created_at = EXCLUDED.created_at
-WHERE $11::bigint = 0 OR accounts.version = $11::bigint
-RETURNING id, tenant_id, display_name, email, employee_id, status, user_group_ids, direct_permission_set_ids, active_assumable_role_id, version, created_at
+WHERE $12::bigint = 0 OR accounts.version = $12::bigint
+RETURNING id, tenant_id, display_name, email, employee_id, status, user_group_ids, direct_permission_set_ids, active_assumable_role_id, preferred_locale, version, created_at
 `
 
 type UpsertAccountParams struct {
@@ -4715,6 +5064,7 @@ type UpsertAccountParams struct {
 	UserGroupIds           []string           `json:"user_group_ids"`
 	DirectPermissionSetIds []string           `json:"direct_permission_set_ids"`
 	ActiveAssumableRoleID  string             `json:"active_assumable_role_id"`
+	PreferredLocale        string             `json:"preferred_locale"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	ExpectedVersion        int64              `json:"expected_version"`
 }
@@ -4732,6 +5082,7 @@ func (q *Queries) UpsertAccount(ctx context.Context, arg UpsertAccountParams) (A
 		arg.UserGroupIds,
 		arg.DirectPermissionSetIds,
 		arg.ActiveAssumableRoleID,
+		arg.PreferredLocale,
 		arg.CreatedAt,
 		arg.ExpectedVersion,
 	)
@@ -4746,6 +5097,7 @@ func (q *Queries) UpsertAccount(ctx context.Context, arg UpsertAccountParams) (A
 		&i.UserGroupIds,
 		&i.DirectPermissionSetIds,
 		&i.ActiveAssumableRoleID,
+		&i.PreferredLocale,
 		&i.Version,
 		&i.CreatedAt,
 	)
@@ -4755,9 +5107,14 @@ func (q *Queries) UpsertAccount(ctx context.Context, arg UpsertAccountParams) (A
 const upsertAgentRun = `-- name: UpsertAgentRun :one
 INSERT INTO agent_runs (
     id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer,
-    status, reference_items, created_at, updated_at
+    status, reference_items, llm_call_count, input_tokens, cached_tokens,
+    output_tokens, total_tokens, usage_complete, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10::jsonb, $11, $12
+    $1, $2, $3, $4,
+    $5, $6, $7, $8,
+    $9, $10::jsonb, $11,
+    $12, $13, $14,
+    $15, $16, $17, $18
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
@@ -4769,24 +5126,36 @@ ON CONFLICT (id) DO UPDATE SET
     answer = EXCLUDED.answer,
     status = EXCLUDED.status,
     reference_items = EXCLUDED.reference_items,
+    llm_call_count = EXCLUDED.llm_call_count,
+    input_tokens = EXCLUDED.input_tokens,
+    cached_tokens = EXCLUDED.cached_tokens,
+    output_tokens = EXCLUDED.output_tokens,
+    total_tokens = EXCLUDED.total_tokens,
+    usage_complete = EXCLUDED.usage_complete,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer, status, reference_items, created_at, updated_at
+RETURNING id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer, status, reference_items, llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens, usage_complete, created_at, updated_at
 `
 
 type UpsertAgentRunParams struct {
-	ID        string             `json:"id"`
-	TenantID  string             `json:"tenant_id"`
-	AccountID string             `json:"account_id"`
-	AgentID   pgtype.Text        `json:"agent_id"`
-	SessionID pgtype.Text        `json:"session_id"`
-	Mode      string             `json:"mode"`
-	Prompt    string             `json:"prompt"`
-	Answer    string             `json:"answer"`
-	Status    string             `json:"status"`
-	Column10  []byte             `json:"column_10"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	AccountID      string             `json:"account_id"`
+	AgentID        pgtype.Text        `json:"agent_id"`
+	SessionID      pgtype.Text        `json:"session_id"`
+	Mode           string             `json:"mode"`
+	Prompt         string             `json:"prompt"`
+	Answer         string             `json:"answer"`
+	Status         string             `json:"status"`
+	ReferenceItems []byte             `json:"reference_items"`
+	LlmCallCount   int64              `json:"llm_call_count"`
+	InputTokens    int64              `json:"input_tokens"`
+	CachedTokens   int64              `json:"cached_tokens"`
+	OutputTokens   int64              `json:"output_tokens"`
+	TotalTokens    int64              `json:"total_tokens"`
+	UsageComplete  bool               `json:"usage_complete"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) UpsertAgentRun(ctx context.Context, arg UpsertAgentRunParams) (AgentRun, error) {
@@ -4800,7 +5169,13 @@ func (q *Queries) UpsertAgentRun(ctx context.Context, arg UpsertAgentRunParams) 
 		arg.Prompt,
 		arg.Answer,
 		arg.Status,
-		arg.Column10,
+		arg.ReferenceItems,
+		arg.LlmCallCount,
+		arg.InputTokens,
+		arg.CachedTokens,
+		arg.OutputTokens,
+		arg.TotalTokens,
+		arg.UsageComplete,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -4816,6 +5191,12 @@ func (q *Queries) UpsertAgentRun(ctx context.Context, arg UpsertAgentRunParams) 
 		&i.Answer,
 		&i.Status,
 		&i.ReferenceItems,
+		&i.LlmCallCount,
+		&i.InputTokens,
+		&i.CachedTokens,
+		&i.OutputTokens,
+		&i.TotalTokens,
+		&i.UsageComplete,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -5296,6 +5677,7 @@ ON CONFLICT (tenant_id) DO UPDATE SET
     effective_from = EXCLUDED.effective_from,
     updated_by_account_id = EXCLUDED.updated_by_account_id,
     updated_at = EXCLUDED.updated_at
+WHERE attendance_policies.version < EXCLUDED.version
 RETURNING id, tenant_id, work_time, leave_types, version, effective_from, updated_by_account_id, created_at, updated_at
 `
 
@@ -5568,7 +5950,7 @@ ON CONFLICT (id) DO UPDATE SET
     internal_experiences = EXCLUDED.internal_experiences,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at
+RETURNING id, tenant_id, employee_no, name, company_email, personal_email, phone, org_unit_id, account_id, manager_employee_id, position_id, position, category, status, employment_status, show_in_org_chart, hire_date, resign_date, basic_info, employment_info, education_military_info, contact_info, insurance_info, internal_experiences, created_at, updated_at
 `
 
 type UpsertEmployeeParams struct {
@@ -5644,6 +6026,7 @@ func (q *Queries) UpsertEmployee(ctx context.Context, arg UpsertEmployeeParams) 
 		&i.Category,
 		&i.Status,
 		&i.EmploymentStatus,
+		&i.ShowInOrgChart,
 		&i.HireDate,
 		&i.ResignDate,
 		&i.BasicInfo,
@@ -6052,15 +6435,16 @@ func (q *Queries) UpsertGroupMembership(ctx context.Context, arg UpsertGroupMemb
 
 const upsertLeaveBalance = `-- name: UpsertLeaveBalance :one
 INSERT INTO leave_balances (
-    id, tenant_id, employee_id, leave_type, remaining_hours,
+    id, tenant_id, employee_id, leave_type, leave_type_id, remaining_hours,
     period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio,
     updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5::numeric(12,2),
-    $6, $7, $8::numeric(12,2), $9::numeric(12,2), $10, $11, $12,
-    $13
+    $1, $2, $3, $4, $5, $6::numeric(12,2),
+    $7, $8, $9::numeric(12,2), $10::numeric(12,2), $11, $12, $13,
+    $14
 )
 ON CONFLICT (tenant_id, employee_id, leave_type, period_start, period_end) DO UPDATE SET
+    leave_type_id = EXCLUDED.leave_type_id,
     remaining_hours = EXCLUDED.remaining_hours,
     granted_hours = EXCLUDED.granted_hours,
     used_hours = EXCLUDED.used_hours,
@@ -6068,7 +6452,7 @@ ON CONFLICT (tenant_id, employee_id, leave_type, period_start, period_end) DO UP
     policy_version = EXCLUDED.policy_version,
     prorate_ratio = EXCLUDED.prorate_ratio,
     updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, employee_id, leave_type, remaining_hours, period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio, updated_at
+RETURNING id, tenant_id, employee_id, leave_type, leave_type_id, remaining_hours, period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio, updated_at
 `
 
 type UpsertLeaveBalanceParams struct {
@@ -6076,6 +6460,7 @@ type UpsertLeaveBalanceParams struct {
 	TenantID       string             `json:"tenant_id"`
 	EmployeeID     string             `json:"employee_id"`
 	LeaveType      string             `json:"leave_type"`
+	LeaveTypeID    string             `json:"leave_type_id"`
 	RemainingHours pgtype.Numeric     `json:"remaining_hours"`
 	PeriodStart    pgtype.Date        `json:"period_start"`
 	PeriodEnd      pgtype.Date        `json:"period_end"`
@@ -6093,6 +6478,7 @@ func (q *Queries) UpsertLeaveBalance(ctx context.Context, arg UpsertLeaveBalance
 		arg.TenantID,
 		arg.EmployeeID,
 		arg.LeaveType,
+		arg.LeaveTypeID,
 		arg.RemainingHours,
 		arg.PeriodStart,
 		arg.PeriodEnd,
@@ -6109,6 +6495,7 @@ func (q *Queries) UpsertLeaveBalance(ctx context.Context, arg UpsertLeaveBalance
 		&i.TenantID,
 		&i.EmployeeID,
 		&i.LeaveType,
+		&i.LeaveTypeID,
 		&i.RemainingHours,
 		&i.PeriodStart,
 		&i.PeriodEnd,
@@ -6124,16 +6511,22 @@ func (q *Queries) UpsertLeaveBalance(ctx context.Context, arg UpsertLeaveBalance
 
 const upsertLeaveRequest = `-- name: UpsertLeaveRequest :one
 INSERT INTO leave_requests (
-    id, tenant_id, employee_id, leave_type, start_at, end_at,
+    id, tenant_id, employee_id, leave_type, leave_type_id, policy_version,
+    rule_snapshot, evaluation_snapshot, start_at, end_at,
     hours, reason, status, form_instance_id, leave_balance_id, created_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
-    $7, $8, $9, $10, $11, $12
+    $7::jsonb, $8::jsonb, $9, $10,
+    $11, $12, $13, $14, $15, $16
 )
 ON CONFLICT (id) DO UPDATE SET
     tenant_id = EXCLUDED.tenant_id,
     employee_id = EXCLUDED.employee_id,
     leave_type = EXCLUDED.leave_type,
+    leave_type_id = EXCLUDED.leave_type_id,
+    policy_version = EXCLUDED.policy_version,
+    rule_snapshot = EXCLUDED.rule_snapshot,
+    evaluation_snapshot = EXCLUDED.evaluation_snapshot,
     start_at = EXCLUDED.start_at,
     end_at = EXCLUDED.end_at,
     hours = EXCLUDED.hours,
@@ -6142,22 +6535,26 @@ ON CONFLICT (id) DO UPDATE SET
     form_instance_id = EXCLUDED.form_instance_id,
     leave_balance_id = EXCLUDED.leave_balance_id,
     created_at = EXCLUDED.created_at
-RETURNING id, tenant_id, employee_id, leave_type, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at
+RETURNING id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, created_at
 `
 
 type UpsertLeaveRequestParams struct {
-	ID             string             `json:"id"`
-	TenantID       string             `json:"tenant_id"`
-	EmployeeID     string             `json:"employee_id"`
-	LeaveType      string             `json:"leave_type"`
-	StartAt        pgtype.Timestamptz `json:"start_at"`
-	EndAt          pgtype.Timestamptz `json:"end_at"`
-	Hours          float64            `json:"hours"`
-	Reason         string             `json:"reason"`
-	Status         string             `json:"status"`
-	FormInstanceID string             `json:"form_instance_id"`
-	LeaveBalanceID pgtype.Text        `json:"leave_balance_id"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ID                 string             `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	EmployeeID         string             `json:"employee_id"`
+	LeaveType          string             `json:"leave_type"`
+	LeaveTypeID        string             `json:"leave_type_id"`
+	PolicyVersion      int32              `json:"policy_version"`
+	RuleSnapshot       []byte             `json:"rule_snapshot"`
+	EvaluationSnapshot []byte             `json:"evaluation_snapshot"`
+	StartAt            pgtype.Timestamptz `json:"start_at"`
+	EndAt              pgtype.Timestamptz `json:"end_at"`
+	Hours              float64            `json:"hours"`
+	Reason             string             `json:"reason"`
+	Status             string             `json:"status"`
+	FormInstanceID     string             `json:"form_instance_id"`
+	LeaveBalanceID     pgtype.Text        `json:"leave_balance_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
 func (q *Queries) UpsertLeaveRequest(ctx context.Context, arg UpsertLeaveRequestParams) (LeaveRequest, error) {
@@ -6166,6 +6563,10 @@ func (q *Queries) UpsertLeaveRequest(ctx context.Context, arg UpsertLeaveRequest
 		arg.TenantID,
 		arg.EmployeeID,
 		arg.LeaveType,
+		arg.LeaveTypeID,
+		arg.PolicyVersion,
+		arg.RuleSnapshot,
+		arg.EvaluationSnapshot,
 		arg.StartAt,
 		arg.EndAt,
 		arg.Hours,
@@ -6181,6 +6582,10 @@ func (q *Queries) UpsertLeaveRequest(ctx context.Context, arg UpsertLeaveRequest
 		&i.TenantID,
 		&i.EmployeeID,
 		&i.LeaveType,
+		&i.LeaveTypeID,
+		&i.PolicyVersion,
+		&i.RuleSnapshot,
+		&i.EvaluationSnapshot,
 		&i.StartAt,
 		&i.EndAt,
 		&i.Hours,
@@ -6191,6 +6596,132 @@ func (q *Queries) UpsertLeaveRequest(ctx context.Context, arg UpsertLeaveRequest
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const upsertLeaveRequestAllocation = `-- name: UpsertLeaveRequestAllocation :one
+INSERT INTO leave_request_allocations (
+    tenant_id, leave_request_id, leave_balance_id, reserved_hours, created_at
+) VALUES (
+    $1, $2, $3,
+    $4::numeric(12,2), $5
+)
+ON CONFLICT (tenant_id, leave_request_id, leave_balance_id) DO UPDATE SET
+    reserved_hours = EXCLUDED.reserved_hours
+RETURNING id, tenant_id, leave_request_id, leave_balance_id, reserved_hours, created_at
+`
+
+type UpsertLeaveRequestAllocationParams struct {
+	TenantID       string             `json:"tenant_id"`
+	LeaveRequestID string             `json:"leave_request_id"`
+	LeaveBalanceID string             `json:"leave_balance_id"`
+	ReservedHours  pgtype.Numeric     `json:"reserved_hours"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) UpsertLeaveRequestAllocation(ctx context.Context, arg UpsertLeaveRequestAllocationParams) (LeaveRequestAllocation, error) {
+	row := q.db.QueryRow(ctx, upsertLeaveRequestAllocation,
+		arg.TenantID,
+		arg.LeaveRequestID,
+		arg.LeaveBalanceID,
+		arg.ReservedHours,
+		arg.CreatedAt,
+	)
+	var i LeaveRequestAllocation
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.LeaveRequestID,
+		&i.LeaveBalanceID,
+		&i.ReservedHours,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertLeaveTypeExternalMapping = `-- name: UpsertLeaveTypeExternalMapping :exec
+INSERT INTO leave_type_external_mappings (
+    id, tenant_id, source, external_code, leave_type_id,
+    effective_from, effective_to, created_at, updated_at
+) VALUES (
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9
+)
+ON CONFLICT (id) DO UPDATE SET
+    source = EXCLUDED.source,
+    external_code = EXCLUDED.external_code,
+    leave_type_id = EXCLUDED.leave_type_id,
+    effective_from = EXCLUDED.effective_from,
+    effective_to = EXCLUDED.effective_to,
+    updated_at = EXCLUDED.updated_at
+WHERE leave_type_external_mappings.tenant_id = EXCLUDED.tenant_id
+`
+
+type UpsertLeaveTypeExternalMappingParams struct {
+	ID            string             `json:"id"`
+	TenantID      string             `json:"tenant_id"`
+	Source        string             `json:"source"`
+	ExternalCode  string             `json:"external_code"`
+	LeaveTypeID   string             `json:"leave_type_id"`
+	EffectiveFrom pgtype.Date        `json:"effective_from"`
+	EffectiveTo   pgtype.Date        `json:"effective_to"`
+	CreatedAt     pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertLeaveTypeExternalMapping(ctx context.Context, arg UpsertLeaveTypeExternalMappingParams) error {
+	_, err := q.db.Exec(ctx, upsertLeaveTypeExternalMapping,
+		arg.ID,
+		arg.TenantID,
+		arg.Source,
+		arg.ExternalCode,
+		arg.LeaveTypeID,
+		arg.EffectiveFrom,
+		arg.EffectiveTo,
+		arg.CreatedAt,
+		arg.UpdatedAt,
+	)
+	return err
+}
+
+const upsertLeaveTypeSyncIssue = `-- name: UpsertLeaveTypeSyncIssue :exec
+INSERT INTO leave_type_sync_issues (
+    id, tenant_id, source, external_code, issue_code, message,
+    occurrences, status, first_seen_at, last_seen_at, resolved_at
+) VALUES (
+    $1, $2, $3, $4, $5, $6,
+    1, 'open', $7, $8, NULL
+)
+ON CONFLICT (tenant_id, source, external_code, issue_code) DO UPDATE SET
+    message = EXCLUDED.message,
+    occurrences = leave_type_sync_issues.occurrences + 1,
+    status = 'open',
+    last_seen_at = EXCLUDED.last_seen_at,
+    resolved_at = NULL
+`
+
+type UpsertLeaveTypeSyncIssueParams struct {
+	ID           string             `json:"id"`
+	TenantID     string             `json:"tenant_id"`
+	Source       string             `json:"source"`
+	ExternalCode string             `json:"external_code"`
+	IssueCode    string             `json:"issue_code"`
+	Message      string             `json:"message"`
+	FirstSeenAt  pgtype.Timestamptz `json:"first_seen_at"`
+	LastSeenAt   pgtype.Timestamptz `json:"last_seen_at"`
+}
+
+func (q *Queries) UpsertLeaveTypeSyncIssue(ctx context.Context, arg UpsertLeaveTypeSyncIssueParams) error {
+	_, err := q.db.Exec(ctx, upsertLeaveTypeSyncIssue,
+		arg.ID,
+		arg.TenantID,
+		arg.Source,
+		arg.ExternalCode,
+		arg.IssueCode,
+		arg.Message,
+		arg.FirstSeenAt,
+		arg.LastSeenAt,
+	)
+	return err
 }
 
 const upsertOrgUnit = `-- name: UpsertOrgUnit :one

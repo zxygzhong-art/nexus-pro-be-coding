@@ -83,6 +83,7 @@ func (c PlatformService) publishedPlatformAssistants(ctx RequestContext, limit i
 		}
 		welcomeMessage := agent.WelcomeMessage
 		suggestedQuestions := agent.SuggestedQuestions
+		suggestedQuestionTranslations := agent.SuggestedQuestionTranslations
 		if agent.PublishedVersion > 0 {
 			snapshot, found, err := c.store.GetAgentDefinitionVersion(
 				goContext(ctx),
@@ -96,8 +97,14 @@ func (c PlatformService) publishedPlatformAssistants(ctx RequestContext, limit i
 			if found {
 				welcomeMessage = snapshot.WelcomeMessage
 				suggestedQuestions = snapshot.SuggestedQuestions
+				suggestedQuestionTranslations = snapshot.SuggestedQuestionTranslations
 			}
 		}
+		suggestedQuestions = localizedSuggestedQuestions(
+			suggestedQuestionTranslations,
+			account.PreferredLocale,
+			suggestedQuestions,
+		)
 		assistant := PlatformAssistant{
 			ID:                 agent.ID,
 			Emoji:              agent.Emoji,
@@ -471,7 +478,7 @@ func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employe
 	monthlyHours := 0.0
 	if policy, policyErr := c.Service.Attendance().loadAttendancePolicyResponse(ctx); policyErr == nil {
 		for workDate, dayRecords := range recordsByDate {
-			projection := projectAttendanceDay(dayRecords, leaves, workDate, policy.WorkTime, now)
+			projection := ProjectAttendanceDay(dayRecords, leaves, workDate, policy.WorkTime, now)
 			if projection.ClockIn != nil && projection.ClockOut != nil {
 				monthlyHours += float64(projection.WorkedMinutes) / 60
 			}
@@ -971,11 +978,25 @@ func platformTemplateUpdatedAt(schema map[string]any, fallback time.Time) string
 	return platformTime(fallback)
 }
 
+// platformExplicitTemplateFields returns only fields actually declared by the stored schema.
+func platformExplicitTemplateFields(schema map[string]any) ([]PlatformFormBuilderField, bool) {
+	design := platformTemplateDesign(schema)
+	if design == nil {
+		return nil, false
+	}
+	rawFields, exists := design["fields"]
+	if !exists {
+		return nil, false
+	}
+	fields, ok := platformDecodeSlice[PlatformFormBuilderField](rawFields)
+	return fields, ok && len(fields) > 0
+}
+
 // platformTemplateFields 依範本類型處理已儲存欄位與舊資料 fallback。
 func platformTemplateFields(templateKey string, schema map[string]any) []PlatformFormBuilderField {
-	fields, ok := platformDecodeSlice[PlatformFormBuilderField](platformTemplateDesign(schema)["fields"])
+	fields, ok := platformExplicitTemplateFields(schema)
 	isLeaveTemplate := lockedFieldIDsForTemplate(templateKey, defaultFormKindForTemplateKey(templateKey)) != nil
-	if ok && len(fields) > 0 && !(isLeaveTemplate && isLegacyGenericBuilderFields(fields)) {
+	if ok && !(isLeaveTemplate && isLegacyGenericBuilderFields(fields)) {
 		return fields
 	}
 	if isLeaveTemplate {

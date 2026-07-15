@@ -80,18 +80,19 @@ type WorkspaceOrganizationResponse struct {
 
 // WorkspaceOrganizationRow 定義工作區 organization 列的資料結構。
 type WorkspaceOrganizationRow struct {
-	ID            string `json:"id"`
-	NameZH        string `json:"name_zh"`
-	NameEN        string `json:"name_en"`
-	Dept          string `json:"dept"`
-	Title         string `json:"title"`
-	Level         int    `json:"level"`
-	IsManager     bool   `json:"is_manager"`
-	ParentID      string `json:"parent_id"`
-	OrgUnitID     string `json:"org_unit_id,omitempty"`
-	ManagerSource string `json:"manager_source,omitempty"`
-	IsOverride    bool   `json:"is_override,omitempty"`
-	ManagerIssue  string `json:"manager_issue,omitempty"`
+	ID             string `json:"id"`
+	NameZH         string `json:"name_zh"`
+	NameEN         string `json:"name_en"`
+	Dept           string `json:"dept"`
+	Title          string `json:"title"`
+	Level          int    `json:"level"`
+	IsManager      bool   `json:"is_manager"`
+	ShowInOrgChart bool   `json:"show_in_org_chart"`
+	ParentID       string `json:"parent_id"`
+	OrgUnitID      string `json:"org_unit_id,omitempty"`
+	ManagerSource  string `json:"manager_source,omitempty"`
+	IsOverride     bool   `json:"is_override,omitempty"`
+	ManagerIssue   string `json:"manager_issue,omitempty"`
 }
 
 // WorkspaceTurnoverQuery 定義工作區人員異動查詢的資料結構。
@@ -277,6 +278,7 @@ type WorkspaceDayCell struct {
 	Out      string  `json:"out,omitempty"`
 	InLoc    string  `json:"in_loc,omitempty"`
 	OutLoc   string  `json:"out_loc,omitempty"`
+	Recorded bool    `json:"recorded,omitempty"`
 	Abnormal bool    `json:"abnormal,omitempty"`
 	Reason   string  `json:"reason,omitempty"`
 }

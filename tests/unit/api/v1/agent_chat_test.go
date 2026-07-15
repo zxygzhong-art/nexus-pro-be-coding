@@ -3,6 +3,7 @@ package v1_test
 import (
 	"bytes"
 	"context"
+	"errors"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -90,6 +91,57 @@ func TestAgentChatEndpointStreamsSSE(t *testing.T) {
 		if !strings.Contains(body, expected) {
 			t.Fatalf("expected SSE body to contain %q, got:\n%s", expected, body)
 		}
+	}
+}
+
+func TestAgentChatEndpointSanitizesRuntimeFailure(t *testing.T) {
+	store := memory.NewStore()
+	populateDemoFixture(store)
+	const rawFailure = "upstream 500 token=secret-value"
+	runtime := apiFakeAgentChatRuntime{run: func(ctx context.Context, _ service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
+		if err := emit(ctx, domain.AgentChatEvent{
+			Event: domain.AgentChatEventError, Message: rawFailure, Data: map[string]any{"provider_error": rawFailure},
+		}); err != nil {
+			return err
+		}
+		return errors.New(rawFailure)
+	}}
+	handler := v1api.New(service.New(store, service.Options{AgentChatRuntime: runtime}), nil, v1api.Options{
+		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo", AccountID: "acct-admin"}, ok: true},
+	}).Routes()
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/agents/chat", strings.NewReader(`{"message":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("X-Request-ID", "trace-agent-runtime")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected streamed runtime error to keep 200 SSE status, got %d: %s", rec.Code, rec.Body.String())
+	}
+	body := rec.Body.String()
+	for _, expected := range []string{
+		"event: error\n",
+		`"message":"` + service.AgentRuntimeFailureMessage + `"`,
+		`"reason_code":"` + service.AgentRuntimeFailureReasonCode + `"`,
+		`"trace_id":"trace-agent-runtime"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("expected sanitized SSE body to contain %q, got:\n%s", expected, body)
+		}
+	}
+	if strings.Contains(body, rawFailure) || strings.Contains(body, "secret-value") {
+		t.Fatalf("runtime failure leaked into SSE body: %s", body)
+	}
+	if count := strings.Count(body, "event: error\n"); count != 1 {
+		t.Fatalf("expected one sanitized SSE error event, got %d:\n%s", count, body)
+	}
+	runs, err := store.ListAgentRunsByAccount(context.Background(), "demo", "acct-admin")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(runs) != 1 || strings.Contains(runs[0].Answer, "secret-value") || !strings.Contains(runs[0].Answer, "trace_id=trace-agent-runtime") {
+		t.Fatalf("expected sanitized run history, got %+v", runs)
 	}
 }
 

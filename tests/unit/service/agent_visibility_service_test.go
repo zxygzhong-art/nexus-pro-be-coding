@@ -78,6 +78,62 @@ func TestPlatformAssistantsUsePublishedConversationExperience(t *testing.T) {
 	}
 }
 
+// TestPlatformAssistantsLocalizePublishedSuggestions verifies account-locale selection and per-item fallback.
+func TestPlatformAssistantsLocalizePublishedSuggestions(t *testing.T) {
+	now := time.Date(2026, 7, 15, 10, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentAdminAccount(t, store, now)
+	if _, ok, err := store.UpdateAccountPreferredLocale(
+		context.Background(),
+		"tenant-1",
+		"acct-admin",
+		domain.PreferredLocaleENUS,
+	); err != nil || !ok {
+		t.Fatalf("set preferred locale: ok=%v err=%v", ok, err)
+	}
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
+	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
+		Name: "Model", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
+		Name:    "Leave Agent",
+		ModelID: model.ID,
+		SuggestedQuestionTranslations: []domain.LocalizedAgentSuggestedQuestion{
+			{Translations: map[string]string{
+				domain.PreferredLocaleZHTW: "幫我請特休",
+				domain.PreferredLocaleENUS: "Request annual leave",
+			}},
+			{Translations: map[string]string{
+				domain.PreferredLocaleZHTW: "查詢假期餘額",
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agent.SuggestedQuestions) != 2 || agent.SuggestedQuestions[0] != "幫我請特休" {
+		t.Fatalf("expected zh-TW compatibility projection, got %+v", agent.SuggestedQuestions)
+	}
+	if _, err = svc.Agent().PublishDefinition(ctx, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+
+	response, err := svc.Platform().ListAssistants(ctx, domain.PlatformAssistantsQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(response.Data) != 1 || len(response.Data[0].SuggestedQuestions) != 2 {
+		t.Fatalf("expected localized suggestions, got %+v", response.Data)
+	}
+	if response.Data[0].SuggestedQuestions[0] != "Request annual leave" || response.Data[0].SuggestedQuestions[1] != "查詢假期餘額" {
+		t.Fatalf("expected en-US with zh-TW fallback, got %+v", response.Data[0].SuggestedQuestions)
+	}
+}
+
 func TestPublishedAssistantsEnforceDepartmentVisibility(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
 	store := memory.NewStore()

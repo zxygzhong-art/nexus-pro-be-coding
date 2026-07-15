@@ -27,6 +27,7 @@ func (c WorkspaceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace.GET("/employees", c.routes.Handle("hr.employee", "read", c.employees))
 	workspace.GET("/organization", c.routes.Handle("hr.employee", "read", c.organization))
 	workspace.PATCH("/organization/employees/:id/manager", c.routes.Handle("hr.employee", "update", c.updateOrganizationManager, PathParam(PathParamID)))
+	workspace.PATCH("/organization/employees/:id/visibility", c.routes.Handle("hr.employee", "update", c.updateOrganizationVisibility, PathParam(PathParamID)))
 	workspace.GET("/attendance", c.routes.Handle("attendance.clock", "read", c.attendance))
 	workspace.GET("/attendance/export", c.routes.Handle("attendance.clock", "export", c.exportAttendanceCSV))
 	workspace.GET("/turnover", c.routes.Handle("hr.employee", "read", c.turnover))
@@ -97,6 +98,20 @@ func (c WorkspaceCtrl) updateOrganizationManager(w http.ResponseWriter, r *http.
 		return err
 	}
 	item, err := c.svc.UpdateWorkspaceOrganizationManager(ctx, r.PathValue(PathParamID), input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// updateOrganizationVisibility 處理組織圖預覽可見性更新。
+func (c WorkspaceCtrl) updateOrganizationVisibility(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.UpdateWorkspaceOrganizationVisibilityInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.UpdateWorkspaceOrganizationVisibility(ctx, r.PathValue(PathParamID), input)
 	if err != nil {
 		return err
 	}

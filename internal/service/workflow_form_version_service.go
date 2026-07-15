@@ -23,6 +23,44 @@ func (c WorkflowService) currentFormTemplateVersion(ctx RequestContext, template
 	return version, nil
 }
 
+// formTemplateVersionByID resolves a published immutable version owned by the template.
+func (c WorkflowService) formTemplateVersionByID(ctx RequestContext, template domain.FormTemplate, versionID string) (domain.FormTemplateVersion, error) {
+	versionID = strings.TrimSpace(versionID)
+	var version domain.FormTemplateVersion
+	var err error
+	if versionID == "" {
+		version, err = c.currentFormTemplateVersion(ctx, template)
+		if err != nil {
+			return domain.FormTemplateVersion{}, err
+		}
+	} else {
+		var ok bool
+		version, ok, err = c.store.GetFormTemplateVersion(goContext(ctx), ctx.TenantID, versionID)
+		if err != nil {
+			return domain.FormTemplateVersion{}, err
+		}
+		if !ok || version.TemplateID != template.ID {
+			return domain.FormTemplateVersion{}, NotFound("form template version", versionID)
+		}
+	}
+	if status := strings.TrimSpace(strings.ToLower(version.Status)); status != "" && status != "published" {
+		return domain.FormTemplateVersion{}, BadRequest("form template version is not published")
+	}
+	return version, nil
+}
+
+// currentFormTemplateVersionForNewInstance prevents clients from downgrading to an older schema.
+func (c WorkflowService) currentFormTemplateVersionForNewInstance(ctx RequestContext, template domain.FormTemplate, renderedVersionID string) (domain.FormTemplateVersion, error) {
+	current, err := c.formTemplateVersionByID(ctx, template, "")
+	if err != nil {
+		return domain.FormTemplateVersion{}, err
+	}
+	if renderedVersionID = strings.TrimSpace(renderedVersionID); renderedVersionID != "" && renderedVersionID != current.ID {
+		return domain.FormTemplateVersion{}, Conflict("form template changed after this form was opened").WithReasonCode("workflow_form_template_version_changed")
+	}
+	return current, nil
+}
+
 // formTemplateVersionForInstance 取得表單實例提交時綁定的模板版本。
 func (c WorkflowService) formTemplateVersionForInstance(ctx RequestContext, template domain.FormTemplate, instance domain.FormInstance) (domain.FormTemplateVersion, error) {
 	if strings.TrimSpace(instance.TemplateVersionID) == "" {
@@ -59,7 +97,7 @@ func (c WorkflowService) replaceFormInstanceFieldProjection(ctx RequestContext, 
 		if !exists || rawValue == nil {
 			continue
 		}
-		value, ok := projectFormInstanceFieldValue(instance, field, rawValue)
+		value, ok := ProjectFormInstanceFieldValue(instance, field, rawValue)
 		if ok {
 			values = append(values, value)
 		}
@@ -67,8 +105,8 @@ func (c WorkflowService) replaceFormInstanceFieldProjection(ctx RequestContext, 
 	return c.store.ReplaceFormInstanceFieldValues(goContext(ctx), ctx.TenantID, instance.ID, values)
 }
 
-// projectFormInstanceFieldValue 將單一 payload 值轉為可索引型別。
-func projectFormInstanceFieldValue(instance domain.FormInstance, field domain.PlatformFormBuilderField, rawValue any) (domain.FormInstanceFieldValue, bool) {
+// ProjectFormInstanceFieldValue converts a submitted field into its typed reporting projection.
+func ProjectFormInstanceFieldValue(instance domain.FormInstance, field domain.PlatformFormBuilderField, rawValue any) (domain.FormInstanceFieldValue, bool) {
 	createdAt := instance.UpdatedAt
 	if createdAt.IsZero() {
 		createdAt = instance.SubmittedAt

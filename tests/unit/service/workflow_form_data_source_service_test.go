@@ -1,14 +1,15 @@
-package service
+package service_test
 
 import (
 	"testing"
 
 	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/service"
 )
 
 // TestValidateFormFieldBindingRejectsUnsupportedSources verifies persisted bindings are allowlisted.
 func TestValidateFormFieldBindingRejectsUnsupportedSources(t *testing.T) {
-	errors := validateFormFieldBinding("employee", "select", domain.PlatformFormBuilderFieldBinding{
+	errors := service.ValidateFormFieldBinding("employee", "select", domain.PlatformFormBuilderFieldBinding{
 		SourceID: "arbitrary_url", ValueField: "id", LabelField: "name",
 	})
 	if len(errors) != 1 || errors[0].Code != "invalid" {
@@ -23,14 +24,14 @@ func TestValidateAndResolveBoundSubmissionValue(t *testing.T) {
 		{ID: "departments", Kind: "collection", Records: []map[string]interface{}{{"id": "dept-1", "name": "產品部"}}},
 	}}
 
-	resolved, exists, message := validateAndResolveBoundSubmissionValue(catalog, domain.PlatformFormBuilderFieldBinding{
+	resolved, exists, message := service.ValidateAndResolveBoundSubmissionValue(catalog, domain.PlatformFormBuilderFieldBinding{
 		SourceID: "current_user", ValueField: "employee_no",
 	}, "tampered", true)
 	if message != "" || !exists || resolved != "E-001" {
 		t.Fatalf("expected server value to replace client value, got value=%v exists=%v message=%q", resolved, exists, message)
 	}
 
-	_, _, message = validateAndResolveBoundSubmissionValue(catalog, domain.PlatformFormBuilderFieldBinding{
+	_, _, message = service.ValidateAndResolveBoundSubmissionValue(catalog, domain.PlatformFormBuilderFieldBinding{
 		SourceID: "departments", ValueField: "id", LabelField: "name",
 	}, "dept-unknown", true)
 	if message == "" {

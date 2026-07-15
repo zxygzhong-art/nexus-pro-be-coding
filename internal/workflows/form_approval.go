@@ -2,6 +2,7 @@ package workflows
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"time"
 
@@ -12,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
 	"go.opentelemetry.io/otel/trace"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/workflow"
 )
 
@@ -31,6 +33,12 @@ func FormApprovalWorkflow(ctx workflow.Context, input domain.FormApprovalWorkflo
 	workflow.GetVersion(ctx, formApprovalVersionChangeID, workflow.DefaultVersion, 1)
 	ctx = workflow.WithActivityOptions(ctx, workflow.ActivityOptions{
 		StartToCloseTimeout: 30 * time.Second,
+		RetryPolicy: &temporal.RetryPolicy{
+			InitialInterval:    time.Second,
+			BackoffCoefficient: 2,
+			MaximumInterval:    5 * time.Second,
+			MaximumAttempts:    3,
+		},
 	})
 
 	var projection domain.FormApprovalProjection
@@ -118,7 +126,7 @@ func (a *Activities) LoadFormApprovalProjection(ctx context.Context, input domai
 		Context:  ctx,
 		TenantID: input.TenantID,
 	}, input.FormInstanceID)
-	return projection, nonRetryableActivityError(err)
+	return projection, NonRetryableActivityError(err)
 }
 
 // ApplyFormApprovalSignal applies an approve/reject/return/withdraw signal to the read model.
@@ -135,7 +143,7 @@ func (a *Activities) ApplyFormApprovalSignal(ctx context.Context, signal domain.
 		RequestID: signal.RequestID,
 		TraceID:   signal.TraceID,
 	}, signal)
-	return projection, nonRetryableActivityError(err)
+	return projection, NonRetryableActivityError(err)
 }
 
 // RecordFormApprovalReminder writes a reminder notification and audit log.
@@ -150,7 +158,7 @@ func (a *Activities) RecordFormApprovalReminder(ctx context.Context, reminder do
 		TenantID:  reminder.TenantID,
 		AccountID: "system",
 	}, reminder)
-	return nonRetryableActivityError(err)
+	return NonRetryableActivityError(err)
 }
 
 func applyFormApprovalSignal(ctx workflow.Context, current domain.FormApprovalProjection, signal domain.FormApprovalWorkflowSignal) (domain.FormApprovalProjection, error) {
@@ -160,12 +168,21 @@ func applyFormApprovalSignal(ctx workflow.Context, current domain.FormApprovalPr
 	case domain.FormApprovalWorkflowActionApprove, domain.FormApprovalWorkflowActionReject, domain.FormApprovalWorkflowActionReturn, domain.FormApprovalWorkflowActionWithdraw:
 		var projection domain.FormApprovalProjection
 		if err := workflow.ExecuteActivity(ctx, ActivityNameApplyFormApprovalSignal, signal).Get(ctx, &projection); err != nil {
+			if formApprovalSignalBusinessRejection(err) {
+				return current, nil
+			}
 			return domain.FormApprovalProjection{}, err
 		}
 		return projection, nil
 	default:
 		return current, nil
 	}
+}
+
+// formApprovalSignalBusinessRejection keeps deterministic client errors from terminating the workflow.
+func formApprovalSignalBusinessRejection(err error) bool {
+	var appErr *temporal.ApplicationError
+	return errors.As(err, &appErr) && appErr.NonRetryable()
 }
 
 func formApprovalProjectionTerminal(projection domain.FormApprovalProjection) bool {

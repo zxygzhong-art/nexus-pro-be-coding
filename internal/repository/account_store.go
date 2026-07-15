@@ -10,6 +10,7 @@ import (
 type AccountStore interface {
 	UpsertAccount(context.Context, domain.Account) error
 	GetAccount(ctx context.Context, tenantID, id string) (domain.Account, bool, error)
+	UpdateAccountPreferredLocale(ctx context.Context, tenantID, id, preferredLocale string) (domain.Account, bool, error)
 	ListAccounts(ctx context.Context, tenantID string) ([]domain.Account, error)
 	AddAccountGroup(ctx context.Context, tenantID, accountID, groupID string) error
 	RemoveAccountGroup(ctx context.Context, tenantID, accountID, groupID string) error

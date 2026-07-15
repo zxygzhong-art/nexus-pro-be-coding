@@ -17,3 +17,17 @@ func ehrmsFetchError(label string, err error) *domain.AppError {
 	}
 	return appErr
 }
+
+// requireTenantWideEHRMSSyncScope prevents scoped grants from triggering tenant-wide upstream writes.
+func requireTenantWideEHRMSSyncScope(decision CheckResult) error {
+	scope := decision.EffectiveScope
+	if scope == "" {
+		scope = decision.Scope
+	}
+	switch scope {
+	case "", ScopeAll, ScopeTenant, ScopeSystem:
+		return nil
+	default:
+		return forbiddenDataScope("tenant-wide eHRMS sync requires all-tenant access")
+	}
+}

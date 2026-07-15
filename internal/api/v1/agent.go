@@ -236,6 +236,7 @@ func (c AgentCtrl) chatAgent(w http.ResponseWriter, r *http.Request, ctx domain.
 	}
 	var streamMu sync.Mutex
 	wroteHeader := false
+	wroteErrorEvent := false
 	writeStreamHeader := func() {
 		if wroteHeader {
 			return
@@ -254,15 +255,20 @@ func (c AgentCtrl) chatAgent(w http.ResponseWriter, r *http.Request, ctx domain.
 		if err := writeSSEEvent(w, event); err != nil {
 			return err
 		}
+		if event.Event == domain.AgentChatEventError {
+			wroteErrorEvent = true
+		}
 		flusher.Flush()
 		return nil
 	}
-	_, err := c.svc.Chat(ctx, input, emit)
+	run, err := c.svc.Chat(ctx, input, emit)
 	if err != nil {
 		streamMu.Lock()
 		defer streamMu.Unlock()
 		if wroteHeader {
-			_ = writeSSEEvent(w, domain.AgentChatEvent{Event: domain.AgentChatEventError, Message: err.Error()})
+			if !wroteErrorEvent {
+				_ = writeSSEEvent(w, service.AgentRuntimeFailureEvent(ctx, run.ID))
+			}
 			flusher.Flush()
 			return nil
 		}

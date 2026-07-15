@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -131,6 +132,46 @@ func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 	}
 	if _, err := svc.Agent().DeleteModel(ctx, model.ID); err != nil {
 		t.Fatalf("expected unused model to be deleted with its audit: %v", err)
+	}
+}
+
+// TestAgentAdminSupportsTenLocalizedSuggestedQuestions enforces the expanded bounded editor contract.
+func TestAgentAdminSupportsTenLocalizedSuggestedQuestions(t *testing.T) {
+	now := time.Date(2026, 7, 15, 10, 30, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentAdminAccount(t, store, now)
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
+	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
+		Name: "Model", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	questions := make([]domain.LocalizedAgentSuggestedQuestion, domain.MaxAgentSuggestedQuestions)
+	for index := range questions {
+		questions[index] = domain.LocalizedAgentSuggestedQuestion{Translations: map[string]string{
+			domain.PreferredLocaleZHTW: fmt.Sprintf("問題 %d", index+1),
+			domain.PreferredLocaleENUS: fmt.Sprintf("Question %d", index+1),
+		}}
+	}
+	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
+		Name: "Localized Agent", ModelID: model.ID, SuggestedQuestionTranslations: questions,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(agent.SuggestedQuestionTranslations) != domain.MaxAgentSuggestedQuestions {
+		t.Fatalf("expected %d suggestions, got %d", domain.MaxAgentSuggestedQuestions, len(agent.SuggestedQuestionTranslations))
+	}
+
+	tooMany := append(questions, domain.LocalizedAgentSuggestedQuestion{Translations: map[string]string{
+		domain.PreferredLocaleZHTW: "超出上限",
+	}})
+	if _, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
+		Name: "Too Many", ModelID: model.ID, SuggestedQuestionTranslations: tooMany,
+	}); err == nil || !strings.Contains(err.Error(), "at most 10") {
+		t.Fatalf("expected ten-item limit error, got %v", err)
 	}
 }
 

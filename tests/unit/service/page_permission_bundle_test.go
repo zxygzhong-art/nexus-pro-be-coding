@@ -187,6 +187,7 @@ func TestCanonicalWorkspacePageActionsDeriveNavigation(t *testing.T) {
 		{menuKey: "workflow.forms", primaryResource: "workflow.form_template", resource: "workflow.form_template", action: domain.ActionDelete},
 		{menuKey: "agents.models", primaryResource: "agent.model", resource: "agent.model", action: domain.ActionDelete},
 		{menuKey: "agents.definitions", primaryResource: "agent.definition", resource: "agent.definition", action: domain.ActionUpdate},
+		{menuKey: "agents.usage", primaryResource: "agent.definition", resource: "agent.definition", action: domain.ActionRead},
 		{menuKey: "iam.members", primaryResource: "iam.permission_set_assignment", resource: "iam.permission_set_assignment", action: domain.ActionCreate},
 		{menuKey: "iam.user_groups", primaryResource: "iam.user_group", resource: "iam.user_group", action: domain.ActionDelete},
 		{menuKey: "iam.permission_sets", primaryResource: "iam.permission_set", resource: "iam.permission_set", action: domain.ActionUpdate},
@@ -234,6 +235,130 @@ func TestCanonicalWorkspacePageActionsDeriveNavigation(t *testing.T) {
 			}
 			if !pagePermissionHasMenuKey(me.EffectiveMenuKeys, test.menuKey) {
 				t.Fatalf("expected explicit primary read to expose %s, got %+v", test.menuKey, me.EffectiveMenuKeys)
+			}
+		})
+	}
+}
+
+// TestAgentUsageMenuRequiresTenantWideDefinitionRead keeps navigation aligned with the usage service scope guard.
+func TestAgentUsageMenuRequiresTenantWideDefinitionRead(t *testing.T) {
+	tests := []struct {
+		name    string
+		scopes  []domain.Scope
+		visible bool
+	}{
+		{name: "unscoped", scopes: []domain.Scope{""}, visible: true},
+		{name: "self", scopes: []domain.Scope{domain.ScopeSelf}},
+		{name: "own", scopes: []domain.Scope{domain.ScopeOwn}},
+		{name: "all", scopes: []domain.Scope{domain.ScopeAll}, visible: true},
+		{name: "tenant", scopes: []domain.Scope{domain.ScopeTenant}, visible: true},
+		{name: "system_without_assumed_session", scopes: []domain.Scope{domain.ScopeSystem}},
+		{name: "normal_union_all_and_self", scopes: []domain.Scope{domain.ScopeAll, domain.ScopeSelf}, visible: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			now := pagePermissionTestNow()
+			store := pagePermissionTestStore(now)
+			permissions := []domain.Permission{
+				pagePermissionAPI("workbench", "me", domain.ActionRead),
+				pagePermissionMenu("agents.usage"),
+			}
+			for _, scope := range test.scopes {
+				permissions = append(permissions, domain.Permission{
+					Resource:       "agent.definition",
+					Action:         domain.ActionRead,
+					Scope:          scope,
+					PermissionType: domain.PermissionTypeAPI,
+					MenuKey:        "agents.usage",
+				})
+			}
+			pagePermissionUpsertSet(store, now, "ps-usage", permissions)
+			pagePermissionUpsertAccount(store, now, []string{"ps-usage"})
+
+			me, err := service.New(store).Me().Resolve(pagePermissionTestContext())
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := pagePermissionHasMenuKey(me.EffectiveMenuKeys, "agents.usage"); got != test.visible {
+				t.Fatalf("expected agents.usage visibility %v for scopes %v, got keys %+v", test.visible, test.scopes, me.EffectiveMenuKeys)
+			}
+			if got := pagePermissionHasPermission(me.EffectivePermissions, domain.PermissionTypeMenu, "agents.usage", domain.ActionRead); got != test.visible {
+				t.Fatalf("expected agents.usage menu grant visibility %v for scopes %v, got permissions %+v", test.visible, test.scopes, me.EffectivePermissions)
+			}
+		})
+	}
+}
+
+// TestAgentUsageMenuUsesFinalAssumedRoleScope validates normal and assumed scope intersection before showing usage.
+func TestAgentUsageMenuUsesFinalAssumedRoleScope(t *testing.T) {
+	tests := []struct {
+		name          string
+		assumedScope  domain.Scope
+		expectedScope domain.Scope
+		visible       bool
+	}{
+		{name: "self", assumedScope: domain.ScopeSelf, expectedScope: domain.ScopeSelf},
+		{name: "tenant", assumedScope: domain.ScopeTenant, expectedScope: domain.ScopeTenant, visible: true},
+		{name: "all", assumedScope: domain.ScopeAll, expectedScope: domain.ScopeAll, visible: true},
+		{name: "system", assumedScope: domain.ScopeSystem, expectedScope: domain.ScopeSystem, visible: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			now := pagePermissionTestNow()
+			store := pagePermissionTestStore(now)
+			pagePermissionUpsertSet(store, now, "ps-base", []domain.Permission{
+				{Resource: "iam.assumable_role", Action: domain.ActionAssume, Target: "role-usage", Scope: domain.ScopeAll},
+				pagePermissionAPI("workbench", "me", domain.ActionRead),
+				pagePermissionAPI("agents.usage", "agent.definition", domain.ActionRead),
+				pagePermissionMenu("agents.usage"),
+			})
+			pagePermissionUpsertSet(store, now, "ps-role-usage", []domain.Permission{
+				pagePermissionAPI("workbench", "me", domain.ActionRead),
+				{
+					Resource:       "agent.definition",
+					Action:         domain.ActionRead,
+					Scope:          test.assumedScope,
+					PermissionType: domain.PermissionTypeAPI,
+					MenuKey:        "agents.usage",
+				},
+				pagePermissionMenu("agents.usage"),
+			})
+			pagePermissionUpsertAccount(store, now, []string{"ps-base"})
+			_ = store.UpsertAssumableRole(context.Background(), domain.AssumableRole{
+				ID:                     "role-usage",
+				TenantID:               "tenant-1",
+				Name:                   "Usage Scope Role",
+				PermissionSetIDs:       []string{"ps-role-usage"},
+				Trusted:                true,
+				TrustPolicy:            map[string]any{"accounts": []string{"acct-1"}},
+				PermissionBoundary:     map[string]any{"allow": []string{"platform.me.read", "agent.definition.read"}},
+				SessionDurationSeconds: 3600,
+				CreatedAt:              now,
+			})
+			svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+			session, err := svc.IAM().AssumeRole(pagePermissionTestContext(), "role-usage", domain.AssumeRoleInput{Reason: "usage scope test"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			ctx := pagePermissionTestContext()
+			ctx.AssumedRoleSessionID = session.SessionID
+			decision, err := svc.Authz().Check(ctx, domain.CheckRequest{Resource: "agent.definition", Action: domain.ActionRead})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !decision.Allowed || decision.Scope != test.expectedScope {
+				t.Fatalf("expected final decision scope %s, got %+v", test.expectedScope, decision)
+			}
+
+			me, err := svc.Me().Resolve(ctx)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := pagePermissionHasMenuKey(me.EffectiveMenuKeys, "agents.usage"); got != test.visible {
+				t.Fatalf("expected agents.usage visibility %v for assumed scope %s, got keys %+v", test.visible, test.assumedScope, me.EffectiveMenuKeys)
+			}
+			if got := pagePermissionHasPermission(me.EffectivePermissions, domain.PermissionTypeMenu, "agents.usage", domain.ActionRead); got != test.visible {
+				t.Fatalf("expected agents.usage menu grant visibility %v for assumed scope %s, got permissions %+v", test.visible, test.assumedScope, me.EffectivePermissions)
 			}
 		})
 	}

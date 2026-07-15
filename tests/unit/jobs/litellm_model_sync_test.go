@@ -1,4 +1,4 @@
-package jobs
+package jobs_test
 
 import (
 	"context"
@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/jobs"
 	platformsecret "nexus-pro-be/internal/platform/secret"
 	"nexus-pro-be/internal/repository/memory"
 )
@@ -56,7 +57,7 @@ func TestLiteLLMModelSyncerDecryptsCredentialOnlyAtDispatch(t *testing.T) {
 		t.Fatal(err)
 	}
 	admin := &fakeLiteLLMModelAdmin{}
-	if _, err := NewLiteLLMModelSyncer(store, admin, nil).WithCredentialCipher(cipher).ReconcileAll(ctx); err != nil {
+	if _, err := jobs.NewLiteLLMModelSyncer(store, admin, nil).WithCredentialCipher(cipher).ReconcileAll(ctx); err != nil {
 		t.Fatal(err)
 	}
 	if len(admin.apiKeys) != 1 || admin.apiKeys[0] != "sk-upstream" {
@@ -92,8 +93,7 @@ func TestLiteLLMModelSyncerReconcileAllUpsertsActiveAndDeletesDisabled(t *testin
 		}
 	}
 	admin := &fakeLiteLLMModelAdmin{remote: []string{"amodel-active", "amodel-disabled", "amodel-orphan"}}
-	syncer := NewLiteLLMModelSyncer(store, admin, nil)
-	syncer.now = func() time.Time { return now.Add(time.Minute) }
+	syncer := jobs.NewLiteLLMModelSyncer(store, admin, nil)
 	processed, err := syncer.ReconcileAll(ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -128,7 +128,7 @@ func TestLiteLLMModelSyncerDoesNotOverwriteRouteWithoutCredential(t *testing.T) 
 		t.Fatal(err)
 	}
 	admin := &fakeLiteLLMModelAdmin{}
-	syncer := NewLiteLLMModelSyncer(store, admin, nil)
+	syncer := jobs.NewLiteLLMModelSyncer(store, admin, nil)
 	processed, err := syncer.ReconcileAll(ctx)
 	if processed != 1 || err == nil {
 		t.Fatalf("expected missing credential to fail closed, processed=%d err=%v", processed, err)
@@ -150,8 +150,8 @@ func TestOutboxDispatcherKeepsModelEventPendingWithoutLiteLLMConfig(t *testing.T
 	if err := store.AppendOutboxEvent(ctx, event); err != nil {
 		t.Fatal(err)
 	}
-	dispatcher := NewOutboxDispatcher(store, nil, nil).WithAgentModelSyncHandler(NewLiteLLMModelSyncer(store, nil, nil))
-	if _, err := dispatcher.ProcessTenant(ctx, "tenant-1", OutboxDispatchOptions{}); err != nil {
+	dispatcher := jobs.NewOutboxDispatcher(store, nil, nil).WithAgentModelSyncHandler(jobs.NewLiteLLMModelSyncer(store, nil, nil))
+	if _, err := dispatcher.ProcessTenant(ctx, "tenant-1", jobs.OutboxDispatchOptions{}); err != nil {
 		t.Fatal(err)
 	}
 	events, err := store.ListOutboxEvents(ctx, "tenant-1")

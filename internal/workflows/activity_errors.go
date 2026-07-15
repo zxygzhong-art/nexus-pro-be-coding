@@ -6,8 +6,8 @@ import (
 	"go.temporal.io/sdk/temporal"
 )
 
-// nonRetryableActivityError marks client/data errors that should not be retried by Temporal.
-func nonRetryableActivityError(err error) error {
+// NonRetryableActivityError converts permanent domain failures into non-retryable Temporal errors.
+func NonRetryableActivityError(err error) error {
 	if err == nil {
 		return nil
 	}
@@ -16,7 +16,7 @@ func nonRetryableActivityError(err error) error {
 		return err
 	}
 	switch appErr.Status {
-	case 400, 404:
+	case 400, 401, 403, 404, 409, 422:
 		return temporal.NewNonRetryableApplicationError(appErr.Message, appErr.Code, err)
 	default:
 		return err

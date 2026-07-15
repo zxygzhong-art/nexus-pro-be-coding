@@ -1,4 +1,4 @@
-package llm
+package llm_test
 
 import (
 	"context"
@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/platform/llm"
 )
 
 // TestLiteLLMAdminSyncModelCreatesThenUpdates 驗證 stable ID 的 info/upsert 路徑與 payload。
@@ -54,7 +55,7 @@ func TestLiteLLMAdminSyncModelCreatesThenUpdates(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewLiteLLMAdminClient(LiteLLMAdminConfig{BaseURL: server.URL, MasterKey: "master-key", Client: server.Client()})
+	client, err := llm.NewLiteLLMAdminClient(llm.LiteLLMAdminConfig{BaseURL: server.URL, MasterKey: "master-key", Client: server.Client()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +109,7 @@ func TestLiteLLMAdminDeleteModelTreatsMissingAsSuccess(t *testing.T) {
 		_, _ = w.Write([]byte(`{"detail":{"error":"Model id = amodel-1 not found on litellm proxy"}}`))
 	}))
 	defer server.Close()
-	client, err := NewLiteLLMAdminClient(LiteLLMAdminConfig{BaseURL: server.URL, MasterKey: "master-key", Client: server.Client()})
+	client, err := llm.NewLiteLLMAdminClient(llm.LiteLLMAdminConfig{BaseURL: server.URL, MasterKey: "master-key", Client: server.Client()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +135,7 @@ func TestLiteLLMAdminSyncModelPreservesUnrelatedBadRequest(t *testing.T) {
 		}
 	}))
 	defer server.Close()
-	client, err := NewLiteLLMAdminClient(LiteLLMAdminConfig{BaseURL: server.URL, MasterKey: "master-key", Client: server.Client()})
+	client, err := llm.NewLiteLLMAdminClient(llm.LiteLLMAdminConfig{BaseURL: server.URL, MasterKey: "master-key", Client: server.Client()})
 	if err != nil {
 		t.Fatal(err)
 	}

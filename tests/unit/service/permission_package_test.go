@@ -31,6 +31,13 @@ func TestPermissionPackageSchemaValidationRejectsMissingFieldsAndBadVersion(t *t
 	if err := service.ValidatePermissionPackageContent(badVersion); err == nil {
 		t.Fatal("expected non-semver version to be rejected")
 	}
+
+	duplicatePermission := valid
+	duplicatePermission.Permissions = append([]domain.Permission(nil), valid.Permissions...)
+	duplicatePermission.Permissions = append(duplicatePermission.Permissions, valid.Permissions[0])
+	if err := service.ValidatePermissionPackageContent(duplicatePermission); err == nil {
+		t.Fatal("expected duplicate application/resource/action permission to be rejected")
+	}
 }
 
 func TestDefaultHRPermissionPackageJSONMatchesBuilder(t *testing.T) {
@@ -55,6 +62,85 @@ func TestDefaultHRPermissionPackageJSONMatchesBuilder(t *testing.T) {
 	}
 	if fileChecksum != builderChecksum {
 		t.Fatal("ops/permission-packages/hr-1.0.0.json drifted from DefaultHRPermissionPackageContent")
+	}
+}
+
+func TestDefaultHRPermissionPackagePermissionsAreCanonical(t *testing.T) {
+	content := service.DefaultHRPermissionPackageContent()
+	riskRank := func(value string) int {
+		switch value {
+		case string(domain.RiskCritical):
+			return 3
+		case string(domain.RiskHigh):
+			return 2
+		default:
+			return 1
+		}
+	}
+	permissionKey := func(application, resource, action string) string {
+		return strings.Join([]string{application, resource, action}, "\x00")
+	}
+
+	expectedRisks := make(map[string]string)
+	for _, policy := range domain.DefaultRoutePolicies {
+		key := permissionKey(policy.ApplicationCode, policy.ResourceType, policy.Action)
+		candidate := string(policy.RiskLevel)
+		current, exists := expectedRisks[key]
+		if !exists || riskRank(candidate) > riskRank(current) {
+			expectedRisks[key] = candidate
+		}
+	}
+	seen := make(map[string]struct{}, len(content.Permissions))
+	for _, permission := range content.Permissions {
+		key := permissionKey(string(permission.ApplicationCode), string(permission.ResourceType), string(permission.Action))
+		if _, duplicate := seen[key]; duplicate {
+			t.Fatalf("duplicate canonical permission %q", key)
+		}
+		seen[key] = struct{}{}
+		if permission.RiskLevel != expectedRisks[key] {
+			t.Fatalf("expected highest risk %q for %q, got %q", expectedRisks[key], key, permission.RiskLevel)
+		}
+	}
+	if len(seen) != len(expectedRisks) {
+		t.Fatalf("expected %d canonical route permissions, got %d", len(expectedRisks), len(seen))
+	}
+
+	usageMenus := 0
+	var countUsageMenus func([]domain.PermissionPackageMenu)
+	countUsageMenus = func(menus []domain.PermissionPackageMenu) {
+		for _, menu := range menus {
+			if menu.Key == "agents.usage" {
+				usageMenus++
+			}
+			countUsageMenus(menu.Children)
+		}
+	}
+	countUsageMenus(content.Menus)
+	if usageMenus != 1 {
+		t.Fatalf("expected agents.usage menu exactly once, got %d", usageMenus)
+	}
+}
+
+func TestDefaultHRPermissionPackageUsesEmployeeLeaveSelfServicePath(t *testing.T) {
+	menus := service.DefaultHRPermissionPackageContent().Menus
+	var findMenu func([]domain.PermissionPackageMenu, string) (domain.PermissionPackageMenu, bool)
+	findMenu = func(items []domain.PermissionPackageMenu, key string) (domain.PermissionPackageMenu, bool) {
+		for _, item := range items {
+			if item.Key == key {
+				return item, true
+			}
+			if found, ok := findMenu(item.Children, key); ok {
+				return found, true
+			}
+		}
+		return domain.PermissionPackageMenu{}, false
+	}
+	menu, ok := findMenu(menus, "attendance.leave")
+	if !ok {
+		t.Fatal("expected attendance.leave menu")
+	}
+	if menu.Path != "/attendance" || menu.Label != "我的假勤" {
+		t.Fatalf("expected employee leave self-service menu, got %+v", menu)
 	}
 }
 

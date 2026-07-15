@@ -171,6 +171,8 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 		ShiftAssignmentID: assignment.ID,
 		ShiftID:           shift.ID,
 		WorksiteID:        worksite.ID,
+		WorksiteName:      worksite.Name,
+		WorksiteAddress:   worksite.Address,
 		WorkDate:          workDate,
 		Direction:         direction,
 		ClientEventID:     clientEventID,
@@ -218,6 +220,10 @@ func (c AttendanceService) ListAttendanceClockRecordPage(ctx RequestContext, que
 		return PageResponse[AttendanceClockRecord]{}, err
 	}
 	items, err = c.filterClockRecordsByDecision(ctx, account, decision, items)
+	if err != nil {
+		return PageResponse[AttendanceClockRecord]{}, err
+	}
+	items, err = c.attachAttendanceClockWorksiteDetails(ctx, items)
 	if err != nil {
 		return PageResponse[AttendanceClockRecord]{}, err
 	}
@@ -440,6 +446,30 @@ func applyAttendanceClockFieldPolicies(items []AttendanceClockRecord, policies m
 	return out
 }
 
+// attachAttendanceClockWorksiteDetails adds display metadata only for worksites already linked to authorized records.
+func (c AttendanceService) attachAttendanceClockWorksiteDetails(ctx RequestContext, items []AttendanceClockRecord) ([]AttendanceClockRecord, error) {
+	if len(items) == 0 {
+		return items, nil
+	}
+	worksites, err := c.store.ListAttendanceWorksites(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	worksitesByID := make(map[string]AttendanceWorksite, len(worksites))
+	for _, worksite := range worksites {
+		worksitesByID[worksite.ID] = worksite
+	}
+	for index := range items {
+		worksite, ok := worksitesByID[items[index].WorksiteID]
+		if !ok {
+			continue
+		}
+		items[index].WorksiteName = worksite.Name
+		items[index].WorksiteAddress = worksite.Address
+	}
+	return items, nil
+}
+
 // applyAttendanceClockFieldPolicy 處理 apply 考勤打卡欄位政策。
 func applyAttendanceClockFieldPolicy(item AttendanceClockRecord, policies map[string]string) AttendanceClockRecord {
 	for field, effect := range policies {
@@ -585,6 +615,8 @@ func (c AttendanceService) applyApprovedAttendanceCorrection(ctx RequestContext,
 		TenantID:            ctx.TenantID,
 		EmployeeID:          current.EmployeeID,
 		WorksiteID:          worksite.ID,
+		WorksiteName:        worksite.Name,
+		WorksiteAddress:     worksite.Address,
 		WorkDate:            current.WorkDate,
 		Direction:           current.Direction,
 		ClockedAt:           current.RequestedClockedAt,

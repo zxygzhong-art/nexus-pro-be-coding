@@ -88,7 +88,7 @@ func TestPermissionCatalogGroupsRouteAPIsUnderCanonicalPages(t *testing.T) {
 			t.Fatalf("expected API catalog item %s:%s", expected.resource, expected.action)
 		}
 	}
-	for _, menuKey := range []string{"workflow.instances", "agents.runs", "attendance.corrections", "attendance.worksites"} {
+	for _, menuKey := range []string{"workflow.instances", "agents.runs", "agents.usage", "attendance.corrections", "attendance.worksites"} {
 		found := false
 		for _, item := range items {
 			if item.PermissionType == domain.PermissionTypeMenu && item.MenuKey == menuKey {

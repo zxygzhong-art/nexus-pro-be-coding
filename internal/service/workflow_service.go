@@ -61,6 +61,54 @@ func (c WorkflowService) ListFormTemplatePage(ctx RequestContext, page PageReque
 	return utils.PageResponse(items, page), nil
 }
 
+// GetRuntimeFormTemplate returns the exact published schema used to render and submit a form.
+func (c WorkflowService) GetRuntimeFormTemplate(ctx RequestContext, templateKey, versionID string) (domain.RuntimeFormTemplate, error) {
+	templateKey = strings.TrimSpace(templateKey)
+	if templateKey == "" {
+		return domain.RuntimeFormTemplate{}, BadRequest("template key is required")
+	}
+	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, ""); err != nil {
+		return domain.RuntimeFormTemplate{}, err
+	}
+	template, ok, err := c.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, templateKey)
+	if err != nil {
+		return domain.RuntimeFormTemplate{}, err
+	}
+	if !ok {
+		return domain.RuntimeFormTemplate{}, NotFound("form template", templateKey)
+	}
+	if status := strings.TrimSpace(strings.ToLower(template.Status)); status != "" && status != "published" {
+		return domain.RuntimeFormTemplate{}, BadRequest("form template is not published")
+	}
+	if err := validateWorkflowTemplateSubmittable(template); err != nil {
+		return domain.RuntimeFormTemplate{}, err
+	}
+	version, err := c.formTemplateVersionByID(ctx, template, versionID)
+	if err != nil {
+		return domain.RuntimeFormTemplate{}, err
+	}
+	versionedTemplate := formTemplateAtVersion(template, version)
+	if err := validateWorkflowTemplateSubmittable(versionedTemplate); err != nil {
+		return domain.RuntimeFormTemplate{}, err
+	}
+	fields := platformTemplateFields(template.Key, versionedTemplate.Schema)
+	if len(fields) == 0 {
+		return domain.RuntimeFormTemplate{}, BadRequest("form template has no fields")
+	}
+	return domain.RuntimeFormTemplate{
+		ID:                template.ID,
+		TemplateVersionID: version.ID,
+		Key:               template.Key,
+		Name:              template.Name,
+		Description:       template.Description,
+		Version:           version.Version,
+		FormKind:          firstNonEmpty(platformTemplateFormKind(versionedTemplate.Schema), defaultFormKindForTemplateKey(template.Key)),
+		Icon:              platformTemplateIcon(versionedTemplate),
+		Fields:            fields,
+		Stages:            platformTemplateStages(versionedTemplate.Schema),
+	}, nil
+}
+
 // CreateFormTemplate 建立表單範本的服務流程。
 func (c WorkflowService) CreateFormTemplate(ctx RequestContext, input CreateFormTemplateInput) (FormTemplate, error) {
 	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceType("form_template"), ActionCreate, ""); err != nil {
@@ -118,6 +166,36 @@ func (c WorkflowService) ListFormInstancePage(ctx RequestContext, query FormInst
 	return utils.PageResponseFromStore(items, total, page), nil
 }
 
+// GetFormInstanceDetail returns one authorized form instance with its template identity.
+func (c WorkflowService) GetFormInstanceDetail(ctx RequestContext, id string) (FormInstanceDetail, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return FormInstanceDetail{}, BadRequest("id is required")
+	}
+	account, decision, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
+	if err != nil {
+		return FormInstanceDetail{}, err
+	}
+	instance, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, id)
+	if err != nil {
+		return FormInstanceDetail{}, err
+	}
+	if !ok {
+		return FormInstanceDetail{}, NotFound("form instance", id)
+	}
+	if err := requireFormInstanceVisible(instance, account, decision); err != nil {
+		return FormInstanceDetail{}, err
+	}
+	template, ok, err := c.store.GetFormTemplate(goContext(ctx), ctx.TenantID, instance.TemplateID)
+	if err != nil {
+		return FormInstanceDetail{}, err
+	}
+	if !ok {
+		return FormInstanceDetail{}, NotFound("form template", instance.TemplateID)
+	}
+	return FormInstanceDetail{FormInstance: instance, TemplateKey: template.Key, TemplateName: template.Name}, nil
+}
+
 // ReviewQueue 處理審核佇列的服務流程。
 func (c WorkflowService) ReviewQueue(ctx RequestContext) (WorkflowReviewQueueResponse, error) {
 	items, account, err := c.listFormInstances(ctx, FormInstanceQuery{})
@@ -127,6 +205,24 @@ func (c WorkflowService) ReviewQueue(ctx RequestContext) (WorkflowReviewQueueRes
 	pendingForAccount, err := workflowFormInstancePendingForAccount(ctx, c.store, ctx.TenantID, account.ID)
 	if err != nil {
 		return WorkflowReviewQueueResponse{}, err
+	}
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		seen[item.ID] = struct{}{}
+	}
+	for formInstanceID := range pendingForAccount {
+		if _, ok := seen[formInstanceID]; ok {
+			continue
+		}
+		item, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, formInstanceID)
+		if err != nil {
+			return WorkflowReviewQueueResponse{}, err
+		}
+		if !ok {
+			continue
+		}
+		items = append(items, item)
+		seen[item.ID] = struct{}{}
 	}
 	templates, err := c.formTemplateMap(ctx)
 	if err != nil {
@@ -192,7 +288,10 @@ func (c WorkflowService) SaveFormDraft(ctx RequestContext, input SaveFormDraftIn
 	if !ok {
 		return FormInstance{}, NotFound("form template", templateKey)
 	}
-	version, err := c.currentFormTemplateVersion(ctx, template)
+	if err := validateWorkflowTemplateSubmittable(template); err != nil {
+		return FormInstance{}, err
+	}
+	version, err := c.currentFormTemplateVersionForNewInstance(ctx, template, input.TemplateVersionID)
 	if err != nil {
 		return FormInstance{}, err
 	}
@@ -368,7 +467,7 @@ func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (
 	} else if ok {
 		instance, err = c.submitExistingDraft(ctx, existing.ID, input.Payload)
 	} else {
-		instance, err = c.submitNewForm(ctx, idOrTemplateKey, input.Payload)
+		instance, err = c.submitNewForm(ctx, idOrTemplateKey, input.TemplateVersionID, input.Payload)
 	}
 	if err != nil {
 		return FormInstance{}, err
@@ -381,14 +480,20 @@ func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (
 }
 
 // submitNewForm 提交 new 表單的服務流程。
-func (c WorkflowService) submitNewForm(ctx RequestContext, templateKey string, payload map[string]any) (FormInstance, error) {
+func (c WorkflowService) submitNewForm(ctx RequestContext, templateKey, templateVersionID string, payload map[string]any) (FormInstance, error) {
 	account, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionSubmit, "")
 	if err != nil {
 		return FormInstance{}, err
 	}
+	return c.submitNewFormForApplicant(ctx, account, templateKey, templateVersionID, payload)
+}
+
+// submitNewFormForApplicant runs the canonical submission transaction after the caller authorizes the entrypoint.
+func (c WorkflowService) submitNewFormForApplicant(ctx RequestContext, account Account, templateKey, templateVersionID string, payload map[string]any) (FormInstance, error) {
 	var instance FormInstance
 	var template FormTemplate
 	var linkedLeaveRequest LeaveRequest
+	var linkedOvertimeRequest OvertimeRequest
 	if err := c.withTransaction(ctx, func(tx WorkflowService) error {
 		nextTemplate, ok, err := tx.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, templateKey)
 		if err != nil {
@@ -400,7 +505,7 @@ func (c WorkflowService) submitNewForm(ctx RequestContext, templateKey string, p
 		if err := validateWorkflowTemplateSubmittable(nextTemplate); err != nil {
 			return err
 		}
-		version, err := tx.currentFormTemplateVersion(ctx, nextTemplate)
+		version, err := tx.currentFormTemplateVersionForNewInstance(ctx, nextTemplate, templateVersionID)
 		if err != nil {
 			return err
 		}
@@ -438,7 +543,12 @@ func (c WorkflowService) submitNewForm(ctx RequestContext, templateKey string, p
 			return err
 		}
 		linkedLeaveRequest = linked
-		if linked.ID != "" {
+		linkedOvertime, err := tx.Service.Attendance().createOvertimeRequestFromSubmittedForm(ctx, instance, template.Key, instance.Payload)
+		if err != nil {
+			return err
+		}
+		linkedOvertimeRequest = linkedOvertime
+		if linked.ID != "" || linkedOvertime.ID != "" {
 			updated, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, instance.ID)
 			if err != nil {
 				return err
@@ -464,6 +574,14 @@ func (c WorkflowService) submitNewForm(ctx RequestContext, templateKey string, p
 			"hours", linkedLeaveRequest.Hours,
 		)
 	}
+	if linkedOvertimeRequest.ID != "" {
+		c.logInfo(ctx, "overtime request linked from form submit",
+			"overtime_request_id", linkedOvertimeRequest.ID,
+			"form_instance_id", instance.ID,
+			"template_key", template.Key,
+			"hours", linkedOvertimeRequest.Hours,
+		)
+	}
 	c.logInfo(ctx, "form submitted",
 		"form_instance_id", instance.ID,
 		"form_template_id", template.ID,
@@ -485,6 +603,7 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 	var instance FormInstance
 	var template FormTemplate
 	var linkedLeaveRequest LeaveRequest
+	var linkedOvertimeRequest OvertimeRequest
 	if err := c.withTransaction(ctx, func(tx WorkflowService) error {
 		next, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, id)
 		if err != nil {
@@ -557,7 +676,12 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 			return err
 		}
 		linkedLeaveRequest = linked
-		if linked.ID != "" {
+		linkedOvertime, err := tx.Service.Attendance().createOvertimeRequestFromSubmittedForm(ctx, instance, template.Key, instance.Payload)
+		if err != nil {
+			return err
+		}
+		linkedOvertimeRequest = linkedOvertime
+		if linked.ID != "" || linkedOvertime.ID != "" {
 			updated, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, instance.ID)
 			if err != nil {
 				return err
@@ -578,6 +702,14 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 			"template_key", template.Key,
 			"leave_type", linkedLeaveRequest.LeaveType,
 			"hours", linkedLeaveRequest.Hours,
+		)
+	}
+	if linkedOvertimeRequest.ID != "" {
+		c.logInfo(ctx, "overtime request linked from form submit",
+			"overtime_request_id", linkedOvertimeRequest.ID,
+			"form_instance_id", instance.ID,
+			"template_key", template.Key,
+			"hours", linkedOvertimeRequest.Hours,
 		)
 	}
 	return instance, nil
@@ -678,14 +810,27 @@ func (c WorkflowService) DuplicateForm(ctx RequestContext, id string) (FormInsta
 	if err := requireFormInstanceVisible(current, reader, readDecision); err != nil {
 		return FormInstance{}, err
 	}
+	template, ok, err := c.store.GetFormTemplate(goContext(ctx), ctx.TenantID, current.TemplateID)
+	if err != nil {
+		return FormInstance{}, err
+	}
+	if !ok {
+		return FormInstance{}, NotFound("form template", current.TemplateID)
+	}
+	version, err := c.formTemplateVersionForInstance(ctx, template, current)
+	if err != nil {
+		return FormInstance{}, err
+	}
+	template = formTemplateAtVersion(template, version)
 	now := c.Now()
 	next := FormInstance{
 		ID:                 utils.NewID("fi"),
 		TenantID:           ctx.TenantID,
 		TemplateID:         current.TemplateID,
+		TemplateVersionID:  version.ID,
 		ApplicantAccountID: reader.ID,
 		Status:             workflowFormStatusDraft,
-		Payload:            workflowPayload(current.Payload),
+		Payload:            workflowPayloadForNewInstance(template, current.Payload),
 		SubmittedAt:        now,
 		UpdatedAt:          now,
 	}
@@ -695,6 +840,7 @@ func (c WorkflowService) DuplicateForm(ctx RequestContext, id string) (FormInsta
 	if err := c.audit(ctx, "workflow.form.duplicate", "form_instance", next.ID, "low", map[string]any{
 		"source_form_instance_id": current.ID,
 		"template_id":             current.TemplateID,
+		"template_version_id":     version.ID,
 	}); err != nil {
 		return FormInstance{}, err
 	}

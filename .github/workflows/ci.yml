@@ -37,8 +37,15 @@ jobs:
       - name: Unit tests
         run: GOCACHE=$PWD/.gocache go test ./tests/unit/...
 
-      - name: Package tests
+      - name: Compile internal packages
         run: GOCACHE=$PWD/.gocache go test ./internal/...
+
+      - name: Validate API smoke coverage
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python3 -m unittest discover -s tests/unit/tools/api-smoke -p 'test_*.py'
+          python3 tools/api-smoke/full_api_smoke.py --check-coverage
 
       - name: Validate migrations
         run: make migrate-validate

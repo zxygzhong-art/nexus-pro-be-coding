@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/repository/memory"
@@ -58,4 +59,39 @@ func startWorkflowRunForTest(t *testing.T, svc *service.Service, store *memory.S
 	if err := svc.Workflow().StartWorkflowRun(domain.RequestContext{TenantID: tenantID, AccountID: applicantAccountID}, instance, template, applicant); err != nil {
 		t.Fatal(err)
 	}
+}
+
+// grantDirectAttendanceCreatePermission enables the compatibility create endpoints for the workflow applicant fixture.
+func grantDirectAttendanceCreatePermission(t *testing.T, store *memory.Store) {
+	t.Helper()
+	permissionSet, ok, err := store.GetPermissionSet(t.Context(), "tenant-1", "ps-workflow-applicant")
+	if err != nil || !ok {
+		t.Fatalf("permission set lookup failed ok=%v err=%v", ok, err)
+	}
+	permissionSet.Permissions = append(permissionSet.Permissions, domain.Permission{
+		Resource: "attendance.leave", Action: "create", Scope: "self",
+	})
+	if err := store.UpsertPermissionSet(t.Context(), permissionSet); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// newDirectAttendanceWorkflowService seeds the minimum review contract required by compatibility submissions.
+func newDirectAttendanceWorkflowService(t *testing.T, store *memory.Store, now time.Time, templateKeys ...string) *service.Service {
+	t.Helper()
+	if err := store.UpsertAccount(t.Context(), domain.Account{
+		ID: "acct-direct-reviewer", TenantID: "tenant-1", DisplayName: "Direct Reviewer", Status: "active", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	for _, templateKey := range templateKeys {
+		if err := store.UpsertFormTemplate(t.Context(), domain.FormTemplate{
+			ID: "ft-" + templateKey, TenantID: "tenant-1", Key: templateKey, Name: templateKey,
+			Schema: workflowEnabledTemplateSchema("acct-direct-reviewer"), CreatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now }})
+	return svc
 }

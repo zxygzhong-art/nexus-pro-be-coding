@@ -102,7 +102,7 @@ COMPOSE_PROFILES=litellm docker compose --env-file .env up -d --no-deps litellm
 
 模型設定頁透過 LiteLLM 的 `/model/new`、`/model/update` 與 `/model/delete` 管理動態路由，因此 LiteLLM 必須同時具備 `DATABASE_URL` 與 `STORE_MODEL_IN_DB=True`。Compose 會依 PostgreSQL 連線設定自動組出 `DATABASE_URL`，並由 `LITELLM_STORE_MODEL_IN_DB` 控制寫入開關。
 
-知識庫使用 PostgreSQL 的 `vector` extension 保存文件分塊向量，後端只呼叫 LiteLLM 公共 alias `nexus-pro-embedding`。`LITELLM_EMBEDDING_UPSTREAM_MODEL` 可替換實際 embedding 模型，不需要修改後端；若替換後向量維度改變，舊文件需重新儲存或執行後續 reindex 才會進入新維度的檢索結果。
+知識庫使用 PostgreSQL 的 `vector` extension 保存文件分塊向量，後端只呼叫 LiteLLM 公共 alias `nexus-pro-embedding`，實際 embedding 模型在 `litellm/config.yaml` 中維護；若替換後向量維度改變，舊文件需重新儲存或執行後續 reindex 才會進入新維度的檢索結果。
 
 只部署 SFTPGo：
 

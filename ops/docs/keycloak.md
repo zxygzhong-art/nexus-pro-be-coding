@@ -97,7 +97,7 @@ http://127.0.0.1:8080/realms/nexus-pro
 curl -s http://127.0.0.1:8080/realms/nexus-pro/.well-known/openid-configuration | jq .issuer
 ```
 
-## 3. 配置应用 Client
+## 3. 步骤一：配置登录 Client `nexus-pro-connect-api`
 
 项目约定 client id 为 **`nexus-pro-connect-api`**，同时服务于前端 BFF 和后端 token 校验。
 
@@ -139,7 +139,7 @@ curl -s http://127.0.0.1:8080/realms/nexus-pro/.well-known/openid-configuration 
 
 前端 `exchangeKeycloakToken` 在配置了 secret 时会自动附带 `client_secret`。
 
-## 4. Protocol Mappers（关键）
+### 3.5 Protocol Mappers（关键）
 
 后端校验 access token 时，除标准 OIDC claims 外，**必须**包含：
 
@@ -152,7 +152,7 @@ curl -s http://127.0.0.1:8080/realms/nexus-pro/.well-known/openid-configuration 
 
 在 **`nexus-pro-connect-api` → Client scopes → Dedicated scope → Add mapper → By configuration → User Attribute`** 分别添加：
 
-### Mapper 1：`tenant_id`
+#### Mapper 1：`tenant_id`
 
 | 字段 | 值 |
 | --- | --- |
@@ -164,7 +164,7 @@ curl -s http://127.0.0.1:8080/realms/nexus-pro/.well-known/openid-configuration 
 | Add to access token | **On** |
 | Add to userinfo | On |
 
-### Mapper 2：`account_id`
+#### Mapper 2：`account_id`
 
 | 字段 | 值 |
 | --- | --- |
@@ -176,11 +176,11 @@ curl -s http://127.0.0.1:8080/realms/nexus-pro/.well-known/openid-configuration 
 | Add to access token | **On** |
 | Add to userinfo | On |
 
-### Audience 说明
+#### Audience 说明
 
 后端还会校验 `aud` 包含 `KEYCLOAK_CLIENT_ID`（即 `nexus-pro-connect-api`）。Keycloak 默认会为目标 client 签发 audience，一般无需额外 mapper。若自定义了 audience 行为，确保 access token 的 `aud` 包含该 client id。
 
-## 5. 配置 Admin Client（用户开通，可选）
+## 4. 步骤二：配置管理 Client `nexus-pro-admin`
 
 当 `KEYCLOAK_PROVISION_USERS=true` 时，后端通过 Keycloak Admin API 在员工创建 / 导入 / 邀请时自动开通用户。需要一个 **Service Account** client。
 
@@ -198,7 +198,8 @@ curl -s http://127.0.0.1:8080/realms/nexus-pro/.well-known/openid-configuration 
 
 1. 进入 **Service account roles** 标签
 2. **Assign role** → Filter by clients → 选择 `realm-management`
-3. 至少勾选 **`manage-users`**（创建 / 更新用户、发送 required actions 邮件）
+3. 只勾选 **`manage-users`**（创建 / 查询 / 更新用户、修改密码、发送 required actions 邮件）
+4. 不要勾选 `manage-realm` 或 `realm-admin`；当前业务不需要修改整个 realm
 
 在 **Credentials** 标签复制 **Client secret**，填入后端：
 
@@ -208,6 +209,88 @@ KEYCLOAK_ADMIN_CLIENT_SECRET=<secret>
 ```
 
 Admin client 使用 `client_credentials` grant 获取 token（见 `internal/platform/auth/keycloak_admin.go`）。
+
+`KEYCLOAK_ADMIN_CLIENT_ID` 与 `KEYCLOAK_ADMIN_CLIENT_SECRET` 也用于当前用户在 Nexus 设置弹窗内变更密码；此流程先用 `KEYCLOAK_CLIENT_ID` 验证当前密码，再只更新登录账号绑定的 Keycloak subject。即使 `KEYCLOAK_PROVISION_USERS=false`，要启用弹窗内改密仍需配置这两个 Admin client 变量。
+
+### 4.1 验证 Admin Client
+
+加载后端环境变量，然后用 `client_credentials` 获取 token：
+
+```bash
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be
+set -a
+source ./.env
+set +a
+
+ADMIN_TOKEN_JSON=$(curl -sS -X POST \
+  "$KEYCLOAK_BASE_URL/protocol/openid-connect/token" \
+  --data-urlencode "grant_type=client_credentials" \
+  --data-urlencode "client_id=$KEYCLOAK_ADMIN_CLIENT_ID" \
+  --data-urlencode "client_secret=$KEYCLOAK_ADMIN_CLIENT_SECRET")
+
+jq '{token_type, expires_in, error, error_description}' <<<"$ADMIN_TOKEN_JSON"
+```
+
+成功时 `token_type` 为 `Bearer`，且 `error` 为空。继续验证 `manage-users` 权限：
+
+```bash
+ADMIN_TOKEN=$(jq -r '.access_token // empty' <<<"$ADMIN_TOKEN_JSON")
+KEYCLOAK_ROOT="${KEYCLOAK_BASE_URL%%/realms/*}"
+
+curl -sS -o /dev/null \
+  -w 'Admin API HTTP %{http_code}\n' \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  "$KEYCLOAK_ROOT/admin/realms/nexus-pro/users?max=1"
+```
+
+返回 `200` 表示 Client ID、Client secret 和角色均可用；`401` 通常是 client 凭证或 realm 错误，`403` 通常是 `manage-users` 未正确分配。
+
+## 5. 步骤三：配置邀请 Client 与邮件
+
+邀请流程不需要再创建第三个 Keycloak client。`KEYCLOAK_INVITE_CLIENT_ID` 表示邀请链接使用哪个登录 client，推荐直接复用步骤一的 `nexus-pro-connect-api`；真正调用 Keycloak Admin API 发送邮件的仍是步骤二的 `nexus-pro-admin`。
+
+后端邀请用户时会添加 `UPDATE_PASSWORD` required action。仅当 `KEYCLOAK_SEND_INVITE_EMAIL=true` 时，后端才会调用 Keycloak 的 `execute-actions-email`；邮件链接有效期为 24 小时。
+
+### 5.1 暂不发送邀请邮件
+
+本地尚未配置 SMTP 时使用：
+
+```bash
+KEYCLOAK_SEND_INVITE_EMAIL=false
+KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api
+KEYCLOAK_INVITE_REDIRECT_URL=
+```
+
+这种模式下 Keycloak 不发送邮件。管理员需要在 **Users → 目标用户 → Credentials** 中手动设置初始密码；建议开启 **Temporary**，让用户首次登录时修改密码。
+
+### 5.2 启用邀请邮件
+
+本地开发配置：
+
+```bash
+KEYCLOAK_PROVISION_USERS=true
+KEYCLOAK_SEND_INVITE_EMAIL=true
+KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api
+KEYCLOAK_INVITE_REDIRECT_URL=http://localhost:3002/login
+```
+
+还需要在 Keycloak 完成以下配置：
+
+1. **Realm settings → Email**：配置 SMTP，并使用测试连接功能确认发送成功
+2. **Clients → nexus-pro-connect-api → Settings → Valid redirect URIs**：增加 `http://localhost:3002/login`
+3. 若使用 `127.0.0.1` 访问前端，再增加 `http://127.0.0.1:3002/login`
+4. 确认 `nexus-pro-admin` 已按步骤二分配 `realm-management → manage-users`
+
+生产环境必须替换为实际 HTTPS 前端地址，并在 `Valid redirect URIs` 中注册完全一致的地址：
+
+```bash
+KEYCLOAK_PROVISION_USERS=true
+KEYCLOAK_SEND_INVITE_EMAIL=true
+KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api
+KEYCLOAK_INVITE_REDIRECT_URL=https://app.example.com/login
+```
+
+`KEYCLOAK_SEND_INVITE_EMAIL=true` 依赖 `KEYCLOAK_PROVISION_USERS=true`。`KEYCLOAK_INVITE_CLIENT_ID` 留空时后端会回退到 `KEYCLOAK_CLIENT_ID`，但建议显式填写，方便部署检查。
 
 ## 6. 创建测试用户
 
@@ -344,10 +427,10 @@ KEYCLOAK_PROVISION_USERS=true
 KEYCLOAK_ADMIN_CLIENT_ID=nexus-pro-admin
 KEYCLOAK_ADMIN_CLIENT_SECRET=<secret>
 
-# 邀请邮件（需 SMTP + manage-users 权限）
+# 邀请邮件关闭时（启用方式见步骤三）
 KEYCLOAK_SEND_INVITE_EMAIL=false
 KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api
-KEYCLOAK_INVITE_REDIRECT_URL=http://localhost:3002/
+KEYCLOAK_INVITE_REDIRECT_URL=
 ```
 
 当 `KEYCLOAK_PROVISION_USERS=true` 时，员工创建 / 导入 / 邀请会：
@@ -397,6 +480,8 @@ tools/api-smoke/full_api_smoke.py
 - [ ] `KEYCLOAK_BASE_URL` 使用 `https://` 公网地址
 - [ ] redirect URI / Web origins 仅包含正式域名
 - [ ] SMTP 已配置（若启用邀请邮件或忘记密码）
+- [ ] 邀请邮件启用时，`KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api`
+- [ ] 邀请邮件启用时，HTTPS `KEYCLOAK_INVITE_REDIRECT_URL` 已注册到登录 client 的 Valid redirect URIs
 - [ ] Direct access grants 按安全策略评估（密码登录依赖此开关；可仅保留 SSO）
 - [ ] Protocol Mapper `tenant_id` / `account_id` 已配置
 - [ ] Admin client 的 `manage-users` 权限已最小化授予
@@ -428,6 +513,14 @@ tools/api-smoke/full_api_smoke.py
 1. 确认 `KEYCLOAK_ADMIN_CLIENT_ID` / `SECRET` 正确
 2. 确认 service account 已分配 `realm-management → manage-users`
 3. 确认 `KEYCLOAK_BASE_URL` 格式为 `http(s)://host/realms/nexus-pro`
+
+### 邀请邮件未发送或返回 400
+
+1. 确认 `KEYCLOAK_PROVISION_USERS=true` 且 `KEYCLOAK_SEND_INVITE_EMAIL=true`
+2. 确认 Keycloak Realm SMTP 已配置并通过测试
+3. 确认 `KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api`
+4. 确认 `KEYCLOAK_INVITE_REDIRECT_URL` 与该 client 的 Valid redirect URIs 完全一致
+5. 确认 `nexus-pro-admin` 只需并且已经拥有 `realm-management → manage-users`
 
 ### Issuer 端口不一致
 

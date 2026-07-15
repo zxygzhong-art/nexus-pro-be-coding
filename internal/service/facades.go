@@ -17,6 +17,8 @@ type IdentityFacade interface {
 type MeFacade interface {
 	Resolve(RequestContext) (MeResponse, error)
 	UpdateProfile(RequestContext, UpdateMeProfileInput) (MeResponse, error)
+	UpdatePreferences(RequestContext, UpdateMePreferencesInput) (MeResponse, error)
+	ChangePassword(RequestContext, ChangePasswordInput) error
 	ListMenus(RequestContext) ([]MenuNode, error)
 }
 
@@ -115,13 +117,21 @@ type HRFacade interface {
 // AttendanceFacade 定義考勤 facade 的行為契約。
 type AttendanceFacade interface {
 	ListLeaveBalancePage(RequestContext, PageRequest) (PageResponse[LeaveBalance], error)
+	ListLeaveBalancePageByQuery(RequestContext, LeaveBalanceQuery, PageRequest) (PageResponse[LeaveBalance], error)
 	ListLeaveRequestPage(RequestContext, PageRequest) (PageResponse[LeaveRequest], error)
+	ListLeaveRequestPageByQuery(RequestContext, LeaveRequestQuery, PageRequest) (PageResponse[LeaveRequest], error)
+	EvaluateLeaveRequest(RequestContext, EvaluateLeaveRequestInput) (LeaveRequestEvaluation, error)
 	CreateLeaveRequest(RequestContext, CreateLeaveRequestInput) (LeaveRequest, error)
 	ListOvertimeRequestPage(RequestContext, PageRequest) (PageResponse[OvertimeRequest], error)
 	CreateOvertimeRequest(RequestContext, CreateOvertimeRequestInput) (OvertimeRequest, error)
 	CurrentAttendancePolicy(RequestContext) (AttendancePolicyResponse, error)
+	ValidateAttendancePolicy(RequestContext, UpdateAttendancePolicyInput) (AttendancePolicyValidationResult, error)
+	PublishAttendancePolicy(RequestContext, UpdateAttendancePolicyInput) (AttendancePolicyResponse, error)
 	UpdateAttendancePolicy(RequestContext, UpdateAttendancePolicyInput) (AttendancePolicyResponse, error)
 	GrantLeaveBalances(RequestContext, GrantLeaveBalancesInput) (GrantLeaveBalancesResult, error)
+	ListLeaveTypeIntegrations(RequestContext) (LeaveTypeIntegrationResponse, error)
+	SaveLeaveTypeExternalMapping(RequestContext, SaveLeaveTypeExternalMappingInput) (LeaveTypeExternalMapping, error)
+	ExpireLeaveTypeExternalMapping(RequestContext, string) (LeaveTypeExternalMapping, error)
 	ListAttendanceWorksitePage(RequestContext, PageRequest) (PageResponse[AttendanceWorksite], error)
 	CreateAttendanceWorksite(RequestContext, CreateAttendanceWorksiteInput) (AttendanceWorksite, error)
 	UpdateAttendanceWorksite(RequestContext, UpdateAttendanceWorksiteInput) (AttendanceWorksite, error)
@@ -131,6 +141,7 @@ type AttendanceFacade interface {
 	ListAttendanceShiftAssignmentPage(RequestContext, PageRequest) (PageResponse[AttendanceShiftAssignment], error)
 	CreateAttendanceShiftAssignment(RequestContext, CreateAttendanceShiftAssignmentInput) (AttendanceShiftAssignment, error)
 	AttendanceClockStatus(RequestContext) (AttendanceClockStatus, error)
+	AttendanceMonthlySummary(RequestContext, string) (AttendanceMonthlySummary, error)
 	CreateAttendanceClockRecord(RequestContext, CreateAttendanceClockRecordInput) (AttendanceClockRecord, error)
 	ListAttendanceClockRecordPage(RequestContext, AttendanceClockRecordQuery, PageRequest) (PageResponse[AttendanceClockRecord], error)
 	SyncEHRMSAttendance(RequestContext, EHRMSAttendanceSyncInput) (EHRMSAttendanceSyncResponse, error)
@@ -162,6 +173,7 @@ type WorkspaceFacade interface {
 	WorkspaceEmployees(RequestContext, PlatformWorkspaceEmployeesQuery) (PlatformWorkspaceEmployeesResponse, error)
 	WorkspaceOrganization(RequestContext) (WorkspaceOrganizationResponse, error)
 	UpdateWorkspaceOrganizationManager(RequestContext, string, UpdateWorkspaceOrganizationManagerInput) (WorkspaceOrganizationResponse, error)
+	UpdateWorkspaceOrganizationVisibility(RequestContext, string, UpdateWorkspaceOrganizationVisibilityInput) (WorkspaceOrganizationResponse, error)
 	WorkspaceTurnover(RequestContext, WorkspaceTurnoverQuery) (WorkspaceTurnoverResponse, error)
 	ExportWorkspaceTurnoverCSV(RequestContext, WorkspaceTurnoverQuery, string) ([]byte, string, error)
 	WorkspaceAttendance(RequestContext, WorkspaceAttendanceQuery) (WorkspaceAttendanceResponse, error)
@@ -177,6 +189,7 @@ type WorkspaceFacade interface {
 // WorkflowFacade 定義流程 facade 的行為契約。
 type WorkflowFacade interface {
 	FormDataSources(RequestContext) (FormDataSourceCatalogResponse, error)
+	GetRuntimeFormTemplate(RequestContext, string, string) (domain.RuntimeFormTemplate, error)
 	FormBuilderCapabilities(RequestContext) (domain.FormBuilderCapabilitiesResponse, error)
 	ListFormDefinitionDrafts(RequestContext, string, string) ([]domain.FormDefinitionDraft, error)
 	GetFormDefinitionDraft(RequestContext, string) (domain.FormDefinitionDraft, error)
@@ -190,6 +203,7 @@ type WorkflowFacade interface {
 	ListFormTemplatePage(RequestContext, PageRequest) (PageResponse[FormTemplate], error)
 	CreateFormTemplate(RequestContext, CreateFormTemplateInput) (FormTemplate, error)
 	ListFormInstancePage(RequestContext, FormInstanceQuery, PageRequest) (PageResponse[FormInstance], error)
+	GetFormInstanceDetail(RequestContext, string) (FormInstanceDetail, error)
 	ReviewQueue(RequestContext) (WorkflowReviewQueueResponse, error)
 	SaveFormDraft(RequestContext, SaveFormDraftInput) (FormInstance, error)
 	UpdateFormDraft(RequestContext, string, UpdateFormDraftInput) (FormInstance, error)
@@ -218,6 +232,8 @@ type AgentFacade interface {
 	ClearSessionContext(RequestContext, string) (domain.AgentSession, error)
 	DeleteSession(RequestContext, string) (domain.AgentSession, error)
 	ListSessionMessages(RequestContext, string) ([]domain.AgentSessionMessage, error)
+	ListAccountUsage(RequestContext, domain.AgentAccountUsageQuery, PageRequest) (domain.AgentUsageResponse, error)
+	ListAccountSessionUsage(RequestContext, string, PageRequest) (domain.AgentSessionUsagePage, error)
 	UploadSessionFile(RequestContext, string, domain.UploadAgentSessionFileInput) (domain.AgentSessionFile, error)
 	ListSessionFiles(RequestContext, string) ([]domain.AgentSessionFile, error)
 	DownloadSessionFile(RequestContext, string, string) (domain.AgentSessionFileDownload, error)

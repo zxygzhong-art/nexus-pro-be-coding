@@ -21,7 +21,7 @@ type attendanceTimeInterval struct {
 }
 
 // attendanceClockStatusFromProjection exposes the stable daily projection to clients.
-func attendanceClockStatusFromProjection(employeeID, workDate string, projection attendanceDayProjection) AttendanceClockStatus {
+func attendanceClockStatusFromProjection(employeeID, workDate string, projection AttendanceDayProjection) AttendanceClockStatus {
 	nextAction := clockDirectionIn
 	if projection.CanClockOut {
 		nextAction = clockDirectionOut
@@ -44,8 +44,8 @@ func attendanceClockStatusFromProjection(employeeID, workDate string, projection
 	}
 }
 
-// attendanceDayProjection is the single derived view shared by clock status and reporting.
-type attendanceDayProjection struct {
+// AttendanceDayProjection is the single derived view shared by clock status and reporting.
+type AttendanceDayProjection struct {
 	ClockIn              *AttendanceClockRecord
 	ClockOut             *AttendanceClockRecord
 	LastPunch            *AttendanceClockRecord
@@ -61,14 +61,14 @@ type attendanceDayProjection struct {
 }
 
 // loadAttendanceDayProjection loads every raw punch and overlapping leave before deriving the day state.
-func (c AttendanceService) loadAttendanceDayProjection(ctx RequestContext, employeeID, workDate string, asOf time.Time) (attendanceDayProjection, error) {
+func (c AttendanceService) loadAttendanceDayProjection(ctx RequestContext, employeeID, workDate string, asOf time.Time) (AttendanceDayProjection, error) {
 	records, err := c.store.ListAttendanceClockRecords(goContext(ctx), ctx.TenantID, AttendanceClockRecordQuery{
 		EmployeeID: employeeID,
 		FromDate:   workDate,
 		ToDate:     workDate,
 	})
 	if err != nil {
-		return attendanceDayProjection{}, err
+		return AttendanceDayProjection{}, err
 	}
 	leaves, err := c.store.ListLeaveRequestsByQuery(goContext(ctx), ctx.TenantID, LeaveRequestQuery{
 		EmployeeIDs: []string{employeeID},
@@ -76,17 +76,17 @@ func (c AttendanceService) loadAttendanceDayProjection(ctx RequestContext, emplo
 		ToDate:      workDate,
 	})
 	if err != nil {
-		return attendanceDayProjection{}, err
+		return AttendanceDayProjection{}, err
 	}
 	policy, err := c.loadAttendancePolicyResponse(ctx)
 	if err != nil {
-		return attendanceDayProjection{}, err
+		return AttendanceDayProjection{}, err
 	}
-	return projectAttendanceDay(records, leaves, workDate, policy.WorkTime, asOf), nil
+	return ProjectAttendanceDay(records, leaves, workDate, policy.WorkTime, asOf), nil
 }
 
-// projectAttendanceDay derives stable boundaries and credited time without mutating raw punches.
-func projectAttendanceDay(records []AttendanceClockRecord, leaves []LeaveRequest, workDate string, workTime AttendancePolicyWorkTime, asOf time.Time) attendanceDayProjection {
+// ProjectAttendanceDay derives stable clock boundaries and credited time without mutating raw punches.
+func ProjectAttendanceDay(records []AttendanceClockRecord, leaves []LeaveRequest, workDate string, workTime AttendancePolicyWorkTime, asOf time.Time) AttendanceDayProjection {
 	effective := make([]AttendanceClockRecord, 0, len(records))
 	for _, record := range records {
 		if record.WorkDate != workDate || !strings.EqualFold(record.RecordStatus, clockRecordStatusAccepted) || record.Voided {
@@ -104,7 +104,7 @@ func projectAttendanceDay(records []AttendanceClockRecord, leaves []LeaveRequest
 		return effective[i].ClockedAt.Before(effective[j].ClockedAt)
 	})
 
-	projection := attendanceDayProjection{
+	projection := AttendanceDayProjection{
 		PunchCount:      len(effective),
 		RequiredMinutes: int(standardDayHours(workTime)*60 + 0.5),
 		DayStatus:       attendanceDayStatusNotStarted,
@@ -250,7 +250,7 @@ func attendanceLeaveIntervals(leaves []LeaveRequest, schedule, breaks []attendan
 }
 
 // attendanceDayAnomalies calculates soft anomalies from the final daily projection.
-func attendanceDayAnomalies(projection attendanceDayProjection, workTime AttendancePolicyWorkTime) []string {
+func attendanceDayAnomalies(projection AttendanceDayProjection, workTime AttendancePolicyWorkTime) []string {
 	reasons := make([]string, 0, 2)
 	credited := projection.WorkedMinutes + projection.ApprovedLeaveMinutes
 	if projection.ClockOut != nil && credited < projection.RequiredMinutes {

@@ -192,12 +192,13 @@ func TestEHRMSConfig(t *testing.T) {
 	t.Setenv("EHRMS_SYNC_TENANT_ID", "tenant-1")
 	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
 	t.Setenv("EHRMS_SYNC_RUN_ON_START", "true")
-	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "true")
+	// Legacy attendance switches must not override the master sync switches.
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "false")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_INTERVAL", "720h")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_MODE", "upsert")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_TENANT_ID", "tenant-att")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID", "acct-att")
-	t.Setenv("EHRMS_ATTENDANCE_SYNC_RUN_ON_START", "true")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_RUN_ON_START", "false")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_SINCE", "2026-06-01")
 
 	cfg, err := config.LoadE()
@@ -258,9 +259,9 @@ func TestEHRMSSyncConfigValidatesIntervalAndMode(t *testing.T) {
 func TestEHRMSAttendanceSyncConfigDefaultsToEmployeeActor(t *testing.T) {
 	t.Setenv("EHRMS_BASE_URL", "https://ehrms.example")
 	t.Setenv("EHRMS_API_KEY", "test-key")
+	t.Setenv("EHRMS_SYNC_ENABLED", "true")
 	t.Setenv("EHRMS_SYNC_TENANT_ID", "tenant-1")
 	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
-	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "true")
 
 	cfg, err := config.LoadE()
 	if err != nil {
@@ -271,18 +272,19 @@ func TestEHRMSAttendanceSyncConfigDefaultsToEmployeeActor(t *testing.T) {
 	}
 }
 
-// TestEHRMSAttendanceSyncConfigValidatesMinimumInterval 驗證 eHRMS 考勤 sync interval 至少 30 天。
-func TestEHRMSAttendanceSyncConfigValidatesMinimumInterval(t *testing.T) {
-	t.Setenv("EHRMS_BASE_URL", "https://ehrms.example")
-	t.Setenv("EHRMS_API_KEY", "test-key")
-	t.Setenv("EHRMS_SYNC_TENANT_ID", "tenant-1")
-	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
+// TestEHRMSMasterSwitchDisablesAttendanceSync verifies that legacy attendance switches cannot enable a partial pipeline.
+func TestEHRMSMasterSwitchDisablesAttendanceSync(t *testing.T) {
+	t.Setenv("EHRMS_SYNC_ENABLED", "false")
+	t.Setenv("EHRMS_SYNC_RUN_ON_START", "true")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "true")
-	t.Setenv("EHRMS_ATTENDANCE_SYNC_INTERVAL", "24h")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_RUN_ON_START", "true")
 
-	_, err := config.LoadE()
-	if err == nil || !strings.Contains(err.Error(), "EHRMS_ATTENDANCE_SYNC_INTERVAL must be at least 720h") {
-		t.Fatalf("expected minimum attendance sync interval error, got %v", err)
+	cfg, err := config.LoadE()
+	if err != nil {
+		t.Fatalf("expected disabled master sync config to load, got %v", err)
+	}
+	if cfg.EHRMSAttendanceSyncEnabled || cfg.EHRMSAttendanceSyncRunOnStart {
+		t.Fatalf("expected master switch to disable attendance sync, got %+v", cfg)
 	}
 }
 
@@ -293,7 +295,7 @@ func TestEHRMSPipelineSkipsAttendanceIntervalMinimum(t *testing.T) {
 	t.Setenv("EHRMS_SYNC_ENABLED", "true")
 	t.Setenv("EHRMS_SYNC_TENANT_ID", "tenant-1")
 	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
-	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "true")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "false")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_INTERVAL", "24h")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_SINCE", "2026-06-01")
 
@@ -306,14 +308,10 @@ func TestEHRMSPipelineSkipsAttendanceIntervalMinimum(t *testing.T) {
 	}
 }
 
-// TestEHRMSPipelineIgnoresDisabledAttendanceSemantics 驗證關閉考勤時不校驗其 mode 與 since。
-func TestEHRMSPipelineIgnoresDisabledAttendanceSemantics(t *testing.T) {
-	t.Setenv("EHRMS_BASE_URL", "https://ehrms.example")
-	t.Setenv("EHRMS_API_KEY", "test-key")
-	t.Setenv("EHRMS_SYNC_ENABLED", "true")
-	t.Setenv("EHRMS_SYNC_TENANT_ID", "tenant-1")
-	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
-	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "false")
+// TestEHRMSMasterSwitchIgnoresAttendanceOptionsWhenDisabled verifies that disabled sync does not validate unused attendance options.
+func TestEHRMSMasterSwitchIgnoresAttendanceOptionsWhenDisabled(t *testing.T) {
+	t.Setenv("EHRMS_SYNC_ENABLED", "false")
+	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "true")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_MODE", "disabled-value")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_SINCE", "not-a-date")
 
@@ -326,9 +324,9 @@ func TestEHRMSPipelineIgnoresDisabledAttendanceSemantics(t *testing.T) {
 func TestEHRMSAttendanceSyncConfigValidatesSince(t *testing.T) {
 	t.Setenv("EHRMS_BASE_URL", "https://ehrms.example")
 	t.Setenv("EHRMS_API_KEY", "test-key")
+	t.Setenv("EHRMS_SYNC_ENABLED", "true")
 	t.Setenv("EHRMS_SYNC_TENANT_ID", "tenant-1")
 	t.Setenv("EHRMS_SYNC_ACCOUNT_ID", "acct-1")
-	t.Setenv("EHRMS_ATTENDANCE_SYNC_ENABLED", "true")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_INTERVAL", "soon")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_MODE", "merge")
 	t.Setenv("EHRMS_ATTENDANCE_SYNC_SINCE", "2026/06/01")

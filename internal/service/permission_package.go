@@ -998,8 +998,9 @@ func validatePackagePermissions(items []Permission, addField func(string, string
 			addField("permissions", "invalid", "permission resource and action are required")
 			continue
 		}
-		key := string(item.ApplicationCode) + ":" + item.Resource + ":" + string(item.Action) + ":" + string(item.PermissionType)
+		key := string(item.ApplicationCode) + ":" + item.Resource + ":" + string(item.Action)
 		if _, ok := seen[key]; ok {
+			addField("permissions", "invalid", "duplicate permission: "+key)
 			continue
 		}
 		seen[key] = struct{}{}

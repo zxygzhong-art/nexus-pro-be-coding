@@ -56,6 +56,77 @@ type AgentSessionMessage struct {
 	CreatedAt      time.Time          `json:"created_at"`
 }
 
+// AgentAccountUsage reports retained Agent conversation usage for one tenant account.
+type AgentAccountUsage struct {
+	AccountID    string     `json:"account_id"`
+	DisplayName  string     `json:"display_name"`
+	Email        string     `json:"email,omitempty"`
+	Status       string     `json:"status"`
+	SessionCount int64      `json:"session_count"`
+	MessageCount int64      `json:"message_count"`
+	LLMCallCount int64      `json:"llm_call_count"`
+	InputTokens  int64      `json:"input_tokens"`
+	CachedTokens int64      `json:"cached_tokens"`
+	OutputTokens int64      `json:"output_tokens"`
+	TotalTokens  int64      `json:"total_tokens"`
+	ActualTokens int64      `json:"actual_tokens"`
+	LastActiveAt *time.Time `json:"last_active_at,omitempty"`
+}
+
+// AgentSessionUsage reports retained conversation and token usage for one session.
+type AgentSessionUsage struct {
+	SessionID    string             `json:"session_id"`
+	AccountID    string             `json:"account_id"`
+	Title        string             `json:"title"`
+	Status       AgentSessionStatus `json:"status"`
+	MessageCount int64              `json:"message_count"`
+	LLMCallCount int64              `json:"llm_call_count"`
+	InputTokens  int64              `json:"input_tokens"`
+	CachedTokens int64              `json:"cached_tokens"`
+	OutputTokens int64              `json:"output_tokens"`
+	TotalTokens  int64              `json:"total_tokens"`
+	ActualTokens int64              `json:"actual_tokens"`
+	LastActiveAt *time.Time         `json:"last_active_at,omitempty"`
+}
+
+// AgentUsageSummary aggregates retained Agent conversation usage for a tenant.
+type AgentUsageSummary struct {
+	UserCount      int   `json:"user_count"`
+	UsersWithUsage int   `json:"users_with_usage"`
+	SessionCount   int64 `json:"session_count"`
+	MessageCount   int64 `json:"message_count"`
+	LLMCallCount   int64 `json:"llm_call_count"`
+	InputTokens    int64 `json:"input_tokens"`
+	CachedTokens   int64 `json:"cached_tokens"`
+	OutputTokens   int64 `json:"output_tokens"`
+	TotalTokens    int64 `json:"total_tokens"`
+	ActualTokens   int64 `json:"actual_tokens"`
+}
+
+// AgentUsageResponse contains the per-account breakdown and tenant totals.
+type AgentUsageResponse struct {
+	Items    []AgentAccountUsage `json:"items"`
+	Total    int                 `json:"total"`
+	Page     int                 `json:"page"`
+	PageSize int                 `json:"page_size"`
+	Summary  AgentUsageSummary   `json:"summary"`
+}
+
+// AgentAccountUsageQuery filters the tenant account usage overview.
+type AgentAccountUsageQuery struct {
+	Query  string `json:"query,omitempty"`
+	Status string `json:"status,omitempty"`
+}
+
+// AgentSessionUsagePage contains one account's paginated session usage.
+type AgentSessionUsagePage struct {
+	Account  AgentAccountUsage   `json:"account"`
+	Items    []AgentSessionUsage `json:"items"`
+	Total    int                 `json:"total"`
+	Page     int                 `json:"page"`
+	PageSize int                 `json:"page_size"`
+}
+
 // AgentMemory 定義簡單記憶條目。
 type AgentMemory struct {
 	ID         string            `json:"id"`

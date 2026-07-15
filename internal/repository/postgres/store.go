@@ -124,6 +124,7 @@ func (s *Store) UpsertAccount(execCtx context.Context, v domain.Account) error {
 		UserGroupIds:           textArray(v.UserGroupIDs),
 		DirectPermissionSetIds: textArray(v.DirectPermissionSetIDs),
 		ActiveAssumableRoleID:  v.ActiveAssumableRoleID,
+		PreferredLocale:        domain.PreferredLocaleWithDefault(v.PreferredLocale),
 		CreatedAt:              timestamptz(v.CreatedAt),
 		ExpectedVersion:        v.Version,
 	})
@@ -131,6 +132,22 @@ func (s *Store) UpsertAccount(execCtx context.Context, v domain.Account) error {
 		return domain.Conflict("account was modified concurrently")
 	}
 	return err
+}
+
+// UpdateAccountPreferredLocale updates one account preference and returns the refreshed row.
+func (s *Store) UpdateAccountPreferredLocale(execCtx context.Context, tenantID, id, preferredLocale string) (domain.Account, bool, error) {
+	v, err := s.q.UpdateAccountPreferredLocale(tenantContext(execCtx, tenantID), sqlc.UpdateAccountPreferredLocaleParams{
+		PreferredLocale: preferredLocale,
+		TenantID:        tenantID,
+		ID:              id,
+	})
+	if isNotFound(err) {
+		return domain.Account{}, false, nil
+	}
+	if err != nil {
+		return domain.Account{}, false, err
+	}
+	return fromAccount(v), true, nil
 }
 
 // GetAccount 從儲存層取得帳號。
@@ -1163,6 +1180,16 @@ func (s *Store) UpsertEmployee(execCtx context.Context, v domain.Employee) error
 	return err
 }
 
+// UpdateEmployeeOrgChartVisibility 更新員工在組織圖預覽中的可見性。
+func (s *Store) UpdateEmployeeOrgChartVisibility(execCtx context.Context, tenantID, id string, showInOrgChart bool, updatedAt time.Time) error {
+	return s.q.UpdateEmployeeOrgChartVisibility(execCtx, sqlc.UpdateEmployeeOrgChartVisibilityParams{
+		TenantID:       tenantID,
+		ID:             id,
+		ShowInOrgChart: showInOrgChart,
+		UpdatedAt:      timestamptz(updatedAt),
+	})
+}
+
 // GetEmployee 從儲存層取得員工。
 func (s *Store) GetEmployee(execCtx context.Context, tenantID, id string) (domain.Employee, bool, error) {
 	v, err := s.q.GetEmployee(execCtx, sqlc.GetEmployeeParams{TenantID: tenantID, ID: id})
@@ -1525,6 +1552,9 @@ func (s *Store) UpsertAttendancePolicy(execCtx context.Context, v domain.Attenda
 		CreatedAt:          timestamptz(v.CreatedAt),
 		UpdatedAt:          timestamptz(v.UpdatedAt),
 	})
+	if isNotFound(err) {
+		return domain.Conflict("attendance policy was modified concurrently")
+	}
 	return err
 }
 
@@ -1540,9 +1570,146 @@ func (s *Store) GetAttendancePolicy(execCtx context.Context, tenantID string) (d
 	return fromAttendancePolicy(v), true, nil
 }
 
+// GetLeaveTypeExternalMapping resolves a tenant-specific upstream leave alias.
+func (s *Store) GetLeaveTypeExternalMapping(execCtx context.Context, tenantID, source, externalCode string, asOf time.Time) (domain.LeaveTypeExternalMapping, bool, error) {
+	v, err := s.q.GetLeaveTypeExternalMapping(tenantContext(execCtx, tenantID), sqlc.GetLeaveTypeExternalMappingParams{
+		TenantID:     tenantID,
+		Source:       source,
+		ExternalCode: externalCode,
+		AsOf:         pgtype.Date{Time: asOf, Valid: true},
+	})
+	if isNotFound(err) {
+		return domain.LeaveTypeExternalMapping{}, false, nil
+	}
+	if err != nil {
+		return domain.LeaveTypeExternalMapping{}, false, err
+	}
+	return domain.LeaveTypeExternalMapping{
+		ID:            v.ID,
+		TenantID:      v.TenantID,
+		Source:        v.Source,
+		ExternalCode:  v.ExternalCode,
+		LeaveTypeID:   v.LeaveTypeID,
+		LeaveTypeCode: v.LeaveTypeCode,
+		EffectiveFrom: dateTextFrom(v.EffectiveFrom),
+		EffectiveTo:   dateTextFrom(v.EffectiveTo),
+		CreatedAt:     timeFrom(v.CreatedAt),
+		UpdatedAt:     timeFrom(v.UpdatedAt),
+	}, true, nil
+}
+
+// ListLeaveTypeExternalMappings returns the mapping history used by the HR admin view.
+func (s *Store) ListLeaveTypeExternalMappings(execCtx context.Context, tenantID string) ([]domain.LeaveTypeExternalMapping, error) {
+	rows, err := s.q.ListLeaveTypeExternalMappings(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.LeaveTypeExternalMapping, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, domain.LeaveTypeExternalMapping{
+			ID: row.ID, TenantID: row.TenantID, Source: row.Source, ExternalCode: row.ExternalCode,
+			LeaveTypeID: row.LeaveTypeID, LeaveTypeCode: row.LeaveTypeCode,
+			EffectiveFrom: dateTextFrom(row.EffectiveFrom), EffectiveTo: dateTextFrom(row.EffectiveTo),
+			CreatedAt: timeFrom(row.CreatedAt), UpdatedAt: timeFrom(row.UpdatedAt),
+		})
+	}
+	return out, nil
+}
+
+// LockLeaveTypeExternalMappingKey serializes overlap validation for one normalized upstream code.
+func (s *Store) LockLeaveTypeExternalMappingKey(execCtx context.Context, tenantID, source, externalCode string) error {
+	tenantID = strings.TrimSpace(tenantID)
+	source = strings.ToLower(strings.TrimSpace(source))
+	externalCode = strings.ToLower(strings.TrimSpace(externalCode))
+	lockKey := fmt.Sprintf(
+		"leave-type-external-mapping|%d:%s|%d:%s|%d:%s",
+		len(tenantID), tenantID,
+		len(source), source,
+		len(externalCode), externalCode,
+	)
+	_, err := s.db.Exec(
+		tenantContext(execCtx, tenantID),
+		"SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
+		lockKey,
+	)
+	return err
+}
+
+// UpsertLeaveTypeExternalMapping persists one effective upstream alias.
+func (s *Store) UpsertLeaveTypeExternalMapping(execCtx context.Context, mapping domain.LeaveTypeExternalMapping) error {
+	tenantCtx := tenantContext(execCtx, mapping.TenantID)
+	if err := s.q.EnsureLeaveTypeCatalog(tenantCtx, sqlc.EnsureLeaveTypeCatalogParams{
+		ID: mapping.LeaveTypeID, TenantID: mapping.TenantID, Code: mapping.LeaveTypeCode,
+		CreatedAt: timestamptz(mapping.CreatedAt), UpdatedAt: timestamptz(mapping.UpdatedAt),
+	}); err != nil {
+		return err
+	}
+	effectiveFrom, err := nullableDate(mapping.EffectiveFrom)
+	if err != nil {
+		return err
+	}
+	effectiveTo, err := nullableDate(mapping.EffectiveTo)
+	if err != nil {
+		return err
+	}
+	return s.q.UpsertLeaveTypeExternalMapping(tenantCtx, sqlc.UpsertLeaveTypeExternalMappingParams{
+		ID: mapping.ID, TenantID: mapping.TenantID, Source: mapping.Source, ExternalCode: mapping.ExternalCode,
+		LeaveTypeID: mapping.LeaveTypeID, EffectiveFrom: effectiveFrom, EffectiveTo: effectiveTo,
+		CreatedAt: timestamptz(mapping.CreatedAt), UpdatedAt: timestamptz(mapping.UpdatedAt),
+	})
+}
+
+// ExpireLeaveTypeExternalMapping ends one mapping while keeping its audit history.
+func (s *Store) ExpireLeaveTypeExternalMapping(execCtx context.Context, tenantID, id, effectiveTo string, updatedAt time.Time) (bool, error) {
+	date, err := nullableDate(effectiveTo)
+	if err != nil {
+		return false, err
+	}
+	rows, err := s.q.ExpireLeaveTypeExternalMapping(tenantContext(execCtx, tenantID), sqlc.ExpireLeaveTypeExternalMappingParams{
+		EffectiveTo: date, UpdatedAt: timestamptz(updatedAt), TenantID: tenantID, ID: id,
+	})
+	return rows > 0, err
+}
+
+// UpsertLeaveTypeSyncIssue groups repeated unknown upstream codes into one issue.
+func (s *Store) UpsertLeaveTypeSyncIssue(execCtx context.Context, issue domain.LeaveTypeSyncIssue) error {
+	return s.q.UpsertLeaveTypeSyncIssue(tenantContext(execCtx, issue.TenantID), sqlc.UpsertLeaveTypeSyncIssueParams{
+		ID: issue.ID, TenantID: issue.TenantID, Source: issue.Source, ExternalCode: issue.ExternalCode,
+		IssueCode: issue.IssueCode, Message: issue.Message,
+		FirstSeenAt: timestamptz(issue.FirstSeenAt), LastSeenAt: timestamptz(issue.LastSeenAt),
+	})
+}
+
+// ListOpenLeaveTypeSyncIssues returns unresolved upstream leave codes.
+func (s *Store) ListOpenLeaveTypeSyncIssues(execCtx context.Context, tenantID string) ([]domain.LeaveTypeSyncIssue, error) {
+	rows, err := s.q.ListOpenLeaveTypeSyncIssues(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.LeaveTypeSyncIssue, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, domain.LeaveTypeSyncIssue{
+			ID: row.ID, TenantID: row.TenantID, Source: row.Source, ExternalCode: row.ExternalCode,
+			IssueCode: row.IssueCode, Message: row.Message, Occurrences: int(row.Occurrences), Status: row.Status,
+			FirstSeenAt: timeFrom(row.FirstSeenAt), LastSeenAt: timeFrom(row.LastSeenAt), ResolvedAt: timePtrFrom(row.ResolvedAt),
+		})
+	}
+	return out, nil
+}
+
+// ResolveLeaveTypeSyncIssues closes mapping work after HR provides an alias.
+func (s *Store) ResolveLeaveTypeSyncIssues(execCtx context.Context, tenantID, source, externalCode string, resolvedAt time.Time) error {
+	return s.q.ResolveLeaveTypeSyncIssues(tenantContext(execCtx, tenantID), sqlc.ResolveLeaveTypeSyncIssuesParams{
+		ResolvedAt: timestamptz(resolvedAt), TenantID: tenantID, Source: source, ExternalCode: externalCode,
+	})
+}
+
 // UpsertLeaveBalance 從儲存層處理 upsert 請假 balance。
 func (s *Store) UpsertLeaveBalance(execCtx context.Context, v domain.LeaveBalance) error {
 	v.LeaveType = strings.ToLower(strings.TrimSpace(v.LeaveType))
+	if strings.TrimSpace(v.LeaveTypeID) == "" {
+		v.LeaveTypeID = domain.StableLeaveTypeID(v.LeaveType)
+	}
 	source := strings.TrimSpace(v.Source)
 	if source == "" {
 		source = "legacy"
@@ -1572,6 +1739,7 @@ func (s *Store) UpsertLeaveBalance(execCtx context.Context, v domain.LeaveBalanc
 		TenantID:       v.TenantID,
 		EmployeeID:     v.EmployeeID,
 		LeaveType:      v.LeaveType,
+		LeaveTypeID:    v.LeaveTypeID,
 		RemainingHours: remainingHours,
 		PeriodStart:    periodStart,
 		PeriodEnd:      periodEnd,
@@ -1689,18 +1857,49 @@ func (s *Store) ReleaseLeaveBalance(execCtx context.Context, tenantID, employeeI
 
 // UpsertLeaveRequest 從儲存層處理 upsert 請假請求。
 func (s *Store) UpsertLeaveRequest(execCtx context.Context, v domain.LeaveRequest) error {
+	if strings.TrimSpace(v.LeaveTypeID) == "" {
+		v.LeaveTypeID = domain.StableLeaveTypeID(v.LeaveType)
+	}
+	ruleSnapshot := v.RuleSnapshot
+	if ruleSnapshot == nil {
+		ruleSnapshot = map[string]any{}
+	}
+	evaluationSnapshot := v.EvaluationSnapshot
+	if evaluationSnapshot == nil {
+		evaluationSnapshot = map[string]any{}
+	}
 	_, err := s.q.UpsertLeaveRequest(tenantContext(execCtx, v.TenantID), sqlc.UpsertLeaveRequestParams{
-		ID:             v.ID,
+		ID:                 v.ID,
+		TenantID:           v.TenantID,
+		EmployeeID:         v.EmployeeID,
+		LeaveType:          v.LeaveType,
+		LeaveTypeID:        v.LeaveTypeID,
+		PolicyVersion:      int32(v.PolicyVersion),
+		RuleSnapshot:       mustJSON(ruleSnapshot),
+		EvaluationSnapshot: mustJSON(evaluationSnapshot),
+		StartAt:            timestamptz(v.StartAt),
+		EndAt:              timestamptz(v.EndAt),
+		Hours:              v.Hours,
+		Reason:             v.Reason,
+		Status:             v.Status,
+		FormInstanceID:     v.FormInstanceID,
+		LeaveBalanceID:     nullableText(v.LeaveBalanceID),
+		CreatedAt:          timestamptz(v.CreatedAt),
+	})
+	return err
+}
+
+// UpsertLeaveRequestAllocation persists the exact reserved balance bucket.
+func (s *Store) UpsertLeaveRequestAllocation(execCtx context.Context, v domain.LeaveRequestAllocation) error {
+	reservedHours, err := numericFromFloat64(v.ReservedHours)
+	if err != nil {
+		return err
+	}
+	_, err = s.q.UpsertLeaveRequestAllocation(tenantContext(execCtx, v.TenantID), sqlc.UpsertLeaveRequestAllocationParams{
 		TenantID:       v.TenantID,
-		EmployeeID:     v.EmployeeID,
-		LeaveType:      v.LeaveType,
-		StartAt:        timestamptz(v.StartAt),
-		EndAt:          timestamptz(v.EndAt),
-		Hours:          v.Hours,
-		Reason:         v.Reason,
-		Status:         v.Status,
-		FormInstanceID: v.FormInstanceID,
-		LeaveBalanceID: nullableText(v.LeaveBalanceID),
+		LeaveRequestID: v.LeaveRequestID,
+		LeaveBalanceID: v.LeaveBalanceID,
+		ReservedHours:  reservedHours,
 		CreatedAt:      timestamptz(v.CreatedAt),
 	})
 	return err
@@ -1861,7 +2060,7 @@ func (s *Store) ListAttendanceShifts(execCtx context.Context, tenantID string) (
 // UpsertAttendanceShiftAssignment 儲存員工班別指派。
 func (s *Store) UpsertAttendanceShiftAssignment(execCtx context.Context, v domain.AttendanceShiftAssignment) error {
 	_, err := s.q.UpsertAttendanceShiftAssignment(execCtx, sqlc.UpsertAttendanceShiftAssignmentParams{ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, ShiftID: v.ShiftID, WorksiteID: v.WorksiteID, EffectiveFrom: timestamptz(v.EffectiveFrom), EffectiveTo: nullableTimestamptz(v.EffectiveTo), Status: v.Status, CreatedAt: timestamptz(v.CreatedAt), UpdatedAt: timestamptz(v.UpdatedAt)})
-	if isExclusionConstraint(err, "attendance_shift_assignments_active_no_overlap") {
+	if IsExclusionConstraint(err, "attendance_shift_assignments_active_no_overlap") {
 		return domain.Conflict("active shift assignment overlaps existing assignment")
 	}
 	return err
@@ -2563,18 +2762,24 @@ func (s *Store) DeletePlatformTaskTodo(execCtx context.Context, tenantID, accoun
 // UpsertAgentRun 從儲存層處理 upsert agent 執行。
 func (s *Store) UpsertAgentRun(execCtx context.Context, v domain.AgentRun) error {
 	_, err := s.q.UpsertAgentRun(tenantContext(execCtx, v.TenantID), sqlc.UpsertAgentRunParams{
-		ID:        v.ID,
-		TenantID:  v.TenantID,
-		AccountID: v.AccountID,
-		AgentID:   nullableText(v.AgentID),
-		SessionID: nullableText(v.SessionID),
-		Mode:      v.Mode,
-		Prompt:    v.Prompt,
-		Answer:    v.Answer,
-		Status:    v.Status,
-		Column10:  mustJSON(v.References),
-		CreatedAt: timestamptz(v.CreatedAt),
-		UpdatedAt: timestamptz(v.UpdatedAt),
+		ID:             v.ID,
+		TenantID:       v.TenantID,
+		AccountID:      v.AccountID,
+		AgentID:        nullableText(v.AgentID),
+		SessionID:      nullableText(v.SessionID),
+		Mode:           v.Mode,
+		Prompt:         v.Prompt,
+		Answer:         v.Answer,
+		Status:         v.Status,
+		ReferenceItems: mustJSON(v.References),
+		LlmCallCount:   v.LLMCallCount,
+		InputTokens:    v.InputTokens,
+		CachedTokens:   v.CachedTokens,
+		OutputTokens:   v.OutputTokens,
+		TotalTokens:    v.TotalTokens,
+		UsageComplete:  v.UsageComplete,
+		CreatedAt:      timestamptz(v.CreatedAt),
+		UpdatedAt:      timestamptz(v.UpdatedAt),
 	})
 	return err
 }
@@ -2791,36 +2996,37 @@ func (s *Store) DeleteAgentExternalTool(execCtx context.Context, tenantID, id st
 // UpsertAgentDefinition 從儲存層處理 upsert agent 定義。
 func (s *Store) UpsertAgentDefinition(execCtx context.Context, v domain.AgentDefinition) error {
 	_, err := s.q.UpsertAgentDefinition(tenantContext(execCtx, v.TenantID), sqlc.UpsertAgentDefinitionParams{
-		ID:                 v.ID,
-		TenantID:           v.TenantID,
-		Name:               v.Name,
-		Description:        v.Description,
-		Emoji:              v.Emoji,
-		Category:           string(v.Category),
-		ModelID:            v.ModelID,
-		MainAgentRole:      v.MainAgentRole,
-		SubAgents:          mustJSON(v.SubAgents),
-		SystemPrompt:       v.SystemPrompt,
-		WelcomeMessage:     v.WelcomeMessage,
-		SuggestedQuestions: mustJSON(v.SuggestedQuestions),
-		Tools:              mustJSON(v.Tools),
-		KnowledgeBaseIds:   mustJSON(v.KnowledgeBaseIDs),
-		Status:             string(v.Status),
-		Visibility:         string(v.Visibility),
-		VisibilityTargets:  mustJSON(v.VisibilityTargets),
-		TimeoutSeconds:     int32(v.TimeoutSeconds),
-		Version:            int32(v.Version),
-		PublishedVersion:   int32(v.PublishedVersion),
-		UsageTotalRuns:     v.Usage.TotalRuns,
-		UsageSuccessRuns:   v.Usage.SuccessRuns,
-		UsageFailedRuns:    v.Usage.FailedRuns,
-		UsageAvgLatencyMs:  int32(v.Usage.AvgLatencyMs),
-		UsageLastRunAt:     nullableTimestamptz(v.Usage.LastRunAt),
-		UsageTopPrompts:    mustJSON(v.Usage.TopPrompts),
-		CreatedByAccountID: nullableText(v.CreatedByAccountID),
-		UpdatedByAccountID: nullableText(v.UpdatedByAccountID),
-		CreatedAt:          timestamptz(v.CreatedAt),
-		UpdatedAt:          timestamptz(v.UpdatedAt),
+		ID:                            v.ID,
+		TenantID:                      v.TenantID,
+		Name:                          v.Name,
+		Description:                   v.Description,
+		Emoji:                         v.Emoji,
+		Category:                      string(v.Category),
+		ModelID:                       v.ModelID,
+		MainAgentRole:                 v.MainAgentRole,
+		SubAgents:                     mustJSON(v.SubAgents),
+		SystemPrompt:                  v.SystemPrompt,
+		WelcomeMessage:                v.WelcomeMessage,
+		SuggestedQuestions:            mustJSON(v.SuggestedQuestions),
+		SuggestedQuestionTranslations: mustJSON(v.SuggestedQuestionTranslations),
+		Tools:                         mustJSON(v.Tools),
+		KnowledgeBaseIds:              mustJSON(v.KnowledgeBaseIDs),
+		Status:                        string(v.Status),
+		Visibility:                    string(v.Visibility),
+		VisibilityTargets:             mustJSON(v.VisibilityTargets),
+		TimeoutSeconds:                int32(v.TimeoutSeconds),
+		Version:                       int32(v.Version),
+		PublishedVersion:              int32(v.PublishedVersion),
+		UsageTotalRuns:                v.Usage.TotalRuns,
+		UsageSuccessRuns:              v.Usage.SuccessRuns,
+		UsageFailedRuns:               v.Usage.FailedRuns,
+		UsageAvgLatencyMs:             int32(v.Usage.AvgLatencyMs),
+		UsageLastRunAt:                nullableTimestamptz(v.Usage.LastRunAt),
+		UsageTopPrompts:               mustJSON(v.Usage.TopPrompts),
+		CreatedByAccountID:            nullableText(v.CreatedByAccountID),
+		UpdatedByAccountID:            nullableText(v.UpdatedByAccountID),
+		CreatedAt:                     timestamptz(v.CreatedAt),
+		UpdatedAt:                     timestamptz(v.UpdatedAt),
 	})
 	return err
 }
@@ -2889,21 +3095,22 @@ func (s *Store) UpdateAgentDefinitionUsage(execCtx context.Context, tenantID, id
 // InsertAgentDefinitionVersion 從儲存層新增 agent 版本。
 func (s *Store) InsertAgentDefinitionVersion(execCtx context.Context, v domain.AgentDefinitionVersion) error {
 	_, err := s.q.InsertAgentDefinitionVersion(tenantContext(execCtx, v.TenantID), sqlc.InsertAgentDefinitionVersionParams{
-		ID:                 v.ID,
-		TenantID:           v.TenantID,
-		AgentID:            v.AgentID,
-		Version:            int32(v.Version),
-		MainAgentRole:      v.MainAgentRole,
-		SubAgents:          mustJSON(v.SubAgents),
-		SystemPrompt:       v.SystemPrompt,
-		WelcomeMessage:     v.WelcomeMessage,
-		SuggestedQuestions: mustJSON(v.SuggestedQuestions),
-		Tools:              mustJSON(v.Tools),
-		KnowledgeBaseIds:   mustJSON(v.KnowledgeBaseIDs),
-		ModelID:            v.ModelID,
-		Note:               v.Note,
-		CreatedByAccountID: nullableText(v.CreatedByAccountID),
-		CreatedAt:          timestamptz(v.CreatedAt),
+		ID:                            v.ID,
+		TenantID:                      v.TenantID,
+		AgentID:                       v.AgentID,
+		Version:                       int32(v.Version),
+		MainAgentRole:                 v.MainAgentRole,
+		SubAgents:                     mustJSON(v.SubAgents),
+		SystemPrompt:                  v.SystemPrompt,
+		WelcomeMessage:                v.WelcomeMessage,
+		SuggestedQuestions:            mustJSON(v.SuggestedQuestions),
+		SuggestedQuestionTranslations: mustJSON(v.SuggestedQuestionTranslations),
+		Tools:                         mustJSON(v.Tools),
+		KnowledgeBaseIds:              mustJSON(v.KnowledgeBaseIDs),
+		ModelID:                       v.ModelID,
+		Note:                          v.Note,
+		CreatedByAccountID:            nullableText(v.CreatedByAccountID),
+		CreatedAt:                     timestamptz(v.CreatedAt),
 	})
 	return err
 }
@@ -3272,8 +3479,8 @@ func isUniqueConstraint(err error, constraint string) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "23505" && pgErr.ConstraintName == constraint
 }
 
-// isExclusionConstraint identifies a specific PostgreSQL exclusion violation.
-func isExclusionConstraint(err error, constraint string) bool {
+// IsExclusionConstraint reports whether an error is the named PostgreSQL exclusion-constraint violation.
+func IsExclusionConstraint(err error, constraint string) bool {
 	var pgErr *pgconn.PgError
 	return errors.As(err, &pgErr) && pgErr.Code == "23P01" && pgErr.ConstraintName == constraint
 }
@@ -3513,6 +3720,18 @@ func jsonAgentTeamMembers(b []byte) []domain.AgentTeamMember {
 	return out
 }
 
+// jsonLocalizedAgentSuggestedQuestions restores ordered locale maps from JSONB.
+func jsonLocalizedAgentSuggestedQuestions(b []byte) []domain.LocalizedAgentSuggestedQuestion {
+	if len(b) == 0 {
+		return nil
+	}
+	var out []domain.LocalizedAgentSuggestedQuestion
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil
+	}
+	return out
+}
+
 // jsonEmployeeExperiences 處理 JSON 員工 experiences。
 func jsonEmployeeExperiences(b []byte) []domain.EmployeeExperience {
 	if len(b) == 0 {
@@ -3655,6 +3874,7 @@ func fromAccount(v sqlc.Account) domain.Account {
 		UserGroupIDs:           utils.CopyStrings(v.UserGroupIds),
 		DirectPermissionSetIDs: utils.CopyStrings(v.DirectPermissionSetIds),
 		ActiveAssumableRoleID:  v.ActiveAssumableRoleID,
+		PreferredLocale:        v.PreferredLocale,
 		Version:                v.Version,
 		CreatedAt:              timeFrom(v.CreatedAt),
 	}
@@ -3957,6 +4177,7 @@ func fromEmployee(v sqlc.Employee) domain.Employee {
 		Category:              v.Category,
 		Status:                v.Status,
 		EmploymentStatus:      v.EmploymentStatus,
+		ShowInOrgChart:        v.ShowInOrgChart,
 		HireDate:              timePtrFrom(v.HireDate),
 		ResignDate:            timePtrFrom(v.ResignDate),
 		BasicInfo:             jsonMap(v.BasicInfo),
@@ -4051,6 +4272,7 @@ func fromLeaveBalance(v sqlc.LeaveBalance) domain.LeaveBalance {
 		TenantID:       v.TenantID,
 		EmployeeID:     v.EmployeeID,
 		LeaveType:      v.LeaveType,
+		LeaveTypeID:    v.LeaveTypeID,
 		RemainingHours: float64FromNumeric(v.RemainingHours),
 		PeriodStart:    dateTextFrom(v.PeriodStart),
 		PeriodEnd:      dateTextFrom(v.PeriodEnd),
@@ -4066,18 +4288,22 @@ func fromLeaveBalance(v sqlc.LeaveBalance) domain.LeaveBalance {
 // fromLeaveRequest 轉換請假請求。
 func fromLeaveRequest(v sqlc.LeaveRequest) domain.LeaveRequest {
 	return domain.LeaveRequest{
-		ID:             v.ID,
-		TenantID:       v.TenantID,
-		EmployeeID:     v.EmployeeID,
-		LeaveType:      v.LeaveType,
-		StartAt:        timeFrom(v.StartAt),
-		EndAt:          timeFrom(v.EndAt),
-		Hours:          v.Hours,
-		Reason:         v.Reason,
-		Status:         v.Status,
-		FormInstanceID: v.FormInstanceID,
-		LeaveBalanceID: textFrom(v.LeaveBalanceID),
-		CreatedAt:      timeFrom(v.CreatedAt),
+		ID:                 v.ID,
+		TenantID:           v.TenantID,
+		EmployeeID:         v.EmployeeID,
+		LeaveType:          v.LeaveType,
+		LeaveTypeID:        v.LeaveTypeID,
+		PolicyVersion:      int(v.PolicyVersion),
+		RuleSnapshot:       jsonMap(v.RuleSnapshot),
+		EvaluationSnapshot: jsonMap(v.EvaluationSnapshot),
+		StartAt:            timeFrom(v.StartAt),
+		EndAt:              timeFrom(v.EndAt),
+		Hours:              v.Hours,
+		Reason:             v.Reason,
+		Status:             v.Status,
+		FormInstanceID:     v.FormInstanceID,
+		LeaveBalanceID:     textFrom(v.LeaveBalanceID),
+		CreatedAt:          timeFrom(v.CreatedAt),
 	}
 }
 
@@ -4348,18 +4574,24 @@ func fromPlatformTaskTodo(v sqlc.PlatformTaskTodo) domain.PlatformTaskTodoRecord
 // fromAgentRun 轉換 agent 執行。
 func fromAgentRun(v sqlc.AgentRun) domain.AgentRun {
 	return domain.AgentRun{
-		ID:         v.ID,
-		TenantID:   v.TenantID,
-		AccountID:  v.AccountID,
-		AgentID:    textFrom(v.AgentID),
-		SessionID:  textFrom(v.SessionID),
-		Mode:       v.Mode,
-		Prompt:     v.Prompt,
-		Answer:     v.Answer,
-		Status:     v.Status,
-		References: jsonRefs(v.ReferenceItems),
-		CreatedAt:  timeFrom(v.CreatedAt),
-		UpdatedAt:  timeFrom(v.UpdatedAt),
+		ID:            v.ID,
+		TenantID:      v.TenantID,
+		AccountID:     v.AccountID,
+		AgentID:       textFrom(v.AgentID),
+		SessionID:     textFrom(v.SessionID),
+		Mode:          v.Mode,
+		Prompt:        v.Prompt,
+		Answer:        v.Answer,
+		Status:        v.Status,
+		References:    jsonRefs(v.ReferenceItems),
+		LLMCallCount:  v.LlmCallCount,
+		InputTokens:   v.InputTokens,
+		CachedTokens:  v.CachedTokens,
+		OutputTokens:  v.OutputTokens,
+		TotalTokens:   v.TotalTokens,
+		UsageComplete: v.UsageComplete,
+		CreatedAt:     timeFrom(v.CreatedAt),
+		UpdatedAt:     timeFrom(v.UpdatedAt),
 	}
 }
 
@@ -4427,26 +4659,27 @@ func maskStoredSecret(value string) string {
 // fromAgentDefinition 轉換 agent 定義。
 func fromAgentDefinition(v sqlc.AgentDefinition) domain.AgentDefinition {
 	return domain.AgentDefinition{
-		ID:                 v.ID,
-		TenantID:           v.TenantID,
-		Name:               v.Name,
-		Description:        v.Description,
-		Emoji:              v.Emoji,
-		Category:           domain.AgentCategory(v.Category),
-		ModelID:            v.ModelID,
-		MainAgentRole:      v.MainAgentRole,
-		SubAgents:          jsonAgentTeamMembers(v.SubAgents),
-		SystemPrompt:       v.SystemPrompt,
-		WelcomeMessage:     v.WelcomeMessage,
-		SuggestedQuestions: jsonStrings(v.SuggestedQuestions),
-		Tools:              jsonStrings(v.Tools),
-		KnowledgeBaseIDs:   jsonStrings(v.KnowledgeBaseIds),
-		Status:             domain.AgentDefinitionStatus(v.Status),
-		Visibility:         domain.AgentVisibility(v.Visibility),
-		VisibilityTargets:  jsonStrings(v.VisibilityTargets),
-		TimeoutSeconds:     int(v.TimeoutSeconds),
-		Version:            int(v.Version),
-		PublishedVersion:   int(v.PublishedVersion),
+		ID:                            v.ID,
+		TenantID:                      v.TenantID,
+		Name:                          v.Name,
+		Description:                   v.Description,
+		Emoji:                         v.Emoji,
+		Category:                      domain.AgentCategory(v.Category),
+		ModelID:                       v.ModelID,
+		MainAgentRole:                 v.MainAgentRole,
+		SubAgents:                     jsonAgentTeamMembers(v.SubAgents),
+		SystemPrompt:                  v.SystemPrompt,
+		WelcomeMessage:                v.WelcomeMessage,
+		SuggestedQuestions:            jsonStrings(v.SuggestedQuestions),
+		SuggestedQuestionTranslations: jsonLocalizedAgentSuggestedQuestions(v.SuggestedQuestionTranslations),
+		Tools:                         jsonStrings(v.Tools),
+		KnowledgeBaseIDs:              jsonStrings(v.KnowledgeBaseIds),
+		Status:                        domain.AgentDefinitionStatus(v.Status),
+		Visibility:                    domain.AgentVisibility(v.Visibility),
+		VisibilityTargets:             jsonStrings(v.VisibilityTargets),
+		TimeoutSeconds:                int(v.TimeoutSeconds),
+		Version:                       int(v.Version),
+		PublishedVersion:              int(v.PublishedVersion),
 		Usage: domain.AgentUsageStats{
 			TotalRuns:    v.UsageTotalRuns,
 			SuccessRuns:  v.UsageSuccessRuns,
@@ -4465,21 +4698,22 @@ func fromAgentDefinition(v sqlc.AgentDefinition) domain.AgentDefinition {
 // fromAgentDefinitionVersion 轉換 agent 定義版本。
 func fromAgentDefinitionVersion(v sqlc.AgentDefinitionVersion) domain.AgentDefinitionVersion {
 	return domain.AgentDefinitionVersion{
-		ID:                 v.ID,
-		TenantID:           v.TenantID,
-		AgentID:            v.AgentID,
-		Version:            int(v.Version),
-		MainAgentRole:      v.MainAgentRole,
-		SubAgents:          jsonAgentTeamMembers(v.SubAgents),
-		SystemPrompt:       v.SystemPrompt,
-		WelcomeMessage:     v.WelcomeMessage,
-		SuggestedQuestions: jsonStrings(v.SuggestedQuestions),
-		Tools:              jsonStrings(v.Tools),
-		KnowledgeBaseIDs:   jsonStrings(v.KnowledgeBaseIds),
-		ModelID:            v.ModelID,
-		Note:               v.Note,
-		CreatedByAccountID: textFrom(v.CreatedByAccountID),
-		CreatedAt:          timeFrom(v.CreatedAt),
+		ID:                            v.ID,
+		TenantID:                      v.TenantID,
+		AgentID:                       v.AgentID,
+		Version:                       int(v.Version),
+		MainAgentRole:                 v.MainAgentRole,
+		SubAgents:                     jsonAgentTeamMembers(v.SubAgents),
+		SystemPrompt:                  v.SystemPrompt,
+		WelcomeMessage:                v.WelcomeMessage,
+		SuggestedQuestions:            jsonStrings(v.SuggestedQuestions),
+		SuggestedQuestionTranslations: jsonLocalizedAgentSuggestedQuestions(v.SuggestedQuestionTranslations),
+		Tools:                         jsonStrings(v.Tools),
+		KnowledgeBaseIDs:              jsonStrings(v.KnowledgeBaseIds),
+		ModelID:                       v.ModelID,
+		Note:                          v.Note,
+		CreatedByAccountID:            textFrom(v.CreatedByAccountID),
+		CreatedAt:                     timeFrom(v.CreatedAt),
 	}
 }
 

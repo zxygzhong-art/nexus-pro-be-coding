@@ -113,6 +113,12 @@ const (
 	ErrorCodeSSOIdentityConflict ErrorCode = 10036
 	// ErrorCodeSSOEmailAmbiguous 說明此處的錯誤處理語義。
 	ErrorCodeSSOEmailAmbiguous ErrorCode = 10037
+	// ErrorCodeCurrentPasswordInvalid identifies a failed self-service re-authentication.
+	ErrorCodeCurrentPasswordInvalid ErrorCode = 10038
+	// ErrorCodePasswordPolicyRejected identifies a new password rejected by the identity provider.
+	ErrorCodePasswordPolicyRejected ErrorCode = 10039
+	// ErrorCodePasswordChangeUnavailable identifies missing or unavailable password-change infrastructure.
+	ErrorCodePasswordChangeUnavailable ErrorCode = 10040
 	// ErrorCodeForbidden 說明此處的錯誤處理語義。
 	ErrorCodeForbidden ErrorCode = 20040
 	// ErrorCodePermissionMissing 說明此處的錯誤處理語義。
@@ -184,6 +190,12 @@ func reasonErrorCode(reason string) (ErrorCode, bool) {
 		return ErrorCodeSSOIdentityConflict, true
 	case "sso_email_ambiguous":
 		return ErrorCodeSSOEmailAmbiguous, true
+	case "current_password_invalid":
+		return ErrorCodeCurrentPasswordInvalid, true
+	case "password_policy_rejected":
+		return ErrorCodePasswordPolicyRejected, true
+	case "password_change_unavailable":
+		return ErrorCodePasswordChangeUnavailable, true
 	case "permission_missing":
 		return ErrorCodePermissionMissing, true
 	case "menu_denied":

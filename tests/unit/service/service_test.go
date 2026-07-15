@@ -1556,6 +1556,66 @@ func TestSelfScopedLeaveReadOnlyReturnsCurrentEmployeeItems(t *testing.T) {
 	if len(requests) != 1 || requests[0].EmployeeID != "emp-1" {
 		t.Fatalf("expected only current employee request, got %+v", requests)
 	}
+	otherBalancePage, err := svc.Attendance().ListLeaveBalancePageByQuery(
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
+		domain.LeaveBalanceQuery{EmployeeIDs: []string{"emp-2"}},
+		domain.PageRequest{Page: 1, PageSize: 20},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherBalancePage.Total != 0 {
+		t.Fatalf("expected explicit employee filter to stay inside self scope, got %+v", otherBalancePage)
+	}
+	otherRequestPage, err := svc.Attendance().ListLeaveRequestPageByQuery(
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
+		domain.LeaveRequestQuery{EmployeeIDs: []string{"emp-2"}},
+		domain.PageRequest{Page: 1, PageSize: 20},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if otherRequestPage.Total != 0 {
+		t.Fatalf("expected explicit employee filter to stay inside self scope, got %+v", otherRequestPage)
+	}
+}
+
+// TestAttendanceLeavePagesFilterEmployeeBeforePagination verifies employee detail queries are complete and isolated.
+func TestAttendanceLeavePagesFilterEmployeeBeforePagination(t *testing.T) {
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{{Resource: "attendance.leave", Action: "read", Scope: "all"}})
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	for _, employeeID := range []string{"emp-1", "emp-2"} {
+		_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{
+			ID: employeeID + "-annual", TenantID: "tenant-1", EmployeeID: employeeID, LeaveType: "annual", RemainingHours: 8, UpdatedAt: now,
+		})
+		_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{
+			ID: employeeID + "-request", TenantID: "tenant-1", EmployeeID: employeeID, LeaveType: "annual", Hours: 8, Status: "approved", CreatedAt: now,
+		})
+	}
+
+	balancePage, err := svc.Attendance().ListLeaveBalancePageByQuery(
+		ctx,
+		domain.LeaveBalanceQuery{EmployeeIDs: []string{"emp-2"}},
+		domain.PageRequest{Page: 1, PageSize: 1},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if balancePage.Total != 1 || len(balancePage.Items) != 1 || balancePage.Items[0].EmployeeID != "emp-2" {
+		t.Fatalf("expected one filtered balance before pagination, got %+v", balancePage)
+	}
+
+	requestPage, err := svc.Attendance().ListLeaveRequestPageByQuery(
+		ctx,
+		domain.LeaveRequestQuery{EmployeeIDs: []string{"emp-2"}},
+		domain.PageRequest{Page: 1, PageSize: 1},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if requestPage.Total != 1 || len(requestPage.Items) != 1 || requestPage.Items[0].EmployeeID != "emp-2" {
+		t.Fatalf("expected one filtered request before pagination, got %+v", requestPage)
+	}
 }
 
 // TestAttendanceClockRecordsAcceptedRejectedAndRepeated 驗證有效、拒絕及重複打卡都保留逐筆記錄。
@@ -1769,6 +1829,54 @@ func TestAttendanceClockRejectsInsufficientWorkHoursAndAllowsRetry(t *testing.T)
 	}
 	if home.ClockSummary.MonthlyHours != 8 {
 		t.Fatalf("expected actual 8 monthly clock hours, got %+v", home.ClockSummary)
+	}
+}
+
+// TestAttendanceMonthlySummaryUsesDailyProjection verifies selected-month totals and record counts.
+func TestAttendanceMonthlySummaryUsesDailyProjection(t *testing.T) {
+	_, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
+	clockInAt := attendanceFixtureClockInTime()
+
+	if _, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_in",
+		ClientEventID:  "monthly-summary-in",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	setNow(clockInAt.Add(9 * time.Hour))
+	if _, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_out",
+		ClientEventID:  "monthly-summary-out",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	summary, err := svc.Attendance().AttendanceMonthlySummary(employeeCtx, "2026-06")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.EmployeeID != "emp-1" || summary.Month != "2026-06" || summary.AttendanceDays != 1 || summary.WorkedMinutes != 480 || summary.RecordCount != 2 || summary.AbnormalDays != 0 {
+		t.Fatalf("unexpected monthly attendance summary: %+v", summary)
+	}
+	if len(summary.Days) != 1 || summary.Days[0].WorkDate != "2026-06-10" || summary.Days[0].WorkedMinutes != 480 || summary.Days[0].RecordCount != 2 || summary.Days[0].DayStatus != "complete" {
+		t.Fatalf("expected one projected calendar day, got %+v", summary.Days)
+	}
+
+	empty, err := svc.Attendance().AttendanceMonthlySummary(employeeCtx, "2026-05")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if empty.AttendanceDays != 0 || empty.WorkedMinutes != 0 || empty.RecordCount != 0 || len(empty.Days) != 0 {
+		t.Fatalf("expected selected-month filtering, got %+v", empty)
+	}
+	if _, err := svc.Attendance().AttendanceMonthlySummary(employeeCtx, "2026/06"); err == nil {
+		t.Fatal("expected invalid month to be rejected")
 	}
 }
 
@@ -2072,6 +2180,31 @@ func TestAttendanceClockRecordSkipsGeofenceWhenPolicyDisablesIt(t *testing.T) {
 	}
 	if record.RecordStatus != "accepted" || record.WorksiteID != "" {
 		t.Fatalf("expected accepted clock-in without worksite, got %+v", record)
+	}
+}
+
+// TestAttendanceClockReadIncludesAssociatedWorksiteDetails verifies self-service reads expose only the linked place label.
+func TestAttendanceClockReadIncludesAssociatedWorksiteDetails(t *testing.T) {
+	_, svc, employeeCtx, _, _ := newAttendanceFixture(t)
+	if _, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_in",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	page, err := svc.Attendance().ListAttendanceClockRecordPage(employeeCtx, domain.AttendanceClockRecordQuery{EmployeeID: "emp-1"}, domain.PageRequest{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 1 || len(page.Items) != 1 {
+		t.Fatalf("expected one self-service clock record, got %+v", page)
+	}
+	item := page.Items[0]
+	if item.WorksiteID != "aws-1" || item.WorksiteName != "HQ" || item.WorksiteAddress != "No. 1, HQ Road" {
+		t.Fatalf("expected linked worksite display details, got %+v", item)
 	}
 }
 
@@ -2398,7 +2531,7 @@ func TestCreateLeaveRequestReservesLeaveBalance(t *testing.T) {
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now})
 	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 16, UpdatedAt: now})
 
-	created, err := service.New(store).Attendance().CreateLeaveRequest(
+	created, err := newDirectAttendanceWorkflowService(t, store, now, "leave-request").Attendance().CreateLeaveRequest(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		domain.CreateLeaveRequestInput{
 			LeaveType: "annual",
@@ -2420,8 +2553,8 @@ func TestCreateLeaveRequestReservesLeaveBalance(t *testing.T) {
 	if !ok {
 		t.Fatal("leave balance was not found")
 	}
-	if balance.RemainingHours != 8 {
-		t.Fatalf("expected remaining balance 8, got %v", balance.RemainingHours)
+	if created.Hours != 7 || balance.RemainingHours != 9 {
+		t.Fatalf("expected policy-derived 7 hours and remaining balance 9, request=%+v balance=%+v", created, balance)
 	}
 }
 
@@ -2490,7 +2623,6 @@ func TestLeaveWorkflowReviewUpdatesRequestAndBalance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	startWorkflowRunForTest(t, svc, store, "tenant-1", approvedRequest.FormInstanceID, "acct-employee")
 	if _, err := svc.Workflow().ApproveForm(reviewerCtx, approvedRequest.FormInstanceID, domain.ApproveFormInput{}); err != nil {
 		t.Fatal(err)
 	}
@@ -2505,7 +2637,7 @@ func TestLeaveWorkflowReviewUpdatesRequestAndBalance(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("leave balance missing ok=%v err=%v", ok, err)
 	}
-	if balance.RemainingHours != 16 {
+	if balance.RemainingHours != 17 {
 		t.Fatalf("approval should keep reserved hours deducted, got %v", balance.RemainingHours)
 	}
 
@@ -2518,7 +2650,14 @@ func TestLeaveWorkflowReviewUpdatesRequestAndBalance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	startWorkflowRunForTest(t, svc, store, "tenant-1", rejectedRequest.FormInstanceID, "acct-employee")
+	_ = store.UpsertAttendancePolicy(context.Background(), domain.AttendancePolicy{
+		ID: "current", TenantID: "tenant-1", Version: rejectedRequest.PolicyVersion + 1,
+		WorkTime: domain.AttendancePolicyWorkTime{StandardStart: "09:00", StandardEnd: "18:00", BreakStart: "12:00", BreakEnd: "13:00"},
+		LeaveTypes: []domain.AttendanceLeaveType{{
+			Code: "annual", Name: "特休假", GrantMode: domain.LeaveGrantModeUnlimited, RequiresBalance: false, Active: true,
+		}},
+		CreatedAt: now, UpdatedAt: now.Add(30 * time.Minute),
+	})
 	if _, err := svc.Workflow().RejectForm(reviewerCtx, rejectedRequest.FormInstanceID, domain.RejectFormInput{Reason: "missing attachment"}); err != nil {
 		t.Fatal(err)
 	}
@@ -2533,7 +2672,7 @@ func TestLeaveWorkflowReviewUpdatesRequestAndBalance(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("leave balance missing ok=%v err=%v", ok, err)
 	}
-	if balance.RemainingHours != 16 {
+	if balance.RemainingHours != 17 {
 		t.Fatalf("rejection should release reserved hours, got %v", balance.RemainingHours)
 	}
 }
@@ -2727,7 +2866,6 @@ func TestOvertimeWorkflowReviewUpdatesRequestAndCreditsBalance(t *testing.T) {
 	if approvedRequest.Status != "pending_approval" || approvedRequest.FormInstanceID == "" {
 		t.Fatalf("expected pending overtime request with form evidence, got %+v", approvedRequest)
 	}
-	startWorkflowRunForTest(t, svc, store, "tenant-1", approvedRequest.FormInstanceID, "acct-employee")
 	if _, err := svc.Workflow().ApproveForm(reviewerCtx, approvedRequest.FormInstanceID, domain.ApproveFormInput{}); err != nil {
 		t.Fatal(err)
 	}
@@ -2760,7 +2898,6 @@ func TestOvertimeWorkflowReviewUpdatesRequestAndCreditsBalance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	startWorkflowRunForTest(t, svc, store, "tenant-1", rejectedRequest.FormInstanceID, "acct-employee")
 	if _, err := svc.Workflow().RejectForm(reviewerCtx, rejectedRequest.FormInstanceID, domain.RejectFormInput{Reason: "no need"}); err != nil {
 		t.Fatal(err)
 	}
@@ -2786,8 +2923,8 @@ func TestOvertimeWorkflowReviewUpdatesRequestAndCreditsBalance(t *testing.T) {
 	}
 }
 
-// TestCreateLeaveRequestRejectsInsufficientLeaveBalance 驗證請假請求 rejects insufficient 請假 balance。
-func TestCreateLeaveRequestRejectsInsufficientLeaveBalance(t *testing.T) {
+// TestCreateLeaveRequestFallsBackFromInsufficientLeaveBalance verifies the form remains creatable.
+func TestCreateLeaveRequestFallsBackFromInsufficientLeaveBalance(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
 	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
@@ -2812,7 +2949,7 @@ func TestCreateLeaveRequestRejectsInsufficientLeaveBalance(t *testing.T) {
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now})
 	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 4, UpdatedAt: now})
 
-	_, err := service.New(store).Attendance().CreateLeaveRequest(
+	created, err := newDirectAttendanceWorkflowService(t, store, now, "leave-request").Attendance().CreateLeaveRequest(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		domain.CreateLeaveRequestInput{
 			LeaveType: "annual",
@@ -2821,18 +2958,21 @@ func TestCreateLeaveRequestRejectsInsufficientLeaveBalance(t *testing.T) {
 			Hours:     8,
 		},
 	)
-	if err == nil {
-		t.Fatal("expected insufficient leave balance error")
+	if err != nil {
+		t.Fatal(err)
 	}
-	if requests, err := store.ListLeaveRequests(context.Background(), "tenant-1"); err != nil || len(requests) != 0 {
-		t.Fatalf("expected no leave request to be created, got %+v", requests)
+	if created.LeaveBalanceID != "" || created.RuleSnapshot["requires_balance"] != true || created.EvaluationSnapshot["balance_required"] != false || created.EvaluationSnapshot["balance_fallback_reason"] != "insufficient_balance" {
+		t.Fatalf("expected a no-balance fallback request with an auditable policy snapshot, got %+v", created)
+	}
+	if requests, err := store.ListLeaveRequests(context.Background(), "tenant-1"); err != nil || len(requests) != 1 {
+		t.Fatalf("expected one leave request to be created, got %+v", requests)
 	}
 	forms, err := store.ListFormInstances(context.Background(), "tenant-1")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(forms) != 0 {
-		t.Fatalf("expected no form instance to be created, got %+v", forms)
+	if len(forms) != 1 {
+		t.Fatalf("expected one form instance to be created, got %+v", forms)
 	}
 	balance, ok, err := store.GetLeaveBalance(context.Background(), "tenant-1", "lb-1")
 	if err != nil {
@@ -2912,7 +3052,7 @@ func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 
 	draft, err := svc.Workflow().SaveFormDraft(ctx, domain.SaveFormDraftInput{
 		TemplateKey: "leave-request",
-		Payload:     map[string]any{"desc": "draft leave"},
+		Payload:     map[string]any{"reason": "draft leave"},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -2921,12 +3061,12 @@ func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 		t.Fatalf("expected draft status, got %+v", draft)
 	}
 	updated, err := svc.Workflow().UpdateFormDraft(ctx, draft.ID, domain.UpdateFormDraftInput{
-		Payload: map[string]any{"desc": "updated leave"},
+		Payload: map[string]any{"reason": "updated leave"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.Payload["desc"] != "updated leave" {
+	if updated.Payload["reason"] != "updated leave" {
 		t.Fatalf("expected updated payload, got %+v", updated.Payload)
 	}
 	forms, err := svc.Platform().Forms(ctx)
@@ -2939,12 +3079,12 @@ func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 
 	submitted, err := svc.Workflow().SubmitForm(ctx, domain.SubmitFormInput{
 		TemplateKey: draft.ID,
-		Payload:     map[string]any{"desc": "submitted leave"},
+		Payload:     map[string]any{"reason": "submitted leave"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if submitted.ID != draft.ID || submitted.Status != "in_review" || submitted.Payload["desc"] != "submitted leave" {
+	if submitted.ID != draft.ID || submitted.Status != "in_review" || submitted.Payload["reason"] != "submitted leave" {
 		t.Fatalf("expected submitted draft, got %+v", submitted)
 	}
 	forms, err = svc.Platform().Forms(ctx)
@@ -2954,13 +3094,42 @@ func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 	if len(forms.Drafts) != 0 || len(forms.Applications) != 1 || forms.Applications[0].ID != draft.ID {
 		t.Fatalf("expected one application and no drafts, got applications=%+v drafts=%+v", forms.Applications, forms.Drafts)
 	}
+	if submitted.TemplateVersionID == "" {
+		t.Fatal("expected submitted form to bind an immutable template version")
+	}
+	template, ok, err := store.GetFormTemplate(context.Background(), "tenant-1", submitted.TemplateID)
+	if err != nil || !ok {
+		t.Fatalf("template lookup failed ok=%v err=%v", ok, err)
+	}
+	template.CurrentVersion = 2
+	template.UpdatedAt = now.Add(2 * time.Hour)
+	if err := store.UpsertFormTemplate(context.Background(), template); err != nil {
+		t.Fatal(err)
+	}
+	currentVersion, ok, err := store.GetFormTemplateVersionByNumber(context.Background(), "tenant-1", submitted.TemplateID, 2)
+	if err != nil || !ok {
+		t.Fatalf("updated template version lookup failed ok=%v err=%v", ok, err)
+	}
+	if currentVersion.ID == submitted.TemplateVersionID {
+		t.Fatalf("expected template update to create a distinct version, got %q", currentVersion.ID)
+	}
 
 	duplicate, err := svc.Workflow().DuplicateForm(ctx, submitted.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if duplicate.Status != "draft" || duplicate.ID == submitted.ID || duplicate.Payload["desc"] != "submitted leave" {
+	if duplicate.Status != "draft" || duplicate.ID == submitted.ID || duplicate.Payload["reason"] != "submitted leave" {
 		t.Fatalf("expected duplicated draft, got %+v", duplicate)
+	}
+	if duplicate.TemplateVersionID == "" || duplicate.TemplateVersionID != submitted.TemplateVersionID {
+		t.Fatalf("expected duplicate to preserve source template version, source=%q duplicate=%q", submitted.TemplateVersionID, duplicate.TemplateVersionID)
+	}
+	persistedDuplicate, ok, err := store.GetFormInstance(context.Background(), "tenant-1", duplicate.ID)
+	if err != nil || !ok {
+		t.Fatalf("duplicate lookup failed ok=%v err=%v", ok, err)
+	}
+	if persistedDuplicate.TemplateVersionID != submitted.TemplateVersionID {
+		t.Fatalf("expected persisted duplicate to preserve source template version, source=%q duplicate=%q", submitted.TemplateVersionID, persistedDuplicate.TemplateVersionID)
 	}
 	exported, err := svc.Workflow().ExportForm(ctx, submitted.ID)
 	if err != nil {
@@ -2968,6 +3137,13 @@ func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 	}
 	if exported.FileName == "" || !strings.Contains(string(exported.Body), "submitted leave") {
 		t.Fatalf("expected exported JSON to include submitted payload, got name=%q body=%s", exported.FileName, string(exported.Body))
+	}
+	detail, err := svc.Workflow().GetFormInstanceDetail(ctx, submitted.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.ID != submitted.ID || detail.TemplateKey != "leave-request" || detail.TemplateName != "请假申请单" || detail.Payload["reason"] != "submitted leave" {
+		t.Fatalf("expected renderable submitted form detail, got %+v", detail)
 	}
 	cancelled, err := svc.Workflow().CancelForm(ctx, submitted.ID, domain.CancelFormInput{Reason: "no longer needed"})
 	if err != nil {
@@ -3081,7 +3257,7 @@ func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
 	if len(queue.PendingReview) != 1 || len(queue.Notified) != 1 {
 		t.Fatalf("expected one pending and notified item, got %+v", queue)
 	}
-	if queue.PendingReview[0].Title != "请假申请单" || queue.PendingReview[0].Desc != "申请一天特休" {
+	if queue.PendingReview[0].Title != "请假申请单" || queue.PendingReview[0].Desc != "表单已提交，等待审批处理。" {
 		t.Fatalf("unexpected review projection: %+v", queue.PendingReview[0])
 	}
 	if item := queue.PendingReview[0]; item.TemplateKey != "leave-request" || item.FormKind != "custom" || len(item.Fields) != 1 || item.Fields[0].ID != "frozen_reason" || item.Instance.ID != submitted.ID {
@@ -4729,10 +4905,10 @@ func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
 	if got.ClockStart != "09:01" || got.ClockEnd != "18:02" || got.AttendStart != "09:00" || got.AttendEnd != "18:00" || got.AttendHours != 8 || !got.AttendCounted {
 		t.Fatalf("unexpected clock/attend mapping: %+v", got)
 	}
-	if got.LeaveType != "特休" || got.LeaveStart != "13:00" || got.LeaveEnd != "15:00" || got.LeaveHours != 2 || !got.LeaveCounted {
+	if got.LeaveType != "annual" || got.LeaveStart != "13:00" || got.LeaveEnd != "15:00" || got.LeaveHours != 2 || !got.LeaveCounted {
 		t.Fatalf("unexpected leave mapping: %+v", got)
 	}
-	if got.Leave2Type != "病假" || got.Leave2Start != "16:00" || got.Leave2End != "17:00" || got.Leave2Hours != 1 || !got.Leave2Counted {
+	if got.Leave2Type != "sick_full" || got.Leave2Start != "16:00" || got.Leave2End != "17:00" || got.Leave2Hours != 1 || !got.Leave2Counted {
 		t.Fatalf("unexpected second leave mapping: %+v", got)
 	}
 	if got.OvertimeStart != "18:30" || got.OvertimeEnd != "20:00" || got.OvertimeHours != 1.5 || !got.OvertimeCounted {
@@ -4788,6 +4964,11 @@ func TestSyncEHRMSAttendanceUpsertsLeaveBalancesAndDetails(t *testing.T) {
 			"remaining":   "8",
 			"grant_start": "2026-01-01",
 			"expire_date": "2026-12-31",
+		}, {
+			"emp_id":     "IKM017",
+			"leave_type": "加班",
+			"unit":       "hours",
+			"used":       "12",
 		}},
 		leaveDetails: []domain.EHRMSLeaveDetailRecord{{
 			"emp_id":     "IKM017",
@@ -4796,6 +4977,13 @@ func TestSyncEHRMSAttendanceUpsertsLeaveBalancesAndDetails(t *testing.T) {
 			"start":      "09:00",
 			"end":        "13:00",
 			"hours":      "4",
+		}, {
+			"emp_id":     "IKM017",
+			"date":       "2026-06-12",
+			"leave_type": "出勤時數",
+			"start":      "09:00",
+			"end":        "18:00",
+			"hours":      "8",
 		}},
 	}, Now: func() time.Time { return syncNow }})
 	now := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
@@ -4816,7 +5004,7 @@ func TestSyncEHRMSAttendanceUpsertsLeaveBalancesAndDetails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.LeaveBalancesFetched != 1 || result.LeaveBalancesUpserted != 1 || result.LeaveDetailsFetched != 1 || result.LeaveDetailsCreated != 1 || result.LeaveDetailsUpdated != 0 {
+	if result.LeaveBalancesFetched != 2 || result.LeaveBalancesUpserted != 1 || result.LeaveBalancesSkipped != 1 || result.LeaveDetailsFetched != 2 || result.LeaveDetailsCreated != 1 || result.LeaveDetailsUpdated != 0 || result.LeaveDetailsSkipped != 1 {
 		t.Fatalf("unexpected eHRMS leave sync result: %+v", result)
 	}
 	balances, err := store.ListLeaveBalances(context.Background(), "tenant-1")
@@ -4826,7 +5014,7 @@ func TestSyncEHRMSAttendanceUpsertsLeaveBalancesAndDetails(t *testing.T) {
 	if len(balances) != 1 {
 		t.Fatalf("expected one leave balance, got %+v", balances)
 	}
-	if balances[0].EmployeeID != "emp-ehrms" || balances[0].LeaveType != "annual" || balances[0].GrantedHours != 80 || balances[0].UsedHours != 16 || balances[0].RemainingHours != 64 || balances[0].Source != "ehrms" {
+	if balances[0].EmployeeID != "emp-ehrms" || balances[0].LeaveType != "annual" || balances[0].GrantedHours != 70 || balances[0].UsedHours != 14 || balances[0].RemainingHours != 56 || balances[0].Source != "ehrms" {
 		t.Fatalf("unexpected leave balance mapping: %+v", balances[0])
 	}
 	requests, err := store.ListLeaveRequests(context.Background(), "tenant-1")
@@ -4845,8 +5033,107 @@ func TestSyncEHRMSAttendanceUpsertsLeaveBalancesAndDetails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.LeaveDetailsCreated != 0 || result.LeaveDetailsUpdated != 1 || result.LeaveBalancesUpserted != 1 {
+	if result.LeaveDetailsCreated != 0 || result.LeaveDetailsUpdated != 1 || result.LeaveDetailsSkipped != 1 || result.LeaveBalancesUpserted != 1 || result.LeaveBalancesSkipped != 1 {
 		t.Fatalf("expected idempotent leave sync, got %+v", result)
+	}
+}
+
+// TestSyncEHRMSAttendanceRequiresUnknownLeaveCodesToBeMapped verifies unknown upstream codes become actionable HR work.
+func TestSyncEHRMSAttendanceRequiresUnknownLeaveCodesToBeMapped(t *testing.T) {
+	syncNow := time.Date(2026, 6, 20, 8, 0, 0, 0, time.UTC)
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "attendance.clock", Action: "import", Scope: "all"},
+		{Resource: "attendance.leave", Action: "read", Scope: "all"},
+		{Resource: "attendance.leave", Action: "update", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{
+		leaveBalances: []domain.EHRMSLeaveBalanceRecord{{
+			"emp_id": "IKM-MAP", "leave_type": "Wellness Leave", "unit": "days", "quota": "1", "remaining": "1",
+			"grant_start": "2026-01-01", "expire_date": "2026-12-31",
+		}},
+	}, Now: func() time.Time { return syncNow }})
+	if err := store.UpsertEmployee(context.Background(), domain.Employee{
+		ID: "emp-map", TenantID: "tenant-1", EmployeeNo: "IKM-MAP", Name: "Mapping Employee",
+		Status: "active", EmploymentStatus: "active", CreatedAt: syncNow, UpdatedAt: syncNow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.Attendance().SyncEHRMSAttendance(ctx, domain.EHRMSAttendanceSyncInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.LeaveBalancesFailed != 1 || result.LeaveBalancesUpserted != 0 || len(result.RowErrors) != 1 || result.RowErrors[0].Code != "unmapped_leave_type" {
+		t.Fatalf("expected unknown leave code to fail with mapping work, got %+v", result)
+	}
+	integrations, err := svc.Attendance().ListLeaveTypeIntegrations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(integrations.UnmappedIssues) != 1 || integrations.UnmappedIssues[0].ExternalCode != "Wellness Leave" || integrations.NeedsMapping != 1 {
+		t.Fatalf("expected one unresolved mapping issue, got %+v", integrations)
+	}
+
+	mapping, err := svc.Attendance().SaveLeaveTypeExternalMapping(ctx, domain.SaveLeaveTypeExternalMappingInput{
+		Source: "ehrms", ExternalCode: "Wellness Leave", LeaveTypeID: "lt_annual",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mapping.LeaveTypeCode != "annual" {
+		t.Fatalf("expected mapping to canonical annual leave, got %+v", mapping)
+	}
+	integrations, err = svc.Attendance().ListLeaveTypeIntegrations(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(integrations.UnmappedIssues) != 0 || integrations.Mapped != 1 {
+		t.Fatalf("expected mapping issue to resolve, got %+v", integrations)
+	}
+
+	result, err = svc.Attendance().SyncEHRMSAttendance(ctx, domain.EHRMSAttendanceSyncInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.LeaveBalancesUpserted != 1 || result.LeaveBalancesFailed != 0 {
+		t.Fatalf("expected mapped code to sync, got %+v", result)
+	}
+	balances, err := store.ListLeaveBalances(context.Background(), "tenant-1")
+	if err != nil || len(balances) != 1 || balances[0].LeaveType != "annual" || balances[0].GrantedHours != 7 {
+		t.Fatalf("expected configured seven-hour day conversion, balances=%+v err=%v", balances, err)
+	}
+}
+
+// TestValidateAttendancePolicyBlocksRemovingLinkedLeaveTypes verifies HR must deactivate stable leave identities.
+func TestValidateAttendancePolicyBlocksRemovingLinkedLeaveTypes(t *testing.T) {
+	now := time.Date(2026, 6, 20, 8, 0, 0, 0, time.UTC)
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "attendance.leave", Action: "read", Scope: "all"},
+		{Resource: "attendance.leave", Action: "update", Scope: "all"},
+	}, service.Options{Now: func() time.Time { return now }})
+	if err := store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{
+		ID: "lb-linked", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", LeaveTypeID: "lt_annual",
+		RemainingHours: 7, PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", Source: "ehrms", UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	policy, err := svc.Attendance().CurrentAttendancePolicy(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaveTypes := make([]domain.AttendanceLeaveType, 0, len(policy.LeaveTypes)-1)
+	for _, leaveType := range policy.LeaveTypes {
+		if leaveType.Code != "annual" {
+			leaveTypes = append(leaveTypes, leaveType)
+		}
+	}
+	validation, err := svc.Attendance().ValidateAttendancePolicy(ctx, domain.UpdateAttendancePolicyInput{
+		BaseVersion: policy.Version, WorkTime: policy.WorkTime, LeaveTypes: leaveTypes,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if validation.Valid || len(validation.Issues) != 1 || !strings.Contains(validation.Issues[0], "deactivate it instead of deleting it") {
+		t.Fatalf("expected linked leave type removal to be rejected, got %+v", validation)
 	}
 }
 
@@ -6151,6 +6438,25 @@ func TestPlatformWorkspaceOrganizationManagerUpdatePersistsHierarchy(t *testing.
 	if row.ParentID != "E1001" || row.Level != 2 {
 		t.Fatalf("expected refreshed organization row to point at E1001, got %+v", row)
 	}
+	if !row.ShowInOrgChart {
+		t.Fatalf("expected organization rows to be visible by default, got %+v", row)
+	}
+
+	organization, err = svc.Workspace().UpdateWorkspaceOrganizationVisibility(ctx, "E1002", domain.UpdateWorkspaceOrganizationVisibilityInput{ShowInOrgChart: boolPtr(false)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	report, ok, err = store.GetEmployee(context.Background(), "tenant-1", "emp-report")
+	if err != nil || !ok {
+		t.Fatalf("report lookup after visibility update failed ok=%v err=%v", ok, err)
+	}
+	if report.ShowInOrgChart {
+		t.Fatalf("expected organization chart visibility to persist, got %+v", report)
+	}
+	row = findWorkspaceOrganizationRow(t, organization.Rows, "E1002")
+	if row.ShowInOrgChart {
+		t.Fatalf("expected refreshed organization row to be hidden, got %+v", row)
+	}
 
 	if _, err := svc.Workspace().UpdateWorkspaceOrganizationManager(ctx, "E1001", domain.UpdateWorkspaceOrganizationManagerInput{ParentID: stringPtr("E1003")}); err == nil {
 		t.Fatal("expected manager cycle to be rejected")
@@ -6485,6 +6791,7 @@ func newAttendanceFixture(t *testing.T) (*memory.Store, *service.Service, domain
 		ID:           "aws-1",
 		TenantID:     "tenant-1",
 		Name:         "HQ",
+		Address:      "No. 1, HQ Road",
 		Latitude:     25.033964,
 		Longitude:    121.564468,
 		RadiusMeters: 200,

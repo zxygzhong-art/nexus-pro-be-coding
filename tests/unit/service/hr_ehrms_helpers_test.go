@@ -1,23 +1,25 @@
-package service
+package service_test
 
 import (
 	"context"
 	"testing"
 	"time"
 
+	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/repository/memory"
+	"nexus-pro-be/internal/service"
 )
 
 func TestEhrmsInferParentDeptCodeUsesLongestPrefix(t *testing.T) {
 	t.Parallel()
 	codes := map[string]struct{}{"C01": {}, "C0101": {}, "C0105": {}, "C010501": {}}
-	if got := ehrmsInferParentDeptCode("C010501", codes); got != "C0105" {
+	if got := service.EHRMSInferParentDeptCode("C010501", codes); got != "C0105" {
 		t.Fatalf("expected parent C0105, got %q", got)
 	}
-	if got := ehrmsInferParentDeptCode("C0101", codes); got != "C01" {
+	if got := service.EHRMSInferParentDeptCode("C0101", codes); got != "C01" {
 		t.Fatalf("expected parent C01, got %q", got)
 	}
-	if got := ehrmsInferParentDeptCode("C01", codes); got != "" {
+	if got := service.EHRMSInferParentDeptCode("C01", codes); got != "" {
 		t.Fatalf("expected root without parent, got %q", got)
 	}
 }
@@ -25,12 +27,12 @@ func TestEhrmsInferParentDeptCodeUsesLongestPrefix(t *testing.T) {
 func TestEhrmsOrgUnitsFromDepartmentsUsesParentCodeAndClosed(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	units := ehrmsOrgUnitsFromDepartments("tenant-1", []EHRMSDepartmentRecord{
+	units := service.EHRMSOrgUnitsFromDepartments("tenant-1", []domain.EHRMSDepartmentRecord{
 		{"部門代碼": "C01", "部門中文名稱": "Corporate", "部門英文名稱": "Corporate EN"},
 		{"部門代碼": "C0101", "部門中文名稱": "Sales(已關閉)", "上級部門代碼": "C01", "部門已關閉": "true"},
 		{"部門代碼": "C0102", "部門中文名稱": "Ops（已關閉）", "上級部門代碼": "C01"},
 	}, now)
-	byID := map[string]OrgUnit{}
+	byID := map[string]domain.OrgUnit{}
 	for _, unit := range units {
 		byID[unit.ID] = unit
 	}
@@ -51,7 +53,7 @@ func TestEhrmsOrgUnitsFromDepartmentsUsesParentCodeAndClosed(t *testing.T) {
 func TestEhrmsOrgUnitsFromDepartmentsInheritsClosedAncestor(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	units := ehrmsOrgUnitsFromDepartments("tenant-1", []EHRMSDepartmentRecord{
+	units := service.EHRMSOrgUnitsFromDepartments("tenant-1", []domain.EHRMSDepartmentRecord{
 		{"部門代碼": "C01", "部門中文名稱": "Corporate", "部門已關閉": "true"},
 		{"部門代碼": "C0101", "部門中文名稱": "Sales", "上級部門代碼": "C01", "部門已關閉": "false"},
 		{"部門代碼": "C010101", "部門中文名稱": "Sales Ops", "上級部門代碼": "C0101", "部門已關閉": "false"},
@@ -65,11 +67,11 @@ func TestEhrmsOrgUnitsFromDepartmentsInheritsClosedAncestor(t *testing.T) {
 
 func TestEhrmsCleanDepartmentName(t *testing.T) {
 	t.Parallel()
-	name, closed := ehrmsCleanDepartmentName("COO Office(已關閉)")
+	name, closed := service.EHRMSCleanDepartmentName("COO Office(已關閉)")
 	if name != "COO Office" || !closed {
 		t.Fatalf("got name=%q closed=%v", name, closed)
 	}
-	name, closed = ehrmsCleanDepartmentName("Active Dept")
+	name, closed = service.EHRMSCleanDepartmentName("Active Dept")
 	if name != "Active Dept" || closed {
 		t.Fatalf("got name=%q closed=%v", name, closed)
 	}
@@ -78,7 +80,7 @@ func TestEhrmsCleanDepartmentName(t *testing.T) {
 func TestEhrmsPositionsFromRecordsDedupesByJobCode(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	positions := ehrmsPositionsFromRecords("tenant-1", []EHRMSPositionRecord{
+	positions := service.EHRMSPositionsFromRecords("tenant-1", []domain.EHRMSPositionRecord{
 		{"職務代碼": "0704", "職務中文名稱": "工程師", "職務英文名稱": "Engineer"},
 		{"職務代碼": "0704", "職務中文名稱": "Engineer Alt"},
 	}, now)
@@ -90,15 +92,15 @@ func TestEhrmsPositionsFromRecordsDedupesByJobCode(t *testing.T) {
 func TestUpsertEHRMSPositionsPreservesOrgUnitAssignment(t *testing.T) {
 	store := memory.NewStore()
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	if err := store.UpsertPosition(context.Background(), Position{
+	if err := store.UpsertPosition(context.Background(), domain.Position{
 		ID: "0901", TenantID: "tenant-1", Code: "0901", Name: "Manager", OrgUnitID: "ou-ceo",
-		Status: string(PositionStatusActive), CreatedAt: now, UpdatedAt: now,
+		Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	hr := New(store).HR()
-	if _, err := hr.upsertEHRMSPositions(RequestContext{TenantID: "tenant-1"}, []Position{{
-		ID: "0901", TenantID: "tenant-1", Code: "0901", Name: "Manager", Status: string(PositionStatusActive), CreatedAt: now, UpdatedAt: now,
+	hr := service.New(store).HR()
+	if _, err := hr.UpsertEHRMSPositions(service.RequestContext{TenantID: "tenant-1"}, []domain.Position{{
+		ID: "0901", TenantID: "tenant-1", Code: "0901", Name: "Manager", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now,
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -114,14 +116,14 @@ func TestUpsertEHRMSPositionsPreservesOrgUnitAssignment(t *testing.T) {
 func TestUpsertEHRMSOrgUnitsPreservesManagerPosition(t *testing.T) {
 	store := memory.NewStore()
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	if err := store.UpsertOrgUnit(context.Background(), OrgUnit{
+	if err := store.UpsertOrgUnit(context.Background(), domain.OrgUnit{
 		ID: "ou-ceo", TenantID: "tenant-1", Code: "CEO", Name: "CEO", Path: []string{"ou-ceo"},
 		ManagerPositionID: "0901", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	hr := New(store).HR()
-	if _, err := hr.upsertEHRMSOrgUnits(RequestContext{TenantID: "tenant-1"}, []OrgUnit{{
+	hr := service.New(store).HR()
+	if _, err := hr.UpsertEHRMSOrgUnits(service.RequestContext{TenantID: "tenant-1"}, []domain.OrgUnit{{
 		ID: "ou-ceo", TenantID: "tenant-1", Code: "CEO", Name: "CEO", Path: []string{"ou-ceo"}, CreatedAt: now, UpdatedAt: now,
 	}}); err != nil {
 		t.Fatal(err)
@@ -139,17 +141,17 @@ func TestUpsertEHRMSOrgUnitsPreservesManagerPosition(t *testing.T) {
 func TestUpsertEHRMSOrgUnitsAttachesRootsToCanonicalRoot(t *testing.T) {
 	store := memory.NewStore()
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
-	if err := store.UpsertOrgUnit(context.Background(), OrgUnit{
+	if err := store.UpsertOrgUnit(context.Background(), domain.OrgUnit{
 		ID: "ou-root", TenantID: "tenant-1", Code: "ROOT", Name: "Company", Path: []string{"ou-root"}, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	hr := New(store).HR()
-	departments := []OrgUnit{
+	hr := service.New(store).HR()
+	departments := []domain.OrgUnit{
 		{ID: "C01", TenantID: "tenant-1", Code: "C01", Name: "Cloud", Path: []string{"C01"}, Source: "ehrms", CreatedAt: now, UpdatedAt: now},
 		{ID: "C0101", TenantID: "tenant-1", Code: "C0101", Name: "Sales", ParentID: "C01", Path: []string{"C01", "C0101"}, Source: "ehrms", CreatedAt: now, UpdatedAt: now},
 	}
-	if _, err := hr.upsertEHRMSOrgUnits(RequestContext{TenantID: "tenant-1"}, departments); err != nil {
+	if _, err := hr.UpsertEHRMSOrgUnits(service.RequestContext{TenantID: "tenant-1"}, departments); err != nil {
 		t.Fatal(err)
 	}
 	root, ok, err := store.GetOrgUnit(context.Background(), "tenant-1", "C01")

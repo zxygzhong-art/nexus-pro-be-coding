@@ -1,9 +1,10 @@
-package v1
+package v1_test
 
 import (
 	"errors"
 	"testing"
 
+	v1 "nexus-pro-be/internal/api/v1"
 	"nexus-pro-be/internal/domain"
 )
 
@@ -22,7 +23,7 @@ func TestBusinessRouteErrorMapsGenericCodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			mapped := businessRouteError(tt.resource, tt.err)
+			mapped := v1.BusinessRouteError(tt.resource, tt.err)
 			appErr, ok := domain.AsAppError(mapped)
 			if !ok || appErr.NumericCode() != tt.want {
 				t.Fatalf("expected code %d, got %#v", tt.want, mapped)
@@ -34,14 +35,14 @@ func TestBusinessRouteErrorMapsGenericCodes(t *testing.T) {
 // TestBusinessRouteErrorPreservesSpecificAndUnknownErrors verifies specific codes and raw failures keep their safety behavior.
 func TestBusinessRouteErrorPreservesSpecificAndUnknownErrors(t *testing.T) {
 	specific := domain.Conflict("model is in use").WithReasonCode("agent_model_in_use")
-	mapped := businessRouteError("agent.model", specific)
+	mapped := v1.BusinessRouteError("agent.model", specific)
 	appErr, ok := domain.AsAppError(mapped)
 	if !ok || appErr.NumericCode() != domain.ErrorCodeAgentModelInUse {
 		t.Fatalf("specific code was overwritten: %#v", mapped)
 	}
 
 	raw := errors.New("database unavailable")
-	if got := businessRouteError("agent.model", raw); got != raw {
+	if got := v1.BusinessRouteError("agent.model", raw); got != raw {
 		t.Fatalf("raw system error must remain unchanged, got %#v", got)
 	}
 }

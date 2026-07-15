@@ -38,6 +38,250 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.arg(agent_id)::text = '' OR agent_id = sqlc.arg(agent_id))
 ORDER BY COALESCE(last_message_at, updated_at) DESC, id DESC;
 
+-- name: ListAgentUsageByAccount :many
+WITH session_usage AS (
+    SELECT
+        account_id,
+        count(*)::bigint AS session_count,
+        max(COALESCE(last_message_at, updated_at))::timestamptz AS last_session_at
+    FROM agent_sessions sessions
+    WHERE sessions.tenant_id = sqlc.arg(tenant_id)
+    GROUP BY sessions.account_id
+), message_usage AS (
+    SELECT
+        sessions.account_id,
+        count(messages.id)::bigint AS message_count,
+        max(messages.created_at)::timestamptz AS last_message_at
+    FROM agent_sessions sessions
+    JOIN agent_session_messages messages
+      ON messages.tenant_id = sessions.tenant_id
+     AND messages.session_id = sessions.id
+    WHERE sessions.tenant_id = sqlc.arg(tenant_id)
+    GROUP BY sessions.account_id
+), run_usage AS (
+    SELECT
+        account_id,
+        sum(llm_call_count)::bigint AS llm_call_count,
+        sum(input_tokens)::bigint AS input_tokens,
+        sum(cached_tokens)::bigint AS cached_tokens,
+        sum(output_tokens)::bigint AS output_tokens,
+        sum(total_tokens)::bigint AS total_tokens
+    FROM agent_runs
+    WHERE tenant_id = sqlc.arg(tenant_id)
+    GROUP BY account_id
+), account_usage AS (
+SELECT
+    accounts.id AS account_id,
+    accounts.display_name,
+    accounts.email,
+    accounts.status,
+    COALESCE(session_usage.session_count, 0)::bigint AS session_count,
+    COALESCE(message_usage.message_count, 0)::bigint AS message_count,
+    COALESCE(run_usage.llm_call_count, 0)::bigint AS llm_call_count,
+    COALESCE(run_usage.input_tokens, 0)::bigint AS input_tokens,
+    COALESCE(run_usage.cached_tokens, 0)::bigint AS cached_tokens,
+    COALESCE(run_usage.output_tokens, 0)::bigint AS output_tokens,
+    COALESCE(run_usage.total_tokens, 0)::bigint AS total_tokens,
+    GREATEST(COALESCE(run_usage.total_tokens, 0) - COALESCE(run_usage.cached_tokens, 0), 0)::bigint AS actual_tokens,
+    GREATEST(session_usage.last_session_at, message_usage.last_message_at)::timestamptz AS last_active_at
+FROM accounts
+LEFT JOIN session_usage ON session_usage.account_id = accounts.id
+LEFT JOIN message_usage ON message_usage.account_id = accounts.id
+LEFT JOIN run_usage ON run_usage.account_id = accounts.id
+WHERE accounts.tenant_id = sqlc.arg(tenant_id)
+)
+SELECT *
+FROM account_usage
+WHERE (sqlc.arg(search_query)::text = '' OR lower(display_name || ' ' || email || ' ' || account_id) LIKE '%' || lower(sqlc.arg(search_query)) || '%')
+  AND (sqlc.arg(account_status)::text = '' OR status = sqlc.arg(account_status))
+ORDER BY
+    CASE WHEN sqlc.arg(sort_order)::text = 'session_count_asc' THEN session_count END ASC,
+    CASE WHEN sqlc.arg(sort_order)::text IN ('usage_desc', 'session_count_desc') THEN session_count END DESC,
+    CASE WHEN sqlc.arg(sort_order)::text = 'message_count_asc' THEN message_count END ASC,
+    CASE WHEN sqlc.arg(sort_order)::text IN ('usage_desc', 'message_count_desc') THEN message_count END DESC,
+    CASE WHEN sqlc.arg(sort_order)::text = 'total_tokens_asc' THEN total_tokens END ASC,
+    CASE WHEN sqlc.arg(sort_order)::text = 'total_tokens_desc' THEN total_tokens END DESC,
+    CASE WHEN sqlc.arg(sort_order)::text = 'cached_tokens_asc' THEN cached_tokens END ASC,
+    CASE WHEN sqlc.arg(sort_order)::text = 'cached_tokens_desc' THEN cached_tokens END DESC,
+    CASE WHEN sqlc.arg(sort_order)::text = 'actual_tokens_asc' THEN actual_tokens END ASC,
+    CASE WHEN sqlc.arg(sort_order)::text = 'actual_tokens_desc' THEN actual_tokens END DESC,
+    CASE WHEN sqlc.arg(sort_order)::text = 'last_active_at_asc' THEN last_active_at END ASC NULLS LAST,
+    CASE WHEN sqlc.arg(sort_order)::text = 'last_active_at_desc' THEN last_active_at END DESC NULLS LAST,
+    lower(display_name), account_id
+LIMIT sqlc.arg(limit_count)::int
+OFFSET sqlc.arg(offset_count)::int;
+
+-- name: CountAgentUsageByAccount :one
+SELECT count(*)::bigint
+FROM accounts
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.arg(search_query)::text = '' OR lower(display_name || ' ' || email || ' ' || id) LIKE '%' || lower(sqlc.arg(search_query)) || '%')
+  AND (sqlc.arg(account_status)::text = '' OR status = sqlc.arg(account_status));
+
+-- name: GetAgentUsageByAccount :one
+WITH session_usage AS (
+    SELECT
+        account_id,
+        count(*)::bigint AS session_count,
+        max(COALESCE(last_message_at, updated_at))::timestamptz AS last_session_at
+    FROM agent_sessions sessions
+    WHERE sessions.tenant_id = sqlc.arg(tenant_id)
+    GROUP BY sessions.account_id
+), message_usage AS (
+    SELECT
+        sessions.account_id,
+        count(messages.id)::bigint AS message_count,
+        max(messages.created_at)::timestamptz AS last_message_at
+    FROM agent_sessions sessions
+    JOIN agent_session_messages messages
+      ON messages.tenant_id = sessions.tenant_id
+     AND messages.session_id = sessions.id
+    WHERE sessions.tenant_id = sqlc.arg(tenant_id)
+    GROUP BY sessions.account_id
+), run_usage AS (
+    SELECT
+        account_id,
+        sum(llm_call_count)::bigint AS llm_call_count,
+        sum(input_tokens)::bigint AS input_tokens,
+        sum(cached_tokens)::bigint AS cached_tokens,
+        sum(output_tokens)::bigint AS output_tokens,
+        sum(total_tokens)::bigint AS total_tokens
+    FROM agent_runs
+    WHERE tenant_id = sqlc.arg(tenant_id)
+    GROUP BY account_id
+)
+SELECT
+    accounts.id AS account_id,
+    accounts.display_name,
+    accounts.email,
+    accounts.status,
+    COALESCE(session_usage.session_count, 0)::bigint AS session_count,
+    COALESCE(message_usage.message_count, 0)::bigint AS message_count,
+    COALESCE(run_usage.llm_call_count, 0)::bigint AS llm_call_count,
+    COALESCE(run_usage.input_tokens, 0)::bigint AS input_tokens,
+    COALESCE(run_usage.cached_tokens, 0)::bigint AS cached_tokens,
+    COALESCE(run_usage.output_tokens, 0)::bigint AS output_tokens,
+    COALESCE(run_usage.total_tokens, 0)::bigint AS total_tokens,
+    GREATEST(COALESCE(run_usage.total_tokens, 0) - COALESCE(run_usage.cached_tokens, 0), 0)::bigint AS actual_tokens,
+    GREATEST(session_usage.last_session_at, message_usage.last_message_at)::timestamptz AS last_active_at
+FROM accounts
+LEFT JOIN session_usage ON session_usage.account_id = accounts.id
+LEFT JOIN message_usage ON message_usage.account_id = accounts.id
+LEFT JOIN run_usage ON run_usage.account_id = accounts.id
+WHERE accounts.tenant_id = sqlc.arg(tenant_id)
+  AND accounts.id = sqlc.arg(account_id);
+
+-- name: GetAgentUsageSummary :one
+WITH session_usage AS (
+    SELECT account_id, count(*)::bigint AS session_count
+    FROM agent_sessions sessions
+    WHERE sessions.tenant_id = sqlc.arg(tenant_id)
+    GROUP BY sessions.account_id
+), message_usage AS (
+    SELECT sessions.account_id, count(messages.id)::bigint AS message_count
+    FROM agent_sessions sessions
+    JOIN agent_session_messages messages
+      ON messages.tenant_id = sessions.tenant_id
+     AND messages.session_id = sessions.id
+    WHERE sessions.tenant_id = sqlc.arg(tenant_id)
+    GROUP BY sessions.account_id
+), run_usage AS (
+    SELECT
+        account_id,
+        sum(llm_call_count)::bigint AS llm_call_count,
+        sum(input_tokens)::bigint AS input_tokens,
+        sum(cached_tokens)::bigint AS cached_tokens,
+        sum(output_tokens)::bigint AS output_tokens,
+        sum(total_tokens)::bigint AS total_tokens
+    FROM agent_runs
+    WHERE tenant_id = sqlc.arg(tenant_id)
+    GROUP BY account_id
+), account_usage AS (
+    SELECT
+        COALESCE(session_usage.session_count, 0)::bigint AS session_count,
+        COALESCE(message_usage.message_count, 0)::bigint AS message_count,
+        COALESCE(run_usage.llm_call_count, 0)::bigint AS llm_call_count,
+        COALESCE(run_usage.input_tokens, 0)::bigint AS input_tokens,
+        COALESCE(run_usage.cached_tokens, 0)::bigint AS cached_tokens,
+        COALESCE(run_usage.output_tokens, 0)::bigint AS output_tokens,
+        COALESCE(run_usage.total_tokens, 0)::bigint AS total_tokens,
+        GREATEST(COALESCE(run_usage.total_tokens, 0) - COALESCE(run_usage.cached_tokens, 0), 0)::bigint AS actual_tokens
+    FROM accounts
+    LEFT JOIN session_usage ON session_usage.account_id = accounts.id
+    LEFT JOIN message_usage ON message_usage.account_id = accounts.id
+    LEFT JOIN run_usage ON run_usage.account_id = accounts.id
+    WHERE accounts.tenant_id = sqlc.arg(tenant_id)
+)
+SELECT
+    count(*)::bigint AS user_count,
+    count(*) FILTER (WHERE session_count > 0 OR message_count > 0)::bigint AS users_with_usage,
+    COALESCE(sum(session_count), 0)::bigint AS session_count,
+    COALESCE(sum(message_count), 0)::bigint AS message_count,
+    COALESCE(sum(llm_call_count), 0)::bigint AS llm_call_count,
+    COALESCE(sum(input_tokens), 0)::bigint AS input_tokens,
+    COALESCE(sum(cached_tokens), 0)::bigint AS cached_tokens,
+    COALESCE(sum(output_tokens), 0)::bigint AS output_tokens,
+    COALESCE(sum(total_tokens), 0)::bigint AS total_tokens,
+    COALESCE(sum(actual_tokens), 0)::bigint AS actual_tokens
+FROM account_usage;
+
+-- name: ListAgentUsageBySession :many
+WITH account_sessions AS (
+	SELECT id
+	FROM agent_sessions
+	WHERE tenant_id = sqlc.arg(tenant_id)
+	  AND account_id = sqlc.arg(account_id)
+), message_usage AS (
+    SELECT
+		messages.session_id,
+        count(*)::bigint AS message_count,
+        max(messages.created_at)::timestamptz AS last_message_at
+    FROM agent_session_messages messages
+	JOIN account_sessions ON account_sessions.id = messages.session_id
+    WHERE messages.tenant_id = sqlc.arg(tenant_id)
+    GROUP BY messages.session_id
+), run_usage AS (
+    SELECT
+		runs.session_id,
+        sum(llm_call_count)::bigint AS llm_call_count,
+        sum(input_tokens)::bigint AS input_tokens,
+        sum(cached_tokens)::bigint AS cached_tokens,
+        sum(output_tokens)::bigint AS output_tokens,
+        sum(total_tokens)::bigint AS total_tokens,
+        max(updated_at)::timestamptz AS last_run_at
+	FROM agent_runs runs
+	JOIN account_sessions ON account_sessions.id = runs.session_id
+	WHERE runs.tenant_id = sqlc.arg(tenant_id)
+	GROUP BY runs.session_id
+)
+SELECT
+    sessions.id AS session_id,
+    sessions.account_id,
+    sessions.title,
+    sessions.status,
+    COALESCE(message_usage.message_count, 0)::bigint AS message_count,
+    COALESCE(run_usage.llm_call_count, 0)::bigint AS llm_call_count,
+    COALESCE(run_usage.input_tokens, 0)::bigint AS input_tokens,
+    COALESCE(run_usage.cached_tokens, 0)::bigint AS cached_tokens,
+    COALESCE(run_usage.output_tokens, 0)::bigint AS output_tokens,
+    COALESCE(run_usage.total_tokens, 0)::bigint AS total_tokens,
+    GREATEST(COALESCE(run_usage.total_tokens, 0) - COALESCE(run_usage.cached_tokens, 0), 0)::bigint AS actual_tokens,
+    GREATEST(COALESCE(sessions.last_message_at, sessions.updated_at), message_usage.last_message_at, run_usage.last_run_at)::timestamptz AS last_active_at
+FROM agent_sessions sessions
+LEFT JOIN message_usage ON message_usage.session_id = sessions.id
+LEFT JOIN run_usage ON run_usage.session_id = sessions.id
+WHERE sessions.tenant_id = sqlc.arg(tenant_id)
+  AND sessions.account_id = sqlc.arg(account_id)
+ORDER BY last_active_at DESC, sessions.id DESC
+LIMIT sqlc.arg(limit_count)::int
+OFFSET sqlc.arg(offset_count)::int;
+
+-- name: CountAgentUsageSessionsByAccount :one
+SELECT count(*)::bigint
+FROM agent_sessions
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND account_id = sqlc.arg(account_id);
+
 -- name: DeleteAgentSession :one
 DELETE FROM agent_sessions
 WHERE tenant_id = sqlc.arg(tenant_id)

@@ -2,6 +2,7 @@ package v1
 
 import (
 	"net/http"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -37,6 +38,8 @@ func (c WorkspaceAgentCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace.POST("/agent-models/:id/test", c.routes.Handle("agent.model", "update", c.testModel, ResourceID(PathParamID)))
 
 	workspace.GET("/agents/tools", c.routes.Handle("agent.tool", "read", c.tools))
+	workspace.GET("/agent-usage", c.routes.Handle("agent.definition", "read", c.listAccountUsage))
+	workspace.GET("/agent-usage/:id/sessions", c.routes.Handle("agent.definition", "read", c.listAccountSessionUsage, PathParam(PathParamID)))
 	workspace.GET("/agents/external-tools", c.routes.Handle("agent.tool", "read", c.listExternalTools))
 	workspace.POST("/agents/external-tools", c.routes.Handle("agent.tool", "create", c.createExternalTool))
 	workspace.DELETE("/agents/external-tools/:id", c.routes.Handle("agent.tool", "delete", c.deleteExternalTool, ResourceID(PathParamID)))
@@ -206,6 +209,37 @@ func (c WorkspaceAgentCtrl) tools(w http.ResponseWriter, _ *http.Request, ctx do
 		return err
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	return nil
+}
+
+// listAccountUsage returns a server-filtered page with tenant-wide totals.
+func (c WorkspaceAgentCtrl) listAccountUsage(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	page, err := pageRequestFromRequest(r)
+	if err != nil {
+		return err
+	}
+	usage, err := c.svc.ListAccountUsage(ctx, domain.AgentAccountUsageQuery{
+		Query:  strings.TrimSpace(r.URL.Query().Get("query")),
+		Status: strings.TrimSpace(r.URL.Query().Get("status")),
+	}, page)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, usage)
+	return nil
+}
+
+// listAccountSessionUsage returns paginated session usage for one account.
+func (c WorkspaceAgentCtrl) listAccountSessionUsage(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	page, err := pageRequestFromRequest(r)
+	if err != nil {
+		return err
+	}
+	usage, err := c.svc.ListAccountSessionUsage(ctx, r.PathValue(PathParamID), page)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, usage)
 	return nil
 }
 

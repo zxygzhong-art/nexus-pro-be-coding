@@ -1,14 +1,16 @@
-package service
+package service_test
 
 import (
 	"testing"
 	"time"
+
+	"nexus-pro-be/internal/service"
 )
 
 func TestNormalizeEHRMSAttendanceSinceDefaultsToOneMonthWindow(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
-	since, err := normalizeEHRMSAttendanceSince("", now, defaultEHRMSAttendanceSyncWindow)
+	since, err := service.NormalizeEHRMSAttendanceSince("", now, 30*24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -20,7 +22,7 @@ func TestNormalizeEHRMSAttendanceSinceDefaultsToOneMonthWindow(t *testing.T) {
 func TestNormalizeEHRMSAttendanceSinceClampsOlderExplicitSince(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
-	since, err := normalizeEHRMSAttendanceSince("2026-01-01", now, defaultEHRMSAttendanceSyncWindow)
+	since, err := service.NormalizeEHRMSAttendanceSince("2026-01-01", now, 30*24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +34,7 @@ func TestNormalizeEHRMSAttendanceSinceClampsOlderExplicitSince(t *testing.T) {
 func TestNormalizeEHRMSAttendanceSinceKeepsRecentExplicitSince(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 7, 8, 12, 0, 0, 0, time.UTC)
-	since, err := normalizeEHRMSAttendanceSince("2026-07-01", now, defaultEHRMSAttendanceSyncWindow)
+	since, err := service.NormalizeEHRMSAttendanceSince("2026-07-01", now, 30*24*time.Hour)
 	if err != nil {
 		t.Fatal(err)
 	}

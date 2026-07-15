@@ -31,7 +31,7 @@ type SFTPGoHTTP struct {
 
 // NewSFTPGoHTTP creates an object store backed by SFTPGo HTTP/REST.
 func NewSFTPGoHTTP(ctx context.Context, opts SFTPGoOptions) (*SFTPGoHTTP, error) {
-	baseURL, err := normalizeSFTPGoHTTPBaseURL(opts.Endpoint)
+	baseURL, err := NormalizeSFTPGoHTTPBaseURL(opts.Endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -72,7 +72,7 @@ func (s *SFTPGoHTTP) PutObject(ctx context.Context, key string, contentType stri
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	objectPath, err := s.pathForKey(key)
+	objectPath, err := s.PathForKey(key)
 	if err != nil {
 		return err
 	}
@@ -109,7 +109,7 @@ func (s *SFTPGoHTTP) GetObject(ctx context.Context, key string) ([]byte, error) 
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	objectPath, err := s.pathForKey(key)
+	objectPath, err := s.PathForKey(key)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +135,7 @@ func (s *SFTPGoHTTP) DeleteObject(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	objectPath, err := s.pathForKey(key)
+	objectPath, err := s.PathForKey(key)
 	if err != nil {
 		return err
 	}
@@ -224,7 +224,8 @@ func (s *SFTPGoHTTP) dirExists(ctx context.Context, dir string) (bool, error) {
 	}
 }
 
-func (s *SFTPGoHTTP) pathForKey(key string) (string, error) {
+// PathForKey resolves an object key under the configured HTTP root without allowing traversal.
+func (s *SFTPGoHTTP) PathForKey(key string) (string, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return "", errors.New("object key is required")
@@ -318,7 +319,8 @@ func (s *SFTPGoHTTP) invalidateToken() {
 	s.expiresAt = time.Time{}
 }
 
-func normalizeSFTPGoHTTPBaseURL(endpoint string) (string, error) {
+// NormalizeSFTPGoHTTPBaseURL validates and canonicalizes an SFTPGo HTTP endpoint.
+func NormalizeSFTPGoHTTPBaseURL(endpoint string) (string, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
 		return "", errors.New("object store endpoint is required")

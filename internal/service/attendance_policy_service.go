@@ -44,8 +44,10 @@ var legacyLeaveTypeCodeMap = map[string]string{
 	"檢":     leaveTypeCodePrenatal,
 	"補":     leaveTypeCodeCompensatory,
 	"特":     leaveTypeCodeAnnual,
+	"特休":    leaveTypeCodeAnnual,
 	"特休假":   leaveTypeCodeAnnual,
 	"事假":    leaveTypeCodePersonal,
+	"病假":    leaveTypeCodeSickFull,
 	"全薪病假":  leaveTypeCodeSickFull,
 	"半薪病假":  leaveTypeCodeSickHalf,
 	"家庭照顧假": leaveTypeCodeFamilyCare,
@@ -84,6 +86,38 @@ func (c AttendanceService) CurrentAttendancePolicy(ctx RequestContext) (Attendan
 	return c.loadAttendancePolicyResponse(ctx)
 }
 
+// ValidateAttendancePolicy checks a draft without changing the published policy.
+func (c AttendanceService) ValidateAttendancePolicy(ctx RequestContext, input UpdateAttendancePolicyInput) (domain.AttendancePolicyValidationResult, error) {
+	account, _, err := c.requireAttendanceAuthz(ctx, ResourceLeave, ActionUpdate, "")
+	if err != nil {
+		return domain.AttendancePolicyValidationResult{}, err
+	}
+	next, err := c.attendancePolicyFromInput(ctx, account.ID, input)
+	if err != nil {
+		if appErr, ok := domain.AsAppError(err); ok && appErr.Status == 400 {
+			return domain.AttendancePolicyValidationResult{
+				Valid: false, Issues: []string{appErr.Message}, ProjectedVersion: next.Version, Policy: attendancePolicyResponse(next),
+			}, nil
+		}
+		return domain.AttendancePolicyValidationResult{}, err
+	}
+	return domain.AttendancePolicyValidationResult{
+		Valid: true, Issues: []string{}, ProjectedVersion: next.Version, Policy: attendancePolicyResponse(next),
+	}, nil
+}
+
+// PublishAttendancePolicy validates and atomically advances the published policy version.
+func (c AttendanceService) PublishAttendancePolicy(ctx RequestContext, input UpdateAttendancePolicyInput) (AttendancePolicyResponse, error) {
+	validation, err := c.ValidateAttendancePolicy(ctx, input)
+	if err != nil {
+		return AttendancePolicyResponse{}, err
+	}
+	if !validation.Valid {
+		return AttendancePolicyResponse{}, BadRequest(strings.Join(validation.Issues, "; "))
+	}
+	return c.UpdateAttendancePolicy(ctx, input)
+}
+
 // loadAttendancePolicyResponse 讀取考勤政策（不做額外授權檢查，供內部業務使用）。
 func (c AttendanceService) loadAttendancePolicyResponse(ctx RequestContext) (AttendancePolicyResponse, error) {
 	policy, ok, err := c.store.GetAttendancePolicy(goContext(ctx), ctx.TenantID)
@@ -105,12 +139,14 @@ func (c AttendanceService) UpdateAttendancePolicy(ctx RequestContext, input Upda
 	if err != nil {
 		return AttendancePolicyResponse{}, err
 	}
-	next, err := c.attendancePolicyFromInput(ctx, account.ID, input)
-	if err != nil {
-		return AttendancePolicyResponse{}, err
-	}
+	var next AttendancePolicy
 	if err := c.Service.withTenantTransaction(ctx, func(txService *Service) error {
 		tx := txService.Attendance()
+		var err error
+		next, err = tx.attendancePolicyFromInput(ctx, account.ID, input)
+		if err != nil {
+			return err
+		}
 		if err := tx.store.UpsertAttendancePolicy(goContext(ctx), next); err != nil {
 			return err
 		}
@@ -141,18 +177,49 @@ func (c AttendanceService) attendancePolicyFromInput(ctx RequestContext, account
 	}
 	now := c.Now()
 	createdAt := now
-	version := 1
+	// The built-in policy is the implicit version 1, so the first explicit publish advances to version 2.
+	currentVersion := defaultAttendancePolicyResponse().Version
+	version := currentVersion + 1
 	if ok && !current.CreatedAt.IsZero() {
 		createdAt = current.CreatedAt
 	}
 	if ok && current.Version > 0 {
-		version = current.Version + 1
+		currentVersion = current.Version
+		version = currentVersion + 1
+	}
+	if input.BaseVersion > 0 && input.BaseVersion != currentVersion {
+		return AttendancePolicy{}, domain.Conflict("attendance policy changed after this draft was loaded")
+	}
+	nextLeaveTypes := normalizeAttendanceLeaveTypes(input.LeaveTypes)
+	currentLeaveTypes := defaultAttendancePolicyResponse().LeaveTypes
+	if ok {
+		currentLeaveTypes = normalizeAttendanceLeaveTypes(current.LeaveTypes)
+	}
+	retained := make(map[string]struct{}, len(nextLeaveTypes)*2)
+	for _, leaveType := range nextLeaveTypes {
+		retained[leaveType.ID] = struct{}{}
+		retained[strings.ToLower(leaveType.Code)] = struct{}{}
+	}
+	for _, leaveType := range currentLeaveTypes {
+		if _, keptByID := retained[leaveType.ID]; keptByID {
+			continue
+		}
+		if _, keptByCode := retained[strings.ToLower(leaveType.Code)]; keptByCode {
+			continue
+		}
+		linked, linkErr := c.leaveTypeHasLinkedData(ctx, leaveType)
+		if linkErr != nil {
+			return AttendancePolicy{}, linkErr
+		}
+		if linked {
+			return AttendancePolicy{}, BadRequest("leave type " + leaveType.Name + " has mappings, balances, or requests; deactivate it instead of deleting it")
+		}
 	}
 	policy := AttendancePolicy{
 		ID:                 "current",
 		TenantID:           ctx.TenantID,
 		WorkTime:           normalizeAttendancePolicyWorkTime(input.WorkTime),
-		LeaveTypes:         normalizeAttendanceLeaveTypes(input.LeaveTypes),
+		LeaveTypes:         nextLeaveTypes,
 		Version:            version,
 		EffectiveFrom:      &now,
 		UpdatedByAccountID: strings.TrimSpace(accountID),
@@ -160,7 +227,7 @@ func (c AttendanceService) attendancePolicyFromInput(ctx RequestContext, account
 		UpdatedAt:          now,
 	}
 	if err := validateAttendancePolicy(policy); err != nil {
-		return AttendancePolicy{}, err
+		return policy, err
 	}
 	return policy, nil
 }
@@ -274,6 +341,7 @@ func normalizeAttendanceLeaveType(item AttendanceLeaveType) AttendanceLeaveType 
 	code := normalizeLeaveTypeCode(item.Code)
 	seed, hasSeed := attendanceLeaveTypeByCode(code)
 	next := AttendanceLeaveType{
+		ID:              strings.TrimSpace(item.ID),
 		Code:            code,
 		Name:            strings.TrimSpace(item.Name),
 		Quota:           strings.TrimSpace(item.Quota),
@@ -286,6 +354,9 @@ func normalizeAttendanceLeaveType(item AttendanceLeaveType) AttendanceLeaveType 
 		ProofAfterHours: cloneFloatPtr(item.ProofAfterHours),
 		Active:          true,
 		Entitlements:    normalizeLeaveEntitlements(item.Entitlements),
+	}
+	if next.ID == "" {
+		next.ID = domain.StableLeaveTypeID(code)
 	}
 	// Detect "legacy display-only" payloads (only code/name/quota/rule/proof).
 	legacyOnly := item.GrantMode == "" && item.Unit == "" && len(item.Entitlements) == 0 && item.PaidRatio == 0 && item.ProofAfterHours == nil && !item.RequiresBalance && !item.Active
@@ -314,7 +385,7 @@ func normalizeAttendanceLeaveType(item AttendanceLeaveType) AttendanceLeaveType 
 	} else if next.GrantMode == domain.LeaveGrantModeAnnualGrant || next.GrantMode == domain.LeaveGrantModeOvertimeCredit {
 		next.RequiresBalance = true
 	}
-	if item.PaidRatio == 0 && next.Code != leaveTypeCodePersonal && next.Code != leaveTypeCodeSickHalf {
+	if item.PaidRatio == 0 && item.GrantMode == "" && next.Code != leaveTypeCodePersonal && next.Code != leaveTypeCodeSickHalf {
 		next.PaidRatio = defaultPaidRatioForLeaveType(next.Code)
 	}
 	if item.Active {
@@ -325,6 +396,12 @@ func normalizeAttendanceLeaveType(item AttendanceLeaveType) AttendanceLeaveType 
 	}
 	if next.GrantMode == domain.LeaveGrantModeAnnualGrant && len(next.Entitlements) == 0 && hasSeed {
 		next.Entitlements = normalizeLeaveEntitlements(seed.Entitlements)
+	}
+	// Personal leave is application-based and must never depend on a pre-granted balance row.
+	if next.Code == leaveTypeCodePersonal {
+		next.GrantMode = domain.LeaveGrantModeEvent
+		next.RequiresBalance = false
+		next.Entitlements = nil
 	}
 	if next.Name == "" && hasSeed {
 		next.Name = seed.Name
@@ -406,10 +483,15 @@ func validateAttendancePolicy(policy AttendancePolicy) error {
 		return BadRequest("leave_types is required")
 	}
 	seen := map[string]struct{}{}
+	seenIDs := map[string]struct{}{}
 	for _, item := range policy.LeaveTypes {
-		if item.Code == "" || item.Name == "" {
-			return BadRequest("leave type code and name are required")
+		if item.ID == "" || item.Code == "" || item.Name == "" {
+			return BadRequest("leave type id, code, and name are required")
 		}
+		if _, ok := seenIDs[item.ID]; ok {
+			return BadRequest("leave type id must be unique")
+		}
+		seenIDs[item.ID] = struct{}{}
 		if _, ok := seen[item.Code]; ok {
 			return BadRequest("leave type code must be unique")
 		}
@@ -526,8 +608,8 @@ func standardDayHours(work AttendancePolicyWorkTime) float64 {
 	return hours
 }
 
-// calculateLeaveHoursWithinPolicy clips leave to each workday and subtracts overlapping break time.
-func calculateLeaveHoursWithinPolicy(startAt, endAt time.Time, work AttendancePolicyWorkTime) float64 {
+// CalculateLeaveHoursWithinPolicy calculates payable leave hours across policy workdays and breaks.
+func CalculateLeaveHoursWithinPolicy(startAt, endAt time.Time, work AttendancePolicyWorkTime) float64 {
 	if !endAt.After(startAt) {
 		return 0
 	}
@@ -544,6 +626,9 @@ func calculateLeaveHoursWithinPolicy(startAt, endAt time.Time, work AttendancePo
 	lastDay := time.Date(localEnd.Year(), localEnd.Month(), localEnd.Day(), 0, 0, 0, 0, attendanceClockLocation)
 	totalHours := 0.0
 	for day := time.Date(localStart.Year(), localStart.Month(), localStart.Day(), 0, 0, 0, 0, attendanceClockLocation); !day.After(lastDay); day = day.AddDate(0, 0, 1) {
+		if attendancePolicyDayIsWeekend(day, work.Weekend) {
+			continue
+		}
 		workStartAt := day.Add(time.Duration(standardStart) * time.Minute)
 		workEndAt := day.Add(time.Duration(standardEnd) * time.Minute)
 		clippedStartAt := workStartAt
@@ -577,6 +662,20 @@ func calculateLeaveHoursWithinPolicy(startAt, endAt time.Time, work AttendancePo
 		totalHours += math.Max(0, dayHours)
 	}
 	return math.Round(totalHours*100) / 100
+}
+
+// attendancePolicyDayIsWeekend applies the configured non-working weekdays to leave duration.
+func attendancePolicyDayIsWeekend(day time.Time, weekend string) bool {
+	switch strings.TrimSpace(weekend) {
+	case "", "週六、週日":
+		return day.Weekday() == time.Saturday || day.Weekday() == time.Sunday
+	case "週日":
+		return day.Weekday() == time.Sunday
+	case "無":
+		return false
+	default:
+		return false
+	}
 }
 
 func parseHHMMMinutes(value string) int {
@@ -721,7 +820,7 @@ func attendancePolicyCycleEndOptions() []string {
 // attendancePolicyLeaveTypes 處理考勤政策請假 types。
 func attendancePolicyLeaveTypes() []AttendanceLeaveType {
 	proof24 := floatPtr(24)
-	return []AttendanceLeaveType{
+	items := []AttendanceLeaveType{
 		{
 			Code: leaveTypeCodeSickFull, Name: "全薪病假", Unit: leaveUnitDay,
 			GrantMode: domain.LeaveGrantModeAnnualGrant, RequiresBalance: true, PaidRatio: 1, Active: true,
@@ -737,9 +836,8 @@ func attendancePolicyLeaveTypes() []AttendanceLeaveType {
 		},
 		{
 			Code: leaveTypeCodePersonal, Name: "事假", Unit: leaveUnitDay,
-			GrantMode: domain.LeaveGrantModeAnnualGrant, RequiresBalance: true, PaidRatio: 0, Active: true,
+			GrantMode: domain.LeaveGrantModeEvent, RequiresBalance: false, PaidRatio: 0, Active: true,
 			Quota: "14 天 / 年", Rule: "無累計（不支薪）", Proof: "—",
-			Entitlements: []domain.LeaveEntitlementRule{entitlement("*", 0, nil, 112, false, 0)},
 		},
 		{
 			Code: leaveTypeCodeFamilyCare, Name: "家庭照顧假", Unit: leaveUnitDay,
@@ -808,6 +906,10 @@ func attendancePolicyLeaveTypes() []AttendanceLeaveType {
 			},
 		},
 	}
+	for index := range items {
+		items[index].ID = domain.StableLeaveTypeID(items[index].Code)
+	}
+	return items
 }
 
 // twoDigit 處理 two digit。

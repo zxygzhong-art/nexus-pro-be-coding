@@ -148,14 +148,14 @@ SELECT (
 -- name: UpsertAgentDefinition :one
 INSERT INTO agent_definitions (
     id, tenant_id, name, description, emoji, category, model_id,
-    main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds,
+    main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds,
     version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms,
     usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id,
     created_at, updated_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(name), sqlc.arg(description),
     sqlc.arg(emoji), sqlc.arg(category), sqlc.arg(model_id),
-    sqlc.arg(main_agent_role), sqlc.arg(sub_agents)::jsonb, sqlc.arg(system_prompt), sqlc.arg(welcome_message), sqlc.arg(suggested_questions)::jsonb, sqlc.arg(tools)::jsonb, sqlc.arg(knowledge_base_ids)::jsonb, sqlc.arg(status), sqlc.arg(visibility),
+    sqlc.arg(main_agent_role), sqlc.arg(sub_agents)::jsonb, sqlc.arg(system_prompt), sqlc.arg(welcome_message), sqlc.arg(suggested_questions)::jsonb, sqlc.arg(suggested_question_translations)::jsonb, sqlc.arg(tools)::jsonb, sqlc.arg(knowledge_base_ids)::jsonb, sqlc.arg(status), sqlc.arg(visibility),
     sqlc.arg(visibility_targets)::jsonb, sqlc.arg(timeout_seconds), sqlc.arg(version), sqlc.arg(published_version),
     sqlc.arg(usage_total_runs), sqlc.arg(usage_success_runs), sqlc.arg(usage_failed_runs),
     sqlc.arg(usage_avg_latency_ms), sqlc.arg(usage_last_run_at), sqlc.arg(usage_top_prompts)::jsonb,
@@ -174,6 +174,7 @@ ON CONFLICT (id) DO UPDATE SET
     system_prompt = EXCLUDED.system_prompt,
     welcome_message = EXCLUDED.welcome_message,
     suggested_questions = EXCLUDED.suggested_questions,
+    suggested_question_translations = EXCLUDED.suggested_question_translations,
     tools = EXCLUDED.tools,
     knowledge_base_ids = EXCLUDED.knowledge_base_ids,
     status = EXCLUDED.status,
@@ -248,11 +249,11 @@ RETURNING *;
 
 -- name: InsertAgentDefinitionVersion :one
 INSERT INTO agent_definition_versions (
-    id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, tools, knowledge_base_ids, model_id, note,
+    id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, model_id, note,
     created_by_account_id, created_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(agent_id), sqlc.arg(version),
-    sqlc.arg(main_agent_role), sqlc.arg(sub_agents)::jsonb, sqlc.arg(system_prompt), sqlc.arg(welcome_message), sqlc.arg(suggested_questions)::jsonb, sqlc.arg(tools)::jsonb, sqlc.arg(knowledge_base_ids)::jsonb, sqlc.arg(model_id), sqlc.arg(note),
+    sqlc.arg(main_agent_role), sqlc.arg(sub_agents)::jsonb, sqlc.arg(system_prompt), sqlc.arg(welcome_message), sqlc.arg(suggested_questions)::jsonb, sqlc.arg(suggested_question_translations)::jsonb, sqlc.arg(tools)::jsonb, sqlc.arg(knowledge_base_ids)::jsonb, sqlc.arg(model_id), sqlc.arg(note),
     sqlc.arg(created_by_account_id), sqlc.arg(created_at)
 )
 RETURNING *;

@@ -57,6 +57,7 @@ type AgentChatRuntimeRequest struct {
 	Mode           string
 	Tools          map[string]AgentTool
 	SubAgents      []AgentChatSubAgentRuntimeRequest
+	RecordUsage    func(domain.AgentTokenUsage)
 }
 
 // AgentChatSubAgentRuntimeRequest 定義一個可由主 Agent 委派的運行時成員。
@@ -328,15 +329,22 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		AgentID: agentID, SessionID: sessionID, RunID: run.ID, ContextVersion: session.ContextVersion,
 	})
 	if err := emit(baseCtx, domain.AgentChatEvent{Event: domain.AgentChatEventSession, SessionID: sessionID, RunID: run.ID}); err != nil {
-		_ = c.failRun(ctx, run, err)
+		_ = c.FailRun(ctx, run, err)
 		return run, err
 	}
 	answer := strings.Builder{}
 	artifactEvents := make([]domain.AgentChatEvent, 0, 4)
 	var eventMu sync.Mutex
+	var usageMu sync.Mutex
+	tokenUsage := domain.AgentTokenUsage{}
+	var llmCallCount int64
+	// wrappedEmit normalizes runtime events before they cross the public stream boundary.
 	wrappedEmit := func(eventCtx context.Context, event domain.AgentChatEvent) error {
 		if event.Event == "" {
 			event.Event = domain.AgentChatEventMessageDelta
+		}
+		if event.Event == domain.AgentChatEventError {
+			event = AgentRuntimeFailureEvent(ctx, run.ID)
 		}
 		eventMu.Lock()
 		if event.Event == domain.AgentChatEventMessageDelta && (len(resolvedSubAgents) == 0 || event.AgentName == "" || event.AgentName == agentName) {
@@ -371,8 +379,18 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		Mode:           mode,
 		Tools:          c.filteredAgentTools(ctx, configuredTools, limitTools, wrappedEmit, configuredKnowledgeBaseIDs),
 		SubAgents:      runtimeSubAgents,
+		RecordUsage: func(usage domain.AgentTokenUsage) {
+			usageMu.Lock()
+			llmCallCount++
+			tokenUsage.InputTokens += usage.InputTokens
+			tokenUsage.CachedTokens += usage.CachedTokens
+			tokenUsage.OutputTokens += usage.OutputTokens
+			tokenUsage.TotalTokens += usage.TotalTokens
+			usageMu.Unlock()
+		},
 	}
 	runtimeErr := c.agentChatRuntime.RunAgentChat(baseCtx, req, wrappedEmit)
+	usageComplete := runtimeErr == nil
 	if runtimeErr != nil && mode == agentChatModeAssistantRecommendation && strings.TrimSpace(answer.String()) == "" {
 		fallbackAnswer := assistantRecommendationFallback(userMessage, recommendationCatalog)
 		if fallbackAnswer != "" {
@@ -384,15 +402,28 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 			}
 		}
 	}
+	usageMu.Lock()
+	run.LLMCallCount = llmCallCount
+	run.InputTokens = tokenUsage.InputTokens
+	run.CachedTokens = tokenUsage.CachedTokens
+	run.OutputTokens = tokenUsage.OutputTokens
+	run.TotalTokens = tokenUsage.TotalTokens
+	run.UsageComplete = usageComplete && llmCallCount > 0
+	usageMu.Unlock()
 	if runtimeErr != nil {
-		run.Answer = runtimeErr.Error()
+		c.logWarn(ctx, "agent chat runtime failed",
+			"run_id", run.ID,
+			"session_id", sessionID,
+			"error", runtimeErr,
+		)
+		run.Answer = agentRuntimeFailureAnswer(ctx)
 		failed := run
 		if next, failErr := c.transitionRun(ctx, run, AgentRunStatusFailed); failErr == nil {
 			failed = next
 		}
-		failed.Answer = runtimeErr.Error()
+		failed.Answer = run.Answer
 		_ = c.store.UpsertAgentRun(goContext(ctx), failed)
-		return failed, runtimeErr
+		return failed, agentRuntimeFailureError(ctx)
 	}
 	eventMu.Lock()
 	run.Answer = strings.TrimSpace(answer.String())
@@ -400,7 +431,7 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 	eventMu.Unlock()
 	completedRun, err := c.completeAgentChat(ctx, account.ID, session, run, userMessage, persistedArtifacts)
 	if err != nil {
-		_ = c.failRun(ctx, run, err)
+		_ = c.FailRun(ctx, run, err)
 		return run, err
 	}
 	run = completedRun
@@ -993,7 +1024,7 @@ func agentToolDescription(name string) string {
 		"list_employees":                "List employee summaries. Optional args: limit.",
 		"get_employee":                  "Read one employee. Args: employee_id.",
 		"my_leave_balances":             "Read only the current employee's leave balances. No args. initialized=false means balance data is missing, not zero; never claim zero balance from an empty items list.",
-		"check_leave_eligibility":       "Deterministically check whether the current employee can request one leave type under the active attendance policy and current balance. Args: leave_type, date (YYYY-MM-DD or RFC3339), and hours. Use this before creating a leave draft; do not infer eligibility from my_leave_balances.",
+		"check_leave_eligibility":       "Deterministically check one leave type under the active policy. Args: leave_type, date (YYYY-MM-DD or RFC3339), and hours. Use this before creating a leave draft; do not infer eligibility from my_leave_balances. Missing or insufficient balance is non-blocking: eligible remains true and you must continue creating the draft without balance reservation. Only an unsupported or inactive leave type blocks draft creation.",
 		"my_clock_records":              "Read current user's clock records. Optional args: limit.",
 		"my_attendance_summary":         "Read the current employee's attendance summary for the current month, including attendance days, worked hours, approved leave days, approved overtime hours, and today's clock status. No args.",
 		"my_form_history":               "Read only the current account's form applications. Optional args: template_key, status, and limit. Use template_key=leave-request for leave history.",
@@ -1118,70 +1149,49 @@ func (c AgentService) toolCheckLeaveEligibility(ctx domain.RequestContext, args 
 		return nil, BadRequest("hours must be greater than zero")
 	}
 
-	employeeID, balances, err := c.currentEmployeeLeaveBalances(ctx)
+	employeeID, _, err := c.currentEmployeeLeaveBalances(ctx)
 	if err != nil {
 		return nil, err
 	}
-	policy, err := c.Attendance().loadAttendancePolicyResponse(ctx)
+	evaluation, err := c.Attendance().evaluateLeaveRequestRules(ctx, employeeID, leaveTypeRaw, requestedDate, requestedDate.Add(time.Duration(hours*float64(time.Hour))), hours)
 	if err != nil {
 		return nil, err
 	}
-	leaveTypeCode := normalizeLeaveTypeCode(leaveTypeRaw)
-	leaveType, supported := findLeaveTypeInPolicy(policy, leaveTypeCode)
 	result := map[string]any{
-		"employee_id":    employeeID,
-		"leave_type":     leaveTypeCode,
-		"requested_date": requestedDate.Format(time.DateOnly),
-		"required_hours": hours,
-		"supported":      supported && leaveType.Active,
+		"employee_id":              employeeID,
+		"leave_type_id":            evaluation.LeaveTypeID,
+		"leave_type":               evaluation.LeaveType,
+		"requested_date":           requestedDate.Format(time.DateOnly),
+		"required_hours":           hours,
+		"supported":                evaluation.Status != leaveEvaluationUnsupported,
+		"eligible":                 evaluation.Eligible,
+		"status":                   evaluation.Status,
+		"message":                  evaluation.Message,
+		"policy_version":           evaluation.PolicyVersion,
+		"proof_required":           evaluation.ProofRequired,
+		"policy_balance_required":  evaluation.Rule.RequiresBalance,
+		"balance_required":         evaluation.BalanceRequired,
+		"balance_initialized":      evaluation.BalanceInitialized,
+		"balance_fallback_applied": evaluation.BalanceFallbackReason != "",
+		"balance_fallback_reason":  evaluation.BalanceFallbackReason,
 	}
-	if !supported || !leaveType.Active {
-		result["eligible"] = false
-		result["status"] = "unsupported_leave_type"
-		result["message"] = "The requested leave type is not active in the current attendance policy."
+	if evaluation.Status == leaveEvaluationUnsupported {
 		return result, nil
 	}
-
-	result["leave_type_name"] = leaveType.Name
-	result["balance_required"] = leaveType.RequiresBalance
-	if !leaveType.RequiresBalance {
-		result["balance_initialized"] = false
-		result["eligible"] = true
-		result["status"] = "eligible"
-		result["reason"] = "balance_not_required"
-		result["message"] = "The requested leave type does not require a balance."
-		return result, nil
-	}
-
-	var matched *LeaveBalance
-	for index := range balances {
-		if strings.EqualFold(strings.TrimSpace(balances[index].LeaveType), leaveTypeCode) {
-			matched = &balances[index]
-			break
+	result["leave_type_name"] = evaluation.LeaveTypeName
+	if evaluation.BalanceFallbackReason != "" {
+		if evaluation.BalanceInitialized {
+			result["remaining_hours"] = evaluation.AvailableHours
 		}
-	}
-	if matched == nil {
-		result["balance_initialized"] = false
-		result["eligible"] = false
-		result["status"] = "balance_not_initialized"
-		result["message"] = "Balance data for the requested leave type is not initialized. Do not treat missing data as zero."
+		result["reason"] = "balance_unavailable_fallback"
 		return result, nil
 	}
-
-	remaining := matched.RemainingHours
-	result["balance_initialized"] = true
-	result["remaining_hours"] = remaining
-	if remaining < hours {
-		result["eligible"] = false
-		result["status"] = "insufficient_balance"
-		result["shortfall_hours"] = hours - remaining
-		result["message"] = "The requested leave type has insufficient balance."
+	if !evaluation.BalanceRequired {
+		result["reason"] = "balance_not_required"
 		return result, nil
 	}
-	result["eligible"] = true
-	result["status"] = "eligible"
+	result["remaining_hours"] = evaluation.AvailableHours
 	result["reason"] = "sufficient_balance"
-	result["message"] = "The requested leave type has sufficient balance."
 	return result, nil
 }
 

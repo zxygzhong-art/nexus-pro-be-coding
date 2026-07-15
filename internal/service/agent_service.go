@@ -128,7 +128,7 @@ func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (
 		},
 	})
 	if err != nil {
-		_ = c.failRun(ctx, run, err)
+		_ = c.FailRun(ctx, run, err)
 		return AgentRun{}, err
 	}
 	run.Answer = toolResult.Answer
@@ -166,13 +166,13 @@ func (c AgentService) transitionRun(ctx RequestContext, run AgentRun, status Age
 	return run, nil
 }
 
-// failRun 處理 fail 執行的服務流程。
-func (c AgentService) failRun(ctx RequestContext, run AgentRun, cause error) error {
-	run.Answer = cause.Error()
+// FailRun persists a sanitized legacy runtime failure without exposing the raw provider cause.
+func (c AgentService) FailRun(ctx RequestContext, run AgentRun, cause error) error {
+	run.Answer = agentRuntimeFailureAnswer(ctx)
 	c.logWarn(ctx, "agent run failed",
 		"run_id", run.ID,
 		"mode", run.Mode,
-		"error", cause.Error(),
+		"error", cause,
 	)
 	_, err := c.transitionRun(ctx, run, AgentRunStatusFailed)
 	return err
@@ -369,6 +369,7 @@ func (c AgentService) publishedAgentDefinition(ctx RequestContext, id string) (d
 		agent.SystemPrompt = snapshot.SystemPrompt
 		agent.WelcomeMessage = snapshot.WelcomeMessage
 		agent.SuggestedQuestions = snapshot.SuggestedQuestions
+		agent.SuggestedQuestionTranslations = snapshot.SuggestedQuestionTranslations
 		agent.Tools = snapshot.Tools
 		agent.KnowledgeBaseIDs = snapshot.KnowledgeBaseIDs
 		agent.ModelID = snapshot.ModelID

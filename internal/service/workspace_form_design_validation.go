@@ -68,9 +68,9 @@ func validateWorkspaceFormDesignInput(fields []domain.PlatformFormBuilderField, 
 			})
 		}
 		if binding := field.Binding; binding != nil {
-			fieldErrors = append(fieldErrors, validateFormFieldBinding(id, field.Type, *binding)...)
+			fieldErrors = append(fieldErrors, ValidateFormFieldBinding(id, field.Type, *binding)...)
 		}
-		fieldErrors = append(fieldErrors, validateFormFieldAnalyticsAndSecurity(id, field)...)
+		fieldErrors = append(fieldErrors, ValidateFormFieldAnalyticsAndSecurity(id, field)...)
 	}
 
 	if len(stages) == 0 {
@@ -166,8 +166,8 @@ func validateWorkspaceFormDesignInput(fields []domain.PlatformFormBuilderField, 
 	return nil
 }
 
-// validatePublishedFormFieldIdentity 禁止已發布模板移除欄位或改變既有 ID/type。
-func validatePublishedFormFieldIdentity(previous, next []domain.PlatformFormBuilderField) error {
+// ValidatePublishedFormFieldIdentity prevents published field IDs and types from being removed or changed.
+func ValidatePublishedFormFieldIdentity(previous, next []domain.PlatformFormBuilderField) error {
 	nextByID := make(map[string]domain.PlatformFormBuilderField, len(next))
 	for _, field := range next {
 		nextByID[strings.TrimSpace(field.ID)] = field
@@ -190,8 +190,8 @@ func validatePublishedFormFieldIdentity(previous, next []domain.PlatformFormBuil
 	return nil
 }
 
-// validateFormFieldAnalyticsAndSecurity 驗證欄位統計與敏感度契約。
-func validateFormFieldAnalyticsAndSecurity(fieldID string, field domain.PlatformFormBuilderField) []domain.FieldError {
+// ValidateFormFieldAnalyticsAndSecurity validates reportability, aggregation, and field-security settings.
+func ValidateFormFieldAnalyticsAndSecurity(fieldID string, field domain.PlatformFormBuilderField) []domain.FieldError {
 	errors := make([]domain.FieldError, 0)
 	if analytics := field.Analytics; analytics != nil {
 		role := strings.TrimSpace(analytics.Role)
@@ -260,23 +260,15 @@ func validateSystemFormFieldLocks(templateKey, formKind string, fields []domain.
 	return nil
 }
 
-// validateFormSubmissionPayload 依 template fields 驗證提交 payload。
-// 僅在 schema 明確宣告 fields 時校驗；未宣告時不套用 builder contract 預設欄位，避免誤傷舊模板。
+// validateFormSubmissionPayload strips server metadata before validating the frozen template contract.
 func (c WorkflowService) validateFormSubmissionPayload(ctx RequestContext, template domain.FormTemplate, payload map[string]any) (map[string]any, error) {
-	normalized, err := c.normalizeLeaveSubmissionHours(ctx, template.Key, workflowPayload(payload))
+	sanitized := workflowPayloadForNewInstance(template, workflowPayload(payload))
+	normalized, err := c.normalizeLeaveSubmissionHours(ctx, template.Key, sanitized)
 	if err != nil {
 		return nil, err
 	}
-	design := platformTemplateDesign(template.Schema)
-	if design == nil {
-		return normalized, nil
-	}
-	rawFields, hasFields := design["fields"]
-	if !hasFields {
-		return normalized, nil
-	}
-	fields, ok := platformDecodeSlice[domain.PlatformFormBuilderField](rawFields)
-	if !ok || len(fields) == 0 {
+	fields, hasExplicitFields := platformExplicitTemplateFields(template.Schema)
+	if !hasExplicitFields {
 		return normalized, nil
 	}
 	var catalog domain.FormDataSourceCatalogResponse
@@ -295,7 +287,7 @@ func (c WorkflowService) validateFormSubmissionPayload(ctx RequestContext, templ
 		}
 		value, exists := normalized[id]
 		if field.Binding != nil {
-			boundValue, boundExists, bindingError := validateAndResolveBoundSubmissionValue(catalog, *field.Binding, value, exists)
+			boundValue, boundExists, bindingError := ValidateAndResolveBoundSubmissionValue(catalog, *field.Binding, value, exists)
 			if bindingError != "" {
 				fieldErrors = append(fieldErrors, domain.FieldError{Field: id, Code: "invalid_binding_value", Message: bindingError})
 				continue
@@ -369,7 +361,7 @@ func (c WorkflowService) normalizeLeaveSubmissionHours(ctx RequestContext, templ
 	if err != nil {
 		return nil, err
 	}
-	hours := calculateLeaveHoursWithinPolicy(startAt, endAt, policy.WorkTime)
+	hours := CalculateLeaveHoursWithinPolicy(startAt, endAt, policy.WorkTime)
 	if hours <= 0 {
 		return nil, ValidationFailed("leave time validation failed", []domain.FieldError{{
 			Field: "hours", Code: "outside_work_time", Message: "selected time does not include working hours",
@@ -389,8 +381,8 @@ func formFieldsHaveBindings(fields []domain.PlatformFormBuilderField) bool {
 	return false
 }
 
-// validateAndResolveBoundSubmissionValue 重新解析 object 綁定並驗證 collection 選項。
-func validateAndResolveBoundSubmissionValue(catalog domain.FormDataSourceCatalogResponse, binding domain.PlatformFormBuilderFieldBinding, value any, exists bool) (any, bool, string) {
+// ValidateAndResolveBoundSubmissionValue resolves server-owned values and rejects unknown collection selections.
+func ValidateAndResolveBoundSubmissionValue(catalog domain.FormDataSourceCatalogResponse, binding domain.PlatformFormBuilderFieldBinding, value any, exists bool) (any, bool, string) {
 	source, ok := formDataSourceByID(catalog, strings.TrimSpace(binding.SourceID))
 	if !ok {
 		return nil, false, "bound data source is unavailable"

@@ -36,37 +36,42 @@ func (c WorkflowService) startTemporalFormApprovalWorkflow(ctx RequestContext, i
 // The instance is marked workflow_start_failed so operators can backfill instead of leaving a silent in_review orphan.
 func (c WorkflowService) markFormApprovalWorkflowStartFailed(ctx RequestContext, instance domain.FormInstance, startErr error) error {
 	return c.withTransaction(ctx, func(tx WorkflowService) error {
-		current, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, instance.ID)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return NotFound("form instance", instance.ID)
-		}
-		now := tx.Now()
-		current.Status = domain.WorkflowFormStatusWorkflowStartFailed
-		current.UpdatedAt = now
-		if err := tx.store.UpsertFormInstance(goContext(ctx), current); err != nil {
-			return err
-		}
-		if run, ok, err := tx.store.GetWorkflowRunByFormInstance(goContext(ctx), ctx.TenantID, instance.ID); err != nil {
-			return err
-		} else if ok {
-			run.Status = domain.WorkflowRunStatusStartFailed
-			run.UpdatedAt = now
-			if err := tx.store.UpsertWorkflowRun(goContext(ctx), run); err != nil {
-				return err
-			}
-		}
-		details := map[string]any{
-			"template_id": current.TemplateID,
-			"temporal":    true,
-		}
-		if startErr != nil {
-			details["error"] = startErr.Error()
-		}
-		return tx.audit(ctx, "workflow.form.temporal_start_failed", string(ResourceFormInstance), current.ID, string(SeverityHigh), details)
+		return tx.markFormApprovalWorkflowStartFailedInTransaction(ctx, instance, startErr)
 	})
+}
+
+// markFormApprovalWorkflowStartFailedInTransaction persists start-failure state inside the caller's transaction.
+func (c WorkflowService) markFormApprovalWorkflowStartFailedInTransaction(ctx RequestContext, instance domain.FormInstance, startErr error) error {
+	current, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, instance.ID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return NotFound("form instance", instance.ID)
+	}
+	now := c.Now()
+	current.Status = domain.WorkflowFormStatusWorkflowStartFailed
+	current.UpdatedAt = now
+	if err := c.store.UpsertFormInstance(goContext(ctx), current); err != nil {
+		return err
+	}
+	if run, ok, err := c.store.GetWorkflowRunByFormInstance(goContext(ctx), ctx.TenantID, instance.ID); err != nil {
+		return err
+	} else if ok {
+		run.Status = domain.WorkflowRunStatusStartFailed
+		run.UpdatedAt = now
+		if err := c.store.UpsertWorkflowRun(goContext(ctx), run); err != nil {
+			return err
+		}
+	}
+	details := map[string]any{
+		"template_id": current.TemplateID,
+		"temporal":    true,
+	}
+	if startErr != nil {
+		details["error"] = startErr.Error()
+	}
+	return c.audit(ctx, "workflow.form.temporal_start_failed", string(ResourceFormInstance), current.ID, string(SeverityHigh), details)
 }
 
 func (c WorkflowService) signalTemporalFormApprovalWorkflow(ctx RequestContext, id, action, expectedStatus, reason string) (domain.FormInstance, error) {
@@ -74,8 +79,16 @@ func (c WorkflowService) signalTemporalFormApprovalWorkflow(ctx RequestContext, 
 	if id == "" {
 		return domain.FormInstance{}, BadRequest("id is required")
 	}
-	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, workflowSignalAuthzAction(action), workflowSignalAuthzResourceID(action, id)); err != nil {
-		return domain.FormInstance{}, err
+	action = strings.TrimSpace(strings.ToLower(action))
+	switch action {
+	case domain.FormApprovalWorkflowActionApprove, domain.FormApprovalWorkflowActionReject, domain.FormApprovalWorkflowActionReturn:
+		if _, _, _, _, _, err := c.loadActiveWorkflowStageForAssignee(ctx, id); err != nil {
+			return domain.FormInstance{}, err
+		}
+	default:
+		if _, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionUpdate, ""); err != nil {
+			return domain.FormInstance{}, err
+		}
 	}
 	if c.formApprovalWorkflows == nil {
 		return domain.FormInstance{}, domain.E(503, "temporal_workflow_unavailable", "temporal form approval workflow client is required").WithReasonCode("temporal_workflow_unavailable")
@@ -88,7 +101,7 @@ func (c WorkflowService) signalTemporalFormApprovalWorkflow(ctx RequestContext, 
 		TenantID:       ctx.TenantID,
 		FormInstanceID: id,
 		AccountID:      ctx.AccountID,
-		Action:         strings.TrimSpace(strings.ToLower(action)),
+		Action:         action,
 		Reason:         strings.TrimSpace(reason),
 		RequestID:      ctx.RequestID,
 		TraceID:        ctx.TraceID,
@@ -295,26 +308,6 @@ func (c WorkflowService) withdrawTemporalFormApproval(ctx RequestContext, formIn
 		return domain.FormInstance{}, err
 	}
 	return instance, nil
-}
-
-// workflowSignalAuthzAction maps review signals to their policy action before side effects run.
-func workflowSignalAuthzAction(action string) Action {
-	switch strings.TrimSpace(strings.ToLower(action)) {
-	case domain.FormApprovalWorkflowActionApprove, domain.FormApprovalWorkflowActionReject, domain.FormApprovalWorkflowActionReturn:
-		return ActionApprove
-	default:
-		return ActionUpdate
-	}
-}
-
-// workflowSignalAuthzResourceID defers withdraw ownership checks until the form projection is loaded.
-func workflowSignalAuthzResourceID(action, id string) string {
-	switch strings.TrimSpace(strings.ToLower(action)) {
-	case domain.FormApprovalWorkflowActionWithdraw:
-		return ""
-	default:
-		return id
-	}
 }
 
 func (c WorkflowService) waitTemporalFormApprovalProjection(ctx RequestContext, before domain.FormApprovalProjection, expectedStatus string) (domain.FormApprovalProjection, error) {

@@ -74,14 +74,14 @@ func (a *API) ginHandle(resource, action string, next HandlerFunc, authz routeAu
 			return
 		}
 		if err := next(c.Writer, c.Request, ctx); err != nil {
-			a.writeError(c.Writer, c.Request, businessRouteError(resource, err))
+			a.writeError(c.Writer, c.Request, BusinessRouteError(resource, err))
 			return
 		}
 	}
 }
 
-// businessRouteError assigns module fallbacks only to expected application errors.
-func businessRouteError(resource string, err error) error {
+// BusinessRouteError maps generic domain failures to the module-specific API error code.
+func BusinessRouteError(resource string, err error) error {
 	appErr, ok := domain.AsAppError(err)
 	if !ok {
 		return err

@@ -54,8 +54,11 @@ func (s *Store) cloneLocked() *Store {
 		employeeImports:         cloneNestedMap(s.employeeImports, copyEmployeeImportSession),
 		employmentContracts:     cloneNestedMap(s.employmentContracts, copyEmploymentContract),
 		attendancePolicies:      cloneMap(s.attendancePolicies, copyAttendancePolicy),
+		leaveTypeMappings:       cloneNestedMap(s.leaveTypeMappings, func(v LeaveTypeExternalMapping) LeaveTypeExternalMapping { return v }),
+		leaveTypeSyncIssues:     cloneNestedMap(s.leaveTypeSyncIssues, func(v LeaveTypeSyncIssue) LeaveTypeSyncIssue { return v }),
 		leaveBalances:           cloneNestedMap(s.leaveBalances, copyLeaveBalance),
 		leaveRequests:           cloneNestedMap(s.leaveRequests, copyLeaveRequest),
+		leaveRequestAllocations: cloneNestedMap(s.leaveRequestAllocations, func(v LeaveRequestAllocation) LeaveRequestAllocation { return v }),
 		attendanceWorksites:     cloneNestedMap(s.attendanceWorksites, copyAttendanceWorksite),
 		attendanceShifts:        cloneNestedMap(s.attendanceShifts, copyAttendanceShift),
 		attendanceAssignments:   cloneNestedMap(s.attendanceAssignments, copyAttendanceShiftAssignment),
@@ -133,8 +136,11 @@ func (s *Store) replaceLocked(next *Store) {
 	s.employeeImports = next.employeeImports
 	s.employmentContracts = next.employmentContracts
 	s.attendancePolicies = next.attendancePolicies
+	s.leaveTypeMappings = next.leaveTypeMappings
+	s.leaveTypeSyncIssues = next.leaveTypeSyncIssues
 	s.leaveBalances = next.leaveBalances
 	s.leaveRequests = next.leaveRequests
+	s.leaveRequestAllocations = next.leaveRequestAllocations
 	s.attendanceWorksites = next.attendanceWorksites
 	s.attendanceShifts = next.attendanceShifts
 	s.attendanceAssignments = next.attendanceAssignments

@@ -297,7 +297,6 @@
       "application_code": "workflow",
       "resource_type": "form_instance",
       "actions": [
-        "approve",
         "delete",
         "read",
         "submit",
@@ -390,19 +389,8 @@
       "application_code": "platform",
       "resource_type": "me",
       "resource": "me",
-      "action": "update"
-    },
-    {
-      "application_code": "platform",
-      "resource_type": "me",
-      "resource": "me",
-      "action": "read"
-    },
-    {
-      "application_code": "iam",
-      "resource_type": "authz",
-      "resource": "iam.authz",
-      "action": "check"
+      "action": "update",
+      "risk_level": "critical"
     },
     {
       "application_code": "iam",
@@ -509,26 +497,6 @@
     },
     {
       "application_code": "iam",
-      "resource_type": "user_group",
-      "resource": "iam.user_group",
-      "action": "read"
-    },
-    {
-      "application_code": "iam",
-      "resource_type": "user_group",
-      "resource": "iam.user_group",
-      "action": "update",
-      "risk_level": "critical"
-    },
-    {
-      "application_code": "iam",
-      "resource_type": "user_group",
-      "resource": "iam.user_group",
-      "action": "update",
-      "risk_level": "critical"
-    },
-    {
-      "application_code": "iam",
       "resource_type": "permission_set",
       "resource": "iam.permission_set",
       "action": "read"
@@ -558,12 +526,6 @@
       "application_code": "iam",
       "resource_type": "account",
       "resource": "iam.account",
-      "action": "read"
-    },
-    {
-      "application_code": "iam",
-      "resource_type": "permission_set_assignment",
-      "resource": "iam.permission_set_assignment",
       "action": "read"
     },
     {
@@ -646,12 +608,6 @@
       "resource": "iam.outbox_event",
       "action": "update",
       "risk_level": "high"
-    },
-    {
-      "application_code": "iam",
-      "resource_type": "assumable_role",
-      "resource": "iam.assumable_role",
-      "action": "read"
     },
     {
       "application_code": "iam",
@@ -691,20 +647,8 @@
       "application_code": "hr",
       "resource_type": "position",
       "resource": "hr.position",
-      "action": "create"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "position",
-      "resource": "hr.position",
       "action": "create",
       "risk_level": "critical"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "position",
-      "resource": "hr.position",
-      "action": "read"
     },
     {
       "application_code": "hr",
@@ -729,18 +673,6 @@
       "application_code": "hr",
       "resource_type": "employee",
       "resource": "hr.employee",
-      "action": "read"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "create"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
       "action": "create"
     },
     {
@@ -748,82 +680,6 @@
       "resource_type": "employee",
       "resource": "hr.employee",
       "action": "update"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "update"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "update"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "update"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "read"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "read"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "read"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "import",
-      "risk_level": "critical"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "import",
-      "risk_level": "critical"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "import",
-      "risk_level": "critical"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "read"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "import",
-      "risk_level": "critical"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "read"
     },
     {
       "application_code": "hr",
@@ -837,20 +693,6 @@
       "resource_type": "employee",
       "resource": "hr.employee",
       "action": "export",
-      "risk_level": "critical"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "export",
-      "risk_level": "critical"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "delete",
       "risk_level": "critical"
     },
     {
@@ -899,13 +741,6 @@
       "application_code": "hr",
       "resource_type": "employment_contract",
       "resource": "hr.employment_contract",
-      "action": "read",
-      "risk_level": "critical"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employment_contract",
-      "resource": "hr.employment_contract",
       "action": "update",
       "risk_level": "critical"
     },
@@ -921,12 +756,6 @@
       "resource_type": "org_unit",
       "resource": "hr.org_unit",
       "action": "read"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "org_unit",
-      "resource": "hr.org_unit",
-      "action": "create"
     },
     {
       "application_code": "hr",
@@ -958,38 +787,7 @@
       "application_code": "attendance",
       "resource_type": "leave",
       "resource": "attendance.leave",
-      "action": "read"
-    },
-    {
-      "application_code": "attendance",
-      "resource_type": "leave",
-      "resource": "attendance.leave",
       "action": "create"
-    },
-    {
-      "application_code": "attendance",
-      "resource_type": "leave",
-      "resource": "attendance.leave",
-      "action": "read"
-    },
-    {
-      "application_code": "attendance",
-      "resource_type": "leave",
-      "resource": "attendance.leave",
-      "action": "create"
-    },
-    {
-      "application_code": "attendance",
-      "resource_type": "leave",
-      "resource": "attendance.leave",
-      "action": "read"
-    },
-    {
-      "application_code": "attendance",
-      "resource_type": "leave",
-      "resource": "attendance.leave",
-      "action": "update",
-      "risk_level": "critical"
     },
     {
       "application_code": "attendance",
@@ -1038,12 +836,6 @@
       "resource_type": "shift_assignment",
       "resource": "attendance.shift_assignment",
       "action": "create"
-    },
-    {
-      "application_code": "attendance",
-      "resource_type": "clock",
-      "resource": "attendance.clock",
-      "action": "read"
     },
     {
       "application_code": "attendance",
@@ -1094,140 +886,13 @@
       "application_code": "platform",
       "resource_type": "me",
       "resource": "me",
-      "action": "read"
-    },
-    {
-      "application_code": "platform",
-      "resource_type": "me",
-      "resource": "me",
-      "action": "read"
-    },
-    {
-      "application_code": "platform",
-      "resource_type": "me",
-      "resource": "me",
-      "action": "read"
-    },
-    {
-      "application_code": "platform",
-      "resource_type": "me",
-      "resource": "me",
-      "action": "read"
-    },
-    {
-      "application_code": "platform",
-      "resource_type": "me",
-      "resource": "me",
       "action": "create"
     },
     {
       "application_code": "platform",
       "resource_type": "me",
       "resource": "me",
-      "action": "update"
-    },
-    {
-      "application_code": "platform",
-      "resource_type": "me",
-      "resource": "me",
       "action": "delete"
-    },
-    {
-      "application_code": "platform",
-      "resource_type": "me",
-      "resource": "me",
-      "action": "create"
-    },
-    {
-      "application_code": "platform",
-      "resource_type": "me",
-      "resource": "me",
-      "action": "update"
-    },
-    {
-      "application_code": "platform",
-      "resource_type": "me",
-      "resource": "me",
-      "action": "delete"
-    },
-    {
-      "application_code": "platform",
-      "resource_type": "me",
-      "resource": "me",
-      "action": "update"
-    },
-    {
-      "application_code": "platform",
-      "resource_type": "me",
-      "resource": "me",
-      "action": "read"
-    },
-    {
-      "application_code": "platform",
-      "resource_type": "me",
-      "resource": "me",
-      "action": "read"
-    },
-    {
-      "application_code": "platform",
-      "resource_type": "me",
-      "resource": "me",
-      "action": "update"
-    },
-    {
-      "application_code": "platform",
-      "resource_type": "me",
-      "resource": "me",
-      "action": "update"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "read"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "read"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "read"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "read"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "update"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "read"
-    },
-    {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "export",
-      "risk_level": "critical"
-    },
-    {
-      "application_code": "attendance",
-      "resource_type": "clock",
-      "resource": "attendance.clock",
-      "action": "read"
     },
     {
       "application_code": "attendance",
@@ -1268,12 +933,6 @@
       "action": "read"
     },
     {
-      "application_code": "hr",
-      "resource_type": "employee",
-      "resource": "hr.employee",
-      "action": "read"
-    },
-    {
       "application_code": "agent",
       "resource_type": "model",
       "resource": "agent.model",
@@ -1302,19 +961,6 @@
     },
     {
       "application_code": "agent",
-      "resource_type": "model",
-      "resource": "agent.model",
-      "action": "update",
-      "risk_level": "high"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "model",
-      "resource": "agent.model",
-      "action": "update"
-    },
-    {
-      "application_code": "agent",
       "resource_type": "knowledge_base",
       "resource": "agent.knowledge_base",
       "action": "read"
@@ -1330,12 +976,6 @@
       "application_code": "agent",
       "resource_type": "knowledge_base",
       "resource": "agent.knowledge_base",
-      "action": "read"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "knowledge_base",
-      "resource": "agent.knowledge_base",
       "action": "update",
       "risk_level": "high"
     },
@@ -1345,39 +985,6 @@
       "resource": "agent.knowledge_base",
       "action": "delete",
       "risk_level": "high"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "knowledge_base",
-      "resource": "agent.knowledge_base",
-      "action": "read"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "knowledge_base",
-      "resource": "agent.knowledge_base",
-      "action": "update",
-      "risk_level": "high"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "knowledge_base",
-      "resource": "agent.knowledge_base",
-      "action": "update",
-      "risk_level": "high"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "knowledge_base",
-      "resource": "agent.knowledge_base",
-      "action": "update",
-      "risk_level": "high"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "knowledge_base",
-      "resource": "agent.knowledge_base",
-      "action": "read"
     },
     {
       "application_code": "agent",
@@ -1403,41 +1010,8 @@
       "application_code": "agent",
       "resource_type": "definition",
       "resource": "agent.definition",
-      "action": "update",
-      "risk_level": "high"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "definition",
-      "resource": "agent.definition",
-      "action": "update",
-      "risk_level": "high"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "definition",
-      "resource": "agent.definition",
       "action": "delete",
       "risk_level": "high"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "definition",
-      "resource": "agent.definition",
-      "action": "update"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "definition",
-      "resource": "agent.definition",
-      "action": "update",
-      "risk_level": "high"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "tool",
-      "resource": "agent.tool",
-      "action": "read"
     },
     {
       "application_code": "agent",
@@ -1461,36 +1035,6 @@
     },
     {
       "application_code": "workflow",
-      "resource_type": "form_template",
-      "resource": "workflow.form_template",
-      "action": "read"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_template",
-      "resource": "workflow.form_template",
-      "action": "create"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_definition_draft",
-      "resource": "workflow.form_definition_draft",
-      "action": "read"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_definition_draft",
-      "resource": "workflow.form_definition_draft",
-      "action": "read"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_definition_draft",
-      "resource": "workflow.form_definition_draft",
-      "action": "read"
-    },
-    {
-      "application_code": "workflow",
       "resource_type": "form_definition_draft",
       "resource": "workflow.form_definition_draft",
       "action": "read"
@@ -1501,36 +1045,12 @@
       "resource": "workflow.form_definition_draft",
       "action": "create",
       "risk_level": "high"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_definition_draft",
-      "resource": "workflow.form_definition_draft",
-      "action": "read"
     },
     {
       "application_code": "workflow",
       "resource_type": "form_definition_draft",
       "resource": "workflow.form_definition_draft",
       "action": "update"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_definition_draft",
-      "resource": "workflow.form_definition_draft",
-      "action": "read"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_definition_draft",
-      "resource": "workflow.form_definition_draft",
-      "action": "read"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_definition_draft",
-      "resource": "workflow.form_definition_draft",
-      "action": "read"
     },
     {
       "application_code": "workflow",
@@ -1556,37 +1076,7 @@
       "application_code": "workflow",
       "resource_type": "form_instance",
       "resource": "workflow.form_instance",
-      "action": "read"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_instance",
-      "resource": "workflow.form_instance",
-      "action": "read"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_instance",
-      "resource": "workflow.form_instance",
-      "action": "update"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_instance",
-      "resource": "workflow.form_instance",
       "action": "submit"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_instance",
-      "resource": "workflow.form_instance",
-      "action": "read"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_instance",
-      "resource": "workflow.form_instance",
-      "action": "read"
     },
     {
       "application_code": "workflow",
@@ -1601,58 +1091,10 @@
       "action": "delete"
     },
     {
-      "application_code": "workflow",
-      "resource_type": "form_instance",
-      "resource": "workflow.form_instance",
-      "action": "submit"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_instance",
-      "resource": "workflow.form_instance",
-      "action": "approve"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_instance",
-      "resource": "workflow.form_instance",
-      "action": "update"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_instance",
-      "resource": "workflow.form_instance",
-      "action": "update"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_instance",
-      "resource": "workflow.form_instance",
-      "action": "update"
-    },
-    {
-      "application_code": "workflow",
-      "resource_type": "form_instance",
-      "resource": "workflow.form_instance",
-      "action": "submit"
-    },
-    {
       "application_code": "agent",
       "resource_type": "run",
       "resource": "agent.run",
       "action": "read"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "create"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "create"
     },
     {
       "application_code": "agent",
@@ -1665,84 +1107,6 @@
       "application_code": "agent",
       "resource_type": "run",
       "resource": "agent.run",
-      "action": "read"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "create"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "read"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "update"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "create"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "delete"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "read"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "read"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "create"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "read"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "create"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "read"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
-      "action": "create"
-    },
-    {
-      "application_code": "agent",
-      "resource_type": "run",
-      "resource": "agent.run",
       "action": "update"
     },
     {
@@ -1750,12 +1114,6 @@
       "resource_type": "run",
       "resource": "agent.run",
       "action": "delete"
-    },
-    {
-      "application_code": "audit",
-      "resource_type": "audit_log",
-      "resource": "audit.audit_log",
-      "action": "read"
     }
   ],
   "menus": [
@@ -1841,58 +1199,64 @@
           "sort_order": 11
         },
         {
+          "key": "agents.usage",
+          "label": "用量管理",
+          "path": "/workspace/agent-usage",
+          "sort_order": 12
+        },
+        {
           "key": "agents.knowledge_bases",
           "label": "知識庫",
           "path": "/workspace/knowledge-bases",
-          "sort_order": 12
+          "sort_order": 13
         },
         {
           "key": "agents.tools",
           "label": "工具與整合",
           "path": "/workspace/agent-tools",
-          "sort_order": 13
+          "sort_order": 14
         },
         {
           "key": "iam.members",
           "label": "成員權限",
           "path": "/workspace/iam/members",
-          "sort_order": 14
+          "sort_order": 15
         },
         {
           "key": "iam.user_groups",
           "label": "使用者群組",
           "path": "/workspace/iam/user-groups",
-          "sort_order": 15
+          "sort_order": 16
         },
         {
           "key": "iam.permission_sets",
           "label": "權限集合",
           "path": "/workspace/iam/permission-sets",
-          "sort_order": 16
+          "sort_order": 17
         },
         {
           "key": "iam.assignments",
           "label": "權限指派",
           "path": "/workspace/iam/assignments",
-          "sort_order": 17
+          "sort_order": 18
         },
         {
           "key": "iam.assumable_roles",
           "label": "可承擔角色",
           "path": "/workspace/iam/roles",
-          "sort_order": 18
+          "sort_order": 19
         },
         {
           "key": "iam.policies",
           "label": "數據策略",
           "path": "/workspace/iam/policies",
-          "sort_order": 19
+          "sort_order": 20
         },
         {
           "key": "audit.logs",
           "label": "操作紀錄",
           "path": "/workspace/audit-log",
-          "sort_order": 20
+          "sort_order": 21
         }
       ],
       "sort_order": 1
@@ -1913,7 +1277,7 @@
     {
       "key": "attendance",
       "label": "假勤自助",
-      "path": "/workspace/attendance",
+      "path": "/attendance",
       "children": [
         {
           "key": "attendance.corrections",
@@ -1922,8 +1286,8 @@
         },
         {
           "key": "attendance.leave",
-          "label": "請假申請",
-          "path": "/workspace/leave-policy",
+          "label": "我的假勤",
+          "path": "/attendance",
           "sort_order": 1
         },
         {

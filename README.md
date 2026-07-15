@@ -367,7 +367,7 @@ Run the minimal validation suite:
 go test ./...
 ```
 
-Unit tests live under `tests/unit` and can be run independently:
+All Go test files live outside production packages: unit tests mirror the business package structure under `tests/unit`, while database-backed suites live under `tests/integration`. Unit tests can be run independently:
 
 ```sh
 go test ./tests/unit/...
@@ -394,7 +394,8 @@ The codebase is organized by responsibility so new modules can be added without 
 - `internal/repository/memory` contains the in-memory repository implementation for tests.
 - `internal/jobs` is reserved for scheduled and background task entrypoints.
 - `internal/platform` contains infrastructure clients such as PostgreSQL and Redis.
-- `tests/unit` contains unit tests outside production packages.
+- `tests/unit` mirrors production package paths for unit tests; do not place `_test.go` files under `internal` or `cmd`.
+- `tests/integration` contains database-backed and cross-boundary integration tests.
 
 Project code-organization preferences are documented in `docs/code-organization.md`.
 

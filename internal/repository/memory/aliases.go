@@ -37,6 +37,9 @@ type (
 	AttendanceLeaveType             = domain.AttendanceLeaveType
 	LeaveBalance                    = domain.LeaveBalance
 	LeaveRequest                    = domain.LeaveRequest
+	LeaveRequestAllocation          = domain.LeaveRequestAllocation
+	LeaveTypeExternalMapping        = domain.LeaveTypeExternalMapping
+	LeaveTypeSyncIssue              = domain.LeaveTypeSyncIssue
 	AttendanceWorksite              = domain.AttendanceWorksite
 	AttendanceShift                 = domain.AttendanceShift
 	AttendanceShiftAssignment       = domain.AttendanceShiftAssignment
@@ -56,6 +59,7 @@ type (
 	AgentExternalTool               = domain.AgentExternalTool
 	AgentModelSyncStatus            = domain.AgentModelSyncStatus
 	AgentDefinition                 = domain.AgentDefinition
+	LocalizedAgentSuggestedQuestion = domain.LocalizedAgentSuggestedQuestion
 	AgentTeamMember                 = domain.AgentTeamMember
 	AgentDefinitionVersion          = domain.AgentDefinitionVersion
 	KnowledgeBase                   = domain.KnowledgeBase

@@ -1,9 +1,11 @@
 package service
 
 import (
+	"errors"
 	"sort"
 	"strings"
 
+	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/utils"
 )
 
@@ -55,6 +57,10 @@ func (c MeService) Resolve(ctx RequestContext) (MeResponse, error) {
 	}
 
 	effectiveMenuKeys := uniqueStrings(menuKeysFromPermissions(permissions))
+	permissions, effectiveMenuKeys, err = c.applyMenuScopeRequirements(ctx, account, permissions, effectiveMenuKeys)
+	if err != nil {
+		return MeResponse{}, err
+	}
 	capabilities := uniqueStrings(capabilitiesFromPermissions(permissions))
 
 	return MeResponse{
@@ -68,6 +74,58 @@ func (c MeService) Resolve(ctx RequestContext) (MeResponse, error) {
 		EffectiveMenuKeys:    effectiveMenuKeys,
 		Capabilities:         capabilities,
 	}, nil
+}
+
+// applyMenuScopeRequirements validates restricted menus against the authoritative final authz scope intersection.
+func (c MeService) applyMenuScopeRequirements(ctx RequestContext, account Account, permissions []Permission, menuKeys []string) ([]Permission, []string, error) {
+	denied := map[string]struct{}{}
+	for _, menuKey := range menuKeys {
+		requirement, ok := menuPrimaryReadRequirement(menuKey)
+		if !ok || len(requirement.allowedScopes) == 0 {
+			continue
+		}
+		decision, err := c.evaluateAuthz(ctx, account, CheckRequest{
+			ApplicationCode: requirement.applicationCode,
+			ResourceType:    requirement.resourceType,
+			Resource:        routeResourceName(requirement.applicationCode, requirement.resourceType),
+			Action:          requirement.action,
+		})
+		if err != nil {
+			var appErr *domain.AppError
+			if errors.As(err, &appErr) && appErr.ReasonCode == "data_scope_denied" {
+				denied[canonicalPageMenuKey(menuKey)] = struct{}{}
+				continue
+			}
+			return nil, nil, err
+		}
+		if !decision.Allowed || !requirement.allowsScope(decision.Scope) {
+			denied[canonicalPageMenuKey(menuKey)] = struct{}{}
+		}
+	}
+	if len(denied) == 0 {
+		return permissions, menuKeys, nil
+	}
+	filteredPermissions := make([]Permission, 0, len(permissions))
+	for _, permission := range permissions {
+		menuKey := strings.TrimSpace(permission.MenuKey)
+		if menuKey == "" && permission.PermissionType == PermissionTypeMenu {
+			menuKey = strings.TrimSpace(permission.Resource)
+		}
+		if permission.PermissionType == PermissionTypeMenu {
+			if _, blocked := denied[canonicalPageMenuKey(menuKey)]; blocked {
+				continue
+			}
+		}
+		filteredPermissions = append(filteredPermissions, permission)
+	}
+	filteredMenuKeys := make([]string, 0, len(menuKeys))
+	for _, menuKey := range menuKeys {
+		if _, blocked := denied[canonicalPageMenuKey(menuKey)]; blocked {
+			continue
+		}
+		filteredMenuKeys = append(filteredMenuKeys, menuKey)
+	}
+	return filteredPermissions, filteredMenuKeys, nil
 }
 
 // UpdateProfile applies the allowlisted self-service fields to the current user's linked employee.
@@ -114,6 +172,98 @@ func (c MeService) UpdateProfile(ctx RequestContext, input UpdateMeProfileInput)
 		return MeResponse{}, err
 	}
 	return c.Resolve(ctx)
+}
+
+// UpdatePreferences persists account-owned settings without rewriting the linked employee profile.
+func (c MeService) UpdatePreferences(ctx RequestContext, input UpdateMePreferencesInput) (MeResponse, error) {
+	if err := input.Validate(); err != nil {
+		return MeResponse{}, err
+	}
+	account, decision, authzAudit, err := c.Authorize(ctx,
+		CheckRequest{Resource: "me", Action: ActionUpdate, Scope: ScopeSelf},
+		AuditTarget{Event: "me.preferences.update", Resource: "me", Target: ctx.AccountID},
+	)
+	if err != nil {
+		return MeResponse{}, err
+	}
+	if err := c.withTransaction(ctx, func(tx MeService) error {
+		updated, ok, err := tx.store.UpdateAccountPreferredLocale(goContext(ctx), ctx.TenantID, account.ID, input.PreferredLocale)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("account", account.ID)
+		}
+		if err := tx.audit(ctx, "platform.me.preferences.update", "account", updated.ID, string(SeverityLow), auditDecisionDetails(ctx, decision, map[string]any{
+			"preferred_locale": updated.PreferredLocale,
+		})); err != nil {
+			return err
+		}
+		return authzAudit.CommitWith(ctx, tx.Service)
+	}); err != nil {
+		return MeResponse{}, err
+	}
+	return c.Resolve(ctx)
+}
+
+// ChangePassword re-authenticates the current account and updates only its bound Keycloak credential.
+func (c MeService) ChangePassword(ctx RequestContext, input ChangePasswordInput) error {
+	if err := input.Validate(); err != nil {
+		return err
+	}
+	account, _, authzAudit, err := c.Authorize(ctx,
+		CheckRequest{Resource: "me", Action: ActionUpdate, Scope: ScopeSelf},
+		AuditTarget{Event: "me.password.update", Resource: "me", Target: ctx.AccountID},
+	)
+	if err != nil {
+		return err
+	}
+	if c.identityPasswordChanger == nil {
+		return domain.E(503, "service_unavailable", "password change is not configured").
+			WithReasonCode("password_change_unavailable")
+	}
+	identities, err := c.store.ListUserIdentities(goContext(ctx), ctx.TenantID, account.ID)
+	if err != nil {
+		return err
+	}
+	var subject string
+	for _, identity := range identities {
+		if identity.Provider == domain.IdentityProviderKeycloak && strings.TrimSpace(identity.Subject) != "" {
+			subject = strings.TrimSpace(identity.Subject)
+			break
+		}
+	}
+	if subject == "" {
+		return domain.E(409, "conflict", "current account is not linked to a Keycloak password identity").
+			WithReasonCode("password_change_unavailable")
+	}
+	err = c.identityPasswordChanger.ChangePassword(goContext(ctx), domain.IdentityPasswordChangeInput{
+		TenantID:        ctx.TenantID,
+		AccountID:       account.ID,
+		Subject:         subject,
+		CurrentPassword: input.CurrentPassword,
+		NewPassword:     input.NewPassword,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, domain.ErrIdentityCurrentPasswordInvalid):
+			return domain.BadRequest("current password is incorrect").WithReasonCode("current_password_invalid")
+		case errors.Is(err, domain.ErrIdentityPasswordRejected):
+			return domain.BadRequest("new password does not satisfy the Keycloak password policy").WithReasonCode("password_policy_rejected")
+		case errors.Is(err, domain.ErrIdentityPasswordUnavailable):
+			return domain.E(503, "service_unavailable", "password change is temporarily unavailable").
+				WithReasonCode("password_change_unavailable")
+		default:
+			c.logWarn(ctx, "Keycloak password change failed", "error", err)
+			return domain.E(502, "identity_provider_error", "password change failed at the identity provider")
+		}
+	}
+	if err := authzAudit.Commit(ctx); err != nil {
+		// The external password has already changed; do not invite a destructive retry because audit persistence failed.
+		c.logWarn(ctx, "password change audit failed after identity update", "error", err)
+	}
+	c.logInfo(ctx, "password changed for current account")
+	return nil
 }
 
 // employeeForAccount resolves both modern account.employee_id links and legacy employee.account_id links.
@@ -193,13 +343,6 @@ func (c MeService) ListMenus(ctx RequestContext) ([]MenuNode, error) {
 
 // menuKeysFromPermissions 處理 menu keys 來源 權限。
 func menuKeysFromPermissions(perms []Permission) []string {
-	effectivePermissionKeys := map[string]struct{}{}
-	for _, perm := range perms {
-		perm = normalizePermission(perm)
-		if permissionCanAuthorizeRequest(perm) {
-			effectivePermissionKeys[permissionKey(perm.ApplicationCode, perm.ResourceType, perm.Action)] = struct{}{}
-		}
-	}
 	keys := make([]string, 0, len(perms))
 	for _, perm := range perms {
 		menuKey := strings.TrimSpace(perm.MenuKey)
@@ -209,15 +352,17 @@ func menuKeysFromPermissions(perms []Permission) []string {
 		if menuKey == "" {
 			continue
 		}
-		primaryRead, ok := menuPrimaryReadPermissionKey(menuKey)
+		requirement, ok := menuPrimaryReadRequirement(menuKey)
 		if !ok {
 			normalized := normalizePermission(perm)
 			if !permissionCanAuthorizeRequest(normalized) || normalized.Action != ActionRead {
 				continue
 			}
-			primaryRead = permissionKey(normalized.ApplicationCode, normalized.ResourceType, normalized.Action)
+			requirement = menuPermissionRequirement{
+				permissionKey: permissionKey(normalized.ApplicationCode, normalized.ResourceType, normalized.Action),
+			}
 		}
-		if _, effective := effectivePermissionKeys[primaryRead]; !effective {
+		if !permissionsSatisfyMenuRequirement(perms, requirement) {
 			continue
 		}
 		keys = append(keys, menuKey)
@@ -303,6 +448,7 @@ var defaultMenuCatalog = []MenuNode{
 			{Key: "workflow.forms", Label: "表單設計", Path: "/workspace/forms"},
 			{Key: "agents.models", Label: "模型設定", Path: "/workspace/agent-models"},
 			{Key: "agents.definitions", Label: "Agent 管理", Path: "/workspace/agents"},
+			{Key: "agents.usage", Label: "用量管理", Path: "/workspace/agent-usage"},
 			{Key: "agents.knowledge_bases", Label: "知識庫", Path: "/workspace/knowledge-bases"},
 			{Key: "agents.tools", Label: "工具與整合", Path: "/workspace/agent-tools"},
 			{Key: "iam.members", Label: "成員權限", Path: "/workspace/iam/members"},
@@ -325,10 +471,10 @@ var defaultMenuCatalog = []MenuNode{
 	{
 		Key:   "attendance",
 		Label: "假勤自助",
-		Path:  "/workspace/attendance",
+		Path:  "/attendance",
 		Children: []MenuNode{
 			{Key: "attendance.corrections", Label: "補卡申請", Path: "/workspace/clock"},
-			{Key: "attendance.leave", Label: "請假申請", Path: "/workspace/leave-policy"},
+			{Key: "attendance.leave", Label: "我的假勤", Path: "/attendance"},
 			{Key: "attendance.worksites", Label: "辦公地點", Path: "/workspace/leave-policy"},
 			{Key: "attendance.shifts", Label: "班次規則", Path: "/workspace/leave-policy"},
 		},

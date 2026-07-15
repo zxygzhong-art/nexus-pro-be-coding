@@ -1,4 +1,4 @@
-package llm
+package llm_test
 
 import (
 	"context"
@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+
+	"nexus-pro-be/internal/platform/llm"
 )
 
 // TestLiteLLMEmbeddingClient verifies alias routing, authentication, and response ordering.
@@ -30,7 +32,7 @@ func TestLiteLLMEmbeddingClient(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client, err := NewLiteLLMEmbeddingClient(LiteLLMEmbeddingConfig{BaseURL: server.URL, APIKey: "test-key"})
+	client, err := llm.NewLiteLLMEmbeddingClient(llm.LiteLLMEmbeddingConfig{BaseURL: server.URL, APIKey: "test-key"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -50,7 +52,7 @@ func TestLiteLLMEmbeddingClientRejectsInvalidResponse(t *testing.T) {
 		_, _ = w.Write([]byte(`{"object":"list","model":"upstream","data":[{"object":"embedding","index":0,"embedding":[1]}],"usage":{"prompt_tokens":1,"total_tokens":1}}`))
 	}))
 	defer server.Close()
-	client, err := NewLiteLLMEmbeddingClient(LiteLLMEmbeddingConfig{BaseURL: server.URL, APIKey: "test-key"})
+	client, err := llm.NewLiteLLMEmbeddingClient(llm.LiteLLMEmbeddingConfig{BaseURL: server.URL, APIKey: "test-key"})
 	if err != nil {
 		t.Fatal(err)
 	}

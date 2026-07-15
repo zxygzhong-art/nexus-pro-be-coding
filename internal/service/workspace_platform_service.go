@@ -212,7 +212,7 @@ func (c WorkspaceService) UpdateWorkspaceFormDesign(ctx RequestContext, id strin
 				return err
 			}
 			if input.Fields != nil && template.Status == "published" {
-				if err := validatePublishedFormFieldIdentity(platformTemplateFields(template.Key, template.Schema), next.Fields); err != nil {
+				if err := ValidatePublishedFormFieldIdentity(platformTemplateFields(template.Key, template.Schema), next.Fields); err != nil {
 					return err
 				}
 			}
@@ -593,6 +593,65 @@ func (c WorkspaceService) UpdateWorkspaceOrganizationManager(ctx RequestContext,
 		if err := tx.audit(ctx, "platform.workspace.organization.manager.update", string(ResourceEmployee), next.ID, string(SeverityMedium), auditDecisionDetails(ctx, decision, map[string]any{
 			"before_manager_employee_id": before.ManagerEmployeeID,
 			"after_manager_employee_id":  next.ManagerEmployeeID,
+		})); err != nil {
+			return err
+		}
+		return authzAudit.CommitWith(ctx, tx.Service)
+	}); err != nil {
+		return WorkspaceOrganizationResponse{}, err
+	}
+	return c.WorkspaceOrganization(ctx)
+}
+
+// UpdateWorkspaceOrganizationVisibility 更新員工在組織圖預覽中的可見性。
+func (c WorkspaceService) UpdateWorkspaceOrganizationVisibility(ctx RequestContext, displayID string, input UpdateWorkspaceOrganizationVisibilityInput) (WorkspaceOrganizationResponse, error) {
+	if input.ShowInOrgChart == nil {
+		return WorkspaceOrganizationResponse{}, BadRequest("show_in_org_chart is required")
+	}
+	visibleEmployees, err := c.visibleWorkspaceEmployees(ctx, "workspace.organization")
+	if err != nil {
+		return WorkspaceOrganizationResponse{}, err
+	}
+	visibleEmployees = workspaceOrganizationEmployees(visibleEmployees)
+	employee, ok := workspaceEmployeeByDisplayID(visibleEmployees, displayID)
+	if !ok {
+		return WorkspaceOrganizationResponse{}, NotFound("employee", strings.TrimSpace(displayID))
+	}
+	account, decision, authzAudit, err := c.Service.Authorize(ctx,
+		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, ResourceID: employee.ID, Action: ActionUpdate},
+		AuditTarget{Event: "platform.workspace.organization.visibility.update", Resource: string(ResourceEmployee), Target: employee.ID},
+	)
+	if err != nil {
+		return WorkspaceOrganizationResponse{}, err
+	}
+	showInOrgChart := *input.ShowInOrgChart
+	if err := c.Service.HR().withTransaction(ctx, func(tx HRService) error {
+		current, ok, err := tx.store.GetEmployee(goContext(ctx), ctx.TenantID, employee.ID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("employee", employee.ID)
+		}
+		visible, err := tx.filterEmployeesByDecision(ctx, account, []Employee{current}, decision)
+		if err != nil {
+			return err
+		}
+		if len(visible) == 0 {
+			return forbiddenDataScope("employee is outside data scope")
+		}
+		if err := tx.store.UpdateEmployeeOrgChartVisibility(goContext(ctx), ctx.TenantID, current.ID, showInOrgChart, tx.Now()); err != nil {
+			return err
+		}
+		if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeUpdated), current.ID, map[string]any{
+			"employee_id":       current.ID,
+			"show_in_org_chart": showInOrgChart,
+		}); err != nil {
+			return err
+		}
+		if err := tx.audit(ctx, "platform.workspace.organization.visibility.update", string(ResourceEmployee), current.ID, string(SeverityMedium), auditDecisionDetails(ctx, decision, map[string]any{
+			"before_show_in_org_chart": current.ShowInOrgChart,
+			"after_show_in_org_chart":  showInOrgChart,
 		})); err != nil {
 			return err
 		}

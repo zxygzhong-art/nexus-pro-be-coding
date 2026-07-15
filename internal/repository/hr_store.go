@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"nexus-pro-be/internal/domain"
 )
@@ -25,6 +26,7 @@ type PositionStore interface {
 // EmployeeStore 定義員工儲存層的行為契約。
 type EmployeeStore interface {
 	UpsertEmployee(ctx context.Context, employee domain.Employee) error
+	UpdateEmployeeOrgChartVisibility(ctx context.Context, tenantID, id string, showInOrgChart bool, updatedAt time.Time) error
 	GetEmployee(ctx context.Context, tenantID, id string) (domain.Employee, bool, error)
 	ListEmployees(ctx context.Context, tenantID string) ([]domain.Employee, error)
 	GetEmployeeByEmployeeNo(ctx context.Context, tenantID, employeeNo string) (domain.Employee, bool, error)

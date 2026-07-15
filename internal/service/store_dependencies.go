@@ -3,7 +3,9 @@ package service
 import "nexus-pro-be/internal/repository"
 
 type meStore interface {
+	repository.AccountStore
 	repository.IAMStore
+	repository.IdentityStore
 	repository.EmployeeStore
 	repository.OrgStore
 	repository.AuditStore

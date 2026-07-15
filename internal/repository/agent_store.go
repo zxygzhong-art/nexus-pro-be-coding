@@ -37,6 +37,10 @@ type AgentStore interface {
 	GetAgentSession(ctx context.Context, tenantID, id string) (domain.AgentSession, bool, error)
 	GetAgentSessionForUpdate(ctx context.Context, tenantID, id string) (domain.AgentSession, bool, error)
 	ListAgentSessionsByAccount(ctx context.Context, tenantID, accountID, status, agentID string) ([]domain.AgentSession, error)
+	ListAgentUsageByAccount(ctx context.Context, tenantID string, query domain.AgentAccountUsageQuery, page domain.PageRequest) ([]domain.AgentAccountUsage, int, error)
+	GetAgentUsageByAccount(ctx context.Context, tenantID, accountID string) (domain.AgentAccountUsage, bool, error)
+	GetAgentUsageSummary(ctx context.Context, tenantID string) (domain.AgentUsageSummary, error)
+	ListAgentUsageBySession(ctx context.Context, tenantID, accountID string, page domain.PageRequest) ([]domain.AgentSessionUsage, int, error)
 	DeleteAgentSession(ctx context.Context, tenantID, id string) (domain.AgentSession, bool, error)
 	InsertAgentSessionMessage(context.Context, domain.AgentSessionMessage) error
 	ListAgentSessionMessages(ctx context.Context, tenantID, sessionID string) ([]domain.AgentSessionMessage, error)

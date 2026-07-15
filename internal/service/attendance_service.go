@@ -91,9 +91,21 @@ func (c AttendanceService) ListLeaveBalances(ctx RequestContext) ([]LeaveBalance
 
 // ListLeaveBalancePage 列出請假 balance 分頁的服務流程。
 func (c AttendanceService) ListLeaveBalancePage(ctx RequestContext, page PageRequest) (PageResponse[LeaveBalance], error) {
+	return c.ListLeaveBalancePageByQuery(ctx, LeaveBalanceQuery{}, page)
+}
+
+// ListLeaveBalancePageByQuery filters authorized balances before sorting and pagination.
+func (c AttendanceService) ListLeaveBalancePageByQuery(ctx RequestContext, query LeaveBalanceQuery, page PageRequest) (PageResponse[LeaveBalance], error) {
 	items, err := c.ListLeaveBalances(ctx)
 	if err != nil {
 		return PageResponse[LeaveBalance]{}, err
+	}
+	if employeeIDs := employeeIDsFromSlice(query.EmployeeIDs); len(employeeIDs) > 0 {
+		allowed := make(map[string]struct{}, len(employeeIDs))
+		for _, employeeID := range employeeIDs {
+			allowed[employeeID] = struct{}{}
+		}
+		items = filterLeaveBalancesByEmployees(items, allowed)
 	}
 	items = utils.SortLeaveBalances(items, page.Sort)
 	return utils.PageResponse(items, page), nil
@@ -132,6 +144,11 @@ func (c AttendanceService) listLeaveRequestsByQuery(ctx RequestContext, query Le
 
 // ListLeaveRequestPage 列出請假請求分頁的服務流程。
 func (c AttendanceService) ListLeaveRequestPage(ctx RequestContext, page PageRequest) (PageResponse[LeaveRequest], error) {
+	return c.ListLeaveRequestPageByQuery(ctx, LeaveRequestQuery{}, page)
+}
+
+// ListLeaveRequestPageByQuery intersects requested employees with the caller's authorized scope.
+func (c AttendanceService) ListLeaveRequestPageByQuery(ctx RequestContext, query LeaveRequestQuery, page PageRequest) (PageResponse[LeaveRequest], error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
 		return PageResponse[LeaveRequest]{}, err
@@ -147,9 +164,8 @@ func (c AttendanceService) ListLeaveRequestPage(ctx RequestContext, page PageReq
 	if err != nil {
 		return PageResponse[LeaveRequest]{}, err
 	}
-	query := LeaveRequestQuery{}
 	if !all {
-		query.EmployeeIDs = employeeIDsFromSet(allowed)
+		query.EmployeeIDs = intersectEmployeeIDs(query.EmployeeIDs, allowed)
 		if len(query.EmployeeIDs) == 0 {
 			page = utils.NormalizePageRequest(page)
 			return PageResponse[LeaveRequest]{Items: []LeaveRequest{}, Page: page.Page, PageSize: page.PageSize, Sort: page.Sort}, nil

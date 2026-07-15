@@ -14,37 +14,39 @@ import (
 
 // Service 定義服務的資料結構。
 type Service struct {
-	store                 repository.Store
-	now                   func() time.Time
-	logger                *slog.Logger
-	authzSnapshot         AuthzSnapshotCache
-	relationships         RelationshipChecker
-	openFGAScopeChecks    bool
-	agentChatRuntime      AgentChatRuntime
-	liteLLMAdmin          LiteLLMAdminClient
-	knowledgeEmbedder     KnowledgeEmbedder
-	objectStore           ObjectStore
-	ehrmsClient           EHRMSClient
-	identityProvisioner   IdentityProvisioner
-	formApprovalWorkflows FormApprovalWorkflowClient
-	credentialCipher      CredentialCipher
+	store                   repository.Store
+	now                     func() time.Time
+	logger                  *slog.Logger
+	authzSnapshot           AuthzSnapshotCache
+	relationships           RelationshipChecker
+	openFGAScopeChecks      bool
+	agentChatRuntime        AgentChatRuntime
+	liteLLMAdmin            LiteLLMAdminClient
+	knowledgeEmbedder       KnowledgeEmbedder
+	objectStore             ObjectStore
+	ehrmsClient             EHRMSClient
+	identityProvisioner     IdentityProvisioner
+	identityPasswordChanger IdentityPasswordChanger
+	formApprovalWorkflows   FormApprovalWorkflowClient
+	credentialCipher        CredentialCipher
 }
 
 // Options 定義選項的資料結構。
 type Options struct {
-	Logger                *slog.Logger
-	Now                   func() time.Time
-	AuthzSnapshot         AuthzSnapshotCache
-	Relationships         RelationshipChecker
-	OpenFGAScopeChecks    bool
-	AgentChatRuntime      AgentChatRuntime
-	LiteLLMAdmin          LiteLLMAdminClient
-	KnowledgeEmbedder     KnowledgeEmbedder
-	ObjectStore           ObjectStore
-	EHRMSClient           EHRMSClient
-	IdentityProvisioner   IdentityProvisioner
-	FormApprovalWorkflows FormApprovalWorkflowClient
-	CredentialCipher      CredentialCipher
+	Logger                  *slog.Logger
+	Now                     func() time.Time
+	AuthzSnapshot           AuthzSnapshotCache
+	Relationships           RelationshipChecker
+	OpenFGAScopeChecks      bool
+	AgentChatRuntime        AgentChatRuntime
+	LiteLLMAdmin            LiteLLMAdminClient
+	KnowledgeEmbedder       KnowledgeEmbedder
+	ObjectStore             ObjectStore
+	EHRMSClient             EHRMSClient
+	IdentityProvisioner     IdentityProvisioner
+	IdentityPasswordChanger IdentityPasswordChanger
+	FormApprovalWorkflows   FormApprovalWorkflowClient
+	CredentialCipher        CredentialCipher
 }
 
 // CredentialCipher encrypts persisted secrets with contextual associated data.
@@ -87,6 +89,11 @@ type IdentityProvisioner interface {
 	EnsureUser(context.Context, domain.IdentityProvisioningInput) (domain.ProvisionedIdentity, error)
 }
 
+// IdentityPasswordChanger updates one externally managed password after ownership and current-credential verification.
+type IdentityPasswordChanger interface {
+	ChangePassword(context.Context, domain.IdentityPasswordChangeInput) error
+}
+
 // FormApprovalWorkflowClient defines the Temporal operations used by workflow service.
 type FormApprovalWorkflowClient interface {
 	StartFormApprovalWorkflow(context.Context, domain.FormApprovalWorkflowStart) error
@@ -108,20 +115,21 @@ func New(store repository.Store, options ...Options) *Service {
 		now = cfg.Now
 	}
 	return &Service{
-		store:                 store,
-		now:                   now,
-		logger:                logger,
-		authzSnapshot:         cfg.AuthzSnapshot,
-		relationships:         cfg.Relationships,
-		openFGAScopeChecks:    cfg.OpenFGAScopeChecks,
-		agentChatRuntime:      cfg.AgentChatRuntime,
-		liteLLMAdmin:          cfg.LiteLLMAdmin,
-		knowledgeEmbedder:     cfg.KnowledgeEmbedder,
-		objectStore:           firstObjectStore(cfg.ObjectStore),
-		ehrmsClient:           cfg.EHRMSClient,
-		identityProvisioner:   cfg.IdentityProvisioner,
-		formApprovalWorkflows: cfg.FormApprovalWorkflows,
-		credentialCipher:      cfg.CredentialCipher,
+		store:                   store,
+		now:                     now,
+		logger:                  logger,
+		authzSnapshot:           cfg.AuthzSnapshot,
+		relationships:           cfg.Relationships,
+		openFGAScopeChecks:      cfg.OpenFGAScopeChecks,
+		agentChatRuntime:        cfg.AgentChatRuntime,
+		liteLLMAdmin:            cfg.LiteLLMAdmin,
+		knowledgeEmbedder:       cfg.KnowledgeEmbedder,
+		objectStore:             firstObjectStore(cfg.ObjectStore),
+		ehrmsClient:             cfg.EHRMSClient,
+		identityProvisioner:     cfg.IdentityProvisioner,
+		identityPasswordChanger: cfg.IdentityPasswordChanger,
+		formApprovalWorkflows:   cfg.FormApprovalWorkflows,
+		credentialCipher:        cfg.CredentialCipher,
 	}
 }
 
@@ -716,7 +724,6 @@ func effectiveAccessPermissionsFromGrants(grants []authzGrant, boundary map[stri
 
 	out := make([]Permission, 0, len(grants))
 	seen := map[string]struct{}{}
-	effectivePermissionKeys := map[string]struct{}{}
 	for _, grant := range grants {
 		perm := normalizePermission(grant.Permission)
 		if !permissionCanAuthorizeRequest(perm) {
@@ -737,7 +744,6 @@ func effectiveAccessPermissionsFromGrants(grants []authzGrant, boundary map[stri
 				continue
 			}
 		}
-		effectivePermissionKeys[key] = struct{}{}
 		label := effectivePermissionIdentity(perm)
 		if _, ok := seen[label]; ok {
 			continue
@@ -754,11 +760,11 @@ func effectiveAccessPermissionsFromGrants(grants []authzGrant, boundary map[stri
 		if menuKey == "" {
 			menuKey = strings.TrimSpace(perm.Resource)
 		}
-		primaryRead, ok := menuPrimaryReadPermissionKey(menuKey)
+		requirement, ok := menuPrimaryReadRequirement(menuKey)
 		if !ok {
 			continue
 		}
-		if _, effective := effectivePermissionKeys[primaryRead]; !effective {
+		if !permissionsSatisfyMenuRequirement(out, requirement) {
 			continue
 		}
 		label := effectivePermissionIdentity(perm)

@@ -9,6 +9,7 @@ import (
 	"nexus-pro-be/internal/workflows"
 
 	"go.temporal.io/sdk/activity"
+	"go.temporal.io/sdk/temporal"
 	"go.temporal.io/sdk/testsuite"
 )
 
@@ -141,10 +142,38 @@ func TestFormApprovalWorkflowWithdrawSignalCompletes(t *testing.T) {
 	}
 }
 
+// TestFormApprovalWorkflowContinuesAfterBusinessRejection keeps one invalid signal from terminating the workflow.
+func TestFormApprovalWorkflowContinuesAfterBusinessRejection(t *testing.T) {
+	env, counters := newFormApprovalWorkflowEnv(t, formApprovalWorkflowScript{
+		afterSignal: domain.FormApprovalProjection{TenantID: "tenant-1", FormInstanceID: "fi-1", FormStatus: "approved", RunStatus: domain.WorkflowRunStatusCompleted},
+		applyErrors: []error{temporal.NewNonRetryableApplicationError("not assigned", "forbidden", nil)},
+	})
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(domain.FormApprovalWorkflowSignalName, domain.FormApprovalWorkflowSignal{
+			TenantID: "tenant-1", FormInstanceID: "fi-1", AccountID: "acct-bystander", Action: domain.FormApprovalWorkflowActionApprove,
+		})
+	}, time.Millisecond)
+	env.RegisterDelayedCallback(func() {
+		env.SignalWorkflow(domain.FormApprovalWorkflowSignalName, domain.FormApprovalWorkflowSignal{
+			TenantID: "tenant-1", FormInstanceID: "fi-1", AccountID: "acct-admin", Action: domain.FormApprovalWorkflowActionApprove,
+		})
+	}, 2*time.Millisecond)
+
+	env.ExecuteWorkflow(workflows.FormApprovalWorkflow, formApprovalStart())
+
+	if err := env.GetWorkflowError(); err != nil {
+		t.Fatal(err)
+	}
+	if counters.apply != 2 {
+		t.Fatalf("expected rejected and accepted signals to be processed once each, got %d", counters.apply)
+	}
+}
+
 type formApprovalWorkflowScript struct {
 	initial     domain.FormApprovalProjection
 	afterLoad   domain.FormApprovalProjection
 	afterSignal domain.FormApprovalProjection
+	applyErrors []error
 }
 
 type formApprovalWorkflowCounters struct {
@@ -174,6 +203,9 @@ func newFormApprovalWorkflowEnv(t *testing.T, script formApprovalWorkflowScript)
 	}, activity.RegisterOptions{Name: workflows.ActivityNameLoadFormApprovalProjection})
 	env.RegisterActivityWithOptions(func(context.Context, domain.FormApprovalWorkflowSignal) (domain.FormApprovalProjection, error) {
 		counters.apply++
+		if counters.apply <= len(script.applyErrors) && script.applyErrors[counters.apply-1] != nil {
+			return domain.FormApprovalProjection{}, script.applyErrors[counters.apply-1]
+		}
 		return script.afterSignal, nil
 	}, activity.RegisterOptions{Name: workflows.ActivityNameApplyFormApprovalSignal})
 	env.RegisterActivityWithOptions(func(context.Context, domain.FormApprovalReminder) error {

@@ -49,7 +49,7 @@ func (s *SFTPGo) GetObject(ctx context.Context, key string) ([]byte, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	objectPath, err := s.pathForKey(key)
+	objectPath, err := s.PathForKey(key)
 	if err != nil {
 		return nil, err
 	}
@@ -88,7 +88,7 @@ func NewSFTPGoStore(ctx context.Context, opts SFTPGoOptions) (ObjectStore, error
 
 // NewSFTPGo creates an object store backed by SFTPGo.
 func NewSFTPGo(ctx context.Context, opts SFTPGoOptions) (*SFTPGo, error) {
-	endpoint, err := normalizeSFTPGoEndpoint(opts.Endpoint)
+	endpoint, err := NormalizeSFTPGoEndpoint(opts.Endpoint)
 	if err != nil {
 		return nil, err
 	}
@@ -131,7 +131,7 @@ func (s *SFTPGo) PutObject(ctx context.Context, key string, _ string, data []byt
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	objectPath, err := s.pathForKey(key)
+	objectPath, err := s.PathForKey(key)
 	if err != nil {
 		return err
 	}
@@ -156,7 +156,7 @@ func (s *SFTPGo) DeleteObject(ctx context.Context, key string) error {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	objectPath, err := s.pathForKey(key)
+	objectPath, err := s.PathForKey(key)
 	if err != nil {
 		return err
 	}
@@ -199,7 +199,8 @@ func (s *SFTPGo) withClient(ctx context.Context, fn func(*sftp.Client) error) er
 	return fn(client)
 }
 
-func (s *SFTPGo) pathForKey(key string) (string, error) {
+// PathForKey resolves an object key under the configured SFTP root without allowing traversal.
+func (s *SFTPGo) PathForKey(key string) (string, error) {
 	key = strings.TrimSpace(key)
 	if key == "" {
 		return "", errors.New("object key is required")
@@ -211,7 +212,8 @@ func (s *SFTPGo) pathForKey(key string) (string, error) {
 	return path.Join(s.root, cleanKey), nil
 }
 
-func normalizeSFTPGoEndpoint(endpoint string) (string, error) {
+// NormalizeSFTPGoEndpoint validates an SFTP endpoint and adds the default SFTPGo port when absent.
+func NormalizeSFTPGoEndpoint(endpoint string) (string, error) {
 	endpoint = strings.TrimSpace(endpoint)
 	if endpoint == "" {
 		return "", errors.New("object store endpoint is required")

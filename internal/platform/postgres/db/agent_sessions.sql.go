@@ -30,6 +30,46 @@ func (q *Queries) CountActiveAgentRunsBySession(ctx context.Context, arg CountAc
 	return count, err
 }
 
+const countAgentUsageByAccount = `-- name: CountAgentUsageByAccount :one
+SELECT count(*)::bigint
+FROM accounts
+WHERE tenant_id = $1
+  AND ($2::text = '' OR lower(display_name || ' ' || email || ' ' || id) LIKE '%' || lower($2) || '%')
+  AND ($3::text = '' OR status = $3)
+`
+
+type CountAgentUsageByAccountParams struct {
+	TenantID      string `json:"tenant_id"`
+	SearchQuery   string `json:"search_query"`
+	AccountStatus string `json:"account_status"`
+}
+
+func (q *Queries) CountAgentUsageByAccount(ctx context.Context, arg CountAgentUsageByAccountParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAgentUsageByAccount, arg.TenantID, arg.SearchQuery, arg.AccountStatus)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
+const countAgentUsageSessionsByAccount = `-- name: CountAgentUsageSessionsByAccount :one
+SELECT count(*)::bigint
+FROM agent_sessions
+WHERE tenant_id = $1
+  AND account_id = $2
+`
+
+type CountAgentUsageSessionsByAccountParams struct {
+	TenantID  string `json:"tenant_id"`
+	AccountID string `json:"account_id"`
+}
+
+func (q *Queries) CountAgentUsageSessionsByAccount(ctx context.Context, arg CountAgentUsageSessionsByAccountParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countAgentUsageSessionsByAccount, arg.TenantID, arg.AccountID)
+	var column_1 int64
+	err := row.Scan(&column_1)
+	return column_1, err
+}
+
 const deleteAgentMemory = `-- name: DeleteAgentMemory :one
 DELETE FROM agent_memories
 WHERE tenant_id = $1
@@ -178,6 +218,188 @@ func (q *Queries) GetAgentSessionForUpdate(ctx context.Context, arg GetAgentSess
 		&i.LastMessageAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAgentUsageByAccount = `-- name: GetAgentUsageByAccount :one
+WITH session_usage AS (
+    SELECT
+        account_id,
+        count(*)::bigint AS session_count,
+        max(COALESCE(last_message_at, updated_at))::timestamptz AS last_session_at
+    FROM agent_sessions sessions
+    WHERE sessions.tenant_id = $1
+    GROUP BY sessions.account_id
+), message_usage AS (
+    SELECT
+        sessions.account_id,
+        count(messages.id)::bigint AS message_count,
+        max(messages.created_at)::timestamptz AS last_message_at
+    FROM agent_sessions sessions
+    JOIN agent_session_messages messages
+      ON messages.tenant_id = sessions.tenant_id
+     AND messages.session_id = sessions.id
+    WHERE sessions.tenant_id = $1
+    GROUP BY sessions.account_id
+), run_usage AS (
+    SELECT
+        account_id,
+        sum(llm_call_count)::bigint AS llm_call_count,
+        sum(input_tokens)::bigint AS input_tokens,
+        sum(cached_tokens)::bigint AS cached_tokens,
+        sum(output_tokens)::bigint AS output_tokens,
+        sum(total_tokens)::bigint AS total_tokens
+    FROM agent_runs
+    WHERE tenant_id = $1
+    GROUP BY account_id
+)
+SELECT
+    accounts.id AS account_id,
+    accounts.display_name,
+    accounts.email,
+    accounts.status,
+    COALESCE(session_usage.session_count, 0)::bigint AS session_count,
+    COALESCE(message_usage.message_count, 0)::bigint AS message_count,
+    COALESCE(run_usage.llm_call_count, 0)::bigint AS llm_call_count,
+    COALESCE(run_usage.input_tokens, 0)::bigint AS input_tokens,
+    COALESCE(run_usage.cached_tokens, 0)::bigint AS cached_tokens,
+    COALESCE(run_usage.output_tokens, 0)::bigint AS output_tokens,
+    COALESCE(run_usage.total_tokens, 0)::bigint AS total_tokens,
+    GREATEST(COALESCE(run_usage.total_tokens, 0) - COALESCE(run_usage.cached_tokens, 0), 0)::bigint AS actual_tokens,
+    GREATEST(session_usage.last_session_at, message_usage.last_message_at)::timestamptz AS last_active_at
+FROM accounts
+LEFT JOIN session_usage ON session_usage.account_id = accounts.id
+LEFT JOIN message_usage ON message_usage.account_id = accounts.id
+LEFT JOIN run_usage ON run_usage.account_id = accounts.id
+WHERE accounts.tenant_id = $1
+  AND accounts.id = $2
+`
+
+type GetAgentUsageByAccountParams struct {
+	TenantID  string `json:"tenant_id"`
+	AccountID string `json:"account_id"`
+}
+
+type GetAgentUsageByAccountRow struct {
+	AccountID    string             `json:"account_id"`
+	DisplayName  string             `json:"display_name"`
+	Email        string             `json:"email"`
+	Status       string             `json:"status"`
+	SessionCount int64              `json:"session_count"`
+	MessageCount int64              `json:"message_count"`
+	LlmCallCount int64              `json:"llm_call_count"`
+	InputTokens  int64              `json:"input_tokens"`
+	CachedTokens int64              `json:"cached_tokens"`
+	OutputTokens int64              `json:"output_tokens"`
+	TotalTokens  int64              `json:"total_tokens"`
+	ActualTokens int64              `json:"actual_tokens"`
+	LastActiveAt pgtype.Timestamptz `json:"last_active_at"`
+}
+
+func (q *Queries) GetAgentUsageByAccount(ctx context.Context, arg GetAgentUsageByAccountParams) (GetAgentUsageByAccountRow, error) {
+	row := q.db.QueryRow(ctx, getAgentUsageByAccount, arg.TenantID, arg.AccountID)
+	var i GetAgentUsageByAccountRow
+	err := row.Scan(
+		&i.AccountID,
+		&i.DisplayName,
+		&i.Email,
+		&i.Status,
+		&i.SessionCount,
+		&i.MessageCount,
+		&i.LlmCallCount,
+		&i.InputTokens,
+		&i.CachedTokens,
+		&i.OutputTokens,
+		&i.TotalTokens,
+		&i.ActualTokens,
+		&i.LastActiveAt,
+	)
+	return i, err
+}
+
+const getAgentUsageSummary = `-- name: GetAgentUsageSummary :one
+WITH session_usage AS (
+    SELECT account_id, count(*)::bigint AS session_count
+    FROM agent_sessions sessions
+    WHERE sessions.tenant_id = $1
+    GROUP BY sessions.account_id
+), message_usage AS (
+    SELECT sessions.account_id, count(messages.id)::bigint AS message_count
+    FROM agent_sessions sessions
+    JOIN agent_session_messages messages
+      ON messages.tenant_id = sessions.tenant_id
+     AND messages.session_id = sessions.id
+    WHERE sessions.tenant_id = $1
+    GROUP BY sessions.account_id
+), run_usage AS (
+    SELECT
+        account_id,
+        sum(llm_call_count)::bigint AS llm_call_count,
+        sum(input_tokens)::bigint AS input_tokens,
+        sum(cached_tokens)::bigint AS cached_tokens,
+        sum(output_tokens)::bigint AS output_tokens,
+        sum(total_tokens)::bigint AS total_tokens
+    FROM agent_runs
+    WHERE tenant_id = $1
+    GROUP BY account_id
+), account_usage AS (
+    SELECT
+        COALESCE(session_usage.session_count, 0)::bigint AS session_count,
+        COALESCE(message_usage.message_count, 0)::bigint AS message_count,
+        COALESCE(run_usage.llm_call_count, 0)::bigint AS llm_call_count,
+        COALESCE(run_usage.input_tokens, 0)::bigint AS input_tokens,
+        COALESCE(run_usage.cached_tokens, 0)::bigint AS cached_tokens,
+        COALESCE(run_usage.output_tokens, 0)::bigint AS output_tokens,
+        COALESCE(run_usage.total_tokens, 0)::bigint AS total_tokens,
+        GREATEST(COALESCE(run_usage.total_tokens, 0) - COALESCE(run_usage.cached_tokens, 0), 0)::bigint AS actual_tokens
+    FROM accounts
+    LEFT JOIN session_usage ON session_usage.account_id = accounts.id
+    LEFT JOIN message_usage ON message_usage.account_id = accounts.id
+    LEFT JOIN run_usage ON run_usage.account_id = accounts.id
+    WHERE accounts.tenant_id = $1
+)
+SELECT
+    count(*)::bigint AS user_count,
+    count(*) FILTER (WHERE session_count > 0 OR message_count > 0)::bigint AS users_with_usage,
+    COALESCE(sum(session_count), 0)::bigint AS session_count,
+    COALESCE(sum(message_count), 0)::bigint AS message_count,
+    COALESCE(sum(llm_call_count), 0)::bigint AS llm_call_count,
+    COALESCE(sum(input_tokens), 0)::bigint AS input_tokens,
+    COALESCE(sum(cached_tokens), 0)::bigint AS cached_tokens,
+    COALESCE(sum(output_tokens), 0)::bigint AS output_tokens,
+    COALESCE(sum(total_tokens), 0)::bigint AS total_tokens,
+    COALESCE(sum(actual_tokens), 0)::bigint AS actual_tokens
+FROM account_usage
+`
+
+type GetAgentUsageSummaryRow struct {
+	UserCount      int64 `json:"user_count"`
+	UsersWithUsage int64 `json:"users_with_usage"`
+	SessionCount   int64 `json:"session_count"`
+	MessageCount   int64 `json:"message_count"`
+	LlmCallCount   int64 `json:"llm_call_count"`
+	InputTokens    int64 `json:"input_tokens"`
+	CachedTokens   int64 `json:"cached_tokens"`
+	OutputTokens   int64 `json:"output_tokens"`
+	TotalTokens    int64 `json:"total_tokens"`
+	ActualTokens   int64 `json:"actual_tokens"`
+}
+
+func (q *Queries) GetAgentUsageSummary(ctx context.Context, tenantID string) (GetAgentUsageSummaryRow, error) {
+	row := q.db.QueryRow(ctx, getAgentUsageSummary, tenantID)
+	var i GetAgentUsageSummaryRow
+	err := row.Scan(
+		&i.UserCount,
+		&i.UsersWithUsage,
+		&i.SessionCount,
+		&i.MessageCount,
+		&i.LlmCallCount,
+		&i.InputTokens,
+		&i.CachedTokens,
+		&i.OutputTokens,
+		&i.TotalTokens,
+		&i.ActualTokens,
 	)
 	return i, err
 }
@@ -377,6 +599,258 @@ func (q *Queries) ListAgentSessionsByAccount(ctx context.Context, arg ListAgentS
 			&i.LastMessageAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentUsageByAccount = `-- name: ListAgentUsageByAccount :many
+WITH session_usage AS (
+    SELECT
+        account_id,
+        count(*)::bigint AS session_count,
+        max(COALESCE(last_message_at, updated_at))::timestamptz AS last_session_at
+    FROM agent_sessions sessions
+    WHERE sessions.tenant_id = $6
+    GROUP BY sessions.account_id
+), message_usage AS (
+    SELECT
+        sessions.account_id,
+        count(messages.id)::bigint AS message_count,
+        max(messages.created_at)::timestamptz AS last_message_at
+    FROM agent_sessions sessions
+    JOIN agent_session_messages messages
+      ON messages.tenant_id = sessions.tenant_id
+     AND messages.session_id = sessions.id
+    WHERE sessions.tenant_id = $6
+    GROUP BY sessions.account_id
+), run_usage AS (
+    SELECT
+        account_id,
+        sum(llm_call_count)::bigint AS llm_call_count,
+        sum(input_tokens)::bigint AS input_tokens,
+        sum(cached_tokens)::bigint AS cached_tokens,
+        sum(output_tokens)::bigint AS output_tokens,
+        sum(total_tokens)::bigint AS total_tokens
+    FROM agent_runs
+    WHERE tenant_id = $6
+    GROUP BY account_id
+), account_usage AS (
+SELECT
+    accounts.id AS account_id,
+    accounts.display_name,
+    accounts.email,
+    accounts.status,
+    COALESCE(session_usage.session_count, 0)::bigint AS session_count,
+    COALESCE(message_usage.message_count, 0)::bigint AS message_count,
+    COALESCE(run_usage.llm_call_count, 0)::bigint AS llm_call_count,
+    COALESCE(run_usage.input_tokens, 0)::bigint AS input_tokens,
+    COALESCE(run_usage.cached_tokens, 0)::bigint AS cached_tokens,
+    COALESCE(run_usage.output_tokens, 0)::bigint AS output_tokens,
+    COALESCE(run_usage.total_tokens, 0)::bigint AS total_tokens,
+    GREATEST(COALESCE(run_usage.total_tokens, 0) - COALESCE(run_usage.cached_tokens, 0), 0)::bigint AS actual_tokens,
+    GREATEST(session_usage.last_session_at, message_usage.last_message_at)::timestamptz AS last_active_at
+FROM accounts
+LEFT JOIN session_usage ON session_usage.account_id = accounts.id
+LEFT JOIN message_usage ON message_usage.account_id = accounts.id
+LEFT JOIN run_usage ON run_usage.account_id = accounts.id
+WHERE accounts.tenant_id = $6
+)
+SELECT account_id, display_name, email, status, session_count, message_count, llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens, actual_tokens, last_active_at
+FROM account_usage
+WHERE ($1::text = '' OR lower(display_name || ' ' || email || ' ' || account_id) LIKE '%' || lower($1) || '%')
+  AND ($2::text = '' OR status = $2)
+ORDER BY
+    CASE WHEN $3::text = 'session_count_asc' THEN session_count END ASC,
+    CASE WHEN $3::text IN ('usage_desc', 'session_count_desc') THEN session_count END DESC,
+    CASE WHEN $3::text = 'message_count_asc' THEN message_count END ASC,
+    CASE WHEN $3::text IN ('usage_desc', 'message_count_desc') THEN message_count END DESC,
+    CASE WHEN $3::text = 'total_tokens_asc' THEN total_tokens END ASC,
+    CASE WHEN $3::text = 'total_tokens_desc' THEN total_tokens END DESC,
+    CASE WHEN $3::text = 'cached_tokens_asc' THEN cached_tokens END ASC,
+    CASE WHEN $3::text = 'cached_tokens_desc' THEN cached_tokens END DESC,
+    CASE WHEN $3::text = 'actual_tokens_asc' THEN actual_tokens END ASC,
+    CASE WHEN $3::text = 'actual_tokens_desc' THEN actual_tokens END DESC,
+    CASE WHEN $3::text = 'last_active_at_asc' THEN last_active_at END ASC NULLS LAST,
+    CASE WHEN $3::text = 'last_active_at_desc' THEN last_active_at END DESC NULLS LAST,
+    lower(display_name), account_id
+LIMIT $5::int
+OFFSET $4::int
+`
+
+type ListAgentUsageByAccountParams struct {
+	SearchQuery   string `json:"search_query"`
+	AccountStatus string `json:"account_status"`
+	SortOrder     string `json:"sort_order"`
+	OffsetCount   int32  `json:"offset_count"`
+	LimitCount    int32  `json:"limit_count"`
+	TenantID      string `json:"tenant_id"`
+}
+
+type ListAgentUsageByAccountRow struct {
+	AccountID    string             `json:"account_id"`
+	DisplayName  string             `json:"display_name"`
+	Email        string             `json:"email"`
+	Status       string             `json:"status"`
+	SessionCount int64              `json:"session_count"`
+	MessageCount int64              `json:"message_count"`
+	LlmCallCount int64              `json:"llm_call_count"`
+	InputTokens  int64              `json:"input_tokens"`
+	CachedTokens int64              `json:"cached_tokens"`
+	OutputTokens int64              `json:"output_tokens"`
+	TotalTokens  int64              `json:"total_tokens"`
+	ActualTokens int64              `json:"actual_tokens"`
+	LastActiveAt pgtype.Timestamptz `json:"last_active_at"`
+}
+
+func (q *Queries) ListAgentUsageByAccount(ctx context.Context, arg ListAgentUsageByAccountParams) ([]ListAgentUsageByAccountRow, error) {
+	rows, err := q.db.Query(ctx, listAgentUsageByAccount,
+		arg.SearchQuery,
+		arg.AccountStatus,
+		arg.SortOrder,
+		arg.OffsetCount,
+		arg.LimitCount,
+		arg.TenantID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentUsageByAccountRow
+	for rows.Next() {
+		var i ListAgentUsageByAccountRow
+		if err := rows.Scan(
+			&i.AccountID,
+			&i.DisplayName,
+			&i.Email,
+			&i.Status,
+			&i.SessionCount,
+			&i.MessageCount,
+			&i.LlmCallCount,
+			&i.InputTokens,
+			&i.CachedTokens,
+			&i.OutputTokens,
+			&i.TotalTokens,
+			&i.ActualTokens,
+			&i.LastActiveAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAgentUsageBySession = `-- name: ListAgentUsageBySession :many
+WITH account_sessions AS (
+	SELECT id
+	FROM agent_sessions
+	WHERE tenant_id = $1
+	  AND account_id = $2
+), message_usage AS (
+    SELECT
+		messages.session_id,
+        count(*)::bigint AS message_count,
+        max(messages.created_at)::timestamptz AS last_message_at
+    FROM agent_session_messages messages
+	JOIN account_sessions ON account_sessions.id = messages.session_id
+    WHERE messages.tenant_id = $1
+    GROUP BY messages.session_id
+), run_usage AS (
+    SELECT
+		runs.session_id,
+        sum(llm_call_count)::bigint AS llm_call_count,
+        sum(input_tokens)::bigint AS input_tokens,
+        sum(cached_tokens)::bigint AS cached_tokens,
+        sum(output_tokens)::bigint AS output_tokens,
+        sum(total_tokens)::bigint AS total_tokens,
+        max(updated_at)::timestamptz AS last_run_at
+	FROM agent_runs runs
+	JOIN account_sessions ON account_sessions.id = runs.session_id
+	WHERE runs.tenant_id = $1
+	GROUP BY runs.session_id
+)
+SELECT
+    sessions.id AS session_id,
+    sessions.account_id,
+    sessions.title,
+    sessions.status,
+    COALESCE(message_usage.message_count, 0)::bigint AS message_count,
+    COALESCE(run_usage.llm_call_count, 0)::bigint AS llm_call_count,
+    COALESCE(run_usage.input_tokens, 0)::bigint AS input_tokens,
+    COALESCE(run_usage.cached_tokens, 0)::bigint AS cached_tokens,
+    COALESCE(run_usage.output_tokens, 0)::bigint AS output_tokens,
+    COALESCE(run_usage.total_tokens, 0)::bigint AS total_tokens,
+    GREATEST(COALESCE(run_usage.total_tokens, 0) - COALESCE(run_usage.cached_tokens, 0), 0)::bigint AS actual_tokens,
+    GREATEST(COALESCE(sessions.last_message_at, sessions.updated_at), message_usage.last_message_at, run_usage.last_run_at)::timestamptz AS last_active_at
+FROM agent_sessions sessions
+LEFT JOIN message_usage ON message_usage.session_id = sessions.id
+LEFT JOIN run_usage ON run_usage.session_id = sessions.id
+WHERE sessions.tenant_id = $1
+  AND sessions.account_id = $2
+ORDER BY last_active_at DESC, sessions.id DESC
+LIMIT $4::int
+OFFSET $3::int
+`
+
+type ListAgentUsageBySessionParams struct {
+	TenantID    string `json:"tenant_id"`
+	AccountID   string `json:"account_id"`
+	OffsetCount int32  `json:"offset_count"`
+	LimitCount  int32  `json:"limit_count"`
+}
+
+type ListAgentUsageBySessionRow struct {
+	SessionID    string             `json:"session_id"`
+	AccountID    string             `json:"account_id"`
+	Title        string             `json:"title"`
+	Status       string             `json:"status"`
+	MessageCount int64              `json:"message_count"`
+	LlmCallCount int64              `json:"llm_call_count"`
+	InputTokens  int64              `json:"input_tokens"`
+	CachedTokens int64              `json:"cached_tokens"`
+	OutputTokens int64              `json:"output_tokens"`
+	TotalTokens  int64              `json:"total_tokens"`
+	ActualTokens int64              `json:"actual_tokens"`
+	LastActiveAt pgtype.Timestamptz `json:"last_active_at"`
+}
+
+func (q *Queries) ListAgentUsageBySession(ctx context.Context, arg ListAgentUsageBySessionParams) ([]ListAgentUsageBySessionRow, error) {
+	rows, err := q.db.Query(ctx, listAgentUsageBySession,
+		arg.TenantID,
+		arg.AccountID,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentUsageBySessionRow
+	for rows.Next() {
+		var i ListAgentUsageBySessionRow
+		if err := rows.Scan(
+			&i.SessionID,
+			&i.AccountID,
+			&i.Title,
+			&i.Status,
+			&i.MessageCount,
+			&i.LlmCallCount,
+			&i.InputTokens,
+			&i.CachedTokens,
+			&i.OutputTokens,
+			&i.TotalTokens,
+			&i.ActualTokens,
+			&i.LastActiveAt,
 		); err != nil {
 			return nil, err
 		}

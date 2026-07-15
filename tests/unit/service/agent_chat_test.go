@@ -35,6 +35,8 @@ func TestAgentChatUsesInjectedRuntimeAndPersistsRun(t *testing.T) {
 			if !strings.Contains(req.Message, "Known facts:") || !strings.Contains(req.Message, "User: 帮我看一下资料") {
 				t.Fatalf("expected runtime message to retain assembled context, got %q", req.Message)
 			}
+			req.RecordUsage(domain.AgentTokenUsage{InputTokens: 100, CachedTokens: 40, OutputTokens: 20, TotalTokens: 120})
+			req.RecordUsage(domain.AgentTokenUsage{InputTokens: 30, OutputTokens: 10, TotalTokens: 40})
 			return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "您好，已完成分析。"})
 		},
 	}
@@ -58,6 +60,9 @@ func TestAgentChatUsesInjectedRuntimeAndPersistsRun(t *testing.T) {
 	if run.Status != string(domain.AgentRunStatusCompleted) || run.Answer != "您好，已完成分析。" || run.Mode != "assistant_chat" || run.Prompt != "帮我看一下资料" {
 		t.Fatalf("unexpected run: %+v", run)
 	}
+	if run.LLMCallCount != 2 || run.InputTokens != 130 || run.CachedTokens != 40 || run.OutputTokens != 30 || run.TotalTokens != 160 || !run.UsageComplete {
+		t.Fatalf("unexpected token usage: %+v", run)
+	}
 	if len(events) != 3 || events[0].Event != domain.AgentChatEventSession || events[1].Event != domain.AgentChatEventMessageDelta || events[2].Event != domain.AgentChatEventDone {
 		t.Fatalf("unexpected events: %+v", events)
 	}
@@ -65,7 +70,7 @@ func TestAgentChatUsesInjectedRuntimeAndPersistsRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(stored) != 1 || stored[0].ID != run.ID || stored[0].Answer != run.Answer || stored[0].Prompt != "帮我看一下资料" {
+	if len(stored) != 1 || stored[0].ID != run.ID || stored[0].Answer != run.Answer || stored[0].Prompt != "帮我看一下资料" || stored[0].TotalTokens != 160 {
 		t.Fatalf("expected persisted completed run, got %+v", stored)
 	}
 }
@@ -215,8 +220,8 @@ func TestAgentChatReadOnlyToolsUseRequestContext(t *testing.T) {
 	}
 }
 
-// TestAgentChatLeaveBalanceMissingIsNotZero verifies missing balance rows remain explicitly uninitialized.
-func TestAgentChatLeaveBalanceMissingIsNotZero(t *testing.T) {
+// TestAgentChatPersonalLeaveDoesNotRequireBalance verifies ordinary personal leave stays non-blocking.
+func TestAgentChatPersonalLeaveDoesNotRequireBalance(t *testing.T) {
 	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
 	seedAgentChatAccount(t, store, now, agentLeaveToolPermissions("self"))
@@ -234,8 +239,8 @@ func TestAgentChatLeaveBalanceMissingIsNotZero(t *testing.T) {
 		if err != nil {
 			return err
 		}
-		if eligibility["eligible"] != false || eligibility["balance_initialized"] != false || eligibility["status"] != "balance_not_initialized" {
-			t.Fatalf("missing personal leave balance was treated as a numeric zero: %+v", eligibility)
+		if eligibility["eligible"] != true || eligibility["balance_required"] != false || eligibility["policy_balance_required"] != false || eligibility["status"] != "eligible" || eligibility["reason"] != "balance_not_required" {
+			t.Fatalf("personal leave unexpectedly required a balance: %+v", eligibility)
 		}
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
 	}}
@@ -245,30 +250,30 @@ func TestAgentChatLeaveBalanceMissingIsNotZero(t *testing.T) {
 	}
 }
 
-// TestAgentChatLeaveEligibilityRejectsRealZeroBalance verifies an initialized zero is insufficient, not missing.
-func TestAgentChatLeaveEligibilityRejectsRealZeroBalance(t *testing.T) {
+// TestAgentChatLeaveEligibilityFallsBackFromRealZeroBalance verifies zero balance still permits a draft.
+func TestAgentChatLeaveEligibilityFallsBackFromRealZeroBalance(t *testing.T) {
 	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
 	seedAgentChatAccount(t, store, now, agentLeaveToolPermissions("self"))
 	if err := store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{
-		ID: "lb-personal", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "personal", RemainingHours: 0, UpdatedAt: now,
+		ID: "lb-annual", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 0, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	runtime := fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
 		eligibility, err := req.Tools["check_leave_eligibility"](ctx, map[string]any{
-			"leave_type": "personal", "date": "2026-07-15", "hours": float64(8),
+			"leave_type": "annual", "date": "2026-07-15", "hours": float64(8),
 		})
 		if err != nil {
 			return err
 		}
-		if eligibility["eligible"] != false || eligibility["balance_initialized"] != true || eligibility["status"] != "insufficient_balance" || eligibility["remaining_hours"] != float64(0) {
-			t.Fatalf("real zero balance was not reported as insufficient: %+v", eligibility)
+		if eligibility["eligible"] != true || eligibility["balance_initialized"] != true || eligibility["balance_required"] != false || eligibility["policy_balance_required"] != true || eligibility["balance_fallback_applied"] != true || eligibility["balance_fallback_reason"] != "insufficient_balance" || eligibility["status"] != "eligible_without_balance" || eligibility["remaining_hours"] != float64(0) {
+			t.Fatalf("real zero balance did not fall back to a no-balance request: %+v", eligibility)
 		}
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
 	}}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
-	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申请事假"}, nil); err != nil {
+	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申请特休"}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -279,24 +284,24 @@ func TestAgentChatLeaveEligibilityAcceptsSufficientBalance(t *testing.T) {
 	store := memory.NewStore()
 	seedAgentChatAccount(t, store, now, agentLeaveToolPermissions("self"))
 	if err := store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{
-		ID: "lb-personal", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "personal", RemainingHours: 16, UpdatedAt: now,
+		ID: "lb-annual", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 16, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	runtime := fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
 		eligibility, err := req.Tools["check_leave_eligibility"](ctx, map[string]any{
-			"leave_type": "事假", "date": "2026-07-15", "hours": float64(8),
+			"leave_type": "特休", "date": "2026-07-15", "hours": float64(8),
 		})
 		if err != nil {
 			return err
 		}
-		if eligibility["eligible"] != true || eligibility["balance_initialized"] != true || eligibility["status"] != "eligible" || eligibility["remaining_hours"] != float64(16) {
-			t.Fatalf("sufficient personal leave balance was rejected: %+v", eligibility)
+		if eligibility["eligible"] != true || eligibility["balance_required"] != true || eligibility["policy_balance_required"] != true || eligibility["balance_fallback_applied"] != false || eligibility["balance_initialized"] != true || eligibility["status"] != "eligible" || eligibility["remaining_hours"] != float64(16) {
+			t.Fatalf("sufficient annual leave balance was not selected for reservation: %+v", eligibility)
 		}
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
 	}}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
-	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申请事假"}, nil); err != nil {
+	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申请特休"}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -423,6 +428,50 @@ func TestAgentChatToolRequiresAgentToolPermission(t *testing.T) {
 	}
 	if run.Status != string(domain.AgentRunStatusFailed) || run.Answer == "" {
 		t.Fatalf("expected failed run to be persisted with error answer, got %+v", run)
+	}
+}
+
+func TestAgentChatSanitizesRuntimeFailure(t *testing.T) {
+	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentChatAccount(t, store, now, []domain.Permission{
+		{Resource: "agent.run", Action: "create", Scope: "all"},
+	})
+	const rawFailure = "upstream 500 token=secret-value"
+	svc := service.New(store, service.Options{
+		Now: func() time.Time { return now },
+		AgentChatRuntime: fakeAgentChatRuntime{run: func(context.Context, service.AgentChatRuntimeRequest, service.AgentChatEmitFunc) error {
+			return errors.New(rawFailure)
+		}},
+	})
+	ctx := domain.RequestContext{
+		TenantID: "tenant-1", AccountID: "acct-1", RequestID: "request-agent-runtime", TraceID: "trace-agent-runtime",
+	}
+
+	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "hello"}, nil)
+	if err == nil {
+		t.Fatal("expected runtime failure")
+	}
+	appErr, ok := domain.AsAppError(err)
+	if !ok || appErr.ReasonCode != service.AgentRuntimeFailureReasonCode || appErr.TraceID != ctx.TraceID {
+		t.Fatalf("expected safe runtime app error, got %#v", err)
+	}
+	if strings.Contains(err.Error(), rawFailure) || strings.Contains(err.Error(), "secret-value") {
+		t.Fatalf("runtime error leaked through service boundary: %v", err)
+	}
+	if run.Status != string(domain.AgentRunStatusFailed) ||
+		!strings.Contains(run.Answer, service.AgentRuntimeFailureMessage) ||
+		!strings.Contains(run.Answer, "reason_code="+service.AgentRuntimeFailureReasonCode) ||
+		!strings.Contains(run.Answer, "trace_id="+ctx.TraceID) ||
+		strings.Contains(run.Answer, rawFailure) {
+		t.Fatalf("expected sanitized failed run, got %+v", run)
+	}
+	stored, err := store.ListAgentRunsByAccount(context.Background(), "tenant-1", "acct-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stored) != 1 || stored[0].Answer != run.Answer || strings.Contains(stored[0].Answer, "secret-value") {
+		t.Fatalf("runtime failure leaked into run history: %+v", stored)
 	}
 }
 

@@ -215,6 +215,7 @@ type Employee struct {
 	Category              string               `json:"category,omitempty"`
 	Status                string               `json:"status"`
 	EmploymentStatus      string               `json:"employment_status,omitempty"`
+	ShowInOrgChart        bool                 `json:"show_in_org_chart"`
 	HireDate              *time.Time           `json:"hire_date,omitempty"`
 	ResignDate            *time.Time           `json:"resign_date,omitempty"`
 	BasicInfo             map[string]any       `json:"basic_info,omitempty"`

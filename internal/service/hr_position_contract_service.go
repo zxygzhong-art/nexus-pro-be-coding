@@ -26,19 +26,36 @@ func (c HRService) ListPositionPage(ctx RequestContext, page PageRequest) (PageR
 	return utils.PageResponse(items, page), nil
 }
 
-// CreatePosition 建立崗位的服務流程。
+// CreatePosition persists the position and its authorization audit atomically.
 func (c HRService) CreatePosition(ctx RequestContext, input CreatePositionInput) (Position, error) {
-	if _, _, _, err := c.Authorize(ctx,
+	_, decision, authzAudit, err := c.Authorize(ctx,
 		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourcePosition, Action: ActionCreate},
 		AuditTarget{Event: "hr.position.create", Resource: string(ResourcePosition)},
-	); err != nil {
-		return Position{}, err
-	}
-	position, err := c.positionFromInput(ctx, input)
+	)
 	if err != nil {
 		return Position{}, err
 	}
-	if err := c.store.UpsertPosition(goContext(ctx), position); err != nil {
+	var position Position
+	if err := c.withTransaction(ctx, func(tx HRService) error {
+		next, err := tx.positionFromInput(ctx, input)
+		if err != nil {
+			return err
+		}
+		if err := tx.store.UpsertPosition(goContext(ctx), next); err != nil {
+			return err
+		}
+		authzAudit.target.Target = next.ID
+		if err := tx.audit(ctx, "hr.position.create", string(ResourcePosition), next.ID, string(SeverityMedium), auditDecisionDetails(ctx, decision, map[string]any{
+			"code": next.Code, "name": next.Name, "status": next.Status,
+		})); err != nil {
+			return err
+		}
+		if err := authzAudit.CommitWith(ctx, tx.Service); err != nil {
+			return err
+		}
+		position = next
+		return nil
+	}); err != nil {
 		return Position{}, err
 	}
 	return position, nil
@@ -59,25 +76,42 @@ func (c HRService) GetPosition(ctx RequestContext, id string) (Position, error) 
 	return position, nil
 }
 
-// UpdatePosition 更新崗位的服務流程。
+// UpdatePosition applies the patch and its authorization audit atomically.
 func (c HRService) UpdatePosition(ctx RequestContext, id string, input UpdatePositionInput) (Position, error) {
-	if _, _, _, err := c.Authorize(ctx,
-		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourcePosition, ResourceID: id, Action: ActionUpdate},
-		AuditTarget{Event: "hr.position.update", Resource: string(ResourcePosition), Target: id},
-	); err != nil {
-		return Position{}, err
-	}
-	position, ok, err := c.store.GetPosition(goContext(ctx), ctx.TenantID, strings.TrimSpace(id))
+	positionID := strings.TrimSpace(id)
+	_, decision, authzAudit, err := c.Authorize(ctx,
+		CheckRequest{ApplicationCode: AppHR, ResourceType: ResourcePosition, ResourceID: positionID, Action: ActionUpdate},
+		AuditTarget{Event: "hr.position.update", Resource: string(ResourcePosition), Target: positionID},
+	)
 	if err != nil {
 		return Position{}, err
 	}
-	if !ok {
-		return Position{}, positionNotFound(id)
-	}
-	if err := c.applyPositionPatch(ctx, &position, input); err != nil {
-		return Position{}, err
-	}
-	if err := c.store.UpsertPosition(goContext(ctx), position); err != nil {
+	var position Position
+	if err := c.withTransaction(ctx, func(tx HRService) error {
+		next, ok, err := tx.store.GetPosition(goContext(ctx), ctx.TenantID, positionID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return positionNotFound(id)
+		}
+		if err := tx.applyPositionPatch(ctx, &next, input); err != nil {
+			return err
+		}
+		if err := tx.store.UpsertPosition(goContext(ctx), next); err != nil {
+			return err
+		}
+		if err := tx.audit(ctx, "hr.position.update", string(ResourcePosition), next.ID, string(SeverityMedium), auditDecisionDetails(ctx, decision, map[string]any{
+			"code": next.Code, "name": next.Name, "status": next.Status,
+		})); err != nil {
+			return err
+		}
+		if err := authzAudit.CommitWith(ctx, tx.Service); err != nil {
+			return err
+		}
+		position = next
+		return nil
+	}); err != nil {
 		return Position{}, err
 	}
 	return position, nil

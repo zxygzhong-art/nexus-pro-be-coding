@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"iter"
+	"math"
 	"regexp"
 	"strings"
 
@@ -79,7 +80,7 @@ func (m *LiteLLM) generate(ctx context.Context, req *model.LLMRequest) (*model.L
 	if len(completion.Choices) == 0 {
 		return nil, errors.New("litellm returned no choices")
 	}
-	return llmResponseFromMessage(completion.Choices[0].Message, aliases)
+	return llmResponseFromMessage(completion.Choices[0].Message, aliases, completion.Usage)
 }
 
 func (m *LiteLLM) generateStream(ctx context.Context, req *model.LLMRequest) iter.Seq2[*model.LLMResponse, error] {
@@ -91,8 +92,12 @@ func (m *LiteLLM) generateStream(ctx context.Context, req *model.LLMRequest) ite
 		}
 		stream := m.client.Chat.Completions.NewStreaming(ctx, params)
 		accumulator := openai.ChatCompletionAccumulator{}
+		finalUsage := openai.CompletionUsage{}
 		for stream.Next() {
 			chunk := stream.Current()
+			if hasOpenAIUsage(chunk.Usage) {
+				finalUsage = chunk.Usage
+			}
 			if !accumulator.AddChunk(chunk) {
 				yield(nil, errors.New("litellm returned an inconsistent stream"))
 				return
@@ -112,12 +117,17 @@ func (m *LiteLLM) generateStream(ctx context.Context, req *model.LLMRequest) ite
 			yield(nil, err)
 			return
 		}
+		if !hasOpenAIUsage(finalUsage) {
+			finalUsage = accumulator.Usage
+		}
 		if len(accumulator.Choices) > 0 && len(accumulator.Choices[0].Message.ToolCalls) > 0 {
-			response, err := llmResponseFromMessage(accumulator.Choices[0].Message, aliases)
+			response, err := llmResponseFromMessage(accumulator.Choices[0].Message, aliases, finalUsage)
 			yield(response, err)
 			return
 		}
-		yield(llmTextResponse("", false, true), nil)
+		response := llmTextResponse("", false, true)
+		response.UsageMetadata = usageMetadataFromOpenAI(finalUsage)
+		yield(response, nil)
 	}
 }
 
@@ -139,6 +149,9 @@ func (m *LiteLLM) params(req *model.LLMRequest) (openai.ChatCompletionNewParams,
 		Model:    openai.ChatModel(modelName),
 		Messages: messages,
 		Tools:    tools,
+		StreamOptions: openai.ChatCompletionStreamOptionsParam{
+			IncludeUsage: openai.Bool(true),
+		},
 	}, aliases, nil
 }
 
@@ -421,7 +434,7 @@ func contentText(content *genai.Content) string {
 }
 
 // llmResponseFromMessage 將 OpenAI 的文本或函數調用恢復成 ADK 可執行回應。
-func llmResponseFromMessage(message openai.ChatCompletionMessage, aliases map[string]string) (*model.LLMResponse, error) {
+func llmResponseFromMessage(message openai.ChatCompletionMessage, aliases map[string]string, usage openai.CompletionUsage) (*model.LLMResponse, error) {
 	parts := make([]*genai.Part, 0, 1+len(message.ToolCalls))
 	if message.Content != "" {
 		parts = append(parts, genai.NewPartFromText(message.Content))
@@ -442,9 +455,40 @@ func llmResponseFromMessage(message openai.ChatCompletionMessage, aliases map[st
 		parts = append(parts, part)
 	}
 	return &model.LLMResponse{
-		Content:      &genai.Content{Role: "model", Parts: parts},
-		TurnComplete: true,
+		Content:       &genai.Content{Role: "model", Parts: parts},
+		UsageMetadata: usageMetadataFromOpenAI(usage),
+		TurnComplete:  true,
 	}, nil
+}
+
+// usageMetadataFromOpenAI preserves LiteLLM billing counters across the ADK boundary.
+func usageMetadataFromOpenAI(usage openai.CompletionUsage) *genai.GenerateContentResponseUsageMetadata {
+	if !hasOpenAIUsage(usage) {
+		return nil
+	}
+	return &genai.GenerateContentResponseUsageMetadata{
+		PromptTokenCount:        tokenCount32(usage.PromptTokens),
+		CachedContentTokenCount: tokenCount32(usage.PromptTokensDetails.CachedTokens),
+		CandidatesTokenCount:    tokenCount32(usage.CompletionTokens),
+		TotalTokenCount:         tokenCount32(usage.TotalTokens),
+	}
+}
+
+// hasOpenAIUsage distinguishes an omitted streaming usage block from valid zero counters.
+func hasOpenAIUsage(usage openai.CompletionUsage) bool {
+	return usage.PromptTokens != 0 || usage.CompletionTokens != 0 || usage.TotalTokens != 0 || usage.PromptTokensDetails.CachedTokens != 0 ||
+		usage.JSON.PromptTokens.Valid() || usage.JSON.CompletionTokens.Valid() || usage.JSON.TotalTokens.Valid()
+}
+
+// tokenCount32 clamps provider counters to the ADK metadata field width.
+func tokenCount32(value int64) int32 {
+	if value <= 0 {
+		return 0
+	}
+	if value > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	return int32(value)
 }
 
 func llmTextResponse(text string, partial bool, complete bool) *model.LLMResponse {

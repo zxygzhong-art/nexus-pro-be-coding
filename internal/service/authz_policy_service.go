@@ -199,17 +199,27 @@ func (c *Service) auditAuthzDecision(ctx RequestContext, action, resource, targe
 	return c.audit(ctx, action, resource, target, "high", auditDecisionDetails(ctx, decision, nil))
 }
 
-// defaultPermissions 處理預設權限。
+// defaultPermissions collapses route aliases into one catalog permission and preserves the highest route risk.
 func defaultPermissions() []Permission {
 	out := make([]Permission, 0, len(domain.DefaultRoutePolicies))
+	indexes := make(map[string]int, len(domain.DefaultRoutePolicies))
 	for _, policy := range domain.DefaultRoutePolicies {
-		out = append(out, Permission{
+		permission := Permission{
 			ApplicationCode: ApplicationCode(policy.ApplicationCode),
 			ResourceType:    ResourceType(policy.ResourceType),
 			Resource:        routeResourceName(ApplicationCode(policy.ApplicationCode), ResourceType(policy.ResourceType)),
 			Action:          Action(policy.Action),
 			RiskLevel:       string(policy.RiskLevel),
-		})
+		}
+		key := strings.Join([]string{policy.ApplicationCode, policy.ResourceType, policy.Action}, "\x00")
+		if index, exists := indexes[key]; exists {
+			if riskRank(permission.RiskLevel) > riskRank(out[index].RiskLevel) {
+				out[index].RiskLevel = permission.RiskLevel
+			}
+			continue
+		}
+		indexes[key] = len(out)
+		out = append(out, permission)
 	}
 	return out
 }
@@ -660,7 +670,7 @@ func mergeScopeConditions(current, candidate map[string]any) map[string]any {
 	return out
 }
 
-// intersectScopes 以 AND 語義收斂兩個資料範圍。
+// intersectScopes narrows normal and assumed-role data scopes with AND semantics.
 func intersectScopes(leftScope Scope, leftConditions map[string]any, rightScope Scope, rightConditions map[string]any) (Scope, map[string]any, bool) {
 	if rightScope == "" {
 		return leftScope, utils.CopyStringMap(leftConditions), false
@@ -673,6 +683,11 @@ func intersectScopes(leftScope Scope, leftConditions map[string]any, rightScope 
 		return narrowerScope(leftScope, rightScope), outConditions, true
 	}
 	outScope := narrowerScope(leftScope, rightScope)
+	if leftScope == ScopeAll {
+		outScope = rightScope
+	} else if rightScope == ScopeAll {
+		outScope = leftScope
+	}
 	if requiresCustomIntersectionScope(leftScope, rightScope, outScope, outConditions) {
 		outScope = ScopeCustomCondition
 		if outConditions == nil {
@@ -768,7 +783,7 @@ func requiresCustomIntersectionScope(left, right, out Scope, conditions map[stri
 	if out == ScopeCustomCondition {
 		return true
 	}
-	if left != "" && right != "" && left != right && scopeRank(left) == scopeRank(right) {
+	if left != "" && right != "" && left != right && left != ScopeAll && right != ScopeAll && scopeRank(left) == scopeRank(right) {
 		return true
 	}
 	restrictiveKeys := 0

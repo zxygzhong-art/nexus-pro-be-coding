@@ -121,8 +121,10 @@ func TestAgentLeaveDraftDefaultsMissingTimes(t *testing.T) {
 	store := memory.NewStore()
 	seedAgentConfirmationAccount(t, store, now, "acct-employee", []domain.Permission{
 		{Resource: "agent.run", Action: "create", Scope: "all"},
+		agentToolTestPermission("check_leave_eligibility"),
 		agentToolTestPermission("create_form_draft"),
 		agentToolTestPermission("preview_form_submission"),
+		{Resource: "attendance.leave", Action: "read", Scope: "self"},
 		{Resource: "workflow.form_template", Action: "read", Scope: "all"},
 		{Resource: "workflow.form_instance", Action: "submit", Scope: "self"},
 		{Resource: "workflow.form_instance", Action: "read", Scope: "self"},
@@ -161,6 +163,15 @@ func TestAgentLeaveDraftDefaultsMissingTimes(t *testing.T) {
 	var explicitDraft domain.FormInstance
 	var explicitNormalizedFields []string
 	runtime := fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, _ service.AgentChatEmitFunc) error {
+		eligibility, err := req.Tools["check_leave_eligibility"](ctx, map[string]any{
+			"leave_type": "annual", "date": "2026-07-14", "hours": float64(8),
+		})
+		if err != nil {
+			return err
+		}
+		if eligibility["eligible"] != true || eligibility["balance_required"] != false || eligibility["balance_fallback_reason"] != "balance_not_initialized" {
+			t.Fatalf("missing balance should continue to draft creation: %+v", eligibility)
+		}
 		result, err := req.Tools["create_form_draft"](ctx, map[string]any{
 			"template_key": "leave-request",
 			"payload":      map[string]any{"leave_type": "annual", "reason": "家庭安排", "proxy": "Demo"},

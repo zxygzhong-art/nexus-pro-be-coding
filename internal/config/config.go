@@ -244,6 +244,8 @@ func LoadE() (Config, error) {
 	dbSSLMode := env("DB_SSLMODE", "disable")
 	redisHost := strings.TrimSpace(os.Getenv("REDIS_HOST"))
 	redisPort := env("REDIS_PORT", "6379")
+	ehrmsSyncEnabled := envBool("EHRMS_SYNC_ENABLED", false, &problems)
+	ehrmsSyncRunOnStart := envBool("EHRMS_SYNC_RUN_ON_START", false, &problems)
 	cfg := Config{
 		Env:               appEnv,
 		HTTPAddr:          env("HTTP_ADDR", ":8080"),
@@ -320,19 +322,19 @@ func LoadE() (Config, error) {
 
 		EHRMSBaseURL:        strings.TrimSpace(os.Getenv("EHRMS_BASE_URL")),
 		EHRMSAPIKey:         os.Getenv("EHRMS_API_KEY"),
-		EHRMSSyncEnabled:    envBool("EHRMS_SYNC_ENABLED", false, &problems),
+		EHRMSSyncEnabled:    ehrmsSyncEnabled,
 		EHRMSSyncInterval:   envDuration("EHRMS_SYNC_INTERVAL", 24*time.Hour, &problems),
 		EHRMSSyncMode:       env("EHRMS_SYNC_MODE", "upsert"),
 		EHRMSSyncTenantID:   strings.TrimSpace(os.Getenv("EHRMS_SYNC_TENANT_ID")),
 		EHRMSSyncAccountID:  strings.TrimSpace(os.Getenv("EHRMS_SYNC_ACCOUNT_ID")),
-		EHRMSSyncRunOnStart: envBool("EHRMS_SYNC_RUN_ON_START", false, &problems),
+		EHRMSSyncRunOnStart: ehrmsSyncRunOnStart,
 
-		EHRMSAttendanceSyncEnabled:    envBool("EHRMS_ATTENDANCE_SYNC_ENABLED", false, &problems),
+		EHRMSAttendanceSyncEnabled:    ehrmsSyncEnabled,
 		EHRMSAttendanceSyncInterval:   envDuration("EHRMS_ATTENDANCE_SYNC_INTERVAL", 30*24*time.Hour, &problems),
 		EHRMSAttendanceSyncMode:       env("EHRMS_ATTENDANCE_SYNC_MODE", "upsert"),
 		EHRMSAttendanceSyncTenantID:   strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_TENANT_ID")),
 		EHRMSAttendanceSyncAccountID:  strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID")),
-		EHRMSAttendanceSyncRunOnStart: envBool("EHRMS_ATTENDANCE_SYNC_RUN_ON_START", false, &problems),
+		EHRMSAttendanceSyncRunOnStart: ehrmsSyncEnabled && ehrmsSyncRunOnStart,
 		EHRMSAttendanceSyncSince:      strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_SINCE")),
 
 		OTelEnabled:              envBool("OTEL_ENABLED", false, &problems),
@@ -433,31 +435,12 @@ func ehrmsSyncConfigProblems(c Config) []string {
 	return problems
 }
 
-// ehrmsAttendanceSyncConfigProblems 僅在考勤同步啟用時校驗其獨立配置。
-// interval 最小值僅在 attendance-only（未開員工 sync）相容路徑強制。
+// ehrmsAttendanceSyncConfigProblems validates attendance options when the master eHRMS sync is enabled.
 func ehrmsAttendanceSyncConfigProblems(c Config) []string {
-	if !c.EHRMSAttendanceSyncEnabled {
+	if !c.EHRMSSyncEnabled {
 		return nil
 	}
-	attendanceOnly := !c.EHRMSSyncEnabled
 	problems := []string{}
-	if attendanceOnly {
-		if strings.TrimSpace(c.EHRMSBaseURL) == "" {
-			problems = append(problems, "EHRMS_BASE_URL is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
-		}
-		if strings.TrimSpace(c.EHRMSAPIKey) == "" {
-			problems = append(problems, "EHRMS_API_KEY is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
-		}
-		if strings.TrimSpace(c.EHRMSAttendanceSyncTenantID) == "" {
-			problems = append(problems, "EHRMS_ATTENDANCE_SYNC_TENANT_ID is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
-		}
-		if strings.TrimSpace(c.EHRMSAttendanceSyncAccountID) == "" {
-			problems = append(problems, "EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID is required when EHRMS_ATTENDANCE_SYNC_ENABLED=true")
-		}
-		if c.EHRMSAttendanceSyncInterval > 0 && c.EHRMSAttendanceSyncInterval < 30*24*time.Hour {
-			problems = append(problems, "EHRMS_ATTENDANCE_SYNC_INTERVAL must be at least 720h (30 days)")
-		}
-	}
 	switch strings.ToLower(strings.TrimSpace(c.EHRMSAttendanceSyncMode)) {
 	case "", "create", "update", "upsert":
 	default:

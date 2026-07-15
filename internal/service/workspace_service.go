@@ -144,18 +144,19 @@ func (c WorkspaceService) WorkspaceOrganization(ctx RequestContext) (WorkspaceOr
 		}
 		_, isManager := managerIDs[employee.ID]
 		rows = append(rows, WorkspaceOrganizationRow{
-			ID:            displayID,
-			NameZH:        employee.Name,
-			NameEN:        workspaceEmployeeNameEN(employee),
-			Dept:          workspaceOrgName(orgNames, employee.OrgUnitID),
-			Title:         employee.Position,
-			Level:         workspaceEffectiveEmployeeLevel(employee.ID, effectiveParents, byID, levelMemo),
-			IsManager:     isManager,
-			ParentID:      parentID,
-			OrgUnitID:     employee.OrgUnitID,
-			ManagerSource: source,
-			IsOverride:    source == "override",
-			ManagerIssue:  managerIssue,
+			ID:             displayID,
+			NameZH:         employee.Name,
+			NameEN:         workspaceEmployeeNameEN(employee),
+			Dept:           workspaceOrgName(orgNames, employee.OrgUnitID),
+			Title:          employee.Position,
+			Level:          workspaceEffectiveEmployeeLevel(employee.ID, effectiveParents, byID, levelMemo),
+			IsManager:      isManager,
+			ShowInOrgChart: employee.ShowInOrgChart,
+			ParentID:       parentID,
+			OrgUnitID:      employee.OrgUnitID,
+			ManagerSource:  source,
+			IsOverride:     source == "override",
+			ManagerIssue:   managerIssue,
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -258,7 +259,7 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	overtimeByEmployeeDate := workspaceOvertimeCells(overtimes, start, end)
 	summaryByEmployeeDate := workspaceSummaryCells(summaries)
 	clockByEmployeeDate := workspaceClockCells(clocks, summaries, worksites, leaveByEmployeeDate, overtimeByEmployeeDate)
-	attendanceMatrix := workspaceAttendanceMatrix(monthEmployees, cards, dates, leaveByEmployeeDate, overtimeByEmployeeDate, summaryByEmployeeDate)
+	attendanceMatrix := workspaceAttendanceMatrix(monthEmployees, cards, dates, leaveByEmployeeDate, overtimeByEmployeeDate, summaryByEmployeeDate, clockByEmployeeDate, now)
 	clockMatrix := workspaceClockMatrix(monthEmployees, cards, dates, leaveByEmployeeDate, clockByEmployeeDate)
 
 	return WorkspaceAttendanceResponse{
@@ -486,6 +487,9 @@ func workspaceCSVDataRows(rows [][]string) int {
 }
 
 func workspaceAttendanceCellLabel(cell WorkspaceDayCell) string {
+	if cell.Type == "absence" {
+		return "缺勤"
+	}
 	if cell.Holiday != "" {
 		return cell.Holiday
 	}

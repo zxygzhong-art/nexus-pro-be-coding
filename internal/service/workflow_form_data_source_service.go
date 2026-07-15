@@ -23,8 +23,8 @@ var formDataSourceAllowedFields = map[string]map[string]struct{}{
 	formDataSourceLeaveTypes:  {"code": {}, "name": {}, "unit": {}},
 }
 
-// validateFormFieldBinding 驗證 schema 僅能引用公開目錄與允許欄位。
-func validateFormFieldBinding(fieldID, fieldType string, binding domain.PlatformFormBuilderFieldBinding) []domain.FieldError {
+// ValidateFormFieldBinding validates that a persisted form binding uses an allowlisted data source.
+func ValidateFormFieldBinding(fieldID, fieldType string, binding domain.PlatformFormBuilderFieldBinding) []domain.FieldError {
 	prefix := "fields." + fieldID + ".binding"
 	sourceID := strings.TrimSpace(binding.SourceID)
 	allowedFields, sourceOK := formDataSourceAllowedFields[sourceID]

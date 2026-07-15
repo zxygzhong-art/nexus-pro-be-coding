@@ -349,8 +349,12 @@ func copyAttendancePolicy(v AttendancePolicy) AttendancePolicy {
 	return v
 }
 
-// copyLeaveRequest 複製請假請求。
-func copyLeaveRequest(v LeaveRequest) LeaveRequest { return v }
+// copyLeaveRequest preserves immutable rule and evaluation snapshots across reads.
+func copyLeaveRequest(v LeaveRequest) LeaveRequest {
+	v.RuleSnapshot = utils.CopyStringMap(v.RuleSnapshot)
+	v.EvaluationSnapshot = utils.CopyStringMap(v.EvaluationSnapshot)
+	return v
+}
 
 // copyAttendanceWorksite 複製考勤工作地點。
 func copyAttendanceWorksite(v AttendanceWorksite) AttendanceWorksite { return v }
@@ -464,6 +468,7 @@ func copyAgentModel(v AgentModel) AgentModel {
 // copyAgentDefinition 複製 agent 定義。
 func copyAgentDefinition(v AgentDefinition) AgentDefinition {
 	v.SuggestedQuestions = utils.CopyStrings(v.SuggestedQuestions)
+	v.SuggestedQuestionTranslations = copyLocalizedAgentSuggestedQuestions(v.SuggestedQuestionTranslations)
 	v.Tools = utils.CopyStrings(v.Tools)
 	v.KnowledgeBaseIDs = utils.CopyStrings(v.KnowledgeBaseIDs)
 	v.SubAgents = copyAgentTeamMembers(v.SubAgents)
@@ -480,10 +485,29 @@ func copyAgentDefinition(v AgentDefinition) AgentDefinition {
 // copyAgentDefinitionVersion 複製 agent 版本。
 func copyAgentDefinitionVersion(v AgentDefinitionVersion) AgentDefinitionVersion {
 	v.SuggestedQuestions = utils.CopyStrings(v.SuggestedQuestions)
+	v.SuggestedQuestionTranslations = copyLocalizedAgentSuggestedQuestions(v.SuggestedQuestionTranslations)
 	v.Tools = utils.CopyStrings(v.Tools)
 	v.KnowledgeBaseIDs = utils.CopyStrings(v.KnowledgeBaseIDs)
 	v.SubAgents = copyAgentTeamMembers(v.SubAgents)
 	return v
+}
+
+// copyLocalizedAgentSuggestedQuestions keeps translation maps isolated between in-memory snapshots.
+func copyLocalizedAgentSuggestedQuestions(
+	src []LocalizedAgentSuggestedQuestion,
+) []LocalizedAgentSuggestedQuestion {
+	if src == nil {
+		return nil
+	}
+	result := make([]LocalizedAgentSuggestedQuestion, len(src))
+	for index, item := range src {
+		translations := make(map[string]string, len(item.Translations))
+		for locale, value := range item.Translations {
+			translations[locale] = value
+		}
+		result[index] = LocalizedAgentSuggestedQuestion{Translations: translations}
+	}
+	return result
 }
 
 // copyAgentTeamMembers 深複製 Team 成員及其工具集合。

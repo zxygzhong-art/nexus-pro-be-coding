@@ -63,6 +63,75 @@ func (s *Store) ListAgentSessionsByAccount(execCtx context.Context, tenantID, ac
 	return mapSlice(items, fromAgentSession), nil
 }
 
+// ListAgentUsageByAccount returns a filtered and ordered account usage page.
+func (s *Store) ListAgentUsageByAccount(execCtx context.Context, tenantID string, query domain.AgentAccountUsageQuery, page domain.PageRequest) ([]domain.AgentAccountUsage, int, error) {
+	ctx := tenantContext(execCtx, tenantID)
+	total, err := s.q.CountAgentUsageByAccount(ctx, sqlc.CountAgentUsageByAccountParams{
+		TenantID: tenantID, SearchQuery: query.Query, AccountStatus: query.Status,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	items, err := s.q.ListAgentUsageByAccount(ctx, sqlc.ListAgentUsageByAccountParams{
+		TenantID: tenantID, SearchQuery: query.Query, AccountStatus: query.Status, SortOrder: page.Sort,
+		LimitCount: int32(page.PageSize), OffsetCount: int32((page.Page - 1) * page.PageSize),
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return mapSlice(items, fromAgentAccountUsage), int(total), nil
+}
+
+// GetAgentUsageByAccount returns one tenant account's aggregate usage.
+func (s *Store) GetAgentUsageByAccount(execCtx context.Context, tenantID, accountID string) (domain.AgentAccountUsage, bool, error) {
+	item, err := s.q.GetAgentUsageByAccount(tenantContext(execCtx, tenantID), sqlc.GetAgentUsageByAccountParams{
+		TenantID: tenantID, AccountID: accountID,
+	})
+	if isNotFound(err) {
+		return domain.AgentAccountUsage{}, false, nil
+	}
+	if err != nil {
+		return domain.AgentAccountUsage{}, false, err
+	}
+	return fromAgentAccountUsageFields(item.AccountID, item.DisplayName, item.Email, item.Status, item.SessionCount, item.MessageCount, item.LlmCallCount, item.InputTokens, item.CachedTokens, item.OutputTokens, item.TotalTokens, item.ActualTokens, timePtrFrom(item.LastActiveAt)), true, nil
+}
+
+// GetAgentUsageSummary returns tenant-wide totals without loading account rows.
+func (s *Store) GetAgentUsageSummary(execCtx context.Context, tenantID string) (domain.AgentUsageSummary, error) {
+	item, err := s.q.GetAgentUsageSummary(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return domain.AgentUsageSummary{}, err
+	}
+	return domain.AgentUsageSummary{
+		UserCount: int(item.UserCount), UsersWithUsage: int(item.UsersWithUsage),
+		SessionCount: item.SessionCount, MessageCount: item.MessageCount, LLMCallCount: item.LlmCallCount,
+		InputTokens: item.InputTokens, CachedTokens: item.CachedTokens, OutputTokens: item.OutputTokens,
+		TotalTokens: item.TotalTokens, ActualTokens: item.ActualTokens,
+	}, nil
+}
+
+// ListAgentUsageBySession returns paginated usage for one account's sessions.
+func (s *Store) ListAgentUsageBySession(execCtx context.Context, tenantID, accountID string, page domain.PageRequest) ([]domain.AgentSessionUsage, int, error) {
+	ctx := tenantContext(execCtx, tenantID)
+	total, err := s.q.CountAgentUsageSessionsByAccount(ctx, sqlc.CountAgentUsageSessionsByAccountParams{
+		TenantID:  tenantID,
+		AccountID: accountID,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	items, err := s.q.ListAgentUsageBySession(ctx, sqlc.ListAgentUsageBySessionParams{
+		TenantID:    tenantID,
+		AccountID:   accountID,
+		LimitCount:  int32(page.PageSize),
+		OffsetCount: int32((page.Page - 1) * page.PageSize),
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return mapSlice(items, fromAgentSessionUsage), int(total), nil
+}
+
 // DeleteAgentSession 從儲存層刪除 agent 會話。
 func (s *Store) DeleteAgentSession(execCtx context.Context, tenantID, id string) (domain.AgentSession, bool, error) {
 	v, err := s.q.DeleteAgentSession(tenantContext(execCtx, tenantID), sqlc.DeleteAgentSessionParams{TenantID: tenantID, ID: id})
@@ -232,6 +301,39 @@ func fromAgentSessionMessage(v sqlc.AgentSessionMessage) domain.AgentSessionMess
 		ContextVersion: v.ContextVersion,
 		Metadata:       jsonMap(v.Metadata),
 		CreatedAt:      timeFrom(v.CreatedAt),
+	}
+}
+
+// fromAgentAccountUsage maps the aggregate SQL row without exposing sqlc types.
+func fromAgentAccountUsage(v sqlc.ListAgentUsageByAccountRow) domain.AgentAccountUsage {
+	return fromAgentAccountUsageFields(v.AccountID, v.DisplayName, v.Email, v.Status, v.SessionCount, v.MessageCount, v.LlmCallCount, v.InputTokens, v.CachedTokens, v.OutputTokens, v.TotalTokens, v.ActualTokens, timePtrFrom(v.LastActiveAt))
+}
+
+// fromAgentAccountUsageFields centralizes mapping shared by list and detail queries.
+func fromAgentAccountUsageFields(accountID, displayName, email, status string, sessionCount, messageCount, llmCallCount, inputTokens, cachedTokens, outputTokens, totalTokens, actualTokens int64, lastActiveAt *time.Time) domain.AgentAccountUsage {
+	return domain.AgentAccountUsage{
+		AccountID: accountID, DisplayName: displayName, Email: email, Status: status,
+		SessionCount: sessionCount, MessageCount: messageCount, LLMCallCount: llmCallCount,
+		InputTokens: inputTokens, CachedTokens: cachedTokens, OutputTokens: outputTokens,
+		TotalTokens: totalTokens, ActualTokens: actualTokens, LastActiveAt: lastActiveAt,
+	}
+}
+
+// fromAgentSessionUsage maps one session aggregate without leaking sqlc types.
+func fromAgentSessionUsage(v sqlc.ListAgentUsageBySessionRow) domain.AgentSessionUsage {
+	return domain.AgentSessionUsage{
+		SessionID:    v.SessionID,
+		AccountID:    v.AccountID,
+		Title:        v.Title,
+		Status:       domain.AgentSessionStatus(v.Status),
+		MessageCount: v.MessageCount,
+		LLMCallCount: v.LlmCallCount,
+		InputTokens:  v.InputTokens,
+		CachedTokens: v.CachedTokens,
+		OutputTokens: v.OutputTokens,
+		TotalTokens:  v.TotalTokens,
+		ActualTokens: v.ActualTokens,
+		LastActiveAt: timePtrFrom(v.LastActiveAt),
 	}
 }
 

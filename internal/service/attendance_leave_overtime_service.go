@@ -1,231 +1,166 @@
 package service
 
 import (
+	"context"
+	"errors"
 	"sort"
 	"strings"
 	"time"
 
+	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/utils"
 )
 
-// CreateLeaveRequest 建立請假請求的服務流程。
+const attendanceCompatibilityDefaultReason = "未填寫"
+
+// CreateLeaveRequest delegates the compatibility endpoint to the canonical workflow submission runtime.
 func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLeaveRequestInput) (LeaveRequest, error) {
-	account, _, err := c.resolveAccount(ctx)
+	account, employeeID, err := c.authorizeLeaveRequestEmployee(ctx, input.EmployeeID)
 	if err != nil {
 		return LeaveRequest{}, err
 	}
-	employeeID := strings.TrimSpace(input.EmployeeID)
-	if employeeID == "" {
-		employeeID = account.EmployeeID
+	if employeeID != strings.TrimSpace(account.EmployeeID) {
+		return LeaveRequest{}, Forbidden("proxy attendance submission requires a dedicated authorization path").WithReasonCode("attendance_proxy_submission_not_supported")
 	}
-	if employeeID == "" {
-		return LeaveRequest{}, BadRequest("employee_id is required")
-	}
-	decision, err := c.evaluateAuthz(ctx, account, CheckRequest{
-		ApplicationCode:  AppAttendance,
-		ResourceType:     ResourceLeave,
-		ResourceID:       employeeID,
-		Target:           employeeID,
-		TargetEmployeeID: employeeID,
-		Action:           ActionCreate,
+	instance, err := c.submitAttendanceCompatibilityForm(ctx, account, "leave-request", map[string]any{
+		"leave_type": input.LeaveType,
+		"start_at":   input.StartAt,
+		"end_at":     input.EndAt,
+		"hours":      input.Hours,
+		"reason":     attendanceCompatibilityReason(input.Reason),
 	})
 	if err != nil {
 		return LeaveRequest{}, err
 	}
-	if !decision.Allowed {
-		return LeaveRequest{}, Forbidden(decision.Reason)
-	}
-	allowed, all, err := c.attendanceEmployeeScope(ctx, account, decision)
+	request, ok, err := c.store.GetLeaveRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID)
 	if err != nil {
 		return LeaveRequest{}, err
 	}
-	if !all {
-		if _, ok := allowed[employeeID]; !ok {
-			return LeaveRequest{}, Forbidden("employee is outside data scope")
-		}
+	if !ok {
+		return LeaveRequest{}, domain.E(500, "attendance_projection_missing", "workflow submission did not create a leave request")
 	}
-	if _, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, employeeID); err != nil {
-		return LeaveRequest{}, err
-	} else if !ok {
-		return LeaveRequest{}, NotFound("employee", employeeID)
-	}
-	if strings.TrimSpace(input.LeaveType) == "" {
-		return LeaveRequest{}, BadRequest("leave_type is required")
-	}
-	if input.Hours <= 0 {
-		return LeaveRequest{}, BadRequest("hours must be greater than zero")
-	}
-	policy, err := c.loadAttendancePolicyResponse(ctx)
-	if err != nil {
-		return LeaveRequest{}, err
-	}
-	leaveTypeCode := normalizeLeaveTypeCode(input.LeaveType)
-	leaveType, ok := findLeaveTypeInPolicy(policy, leaveTypeCode)
-	if !ok || !leaveType.Active {
-		return LeaveRequest{}, BadRequest("unknown leave type")
-	}
-	startAt, err := utils.ParseDateTime(input.StartAt)
-	if err != nil {
-		return LeaveRequest{}, BadRequest("start_at must be RFC3339 or YYYY-MM-DD")
-	}
-	endAt, err := utils.ParseDateTime(input.EndAt)
-	if err != nil {
-		return LeaveRequest{}, BadRequest("end_at must be RFC3339 or YYYY-MM-DD")
-	}
-	if !endAt.After(startAt) {
-		return LeaveRequest{}, BadRequest("end_at must be after start_at")
-	}
-	var req LeaveRequest
-	requestID := utils.NewID("lr")
-	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
-		leaveBalanceID := ""
-		if leaveType.RequiresBalance {
-			balance, err := tx.reserveLeaveBalance(ctx, employeeID, leaveTypeCode, input.Hours, startAt)
-			if err != nil {
-				return err
-			}
-			leaveBalanceID = balance.ID
-		}
-		template, ok, err := tx.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, "leave-request")
-		if err != nil {
-			return err
-		}
-		if !ok {
-			template = FormTemplate{
-				ID:        utils.NewID("ft"),
-				TenantID:  ctx.TenantID,
-				Key:       "leave-request",
-				Name:      "請假申請單",
-				Schema:    map[string]any{"type": "object"},
-				CreatedAt: tx.Now(),
-			}
-			if err := tx.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
-				return err
-			}
-		}
-		instance := FormInstance{
-			ID:                 utils.NewID("fi"),
-			TenantID:           ctx.TenantID,
-			TemplateID:         template.ID,
-			ApplicantAccountID: account.ID,
-			Status:             "submitted",
-			Payload: map[string]any{
-				"employee_id":          employeeID,
-				"leave_request_id":     requestID,
-				"leave_type":           leaveTypeCode,
-				"linked_resource_id":   requestID,
-				"linked_resource_type": "attendance.leave_request",
-				"start_at":             startAt.Format(time.RFC3339),
-				"end_at":               endAt.Format(time.RFC3339),
-				"hours":                input.Hours,
-				"reason":               input.Reason,
-			},
-			SubmittedAt: tx.Now(),
-			UpdatedAt:   tx.Now(),
-		}
-		if err := tx.store.UpsertFormInstance(goContext(ctx), instance); err != nil {
-			return err
-		}
-		req = LeaveRequest{
-			ID:             requestID,
-			TenantID:       ctx.TenantID,
-			EmployeeID:     employeeID,
-			LeaveType:      leaveTypeCode,
-			StartAt:        startAt,
-			EndAt:          endAt,
-			Hours:          input.Hours,
-			Reason:         strings.TrimSpace(input.Reason),
-			Status:         "pending_approval",
-			FormInstanceID: instance.ID,
-			LeaveBalanceID: leaveBalanceID,
-			CreatedAt:      tx.Now(),
-		}
-		if err := tx.store.UpsertLeaveRequest(goContext(ctx), req); err != nil {
-			return err
-		}
-		if leaveType.RequiresBalance {
-			if err := tx.audit(ctx, "attendance.leave_balance.reserve", "leave_balance", employeeID+"|"+leaveTypeCode, "medium", map[string]any{
-				"employee_id":    employeeID,
-				"leave_type":     leaveTypeCode,
-				"reserved_hours": input.Hours,
-			}); err != nil {
-				return err
-			}
-		}
-		if err := tx.audit(ctx, "attendance.leave_request.create", "leave_request", req.ID, "medium", map[string]any{"leave_type": req.LeaveType, "hours": req.Hours}); err != nil {
-			return err
-		}
-		return nil
-	}); err != nil {
-		return LeaveRequest{}, err
-	}
-	c.logInfo(ctx, "leave request created",
-		"leave_request_id", req.ID,
-		"employee_id", req.EmployeeID,
-		"leave_type", req.LeaveType,
-		"hours", req.Hours,
-		"status", req.Status,
-		"form_instance_id", req.FormInstanceID,
-	)
-	return req, nil
+	return request, nil
 }
 
-// reserveLeaveBalance 保留請假 balance 的服務流程。
-func (c AttendanceService) reserveLeaveBalance(ctx RequestContext, employeeID, leaveType string, hours float64, asOf time.Time) (LeaveBalance, error) {
+// submitAttendanceCompatibilityForm preserves the old API shape while using the canonical workflow engine.
+func (c AttendanceService) submitAttendanceCompatibilityForm(ctx RequestContext, account Account, templateKey string, payload map[string]any) (FormInstance, error) {
+	workflow := c.Service.Workflow()
+	instance, err := workflow.submitNewFormForApplicant(ctx, account, templateKey, "", payload)
+	if err != nil {
+		return FormInstance{}, err
+	}
+	if err := workflow.startTemporalFormApprovalWorkflow(ctx, instance); err != nil {
+		compensationContext, cancel := context.WithTimeout(context.WithoutCancel(goContext(ctx)), 5*time.Second)
+		defer cancel()
+		compensationRequestContext := ctx
+		compensationRequestContext.Context = compensationContext
+		if compensationErr := c.compensateAttendanceCompatibilityWorkflowStartFailure(compensationRequestContext, instance, err); compensationErr != nil {
+			return FormInstance{}, errors.Join(err, compensationErr)
+		}
+		return FormInstance{}, err
+	}
+	return instance, nil
+}
+
+// compensateAttendanceCompatibilityWorkflowStartFailure cancels attendance projections and restores leave balance atomically.
+func (c AttendanceService) compensateAttendanceCompatibilityWorkflowStartFailure(ctx RequestContext, instance FormInstance, startErr error) error {
+	return c.withTransaction(ctx, func(tx AttendanceService) error {
+		if _, ok, err := tx.store.GetLeaveRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID); err != nil {
+			return err
+		} else if ok {
+			if err := tx.applyLeaveWorkflowReview(ctx, instance, "cancel", "cancelled"); err != nil {
+				return err
+			}
+		}
+		if _, ok, err := tx.store.GetOvertimeRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID); err != nil {
+			return err
+		} else if ok {
+			if err := tx.applyOvertimeWorkflowReview(ctx, instance, "cancel", "cancelled"); err != nil {
+				return err
+			}
+		}
+		return tx.Service.Workflow().markFormApprovalWorkflowStartFailedInTransaction(ctx, instance, startErr)
+	})
+}
+
+// reserveLeaveBalanceIfAvailable degrades a missing or insufficient balance to a no-balance request.
+func (c AttendanceService) reserveLeaveBalanceIfAvailable(ctx RequestContext, employeeID, leaveType string, hours float64, asOf time.Time) (LeaveBalance, string, error) {
 	balance, reserved, found, err := c.store.ReserveLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, leaveType, hours, asOf, c.Now())
 	if err != nil {
-		return LeaveBalance{}, err
+		return LeaveBalance{}, "", err
 	}
 	if !found {
-		return LeaveBalance{}, BadRequest("leave balance is required for this leave type")
+		return LeaveBalance{}, leaveEvaluationBalanceMissing, nil
 	}
 	if !reserved {
-		return LeaveBalance{}, BadRequest("leave balance is insufficient")
+		return balance, leaveEvaluationBalanceInsufficient, nil
 	}
-	return balance, nil
+	return balance, "", nil
 }
 
-// releaseLeaveBalance 釋放請假 balance 的服務流程。
-func (c AttendanceService) releaseLeaveBalance(ctx RequestContext, balanceID, employeeID, leaveType string, hours float64) (LeaveBalance, error) {
-	if strings.TrimSpace(balanceID) != "" {
-		balance, found, err := c.store.ReleaseLeaveBalanceByID(goContext(ctx), ctx.TenantID, balanceID, hours, c.Now())
+// releaseLeaveBalance restores one exact balance bucket, resolving legacy requests by their start date.
+func (c AttendanceService) releaseLeaveBalance(ctx RequestContext, balanceID, employeeID, leaveType string, hours float64, asOf time.Time) (LeaveBalance, error) {
+	resolvedID := strings.TrimSpace(balanceID)
+	if resolvedID == "" {
+		balances, err := c.store.ListLeaveBalances(goContext(ctx), ctx.TenantID)
 		if err != nil {
 			return LeaveBalance{}, err
 		}
-		if found {
-			return balance, nil
+		matches := make([]LeaveBalance, 0, 1)
+		for _, balance := range balances {
+			if balance.EmployeeID == employeeID && strings.EqualFold(strings.TrimSpace(balance.LeaveType), strings.TrimSpace(leaveType)) && leaveBalanceCoversDate(balance, asOf) {
+				matches = append(matches, balance)
+			}
+		}
+		switch len(matches) {
+		case 0:
+			return LeaveBalance{}, Conflict("legacy leave request has no balance covering its start date")
+		case 1:
+			resolvedID = strings.TrimSpace(matches[0].ID)
+		default:
+			return LeaveBalance{}, Conflict("legacy leave request matches multiple balances for its start date")
+		}
+		if resolvedID == "" {
+			return LeaveBalance{}, Conflict("legacy leave request resolved to an invalid balance")
 		}
 	}
-	balance, found, err := c.store.ReleaseLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, leaveType, hours, c.Now())
+	balance, found, err := c.store.ReleaseLeaveBalanceByID(goContext(ctx), ctx.TenantID, resolvedID, hours, c.Now())
 	if err != nil {
 		return LeaveBalance{}, err
 	}
 	if !found {
-		return LeaveBalance{}, BadRequest("leave balance is required for this leave type")
+		return LeaveBalance{}, Conflict("linked leave balance was not found")
 	}
 	return balance, nil
 }
 
 // applyLeaveWorkflowReview 處理 apply 請假流程審核的服務流程。
 func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance FormInstance, kind string, status string) error {
-	leaveRequestID := workflowLinkedLeaveRequestID(instance)
-	var request LeaveRequest
-	var ok bool
-	var err error
-	if leaveRequestID != "" {
-		request, ok, err = c.store.GetLeaveRequest(goContext(ctx), ctx.TenantID, leaveRequestID)
-		if err != nil {
-			return err
-		}
+	request, ok, err := c.store.GetLeaveRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID)
+	if err != nil {
+		return err
 	}
-	if leaveRequestID == "" || !ok {
-		request, ok, err = c.store.GetLeaveRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID)
-		if err != nil {
-			return err
+	if !ok {
+		leaveRequestID := workflowLinkedLeaveRequestID(instance)
+		if leaveRequestID != "" {
+			candidate, found, lookupErr := c.store.GetLeaveRequest(goContext(ctx), ctx.TenantID, leaveRequestID)
+			if lookupErr != nil {
+				return lookupErr
+			}
+			if found && strings.TrimSpace(candidate.FormInstanceID) == strings.TrimSpace(instance.ID) {
+				request, ok = candidate, true
+			}
 		}
 		if !ok {
 			return nil
 		}
+	}
+	applicantEmployeeID, err := c.workflowApplicantEmployeeID(ctx, instance)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(request.EmployeeID) != applicantEmployeeID {
+		return Conflict("linked leave request does not belong to the form applicant")
 	}
 	previousStatus := normalizeLeaveRequestStatus(request.Status)
 	nextStatus := leaveRequestStatusForWorkflow(kind, status)
@@ -236,12 +171,21 @@ func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance
 		return BadRequest("approved leave request cannot be changed by workflow")
 	}
 	if leaveRequestStatusReleasesBalance(previousStatus, nextStatus) {
-		policy, err := c.loadAttendancePolicyResponse(ctx)
-		if err != nil {
-			return err
+		requiresBalance := strings.TrimSpace(request.LeaveBalanceID) != ""
+		if snapshotValue, ok := request.EvaluationSnapshot["balance_required"].(bool); ok {
+			requiresBalance = snapshotValue
 		}
-		if leaveType, ok := findLeaveTypeInPolicy(policy, request.LeaveType); ok && leaveType.RequiresBalance {
-			if _, err := c.releaseLeaveBalance(ctx, request.LeaveBalanceID, request.EmployeeID, request.LeaveType, request.Hours); err != nil {
+		if len(request.EvaluationSnapshot) == 0 && len(request.RuleSnapshot) == 0 {
+			policy, err := c.loadAttendancePolicyResponse(ctx)
+			if err != nil {
+				return err
+			}
+			if leaveType, ok := findLeaveTypeInPolicy(policy, request.LeaveType); ok {
+				requiresBalance = leaveType.RequiresBalance
+			}
+		}
+		if requiresBalance {
+			if _, err := c.releaseLeaveBalance(ctx, request.LeaveBalanceID, request.EmployeeID, request.LeaveType, request.Hours, request.StartAt); err != nil {
 				return err
 			}
 		}
@@ -301,6 +245,21 @@ func employeeIDsFromSlice(values []string) []string {
 	return out
 }
 
+// intersectEmployeeIDs preserves an explicit employee filter without widening the authorized scope.
+func intersectEmployeeIDs(requested []string, allowed map[string]struct{}) []string {
+	requested = employeeIDsFromSlice(requested)
+	if len(requested) == 0 {
+		return employeeIDsFromSet(allowed)
+	}
+	out := make([]string, 0, len(requested))
+	for _, employeeID := range requested {
+		if _, ok := allowed[employeeID]; ok {
+			out = append(out, employeeID)
+		}
+	}
+	return out
+}
+
 // workflowLinkedLeaveRequestID 處理流程 linked 請假請求 ID。
 func workflowLinkedLeaveRequestID(instance FormInstance) string {
 	if !strings.EqualFold(stringFromAny(instance.Payload["linked_resource_type"]), "attendance.leave_request") {
@@ -352,54 +311,14 @@ func leaveRequestStatusReleasesBalance(previousStatus string, nextStatus string)
 	return nextStatus == "rejected" || nextStatus == "cancelled"
 }
 
-// CreateOvertimeRequest 建立加班申請的服務流程。
+// CreateOvertimeRequest delegates the compatibility endpoint to the canonical workflow submission runtime.
 func (c AttendanceService) CreateOvertimeRequest(ctx RequestContext, input CreateOvertimeRequestInput) (OvertimeRequest, error) {
-	account, _, err := c.resolveAccount(ctx)
+	account, employeeID, err := c.authorizeLeaveRequestEmployee(ctx, input.EmployeeID)
 	if err != nil {
 		return OvertimeRequest{}, err
 	}
-	employeeID := strings.TrimSpace(input.EmployeeID)
-	if employeeID == "" {
-		employeeID = account.EmployeeID
-	}
-	if employeeID == "" {
-		return OvertimeRequest{}, BadRequest("employee_id is required")
-	}
-	decision, err := c.evaluateAuthz(ctx, account, CheckRequest{
-		ApplicationCode:  AppAttendance,
-		ResourceType:     ResourceLeave,
-		ResourceID:       employeeID,
-		Target:           employeeID,
-		TargetEmployeeID: employeeID,
-		Action:           ActionCreate,
-	})
-	if err != nil {
-		return OvertimeRequest{}, err
-	}
-	if !decision.Allowed {
-		return OvertimeRequest{}, Forbidden(decision.Reason)
-	}
-	if err := c.ensureAttendanceEmployeeAllowed(ctx, account, decision, employeeID); err != nil {
-		return OvertimeRequest{}, err
-	}
-	if _, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, employeeID); err != nil {
-		return OvertimeRequest{}, err
-	} else if !ok {
-		return OvertimeRequest{}, NotFound("employee", employeeID)
-	}
-	if input.Hours <= 0 {
-		return OvertimeRequest{}, BadRequest("hours must be greater than zero")
-	}
-	startAt, err := utils.ParseDateTime(input.StartAt)
-	if err != nil {
-		return OvertimeRequest{}, BadRequest("start_at must be RFC3339 or YYYY-MM-DD")
-	}
-	endAt, err := utils.ParseDateTime(input.EndAt)
-	if err != nil {
-		return OvertimeRequest{}, BadRequest("end_at must be RFC3339 or YYYY-MM-DD")
-	}
-	if !endAt.After(startAt) {
-		return OvertimeRequest{}, BadRequest("end_at must be after start_at")
+	if employeeID != strings.TrimSpace(account.EmployeeID) {
+		return OvertimeRequest{}, Forbidden("proxy attendance submission requires a dedicated authorization path").WithReasonCode("attendance_proxy_submission_not_supported")
 	}
 	overtimeType, err := normalizeOvertimeType(input.OvertimeType)
 	if err != nil {
@@ -409,86 +328,33 @@ func (c AttendanceService) CreateOvertimeRequest(ctx RequestContext, input Creat
 	if err != nil {
 		return OvertimeRequest{}, err
 	}
-	var req OvertimeRequest
-	requestID := utils.NewID("ot")
-	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
-		template, ok, err := tx.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, "overtime-approval")
-		if err != nil {
-			return err
-		}
-		if !ok {
-			template = FormTemplate{
-				ID:        utils.NewID("ft"),
-				TenantID:  ctx.TenantID,
-				Key:       "overtime-approval",
-				Name:      "加班核准申請單",
-				Schema:    map[string]any{"type": "object"},
-				CreatedAt: tx.Now(),
-			}
-			if err := tx.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
-				return err
-			}
-		}
-		instance := FormInstance{
-			ID:                 utils.NewID("fi"),
-			TenantID:           ctx.TenantID,
-			TemplateID:         template.ID,
-			ApplicantAccountID: account.ID,
-			Status:             "submitted",
-			Payload: map[string]any{
-				"employee_id":          employeeID,
-				"overtime_request_id":  requestID,
-				"linked_resource_id":   requestID,
-				"linked_resource_type": "attendance.overtime_request",
-				"start_at":             startAt.Format(time.RFC3339),
-				"end_at":               endAt.Format(time.RFC3339),
-				"hours":                input.Hours,
-				"overtime_type":        overtimeType,
-				"compensation_type":    compensationType,
-				"reason":               input.Reason,
-			},
-			SubmittedAt: tx.Now(),
-			UpdatedAt:   tx.Now(),
-		}
-		if err := tx.store.UpsertFormInstance(goContext(ctx), instance); err != nil {
-			return err
-		}
-		req = OvertimeRequest{
-			ID:               requestID,
-			TenantID:         ctx.TenantID,
-			EmployeeID:       employeeID,
-			WorkDate:         attendanceWorkDate(startAt),
-			StartAt:          startAt,
-			EndAt:            endAt,
-			Hours:            input.Hours,
-			OvertimeType:     overtimeType,
-			CompensationType: compensationType,
-			Reason:           strings.TrimSpace(input.Reason),
-			Status:           "pending_approval",
-			FormInstanceID:   instance.ID,
-			CreatedAt:        tx.Now(),
-			UpdatedAt:        tx.Now(),
-		}
-		if err := tx.store.UpsertOvertimeRequest(goContext(ctx), req); err != nil {
-			return err
-		}
-		return tx.audit(ctx, "attendance.overtime_request.create", "overtime_request", req.ID, "medium", map[string]any{
-			"employee_id":       employeeID,
-			"hours":             req.Hours,
-			"overtime_type":     req.OvertimeType,
-			"compensation_type": req.CompensationType,
-		})
-	}); err != nil {
+	instance, err := c.submitAttendanceCompatibilityForm(ctx, account, "overtime-approval", map[string]any{
+		"start_at":          input.StartAt,
+		"end_at":            input.EndAt,
+		"hours":             input.Hours,
+		"overtime_type":     overtimeType,
+		"compensation_type": compensationType,
+		"reason":            attendanceCompatibilityReason(input.Reason),
+	})
+	if err != nil {
 		return OvertimeRequest{}, err
 	}
-	c.logInfo(ctx, "overtime request created",
-		"overtime_request_id", req.ID,
-		"employee_id", req.EmployeeID,
-		"hours", req.Hours,
-		"status", req.Status,
-		"form_instance_id", req.FormInstanceID,
-	)
-	return req, nil
+	request, ok, err := c.store.GetOvertimeRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID)
+	if err != nil {
+		return OvertimeRequest{}, err
+	}
+	if !ok {
+		return OvertimeRequest{}, domain.E(500, "attendance_projection_missing", "workflow submission did not create an overtime request")
+	}
+	return request, nil
+}
+
+// attendanceCompatibilityReason keeps optional legacy API requests valid against required form fields.
+func attendanceCompatibilityReason(value string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return attendanceCompatibilityDefaultReason
 }
 
 // listOvertimeRequestsByQuery 列出加班申請 by 查詢的服務流程。
@@ -618,24 +484,31 @@ func (c AttendanceService) applyCorrectionWorkflowReview(ctx RequestContext, ins
 
 // applyOvertimeWorkflowReview 處理加班表單流程審核的服務流程。
 func (c AttendanceService) applyOvertimeWorkflowReview(ctx RequestContext, instance FormInstance, kind string, status string) error {
-	overtimeRequestID := workflowLinkedOvertimeRequestID(instance)
-	var request OvertimeRequest
-	var ok bool
-	var err error
-	if overtimeRequestID != "" {
-		request, ok, err = c.store.GetOvertimeRequest(goContext(ctx), ctx.TenantID, overtimeRequestID)
-		if err != nil {
-			return err
-		}
+	request, ok, err := c.store.GetOvertimeRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID)
+	if err != nil {
+		return err
 	}
-	if overtimeRequestID == "" || !ok {
-		request, ok, err = c.store.GetOvertimeRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID)
-		if err != nil {
-			return err
+	if !ok {
+		overtimeRequestID := workflowLinkedOvertimeRequestID(instance)
+		if overtimeRequestID != "" {
+			candidate, found, lookupErr := c.store.GetOvertimeRequest(goContext(ctx), ctx.TenantID, overtimeRequestID)
+			if lookupErr != nil {
+				return lookupErr
+			}
+			if found && strings.TrimSpace(candidate.FormInstanceID) == strings.TrimSpace(instance.ID) {
+				request, ok = candidate, true
+			}
 		}
 		if !ok {
 			return nil
 		}
+	}
+	applicantEmployeeID, err := c.workflowApplicantEmployeeID(ctx, instance)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(request.EmployeeID) != applicantEmployeeID {
+		return Conflict("linked overtime request does not belong to the form applicant")
 	}
 	previousStatus := normalizeLeaveRequestStatus(request.Status)
 	nextStatus := leaveRequestStatusForWorkflow(kind, status)

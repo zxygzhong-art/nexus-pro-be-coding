@@ -74,19 +74,9 @@ func (c WorkflowService) ActOnWorkflowStage(ctx RequestContext, formInstanceID, 
 	if action == "" {
 		return domain.FormInstance{}, BadRequest("action is required")
 	}
-	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, workflowSignalAuthzAction(action), formInstanceID); err != nil {
-		return domain.FormInstance{}, err
-	}
-	instance, run, stageInstance, stages, err := c.loadActiveWorkflowStage(ctx, formInstanceID)
+	instance, run, stageInstance, stages, assignees, err := c.loadActiveWorkflowStageForAssignee(ctx, formInstanceID)
 	if err != nil {
 		return domain.FormInstance{}, err
-	}
-	assignees, err := c.store.ListWorkflowStageAssignees(goContext(ctx), ctx.TenantID, stageInstance.ID)
-	if err != nil {
-		return domain.FormInstance{}, err
-	}
-	if !workflowAssigneeCanAct(assignees, ctx.AccountID) {
-		return domain.FormInstance{}, Forbidden("current account is not an active assignee for this stage").WithReasonCode("workflow_not_assignee")
 	}
 	stageDefinition := workflowStageByID(stages, stageInstance.StageID)
 	now := c.Now()
@@ -121,6 +111,25 @@ func (c WorkflowService) ActOnWorkflowStage(ctx RequestContext, formInstanceID, 
 	return updated, nil
 }
 
+// loadActiveWorkflowStageForAssignee combines the baseline read grant with the runtime assignee relation.
+func (c WorkflowService) loadActiveWorkflowStageForAssignee(ctx RequestContext, formInstanceID string) (domain.FormInstance, domain.WorkflowRun, domain.WorkflowStageInstance, []domain.WorkflowStageDefinition, []domain.WorkflowStageAssignee, error) {
+	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, ""); err != nil {
+		return domain.FormInstance{}, domain.WorkflowRun{}, domain.WorkflowStageInstance{}, nil, nil, err
+	}
+	instance, run, stageInstance, stages, err := c.loadActiveWorkflowStage(ctx, formInstanceID)
+	if err != nil {
+		return domain.FormInstance{}, domain.WorkflowRun{}, domain.WorkflowStageInstance{}, nil, nil, err
+	}
+	assignees, err := c.store.ListWorkflowStageAssignees(goContext(ctx), ctx.TenantID, stageInstance.ID)
+	if err != nil {
+		return domain.FormInstance{}, domain.WorkflowRun{}, domain.WorkflowStageInstance{}, nil, nil, err
+	}
+	if !workflowAssigneeCanAct(assignees, ctx.AccountID) {
+		return domain.FormInstance{}, domain.WorkflowRun{}, domain.WorkflowStageInstance{}, nil, nil, Forbidden("current account is not an active assignee for this stage").WithReasonCode("workflow_not_assignee")
+	}
+	return instance, run, stageInstance, stages, assignees, nil
+}
+
 // GetWorkflowFormState 回傳單據流程運行狀態。
 func (c WorkflowService) GetWorkflowFormState(ctx RequestContext, formInstanceID string) (domain.WorkflowFormStateResponse, error) {
 	account, decision, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
@@ -135,7 +144,13 @@ func (c WorkflowService) GetWorkflowFormState(ctx RequestContext, formInstanceID
 		return domain.WorkflowFormStateResponse{}, NotFound("form instance", formInstanceID)
 	}
 	if err := requireFormInstanceVisible(instance, account, decision); err != nil {
-		return domain.WorkflowFormStateResponse{}, err
+		pending, pendingErr := workflowFormInstancePendingForAccount(ctx, c.store, ctx.TenantID, account.ID)
+		if pendingErr != nil {
+			return domain.WorkflowFormStateResponse{}, pendingErr
+		}
+		if _, assigned := pending[instance.ID]; !assigned {
+			return domain.WorkflowFormStateResponse{}, err
+		}
 	}
 	run, ok, err := c.store.GetWorkflowRunByFormInstance(goContext(ctx), ctx.TenantID, formInstanceID)
 	if err != nil {

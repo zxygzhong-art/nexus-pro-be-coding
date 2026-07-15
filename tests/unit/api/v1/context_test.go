@@ -1,15 +1,16 @@
-package v1
+package v1_test
 
 import (
 	"testing"
 
+	v1 "nexus-pro-be/internal/api/v1"
 	"nexus-pro-be/internal/domain"
 )
 
 // TestAuthenticatedPlatformAdminAcceptsDedicatedClaim 驗證專用布林 claim 可建立平台管理員身分。
 func TestAuthenticatedPlatformAdminAcceptsDedicatedClaim(t *testing.T) {
 	principal := domain.AuthenticatedPrincipal{Claims: map[string]any{"platform_admin": true}}
-	if !authenticatedPlatformAdmin(principal) {
+	if !v1.AuthenticatedPlatformAdmin(principal) {
 		t.Fatal("expected platform_admin claim to authorize platform registry writes")
 	}
 }
@@ -19,14 +20,14 @@ func TestAuthenticatedPlatformAdminRequiresDedicatedRealmRole(t *testing.T) {
 	admin := domain.AuthenticatedPrincipal{Claims: map[string]any{
 		"realm_access": map[string]any{"roles": []any{"nexus-platform-admin"}},
 	}}
-	if !authenticatedPlatformAdmin(admin) {
+	if !v1.AuthenticatedPlatformAdmin(admin) {
 		t.Fatal("expected dedicated platform realm role to authorize platform registry writes")
 	}
 
 	tenantAdmin := domain.AuthenticatedPrincipal{Claims: map[string]any{
 		"realm_access": map[string]any{"roles": []any{"admin", "tenant-admin"}},
 	}}
-	if authenticatedPlatformAdmin(tenantAdmin) {
+	if v1.AuthenticatedPlatformAdmin(tenantAdmin) {
 		t.Fatal("expected tenant-local admin roles to remain insufficient")
 	}
 }

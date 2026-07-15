@@ -2,10 +2,12 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/repository"
 	"nexus-pro-be/internal/service"
 )
 
@@ -55,8 +57,45 @@ func TestHRPositionCRUDSoftDisablesPosition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := findAuditLog(logs, "hr.position.delete"); !ok {
-		t.Fatalf("expected hr.position.delete audit log, got %+v", logs)
+	for _, action := range []string{"hr.position.create", "hr.position.update", "hr.position.delete"} {
+		log, ok := findAuditLog(logs, action)
+		if !ok || log.Target != created.ID || log.Details["authz_decision"] != true {
+			t.Fatalf("expected decision-backed %s audit for %q, got %+v", action, created.ID, logs)
+		}
+	}
+}
+
+func TestHRPositionCreateAndUpdateRollbackWhenAuditFails(t *testing.T) {
+	store, baseService, ctx := newEmployeeFeatureFixture(t, hrPositionContractPermissions())
+	createStore := &positionAuditFailureStore{Store: store, failAction: "hr.position.create"}
+	createService := service.New(createStore)
+	if _, err := createService.HR().CreatePosition(ctx, domain.CreatePositionInput{Code: "rollback", Name: "Rollback", OrgUnitID: "ou-1"}); err == nil {
+		t.Fatal("expected create audit failure")
+	}
+	positions, err := store.ListPositions(context.Background(), ctx.TenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(positions) != 0 {
+		t.Fatalf("position create escaped failed audit transaction: %+v", positions)
+	}
+
+	created, err := baseService.HR().CreatePosition(ctx, domain.CreatePositionInput{Code: "stable", Name: "Stable", OrgUnitID: "ou-1", Level: "L3"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updateStore := &positionAuditFailureStore{Store: store, failAction: "hr.position.update"}
+	updateService := service.New(updateStore)
+	level := "L4"
+	if _, err := updateService.HR().UpdatePosition(ctx, created.ID, domain.UpdatePositionInput{Level: &level}); err == nil {
+		t.Fatal("expected update audit failure")
+	}
+	persisted, ok, err := store.GetPosition(context.Background(), ctx.TenantID, created.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok || persisted.Level != "L3" {
+		t.Fatalf("position update escaped failed audit transaction: %+v", persisted)
 	}
 }
 
@@ -254,4 +293,24 @@ func hrPositionContractPermissions() []domain.Permission {
 		{Resource: "hr.employment_contract", Action: "update", Scope: "all"},
 		{Resource: "hr.employment_contract", Action: "delete", Scope: "all"},
 	}
+}
+
+type positionAuditFailureStore struct {
+	repository.Store
+	failAction string
+}
+
+// WithTenantTransaction keeps the injected audit failure inside the memory transaction.
+func (s *positionAuditFailureStore) WithTenantTransaction(ctx context.Context, tenantID string, fn func(repository.Store) error) error {
+	return repository.WithinTenantTransaction(ctx, s.Store, tenantID, func(tx repository.Store) error {
+		return fn(&positionAuditFailureStore{Store: tx, failAction: s.failAction})
+	})
+}
+
+// AppendAuditLog simulates a durable audit failure for one position action.
+func (s *positionAuditFailureStore) AppendAuditLog(ctx context.Context, log domain.AuditLog) error {
+	if log.Action == s.failAction {
+		return errors.New("injected position audit failure")
+	}
+	return s.Store.AppendAuditLog(ctx, log)
 }

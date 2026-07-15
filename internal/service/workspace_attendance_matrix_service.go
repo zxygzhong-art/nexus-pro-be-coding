@@ -345,19 +345,26 @@ func workspaceShortHoursExempted(employeeID string, date string, workedHours flo
 	return false
 }
 
-// workspaceAttendanceMatrix 處理工作區考勤矩陣。
-func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceEmployeeCard, dates []WorkspaceDate, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64, summaryCells map[string]map[string]AttendanceDailySummary) WorkspaceAttendanceMatrix {
+// workspaceAttendanceMatrix projects explicit attendance facts and marks only elapsed eligible workdays absent.
+func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceEmployeeCard, dates []WorkspaceDate, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64, summaryCells map[string]map[string]AttendanceDailySummary, clockCells map[string]map[string]workspaceClockCell, now time.Time) WorkspaceAttendanceMatrix {
 	rows := []WorkspaceAttendanceRow{}
 	totalLeaveHours := 0.0
 	totalOvertimeHours := 0.0
 	perfect := 0
 	workdays := workspaceWorkdayCount(dates)
 	holidays := workspaceHolidayCount(dates)
+	todayKey := now.In(attendanceClockLocation).Format(time.DateOnly)
 	for _, employee := range employees {
 		row := WorkspaceAttendanceRow{Employee: cards[employee.ID], Cells: make([]WorkspaceDayCell, 0, len(dates)), Summary: WorkspaceEmployeeHours{LeaveByType: map[string]float64{}, WorkDays: workdays}}
+		hasAbsence := false
+		hasRecordedAttendance := false
 		for _, date := range dates {
 			cell := workspaceBaseDayCell(date)
-			if leave, ok := leaveCells[employee.ID][date.Key]; ok {
+			eligible := workspaceEmployeeEligibleOnDate(employee, date)
+			if cell.Type == "work" && !eligible {
+				cell.Type = "empty"
+			}
+			if leave, ok := leaveCells[employee.ID][date.Key]; ok && eligible {
 				cell.Type = "leave"
 				cell.Leave = leave.Code
 				cell.Hours = leave.Hours
@@ -365,20 +372,37 @@ func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceE
 				row.Summary.LeaveHours += leave.Hours
 				row.Summary.LeaveByType[leave.Code] += leave.Hours
 			}
-			if overtime := overtimeCells[employee.ID][date.Key]; overtime > 0 {
+			if overtime := overtimeCells[employee.ID][date.Key]; overtime > 0 && eligible {
 				cell.Overtime = overtime
 				row.Summary.OvertimeHours += overtime
 			}
-			if summary, ok := summaryCells[employee.ID][date.Key]; ok && summary.ClockHours > 0 && cell.Type != "leave" {
+			if summary, ok := summaryCells[employee.ID][date.Key]; ok && summary.ClockHours > 0 && cell.Type == "work" {
 				cell.Type = "work"
 				cell.Hours = summary.ClockHours
 				cell.Label = "eHRMS"
+				cell.Recorded = true
+			}
+			if clock, ok := clockCells[employee.ID][date.Key]; ok && cell.Type == "work" && (clock.In != "" || clock.Out != "") {
+				cell.Recorded = true
+				if cell.Label == "" {
+					cell.Label = "打卡"
+				}
+			}
+			if cell.Type == "work" {
+				switch {
+				case cell.Recorded:
+					hasRecordedAttendance = true
+				case date.Key < todayKey:
+					cell.Type = "absence"
+					cell.Label = "缺勤"
+					hasAbsence = true
+				}
 			}
 			row.Cells = append(row.Cells, cell)
 		}
 		row.Summary.DueHours = float64(workdays) * workspaceDayHours
 		row.Summary.AttendedHours = math.Max(0, row.Summary.DueHours-row.Summary.LeaveHours-row.Summary.DeductHours) + row.Summary.OvertimeHours
-		if row.Summary.LeaveHours == 0 {
+		if row.Summary.LeaveHours == 0 && !hasAbsence && hasRecordedAttendance {
 			perfect++
 		}
 		totalLeaveHours += row.Summary.LeaveHours
@@ -386,6 +410,26 @@ func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceE
 		rows = append(rows, row)
 	}
 	return WorkspaceAttendanceMatrix{Rows: rows, Summary: WorkspaceAttendanceMatrixSum{Holidays: holidays, LeaveHours: totalLeaveHours, OvertimeHours: totalOvertimeHours, Perfect: perfect, Workdays: workdays}}
+}
+
+// workspaceEmployeeEligibleOnDate avoids absence marks before hire, after resignation, or outside active employment.
+func workspaceEmployeeEligibleOnDate(employee Employee, date WorkspaceDate) bool {
+	status := workspaceEmployeeStatus(employee)
+	switch status {
+	case string(EmployeeStatusDeleted), string(EmployeeStatusOnboarding), string(EmployeeStatusLeaveSuspended):
+		return false
+	case string(EmployeeStatusResigned):
+		if employee.ResignDate == nil {
+			return false
+		}
+	}
+	if employee.HireDate != nil && date.Key < employee.HireDate.In(attendanceClockLocation).Format(time.DateOnly) {
+		return false
+	}
+	if employee.ResignDate != nil && date.Key > employee.ResignDate.In(attendanceClockLocation).Format(time.DateOnly) {
+		return false
+	}
+	return true
 }
 
 // workspaceSummaryCells 處理 eHRMS 日彙總儲存格。
