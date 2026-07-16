@@ -22,22 +22,23 @@ type WorkspaceCtrl struct {
 // RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c WorkspaceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace := router.Group("/workspace")
-	workspace.GET("", c.routes.Handle("hr.employee", "read", c.aggregate))
-	workspace.GET("/overview", c.routes.Handle("hr.employee", "read", c.overview))
-	workspace.GET("/employees", c.routes.Handle("hr.employee", "read", c.employees))
-	workspace.GET("/organization", c.routes.Handle("hr.employee", "read", c.organization))
-	workspace.PATCH("/organization/employees/:id/manager", c.routes.Handle("hr.employee", "update", c.updateOrganizationManager, PathParam(PathParamID)))
-	workspace.PATCH("/organization/employees/:id/visibility", c.routes.Handle("hr.employee", "update", c.updateOrganizationVisibility, PathParam(PathParamID)))
-	workspace.GET("/attendance", c.routes.Handle("attendance.clock", "read", c.attendance))
-	workspace.GET("/attendance/export", c.routes.Handle("attendance.clock", "export", c.exportAttendanceCSV))
-	workspace.GET("/turnover", c.routes.Handle("hr.employee", "read", c.turnover))
-	workspace.GET("/turnover/export", c.routes.Handle("hr.employee", "export", c.exportTurnoverCSV))
-	workspace.GET("/forms", c.routes.Handle("workflow.form_template", "read", c.formDesign))
-	workspace.POST("/forms", c.routes.Handle("workflow.form_template", "create", c.createFormDesign))
-	workspace.PATCH("/forms/:id", c.routes.Handle("workflow.form_template", "update", c.updateFormDesign, PathParam(PathParamID)))
-	workspace.DELETE("/forms/:id", c.routes.Handle("workflow.form_template", "delete", c.deleteFormDesign, PathParam(PathParamID)))
-	workspace.GET("/audit-logs", c.routes.Handle("audit.log", "read", c.auditLogs))
-	workspace.GET("/insights", c.routes.Handle("hr.employee", "read", c.insights))
+	workspace.GET("", c.routes.Handle("hr.employee", "read", c.aggregate, TenantWideScope()))
+	workspace.GET("/overview", c.routes.Handle("hr.employee", "read", c.overview, TenantWideScope()))
+	workspace.GET("/employees", c.routes.Handle("hr.employee", "read", c.employees, TenantWideScope()))
+	workspace.GET("/organization", c.routes.Handle("hr.employee", "read", c.organization, TenantWideScope()))
+	workspace.PATCH("/organization/employees/:id/manager", c.routes.Handle("hr.employee", "update", c.updateOrganizationManager, PathParam(PathParamID), TenantWideScope()))
+	workspace.PATCH("/organization/employees/:id/visibility", c.routes.Handle("hr.employee", "update", c.updateOrganizationVisibility, PathParam(PathParamID), TenantWideScope()))
+	workspace.GET("/attendance", c.routes.Handle("attendance.clock", "read", c.attendance, TenantWideScope()))
+	workspace.GET("/attendance/export", c.routes.Handle("attendance.clock", "export", c.exportAttendanceCSV, TenantWideScope()))
+	workspace.GET("/turnover", c.routes.Handle("hr.employee", "read", c.turnover, TenantWideScope()))
+	workspace.GET("/turnover/export", c.routes.Handle("hr.employee", "export", c.exportTurnoverCSV, TenantWideScope()))
+	workspace.GET("/forms", c.routes.Handle("workflow.form_template", "read", c.formDesign, TenantWideScope()))
+	workspace.POST("/forms", c.routes.Handle("workflow.form_template", "create", c.createFormDesign, TenantWideScope()))
+	workspace.PATCH("/forms/:id", c.routes.Handle("workflow.form_template", "update", c.updateFormDesign, PathParam(PathParamID), TenantWideScope()))
+	workspace.DELETE("/forms/:id", c.routes.Handle("workflow.form_template", "delete", c.deleteFormDesign, PathParam(PathParamID), TenantWideScope()))
+	workspace.GET("/audit-logs", c.routes.Handle("audit.log", "read", c.auditLogs, TenantWideScope()))
+	workspace.GET("/audit-logs/facets", c.routes.Handle("audit.log", "read", c.auditLogFacets, TenantWideScope()))
+	workspace.GET("/insights", c.routes.Handle("hr.employee", "read", c.insights, TenantWideScope()))
 }
 
 // aggregate 處理工作區 aggregate 的 HTTP 請求。
@@ -233,7 +234,7 @@ func (c WorkspaceCtrl) deleteFormDesign(w http.ResponseWriter, r *http.Request, 
 	return nil
 }
 
-// auditLogs 處理稽核 logs 的 HTTP 請求。
+// auditLogs 處理稽覈 logs 的 HTTP 請求。
 func (c WorkspaceCtrl) auditLogs(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -251,6 +252,16 @@ func (c WorkspaceCtrl) auditLogs(w http.ResponseWriter, r *http.Request, ctx dom
 		return err
 	}
 	writeJSON(w, http.StatusOK, items)
+	return nil
+}
+
+// auditLogFacets returns tenant-wide filter options with stable operator identifiers.
+func (c WorkspaceCtrl) auditLogFacets(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.WorkspaceAuditLogFacets(ctx)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 

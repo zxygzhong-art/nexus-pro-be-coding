@@ -73,9 +73,9 @@ var pagePermissionBundles = map[string][]pagePermissionResource{
 	"agents.usage": {
 		{
 			applicationCode: AppAgent,
-			resourceType:    ResourceDefinition,
+			resourceType:    ResourceUsage,
 			actions:         []Action{ActionRead},
-			allowedScopes:   []Scope{"", ScopeAll, ScopeTenant, ScopeSystem},
+			allowedScopes:   []Scope{ScopeAll, ScopeTenant, ScopeSystem},
 		},
 	},
 	"agents.knowledge_bases": {
@@ -132,11 +132,37 @@ var pagePermissionBundles = map[string][]pagePermissionResource{
 	},
 }
 
+var tenantWideWorkspaceMenuKeys = map[string]struct{}{
+	"workspace.overview":      {},
+	"hr.employees":            {},
+	"hr.org_units":            {},
+	"hr.positions":            {},
+	"hr.organization":         {},
+	"hr.turnover":             {},
+	"attendance.overview":     {},
+	"attendance.clock":        {},
+	"attendance.leave_policy": {},
+	"workflow.forms":          {},
+	"agents.models":           {},
+	"agents.definitions":      {},
+	"agents.usage":            {},
+	"agents.knowledge_bases":  {},
+	"agents.tools":            {},
+	"iam.members":             {},
+	"iam.user_groups":         {},
+	"iam.permission_sets":     {},
+	"iam.assignments":         {},
+	"iam.assumable_roles":     {},
+	"iam.policies":            {},
+	"audit.logs":              {},
+}
+
+var tenantWideWorkspaceScopes = []Scope{"", ScopeAll, ScopeTenant, ScopeSystem}
+
 var pagePermissionAliases = map[string]string{
 	"audit":               "audit.logs",
 	"hr.reporting":        "hr.organization",
 	"attendance":          "attendance.overview",
-	"attendance.leave":    "attendance.leave_policy",
 	"workspace.audit-log": "audit.logs",
 }
 
@@ -170,12 +196,16 @@ func pagePermissionPrimaryReadRequirement(menuKey string) (menuPermissionRequire
 		if _, exists := routePermissionRiskLevel(primary.applicationCode, primary.resourceType, action); !exists {
 			return menuPermissionRequirement{}, false
 		}
+		allowedScopes := primary.allowedScopes
+		if _, tenantWide := tenantWideWorkspaceMenuKeys[canonicalMenuKey]; tenantWide && len(allowedScopes) == 0 {
+			allowedScopes = tenantWideWorkspaceScopes
+		}
 		return menuPermissionRequirement{
 			applicationCode: primary.applicationCode,
 			resourceType:    primary.resourceType,
 			action:          action,
 			permissionKey:   permissionKey(primary.applicationCode, primary.resourceType, action),
-			allowedScopes:   primary.allowedScopes,
+			allowedScopes:   allowedScopes,
 		}, true
 	}
 	return menuPermissionRequirement{}, false
@@ -269,6 +299,8 @@ func canonicalMenuKeyForPermission(permission Permission) string {
 		return "agents.models"
 	case strings.HasPrefix(key, "agent.definition."):
 		return "agents.definitions"
+	case strings.HasPrefix(key, "agent.usage."):
+		return "agents.usage"
 	case strings.HasPrefix(key, "agent.knowledge_base."):
 		return "agents.knowledge_bases"
 	case key == "agent.tool.read":

@@ -1119,7 +1119,7 @@
   "menus": [
     {
       "key": "workbench",
-      "label": "工作台",
+      "label": "工作臺",
       "path": "/"
     },
     {
@@ -1224,7 +1224,7 @@
         },
         {
           "key": "iam.user_groups",
-          "label": "使用者群組",
+          "label": "使用者羣組",
           "path": "/workspace/iam/user-groups",
           "sort_order": 16
         },
@@ -1948,8 +1948,8 @@
     },
     {
       "template_key": "platform_readonly_troubleshooting",
-      "name": "平台唯讀排障權限",
-      "description": "平台與審計唯讀排障用權限集合。",
+      "name": "平臺唯讀排障權限",
+      "description": "平臺與審計唯讀排障用權限集合。",
       "permissions": [
         {
           "resource": "me",
@@ -1999,7 +1999,7 @@
   "assumable_role_templates": [
     {
       "template_key": "platform_readonly_troubleshooter",
-      "name": "平台只讀排障",
+      "name": "平臺只讀排障",
       "description": "短時承擔的唯讀排障角色。",
       "permission_set_template_keys": [
         "platform_readonly_troubleshooting"

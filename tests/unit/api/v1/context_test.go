@@ -7,7 +7,7 @@ import (
 	"nexus-pro-be/internal/domain"
 )
 
-// TestAuthenticatedPlatformAdminAcceptsDedicatedClaim 驗證專用布林 claim 可建立平台管理員身分。
+// TestAuthenticatedPlatformAdminAcceptsDedicatedClaim 驗證專用布林 claim 可建立平臺管理員身分。
 func TestAuthenticatedPlatformAdminAcceptsDedicatedClaim(t *testing.T) {
 	principal := domain.AuthenticatedPrincipal{Claims: map[string]any{"platform_admin": true}}
 	if !v1.AuthenticatedPlatformAdmin(principal) {
@@ -15,7 +15,7 @@ func TestAuthenticatedPlatformAdminAcceptsDedicatedClaim(t *testing.T) {
 	}
 }
 
-// TestAuthenticatedPlatformAdminRequiresDedicatedRealmRole 驗證租戶管理角色不會被提升為平台管理員。
+// TestAuthenticatedPlatformAdminRequiresDedicatedRealmRole 驗證租戶管理角色不會被提升為平臺管理員。
 func TestAuthenticatedPlatformAdminRequiresDedicatedRealmRole(t *testing.T) {
 	admin := domain.AuthenticatedPrincipal{Claims: map[string]any{
 		"realm_access": map[string]any{"roles": []any{"nexus-platform-admin"}},

@@ -14,9 +14,19 @@ type apiRouteBinder struct {
 }
 
 type routeAuthz struct {
-	pathParams            []string
-	resourceIDParam       string
-	targetEmployeeIDParam string
+	pathParams              []string
+	resourceIDParam         string
+	targetEmployeeIDParam   string
+	requireTenantWide       bool
+	currentAccessProjection bool
+}
+
+// CurrentAccessProjection marks the caller-identity bootstrap route. The backend
+// still validates any supplied assumed-role session before checking base me.read.
+func CurrentAccessProjection() RouteOption {
+	return func(cfg *routeAuthz) {
+		cfg.currentAccessProjection = true
+	}
 }
 
 // RouteOption 表示路由選項。
@@ -42,6 +52,13 @@ func TargetEmployeeID(param string) RouteOption {
 	return func(cfg *routeAuthz) {
 		cfg.targetEmployeeIDParam = param
 		cfg.pathParams = appendPathParam(cfg.pathParams, param)
+	}
+}
+
+// TenantWideScope 限制管理型路由只能由租戶級資料範圍存取。
+func TenantWideScope() RouteOption {
+	return func(cfg *routeAuthz) {
+		cfg.requireTenantWide = true
 	}
 }
 

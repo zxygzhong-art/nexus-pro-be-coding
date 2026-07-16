@@ -329,7 +329,7 @@ func (c *Service) answerAgentPrompt(ctx RequestContext, prompt string, knowledge
 		return "", nil, err
 	}
 	if len(result.Hits) == 0 {
-		return "当前 Agent 绑定的知识库中没有匹配内容。", nil, nil
+		return "當前 Agent 綁定的知識庫中沒有匹配內容。", nil, nil
 	}
 	references := make([]Reference, 0, len(result.Hits))
 	for _, hit := range result.Hits {

@@ -8,7 +8,7 @@ import (
 	"nexus-pro-be/internal/utils"
 )
 
-// AttendanceClockStatus 處理考勤打卡狀態的服務流程。
+// AttendanceClockStatus returns punch state together with the authoritative worksite policy.
 func (c AttendanceService) AttendanceClockStatus(ctx RequestContext) (AttendanceClockStatus, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
@@ -29,6 +29,13 @@ func (c AttendanceService) AttendanceClockStatus(ctx RequestContext) (Attendance
 	if !decision.Allowed {
 		return AttendanceClockStatus{}, Forbidden(decision.Reason)
 	}
+	employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, account.EmployeeID)
+	if err != nil {
+		return AttendanceClockStatus{}, err
+	}
+	// A dangling legacy employee link keeps the read endpoint available, but it must
+	// never advertise a clock mutation that CreateAttendanceClockRecord will reject.
+	activeEmployment := ok && attendanceEmployeeAllowsActiveOperations(employee)
 	now := c.Now()
 	workDate := attendanceWorkDate(now)
 	projection, err := c.loadAttendanceDayProjection(ctx, account.EmployeeID, workDate, now)
@@ -49,7 +56,27 @@ func (c AttendanceService) AttendanceClockStatus(ctx RequestContext) (Attendance
 			workDate = previousWorkDate
 		}
 	}
-	return attendanceClockStatusFromProjection(account.EmployeeID, workDate, projection), nil
+	status := attendanceClockStatusFromProjection(account.EmployeeID, workDate, projection)
+	policy, err := c.loadAttendancePolicyResponse(ctx)
+	if err != nil {
+		return AttendanceClockStatus{}, err
+	}
+	worksites, err := c.activeAttendanceWorksites(ctx)
+	if err != nil {
+		return AttendanceClockStatus{}, err
+	}
+	status.RequireWorksite = policy.WorkTime.RequireWorksite
+	status.Worksites = worksites
+	if len(worksites) > 0 {
+		primary := worksites[0]
+		status.Worksite = &primary
+	}
+	if !activeEmployment {
+		status.NextAction = "complete"
+		status.CanClockIn = false
+		status.CanClockOut = false
+	}
+	return status, nil
 }
 
 // CreateAttendanceClockRecord 建立考勤打卡 record 的服務流程。
@@ -84,10 +111,8 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 	if err := c.ensureAttendanceEmployeeAllowed(ctx, account, decision, employeeID); err != nil {
 		return AttendanceClockRecord{}, err
 	}
-	if _, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, employeeID); err != nil {
+	if _, err := c.requireAttendanceEmployeeActive(ctx, employeeID); err != nil {
 		return AttendanceClockRecord{}, err
-	} else if !ok {
-		return AttendanceClockRecord{}, NotFound("employee", employeeID)
 	}
 	direction, err := normalizeClockDirection(input.Direction)
 	if err != nil {
@@ -260,10 +285,8 @@ func (c AttendanceService) CreateAttendanceCorrection(ctx RequestContext, input 
 	if err := c.ensureAttendanceEmployeeAllowed(ctx, account, decision, employeeID); err != nil {
 		return AttendanceCorrectionRequest{}, err
 	}
-	if _, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, employeeID); err != nil {
+	if _, err := c.requireAttendanceEmployeeActive(ctx, employeeID); err != nil {
 		return AttendanceCorrectionRequest{}, err
-	} else if !ok {
-		return AttendanceCorrectionRequest{}, NotFound("employee", employeeID)
 	}
 	correctionType, err := normalizeAttendanceCorrectionType(input.CorrectionType)
 	if err != nil {
@@ -388,7 +411,7 @@ func (c AttendanceService) ListAttendanceCorrectionPage(ctx RequestContext, quer
 	return utils.PageResponse(items, page), nil
 }
 
-// ApproveAttendanceCorrection 核准考勤 correction 的服務流程。
+// ApproveAttendanceCorrection 覈準考勤 correction 的服務流程。
 func (c AttendanceService) ApproveAttendanceCorrection(ctx RequestContext, id string, input ReviewAttendanceCorrectionInput) (AttendanceCorrectionRequest, error) {
 	return c.reviewAttendanceCorrection(ctx, strings.TrimSpace(id), correctionStatusApproved, input)
 }
@@ -795,18 +818,30 @@ func (c AttendanceService) optionalAttendanceShift(ctx RequestContext, employeeI
 	return assignment, shift, true, nil
 }
 
-// nearestActiveAttendanceWorksite 選擇最接近打卡定位的啟用辦公地點。
-func (c AttendanceService) nearestActiveAttendanceWorksite(ctx RequestContext, latitude, longitude float64) (AttendanceWorksite, float64, error) {
+// activeAttendanceWorksites returns every active tenant worksite in repository priority order.
+func (c AttendanceService) activeAttendanceWorksites(ctx RequestContext) ([]AttendanceWorksite, error) {
 	items, err := c.store.ListAttendanceWorksites(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	active := make([]AttendanceWorksite, 0, len(items))
+	for _, item := range items {
+		if strings.EqualFold(item.Status, attendanceStatusActive) {
+			active = append(active, item)
+		}
+	}
+	return active, nil
+}
+
+// nearestActiveAttendanceWorksite selects the closest configured worksite using the same set exposed by clock status.
+func (c AttendanceService) nearestActiveAttendanceWorksite(ctx RequestContext, latitude, longitude float64) (AttendanceWorksite, float64, error) {
+	items, err := c.activeAttendanceWorksites(ctx)
 	if err != nil {
 		return AttendanceWorksite{}, 0, err
 	}
 	var selected AttendanceWorksite
 	selectedDistance := math.MaxFloat64
 	for _, item := range items {
-		if !strings.EqualFold(item.Status, attendanceStatusActive) {
-			continue
-		}
 		distance := haversineMeters(latitude, longitude, item.Latitude, item.Longitude)
 		if distance < selectedDistance {
 			selected, selectedDistance = item, distance
@@ -818,16 +853,14 @@ func (c AttendanceService) nearestActiveAttendanceWorksite(ctx RequestContext, l
 	return selected, selectedDistance, nil
 }
 
-// firstActiveAttendanceWorksite 取得補卡所需的一個啟用辦公地點。
+// firstActiveAttendanceWorksite returns the primary active worksite for manual correction records.
 func (c AttendanceService) firstActiveAttendanceWorksite(ctx RequestContext) (AttendanceWorksite, error) {
-	items, err := c.store.ListAttendanceWorksites(goContext(ctx), ctx.TenantID)
+	items, err := c.activeAttendanceWorksites(ctx)
 	if err != nil {
 		return AttendanceWorksite{}, err
 	}
-	for _, item := range items {
-		if strings.EqualFold(item.Status, attendanceStatusActive) {
-			return item, nil
-		}
+	if len(items) > 0 {
+		return items[0], nil
 	}
 	return AttendanceWorksite{}, BadRequest("attendance worksite is required").WithReasonCode("attendance_worksite_required")
 }

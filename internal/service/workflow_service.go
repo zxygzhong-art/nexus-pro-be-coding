@@ -353,8 +353,9 @@ func (c WorkflowService) UpdateFormDraft(ctx RequestContext, id string, input Up
 		if err := requireFormInstanceVisible(next, account, decision); err != nil {
 			return err
 		}
-		if !strings.EqualFold(next.Status, workflowFormStatusDraft) {
-			return BadRequest("only draft form instances can be updated")
+		status := normalizeWorkflowStatus(next.Status)
+		if status != workflowFormStatusDraft && status != workflowFormStatusReturned {
+			return BadRequest("only draft or returned form instances can be updated")
 		}
 		if templateKey := strings.TrimSpace(input.TemplateKey); templateKey != "" {
 			template, ok, err := tx.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, templateKey)
@@ -392,7 +393,8 @@ func (c WorkflowService) UpdateFormDraft(ctx RequestContext, id string, input Up
 			return err
 		}
 		if err := tx.audit(ctx, "workflow.form.draft.update", string(ResourceFormInstance), next.ID, string(SeverityLow), map[string]any{
-			"template_id": next.TemplateID,
+			"template_id":       next.TemplateID,
+			"returned_revision": status == workflowFormStatusReturned,
 		}); err != nil {
 			return err
 		}
@@ -502,6 +504,9 @@ func (c WorkflowService) submitNewFormForApplicant(ctx RequestContext, account A
 			return NotFound("form template", templateKey)
 		}
 		if err := validateWorkflowTemplateSubmittable(nextTemplate); err != nil {
+			return err
+		}
+		if err := tx.Service.Attendance().preflightWorkflowAttendanceSubmission(ctx, account, nextTemplate.Key); err != nil {
 			return err
 		}
 		version, err := tx.currentFormTemplateVersionForNewInstance(ctx, nextTemplate, templateVersionID)
@@ -636,6 +641,9 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 		if err := validateWorkflowTemplateSubmittable(template); err != nil {
 			return err
 		}
+		if err := tx.Service.Attendance().preflightWorkflowAttendanceSubmission(ctx, account, template.Key); err != nil {
+			return err
+		}
 		effectivePayload := next.Payload
 		if payload != nil {
 			effectivePayload = workflowPayload(payload)
@@ -714,7 +722,7 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 	return instance, nil
 }
 
-// ApproveForm 核准表單的服務流程。
+// ApproveForm 覈準表單的服務流程。
 func (c WorkflowService) ApproveForm(ctx RequestContext, id string, input ApproveFormInput) (FormInstance, error) {
 	instance, err := c.reviewForm(ctx, id, "approve", "approved", input.Reason)
 	if err != nil {
@@ -1082,7 +1090,7 @@ func (c WorkflowService) reviewItem(ctx RequestContext, item FormInstance, templ
 	}
 	versionedTemplate := formTemplateAtVersion(template, version)
 	status := normalizeWorkflowStatus(item.Status)
-	title := utils.FirstNonEmpty(template.Name, template.Key, item.TemplateID, "审批申请")
+	title := utils.FirstNonEmpty(template.Name, template.Key, item.TemplateID, "審批申請")
 	return WorkflowReviewItem{
 		ID:          item.ID,
 		TemplateKey: template.Key,
@@ -1124,7 +1132,7 @@ func workflowReviewStatus(status string) string {
 func workflowReviewStatusText(status string) string {
 	switch status {
 	case "approved":
-		return "已核准"
+		return "已覈準"
 	case "rejected":
 		return "已駁回"
 	case "returned":
@@ -1132,7 +1140,7 @@ func workflowReviewStatusText(status string) string {
 	case "cancelled", "canceled":
 		return "已取消"
 	default:
-		return "审核中"
+		return "審核中"
 	}
 }
 
@@ -1162,7 +1170,7 @@ func workflowReviewDescription(payload map[string]any) string {
 	if app != "" || resource != "" || action != "" {
 		return strings.TrimSpace(strings.Join([]string{app, resource, action}, " "))
 	}
-	return "表单已提交，等待审批处理。"
+	return "表單已提交，等待審批處理。"
 }
 
 // workflowReviewTime 處理流程審核時間。
@@ -1187,7 +1195,7 @@ func normalizeWorkflowPendingStatus(status string) bool {
 	}
 }
 
-// workflowReviewLog 處理流程審核 log。
+// workflowReviewLog projects internal workflow actions onto the stable review API contract.
 func workflowReviewLog(payload map[string]any) []WorkflowReviewLogItem {
 	review, _ := payload["_review"].(map[string]any)
 	if len(review) == 0 {
@@ -1197,10 +1205,13 @@ func workflowReviewLog(payload map[string]any) []WorkflowReviewLogItem {
 	if kind == "" {
 		return nil
 	}
+	if strings.EqualFold(kind, domain.FormApprovalWorkflowActionWithdraw) {
+		kind = "cancel"
+	}
 	return []WorkflowReviewLogItem{{
 		Type:    kind,
 		Name:    strings.TrimSpace(stringFromAny(review["account_id"])),
-		Role:    "审批人",
+		Role:    "審批人",
 		Time:    strings.TrimSpace(stringFromAny(review["time"])),
 		Comment: strings.TrimSpace(stringFromAny(review["comment"])),
 	}}

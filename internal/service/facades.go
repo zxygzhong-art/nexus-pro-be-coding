@@ -25,6 +25,7 @@ type MeFacade interface {
 // AuthzFacade 定義授權 facade 的行為契約。
 type AuthzFacade interface {
 	Check(RequestContext, CheckRequest) (CheckResult, error)
+	CheckCurrentAccessProjection(RequestContext, CheckRequest) (CheckResult, error)
 	BatchCheck(RequestContext, BatchCheckRequest) (BatchCheckResult, error)
 	Explain(RequestContext, CheckRequest) (AuthzExplainResponse, error)
 	Simulate(RequestContext, AuthzSimulationRequest) (AuthzSimulationResponse, error)
@@ -72,6 +73,7 @@ type IAMFacade interface {
 	UpdateAssumableRole(RequestContext, string, UpdateAssumableRoleInput) (AssumableRole, error)
 	DeleteAssumableRole(RequestContext, string) (AssumableRole, error)
 	AssumeRole(RequestContext, string, AssumeRoleInput) (AssumeRoleResponse, error)
+	RevokeCurrentAssumableRoleSession(RequestContext) error
 }
 
 // HRFacade 定義 HR facade 的行為契約。
@@ -151,7 +153,7 @@ type AttendanceFacade interface {
 	RejectAttendanceCorrection(RequestContext, string, ReviewAttendanceCorrectionInput) (AttendanceCorrectionRequest, error)
 }
 
-// PlatformFacade 定義平台 facade 的行為契約。
+// PlatformFacade 定義平臺 facade 的行為契約。
 type PlatformFacade interface {
 	Home(RequestContext) (PlatformHomeResponse, error)
 	ListAssistants(RequestContext, PlatformAssistantsQuery) (PlatformAssistantsResponse, error)
@@ -183,6 +185,7 @@ type WorkspaceFacade interface {
 	UpdateWorkspaceFormDesign(RequestContext, string, UpdateWorkspaceFormDesignInput) (PlatformFormDesign, error)
 	DeleteWorkspaceFormDesign(RequestContext, string) (PlatformFormDesign, error)
 	WorkspaceAuditLogs(RequestContext, WorkspaceAuditLogQuery, PageRequest) (PageResponse[WorkspaceAuditLog], error)
+	WorkspaceAuditLogFacets(RequestContext) (WorkspaceAuditLogFacets, error)
 	Insights(RequestContext, PlatformInsightsQuery) (PlatformInsightsResponse, error)
 }
 
@@ -283,7 +286,7 @@ type NotificationFacade interface {
 	MarkAllNotificationsRead(RequestContext) (NotificationReadAllResponse, error)
 }
 
-// AuditFacade 定義稽核 facade 的行為契約。
+// AuditFacade 定義稽覈 facade 的行為契約。
 type AuditFacade interface {
 	ListLogPage(RequestContext, PageRequest) (PageResponse[AuditLog], error)
 	RecordSecurityEvent(RequestContext, string, string, string, map[string]any) error

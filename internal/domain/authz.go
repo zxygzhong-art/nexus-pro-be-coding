@@ -118,6 +118,7 @@ const (
 	ResourceAssumableRole             ResourceType = "assumable_role"
 	ResourceTool                      ResourceType = "tool"
 	ResourceDefinition                ResourceType = "definition"
+	ResourceUsage                     ResourceType = "usage"
 	ResourceModel                     ResourceType = "model"
 	ResourceEmployeeCollection        ResourceType = "employee_collection"
 	ResourceFormInstance              ResourceType = "form_instance"
@@ -186,7 +187,7 @@ type RelationshipCheck struct {
 	Object   string
 }
 
-// AuditEvent 處理稽核事件。
+// AuditEvent 處理稽覈事件。
 func (r CheckRequest) AuditEvent() string {
 	req := r
 	if req.ApplicationCode == "" || req.ResourceType == "" {
@@ -275,6 +276,7 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "iam.assumable_role.update", Method: "PATCH", Path: "/v1/iam/assumable-roles/:id", ApplicationCode: "iam", ResourceType: "assumable_role", Action: "update", RiskLevel: RiskCritical},
 	{Name: "iam.assumable_role.delete", Method: "DELETE", Path: "/v1/iam/assumable-roles/:id", ApplicationCode: "iam", ResourceType: "assumable_role", Action: "delete", RiskLevel: RiskCritical},
 	{Name: "iam.assumable_role.assume", Method: "POST", Path: "/v1/iam/assumable-roles/:id/assume", ApplicationCode: "iam", ResourceType: "assumable_role", Action: "assume", RiskLevel: RiskCritical},
+	{Name: "iam.assumable_role_session.revoke_current", Method: "DELETE", Path: "/v1/iam/assumable-role-sessions/current", ApplicationCode: "platform", ResourceType: "me", Action: "read", RiskLevel: RiskCritical},
 	{Name: "hr.position.read", Method: "GET", Path: "/v1/hr/positions", ApplicationCode: "hr", ResourceType: "position", Action: "read"},
 	{Name: "hr.position.create", Method: "POST", Path: "/v1/hr/positions", ApplicationCode: "hr", ResourceType: "position", Action: "create"},
 	{Name: "hr.position.ehrms_sync", Method: "POST", Path: "/v1/hr/positions/ehrms/sync", ApplicationCode: "hr", ResourceType: "position", Action: "create", RiskLevel: RiskCritical},
@@ -372,6 +374,7 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "workspace.form.update", Method: "PATCH", Path: "/v1/workspace/forms/:id", ApplicationCode: "workflow", ResourceType: "form_template", Action: "update"},
 	{Name: "workspace.form.delete", Method: "DELETE", Path: "/v1/workspace/forms/:id", ApplicationCode: "workflow", ResourceType: "form_template", Action: "delete", RiskLevel: RiskHigh},
 	{Name: "workspace.audit_logs.read", Method: "GET", Path: "/v1/workspace/audit-logs", ApplicationCode: "audit", ResourceType: "audit_log", Action: "read"},
+	{Name: "workspace.audit_log_facets.read", Method: "GET", Path: "/v1/workspace/audit-logs/facets", ApplicationCode: "audit", ResourceType: "audit_log", Action: "read"},
 	{Name: "workspace.insights.read", Method: "GET", Path: "/v1/workspace/insights", ApplicationCode: "hr", ResourceType: "employee", Action: "read"},
 	{Name: "workspace.agent_model.read", Method: "GET", Path: "/v1/workspace/agent-models", ApplicationCode: "agent", ResourceType: "model", Action: "read"},
 	{Name: "workspace.agent_model.create", Method: "POST", Path: "/v1/workspace/agent-models", ApplicationCode: "agent", ResourceType: "model", Action: "create", RiskLevel: RiskHigh},
@@ -398,8 +401,8 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "workspace.agent_definition.trial", Method: "POST", Path: "/v1/workspace/agents/:id/trial", ApplicationCode: "agent", ResourceType: "definition", Action: "update"},
 	{Name: "workspace.agent_definition.rollback", Method: "POST", Path: "/v1/workspace/agents/:id/rollback", ApplicationCode: "agent", ResourceType: "definition", Action: "update", RiskLevel: RiskHigh},
 	{Name: "workspace.agent_definition.tools", Method: "GET", Path: "/v1/workspace/agents/tools", ApplicationCode: "agent", ResourceType: "tool", Action: "read"},
-	{Name: "workspace.agent_usage.read", Method: "GET", Path: "/v1/workspace/agent-usage", ApplicationCode: "agent", ResourceType: "definition", Action: "read"},
-	{Name: "workspace.agent_usage_sessions.read", Method: "GET", Path: "/v1/workspace/agent-usage/:id/sessions", ApplicationCode: "agent", ResourceType: "definition", Action: "read"},
+	{Name: "workspace.agent_usage.read", Method: "GET", Path: "/v1/workspace/agent-usage", ApplicationCode: "agent", ResourceType: "usage", Action: "read", RiskLevel: RiskHigh},
+	{Name: "workspace.agent_usage_sessions.read", Method: "GET", Path: "/v1/workspace/agent-usage/:id/sessions", ApplicationCode: "agent", ResourceType: "usage", Action: "read", RiskLevel: RiskHigh},
 	{Name: "workspace.agent_external_tool.read", Method: "GET", Path: "/v1/workspace/agents/external-tools", ApplicationCode: "agent", ResourceType: "tool", Action: "read"},
 	{Name: "workspace.agent_external_tool.create", Method: "POST", Path: "/v1/workspace/agents/external-tools", ApplicationCode: "agent", ResourceType: "tool", Action: "create", RiskLevel: RiskHigh},
 	{Name: "workspace.agent_external_tool.delete", Method: "DELETE", Path: "/v1/workspace/agents/external-tools/:id", ApplicationCode: "agent", ResourceType: "tool", Action: "delete", RiskLevel: RiskHigh},

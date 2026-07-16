@@ -137,7 +137,7 @@ func routeFallbackErrorCode(resource, kind string) domain.ErrorCode {
 	}
 }
 
-// requestContextWithRoute 附加路由政策元資料供後續稽核 details 使用。
+// requestContextWithRoute 附加路由政策元資料供後續稽覈 details 使用。
 func requestContextWithRoute(ctx domain.RequestContext, method, path, resource, action string) domain.RequestContext {
 	for _, policy := range domain.DefaultRoutePolicies {
 		if strings.EqualFold(policy.Method, method) && policy.Path == path {
@@ -156,7 +156,7 @@ func requestContextWithRoute(ctx domain.RequestContext, method, path, resource, 
 	return ctx
 }
 
-// rejectCrossTenantRequest 拒絕顯式目標租戶與 token 租戶不一致的請求並寫安全稽核。
+// rejectCrossTenantRequest 拒絕顯式目標租戶與 token 租戶不一致的請求並寫安全稽覈。
 func (a *API) rejectCrossTenantRequest(ctx domain.RequestContext, r *http.Request) error {
 	targetTenantID := requestTargetTenantID(r)
 	if targetTenantID == "" || targetTenantID == ctx.TenantID {

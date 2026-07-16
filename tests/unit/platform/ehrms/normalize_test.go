@@ -26,7 +26,7 @@ func TestNormalizeEmployeeRecordsMapsEnglishAliases(t *testing.T) {
 	if rows[0]["dept_code"] != "M0101" {
 		t.Fatalf("expected original keys to remain, got %+v", rows[0])
 	}
-	if rows[0]["休假群組"] != "-" {
+	if rows[0]["休假羣組"] != "-" {
 		t.Fatalf("expected leave_group alias, got %+v", rows[0])
 	}
 	if rows[0]["學校名稱(中文)"] != "Nexus University" {

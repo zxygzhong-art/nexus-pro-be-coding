@@ -47,6 +47,8 @@ const (
 	compensatoryLeaveType = "compensatory"
 
 	clockMaxAccuracyMeters = 200.0
+
+	attendanceEmployeeInactiveReason = "attendance_employee_inactive"
 )
 
 var attendanceClockLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
@@ -235,4 +237,33 @@ func (c AttendanceService) ensureAttendanceEmployeeAllowed(ctx RequestContext, a
 		return nil
 	}
 	return forbiddenDataScope("employee is outside data scope")
+}
+
+// attendanceEmployeeAllowsActiveOperations keeps historical reads available while
+// preventing terminal or inactive employment records from creating new attendance data.
+// Blank and non-terminal legacy statuses remain eligible for backwards compatibility.
+func attendanceEmployeeAllowsActiveOperations(employee Employee) bool {
+	status := strings.ToLower(strings.TrimSpace(firstNonBlank(employee.EmploymentStatus, employee.Status)))
+	switch status {
+	case "resigned", "deleted", "inactive", "已停用", "離職":
+		return false
+	default:
+		return true
+	}
+}
+
+// requireAttendanceEmployeeActive rejects attendance mutations before any business
+// record, workflow form, balance reservation, or mutation audit is created.
+func (c AttendanceService) requireAttendanceEmployeeActive(ctx RequestContext, employeeID string) (Employee, error) {
+	employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, strings.TrimSpace(employeeID))
+	if err != nil {
+		return Employee{}, err
+	}
+	if !ok {
+		return Employee{}, NotFound("employee", employeeID)
+	}
+	if !attendanceEmployeeAllowsActiveOperations(employee) {
+		return Employee{}, Forbidden("employee employment status does not allow attendance operations").WithReasonCode(attendanceEmployeeInactiveReason)
+	}
+	return employee, nil
 }

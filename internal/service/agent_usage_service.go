@@ -27,12 +27,16 @@ var supportedAgentAccountUsageSorts = map[string]struct{}{
 
 // requireAccountUsageRead enforces tenant-wide access for usage management.
 func (c AgentService) requireAccountUsageRead(ctx RequestContext) error {
-	_, decision, err := c.requireAgentAuthz(ctx, ResourceDefinition, ActionRead, "")
+	_, decision, err := c.requireAgentAuthz(ctx, ResourceUsage, ActionRead, "")
 	if err != nil {
 		return err
 	}
-	if decision.Scope != "" && decision.Scope != ScopeAll && decision.Scope != ScopeTenant && decision.Scope != ScopeSystem {
-		return domain.Forbidden("tenant-wide Agent usage requires all-tenant access")
+	scope := decision.EffectiveScope
+	if scope == "" {
+		scope = decision.Scope
+	}
+	if scope != ScopeAll && scope != ScopeTenant && scope != ScopeSystem {
+		return forbiddenDataScope("tenant-wide Agent usage requires an explicit all-tenant scope")
 	}
 	return nil
 }

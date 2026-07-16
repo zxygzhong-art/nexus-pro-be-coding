@@ -26,7 +26,7 @@ func (c IAMService) ListUserGroups(ctx RequestContext) ([]UserGroup, error) {
 	return groups, nil
 }
 
-// ListUserGroupPage 列出使用者群組分頁的服務流程。
+// ListUserGroupPage 列出使用者羣組分頁的服務流程。
 func (c IAMService) ListUserGroupPage(ctx RequestContext, page PageRequest) (PageResponse[UserGroup], error) {
 	items, err := c.ListUserGroups(ctx)
 	if err != nil {
@@ -36,7 +36,7 @@ func (c IAMService) ListUserGroupPage(ctx RequestContext, page PageRequest) (Pag
 	return utils.PageResponse(items, page), nil
 }
 
-// CreateUserGroup 建立使用者群組的服務流程。
+// CreateUserGroup 建立使用者羣組的服務流程。
 func (c IAMService) CreateUserGroup(ctx RequestContext, input CreateUserGroupInput) (UserGroup, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceUserGroup, ActionCreate, ""); err != nil {
 		return UserGroup{}, err
@@ -107,7 +107,7 @@ func (c IAMService) CreateUserGroup(ctx RequestContext, input CreateUserGroupInp
 	return group, nil
 }
 
-// UpdateUserGroup 更新使用者群組基本資訊與權限集合。
+// UpdateUserGroup 更新使用者羣組基本資訊與權限集合。
 func (c IAMService) UpdateUserGroup(ctx RequestContext, id string, input UpdateUserGroupInput) (UserGroup, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceUserGroup, ActionUpdate, id); err != nil {
 		return UserGroup{}, err
@@ -165,7 +165,7 @@ func (c IAMService) UpdateUserGroup(ctx RequestContext, id string, input UpdateU
 	return next, nil
 }
 
-// DeleteUserGroup 刪除使用者群組；若仍有成員、指派或 trust_policy 引用則拒絕。
+// DeleteUserGroup 刪除使用者羣組；若仍有成員、指派或 trust_policy 引用則拒絕。
 func (c IAMService) DeleteUserGroup(ctx RequestContext, id string) (UserGroup, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceUserGroup, ActionDelete, id); err != nil {
 		return UserGroup{}, err
@@ -208,7 +208,7 @@ func (c IAMService) DeleteUserGroup(ctx RequestContext, id string) (UserGroup, e
 	return group, nil
 }
 
-// ensureUserGroupDeletable 檢查使用者群組是否仍有成員、指派或 trust_policy 引用。
+// ensureUserGroupDeletable 檢查使用者羣組是否仍有成員、指派或 trust_policy 引用。
 func (c IAMService) ensureUserGroupDeletable(ctx RequestContext, group UserGroup) error {
 	memberships, err := c.store.ListGroupMembershipsForGroup(goContext(ctx), ctx.TenantID, group.ID)
 	if err != nil {
@@ -241,7 +241,7 @@ func (c IAMService) ensureUserGroupDeletable(ctx RequestContext, group UserGroup
 	return nil
 }
 
-// assumableRoleTrustPolicyReferencesUserGroup 判斷 trust_policy 是否引用指定使用者群組。
+// assumableRoleTrustPolicyReferencesUserGroup 判斷 trust_policy 是否引用指定使用者羣組。
 func assumableRoleTrustPolicyReferencesUserGroup(role AssumableRole, groupID string) bool {
 	if len(role.TrustPolicy) == 0 {
 		return false
@@ -251,7 +251,7 @@ func assumableRoleTrustPolicyReferencesUserGroup(role AssumableRole, groupID str
 	return ok
 }
 
-// ListUserGroupMemberPage 列出使用者群組成員分頁。
+// ListUserGroupMemberPage 列出使用者羣組成員分頁。
 func (c IAMService) ListUserGroupMemberPage(ctx RequestContext, groupID string, page PageRequest) (PageResponse[GroupMembership], error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceUserGroup, ActionRead, groupID); err != nil {
 		return PageResponse[GroupMembership]{}, err
@@ -274,7 +274,7 @@ func (c IAMService) ListUserGroupMemberPage(ctx RequestContext, groupID string, 
 	return utils.PageResponse(active, page), nil
 }
 
-// AddUserGroupMember 新增或更新使用者群組成員。
+// AddUserGroupMember 新增或更新使用者羣組成員。
 func (c IAMService) AddUserGroupMember(ctx RequestContext, groupID string, input AddUserGroupMemberInput) (GroupMembership, error) {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceUserGroup, ActionUpdate, groupID); err != nil {
 		return GroupMembership{}, err
@@ -365,7 +365,7 @@ func (c IAMService) AddUserGroupMember(ctx RequestContext, groupID string, input
 	return membership, nil
 }
 
-// RemoveUserGroupMember 移除使用者群組成員。
+// RemoveUserGroupMember 移除使用者羣組成員。
 func (c IAMService) RemoveUserGroupMember(ctx RequestContext, groupID, accountID string) error {
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceUserGroup, ActionUpdate, groupID); err != nil {
 		return err
@@ -439,7 +439,7 @@ func (c IAMService) userGroupWithActiveMembers(ctx RequestContext, group UserGro
 	return group, nil
 }
 
-// groupMembershipAuditDetails 建立群組成員審計 details。
+// groupMembershipAuditDetails 建立羣組成員審計 details。
 func groupMembershipAuditDetails(membership GroupMembership) map[string]any {
 	details := map[string]any{
 		"user_group_id":        membership.UserGroupID,

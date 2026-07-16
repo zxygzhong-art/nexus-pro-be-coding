@@ -39,7 +39,7 @@ func (c WorkspaceService) Workspace(ctx RequestContext) (PlatformWorkspaceRespon
 	}, nil
 }
 
-// workspaceAuditLogsForAggregate 處理工作區稽核 logs for aggregate 的服務流程。
+// workspaceAuditLogsForAggregate 處理工作區稽覈 logs for aggregate 的服務流程。
 func (c WorkspaceService) workspaceAuditLogsForAggregate(ctx RequestContext) ([]WorkspaceAuditLog, error) {
 	auditLogs, err := c.WorkspaceAuditLogs(ctx, WorkspaceAuditLogQuery{}, PageRequest{Page: 1, PageSize: 50, Sort: "created_at_desc"})
 	if err != nil {

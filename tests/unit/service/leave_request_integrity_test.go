@@ -52,6 +52,78 @@ func TestCreateLeaveRequestUsesPolicyHours(t *testing.T) {
 	}
 }
 
+// TestReturnedLeaveFormCanBeEditedAndResubmitted verifies the same form and leave request survive supplementation.
+func TestReturnedLeaveFormCanBeEditedAndResubmitted(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store, svc, employeeCtx, reviewerCtx := newLeaveRequestIntegrityFixture(t, now)
+	permissionSet, ok, err := store.GetPermissionSet(t.Context(), "tenant-1", "ps-leave")
+	if err != nil || !ok {
+		t.Fatalf("leave permission set lookup failed ok=%v err=%v", ok, err)
+	}
+	permissionSet.Permissions = append(permissionSet.Permissions,
+		domain.Permission{Resource: "workflow.form_instance", Action: "read", Scope: "self"},
+		domain.Permission{Resource: "workflow.form_instance", Action: "update", Scope: "self"},
+		domain.Permission{Resource: "workflow.form_instance", Action: "submit", Scope: "self"},
+	)
+	if err := store.UpsertPermissionSet(t.Context(), permissionSet); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertLeaveBalance(t.Context(), domain.LeaveBalance{
+		ID: "lb-resubmit", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual",
+		PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", RemainingHours: 16, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := svc.Attendance().CreateLeaveRequest(employeeCtx, domain.CreateLeaveRequestInput{
+		LeaveType: "annual", StartAt: "2026-06-10T09:00:00+08:00", EndAt: "2026-06-10T17:00:00+08:00",
+		Reason: "original reason",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Workflow().ReturnForm(reviewerCtx, created.FormInstanceID, domain.ReturnFormInput{Reason: "please supplement"}); err != nil {
+		t.Fatal(err)
+	}
+	assertLeaveBalanceHours(t, store, "lb-resubmit", 16, 0)
+
+	updated, err := svc.Workflow().UpdateFormDraft(employeeCtx, created.FormInstanceID, domain.UpdateFormDraftInput{Payload: map[string]any{
+		"leave_type": "annual",
+		"start_at":   "2026-06-11T09:00:00+08:00",
+		"end_at":     "2026-06-11T17:00:00+08:00",
+		"reason":     "supplemented reason",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Status != domain.WorkflowFormStatusReturned || updated.Payload["reason"] != "supplemented reason" {
+		t.Fatalf("returned form update was not persisted: %+v", updated)
+	}
+
+	resubmitted, err := svc.Workflow().SubmitForm(employeeCtx, domain.SubmitFormInput{
+		TemplateKey: created.FormInstanceID,
+		Payload:     updated.Payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resubmitted.ID != created.FormInstanceID || resubmitted.Status != domain.WorkflowFormStatusInReview {
+		t.Fatalf("expected the returned form to re-enter review in place, got %+v", resubmitted)
+	}
+	request, ok, err := store.GetLeaveRequestByFormInstanceID(t.Context(), "tenant-1", created.FormInstanceID)
+	if err != nil || !ok {
+		t.Fatalf("resubmitted leave request lookup failed ok=%v err=%v", ok, err)
+	}
+	if request.ID != created.ID || request.Status != "pending_approval" || request.Reason != "supplemented reason" || request.StartAt.Day() != 11 {
+		t.Fatalf("expected stable linked leave projection with supplemented values, got %+v", request)
+	}
+	assertLeaveBalanceHours(t, store, "lb-resubmit", 9, 7)
+	runs, err := store.ListWorkflowRunsByFormInstance(t.Context(), "tenant-1", created.FormInstanceID)
+	if err != nil || len(runs) != 2 || runs[1].Version != 2 {
+		t.Fatalf("expected a second workflow run for resubmission, err=%v runs=%+v", err, runs)
+	}
+}
+
 // TestLegacyLeaveReleaseResolvesTheRequestPeriod verifies only the reserved entitlement period is restored.
 func TestLegacyLeaveReleaseResolvesTheRequestPeriod(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)

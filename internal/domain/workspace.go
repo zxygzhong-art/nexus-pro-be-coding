@@ -253,17 +253,18 @@ type WorkspaceAttendanceRow struct {
 
 // WorkspaceEmployeeCard 定義工作區員工 card 的資料結構。
 type WorkspaceEmployeeCard struct {
-	ID       string `json:"id"`
-	Avatar   string `json:"avatar"`
-	NameZH   string `json:"name_zh"`
-	NameEN   string `json:"name_en"`
-	Email    string `json:"email"`
-	Dept     string `json:"dept"`
-	Title    string `json:"title"`
-	Type     string `json:"type"`
-	Phone    string `json:"phone"`
-	Status   string `json:"status"`
-	HireDate string `json:"hire_date"`
+	ID         string `json:"id"`
+	EmployeeID string `json:"employee_id"`
+	Avatar     string `json:"avatar"`
+	NameZH     string `json:"name_zh"`
+	NameEN     string `json:"name_en"`
+	Email      string `json:"email"`
+	Dept       string `json:"dept"`
+	Title      string `json:"title"`
+	Type       string `json:"type"`
+	Phone      string `json:"phone"`
+	Status     string `json:"status"`
+	HireDate   string `json:"hire_date"`
 }
 
 // WorkspaceDayCell 定義工作區 day 儲存格的資料結構。
@@ -331,7 +332,7 @@ type WorkspaceClockSummary struct {
 	NormalDays     int `json:"normal_days"`
 }
 
-// WorkspaceAuditLogQuery 定義工作區稽核 log 查詢的資料結構。
+// WorkspaceAuditLogQuery 定義工作區稽覈 log 查詢的資料結構。
 type WorkspaceAuditLogQuery struct {
 	OperatorID string `json:"operator_id,omitempty"`
 	Type       string `json:"type,omitempty"`
@@ -340,7 +341,7 @@ type WorkspaceAuditLogQuery struct {
 	Keyword    string `json:"keyword,omitempty"`
 }
 
-// WorkspaceAuditLog 定義工作區稽核 log 的資料結構。
+// WorkspaceAuditLog 定義工作區稽覈 log 的資料結構。
 type WorkspaceAuditLog struct {
 	ID       string `json:"id"`
 	Time     string `json:"time"`
@@ -348,4 +349,25 @@ type WorkspaceAuditLog struct {
 	Type     string `json:"type"`
 	Action   string `json:"action"`
 	Detail   string `json:"detail"`
+}
+
+const WorkspaceAuditSystemOperatorID = "__system__"
+
+// WorkspaceAuditLogFacetSource contains only non-sensitive fields needed to build tenant-wide facets.
+type WorkspaceAuditLogFacetSource struct {
+	ActorAccountID string `json:"actor_account_id"`
+	Action         string `json:"action"`
+	Resource       string `json:"resource"`
+}
+
+// WorkspaceAuditLogOperatorFacet exposes a stable filter ID with its current display label.
+type WorkspaceAuditLogOperatorFacet struct {
+	ID    string `json:"id"`
+	Label string `json:"label"`
+}
+
+// WorkspaceAuditLogFacets contains tenant-wide operator and audit-type filter options.
+type WorkspaceAuditLogFacets struct {
+	Operators []WorkspaceAuditLogOperatorFacet `json:"operators"`
+	Types     []string                         `json:"types"`
 }

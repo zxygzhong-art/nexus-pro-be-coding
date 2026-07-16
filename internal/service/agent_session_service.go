@@ -119,7 +119,7 @@ func (c AgentService) ClearSessionContext(ctx RequestContext, id string) (domain
 			locked.ContextVersion = 1
 		}
 		locked.ContextVersion++
-		locked.Title = "新对话"
+		locked.Title = "新對話"
 		locked.LastMessageAt = nil
 		locked.UpdatedAt = c.Now()
 		if err := tx.store.UpsertAgentSession(goContext(ctx), locked); err != nil {

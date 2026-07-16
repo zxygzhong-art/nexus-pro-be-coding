@@ -29,6 +29,82 @@ func TestPlatformAssistantsDoNotFallbackToStaticCatalog(t *testing.T) {
 	}
 }
 
+// TestPlatformAssistantsProjectRunnableFromEffectiveRunPermissions keeps catalog execution state aligned with the real runtime checks.
+func TestPlatformAssistantsProjectRunnableFromEffectiveRunPermissions(t *testing.T) {
+	now := time.Date(2026, 7, 16, 9, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name        string
+		permissions []domain.Permission
+		runnable    bool
+	}{
+		{name: "no run permission", permissions: nil, runnable: false},
+		{
+			name: "read only",
+			permissions: []domain.Permission{
+				{Resource: "agent.run", Action: "read", Scope: "all"},
+			},
+			runnable: false,
+		},
+		{
+			name: "create only",
+			permissions: []domain.Permission{
+				{Resource: "agent.run", Action: "create", Scope: "all"},
+			},
+			runnable: false,
+		},
+		{
+			name: "read and create",
+			permissions: []domain.Permission{
+				{Resource: "agent.run", Action: "read", Scope: "all"},
+				{Resource: "agent.run", Action: "create", Scope: "all"},
+			},
+			runnable: true,
+		},
+		{
+			name: "explicit create deny",
+			permissions: []domain.Permission{
+				{Resource: "agent.run", Action: "read", Scope: "all"},
+				{Resource: "agent.run", Action: "create", Scope: "all"},
+				{Resource: "agent.run", Action: "create", Scope: "all", Effect: "deny"},
+			},
+			runnable: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := memory.NewStore()
+			seedAgentChatAccount(t, store, now, tt.permissions)
+			if err := store.UpsertAgentDefinition(context.Background(), domain.AgentDefinition{
+				ID:         "agent-published",
+				TenantID:   "tenant-1",
+				Name:       "Published Agent",
+				Category:   domain.AgentCategoryWorkflow,
+				Status:     domain.AgentDefinitionStatusPublished,
+				Visibility: domain.AgentVisibilityAll,
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+
+			response, err := service.New(store).Platform().ListAssistants(
+				domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
+				domain.PlatformAssistantsQuery{},
+			)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(response.Data) != 1 {
+				t.Fatalf("expected one visible catalog item, got %+v", response.Data)
+			}
+			if response.Data[0].Runnable != tt.runnable {
+				t.Fatalf("expected runnable=%v, got %+v", tt.runnable, response.Data[0])
+			}
+		})
+	}
+}
+
 // TestPlatformAssistantsUsePublishedConversationExperience keeps draft edits out of the runtime assistant page.
 func TestPlatformAssistantsUsePublishedConversationExperience(t *testing.T) {
 	now := time.Date(2026, 7, 14, 10, 0, 0, 0, time.UTC)
@@ -137,7 +213,10 @@ func TestPlatformAssistantsLocalizePublishedSuggestions(t *testing.T) {
 func TestPublishedAssistantsEnforceDepartmentVisibility(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
-	seedAgentChatAccount(t, store, now, []domain.Permission{{Resource: "agent.run", Action: "create", Scope: "all"}})
+	seedAgentChatAccount(t, store, now, []domain.Permission{
+		{Resource: "agent.run", Action: "read", Scope: "all"},
+		{Resource: "agent.run", Action: "create", Scope: "all"},
+	})
 	if err := store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-hr", TenantID: "tenant-1", Name: "HR", Path: []string{"ou-hr"}, CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
@@ -198,9 +277,12 @@ func TestAgentDefinitionScopedVisibilityRequiresExistingTargets(t *testing.T) {
 func TestPublishedAssistantsRequireActiveAssumableRoleForRoleVisibility(t *testing.T) {
 	now := time.Date(2026, 7, 9, 10, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
-	seedAgentChatAccount(t, store, now, []domain.Permission{{Resource: "agent.run", Action: "create", Scope: "all"}})
+	seedAgentChatAccount(t, store, now, []domain.Permission{
+		{Resource: "agent.run", Action: "read", Scope: "all"},
+		{Resource: "agent.run", Action: "create", Scope: "all"},
+	})
 	if err := store.UpsertAssumableRole(context.Background(), domain.AssumableRole{
-		ID: "role-reviewer", TenantID: "tenant-1", Name: "Reviewer", Trusted: true, CreatedAt: now,
+		ID: "role-reviewer", TenantID: "tenant-1", Name: "Reviewer", PermissionSetIDs: []string{"ps-agent-chat"}, Trusted: true, CreatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -8,8 +8,11 @@ import (
 	"hash/fnv"
 	"iter"
 	"math"
+	"net/http"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
@@ -20,18 +23,27 @@ import (
 
 // LiteLLMConfig defines the OpenAI-compatible LiteLLM model adapter config.
 type LiteLLMConfig struct {
-	BaseURL string
-	APIKey  string
+	BaseURL  string
+	APIKey   string
+	Client   *http.Client
+	ProbeTTL time.Duration
 }
 
-const liteLLMFallbackModelName = "nexus-agent-fallback"
+const (
+	liteLLMFallbackModelName = "nexus-agent-fallback"
+	defaultLiteLLMProbeTTL   = 30 * time.Second
+)
 
 var openAIToolNamePattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_-]{0,63}$`)
 
 // LiteLLM implements ADK model.LLM using the official OpenAI Go SDK.
 type LiteLLM struct {
-	client openai.Client
-	model  string
+	client       openai.Client
+	model        string
+	probeTTL     time.Duration
+	probeMu      sync.Mutex
+	lastProbeAt  time.Time
+	lastProbeErr error
 }
 
 // NewLiteLLM creates an ADK LLM backed by a LiteLLM OpenAI-compatible endpoint.
@@ -42,13 +54,18 @@ func NewLiteLLM(cfg LiteLLMConfig) (*LiteLLM, error) {
 	if strings.TrimSpace(cfg.APIKey) == "" {
 		return nil, errors.New("litellm api key is required")
 	}
-	return &LiteLLM{
-		client: openai.NewClient(
-			option.WithAPIKey(cfg.APIKey),
-			option.WithBaseURL(strings.TrimRight(cfg.BaseURL, "/")),
-		),
-		model: liteLLMFallbackModelName,
-	}, nil
+	opts := []option.RequestOption{
+		option.WithAPIKey(strings.TrimSpace(cfg.APIKey)),
+		option.WithBaseURL(strings.TrimRight(strings.TrimSpace(cfg.BaseURL), "/")),
+	}
+	if cfg.Client != nil {
+		opts = append(opts, option.WithHTTPClient(cfg.Client))
+	}
+	probeTTL := cfg.ProbeTTL
+	if probeTTL == 0 {
+		probeTTL = defaultLiteLLMProbeTTL
+	}
+	return &LiteLLM{client: openai.NewClient(opts...), model: liteLLMFallbackModelName, probeTTL: probeTTL}, nil
 }
 
 func (m *LiteLLM) Name() string {
@@ -56,6 +73,33 @@ func (m *LiteLLM) Name() string {
 		return ""
 	}
 	return m.model
+}
+
+// Ping verifies the fallback chat route and caches the result to bound provider traffic.
+func (m *LiteLLM) Ping(ctx context.Context) error {
+	if m == nil {
+		return errors.New("litellm client is not configured")
+	}
+	m.probeMu.Lock()
+	defer m.probeMu.Unlock()
+	now := time.Now()
+	if !m.lastProbeAt.IsZero() && m.probeTTL > 0 && now.Sub(m.lastProbeAt) < m.probeTTL {
+		return m.lastProbeErr
+	}
+	response, err := m.client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
+		Model:               openai.ChatModel(m.model),
+		Messages:            []openai.ChatCompletionMessageParamUnion{openai.UserMessage("Reply OK")},
+		MaxCompletionTokens: openai.Int(1),
+	})
+	if err == nil && len(response.Choices) == 0 {
+		err = errors.New("litellm returned no choices")
+	}
+	if err != nil {
+		err = fmt.Errorf("litellm agent probe failed: %w", err)
+	}
+	m.lastProbeAt = now
+	m.lastProbeErr = err
+	return err
 }
 
 func (m *LiteLLM) GenerateContent(ctx context.Context, req *model.LLMRequest, stream bool) iter.Seq2[*model.LLMResponse, error] {

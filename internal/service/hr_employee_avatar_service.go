@@ -246,7 +246,7 @@ func employeePreviewResponse(employee Employee, diff map[string]any) EmployeePre
 	return EmployeePreviewResponse{Employee: employee, Detail: domain.EmployeeDetailFromEmployee(employee), Diff: diff, Valid: true}
 }
 
-// employeeQueryApprovalFilters 處理員工查詢核准篩選。
+// employeeQueryApprovalFilters 處理員工查詢覈準篩選。
 func employeeQueryApprovalFilters(query EmployeeQuery) map[string]any {
 	out := map[string]any{}
 	if query.Keyword != "" {

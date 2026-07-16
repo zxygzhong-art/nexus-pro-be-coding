@@ -1,31 +1,31 @@
-# QA 测试账号生成脚本
+# QA 測試賬號生成腳本
 
-为 QA 测试生成一套**可真实登录**的测试账号（Keycloak 用户 + 后端 DB 绑定），覆盖不同权限集与不同账号/员工状态，用于模拟真实用户测试各页面的权限边界。
+爲 QA 測試生成一套**可真實登錄**的測試賬號（Keycloak 用戶 + 後端 DB 綁定），覆蓋不同權限集與不同賬號/員工狀態，用於模擬真實用戶測試各頁面的權限邊界。
 
-## 账号矩阵
+## 賬號矩陣
 
-统一密码：`QaTest123!`（可用 `QA_PASSWORD` 覆盖），租户默认 `qa`（`QA_TENANT_ID` 覆盖）。
+統一密碼：`QaTest123!`（可用 `QA_PASSWORD` 覆蓋），租戶默認 `qa`（`QA_TENANT_ID` 覆蓋）。
 
-| 账号 | 权限集 | 账号状态 | 员工状态 | 用途 |
+| 賬號 | 權限集 | 賬號狀態 | 員工狀態 | 用途 |
 |---|---|---|---|---|
-| `qa-superadmin@qa.test` | Platform Admin（`*.*`） | active | active | 全部页面基准对照 |
-| `qa-hr@qa.test` | HR Admin（hr.employee.\* + hr.org_unit.\*） | active | active | 员工管理/組織架構/在職分析可见；考勤、表單設計、管理員、審計应被拦 |
-| `qa-attendance@qa.test` | 考勤管理（clock/correction/leave read+approve） | active | active | 工時統計/打卡時間/假勤制度；补卡审批 |
-| `qa-approver@qa.test` | 表单审批人（form_instance approve） | active | active | 待辦審核核准/驳回/退回；是 qa-employee 的主管 |
-| `qa-employee@qa.test` | 普通员工（self scope） | active | active | 打卡、请假、提交表单；workspace 全部 403 |
-| `qa-audit@qa.test` | 仅审计（audit.log.read） | active | active | workspace 仅操作紀錄可见 |
-| `qa-noperm@qa.test` | 仅 me.read | active | active | 能登录进主页，业务 API 全 403 |
-| `qa-disabled@qa.test` | 员工权限 | **disabled** | active | Keycloak 出 token，后端应 401 `account_inactive` |
-| `qa-pending@qa.test` | 员工权限 | **pending_invite** | onboarding | 同上 |
-| `qa-resigned@qa.test` | 员工权限 | active | **resigned** | 边界：离职员工还能否打卡/请假 |
-| `qa-kc-only@qa.test` | —（无 DB 绑定） | — | — | 边界：Keycloak 有用户但后端无 `user_identities`，应 401 identity not linked |
+| `qa-superadmin@qa.test` | Platform Admin（`*.*` + 顯式頁面投影） | active | active | 全部頁面基準對照 |
+| `qa-hr@qa.test` | HR Admin（hr.employee.\* + hr.org_unit.\*） | active | active | 員工管理/組織架構/在職分析可見；考勤、表單設計、管理員、審計應被攔 |
+| `qa-attendance@qa.test` | 考勤管理（clock/correction/leave read+approve） | active | active | 工時統計/打卡時間/假勤制度；補卡審批 |
+| `qa-approver@qa.test` | 表單審批人（form_instance approve） | active | active | 待辦審核覈準/駁回/退回；是 qa-employee 的主管 |
+| `qa-employee@qa.test` | 普通員工（self scope） | active | active | 打卡、請假、提交表單；workspace 全部 403 |
+| `qa-audit@qa.test` | 僅審計（audit.log.read） | active | active | workspace 僅操作紀錄可見 |
+| `qa-noperm@qa.test` | 僅 me.read | active | active | 能登錄進主頁，業務 API 全 403 |
+| `qa-disabled@qa.test` | 員工權限 | **disabled** | active | Keycloak 出 token，後端應 401 `account_inactive` |
+| `qa-pending@qa.test` | 員工權限 | **pending_invite** | onboarding | 同上 |
+| `qa-resigned@qa.test` | 員工權限 | active | **resigned** | 邊界：離職員工還能否打卡/請假 |
+| `qa-kc-only@qa.test` | —（無 DB 綁定） | — | — | 邊界：Keycloak 有用戶但後端無 `user_identities`，應 401 identity not linked |
 
-## 前置条件
+## 前置條件
 
-1. Postgres 已迁移：`make migrate-up DB_HOST=... DB_USERNAME=... DB_NAME=...`
-2. Keycloak 已启动，realm `nexus-pro` 与 client `nexus-pro-connect-api` 已按 `ops/docs/keycloak.md` 配置，且 client 开启 **Direct Access Grants**（ROPC）。
-   - 缺少的 protocol mappers（`tenant_id`/`account_id` 等 attribute → claim）脚本会自动补建。
-3. 本机有 `psql` 与 Python 3.9+（仅标准库）。
+1. Postgres 已遷移：`make migrate-up DB_HOST=... DB_USERNAME=... DB_NAME=...`
+2. Keycloak 已啓動，realm `nexus-pro` 與 client `nexus-pro-connect-api` 已按 `ops/docs/keycloak.md` 配置，且 client 開啓 **Direct Access Grants**（ROPC）。
+   - 缺少的 protocol mappers（`tenant_id`/`account_id` 等 attribute → claim）腳本會自動補建。
+3. 本機有 `psql`、Python 3.9+（僅標準庫）與 Go toolchain。腳本會複用 `tenantctl` 冪等補齊六個內建表單模板，不覆蓋同 key 的租戶自定義模板。
 
 ## 使用
 
@@ -34,41 +34,41 @@ cd nexus-pro-be/tools/qa-accounts
 
 export DB_HOST=127.0.0.1 DB_PORT=5432 DB_USERNAME=nexus DB_PASSWORD=nexus DB_NAME=nexus_pro_be DB_SSLMODE=disable
 export KEYCLOAK_BASE_URL='http://127.0.0.1:8080'
-export API_BASE_URL='http://127.0.0.1:18080'   # 可选：附带 GET /v1/me 验证
+export API_BASE_URL='http://127.0.0.1:18080'   # 可選：附帶 GET /v1/me 驗證
 
-./provision_qa_accounts.py                # 创建 + 自动验证
-./provision_qa_accounts.py --print-matrix # 只看账号矩阵
-./provision_qa_accounts.py --verify-only  # 只跑登录验证
+./provision_qa_accounts.py                # 創建 + 自動驗證
+./provision_qa_accounts.py --print-matrix # 只看賬號矩陣
+./provision_qa_accounts.py --verify-only  # 只跑登錄驗證
 ```
 
-脚本是**幂等**的：重复执行会更新 Keycloak 用户与密码、覆盖权限集与账号状态，可放心重跑（比如手工改坏了状态后一键还原）。
+腳本是**冪等**的：重複執行會更新 Keycloak 用戶與密碼、覆蓋權限集與賬號狀態，可放心重跑（比如手工改壞了狀態後一鍵還原）。
 
-验证阶段会对每个账号做 ROPC 登录取 token；配置了 `API_BASE_URL` 时再调 `GET /v1/me`，并按每个账号的预期（正常 200 / disabled、pending、kc-only 应 401/403）断言，有不符会以非零退出码结束。
+驗證階段會對每個賬號做 ROPC 登錄取 token；配置了 `API_BASE_URL` 時再調 `GET /v1/me`，並按每個賬號的預期（正常 200 / disabled、pending、kc-only 應 401/403）斷言，有不符會以非零退出碼結束。
 
-## 前端登录
+## 前端登錄
 
-前端 `nexus-pro-fe` 的 `/login` 页直接用 email + 密码登录即可（BFF 走同一个 ROPC client）。注意前端 `.env.local` 需设置：
+前端 `nexus-pro-fe` 的 `/login` 頁直接用 email + 密碼登錄即可（BFF 走同一個 ROPC client）。注意前端 `.env.local` 需設置：
 
 ```bash
 KEYCLOAK_BASE_URL=http://127.0.0.1:8080/realms/nexus-pro
 KEYCLOAK_CLIENT_ID=nexus-pro-connect-api
-NEXUS_API_BASE_URL=http://127.0.0.1:18080   # 走真实后端而非 mock
+NEXUS_API_BASE_URL=http://127.0.0.1:18080   # 走真實後端而非 mock
 ```
 
-## 环境变量一览
+## 環境變量一覽
 
-| 变量 | 默认 | 说明 |
+| 變量 | 默認 | 說明 |
 |---|---|---|
-| `DB_HOST` / `DB_USERNAME` / `DB_NAME` | （必填） | Postgres 连接字段 |
+| `DB_HOST` / `DB_USERNAME` / `DB_NAME` | （必填） | Postgres 連接字段 |
 | `KEYCLOAK_BASE_URL` | `http://127.0.0.1:8080` | Keycloak 地址 |
 | `KEYCLOAK_REALM` | `nexus-pro` | realm |
-| `KEYCLOAK_ADMIN_USER/PASS` | `admin`/`admin` | master realm 管理员（见 ops/local-credentials.md） |
+| `KEYCLOAK_ADMIN_USER/PASS` | `admin`/`admin` | master realm 管理員（見 ops/local-credentials.md） |
 | `KEYCLOAK_CLIENT_ID` | `nexus-pro-connect-api` | ROPC client |
-| `KEYCLOAK_CLIENT_SECRET` | 空 | confidential client 时填写 |
-| `QA_TENANT_ID` | `qa` | 测试租户 id（换成 `qa2` 可再造一套做跨租户隔离测试） |
-| `QA_PASSWORD` | `QaTest123!` | 所有账号统一密码 |
-| `API_BASE_URL` | 空 | 填了则验证阶段调 `/v1/me` |
+| `KEYCLOAK_CLIENT_SECRET` | 空 | confidential client 時填寫 |
+| `QA_TENANT_ID` | `qa` | 測試租戶 id（換成 `qa2` 可再造一套做跨租戶隔離測試）；非默認租戶的權限集合 ID 會自動附加租戶後綴，避免全局主鍵衝突 |
+| `QA_PASSWORD` | `QaTest123!` | 所有賬號統一密碼 |
+| `API_BASE_URL` | 空 | 填了則驗證階段調 `/v1/me` |
 
-## 跨租户隔离测试
+## 跨租戶隔離測試
 
-用不同 `QA_TENANT_ID` 跑两次（如 `qa` 与 `qa2`），即可用 `qa2` 的 token 访问 `qa` 的资源验证租户隔离（应 403/404）。
+用不同 `QA_TENANT_ID` 跑兩次（如 `qa` 與 `qa2`），即可用 `qa2` 的 token 訪問 `qa` 的資源驗證租戶隔離（應 403/404）。

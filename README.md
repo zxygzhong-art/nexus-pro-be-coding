@@ -281,7 +281,7 @@ The response should resolve to the provisioned tenant/account and include admini
 
 ### 4. Import the optional built-in permission templates
 
-Tenant provisioning currently creates the directly assigned `Platform Admin` permission set and the complete permission catalog. It does not automatically instantiate the built-in package templates for `員工基礎權限`, `HR 管理權限`, and `平台唯讀排障權限`, or their user groups/data scopes.
+Tenant provisioning currently creates the directly assigned `Platform Admin` permission set and the complete permission catalog. It does not automatically instantiate the built-in package templates for `員工基礎權限`, `HR 管理權限`, and `平臺唯讀排障權限`, or their user groups/data scopes.
 
 After the API is running, list the registered packages and import the built-in package when those reusable templates are needed:
 

@@ -299,7 +299,7 @@ func workspaceTodoCategories(employees []Employee, now time.Time) []WorkspaceTod
 			}
 			return workspaceFormatTimeSlash(*item.ResignDate), true
 		}),
-		workspaceTodoCategory("unpaid", "留職停薪", "pause-circle", "留停中或待核准", "留停期間", employees, func(item Employee) (string, bool) {
+		workspaceTodoCategory("unpaid", "留職停薪", "pause-circle", "留停中或待覈準", "留停期間", employees, func(item Employee) (string, bool) {
 			if workspaceEmployeeStatus(item) != string(EmployeeStatusLeaveSuspended) {
 				return "", false
 			}

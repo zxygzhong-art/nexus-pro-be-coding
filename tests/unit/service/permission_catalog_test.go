@@ -65,13 +65,16 @@ func TestPermissionCatalogGroupsRouteAPIsUnderCanonicalPages(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, expected := range []struct {
-		resource string
-		action   string
-		menuKey  string
+		resource  string
+		action    string
+		menuKey   string
+		highRisk  bool
+		checkRisk bool
 	}{
 		{resource: "hr.employee", action: "create", menuKey: "hr.employees"},
 		{resource: "attendance.clock", action: "read", menuKey: "attendance.clock"},
 		{resource: "agent.model", action: "update", menuKey: "agents.models"},
+		{resource: "agent.usage", action: "read", menuKey: "agents.usage", highRisk: true, checkRisk: true},
 		{resource: "audit.audit_log", action: "read", menuKey: "audit.logs"},
 	} {
 		found := false
@@ -82,6 +85,9 @@ func TestPermissionCatalogGroupsRouteAPIsUnderCanonicalPages(t *testing.T) {
 			found = true
 			if item.MenuKey != expected.menuKey {
 				t.Fatalf("expected %s:%s under %s, got %+v", expected.resource, expected.action, expected.menuKey, item)
+			}
+			if expected.checkRisk && item.HighRisk != expected.highRisk {
+				t.Fatalf("expected %s:%s highRisk=%v, got %+v", expected.resource, expected.action, expected.highRisk, item)
 			}
 		}
 		if !found {

@@ -6,7 +6,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"nexus-pro-be/internal/platform/llm"
 )
@@ -42,6 +44,53 @@ func TestLiteLLMEmbeddingClient(t *testing.T) {
 	}
 	if client.Model() != "nexus-pro-embedding" || !reflect.DeepEqual(vectors, [][]float32{{1, 0}, {0, 1}}) {
 		t.Fatalf("unexpected embedding result: model=%s vectors=%v", client.Model(), vectors)
+	}
+}
+
+// TestLiteLLMEmbeddingPing verifies real-route probing and bounded provider traffic.
+func TestLiteLLMEmbeddingPing(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.Path != "/embeddings" {
+			t.Fatalf("unexpected probe path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"object":"list","model":"upstream","data":[{"object":"embedding","index":0,"embedding":[1,0]}],"usage":{"prompt_tokens":1,"total_tokens":1}}`))
+	}))
+	defer server.Close()
+
+	client, err := llm.NewLiteLLMEmbeddingClient(llm.LiteLLMEmbeddingConfig{
+		BaseURL: server.URL, APIKey: "test-key", ProbeTTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Ping(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Ping(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected one cached provider probe, got %d", calls.Load())
+	}
+}
+
+// TestLiteLLMEmbeddingPingReportsProviderFailure verifies readiness fails on an unusable route.
+func TestLiteLLMEmbeddingPingReportsProviderFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error":{"message":"provider unavailable"}}`, http.StatusBadGateway)
+	}))
+	defer server.Close()
+	client, err := llm.NewLiteLLMEmbeddingClient(llm.LiteLLMEmbeddingConfig{
+		BaseURL: server.URL, APIKey: "test-key", ProbeTTL: time.Hour,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := client.Ping(context.Background()); err == nil {
+		t.Fatal("expected an unusable embedding route to fail readiness")
 	}
 }
 

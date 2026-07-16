@@ -44,7 +44,7 @@ func TestFormDefinitionDraftLifecycleCompilesAndPublishesOnlyAfterReview(t *test
 	}
 
 	updatedSchema := validDefinitionSchema()
-	updatedSchema.Description = "更新后的说明"
+	updatedSchema.Description = "更新後的說明"
 	if _, err := svc.Workflow().UpdateFormDefinitionDraft(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}, draft.ID, domain.UpdateFormDefinitionDraftInput{Revision: draft.Revision + 1, Schema: updatedSchema}); err == nil {
 		t.Fatal("expected stale revision conflict")
 	}
@@ -63,5 +63,5 @@ func TestFormDefinitionDraftLifecycleCompilesAndPublishesOnlyAfterReview(t *test
 }
 
 func validDefinitionSchema() domain.FormDefinitionSchemaV2 {
-	return domain.FormDefinitionSchemaV2{SchemaVersion: 2, Name: "请假单", Fields: []domain.FormFieldDefinitionV2{{ID: "reason", Label: "事由", DataType: "string", Widget: "textarea"}}, Layout: domain.FormLayoutV2{Rows: []domain.FormLayoutRowV2{{FieldIDs: []string{"reason"}}}}, Workflow: domain.FormWorkflowV2{Stages: []domain.FormWorkflowStageV2{{ID: "manager", Type: "approver", Label: "直属主管", Config: map[string]any{"role": "manager"}}}}}
+	return domain.FormDefinitionSchemaV2{SchemaVersion: 2, Name: "請假單", Fields: []domain.FormFieldDefinitionV2{{ID: "reason", Label: "事由", DataType: "string", Widget: "textarea"}}, Layout: domain.FormLayoutV2{Rows: []domain.FormLayoutRowV2{{FieldIDs: []string{"reason"}}}}, Workflow: domain.FormWorkflowV2{Stages: []domain.FormWorkflowStageV2{{ID: "manager", Type: "approver", Label: "直屬主管", Config: map[string]any{"role": "manager"}}}}}
 }

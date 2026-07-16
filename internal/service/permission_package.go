@@ -16,7 +16,7 @@ import (
 
 const (
 	defaultHRPermissionPackageApplication = "hr"
-	defaultHRPermissionPackageVersion     = "1.0.0"
+	defaultHRPermissionPackageVersion     = "1.0.1"
 )
 
 var semverPattern = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
@@ -113,6 +113,7 @@ func DefaultHRPermissionPackageContent() PermissionPackageContent {
 					{Resource: "agent.definition", Action: ActionCreate, Scope: ScopeAll, MenuKey: "agents.runs"},
 					{Resource: "agent.definition", Action: ActionUpdate, Scope: ScopeAll, MenuKey: "agents.runs"},
 					{Resource: "agent.definition", Action: ActionDelete, Scope: ScopeAll, MenuKey: "agents.runs"},
+					{Resource: "agent.usage", Action: ActionRead, Scope: ScopeAll, MenuKey: "agents.usage"},
 					{Resource: "agent.knowledge_base", Action: ActionRead, Scope: ScopeAll, MenuKey: "agents.knowledge_bases"},
 					{Resource: "agent.knowledge_base", Action: ActionCreate, Scope: ScopeAll, MenuKey: "agents.knowledge_bases"},
 					{Resource: "agent.knowledge_base", Action: ActionUpdate, Scope: ScopeAll, MenuKey: "agents.knowledge_bases"},
@@ -146,8 +147,8 @@ func DefaultHRPermissionPackageContent() PermissionPackageContent {
 			},
 			{
 				TemplateKey: "platform_readonly_troubleshooting",
-				Name:        "平台唯讀排障權限",
-				Description: "平台與審計唯讀排障用權限集合。",
+				Name:        "平臺唯讀排障權限",
+				Description: "平臺與審計唯讀排障用權限集合。",
 				Permissions: []Permission{
 					{Resource: "me", Action: ActionRead, Scope: ScopeAll, MenuKey: "workbench"},
 					{Resource: "audit.log", Action: ActionRead, Scope: ScopeAll, MenuKey: "audit"},
@@ -173,7 +174,7 @@ func DefaultHRPermissionPackageContent() PermissionPackageContent {
 		AssumableRoleTemplates: []AssumableRoleTemplateContent{
 			{
 				TemplateKey:               "platform_readonly_troubleshooter",
-				Name:                      "平台只讀排障",
+				Name:                      "平臺只讀排障",
 				Description:               "短時承擔的唯讀排障角色。",
 				PermissionSetTemplateKeys: []string{"platform_readonly_troubleshooting"},
 				Trusted:                   true,
@@ -384,7 +385,7 @@ func (c IAMService) PublishPermissionPackage(ctx RequestContext, id string) (Per
 	return pkg, nil
 }
 
-// requireGlobalPermissionPackageWrite 僅接受由已驗證 token 推導出的平台管理員身分。
+// requireGlobalPermissionPackageWrite 僅接受由已驗證 token 推導出的平臺管理員身分。
 func (c IAMService) requireGlobalPermissionPackageWrite(ctx RequestContext) error {
 	if !ctx.PlatformAdmin {
 		return Forbidden("global permission package registry write is not authorized")
@@ -993,6 +994,10 @@ func validatePackageActions(items []PermissionPackageAction, addField func(strin
 func validatePackagePermissions(items []Permission, addField func(string, string, string)) {
 	seen := map[string]struct{}{}
 	for _, item := range items {
+		if item.Conditions != nil {
+			addField("permissions", "invalid", "permission conditions are read-only")
+			continue
+		}
 		item = normalizePermission(item)
 		if item.Resource == "" || item.Action == "" {
 			addField("permissions", "invalid", "permission resource and action are required")
@@ -1074,6 +1079,11 @@ func validatePackageTemplates(content PermissionPackageContent, addField func(st
 		permissionSetKeys[item.TemplateKey] = struct{}{}
 		if len(item.Permissions) == 0 {
 			addField("permission_set_templates", "invalid", "permission set template permissions are required")
+		}
+		for _, permission := range item.Permissions {
+			if permission.Conditions != nil {
+				addField("permission_set_templates", "invalid", "permission conditions are read-only")
+			}
 		}
 	}
 	validateTemplateRefs := func(field string, templateKey string, refs []string) {

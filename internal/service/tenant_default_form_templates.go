@@ -38,7 +38,7 @@ func tenantDefaultFormDefinitions() []tenantDefaultFormDefinition {
 			Fields: platformLeaveRequestBuilderFields(), Stages: tenantManagerApprovalStages(),
 		},
 		{
-			Key: "overtime-approval", Name: "加班核准申請單", Description: "平日延時、假日加班皆可使用",
+			Key: "overtime-approval", Name: "加班覈準申請單", Description: "平日延時、假日加班皆可使用",
 			Category: "人事考勤類", Icon: "⏰", FormKind: "hybrid",
 			Fields: tenantOvertimeFormFields(), Stages: tenantManagerApprovalStages(),
 		},
@@ -148,7 +148,7 @@ func tenantApplicantFields() []domain.PlatformFormBuilderField {
 	}
 }
 
-// tenantOvertimeFormFields 建立加班核准表單元件。
+// tenantOvertimeFormFields 建立加班覈準表單元件。
 func tenantOvertimeFormFields() []domain.PlatformFormBuilderField {
 	fields := tenantApplicantFields()
 	return append(fields,
@@ -262,7 +262,7 @@ func tenantHeadcountApprovalStages() []domain.PlatformFormBuilderStage {
 	return []domain.PlatformFormBuilderStage{
 		{ID: "stage-dept-head", Type: "approver", Label: "部門主管", Detail: "確認人力需求與部門編制", Config: map[string]any{"role": "dept-head"}},
 		{ID: "stage-hr", Type: "approver", Label: "HR 複核", Detail: "確認職缺與招募條件", Config: map[string]any{"role": "hr"}},
-		{ID: "stage-ceo", Type: "approver", Label: "總經理核准", Detail: "核准新增編制", Config: map[string]any{"role": "ceo"}},
+		{ID: "stage-ceo", Type: "approver", Label: "總經理覈準", Detail: "覈準新增編制", Config: map[string]any{"role": "ceo"}},
 	}
 }
 

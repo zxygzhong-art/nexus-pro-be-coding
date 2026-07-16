@@ -48,6 +48,37 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	t.Run("catalog IDs cannot be rehomed across tenants", func(t *testing.T) {
+		orgID := "ou_shared_" + suffix
+		if err := store.UpsertOrgUnit(ctx, domain.OrgUnit{ID: orgID, TenantID: tenantA, Code: "SHARED", Name: "Tenant A Org", Path: []string{orgID}, CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.UpsertOrgUnit(ctx, domain.OrgUnit{ID: orgID, TenantID: tenantB, Code: "SHARED", Name: "Tenant B Org", Path: []string{orgID}, CreatedAt: now, UpdatedAt: now}); err == nil {
+			t.Fatal("expected a cross-tenant org ID collision to fail")
+		}
+		storedOrg, ok, err := store.GetOrgUnit(ctx, tenantA, orgID)
+		if err != nil || !ok || storedOrg.Name != "Tenant A Org" {
+			t.Fatalf("expected original org ownership to remain, ok=%v org=%+v err=%v", ok, storedOrg, err)
+		}
+		if _, ok, err := store.GetOrgUnit(ctx, tenantB, orgID); err != nil || ok {
+			t.Fatalf("expected tenant B not to acquire the colliding org, ok=%v err=%v", ok, err)
+		}
+
+		positionID := "pos_shared_" + suffix
+		if err := store.UpsertPosition(ctx, domain.Position{ID: positionID, TenantID: tenantA, Code: "SHARED", Name: "Tenant A Position", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.UpsertPosition(ctx, domain.Position{ID: positionID, TenantID: tenantB, Code: "SHARED", Name: "Tenant B Position", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now}); err == nil {
+			t.Fatal("expected a cross-tenant position ID collision to fail")
+		}
+		storedPosition, ok, err := store.GetPosition(ctx, tenantA, positionID)
+		if err != nil || !ok || storedPosition.Name != "Tenant A Position" {
+			t.Fatalf("expected original position ownership to remain, ok=%v position=%+v err=%v", ok, storedPosition, err)
+		}
+		if _, ok, err := store.GetPosition(ctx, tenantB, positionID); err != nil || ok {
+			t.Fatalf("expected tenant B not to acquire the colliding position, ok=%v err=%v", ok, err)
+		}
+	})
 	if err := store.UpsertEmployee(ctx, domain.Employee{ID: empA, TenantID: tenantA, Name: "Tenant A", CompanyEmail: empA + "@example.com", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
@@ -979,7 +1010,7 @@ func (integrationTokenResolver) Resolve(req *http.Request) (v1api.TokenContext, 
 	}, true, nil
 }
 
-// findIntegrationAuditLog 驗證 find integration 稽核 log。
+// findIntegrationAuditLog 驗證 find integration 稽覈 log。
 func findIntegrationAuditLog(logs []domain.AuditLog, action string) (domain.AuditLog, bool) {
 	for _, log := range logs {
 		if log.Action == action {

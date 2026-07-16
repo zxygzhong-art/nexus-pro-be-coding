@@ -92,7 +92,7 @@ func (c WorkflowService) withTransaction(ctx RequestContext, fn func(WorkflowSer
 	})
 }
 
-// withTransaction 讓 Agent 寫入與其管理稽核在同一租戶交易中完成。
+// withTransaction 讓 Agent 寫入與其管理稽覈在同一租戶交易中完成。
 func (c AgentService) withTransaction(ctx RequestContext, fn func(AgentService) error) error {
 	return c.Service.withTenantTransaction(ctx, func(tx *Service) error {
 		return fn(tx.Agent())

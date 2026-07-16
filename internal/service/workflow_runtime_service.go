@@ -345,7 +345,7 @@ func (c WorkflowService) completeAutomaticStage(ctx RequestContext, run domain.W
 				template = domain.FormTemplate{ID: run.TemplateID}
 			}
 			title := workflowNotificationTemplateTitle(template, instance)
-			body := workflowAccountLabel(applicant) + "提交了「" + title + "」，請知悉。"
+			body := workflowAccountLabel(applicant) + " 提交了「" + title + "」，請知悉。"
 			_ = c.deliverWorkflowNotification(ctx, domain.Notification{
 				ID:                 workflowNotificationID("notify-"+stage.ID, run.FormInstanceID),
 				TenantID:           ctx.TenantID,
@@ -666,7 +666,7 @@ func (c WorkflowService) recordWorkflowAction(ctx RequestContext, run domain.Wor
 
 func (c WorkflowService) notifyWorkflowPendingApprovers(ctx RequestContext, instance domain.FormInstance, template domain.FormTemplate, applicant domain.Account, stage domain.WorkflowStageDefinition, assigneeIDs []string) error {
 	title := workflowNotificationTemplateTitle(template, instance)
-	body := workflowAccountLabel(applicant) + "提交了「" + title + "」，目前在「" + stage.Label + "」待您審核。"
+	body := workflowAccountLabel(applicant) + " 提交了「" + title + "」，目前在「" + stage.Label + "」待您審核。"
 	return c.deliverWorkflowNotification(ctx, domain.Notification{
 		ID:                 workflowNotificationID("pending-"+stage.ID, instance.ID),
 		TenantID:           ctx.TenantID,

@@ -69,7 +69,7 @@ func newWorkflowEngineFixtureWithFake(t *testing.T, now time.Time, reviewerAccou
 		ID:        "ft-leave",
 		TenantID:  "tenant-1",
 		Key:       "leave-request",
-		Name:      "请假申请单",
+		Name:      "請假申請單",
 		Schema:    workflowEnabledTemplateSchema(reviewerAccountID),
 		CreatedAt: now,
 	})

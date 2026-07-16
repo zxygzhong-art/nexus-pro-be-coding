@@ -24,7 +24,7 @@ var userGroupComparators = comparators[domain.UserGroup]{
 	"name_asc":        func(a, b domain.UserGroup) bool { return a.Name < b.Name },
 }
 
-// SortUserGroups 排序使用者群組。
+// SortUserGroups 排序使用者羣組。
 func SortUserGroups(items []domain.UserGroup, sort string) []domain.UserGroup {
 	return sortBy(items, sort, userGroupComparators, "created_at_desc")
 }

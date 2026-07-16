@@ -1228,7 +1228,7 @@ func restrictedEmployeeFieldPolicies(policies map[string]string) map[string][]st
 	return out
 }
 
-// auditSensitiveEmployeeRead 寫入員工敏感欄位明文讀取稽核。
+// auditSensitiveEmployeeRead 寫入員工敏感欄位明文讀取稽覈。
 func (c HRService) auditSensitiveEmployeeRead(ctx RequestContext, decision CheckResult, items []Employee, target string) error {
 	fields := visibleSensitiveEmployeeFields(decision, items)
 	if len(fields) == 0 {

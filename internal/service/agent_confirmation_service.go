@@ -525,22 +525,22 @@ func (c AgentService) newBulkReviewConfirmation(ctx domain.RequestContext, pendi
 		}
 		items = append(items, domain.AgentConfirmationItem{
 			ID: formID, Title: item.Title, Subtitle: item.Who, Status: item.StatusText,
-			Rows: []domain.AgentAnalysisRow{{Label: "摘要", Value: item.Desc}, {Label: "申请时间", Value: item.Time}},
+			Rows: []domain.AgentAnalysisRow{{Label: "摘要", Value: item.Desc}, {Label: "申請時間", Value: item.Time}},
 		})
 		expected = append(expected, agentConfirmationExpectedReview{
 			FormInstanceID: formID, FormInstanceVersion: item.Instance.Version,
 			WorkflowRunID: run.ID, StageInstanceID: run.CurrentStageInstanceID,
 		})
 	}
-	label := map[string]string{"approve": "批准", "reject": "拒绝", "return": "退回"}[action]
-	rows := []domain.AgentAnalysisRow{{Label: "操作", Value: label}, {Label: "单据数量", Value: fmt.Sprintf("%d", len(items))}}
+	label := map[string]string{"approve": "批准", "reject": "拒絕", "return": "退回"}[action]
+	rows := []domain.AgentAnalysisRow{{Label: "操作", Value: label}, {Label: "單據數量", Value: fmt.Sprintf("%d", len(items))}}
 	if reason != "" {
-		rows = append(rows, domain.AgentAnalysisRow{Label: "意见", Value: reason})
+		rows = append(rows, domain.AgentAnalysisRow{Label: "意見", Value: reason})
 	}
 	confirmation := domain.AgentConfirmation{
-		ID: id, Kind: agentConfirmationBulkReview, Title: "确认批量" + label,
-		Description: "系统将在执行前重新检查每笔单据的当前审批人与节点版本。",
-		Action:      action, ActionLabel: fmt.Sprintf("确认%s %d 笔", label, len(items)),
+		ID: id, Kind: agentConfirmationBulkReview, Title: "確認批量" + label,
+		Description: "系統將在執行前重新檢查每筆單據的當前審批人與節點版本。",
+		Action:      action, ActionLabel: fmt.Sprintf("確認%s %d 筆", label, len(items)),
 		Rows: rows, Items: items, ExpiresAt: c.Now().Add(agentConfirmationTTL),
 	}
 	if err := c.saveAgentConfirmation(ctx, agentConfirmationAction{

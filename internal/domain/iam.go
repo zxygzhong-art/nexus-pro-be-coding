@@ -14,7 +14,7 @@ const (
 	PermissionTypeScope  PermissionType = "scope"
 )
 
-// UserGroup 定義使用者群組的資料結構。
+// UserGroup 定義使用者羣組的資料結構。
 type UserGroup struct {
 	ID                   string    `json:"id"`
 	TenantID             string    `json:"tenant_id"`
@@ -28,7 +28,7 @@ type UserGroup struct {
 	CreatedAt            time.Time `json:"created_at"`
 }
 
-// GroupMembership 定義使用者群組成員關係的資料結構。
+// GroupMembership 定義使用者羣組成員關係的資料結構。
 type GroupMembership struct {
 	ID                 string     `json:"id"`
 	TenantID           string     `json:"tenant_id"`
@@ -42,7 +42,7 @@ type GroupMembership struct {
 	CreatedAt          time.Time  `json:"created_at"`
 }
 
-// CreateUserGroupInput 定義使用者群組輸入的資料結構。
+// CreateUserGroupInput 定義使用者羣組輸入的資料結構。
 type CreateUserGroupInput struct {
 	Name             string   `json:"name"`
 	Description      string   `json:"description,omitempty"`
@@ -50,14 +50,14 @@ type CreateUserGroupInput struct {
 	MemberAccountIDs []string `json:"member_account_ids,omitempty"`
 }
 
-// UpdateUserGroupInput 定義使用者群組更新輸入的資料結構。
+// UpdateUserGroupInput 定義使用者羣組更新輸入的資料結構。
 type UpdateUserGroupInput struct {
 	Name             *string  `json:"name,omitempty"`
 	Description      *string  `json:"description,omitempty"`
 	PermissionSetIDs []string `json:"permission_set_ids,omitempty"`
 }
 
-// AddUserGroupMemberInput 定義新增使用者群組成員輸入的資料結構。
+// AddUserGroupMemberInput 定義新增使用者羣組成員輸入的資料結構。
 type AddUserGroupMemberInput struct {
 	AccountID          string `json:"account_id"`
 	ValidUntil         string `json:"valid_until,omitempty"`
@@ -102,6 +102,7 @@ type Permission struct {
 	Action          Action          `json:"action"`
 	Target          string          `json:"target,omitempty"`
 	Scope           Scope           `json:"scope,omitempty"`
+	Conditions      map[string]any  `json:"conditions,omitempty"`
 	Effect          string          `json:"effect,omitempty"`
 	RiskLevel       string          `json:"risk_level,omitempty"`
 	Severity        string          `json:"severity,omitempty"`
@@ -280,7 +281,7 @@ type PermissionSetTemplateContent struct {
 	Permissions []Permission `json:"permissions"`
 }
 
-// UserGroupTemplateContent 定義使用者群組模板內容。
+// UserGroupTemplateContent 定義使用者羣組模板內容。
 type UserGroupTemplateContent struct {
 	TemplateKey               string   `json:"template_key"`
 	Name                      string   `json:"name"`
@@ -316,7 +317,7 @@ type PermissionSetTemplate struct {
 	Version     string                       `json:"version"`
 }
 
-// UserGroupTemplate 定義使用者群組模板落庫投影。
+// UserGroupTemplate 定義使用者羣組模板落庫投影。
 type UserGroupTemplate struct {
 	ID          string                   `json:"id"`
 	PackageID   string                   `json:"package_id"`

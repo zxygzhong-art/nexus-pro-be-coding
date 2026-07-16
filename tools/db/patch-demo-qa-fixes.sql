@@ -23,7 +23,7 @@ WHERE tenant_id = 'demo' AND key = 'employment-certificate';
 
 DELETE FROM form_templates
 WHERE tenant_id = 'demo'
-  AND name IN ('补卡申请', '请假申请', '在职证明');
+  AND name IN ('補卡申請', '請假申請', '在職證明');
 
 INSERT INTO attendance_worksites (
   id, tenant_id, name, address, latitude, longitude, radius_meters, status, created_at, updated_at

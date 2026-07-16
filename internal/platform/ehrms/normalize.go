@@ -36,7 +36,7 @@ var employeeFieldAliases = map[string]string{
 	"shift_name":      "員工班別名稱",
 	"shift_attr":      "員工班別屬性",
 	"direct_indirect": "直接/間接員工",
-	"leave_group":     "休假群組",
+	"leave_group":     "休假羣組",
 	"school_name":     "學校名稱(中文)",
 	"school_zh":       "學校名稱(中文)",
 	"email":           "公司信箱",

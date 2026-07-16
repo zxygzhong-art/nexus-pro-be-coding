@@ -45,7 +45,7 @@ docker build --build-arg SFTPGO_IMAGE="${SFTPGO_IMAGE}" -f dockerfiles/sftpgo/Do
 - Temporal 需要 PostgreSQL，並使用 `temporal` 與 `temporal_visibility` 兩個 database。
 - NATS 使用 JetStream，資料會持久化到 volume 掛載的 `/data/jetstream`。
 - Prometheus 會 scrape `host.docker.internal:9091`、`tempo:3200`、`keycloak:9000` 和 `openfga:2112`。
-- 後端 JSON 日誌只直接輸出到 stdout / 控制台。
+- 後端 JSON 日誌只直接輸出到 stdout / 控制檯。
 - Grafana 資料來源指向 `prometheus:9090` 和 `tempo:3200`。
 - SFTPGo 提供後端業務文件儲存，預設遠端根目錄是 `nexus-hr-imports`。
 

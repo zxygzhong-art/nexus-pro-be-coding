@@ -195,13 +195,7 @@ func resolveGrantPeriod(startRaw, endRaw string, now time.Time) (time.Time, time
 }
 
 func isGrantableEmployee(employee Employee) bool {
-	status := strings.ToLower(strings.TrimSpace(firstNonBlank(employee.EmploymentStatus, employee.Status)))
-	switch status {
-	case "resigned", "deleted", "inactive", "已停用", "離職":
-		return false
-	default:
-		return true
-	}
+	return attendanceEmployeeAllowsActiveOperations(employee)
 }
 
 func employeeJobLevel(employee Employee) string {

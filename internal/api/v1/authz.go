@@ -36,14 +36,40 @@ func (a *API) authorize(ctx domain.RequestContext, r *http.Request, routePath, r
 			req.ResourceID = req.TargetEmployeeID
 		}
 	}
-	result, err := a.authz.Check(ctx, req)
+	var result domain.CheckResult
+	var err error
+	if authz.currentAccessProjection {
+		result, err = a.authz.CheckCurrentAccessProjection(ctx, req)
+	} else {
+		result, err = a.authz.Check(ctx, req)
+	}
 	if err != nil {
 		return err
 	}
 	if !result.Allowed {
 		return domain.ForbiddenReason(apiAuthzReasonCode(result), result.Reason)
 	}
+	if authz.requireTenantWide && !apiTenantWideScope(result.EffectiveScope, result.Scope) {
+		result.Allowed = false
+		result.Reason = "workspace management requires tenant-wide data scope"
+		_ = a.authz.AuditDecision(ctx, req, result)
+		return domain.ForbiddenReason("data_scope_denied", result.Reason)
+	}
 	return nil
+}
+
+// apiTenantWideScope 判斷授權決策是否可進入租戶管理面。
+func apiTenantWideScope(effective, fallback domain.Scope) bool {
+	scope := effective
+	if scope == "" {
+		scope = fallback
+	}
+	switch scope {
+	case "", domain.ScopeAll, domain.ScopeTenant, domain.ScopeSystem:
+		return true
+	default:
+		return false
+	}
 }
 
 // apiAuthzReasonCode 處理 API 授權 reason 碼。
@@ -58,6 +84,8 @@ func apiAuthzReasonCode(result domain.CheckResult) string {
 		default:
 			return "permission_missing"
 		}
+	case "data scope denied":
+		return "data_scope_denied"
 	default:
 		return "permission_missing"
 	}

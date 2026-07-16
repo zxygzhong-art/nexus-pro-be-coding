@@ -18,7 +18,7 @@ type MeCtrl struct {
 // RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c MeCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	me := router.Group("/me")
-	me.GET("", c.routes.Handle("me", "read", c.getMe))
+	me.GET("", c.routes.Handle("me", "read", c.getMe, CurrentAccessProjection()))
 	me.PATCH("/profile", c.routes.Handle("me", "update", c.updateProfile))
 	me.PATCH("/preferences", c.routes.Handle("me", "update", c.updatePreferences))
 	me.PUT("/password", c.routes.Handle("me", "update", c.changePassword))

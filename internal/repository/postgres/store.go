@@ -271,7 +271,7 @@ func (s *Store) UpdateIdentityProvisioningOutboxEvent(execCtx context.Context, v
 	return err
 }
 
-// AddAccountGroup 從儲存層處理 add 帳號群組。
+// AddAccountGroup 從儲存層處理 add 帳號羣組。
 func (s *Store) AddAccountGroup(execCtx context.Context, tenantID, accountID, groupID string) error {
 	account, ok, err := s.GetAccount(execCtx, tenantID, accountID)
 	if err != nil {
@@ -287,7 +287,7 @@ func (s *Store) AddAccountGroup(execCtx context.Context, tenantID, accountID, gr
 	return s.UpsertAccount(execCtx, account)
 }
 
-// RemoveAccountGroup 從儲存層處理 remove 帳號群組。
+// RemoveAccountGroup 從儲存層處理 remove 帳號羣組。
 func (s *Store) RemoveAccountGroup(execCtx context.Context, tenantID, accountID, groupID string) error {
 	account, ok, err := s.GetAccount(execCtx, tenantID, accountID)
 	if err != nil {
@@ -306,7 +306,7 @@ func (s *Store) RemoveAccountGroup(execCtx context.Context, tenantID, accountID,
 	return s.UpsertAccount(execCtx, account)
 }
 
-// UpsertUserGroup 從儲存層處理 upsert 使用者群組。Version > 0 時執行樂觀鎖檢查。
+// UpsertUserGroup 從儲存層處理 upsert 使用者羣組。Version > 0 時執行樂觀鎖檢查。
 func (s *Store) UpsertUserGroup(execCtx context.Context, v domain.UserGroup) error {
 	_, err := s.q.UpsertUserGroup(execCtx, sqlc.UpsertUserGroupParams{
 		ID:                   v.ID,
@@ -326,7 +326,7 @@ func (s *Store) UpsertUserGroup(execCtx context.Context, v domain.UserGroup) err
 	return err
 }
 
-// GetUserGroup 從儲存層取得使用者群組。
+// GetUserGroup 從儲存層取得使用者羣組。
 func (s *Store) GetUserGroup(execCtx context.Context, tenantID, id string) (domain.UserGroup, bool, error) {
 	v, err := s.q.GetUserGroup(execCtx, sqlc.GetUserGroupParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -338,7 +338,7 @@ func (s *Store) GetUserGroup(execCtx context.Context, tenantID, id string) (doma
 	return fromUserGroup(v), true, nil
 }
 
-// ListUserGroups 從儲存層列出使用者群組。
+// ListUserGroups 從儲存層列出使用者羣組。
 func (s *Store) ListUserGroups(execCtx context.Context, tenantID string) ([]domain.UserGroup, error) {
 	items, err := s.q.ListUserGroups(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -347,7 +347,7 @@ func (s *Store) ListUserGroups(execCtx context.Context, tenantID string) ([]doma
 	return mapSlice(items, fromUserGroup), nil
 }
 
-// DeleteUserGroup 從儲存層刪除使用者群組。
+// DeleteUserGroup 從儲存層刪除使用者羣組。
 func (s *Store) DeleteUserGroup(execCtx context.Context, tenantID, id string) (domain.UserGroup, bool, error) {
 	v, err := s.q.DeleteUserGroup(tenantContext(execCtx, tenantID), sqlc.DeleteUserGroupParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
@@ -359,7 +359,7 @@ func (s *Store) DeleteUserGroup(execCtx context.Context, tenantID, id string) (d
 	return fromUserGroup(v), true, nil
 }
 
-// UpsertGroupMembership 從儲存層處理 upsert 使用者群組成員關係。
+// UpsertGroupMembership 從儲存層處理 upsert 使用者羣組成員關係。
 func (s *Store) UpsertGroupMembership(execCtx context.Context, v domain.GroupMembership) error {
 	_, err := s.q.UpsertGroupMembership(tenantContext(execCtx, v.TenantID), sqlc.UpsertGroupMembershipParams{
 		ID:                 v.ID,
@@ -376,7 +376,7 @@ func (s *Store) UpsertGroupMembership(execCtx context.Context, v domain.GroupMem
 	return err
 }
 
-// DeleteGroupMembership 從儲存層刪除使用者群組成員關係。
+// DeleteGroupMembership 從儲存層刪除使用者羣組成員關係。
 func (s *Store) DeleteGroupMembership(execCtx context.Context, tenantID, userGroupID, accountID string) (domain.GroupMembership, bool, error) {
 	v, err := s.q.DeleteGroupMembership(tenantContext(execCtx, tenantID), sqlc.DeleteGroupMembershipParams{
 		TenantID:    tenantID,
@@ -406,7 +406,7 @@ func (s *Store) CloseGroupMembership(execCtx context.Context, tenantID, userGrou
 	return fromGroupMembership(v), true, nil
 }
 
-// GetGroupMembership 從儲存層取得使用者群組成員關係。
+// GetGroupMembership 從儲存層取得使用者羣組成員關係。
 func (s *Store) GetGroupMembership(execCtx context.Context, tenantID, userGroupID, accountID string) (domain.GroupMembership, bool, error) {
 	v, err := s.q.GetGroupMembership(tenantContext(execCtx, tenantID), sqlc.GetGroupMembershipParams{
 		TenantID:    tenantID,
@@ -422,7 +422,7 @@ func (s *Store) GetGroupMembership(execCtx context.Context, tenantID, userGroupI
 	return fromGroupMembership(v), true, nil
 }
 
-// ListGroupMembershipsForGroup 從儲存層列出使用者群組成員關係。
+// ListGroupMembershipsForGroup 從儲存層列出使用者羣組成員關係。
 func (s *Store) ListGroupMembershipsForGroup(execCtx context.Context, tenantID, userGroupID string) ([]domain.GroupMembership, error) {
 	items, err := s.q.ListGroupMembershipsForGroup(tenantContext(execCtx, tenantID), sqlc.ListGroupMembershipsForGroupParams{
 		TenantID:    tenantID,
@@ -434,7 +434,7 @@ func (s *Store) ListGroupMembershipsForGroup(execCtx context.Context, tenantID, 
 	return mapSlice(items, fromGroupMembership), nil
 }
 
-// ListActiveGroupMembershipsForAccount 從儲存層列出帳號有效使用者群組成員關係。
+// ListActiveGroupMembershipsForAccount 從儲存層列出帳號有效使用者羣組成員關係。
 func (s *Store) ListActiveGroupMembershipsForAccount(execCtx context.Context, tenantID, accountID string, at time.Time) ([]domain.GroupMembership, error) {
 	items, err := s.q.ListActiveGroupMembershipsForAccount(tenantContext(execCtx, tenantID), sqlc.ListActiveGroupMembershipsForAccountParams{
 		TenantID:  tenantID,
@@ -692,7 +692,7 @@ func (s *Store) ListPermissionSetTemplates(execCtx context.Context, packageID st
 	return mapSlice(items, fromPermissionSetTemplate), nil
 }
 
-// UpsertUserGroupTemplate 從儲存層處理 upsert 使用者群組模板。
+// UpsertUserGroupTemplate 從儲存層處理 upsert 使用者羣組模板。
 func (s *Store) UpsertUserGroupTemplate(execCtx context.Context, v domain.UserGroupTemplate) error {
 	_, err := s.q.UpsertUserGroupTemplate(execCtx, sqlc.UpsertUserGroupTemplateParams{
 		ID:          v.ID,
@@ -705,7 +705,7 @@ func (s *Store) UpsertUserGroupTemplate(execCtx context.Context, v domain.UserGr
 	return err
 }
 
-// ListUserGroupTemplates 從儲存層列出使用者群組模板。
+// ListUserGroupTemplates 從儲存層列出使用者羣組模板。
 func (s *Store) ListUserGroupTemplates(execCtx context.Context, packageID string) ([]domain.UserGroupTemplate, error) {
 	items, err := s.q.ListUserGroupTemplates(execCtx, packageID)
 	if err != nil {
@@ -1017,9 +1017,38 @@ func (s *Store) UpsertAssumableRoleSession(execCtx context.Context, v domain.Ass
 	return err
 }
 
+// GetAssumableRoleSession 取得 session 原始狀態，供服務層區分失效原因並執行 ownership 驗證。
+func (s *Store) GetAssumableRoleSession(execCtx context.Context, tenantID, id string) (domain.AssumableRoleSession, bool, error) {
+	v, err := s.q.GetAuthzAssumableRoleSession(execCtx, sqlc.GetAuthzAssumableRoleSessionParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.AssumableRoleSession{}, false, nil
+	}
+	if err != nil {
+		return domain.AssumableRoleSession{}, false, err
+	}
+	return fromAssumableRoleSession(v), true, nil
+}
+
 // GetActiveAssumableRoleSession 從儲存層取得啟用中 assumable 角色 session。
 func (s *Store) GetActiveAssumableRoleSession(execCtx context.Context, tenantID, id string) (domain.AssumableRoleSession, bool, error) {
 	v, err := s.q.GetActiveAuthzAssumableRoleSession(execCtx, sqlc.GetActiveAuthzAssumableRoleSessionParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.AssumableRoleSession{}, false, nil
+	}
+	if err != nil {
+		return domain.AssumableRoleSession{}, false, err
+	}
+	return fromAssumableRoleSession(v), true, nil
+}
+
+// RevokeAssumableRoleSession 僅撤銷同租戶、同帳號且尚未撤銷的 session。
+func (s *Store) RevokeAssumableRoleSession(execCtx context.Context, tenantID, accountID, id string, revokedAt time.Time) (domain.AssumableRoleSession, bool, error) {
+	v, err := s.q.RevokeAuthzAssumableRoleSession(execCtx, sqlc.RevokeAuthzAssumableRoleSessionParams{
+		RevokedAt: timestamptz(revokedAt),
+		TenantID:  tenantID,
+		AccountID: accountID,
+		ID:        id,
+	})
 	if isNotFound(err) {
 		return domain.AssumableRoleSession{}, false, nil
 	}
@@ -2673,7 +2702,7 @@ func (s *Store) DeleteFormInstance(execCtx context.Context, tenantID, id string)
 	return s.q.DeleteFormInstance(tenantContext(execCtx, tenantID), sqlc.DeleteFormInstanceParams{TenantID: tenantID, ID: id})
 }
 
-// UpsertPlatformTaskItem 從儲存層處理 upsert 平台任務項目。
+// UpsertPlatformTaskItem 從儲存層處理 upsert 平臺任務項目。
 func (s *Store) UpsertPlatformTaskItem(execCtx context.Context, v domain.PlatformTaskRecordItem) error {
 	_, err := s.q.UpsertPlatformTaskItem(tenantContext(execCtx, v.TenantID), sqlc.UpsertPlatformTaskItemParams{
 		ID:        v.ID,
@@ -2691,7 +2720,7 @@ func (s *Store) UpsertPlatformTaskItem(execCtx context.Context, v domain.Platfor
 	return err
 }
 
-// GetPlatformTaskItem 從儲存層取得平台任務項目。
+// GetPlatformTaskItem 從儲存層取得平臺任務項目。
 func (s *Store) GetPlatformTaskItem(execCtx context.Context, tenantID, accountID, id string) (domain.PlatformTaskRecordItem, bool, error) {
 	v, err := s.q.GetPlatformTaskItem(tenantContext(execCtx, tenantID), sqlc.GetPlatformTaskItemParams{TenantID: tenantID, AccountID: accountID, ID: id})
 	if isNotFound(err) {
@@ -2703,7 +2732,7 @@ func (s *Store) GetPlatformTaskItem(execCtx context.Context, tenantID, accountID
 	return fromPlatformTaskItem(v), true, nil
 }
 
-// ListPlatformTaskItems 從儲存層列出平台任務項目。
+// ListPlatformTaskItems 從儲存層列出平臺任務項目。
 func (s *Store) ListPlatformTaskItems(execCtx context.Context, tenantID, accountID string) ([]domain.PlatformTaskRecordItem, error) {
 	items, err := s.q.ListPlatformTaskItems(tenantContext(execCtx, tenantID), sqlc.ListPlatformTaskItemsParams{TenantID: tenantID, AccountID: accountID})
 	if err != nil {
@@ -2712,12 +2741,12 @@ func (s *Store) ListPlatformTaskItems(execCtx context.Context, tenantID, account
 	return mapSlice(items, fromPlatformTaskItem), nil
 }
 
-// DeletePlatformTaskItem 從儲存層刪除平台任務項目。
+// DeletePlatformTaskItem 從儲存層刪除平臺任務項目。
 func (s *Store) DeletePlatformTaskItem(execCtx context.Context, tenantID, accountID, id string) error {
 	return s.q.DeletePlatformTaskItem(tenantContext(execCtx, tenantID), sqlc.DeletePlatformTaskItemParams{TenantID: tenantID, AccountID: accountID, ID: id})
 }
 
-// UpsertPlatformTaskTodo 從儲存層處理 upsert 平台任務待辦。
+// UpsertPlatformTaskTodo 從儲存層處理 upsert 平臺任務待辦。
 func (s *Store) UpsertPlatformTaskTodo(execCtx context.Context, v domain.PlatformTaskTodoRecord) error {
 	_, err := s.q.UpsertPlatformTaskTodo(tenantContext(execCtx, v.TenantID), sqlc.UpsertPlatformTaskTodoParams{
 		ID:                  v.ID,
@@ -2733,7 +2762,7 @@ func (s *Store) UpsertPlatformTaskTodo(execCtx context.Context, v domain.Platfor
 	return err
 }
 
-// GetPlatformTaskTodo 從儲存層取得平台任務待辦。
+// GetPlatformTaskTodo 從儲存層取得平臺任務待辦。
 func (s *Store) GetPlatformTaskTodo(execCtx context.Context, tenantID, accountID, id string) (domain.PlatformTaskTodoRecord, bool, error) {
 	v, err := s.q.GetPlatformTaskTodo(tenantContext(execCtx, tenantID), sqlc.GetPlatformTaskTodoParams{TenantID: tenantID, AccountID: accountID, ID: id})
 	if isNotFound(err) {
@@ -2745,7 +2774,7 @@ func (s *Store) GetPlatformTaskTodo(execCtx context.Context, tenantID, accountID
 	return fromPlatformTaskTodo(v), true, nil
 }
 
-// ListPlatformTaskTodos 從儲存層列出平台任務待辦。
+// ListPlatformTaskTodos 從儲存層列出平臺任務待辦。
 func (s *Store) ListPlatformTaskTodos(execCtx context.Context, tenantID, accountID string) ([]domain.PlatformTaskTodoRecord, error) {
 	items, err := s.q.ListPlatformTaskTodos(tenantContext(execCtx, tenantID), sqlc.ListPlatformTaskTodosParams{TenantID: tenantID, AccountID: accountID})
 	if err != nil {
@@ -2754,7 +2783,7 @@ func (s *Store) ListPlatformTaskTodos(execCtx context.Context, tenantID, account
 	return mapSlice(items, fromPlatformTaskTodo), nil
 }
 
-// DeletePlatformTaskTodo 從儲存層刪除平台任務待辦。
+// DeletePlatformTaskTodo 從儲存層刪除平臺任務待辦。
 func (s *Store) DeletePlatformTaskTodo(execCtx context.Context, tenantID, accountID, id string) error {
 	return s.q.DeletePlatformTaskTodo(tenantContext(execCtx, tenantID), sqlc.DeletePlatformTaskTodoParams{TenantID: tenantID, AccountID: accountID, ID: id})
 }
@@ -3240,7 +3269,7 @@ func (s *Store) MarkAllNotificationsRead(execCtx context.Context, tenantID, acco
 	return int(count), nil
 }
 
-// AppendAuditLog 從儲存層附加稽核 log。
+// AppendAuditLog 從儲存層附加稽覈 log。
 func (s *Store) AppendAuditLog(execCtx context.Context, v domain.AuditLog) error {
 	_, err := s.q.AppendAuditLog(tenantContext(execCtx, v.TenantID), sqlc.AppendAuditLogParams{
 		ID:             v.ID,
@@ -3258,7 +3287,7 @@ func (s *Store) AppendAuditLog(execCtx context.Context, v domain.AuditLog) error
 	return err
 }
 
-// ListAuditLogs 從儲存層列出稽核 logs。
+// ListAuditLogs 從儲存層列出稽覈 logs。
 func (s *Store) ListAuditLogs(execCtx context.Context, tenantID string) ([]domain.AuditLog, error) {
 	items, err := s.q.ListAuditLogs(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
@@ -3267,7 +3296,24 @@ func (s *Store) ListAuditLogs(execCtx context.Context, tenantID string) ([]domai
 	return mapSlice(items, fromAuditLog), nil
 }
 
-// ListAuditLogPage 從儲存層列出稽核 log 分頁。
+// ListAuditLogFacetSources returns tenant-scoped fields required for audit filters and omits sensitive details.
+func (s *Store) ListAuditLogFacetSources(execCtx context.Context, tenantID string) ([]domain.WorkspaceAuditLogFacetSource, error) {
+	items, err := s.q.ListAuditLogFacetSources(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.WorkspaceAuditLogFacetSource, 0, len(items))
+	for _, item := range items {
+		out = append(out, domain.WorkspaceAuditLogFacetSource{
+			ActorAccountID: item.ActorAccountID,
+			Action:         item.Action,
+			Resource:       item.Resource,
+		})
+	}
+	return out, nil
+}
+
+// ListAuditLogPage 從儲存層列出稽覈 log 分頁。
 func (s *Store) ListAuditLogPage(execCtx context.Context, tenantID string, page domain.PageRequest) ([]domain.AuditLog, int, error) {
 	page = utils.NormalizePageRequest(page)
 	total, err := s.q.CountAuditLogs(tenantContext(execCtx, tenantID), tenantID)
@@ -3286,7 +3332,7 @@ func (s *Store) ListAuditLogPage(execCtx context.Context, tenantID string, page 
 	return mapSlice(items, fromAuditLog), int(total), nil
 }
 
-// ListAuditLogPageFiltered 從儲存層篩選並列出稽核 log 分頁。
+// ListAuditLogPageFiltered 從儲存層篩選並列出稽覈 log 分頁。
 func (s *Store) ListAuditLogPageFiltered(execCtx context.Context, tenantID string, query domain.WorkspaceAuditLogQuery, page domain.PageRequest) ([]domain.AuditLog, int, error) {
 	page = utils.NormalizePageRequest(page)
 	params := auditLogFilterParams(tenantID, query, page)
@@ -3809,7 +3855,7 @@ func jsonPermissionSetTemplateContent(b []byte) domain.PermissionSetTemplateCont
 	return out
 }
 
-// jsonUserGroupTemplateContent 處理 JSON 使用者群組模板內容。
+// jsonUserGroupTemplateContent 處理 JSON 使用者羣組模板內容。
 func jsonUserGroupTemplateContent(b []byte) domain.UserGroupTemplateContent {
 	if len(b) == 0 {
 		return domain.UserGroupTemplateContent{}
@@ -3893,7 +3939,7 @@ func fromUserIdentity(v sqlc.UserIdentity) domain.UserIdentity {
 	}
 }
 
-// fromUserGroup 轉換使用者群組。
+// fromUserGroup 轉換使用者羣組。
 func fromUserGroup(v sqlc.UserGroup) domain.UserGroup {
 	return domain.UserGroup{
 		ID:                   v.ID,
@@ -3909,7 +3955,7 @@ func fromUserGroup(v sqlc.UserGroup) domain.UserGroup {
 	}
 }
 
-// fromGroupMembership 轉換使用者群組成員關係。
+// fromGroupMembership 轉換使用者羣組成員關係。
 func fromGroupMembership(v sqlc.AuthzGroupMembership) domain.GroupMembership {
 	return domain.GroupMembership{
 		ID:                 v.ID,
@@ -3998,7 +4044,7 @@ func fromPermissionSetTemplate(v sqlc.PermissionSetTemplate) domain.PermissionSe
 	}
 }
 
-// fromUserGroupTemplate 轉換使用者群組模板。
+// fromUserGroupTemplate 轉換使用者羣組模板。
 func fromUserGroupTemplate(v sqlc.UserGroupTemplate) domain.UserGroupTemplate {
 	return domain.UserGroupTemplate{
 		ID:          v.ID,
@@ -4539,7 +4585,7 @@ func fromFormInstanceFieldValue(v sqlc.FormInstanceFieldValue) domain.FormInstan
 	}
 }
 
-// fromPlatformTaskItem 轉換平台任務項目。
+// fromPlatformTaskItem 轉換平臺任務項目。
 func fromPlatformTaskItem(v sqlc.PlatformTaskItem) domain.PlatformTaskRecordItem {
 	return domain.PlatformTaskRecordItem{
 		ID:        v.ID,
@@ -4556,7 +4602,7 @@ func fromPlatformTaskItem(v sqlc.PlatformTaskItem) domain.PlatformTaskRecordItem
 	}
 }
 
-// fromPlatformTaskTodo 轉換平台任務待辦。
+// fromPlatformTaskTodo 轉換平臺任務待辦。
 func fromPlatformTaskTodo(v sqlc.PlatformTaskTodo) domain.PlatformTaskTodoRecord {
 	return domain.PlatformTaskTodoRecord{
 		ID:                  v.ID,
@@ -4742,7 +4788,7 @@ func notificationItemFromFields(id, tone, category, title, body, statusText, lin
 	}
 }
 
-// fromAuditLog 轉換稽核 log。
+// fromAuditLog 轉換稽覈 log。
 func fromAuditLog(v sqlc.AuditLog) domain.AuditLog {
 	return domain.AuditLog{
 		ID:             v.ID,

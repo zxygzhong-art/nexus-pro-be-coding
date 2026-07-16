@@ -32,21 +32,44 @@ func TestEhrmsOrgUnitsFromDepartmentsUsesParentCodeAndClosed(t *testing.T) {
 		{"部門代碼": "C0101", "部門中文名稱": "Sales(已關閉)", "上級部門代碼": "C01", "部門已關閉": "true"},
 		{"部門代碼": "C0102", "部門中文名稱": "Ops（已關閉）", "上級部門代碼": "C01"},
 	}, now)
-	byID := map[string]domain.OrgUnit{}
+	byCode := map[string]domain.OrgUnit{}
 	for _, unit := range units {
-		byID[unit.ID] = unit
+		byCode[unit.Code] = unit
 	}
-	if byID["C0101"].ParentID != "C01" || !byID["C0101"].Closed {
-		t.Fatalf("unexpected department mapping: %+v", byID["C0101"])
+	if byCode["C0101"].ParentID != byCode["C01"].ID || !byCode["C0101"].Closed {
+		t.Fatalf("unexpected department mapping: %+v", byCode["C0101"])
 	}
-	if byID["C0101"].Name != "Sales" {
-		t.Fatalf("expected closed suffix stripped from name, got %q", byID["C0101"].Name)
+	if byCode["C0101"].Name != "Sales" {
+		t.Fatalf("expected closed suffix stripped from name, got %q", byCode["C0101"].Name)
 	}
-	if !byID["C0102"].Closed || byID["C0102"].Name != "Ops" {
-		t.Fatalf("expected name suffix to mark closed and strip label, got %+v", byID["C0102"])
+	if !byCode["C0102"].Closed || byCode["C0102"].Name != "Ops" {
+		t.Fatalf("expected name suffix to mark closed and strip label, got %+v", byCode["C0102"])
 	}
-	if len(byID["C0101"].Path) != 2 || byID["C0101"].Path[0] != "C01" {
-		t.Fatalf("unexpected path: %+v", byID["C0101"].Path)
+	if len(byCode["C0101"].Path) != 2 || byCode["C0101"].Path[0] != byCode["C01"].ID {
+		t.Fatalf("unexpected path: %+v", byCode["C0101"].Path)
+	}
+	if byCode["C01"].ID == "C01" || byCode["C0101"].ID == "C0101" {
+		t.Fatalf("expected opaque tenant-scoped IDs, got %+v", byCode)
+	}
+}
+
+// TestEHRMSCatalogIDsAreTenantScoped verifies identical external codes never share global IDs.
+func TestEHRMSCatalogIDsAreTenantScoped(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	departments := []domain.EHRMSDepartmentRecord{{"部門代碼": "C01", "部門中文名稱": "Corporate"}}
+	positions := []domain.EHRMSPositionRecord{{"職務代碼": "0704", "職務中文名稱": "Engineer"}}
+
+	tenantAUnits := service.EHRMSOrgUnitsFromDepartments("tenant-a", departments, now)
+	tenantBUnits := service.EHRMSOrgUnitsFromDepartments("tenant-b", departments, now)
+	tenantAPositions := service.EHRMSPositionsFromRecords("tenant-a", positions, now)
+	tenantBPositions := service.EHRMSPositionsFromRecords("tenant-b", positions, now)
+
+	if tenantAUnits[0].ID == tenantBUnits[0].ID || tenantAUnits[0].Code != tenantBUnits[0].Code {
+		t.Fatalf("expected tenant-scoped org IDs with the same business code, a=%+v b=%+v", tenantAUnits[0], tenantBUnits[0])
+	}
+	if tenantAPositions[0].ID == tenantBPositions[0].ID || tenantAPositions[0].Code != tenantBPositions[0].Code {
+		t.Fatalf("expected tenant-scoped position IDs with the same business code, a=%+v b=%+v", tenantAPositions[0], tenantBPositions[0])
 	}
 }
 
@@ -87,6 +110,38 @@ func TestEhrmsPositionsFromRecordsDedupesByJobCode(t *testing.T) {
 	if len(positions) != 1 || positions[0].Name != "工程師" || positions[0].NameEN != "Engineer" {
 		t.Fatalf("unexpected positions: %+v", positions)
 	}
+	if positions[0].ID == positions[0].Code {
+		t.Fatalf("expected opaque position ID, got %+v", positions[0])
+	}
+}
+
+// mustOrgUnitByCode resolves a tenant-local business code in memory-backed tests.
+func mustOrgUnitByCode(t *testing.T, store *memory.Store, tenantID, code string) domain.OrgUnit {
+	t.Helper()
+	units, err := store.ListOrgUnits(context.Background(), tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, unit := range units {
+		if unit.Code == code {
+			return unit
+		}
+	}
+	t.Fatalf("expected org unit code %q for tenant %q", code, tenantID)
+	return domain.OrgUnit{}
+}
+
+// mustPositionByCode resolves a tenant-local position business code in memory-backed tests.
+func mustPositionByCode(t *testing.T, store *memory.Store, tenantID, code string) domain.Position {
+	t.Helper()
+	position, ok, err := store.GetPositionByCode(context.Background(), tenantID, code)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
+		t.Fatalf("expected position code %q for tenant %q", code, tenantID)
+	}
+	return position
 }
 
 func TestUpsertEHRMSPositionsPreservesOrgUnitAssignment(t *testing.T) {
@@ -100,7 +155,7 @@ func TestUpsertEHRMSPositionsPreservesOrgUnitAssignment(t *testing.T) {
 	}
 	hr := service.New(store).HR()
 	if _, err := hr.UpsertEHRMSPositions(service.RequestContext{TenantID: "tenant-1"}, []domain.Position{{
-		ID: "0901", TenantID: "tenant-1", Code: "0901", Name: "Manager", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now,
+		ID: "ehrms-pos-new", TenantID: "tenant-1", Code: "0901", Name: "Manager", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now,
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -110,6 +165,9 @@ func TestUpsertEHRMSPositionsPreservesOrgUnitAssignment(t *testing.T) {
 	}
 	if updated.OrgUnitID != "ou-ceo" {
 		t.Fatalf("expected eHRMS sync to preserve org unit, got %+v", updated)
+	}
+	if _, ok, err := store.GetPosition(context.Background(), "tenant-1", "ehrms-pos-new"); err != nil || ok {
+		t.Fatalf("expected business-code reconciliation to preserve the legacy ID, ok=%v err=%v", ok, err)
 	}
 }
 
@@ -124,7 +182,7 @@ func TestUpsertEHRMSOrgUnitsPreservesManagerPosition(t *testing.T) {
 	}
 	hr := service.New(store).HR()
 	if _, err := hr.UpsertEHRMSOrgUnits(service.RequestContext{TenantID: "tenant-1"}, []domain.OrgUnit{{
-		ID: "ou-ceo", TenantID: "tenant-1", Code: "CEO", Name: "CEO", Path: []string{"ou-ceo"}, CreatedAt: now, UpdatedAt: now,
+		ID: "ehrms-ou-new", TenantID: "tenant-1", Code: "CEO", Name: "CEO", Path: []string{"ehrms-ou-new"}, CreatedAt: now, UpdatedAt: now,
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -134,6 +192,9 @@ func TestUpsertEHRMSOrgUnitsPreservesManagerPosition(t *testing.T) {
 	}
 	if updated.ManagerPositionID != "0901" {
 		t.Fatalf("expected eHRMS sync to preserve manager position, got %+v", updated)
+	}
+	if _, ok, err := store.GetOrgUnit(context.Background(), "tenant-1", "ehrms-ou-new"); err != nil || ok {
+		t.Fatalf("expected business-code reconciliation to preserve the legacy ID, ok=%v err=%v", ok, err)
 	}
 }
 

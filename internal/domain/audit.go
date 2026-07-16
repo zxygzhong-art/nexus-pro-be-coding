@@ -2,7 +2,7 @@ package domain
 
 import "time"
 
-// AuditLog 定義稽核 log 的資料結構。
+// AuditLog 定義稽覈 log 的資料結構。
 type AuditLog struct {
 	ID             string         `json:"id"`
 	TenantID       string         `json:"tenant_id"`

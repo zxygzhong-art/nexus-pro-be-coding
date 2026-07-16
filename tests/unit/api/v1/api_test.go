@@ -17,6 +17,7 @@ import (
 	"net/http/httptest"
 	"net/textproto"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -206,7 +207,7 @@ func TestDefaultAPIRequiresAuthenticatedContext(t *testing.T) {
 	}
 }
 
-// TestPlatformHomeEndpointRequiresMeReadPermission 驗證平台首頁 endpoint requires me.read 權限。
+// TestPlatformHomeEndpointRequiresMeReadPermission 驗證平臺首頁 endpoint requires me.read 權限。
 func TestPlatformHomeEndpointRequiresMeReadPermission(t *testing.T) {
 	now := time.Date(2026, 7, 2, 9, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
 	handler := newTestAPIForAccountNow("acct-no-platform-home", now, func(store *memory.Store) {
@@ -240,7 +241,7 @@ func TestPlatformHomeEndpointRequiresMeReadPermission(t *testing.T) {
 	}
 }
 
-// TestPlatformHomeEndpointReturnsHomeProjection 驗證平台首頁 endpoint returns projection。
+// TestPlatformHomeEndpointReturnsHomeProjection 驗證平臺首頁 endpoint returns projection。
 func TestPlatformHomeEndpointReturnsHomeProjection(t *testing.T) {
 	now := time.Date(2026, 7, 2, 9, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
 	handler := newTestAPIForAccountNow("acct-employee", now, nil)
@@ -258,6 +259,124 @@ func TestPlatformHomeEndpointReturnsHomeProjection(t *testing.T) {
 	}
 	if body.ClockSummary.CheckedOutAt != nil {
 		t.Fatalf("unexpected clock summary: %+v", body.ClockSummary)
+	}
+}
+
+// TestPlatformHomeEndpointSerializesEmptyFormColumnsAsArray keeps the HTTP contract aligned with OpenAPI.
+func TestPlatformHomeEndpointSerializesEmptyFormColumnsAsArray(t *testing.T) {
+	now := time.Date(2026, 7, 2, 9, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	handler := newTestAPIForAccountNow("acct-employee", now, func(store *memory.Store) {
+		templates, err := store.ListFormTemplates(context.Background(), "demo")
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, template := range templates {
+			template.Schema = map[string]any{"workspace_design": map[string]any{"enabled": false}}
+			if err := store.UpsertFormTemplate(context.Background(), template); err != nil {
+				t.Fatal(err)
+			}
+		}
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/platform/home", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for platform home, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	columns, ok := payload.Data["form_columns"].([]any)
+	if !ok || len(columns) != 0 {
+		t.Fatalf("expected form_columns to be an empty JSON array, got %#v", payload.Data["form_columns"])
+	}
+}
+
+// TestPlatformTasksEndpointReturnsAccessibleProjectionWithoutClockPermission keeps optional widgets from failing the task page.
+func TestPlatformTasksEndpointReturnsAccessibleProjectionWithoutClockPermission(t *testing.T) {
+	now := time.Date(2026, 7, 2, 9, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	handler := newTestAPIForAccountNow("acct-hr-readonly", now, func(store *memory.Store) {
+		permissionSet, ok, err := store.GetPermissionSet(context.Background(), "demo", "ps-hr-readonly")
+		if err != nil || !ok {
+			t.Fatalf("load HR readonly permission set: ok=%v err=%v", ok, err)
+		}
+		filtered := make([]domain.Permission, 0, len(permissionSet.Permissions))
+		for _, permission := range permissionSet.Permissions {
+			if permission.Resource == "attendance.clock" && permission.Action == domain.ActionRead {
+				continue
+			}
+			filtered = append(filtered, permission)
+		}
+		permissionSet.Permissions = filtered
+		if err := store.UpsertPermissionSet(context.Background(), permissionSet); err != nil {
+			t.Fatal(err)
+		}
+	})
+	req := httptest.NewRequest(http.MethodGet, "/v1/platform/tasks", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for accessible task subset, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Data map[string]any `json:"data"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := payload.Data["clock_summary"]; ok {
+		t.Fatalf("expected unauthorized clock_summary to be omitted, got %#v", payload.Data["clock_summary"])
+	}
+	for _, key := range []string{"records", "todos", "ai_messages", "quick_prompts"} {
+		if _, ok := payload.Data[key]; !ok {
+			t.Fatalf("expected accessible task field %q, got %#v", key, payload.Data)
+		}
+	}
+}
+
+// TestWorkspaceManagementRejectsSelfScope prevents personal HR grants from opening the tenant management plane.
+func TestWorkspaceManagementRejectsSelfScope(t *testing.T) {
+	now := time.Date(2026, 7, 2, 9, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	handler := newTestAPIForAccountNow("acct-employee", now, nil)
+
+	for _, path := range []string{"/v1/workspace/overview", "/v1/workspace/employees"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, req)
+		if rec.Code != http.StatusForbidden {
+			t.Fatalf("expected 403 for self-scoped workspace request %s, got %d: %s", path, rec.Code, rec.Body.String())
+		}
+		apiErr := decodeError(t, rec.Body.Bytes())
+		if apiErr.Code != domain.ErrorCodeDataScopeDenied || apiErr.ReasonCode != "data_scope_denied" {
+			t.Fatalf("expected data_scope_denied for %s, got %+v", path, apiErr)
+		}
+	}
+
+	personalReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees", nil)
+	personalRec := httptest.NewRecorder()
+	handler.ServeHTTP(personalRec, personalReq)
+	if personalRec.Code != http.StatusOK {
+		t.Fatalf("expected personal HR collection to remain available, got %d: %s", personalRec.Code, personalRec.Body.String())
+	}
+}
+
+// TestWorkspaceManagementAllowsTenantWideScope keeps the administrator path available.
+func TestWorkspaceManagementAllowsTenantWideScope(t *testing.T) {
+	handler := newTestAPI(true)
+	req := httptest.NewRequest(http.MethodGet, "/v1/workspace/employees", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected tenant-wide workspace access, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -1032,7 +1151,7 @@ func TestEHRMSEmployeeSyncRouteReachesServiceWithoutApprovalHeader(t *testing.T)
 	}
 }
 
-// TestAuditLogRouteAllowsGrantedRead 驗證稽核列表依 read 權限直接放行。
+// TestAuditLogRouteAllowsGrantedRead 驗證稽覈列表依 read 權限直接放行。
 func TestAuditLogRouteAllowsGrantedRead(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodGet, "/v1/audit-logs", nil)
@@ -1042,6 +1161,23 @@ func TestAuditLogRouteAllowsGrantedRead(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected 200 for granted audit log read, got %d: %s", rec.Code, rec.Body.String())
+	}
+}
+
+// TestWorkspaceAuditLogFacetsRouteReturnsTypedEmptyOptions verifies the dedicated tenant-wide contract.
+func TestWorkspaceAuditLogFacetsRouteReturnsTypedEmptyOptions(t *testing.T) {
+	handler := newTestAPI(true)
+	req := httptest.NewRequest(http.MethodGet, "/v1/workspace/audit-logs/facets", nil)
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200 for granted workspace audit facets, got %d: %s", rec.Code, rec.Body.String())
+	}
+	facets := decodeData[domain.WorkspaceAuditLogFacets](t, rec.Body.Bytes())
+	if facets.Operators == nil || facets.Types == nil || len(facets.Operators) != 0 || len(facets.Types) != 0 {
+		t.Fatalf("expected typed empty facets, got %+v", facets)
 	}
 }
 
@@ -1105,6 +1241,115 @@ func TestAssumeRoleEndpointReturnsCreatedTypedResponse(t *testing.T) {
 	}
 	if regexp.MustCompile(`^sess-\d+-\d{6}$`).MatchString(result.SessionToken) {
 		t.Fatalf("assume role session token should not use timestamp-counter format: %q", result.SessionToken)
+	}
+}
+
+// TestMeProjectsAssumedAccessWhenBoundaryExcludesMeRead keeps GET /me usable as
+// the authoritative caller-identity bootstrap without broadening the role boundary.
+func TestMeProjectsAssumedAccessWhenBoundaryExcludesMeRead(t *testing.T) {
+	now := time.Now().UTC()
+	handler := newTestAPIForAccountNow("acct-admin", now, func(store *memory.Store) {
+		_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+			ID:       "ps-admin",
+			TenantID: "demo",
+			Name:     "Wildcard Admin",
+			Permissions: []domain.Permission{
+				{Resource: "*", Action: "*", Scope: domain.ScopeAll},
+			},
+			CreatedAt: now,
+		})
+	})
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/iam/assumable-roles", strings.NewReader(`{"name":"Audit Projection","trusted":true,"trust_policy":{"accounts":["acct-admin"]},"permission_boundary":{"allow":["audit.log.read"]},"permission_set_ids":["ps-audit"],"session_duration_seconds":1800}`))
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	handler.ServeHTTP(createRec, createReq)
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("expected role creation to succeed, got %d", createRec.Code)
+	}
+	role := decodeData[domain.AssumableRole](t, createRec.Body.Bytes())
+
+	assumeReq := httptest.NewRequest(http.MethodPost, "/v1/iam/assumable-roles/"+role.ID+"/assume", strings.NewReader(`{"reason":"verify caller projection","duration_minutes":30}`))
+	assumeReq.Header.Set("Content-Type", "application/json")
+	assumeRec := httptest.NewRecorder()
+	handler.ServeHTTP(assumeRec, assumeReq)
+	if assumeRec.Code != http.StatusCreated {
+		t.Fatalf("expected role assumption to succeed, got %d", assumeRec.Code)
+	}
+	assumed := decodeData[domain.AssumeRoleResponse](t, assumeRec.Body.Bytes())
+
+	meReq := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	meReq.Header.Set("X-Assumable-Role-Session-ID", assumed.SessionID)
+	meRec := httptest.NewRecorder()
+	handler.ServeHTTP(meRec, meReq)
+	if meRec.Code != http.StatusOK {
+		t.Fatalf("expected assumed access projection to succeed, got %d", meRec.Code)
+	}
+	me := decodeData[domain.MeResponse](t, meRec.Body.Bytes())
+	if me.AssumedRole == nil || me.AssumedRole.ID != role.ID {
+		t.Fatalf("expected the assumed role in the authoritative projection")
+	}
+	var hasAuditRead, hasMeRead, hasIAMRead, hasWildcard bool
+	for _, permission := range me.EffectivePermissions {
+		if permission.ApplicationCode == domain.AppAudit && permission.ResourceType == "audit_log" && permission.Action == domain.ActionRead {
+			hasAuditRead = true
+		}
+		if permission.Resource == "me" && permission.Action == domain.ActionRead {
+			hasMeRead = true
+		}
+		if permission.ApplicationCode == domain.AppIAM {
+			hasIAMRead = true
+		}
+		if permission.Resource == "*" || permission.Action == "*" {
+			hasWildcard = true
+		}
+	}
+	if !hasAuditRead || hasMeRead || hasIAMRead || hasWildcard {
+		t.Fatalf("expected the projection to keep only boundary-allowed audit access, got %+v", me.EffectivePermissions)
+	}
+	if !slices.Contains(me.EffectiveMenuKeys, "audit.logs") {
+		t.Fatalf("expected canonical audit.logs menu key, got %+v", me.EffectiveMenuKeys)
+	}
+
+	auditReq := httptest.NewRequest(http.MethodGet, "/v1/audit-logs", nil)
+	auditReq.Header.Set("X-Assumable-Role-Session-ID", assumed.SessionID)
+	auditRec := httptest.NewRecorder()
+	handler.ServeHTTP(auditRec, auditReq)
+	if auditRec.Code != http.StatusOK {
+		t.Fatalf("expected legacy audit.log.read boundary to authorize the audit route, got %d", auditRec.Code)
+	}
+
+	invalidReq := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
+	invalidReq.Header.Set("X-Assumable-Role-Session-ID", "synthetic-inactive-session")
+	invalidRec := httptest.NewRecorder()
+	handler.ServeHTTP(invalidRec, invalidReq)
+	if invalidRec.Code != http.StatusNotFound {
+		t.Fatalf("expected an invalid supplied session to fail closed, got %d", invalidRec.Code)
+	}
+}
+
+// TestCreateAssumableRoleRejectsMissingPermissionBoundary keeps the HTTP contract aligned with the service safety invariant.
+func TestCreateAssumableRoleRejectsMissingPermissionBoundary(t *testing.T) {
+	handler := newTestAPI(true)
+	req := httptest.NewRequest(http.MethodPost, "/v1/iam/assumable-roles", strings.NewReader(`{"name":"Missing Boundary","trusted":true,"trust_policy":{"accounts":["acct-admin"]}}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for missing permission boundary, got %d: %s", rec.Code, rec.Body.String())
+	}
+	var payload struct {
+		Error struct {
+			Code    domain.ErrorCode `json:"code"`
+			Message string           `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Error.Code != domain.ErrorCodeBadRequest || payload.Error.Message != "assumable role permission_boundary is required" {
+		t.Fatalf("unexpected missing-boundary error: %+v", payload.Error)
 	}
 }
 
@@ -1184,7 +1429,7 @@ func TestEmployeeListDetailAndCSVExportEndpoints(t *testing.T) {
 	}
 }
 
-// TestEmployeeExportAuditUsesOpenTelemetryTraceID 驗證員工 export 稽核 uses open 遙測 trace ID。
+// TestEmployeeExportAuditUsesOpenTelemetryTraceID 驗證員工 export 稽覈 uses open 遙測 trace ID。
 func TestEmployeeExportAuditUsesOpenTelemetryTraceID(t *testing.T) {
 	spanRecorder := installAPISpanRecorder(t)
 	store := memory.NewStore()
@@ -1388,7 +1633,7 @@ func TestEmployeeCreateStatusAndDeleteContract(t *testing.T) {
 	}
 }
 
-// TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes 驗證員工 preview avatar 範本 and 流程核准路由。
+// TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes 驗證員工 preview avatar 範本 and 流程覈準路由。
 func TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes(t *testing.T) {
 	handler := newTestAPIWithFormApprovalWorkflows(true)
 
@@ -1705,7 +1950,7 @@ func apiSpanNames(recorder *tracetest.SpanRecorder) []string {
 	return names
 }
 
-// findAPIAuditLog 驗證 find API 稽核 log。
+// findAPIAuditLog 驗證 find API 稽覈 log。
 func findAPIAuditLog(logs []domain.AuditLog, action string) (domain.AuditLog, bool) {
 	for _, log := range logs {
 		if log.Action == action {

@@ -76,7 +76,7 @@ func TestWorkflowHTTPPostgresAcceptance(t *testing.T) {
 	upsertIntegrationIdentity(t, store, tenantID, applicantID, now)
 	upsertIntegrationIdentity(t, store, tenantID, approverID, now)
 	if err := store.UpsertFormTemplate(ctx, domain.FormTemplate{
-		ID: "ft_" + suffix, TenantID: tenantID, Key: "general", Name: "通用签呈",
+		ID: "ft_" + suffix, TenantID: tenantID, Key: "general", Name: "通用簽呈",
 		Schema: postgresWorkflowTemplateSchema(approverID), CreatedAt: now,
 	}); err != nil {
 		t.Fatal(err)

@@ -245,15 +245,18 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 			return nil, err
 		}
 		serviceOptions.KnowledgeEmbedder = embeddingClient
+		readinessChecks["knowledge_embedding"] = embeddingClient.Ping
 		agentModel, err := platformllm.NewLiteLLM(platformllm.LiteLLMConfig{
 			BaseURL: cfg.LiteLLMBaseURL,
 			APIKey:  cfg.LiteLLMAPIKey,
+			Client:  modelHTTPClient,
 		})
 		if err != nil {
 			logStartupFailure(logger, "agent_chat_model", err)
 			shutdownStartedModules(shutdowns, logger)
 			return nil, err
 		}
+		readinessChecks["agent_runtime"] = agentModel.Ping
 		agentRuntime, err := service.NewADKAgentChatRuntime(agentModel)
 		if err != nil {
 			logStartupFailure(logger, "agent_chat_runtime", err)

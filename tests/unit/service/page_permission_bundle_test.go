@@ -187,7 +187,7 @@ func TestCanonicalWorkspacePageActionsDeriveNavigation(t *testing.T) {
 		{menuKey: "workflow.forms", primaryResource: "workflow.form_template", resource: "workflow.form_template", action: domain.ActionDelete},
 		{menuKey: "agents.models", primaryResource: "agent.model", resource: "agent.model", action: domain.ActionDelete},
 		{menuKey: "agents.definitions", primaryResource: "agent.definition", resource: "agent.definition", action: domain.ActionUpdate},
-		{menuKey: "agents.usage", primaryResource: "agent.definition", resource: "agent.definition", action: domain.ActionRead},
+		{menuKey: "agents.usage", primaryResource: "agent.usage", resource: "agent.usage", action: domain.ActionRead},
 		{menuKey: "iam.members", primaryResource: "iam.permission_set_assignment", resource: "iam.permission_set_assignment", action: domain.ActionCreate},
 		{menuKey: "iam.user_groups", primaryResource: "iam.user_group", resource: "iam.user_group", action: domain.ActionDelete},
 		{menuKey: "iam.permission_sets", primaryResource: "iam.permission_set", resource: "iam.permission_set", action: domain.ActionUpdate},
@@ -240,14 +240,14 @@ func TestCanonicalWorkspacePageActionsDeriveNavigation(t *testing.T) {
 	}
 }
 
-// TestAgentUsageMenuRequiresTenantWideDefinitionRead keeps navigation aligned with the usage service scope guard.
-func TestAgentUsageMenuRequiresTenantWideDefinitionRead(t *testing.T) {
+// TestAgentUsageMenuRequiresDedicatedTenantWideRead keeps definition readers out of account usage navigation.
+func TestAgentUsageMenuRequiresDedicatedTenantWideRead(t *testing.T) {
 	tests := []struct {
 		name    string
 		scopes  []domain.Scope
 		visible bool
 	}{
-		{name: "unscoped", scopes: []domain.Scope{""}, visible: true},
+		{name: "unscoped", scopes: []domain.Scope{""}},
 		{name: "self", scopes: []domain.Scope{domain.ScopeSelf}},
 		{name: "own", scopes: []domain.Scope{domain.ScopeOwn}},
 		{name: "all", scopes: []domain.Scope{domain.ScopeAll}, visible: true},
@@ -265,7 +265,7 @@ func TestAgentUsageMenuRequiresTenantWideDefinitionRead(t *testing.T) {
 			}
 			for _, scope := range test.scopes {
 				permissions = append(permissions, domain.Permission{
-					Resource:       "agent.definition",
+					Resource:       "agent.usage",
 					Action:         domain.ActionRead,
 					Scope:          scope,
 					PermissionType: domain.PermissionTypeAPI,
@@ -289,18 +289,68 @@ func TestAgentUsageMenuRequiresTenantWideDefinitionRead(t *testing.T) {
 	}
 }
 
+// TestAgentDefinitionReadDoesNotExposeUsageMenu keeps Agent configuration separate from account PII and usage.
+func TestAgentDefinitionReadDoesNotExposeUsageMenu(t *testing.T) {
+	now := pagePermissionTestNow()
+	store := pagePermissionTestStore(now)
+	pagePermissionUpsertSet(store, now, "ps-definition-reader", []domain.Permission{
+		pagePermissionAPI("workbench", "me", domain.ActionRead),
+		pagePermissionAPI("agents.usage", "agent.definition", domain.ActionRead),
+		pagePermissionMenu("agents.usage"),
+	})
+	pagePermissionUpsertAccount(store, now, []string{"ps-definition-reader"})
+
+	me, err := service.New(store).Me().Resolve(pagePermissionTestContext())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pagePermissionHasMenuKey(me.EffectiveMenuKeys, "agents.usage") {
+		t.Fatalf("expected definition read not to expose agents.usage, got %+v", me.EffectiveMenuKeys)
+	}
+	if pagePermissionHasPermission(me.EffectivePermissions, domain.PermissionTypeMenu, "agents.usage", domain.ActionRead) {
+		t.Fatalf("expected stale agents.usage menu grant to be removed, got %+v", me.EffectivePermissions)
+	}
+}
+
+// TestWorkspaceMenusRejectPersonalScopes keeps self-service permissions out of the tenant management navigation.
+func TestWorkspaceMenusRejectPersonalScopes(t *testing.T) {
+	now := pagePermissionTestNow()
+	store := pagePermissionTestStore(now)
+	pagePermissionUpsertSet(store, now, "ps-self-service", []domain.Permission{
+		pagePermissionAPI("workbench", "me", domain.ActionRead),
+		{Resource: "hr.employee", Action: domain.ActionRead, Scope: domain.ScopeSelf, MenuKey: "hr.employees"},
+		{Resource: "attendance.clock", Action: domain.ActionRead, Scope: domain.ScopeSelf, MenuKey: "attendance.clock"},
+		{Resource: "attendance.leave", Action: domain.ActionRead, Scope: domain.ScopeSelf, MenuKey: "attendance.leave"},
+	})
+	pagePermissionUpsertAccount(store, now, []string{"ps-self-service"})
+
+	me, err := service.New(store).Me().Resolve(pagePermissionTestContext())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, key := range []string{"hr.employees", "attendance.clock", "attendance.leave_policy"} {
+		if pagePermissionHasMenuKey(me.EffectiveMenuKeys, key) {
+			t.Fatalf("expected personal scope to hide workspace key %s, got %+v", key, me.EffectiveMenuKeys)
+		}
+	}
+	if !pagePermissionHasMenuKey(me.EffectiveMenuKeys, "attendance.leave") {
+		t.Fatalf("expected personal leave navigation to remain available, got %+v", me.EffectiveMenuKeys)
+	}
+}
+
 // TestAgentUsageMenuUsesFinalAssumedRoleScope validates normal and assumed scope intersection before showing usage.
 func TestAgentUsageMenuUsesFinalAssumedRoleScope(t *testing.T) {
 	tests := []struct {
 		name          string
 		assumedScope  domain.Scope
 		expectedScope domain.Scope
+		allowed       bool
 		visible       bool
 	}{
 		{name: "self", assumedScope: domain.ScopeSelf, expectedScope: domain.ScopeSelf},
-		{name: "tenant", assumedScope: domain.ScopeTenant, expectedScope: domain.ScopeTenant, visible: true},
-		{name: "all", assumedScope: domain.ScopeAll, expectedScope: domain.ScopeAll, visible: true},
-		{name: "system", assumedScope: domain.ScopeSystem, expectedScope: domain.ScopeSystem, visible: true},
+		{name: "tenant", assumedScope: domain.ScopeTenant, expectedScope: domain.ScopeTenant, allowed: true, visible: true},
+		{name: "all", assumedScope: domain.ScopeAll, expectedScope: domain.ScopeAll, allowed: true, visible: true},
+		{name: "system", assumedScope: domain.ScopeSystem, expectedScope: domain.ScopeSystem, allowed: true, visible: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -309,13 +359,13 @@ func TestAgentUsageMenuUsesFinalAssumedRoleScope(t *testing.T) {
 			pagePermissionUpsertSet(store, now, "ps-base", []domain.Permission{
 				{Resource: "iam.assumable_role", Action: domain.ActionAssume, Target: "role-usage", Scope: domain.ScopeAll},
 				pagePermissionAPI("workbench", "me", domain.ActionRead),
-				pagePermissionAPI("agents.usage", "agent.definition", domain.ActionRead),
+				pagePermissionAPI("agents.usage", "agent.usage", domain.ActionRead),
 				pagePermissionMenu("agents.usage"),
 			})
 			pagePermissionUpsertSet(store, now, "ps-role-usage", []domain.Permission{
 				pagePermissionAPI("workbench", "me", domain.ActionRead),
 				{
-					Resource:       "agent.definition",
+					Resource:       "agent.usage",
 					Action:         domain.ActionRead,
 					Scope:          test.assumedScope,
 					PermissionType: domain.PermissionTypeAPI,
@@ -331,7 +381,7 @@ func TestAgentUsageMenuUsesFinalAssumedRoleScope(t *testing.T) {
 				PermissionSetIDs:       []string{"ps-role-usage"},
 				Trusted:                true,
 				TrustPolicy:            map[string]any{"accounts": []string{"acct-1"}},
-				PermissionBoundary:     map[string]any{"allow": []string{"platform.me.read", "agent.definition.read"}},
+				PermissionBoundary:     map[string]any{"allow": []string{"platform.me.read", "agent.usage.read"}},
 				SessionDurationSeconds: 3600,
 				CreatedAt:              now,
 			})
@@ -342,12 +392,15 @@ func TestAgentUsageMenuUsesFinalAssumedRoleScope(t *testing.T) {
 			}
 			ctx := pagePermissionTestContext()
 			ctx.AssumedRoleSessionID = session.SessionID
-			decision, err := svc.Authz().Check(ctx, domain.CheckRequest{Resource: "agent.definition", Action: domain.ActionRead})
+			decision, err := svc.Authz().Check(ctx, domain.CheckRequest{Resource: "agent.usage", Action: domain.ActionRead})
 			if err != nil {
 				t.Fatal(err)
 			}
-			if !decision.Allowed || decision.Scope != test.expectedScope {
-				t.Fatalf("expected final decision scope %s, got %+v", test.expectedScope, decision)
+			if decision.Allowed != test.allowed || (test.allowed && decision.Scope != test.expectedScope) {
+				t.Fatalf("expected allowed=%v final decision scope %s, got %+v", test.allowed, test.expectedScope, decision)
+			}
+			if !test.allowed && decision.Reason != "data scope denied" {
+				t.Fatalf("expected non-tenant usage scope to fail closed, got %+v", decision)
 			}
 
 			me, err := svc.Me().Resolve(ctx)

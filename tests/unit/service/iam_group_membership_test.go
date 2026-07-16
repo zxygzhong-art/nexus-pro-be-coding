@@ -159,7 +159,7 @@ func TestUserGroupMemberAddRemoveAffectsAuthorizationAndAudits(t *testing.T) {
 	}
 }
 
-// TestGroupMembershipExpiryCapsAllowSnapshot 驗證群組授權快照不會活得比成員關係更久。
+// TestGroupMembershipExpiryCapsAllowSnapshot 驗證羣組授權快照不會活得比成員關係更久。
 func TestGroupMembershipExpiryCapsAllowSnapshot(t *testing.T) {
 	now := time.Now().UTC()
 	validUntil := now.Add(30 * time.Second)
@@ -304,7 +304,7 @@ func TestExpiredGroupMembershipDoesNotGrantGroupPermission(t *testing.T) {
 	}
 }
 
-// TestExpiredGroupMembershipDoesNotSatisfyAssumableRoleTrust 驗證角色 trust 不採用帳號上的過期群組投影。
+// TestExpiredGroupMembershipDoesNotSatisfyAssumableRoleTrust 驗證角色 trust 不採用帳號上的過期羣組投影。
 func TestExpiredGroupMembershipDoesNotSatisfyAssumableRoleTrust(t *testing.T) {
 	now := time.Now().UTC()
 	expiredAt := now.Add(-time.Hour)

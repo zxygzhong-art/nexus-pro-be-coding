@@ -9,13 +9,13 @@ import (
 func TestValidateAndCompileFormDefinitionSchemaV2(t *testing.T) {
 	schema := domain.FormDefinitionSchemaV2{
 		SchemaVersion: 2,
-		Name:          "请假单",
+		Name:          "請假單",
 		Fields: []domain.FormFieldDefinitionV2{
-			{ID: "leave_type", Label: "假别", DataType: "string", Widget: "select", Options: []domain.FormFieldOptionV2{{Label: "年假", Value: "annual"}}},
+			{ID: "leave_type", Label: "假別", DataType: "string", Widget: "select", Options: []domain.FormFieldOptionV2{{Label: "年假", Value: "annual"}}},
 			{ID: "reason", Label: "事由", DataType: "string", Widget: "textarea"},
 		},
 		Layout:   domain.FormLayoutV2{Rows: []domain.FormLayoutRowV2{{ID: "row-1", FieldIDs: []string{"leave_type", "reason"}}}},
-		Workflow: domain.FormWorkflowV2{Stages: []domain.FormWorkflowStageV2{{ID: "manager", Type: "approver", Label: "直属主管", Config: map[string]any{"role": "manager"}}}},
+		Workflow: domain.FormWorkflowV2{Stages: []domain.FormWorkflowStageV2{{ID: "manager", Type: "approver", Label: "直屬主管", Config: map[string]any{"role": "manager"}}}},
 	}
 	compiled, result := domain.CompileFormDefinitionSchemaV2(schema)
 	if !result.Valid || len(result.Errors) != 0 {
@@ -41,9 +41,9 @@ func TestValidateFormDefinitionSchemaV2RejectsUnsafeShape(t *testing.T) {
 func TestValidateFormDefinitionSchemaV2RejectsUncontrolledBinding(t *testing.T) {
 	result := domain.ValidateFormDefinitionSchemaV2(domain.FormDefinitionSchemaV2{
 		SchemaVersion: 2,
-		Name:          "员工选择",
+		Name:          "員工選擇",
 		Fields: []domain.FormFieldDefinitionV2{{
-			ID: "employee", Label: "员工", DataType: "string", Widget: "input",
+			ID: "employee", Label: "員工", DataType: "string", Widget: "input",
 			Binding: &domain.FormFieldBindingV2{SourceID: "sql://tenant.users", ValueField: "email", LabelField: "name"},
 		}},
 		Layout:   domain.FormLayoutV2{Rows: []domain.FormLayoutRowV2{{FieldIDs: []string{"employee"}}}},

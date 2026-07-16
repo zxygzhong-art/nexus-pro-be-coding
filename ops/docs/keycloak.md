@@ -1,10 +1,10 @@
 # Keycloak 配置指南
 
-本指南说明如何在 Nexus Pro 项目中部署、配置 Keycloak，并将其与前端（`nexus-pro-fe`）和后端（`nexus-pro-be`）对接。
+本指南說明如何在 Nexus Pro 項目中部署、配置 Keycloak，並將其與前端（`nexus-pro-fe`）和後端（`nexus-pro-be`）對接。
 
-所有基础设施相关的可调项统一在 [`ops/.env`](../.env)。应用层环境变量分别写在 `nexus-pro-be/.env` 与 `nexus-pro-fe/.env.local`。
+所有基礎設施相關的可調項統一在 [`ops/.env`](../.env)。應用層環境變量分別寫在 `nexus-pro-be/.env` 與 `nexus-pro-fe/.env.local`。
 
-## 架构概览
+## 架構概覽
 
 ```text
 ┌─────────────┐     BFF (app/api/auth/*)      ┌──────────────┐
@@ -13,24 +13,24 @@
 └──────┬──────┘                               └──────┬───────┘
        │ httpOnly cookie (_t / _rt)                    │
        │ proxy.ts 注入 Authorization: Bearer           │ Admin API
-       ▼                                               │ (可选)
+       ▼                                               │ (可選)
 ┌─────────────┐                                        ▼
-│ nexus-pro-be│◀────────────────────────────── 用户开通 / 邀请
-│   (Go API)  │  校验 JWT（iss / aud / tenant_id / sub）
+│ nexus-pro-be│◀────────────────────────────── 用戶開通 / 邀請
+│   (Go API)  │  校驗 JWT（iss / aud / tenant_id / sub）
 └─────────────┘
 ```
 
-职责划分：
+職責劃分：
 
-| 组件 | 职责 |
+| 組件 | 職責 |
 | --- | --- |
-| Keycloak | 登录凭证、OIDC token 签发、社交登录、忘记密码 |
-| 前端 BFF | 与 Keycloak 交换 token，写入 httpOnly cookie，不暴露 token 给浏览器 JS |
-| 后端 API | 校验 Bearer token，从 claims 解析 `tenant_id` 与 `account_id`；可选通过 Admin API 开通用户 |
+| Keycloak | 登錄憑證、OIDC token 簽發、社交登錄、忘記密碼 |
+| 前端 BFF | 與 Keycloak 交換 token，寫入 httpOnly cookie，不暴露 token 給瀏覽器 JS |
+| 後端 API | 校驗 Bearer token，從 claims 解析 `tenant_id` 與 `account_id`；可選通過 Admin API 開通用戶 |
 
-## 1. 启动 Keycloak
+## 1. 啓動 Keycloak
 
-### 完整观测栈（含 PostgreSQL）
+### 完整觀測棧（含 PostgreSQL）
 
 ```bash
 cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
@@ -38,119 +38,119 @@ cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
 docker compose --env-file .env up -d
 ```
 
-### 仅启动 Keycloak
+### 僅啓動 Keycloak
 
-PostgreSQL 已就绪时：
+PostgreSQL 已就緒時：
 
 ```bash
 cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
 COMPOSE_PROFILES=keycloak docker compose --env-file .env up -d --no-deps keycloak
 ```
 
-### 本地默认访问地址
+### 本地默認訪問地址
 
 | 用途 | 地址 |
 | --- | --- |
 | Admin Console / OIDC | `http://127.0.0.1:8080` |
 | Health / Metrics | `http://127.0.0.1:24990` |
 
-默认 bootstrap 管理员（仅本地开发）：
+默認 bootstrap 管理員（僅本地開發）：
 
-| 账号 | 密码 |
+| 賬號 | 密碼 |
 | --- | --- |
 | `admin` | `admin` |
 
-> 正式环境必须更换 `KEYCLOAK_ADMIN_PASSWORD`，并将 `KEYCLOAK_COMMAND` 从 `start-dev` 改为生产模式（`start` + 反向代理 / TLS 配置）。
+> 正式環境必須更換 `KEYCLOAK_ADMIN_PASSWORD`，並將 `KEYCLOAK_COMMAND` 從 `start-dev` 改爲生產模式（`start` + 反向代理 / TLS 配置）。
 
-### 相关 `ops/.env` 变量
+### 相關 `ops/.env` 變量
 
-| 变量 | 默认值 | 说明 |
+| 變量 | 默認值 | 說明 |
 | --- | --- | --- |
 | `KEYCLOAK_IMAGE` | `quay.io/keycloak/keycloak:26.7.0` | 固定版本，不使用 `latest` |
-| `KEYCLOAK_HTTP_HOST_PORT` | `8080` | 对宿主机的 HTTP 端口 |
-| `KEYCLOAK_COMMAND` | `start-dev` | 本地开发模式 |
-| `KEYCLOAK_DB_NAME` | `keycloak` | PostgreSQL 数据库名（initdb 自动创建） |
-| `KEYCLOAK_FEATURES` | `opentelemetry` | 启用 OpenTelemetry |
-| `KEYCLOAK_TRACING_ENABLED` | `true` | trace 上报到 `tempo` |
+| `KEYCLOAK_HTTP_HOST_PORT` | `8080` | 對宿主機的 HTTP 端口 |
+| `KEYCLOAK_COMMAND` | `start-dev` | 本地開發模式 |
+| `KEYCLOAK_DB_NAME` | `keycloak` | PostgreSQL 數據庫名（initdb 自動創建） |
+| `KEYCLOAK_FEATURES` | `opentelemetry` | 啓用 OpenTelemetry |
+| `KEYCLOAK_TRACING_ENABLED` | `true` | trace 上報到 `tempo` |
 
-## 2. 创建 Realm
+## 2. 創建 Realm
 
-1. 打开 Admin Console：`http://127.0.0.1:8080`
+1. 打開 Admin Console：`http://127.0.0.1:8080`
 2. 左上角下拉 → **Create realm**
-3. 填写：
-   - **Realm name**：`nexus-pro`（与项目约定一致）
+3. 填寫：
+   - **Realm name**：`nexus-pro`（與項目約定一致）
 4. 保存
 
-后续所有配置都在 `nexus-pro` realm 下进行。
+後續所有配置都在 `nexus-pro` realm 下進行。
 
-**Issuer URL**（前后端必须一致，无尾部斜杠）：
+**Issuer URL**（前後端必須一致，無尾部斜槓）：
 
 ```text
 http://127.0.0.1:8080/realms/nexus-pro
 ```
 
-若通过反向代理或不同端口对外暴露，请使用浏览器和后端实际访问的地址。例如 `.env.example` 中的 `http://127.0.0.1:8080/realms/nexus-pro` 表示宿主映射到了 `8080`——关键是 **issuer 与 discovery 端点可达且一致**。
+若通過反向代理或不同端口對外暴露，請使用瀏覽器和後端實際訪問的地址。例如 `.env.example` 中的 `http://127.0.0.1:8080/realms/nexus-pro` 表示宿主映射到了 `8080`——關鍵是 **issuer 與 discovery 端點可達且一致**。
 
-验证 discovery 端点：
+驗證 discovery 端點：
 
 ```bash
 curl -s http://127.0.0.1:8080/realms/nexus-pro/.well-known/openid-configuration | jq .issuer
 ```
 
-## 3. 步骤一：配置登录 Client `nexus-pro-connect-api`
+## 3. 步驟一：配置登錄 Client `nexus-pro-connect-api`
 
-项目约定 client id 为 **`nexus-pro-connect-api`**，同时服务于前端 BFF 和后端 token 校验。
+項目約定 client id 爲 **`nexus-pro-connect-api`**，同時服務於前端 BFF 和後端 token 校驗。
 
-路径：**Clients → Create client**
+路徑：**Clients → Create client**
 
-### 3.1 基本设置
+### 3.1 基本設置
 
 | 字段 | 值 |
 | --- | --- |
 | Client type | OpenID Connect |
 | Client ID | `nexus-pro-connect-api` |
-| Client authentication | 视部署选择（见下） |
+| Client authentication | 視部署選擇（見下） |
 
 ### 3.2 Capability config
 
-| 开关 | 是否开启 | 原因 |
+| 開關 | 是否開啓 | 原因 |
 | --- | --- | --- |
-| **Standard flow** | ✅ | SSO / 授权码 + PKCE 回调 |
-| **Direct access grants** | ✅ | 邮箱 + 密码登录（`/api/auth/login`） |
-| **Implicit flow** | ❌ | 已废弃 |
-| **Service accounts roles** | ❌ | 应用 client 不需要 |
+| **Standard flow** | ✅ | SSO / 授權碼 + PKCE 回調 |
+| **Direct access grants** | ✅ | 郵箱 + 密碼登錄（`/api/auth/login`） |
+| **Implicit flow** | ❌ | 已廢棄 |
+| **Service accounts roles** | ❌ | 應用 client 不需要 |
 
 ### 3.3 Login settings
 
-| 字段 | 本地开发示例 |
+| 字段 | 本地開發示例 |
 | --- | --- |
 | Valid redirect URIs | `http://localhost:3002/api/auth/keycloak/callback`, `http://127.0.0.1:3002/api/auth/keycloak/callback` |
 | Valid post logout redirect URIs | `http://localhost:3002/*`, `http://127.0.0.1:3002/*` |
 | Web origins | `http://localhost:3002`, `http://127.0.0.1:3002` |
 
-正式环境替换为实际前端域名，例如 `https://app.example.com/api/auth/keycloak/callback`。
+正式環境替換爲實際前端域名，例如 `https://app.example.com/api/auth/keycloak/callback`。
 
 ### 3.4 Public vs Confidential
 
-| 类型 | 适用场景 | 前端环境变量 |
+| 類型 | 適用場景 | 前端環境變量 |
 | --- | --- | --- |
-| **Public** | 本地开发、纯 PKCE 流程 | `KEYCLOAK_CLIENT_SECRET` 留空 |
-| **Confidential** | 需要 client secret 保护 token 端点 | 填写 `KEYCLOAK_CLIENT_SECRET` |
+| **Public** | 本地開發、純 PKCE 流程 | `KEYCLOAK_CLIENT_SECRET` 留空 |
+| **Confidential** | 需要 client secret 保護 token 端點 | 填寫 `KEYCLOAK_CLIENT_SECRET` |
 
-前端 `exchangeKeycloakToken` 在配置了 secret 时会自动附带 `client_secret`。
+前端 `exchangeKeycloakToken` 在配置了 secret 時會自動附帶 `client_secret`。
 
-### 3.5 Protocol Mappers（关键）
+### 3.5 Protocol Mappers（關鍵）
 
-后端校验 access token 时，除标准 OIDC claims 外，**必须**包含：
+後端校驗 access token 時，除標準 OIDC claims 外，**必須**包含：
 
-| Claim | 别名 | 用途 |
+| Claim | 別名 | 用途 |
 | --- | --- | --- |
-| `tenant_id` | `tid`, `tenant_hint` | 多租户隔离 |
-| `sub` | `account_id`, `acct` | 用户身份绑定 |
+| `tenant_id` | `tid`, `tenant_hint` | 多租戶隔離 |
+| `sub` | `account_id`, `acct` | 用戶身份綁定 |
 
-开通用户时，后端 Admin API 会把 `tenant_id`、`account_id` 写入 Keycloak 用户 attributes。需要通过 Protocol Mapper 映射到 token。
+開通用戶時，後端 Admin API 會把 `tenant_id`、`account_id` 寫入 Keycloak 用戶 attributes。需要通過 Protocol Mapper 映射到 token。
 
-在 **`nexus-pro-connect-api` → Client scopes → Dedicated scope → Add mapper → By configuration → User Attribute`** 分别添加：
+在 **`nexus-pro-connect-api` → Client scopes → Dedicated scope → Add mapper → By configuration → User Attribute`** 分別添加：
 
 #### Mapper 1：`tenant_id`
 
@@ -176,45 +176,45 @@ curl -s http://127.0.0.1:8080/realms/nexus-pro/.well-known/openid-configuration 
 | Add to access token | **On** |
 | Add to userinfo | On |
 
-#### Audience 说明
+#### Audience 說明
 
-后端还会校验 `aud` 包含 `KEYCLOAK_CLIENT_ID`（即 `nexus-pro-connect-api`）。Keycloak 默认会为目标 client 签发 audience，一般无需额外 mapper。若自定义了 audience 行为，确保 access token 的 `aud` 包含该 client id。
+後端還會校驗 `aud` 包含 `KEYCLOAK_CLIENT_ID`（即 `nexus-pro-connect-api`）。Keycloak 默認會爲目標 client 簽發 audience，一般無需額外 mapper。若自定義了 audience 行爲，確保 access token 的 `aud` 包含該 client id。
 
-## 4. 步骤二：配置管理 Client `nexus-pro-admin`
+## 4. 步驟二：配置管理 Client `nexus-pro-admin`
 
-当 `KEYCLOAK_PROVISION_USERS=true` 时，后端通过 Keycloak Admin API 在员工创建 / 导入 / 邀请时自动开通用户。需要一个 **Service Account** client。
+當 `KEYCLOAK_PROVISION_USERS=true` 時，後端通過 Keycloak Admin API 在員工創建 / 導入 / 邀請時自動開通用戶。需要一個 **Service Account** client。
 
-路径：**Clients → Create client**
+路徑：**Clients → Create client**
 
 | 字段 | 值 |
 | --- | --- |
-| Client ID | `nexus-pro-admin`（或自定义，与后端环境变量一致） |
+| Client ID | `nexus-pro-admin`（或自定義，與後端環境變量一致） |
 | Client authentication | **On** |
 | Service accounts roles | **On** |
 | Standard flow | Off |
 | Direct access grants | Off |
 
-创建后：
+創建後：
 
-1. 进入 **Service account roles** 标签
-2. **Assign role** → Filter by clients → 选择 `realm-management`
-3. 只勾选 **`manage-users`**（创建 / 查询 / 更新用户、修改密码、发送 required actions 邮件）
-4. 不要勾选 `manage-realm` 或 `realm-admin`；当前业务不需要修改整个 realm
+1. 進入 **Service account roles** 標籤
+2. **Assign role** → Filter by clients → 選擇 `realm-management`
+3. 只勾選 **`manage-users`**（創建 / 查詢 / 更新用戶、修改密碼、發送 required actions 郵件）
+4. 不要勾選 `manage-realm` 或 `realm-admin`；當前業務不需要修改整個 realm
 
-在 **Credentials** 标签复制 **Client secret**，填入后端：
+在 **Credentials** 標籤複製 **Client secret**，填入後端：
 
 ```bash
 KEYCLOAK_ADMIN_CLIENT_ID=nexus-pro-admin
 KEYCLOAK_ADMIN_CLIENT_SECRET=<secret>
 ```
 
-Admin client 使用 `client_credentials` grant 获取 token（见 `internal/platform/auth/keycloak_admin.go`）。
+Admin client 使用 `client_credentials` grant 獲取 token（見 `internal/platform/auth/keycloak_admin.go`）。
 
-`KEYCLOAK_ADMIN_CLIENT_ID` 与 `KEYCLOAK_ADMIN_CLIENT_SECRET` 也用于当前用户在 Nexus 设置弹窗内变更密码；此流程先用 `KEYCLOAK_CLIENT_ID` 验证当前密码，再只更新登录账号绑定的 Keycloak subject。即使 `KEYCLOAK_PROVISION_USERS=false`，要启用弹窗内改密仍需配置这两个 Admin client 变量。
+`KEYCLOAK_ADMIN_CLIENT_ID` 與 `KEYCLOAK_ADMIN_CLIENT_SECRET` 也用於當前用戶在 Nexus 設置彈窗內變更密碼；此流程先用 `KEYCLOAK_CLIENT_ID` 驗證當前密碼，再只更新登錄賬號綁定的 Keycloak subject。即使 `KEYCLOAK_PROVISION_USERS=false`，要啓用彈窗內改密仍需配置這兩個 Admin client 變量。
 
-### 4.1 验证 Admin Client
+### 4.1 驗證 Admin Client
 
-加载后端环境变量，然后用 `client_credentials` 获取 token：
+加載後端環境變量，然後用 `client_credentials` 獲取 token：
 
 ```bash
 cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be
@@ -231,7 +231,7 @@ ADMIN_TOKEN_JSON=$(curl -sS -X POST \
 jq '{token_type, expires_in, error, error_description}' <<<"$ADMIN_TOKEN_JSON"
 ```
 
-成功时 `token_type` 为 `Bearer`，且 `error` 为空。继续验证 `manage-users` 权限：
+成功時 `token_type` 爲 `Bearer`，且 `error` 爲空。繼續驗證 `manage-users` 權限：
 
 ```bash
 ADMIN_TOKEN=$(jq -r '.access_token // empty' <<<"$ADMIN_TOKEN_JSON")
@@ -243,17 +243,17 @@ curl -sS -o /dev/null \
   "$KEYCLOAK_ROOT/admin/realms/nexus-pro/users?max=1"
 ```
 
-返回 `200` 表示 Client ID、Client secret 和角色均可用；`401` 通常是 client 凭证或 realm 错误，`403` 通常是 `manage-users` 未正确分配。
+返回 `200` 表示 Client ID、Client secret 和角色均可用；`401` 通常是 client 憑證或 realm 錯誤，`403` 通常是 `manage-users` 未正確分配。
 
-## 5. 步骤三：配置邀请 Client 与邮件
+## 5. 步驟三：配置邀請 Client 與郵件
 
-邀请流程不需要再创建第三个 Keycloak client。`KEYCLOAK_INVITE_CLIENT_ID` 表示邀请链接使用哪个登录 client，推荐直接复用步骤一的 `nexus-pro-connect-api`；真正调用 Keycloak Admin API 发送邮件的仍是步骤二的 `nexus-pro-admin`。
+邀請流程不需要再創建第三個 Keycloak client。`KEYCLOAK_INVITE_CLIENT_ID` 表示邀請鏈接使用哪個登錄 client，推薦直接複用步驟一的 `nexus-pro-connect-api`；真正調用 Keycloak Admin API 發送郵件的仍是步驟二的 `nexus-pro-admin`。
 
-后端邀请用户时会添加 `UPDATE_PASSWORD` required action。仅当 `KEYCLOAK_SEND_INVITE_EMAIL=true` 时，后端才会调用 Keycloak 的 `execute-actions-email`；邮件链接有效期为 24 小时。
+後端邀請用戶時會添加 `UPDATE_PASSWORD` required action。僅當 `KEYCLOAK_SEND_INVITE_EMAIL=true` 時，後端纔會調用 Keycloak 的 `execute-actions-email`；郵件鏈接有效期爲 24 小時。
 
-### 5.1 暂不发送邀请邮件
+### 5.1 暫不發送邀請郵件
 
-本地尚未配置 SMTP 时使用：
+本地尚未配置 SMTP 時使用：
 
 ```bash
 KEYCLOAK_SEND_INVITE_EMAIL=false
@@ -261,11 +261,11 @@ KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api
 KEYCLOAK_INVITE_REDIRECT_URL=
 ```
 
-这种模式下 Keycloak 不发送邮件。管理员需要在 **Users → 目标用户 → Credentials** 中手动设置初始密码；建议开启 **Temporary**，让用户首次登录时修改密码。
+這種模式下 Keycloak 不發送郵件。管理員需要在 **Users → 目標用戶 → Credentials** 中手動設置初始密碼；建議開啓 **Temporary**，讓用戶首次登錄時修改密碼。
 
-### 5.2 启用邀请邮件
+### 5.2 啓用邀請郵件
 
-本地开发配置：
+本地開發配置：
 
 ```bash
 KEYCLOAK_PROVISION_USERS=true
@@ -274,14 +274,14 @@ KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api
 KEYCLOAK_INVITE_REDIRECT_URL=http://localhost:3002/login
 ```
 
-还需要在 Keycloak 完成以下配置：
+還需要在 Keycloak 完成以下配置：
 
-1. **Realm settings → Email**：配置 SMTP，并使用测试连接功能确认发送成功
+1. **Realm settings → Email**：配置 SMTP，並使用測試連接功能確認發送成功
 2. **Clients → nexus-pro-connect-api → Settings → Valid redirect URIs**：增加 `http://localhost:3002/login`
-3. 若使用 `127.0.0.1` 访问前端，再增加 `http://127.0.0.1:3002/login`
-4. 确认 `nexus-pro-admin` 已按步骤二分配 `realm-management → manage-users`
+3. 若使用 `127.0.0.1` 訪問前端，再增加 `http://127.0.0.1:3002/login`
+4. 確認 `nexus-pro-admin` 已按步驟二分配 `realm-management → manage-users`
 
-生产环境必须替换为实际 HTTPS 前端地址，并在 `Valid redirect URIs` 中注册完全一致的地址：
+生產環境必須替換爲實際 HTTPS 前端地址，並在 `Valid redirect URIs` 中註冊完全一致的地址：
 
 ```bash
 KEYCLOAK_PROVISION_USERS=true
@@ -290,13 +290,13 @@ KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api
 KEYCLOAK_INVITE_REDIRECT_URL=https://app.example.com/login
 ```
 
-`KEYCLOAK_SEND_INVITE_EMAIL=true` 依赖 `KEYCLOAK_PROVISION_USERS=true`。`KEYCLOAK_INVITE_CLIENT_ID` 留空时后端会回退到 `KEYCLOAK_CLIENT_ID`，但建议显式填写，方便部署检查。
+`KEYCLOAK_SEND_INVITE_EMAIL=true` 依賴 `KEYCLOAK_PROVISION_USERS=true`。`KEYCLOAK_INVITE_CLIENT_ID` 留空時後端會回退到 `KEYCLOAK_CLIENT_ID`，但建議顯式填寫，方便部署檢查。
 
-## 6. 创建测试用户
+## 6. 創建測試用戶
 
-用于本地联调与 smoke test。每个用户的 attributes 必须包含 `tenant_id` 和 `account_id`。
+用於本地聯調與 smoke test。每個用戶的 attributes 必須包含 `tenant_id` 和 `account_id`。
 
-路径：**Users → Add user**
+路徑：**Users → Add user**
 
 | 字段 | admin 示例 | employee 示例 |
 | --- | --- | --- |
@@ -304,27 +304,27 @@ KEYCLOAK_INVITE_REDIRECT_URL=https://app.example.com/login
 | Email | `admin@example.com` | `employee@example.com` |
 | Email verified | On | On |
 
-保存后进入 **Credentials** 标签设置密码（关闭 Temporary）。
+保存後進入 **Credentials** 標籤設置密碼（關閉 Temporary）。
 
-进入 **Attributes** 标签：
+進入 **Attributes** 標籤：
 
-**admin 用户：**
+**admin 用戶：**
 
 | Key | Value |
 | --- | --- |
 | `tenant_id` | `demo` |
 | `account_id` | `acct-admin` |
 
-**employee 用户：**
+**employee 用戶：**
 
 | Key | Value |
 | --- | --- |
 | `tenant_id` | `demo` |
 | `account_id` | `acct-employee` |
 
-这些值须与后端数据库 `accounts` / `user_identities` 表中的记录一致。Smoke test 约定见 [`tools/api-smoke/README.md`](../../tools/api-smoke/README.md)。
+這些值須與後端數據庫 `accounts` / `user_identities` 表中的記錄一致。Smoke test 約定見 [`tools/api-smoke/README.md`](../../tools/api-smoke/README.md)。
 
-### 验证 token claims
+### 驗證 token claims
 
 ```bash
 TOKEN=$(curl -s -X POST "http://127.0.0.1:8080/realms/nexus-pro/protocol/openid-connect/token" \
@@ -335,126 +335,126 @@ TOKEN=$(curl -s -X POST "http://127.0.0.1:8080/realms/nexus-pro/protocol/openid-
   -d "scope=openid profile email" \
   | jq -r .access_token)
 
-# 解码 payload（仅用于调试）
+# 解碼 payload（僅用於調試）
 echo "$TOKEN" | cut -d. -f2 | base64 -d 2>/dev/null | jq .
 ```
 
-确认输出包含 `"tenant_id": "demo"` 和 `"account_id": "acct-admin"`（或 `"sub"` 有值）。
+確認輸出包含 `"tenant_id": "demo"` 和 `"account_id": "acct-admin"`（或 `"sub"` 有值）。
 
-## 7. 社交登录（可选）
+## 7. 社交登錄（可選）
 
-前端支持 Google / Microsoft SSO，通过 Keycloak Identity Provider 中转。
+前端支持 Google / Microsoft SSO，通過 Keycloak Identity Provider 中轉。
 
-路径：**Identity providers → Add provider**
+路徑：**Identity providers → Add provider**
 
-| Provider | 前端参数 | 默认 IdP alias |
+| Provider | 前端參數 | 默認 IdP alias |
 | --- | --- | --- |
 | Google | `/api/auth/oidc/google/authorize` | `google` |
 | Microsoft | `/api/auth/oidc/microsoft/authorize` | `microsoft` |
 
-在 IdP 配置中填写 OAuth client id / secret。若 alias 不是默认值，在前端设置：
+在 IdP 配置中填寫 OAuth client id / secret。若 alias 不是默認值，在前端設置：
 
 ```bash
 KEYCLOAK_GOOGLE_IDP_ALIAS=google
 KEYCLOAK_MICROSOFT_IDP_ALIAS=microsoft
 ```
 
-SSO 流程使用授权码 + PKCE，回调地址为 `/api/auth/keycloak/callback`，需在应用 client 的 Valid redirect URIs 中允许。
+SSO 流程使用授權碼 + PKCE，回調地址爲 `/api/auth/keycloak/callback`，需在應用 client 的 Valid redirect URIs 中允許。
 
-## 8. 忘记密码
+## 8. 忘記密碼
 
-前端 `/api/auth/reset-password` 会 302 重定向到 Keycloak 托管流程：
+前端 `/api/auth/reset-password` 會 302 重定向到 Keycloak 託管流程：
 
 ```text
 {issuer}/login-actions/reset-credentials?client_id=nexus-pro-connect-api
 ```
 
-要真正发送重置邮件，还需在 Keycloak 配置 SMTP：
+要真正發送重置郵件，還需在 Keycloak 配置 SMTP：
 
-路径：**Realm settings → Email**
+路徑：**Realm settings → Email**
 
-填写 SMTP 服务器、发件人地址，并在 **Realm settings → Login** 中启用 **Forgot password**。
+填寫 SMTP 服務器、發件人地址，並在 **Realm settings → Login** 中啓用 **Forgot password**。
 
-## 9. 应用环境变量
+## 9. 應用環境變量
 
 ### 9.1 前端（`nexus-pro-fe/.env.local`）
 
 ```bash
-# 必填（认证路由执行期校验）
+# 必填（認證路由執行期校驗）
 KEYCLOAK_BASE_URL=http://127.0.0.1:8080/realms/nexus-pro
 KEYCLOAK_CLIENT_ID=nexus-pro-connect-api
 
 # confidential client 才需要
 KEYCLOAK_CLIENT_SECRET=
 
-# 可选，默认 openid profile email
+# 可選，默認 openid profile email
 KEYCLOAK_SCOPE=openid profile email
 
-# 社交登录 IdP alias
+# 社交登錄 IdP alias
 KEYCLOAK_GOOGLE_IDP_ALIAS=google
 KEYCLOAK_MICROSOFT_IDP_ALIAS=microsoft
 ```
 
-认证流程说明：
+認證流程說明：
 
-| 路由 | Grant type | 前置条件 |
+| 路由 | Grant type | 前置條件 |
 | --- | --- | --- |
-| `POST /api/auth/login` | `password` | Direct access grants 已开启 |
-| `GET /api/auth/oidc/{provider}/authorize` | 授权码 + PKCE | Standard flow 已开启 |
-| `GET /api/auth/keycloak/callback` | `authorization_code` | redirect URI 已注册 |
-| `POST /api/auth/refresh` | `refresh_token` | 登录时写入了 `_rt` cookie |
+| `POST /api/auth/login` | `password` | Direct access grants 已開啓 |
+| `GET /api/auth/oidc/{provider}/authorize` | 授權碼 + PKCE | Standard flow 已開啓 |
+| `GET /api/auth/keycloak/callback` | `authorization_code` | redirect URI 已註冊 |
+| `POST /api/auth/refresh` | `refresh_token` | 登錄時寫入了 `_rt` cookie |
 | `GET /api/auth/reset-password` | — | 重定向到 Keycloak reset-credentials |
 
-Token 存储：
+Token 存儲：
 
-- `_t`：access token（httpOnly，path `/`，寿命对齐 `expires_in`）
+- `_t`：access token（httpOnly，path `/`，壽命對齊 `expires_in`）
 - `_rt`：refresh token（httpOnly，path `/api/auth`）
-- `_session`：会话标记，供 `proxy.ts` 判断登录态
+- `_session`：會話標記，供 `proxy.ts` 判斷登錄態
 
-### 9.2 后端（`nexus-pro-be/.env`）
+### 9.2 後端（`nexus-pro-be/.env`）
 
-**基础 OIDC 校验（必填，生产环境启动时强制）：**
+**基礎 OIDC 校驗（必填，生產環境啓動時強制）：**
 
 ```bash
 KEYCLOAK_BASE_URL=http://127.0.0.1:8080/realms/nexus-pro
 KEYCLOAK_CLIENT_ID=nexus-pro-connect-api
 ```
 
-**用户开通（可选）：**
+**用戶開通（可選）：**
 
 ```bash
 KEYCLOAK_PROVISION_USERS=true
 KEYCLOAK_ADMIN_CLIENT_ID=nexus-pro-admin
 KEYCLOAK_ADMIN_CLIENT_SECRET=<secret>
 
-# 邀请邮件关闭时（启用方式见步骤三）
+# 邀請郵件關閉時（啓用方式見步驟三）
 KEYCLOAK_SEND_INVITE_EMAIL=false
 KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api
 KEYCLOAK_INVITE_REDIRECT_URL=
 ```
 
-当 `KEYCLOAK_PROVISION_USERS=true` 时，员工创建 / 导入 / 邀请会：
+當 `KEYCLOAK_PROVISION_USERS=true` 時，員工創建 / 導入 / 邀請會：
 
-1. 通过 Admin API 在 Keycloak 创建或更新用户
-2. 写入 attributes：`tenant_id`、`account_id`、`employee_id`、`employee_no`
-3. 将 Keycloak `sub` 绑定到 `user_identities` 表
+1. 通過 Admin API 在 Keycloak 創建或更新用戶
+2. 寫入 attributes：`tenant_id`、`account_id`、`employee_id`、`employee_no`
+3. 將 Keycloak `sub` 綁定到 `user_identities` 表
 
-## 10. 端到端验证
+## 10. 端到端驗證
 
-### 10.1 前端登录
+### 10.1 前端登錄
 
 ```bash
 cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-fe
 pnpm dev
 ```
 
-浏览器打开 `http://localhost:3002/login`，使用测试账号登录。成功后在 DevTools → Application → Cookies 中应看到 `_t`、`_rt`、`_session`。
+瀏覽器打開 `http://localhost:3002/login`，使用測試賬號登錄。成功後在 DevTools → Application → Cookies 中應看到 `_t`、`_rt`、`_session`。
 
-### 10.2 后端 API
+### 10.2 後端 API
 
 ```bash
 cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be
-# 确保 KEYCLOAK_BASE_URL / KEYCLOAK_CLIENT_ID 已设置
+# 確保 KEYCLOAK_BASE_URL / KEYCLOAK_CLIENT_ID 已設置
 go run ./cmd/api
 ```
 
@@ -473,67 +473,67 @@ export SMOKE_ADMIN_PASSWORD="..."
 tools/api-smoke/full_api_smoke.py
 ```
 
-## 11. 生产环境检查清单
+## 11. 生產環境檢查清單
 
 - [ ] `KEYCLOAK_COMMAND=start`（非 `start-dev`）
-- [ ] 管理员密码、client secret 已轮换
-- [ ] `KEYCLOAK_BASE_URL` 使用 `https://` 公网地址
-- [ ] redirect URI / Web origins 仅包含正式域名
-- [ ] SMTP 已配置（若启用邀请邮件或忘记密码）
-- [ ] 邀请邮件启用时，`KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api`
-- [ ] 邀请邮件启用时，HTTPS `KEYCLOAK_INVITE_REDIRECT_URL` 已注册到登录 client 的 Valid redirect URIs
-- [ ] Direct access grants 按安全策略评估（密码登录依赖此开关；可仅保留 SSO）
+- [ ] 管理員密碼、client secret 已輪換
+- [ ] `KEYCLOAK_BASE_URL` 使用 `https://` 公網地址
+- [ ] redirect URI / Web origins 僅包含正式域名
+- [ ] SMTP 已配置（若啓用邀請郵件或忘記密碼）
+- [ ] 邀請郵件啓用時，`KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api`
+- [ ] 邀請郵件啓用時，HTTPS `KEYCLOAK_INVITE_REDIRECT_URL` 已註冊到登錄 client 的 Valid redirect URIs
+- [ ] Direct access grants 按安全策略評估（密碼登錄依賴此開關；可僅保留 SSO）
 - [ ] Protocol Mapper `tenant_id` / `account_id` 已配置
-- [ ] Admin client 的 `manage-users` 权限已最小化授予
-- [ ] 后端 `KEYCLOAK_PROVISION_USERS` 与业务流程一致
+- [ ] Admin client 的 `manage-users` 權限已最小化授予
+- [ ] 後端 `KEYCLOAK_PROVISION_USERS` 與業務流程一致
 
-## 12. 常见问题
+## 12. 常見問題
 
-### 登录返回 401「Keycloak 登入失敗」
+### 登錄返回 401「Keycloak 登入失敗」
 
-1. 确认 client 已开启 **Direct access grants**
-2. 确认用户名 / 密码正确，用户未被禁用
-3. 用 curl 直接打 token 端点排查（见第 6 节）
+1. 確認 client 已開啓 **Direct access grants**
+2. 確認用戶名 / 密碼正確，用戶未被禁用
+3. 用 curl 直接打 token 端點排查（見第 6 節）
 
-### 后端返回 401「invalid bearer token」
+### 後端返回 401「invalid bearer token」
 
-1. 检查 `KEYCLOAK_BASE_URL` 与 token 中 `iss` 完全一致（无尾部 `/`）
-2. 检查 token `aud` 是否包含 `KEYCLOAK_CLIENT_ID`
-3. 检查 token 是否包含 `tenant_id` 和 `sub`（或 `account_id`）——通常是 **Protocol Mapper 未配置**
-4. 检查 token 是否过期
+1. 檢查 `KEYCLOAK_BASE_URL` 與 token 中 `iss` 完全一致（無尾部 `/`）
+2. 檢查 token `aud` 是否包含 `KEYCLOAK_CLIENT_ID`
+3. 檢查 token 是否包含 `tenant_id` 和 `sub`（或 `account_id`）——通常是 **Protocol Mapper 未配置**
+4. 檢查 token 是否過期
 
-### SSO 回调「登入狀態已失效」
+### SSO 回調「登入狀態已失效」
 
-1. 确认 `nexus_keycloak_state` cookie 在回调时仍存在（同站、10 分钟有效期）
-2. 确认 redirect URI 与 Keycloak client 配置完全匹配
-3. 确认前端 origin 与 Web origins 一致
+1. 確認 `nexus_keycloak_state` cookie 在回調時仍存在（同站、10 分鐘有效期）
+2. 確認 redirect URI 與 Keycloak client 配置完全匹配
+3. 確認前端 origin 與 Web origins 一致
 
-### Admin API 开通用户失败
+### Admin API 開通用戶失敗
 
-1. 确认 `KEYCLOAK_ADMIN_CLIENT_ID` / `SECRET` 正确
-2. 确认 service account 已分配 `realm-management → manage-users`
-3. 确认 `KEYCLOAK_BASE_URL` 格式为 `http(s)://host/realms/nexus-pro`
+1. 確認 `KEYCLOAK_ADMIN_CLIENT_ID` / `SECRET` 正確
+2. 確認 service account 已分配 `realm-management → manage-users`
+3. 確認 `KEYCLOAK_BASE_URL` 格式爲 `http(s)://host/realms/nexus-pro`
 
-### 邀请邮件未发送或返回 400
+### 邀請郵件未發送或返回 400
 
-1. 确认 `KEYCLOAK_PROVISION_USERS=true` 且 `KEYCLOAK_SEND_INVITE_EMAIL=true`
-2. 确认 Keycloak Realm SMTP 已配置并通过测试
-3. 确认 `KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api`
-4. 确认 `KEYCLOAK_INVITE_REDIRECT_URL` 与该 client 的 Valid redirect URIs 完全一致
-5. 确认 `nexus-pro-admin` 只需并且已经拥有 `realm-management → manage-users`
+1. 確認 `KEYCLOAK_PROVISION_USERS=true` 且 `KEYCLOAK_SEND_INVITE_EMAIL=true`
+2. 確認 Keycloak Realm SMTP 已配置並通過測試
+3. 確認 `KEYCLOAK_INVITE_CLIENT_ID=nexus-pro-connect-api`
+4. 確認 `KEYCLOAK_INVITE_REDIRECT_URL` 與該 client 的 Valid redirect URIs 完全一致
+5. 確認 `nexus-pro-admin` 只需並且已經擁有 `realm-management → manage-users`
 
 ### Issuer 端口不一致
 
-`ops/.env` 默认映射 `8080`，而 `nexus-pro-be/.env.example` 示例为 `18080`。两者不矛盾——选你实际对外暴露的地址即可，前后端必须使用同一个 issuer。
+`ops/.env` 默認映射 `8080`，而 `nexus-pro-be/.env.example` 示例爲 `18080`。兩者不矛盾——選你實際對外暴露的地址即可，前後端必須使用同一個 issuer。
 
-## 相关文件
+## 相關文件
 
-| 文件 | 说明 |
+| 文件 | 說明 |
 | --- | --- |
-| [`ops/.env`](../.env) | Keycloak 容器部署参数 |
-| [`ops/compose.yaml`](../compose.yaml) | Keycloak compose 服务定义 |
-| [`nexus-pro-be/.env.example`](../../.env.example) | 后端 Keycloak 环境变量 |
-| [`nexus-pro-fe/.env.example`](../../../nexus-pro-fe/.env.example) | 前端 Keycloak 环境变量 |
+| [`ops/.env`](../.env) | Keycloak 容器部署參數 |
+| [`ops/compose.yaml`](../compose.yaml) | Keycloak compose 服務定義 |
+| [`nexus-pro-be/.env.example`](../../.env.example) | 後端 Keycloak 環境變量 |
+| [`nexus-pro-fe/.env.example`](../../../nexus-pro-fe/.env.example) | 前端 Keycloak 環境變量 |
 | [`nexus-pro-fe/app/api/auth/_keycloak.ts`](../../../nexus-pro-fe/app/api/auth/_keycloak.ts) | 前端 BFF Keycloak 集成 |
-| [`nexus-pro-be/internal/platform/auth/token.go`](../../internal/platform/auth/token.go) | 后端 JWT 校验 |
-| [`nexus-pro-be/internal/platform/auth/keycloak_admin.go`](../../internal/platform/auth/keycloak_admin.go) | 后端 Admin API 用户开通 |
+| [`nexus-pro-be/internal/platform/auth/token.go`](../../internal/platform/auth/token.go) | 後端 JWT 校驗 |
+| [`nexus-pro-be/internal/platform/auth/keycloak_admin.go`](../../internal/platform/auth/keycloak_admin.go) | 後端 Admin API 用戶開通 |

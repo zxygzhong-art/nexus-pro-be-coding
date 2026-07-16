@@ -130,7 +130,7 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		return AgentRun{}, BadRequest("message is required")
 	}
 	if userMessage == "" {
-		userMessage = "请分析附件。"
+		userMessage = "請分析附件。"
 	}
 	agentID := strings.TrimSpace(input.AgentID)
 	sessionID := strings.TrimSpace(input.SessionID)
@@ -196,8 +196,8 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		if err != nil {
 			return AgentRun{}, err
 		}
-		agentName = "助理推荐"
-		agentRole = "根据当前账号可见的助理目录推荐最匹配的助理，并说明选择理由。"
+		agentName = "助理推薦"
+		agentRole = "根據當前賬號可見的助理目錄推薦最匹配的助理，並說明選擇理由。"
 		configuredTools = nil
 		limitTools = true
 	}
@@ -416,13 +416,14 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 			"session_id", sessionID,
 			"error", runtimeErr,
 		)
-		run.Answer = agentRuntimeFailureAnswer(ctx)
-		failed := run
-		if next, failErr := c.transitionRun(ctx, run, AgentRunStatusFailed); failErr == nil {
-			failed = next
+		failed, failErr := c.failAgentChat(ctx, account.ID, session, run)
+		if failErr != nil {
+			c.logWarn(ctx, "persist agent chat failure marker failed", "run_id", run.ID, "session_id", sessionID, "error", failErr)
+			run.Answer = agentRuntimeFailureAnswer(ctx)
+			_ = c.FailRun(ctx, run, failErr)
+			failed = run
+			failed.Status = string(AgentRunStatusFailed)
 		}
-		failed.Answer = run.Answer
-		_ = c.store.UpsertAgentRun(goContext(ctx), failed)
 		return failed, agentRuntimeFailureError(ctx)
 	}
 	eventMu.Lock()
@@ -441,6 +442,54 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 	return run, nil
 }
 
+// failAgentChat atomically persists a safe assistant failure marker, failed run, and session activity.
+func (c AgentService) failAgentChat(ctx RequestContext, accountID string, expectedSession domain.AgentSession, run AgentRun) (AgentRun, error) {
+	previousStatus := run.Status
+	run.Status = string(AgentRunStatusFailed)
+	run.Answer = agentRuntimeFailureAnswer(ctx)
+	run.UpdatedAt = c.Now()
+	messageCreatedAt := c.Now()
+	metadata := map[string]any{
+		"status":      "failed",
+		"reason_code": AgentRuntimeFailureReasonCode,
+	}
+	if traceID := strings.TrimSpace(ctx.TraceID); traceID != "" {
+		metadata["trace_id"] = traceID
+	}
+	if err := c.withTransaction(ctx, func(tx AgentService) error {
+		session, err := tx.lockCurrentAgentSession(ctx, accountID, expectedSession.ID)
+		if err != nil {
+			return err
+		}
+		if session.ContextVersion != expectedSession.ContextVersion {
+			return Conflict("agent session context changed while the message was running").WithReasonCode("agent_session_context_changed")
+		}
+		if err := tx.store.InsertAgentSessionMessage(goContext(ctx), domain.AgentSessionMessage{
+			ID:             utils.NewID("amsg"),
+			TenantID:       ctx.TenantID,
+			SessionID:      session.ID,
+			Role:           domain.AgentMessageRoleAssistant,
+			Content:        run.Answer,
+			RunID:          run.ID,
+			ContextVersion: session.ContextVersion,
+			Metadata:       metadata,
+			CreatedAt:      messageCreatedAt,
+		}); err != nil {
+			return err
+		}
+		session.LastMessageAt = &messageCreatedAt
+		session.UpdatedAt = messageCreatedAt
+		if err := tx.store.UpsertAgentSession(goContext(ctx), session); err != nil {
+			return err
+		}
+		return tx.store.UpsertAgentRun(goContext(ctx), run)
+	}); err != nil {
+		return AgentRun{}, err
+	}
+	c.logInfo(ctx, "agent run status changed", "run_id", run.ID, "mode", run.Mode, "previous_status", previousStatus, "status", run.Status)
+	return run, nil
+}
+
 // agentRecommendationSystemPrompt builds a trusted catalog from assistants visible to the current account.
 func (c AgentService) agentRecommendationSystemPrompt(ctx RequestContext) (string, []PlatformAssistant, error) {
 	response, err := c.Platform().ListAssistants(ctx, PlatformAssistantsQuery{})
@@ -448,7 +497,7 @@ func (c AgentService) agentRecommendationSystemPrompt(ctx RequestContext) (strin
 		return "", nil, err
 	}
 	var builder strings.Builder
-	builder.WriteString("你正在执行助理推荐任务。只能从下面当前账号可见的助理目录中推荐，不得编造不存在的助理。请优先给出一个最匹配选项，并简要说明理由；没有合适选项时要明确说明。")
+	builder.WriteString("你正在執行助理推薦任務。只能從下面當前賬號可見的助理目錄中推薦，不得編造不存在的助理。請優先給出一個最匹配選項，並簡要說明理由；沒有合適選項時要明確說明。")
 	for _, assistant := range response.Data {
 		builder.WriteString("\n- ")
 		builder.WriteString(strings.TrimSpace(assistant.Title))
@@ -496,9 +545,9 @@ func assistantRecommendationFallback(message string, catalog []PlatformAssistant
 		}
 	}
 	if bestScore == 0 {
-		return "目前目录里没有完全匹配的助理；最接近的是「" + strings.TrimSpace(best.Title) + "」" + detail
+		return "目前目錄裏沒有完全匹配的助理；最接近的是「" + strings.TrimSpace(best.Title) + "」" + detail
 	}
-	return "当前最匹配的是「" + strings.TrimSpace(best.Title) + "」" + detail
+	return "當前最匹配的是「" + strings.TrimSpace(best.Title) + "」" + detail
 }
 
 // assistantRecommendationScore matches common multilingual task concepts without inventing catalog entries.
@@ -509,15 +558,15 @@ func assistantRecommendationScore(message string, assistant PlatformAssistant) i
 		return 0
 	}
 	topicGroups := [][]string{
-		{"員工", "员工", "人事", "hr", "請假", "请假", "申請", "申请", "申訴", "申诉"},
-		{"客訴", "客诉", "投訴", "投诉", "客服"},
-		{"業績", "业绩", "銷售", "销售", "報表", "报表", "分析"},
-		{"週報", "周报", "專案", "项目", "進度", "进度"},
-		{"新人", "入職", "入职", "onboarding", "培訓", "培训"},
-		{"合約", "合同", "法務", "法务"},
-		{"資安", "资安", "安全", "風控", "风控", "登入", "登录"},
-		{"產品", "产品", "規格", "规格", "提案"},
-		{"招聘", "招募", "履歷", "简历", "面試", "面试"},
+		{"員工", "員工", "人事", "hr", "請假", "請假", "申請", "申請", "申訴", "申訴"},
+		{"客訴", "客訴", "投訴", "投訴", "客服"},
+		{"業績", "業績", "銷售", "銷售", "報表", "報表", "分析"},
+		{"週報", "週報", "專案", "項目", "進度", "進度"},
+		{"新人", "入職", "入職", "onboarding", "培訓", "培訓"},
+		{"合約", "合同", "法務", "法務"},
+		{"資安", "資安", "安全", "風控", "風控", "登入", "登錄"},
+		{"產品", "產品", "規格", "規格", "提案"},
+		{"招聘", "招募", "履歷", "簡歷", "面試", "面試"},
 	}
 	score := 0
 	for _, group := range topicGroups {
@@ -809,7 +858,7 @@ func extractAgentAutoMemory(message string) string {
 	if text == "" {
 		return ""
 	}
-	for _, marker := range []string{"我叫", "我是", "记住", "記得"} {
+	for _, marker := range []string{"我叫", "我是", "記住", "記得"} {
 		if strings.Contains(text, marker) {
 			return firstAgentMemorySentence(text)
 		}

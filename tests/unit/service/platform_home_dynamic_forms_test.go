@@ -2,10 +2,13 @@ package service_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
 	"nexus-pro-be/internal/domain"
+	"nexus-pro-be/internal/repository"
+	"nexus-pro-be/internal/service"
 )
 
 // TestPlatformHomeUsesEnabledTenantFormTemplates verifies that home form entries come from the tenant template store.
@@ -28,6 +31,9 @@ func TestPlatformHomeUsesEnabledTenantFormTemplates(t *testing.T) {
 	home, err := svc.Platform().Home(employeeCtx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if home.ClockSummary == nil {
+		t.Fatal("expected authorized clock summary to remain present")
 	}
 	if len(home.FormColumns) != 2 {
 		t.Fatalf("expected two dynamic home columns, got %+v", home.FormColumns)
@@ -58,9 +64,101 @@ func TestPlatformHomeDoesNotRestoreStaticForms(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if home.FormColumns == nil {
+		t.Fatal("expected empty home form columns to serialize as an array, got nil")
+	}
 	if len(home.FormColumns) != 0 {
 		t.Fatalf("expected no home forms when every template is disabled, got %+v", home.FormColumns)
 	}
+}
+
+// TestPlatformHomeOmitsClockSummaryWithoutAttendanceRead verifies that a denied widget does not fail the aggregate.
+func TestPlatformHomeOmitsClockSummaryWithoutAttendanceRead(t *testing.T) {
+	store, svc, employeeCtx, _, _ := newAttendanceFixture(t)
+	permissionSet, ok, err := store.GetPermissionSet(context.Background(), "tenant-1", "ps-attendance-self")
+	if err != nil || !ok {
+		t.Fatalf("load fixture permission set: ok=%v err=%v", ok, err)
+	}
+	permissionSet.Permissions = []domain.Permission{
+		{Resource: "hr.employee", Action: domain.ActionRead, Scope: domain.ScopeAll},
+	}
+	if err := store.UpsertPermissionSet(context.Background(), permissionSet); err != nil {
+		t.Fatal(err)
+	}
+
+	home, err := svc.Platform().Home(employeeCtx)
+	if err != nil {
+		t.Fatalf("expected accessible home subset, got %v", err)
+	}
+	if home.ClockSummary != nil {
+		t.Fatalf("expected unauthorized clock summary to be omitted, got %+v", home.ClockSummary)
+	}
+	if home.Assistants == nil || home.FormColumns == nil {
+		t.Fatalf("expected accessible home collections to remain present, got %+v", home)
+	}
+}
+
+// TestPlatformHomeKeepsAuthorizedClockErrors verifies that only explicit denial is downgraded.
+func TestPlatformHomeKeepsAuthorizedClockErrors(t *testing.T) {
+	store, _, employeeCtx, _, _ := newAttendanceFixture(t)
+	expected := errors.New("clock projection unavailable")
+	svc := service.New(&platformHomeClockFailureStore{Store: store, err: expected})
+
+	_, err := svc.Platform().Home(employeeCtx)
+	if !errors.Is(err, expected) {
+		t.Fatalf("expected clock projection error to propagate, got %v", err)
+	}
+}
+
+// TestPlatformTasksOmitsClockSummaryWithoutAttendanceRead verifies that task data remains available when the optional clock widget is denied.
+func TestPlatformTasksOmitsClockSummaryWithoutAttendanceRead(t *testing.T) {
+	store, svc, employeeCtx, _, _ := newAttendanceFixture(t)
+	permissionSet, ok, err := store.GetPermissionSet(context.Background(), "tenant-1", "ps-attendance-self")
+	if err != nil || !ok {
+		t.Fatalf("load fixture permission set: ok=%v err=%v", ok, err)
+	}
+	permissionSet.Permissions = []domain.Permission{
+		{Resource: "me", Action: domain.ActionRead, Scope: domain.ScopeSelf},
+	}
+	if err := store.UpsertPermissionSet(context.Background(), permissionSet); err != nil {
+		t.Fatal(err)
+	}
+
+	tasks, err := svc.Platform().Tasks(employeeCtx)
+	if err != nil {
+		t.Fatalf("expected accessible task subset, got %v", err)
+	}
+	if tasks.ClockSummary != nil {
+		t.Fatalf("expected unauthorized clock summary to be omitted, got %+v", tasks.ClockSummary)
+	}
+	if tasks.Records == nil || tasks.Todos == nil || tasks.AIMessages == nil || tasks.QuickPrompts == nil {
+		t.Fatalf("expected accessible task collections to remain present, got %+v", tasks)
+	}
+}
+
+// TestPlatformTasksKeepsAuthorizedClockErrors verifies that only explicit denial is downgraded for the task aggregate.
+func TestPlatformTasksKeepsAuthorizedClockErrors(t *testing.T) {
+	store, _, employeeCtx, _, _ := newAttendanceFixture(t)
+	expected := errors.New("clock projection unavailable")
+	svc := service.New(&platformHomeClockFailureStore{Store: store, err: expected})
+
+	_, err := svc.Platform().Tasks(employeeCtx)
+	if !errors.Is(err, expected) {
+		t.Fatalf("expected clock projection error to propagate, got %v", err)
+	}
+}
+
+type platformHomeClockFailureStore struct {
+	repository.Store
+	err error
+}
+
+func (s *platformHomeClockFailureStore) ListAttendanceClockRecords(
+	context.Context,
+	string,
+	domain.AttendanceClockRecordQuery,
+) ([]domain.AttendanceClockRecord, error) {
+	return nil, s.err
 }
 
 // platformHomeTemplate builds persisted template metadata used by the platform home projection tests.

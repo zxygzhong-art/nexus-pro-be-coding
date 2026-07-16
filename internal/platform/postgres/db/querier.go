@@ -78,6 +78,7 @@ type Querier interface {
 	GetAttendancePolicy(ctx context.Context, tenantID string) (AttendancePolicy, error)
 	GetAttendanceShift(ctx context.Context, arg GetAttendanceShiftParams) (AttendanceShift, error)
 	GetAttendanceWorksite(ctx context.Context, arg GetAttendanceWorksiteParams) (AttendanceWorksite, error)
+	GetAuthzAssumableRoleSession(ctx context.Context, arg GetAuthzAssumableRoleSessionParams) (AuthzAssumableRoleSession, error)
 	GetAuthzDataScope(ctx context.Context, arg GetAuthzDataScopeParams) (AuthzDataScope, error)
 	GetAuthzFieldPolicy(ctx context.Context, arg GetAuthzFieldPolicyParams) (AuthzFieldPolicy, error)
 	GetAuthzPermissionVersion(ctx context.Context, tenantID string) (AuthzPermissionVersion, error)
@@ -159,6 +160,7 @@ type Querier interface {
 	ListAttendanceShiftAssignments(ctx context.Context, tenantID string) ([]AttendanceShiftAssignment, error)
 	ListAttendanceShifts(ctx context.Context, tenantID string) ([]AttendanceShift, error)
 	ListAttendanceWorksites(ctx context.Context, tenantID string) ([]AttendanceWorksite, error)
+	ListAuditLogFacetSources(ctx context.Context, tenantID string) ([]ListAuditLogFacetSourcesRow, error)
 	ListAuditLogs(ctx context.Context, tenantID string) ([]AuditLog, error)
 	ListAuditLogsFilteredPage(ctx context.Context, arg ListAuditLogsFilteredPageParams) ([]AuditLog, error)
 	ListAuditLogsPage(ctx context.Context, arg ListAuditLogsPageParams) ([]AuditLog, error)
@@ -224,6 +226,7 @@ type Querier interface {
 	ReleaseLeaveBalanceByID(ctx context.Context, arg ReleaseLeaveBalanceByIDParams) (LeaveBalance, error)
 	ReserveLeaveBalance(ctx context.Context, arg ReserveLeaveBalanceParams) (LeaveBalance, error)
 	ResolveLeaveTypeSyncIssues(ctx context.Context, arg ResolveLeaveTypeSyncIssuesParams) error
+	RevokeAuthzAssumableRoleSession(ctx context.Context, arg RevokeAuthzAssumableRoleSessionParams) (AuthzAssumableRoleSession, error)
 	SearchKnowledgeDocumentChunks(ctx context.Context, arg SearchKnowledgeDocumentChunksParams) ([]SearchKnowledgeDocumentChunksRow, error)
 	UpdateAccountPreferredLocale(ctx context.Context, arg UpdateAccountPreferredLocaleParams) (Account, error)
 	UpdateAgentDefinitionUsage(ctx context.Context, arg UpdateAgentDefinitionUsageParams) (AgentDefinition, error)

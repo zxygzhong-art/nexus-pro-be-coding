@@ -322,6 +322,57 @@ func TestDirectAttendanceCreateStartsWorkflow(t *testing.T) {
 	}
 }
 
+// TestReturnedOvertimeFormRefreshesLinkedProjection verifies resubmission keeps one stable overtime request.
+func TestReturnedOvertimeFormRefreshesLinkedProjection(t *testing.T) {
+	now := time.Date(2026, 7, 15, 8, 0, 0, 0, time.UTC)
+	svc, ctx, store, _ := newWorkflowEngineFixtureWithFake(t, now, "acct-admin")
+	grantDirectAttendanceCreatePermission(t, store)
+	permissionSet, ok, err := store.GetPermissionSet(t.Context(), "tenant-1", "ps-workflow-applicant")
+	if err != nil || !ok {
+		t.Fatalf("workflow applicant permission lookup failed ok=%v err=%v", ok, err)
+	}
+	permissionSet.Permissions = append(permissionSet.Permissions, domain.Permission{
+		Resource: "workflow.form_instance", Action: "update", Scope: "self",
+	})
+	if err := store.UpsertPermissionSet(t.Context(), permissionSet); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertFormTemplate(t.Context(), domain.FormTemplate{
+		ID: "ft-overtime", TenantID: "tenant-1", Key: "overtime-approval", Name: "Overtime",
+		Schema: workflowEnabledTemplateSchema("acct-admin"), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	created, err := svc.Attendance().CreateOvertimeRequest(ctx, domain.CreateOvertimeRequestInput{
+		StartAt: "2026-07-16T18:00:00+08:00", EndAt: "2026-07-16T21:00:00+08:00", Hours: 3,
+		OvertimeType: "weekday", CompensationType: "leave", Reason: "original reason",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Workflow().ReturnForm(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}, created.FormInstanceID, domain.ReturnFormInput{Reason: "please supplement"}); err != nil {
+		t.Fatal(err)
+	}
+	updated, err := svc.Workflow().UpdateFormDraft(ctx, created.FormInstanceID, domain.UpdateFormDraftInput{Payload: map[string]any{
+		"start_at": "2026-07-17T18:00:00+08:00", "end_at": "2026-07-17T20:00:00+08:00", "hours": 2,
+		"overtime_type": "weekday", "compensation_type": "pay", "reason": "supplemented reason",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Workflow().SubmitForm(ctx, domain.SubmitFormInput{TemplateKey: created.FormInstanceID, Payload: updated.Payload}); err != nil {
+		t.Fatal(err)
+	}
+	request, ok, err := store.GetOvertimeRequestByFormInstanceID(t.Context(), "tenant-1", created.FormInstanceID)
+	if err != nil || !ok {
+		t.Fatalf("resubmitted overtime lookup failed ok=%v err=%v", ok, err)
+	}
+	if request.ID != created.ID || request.Status != "pending_approval" || request.Hours != 2 || request.CompensationType != "pay" || request.Reason != "supplemented reason" || request.StartAt.Day() != 17 {
+		t.Fatalf("expected stable refreshed overtime projection, got %+v", request)
+	}
+}
+
 // TestDirectLeaveStartFailureRestoresBalanceBeforeRetry verifies only the successful retry keeps a reservation.
 func TestDirectLeaveStartFailureRestoresBalanceBeforeRetry(t *testing.T) {
 	now := time.Date(2026, 7, 15, 8, 0, 0, 0, time.UTC)

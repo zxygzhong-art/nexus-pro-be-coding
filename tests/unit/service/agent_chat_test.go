@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -32,7 +33,7 @@ func TestAgentChatUsesInjectedRuntimeAndPersistsRun(t *testing.T) {
 			if _, ok := req.Tools["knowledge.search"]; !ok {
 				t.Fatalf("tool catalog entry knowledge.search is missing from runtime tools: %+v", req.Tools)
 			}
-			if !strings.Contains(req.Message, "Known facts:") || !strings.Contains(req.Message, "User: 帮我看一下资料") {
+			if !strings.Contains(req.Message, "Known facts:") || !strings.Contains(req.Message, "User: 幫我看一下資料") {
 				t.Fatalf("expected runtime message to retain assembled context, got %q", req.Message)
 			}
 			req.RecordUsage(domain.AgentTokenUsage{InputTokens: 100, CachedTokens: 40, OutputTokens: 20, TotalTokens: 120})
@@ -48,7 +49,7 @@ func TestAgentChatUsesInjectedRuntimeAndPersistsRun(t *testing.T) {
 
 	run, err := svc.Agent().Chat(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
-		domain.AgentChatInput{Message: "帮我看一下资料", Mode: "assistant_chat"},
+		domain.AgentChatInput{Message: "幫我看一下資料", Mode: "assistant_chat"},
 		func(_ context.Context, event domain.AgentChatEvent) error {
 			events = append(events, event)
 			return nil
@@ -57,7 +58,7 @@ func TestAgentChatUsesInjectedRuntimeAndPersistsRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != string(domain.AgentRunStatusCompleted) || run.Answer != "您好，已完成分析。" || run.Mode != "assistant_chat" || run.Prompt != "帮我看一下资料" {
+	if run.Status != string(domain.AgentRunStatusCompleted) || run.Answer != "您好，已完成分析。" || run.Mode != "assistant_chat" || run.Prompt != "幫我看一下資料" {
 		t.Fatalf("unexpected run: %+v", run)
 	}
 	if run.LLMCallCount != 2 || run.InputTokens != 130 || run.CachedTokens != 40 || run.OutputTokens != 30 || run.TotalTokens != 160 || !run.UsageComplete {
@@ -70,7 +71,7 @@ func TestAgentChatUsesInjectedRuntimeAndPersistsRun(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(stored) != 1 || stored[0].ID != run.ID || stored[0].Answer != run.Answer || stored[0].Prompt != "帮我看一下资料" || stored[0].TotalTokens != 160 {
+	if len(stored) != 1 || stored[0].ID != run.ID || stored[0].Answer != run.Answer || stored[0].Prompt != "幫我看一下資料" || stored[0].TotalTokens != 160 {
 		t.Fatalf("expected persisted completed run, got %+v", stored)
 	}
 }
@@ -83,12 +84,12 @@ func TestAgentChatRecommendationUsesVisibleAssistantCatalog(t *testing.T) {
 	})
 	for _, agent := range []domain.AgentDefinition{
 		{
-			ID: "agent-payroll", TenantID: "tenant-1", Name: "薪资助理", Description: "协助薪资查询与差异说明",
+			ID: "agent-payroll", TenantID: "tenant-1", Name: "薪資助理", Description: "協助薪資查詢與差異說明",
 			Category: domain.AgentCategoryAnalytics, Status: domain.AgentDefinitionStatusPublished,
 			Visibility: domain.AgentVisibilityAll, CreatedAt: now, UpdatedAt: now,
 		},
 		{
-			ID: "agent-draft", TenantID: "tenant-1", Name: "未发布助理", Description: "不应出现在推荐上下文",
+			ID: "agent-draft", TenantID: "tenant-1", Name: "未發佈助理", Description: "不應出現在推薦上下文",
 			Category: domain.AgentCategoryWorkflow, Status: domain.AgentDefinitionStatusDraft,
 			Visibility: domain.AgentVisibilityAll, CreatedAt: now, UpdatedAt: now,
 		},
@@ -98,32 +99,32 @@ func TestAgentChatRecommendationUsesVisibleAssistantCatalog(t *testing.T) {
 		}
 	}
 	runtime := fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
-		if req.Mode != "assistant_recommendation" || req.AgentName != "助理推荐" {
+		if req.Mode != "assistant_recommendation" || req.AgentName != "助理推薦" {
 			t.Fatalf("unexpected recommendation runtime request: %+v", req)
 		}
-		if !strings.Contains(req.Message, "薪资助理") || strings.Contains(req.Message, "未发布助理") {
+		if !strings.Contains(req.Message, "薪資助理") || strings.Contains(req.Message, "未發佈助理") {
 			t.Fatalf("recommendation prompt did not contain only visible published assistants: %s", req.Message)
 		}
 		if len(req.Tools) != 0 {
 			t.Fatalf("recommendation mode should not expose business tools: %+v", req.Tools)
 		}
-		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "建议使用薪资助理。"})
+		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "建議使用薪資助理。"})
 	}}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
-	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "谁能解释薪资差异？", Mode: "assistant_recommendation"}, nil)
+	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "誰能解釋薪資差異？", Mode: "assistant_recommendation"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Answer != "建议使用薪资助理。" || run.SessionID == "" {
+	if run.Answer != "建議使用薪資助理。" || run.SessionID == "" {
 		t.Fatalf("unexpected recommendation run: %+v", run)
 	}
 	session, ok, err := store.GetAgentSession(context.Background(), "tenant-1", run.SessionID)
 	if err != nil || !ok {
 		t.Fatalf("expected recommendation session, ok=%v err=%v", ok, err)
 	}
-	if session.Title != "谁能解释薪资差异？" {
+	if session.Title != "誰能解釋薪資差異？" {
 		t.Fatalf("expected user text to remain the conversation title, got %q", session.Title)
 	}
 }
@@ -136,12 +137,12 @@ func TestAgentChatRecommendationFallsBackToVisibleCatalog(t *testing.T) {
 	})
 	for _, agent := range []domain.AgentDefinition{
 		{
-			ID: "agent-leave", TenantID: "tenant-1", Name: "请假流程助理", Description: "协助员工请假申请与流程说明",
+			ID: "agent-leave", TenantID: "tenant-1", Name: "請假流程助理", Description: "協助員工請假申請與流程說明",
 			Category: domain.AgentCategoryWorkflow, Status: domain.AgentDefinitionStatusPublished,
 			Visibility: domain.AgentVisibilityAll, CreatedAt: now, UpdatedAt: now,
 		},
 		{
-			ID: "agent-sales", TenantID: "tenant-1", Name: "业务分析助理", Description: "分析销售与业绩报表",
+			ID: "agent-sales", TenantID: "tenant-1", Name: "業務分析助理", Description: "分析銷售與業績報表",
 			Category: domain.AgentCategoryAnalytics, Status: domain.AgentDefinitionStatusPublished,
 			Visibility: domain.AgentVisibilityAll, CreatedAt: now, UpdatedAt: now,
 		},
@@ -158,7 +159,7 @@ func TestAgentChatRecommendationFallsBackToVisibleCatalog(t *testing.T) {
 
 	run, err := svc.Agent().Chat(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
-		domain.AgentChatInput{Message: "请推荐处理员工请假的助理", Mode: "assistant_recommendation"},
+		domain.AgentChatInput{Message: "請推薦處理員工請假的助理", Mode: "assistant_recommendation"},
 		func(_ context.Context, event domain.AgentChatEvent) error {
 			events = append(events, event)
 			return nil
@@ -167,7 +168,7 @@ func TestAgentChatRecommendationFallsBackToVisibleCatalog(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Status != string(domain.AgentRunStatusCompleted) || !strings.Contains(run.Answer, "请假流程助理") {
+	if run.Status != string(domain.AgentRunStatusCompleted) || !strings.Contains(run.Answer, "請假流程助理") {
 		t.Fatalf("expected completed catalog fallback, got %+v", run)
 	}
 	if len(events) != 3 || events[1].Event != domain.AgentChatEventMessageDelta || events[2].Event != domain.AgentChatEventDone {
@@ -213,7 +214,7 @@ func TestAgentChatReadOnlyToolsUseRequestContext(t *testing.T) {
 
 	if _, err := svc.Agent().Chat(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
-		domain.AgentChatInput{Message: "我的资料"},
+		domain.AgentChatInput{Message: "我的資料"},
 		func(context.Context, domain.AgentChatEvent) error { return nil },
 	); err != nil {
 		t.Fatal(err)
@@ -245,7 +246,7 @@ func TestAgentChatPersonalLeaveDoesNotRequireBalance(t *testing.T) {
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
 	}}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
-	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申请事假"}, nil); err != nil {
+	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申請事假"}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -273,7 +274,7 @@ func TestAgentChatLeaveEligibilityFallsBackFromRealZeroBalance(t *testing.T) {
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
 	}}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
-	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申请特休"}, nil); err != nil {
+	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申請特休"}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -301,7 +302,7 @@ func TestAgentChatLeaveEligibilityAcceptsSufficientBalance(t *testing.T) {
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
 	}}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
-	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申请特休"}, nil); err != nil {
+	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申請特休"}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -336,7 +337,7 @@ func TestAgentChatLeaveBalanceAdminScopeStaysSelfOnly(t *testing.T) {
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
 	}}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
-	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "查询我的余额"}, nil); err != nil {
+	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "查詢我的餘額"}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -396,7 +397,7 @@ func TestAgentChatAttendanceSummaryAndFormHistoryStaySelfScoped(t *testing.T) {
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
 	}}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
-	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "查看本月考勤和历史请假"}, nil); err != nil {
+	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "查看本月考勤和歷史請假"}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -420,7 +421,7 @@ func TestAgentChatToolRequiresAgentToolPermission(t *testing.T) {
 
 	run, err := svc.Agent().Chat(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
-		domain.AgentChatInput{Message: "我的资料"},
+		domain.AgentChatInput{Message: "我的資料"},
 		func(context.Context, domain.AgentChatEvent) error { return nil },
 	)
 	if err == nil {
@@ -472,6 +473,24 @@ func TestAgentChatSanitizesRuntimeFailure(t *testing.T) {
 	}
 	if len(stored) != 1 || stored[0].Answer != run.Answer || strings.Contains(stored[0].Answer, "secret-value") {
 		t.Fatalf("runtime failure leaked into run history: %+v", stored)
+	}
+	messages, err := store.ListAgentSessionMessages(context.Background(), "tenant-1", run.SessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[0].Role != domain.AgentMessageRoleUser || messages[1].Role != domain.AgentMessageRoleAssistant {
+		t.Fatalf("expected user and assistant failure messages, got %+v", messages)
+	}
+	failureMessage := messages[1]
+	if failureMessage.Content != run.Answer || failureMessage.Metadata["status"] != "failed" || failureMessage.Metadata["reason_code"] != service.AgentRuntimeFailureReasonCode {
+		t.Fatalf("expected a replayable assistant failure marker, got %+v", failureMessage)
+	}
+	if strings.Contains(failureMessage.Content, rawFailure) || strings.Contains(fmt.Sprint(failureMessage.Metadata), "secret-value") {
+		t.Fatalf("runtime failure leaked into assistant history: %+v", failureMessage)
+	}
+	session, ok, err := store.GetAgentSession(context.Background(), "tenant-1", run.SessionID)
+	if err != nil || !ok || session.LastMessageAt == nil {
+		t.Fatalf("expected failed conversation to update session activity, ok=%v session=%+v err=%v", ok, session, err)
 	}
 }
 

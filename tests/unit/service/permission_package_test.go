@@ -41,7 +41,7 @@ func TestPermissionPackageSchemaValidationRejectsMissingFieldsAndBadVersion(t *t
 }
 
 func TestDefaultHRPermissionPackageJSONMatchesBuilder(t *testing.T) {
-	raw, err := os.ReadFile("../../../ops/permission-packages/hr-1.0.0.json")
+	raw, err := os.ReadFile("../../../ops/permission-packages/hr-1.0.1.json")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestDefaultHRPermissionPackageJSONMatchesBuilder(t *testing.T) {
 		t.Fatal(err)
 	}
 	if fileChecksum != builderChecksum {
-		t.Fatal("ops/permission-packages/hr-1.0.0.json drifted from DefaultHRPermissionPackageContent")
+		t.Fatal("ops/permission-packages/hr-1.0.1.json drifted from DefaultHRPermissionPackageContent")
 	}
 }
 

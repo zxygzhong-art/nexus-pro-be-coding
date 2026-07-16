@@ -38,6 +38,9 @@ func (c IAMService) CreateAssumableRole(ctx RequestContext, input CreateAssumabl
 	if len(input.PermissionBoundary) == 0 {
 		return AssumableRole{}, BadRequest("assumable role permission_boundary is required")
 	}
+	if err := validateTrustedAssumableRoleTrustPolicy(input.Trusted, input.TrustPolicy); err != nil {
+		return AssumableRole{}, err
+	}
 	if err := validateAssumableRoleSessionSeconds(input.SessionDurationSeconds); err != nil {
 		return AssumableRole{}, err
 	}
@@ -136,6 +139,9 @@ func (c IAMService) UpdateAssumableRole(ctx RequestContext, id string, input Upd
 			return AssumableRole{}, err
 		}
 		next.SessionDurationSeconds = *input.SessionDurationSeconds
+	}
+	if err := validateTrustedAssumableRoleTrustPolicy(next.Trusted, next.TrustPolicy); err != nil {
+		return AssumableRole{}, err
 	}
 	if err := c.withTransaction(ctx, func(tx IAMService) error {
 		if err := tx.store.UpsertAssumableRole(goContext(ctx), next); err != nil {
@@ -293,7 +299,6 @@ func (c IAMService) AssumeRole(ctx RequestContext, roleID string, input AssumeRo
 			return err
 		}
 		if err := tx.touchAuthzConfig(ctx, "iam.assumable_role.assume", map[string]any{
-			"session_id":        token,
 			"assumable_role_id": role.ID,
 			"account_id":        account.ID,
 			"expires_at":        session.ExpiresAt.Format(time.RFC3339),
@@ -301,7 +306,7 @@ func (c IAMService) AssumeRole(ctx RequestContext, roleID string, input AssumeRo
 			return err
 		}
 		return tx.audit(ctx, "iam.assumable_role.assume", "assumable_role", role.ID, "high", map[string]any{
-			"session_id": token,
+			"account_id": account.ID,
 			"reason":     input.Reason,
 			"expires_at": session.ExpiresAt.Format(time.RFC3339),
 		})
@@ -309,8 +314,8 @@ func (c IAMService) AssumeRole(ctx RequestContext, roleID string, input AssumeRo
 		return AssumeRoleResponse{}, err
 	}
 	c.logWarn(ctx, "assumable role assumed",
-		"session_id", token,
 		"assumable_role_id", role.ID,
+		"account_id", account.ID,
 		"expires_at", session.ExpiresAt.Format(time.RFC3339),
 		"duration_seconds", int64(duration.Seconds()),
 	)
@@ -336,6 +341,20 @@ func validateAssumableRoleSessionSeconds(seconds int) error {
 	return nil
 }
 
+func validateTrustedAssumableRoleTrustPolicy(trusted bool, policy map[string]any) error {
+	if !trusted {
+		return nil
+	}
+	for _, principalIDs := range [][]string{trustPolicyAccountIDs(policy), trustPolicyUserGroupIDs(policy)} {
+		for _, principalID := range principalIDs {
+			if strings.TrimSpace(principalID) != "" {
+				return nil
+			}
+		}
+	}
+	return BadRequest("trusted assumable role trust_policy must include at least one non-empty principal in accounts, account_ids, user_groups, or user_group_ids")
+}
+
 // effectiveAssumableRoleSessionDuration 處理 effective assumable 角色 session duration。
 func effectiveAssumableRoleSessionDuration(roleSeconds int, requestedMinutes int) (time.Duration, error) {
 	if err := validateAssumableRoleSessionSeconds(roleSeconds); err != nil {
@@ -356,7 +375,7 @@ func effectiveAssumableRoleSessionDuration(roleSeconds int, requestedMinutes int
 	return time.Duration(requestedMinutes) * time.Minute, nil
 }
 
-// trustPolicyAllowsAccount 只使用目前有效的群組成員關係判斷角色信任。
+// trustPolicyAllowsAccount 只使用目前有效的羣組成員關係判斷角色信任。
 func (c IAMService) trustPolicyAllowsAccount(ctx RequestContext, account Account, role AssumableRole) (bool, error) {
 	if !role.Trusted || len(role.TrustPolicy) == 0 {
 		return false, nil

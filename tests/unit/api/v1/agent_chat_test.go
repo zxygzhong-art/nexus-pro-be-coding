@@ -286,7 +286,7 @@ func TestAgentSessionFileEndpointsHidePreviousContext(t *testing.T) {
 		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo", AccountID: "acct-admin"}, ok: true},
 	}).Routes()
 
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/agents/sessions", strings.NewReader(`{"title":"附件对话"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/agents/sessions", strings.NewReader(`{"title":"附件對話"}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	handler.ServeHTTP(createRec, createReq)
@@ -367,7 +367,7 @@ func TestAgentConfirmationEndpointSubmitsPreparedDraft(t *testing.T) {
 				return err
 			}
 			confirmationID = preview["confirmation"].(*domain.AgentConfirmation).ID
-			return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "请确认提交"})
+			return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "請確認提交"})
 		},
 	}
 	workflowClient := &apiFakeFormApprovalWorkflowClient{started: map[string]domain.FormApprovalWorkflowStart{}}
@@ -379,7 +379,7 @@ func TestAgentConfirmationEndpointSubmitsPreparedDraft(t *testing.T) {
 		TokenResolver: staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-employee", TenantID: "demo", AccountID: "acct-employee"}, ok: true},
 	}).Routes()
 
-	chatReq := httptest.NewRequest(http.MethodPost, "/v1/agents/chat", strings.NewReader(`{"message":"帮我提交请假单"}`))
+	chatReq := httptest.NewRequest(http.MethodPost, "/v1/agents/chat", strings.NewReader(`{"message":"幫我提交請假單"}`))
 	chatReq.Header.Set("Content-Type", "application/json")
 	chatRec := httptest.NewRecorder()
 	handler.ServeHTTP(chatRec, chatReq)

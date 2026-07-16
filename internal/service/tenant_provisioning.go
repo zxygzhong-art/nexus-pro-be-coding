@@ -432,6 +432,7 @@ func tenantProvisionAdminPermissions() []domain.Permission {
 		{Resource: "agent.definition", Action: domain.ActionCreate, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
 		{Resource: "agent.definition", Action: domain.ActionUpdate, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
 		{Resource: "agent.definition", Action: domain.ActionDelete, Scope: domain.ScopeAll, MenuKey: "agents.runs"},
+		{Resource: "agent.usage", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "agents.usage"},
 		{Resource: "agent.knowledge_base", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "agents.knowledge_bases"},
 		{Resource: "agent.knowledge_base", Action: domain.ActionCreate, Scope: domain.ScopeAll, MenuKey: "agents.knowledge_bases"},
 		{Resource: "agent.knowledge_base", Action: domain.ActionUpdate, Scope: domain.ScopeAll, MenuKey: "agents.knowledge_bases"},

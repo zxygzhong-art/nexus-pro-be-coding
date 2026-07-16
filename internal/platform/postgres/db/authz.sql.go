@@ -217,6 +217,33 @@ func (q *Queries) GetActiveAuthzAssumableRoleSession(ctx context.Context, arg Ge
 	return i, err
 }
 
+const getAuthzAssumableRoleSession = `-- name: GetAuthzAssumableRoleSession :one
+SELECT id, tenant_id, account_id, assumable_role_id, session_policy, expires_at, revoked_at, created_at FROM authz_assumable_role_sessions
+WHERE tenant_id = $1
+  AND id = $2
+`
+
+type GetAuthzAssumableRoleSessionParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetAuthzAssumableRoleSession(ctx context.Context, arg GetAuthzAssumableRoleSessionParams) (AuthzAssumableRoleSession, error) {
+	row := q.db.QueryRow(ctx, getAuthzAssumableRoleSession, arg.TenantID, arg.ID)
+	var i AuthzAssumableRoleSession
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.AssumableRoleID,
+		&i.SessionPolicy,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getAuthzDataScope = `-- name: GetAuthzDataScope :one
 SELECT id, tenant_id, code, name, scope_type, params, created_at FROM authz_data_scopes
 WHERE tenant_id = $1 AND id = $2
@@ -618,6 +645,44 @@ func (q *Queries) ListUserIdentities(ctx context.Context, arg ListUserIdentities
 		return nil, err
 	}
 	return items, nil
+}
+
+const revokeAuthzAssumableRoleSession = `-- name: RevokeAuthzAssumableRoleSession :one
+UPDATE authz_assumable_role_sessions
+SET revoked_at = $1
+WHERE tenant_id = $2
+  AND account_id = $3
+  AND id = $4
+  AND revoked_at IS NULL
+RETURNING id, tenant_id, account_id, assumable_role_id, session_policy, expires_at, revoked_at, created_at
+`
+
+type RevokeAuthzAssumableRoleSessionParams struct {
+	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
+	TenantID  string             `json:"tenant_id"`
+	AccountID string             `json:"account_id"`
+	ID        string             `json:"id"`
+}
+
+func (q *Queries) RevokeAuthzAssumableRoleSession(ctx context.Context, arg RevokeAuthzAssumableRoleSessionParams) (AuthzAssumableRoleSession, error) {
+	row := q.db.QueryRow(ctx, revokeAuthzAssumableRoleSession,
+		arg.RevokedAt,
+		arg.TenantID,
+		arg.AccountID,
+		arg.ID,
+	)
+	var i AuthzAssumableRoleSession
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.AssumableRoleID,
+		&i.SessionPolicy,
+		&i.ExpiresAt,
+		&i.RevokedAt,
+		&i.CreatedAt,
+	)
+	return i, err
 }
 
 const updateAuthzDataScope = `-- name: UpdateAuthzDataScope :one

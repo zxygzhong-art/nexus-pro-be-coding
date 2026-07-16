@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -61,6 +62,58 @@ func TestLiteLLMGenerateContent(t *testing.T) {
 	}
 }
 
+// TestLiteLLMPing verifies the fallback route and caches repeated readiness checks.
+func TestLiteLLMPing(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.Path != "/chat/completions" {
+			t.Fatalf("unexpected probe path: %s", r.URL.Path)
+		}
+		var body struct {
+			Model               string `json:"model"`
+			MaxCompletionTokens int    `json:"max_completion_tokens"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatal(err)
+		}
+		if body.Model != "nexus-agent-fallback" || body.MaxCompletionTokens != 1 {
+			t.Fatalf("unexpected probe payload: %+v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-probe","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"OK"},"finish_reason":"stop"}]}`))
+	}))
+	defer server.Close()
+	modelClient, err := llm.NewLiteLLM(llm.LiteLLMConfig{BaseURL: server.URL, APIKey: "test-key", ProbeTTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := modelClient.Ping(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if err := modelClient.Ping(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("expected one cached agent probe, got %d", calls.Load())
+	}
+}
+
+// TestLiteLLMPingReportsProviderFailure verifies readiness fails when the runtime route is unusable.
+func TestLiteLLMPingReportsProviderFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		http.Error(w, `{"error":{"message":"provider unavailable"}}`, http.StatusBadGateway)
+	}))
+	defer server.Close()
+	modelClient, err := llm.NewLiteLLM(llm.LiteLLMConfig{BaseURL: server.URL, APIKey: "test-key", ProbeTTL: time.Hour})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := modelClient.Ping(context.Background()); err == nil {
+		t.Fatal("expected an unusable agent runtime route to fail readiness")
+	}
+}
+
 func TestLiteLLMGenerateContentStream(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/event-stream")
@@ -106,7 +159,7 @@ func TestLiteLLMGenerateContentToolCall(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatal(err)
 		}
-		if len(body.Messages) != 2 || body.Messages[0].Role != "system" || body.Messages[0].Content != "必须使用工具" {
+		if len(body.Messages) != 2 || body.Messages[0].Role != "system" || body.Messages[0].Content != "必須使用工具" {
 			t.Fatalf("system instruction was not preserved: %+v", body.Messages)
 		}
 		if len(body.Tools) != 1 || body.Tools[0].Function.Name != "create_form_draft" || body.Tools[0].Function.Parameters["type"] != "object" {
@@ -120,12 +173,12 @@ func TestLiteLLMGenerateContentToolCall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	req := userRequest("我要请假", "test-model")
+	req := userRequest("我要請假", "test-model")
 	req.Config = &genai.GenerateContentConfig{
-		SystemInstruction: genai.NewContentFromText("必须使用工具", "system"),
+		SystemInstruction: genai.NewContentFromText("必須使用工具", "system"),
 		Tools: []*genai.Tool{{FunctionDeclarations: []*genai.FunctionDeclaration{{
 			Name:                 "create_form_draft",
-			Description:          "建立请假草稿",
+			Description:          "建立請假草稿",
 			ParametersJsonSchema: map[string]any{"type": "object", "properties": map[string]any{"template_key": map[string]any{"type": "string"}}},
 		}}}},
 	}
@@ -161,7 +214,7 @@ func TestLiteLLMGenerateContentStreamToolCall(t *testing.T) {
 	}
 
 	var response *model.LLMResponse
-	for item, err := range modelClient.GenerateContent(context.Background(), userRequest("我要请假", "test-model"), true) {
+	for item, err := range modelClient.GenerateContent(context.Background(), userRequest("我要請假", "test-model"), true) {
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -203,7 +256,7 @@ func TestLiteLLMADKToolLoop(t *testing.T) {
 		case 3:
 			writeToolCallResponse(t, w, "call-create", "create_form_draft", `{"template_key":"leave-request","payload":{"leave_type":"annual","hours":8}}`)
 		default:
-			_, _ = w.Write([]byte(`{"id":"chatcmpl-final","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"请假草稿已生成。"},"finish_reason":"stop"}]}`))
+			_, _ = w.Write([]byte(`{"id":"chatcmpl-final","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"請假草稿已生成。"},"finish_reason":"stop"}]}`))
 		}
 	}))
 	defer server.Close()
@@ -223,7 +276,7 @@ func TestLiteLLMADKToolLoop(t *testing.T) {
 		},
 		"get_published_form_template": func(context.Context, map[string]any) (map[string]any, error) {
 			executed = append(executed, "get_published_form_template")
-			return map[string]any{"template": map[string]any{"key": "leave-request", "name": "请假申请单"}}, nil
+			return map[string]any{"template": map[string]any{"key": "leave-request", "name": "請假申請單"}}, nil
 		},
 		"create_form_draft": func(context.Context, map[string]any) (map[string]any, error) {
 			executed = append(executed, "create_form_draft")
@@ -237,7 +290,7 @@ func TestLiteLLMADKToolLoop(t *testing.T) {
 		RequestContext: domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		SessionID:      "session-1",
 		ModelName:      "test-model",
-		Message:        "帮我请年假",
+		Message:        "幫我請年假",
 		Tools:          tools,
 	}, func(_ context.Context, event domain.AgentChatEvent) error {
 		if event.Event == domain.AgentChatEventMessageDelta {
@@ -251,7 +304,7 @@ func TestLiteLLMADKToolLoop(t *testing.T) {
 	if strings.Join(executed, ",") != "list_published_form_templates,get_published_form_template,create_form_draft" {
 		t.Fatalf("unexpected tool execution order: %+v", executed)
 	}
-	if callCount != 4 || answer.String() != "请假草稿已生成。" {
+	if callCount != 4 || answer.String() != "請假草稿已生成。" {
 		t.Fatalf("unexpected model loop result: calls=%d answer=%q", callCount, answer.String())
 	}
 }
@@ -316,7 +369,7 @@ func TestLiteLLMADKParallelToolLoop(t *testing.T) {
 		if !gotIDs["call-list"] || !gotIDs["call-balance"] {
 			t.Fatalf("tool response IDs do not match assistant calls: %+v", body.Messages)
 		}
-		_, _ = w.Write([]byte(`{"id":"chatcmpl-final","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"已取得请假表单和假期余额。"},"finish_reason":"stop"}]}`))
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-final","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"已取得請假表單和假期餘額。"},"finish_reason":"stop"}]}`))
 	}))
 	defer server.Close()
 
@@ -345,7 +398,7 @@ func TestLiteLLMADKParallelToolLoop(t *testing.T) {
 		RequestContext: domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		SessionID:      "session-parallel",
 		ModelName:      "test-model",
-		Message:        "帮我确认请假表单和余额",
+		Message:        "幫我確認請假表單和餘額",
 		Tools:          tools,
 	}, func(context.Context, domain.AgentChatEvent) error { return nil })
 	if err != nil {
@@ -386,11 +439,11 @@ func TestLiteLLMRetryAfterUnresolvedParallelToolCalls(t *testing.T) {
 			}
 		}
 		last := body.Messages[len(body.Messages)-1]
-		if last.Role != "user" || last.Content != "重试请假" {
+		if last.Role != "user" || last.Content != "重試請假" {
 			t.Fatalf("latest user retry was not preserved: %+v", body.Messages)
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":"chatcmpl-retry","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"可以继续处理。"},"finish_reason":"stop"}]}`))
+		_, _ = w.Write([]byte(`{"id":"chatcmpl-retry","object":"chat.completion","created":1,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"可以繼續處理。"},"finish_reason":"stop"}]}`))
 	}))
 	defer server.Close()
 
@@ -398,12 +451,12 @@ func TestLiteLLMRetryAfterUnresolvedParallelToolCalls(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	request := userRequest("第一次请假", "test-model")
+	request := userRequest("第一次請假", "test-model")
 	danglingCalls := &genai.Content{Role: "model", Parts: []*genai.Part{
 		{FunctionCall: &genai.FunctionCall{ID: "call-profile", Name: "get_my_profile", Args: map[string]any{}}},
 		{FunctionCall: &genai.FunctionCall{ID: "call-balance", Name: "my_leave_balances", Args: map[string]any{}}},
 	}}
-	request.Contents = append(request.Contents, danglingCalls, genai.NewContentFromText("重试请假", "user"))
+	request.Contents = append(request.Contents, danglingCalls, genai.NewContentFromText("重試請假", "user"))
 
 	var response *model.LLMResponse
 	for item, err := range modelClient.GenerateContent(context.Background(), request, false) {
@@ -412,7 +465,7 @@ func TestLiteLLMRetryAfterUnresolvedParallelToolCalls(t *testing.T) {
 		}
 		response = item
 	}
-	if textFromResponse(response) != "可以继续处理。" {
+	if textFromResponse(response) != "可以繼續處理。" {
 		t.Fatalf("unexpected retry response: %+v", response)
 	}
 }

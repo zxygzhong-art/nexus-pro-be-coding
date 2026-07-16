@@ -70,14 +70,16 @@ func TestProvisionTenantCreatesUsableAdmin(t *testing.T) {
 		}
 	}
 	permissionSet, ok, err := store.GetPermissionSet(context.Background(), "tenant-acme", result.AdminPermissionSetID)
-	if err != nil || !ok || !hasPermission(permissionSet.Permissions, "hr.employee", domain.ActionDelete, "hr.employees") {
+	if err != nil || !ok ||
+		!hasPermission(permissionSet.Permissions, "hr.employee", domain.ActionDelete, "hr.employees") ||
+		!hasPermission(permissionSet.Permissions, "agent.usage", domain.ActionRead, "agents.usage") {
 		t.Fatalf("expected admin permission set, permissionSet=%+v ok=%v err=%v", permissionSet, ok, err)
 	}
 	me, err := svc.Me().Resolve(domain.RequestContext{TenantID: "tenant-acme", AccountID: result.AdminAccountID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, key := range []string{"workbench", "hr.employees", "iam.permission_sets", "audit"} {
+	for _, key := range []string{"workbench", "hr.employees", "iam.permission_sets", "agents.usage", "audit"} {
 		if !hasString(me.EffectiveMenuKeys, key) {
 			t.Fatalf("expected menu key %q in %+v", key, me.EffectiveMenuKeys)
 		}

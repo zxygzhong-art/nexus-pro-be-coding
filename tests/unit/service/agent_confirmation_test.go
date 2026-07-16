@@ -31,7 +31,7 @@ func TestAgentCreatesDraftAndRequiresConfirmationBeforeSubmission(t *testing.T) 
 	employee.ManagerEmployeeID = "emp-manager"
 	_ = store.UpsertEmployee(context.Background(), employee)
 	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
-		ID: "ft-general", TenantID: "tenant-1", Key: "general", Name: "通用申请单",
+		ID: "ft-general", TenantID: "tenant-1", Key: "general", Name: "通用申請單",
 		Status: "published", Schema: workflowEnabledTemplateSchema(), CreatedAt: now, UpdatedAt: now,
 	})
 
@@ -39,7 +39,7 @@ func TestAgentCreatesDraftAndRequiresConfirmationBeforeSubmission(t *testing.T) 
 	runtime := fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, emit service.AgentChatEmitFunc) error {
 		draftResult, err := req.Tools["create_form_draft"](ctx, map[string]any{
 			"template_key": "general",
-			"payload":      map[string]any{"subject": "请假", "description": "家庭安排"},
+			"payload":      map[string]any{"subject": "請假", "description": "家庭安排"},
 		})
 		if err != nil {
 			return err
@@ -48,11 +48,11 @@ func TestAgentCreatesDraftAndRequiresConfirmationBeforeSubmission(t *testing.T) 
 		if _, err := req.Tools["preview_form_submission"](ctx, map[string]any{"draft_id": draft.ID}); err != nil {
 			return err
 		}
-		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "草稿已准备，请确认提交。"})
+		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "草稿已準備，請確認提交。"})
 	}}
 	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"}
-	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "帮我创建请假单"}, func(_ context.Context, event domain.AgentChatEvent) error {
+	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "幫我創建請假單"}, func(_ context.Context, event domain.AgentChatEvent) error {
 		if event.Event == domain.AgentChatEventConfirmation {
 			confirmation = event.Confirmation
 		}
@@ -142,7 +142,7 @@ func TestAgentLeaveDraftDefaultsMissingTimes(t *testing.T) {
 		{"id": "reason", "type": "textarea", "label": "請假原因", "required": true},
 	}
 	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
-		ID: "ft-leave-default", TenantID: "tenant-1", Key: "leave-request", Name: "请假申请单",
+		ID: "ft-leave-default", TenantID: "tenant-1", Key: "leave-request", Name: "請假申請單",
 		Status: "published", Schema: leaveSchema, CreatedAt: now, UpdatedAt: now,
 	})
 	if err := store.UpsertAttendancePolicy(context.Background(), domain.AttendancePolicy{
@@ -187,7 +187,7 @@ func TestAgentLeaveDraftDefaultsMissingTimes(t *testing.T) {
 		explicitResult, err := req.Tools["create_form_draft"](ctx, map[string]any{
 			"template_key": "leave-request",
 			"payload": map[string]any{
-				"leave_type": "annual", "reason": "已指定时间", "hours": float64(9),
+				"leave_type": "annual", "reason": "已指定時間", "hours": float64(9),
 				"proxy":    "emp-proxy",
 				"start_at": "2026-07-20T09:00:00+08:00", "end_at": "2026-07-20T18:00:00+08:00",
 			},
@@ -201,7 +201,7 @@ func TestAgentLeaveDraftDefaultsMissingTimes(t *testing.T) {
 	}}
 	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"}
-	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "帮我申请特休，原因是家庭安排"}, func(context.Context, domain.AgentChatEvent) error { return nil }); err != nil {
+	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "幫我申請特休，原因是家庭安排"}, func(context.Context, domain.AgentChatEvent) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 
@@ -238,7 +238,7 @@ func TestAgentConfirmationExpiryUsesServiceClock(t *testing.T) {
 		{Resource: "workflow.form_instance", Action: "read", Scope: "self"},
 	})
 	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
-		ID: "ft-expiry", TenantID: "tenant-1", Key: "expiry-form", Name: "时钟确认单",
+		ID: "ft-expiry", TenantID: "tenant-1", Key: "expiry-form", Name: "時鐘確認單",
 		Status: "published", Schema: workflowEnabledTemplateSchema("acct-employee"), CreatedAt: now, UpdatedAt: now,
 	})
 
@@ -246,7 +246,7 @@ func TestAgentConfirmationExpiryUsesServiceClock(t *testing.T) {
 	runtime := fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, _ service.AgentChatEmitFunc) error {
 		draftResult, err := req.Tools["create_form_draft"](ctx, map[string]any{
 			"template_key": "expiry-form",
-			"payload":      map[string]any{"description": "验证 TTL"},
+			"payload":      map[string]any{"description": "驗證 TTL"},
 		})
 		if err != nil {
 			return err
@@ -262,7 +262,7 @@ func TestAgentConfirmationExpiryUsesServiceClock(t *testing.T) {
 	clock := now
 	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return clock }, AgentChatRuntime: runtime})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"}
-	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "创建确认单"}, func(context.Context, domain.AgentChatEvent) error { return nil }); err != nil {
+	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "創建確認單"}, func(context.Context, domain.AgentChatEvent) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if confirmation == nil {
@@ -292,7 +292,7 @@ func TestAgentConfirmationRetriesTransientFailureButConsumesConflict(t *testing.
 		{Resource: "workflow.form_instance", Action: "read", Scope: "self"},
 	})
 	_ = baseStore.UpsertFormTemplate(context.Background(), domain.FormTemplate{
-		ID: "ft-retry", TenantID: "tenant-1", Key: "retry-form", Name: "重试确认单",
+		ID: "ft-retry", TenantID: "tenant-1", Key: "retry-form", Name: "重試確認單",
 		Status: "published", Schema: workflowEnabledTemplateSchema("acct-employee"), CreatedAt: now, UpdatedAt: now,
 	})
 
@@ -301,7 +301,7 @@ func TestAgentConfirmationRetriesTransientFailureButConsumesConflict(t *testing.
 	runtime := fakeAgentChatRuntime{run: func(ctx context.Context, req service.AgentChatRuntimeRequest, _ service.AgentChatEmitFunc) error {
 		draftResult, err := req.Tools["create_form_draft"](ctx, map[string]any{
 			"template_key": "retry-form",
-			"payload":      map[string]any{"description": "验证瞬时失败"},
+			"payload":      map[string]any{"description": "驗證瞬時失敗"},
 		})
 		if err != nil {
 			return err
@@ -321,7 +321,7 @@ func TestAgentConfirmationRetriesTransientFailureButConsumesConflict(t *testing.
 		t.Helper()
 		confirmation = nil
 		draftID = ""
-		if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "创建确认单"}, func(context.Context, domain.AgentChatEvent) error { return nil }); err != nil {
+		if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "創建確認單"}, func(context.Context, domain.AgentChatEvent) error { return nil }); err != nil {
 			t.Fatal(err)
 		}
 		if confirmation == nil || draftID == "" {
@@ -349,7 +349,7 @@ func TestAgentConfirmationRetriesTransientFailureButConsumesConflict(t *testing.
 	if err != nil || !ok {
 		t.Fatalf("draft lookup failed ok=%v err=%v", ok, err)
 	}
-	draft.Payload["description"] = "确认后被修改"
+	draft.Payload["description"] = "確認後被修改"
 	if err := baseStore.UpsertFormInstance(context.Background(), draft); err != nil {
 		t.Fatal(err)
 	}
@@ -390,7 +390,7 @@ func TestAgentPreparesAndExecutesFixedBulkReview(t *testing.T) {
 	})
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-applicant", TenantID: "tenant-1", DisplayName: "Applicant", Status: "active", CreatedAt: now})
 	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
-		ID: "ft-general", TenantID: "tenant-1", Key: "general", Name: "通用申请",
+		ID: "ft-general", TenantID: "tenant-1", Key: "general", Name: "通用申請",
 		Status: "published", Schema: workflowEnabledTemplateSchema("acct-manager"), CreatedAt: now, UpdatedAt: now,
 	})
 	for _, id := range []string{"fi-one", "fi-two"} {
@@ -405,19 +405,19 @@ func TestAgentPreparesAndExecutesFixedBulkReview(t *testing.T) {
 		_, err := req.Tools["prepare_bulk_review"](ctx, map[string]any{
 			"form_instance_ids": []any{"fi-one", "fi-two"},
 			"action":            "approve",
-			"reason":            "资料完整",
+			"reason":            "資料完整",
 		})
 		if err != nil {
 			return err
 		}
-		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "请确认批量批准。"})
+		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "請確認批量批准。"})
 	}}
 	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
 	for _, id := range []string{"fi-one", "fi-two"} {
 		startWorkflowRunForTest(t, svc, store, "tenant-1", id, "acct-applicant")
 	}
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-manager"}
-	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "批准这两笔"}, func(_ context.Context, event domain.AgentChatEvent) error {
+	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "批准這兩筆"}, func(_ context.Context, event domain.AgentChatEvent) error {
 		if event.Event == domain.AgentChatEventConfirmation {
 			confirmation = event.Confirmation
 		}
@@ -485,7 +485,7 @@ func (s *transientAgentConfirmationStore) GetFormInstance(ctx context.Context, t
 	return s.Store.GetFormInstance(ctx, tenantID, id)
 }
 
-// AppendAuditLog 只注入 confirmation 成功後的稽核故障，證明完成的 side effect 不會恢復 token。
+// AppendAuditLog 只注入 confirmation 成功後的稽覈故障，證明完成的 side effect 不會恢復 token。
 func (s *transientAgentConfirmationStore) AppendAuditLog(ctx context.Context, log domain.AuditLog) error {
 	if s.failConfirmationAudit && log.Action == "agent.confirmation.execute" {
 		s.failConfirmationAudit = false

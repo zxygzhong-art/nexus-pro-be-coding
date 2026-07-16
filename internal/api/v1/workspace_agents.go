@@ -38,8 +38,8 @@ func (c WorkspaceAgentCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace.POST("/agent-models/:id/test", c.routes.Handle("agent.model", "update", c.testModel, ResourceID(PathParamID)))
 
 	workspace.GET("/agents/tools", c.routes.Handle("agent.tool", "read", c.tools))
-	workspace.GET("/agent-usage", c.routes.Handle("agent.definition", "read", c.listAccountUsage))
-	workspace.GET("/agent-usage/:id/sessions", c.routes.Handle("agent.definition", "read", c.listAccountSessionUsage, PathParam(PathParamID)))
+	workspace.GET("/agent-usage", c.routes.Handle("agent.usage", "read", c.listAccountUsage))
+	workspace.GET("/agent-usage/:id/sessions", c.routes.Handle("agent.usage", "read", c.listAccountSessionUsage, PathParam(PathParamID)))
 	workspace.GET("/agents/external-tools", c.routes.Handle("agent.tool", "read", c.listExternalTools))
 	workspace.POST("/agents/external-tools", c.routes.Handle("agent.tool", "create", c.createExternalTool))
 	workspace.DELETE("/agents/external-tools/:id", c.routes.Handle("agent.tool", "delete", c.deleteExternalTool, ResourceID(PathParamID)))

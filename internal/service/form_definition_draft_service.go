@@ -15,7 +15,7 @@ func (c WorkflowService) FormBuilderCapabilities(ctx RequestContext) (domain.For
 		return domain.FormBuilderCapabilitiesResponse{}, err
 	}
 	dataSources := make([]domain.FormBuilderDataSourceMetadata, 0, len(formDataSourceAllowedFields))
-	labels := map[string]string{formDataSourceCurrentUser: "当前用户", formDataSourceDepartments: "部门", formDataSourceEmployees: "员工", formDataSourcePositions: "职位", formDataSourceLeaveTypes: "假期类型"}
+	labels := map[string]string{formDataSourceCurrentUser: "當前用戶", formDataSourceDepartments: "部門", formDataSourceEmployees: "員工", formDataSourcePositions: "職位", formDataSourceLeaveTypes: "假期類型"}
 	for id, fields := range formDataSourceAllowedFields {
 		keys := make([]string, 0, len(fields))
 		for key := range fields {
@@ -34,13 +34,13 @@ func (c WorkflowService) FormBuilderCapabilities(ctx RequestContext) (domain.For
 	}
 	sort.Slice(dataSources, func(i, j int) bool { return dataSources[i].ID < dataSources[j].ID })
 	targets := []domain.FormBuilderWorkflowTarget{
-		{Role: "manager", Label: "直属主管", Description: "申请人的直接主管"},
-		{Role: "relative", Label: "相对层级主管", Description: "按 relative_level 解析的主管"},
-		{Role: "dept-head", Label: "部门主管", Description: "申请人所属部门负责人"},
-		{Role: "hr", Label: "HR", Description: "HR 审批角色"},
-		{Role: "finance", Label: "财务", Description: "财务审批角色"},
-		{Role: "ceo", Label: "总经理", Description: "总经理审批角色"},
-		{Role: "applicant", Label: "申请人", Description: "申请人本人"},
+		{Role: "manager", Label: "直屬主管", Description: "申請人的直接主管"},
+		{Role: "relative", Label: "相對層級主管", Description: "按 relative_level 解析的主管"},
+		{Role: "dept-head", Label: "部門主管", Description: "申請人所屬部門負責人"},
+		{Role: "hr", Label: "HR", Description: "HR 審批角色"},
+		{Role: "finance", Label: "財務", Description: "財務審批角色"},
+		{Role: "ceo", Label: "總經理", Description: "總經理審批角色"},
+		{Role: "applicant", Label: "申請人", Description: "申請人本人"},
 	}
 	return domain.FormBuilderCapabilitiesResponse{
 		SchemaVersion: domain.FormDefinitionSchemaVersion2,

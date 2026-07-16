@@ -38,7 +38,7 @@ const (
 	ehrmsFieldShiftName       = "員工班別名稱"
 	ehrmsFieldShiftType       = "員工班別屬性"
 	ehrmsFieldDirectIndirect  = "直接/間接員工"
-	ehrmsFieldLeaveGroup      = "休假群組"
+	ehrmsFieldLeaveGroup      = "休假羣組"
 	ehrmsFieldCompanyEmail    = "公司信箱"
 	ehrmsFieldParentDeptCode  = "上級部門代碼"
 	ehrmsFieldDeptClosed      = "部門已關閉"
@@ -308,7 +308,7 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 	return response, nil
 }
 
-// prepareEHRMSSyncWrites 處理 prepare eHRMS sync writes 的服務流程。
+// prepareEHRMSSyncWrites resolves tenant-local catalog identities once before mapping employee rows.
 func (c HRService) prepareEHRMSSyncWrites(ctx RequestContext, account Account, decision CheckResult, records []EHRMSEmployeeRecord, mode string) ([]ehrmsEmployeeWrite, []RowError, []BatchEmployeeResult, error) {
 	writes := make([]ehrmsEmployeeWrite, 0, len(records))
 	rowErrors := make([]RowError, 0)
@@ -322,7 +322,7 @@ func (c HRService) prepareEHRMSSyncWrites(ctx RequestContext, account Account, d
 	}
 	for idx, record := range records {
 		rowNumber := idx + 1
-		employee, errors, err := c.ehrmsEmployeeCandidate(ctx, record, rowNumber)
+		employee, errors, err := c.ehrmsEmployeeCandidate(ctx, record, rowNumber, lookup)
 		if err != nil {
 			return nil, nil, nil, err
 		}
@@ -386,17 +386,20 @@ func (c HRService) prepareEHRMSSyncWrites(ctx RequestContext, account Account, d
 	return writes, rowErrors, results, nil
 }
 
-// ehrmsEmployeeCandidate 處理 eHRMS 員工候選的服務流程。
-func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmployeeRecord, rowNumber int) (Employee, []RowError, error) {
+// ehrmsEmployeeCandidate maps upstream business codes to tenant-scoped internal references.
+func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmployeeRecord, rowNumber int, lookup ehrmsValidationLookup) (Employee, []RowError, error) {
 	status := normalizeEmployeeStatus(ehrmsValue(record, ehrmsFieldEmployeeStatus))
+	departmentCode := ehrmsValue(record, ehrmsFieldDepartmentCode)
 	positionCode := ehrmsValue(record, ehrmsFieldPositionCode)
+	orgUnitID := utils.FirstNonEmpty(lookup.orgUnitIDsByCode[ehrmsExternalCodeKey(departmentCode)], ehrmsOrgUnitID(ctx.TenantID, departmentCode))
+	positionID := utils.FirstNonEmpty(lookup.positionIDsByCode[ehrmsExternalCodeKey(positionCode)], ehrmsPositionID(ctx.TenantID, positionCode))
 	companyEmail := strings.ToLower(strings.TrimSpace(ehrmsValue(record, ehrmsFieldCompanyEmail)))
 	input := CreateEmployeeInput{
 		EmployeeNo:       ehrmsValue(record, ehrmsFieldEmployeeNo),
 		Name:             ehrmsValue(record, ehrmsFieldName),
 		CompanyEmail:     companyEmail,
-		OrgUnitID:        ehrmsValue(record, ehrmsFieldDepartmentCode),
-		PositionID:       positionCode,
+		OrgUnitID:        orgUnitID,
+		PositionID:       positionID,
 		Position:         utils.FirstNonEmpty(ehrmsValue(record, ehrmsFieldPositionName), positionCode),
 		Category:         ehrmsEmployeeCategory(record),
 		Status:           status,
@@ -417,11 +420,12 @@ func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmploy
 			"source":             "ehrms",
 		},
 		EmploymentInfo: map[string]any{
-			"org_unit_id":              ehrmsValue(record, ehrmsFieldDepartmentCode),
-			"org_unit_code":            ehrmsValue(record, ehrmsFieldDepartmentCode),
+			"org_unit_id":              orgUnitID,
+			"org_unit_code":            departmentCode,
 			"org_unit_name":            ehrmsValue(record, ehrmsFieldDepartmentName),
 			"org_unit_name_en":         ehrmsValue(record, ehrmsFieldDepartmentEN),
 			"position":                 utils.FirstNonEmpty(ehrmsValue(record, ehrmsFieldPositionName), ehrmsValue(record, ehrmsFieldPositionCode)),
+			"position_id":              positionID,
 			"position_code":            ehrmsValue(record, ehrmsFieldPositionCode),
 			"position_name_en":         ehrmsValue(record, ehrmsFieldPositionEN),
 			"category":                 ehrmsEmployeeCategory(record),
@@ -487,11 +491,13 @@ func (c HRService) validateEHRMSEmployee(ctx RequestContext, employee Employee, 
 }
 
 type ehrmsValidationLookup struct {
-	orgUnitIDs map[string]struct{}
-	unique     employeeUniqueIndex
+	orgUnitIDs        map[string]struct{}
+	orgUnitIDsByCode  map[string]string
+	positionIDsByCode map[string]string
+	unique            employeeUniqueIndex
 }
 
-// ehrmsValidationLookup 處理 eHRMS 驗證 lookup 的服務流程。
+// ehrmsValidationLookup builds validation and business-code reference indexes for one tenant.
 func (c HRService) ehrmsValidationLookup(ctx RequestContext) (ehrmsValidationLookup, error) {
 	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
 	if err != nil {
@@ -501,11 +507,32 @@ func (c HRService) ehrmsValidationLookup(ctx RequestContext) (ehrmsValidationLoo
 	if err != nil {
 		return ehrmsValidationLookup{}, err
 	}
+	positions, err := c.store.ListPositions(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return ehrmsValidationLookup{}, err
+	}
 	orgUnitIDs := make(map[string]struct{}, len(units))
+	orgUnitIDsByCode := make(map[string]string, len(units))
 	for _, unit := range units {
 		orgUnitIDs[unit.ID] = struct{}{}
+		key := ehrmsExternalCodeKey(unit.Code)
+		if key != "" {
+			orgUnitIDsByCode[key] = unit.ID
+		}
 	}
-	return ehrmsValidationLookup{orgUnitIDs: orgUnitIDs, unique: newEmployeeUniqueIndex(employees)}, nil
+	positionIDsByCode := make(map[string]string, len(positions))
+	for _, position := range positions {
+		key := ehrmsExternalCodeKey(position.Code)
+		if key != "" {
+			positionIDsByCode[key] = position.ID
+		}
+	}
+	return ehrmsValidationLookup{
+		orgUnitIDs:        orgUnitIDs,
+		orgUnitIDsByCode:  orgUnitIDsByCode,
+		positionIDsByCode: positionIDsByCode,
+		unique:            newEmployeeUniqueIndex(employees),
+	}, nil
 }
 
 type employeeUniqueIndex struct {
@@ -585,7 +612,11 @@ func (idx employeeUniqueIndex) fieldErrors(employee Employee) []FieldError {
 
 // UpsertEHRMSOrgUnits persists normalized upstream departments while preserving local ownership fields.
 func (c HRService) UpsertEHRMSOrgUnits(ctx RequestContext, departments []OrgUnit) (int, error) {
-	departments, err := c.attachEHRMSRootsToCanonicalRoot(ctx, departments)
+	departments, err := c.reconcileEHRMSOrgUnitIDs(ctx, departments)
+	if err != nil {
+		return 0, err
+	}
+	departments, err = c.attachEHRMSRootsToCanonicalRoot(ctx, departments)
 	if err != nil {
 		return 0, err
 	}
@@ -608,6 +639,47 @@ func (c HRService) UpsertEHRMSOrgUnits(ctx RequestContext, departments []OrgUnit
 		}
 	}
 	return len(departments), nil
+}
+
+// reconcileEHRMSOrgUnitIDs preserves same-tenant legacy IDs while remapping incoming hierarchy references.
+func (c HRService) reconcileEHRMSOrgUnitIDs(ctx RequestContext, departments []OrgUnit) ([]OrgUnit, error) {
+	existing, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	existingByCode := make(map[string]OrgUnit, len(existing))
+	for _, unit := range existing {
+		key := ehrmsExternalCodeKey(unit.Code)
+		if key == "" {
+			continue
+		}
+		current, ok := existingByCode[key]
+		if !ok || (current.Source != "ehrms" && unit.Source == "ehrms") {
+			existingByCode[key] = unit
+		}
+	}
+	replacements := make(map[string]string, len(departments))
+	for _, unit := range departments {
+		if previous, ok := existingByCode[ehrmsExternalCodeKey(unit.Code)]; ok {
+			replacements[unit.ID] = previous.ID
+		}
+	}
+	out := make([]OrgUnit, 0, len(departments))
+	for _, unit := range departments {
+		if replacement := replacements[unit.ID]; replacement != "" {
+			unit.ID = replacement
+		}
+		if replacement := replacements[unit.ParentID]; replacement != "" {
+			unit.ParentID = replacement
+		}
+		for index, pathID := range unit.Path {
+			if replacement := replacements[pathID]; replacement != "" {
+				unit.Path[index] = replacement
+			}
+		}
+		out = append(out, unit)
+	}
+	return out, nil
 }
 
 // attachEHRMSRootsToCanonicalRoot 將 eHRMS 的多個根部門收斂到租戶唯一根節點下。
@@ -659,12 +731,15 @@ func (c HRService) attachEHRMSRootsToCanonicalRoot(ctx RequestContext, departmen
 // UpsertEHRMSPositions persists normalized upstream positions while preserving local organization assignments.
 func (c HRService) UpsertEHRMSPositions(ctx RequestContext, positions []Position) (int, error) {
 	for _, position := range positions {
-		before, ok, err := c.store.GetPosition(goContext(ctx), ctx.TenantID, position.ID)
+		before, ok, err := c.store.GetPositionByCode(goContext(ctx), ctx.TenantID, position.Code)
 		if err != nil {
 			return 0, err
 		}
-		if ok && position.OrgUnitID == "" {
-			position.OrgUnitID = before.OrgUnitID
+		if ok {
+			position.ID = before.ID
+			if position.OrgUnitID == "" {
+				position.OrgUnitID = before.OrgUnitID
+			}
 		}
 		if err := c.store.UpsertPosition(goContext(ctx), position); err != nil {
 			return 0, err
@@ -675,12 +750,14 @@ func (c HRService) UpsertEHRMSPositions(ctx RequestContext, positions []Position
 
 // EHRMSOrgUnitsFromDepartments maps upstream department records into the canonical organization hierarchy.
 func EHRMSOrgUnitsFromDepartments(tenantID string, records []EHRMSDepartmentRecord, now time.Time) []OrgUnit {
-	unitsByID := make(map[string]OrgUnit, len(records))
+	unitsByCode := make(map[string]OrgUnit, len(records))
+	parentCodes := make(map[string]string, len(records))
 	for _, record := range records {
 		code := ehrmsValue(record, ehrmsFieldDepartmentCode)
 		if code == "" {
 			continue
 		}
+		codeKey := ehrmsExternalCodeKey(code)
 		rawName := utils.FirstNonEmpty(ehrmsValue(record, ehrmsFieldDepartmentName), ehrmsValue(record, ehrmsFieldDepartmentEN), code)
 		rawNameEN := ehrmsValue(record, ehrmsFieldDepartmentEN)
 		name, nameClosed := EHRMSCleanDepartmentName(rawName)
@@ -689,28 +766,29 @@ func EHRMSOrgUnitsFromDepartments(tenantID string, records []EHRMSDepartmentReco
 		if name == "" {
 			name = code
 		}
-		unitsByID[code] = OrgUnit{
-			ID:        code,
+		unitsByCode[codeKey] = OrgUnit{
+			ID:        ehrmsOrgUnitID(tenantID, code),
 			TenantID:  tenantID,
 			Code:      code,
 			Name:      name,
 			NameEN:    nameEN,
-			ParentID:  ehrmsValue(record, ehrmsFieldParentDeptCode),
 			Closed:    closed,
 			CreatedAt: now,
 			UpdatedAt: now,
 			Source:    "ehrms",
 		}
+		parentCodes[codeKey] = ehrmsExternalCodeKey(ehrmsValue(record, ehrmsFieldParentDeptCode))
 	}
-	for code := range unitsByID {
-		unit := unitsByID[code]
-		if unit.ParentID != "" {
-			if _, ok := unitsByID[unit.ParentID]; !ok {
-				unit.ParentID = ""
-			}
+	unitsByID := make(map[string]OrgUnit, len(unitsByCode))
+	for codeKey, unit := range unitsByCode {
+		if parent, ok := unitsByCode[parentCodes[codeKey]]; ok {
+			unit.ParentID = parent.ID
 		}
-		unit.Path = ehrmsOrgUnitPath(code, unitsByID)
-		unitsByID[code] = unit
+		unitsByID[unit.ID] = unit
+	}
+	for id, unit := range unitsByID {
+		unit.Path = ehrmsOrgUnitPath(id, unitsByID)
+		unitsByID[id] = unit
 	}
 	for _, unit := range ehrmsSortedOrgUnits(unitsByID) {
 		if parent, ok := unitsByID[unit.ParentID]; ok && parent.Closed {
@@ -730,11 +808,12 @@ func EHRMSPositionsFromRecords(tenantID string, records []EHRMSPositionRecord, n
 			continue
 		}
 		name := utils.FirstNonEmpty(ehrmsValue(record, ehrmsFieldPositionName), ehrmsValue(record, ehrmsFieldPositionEN), code)
-		if existing, ok := byCode[code]; ok && strings.TrimSpace(existing.Name) != "" {
+		codeKey := ehrmsExternalCodeKey(code)
+		if existing, ok := byCode[codeKey]; ok && strings.TrimSpace(existing.Name) != "" {
 			continue
 		}
-		byCode[code] = Position{
-			ID:        code,
+		byCode[codeKey] = Position{
+			ID:        ehrmsPositionID(tenantID, code),
 			TenantID:  tenantID,
 			Code:      code,
 			Name:      name,
@@ -755,6 +834,29 @@ func EHRMSPositionsFromRecords(tenantID string, records []EHRMSPositionRecord, n
 		positions = append(positions, byCode[id])
 	}
 	return positions
+}
+
+// ehrmsExternalCodeKey normalizes external catalog codes for deterministic identity mapping.
+func ehrmsExternalCodeKey(code string) string {
+	return strings.ToLower(strings.TrimSpace(code))
+}
+
+// ehrmsOrgUnitID keeps upstream department codes tenant-local while producing globally safe IDs.
+func ehrmsOrgUnitID(tenantID, code string) string {
+	code = ehrmsExternalCodeKey(code)
+	if code == "" {
+		return ""
+	}
+	return ehrmsStableID("ehrms-ou", strings.TrimSpace(tenantID), code)
+}
+
+// ehrmsPositionID keeps upstream position codes tenant-local while producing globally safe IDs.
+func ehrmsPositionID(tenantID, code string) string {
+	code = ehrmsExternalCodeKey(code)
+	if code == "" {
+		return ""
+	}
+	return ehrmsStableID("ehrms-pos", strings.TrimSpace(tenantID), code)
 }
 
 // ehrmsOrgUnits 從員工資料彙整組織單位（測試與相容保留）。
@@ -1030,7 +1132,7 @@ func EHRMSCleanDepartmentName(name string) (string, bool) {
 		return "", false
 	}
 	closed := false
-	suffixes := []string{"(已關閉)", "（已關閉）", "(已关闭)", "（已关闭）"}
+	suffixes := []string{"(已關閉)", "（已關閉）", "(已關閉)", "（已關閉）"}
 	for {
 		changed := false
 		for _, suffix := range suffixes {

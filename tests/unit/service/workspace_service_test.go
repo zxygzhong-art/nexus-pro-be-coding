@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -387,11 +388,55 @@ func TestWorkspaceAttendanceBuildsLeaveAndClockMatrices(t *testing.T) {
 	if len(got.Dates) != 30 || len(got.Attendance.Rows) != 1 || len(got.Clock.Rows) != 1 {
 		t.Fatalf("unexpected matrix sizes: dates=%d attendance=%d clock=%d", len(got.Dates), len(got.Attendance.Rows), len(got.Clock.Rows))
 	}
+	if card := got.Clock.Rows[0].Employee; card.ID != "IKL001" || card.EmployeeID != "emp-1" {
+		t.Fatalf("expected display and canonical employee IDs, got %+v", card)
+	}
 	if cell := got.Attendance.Rows[0].Cells[9]; cell.Type != "leave" || cell.Leave != "特" || cell.Hours != 8 {
 		t.Fatalf("unexpected leave cell: %+v", cell)
 	}
 	if len(got.Clock.Abnormals) != 1 || got.Clock.Abnormals[0].Record.Reason != "缺下班卡" {
 		t.Fatalf("unexpected clock abnormals: %+v", got.Clock.Abnormals)
+	}
+}
+
+// TestWorkspaceAttendanceDoesNotRequireHRPermissions verifies that the
+// attendance-only manager contract can read the matrix without broad HR API access.
+func TestWorkspaceAttendanceDoesNotRequireHRPermissions(t *testing.T) {
+	store, _, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 7, 16, 8, 0, 0, 0, time.UTC)
+	if err := store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+		ID:       "ps-attendance-only",
+		TenantID: "tenant-1",
+		Name:     "Attendance only",
+		Permissions: []domain.Permission{
+			{Resource: "attendance.clock", Action: "read", Scope: "all", MenuKey: "attendance.overview"},
+			{Resource: "attendance.leave", Action: "read", Scope: "all", MenuKey: "attendance.leave_policy"},
+		},
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAccount(context.Background(), domain.Account{
+		ID:                     "acct-1",
+		TenantID:               "tenant-1",
+		Status:                 "active",
+		DirectPermissionSetIDs: []string{"ps-attendance-only"},
+		CreatedAt:              now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	insertWorkspaceEmployee(t, store, domain.Employee{
+		ID: "emp-attendance", EmployeeNo: "ATT001", Name: "Attendance Visible",
+		Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)),
+	})
+
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
+	got, err := svc.Workspace().WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 7})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Attendance.Rows) != 1 || got.Attendance.Rows[0].Employee.ID != "ATT001" {
+		t.Fatalf("expected attendance-scoped roster, got %+v", got.Attendance.Rows)
 	}
 }
 
@@ -485,7 +530,7 @@ func TestWorkspaceAttendanceNormalizesEHRMSLeaveTypes(t *testing.T) {
 	}
 }
 
-// TestWorkspaceAttendanceMergesApprovedLocalLeaveWithDailyFacts 驗證矩陣即時合併已核准本地請假，且不重複計算每日假勤。
+// TestWorkspaceAttendanceMergesApprovedLocalLeaveWithDailyFacts 驗證矩陣即時合併已覈準本地請假，且不重複計算每日假勤。
 func TestWorkspaceAttendanceUsesDailyLeaveFactsInsteadOfLeaveRanges(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 7, 10, 9, 0, 0, 0, time.UTC)
@@ -607,8 +652,54 @@ func TestWorkspaceAttendanceUsesEHRMSDailySummaries(t *testing.T) {
 	if clockCell.Type != "work" || clockCell.In != "09:00" || clockCell.Out != "18:00" || clockCell.Abnormal {
 		t.Fatalf("expected eHRMS summary to project clock times, got %+v", clockCell)
 	}
-	if got.Attendance.Rows[0].Summary.AttendedHours < 8 {
+	if got.Attendance.Rows[0].Summary.AttendedHours != 8 {
 		t.Fatalf("expected eHRMS summary hours to count as attended, got %+v", got.Attendance.Rows[0].Summary)
+	}
+}
+
+// TestWorkspaceAttendancePrefersLocalActualEvidence verifies local effective punches win without double-counting eHRMS facts.
+func TestWorkspaceAttendancePrefersLocalActualEvidence(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	local := time.FixedZone("Asia/Shanghai", 8*60*60)
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
+	for _, record := range []domain.AttendanceClockRecord{
+		{ID: "local-in", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-09", Direction: "clock_in", ClockedAt: time.Date(2026, 6, 9, 9, 0, 0, 0, local), RecordStatus: "accepted", Source: "geofence", CreatedAt: now},
+		{ID: "local-out", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-09", Direction: "clock_out", ClockedAt: time.Date(2026, 6, 9, 18, 0, 0, 0, local), RecordStatus: "accepted", Source: "geofence", CreatedAt: now},
+		{ID: "open-in", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_in", ClockedAt: time.Date(2026, 6, 10, 9, 0, 0, 0, local), RecordStatus: "accepted", Source: "geofence", CreatedAt: now},
+		{ID: "rejected-in", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", Direction: "clock_in", ClockedAt: time.Date(2026, 6, 11, 9, 0, 0, 0, local), RecordStatus: "rejected", Source: "geofence", CreatedAt: now},
+		{ID: "rejected-out", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", Direction: "clock_out", ClockedAt: time.Date(2026, 6, 11, 18, 0, 0, 0, local), RecordStatus: "rejected", Source: "geofence", CreatedAt: now},
+	} {
+		if err := store.UpsertAttendanceClockRecord(context.Background(), record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, summary := range []domain.AttendanceDailySummary{
+		{ID: "local-fallback", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-09", AttendHours: 12, AttendCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-09", CreatedAt: now, UpdatedAt: now},
+		{ID: "open-fallback", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", AttendHours: 7, AttendCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-10", CreatedAt: now, UpdatedAt: now},
+		{ID: "rejected-fallback", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", AttendHours: 6, AttendCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-11", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := store.UpsertAttendanceDailySummary(context.Background(), summary); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	got, err := svc.Workspace().WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	row := got.Attendance.Rows[0]
+	if row.Summary.AttendedHours != 14 {
+		t.Fatalf("expected 8 local hours plus 6 eHRMS fallback hours, got %+v", row.Summary)
+	}
+	if row.Cells[8].Hours != 8 || row.Cells[8].Label != "打卡" {
+		t.Fatalf("expected local evidence to drive the June 9 cell, got %+v", row.Cells[8])
+	}
+	if row.Cells[9].Hours != 0 {
+		t.Fatalf("expected a trailing open punch to contribute zero hours, got %+v", row.Cells[9])
+	}
+	if row.Cells[10].Hours != 6 || row.Cells[10].Label != "eHRMS" {
+		t.Fatalf("expected rejected local punches to allow eHRMS fallback, got %+v", row.Cells[10])
 	}
 }
 
@@ -637,7 +728,7 @@ func TestWorkspaceAttendanceMarksIncompleteEHRMSClockSummaryAbnormal(t *testing.
 	}
 }
 
-// TestWorkspaceAttendanceCountsApprovedLeaveAndOvertime 驗證工時統計合併每日假勤、本地核準請假與核准加班。
+// TestWorkspaceAttendanceCountsApprovedLeaveAndOvertime 驗證工時統計合併每日假勤、本地核準請假與覈準加班。
 func TestWorkspaceAttendanceCountsDailyLeaveAndApprovedOvertime(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
@@ -669,9 +760,8 @@ func TestWorkspaceAttendanceCountsDailyLeaveAndApprovedOvertime(t *testing.T) {
 	if row.Summary.LeaveHours != 22 || row.Summary.OvertimeHours != 3 {
 		t.Fatalf("unexpected summary hours: %+v", row.Summary)
 	}
-	expectedAttended := row.Summary.DueHours - 22 + 3
-	if row.Summary.AttendedHours != expectedAttended {
-		t.Fatalf("expected attended hours %v, got %v", expectedAttended, row.Summary.AttendedHours)
+	if row.Summary.AttendedHours != 0 {
+		t.Fatalf("expected leave and overtime without actual attendance evidence to contribute zero attended hours, got %v", row.Summary.AttendedHours)
 	}
 	if got.Attendance.Summary.OvertimeHours != 3 {
 		t.Fatalf("unexpected matrix overtime summary: %+v", got.Attendance.Summary)
@@ -697,7 +787,7 @@ func TestWorkspaceClockShortHoursExemptedByDailyLeave(t *testing.T) {
 	}
 }
 
-// TestPlatformWorkspaceEmployeesFiltersAndNormalizesStatus 驗證平台工作區員工篩選 and normalizes 狀態。
+// TestPlatformWorkspaceEmployeesFiltersAndNormalizesStatus 驗證平臺工作區員工篩選 and normalizes 狀態。
 func TestPlatformWorkspaceEmployeesFiltersAndNormalizesStatus(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
@@ -790,7 +880,7 @@ func TestUpdateAttendancePolicyPersistsWorkspaceSettings(t *testing.T) {
 	}
 }
 
-// TestPlatformWorkspaceRequiresWorkflowFormTemplateRead 驗證平台工作區 requires 流程表單範本 read。
+// TestPlatformWorkspaceRequiresWorkflowFormTemplateRead 驗證平臺工作區 requires 流程表單範本 read。
 func TestPlatformWorkspaceRequiresWorkflowFormTemplateRead(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -819,7 +909,7 @@ func TestPlatformWorkspaceRequiresWorkflowFormTemplateRead(t *testing.T) {
 	}
 }
 
-// TestWorkspaceAuditLogsFiltersAndProjects 驗證工作區稽核 logs 篩選 and projects。
+// TestWorkspaceAuditLogsFiltersAndProjects 驗證工作區稽覈 logs 篩選 and projects。
 func TestWorkspaceAuditLogsFiltersAndProjects(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -839,6 +929,74 @@ func TestWorkspaceAuditLogsFiltersAndProjects(t *testing.T) {
 	}
 	if got.Items[0].Time != "2026-06-10T08:00:00Z" {
 		t.Fatalf("expected RFC3339 UTC audit time, got %q", got.Items[0].Time)
+	}
+}
+
+// TestWorkspaceAuditLogFacetsUsesTenantWideStableOptions verifies isolation, stable IDs, and redaction.
+func TestWorkspaceAuditLogFacetsUsesTenantWideStableOptions(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-2", Name: "Tenant 2", CreatedAt: now})
+	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{ID: "ps-audit", TenantID: "tenant-1", Name: "Audit", Permissions: []domain.Permission{{Resource: "audit.log", Action: "read", Scope: "all"}}, CreatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-a", EmployeeNo: "E001", Name: "Alice", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-b", EmployeeNo: "E002", Name: "Bob", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-x", TenantID: "tenant-2", EmployeeNo: "X001", Name: "Tenant Two", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-a", TenantID: "tenant-1", EmployeeID: "emp-a", Status: "active", DirectPermissionSetIDs: []string{"ps-audit"}, CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-b", TenantID: "tenant-1", EmployeeID: "emp-b", Status: "active", CreatedAt: now})
+	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-x", TenantID: "tenant-2", EmployeeID: "emp-x", Status: "active", CreatedAt: now})
+	logs := []domain.AuditLog{
+		{ID: "audit-employee", TenantID: "tenant-1", ActorAccountID: "acct-a", Action: "hr.employee.create", Resource: "hr.employee", Details: map[string]any{"token": "secret-value"}, CreatedAt: now},
+		{ID: "audit-clock", TenantID: "tenant-1", ActorAccountID: "acct-a", Action: "clock.update", Resource: "attendance.clock", CreatedAt: now.Add(-time.Minute)},
+		{ID: "audit-position", TenantID: "tenant-1", ActorAccountID: "acct-b", Action: "position.update", Resource: "hr.position", CreatedAt: now.Add(-2 * time.Minute)},
+		{ID: "audit-permission", TenantID: "tenant-1", ActorAccountID: "acct-b", Action: "permission.revoke", Resource: "iam.permission", CreatedAt: now.Add(-3 * time.Minute)},
+		{ID: "audit-system", TenantID: "tenant-1", Action: "system.bootstrap", Resource: "system", Details: map[string]any{"password": "secret-value"}, CreatedAt: now.Add(-4 * time.Minute)},
+		{ID: "audit-other-tenant", TenantID: "tenant-2", ActorAccountID: "acct-x", Action: "workflow.publish", Resource: "workflow.form", CreatedAt: now},
+	}
+	for _, log := range logs {
+		_ = store.AppendAuditLog(context.Background(), log)
+	}
+
+	svc := service.New(store).Workspace()
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-a"}
+	facets, err := svc.WorkspaceAuditLogFacets(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantOperators := []domain.WorkspaceAuditLogOperatorFacet{{ID: "acct-a", Label: "Alice"}, {ID: "acct-b", Label: "Bob"}, {ID: domain.WorkspaceAuditSystemOperatorID, Label: "系統"}}
+	if len(facets.Operators) != len(wantOperators) {
+		t.Fatalf("unexpected operators: %+v", facets.Operators)
+	}
+	for index, want := range wantOperators {
+		if facets.Operators[index] != want {
+			t.Fatalf("operator %d: got %+v want %+v", index, facets.Operators[index], want)
+		}
+	}
+	wantTypes := []string{"員工管理", "組織架構", "假勤制度", "管理員設定", "系統"}
+	if strings.Join(facets.Types, ",") != strings.Join(wantTypes, ",") {
+		t.Fatalf("unexpected types: %+v", facets.Types)
+	}
+	encoded, err := json.Marshal(facets)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(encoded), "secret-value") || strings.Contains(string(encoded), "details") || strings.Contains(string(encoded), "acct-x") {
+		t.Fatalf("facets leaked sensitive or cross-tenant data: %s", encoded)
+	}
+
+	systemLogs, err := svc.WorkspaceAuditLogs(ctx, domain.WorkspaceAuditLogQuery{OperatorID: domain.WorkspaceAuditSystemOperatorID, Type: "系統"}, domain.PageRequest{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if systemLogs.Total != 1 || systemLogs.Items[0].ID != "audit-system" {
+		t.Fatalf("system facet is not filterable: %+v", systemLogs)
+	}
+	permissionLogs, err := svc.WorkspaceAuditLogs(ctx, domain.WorkspaceAuditLogQuery{OperatorID: "acct-b", Type: "管理員設定"}, domain.PageRequest{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if permissionLogs.Total != 1 || permissionLogs.Items[0].ID != "audit-permission" {
+		t.Fatalf("stable operator/type facets are not filterable: %+v", permissionLogs)
 	}
 }
 

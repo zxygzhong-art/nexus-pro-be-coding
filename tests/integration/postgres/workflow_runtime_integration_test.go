@@ -214,7 +214,7 @@ func TestPostgresWorkflowSubmitApproveServiceSemantics(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := store.UpsertFormTemplate(ctx, domain.FormTemplate{
-		ID: templateID, TenantID: tenantID, Key: "general", Name: "通用签呈",
+		ID: templateID, TenantID: tenantID, Key: "general", Name: "通用簽呈",
 		Schema: postgresWorkflowTemplateSchema(approverID), CreatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
@@ -276,7 +276,7 @@ func postgresWorkflowTemplateSchema(assigneeAccountID string) map[string]any {
 		"workspace_design": map[string]any{
 			"enabled": true,
 			"stages": []map[string]any{{
-				"id": "stage-approver", "type": "approver", "label": "审核",
+				"id": "stage-approver", "type": "approver", "label": "審覈",
 				"config": map[string]any{"account_ids": []any{assigneeAccountID}},
 			}},
 		},

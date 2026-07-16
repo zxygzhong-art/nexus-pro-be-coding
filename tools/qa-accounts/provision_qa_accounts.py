@@ -7,6 +7,7 @@ edge cases on every page.
 
 Requirements:
   - Python 3.9+ (stdlib only)
+  - Go toolchain (reuses tenantctl to seed the canonical built-in forms)
   - `psql` CLI on PATH
   - Keycloak running with realm configured (see ops/docs/keycloak.md):
       * realm `nexus-pro`
@@ -87,6 +88,7 @@ def keycloak_server_base(raw: str) -> str:
 KC_BASE_RAW = os.environ.get("KEYCLOAK_BASE_URL", "http://127.0.0.1:8080")
 KC_BASE = keycloak_server_base(KC_BASE_RAW)
 DATABASE_URL = build_database_url()
+REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 
 ROOT_ORG_ID = f"ou-{TENANT_ID}-root"
 
@@ -126,16 +128,48 @@ SELF_EMPLOYEE = [
     perm("attendance.leave", "read", "self", "attendance.leave"),
     perm("attendance.leave", "create", "self", "attendance.leave"),
     perm("workflow.form_template", "read", "all", "workflow.forms"),
-    perm("workflow.form_instance", "read", "self", "workflow.forms"),
-    perm("workflow.form_instance", "submit", "self", "workflow.forms"),
-    perm("workflow.form_instance", "update", "self", "workflow.forms"),
-    perm("workflow.form_instance", "delete", "self", "workflow.forms"),
+    perm("workflow.form_instance", "read", "self", "workflow.instances"),
+    perm("workflow.form_instance", "submit", "self", "workflow.instances"),
+    perm("workflow.form_instance", "update", "self", "workflow.instances"),
+    perm("workflow.form_instance", "delete", "self", "workflow.instances"),
+]
+
+# Wildcard authorizes APIs but page navigation is intentionally projected from
+# explicit primary read grants. Mirror the real tenant-admin shape so the QA
+# superadmin can exercise every management page without weakening that rule.
+SUPERADMIN_PAGE_GRANTS = [
+    perm("hr.employee", "read", "all", "workspace.overview"),
+    perm("hr.employee", "read", "all", "hr.employees"),
+    perm("hr.org_unit", "read", "all", "hr.org_units"),
+    perm("hr.position", "read", "all", "hr.positions"),
+    perm("hr.employee", "read", "all", "hr.organization"),
+    perm("hr.employee", "read", "all", "hr.turnover"),
+    perm("attendance.clock", "read", "all", "attendance.overview"),
+    perm("attendance.clock", "read", "all", "attendance.clock"),
+    perm("attendance.leave", "read", "all", "attendance.leave_policy"),
+    perm("workflow.form_template", "read", "all", "workflow.forms"),
+    perm("workflow.form_template", "create", "all", "workflow.forms"),
+    perm("agent.model", "read", "all", "agents.models"),
+    perm("agent.knowledge_base", "read", "all", "agents.knowledge_bases"),
+    perm("agent.tool", "read", "all", "agents.tools"),
+    perm("agent.definition", "read", "all", "agents.definitions"),
+    perm("agent.usage", "read", "all", "agents.usage"),
+    perm("iam.permission_set_assignment", "read", "all", "iam.members"),
+    perm("iam.user_group", "read", "all", "iam.user_groups"),
+    perm("iam.permission_set", "read", "all", "iam.permission_sets"),
+    perm("iam.permission_set_assignment", "read", "all", "iam.assignments"),
+    perm("iam.assumable_role", "read", "all", "iam.assumable_roles"),
+    perm("iam.data_scope", "read", "all", "iam.policies"),
+    perm("audit.audit_log", "read", "all", "audit.logs"),
+    perm("attendance.leave", "read", "all", "attendance.leave"),
+    perm("workflow.form_instance", "read", "all", "workflow.instances"),
+    perm("agent.run", "read", "all", "agents.runs"),
 ]
 
 PERMISSION_SETS = {
     "ps-qa-platform-admin": {
         "name": "QA Platform Admin",
-        "permissions": [perm("*", "*", menu_key="workbench")] + ME_BASIC,
+        "permissions": [perm("*", "*", menu_key="workbench")] + ME_BASIC + SUPERADMIN_PAGE_GRANTS,
     },
     "ps-qa-hr-admin": {
         "name": "QA HR Admin",
@@ -151,17 +185,25 @@ PERMISSION_SETS = {
             perm("hr.org_unit", "read", menu_key="hr.org_units"),
             perm("hr.org_unit", "create", menu_key="hr.org_units"),
             perm("hr.org_unit", "update", menu_key="hr.org_units"),
+            # These page associations reuse the existing employee read grant;
+            # they expose no additional API action or data scope.
+            perm("hr.employee", "read", "all", "hr.organization"),
+            perm("hr.employee", "read", "all", "hr.turnover"),
         ],
     },
     "ps-qa-attendance-manager": {
         "name": "QA Attendance Manager",
         "permissions": ME_BASIC
         + [
+            # The same read grants project the manager into each workspace page;
+            # they do not add a broader API action or data scope.
+            perm("attendance.clock", "read", menu_key="attendance.overview"),
             perm("attendance.clock", "read", menu_key="attendance.clock"),
             perm("attendance.clock", "create", menu_key="attendance.clock"),
             perm("attendance.correction", "read", menu_key="attendance.corrections"),
             perm("attendance.correction", "approve", menu_key="attendance.corrections"),
             perm("attendance.correction", "update", menu_key="attendance.corrections"),
+            perm("attendance.leave", "read", menu_key="attendance.leave_policy"),
             perm("attendance.leave", "read", menu_key="attendance.leave"),
             perm("attendance.leave", "update", menu_key="attendance.leave"),
         ],
@@ -171,9 +213,9 @@ PERMISSION_SETS = {
         "permissions": ME_BASIC
         + SELF_EMPLOYEE
         + [
-            perm("workflow.form_instance", "read", menu_key="workflow.forms"),
-            perm("workflow.form_instance", "approve", menu_key="workflow.forms"),
-            perm("workflow.form_instance", "update", menu_key="workflow.forms"),
+            perm("workflow.form_instance", "read", menu_key="workflow.instances"),
+            perm("workflow.form_instance", "approve", menu_key="workflow.instances"),
+            perm("workflow.form_instance", "update", menu_key="workflow.instances"),
         ],
     },
     "ps-qa-employee": {
@@ -194,6 +236,13 @@ PERMISSION_SETS = {
     },
 }
 
+
+def permission_set_id(base_id: str) -> str:
+    """Return a globally unique permission-set ID for the selected QA tenant."""
+    if TENANT_ID == "qa":
+        return base_id
+    return f"{base_id}-{TENANT_ID}"
+
 # ---------------------------------------------------------------------------
 # Account matrix
 # ---------------------------------------------------------------------------
@@ -208,7 +257,7 @@ ACCOUNTS = [
         "account_status": "active",
         "employee_status": "active",
         "expect_login": True,
-        "desc": "全权限（wildcard），所有 workspace 页面可见",
+        "desc": "全權限（wildcard），所有 workspace 頁面可見",
     },
     {
         "key": "hr",
@@ -219,7 +268,7 @@ ACCOUNTS = [
         "account_status": "active",
         "employee_status": "active",
         "expect_login": True,
-        "desc": "HR 权限：员工/组织页面可见，考勤/表单设计/管理员/审计不可见",
+        "desc": "HR 權限：員工/組織頁面可見，考勤/表單設計/管理員/審計不可見",
     },
     {
         "key": "attendance",
@@ -230,7 +279,7 @@ ACCOUNTS = [
         "account_status": "active",
         "employee_status": "active",
         "expect_login": True,
-        "desc": "考勤管理：工時統計/打卡時間/假勤制度可见，可审批补卡",
+        "desc": "考勤管理：工時統計/打卡時間/假勤制度可見，可審批補卡",
     },
     {
         "key": "approver",
@@ -241,7 +290,7 @@ ACCOUNTS = [
         "account_status": "active",
         "employee_status": "active",
         "expect_login": True,
-        "desc": "表单审批人：待辦審核可核准/驳回/退回；同时是 qa-employee 的主管",
+        "desc": "表單審批人：待辦審核可覈準/駁回/退回；同時是 qa-employee 的主管",
     },
     {
         "key": "employee",
@@ -253,7 +302,7 @@ ACCOUNTS = [
         "employee_status": "active",
         "manager_key": "approver",
         "expect_login": True,
-        "desc": "普通员工（self scope）：打卡/请假/提交表单，无任何 workspace 页面",
+        "desc": "普通員工（self scope）：打卡/請假/提交表單，無任何 workspace 頁面",
     },
     {
         "key": "audit",
@@ -264,7 +313,7 @@ ACCOUNTS = [
         "account_status": "active",
         "employee_status": "active",
         "expect_login": True,
-        "desc": "仅审计：workspace 只见操作紀錄",
+        "desc": "僅審計：workspace 只見操作紀錄",
     },
     {
         "key": "noperm",
@@ -275,7 +324,7 @@ ACCOUNTS = [
         "account_status": "active",
         "employee_status": "active",
         "expect_login": True,
-        "desc": "仅 me.read：能登录进主页，任何业务 API 应 403，workspace 全部拦截",
+        "desc": "僅 me.read：能登錄進主頁，任何業務 API 應 403，workspace 全部攔截",
     },
     {
         "key": "disabled",
@@ -287,7 +336,7 @@ ACCOUNTS = [
         "employee_status": "active",
         "expect_login": True,  # Keycloak 會發 token，但後端 API 應拒絕
         "expect_api_ok": False,
-        "desc": "账号已停用：Keycloak 可取得 token，但业务 API 应拒绝（account_inactive）",
+        "desc": "賬號已停用：Keycloak 可取得 token，但業務 API 應拒絕（account_inactive）",
     },
     {
         "key": "pending",
@@ -299,7 +348,7 @@ ACCOUNTS = [
         "employee_status": "onboarding",
         "expect_login": True,
         "expect_api_ok": False,
-        "desc": "待邀请激活：同上，后端应拒绝",
+        "desc": "待邀請激活：同上，後端應拒絕",
     },
     {
         "key": "resigned",
@@ -310,7 +359,7 @@ ACCOUNTS = [
         "account_status": "active",
         "employee_status": "resigned",
         "expect_login": True,
-        "desc": "边界：账号 active 但员工已离职——验证打卡/请假等操作的实际行为",
+        "desc": "邊界：賬號 active 但員工已離職——驗證打卡/請假等操作的實際行爲",
     },
     {
         "key": "kc-only",
@@ -322,7 +371,7 @@ ACCOUNTS = [
         "employee_status": None,
         "expect_login": True,
         "expect_api_ok": False,
-        "desc": "边界：Keycloak 有用户但后端无绑定，API 应 401（identity not linked）",
+        "desc": "邊界：Keycloak 有用戶但後端無綁定，API 應 401（identity not linked）",
     },
 ]
 
@@ -498,16 +547,17 @@ def build_sql(subs: dict) -> str:
         f"""INSERT INTO tenants (id, name, created_at)
 VALUES ({sql_quote(TENANT_ID)}, {sql_quote(TENANT_NAME)}, now())
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name;""",
-        f"""INSERT INTO org_units (id, tenant_id, code, name, parent_id, path, created_at)
-VALUES ({sql_quote(ROOT_ORG_ID)}, {sql_quote(TENANT_ID)}, 'ROOT', {sql_quote(TENANT_NAME)}, '', ARRAY[{sql_quote(ROOT_ORG_ID)}], now())
+        f"""INSERT INTO org_units (id, tenant_id, code, name, parent_id, path, created_at, updated_at)
+VALUES ({sql_quote(ROOT_ORG_ID)}, {sql_quote(TENANT_ID)}, 'ROOT', {sql_quote(TENANT_NAME)}, '', ARRAY[{sql_quote(ROOT_ORG_ID)}], now(), now())
 ON CONFLICT (id) DO NOTHING;""",
     ]
 
     for ps_id, ps in PERMISSION_SETS.items():
+        stored_ps_id = permission_set_id(ps_id)
         perms_json = json.dumps(ps["permissions"], ensure_ascii=False)
         lines.append(
             f"""INSERT INTO permission_sets (id, tenant_id, name, description, permissions, created_at)
-VALUES ({sql_quote(ps_id)}, {sql_quote(TENANT_ID)}, {sql_quote(ps["name"])}, 'QA provisioned',
+VALUES ({sql_quote(stored_ps_id)}, {sql_quote(TENANT_ID)}, {sql_quote(ps["name"])}, 'QA provisioned',
         {sql_quote(perms_json)}::jsonb, now())
 ON CONFLICT (id) DO UPDATE SET permissions = EXCLUDED.permissions, name = EXCLUDED.name;"""
         )
@@ -517,7 +567,7 @@ ON CONFLICT (id) DO UPDATE SET permissions = EXCLUDED.permissions, name = EXCLUD
         if acct["account_status"] is None:
             continue  # keycloak-only edge case
         key = acct["key"]
-        ps_array = ", ".join(sql_quote(p) for p in acct["permission_sets"])
+        ps_array = ", ".join(sql_quote(permission_set_id(p)) for p in acct["permission_sets"])
         lines.append(
             f"""INSERT INTO accounts (id, tenant_id, display_name, email, employee_id, status,
         direct_permission_set_ids, created_at)
@@ -589,6 +639,32 @@ def run_psql(sql: str):
         die(f"psql failed:\n{proc.stderr}")
 
 
+def ensure_default_form_templates():
+    """Backfill canonical built-in forms without overwriting tenant customizations."""
+    proc = subprocess.run(
+        [
+            "go",
+            "run",
+            "./cmd/tenantctl",
+            "ensure-default-form-templates",
+            "--tenant-id",
+            TENANT_ID,
+            "--database-url",
+            DATABASE_URL,
+        ],
+        cwd=REPO_ROOT,
+        text=True,
+        capture_output=True,
+    )
+    if proc.returncode != 0:
+        die(proc.stderr.strip() or "default form template backfill failed")
+    try:
+        result = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        die("tenantctl returned an invalid default form template result")
+    print(f"  [forms] defaults ready (created={result.get('created', 0)})")
+
+
 # ---------------------------------------------------------------------------
 # Verification
 # ---------------------------------------------------------------------------
@@ -608,7 +684,7 @@ def ropc_login(email: str):
 
 
 def verify_accounts():
-    print("\n=== 验证登录（Keycloak ROPC" + (f" + {API_BASE}/v1/me" if API_BASE else "") + "）===")
+    print("\n=== 驗證登錄（Keycloak ROPC" + (f" + {API_BASE}/v1/me" if API_BASE else "") + "）===")
     failures = 0
     for acct in ACCOUNTS:
         status, body, _ = ropc_login(acct["email"])
@@ -629,14 +705,14 @@ def verify_accounts():
         print(line)
     if failures:
         die(f"{failures} account(s) behaved unexpectedly")
-    print("全部账号验证通过。")
+    print("全部賬號驗證通過。")
 
 
 def print_matrix():
     print(f"tenant: {TENANT_ID}   password (all users): {QA_PASSWORD}\n")
-    print(f"{'email':<38} {'account_status':<15} {'employee':<12} {'permission sets':<28} 说明")
+    print(f"{'email':<38} {'account_status':<15} {'employee':<12} {'permission sets':<28} 說明")
     for acct in ACCOUNTS:
-        ps = ",".join(acct["permission_sets"]) or "-"
+        ps = ",".join(permission_set_id(p) for p in acct["permission_sets"]) or "—"
         print(f"{acct['email']:<38} {str(acct['account_status']):<15} {str(acct['employee_status']):<12} {ps:<28} {acct['desc']}")
 
 
@@ -662,22 +738,25 @@ def main():
     if not DATABASE_URL:
         die("DB_HOST, DB_USERNAME, and DB_NAME are required")
 
-    print(f"=== 1/4 Keycloak admin 登录（{KC_BASE}, realm={KC_REALM}）===")
+    print(f"=== 1/5 Keycloak admin 登錄（{KC_BASE}, realm={KC_REALM}）===")
     token = kc_admin_token()
 
-    print("=== 2/4 确认 protocol mappers（tenant_id/account_id claims）===")
+    print("=== 2/5 確認 protocol mappers（tenant_id/account_id claims）===")
     kc_ensure_protocol_mappers(token)
 
-    print("=== 3/4 创建 Keycloak 用户并设置密码 ===")
+    print("=== 3/5 創建 Keycloak 用戶並設置密碼 ===")
     subs = {}
     for acct in ACCOUNTS:
         sub = kc_ensure_user(token, acct)
         subs[acct["key"]] = sub
         print(f"  [keycloak] {acct['email']:<38} sub={sub}")
 
-    print("=== 4/4 写入 Postgres（tenant/permission_sets/accounts/employees/user_identities）===")
+    print("=== 4/5 寫入 Postgres（tenant/permission_sets/accounts/employees/user_identities）===")
     run_psql(build_sql(subs))
     print("  [postgres] done")
+
+    print("=== 5/5 補齊內建表單模板（保留既有自定義）===")
+    ensure_default_form_templates()
 
     print_matrix()
     if not args.skip_verify:

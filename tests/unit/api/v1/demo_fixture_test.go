@@ -335,7 +335,7 @@ func populateDemoFixture(store repository.Store) {
 		ID:               "ug-employee",
 		TenantID:         "demo",
 		Name:             "Employee",
-		Description:      "普通员工",
+		Description:      "普通員工",
 		MemberAccountIDs: []string{"acct-employee"},
 		PermissionSetIDs: []string{"ps-employee"},
 		CreatedAt:        now.Add(time.Minute),
@@ -344,7 +344,7 @@ func populateDemoFixture(store repository.Store) {
 		ID:               "ug-audit",
 		TenantID:         "demo",
 		Name:             "Audit",
-		Description:      "审计查看组",
+		Description:      "審計查看組",
 		MemberAccountIDs: []string{"acct-audit"},
 		PermissionSetIDs: []string{"ps-audit"},
 		CreatedAt:        now.Add(2 * time.Minute),
@@ -353,7 +353,7 @@ func populateDemoFixture(store repository.Store) {
 		ID:               "ug-hr-manager",
 		TenantID:         "demo",
 		Name:             "HR Manager",
-		Description:      "HR 管理员测试组",
+		Description:      "HR 管理員測試組",
 		MemberAccountIDs: []string{"acct-hr-manager"},
 		PermissionSetIDs: []string{"ps-hr-manager"},
 		CreatedAt:        now.Add(3 * time.Minute),
@@ -362,7 +362,7 @@ func populateDemoFixture(store repository.Store) {
 		ID:               "ug-hr-readonly",
 		TenantID:         "demo",
 		Name:             "HR Readonly",
-		Description:      "HR 只读测试组",
+		Description:      "HR 只讀測試組",
 		MemberAccountIDs: []string{"acct-hr-readonly"},
 		PermissionSetIDs: []string{"ps-hr-readonly"},
 		CreatedAt:        now.Add(4 * time.Minute),
@@ -371,7 +371,7 @@ func populateDemoFixture(store repository.Store) {
 		ID:               "ug-attendance-manager",
 		TenantID:         "demo",
 		Name:             "Attendance Manager",
-		Description:      "假勤管理员测试组",
+		Description:      "假勤管理員測試組",
 		MemberAccountIDs: []string{"acct-attendance-manager"},
 		PermissionSetIDs: []string{"ps-attendance-manager"},
 		CreatedAt:        now.Add(5 * time.Minute),
@@ -380,7 +380,7 @@ func populateDemoFixture(store repository.Store) {
 		ID:               "ug-workflow-approver",
 		TenantID:         "demo",
 		Name:             "Workflow Approver",
-		Description:      "流程审批测试组",
+		Description:      "流程審批測試組",
 		MemberAccountIDs: []string{"acct-workflow-approver"},
 		PermissionSetIDs: []string{"ps-workflow-approver"},
 		CreatedAt:        now.Add(6 * time.Minute),
@@ -389,7 +389,7 @@ func populateDemoFixture(store repository.Store) {
 		ID:               "ug-security-admin",
 		TenantID:         "demo",
 		Name:             "Security Admin",
-		Description:      "安全管理员测试组",
+		Description:      "安全管理員測試組",
 		MemberAccountIDs: []string{"acct-security-admin"},
 		PermissionSetIDs: []string{"ps-security-admin"},
 		CreatedAt:        now.Add(7 * time.Minute),
@@ -398,7 +398,7 @@ func populateDemoFixture(store repository.Store) {
 		ID:               "ug-insights-viewer",
 		TenantID:         "demo",
 		Name:             "Insights Viewer",
-		Description:      "数据看板只读测试组",
+		Description:      "數據看板只讀測試組",
 		MemberAccountIDs: []string{"acct-insights-viewer"},
 		PermissionSetIDs: []string{"ps-insights-viewer"},
 		CreatedAt:        now.Add(8 * time.Minute),
@@ -653,7 +653,7 @@ func populateDemoFixture(store repository.Store) {
 		ID:        "ou-security",
 		TenantID:  "demo",
 		Code:      "SEC",
-		Name:      "安全合规部",
+		Name:      "安全合規部",
 		ParentID:  "ou-hq",
 		Path:      []string{"ou-hq", "ou-security"},
 		CreatedAt: now.Add(5 * time.Minute),
@@ -1109,7 +1109,7 @@ func populateDemoFixture(store repository.Store) {
 	})
 }
 
-// populateFixturePlatformFormTemplates 驗證 populate fixture 平台表單範本。
+// populateFixturePlatformFormTemplates 驗證 populate fixture 平臺表單範本。
 func populateFixturePlatformFormTemplates(ctx context.Context, store repository.Store, now time.Time) {
 	offset := 2
 	for _, column := range platformFormColumns() {
@@ -1139,12 +1139,12 @@ func populateFixturePlatformFormTemplates(ctx context.Context, store repository.
 	}
 }
 
-// platformFormColumns 驗證平台表單 columns。
+// platformFormColumns 驗證平臺表單 columns。
 func platformFormColumns() []PlatformFormColumn {
 	return []PlatformFormColumn{
 		{Title: "人事考勤類", Emoji: "👥", Items: []PlatformFormItem{
 			{ID: "leave-request", Emoji: "🗓️", Title: "請假申請單", Desc: "特休 / 事假 / 病假 / 公假"},
-			{ID: "overtime-approval", Emoji: "⏰", Title: "加班核准申請單", Desc: "平日延時、假日加班皆可使用"},
+			{ID: "overtime-approval", Emoji: "⏰", Title: "加班覈準申請單", Desc: "平日延時、假日加班皆可使用"},
 			{ID: "punch-fix", Emoji: "🕒", Title: "HR-005 補卡單", Desc: "漏打卡或打卡異常補登"},
 		}},
 		{Title: "人資相關", Emoji: "👥", Items: []PlatformFormItem{

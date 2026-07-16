@@ -24,13 +24,27 @@ func (c AttendanceService) createOvertimeRequestFromSubmittedForm(ctx RequestCon
 	if err != nil {
 		return OvertimeRequest{}, err
 	}
-	if existing, ok, err := c.store.GetOvertimeRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID); err != nil {
+	if _, err := c.requireAttendanceEmployeeActive(ctx, employeeID); err != nil {
 		return OvertimeRequest{}, err
-	} else if ok {
+	}
+	existing, resubmitting, err := c.store.GetOvertimeRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID)
+	if err != nil {
+		return OvertimeRequest{}, err
+	}
+	if resubmitting {
 		if strings.TrimSpace(existing.EmployeeID) != employeeID {
 			return OvertimeRequest{}, Conflict("linked overtime request does not belong to the form applicant")
 		}
-		return existing, nil
+		switch normalizeLeaveRequestStatus(existing.Status) {
+		case "pending_approval":
+			return existing, nil
+		case "rejected", "cancelled":
+			// Returned submissions reuse their stable request identity and refresh the requested values below.
+		case "approved":
+			return OvertimeRequest{}, Conflict("approved linked overtime request cannot be resubmitted")
+		default:
+			return OvertimeRequest{}, Conflict("linked overtime request is not eligible for resubmission")
+		}
 	}
 
 	startRaw := utils.FirstNonEmpty(stringFromAny(payload["start_at"]), stringFromAny(payload["startAt"]))
@@ -65,11 +79,16 @@ func (c AttendanceService) createOvertimeRequestFromSubmittedForm(ctx RequestCon
 	reason := strings.TrimSpace(utils.FirstNonEmpty(stringFromAny(payload["reason"]), stringFromAny(payload["description"])))
 	now := c.Now()
 	requestID := utils.NewID("ot")
+	createdAt := now
+	if resubmitting {
+		requestID = existing.ID
+		createdAt = existing.CreatedAt
+	}
 	req := OvertimeRequest{
 		ID: requestID, TenantID: ctx.TenantID, EmployeeID: employeeID,
 		WorkDate: attendanceWorkDate(startAt), StartAt: startAt, EndAt: endAt, Hours: hours,
 		OvertimeType: overtimeType, CompensationType: compensationType, Reason: reason,
-		Status: "pending_approval", FormInstanceID: instance.ID, CreatedAt: now, UpdatedAt: now,
+		Status: "pending_approval", FormInstanceID: instance.ID, CreatedAt: createdAt, UpdatedAt: now,
 	}
 	if err := c.store.UpsertOvertimeRequest(goContext(ctx), req); err != nil {
 		return OvertimeRequest{}, err
@@ -94,9 +113,13 @@ func (c AttendanceService) createOvertimeRequestFromSubmittedForm(ctx RequestCon
 	if err := c.store.UpsertFormInstance(goContext(ctx), instance); err != nil {
 		return OvertimeRequest{}, err
 	}
-	if err := c.audit(ctx, "attendance.overtime_request.create", "overtime_request", req.ID, "medium", map[string]any{
+	event := "attendance.overtime_request.create"
+	if resubmitting {
+		event = "attendance.overtime_request.resubmit"
+	}
+	if err := c.audit(ctx, event, "overtime_request", req.ID, "medium", map[string]any{
 		"employee_id": employeeID, "hours": hours, "overtime_type": overtimeType,
-		"compensation_type": compensationType, "form_instance_id": instance.ID, "source": "workflow.form.submit",
+		"compensation_type": compensationType, "form_instance_id": instance.ID, "source": "workflow.form.submit", "resubmit": resubmitting,
 	}); err != nil {
 		return OvertimeRequest{}, err
 	}

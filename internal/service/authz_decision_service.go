@@ -39,6 +39,25 @@ type authzPermissionSetMutation struct {
 	removePermissions []string
 }
 
+type authzScopeCacheEntry struct {
+	scope      Scope
+	conditions map[string]any
+	err        error
+}
+
+type authzBoundaryScopeCacheEntry struct {
+	authzScopeCacheEntry
+	hasScope bool
+}
+
+// authzDecisionScopeCache is request-local. Projection reuses it while checking
+// each materialized route so employee/org lookups are bounded by grants rather
+// than multiplied by the number of routes advertised through /me.
+type authzDecisionScopeCache struct {
+	grantConditions map[string]authzScopeCacheEntry
+	boundary        *authzBoundaryScopeCacheEntry
+}
+
 type authzTrace struct {
 	evaluatedGrants []domain.AuthzEvaluatedGrant
 	denySources     []string
@@ -79,7 +98,29 @@ func (c *Service) evaluateAuthz(ctx RequestContext, account Account, req CheckRe
 	return cacheResult(result), nil
 }
 
+// evaluateCurrentAccessProjection validates an explicitly supplied assumed session,
+// then checks the base account's permission to read its own authoritative projection.
+// Invalid, expired, revoked, cross-tenant, or cross-account sessions never fall back.
+func (c *Service) evaluateCurrentAccessProjection(ctx RequestContext, account Account, req CheckRequest) (CheckResult, error) {
+	if strings.TrimSpace(ctx.AssumedRoleSessionID) != "" {
+		if _, _, err := c.activeAssumableRole(ctx, account); err != nil {
+			return CheckResult{}, err
+		}
+	}
+	baseCtx := ctx
+	baseCtx.AssumedRoleID = ""
+	baseCtx.AssumedRoleSessionID = ""
+	return c.evaluateAuthz(baseCtx, account, req)
+}
+
 func (c *Service) evaluateAuthzDecision(ctx RequestContext, account Account, req CheckRequest, grants []authzGrant, setIDs []string, assumedRole *AssumedRoleDecision, boundary map[string]any, trace *authzTrace) (CheckResult, error) {
+	return c.evaluateAuthzDecisionWithFieldPolicies(ctx, account, req, grants, setIDs, assumedRole, boundary, trace, true, nil)
+}
+
+// evaluateAuthzDecisionWithFieldPolicies lets caller-projection checks reuse the
+// authoritative grant/boundary/scope engine without performing an unused field
+// policy query for every projected permission.
+func (c *Service) evaluateAuthzDecisionWithFieldPolicies(ctx RequestContext, account Account, req CheckRequest, grants []authzGrant, setIDs []string, assumedRole *AssumedRoleDecision, boundary map[string]any, trace *authzTrace, includeFieldPolicies bool, scopeCache *authzDecisionScopeCache) (CheckResult, error) {
 	req = normalizeCheckRequest(req)
 	matched := make([]string, 0)
 	matchedBy := make([]string, 0)
@@ -88,13 +129,15 @@ func (c *Service) evaluateAuthzDecision(ctx RequestContext, account Account, req
 	var normalScope Scope
 	var normalConditions map[string]any
 	var normalMatched bool
+	var normalUsageScopeInvalid bool
 	var assumedScope Scope
 	var assumedConditions map[string]any
 	var assumedMatched bool
+	var assumedUsageScopeInvalid bool
 	riskLevel := riskLevelForRoute(req)
 	permissionKey := permissionKey(req.ApplicationCode, req.ResourceType, req.Action)
 
-	for _, grant := range grants {
+	for grantIndex, grant := range grants {
 		if !permissionMatches(grant.Permission, req, account) {
 			if trace != nil {
 				trace.addGrant(grant, false, "", "")
@@ -146,14 +189,26 @@ func (c *Service) evaluateAuthzDecision(ctx RequestContext, account Account, req
 			}
 			matchedBy = append(matchedBy, label)
 		}
+		scope, conditions, err := c.conditionsForGrantCached(ctx, account, grant, req, grantIndex, scopeCache)
+		if err != nil {
+			return CheckResult{}, err
+		}
+		if req.ApplicationCode == AppAgent && req.ResourceType == ResourceUsage && !isTenantWideUsageScope(scope) {
+			switch grant.SourceKind {
+			case authzGrantSourceAssumed:
+				assumedUsageScopeInvalid = true
+			default:
+				normalUsageScopeInvalid = true
+			}
+			if trace != nil {
+				trace.addGrant(grant, true, "data_scope", scope)
+			}
+			continue
+		}
 		matched = append(matched, permissionLabel(grant.Permission))
 		matchedBy = append(matchedBy, source)
 		if isHighRiskPermission(grant.Permission) {
 			riskLevel = maxRiskLevel(riskLevel, grant.Permission.RiskLevel)
-		}
-		scope, conditions, err := c.conditionsForGrant(ctx, account, grant, req)
-		if err != nil {
-			return CheckResult{}, err
 		}
 		if trace != nil {
 			trace.addGrant(grant, true, "", scope)
@@ -167,7 +222,7 @@ func (c *Service) evaluateAuthzDecision(ctx RequestContext, account Account, req
 			normalScope, normalConditions = chooseScope(normalScope, normalConditions, scope, conditions)
 		}
 	}
-	if c.relationships != nil && len(matched) == 0 && req.ResourceID != "" {
+	if c.relationships != nil && len(matched) == 0 && req.ResourceID != "" && supportsImplicitRelationshipFallback(req) {
 		object := relationshipObject(req)
 		switch {
 		case policyDenies(boundary, permissionKey):
@@ -216,7 +271,7 @@ func (c *Service) evaluateAuthzDecision(ctx RequestContext, account Account, req
 	}
 	var boundaryScope Scope
 	if !scopeIntersectionEmpty {
-		boundaryScope, boundaryConditions, hasBoundaryScope, err := c.boundaryScopeDecision(ctx, account, boundary)
+		boundaryScope, boundaryConditions, hasBoundaryScope, err := c.boundaryScopeDecisionCached(ctx, account, boundary, scopeCache)
 		if err != nil {
 			return CheckResult{}, err
 		}
@@ -233,9 +288,13 @@ func (c *Service) evaluateAuthzDecision(ctx RequestContext, account Account, req
 
 	matchedPermissions := uniqueStrings(matched)
 	matchedSources := uniqueStrings(matchedBy)
-	fieldPolicies, err := c.fieldPolicyDecision(ctx, req.ApplicationCode, req.ResourceType, permissionKey, matchedPermissions)
-	if err != nil {
-		return CheckResult{}, err
+	var fieldPolicies map[string]string
+	if includeFieldPolicies {
+		resolvedFieldPolicies, err := c.fieldPolicyDecision(ctx, req.ApplicationCode, req.ResourceType, permissionKey, matchedPermissions)
+		if err != nil {
+			return CheckResult{}, err
+		}
+		fieldPolicies = resolvedFieldPolicies
 	}
 	result := CheckResult{
 		Allowed:            len(matched) > 0 && len(deniedBy) == 0,
@@ -264,6 +323,20 @@ func (c *Service) evaluateAuthzDecision(ctx RequestContext, account Account, req
 		result.MissingPermissions = []string{permissionKey}
 		return result, nil
 	}
+	usageScopeInvalid := !normalMatched && normalUsageScopeInvalid
+	if assumedRole != nil {
+		usageScopeInvalid = usageScopeInvalid || (!assumedMatched && assumedUsageScopeInvalid)
+	}
+	if req.ApplicationCode == AppAgent && req.ResourceType == ResourceUsage &&
+		len(matched) > 0 && !scopeIntersectionEmpty && !isTenantWideUsageScope(chosenScope) {
+		usageScopeInvalid = true
+	}
+	if usageScopeInvalid {
+		result.Allowed = false
+		result.Reason = "data scope denied"
+		result.MissingPermissions = []string{permissionKey}
+		return result, nil
+	}
 	if len(matched) == 0 {
 		if len(relationshipDeniedBy) > 0 {
 			result.Reason = "relationship denied"
@@ -283,6 +356,92 @@ func (c *Service) evaluateAuthzDecision(ctx RequestContext, account Account, req
 	}
 	result.Reason = "matched permission"
 	return result, nil
+}
+
+// implicitRelationshipFallbackRelations mirrors the object types and relations declared in ops/openfga/model.json.
+var implicitRelationshipFallbackRelations = map[string]map[Action]struct{}{
+	"tenant": {
+		Action("admin"): {}, Action("member"): {}, Action("security_admin"): {},
+	},
+	"org_unit": {
+		Action("editor"): {}, Action("manager"): {}, Action("member"): {}, Action("member_recursive"): {},
+		Action("parent"): {}, Action("tenant"): {}, Action("viewer"): {},
+	},
+	"user_group": {
+		Action("manager"): {}, Action("member"): {},
+	},
+	"assumable_role": {
+		Action("approver"): {}, Action("can_approve"): {}, Action("can_assume"): {}, Action("tenant"): {},
+		Action("trusted_group"): {}, Action("trusted_user"): {},
+	},
+	"agent_tool": {
+		Action("can_run"): {}, Action("runner"): {}, Action("tenant"): {},
+	},
+	"hr.employee": {
+		ActionDelete: {}, ActionInvite: {}, Action("manager"): {}, Action("org"): {}, Action("owner"): {},
+		ActionRead: {}, ActionStatusTransition: {}, ActionUpdate: {}, ActionUpdateStatus: {},
+	},
+	"agent.knowledge_article": {
+		ActionRead: {}, Action("viewer"): {},
+	},
+}
+
+// supportsImplicitRelationshipFallback permits only object/relation pairs present in the OpenFGA model.
+func supportsImplicitRelationshipFallback(req CheckRequest) bool {
+	relations, ok := implicitRelationshipFallbackRelations[routeResourceName(req.ApplicationCode, req.ResourceType)]
+	if !ok {
+		return false
+	}
+	_, ok = relations[req.Action]
+	return ok
+}
+
+func isTenantWideUsageScope(scope Scope) bool {
+	return scope == ScopeAll || scope == ScopeTenant || scope == ScopeSystem
+}
+
+func (c *Service) conditionsForGrantCached(ctx RequestContext, account Account, grant authzGrant, req CheckRequest, grantIndex int, cache *authzDecisionScopeCache) (Scope, map[string]any, error) {
+	if cache == nil {
+		return c.conditionsForGrant(ctx, account, grant, req)
+	}
+	if cache.grantConditions == nil {
+		cache.grantConditions = map[string]authzScopeCacheEntry{}
+	}
+	// An empty permission scope is request-sensitive only for the dedicated
+	// agent usage resource, where it deliberately fails closed instead of
+	// inheriting the legacy ScopeAll default.
+	usageWithoutScope := grant.DataScope == nil && grant.Permission.Scope == "" &&
+		req.ApplicationCode == AppAgent && req.ResourceType == ResourceUsage
+	key := fmt.Sprintf("%d|%t", grantIndex, usageWithoutScope)
+	if cached, ok := cache.grantConditions[key]; ok {
+		return cached.scope, utils.CopyStringMap(cached.conditions), cached.err
+	}
+	scope, conditions, err := c.conditionsForGrant(ctx, account, grant, req)
+	cache.grantConditions[key] = authzScopeCacheEntry{
+		scope:      scope,
+		conditions: utils.CopyStringMap(conditions),
+		err:        err,
+	}
+	return scope, conditions, err
+}
+
+func (c *Service) boundaryScopeDecisionCached(ctx RequestContext, account Account, boundary map[string]any, cache *authzDecisionScopeCache) (Scope, map[string]any, bool, error) {
+	if cache == nil {
+		return c.boundaryScopeDecision(ctx, account, boundary)
+	}
+	if cache.boundary != nil {
+		return cache.boundary.scope, utils.CopyStringMap(cache.boundary.conditions), cache.boundary.hasScope, cache.boundary.err
+	}
+	scope, conditions, hasScope, err := c.boundaryScopeDecision(ctx, account, boundary)
+	cache.boundary = &authzBoundaryScopeCacheEntry{
+		authzScopeCacheEntry: authzScopeCacheEntry{
+			scope:      scope,
+			conditions: utils.CopyStringMap(conditions),
+			err:        err,
+		},
+		hasScope: hasScope,
+	}
+	return scope, conditions, hasScope, err
 }
 
 // collectAuthzGrants 處理 collect 授權 grants 的服務流程。

@@ -270,6 +270,7 @@ LEFT JOIN employees e ON e.tenant_id = al.tenant_id AND e.id = a.employee_id
 WHERE al.tenant_id = $1
   AND (
     $2::text = ''
+    OR (lower($2::text) = '__system__' AND btrim(al.actor_account_id) = '')
     OR lower(al.actor_account_id) = lower($2::text)
     OR lower(coalesce(a.id, '')) = lower($2::text)
     OR lower(coalesce(a.employee_id, '')) = lower($2::text)
@@ -287,9 +288,9 @@ WHERE al.tenant_id = $1
       CASE
         WHEN lower(al.resource || ' ' || al.action) LIKE '%employee%' THEN '員工管理'
         WHEN lower(al.resource || ' ' || al.action) LIKE '%org%' OR lower(al.resource || ' ' || al.action) LIKE '%position%' THEN '組織架構'
-        WHEN lower(al.resource || ' ' || al.action) LIKE '%attendance%' OR lower(al.resource || ' ' || al.action) LIKE '%leave%' THEN '假勤制度'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%attendance%' OR lower(al.resource || ' ' || al.action) LIKE '%leave%' OR lower(al.resource || ' ' || al.action) LIKE '%clock%' OR lower(al.resource || ' ' || al.action) LIKE '%shift%' THEN '假勤制度'
         WHEN lower(al.resource || ' ' || al.action) LIKE '%form%' OR lower(al.resource || ' ' || al.action) LIKE '%workflow%' THEN '表單設計'
-        WHEN lower(al.resource || ' ' || al.action) LIKE '%iam%' OR lower(al.resource || ' ' || al.action) LIKE '%authz%' OR lower(al.resource || ' ' || al.action) LIKE '%admin%' THEN '管理員設定'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%iam%' OR lower(al.resource || ' ' || al.action) LIKE '%authz%' OR lower(al.resource || ' ' || al.action) LIKE '%permission%' OR lower(al.resource || ' ' || al.action) LIKE '%admin%' THEN '管理員設定'
         ELSE '系統'
       END || ' ' || al.resource || ' ' || al.action
     ) LIKE '%' || lower($7::text) || '%'
@@ -3062,6 +3063,39 @@ func (q *Queries) ListAttendanceWorksites(ctx context.Context, tenantID string) 
 	return items, nil
 }
 
+const listAuditLogFacetSources = `-- name: ListAuditLogFacetSources :many
+SELECT DISTINCT actor_account_id, action, resource
+FROM audit_logs
+WHERE tenant_id = $1
+ORDER BY actor_account_id, resource, action
+`
+
+type ListAuditLogFacetSourcesRow struct {
+	ActorAccountID string `json:"actor_account_id"`
+	Action         string `json:"action"`
+	Resource       string `json:"resource"`
+}
+
+func (q *Queries) ListAuditLogFacetSources(ctx context.Context, tenantID string) ([]ListAuditLogFacetSourcesRow, error) {
+	rows, err := q.db.Query(ctx, listAuditLogFacetSources, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAuditLogFacetSourcesRow
+	for rows.Next() {
+		var i ListAuditLogFacetSourcesRow
+		if err := rows.Scan(&i.ActorAccountID, &i.Action, &i.Resource); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listAuditLogs = `-- name: ListAuditLogs :many
 SELECT id, tenant_id, actor_account_id, action, resource, target, result, trace_id, severity, details, created_at FROM audit_logs
 WHERE tenant_id = $1
@@ -3108,6 +3142,7 @@ LEFT JOIN employees e ON e.tenant_id = al.tenant_id AND e.id = a.employee_id
 WHERE al.tenant_id = $1
   AND (
     $2::text = ''
+    OR (lower($2::text) = '__system__' AND btrim(al.actor_account_id) = '')
     OR lower(al.actor_account_id) = lower($2::text)
     OR lower(coalesce(a.id, '')) = lower($2::text)
     OR lower(coalesce(a.employee_id, '')) = lower($2::text)
@@ -3125,9 +3160,9 @@ WHERE al.tenant_id = $1
       CASE
         WHEN lower(al.resource || ' ' || al.action) LIKE '%employee%' THEN '員工管理'
         WHEN lower(al.resource || ' ' || al.action) LIKE '%org%' OR lower(al.resource || ' ' || al.action) LIKE '%position%' THEN '組織架構'
-        WHEN lower(al.resource || ' ' || al.action) LIKE '%attendance%' OR lower(al.resource || ' ' || al.action) LIKE '%leave%' THEN '假勤制度'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%attendance%' OR lower(al.resource || ' ' || al.action) LIKE '%leave%' OR lower(al.resource || ' ' || al.action) LIKE '%clock%' OR lower(al.resource || ' ' || al.action) LIKE '%shift%' THEN '假勤制度'
         WHEN lower(al.resource || ' ' || al.action) LIKE '%form%' OR lower(al.resource || ' ' || al.action) LIKE '%workflow%' THEN '表單設計'
-        WHEN lower(al.resource || ' ' || al.action) LIKE '%iam%' OR lower(al.resource || ' ' || al.action) LIKE '%authz%' OR lower(al.resource || ' ' || al.action) LIKE '%admin%' THEN '管理員設定'
+        WHEN lower(al.resource || ' ' || al.action) LIKE '%iam%' OR lower(al.resource || ' ' || al.action) LIKE '%authz%' OR lower(al.resource || ' ' || al.action) LIKE '%permission%' OR lower(al.resource || ' ' || al.action) LIKE '%admin%' THEN '管理員設定'
         ELSE '系統'
       END || ' ' || al.resource || ' ' || al.action
     ) LIKE '%' || lower($7::text) || '%'
@@ -6731,7 +6766,6 @@ INSERT INTO org_units (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
 ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
     code = EXCLUDED.code,
     name = EXCLUDED.name,
     name_en = EXCLUDED.name_en,
@@ -6742,6 +6776,7 @@ ON CONFLICT (id) DO UPDATE SET
     closed = EXCLUDED.closed,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
+WHERE org_units.tenant_id = EXCLUDED.tenant_id
 RETURNING id, tenant_id, code, name, name_en, parent_id, path, manager_position_id, source, closed, created_at, updated_at
 `
 

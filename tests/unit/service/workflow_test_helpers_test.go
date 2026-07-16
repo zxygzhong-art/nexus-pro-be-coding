@@ -14,8 +14,8 @@ func workflowEnabledTemplateSchema(assigneeAccountIDs ...string) map[string]any 
 	stage := map[string]any{
 		"id":     "stage-approver",
 		"type":   "approver",
-		"label":  "直属主管",
-		"detail": "由直属主管审核",
+		"label":  "直屬主管",
+		"detail": "由直屬主管審覈",
 	}
 	if len(assigneeAccountIDs) > 0 {
 		ids := make([]any, 0, len(assigneeAccountIDs))

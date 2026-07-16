@@ -5,7 +5,6 @@ INSERT INTO positions (
     $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
 ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
     code = EXCLUDED.code,
     name = EXCLUDED.name,
     name_en = EXCLUDED.name_en,
@@ -16,6 +15,7 @@ ON CONFLICT (id) DO UPDATE SET
     source = EXCLUDED.source,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
+WHERE positions.tenant_id = EXCLUDED.tenant_id
 RETURNING *;
 
 -- name: GetPosition :one

@@ -311,14 +311,14 @@ func (c AgentService) GetDefinition(ctx RequestContext, id string) (domain.Agent
 	return c.definitionWithVersions(ctx, agent)
 }
 
-// definitionWithVersions 補齊獨立儲存的版本快照，讓真實 Postgres 回應與管理 UI 契約一致。
+// definitionWithVersions attaches stored versions and normalizes every response collection.
 func (c AgentService) definitionWithVersions(ctx RequestContext, agent domain.AgentDefinition) (domain.AgentDefinition, error) {
 	versions, err := c.store.ListAgentDefinitionVersions(goContext(ctx), ctx.TenantID, agent.ID)
 	if err != nil {
 		return domain.AgentDefinition{}, err
 	}
 	agent.Versions = versions
-	return agent, nil
+	return normalizeAgentDefinitionResponse(agent), nil
 }
 
 // CreateDefinition 建立工作區 Agent。
@@ -368,7 +368,7 @@ func (c AgentService) CreateDefinition(ctx RequestContext, input domain.CreateAg
 	}); err != nil {
 		return domain.AgentDefinition{}, err
 	}
-	return agent, nil
+	return normalizeAgentDefinitionResponse(agent), nil
 }
 
 // UpdateDefinition 更新工作區 Agent；prompt/tools/model 變動會建立新版本，發布狀態僅能透過專用接口流轉。
@@ -461,7 +461,7 @@ func (c AgentService) UpdateDefinition(ctx RequestContext, id string, input doma
 	}); err != nil {
 		return domain.AgentDefinition{}, err
 	}
-	return agent, nil
+	return normalizeAgentDefinitionResponse(agent), nil
 }
 
 // PublishDefinition 將工作區 Agent 發布到可試用與助理列表。
@@ -501,7 +501,7 @@ func (c AgentService) transitionDefinitionPublishStatus(ctx RequestContext, id s
 	}); err != nil {
 		return domain.AgentDefinition{}, err
 	}
-	return agent, nil
+	return normalizeAgentDefinitionResponse(agent), nil
 }
 
 // DeleteDefinition 刪除工作區 Agent。
@@ -701,7 +701,7 @@ func (c AgentService) RollbackDefinition(ctx RequestContext, id string, input do
 	}); err != nil {
 		return domain.AgentDefinition{}, err
 	}
-	return agent, nil
+	return normalizeAgentDefinitionResponse(agent), nil
 }
 
 // Tools 回傳靜態可用工具目錄。
@@ -1180,7 +1180,7 @@ func (c AgentService) normalizeAgentDefinition(ctx RequestContext, agent domain.
 	}
 	agent.MainAgentRole = strings.TrimSpace(agent.MainAgentRole)
 	if agent.MainAgentRole == "" {
-		agent.MainAgentRole = "理解使用者目标，按子 Agent 的职责进行委派，并验证与汇总最终结果。"
+		agent.MainAgentRole = "理解使用者目標，按子 Agent 的職責進行委派，並驗證與彙總最終結果。"
 	}
 	agent.Tools = uniqueStrings(agent.Tools)
 	if err := validateAgentTools(agent.Tools); err != nil {
@@ -1239,6 +1239,42 @@ func (c AgentService) normalizeAgentDefinition(ctx RequestContext, agent domain.
 		return domain.AgentDefinition{}, err
 	}
 	return agent, nil
+}
+
+// normalizeAgentDefinitionResponse keeps Agent JSON collections non-null without changing shared slice semantics.
+func normalizeAgentDefinitionResponse(agent domain.AgentDefinition) domain.AgentDefinition {
+	agent.SubAgents = agentResponseSlice(agent.SubAgents)
+	for index := range agent.SubAgents {
+		agent.SubAgents[index].Tools = agentResponseSlice(agent.SubAgents[index].Tools)
+		agent.SubAgents[index].KnowledgeBaseIDs = agentResponseSlice(agent.SubAgents[index].KnowledgeBaseIDs)
+	}
+	agent.SuggestedQuestions = agentResponseSlice(agent.SuggestedQuestions)
+	agent.SuggestedQuestionTranslations = agentResponseSlice(agent.SuggestedQuestionTranslations)
+	agent.Tools = agentResponseSlice(agent.Tools)
+	agent.KnowledgeBaseIDs = agentResponseSlice(agent.KnowledgeBaseIDs)
+	agent.VisibilityTargets = agentResponseSlice(agent.VisibilityTargets)
+	agent.Versions = agentResponseSlice(agent.Versions)
+	for index := range agent.Versions {
+		version := &agent.Versions[index]
+		version.SubAgents = agentResponseSlice(version.SubAgents)
+		for memberIndex := range version.SubAgents {
+			version.SubAgents[memberIndex].Tools = agentResponseSlice(version.SubAgents[memberIndex].Tools)
+			version.SubAgents[memberIndex].KnowledgeBaseIDs = agentResponseSlice(version.SubAgents[memberIndex].KnowledgeBaseIDs)
+		}
+		version.SuggestedQuestions = agentResponseSlice(version.SuggestedQuestions)
+		version.SuggestedQuestionTranslations = agentResponseSlice(version.SuggestedQuestionTranslations)
+		version.Tools = agentResponseSlice(version.Tools)
+		version.KnowledgeBaseIDs = agentResponseSlice(version.KnowledgeBaseIDs)
+	}
+	agent.Usage.TopPrompts = agentResponseSlice(agent.Usage.TopPrompts)
+	return agent
+}
+
+// agentResponseSlice clones an Agent collection into a stable non-nil response slice.
+func agentResponseSlice[T any](items []T) []T {
+	result := make([]T, len(items))
+	copy(result, items)
+	return result
 }
 
 // normalizeSuggestedQuestionTranslations validates supported locales while preserving question order.

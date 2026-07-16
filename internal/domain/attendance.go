@@ -364,6 +364,8 @@ type AttendanceClockStatus struct {
 	EmployeeID           string                 `json:"employee_id"`
 	WorkDate             string                 `json:"work_date"`
 	Worksite             *AttendanceWorksite    `json:"worksite,omitempty"`
+	Worksites            []AttendanceWorksite   `json:"worksites"`
+	RequireWorksite      bool                   `json:"require_worksite"`
 	ClockIn              *AttendanceClockRecord `json:"clock_in,omitempty"`
 	ClockOut             *AttendanceClockRecord `json:"clock_out,omitempty"`
 	LastPunch            *AttendanceClockRecord `json:"last_punch,omitempty"`

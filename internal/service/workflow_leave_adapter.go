@@ -12,6 +12,22 @@ var leaveLinkedTemplateKeys = map[string]struct{}{
 	"field-leave":   {},
 }
 
+// preflightWorkflowAttendanceSubmission rejects inactive applicants before workflow projection or stage resolution.
+func (c AttendanceService) preflightWorkflowAttendanceSubmission(ctx RequestContext, account Account, templateKey string) error {
+	templateKey = strings.TrimSpace(templateKey)
+	_, isLeave := leaveLinkedTemplateKeys[templateKey]
+	_, isOvertime := overtimeLinkedTemplateKeys[templateKey]
+	if !isLeave && !isOvertime {
+		return nil
+	}
+	employeeID := strings.TrimSpace(account.EmployeeID)
+	if employeeID == "" {
+		return BadRequest("form applicant account is not linked to an employee")
+	}
+	_, err := c.requireAttendanceEmployeeActive(ctx, employeeID)
+	return err
+}
+
 // createLeaveRequestFromSubmittedForm links leave data inside the caller's submission transaction.
 func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContext, instance FormInstance, templateKey string, payload map[string]any) (LeaveRequest, error) {
 	if _, ok := leaveLinkedTemplateKeys[strings.TrimSpace(templateKey)]; !ok {
@@ -27,13 +43,27 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 	if err != nil {
 		return LeaveRequest{}, err
 	}
-	if existing, ok, err := c.store.GetLeaveRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID); err != nil {
+	if _, err := c.requireAttendanceEmployeeActive(ctx, employeeID); err != nil {
 		return LeaveRequest{}, err
-	} else if ok {
+	}
+	existing, resubmitting, err := c.store.GetLeaveRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID)
+	if err != nil {
+		return LeaveRequest{}, err
+	}
+	if resubmitting {
 		if strings.TrimSpace(existing.EmployeeID) != employeeID {
 			return LeaveRequest{}, Conflict("linked leave request does not belong to the form applicant")
 		}
-		return existing, nil
+		switch normalizeLeaveRequestStatus(existing.Status) {
+		case "pending_approval":
+			return existing, nil
+		case "rejected", "cancelled":
+			// Returned submissions reuse their stable request identity and reserve entitlement again below.
+		case "approved":
+			return LeaveRequest{}, Conflict("approved linked leave request cannot be resubmitted")
+		default:
+			return LeaveRequest{}, Conflict("linked leave request is not eligible for resubmission")
+		}
 	}
 
 	leaveTypeRaw := utils.FirstNonEmpty(
@@ -74,6 +104,11 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 
 	reason := utils.FirstNonEmpty(stringFromAny(payload["reason"]), stringFromAny(payload["description"]))
 	requestID := utils.NewID("lr")
+	createdAt := c.Now()
+	if resubmitting {
+		requestID = existing.ID
+		createdAt = existing.CreatedAt
+	}
 	leaveBalanceID := ""
 	if evaluation.BalanceRequired {
 		balance, fallbackReason, err := c.reserveLeaveBalanceIfAvailable(ctx, employeeID, leaveTypeCode, hours, startAt)
@@ -104,7 +139,7 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 		Status:             "pending_approval",
 		FormInstanceID:     instance.ID,
 		LeaveBalanceID:     leaveBalanceID,
-		CreatedAt:          c.Now(),
+		CreatedAt:          createdAt,
 	}
 	if err := c.store.UpsertLeaveRequest(goContext(ctx), req); err != nil {
 		return LeaveRequest{}, err
@@ -145,11 +180,16 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 			return LeaveRequest{}, err
 		}
 	}
-	if err := c.audit(ctx, "attendance.leave_request.create", "leave_request", req.ID, "medium", map[string]any{
+	event := "attendance.leave_request.create"
+	if resubmitting {
+		event = "attendance.leave_request.resubmit"
+	}
+	if err := c.audit(ctx, event, "leave_request", req.ID, "medium", map[string]any{
 		"leave_type":       req.LeaveType,
 		"hours":            req.Hours,
 		"form_instance_id": instance.ID,
 		"source":           "workflow.form.submit",
+		"resubmit":         resubmitting,
 	}); err != nil {
 		return LeaveRequest{}, err
 	}

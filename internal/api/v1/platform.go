@@ -10,7 +10,7 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
-// PlatformCtrl 定義平台 ctrl 的資料結構。
+// PlatformCtrl 定義平臺 ctrl 的資料結構。
 type PlatformCtrl struct {
 	routes routeBinder
 	svc    service.PlatformFacade

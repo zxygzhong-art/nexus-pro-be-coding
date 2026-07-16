@@ -74,7 +74,7 @@ paths:
       summary: Get current-account task dashboard projection
       responses:
         "200":
-          description: Task records, todos, clock summary, and AI panel prompts
+          description: Task records, todos, AI panel prompts, and an optional clock summary when attendance clock read is allowed
           content:
             application/json:
               schema:
@@ -1670,6 +1670,12 @@ paths:
                 $ref: "#/components/schemas/DataResponse"
     post:
       summary: Create assumable role
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssumableRoleInput"
       responses:
         "201":
           description: Created assumable role
@@ -1677,6 +1683,9 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
   /v1/iam/assumable-roles/{id}:
     patch:
       summary: Update assumable role
@@ -1719,6 +1728,21 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+  /v1/iam/assumable-role-sessions/current:
+    delete:
+      summary: Return the caller-owned temporary assumed role
+      parameters:
+        - name: X-Assumable-Role-Session-ID
+          in: header
+          required: true
+          schema: {type: string}
+      responses:
+        "204":
+          description: Temporary role session revoked
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
   /v1/org/units:
     get:
       summary: List organization units
@@ -2724,7 +2748,7 @@ paths:
   /v1/workspace/agent-usage:
     get:
       summary: List workspace Agent conversation usage by account
-      description: Returns a server-filtered account page plus unfiltered tenant totals. Counts retained sessions and message rows, and aggregates LiteLLM token usage captured on Agent runs. Historical runs created before token capture remain zero.
+      description: Requires high-risk `agent.usage:read` with an explicit `all`, `tenant`, or `system` scope. Returns a server-filtered account page plus unfiltered tenant totals. Counts retained sessions and message rows, and aggregates LiteLLM token usage captured on Agent runs. Historical runs created before token capture remain zero.
       parameters:
         - {name: query, in: query, description: Case-insensitive display name or email search, schema: {type: string, maxLength: 200}}
         - {name: status, in: query, schema: {type: string, enum: [active, disabled, pending_invite]}}
@@ -2744,7 +2768,7 @@ paths:
   /v1/workspace/agent-usage/{id}/sessions:
     get:
       summary: List one account's Agent session usage
-      description: Returns paginated per-conversation message and LiteLLM token usage for one account in the authenticated tenant.
+      description: Requires high-risk `agent.usage:read` with an explicit `all`, `tenant`, or `system` scope. Returns paginated per-conversation message and LiteLLM token usage for one account in the authenticated tenant.
       parameters:
         - {$ref: "#/components/parameters/ID"}
         - {$ref: "#/components/parameters/Page"}
@@ -3153,6 +3177,20 @@ paths:
               schema:
                 $ref: "#/components/schemas/WorkspaceAuditLogPageDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/audit-logs/facets:
+    get:
+      summary: Get tenant-wide workspace audit-log filter options
+      description: Returns stable operator IDs and audit types without exposing audit details.
+      responses:
+        "200":
+          description: Tenant-wide audit-log facets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceAuditLogFacetsDataResponse"
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
@@ -4527,6 +4565,8 @@ components:
         effective_scope: {type: string}
         conditions:
           type: object
+          readOnly: true
+          description: Server-computed effective data-scope conditions returned by access projections; not accepted in permission definitions.
           additionalProperties: true
         field_policies:
           type: object
@@ -5289,6 +5329,32 @@ components:
         source:
           type: string
           enum: [manual]
+    CreateAssumableRoleInput:
+      type: object
+      required: [name, trusted, trust_policy, permission_boundary]
+      properties:
+        name:
+          type: string
+          minLength: 1
+        description: {type: string}
+        permission_set_ids:
+          type: array
+          items: {type: string}
+        trusted: {type: boolean}
+        trust_policy:
+          type: object
+          minProperties: 1
+          description: Trusted roles must list at least one non-empty account or user group in accounts, account_ids, user_groups, or user_group_ids.
+          additionalProperties: true
+        permission_boundary:
+          type: object
+          minProperties: 1
+          description: Explicit maximum permission policy for the assumed session; for example, an allow list of permission keys.
+          additionalProperties: true
+        session_duration_seconds:
+          type: integer
+          minimum: 0
+          maximum: 43200
     IAMRoleProjection:
       type: object
       required: [id, tenant_id, name, permission_set_ids, permission_sets, trusted, created_at]
@@ -5376,6 +5442,11 @@ components:
         action: {type: string}
         target: {type: string}
         scope: {type: string}
+        conditions:
+          type: object
+          readOnly: true
+          description: Server-computed effective data-scope conditions returned by access projections; not accepted in permission definitions.
+          additionalProperties: true
         effect: {type: string}
         risk_level: {type: string}
         severity: {type: string}
@@ -5630,7 +5701,7 @@ components:
           $ref: "#/components/schemas/PlatformInsightsResponse"
     PlatformHomeResponse:
       type: object
-      required: [assistants, form_columns, clock_summary]
+      required: [assistants, form_columns]
       additionalProperties: true
       properties:
         assistants:
@@ -5672,7 +5743,7 @@ components:
         desc: {type: string}
     PlatformClockSummary:
       type: object
-      required: [date_label, location, monthly_attendance_days, monthly_hours, leave_days]
+      required: [date_label, location, monthly_attendance_days, monthly_hours, monthly_overtime_hours, leave_days]
       properties:
         date_label: {type: string}
         checked_in_at: {type: string, nullable: true}
@@ -5680,6 +5751,7 @@ components:
         location: {type: string}
         monthly_attendance_days: {type: integer}
         monthly_hours: {type: number}
+        monthly_overtime_hours: {type: number}
         leave_days: {type: number}
     PlatformAssistantsResponse:
       type: object
@@ -5759,7 +5831,7 @@ components:
     PlatformTasksResponse:
       type: object
       additionalProperties: true
-      required: [records, todos, clock_summary, ai_messages, quick_prompts]
+      required: [records, todos, ai_messages, quick_prompts]
       properties:
         records:
           type: array
@@ -6279,6 +6351,12 @@ components:
             page: {type: integer}
             page_size: {type: integer}
             sort: {type: string}
+    WorkspaceAuditLogFacetsDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/WorkspaceAuditLogFacets"
     AttendancePolicy:
       type: object
       required: [work_time, leave_types]
@@ -6499,9 +6577,10 @@ components:
               description: Published version that the draft was based on; stale publishes return a conflict.
     WorkspaceEmployeeCard:
       type: object
-      required: [id, avatar, name_zh, name_en, email, dept, title, type, phone, status, hire_date]
+      required: [id, employee_id, avatar, name_zh, name_en, email, dept, title, type, phone, status, hire_date]
       properties:
         id: {type: string}
+        employee_id: {type: string}
         avatar: {type: string}
         name_zh: {type: string}
         name_en: {type: string}
@@ -6658,6 +6737,27 @@ components:
           enum: [員工管理, 組織架構, 假勤制度, 表單設計, 管理員設定, 系統]
         action: {type: string}
         detail: {type: string}
+    WorkspaceAuditLogOperatorFacet:
+      type: object
+      required: [id, label]
+      properties:
+        id:
+          type: string
+          description: Stable account ID, or __system__ for actorless events.
+        label: {type: string}
+    WorkspaceAuditLogFacets:
+      type: object
+      required: [operators, types]
+      properties:
+        operators:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceAuditLogOperatorFacet"
+        types:
+          type: array
+          items:
+            type: string
+            enum: [員工管理, 組織架構, 假勤制度, 表單設計, 管理員設定, 系統]
     WorkspaceDate:
       type: object
       required: [key, y, m, d, dow]
@@ -6788,7 +6888,7 @@ components:
         last_punch:
           $ref: "#/components/schemas/AttendanceClockRecord"
         punch_count: {type: integer, minimum: 0}
-        next_action: {type: string, enum: [clock_in, clock_out]}
+        next_action: {type: string, enum: [clock_in, clock_out, complete]}
         can_clock_in: {type: boolean}
         can_clock_out: {type: boolean}
         worked_minutes: {type: integer, minimum: 0}

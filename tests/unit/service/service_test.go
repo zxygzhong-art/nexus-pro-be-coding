@@ -113,7 +113,7 @@ func TestReadFacadesReturnForbiddenWhenReadPermissionMissing(t *testing.T) {
 	}
 }
 
-// TestEmployeeQuerySkipsSuccessfulReadAudit 驗證成功 query 不寫入操作稽核，export 仍保留。
+// TestEmployeeQuerySkipsSuccessfulReadAudit 驗證成功 query 不寫入操作稽覈，export 仍保留。
 func TestEmployeeQuerySkipsSuccessfulReadAudit(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
@@ -220,17 +220,17 @@ func TestCreateAgentRunReturnsNoMatchWithoutBoundKnowledge(t *testing.T) {
 		Status: domain.AgentDefinitionStatusPublished, Visibility: domain.AgentVisibilityAll, CreatedAt: now, UpdatedAt: now,
 	})
 
-	run, err := service.New(store).Agent().CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.CreateAgentRunInput{AgentID: "agent-1", Prompt: "请"})
+	run, err := service.New(store).Agent().CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.CreateAgentRunInput{AgentID: "agent-1", Prompt: "請"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if run.Prompt != "请" {
+	if run.Prompt != "請" {
 		t.Fatalf("expected persisted prompt to contain only the user input, got %q", run.Prompt)
 	}
 	if len(run.References) != 0 {
 		t.Fatalf("expected no knowledge references, got %+v", run.References)
 	}
-	if !strings.Contains(run.Answer, "没有匹配内容") {
+	if !strings.Contains(run.Answer, "沒有匹配內容") {
 		t.Fatalf("unexpected placeholder answer: %s", run.Answer)
 	}
 	if len(run.ToolDecisions) != 1 || !run.ToolDecisions[0].Allowed {
@@ -257,7 +257,7 @@ func TestCreateAgentRunRequiresToolPermission(t *testing.T) {
 	account.DirectPermissionSetIDs = []string{"ps-agent-run"}
 	_ = store.UpsertAccount(context.Background(), account)
 
-	_, err := service.New(store).Agent().CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.CreateAgentRunInput{Prompt: "请假"})
+	_, err := service.New(store).Agent().CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.CreateAgentRunInput{Prompt: "請假"})
 	if err == nil {
 		t.Fatal("expected agent tool gateway to reject missing tool permission")
 	}
@@ -1683,6 +1683,52 @@ func TestAttendanceClockRecordsAcceptedRejectedAndDuplicate(t *testing.T) {
 	}
 }
 
+// TestAttendanceClockStatusProjectsAuthoritativeWorksites verifies only active geofences reach self-service clients.
+func TestAttendanceClockStatusProjectsAuthoritativeWorksites(t *testing.T) {
+	store, svc, employeeCtx, _, _ := newAttendanceFixture(t)
+	now := attendanceFixtureClockInTime()
+	for _, worksite := range []domain.AttendanceWorksite{
+		{ID: "aws-2", TenantID: "tenant-1", Name: "Branch", Address: "No. 2, Branch Road", Latitude: 25.04, Longitude: 121.57, RadiusMeters: 350, Status: "active", CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute)},
+		{ID: "aws-inactive", TenantID: "tenant-1", Name: "Closed", Address: "No. 3, Closed Road", Latitude: 25.05, Longitude: 121.58, RadiusMeters: 500, Status: "inactive", CreatedAt: now.Add(2 * time.Minute), UpdatedAt: now.Add(2 * time.Minute)},
+	} {
+		if err := store.UpsertAttendanceWorksite(context.Background(), worksite); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	status, err := svc.Attendance().AttendanceClockStatus(employeeCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.RequireWorksite || status.Worksite == nil || status.Worksite.ID != "aws-2" {
+		t.Fatalf("expected the current worksite policy and primary active worksite, got %+v", status)
+	}
+	if len(status.Worksites) != 2 || status.Worksites[0].ID != "aws-2" || status.Worksites[1].ID != "aws-1" {
+		t.Fatalf("expected every active worksite and no inactive entries, got %+v", status.Worksites)
+	}
+	record, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction: "clock_in", Latitude: 25.04, Longitude: 121.57, AccuracyMeters: 10,
+	})
+	if err != nil || record.WorksiteID != "aws-2" || record.RecordStatus != "accepted" {
+		t.Fatalf("expected multi-worksite submission to select the same nearest active geofence, record=%+v err=%v", record, err)
+	}
+	for _, worksite := range []domain.AttendanceWorksite{
+		{ID: "aws-1", TenantID: "tenant-1", Name: "HQ", Latitude: 25.033964, Longitude: 121.564468, RadiusMeters: 200, Status: "inactive", CreatedAt: now, UpdatedAt: now.Add(3 * time.Minute)},
+		{ID: "aws-2", TenantID: "tenant-1", Name: "Branch", Latitude: 25.04, Longitude: 121.57, RadiusMeters: 350, Status: "inactive", CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(3 * time.Minute)},
+	} {
+		if err := store.UpsertAttendanceWorksite(context.Background(), worksite); err != nil {
+			t.Fatal(err)
+		}
+	}
+	status, err = svc.Attendance().AttendanceClockStatus(employeeCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status.Worksite != nil || len(status.Worksites) != 0 || !status.RequireWorksite {
+		t.Fatalf("expected required policy with an explicit empty active worksite set, got %+v", status)
+	}
+}
+
 // TestAttendanceClockClientEventIDIsIdempotent 驗證網路重試不會重複建立原始打卡事件。
 func TestAttendanceClockClientEventIDIsIdempotent(t *testing.T) {
 	store, svc, employeeCtx, _, _ := newAttendanceFixture(t)
@@ -2398,7 +2444,7 @@ func TestAttendanceClockSelfScopeCannotTargetAnotherEmployee(t *testing.T) {
 	}
 }
 
-// TestAttendanceCorrectionApproveCreatesManualRecordAndRejectDoesNot 驗證考勤 correction 核准 creates manual record and 駁回 does not。
+// TestAttendanceCorrectionApproveCreatesManualRecordAndRejectDoesNot 驗證考勤 correction 覈準 creates manual record and 駁回 does not。
 func TestAttendanceCorrectionApproveCreatesManualRecordAndRejectDoesNot(t *testing.T) {
 	store, svc, employeeCtx, adminCtx, _ := newAttendanceFixture(t)
 	requestedAt := attendanceFixtureClockInTime().Format(time.RFC3339)
@@ -2502,6 +2548,91 @@ func TestAttendanceCorrectionReplaceVoidsTargetAndCreatesReplacement(t *testing.
 	boundary, ok, err := store.GetEarliestAcceptedAttendanceClockIn(context.Background(), "tenant-1", "emp-1", target.WorkDate)
 	if err != nil || !ok || boundary.ID != replacement.ID {
 		t.Fatalf("effective boundary should use replacement, ok=%v err=%v record=%+v", ok, err, boundary)
+	}
+}
+
+// TestAttendanceCorrectionReplaceShortHoursClockOut avoids add-record conflicts by replacing the bound accepted event.
+func TestAttendanceCorrectionReplaceShortHoursClockOut(t *testing.T) {
+	store, svc, employeeCtx, adminCtx, setNow := newAttendanceFixture(t)
+	clockIn, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_in",
+		ClientEventID:  "short-hours-clock-in",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setNow(attendanceFixtureClockOutTime())
+	clockOut, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_out",
+		ClientEventID:  "short-hours-clock-out",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	pending, err := svc.Attendance().CreateAttendanceCorrection(employeeCtx, domain.CreateAttendanceCorrectionInput{
+		CorrectionType:      "replace_record",
+		TargetClockRecordID: clockOut.ID,
+		Direction:           "clock_out",
+		RequestedClockedAt:  attendanceFixtureClockOutTime().Add(30 * time.Minute).Format(time.RFC3339),
+		Reason:              "replace insufficient-hours clock out",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved, err := svc.Attendance().ApproveAttendanceCorrection(adminCtx, pending.ID, domain.ReviewAttendanceCorrectionInput{Reason: "verified short-hours correction"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if approved.Status != "approved" || approved.ReplacementClockRecordID == "" {
+		t.Fatalf("expected replacement approval without sequence conflict, got %+v", approved)
+	}
+	if original, ok, err := store.GetEarliestAcceptedAttendanceClockIn(context.Background(), "tenant-1", "emp-1", clockIn.WorkDate); err != nil || !ok || original.ID != clockIn.ID {
+		t.Fatalf("clock-in boundary changed unexpectedly, ok=%v err=%v record=%+v", ok, err, original)
+	}
+	if replacement, ok, err := store.GetLatestAcceptedAttendanceClockOut(context.Background(), "tenant-1", "emp-1", clockOut.WorkDate); err != nil || !ok || replacement.ID != approved.ReplacementClockRecordID {
+		t.Fatalf("expected replacement clock-out boundary, ok=%v err=%v record=%+v", ok, err, replacement)
+	}
+}
+
+// TestAttendanceCorrectionTargetRecordOwnership rejects a target owned by another employee before request creation.
+func TestAttendanceCorrectionTargetRecordOwnership(t *testing.T) {
+	store, svc, employeeCtx, _, _ := newAttendanceFixture(t)
+	now := attendanceFixtureClockInTime()
+	foreign := domain.AttendanceClockRecord{
+		ID:           "acr-foreign",
+		TenantID:     "tenant-1",
+		EmployeeID:   "emp-2",
+		WorksiteID:   "aws-1",
+		WorkDate:     "2026-06-10",
+		Direction:    "clock_in",
+		ClockedAt:    now,
+		RecordStatus: "accepted",
+		Source:       "geofence",
+		CreatedAt:    now,
+	}
+	if err := store.UpsertAttendanceClockRecord(context.Background(), foreign); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := svc.Attendance().CreateAttendanceCorrection(employeeCtx, domain.CreateAttendanceCorrectionInput{
+		CorrectionType:      "replace_record",
+		TargetClockRecordID: foreign.ID,
+		Direction:           "clock_in",
+		RequestedClockedAt:  now.Add(15 * time.Minute).Format(time.RFC3339),
+		Reason:              "must not replace another employee record",
+	})
+	if err == nil {
+		t.Fatal("expected another employee's target record to stay inaccessible")
+	}
+	if appErr, ok := domain.AsAppError(err); !ok || appErr.Status != http.StatusNotFound {
+		t.Fatalf("expected ownership-safe not found, got %v", err)
 	}
 }
 
@@ -2844,7 +2975,7 @@ func TestOvertimeWorkflowReviewUpdatesRequestAndCreditsBalance(t *testing.T) {
 		ID:        "ft-overtime",
 		TenantID:  "tenant-1",
 		Key:       "overtime-approval",
-		Name:      "加班核准申請單",
+		Name:      "加班覈準申請單",
 		Schema:    workflowEnabledTemplateSchema("acct-reviewer"),
 		CreatedAt: now,
 	})
@@ -2986,7 +3117,7 @@ func TestCreateLeaveRequestFallsBackFromInsufficientLeaveBalance(t *testing.T) {
 	}
 }
 
-// TestWorkflowDraftLifecycleAndPlatformProjection 驗證流程草稿生命週期 and 平台 projection。
+// TestWorkflowDraftLifecycleAndPlatformProjection 驗證流程草稿生命週期 and 平臺 projection。
 func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -3043,7 +3174,7 @@ func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 		ID:        "ft-leave",
 		TenantID:  "tenant-1",
 		Key:       "leave-request",
-		Name:      "请假申请单",
+		Name:      "請假申請單",
 		Schema:    workflowEnabledTemplateSchema(),
 		CreatedAt: now,
 	})
@@ -3142,7 +3273,7 @@ func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if detail.ID != submitted.ID || detail.TemplateKey != "leave-request" || detail.TemplateName != "请假申请单" || detail.Payload["reason"] != "submitted leave" {
+	if detail.ID != submitted.ID || detail.TemplateKey != "leave-request" || detail.TemplateName != "請假申請單" || detail.Payload["reason"] != "submitted leave" {
 		t.Fatalf("expected renderable submitted form detail, got %+v", detail)
 	}
 	cancelled, err := svc.Workflow().CancelForm(ctx, submitted.ID, domain.CancelFormInput{Reason: "no longer needed"})
@@ -3151,6 +3282,13 @@ func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 	}
 	if cancelled.Status != "cancelled" {
 		t.Fatalf("expected cancelled status, got %+v", cancelled)
+	}
+	reviewQueue, err := svc.Workflow().ReviewQueue(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(reviewQueue.AlreadyReviewed) != 1 || len(reviewQueue.AlreadyReviewed[0].ReviewLog) != 1 || reviewQueue.AlreadyReviewed[0].ReviewLog[0].Type != "cancel" {
+		t.Fatalf("expected withdraw to project as the public cancel action, got %+v", reviewQueue.AlreadyReviewed)
 	}
 	deleted, err := svc.Workflow().DeleteFormDraft(ctx, duplicate.ID)
 	if err != nil {
@@ -3219,13 +3357,13 @@ func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
 	originalDesign := originalSchema["workspace_design"].(map[string]any)
 	originalDesign["form_kind"] = "custom"
 	originalDesign["fields"] = []map[string]any{{
-		"id": "frozen_reason", "type": "textarea", "label": "原始事由", "placeholder": "填写原始事由", "required": true,
+		"id": "frozen_reason", "type": "textarea", "label": "原始事由", "placeholder": "填寫原始事由", "required": true,
 	}}
 	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
 		ID:        "ft-leave",
 		TenantID:  "tenant-1",
 		Key:       "leave-request",
-		Name:      "请假申请单",
+		Name:      "請假申請單",
 		Schema:    originalSchema,
 		CreatedAt: now,
 	})
@@ -3233,7 +3371,7 @@ func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
 	applicantCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-applicant"}
 	submitted, err := svc.Workflow().SubmitForm(applicantCtx, domain.SubmitFormInput{
 		TemplateKey: "leave-request",
-		Payload:     map[string]any{"desc": "申请一天特休", "frozen_reason": "申请一天特休", "notify_account_ids": []any{"acct-admin"}},
+		Payload:     map[string]any{"desc": "申請一天特休", "frozen_reason": "申請一天特休", "notify_account_ids": []any{"acct-admin"}},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -3242,10 +3380,10 @@ func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
 	currentDesign := currentSchema["workspace_design"].(map[string]any)
 	currentDesign["form_kind"] = "hybrid"
 	currentDesign["fields"] = []map[string]any{{
-		"id": "current_reason", "type": "textarea", "label": "当前事由", "placeholder": "填写当前事由", "required": true,
+		"id": "current_reason", "type": "textarea", "label": "當前事由", "placeholder": "填寫當前事由", "required": true,
 	}}
 	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
-		ID: "ft-leave", TenantID: "tenant-1", Key: "leave-request", Name: "请假申请单",
+		ID: "ft-leave", TenantID: "tenant-1", Key: "leave-request", Name: "請假申請單",
 		Schema: currentSchema, Status: "published", CurrentVersion: 2, CreatedAt: now, UpdatedAt: now.Add(2 * time.Hour),
 	})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
@@ -3257,7 +3395,7 @@ func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
 	if len(queue.PendingReview) != 1 || len(queue.Notified) != 1 {
 		t.Fatalf("expected one pending and notified item, got %+v", queue)
 	}
-	if queue.PendingReview[0].Title != "请假申请单" || queue.PendingReview[0].Desc != "表单已提交，等待审批处理。" {
+	if queue.PendingReview[0].Title != "請假申請單" || queue.PendingReview[0].StatusText != "審核中" || queue.PendingReview[0].Desc != "表單已提交，等待審批處理。" {
 		t.Fatalf("unexpected review projection: %+v", queue.PendingReview[0])
 	}
 	if item := queue.PendingReview[0]; item.TemplateKey != "leave-request" || item.FormKind != "custom" || len(item.Fields) != 1 || item.Fields[0].ID != "frozen_reason" || item.Instance.ID != submitted.ID {
@@ -3291,6 +3429,19 @@ func TestWorkflowReviewQueueAndRejectForm(t *testing.T) {
 	}
 	if got := queue.AlreadyReviewed[0].ReviewLog; len(got) != 1 || got[0].Type != "reject" || got[0].Comment != "missing attachment" {
 		t.Fatalf("unexpected review log: %+v", got)
+	}
+	applicantNotifications, err := svc.Notifications().ListNotifications(
+		applicantCtx,
+		domain.NotificationListQuery{},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(applicantNotifications.Items) != 1 {
+		t.Fatalf("expected one rejection notification, got %+v", applicantNotifications)
+	}
+	if item := applicantNotifications.Items[0]; item.StatusText != "已駁回" || item.Title != "你的「請假申請單」已駁回" || item.Body != "由 Admin Reviewer 已駁回這筆申請。 審核意見：missing attachment" {
+		t.Fatalf("unexpected rejection notification copy: %+v", item)
 	}
 
 	_ = store.UpsertFormInstance(context.Background(), domain.FormInstance{
@@ -3337,7 +3488,7 @@ func TestWorkflowBulkReviewFormsReturnsPerItemResults(t *testing.T) {
 		ID:        "ft-general",
 		TenantID:  "tenant-1",
 		Key:       "general",
-		Name:      "通用签呈",
+		Name:      "通用簽呈",
 		Schema:    workflowEnabledTemplateSchema("acct-admin"),
 		CreatedAt: now,
 	})
@@ -3468,7 +3619,7 @@ func TestWorkflowNotificationsFollowSubmitAndReview(t *testing.T) {
 		ID:        "ft-general",
 		TenantID:  "tenant-1",
 		Key:       "general",
-		Name:      "通用签呈",
+		Name:      "通用簽呈",
 		Schema:    workflowEnabledTemplateSchema("acct-admin"),
 		CreatedAt: now,
 	})
@@ -3498,7 +3649,7 @@ func TestWorkflowNotificationsFollowSubmitAndReview(t *testing.T) {
 	if adminNotifications.UnreadCount != 1 || len(adminNotifications.Items) != 1 {
 		t.Fatalf("expected one approver notification, got %+v", adminNotifications)
 	}
-	if item := adminNotifications.Items[0]; item.StatusText != "待處理" || item.LinkURL != "/notifications?reviewId="+submitted.ID || !strings.Contains(item.Body, "通用签呈") {
+	if item := adminNotifications.Items[0]; item.StatusText != "待處理" || item.LinkURL != "/notifications?reviewId="+submitted.ID || !strings.Contains(item.Body, "Applicant One 提交了") || strings.Contains(item.Body, "Applicant One提交了") {
 		t.Fatalf("unexpected submit notification: %+v", item)
 	}
 
@@ -3541,7 +3692,7 @@ func TestWorkflowNotificationsFollowSubmitAndReview(t *testing.T) {
 	if applicantAfterReview.UnreadCount != 1 || len(applicantAfterReview.Items) != 1 {
 		t.Fatalf("expected one applicant review-result notification, got %+v", applicantAfterReview)
 	}
-	if item := applicantAfterReview.Items[0]; item.Tone != "success" || item.StatusText != "已核准" || item.LinkURL != "/forms?applicationId="+submitted.ID || !strings.Contains(item.Body, "looks good") {
+	if item := applicantAfterReview.Items[0]; item.Tone != "success" || item.StatusText != "已覈準" || item.LinkURL != "/forms?applicationId="+submitted.ID || !strings.Contains(item.Body, "由 Admin Reviewer 已覈準") || !strings.Contains(item.Body, "looks good") {
 		t.Fatalf("unexpected review notification: %+v", item)
 	}
 }
@@ -3580,7 +3731,7 @@ func TestWorkflowFormInstanceReadSelfScopeOnlyReturnsOwnItems(t *testing.T) {
 		ID:        "ft-general",
 		TenantID:  "tenant-1",
 		Key:       "general",
-		Name:      "通用签呈",
+		Name:      "通用簽呈",
 		CreatedAt: now,
 	})
 	for _, item := range []domain.FormInstance{
@@ -4299,13 +4450,11 @@ func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
 	if result.Fetched != 1 || result.Created != 1 || result.Updated != 0 || result.DepartmentsUpserted != 1 || result.PositionsUpserted != 1 || result.Mode != "upsert" {
 		t.Fatalf("unexpected eHRMS sync result: %+v", result)
 	}
-	unit, ok, err := store.GetOrgUnit(context.Background(), "tenant-1", "M0101")
-	if err != nil {
-		t.Fatal(err)
+	unit := mustOrgUnitByCode(t, store, "tenant-1", "M0101")
+	if unit.Name != "Nexus" {
+		t.Fatalf("expected eHRMS department to be upserted, unit=%+v", unit)
 	}
-	if !ok || unit.Name != "Nexus" {
-		t.Fatalf("expected eHRMS department to be upserted, ok=%v unit=%+v", ok, unit)
-	}
+	position := mustPositionByCode(t, store, "tenant-1", "0704")
 	employee, ok, err := store.GetEmployeeByEmployeeNo(context.Background(), "tenant-1", "IKM001")
 	if err != nil {
 		t.Fatal(err)
@@ -4313,7 +4462,7 @@ func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
 	if !ok {
 		t.Fatal("expected eHRMS employee to be created")
 	}
-	if employee.Name != "測試員工" || employee.CompanyEmail != "test.employee@ikala.ai" || employee.OrgUnitID != "M0101" || employee.Position != "工程師" || employee.PositionID != "0704" || employee.Status != "active" || employee.Category != "full_time" {
+	if employee.Name != "測試員工" || employee.CompanyEmail != "test.employee@ikala.ai" || employee.OrgUnitID != unit.ID || employee.Position != "工程師" || employee.PositionID != position.ID || employee.Status != "active" || employee.Category != "full_time" {
 		t.Fatalf("unexpected eHRMS employee mapping: %+v", employee)
 	}
 	if employee.AccountID == "" {
@@ -4325,6 +4474,126 @@ func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
 	}
 	if employee.BasicInfo["national_id"] != "A123456789" || employee.EmploymentInfo["position"] != "工程師" || employee.EducationMilitaryInfo["school_name"] != "Nexus University" {
 		t.Fatalf("expected eHRMS profile sections to be preserved, got basic=%+v employment=%+v education=%+v", employee.BasicInfo, employee.EmploymentInfo, employee.EducationMilitaryInfo)
+	}
+}
+
+// TestSyncEHRMSEmployeesRepairsLegacyRawCatalogReferences verifies an upsert rewrites old code-based references.
+func TestSyncEHRMSEmployeesRepairsLegacyRawCatalogReferences(t *testing.T) {
+	rows := []domain.EHRMSEmployeeRecord{{
+		"員工編號":   "LEGACY001",
+		"中文姓名":   "Legacy Employee",
+		"在職狀態":   "在職",
+		"部門代碼":   "C01",
+		"部門中文名稱": "Corporate",
+		"職務代碼":   "0704",
+		"職務中文名稱": "Engineer",
+	}}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "import", Scope: "all"},
+		{Resource: "hr.employee", Action: "read", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{rows: rows}})
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	if err := store.UpsertEmployee(context.Background(), domain.Employee{
+		ID:               "emp-legacy-raw-refs",
+		TenantID:         ctx.TenantID,
+		EmployeeNo:       "LEGACY001",
+		Name:             "Legacy Employee",
+		OrgUnitID:        "C01",
+		PositionID:       "0704",
+		Position:         "Engineer",
+		Status:           "active",
+		EmploymentStatus: "active",
+		EmploymentInfo:   map[string]any{"org_unit_id": "C01", "org_unit_code": "C01", "position_id": "0704", "position_code": "0704"},
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{Mode: "upsert"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Updated != 1 || result.Failed != 0 {
+		t.Fatalf("expected one repaired employee, got %+v", result)
+	}
+	unit := mustOrgUnitByCode(t, store, ctx.TenantID, "C01")
+	position := mustPositionByCode(t, store, ctx.TenantID, "0704")
+	updated, ok, err := store.GetEmployeeByEmployeeNo(context.Background(), ctx.TenantID, "LEGACY001")
+	if err != nil || !ok {
+		t.Fatalf("expected repaired employee, ok=%v err=%v", ok, err)
+	}
+	if updated.OrgUnitID != unit.ID || updated.PositionID != position.ID {
+		t.Fatalf("expected tenant-scoped references, employee=%+v unit=%+v position=%+v", updated, unit, position)
+	}
+	if updated.EmploymentInfo["org_unit_id"] != unit.ID || updated.EmploymentInfo["position_id"] != position.ID {
+		t.Fatalf("expected profile projection to use tenant-scoped references, got %+v", updated.EmploymentInfo)
+	}
+}
+
+// TestSyncEHRMSEmployeesReusesSameTenantLegacyCatalogIDs verifies upgrades do not duplicate legacy catalogs.
+func TestSyncEHRMSEmployeesReusesSameTenantLegacyCatalogIDs(t *testing.T) {
+	rows := []domain.EHRMSEmployeeRecord{{
+		"員工編號":   "LEGACY002",
+		"中文姓名":   "Legacy Catalog Employee",
+		"在職狀態":   "在職",
+		"部門代碼":   "C01",
+		"部門中文名稱": "Corporate",
+		"職務代碼":   "0704",
+		"職務中文名稱": "Engineer",
+	}}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "import", Scope: "all"},
+		{Resource: "hr.employee", Action: "read", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{rows: rows}})
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	if err := store.UpsertOrgUnit(context.Background(), domain.OrgUnit{
+		ID: "C01", TenantID: ctx.TenantID, Code: "C01", Name: "Legacy Corporate", Path: []string{"C01"}, Source: "ehrms", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertPosition(context.Background(), domain.Position{
+		ID: "0704", TenantID: ctx.TenantID, Code: "0704", Name: "Legacy Engineer", Status: string(domain.PositionStatusActive), Source: "ehrms", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertEmployee(context.Background(), domain.Employee{
+		ID: "emp-legacy-catalog", TenantID: ctx.TenantID, EmployeeNo: "LEGACY002", Name: "Legacy Catalog Employee",
+		OrgUnitID: "C01", PositionID: "0704", Position: "Engineer", Status: "active", EmploymentStatus: "active",
+		EmploymentInfo: map[string]any{"org_unit_id": "C01", "org_unit_code": "C01", "position_id": "0704", "position_code": "0704"},
+		CreatedAt:      now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{Mode: "upsert"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Updated != 1 || result.Failed != 0 {
+		t.Fatalf("expected the legacy employee to update, got %+v", result)
+	}
+	unit := mustOrgUnitByCode(t, store, ctx.TenantID, "C01")
+	position := mustPositionByCode(t, store, ctx.TenantID, "0704")
+	if unit.ID != "C01" || position.ID != "0704" {
+		t.Fatalf("expected same-tenant legacy IDs to remain compatible, unit=%+v position=%+v", unit, position)
+	}
+	updated, ok, err := store.GetEmployeeByEmployeeNo(context.Background(), ctx.TenantID, "LEGACY002")
+	if err != nil || !ok || updated.OrgUnitID != unit.ID || updated.PositionID != position.ID {
+		t.Fatalf("expected employee references to reuse legacy catalog IDs, ok=%v employee=%+v err=%v", ok, updated, err)
+	}
+	units, err := store.ListOrgUnits(context.Background(), ctx.TenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matchingUnits := 0
+	for _, item := range units {
+		if item.Code == "C01" {
+			matchingUnits++
+		}
+	}
+	if matchingUnits != 1 {
+		t.Fatalf("expected one org row for business code C01, got %d", matchingUnits)
 	}
 }
 
@@ -4649,12 +4918,9 @@ func TestSyncEHRMSEmployeesMapsEnglishAliasesToDatabase(t *testing.T) {
 		t.Fatalf("unexpected eHRMS sync result: %+v", result)
 	}
 
-	unit, ok, err := store.GetOrgUnit(context.Background(), "tenant-1", "M010102")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok || unit.Code != "M010102" {
-		t.Fatalf("expected org unit from dept_code, got ok=%v unit=%+v", ok, unit)
+	unit := mustOrgUnitByCode(t, store, "tenant-1", "M010102")
+	if unit.Code != "M010102" {
+		t.Fatalf("expected org unit from dept_code, got unit=%+v", unit)
 	}
 	if unit.Name != "行銷科技事業處-網紅行銷事業-業務二" || unit.NameEN != "MarTech Div.(TW)-KOL Radar E2E-Sales 2" || !unit.Closed || unit.Source != "ehrms" || unit.UpdatedAt.IsZero() {
 		t.Fatalf("expected eHRMS org metadata with closed status and cleaned name, got %+v", unit)
@@ -4667,7 +4933,7 @@ func TestSyncEHRMSEmployeesMapsEnglishAliasesToDatabase(t *testing.T) {
 	if !ok {
 		t.Fatal("expected employee to be created")
 	}
-	if employee.Name != "測試員工IK0028" || employee.OrgUnitID != "M010102" || employee.Position != "經理" || employee.Status != "resigned" {
+	if employee.Name != "測試員工IK0028" || employee.OrgUnitID != unit.ID || employee.Position != "經理" || employee.Status != "resigned" {
 		t.Fatalf("unexpected employee hot fields: %+v", employee)
 	}
 	if employee.PositionID == "" {
@@ -4721,9 +4987,10 @@ func TestSyncEHRMSOrgUnitsUpsertsDepartments(t *testing.T) {
 	if result.Fetched != 2 || result.Upserted != 2 {
 		t.Fatalf("unexpected org sync result: %+v", result)
 	}
-	child, ok, err := store.GetOrgUnit(context.Background(), "tenant-1", "C0101")
-	if err != nil || !ok || child.ParentID != "C01" || child.Source != "ehrms" {
-		t.Fatalf("expected synced child org unit, ok=%v unit=%+v err=%v", ok, child, err)
+	parent := mustOrgUnitByCode(t, store, "tenant-1", "C01")
+	child := mustOrgUnitByCode(t, store, "tenant-1", "C0101")
+	if child.ParentID != parent.ID || child.Source != "ehrms" {
+		t.Fatalf("expected synced child org unit, unit=%+v", child)
 	}
 }
 
@@ -4744,9 +5011,9 @@ func TestSyncEHRMSPositionsUpsertsCatalog(t *testing.T) {
 	if result.Fetched != 2 || result.Upserted != 2 {
 		t.Fatalf("unexpected position sync result: %+v", result)
 	}
-	position, ok, err := store.GetPosition(context.Background(), "tenant-1", "0704")
-	if err != nil || !ok || position.Name != "工程師" || position.Source != "ehrms" {
-		t.Fatalf("expected synced position, ok=%v position=%+v err=%v", ok, position, err)
+	position := mustPositionByCode(t, store, "tenant-1", "0704")
+	if position.Name != "工程師" || position.Source != "ehrms" {
+		t.Fatalf("expected synced position, position=%+v", position)
 	}
 }
 
@@ -4806,24 +5073,25 @@ func TestSyncEHRMSEmployeesBuildsOrgHierarchyAndPositions(t *testing.T) {
 	if result.DepartmentsUpserted != 3 || result.PositionsUpserted != 3 {
 		t.Fatalf("unexpected sync counts: %+v", result)
 	}
-	child, ok, err := store.GetOrgUnit(context.Background(), "tenant-1", "C0101")
-	if err != nil || !ok || child.ParentID != "C01" {
-		t.Fatalf("expected child org unit parent, got ok=%v unit=%+v err=%v", ok, child, err)
+	parent := mustOrgUnitByCode(t, store, "tenant-1", "C01")
+	child := mustOrgUnitByCode(t, store, "tenant-1", "C0101")
+	if child.ParentID != parent.ID {
+		t.Fatalf("expected child org unit parent, got unit=%+v", child)
 	}
 	if child.NameEN != "Sales EN" || child.Source != "ehrms" || child.UpdatedAt.IsZero() || child.Closed {
 		t.Fatalf("expected child org metadata, got %+v", child)
 	}
-	closed, ok, err := store.GetOrgUnit(context.Background(), "tenant-1", "C0199")
-	if err != nil || !ok || !closed.Closed || closed.ParentID != "C01" {
-		t.Fatalf("expected empty closed department upserted, ok=%v unit=%+v err=%v", ok, closed, err)
+	closed := mustOrgUnitByCode(t, store, "tenant-1", "C0199")
+	if !closed.Closed || closed.ParentID != parent.ID {
+		t.Fatalf("expected empty closed department upserted, unit=%+v", closed)
 	}
-	position, ok, err := store.GetPosition(context.Background(), "tenant-1", "0704")
-	if err != nil || !ok || position.Name != "工程師" || position.NameEN != "Engineer" || position.Source != "ehrms" {
-		t.Fatalf("expected synced position, got ok=%v position=%+v err=%v", ok, position, err)
+	position := mustPositionByCode(t, store, "tenant-1", "0704")
+	if position.Name != "工程師" || position.NameEN != "Engineer" || position.Source != "ehrms" {
+		t.Fatalf("expected synced position, got position=%+v", position)
 	}
-	intern, ok, err := store.GetPosition(context.Background(), "tenant-1", "0501")
-	if err != nil || !ok || intern.Name != "實習生" {
-		t.Fatalf("expected position from /positions without employees, ok=%v position=%+v err=%v", ok, intern, err)
+	intern := mustPositionByCode(t, store, "tenant-1", "0501")
+	if intern.Name != "實習生" {
+		t.Fatalf("expected position from /positions without employees, position=%+v", intern)
 	}
 }
 
@@ -5519,7 +5787,7 @@ func TestDeleteEmployeeRejectsAlreadyDeleted(t *testing.T) {
 	}
 }
 
-// TestAuditServiceRequiresAuditReadPermission 驗證稽核服務 requires 稽核 read 權限。
+// TestAuditServiceRequiresAuditReadPermission 驗證稽覈服務 requires 稽覈 read 權限。
 func TestAuditServiceRequiresAuditReadPermission(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -6237,7 +6505,7 @@ func TestUpdateOrgUnitManagerPosition(t *testing.T) {
 	}
 }
 
-// TestPlatformTaskMutationsPersistAndProject 驗證平台任務 mutations persist and project。
+// TestPlatformTaskMutationsPersistAndProject 驗證平臺任務 mutations persist and project。
 func TestPlatformTaskMutationsPersistAndProject(t *testing.T) {
 	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -6286,6 +6554,9 @@ func TestPlatformTaskMutationsPersistAndProject(t *testing.T) {
 	tasks, err := svc.Platform().Tasks(ctx)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if tasks.ClockSummary == nil {
+		t.Fatal("expected authorized task projection to include clock summary")
 	}
 	record := findPlatformTaskRecord(t, tasks.Records, "2026/07/01")
 	if record.TotalHours != 1.5 || len(record.Items) != 1 || record.Items[0].ID != item.ID {
@@ -6385,7 +6656,7 @@ func TestPlatformTaskMutationsPersistAndProject(t *testing.T) {
 	}
 }
 
-// TestPlatformWorkspaceOrganizationManagerUpdatePersistsHierarchy 驗證平台工作區 organization 主管 update persists hierarchy。
+// TestPlatformWorkspaceOrganizationManagerUpdatePersistsHierarchy 驗證平臺工作區 organization 主管 update persists hierarchy。
 func TestPlatformWorkspaceOrganizationManagerUpdatePersistsHierarchy(t *testing.T) {
 	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -6463,7 +6734,7 @@ func TestPlatformWorkspaceOrganizationManagerUpdatePersistsHierarchy(t *testing.
 	}
 }
 
-// TestPlatformWorkspaceFormDesignMutationsPersistTemplateSchema 驗證平台工作區表單 design mutations persist 範本 schema。
+// TestPlatformWorkspaceFormDesignMutationsPersistTemplateSchema 驗證平臺工作區表單 design mutations persist 範本 schema。
 func TestPlatformWorkspaceFormDesignMutationsPersistTemplateSchema(t *testing.T) {
 	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
 	currentNow := now
@@ -6616,7 +6887,7 @@ func findWorkspaceOrganizationRow(t *testing.T, rows []domain.WorkspaceOrganizat
 	return domain.WorkspaceOrganizationRow{}
 }
 
-// findPlatformFormDesignForm 驗證 find 平台表單 design 表單。
+// findPlatformFormDesignForm 驗證 find 平臺表單 design 表單。
 func findPlatformFormDesignForm(t *testing.T, forms []domain.PlatformFormDesignForm, id string) domain.PlatformFormDesignForm {
 	t.Helper()
 	form, ok := platformFormDesignFormByID(forms, id)
@@ -6626,7 +6897,7 @@ func findPlatformFormDesignForm(t *testing.T, forms []domain.PlatformFormDesignF
 	return form
 }
 
-// platformFormDesignFormByID 驗證平台表單 design 表單 by ID。
+// platformFormDesignFormByID 驗證平臺表單 design 表單 by ID。
 func platformFormDesignFormByID(forms []domain.PlatformFormDesignForm, id string) (domain.PlatformFormDesignForm, bool) {
 	for _, form := range forms {
 		if form.ID == id {
@@ -6660,7 +6931,7 @@ func boolPtr(value bool) *bool {
 	return &value
 }
 
-// findPlatformTaskRecord 驗證 find 平台任務 record。
+// findPlatformTaskRecord 驗證 find 平臺任務 record。
 func findPlatformTaskRecord(t *testing.T, records []domain.PlatformTaskRecord, date string) domain.PlatformTaskRecord {
 	t.Helper()
 	for _, record := range records {
@@ -6672,7 +6943,7 @@ func findPlatformTaskRecord(t *testing.T, records []domain.PlatformTaskRecord, d
 	return domain.PlatformTaskRecord{}
 }
 
-// findPlatformTaskTodo 驗證 find 平台任務待辦。
+// findPlatformTaskTodo 驗證 find 平臺任務待辦。
 func findPlatformTaskTodo(t *testing.T, todos []domain.PlatformTaskTodo, id string) domain.PlatformTaskTodo {
 	t.Helper()
 	for _, todo := range todos {
@@ -7163,7 +7434,7 @@ func relationshipTupleExists(tuples []domain.AuthzRelationshipTuple, relation, s
 	return false
 }
 
-// findAuditLog 驗證 find 稽核 log。
+// findAuditLog 驗證 find 稽覈 log。
 func findAuditLog(logs []domain.AuditLog, action string) (domain.AuditLog, bool) {
 	for _, log := range logs {
 		if log.Action == action {

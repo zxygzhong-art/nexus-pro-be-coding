@@ -30,7 +30,7 @@ Keycloak 部署與前後端對接說明請看 [docs/keycloak.md](docs/keycloak.m
 
 不要把帳號、密碼、資料庫地址、bucket 名稱、tracing endpoint、對外主機名或環境相關設定寫進 Dockerfile。這些值屬於執行期設定，應該放在 [`.env`](.env)，再由 `compose.yaml` 注入，或由 `render-configs.sh` 產生到 `ops/generated/`。
 
-這樣同一個映像才能同時用於本地、測試、正式環境和多主機拆分部署。例如同一個 Keycloak 映像可以連本地 PostgreSQL 容器，也可以連另一台主機上的 PostgreSQL，只需要修改 [`.env`](.env) 裡的 `POSTGRES_INTERNAL_HOST`、`POSTGRES_INTERNAL_PORT`、`POSTGRES_USER` 和 `POSTGRES_PASSWORD`。
+這樣同一個映像才能同時用於本地、測試、正式環境和多主機拆分部署。例如同一個 Keycloak 映像可以連本地 PostgreSQL 容器，也可以連另一臺主機上的 PostgreSQL，只需要修改 [`.env`](.env) 裡的 `POSTGRES_INTERNAL_HOST`、`POSTGRES_INTERNAL_PORT`、`POSTGRES_USER` 和 `POSTGRES_PASSWORD`。
 
 ## 設定檔結構
 
@@ -58,7 +58,7 @@ Grafana
 
 ```text
 *_INTERNAL_HOST: 容器或服務之間互相連線的地址；依賴服務已部署到其他主機時，改成該主機 IP 或 DNS。
-*_BIND_HOST: 目前這台 Docker 主機發佈 port 時綁定的網卡地址。
+*_BIND_HOST: 目前這臺 Docker 主機發佈 port 時綁定的網卡地址。
 ```
 
 ## 部署單一服務
@@ -188,11 +188,11 @@ SFTPGo SFTP:    sftp://127.0.0.1:22022
 
 ## 應用程式端點
 
-後端 traces 和 metrics 分別進入對應的本地可觀測性服務，logs 只直接輸出到控制台：
+後端 traces 和 metrics 分別進入對應的本地可觀測性服務，logs 只直接輸出到控制檯：
 
 - traces：後端用 OTLP gRPC 直接上報到 Tempo。
 - metrics：Prometheus 直接 scrape 後端 `/metrics`。
-- logs：後端 JSON 日誌直接寫 stdout / 控制台。
+- logs：後端 JSON 日誌直接寫 stdout / 控制檯。
 
 在宿主機上執行 Go 後端時使用：
 
@@ -204,7 +204,7 @@ OTEL_SERVICE_NAME=nexus-pro-be
 METRICS_ADDR=0.0.0.0:9091
 ```
 
-日誌直接看啟動進程的控制台輸出：
+日誌直接看啟動進程的控制檯輸出：
 
 ```bash
 go run ./cmd/api

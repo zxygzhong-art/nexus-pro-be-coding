@@ -55,6 +55,52 @@ func TestOpenAPIYAMLParsesStructurally(t *testing.T) {
 	}
 }
 
+// TestPlatformClockSummaryIsOptionalInAggregates keeps permission-projected widgets aligned with the public contract.
+func TestPlatformClockSummaryIsOptionalInAggregates(t *testing.T) {
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Required   []string       `yaml:"required"`
+				Properties map[string]any `yaml:"properties"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(readOpenAPI(t), &doc); err != nil {
+		t.Fatalf("openapi.yaml should parse as YAML: %v", err)
+	}
+	for _, name := range []string{"PlatformHomeResponse", "PlatformTasksResponse"} {
+		schema, ok := doc.Components.Schemas[name]
+		if !ok {
+			t.Fatalf("expected OpenAPI schema %s", name)
+		}
+		if _, ok := schema.Properties["clock_summary"]; !ok {
+			t.Fatalf("expected %s to define optional clock_summary", name)
+		}
+		for _, required := range schema.Required {
+			if required == "clock_summary" {
+				t.Fatalf("expected %s.clock_summary to be optional", name)
+			}
+		}
+	}
+	clockSchema, ok := doc.Components.Schemas["PlatformClockSummary"]
+	if !ok {
+		t.Fatal("expected PlatformClockSummary schema")
+	}
+	if _, ok := clockSchema.Properties["monthly_overtime_hours"]; !ok {
+		t.Fatal("expected PlatformClockSummary to document monthly_overtime_hours")
+	}
+	foundRequired := false
+	for _, required := range clockSchema.Required {
+		if required == "monthly_overtime_hours" {
+			foundRequired = true
+			break
+		}
+	}
+	if !foundRequired {
+		t.Fatal("expected monthly_overtime_hours to be required like the non-omitempty response field")
+	}
+}
+
 // TestRegisteredRoutesMatchAuthzPolicies 驗證 registered 路由 match 授權政策。
 func TestRegisteredRoutesMatchAuthzPolicies(t *testing.T) {
 	router, ok := v1api.New(service.New(memory.NewStore()), nil).Routes().(*gin.Engine)
@@ -114,6 +160,26 @@ func TestPermissionSetAssignmentPoliciesUseDedicatedResource(t *testing.T) {
 	}
 	if found != 2 {
 		t.Fatalf("expected read and create assignment policies, got %d", found)
+	}
+}
+
+// TestAgentUsagePoliciesUseDedicatedHighRiskResource prevents definition readers regaining account usage access.
+func TestAgentUsagePoliciesUseDedicatedHighRiskResource(t *testing.T) {
+	found := 0
+	for _, policy := range domain.DefaultRoutePolicies {
+		if !strings.HasPrefix(policy.Path, "/v1/workspace/agent-usage") {
+			continue
+		}
+		found++
+		if policy.ApplicationCode != "agent" || policy.ResourceType != "usage" || policy.Action != "read" {
+			t.Fatalf("expected dedicated agent.usage:read policy, got %+v", policy)
+		}
+		if policy.RiskLevel != domain.RiskHigh {
+			t.Fatalf("expected usage policy to be high risk, got %+v", policy)
+		}
+	}
+	if found != 2 {
+		t.Fatalf("expected overview and session usage policies, got %d", found)
 	}
 }
 
@@ -184,6 +250,42 @@ func TestEmployeeOpenAPIRequestBodiesUseNamedSchemas(t *testing.T) {
 	for key, schemaName := range expected {
 		if got := refs[key]; got != schemaName {
 			t.Fatalf("%s request body uses %q, want %q", key, got, schemaName)
+		}
+	}
+}
+
+// TestAssumableRoleCreateOpenAPIUsesSafetyContract verifies that the public request names every service-required policy.
+func TestAssumableRoleCreateOpenAPIUsesSafetyContract(t *testing.T) {
+	refs := openAPIRequestJSONSchemaRefs(t)
+	if got := refs["POST /v1/iam/assumable-roles"]; got != "CreateAssumableRoleInput" {
+		t.Fatalf("assumable role create request body uses %q, want CreateAssumableRoleInput", got)
+	}
+
+	var doc struct {
+		Components struct {
+			Schemas map[string]struct {
+				Required []string `yaml:"required"`
+			} `yaml:"schemas"`
+		} `yaml:"components"`
+	}
+	if err := yaml.Unmarshal(readOpenAPI(t), &doc); err != nil {
+		t.Fatalf("openapi.yaml should parse as YAML: %v", err)
+	}
+	required := map[string]bool{}
+	for _, field := range doc.Components.Schemas["CreateAssumableRoleInput"].Required {
+		required[field] = true
+	}
+	for _, field := range []string{"name", "trusted", "trust_policy", "permission_boundary"} {
+		if !required[field] {
+			t.Fatalf("CreateAssumableRoleInput must require %s", field)
+		}
+	}
+
+	errors := openAPIErrorResponseRefs(t)
+	for status, response := range map[string]string{"400": "ValidationError", "401": "Unauthenticated", "403": "Forbidden"} {
+		key := "POST /v1/iam/assumable-roles " + status
+		if got := errors[key]; got != response {
+			t.Fatalf("%s response uses %q, want %q", key, got, response)
 		}
 	}
 }

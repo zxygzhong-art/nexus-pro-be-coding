@@ -202,11 +202,11 @@ func (c WorkspaceService) WorkspaceTurnover(ctx RequestContext, query WorkspaceT
 func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query WorkspaceAttendanceQuery) (WorkspaceAttendanceResponse, error) {
 	now := c.Now()
 	start, end := workspaceMonthRange(query.Year, query.Month, now)
-	employees, err := c.visibleWorkspaceEmployees(ctx, "workspace.attendance")
+	employees, err := c.visibleWorkspaceAttendanceEmployees(ctx, "workspace.attendance")
 	if err != nil {
 		return WorkspaceAttendanceResponse{}, err
 	}
-	units, err := c.Service.HR().ListOrgUnits(ctx)
+	units, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
 	if err != nil {
 		return WorkspaceAttendanceResponse{}, err
 	}
@@ -257,9 +257,9 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	leaveByEmployeeDate := workspaceSummaryLeaveCells(summaries)
 	leaveByEmployeeDate = workspaceMergeApprovedLeaveCells(leaveByEmployeeDate, leaves, policy.WorkTime, start, end)
 	overtimeByEmployeeDate := workspaceOvertimeCells(overtimes, start, end)
-	summaryByEmployeeDate := workspaceSummaryCells(summaries)
+	attendanceEvidenceByEmployeeDate := workspaceAttendanceEvidenceCells(clocks, summaries, leaves, policy.WorkTime)
 	clockByEmployeeDate := workspaceClockCells(clocks, summaries, worksites, leaveByEmployeeDate, overtimeByEmployeeDate)
-	attendanceMatrix := workspaceAttendanceMatrix(monthEmployees, cards, dates, leaveByEmployeeDate, overtimeByEmployeeDate, summaryByEmployeeDate, clockByEmployeeDate, now)
+	attendanceMatrix := workspaceAttendanceMatrix(monthEmployees, cards, dates, leaveByEmployeeDate, overtimeByEmployeeDate, attendanceEvidenceByEmployeeDate, clockByEmployeeDate, now)
 	clockMatrix := workspaceClockMatrix(monthEmployees, cards, dates, leaveByEmployeeDate, clockByEmployeeDate)
 
 	return WorkspaceAttendanceResponse{
@@ -519,7 +519,7 @@ func workspaceFloat(value float64) string {
 	return strconv.FormatFloat(value, 'f', -1, 64)
 }
 
-// WorkspaceAuditLogs 處理工作區稽核 logs 的服務流程。
+// WorkspaceAuditLogs 處理工作區稽覈 logs 的服務流程。
 func (c WorkspaceService) WorkspaceAuditLogs(ctx RequestContext, query WorkspaceAuditLogQuery, page PageRequest) (PageResponse[WorkspaceAuditLog], error) {
 	if _, _, _, err := c.Authorize(ctx, CheckRequest{Resource: "audit.log", Action: ActionRead}, AuditTarget{Event: "workspace.audit_log.query", Resource: "audit_log"}); err != nil {
 		return PageResponse[WorkspaceAuditLog]{}, err
@@ -564,6 +564,69 @@ func (c WorkspaceService) WorkspaceAuditLogs(ctx RequestContext, query Workspace
 	return utils.PageResponseFromStore(projected, total, page), nil
 }
 
+// WorkspaceAuditLogFacets builds tenant-wide filter options without reading sensitive audit details.
+func (c WorkspaceService) WorkspaceAuditLogFacets(ctx RequestContext) (WorkspaceAuditLogFacets, error) {
+	if _, _, _, err := c.Authorize(ctx, CheckRequest{Resource: "audit.log", Action: ActionRead}, AuditTarget{Event: "workspace.audit_log.facets", Resource: "audit_log"}); err != nil {
+		return WorkspaceAuditLogFacets{}, err
+	}
+	sources, err := c.store.ListAuditLogFacetSources(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return WorkspaceAuditLogFacets{}, err
+	}
+	accounts, err := c.store.ListAccounts(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return WorkspaceAuditLogFacets{}, err
+	}
+	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return WorkspaceAuditLogFacets{}, err
+	}
+	accountByID := make(map[string]Account, len(accounts))
+	for _, account := range accounts {
+		accountByID[account.ID] = account
+	}
+	employeeByID := make(map[string]Employee, len(employees))
+	for _, employee := range employees {
+		employeeByID[employee.ID] = employee
+	}
+
+	operatorByID := map[string]WorkspaceAuditLogOperatorFacet{}
+	typeSet := map[string]struct{}{}
+	for _, source := range sources {
+		operatorID := strings.TrimSpace(source.ActorAccountID)
+		if operatorID == "" {
+			operatorID = WorkspaceAuditSystemOperatorID
+		}
+		account := accountByID[source.ActorAccountID]
+		employee := employeeByID[account.EmployeeID]
+		operatorByID[operatorID] = WorkspaceAuditLogOperatorFacet{
+			ID: operatorID,
+			Label: workspaceAuditOperator(AuditLog{
+				ActorAccountID: source.ActorAccountID,
+			}, account, employee),
+		}
+		typeSet[workspaceAuditType(AuditLog{Action: source.Action, Resource: source.Resource})] = struct{}{}
+	}
+	operators := make([]WorkspaceAuditLogOperatorFacet, 0, len(operatorByID))
+	for _, operator := range operatorByID {
+		operators = append(operators, operator)
+	}
+	sort.Slice(operators, func(i, j int) bool {
+		if operators[i].Label != operators[j].Label {
+			return operators[i].Label < operators[j].Label
+		}
+		return operators[i].ID < operators[j].ID
+	})
+	typeCatalog := []string{"員工管理", "組織架構", "假勤制度", "表單設計", "管理員設定", "系統"}
+	types := make([]string, 0, len(typeSet))
+	for _, auditType := range typeCatalog {
+		if _, ok := typeSet[auditType]; ok {
+			types = append(types, auditType)
+		}
+	}
+	return WorkspaceAuditLogFacets{Operators: operators, Types: types}, nil
+}
+
 // visibleWorkspaceEmployees 處理可見工作區員工的服務流程。
 func (c WorkspaceService) visibleWorkspaceEmployees(ctx RequestContext, event string) ([]Employee, error) {
 	account, decision, audit, err := c.Authorize(ctx,
@@ -585,6 +648,40 @@ func (c WorkspaceService) visibleWorkspaceEmployees(ctx RequestContext, event st
 	items, err = hr.applyEmployeeDecision(ctx, account, items, decision)
 	if err != nil {
 		return nil, err
+	}
+	if err := audit.Commit(ctx); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+// visibleWorkspaceAttendanceEmployees projects the roster needed by the
+// attendance matrix under the caller's attendance scope. Requiring a separate
+// HR grant here would contradict the workspace route and endpoint contract.
+func (c WorkspaceService) visibleWorkspaceAttendanceEmployees(ctx RequestContext, event string) ([]Employee, error) {
+	account, decision, audit, err := c.Authorize(ctx,
+		CheckRequest{ApplicationCode: AppAttendance, ResourceType: ResourceAttendanceClock, Action: ActionRead},
+		AuditTarget{Event: event, Resource: string(ResourceAttendanceClock)},
+	)
+	if err != nil {
+		return nil, err
+	}
+	items, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	allowed, all, err := c.Service.Attendance().attendanceEmployeeScope(ctx, account, decision)
+	if err != nil {
+		return nil, err
+	}
+	if !all {
+		filtered := make([]Employee, 0, len(items))
+		for _, item := range items {
+			if _, ok := allowed[item.ID]; ok {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
 	}
 	if err := audit.Commit(ctx); err != nil {
 		return nil, err

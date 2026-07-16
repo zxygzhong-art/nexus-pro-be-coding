@@ -439,7 +439,7 @@ func employeeImportSHA256(raw []byte) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// employeeImportAuditDetails 處理員工 import 稽核 details。
+// employeeImportAuditDetails 處理員工 import 稽覈 details。
 func employeeImportAuditDetails(session EmployeeImportSession) map[string]any {
 	details := utils.CopyStringMap(session.Summary)
 	if details == nil {

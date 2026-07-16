@@ -69,6 +69,8 @@ type IAMStore interface {
 	ListAssumableRoles(ctx context.Context, tenantID string) ([]domain.AssumableRole, error)
 	DeleteAssumableRole(ctx context.Context, tenantID, id string) (domain.AssumableRole, bool, error)
 	UpsertAssumableRoleSession(context.Context, domain.AssumableRoleSession) error
+	GetAssumableRoleSession(ctx context.Context, tenantID, id string) (domain.AssumableRoleSession, bool, error)
 	GetActiveAssumableRoleSession(ctx context.Context, tenantID, id string) (domain.AssumableRoleSession, bool, error)
+	RevokeAssumableRoleSession(ctx context.Context, tenantID, accountID, id string, revokedAt time.Time) (domain.AssumableRoleSession, bool, error)
 	ListActiveAssumableRoleSessionsForRole(ctx context.Context, tenantID, roleID string) ([]domain.AssumableRoleSession, error)
 }

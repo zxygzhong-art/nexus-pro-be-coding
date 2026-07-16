@@ -105,6 +105,47 @@ func TestPatchMeProfileUpdatesOnlySelfServiceFields(t *testing.T) {
 	}
 }
 
+// TestPatchMeProfileInitializesMissingProfileMaps covers employees provisioned without optional JSON profile sections.
+func TestPatchMeProfileInitializesMissingProfileMaps(t *testing.T) {
+	handler := newTestAPIForAccountNow("acct-employee", time.Date(2026, 7, 15, 12, 0, 0, 0, time.UTC), func(store *memory.Store) {
+		set, ok, err := store.GetPermissionSet(context.Background(), "demo", "ps-employee")
+		if err != nil || !ok {
+			t.Fatalf("load employee permission set: ok=%v err=%v", ok, err)
+		}
+		for index := range set.Permissions {
+			if set.Permissions[index].Resource == "me" && set.Permissions[index].Action == "update" {
+				set.Permissions[index].Scope = "self"
+			}
+		}
+		if err := store.UpsertPermissionSet(context.Background(), set); err != nil {
+			t.Fatalf("update employee permission set: %v", err)
+		}
+
+		employee, ok, err := store.GetEmployee(context.Background(), "demo", "emp-employee")
+		if err != nil || !ok {
+			t.Fatalf("load employee: ok=%v err=%v", ok, err)
+		}
+		employee.BasicInfo = nil
+		employee.ContactInfo = nil
+		if err := store.UpsertEmployee(context.Background(), employee); err != nil {
+			t.Fatalf("clear optional profile maps: %v", err)
+		}
+	})
+
+	req := httptest.NewRequest(http.MethodPatch, "/v1/me/profile", strings.NewReader(`{"english_name":"QA Empty Map","slack":"qa-empty-map"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", rec.Code, rec.Body.String())
+	}
+	me := decodeData[service.MeResponse](t, rec.Body.Bytes())
+	if me.Employee == nil || me.Employee.BasicInfo["name_en"] != "QA Empty Map" || me.Employee.ContactInfo["slack"] != "qa-empty-map" {
+		t.Fatalf("missing profile maps were not initialized: %+v", me.Employee)
+	}
+}
+
 // TestPatchMeProfileRejectsUnknownOrEmptyPayloads verifies immutable fields cannot be smuggled into the self-service contract.
 func TestPatchMeProfileRejectsUnknownOrEmptyPayloads(t *testing.T) {
 	handler := newTestAPIForAccountNow("acct-employee", time.Now(), nil)

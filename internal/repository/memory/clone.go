@@ -59,14 +59,14 @@ func copyAccount(v Account) Account {
 // copyUserIdentity 複製使用者身分。
 func copyUserIdentity(v UserIdentity) UserIdentity { return v }
 
-// copyUserGroup 複製使用者群組。
+// copyUserGroup 複製使用者羣組。
 func copyUserGroup(v UserGroup) UserGroup {
 	v.MemberAccountIDs = utils.CopyStrings(v.MemberAccountIDs)
 	v.PermissionSetIDs = utils.CopyStrings(v.PermissionSetIDs)
 	return v
 }
 
-// copyGroupMembership 複製使用者群組成員關係。
+// copyGroupMembership 複製使用者羣組成員關係。
 func copyGroupMembership(v GroupMembership) GroupMembership {
 	if v.ValidUntil != nil {
 		t := *v.ValidUntil
@@ -163,7 +163,7 @@ func copyPermissionSetTemplate(v PermissionSetTemplate) PermissionSetTemplate {
 	return v
 }
 
-// copyUserGroupTemplate 複製使用者群組模板。
+// copyUserGroupTemplate 複製使用者羣組模板。
 func copyUserGroupTemplate(v UserGroupTemplate) UserGroupTemplate {
 	v.Content.PermissionSetTemplateKeys = utils.CopyStrings(v.Content.PermissionSetTemplateKeys)
 	return v
@@ -439,10 +439,10 @@ func copyFormInstanceFieldValues(values []FormInstanceFieldValue) []FormInstance
 	return out
 }
 
-// copyPlatformTaskRecordItem 複製平台任務 record 項目。
+// copyPlatformTaskRecordItem 複製平臺任務 record 項目。
 func copyPlatformTaskRecordItem(v PlatformTaskRecordItem) PlatformTaskRecordItem { return v }
 
-// copyPlatformTaskTodoRecord 複製平台任務待辦 record。
+// copyPlatformTaskTodoRecord 複製平臺任務待辦 record。
 func copyPlatformTaskTodoRecord(v PlatformTaskTodoRecord) PlatformTaskTodoRecord { return v }
 
 // copyAgentRun 複製 agent 執行。
@@ -616,7 +616,7 @@ func copyCheckResults(src []CheckResult) []CheckResult {
 	return dst
 }
 
-// copyAuditLog 複製稽核 log。
+// copyAuditLog 複製稽覈 log。
 func copyAuditLog(v AuditLog) AuditLog {
 	v.Details = utils.CopyStringMap(v.Details)
 	return v

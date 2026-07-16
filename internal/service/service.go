@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"sort"
 	"strings"
@@ -192,9 +193,6 @@ func (c *Service) loggerFor(ctx RequestContext) *slog.Logger {
 	if ctx.AssumedRoleID != "" {
 		attrs = append(attrs, "assumed_role_id", ctx.AssumedRoleID)
 	}
-	if ctx.AssumedRoleSessionID != "" {
-		attrs = append(attrs, "assumed_role_session_id", ctx.AssumedRoleSessionID)
-	}
 	return logger.With(attrs...)
 }
 
@@ -226,14 +224,14 @@ func (c *Service) resolveAccount(ctx RequestContext) (Account, Tenant, error) {
 	return account, tenant, nil
 }
 
-// AuditTarget 定義稽核 target 的資料結構。
+// AuditTarget 定義稽覈 target 的資料結構。
 type AuditTarget struct {
 	Event    string
 	Resource string
 	Target   string
 }
 
-// AuthzAudit 定義授權稽核的資料結構。
+// AuthzAudit 定義授權稽覈的資料結構。
 type AuthzAudit struct {
 	service  *Service
 	target   AuditTarget
@@ -317,7 +315,7 @@ func (a AuditTarget) fromRequest(req CheckRequest) AuditTarget {
 	return a
 }
 
-// auditAuthzTarget 處理稽核授權 target 的服務流程。
+// auditAuthzTarget 處理稽覈授權 target 的服務流程。
 func (c *Service) auditAuthzTarget(ctx RequestContext, audit AuditTarget, decision CheckResult) error {
 	if audit.Event == "" {
 		return nil
@@ -328,7 +326,7 @@ func (c *Service) auditAuthzTarget(ctx RequestContext, audit AuditTarget, decisi
 	return c.auditAuthzDecision(ctx, audit.Event, audit.Resource, audit.Target, decision)
 }
 
-// shouldAuditAuthzDecision 判斷授權決策是否需要寫入操作稽核。
+// shouldAuditAuthzDecision 判斷授權決策是否需要寫入操作稽覈。
 func shouldAuditAuthzDecision(decision CheckResult) bool {
 	if !decision.Allowed {
 		return true
@@ -407,22 +405,26 @@ func (c *Service) resolveAccess(ctx RequestContext, account Account) ([]Permissi
 		}
 		permissionSets = append(permissionSets, set)
 	}
-	grants, _, assumed, boundary, err := c.collectAuthzGrants(ctx, account)
+	grants, setIDs, assumed, boundary, err := c.collectAuthzGrants(ctx, account)
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	permissions := effectiveAccessPermissionsFromGrants(grants, boundary, assumed != nil)
+	permissions := effectiveAccessPermissionCandidates(grants)
+	permissions, err = c.projectEffectivePermissionScopes(ctx, account, permissions, grants, setIDs, assumed, boundary)
+	if err != nil {
+		return nil, nil, nil, err
+	}
 
 	return permissions, permissionSets, groups, nil
 }
 
-// activeUserGroupsForAccount 以成員關係表解析帳號目前有效的使用者群組。
+// activeUserGroupsForAccount 以成員關係表解析帳號目前有效的使用者羣組。
 func (c *Service) activeUserGroupsForAccount(ctx RequestContext, account Account) ([]UserGroup, error) {
 	groups, _, err := c.activeUserGroupsForAccountWithExpiries(ctx, account)
 	return groups, err
 }
 
-// activeUserGroupsForAccountWithExpiries 同時回傳群組成員關係期限，供授權快照限制 TTL。
+// activeUserGroupsForAccountWithExpiries 同時回傳羣組成員關係期限，供授權快照限制 TTL。
 func (c *Service) activeUserGroupsForAccountWithExpiries(ctx RequestContext, account Account) ([]UserGroup, map[string]*time.Time, error) {
 	at := c.Now()
 	memberships, err := c.store.ListActiveGroupMembershipsForAccount(goContext(ctx), ctx.TenantID, account.ID, at)
@@ -457,7 +459,7 @@ func (c *Service) activeUserGroupsForAccountWithExpiries(ctx RequestContext, acc
 	return groups, expiries, nil
 }
 
-// groupMembershipActiveAt 判斷群組成員關係在指定時間是否有效。
+// groupMembershipActiveAt 判斷羣組成員關係在指定時間是否有效。
 func groupMembershipActiveAt(membership GroupMembership, at time.Time) bool {
 	if !membership.ValidFrom.IsZero() && membership.ValidFrom.After(at) {
 		return false
@@ -465,7 +467,7 @@ func groupMembershipActiveAt(membership GroupMembership, at time.Time) bool {
 	return membership.ValidUntil == nil || at.Before(*membership.ValidUntil)
 }
 
-// audit 處理稽核的服務流程。
+// audit 處理稽覈的服務流程。
 func (c *Service) audit(ctx RequestContext, action, resource, target, severity string, details map[string]any) error {
 	details = auditDetailsWithContext(ctx, details)
 	result := auditResultFromDetails(details)
@@ -488,7 +490,7 @@ func (c *Service) audit(ctx RequestContext, action, resource, target, severity s
 	})
 }
 
-// auditResultFromDetails 處理稽核結果 來源 details。
+// auditResultFromDetails 處理稽覈結果 來源 details。
 func auditResultFromDetails(details map[string]any) string {
 	if result := strings.TrimSpace(stringFromAny(details["result"])); result != "" {
 		return result
@@ -526,12 +528,14 @@ func authzReasonCode(decision CheckResult) string {
 		}
 	case "relationship denied", "explicit deny":
 		return "permission_missing"
+	case "data scope denied":
+		return "data_scope_denied"
 	default:
 		return "permission_missing"
 	}
 }
 
-// auditDetailsWithContext 處理稽核 details with context。
+// auditDetailsWithContext 處理稽覈 details with context。
 func auditDetailsWithContext(ctx RequestContext, details map[string]any) map[string]any {
 	out := utils.CopyStringMap(details)
 	if out == nil {
@@ -565,13 +569,10 @@ func auditDetailsWithContext(ctx RequestContext, details map[string]any) map[str
 	if ctx.RoutePath != "" {
 		out["route_path"] = ctx.RoutePath
 	}
-	if ctx.AssumedRoleSessionID != "" {
-		out["assumed_role_session_id"] = ctx.AssumedRoleSessionID
-	}
 	return out
 }
 
-// auditDecisionDetails 處理稽核決策 details。
+// auditDecisionDetails 處理稽覈決策 details。
 func auditDecisionDetails(ctx RequestContext, decision CheckResult, details map[string]any) map[string]any {
 	out := auditDetailsWithContext(ctx, details)
 	out["authz_decision"] = decision.Allowed
@@ -607,7 +608,8 @@ func permissionMatches(perm Permission, req CheckRequest, account Account) bool 
 	default:
 		return false
 	}
-	if !wildcardMatch(req.Resource, perm.Resource) {
+	if !wildcardMatch(string(req.ApplicationCode), string(perm.ApplicationCode)) ||
+		!wildcardMatch(string(req.ResourceType), string(perm.ResourceType)) {
 		return false
 	}
 	if !wildcardMatch(string(req.Action), string(perm.Action)) {
@@ -697,31 +699,10 @@ func capabilitiesFromPermissions(perms []Permission) []string {
 	return out
 }
 
-// effectiveAccessPermissionsFromGrants 回傳套用 deny、boundary 與 assumed-role 交集後的有效權限。
-func effectiveAccessPermissionsFromGrants(grants []authzGrant, boundary map[string]any, requireAssumed bool) []Permission {
-	normalAllowed := map[string]struct{}{}
-	assumedAllowed := map[string]struct{}{}
-	denied := make([]string, 0)
-	for _, grant := range grants {
-		perm := normalizePermission(grant.Permission)
-		if !permissionCanAuthorizeRequest(perm) {
-			continue
-		}
-		key := permissionKey(perm.ApplicationCode, perm.ResourceType, perm.Action)
-		if permissionEffect(grant) == "deny" {
-			denied = append(denied, key)
-			continue
-		}
-		if policyDenies(boundary, key) || !policyAllows(boundary, key) {
-			continue
-		}
-		if grant.SourceKind == authzGrantSourceAssumed {
-			assumedAllowed[key] = struct{}{}
-			continue
-		}
-		normalAllowed[key] = struct{}{}
-	}
-
+// effectiveAccessPermissionCandidates collects positive candidates only.
+// Concrete boundary, deny, target, scope and assumed-role intersection checks
+// are deliberately deferred to the authoritative projection decision pass.
+func effectiveAccessPermissionCandidates(grants []authzGrant) []Permission {
 	out := make([]Permission, 0, len(grants))
 	seen := map[string]struct{}{}
 	for _, grant := range grants {
@@ -729,22 +710,12 @@ func effectiveAccessPermissionsFromGrants(grants []authzGrant, boundary map[stri
 		if !permissionCanAuthorizeRequest(perm) {
 			continue
 		}
-		key := permissionKey(perm.ApplicationCode, perm.ResourceType, perm.Action)
 		if permissionEffect(grant) == "deny" {
 			continue
 		}
-		if policyDenies(boundary, key) || !policyAllows(boundary, key) || permissionKeyDenied(key, denied) {
-			continue
-		}
-		if requireAssumed {
-			if _, ok := normalAllowed[key]; !ok {
-				continue
-			}
-			if _, ok := assumedAllowed[key]; !ok {
-				continue
-			}
-		}
-		label := effectivePermissionIdentity(perm)
+		// Boundary and explicit denies are intentionally deferred until every
+		// candidate has been materialized with its target and concrete key.
+		label := effectivePermissionIdentity(perm) + "|relation:" + relationshipConstraint(perm)
 		if _, ok := seen[label]; ok {
 			continue
 		}
@@ -760,13 +731,6 @@ func effectiveAccessPermissionsFromGrants(grants []authzGrant, boundary map[stri
 		if menuKey == "" {
 			menuKey = strings.TrimSpace(perm.Resource)
 		}
-		requirement, ok := menuPrimaryReadRequirement(menuKey)
-		if !ok {
-			continue
-		}
-		if !permissionsSatisfyMenuRequirement(out, requirement) {
-			continue
-		}
 		label := effectivePermissionIdentity(perm)
 		if _, ok := seen[label]; ok {
 			continue
@@ -775,6 +739,210 @@ func effectiveAccessPermissionsFromGrants(grants []authzGrant, boundary map[stri
 		out = append(out, perm)
 	}
 	return out
+}
+
+// permissionCoveredByAny uses the same wildcard resource/action semantics as
+// request authorization. The candidate must be no broader than at least one
+// grant on the other side of an assumed-role intersection.
+func permissionCoveredByAny(candidate Permission, grants []Permission) bool {
+	for _, grant := range grants {
+		grant = normalizePermission(grant)
+		if !wildcardMatch(string(candidate.ApplicationCode), string(grant.ApplicationCode)) ||
+			!wildcardMatch(string(candidate.ResourceType), string(grant.ResourceType)) ||
+			!wildcardMatch(string(candidate.Action), string(grant.Action)) {
+			continue
+		}
+		if grant.Target != "" && grant.Target != "*" && !strings.HasPrefix(grant.Target, "rebac:") &&
+			!wildcardMatch(candidate.Target, grant.Target) {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+func projectionPermissionHasWildcard(permission Permission) bool {
+	permission = normalizePermission(permission)
+	return permission.ApplicationCode == "" || permission.ApplicationCode == "*" ||
+		permission.ResourceType == "" || permission.ResourceType == "*" ||
+		permission.Action == "" || permission.Action == "*"
+}
+
+// materializeProjectionPermissions turns intersected wildcard grants into the
+// finite set of concrete HTTP permissions known by the route policy catalog.
+// Exact custom permissions (for example agent tool targets) remain available,
+// while unknown wildcard namespaces fail closed instead of being advertised as
+// broader client capabilities.
+func materializeProjectionPermissions(permissions []Permission) []Permission {
+	catalog := make([]Permission, 0, len(permissions)+len(domain.DefaultRoutePolicies))
+	catalogSeen := map[string]struct{}{}
+	addCatalog := func(permission Permission) {
+		permission = normalizePermission(permission)
+		if !permissionCanAuthorizeRequest(permission) || projectionPermissionHasWildcard(permission) {
+			return
+		}
+		identity := projectionRequestIdentity(permission)
+		if _, exists := catalogSeen[identity]; exists {
+			return
+		}
+		catalogSeen[identity] = struct{}{}
+		catalog = append(catalog, permission)
+	}
+	// Prefer exact grants because they retain target/relation/menu metadata.
+	for _, permission := range permissions {
+		addCatalog(permission)
+	}
+	for _, permission := range defaultPermissions() {
+		addCatalog(permission)
+	}
+
+	out := make([]Permission, 0, len(permissions))
+	indexes := map[string]int{}
+	addProjection := func(permission Permission) {
+		permission = normalizePermission(permission)
+		identity := projectionRequestIdentity(permission)
+		if !permissionCanAuthorizeRequest(permission) {
+			identity = "control|" + effectivePermissionIdentity(permission)
+		}
+		if index, exists := indexes[identity]; exists {
+			current := &out[index]
+			if current.MenuKey == "" && permission.MenuKey != "" {
+				current.MenuKey = permission.MenuKey
+			}
+			if current.PermissionType == "" && permission.PermissionType != "" {
+				current.PermissionType = permission.PermissionType
+			}
+			if riskRank(permission.RiskLevel) > riskRank(current.RiskLevel) {
+				current.RiskLevel = permission.RiskLevel
+			}
+			return
+		}
+		indexes[identity] = len(out)
+		out = append(out, permission)
+	}
+
+	for _, permission := range permissions {
+		permission = normalizePermission(permission)
+		if permissionCanAuthorizeRequest(permission) {
+			if menuKey := strings.TrimSpace(permission.MenuKey); menuKey != "" {
+				addProjection(Permission{
+					PermissionType: PermissionTypeMenu,
+					Resource:       canonicalPageMenuKey(menuKey),
+					Action:         ActionRead,
+					MenuKey:        canonicalPageMenuKey(menuKey),
+				})
+			}
+		}
+		if !permissionCanAuthorizeRequest(permission) || !projectionPermissionHasWildcard(permission) {
+			addProjection(permission)
+			continue
+		}
+		for _, candidate := range catalog {
+			if permissionCoveredByAny(candidate, []Permission{permission}) {
+				addProjection(candidate)
+			}
+		}
+	}
+	return out
+}
+
+func projectionRequestIdentity(permission Permission) string {
+	permission = normalizePermission(permission)
+	permissionType := permission.PermissionType
+	if permissionType == "" {
+		permissionType = PermissionTypeAPI
+	}
+	return strings.Join([]string{
+		string(permissionType),
+		string(permission.ApplicationCode),
+		string(permission.ResourceType),
+		string(permission.Action),
+		permission.Target,
+		relationshipConstraint(permission),
+	}, "|")
+}
+
+// projectEffectivePermissionScopes narrows every projected request permission
+// to the same final scope produced by authorization, including data-scope and
+// boundary intersections. Control permissions are retained only when the
+// narrowed request permissions still satisfy their page requirement.
+func (c *Service) projectEffectivePermissionScopes(
+	ctx RequestContext,
+	account Account,
+	permissions []Permission,
+	grants []authzGrant,
+	setIDs []string,
+	assumed *AssumedRoleDecision,
+	boundary map[string]any,
+) ([]Permission, error) {
+	permissions = materializeProjectionPermissions(permissions)
+	scopeCache := &authzDecisionScopeCache{}
+	requestPermissions := make([]Permission, 0, len(permissions))
+	controlPermissions := make([]Permission, 0, len(permissions))
+	seen := map[string]struct{}{}
+	for _, permission := range permissions {
+		permission = normalizePermission(permission)
+		if !permissionCanAuthorizeRequest(permission) {
+			controlPermissions = append(controlPermissions, permission)
+			continue
+		}
+		// Relation/object grants require a concrete resource ID and therefore must
+		// not be projected as tenant-wide client capabilities. Object endpoints
+		// continue to use the authoritative per-object Authz.Check path.
+		if relationshipConstraint(permission) != "" {
+			continue
+		}
+		decision, err := c.evaluateAuthzDecisionWithFieldPolicies(ctx, account, CheckRequest{
+			ApplicationCode: permission.ApplicationCode,
+			ResourceType:    permission.ResourceType,
+			Resource:        permission.Resource,
+			Action:          permission.Action,
+			Target:          permission.Target,
+		}, grants, setIDs, assumed, boundary, nil, false, scopeCache)
+		if err != nil {
+			var appErr *domain.AppError
+			if errors.As(err, &appErr) && appErr.ReasonCode == "data_scope_denied" {
+				continue
+			}
+			return nil, err
+		}
+		if !decision.Allowed {
+			continue
+		}
+		if decision.Scope == ScopeObject {
+			continue
+		}
+		permission.Scope = decision.Scope
+		permission.Conditions = utils.CopyStringMap(decision.Conditions)
+		permission.RiskLevel = maxRiskLevel(permission.RiskLevel, decision.RiskLevel)
+		identity := effectivePermissionIdentity(permission)
+		if _, ok := seen[identity]; ok {
+			continue
+		}
+		seen[identity] = struct{}{}
+		requestPermissions = append(requestPermissions, permission)
+	}
+
+	out := requestPermissions
+	for _, permission := range controlPermissions {
+		if permission.PermissionType == PermissionTypeMenu {
+			menuKey := strings.TrimSpace(permission.MenuKey)
+			if menuKey == "" {
+				menuKey = strings.TrimSpace(permission.Resource)
+			}
+			requirement, ok := menuPrimaryReadRequirement(menuKey)
+			if !ok || !permissionsSatisfyMenuRequirement(requestPermissions, requirement) {
+				continue
+			}
+		}
+		identity := effectivePermissionIdentity(permission)
+		if _, ok := seen[identity]; ok {
+			continue
+		}
+		seen[identity] = struct{}{}
+		out = append(out, permission)
+	}
+	return out, nil
 }
 
 // permissionCanAuthorizeRequest 限制只有 API、button 與舊版未標型別權限可參與 API 授權。
@@ -794,13 +962,4 @@ func effectivePermissionIdentity(permission Permission) string {
 		permissionLabel(permission),
 		canonicalPageMenuKey(permission.MenuKey),
 	}, "|")
-}
-
-func permissionKeyDenied(key string, denied []string) bool {
-	for _, pattern := range denied {
-		if permissionKeyMatches(key, pattern) {
-			return true
-		}
-	}
-	return false
 }

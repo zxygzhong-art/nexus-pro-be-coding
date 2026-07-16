@@ -13,7 +13,7 @@ import (
 	"nexus-pro-be/internal/service"
 )
 
-func TestAuditDetailsIncludeRouteApplicationAndAssumedSession(t *testing.T) {
+func TestAuditDetailsIncludeRouteApplicationWithoutAssumedSessionCredential(t *testing.T) {
 	now := time.Date(2026, 7, 8, 9, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
 	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
@@ -42,8 +42,11 @@ func TestAuditDetailsIncludeRouteApplicationAndAssumedSession(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected security audit log, got %+v", logs)
 	}
-	if log.Details["application_code"] != "iam" || log.Details["assumed_role_session_id"] != "sess-active" || log.Details["route_path"] != "/v1/iam/field-policies/:id" {
-		t.Fatalf("expected route application and assumed session details, got %+v", log.Details)
+	if log.Details["application_code"] != "iam" || log.Details["route_path"] != "/v1/iam/field-policies/:id" {
+		t.Fatalf("expected route application details, got %+v", log.Details)
+	}
+	if _, exists := log.Details["assumed_role_session_id"]; exists {
+		t.Fatal("audit details must not contain an assumed-role bearer credential")
 	}
 }
 

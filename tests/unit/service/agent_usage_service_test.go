@@ -197,37 +197,98 @@ func TestAgentSessionUsageRejectsUnknownAccounts(t *testing.T) {
 	}
 }
 
-// TestAgentUsageRequiresTenantWideWorkspaceAgentRead rejects account-scoped management grants.
-func TestAgentUsageRequiresTenantWideWorkspaceAgentRead(t *testing.T) {
+// TestAgentUsageRequiresDedicatedTenantWideRead rejects definition-only and account-scoped usage grants.
+func TestAgentUsageRequiresDedicatedTenantWideRead(t *testing.T) {
+	now := time.Date(2026, 7, 15, 2, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name                string
+		permission          domain.Permission
+		expectDataScopeDeny bool
+	}{
+		{name: "tenant_wide_definition_read", permission: domain.Permission{Resource: "agent.definition", Action: domain.ActionRead, Scope: domain.ScopeAll}},
+		{name: "unscoped_usage_read", permission: domain.Permission{Resource: "agent.usage", Action: domain.ActionRead}, expectDataScopeDeny: true},
+		{name: "self_scoped_usage_read", permission: domain.Permission{Resource: "agent.usage", Action: domain.ActionRead, Scope: domain.ScopeSelf}, expectDataScopeDeny: true},
+		{name: "own_scoped_usage_read", permission: domain.Permission{Resource: "agent.usage", Action: domain.ActionRead, Scope: domain.ScopeOwn}, expectDataScopeDeny: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			store := memory.NewStore()
+			seedAgentUsageTenant(t, store, now, "tenant-1", "acct-runtime", false)
+			if err := store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
+				ID:          "ps-runtime",
+				TenantID:    "tenant-1",
+				Name:        "Usage Boundary Test",
+				Permissions: []domain.Permission{test.permission},
+				CreatedAt:   now,
+			}); err != nil {
+				t.Fatal(err)
+			}
+			account, ok, err := store.GetAccount(context.Background(), "tenant-1", "acct-runtime")
+			if err != nil || !ok {
+				t.Fatalf("get account: ok=%v err=%v", ok, err)
+			}
+			if test.permission.Scope == domain.ScopeSelf || test.permission.Scope == domain.ScopeOwn {
+				account.EmployeeID = "emp-runtime"
+			}
+			account.DirectPermissionSetIDs = []string{"ps-runtime"}
+			if err := store.UpsertAccount(context.Background(), account); err != nil {
+				t.Fatal(err)
+			}
+
+			svc := service.New(store).Agent()
+			ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-runtime"}
+			for endpoint, call := range map[string]func() error{
+				"overview": func() error {
+					_, err := svc.ListAccountUsage(ctx, domain.AgentAccountUsageQuery{}, domain.PageRequest{})
+					return err
+				},
+				"sessions": func() error {
+					_, err := svc.ListAccountSessionUsage(ctx, "acct-runtime", domain.PageRequest{})
+					return err
+				},
+			} {
+				err := call()
+				appErr, ok := domain.AsAppError(err)
+				if !ok || appErr.Status != 403 {
+					t.Fatalf("expected %s forbidden for %s, got %v", endpoint, test.name, err)
+				}
+				if test.expectDataScopeDeny && appErr.ReasonCode != "data_scope_denied" {
+					t.Fatalf("expected %s data_scope_denied for %s, got %+v", endpoint, test.name, appErr)
+				}
+			}
+		})
+	}
+}
+
+// TestAgentUsageAcceptsExplicitTenantScope keeps the dedicated permission usable for tenant managers.
+func TestAgentUsageAcceptsExplicitTenantScope(t *testing.T) {
 	now := time.Date(2026, 7, 15, 2, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
-	seedAgentUsageTenant(t, store, now, "tenant-1", "acct-runtime", false)
+	seedAgentUsageTenant(t, store, now, "tenant-1", "acct-manager", false)
 	if err := store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
-		ID:          "ps-runtime",
+		ID:          "ps-usage-tenant",
 		TenantID:    "tenant-1",
-		Name:        "Scoped Agent Reader",
-		Permissions: []domain.Permission{{Resource: "agent.definition", Action: domain.ActionRead, Scope: domain.ScopeSelf}},
+		Name:        "Tenant Usage Reader",
+		Permissions: []domain.Permission{{Resource: "agent.usage", Action: domain.ActionRead, Scope: domain.ScopeTenant}},
 		CreatedAt:   now,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	account, ok, err := store.GetAccount(context.Background(), "tenant-1", "acct-runtime")
+	account, ok, err := store.GetAccount(context.Background(), "tenant-1", "acct-manager")
 	if err != nil || !ok {
 		t.Fatalf("get account: ok=%v err=%v", ok, err)
 	}
-	account.DirectPermissionSetIDs = []string{"ps-runtime"}
+	account.DirectPermissionSetIDs = []string{"ps-usage-tenant"}
 	if err := store.UpsertAccount(context.Background(), account); err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = service.New(store).Agent().ListAccountUsage(
-		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-runtime"},
+	usage, err := service.New(store).Agent().ListAccountUsage(
+		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-manager"},
 		domain.AgentAccountUsageQuery{},
 		domain.PageRequest{},
 	)
-	appErr, ok := domain.AsAppError(err)
-	if !ok || appErr.Status != 403 {
-		t.Fatalf("expected forbidden without tenant-wide agent definition read, got %v", err)
+	if err != nil || usage.Total != 1 {
+		t.Fatalf("expected explicit tenant usage read to succeed, usage=%+v err=%v", usage, err)
 	}
 }
 
@@ -244,7 +305,7 @@ func seedAgentUsageTenant(t *testing.T, store *memory.Store, now time.Time, tena
 			ID:          permissionSetID,
 			TenantID:    tenantID,
 			Name:        "Agent Admin",
-			Permissions: []domain.Permission{{Resource: "agent.definition", Action: domain.ActionRead, Scope: domain.ScopeAll}},
+			Permissions: []domain.Permission{{Resource: "agent.usage", Action: domain.ActionRead, Scope: domain.ScopeAll}},
 			CreatedAt:   now,
 		}); err != nil {
 			t.Fatal(err)

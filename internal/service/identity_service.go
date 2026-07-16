@@ -42,7 +42,7 @@ func (c IdentityService) ResolveAuthenticatedPrincipal(ctx context.Context, prin
 	if ok {
 		return IdentityResolution{TenantID: identity.TenantID, AccountID: identity.AccountID, Identity: &identity}, nil
 	}
-	return IdentityResolution{}, domain.Unauthorized("external identity is not linked to a local account")
+	return IdentityResolution{}, domain.UnauthorizedReason("identity_not_linked", "external identity is not linked to a local account")
 }
 
 // VerifyGoogleSSOLogin 驗證 Google SSO principal 並建立本機身分綁定。
@@ -100,7 +100,7 @@ func (c IdentityService) ResolveBoundAuthenticatedPrincipal(ctx context.Context,
 		return IdentityResolution{}, err
 	}
 	if !ok {
-		return IdentityResolution{}, domain.Unauthorized("external identity is not linked to a local account")
+		return IdentityResolution{}, domain.UnauthorizedReason("identity_not_linked", "external identity is not linked to a local account")
 	}
 	return IdentityResolution{TenantID: identity.TenantID, AccountID: identity.AccountID, Identity: &identity}, nil
 }
@@ -127,7 +127,7 @@ func (c IdentityService) resolveIdentityBySubject(ctx context.Context, provider,
 		found = &next
 	}
 	if found == nil {
-		return IdentityResolution{}, domain.Unauthorized("external identity is not linked to a local account")
+		return IdentityResolution{}, domain.UnauthorizedReason("identity_not_linked", "external identity is not linked to a local account")
 	}
 	return IdentityResolution{TenantID: found.TenantID, AccountID: found.AccountID, Identity: found}, nil
 }

@@ -84,7 +84,7 @@ func TestWorkflowGroupApproverResolutionFiltersUnsafeMembers(t *testing.T) {
 	addWorkflowGroupMember(t, store, "group-approvers", "acct-expired", now, &expiredAt)
 	addWorkflowGroupMember(t, store, "group-approvers", "acct-future", now.Add(2*time.Hour), nil)
 	configureWorkflowGroupStage(t, store, []map[string]any{{
-		"id": "stage-group", "type": "approver", "label": "安全审批组",
+		"id": "stage-group", "type": "approver", "label": "安全審批組",
 		"config": map[string]any{"user_group_ids": []any{"group-approvers"}, "exclude_applicant": true},
 	}}, now)
 
@@ -114,7 +114,7 @@ func TestWorkflowGroupApproverMembershipIsRevalidated(t *testing.T) {
 	svc, applicantCtx, store := newWorkflowEngineFixture(t, now, "acct-reviewer")
 	addWorkflowGroupMember(t, store, "group-approvers", "acct-reviewer", now, nil)
 	configureWorkflowGroupStage(t, store, []map[string]any{{
-		"id": "stage-group", "type": "approver", "label": "安全审批组",
+		"id": "stage-group", "type": "approver", "label": "安全審批組",
 		"config": map[string]any{"user_group_ids": []any{"group-approvers"}, "exclude_applicant": true},
 	}}, now)
 
@@ -140,8 +140,8 @@ func TestWorkflowGroupApproverCanRequireDistinctStages(t *testing.T) {
 	addWorkflowGroupMember(t, store, "group-approvers", "acct-reviewer", now, nil)
 	addWorkflowGroupMember(t, store, "group-approvers", "acct-reviewer-2", now, nil)
 	configureWorkflowGroupStage(t, store, []map[string]any{
-		{"id": "stage-one", "type": "approver", "label": "一级审批", "config": map[string]any{"user_group_ids": []any{"group-approvers"}, "exclude_applicant": true}},
-		{"id": "stage-two", "type": "approver", "label": "二级审批", "config": map[string]any{"user_group_ids": []any{"group-approvers"}, "exclude_applicant": true, "require_distinct_approver": true}},
+		{"id": "stage-one", "type": "approver", "label": "一級審批", "config": map[string]any{"user_group_ids": []any{"group-approvers"}, "exclude_applicant": true}},
+		{"id": "stage-two", "type": "approver", "label": "二級審批", "config": map[string]any{"user_group_ids": []any{"group-approvers"}, "exclude_applicant": true, "require_distinct_approver": true}},
 	}, now)
 
 	instance, err := svc.Workflow().SubmitForm(applicantCtx, domain.SubmitFormInput{TemplateKey: "leave-request", Payload: map[string]any{"desc": "two stages"}})

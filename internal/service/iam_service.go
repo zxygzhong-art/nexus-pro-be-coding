@@ -105,6 +105,9 @@ func (c IAMService) CreatePermissionSet(ctx RequestContext, input CreatePermissi
 		return PermissionSet{}, BadRequest("permission set name is required")
 	}
 	for _, perm := range input.Permissions {
+		if perm.Conditions != nil {
+			return PermissionSet{}, BadRequest("permission conditions are read-only")
+		}
 		perm = normalizePermission(perm)
 		if strings.TrimSpace(perm.Resource) == "" || strings.TrimSpace(string(perm.Action)) == "" {
 			return PermissionSet{}, BadRequest("permission resource and action are required")
@@ -170,6 +173,9 @@ func (c IAMService) UpdatePermissionSet(ctx RequestContext, id string, input Upd
 	}
 	if input.Permissions != nil {
 		for _, perm := range input.Permissions {
+			if perm.Conditions != nil {
+				return PermissionSet{}, BadRequest("permission conditions are read-only")
+			}
 			perm = normalizePermission(perm)
 			if strings.TrimSpace(perm.Resource) == "" || strings.TrimSpace(string(perm.Action)) == "" {
 				return PermissionSet{}, BadRequest("permission resource and action are required")
@@ -476,4 +482,4 @@ func (c IAMService) ListRoleBindingPage(ctx RequestContext, page PageRequest) (P
 	return utils.PageResponse(items, page), nil
 }
 
-// ListUserGroups 列出使用者群組的服務流程。
+// ListUserGroups 列出使用者羣組的服務流程。

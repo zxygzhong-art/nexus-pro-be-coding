@@ -5,7 +5,7 @@ type ErrorCode int
 
 const (
 	// 公開錯誤碼前綴分配：
-	// 1xxxx 表示通用平台、請求與認證錯誤。
+	// 1xxxx 表示通用平臺、請求與認證錯誤。
 	// 2xxxx 表示 IAM 與授權錯誤。
 	// 3xxxx 表示 people-domain 與 HR 錯誤。
 	// 4xxxx 表示考勤錯誤。

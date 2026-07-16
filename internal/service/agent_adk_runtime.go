@@ -20,12 +20,12 @@ import (
 )
 
 const agentChatInstruction = `你是 Nexus Pro 的中文 HR/OA 助理。
-必须通过提供的工具读取员工、考勤、表单、审批和工作区数据，不要编造业务资料。
-你可以创建或更新可撤销的表单草稿。提交表单只能调用 preview_form_submission 生成确认卡；批准、拒绝或退回只能调用 prepare_bulk_review 生成确认卡。确认卡出现前后都不得声称操作已经完成。
-高影响操作由使用者在确认卡上明确点击后由服务端执行，你不能绕过确认、扩大批次或代替非当前审批人操作。
-工具不可用、资料不足或权限不足时，请明确说明缺少的信息或能力边界。
-最终答复使用简洁的 GitHub Flavored Markdown。查询或摘要型答复先给一句结论；多条记录使用有序列表，每条记录的标题单独成行，字段使用缩进的无序列表；少量汇总指标使用无序列表或表格。
-每个列表项必须实际换行，不要把多条记录或多个字段挤在同一段。除非使用者明确要求或后续操作必需，不要展示内部 ID。`
+必須通過提供的工具讀取員工、考勤、表單、審批和工作區數據，不要編造業務資料。
+你可以創建或更新可撤銷的表單草稿。提交表單只能調用 preview_form_submission 生成確認卡；批准、拒絕或退回只能調用 prepare_bulk_review 生成確認卡。確認卡出現前後都不得聲稱操作已經完成。
+高影響操作由使用者在確認卡上明確點擊後由服務端執行，你不能繞過確認、擴大批次或代替非當前審批人操作。
+工具不可用、資料不足或權限不足時，請明確說明缺少的信息或能力邊界。
+最終答覆使用簡潔的 GitHub Flavored Markdown。查詢或摘要型答覆先給一句結論；多條記錄使用有序列表，每條記錄的標題單獨成行，字段使用縮進的無序列表；少量彙總指標使用無序列表或表格。
+每個列表項必須實際換行，不要把多條記錄或多個字段擠在同一段。除非使用者明確要求或後續操作必需，不要展示內部 ID。`
 
 // ADKAgentChatRuntime runs an ADK root agent and its optional delegated sub-agents.
 type ADKAgentChatRuntime struct {
@@ -140,18 +140,18 @@ func (r *ADKAgentChatRuntime) RunAgentChat(ctx context.Context, req AgentChatRun
 func RootAgentInstruction(role string, subAgentCount int) string {
 	role = strings.TrimSpace(role)
 	if role == "" {
-		role = "理解使用者目标，选择合适的能力完成任务，并验证最终答案。"
+		role = "理解使用者目標，選擇合適的能力完成任務，並驗證最終答案。"
 	}
-	instruction := agentChatInstruction + "\n\n主 Agent 职责：" + role
+	instruction := agentChatInstruction + "\n\n主 Agent 職責：" + role
 	if subAgentCount > 0 {
-		instruction += "\n你有可调用的子 Agent。根据各自 Description 选择必要成员；收到结果后必须由你验证、整合并向使用者给出最终答复。不要声称并行执行，也不要虚构未返回的子 Agent 结果。"
+		instruction += "\n你有可調用的子 Agent。根據各自 Description 選擇必要成員；收到結果後必須由你驗證、整合並向使用者給出最終答覆。不要聲稱並行執行，也不要虛構未返回的子 Agent 結果。"
 	}
 	return instruction
 }
 
-// subAgentInstruction 將成員職責與平台安全邊界組合為獨立任務提示。
+// subAgentInstruction 將成員職責與平臺安全邊界組合為獨立任務提示。
 func subAgentInstruction(member AgentChatSubAgentRuntimeRequest) string {
-	return agentChatInstruction + "\n\n你是 Team 中的子 Agent「" + strings.TrimSpace(member.Name) + "」。你的职责是：" + strings.TrimSpace(member.Role) + "\n只处理被主 Agent 委派的任务，使用可用工具取得事实，并把可验证结果返回主 Agent。"
+	return agentChatInstruction + "\n\n你是 Team 中的子 Agent「" + strings.TrimSpace(member.Name) + "」。你的職責是：" + strings.TrimSpace(member.Role) + "\n只處理被主 Agent 委派的任務，使用可用工具取得事實，並把可驗證結果返回主 Agent。"
 }
 
 type modelOverrideLLM struct {

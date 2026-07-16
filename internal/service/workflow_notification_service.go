@@ -14,7 +14,7 @@ func (c WorkflowService) notifyWorkflowFormReviewed(ctx RequestContext, instance
 	}
 	title := workflowNotificationTemplateTitle(template, instance)
 	tone, statusText, notificationTitle, actionText := workflowReviewNotificationCopy(kind, title)
-	body := "由 " + workflowAccountLabel(reviewer) + actionText + "。"
+	body := "由 " + workflowAccountLabel(reviewer) + " " + actionText + "。"
 	if reason = strings.TrimSpace(reason); reason != "" {
 		body += " 審核意見：" + reason
 	}
@@ -90,11 +90,11 @@ func (c WorkflowService) validWorkflowNotificationRecipients(ctx RequestContext,
 func workflowReviewNotificationCopy(kind, title string) (tone, statusText, notificationTitle, actionText string) {
 	switch strings.TrimSpace(strings.ToLower(kind)) {
 	case "approve":
-		return "success", "已核准", "你的「" + title + "」已核准", "已核准這筆申請"
+		return "success", "已覈準", "你的「" + title + "」已覈準", "已覈準這筆申請"
 	case "return":
 		return "warning", "已退回", "你的「" + title + "」已退回補件", "已退回這筆申請"
 	default:
-		return "warning", "不通過", "你的「" + title + "」未通過", "未通過這筆申請"
+		return "warning", "已駁回", "你的「" + title + "」已駁回", "已駁回這筆申請"
 	}
 }
 

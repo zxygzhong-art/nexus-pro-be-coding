@@ -16,19 +16,19 @@ const (
 	platformFormDesignSchemaKey = "workspace_design"
 )
 
-// PlatformService 定義平台服務的資料結構。
+// PlatformService 定義平臺服務的資料結構。
 type PlatformService struct {
 	*Service
 }
 
-// Platform 處理平台的服務流程。
+// Platform 處理平臺的服務流程。
 func (c *Service) Platform() PlatformService {
 	return PlatformService{Service: c}
 }
 
 // Home 處理首頁的服務流程。
 func (c PlatformService) Home(ctx RequestContext) (PlatformHomeResponse, error) {
-	clockSummary, err := c.clockSummary(ctx)
+	clockSummary, err := c.authorizedClockSummary(ctx)
 	if err != nil {
 		return PlatformHomeResponse{}, err
 	}
@@ -47,6 +47,34 @@ func (c PlatformService) Home(ctx RequestContext) (PlatformHomeResponse, error) 
 	}, nil
 }
 
+// authorizedClockSummary projects the optional clock widget only when the caller can read their clock state.
+func (c PlatformService) authorizedClockSummary(ctx RequestContext) (*PlatformClockSummary, error) {
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(account.EmployeeID) == "" {
+		return nil, nil
+	}
+	decision, err := c.evaluateAuthz(ctx, account, CheckRequest{
+		ApplicationCode:  AppAttendance,
+		ResourceType:     ResourceAttendanceClock,
+		Action:           ActionRead,
+		TargetEmployeeID: account.EmployeeID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !decision.Allowed {
+		return nil, nil
+	}
+	summary, err := c.clockSummary(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return &summary, nil
+}
+
 // ListAssistants 列出助理的服務流程。
 func (c PlatformService) ListAssistants(ctx RequestContext, query PlatformAssistantsQuery) (PlatformAssistantsResponse, error) {
 	items, err := c.publishedPlatformAssistants(ctx, 0, query)
@@ -63,6 +91,10 @@ func (c PlatformService) ListAssistants(ctx RequestContext, query PlatformAssist
 
 func (c PlatformService) publishedPlatformAssistants(ctx RequestContext, limit int, query PlatformAssistantsQuery) ([]PlatformAssistant, error) {
 	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return nil, err
+	}
+	runnable, err := c.canUsePublishedAgentRuntime(ctx, account)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +145,7 @@ func (c PlatformService) publishedPlatformAssistants(ctx RequestContext, limit i
 			Tag:                string(agent.Category),
 			WelcomeMessage:     welcomeMessage,
 			SuggestedQuestions: suggestedQuestions,
-			Runnable:           true,
+			Runnable:           runnable,
 		}
 		if tag != "" && tag != "all" && assistant.Tag != tag {
 			continue
@@ -127,6 +159,24 @@ func (c PlatformService) publishedPlatformAssistants(ctx RequestContext, limit i
 		}
 	}
 	return items, nil
+}
+
+// canUsePublishedAgentRuntime mirrors the read and create checks required by the interactive assistant surface.
+func (c PlatformService) canUsePublishedAgentRuntime(ctx RequestContext, account Account) (bool, error) {
+	for _, action := range []Action{ActionRead, ActionCreate} {
+		decision, err := c.evaluateAuthz(ctx, account, CheckRequest{
+			ApplicationCode: AppAgent,
+			ResourceType:    ResourceType("run"),
+			Action:          action,
+		})
+		if err != nil {
+			return false, err
+		}
+		if !decision.Allowed {
+			return false, nil
+		}
+	}
+	return true, nil
 }
 
 // Forms 處理表單的服務流程。
@@ -152,7 +202,7 @@ func (c PlatformService) Forms(ctx RequestContext) (PlatformFormsResponse, error
 
 // Tasks 處理任務的服務流程。
 func (c PlatformService) Tasks(ctx RequestContext) (PlatformTasksResponse, error) {
-	clockSummary, err := c.clockSummary(ctx)
+	clockSummary, err := c.authorizedClockSummary(ctx)
 	if err != nil {
 		return PlatformTasksResponse{}, err
 	}
@@ -376,7 +426,7 @@ func (c PlatformService) ConvertTaskTodo(ctx RequestContext, id string, input Co
 	return out, nil
 }
 
-// platformWorkspaceEmployeeMatches 處理平台工作區員工 matches。
+// platformWorkspaceEmployeeMatches 處理平臺工作區員工 matches。
 func platformWorkspaceEmployeeMatches(query PlatformWorkspaceEmployeesQuery, employee Employee, card WorkspaceEmployeeCard) bool {
 	departmentID := strings.TrimSpace(query.DepartmentID)
 	if departmentID != "" && employee.OrgUnitID != departmentID {
@@ -437,7 +487,7 @@ func (c PlatformService) clockSummary(ctx RequestContext) (PlatformClockSummary,
 	}, nil
 }
 
-// monthlyClockAndLeaveSummary 處理每月打卡 and 請假摘要的服務流程。請假與加班只計已核准的申請。
+// monthlyClockAndLeaveSummary 處理每月打卡 and 請假摘要的服務流程。請假與加班只計已覈準的申請。
 func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employeeID string, now time.Time) (int, float64, float64, float64) {
 	start := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location())
 	end := start.AddDate(0, 1, 0)
@@ -609,7 +659,7 @@ func (c PlatformService) taskProjection(ctx RequestContext) ([]PlatformTaskRecor
 	return records, todos, nil
 }
 
-// currentPlatformTaskItem 處理目前平台任務項目的服務流程。
+// currentPlatformTaskItem 處理目前平臺任務項目的服務流程。
 func (c PlatformService) currentPlatformTaskItem(ctx RequestContext, accountID string, id string) (PlatformTaskRecordItem, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -625,7 +675,7 @@ func (c PlatformService) currentPlatformTaskItem(ctx RequestContext, accountID s
 	return item, nil
 }
 
-// currentPlatformTaskTodo 處理目前平台任務待辦的服務流程。
+// currentPlatformTaskTodo 處理目前平臺任務待辦的服務流程。
 func (c PlatformService) currentPlatformTaskTodo(ctx RequestContext, accountID string, id string) (PlatformTaskTodoRecord, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -641,7 +691,7 @@ func (c PlatformService) currentPlatformTaskTodo(ctx RequestContext, accountID s
 	return todo, nil
 }
 
-// platformTaskItemRecord 處理平台任務項目 record 的服務流程。
+// platformTaskItemRecord 處理平臺任務項目 record 的服務流程。
 func (c PlatformService) platformTaskItemRecord(ctx RequestContext, accountID string, item PlatformTaskRecordItem) (PlatformTaskRecordItem, error) {
 	title := strings.TrimSpace(item.Title)
 	if title == "" {
@@ -670,7 +720,7 @@ func (c PlatformService) platformTaskItemRecord(ctx RequestContext, accountID st
 	return item, nil
 }
 
-// platformTaskTodoRecord 處理平台任務待辦 record 的服務流程。
+// platformTaskTodoRecord 處理平臺任務待辦 record 的服務流程。
 func (c PlatformService) platformTaskTodoRecord(ctx RequestContext, accountID string, todo PlatformTaskTodoRecord) (PlatformTaskTodoRecord, error) {
 	text := strings.TrimSpace(todo.Text)
 	if text == "" {
@@ -701,7 +751,7 @@ func (c PlatformService) platformTaskTodoRecord(ctx RequestContext, accountID st
 	return todo, nil
 }
 
-// platformTaskItemFromRecord 處理平台任務項目 來源 record。
+// platformTaskItemFromRecord 處理平臺任務項目 來源 record。
 func platformTaskItemFromRecord(item PlatformTaskRecordItem) PlatformTaskItem {
 	return PlatformTaskItem{
 		ID:       item.ID,
@@ -713,7 +763,7 @@ func platformTaskItemFromRecord(item PlatformTaskRecordItem) PlatformTaskItem {
 	}
 }
 
-// platformTaskTodoFromRecord 處理平台任務待辦 來源 record。
+// platformTaskTodoFromRecord 處理平臺任務待辦 來源 record。
 func platformTaskTodoFromRecord(todo PlatformTaskTodoRecord) PlatformTaskTodo {
 	return PlatformTaskTodo{
 		ID:       todo.ID,
@@ -725,7 +775,7 @@ func platformTaskTodoFromRecord(todo PlatformTaskTodoRecord) PlatformTaskTodo {
 	}
 }
 
-// platformTaskTodoDate 處理平台任務待辦日期。
+// platformTaskTodoDate 處理平臺任務待辦日期。
 func platformTaskTodoDate(todo PlatformTaskTodoRecord) string {
 	if todo.DueDate != "" {
 		if parsed, err := time.Parse(platformDateLayout, todo.DueDate); err == nil {
@@ -739,7 +789,7 @@ func platformTaskTodoDate(todo PlatformTaskTodoRecord) string {
 	return ""
 }
 
-// platformWeekdayFromDate 處理平台星期 來源 日期。
+// platformWeekdayFromDate 處理平臺星期 來源 日期。
 func platformWeekdayFromDate(date string) string {
 	parsed, err := time.Parse(platformDateLayout, date)
 	if err != nil {
@@ -748,7 +798,7 @@ func platformWeekdayFromDate(date string) string {
 	return platformWeekday(parsed)
 }
 
-// normalizePlatformWorkDate 正規化平台 work 日期。
+// normalizePlatformWorkDate 正規化平臺 work 日期。
 func normalizePlatformWorkDate(value string, fallback time.Time) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -763,7 +813,7 @@ func normalizePlatformWorkDate(value string, fallback time.Time) (string, error)
 	return "", BadRequest("work_date must be YYYY/MM/DD or YYYY-MM-DD")
 }
 
-// normalizeOptionalPlatformDate 正規化可選平台日期。
+// normalizeOptionalPlatformDate 正規化可選平臺日期。
 func normalizeOptionalPlatformDate(value string) (string, error) {
 	value = strings.TrimSpace(value)
 	if value == "" {
@@ -772,7 +822,7 @@ func normalizeOptionalPlatformDate(value string) (string, error) {
 	return normalizePlatformWorkDate(value, time.Time{})
 }
 
-// validatePlatformTaskHours 驗證平台任務小時。
+// validatePlatformTaskHours 驗證平臺任務小時。
 func validatePlatformTaskHours(hours float64) error {
 	if hours <= 0 || hours > 24 {
 		return BadRequest("hours must be greater than zero and no more than 24")
@@ -872,7 +922,7 @@ func workspaceFormDesignSchema(base map[string]any, input SaveWorkspaceFormDesig
 	return schema
 }
 
-// platformTemplateDesign 處理平台範本 design。
+// platformTemplateDesign 處理平臺範本 design。
 func platformTemplateDesign(schema map[string]any) map[string]any {
 	if len(schema) == 0 {
 		return nil
@@ -883,17 +933,17 @@ func platformTemplateDesign(schema map[string]any) map[string]any {
 	return nil
 }
 
-// platformTemplateDeleted 處理平台範本 deleted。
+// platformTemplateDeleted 處理平臺範本 deleted。
 func platformTemplateDeleted(schema map[string]any) bool {
 	return platformDesignBool(platformTemplateDesign(schema), "deleted", false)
 }
 
-// platformTemplateEnabled 處理平台範本 enabled。
+// platformTemplateEnabled 處理平臺範本 enabled。
 func platformTemplateEnabled(schema map[string]any) bool {
 	return platformDesignBool(platformTemplateDesign(schema), "enabled", true)
 }
 
-// platformTemplateIcon 處理平台範本 icon。
+// platformTemplateIcon 處理平臺範本 icon。
 func platformTemplateIcon(template FormTemplate) string {
 	if icon := platformDesignString(platformTemplateDesign(template.Schema), "icon"); icon != "" {
 		return icon
@@ -908,7 +958,7 @@ func platformTemplateIcon(template FormTemplate) string {
 	return "📋"
 }
 
-// platformTemplateCategory 處理平台範本分類。
+// platformTemplateCategory 處理平臺範本分類。
 func platformTemplateCategory(template FormTemplate) string {
 	if category := platformDesignString(platformTemplateDesign(template.Schema), "category"); category != "" {
 		return category
@@ -916,7 +966,7 @@ func platformTemplateCategory(template FormTemplate) string {
 	return platformFormCategory(template.Key)
 }
 
-// platformTemplateFormKind 處理平台範本 form kind。
+// platformTemplateFormKind 處理平臺範本 form kind。
 func platformTemplateFormKind(schema map[string]any) string {
 	if kind := platformDesignString(platformTemplateDesign(schema), "form_kind"); kind != "" {
 		return kind
@@ -960,7 +1010,7 @@ func lockedFieldIDsForTemplate(templateKey, formKind string) map[string]struct{}
 	}
 }
 
-// platformTemplateDesc 處理平台範本 desc。
+// platformTemplateDesc 處理平臺範本 desc。
 func platformTemplateDesc(template FormTemplate) string {
 	if desc := platformDesignString(platformTemplateDesign(template.Schema), "desc"); desc != "" {
 		return desc
@@ -968,7 +1018,7 @@ func platformTemplateDesc(template FormTemplate) string {
 	return template.Description
 }
 
-// platformTemplateUpdatedAt 處理平台範本 updated at。
+// platformTemplateUpdatedAt 處理平臺範本 updated at。
 func platformTemplateUpdatedAt(schema map[string]any, fallback time.Time) string {
 	if raw := platformDesignString(platformTemplateDesign(schema), "updated_at"); raw != "" {
 		if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
@@ -1049,7 +1099,7 @@ func platformLeaveRequestBuilderFields() []PlatformFormBuilderField {
 	}
 }
 
-// platformTemplateStages 處理平台範本 stages。
+// platformTemplateStages 處理平臺範本 stages。
 func platformTemplateStages(schema map[string]any) []PlatformFormBuilderStage {
 	if stages, ok := platformDecodeSlice[PlatformFormBuilderStage](platformTemplateDesign(schema)["stages"]); ok {
 		return stages
@@ -1057,7 +1107,7 @@ func platformTemplateStages(schema map[string]any) []PlatformFormBuilderStage {
 	return platformFormBuilderContract().Stages
 }
 
-// platformDecodeSlice 處理平台 decode slice。
+// platformDecodeSlice 處理平臺 decode slice。
 func platformDecodeSlice[T any](value any) ([]T, bool) {
 	if value == nil {
 		return nil, false
@@ -1076,7 +1126,7 @@ func platformDecodeSlice[T any](value any) ([]T, bool) {
 	return out, true
 }
 
-// platformDesignString 處理平台 design 字串。
+// platformDesignString 處理平臺 design 字串。
 func platformDesignString(values map[string]any, key string) string {
 	if len(values) == 0 {
 		return ""
@@ -1087,7 +1137,7 @@ func platformDesignString(values map[string]any, key string) string {
 	return ""
 }
 
-// platformDesignBool 處理平台 design 布林值。
+// platformDesignBool 處理平臺 design 布林值。
 func platformDesignBool(values map[string]any, key string, fallback bool) bool {
 	if len(values) == 0 {
 		return fallback
@@ -1098,7 +1148,7 @@ func platformDesignBool(values map[string]any, key string, fallback bool) bool {
 	return fallback
 }
 
-// platformFormBuilderContract 處理平台表單 builder contract。
+// platformFormBuilderContract 處理平臺表單 builder contract。
 func platformFormBuilderContract() PlatformFormBuilderContract {
 	return PlatformFormBuilderContract{
 		Layouts: []PlatformFormBuilderLayout{
@@ -1125,19 +1175,22 @@ func platformFormBuilderContract() PlatformFormBuilderContract {
 	}
 }
 
-// platformAssistantMessages 處理平台助理 messages。
+// platformAssistantMessages 處理平臺助理 messages。
 func platformAssistantMessages() []PlatformChatMessage {
 	return []PlatformChatMessage{
 		{ID: "m1", Role: "assistant", Avatar: "🤖", Content: "哈囉！告訴我你想處理的事情，我能幫你挑選最合適的助理。"},
 	}
 }
 
-// platformHomeFormColumns 處理平台首頁表單 columns。
+// platformHomeFormColumns 處理平臺首頁表單 columns。
 func platformHomeFormColumns(columns []PlatformFormColumn) []PlatformFormColumn {
-	if len(columns) > 2 {
-		return append([]PlatformFormColumn(nil), columns[:2]...)
+	limit := len(columns)
+	if limit > 2 {
+		limit = 2
 	}
-	return append([]PlatformFormColumn(nil), columns...)
+	result := make([]PlatformFormColumn, limit)
+	copy(result, columns[:limit])
+	return result
 }
 
 // platformFormCategories 依租戶已啟用範本組裝表單分類。
@@ -1209,12 +1262,12 @@ func platformFormColumnsFromTemplates(templates []FormTemplate) []PlatformFormCo
 	return ordered
 }
 
-// platformFormColumns 處理平台表單 columns。
+// platformFormColumns 處理平臺表單 columns。
 func platformFormColumns() []PlatformFormColumn {
 	return []PlatformFormColumn{
 		{Title: "人事考勤類", Emoji: "👥", Items: []PlatformFormItem{
 			{ID: "leave-request", Emoji: "🗓️", Title: "請假申請單", Desc: "特休 / 事假 / 病假 / 公假"},
-			{ID: "overtime-approval", Emoji: "⏰", Title: "加班核准申請單", Desc: "平日延時、假日加班皆可使用"},
+			{ID: "overtime-approval", Emoji: "⏰", Title: "加班覈準申請單", Desc: "平日延時、假日加班皆可使用"},
 			{ID: "punch-fix", Emoji: "🕒", Title: "HR-005 補卡單", Desc: "漏打卡或打卡異常補登"},
 		}},
 		{Title: "人資相關", Emoji: "👥", Items: []PlatformFormItem{
@@ -1235,7 +1288,7 @@ func platformFormColumns() []PlatformFormColumn {
 	}
 }
 
-// platformFormCategoryNames 處理平台表單分類 names。
+// platformFormCategoryNames 處理平臺表單分類 names。
 func platformFormCategoryNames() []string {
 	columns := platformFormColumns()
 	out := make([]string, 0, len(columns))
@@ -1245,7 +1298,7 @@ func platformFormCategoryNames() []string {
 	return out
 }
 
-// platformFormCategory 處理平台表單分類。
+// platformFormCategory 處理平臺表單分類。
 func platformFormCategory(templateKey string) string {
 	for _, column := range platformFormColumns() {
 		for _, item := range column.Items {
@@ -1257,7 +1310,7 @@ func platformFormCategory(templateKey string) string {
 	return "其他"
 }
 
-// platformTemplateFlow 處理平台範本 flow。
+// platformTemplateFlow 處理平臺範本 flow。
 func platformTemplateFlow(schema map[string]any) string {
 	if stages, ok := platformDecodeSlice[PlatformFormBuilderStage](platformTemplateDesign(schema)["stages"]); ok {
 		return platformStageFlow(stages)
@@ -1268,7 +1321,7 @@ func platformTemplateFlow(schema map[string]any) string {
 	return "直屬主管 → HR"
 }
 
-// platformStageFlow 處理平台 stage flow。
+// platformStageFlow 處理平臺 stage flow。
 func platformStageFlow(stages []PlatformFormBuilderStage) string {
 	labels := make([]string, 0, len(stages))
 	for _, stage := range stages {
@@ -1282,7 +1335,7 @@ func platformStageFlow(stages []PlatformFormBuilderStage) string {
 	return strings.Join(labels, " → ")
 }
 
-// platformFormStatus 處理平台表單狀態。
+// platformFormStatus 處理平臺表單狀態。
 func platformFormStatus(status string) string {
 	switch strings.ToLower(strings.TrimSpace(status)) {
 	case "approved":
@@ -1298,7 +1351,7 @@ func platformFormStatus(status string) string {
 	}
 }
 
-// platformFormSummary 處理平台表單摘要。
+// platformFormSummary 處理平臺表單摘要。
 func platformFormSummary(payload map[string]any) string {
 	if len(payload) == 0 {
 		return "已送出"
@@ -1326,19 +1379,19 @@ func clockTime(record *AttendanceClockRecord) *string {
 	return &text
 }
 
-// platformDateLabel 處理平台日期 label。
+// platformDateLabel 處理平臺日期 label。
 func platformDateLabel(t time.Time) string {
 	local := t.In(attendanceClockLocation)
 	return fmt.Sprintf("%s %s", local.Format(platformDateLayout), platformWeekday(local))
 }
 
-// platformWeekday 處理平台星期。
+// platformWeekday 處理平臺星期。
 func platformWeekday(t time.Time) string {
 	names := []string{"週日", "週一", "週二", "週三", "週四", "週五", "週六"}
 	return names[int(t.Weekday())]
 }
 
-// platformTime 處理平台時間。
+// platformTime 處理平臺時間。
 func platformTime(t time.Time) string {
 	return apiTimestamp(t)
 }

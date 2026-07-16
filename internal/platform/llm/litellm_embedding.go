@@ -7,25 +7,35 @@ import (
 	"math"
 	"net/http"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/openai/openai-go"
 	"github.com/openai/openai-go/option"
 )
 
-const defaultLiteLLMEmbeddingModel = "nexus-pro-embedding"
+const (
+	defaultLiteLLMEmbeddingModel    = "nexus-pro-embedding"
+	defaultLiteLLMEmbeddingProbeTTL = 30 * time.Second
+)
 
 // LiteLLMEmbeddingConfig defines the OpenAI-compatible embedding endpoint config.
 type LiteLLMEmbeddingConfig struct {
-	BaseURL string
-	APIKey  string
-	Model   string
-	Client  *http.Client
+	BaseURL  string
+	APIKey   string
+	Model    string
+	Client   *http.Client
+	ProbeTTL time.Duration
 }
 
 // LiteLLMEmbeddingClient calls the stable embedding alias exposed by LiteLLM.
 type LiteLLMEmbeddingClient struct {
-	client openai.Client
-	model  string
+	client       openai.Client
+	model        string
+	probeTTL     time.Duration
+	probeMu      sync.Mutex
+	lastProbeAt  time.Time
+	lastProbeErr error
 }
 
 // NewLiteLLMEmbeddingClient creates a validated embedding client.
@@ -47,7 +57,11 @@ func NewLiteLLMEmbeddingClient(cfg LiteLLMEmbeddingConfig) (*LiteLLMEmbeddingCli
 	if cfg.Client != nil {
 		opts = append(opts, option.WithHTTPClient(cfg.Client))
 	}
-	return &LiteLLMEmbeddingClient{client: openai.NewClient(opts...), model: model}, nil
+	probeTTL := cfg.ProbeTTL
+	if probeTTL == 0 {
+		probeTTL = defaultLiteLLMEmbeddingProbeTTL
+	}
+	return &LiteLLMEmbeddingClient{client: openai.NewClient(opts...), model: model, probeTTL: probeTTL}, nil
 }
 
 // Model returns the stable LiteLLM alias used to generate and query vectors.
@@ -56,6 +70,26 @@ func (c *LiteLLMEmbeddingClient) Model() string {
 		return ""
 	}
 	return c.model
+}
+
+// Ping verifies the configured embedding route and caches the result to bound provider traffic.
+func (c *LiteLLMEmbeddingClient) Ping(ctx context.Context) error {
+	if c == nil {
+		return errors.New("litellm embedding client is not configured")
+	}
+	c.probeMu.Lock()
+	defer c.probeMu.Unlock()
+	now := time.Now()
+	if !c.lastProbeAt.IsZero() && c.probeTTL > 0 && now.Sub(c.lastProbeAt) < c.probeTTL {
+		return c.lastProbeErr
+	}
+	_, err := c.Embed(ctx, []string{"nexus readiness probe"})
+	if err != nil {
+		err = fmt.Errorf("litellm embedding probe failed: %w", err)
+	}
+	c.lastProbeAt = now
+	c.lastProbeErr = err
+	return err
 }
 
 // Embed returns finite, consistently sized vectors in the same order as inputs.

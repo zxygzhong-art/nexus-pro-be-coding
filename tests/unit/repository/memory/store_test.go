@@ -251,7 +251,7 @@ func TestUpsertLeaveBalanceUsesEmployeeTypeAndPeriodIdentity(t *testing.T) {
 	}
 }
 
-// TestPlatformTaskStoreScopesRecordsByAccount 驗證平台任務儲存層範圍 records by 帳號。
+// TestPlatformTaskStoreScopesRecordsByAccount 驗證平臺任務儲存層範圍 records by 帳號。
 func TestPlatformTaskStoreScopesRecordsByAccount(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()

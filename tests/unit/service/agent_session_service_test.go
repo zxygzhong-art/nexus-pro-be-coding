@@ -28,7 +28,7 @@ func TestAgentSessionChatPersistsMessagesAndAutoMemory(t *testing.T) {
 			if !strings.Contains(req.Message, "Known facts:") {
 				t.Fatalf("expected runtime message to include memory context, got %q", req.Message)
 			}
-			return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "已记住。"})
+			return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "已記住。"})
 		},
 	}
 	svc := service.New(store, service.Options{
@@ -37,7 +37,7 @@ func TestAgentSessionChatPersistsMessagesAndAutoMemory(t *testing.T) {
 	})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
-	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "记住我喜欢特休"}, func(context.Context, domain.AgentChatEvent) error { return nil })
+	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "記住我喜歡特休"}, func(context.Context, domain.AgentChatEvent) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +52,7 @@ func TestAgentSessionChatPersistsMessagesAndAutoMemory(t *testing.T) {
 	if len(sessions) != 1 || sessions[0].ID != run.SessionID || sessions[0].Status != domain.AgentSessionStatusActive {
 		t.Fatalf("expected one active session, got %+v", sessions)
 	}
-	if sessions[0].Title == "" || !strings.Contains(sessions[0].Title, "记住我喜欢特休") {
+	if sessions[0].Title == "" || !strings.Contains(sessions[0].Title, "記住我喜歡特休") {
 		t.Fatalf("expected session title from first message, got %+v", sessions[0])
 	}
 
@@ -63,7 +63,7 @@ func TestAgentSessionChatPersistsMessagesAndAutoMemory(t *testing.T) {
 	if len(messages) != 2 || messages[0].Role != domain.AgentMessageRoleUser || messages[1].Role != domain.AgentMessageRoleAssistant {
 		t.Fatalf("expected user and assistant messages, got %+v", messages)
 	}
-	if messages[0].Content != "记住我喜欢特休" || messages[1].Content != "已记住。" {
+	if messages[0].Content != "記住我喜歡特休" || messages[1].Content != "已記住。" {
 		t.Fatalf("unexpected persisted message content: %+v", messages)
 	}
 

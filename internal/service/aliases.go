@@ -170,6 +170,9 @@ type (
 	WorkspaceClockRow                  = domain.WorkspaceClockRow
 	WorkspaceClockSummary              = domain.WorkspaceClockSummary
 	WorkspaceAuditLog                  = domain.WorkspaceAuditLog
+	WorkspaceAuditLogFacetSource       = domain.WorkspaceAuditLogFacetSource
+	WorkspaceAuditLogOperatorFacet     = domain.WorkspaceAuditLogOperatorFacet
+	WorkspaceAuditLogFacets            = domain.WorkspaceAuditLogFacets
 	FormTemplate                       = domain.FormTemplate
 	FormInstance                       = domain.FormInstance
 	FormInstanceDetail                 = domain.FormInstanceDetail
@@ -334,9 +337,10 @@ type (
 
 // 下列常數定義此模組使用的固定值。
 const (
-	DefaultPage     = domain.DefaultPage
-	DefaultPageSize = domain.DefaultPageSize
-	MaxPageSize     = domain.MaxPageSize
+	WorkspaceAuditSystemOperatorID = domain.WorkspaceAuditSystemOperatorID
+	DefaultPage                    = domain.DefaultPage
+	DefaultPageSize                = domain.DefaultPageSize
+	MaxPageSize                    = domain.MaxPageSize
 
 	EffectAllow = domain.EffectAllow
 	EffectDeny  = domain.EffectDeny
@@ -419,6 +423,7 @@ const (
 	ResourceAssumableRole             = domain.ResourceAssumableRole
 	ResourceTool                      = domain.ResourceTool
 	ResourceDefinition                = domain.ResourceDefinition
+	ResourceUsage                     = domain.ResourceUsage
 	ResourceModel                     = domain.ResourceModel
 	ResourceEmployeeCollection        = domain.ResourceEmployeeCollection
 	ResourceFormInstance              = domain.ResourceFormInstance

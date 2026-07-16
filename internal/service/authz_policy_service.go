@@ -11,22 +11,16 @@ import (
 
 func (c *Service) activeAssumableRole(ctx RequestContext, account Account) (*AssumableRole, *AssumableRoleSession, error) {
 	if ctx.AssumedRoleSessionID != "" {
-		session, ok, err := c.store.GetActiveAssumableRoleSession(goContext(ctx), ctx.TenantID, ctx.AssumedRoleSessionID)
+		session, err := c.ownedActiveAssumableRoleSession(ctx, account.ID)
 		if err != nil {
 			return nil, nil, err
-		}
-		if !ok {
-			return nil, nil, NotFound("assumable role session", ctx.AssumedRoleSessionID)
-		}
-		if session.AccountID != account.ID {
-			return nil, nil, Forbidden("assumable role session belongs to another account")
 		}
 		role, ok, err := c.store.GetAssumableRole(goContext(ctx), ctx.TenantID, session.AssumableRoleID)
 		if err != nil {
 			return nil, nil, err
 		}
 		if !ok {
-			return nil, nil, NotFound("assumable role", session.AssumableRoleID)
+			return nil, nil, assumedRoleSessionStateError(404, assumedRoleSessionReasonInvalid)
 		}
 		return &role, &session, nil
 	}
@@ -41,6 +35,11 @@ func (c *Service) conditionsForGrant(ctx RequestContext, account Account, grant 
 	}
 	scope := grant.Permission.Scope
 	if scope == "" {
+		// Account usage exposes tenant-wide identity and activity data. Unlike legacy
+		// resources, its dedicated high-risk permission must declare its scope.
+		if req.ApplicationCode == AppAgent && req.ResourceType == ResourceUsage {
+			return "", nil, nil
+		}
 		scope = ScopeAll
 	}
 	conditions, err := c.scopeConditions(ctx, account, scope, nil)
@@ -194,7 +193,7 @@ func fieldPolicyEffectRank(effect string) int {
 	}
 }
 
-// auditAuthzDecision 處理稽核授權決策的服務流程。
+// auditAuthzDecision 處理稽覈授權決策的服務流程。
 func (c *Service) auditAuthzDecision(ctx RequestContext, action, resource, target string, decision CheckResult) error {
 	return c.audit(ctx, action, resource, target, "high", auditDecisionDetails(ctx, decision, nil))
 }
@@ -266,6 +265,7 @@ func normalizeCheckRequest(req CheckRequest) CheckRequest {
 	if req.ResourceType == "" {
 		req.ResourceType = ResourceType(req.Resource)
 	}
+	req.ApplicationCode, req.ResourceType = canonicalAuthorizationResource(req.ApplicationCode, req.ResourceType)
 	if req.Resource == "" {
 		req.Resource = routeResourceName(req.ApplicationCode, req.ResourceType)
 	}
@@ -289,7 +289,13 @@ func normalizePermission(perm Permission) Permission {
 			perm.ResourceType = resourceType
 		}
 	}
-	if perm.Resource == "" {
+	perm.ApplicationCode, perm.ResourceType = canonicalAuthorizationResource(perm.ApplicationCode, perm.ResourceType)
+	if perm.ApplicationCode == "*" && perm.ResourceType == "*" {
+		perm.Resource = "*"
+	} else {
+		// Resource is a compatibility input. Once application/resource_type are
+		// canonical, the projected identity must use that same source of truth so
+		// legacy aliases such as audit.log cannot survive as duplicate grants.
 		perm.Resource = routeResourceName(perm.ApplicationCode, perm.ResourceType)
 	}
 	return perm
@@ -317,9 +323,18 @@ func splitResource(resource string) (ApplicationCode, ResourceType) {
 	}
 	parts := strings.SplitN(resource, ".", 2)
 	if len(parts) == 2 {
-		return ApplicationCode(parts[0]), ResourceType(parts[1])
+		return canonicalAuthorizationResource(ApplicationCode(parts[0]), ResourceType(parts[1]))
 	}
 	return AppPlatform, ResourceType(resource)
+}
+
+// canonicalAuthorizationResource keeps legacy route resources on the same
+// application/resource_type identity used by the route policy catalog.
+func canonicalAuthorizationResource(applicationCode ApplicationCode, resourceType ResourceType) (ApplicationCode, ResourceType) {
+	if strings.EqualFold(string(applicationCode), string(AppAudit)) && strings.EqualFold(string(resourceType), "log") {
+		return AppAudit, ResourceType("audit_log")
+	}
+	return applicationCode, resourceType
 }
 
 // routeResourceName 處理路由 resource 名稱。
@@ -490,6 +505,8 @@ func valueListContains(value any, key string) bool {
 
 // permissionKeyMatches 處理權限 key matches。
 func permissionKeyMatches(key, pattern string) bool {
+	key = canonicalPermissionKeyPattern(key)
+	pattern = canonicalPermissionKeyPattern(pattern)
 	if pattern == "" {
 		return false
 	}
@@ -500,6 +517,14 @@ func permissionKeyMatches(key, pattern string) bool {
 		return strings.HasPrefix(key, strings.TrimSuffix(pattern, "*"))
 	}
 	return false
+}
+
+func canonicalPermissionKeyPattern(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	if strings.HasPrefix(value, "audit.log.") {
+		return "audit.audit_log." + strings.TrimPrefix(value, "audit.log.")
+	}
+	return value
 }
 
 // mergePolicy 合併政策。

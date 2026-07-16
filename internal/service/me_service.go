@@ -26,7 +26,7 @@ func (c MeService) Resolve(ctx RequestContext) (MeResponse, error) {
 	if err != nil {
 		return MeResponse{}, err
 	}
-	decision, err := c.evaluateAuthz(ctx, account, CheckRequest{Resource: "me", Action: ActionRead})
+	decision, err := c.evaluateCurrentAccessProjection(ctx, account, CheckRequest{Resource: "me", Action: ActionRead})
 	if err != nil {
 		return MeResponse{}, err
 	}
@@ -57,10 +57,6 @@ func (c MeService) Resolve(ctx RequestContext) (MeResponse, error) {
 	}
 
 	effectiveMenuKeys := uniqueStrings(menuKeysFromPermissions(permissions))
-	permissions, effectiveMenuKeys, err = c.applyMenuScopeRequirements(ctx, account, permissions, effectiveMenuKeys)
-	if err != nil {
-		return MeResponse{}, err
-	}
 	capabilities := uniqueStrings(capabilitiesFromPermissions(permissions))
 
 	return MeResponse{
@@ -148,6 +144,12 @@ func (c MeService) UpdateProfile(ctx RequestContext, input UpdateMeProfileInput)
 		authzAudit.target.Target = next.ID
 		next.BasicInfo = utils.CopyStringMap(next.BasicInfo)
 		next.ContactInfo = utils.CopyStringMap(next.ContactInfo)
+		if next.BasicInfo == nil {
+			next.BasicInfo = make(map[string]any)
+		}
+		if next.ContactInfo == nil {
+			next.ContactInfo = make(map[string]any)
+		}
 		changedFields := applyMeProfilePatch(&next, input)
 		if len(changedFields) > 0 {
 			next.UpdatedAt = tx.Now()
@@ -430,7 +432,7 @@ func menuNodesFromChildren(parentKey string, children map[string][]MenuItem, vis
 }
 
 var defaultMenuCatalog = []MenuNode{
-	{Key: "workbench", Label: "工作台", Path: "/"},
+	{Key: "workbench", Label: "工作臺", Path: "/"},
 	{
 		Key:   "workspace",
 		Label: "工作區設定",
@@ -452,7 +454,7 @@ var defaultMenuCatalog = []MenuNode{
 			{Key: "agents.knowledge_bases", Label: "知識庫", Path: "/workspace/knowledge-bases"},
 			{Key: "agents.tools", Label: "工具與整合", Path: "/workspace/agent-tools"},
 			{Key: "iam.members", Label: "成員權限", Path: "/workspace/iam/members"},
-			{Key: "iam.user_groups", Label: "使用者群組", Path: "/workspace/iam/user-groups"},
+			{Key: "iam.user_groups", Label: "使用者羣組", Path: "/workspace/iam/user-groups"},
 			{Key: "iam.permission_sets", Label: "權限集合", Path: "/workspace/iam/permission-sets"},
 			{Key: "iam.assignments", Label: "權限指派", Path: "/workspace/iam/assignments"},
 			{Key: "iam.assumable_roles", Label: "可承擔角色", Path: "/workspace/iam/roles"},

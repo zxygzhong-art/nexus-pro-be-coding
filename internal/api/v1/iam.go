@@ -59,6 +59,9 @@ func (c IAMCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	iam.PATCH("/assumable-roles/:id", c.routes.Handle("iam.assumable_role", "update", c.updateAssumableRole, ResourceID(PathParamID)))
 	iam.DELETE("/assumable-roles/:id", c.routes.Handle("iam.assumable_role", "delete", c.deleteAssumableRole, ResourceID(PathParamID)))
 	iam.POST("/assumable-roles/:id/assume", c.routes.Handle("iam.assumable_role", "assume", c.assumeRole, ResourceID(PathParamID)))
+	// Returning a temporary role is governed by the caller's base me.read access,
+	// not by the narrowed assumed-role permissions. The service rechecks ownership.
+	iam.DELETE("/assumable-role-sessions/current", c.routes.Handle("platform.me", "read", c.revokeCurrentAssumableRoleSession, CurrentAccessProjection()))
 }
 
 // listApplications 處理 applications 目錄的 HTTP 請求。
@@ -171,7 +174,7 @@ func (c IAMCtrl) listRoleBindings(w http.ResponseWriter, r *http.Request, ctx do
 	return nil
 }
 
-// listUserGroups 處理使用者群組的 HTTP 請求。
+// listUserGroups 處理使用者羣組的 HTTP 請求。
 func (c IAMCtrl) listUserGroups(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -185,7 +188,7 @@ func (c IAMCtrl) listUserGroups(w http.ResponseWriter, r *http.Request, ctx doma
 	return nil
 }
 
-// createUserGroup 處理使用者群組的 HTTP 請求。
+// createUserGroup 處理使用者羣組的 HTTP 請求。
 func (c IAMCtrl) createUserGroup(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.CreateUserGroupInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -199,7 +202,7 @@ func (c IAMCtrl) createUserGroup(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
-// updateUserGroup 處理使用者群組更新的 HTTP 請求。
+// updateUserGroup 處理使用者羣組更新的 HTTP 請求。
 func (c IAMCtrl) updateUserGroup(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.UpdateUserGroupInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -213,7 +216,7 @@ func (c IAMCtrl) updateUserGroup(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
-// deleteUserGroup 處理使用者群組刪除的 HTTP 請求。
+// deleteUserGroup 處理使用者羣組刪除的 HTTP 請求。
 func (c IAMCtrl) deleteUserGroup(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.DeleteUserGroup(ctx, r.PathValue(PathParamID))
 	if err != nil {
@@ -223,7 +226,7 @@ func (c IAMCtrl) deleteUserGroup(w http.ResponseWriter, r *http.Request, ctx dom
 	return nil
 }
 
-// listUserGroupMembers 處理使用者群組成員列表的 HTTP 請求。
+// listUserGroupMembers 處理使用者羣組成員列表的 HTTP 請求。
 func (c IAMCtrl) listUserGroupMembers(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	page, err := pageRequestFromRequest(r)
 	if err != nil {
@@ -237,7 +240,7 @@ func (c IAMCtrl) listUserGroupMembers(w http.ResponseWriter, r *http.Request, ct
 	return nil
 }
 
-// addUserGroupMember 處理新增使用者群組成員的 HTTP 請求。
+// addUserGroupMember 處理新增使用者羣組成員的 HTTP 請求。
 func (c IAMCtrl) addUserGroupMember(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.AddUserGroupMemberInput
 	if err := readJSON(w, r, &input); err != nil {
@@ -251,7 +254,7 @@ func (c IAMCtrl) addUserGroupMember(w http.ResponseWriter, r *http.Request, ctx 
 	return nil
 }
 
-// removeUserGroupMember 處理移除使用者群組成員的 HTTP 請求。
+// removeUserGroupMember 處理移除使用者羣組成員的 HTTP 請求。
 func (c IAMCtrl) removeUserGroupMember(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	if err := c.svc.RemoveUserGroupMember(ctx, r.PathValue(PathParamID), r.PathValue("accountId")); err != nil {
 		return err
@@ -588,5 +591,14 @@ func (c IAMCtrl) assumeRole(w http.ResponseWriter, r *http.Request, ctx domain.R
 		return err
 	}
 	writeJSON(w, http.StatusCreated, result)
+	return nil
+}
+
+// revokeCurrentAssumableRoleSession ends only the caller-owned temporary role session.
+func (c IAMCtrl) revokeCurrentAssumableRoleSession(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
+	if err := c.svc.RevokeCurrentAssumableRoleSession(ctx); err != nil {
+		return err
+	}
+	w.WriteHeader(http.StatusNoContent)
 	return nil
 }

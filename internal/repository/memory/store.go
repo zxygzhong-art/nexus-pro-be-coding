@@ -287,7 +287,7 @@ func (s *Store) ListUserIdentities(_ context.Context, tenantID, accountID string
 	return out, nil
 }
 
-// UpsertUserGroup 從儲存層處理 upsert 使用者群組。Version > 0 時執行樂觀鎖檢查。
+// UpsertUserGroup 從儲存層處理 upsert 使用者羣組。Version > 0 時執行樂觀鎖檢查。
 func (s *Store) UpsertUserGroup(_ context.Context, v UserGroup) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -304,7 +304,7 @@ func (s *Store) UpsertUserGroup(_ context.Context, v UserGroup) error {
 	return nil
 }
 
-// GetUserGroup 從儲存層取得使用者群組。
+// GetUserGroup 從儲存層取得使用者羣組。
 func (s *Store) GetUserGroup(_ context.Context, tenantID, id string) (UserGroup, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -315,7 +315,7 @@ func (s *Store) GetUserGroup(_ context.Context, tenantID, id string) (UserGroup,
 	return copyUserGroup(v), true, nil
 }
 
-// ListUserGroups 從儲存層列出使用者群組。
+// ListUserGroups 從儲存層列出使用者羣組。
 func (s *Store) ListUserGroups(_ context.Context, tenantID string) ([]UserGroup, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -324,7 +324,7 @@ func (s *Store) ListUserGroups(_ context.Context, tenantID string) ([]UserGroup,
 	return out, nil
 }
 
-// DeleteUserGroup 從儲存層刪除使用者群組。
+// DeleteUserGroup 從儲存層刪除使用者羣組。
 func (s *Store) DeleteUserGroup(_ context.Context, tenantID, id string) (UserGroup, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -336,7 +336,7 @@ func (s *Store) DeleteUserGroup(_ context.Context, tenantID, id string) (UserGro
 	return copyUserGroup(v), true, nil
 }
 
-// UpsertGroupMembership 從儲存層處理 upsert 使用者群組成員關係。
+// UpsertGroupMembership 從儲存層處理 upsert 使用者羣組成員關係。
 func (s *Store) UpsertGroupMembership(_ context.Context, v GroupMembership) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -348,7 +348,7 @@ func (s *Store) UpsertGroupMembership(_ context.Context, v GroupMembership) erro
 	return nil
 }
 
-// DeleteGroupMembership 從儲存層刪除使用者群組成員關係。
+// DeleteGroupMembership 從儲存層刪除使用者羣組成員關係。
 func (s *Store) DeleteGroupMembership(_ context.Context, tenantID, userGroupID, accountID string) (GroupMembership, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -397,7 +397,7 @@ func (s *Store) CloseGroupMembership(_ context.Context, tenantID, userGroupID, a
 	return copyGroupMembership(selected), true, nil
 }
 
-// GetGroupMembership 從儲存層取得使用者群組成員關係。
+// GetGroupMembership 從儲存層取得使用者羣組成員關係。
 func (s *Store) GetGroupMembership(_ context.Context, tenantID, userGroupID, accountID string) (GroupMembership, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -414,7 +414,7 @@ func (s *Store) GetGroupMembership(_ context.Context, tenantID, userGroupID, acc
 	return copyGroupMembership(v), true, nil
 }
 
-// ListGroupMembershipsForGroup 從儲存層列出使用者群組成員關係。
+// ListGroupMembershipsForGroup 從儲存層列出使用者羣組成員關係。
 func (s *Store) ListGroupMembershipsForGroup(_ context.Context, tenantID, userGroupID string) ([]GroupMembership, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -428,7 +428,7 @@ func (s *Store) ListGroupMembershipsForGroup(_ context.Context, tenantID, userGr
 	return out, nil
 }
 
-// ListActiveGroupMembershipsForAccount 從儲存層列出帳號有效使用者群組成員關係。
+// ListActiveGroupMembershipsForAccount 從儲存層列出帳號有效使用者羣組成員關係。
 func (s *Store) ListActiveGroupMembershipsForAccount(_ context.Context, tenantID, accountID string, at time.Time) ([]GroupMembership, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -694,7 +694,7 @@ func (s *Store) ListPermissionSetTemplates(_ context.Context, packageID string) 
 	return out, nil
 }
 
-// UpsertUserGroupTemplate 從儲存層處理 upsert 使用者群組模板。
+// UpsertUserGroupTemplate 從儲存層處理 upsert 使用者羣組模板。
 func (s *Store) UpsertUserGroupTemplate(_ context.Context, v UserGroupTemplate) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -702,7 +702,7 @@ func (s *Store) UpsertUserGroupTemplate(_ context.Context, v UserGroupTemplate) 
 	return nil
 }
 
-// ListUserGroupTemplates 從儲存層列出使用者群組模板。
+// ListUserGroupTemplates 從儲存層列出使用者羣組模板。
 func (s *Store) ListUserGroupTemplates(_ context.Context, packageID string) ([]UserGroupTemplate, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -960,6 +960,17 @@ func (s *Store) UpsertAssumableRoleSession(_ context.Context, v AssumableRoleSes
 	return nil
 }
 
+// GetAssumableRoleSession 取得 session 原始狀態，供服務層區分失效原因並執行 ownership 驗證。
+func (s *Store) GetAssumableRoleSession(_ context.Context, tenantID, id string) (AssumableRoleSession, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	v, ok := getNested(s.roleSessions, tenantID, id)
+	if !ok {
+		return AssumableRoleSession{}, false, nil
+	}
+	return copyAssumableRoleSession(v), true, nil
+}
+
 // GetActiveAssumableRoleSession 從儲存層取得啟用中 assumable 角色 session。
 func (s *Store) GetActiveAssumableRoleSession(_ context.Context, tenantID, id string) (AssumableRoleSession, bool, error) {
 	s.mu.RLock()
@@ -972,6 +983,20 @@ func (s *Store) GetActiveAssumableRoleSession(_ context.Context, tenantID, id st
 	if v.RevokedAt != nil || !v.ExpiresAt.After(now) {
 		return AssumableRoleSession{}, false, nil
 	}
+	return copyAssumableRoleSession(v), true, nil
+}
+
+// RevokeAssumableRoleSession 僅撤銷同租戶、同帳號且尚未撤銷的 session。
+func (s *Store) RevokeAssumableRoleSession(_ context.Context, tenantID, accountID, id string, revokedAt time.Time) (AssumableRoleSession, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	v, ok := getNested(s.roleSessions, tenantID, id)
+	if !ok || v.AccountID != accountID || v.RevokedAt != nil {
+		return AssumableRoleSession{}, false, nil
+	}
+	at := revokedAt.UTC()
+	v.RevokedAt = &at
+	putNested(s.roleSessions, tenantID, id, copyAssumableRoleSession(v))
 	return copyAssumableRoleSession(v), true, nil
 }
 
@@ -2650,7 +2675,7 @@ func (s *Store) DeleteFormInstance(_ context.Context, tenantID, id string) error
 	return nil
 }
 
-// UpsertPlatformTaskItem 從儲存層處理 upsert 平台任務項目。
+// UpsertPlatformTaskItem 從儲存層處理 upsert 平臺任務項目。
 func (s *Store) UpsertPlatformTaskItem(_ context.Context, v PlatformTaskRecordItem) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2661,7 +2686,7 @@ func (s *Store) UpsertPlatformTaskItem(_ context.Context, v PlatformTaskRecordIt
 	return nil
 }
 
-// GetPlatformTaskItem 從儲存層取得平台任務項目。
+// GetPlatformTaskItem 從儲存層取得平臺任務項目。
 func (s *Store) GetPlatformTaskItem(_ context.Context, tenantID, accountID, id string) (PlatformTaskRecordItem, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2672,7 +2697,7 @@ func (s *Store) GetPlatformTaskItem(_ context.Context, tenantID, accountID, id s
 	return copyPlatformTaskRecordItem(v), true, nil
 }
 
-// ListPlatformTaskItems 從儲存層列出平台任務項目。
+// ListPlatformTaskItems 從儲存層列出平臺任務項目。
 func (s *Store) ListPlatformTaskItems(_ context.Context, tenantID, accountID string) ([]PlatformTaskRecordItem, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2691,7 +2716,7 @@ func (s *Store) ListPlatformTaskItems(_ context.Context, tenantID, accountID str
 	return out, nil
 }
 
-// DeletePlatformTaskItem 從儲存層刪除平台任務項目。
+// DeletePlatformTaskItem 從儲存層刪除平臺任務項目。
 func (s *Store) DeletePlatformTaskItem(_ context.Context, tenantID, accountID, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2701,7 +2726,7 @@ func (s *Store) DeletePlatformTaskItem(_ context.Context, tenantID, accountID, i
 	return nil
 }
 
-// UpsertPlatformTaskTodo 從儲存層處理 upsert 平台任務待辦。
+// UpsertPlatformTaskTodo 從儲存層處理 upsert 平臺任務待辦。
 func (s *Store) UpsertPlatformTaskTodo(_ context.Context, v PlatformTaskTodoRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -2712,7 +2737,7 @@ func (s *Store) UpsertPlatformTaskTodo(_ context.Context, v PlatformTaskTodoReco
 	return nil
 }
 
-// GetPlatformTaskTodo 從儲存層取得平台任務待辦。
+// GetPlatformTaskTodo 從儲存層取得平臺任務待辦。
 func (s *Store) GetPlatformTaskTodo(_ context.Context, tenantID, accountID, id string) (PlatformTaskTodoRecord, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2723,7 +2748,7 @@ func (s *Store) GetPlatformTaskTodo(_ context.Context, tenantID, accountID, id s
 	return copyPlatformTaskTodoRecord(v), true, nil
 }
 
-// ListPlatformTaskTodos 從儲存層列出平台任務待辦。
+// ListPlatformTaskTodos 從儲存層列出平臺任務待辦。
 func (s *Store) ListPlatformTaskTodos(_ context.Context, tenantID, accountID string) ([]PlatformTaskTodoRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -2742,7 +2767,7 @@ func (s *Store) ListPlatformTaskTodos(_ context.Context, tenantID, accountID str
 	return out, nil
 }
 
-// DeletePlatformTaskTodo 從儲存層刪除平台任務待辦。
+// DeletePlatformTaskTodo 從儲存層刪除平臺任務待辦。
 func (s *Store) DeletePlatformTaskTodo(_ context.Context, tenantID, accountID, id string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -3989,7 +4014,7 @@ func memoryNotificationItem(item Notification, recipient NotificationRecipient) 
 	}
 }
 
-// AppendAuditLog 從儲存層附加稽核 log。
+// AppendAuditLog 從儲存層附加稽覈 log。
 func (s *Store) AppendAuditLog(_ context.Context, v AuditLog) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -3997,7 +4022,7 @@ func (s *Store) AppendAuditLog(_ context.Context, v AuditLog) error {
 	return nil
 }
 
-// ListAuditLogs 從儲存層列出稽核 logs。
+// ListAuditLogs 從儲存層列出稽覈 logs。
 func (s *Store) ListAuditLogs(_ context.Context, tenantID string) ([]AuditLog, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -4010,7 +4035,35 @@ func (s *Store) ListAuditLogs(_ context.Context, tenantID string) ([]AuditLog, e
 	return out, nil
 }
 
-// ListAuditLogPage 從儲存層列出稽核 log 分頁。
+// ListAuditLogFacetSources returns tenant-scoped, distinct, non-sensitive audit facet inputs.
+func (s *Store) ListAuditLogFacetSources(_ context.Context, tenantID string) ([]domain.WorkspaceAuditLogFacetSource, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	seen := make(map[domain.WorkspaceAuditLogFacetSource]struct{})
+	for _, log := range s.auditLogs[tenantID] {
+		seen[domain.WorkspaceAuditLogFacetSource{
+			ActorAccountID: log.ActorAccountID,
+			Action:         log.Action,
+			Resource:       log.Resource,
+		}] = struct{}{}
+	}
+	out := make([]domain.WorkspaceAuditLogFacetSource, 0, len(seen))
+	for source := range seen {
+		out = append(out, source)
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].ActorAccountID != out[j].ActorAccountID {
+			return out[i].ActorAccountID < out[j].ActorAccountID
+		}
+		if out[i].Resource != out[j].Resource {
+			return out[i].Resource < out[j].Resource
+		}
+		return out[i].Action < out[j].Action
+	})
+	return out, nil
+}
+
+// ListAuditLogPage 從儲存層列出稽覈 log 分頁。
 func (s *Store) ListAuditLogPage(ctx context.Context, tenantID string, page PageRequest) ([]AuditLog, int, error) {
 	items, err := s.ListAuditLogs(ctx, tenantID)
 	if err != nil {
@@ -4029,7 +4082,7 @@ func (s *Store) ListAuditLogPage(ctx context.Context, tenantID string, page Page
 	return paginateMemory(items, page.Page, page.PageSize), total, nil
 }
 
-// ListAuditLogPageFiltered 從儲存層篩選並列出稽核 log 分頁。
+// ListAuditLogPageFiltered 從儲存層篩選並列出稽覈 log 分頁。
 func (s *Store) ListAuditLogPageFiltered(_ context.Context, tenantID string, query domain.WorkspaceAuditLogQuery, page PageRequest) ([]AuditLog, int, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -4096,6 +4149,9 @@ func auditLogOperatorMatches(log AuditLog, account Account, employee Employee, v
 	if needle == "" {
 		return true
 	}
+	if needle == strings.ToLower(domain.WorkspaceAuditSystemOperatorID) {
+		return strings.TrimSpace(log.ActorAccountID) == ""
+	}
 	for _, candidate := range []string{log.ActorAccountID, account.ID, account.EmployeeID, account.DisplayName, account.Email, employee.ID, employee.EmployeeNo, employee.Name} {
 		if strings.ToLower(strings.TrimSpace(candidate)) == needle {
 			return true
@@ -4132,6 +4188,7 @@ func auditLogKeywordMatches(log AuditLog, account Account, employee Employee, va
 	return strings.Contains(haystack, needle)
 }
 
+// auditLogWorkspaceType mirrors the service projection so every advertised facet remains filterable.
 func auditLogWorkspaceType(log AuditLog) string {
 	text := strings.ToLower(strings.Join([]string{log.Resource, log.Action}, " "))
 	switch {
@@ -4139,11 +4196,11 @@ func auditLogWorkspaceType(log AuditLog) string {
 		return "員工管理"
 	case strings.Contains(text, "org") || strings.Contains(text, "position"):
 		return "組織架構"
-	case strings.Contains(text, "attendance") || strings.Contains(text, "leave"):
+	case strings.Contains(text, "attendance") || strings.Contains(text, "leave") || strings.Contains(text, "clock") || strings.Contains(text, "shift"):
 		return "假勤制度"
 	case strings.Contains(text, "form") || strings.Contains(text, "workflow"):
 		return "表單設計"
-	case strings.Contains(text, "iam") || strings.Contains(text, "authz") || strings.Contains(text, "admin"):
+	case strings.Contains(text, "iam") || strings.Contains(text, "authz") || strings.Contains(text, "permission") || strings.Contains(text, "admin"):
 		return "管理員設定"
 	default:
 		return "系統"
@@ -4367,7 +4424,7 @@ func (s *Store) UpdateOutboxEvent(_ context.Context, v OutboxEvent) error {
 	return nil
 }
 
-// AddAccountGroup 從儲存層處理 add 帳號群組。
+// AddAccountGroup 從儲存層處理 add 帳號羣組。
 func (s *Store) AddAccountGroup(_ context.Context, tenantID, accountID, groupID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -4383,7 +4440,7 @@ func (s *Store) AddAccountGroup(_ context.Context, tenantID, accountID, groupID 
 	return nil
 }
 
-// RemoveAccountGroup 從儲存層處理 remove 帳號群組。
+// RemoveAccountGroup 從儲存層處理 remove 帳號羣組。
 func (s *Store) RemoveAccountGroup(_ context.Context, tenantID, accountID, groupID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -4403,12 +4460,12 @@ func (s *Store) RemoveAccountGroup(_ context.Context, tenantID, accountID, group
 	return nil
 }
 
-// groupMembershipKey 取得使用者群組成員關係 key。
+// groupMembershipKey 取得使用者羣組成員關係 key。
 func groupMembershipKey(userGroupID, accountID string) string {
 	return userGroupID + "\x00" + accountID
 }
 
-// membershipActiveAt 判斷群組成員關係在指定時間是否有效。
+// membershipActiveAt 判斷羣組成員關係在指定時間是否有效。
 func membershipActiveAt(v GroupMembership, at time.Time) bool {
 	if !v.ValidFrom.IsZero() && v.ValidFrom.After(at) {
 		return false

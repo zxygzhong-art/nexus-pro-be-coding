@@ -51,7 +51,7 @@ func workspaceLeaveLegend() []WorkspaceLeaveLegendItem {
 	}
 }
 
-// workspaceAuditLogQueryEmpty 處理工作區稽核 log 查詢空值。
+// workspaceAuditLogQueryEmpty 處理工作區稽覈 log 查詢空值。
 func workspaceAuditLogQueryEmpty(query WorkspaceAuditLogQuery) bool {
 	return strings.TrimSpace(query.OperatorID) == "" &&
 		strings.TrimSpace(query.Type) == "" &&
@@ -60,8 +60,9 @@ func workspaceAuditLogQueryEmpty(query WorkspaceAuditLogQuery) bool {
 		strings.TrimSpace(query.Keyword) == ""
 }
 
-// workspaceAuditLogProjection 處理工作區稽核 log projection。
+// workspaceAuditLogProjection 處理工作區稽覈 log projection。
 func workspaceAuditLogProjection(log AuditLog, accounts map[string]Account, employees map[string]Employee) WorkspaceAuditLog {
+	log = sanitizeAuditLog(log)
 	account := accounts[log.ActorAccountID]
 	employee := employees[account.EmployeeID]
 	return WorkspaceAuditLog{
@@ -74,31 +75,31 @@ func workspaceAuditLogProjection(log AuditLog, accounts map[string]Account, empl
 	}
 }
 
-// workspaceAuditOperator 處理工作區稽核 operator。
+// workspaceAuditOperator 處理工作區稽覈 operator。
 func workspaceAuditOperator(log AuditLog, account Account, employee Employee) string {
 	return utils.FirstNonEmpty(employee.Name, account.DisplayName, account.Email, log.ActorAccountID, "系統")
 }
 
-// workspaceAuditType 處理工作區稽核 type。
+// workspaceAuditType maps raw audit resources and actions to the stable workspace category catalog.
 func workspaceAuditType(log AuditLog) string {
 	text := strings.ToLower(strings.Join([]string{log.Resource, log.Action}, " "))
 	switch {
 	case strings.Contains(text, "employee"):
 		return "員工管理"
-	case strings.Contains(text, "org"):
+	case strings.Contains(text, "org") || strings.Contains(text, "position"):
 		return "組織架構"
 	case strings.Contains(text, "attendance") || strings.Contains(text, "leave") || strings.Contains(text, "clock") || strings.Contains(text, "shift"):
 		return "假勤制度"
 	case strings.Contains(text, "form") || strings.Contains(text, "workflow"):
 		return "表單設計"
-	case strings.Contains(text, "iam") || strings.Contains(text, "permission") || strings.Contains(text, "admin"):
+	case strings.Contains(text, "iam") || strings.Contains(text, "authz") || strings.Contains(text, "permission") || strings.Contains(text, "admin"):
 		return "管理員設定"
 	default:
 		return "系統"
 	}
 }
 
-// workspaceAuditAction 處理工作區稽核 action。
+// workspaceAuditAction 處理工作區稽覈 action。
 func workspaceAuditAction(log AuditLog) string {
 	action := utils.FirstNonEmpty(log.Action, log.Resource)
 	if log.Target != "" {
@@ -107,14 +108,15 @@ func workspaceAuditAction(log AuditLog) string {
 	return action
 }
 
-// workspaceAuditDetail 處理工作區稽核 detail。
+// workspaceAuditDetail 處理工作區稽覈 detail。
 func workspaceAuditDetail(log AuditLog) string {
-	if len(log.Details) > 0 {
-		if raw, err := json.Marshal(log.Details); err == nil {
+	details := sanitizeAuditDetails(log.Details)
+	if len(details) > 0 {
+		if raw, err := json.Marshal(details); err == nil {
 			return string(raw)
 		}
 	}
-	return utils.FirstNonEmpty(log.Result, log.TraceID)
+	return utils.FirstNonEmpty(sanitizeAuditText(log.Result), sanitizeAuditText(log.TraceID))
 }
 
 // workspaceSummaryLeaveCells 直接投影 eHRMS 每日假勤事實，避免從請假區間推算日期或分攤時數。
@@ -180,7 +182,7 @@ func workspaceMergeApprovedLeaveCells(existing map[string]map[string]workspaceLe
 	return existing
 }
 
-// workspaceOvertimeCells 處理工作區加班儲存格。僅累計核准加班的每日時數。
+// workspaceOvertimeCells 處理工作區加班儲存格。僅累計覈準加班的每日時數。
 func workspaceOvertimeCells(overtimes []OvertimeRequest, start time.Time, end time.Time) map[string]map[string]float64 {
 	out := map[string]map[string]float64{}
 	for _, overtime := range overtimes {
@@ -204,6 +206,72 @@ func workspaceOvertimeCells(overtimes []OvertimeRequest, start time.Time, end ti
 			out[overtime.EmployeeID] = map[string]float64{}
 		}
 		out[overtime.EmployeeID][key] += overtime.Hours
+	}
+	return out
+}
+
+// workspaceAttendanceEvidence records the actual hours and authoritative source for one employee day.
+type workspaceAttendanceEvidence struct {
+	Hours  float64
+	Source string
+}
+
+// workspaceAttendanceEvidenceCells prefers effective local punches and falls back to eHRMS actual-attendance facts.
+func workspaceAttendanceEvidenceCells(clocks []AttendanceClockRecord, summaries []AttendanceDailySummary, leaves []LeaveRequest, workTime AttendancePolicyWorkTime) map[string]map[string]workspaceAttendanceEvidence {
+	recordsByEmployeeDate := map[string]map[string][]AttendanceClockRecord{}
+	for _, record := range clocks {
+		if record.EmployeeID == "" || record.WorkDate == "" || record.Voided || !strings.EqualFold(record.RecordStatus, clockRecordStatusAccepted) {
+			continue
+		}
+		if recordsByEmployeeDate[record.EmployeeID] == nil {
+			recordsByEmployeeDate[record.EmployeeID] = map[string][]AttendanceClockRecord{}
+		}
+		recordsByEmployeeDate[record.EmployeeID][record.WorkDate] = append(recordsByEmployeeDate[record.EmployeeID][record.WorkDate], record)
+	}
+	leavesByEmployee := map[string][]LeaveRequest{}
+	for _, leave := range leaves {
+		if leave.EmployeeID != "" {
+			leavesByEmployee[leave.EmployeeID] = append(leavesByEmployee[leave.EmployeeID], leave)
+		}
+	}
+
+	out := map[string]map[string]workspaceAttendanceEvidence{}
+	for employeeID, recordsByDate := range recordsByEmployeeDate {
+		out[employeeID] = map[string]workspaceAttendanceEvidence{}
+		for workDate, records := range recordsByDate {
+			asOf := records[0].ClockedAt
+			for _, record := range records[1:] {
+				if record.ClockedAt.After(asOf) {
+					asOf = record.ClockedAt
+				}
+			}
+			projection := ProjectAttendanceDay(records, leavesByEmployee[employeeID], workDate, workTime, asOf)
+			out[employeeID][workDate] = workspaceAttendanceEvidence{
+				Hours:  math.Max(0, float64(projection.WorkedMinutes)/60),
+				Source: "clock",
+			}
+		}
+	}
+	for _, summary := range summaries {
+		if summary.EmployeeID == "" || summary.WorkDate == "" {
+			continue
+		}
+		if _, exists := out[summary.EmployeeID][summary.WorkDate]; exists {
+			continue
+		}
+		hours := 0.0
+		switch {
+		case summary.AttendCounted:
+			hours = math.Max(0, summary.AttendHours)
+		case summary.ClockHours > 0:
+			hours = summary.ClockHours
+		default:
+			continue
+		}
+		if out[summary.EmployeeID] == nil {
+			out[summary.EmployeeID] = map[string]workspaceAttendanceEvidence{}
+		}
+		out[summary.EmployeeID][summary.WorkDate] = workspaceAttendanceEvidence{Hours: hours, Source: "ehrms"}
 	}
 	return out
 }
@@ -325,7 +393,7 @@ func workspaceClockCellFromSummary(summary AttendanceDailySummary, leaveCells ma
 	return cell, true
 }
 
-// workspaceShortHoursExempted 判斷工時不足是否可由核准的請假或加班補足當日應出勤時數。
+// workspaceShortHoursExempted 判斷工時不足是否可由覈準的請假或加班補足當日應出勤時數。
 func workspaceShortHoursExempted(employeeID string, date string, workedHours float64, expectedHours float64, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64) bool {
 	leaveHours := 0.0
 	if cell, ok := leaveCells[employeeID][date]; ok {
@@ -334,7 +402,7 @@ func workspaceShortHoursExempted(employeeID string, date string, workedHours flo
 	if workedHours+leaveHours >= expectedHours {
 		return true
 	}
-	// 週末或假日的打卡若對應核准加班，不視為工時異常。
+	// 週末或假日的打卡若對應覈準加班，不視為工時異常。
 	if overtimeCells[employeeID][date] > 0 {
 		if day, err := time.Parse(time.DateOnly, date); err == nil {
 			if dow := day.Weekday(); dow == time.Saturday || dow == time.Sunday {
@@ -346,7 +414,7 @@ func workspaceShortHoursExempted(employeeID string, date string, workedHours flo
 }
 
 // workspaceAttendanceMatrix projects explicit attendance facts and marks only elapsed eligible workdays absent.
-func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceEmployeeCard, dates []WorkspaceDate, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64, summaryCells map[string]map[string]AttendanceDailySummary, clockCells map[string]map[string]workspaceClockCell, now time.Time) WorkspaceAttendanceMatrix {
+func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceEmployeeCard, dates []WorkspaceDate, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64, attendanceEvidence map[string]map[string]workspaceAttendanceEvidence, clockCells map[string]map[string]workspaceClockCell, now time.Time) WorkspaceAttendanceMatrix {
 	rows := []WorkspaceAttendanceRow{}
 	totalLeaveHours := 0.0
 	totalOvertimeHours := 0.0
@@ -376,11 +444,15 @@ func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceE
 				cell.Overtime = overtime
 				row.Summary.OvertimeHours += overtime
 			}
-			if summary, ok := summaryCells[employee.ID][date.Key]; ok && summary.ClockHours > 0 && cell.Type == "work" {
-				cell.Type = "work"
-				cell.Hours = summary.ClockHours
-				cell.Label = "eHRMS"
-				cell.Recorded = true
+			if evidence, ok := attendanceEvidence[employee.ID][date.Key]; ok && eligible {
+				row.Summary.AttendedHours += math.Max(0, evidence.Hours)
+				if cell.Type == "work" && evidence.Hours > 0 {
+					cell.Hours = evidence.Hours
+					if evidence.Source == "ehrms" {
+						cell.Label = "eHRMS"
+						cell.Recorded = true
+					}
+				}
 			}
 			if clock, ok := clockCells[employee.ID][date.Key]; ok && cell.Type == "work" && (clock.In != "" || clock.Out != "") {
 				cell.Recorded = true
@@ -401,7 +473,6 @@ func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceE
 			row.Cells = append(row.Cells, cell)
 		}
 		row.Summary.DueHours = float64(workdays) * workspaceDayHours
-		row.Summary.AttendedHours = math.Max(0, row.Summary.DueHours-row.Summary.LeaveHours-row.Summary.DeductHours) + row.Summary.OvertimeHours
 		if row.Summary.LeaveHours == 0 && !hasAbsence && hasRecordedAttendance {
 			perfect++
 		}
@@ -498,17 +569,18 @@ func workspaceEmployeeCards(employees []Employee, orgNames map[string]string) ma
 	out := map[string]WorkspaceEmployeeCard{}
 	for _, employee := range employees {
 		out[employee.ID] = WorkspaceEmployeeCard{
-			ID:       workspaceEmployeeDisplayID(employee),
-			Avatar:   workspaceAvatar(employee.Name),
-			NameZH:   employee.Name,
-			NameEN:   workspaceEmployeeNameEN(employee),
-			Email:    employee.CompanyEmail,
-			Dept:     workspaceOrgName(orgNames, employee.OrgUnitID),
-			Title:    employee.Position,
-			Type:     workspaceCategoryLabel(employee.Category),
-			Phone:    employee.Phone,
-			Status:   workspaceStatusLabel(workspaceEmployeeStatus(employee)),
-			HireDate: workspaceFormatDateSlash(employee.HireDate),
+			ID:         workspaceEmployeeDisplayID(employee),
+			EmployeeID: employee.ID,
+			Avatar:     workspaceAvatar(employee.Name),
+			NameZH:     employee.Name,
+			NameEN:     workspaceEmployeeNameEN(employee),
+			Email:      employee.CompanyEmail,
+			Dept:       workspaceOrgName(orgNames, employee.OrgUnitID),
+			Title:      employee.Position,
+			Type:       workspaceCategoryLabel(employee.Category),
+			Phone:      employee.Phone,
+			Status:     workspaceStatusLabel(workspaceEmployeeStatus(employee)),
+			HireDate:   workspaceFormatDateSlash(employee.HireDate),
 		}
 	}
 	return out

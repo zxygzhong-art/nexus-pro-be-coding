@@ -159,7 +159,7 @@ func (c HRService) BatchDeleteEmployees(ctx RequestContext, input BatchDeleteEmp
 	return BatchEmployeeResponse{Results: results}, nil
 }
 
-// batchEmployeeAuditResult 處理批次員工稽核結果。
+// batchEmployeeAuditResult 處理批次員工稽覈結果。
 func batchEmployeeAuditResult(succeeded, total int) string {
 	switch {
 	case total <= 0 || succeeded == 0:
@@ -609,7 +609,7 @@ func employeeTransitionType(current, next string) string {
 	}
 }
 
-// employeeStatusTransitionAuditAction 處理員工狀態轉換稽核 action。
+// employeeStatusTransitionAuditAction 處理員工狀態轉換稽覈 action。
 func employeeStatusTransitionAuditAction(current, next string) string {
 	switch employeeTransitionType(current, next) {
 	case "reinstatement":

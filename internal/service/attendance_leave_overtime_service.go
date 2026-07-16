@@ -20,6 +20,9 @@ func (c AttendanceService) CreateLeaveRequest(ctx RequestContext, input CreateLe
 	if employeeID != strings.TrimSpace(account.EmployeeID) {
 		return LeaveRequest{}, Forbidden("proxy attendance submission requires a dedicated authorization path").WithReasonCode("attendance_proxy_submission_not_supported")
 	}
+	if _, err := c.requireAttendanceEmployeeActive(ctx, employeeID); err != nil {
+		return LeaveRequest{}, err
+	}
 	instance, err := c.submitAttendanceCompatibilityForm(ctx, account, "leave-request", map[string]any{
 		"leave_type": input.LeaveType,
 		"start_at":   input.StartAt,
@@ -290,6 +293,9 @@ func (c AttendanceService) CreateOvertimeRequest(ctx RequestContext, input Creat
 	if employeeID != strings.TrimSpace(account.EmployeeID) {
 		return OvertimeRequest{}, Forbidden("proxy attendance submission requires a dedicated authorization path").WithReasonCode("attendance_proxy_submission_not_supported")
 	}
+	if _, err := c.requireAttendanceEmployeeActive(ctx, employeeID); err != nil {
+		return OvertimeRequest{}, err
+	}
 	overtimeType, err := normalizeOvertimeType(input.OvertimeType)
 	if err != nil {
 		return OvertimeRequest{}, err
@@ -498,7 +504,7 @@ func (c AttendanceService) applyOvertimeWorkflowReview(ctx RequestContext, insta
 	return c.store.UpsertOvertimeRequest(goContext(ctx), request)
 }
 
-// creditCompensatoryLeaveBalance 依核准加班時數累積補休假餘額。
+// creditCompensatoryLeaveBalance 依覈準加班時數累積補休假餘額。
 func (c AttendanceService) creditCompensatoryLeaveBalance(ctx RequestContext, employeeID string, hours float64) error {
 	if hours <= 0 {
 		return nil

@@ -141,6 +141,20 @@ WHERE tenant_id = $1
   AND revoked_at IS NULL
   AND expires_at > now();
 
+-- name: GetAuthzAssumableRoleSession :one
+SELECT * FROM authz_assumable_role_sessions
+WHERE tenant_id = $1
+  AND id = $2;
+
+-- name: RevokeAuthzAssumableRoleSession :one
+UPDATE authz_assumable_role_sessions
+SET revoked_at = sqlc.arg(revoked_at)
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND account_id = sqlc.arg(account_id)
+  AND id = sqlc.arg(id)
+  AND revoked_at IS NULL
+RETURNING *;
+
 -- name: ListActiveAuthzAssumableRoleSessionsForRole :many
 SELECT * FROM authz_assumable_role_sessions
 WHERE tenant_id = $1

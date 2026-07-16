@@ -33,6 +33,26 @@ func (c AuthzService) Check(ctx RequestContext, req CheckRequest) (result CheckR
 	return result, err
 }
 
+// CheckCurrentAccessProjection authorizes the caller-identity bootstrap used by GET /me.
+// A supplied assumed-role session is always validated first, but its boundary must not
+// block the endpoint that projects that same boundary back to the client.
+func (c AuthzService) CheckCurrentAccessProjection(ctx RequestContext, req CheckRequest) (result CheckResult, err error) {
+	ctx, span := startServiceSpan(ctx, "service.authz.check_current_access_projection", authzSpanAttributes(req)...)
+	defer func() {
+		setAuthzSpanResult(span, result)
+		finishServiceSpan(span, err)
+	}()
+	account, _, err := c.resolveAccount(ctx)
+	if err != nil {
+		return CheckResult{}, err
+	}
+	result, err = c.evaluateCurrentAccessProjection(ctx, account, req)
+	if err == nil && c.shouldAuditRouteAuthzCheck(ctx, result) {
+		_ = c.auditAuthzTarget(ctx, AuditTarget{}.fromRequest(req), result)
+	}
+	return result, err
+}
+
 // BatchCheck 處理批次 check 的服務流程。
 func (c AuthzService) BatchCheck(ctx RequestContext, req BatchCheckRequest) (result BatchCheckResult, err error) {
 	ctx, span := startServiceSpan(ctx, "service.authz.batch_check")
@@ -119,12 +139,12 @@ func (c AuthzService) Simulate(ctx RequestContext, req AuthzSimulationRequest) (
 	return result, nil
 }
 
-// shouldAuditRouteAuthzCheck 處理 should 稽核路由授權 check 的服務流程。
+// shouldAuditRouteAuthzCheck 處理 should 稽覈路由授權 check 的服務流程。
 func (c AuthzService) shouldAuditRouteAuthzCheck(ctx RequestContext, result CheckResult) bool {
 	return !result.Allowed
 }
 
-// AuditDecision 處理稽核決策的服務流程。
+// AuditDecision 處理稽覈決策的服務流程。
 func (c AuthzService) AuditDecision(ctx RequestContext, req CheckRequest, result CheckResult) error {
 	return c.auditAuthzTarget(ctx, AuditTarget{}.fromRequest(req), result)
 }
