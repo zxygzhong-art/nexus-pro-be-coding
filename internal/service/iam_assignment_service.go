@@ -2,7 +2,6 @@ package service
 
 import (
 	"nexus-pro-be/internal/utils"
-	"sort"
 	"strings"
 )
 
@@ -524,20 +523,12 @@ func (c IAMService) ListOutboxEventPage(ctx RequestContext, query OutboxEventQue
 	if _, _, err := c.requireIAMAuthz(ctx, ResourceOutboxEvent, ActionRead, ""); err != nil {
 		return PageResponse[OutboxEvent]{}, err
 	}
-	items, err := c.Service.store.ListOutboxEvents(goContext(ctx), ctx.TenantID)
+	page = utils.NormalizePageRequest(page)
+	items, total, err := c.Service.store.ListOutboxEventPage(goContext(ctx), ctx.TenantID, query, page)
 	if err != nil {
 		return PageResponse[OutboxEvent]{}, err
 	}
-	items = filterOutboxEvents(items, query)
-	sort.SliceStable(items, func(i, j int) bool {
-		switch page.Sort {
-		case "created_at_asc":
-			return items[i].CreatedAt.Before(items[j].CreatedAt)
-		default:
-			return items[i].CreatedAt.After(items[j].CreatedAt)
-		}
-	})
-	return utils.PageResponse(items, page), nil
+	return utils.PageResponseFromStore(items, total, page), nil
 }
 
 // RetryOutboxEvent resets failed or parked outbox events after the dispatch path is ready.
@@ -577,46 +568,7 @@ func (c IAMService) RetryOutboxEvent(ctx RequestContext, id string) (OutboxEvent
 
 // outboxEventByID 依 ID 取得 outbox 事件。
 func (c IAMService) outboxEventByID(ctx RequestContext, id string) (OutboxEvent, bool, error) {
-	items, err := c.Service.store.ListOutboxEvents(goContext(ctx), ctx.TenantID)
-	if err != nil {
-		return OutboxEvent{}, false, err
-	}
-	for _, item := range items {
-		if item.ID == id {
-			return item, true, nil
-		}
-	}
-	return OutboxEvent{}, false, nil
-}
-
-// filterOutboxEvents 套用 outbox 管理查詢條件。
-func filterOutboxEvents(items []OutboxEvent, query OutboxEventQuery) []OutboxEvent {
-	status := strings.TrimSpace(query.Status)
-	eventType := strings.TrimSpace(query.EventType)
-	lastError := strings.TrimSpace(query.LastError)
-	out := make([]OutboxEvent, 0, len(items))
-	for _, item := range items {
-		if status != "" && item.Status != status {
-			continue
-		}
-		if eventType != "" && item.EventType != eventType {
-			continue
-		}
-		if lastError != "" && !strings.Contains(strings.ToLower(item.LastError), strings.ToLower(lastError)) {
-			continue
-		}
-		if query.RetryCount != nil && item.RetryCount != *query.RetryCount {
-			continue
-		}
-		if query.HasError != nil {
-			hasError := strings.TrimSpace(item.LastError) != ""
-			if hasError != *query.HasError {
-				continue
-			}
-		}
-		out = append(out, item)
-	}
-	return out
+	return c.Service.store.GetOutboxEventByID(goContext(ctx), ctx.TenantID, id)
 }
 
 // validDataScopeType 處理有效資料範圍 type。

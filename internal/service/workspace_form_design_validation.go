@@ -143,12 +143,24 @@ func validateWorkspaceFormDesignInput(fields []domain.PlatformFormBuilderField, 
 				}
 			}
 		case "condition":
-			if strings.TrimSpace(config.Field) == "" || strings.TrimSpace(config.Operator) == "" || strings.TrimSpace(config.Value) == "" {
+			field := strings.TrimSpace(config.Field)
+			value := strings.TrimSpace(config.Value)
+			if field == "" || strings.TrimSpace(config.Operator) == "" || value == "" {
 				fieldErrors = append(fieldErrors, domain.FieldError{
 					Field:   prefix + ".config",
 					Code:    "required",
 					Message: "condition stage requires field, operator, and value",
 				})
+			} else if field != "level" {
+				// Runtime evaluates every non-level condition field numerically;
+				// reject values that would otherwise degrade to a silent zero.
+				if _, err := strconv.ParseFloat(value, 64); err != nil {
+					fieldErrors = append(fieldErrors, domain.FieldError{
+						Field:   prefix + ".config.value",
+						Code:    "invalid",
+						Message: "condition value must be a number",
+					})
+				}
 			}
 		}
 	}

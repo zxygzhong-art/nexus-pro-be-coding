@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -198,4 +199,26 @@ func (m *fakeEventMessage) Ack() error {
 func (m *fakeEventMessage) Nak() error {
 	m.naks++
 	return m.nakErr
+}
+
+
+// TestOpenFGAConsumerProcessedIDsBounded 驗證去重集合達上限時整體重建，最舊事件可被重新處理。
+func TestOpenFGAConsumerProcessedIDsBounded(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStore()
+	writer := &recordingTupleWriter{}
+	messages := make([]*fakeEventMessage, 0, 10002)
+	for i := 0; i <= 10000; i++ {
+		messages = append(messages, newOpenFGAEventMessage(t, fmt.Sprintf("outbox-%d", i), string(domain.EventOpenFGARelationshipWrite), "tenant-1", 1))
+	}
+	// After the cap resets the dedupe set, the oldest event ID is processed again.
+	messages = append(messages, newOpenFGAEventMessage(t, "outbox-0", string(domain.EventOpenFGARelationshipWrite), "tenant-1", 2))
+	subscriber := &fakeEventSubscriber{messages: messages}
+	consumer := jobs.NewOpenFGAConsumer(subscriber, writer, store, nil)
+
+	consumer.Run(ctx, jobs.OpenFGAConsumerOptions{})
+
+	if len(writer.changes) != 10002 {
+		t.Fatalf("expected the bounded dedupe set to reprocess the oldest event after reset, got %d writes", len(writer.changes))
+	}
 }

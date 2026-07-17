@@ -19,6 +19,10 @@ const (
 	defaultOpenFGAConsumerMaxDeliver = 5
 	defaultOpenFGAConsumerAckWait    = 30 * time.Second
 	openFGAConsumerFilterSubject     = "events.iam.relationship.*"
+	// openFGAConsumerMaxProcessedIDs bounds the in-process dedupe set. It is only
+	// a second line of defense behind JetStream's server-side dedupe window, so
+	// reaching the cap resets the set instead of growing without limit.
+	openFGAConsumerMaxProcessedIDs = 10000
 )
 
 // OpenFGAConsumerOptions defines OpenFGA durable consumer options.
@@ -211,6 +215,9 @@ func (c *OpenFGAConsumer) isProcessed(eventID string) bool {
 func (c *OpenFGAConsumer) markProcessed(eventID string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	if len(c.processed) >= openFGAConsumerMaxProcessedIDs {
+		c.processed = make(map[string]struct{}, openFGAConsumerMaxProcessedIDs)
+	}
 	c.processed[eventID] = struct{}{}
 }
 

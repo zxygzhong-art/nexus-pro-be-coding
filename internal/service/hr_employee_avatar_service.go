@@ -125,7 +125,8 @@ func (c HRService) UpdateEmployeeAvatar(ctx RequestContext, id string, input Emp
 		oldKey = stringFromMap(next.BasicInfo, "avatar_object_key")
 		newKey = employeeAvatarObjectKey(ctx.TenantID, next.ID, input.Filename, input.ContentType)
 		if err := tx.objectStore.PutObject(goContext(ctx), newKey, input.ContentType, input.Content); err != nil {
-			return BadRequest("store avatar: " + err.Error())
+			tx.logWarn(ctx, "store employee avatar failed", "object_key", newKey, "error", err)
+			return domain.E(502, "object_store_error", "employee avatar storage failed")
 		}
 		newObjectWritten = true
 		next.BasicInfo = mergeMap(next.BasicInfo, map[string]any{

@@ -3,6 +3,7 @@ package jobs_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,6 +12,42 @@ import (
 	"nexus-pro-be/internal/repository/memory"
 	"nexus-pro-be/internal/service"
 )
+
+// TestIdentityProvisioningProcessorContinuesAfterTenantFailure 驗證單一租戶處理失敗不阻塞其他租戶。
+func TestIdentityProvisioningProcessorContinuesAfterTenantFailure(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 17, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-2", Name: "Tenant 2", CreatedAt: now})
+	svc := &stubProvisioningService{failTenant: "tenant-1"}
+	processor := jobs.NewIdentityProvisioningOutboxProcessor(store, svc, nil)
+
+	processed, err := processor.ProcessAllTenants(ctx, jobs.IdentityProvisioningOutboxOptions{})
+	if err == nil || !strings.Contains(err.Error(), "tenant-1") {
+		t.Fatalf("expected aggregated tenant-1 error, got %v", err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected tenant-2 to be processed despite tenant-1 failure, processed = %d", processed)
+	}
+	if len(svc.attempts) != 2 {
+		t.Fatalf("expected both tenants attempted, got %+v", svc.attempts)
+	}
+}
+
+type stubProvisioningService struct {
+	failTenant string
+	attempts   []string
+}
+
+// ProcessIdentityProvisioningOutbox 驗證指定租戶的處理失敗。
+func (s *stubProvisioningService) ProcessIdentityProvisioningOutbox(_ context.Context, tenantID string, _, _ int) (int, error) {
+	s.attempts = append(s.attempts, tenantID)
+	if tenantID == s.failTenant {
+		return 0, errors.New("provisioning store unavailable")
+	}
+	return 1, nil
+}
 
 type flakyIdentityProvisioner struct {
 	failuresLeft int

@@ -308,3 +308,63 @@ func TestWriteRelationshipTuplesReturnsDetailedHTTPError(t *testing.T) {
 		}
 	}
 }
+
+
+// TestCheckerSendsBearerTokenWhenConfigured 驗證設定 token 後所有 OpenFGA 請求帶 Authorization。
+func TestCheckerSendsBearerTokenWhenConfigured(t *testing.T) {
+	got := map[string]string{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got[r.Method+" "+r.URL.Path] = r.Header.Get("Authorization")
+		if r.URL.Path == "/stores/store-1/check" {
+			_ = json.NewEncoder(w).Encode(map[string]bool{"allowed": true})
+			return
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+	checker := openfga.NewChecker(server.URL, "store-1", server.Client()).WithAuthToken("secret-token")
+
+	if err := checker.Ping(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := checker.CheckRelationship(context.Background(), domain.RelationshipCheck{
+		TenantID: "tenant-1", Subject: "account:acct-1", Relation: "viewer", Object: "hr.employee:emp-1",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := checker.WriteRelationshipTuples(context.Background(), []domain.AuthzRelationshipTupleChange{{
+		Operation: domain.AuthzRelationshipTupleWrite,
+		Tuple: domain.AuthzRelationshipTuple{
+			ObjectType: "hr.employee", ObjectID: "emp-1", Relation: "owner", SubjectType: "account", SubjectID: "acct-1",
+		},
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(got) != 3 {
+		t.Fatalf("expected 3 recorded requests, got %+v", got)
+	}
+	for label, header := range got {
+		if header != "Bearer secret-token" {
+			t.Fatalf("%s: expected bearer token header, got %q", label, header)
+		}
+	}
+}
+
+// TestCheckerOmitsBearerTokenWhenEmpty 驗證未設定 token 時不帶 Authorization（向後相容）。
+func TestCheckerOmitsBearerTokenWhenEmpty(t *testing.T) {
+	var gotAuth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	checker := openfga.NewChecker(server.URL, "store-1", server.Client()).WithAuthToken("  ")
+
+	if err := checker.Ping(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if gotAuth != "" {
+		t.Fatalf("expected no Authorization header, got %q", gotAuth)
+	}
+}

@@ -28,6 +28,7 @@ func TestWorkflowHTTPPostgresAcceptance(t *testing.T) {
 	applicantID := "acct_" + suffix + "_applicant"
 	approverID := "acct_" + suffix + "_approver"
 	applicantEmpID := "emp_" + suffix + "_applicant"
+	ctx = tenantScopedContext(tenantID)
 
 	if err := store.UpsertTenant(ctx, domain.Tenant{ID: tenantID, Name: tenantID, CreatedAt: now}); err != nil {
 		t.Fatal(err)

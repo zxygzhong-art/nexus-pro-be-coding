@@ -269,6 +269,63 @@ func TestOutboxDispatcherClaimIsExclusiveAcrossWorkers(t *testing.T) {
 	}
 }
 
+// TestOutboxDispatcherContinuesAfterTenantFailure 驗證單一租戶處理失敗不阻塞其他租戶。
+func TestOutboxDispatcherContinuesAfterTenantFailure(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 17, 8, 0, 0, 0, time.UTC)
+	store := &failingClaimStore{Store: memory.NewStore(), failTenant: "tenant-1"}
+	_ = store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
+	_ = store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-2", Name: "Tenant 2", CreatedAt: now})
+	_ = store.AppendOutboxEvent(ctx, domain.OutboxEvent{
+		ID:            "outbox-2",
+		TenantID:      "tenant-2",
+		EventType:     string(domain.EventOpenFGARelationshipWrite),
+		AggregateType: domain.OutboxAggregateAuthz,
+		Payload: map[string]any{
+			"object_type":  "hr.employee",
+			"object_id":    "emp-1",
+			"relation":     "owner",
+			"subject_type": "account",
+			"subject_id":   "acct-1",
+		},
+		Status:    "pending",
+		CreatedAt: now,
+	})
+	writer := &recordingTupleWriter{}
+	dispatcher := jobs.NewOutboxDispatcher(store, writer, nil)
+
+	processed, err := dispatcher.ProcessAllTenants(ctx, jobs.OutboxDispatchOptions{BatchSize: 10})
+	if err == nil || !strings.Contains(err.Error(), "tenant-1") {
+		t.Fatalf("expected aggregated tenant-1 error, got %v", err)
+	}
+	if processed != 1 {
+		t.Fatalf("expected tenant-2 to be processed despite tenant-1 failure, processed = %d", processed)
+	}
+	if len(writer.changes) != 1 {
+		t.Fatalf("expected tenant-2 OpenFGA write, got %+v", writer.changes)
+	}
+	events, err := store.ListOutboxEvents(ctx, "tenant-2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Status != "succeeded" {
+		t.Fatalf("expected tenant-2 event succeeded, got %+v", events)
+	}
+}
+
+type failingClaimStore struct {
+	*memory.Store
+	failTenant string
+}
+
+// ClaimOutboxEvents 驗證指定租戶的 claim 失敗。
+func (s *failingClaimStore) ClaimOutboxEvents(ctx context.Context, tenantID string, limit, maxRetries int) ([]domain.OutboxEvent, error) {
+	if tenantID == s.failTenant {
+		return nil, errors.New("claim query failed")
+	}
+	return s.Store.ClaimOutboxEvents(ctx, tenantID, limit, maxRetries)
+}
+
 type recordingTupleWriter struct {
 	err     error
 	changes []domain.AuthzRelationshipTupleChange

@@ -29,6 +29,7 @@ type Querier interface {
 	CountFormInstancesByQuery(ctx context.Context, arg CountFormInstancesByQueryParams) (int64, error)
 	CountLeaveRequestsByQuery(ctx context.Context, arg CountLeaveRequestsByQueryParams) (int64, error)
 	CountNotificationTones(ctx context.Context, arg CountNotificationTonesParams) (CountNotificationTonesRow, error)
+	CountOutboxEventsFiltered(ctx context.Context, arg CountOutboxEventsFilteredParams) (int64, error)
 	CountUnreadNotifications(ctx context.Context, arg CountUnreadNotificationsParams) (int32, error)
 	CreateAuthzAssumableRoleSession(ctx context.Context, arg CreateAuthzAssumableRoleSessionParams) (AuthzAssumableRoleSession, error)
 	CreateKnowledgeDocumentChunk(ctx context.Context, arg CreateKnowledgeDocumentChunkParams) error
@@ -55,6 +56,7 @@ type Querier interface {
 	DeletePermissionSetItemsForSet(ctx context.Context, arg DeletePermissionSetItemsForSetParams) error
 	DeletePlatformTaskItem(ctx context.Context, arg DeletePlatformTaskItemParams) error
 	DeletePlatformTaskTodo(ctx context.Context, arg DeletePlatformTaskTodoParams) error
+	DeleteSucceededOutboxEventsBefore(ctx context.Context, arg DeleteSucceededOutboxEventsBeforeParams) (int64, error)
 	DeleteUserGroup(ctx context.Context, arg DeleteUserGroupParams) (UserGroup, error)
 	EnsureLeaveTypeCatalog(ctx context.Context, arg EnsureLeaveTypeCatalogParams) error
 	ExpireLeaveTypeExternalMapping(ctx context.Context, arg ExpireLeaveTypeExternalMappingParams) (int64, error)
@@ -109,6 +111,7 @@ type Querier interface {
 	GetLeaveRequestByFormInstanceID(ctx context.Context, arg GetLeaveRequestByFormInstanceIDParams) (LeaveRequest, error)
 	GetLeaveTypeExternalMapping(ctx context.Context, arg GetLeaveTypeExternalMappingParams) (GetLeaveTypeExternalMappingRow, error)
 	GetOrgUnit(ctx context.Context, arg GetOrgUnitParams) (OrgUnit, error)
+	GetOutboxEventByID(ctx context.Context, arg GetOutboxEventByIDParams) (OutboxEvent, error)
 	GetOvertimeRequest(ctx context.Context, arg GetOvertimeRequestParams) (OvertimeRequest, error)
 	GetOvertimeRequestByFormInstanceID(ctx context.Context, arg GetOvertimeRequestByFormInstanceIDParams) (OvertimeRequest, error)
 	GetPermissionCatalogItemByKey(ctx context.Context, arg GetPermissionCatalogItemByKeyParams) (Permission, error)
@@ -195,6 +198,7 @@ type Querier interface {
 	ListNotificationItems(ctx context.Context, arg ListNotificationItemsParams) ([]ListNotificationItemsRow, error)
 	ListOpenLeaveTypeSyncIssues(ctx context.Context, tenantID string) ([]LeaveTypeSyncIssue, error)
 	ListOrgUnits(ctx context.Context, tenantID string) ([]OrgUnit, error)
+	ListOutboxEventPage(ctx context.Context, arg ListOutboxEventPageParams) ([]OutboxEvent, error)
 	ListOutboxEvents(ctx context.Context, tenantID string) ([]OutboxEvent, error)
 	ListOvertimeRequestsByQuery(ctx context.Context, arg ListOvertimeRequestsByQueryParams) ([]OvertimeRequest, error)
 	ListPendingAssigneeStageInstanceIDs(ctx context.Context, arg ListPendingAssigneeStageInstanceIDsParams) ([]string, error)

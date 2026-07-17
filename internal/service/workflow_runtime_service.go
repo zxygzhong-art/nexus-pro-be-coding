@@ -869,11 +869,17 @@ func evaluateWorkflowCondition(config domain.WorkflowStageConfig, applicant doma
 		return false
 	case "amount":
 		left := workflowPayloadNumber(payload, "amount", "total_amount", "totalAmount")
-		right, _ := strconv.ParseFloat(strings.TrimSpace(config.Value), 64)
+		right, err := strconv.ParseFloat(strings.TrimSpace(config.Value), 64)
+		if err != nil {
+			return false
+		}
 		return compareWorkflowNumbers(left, right, config.Operator)
 	default:
 		left := workflowPayloadNumber(payload, "hours", "leave_hours", "leaveHours")
-		right, _ := strconv.ParseFloat(strings.TrimSpace(config.Value), 64)
+		right, err := strconv.ParseFloat(strings.TrimSpace(config.Value), 64)
+		if err != nil {
+			return false
+		}
 		return compareWorkflowNumbers(left, right, config.Operator)
 	}
 }

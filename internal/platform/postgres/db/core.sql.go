@@ -457,6 +457,46 @@ func (q *Queries) CountLeaveRequestsByQuery(ctx context.Context, arg CountLeaveR
 	return count, err
 }
 
+const countOutboxEventsFiltered = `-- name: CountOutboxEventsFiltered :one
+SELECT count(*) FROM outbox_events
+WHERE tenant_id = $1
+  AND ($2::text = '' OR status = $2)
+  AND ($3::text = '' OR event_type = $3)
+  AND (
+    $4::text = ''
+    OR lower(outbox_events.last_error) LIKE '%' || lower($4::text) || '%'
+  )
+  AND (NOT $5::bool OR retry_count = $6::int)
+  AND (NOT $7::bool OR (btrim(outbox_events.last_error) <> '') = $8::bool)
+`
+
+type CountOutboxEventsFilteredParams struct {
+	TenantID       string `json:"tenant_id"`
+	Status         string `json:"status"`
+	EventType      string `json:"event_type"`
+	LastError      string `json:"last_error"`
+	HasRetryCount  bool   `json:"has_retry_count"`
+	RetryCount     int32  `json:"retry_count"`
+	FilterHasError bool   `json:"filter_has_error"`
+	HasError       bool   `json:"has_error"`
+}
+
+func (q *Queries) CountOutboxEventsFiltered(ctx context.Context, arg CountOutboxEventsFilteredParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countOutboxEventsFiltered,
+		arg.TenantID,
+		arg.Status,
+		arg.EventType,
+		arg.LastError,
+		arg.HasRetryCount,
+		arg.RetryCount,
+		arg.FilterHasError,
+		arg.HasError,
+	)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const deleteAssumableRole = `-- name: DeleteAssumableRole :one
 DELETE FROM assumable_roles
 WHERE tenant_id = $1 AND id = $2
@@ -610,6 +650,26 @@ type DeletePlatformTaskTodoParams struct {
 func (q *Queries) DeletePlatformTaskTodo(ctx context.Context, arg DeletePlatformTaskTodoParams) error {
 	_, err := q.db.Exec(ctx, deletePlatformTaskTodo, arg.TenantID, arg.AccountID, arg.ID)
 	return err
+}
+
+const deleteSucceededOutboxEventsBefore = `-- name: DeleteSucceededOutboxEventsBefore :execrows
+DELETE FROM outbox_events
+WHERE tenant_id = $1
+  AND status = 'succeeded'
+  AND created_at < $2
+`
+
+type DeleteSucceededOutboxEventsBeforeParams struct {
+	TenantID string             `json:"tenant_id"`
+	Before   pgtype.Timestamptz `json:"before"`
+}
+
+func (q *Queries) DeleteSucceededOutboxEventsBefore(ctx context.Context, arg DeleteSucceededOutboxEventsBeforeParams) (int64, error) {
+	result, err := q.db.Exec(ctx, deleteSucceededOutboxEventsBefore, arg.TenantID, arg.Before)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const deleteUserGroup = `-- name: DeleteUserGroup :one
@@ -1985,6 +2045,35 @@ func (q *Queries) GetOrgUnit(ctx context.Context, arg GetOrgUnitParams) (OrgUnit
 		&i.Closed,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getOutboxEventByID = `-- name: GetOutboxEventByID :one
+SELECT id, tenant_id, event_type, aggregate_type, aggregate_id, payload, status, retry_count, last_error, created_at, processed_at FROM outbox_events
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetOutboxEventByIDParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetOutboxEventByID(ctx context.Context, arg GetOutboxEventByIDParams) (OutboxEvent, error) {
+	row := q.db.QueryRow(ctx, getOutboxEventByID, arg.TenantID, arg.ID)
+	var i OutboxEvent
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EventType,
+		&i.AggregateType,
+		&i.AggregateID,
+		&i.Payload,
+		&i.Status,
+		&i.RetryCount,
+		&i.LastError,
+		&i.CreatedAt,
+		&i.ProcessedAt,
 	)
 	return i, err
 }
@@ -4285,6 +4374,83 @@ func (q *Queries) ListOrgUnits(ctx context.Context, tenantID string) ([]OrgUnit,
 			&i.Closed,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listOutboxEventPage = `-- name: ListOutboxEventPage :many
+SELECT id, tenant_id, event_type, aggregate_type, aggregate_id, payload, status, retry_count, last_error, created_at, processed_at FROM outbox_events
+WHERE tenant_id = $1
+  AND ($2::text = '' OR status = $2)
+  AND ($3::text = '' OR event_type = $3)
+  AND (
+    $4::text = ''
+    OR lower(outbox_events.last_error) LIKE '%' || lower($4::text) || '%'
+  )
+  AND (NOT $5::bool OR retry_count = $6::int)
+  AND (NOT $7::bool OR (btrim(outbox_events.last_error) <> '') = $8::bool)
+ORDER BY
+  CASE WHEN $9::text = 'created_at_asc' THEN created_at END ASC,
+  created_at DESC,
+  id ASC
+LIMIT $11::int
+OFFSET $10::int
+`
+
+type ListOutboxEventPageParams struct {
+	TenantID       string `json:"tenant_id"`
+	Status         string `json:"status"`
+	EventType      string `json:"event_type"`
+	LastError      string `json:"last_error"`
+	HasRetryCount  bool   `json:"has_retry_count"`
+	RetryCount     int32  `json:"retry_count"`
+	FilterHasError bool   `json:"filter_has_error"`
+	HasError       bool   `json:"has_error"`
+	Sort           string `json:"sort"`
+	OffsetCount    int32  `json:"offset_count"`
+	LimitCount     int32  `json:"limit_count"`
+}
+
+func (q *Queries) ListOutboxEventPage(ctx context.Context, arg ListOutboxEventPageParams) ([]OutboxEvent, error) {
+	rows, err := q.db.Query(ctx, listOutboxEventPage,
+		arg.TenantID,
+		arg.Status,
+		arg.EventType,
+		arg.LastError,
+		arg.HasRetryCount,
+		arg.RetryCount,
+		arg.FilterHasError,
+		arg.HasError,
+		arg.Sort,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []OutboxEvent
+	for rows.Next() {
+		var i OutboxEvent
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.EventType,
+			&i.AggregateType,
+			&i.AggregateID,
+			&i.Payload,
+			&i.Status,
+			&i.RetryCount,
+			&i.LastError,
+			&i.CreatedAt,
+			&i.ProcessedAt,
 		); err != nil {
 			return nil, err
 		}

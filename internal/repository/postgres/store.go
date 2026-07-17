@@ -3482,6 +3482,63 @@ func (s *Store) ListOutboxEvents(execCtx context.Context, tenantID string) ([]do
 	return mapSlice(items, fromOutboxEvent), nil
 }
 
+// GetOutboxEventByID 從儲存層依主鍵取得 outbox 事件。
+func (s *Store) GetOutboxEventByID(execCtx context.Context, tenantID, id string) (domain.OutboxEvent, bool, error) {
+	v, err := s.q.GetOutboxEventByID(tenantContext(execCtx, tenantID), sqlc.GetOutboxEventByIDParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.OutboxEvent{}, false, nil
+	}
+	if err != nil {
+		return domain.OutboxEvent{}, false, err
+	}
+	return fromOutboxEvent(v), true, nil
+}
+
+// ListOutboxEventPage 從儲存層篩選並列出 outbox 事件分頁。
+func (s *Store) ListOutboxEventPage(execCtx context.Context, tenantID string, query domain.OutboxEventQuery, page domain.PageRequest) ([]domain.OutboxEvent, int, error) {
+	page = utils.NormalizePageRequest(page)
+	params := outboxEventFilterParams(tenantID, query, page)
+	total, err := s.q.CountOutboxEventsFiltered(tenantContext(execCtx, tenantID), sqlc.CountOutboxEventsFilteredParams{
+		TenantID:       params.TenantID,
+		Status:         params.Status,
+		EventType:      params.EventType,
+		LastError:      params.LastError,
+		HasRetryCount:  params.HasRetryCount,
+		RetryCount:     params.RetryCount,
+		FilterHasError: params.FilterHasError,
+		HasError:       params.HasError,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	items, err := s.q.ListOutboxEventPage(tenantContext(execCtx, tenantID), params)
+	if err != nil {
+		return nil, 0, err
+	}
+	return mapSlice(items, fromOutboxEvent), int(total), nil
+}
+
+func outboxEventFilterParams(tenantID string, query domain.OutboxEventQuery, page domain.PageRequest) sqlc.ListOutboxEventPageParams {
+	params := sqlc.ListOutboxEventPageParams{
+		TenantID:    tenantID,
+		Status:      strings.TrimSpace(query.Status),
+		EventType:   strings.TrimSpace(query.EventType),
+		LastError:   strings.TrimSpace(query.LastError),
+		Sort:        page.Sort,
+		OffsetCount: int32((page.Page - 1) * page.PageSize),
+		LimitCount:  int32(page.PageSize),
+	}
+	if query.RetryCount != nil {
+		params.HasRetryCount = true
+		params.RetryCount = int32(*query.RetryCount)
+	}
+	if query.HasError != nil {
+		params.FilterHasError = true
+		params.HasError = *query.HasError
+	}
+	return params
+}
+
 // ClaimOutboxEvents atomically claims dispatchable outbox events for a worker.
 func (s *Store) ClaimOutboxEvents(execCtx context.Context, tenantID string, limit, maxRetries int) ([]domain.OutboxEvent, error) {
 	if limit <= 0 {
@@ -3512,6 +3569,14 @@ func (s *Store) UpdateOutboxEvent(execCtx context.Context, v domain.OutboxEvent)
 		ProcessedAt: nullableTimestamptz(v.ProcessedAt),
 	})
 	return err
+}
+
+// DeleteSucceededOutboxEventsBefore 從儲存層刪除已成功且早於 cutoff 的 outbox 事件。
+func (s *Store) DeleteSucceededOutboxEventsBefore(execCtx context.Context, tenantID string, before time.Time) (int64, error) {
+	return s.q.DeleteSucceededOutboxEventsBefore(tenantContext(execCtx, tenantID), sqlc.DeleteSucceededOutboxEventsBeforeParams{
+		TenantID: tenantID,
+		Before:   timestamptz(before),
+	})
 }
 
 // isNotFound 判斷是否為not found。

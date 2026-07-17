@@ -84,12 +84,37 @@ jobs:
           check-latest: true
           cache: true
 
-      - name: Repository tests
+      - name: Run migrations
         env:
           DB_HOST: localhost
           DB_PORT: 5432
           DB_USERNAME: nexus
           DB_PASSWORD: nexus
+          DB_NAME: nexus_pro_be
+          DB_SSLMODE: disable
+        run: |
+          DATABASE_URL="postgres://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSLMODE}"
+          go run github.com/pressly/goose/v3/cmd/goose@v3.27.2 -dir db/migrations postgres "$DATABASE_URL" up
+
+      - name: Create non-superuser RLS test role
+        env:
+          PGPASSWORD: nexus
+        run: |
+          psql "host=localhost port=5432 user=nexus dbname=nexus_pro_be sslmode=disable" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE nexus_rls LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD 'nexus_rls';
+          GRANT USAGE ON SCHEMA public TO nexus_rls;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO nexus_rls;
+          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO nexus_rls;
+          ALTER DEFAULT PRIVILEGES FOR ROLE nexus IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO nexus_rls;
+          ALTER DEFAULT PRIVILEGES FOR ROLE nexus IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO nexus_rls;
+          SQL
+
+      - name: Repository tests
+        env:
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_USERNAME: nexus_rls
+          DB_PASSWORD: nexus_rls
           DB_NAME: nexus_pro_be
           DB_SSLMODE: disable
         run: GOCACHE=$PWD/.gocache go test ./tests/unit/repository/postgres
@@ -134,6 +159,19 @@ jobs:
           DATABASE_URL="postgres://${DB_USERNAME}:${DB_PASSWORD}@${DB_HOST}:${DB_PORT}/${DB_NAME}?sslmode=${DB_SSLMODE}"
           go run github.com/pressly/goose/v3/cmd/goose@v3.27.2 -dir db/migrations postgres "$DATABASE_URL" up
 
+      - name: Create non-superuser RLS test role
+        env:
+          PGPASSWORD: nexus
+        run: |
+          psql "host=localhost port=5432 user=nexus dbname=nexus_pro_be sslmode=disable" -v ON_ERROR_STOP=1 <<'SQL'
+          CREATE ROLE nexus_rls LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS PASSWORD 'nexus_rls';
+          GRANT USAGE ON SCHEMA public TO nexus_rls;
+          GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO nexus_rls;
+          GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO nexus_rls;
+          ALTER DEFAULT PRIVILEGES FOR ROLE nexus IN SCHEMA public GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO nexus_rls;
+          ALTER DEFAULT PRIVILEGES FOR ROLE nexus IN SCHEMA public GRANT USAGE, SELECT ON SEQUENCES TO nexus_rls;
+          SQL
+
       - name: Integration tests
         env:
           DB_HOST: localhost
@@ -142,4 +180,6 @@ jobs:
           DB_PASSWORD: nexus
           DB_NAME: nexus_pro_be
           DB_SSLMODE: disable
+          DB_RLS_USERNAME: nexus_rls
+          DB_RLS_PASSWORD: nexus_rls
         run: GOCACHE=$PWD/.gocache go test ./tests/integration/postgres

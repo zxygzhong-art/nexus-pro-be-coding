@@ -31,6 +31,7 @@ func TestPostgresWorkflowRuntimeSemantics(t *testing.T) {
 	stageA := "wfs_" + suffix + "_a"
 	accountA := "acct_" + suffix + "_a"
 	accountB := "acct_" + suffix + "_b"
+	ctx = tenantScopedContext(tenantA)
 
 	for _, tenantID := range []string{tenantA, tenantB} {
 		if err := store.UpsertTenant(ctx, domain.Tenant{ID: tenantID, Name: tenantID, CreatedAt: now}); err != nil {
@@ -42,7 +43,7 @@ func TestPostgresWorkflowRuntimeSemantics(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.UpsertFormTemplate(ctx, domain.FormTemplate{
+	if err := store.UpsertFormTemplate(tenantScopedContext(tenantB), domain.FormTemplate{
 		ID: "ft_" + suffix + "_b", TenantID: tenantB, Key: "general", Name: "General", CreatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
@@ -50,7 +51,7 @@ func TestPostgresWorkflowRuntimeSemantics(t *testing.T) {
 	if err := store.UpsertAccount(ctx, domain.Account{ID: accountA, TenantID: tenantA, Status: "active", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.UpsertAccount(ctx, domain.Account{ID: accountB, TenantID: tenantB, Status: "active", CreatedAt: now}); err != nil {
+	if err := store.UpsertAccount(tenantScopedContext(tenantB), domain.Account{ID: accountB, TenantID: tenantB, Status: "active", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.UpsertFormInstance(ctx, domain.FormInstance{
@@ -59,7 +60,7 @@ func TestPostgresWorkflowRuntimeSemantics(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.UpsertFormInstance(ctx, domain.FormInstance{
+	if err := store.UpsertFormInstance(tenantScopedContext(tenantB), domain.FormInstance{
 		ID: formB, TenantID: tenantB, TemplateID: "ft_" + suffix + "_b", ApplicantAccountID: accountB,
 		Status: domain.WorkflowFormStatusInReview, SubmittedAt: now, UpdatedAt: now,
 	}); err != nil {
@@ -170,6 +171,7 @@ func TestPostgresWorkflowSubmitApproveServiceSemantics(t *testing.T) {
 	applicantID := "acct_" + suffix + "_applicant"
 	approverID := "acct_" + suffix + "_approver"
 	templateID := "ft_" + suffix
+	ctx = tenantScopedContext(tenantID)
 
 	if err := store.UpsertTenant(ctx, domain.Tenant{ID: tenantID, Name: tenantID, CreatedAt: now}); err != nil {
 		t.Fatal(err)

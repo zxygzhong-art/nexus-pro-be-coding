@@ -50,7 +50,8 @@ func (c AgentService) UploadSessionFile(ctx RequestContext, sessionID string, in
 	fileID := utils.NewID("afile")
 	objectKey := fmt.Sprintf("tenants/%s/conversations/%s/%s/source", ctx.TenantID, session.ID, fileID)
 	if err := c.objectStore.PutObject(goContext(ctx), objectKey, contentType, input.Content); err != nil {
-		return domain.AgentSessionFile{}, BadRequest("store conversation file: " + err.Error())
+		c.logWarn(ctx, "store conversation file failed", "object_key", objectKey, "error", err)
+		return domain.AgentSessionFile{}, domain.E(502, "object_store_error", "conversation file storage failed")
 	}
 	committed := false
 	defer func() {

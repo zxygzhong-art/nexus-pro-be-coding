@@ -542,7 +542,7 @@ func startRelationshipModule(cfg config.Config, logger *slog.Logger) relationshi
 		openfgaClient := openfgaclient.NewChecker(cfg.OpenFGAAPIURL, cfg.OpenFGAStoreID, &http.Client{
 			Timeout:   5 * time.Second,
 			Transport: otelhttp.NewTransport(http.DefaultTransport),
-		}).WithAuthorizationModelID(cfg.OpenFGAModelID)
+		}).WithAuthorizationModelID(cfg.OpenFGAModelID).WithAuthToken(cfg.OpenFGAAuthToken)
 		result.checker = openfgaClient
 		result.writer = openfgaClient
 		result.readiness["openfga"] = openfgaClient.Ping
@@ -979,6 +979,13 @@ func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Lo
 			defer r.workers.Done()
 			dispatcher.Run(ctx, jobs.OutboxDispatchOptions{})
 		}()
+		outboxCleaner := jobs.NewOutboxCleaner(r.store, logger)
+		r.workers.Add(1)
+		go func() {
+			defer r.workers.Done()
+			outboxCleaner.Run(ctx, jobs.OutboxCleanupOptions{})
+		}()
+		logger.Info("outbox cleanup worker started", "interval", "24h", "retention", "168h")
 	}
 	if r.liteLLMModelSyncer != nil && r.liteLLMModelSyncer.Configured() {
 		r.workers.Add(1)

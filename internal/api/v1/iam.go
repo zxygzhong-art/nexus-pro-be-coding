@@ -70,7 +70,7 @@ func (c IAMCtrl) listApplications(w http.ResponseWriter, r *http.Request, ctx do
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeJSON(w, http.StatusOK, items)
 	return nil
 }
 
@@ -80,7 +80,7 @@ func (c IAMCtrl) listResourceTypes(w http.ResponseWriter, r *http.Request, ctx d
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"data": items})
+	writeJSON(w, http.StatusOK, items)
 	return nil
 }
 

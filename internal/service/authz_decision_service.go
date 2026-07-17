@@ -85,8 +85,13 @@ func (c *Service) evaluateAuthz(ctx RequestContext, account Account, req CheckRe
 	}
 
 	cacheResult := func(result CheckResult) CheckResult {
-		if useSnapshot && result.Allowed {
+		if !useSnapshot {
+			return result
+		}
+		if result.Allowed {
 			c.setAuthzSnapshot(goContext(ctx), snapshotKey, result, earliestAuthzGrantExpiry(grants))
+		} else {
+			c.setAuthzDenySnapshot(goContext(ctx), snapshotKey, result)
 		}
 		return result
 	}

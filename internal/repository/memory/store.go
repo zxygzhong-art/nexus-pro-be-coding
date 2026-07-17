@@ -4364,6 +4364,65 @@ func (s *Store) ListOutboxEvents(_ context.Context, tenantID string) ([]OutboxEv
 	return out, nil
 }
 
+// GetOutboxEventByID 從儲存層依主鍵取得 outbox 事件。
+func (s *Store) GetOutboxEventByID(_ context.Context, tenantID, id string) (OutboxEvent, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, v := range s.outboxEvents[tenantID] {
+		if v.ID == id {
+			return copyOutboxEvent(v), true, nil
+		}
+	}
+	return OutboxEvent{}, false, nil
+}
+
+// ListOutboxEventPage 從儲存層篩選並列出 outbox 事件分頁。
+func (s *Store) ListOutboxEventPage(_ context.Context, tenantID string, query domain.OutboxEventQuery, page PageRequest) ([]OutboxEvent, int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]OutboxEvent, 0, len(s.outboxEvents[tenantID]))
+	for _, v := range s.outboxEvents[tenantID] {
+		if !outboxEventMatchesQuery(v, query) {
+			continue
+		}
+		out = append(out, copyOutboxEvent(v))
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		switch page.Sort {
+		case "created_at_asc":
+			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		default:
+			return out[i].CreatedAt.After(out[j].CreatedAt)
+		}
+	})
+	page = utils.NormalizePageRequest(page)
+	total := len(out)
+	return paginateMemory(out, page.Page, page.PageSize), total, nil
+}
+
+// outboxEventMatchesQuery 套用 outbox 管理查詢條件。
+func outboxEventMatchesQuery(v OutboxEvent, query domain.OutboxEventQuery) bool {
+	if status := strings.TrimSpace(query.Status); status != "" && v.Status != status {
+		return false
+	}
+	if eventType := strings.TrimSpace(query.EventType); eventType != "" && v.EventType != eventType {
+		return false
+	}
+	if lastError := strings.TrimSpace(query.LastError); lastError != "" && !strings.Contains(strings.ToLower(v.LastError), strings.ToLower(lastError)) {
+		return false
+	}
+	if query.RetryCount != nil && v.RetryCount != *query.RetryCount {
+		return false
+	}
+	if query.HasError != nil && (strings.TrimSpace(v.LastError) != "") != *query.HasError {
+		return false
+	}
+	return true
+}
+
 // ClaimOutboxEvents atomically claims dispatchable outbox events for a worker.
 func (s *Store) ClaimOutboxEvents(_ context.Context, tenantID string, limit, maxRetries int) ([]OutboxEvent, error) {
 	s.mu.Lock()
@@ -4422,6 +4481,24 @@ func (s *Store) UpdateOutboxEvent(_ context.Context, v OutboxEvent) error {
 		}
 	}
 	return nil
+}
+
+// DeleteSucceededOutboxEventsBefore 從儲存層刪除已成功且早於 cutoff 的 outbox 事件。
+func (s *Store) DeleteSucceededOutboxEventsBefore(_ context.Context, tenantID string, before time.Time) (int64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	events := s.outboxEvents[tenantID]
+	kept := make([]OutboxEvent, 0, len(events))
+	var deleted int64
+	for _, v := range events {
+		if v.Status == "succeeded" && v.CreatedAt.Before(before) {
+			deleted++
+			continue
+		}
+		kept = append(kept, v)
+	}
+	s.outboxEvents[tenantID] = kept
+	return deleted, nil
 }
 
 // AddAccountGroup 從儲存層處理 add 帳號羣組。

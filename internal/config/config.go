@@ -64,6 +64,7 @@ type Config struct {
 	OpenFGAAPIURL            string
 	OpenFGAStoreID           string
 	OpenFGAModelID           string
+	OpenFGAAuthToken         string
 	OpenFGAScopeCheckEnabled bool
 
 	TemporalBaseURL   string
@@ -165,6 +166,9 @@ func (c Config) ValidateStartup() error {
 	}
 	if strings.TrimSpace(c.OpenFGAModelID) == "" {
 		problems = append(problems, "OPENFGA_MODEL_ID is required")
+	}
+	if c.OpenFGAScopeCheckEnabled && strings.TrimSpace(c.OpenFGAAuthToken) == "" {
+		problems = append(problems, "OPENFGA_AUTH_TOKEN is required when OPENFGA_SCOPE_CHECK_ENABLED=true")
 	}
 	problems = append(problems, temporalConfigProblems(c)...)
 	if c.NATSEnabled {
@@ -290,6 +294,7 @@ func LoadE() (Config, error) {
 		OpenFGAAPIURL:            strings.TrimSpace(os.Getenv("OPENFGA_BASE_URL")),
 		OpenFGAStoreID:           strings.TrimSpace(os.Getenv("OPENFGA_STORE_ID")),
 		OpenFGAModelID:           strings.TrimSpace(os.Getenv("OPENFGA_MODEL_ID")),
+		OpenFGAAuthToken:         strings.TrimSpace(os.Getenv("OPENFGA_AUTH_TOKEN")),
 		OpenFGAScopeCheckEnabled: envBool("OPENFGA_SCOPE_CHECK_ENABLED", false, &problems),
 
 		TemporalBaseURL:   envAllowEmpty("TEMPORAL_BASE_URL", "127.0.0.1:27233"),

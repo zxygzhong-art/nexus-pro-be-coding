@@ -53,8 +53,8 @@ func TestUserGroupMemberAddRemoveAffectsAuthorizationAndAudits(t *testing.T) {
 	if before.Allowed {
 		t.Fatalf("expected user to be denied before group membership, got %+v", before)
 	}
-	if len(cache.values) != 0 {
-		t.Fatal("expected denied authz result not to be cached")
+	if len(cache.values) != 1 || len(cache.ttls) != 1 || cache.ttls[0] != time.Minute {
+		t.Fatalf("expected denied authz result to be cached with the short deny TTL, got values=%d ttls=%+v", len(cache.values), cache.ttls)
 	}
 
 	validUntil := now.Add(24 * time.Hour).Format(time.RFC3339)

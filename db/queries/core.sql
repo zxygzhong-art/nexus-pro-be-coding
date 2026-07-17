@@ -511,6 +511,40 @@ SELECT * FROM outbox_events
 WHERE tenant_id = $1
 ORDER BY created_at ASC, id ASC;
 
+-- name: GetOutboxEventByID :one
+SELECT * FROM outbox_events
+WHERE tenant_id = $1 AND id = $2;
+
+-- name: CountOutboxEventsFiltered :one
+SELECT count(*) FROM outbox_events
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.arg(status)::text = '' OR status = sqlc.arg(status))
+  AND (sqlc.arg(event_type)::text = '' OR event_type = sqlc.arg(event_type))
+  AND (
+    sqlc.arg(last_error)::text = ''
+    OR lower(outbox_events.last_error) LIKE '%' || lower(sqlc.arg(last_error)::text) || '%'
+  )
+  AND (NOT sqlc.arg(has_retry_count)::bool OR retry_count = sqlc.arg(retry_count)::int)
+  AND (NOT sqlc.arg(filter_has_error)::bool OR (btrim(outbox_events.last_error) <> '') = sqlc.arg(has_error)::bool);
+
+-- name: ListOutboxEventPage :many
+SELECT * FROM outbox_events
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND (sqlc.arg(status)::text = '' OR status = sqlc.arg(status))
+  AND (sqlc.arg(event_type)::text = '' OR event_type = sqlc.arg(event_type))
+  AND (
+    sqlc.arg(last_error)::text = ''
+    OR lower(outbox_events.last_error) LIKE '%' || lower(sqlc.arg(last_error)::text) || '%'
+  )
+  AND (NOT sqlc.arg(has_retry_count)::bool OR retry_count = sqlc.arg(retry_count)::int)
+  AND (NOT sqlc.arg(filter_has_error)::bool OR (btrim(outbox_events.last_error) <> '') = sqlc.arg(has_error)::bool)
+ORDER BY
+  CASE WHEN sqlc.arg(sort)::text = 'created_at_asc' THEN created_at END ASC,
+  created_at DESC,
+  id ASC
+LIMIT sqlc.arg(limit_count)::int
+OFFSET sqlc.arg(offset_count)::int;
+
 -- name: ClaimOutboxEvents :many
 -- Atomically claim a batch of dispatchable outbox rows for multi-replica workers.
 UPDATE outbox_events AS claimed
@@ -539,6 +573,12 @@ SET status = $3,
 WHERE tenant_id = $1
   AND id = $2
 RETURNING *;
+
+-- name: DeleteSucceededOutboxEventsBefore :execrows
+DELETE FROM outbox_events
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND status = 'succeeded'
+  AND created_at < sqlc.arg(before);
 
 -- name: UpsertAttendancePolicy :one
 INSERT INTO attendance_policies (

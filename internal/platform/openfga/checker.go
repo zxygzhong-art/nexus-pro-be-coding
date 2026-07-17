@@ -18,10 +18,11 @@ const maxOpenFGAErrorBodyLength = 500
 
 // Checker 定義 checker 的資料結構。
 type Checker struct {
-	apiURL  string
-	storeID string
-	modelID string
-	client  *http.Client
+	apiURL    string
+	storeID   string
+	modelID   string
+	authToken string
+	client    *http.Client
 }
 
 // NewChecker 建立 checker。
@@ -45,6 +46,23 @@ func (c *Checker) WithAuthorizationModelID(modelID string) *Checker {
 	return c
 }
 
+// WithAuthToken attaches the preshared bearer token sent on every OpenFGA request.
+func (c *Checker) WithAuthToken(token string) *Checker {
+	if c == nil {
+		return c
+	}
+	c.authToken = strings.TrimSpace(token)
+	return c
+}
+
+// authorize 在請求上附加 preshared 認證標頭（僅當 token 非空）。
+func (c *Checker) authorize(req *http.Request) {
+	if c.authToken == "" {
+		return
+	}
+	req.Header.Set("Authorization", "Bearer "+c.authToken)
+}
+
 // Ping 檢查外部服務連線狀態。
 func (c *Checker) Ping(ctx context.Context) error {
 	if c == nil || c.apiURL == "" || c.storeID == "" {
@@ -54,6 +72,7 @@ func (c *Checker) Ping(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	c.authorize(req)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return err
@@ -92,6 +111,7 @@ func (c *Checker) CheckRelationship(ctx context.Context, check domain.Relationsh
 		return false, err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	c.authorize(req)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return false, err
@@ -146,6 +166,7 @@ func (c *Checker) WriteRelationshipTuples(ctx context.Context, changes []domain.
 		return err
 	}
 	req.Header.Set("Content-Type", "application/json")
+	c.authorize(req)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return err
@@ -182,6 +203,7 @@ func (c *Checker) verifyAuthorizationModel(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
+	c.authorize(req)
 	resp, err := c.client.Do(req)
 	if err != nil {
 		return err

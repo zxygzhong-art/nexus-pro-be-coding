@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/utils"
 )
 
@@ -496,7 +497,8 @@ func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImpor
 	sessionID := utils.NewID("eimp")
 	objectKey := employeeImportObjectKey(ctx.TenantID, sessionID, filename)
 	if err := c.objectStore.PutObject(goContext(ctx), objectKey, contentType, raw); err != nil {
-		return EmployeeImportSession{}, BadRequest("store import file: " + err.Error())
+		c.logWarn(ctx, "store employee import file failed", "object_key", objectKey, "error", err)
+		return EmployeeImportSession{}, domain.E(502, "object_store_error", "employee import file storage failed")
 	}
 	objectCommitted := false
 	defer func() {

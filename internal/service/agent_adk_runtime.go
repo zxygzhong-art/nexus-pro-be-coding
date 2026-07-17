@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"iter"
+	"log/slog"
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -17,6 +18,13 @@ import (
 	"google.golang.org/genai"
 
 	"nexus-pro-be/internal/domain"
+)
+
+const (
+	// agentADKAppName scopes ADK in-memory sessions to this application.
+	agentADKAppName = "nexus-pro-be"
+	// agentADKRootName is the technical name of the root coordinator agent.
+	agentADKRootName = "nexus_team_root"
 )
 
 const agentChatInstruction = `你是 Nexus Pro 的中文 HR/OA 助理。
@@ -76,7 +84,7 @@ func (r *ADKAgentChatRuntime) RunAgentChat(ctx context.Context, req AgentChatRun
 		subAgents = append(subAgents, child)
 		agentLabels[technicalName] = strings.TrimSpace(member.Name)
 	}
-	rootName := "nexus_team_root"
+	rootName := agentADKRootName
 	rootLabel := strings.TrimSpace(req.AgentName)
 	if rootLabel == "" {
 		rootLabel = "Nexus Pro 助理"
@@ -95,7 +103,7 @@ func (r *ADKAgentChatRuntime) RunAgentChat(ctx context.Context, req AgentChatRun
 		return err
 	}
 	run, err := runner.New(runner.Config{
-		AppName:           "nexus-pro-be",
+		AppName:           agentADKAppName,
 		Agent:             rootAgent,
 		SessionService:    r.sessions,
 		AutoCreateSession: true,
@@ -107,11 +115,25 @@ func (r *ADKAgentChatRuntime) RunAgentChat(ctx context.Context, req AgentChatRun
 	if userID == "" {
 		userID = "anonymous"
 	}
+	// The ADK in-memory session is a per-run working copy only: the DB holds the
+	// authoritative history, so seed from it before the run and always delete the
+	// session afterwards to keep the shared in-memory store bounded.
+	sessionID := strings.TrimSpace(req.SessionID)
+	if sessionID != "" {
+		if err := r.prepareSession(ctx, userID, sessionID, req.History); err != nil {
+			return err
+		}
+		defer func() {
+			if err := r.sessions.Delete(context.WithoutCancel(ctx), &session.DeleteRequest{AppName: agentADKAppName, UserID: userID, SessionID: sessionID}); err != nil {
+				slog.WarnContext(ctx, "delete ADK session failed", "user_id", userID, "session_id", sessionID, "error", err)
+			}
+		}()
+	}
 	message := &genai.Content{
 		Role:  "user",
 		Parts: []*genai.Part{genai.NewPartFromText(req.Message)},
 	}
-	for event, err := range run.Run(ctx, userID, req.SessionID, message, adkagent.RunConfig{}) {
+	for event, err := range run.Run(ctx, userID, sessionID, message, adkagent.RunConfig{}) {
 		if err != nil {
 			return err
 		}
@@ -134,6 +156,47 @@ func (r *ADKAgentChatRuntime) RunAgentChat(ctx context.Context, req AgentChatRun
 		}
 	}
 	return nil
+}
+
+// prepareSession resets the run's ADK session and seeds it from the
+// DB-persisted history so multi-turn context survives session cleanup.
+func (r *ADKAgentChatRuntime) prepareSession(ctx context.Context, userID, sessionID string, history []domain.AgentSessionMessage) error {
+	// Drop residue from an earlier run whose cleanup did not finish.
+	_ = r.sessions.Delete(ctx, &session.DeleteRequest{AppName: agentADKAppName, UserID: userID, SessionID: sessionID})
+	created, err := r.sessions.Create(ctx, &session.CreateRequest{AppName: agentADKAppName, UserID: userID, SessionID: sessionID})
+	if err != nil {
+		return err
+	}
+	for _, message := range history {
+		event := adkHistoryEvent(message)
+		if event == nil {
+			continue
+		}
+		if err := r.sessions.AppendEvent(ctx, created.Session, event); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// adkHistoryEvent converts a persisted chat message into an ADK session event.
+func adkHistoryEvent(message domain.AgentSessionMessage) *session.Event {
+	text := strings.TrimSpace(message.Content)
+	if text == "" {
+		return nil
+	}
+	event := &session.Event{Timestamp: message.CreatedAt}
+	switch message.Role {
+	case domain.AgentMessageRoleUser:
+		event.Author = "user"
+		event.LLMResponse = model.LLMResponse{Content: &genai.Content{Role: genai.RoleUser, Parts: []*genai.Part{genai.NewPartFromText(text)}}}
+	case domain.AgentMessageRoleAssistant:
+		event.Author = agentADKRootName
+		event.LLMResponse = model.LLMResponse{Content: &genai.Content{Role: genai.RoleModel, Parts: []*genai.Part{genai.NewPartFromText(text)}}}
+	default:
+		return nil
+	}
+	return event
 }
 
 // RootAgentInstruction builds the user-facing instruction contract for the root agent.

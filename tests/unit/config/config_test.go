@@ -788,3 +788,55 @@ func TestInvalidBooleanConfigReturnsError(t *testing.T) {
 		t.Fatalf("expected invalid boolean config error, got %v", err)
 	}
 }
+
+
+// TestOpenFGAAuthTokenConfig 驗證 OpenFGA preshared token 從環境變數載入。
+func TestOpenFGAAuthTokenConfig(t *testing.T) {
+	t.Setenv("OPENFGA_AUTH_TOKEN", "  dev-token  ")
+	cfg, err := config.LoadE()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.OpenFGAAuthToken != "dev-token" {
+		t.Fatalf("unexpected OpenFGA auth token: %q", cfg.OpenFGAAuthToken)
+	}
+}
+
+// TestValidateStartupRequiresOpenFGATokenWhenScopeChecksEnabled 驗證 production 啟用 scope check 時 token 必填（fail-closed）。
+func TestValidateStartupRequiresOpenFGATokenWhenScopeChecksEnabled(t *testing.T) {
+	base := config.Config{
+		Env:               "production",
+		DatabaseURL:       "postgres://nexus:nexus@db.internal:5432/nexus_pro_be?sslmode=require",
+		DBSSLMode:         "require",
+		KeycloakIssuerURL: "https://issuer.example/realms/nexus",
+		KeycloakClientID:  "nexus-api",
+		OpenFGAAPIURL:     "https://openfga.example",
+		OpenFGAStoreID:    "store-1",
+		OpenFGAModelID:    "model-1",
+		TemporalBaseURL:   "temporal:7233",
+		TemporalNamespace: "default",
+		TemporalTaskQueue: "nexus-workflows",
+		ObjectStoreDir:    "/var/lib/nexus-pro-be/objects",
+	}
+
+	cfg := base
+	cfg.OpenFGAScopeCheckEnabled = true
+	err := cfg.ValidateStartup()
+	if err == nil || !strings.Contains(err.Error(), "OPENFGA_AUTH_TOKEN") {
+		t.Fatalf("expected OPENFGA_AUTH_TOKEN fail-closed error, got %v", err)
+	}
+
+	cfg = base
+	cfg.OpenFGAScopeCheckEnabled = true
+	cfg.OpenFGAAuthToken = "prod-token"
+	if err := cfg.ValidateStartup(); err != nil {
+		t.Fatalf("expected configured token to satisfy validation, got %v", err)
+	}
+
+	cfg = base
+	cfg.Env = "development"
+	cfg.OpenFGAScopeCheckEnabled = true
+	if err := cfg.ValidateStartup(); err != nil {
+		t.Fatalf("expected development to tolerate empty token for backward compatibility, got %v", err)
+	}
+}

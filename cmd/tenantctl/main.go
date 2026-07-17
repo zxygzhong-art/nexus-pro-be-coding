@@ -493,7 +493,7 @@ func runEHRMSSyncPipeline(args []string) error {
 	defer pool.Close()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	httpClient := &http.Client{Timeout: 60 * time.Second}
-	checker := openfgaclient.NewChecker(cfg.OpenFGAAPIURL, cfg.OpenFGAStoreID, httpClient).WithAuthorizationModelID(cfg.OpenFGAModelID)
+	checker := openfgaclient.NewChecker(cfg.OpenFGAAPIURL, cfg.OpenFGAStoreID, httpClient).WithAuthorizationModelID(cfg.OpenFGAModelID).WithAuthToken(cfg.OpenFGAAuthToken)
 	ehrmsClient, err := ehrms.NewClient(cfg.EHRMSBaseURL, cfg.EHRMSAPIKey, httpClient)
 	if err != nil {
 		return err
@@ -577,7 +577,7 @@ func runEHRMSSyncEmployees(args []string) error {
 	defer pool.Close()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	httpClient := &http.Client{Timeout: 60 * time.Second}
-	checker := openfgaclient.NewChecker(cfg.OpenFGAAPIURL, cfg.OpenFGAStoreID, httpClient).WithAuthorizationModelID(cfg.OpenFGAModelID)
+	checker := openfgaclient.NewChecker(cfg.OpenFGAAPIURL, cfg.OpenFGAStoreID, httpClient).WithAuthorizationModelID(cfg.OpenFGAModelID).WithAuthToken(cfg.OpenFGAAuthToken)
 	ehrmsClient, err := ehrms.NewClient(cfg.EHRMSBaseURL, cfg.EHRMSAPIKey, httpClient)
 	if err != nil {
 		return err
@@ -654,7 +654,7 @@ func runEHRMSSyncAttendance(args []string) error {
 	defer pool.Close()
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 	httpClient := &http.Client{Timeout: 60 * time.Second}
-	checker := openfgaclient.NewChecker(cfg.OpenFGAAPIURL, cfg.OpenFGAStoreID, httpClient).WithAuthorizationModelID(cfg.OpenFGAModelID)
+	checker := openfgaclient.NewChecker(cfg.OpenFGAAPIURL, cfg.OpenFGAStoreID, httpClient).WithAuthorizationModelID(cfg.OpenFGAModelID).WithAuthToken(cfg.OpenFGAAuthToken)
 	ehrmsClient, err := ehrms.NewClient(cfg.EHRMSBaseURL, cfg.EHRMSAPIKey, httpClient)
 	if err != nil {
 		return err

@@ -72,6 +72,18 @@ func (c *Service) setAuthzSnapshot(ctx context.Context, key string, result Check
 	_ = c.authzSnapshot.SetAuthzSnapshot(ctx, key, result, ttl)
 }
 
+// authzDenySnapshotTTL bounds cached deny decisions: denials must converge
+// quickly after a grant appears, without waiting for tenant invalidation.
+const authzDenySnapshotTTL = time.Minute
+
+// setAuthzDenySnapshot 以較短 TTL 快取 deny 決策，避免未授權請求反覆打滿決策鏈。
+func (c *Service) setAuthzDenySnapshot(ctx context.Context, key string, result CheckResult) {
+	if c.authzSnapshot == nil {
+		return
+	}
+	_ = c.authzSnapshot.SetAuthzSnapshot(ctx, key, result, authzDenySnapshotTTL)
+}
+
 // invalidateAuthzSnapshots 處理 invalidate 授權 snapshots 的服務流程。
 func (c *Service) invalidateAuthzSnapshots(ctx context.Context, tenantID string) {
 	if c.authzSnapshot == nil {

@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -76,14 +77,18 @@ func (p *IdentityProvisioningOutboxProcessor) ProcessAllTenants(ctx context.Cont
 		return 0, err
 	}
 	processed := 0
+	var errs []error
 	for _, tenant := range tenants {
 		n, err := p.service.ProcessIdentityProvisioningOutbox(ctx, tenant.ID, opts.BatchSize, opts.MaxRetries)
 		if err != nil {
-			return processed, err
+			// 單一租戶失敗不阻塞其他租戶,迴圈結束後聚合回傳錯誤。
+			p.logger.WarnContext(ctx, "identity provisioning outbox processing failed for tenant", "tenant_id", tenant.ID, "error", err)
+			errs = append(errs, fmt.Errorf("tenant %s: %w", tenant.ID, err))
+			continue
 		}
 		processed += n
 	}
-	return processed, nil
+	return processed, errors.Join(errs...)
 }
 
 // processAllTenantsAndLog 處理 all 租戶 and log。
@@ -91,7 +96,6 @@ func (p *IdentityProvisioningOutboxProcessor) processAllTenantsAndLog(ctx contex
 	processed, err := p.ProcessAllTenants(ctx, opts)
 	if err != nil {
 		p.logger.WarnContext(ctx, "identity provisioning outbox processing failed", "error", err)
-		return
 	}
 	if processed > 0 {
 		p.logger.InfoContext(ctx, "identity provisioning outbox processed", "events", processed)

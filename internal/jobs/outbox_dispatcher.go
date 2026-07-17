@@ -3,6 +3,7 @@ package jobs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"strings"
 	"time"
@@ -112,14 +113,18 @@ func (p *OutboxDispatcher) ProcessAllTenants(ctx context.Context, opts OutboxDis
 		return 0, err
 	}
 	processed := 0
+	var errs []error
 	for _, tenant := range tenants {
 		n, err := p.ProcessTenant(ctx, tenant.ID, opts)
 		if err != nil {
-			return processed, err
+			// 單一租戶失敗不阻塞其他租戶,迴圈結束後聚合回傳錯誤。
+			p.logger.WarnContext(ctx, "outbox dispatch failed for tenant", "tenant_id", tenant.ID, "error", err)
+			errs = append(errs, fmt.Errorf("tenant %s: %w", tenant.ID, err))
+			continue
 		}
 		processed += n
 	}
-	return processed, nil
+	return processed, errors.Join(errs...)
 }
 
 // ProcessTenant 處理租戶。
@@ -212,7 +217,6 @@ func (p *OutboxDispatcher) processAllTenantsAndLog(ctx context.Context, opts Out
 	processed, err := p.ProcessAllTenants(ctx, opts)
 	if err != nil {
 		p.logger.WarnContext(ctx, "outbox dispatch failed", "error", err)
-		return
 	}
 	if processed > 0 {
 		p.logger.InfoContext(ctx, "outbox events dispatched", "events", processed)

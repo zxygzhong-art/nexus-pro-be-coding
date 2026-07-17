@@ -6,7 +6,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"nexus-pro-be/internal/config"
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -27,6 +29,7 @@ import (
 	"nexus-pro-be/internal/repository"
 	postgresrepo "nexus-pro-be/internal/repository/postgres"
 	"nexus-pro-be/internal/service"
+	"nexus-pro-be/internal/utils/tenantctx"
 )
 
 // TestPostgresRepositoryCriticalSemantics 驗證 Postgres repository critical semantics。
@@ -42,6 +45,7 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 	tenantB := "tenant_" + suffix + "_b"
 	empA := "emp_" + suffix + "_a"
 	empB := "emp_" + suffix + "_b"
+	ctx = tenantScopedContext(tenantA)
 
 	for _, tenantID := range []string{tenantA, tenantB} {
 		if err := store.UpsertTenant(ctx, domain.Tenant{ID: tenantID, Name: tenantID, CreatedAt: now}); err != nil {
@@ -53,7 +57,7 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 		if err := store.UpsertOrgUnit(ctx, domain.OrgUnit{ID: orgID, TenantID: tenantA, Code: "SHARED", Name: "Tenant A Org", Path: []string{orgID}, CreatedAt: now, UpdatedAt: now}); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.UpsertOrgUnit(ctx, domain.OrgUnit{ID: orgID, TenantID: tenantB, Code: "SHARED", Name: "Tenant B Org", Path: []string{orgID}, CreatedAt: now, UpdatedAt: now}); err == nil {
+		if err := store.UpsertOrgUnit(tenantScopedContext(tenantB), domain.OrgUnit{ID: orgID, TenantID: tenantB, Code: "SHARED", Name: "Tenant B Org", Path: []string{orgID}, CreatedAt: now, UpdatedAt: now}); err == nil {
 			t.Fatal("expected a cross-tenant org ID collision to fail")
 		}
 		storedOrg, ok, err := store.GetOrgUnit(ctx, tenantA, orgID)
@@ -68,7 +72,7 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 		if err := store.UpsertPosition(ctx, domain.Position{ID: positionID, TenantID: tenantA, Code: "SHARED", Name: "Tenant A Position", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now}); err != nil {
 			t.Fatal(err)
 		}
-		if err := store.UpsertPosition(ctx, domain.Position{ID: positionID, TenantID: tenantB, Code: "SHARED", Name: "Tenant B Position", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now}); err == nil {
+		if err := store.UpsertPosition(tenantScopedContext(tenantB), domain.Position{ID: positionID, TenantID: tenantB, Code: "SHARED", Name: "Tenant B Position", Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now}); err == nil {
 			t.Fatal("expected a cross-tenant position ID collision to fail")
 		}
 		storedPosition, ok, err := store.GetPosition(ctx, tenantA, positionID)
@@ -82,23 +86,27 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 	if err := store.UpsertEmployee(ctx, domain.Employee{ID: empA, TenantID: tenantA, Name: "Tenant A", CompanyEmail: empA + "@example.com", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.UpsertEmployee(ctx, domain.Employee{ID: empB, TenantID: tenantB, Name: "Tenant B", CompanyEmail: empB + "@example.com", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := store.UpsertEmployee(tenantScopedContext(tenantB), domain.Employee{ID: empB, TenantID: tenantB, Name: "Tenant B", CompanyEmail: empB + "@example.com", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 	t.Run("employee RLS isolates tenant visibility", func(t *testing.T) {
-		requireRLSCapableUser(t, pool)
-		if got := countEmployeesVisibleViaRLS(t, pool, tenantA, empA); got != 1 {
+		rlsPool := openRLSIntegrationPool(t)
+		defer rlsPool.Close()
+		requireRLSCapableUser(t, rlsPool)
+		if got := countEmployeesVisibleViaRLS(t, rlsPool, tenantA, empA); got != 1 {
 			t.Fatalf("expected tenant A RLS scope to see employee %s once, got %d", empA, got)
 		}
-		if got := countEmployeesVisibleViaRLS(t, pool, tenantB, empA); got != 0 {
+		if got := countEmployeesVisibleViaRLS(t, rlsPool, tenantB, empA); got != 0 {
 			t.Fatalf("expected tenant B RLS scope not to see tenant A employee %s, got %d", empA, got)
 		}
 	})
 
 	t.Run("tenants RLS lets system task list every tenant", func(t *testing.T) {
-		requireRLSCapableUser(t, pool)
-		requireTenantsSystemReadPolicy(t, pool)
-		tenants, err := store.ListTenants(ctx)
+		rlsPool := openRLSIntegrationPool(t)
+		defer rlsPool.Close()
+		requireRLSCapableUser(t, rlsPool)
+		requireTenantsSystemReadPolicy(t, rlsPool)
+		tenants, err := postgresrepo.NewStore(rlsPool).ListTenants(ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -272,6 +280,7 @@ func TestHRCoreCRUDPostgresAcceptanceSemantics(t *testing.T) {
 	tenantA := "tenant_" + suffix + "_a"
 	tenantB := "tenant_" + suffix + "_b"
 	accountID := "acct_" + suffix
+	ctx = tenantScopedContext(tenantA)
 
 	for _, tenantID := range []string{tenantA, tenantB} {
 		if err := store.UpsertTenant(ctx, domain.Tenant{ID: tenantID, Name: tenantID, CreatedAt: now}); err != nil {
@@ -392,6 +401,7 @@ func TestEmployeeHTTPPostgresAcceptanceTraceAuthzAndFieldPolicy(t *testing.T) {
 	employeeID := "emp_" + suffix
 	orgUnitID := "ou_" + suffix
 	hireDate := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	ctx = tenantScopedContext(tenantID)
 	var openFGACheckPath string
 	var openFGATraceParent string
 	openFGAServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -627,6 +637,7 @@ func TestAttendanceClockHTTPPostgresFieldPolicy(t *testing.T) {
 	adminAccountID := "acct_" + suffix + "_admin"
 	worksiteID := "aws_" + suffix
 	shiftID := "ash_" + suffix
+	ctx = tenantScopedContext(tenantID)
 
 	if err := store.UpsertTenant(ctx, domain.Tenant{ID: tenantID, Name: tenantID, CreatedAt: now}); err != nil {
 		t.Fatal(err)
@@ -823,6 +834,39 @@ func openIntegrationPool(t *testing.T) *pgxpool.Pool {
 	return pool
 }
 
+// tenantScopedContext 回傳帶指定租戶 scope 的 context。
+// 直接寫入儲存層的測試設定在 RLS 生效時需要租戶 scope 才能通過政策檢查。
+func tenantScopedContext(tenantID string) context.Context {
+	return tenantctx.WithTenantID(context.Background(), tenantID)
+}
+
+// openRLSIntegrationPool 開啟使用 NOSUPERUSER/NOBYPASSRLS 角色的連線池。
+// RLS 斷言必須透過這個連線池執行,否則 superuser 會靜默繞過 RLS 政策。
+// DB_RLS_USERNAME/DB_RLS_PASSWORD 未設定時維持過往行為直接 skip。
+func openRLSIntegrationPool(t *testing.T) *pgxpool.Pool {
+	t.Helper()
+	dsn := config.DatabaseURLFromEnv()
+	if dsn == "" {
+		t.Skip("DB_* is not set; skipping postgres integration test")
+	}
+	username := strings.TrimSpace(os.Getenv("DB_RLS_USERNAME"))
+	if username == "" {
+		t.Skip("DB_RLS_USERNAME is not set; skipping RLS integration test")
+	}
+	u, err := url.Parse(dsn)
+	if err != nil {
+		t.Fatal(err)
+	}
+	u.User = url.UserPassword(username, os.Getenv("DB_RLS_PASSWORD"))
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	pool, err := pgplatform.OpenPool(ctx, u.String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return pool
+}
+
 // requireMigratedSchema 驗證 require migrated schema。
 func requireMigratedSchema(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
@@ -978,7 +1022,7 @@ func addIntegrationHeaders(req *http.Request, tenantID, accountID, requestID str
 // upsertIntegrationIdentity 驗證 upsert integration 身分。
 func upsertIntegrationIdentity(t *testing.T, store repository.Store, tenantID, accountID string, now time.Time) {
 	t.Helper()
-	if err := store.UpsertUserIdentity(context.Background(), domain.UserIdentity{
+	if err := store.UpsertUserIdentity(tenantScopedContext(tenantID), domain.UserIdentity{
 		ID:        "uid_" + tenantID + "_" + accountID,
 		TenantID:  tenantID,
 		AccountID: accountID,
