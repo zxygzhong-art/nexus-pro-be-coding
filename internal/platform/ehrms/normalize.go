@@ -17,6 +17,7 @@ var employeeFieldAliases = map[string]string{
 	"gender":          "性別",
 	"birthday":        "生日",
 	"hire_date":       "到職日期",
+	"quit_date":       "離職日期",
 	"seniority_start": "年資起始日",
 	"probation_end":   "試用期滿日",
 	"work_status":     "在職狀態",

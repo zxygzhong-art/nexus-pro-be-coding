@@ -1,6 +1,7 @@
 package service
 
 import (
+	"math"
 	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/utils"
 	"sort"
@@ -451,15 +452,17 @@ func insightAttendanceMembers(attendance WorkspaceAttendanceResponse) ([]map[str
 	members := make([]map[string]any, 0, len(attendance.Attendance.Rows))
 	hourBars := make([]insightMemberBar, 0, len(attendance.Attendance.Rows))
 	leaveBars := make([]insightMemberBar, 0, len(attendance.Attendance.Rows))
-	totalHours := 0.0
+	totalCentiHours := int64(0)
 	for _, row := range attendance.Attendance.Rows {
 		name := utils.FirstNonEmpty(row.Employee.NameZH, row.Employee.NameEN, row.Employee.ID)
 		leaveDays := row.Summary.LeaveHours / workspaceDayHours
+		centiHours := insightCentiHours(row.Summary.AttendedHours)
+		hours := float64(centiHours) / 100
 		member := map[string]any{
 			"id":              row.Employee.ID,
 			"name":            name,
 			"avatar":          row.Employee.Avatar,
-			"hours":           row.Summary.AttendedHours,
+			"hours":           hours,
 			"leave_days":      leaveDays,
 			"primary_product": "—",
 			"task_count":      0,
@@ -470,14 +473,19 @@ func insightAttendanceMembers(attendance WorkspaceAttendanceResponse) ([]map[str
 			member["leave_type"] = leaveType
 		}
 		members = append(members, member)
-		hourBars = append(hourBars, insightMemberBar{ID: row.Employee.ID, Label: name, Avatar: row.Employee.Avatar, Value: row.Summary.AttendedHours})
+		hourBars = append(hourBars, insightMemberBar{ID: row.Employee.ID, Label: name, Avatar: row.Employee.Avatar, Value: hours})
 		if leaveDays > 0 {
 			leaveBars = append(leaveBars, insightMemberBar{ID: row.Employee.ID, Label: name, Avatar: row.Employee.Avatar, Value: leaveDays})
 		}
-		totalHours += row.Summary.AttendedHours
+		totalCentiHours += centiHours
 	}
 	sort.SliceStable(members, func(i, j int) bool { return members[i]["id"].(string) < members[j]["id"].(string) })
-	return members, insightTopMemberBars(hourBars, "primary", "h"), insightTopMemberBars(leaveBars, "warning", " 天"), totalHours
+	return members, insightTopMemberBars(hourBars, "primary", "h"), insightTopMemberBars(leaveBars, "warning", " 天"), float64(totalCentiHours) / 100
+}
+
+// insightCentiHours 將洞察工時量化為百分之一小時，避免 float64 累加尾差洩漏到 API。
+func insightCentiHours(hours float64) int64 {
+	return int64(math.Round(hours * 100))
 }
 
 // insightTopMemberBars 取前八名成員並補齊一致的圖表比例基準。

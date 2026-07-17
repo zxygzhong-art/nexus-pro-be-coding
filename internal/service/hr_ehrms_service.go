@@ -18,6 +18,7 @@ const (
 	ehrmsFieldGender          = "性別"
 	ehrmsFieldBirthDate       = "生日"
 	ehrmsFieldHireDate        = "到職日期"
+	ehrmsFieldQuitDate        = "離職日期"
 	ehrmsFieldTenureStartDate = "年資起始日"
 	ehrmsFieldProbationEnd    = "試用期滿日"
 	ehrmsFieldEmployeeStatus  = "在職狀態"
@@ -405,6 +406,7 @@ func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmploy
 		Status:           status,
 		EmploymentStatus: status,
 		HireDate:         normalizeImportDate(ehrmsValue(record, ehrmsFieldHireDate)),
+		ResignDate:       normalizeImportDate(ehrmsValue(record, ehrmsFieldQuitDate)),
 		BasicInfo: map[string]any{
 			"name":               ehrmsValue(record, ehrmsFieldName),
 			"name_en":            ehrmsValue(record, ehrmsFieldNameEN),
@@ -431,6 +433,7 @@ func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmploy
 			"category":                 ehrmsEmployeeCategory(record),
 			"employment_status":        status,
 			"hire_date":                normalizeImportDate(ehrmsValue(record, ehrmsFieldHireDate)),
+			"resign_date":              normalizeImportDate(ehrmsValue(record, ehrmsFieldQuitDate)),
 			"tenure_start_date":        normalizeImportDate(ehrmsValue(record, ehrmsFieldTenureStartDate)),
 			"probation_end_date":       normalizeImportDate(ehrmsValue(record, ehrmsFieldProbationEnd)),
 			"card_no":                  ehrmsValue(record, ehrmsFieldCardNo),

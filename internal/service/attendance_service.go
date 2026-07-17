@@ -26,6 +26,7 @@ const (
 	clockRejectionOutsideGeofence       = "outside_geofence"
 	clockRejectionOutsideWindow         = "outside_time_window"
 	clockRejectionInsufficientWorkHours = "insufficient_work_hours"
+	attendanceAnomalyMissingClockOut    = "missing_clock_out"
 
 	clockSourceGeofence         = "geofence"
 	clockSourceManualCorrection = "manual_correction"

@@ -84,6 +84,44 @@ func TestProjectAttendanceDayExcludesVoidedPunch(t *testing.T) {
 	}
 }
 
+// TestProjectAttendanceDayMarksExpiredOpenClockAbnormal verifies a past workday cannot remain "working" forever.
+func TestProjectAttendanceDayMarksExpiredOpenClockAbnormal(t *testing.T) {
+	workDate := "2026-07-13"
+	records := []domain.AttendanceClockRecord{
+		attendanceProjectionRecord("in", workDate, "clock_in", "09:00", false),
+	}
+
+	projection := service.ProjectAttendanceDay(records, nil, workDate, attendanceProjectionWorkTime(), attendanceProjectionTime("2026-07-14", "10:00"))
+
+	if projection.DayStatus != "abnormal" {
+		t.Fatalf("day status = %q, want abnormal for a past open clock", projection.DayStatus)
+	}
+	if len(projection.AnomalyReasons) != 1 || projection.AnomalyReasons[0] != "missing_clock_out" {
+		t.Fatalf("anomaly reasons = %#v, want missing_clock_out", projection.AnomalyReasons)
+	}
+}
+
+// TestProjectAttendanceDayKeepsOvernightClockWorkingUntilScheduleEnds protects cross-midnight shifts.
+func TestProjectAttendanceDayKeepsOvernightClockWorkingUntilScheduleEnds(t *testing.T) {
+	workDate := "2026-07-13"
+	records := []domain.AttendanceClockRecord{
+		attendanceProjectionRecord("in", workDate, "clock_in", "22:00", false),
+	}
+	workTime := attendanceProjectionWorkTime()
+	workTime.StandardStart = "22:00"
+	workTime.StandardEnd = "06:00"
+
+	working := service.ProjectAttendanceDay(records, nil, workDate, workTime, attendanceProjectionTime("2026-07-14", "01:00"))
+	if working.DayStatus != "working" {
+		t.Fatalf("day status before overnight schedule end = %q, want working", working.DayStatus)
+	}
+
+	expired := service.ProjectAttendanceDay(records, nil, workDate, workTime, attendanceProjectionTime("2026-07-14", "07:00"))
+	if expired.DayStatus != "abnormal" {
+		t.Fatalf("day status after overnight schedule end = %q, want abnormal", expired.DayStatus)
+	}
+}
+
 // attendanceProjectionRecord builds one accepted raw punch in the business timezone.
 func attendanceProjectionRecord(id, workDate, direction, hhmm string, voided bool) domain.AttendanceClockRecord {
 	at := attendanceProjectionTime(workDate, hhmm)

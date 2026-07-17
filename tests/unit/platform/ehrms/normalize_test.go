@@ -15,6 +15,7 @@ func TestNormalizeEmployeeRecordsMapsEnglishAliases(t *testing.T) {
 		"work_status": "在職",
 		"dept_code":   "M0101",
 		"hire_date":   "2026/06/01",
+		"quit_date":   "2026/06/30",
 		"national_id": "A123456789",
 		"leave_group": "-",
 		"school_zh":   "Nexus University",
@@ -34,6 +35,9 @@ func TestNormalizeEmployeeRecordsMapsEnglishAliases(t *testing.T) {
 	}
 	if rows[0]["公司信箱"] != "test@ikala.ai" {
 		t.Fatalf("expected email alias, got %+v", rows[0])
+	}
+	if rows[0]["離職日期"] != "2026/06/30" {
+		t.Fatalf("expected quit_date alias, got %+v", rows[0])
 	}
 }
 

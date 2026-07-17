@@ -1926,6 +1926,96 @@ func TestAttendanceMonthlySummaryUsesDailyProjection(t *testing.T) {
 	}
 }
 
+// TestAttendanceMonthlySummaryMarksPastOpenDayAbnormal verifies calendar totals use the elapsed-day boundary.
+func TestAttendanceMonthlySummaryMarksPastOpenDayAbnormal(t *testing.T) {
+	_, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
+	clockInAt := attendanceFixtureClockInTime()
+
+	if _, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_in",
+		ClientEventID:  "monthly-summary-expired-in",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	setNow(clockInAt.Add(25 * time.Hour))
+
+	summary, err := svc.Attendance().AttendanceMonthlySummary(employeeCtx, "2026-06")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if summary.AttendanceDays != 1 || summary.WorkedMinutes != 0 || summary.RecordCount != 1 || summary.AbnormalDays != 1 {
+		t.Fatalf("unexpected expired-open-day totals: %+v", summary)
+	}
+	if len(summary.Days) != 1 || summary.Days[0].DayStatus != "abnormal" || len(summary.Days[0].AnomalyReasons) != 1 || summary.Days[0].AnomalyReasons[0] != "missing_clock_out" {
+		t.Fatalf("expected one abnormal calendar day with missing_clock_out, got %+v", summary.Days)
+	}
+}
+
+// TestAttendanceMonthlySummaryHonorsOpenOvernightShiftDeadline verifies the calendar waits for the assigned night-shift window.
+func TestAttendanceMonthlySummaryHonorsOpenOvernightShiftDeadline(t *testing.T) {
+	store, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
+	fixtureNow := attendanceFixtureClockInTime()
+	if err := store.UpsertAttendanceShift(context.Background(), domain.AttendanceShift{
+		ID:            "ash-night-summary",
+		TenantID:      "tenant-1",
+		Name:          "Night Shift",
+		ClockInStart:  "22:00",
+		ClockInEnd:    "23:59",
+		ClockOutStart: "05:00",
+		ClockOutEnd:   "07:00",
+		Status:        "active",
+		CreatedAt:     fixtureNow,
+		UpdatedAt:     fixtureNow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAttendanceShiftAssignment(context.Background(), domain.AttendanceShiftAssignment{
+		ID:            "asa-night-summary",
+		TenantID:      "tenant-1",
+		EmployeeID:    "emp-1",
+		ShiftID:       "ash-night-summary",
+		WorksiteID:    "aws-1",
+		EffectiveFrom: fixtureNow.Add(-24 * time.Hour),
+		Status:        "active",
+		CreatedAt:     fixtureNow,
+		UpdatedAt:     fixtureNow,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	setNow(time.Date(2026, 6, 10, 14, 30, 0, 0, time.UTC))
+	if _, err := svc.Attendance().CreateAttendanceClockRecord(employeeCtx, domain.CreateAttendanceClockRecordInput{
+		Direction:      "clock_in",
+		ClientEventID:  "night-summary-open",
+		Latitude:       25.033964,
+		Longitude:      121.564468,
+		AccuracyMeters: 12,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	setNow(time.Date(2026, 6, 10, 17, 0, 0, 0, time.UTC))
+	working, err := svc.Attendance().AttendanceMonthlySummary(employeeCtx, "2026-06")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if working.AbnormalDays != 0 || len(working.Days) != 1 || working.Days[0].DayStatus != "working" {
+		t.Fatalf("expected open night shift to remain working before 07:00, got %+v", working)
+	}
+
+	setNow(time.Date(2026, 6, 11, 0, 0, 0, 0, time.UTC))
+	expired, err := svc.Attendance().AttendanceMonthlySummary(employeeCtx, "2026-06")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if expired.AbnormalDays != 1 || len(expired.Days) != 1 || expired.Days[0].DayStatus != "abnormal" {
+		t.Fatalf("expected open night shift to become abnormal after 07:00, got %+v", expired)
+	}
+}
+
 // TestAttendanceClockUsesElapsedHoursInsteadOfFixedClockOutTime 驗證彈性打卡只依實際工時判定。
 func TestAttendanceClockUsesElapsedHoursInsteadOfFixedClockOutTime(t *testing.T) {
 	_, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
@@ -2395,6 +2485,14 @@ func TestAttendanceClockSupportsOvernightShiftWorkDate(t *testing.T) {
 	}
 	if clockIn.WorkDate != "2026-06-10" || clockIn.RecordStatus != "accepted" {
 		t.Fatalf("expected accepted night clock-in on 2026-06-10, got %+v", clockIn)
+	}
+	setNow(time.Date(2026, 6, 10, 17, 0, 0, 0, time.UTC))
+	workingStatus, err := svc.Attendance().AttendanceClockStatus(employeeCtx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if workingStatus.WorkDate != "2026-06-10" || workingStatus.DayStatus != "working" || workingStatus.ClockIn == nil || workingStatus.ClockOut != nil || !workingStatus.CanClockOut {
+		t.Fatalf("expected open night-shift status to remain working after midnight, got %+v", workingStatus)
 	}
 
 	setNow(time.Date(2026, 6, 10, 22, 30, 0, 0, time.UTC))

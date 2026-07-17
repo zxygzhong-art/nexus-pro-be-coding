@@ -68,7 +68,10 @@ func (c AttendanceService) AttendanceMonthlySummary(ctx RequestContext, month st
 	sort.Strings(workDates)
 	for _, workDate := range workDates {
 		dayRecords := recordsByDate[workDate]
-		projection := ProjectAttendanceDay(dayRecords, leaves, workDate, policy.WorkTime, c.Now())
+		projection, err := c.projectAttendanceDay(ctx, dayRecords, leaves, workDate, policy.WorkTime, c.Now())
+		if err != nil {
+			return AttendanceMonthlySummary{}, err
+		}
 		workedMinutes := 0
 		if projection.ClockIn != nil && projection.ClockOut != nil {
 			workedMinutes = projection.WorkedMinutes

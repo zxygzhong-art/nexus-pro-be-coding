@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -122,6 +123,23 @@ func TestWorkspaceInsightsProjectsAttendanceMembers(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	for i, hours := range []float64{7.8, 8.43, 8.18, 8.13, 8.2, 8.12, 8.02} {
+		workDate := fmt.Sprintf("2026-06-%02d", i+1)
+		if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{
+			ID: fmt.Sprintf("sum-attended-%d", i), TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: workDate,
+			AttendHours: hours, AttendCounted: true, Source: "ehrms",
+			ExternalRef: "IKL001:" + workDate, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{
+		ID: "sum-attended-emp-2", TenantID: "tenant-1", EmployeeID: "emp-2", WorkDate: "2026-06-01",
+		AttendHours: 55.209999999999994, AttendCounted: true, Source: "ehrms",
+		ExternalRef: "IKL002:2026-06-01", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	got, err := svc.Workspace().Insights(ctx, domain.PlatformInsightsQuery{Month: "2026-06"})
 	if err != nil {
@@ -138,15 +156,21 @@ func TestWorkspaceInsightsProjectsAttendanceMembers(t *testing.T) {
 	if members[0]["primary_product"] != "—" || members[0]["task_count"] != 0 || len(members[0]["tasks"].([]map[string]any)) != 0 {
 		t.Fatalf("unsourced task data must stay empty, got %+v", members[0])
 	}
+	if members[0]["hours"] != float64(56.88) || members[1]["hours"] != float64(55.21) {
+		t.Fatalf("expected member hours rounded to hundredths, got %+v", members)
+	}
 	memberHours := report["member_hours"].([]map[string]any)
 	leaveChart := report["leave_chart"].([]map[string]any)
 	if len(memberHours) != 2 || len(leaveChart) != 1 || leaveChart[0]["id"] != "IKL001" {
 		t.Fatalf("unexpected member charts: hours=%+v leave=%+v", memberHours, leaveChart)
 	}
+	if memberHours[0]["value"] != float64(56.88) || memberHours[0]["meta"] != "56.88h" || memberHours[1]["value"] != float64(55.21) || memberHours[1]["meta"] != "55.21h" {
+		t.Fatalf("expected member chart values and labels rounded to hundredths, got %+v", memberHours)
+	}
 	totalHours := insightMetricValueByID(t, report, "dept-total-hours").(float64)
 	wantTotal := members[0]["hours"].(float64) + members[1]["hours"].(float64)
-	if totalHours != wantTotal {
-		t.Fatalf("expected total hours %.1f from member rows, got %.1f", wantTotal, totalHours)
+	if totalHours != float64(112.09) || totalHours != wantTotal {
+		t.Fatalf("expected rounded total hours %.2f from member rows, got %.2f", wantTotal, totalHours)
 	}
 }
 
