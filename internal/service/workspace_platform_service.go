@@ -2,8 +2,8 @@ package service
 
 import (
 	"math"
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 	"sort"
 	"strings"
 	"time"
@@ -587,7 +587,7 @@ func (c WorkspaceService) UpdateWorkspaceOrganizationManager(ctx RequestContext,
 			return err
 		}
 		if len(visible) == 0 {
-			return forbiddenDataScope("employee is outside data scope")
+			return ForbiddenDataScope("employee is outside data scope")
 		}
 		before := next
 		next.ManagerEmployeeID = managerEmployeeID
@@ -650,7 +650,7 @@ func (c WorkspaceService) UpdateWorkspaceOrganizationVisibility(ctx RequestConte
 			return err
 		}
 		if len(visible) == 0 {
-			return forbiddenDataScope("employee is outside data scope")
+			return ForbiddenDataScope("employee is outside data scope")
 		}
 		if err := tx.store.UpdateEmployeeOrgChartVisibility(goContext(ctx), ctx.TenantID, current.ID, showInOrgChart, tx.Now()); err != nil {
 			return err

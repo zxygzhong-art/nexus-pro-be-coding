@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // Client 定義 client 的資料結構。

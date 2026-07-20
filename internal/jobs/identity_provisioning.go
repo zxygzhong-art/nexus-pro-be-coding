@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"nexus-pro-be/internal/repository"
+	"nexus-pro-api/internal/repository"
 )
 
 const (

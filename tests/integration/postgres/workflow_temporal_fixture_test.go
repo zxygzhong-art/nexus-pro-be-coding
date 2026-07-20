@@ -3,9 +3,9 @@ package postgres_integration_test
 import (
 	"context"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository"
+	"nexus-pro-api/internal/service"
 )
 
 type integrationFormApprovalWorkflowClient struct {

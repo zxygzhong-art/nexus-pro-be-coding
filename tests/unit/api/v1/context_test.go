@@ -3,8 +3,8 @@ package v1_test
 import (
 	"testing"
 
-	v1 "nexus-pro-be/internal/api/v1"
-	"nexus-pro-be/internal/domain"
+	v1 "nexus-pro-api/internal/api/v1"
+	"nexus-pro-api/internal/domain"
 )
 
 // TestAuthenticatedPlatformAdminAcceptsDedicatedClaim 驗證專用布林 claim 可建立平臺管理員身分。

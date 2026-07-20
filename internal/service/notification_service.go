@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // NotificationService 實作目前帳號的系統通知流程。

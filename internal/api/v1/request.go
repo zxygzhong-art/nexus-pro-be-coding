@@ -11,7 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/otel/trace"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // stringValue 處理字串 value。

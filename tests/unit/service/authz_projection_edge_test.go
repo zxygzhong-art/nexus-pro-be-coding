@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 func TestMeProjectionIntersectsOrthogonalWildcardsAtConcreteRoute(t *testing.T) {
@@ -333,7 +334,7 @@ func TestAgentUsageProjectionRequiresExplicitTenantWideScopeOnBothSides(t *testi
 	if authzScopeHasString(me.EffectiveMenuKeys, "agents.usage") {
 		t.Fatalf("unscoped usage menu must remain hidden, got %+v", me.EffectiveMenuKeys)
 	}
-	_, err = svc.Agent().ListAccountUsage(ctx, domain.AgentAccountUsageQuery{}, domain.PageRequest{})
+	_, err = agentservice.New(svc).ListAccountUsage(ctx, domain.AgentAccountUsageQuery{}, domain.PageRequest{})
 	appErr, ok := domain.AsAppError(err)
 	if !ok || appErr.Status != 403 || appErr.ReasonCode != "data_scope_denied" {
 		t.Fatalf("usage service must fail closed with stable reason, got %v", err)

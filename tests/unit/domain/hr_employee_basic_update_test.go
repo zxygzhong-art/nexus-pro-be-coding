@@ -3,7 +3,7 @@ package domain_test
 import (
 	"testing"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // TestEmployeeBasicInfoOnlyUpdateValidation 驗證員工管理編輯欄位邊界。

@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
 )
 
 // TestPermissionCatalogSeedIsIdempotent 驗證權限與選單 catalog seed 可重複執行。

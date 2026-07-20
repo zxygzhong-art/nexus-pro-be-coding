@@ -9,9 +9,9 @@ import (
 	"time"
 	"unicode"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository"
+	"nexus-pro-api/internal/utils"
 )
 
 // TenantProvisionInput 定義租戶開通輸入。

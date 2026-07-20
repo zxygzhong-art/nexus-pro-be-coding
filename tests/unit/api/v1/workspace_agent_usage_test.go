@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
 )
 
 // TestWorkspaceAgentUsageBindsServerListControls verifies overview filters and pagination reach the service.

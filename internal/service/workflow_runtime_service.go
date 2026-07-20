@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 // StartWorkflowRun 依 template stages 啟動流程運行。
@@ -113,7 +113,7 @@ func (c WorkflowService) ActOnWorkflowStage(ctx RequestContext, formInstanceID, 
 
 // loadActiveWorkflowStageForAssignee combines the baseline read grant with the runtime assignee relation.
 func (c WorkflowService) loadActiveWorkflowStageForAssignee(ctx RequestContext, formInstanceID string) (domain.FormInstance, domain.WorkflowRun, domain.WorkflowStageInstance, []domain.WorkflowStageDefinition, []domain.WorkflowStageAssignee, error) {
-	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, ""); err != nil {
+	if _, _, err := c.RequireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, ""); err != nil {
 		return domain.FormInstance{}, domain.WorkflowRun{}, domain.WorkflowStageInstance{}, nil, nil, err
 	}
 	instance, run, stageInstance, stages, err := c.loadActiveWorkflowStage(ctx, formInstanceID)
@@ -132,7 +132,7 @@ func (c WorkflowService) loadActiveWorkflowStageForAssignee(ctx RequestContext, 
 
 // GetWorkflowFormState 回傳單據流程運行狀態。
 func (c WorkflowService) GetWorkflowFormState(ctx RequestContext, formInstanceID string) (domain.WorkflowFormStateResponse, error) {
-	account, decision, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
+	account, decision, err := c.RequireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
 	if err != nil {
 		return domain.WorkflowFormStateResponse{}, err
 	}

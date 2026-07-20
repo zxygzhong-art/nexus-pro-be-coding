@@ -19,7 +19,7 @@ type queryTracer struct {
 
 // newQueryTracer 建立查詢 tracer。
 func newQueryTracer() pgx.QueryTracer {
-	return queryTracer{tracer: otel.Tracer("nexus-pro-be/internal/platform/postgres")}
+	return queryTracer{tracer: otel.Tracer("nexus-pro-api/internal/platform/postgres")}
 }
 
 // TraceQueryStart 處理 trace 查詢 start。
@@ -28,7 +28,7 @@ func (t queryTracer) TraceQueryStart(ctx context.Context, _ *pgx.Conn, data pgx.
 		ctx = context.Background()
 	}
 	if t.tracer == nil {
-		t.tracer = otel.Tracer("nexus-pro-be/internal/platform/postgres")
+		t.tracer = otel.Tracer("nexus-pro-api/internal/platform/postgres")
 	}
 	operation := sqlOperation(data.SQL)
 	ctx, _ = t.tracer.Start(ctx, "postgres."+operation,

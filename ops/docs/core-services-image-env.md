@@ -110,7 +110,7 @@ TEMPO_S3_INSECURE=false
 
 # 後端側
 OTEL_ENABLED=true
-OTEL_SERVICE_NAME=nexus-pro-be
+OTEL_SERVICE_NAME=nexus-pro-api
 OTEL_BASE_URL=<http://tempo-host:4317>
 OTEL_EXPORTER_OTLP_INSECURE=false
 ```

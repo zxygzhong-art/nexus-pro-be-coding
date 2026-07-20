@@ -6,8 +6,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/service"
 )
 
 // NotificationCtrl 連接目前帳號的系統通知 endpoints。

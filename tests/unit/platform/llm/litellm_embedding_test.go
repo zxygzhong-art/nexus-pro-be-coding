@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/platform/llm"
+	"nexus-pro-api/internal/platform/llm"
 )
 
 // TestLiteLLMEmbeddingClient verifies alias routing, authentication, and response ordering.

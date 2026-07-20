@@ -4,7 +4,7 @@ import (
 	"sort"
 	"strings"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 const (
@@ -61,7 +61,7 @@ func isFormDataSourceOptionField(fieldType string) bool {
 
 // FormDataSources 回傳目前租戶可供表單設計與執行階段使用的資料源目錄。
 func (c WorkflowService) FormDataSources(ctx RequestContext) (domain.FormDataSourceCatalogResponse, error) {
-	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, ""); err != nil {
+	if _, _, err := c.RequireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, ""); err != nil {
 		return domain.FormDataSourceCatalogResponse{}, err
 	}
 	return c.loadFormDataSources(ctx)

@@ -17,7 +17,7 @@ type objectStoreDescriptor interface {
 	Bucket() string
 }
 
-type objectDeleter interface {
+type ObjectDeleter interface {
 	DeleteObject(ctx context.Context, key string) error
 }
 
@@ -88,16 +88,16 @@ func firstObjectStore(store ObjectStore) ObjectStore {
 	return NewMemoryObjectStore()
 }
 
-// objectStoreProvider 處理物件儲存層提供者。
-func objectStoreProvider(store ObjectStore) string {
+// ObjectStoreProvider 處理物件儲存層提供者。
+func ObjectStoreProvider(store ObjectStore) string {
 	if described, ok := store.(objectStoreDescriptor); ok {
 		return described.Provider()
 	}
 	return ""
 }
 
-// objectStoreBucket 處理物件儲存層 bucket。
-func objectStoreBucket(store ObjectStore) string {
+// ObjectStoreBucket 處理物件儲存層 bucket。
+func ObjectStoreBucket(store ObjectStore) string {
 	if described, ok := store.(objectStoreDescriptor); ok {
 		return described.Bucket()
 	}

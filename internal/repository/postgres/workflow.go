@@ -7,8 +7,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgtype"
 
-	"nexus-pro-be/internal/domain"
-	sqlc "nexus-pro-be/internal/platform/postgres/db"
+	"nexus-pro-api/internal/domain"
+	sqlc "nexus-pro-api/internal/platform/postgres/db"
 )
 
 // UpsertWorkflowRun 持久化流程運行實例。

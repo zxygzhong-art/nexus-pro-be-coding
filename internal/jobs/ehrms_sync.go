@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 const defaultEHRMSEmployeeSyncInterval = 24 * time.Hour

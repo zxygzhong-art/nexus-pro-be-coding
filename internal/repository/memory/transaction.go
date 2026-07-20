@@ -3,8 +3,8 @@ package memory
 import (
 	"context"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository"
 )
 
 var _ repository.Store = (*Store)(nil)

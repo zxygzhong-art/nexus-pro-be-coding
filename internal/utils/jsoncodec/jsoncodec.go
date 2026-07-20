@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"reflect"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // Must 處理 must。

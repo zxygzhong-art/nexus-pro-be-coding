@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
 )
 
 // TestAuthzDenySnapshotUsesShortTTLAndExpires 驗證 deny 決策以短 TTL 快取並準時失效。

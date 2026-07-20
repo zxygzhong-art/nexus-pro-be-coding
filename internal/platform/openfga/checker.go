@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 const maxOpenFGAErrorBodyLength = 500

@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // KeycloakAdminConfig 定義 Keycloak 管理員組態的資料結構。

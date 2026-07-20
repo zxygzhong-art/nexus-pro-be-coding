@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils/jsoncodec"
-	"nexus-pro-be/internal/utils/tenantctx"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils/jsoncodec"
+	"nexus-pro-api/internal/utils/tenantctx"
 )
 
 // TestTenantIDFromArgs 驗證租戶 ID 來源 args。

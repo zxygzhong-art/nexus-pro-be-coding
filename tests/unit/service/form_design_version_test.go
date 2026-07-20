@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
 )
 
 // TestWorkspaceFormDesignUsesGloballyUniqueTemplateIDs 驗證不同租戶使用相同表單 key 時不再碰撞主鍵。

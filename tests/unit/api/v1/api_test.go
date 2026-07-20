@@ -27,11 +27,11 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	v1api "nexus-pro-be/internal/api/v1"
-	"nexus-pro-be/internal/domain"
-	platformauth "nexus-pro-be/internal/platform/auth"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	v1api "nexus-pro-api/internal/api/v1"
+	"nexus-pro-api/internal/domain"
+	platformauth "nexus-pro-api/internal/platform/auth"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
 )
 
 // newTestAPI 驗證 test API。
@@ -1436,7 +1436,7 @@ func TestEmployeeExportAuditUsesOpenTelemetryTraceID(t *testing.T) {
 	populateDemoFixture(store)
 	handler := v1api.New(service.New(store), nil, v1api.Options{
 		TokenResolver:        staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo"}, ok: true},
-		TelemetryServiceName: "nexus-pro-be-test",
+		TelemetryServiceName: "nexus-pro-api-test",
 	}).Routes()
 
 	req := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/export", nil)

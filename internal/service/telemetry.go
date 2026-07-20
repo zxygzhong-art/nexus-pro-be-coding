@@ -22,7 +22,7 @@ func startServiceSpan(ctx RequestContext, name string, attrs ...attribute.KeyVal
 	}
 	baseAttrs = append(baseAttrs, attrs...)
 
-	next, span := otel.Tracer("nexus-pro-be/internal/service").Start(base, name,
+	next, span := otel.Tracer("nexus-pro-api/internal/service").Start(base, name,
 		trace.WithSpanKind(trace.SpanKindInternal),
 		trace.WithAttributes(baseAttrs...),
 	)

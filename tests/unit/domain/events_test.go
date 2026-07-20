@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 func TestEventSubjectForType(t *testing.T) {

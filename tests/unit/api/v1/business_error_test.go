@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	v1 "nexus-pro-be/internal/api/v1"
-	"nexus-pro-be/internal/domain"
+	v1 "nexus-pro-api/internal/api/v1"
+	"nexus-pro-api/internal/domain"
 )
 
 // TestBusinessRouteErrorMapsGenericCodes verifies module ownership without changing HTTP semantics.

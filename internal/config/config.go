@@ -343,7 +343,7 @@ func LoadE() (Config, error) {
 		EHRMSAttendanceSyncSince:      strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_SINCE")),
 
 		OTelEnabled:              envBool("OTEL_ENABLED", false, &problems),
-		OTelServiceName:          env("OTEL_SERVICE_NAME", "nexus-pro-be"),
+		OTelServiceName:          env("OTEL_SERVICE_NAME", "nexus-pro-api"),
 		OTelExporterOTLPEndpoint: env("OTEL_BASE_URL", "localhost:4317"),
 		OTelExporterOTLPInsecure: envBool("OTEL_EXPORTER_OTLP_INSECURE", true, &problems),
 	}

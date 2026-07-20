@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository"
+	"nexus-pro-api/internal/service"
 )
 
 // TestHRPositionCRUDSoftDisablesPosition 驗證崗位 CRUD 與刪除策略。

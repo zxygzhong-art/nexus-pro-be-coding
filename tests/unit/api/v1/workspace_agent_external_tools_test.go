@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 func TestWorkspaceAgentExternalToolLifecycle(t *testing.T) {

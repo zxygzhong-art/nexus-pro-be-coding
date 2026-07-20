@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // TenantStore 定義租戶儲存層的行為契約。

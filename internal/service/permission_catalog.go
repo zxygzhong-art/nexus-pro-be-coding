@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository"
 )
 
 // SyncPermissionCatalogForAllTenants 將程式宣告的權限與選單 catalog 同步到所有租戶。

@@ -5,13 +5,13 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 // FormBuilderCapabilities 回傳 Agent 建構表單所需的 schema、widget、資料源與流程角色能力。
 func (c WorkflowService) FormBuilderCapabilities(ctx RequestContext) (domain.FormBuilderCapabilitiesResponse, error) {
-	if _, _, err := c.requireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionRead, ""); err != nil {
+	if _, _, err := c.RequireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionRead, ""); err != nil {
 		return domain.FormBuilderCapabilitiesResponse{}, err
 	}
 	dataSources := make([]domain.FormBuilderDataSourceMetadata, 0, len(formDataSourceAllowedFields))
@@ -52,7 +52,7 @@ func (c WorkflowService) FormBuilderCapabilities(ctx RequestContext) (domain.For
 
 // ListFormDefinitionDrafts 列出草稿；調用方通過 ownerAccountID 控制“我的草稿”或管理員全量視圖。
 func (c WorkflowService) ListFormDefinitionDrafts(ctx RequestContext, ownerAccountID, status string) ([]domain.FormDefinitionDraft, error) {
-	if _, _, err := c.requireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionRead, ""); err != nil {
+	if _, _, err := c.RequireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionRead, ""); err != nil {
 		return nil, err
 	}
 	return c.store.ListFormDefinitionDrafts(goContext(ctx), ctx.TenantID, ownerAccountID, status)
@@ -60,7 +60,7 @@ func (c WorkflowService) ListFormDefinitionDrafts(ctx RequestContext, ownerAccou
 
 // GetFormDefinitionDraft 取得單個草稿並執行資源級授權。
 func (c WorkflowService) GetFormDefinitionDraft(ctx RequestContext, id string) (domain.FormDefinitionDraft, error) {
-	_, decision, err := c.requireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionRead, id)
+	_, decision, err := c.RequireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionRead, id)
 	if err != nil {
 		return domain.FormDefinitionDraft{}, err
 	}
@@ -79,7 +79,7 @@ func (c WorkflowService) GetFormDefinitionDraft(ctx RequestContext, id string) (
 
 // CreateFormDefinitionDraft 建立 Agent 可控、不可直接發佈的表單定義草稿。
 func (c WorkflowService) CreateFormDefinitionDraft(ctx RequestContext, input domain.CreateFormDefinitionDraftInput) (domain.FormDefinitionDraft, error) {
-	if _, _, err := c.requireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionCreate, ""); err != nil {
+	if _, _, err := c.RequireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionCreate, ""); err != nil {
 		return domain.FormDefinitionDraft{}, err
 	}
 	if input.AgentRunID != "" && input.ToolCallID != "" {
@@ -102,7 +102,7 @@ func (c WorkflowService) CreateFormDefinitionDraft(ctx RequestContext, input dom
 
 // UpdateFormDefinitionDraft 更新草稿，必須攜帶當前 revision 以阻止 Agent 覆蓋人工編輯。
 func (c WorkflowService) UpdateFormDefinitionDraft(ctx RequestContext, id string, input domain.UpdateFormDefinitionDraftInput) (domain.FormDefinitionDraft, error) {
-	_, decision, err := c.requireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionUpdate, id)
+	_, decision, err := c.RequireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionUpdate, id)
 	if err != nil {
 		return domain.FormDefinitionDraft{}, err
 	}
@@ -168,7 +168,7 @@ func (c WorkflowService) SimulateFormDefinitionWorkflow(ctx RequestContext, id s
 
 // SubmitFormDefinitionDraftForReview 把草稿送入管理員確認發佈隊列。
 func (c WorkflowService) SubmitFormDefinitionDraftForReview(ctx RequestContext, id string, revision int64) (domain.FormDefinitionDraft, error) {
-	_, _, err := c.requireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionSubmit, id)
+	_, _, err := c.RequireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionSubmit, id)
 	if err != nil {
 		return domain.FormDefinitionDraft{}, err
 	}
@@ -199,7 +199,7 @@ func (c WorkflowService) SubmitFormDefinitionDraftForReview(ctx RequestContext, 
 
 // PublishFormDefinitionDraft 由管理員確認後把 compiled schema 寫入既有 form_templates runtime。
 func (c WorkflowService) PublishFormDefinitionDraft(ctx RequestContext, id string, revision int64) (domain.FormDefinitionDraft, error) {
-	if _, _, err := c.requireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionApprove, id); err != nil {
+	if _, _, err := c.RequireWorkflowAuthz(ctx, domain.ResourceFormDefinitionDraft, domain.ActionApprove, id); err != nil {
 		return domain.FormDefinitionDraft{}, err
 	}
 	draft, ok, err := c.store.GetFormDefinitionDraft(goContext(ctx), ctx.TenantID, id)

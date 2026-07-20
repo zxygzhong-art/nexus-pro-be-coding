@@ -6,10 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/jobs"
-	platformsecret "nexus-pro-be/internal/platform/secret"
-	"nexus-pro-be/internal/repository/memory"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/jobs"
+	platformsecret "nexus-pro-api/internal/platform/secret"
+	"nexus-pro-api/internal/repository/memory"
 )
 
 type fakeLiteLLMModelAdmin struct {

@@ -1,6 +1,6 @@
 package service
 
-import "nexus-pro-be/internal/utils"
+import "nexus-pro-api/internal/utils"
 
 // AuditService 定義稽覈服務的資料結構。
 type AuditService struct {

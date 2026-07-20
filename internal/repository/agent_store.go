@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // AgentStore 定義 agent 儲存層的行為契約。

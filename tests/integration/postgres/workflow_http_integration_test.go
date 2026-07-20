@@ -9,10 +9,10 @@ import (
 	"testing"
 	"time"
 
-	v1api "nexus-pro-be/internal/api/v1"
-	"nexus-pro-be/internal/domain"
-	postgresrepo "nexus-pro-be/internal/repository/postgres"
-	"nexus-pro-be/internal/service"
+	v1api "nexus-pro-api/internal/api/v1"
+	"nexus-pro-api/internal/domain"
+	postgresrepo "nexus-pro-api/internal/repository/postgres"
+	"nexus-pro-api/internal/service"
 )
 
 // TestWorkflowHTTPPostgresAcceptance 驗證 workflow HTTP 路由在 Postgres 上可 submit → review → approve。

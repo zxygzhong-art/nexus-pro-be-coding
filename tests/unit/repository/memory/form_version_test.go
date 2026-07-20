@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
 )
 
 // TestFormTemplateVersionsAreImmutableAndInstancesBindVersion 驗證模板更新保留舊快照且實例綁定當前版本。

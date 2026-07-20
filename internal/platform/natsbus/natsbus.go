@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
@@ -109,7 +109,7 @@ func Connect(ctx context.Context, cfg Config, logger *slog.Logger) (*Client, err
 	}
 	nc, err := nats.Connect(
 		cfg.URL,
-		nats.Name("nexus-pro-be"),
+		nats.Name("nexus-pro-api"),
 		nats.Timeout(5*time.Second),
 	)
 	if err != nil {
@@ -151,7 +151,7 @@ func (c *Client) Publish(ctx context.Context, subject string, envelope domain.Do
 	if c != nil {
 		stream = c.stream
 	}
-	ctx, span := otel.Tracer("nexus-pro-be/internal/platform/natsbus").Start(ctx, "natsbus.publish",
+	ctx, span := otel.Tracer("nexus-pro-api/internal/platform/natsbus").Start(ctx, "natsbus.publish",
 		trace.WithSpanKind(trace.SpanKindProducer),
 		trace.WithAttributes(
 			attribute.String("messaging.system", "nats"),
@@ -217,7 +217,7 @@ func (c *Client) Subscribe(ctx context.Context, opts SubscriptionOptions, handle
 		return nil, err
 	}
 	consumeCtx, err := consumer.Consume(func(msg jetstream.Msg) {
-		ctx, span := otel.Tracer("nexus-pro-be/internal/platform/natsbus").Start(ctx, "natsbus.consume",
+		ctx, span := otel.Tracer("nexus-pro-api/internal/platform/natsbus").Start(ctx, "natsbus.consume",
 			trace.WithSpanKind(trace.SpanKindConsumer),
 			trace.WithAttributes(
 				attribute.String("messaging.system", "nats"),

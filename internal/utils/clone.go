@@ -1,6 +1,6 @@
 package utils
 
-import "nexus-pro-be/internal/domain"
+import "nexus-pro-api/internal/domain"
 
 // CopyStrings 複製字串。
 func CopyStrings(src []string) []string {

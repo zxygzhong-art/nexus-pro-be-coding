@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository"
+	"nexus-pro-api/internal/service"
 )
 
 // TestPlatformHomeUsesEnabledTenantFormTemplates verifies that home form entries come from the tenant template store.

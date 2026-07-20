@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 func TestAgentSessionChatPersistsMessagesAndAutoMemory(t *testing.T) {
@@ -37,7 +38,7 @@ func TestAgentSessionChatPersistsMessagesAndAutoMemory(t *testing.T) {
 	})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
-	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "記住我喜歡特休"}, func(context.Context, domain.AgentChatEvent) error { return nil })
+	run, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{Message: "記住我喜歡特休"}, func(context.Context, domain.AgentChatEvent) error { return nil })
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +46,7 @@ func TestAgentSessionChatPersistsMessagesAndAutoMemory(t *testing.T) {
 		t.Fatalf("expected run session id, got %+v", run)
 	}
 
-	sessions, err := svc.Agent().ListSessions(ctx, domain.ListAgentSessionsQuery{})
+	sessions, err := agentservice.New(svc).ListSessions(ctx, domain.ListAgentSessionsQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +57,7 @@ func TestAgentSessionChatPersistsMessagesAndAutoMemory(t *testing.T) {
 		t.Fatalf("expected session title from first message, got %+v", sessions[0])
 	}
 
-	messages, err := svc.Agent().ListSessionMessages(ctx, run.SessionID)
+	messages, err := agentservice.New(svc).ListSessionMessages(ctx, run.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -67,7 +68,7 @@ func TestAgentSessionChatPersistsMessagesAndAutoMemory(t *testing.T) {
 		t.Fatalf("unexpected persisted message content: %+v", messages)
 	}
 
-	memories, err := svc.Agent().ListMemories(ctx, domain.ListAgentMemoriesQuery{})
+	memories, err := agentservice.New(svc).ListMemories(ctx, domain.ListAgentMemoriesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}

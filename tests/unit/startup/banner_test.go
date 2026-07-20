@@ -4,13 +4,13 @@ import (
 	"strings"
 	"testing"
 
-	"nexus-pro-be/internal/startup"
+	"nexus-pro-api/internal/startup"
 )
 
 // TestRenderIncludesRuntimeAndDependencies 驗證 render includes runtime and 依賴。
 func TestRenderIncludesRuntimeAndDependencies(t *testing.T) {
 	output := startup.Render(startup.Report{
-		Name:       "nexus-pro-be",
+		Name:       "nexus-pro-api",
 		Env:        "development",
 		HTTPAddr:   ":8080",
 		Repository: "postgresql",
@@ -21,7 +21,7 @@ func TestRenderIncludesRuntimeAndDependencies(t *testing.T) {
 	})
 
 	for _, want := range []string{
-		"nexus-pro-be",
+		"nexus-pro-api",
 		"env=development",
 		"addr=:8080",
 		"repository=postgresql",

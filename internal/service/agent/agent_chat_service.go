@@ -1,4 +1,4 @@
-package service
+package agent
 
 import (
 	"context"
@@ -6,20 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 type agentChatContextKey struct{}
-
-type agentChatExecutionContextKey struct{}
-
-type agentChatExecutionContext struct {
-	AgentID        string
-	SessionID      string
-	RunID          string
-	ContextVersion int64
-}
 
 const (
 	defaultChatRuntimeTimeout            = 60 * time.Second
@@ -36,51 +27,7 @@ func effectiveAgentRuntimeTimeout(_ int, modelSeconds int) time.Duration {
 	return time.Duration(modelSeconds) * time.Second
 }
 
-// AgentTool 定義 agent runtime 可呼叫、且受工具與業務權限雙重檢查的工具。
-type AgentTool func(context.Context, map[string]any) (map[string]any, error)
-
 // AgentChatEmitFunc 定義 agent chat 事件輸出 callback。
-type AgentChatEmitFunc func(context.Context, domain.AgentChatEvent) error
-
-// AgentChatRuntimeRequest 定義 agent runtime 輸入。
-type AgentChatRuntimeRequest struct {
-	RequestContext domain.RequestContext
-	RunID          string
-	SessionID      string
-	AgentName      string
-	AgentRole      string
-	ModelName      string
-	Message        string
-	History        []domain.AgentSessionMessage
-	Memories       []domain.AgentMemory
-	Mode           string
-	Tools          map[string]AgentTool
-	SubAgents      []AgentChatSubAgentRuntimeRequest
-	RecordUsage    func(domain.AgentTokenUsage)
-}
-
-// AgentChatSubAgentRuntimeRequest 定義一個可由主 Agent 委派的運行時成員。
-type AgentChatSubAgentRuntimeRequest struct {
-	ID        string
-	Name      string
-	Role      string
-	ModelName string
-	Tools     map[string]AgentTool
-}
-
-type resolvedAgentTeamMember struct {
-	ID               string
-	Name             string
-	Role             string
-	ModelName        string
-	ToolNames        []string
-	KnowledgeBaseIDs []string
-}
-
-// AgentChatRuntime 定義 agent chat runtime 行為。
-type AgentChatRuntime interface {
-	RunAgentChat(context.Context, AgentChatRuntimeRequest, AgentChatEmitFunc) error
-}
 
 // WithAgentRequestContext 把 RequestContext 注入 context.Context，供工具執行時還原身份。
 func WithAgentRequestContext(ctx context.Context, reqCtx domain.RequestContext) context.Context {
@@ -96,23 +43,9 @@ func AgentRequestContextFromContext(ctx context.Context) (domain.RequestContext,
 	return reqCtx, ok
 }
 
-// withAgentChatExecutionContext associates tool side effects with the exact visible conversation partition.
-func withAgentChatExecutionContext(ctx context.Context, execution agentChatExecutionContext) context.Context {
-	return context.WithValue(ctx, agentChatExecutionContextKey{}, execution)
-}
-
-// agentChatExecutionContextFromContext restores the session identity used by artifact and confirmation persistence.
-func agentChatExecutionContextFromContext(ctx context.Context) (agentChatExecutionContext, bool) {
-	if ctx == nil {
-		return agentChatExecutionContext{}, false
-	}
-	execution, ok := ctx.Value(agentChatExecutionContextKey{}).(agentChatExecutionContext)
-	return execution, ok
-}
-
 // Chat 執行流式 agent chat。
 func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit AgentChatEmitFunc) (AgentRun, error) {
-	if c.agentChatRuntime == nil {
+	if c.AgentChatRuntime() == nil {
 		err := domain.E(503, "service_unavailable", "agent chat is disabled").WithReasonCode("agent_chat_disabled")
 		return AgentRun{}, err
 	}
@@ -139,7 +72,7 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		mode = "assistant_chat"
 	}
 	if sessionID != "" {
-		session, err = c.currentAgentSession(ctx, account.ID, sessionID)
+		session, err = c.CurrentAgentSession(ctx, account.ID, sessionID)
 		if err != nil {
 			return AgentRun{}, err
 		}
@@ -160,7 +93,7 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 	agentName := ""
 	agentRole := ""
 	var recommendationCatalog []PlatformAssistant
-	var resolvedSubAgents []resolvedAgentTeamMember
+	var resolvedSubAgents []ResolvedAgentTeamMember
 	runtimeTimeout := defaultChatRuntimeTimeout
 	if agentID != "" {
 		definition, err := c.publishedAgentDefinition(ctx, agentID)
@@ -324,7 +257,7 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 	baseCtx, cancel = context.WithTimeout(baseCtx, runtimeTimeout)
 	defer cancel()
 	baseCtx = WithAgentRequestContext(baseCtx, ctx)
-	baseCtx = withAgentChatExecutionContext(baseCtx, agentChatExecutionContext{
+	baseCtx = WithAgentChatExecutionContext(baseCtx, AgentChatExecutionContext{
 		AgentID: agentID, SessionID: sessionID, RunID: run.ID, ContextVersion: session.ContextVersion,
 	})
 	if err := emit(baseCtx, domain.AgentChatEvent{Event: domain.AgentChatEventSession, SessionID: sessionID, RunID: run.ID}); err != nil {
@@ -388,7 +321,7 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 			usageMu.Unlock()
 		},
 	}
-	runtimeErr := c.agentChatRuntime.RunAgentChat(baseCtx, req, wrappedEmit)
+	runtimeErr := c.AgentChatRuntime().RunAgentChat(baseCtx, req, wrappedEmit)
 	usageComplete := runtimeErr == nil
 	if runtimeErr != nil && mode == agentChatModeAssistantRecommendation && strings.TrimSpace(answer.String()) == "" {
 		fallbackAnswer := assistantRecommendationFallback(userMessage, recommendationCatalog)
@@ -396,7 +329,7 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 			if emitErr := wrappedEmit(baseCtx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: fallbackAnswer}); emitErr != nil {
 				runtimeErr = emitErr
 			} else {
-				c.logger.Warn("assistant recommendation runtime failed; using visible catalog fallback", "error", runtimeErr, "session_id", sessionID, "run_id", run.ID)
+				c.Logger().Warn("assistant recommendation runtime failed; using visible catalog fallback", "error", runtimeErr, "session_id", sessionID, "run_id", run.ID)
 				runtimeErr = nil
 			}
 		}
@@ -410,14 +343,14 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 	run.UsageComplete = usageComplete && llmCallCount > 0
 	usageMu.Unlock()
 	if runtimeErr != nil {
-		c.logWarn(ctx, "agent chat runtime failed",
+		c.LogWarn(ctx, "agent chat runtime failed",
 			"run_id", run.ID,
 			"session_id", sessionID,
 			"error", runtimeErr,
 		)
 		failed, failErr := c.failAgentChat(ctx, account.ID, session, run)
 		if failErr != nil {
-			c.logWarn(ctx, "persist agent chat failure marker failed", "run_id", run.ID, "session_id", sessionID, "error", failErr)
+			c.LogWarn(ctx, "persist agent chat failure marker failed", "run_id", run.ID, "session_id", sessionID, "error", failErr)
 			run.Answer = agentRuntimeFailureAnswer(ctx)
 			_ = c.FailRun(ctx, run, failErr)
 			failed = run
@@ -485,7 +418,7 @@ func (c AgentService) failAgentChat(ctx RequestContext, accountID string, expect
 	}); err != nil {
 		return AgentRun{}, err
 	}
-	c.logInfo(ctx, "agent run status changed", "run_id", run.ID, "mode", run.Mode, "previous_status", previousStatus, "status", run.Status)
+	c.LogInfo(ctx, "agent run status changed", "run_id", run.ID, "mode", run.Mode, "previous_status", previousStatus, "status", run.Status)
 	return run, nil
 }
 
@@ -618,7 +551,7 @@ func (c AgentService) recoverStaleAgentRuns(ctx RequestContext, sessionID string
 		return err
 	}
 	if recovered > 0 {
-		c.logWarn(ctx, "stale agent runs recovered",
+		c.LogWarn(ctx, "stale agent runs recovered",
 			"session_id", sessionID,
 			"recovered_runs", recovered,
 			"stale_before", staleBefore,
@@ -738,7 +671,7 @@ func (c AgentService) completeAgentChat(ctx RequestContext, accountID string, ex
 	}); err != nil {
 		return AgentRun{}, err
 	}
-	c.logInfo(ctx, "agent run status changed",
+	c.LogInfo(ctx, "agent run status changed",
 		"run_id", run.ID,
 		"mode", run.Mode,
 		"previous_status", previousStatus,
@@ -760,7 +693,7 @@ func shouldPersistAgentArtifact(event domain.AgentChatEvent) bool {
 
 // agentArtifactMessageMetadata serializes the event as an opaque JSON string so dynamic form field IDs stay unchanged.
 func agentArtifactMessageMetadata(event domain.AgentChatEvent) (map[string]any, error) {
-	return encodeAgentArtifactMetadata(map[string]any{
+	return domain.EncodeAgentArtifactMetadata(map[string]any{
 		"event":  event.Event,
 		"name":   event.Name,
 		"status": event.Status,
@@ -798,7 +731,7 @@ func (c AgentService) agentMemoriesForChat(ctx RequestContext, accountID, agentI
 	seen := map[string]struct{}{}
 	appendUnique := func(items []domain.AgentMemory) {
 		for _, item := range items {
-			if item.Key == agentConfirmationMemoryKey {
+			if item.Key == AgentConfirmationMemoryKey {
 				continue
 			}
 			if _, ok := seen[item.ID]; ok {
@@ -928,8 +861,8 @@ func agentMessageRoleLabel(role domain.AgentMessageRole) string {
 }
 
 // resolveAgentTeamMembers 解析每個子 Agent 的模型路由，並以最慢模型的設置作為 Team 執行上限。
-func (c AgentService) resolveAgentTeamMembers(ctx RequestContext, members []domain.AgentTeamMember, timeout time.Duration) ([]resolvedAgentTeamMember, time.Duration, error) {
-	out := make([]resolvedAgentTeamMember, 0, len(members))
+func (c AgentService) resolveAgentTeamMembers(ctx RequestContext, members []domain.AgentTeamMember, timeout time.Duration) ([]ResolvedAgentTeamMember, time.Duration, error) {
+	out := make([]ResolvedAgentTeamMember, 0, len(members))
 	for _, member := range members {
 		model, err := c.currentAgentModel(ctx, member.ModelID)
 		if err != nil {
@@ -943,7 +876,7 @@ func (c AgentService) resolveAgentTeamMembers(ctx RequestContext, members []doma
 		if memberTimeout > timeout {
 			timeout = memberTimeout
 		}
-		out = append(out, resolvedAgentTeamMember{
+		out = append(out, ResolvedAgentTeamMember{
 			ID:               member.ID,
 			Name:             member.Name,
 			Role:             member.Role,
@@ -980,7 +913,7 @@ func (c AgentService) filteredAgentTools(reqCtx RequestContext, allowed []string
 func (c AgentService) filteredReadonlyAgentTools(reqCtx RequestContext, allowed []string, limit bool, emit AgentChatEmitFunc, knowledgeBaseIDs []string) map[string]AgentTool {
 	tools := c.filteredAgentTools(reqCtx, allowed, limit, emit, knowledgeBaseIDs)
 	readonly := make(map[string]struct{})
-	for _, meta := range agentToolCatalog() {
+	for _, meta := range domain.AgentToolCatalog() {
 		if meta.Readonly {
 			readonly[meta.Value] = struct{}{}
 		}
@@ -1003,7 +936,7 @@ func (c AgentService) agentTools(reqCtx RequestContext, emit AgentChatEmitFunc, 
 			}
 			actualCtx.Context = ctx
 			_ = emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventToolCall, Name: name, Status: "started"})
-			result, err := c.agentToolGateway().Call(actualCtx, AgentToolCall{
+			result, err := c.AgentToolGateway().Call(actualCtx, AgentToolCall{
 				Name: name,
 				Authz: CheckRequest{
 					ApplicationCode: AppAgent,
@@ -1044,19 +977,19 @@ func (c AgentService) agentTools(reqCtx RequestContext, emit AgentChatEmitFunc, 
 		"my_form_history":               tool("my_form_history", c.toolMyFormHistory),
 		"my_pending_reviews":            tool("my_pending_reviews", c.toolMyPendingReviews),
 		"workspace_insights":            tool("workspace_insights", c.toolWorkspaceInsights),
-		"list_published_form_templates": tool("list_published_form_templates", c.toolListPublishedFormTemplates),
-		"get_published_form_template":   tool("get_published_form_template", c.toolGetPublishedFormTemplate),
-		"create_form_draft":             tool("create_form_draft", c.toolCreateFormDraft),
-		"update_form_draft":             tool("update_form_draft", c.toolUpdateFormDraft),
-		"preview_form_submission":       tool("preview_form_submission", c.toolPreviewFormSubmission),
-		"prepare_bulk_review":           tool("prepare_bulk_review", c.toolPrepareBulkReview),
-		"form.get_capabilities":         tool("form.get_capabilities", c.toolFormGetCapabilities),
-		"form.get_data_source_schema":   tool("form.get_data_source_schema", c.toolFormGetDataSourceSchema),
-		"form.create_draft":             tool("form.create_draft", c.toolFormCreateDraft),
-		"form.update_draft":             tool("form.update_draft", c.toolFormUpdateDraft),
-		"form.validate_draft":           tool("form.validate_draft", c.toolFormValidateDraft),
-		"form.preview_draft":            tool("form.preview_draft", c.toolFormPreviewDraft),
-		"form.simulate_workflow":        tool("form.simulate_workflow", c.toolFormSimulateWorkflow),
+		"list_published_form_templates": tool("list_published_form_templates", c.ToolListPublishedFormTemplates),
+		"get_published_form_template":   tool("get_published_form_template", c.ToolGetPublishedFormTemplate),
+		"create_form_draft":             tool("create_form_draft", c.ToolCreateFormDraft),
+		"update_form_draft":             tool("update_form_draft", c.ToolUpdateFormDraft),
+		"preview_form_submission":       tool("preview_form_submission", c.ToolPreviewFormSubmission),
+		"prepare_bulk_review":           tool("prepare_bulk_review", c.ToolPrepareBulkReview),
+		"form.get_capabilities":         tool("form.get_capabilities", c.ToolFormGetCapabilities),
+		"form.get_data_source_schema":   tool("form.get_data_source_schema", c.ToolFormGetDataSourceSchema),
+		"form.create_draft":             tool("form.create_draft", c.ToolFormCreateDraft),
+		"form.update_draft":             tool("form.update_draft", c.ToolFormUpdateDraft),
+		"form.validate_draft":           tool("form.validate_draft", c.ToolFormValidateDraft),
+		"form.preview_draft":            tool("form.preview_draft", c.ToolFormPreviewDraft),
+		"form.simulate_workflow":        tool("form.simulate_workflow", c.ToolFormSimulateWorkflow),
 	}
 }
 
@@ -1197,7 +1130,7 @@ func (c AgentService) toolCheckLeaveEligibility(ctx domain.RequestContext, args 
 	if err != nil {
 		return nil, err
 	}
-	evaluation, err := c.Attendance().evaluateLeaveRequestRules(ctx, employeeID, leaveTypeRaw, requestedDate, requestedDate.Add(time.Duration(hours*float64(time.Hour))), hours)
+	evaluation, err := c.Attendance().EvaluateLeaveRequestRules(ctx, employeeID, leaveTypeRaw, requestedDate, requestedDate.Add(time.Duration(hours*float64(time.Hour))), hours)
 	if err != nil {
 		return nil, err
 	}
@@ -1207,7 +1140,7 @@ func (c AgentService) toolCheckLeaveEligibility(ctx domain.RequestContext, args 
 		"leave_type":               evaluation.LeaveType,
 		"requested_date":           requestedDate.Format(time.DateOnly),
 		"required_hours":           hours,
-		"supported":                evaluation.Status != leaveEvaluationUnsupported,
+		"supported":                evaluation.Status != LeaveEvaluationUnsupported,
 		"eligible":                 evaluation.Eligible,
 		"status":                   evaluation.Status,
 		"message":                  evaluation.Message,
@@ -1219,7 +1152,7 @@ func (c AgentService) toolCheckLeaveEligibility(ctx domain.RequestContext, args 
 		"balance_fallback_applied": evaluation.BalanceFallbackReason != "",
 		"balance_fallback_reason":  evaluation.BalanceFallbackReason,
 	}
-	if evaluation.Status == leaveEvaluationUnsupported {
+	if evaluation.Status == LeaveEvaluationUnsupported {
 		return result, nil
 	}
 	result["leave_type_name"] = evaluation.LeaveTypeName
@@ -1241,7 +1174,7 @@ func (c AgentService) toolCheckLeaveEligibility(ctx domain.RequestContext, args 
 
 // currentEmployeeLeaveBalances narrows any authorized attendance scope to the account's own employee record.
 func (c AgentService) currentEmployeeLeaveBalances(ctx domain.RequestContext) (string, []LeaveBalance, error) {
-	account, _, err := c.resolveAccount(ctx)
+	account, _, err := c.ResolveAccount(ctx)
 	if err != nil {
 		return "", nil, err
 	}
@@ -1273,7 +1206,7 @@ func (c AgentService) toolMyClockRecords(ctx domain.RequestContext, args map[str
 
 // toolMyAttendanceSummary returns the same self-scoped monthly projection shown on the platform home page.
 func (c AgentService) toolMyAttendanceSummary(ctx domain.RequestContext, _ map[string]any) (map[string]any, error) {
-	summary, err := c.Platform().clockSummary(ctx)
+	summary, err := c.Platform().ClockSummary(ctx)
 	if err != nil {
 		return nil, err
 	}

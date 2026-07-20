@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // TestOpenFGARelationshipPayloadRoundTrip 驗證 typed payload 經 wire map 來回转換後保持一致。

@@ -34,7 +34,7 @@ func Print(w io.Writer, report Report) error {
 func Render(report Report) string {
 	name := clean(report.Name)
 	if name == "" {
-		name = "nexus-pro-be"
+		name = "nexus-pro-api"
 	}
 	env := clean(report.Env)
 	if env == "" {

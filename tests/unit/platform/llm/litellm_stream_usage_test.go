@@ -11,7 +11,7 @@ import (
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"nexus-pro-be/internal/platform/llm"
+	"nexus-pro-api/internal/platform/llm"
 )
 
 // TestLiteLLMStreamingPreservesUsage verifies the OpenAI stream usage contract end to end.

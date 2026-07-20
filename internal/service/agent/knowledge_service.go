@@ -1,4 +1,4 @@
-package service
+package agent
 
 import (
 	"bytes"
@@ -15,8 +15,8 @@ import (
 
 	"github.com/ledongthuc/pdf"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 const (
@@ -262,11 +262,11 @@ func (c AgentService) UploadKnowledgeDocument(ctx RequestContext, knowledgeBaseI
 		ID: utils.NewID("kdoc"), TenantID: ctx.TenantID, KnowledgeBaseID: base.ID,
 		Title: upload.Title, Content: upload.Content, SourceType: upload.SourceType,
 		OriginalFilename: upload.Filename, ContentType: upload.ContentType, SizeBytes: int64(len(input.Content)), SHA256: upload.SHA256,
-		ObjectProvider: objectStoreProvider(c.objectStore), ObjectBucket: objectStoreBucket(c.objectStore), ParseStatus: "ready",
+		ObjectProvider: ObjectStoreProvider(c.ObjectStore()), ObjectBucket: ObjectStoreBucket(c.ObjectStore()), ParseStatus: "ready",
 		CreatedByAccountID: account.ID, UpdatedByAccountID: account.ID, CreatedAt: now, UpdatedAt: now,
 	}
 	item.ObjectKey = fmt.Sprintf("tenants/%s/knowledge-bases/%s/documents/%s/source", ctx.TenantID, base.ID, item.ID)
-	if err := c.objectStore.PutObject(goContext(ctx), item.ObjectKey, item.ContentType, input.Content); err != nil {
+	if err := c.ObjectStore().PutObject(goContext(ctx), item.ObjectKey, item.ContentType, input.Content); err != nil {
 		return domain.KnowledgeDocument{}, err
 	}
 	stored := true
@@ -378,8 +378,8 @@ func (c AgentService) SearchKnowledge(ctx RequestContext, input domain.Knowledge
 		}
 	}
 	semantics := "cosine similarity over LiteLLM alias nexus-pro-embedding in PostgreSQL pgvector"
-	if c.knowledgeEmbedder != nil && strings.TrimSpace(c.knowledgeEmbedder.Model()) != "" {
-		semantics = fmt.Sprintf("cosine similarity over LiteLLM alias %s in PostgreSQL pgvector", strings.TrimSpace(c.knowledgeEmbedder.Model()))
+	if c.KnowledgeEmbedder() != nil && strings.TrimSpace(c.KnowledgeEmbedder().Model()) != "" {
+		semantics = fmt.Sprintf("cosine similarity over LiteLLM alias %s in PostgreSQL pgvector", strings.TrimSpace(c.KnowledgeEmbedder().Model()))
 	}
 	if len(baseIDs) == 0 {
 		return domain.KnowledgeSearchResult{Query: query, Semantics: semantics, Hits: []domain.KnowledgeSearchHit{}, Total: 0}, nil
@@ -422,7 +422,7 @@ func (c AgentService) SearchKnowledge(ctx RequestContext, input domain.Knowledge
 
 // knowledgeChunksForDocument chunks and embeds a document before its transactional write.
 func (c AgentService) knowledgeChunksForDocument(ctx RequestContext, document domain.KnowledgeDocument, config domain.KnowledgeChunkConfig) ([]domain.KnowledgeDocumentChunk, error) {
-	if c.knowledgeEmbedder == nil || strings.TrimSpace(c.knowledgeEmbedder.Model()) == "" {
+	if c.KnowledgeEmbedder() == nil || strings.TrimSpace(c.KnowledgeEmbedder().Model()) == "" {
 		return nil, knowledgeEmbeddingUnavailable()
 	}
 	contents := splitKnowledgeContent(document.Content, config)
@@ -436,13 +436,13 @@ func (c AgentService) knowledgeChunksForDocument(ctx RequestContext, document do
 		if end > len(inputs) {
 			end = len(inputs)
 		}
-		batch, err := c.knowledgeEmbedder.Embed(goContext(ctx), inputs[start:end])
+		batch, err := c.KnowledgeEmbedder().Embed(goContext(ctx), inputs[start:end])
 		if err != nil {
-			c.logWarn(ctx, "knowledge document embedding failed", "document_id", document.ID, "model", c.knowledgeEmbedder.Model(), "error", err)
+			c.LogWarn(ctx, "knowledge document embedding failed", "document_id", document.ID, "model", c.KnowledgeEmbedder().Model(), "error", err)
 			return nil, knowledgeEmbeddingFailed()
 		}
 		if err := validateKnowledgeVectors(batch, end-start); err != nil {
-			c.logWarn(ctx, "knowledge document embedding response invalid", "document_id", document.ID, "model", c.knowledgeEmbedder.Model(), "error", err)
+			c.LogWarn(ctx, "knowledge document embedding response invalid", "document_id", document.ID, "model", c.KnowledgeEmbedder().Model(), "error", err)
 			return nil, knowledgeEmbeddingFailed()
 		}
 		if len(vectors) > 0 && len(batch[0]) != len(vectors[0]) {
@@ -454,7 +454,7 @@ func (c AgentService) knowledgeChunksForDocument(ctx RequestContext, document do
 	for i, content := range contents {
 		chunks[i] = domain.KnowledgeDocumentChunk{
 			ID: utils.NewID("kchunk"), TenantID: document.TenantID, KnowledgeBaseID: document.KnowledgeBaseID,
-			DocumentID: document.ID, Ordinal: i, Content: content, EmbeddingModel: strings.TrimSpace(c.knowledgeEmbedder.Model()),
+			DocumentID: document.ID, Ordinal: i, Content: content, EmbeddingModel: strings.TrimSpace(c.KnowledgeEmbedder().Model()),
 			EmbeddingDimensions: len(vectors[i]), Embedding: vectors[i], CreatedAt: document.UpdatedAt,
 		}
 	}
@@ -463,19 +463,19 @@ func (c AgentService) knowledgeChunksForDocument(ctx RequestContext, document do
 
 // embedKnowledgeQuery embeds and validates one semantic search query.
 func (c AgentService) embedKnowledgeQuery(ctx RequestContext, query string) ([]float32, string, error) {
-	if c.knowledgeEmbedder == nil || strings.TrimSpace(c.knowledgeEmbedder.Model()) == "" {
+	if c.KnowledgeEmbedder() == nil || strings.TrimSpace(c.KnowledgeEmbedder().Model()) == "" {
 		return nil, "", knowledgeEmbeddingUnavailable()
 	}
-	vectors, err := c.knowledgeEmbedder.Embed(goContext(ctx), []string{query})
+	vectors, err := c.KnowledgeEmbedder().Embed(goContext(ctx), []string{query})
 	if err != nil {
-		c.logWarn(ctx, "knowledge query embedding failed", "model", c.knowledgeEmbedder.Model(), "error", err)
+		c.LogWarn(ctx, "knowledge query embedding failed", "model", c.KnowledgeEmbedder().Model(), "error", err)
 		return nil, "", knowledgeEmbeddingFailed()
 	}
 	if err := validateKnowledgeVectors(vectors, 1); err != nil {
-		c.logWarn(ctx, "knowledge query embedding response invalid", "model", c.knowledgeEmbedder.Model(), "error", err)
+		c.LogWarn(ctx, "knowledge query embedding response invalid", "model", c.KnowledgeEmbedder().Model(), "error", err)
 		return nil, "", knowledgeEmbeddingFailed()
 	}
-	return vectors[0], strings.TrimSpace(c.knowledgeEmbedder.Model()), nil
+	return vectors[0], strings.TrimSpace(c.KnowledgeEmbedder().Model()), nil
 }
 
 // splitKnowledgeContent applies the selected bounded segmentation strategy.
@@ -748,12 +748,12 @@ func normalizeKnowledgeUpload(input domain.UploadKnowledgeDocumentInput) (normal
 
 // deleteKnowledgeObjectIfSupported performs best-effort cleanup after metadata deletion or rollback.
 func (c AgentService) deleteKnowledgeObjectIfSupported(ctx RequestContext, key string) {
-	deleter, ok := c.objectStore.(objectDeleter)
+	deleter, ok := c.ObjectStore().(ObjectDeleter)
 	if !ok || strings.TrimSpace(key) == "" {
 		return
 	}
 	if err := deleter.DeleteObject(goContext(ctx), key); err != nil {
-		c.logWarn(ctx, "delete knowledge source object failed", "object_key", key, "error", err)
+		c.LogWarn(ctx, "delete knowledge source object failed", "object_key", key, "error", err)
 	}
 }
 

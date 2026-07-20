@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // configureWorkflowGroupStage replaces the fixture template with IAM group based approval stages.

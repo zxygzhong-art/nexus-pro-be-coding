@@ -1,6 +1,6 @@
 package utils
 
-import "nexus-pro-be/internal/domain"
+import "nexus-pro-api/internal/domain"
 
 type comparators[T any] map[string]func(a, b T) bool
 

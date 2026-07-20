@@ -1,7 +1,7 @@
 package workflows
 
 import (
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 
 	"go.temporal.io/sdk/temporal"
 )

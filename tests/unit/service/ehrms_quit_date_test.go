@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/service"
 )
 
 func TestSyncEHRMSEmployeesMapsQuitDateForResignedEmployee(t *testing.T) {

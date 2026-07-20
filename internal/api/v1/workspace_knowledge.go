@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strings"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 const pathParamDocumentID = "document_id"

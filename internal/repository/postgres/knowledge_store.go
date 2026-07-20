@@ -5,8 +5,8 @@ import (
 
 	"github.com/pgvector/pgvector-go"
 
-	"nexus-pro-be/internal/domain"
-	sqlc "nexus-pro-be/internal/platform/postgres/db"
+	"nexus-pro-api/internal/domain"
+	sqlc "nexus-pro-api/internal/platform/postgres/db"
 )
 
 // UpsertKnowledgeBase persists a tenant knowledge base.

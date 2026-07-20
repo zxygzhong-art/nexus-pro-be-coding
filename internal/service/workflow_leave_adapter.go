@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/utils"
 )
 
 var leaveLinkedTemplateKeys = map[string]struct{}{
@@ -92,7 +92,7 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 		return LeaveRequest{}, BadRequest("end_at must be after start_at")
 	}
 
-	evaluation, err := c.evaluateLeaveRequestRules(ctx, employeeID, leaveTypeRaw, startAt, endAt, 0)
+	evaluation, err := c.EvaluateLeaveRequestRules(ctx, employeeID, leaveTypeRaw, startAt, endAt, 0)
 	if err != nil {
 		return LeaveRequest{}, err
 	}

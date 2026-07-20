@@ -10,8 +10,9 @@ import (
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 // capturingLLM records every LLM request so tests can inspect the contents the
@@ -34,7 +35,7 @@ func (m *capturingLLM) GenerateContent(_ context.Context, req *model.LLMRequest,
 	}
 }
 
-func runADKChatForTest(t *testing.T, runtime *service.ADKAgentChatRuntime, req service.AgentChatRuntimeRequest) {
+func runADKChatForTest(t *testing.T, runtime *agentservice.ADKAgentChatRuntime, req service.AgentChatRuntimeRequest) {
 	t.Helper()
 	emit := func(context.Context, domain.AgentChatEvent) error { return nil }
 	if err := runtime.RunAgentChat(context.Background(), req, emit); err != nil {
@@ -66,7 +67,7 @@ func requestTexts(req *model.LLMRequest) string {
 // replay earlier turns unless they are re-seeded from the DB history.
 func TestADKRuntimeDeletesSessionAfterRun(t *testing.T) {
 	llm := &capturingLLM{}
-	runtime, err := service.NewADKAgentChatRuntime(llm)
+	runtime, err := agentservice.NewADKAgentChatRuntime(llm)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +87,7 @@ func TestADKRuntimeDeletesSessionAfterRun(t *testing.T) {
 // into the per-run ADK session so multi-turn context survives session cleanup.
 func TestADKRuntimeSeedsHistoryFromRequest(t *testing.T) {
 	llm := &capturingLLM{}
-	runtime, err := service.NewADKAgentChatRuntime(llm)
+	runtime, err := agentservice.NewADKAgentChatRuntime(llm)
 	if err != nil {
 		t.Fatal(err)
 	}

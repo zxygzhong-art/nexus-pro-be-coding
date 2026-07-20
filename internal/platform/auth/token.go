@@ -15,7 +15,7 @@ import (
 	"sync"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // TokenResolver 定義 token resolver 的行為契約。

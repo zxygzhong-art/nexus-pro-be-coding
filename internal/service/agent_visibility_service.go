@@ -3,11 +3,11 @@ package service
 import (
 	"strings"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
-// agentDefinitionVisibleToAccount 判斷已發布 Agent 是否對目前帳號與臨時角色可見。
-func (c *Service) agentDefinitionVisibleToAccount(ctx RequestContext, account Account, agent domain.AgentDefinition) (bool, error) {
+// AgentDefinitionVisibleToAccount 判斷已發布 Agent 是否對目前帳號與臨時角色可見。
+func (c *Service) AgentDefinitionVisibleToAccount(ctx RequestContext, account Account, agent domain.AgentDefinition) (bool, error) {
 	targets := make(map[string]struct{}, len(agent.VisibilityTargets))
 	for _, target := range agent.VisibilityTargets {
 		if target = strings.TrimSpace(target); target != "" {

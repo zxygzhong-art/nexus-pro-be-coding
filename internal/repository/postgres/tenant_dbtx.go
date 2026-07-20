@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"nexus-pro-be/internal/utils/tenantctx"
+	"nexus-pro-api/internal/utils/tenantctx"
 )
 
 // tenantDBTX 定義租戶 dbtx 的資料結構。

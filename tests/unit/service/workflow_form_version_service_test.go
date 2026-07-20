@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/service"
 )
 
 // TestValidatePublishedFormFieldIdentityLocksIDAndType 驗證已發布欄位不可刪除或改型別。

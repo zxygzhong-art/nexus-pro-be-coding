@@ -1,4 +1,4 @@
-package service
+package agent
 
 import (
 	"context"
@@ -17,12 +17,12 @@ import (
 	"google.golang.org/adk/v2/tool/functiontool"
 	"google.golang.org/genai"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 const (
 	// agentADKAppName scopes ADK in-memory sessions to this application.
-	agentADKAppName = "nexus-pro-be"
+	agentADKAppName = "nexus-pro-api"
 	// agentADKRootName is the technical name of the root coordinator agent.
 	agentADKRootName = "nexus_team_root"
 )

@@ -5,8 +5,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/service"
 )
 
 // MeCtrl 定義 me ctrl 的資料結構。

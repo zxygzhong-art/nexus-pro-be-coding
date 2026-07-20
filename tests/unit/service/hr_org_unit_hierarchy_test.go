@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // TestClosingOrgUnitClosesDescendants 驗證父組織關閉會遞歸關閉全部後代。

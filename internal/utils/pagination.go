@@ -3,7 +3,7 @@ package utils
 import (
 	"sort"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // NormalizePageRequest 正規化分頁請求。

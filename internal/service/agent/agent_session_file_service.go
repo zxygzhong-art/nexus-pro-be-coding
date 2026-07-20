@@ -1,4 +1,4 @@
-package service
+package agent
 
 import (
 	"crypto/sha256"
@@ -11,8 +11,8 @@ import (
 	"unicode"
 	"unicode/utf8"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 const (
@@ -35,7 +35,7 @@ func (c AgentService) UploadSessionFile(ctx RequestContext, sessionID string, in
 	if err != nil {
 		return domain.AgentSessionFile{}, err
 	}
-	session, err := c.currentAgentSession(ctx, account.ID, sessionID)
+	session, err := c.CurrentAgentSession(ctx, account.ID, sessionID)
 	if err != nil {
 		return domain.AgentSessionFile{}, err
 	}
@@ -49,8 +49,8 @@ func (c AgentService) UploadSessionFile(ctx RequestContext, sessionID string, in
 	now := c.Now()
 	fileID := utils.NewID("afile")
 	objectKey := fmt.Sprintf("tenants/%s/conversations/%s/%s/source", ctx.TenantID, session.ID, fileID)
-	if err := c.objectStore.PutObject(goContext(ctx), objectKey, contentType, input.Content); err != nil {
-		c.logWarn(ctx, "store conversation file failed", "object_key", objectKey, "error", err)
+	if err := c.ObjectStore().PutObject(goContext(ctx), objectKey, contentType, input.Content); err != nil {
+		c.LogWarn(ctx, "store conversation file failed", "object_key", objectKey, "error", err)
 		return domain.AgentSessionFile{}, domain.E(502, "object_store_error", "conversation file storage failed")
 	}
 	committed := false
@@ -63,7 +63,7 @@ func (c AgentService) UploadSessionFile(ctx RequestContext, sessionID string, in
 	file := domain.AgentSessionFile{
 		ID: fileID, TenantID: ctx.TenantID, SessionID: session.ID, ContextVersion: session.ContextVersion,
 		CreatedByAccountID: account.ID, OriginalFilename: filename,
-		ObjectProvider: objectStoreProvider(c.objectStore), ObjectBucket: objectStoreBucket(c.objectStore), ObjectKey: objectKey,
+		ObjectProvider: ObjectStoreProvider(c.ObjectStore()), ObjectBucket: ObjectStoreBucket(c.ObjectStore()), ObjectKey: objectKey,
 		ContentType: contentType, SizeBytes: int64(len(input.Content)), SHA256: hex.EncodeToString(hash[:]),
 		ScanStatus: "not_configured", ParseStatus: "ready", RetentionClass: "conversation", State: "draft",
 		CreatedAt: now, UpdatedAt: now,
@@ -99,7 +99,7 @@ func (c AgentService) ListSessionFiles(ctx RequestContext, sessionID string) ([]
 	if err != nil {
 		return nil, err
 	}
-	if _, err := c.currentAgentSession(ctx, account.ID, sessionID); err != nil {
+	if _, err := c.CurrentAgentSession(ctx, account.ID, sessionID); err != nil {
 		return nil, err
 	}
 	return c.store.ListCurrentAgentSessionFiles(goContext(ctx), ctx.TenantID, strings.TrimSpace(sessionID))
@@ -111,7 +111,7 @@ func (c AgentService) DownloadSessionFile(ctx RequestContext, sessionID, fileID 
 	if err != nil {
 		return domain.AgentSessionFileDownload{}, err
 	}
-	if _, err := c.currentAgentSession(ctx, account.ID, sessionID); err != nil {
+	if _, err := c.CurrentAgentSession(ctx, account.ID, sessionID); err != nil {
 		return domain.AgentSessionFileDownload{}, err
 	}
 	file, ok, err := c.store.GetCurrentAgentSessionFile(goContext(ctx), ctx.TenantID, strings.TrimSpace(sessionID), strings.TrimSpace(fileID))
@@ -121,7 +121,7 @@ func (c AgentService) DownloadSessionFile(ctx RequestContext, sessionID, fileID 
 	if !ok {
 		return domain.AgentSessionFileDownload{}, NotFound("agent session file", fileID)
 	}
-	content, err := c.objectStore.GetObject(goContext(ctx), file.ObjectKey)
+	content, err := c.ObjectStore().GetObject(goContext(ctx), file.ObjectKey)
 	if err != nil {
 		return domain.AgentSessionFileDownload{}, err
 	}
@@ -134,7 +134,7 @@ func (c AgentService) DeleteSessionFile(ctx RequestContext, sessionID, fileID st
 	if err != nil {
 		return domain.AgentSessionFile{}, err
 	}
-	if _, err := c.currentAgentSession(ctx, account.ID, sessionID); err != nil {
+	if _, err := c.CurrentAgentSession(ctx, account.ID, sessionID); err != nil {
 		return domain.AgentSessionFile{}, err
 	}
 	file, ok, err := c.store.GetCurrentAgentSessionFile(goContext(ctx), ctx.TenantID, strings.TrimSpace(sessionID), strings.TrimSpace(fileID))
@@ -263,11 +263,11 @@ func normalizeAgentSessionFileInput(input domain.UploadAgentSessionFileInput) (s
 
 // deleteAgentObjectIfSupported performs best-effort cleanup after metadata rollback or draft deletion.
 func (c AgentService) deleteAgentObjectIfSupported(ctx RequestContext, key string) {
-	deleter, ok := c.objectStore.(objectDeleter)
+	deleter, ok := c.ObjectStore().(ObjectDeleter)
 	if !ok || strings.TrimSpace(key) == "" {
 		return
 	}
 	if err := deleter.DeleteObject(goContext(ctx), key); err != nil {
-		c.logWarn(ctx, "delete conversation file object failed", "object_key", key, "error", err)
+		c.LogWarn(ctx, "delete conversation file object failed", "object_key", key, "error", err)
 	}
 }

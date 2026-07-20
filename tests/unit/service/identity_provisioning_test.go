@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/service"
 )
 
 // TestEmployeeCreateSucceedsAndKeepsOutboxPendingWhenKeycloakFails 驗證員工 create succeeds and keeps outbox pending when Keycloak fails。

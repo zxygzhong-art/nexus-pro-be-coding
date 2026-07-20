@@ -5,8 +5,8 @@ import (
 	"sort"
 	"strings"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 // MeService 定義 me 服務的資料結構。

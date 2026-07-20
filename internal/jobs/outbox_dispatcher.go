@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/platform/natsbus"
-	"nexus-pro-be/internal/repository"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/platform/natsbus"
+	"nexus-pro-api/internal/repository"
 )
 
 const (

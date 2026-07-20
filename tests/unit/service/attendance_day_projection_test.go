@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/service"
 )
 
 // TestProjectAttendanceDayUsesEarliestInAndLatestOut verifies repeated and accidental punches do not replace stable boundaries.

@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // WorkflowStore 定義流程與運行時儲存層的行為契約。

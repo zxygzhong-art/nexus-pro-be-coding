@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // currentFormTemplateVersion 取得模板目前指向的不可變版本。
@@ -61,8 +61,8 @@ func (c WorkflowService) currentFormTemplateVersionForNewInstance(ctx RequestCon
 	return current, nil
 }
 
-// formTemplateVersionForInstance 取得表單實例提交時綁定的模板版本。
-func (c WorkflowService) formTemplateVersionForInstance(ctx RequestContext, template domain.FormTemplate, instance domain.FormInstance) (domain.FormTemplateVersion, error) {
+// FormTemplateVersionForInstance 取得表單實例提交時綁定的模板版本。
+func (c WorkflowService) FormTemplateVersionForInstance(ctx RequestContext, template domain.FormTemplate, instance domain.FormInstance) (domain.FormTemplateVersion, error) {
 	if strings.TrimSpace(instance.TemplateVersionID) == "" {
 		return c.currentFormTemplateVersion(ctx, template)
 	}
@@ -76,8 +76,8 @@ func (c WorkflowService) formTemplateVersionForInstance(ctx RequestContext, temp
 	return version, nil
 }
 
-// formTemplateAtVersion 將模板身份與不可變 schema 快照組合成執行期模板。
-func formTemplateAtVersion(template domain.FormTemplate, version domain.FormTemplateVersion) domain.FormTemplate {
+// FormTemplateAtVersion 將模板身份與不可變 schema 快照組合成執行期模板。
+func FormTemplateAtVersion(template domain.FormTemplate, version domain.FormTemplateVersion) domain.FormTemplate {
 	template.Schema = version.Schema
 	template.Status = version.Status
 	template.CurrentVersion = version.Version

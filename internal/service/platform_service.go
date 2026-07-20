@@ -8,7 +8,8 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 const (
@@ -28,7 +29,7 @@ func (c *Service) Platform() PlatformService {
 
 // Home 處理首頁的服務流程。
 func (c PlatformService) Home(ctx RequestContext) (PlatformHomeResponse, error) {
-	clockSummary, err := c.authorizedClockSummary(ctx)
+	ClockSummary, err := c.authorizedClockSummary(ctx)
 	if err != nil {
 		return PlatformHomeResponse{}, err
 	}
@@ -43,7 +44,7 @@ func (c PlatformService) Home(ctx RequestContext) (PlatformHomeResponse, error) 
 	return PlatformHomeResponse{
 		Assistants:   assistants,
 		FormColumns:  platformHomeFormColumns(formColumns),
-		ClockSummary: clockSummary,
+		ClockSummary: ClockSummary,
 	}, nil
 }
 
@@ -68,7 +69,7 @@ func (c PlatformService) authorizedClockSummary(ctx RequestContext) (*PlatformCl
 	if !decision.Allowed {
 		return nil, nil
 	}
-	summary, err := c.clockSummary(ctx)
+	summary, err := c.ClockSummary(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +107,7 @@ func (c PlatformService) publishedPlatformAssistants(ctx RequestContext, limit i
 	search := strings.ToLower(strings.TrimSpace(query.Search))
 	items := make([]PlatformAssistant, 0, len(agents))
 	for _, agent := range agents {
-		visible, err := c.agentDefinitionVisibleToAccount(ctx, account, agent)
+		visible, err := c.AgentDefinitionVisibleToAccount(ctx, account, agent)
 		if err != nil {
 			return nil, err
 		}
@@ -132,7 +133,7 @@ func (c PlatformService) publishedPlatformAssistants(ctx RequestContext, limit i
 				suggestedQuestionTranslations = snapshot.SuggestedQuestionTranslations
 			}
 		}
-		suggestedQuestions = localizedSuggestedQuestions(
+		suggestedQuestions = domain.LocalizedSuggestedQuestions(
 			suggestedQuestionTranslations,
 			account.PreferredLocale,
 			suggestedQuestions,
@@ -202,7 +203,7 @@ func (c PlatformService) Forms(ctx RequestContext) (PlatformFormsResponse, error
 
 // Tasks 處理任務的服務流程。
 func (c PlatformService) Tasks(ctx RequestContext) (PlatformTasksResponse, error) {
-	clockSummary, err := c.authorizedClockSummary(ctx)
+	ClockSummary, err := c.authorizedClockSummary(ctx)
 	if err != nil {
 		return PlatformTasksResponse{}, err
 	}
@@ -213,7 +214,7 @@ func (c PlatformService) Tasks(ctx RequestContext) (PlatformTasksResponse, error
 	return PlatformTasksResponse{
 		Records:      records,
 		Todos:        todos,
-		ClockSummary: clockSummary,
+		ClockSummary: ClockSummary,
 		AIMessages: []PlatformChatMessage{
 			{ID: "tm1", Role: "assistant", Avatar: "🤖", Content: "今日工時與任務已整理完成，可以繼續追問本週投入分佈或待辦重點。"},
 		},
@@ -461,8 +462,8 @@ func platformWorkspaceEmployeeMatches(query PlatformWorkspaceEmployeesQuery, emp
 	return strings.Contains(haystack, keyword)
 }
 
-// clockSummary 處理打卡摘要的服務流程。
-func (c PlatformService) clockSummary(ctx RequestContext) (PlatformClockSummary, error) {
+// ClockSummary 處理打卡摘要的服務流程。
+func (c PlatformService) ClockSummary(ctx RequestContext) (PlatformClockSummary, error) {
 	status, err := c.Service.Attendance().AttendanceClockStatus(ctx)
 	if err != nil {
 		return PlatformClockSummary{}, err
@@ -582,7 +583,7 @@ func (c PlatformService) formInstances(ctx RequestContext) ([]PlatformFormApplic
 		if title == "" {
 			title = template.Key
 		}
-		if strings.EqualFold(instance.Status, workflowFormStatusDraft) {
+		if strings.EqualFold(instance.Status, WorkflowFormStatusDraft) {
 			drafts = append(drafts, PlatformFormDraft{
 				ID:          instance.ID,
 				TemplateKey: template.Key,

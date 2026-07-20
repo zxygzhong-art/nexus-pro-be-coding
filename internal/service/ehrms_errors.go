@@ -3,7 +3,7 @@ package service
 import (
 	"errors"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // ehrmsFetchError 隱藏上游錯誤細節，並保留 scheduler 所需的暫時錯誤分類。
@@ -28,6 +28,6 @@ func requireTenantWideEHRMSSyncScope(decision CheckResult) error {
 	case "", ScopeAll, ScopeTenant, ScopeSystem:
 		return nil
 	default:
-		return forbiddenDataScope("tenant-wide eHRMS sync requires all-tenant access")
+		return ForbiddenDataScope("tenant-wide eHRMS sync requires all-tenant access")
 	}
 }

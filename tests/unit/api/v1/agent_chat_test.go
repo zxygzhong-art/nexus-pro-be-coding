@@ -14,10 +14,11 @@ import (
 	"testing"
 	"time"
 
-	v1api "nexus-pro-be/internal/api/v1"
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	v1api "nexus-pro-api/internal/api/v1"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 func TestAgentChatEndpointReturnsUnavailableWhenDisabled(t *testing.T) {
@@ -122,8 +123,8 @@ func TestAgentChatEndpointSanitizesRuntimeFailure(t *testing.T) {
 	body := rec.Body.String()
 	for _, expected := range []string{
 		"event: error\n",
-		`"message":"` + service.AgentRuntimeFailureMessage + `"`,
-		`"reason_code":"` + service.AgentRuntimeFailureReasonCode + `"`,
+		`"message":"` + agentservice.AgentRuntimeFailureMessage + `"`,
+		`"reason_code":"` + agentservice.AgentRuntimeFailureReasonCode + `"`,
 		`"trace_id":"trace-agent-runtime"`,
 	} {
 		if !strings.Contains(body, expected) {

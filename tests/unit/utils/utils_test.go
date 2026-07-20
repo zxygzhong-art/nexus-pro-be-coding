@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/utils"
 )
 
 // TestStringHelpers 驗證字串 helpers。

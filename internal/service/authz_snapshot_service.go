@@ -108,12 +108,7 @@ func (c IAMService) requireIAMAuthz(ctx RequestContext, resource ResourceType, a
 	return c.Service.requireServiceAuthz(ctx, AppIAM, resource, action, resourceID)
 }
 
-// requireWorkflowAuthz 處理 require 流程授權的服務流程。
-func (c WorkflowService) requireWorkflowAuthz(ctx RequestContext, resource ResourceType, action Action, resourceID string) (Account, CheckResult, error) {
+// RequireWorkflowAuthz 處理 require 流程授權的服務流程。
+func (c WorkflowService) RequireWorkflowAuthz(ctx RequestContext, resource ResourceType, action Action, resourceID string) (Account, CheckResult, error) {
 	return c.Service.requireServiceAuthz(ctx, AppWorkflow, resource, action, resourceID)
-}
-
-// requireAgentAuthz 處理 require agent 授權的服務流程。
-func (c AgentService) requireAgentAuthz(ctx RequestContext, resource ResourceType, action Action, resourceID string) (Account, CheckResult, error) {
-	return c.Service.requireServiceAuthz(ctx, AppAgent, resource, action, resourceID)
 }

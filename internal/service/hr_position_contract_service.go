@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 // ListPositions 列出崗位的服務流程。
@@ -614,7 +614,7 @@ func (c HRService) visibleEmployeeForContract(ctx RequestContext, account Accoun
 		return Employee{}, err
 	}
 	if len(visible) == 0 {
-		return Employee{}, forbiddenDataScope("employee is outside data scope")
+		return Employee{}, ForbiddenDataScope("employee is outside data scope")
 	}
 	return visible[0], nil
 }

@@ -30,7 +30,7 @@ func Init(ctx context.Context, cfg Config) (func(context.Context) error, error) 
 	}
 	serviceName := cfg.Service
 	if serviceName == "" {
-		serviceName = "nexus-pro-be"
+		serviceName = "nexus-pro-api"
 	}
 	endpoint := cfg.Endpoint
 	if strings.Contains(endpoint, "://") {

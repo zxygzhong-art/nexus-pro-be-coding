@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/jobs"
-	"nexus-pro-be/internal/repository/memory"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/jobs"
+	"nexus-pro-api/internal/repository/memory"
 )
 
 // TestOutboxDispatcherConsumesTypedRelationshipPayload 驗證生產端 typed payload 經 wire map 消費的完整 round-trip。

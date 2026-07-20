@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 // TestAgentUsageAggregatesRetainedMessagesByTenantAccount verifies the management usage contract.
@@ -68,7 +69,7 @@ func TestAgentUsageAggregatesRetainedMessagesByTenantAccount(t *testing.T) {
 		}
 	}
 
-	usage, err := service.New(store).Agent().ListAccountUsage(
+	usage, err := agentservice.New(service.New(store)).ListAccountUsage(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"},
 		domain.AgentAccountUsageQuery{},
 		domain.PageRequest{},
@@ -98,7 +99,7 @@ func TestAgentUsageAggregatesRetainedMessagesByTenantAccount(t *testing.T) {
 	if used.InputTokens != 150 || used.OutputTokens != 30 || used.TotalTokens != 180 || used.ActualTokens != 140 {
 		t.Fatalf("unexpected account token usage: %+v", used)
 	}
-	detail, err := service.New(store).Agent().ListAccountSessionUsage(
+	detail, err := agentservice.New(service.New(store)).ListAccountSessionUsage(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"},
 		"acct-user",
 		domain.PageRequest{Page: 1, PageSize: 1},
@@ -116,7 +117,7 @@ func TestAgentUsageAggregatesRetainedMessagesByTenantAccount(t *testing.T) {
 	if activeSession.MessageCount != 2 || activeSession.TotalTokens != 120 || activeSession.CachedTokens != 40 || activeSession.ActualTokens != 80 {
 		t.Fatalf("unexpected active session usage: %+v", activeSession)
 	}
-	secondPage, err := service.New(store).Agent().ListAccountSessionUsage(
+	secondPage, err := agentservice.New(service.New(store)).ListAccountSessionUsage(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"},
 		"acct-user",
 		domain.PageRequest{Page: 2, PageSize: 1},
@@ -130,7 +131,7 @@ func TestAgentUsageAggregatesRetainedMessagesByTenantAccount(t *testing.T) {
 		}
 	}
 
-	filtered, err := service.New(store).Agent().ListAccountUsage(
+	filtered, err := agentservice.New(service.New(store)).ListAccountUsage(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"},
 		domain.AgentAccountUsageQuery{Query: "ALICE@EXAMPLE", Status: "active"},
 		domain.PageRequest{Page: 1, PageSize: 1, Sort: "total_tokens_desc"},
@@ -145,7 +146,7 @@ func TestAgentUsageAggregatesRetainedMessagesByTenantAccount(t *testing.T) {
 		t.Fatalf("expected tenant totals to remain independent of list filters, got %+v", filtered.Summary)
 	}
 
-	ascending, err := service.New(store).Agent().ListAccountUsage(
+	ascending, err := agentservice.New(service.New(store)).ListAccountUsage(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"},
 		domain.AgentAccountUsageQuery{},
 		domain.PageRequest{Page: 2, PageSize: 2, Sort: "total_tokens_asc"},
@@ -160,7 +161,7 @@ func TestAgentUsageRejectsUnsupportedFilters(t *testing.T) {
 	store := memory.NewStore()
 	now := time.Date(2026, 7, 15, 2, 0, 0, 0, time.UTC)
 	seedAgentUsageTenant(t, store, now, "tenant-1", "acct-admin", true)
-	svc := service.New(store).Agent()
+	svc := agentservice.New(service.New(store))
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
 	for name, input := range map[string]struct {
@@ -186,7 +187,7 @@ func TestAgentSessionUsageRejectsUnknownAccounts(t *testing.T) {
 	store := memory.NewStore()
 	seedAgentUsageTenant(t, store, now, "tenant-1", "acct-admin", true)
 
-	_, err := service.New(store).Agent().ListAccountSessionUsage(
+	_, err := agentservice.New(service.New(store)).ListAccountSessionUsage(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"},
 		"missing-account",
 		domain.PageRequest{},
@@ -234,7 +235,7 @@ func TestAgentUsageRequiresDedicatedTenantWideRead(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			svc := service.New(store).Agent()
+			svc := agentservice.New(service.New(store))
 			ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-runtime"}
 			for endpoint, call := range map[string]func() error{
 				"overview": func() error {
@@ -282,7 +283,7 @@ func TestAgentUsageAcceptsExplicitTenantScope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	usage, err := service.New(store).Agent().ListAccountUsage(
+	usage, err := agentservice.New(service.New(store)).ListAccountUsage(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-manager"},
 		domain.AgentAccountUsageQuery{},
 		domain.PageRequest{},

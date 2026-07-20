@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // TaskStore 定義任務儲存層的行為契約。

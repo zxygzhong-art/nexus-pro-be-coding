@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 // TestAgentDefinitionResponsesUseNonNullCollections covers every public read and mutation response shape.
@@ -21,14 +22,14 @@ func TestAgentDefinitionResponsesUseNonNullCollections(t *testing.T) {
 	})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
-	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
+	model, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{
 		Name: "Contract Model", ModelName: "gpt-4.1", APIKey: "sk-test",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	created, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
+	created, err := agentservice.New(svc).CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
 		Name:    "Contract Agent",
 		ModelID: model.ID,
 		SubAgents: []domain.AgentTeamMember{{
@@ -41,37 +42,37 @@ func TestAgentDefinitionResponsesUseNonNullCollections(t *testing.T) {
 	assertAgentDefinitionResponseArrays(t, "create", created)
 
 	description := "Updated contract fixture"
-	updated, err := svc.Agent().UpdateDefinition(ctx, created.ID, domain.UpdateAgentDefinitionInput{Description: &description})
+	updated, err := agentservice.New(svc).UpdateDefinition(ctx, created.ID, domain.UpdateAgentDefinitionInput{Description: &description})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertAgentDefinitionResponseArrays(t, "update", updated)
 
-	published, err := svc.Agent().PublishDefinition(ctx, created.ID)
+	published, err := agentservice.New(svc).PublishDefinition(ctx, created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertAgentDefinitionResponseArrays(t, "publish", published)
 
-	unpublished, err := svc.Agent().UnpublishDefinition(ctx, created.ID)
+	unpublished, err := agentservice.New(svc).UnpublishDefinition(ctx, created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertAgentDefinitionResponseArrays(t, "unpublish", unpublished)
 
-	rolledBack, err := svc.Agent().RollbackDefinition(ctx, created.ID, domain.RollbackAgentDefinitionInput{Version: 1})
+	rolledBack, err := agentservice.New(svc).RollbackDefinition(ctx, created.ID, domain.RollbackAgentDefinitionInput{Version: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertAgentDefinitionResponseArrays(t, "rollback", rolledBack)
 
-	got, err := svc.Agent().GetDefinition(ctx, created.ID)
+	got, err := agentservice.New(svc).GetDefinition(ctx, created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertAgentDefinitionResponseArrays(t, "get", got)
 
-	listed, err := svc.Agent().ListDefinitions(ctx)
+	listed, err := agentservice.New(svc).ListDefinitions(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}

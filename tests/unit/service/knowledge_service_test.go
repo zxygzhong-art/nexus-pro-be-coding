@@ -8,9 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 // TestKnowledgeCRUDSearchAndAgentBindings covers the in-memory MVP lifecycle and runtime citations.
@@ -18,11 +19,11 @@ func TestKnowledgeCRUDSearchAndAgentBindings(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store, svc, ctx := newKnowledgeFixture(t, now)
 
-	base, err := svc.Agent().CreateKnowledgeBase(ctx, domain.CreateKnowledgeBaseInput{Name: "HR Policies", Description: "Current HR policies"})
+	base, err := agentservice.New(svc).CreateKnowledgeBase(ctx, domain.CreateKnowledgeBaseInput{Name: "HR Policies", Description: "Current HR policies"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	document, err := svc.Agent().CreateKnowledgeDocument(ctx, base.ID, domain.CreateKnowledgeDocumentInput{
+	document, err := agentservice.New(svc).CreateKnowledgeDocument(ctx, base.ID, domain.CreateKnowledgeDocumentInput{
 		Title: "Annual Leave Policy", Content: "Employees have 12 annual leave days each calendar year.",
 	})
 	if err != nil {
@@ -31,7 +32,7 @@ func TestKnowledgeCRUDSearchAndAgentBindings(t *testing.T) {
 	if document.SourceType != "manual" {
 		t.Fatalf("expected manual source type, got %+v", document)
 	}
-	result, err := svc.Agent().SearchKnowledge(ctx, domain.KnowledgeSearchInput{
+	result, err := agentservice.New(svc).SearchKnowledge(ctx, domain.KnowledgeSearchInput{
 		Query: "ANNUAL employees", KnowledgeBaseIDs: []string{base.ID}, Limit: 10,
 	})
 	if err != nil {
@@ -40,50 +41,50 @@ func TestKnowledgeCRUDSearchAndAgentBindings(t *testing.T) {
 	if result.Total != 1 || result.Hits[0].DocumentID != document.ID || !strings.HasPrefix(result.Hits[0].Source, "knowledge://") {
 		t.Fatalf("unexpected AND search result: %+v", result)
 	}
-	if miss, err := svc.Agent().SearchKnowledge(ctx, domain.KnowledgeSearchInput{Query: "annual contractor", KnowledgeBaseIDs: []string{base.ID}}); err != nil || miss.Total != 0 {
+	if miss, err := agentservice.New(svc).SearchKnowledge(ctx, domain.KnowledgeSearchInput{Query: "annual contractor", KnowledgeBaseIDs: []string{base.ID}}); err != nil || miss.Total != 0 {
 		t.Fatalf("expected AND semantics to reject partial matches: result=%+v err=%v", miss, err)
 	}
 
-	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Knowledge Model", ModelName: "knowledge-model", APIKey: "sk-test"})
+	model, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{Name: "Knowledge Model", ModelName: "knowledge-model", APIKey: "sk-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
+	agent, err := agentservice.New(svc).CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
 		Name: "Policy Helper", ModelID: model.ID, Tools: []string{"knowledge.search"}, KnowledgeBaseIDs: []string{base.ID},
 		SubAgents: []domain.AgentTeamMember{{ID: "policy", Name: "Policy", Role: "search policy", ModelID: model.ID, Tools: []string{"knowledge.search"}, KnowledgeBaseIDs: []string{base.ID}}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	listed, err := svc.Agent().GetDefinition(ctx, agent.ID)
+	listed, err := agentservice.New(svc).GetDefinition(ctx, agent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(listed.KnowledgeBaseIDs) != 1 || len(listed.SubAgents) != 1 || len(listed.SubAgents[0].KnowledgeBaseIDs) != 1 || len(listed.Versions) != 1 || len(listed.Versions[0].KnowledgeBaseIDs) != 1 {
 		t.Fatalf("knowledge bindings did not round-trip through agent and version snapshots: %+v", listed)
 	}
-	agent, err = svc.Agent().PublishDefinition(ctx, agent.ID)
+	agent, err = agentservice.New(svc).PublishDefinition(ctx, agent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	run, err := svc.Agent().CreateRun(ctx, domain.CreateAgentRunInput{AgentID: agent.ID, Prompt: "annual employees"})
+	run, err := agentservice.New(svc).CreateRun(ctx, domain.CreateAgentRunInput{AgentID: agent.ID, Prompt: "annual employees"})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(run.References) != 1 || run.References[0].Source != result.Hits[0].Source {
 		t.Fatalf("runtime knowledge search did not return a bound citation: %+v", run)
 	}
-	if _, err := svc.Agent().DeleteKnowledgeBase(ctx, base.ID); err == nil {
+	if _, err := agentservice.New(svc).DeleteKnowledgeBase(ctx, base.ID); err == nil {
 		t.Fatal("expected bound knowledge base deletion to conflict")
 	} else if appErr, ok := domain.AsAppError(err); !ok || appErr.Status != 409 {
 		t.Fatalf("expected conflict deleting bound knowledge base, got %v", err)
 	}
 
 	updatedTitle := "Annual Leave Rules"
-	if _, err := svc.Agent().UpdateKnowledgeDocument(ctx, base.ID, document.ID, domain.UpdateKnowledgeDocumentInput{Title: &updatedTitle}); err != nil {
+	if _, err := agentservice.New(svc).UpdateKnowledgeDocument(ctx, base.ID, document.ID, domain.UpdateKnowledgeDocumentInput{Title: &updatedTitle}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Agent().DeleteKnowledgeDocument(ctx, base.ID, document.ID); err != nil {
+	if _, err := agentservice.New(svc).DeleteKnowledgeDocument(ctx, base.ID, document.ID); err != nil {
 		t.Fatal(err)
 	}
 	remaining, err := store.ListKnowledgeDocuments(context.Background(), "tenant-1", base.ID)
@@ -101,7 +102,7 @@ func TestKnowledgeUploadsAndChunkConfiguration(t *testing.T) {
 		Now: func() time.Time { return now }, KnowledgeEmbedder: deterministicKnowledgeEmbedder{}, ObjectStore: objects,
 	})
 	chunkSize, overlap := 600, 60
-	base, err := svc.Agent().CreateKnowledgeBase(ctx, domain.CreateKnowledgeBaseInput{
+	base, err := agentservice.New(svc).CreateKnowledgeBase(ctx, domain.CreateKnowledgeBaseInput{
 		Name: "Uploaded policies", ChunkMode: "paragraph", ChunkSize: &chunkSize, ChunkOverlap: &overlap,
 	})
 	if err != nil {
@@ -111,7 +112,7 @@ func TestKnowledgeUploadsAndChunkConfiguration(t *testing.T) {
 		t.Fatalf("chunk configuration did not persist: %+v", base)
 	}
 
-	textDocument, err := svc.Agent().UploadKnowledgeDocument(ctx, base.ID, domain.UploadKnowledgeDocumentInput{
+	textDocument, err := agentservice.New(svc).UploadKnowledgeDocument(ctx, base.ID, domain.UploadKnowledgeDocumentInput{
 		Filename: "leave-policy.md", ContentType: "text/markdown", Content: []byte("# Leave\n\nEmployees must submit leave before the start date."),
 	})
 	if err != nil {
@@ -124,7 +125,7 @@ func TestKnowledgeUploadsAndChunkConfiguration(t *testing.T) {
 		t.Fatalf("uploaded source object did not round-trip: content=%q err=%v", stored, getErr)
 	}
 
-	pdfDocument, err := svc.Agent().UploadKnowledgeDocument(ctx, base.ID, domain.UploadKnowledgeDocumentInput{
+	pdfDocument, err := agentservice.New(svc).UploadKnowledgeDocument(ctx, base.ID, domain.UploadKnowledgeDocumentInput{
 		Filename: "attendance.pdf", ContentType: "application/pdf", Content: minimalTextPDF("Attendance policy requires clock records."),
 	})
 	if err != nil {
@@ -134,14 +135,14 @@ func TestKnowledgeUploadsAndChunkConfiguration(t *testing.T) {
 		t.Fatalf("PDF text was not extracted: %+v", pdfDocument)
 	}
 
-	if _, err := svc.Agent().UpdateKnowledgeDocument(ctx, base.ID, textDocument.ID, domain.UpdateKnowledgeDocumentInput{}); err == nil {
+	if _, err := agentservice.New(svc).UpdateKnowledgeDocument(ctx, base.ID, textDocument.ID, domain.UpdateKnowledgeDocumentInput{}); err == nil {
 		t.Fatal("expected uploaded sources to reject manual edits")
 	} else if appErr, ok := domain.AsAppError(err); !ok || appErr.Status != 409 {
 		t.Fatalf("expected uploaded-source edit conflict, got %v", err)
 	}
 
 	fixedSize, fixedOverlap, fixedMode := 200, 20, "fixed"
-	updated, err := svc.Agent().UpdateKnowledgeBase(ctx, base.ID, domain.UpdateKnowledgeBaseInput{
+	updated, err := agentservice.New(svc).UpdateKnowledgeBase(ctx, base.ID, domain.UpdateKnowledgeBaseInput{
 		ChunkMode: &fixedMode, ChunkSize: &fixedSize, ChunkOverlap: &fixedOverlap,
 	})
 	if err != nil {
@@ -151,7 +152,7 @@ func TestKnowledgeUploadsAndChunkConfiguration(t *testing.T) {
 		t.Fatalf("updated chunk configuration did not persist: %+v", updated)
 	}
 
-	if _, err := svc.Agent().DeleteKnowledgeDocument(ctx, base.ID, textDocument.ID); err != nil {
+	if _, err := agentservice.New(svc).DeleteKnowledgeDocument(ctx, base.ID, textDocument.ID); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := objects.GetObject(context.Background(), textDocument.ObjectKey); err == nil {
@@ -163,11 +164,11 @@ func TestKnowledgeUploadsAndChunkConfiguration(t *testing.T) {
 func TestAgentKnowledgeBindingRequiresReadableExistingBase(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store, svc, adminCtx := newKnowledgeFixture(t, now)
-	base, err := svc.Agent().CreateKnowledgeBase(adminCtx, domain.CreateKnowledgeBaseInput{Name: "Private"})
+	base, err := agentservice.New(svc).CreateKnowledgeBase(adminCtx, domain.CreateKnowledgeBaseInput{Name: "Private"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	model, err := svc.Agent().CreateModel(adminCtx, domain.CreateAgentModelInput{Name: "Model", ModelName: "model", APIKey: "sk-test"})
+	model, err := agentservice.New(svc).CreateModel(adminCtx, domain.CreateAgentModelInput{Name: "Model", ModelName: "model", APIKey: "sk-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +186,7 @@ func TestAgentKnowledgeBindingRequiresReadableExistingBase(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.Agent().CreateDefinition(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-editor"}, domain.CreateAgentDefinitionInput{
+	_, err = agentservice.New(svc).CreateDefinition(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-editor"}, domain.CreateAgentDefinitionInput{
 		Name: "Guessed Binding", ModelID: model.ID, KnowledgeBaseIDs: []string{base.ID},
 	})
 	if err == nil {
@@ -194,7 +195,7 @@ func TestAgentKnowledgeBindingRequiresReadableExistingBase(t *testing.T) {
 	if appErr, ok := domain.AsAppError(err); !ok || appErr.Status != 403 {
 		t.Fatalf("expected forbidden guessed binding, got %v", err)
 	}
-	_, err = svc.Agent().CreateDefinition(adminCtx, domain.CreateAgentDefinitionInput{
+	_, err = agentservice.New(svc).CreateDefinition(adminCtx, domain.CreateAgentDefinitionInput{
 		Name: "Missing Binding", ModelID: model.ID, KnowledgeBaseIDs: []string{"kb-missing"},
 	})
 	if err == nil {
@@ -207,11 +208,11 @@ func TestKnowledgeDocumentCreateRequiresEmbeddingRuntime(t *testing.T) {
 	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
 	store, _, ctx := newKnowledgeFixture(t, now)
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
-	base, err := svc.Agent().CreateKnowledgeBase(ctx, domain.CreateKnowledgeBaseInput{Name: "Policies"})
+	base, err := agentservice.New(svc).CreateKnowledgeBase(ctx, domain.CreateKnowledgeBaseInput{Name: "Policies"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = svc.Agent().CreateKnowledgeDocument(ctx, base.ID, domain.CreateKnowledgeDocumentInput{Title: "Policy", Content: "Indexed content"})
+	_, err = agentservice.New(svc).CreateKnowledgeDocument(ctx, base.ID, domain.CreateKnowledgeDocumentInput{Title: "Policy", Content: "Indexed content"})
 	if err == nil {
 		t.Fatal("expected document creation to fail without an embedding runtime")
 	}

@@ -10,9 +10,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository"
-	postgresrepo "nexus-pro-be/internal/repository/postgres"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository"
+	postgresrepo "nexus-pro-api/internal/repository/postgres"
 )
 
 // TestLeaveTypeMappingAdvisoryLockSerializesOverlapValidation proves that two

@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/service"
 )
 
 // TestSyncEHRMSEmployeesSectionKeysRoundTrip 驗證 eHRMS 寫入的 section 鍵與 typed 視圖讀端一致：

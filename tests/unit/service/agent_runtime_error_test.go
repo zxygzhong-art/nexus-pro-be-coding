@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 func TestLegacyAgentFailRunSanitizesHistory(t *testing.T) {
@@ -25,7 +26,7 @@ func TestLegacyAgentFailRunSanitizesHistory(t *testing.T) {
 		t.Fatal(err)
 	}
 	const rawFailure = "provider token=legacy-secret"
-	if err := svc.Agent().FailRun(ctx, run, errors.New(rawFailure)); err != nil {
+	if err := agentservice.New(svc).FailRun(ctx, run, errors.New(rawFailure)); err != nil {
 		t.Fatal(err)
 	}
 
@@ -38,8 +39,8 @@ func TestLegacyAgentFailRunSanitizesHistory(t *testing.T) {
 	}
 	persisted := runs[0]
 	if persisted.Status != string(domain.AgentRunStatusFailed) ||
-		!strings.Contains(persisted.Answer, service.AgentRuntimeFailureMessage) ||
-		!strings.Contains(persisted.Answer, "reason_code="+service.AgentRuntimeFailureReasonCode) ||
+		!strings.Contains(persisted.Answer, agentservice.AgentRuntimeFailureMessage) ||
+		!strings.Contains(persisted.Answer, "reason_code="+agentservice.AgentRuntimeFailureReasonCode) ||
 		!strings.Contains(persisted.Answer, "trace_id="+ctx.TraceID) ||
 		strings.Contains(persisted.Answer, rawFailure) {
 		t.Fatalf("legacy runtime failure leaked into history: %+v", persisted)

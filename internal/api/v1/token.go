@@ -3,8 +3,8 @@ package v1
 import (
 	"net/http"
 
-	"nexus-pro-be/internal/domain"
-	platformauth "nexus-pro-be/internal/platform/auth"
+	"nexus-pro-api/internal/domain"
+	platformauth "nexus-pro-api/internal/platform/auth"
 )
 
 // TokenContext 表示 token context。

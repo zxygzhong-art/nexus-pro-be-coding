@@ -12,8 +12,9 @@ import (
 
 	"github.com/gin-gonic/gin"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 const pathParamAgentFileID = "file_id"
@@ -267,7 +268,7 @@ func (c AgentCtrl) chatAgent(w http.ResponseWriter, r *http.Request, ctx domain.
 		defer streamMu.Unlock()
 		if wroteHeader {
 			if !wroteErrorEvent {
-				_ = writeSSEEvent(w, service.AgentRuntimeFailureEvent(ctx, run.ID))
+				_ = writeSSEEvent(w, agentservice.AgentRuntimeFailureEvent(ctx, run.ID))
 			}
 			flusher.Flush()
 			return nil

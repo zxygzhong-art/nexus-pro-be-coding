@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"nexus-pro-be/internal/domain"
-	platformauth "nexus-pro-be/internal/platform/auth"
+	"nexus-pro-api/internal/domain"
+	platformauth "nexus-pro-api/internal/platform/auth"
 )
 
 // TestKeycloakAdminClientEnsureUserCreatesAndInvites 驗證 Keycloak 管理員 client ensure 使用者 creates and invites。

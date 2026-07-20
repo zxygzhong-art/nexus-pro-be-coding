@@ -1,10 +1,10 @@
-package service
+package agent
 
 import (
 	"strings"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 const defaultAgentAccountUsageSort = "usage_desc"
@@ -36,7 +36,7 @@ func (c AgentService) requireAccountUsageRead(ctx RequestContext) error {
 		scope = decision.Scope
 	}
 	if scope != ScopeAll && scope != ScopeTenant && scope != ScopeSystem {
-		return forbiddenDataScope("tenant-wide Agent usage requires an explicit all-tenant scope")
+		return ForbiddenDataScope("tenant-wide Agent usage requires an explicit all-tenant scope")
 	}
 	return nil
 }

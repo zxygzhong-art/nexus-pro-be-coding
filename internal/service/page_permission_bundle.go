@@ -3,7 +3,7 @@ package service
 import (
 	"strings"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 type pagePermissionResource struct {

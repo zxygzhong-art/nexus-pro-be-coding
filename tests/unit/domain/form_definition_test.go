@@ -3,7 +3,7 @@ package domain_test
 import (
 	"testing"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 func TestValidateAndCompileFormDefinitionSchemaV2(t *testing.T) {

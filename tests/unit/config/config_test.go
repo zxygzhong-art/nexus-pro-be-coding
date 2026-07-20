@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/config"
+	"nexus-pro-api/internal/config"
 )
 
 // TestLogLevelDefaultsToInfo 驗證 log level defaults to info。
@@ -410,7 +410,7 @@ func TestValidateStartupAcceptsProductionMinimum(t *testing.T) {
 		TemporalBaseURL:   "temporal:7233",
 		TemporalNamespace: "default",
 		TemporalTaskQueue: "nexus-workflows",
-		ObjectStoreDir:    "/var/lib/nexus-pro-be/objects",
+		ObjectStoreDir:    "/var/lib/nexus-pro-api/objects",
 	}
 
 	if err := cfg.ValidateStartup(); err != nil {
@@ -515,7 +515,7 @@ func TestValidateStartupRejectsCleartextProductionSecurityURLs(t *testing.T) {
 		OpenFGAAPIURL:     "http://openfga.example",
 		OpenFGAStoreID:    "store-1",
 		OpenFGAModelID:    "model-1",
-		ObjectStoreDir:    "/var/lib/nexus-pro-be/objects",
+		ObjectStoreDir:    "/var/lib/nexus-pro-api/objects",
 	}
 
 	err := cfg.ValidateStartup()
@@ -558,7 +558,7 @@ func TestValidateStartupRejectsProductionDatabaseWithoutSSL(t *testing.T) {
 		TemporalBaseURL:   "temporal:7233",
 		TemporalNamespace: "default",
 		TemporalTaskQueue: "nexus-workflows",
-		ObjectStoreDir:    "/var/lib/nexus-pro-be/objects",
+		ObjectStoreDir:    "/var/lib/nexus-pro-api/objects",
 	}
 	for name, sslmode := range map[string]string{
 		"sslmode disable": "disable",
@@ -593,7 +593,7 @@ func TestValidateStartupRejectsProductionTemporalWithoutHost(t *testing.T) {
 		OpenFGAAPIURL:     "https://openfga.example",
 		OpenFGAStoreID:    "store-1",
 		OpenFGAModelID:    "model-1",
-		ObjectStoreDir:    "/var/lib/nexus-pro-be/objects",
+		ObjectStoreDir:    "/var/lib/nexus-pro-api/objects",
 		TemporalNamespace: "default",
 		TemporalTaskQueue: "nexus-workflows",
 	}
@@ -618,7 +618,7 @@ func TestValidateStartupRejectsProductionNATSInvalidURL(t *testing.T) {
 		TemporalBaseURL:   "temporal:7233",
 		TemporalNamespace: "default",
 		TemporalTaskQueue: "nexus-workflows",
-		ObjectStoreDir:    "/var/lib/nexus-pro-be/objects",
+		ObjectStoreDir:    "/var/lib/nexus-pro-api/objects",
 		NATSEnabled:       true,
 		NATSURL:           "http://nats:4222",
 	}
@@ -815,7 +815,7 @@ func TestValidateStartupRequiresOpenFGATokenWhenScopeChecksEnabled(t *testing.T)
 		TemporalBaseURL:   "temporal:7233",
 		TemporalNamespace: "default",
 		TemporalTaskQueue: "nexus-workflows",
-		ObjectStoreDir:    "/var/lib/nexus-pro-be/objects",
+		ObjectStoreDir:    "/var/lib/nexus-pro-api/objects",
 	}
 
 	cfg := base

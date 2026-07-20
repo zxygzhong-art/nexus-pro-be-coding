@@ -6,7 +6,7 @@ import (
 
 	"github.com/jackc/pgx/v5/pgconn"
 
-	"nexus-pro-be/internal/repository/postgres"
+	"nexus-pro-api/internal/repository/postgres"
 )
 
 // TestIsExclusionConstraint verifies overlap conflicts are recognized through wrapped driver errors.

@@ -9,9 +9,10 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 func TestAgentChatUsesInjectedRuntimeAndPersistsRun(t *testing.T) {
@@ -47,7 +48,7 @@ func TestAgentChatUsesInjectedRuntimeAndPersistsRun(t *testing.T) {
 	})
 	events := []domain.AgentChatEvent{}
 
-	run, err := svc.Agent().Chat(
+	run, err := agentservice.New(svc).Chat(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		domain.AgentChatInput{Message: "幫我看一下資料", Mode: "assistant_chat"},
 		func(_ context.Context, event domain.AgentChatEvent) error {
@@ -113,7 +114,7 @@ func TestAgentChatRecommendationUsesVisibleAssistantCatalog(t *testing.T) {
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
 
-	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "誰能解釋薪資差異？", Mode: "assistant_recommendation"}, nil)
+	run, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{Message: "誰能解釋薪資差異？", Mode: "assistant_recommendation"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +158,7 @@ func TestAgentChatRecommendationFallsBackToVisibleCatalog(t *testing.T) {
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
 	events := []domain.AgentChatEvent{}
 
-	run, err := svc.Agent().Chat(
+	run, err := agentservice.New(svc).Chat(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		domain.AgentChatInput{Message: "請推薦處理員工請假的助理", Mode: "assistant_recommendation"},
 		func(_ context.Context, event domain.AgentChatEvent) error {
@@ -212,7 +213,7 @@ func TestAgentChatReadOnlyToolsUseRequestContext(t *testing.T) {
 		AgentChatRuntime: runtime,
 	})
 
-	if _, err := svc.Agent().Chat(
+	if _, err := agentservice.New(svc).Chat(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		domain.AgentChatInput{Message: "我的資料"},
 		func(context.Context, domain.AgentChatEvent) error { return nil },
@@ -246,7 +247,7 @@ func TestAgentChatPersonalLeaveDoesNotRequireBalance(t *testing.T) {
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
 	}}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
-	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申請事假"}, nil); err != nil {
+	if _, err := agentservice.New(svc).Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申請事假"}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -274,7 +275,7 @@ func TestAgentChatLeaveEligibilityFallsBackFromRealZeroBalance(t *testing.T) {
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
 	}}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
-	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申請特休"}, nil); err != nil {
+	if _, err := agentservice.New(svc).Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申請特休"}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -302,7 +303,7 @@ func TestAgentChatLeaveEligibilityAcceptsSufficientBalance(t *testing.T) {
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
 	}}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
-	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申請特休"}, nil); err != nil {
+	if _, err := agentservice.New(svc).Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "申請特休"}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -337,7 +338,7 @@ func TestAgentChatLeaveBalanceAdminScopeStaysSelfOnly(t *testing.T) {
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
 	}}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
-	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "查詢我的餘額"}, nil); err != nil {
+	if _, err := agentservice.New(svc).Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "查詢我的餘額"}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -397,7 +398,7 @@ func TestAgentChatAttendanceSummaryAndFormHistoryStaySelfScoped(t *testing.T) {
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "ok"})
 	}}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
-	if _, err := svc.Agent().Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "查看本月考勤和歷史請假"}, nil); err != nil {
+	if _, err := agentservice.New(svc).Chat(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.AgentChatInput{Message: "查看本月考勤和歷史請假"}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -419,7 +420,7 @@ func TestAgentChatToolRequiresAgentToolPermission(t *testing.T) {
 		AgentChatRuntime: runtime,
 	})
 
-	run, err := svc.Agent().Chat(
+	run, err := agentservice.New(svc).Chat(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
 		domain.AgentChatInput{Message: "我的資料"},
 		func(context.Context, domain.AgentChatEvent) error { return nil },
@@ -449,20 +450,20 @@ func TestAgentChatSanitizesRuntimeFailure(t *testing.T) {
 		TenantID: "tenant-1", AccountID: "acct-1", RequestID: "request-agent-runtime", TraceID: "trace-agent-runtime",
 	}
 
-	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "hello"}, nil)
+	run, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{Message: "hello"}, nil)
 	if err == nil {
 		t.Fatal("expected runtime failure")
 	}
 	appErr, ok := domain.AsAppError(err)
-	if !ok || appErr.ReasonCode != service.AgentRuntimeFailureReasonCode || appErr.TraceID != ctx.TraceID {
+	if !ok || appErr.ReasonCode != agentservice.AgentRuntimeFailureReasonCode || appErr.TraceID != ctx.TraceID {
 		t.Fatalf("expected safe runtime app error, got %#v", err)
 	}
 	if strings.Contains(err.Error(), rawFailure) || strings.Contains(err.Error(), "secret-value") {
 		t.Fatalf("runtime error leaked through service boundary: %v", err)
 	}
 	if run.Status != string(domain.AgentRunStatusFailed) ||
-		!strings.Contains(run.Answer, service.AgentRuntimeFailureMessage) ||
-		!strings.Contains(run.Answer, "reason_code="+service.AgentRuntimeFailureReasonCode) ||
+		!strings.Contains(run.Answer, agentservice.AgentRuntimeFailureMessage) ||
+		!strings.Contains(run.Answer, "reason_code="+agentservice.AgentRuntimeFailureReasonCode) ||
 		!strings.Contains(run.Answer, "trace_id="+ctx.TraceID) ||
 		strings.Contains(run.Answer, rawFailure) {
 		t.Fatalf("expected sanitized failed run, got %+v", run)
@@ -482,7 +483,7 @@ func TestAgentChatSanitizesRuntimeFailure(t *testing.T) {
 		t.Fatalf("expected user and assistant failure messages, got %+v", messages)
 	}
 	failureMessage := messages[1]
-	if failureMessage.Content != run.Answer || failureMessage.Metadata["status"] != "failed" || failureMessage.Metadata["reason_code"] != service.AgentRuntimeFailureReasonCode {
+	if failureMessage.Content != run.Answer || failureMessage.Metadata["status"] != "failed" || failureMessage.Metadata["reason_code"] != agentservice.AgentRuntimeFailureReasonCode {
 		t.Fatalf("expected a replayable assistant failure marker, got %+v", failureMessage)
 	}
 	if strings.Contains(failureMessage.Content, rawFailure) || strings.Contains(fmt.Sprint(failureMessage.Metadata), "secret-value") {
@@ -508,7 +509,7 @@ func TestAgentChatBlocksActiveRunInSameSession(t *testing.T) {
 		}},
 	})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
-	session, err := svc.Agent().CreateSession(ctx, domain.CreateAgentSessionInput{Title: "Busy"})
+	session, err := agentservice.New(svc).CreateSession(ctx, domain.CreateAgentSessionInput{Title: "Busy"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -525,7 +526,7 @@ func TestAgentChatBlocksActiveRunInSameSession(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{SessionID: session.ID, Message: "hi"}, nil); err == nil {
+	if _, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{SessionID: session.ID, Message: "hi"}, nil); err == nil {
 		t.Fatal("expected active run conflict")
 	}
 }
@@ -545,7 +546,7 @@ func TestAgentChatRecoversStaleRunInSameSession(t *testing.T) {
 		}},
 	})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
-	session, err := svc.Agent().CreateSession(ctx, domain.CreateAgentSessionInput{Title: "Interrupted"})
+	session, err := agentservice.New(svc).CreateSession(ctx, domain.CreateAgentSessionInput{Title: "Interrupted"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -563,7 +564,7 @@ func TestAgentChatRecoversStaleRunInSameSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{SessionID: session.ID, Message: "retry"}, nil)
+	run, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{SessionID: session.ID, Message: "retry"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -625,14 +626,14 @@ func TestAgentChatUsesSessionBoundAgentAndRejectsAgentSwitch(t *testing.T) {
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "bound answer"})
 	}}})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
-	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{SessionID: "session-bound", Message: "continue"}, nil)
+	run, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{SessionID: "session-bound", Message: "continue"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if run.AgentID != "agent-bound" || runtimeCalls != 1 {
 		t.Fatalf("expected bound agent run, got run=%+v calls=%d", run, runtimeCalls)
 	}
-	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{SessionID: "session-bound", AgentID: "other-agent", Message: "switch"}, nil); err == nil {
+	if _, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{SessionID: "session-bound", AgentID: "other-agent", Message: "switch"}, nil); err == nil {
 		t.Fatal("expected switching the agent bound to an existing session to fail")
 	}
 	if runtimeCalls != 1 {
@@ -669,25 +670,25 @@ func TestAgentChatClearContextDropsPreviousHistoryFromPrompt(t *testing.T) {
 		AgentChatRuntime: runtime,
 	})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
-	first, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "first question"}, nil)
+	first, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{Message: "first question"}, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	cleared, err := svc.Agent().ClearSessionContext(ctx, first.SessionID)
+	cleared, err := agentservice.New(svc).ClearSessionContext(ctx, first.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cleared.ContextVersion != 2 || cleared.LastMessageAt != nil {
 		t.Fatalf("expected clear to advance the visible context partition, got %+v", cleared)
 	}
-	visible, err := svc.Agent().ListSessionMessages(ctx, first.SessionID)
+	visible, err := agentservice.New(svc).ListSessionMessages(ctx, first.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(visible) != 0 {
 		t.Fatalf("expected messages before clear to be invisible, got %+v", visible)
 	}
-	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{SessionID: first.SessionID, Message: "second question"}, nil); err != nil {
+	if _, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{SessionID: first.SessionID, Message: "second question"}, nil); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -713,11 +714,11 @@ func TestAgentChatFilesAreBoundToMessagesAndHiddenAfterClear(t *testing.T) {
 		Now: func() time.Time { return now }, AgentChatRuntime: runtime, ObjectStore: objectStore,
 	})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
-	session, err := svc.Agent().CreateSession(ctx, domain.CreateAgentSessionInput{Title: "File review"})
+	session, err := agentservice.New(svc).CreateSession(ctx, domain.CreateAgentSessionInput{Title: "File review"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	file, err := svc.Agent().UploadSessionFile(ctx, session.ID, domain.UploadAgentSessionFileInput{
+	file, err := agentservice.New(svc).UploadSessionFile(ctx, session.ID, domain.UploadAgentSessionFileInput{
 		Filename: "report.txt", ContentType: "text/plain", Content: []byte("quarterly revenue is 42"),
 	})
 	if err != nil {
@@ -726,16 +727,16 @@ func TestAgentChatFilesAreBoundToMessagesAndHiddenAfterClear(t *testing.T) {
 	if file.State != "draft" || file.ContextVersion != 1 {
 		t.Fatalf("unexpected staged file: %+v", file)
 	}
-	download, err := svc.Agent().DownloadSessionFile(ctx, session.ID, file.ID)
+	download, err := agentservice.New(svc).DownloadSessionFile(ctx, session.ID, file.ID)
 	if err != nil || string(download.Content) != "quarterly revenue is 42" {
 		t.Fatalf("unexpected staged download: content=%q err=%v", download.Content, err)
 	}
-	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{
+	if _, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{
 		SessionID: session.ID, Message: "review this", AttachmentIDs: []string{file.ID},
 	}, nil); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := svc.Agent().ListSessionMessages(ctx, session.ID)
+	messages, err := agentservice.New(svc).ListSessionMessages(ctx, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -749,24 +750,24 @@ func TestAgentChatFilesAreBoundToMessagesAndHiddenAfterClear(t *testing.T) {
 	if strings.Contains(string(rawMessage), "object_key") || strings.Contains(string(rawMessage), file.ObjectKey) {
 		t.Fatalf("storage key must not be serialized through message attachments: %s", rawMessage)
 	}
-	if _, err := svc.Agent().ClearSessionContext(ctx, session.ID); err != nil {
+	if _, err := agentservice.New(svc).ClearSessionContext(ctx, session.ID); err != nil {
 		t.Fatal(err)
 	}
-	messages, err = svc.Agent().ListSessionMessages(ctx, session.ID)
+	messages, err = agentservice.New(svc).ListSessionMessages(ctx, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(messages) != 0 {
 		t.Fatalf("expected cleared messages to be invisible, got %+v", messages)
 	}
-	files, err := svc.Agent().ListSessionFiles(ctx, session.ID)
+	files, err := agentservice.New(svc).ListSessionFiles(ctx, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(files) != 0 {
 		t.Fatalf("expected cleared files to be invisible, got %+v", files)
 	}
-	if _, err := svc.Agent().DownloadSessionFile(ctx, session.ID, file.ID); err == nil {
+	if _, err := agentservice.New(svc).DownloadSessionFile(ctx, session.ID, file.ID); err == nil {
 		t.Fatal("expected old context file download to be hidden")
 	}
 }
@@ -788,7 +789,7 @@ func TestAgentChatClearCannotSplitAnActiveRunAcrossContextVersions(t *testing.T)
 	}}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
-	session, err := svc.Agent().CreateSession(ctx, domain.CreateAgentSessionInput{Title: "active turn"})
+	session, err := agentservice.New(svc).CreateSession(ctx, domain.CreateAgentSessionInput{Title: "active turn"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -798,11 +799,11 @@ func TestAgentChatClearCannotSplitAnActiveRunAcrossContextVersions(t *testing.T)
 	}
 	result := make(chan chatResult, 1)
 	go func() {
-		run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{SessionID: session.ID, Message: "hello"}, nil)
+		run, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{SessionID: session.ID, Message: "hello"}, nil)
 		result <- chatResult{run: run, err: err}
 	}()
 	<-started
-	if _, err := svc.Agent().ClearSessionContext(ctx, session.ID); err == nil {
+	if _, err := agentservice.New(svc).ClearSessionContext(ctx, session.ID); err == nil {
 		t.Fatal("expected clear to reject while the session has an active run")
 	}
 	close(release)
@@ -810,14 +811,14 @@ func TestAgentChatClearCannotSplitAnActiveRunAcrossContextVersions(t *testing.T)
 	if completed.err != nil || completed.run.Status != string(domain.AgentRunStatusCompleted) {
 		t.Fatalf("expected the active turn to complete atomically, run=%+v err=%v", completed.run, completed.err)
 	}
-	cleared, err := svc.Agent().ClearSessionContext(ctx, session.ID)
+	cleared, err := agentservice.New(svc).ClearSessionContext(ctx, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cleared.ContextVersion != session.ContextVersion+1 {
 		t.Fatalf("expected context version to advance after the turn, got %+v", cleared)
 	}
-	messages, err := svc.Agent().ListSessionMessages(ctx, session.ID)
+	messages, err := agentservice.New(svc).ListSessionMessages(ctx, session.ID)
 	if err != nil {
 		t.Fatal(err)
 	}

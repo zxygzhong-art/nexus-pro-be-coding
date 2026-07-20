@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	postgresrepo "nexus-pro-be/internal/repository/postgres"
-	"nexus-pro-be/internal/utils/tenantctx"
+	"nexus-pro-api/internal/domain"
+	postgresrepo "nexus-pro-api/internal/repository/postgres"
+	"nexus-pro-api/internal/utils/tenantctx"
 )
 
 // TestOutboxEventRepositoryQueries 驗證 outbox 事件主鍵查詢、SQL 分頁與定期清理刪除。

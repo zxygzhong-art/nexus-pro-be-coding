@@ -8,10 +8,10 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository"
-	postgresrepo "nexus-pro-be/internal/repository/postgres"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository"
+	postgresrepo "nexus-pro-api/internal/repository/postgres"
+	"nexus-pro-api/internal/service"
 )
 
 // TestPostgresWorkflowRuntimeSemantics 驗證 workflow runtime 表可持久化並依租戶隔離讀寫。

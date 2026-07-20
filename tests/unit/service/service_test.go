@@ -14,11 +14,12 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/platform/ehrms"
-	"nexus-pro-be/internal/repository"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/platform/ehrms"
+	"nexus-pro-api/internal/repository"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 type storeWithoutTenantTransaction struct {
@@ -220,7 +221,7 @@ func TestCreateAgentRunReturnsNoMatchWithoutBoundKnowledge(t *testing.T) {
 		Status: domain.AgentDefinitionStatusPublished, Visibility: domain.AgentVisibilityAll, CreatedAt: now, UpdatedAt: now,
 	})
 
-	run, err := service.New(store).Agent().CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.CreateAgentRunInput{AgentID: "agent-1", Prompt: "請"})
+	run, err := agentservice.New(service.New(store)).CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.CreateAgentRunInput{AgentID: "agent-1", Prompt: "請"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -257,7 +258,7 @@ func TestCreateAgentRunRequiresToolPermission(t *testing.T) {
 	account.DirectPermissionSetIDs = []string{"ps-agent-run"}
 	_ = store.UpsertAccount(context.Background(), account)
 
-	_, err := service.New(store).Agent().CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.CreateAgentRunInput{Prompt: "請假"})
+	_, err := agentservice.New(service.New(store)).CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.CreateAgentRunInput{Prompt: "請假"})
 	if err == nil {
 		t.Fatal("expected agent tool gateway to reject missing tool permission")
 	}
@@ -294,14 +295,14 @@ func TestAgentRunListRespectsOwnerScope(t *testing.T) {
 
 	svc := service.New(store)
 	ownCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-owner"}
-	runs, err := svc.Agent().ListRuns(ownCtx)
+	runs, err := agentservice.New(svc).ListRuns(ownCtx)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(runs) != 1 || runs[0].ID != "run-owner" {
 		t.Fatalf("expected own-scoped list to return only owner run, got %+v", runs)
 	}
-	page, err := svc.Agent().ListRunPage(ownCtx, domain.PageRequest{Page: 1, PageSize: 10})
+	page, err := agentservice.New(svc).ListRunPage(ownCtx, domain.PageRequest{Page: 1, PageSize: 10})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -309,7 +310,7 @@ func TestAgentRunListRespectsOwnerScope(t *testing.T) {
 		t.Fatalf("expected own-scoped page to return only owner run, got %+v", page)
 	}
 
-	allRuns, err := svc.Agent().ListRuns(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"})
+	allRuns, err := agentservice.New(svc).ListRuns(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"})
 	if err != nil {
 		t.Fatal(err)
 	}

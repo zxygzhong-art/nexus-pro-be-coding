@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/workflows"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/platform/temporal/workflows"
 
 	"go.temporal.io/sdk/temporal"
 )

@@ -153,7 +153,7 @@ def main() -> int:
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Full HTTP smoke test for nexus-pro-be APIs.")
+    parser = argparse.ArgumentParser(description="Full HTTP smoke test for nexus-pro-api APIs.")
     parser.add_argument("--base-url", help="Use an existing server instead of starting go run ./cmd/api.")
     parser.add_argument("--check-coverage", action="store_true", help="Validate OpenAPI route coverage without DB, Keycloak, or HTTP calls.")
     parser.add_argument("--start-timeout", type=float, default=90.0, help="Seconds to wait for a started server.")

@@ -3,8 +3,8 @@ package service_test
 import (
 	"testing"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/service"
 )
 
 // TestEHRMSMergePreservesSelfManagedEnglishName verifies upstream sync cannot undo a user-selected English name.

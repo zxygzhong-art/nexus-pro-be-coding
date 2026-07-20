@@ -13,9 +13,10 @@ import (
 	"google.golang.org/adk/v2/model"
 	"google.golang.org/genai"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/platform/llm"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/platform/llm"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 func TestLiteLLMGenerateContent(t *testing.T) {
@@ -264,7 +265,7 @@ func TestLiteLLMADKToolLoop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := service.NewADKAgentChatRuntime(modelClient)
+	runtime, err := agentservice.NewADKAgentChatRuntime(modelClient)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -377,7 +378,7 @@ func TestLiteLLMADKParallelToolLoop(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	runtime, err := service.NewADKAgentChatRuntime(modelClient)
+	runtime, err := agentservice.NewADKAgentChatRuntime(modelClient)
 	if err != nil {
 		t.Fatal(err)
 	}

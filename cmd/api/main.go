@@ -10,8 +10,8 @@ import (
 	"syscall"
 	"time"
 
-	"nexus-pro-be/internal/config"
-	"nexus-pro-be/internal/startup"
+	"nexus-pro-api/internal/config"
+	"nexus-pro-api/internal/startup"
 )
 
 // main 啟動 API 程序並協調關閉流程。
@@ -40,7 +40,7 @@ func main() {
 
 	errs := make(chan error, 1)
 	go func() {
-		logger.Info("nexus-pro-be started", "addr", cfg.HTTPAddr)
+		logger.Info("nexus-pro-api started", "addr", cfg.HTTPAddr)
 		errs <- modules.server.ListenAndServe()
 	}()
 	if modules.metricsServer != nil {

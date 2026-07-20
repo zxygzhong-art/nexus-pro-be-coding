@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Live workflow E2E against a running API + Keycloak.
 # Usage:
-#   cd nexus-pro-be
+#   cd nexus-pro-api
 #   set -a && source .env && set +a
 #   export SMOKE_ADMIN_USERNAME='admin@demo.local'
 #   export SMOKE_ADMIN_PASSWORD='...'

@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	sqlc "nexus-pro-be/internal/platform/postgres/db"
+	"nexus-pro-api/internal/domain"
+	sqlc "nexus-pro-api/internal/platform/postgres/db"
 )
 
 // UpsertAgentSession 從儲存層處理 upsert agent 會話。

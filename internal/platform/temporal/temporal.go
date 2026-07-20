@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/workflows"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/platform/temporal/workflows"
 
 	sdkclient "go.temporal.io/sdk/client"
 	sdkworker "go.temporal.io/sdk/worker"

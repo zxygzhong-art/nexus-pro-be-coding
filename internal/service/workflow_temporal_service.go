@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 func (c WorkflowService) startTemporalFormApprovalWorkflow(ctx RequestContext, instance domain.FormInstance) error {
@@ -109,7 +109,7 @@ func (c WorkflowService) signalTemporalFormApprovalWorkflow(ctx RequestContext, 
 			return domain.FormInstance{}, err
 		}
 	default:
-		if _, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionUpdate, ""); err != nil {
+		if _, _, err := c.RequireWorkflowAuthz(ctx, ResourceFormInstance, ActionUpdate, ""); err != nil {
 			return domain.FormInstance{}, err
 		}
 	}
@@ -285,7 +285,7 @@ func (c WorkflowService) RecordTemporalFormApprovalReminder(ctx RequestContext, 
 }
 
 func (c WorkflowService) withdrawTemporalFormApproval(ctx RequestContext, formInstanceID, reason string) (domain.FormInstance, error) {
-	account, decision, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionUpdate, "")
+	account, decision, err := c.RequireWorkflowAuthz(ctx, ResourceFormInstance, ActionUpdate, "")
 	if err != nil {
 		return domain.FormInstance{}, err
 	}

@@ -8,8 +8,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"go.opentelemetry.io/contrib/instrumentation/github.com/gin-gonic/gin/otelgin"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 // API 定義 API 的資料結構。
@@ -97,7 +98,7 @@ func New(app *service.Service, logger *slog.Logger, options ...Options) *API {
 		api.platform = app.Platform()
 		api.workspace = app.Workspace()
 		api.workflow = app.Workflow()
-		api.agent = app.Agent()
+		api.agent = agentservice.New(app)
 		api.notification = app.Notifications()
 		api.audit = app.Audit()
 	}

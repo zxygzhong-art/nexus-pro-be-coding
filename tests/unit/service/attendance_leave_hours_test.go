@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/service"
 )
 
 // TestCalculateLeaveHoursWithinPolicy verifies full, partial, and multi-day break deductions.

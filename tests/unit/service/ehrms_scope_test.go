@@ -5,8 +5,8 @@ import (
 	"errors"
 	"testing"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/service"
 )
 
 // TestEHRMSBulkSyncRejectsScopedGrantsBeforeFetch verifies scoped grants cannot trigger tenant-wide upstream reads or writes.

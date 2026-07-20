@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/service"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -210,7 +210,7 @@ func formApprovalReminderDuration(input domain.FormApprovalWorkflowStart, projec
 }
 
 func workflowActivitySpan(ctx context.Context, name, tenantID, formInstanceID string) (context.Context, trace.Span) {
-	ctx, span := otel.Tracer("nexus-pro-be/internal/workflows").Start(ctx, name)
+	ctx, span := otel.Tracer("nexus-pro-api/internal/platform/temporal/workflows").Start(ctx, name)
 	span.SetAttributes(
 		attribute.String("tenant_id", tenantID),
 		attribute.String("form_instance_id", formInstanceID),

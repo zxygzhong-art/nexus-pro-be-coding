@@ -7,10 +7,11 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 func TestAgentCreatesDraftAndRequiresConfirmationBeforeSubmission(t *testing.T) {
@@ -52,7 +53,7 @@ func TestAgentCreatesDraftAndRequiresConfirmationBeforeSubmission(t *testing.T) 
 	}}
 	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"}
-	run, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "幫我創建請假單"}, func(_ context.Context, event domain.AgentChatEvent) error {
+	run, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{Message: "幫我創建請假單"}, func(_ context.Context, event domain.AgentChatEvent) error {
 		if event.Event == domain.AgentChatEventConfirmation {
 			confirmation = event.Confirmation
 		}
@@ -64,7 +65,7 @@ func TestAgentCreatesDraftAndRequiresConfirmationBeforeSubmission(t *testing.T) 
 	if run.Status != string(domain.AgentRunStatusCompleted) || confirmation == nil || confirmation.Kind != "form_submit" {
 		t.Fatalf("expected a completed chat with submit confirmation, run=%+v confirmation=%+v", run, confirmation)
 	}
-	messages, err := svc.Agent().ListSessionMessages(ctx, run.SessionID)
+	messages, err := agentservice.New(svc).ListSessionMessages(ctx, run.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,14 +94,14 @@ func TestAgentCreatesDraftAndRequiresConfirmationBeforeSubmission(t *testing.T) 
 		t.Fatalf("preview must not submit the form, forms=%+v err=%v", drafts, err)
 	}
 
-	executed, err := svc.Agent().ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{})
+	executed, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if executed.FormInstance == nil || executed.FormInstance.Status != "in_review" {
 		t.Fatalf("expected confirmed draft to enter workflow, got %+v", executed)
 	}
-	messages, err = svc.Agent().ListSessionMessages(ctx, run.SessionID)
+	messages, err = agentservice.New(svc).ListSessionMessages(ctx, run.SessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,7 +111,7 @@ func TestAgentCreatesDraftAndRequiresConfirmationBeforeSubmission(t *testing.T) 
 			t.Fatal("consumed confirmation must not be restored from session history")
 		}
 	}
-	if _, err := svc.Agent().ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
+	if _, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
 		t.Fatal("expected one-time confirmation replay to be rejected")
 	}
 }
@@ -201,7 +202,7 @@ func TestAgentLeaveDraftDefaultsMissingTimes(t *testing.T) {
 	}}
 	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"}
-	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "幫我申請特休，原因是家庭安排"}, func(context.Context, domain.AgentChatEvent) error { return nil }); err != nil {
+	if _, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{Message: "幫我申請特休，原因是家庭安排"}, func(context.Context, domain.AgentChatEvent) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 
@@ -262,7 +263,7 @@ func TestAgentConfirmationExpiryUsesServiceClock(t *testing.T) {
 	clock := now
 	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return clock }, AgentChatRuntime: runtime})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"}
-	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "創建確認單"}, func(context.Context, domain.AgentChatEvent) error { return nil }); err != nil {
+	if _, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{Message: "創建確認單"}, func(context.Context, domain.AgentChatEvent) error { return nil }); err != nil {
 		t.Fatal(err)
 	}
 	if confirmation == nil {
@@ -270,10 +271,10 @@ func TestAgentConfirmationExpiryUsesServiceClock(t *testing.T) {
 	}
 
 	clock = now.Add(11 * time.Minute)
-	if _, err := svc.Agent().ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
+	if _, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
 		t.Fatal("expected expired confirmation to be rejected")
 	}
-	if _, err := svc.Agent().ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
+	if _, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
 		t.Fatal("expected expired confirmation replay to be rejected")
 	}
 }
@@ -321,7 +322,7 @@ func TestAgentConfirmationRetriesTransientFailureButConsumesConflict(t *testing.
 		t.Helper()
 		confirmation = nil
 		draftID = ""
-		if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "創建確認單"}, func(context.Context, domain.AgentChatEvent) error { return nil }); err != nil {
+		if _, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{Message: "創建確認單"}, func(context.Context, domain.AgentChatEvent) error { return nil }); err != nil {
 			t.Fatal(err)
 		}
 		if confirmation == nil || draftID == "" {
@@ -331,12 +332,12 @@ func TestAgentConfirmationRetriesTransientFailureButConsumesConflict(t *testing.
 
 	prepare()
 	store.failNextFormInstanceGet = true
-	if _, err := svc.Agent().ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
+	if _, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
 		t.Fatal("expected transient execution failure")
 	} else if appErr, ok := domain.AsAppError(err); !ok || appErr.Status != 503 {
 		t.Fatalf("expected original 503 error, got %v", err)
 	}
-	executed, err := svc.Agent().ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{})
+	executed, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,18 +354,18 @@ func TestAgentConfirmationRetriesTransientFailureButConsumesConflict(t *testing.
 	if err := baseStore.UpsertFormInstance(context.Background(), draft); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Agent().ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
+	if _, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
 		t.Fatal("expected stale confirmation conflict")
 	} else if appErr, ok := domain.AsAppError(err); !ok || appErr.Status != 409 {
 		t.Fatalf("expected conflict error, got %v", err)
 	}
-	if _, err := svc.Agent().ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
+	if _, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
 		t.Fatal("expected stale confirmation replay to remain consumed")
 	}
 
 	prepare()
 	store.failConfirmationAudit = true
-	if _, err := svc.Agent().ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
+	if _, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
 		t.Fatal("expected confirmation audit failure")
 	} else if appErr, ok := domain.AsAppError(err); !ok || appErr.Status != 503 {
 		t.Fatalf("expected original audit error, got %v", err)
@@ -373,7 +374,7 @@ func TestAgentConfirmationRetriesTransientFailureButConsumesConflict(t *testing.
 	if err != nil || !ok || submitted.Status != "in_review" {
 		t.Fatalf("side effect should remain completed despite audit failure, instance=%+v ok=%v err=%v", submitted, ok, err)
 	}
-	if _, err := svc.Agent().ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
+	if _, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
 		t.Fatal("expected audit failure not to restore a completed confirmation")
 	}
 }
@@ -417,7 +418,7 @@ func TestAgentPreparesAndExecutesFixedBulkReview(t *testing.T) {
 		startWorkflowRunForTest(t, svc, store, "tenant-1", id, "acct-applicant")
 	}
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-manager"}
-	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{Message: "批准這兩筆"}, func(_ context.Context, event domain.AgentChatEvent) error {
+	if _, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{Message: "批准這兩筆"}, func(_ context.Context, event domain.AgentChatEvent) error {
 		if event.Event == domain.AgentChatEventConfirmation {
 			confirmation = event.Confirmation
 		}
@@ -429,7 +430,7 @@ func TestAgentPreparesAndExecutesFixedBulkReview(t *testing.T) {
 		t.Fatalf("expected fixed bulk confirmation, got %+v", confirmation)
 	}
 
-	executed, err := svc.Agent().ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{})
+	executed, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{})
 	if err != nil {
 		t.Fatal(err)
 	}

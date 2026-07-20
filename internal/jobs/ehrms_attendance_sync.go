@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 const defaultEHRMSAttendanceSyncInterval = 30 * 24 * time.Hour

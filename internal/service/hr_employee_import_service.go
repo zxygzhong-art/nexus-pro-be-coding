@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 func employeeImportTemplateCSV() ([]byte, error) {
@@ -525,8 +525,8 @@ func (c HRService) PreviewEmployeeImport(ctx RequestContext, input EmployeeImpor
 		ID:                 sessionID,
 		TenantID:           ctx.TenantID,
 		Filename:           filename,
-		ObjectProvider:     objectStoreProvider(c.objectStore),
-		ObjectBucket:       objectStoreBucket(c.objectStore),
+		ObjectProvider:     ObjectStoreProvider(c.objectStore),
+		ObjectBucket:       ObjectStoreBucket(c.objectStore),
 		ObjectKey:          objectKey,
 		ContentType:        contentType,
 		SizeBytes:          int64(len(raw)),

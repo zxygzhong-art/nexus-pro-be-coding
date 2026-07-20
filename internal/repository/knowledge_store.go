@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // KnowledgeStore persists tenant knowledge bases and manual documents.

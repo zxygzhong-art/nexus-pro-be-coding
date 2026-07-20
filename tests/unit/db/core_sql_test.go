@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
 
-	sqlc "nexus-pro-be/internal/platform/postgres/db"
+	sqlc "nexus-pro-api/internal/platform/postgres/db"
 )
 
 type captureDBTX struct {

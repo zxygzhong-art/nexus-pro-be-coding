@@ -7,9 +7,10 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 // failingObjectStore simulates an object store outage with an error whose text
@@ -47,12 +48,13 @@ func TestUploadSessionFileObjectStoreFailure(t *testing.T) {
 		ObjectStore: &failingObjectStore{err: errObjectStoreOutage},
 	})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
-	session, err := svc.Agent().CreateSession(ctx, domain.CreateAgentSessionInput{Title: "Files"})
+	agentSvc := agentservice.New(svc)
+	session, err := agentSvc.CreateSession(ctx, domain.CreateAgentSessionInput{Title: "Files"})
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = svc.Agent().UploadSessionFile(ctx, session.ID, domain.UploadAgentSessionFileInput{
+	_, err = agentSvc.UploadSessionFile(ctx, session.ID, domain.UploadAgentSessionFileInput{
 		Filename: "notes.txt", ContentType: "text/plain", Content: []byte("hello"),
 	})
 	assertObjectStoreError(t, err)

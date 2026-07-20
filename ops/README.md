@@ -7,7 +7,7 @@
 ## 啟動
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 ./render-configs.sh
 docker compose --env-file .env up -d
 ```
@@ -82,21 +82,21 @@ Grafana
 只部署 PostgreSQL：
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 COMPOSE_PROFILES=postgres docker compose --env-file .env up -d postgres
 ```
 
 只部署 Redis：
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 COMPOSE_PROFILES=redis docker compose --env-file .env up -d redis
 ```
 
 只部署 LiteLLM（PostgreSQL 已存在，且已建立 `LITELLM_DB_NAME` 指定的 database）：
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 COMPOSE_PROFILES=litellm docker compose --env-file .env up -d --no-deps litellm
 ```
 
@@ -107,7 +107,7 @@ COMPOSE_PROFILES=litellm docker compose --env-file .env up -d --no-deps litellm
 只部署 SFTPGo：
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 ./render-configs.sh
 COMPOSE_PROFILES=sftpgo docker compose --env-file .env up -d sftpgo
 ```
@@ -115,14 +115,14 @@ COMPOSE_PROFILES=sftpgo docker compose --env-file .env up -d sftpgo
 只部署 NATS JetStream：
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 COMPOSE_PROFILES=nats docker compose --env-file .env up -d nats
 ```
 
 PostgreSQL 已在其他主機部署，只部署 Temporal：
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 # 先在 .env 裡把 POSTGRES_INTERNAL_HOST、POSTGRES_INTERNAL_PORT、POSTGRES_USER、POSTGRES_PASSWORD 指向既有資料庫主機。
 ./render-configs.sh
 COMPOSE_PROFILES=temporal docker compose --env-file .env up -d --no-deps temporal temporal-ui temporal-admin-tools
@@ -131,7 +131,7 @@ COMPOSE_PROFILES=temporal docker compose --env-file .env up -d --no-deps tempora
 PostgreSQL 已在其他主機部署，只部署 Keycloak：
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 # 先在 .env 裡把 POSTGRES_INTERNAL_HOST、POSTGRES_INTERNAL_PORT、POSTGRES_USER、POSTGRES_PASSWORD 指向既有資料庫主機。
 COMPOSE_PROFILES=keycloak docker compose --env-file .env up -d --no-deps keycloak
 ```
@@ -139,7 +139,7 @@ COMPOSE_PROFILES=keycloak docker compose --env-file .env up -d --no-deps keycloa
 Prometheus、Tempo 已在其他主機部署，只部署 Grafana：
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 # 先在 .env 裡把 PROMETHEUS_INTERNAL_HOST、TEMPO_INTERNAL_HOST 指向既有服務主機。
 ./render-configs.sh
 COMPOSE_PROFILES=grafana docker compose --env-file .env up -d --no-deps grafana
@@ -200,7 +200,7 @@ SFTPGo SFTP:    sftp://127.0.0.1:22022
 OTEL_ENABLED=true
 OTEL_BASE_URL=http://127.0.0.1:24317
 OTEL_EXPORTER_OTLP_INSECURE=true
-OTEL_SERVICE_NAME=nexus-pro-be
+OTEL_SERVICE_NAME=nexus-pro-api
 METRICS_ADDR=0.0.0.0:9091
 ```
 
@@ -248,7 +248,7 @@ NATS_BASE_URL=nats://127.0.0.1:24222
 後端不會自動載入 `.env`；從宿主機啟動 API 時需要明確 source：
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api
 set -a
 source ops/.env
 set +a
@@ -261,7 +261,7 @@ go run ./cmd/api
 ## 停止
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 docker compose --env-file .env down
 ```
 

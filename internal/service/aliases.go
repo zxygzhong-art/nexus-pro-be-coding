@@ -1,6 +1,6 @@
 package service
 
-import "nexus-pro-be/internal/domain"
+import "nexus-pro-api/internal/domain"
 
 // Domain 說明此處的程式契約。
 type (

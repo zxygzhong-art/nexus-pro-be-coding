@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
 )
 
 // seedActiveGroupMembership records the authoritative relation used by authorization tests.

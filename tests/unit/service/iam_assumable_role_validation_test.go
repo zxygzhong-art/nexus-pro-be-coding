@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
 )
 
 const trustedRolePrincipalError = "trusted assumable role trust_policy must include at least one non-empty principal in accounts, account_ids, user_groups, or user_group_ids"

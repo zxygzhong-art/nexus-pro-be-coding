@@ -4,10 +4,10 @@ import (
 	"context"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 
-	sqlc "nexus-pro-be/internal/platform/postgres/db"
+	sqlc "nexus-pro-api/internal/platform/postgres/db"
 )
 
 // UpsertAgentFileAsset persists object metadata without exposing its storage key through the API.

@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
-	"nexus-pro-be/internal/config"
+	"nexus-pro-api/internal/config"
 	"os"
 	"sort"
 	"strings"
@@ -22,14 +22,14 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	v1api "nexus-pro-be/internal/api/v1"
-	"nexus-pro-be/internal/domain"
-	openfgaclient "nexus-pro-be/internal/platform/openfga"
-	pgplatform "nexus-pro-be/internal/platform/postgres"
-	"nexus-pro-be/internal/repository"
-	postgresrepo "nexus-pro-be/internal/repository/postgres"
-	"nexus-pro-be/internal/service"
-	"nexus-pro-be/internal/utils/tenantctx"
+	v1api "nexus-pro-api/internal/api/v1"
+	"nexus-pro-api/internal/domain"
+	openfgaclient "nexus-pro-api/internal/platform/openfga"
+	pgplatform "nexus-pro-api/internal/platform/postgres"
+	"nexus-pro-api/internal/repository"
+	postgresrepo "nexus-pro-api/internal/repository/postgres"
+	"nexus-pro-api/internal/service"
+	"nexus-pro-api/internal/utils/tenantctx"
 )
 
 // TestPostgresRepositoryCriticalSemantics 驗證 Postgres repository critical semantics。
@@ -507,7 +507,7 @@ func TestEmployeeHTTPPostgresAcceptanceTraceAuthzAndFieldPolicy(t *testing.T) {
 	}
 
 	handler := v1api.New(service.New(store, service.Options{Relationships: relationshipChecker}), nil, v1api.Options{
-		TelemetryServiceName: "nexus-pro-be-it",
+		TelemetryServiceName: "nexus-pro-api-it",
 		TokenResolver:        integrationTokenResolver{},
 	}).Routes()
 

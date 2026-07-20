@@ -30,7 +30,7 @@
 ## 使用
 
 ```bash
-cd nexus-pro-be/tools/qa-accounts
+cd nexus-pro-api/tools/qa-accounts
 
 export DB_HOST=127.0.0.1 DB_PORT=5432 DB_USERNAME=nexus DB_PASSWORD=nexus DB_NAME=nexus_pro_be DB_SSLMODE=disable
 export KEYCLOAK_BASE_URL='http://127.0.0.1:8080'

@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository"
+	"nexus-pro-api/internal/utils"
 )
 
 // Service 定義服務的資料結構。
@@ -518,8 +518,8 @@ func forbiddenAuthz(decision CheckResult) error {
 	return domain.ForbiddenReason(authzReasonCode(decision), decision.Reason)
 }
 
-// forbiddenDataScope 處理禁止資料範圍。
-func forbiddenDataScope(message string) error {
+// ForbiddenDataScope 處理禁止資料範圍。
+func ForbiddenDataScope(message string) error {
 	return domain.ForbiddenReason("data_scope_denied", message)
 }
 

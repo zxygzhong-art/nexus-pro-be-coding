@@ -1,6 +1,6 @@
-# nexus-pro-be
+# nexus-pro-api
 
-`nexus-pro-be` is the Go backend for the first-stage multi-tenant HR platform foundation.
+`nexus-pro-api` is the Go backend for the first-stage multi-tenant HR platform foundation.
 
 The first implementation phase focuses on a modular monolith for HR core data, attendance, workflow forms, audit, AI Agent adapters, and the permission-center foundation. Keycloak OIDC token validation is wired into request handling when configured, and OpenFGA can be enabled as a relationship-check adapter.
 
@@ -20,7 +20,7 @@ Migration execution uses `goose` as a command-line tool. It is intentionally not
 ## Local Services
 
 ```sh
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 ./render-configs.sh
 docker compose --env-file .env up -d
 ```
@@ -28,7 +28,7 @@ docker compose --env-file .env up -d
 The ops stack reads `ops/.env`. Copy the application sample environment file from the repository root if you want local API defaults:
 
 ```sh
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api
 cp .env.example .env
 ```
 
@@ -52,7 +52,7 @@ OpenTelemetry tracing is disabled by default. To send traces directly to local T
 
 ```sh
 export OTEL_ENABLED=true
-export OTEL_SERVICE_NAME=nexus-pro-be
+export OTEL_SERVICE_NAME=nexus-pro-api
 export OTEL_BASE_URL=localhost:24317
 export OTEL_EXPORTER_OTLP_INSECURE=true
 export METRICS_ADDR=0.0.0.0:9091
@@ -82,7 +82,7 @@ Temporal is a required runtime dependency for form approval. Form submit starts 
 Start the local Temporal profile:
 
 ```sh
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 ./render-configs.sh
 docker compose --profile temporal --env-file .env up -d temporal temporal-ui temporal-admin-tools
 ```
@@ -114,7 +114,7 @@ NATS JetStream is optional and disabled by default. When enabled, the existing `
 Start the local NATS profile:
 
 ```sh
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 docker compose --profile nats --env-file .env up -d nats
 ```
 
@@ -167,7 +167,7 @@ Provisioning uses stable generated IDs and is safe to rerun with the same tenant
 The application and CLI read environment variables directly; they do not load `.env` automatically.
 
 ```sh
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api
 test -f .env || cp .env.example .env
 
 set -a

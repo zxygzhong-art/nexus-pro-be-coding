@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"strings"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 var workflowConditionNumberPattern = regexp.MustCompile(`(?:≥|>|=|<|≤|>=|<=)\s*([0-9]+)`)
@@ -214,7 +214,7 @@ func workflowIntFromAny(value any) int {
 	}
 }
 
-func validateWorkflowTemplateSubmittable(template domain.FormTemplate) error {
+func ValidateWorkflowTemplateSubmittable(template domain.FormTemplate) error {
 	if platformTemplateDeleted(template.Schema) {
 		return BadRequest("form template is deleted")
 	}

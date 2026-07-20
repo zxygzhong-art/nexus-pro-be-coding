@@ -11,7 +11,7 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // LiteLLMAdminConfig defines the LiteLLM proxy admin client config.

@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
 )
 
 // TestUnlinkedIdentityErrorsExposeStableReasonCode keeps every identity-resolution entrypoint message-independent.

@@ -16,12 +16,12 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"nexus-pro-be/internal/domain"
-	sqlc "nexus-pro-be/internal/platform/postgres/db"
-	"nexus-pro-be/internal/repository"
-	"nexus-pro-be/internal/utils"
-	"nexus-pro-be/internal/utils/jsoncodec"
-	"nexus-pro-be/internal/utils/tenantctx"
+	"nexus-pro-api/internal/domain"
+	sqlc "nexus-pro-api/internal/platform/postgres/db"
+	"nexus-pro-api/internal/repository"
+	"nexus-pro-api/internal/utils"
+	"nexus-pro-api/internal/utils/jsoncodec"
+	"nexus-pro-api/internal/utils/tenantctx"
 )
 
 // Store 定義儲存層的資料結構。

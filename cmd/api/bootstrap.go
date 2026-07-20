@@ -10,25 +10,26 @@ import (
 	"sync"
 	"time"
 
-	v1api "nexus-pro-be/internal/api/v1"
-	"nexus-pro-be/internal/config"
-	"nexus-pro-be/internal/jobs"
-	platformauth "nexus-pro-be/internal/platform/auth"
-	"nexus-pro-be/internal/platform/ehrms"
-	platformllm "nexus-pro-be/internal/platform/llm"
-	"nexus-pro-be/internal/platform/natsbus"
-	"nexus-pro-be/internal/platform/objectstore"
-	openfgaclient "nexus-pro-be/internal/platform/openfga"
-	"nexus-pro-be/internal/platform/postgres"
-	redisstore "nexus-pro-be/internal/platform/redis"
-	platformsecret "nexus-pro-be/internal/platform/secret"
-	"nexus-pro-be/internal/platform/telemetry"
-	temporalplatform "nexus-pro-be/internal/platform/temporal"
-	"nexus-pro-be/internal/repository"
-	pgstore "nexus-pro-be/internal/repository/postgres"
-	"nexus-pro-be/internal/service"
-	"nexus-pro-be/internal/startup"
-	"nexus-pro-be/internal/workflows"
+	v1api "nexus-pro-api/internal/api/v1"
+	"nexus-pro-api/internal/config"
+	"nexus-pro-api/internal/jobs"
+	platformauth "nexus-pro-api/internal/platform/auth"
+	"nexus-pro-api/internal/platform/ehrms"
+	platformllm "nexus-pro-api/internal/platform/llm"
+	"nexus-pro-api/internal/platform/natsbus"
+	"nexus-pro-api/internal/platform/objectstore"
+	openfgaclient "nexus-pro-api/internal/platform/openfga"
+	"nexus-pro-api/internal/platform/postgres"
+	redisstore "nexus-pro-api/internal/platform/redis"
+	platformsecret "nexus-pro-api/internal/platform/secret"
+	"nexus-pro-api/internal/platform/telemetry"
+	temporalplatform "nexus-pro-api/internal/platform/temporal"
+	"nexus-pro-api/internal/platform/temporal/workflows"
+	"nexus-pro-api/internal/repository"
+	pgstore "nexus-pro-api/internal/repository/postgres"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
+	"nexus-pro-api/internal/startup"
 
 	goredis "github.com/redis/go-redis/v9"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
@@ -114,7 +115,7 @@ func logStartupFailure(logger *slog.Logger, stage string, err error) {
 // startModules 啟動模組。
 func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (*apiRuntime, error) {
 	report := startup.Report{
-		Name:       "nexus-pro-be",
+		Name:       "nexus-pro-api",
 		Env:        cfg.Env,
 		HTTPAddr:   cfg.HTTPAddr,
 		Repository: "postgresql",
@@ -257,7 +258,7 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 			return nil, err
 		}
 		readinessChecks["agent_runtime"] = agentModel.Ping
-		agentRuntime, err := service.NewADKAgentChatRuntime(agentModel)
+		agentRuntime, err := agentservice.NewADKAgentChatRuntime(agentModel)
 		if err != nil {
 			logStartupFailure(logger, "agent_chat_runtime", err)
 			shutdownStartedModules(shutdowns, logger)

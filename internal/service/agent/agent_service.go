@@ -1,8 +1,8 @@
-package service
+package agent
 
 import (
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 	"sort"
 	"strings"
 )
@@ -11,11 +11,6 @@ import (
 type AgentService struct {
 	*Service
 	store agentStore
-}
-
-// Agent 處理 agent 的服務流程。
-func (c *Service) Agent() AgentService {
-	return AgentService{Service: c, store: c.store}
 }
 
 // ListRuns 列出執行紀錄的服務流程。
@@ -102,7 +97,7 @@ func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (
 	if err := c.store.UpsertAgentRun(goContext(ctx), run); err != nil {
 		return AgentRun{}, err
 	}
-	c.logInfo(ctx, "agent run created",
+	c.LogInfo(ctx, "agent run created",
 		"run_id", run.ID,
 		"mode", run.Mode,
 		"status", run.Status,
@@ -111,7 +106,7 @@ func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (
 	if err != nil {
 		return AgentRun{}, err
 	}
-	toolResult, err := c.agentToolGateway().Call(ctx, AgentToolCall{
+	toolResult, err := c.AgentToolGateway().Call(ctx, AgentToolCall{
 		Name: "knowledge.search",
 		Authz: CheckRequest{
 			ApplicationCode: AppAgent,
@@ -138,7 +133,7 @@ func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (
 	if err != nil {
 		return AgentRun{}, err
 	}
-	if err := c.audit(ctx, "ai.agent.run.create", "agent_run", run.ID, "high", map[string]any{
+	if err := c.RecordAudit(ctx, "ai.agent.run.create", "agent_run", run.ID, "high", map[string]any{
 		"mode":          run.Mode,
 		"tool":          toolResult.Name,
 		"tool_allowed":  toolResult.Decision.Allowed,
@@ -157,7 +152,7 @@ func (c AgentService) transitionRun(ctx RequestContext, run AgentRun, status Age
 	if err := c.store.UpsertAgentRun(goContext(ctx), run); err != nil {
 		return AgentRun{}, err
 	}
-	c.logInfo(ctx, "agent run status changed",
+	c.LogInfo(ctx, "agent run status changed",
 		"run_id", run.ID,
 		"mode", run.Mode,
 		"previous_status", previousStatus,
@@ -169,7 +164,7 @@ func (c AgentService) transitionRun(ctx RequestContext, run AgentRun, status Age
 // FailRun persists a sanitized legacy runtime failure without exposing the raw provider cause.
 func (c AgentService) FailRun(ctx RequestContext, run AgentRun, cause error) error {
 	run.Answer = agentRuntimeFailureAnswer(ctx)
-	c.logWarn(ctx, "agent run failed",
+	c.LogWarn(ctx, "agent run failed",
 		"run_id", run.ID,
 		"mode", run.Mode,
 		"error", cause,
@@ -218,113 +213,9 @@ func sortAgentRuns(items []AgentRun, order string) {
 	})
 }
 
-type agentToolCaller interface {
-	Call(ctx RequestContext, call AgentToolCall) (AgentToolResult, error)
-}
-
-// AgentToolCall 定義 agent 工具呼叫的資料結構。
-type AgentToolCall struct {
-	Name    string
-	Authz   CheckRequest
-	Execute func() (AgentToolResult, error)
-}
-
-// AgentToolResult 定義 agent 工具結果的資料結構。
-type AgentToolResult struct {
-	Name       string
-	Decision   CheckResult
-	Answer     string
-	References []Reference
-	Data       map[string]any
-}
-
-type authzToolGateway struct {
-	service *Service
-}
-
-// agentToolGateway 處理 agent 工具 gateway 的服務流程。
-func (c *Service) agentToolGateway() agentToolCaller {
-	return authzToolGateway{service: c}
-}
-
-// Call 呼叫目前流程。
-func (g authzToolGateway) Call(ctx RequestContext, call AgentToolCall) (AgentToolResult, error) {
-	account, _, err := g.service.resolveAccount(ctx)
-	if err != nil {
-		return AgentToolResult{}, err
-	}
-	req := call.Authz
-	if req.ApplicationCode == "" {
-		req.ApplicationCode = "agent"
-	}
-	if req.ResourceType == "" {
-		req.ResourceType = "tool"
-	}
-	if req.Action == "" {
-		req.Action = "call"
-	}
-	if req.ResourceID == "" {
-		req.ResourceID = call.Name
-	}
-	decision, err := g.service.evaluateAuthz(ctx, account, req)
-	if err != nil {
-		return AgentToolResult{}, err
-	}
-	if !decision.Allowed {
-		return AgentToolResult{Name: call.Name, Decision: decision}, Forbidden("agent tool call denied: " + decision.Reason)
-	}
-	decision, err = g.applyOpenFGAAgentToolDecision(ctx, account, req, decision)
-	if err != nil {
-		return AgentToolResult{Name: call.Name, Decision: decision}, err
-	}
-	if call.Execute == nil {
-		return AgentToolResult{Name: call.Name, Decision: decision}, nil
-	}
-	result, err := call.Execute()
-	if err != nil {
-		return AgentToolResult{}, err
-	}
-	result.Name = call.Name
-	result.Decision = decision
-	return result, nil
-}
-
-func (g authzToolGateway) applyOpenFGAAgentToolDecision(ctx RequestContext, account Account, req CheckRequest, decision CheckResult) (CheckResult, error) {
-	if g.service == nil || !g.service.openFGAScopeChecksAvailable() {
-		return decision, nil
-	}
-	toolID := strings.TrimSpace(req.ResourceID)
-	if toolID == "" {
-		return decision, nil
-	}
-	object := openFGATypeAgentTool + ":" + toolID
-	subject := openFGASubjectTypeAccount + ":" + account.ID
-	allowed, err := g.service.relationships.CheckRelationship(goContext(ctx), domain.RelationshipCheck{
-		TenantID: ctx.TenantID,
-		Subject:  subject,
-		Relation: openFGARelationCanRun,
-		Object:   object,
-	})
-	if err != nil {
-		g.service.logWarn(ctx, "openfga agent tool can_run check failed; denying tool run",
-			"tool_id", toolID,
-			"error", err,
-		)
-		return decision, Forbidden("agent tool can_run relationship check unavailable")
-	}
-	if !allowed {
-		decision.Allowed = false
-		decision.Reason = "relationship denied"
-		decision.MissingPermissions = uniqueStrings(append(decision.MissingPermissions, openFGATypeAgentTool+"."+openFGARelationCanRun))
-		return decision, Forbidden("agent tool can_run relationship denied")
-	}
-	decision.MatchedBy = uniqueStrings(append(decision.MatchedBy, "openfga:"+object+"#"+openFGARelationCanRun))
-	return decision, nil
-}
-
 // answerAgentPrompt 僅在 Agent 綁定的知識庫中搜尋並回傳可追溯引用。
-func (c *Service) answerAgentPrompt(ctx RequestContext, prompt string, knowledgeBaseIDs []string) (string, []Reference, error) {
-	result, err := c.Agent().SearchKnowledge(ctx, domain.KnowledgeSearchInput{Query: prompt, KnowledgeBaseIDs: knowledgeBaseIDs})
+func (c AgentService) answerAgentPrompt(ctx RequestContext, prompt string, knowledgeBaseIDs []string) (string, []Reference, error) {
+	result, err := New(c.Service).SearchKnowledge(ctx, domain.KnowledgeSearchInput{Query: prompt, KnowledgeBaseIDs: knowledgeBaseIDs})
 	if err != nil {
 		return "", nil, err
 	}
@@ -346,11 +237,11 @@ func (c AgentService) publishedAgentDefinition(ctx RequestContext, id string) (d
 	if !ok || agent.Status != domain.AgentDefinitionStatusPublished {
 		return domain.AgentDefinition{}, NotFound("published agent definition", id)
 	}
-	account, _, err := c.resolveAccount(ctx)
+	account, _, err := c.ResolveAccount(ctx)
 	if err != nil {
 		return domain.AgentDefinition{}, err
 	}
-	visible, err := c.agentDefinitionVisibleToAccount(ctx, account, agent)
+	visible, err := c.AgentDefinitionVisibleToAccount(ctx, account, agent)
 	if err != nil {
 		return domain.AgentDefinition{}, err
 	}

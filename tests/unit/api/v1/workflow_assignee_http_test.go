@@ -7,10 +7,10 @@ import (
 	"testing"
 	"time"
 
-	v1api "nexus-pro-be/internal/api/v1"
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	v1api "nexus-pro-api/internal/api/v1"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
 )
 
 // TestWorkflowAssignedSelfReaderCanApproveOverHTTP keeps route authz from hiding active assignee access.

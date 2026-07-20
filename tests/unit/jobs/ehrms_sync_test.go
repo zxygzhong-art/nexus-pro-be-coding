@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/jobs"
-	"nexus-pro-be/internal/repository/memory"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/jobs"
+	"nexus-pro-api/internal/repository/memory"
 )
 
 // TestEHRMSEmployeeSyncSchedulerSyncOnceUsesConfiguredActor 驗證 eHRMS 員工 sync scheduler sync once uses configured actor。

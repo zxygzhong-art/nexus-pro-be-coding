@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/utils"
 )
 
 const (
@@ -237,7 +237,7 @@ func (c AttendanceService) ensureAttendanceEmployeeAllowed(ctx RequestContext, a
 	if _, ok := allowed[employeeID]; ok {
 		return nil
 	}
-	return forbiddenDataScope("employee is outside data scope")
+	return ForbiddenDataScope("employee is outside data scope")
 }
 
 // attendanceEmployeeAllowsActiveOperations keeps historical reads available while

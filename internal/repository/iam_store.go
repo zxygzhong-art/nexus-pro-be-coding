@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // IAMStore 定義 IAM 儲存層的行為契約。

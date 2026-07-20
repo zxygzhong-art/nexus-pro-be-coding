@@ -4,7 +4,7 @@ import (
 	"encoding/base64"
 	"testing"
 
-	platformsecret "nexus-pro-be/internal/platform/secret"
+	platformsecret "nexus-pro-api/internal/platform/secret"
 )
 
 // TestAESGCMCipherRoundTripAndContextBinding verifies encryption randomness and associated-data isolation.

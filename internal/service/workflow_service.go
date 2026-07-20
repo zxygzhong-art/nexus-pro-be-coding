@@ -5,12 +5,12 @@ import (
 	"sort"
 	"strings"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 const (
-	workflowFormStatusDraft     = "draft"
+	WorkflowFormStatusDraft     = "draft"
 	workflowFormStatusSubmitted = "submitted"
 	workflowFormStatusInReview  = "in_review"
 	workflowFormStatusApproved  = "approved"
@@ -45,7 +45,7 @@ func (c *Service) Workflow() WorkflowService {
 
 // ListFormTemplates 列出表單範本的服務流程。
 func (c WorkflowService) ListFormTemplates(ctx RequestContext) ([]FormTemplate, error) {
-	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceType("form_template"), ActionRead, ""); err != nil {
+	if _, _, err := c.RequireWorkflowAuthz(ctx, ResourceType("form_template"), ActionRead, ""); err != nil {
 		return nil, err
 	}
 	return c.store.ListFormTemplates(goContext(ctx), ctx.TenantID)
@@ -67,7 +67,7 @@ func (c WorkflowService) GetRuntimeFormTemplate(ctx RequestContext, templateKey,
 	if templateKey == "" {
 		return domain.RuntimeFormTemplate{}, BadRequest("template key is required")
 	}
-	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, ""); err != nil {
+	if _, _, err := c.RequireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, ""); err != nil {
 		return domain.RuntimeFormTemplate{}, err
 	}
 	template, ok, err := c.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, templateKey)
@@ -80,15 +80,15 @@ func (c WorkflowService) GetRuntimeFormTemplate(ctx RequestContext, templateKey,
 	if status := strings.TrimSpace(strings.ToLower(template.Status)); status != "" && status != "published" {
 		return domain.RuntimeFormTemplate{}, BadRequest("form template is not published")
 	}
-	if err := validateWorkflowTemplateSubmittable(template); err != nil {
+	if err := ValidateWorkflowTemplateSubmittable(template); err != nil {
 		return domain.RuntimeFormTemplate{}, err
 	}
 	version, err := c.formTemplateVersionByID(ctx, template, versionID)
 	if err != nil {
 		return domain.RuntimeFormTemplate{}, err
 	}
-	versionedTemplate := formTemplateAtVersion(template, version)
-	if err := validateWorkflowTemplateSubmittable(versionedTemplate); err != nil {
+	versionedTemplate := FormTemplateAtVersion(template, version)
+	if err := ValidateWorkflowTemplateSubmittable(versionedTemplate); err != nil {
 		return domain.RuntimeFormTemplate{}, err
 	}
 	fields := platformTemplateFields(template.Key, versionedTemplate.Schema)
@@ -111,7 +111,7 @@ func (c WorkflowService) GetRuntimeFormTemplate(ctx RequestContext, templateKey,
 
 // CreateFormTemplate 建立表單範本的服務流程。
 func (c WorkflowService) CreateFormTemplate(ctx RequestContext, input CreateFormTemplateInput) (FormTemplate, error) {
-	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceType("form_template"), ActionCreate, ""); err != nil {
+	if _, _, err := c.RequireWorkflowAuthz(ctx, ResourceType("form_template"), ActionCreate, ""); err != nil {
 		return FormTemplate{}, err
 	}
 	if strings.TrimSpace(input.Key) == "" || strings.TrimSpace(input.Name) == "" {
@@ -147,7 +147,7 @@ func (c WorkflowService) CreateFormTemplate(ctx RequestContext, input CreateForm
 
 // ListFormInstancePage 列出表單實例分頁的服務流程。
 func (c WorkflowService) ListFormInstancePage(ctx RequestContext, query FormInstanceQuery, page PageRequest) (PageResponse[FormInstance], error) {
-	account, decision, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
+	account, decision, err := c.RequireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
 	if err != nil {
 		return PageResponse[FormInstance]{}, err
 	}
@@ -172,7 +172,7 @@ func (c WorkflowService) GetFormInstanceDetail(ctx RequestContext, id string) (F
 	if id == "" {
 		return FormInstanceDetail{}, BadRequest("id is required")
 	}
-	account, decision, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
+	account, decision, err := c.RequireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
 	if err != nil {
 		return FormInstanceDetail{}, err
 	}
@@ -244,7 +244,7 @@ func (c WorkflowService) ReviewQueue(ctx RequestContext) (WorkflowReviewQueueRes
 		Notified:        []WorkflowReviewItem{},
 	}
 	for _, item := range items {
-		if strings.EqualFold(item.Status, workflowFormStatusDraft) {
+		if strings.EqualFold(item.Status, WorkflowFormStatusDraft) {
 			continue
 		}
 		projected, err := c.reviewItem(ctx, item, templates[item.TemplateID], accounts[item.ApplicantAccountID], employees[item.ApplicantAccountID])
@@ -274,7 +274,7 @@ func (c WorkflowService) ReviewQueue(ctx RequestContext) (WorkflowReviewQueueRes
 // SaveFormDraft 儲存表單草稿的服務流程。
 func (c WorkflowService) SaveFormDraft(ctx RequestContext, input SaveFormDraftInput) (FormInstance, error) {
 	templateKey := strings.TrimSpace(input.TemplateKey)
-	account, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionSubmit, "")
+	account, _, err := c.RequireWorkflowAuthz(ctx, ResourceFormInstance, ActionSubmit, "")
 	if err != nil {
 		return FormInstance{}, err
 	}
@@ -288,14 +288,14 @@ func (c WorkflowService) SaveFormDraft(ctx RequestContext, input SaveFormDraftIn
 	if !ok {
 		return FormInstance{}, NotFound("form template", templateKey)
 	}
-	if err := validateWorkflowTemplateSubmittable(template); err != nil {
+	if err := ValidateWorkflowTemplateSubmittable(template); err != nil {
 		return FormInstance{}, err
 	}
 	version, err := c.currentFormTemplateVersionForNewInstance(ctx, template, input.TemplateVersionID)
 	if err != nil {
 		return FormInstance{}, err
 	}
-	template = formTemplateAtVersion(template, version)
+	template = FormTemplateAtVersion(template, version)
 	now := c.Now()
 	instance := FormInstance{
 		ID:                 utils.NewID("fi"),
@@ -303,7 +303,7 @@ func (c WorkflowService) SaveFormDraft(ctx RequestContext, input SaveFormDraftIn
 		TemplateID:         template.ID,
 		TemplateVersionID:  version.ID,
 		ApplicantAccountID: account.ID,
-		Status:             workflowFormStatusDraft,
+		Status:             WorkflowFormStatusDraft,
 		Payload:            workflowPayload(input.Payload),
 		SubmittedAt:        now,
 		UpdatedAt:          now,
@@ -354,7 +354,7 @@ func (c WorkflowService) UpdateFormDraft(ctx RequestContext, id string, input Up
 			return err
 		}
 		status := normalizeWorkflowStatus(next.Status)
-		if status != workflowFormStatusDraft && status != workflowFormStatusReturned {
+		if status != WorkflowFormStatusDraft && status != workflowFormStatusReturned {
 			return BadRequest("only draft or returned form instances can be updated")
 		}
 		if templateKey := strings.TrimSpace(input.TemplateKey); templateKey != "" {
@@ -379,11 +379,11 @@ func (c WorkflowService) UpdateFormDraft(ctx RequestContext, id string, input Up
 		if !ok {
 			return NotFound("form template", next.TemplateID)
 		}
-		version, err := tx.formTemplateVersionForInstance(ctx, template, next)
+		version, err := tx.FormTemplateVersionForInstance(ctx, template, next)
 		if err != nil {
 			return err
 		}
-		template = formTemplateAtVersion(template, version)
+		template = FormTemplateAtVersion(template, version)
 		next.Payload = workflowPayload(input.Payload)
 		next.UpdatedAt = tx.Now()
 		if err := tx.store.UpsertFormInstance(goContext(ctx), next); err != nil {
@@ -434,7 +434,7 @@ func (c WorkflowService) DeleteFormDraft(ctx RequestContext, id string) (FormIns
 		if err := requireFormInstanceVisible(current, account, decision); err != nil {
 			return err
 		}
-		if !strings.EqualFold(current.Status, workflowFormStatusDraft) {
+		if !strings.EqualFold(current.Status, WorkflowFormStatusDraft) {
 			return BadRequest("only draft form instances can be deleted")
 		}
 		if err := tx.store.DeleteFormInstance(goContext(ctx), ctx.TenantID, id); err != nil {
@@ -482,7 +482,7 @@ func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (
 
 // submitNewForm 提交 new 表單的服務流程。
 func (c WorkflowService) submitNewForm(ctx RequestContext, templateKey, templateVersionID string, payload map[string]any) (FormInstance, error) {
-	account, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionSubmit, "")
+	account, _, err := c.RequireWorkflowAuthz(ctx, ResourceFormInstance, ActionSubmit, "")
 	if err != nil {
 		return FormInstance{}, err
 	}
@@ -503,7 +503,7 @@ func (c WorkflowService) submitNewFormForApplicant(ctx RequestContext, account A
 		if !ok {
 			return NotFound("form template", templateKey)
 		}
-		if err := validateWorkflowTemplateSubmittable(nextTemplate); err != nil {
+		if err := ValidateWorkflowTemplateSubmittable(nextTemplate); err != nil {
 			return err
 		}
 		if err := tx.Service.Attendance().preflightWorkflowAttendanceSubmission(ctx, account, nextTemplate.Key); err != nil {
@@ -513,7 +513,7 @@ func (c WorkflowService) submitNewFormForApplicant(ctx RequestContext, account A
 		if err != nil {
 			return err
 		}
-		nextTemplate = formTemplateAtVersion(nextTemplate, version)
+		nextTemplate = FormTemplateAtVersion(nextTemplate, version)
 		normalizedPayload, err := tx.validateFormSubmissionPayload(ctx, nextTemplate, payload)
 		if err != nil {
 			return err
@@ -525,7 +525,7 @@ func (c WorkflowService) submitNewFormForApplicant(ctx RequestContext, account A
 			TemplateID:         nextTemplate.ID,
 			TemplateVersionID:  version.ID,
 			ApplicantAccountID: account.ID,
-			Status:             workflowFormStatusDraft,
+			Status:             WorkflowFormStatusDraft,
 			Payload:            normalizedPayload,
 			SubmittedAt:        now,
 			UpdatedAt:          now,
@@ -620,7 +620,7 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 			return err
 		}
 		status := normalizeWorkflowStatus(next.Status)
-		if status != workflowFormStatusDraft && status != workflowFormStatusReturned {
+		if status != WorkflowFormStatusDraft && status != workflowFormStatusReturned {
 			if status == workflowFormStatusInReview || status == workflowFormStatusSubmitted {
 				return Conflict("form instance has already been submitted").WithReasonCode("workflow_form_already_submitted")
 			}
@@ -633,12 +633,12 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 		if !ok {
 			return NotFound("form template", next.TemplateID)
 		}
-		version, err := tx.formTemplateVersionForInstance(ctx, nextTemplate, next)
+		version, err := tx.FormTemplateVersionForInstance(ctx, nextTemplate, next)
 		if err != nil {
 			return err
 		}
-		template = formTemplateAtVersion(nextTemplate, version)
-		if err := validateWorkflowTemplateSubmittable(template); err != nil {
+		template = FormTemplateAtVersion(nextTemplate, version)
+		if err := ValidateWorkflowTemplateSubmittable(template); err != nil {
 			return err
 		}
 		if err := tx.Service.Attendance().preflightWorkflowAttendanceSubmission(ctx, account, template.Key); err != nil {
@@ -669,7 +669,7 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 		}
 		if err := tx.audit(ctx, "workflow.form.submit", string(ResourceFormInstance), started.ID, string(SeverityMedium), map[string]any{
 			"template_id": next.TemplateID,
-			"from_draft":  status == workflowFormStatusDraft,
+			"from_draft":  status == WorkflowFormStatusDraft,
 			"resubmit":    status == workflowFormStatusReturned,
 		}); err != nil {
 			return err
@@ -800,11 +800,11 @@ func (c WorkflowService) DuplicateForm(ctx RequestContext, id string) (FormInsta
 	if id == "" {
 		return FormInstance{}, BadRequest("id is required")
 	}
-	reader, readDecision, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
+	reader, readDecision, err := c.RequireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
 	if err != nil {
 		return FormInstance{}, err
 	}
-	if _, _, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionSubmit, ""); err != nil {
+	if _, _, err := c.RequireWorkflowAuthz(ctx, ResourceFormInstance, ActionSubmit, ""); err != nil {
 		return FormInstance{}, err
 	}
 	current, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, id)
@@ -824,11 +824,11 @@ func (c WorkflowService) DuplicateForm(ctx RequestContext, id string) (FormInsta
 	if !ok {
 		return FormInstance{}, NotFound("form template", current.TemplateID)
 	}
-	version, err := c.formTemplateVersionForInstance(ctx, template, current)
+	version, err := c.FormTemplateVersionForInstance(ctx, template, current)
 	if err != nil {
 		return FormInstance{}, err
 	}
-	template = formTemplateAtVersion(template, version)
+	template = FormTemplateAtVersion(template, version)
 	now := c.Now()
 	next := FormInstance{
 		ID:                 utils.NewID("fi"),
@@ -836,7 +836,7 @@ func (c WorkflowService) DuplicateForm(ctx RequestContext, id string) (FormInsta
 		TemplateID:         current.TemplateID,
 		TemplateVersionID:  version.ID,
 		ApplicantAccountID: reader.ID,
-		Status:             workflowFormStatusDraft,
+		Status:             WorkflowFormStatusDraft,
 		Payload:            workflowPayloadForNewInstance(template, current.Payload),
 		SubmittedAt:        now,
 		UpdatedAt:          now,
@@ -860,7 +860,7 @@ func (c WorkflowService) ExportForm(ctx RequestContext, id string) (ExportedForm
 	if id == "" {
 		return ExportedFormFile{}, BadRequest("id is required")
 	}
-	account, decision, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
+	account, decision, err := c.RequireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
 	if err != nil {
 		return ExportedFormFile{}, err
 	}
@@ -960,7 +960,7 @@ func normalizeBulkReviewAction(action string) (string, string, error) {
 
 // listFormInstances 列出表單實例的服務流程。
 func (c WorkflowService) listFormInstances(ctx RequestContext, query FormInstanceQuery) ([]FormInstance, Account, error) {
-	account, decision, err := c.requireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
+	account, decision, err := c.RequireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, "")
 	if err != nil {
 		return nil, Account{}, err
 	}
@@ -1005,7 +1005,7 @@ func normalizeFormInstanceStatusFilter(status string) (string, error) {
 	case "", "all":
 		return "", nil
 	case "draft", "drafts":
-		return workflowFormStatusDraft, nil
+		return WorkflowFormStatusDraft, nil
 	case "pending", "pending_review", "pending-review", "submitted", "in_review", "in-review":
 		return workflowFormStatusInReview, nil
 	case "approved":
@@ -1084,11 +1084,11 @@ func (c WorkflowService) employeeByAccountMap(ctx RequestContext) (map[string]Em
 
 // reviewItem 使用實例綁定的不可變模板版本建立審核契約。
 func (c WorkflowService) reviewItem(ctx RequestContext, item FormInstance, template FormTemplate, account Account, employee Employee) (WorkflowReviewItem, error) {
-	version, err := c.formTemplateVersionForInstance(ctx, template, item)
+	version, err := c.FormTemplateVersionForInstance(ctx, template, item)
 	if err != nil {
 		return WorkflowReviewItem{}, err
 	}
-	versionedTemplate := formTemplateAtVersion(template, version)
+	versionedTemplate := FormTemplateAtVersion(template, version)
 	status := normalizeWorkflowStatus(item.Status)
 	title := utils.FirstNonEmpty(template.Name, template.Key, item.TemplateID, "審批申請")
 	return WorkflowReviewItem{

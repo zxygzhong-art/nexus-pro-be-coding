@@ -8,9 +8,9 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository"
+	"nexus-pro-api/internal/utils"
 )
 
 const (
@@ -607,7 +607,7 @@ func trustPolicyUserGroupIDs(policy map[string]any) []string {
 
 // defaultAgentToolIDs derives provisioning tuples from the runtime catalog to prevent authorization drift.
 func defaultAgentToolIDs() []string {
-	items := agentToolCatalog()
+	items := domain.AgentToolCatalog()
 	ids := make([]string, 0, len(items))
 	for _, item := range items {
 		if id := strings.TrimSpace(item.Value); id != "" {

@@ -1,11 +1,11 @@
-package service
+package agent
 
 import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 const (
@@ -60,7 +60,7 @@ func (c AgentService) GetSession(ctx RequestContext, id string) (domain.AgentSes
 	if err != nil {
 		return domain.AgentSession{}, err
 	}
-	return c.currentAgentSession(ctx, account.ID, id)
+	return c.CurrentAgentSession(ctx, account.ID, id)
 }
 
 // UpdateSession 更新 agent 會話。
@@ -139,7 +139,7 @@ func (c AgentService) DeleteSession(ctx RequestContext, id string) (domain.Agent
 	if err != nil {
 		return domain.AgentSession{}, err
 	}
-	session, err := c.currentAgentSession(ctx, account.ID, id)
+	session, err := c.CurrentAgentSession(ctx, account.ID, id)
 	if err != nil {
 		return domain.AgentSession{}, err
 	}
@@ -159,7 +159,7 @@ func (c AgentService) ListSessionMessages(ctx RequestContext, sessionID string) 
 	if err != nil {
 		return nil, err
 	}
-	session, err := c.currentAgentSession(ctx, account.ID, sessionID)
+	session, err := c.CurrentAgentSession(ctx, account.ID, sessionID)
 	if err != nil {
 		return nil, err
 	}
@@ -178,7 +178,7 @@ func (c AgentService) ListSessionMessages(ctx RequestContext, sessionID string) 
 	for index := range messages {
 		messages[index].Attachments = byMessage[messages[index].ID]
 	}
-	confirmations, err := c.pendingAgentConfirmationMessages(ctx, account.ID, session)
+	confirmations, err := c.PendingAgentConfirmationMessages(ctx, account.ID, session)
 	if err != nil {
 		return nil, err
 	}
@@ -198,7 +198,7 @@ func (c AgentService) ListMemories(ctx RequestContext, query domain.ListAgentMem
 	}
 	out := make([]domain.AgentMemory, 0, len(items))
 	for _, item := range items {
-		if item.Key != agentConfirmationMemoryKey {
+		if item.Key != AgentConfirmationMemoryKey {
 			out = append(out, item)
 		}
 	}
@@ -290,21 +290,6 @@ func (c AgentService) DeleteMemory(ctx RequestContext, id string) (domain.AgentM
 	return deleted, nil
 }
 
-func (c AgentService) currentAgentSession(ctx RequestContext, accountID, id string) (domain.AgentSession, error) {
-	id = strings.TrimSpace(id)
-	if id == "" {
-		return domain.AgentSession{}, BadRequest("id is required")
-	}
-	session, ok, err := c.store.GetAgentSession(goContext(ctx), ctx.TenantID, id)
-	if err != nil {
-		return domain.AgentSession{}, err
-	}
-	if !ok || session.AccountID != accountID {
-		return domain.AgentSession{}, NotFound("agent session", id)
-	}
-	return session, nil
-}
-
 // lockCurrentAgentSession serializes writes that must preserve the current context partition.
 func (c AgentService) lockCurrentAgentSession(ctx RequestContext, accountID, id string) (domain.AgentSession, error) {
 	id = strings.TrimSpace(id)
@@ -352,7 +337,7 @@ func (c AgentService) normalizeAgentMemory(ctx RequestContext, memory domain.Age
 		memory.Importance = 1
 	}
 	if memory.SessionID != "" {
-		session, err := c.currentAgentSession(ctx, memory.AccountID, memory.SessionID)
+		session, err := c.CurrentAgentSession(ctx, memory.AccountID, memory.SessionID)
 		if err != nil {
 			return domain.AgentMemory{}, err
 		}

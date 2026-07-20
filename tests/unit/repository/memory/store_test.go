@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository"
-	"nexus-pro-be/internal/repository/memory"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository"
+	"nexus-pro-api/internal/repository/memory"
 )
 
 // TestNextEmployeeNoIncrementsAcrossCalls 驗證 next 員工 no increments across calls。

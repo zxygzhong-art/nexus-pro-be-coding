@@ -1,9 +1,9 @@
-package service
+package agent
 
 import (
 	"strings"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 const (

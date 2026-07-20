@@ -3,7 +3,7 @@ package repository
 import (
 	"context"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // AuthzEventStore 定義授權事件儲存層的行為契約。

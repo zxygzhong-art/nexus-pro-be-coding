@@ -4,7 +4,7 @@ import (
 	"net/http"
 	"strings"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // requestContext 處理請求 context。

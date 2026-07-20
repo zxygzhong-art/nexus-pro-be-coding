@@ -7,8 +7,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/platform/llm"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/platform/llm"
 )
 
 // TestLiteLLMAdminSyncModelCreatesThenUpdates 驗證 stable ID 的 info/upsert 路徑與 payload。

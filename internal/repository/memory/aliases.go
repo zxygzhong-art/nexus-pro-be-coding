@@ -1,6 +1,6 @@
 package memory
 
-import "nexus-pro-be/internal/domain"
+import "nexus-pro-api/internal/domain"
 
 // Domain 說明儲存層資料契約。
 type (

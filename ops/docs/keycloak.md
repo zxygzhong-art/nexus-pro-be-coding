@@ -1,8 +1,8 @@
 # Keycloak 配置指南
 
-本指南說明如何在 Nexus Pro 項目中部署、配置 Keycloak，並將其與前端（`nexus-pro-fe`）和後端（`nexus-pro-be`）對接。
+本指南說明如何在 Nexus Pro 項目中部署、配置 Keycloak，並將其與前端（`nexus-pro-fe`）和後端（`nexus-pro-api`）對接。
 
-所有基礎設施相關的可調項統一在 [`ops/.env`](../.env)。應用層環境變量分別寫在 `nexus-pro-be/.env` 與 `nexus-pro-fe/.env.local`。
+所有基礎設施相關的可調項統一在 [`ops/.env`](../.env)。應用層環境變量分別寫在 `nexus-pro-api/.env` 與 `nexus-pro-fe/.env.local`。
 
 ## 架構概覽
 
@@ -15,7 +15,7 @@
        │ proxy.ts 注入 Authorization: Bearer           │ Admin API
        ▼                                               │ (可選)
 ┌─────────────┐                                        ▼
-│ nexus-pro-be│◀────────────────────────────── 用戶開通 / 邀請
+│ nexus-pro-api│◀────────────────────────────── 用戶開通 / 邀請
 │   (Go API)  │  校驗 JWT（iss / aud / tenant_id / sub）
 └─────────────┘
 ```
@@ -33,7 +33,7 @@
 ### 完整觀測棧（含 PostgreSQL）
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 ./render-configs.sh
 docker compose --env-file .env up -d
 ```
@@ -43,7 +43,7 @@ docker compose --env-file .env up -d
 PostgreSQL 已就緒時：
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 COMPOSE_PROFILES=keycloak docker compose --env-file .env up -d --no-deps keycloak
 ```
 
@@ -217,7 +217,7 @@ Admin client 使用 `client_credentials` grant 獲取 token（見 `internal/plat
 加載後端環境變量，然後用 `client_credentials` 獲取 token：
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api
 set -a
 source ./.env
 set +a
@@ -411,7 +411,7 @@ Token 存儲：
 - `_rt`：refresh token（httpOnly，path `/api/auth`）
 - `_session`：會話標記，供 `proxy.ts` 判斷登錄態
 
-### 9.2 後端（`nexus-pro-be/.env`）
+### 9.2 後端（`nexus-pro-api/.env`）
 
 **基礎 OIDC 校驗（必填，生產環境啓動時強制）：**
 
@@ -453,7 +453,7 @@ pnpm dev
 ### 10.2 後端 API
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api
 # 確保 KEYCLOAK_BASE_URL / KEYCLOAK_CLIENT_ID 已設置
 go run ./cmd/api
 ```
@@ -524,7 +524,7 @@ tools/api-smoke/full_api_smoke.py
 
 ### Issuer 端口不一致
 
-`ops/.env` 默認映射 `8080`，而 `nexus-pro-be/.env.example` 示例爲 `18080`。兩者不矛盾——選你實際對外暴露的地址即可，前後端必須使用同一個 issuer。
+`ops/.env` 默認映射 `8080`，而 `nexus-pro-api/.env.example` 示例爲 `18080`。兩者不矛盾——選你實際對外暴露的地址即可，前後端必須使用同一個 issuer。
 
 ## 相關文件
 
@@ -532,8 +532,8 @@ tools/api-smoke/full_api_smoke.py
 | --- | --- |
 | [`ops/.env`](../.env) | Keycloak 容器部署參數 |
 | [`ops/compose.yaml`](../compose.yaml) | Keycloak compose 服務定義 |
-| [`nexus-pro-be/.env.example`](../../.env.example) | 後端 Keycloak 環境變量 |
+| [`nexus-pro-api/.env.example`](../../.env.example) | 後端 Keycloak 環境變量 |
 | [`nexus-pro-fe/.env.example`](../../../nexus-pro-fe/.env.example) | 前端 Keycloak 環境變量 |
 | [`nexus-pro-fe/app/api/auth/_keycloak.ts`](../../../nexus-pro-fe/app/api/auth/_keycloak.ts) | 前端 BFF Keycloak 集成 |
-| [`nexus-pro-be/internal/platform/auth/token.go`](../../internal/platform/auth/token.go) | 後端 JWT 校驗 |
-| [`nexus-pro-be/internal/platform/auth/keycloak_admin.go`](../../internal/platform/auth/keycloak_admin.go) | 後端 Admin API 用戶開通 |
+| [`nexus-pro-api/internal/platform/auth/token.go`](../../internal/platform/auth/token.go) | 後端 JWT 校驗 |
+| [`nexus-pro-api/internal/platform/auth/keycloak_admin.go`](../../internal/platform/auth/keycloak_admin.go) | 後端 Admin API 用戶開通 |

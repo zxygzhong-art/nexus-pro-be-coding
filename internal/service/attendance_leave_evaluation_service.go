@@ -4,14 +4,14 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 const (
 	leaveEvaluationEligible            = "eligible"
 	leaveEvaluationEligibleNoBalance   = "eligible_without_balance"
-	leaveEvaluationUnsupported         = "unsupported_leave_type"
+	LeaveEvaluationUnsupported         = "unsupported_leave_type"
 	leaveEvaluationBalanceMissing      = "balance_not_initialized"
 	leaveEvaluationBalanceInsufficient = "insufficient_balance"
 )
@@ -33,7 +33,7 @@ func (c AttendanceService) EvaluateLeaveRequest(ctx RequestContext, input Evalua
 	if !endAt.After(startAt) {
 		return LeaveRequestEvaluation{}, BadRequest("end_at must be after start_at")
 	}
-	return c.evaluateLeaveRequestRules(ctx, employeeID, input.LeaveType, startAt, endAt, input.Hours)
+	return c.EvaluateLeaveRequestRules(ctx, employeeID, input.LeaveType, startAt, endAt, input.Hours)
 }
 
 // authorizeLeaveRequestEmployee preserves employee data-scope checks for dry-run and create paths.
@@ -76,8 +76,8 @@ func (c AttendanceService) authorizeLeaveRequestEmployee(ctx RequestContext, req
 	return account, employeeID, nil
 }
 
-// evaluateLeaveRequestRules freezes the effective rule and reports balance readiness without mutating state.
-func (c AttendanceService) evaluateLeaveRequestRules(ctx RequestContext, employeeID, leaveTypeRaw string, startAt, endAt time.Time, requestedHours float64) (LeaveRequestEvaluation, error) {
+// EvaluateLeaveRequestRules freezes the effective rule and reports balance readiness without mutating state.
+func (c AttendanceService) EvaluateLeaveRequestRules(ctx RequestContext, employeeID, leaveTypeRaw string, startAt, endAt time.Time, requestedHours float64) (LeaveRequestEvaluation, error) {
 	policy, err := c.loadAttendancePolicyResponse(ctx)
 	if err != nil {
 		return LeaveRequestEvaluation{}, err
@@ -93,7 +93,7 @@ func (c AttendanceService) evaluateLeaveRequestRules(ctx RequestContext, employe
 	leaveType, supported := findLeaveTypeInPolicy(policy, leaveTypeCode)
 	rule := leaveRuleSnapshot(policy.Version, leaveType)
 	evaluation := LeaveRequestEvaluation{
-		Eligible: false, Status: leaveEvaluationUnsupported,
+		Eligible: false, Status: LeaveEvaluationUnsupported,
 		Message:    "The requested leave type is not active in the current attendance policy.",
 		EmployeeID: employeeID, LeaveTypeID: domain.StableLeaveTypeID(leaveTypeCode),
 		LeaveType: leaveTypeCode, Hours: hours, PolicyVersion: policy.Version, Rule: rule,
@@ -199,7 +199,7 @@ func leaveEvaluationSnapshotMap(evaluation LeaveRequestEvaluation) map[string]an
 // leaveEvaluationError preserves the existing create API error contract for failed dry-run decisions.
 func leaveEvaluationError(evaluation LeaveRequestEvaluation) error {
 	switch evaluation.Status {
-	case leaveEvaluationUnsupported:
+	case LeaveEvaluationUnsupported:
 		return BadRequest("unknown leave type")
 	case leaveEvaluationBalanceMissing:
 		return BadRequest("leave balance is required for this leave type")

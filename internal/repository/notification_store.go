@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // NotificationStore 持久化系統通知與各帳號的已讀狀態。

@@ -2,8 +2,8 @@ package service
 
 import (
 	"fmt"
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 	"strings"
 )
 
@@ -137,19 +137,19 @@ func (c *Service) scopeConditions(ctx RequestContext, account Account, scope Sco
 		return out, nil
 	case ScopeSystem:
 		if ctx.AssumedRoleSessionID == "" {
-			return nil, forbiddenDataScope("system data scope requires an assumed role session")
+			return nil, ForbiddenDataScope("system data scope requires an assumed role session")
 		}
 		return out, nil
 	case ScopeSelf, ScopeOwn:
 		if _, ok := out["employee_ids"]; !ok {
 			if account.EmployeeID == "" {
-				return nil, forbiddenDataScope("account is not linked to an employee for own scope")
+				return nil, ForbiddenDataScope("account is not linked to an employee for own scope")
 			}
 			out["employee_ids"] = []string{account.EmployeeID}
 		}
 	case ScopeDepartment:
 		if _, ok := out["org_unit_ids"]; !ok && account.EmployeeID == "" {
-			return nil, forbiddenDataScope("account is not linked to an employee for department scope")
+			return nil, ForbiddenDataScope("account is not linked to an employee for department scope")
 		}
 		if _, ok := out["org_unit_ids"]; !ok && account.EmployeeID != "" {
 			employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, account.EmployeeID)
@@ -165,7 +165,7 @@ func (c *Service) scopeConditions(ctx RequestContext, account Account, scope Sco
 		}
 	case ScopeDepartmentSubtree:
 		if _, ok := out["org_unit_ids"]; !ok && account.EmployeeID == "" {
-			return nil, forbiddenDataScope("account is not linked to an employee for department_subtree scope")
+			return nil, ForbiddenDataScope("account is not linked to an employee for department_subtree scope")
 		}
 		if _, ok := out["org_unit_ids"]; !ok && account.EmployeeID != "" {
 			employee, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, account.EmployeeID)
@@ -199,11 +199,11 @@ func (c *Service) scopeConditions(ctx RequestContext, account Account, scope Sco
 		}
 	case ScopeAssignedOrgUnits:
 		if len(stringSliceFromAny(out["org_unit_ids"])) == 0 {
-			return nil, forbiddenDataScope("assigned_org_units scope requires org_unit_ids")
+			return nil, ForbiddenDataScope("assigned_org_units scope requires org_unit_ids")
 		}
 	case ScopeCustomCondition:
 		if !hasEffectiveCustomScopeFilter(out) {
-			return nil, forbiddenDataScope("custom_condition has no supported effective filter")
+			return nil, ForbiddenDataScope("custom_condition has no supported effective filter")
 		}
 		out["scope"] = ScopeCustomCondition
 	default:

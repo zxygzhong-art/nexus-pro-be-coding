@@ -5,11 +5,11 @@ import (
 	"fmt"
 	"strings"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
-// toolFormGetCapabilities 只讀取表單創作能力，不返回租戶業務記錄。
-func (c AgentService) toolFormGetCapabilities(ctx domain.RequestContext, _ map[string]any) (map[string]any, error) {
+// ToolFormGetCapabilities 只讀取表單創作能力，不返回租戶業務記錄。
+func (c *Service) ToolFormGetCapabilities(ctx domain.RequestContext, _ map[string]any) (map[string]any, error) {
 	capabilities, err := c.Workflow().FormBuilderCapabilities(ctx)
 	if err != nil {
 		return nil, err
@@ -17,8 +17,8 @@ func (c AgentService) toolFormGetCapabilities(ctx domain.RequestContext, _ map[s
 	return map[string]any{"capabilities": capabilities}, nil
 }
 
-// toolFormGetDataSourceSchema 返回 metadata-only 數據源 schema，避免 Agent 讀取整租戶記錄。
-func (c AgentService) toolFormGetDataSourceSchema(ctx domain.RequestContext, _ map[string]any) (map[string]any, error) {
+// ToolFormGetDataSourceSchema 返回 metadata-only 數據源 schema，避免 Agent 讀取整租戶記錄。
+func (c *Service) ToolFormGetDataSourceSchema(ctx domain.RequestContext, _ map[string]any) (map[string]any, error) {
 	capabilities, err := c.Workflow().FormBuilderCapabilities(ctx)
 	if err != nil {
 		return nil, err
@@ -26,8 +26,8 @@ func (c AgentService) toolFormGetDataSourceSchema(ctx domain.RequestContext, _ m
 	return map[string]any{"data_sources": capabilities.DataSources}, nil
 }
 
-// toolFormCreateDraft 把自然語言產出的結構化 schema 保存為受控草稿，不提供發佈能力。
-func (c AgentService) toolFormCreateDraft(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
+// ToolFormCreateDraft 把自然語言產出的結構化 schema 保存為受控草稿，不提供發佈能力。
+func (c *Service) ToolFormCreateDraft(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
 	schema, err := formDefinitionSchemaArg(args)
 	if err != nil {
 		return nil, err
@@ -41,8 +41,8 @@ func (c AgentService) toolFormCreateDraft(ctx domain.RequestContext, args map[st
 	return map[string]any{"draft": draft, "next_step": "call form.validate_draft, then ask the employee to submit the draft for review"}, nil
 }
 
-// toolFormUpdateDraft 更新 Agent 自己創建的定義草稿並要求 revision。
-func (c AgentService) toolFormUpdateDraft(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
+// ToolFormUpdateDraft 更新 Agent 自己創建的定義草稿並要求 revision。
+func (c *Service) ToolFormUpdateDraft(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
 	id := strings.TrimSpace(stringFromAny(args["draft_id"]))
 	if id == "" {
 		return nil, BadRequest("draft_id is required")
@@ -62,8 +62,8 @@ func (c AgentService) toolFormUpdateDraft(ctx domain.RequestContext, args map[st
 	return map[string]any{"draft": draft, "next_step": "call form.validate_draft before asking for review"}, nil
 }
 
-// toolFormValidateDraft 返回結構化錯誤與編譯結果，不修改發佈狀態。
-func (c AgentService) toolFormValidateDraft(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
+// ToolFormValidateDraft 返回結構化錯誤與編譯結果，不修改發佈狀態。
+func (c *Service) ToolFormValidateDraft(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
 	id := strings.TrimSpace(stringFromAny(args["draft_id"]))
 	if id == "" {
 		return nil, BadRequest("draft_id is required")
@@ -75,8 +75,8 @@ func (c AgentService) toolFormValidateDraft(ctx domain.RequestContext, args map[
 	return map[string]any{"draft": preview.Draft, "validation": preview.Validation, "compiled_schema": preview.CompiledSchema}, nil
 }
 
-// toolFormPreviewDraft 提供前端可複用的預覽數據。
-func (c AgentService) toolFormPreviewDraft(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
+// ToolFormPreviewDraft 提供前端可複用的預覽數據。
+func (c *Service) ToolFormPreviewDraft(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
 	id := strings.TrimSpace(stringFromAny(args["draft_id"]))
 	if id == "" {
 		return nil, BadRequest("draft_id is required")
@@ -88,8 +88,8 @@ func (c AgentService) toolFormPreviewDraft(ctx domain.RequestContext, args map[s
 	return map[string]any{"preview": preview}, nil
 }
 
-// toolFormSimulateWorkflow 返回審批路徑模擬，不啟動真實 Temporal/workflow run。
-func (c AgentService) toolFormSimulateWorkflow(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
+// ToolFormSimulateWorkflow 返回審批路徑模擬，不啟動真實 Temporal/workflow run。
+func (c *Service) ToolFormSimulateWorkflow(ctx domain.RequestContext, args map[string]any) (map[string]any, error) {
 	id := strings.TrimSpace(stringFromAny(args["draft_id"]))
 	if id == "" {
 		return nil, BadRequest("draft_id is required")

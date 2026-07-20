@@ -3,8 +3,8 @@ package utils_test
 import (
 	"testing"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils/jsoncodec"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils/jsoncodec"
 )
 
 // TestJSONCodecMapEDecodesOrReturnsError 驗證 MapE 成功解碼並在失敗時回傳明確錯誤。

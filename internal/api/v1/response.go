@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 type validatedInput interface {

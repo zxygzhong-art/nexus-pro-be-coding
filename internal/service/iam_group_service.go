@@ -4,7 +4,7 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/utils"
 )
 
 // ListUserGroups returns groups with membership rows as the authoritative current member source.

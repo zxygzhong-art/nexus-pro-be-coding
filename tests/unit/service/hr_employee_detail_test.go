@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // TestEmployeeDetailReturnsUnmaskedValuesWhileListRemainsMasked 驗證列表脫敏但詳情回傳授權後原值。

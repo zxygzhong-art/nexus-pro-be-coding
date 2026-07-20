@@ -1,7 +1,7 @@
 package service
 
 import (
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/utils"
 	"strings"
 )
 
@@ -526,7 +526,7 @@ func (c HRService) DeleteEmployee(ctx RequestContext, id string) (Employee, erro
 			return err
 		}
 		if len(visible) == 0 {
-			return forbiddenDataScope("employee is outside data scope")
+			return ForbiddenDataScope("employee is outside data scope")
 		}
 		before := next
 		previousStatus = employeeStatus(before)
@@ -625,7 +625,7 @@ func (c HRService) UpdateEmployeeStatus(ctx RequestContext, id, status string) (
 			return err
 		}
 		if len(visible) == 0 {
-			return forbiddenDataScope("employee is outside data scope")
+			return ForbiddenDataScope("employee is outside data scope")
 		}
 		before := next
 		previousStatus = employeeStatus(before)
@@ -747,7 +747,7 @@ func (c HRService) GetEmployee(ctx RequestContext, id string) (Employee, error) 
 		return Employee{}, err
 	}
 	if len(visible) == 0 {
-		return Employee{}, forbiddenDataScope("employee is outside data scope")
+		return Employee{}, ForbiddenDataScope("employee is outside data scope")
 	}
 	if err := c.auditSensitiveEmployeeRead(ctx, decision, visible, visible[0].ID); err != nil {
 		return Employee{}, err
@@ -867,7 +867,7 @@ func (c HRService) UpdateEmployee(ctx RequestContext, id string, input UpdateEmp
 			return err
 		}
 		if len(visible) == 0 {
-			return forbiddenDataScope("employee is outside data scope")
+			return ForbiddenDataScope("employee is outside data scope")
 		}
 		if fields := forbiddenEmployeePatchFields(input, decision.FieldPolicies); len(fields) > 0 {
 			return domainValidation("employee field policy denied update", fields...)

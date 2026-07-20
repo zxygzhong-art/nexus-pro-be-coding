@@ -6,9 +6,10 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 func TestAssumableRoleTrustPolicyEmitsOpenFGATupleDiff(t *testing.T) {
@@ -122,7 +123,7 @@ func TestAgentToolOpenFGACanRunGate(t *testing.T) {
 	deniedStore := memory.NewStore()
 	seedAgentToolFGAFixture(t, deniedStore, now, true)
 	denyChecker := &mappedRelationshipChecker{allowed: map[string]bool{}}
-	if _, err := service.New(deniedStore, service.Options{Relationships: denyChecker, OpenFGAScopeChecks: true}).Agent().CreateRun(ctx, domain.CreateAgentRunInput{Prompt: "search"}); err == nil {
+	if _, err := agentservice.New(service.New(deniedStore, service.Options{Relationships: denyChecker, OpenFGAScopeChecks: true})).CreateRun(ctx, domain.CreateAgentRunInput{Prompt: "search"}); err == nil {
 		t.Fatal("expected agent_tool can_run denial")
 	}
 	if !relationshipCheckSeen(denyChecker.checks, "can_run", "agent_tool:knowledge.search") {
@@ -132,14 +133,14 @@ func TestAgentToolOpenFGACanRunGate(t *testing.T) {
 	errorStore := memory.NewStore()
 	seedAgentToolFGAFixture(t, errorStore, now, true)
 	errorChecker := &mappedRelationshipChecker{allowed: map[string]bool{}, err: errors.New("model not ready")}
-	if _, err := service.New(errorStore, service.Options{Relationships: errorChecker, OpenFGAScopeChecks: true}).Agent().CreateRun(ctx, domain.CreateAgentRunInput{Prompt: "search"}); err == nil {
+	if _, err := agentservice.New(service.New(errorStore, service.Options{Relationships: errorChecker, OpenFGAScopeChecks: true})).CreateRun(ctx, domain.CreateAgentRunInput{Prompt: "search"}); err == nil {
 		t.Fatal("expected OpenFGA can_run error to fail closed")
 	}
 
 	allowedStore := memory.NewStore()
 	seedAgentToolFGAFixture(t, allowedStore, now, true)
 	allowedChecker := &mappedRelationshipChecker{allowed: map[string]bool{canRunKey: true}}
-	run, err := service.New(allowedStore, service.Options{Relationships: allowedChecker, OpenFGAScopeChecks: true}).Agent().CreateRun(ctx, domain.CreateAgentRunInput{Prompt: "search"})
+	run, err := agentservice.New(service.New(allowedStore, service.Options{Relationships: allowedChecker, OpenFGAScopeChecks: true})).CreateRun(ctx, domain.CreateAgentRunInput{Prompt: "search"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -150,7 +151,7 @@ func TestAgentToolOpenFGACanRunGate(t *testing.T) {
 	disabledStore := memory.NewStore()
 	seedAgentToolFGAFixture(t, disabledStore, now, false)
 	disabledChecker := &mappedRelationshipChecker{allowed: map[string]bool{}}
-	if _, err := service.New(disabledStore, service.Options{Relationships: disabledChecker, OpenFGAScopeChecks: false}).Agent().CreateRun(ctx, domain.CreateAgentRunInput{Prompt: "search"}); err != nil {
+	if _, err := agentservice.New(service.New(disabledStore, service.Options{Relationships: disabledChecker, OpenFGAScopeChecks: false})).CreateRun(ctx, domain.CreateAgentRunInput{Prompt: "search"}); err != nil {
 		t.Fatalf("expected switch-off behavior to ignore OpenFGA, got %v", err)
 	}
 	if len(disabledChecker.checks) != 0 {

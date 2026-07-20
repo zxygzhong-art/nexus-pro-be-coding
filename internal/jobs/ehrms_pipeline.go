@@ -7,8 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository"
 )
 
 // EHRMSPipelineOptions 定義 eHRMS 有序同步 pipeline 選項。

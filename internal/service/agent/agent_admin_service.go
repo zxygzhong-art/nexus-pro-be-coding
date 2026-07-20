@@ -1,4 +1,4 @@
-package service
+package agent
 
 import (
 	"context"
@@ -9,8 +9,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 // ListModels 列出工作區模型設定。
@@ -198,7 +198,7 @@ func (c AgentService) SyncModel(ctx RequestContext, id string) (domain.AgentMode
 	if err != nil {
 		return domain.AgentModel{}, err
 	}
-	if c.liteLLMAdmin == nil {
+	if c.LiteLLMAdmin() == nil {
 		message := "LiteLLM admin client is not configured"
 		updated, updateErr := c.updateAgentModelSyncResult(ctx, account, model, domain.AgentModelSyncStatusFailed, message, false)
 		if updateErr != nil {
@@ -208,9 +208,9 @@ func (c AgentService) SyncModel(ctx RequestContext, id string) (domain.AgentMode
 	}
 	var message string
 	if model.Status == domain.AgentModelStatusDisabled {
-		message, err = c.liteLLMAdmin.DeleteModel(goContext(ctx), model.ID)
+		message, err = c.LiteLLMAdmin().DeleteModel(goContext(ctx), model.ID)
 	} else {
-		message, err = c.liteLLMAdmin.SyncModel(goContext(ctx), model)
+		message, err = c.LiteLLMAdmin().SyncModel(goContext(ctx), model)
 	}
 	if err != nil {
 		updated, updateErr := c.updateAgentModelSyncResult(ctx, account, model, domain.AgentModelSyncStatusFailed, err.Error(), false)
@@ -237,8 +237,8 @@ func (c AgentService) TestModel(ctx RequestContext, id string) (domain.AgentMode
 	if model.Status == domain.AgentModelStatusDisabled {
 		status = "failed"
 		message = "model is disabled"
-	} else if c.liteLLMAdmin != nil {
-		if result, testErr := c.liteLLMAdmin.TestModel(goContext(ctx), model); testErr != nil {
+	} else if c.LiteLLMAdmin() != nil {
+		if result, testErr := c.LiteLLMAdmin().TestModel(goContext(ctx), model); testErr != nil {
 			status = "failed"
 			message = testErr.Error()
 		} else {
@@ -600,7 +600,7 @@ func (c AgentService) Trial(ctx RequestContext, id string, input domain.AgentTri
 
 // trialReply 優先使用已注入的 AgentChatRuntime，並只回報 runtime 實際成功呼叫的工具。
 func (c AgentService) trialReply(ctx RequestContext, agent domain.AgentDefinition, model domain.AgentModel, message string) (string, []string, []string, error) {
-	if c.agentChatRuntime == nil {
+	if c.AgentChatRuntime() == nil {
 		return fmt.Sprintf("[%s] mock reply using %s: %s", agent.Name, model.ModelName, message), []string{}, []string{agent.Name}, nil
 	}
 	var answer strings.Builder
@@ -661,7 +661,7 @@ func (c AgentService) trialReply(ctx RequestContext, agent domain.AgentDefinitio
 		Tools:          c.filteredReadonlyAgentTools(ctx, agent.Tools, true, emit, agent.KnowledgeBaseIDs),
 		SubAgents:      runtimeSubAgents,
 	}
-	if err := c.agentChatRuntime.RunAgentChat(baseCtx, req, emit); err != nil {
+	if err := c.AgentChatRuntime().RunAgentChat(baseCtx, req, emit); err != nil {
 		return "", []string{}, agentsUsed, err
 	}
 	reply := strings.TrimSpace(answer.String())
@@ -724,7 +724,7 @@ func (c AgentService) Tools(ctx RequestContext) ([]domain.AgentToolMeta, error) 
 	if _, _, err := c.requireAgentAuthz(ctx, ResourceTool, ActionRead, ""); err != nil {
 		return nil, err
 	}
-	return agentToolCatalog(), nil
+	return domain.AgentToolCatalog(), nil
 }
 
 // ListExternalTools returns external tool registrations owned by the current tenant.
@@ -775,10 +775,10 @@ func (c AgentService) CreateExternalTool(ctx RequestContext, input domain.Create
 	id := utils.NewID("atool")
 	credentialCiphertext := ""
 	if auth.secret != "" {
-		if c.credentialCipher == nil {
+		if c.CredentialCipher() == nil {
 			return domain.AgentExternalTool{}, domain.E(503, "service_unavailable", "external tool credential storage is not configured")
 		}
-		credentialCiphertext, err = c.credentialCipher.Encrypt([]byte(auth.secret), externalToolCredentialAAD(ctx.TenantID, id))
+		credentialCiphertext, err = c.CredentialCipher().Encrypt([]byte(auth.secret), externalToolCredentialAAD(ctx.TenantID, id))
 		if err != nil {
 			return domain.AgentExternalTool{}, domain.E(500, "internal_error", "failed to protect external tool credential")
 		}
@@ -957,35 +957,6 @@ func normalizeExternalToolEndpoint(value string) (string, error) {
 	return parsed.String(), nil
 }
 
-func agentToolCatalog() []domain.AgentToolMeta {
-	return []domain.AgentToolMeta{
-		{Value: "knowledge.search", Label: "Knowledge Search", Description: "Search tenant knowledge content.", Readonly: true, RequiredPermission: "agent.tool.call:knowledge.search"},
-		{Value: "get_my_profile", Label: "My Profile", Description: "Read current account profile.", Readonly: true, RequiredPermission: "agent.tool.call:get_my_profile"},
-		{Value: "list_employees", Label: "List Employees", Description: "Read employee summaries.", Readonly: true, RequiredPermission: "agent.tool.call:list_employees"},
-		{Value: "get_employee", Label: "Get Employee", Description: "Read one employee summary.", Readonly: true, RequiredPermission: "agent.tool.call:get_employee"},
-		{Value: "my_leave_balances", Label: "My Leave Balances", Description: "Read current account leave balances.", Readonly: true, RequiredPermission: "agent.tool.call:my_leave_balances"},
-		{Value: "check_leave_eligibility", Label: "Check Leave Eligibility", Description: "Check leave policy and choose balance reservation or the non-blocking no-balance fallback.", Readonly: true, RequiredPermission: "agent.tool.call:check_leave_eligibility"},
-		{Value: "my_clock_records", Label: "My Clock Records", Description: "Read current account clock records.", Readonly: true, RequiredPermission: "agent.tool.call:my_clock_records"},
-		{Value: "my_attendance_summary", Label: "My Attendance Summary", Description: "Read the current employee's monthly attendance summary.", Readonly: true, RequiredPermission: "agent.tool.call:my_attendance_summary"},
-		{Value: "my_form_history", Label: "My Form History", Description: "Read the current account's own form application history.", Readonly: true, RequiredPermission: "agent.tool.call:my_form_history"},
-		{Value: "my_pending_reviews", Label: "My Pending Reviews", Description: "Read pending workflow reviews.", Readonly: true, RequiredPermission: "agent.tool.call:my_pending_reviews"},
-		{Value: "workspace_insights", Label: "Workspace Insights", Description: "Read workspace insight reports.", Readonly: true, RequiredPermission: "agent.tool.call:workspace_insights"},
-		{Value: "list_published_form_templates", Label: "Published Forms", Description: "List published forms available to the current account.", Readonly: true, RequiredPermission: "agent.tool.call:list_published_form_templates"},
-		{Value: "get_published_form_template", Label: "Form Schema", Description: "Read an Agent-safe form schema and data sources.", Readonly: true, RequiredPermission: "agent.tool.call:get_published_form_template"},
-		{Value: "create_form_draft", Label: "Create Form Draft", Description: "Create a reversible form draft for the current account.", Readonly: false, RequiredPermission: "agent.tool.call:create_form_draft"},
-		{Value: "update_form_draft", Label: "Update Form Draft", Description: "Update a reversible form draft owned by the current account.", Readonly: false, RequiredPermission: "agent.tool.call:update_form_draft"},
-		{Value: "preview_form_submission", Label: "Preview Form Submission", Description: "Validate a draft and prepare explicit user confirmation.", Readonly: true, RequiredPermission: "agent.tool.call:preview_form_submission"},
-		{Value: "prepare_bulk_review", Label: "Prepare Bulk Review", Description: "Prepare a fixed review batch for explicit user confirmation.", Readonly: true, RequiredPermission: "agent.tool.call:prepare_bulk_review"},
-		{Value: "form.get_capabilities", Label: "Form Builder Capabilities", Description: "Read controlled form schema, widgets, data-source metadata, and workflow roles.", Readonly: true, RequiredPermission: "agent.tool.call:form.get_capabilities"},
-		{Value: "form.get_data_source_schema", Label: "Form Data Source Schema", Description: "Read metadata-only data-source fields for form authoring.", Readonly: true, RequiredPermission: "agent.tool.call:form.get_data_source_schema"},
-		{Value: "form.create_draft", Label: "Create Form Definition Draft", Description: "Create a reversible Agent-authored form definition draft.", Readonly: false, RequiredPermission: "agent.tool.call:form.create_draft"},
-		{Value: "form.update_draft", Label: "Update Form Definition Draft", Description: "Update an Agent-authored form definition draft with revision protection.", Readonly: false, RequiredPermission: "agent.tool.call:form.update_draft"},
-		{Value: "form.validate_draft", Label: "Validate Form Definition Draft", Description: "Validate and compile a controlled form definition draft.", Readonly: true, RequiredPermission: "agent.tool.call:form.validate_draft"},
-		{Value: "form.preview_draft", Label: "Preview Form Definition Draft", Description: "Preview a controlled form definition draft.", Readonly: true, RequiredPermission: "agent.tool.call:form.preview_draft"},
-		{Value: "form.simulate_workflow", Label: "Simulate Form Workflow", Description: "Simulate the form approval path without starting a real workflow.", Readonly: true, RequiredPermission: "agent.tool.call:form.simulate_workflow"},
-	}
-}
-
 func (c AgentService) currentAgentModel(ctx RequestContext, id string) (domain.AgentModel, error) {
 	id = strings.TrimSpace(id)
 	if id == "" {
@@ -999,10 +970,10 @@ func (c AgentService) currentAgentModel(ctx RequestContext, id string) (domain.A
 		return domain.AgentModel{}, NotFound("agent model", id)
 	}
 	if strings.TrimSpace(model.APIKeyCiphertext) != "" {
-		if c.credentialCipher == nil {
+		if c.CredentialCipher() == nil {
 			return domain.AgentModel{}, domain.E(503, "service_unavailable", "agent model credential storage is not configured")
 		}
-		plaintext, err := c.credentialCipher.Decrypt(model.APIKeyCiphertext, domain.AgentModelCredentialAAD(model.TenantID, model.ID))
+		plaintext, err := c.CredentialCipher().Decrypt(model.APIKeyCiphertext, domain.AgentModelCredentialAAD(model.TenantID, model.ID))
 		if err != nil {
 			return domain.AgentModel{}, domain.E(500, "internal_error", "failed to open agent model credential")
 		}
@@ -1016,10 +987,10 @@ func (c AgentService) protectAgentModelCredential(model domain.AgentModel) (doma
 	if strings.TrimSpace(model.APIKey) == "" {
 		return domain.AgentModel{}, BadRequest("api_key is required")
 	}
-	if c.credentialCipher == nil {
+	if c.CredentialCipher() == nil {
 		return domain.AgentModel{}, domain.E(503, "service_unavailable", "agent model credential storage is not configured")
 	}
-	ciphertext, err := c.credentialCipher.Encrypt([]byte(model.APIKey), domain.AgentModelCredentialAAD(model.TenantID, model.ID))
+	ciphertext, err := c.CredentialCipher().Encrypt([]byte(model.APIKey), domain.AgentModelCredentialAAD(model.TenantID, model.ID))
 	if err != nil {
 		return domain.AgentModel{}, domain.E(500, "internal_error", "failed to protect agent model credential")
 	}
@@ -1167,7 +1138,7 @@ func (c AgentService) normalizeAgentDefinition(ctx RequestContext, agent domain.
 		return domain.AgentDefinition{}, err
 	}
 	agent.SuggestedQuestionTranslations = translations
-	agent.SuggestedQuestions = localizedSuggestedQuestions(
+	agent.SuggestedQuestions = domain.LocalizedSuggestedQuestions(
 		agent.SuggestedQuestionTranslations,
 		domain.DefaultPreferredLocale,
 		nil,
@@ -1350,30 +1321,6 @@ func localizedQuestionsFromLegacy(values []string) []domain.LocalizedAgentSugges
 }
 
 // localizedSuggestedQuestions resolves the account locale with deterministic per-question fallback.
-func localizedSuggestedQuestions(
-	items []domain.LocalizedAgentSuggestedQuestion,
-	locale string,
-	fallback []string,
-) []string {
-	locale = domain.PreferredLocaleWithDefault(locale)
-	result := make([]string, 0, len(items))
-	for _, item := range items {
-		value := strings.TrimSpace(item.Translations[locale])
-		if value == "" {
-			value = strings.TrimSpace(item.Translations[domain.DefaultPreferredLocale])
-		}
-		if value == "" {
-			value = strings.TrimSpace(item.Translations[domain.PreferredLocaleENUS])
-		}
-		if value != "" {
-			result = append(result, value)
-		}
-	}
-	if len(result) == 0 {
-		return uniqueStrings(fallback)
-	}
-	return result
-}
 
 // validateKnowledgeBaseReferences 保證 Agent 只能綁定目前租戶存在的知識庫。
 func (c AgentService) validateKnowledgeBaseReferences(ctx RequestContext, ids []string) error {
@@ -1402,7 +1349,7 @@ func (c AgentService) validateAgentVisibilityTargets(ctx RequestContext, agent *
 	for _, targetID := range agent.VisibilityTargets {
 		switch agent.Visibility {
 		case domain.AgentVisibilityDepartment:
-			_, ok, err := c.Service.store.GetOrgUnit(goContext(ctx), ctx.TenantID, targetID)
+			_, ok, err := c.Service.Store().GetOrgUnit(goContext(ctx), ctx.TenantID, targetID)
 			if err != nil {
 				return err
 			}
@@ -1410,7 +1357,7 @@ func (c AgentService) validateAgentVisibilityTargets(ctx RequestContext, agent *
 				return BadRequest("visibility target org unit does not exist: " + targetID)
 			}
 		case domain.AgentVisibilityRole:
-			_, ok, err := c.Service.store.GetAssumableRole(goContext(ctx), ctx.TenantID, targetID)
+			_, ok, err := c.Service.Store().GetAssumableRole(goContext(ctx), ctx.TenantID, targetID)
 			if err != nil {
 				return err
 			}
@@ -1436,7 +1383,7 @@ func validateAgentTools(tools []string) error {
 		return nil
 	}
 	catalog := map[string]struct{}{}
-	for _, tool := range agentToolCatalog() {
+	for _, tool := range domain.AgentToolCatalog() {
 		catalog[tool.Value] = struct{}{}
 	}
 	for _, tool := range tools {
@@ -1507,5 +1454,5 @@ func (c AgentService) recordAgentAdminAudit(ctx RequestContext, account Account,
 	if raw, err := json.Marshal(payload); err == nil {
 		payload["raw"] = string(raw)
 	}
-	return c.audit(ctx, "ai.agent."+entityType+"."+action, "agent_"+entityType, entityID, "high", payload)
+	return c.RecordAudit(ctx, "ai.agent."+entityType+"."+action, "agent_"+entityType, entityID, "high", payload)
 }

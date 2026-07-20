@@ -17,7 +17,7 @@
 ## Start SFTPGo
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 ./render-configs.sh
 COMPOSE_PROFILES=sftpgo docker compose --env-file .env up -d sftpgo
 ```
@@ -37,7 +37,7 @@ Pass: nexus-service
 後端不會自動加載 `.env`。本地啓動 API 前需要手動 source `ops/.env`：
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api
 set -a
 source ops/.env
 set +a
@@ -70,7 +70,7 @@ SFTPGO_BASE_URL=https://sftpgo.example.com
 ## Verify
 
 ```bash
-cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-be/ops
+cd /Users/kuzhiluoya/Desktop/ai-coding/nexus-pro-api/ops
 docker compose --env-file .env exec sftpgo sftpgo ping
 curl -u nexus-service:nexus-service http://127.0.0.1:28080/api/v2/user/token
 ```

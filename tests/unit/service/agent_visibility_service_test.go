@@ -5,9 +5,10 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 // TestPlatformAssistantsDoNotFallbackToStaticCatalog 驗證未發布 Agent 時不洩漏靜態假清單。
@@ -112,23 +113,23 @@ func TestPlatformAssistantsUsePublishedConversationExperience(t *testing.T) {
 	seedAgentAdminAccount(t, store, now)
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
-	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
+	model, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{
 		Name: "Model", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
+	agent, err := agentservice.New(svc).CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
 		Name: "Leave Agent", ModelID: model.ID, WelcomeMessage: "Published welcome", SuggestedQuestions: []string{"Published question"},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = svc.Agent().PublishDefinition(ctx, agent.ID); err != nil {
+	if _, err = agentservice.New(svc).PublishDefinition(ctx, agent.ID); err != nil {
 		t.Fatal(err)
 	}
 	draftWelcome := "Draft welcome"
-	if _, err = svc.Agent().UpdateDefinition(ctx, agent.ID, domain.UpdateAgentDefinitionInput{
+	if _, err = agentservice.New(svc).UpdateDefinition(ctx, agent.ID, domain.UpdateAgentDefinitionInput{
 		WelcomeMessage: &draftWelcome, SuggestedQuestions: []string{"Draft question"},
 	}); err != nil {
 		t.Fatal(err)
@@ -142,7 +143,7 @@ func TestPlatformAssistantsUsePublishedConversationExperience(t *testing.T) {
 		t.Fatalf("expected deployed conversation experience, got %+v", response.Data)
 	}
 
-	if _, err = svc.Agent().PublishDefinition(ctx, agent.ID); err != nil {
+	if _, err = agentservice.New(svc).PublishDefinition(ctx, agent.ID); err != nil {
 		t.Fatal(err)
 	}
 	response, err = svc.Platform().ListAssistants(ctx, domain.PlatformAssistantsQuery{})
@@ -169,13 +170,13 @@ func TestPlatformAssistantsLocalizePublishedSuggestions(t *testing.T) {
 	}
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
-	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
+	model, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{
 		Name: "Model", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
+	agent, err := agentservice.New(svc).CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
 		Name:    "Leave Agent",
 		ModelID: model.ID,
 		SuggestedQuestionTranslations: []domain.LocalizedAgentSuggestedQuestion{
@@ -194,7 +195,7 @@ func TestPlatformAssistantsLocalizePublishedSuggestions(t *testing.T) {
 	if len(agent.SuggestedQuestions) != 2 || agent.SuggestedQuestions[0] != "幫我請特休" {
 		t.Fatalf("expected zh-TW compatibility projection, got %+v", agent.SuggestedQuestions)
 	}
-	if _, err = svc.Agent().PublishDefinition(ctx, agent.ID); err != nil {
+	if _, err = agentservice.New(svc).PublishDefinition(ctx, agent.ID); err != nil {
 		t.Fatal(err)
 	}
 
@@ -248,10 +249,10 @@ func TestPublishedAssistantsEnforceDepartmentVisibility(t *testing.T) {
 	if len(response.Data) != 1 || response.Data[0].ID != "agent-visible" || !response.Data[0].Runnable {
 		t.Fatalf("expected only the runnable department assistant, got %+v", response.Data)
 	}
-	if _, err := svc.Agent().Chat(ctx, domain.AgentChatInput{AgentID: "agent-hidden", Message: "hello"}, nil); err == nil {
+	if _, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{AgentID: "agent-hidden", Message: "hello"}, nil); err == nil {
 		t.Fatal("expected direct chat with a hidden agent to fail")
 	}
-	if _, err := svc.Agent().CreateSession(ctx, domain.CreateAgentSessionInput{AgentID: "agent-hidden", Title: "hidden"}); err == nil {
+	if _, err := agentservice.New(svc).CreateSession(ctx, domain.CreateAgentSessionInput{AgentID: "agent-hidden", Title: "hidden"}); err == nil {
 		t.Fatal("expected creating a session for a hidden agent to fail")
 	}
 }
@@ -262,14 +263,14 @@ func TestAgentDefinitionScopedVisibilityRequiresExistingTargets(t *testing.T) {
 	seedAgentAdminAccount(t, store, now)
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
-	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Model", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test"})
+	model, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{Name: "Model", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{Name: "No target", ModelID: model.ID, Visibility: string(domain.AgentVisibilityDepartment)}); err == nil {
+	if _, err := agentservice.New(svc).CreateDefinition(ctx, domain.CreateAgentDefinitionInput{Name: "No target", ModelID: model.ID, Visibility: string(domain.AgentVisibilityDepartment)}); err == nil {
 		t.Fatal("expected scoped visibility without targets to fail")
 	}
-	if _, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{Name: "Missing target", ModelID: model.ID, Visibility: string(domain.AgentVisibilityDepartment), VisibilityTargets: []string{"ou-missing"}}); err == nil {
+	if _, err := agentservice.New(svc).CreateDefinition(ctx, domain.CreateAgentDefinitionInput{Name: "Missing target", ModelID: model.ID, Visibility: string(domain.AgentVisibilityDepartment), VisibilityTargets: []string{"ou-missing"}}); err == nil {
 		t.Fatal("expected a nonexistent visibility target to fail")
 	}
 }

@@ -1,6 +1,6 @@
 package service
 
-import "nexus-pro-be/internal/repository"
+import "nexus-pro-api/internal/repository"
 
 type meStore interface {
 	repository.AccountStore
@@ -47,12 +47,6 @@ type workflowStore interface {
 	repository.NotificationStore
 }
 
-type agentStore interface {
-	repository.AgentStore
-	repository.KnowledgeStore
-	repository.OutboxStore
-}
-
 type auditStore interface {
 	repository.AuditStore
 }
@@ -89,12 +83,5 @@ func (c AttendanceService) withTransaction(ctx RequestContext, fn func(Attendanc
 func (c WorkflowService) withTransaction(ctx RequestContext, fn func(WorkflowService) error) error {
 	return c.Service.withTenantTransaction(ctx, func(tx *Service) error {
 		return fn(tx.Workflow())
-	})
-}
-
-// withTransaction 讓 Agent 寫入與其管理稽覈在同一租戶交易中完成。
-func (c AgentService) withTransaction(ctx RequestContext, fn func(AgentService) error) error {
-	return c.Service.withTenantTransaction(ctx, func(tx *Service) error {
-		return fn(tx.Agent())
 	})
 }

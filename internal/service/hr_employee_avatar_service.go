@@ -6,8 +6,8 @@ import (
 	"reflect"
 	"strings"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 func (c HRService) PreviewCreateEmployee(ctx RequestContext, input CreateEmployeeInput) (EmployeePreviewResponse, error) {
@@ -64,7 +64,7 @@ func (c HRService) PreviewUpdateEmployee(ctx RequestContext, id string, input Up
 		return EmployeePreviewResponse{}, err
 	}
 	if len(visible) == 0 {
-		return EmployeePreviewResponse{}, forbiddenDataScope("employee is outside data scope")
+		return EmployeePreviewResponse{}, ForbiddenDataScope("employee is outside data scope")
 	}
 	if fields := forbiddenEmployeePatchFields(input, decision.FieldPolicies); len(fields) > 0 {
 		return EmployeePreviewResponse{}, domainValidation("employee field policy denied update", fields...)
@@ -120,7 +120,7 @@ func (c HRService) UpdateEmployeeAvatar(ctx RequestContext, id string, input Emp
 			return err
 		}
 		if len(visible) == 0 {
-			return forbiddenDataScope("employee is outside data scope")
+			return ForbiddenDataScope("employee is outside data scope")
 		}
 		oldKey = stringFromMap(next.BasicInfo, "avatar_object_key")
 		newKey = employeeAvatarObjectKey(ctx.TenantID, next.ID, input.Filename, input.ContentType)
@@ -189,7 +189,7 @@ func (c HRService) DeleteEmployeeAvatar(ctx RequestContext, id string) (Employee
 			return err
 		}
 		if len(visible) == 0 {
-			return forbiddenDataScope("employee is outside data scope")
+			return ForbiddenDataScope("employee is outside data scope")
 		}
 		oldKey = stringFromMap(next.BasicInfo, "avatar_object_key")
 		next.BasicInfo = utils.CopyStringMap(next.BasicInfo)
@@ -369,7 +369,7 @@ func employeeAvatarObjectKey(tenantID, employeeID, filename, contentType string)
 
 // deleteObjectIfSupported 刪除物件 if supported 的服務流程。
 func (c HRService) deleteObjectIfSupported(ctx RequestContext, key string) {
-	deleter, ok := c.objectStore.(objectDeleter)
+	deleter, ok := c.objectStore.(ObjectDeleter)
 	if !ok {
 		return
 	}

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/platform/openfga"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/platform/openfga"
 )
 
 type roundTripFunc func(*http.Request) (*http.Response, error)

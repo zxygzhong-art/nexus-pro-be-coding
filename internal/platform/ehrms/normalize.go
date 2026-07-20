@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 var employeeFieldAliases = map[string]string{

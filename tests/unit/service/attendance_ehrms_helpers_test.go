@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/service"
 )
 
 func TestNormalizeEHRMSAttendanceSinceDefaultsToOneMonthWindow(t *testing.T) {

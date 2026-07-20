@@ -3,8 +3,8 @@ package memory
 import (
 	"encoding/json"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 // copyKnowledgeDocumentChunk copies the embedding to keep memory transactions isolated.

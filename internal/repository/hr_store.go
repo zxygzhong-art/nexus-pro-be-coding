@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // OrgStore 定義組織儲存層的行為契約。

@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"nexus-pro-be/internal/platform/ehrms"
+	"nexus-pro-api/internal/platform/ehrms"
 )
 
 // TestListAttendanceFetchesAndNormalizesEnglishFields 驗證 attendance endpoint and field normalization。

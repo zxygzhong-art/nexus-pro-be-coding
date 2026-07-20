@@ -7,7 +7,7 @@ import (
 	swaggerFiles "github.com/swaggo/files"
 	ginSwagger "github.com/swaggo/gin-swagger"
 
-	apidocs "nexus-pro-be/docs"
+	apidocs "nexus-pro-api/docs"
 )
 
 // SwaggerCtrl 定義 swagger ctrl 的資料結構。

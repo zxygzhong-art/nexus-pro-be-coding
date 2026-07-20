@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"nexus-pro-be/internal/platform/objectstore"
+	"nexus-pro-api/internal/platform/objectstore"
 )
 
 // TestSFTPGoPathForKeyRejectsEscapingKeys protects the remote root boundary.

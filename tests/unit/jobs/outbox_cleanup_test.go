@@ -7,9 +7,9 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/jobs"
-	"nexus-pro-be/internal/repository/memory"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/jobs"
+	"nexus-pro-api/internal/repository/memory"
 )
 
 // TestOutboxCleanerDeletesOnlyExpiredSucceededEvents 驗證清理 job 只刪除過期的已成功事件。

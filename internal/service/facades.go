@@ -3,7 +3,7 @@ package service
 import (
 	"context"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // IdentityFacade 定義身分 facade 的行為契約。
@@ -302,7 +302,6 @@ var (
 	_ PlatformFacade     = PlatformService{}
 	_ WorkspaceFacade    = WorkspaceService{}
 	_ WorkflowFacade     = WorkflowService{}
-	_ AgentFacade        = AgentService{}
 	_ NotificationFacade = NotificationService{}
 	_ AuditFacade        = AuditService{}
 )

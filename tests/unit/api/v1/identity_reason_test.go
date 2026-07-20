@@ -5,10 +5,10 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	v1api "nexus-pro-be/internal/api/v1"
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	v1api "nexus-pro-api/internal/api/v1"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
 )
 
 // TestUnlinkedExternalIdentityEnvelopeIncludesStableReasonCode protects the frontend auth-boundary contract.

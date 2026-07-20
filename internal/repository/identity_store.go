@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"nexus-pro-be/internal/domain"
+	"nexus-pro-api/internal/domain"
 )
 
 // IdentityStore 定義身分儲存層的行為契約。

@@ -3,8 +3,8 @@ package ehrms_test
 import (
 	"testing"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/platform/ehrms"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/platform/ehrms"
 )
 
 func TestNormalizeEmployeeRecordsMapsEnglishAliases(t *testing.T) {

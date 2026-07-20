@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"nexus-pro-be/internal/platform/objectstore"
+	"nexus-pro-api/internal/platform/objectstore"
 )
 
 // TestLocalPutObjectWritesInsideRoot 驗證本機 put 物件 writes inside root。

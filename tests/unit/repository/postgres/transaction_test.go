@@ -3,14 +3,14 @@ package postgres_test
 import (
 	"context"
 	"errors"
-	"nexus-pro-be/internal/config"
+	"nexus-pro-api/internal/config"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"nexus-pro-be/internal/repository"
-	postgresrepo "nexus-pro-be/internal/repository/postgres"
+	"nexus-pro-api/internal/repository"
+	postgresrepo "nexus-pro-api/internal/repository/postgres"
 )
 
 // TestWithTenantTransactionReleasesConnectionOnSuccessErrorAndPanic 驗證租戶 transaction releases connection on success 錯誤 and panic。

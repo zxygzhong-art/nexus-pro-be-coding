@@ -7,7 +7,7 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/utils"
 )
 
 func (c HRService) ExportEmployeesCSV(ctx RequestContext, query EmployeeQuery) ([]byte, string, error) {
@@ -191,7 +191,7 @@ func (c HRService) deleteEmployeeWithDecision(ctx RequestContext, account Accoun
 			return err
 		}
 		if len(visible) == 0 {
-			return forbiddenDataScope("employee is outside data scope")
+			return ForbiddenDataScope("employee is outside data scope")
 		}
 		before := next
 		next.Status = string(EmployeeStatusDeleted)
@@ -271,7 +271,7 @@ func (c HRService) InviteEmployee(ctx RequestContext, id string, input InviteEmp
 			return err
 		}
 		if len(visible) == 0 {
-			return forbiddenDataScope("employee is outside data scope")
+			return ForbiddenDataScope("employee is outside data scope")
 		}
 		switch employeeStatus(next) {
 		case string(EmployeeStatusDeleted), string(EmployeeStatusResigned):
@@ -398,7 +398,7 @@ func (c HRService) TransitionEmployeeStatus(ctx RequestContext, id string, input
 			return err
 		}
 		if len(visible) == 0 {
-			return forbiddenDataScope("employee is outside data scope")
+			return ForbiddenDataScope("employee is outside data scope")
 		}
 		var transitionStart *time.Time
 		switch status {

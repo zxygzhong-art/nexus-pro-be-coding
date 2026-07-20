@@ -4,8 +4,8 @@ import (
 	"context"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository"
 )
 
 type (

@@ -5,7 +5,7 @@ import (
 	"strings"
 	"time"
 
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/utils"
 )
 
 // AttendanceClockStatus returns punch state together with the authoritative worksite policy.

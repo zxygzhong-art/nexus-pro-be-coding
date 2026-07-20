@@ -10,10 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	platformsecret "nexus-pro-be/internal/platform/secret"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	platformsecret "nexus-pro-api/internal/platform/secret"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
+	agentservice "nexus-pro-api/internal/service/agent"
 )
 
 func newTestCredentialCipher(t *testing.T) service.CredentialCipher {
@@ -32,7 +33,7 @@ func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
-	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
+	model, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{
 		Name:         "GPT 4.1",
 		Provider:     "openai",
 		ModelName:    "gpt-4.1",
@@ -46,7 +47,7 @@ func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 		t.Fatalf("unexpected model defaults: %+v", model)
 	}
 
-	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
+	agent, err := agentservice.New(svc).CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
 		Name:               "HR Helper",
 		Description:        "Answers HR questions",
 		ModelID:            model.ID,
@@ -64,7 +65,7 @@ func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 
 	updatedPrompt := "You are a careful HR helper."
 	updatedWelcome := "Welcome v2"
-	agent, err = svc.Agent().UpdateDefinition(ctx, agent.ID, domain.UpdateAgentDefinitionInput{
+	agent, err = agentservice.New(svc).UpdateDefinition(ctx, agent.ID, domain.UpdateAgentDefinitionInput{
 		SystemPrompt:       &updatedPrompt,
 		WelcomeMessage:     &updatedWelcome,
 		SuggestedQuestions: []string{"Question v2"},
@@ -76,14 +77,14 @@ func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 	if agent.Status != domain.AgentDefinitionStatusDraft || agent.Version != 2 {
 		t.Fatalf("expected draft version 2 after config update, got %+v", agent)
 	}
-	agent, err = svc.Agent().PublishDefinition(ctx, agent.ID)
+	agent, err = agentservice.New(svc).PublishDefinition(ctx, agent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if agent.Status != domain.AgentDefinitionStatusPublished || agent.Version != 2 {
 		t.Fatalf("expected published agent without version bump, got %+v", agent)
 	}
-	listed, err := svc.Agent().ListDefinitions(ctx)
+	listed, err := agentservice.New(svc).ListDefinitions(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +92,7 @@ func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 		t.Fatalf("expected list response to include stored version history, got %+v", listed)
 	}
 
-	trial, err := svc.Agent().Trial(ctx, agent.ID, domain.AgentTrialInput{Message: "How do I request leave?"})
+	trial, err := agentservice.New(svc).Trial(ctx, agent.ID, domain.AgentTrialInput{Message: "How do I request leave?"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,28 +110,28 @@ func TestAgentAdminCreatesPublishesTrialsAndRollsBackAgent(t *testing.T) {
 		t.Fatalf("expected usage updated after trial, got %+v", agent.Usage)
 	}
 
-	rolledBack, err := svc.Agent().RollbackDefinition(ctx, agent.ID, domain.RollbackAgentDefinitionInput{Version: 1})
+	rolledBack, err := agentservice.New(svc).RollbackDefinition(ctx, agent.ID, domain.RollbackAgentDefinitionInput{Version: 1})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if rolledBack.Version != 3 || rolledBack.SystemPrompt != "You are an HR helper." || rolledBack.WelcomeMessage != "Welcome v1" || len(rolledBack.SuggestedQuestions) != 1 || rolledBack.SuggestedQuestions[0] != "Question v1" {
 		t.Fatalf("expected rollback to create version 3 from v1, got %+v", rolledBack)
 	}
-	unpublished, err := svc.Agent().UnpublishDefinition(ctx, agent.ID)
+	unpublished, err := agentservice.New(svc).UnpublishDefinition(ctx, agent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if unpublished.Status != domain.AgentDefinitionStatusDraft || unpublished.Version != 3 {
 		t.Fatalf("expected unpublish to keep version and return draft, got %+v", unpublished)
 	}
-	deleted, err := svc.Agent().DeleteDefinition(ctx, agent.ID)
+	deleted, err := agentservice.New(svc).DeleteDefinition(ctx, agent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if deleted.ID != agent.ID {
 		t.Fatalf("expected unpublished agent to be deleted, got %+v", deleted)
 	}
-	if _, err := svc.Agent().DeleteModel(ctx, model.ID); err != nil {
+	if _, err := agentservice.New(svc).DeleteModel(ctx, model.ID); err != nil {
 		t.Fatalf("expected unused model to be deleted with its audit: %v", err)
 	}
 }
@@ -142,7 +143,7 @@ func TestAgentAdminSupportsTenLocalizedSuggestedQuestions(t *testing.T) {
 	seedAgentAdminAccount(t, store, now)
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
-	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
+	model, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{
 		Name: "Model", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test",
 	})
 	if err != nil {
@@ -155,7 +156,7 @@ func TestAgentAdminSupportsTenLocalizedSuggestedQuestions(t *testing.T) {
 			domain.PreferredLocaleENUS: fmt.Sprintf("Question %d", index+1),
 		}}
 	}
-	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
+	agent, err := agentservice.New(svc).CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
 		Name: "Localized Agent", ModelID: model.ID, SuggestedQuestionTranslations: questions,
 	})
 	if err != nil {
@@ -168,7 +169,7 @@ func TestAgentAdminSupportsTenLocalizedSuggestedQuestions(t *testing.T) {
 	tooMany := append(questions, domain.LocalizedAgentSuggestedQuestion{Translations: map[string]string{
 		domain.PreferredLocaleZHTW: "超出上限",
 	}})
-	if _, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
+	if _, err := agentservice.New(svc).CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
 		Name: "Too Many", ModelID: model.ID, SuggestedQuestionTranslations: tooMany,
 	}); err == nil || !strings.Contains(err.Error(), "at most 10") {
 		t.Fatalf("expected ten-item limit error, got %v", err)
@@ -203,7 +204,7 @@ func TestAgentAdminTrialReportsOnlyActuallyUsedTools(t *testing.T) {
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
-	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
+	model, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{
 		Name:         "GPT 4.1",
 		ModelName:    "gpt-4.1",
 		LiteLLMModel: "openai/gpt-4.1",
@@ -213,7 +214,7 @@ func TestAgentAdminTrialReportsOnlyActuallyUsedTools(t *testing.T) {
 		t.Fatal(err)
 	}
 	expectedModelAlias = domain.AgentModelLiteLLMAlias(model.ID)
-	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
+	agent, err := agentservice.New(svc).CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
 		Name:         "HR Helper",
 		ModelID:      model.ID,
 		SystemPrompt: "You are an HR helper.",
@@ -222,12 +223,12 @@ func TestAgentAdminTrialReportsOnlyActuallyUsedTools(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err = svc.Agent().PublishDefinition(ctx, agent.ID)
+	agent, err = agentservice.New(svc).PublishDefinition(ctx, agent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	trial, err := svc.Agent().Trial(ctx, agent.ID, domain.AgentTrialInput{Message: "Who am I?"})
+	trial, err := agentservice.New(svc).Trial(ctx, agent.ID, domain.AgentTrialInput{Message: "Who am I?"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -250,7 +251,7 @@ func TestAgentExternalToolRegistryLifecycle(t *testing.T) {
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: credentialCipher})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
-	created, err := svc.Agent().CreateExternalTool(ctx, domain.CreateAgentExternalToolInput{
+	created, err := agentservice.New(svc).CreateExternalTool(ctx, domain.CreateAgentExternalToolInput{
 		Name:           "Support MCP",
 		Description:    "Customer support knowledge service",
 		Kind:           "mcp",
@@ -284,7 +285,7 @@ func TestAgentExternalToolRegistryLifecycle(t *testing.T) {
 		t.Fatalf("credential leaked in external tool JSON: %s", encoded)
 	}
 
-	items, err := svc.Agent().ListExternalTools(ctx)
+	items, err := agentservice.New(svc).ListExternalTools(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -292,24 +293,24 @@ func TestAgentExternalToolRegistryLifecycle(t *testing.T) {
 		t.Fatalf("expected created external tool in list, got %+v", items)
 	}
 
-	deleted, err := svc.Agent().DeleteExternalTool(ctx, created.ID)
+	deleted, err := agentservice.New(svc).DeleteExternalTool(ctx, created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if deleted.ID != created.ID {
 		t.Fatalf("expected deleted external tool, got %+v", deleted)
 	}
-	items, err = svc.Agent().ListExternalTools(ctx)
+	items, err = agentservice.New(svc).ListExternalTools(ctx)
 	if err != nil || len(items) != 0 {
 		t.Fatalf("expected empty external tool registry after deletion, items=%+v err=%v", items, err)
 	}
 
-	if _, err := svc.Agent().CreateExternalTool(ctx, domain.CreateAgentExternalToolInput{
+	if _, err := agentservice.New(svc).CreateExternalTool(ctx, domain.CreateAgentExternalToolInput{
 		Name: "Unsafe", Kind: "http", EndpointURL: "https://user:secret@tools.example.com/api",
 	}); err == nil {
 		t.Fatal("expected embedded endpoint credentials to be rejected")
 	}
-	if _, err := service.New(store).Agent().CreateExternalTool(ctx, domain.CreateAgentExternalToolInput{
+	if _, err := agentservice.New(service.New(store)).CreateExternalTool(ctx, domain.CreateAgentExternalToolInput{
 		Name: "Missing cipher", Kind: "http", EndpointURL: "https://tools.example.com/api", AuthType: "bearer", AuthSecret: "secret",
 	}); err == nil {
 		t.Fatal("expected authenticated tool creation to fail closed without a credential cipher")
@@ -334,15 +335,15 @@ func TestAgentTeamPublishSnapshotStaysStable(t *testing.T) {
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
-	rootModel, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Root", ModelName: "root-model", APIKey: "sk-root"})
+	rootModel, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{Name: "Root", ModelName: "root-model", APIKey: "sk-root"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	childModel, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Child", ModelName: "child-model", APIKey: "sk-child"})
+	childModel, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{Name: "Child", ModelName: "child-model", APIKey: "sk-child"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
+	agent, err := agentservice.New(svc).CreateDefinition(ctx, domain.CreateAgentDefinitionInput{
 		Name:          "HR Team",
 		ModelID:       rootModel.ID,
 		MainAgentRole: "route old configuration",
@@ -353,7 +354,7 @@ func TestAgentTeamPublishSnapshotStaysStable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err = svc.Agent().PublishDefinition(ctx, agent.ID)
+	agent, err = agentservice.New(svc).PublishDefinition(ctx, agent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -362,7 +363,7 @@ func TestAgentTeamPublishSnapshotStaysStable(t *testing.T) {
 	}
 
 	newRole := "route new configuration"
-	agent, err = svc.Agent().UpdateDefinition(ctx, agent.ID, domain.UpdateAgentDefinitionInput{
+	agent, err = agentservice.New(svc).UpdateDefinition(ctx, agent.ID, domain.UpdateAgentDefinitionInput{
 		MainAgentRole: &newRole,
 		SubAgents: []domain.AgentTeamMember{{
 			ID: "policy", Name: "Policy Agent", Role: "new policy role", ModelID: rootModel.ID, Tools: []string{"get_my_profile"},
@@ -374,7 +375,7 @@ func TestAgentTeamPublishSnapshotStaysStable(t *testing.T) {
 	if agent.Version != 2 || agent.PublishedVersion != 1 {
 		t.Fatalf("expected draft v2 while deployment remains v1, got %+v", agent)
 	}
-	trial, err := svc.Agent().Trial(ctx, agent.ID, domain.AgentTrialInput{Message: "check policy"})
+	trial, err := agentservice.New(svc).Trial(ctx, agent.ID, domain.AgentTrialInput{Message: "check policy"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -388,13 +389,13 @@ func TestAgentTeamPublishSnapshotStaysStable(t *testing.T) {
 		t.Fatalf("expected observable executing agents, got %+v", trial.AgentsUsed)
 	}
 
-	if _, err = svc.Agent().UnpublishDefinition(ctx, agent.ID); err != nil {
+	if _, err = agentservice.New(svc).UnpublishDefinition(ctx, agent.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = svc.Agent().PublishDefinition(ctx, agent.ID); err != nil {
+	if _, err = agentservice.New(svc).PublishDefinition(ctx, agent.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = svc.Agent().Trial(ctx, agent.ID, domain.AgentTrialInput{Message: "check policy again"}); err != nil {
+	if _, err = agentservice.New(svc).Trial(ctx, agent.ID, domain.AgentTrialInput{Message: "check policy again"}); err != nil {
 		t.Fatal(err)
 	}
 	if len(requests) != 2 || requests[1].AgentRole != newRole || requests[1].SubAgents[0].Role != "new policy role" {
@@ -414,18 +415,18 @@ func TestAgentAdminTrialRecordsRuntimeFailure(t *testing.T) {
 		}},
 	})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
-	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Model", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test"})
+	model, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{Name: "Model", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{Name: "Failure counter", ModelID: model.ID})
+	agent, err := agentservice.New(svc).CreateDefinition(ctx, domain.CreateAgentDefinitionInput{Name: "Failure counter", ModelID: model.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = svc.Agent().PublishDefinition(ctx, agent.ID); err != nil {
+	if _, err = agentservice.New(svc).PublishDefinition(ctx, agent.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = svc.Agent().Trial(ctx, agent.ID, domain.AgentTrialInput{Message: "fail"}); err == nil {
+	if _, err = agentservice.New(svc).Trial(ctx, agent.ID, domain.AgentTrialInput{Message: "fail"}); err == nil {
 		t.Fatal("expected runtime failure")
 	}
 	stored, ok, err := store.GetAgentDefinition(context.Background(), "tenant-1", agent.ID)
@@ -444,14 +445,14 @@ func TestAgentAdminBlocksDeletingModelInUse(t *testing.T) {
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
-	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Default", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test"})
+	model, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{Name: "Default", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{Name: "Agent", ModelID: model.ID}); err != nil {
+	if _, err := agentservice.New(svc).CreateDefinition(ctx, domain.CreateAgentDefinitionInput{Name: "Agent", ModelID: model.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Agent().DeleteModel(ctx, model.ID); err == nil {
+	if _, err := agentservice.New(svc).DeleteModel(ctx, model.ID); err == nil {
 		t.Fatal("expected deleting a model used by an agent to be blocked")
 	} else if appErr, ok := domain.AsAppError(err); !ok || appErr.NumericCode() != domain.ErrorCodeAgentModelInUse || appErr.ReasonCode != "agent_model_in_use" {
 		t.Fatalf("expected agent_model_in_use contract, got %#v", err)
@@ -467,29 +468,30 @@ func TestAgentAdminDeletesModelReferencedOnlyByHistoryVersions(t *testing.T) {
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
-	oldModel, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Old", ModelName: "gpt-old", LiteLLMModel: "openai/gpt-old", APIKey: "sk-test"})
+	agentSvc := agentservice.New(svc)
+	oldModel, err := agentSvc.CreateModel(ctx, domain.CreateAgentModelInput{Name: "Old", ModelName: "gpt-old", LiteLLMModel: "openai/gpt-old", APIKey: "sk-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	newModel, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "New", ModelName: "gpt-new", LiteLLMModel: "openai/gpt-new", APIKey: "sk-test"})
+	newModel, err := agentSvc.CreateModel(ctx, domain.CreateAgentModelInput{Name: "New", ModelName: "gpt-new", LiteLLMModel: "openai/gpt-new", APIKey: "sk-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{Name: "Agent", ModelID: oldModel.ID})
+	agent, err := agentSvc.CreateDefinition(ctx, domain.CreateAgentDefinitionInput{Name: "Agent", ModelID: oldModel.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Agent().PublishDefinition(ctx, agent.ID); err != nil {
+	if _, err := agentSvc.PublishDefinition(ctx, agent.ID); err != nil {
 		t.Fatal(err)
 	}
 	// 切換到新模型後，歷史版本仍引用舊模型，但不應阻止刪除。
-	if _, err := svc.Agent().UpdateDefinition(ctx, agent.ID, domain.UpdateAgentDefinitionInput{ModelID: &newModel.ID}); err != nil {
+	if _, err := agentSvc.UpdateDefinition(ctx, agent.ID, domain.UpdateAgentDefinitionInput{ModelID: &newModel.ID}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Agent().PublishDefinition(ctx, agent.ID); err != nil {
+	if _, err := agentSvc.PublishDefinition(ctx, agent.ID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Agent().DeleteModel(ctx, oldModel.ID); err != nil {
+	if _, err := agentSvc.DeleteModel(ctx, oldModel.ID); err != nil {
 		t.Fatalf("expected deleting a model referenced only by history versions to succeed, got %v", err)
 	}
 }
@@ -500,19 +502,19 @@ func TestAgentAdminBlocksDeletingPublishedAgent(t *testing.T) {
 	seedAgentAdminAccount(t, store, now)
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
-	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Default", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test"})
+	model, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{Name: "Default", ModelName: "gpt-4.1", LiteLLMModel: "openai/gpt-4.1", APIKey: "sk-test"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{Name: "Published", ModelID: model.ID})
+	agent, err := agentservice.New(svc).CreateDefinition(ctx, domain.CreateAgentDefinitionInput{Name: "Published", ModelID: model.ID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	agent, err = svc.Agent().PublishDefinition(ctx, agent.ID)
+	agent, err = agentservice.New(svc).PublishDefinition(ctx, agent.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := svc.Agent().DeleteDefinition(ctx, agent.ID); err == nil {
+	if _, err := agentservice.New(svc).DeleteDefinition(ctx, agent.ID); err == nil {
 		t.Fatal("expected published agent deletion to require unpublish first")
 	} else if appErr, ok := domain.AsAppError(err); !ok || appErr.NumericCode() != domain.ErrorCodeAgentDefinitionPublished || appErr.ReasonCode != "agent_definition_published" {
 		t.Fatalf("expected agent_definition_published contract, got %#v", err)
@@ -530,7 +532,7 @@ func TestAgentAdminSyncAndTestModelUseLiteLLMAdmin(t *testing.T) {
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, LiteLLMAdmin: liteLLM, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
-	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
+	model, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{
 		Name:         "GPT 4.1",
 		ModelName:    "gpt-4.1",
 		LiteLLMModel: "openai/gpt-4.1",
@@ -542,14 +544,14 @@ func TestAgentAdminSyncAndTestModelUseLiteLLMAdmin(t *testing.T) {
 	if model.LiteLLMModel != domain.AgentModelLiteLLMAlias(model.ID) || model.SyncStatus != domain.AgentModelSyncStatusPending {
 		t.Fatalf("expected stable alias and pending sync state, got %+v", model)
 	}
-	model, err = svc.Agent().SyncModel(ctx, model.ID)
+	model, err = agentservice.New(svc).SyncModel(ctx, model.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if liteLLM.synced != 1 || model.SyncStatus != domain.AgentModelSyncStatusSynced || model.LastSyncedAt == nil || model.LastTestStatus != "untested" {
 		t.Fatalf("expected sync to update status and call client, model=%+v calls=%d", model, liteLLM.synced)
 	}
-	model, err = svc.Agent().TestModel(ctx, model.ID)
+	model, err = agentservice.New(svc).TestModel(ctx, model.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -565,7 +567,7 @@ func TestAgentAdminModelCredentialsNormalizeAndHideAPIKey(t *testing.T) {
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
 
-	_, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
+	_, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{
 		Name:         "OpenRouter Gemma",
 		Provider:     "custom",
 		ModelName:    "openrouter/google/gemma-3-27b-it",
@@ -576,7 +578,7 @@ func TestAgentAdminModelCredentialsNormalizeAndHideAPIKey(t *testing.T) {
 		t.Fatalf("expected custom provider to require api_base_url, got %v", err)
 	}
 
-	model, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{
+	model, err := agentservice.New(svc).CreateModel(ctx, domain.CreateAgentModelInput{
 		Name:         "OpenRouter Gemma",
 		Provider:     "custom",
 		ModelName:    "openrouter/google/gemma-3-27b-it",
@@ -610,7 +612,7 @@ func TestAgentAdminModelCredentialsNormalizeAndHideAPIKey(t *testing.T) {
 	}
 
 	nextName := "OpenRouter Gemma 27B"
-	updated, err := svc.Agent().UpdateModel(ctx, model.ID, domain.UpdateAgentModelInput{Name: &nextName})
+	updated, err := agentservice.New(svc).UpdateModel(ctx, model.ID, domain.UpdateAgentModelInput{Name: &nextName})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -619,11 +621,11 @@ func TestAgentAdminModelCredentialsNormalizeAndHideAPIKey(t *testing.T) {
 	}
 
 	blankKey := ""
-	if _, err := svc.Agent().UpdateModel(ctx, model.ID, domain.UpdateAgentModelInput{APIKey: &blankKey}); err == nil {
+	if _, err := agentservice.New(svc).UpdateModel(ctx, model.ID, domain.UpdateAgentModelInput{APIKey: &blankKey}); err == nil {
 		t.Fatal("expected blank api_key update to be rejected")
 	}
 	negativeRPM := -1
-	if _, err := svc.Agent().UpdateModel(ctx, model.ID, domain.UpdateAgentModelInput{RateLimitRPM: &negativeRPM}); err == nil {
+	if _, err := agentservice.New(svc).UpdateModel(ctx, model.ID, domain.UpdateAgentModelInput{RateLimitRPM: &negativeRPM}); err == nil {
 		t.Fatal("expected negative rate_limit_rpm update to be rejected")
 	}
 }

@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/platform/objectstore"
+	"nexus-pro-api/internal/platform/objectstore"
 )
 
 // TestNormalizeSFTPGoHTTPBaseURLAcceptsHTTP verifies HTTP endpoints are normalized.

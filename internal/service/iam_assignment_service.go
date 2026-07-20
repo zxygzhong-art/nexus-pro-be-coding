@@ -1,7 +1,7 @@
 package service
 
 import (
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/utils"
 	"strings"
 )
 

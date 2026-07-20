@@ -5,8 +5,8 @@ import (
 	"math"
 	"sort"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/utils"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
 )
 
 // UpsertKnowledgeBase persists a tenant knowledge base.

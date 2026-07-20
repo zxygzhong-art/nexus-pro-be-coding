@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
 )
 
 // TestPatchMeProfileUpdatesOnlySelfServiceFields verifies the authenticated employee can update the five allowlisted fields.

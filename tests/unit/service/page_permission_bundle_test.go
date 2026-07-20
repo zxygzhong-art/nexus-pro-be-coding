@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"nexus-pro-be/internal/domain"
-	"nexus-pro-be/internal/repository/memory"
-	"nexus-pro-be/internal/service"
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/repository/memory"
+	"nexus-pro-api/internal/service"
 )
 
 // TestExplicitPageActionsAuthorizeAndPopulateMeResponse 驗證明確 action 授權與 /me 導覽輸出形成閉環。
