@@ -58,7 +58,7 @@ func (c WorkspaceAgentCtrl) listModels(w http.ResponseWriter, _ *http.Request, c
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	writeJSON(w, http.StatusOK, domain.AgentModelListResponse{Items: items, Total: len(items)})
 	return nil
 }
 
@@ -120,7 +120,7 @@ func (c WorkspaceAgentCtrl) listDefinitions(w http.ResponseWriter, _ *http.Reque
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	writeJSON(w, http.StatusOK, domain.AgentDefinitionListResponse{Items: items, Total: len(items)})
 	return nil
 }
 
@@ -208,7 +208,7 @@ func (c WorkspaceAgentCtrl) tools(w http.ResponseWriter, _ *http.Request, ctx do
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	writeJSON(w, http.StatusOK, domain.AgentToolMetaListResponse{Items: items, Total: len(items)})
 	return nil
 }
 
@@ -249,7 +249,7 @@ func (c WorkspaceAgentCtrl) listExternalTools(w http.ResponseWriter, _ *http.Req
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	writeJSON(w, http.StatusOK, domain.AgentExternalToolListResponse{Items: items, Total: len(items)})
 	return nil
 }
 

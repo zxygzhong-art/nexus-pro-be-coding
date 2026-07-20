@@ -193,7 +193,7 @@ func (c AgentService) pendingAgentConfirmationMessages(ctx RequestContext, accou
 		if action.DraftID != "" {
 			data["form_draft_id"] = action.DraftID
 		}
-		raw, err := json.Marshal(map[string]any{
+		metadata, err := encodeAgentArtifactMetadata(map[string]any{
 			"event":        domain.AgentChatEventConfirmation,
 			"confirmation": action.Public,
 			"data":         data,
@@ -207,7 +207,7 @@ func (c AgentService) pendingAgentConfirmationMessages(ctx RequestContext, accou
 			SessionID:      session.ID,
 			Role:           domain.AgentMessageRoleTool,
 			ContextVersion: session.ContextVersion,
-			Metadata:       map[string]any{"agent_artifact_json": string(raw)},
+			Metadata:       metadata,
 			CreatedAt:      memory.CreatedAt,
 		})
 	}

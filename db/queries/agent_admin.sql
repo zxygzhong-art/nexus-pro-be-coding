@@ -79,25 +79,18 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND id = sqlc.arg(id)
 RETURNING *;
 
--- name: CountAgentDefinitionsByModel :one
-SELECT (
-    SELECT count(*) FROM agent_definitions
-    WHERE agent_definitions.tenant_id = sqlc.arg(tenant_id)
-      AND (
-        agent_definitions.model_id = sqlc.arg(model_id)
-        OR EXISTS (
-            SELECT 1 FROM jsonb_array_elements(agent_definitions.sub_agents) member
-            WHERE member->>'model_id' = sqlc.arg(model_id)
-        )
-      )
-) + (
-    SELECT count(*) FROM agent_definition_versions
-    WHERE agent_definition_versions.tenant_id = sqlc.arg(tenant_id)
-      AND EXISTS (
-        SELECT 1 FROM jsonb_array_elements(agent_definition_versions.sub_agents) member
+-- name: ListAgentDefinitionRefsByModel :many
+-- 只統計「目前」定義對模型的引用；歷史版本是不可變審計快照，不應阻止模型刪除。
+SELECT id, name FROM agent_definitions
+WHERE agent_definitions.tenant_id = sqlc.arg(tenant_id)
+  AND (
+    agent_definitions.model_id = sqlc.arg(model_id)
+    OR EXISTS (
+        SELECT 1 FROM jsonb_array_elements(agent_definitions.sub_agents) member
         WHERE member->>'model_id' = sqlc.arg(model_id)
-      )
-);
+    )
+  )
+ORDER BY name;
 
 -- name: InsertAgentExternalTool :one
 INSERT INTO agent_external_tools (

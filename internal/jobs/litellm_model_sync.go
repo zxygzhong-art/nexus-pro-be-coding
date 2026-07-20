@@ -68,7 +68,11 @@ func (s *LiteLLMModelSyncer) HandleAgentModelSyncEvent(ctx context.Context, even
 	}
 	modelID := event.AggregateID
 	if modelID == "" {
-		modelID, _ = event.Payload["model_id"].(string)
+		payload, err := domain.DecodeAgentModelSyncPayload(event.Payload)
+		if err != nil {
+			return err
+		}
+		modelID = payload.ModelID
 	}
 	if modelID == "" {
 		return errors.New("agent model outbox event is missing model id")

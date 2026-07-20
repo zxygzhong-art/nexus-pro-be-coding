@@ -19,28 +19,40 @@ func Must(v any) []byte {
 	return b
 }
 
-// Map 映射目前流程。
+// Map 映射目前流程。解碼失敗時 fail-closed 回傳 nil;需要錯誤時改用 MapE。
 func Map(b []byte) map[string]any {
-	if len(b) == 0 {
-		return nil
-	}
-	var out map[string]any
-	if err := json.Unmarshal(b, &out); err != nil {
-		return nil
-	}
+	out, _ := MapE(b)
 	return out
 }
 
-// Permissions 處理權限。
-func Permissions(b []byte) []domain.Permission {
+// MapE 解碼 JSON object,失敗時回傳明確錯誤而不是靜默吞掉。
+func MapE(b []byte) (map[string]any, error) {
 	if len(b) == 0 {
-		return nil
+		return nil, nil
+	}
+	var out map[string]any
+	if err := json.Unmarshal(b, &out); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// Permissions 處理權限。解碼失敗時 fail-closed 回傳 nil;需要錯誤時改用 PermissionsE。
+func Permissions(b []byte) []domain.Permission {
+	out, _ := PermissionsE(b)
+	return out
+}
+
+// PermissionsE 解碼權限陣列,失敗時回傳明確錯誤而不是靜默吞掉。
+func PermissionsE(b []byte) ([]domain.Permission, error) {
+	if len(b) == 0 {
+		return nil, nil
 	}
 	var out []domain.Permission
 	if err := json.Unmarshal(b, &out); err != nil {
-		return nil
+		return nil, err
 	}
-	return out
+	return out, nil
 }
 
 // zero 處理 zero。

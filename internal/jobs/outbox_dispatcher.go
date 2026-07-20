@@ -266,27 +266,22 @@ func relationshipChangeFromOutboxEvent(event domain.OutboxEvent) (domain.AuthzRe
 	if event.EventType == string(domain.EventOpenFGARelationshipDelete) {
 		operation = domain.AuthzRelationshipTupleDelete
 	}
+	payload, err := domain.DecodeOpenFGARelationshipPayload(event.Payload)
+	if err != nil {
+		return domain.AuthzRelationshipTupleChange{}, err
+	}
 	tuple := domain.AuthzRelationshipTuple{
 		TenantID:    event.TenantID,
-		ObjectType:  payloadString(event.Payload, "object_type"),
-		ObjectID:    payloadString(event.Payload, "object_id"),
-		Relation:    payloadString(event.Payload, "relation"),
-		SubjectType: payloadString(event.Payload, "subject_type"),
-		SubjectID:   payloadString(event.Payload, "subject_id"),
+		ObjectType:  strings.TrimSpace(payload.ObjectType),
+		ObjectID:    strings.TrimSpace(payload.ObjectID),
+		Relation:    strings.TrimSpace(payload.Relation),
+		SubjectType: strings.TrimSpace(payload.SubjectType),
+		SubjectID:   strings.TrimSpace(payload.SubjectID),
 	}
 	if tuple.ObjectType == "" || tuple.ObjectID == "" || tuple.Relation == "" || tuple.SubjectType == "" || tuple.SubjectID == "" {
 		return domain.AuthzRelationshipTupleChange{}, errors.New("openfga outbox payload missing relationship tuple fields")
 	}
 	return domain.AuthzRelationshipTupleChange{Operation: operation, Tuple: tuple}, nil
-}
-
-// payloadString 處理 payload 字串。
-func payloadString(payload map[string]any, key string) string {
-	if payload == nil {
-		return ""
-	}
-	value, _ := payload[key].(string)
-	return strings.TrimSpace(value)
 }
 
 // truncateOutboxError 截斷 outbox 錯誤。

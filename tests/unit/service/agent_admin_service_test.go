@@ -455,6 +455,42 @@ func TestAgentAdminBlocksDeletingModelInUse(t *testing.T) {
 		t.Fatal("expected deleting a model used by an agent to be blocked")
 	} else if appErr, ok := domain.AsAppError(err); !ok || appErr.NumericCode() != domain.ErrorCodeAgentModelInUse || appErr.ReasonCode != "agent_model_in_use" {
 		t.Fatalf("expected agent_model_in_use contract, got %#v", err)
+	} else if !strings.Contains(appErr.Message, "Agent") {
+		t.Fatalf("expected blocking agent names in message, got %q", appErr.Message)
+	}
+}
+
+func TestAgentAdminDeletesModelReferencedOnlyByHistoryVersions(t *testing.T) {
+	now := time.Date(2026, 7, 9, 10, 30, 0, 0, time.UTC)
+	store := memory.NewStore()
+	seedAgentAdminAccount(t, store, now)
+	svc := service.New(store, service.Options{Now: func() time.Time { return now }, CredentialCipher: newTestCredentialCipher(t)})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-admin"}
+
+	oldModel, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "Old", ModelName: "gpt-old", LiteLLMModel: "openai/gpt-old", APIKey: "sk-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newModel, err := svc.Agent().CreateModel(ctx, domain.CreateAgentModelInput{Name: "New", ModelName: "gpt-new", LiteLLMModel: "openai/gpt-new", APIKey: "sk-test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	agent, err := svc.Agent().CreateDefinition(ctx, domain.CreateAgentDefinitionInput{Name: "Agent", ModelID: oldModel.ID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Agent().PublishDefinition(ctx, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	// 切換到新模型後，歷史版本仍引用舊模型，但不應阻止刪除。
+	if _, err := svc.Agent().UpdateDefinition(ctx, agent.ID, domain.UpdateAgentDefinitionInput{ModelID: &newModel.ID}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Agent().PublishDefinition(ctx, agent.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := svc.Agent().DeleteModel(ctx, oldModel.ID); err != nil {
+		t.Fatalf("expected deleting a model referenced only by history versions to succeed, got %v", err)
 	}
 }
 

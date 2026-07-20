@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"nexus-pro-be/internal/domain"
 	"nexus-pro-be/internal/utils"
 )
 
@@ -408,41 +409,43 @@ func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmploy
 		HireDate:         normalizeImportDate(ehrmsValue(record, ehrmsFieldHireDate)),
 		ResignDate:       normalizeImportDate(ehrmsValue(record, ehrmsFieldQuitDate)),
 		BasicInfo: map[string]any{
-			"name":               ehrmsValue(record, ehrmsFieldName),
-			"name_en":            ehrmsValue(record, ehrmsFieldNameEN),
-			"first_name":         ehrmsValue(record, ehrmsFieldFirstName),
-			"last_name":          ehrmsValue(record, ehrmsFieldLastName),
-			"gender":             ehrmsValue(record, ehrmsFieldGender),
-			"birth_date":         normalizeImportDate(ehrmsValue(record, ehrmsFieldBirthDate)),
-			"nationality":        ehrmsValue(record, ehrmsFieldNationality),
-			"national_id":        ehrmsValue(record, ehrmsFieldNationalID),
-			"passport_no":        ehrmsValue(record, ehrmsFieldPassportNo),
-			"identity_type_name": ehrmsValue(record, ehrmsFieldIdentityType),
-			"company_email":      companyEmail,
-			"source":             "ehrms",
+			domain.EmployeeBasicInfoKeyName:            ehrmsValue(record, ehrmsFieldName),
+			domain.EmployeeBasicInfoKeyNameEN:          ehrmsValue(record, ehrmsFieldNameEN),
+			"first_name":                               ehrmsValue(record, ehrmsFieldFirstName),
+			"last_name":                                ehrmsValue(record, ehrmsFieldLastName),
+			domain.EmployeeBasicInfoKeyGender:          ehrmsValue(record, ehrmsFieldGender),
+			domain.EmployeeBasicInfoKeyBirthDate:       normalizeImportDate(ehrmsValue(record, ehrmsFieldBirthDate)),
+			domain.EmployeeBasicInfoKeyNationalityType: ehrmsValue(record, ehrmsFieldNationality),
+			// 保留 legacy 鍵：前端仍直接讀取原始國籍名稱。
+			domain.EmployeeBasicInfoKeyNationality:  ehrmsValue(record, ehrmsFieldNationality),
+			domain.EmployeeBasicInfoKeyNationalID:   ehrmsValue(record, ehrmsFieldNationalID),
+			domain.EmployeeBasicInfoKeyPassportNo:   ehrmsValue(record, ehrmsFieldPassportNo),
+			"identity_type_name":                    ehrmsValue(record, ehrmsFieldIdentityType),
+			domain.EmployeeBasicInfoKeyCompanyEmail: companyEmail,
+			"source":                                "ehrms",
 		},
 		EmploymentInfo: map[string]any{
-			"org_unit_id":              orgUnitID,
-			"org_unit_code":            departmentCode,
-			"org_unit_name":            ehrmsValue(record, ehrmsFieldDepartmentName),
-			"org_unit_name_en":         ehrmsValue(record, ehrmsFieldDepartmentEN),
-			"position":                 utils.FirstNonEmpty(ehrmsValue(record, ehrmsFieldPositionName), ehrmsValue(record, ehrmsFieldPositionCode)),
-			"position_id":              positionID,
-			"position_code":            ehrmsValue(record, ehrmsFieldPositionCode),
-			"position_name_en":         ehrmsValue(record, ehrmsFieldPositionEN),
-			"category":                 ehrmsEmployeeCategory(record),
-			"employment_status":        status,
-			"hire_date":                normalizeImportDate(ehrmsValue(record, ehrmsFieldHireDate)),
-			"resign_date":              normalizeImportDate(ehrmsValue(record, ehrmsFieldQuitDate)),
-			"tenure_start_date":        normalizeImportDate(ehrmsValue(record, ehrmsFieldTenureStartDate)),
-			"probation_end_date":       normalizeImportDate(ehrmsValue(record, ehrmsFieldProbationEnd)),
-			"card_no":                  ehrmsValue(record, ehrmsFieldCardNo),
-			"clock_required":           ehrmsValue(record, ehrmsFieldClockRequired),
-			"shift_name":               ehrmsValue(record, ehrmsFieldShiftName),
-			"shift_type":               ehrmsValue(record, ehrmsFieldShiftType),
-			"direct_indirect_employee": ehrmsValue(record, ehrmsFieldDirectIndirect),
-			"leave_group":              ehrmsValue(record, ehrmsFieldLeaveGroup),
-			"source":                   "ehrms",
+			domain.EmployeeEmploymentInfoKeyOrgUnitID: orgUnitID,
+			"org_unit_code": departmentCode,
+			domain.EmployeeEmploymentInfoKeyOrgUnitName: ehrmsValue(record, ehrmsFieldDepartmentName),
+			"org_unit_name_en":                          ehrmsValue(record, ehrmsFieldDepartmentEN),
+			"position":                                  utils.FirstNonEmpty(ehrmsValue(record, ehrmsFieldPositionName), ehrmsValue(record, ehrmsFieldPositionCode)),
+			"position_id":                               positionID,
+			"position_code":                             ehrmsValue(record, ehrmsFieldPositionCode),
+			"position_name_en":                          ehrmsValue(record, ehrmsFieldPositionEN),
+			"category":                                  ehrmsEmployeeCategory(record),
+			"employment_status":                         status,
+			"hire_date":                                 normalizeImportDate(ehrmsValue(record, ehrmsFieldHireDate)),
+			"resign_date":                               normalizeImportDate(ehrmsValue(record, ehrmsFieldQuitDate)),
+			"tenure_start_date":                         normalizeImportDate(ehrmsValue(record, ehrmsFieldTenureStartDate)),
+			"probation_end_date":                        normalizeImportDate(ehrmsValue(record, ehrmsFieldProbationEnd)),
+			"card_no":                                   ehrmsValue(record, ehrmsFieldCardNo),
+			"clock_required":                            ehrmsValue(record, ehrmsFieldClockRequired),
+			domain.EmployeeEmploymentInfoKeyShift:       ehrmsValue(record, ehrmsFieldShiftName),
+			domain.EmployeeEmploymentInfoKeyShiftType: ehrmsValue(record, ehrmsFieldShiftType),
+			"direct_indirect_employee":                ehrmsValue(record, ehrmsFieldDirectIndirect),
+			"leave_group":                             ehrmsValue(record, ehrmsFieldLeaveGroup),
+			"source":                                  "ehrms",
 		},
 		EducationMilitaryInfo: map[string]any{
 			"highest_education": ehrmsValue(record, ehrmsFieldEducation),
@@ -971,7 +974,7 @@ func normalizeEHRMSSyncMode(mode string) (string, error) {
 // EHRMSMergeEmployee merges upstream employee data without overwriting self-managed profile fields.
 func EHRMSMergeEmployee(existing Employee, candidate Employee) Employee {
 	next := existing
-	selfNameEN := next.BasicInfo["name_en"]
+	selfNameEN := next.BasicInfo[domain.EmployeeBasicInfoKeyNameEN]
 	nameENSource := stringFromAny(next.BasicInfo["name_en_source"])
 	next.EmployeeNo = candidate.EmployeeNo
 	next.Name = candidate.Name
@@ -986,7 +989,7 @@ func EHRMSMergeEmployee(existing Employee, candidate Employee) Employee {
 	next.ResignDate = candidate.ResignDate
 	next.BasicInfo = mergeEmployeeImportMap(next.BasicInfo, candidate.BasicInfo)
 	if nameENSource == "self" {
-		next.BasicInfo["name_en"] = selfNameEN
+		next.BasicInfo[domain.EmployeeBasicInfoKeyNameEN] = selfNameEN
 		next.BasicInfo["name_en_source"] = "self"
 	}
 	next.EmploymentInfo = mergeEmployeeImportMap(next.EmploymentInfo, candidate.EmploymentInfo)
@@ -995,7 +998,7 @@ func EHRMSMergeEmployee(existing Employee, candidate Employee) Employee {
 		next.BasicInfo = map[string]any{}
 	}
 	// EHRMS email 以 upstream 為準（含空值覆蓋），不受 merge 跳過空字串影響。
-	next.BasicInfo["company_email"] = candidate.CompanyEmail
+	next.BasicInfo[domain.EmployeeBasicInfoKeyCompanyEmail] = candidate.CompanyEmail
 	next.UpdatedAt = candidate.UpdatedAt
 	return next
 }

@@ -308,7 +308,7 @@ func (c AgentCtrl) listAgentSessionFiles(w http.ResponseWriter, r *http.Request,
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	writeJSON(w, http.StatusOK, domain.AgentSessionFileListResponse{Items: items, Total: len(items)})
 	return nil
 }
 

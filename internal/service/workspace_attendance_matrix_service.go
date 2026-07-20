@@ -761,25 +761,12 @@ func workspaceMonthNameZH(month time.Month) string {
 	return names[int(month)]
 }
 
-// workspaceRate 處理工作區速率。
-func workspaceRate(numerator int, denominator int) float64 {
-	if denominator <= 0 {
-		return 0
-	}
-	return float64(numerator) / float64(denominator) * 100
-}
-
 // workspaceRateString 處理工作區速率字串。
 func workspaceRateString(numerator float64, denominator float64) string {
 	if denominator <= 0 {
 		return "0.0"
 	}
 	return fmt.Sprintf("%.1f", numerator/denominator*100)
-}
-
-// workspaceRateLabel 處理工作區速率 label。
-func workspaceRateLabel(numerator int, denominator int) string {
-	return fmt.Sprintf("%.1f%%", workspaceRate(numerator, denominator))
 }
 
 // workspacePercent 處理工作區百分比。

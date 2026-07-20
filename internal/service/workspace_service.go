@@ -74,6 +74,7 @@ func (c WorkspaceService) WorkspaceOverview(ctx RequestContext, query WorkspaceO
 	}
 	hires := workspaceCountHires(employees, start, end)
 	separations := workspaceCountSeparations(employees, start, end)
+	activeAtStart := workspaceCountActiveAt(employees, start.Add(-time.Nanosecond))
 	activeAtEnd := workspaceCountActiveAt(employees, end.Add(-time.Nanosecond))
 	segments := workspaceAttendanceSegments(len(checkedIn), len(targetLeaves), absent)
 
@@ -82,11 +83,12 @@ func (c WorkspaceService) WorkspaceOverview(ctx RequestContext, query WorkspaceO
 		Year:        start.Year(),
 		MonthNumber: int(start.Month()),
 		HRSummary: WorkspaceHRSummary{
-			Title:          fmt.Sprintf("%d年%d月人力概況", start.Year(), int(start.Month())),
-			Active:         activeAtEnd,
-			Hires:          hires,
-			Separations:    separations,
-			SeparationRate: workspaceRateString(float64(separations), float64(maxInt(activeAtEnd, 1))),
+			Title:       fmt.Sprintf("%d年%d月人力概況", start.Year(), int(start.Month())),
+			Active:      activeAtEnd,
+			Hires:       hires,
+			Separations: separations,
+			// 離職率口徑與人員異動頁一致：當月離職 ÷ 當月平均在職（月初與月末平均）。
+			SeparationRate: workspaceRateString(float64(separations), workspaceAverageHeadcount(activeAtStart, activeAtEnd)),
 		},
 		Attendance: WorkspaceOverviewAttendance{
 			CheckedIn:  len(checkedIn),

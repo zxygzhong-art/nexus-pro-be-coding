@@ -284,10 +284,10 @@ func applyMeProfilePatch(employee *Employee, input UpdateMeProfileInput) []strin
 	changedFields := make([]string, 0, 5)
 	if input.EnglishName != nil {
 		value := strings.TrimSpace(*input.EnglishName)
-		if stringFromAny(employee.BasicInfo["name_en"]) != value || stringFromAny(employee.BasicInfo["name_en_source"]) != "self" {
+		if stringFromAny(employee.BasicInfo[domain.EmployeeBasicInfoKeyNameEN]) != value || stringFromAny(employee.BasicInfo["name_en_source"]) != "self" {
 			changedFields = append(changedFields, "english_name")
 		}
-		employee.BasicInfo["name_en"] = value
+		employee.BasicInfo[domain.EmployeeBasicInfoKeyNameEN] = value
 		employee.BasicInfo["name_en_source"] = "self"
 	}
 	if input.MobilePhone != nil {
@@ -506,19 +506,17 @@ func (c MeService) enrichEmployeeProfile(ctx RequestContext, employee Employee) 
 		employee.EmploymentInfo = map[string]any{}
 	}
 	if employee.Position != "" {
-		employee.EmploymentInfo["job_title"] = employee.Position
-		employee.EmploymentInfo["position"] = employee.Position
+		employee.EmploymentInfo[domain.EmployeeEmploymentInfoKeyJobTitle] = employee.Position
+		employee.EmploymentInfo[domain.EmployeeEmploymentInfoKeyPosition] = employee.Position
 	}
 	orgUnitID := strings.TrimSpace(employee.OrgUnitID)
 	if orgUnitID == "" && employee.EmploymentInfo != nil {
-		if value, ok := employee.EmploymentInfo["org_unit_id"].(string); ok {
-			orgUnitID = strings.TrimSpace(value)
-		}
+		orgUnitID = stringFromMap(employee.EmploymentInfo, domain.EmployeeEmploymentInfoKeyOrgUnitID)
 	}
 	if orgUnitID != "" {
 		if ou, ok, err := c.store.GetOrgUnit(goContext(ctx), ctx.TenantID, orgUnitID); err == nil && ok {
-			employee.EmploymentInfo["department_name"] = ou.Name
-			employee.EmploymentInfo["org_unit_name"] = ou.Name
+			employee.EmploymentInfo[domain.EmployeeEmploymentInfoKeyDepartmentName] = ou.Name
+			employee.EmploymentInfo[domain.EmployeeEmploymentInfoKeyOrgUnitName] = ou.Name
 		}
 	}
 	return employee

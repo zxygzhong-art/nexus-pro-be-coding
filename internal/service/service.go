@@ -490,18 +490,27 @@ func (c *Service) audit(ctx RequestContext, action, resource, target, severity s
 	})
 }
 
+// auditDetailAuthzDecisionKey 是稽覈 details 中記錄授權決策（bool）的鍵名，寫讀雙方共用。
+const auditDetailAuthzDecisionKey = "authz_decision"
+
 // auditResultFromDetails 處理稽覈結果 來源 details。
 func auditResultFromDetails(details map[string]any) string {
 	if result := strings.TrimSpace(stringFromAny(details["result"])); result != "" {
 		return result
 	}
-	if allowed, ok := details["authz_decision"].(bool); ok {
-		if !allowed {
-			return "denied"
-		}
-		return "allowed"
+	raw, present := details[auditDetailAuthzDecisionKey]
+	if !present {
+		return "success"
 	}
-	return "success"
+	allowed, ok := raw.(bool)
+	if !ok {
+		// 決策鍵存在但型別異常：顯式標記 unknown，避免靜默歸類為 success。
+		return "unknown"
+	}
+	if !allowed {
+		return "denied"
+	}
+	return "allowed"
 }
 
 // forbiddenAuthz 處理禁止授權。
@@ -575,7 +584,7 @@ func auditDetailsWithContext(ctx RequestContext, details map[string]any) map[str
 // auditDecisionDetails 處理稽覈決策 details。
 func auditDecisionDetails(ctx RequestContext, decision CheckResult, details map[string]any) map[string]any {
 	out := auditDetailsWithContext(ctx, details)
-	out["authz_decision"] = decision.Allowed
+	out[auditDetailAuthzDecisionKey] = decision.Allowed
 	if decision.ApplicationCode != "" {
 		out["application_code"] = decision.ApplicationCode
 	}

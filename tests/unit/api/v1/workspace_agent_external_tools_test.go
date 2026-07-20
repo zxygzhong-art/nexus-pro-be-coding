@@ -35,10 +35,7 @@ func TestWorkspaceAgentExternalToolLifecycle(t *testing.T) {
 	if listResponse.Code != http.StatusOK {
 		t.Fatalf("expected list status 200, got %d: %s", listResponse.Code, listResponse.Body.String())
 	}
-	listed := decodeData[struct {
-		Items []domain.AgentExternalTool `json:"items"`
-		Total int                        `json:"total"`
-	}](t, listResponse.Body.Bytes())
+	listed := decodeData[domain.AgentExternalToolListResponse](t, listResponse.Body.Bytes())
 	if listed.Total != 1 || len(listed.Items) != 1 || listed.Items[0].ID != created.ID {
 		t.Fatalf("unexpected external tool list: %+v", listed)
 	}

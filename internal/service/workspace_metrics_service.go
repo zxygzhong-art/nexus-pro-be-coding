@@ -146,19 +146,30 @@ func workspaceCountActiveAt(items []Employee, at time.Time) int {
 	return count
 }
 
-// workspaceEmployeeActiveAt 處理工作區員工啟用中 at。
+// workspaceEmployeeSeparationTime 回傳員工的有效離職時間。
+// 優先使用 resign_date；只有當狀態為 resigned/deleted 但缺少 resign_date
+// （歷史匯入遺留資料）時，才退回以 updated_at 作為近似離職時間。
+// 注意：workspaceEmployeeActiveAt 與 workspaceEmployeeSeparatedInRange 必須
+// 共用此定義。兩者口徑一旦不一致（例如一邊用 resign_date、另一邊用 updated_at），
+// 就會產生幻影離職，破壞「期初在職 + 期間新進 − 期間離職 = 期末在職」閉合恆等式。
+func workspaceEmployeeSeparationTime(item Employee) (time.Time, bool) {
+	if item.ResignDate != nil {
+		return *item.ResignDate, true
+	}
+	status := workspaceEmployeeStatus(item)
+	if status == string(EmployeeStatusResigned) || status == string(EmployeeStatusDeleted) {
+		return item.UpdatedAt, true
+	}
+	return time.Time{}, false
+}
+
+// workspaceEmployeeActiveAt 判斷員工在指定時點是否在職：
+// 已到職（hire_date 不晚於該時點）且尚未離職（有效離職時間晚於該時點）。
 func workspaceEmployeeActiveAt(item Employee, at time.Time) bool {
-	status := strings.ToLower(utils.FirstNonEmpty(item.EmploymentStatus, item.Status))
-	if status == string(EmployeeStatusDeleted) {
-		return false
-	}
-	if status == string(EmployeeStatusResigned) && (item.ResignDate == nil || !item.ResignDate.After(at)) {
-		return false
-	}
 	if item.HireDate != nil && item.HireDate.After(at) {
 		return false
 	}
-	if item.ResignDate != nil && !item.ResignDate.After(at) {
+	if separatedAt, ok := workspaceEmployeeSeparationTime(item); ok && !separatedAt.After(at) {
 		return false
 	}
 	return true
@@ -213,16 +224,17 @@ func workspaceCountSeparations(items []Employee, start time.Time, end time.Time)
 	return count
 }
 
-// workspaceEmployeeSeparatedInRange 處理工作區員工 separated in range。
+// workspaceEmployeeSeparatedInRange 判斷員工是否屬於 [start, end) 期間離職：
+// 以有效離職時間（見 workspaceEmployeeSeparationTime）落在期間內為準。
+// resign_date 已存在時絕不可再用 updated_at 兜底——批次同步（如 eHRMS 同步、
+// 匯入）會刷新全部資料的 updated_at，若據此重算，會把多年前已離職的員工
+// 重複計入本期離職（幻影離職），並破壞期初/期末閉合恆等式。
 func workspaceEmployeeSeparatedInRange(item Employee, start time.Time, end time.Time) bool {
-	if item.ResignDate != nil && !item.ResignDate.Before(start) && item.ResignDate.Before(end) {
-		return true
-	}
-	status := workspaceEmployeeStatus(item)
-	if status != string(EmployeeStatusResigned) && status != string(EmployeeStatusDeleted) {
+	separatedAt, ok := workspaceEmployeeSeparationTime(item)
+	if !ok {
 		return false
 	}
-	return !item.UpdatedAt.Before(start) && item.UpdatedAt.Before(end)
+	return !separatedAt.Before(start) && separatedAt.Before(end)
 }
 
 // workspaceAttendanceSegments 處理工作區考勤 segments。
@@ -664,6 +676,29 @@ func workspaceOrganizationEmployees(employees []Employee) []Employee {
 	return out
 }
 
+// workspaceAverageHeadcount 回傳期間平均在職人數 = (期初在職 + 期末在職) / 2，保底 1。
+// 這是所有離職率的統一分母。採用期間平均在職（而非期初或期末單一時點快照），
+// 是人資統計的常規口徑：當期內人數劇烈變動時，單一時點分母會讓離職率失真
+// （例如期初基數極小時離職率可超過 100%）。
+func workspaceAverageHeadcount(prev int, end int) float64 {
+	avg := float64(prev+end) / 2
+	if avg < 1 {
+		return 1
+	}
+	return avg
+}
+
+// workspaceTurnoverRate 統一離職率口徑：期間離職人數 ÷ 期間平均在職人數 × 100%。
+// prev/end 為期間起訖時點的在職快照（月視圖：月初/月末；年視圖與 YTD：年初/當期末）。
+func workspaceTurnoverRate(separations int, prev int, end int) float64 {
+	return float64(separations) / workspaceAverageHeadcount(prev, end) * 100
+}
+
+// workspaceTurnoverRateLabel 處理離職率 label，口徑同 workspaceTurnoverRate。
+func workspaceTurnoverRateLabel(separations int, prev int, end int) string {
+	return fmt.Sprintf("%.1f%%", workspaceTurnoverRate(separations, prev, end))
+}
+
 // workspaceMonthlyTurnover 處理工作區每月人員異動。
 func workspaceMonthlyTurnover(employees []Employee, orgs map[string]workspaceOrgInfo, start time.Time, end time.Time, now time.Time) WorkspaceTurnoverMonthly {
 	stats := workspaceMovementByDept(employees, orgs, start, end, time.Date(start.Year(), 1, 1, 0, 0, 0, 0, time.UTC))
@@ -672,8 +707,8 @@ func workspaceMonthlyTurnover(employees []Employee, orgs map[string]workspaceOrg
 	prevMonthStart := start.AddDate(0, -1, 0)
 	prevMonthEnd := start
 	prevStats := workspaceMovementTotal(workspaceMovementByDept(employees, orgs, prevMonthStart, prevMonthEnd, time.Date(start.Year(), 1, 1, 0, 0, 0, 0, time.UTC)))
-	rate := workspaceRate(total.Resigned+total.Layoff, maxInt(total.Prev, 1))
-	prevRate := workspaceRate(prevStats.Resigned+prevStats.Layoff, maxInt(prevStats.Prev, 1))
+	rate := workspaceTurnoverRate(total.Resigned+total.Layoff, total.Prev, total.End)
+	prevRate := workspaceTurnoverRate(prevStats.Resigned+prevStats.Layoff, prevStats.Prev, prevStats.End)
 	return WorkspaceTurnoverMonthly{
 		Year:           start.Year(),
 		Month:          int(start.Month()),
@@ -681,9 +716,11 @@ func workspaceMonthlyTurnover(employees []Employee, orgs map[string]workspaceOrg
 		Title:          fmt.Sprintf("%s在職統計", workspaceMonthNameZH(start.Month())),
 		Stats:          workspaceMonthlyKPIs(total, rate, prevRate),
 		HireComparison: workspaceComparisonFromStats(stats, func(s workspaceMovementStats) float64 { return float64(s.Hires) }, "人", false),
-		RateComparison: workspaceComparisonFromStats(stats, func(s workspaceMovementStats) float64 { return workspaceRate(s.Resigned+s.Layoff, maxInt(s.Prev, 1)) }, "%", true),
-		Rows:           rows,
-		CSVHeaders:     []string{"BU", "部門", "上月在職人數", "新進人數", "離職人數", "資遣", "當月留停", "本月在職人數", "預估離職率", "YTD離職率"},
+		RateComparison: workspaceComparisonFromStats(stats, func(s workspaceMovementStats) float64 {
+			return workspaceTurnoverRate(s.Resigned+s.Layoff, s.Prev, s.End)
+		}, "%", true),
+		Rows:       rows,
+		CSVHeaders: []string{"BU", "部門", "上月在職人數", "新進人數", "離職人數", "資遣", "當月留停", "本月在職人數", "預估離職率", "YTD離職率"},
 	}
 }
 
@@ -693,19 +730,20 @@ func workspaceAnnualTurnover(employees []Employee, orgs map[string]workspaceOrgI
 	annualEnd := annualStart.AddDate(1, 0, 0)
 	stats := workspaceMovementByBU(employees, orgs, annualStart, annualEnd)
 	total := workspaceMovementTotal(stats)
-	base := maxInt(total.Base, 1)
-	rate := workspaceRate(total.Resigned+total.Layoff, base)
+	rate := workspaceTurnoverRate(total.Resigned+total.Layoff, total.Base, total.End)
 	return WorkspaceTurnoverAnnual{
-		Year:               year,
-		IsFuture:           annualStart.After(now),
-		Title:              fmt.Sprintf("%d 年度在職統計", year),
-		KPIs:               workspaceAnnualKPIs(total, rate),
-		HeadcountTrend:     workspaceHeadcountTrend(employees, year, now),
-		RateTrend:          workspaceRateTrend(employees, year, now),
-		Pie:                workspacePieFromStats(stats),
-		DeptRateComparison: workspaceComparisonFromStats(workspaceMovementByDept(employees, orgs, annualStart, annualEnd, annualStart), func(s workspaceMovementStats) float64 { return workspaceRate(s.Resigned+s.Layoff, maxInt(s.Base, 1)) }, "%", true),
-		Rows:               workspaceAnnualTurnoverRows(stats),
-		CSVHeaders:         []string{"BU", "年初在職", "年新進", "年離職", "年資遣", "年留停", "年末在職", "年離職率"},
+		Year:           year,
+		IsFuture:       annualStart.After(now),
+		Title:          fmt.Sprintf("%d 年度在職統計", year),
+		KPIs:           workspaceAnnualKPIs(total, rate),
+		HeadcountTrend: workspaceHeadcountTrend(employees, year, now),
+		RateTrend:      workspaceRateTrend(employees, year, now),
+		Pie:            workspacePieFromStats(stats),
+		DeptRateComparison: workspaceComparisonFromStats(workspaceMovementByDept(employees, orgs, annualStart, annualEnd, annualStart), func(s workspaceMovementStats) float64 {
+			return workspaceTurnoverRate(s.Resigned+s.Layoff, s.Base, s.End)
+		}, "%", true),
+		Rows:       workspaceAnnualTurnoverRows(stats),
+		CSVHeaders: []string{"BU", "年初在職", "年新進", "年離職", "年資遣", "年留停", "年末在職", "年離職率"},
 	}
 }
 
@@ -848,8 +886,8 @@ func workspaceMonthlyRow(stat workspaceMovementStats, rowType string, rowSpan in
 		Layoff:    stat.Layoff,
 		OnLeave:   stat.OnLeave,
 		End:       stat.End,
-		MonthRate: workspaceRateLabel(sep, maxInt(stat.Prev, 1)),
-		YTDRate:   workspaceRateLabel(stat.YTDSep, maxInt(stat.Base, 1)),
+		MonthRate: workspaceTurnoverRateLabel(sep, stat.Prev, stat.End),
+		YTDRate:   workspaceTurnoverRateLabel(stat.YTDSep, stat.Base, stat.End),
 	}
 }
 
@@ -877,7 +915,7 @@ func workspaceAnnualRow(stat workspaceMovementStats) WorkspaceAnnualRow {
 		OnLeave:  stat.OnLeave,
 		End:      stat.End,
 		Sep:      sep,
-		Rate:     workspaceRateLabel(sep, maxInt(stat.Base, 1)),
+		Rate:     workspaceTurnoverRateLabel(sep, stat.Base, stat.End),
 	}
 }
 
@@ -1031,7 +1069,8 @@ func workspaceRateTrend(employees []Employee, year int, now time.Time) []Workspa
 		}
 		sep := workspaceCountSeparations(employees, start, end)
 		prev := workspaceCountActiveAt(employees, start.Add(-time.Nanosecond))
-		values[month-1] = workspaceRate(sep, maxInt(prev, 1))
+		endCount := workspaceCountActiveAt(employees, end.Add(-time.Nanosecond))
+		values[month-1] = workspaceTurnoverRate(sep, prev, endCount)
 		if values[month-1] > maxValue {
 			maxValue = values[month-1]
 		}

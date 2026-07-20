@@ -257,6 +257,33 @@ type EmployeeDetailPreview struct {
 	UpdatedAt         time.Time  `json:"updated_at"`
 }
 
+// Employee section map 鍵名常數：eHRMS 同步、me 自助等寫端與 typed section 視圖共用，
+// 避免鍵名漂移導致資料在 typed 視圖中靜默遺失。標示 legacy 的鍵為早期 eHRMS 同步
+// 寫入的舊鍵，讀端以别名相容資料庫中既有資料。
+const (
+	EmployeeBasicInfoKeyName            = "name"
+	EmployeeBasicInfoKeyNameEN          = "name_en"
+	EmployeeBasicInfoKeyGender          = "gender"
+	EmployeeBasicInfoKeyBirthDate       = "birth_date"
+	EmployeeBasicInfoKeyNationalityType = "nationality_type"
+	EmployeeBasicInfoKeyNationality     = "nationality" // legacy eHRMS 鍵；前端仍讀取原始國籍名稱
+	EmployeeBasicInfoKeyNationalID      = "national_id"
+	EmployeeBasicInfoKeyPassportNo      = "passport_no"
+	EmployeeBasicInfoKeyCompanyEmail    = "company_email"
+)
+
+// EmploymentInfo section map 鍵名常數，用途同上。
+const (
+	EmployeeEmploymentInfoKeyOrgUnitID      = "org_unit_id"
+	EmployeeEmploymentInfoKeyOrgUnitName    = "org_unit_name"
+	EmployeeEmploymentInfoKeyPosition       = "position"
+	EmployeeEmploymentInfoKeyJobTitle       = "job_title"
+	EmployeeEmploymentInfoKeyDepartmentName = "department_name"
+	EmployeeEmploymentInfoKeyShift          = "shift"
+	EmployeeEmploymentInfoKeyShiftName      = "shift_name" // legacy eHRMS 鍵
+	EmployeeEmploymentInfoKeyShiftType      = "shift_type"
+)
+
 // EmployeeSections 定義員工區段的資料結構。
 type EmployeeSections struct {
 	BasicInfo             EmployeeBasicInfo             `json:"basic_info"`
@@ -270,8 +297,11 @@ type EmployeeSections struct {
 // EmployeeBasicInfo 定義員工基本 info 的資料結構。
 type EmployeeBasicInfo struct {
 	Name                 string         `json:"name,omitempty"`
+	NameEN               string         `json:"name_en,omitempty"`
 	CompanyEmail         string         `json:"company_email,omitempty"`
 	PersonalEmail        string         `json:"personal_email,omitempty"`
+	Gender               string         `json:"gender,omitempty"`
+	BirthDate            string         `json:"birth_date,omitempty"`
 	NationalityType      string         `json:"nationality_type,omitempty"`
 	NationalID           string         `json:"national_id,omitempty"`
 	PassportNo           string         `json:"passport_no,omitempty"`
@@ -427,6 +457,9 @@ type EmployeeScopeConstraint struct {
 }
 
 // EmployeeStats 定義員工 stats 的資料結構。
+// 口徑說明：Active 僅統計 employment_status=active 的員工（不含 probation、
+// onboarding、leave_suspended），屬「當前狀態」口徑；概覽頁的在職數則為
+// 月末時點快照（包含留職停薪等仍未離職者），兩者口徑不同、數字可有小幅差異。
 type EmployeeStats struct {
 	Total          int `json:"total"`
 	Active         int `json:"active"`
@@ -618,12 +651,15 @@ func EmployeeDetailFromEmployee(employee Employee) EmployeeDetail {
 func EmployeeSectionsFromEmployee(employee Employee) EmployeeSections {
 	return EmployeeSections{
 		BasicInfo: EmployeeBasicInfo{
-			Name:                 firstNonEmpty(employee.Name, sectionString(employee.BasicInfo, "name")),
-			CompanyEmail:         firstNonEmpty(employee.CompanyEmail, sectionString(employee.BasicInfo, "company_email"), sectionString(employee.BasicInfo, "email")),
+			Name:                 firstNonEmpty(employee.Name, sectionString(employee.BasicInfo, EmployeeBasicInfoKeyName)),
+			NameEN:               sectionString(employee.BasicInfo, EmployeeBasicInfoKeyNameEN),
+			CompanyEmail:         firstNonEmpty(employee.CompanyEmail, sectionString(employee.BasicInfo, EmployeeBasicInfoKeyCompanyEmail), sectionString(employee.BasicInfo, "email")),
 			PersonalEmail:        firstNonEmpty(employee.PersonalEmail, sectionString(employee.BasicInfo, "personal_email")),
-			NationalityType:      sectionString(employee.BasicInfo, "nationality_type"),
-			NationalID:           sectionString(employee.BasicInfo, "national_id"),
-			PassportNo:           sectionString(employee.BasicInfo, "passport_no"),
+			Gender:               sectionString(employee.BasicInfo, EmployeeBasicInfoKeyGender),
+			BirthDate:            sectionString(employee.BasicInfo, EmployeeBasicInfoKeyBirthDate),
+			NationalityType:      firstNonEmpty(sectionString(employee.BasicInfo, EmployeeBasicInfoKeyNationalityType), sectionString(employee.BasicInfo, EmployeeBasicInfoKeyNationality)),
+			NationalID:           sectionString(employee.BasicInfo, EmployeeBasicInfoKeyNationalID),
+			PassportNo:           sectionString(employee.BasicInfo, EmployeeBasicInfoKeyPassportNo),
 			PassportName:         sectionString(employee.BasicInfo, "passport_name"),
 			EntryDate:            sectionString(employee.BasicInfo, "entry_date"),
 			ARCNo:                sectionString(employee.BasicInfo, "arc_no"),
@@ -634,26 +670,27 @@ func EmployeeSectionsFromEmployee(employee Employee) EmployeeSections {
 			ContractExpiryDate:   sectionString(employee.BasicInfo, "contract_expiry_date"),
 			Broker:               sectionString(employee.BasicInfo, "broker"),
 			Avatar:               employee.BasicInfo["avatar"],
+			// "nationality" 刻意不列入 known：原始國籍名稱需透過 Additional 保留給前端顯示。
 			Additional: sectionAdditional(employee.BasicInfo,
-				"name", "company_email", "email", "personal_email", "nationality_type", "national_id",
+				"name", "name_en", "company_email", "email", "personal_email", "gender", "birth_date", "nationality_type", "national_id",
 				"passport_no", "passport_name", "entry_date", "arc_no", "arc_expiry_date", "tax_id",
 				"work_permit_no", "work_permit_expiry_date", "contract_expiry_date", "broker", "avatar"),
 		},
 		EmploymentInfo: EmployeeEmploymentInfo{
-			OrgUnitID:         firstNonEmpty(employee.OrgUnitID, sectionString(employee.EmploymentInfo, "org_unit_id"), sectionString(employee.EmploymentInfo, "department_id")),
+			OrgUnitID:         firstNonEmpty(employee.OrgUnitID, sectionString(employee.EmploymentInfo, EmployeeEmploymentInfoKeyOrgUnitID), sectionString(employee.EmploymentInfo, "department_id")),
 			PositionID:        firstNonEmpty(employee.PositionID, sectionString(employee.EmploymentInfo, "position_id")),
-			Position:          firstNonEmpty(employee.Position, sectionString(employee.EmploymentInfo, "position"), sectionString(employee.EmploymentInfo, "job_title")),
+			Position:          firstNonEmpty(employee.Position, sectionString(employee.EmploymentInfo, EmployeeEmploymentInfoKeyPosition), sectionString(employee.EmploymentInfo, EmployeeEmploymentInfoKeyJobTitle)),
 			Category:          firstNonEmpty(employee.Category, sectionString(employee.EmploymentInfo, "category")),
 			ManagerEmployeeID: firstNonEmpty(employee.ManagerEmployeeID, sectionString(employee.EmploymentInfo, "manager_employee_id")),
 			EmploymentStatus:  firstNonEmpty(employee.EmploymentStatus, employee.Status, sectionString(employee.EmploymentInfo, "employment_status")),
 			HireDate:          firstNonEmpty(dateString(employee.HireDate), sectionString(employee.EmploymentInfo, "hire_date")),
 			ResignDate:        firstNonEmpty(dateString(employee.ResignDate), sectionString(employee.EmploymentInfo, "resign_date")),
 			ResignReason:      sectionString(employee.EmploymentInfo, "resign_reason"),
-			Shift:             sectionString(employee.EmploymentInfo, "shift"),
+			Shift:             firstNonEmpty(sectionString(employee.EmploymentInfo, EmployeeEmploymentInfoKeyShift), sectionString(employee.EmploymentInfo, EmployeeEmploymentInfoKeyShiftName)),
 			TenureStartDate:   sectionString(employee.EmploymentInfo, "tenure_start_date"),
 			Additional: sectionAdditional(employee.EmploymentInfo,
 				"org_unit_id", "department_id", "position_id", "position", "job_title", "category", "manager_employee_id",
-				"employment_status", "hire_date", "resign_date", "resign_reason", "shift", "tenure_start_date"),
+				"employment_status", "hire_date", "resign_date", "resign_reason", "shift", "shift_name", "tenure_start_date"),
 		},
 		EducationMilitaryInfo: EmployeeEducationMilitaryInfo{
 			HighestEducation:     firstNonEmpty(sectionString(employee.EducationMilitaryInfo, "highest_education"), sectionString(employee.EducationMilitaryInfo, "education_level"), sectionString(employee.EducationMilitaryInfo, "degree")),
@@ -699,8 +736,11 @@ func EmployeeSectionsFromEmployee(employee Employee) EmployeeSections {
 func (v EmployeeBasicInfo) MarshalJSON() ([]byte, error) {
 	return json.Marshal(sectionJSON(v.Additional, map[string]any{
 		"name":                    v.Name,
+		"name_en":                 v.NameEN,
 		"company_email":           v.CompanyEmail,
 		"personal_email":          v.PersonalEmail,
+		"gender":                  v.Gender,
+		"birth_date":              v.BirthDate,
 		"nationality_type":        v.NationalityType,
 		"national_id":             v.NationalID,
 		"passport_no":             v.PassportNo,

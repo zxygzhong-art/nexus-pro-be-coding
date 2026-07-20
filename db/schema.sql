@@ -1499,7 +1499,6 @@ CREATE TABLE agent_definition_versions (
     created_at timestamptz NOT NULL,
     CONSTRAINT agent_definition_versions_unique UNIQUE (tenant_id, agent_id, version),
     CONSTRAINT agent_definition_versions_agent_fk FOREIGN KEY (tenant_id, agent_id) REFERENCES agent_definitions (tenant_id, id) ON DELETE CASCADE,
-    CONSTRAINT agent_definition_versions_model_fk FOREIGN KEY (tenant_id, model_id) REFERENCES agent_models (tenant_id, id),
     CONSTRAINT agent_definition_versions_created_by_fk FOREIGN KEY (tenant_id, created_by_account_id) REFERENCES accounts (tenant_id, id)
 );
 

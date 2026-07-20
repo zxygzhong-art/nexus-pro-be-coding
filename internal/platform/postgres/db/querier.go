@@ -18,7 +18,6 @@ type Querier interface {
 	CloseGroupMembership(ctx context.Context, arg CloseGroupMembershipParams) (AuthzGroupMembership, error)
 	CountActiveAgentRunsBySession(ctx context.Context, arg CountActiveAgentRunsBySessionParams) (int64, error)
 	CountAgentDefinitionsByKnowledgeBase(ctx context.Context, arg CountAgentDefinitionsByKnowledgeBaseParams) (int32, error)
-	CountAgentDefinitionsByModel(ctx context.Context, arg CountAgentDefinitionsByModelParams) (int32, error)
 	CountAgentRuns(ctx context.Context, tenantID string) (int64, error)
 	CountAgentRunsByAccount(ctx context.Context, arg CountAgentRunsByAccountParams) (int64, error)
 	CountAgentUsageByAccount(ctx context.Context, arg CountAgentUsageByAccountParams) (int64, error)
@@ -142,6 +141,8 @@ type Querier interface {
 	ListAccounts(ctx context.Context, tenantID string) ([]Account, error)
 	ListActiveAuthzAssumableRoleSessionsForRole(ctx context.Context, arg ListActiveAuthzAssumableRoleSessionsForRoleParams) ([]AuthzAssumableRoleSession, error)
 	ListActiveGroupMembershipsForAccount(ctx context.Context, arg ListActiveGroupMembershipsForAccountParams) ([]AuthzGroupMembership, error)
+	// 只統計「目前」定義對模型的引用；歷史版本是不可變審計快照，不應阻止模型刪除。
+	ListAgentDefinitionRefsByModel(ctx context.Context, arg ListAgentDefinitionRefsByModelParams) ([]ListAgentDefinitionRefsByModelRow, error)
 	ListAgentDefinitionVersions(ctx context.Context, arg ListAgentDefinitionVersionsParams) ([]AgentDefinitionVersion, error)
 	ListAgentDefinitions(ctx context.Context, tenantID string) ([]AgentDefinition, error)
 	ListAgentExternalTools(ctx context.Context, tenantID string) ([]AgentExternalTool, error)

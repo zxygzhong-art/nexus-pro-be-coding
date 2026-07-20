@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"strconv"
 	"strings"
@@ -2972,13 +2973,17 @@ func (s *Store) UpdateAgentModelSyncResult(execCtx context.Context, tenantID, id
 	return fromAgentModel(v), true, nil
 }
 
-// CountAgentDefinitionsByModel 從儲存層統計使用模型的 agent。
-func (s *Store) CountAgentDefinitionsByModel(execCtx context.Context, tenantID, modelID string) (int, error) {
-	count, err := s.q.CountAgentDefinitionsByModel(tenantContext(execCtx, tenantID), sqlc.CountAgentDefinitionsByModelParams{TenantID: tenantID, ModelID: modelID})
+// ListAgentDefinitionRefsByModel 列出目前引用模型的 agent（僅當前定義，不含歷史版本）。
+func (s *Store) ListAgentDefinitionRefsByModel(execCtx context.Context, tenantID, modelID string) ([]domain.AgentDefinitionRef, error) {
+	rows, err := s.q.ListAgentDefinitionRefsByModel(tenantContext(execCtx, tenantID), sqlc.ListAgentDefinitionRefsByModelParams{TenantID: tenantID, ModelID: modelID})
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
-	return int(count), nil
+	refs := make([]domain.AgentDefinitionRef, 0, len(rows))
+	for _, row := range rows {
+		refs = append(refs, domain.AgentDefinitionRef{ID: row.ID, Name: row.Name})
+	}
+	return refs, nil
 }
 
 // InsertAgentExternalTool persists one tenant-scoped external tool registration.
@@ -3807,25 +3812,36 @@ func jsonMap(b []byte) map[string]any {
 	return jsoncodec.Map(b)
 }
 
+// logJSONDecodeFailure 在持久化 JSONB 解碼失敗時輸出 warn 日誌。
+// 損壞資料維持 fail-closed 還原為空值,但必須帶表/記錄上下文可觀測。
+func logJSONDecodeFailure(target string, err error, attrs ...any) {
+	args := make([]any, 0, len(attrs)+4)
+	args = append(args, "target", target, "error", err)
+	args = append(args, attrs...)
+	slog.Warn("postgres store: failed to decode persisted JSON payload", args...)
+}
+
 // jsonStrings 處理 JSON 字串陣列。
-func jsonStrings(b []byte) []string {
+func jsonStrings(target string, b []byte, attrs ...any) []string {
 	if len(b) == 0 {
 		return nil
 	}
 	var out []string
 	if err := json.Unmarshal(b, &out); err != nil {
+		logJSONDecodeFailure(target, err, attrs...)
 		return nil
 	}
 	return out
 }
 
 // jsonAgentTeamMembers 將數據庫中的 Team 成員快照還原為領域結構。
-func jsonAgentTeamMembers(b []byte) []domain.AgentTeamMember {
+func jsonAgentTeamMembers(target string, b []byte, attrs ...any) []domain.AgentTeamMember {
 	if len(b) == 0 {
 		return nil
 	}
 	var out []domain.AgentTeamMember
 	if err := json.Unmarshal(b, &out); err != nil {
+		logJSONDecodeFailure(target, err, attrs...)
 		return nil
 	}
 	return out
@@ -4574,16 +4590,20 @@ func fromOvertimeRequest(v sqlc.OvertimeRequest) domain.OvertimeRequest {
 
 // fromFormDefinitionDraft 轉換表單定義草稿。
 func fromFormDefinitionDraft(v sqlc.FormDefinitionDraft) domain.FormDefinitionDraft {
+	decodeCtx := []any{"table", "form_definition_drafts", "draft_id", v.ID, "tenant_id", v.TenantID}
 	var authoring domain.FormDefinitionSchemaV2
 	if err := json.Unmarshal(v.AuthoringSchema, &authoring); err != nil {
+		logJSONDecodeFailure("authoring_schema", err, decodeCtx...)
 		authoring = domain.FormDefinitionSchemaV2{}
 	}
 	var compiled map[string]any
 	if err := json.Unmarshal(v.CompiledSchema, &compiled); err != nil {
+		logJSONDecodeFailure("compiled_schema", err, decodeCtx...)
 		compiled = map[string]any{}
 	}
 	var validation domain.FormDefinitionValidation
 	if err := json.Unmarshal(v.ValidationResult, &validation); err != nil {
+		logJSONDecodeFailure("validation_result", err, decodeCtx...)
 		validation = domain.FormDefinitionValidation{}
 	}
 	return domain.FormDefinitionDraft{
@@ -4769,6 +4789,7 @@ func maskStoredSecret(value string) string {
 
 // fromAgentDefinition 轉換 agent 定義。
 func fromAgentDefinition(v sqlc.AgentDefinition) domain.AgentDefinition {
+	decodeCtx := []any{"table", "agent_definitions", "agent_id", v.ID, "tenant_id", v.TenantID}
 	return domain.AgentDefinition{
 		ID:                            v.ID,
 		TenantID:                      v.TenantID,
@@ -4778,16 +4799,16 @@ func fromAgentDefinition(v sqlc.AgentDefinition) domain.AgentDefinition {
 		Category:                      domain.AgentCategory(v.Category),
 		ModelID:                       v.ModelID,
 		MainAgentRole:                 v.MainAgentRole,
-		SubAgents:                     jsonAgentTeamMembers(v.SubAgents),
+		SubAgents:                     jsonAgentTeamMembers("sub_agents", v.SubAgents, decodeCtx...),
 		SystemPrompt:                  v.SystemPrompt,
 		WelcomeMessage:                v.WelcomeMessage,
-		SuggestedQuestions:            jsonStrings(v.SuggestedQuestions),
+		SuggestedQuestions:            jsonStrings("suggested_questions", v.SuggestedQuestions, decodeCtx...),
 		SuggestedQuestionTranslations: jsonLocalizedAgentSuggestedQuestions(v.SuggestedQuestionTranslations),
-		Tools:                         jsonStrings(v.Tools),
-		KnowledgeBaseIDs:              jsonStrings(v.KnowledgeBaseIds),
+		Tools:                         jsonStrings("tools", v.Tools, decodeCtx...),
+		KnowledgeBaseIDs:              jsonStrings("knowledge_base_ids", v.KnowledgeBaseIds, decodeCtx...),
 		Status:                        domain.AgentDefinitionStatus(v.Status),
 		Visibility:                    domain.AgentVisibility(v.Visibility),
-		VisibilityTargets:             jsonStrings(v.VisibilityTargets),
+		VisibilityTargets:             jsonStrings("visibility_targets", v.VisibilityTargets, decodeCtx...),
 		TimeoutSeconds:                int(v.TimeoutSeconds),
 		Version:                       int(v.Version),
 		PublishedVersion:              int(v.PublishedVersion),
@@ -4797,7 +4818,7 @@ func fromAgentDefinition(v sqlc.AgentDefinition) domain.AgentDefinition {
 			FailedRuns:   v.UsageFailedRuns,
 			AvgLatencyMs: int(v.UsageAvgLatencyMs),
 			LastRunAt:    timePtrFrom(v.UsageLastRunAt),
-			TopPrompts:   jsonStrings(v.UsageTopPrompts),
+			TopPrompts:   jsonStrings("usage_top_prompts", v.UsageTopPrompts, decodeCtx...),
 		},
 		CreatedByAccountID: textFrom(v.CreatedByAccountID),
 		UpdatedByAccountID: textFrom(v.UpdatedByAccountID),
@@ -4808,19 +4829,20 @@ func fromAgentDefinition(v sqlc.AgentDefinition) domain.AgentDefinition {
 
 // fromAgentDefinitionVersion 轉換 agent 定義版本。
 func fromAgentDefinitionVersion(v sqlc.AgentDefinitionVersion) domain.AgentDefinitionVersion {
+	decodeCtx := []any{"table", "agent_definition_versions", "agent_definition_version_id", v.ID, "agent_id", v.AgentID, "tenant_id", v.TenantID}
 	return domain.AgentDefinitionVersion{
 		ID:                            v.ID,
 		TenantID:                      v.TenantID,
 		AgentID:                       v.AgentID,
 		Version:                       int(v.Version),
 		MainAgentRole:                 v.MainAgentRole,
-		SubAgents:                     jsonAgentTeamMembers(v.SubAgents),
+		SubAgents:                     jsonAgentTeamMembers("sub_agents", v.SubAgents, decodeCtx...),
 		SystemPrompt:                  v.SystemPrompt,
 		WelcomeMessage:                v.WelcomeMessage,
-		SuggestedQuestions:            jsonStrings(v.SuggestedQuestions),
+		SuggestedQuestions:            jsonStrings("suggested_questions", v.SuggestedQuestions, decodeCtx...),
 		SuggestedQuestionTranslations: jsonLocalizedAgentSuggestedQuestions(v.SuggestedQuestionTranslations),
-		Tools:                         jsonStrings(v.Tools),
-		KnowledgeBaseIDs:              jsonStrings(v.KnowledgeBaseIds),
+		Tools:                         jsonStrings("tools", v.Tools, decodeCtx...),
+		KnowledgeBaseIDs:              jsonStrings("knowledge_base_ids", v.KnowledgeBaseIds, decodeCtx...),
 		ModelID:                       v.ModelID,
 		Note:                          v.Note,
 		CreatedByAccountID:            textFrom(v.CreatedByAccountID),

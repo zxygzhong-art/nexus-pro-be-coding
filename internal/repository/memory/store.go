@@ -2936,32 +2936,24 @@ func (s *Store) UpdateAgentModelSyncResult(_ context.Context, tenantID, id strin
 	return copyAgentModel(v), true, nil
 }
 
-// CountAgentDefinitionsByModel 從儲存層統計使用模型的 agent。
-func (s *Store) CountAgentDefinitionsByModel(_ context.Context, tenantID, modelID string) (int, error) {
+// ListAgentDefinitionRefsByModel 列出目前引用模型的 agent（僅當前定義，不含歷史版本）。
+func (s *Store) ListAgentDefinitionRefsByModel(_ context.Context, tenantID, modelID string) ([]domain.AgentDefinitionRef, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	count := 0
+	var refs []domain.AgentDefinitionRef
 	for _, item := range s.agentDefinitions[tenantID] {
 		if item.ModelID == modelID {
-			count++
+			refs = append(refs, domain.AgentDefinitionRef{ID: item.ID, Name: item.Name})
 			continue
 		}
 		for _, member := range item.SubAgents {
 			if member.ModelID == modelID {
-				count++
+				refs = append(refs, domain.AgentDefinitionRef{ID: item.ID, Name: item.Name})
 				break
 			}
 		}
 	}
-	for _, item := range s.agentDefinitionVersions[tenantID] {
-		for _, member := range item.SubAgents {
-			if member.ModelID == modelID {
-				count++
-				break
-			}
-		}
-	}
-	return count, nil
+	return refs, nil
 }
 
 // InsertAgentExternalTool stores one tenant-scoped external tool registration.

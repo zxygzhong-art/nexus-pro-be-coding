@@ -201,7 +201,6 @@ func (m *fakeEventMessage) Nak() error {
 	return m.nakErr
 }
 
-
 // TestOpenFGAConsumerProcessedIDsBounded 驗證去重集合達上限時整體重建，最舊事件可被重新處理。
 func TestOpenFGAConsumerProcessedIDsBounded(t *testing.T) {
 	ctx := context.Background()

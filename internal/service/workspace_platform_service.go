@@ -479,7 +479,11 @@ func insightAttendanceMembers(attendance WorkspaceAttendanceResponse) ([]map[str
 		}
 		totalCentiHours += centiHours
 	}
-	sort.SliceStable(members, func(i, j int) bool { return members[i]["id"].(string) < members[j]["id"].(string) })
+	sort.SliceStable(members, func(i, j int) bool {
+		idI, _ := members[i]["id"].(string)
+		idJ, _ := members[j]["id"].(string)
+		return idI < idJ
+	})
 	return members, insightTopMemberBars(hourBars, "primary", "h"), insightTopMemberBars(leaveBars, "warning", " 天"), float64(totalCentiHours) / 100
 }
 

@@ -151,15 +151,15 @@ func relationshipOutboxEventType(operation domain.AuthzRelationshipTupleOperatio
 }
 
 // relationshipTuplePayload 處理關係 tuple payload。
-func relationshipTuplePayload(operation domain.AuthzRelationshipTupleOperation, tuple domain.AuthzRelationshipTuple) map[string]any {
-	return map[string]any{
-		"operation":    string(operation),
-		"object_type":  tuple.ObjectType,
-		"object_id":    tuple.ObjectID,
-		"relation":     tuple.Relation,
-		"subject_type": tuple.SubjectType,
-		"subject_id":   tuple.SubjectID,
-	}
+func relationshipTuplePayload(operation domain.AuthzRelationshipTupleOperation, tuple domain.AuthzRelationshipTuple) (map[string]any, error) {
+	return domain.OpenFGARelationshipPayload{
+		Operation:   string(operation),
+		ObjectType:  tuple.ObjectType,
+		ObjectID:    tuple.ObjectID,
+		Relation:    tuple.Relation,
+		SubjectType: tuple.SubjectType,
+		SubjectID:   tuple.SubjectID,
+	}.Map()
 }
 
 // dedupeRelationshipTupleChanges 處理 dedupe 關係 tuple changes。

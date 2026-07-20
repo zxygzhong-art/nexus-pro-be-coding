@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"sort"
 	"strings"
 	"unicode/utf8"
 
@@ -135,6 +136,19 @@ func (c AgentService) UpdateModel(ctx RequestContext, id string, input domain.Up
 	return model, nil
 }
 
+// agentDefinitionRefSummary 產生阻擋刪除的引用方摘要（最多 5 個名稱）。
+func agentDefinitionRefSummary(refs []domain.AgentDefinitionRef) string {
+	names := make([]string, 0, len(refs))
+	for _, ref := range refs {
+		names = append(names, ref.Name)
+	}
+	sort.Strings(names)
+	if len(names) > 5 {
+		return strings.Join(names[:5], ", ") + fmt.Sprintf(" (+%d more)", len(names)-5)
+	}
+	return strings.Join(names, ", ")
+}
+
 // DeleteModel 刪除工作區模型設定；已被 Agent 使用時阻擋。
 func (c AgentService) DeleteModel(ctx RequestContext, id string) (domain.AgentModel, error) {
 	account, _, err := c.requireAgentAuthz(ctx, ResourceModel, ActionDelete, id)
@@ -147,12 +161,13 @@ func (c AgentService) DeleteModel(ctx RequestContext, id string) (domain.AgentMo
 	}
 	var deleted domain.AgentModel
 	err = c.withTransaction(ctx, func(tx AgentService) error {
-		count, err := tx.store.CountAgentDefinitionsByModel(goContext(ctx), ctx.TenantID, id)
+		// 只阻擋「目前」定義的引用；歷史版本是不可變審計快照，不應鎖死模型生命週期。
+		refs, err := tx.store.ListAgentDefinitionRefsByModel(goContext(ctx), ctx.TenantID, id)
 		if err != nil {
 			return err
 		}
-		if count > 0 {
-			return Conflict("agent model is used by agent definitions").WithReasonCode("agent_model_in_use")
+		if len(refs) > 0 {
+			return Conflict("agent model is used by agent definitions: " + agentDefinitionRefSummary(refs)).WithReasonCode("agent_model_in_use")
 		}
 		model, ok, err := tx.store.DeleteAgentModel(goContext(ctx), ctx.TenantID, id)
 		if err != nil {
@@ -1085,13 +1100,17 @@ func (c AgentService) normalizeAgentModel(ctx RequestContext, model domain.Agent
 
 // appendAgentModelSyncEvent 在模型資料交易內追加不含密鑰的 LiteLLM 同步事件。
 func (c AgentService) appendAgentModelSyncEvent(ctx RequestContext, modelID string, eventType domain.EventType) error {
+	payload, err := domain.AgentModelSyncPayload{ModelID: modelID}.Map()
+	if err != nil {
+		return err
+	}
 	return c.store.AppendOutboxEvent(goContext(ctx), domain.OutboxEvent{
 		ID:            utils.NewID("outbox"),
 		TenantID:      ctx.TenantID,
 		EventType:     string(eventType),
 		AggregateType: domain.OutboxAggregateAgentModel,
 		AggregateID:   modelID,
-		Payload:       map[string]any{"model_id": modelID},
+		Payload:       payload,
 		Status:        "pending",
 		CreatedAt:     c.Now(),
 	})
@@ -1461,7 +1480,17 @@ func agentDefinitionRuntimeSignature(agent domain.AgentDefinition) string {
 		Tools                         []string                                 `json:"tools"`
 		KnowledgeBaseIDs              []string                                 `json:"knowledge_base_ids"`
 		ModelID                       string                                   `json:"model_id"`
-	}{agent.MainAgentRole, agent.SubAgents, agent.SystemPrompt, agent.WelcomeMessage, agent.SuggestedQuestions, agent.SuggestedQuestionTranslations, agent.Tools, agent.KnowledgeBaseIDs, agent.ModelID}
+	}{
+		MainAgentRole:                 agent.MainAgentRole,
+		SubAgents:                     agent.SubAgents,
+		SystemPrompt:                  agent.SystemPrompt,
+		WelcomeMessage:                agent.WelcomeMessage,
+		SuggestedQuestions:            agent.SuggestedQuestions,
+		SuggestedQuestionTranslations: agent.SuggestedQuestionTranslations,
+		Tools:                         agent.Tools,
+		KnowledgeBaseIDs:              agent.KnowledgeBaseIDs,
+		ModelID:                       agent.ModelID,
+	}
 	encoded, _ := json.Marshal(payload)
 	return string(encoded)
 }

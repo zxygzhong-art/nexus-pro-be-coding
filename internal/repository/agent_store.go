@@ -20,7 +20,7 @@ type AgentStore interface {
 	DeleteAgentModel(ctx context.Context, tenantID, id string) (domain.AgentModel, bool, error)
 	UpdateAgentModelTestResult(ctx context.Context, tenantID, id, status, message string, testedAt time.Time) (domain.AgentModel, bool, error)
 	UpdateAgentModelSyncResult(ctx context.Context, tenantID, id string, status domain.AgentModelSyncStatus, lastError, configHash string, syncedAt *time.Time, updatedAt time.Time) (domain.AgentModel, bool, error)
-	CountAgentDefinitionsByModel(ctx context.Context, tenantID, modelID string) (int, error)
+	ListAgentDefinitionRefsByModel(ctx context.Context, tenantID, modelID string) ([]domain.AgentDefinitionRef, error)
 	InsertAgentExternalTool(context.Context, domain.AgentExternalTool) error
 	ListAgentExternalTools(ctx context.Context, tenantID string) ([]domain.AgentExternalTool, error)
 	DeleteAgentExternalTool(ctx context.Context, tenantID, id string) (domain.AgentExternalTool, bool, error)

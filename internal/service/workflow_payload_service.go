@@ -1,6 +1,7 @@
 package service
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -32,18 +33,62 @@ var workflowServerOwnedPayloadTokens = map[string]struct{}{
 	"workflowstatus":        {},
 }
 
+// workflowReviewPayloadKey 是流程 payload 中存放最近一次審批動作的私有鍵。
+const workflowReviewPayloadKey = "_review"
+
+// workflowReviewPayload 定義 _review 的穩定結構；寫入與讀取都經 JSON marshal/unmarshal，不再裸斷言。
+type workflowReviewPayload struct {
+	Type      string `json:"type"`
+	AccountID string `json:"account_id"`
+	Comment   string `json:"comment"`
+	Time      string `json:"time"`
+}
+
+// toMap 以 JSON 往返產生與既有儲存格式一致的 map[string]any。
+func (r workflowReviewPayload) toMap() map[string]any {
+	raw, err := json.Marshal(r)
+	if err != nil {
+		return map[string]any{}
+	}
+	out := map[string]any{}
+	if err := json.Unmarshal(raw, &out); err != nil {
+		return map[string]any{}
+	}
+	return out
+}
+
+// workflowReviewFromPayload 取出 typed 審批記錄；鍵缺失、型別不符或 type 為空皆視為不存在。
+func workflowReviewFromPayload(payload map[string]any) (workflowReviewPayload, bool) {
+	raw, ok := payload[workflowReviewPayloadKey]
+	if !ok {
+		return workflowReviewPayload{}, false
+	}
+	encoded, err := json.Marshal(raw)
+	if err != nil {
+		return workflowReviewPayload{}, false
+	}
+	review := workflowReviewPayload{}
+	if err := json.Unmarshal(encoded, &review); err != nil {
+		return workflowReviewPayload{}, false
+	}
+	if strings.TrimSpace(review.Type) == "" {
+		return workflowReviewPayload{}, false
+	}
+	return review, true
+}
+
 // withWorkflowReview 附加流程審核。
 func withWorkflowReview(payload map[string]any, kind, accountID, comment string, at time.Time) map[string]any {
 	next := utils.CopyStringMap(payload)
 	if next == nil {
 		next = map[string]any{}
 	}
-	next["_review"] = map[string]any{
-		"type":       kind,
-		"account_id": accountID,
-		"comment":    strings.TrimSpace(comment),
-		"time":       apiTimestamp(at),
-	}
+	next[workflowReviewPayloadKey] = workflowReviewPayload{
+		Type:      kind,
+		AccountID: accountID,
+		Comment:   strings.TrimSpace(comment),
+		Time:      apiTimestamp(at),
+	}.toMap()
 	return next
 }
 

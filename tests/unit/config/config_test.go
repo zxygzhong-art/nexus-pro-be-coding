@@ -789,7 +789,6 @@ func TestInvalidBooleanConfigReturnsError(t *testing.T) {
 	}
 }
 
-
 // TestOpenFGAAuthTokenConfig 驗證 OpenFGA preshared token 從環境變數載入。
 func TestOpenFGAAuthTokenConfig(t *testing.T) {
 	t.Setenv("OPENFGA_AUTH_TOKEN", "  dev-token  ")

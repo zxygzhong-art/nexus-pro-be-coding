@@ -122,6 +122,12 @@ type AgentUsageStats struct {
 	TopPrompts   []string   `json:"top_prompts,omitempty"`
 }
 
+// AgentDefinitionRef 是 Agent 的最小引用（用於刪除前置檢查等場景）。
+type AgentDefinitionRef struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
 // AgentDefinition 定義租戶 Agent。
 type AgentDefinition struct {
 	ID                            string                            `json:"id"`

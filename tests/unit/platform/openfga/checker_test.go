@@ -309,7 +309,6 @@ func TestWriteRelationshipTuplesReturnsDetailedHTTPError(t *testing.T) {
 	}
 }
 
-
 // TestCheckerSendsBearerTokenWhenConfigured 驗證設定 token 後所有 OpenFGA 請求帶 Authorization。
 func TestCheckerSendsBearerTokenWhenConfigured(t *testing.T) {
 	got := map[string]string{}

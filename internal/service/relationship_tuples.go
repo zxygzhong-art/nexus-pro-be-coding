@@ -448,13 +448,17 @@ func (c *Service) applyRelationshipTupleChange(ctx RequestContext, change domain
 	default:
 		return BadRequest("unsupported relationship tuple operation")
 	}
+	payload, err := relationshipTuplePayload(change.Operation, tuple)
+	if err != nil {
+		return err
+	}
 	return c.store.AppendOutboxEvent(goContext(ctx), domain.OutboxEvent{
 		ID:            utils.NewID("outbox"),
 		TenantID:      ctx.TenantID,
 		EventType:     relationshipOutboxEventType(change.Operation),
 		AggregateType: domain.OutboxAggregateAuthz,
 		AggregateID:   tuple.ObjectID,
-		Payload:       relationshipTuplePayload(change.Operation, tuple),
+		Payload:       payload,
 		Status:        "pending",
 		RetryCount:    0,
 		CreatedAt:     c.Now(),

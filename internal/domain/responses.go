@@ -42,6 +42,56 @@ type MenuListResponse struct {
 	Total int        `json:"total"`
 }
 
+// AgentModelListResponse 定義 agent model 列表回應的資料結構。
+type AgentModelListResponse struct {
+	Items []AgentModel `json:"items"`
+	Total int          `json:"total"`
+}
+
+// AgentDefinitionListResponse 定義 agent definition 列表回應的資料結構。
+type AgentDefinitionListResponse struct {
+	Items []AgentDefinition `json:"items"`
+	Total int               `json:"total"`
+}
+
+// AgentToolMetaListResponse 定義 agent tool 列表回應的資料結構。
+type AgentToolMetaListResponse struct {
+	Items []AgentToolMeta `json:"items"`
+	Total int             `json:"total"`
+}
+
+// AgentExternalToolListResponse 定義外部 agent tool 列表回應的資料結構。
+type AgentExternalToolListResponse struct {
+	Items []AgentExternalTool `json:"items"`
+	Total int                 `json:"total"`
+}
+
+// AgentSessionFileListResponse 定義 agent session 檔案列表回應的資料結構。
+type AgentSessionFileListResponse struct {
+	Items []AgentSessionFile `json:"items"`
+	Total int                `json:"total"`
+}
+
+// KnowledgeBaseListResponse 定義知識庫列表回應的資料結構。
+type KnowledgeBaseListResponse struct {
+	Items []KnowledgeBase `json:"items"`
+	Total int             `json:"total"`
+}
+
+// KnowledgeDocumentListResponse 定義知識庫文件列表回應的資料結構。
+type KnowledgeDocumentListResponse struct {
+	Items []KnowledgeDocument `json:"items"`
+	Total int                 `json:"total"`
+}
+
+// KnowledgeSearchResponse 定義知識庫語意搜尋回應的資料結構。
+type KnowledgeSearchResponse struct {
+	Items     []KnowledgeSearchHit `json:"items"`
+	Total     int                  `json:"total"`
+	Query     string               `json:"query"`
+	Semantics string               `json:"semantics"`
+}
+
 // AssumeRoleResponse 定義角色回應的資料結構。
 type AssumeRoleResponse struct {
 	SessionID          string         `json:"session_id"`

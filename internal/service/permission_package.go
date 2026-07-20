@@ -506,13 +506,35 @@ func (c *Service) ensureBuiltinPermissionPackage(ctx context.Context) error {
 	return iam.storePermissionPackageWithTemplates(ctx, pkg)
 }
 
-func (c IAMService) instantiatePermissionPackageTemplates(ctx RequestContext, pkg PermissionPackage) (map[string]any, error) {
-	artifactMap := map[string]any{
-		"permission_set_templates": map[string]any{},
-		"user_group_templates":     map[string]any{},
-		"assumable_role_templates": map[string]any{},
-		"data_scopes":              map[string]any{},
+// permissionPackageArtifactMaps 以 typed 欄位收集模板實例化產生的 ID 對映，避免對內層 map 裸斷言。
+type permissionPackageArtifactMaps struct {
+	permissionSetTemplates map[string]any
+	userGroupTemplates     map[string]any
+	assumableRoleTemplates map[string]any
+	dataScopes             map[string]any
+}
+
+func newPermissionPackageArtifactMaps() permissionPackageArtifactMaps {
+	return permissionPackageArtifactMaps{
+		permissionSetTemplates: map[string]any{},
+		userGroupTemplates:     map[string]any{},
+		assumableRoleTemplates: map[string]any{},
+		dataScopes:             map[string]any{},
 	}
+}
+
+// toArtifactMap 轉為既有的儲存/線上格式。
+func (m permissionPackageArtifactMaps) toArtifactMap() map[string]any {
+	return map[string]any{
+		"permission_set_templates": m.permissionSetTemplates,
+		"user_group_templates":     m.userGroupTemplates,
+		"assumable_role_templates": m.assumableRoleTemplates,
+		"data_scopes":              m.dataScopes,
+	}
+}
+
+func (c IAMService) instantiatePermissionPackageTemplates(ctx RequestContext, pkg PermissionPackage) (map[string]any, error) {
+	artifacts := newPermissionPackageArtifactMaps()
 	permissionSetIDs := map[string]string{}
 	for _, scope := range pkg.Content.DataScopes {
 		id, err := c.ensurePackageDataScope(ctx, pkg, scope)
@@ -520,7 +542,7 @@ func (c IAMService) instantiatePermissionPackageTemplates(ctx RequestContext, pk
 			return nil, err
 		}
 		if id != "" {
-			artifactMap["data_scopes"].(map[string]any)[scope.Code] = id
+			artifacts.dataScopes[scope.Code] = id
 		}
 	}
 	for _, tpl := range pkg.Content.PermissionSetTemplates {
@@ -529,23 +551,23 @@ func (c IAMService) instantiatePermissionPackageTemplates(ctx RequestContext, pk
 			return nil, err
 		}
 		permissionSetIDs[tpl.TemplateKey] = set.ID
-		artifactMap["permission_set_templates"].(map[string]any)[tpl.TemplateKey] = set.ID
+		artifacts.permissionSetTemplates[tpl.TemplateKey] = set.ID
 	}
 	for _, tpl := range pkg.Content.UserGroupTemplates {
 		group, err := c.ensurePackageUserGroup(ctx, pkg, tpl, permissionSetIDs)
 		if err != nil {
 			return nil, err
 		}
-		artifactMap["user_group_templates"].(map[string]any)[tpl.TemplateKey] = group.ID
+		artifacts.userGroupTemplates[tpl.TemplateKey] = group.ID
 	}
 	for _, tpl := range pkg.Content.AssumableRoleTemplates {
 		role, err := c.ensurePackageAssumableRole(ctx, pkg, tpl, permissionSetIDs)
 		if err != nil {
 			return nil, err
 		}
-		artifactMap["assumable_role_templates"].(map[string]any)[tpl.TemplateKey] = role.ID
+		artifacts.assumableRoleTemplates[tpl.TemplateKey] = role.ID
 	}
-	return artifactMap, nil
+	return artifacts.toArtifactMap(), nil
 }
 
 func (c IAMService) ensurePackageDataScope(ctx RequestContext, pkg PermissionPackage, tpl PermissionPackageDataScope) (string, error) {

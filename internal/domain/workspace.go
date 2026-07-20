@@ -18,6 +18,12 @@ type WorkspaceOverviewResponse struct {
 }
 
 // WorkspaceHRSummary 定義工作區 HR 摘要的資料結構。
+// 口徑說明（與人員異動頁一致的「時點快照」口徑）：
+//   - Active：當月末時點在職快照，包含 active/probation/onboarding(已到職)/leave_suspended，
+//     排除已離職與已刪除；因此會略大於員工頁僅統計 status=active 的在職數。
+//   - Hires：當月 hire_date 落入區間的新進人數。
+//   - Separations：當月有效離職時間（resign_date 優先）落入區間的離職人數。
+//   - SeparationRate：Separations ÷ 當月平均在職（月初與月末快照平均）× 100%。
 type WorkspaceHRSummary struct {
 	Title          string `json:"title"`
 	Active         int    `json:"active"`
@@ -109,6 +115,9 @@ type WorkspaceTurnoverResponse struct {
 }
 
 // WorkspaceTurnoverMonthly 定義工作區人員異動每月的資料結構。
+// 口徑說明：統計範圍排除隸屬已關閉組織單元或已停用崗位的員工，
+// 因此在職數會小於概覽頁（全員月末快照）。離職率 = 當月離職 ÷ 當月平均在職
+// （月初與月末快照平均）；每列均滿足 上月在職 + 新進 − 離職 − 資遣 = 本月在職。
 type WorkspaceTurnoverMonthly struct {
 	Year           int                       `json:"year"`
 	Month          int                       `json:"month"`
@@ -122,6 +131,9 @@ type WorkspaceTurnoverMonthly struct {
 }
 
 // WorkspaceTurnoverAnnual 定義工作區人員異動年度的資料結構。
+// 口徑說明：年離職率 = 年度離職 ÷ 年度平均在職（年初與年末快照平均）；
+// 年淨增減 = 年新進 − 年離職 − 年資遣，且恆等於 年末在職 − 年初在職
+// （每列均滿足 年初在職 + 新進 − 離職 − 資遣 = 年末在職 的閉合恆等式）。
 type WorkspaceTurnoverAnnual struct {
 	Year               int                       `json:"year"`
 	IsFuture           bool                      `json:"is_future"`

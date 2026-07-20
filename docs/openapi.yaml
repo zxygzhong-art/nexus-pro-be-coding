@@ -2433,6 +2433,11 @@ paths:
   /v1/workspace/turnover:
     get:
       summary: Get workspace employment turnover analysis
+      description: |
+        統計範圍排除隸屬已關閉組織單元或已停用崗位的員工，因此在職數小於概覽頁（全員快照）。
+        離職以有效離職時間（resign_date 優先）落入期間為準；
+        離職率 = 期間離職 ÷ 期間平均在職（期初與期末快照平均）× 100%；
+        年度數字滿足閉合恆等式：年初在職 + 年新進 − 年離職 − 年資遣 = 年末在職。
       parameters:
         - {name: year, in: query, schema: {type: integer, minimum: 1970}}
         - {name: month, in: query, schema: {type: integer, minimum: 1, maximum: 12}}
@@ -2583,7 +2588,7 @@ paths:
           description: Knowledge base list with document counts
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/KnowledgeBaseListResponse"}
+              schema: {$ref: "#/components/schemas/KnowledgeBaseListDataResponse"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
     post:
@@ -2655,7 +2660,7 @@ paths:
           description: Knowledge source list
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/KnowledgeDocumentListResponse"}
+              schema: {$ref: "#/components/schemas/KnowledgeDocumentListDataResponse"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
@@ -2740,7 +2745,7 @@ paths:
           description: Search hits with document citations
           content:
             application/json:
-              schema: {$ref: "#/components/schemas/KnowledgeSearchResponse"}
+              schema: {$ref: "#/components/schemas/KnowledgeSearchDataResponse"}
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -2794,7 +2799,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/AgentModelListDataResponse"
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
@@ -2890,7 +2895,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/AgentDefinitionListDataResponse"
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
@@ -3019,7 +3024,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/AgentToolMetaListDataResponse"
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
@@ -3906,7 +3911,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/AgentSessionFileListDataResponse"
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
@@ -4188,6 +4193,64 @@ components:
       required: [data]
       properties:
         data: {$ref: "#/components/schemas/AgentExternalToolListResponse"}
+    AgentModel:
+      type: object
+      required: [id, tenant_id, name, provider, model_name, litellm_model, api_key_set, rate_limit_rpm, status, timeout_seconds, monthly_quota, used_quota, last_test_status, sync_status, created_at, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        name: {type: string}
+        provider: {type: string}
+        model_name: {type: string}
+        litellm_model: {type: string}
+        api_base_url: {type: string}
+        api_key_set: {type: boolean}
+        api_key_preview: {type: string, description: Masked preview only; the plaintext API key is never returned.}
+        rate_limit_rpm: {type: integer, minimum: 0}
+        status: {type: string, enum: [active, disabled]}
+        timeout_seconds: {type: integer, minimum: 1}
+        monthly_quota: {type: integer, format: int64, minimum: 0}
+        used_quota: {type: integer, format: int64, minimum: 0}
+        last_tested_at: {type: string, format: date-time}
+        last_test_status: {type: string, enum: [ok, failed, untested]}
+        last_test_message: {type: string}
+        sync_status: {type: string, enum: [pending, synced, failed]}
+        last_synced_at: {type: string, format: date-time}
+        last_sync_error: {type: string}
+        synced_config_hash: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    AgentModelListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/AgentModel"}}
+        total: {type: integer, minimum: 0}
+    AgentModelListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: "#/components/schemas/AgentModelListResponse"}
+    AgentToolMeta:
+      type: object
+      required: [value, label, description, readonly, required_permission]
+      properties:
+        value: {type: string}
+        label: {type: string}
+        description: {type: string}
+        readonly: {type: boolean}
+        required_permission: {type: string}
+    AgentToolMetaListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/AgentToolMeta"}}
+        total: {type: integer, minimum: 0}
+    AgentToolMetaListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: "#/components/schemas/AgentToolMetaListResponse"}
     KnowledgeBase:
       type: object
       required: [id, tenant_id, name, description, chunk_mode, chunk_size, chunk_overlap, document_count, created_at, updated_at]
@@ -4291,6 +4354,21 @@ components:
         total: {type: integer, minimum: 0}
         query: {type: string}
         semantics: {type: string}
+    KnowledgeBaseListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: "#/components/schemas/KnowledgeBaseListResponse"}
+    KnowledgeDocumentListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: "#/components/schemas/KnowledgeDocumentListResponse"}
+    KnowledgeSearchDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: "#/components/schemas/KnowledgeSearchResponse"}
     AgentTeamMember:
       type: object
       required: [id, name, role, model_id, tools, knowledge_base_ids]
@@ -4448,6 +4526,89 @@ components:
         model_id: {type: string}
         note: {type: string}
         created_at: {type: string, format: date-time}
+    AgentUsageStats:
+      type: object
+      required: [total_runs, success_runs, failed_runs, avg_latency_ms]
+      properties:
+        total_runs: {type: integer, format: int64, minimum: 0}
+        success_runs: {type: integer, format: int64, minimum: 0}
+        failed_runs: {type: integer, format: int64, minimum: 0}
+        avg_latency_ms: {type: integer, minimum: 0}
+        last_run_at: {type: string, format: date-time}
+        top_prompts: {type: array, items: {type: string}}
+    AgentDefinition:
+      type: object
+      required: [id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage, created_at, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        name: {type: string}
+        description: {type: string}
+        emoji: {type: string}
+        category: {type: string, enum: [workflow, doc, analytics, it]}
+        model_id: {type: string}
+        main_agent_role: {type: string}
+        sub_agents: {type: array, items: {$ref: "#/components/schemas/AgentTeamMember"}}
+        system_prompt: {type: string}
+        welcome_message: {type: string}
+        suggested_questions: {type: array, maxItems: 10, items: {type: string, maxLength: 100}, description: Default-locale compatibility projection.}
+        suggested_question_translations: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/LocalizedAgentSuggestedQuestion"}}
+        tools: {type: array, items: {type: string}}
+        knowledge_base_ids: {type: array, items: {type: string}}
+        status: {type: string, enum: [draft, published]}
+        visibility: {type: string, enum: [all, department, role]}
+        visibility_targets: {type: array, items: {type: string}}
+        timeout_seconds: {type: integer, minimum: 1}
+        version: {type: integer, minimum: 1}
+        published_version: {type: integer, minimum: 0}
+        versions: {type: array, items: {$ref: "#/components/schemas/AgentDefinitionVersion"}}
+        usage: {$ref: "#/components/schemas/AgentUsageStats"}
+        created_by_account_id: {type: string}
+        updated_by_account_id: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    AgentDefinitionListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/AgentDefinition"}}
+        total: {type: integer, minimum: 0}
+    AgentDefinitionListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: "#/components/schemas/AgentDefinitionListResponse"}
+    AgentSessionFile:
+      type: object
+      required: [id, tenant_id, session_id, context_version, created_by_account_id, original_filename, content_type, size_bytes, sha256, scan_status, parse_status, retention_class, state, created_at, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        session_id: {type: string}
+        context_version: {type: integer, format: int64, minimum: 1}
+        created_by_account_id: {type: string}
+        original_filename: {type: string}
+        content_type: {type: string}
+        size_bytes: {type: integer, format: int64, minimum: 0}
+        sha256: {type: string}
+        scan_status: {type: string, example: not_configured}
+        parse_status: {type: string, example: ready}
+        retention_class: {type: string, example: conversation}
+        state: {type: string, description: draft while unattached; attached once referenced by a persisted message.}
+        expires_at: {type: string, format: date-time}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    AgentSessionFileListResponse:
+      type: object
+      required: [items, total]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/AgentSessionFile"}}
+        total: {type: integer, minimum: 0}
+    AgentSessionFileListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: "#/components/schemas/AgentSessionFileListResponse"}
     FormBuilderCapabilitiesResponse:
       type: object
       required: [schema_version, field_types, widgets, data_sources, workflow_targets]
@@ -6603,10 +6764,16 @@ components:
           required: [title, active, hires, separations, separation_rate]
           properties:
             title: {type: string}
-            active: {type: integer}
+            active:
+              type: integer
+              description: 當月末時點在職快照（含留職停薪等未離職狀態），口徑與員工頁僅計 status=active 的在職數不同
             hires: {type: integer}
-            separations: {type: integer}
-            separation_rate: {type: string}
+            separations:
+              type: integer
+              description: 當月離職人數，以有效離職時間（resign_date 優先）落入當月為準
+            separation_rate:
+              type: string
+              description: 當月離職率 = 當月離職 ÷ 當月平均在職（月初與月末快照平均）× 100%
         attendance:
           type: object
           required: [checked_in, leave, absent, segments, daily_leave]

@@ -2,7 +2,6 @@ package service
 
 import (
 	"context"
-	"encoding/json"
 	"strings"
 	"sync"
 	"time"
@@ -761,16 +760,12 @@ func shouldPersistAgentArtifact(event domain.AgentChatEvent) bool {
 
 // agentArtifactMessageMetadata serializes the event as an opaque JSON string so dynamic form field IDs stay unchanged.
 func agentArtifactMessageMetadata(event domain.AgentChatEvent) (map[string]any, error) {
-	raw, err := json.Marshal(map[string]any{
+	return encodeAgentArtifactMetadata(map[string]any{
 		"event":  event.Event,
 		"name":   event.Name,
 		"status": event.Status,
 		"data":   event.Data,
 	})
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"agent_artifact_json": string(raw)}, nil
 }
 
 func (c AgentService) rememberAgentPreferenceIfNeeded(ctx RequestContext, accountID, agentID, sessionID, message string) error {

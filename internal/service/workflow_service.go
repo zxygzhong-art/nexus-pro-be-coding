@@ -1197,22 +1197,19 @@ func normalizeWorkflowPendingStatus(status string) bool {
 
 // workflowReviewLog projects internal workflow actions onto the stable review API contract.
 func workflowReviewLog(payload map[string]any) []WorkflowReviewLogItem {
-	review, _ := payload["_review"].(map[string]any)
-	if len(review) == 0 {
+	review, ok := workflowReviewFromPayload(payload)
+	if !ok {
 		return nil
 	}
-	kind := strings.TrimSpace(stringFromAny(review["type"]))
-	if kind == "" {
-		return nil
-	}
+	kind := strings.TrimSpace(review.Type)
 	if strings.EqualFold(kind, domain.FormApprovalWorkflowActionWithdraw) {
 		kind = "cancel"
 	}
 	return []WorkflowReviewLogItem{{
 		Type:    kind,
-		Name:    strings.TrimSpace(stringFromAny(review["account_id"])),
+		Name:    strings.TrimSpace(review.AccountID),
 		Role:    "審批人",
-		Time:    strings.TrimSpace(stringFromAny(review["time"])),
-		Comment: strings.TrimSpace(stringFromAny(review["comment"])),
+		Time:    strings.TrimSpace(review.Time),
+		Comment: strings.TrimSpace(review.Comment),
 	}}
 }

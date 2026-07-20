@@ -18,7 +18,7 @@ func (c WorkspaceAgentCtrl) listKnowledgeBases(w http.ResponseWriter, _ *http.Re
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	writeJSON(w, http.StatusOK, domain.KnowledgeBaseListResponse{Items: items, Total: len(items)})
 	return nil
 }
 
@@ -76,7 +76,7 @@ func (c WorkspaceAgentCtrl) listKnowledgeDocuments(w http.ResponseWriter, r *htt
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": len(items)})
+	writeJSON(w, http.StatusOK, domain.KnowledgeDocumentListResponse{Items: items, Total: len(items)})
 	return nil
 }
 
@@ -156,8 +156,8 @@ func (c WorkspaceAgentCtrl) searchKnowledgeBase(w http.ResponseWriter, r *http.R
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, map[string]any{
-		"items": result.Hits, "total": result.Total, "query": result.Query, "semantics": result.Semantics,
+	writeJSON(w, http.StatusOK, domain.KnowledgeSearchResponse{
+		Items: result.Hits, Total: result.Total, Query: result.Query, Semantics: result.Semantics,
 	})
 	return nil
 }

@@ -47,39 +47,6 @@ func (q *Queries) CountAgentDefinitionsByKnowledgeBase(ctx context.Context, arg 
 	return column_1, err
 }
 
-const countAgentDefinitionsByModel = `-- name: CountAgentDefinitionsByModel :one
-SELECT (
-    SELECT count(*) FROM agent_definitions
-    WHERE agent_definitions.tenant_id = $1
-      AND (
-        agent_definitions.model_id = $2
-        OR EXISTS (
-            SELECT 1 FROM jsonb_array_elements(agent_definitions.sub_agents) member
-            WHERE member->>'model_id' = $2
-        )
-      )
-) + (
-    SELECT count(*) FROM agent_definition_versions
-    WHERE agent_definition_versions.tenant_id = $1
-      AND EXISTS (
-        SELECT 1 FROM jsonb_array_elements(agent_definition_versions.sub_agents) member
-        WHERE member->>'model_id' = $2
-      )
-)
-`
-
-type CountAgentDefinitionsByModelParams struct {
-	TenantID string `json:"tenant_id"`
-	ModelID  string `json:"model_id"`
-}
-
-func (q *Queries) CountAgentDefinitionsByModel(ctx context.Context, arg CountAgentDefinitionsByModelParams) (int32, error) {
-	row := q.db.QueryRow(ctx, countAgentDefinitionsByModel, arg.TenantID, arg.ModelID)
-	var column_1 int32
-	err := row.Scan(&column_1)
-	return column_1, err
-}
-
 const deleteAgentDefinition = `-- name: DeleteAgentDefinition :one
 DELETE FROM agent_definitions
 WHERE tenant_id = $1
@@ -470,6 +437,50 @@ func (q *Queries) InsertAgentExternalTool(ctx context.Context, arg InsertAgentEx
 		&i.CreatedAt,
 	)
 	return i, err
+}
+
+const listAgentDefinitionRefsByModel = `-- name: ListAgentDefinitionRefsByModel :many
+SELECT id, name FROM agent_definitions
+WHERE agent_definitions.tenant_id = $1
+  AND (
+    agent_definitions.model_id = $2
+    OR EXISTS (
+        SELECT 1 FROM jsonb_array_elements(agent_definitions.sub_agents) member
+        WHERE member->>'model_id' = $2
+    )
+  )
+ORDER BY name
+`
+
+type ListAgentDefinitionRefsByModelParams struct {
+	TenantID string `json:"tenant_id"`
+	ModelID  string `json:"model_id"`
+}
+
+type ListAgentDefinitionRefsByModelRow struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+}
+
+// 只統計「目前」定義對模型的引用；歷史版本是不可變審計快照，不應阻止模型刪除。
+func (q *Queries) ListAgentDefinitionRefsByModel(ctx context.Context, arg ListAgentDefinitionRefsByModelParams) ([]ListAgentDefinitionRefsByModelRow, error) {
+	rows, err := q.db.Query(ctx, listAgentDefinitionRefsByModel, arg.TenantID, arg.ModelID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListAgentDefinitionRefsByModelRow
+	for rows.Next() {
+		var i ListAgentDefinitionRefsByModelRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
 }
 
 const listAgentDefinitionVersions = `-- name: ListAgentDefinitionVersions :many
