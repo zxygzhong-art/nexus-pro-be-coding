@@ -7,6 +7,7 @@ import (
 
 	"nexus-pro-api/internal/domain"
 	sqlc "nexus-pro-api/internal/platform/postgres/db"
+	"nexus-pro-api/internal/utils"
 )
 
 // UpsertKnowledgeBase persists a tenant knowledge base.
@@ -46,6 +47,48 @@ func (s *Store) ListKnowledgeBases(execCtx context.Context, tenantID string) ([]
 		return nil, err
 	}
 	return mapSlice(items, fromKnowledgeBase), nil
+}
+
+// ListKnowledgeBasePage lists one paginated slice of tenant knowledge bases.
+func (s *Store) ListKnowledgeBasePage(execCtx context.Context, tenantID string, page domain.PageRequest) ([]domain.KnowledgeBase, int, error) {
+	page = utils.NormalizePageRequest(page)
+	total, err := s.q.CountKnowledgeBases(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, 0, err
+	}
+	items, err := s.q.ListKnowledgeBasesPage(tenantContext(execCtx, tenantID), sqlc.ListKnowledgeBasesPageParams{
+		TenantID:    tenantID,
+		Sort:        page.Sort,
+		LimitCount:  int32(page.PageSize),
+		OffsetCount: int32((page.Page - 1) * page.PageSize),
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	return mapSlice(items, fromKnowledgeBase), int(total), nil
+}
+
+// CountKnowledgeDocumentsByBase counts documents per knowledge base in one grouped query.
+func (s *Store) CountKnowledgeDocumentsByBase(execCtx context.Context, tenantID string, knowledgeBaseIDs []string) (map[string]int, error) {
+	rows, err := s.q.CountKnowledgeDocumentsByBase(tenantContext(execCtx, tenantID), sqlc.CountKnowledgeDocumentsByBaseParams{
+		TenantID: tenantID, KnowledgeBaseIds: knowledgeBaseIDs,
+	})
+	if err != nil {
+		return nil, err
+	}
+	counts := make(map[string]int, len(rows))
+	for _, row := range rows {
+		counts[row.KnowledgeBaseID] = int(row.DocumentCount)
+	}
+	return counts, nil
+}
+
+// CountKnowledgeDocuments counts documents within one knowledge base.
+func (s *Store) CountKnowledgeDocuments(execCtx context.Context, tenantID, knowledgeBaseID string) (int, error) {
+	count, err := s.q.CountKnowledgeDocuments(tenantContext(execCtx, tenantID), sqlc.CountKnowledgeDocumentsParams{
+		TenantID: tenantID, KnowledgeBaseID: knowledgeBaseID,
+	})
+	return int(count), err
 }
 
 // DeleteKnowledgeBase deletes a tenant knowledge base.
@@ -95,6 +138,38 @@ func (s *Store) ListKnowledgeDocuments(execCtx context.Context, tenantID, knowle
 		return nil, err
 	}
 	return mapSlice(items, fromKnowledgeDocument), nil
+}
+
+// ListKnowledgeDocumentPage lists one paginated slice of document metadata without full content.
+func (s *Store) ListKnowledgeDocumentPage(execCtx context.Context, tenantID, knowledgeBaseID string, page domain.PageRequest) ([]domain.KnowledgeDocument, int, error) {
+	page = utils.NormalizePageRequest(page)
+	total, err := s.q.CountKnowledgeDocuments(tenantContext(execCtx, tenantID), sqlc.CountKnowledgeDocumentsParams{
+		TenantID: tenantID, KnowledgeBaseID: knowledgeBaseID,
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	rows, err := s.q.ListKnowledgeDocumentsPage(tenantContext(execCtx, tenantID), sqlc.ListKnowledgeDocumentsPageParams{
+		TenantID:        tenantID,
+		KnowledgeBaseID: knowledgeBaseID,
+		Sort:            page.Sort,
+		LimitCount:      int32(page.PageSize),
+		OffsetCount:     int32((page.Page - 1) * page.PageSize),
+	})
+	if err != nil {
+		return nil, 0, err
+	}
+	items := make([]domain.KnowledgeDocument, 0, len(rows))
+	for _, row := range rows {
+		items = append(items, domain.KnowledgeDocument{
+			ID: row.ID, TenantID: row.TenantID, KnowledgeBaseID: row.KnowledgeBaseID, Title: row.Title, SourceType: row.SourceType,
+			OriginalFilename: row.OriginalFilename, ContentType: row.ContentType, SizeBytes: row.SizeBytes, SHA256: row.Sha256,
+			ObjectProvider: row.ObjectProvider, ObjectBucket: row.ObjectBucket, ObjectKey: row.ObjectKey, ParseStatus: row.ParseStatus, ParseError: row.ParseError,
+			CreatedByAccountID: textFrom(row.CreatedByAccountID), UpdatedByAccountID: textFrom(row.UpdatedByAccountID),
+			CreatedAt: timeFrom(row.CreatedAt), UpdatedAt: timeFrom(row.UpdatedAt),
+		})
+	}
+	return items, int(total), nil
 }
 
 // DeleteKnowledgeDocument deletes a document within its knowledge base.

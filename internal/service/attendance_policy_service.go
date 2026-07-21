@@ -10,9 +10,6 @@ import (
 )
 
 const (
-	leaveUnitDay  = "day"
-	leaveUnitHour = "hour"
-
 	leaveTypeCodeSickFull     = "sick_full"
 	leaveTypeCodeFlexible     = "flexible"
 	leaveTypeCodePersonal     = "personal"
@@ -147,11 +144,17 @@ func (c AttendanceService) UpdateAttendancePolicy(ctx RequestContext, input Upda
 		if err != nil {
 			return err
 		}
+		current, exists, err := tx.store.GetAttendancePolicy(goContext(ctx), ctx.TenantID)
+		if err != nil {
+			return err
+		}
+		if exists && current.Version == next.Version {
+			return authzAudit.CommitWith(ctx, tx.Service)
+		}
 		if err := tx.store.UpsertAttendancePolicy(goContext(ctx), next); err != nil {
 			return err
 		}
 		if err := tx.audit(ctx, "attendance.policy.update", string(ResourceLeave), next.ID, string(SeverityHigh), auditDecisionDetails(ctx, decision, map[string]any{
-			"leave_type_count":           len(next.LeaveTypes),
 			"clock_mode":                 next.WorkTime.ClockMode,
 			"flexible_clock_in_earliest": next.WorkTime.FlexibleClockInEarliest,
 			"flexible_clock_out_latest":  next.WorkTime.FlexibleClockOutLatest,
@@ -177,49 +180,30 @@ func (c AttendanceService) attendancePolicyFromInput(ctx RequestContext, account
 	}
 	now := c.Now()
 	createdAt := now
-	// The built-in policy is the implicit version 1, so the first explicit publish advances to version 2.
-	currentVersion := defaultAttendancePolicyResponse().Version
-	version := currentVersion + 1
+	defaults := defaultAttendancePolicyResponse()
+	currentVersion := defaults.Version
+	currentWorkTime := normalizeAttendancePolicyWorkTime(defaults.WorkTime)
 	if ok && !current.CreatedAt.IsZero() {
 		createdAt = current.CreatedAt
 	}
 	if ok && current.Version > 0 {
 		currentVersion = current.Version
-		version = currentVersion + 1
+	}
+	if ok {
+		currentWorkTime = normalizeAttendancePolicyWorkTime(current.WorkTime)
 	}
 	if input.BaseVersion > 0 && input.BaseVersion != currentVersion {
 		return AttendancePolicy{}, domain.Conflict("attendance policy changed after this draft was loaded")
 	}
-	nextLeaveTypes := normalizeAttendanceLeaveTypes(input.LeaveTypes)
-	currentLeaveTypes := defaultAttendancePolicyResponse().LeaveTypes
-	if ok {
-		currentLeaveTypes = normalizeAttendanceLeaveTypes(current.LeaveTypes)
-	}
-	retained := make(map[string]struct{}, len(nextLeaveTypes)*2)
-	for _, leaveType := range nextLeaveTypes {
-		retained[leaveType.ID] = struct{}{}
-		retained[strings.ToLower(leaveType.Code)] = struct{}{}
-	}
-	for _, leaveType := range currentLeaveTypes {
-		if _, keptByID := retained[leaveType.ID]; keptByID {
-			continue
-		}
-		if _, keptByCode := retained[strings.ToLower(leaveType.Code)]; keptByCode {
-			continue
-		}
-		linked, linkErr := c.leaveTypeHasLinkedData(ctx, leaveType)
-		if linkErr != nil {
-			return AttendancePolicy{}, linkErr
-		}
-		if linked {
-			return AttendancePolicy{}, BadRequest("leave type " + leaveType.Name + " has mappings, balances, or requests; deactivate it instead of deleting it")
-		}
+	nextWorkTime := normalizeAttendancePolicyWorkTime(input.WorkTime)
+	version := currentVersion
+	if !attendancePolicyWorkTimeEqual(currentWorkTime, nextWorkTime) {
+		version++
 	}
 	policy := AttendancePolicy{
 		ID:                 "current",
 		TenantID:           ctx.TenantID,
-		WorkTime:           normalizeAttendancePolicyWorkTime(input.WorkTime),
-		LeaveTypes:         nextLeaveTypes,
+		WorkTime:           nextWorkTime,
 		Version:            version,
 		EffectiveFrom:      &now,
 		UpdatedByAccountID: strings.TrimSpace(accountID),
@@ -247,28 +231,19 @@ func defaultAttendancePolicyResponse() AttendancePolicyResponse {
 			Weekend:                 "週六、週日",
 			CycleStart:              "1 日",
 			CycleEnd:                "本月 月底（最後一日）",
-			TimeOptions:             attendancePolicyTimeOptions(),
-			WeekendOptions:          attendancePolicyWeekendOptions(),
-			CycleStartOptions:       attendancePolicyCycleStartOptions(),
-			CycleEndOptions:         attendancePolicyCycleEndOptions(),
 		},
-		LeaveTypes: attendancePolicyLeaveTypes(),
-		Version:    1,
+		Version: 1,
 	}
 }
 
 // attendancePolicyResponse 處理考勤政策回應。
 func attendancePolicyResponse(policy AttendancePolicy) AttendancePolicyResponse {
 	workTime := normalizeAttendancePolicyWorkTime(policy.WorkTime)
-	leaveTypes := normalizeAttendanceLeaveTypes(policy.LeaveTypes)
-	if len(leaveTypes) == 0 {
-		leaveTypes = attendancePolicyLeaveTypes()
-	}
 	version := policy.Version
 	if version <= 0 {
 		version = 1
 	}
-	return AttendancePolicyResponse{WorkTime: workTime, LeaveTypes: leaveTypes, Version: version}
+	return AttendancePolicyResponse{WorkTime: workTime, Version: version}
 }
 
 // normalizeAttendancePolicyWorkTime 正規化考勤政策 work 時間。
@@ -286,10 +261,6 @@ func normalizeAttendancePolicyWorkTime(workTime AttendancePolicyWorkTime) Attend
 		Weekend:                 strings.TrimSpace(workTime.Weekend),
 		CycleStart:              strings.TrimSpace(workTime.CycleStart),
 		CycleEnd:                strings.TrimSpace(workTime.CycleEnd),
-		TimeOptions:             defaults.TimeOptions,
-		WeekendOptions:          defaults.WeekendOptions,
-		CycleStartOptions:       defaults.CycleStartOptions,
-		CycleEndOptions:         defaults.CycleEndOptions,
 	}
 	if out.ClockMode == "" {
 		out.ClockMode = defaults.ClockMode
@@ -324,136 +295,18 @@ func normalizeAttendancePolicyWorkTime(workTime AttendancePolicyWorkTime) Attend
 	return out
 }
 
-// normalizeAttendanceLeaveTypes 正規化考勤請假 types。
-func normalizeAttendanceLeaveTypes(items []AttendanceLeaveType) []AttendanceLeaveType {
-	out := make([]AttendanceLeaveType, 0, len(items))
-	for _, item := range items {
-		next := normalizeAttendanceLeaveType(item)
-		if next.Code == "" && next.Name == "" {
-			continue
-		}
-		out = append(out, next)
-	}
-	return out
-}
-
-func normalizeAttendanceLeaveType(item AttendanceLeaveType) AttendanceLeaveType {
-	code := normalizeLeaveTypeCode(item.Code)
-	seed, hasSeed := attendanceLeaveTypeByCode(code)
-	next := AttendanceLeaveType{
-		ID:              strings.TrimSpace(item.ID),
-		Code:            code,
-		Name:            strings.TrimSpace(item.Name),
-		Quota:           strings.TrimSpace(item.Quota),
-		Rule:            strings.TrimSpace(item.Rule),
-		Proof:           strings.TrimSpace(item.Proof),
-		Unit:            strings.TrimSpace(item.Unit),
-		GrantMode:       strings.TrimSpace(item.GrantMode),
-		RequiresBalance: item.RequiresBalance,
-		PaidRatio:       item.PaidRatio,
-		ProofAfterHours: cloneFloatPtr(item.ProofAfterHours),
-		Active:          true,
-		Entitlements:    normalizeLeaveEntitlements(item.Entitlements),
-	}
-	if next.ID == "" {
-		next.ID = domain.StableLeaveTypeID(code)
-	}
-	// Detect "legacy display-only" payloads (only code/name/quota/rule/proof).
-	legacyOnly := item.GrantMode == "" && item.Unit == "" && len(item.Entitlements) == 0 && item.PaidRatio == 0 && item.ProofAfterHours == nil && !item.RequiresBalance && !item.Active
-	if legacyOnly && hasSeed {
-		next.Name = firstNonBlank(next.Name, seed.Name)
-		next.Unit = seed.Unit
-		next.GrantMode = seed.GrantMode
-		next.RequiresBalance = seed.RequiresBalance
-		next.PaidRatio = seed.PaidRatio
-		next.Active = seed.Active
-		next.ProofAfterHours = cloneFloatPtr(seed.ProofAfterHours)
-		next.Entitlements = normalizeLeaveEntitlements(seed.Entitlements)
-		next.Quota = firstNonBlank(next.Quota, seed.Quota)
-		next.Rule = firstNonBlank(next.Rule, seed.Rule)
-		next.Proof = firstNonBlank(next.Proof, seed.Proof)
-		return next
-	}
-	if next.Unit == "" {
-		next.Unit = leaveUnitDay
-	}
-	if next.GrantMode == "" {
-		next.GrantMode = defaultGrantModeForLeaveType(next.Code)
-	}
-	if item.GrantMode == "" {
-		next.RequiresBalance = leaveTypeRequiresBalance(next.GrantMode)
-	} else if next.GrantMode == domain.LeaveGrantModeAnnualGrant || next.GrantMode == domain.LeaveGrantModeOvertimeCredit {
-		next.RequiresBalance = true
-	}
-	if item.PaidRatio == 0 && item.GrantMode == "" && next.Code != leaveTypeCodePersonal && next.Code != leaveTypeCodeSickHalf {
-		next.PaidRatio = defaultPaidRatioForLeaveType(next.Code)
-	}
-	if item.Active {
-		next.Active = true
-	} else if item.GrantMode != "" {
-		// Explicit structured payload may disable a leave type.
-		next.Active = item.Active
-	}
-	if next.GrantMode == domain.LeaveGrantModeAnnualGrant && len(next.Entitlements) == 0 && hasSeed {
-		next.Entitlements = normalizeLeaveEntitlements(seed.Entitlements)
-	}
-	// Personal leave is application-based and must never depend on a pre-granted balance row.
-	if next.Code == leaveTypeCodePersonal {
-		next.GrantMode = domain.LeaveGrantModeEvent
-		next.RequiresBalance = false
-		next.Entitlements = nil
-	}
-	if next.Name == "" && hasSeed {
-		next.Name = seed.Name
-	}
-	derivedQuota, derivedRule, derivedProof := deriveLeaveTypeDisplay(next)
-	next.Quota = firstNonBlank(next.Quota, derivedQuota)
-	next.Rule = firstNonBlank(next.Rule, derivedRule)
-	next.Proof = firstNonBlank(next.Proof, derivedProof)
-	return next
-}
-
-func cloneFloatPtr(v *float64) *float64 {
-	if v == nil {
-		return nil
-	}
-	out := *v
-	return &out
-}
-
-func firstNonBlank(values ...string) string {
-	for _, value := range values {
-		if strings.TrimSpace(value) != "" {
-			return value
-		}
-	}
-	return ""
-}
-
-func normalizeLeaveEntitlements(items []domain.LeaveEntitlementRule) []domain.LeaveEntitlementRule {
-	if len(items) == 0 {
-		return nil
-	}
-	out := make([]domain.LeaveEntitlementRule, 0, len(items))
-	for _, item := range items {
-		jobLevel := strings.TrimSpace(item.JobLevel)
-		if jobLevel == "" {
-			jobLevel = "*"
-		}
-		next := domain.LeaveEntitlementRule{
-			JobLevel:       jobLevel,
-			TenureMinYears: item.TenureMinYears,
-			QuotaHours:     item.QuotaHours,
-			Prorate:        item.Prorate,
-			Priority:       item.Priority,
-		}
-		if item.TenureMaxYears != nil {
-			max := *item.TenureMaxYears
-			next.TenureMaxYears = &max
-		}
-		out = append(out, next)
-	}
-	return out
+func attendancePolicyWorkTimeEqual(left, right AttendancePolicyWorkTime) bool {
+	return left.RequireWorksite == right.RequireWorksite &&
+		left.ClockMode == right.ClockMode &&
+		left.FlexibleClockInEarliest == right.FlexibleClockInEarliest &&
+		left.FlexibleClockOutLatest == right.FlexibleClockOutLatest &&
+		left.StandardStart == right.StandardStart &&
+		left.StandardEnd == right.StandardEnd &&
+		left.BreakStart == right.BreakStart &&
+		left.BreakEnd == right.BreakEnd &&
+		left.Weekend == right.Weekend &&
+		left.CycleStart == right.CycleStart &&
+		left.CycleEnd == right.CycleEnd
 }
 
 // validateAttendancePolicy 驗證考勤政策。
@@ -461,101 +314,25 @@ func validateAttendancePolicy(policy AttendancePolicy) error {
 	if policy.WorkTime.ClockMode != clockModeFlexible && policy.WorkTime.ClockMode != clockModeFixed {
 		return BadRequest("clock_mode must be flexible or fixed")
 	}
-	if !stringInSlice(policy.WorkTime.StandardStart, policy.WorkTime.TimeOptions) || !stringInSlice(policy.WorkTime.StandardEnd, policy.WorkTime.TimeOptions) {
+	if !stringInSlice(policy.WorkTime.StandardStart, attendancePolicyTimeOptions()) || !stringInSlice(policy.WorkTime.StandardEnd, attendancePolicyTimeOptions()) {
 		return BadRequest("standard time must use a configured time option")
 	}
-	if !stringInSlice(policy.WorkTime.FlexibleClockInEarliest, policy.WorkTime.TimeOptions) || !stringInSlice(policy.WorkTime.FlexibleClockOutLatest, policy.WorkTime.TimeOptions) {
+	if !stringInSlice(policy.WorkTime.FlexibleClockInEarliest, attendancePolicyTimeOptions()) || !stringInSlice(policy.WorkTime.FlexibleClockOutLatest, attendancePolicyTimeOptions()) {
 		return BadRequest("flexible clock range must use configured time options")
 	}
 	if parseHHMMMinutes(policy.WorkTime.FlexibleClockInEarliest) > parseHHMMMinutes(policy.WorkTime.FlexibleClockOutLatest) {
 		return BadRequest("flexible clock earliest time must not be later than latest time")
 	}
-	if !stringInSlice(policy.WorkTime.BreakStart, policy.WorkTime.TimeOptions) || !stringInSlice(policy.WorkTime.BreakEnd, policy.WorkTime.TimeOptions) {
+	if !stringInSlice(policy.WorkTime.BreakStart, attendancePolicyTimeOptions()) || !stringInSlice(policy.WorkTime.BreakEnd, attendancePolicyTimeOptions()) {
 		return BadRequest("break time must use a configured time option")
 	}
-	if !stringInSlice(policy.WorkTime.Weekend, policy.WorkTime.WeekendOptions) {
+	if !stringInSlice(policy.WorkTime.Weekend, attendancePolicyWeekendOptions()) {
 		return BadRequest("weekend must use a configured weekend option")
 	}
-	if !stringInSlice(policy.WorkTime.CycleStart, policy.WorkTime.CycleStartOptions) || !stringInSlice(policy.WorkTime.CycleEnd, policy.WorkTime.CycleEndOptions) {
+	if !stringInSlice(policy.WorkTime.CycleStart, attendancePolicyCycleStartOptions()) || !stringInSlice(policy.WorkTime.CycleEnd, attendancePolicyCycleEndOptions()) {
 		return BadRequest("cycle must use configured cycle options")
 	}
-	if len(policy.LeaveTypes) == 0 {
-		return BadRequest("leave_types is required")
-	}
-	seen := map[string]struct{}{}
-	seenIDs := map[string]struct{}{}
-	for _, item := range policy.LeaveTypes {
-		if item.ID == "" || item.Code == "" || item.Name == "" {
-			return BadRequest("leave type id, code, and name are required")
-		}
-		if _, ok := seenIDs[item.ID]; ok {
-			return BadRequest("leave type id must be unique")
-		}
-		seenIDs[item.ID] = struct{}{}
-		if _, ok := seen[item.Code]; ok {
-			return BadRequest("leave type code must be unique")
-		}
-		seen[item.Code] = struct{}{}
-		if !isValidLeaveGrantMode(item.GrantMode) {
-			return BadRequest("leave type grant_mode is invalid")
-		}
-		if item.Unit != leaveUnitDay && item.Unit != leaveUnitHour {
-			return BadRequest("leave type unit must be day or hour")
-		}
-		if item.GrantMode == domain.LeaveGrantModeAnnualGrant {
-			hasWildcard := false
-			for _, ent := range item.Entitlements {
-				if ent.QuotaHours < 0 {
-					return BadRequest("entitlement quota_hours must be >= 0")
-				}
-				if ent.TenureMinYears < 0 {
-					return BadRequest("entitlement tenure_min_years must be >= 0")
-				}
-				if ent.TenureMaxYears != nil && *ent.TenureMaxYears <= ent.TenureMinYears {
-					return BadRequest("entitlement tenure_max_years must be greater than tenure_min_years")
-				}
-				if ent.JobLevel == "*" {
-					hasWildcard = true
-				}
-			}
-			if !hasWildcard {
-				return BadRequest("annual_grant leave type requires a job_level=* entitlement")
-			}
-		}
-	}
 	return nil
-}
-
-func isValidLeaveGrantMode(mode string) bool {
-	switch mode {
-	case domain.LeaveGrantModeAnnualGrant, domain.LeaveGrantModeEvent, domain.LeaveGrantModeOvertimeCredit, domain.LeaveGrantModeUnlimited:
-		return true
-	default:
-		return false
-	}
-}
-
-func leaveTypeRequiresBalance(mode string) bool {
-	switch mode {
-	case domain.LeaveGrantModeAnnualGrant, domain.LeaveGrantModeOvertimeCredit:
-		return true
-	default:
-		return false
-	}
-}
-
-func defaultGrantModeForLeaveType(code string) string {
-	if seed, ok := attendanceLeaveTypeByCode(code); ok {
-		return seed.GrantMode
-	}
-	return domain.LeaveGrantModeAnnualGrant
-}
-
-func defaultPaidRatioForLeaveType(code string) float64 {
-	if seed, ok := attendanceLeaveTypeByCode(code); ok {
-		return seed.PaidRatio
-	}
-	return 1
 }
 
 // normalizeLeaveTypeCode 將內部、舊版與 eHRMS 假別名稱統一為政策使用的 canonical code。
@@ -571,23 +348,13 @@ func normalizeLeaveTypeCode(code string) string {
 	return normalized
 }
 
-func findLeaveTypeInPolicy(policy AttendancePolicyResponse, code string) (AttendanceLeaveType, bool) {
-	code = normalizeLeaveTypeCode(code)
-	for _, item := range policy.LeaveTypes {
-		if item.Code == code {
-			return item, true
+func firstNonBlank(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
 		}
 	}
-	return AttendanceLeaveType{}, false
-}
-
-func compensatoryLeaveTypeCode(policy AttendancePolicyResponse) string {
-	for _, item := range policy.LeaveTypes {
-		if item.GrantMode == domain.LeaveGrantModeOvertimeCredit && item.Active {
-			return item.Code
-		}
-	}
-	return leaveTypeCodeCompensatory
+	return ""
 }
 
 func standardDayHours(work AttendancePolicyWorkTime) float64 {
@@ -691,86 +458,6 @@ func parseHHMMMinutes(value string) int {
 	return hour*60 + minute
 }
 
-func roundHalfHour(hours float64) float64 {
-	if hours <= 0 {
-		return 0
-	}
-	return math.Round(hours*2) / 2
-}
-
-func deriveLeaveTypeDisplay(item AttendanceLeaveType) (quota, rule, proof string) {
-	dayHours := 8.0
-	switch item.GrantMode {
-	case domain.LeaveGrantModeUnlimited:
-		quota = "不限天數"
-		rule = "需主管核可"
-	case domain.LeaveGrantModeOvertimeCredit:
-		quota = "依加班時數"
-		rule = "期限內請畢"
-	case domain.LeaveGrantModeEvent:
-		quota = "依事件申請"
-		rule = "事件發生時申請"
-	default:
-		if len(item.Entitlements) == 1 && item.Entitlements[0].JobLevel == "*" {
-			days := item.Entitlements[0].QuotaHours / dayHours
-			if days == float64(int(days)) {
-				quota = strconv.Itoa(int(days)) + " 天 / 年"
-			} else {
-				quota = strings.TrimRight(strings.TrimRight(strconv.FormatFloat(days, 'f', 1, 64), "0"), ".") + " 天 / 年"
-			}
-		} else if len(item.Entitlements) > 1 {
-			quota = "依年資 / 職級"
-		} else {
-			quota = "依公司政策"
-		}
-		if hasProrate(item.Entitlements) {
-			rule = "依年資折算"
-		} else {
-			rule = "無累計"
-		}
-	}
-	if item.ProofAfterHours != nil && *item.ProofAfterHours > 0 {
-		days := *item.ProofAfterHours / dayHours
-		proof = strconv.FormatFloat(days, 'f', -1, 64) + " 天以上需證明"
-	} else {
-		proof = "—"
-	}
-	return quota, rule, proof
-}
-
-func hasProrate(items []domain.LeaveEntitlementRule) bool {
-	for _, item := range items {
-		if item.Prorate {
-			return true
-		}
-	}
-	return false
-}
-
-func intPtr(v int) *int { return &v }
-
-func floatPtr(v float64) *float64 { return &v }
-
-func entitlement(jobLevel string, minYears int, maxYears *int, quotaHours float64, prorate bool, priority int) domain.LeaveEntitlementRule {
-	return domain.LeaveEntitlementRule{
-		JobLevel:       jobLevel,
-		TenureMinYears: minYears,
-		TenureMaxYears: maxYears,
-		QuotaHours:     quotaHours,
-		Prorate:        prorate,
-		Priority:       priority,
-	}
-}
-
-func attendanceLeaveTypeByCode(code string) (AttendanceLeaveType, bool) {
-	for _, item := range attendancePolicyLeaveTypes() {
-		if item.Code == code {
-			return item, true
-		}
-	}
-	return AttendanceLeaveType{}, false
-}
-
 // stringInSlice 處理字串 in slice。
 func stringInSlice(value string, options []string) bool {
 	for _, option := range options {
@@ -815,101 +502,6 @@ func attendancePolicyCycleEndOptions() []string {
 		options = append(options, "次月 "+strconv.Itoa(day)+" 日")
 	}
 	return options
-}
-
-// attendancePolicyLeaveTypes 處理考勤政策請假 types。
-func attendancePolicyLeaveTypes() []AttendanceLeaveType {
-	proof24 := floatPtr(24)
-	items := []AttendanceLeaveType{
-		{
-			Code: leaveTypeCodeSickFull, Name: "全薪病假", Unit: leaveUnitDay,
-			GrantMode: domain.LeaveGrantModeAnnualGrant, RequiresBalance: true, PaidRatio: 1, Active: true,
-			ProofAfterHours: proof24,
-			Quota:           "30 天 / 年", Rule: "無累計", Proof: "3 天以上需診斷證明",
-			Entitlements: []domain.LeaveEntitlementRule{entitlement("*", 0, nil, 240, false, 0)},
-		},
-		{
-			Code: leaveTypeCodeFlexible, Name: "彈性休假", Unit: leaveUnitDay,
-			GrantMode: domain.LeaveGrantModeAnnualGrant, RequiresBalance: true, PaidRatio: 1, Active: true,
-			Quota: "依公司政策", Rule: "依年資折算", Proof: "—",
-			Entitlements: []domain.LeaveEntitlementRule{entitlement("*", 0, nil, 0, true, 0)},
-		},
-		{
-			Code: leaveTypeCodePersonal, Name: "事假", Unit: leaveUnitDay,
-			GrantMode: domain.LeaveGrantModeEvent, RequiresBalance: false, PaidRatio: 0, Active: true,
-			Quota: "14 天 / 年", Rule: "無累計（不支薪）", Proof: "—",
-		},
-		{
-			Code: leaveTypeCodeFamilyCare, Name: "家庭照顧假", Unit: leaveUnitDay,
-			GrantMode: domain.LeaveGrantModeAnnualGrant, RequiresBalance: true, PaidRatio: 0, Active: true,
-			Quota: "7 天 / 年", Rule: "併入事假計算", Proof: "得要求相關證明",
-			Entitlements: []domain.LeaveEntitlementRule{entitlement("*", 0, nil, 56, false, 0)},
-		},
-		{
-			Code: leaveTypeCodeSickHalf, Name: "半薪病假", Unit: leaveUnitDay,
-			GrantMode: domain.LeaveGrantModeAnnualGrant, RequiresBalance: true, PaidRatio: 0.5, Active: true,
-			Quota: "30 天 / 年", Rule: "無累計", Proof: "診斷證明",
-			Entitlements: []domain.LeaveEntitlementRule{entitlement("*", 0, nil, 240, false, 0)},
-		},
-		{
-			Code: leaveTypeCodeMenstrual, Name: "生理假", Unit: leaveUnitDay,
-			GrantMode: domain.LeaveGrantModeEvent, RequiresBalance: false, PaidRatio: 1, Active: true,
-			Quota: "每月 1 日", Rule: "全年逾 3 日併入病假", Proof: "—",
-		},
-		{
-			Code: leaveTypeCodeMarriage, Name: "婚假", Unit: leaveUnitDay,
-			GrantMode: domain.LeaveGrantModeEvent, RequiresBalance: false, PaidRatio: 1, Active: true,
-			Quota: "8 天", Rule: "登記後 3 個月內請畢", Proof: "結婚證明",
-		},
-		{
-			Code: leaveTypeCodeMaternity, Name: "八週產假", Unit: leaveUnitDay,
-			GrantMode: domain.LeaveGrantModeEvent, RequiresBalance: false, PaidRatio: 1, Active: true,
-			Quota: "56 天", Rule: "一次請足", Proof: "醫療證明",
-		},
-		{
-			Code: leaveTypeCodePaternity, Name: "陪產假", Unit: leaveUnitDay,
-			GrantMode: domain.LeaveGrantModeEvent, RequiresBalance: false, PaidRatio: 1, Active: true,
-			Quota: "7 天", Rule: "分娩前後 15 日內", Proof: "出生證明",
-		},
-		{
-			Code: leaveTypeCodeBereavement, Name: "喪假", Unit: leaveUnitDay,
-			GrantMode: domain.LeaveGrantModeEvent, RequiresBalance: false, PaidRatio: 1, Active: true,
-			Quota: "3 - 8 天", Rule: "依親等決定天數", Proof: "訃聞或證明",
-		},
-		{
-			Code: leaveTypeCodeOfficial, Name: "公假", Unit: leaveUnitDay,
-			GrantMode: domain.LeaveGrantModeUnlimited, RequiresBalance: false, PaidRatio: 1, Active: true,
-			Quota: "不限天數", Rule: "需主管核可", Proof: "政府傳票或公文",
-		},
-		{
-			Code: leaveTypeCodePrenatal, Name: "產檢假", Unit: leaveUnitDay,
-			GrantMode: domain.LeaveGrantModeEvent, RequiresBalance: false, PaidRatio: 1, Active: true,
-			Quota: "7 天", Rule: "妊娠期間", Proof: "產檢證明",
-		},
-		{
-			Code: leaveTypeCodeCompensatory, Name: "補休假", Unit: leaveUnitHour,
-			GrantMode: domain.LeaveGrantModeOvertimeCredit, RequiresBalance: true, PaidRatio: 1, Active: true,
-			Quota: "依加班時數", Rule: "期限內請畢", Proof: "加班紀錄",
-		},
-		{
-			Code: leaveTypeCodeAnnual, Name: "特休假", Unit: leaveUnitDay,
-			GrantMode: domain.LeaveGrantModeAnnualGrant, RequiresBalance: true, PaidRatio: 1, Active: true,
-			Quota: "依年資 3 - 30 天", Rule: "依年資折算，可遞延一年", Proof: "—",
-			Entitlements: []domain.LeaveEntitlementRule{
-				entitlement("*", 0, intPtr(1), 24, true, 0),
-				entitlement("*", 1, intPtr(2), 56, true, 0),
-				entitlement("*", 2, intPtr(3), 80, true, 0),
-				entitlement("*", 3, intPtr(5), 112, true, 0),
-				entitlement("*", 5, intPtr(10), 120, true, 0),
-				entitlement("*", 10, nil, 160, true, 0),
-				entitlement("senior", 3, nil, 128, true, 10),
-			},
-		},
-	}
-	for index := range items {
-		items[index].ID = domain.StableLeaveTypeID(items[index].Code)
-	}
-	return items
 }
 
 // twoDigit 處理 two digit。

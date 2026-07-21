@@ -12,7 +12,6 @@ import (
 var allowedWorkspaceFormStageTypes = map[string]struct{}{
 	"approver":  {},
 	"condition": {},
-	"parallel":  {},
 	"notify":    {},
 }
 
@@ -31,8 +30,154 @@ var allowedFormAggregations = map[string]struct{}{"count": {}, "sum": {}, "avg":
 var allowedFormSecurityClassifications = map[string]struct{}{"public": {}, "internal": {}, "confidential": {}, "restricted": {}}
 var allowedFormSecurityMasking = map[string]struct{}{"none": {}, "partial": {}, "full": {}}
 
+// normalizeWorkspaceFormDesignStages converts legacy parallel nodes and backfills graph edges in place.
+func normalizeWorkspaceFormDesignStages(stages []domain.PlatformFormBuilderStage) {
+	for index := range stages {
+		stage := &stages[index]
+		if strings.TrimSpace(stage.Type) == "parallel" {
+			stage.Type = "approver"
+			if stage.Config == nil {
+				stage.Config = map[string]any{}
+			}
+			if strings.TrimSpace(stringFromAny(stage.Config["mode"])) == "" {
+				stage.Config["mode"] = "all"
+			}
+		}
+		if stage.Config == nil {
+			stage.Config = map[string]any{}
+		}
+	}
+	falseBranchHeads := map[string]struct{}{}
+	for _, stage := range stages {
+		if strings.TrimSpace(stage.Type) != "condition" {
+			continue
+		}
+		trueNext := strings.TrimSpace(stringFromAny(stage.Config["true_next_stage_id"]))
+		falseNext := strings.TrimSpace(stringFromAny(stage.Config["false_next_stage_id"]))
+		if falseNext != "" && falseNext != domain.WorkflowStageEndID && falseNext != trueNext {
+			falseBranchHeads[falseNext] = struct{}{}
+		}
+	}
+	for index := range stages {
+		stage := &stages[index]
+		switch strings.TrimSpace(stage.Type) {
+		case "condition":
+			if strings.TrimSpace(stringFromAny(stage.Config["true_next_stage_id"])) == "" {
+				next := domain.WorkflowStageEndID
+				if index+1 < len(stages) {
+					if candidate := strings.TrimSpace(stages[index+1].ID); candidate != "" {
+						next = candidate
+					}
+				}
+				stage.Config["true_next_stage_id"] = next
+			}
+			if strings.TrimSpace(stringFromAny(stage.Config["false_next_stage_id"])) == "" {
+				stage.Config["false_next_stage_id"] = domain.WorkflowStageEndID
+			}
+			trueNext := strings.TrimSpace(stringFromAny(stage.Config["true_next_stage_id"]))
+			falseNext := strings.TrimSpace(stringFromAny(stage.Config["false_next_stage_id"]))
+			if falseNext != "" && falseNext != domain.WorkflowStageEndID && falseNext != trueNext {
+				falseBranchHeads[falseNext] = struct{}{}
+			}
+		default:
+			if strings.TrimSpace(stringFromAny(stage.Config["next_stage_id"])) != "" {
+				continue
+			}
+			next := domain.WorkflowStageEndID
+			if index+1 < len(stages) {
+				if candidate := strings.TrimSpace(stages[index+1].ID); candidate != "" {
+					if _, isFalseHead := falseBranchHeads[candidate]; !isFalseHead {
+						next = candidate
+					}
+				}
+			}
+			stage.Config["next_stage_id"] = next
+		}
+	}
+}
+
+func validateWorkflowEdgeTarget(field, target string, stageIDs map[string]struct{}, selfID string) []domain.FieldError {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return []domain.FieldError{{Field: field, Code: "required", Message: "workflow edge target is required"}}
+	}
+	if target == domain.WorkflowStageEndID {
+		return nil
+	}
+	if target == strings.TrimSpace(selfID) {
+		return []domain.FieldError{{Field: field, Code: "invalid", Message: "workflow edge cannot point to itself"}}
+	}
+	if _, ok := stageIDs[target]; !ok {
+		return []domain.FieldError{{Field: field, Code: "invalid", Message: "workflow edge target does not exist"}}
+	}
+	return nil
+}
+
+func validateWorkflowGraphReachability(stages []domain.PlatformFormBuilderStage) []domain.FieldError {
+	if len(stages) == 0 {
+		return nil
+	}
+	byID := make(map[string]domain.PlatformFormBuilderStage, len(stages))
+	for _, stage := range stages {
+		id := strings.TrimSpace(stage.ID)
+		if id != "" {
+			byID[id] = stage
+		}
+	}
+	entry := strings.TrimSpace(stages[0].ID)
+	if entry == "" {
+		return nil
+	}
+	visited := map[string]struct{}{}
+	queue := []string{entry}
+	for len(queue) > 0 {
+		currentID := queue[0]
+		queue = queue[1:]
+		if _, seen := visited[currentID]; seen {
+			continue
+		}
+		visited[currentID] = struct{}{}
+		stage, ok := byID[currentID]
+		if !ok {
+			continue
+		}
+		config := workflowStageConfigFromMap(stage.Config)
+		targets := []string{}
+		if strings.TrimSpace(stage.Type) == "condition" {
+			targets = []string{config.TrueNextStageID, config.FalseNextStageID}
+		} else {
+			targets = []string{config.NextStageID}
+		}
+		for _, target := range targets {
+			target = strings.TrimSpace(target)
+			if target == "" || target == domain.WorkflowStageEndID {
+				continue
+			}
+			if _, seen := visited[target]; !seen {
+				queue = append(queue, target)
+			}
+		}
+	}
+	errors := make([]domain.FieldError, 0)
+	for _, stage := range stages {
+		id := strings.TrimSpace(stage.ID)
+		if id == "" {
+			continue
+		}
+		if _, ok := visited[id]; !ok {
+			errors = append(errors, domain.FieldError{
+				Field:   "stages." + id,
+				Code:    "unreachable",
+				Message: "workflow stage is unreachable from the entry stage",
+			})
+		}
+	}
+	return errors
+}
+
 // validateWorkspaceFormDesignInput 驗證自訂表單設計的欄位與流程節點。
 func validateWorkspaceFormDesignInput(fields []domain.PlatformFormBuilderField, stages []domain.PlatformFormBuilderStage) error {
+	normalizeWorkspaceFormDesignStages(stages)
 	fieldErrors := make([]domain.FieldError, 0)
 	seenFieldIDs := map[string]struct{}{}
 	for i, field := range fields {
@@ -85,7 +230,6 @@ func validateWorkspaceFormDesignInput(fields []domain.PlatformFormBuilderField, 
 	hasApproverStage := false
 	for i, stage := range stages {
 		id := strings.TrimSpace(stage.ID)
-		stageType := strings.TrimSpace(stage.Type)
 		prefix := fmt.Sprintf("stages[%d]", i)
 		if id == "" {
 			fieldErrors = append(fieldErrors, domain.FieldError{
@@ -93,16 +237,23 @@ func validateWorkspaceFormDesignInput(fields []domain.PlatformFormBuilderField, 
 				Code:    "required",
 				Message: "stage id is required",
 			})
-		} else {
+			continue
+		}
+		if _, exists := seenStageIDs[id]; exists {
+			fieldErrors = append(fieldErrors, domain.FieldError{
+				Field:   "stages." + id,
+				Code:    "duplicate",
+				Message: "stage id must be unique",
+			})
+		}
+		seenStageIDs[id] = struct{}{}
+	}
+	for i, stage := range stages {
+		id := strings.TrimSpace(stage.ID)
+		stageType := strings.TrimSpace(stage.Type)
+		prefix := fmt.Sprintf("stages[%d]", i)
+		if id != "" {
 			prefix = "stages." + id
-			if _, exists := seenStageIDs[id]; exists {
-				fieldErrors = append(fieldErrors, domain.FieldError{
-					Field:   prefix,
-					Code:    "duplicate",
-					Message: "stage id must be unique",
-				})
-			}
-			seenStageIDs[id] = struct{}{}
 		}
 		if stageType == "" {
 			fieldErrors = append(fieldErrors, domain.FieldError{
@@ -116,21 +267,29 @@ func validateWorkspaceFormDesignInput(fields []domain.PlatformFormBuilderField, 
 			fieldErrors = append(fieldErrors, domain.FieldError{
 				Field:   prefix + ".type",
 				Code:    "invalid",
-				Message: "stage type must be one of approver, condition, parallel, notify",
+				Message: "stage type must be one of approver, condition, notify",
 			})
 			continue
 		}
 		config := workflowStageConfigFromMap(stage.Config)
 		switch stageType {
-		case "approver", "parallel":
+		case "approver":
 			hasApproverStage = true
 			fallthrough
 		case "notify":
-			if len(config.AccountIDs) == 0 && len(config.UserGroupIDs) == 0 && strings.TrimSpace(config.Role) == "" {
+			// Migration: workflow user_group_ids targeting is retired; stages must use role or account_ids.
+			if len(config.UserGroupIDs) > 0 {
+				fieldErrors = append(fieldErrors, domain.FieldError{
+					Field:   prefix + ".config.user_group_ids",
+					Code:    "unsupported",
+					Message: "workflow user_group_ids targeting is retired; assign an approval role instead",
+				})
+			}
+			if len(config.AccountIDs) == 0 && strings.TrimSpace(config.Role) == "" {
 				fieldErrors = append(fieldErrors, domain.FieldError{
 					Field:   prefix + ".config",
 					Code:    "required",
-					Message: "stage config must include role, account_ids, or user_group_ids",
+					Message: "stage config must include role or account_ids",
 				})
 			}
 			if role := strings.TrimSpace(config.Role); role != "" {
@@ -142,6 +301,7 @@ func validateWorkspaceFormDesignInput(fields []domain.PlatformFormBuilderField, 
 					})
 				}
 			}
+			fieldErrors = append(fieldErrors, validateWorkflowEdgeTarget(prefix+".config.next_stage_id", config.NextStageID, seenStageIDs, id)...)
 		case "condition":
 			field := strings.TrimSpace(config.Field)
 			value := strings.TrimSpace(config.Value)
@@ -162,15 +322,26 @@ func validateWorkspaceFormDesignInput(fields []domain.PlatformFormBuilderField, 
 					})
 				}
 			}
+			if strings.TrimSpace(config.TrueNextStageID) == "" || strings.TrimSpace(config.FalseNextStageID) == "" {
+				fieldErrors = append(fieldErrors, domain.FieldError{
+					Field:   prefix + ".config",
+					Code:    "required",
+					Message: "condition stage requires true_next_stage_id and false_next_stage_id",
+				})
+			} else {
+				fieldErrors = append(fieldErrors, validateWorkflowEdgeTarget(prefix+".config.true_next_stage_id", config.TrueNextStageID, seenStageIDs, id)...)
+				fieldErrors = append(fieldErrors, validateWorkflowEdgeTarget(prefix+".config.false_next_stage_id", config.FalseNextStageID, seenStageIDs, id)...)
+			}
 		}
 	}
 	if len(stages) > 0 && !hasApproverStage {
 		fieldErrors = append(fieldErrors, domain.FieldError{
 			Field:   "stages",
 			Code:    "invalid",
-			Message: "workflow must include at least one approver or parallel stage",
+			Message: "workflow must include at least one approver stage",
 		})
 	}
+	fieldErrors = append(fieldErrors, validateWorkflowGraphReachability(stages)...)
 
 	if len(fieldErrors) > 0 {
 		return ValidationFailed("form design validation failed", fieldErrors)
@@ -479,6 +650,31 @@ func validateFormPayloadFieldType(field domain.PlatformFormBuilderField, value a
 		default:
 			return "invalid", label + " must be an array"
 		}
+	case "file", "image", "upload":
+		if !isFormAttachmentPayloadValue(value) {
+			return "invalid", label + " must be an array of attachment references"
+		}
 	}
 	return "", ""
+}
+
+func isFormAttachmentPayloadValue(value any) bool {
+	switch typed := value.(type) {
+	case []domain.FormAttachmentRef:
+		return true
+	case []any:
+		for _, item := range typed {
+			record, ok := item.(map[string]any)
+			if !ok {
+				return false
+			}
+			id, _ := record["id"].(string)
+			if strings.TrimSpace(id) == "" {
+				return false
+			}
+		}
+		return true
+	default:
+		return false
+	}
 }

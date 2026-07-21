@@ -42,23 +42,28 @@ var knowledgeTextExtensions = map[string]struct{}{
 
 var knowledgeBaseResource = ResourceType("knowledge_base")
 
-// ListKnowledgeBases 列出租戶知識庫並補齊文件數。
-func (c AgentService) ListKnowledgeBases(ctx RequestContext) ([]domain.KnowledgeBase, error) {
+// ListKnowledgeBases 列出租戶知識庫分頁並以單次聚合查詢補齊文件數。
+func (c AgentService) ListKnowledgeBases(ctx RequestContext, page PageRequest) (PageResponse[domain.KnowledgeBase], error) {
 	if _, _, err := c.requireAgentAuthz(ctx, knowledgeBaseResource, ActionRead, ""); err != nil {
-		return nil, err
+		return PageResponse[domain.KnowledgeBase]{}, err
 	}
-	items, err := c.store.ListKnowledgeBases(goContext(ctx), ctx.TenantID)
+	page = utils.NormalizePageRequest(page)
+	items, total, err := c.store.ListKnowledgeBasePage(goContext(ctx), ctx.TenantID, page)
 	if err != nil {
-		return nil, err
+		return PageResponse[domain.KnowledgeBase]{}, err
+	}
+	baseIDs := make([]string, len(items))
+	for index := range items {
+		baseIDs[index] = items[index].ID
+	}
+	counts, err := c.store.CountKnowledgeDocumentsByBase(goContext(ctx), ctx.TenantID, baseIDs)
+	if err != nil {
+		return PageResponse[domain.KnowledgeBase]{}, err
 	}
 	for index := range items {
-		documents, listErr := c.store.ListKnowledgeDocuments(goContext(ctx), ctx.TenantID, items[index].ID)
-		if listErr != nil {
-			return nil, listErr
-		}
-		items[index].DocumentCount = len(documents)
+		items[index].DocumentCount = counts[items[index].ID]
 	}
-	return items, nil
+	return utils.PageResponseFromStore(items, total, page), nil
 }
 
 // GetKnowledgeBase 取得租戶知識庫並補齊文件數。
@@ -197,15 +202,35 @@ func (c AgentService) DeleteKnowledgeBase(ctx RequestContext, id string) (domain
 	return item, nil
 }
 
-// ListKnowledgeDocuments 列出指定知識庫的手動文字文件。
-func (c AgentService) ListKnowledgeDocuments(ctx RequestContext, knowledgeBaseID string) ([]domain.KnowledgeDocument, error) {
+// ListKnowledgeDocuments 列出指定知識庫的文件元資料分頁（不含 content 全文）。
+func (c AgentService) ListKnowledgeDocuments(ctx RequestContext, knowledgeBaseID string, page PageRequest) (PageResponse[domain.KnowledgeDocument], error) {
 	if _, _, err := c.requireAgentAuthz(ctx, knowledgeBaseResource, ActionRead, knowledgeBaseID); err != nil {
-		return nil, err
+		return PageResponse[domain.KnowledgeDocument]{}, err
 	}
 	if _, err := c.currentKnowledgeBase(ctx, knowledgeBaseID); err != nil {
-		return nil, err
+		return PageResponse[domain.KnowledgeDocument]{}, err
 	}
-	return c.store.ListKnowledgeDocuments(goContext(ctx), ctx.TenantID, strings.TrimSpace(knowledgeBaseID))
+	page = utils.NormalizePageRequest(page)
+	items, total, err := c.store.ListKnowledgeDocumentPage(goContext(ctx), ctx.TenantID, strings.TrimSpace(knowledgeBaseID), page)
+	if err != nil {
+		return PageResponse[domain.KnowledgeDocument]{}, err
+	}
+	return utils.PageResponseFromStore(items, total, page), nil
+}
+
+// GetKnowledgeDocument 取得單一文件的完整內容。
+func (c AgentService) GetKnowledgeDocument(ctx RequestContext, knowledgeBaseID, id string) (domain.KnowledgeDocument, error) {
+	if _, _, err := c.requireAgentAuthz(ctx, knowledgeBaseResource, ActionRead, knowledgeBaseID); err != nil {
+		return domain.KnowledgeDocument{}, err
+	}
+	item, ok, err := c.store.GetKnowledgeDocument(goContext(ctx), ctx.TenantID, strings.TrimSpace(knowledgeBaseID), strings.TrimSpace(id))
+	if err != nil {
+		return domain.KnowledgeDocument{}, err
+	}
+	if !ok {
+		return domain.KnowledgeDocument{}, NotFound("knowledge document", id)
+	}
+	return item, nil
 }
 
 // CreateKnowledgeDocument 建立手動文字文件。
@@ -598,11 +623,11 @@ func (c AgentService) currentKnowledgeBase(ctx RequestContext, id string) (domai
 	if !ok {
 		return domain.KnowledgeBase{}, NotFound("knowledge base", id)
 	}
-	documents, err := c.store.ListKnowledgeDocuments(goContext(ctx), ctx.TenantID, id)
+	count, err := c.store.CountKnowledgeDocuments(goContext(ctx), ctx.TenantID, id)
 	if err != nil {
 		return domain.KnowledgeBase{}, err
 	}
-	item.DocumentCount = len(documents)
+	item.DocumentCount = count
 	return item, nil
 }
 

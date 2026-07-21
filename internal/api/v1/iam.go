@@ -30,6 +30,7 @@ func (c IAMCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	iam.GET("/roles", c.routes.Handle("iam.assumable_role", "read", c.listRoles))
 	iam.GET("/role-bindings", c.routes.Handle("iam.permission_set_assignment", "read", c.listRoleBindings))
 	iam.GET("/user-groups", c.routes.Handle("iam.user_group", "read", c.listUserGroups))
+	iam.GET("/user-groups/options", c.routes.Handle("iam.user_group", "read", c.listUserGroupOptions))
 	iam.POST("/user-groups", c.routes.Handle("iam.user_group", "create", c.createUserGroup))
 	iam.PATCH("/user-groups/:id", c.routes.Handle("iam.user_group", "update", c.updateUserGroup, ResourceID(PathParamID)))
 	iam.DELETE("/user-groups/:id", c.routes.Handle("iam.user_group", "delete", c.deleteUserGroup, ResourceID(PathParamID)))
@@ -37,10 +38,12 @@ func (c IAMCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	iam.POST("/user-groups/:id/members", c.routes.Handle("iam.user_group", "update", c.addUserGroupMember, ResourceID(PathParamID)))
 	iam.DELETE("/user-groups/:id/members/:accountId", c.routes.Handle("iam.user_group", "update", c.removeUserGroupMember, ResourceID(PathParamID), PathParam("accountId")))
 	iam.GET("/permission-sets", c.routes.Handle("iam.permission_set", "read", c.listPermissionSets))
+	iam.GET("/permission-sets/options", c.routes.Handle("iam.permission_set", "read", c.listPermissionSetOptions))
 	iam.POST("/permission-sets", c.routes.Handle("iam.permission_set", "create", c.createPermissionSet))
 	iam.PATCH("/permission-sets/:id", c.routes.Handle("iam.permission_set", "update", c.updatePermissionSet, ResourceID(PathParamID)))
 	iam.DELETE("/permission-sets/:id", c.routes.Handle("iam.permission_set", "delete", c.deletePermissionSet, ResourceID(PathParamID)))
 	iam.GET("/accounts", c.routes.Handle("iam.account", "read", c.listAccounts))
+	iam.GET("/accounts/options", c.routes.Handle("iam.account", "read", c.listAccountOptions))
 	iam.GET("/permission-set-assignments", c.routes.Handle("iam.permission_set_assignment", "read", c.listPermissionSetAssignments))
 	iam.POST("/permission-set-assignments", c.routes.Handle("iam.permission_set_assignment", "create", c.createPermissionSetAssignment))
 	iam.DELETE("/permission-set-assignments/:id", c.routes.Handle("iam.permission_set_assignment", "delete", c.deletePermissionSetAssignment, ResourceID(PathParamID)))
@@ -55,6 +58,7 @@ func (c IAMCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	iam.GET("/outbox-events", c.routes.Handle("iam.outbox_event", "read", c.listOutboxEvents))
 	iam.POST("/outbox-events/:id/retry", c.routes.Handle("iam.outbox_event", "update", c.retryOutboxEvent, ResourceID(PathParamID)))
 	iam.GET("/assumable-roles", c.routes.Handle("iam.assumable_role", "read", c.listAssumableRoles))
+	iam.GET("/assumable-roles/options", c.routes.Handle("iam.assumable_role", "read", c.listAssumableRoleOptions))
 	iam.POST("/assumable-roles", c.routes.Handle("iam.assumable_role", "create", c.createAssumableRole))
 	iam.PATCH("/assumable-roles/:id", c.routes.Handle("iam.assumable_role", "update", c.updateAssumableRole, ResourceID(PathParamID)))
 	iam.DELETE("/assumable-roles/:id", c.routes.Handle("iam.assumable_role", "delete", c.deleteAssumableRole, ResourceID(PathParamID)))
@@ -601,4 +605,74 @@ func (c IAMCtrl) revokeCurrentAssumableRoleSession(w http.ResponseWriter, _ *htt
 	}
 	w.WriteHeader(http.StatusNoContent)
 	return nil
+}
+
+// listAccountOptions 處理 IAM 帳號選項的 HTTP 請求。
+func (c IAMCtrl) listAccountOptions(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	query, err := optionQueryFromRequest(r)
+	if err != nil {
+		return err
+	}
+	options, err := c.svc.ListIamAccountOptions(ctx, query)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, options)
+	return nil
+}
+
+// listPermissionSetOptions 處理權限集合選項的 HTTP 請求。
+func (c IAMCtrl) listPermissionSetOptions(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	query, err := optionQueryFromRequest(r)
+	if err != nil {
+		return err
+	}
+	options, err := c.svc.ListPermissionSetOptions(ctx, query)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, options)
+	return nil
+}
+
+// listUserGroupOptions 處理使用者羣組選項的 HTTP 請求。
+func (c IAMCtrl) listUserGroupOptions(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	query, err := optionQueryFromRequest(r)
+	if err != nil {
+		return err
+	}
+	options, err := c.svc.ListUserGroupOptions(ctx, query)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, options)
+	return nil
+}
+
+// listAssumableRoleOptions 處理 assumable 角色選項的 HTTP 請求。
+func (c IAMCtrl) listAssumableRoleOptions(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	query, err := optionQueryFromRequest(r)
+	if err != nil {
+		return err
+	}
+	options, err := c.svc.ListAssumableRoleOptions(ctx, query)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, options)
+	return nil
+}
+
+// optionQueryFromRequest 解析輕量選項查詢（q 模糊搜尋 + cursor/page_size 遊標分頁）。
+func optionQueryFromRequest(r *http.Request) (domain.OptionQuery, error) {
+	values := r.URL.Query()
+	pageSize, err := positiveIntQuery(values.Get("page_size"), "page_size", domain.MaxPageSize)
+	if err != nil {
+		return domain.OptionQuery{}, err
+	}
+	return domain.OptionQuery{
+		Keyword:  strings.TrimSpace(values.Get("q")),
+		Cursor:   strings.TrimSpace(values.Get("cursor")),
+		PageSize: pageSize,
+	}, nil
 }

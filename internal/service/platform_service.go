@@ -1,10 +1,12 @@
 package service
 
 import (
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -181,8 +183,9 @@ func (c PlatformService) canUsePublishedAgentRuntime(ctx RequestContext, account
 }
 
 // Forms 處理表單的服務流程。
-func (c PlatformService) Forms(ctx RequestContext) (PlatformFormsResponse, error) {
-	applications, drafts, err := c.formInstances(ctx)
+func (c PlatformService) Forms(ctx RequestContext, query PlatformFormsQuery) (PlatformFormsResponse, error) {
+	page := utils.NormalizePageRequest(PageRequest{Page: query.Page, PageSize: query.PageSize})
+	applications, drafts, err := c.formInstances(ctx, query)
 	if err != nil {
 		return PlatformFormsResponse{}, err
 	}
@@ -191,9 +194,19 @@ func (c PlatformService) Forms(ctx RequestContext) (PlatformFormsResponse, error
 		return PlatformFormsResponse{}, err
 	}
 	return PlatformFormsResponse{
-		Categories:   categories,
-		Applications: applications,
-		Drafts:       drafts,
+		Categories: categories,
+		Applications: PlatformFormApplicationPage{
+			Items:    paginatePlatformList(applications, page),
+			Total:    len(applications),
+			Page:     page.Page,
+			PageSize: page.PageSize,
+		},
+		Drafts: PlatformFormDraftPage{
+			Items:    paginatePlatformList(drafts, page),
+			Total:    len(drafts),
+			Page:     page.Page,
+			PageSize: page.PageSize,
+		},
 		AIMessages: []PlatformChatMessage{
 			{ID: "fm1", Role: "assistant", Avatar: "📋", Content: "哈囉！我是 AI 表單助理。告訴我你想處理什麼事情，我能推薦最適合的表單並協助你填寫。"},
 		},
@@ -202,18 +215,20 @@ func (c PlatformService) Forms(ctx RequestContext) (PlatformFormsResponse, error
 }
 
 // Tasks 處理任務的服務流程。
-func (c PlatformService) Tasks(ctx RequestContext) (PlatformTasksResponse, error) {
+func (c PlatformService) Tasks(ctx RequestContext, query PlatformTasksQuery) (PlatformTasksResponse, error) {
 	ClockSummary, err := c.authorizedClockSummary(ctx)
 	if err != nil {
 		return PlatformTasksResponse{}, err
 	}
-	records, todos, err := c.taskProjection(ctx)
+	records, items, todos, nextCursor, err := c.taskProjection(ctx, query)
 	if err != nil {
 		return PlatformTasksResponse{}, err
 	}
 	return PlatformTasksResponse{
 		Records:      records,
+		Items:        items,
 		Todos:        todos,
+		NextCursor:   nextCursor,
 		ClockSummary: ClockSummary,
 		AIMessages: []PlatformChatMessage{
 			{ID: "tm1", Role: "assistant", Avatar: "🤖", Content: "今日工時與任務已整理完成，可以繼續追問本週投入分佈或待辦重點。"},
@@ -555,12 +570,16 @@ func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employe
 }
 
 // formInstances 處理表單實例的服務流程。
-func (c PlatformService) formInstances(ctx RequestContext) ([]PlatformFormApplication, []PlatformFormDraft, error) {
+func (c PlatformService) formInstances(ctx RequestContext, query PlatformFormsQuery) ([]PlatformFormApplication, []PlatformFormDraft, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
-	instances, err := c.store.ListFormInstancesByQuery(goContext(ctx), ctx.TenantID, FormInstanceQuery{ApplicantAccountID: account.ID})
+	instances, err := c.store.ListFormInstancesByQuery(goContext(ctx), ctx.TenantID, FormInstanceQuery{
+		ApplicantAccountID: account.ID,
+		TemplateKey:        strings.TrimSpace(query.Template),
+		Search:             strings.TrimSpace(query.Search),
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -572,6 +591,7 @@ func (c PlatformService) formInstances(ctx RequestContext) ([]PlatformFormApplic
 	for _, template := range templates {
 		templateByID[template.ID] = template
 	}
+	status := strings.ToLower(strings.TrimSpace(query.Status))
 	applications := make([]PlatformFormApplication, 0)
 	drafts := make([]PlatformFormDraft, 0)
 	for _, instance := range instances {
@@ -590,11 +610,10 @@ func (c PlatformService) formInstances(ctx RequestContext) ([]PlatformFormApplic
 				Title:       title,
 				UpdatedAt:   platformTime(instance.UpdatedAt),
 				Summary:     platformFormSummary(instance.Payload),
-				Payload:     utils.CopyStringMap(instance.Payload),
 			})
 			continue
 		}
-		applications = append(applications, PlatformFormApplication{
+		application := PlatformFormApplication{
 			ID:          instance.ID,
 			TemplateKey: template.Key,
 			Title:       title,
@@ -602,8 +621,11 @@ func (c PlatformService) formInstances(ctx RequestContext) ([]PlatformFormApplic
 			SubmittedAt: platformTime(instance.SubmittedAt),
 			Status:      platformFormStatus(instance.Status),
 			Summary:     platformFormSummary(instance.Payload),
-			Payload:     utils.CopyStringMap(instance.Payload),
-		})
+		}
+		if status != "" && application.Status != status {
+			continue
+		}
+		applications = append(applications, application)
 	}
 	sort.SliceStable(applications, func(i, j int) bool {
 		return applications[i].SubmittedAt > applications[j].SubmittedAt
@@ -614,31 +636,77 @@ func (c PlatformService) formInstances(ctx RequestContext) ([]PlatformFormApplic
 	return applications, drafts, nil
 }
 
+// paginatePlatformList 將平臺列表切成指定分頁。
+func paginatePlatformList[T any](items []T, page PageRequest) []T {
+	start := (page.Page - 1) * page.PageSize
+	if start >= len(items) {
+		return []T{}
+	}
+	end := start + page.PageSize
+	if end > len(items) {
+		end = len(items)
+	}
+	out := make([]T, end-start)
+	copy(out, items[start:end])
+	return out
+}
+
 // taskProjection 處理任務 projection 的服務流程。
-func (c PlatformService) taskProjection(ctx RequestContext) ([]PlatformTaskRecord, []PlatformTaskTodo, error) {
+func (c PlatformService) taskProjection(ctx RequestContext, query PlatformTasksQuery) ([]PlatformTaskRecord, []PlatformTaskItem, []PlatformTaskTodo, string, error) {
 	account, _, err := c.resolveAccount(ctx)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, "", err
 	}
-	taskItems, err := c.store.ListPlatformTaskItems(goContext(ctx), ctx.TenantID, account.ID)
+	normalized, err := c.normalizePlatformTasksQuery(query)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, "", err
 	}
-	taskTodos, err := c.store.ListPlatformTaskTodos(goContext(ctx), ctx.TenantID, account.ID)
+	storeQuery := normalized
+	storeQuery.PageSize = normalized.PageSize + 1
+	taskItems, err := c.store.ListPlatformTaskItems(goContext(ctx), ctx.TenantID, account.ID, storeQuery)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, "", err
+	}
+	taskTodos, err := c.store.ListPlatformTaskTodos(goContext(ctx), ctx.TenantID, account.ID, storeQuery)
+	if err != nil {
+		return nil, nil, nil, "", err
+	}
+	nextCursor := ""
+	if len(taskItems) > normalized.PageSize {
+		taskItems = taskItems[:normalized.PageSize]
+		last := taskItems[len(taskItems)-1]
+		nextCursor = encodePlatformTaskCursor(last.CreatedAt, last.ID)
+	}
+	if len(taskTodos) > normalized.PageSize {
+		taskTodos = taskTodos[:normalized.PageSize]
 	}
 	recordsByDate := map[string]*PlatformTaskRecord{}
-	todos := make([]PlatformTaskTodo, 0)
+	items := make([]PlatformTaskItem, 0, len(taskItems))
+	todos := make([]PlatformTaskTodo, 0, len(taskTodos))
 	for _, item := range taskItems {
 		record := recordsByDate[item.WorkDate]
 		if record == nil {
 			record = &PlatformTaskRecord{Date: item.WorkDate, Weekday: platformWeekdayFromDate(item.WorkDate), Items: []PlatformTaskItem{}}
 			recordsByDate[item.WorkDate] = record
 		}
-		record.Items = append(record.Items, platformTaskItemFromRecord(item))
+		projected := platformTaskItemFromRecord(item)
+		record.Items = append(record.Items, projected)
 		record.TotalHours += item.Hours
+		flat := projected
+		flat.WorkDate = item.WorkDate
+		items = append(items, flat)
 	}
+	sort.SliceStable(taskTodos, func(i, j int) bool {
+		iOpen := taskTodos[i].Status != "done"
+		jOpen := taskTodos[j].Status != "done"
+		if iOpen != jOpen {
+			return iOpen
+		}
+		if taskTodos[i].CreatedAt.Equal(taskTodos[j].CreatedAt) {
+			return taskTodos[i].ID < taskTodos[j].ID
+		}
+		return taskTodos[i].CreatedAt.Before(taskTodos[j].CreatedAt)
+	})
 	for _, todo := range taskTodos {
 		todos = append(todos, platformTaskTodoFromRecord(todo))
 	}
@@ -657,7 +725,58 @@ func (c PlatformService) taskProjection(ctx RequestContext) ([]PlatformTaskRecor
 			Items:      []PlatformTaskItem{},
 		}}
 	}
-	return records, todos, nil
+	return records, items, todos, nextCursor, nil
+}
+
+// normalizePlatformTasksQuery 驗證並補齊任務查詢的時間窗、分頁大小與遊標。
+func (c PlatformService) normalizePlatformTasksQuery(query PlatformTasksQuery) (PlatformTasksQuery, error) {
+	if query.PageSize <= 0 {
+		query.PageSize = domain.DefaultPageSize
+	}
+	if query.PageSize > domain.MaxPageSize {
+		query.PageSize = domain.MaxPageSize
+	}
+	if query.From.IsZero() {
+		query.From = c.Now().UTC().AddDate(0, 0, -domain.PlatformTasksDefaultWindowDays)
+	}
+	if !query.To.IsZero() && query.From.After(query.To) {
+		return PlatformTasksQuery{}, BadRequest("from must not be after to")
+	}
+	query.Cursor = strings.TrimSpace(query.Cursor)
+	if query.Cursor == "" {
+		return query, nil
+	}
+	createdAt, id, err := decodePlatformTaskCursor(query.Cursor)
+	if err != nil {
+		return PlatformTasksQuery{}, BadRequest("cursor is invalid")
+	}
+	query.HasCursor = true
+	query.CursorCreatedAt = createdAt
+	query.CursorID = id
+	return query, nil
+}
+
+// encodePlatformTaskCursor 將最後一列的穩定倒序排序鍵 (created_at, id) 序列化。
+func encodePlatformTaskCursor(createdAt time.Time, id string) string {
+	raw := fmt.Sprintf("%d|%s", createdAt.UTC().UnixNano(), id)
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+// decodePlatformTaskCursor 解析 encodePlatformTaskCursor 產生的遊標。
+func decodePlatformTaskCursor(cursor string) (time.Time, string, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return time.Time{}, "", err
+	}
+	parts := strings.SplitN(string(decoded), "|", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
+		return time.Time{}, "", fmt.Errorf("invalid cursor")
+	}
+	nanos, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return time.Time{}, "", err
+	}
+	return time.Unix(0, nanos).UTC(), parts[1], nil
 }
 
 // currentPlatformTaskItem 處理目前平臺任務項目的服務流程。

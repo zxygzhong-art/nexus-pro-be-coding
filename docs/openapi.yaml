@@ -58,6 +58,12 @@ paths:
   /v1/platform/forms:
     get:
       summary: Get employee self-service form catalog and applications
+      parameters:
+        - {name: status, in: query, description: Filter applications and drafts by status, schema: {type: string}}
+        - {name: template, in: query, description: Filter applications and drafts by template key, schema: {type: string}}
+        - {name: search, in: query, description: Case-insensitive title and summary search, schema: {type: string}}
+        - {$ref: "#/components/parameters/Page"}
+        - {$ref: "#/components/parameters/PageSize"}
       responses:
         "200":
           description: Form catalog and current-account applications
@@ -72,6 +78,11 @@ paths:
   /v1/platform/tasks:
     get:
       summary: Get current-account task dashboard projection
+      parameters:
+        - {name: cursor, in: query, description: Keyset cursor returned as next_cursor by a previous response, schema: {type: string}}
+        - {$ref: "#/components/parameters/PageSize"}
+        - {name: from, in: query, description: RFC3339 or YYYY-MM-DD inclusive lower bound of the work-date window; defaults to 90 days ago, schema: {type: string}}
+        - {name: to, in: query, description: RFC3339 or YYYY-MM-DD upper bound of the work-date window; a bare date is treated as the end of that day, schema: {type: string}}
       responses:
         "200":
           description: Task records, todos, AI panel prompts, and an optional clock summary when attendance clock read is allowed
@@ -1349,6 +1360,26 @@ paths:
       responses:
         "204":
           description: User group member removed
+  /v1/iam/user-groups/options:
+    get:
+      summary: List lightweight user group options for pickers
+      parameters:
+        - {name: q, in: query, description: Case-insensitive name or description search, schema: {type: string}}
+        - {name: cursor, in: query, description: Keyset cursor returned as next_cursor by a previous response, schema: {type: string}}
+        - {$ref: "#/components/parameters/PageSize"}
+      responses:
+        "200":
+          description: One keyset-paginated page of user group options
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptionPageDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/iam/permission-sets:
     get:
       summary: List permission sets
@@ -1399,6 +1430,26 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
+  /v1/iam/permission-sets/options:
+    get:
+      summary: List lightweight permission set options for pickers
+      parameters:
+        - {name: q, in: query, description: Case-insensitive name or description search, schema: {type: string}}
+        - {name: cursor, in: query, description: Keyset cursor returned as next_cursor by a previous response, schema: {type: string}}
+        - {$ref: "#/components/parameters/PageSize"}
+      responses:
+        "200":
+          description: One keyset-paginated page of permission set options
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptionPageDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/iam/accounts:
     get:
       summary: List IAM accounts
@@ -1414,6 +1465,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+  /v1/iam/accounts/options:
+    get:
+      summary: List lightweight IAM account options for pickers
+      parameters:
+        - {name: q, in: query, description: Case-insensitive display name or email search, schema: {type: string}}
+        - {name: cursor, in: query, description: Keyset cursor returned as next_cursor by a previous response, schema: {type: string}}
+        - {$ref: "#/components/parameters/PageSize"}
+      responses:
+        "200":
+          description: One keyset-paginated page of IAM account options
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptionPageDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/iam/permission-set-assignments:
     get:
       summary: List permission set assignments
@@ -1729,6 +1800,26 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+  /v1/iam/assumable-roles/options:
+    get:
+      summary: List lightweight assumable role options for pickers
+      parameters:
+        - {name: q, in: query, description: Case-insensitive name or description search, schema: {type: string}}
+        - {name: cursor, in: query, description: Keyset cursor returned as next_cursor by a previous response, schema: {type: string}}
+        - {$ref: "#/components/parameters/PageSize"}
+      responses:
+        "200":
+          description: One keyset-paginated page of assumable role options
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OptionPageDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/iam/assumable-role-sessions/current:
     delete:
       summary: Return the caller-owned temporary assumed role
@@ -1751,6 +1842,12 @@ paths:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
+        - name: status
+          in: query
+          description: Filter by organization-unit status after closed-state inheritance. Omit or all returns every unit.
+          schema:
+            type: string
+            enum: [active, closed, all]
       responses:
         "200":
           description: Organization unit page
@@ -1758,6 +1855,7 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
     post:
       summary: Create organization unit
       responses:
@@ -1808,6 +1906,9 @@ paths:
                 show_in_org_chart:
                   type: boolean
                   description: Whether this department and its subtree are displayed in the organization chart.
+                manager_position_id:
+                  type: string
+                  description: Optional manager position for this org unit. Empty inherits the first non-empty ancestor manager position.
       responses:
         "200":
           description: Updated organization unit
@@ -1941,7 +2042,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateAttendancePolicyRequest"
+              $ref: "#/components/schemas/PublishAttendancePolicyRequest"
       responses:
         "200":
           description: Draft validation result and projected version
@@ -1961,7 +2062,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: "#/components/schemas/UpdateAttendancePolicyRequest"
+              $ref: "#/components/schemas/PublishAttendancePolicyRequest"
       responses:
         "200":
           description: Newly published attendance policy version
@@ -1975,7 +2076,9 @@ paths:
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/attendance/leave-balances/grant:
     post:
-      summary: Grant leave balances from attendance policy entitlements
+      deprecated: true
+      summary: Retired local leave balance grant endpoint
+      description: Always returns 400 after authorization. Leave balances must be refreshed through EHRMS attendance sync.
       requestBody:
         required: true
         content:
@@ -1983,47 +2086,57 @@ paths:
             schema:
               $ref: "#/components/schemas/GrantLeaveBalancesRequest"
       responses:
-        "200":
-          description: Leave balance grant result
+        "400":
+          description: Local leave balance grants are retired; use EHRMS attendance sync
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/GrantLeaveBalancesDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
+                $ref: "#/components/schemas/ErrorResponse"
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
-  /v1/attendance/ehrms/leave-types:
+  /v1/attendance/leave-types:
     get:
-      summary: List the persisted EHRMS leave-type snapshot
+      summary: List the fixed system leave catalog with tenant availability
       responses:
         "200":
-          description: EHRMS leave type catalog
+          description: System leave type catalog
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EHRMSLeaveTypeListDataResponse"
+                $ref: "#/components/schemas/LeaveTypeCatalogDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
-  /v1/attendance/ehrms/leave-types/sync:
-    post:
-      summary: Refresh and persist every EHRMS leave-type field
+  /v1/attendance/leave-types/{id}:
+    patch:
+      summary: Set tenant availability for one system leave type
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: {type: string}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetLeaveTypeEnabledInput"
       responses:
         "200":
-          description: Refreshed EHRMS leave-type catalog
+          description: Updated leave type with tenant enabled state
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/EHRMSLeaveTypeListDataResponse"
+                $ref: "#/components/schemas/LeaveTypeDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/attendance/leave-type-integrations:
     get:
-      summary: List local leave types with EHRMS mapping, usage, and unresolved sync state
+      summary: List system leave types with external mapping, usage, and unresolved sync state
       responses:
         "200":
           description: HR-facing leave type integration summary
@@ -2036,7 +2149,7 @@ paths:
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/attendance/leave-type-mappings:
     post:
-      summary: Create or update an effective EHRMS leave type mapping
+      summary: Create or update an external code mapping to a system leave type
       requestBody:
         required: true
         content:
@@ -2057,7 +2170,7 @@ paths:
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/attendance/leave-type-mappings/{id}:
     delete:
-      summary: End an EHRMS leave type mapping while preserving its history
+      summary: End an external leave type mapping while preserving its history
       parameters:
         - $ref: "#/components/parameters/ID"
       responses:
@@ -2447,6 +2560,23 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/org-units-directory:
+    get:
+      summary: Get the organization-unit tab projection
+      description: Returns the complete visible unit hierarchy and, when requested, directory-eligible direct employee summaries.
+      parameters:
+        - {name: include_employees, in: query, schema: {type: boolean, default: false}}
+      responses:
+        "200":
+          description: Organization units with direct employee summaries
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceOrgUnitDirectoryDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/workspace/organization:
     get:
       summary: Get workspace organization tree
@@ -2506,10 +2636,16 @@ paths:
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/workspace/attendance:
     get:
-      summary: Get workspace monthly attendance and clock matrices
+      summary: Get a workspace monthly attendance projection
       parameters:
         - {name: year, in: query, schema: {type: integer, minimum: 1970}}
         - {name: month, in: query, schema: {type: integer, minimum: 1, maximum: 12}}
+        - {name: projection, in: query, description: Omit for the legacy full response; projection requests are employee-paginated, schema: {type: string, enum: [attendance, clock]}}
+        - {name: view, in: query, deprecated: true, description: Alias of projection, schema: {type: string, enum: [attendance, clock]}}
+        - {name: department_id, in: query, schema: {type: string}}
+        - {name: keyword, in: query, description: Case-insensitive employee number/name/email search, schema: {type: string}}
+        - {$ref: "#/components/parameters/Page"}
+        - {$ref: "#/components/parameters/PageSize"}
       responses:
         "200":
           description: Monthly attendance and clock matrices
@@ -2521,12 +2657,40 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/attendance/abnormals:
+    get:
+      summary: List clock abnormalities within one bounded employee page
+      description: The abnormal total is scoped to employee_pagination; the endpoint never scans all tenant employees to calculate a global total.
+      parameters:
+        - {name: year, in: query, schema: {type: integer, minimum: 1970}}
+        - {name: month, in: query, schema: {type: integer, minimum: 1, maximum: 12}}
+        - {name: base_department_id, in: query, description: Optional department filter used to select the same employee page as the matrix, schema: {type: string}}
+        - {name: department_id, in: query, description: Filter abnormal items after the employee page has been selected, schema: {type: string}}
+        - {name: keyword, in: query, schema: {type: string}}
+        - {name: severity, in: query, schema: {type: string, enum: [full_day, missing_punch, time_anomaly]}}
+        - {$ref: "#/components/parameters/Page"}
+        - {$ref: "#/components/parameters/PageSize"}
+        - {name: employee_page, in: query, description: Employee page to inspect, schema: {type: integer, minimum: 1, default: 1}}
+        - {name: employee_page_size, in: query, description: Employee rows to inspect before anomaly filtering, schema: {type: integer, minimum: 1, maximum: 100, default: 50}}
+      responses:
+        "200":
+          description: Abnormal records paginated within the selected employee page
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/WorkspaceClockAbnormalPageDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/workspace/attendance/export:
     get:
       summary: Export workspace attendance matrices as CSV
       parameters:
         - {name: year, in: query, schema: {type: integer, minimum: 1970}}
         - {name: month, in: query, schema: {type: integer, minimum: 1, maximum: 12}}
+        - {name: department_id, in: query, description: Export employees in this department only, schema: {type: string}}
+        - {name: keyword, in: query, description: Case-insensitive employee number/name/email search, schema: {type: string}}
         - {name: kind, in: query, schema: {type: string, enum: [attendance, clock, abnormal], default: attendance}}
       responses:
         "200":
@@ -2614,12 +2778,17 @@ paths:
   /v1/workspace/knowledge-bases:
     get:
       summary: List tenant knowledge bases
+      parameters:
+        - {$ref: "#/components/parameters/Page"}
+        - {$ref: "#/components/parameters/PageSize"}
+        - {name: sort, in: query, schema: {type: string, enum: [created_at_asc, created_at_desc], default: created_at_desc}}
       responses:
         "200":
-          description: Knowledge base list with document counts
+          description: Paginated knowledge base list with document counts
           content:
             application/json:
               schema: {$ref: "#/components/schemas/KnowledgeBaseListDataResponse"}
+        "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
     post:
@@ -2685,13 +2854,18 @@ paths:
   /v1/workspace/knowledge-bases/{id}/documents:
     get:
       summary: List manual and uploaded sources in a knowledge base
-      parameters: [{$ref: "#/components/parameters/ID"}]
+      parameters:
+        - {$ref: "#/components/parameters/ID"}
+        - {$ref: "#/components/parameters/Page"}
+        - {$ref: "#/components/parameters/PageSize"}
+        - {name: sort, in: query, schema: {type: string, enum: [created_at_asc, created_at_desc], default: created_at_desc}}
       responses:
         "200":
-          description: Knowledge source list
+          description: Paginated knowledge source metadata list; items omit the full content field
           content:
             application/json:
               schema: {$ref: "#/components/schemas/KnowledgeDocumentListDataResponse"}
+        "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
@@ -2727,6 +2901,20 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
   /v1/workspace/knowledge-bases/{id}/documents/{document_id}:
+    get:
+      summary: Get one knowledge document with its full content
+      parameters:
+        - $ref: "#/components/parameters/ID"
+        - {name: document_id, in: path, required: true, schema: {type: string}}
+      responses:
+        "200":
+          description: Knowledge document including the extracted content
+          content:
+            application/json:
+              schema: {$ref: "#/components/schemas/KnowledgeDocument"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
     patch:
       summary: Update a manual text document
       parameters:
@@ -3399,6 +3587,7 @@ paths:
   /v1/workflows/form-data-sources:
     get:
       summary: List permission-filtered form data sources
+      description: The leave_types collection is populated from enabled items in the fixed system leave catalog.
       responses:
         "200":
           description: Form data source catalog
@@ -3835,13 +4024,19 @@ paths:
   /v1/agents/sessions:
     get:
       summary: List agent sessions
+      parameters:
+        - {name: agent_id, in: query, description: Filter sessions by bound agent definition, schema: {type: string}}
+        - {name: status, in: query, schema: {type: string, enum: [active, archived]}}
+        - {name: cursor, in: query, description: Keyset cursor returned as next_cursor by a previous response, schema: {type: string}}
+        - {$ref: "#/components/parameters/PageSize"}
       responses:
         "200":
-          description: Agent session list
+          description: One keyset-paginated page of agent sessions
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/AgentSessionListDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
     post:
@@ -3921,13 +4116,16 @@ paths:
       summary: List agent session messages
       parameters:
         - $ref: "#/components/parameters/ID"
+        - {name: cursor, in: query, description: Keyset cursor returned as next_cursor by a previous response, schema: {type: string}}
+        - {$ref: "#/components/parameters/PageSize"}
       responses:
         "200":
-          description: Agent session messages
+          description: One keyset-paginated page of agent session messages
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/AgentSessionMessageListDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
@@ -4300,10 +4498,13 @@ components:
         updated_at: {type: string, format: date-time}
     KnowledgeBaseListResponse:
       type: object
-      required: [items, total]
+      required: [items, total, page, page_size, sort]
       properties:
         items: {type: array, items: {$ref: "#/components/schemas/KnowledgeBase"}}
         total: {type: integer, minimum: 0}
+        page: {type: integer, minimum: 1}
+        page_size: {type: integer, minimum: 1}
+        sort: {type: string, enum: [created_at_asc, created_at_desc]}
     CreateKnowledgeBaseRequest:
       type: object
       required: [name]
@@ -4343,12 +4544,37 @@ components:
         updated_by_account_id: {type: string}
         created_at: {type: string, format: date-time}
         updated_at: {type: string, format: date-time}
+    KnowledgeDocumentListItem:
+      type: object
+      description: Document metadata as returned by list endpoints; the full content field is omitted.
+      required: [id, tenant_id, knowledge_base_id, title, source_type, original_filename, content_type, size_bytes, sha256, object_provider, object_bucket, parse_status, parse_error, created_at, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        knowledge_base_id: {type: string}
+        title: {type: string}
+        source_type: {type: string, enum: [manual, text, pdf]}
+        original_filename: {type: string}
+        content_type: {type: string}
+        size_bytes: {type: integer, format: int64, minimum: 0}
+        sha256: {type: string}
+        object_provider: {type: string}
+        object_bucket: {type: string}
+        parse_status: {type: string, enum: [ready, failed]}
+        parse_error: {type: string}
+        created_by_account_id: {type: string}
+        updated_by_account_id: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
     KnowledgeDocumentListResponse:
       type: object
-      required: [items, total]
+      required: [items, total, page, page_size, sort]
       properties:
-        items: {type: array, items: {$ref: "#/components/schemas/KnowledgeDocument"}}
+        items: {type: array, items: {$ref: "#/components/schemas/KnowledgeDocumentListItem"}}
         total: {type: integer, minimum: 0}
+        page: {type: integer, minimum: 1}
+        page_size: {type: integer, minimum: 1}
+        sort: {type: string, enum: [created_at_asc, created_at_desc]}
     CreateKnowledgeDocumentRequest:
       type: object
       required: [title, content]
@@ -4640,6 +4866,77 @@ components:
       required: [data]
       properties:
         data: {$ref: "#/components/schemas/AgentSessionFileListResponse"}
+    AgentSession:
+      type: object
+      required: [id, tenant_id, account_id, title, status, context_version, created_at, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        account_id: {type: string}
+        agent_id: {type: string}
+        title: {type: string}
+        status: {type: string, enum: [active, archived]}
+        context_version: {type: integer, format: int64}
+        last_message_at: {type: string, format: date-time, nullable: true}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    AgentSessionListPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/AgentSession"}}
+        next_cursor: {type: string, description: Keyset cursor for the next page; omitted when no further page exists.}
+    AgentSessionListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: "#/components/schemas/AgentSessionListPage"}
+    AgentSessionMessage:
+      type: object
+      required: [id, tenant_id, session_id, role, content, context_version, created_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        session_id: {type: string}
+        role: {type: string, enum: [user, assistant, system, tool]}
+        content: {type: string}
+        run_id: {type: string}
+        context_version: {type: integer, format: int64}
+        metadata: {type: object, additionalProperties: true}
+        attachments: {type: array, items: {$ref: "#/components/schemas/AgentSessionFile"}}
+        created_at: {type: string, format: date-time}
+    AgentSessionMessageListPage:
+      type: object
+      required: [items]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/AgentSessionMessage"}}
+        next_cursor: {type: string, description: Keyset cursor for the next page; omitted when no further page exists.}
+    AgentSessionMessageListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: "#/components/schemas/AgentSessionMessageListPage"}
+    OptionItem:
+      type: object
+      required: [id, label]
+      properties:
+        id: {type: string}
+        label: {type: string}
+        meta:
+          type: object
+          additionalProperties: true
+          description: Lightweight display metadata such as email, member count, or status.
+    OptionPage:
+      type: object
+      required: [items, next_cursor]
+      properties:
+        items: {type: array, items: {$ref: "#/components/schemas/OptionItem"}}
+        next_cursor: {type: string, description: Keyset cursor for the next page; an empty string means no further page exists.}
+    OptionPageDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: "#/components/schemas/OptionPage"}
     FormBuilderCapabilitiesResponse:
       type: object
       required: [schema_version, field_types, widgets, data_sources, workflow_targets]
@@ -6020,19 +6317,83 @@ components:
     PlatformFormsResponse:
       type: object
       additionalProperties: true
+      required: [categories, applications, drafts, ai_messages, quick_prompts]
+      properties:
+        categories:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformFormColumn"
+        applications:
+          $ref: "#/components/schemas/PlatformFormApplicationPage"
+        drafts:
+          $ref: "#/components/schemas/PlatformFormDraftPage"
+        ai_messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformChatMessage"
+        quick_prompts:
+          type: array
+          items: {type: string}
+    PlatformFormApplication:
+      type: object
+      description: Application list item; the full submission payload is not returned in list responses.
+      required: [id, title, applicant, submitted_at, status, summary]
+      properties:
+        id: {type: string}
+        template_key: {type: string}
+        title: {type: string}
+        applicant: {type: string}
+        submitted_at: {type: string}
+        status: {type: string}
+        summary: {type: string}
+    PlatformFormApplicationPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/PlatformFormApplication"}
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
+    PlatformFormDraft:
+      type: object
+      description: Draft list item; the draft payload is not returned in list responses.
+      required: [id, title, updated_at, summary]
+      properties:
+        id: {type: string}
+        template_key: {type: string}
+        title: {type: string}
+        updated_at: {type: string}
+        summary: {type: string}
+    PlatformFormDraftPage:
+      type: object
+      required: [items, total, page, page_size]
+      properties:
+        items:
+          type: array
+          items: {$ref: "#/components/schemas/PlatformFormDraft"}
+        total: {type: integer}
+        page: {type: integer}
+        page_size: {type: integer}
     PlatformTasksResponse:
       type: object
       additionalProperties: true
-      required: [records, todos, ai_messages, quick_prompts]
+      required: [records, items, todos, ai_messages, quick_prompts]
       properties:
         records:
           type: array
           items:
             $ref: "#/components/schemas/PlatformTaskRecord"
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/PlatformTaskItem"
         todos:
           type: array
           items:
             $ref: "#/components/schemas/PlatformTaskTodo"
+        next_cursor: {type: string, description: Keyset cursor for the next page of work-log items; omitted when no further page exists.}
         clock_summary:
           $ref: "#/components/schemas/PlatformClockSummary"
         ai_messages:
@@ -6515,6 +6876,12 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/WorkspaceOrganization"
+    WorkspaceOrgUnitDirectoryDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/WorkspaceOrgUnitDirectory"
     WorkspaceTurnoverDataResponse:
       type: object
       required: [data]
@@ -6527,6 +6894,12 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/WorkspaceAttendance"
+    WorkspaceClockAbnormalPageDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/WorkspaceClockAbnormalPage"
     WorkspaceAuditLogPageDataResponse:
       type: object
       required: [data]
@@ -6551,40 +6924,26 @@ components:
           $ref: "#/components/schemas/WorkspaceAuditLogFacets"
     AttendancePolicy:
       type: object
-      required: [work_time, leave_types]
+      required: [work_time]
       properties:
         version: {type: integer}
         work_time:
-          type: object
-          required: [require_worksite, clock_mode, flexible_clock_in_earliest, flexible_clock_out_latest, standard_start, standard_end, break_start, break_end, weekend, cycle_start, cycle_end, time_options, weekend_options, cycle_start_options, cycle_end_options]
-          properties:
-            require_worksite: {type: boolean, default: true}
-            clock_mode: {type: string, enum: [flexible, fixed], default: flexible}
-            flexible_clock_in_earliest: {type: string, default: "00:00"}
-            flexible_clock_out_latest: {type: string, default: "23:30"}
-            standard_start: {type: string}
-            standard_end: {type: string}
-            break_start: {type: string}
-            break_end: {type: string}
-            weekend: {type: string}
-            cycle_start: {type: string}
-            cycle_end: {type: string}
-            time_options:
-              type: array
-              items: {type: string}
-            weekend_options:
-              type: array
-              items: {type: string}
-            cycle_start_options:
-              type: array
-              items: {type: string}
-            cycle_end_options:
-              type: array
-              items: {type: string}
-        leave_types:
-          type: array
-          items:
-            $ref: "#/components/schemas/AttendanceLeaveType"
+          $ref: "#/components/schemas/AttendancePolicyWorkTime"
+    AttendancePolicyWorkTime:
+      type: object
+      required: [require_worksite, clock_mode, flexible_clock_in_earliest, flexible_clock_out_latest, standard_start, standard_end, break_start, break_end, weekend, cycle_start, cycle_end]
+      properties:
+        require_worksite: {type: boolean, default: true}
+        clock_mode: {type: string, enum: [flexible, fixed], default: flexible}
+        flexible_clock_in_earliest: {type: string, default: "00:00"}
+        flexible_clock_out_latest: {type: string, default: "23:30"}
+        standard_start: {type: string}
+        standard_end: {type: string}
+        break_start: {type: string}
+        break_end: {type: string}
+        weekend: {type: string}
+        cycle_start: {type: string}
+        cycle_end: {type: string}
     AttendancePolicyValidationResult:
       type: object
       required: [valid, issues, projected_version, policy]
@@ -6596,54 +6955,48 @@ components:
         projected_version: {type: integer}
         policy:
           $ref: "#/components/schemas/AttendancePolicy"
-    EHRMSLeaveType:
+    LeaveType:
       type: object
-      required: [code, raw]
+      required: [id, code, name_zh, name_en, unit, paid_ratio, requires_balance, enabled, display_order]
       properties:
+        id: {type: string, example: lt_annual}
         code: {type: string}
-        kind: {type: string, enum: [category, item, special_group]}
-        unit: {type: string}
-        abbr_en: {type: string}
-        name_en: {type: string}
         name_zh: {type: string}
-        min_unit: {type: string}
-        max_value: {type: string}
-        parent_code: {type: string}
-        show: {type: string}
-        range: {type: string}
-        ratio: {type: string}
-        target: {type: string}
-        show_max: {type: string}
-        pre_leave: {type: string}
-        salary_std: {type: string}
-        incl_holiday: {type: string}
-        target_class: {type: string}
-        incl_festival: {type: string}
-        first_year_rule: {type: string}
-        rule: {type: string}
-        raw:
-          type: object
-          additionalProperties: true
-          description: Untouched upstream object; preserves future EHRMS fields.
-    EHRMSLeaveTypeCatalog:
+        name_en: {type: string}
+        unit: {type: string, enum: [hour, day]}
+        paid_ratio: {type: number, format: double, minimum: 0, maximum: 1}
+        requires_balance: {type: boolean}
+        enabled:
+          type: boolean
+          description: Tenant-specific availability for new leave requests; defaults to true.
+        display_order: {type: integer}
+    SetLeaveTypeEnabledInput:
       type: object
-      required: [items, total, categories, leave_items, special_groups]
+      required: [enabled]
       properties:
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/EHRMSLeaveType"
-        total: {type: integer}
-        categories: {type: integer}
-        leave_items: {type: integer}
-        special_groups: {type: integer}
-        synced_at: {type: string, format: date-time}
-    EHRMSLeaveTypeListDataResponse:
+        enabled: {type: boolean}
+    LeaveTypeDataResponse:
       type: object
       required: [data]
       properties:
         data:
-          $ref: "#/components/schemas/EHRMSLeaveTypeCatalog"
+          $ref: "#/components/schemas/LeaveType"
+    LeaveTypeCatalog:
+      type: object
+      required: [items, total, enabled]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/LeaveType"
+        total: {type: integer}
+        enabled: {type: integer}
+    LeaveTypeCatalogDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/LeaveTypeCatalog"
     LeaveTypeExternalMapping:
       type: object
       required: [id, source, external_code, leave_type_id, leave_type_code]
@@ -6680,7 +7033,7 @@ components:
         leave_type_code: {type: string}
         leave_type_name: {type: string}
         active: {type: boolean}
-        mapping_status: {type: string, enum: [mapped, local_only, needs_mapping]}
+        mapping_status: {type: string, enum: [mapped, catalog_only]}
         mappings:
           type: array
           items:
@@ -6711,7 +7064,7 @@ components:
         id: {type: string}
         source: {type: string, default: ehrms}
         external_code: {type: string}
-        leave_type_id: {type: string}
+        leave_type_id: {type: string, description: Stable ID of a system leave type}
         effective_from: {type: string, format: date}
         effective_to: {type: string, format: date}
     EvaluateLeaveRequestRequest:
@@ -6719,7 +7072,7 @@ components:
       required: [leave_type, start_at, end_at]
       properties:
         employee_id: {type: string}
-        leave_type: {type: string}
+        leave_type: {type: string, description: Enabled system leave-type code. An active mapping may resolve an external alias to its canonical code.}
         start_at: {type: string, description: RFC3339 timestamp or YYYY-MM-DD}
         end_at: {type: string, description: RFC3339 timestamp or YYYY-MM-DD}
         hours: {type: number, exclusiveMinimum: 0, description: Calculated from the published work schedule when omitted}
@@ -6731,7 +7084,7 @@ components:
         code: {type: string}
         name: {type: string}
         unit: {type: string, enum: [day, hour]}
-        grant_mode: {type: string, enum: [annual_grant, event, overtime_credit, unlimited]}
+        grant_mode: {type: string, enum: [ehrms_sync]}
         requires_balance: {type: boolean}
         paid_ratio: {type: number}
         proof_after_hours: {type: number}
@@ -6808,16 +7161,19 @@ components:
           items:
             $ref: "#/components/schemas/RowError"
     UpdateAttendancePolicyRequest:
-      allOf:
-        - $ref: "#/components/schemas/AttendancePolicy"
-        - type: object
-          properties:
-            base_version:
-              type: integer
-              description: Published version that the draft was based on; stale publishes return a conflict.
+      $ref: "#/components/schemas/PublishAttendancePolicyRequest"
+    PublishAttendancePolicyRequest:
+      type: object
+      required: [work_time]
+      properties:
+        base_version:
+          type: integer
+          description: Published version that the draft was based on; stale publishes return a conflict.
+        work_time:
+          $ref: "#/components/schemas/AttendancePolicyWorkTime"
     WorkspaceEmployeeCard:
       type: object
-      required: [id, employee_id, avatar, name_zh, name_en, email, dept, title, type, phone, status, hire_date]
+      required: [id, employee_id, avatar, name_zh, name_en, email, department_id, dept, title, type, phone, status, hire_date]
       properties:
         id: {type: string}
         employee_id: {type: string}
@@ -6825,6 +7181,7 @@ components:
         name_zh: {type: string}
         name_en: {type: string}
         email: {type: string}
+        department_id: {type: string}
         dept: {type: string}
         title: {type: string}
         type: {type: string}
@@ -6910,9 +7267,13 @@ components:
               date: {type: string}
     WorkspaceOrganization:
       type: object
-      required: [parent_none, rows]
+      required: [parent_none, org_units, rows]
       properties:
         parent_none: {type: string}
+        org_units:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceOrgUnit"
         rows:
           type: array
           items:
@@ -6920,6 +7281,7 @@ components:
             required: [id, name_zh, name_en, dept, title, level, is_manager, show_in_org_chart, parent_id]
             properties:
               id: {type: string}
+              employee_id: {type: string, description: Internal employee UUID used by HR write APIs}
               name_zh: {type: string}
               name_en: {type: string}
               dept: {type: string}
@@ -6929,8 +7291,59 @@ components:
               show_in_org_chart: {type: boolean}
               parent_id: {type: string}
               org_unit_id: {type: string}
-              manager_source: {type: string, enum: [override, none]}
+              manager_source: {type: string, enum: [override, position, none]}
+              manager_issue: {type: string}
               is_override: {type: boolean}
+    WorkspaceOrgUnit:
+      type: object
+      required: [id, tenant_id, name, show_in_org_chart, created_at, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        code: {type: string}
+        name: {type: string}
+        name_en: {type: string}
+        parent_id: {type: string}
+        path:
+          type: array
+          items: {type: string}
+        source: {type: string}
+        closed: {type: boolean}
+        show_in_org_chart: {type: boolean}
+        manager_position_id: {type: string}
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    WorkspaceOrgUnitDirectoryEmployee:
+      type: object
+      required: [id, name]
+      properties:
+        id: {type: string}
+        employee_no: {type: string}
+        name: {type: string}
+        company_email: {type: string}
+        org_unit_id: {type: string}
+        position: {type: string}
+    WorkspaceOrgUnitDirectory:
+      type: object
+      required: [rows, unassigned_employees, employees_included]
+      properties:
+        rows:
+          type: array
+          items:
+            type: object
+            required: [org_unit, direct_employees]
+            properties:
+              org_unit:
+                $ref: "#/components/schemas/WorkspaceOrgUnit"
+              direct_employees:
+                type: array
+                items:
+                  $ref: "#/components/schemas/WorkspaceOrgUnitDirectoryEmployee"
+        unassigned_employees:
+          type: array
+          items:
+            $ref: "#/components/schemas/WorkspaceOrgUnitDirectoryEmployee"
+        employees_included: {type: boolean}
     WorkspaceTurnover:
       type: object
       required: [monthly, annual]
@@ -6943,7 +7356,8 @@ components:
           additionalProperties: true
     WorkspaceAttendance:
       type: object
-      required: [year, month, is_future, label, period_label, dates, leave_legend, attendance, clock]
+      description: Without projection both legacy matrices are present. With projection, only the requested matrix is present and its summary_scope is page.
+      required: [year, month, is_future, label, period_label, dates, leave_legend]
       properties:
         year: {type: integer}
         month: {type: integer, minimum: 1, maximum: 12}
@@ -6962,12 +7376,42 @@ components:
             properties:
               code: {type: string}
               label: {type: string}
+        pagination:
+          $ref: "#/components/schemas/WorkspaceAttendancePagination"
+        summary_scope:
+          type: string
+          enum: [page]
         attendance:
           type: object
           additionalProperties: true
         clock:
           type: object
           additionalProperties: true
+    WorkspaceAttendancePagination:
+      type: object
+      required: [total, page, page_size]
+      properties:
+        total: {type: integer, minimum: 0}
+        page: {type: integer, minimum: 1}
+        page_size: {type: integer, minimum: 1, maximum: 100}
+    WorkspaceClockAbnormalPage:
+      type: object
+      required: [items, pagination, summary_scope, employee_pagination]
+      properties:
+        items:
+          type: array
+          items:
+            type: object
+            required: [date, employee, record]
+            properties:
+              date: {$ref: "#/components/schemas/WorkspaceDate"}
+              employee: {$ref: "#/components/schemas/WorkspaceEmployeeCard"}
+              record: {type: object, additionalProperties: true}
+        pagination:
+          $ref: "#/components/schemas/WorkspaceAttendancePagination"
+        summary_scope: {type: string, enum: [employee_page]}
+        employee_pagination:
+          $ref: "#/components/schemas/WorkspaceAttendancePagination"
     WorkspaceAuditLog:
       type: object
       required: [id, time, operator, type, action, detail]

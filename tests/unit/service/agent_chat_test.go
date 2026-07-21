@@ -175,7 +175,7 @@ func TestAgentChatRecommendationFallsBackToVisibleCatalog(t *testing.T) {
 	if len(events) != 3 || events[1].Event != domain.AgentChatEventMessageDelta || events[2].Event != domain.AgentChatEventDone {
 		t.Fatalf("unexpected fallback events: %+v", events)
 	}
-	messages, err := store.ListAgentSessionMessages(context.Background(), "tenant-1", run.SessionID)
+	messages, err := store.ListAgentSessionMessages(context.Background(), "tenant-1", run.SessionID, domain.KeysetPage{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -475,7 +475,7 @@ func TestAgentChatSanitizesRuntimeFailure(t *testing.T) {
 	if len(stored) != 1 || stored[0].Answer != run.Answer || strings.Contains(stored[0].Answer, "secret-value") {
 		t.Fatalf("runtime failure leaked into run history: %+v", stored)
 	}
-	messages, err := store.ListAgentSessionMessages(context.Background(), "tenant-1", run.SessionID)
+	messages, err := store.ListAgentSessionMessages(context.Background(), "tenant-1", run.SessionID, domain.KeysetPage{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -681,10 +681,11 @@ func TestAgentChatClearContextDropsPreviousHistoryFromPrompt(t *testing.T) {
 	if cleared.ContextVersion != 2 || cleared.LastMessageAt != nil {
 		t.Fatalf("expected clear to advance the visible context partition, got %+v", cleared)
 	}
-	visible, err := agentservice.New(svc).ListSessionMessages(ctx, first.SessionID)
+	visiblePage, err := agentservice.New(svc).ListSessionMessages(ctx, first.SessionID, domain.ListAgentSessionMessagesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	visible := visiblePage.Items
 	if len(visible) != 0 {
 		t.Fatalf("expected messages before clear to be invisible, got %+v", visible)
 	}
@@ -736,10 +737,11 @@ func TestAgentChatFilesAreBoundToMessagesAndHiddenAfterClear(t *testing.T) {
 	}, nil); err != nil {
 		t.Fatal(err)
 	}
-	messages, err := agentservice.New(svc).ListSessionMessages(ctx, session.ID)
+	messagePage, err := agentservice.New(svc).ListSessionMessages(ctx, session.ID, domain.ListAgentSessionMessagesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	messages := messagePage.Items
 	if len(messages) != 2 || len(messages[0].Attachments) != 1 || messages[0].Attachments[0].ID != file.ID {
 		t.Fatalf("expected turn-level attachment provenance, got %+v", messages)
 	}
@@ -753,10 +755,11 @@ func TestAgentChatFilesAreBoundToMessagesAndHiddenAfterClear(t *testing.T) {
 	if _, err := agentservice.New(svc).ClearSessionContext(ctx, session.ID); err != nil {
 		t.Fatal(err)
 	}
-	messages, err = agentservice.New(svc).ListSessionMessages(ctx, session.ID)
+	messagePage, err = agentservice.New(svc).ListSessionMessages(ctx, session.ID, domain.ListAgentSessionMessagesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	messages = messagePage.Items
 	if len(messages) != 0 {
 		t.Fatalf("expected cleared messages to be invisible, got %+v", messages)
 	}
@@ -818,10 +821,11 @@ func TestAgentChatClearCannotSplitAnActiveRunAcrossContextVersions(t *testing.T)
 	if cleared.ContextVersion != session.ContextVersion+1 {
 		t.Fatalf("expected context version to advance after the turn, got %+v", cleared)
 	}
-	messages, err := agentservice.New(svc).ListSessionMessages(ctx, session.ID)
+	messagePage, err := agentservice.New(svc).ListSessionMessages(ctx, session.ID, domain.ListAgentSessionMessagesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	messages := messagePage.Items
 	if len(messages) != 0 {
 		t.Fatalf("expected the completed old-version turn to be hidden, got %+v", messages)
 	}

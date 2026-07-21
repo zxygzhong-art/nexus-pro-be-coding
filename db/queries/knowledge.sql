@@ -26,6 +26,27 @@ SELECT * FROM knowledge_bases
 WHERE tenant_id = sqlc.arg(tenant_id)
 ORDER BY updated_at DESC, id ASC;
 
+-- name: CountKnowledgeBases :one
+SELECT count(*) FROM knowledge_bases
+WHERE tenant_id = sqlc.arg(tenant_id);
+
+-- name: ListKnowledgeBasesPage :many
+SELECT * FROM knowledge_bases
+WHERE tenant_id = sqlc.arg(tenant_id)
+ORDER BY
+  CASE WHEN sqlc.arg(sort)::text = 'created_at_asc' THEN created_at END ASC,
+  created_at DESC,
+  id ASC
+LIMIT sqlc.arg(limit_count)::int
+OFFSET sqlc.arg(offset_count)::int;
+
+-- name: CountKnowledgeDocumentsByBase :many
+SELECT knowledge_base_id, count(*)::int AS document_count
+FROM knowledge_documents
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND knowledge_base_id = ANY(sqlc.arg(knowledge_base_ids)::text[])
+GROUP BY knowledge_base_id;
+
 -- name: DeleteKnowledgeBase :one
 DELETE FROM knowledge_bases
 WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id)
@@ -69,6 +90,25 @@ SELECT * FROM knowledge_documents
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND knowledge_base_id = sqlc.arg(knowledge_base_id)
 ORDER BY updated_at DESC, id ASC;
+
+-- name: CountKnowledgeDocuments :one
+SELECT count(*) FROM knowledge_documents
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND knowledge_base_id = sqlc.arg(knowledge_base_id);
+
+-- name: ListKnowledgeDocumentsPage :many
+SELECT id, tenant_id, knowledge_base_id, title, source_type, original_filename,
+    content_type, size_bytes, sha256, object_provider, object_bucket, object_key,
+    parse_status, parse_error, created_by_account_id, updated_by_account_id, created_at, updated_at
+FROM knowledge_documents
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND knowledge_base_id = sqlc.arg(knowledge_base_id)
+ORDER BY
+  CASE WHEN sqlc.arg(sort)::text = 'created_at_asc' THEN created_at END ASC,
+  created_at DESC,
+  id ASC
+LIMIT sqlc.arg(limit_count)::int
+OFFSET sqlc.arg(offset_count)::int;
 
 -- name: DeleteKnowledgeDocument :one
 DELETE FROM knowledge_documents

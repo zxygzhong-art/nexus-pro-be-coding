@@ -2,7 +2,6 @@ package memory
 
 import (
 	"context"
-	"time"
 
 	"nexus-pro-api/internal/domain"
 	"nexus-pro-api/internal/repository"
@@ -55,8 +54,7 @@ func (s *Store) cloneLocked() *Store {
 		employeeImports:         cloneNestedMap(s.employeeImports, copyEmployeeImportSession),
 		employmentContracts:     cloneNestedMap(s.employmentContracts, copyEmploymentContract),
 		attendancePolicies:      cloneMap(s.attendancePolicies, copyAttendancePolicy),
-		ehrmsLeaveTypes:         cloneSliceMap(s.ehrmsLeaveTypes, copyEHRMSLeaveType),
-		ehrmsLeaveTypesSyncedAt: cloneMap(s.ehrmsLeaveTypesSyncedAt, func(v time.Time) time.Time { return v }),
+		leaveTypeEnablements:    cloneNestedMap(s.leaveTypeEnablements, func(v bool) bool { return v }),
 		leaveTypeMappings:       cloneNestedMap(s.leaveTypeMappings, func(v LeaveTypeExternalMapping) LeaveTypeExternalMapping { return v }),
 		leaveTypeSyncIssues:     cloneNestedMap(s.leaveTypeSyncIssues, func(v LeaveTypeSyncIssue) LeaveTypeSyncIssue { return v }),
 		leaveBalances:           cloneNestedMap(s.leaveBalances, copyLeaveBalance),
@@ -74,6 +72,7 @@ func (s *Store) cloneLocked() *Store {
 		formTemplateVersions:    cloneNestedMap(s.formTemplateVersions, copyFormTemplateVersion),
 		formInstances:           cloneNestedMap(s.formInstances, copyFormInstance),
 		formInstanceFieldValues: cloneNestedMap(s.formInstanceFieldValues, copyFormInstanceFieldValues),
+		formInstanceFiles:       cloneNestedMap(s.formInstanceFiles, copyFormInstanceFile),
 		workflowRuns:            cloneNestedMap(s.workflowRuns, copyWorkflowRun),
 		workflowStageInstances:  cloneNestedMap(s.workflowStageInstances, copyWorkflowStageInstance),
 		workflowStageAssignees:  cloneNestedMap(s.workflowStageAssignees, copyWorkflowStageAssignee),
@@ -139,8 +138,7 @@ func (s *Store) replaceLocked(next *Store) {
 	s.employeeImports = next.employeeImports
 	s.employmentContracts = next.employmentContracts
 	s.attendancePolicies = next.attendancePolicies
-	s.ehrmsLeaveTypes = next.ehrmsLeaveTypes
-	s.ehrmsLeaveTypesSyncedAt = next.ehrmsLeaveTypesSyncedAt
+	s.leaveTypeEnablements = next.leaveTypeEnablements
 	s.leaveTypeMappings = next.leaveTypeMappings
 	s.leaveTypeSyncIssues = next.leaveTypeSyncIssues
 	s.leaveBalances = next.leaveBalances
@@ -158,6 +156,7 @@ func (s *Store) replaceLocked(next *Store) {
 	s.formTemplateVersions = next.formTemplateVersions
 	s.formInstances = next.formInstances
 	s.formInstanceFieldValues = next.formInstanceFieldValues
+	s.formInstanceFiles = next.formInstanceFiles
 	s.workflowRuns = next.workflowRuns
 	s.workflowStageInstances = next.workflowStageInstances
 	s.workflowStageAssignees = next.workflowStageAssignees

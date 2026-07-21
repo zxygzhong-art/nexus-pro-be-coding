@@ -31,13 +31,48 @@ func (c HRService) ListOrgUnits(ctx RequestContext) ([]OrgUnit, error) {
 }
 
 // ListOrgUnitPage 列出組織單位分頁的服務流程。
-func (c HRService) ListOrgUnitPage(ctx RequestContext, page PageRequest) (PageResponse[OrgUnit], error) {
+func (c HRService) ListOrgUnitPage(ctx RequestContext, query OrgUnitQuery) (PageResponse[OrgUnit], error) {
+	status, err := normalizeOrgUnitListStatus(query.Status)
+	if err != nil {
+		return PageResponse[OrgUnit]{}, err
+	}
 	items, err := c.ListOrgUnits(ctx)
 	if err != nil {
 		return PageResponse[OrgUnit]{}, err
 	}
+	items = filterOrgUnitsByListStatus(items, status)
+	page := PageRequest{Page: query.Page, PageSize: query.PageSize, Sort: query.Sort}
 	items = utils.SortOrgUnits(items, page.Sort)
 	return utils.PageResponse(items, page), nil
+}
+
+func normalizeOrgUnitListStatus(raw string) (string, error) {
+	status := strings.TrimSpace(strings.ToLower(raw))
+	switch status {
+	case "", "all":
+		return "all", nil
+	case "active", "closed":
+		return status, nil
+	default:
+		return "", BadRequest("status must be one of active, closed, all")
+	}
+}
+
+func filterOrgUnitsByListStatus(units []OrgUnit, status string) []OrgUnit {
+	if status == "all" {
+		return units
+	}
+	filtered := make([]OrgUnit, 0, len(units))
+	for _, unit := range units {
+		if status == "active" && !unit.Closed {
+			filtered = append(filtered, unit)
+			continue
+		}
+		if status == "closed" && unit.Closed {
+			filtered = append(filtered, unit)
+		}
+	}
+	return filtered
 }
 
 // CreateOrgUnit 建立組織單位的服務流程。
@@ -51,14 +86,18 @@ func (c HRService) CreateOrgUnit(ctx RequestContext, input CreateOrgUnitInput) (
 	var unit OrgUnit
 	if err := c.withTransaction(ctx, func(tx HRService) error {
 		next := OrgUnit{
-			ID:             utils.NewID("ou"),
-			TenantID:       ctx.TenantID,
-			Code:           strings.TrimSpace(input.Code),
-			Name:           strings.TrimSpace(input.Name),
-			ParentID:       strings.TrimSpace(input.ParentID),
-			ShowInOrgChart: true,
-			CreatedAt:      tx.Now(),
-			UpdatedAt:      tx.Now(),
+			ID:                utils.NewID("ou"),
+			TenantID:          ctx.TenantID,
+			Code:              strings.TrimSpace(input.Code),
+			Name:              strings.TrimSpace(input.Name),
+			ParentID:          strings.TrimSpace(input.ParentID),
+			ManagerPositionID: strings.TrimSpace(input.ManagerPositionID),
+			ShowInOrgChart:    true,
+			CreatedAt:         tx.Now(),
+			UpdatedAt:         tx.Now(),
+		}
+		if err := tx.validateOrgUnitManagerPosition(ctx, next); err != nil {
+			return err
 		}
 		if next.ParentID != "" {
 			parent, ok, err := tx.store.GetOrgUnit(goContext(ctx), ctx.TenantID, next.ParentID)
@@ -150,6 +189,12 @@ func (c HRService) UpdateOrgUnit(ctx RequestContext, id string, input UpdateOrgU
 		if input.ShowInOrgChart != nil {
 			next.ShowInOrgChart = *input.ShowInOrgChart
 		}
+		if input.ManagerPositionID != nil {
+			next.ManagerPositionID = strings.TrimSpace(*input.ManagerPositionID)
+		}
+		if err := tx.validateOrgUnitManagerPosition(ctx, next); err != nil {
+			return err
+		}
 		if parentChanged {
 			if err := tx.rebuildOrgUnitPaths(ctx, &next); err != nil {
 				return err
@@ -188,6 +233,11 @@ func (c HRService) UpdateOrgUnit(ctx RequestContext, id string, input UpdateOrgU
 		if err := tx.Service.syncOrgUnitRelationshipTuples(ctx, before, next); err != nil {
 			return err
 		}
+		if strings.TrimSpace(before.ManagerPositionID) != strings.TrimSpace(next.ManagerPositionID) {
+			if err := tx.resyncEmployeeManagerRelationshipTuples(ctx); err != nil {
+				return err
+			}
+		}
 		if err := tx.touchAuthzConfig(ctx, "org.unit.upsert", map[string]any{
 			"org_unit_id": next.ID,
 			"parent_id":   next.ParentID,
@@ -195,12 +245,14 @@ func (c HRService) UpdateOrgUnit(ctx RequestContext, id string, input UpdateOrgU
 			return err
 		}
 		if err := tx.audit(ctx, "org.unit.update", "org_unit", next.ID, "medium", map[string]any{
-			"before_parent_id":         before.ParentID,
-			"after_parent_id":          next.ParentID,
-			"before_closed":            before.Closed,
-			"after_closed":             next.Closed,
-			"before_show_in_org_chart": before.ShowInOrgChart,
-			"after_show_in_org_chart":  next.ShowInOrgChart,
+			"before_parent_id":           before.ParentID,
+			"after_parent_id":            next.ParentID,
+			"before_closed":              before.Closed,
+			"after_closed":               next.Closed,
+			"before_show_in_org_chart":   before.ShowInOrgChart,
+			"after_show_in_org_chart":    next.ShowInOrgChart,
+			"before_manager_position_id": before.ManagerPositionID,
+			"after_manager_position_id":  next.ManagerPositionID,
 		}); err != nil {
 			return err
 		}
@@ -210,6 +262,29 @@ func (c HRService) UpdateOrgUnit(ctx RequestContext, id string, input UpdateOrgU
 		return OrgUnit{}, err
 	}
 	return unit, nil
+}
+
+// validateOrgUnitManagerPosition 驗證組織單位主管崗位引用。
+func (c HRService) validateOrgUnitManagerPosition(ctx RequestContext, unit OrgUnit) error {
+	positionID := strings.TrimSpace(unit.ManagerPositionID)
+	if positionID == "" {
+		return nil
+	}
+	position, ok, err := c.store.GetPosition(goContext(ctx), ctx.TenantID, positionID)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return domainValidation("org unit validation failed", FieldError{
+			Field: "manager_position_id", Code: "not_found", Message: "manager position does not exist",
+		})
+	}
+	if position.Status != string(PositionStatusActive) {
+		return domainValidation("org unit validation failed", FieldError{
+			Field: "manager_position_id", Code: "invalid", Message: "manager position must be active",
+		})
+	}
+	return nil
 }
 
 // inheritClosedOrgUnitState 在讀取投影中保證關閉狀態沿祖先鏈向下繼承。

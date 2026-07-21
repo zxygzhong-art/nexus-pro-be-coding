@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"nexus-pro-api/internal/domain"
@@ -115,6 +116,32 @@ func TestLiteLLMAdminDeleteModelTreatsMissingAsSuccess(t *testing.T) {
 	}
 	if _, err := client.DeleteModel(context.Background(), "amodel-1"); err != nil {
 		t.Fatalf("expected missing route deletion to be idempotent: %v", err)
+	}
+}
+
+// TestLiteLLMAdminListManagedModelIDsReadsLargeModelInfo 驗證 /model/info 超過舊 8KiB 上限仍可完整解碼。
+func TestLiteLLMAdminListManagedModelIDsReadsLargeModelInfo(t *testing.T) {
+	padding := strings.Repeat("x", 12_000)
+	body := `{"data":[{"model_name":"nexus-agent-model-amodel-large","model_info":{"id":"amodel-large","note":"` + padding + `"}}]}`
+	if len(body) <= 8192 {
+		t.Fatalf("fixture must exceed legacy 8KiB cap, got %d", len(body))
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/model/info" || r.URL.RawQuery != "" {
+			http.NotFound(w, r)
+			return
+		}
+		w.Header().Set("content-type", "application/json")
+		_, _ = w.Write([]byte(body))
+	}))
+	defer server.Close()
+	client, err := llm.NewLiteLLMAdminClient(llm.LiteLLMAdminConfig{BaseURL: server.URL, MasterKey: "master-key", Client: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids, err := client.ListManagedModelIDs(context.Background())
+	if err != nil || len(ids) != 1 || ids[0] != "amodel-large" {
+		t.Fatalf("unexpected managed model ids: ids=%v err=%v", ids, err)
 	}
 }
 

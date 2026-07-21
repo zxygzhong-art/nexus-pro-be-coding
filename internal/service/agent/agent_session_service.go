@@ -1,6 +1,9 @@
 package agent
 
 import (
+	"encoding/base64"
+	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -16,12 +19,31 @@ const (
 )
 
 // ListSessions 列出目前帳號的 agent 會話。
-func (c AgentService) ListSessions(ctx RequestContext, query domain.ListAgentSessionsQuery) ([]domain.AgentSession, error) {
+func (c AgentService) ListSessions(ctx RequestContext, query domain.ListAgentSessionsQuery) (domain.AgentSessionListPage, error) {
 	account, _, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionRead, "")
 	if err != nil {
-		return nil, err
+		return domain.AgentSessionListPage{}, err
 	}
-	return c.store.ListAgentSessionsByAccount(goContext(ctx), ctx.TenantID, account.ID, strings.TrimSpace(query.Status), strings.TrimSpace(query.AgentID))
+	page, err := normalizeAgentKeysetPage(query.Cursor, query.PageSize)
+	if err != nil {
+		return domain.AgentSessionListPage{}, err
+	}
+	fetch := page
+	fetch.Limit++
+	items, err := c.store.ListAgentSessionsByAccount(goContext(ctx), ctx.TenantID, account.ID, strings.TrimSpace(query.Status), strings.TrimSpace(query.AgentID), fetch)
+	if err != nil {
+		return domain.AgentSessionListPage{}, err
+	}
+	nextCursor := ""
+	if len(items) > page.Limit {
+		items = items[:page.Limit]
+		last := items[len(items)-1]
+		nextCursor = encodeAgentKeysetCursor(last.CreatedAt, last.ID)
+	}
+	if items == nil {
+		items = []domain.AgentSession{}
+	}
+	return domain.AgentSessionListPage{Items: items, NextCursor: nextCursor}, nil
 }
 
 // CreateSession 建立 agent 會話。
@@ -154,22 +176,34 @@ func (c AgentService) DeleteSession(ctx RequestContext, id string) (domain.Agent
 }
 
 // ListSessionMessages 列出目前帳號會話的訊息。
-func (c AgentService) ListSessionMessages(ctx RequestContext, sessionID string) ([]domain.AgentSessionMessage, error) {
+func (c AgentService) ListSessionMessages(ctx RequestContext, sessionID string, query domain.ListAgentSessionMessagesQuery) (domain.AgentSessionMessageListPage, error) {
 	account, _, err := c.requireAgentAuthz(ctx, ResourceType("run"), ActionRead, strings.TrimSpace(sessionID))
 	if err != nil {
-		return nil, err
+		return domain.AgentSessionMessageListPage{}, err
 	}
 	session, err := c.CurrentAgentSession(ctx, account.ID, sessionID)
 	if err != nil {
-		return nil, err
+		return domain.AgentSessionMessageListPage{}, err
 	}
-	messages, err := c.store.ListAgentSessionMessages(goContext(ctx), ctx.TenantID, strings.TrimSpace(sessionID))
+	page, err := normalizeAgentKeysetPage(query.Cursor, query.PageSize)
 	if err != nil {
-		return nil, err
+		return domain.AgentSessionMessageListPage{}, err
+	}
+	fetch := page
+	fetch.Limit++
+	messages, err := c.store.ListAgentSessionMessages(goContext(ctx), ctx.TenantID, strings.TrimSpace(sessionID), fetch)
+	if err != nil {
+		return domain.AgentSessionMessageListPage{}, err
+	}
+	nextCursor := ""
+	if len(messages) > page.Limit {
+		messages = messages[:page.Limit]
+		last := messages[len(messages)-1]
+		nextCursor = encodeAgentKeysetCursor(last.CreatedAt, last.ID)
 	}
 	attachments, err := c.store.ListCurrentAgentMessageAttachments(goContext(ctx), ctx.TenantID, strings.TrimSpace(sessionID))
 	if err != nil {
-		return nil, err
+		return domain.AgentSessionMessageListPage{}, err
 	}
 	byMessage := make(map[string][]domain.AgentSessionFile)
 	for _, attachment := range attachments {
@@ -178,12 +212,17 @@ func (c AgentService) ListSessionMessages(ctx RequestContext, sessionID string) 
 	for index := range messages {
 		messages[index].Attachments = byMessage[messages[index].ID]
 	}
-	confirmations, err := c.PendingAgentConfirmationMessages(ctx, account.ID, session)
-	if err != nil {
-		return nil, err
+	if !page.HasCursor {
+		confirmations, err := c.PendingAgentConfirmationMessages(ctx, account.ID, session)
+		if err != nil {
+			return domain.AgentSessionMessageListPage{}, err
+		}
+		messages = append(messages, confirmations...)
 	}
-	messages = append(messages, confirmations...)
-	return messages, nil
+	if messages == nil {
+		messages = []domain.AgentSessionMessage{}
+	}
+	return domain.AgentSessionMessageListPage{Items: messages, NextCursor: nextCursor}, nil
 }
 
 // ListMemories 列出目前帳號的 agent 記憶。
@@ -359,6 +398,52 @@ func parseOptionalAgentMemoryTime(raw string) (*time.Time, error) {
 	}
 	t = t.UTC()
 	return &t, nil
+}
+
+// normalizeAgentKeysetPage 正規化 keyset 分頁參數並解碼 (created_at, id) 遊標。
+func normalizeAgentKeysetPage(rawCursor string, pageSize int) (domain.KeysetPage, error) {
+	if pageSize <= 0 {
+		pageSize = domain.DefaultPageSize
+	}
+	if pageSize > domain.MaxPageSize {
+		pageSize = domain.MaxPageSize
+	}
+	page := domain.KeysetPage{Limit: pageSize}
+	rawCursor = strings.TrimSpace(rawCursor)
+	if rawCursor == "" {
+		return page, nil
+	}
+	createdAt, id, err := decodeAgentKeysetCursor(rawCursor)
+	if err != nil {
+		return domain.KeysetPage{}, BadRequest("cursor is invalid")
+	}
+	page.HasCursor = true
+	page.CursorCreatedAt = createdAt
+	page.CursorID = id
+	return page, nil
+}
+
+// encodeAgentKeysetCursor 將最後一列的穩定排序鍵 (created_at, id) 序列化。
+func encodeAgentKeysetCursor(createdAt time.Time, id string) string {
+	raw := fmt.Sprintf("%d|%s", createdAt.UTC().UnixNano(), id)
+	return base64.RawURLEncoding.EncodeToString([]byte(raw))
+}
+
+// decodeAgentKeysetCursor 解析 encodeAgentKeysetCursor 產生的遊標。
+func decodeAgentKeysetCursor(cursor string) (time.Time, string, error) {
+	decoded, err := base64.RawURLEncoding.DecodeString(cursor)
+	if err != nil {
+		return time.Time{}, "", err
+	}
+	parts := strings.SplitN(string(decoded), "|", 2)
+	if len(parts) != 2 || strings.TrimSpace(parts[1]) == "" {
+		return time.Time{}, "", fmt.Errorf("invalid cursor")
+	}
+	nanos, err := strconv.ParseInt(parts[0], 10, 64)
+	if err != nil {
+		return time.Time{}, "", err
+	}
+	return time.Unix(0, nanos).UTC(), parts[1], nil
 }
 
 func agentSessionTitleFromMessage(message string) string {

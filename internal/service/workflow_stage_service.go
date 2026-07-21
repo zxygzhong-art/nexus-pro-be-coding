@@ -21,7 +21,7 @@ func ParseWorkflowStagesFromTemplate(template domain.FormTemplate) []domain.Work
 		}
 		out = append(out, normalizeWorkflowStageDefinition(stage))
 	}
-	return out
+	return ensureWorkflowStagePointers(out)
 }
 
 // SerializeWorkflowStages 序列化流程節點快照。
@@ -43,7 +43,10 @@ func DeserializeWorkflowStages(raw string) []domain.WorkflowStageDefinition {
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		return nil
 	}
-	return out
+	for index := range out {
+		out[index] = normalizeDeserializedWorkflowStage(out[index])
+	}
+	return ensureWorkflowStagePointers(out)
 }
 
 func normalizeWorkflowStageDefinition(stage domain.PlatformFormBuilderStage) domain.WorkflowStageDefinition {
@@ -51,13 +54,89 @@ func normalizeWorkflowStageDefinition(stage domain.PlatformFormBuilderStage) dom
 	if config.Role == "" && len(config.AccountIDs) == 0 && len(config.UserGroupIDs) == 0 && config.Field == "" {
 		config = inferWorkflowStageConfig(stage)
 	}
+	stageType := strings.TrimSpace(stage.Type)
+	if stageType == "parallel" {
+		stageType = "approver"
+		if strings.TrimSpace(config.Mode) == "" {
+			config.Mode = "all"
+		}
+	}
 	return domain.WorkflowStageDefinition{
 		ID:     strings.TrimSpace(stage.ID),
-		Type:   strings.TrimSpace(stage.Type),
+		Type:   stageType,
 		Label:  strings.TrimSpace(stage.Label),
 		Detail: strings.TrimSpace(stage.Detail),
 		Config: config,
 	}
+}
+
+func normalizeDeserializedWorkflowStage(stage domain.WorkflowStageDefinition) domain.WorkflowStageDefinition {
+	stage.ID = strings.TrimSpace(stage.ID)
+	stage.Type = strings.TrimSpace(stage.Type)
+	stage.Label = strings.TrimSpace(stage.Label)
+	stage.Detail = strings.TrimSpace(stage.Detail)
+	if stage.Type == "parallel" {
+		stage.Type = "approver"
+		if strings.TrimSpace(stage.Config.Mode) == "" {
+			stage.Config.Mode = "all"
+		}
+	}
+	return stage
+}
+
+// ensureWorkflowStagePointers backfills linear next edges and condition forks for legacy designs.
+func ensureWorkflowStagePointers(stages []domain.WorkflowStageDefinition) []domain.WorkflowStageDefinition {
+	if len(stages) == 0 {
+		return stages
+	}
+	out := make([]domain.WorkflowStageDefinition, len(stages))
+	copy(out, stages)
+	falseBranchHeads := map[string]struct{}{}
+	for _, stage := range out {
+		if strings.TrimSpace(stage.Type) != "condition" {
+			continue
+		}
+		trueNext := strings.TrimSpace(stage.Config.TrueNextStageID)
+		falseNext := strings.TrimSpace(stage.Config.FalseNextStageID)
+		if falseNext != "" && falseNext != domain.WorkflowStageEndID && falseNext != trueNext {
+			falseBranchHeads[falseNext] = struct{}{}
+		}
+	}
+	for index := range out {
+		stage := &out[index]
+		switch strings.TrimSpace(stage.Type) {
+		case "condition":
+			if strings.TrimSpace(stage.Config.TrueNextStageID) == "" {
+				stage.Config.TrueNextStageID = workflowNextStageID(out, stage.ID)
+				if stage.Config.TrueNextStageID == "" {
+					stage.Config.TrueNextStageID = domain.WorkflowStageEndID
+				}
+			}
+			if strings.TrimSpace(stage.Config.FalseNextStageID) == "" {
+				stage.Config.FalseNextStageID = domain.WorkflowStageEndID
+			}
+			trueNext := strings.TrimSpace(stage.Config.TrueNextStageID)
+			falseNext := strings.TrimSpace(stage.Config.FalseNextStageID)
+			if falseNext != "" && falseNext != domain.WorkflowStageEndID && falseNext != trueNext {
+				falseBranchHeads[falseNext] = struct{}{}
+			}
+		default:
+			if strings.TrimSpace(stage.Config.NextStageID) != "" {
+				continue
+			}
+			nextID := workflowNextStageID(out, stage.ID)
+			if nextID == "" {
+				stage.Config.NextStageID = domain.WorkflowStageEndID
+				continue
+			}
+			if _, isFalseHead := falseBranchHeads[nextID]; isFalseHead {
+				stage.Config.NextStageID = domain.WorkflowStageEndID
+				continue
+			}
+			stage.Config.NextStageID = nextID
+		}
+	}
+	return out
 }
 
 func workflowStageConfigFromMap(values map[string]any) domain.WorkflowStageConfig {
@@ -70,6 +149,7 @@ func workflowStageConfigFromMap(values map[string]any) domain.WorkflowStageConfi
 		Field:                   stringFromAny(values["field"]),
 		Operator:                stringFromAny(values["operator"]),
 		Value:                   stringFromAny(values["value"]),
+		NextStageID:             stringFromAny(values["next_stage_id"]),
 		TrueNextStageID:         stringFromAny(values["true_next_stage_id"]),
 		FalseNextStageID:        stringFromAny(values["false_next_stage_id"]),
 		ExcludeApplicant:        workflowBoolFromAny(values["exclude_applicant"]),
@@ -114,8 +194,6 @@ func inferWorkflowStageConfig(stage domain.PlatformFormBuilderStage) domain.Work
 	switch stageType {
 	case "notify":
 		return domain.WorkflowStageConfig{Role: inferWorkflowRole(text)}
-	case "parallel":
-		return domain.WorkflowStageConfig{Role: inferWorkflowRole(text), Mode: "all"}
 	case "condition":
 		return inferWorkflowConditionConfig(stage)
 	default:

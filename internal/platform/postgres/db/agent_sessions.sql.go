@@ -520,16 +520,33 @@ JOIN agent_sessions sessions
 WHERE messages.tenant_id = $1
   AND messages.session_id = $2
   AND messages.context_version = sessions.context_version
+  AND (
+    NOT $3::boolean
+    OR messages.created_at > $4::timestamptz
+    OR (messages.created_at = $4::timestamptz AND messages.id > $5)
+  )
 ORDER BY messages.created_at ASC, messages.id ASC
+LIMIT $6::int
 `
 
 type ListAgentSessionMessagesParams struct {
-	TenantID  string `json:"tenant_id"`
-	SessionID string `json:"session_id"`
+	TenantID        string             `json:"tenant_id"`
+	SessionID       string             `json:"session_id"`
+	HasCursor       bool               `json:"has_cursor"`
+	CursorCreatedAt pgtype.Timestamptz `json:"cursor_created_at"`
+	CursorID        string             `json:"cursor_id"`
+	LimitCount      int32              `json:"limit_count"`
 }
 
 func (q *Queries) ListAgentSessionMessages(ctx context.Context, arg ListAgentSessionMessagesParams) ([]AgentSessionMessage, error) {
-	rows, err := q.db.Query(ctx, listAgentSessionMessages, arg.TenantID, arg.SessionID)
+	rows, err := q.db.Query(ctx, listAgentSessionMessages,
+		arg.TenantID,
+		arg.SessionID,
+		arg.HasCursor,
+		arg.CursorCreatedAt,
+		arg.CursorID,
+		arg.LimitCount,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -564,14 +581,24 @@ WHERE tenant_id = $1
   AND account_id = $2
   AND ($3::text = '' OR status = $3)
   AND ($4::text = '' OR agent_id = $4)
-ORDER BY COALESCE(last_message_at, updated_at) DESC, id DESC
+  AND (
+    NOT $5::boolean
+    OR created_at < $6::timestamptz
+    OR (created_at = $6::timestamptz AND id < $7)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $8::int
 `
 
 type ListAgentSessionsByAccountParams struct {
-	TenantID  string `json:"tenant_id"`
-	AccountID string `json:"account_id"`
-	Status    string `json:"status"`
-	AgentID   string `json:"agent_id"`
+	TenantID        string             `json:"tenant_id"`
+	AccountID       string             `json:"account_id"`
+	Status          string             `json:"status"`
+	AgentID         string             `json:"agent_id"`
+	HasCursor       bool               `json:"has_cursor"`
+	CursorCreatedAt pgtype.Timestamptz `json:"cursor_created_at"`
+	CursorID        string             `json:"cursor_id"`
+	LimitCount      int32              `json:"limit_count"`
 }
 
 func (q *Queries) ListAgentSessionsByAccount(ctx context.Context, arg ListAgentSessionsByAccountParams) ([]AgentSession, error) {
@@ -580,6 +607,10 @@ func (q *Queries) ListAgentSessionsByAccount(ctx context.Context, arg ListAgentS
 		arg.AccountID,
 		arg.Status,
 		arg.AgentID,
+		arg.HasCursor,
+		arg.CursorCreatedAt,
+		arg.CursorID,
+		arg.LimitCount,
 	)
 	if err != nil {
 		return nil, err

@@ -3,6 +3,7 @@ package jobs_test
 import (
 	"context"
 	"encoding/base64"
+	"errors"
 	"testing"
 	"time"
 
@@ -13,15 +14,21 @@ import (
 )
 
 type fakeLiteLLMModelAdmin struct {
-	synced  []string
-	apiKeys []string
-	deleted []string
-	remote  []string
-	err     error
+	synced   []string
+	apiKeys  []string
+	deleted  []string
+	remote   []string
+	err      error
+	listErr  error
+	listCalls int
 }
 
 // ListManagedModelIDs 回傳測試用遠端 managed deployment。
 func (f *fakeLiteLLMModelAdmin) ListManagedModelIDs(context.Context) ([]string, error) {
+	f.listCalls++
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	return append([]string(nil), f.remote...), f.err
 }
 
@@ -109,6 +116,62 @@ func TestLiteLLMModelSyncerReconcileAllUpsertsActiveAndDeletesDisabled(t *testin
 		if stored.SyncStatus != domain.AgentModelSyncStatusSynced || stored.LastSyncedAt == nil || stored.SyncedConfigHash == "" {
 			t.Fatalf("unexpected sync result for %s: %+v", model.ID, stored)
 		}
+	}
+}
+
+// TestLiteLLMModelSyncerOrphanSweepFailureDoesNotFailLocalReconcile 驗證全量 list 失敗不阻斷本地逐條對帳。
+func TestLiteLLMModelSyncerOrphanSweepFailureDoesNotFailLocalReconcile(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStore()
+	now := time.Date(2026, 7, 21, 8, 0, 0, 0, time.UTC)
+	if err := store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-1", Name: "Tenant", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAgentModel(ctx, domain.AgentModel{
+		ID: "amodel-active", TenantID: "tenant-1", Name: "Active", Provider: "openai",
+		ModelName: "gpt-4.1-mini", LiteLLMModel: domain.AgentModelLiteLLMAlias("amodel-active"),
+		APIKey: "sk-active", Status: domain.AgentModelStatusActive, SyncStatus: domain.AgentModelSyncStatusPending,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	admin := &fakeLiteLLMModelAdmin{listErr: errors.New("decode LiteLLM model info: unexpected end of JSON input")}
+	processed, err := jobs.NewLiteLLMModelSyncer(store, admin, nil).Reconcile(ctx, jobs.LiteLLMReconcileOptions{SweepOrphans: true})
+	if err != nil {
+		t.Fatalf("local reconcile should succeed when orphan sweep fails: processed=%d err=%v", processed, err)
+	}
+	if processed != 1 || len(admin.synced) != 1 || admin.synced[0] != "amodel-active" || admin.listCalls != 1 {
+		t.Fatalf("unexpected calls: processed=%d synced=%v listCalls=%d", processed, admin.synced, admin.listCalls)
+	}
+	stored, ok, getErr := store.GetAgentModel(ctx, "tenant-1", "amodel-active")
+	if getErr != nil || !ok || stored.SyncStatus != domain.AgentModelSyncStatusSynced {
+		t.Fatalf("expected local model marked synced: model=%+v ok=%v err=%v", stored, ok, getErr)
+	}
+}
+
+// TestLiteLLMModelSyncerReconcileCanSkipOrphanSweep 驗證本地對帳可不拉全量 remote list。
+func TestLiteLLMModelSyncerReconcileCanSkipOrphanSweep(t *testing.T) {
+	ctx := context.Background()
+	store := memory.NewStore()
+	now := time.Date(2026, 7, 21, 8, 0, 0, 0, time.UTC)
+	if err := store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-1", Name: "Tenant", CreatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAgentModel(ctx, domain.AgentModel{
+		ID: "amodel-active", TenantID: "tenant-1", Name: "Active", Provider: "openai",
+		ModelName: "gpt-4.1-mini", LiteLLMModel: domain.AgentModelLiteLLMAlias("amodel-active"),
+		APIKey: "sk-active", Status: domain.AgentModelStatusActive, SyncStatus: domain.AgentModelSyncStatusPending,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	admin := &fakeLiteLLMModelAdmin{remote: []string{"amodel-orphan"}}
+	processed, err := jobs.NewLiteLLMModelSyncer(store, admin, nil).Reconcile(ctx, jobs.LiteLLMReconcileOptions{SweepOrphans: false})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if processed != 1 || admin.listCalls != 0 || len(admin.deleted) != 0 || len(admin.synced) != 1 {
+		t.Fatalf("expected local-only reconcile: processed=%d synced=%v deleted=%v listCalls=%d", processed, admin.synced, admin.deleted, admin.listCalls)
 	}
 }
 

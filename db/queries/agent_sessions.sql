@@ -36,7 +36,13 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND account_id = sqlc.arg(account_id)
   AND (sqlc.arg(status)::text = '' OR status = sqlc.arg(status))
   AND (sqlc.arg(agent_id)::text = '' OR agent_id = sqlc.arg(agent_id))
-ORDER BY COALESCE(last_message_at, updated_at) DESC, id DESC;
+  AND (
+    NOT sqlc.arg(has_cursor)::boolean
+    OR created_at < sqlc.arg(cursor_created_at)::timestamptz
+    OR (created_at = sqlc.arg(cursor_created_at)::timestamptz AND id < sqlc.arg(cursor_id))
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(limit_count)::int;
 
 -- name: ListAgentUsageByAccount :many
 WITH session_usage AS (
@@ -306,7 +312,13 @@ JOIN agent_sessions sessions
 WHERE messages.tenant_id = sqlc.arg(tenant_id)
   AND messages.session_id = sqlc.arg(session_id)
   AND messages.context_version = sessions.context_version
-ORDER BY messages.created_at ASC, messages.id ASC;
+  AND (
+    NOT sqlc.arg(has_cursor)::boolean
+    OR messages.created_at > sqlc.arg(cursor_created_at)::timestamptz
+    OR (messages.created_at = sqlc.arg(cursor_created_at)::timestamptz AND messages.id > sqlc.arg(cursor_id))
+  )
+ORDER BY messages.created_at ASC, messages.id ASC
+LIMIT sqlc.arg(limit_count)::int;
 
 -- name: ListRecentAgentSessionMessages :many
 SELECT * FROM (

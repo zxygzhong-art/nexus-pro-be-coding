@@ -164,6 +164,50 @@ func TestPermissionSetAssignmentPoliciesUseDedicatedResource(t *testing.T) {
 	}
 }
 
+// TestIAMOptionRoutesUseEntityReadPolicies 驗證 IAM options 端點沿用實體 read 權限並已註冊路由。
+func TestIAMOptionRoutesUseEntityReadPolicies(t *testing.T) {
+	want := map[string]string{
+		"GET /v1/iam/accounts/options":        "account",
+		"GET /v1/iam/permission-sets/options": "permission_set",
+		"GET /v1/iam/user-groups/options":     "user_group",
+		"GET /v1/iam/assumable-roles/options": "assumable_role",
+	}
+	found := map[string]struct{}{}
+	for _, policy := range domain.DefaultRoutePolicies {
+		key := policy.Method + " " + policy.Path
+		resource, ok := want[key]
+		if !ok {
+			continue
+		}
+		found[key] = struct{}{}
+		if policy.ApplicationCode != "iam" || policy.ResourceType != resource || policy.Action != "read" {
+			t.Fatalf("unexpected policy for %s: %+v", key, policy)
+		}
+		if policy.RiskLevel != "" {
+			t.Fatalf("options policy %s should stay low risk like hr.employee.options, got %q", key, policy.RiskLevel)
+		}
+	}
+	for key := range want {
+		if _, ok := found[key]; !ok {
+			t.Fatalf("missing authz policy for options route %s", key)
+		}
+	}
+
+	router, ok := v1api.New(service.New(memory.NewStore()), nil).Routes().(*gin.Engine)
+	if !ok {
+		t.Fatal("expected routes to be backed by gin engine")
+	}
+	registered := map[string]struct{}{}
+	for _, route := range router.Routes() {
+		registered[route.Method+" "+route.Path] = struct{}{}
+	}
+	for key := range want {
+		if _, ok := registered[key]; !ok {
+			t.Fatalf("options route not registered: %s", key)
+		}
+	}
+}
+
 // TestWorkflowReviewMutationsRequireApprove prevents read-only reviewers from mutating workflow state.
 func TestWorkflowReviewMutationsRequireApprove(t *testing.T) {
 	want := map[string]bool{
@@ -188,11 +232,11 @@ func TestWorkflowReviewMutationsRequireApprove(t *testing.T) {
 	}
 }
 
-// TestEHRMSLeaveTypeSyncPolicySeparatesReadAndUpdate keeps GET read-only and protects explicit synchronization.
-func TestEHRMSLeaveTypeSyncPolicySeparatesReadAndUpdate(t *testing.T) {
+// TestLocalLeaveTypePolicySeparatesReadAndUpdate protects the tenant override mutation.
+func TestLocalLeaveTypePolicySeparatesReadAndUpdate(t *testing.T) {
 	want := map[string]string{
-		"GET /v1/attendance/ehrms/leave-types":       "read",
-		"POST /v1/attendance/ehrms/leave-types/sync": "update",
+		"GET /v1/attendance/leave-types":       "read",
+		"PATCH /v1/attendance/leave-types/:id": "update",
 	}
 	for _, policy := range domain.DefaultRoutePolicies {
 		key := policy.Method + " " + policy.Path
@@ -206,7 +250,7 @@ func TestEHRMSLeaveTypeSyncPolicySeparatesReadAndUpdate(t *testing.T) {
 		delete(want, key)
 	}
 	if len(want) != 0 {
-		t.Fatalf("missing eHRMS leave type policies: %+v", want)
+		t.Fatalf("missing local leave type policies: %+v", want)
 	}
 }
 
@@ -263,6 +307,7 @@ func TestDocumentedJSONSuccessResponsesUseDataEnvelope(t *testing.T) {
 		"POST /v1/hr/employees/{id}/invite 200":            "EmployeeDataResponse",
 		"POST /v1/hr/employees/{id}/status-transition 200": "EmployeeDataResponse",
 		"PATCH /v1/hr/employees/{id}/status 200":           "EmployeeDataResponse",
+		"GET /v1/workspace/org-units-directory 200":        "WorkspaceOrgUnitDirectoryDataResponse",
 	}
 	for key, want := range expected {
 		if got := refs[key]; got != want {

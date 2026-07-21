@@ -11,39 +11,42 @@ import (
 )
 
 const (
-	ehrmsFieldEmployeeNo      = "員工編號"
-	ehrmsFieldName            = "中文姓名"
-	ehrmsFieldNameEN          = "英文姓名"
-	ehrmsFieldFirstName       = "First Name"
-	ehrmsFieldLastName        = "Last Name"
-	ehrmsFieldGender          = "性別"
-	ehrmsFieldBirthDate       = "生日"
-	ehrmsFieldHireDate        = "到職日期"
-	ehrmsFieldQuitDate        = "離職日期"
-	ehrmsFieldTenureStartDate = "年資起始日"
-	ehrmsFieldProbationEnd    = "試用期滿日"
-	ehrmsFieldEmployeeStatus  = "在職狀態"
-	ehrmsFieldNationality     = "國籍名稱"
-	ehrmsFieldNationalID      = "身份證號"
-	ehrmsFieldPassportNo      = "護照號碼"
-	ehrmsFieldIdentityType    = "身份類別名稱"
-	ehrmsFieldEducation       = "最高學歷"
-	ehrmsFieldSchoolName      = "學校名稱(中文)"
-	ehrmsFieldDepartmentCode  = "部門代碼"
-	ehrmsFieldDepartmentName  = "部門中文名稱"
-	ehrmsFieldDepartmentEN    = "部門英文名稱"
-	ehrmsFieldPositionCode    = "職務代碼"
-	ehrmsFieldPositionName    = "職務中文名稱"
-	ehrmsFieldPositionEN      = "職務英文名稱"
-	ehrmsFieldCardNo          = "卡號"
-	ehrmsFieldClockRequired   = "上下班刷卡"
-	ehrmsFieldShiftName       = "員工班別名稱"
-	ehrmsFieldShiftType       = "員工班別屬性"
-	ehrmsFieldDirectIndirect  = "直接/間接員工"
-	ehrmsFieldLeaveGroup      = "休假羣組"
-	ehrmsFieldCompanyEmail    = "公司信箱"
-	ehrmsFieldParentDeptCode  = "上級部門代碼"
-	ehrmsFieldDeptClosed      = "部門已關閉"
+	ehrmsFieldEmployeeNo       = "員工編號"
+	ehrmsFieldName             = "中文姓名"
+	ehrmsFieldNameEN           = "英文姓名"
+	ehrmsFieldFirstName        = "First Name"
+	ehrmsFieldLastName         = "Last Name"
+	ehrmsFieldGender           = "性別"
+	ehrmsFieldBirthDate        = "生日"
+	ehrmsFieldHireDate         = "到職日期"
+	ehrmsFieldQuitDate         = "離職日期"
+	ehrmsFieldTenureStartDate  = "年資起始日"
+	ehrmsFieldProbationEnd     = "試用期滿日"
+	ehrmsFieldEmployeeStatus   = "在職狀態"
+	ehrmsFieldNationality      = "國籍名稱"
+	ehrmsFieldNationalID       = "身份證號"
+	ehrmsFieldPassportNo       = "護照號碼"
+	ehrmsFieldIdentityType     = "身份類別名稱"
+	ehrmsFieldEducation        = "最高學歷"
+	ehrmsFieldSchoolName       = "學校名稱(中文)"
+	ehrmsFieldDepartmentCode   = "部門代碼"
+	ehrmsFieldDepartmentName   = "部門中文名稱"
+	ehrmsFieldDepartmentEN     = "部門英文名稱"
+	ehrmsFieldPositionCode     = "職務代碼"
+	ehrmsFieldPositionName     = "職務中文名稱"
+	ehrmsFieldPositionEN       = "職務英文名稱"
+	ehrmsFieldCardNo           = "卡號"
+	ehrmsFieldClockRequired    = "上下班刷卡"
+	ehrmsFieldShiftName        = "員工班別名稱"
+	ehrmsFieldShiftType        = "員工班別屬性"
+	ehrmsFieldDirectIndirect   = "直接/間接員工"
+	ehrmsFieldLeaveGroup       = "休假羣組"
+	ehrmsFieldCompanyEmail     = "公司信箱"
+	ehrmsFieldParentDeptCode   = "上級部門代碼"
+	ehrmsFieldDeptClosed       = "部門已關閉"
+	ehrmsFieldManagerJobCode   = "主管職務代碼"
+	ehrmsFieldManagerJobName   = "主管職務中文名稱"
+	ehrmsFieldManagerJobNameEN = "主管職務英文名稱"
 )
 
 type ehrmsEmployeeWrite struct {
@@ -73,14 +76,33 @@ func (c HRService) SyncEHRMSOrgUnits(ctx RequestContext) (EHRMSOrgUnitSyncRespon
 		c.logWarn(ctx, "eHRMS department fetch failed", "error", err)
 		return EHRMSOrgUnitSyncResponse{}, ehrmsFetchError("departments", err)
 	}
-	departments := EHRMSOrgUnitsFromDepartments(ctx.TenantID, departmentRecords, c.Now())
+	// Manager-position FKs require the position catalog first; also absorb manager jobs missing from /positions.
+	positionRecords, err := c.ehrmsClient.ListPositions(goContext(ctx))
+	if err != nil {
+		c.logWarn(ctx, "eHRMS position fetch failed during org sync", "error", err)
+		return EHRMSOrgUnitSyncResponse{}, ehrmsFetchError("positions", err)
+	}
+	now := c.Now()
+	positions := mergeEHRMSPositionsWithDepartmentManagers(
+		EHRMSPositionsFromRecords(ctx.TenantID, positionRecords, now),
+		ctx.TenantID,
+		departmentRecords,
+		now,
+	)
+	departments := EHRMSOrgUnitsFromDepartments(ctx.TenantID, departmentRecords, now)
 	response := EHRMSOrgUnitSyncResponse{Fetched: len(departmentRecords)}
 	if err := c.withTransaction(ctx, func(tx HRService) error {
+		if _, err := tx.UpsertEHRMSPositions(ctx, positions); err != nil {
+			return err
+		}
 		upserted, err := tx.UpsertEHRMSOrgUnits(ctx, departments)
 		if err != nil {
 			return err
 		}
 		response.Upserted = upserted
+		if err := tx.resyncEmployeeManagerRelationshipTuples(ctx); err != nil {
+			return err
+		}
 		if err := tx.audit(ctx, "hr.org_unit.ehrms.sync", string(ResourceOrgUnit), "ehrms", string(SeverityHigh), map[string]any{
 			"source":   "ehrms",
 			"fetched":  response.Fetched,
@@ -174,25 +196,39 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 	response := EHRMSEmployeeSyncResponse{Fetched: len(records), Mode: mode}
 	now := c.Now()
 	departments := EHRMSOrgUnitsFromDepartments(ctx.TenantID, departmentRecords, now)
-	positions := EHRMSPositionsFromRecords(ctx.TenantID, positionRecords, now)
+	positions := mergeEHRMSPositionsWithDepartmentManagers(
+		EHRMSPositionsFromRecords(ctx.TenantID, positionRecords, now),
+		ctx.TenantID,
+		departmentRecords,
+		now,
+	)
 	provisionQueued := false
 	if err := c.withTransaction(ctx, func(tx HRService) error {
-		c.logInfo(ctx, "eHRMS sync step started", "step", "departments", "fetched", len(departmentRecords))
-		if _, err := tx.UpsertEHRMSOrgUnits(ctx, departments); err != nil {
-			return err
-		}
-		c.logInfo(ctx, "eHRMS sync step completed", "step", "departments", "upserted", len(departments))
+		// Positions first so department manager_position_id and employee position_id FKs resolve.
 		c.logInfo(ctx, "eHRMS sync step started", "step", "positions", "fetched", len(positionRecords))
 		if _, err := tx.UpsertEHRMSPositions(ctx, positions); err != nil {
 			return err
 		}
 		c.logInfo(ctx, "eHRMS sync step completed", "step", "positions", "upserted", len(positions))
+		c.logInfo(ctx, "eHRMS sync step started", "step", "departments", "fetched", len(departmentRecords))
+		if _, err := tx.UpsertEHRMSOrgUnits(ctx, departments); err != nil {
+			return err
+		}
+		c.logInfo(ctx, "eHRMS sync step completed", "step", "departments", "upserted", len(departments))
 		c.logInfo(ctx, "eHRMS sync step started", "step", "employees", "fetched", len(records))
 		writes, rowErrors, skippedResults, err := tx.prepareEHRMSSyncWrites(ctx, account, decision, records, mode)
 		if err != nil {
 			return err
 		}
-		created, updated := 0, 0
+		created, updated, skipped := 0, 0, 0
+		failed := 0
+		for _, item := range skippedResults {
+			if item.Action == "skipped" {
+				skipped++
+			} else {
+				failed++
+			}
+		}
 		results := make([]BatchEmployeeResult, 0, len(writes)+len(skippedResults))
 		results = append(results, skippedResults...)
 		for _, item := range writes {
@@ -254,7 +290,8 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 		})
 		response.Created = created
 		response.Updated = updated
-		response.Failed = len(skippedResults)
+		response.Skipped = skipped
+		response.Failed = failed
 		response.RowErrors = rowErrors
 		response.DepartmentsUpserted = len(departments)
 		response.PositionsUpserted = len(positions)
@@ -263,7 +300,8 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 			"step", "employees",
 			"created", created,
 			"updated", updated,
-			"failed", len(skippedResults),
+			"skipped", skipped,
+			"failed", failed,
 			"mode", mode,
 		)
 		if err := tx.appendEmployeeEvent(ctx, string(EventEmployeeImported), "ehrms", map[string]any{
@@ -271,7 +309,8 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 			"fetched":              response.Fetched,
 			"created":              created,
 			"updated":              updated,
-			"failed":               len(skippedResults),
+			"skipped":              skipped,
+			"failed":               failed,
 			"departments_upserted": len(departments),
 			"positions_upserted":   len(positions),
 			"mode":                 mode,
@@ -283,8 +322,8 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 			"fetched":              response.Fetched,
 			"created":              created,
 			"updated":              updated,
-			"skipped":              response.Skipped,
-			"failed":               response.Failed,
+			"skipped":              skipped,
+			"failed":               failed,
 			"departments_upserted": len(departments),
 			"positions_upserted":   len(positions),
 			"mode":                 mode,
@@ -363,6 +402,10 @@ func (c HRService) prepareEHRMSSyncWrites(ctx RequestContext, account Account, d
 		}
 		if len(errors) > 0 {
 			rowErrors = append(rowErrors, errors...)
+			action := "failed"
+			if errors[0].Field == "position_code" && (errors[0].Code == "not_found" || errors[0].Code == "required") {
+				action = "skipped"
+			}
 			c.logWarn(ctx, "eHRMS employee sync row skipped",
 				"row", rowNumber,
 				"employee_no", employee.EmployeeNo,
@@ -370,11 +413,12 @@ func (c HRService) prepareEHRMSSyncWrites(ctx RequestContext, account Account, d
 				"field", errors[0].Field,
 				"message", firstRowErrorMessage(errors),
 				"error_count", len(errors),
+				"action", action,
 			)
 			results = append(results, BatchEmployeeResult{
 				RowNumber: rowNumber,
 				Success:   false,
-				Action:    "failed",
+				Action:    action,
 				Code:      errors[0].Code,
 				Message:   firstRowErrorMessage(errors),
 			})
@@ -389,12 +433,25 @@ func (c HRService) prepareEHRMSSyncWrites(ctx RequestContext, account Account, d
 }
 
 // ehrmsEmployeeCandidate maps upstream business codes to tenant-scoped internal references.
+// Employees are only accepted when 職務代碼 already exists in the local positions catalog.
 func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmployeeRecord, rowNumber int, lookup ehrmsValidationLookup) (Employee, []RowError, error) {
 	status := normalizeEmployeeStatus(ehrmsValue(record, ehrmsFieldEmployeeStatus))
 	departmentCode := ehrmsValue(record, ehrmsFieldDepartmentCode)
 	positionCode := ehrmsValue(record, ehrmsFieldPositionCode)
+	if positionCode == "" {
+		return Employee{}, []RowError{{
+			Row: rowNumber, Field: "position_code", Code: "required",
+			Message: "position_code is required and must exist in local positions catalog",
+		}}, nil
+	}
+	positionID, ok := lookup.positionIDsByCode[ehrmsExternalCodeKey(positionCode)]
+	if !ok {
+		return Employee{}, []RowError{{
+			Row: rowNumber, Field: "position_code", Code: "not_found",
+			Message: "position_code does not exist in local positions catalog",
+		}}, nil
+	}
 	orgUnitID := utils.FirstNonEmpty(lookup.orgUnitIDsByCode[ehrmsExternalCodeKey(departmentCode)], ehrmsOrgUnitID(ctx.TenantID, departmentCode))
-	positionID := utils.FirstNonEmpty(lookup.positionIDsByCode[ehrmsExternalCodeKey(positionCode)], ehrmsPositionID(ctx.TenantID, positionCode))
 	companyEmail := strings.ToLower(strings.TrimSpace(ehrmsValue(record, ehrmsFieldCompanyEmail)))
 	input := CreateEmployeeInput{
 		EmployeeNo:       ehrmsValue(record, ehrmsFieldEmployeeNo),
@@ -488,6 +545,20 @@ func (c HRService) validateEHRMSEmployee(ctx RequestContext, employee Employee, 
 	if strings.TrimSpace(employee.OrgUnitID) != "" {
 		if _, ok := lookup.orgUnitIDs[employee.OrgUnitID]; !ok {
 			fields = append(fields, FieldError{Tab: "employment_info", Field: "org_unit_id", Code: "not_found", Message: "org unit not found"})
+		}
+	}
+	positionCode := strings.TrimSpace(stringFromMap(employee.EmploymentInfo, "position_code"))
+	if positionCode == "" || lookup.positionIDsByCode[ehrmsExternalCodeKey(positionCode)] == "" {
+		fields = append(fields, FieldError{
+			Tab: "employment_info", Field: "position_code", Code: "not_found",
+			Message: "position_code does not exist in local positions catalog",
+		})
+	} else if positionID := strings.TrimSpace(employee.PositionID); positionID != "" {
+		if expected := lookup.positionIDsByCode[ehrmsExternalCodeKey(positionCode)]; expected != positionID {
+			fields = append(fields, FieldError{
+				Tab: "employment_info", Field: "position_id", Code: "invalid",
+				Message: "position_id does not match local positions catalog",
+			})
 		}
 	}
 	if len(fields) == 0 {
@@ -631,6 +702,12 @@ func (c HRService) UpsertEHRMSOrgUnits(ctx RequestContext, departments []OrgUnit
 		if err != nil {
 			return 0, err
 		}
+		if ok {
+			unit.CreatedAt = before.CreatedAt
+			unit.ShowInOrgChart = before.ShowInOrgChart
+		} else {
+			unit.ShowInOrgChart = true
+		}
 		if err := c.store.UpsertOrgUnit(goContext(ctx), unit); err != nil {
 			return 0, err
 		}
@@ -740,6 +817,7 @@ func (c HRService) UpsertEHRMSPositions(ctx RequestContext, positions []Position
 		}
 		if ok {
 			position.ID = before.ID
+			position.CreatedAt = before.CreatedAt
 		}
 		if err := c.store.UpsertPosition(goContext(ctx), position); err != nil {
 			return 0, err
@@ -749,9 +827,11 @@ func (c HRService) UpsertEHRMSPositions(ctx RequestContext, positions []Position
 }
 
 // EHRMSOrgUnitsFromDepartments maps upstream department records into the canonical organization hierarchy.
+// manager_position_id uses manager_job_code; empty or same-as-parent job codes stay empty so runtime inherits.
 func EHRMSOrgUnitsFromDepartments(tenantID string, records []EHRMSDepartmentRecord, now time.Time) []OrgUnit {
 	unitsByCode := make(map[string]OrgUnit, len(records))
 	parentCodes := make(map[string]string, len(records))
+	managerJobByCode := make(map[string]string, len(records))
 	for _, record := range records {
 		code := ehrmsValue(record, ehrmsFieldDepartmentCode)
 		if code == "" {
@@ -767,23 +847,31 @@ func EHRMSOrgUnitsFromDepartments(tenantID string, records []EHRMSDepartmentReco
 			name = code
 		}
 		unitsByCode[codeKey] = OrgUnit{
-			ID:        ehrmsOrgUnitID(tenantID, code),
-			TenantID:  tenantID,
-			Code:      code,
-			Name:      name,
-			NameEN:    nameEN,
-			Closed:    closed,
-			CreatedAt: now,
-			UpdatedAt: now,
-			Source:    "ehrms",
+			ID:             ehrmsOrgUnitID(tenantID, code),
+			TenantID:       tenantID,
+			Code:           code,
+			Name:           name,
+			NameEN:         nameEN,
+			Closed:         closed,
+			ShowInOrgChart: true,
+			CreatedAt:      now,
+			UpdatedAt:      now,
+			Source:         "ehrms",
 		}
 		parentCodes[codeKey] = ehrmsExternalCodeKey(ehrmsValue(record, ehrmsFieldParentDeptCode))
+		managerJobByCode[codeKey] = strings.TrimSpace(utils.FirstNonEmpty(
+			ehrmsValue(record, ehrmsFieldManagerJobCode),
+			ehrmsValue(record, "manager_job_code"),
+		))
 	}
 	unitsByID := make(map[string]OrgUnit, len(unitsByCode))
 	for codeKey, unit := range unitsByCode {
 		if parent, ok := unitsByCode[parentCodes[codeKey]]; ok {
 			unit.ParentID = parent.ID
 		}
+		unit.ManagerPositionID = ehrmsCollapsedManagerPositionID(
+			tenantID, managerJobByCode[codeKey], managerJobByCode[parentCodes[codeKey]],
+		)
 		unitsByID[unit.ID] = unit
 	}
 	for id, unit := range unitsByID {
@@ -797,6 +885,70 @@ func EHRMSOrgUnitsFromDepartments(tenantID string, records []EHRMSDepartmentReco
 		}
 	}
 	return ehrmsSortedOrgUnits(unitsByID)
+}
+
+// ehrmsCollapsedManagerPositionID keeps only distinct manager jobs; same-as-parent or empty inherit at runtime.
+func ehrmsCollapsedManagerPositionID(tenantID, ownJobCode, parentJobCode string) string {
+	ownJobCode = strings.TrimSpace(ownJobCode)
+	if ownJobCode == "" {
+		return ""
+	}
+	if ehrmsExternalCodeKey(ownJobCode) == ehrmsExternalCodeKey(parentJobCode) {
+		return ""
+	}
+	return ehrmsPositionID(tenantID, ownJobCode)
+}
+
+// mergeEHRMSPositionsWithDepartmentManagers ensures manager job codes referenced by departments exist locally.
+func mergeEHRMSPositionsWithDepartmentManagers(positions []Position, tenantID string, departments []EHRMSDepartmentRecord, now time.Time) []Position {
+	byCode := make(map[string]Position, len(positions))
+	for _, position := range positions {
+		byCode[ehrmsExternalCodeKey(position.Code)] = position
+	}
+	for _, record := range departments {
+		code := strings.TrimSpace(utils.FirstNonEmpty(
+			ehrmsValue(record, ehrmsFieldManagerJobCode),
+			ehrmsValue(record, "manager_job_code"),
+		))
+		if code == "" {
+			continue
+		}
+		codeKey := ehrmsExternalCodeKey(code)
+		if existing, ok := byCode[codeKey]; ok && strings.TrimSpace(existing.Name) != "" {
+			continue
+		}
+		name := utils.FirstNonEmpty(
+			ehrmsValue(record, ehrmsFieldManagerJobName),
+			ehrmsValue(record, "manager_job_title"),
+			ehrmsValue(record, ehrmsFieldManagerJobNameEN),
+			ehrmsValue(record, "manager_job_title_en"),
+			code,
+		)
+		byCode[codeKey] = Position{
+			ID:       ehrmsPositionID(tenantID, code),
+			TenantID: tenantID,
+			Code:     code,
+			Name:     name,
+			NameEN: utils.FirstNonEmpty(
+				ehrmsValue(record, ehrmsFieldManagerJobNameEN),
+				ehrmsValue(record, "manager_job_title_en"),
+			),
+			Status:    string(PositionStatusActive),
+			Source:    "ehrms",
+			CreatedAt: now,
+			UpdatedAt: now,
+		}
+	}
+	ids := make([]string, 0, len(byCode))
+	for id := range byCode {
+		ids = append(ids, id)
+	}
+	sort.Strings(ids)
+	out := make([]Position, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, byCode[id])
+	}
+	return out
 }
 
 // EHRMSPositionsFromRecords maps upstream position records into the canonical position catalog.

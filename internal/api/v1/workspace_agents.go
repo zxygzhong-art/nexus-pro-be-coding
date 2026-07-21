@@ -25,6 +25,7 @@ func (c WorkspaceAgentCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace.PATCH("/knowledge-bases/:id", c.routes.Handle("agent.knowledge_base", "update", c.updateKnowledgeBase, ResourceID(PathParamID)))
 	workspace.DELETE("/knowledge-bases/:id", c.routes.Handle("agent.knowledge_base", "delete", c.deleteKnowledgeBase, ResourceID(PathParamID)))
 	workspace.GET("/knowledge-bases/:id/documents", c.routes.Handle("agent.knowledge_base", "read", c.listKnowledgeDocuments, ResourceID(PathParamID)))
+	workspace.GET("/knowledge-bases/:id/documents/:document_id", c.routes.Handle("agent.knowledge_base", "read", c.getKnowledgeDocument, ResourceID(PathParamID), PathParam(pathParamDocumentID)))
 	workspace.POST("/knowledge-bases/:id/documents", c.routes.Handle("agent.knowledge_base", "update", c.createKnowledgeDocument, ResourceID(PathParamID)))
 	workspace.PATCH("/knowledge-bases/:id/documents/:document_id", c.routes.Handle("agent.knowledge_base", "update", c.updateKnowledgeDocument, ResourceID(PathParamID), PathParam(pathParamDocumentID)))
 	workspace.DELETE("/knowledge-bases/:id/documents/:document_id", c.routes.Handle("agent.knowledge_base", "update", c.deleteKnowledgeDocument, ResourceID(PathParamID), PathParam(pathParamDocumentID)))

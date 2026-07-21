@@ -148,15 +148,6 @@ func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance
 		if snapshotValue, ok := request.EvaluationSnapshot["balance_required"].(bool); ok {
 			requiresBalance = snapshotValue
 		}
-		if len(request.EvaluationSnapshot) == 0 && len(request.RuleSnapshot) == 0 {
-			policy, err := c.loadAttendancePolicyResponse(ctx)
-			if err != nil {
-				return err
-			}
-			if leaveType, ok := findLeaveTypeInPolicy(policy, request.LeaveType); ok {
-				requiresBalance = leaveType.RequiresBalance
-			}
-		}
 		if requiresBalance {
 			if _, err := c.releaseLeaveBalance(ctx, request.LeaveBalanceID, request.EmployeeID, request.LeaveType, request.Hours, request.StartAt); err != nil {
 				return err
@@ -351,7 +342,7 @@ func (c AttendanceService) listOvertimeRequestsByQuery(ctx RequestContext, query
 		return nil, err
 	}
 	if !all {
-		query.EmployeeIDs = employeeIDsFromSet(allowed)
+		query.EmployeeIDs = intersectEmployeeIDs(query.EmployeeIDs, allowed)
 		if len(query.EmployeeIDs) == 0 {
 			return []OvertimeRequest{}, nil
 		}
@@ -509,11 +500,7 @@ func (c AttendanceService) creditCompensatoryLeaveBalance(ctx RequestContext, em
 	if hours <= 0 {
 		return nil
 	}
-	policy, err := c.loadAttendancePolicyResponse(ctx)
-	if err != nil {
-		return err
-	}
-	leaveType := compensatoryLeaveTypeCode(policy)
+	leaveType := leaveTypeCodeCompensatory
 	if _, found, err := c.store.ReleaseLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, leaveType, hours, c.Now()); err != nil {
 		return err
 	} else if found {

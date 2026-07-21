@@ -25,7 +25,11 @@ type Querier interface {
 	CountAuditLogs(ctx context.Context, tenantID string) (int64, error)
 	CountAuditLogsFiltered(ctx context.Context, arg CountAuditLogsFilteredParams) (int64, error)
 	CountEmployeesFiltered(ctx context.Context, arg CountEmployeesFilteredParams) (int64, error)
+	CountFormInstanceFilesByField(ctx context.Context, arg CountFormInstanceFilesByFieldParams) (int64, error)
 	CountFormInstancesByQuery(ctx context.Context, arg CountFormInstancesByQueryParams) (int64, error)
+	CountKnowledgeBases(ctx context.Context, tenantID string) (int64, error)
+	CountKnowledgeDocuments(ctx context.Context, arg CountKnowledgeDocumentsParams) (int64, error)
+	CountKnowledgeDocumentsByBase(ctx context.Context, arg CountKnowledgeDocumentsByBaseParams) ([]CountKnowledgeDocumentsByBaseRow, error)
 	CountLeaveRequestsByQuery(ctx context.Context, arg CountLeaveRequestsByQueryParams) (int64, error)
 	CountNotificationTones(ctx context.Context, arg CountNotificationTonesParams) (CountNotificationTonesRow, error)
 	CountOutboxEventsFiltered(ctx context.Context, arg CountOutboxEventsFilteredParams) (int64, error)
@@ -44,6 +48,7 @@ type Querier interface {
 	DeleteAuthzPermissionSetAssignment(ctx context.Context, arg DeleteAuthzPermissionSetAssignmentParams) (AuthzPermissionSetAssignment, error)
 	DeleteAuthzRelationshipTuple(ctx context.Context, arg DeleteAuthzRelationshipTupleParams) error
 	DeleteCurrentDraftAgentSessionFile(ctx context.Context, arg DeleteCurrentDraftAgentSessionFileParams) (string, error)
+	DeleteDraftFormInstanceFile(ctx context.Context, arg DeleteDraftFormInstanceFileParams) (string, error)
 	DeleteFileAsset(ctx context.Context, arg DeleteFileAssetParams) error
 	DeleteFormInstance(ctx context.Context, arg DeleteFormInstanceParams) error
 	DeleteFormInstanceFieldValues(ctx context.Context, arg DeleteFormInstanceFieldValuesParams) error
@@ -96,6 +101,7 @@ type Querier interface {
 	GetFormDefinitionDraft(ctx context.Context, arg GetFormDefinitionDraftParams) (FormDefinitionDraft, error)
 	GetFormDefinitionDraftByAgentCall(ctx context.Context, arg GetFormDefinitionDraftByAgentCallParams) (FormDefinitionDraft, error)
 	GetFormInstance(ctx context.Context, arg GetFormInstanceParams) (FormInstance, error)
+	GetFormInstanceFile(ctx context.Context, arg GetFormInstanceFileParams) (GetFormInstanceFileRow, error)
 	GetFormTemplate(ctx context.Context, arg GetFormTemplateParams) (FormTemplate, error)
 	GetFormTemplateByKey(ctx context.Context, arg GetFormTemplateByKeyParams) (FormTemplate, error)
 	GetFormTemplateVersion(ctx context.Context, arg GetFormTemplateVersionParams) (FormTemplateVersion, error)
@@ -136,6 +142,7 @@ type Querier interface {
 	InsertAgentSessionMessage(ctx context.Context, arg InsertAgentSessionMessageParams) (AgentSessionMessage, error)
 	InsertFileChunk(ctx context.Context, arg InsertFileChunkParams) (FileChunk, error)
 	InsertFormInstanceFieldValue(ctx context.Context, arg InsertFormInstanceFieldValueParams) error
+	InsertFormInstanceFile(ctx context.Context, arg InsertFormInstanceFileParams) (FormInstanceFile, error)
 	InsertFormTemplateVersion(ctx context.Context, arg InsertFormTemplateVersionParams) error
 	InsertWorkflowAction(ctx context.Context, arg InsertWorkflowActionParams) (WorkflowAction, error)
 	ListAccounts(ctx context.Context, tenantID string) ([]Account, error)
@@ -183,13 +190,17 @@ type Querier interface {
 	ListFileChunks(ctx context.Context, arg ListFileChunksParams) ([]FileChunk, error)
 	ListFormDefinitionDrafts(ctx context.Context, arg ListFormDefinitionDraftsParams) ([]FormDefinitionDraft, error)
 	ListFormInstanceFieldValues(ctx context.Context, arg ListFormInstanceFieldValuesParams) ([]FormInstanceFieldValue, error)
+	ListFormInstanceFiles(ctx context.Context, arg ListFormInstanceFilesParams) ([]ListFormInstanceFilesRow, error)
+	ListFormInstanceFilesByField(ctx context.Context, arg ListFormInstanceFilesByFieldParams) ([]ListFormInstanceFilesByFieldRow, error)
 	ListFormInstancePageByQuery(ctx context.Context, arg ListFormInstancePageByQueryParams) ([]FormInstance, error)
 	ListFormInstances(ctx context.Context, tenantID string) ([]FormInstance, error)
 	ListFormInstancesByQuery(ctx context.Context, arg ListFormInstancesByQueryParams) ([]FormInstance, error)
 	ListFormTemplates(ctx context.Context, tenantID string) ([]FormTemplate, error)
 	ListGroupMembershipsForGroup(ctx context.Context, arg ListGroupMembershipsForGroupParams) ([]AuthzGroupMembership, error)
 	ListKnowledgeBases(ctx context.Context, tenantID string) ([]KnowledgeBasis, error)
+	ListKnowledgeBasesPage(ctx context.Context, arg ListKnowledgeBasesPageParams) ([]KnowledgeBasis, error)
 	ListKnowledgeDocuments(ctx context.Context, arg ListKnowledgeDocumentsParams) ([]KnowledgeDocument, error)
+	ListKnowledgeDocumentsPage(ctx context.Context, arg ListKnowledgeDocumentsPageParams) ([]ListKnowledgeDocumentsPageRow, error)
 	ListLeaveBalances(ctx context.Context, tenantID string) ([]LeaveBalance, error)
 	ListLeaveRequestPageByQuery(ctx context.Context, arg ListLeaveRequestPageByQueryParams) ([]LeaveRequest, error)
 	ListLeaveRequests(ctx context.Context, tenantID string) ([]LeaveRequest, error)
@@ -225,6 +236,8 @@ type Querier interface {
 	ListWorkflowStageInstancesByRun(ctx context.Context, arg ListWorkflowStageInstancesByRunParams) ([]WorkflowStageInstance, error)
 	MarkAgentSessionFileAttached(ctx context.Context, arg MarkAgentSessionFileAttachedParams) (AgentSessionFile, error)
 	MarkAllNotificationsRead(ctx context.Context, arg MarkAllNotificationsReadParams) (int32, error)
+	MarkFormInstanceFileAttached(ctx context.Context, arg MarkFormInstanceFileAttachedParams) (FormInstanceFile, error)
+	MarkFormInstanceFilesAttached(ctx context.Context, arg MarkFormInstanceFilesAttachedParams) error
 	MarkNotificationRead(ctx context.Context, arg MarkNotificationReadParams) (MarkNotificationReadRow, error)
 	NextEmployeeNoSequence(ctx context.Context, arg NextEmployeeNoSequenceParams) (int32, error)
 	ReleaseLeaveBalance(ctx context.Context, arg ReleaseLeaveBalanceParams) (LeaveBalance, error)

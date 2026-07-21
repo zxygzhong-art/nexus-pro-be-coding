@@ -93,15 +93,22 @@ func (c AgentCtrl) createAgentRun(w http.ResponseWriter, r *http.Request, ctx do
 
 // listAgentSessions 處理 agent 會話列表的 HTTP 請求。
 func (c AgentCtrl) listAgentSessions(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	query := domain.ListAgentSessionsQuery{
-		AgentID: strings.TrimSpace(r.URL.Query().Get("agent_id")),
-		Status:  strings.TrimSpace(r.URL.Query().Get("status")),
-	}
-	items, err := c.svc.ListSessions(ctx, query)
+	values := r.URL.Query()
+	pageSize, err := positiveIntQuery(values.Get("page_size"), "page_size", domain.MaxPageSize)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, items)
+	query := domain.ListAgentSessionsQuery{
+		AgentID:  strings.TrimSpace(values.Get("agent_id")),
+		Status:   strings.TrimSpace(values.Get("status")),
+		Cursor:   strings.TrimSpace(values.Get("cursor")),
+		PageSize: pageSize,
+	}
+	page, err := c.svc.ListSessions(ctx, query)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, page)
 	return nil
 }
 
@@ -165,11 +172,20 @@ func (c AgentCtrl) deleteAgentSession(w http.ResponseWriter, r *http.Request, ct
 
 // listAgentSessionMessages 處理 agent 會話訊息列表的 HTTP 請求。
 func (c AgentCtrl) listAgentSessionMessages(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	items, err := c.svc.ListSessionMessages(ctx, r.PathValue(PathParamID))
+	values := r.URL.Query()
+	pageSize, err := positiveIntQuery(values.Get("page_size"), "page_size", domain.MaxPageSize)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, items)
+	query := domain.ListAgentSessionMessagesQuery{
+		Cursor:   strings.TrimSpace(values.Get("cursor")),
+		PageSize: pageSize,
+	}
+	page, err := c.svc.ListSessionMessages(ctx, r.PathValue(PathParamID), query)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, page)
 	return nil
 }
 

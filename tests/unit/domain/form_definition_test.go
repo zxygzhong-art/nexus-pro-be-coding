@@ -53,3 +53,31 @@ func TestValidateFormDefinitionSchemaV2RejectsUncontrolledBinding(t *testing.T) 
 		t.Fatalf("expected uncontrolled binding to be rejected, got %#v", result)
 	}
 }
+
+func TestValidateFormDefinitionSchemaV2RejectsUserGroupApproverTargeting(t *testing.T) {
+	result := domain.ValidateFormDefinitionSchemaV2(domain.FormDefinitionSchemaV2{
+		SchemaVersion: 2,
+		Name:          "羣組審批單",
+		Fields: []domain.FormFieldDefinitionV2{
+			{ID: "reason", Label: "事由", DataType: "string", Widget: "textarea"},
+		},
+		Layout: domain.FormLayoutV2{Rows: []domain.FormLayoutRowV2{{ID: "row-1", FieldIDs: []string{"reason"}}}},
+		Workflow: domain.FormWorkflowV2{Stages: []domain.FormWorkflowStageV2{{
+			ID: "group", Type: "approver", Label: "審批羣組",
+			Config: map[string]any{"user_group_ids": []any{"ug-finance"}},
+		}}},
+	})
+	if result.Valid {
+		t.Fatalf("expected user_group_ids targeting to be rejected, got %#v", result)
+	}
+	found := false
+	for _, item := range result.Errors {
+		if item.Field == "workflow.stages[0].config.user_group_ids" && item.Code == "unsupported" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected unsupported user_group_ids error, got %#v", result.Errors)
+	}
+}

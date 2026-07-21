@@ -1118,7 +1118,7 @@ func TestListOrgUnitsRespectsDepartmentSubtreeScope(t *testing.T) {
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", EmployeeID: "emp-manager", Status: "active", CreatedAt: now})
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-manager", TenantID: "tenant-1", Name: "Manager", OrgUnitID: "ou-root", Status: "active", EmploymentStatus: "active", CreatedAt: now})
 
-	page, err := service.New(store).HR().ListOrgUnitPage(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.PageRequest{Page: 1, PageSize: 10, Sort: "created_at_asc"})
+	page, err := service.New(store).HR().ListOrgUnitPage(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.OrgUnitQuery{Page: 1, PageSize: 10, Sort: "created_at_asc"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -3299,11 +3299,11 @@ func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 	if updated.Payload["reason"] != "updated leave" {
 		t.Fatalf("expected updated payload, got %+v", updated.Payload)
 	}
-	forms, err := svc.Platform().Forms(ctx)
+	forms, err := svc.Platform().Forms(ctx, domain.PlatformFormsQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(forms.Drafts) != 1 || forms.Drafts[0].ID != draft.ID || forms.Drafts[0].Summary != "updated leave" {
+	if forms.Drafts.Total != 1 || len(forms.Drafts.Items) != 1 || forms.Drafts.Items[0].ID != draft.ID || forms.Drafts.Items[0].Summary != "updated leave" {
 		t.Fatalf("expected draft projection, got %+v", forms.Drafts)
 	}
 
@@ -3317,11 +3317,11 @@ func TestWorkflowDraftLifecycleAndPlatformProjection(t *testing.T) {
 	if submitted.ID != draft.ID || submitted.Status != "in_review" || submitted.Payload["reason"] != "submitted leave" {
 		t.Fatalf("expected submitted draft, got %+v", submitted)
 	}
-	forms, err = svc.Platform().Forms(ctx)
+	forms, err = svc.Platform().Forms(ctx, domain.PlatformFormsQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(forms.Drafts) != 0 || len(forms.Applications) != 1 || forms.Applications[0].ID != draft.ID {
+	if forms.Drafts.Total != 0 || forms.Applications.Total != 1 || len(forms.Applications.Items) != 1 || forms.Applications.Items[0].ID != draft.ID {
 		t.Fatalf("expected one application and no drafts, got applications=%+v drafts=%+v", forms.Applications, forms.Drafts)
 	}
 	if submitted.TemplateVersionID == "" {
@@ -4740,6 +4740,7 @@ func TestSyncEHRMSEmployeesClearsLocalEmailWhenUpstreamEmpty(t *testing.T) {
 		"在職狀態":   "留職停薪",
 		"部門代碼":   "M0202",
 		"部門中文名稱": "People",
+		"職務代碼":   "0801",
 		"職務中文名稱": "專員",
 		"身份類別名稱": "時薪員工",
 		"身份證號":   "B123456789",
@@ -4845,6 +4846,73 @@ func TestSyncEHRMSEmployeesOverwritesLocalEmailAndCreatesPendingInvite(t *testin
 	}
 	if len(identities) != 1 || identities[0].Email != "ehrms@ikala.ai" {
 		t.Fatalf("expected keycloak identity binding, got %+v", identities)
+	}
+}
+
+// TestSyncEHRMSEmployeesSkipsEmployeesWithoutLocalPosition only upserts rows whose job code exists in positions.
+func TestSyncEHRMSEmployeesSkipsEmployeesWithoutLocalPosition(t *testing.T) {
+	rows := []domain.EHRMSEmployeeRecord{
+		{
+			"員工編號": "E1", "中文姓名": "有崗位", "email": "with-pos@ikala.ai",
+			"到職日期": "2026/06/01", "在職狀態": "在職",
+			"部門代碼": "C01", "部門中文名稱": "Corporate",
+			"職務代碼": "0704", "職務中文名稱": "工程師", "身份類別名稱": "一般員工",
+		},
+		{
+			"員工編號": "E2", "中文姓名": "無崗位", "email": "no-pos@ikala.ai",
+			"到職日期": "2026/06/01", "在職狀態": "在職",
+			"部門代碼": "C01", "部門中文名稱": "Corporate",
+			"職務代碼": "9999", "職務中文名稱": "未知職", "身份類別名稱": "一般員工",
+		},
+		{
+			"員工編號": "E3", "中文姓名": "缺職務碼", "email": "empty-pos@ikala.ai",
+			"到職日期": "2026/06/01", "在職狀態": "在職",
+			"部門代碼": "C01", "部門中文名稱": "Corporate",
+			"職務中文名稱": "只有名稱", "身份類別名稱": "一般員工",
+		},
+	}
+	positionRows := []domain.EHRMSPositionRecord{
+		{"job_code": "0704", "job_title_zh": "工程師", "job_title_en": "Engineer"},
+	}
+	departmentRows := []domain.EHRMSDepartmentRecord{
+		{"code": "C01", "name": "Corporate", "closed": "false"},
+	}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "import", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{
+		rows: rows, positionRows: positionRows, departmentRows: departmentRows,
+	}})
+
+	result, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Fetched != 3 || result.Created != 1 || result.Updated != 0 || result.Skipped != 2 || result.Failed != 0 {
+		t.Fatalf("unexpected sync result: %+v", result)
+	}
+	if _, ok, err := store.GetEmployeeByEmployeeNo(context.Background(), "tenant-1", "E1"); err != nil || !ok {
+		t.Fatalf("expected employee with local position to sync, ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := store.GetEmployeeByEmployeeNo(context.Background(), "tenant-1", "E2"); err != nil || ok {
+		t.Fatalf("expected missing-position employee to be skipped, ok=%v err=%v", ok, err)
+	}
+	if _, ok, err := store.GetEmployeeByEmployeeNo(context.Background(), "tenant-1", "E3"); err != nil || ok {
+		t.Fatalf("expected empty position_code employee to be skipped, ok=%v err=%v", ok, err)
+	}
+	skippedNotFound, skippedRequired := false, false
+	for _, item := range result.Results {
+		if item.Action != "skipped" {
+			continue
+		}
+		if item.Code == "not_found" {
+			skippedNotFound = true
+		}
+		if item.Code == "required" {
+			skippedRequired = true
+		}
+	}
+	if !skippedNotFound || !skippedRequired {
+		t.Fatalf("expected skipped not_found and required results, got %+v", result.Results)
 	}
 }
 
@@ -5072,24 +5140,42 @@ func TestSyncEHRMSEmployeesMapsEnglishAliasesToDatabase(t *testing.T) {
 // TestSyncEHRMSOrgUnitsUpsertsDepartments 驗證單獨同步組織單位。
 func TestSyncEHRMSOrgUnitsUpsertsDepartments(t *testing.T) {
 	departmentRows := []domain.EHRMSDepartmentRecord{
-		{"code": "C01", "name": "Corporate", "name_en": "Corporate EN", "parent_code": "", "closed": "false"},
-		{"code": "C0101", "name": "Sales", "name_en": "Sales EN", "parent_code": "C01", "closed": "false"},
+		{"code": "C01", "name": "Corporate", "name_en": "Corporate EN", "parent_code": "", "closed": "false", "manager_job_code": "1502", "manager_job_title": "董事長"},
+		{"code": "C0101", "name": "Sales", "name_en": "Sales EN", "parent_code": "C01", "closed": "false", "manager_job_code": "1502"},
+		{"code": "C0102", "name": "Ops", "name_en": "Ops EN", "parent_code": "C01", "closed": "false", "manager_job_code": "0901", "manager_job_title": "經理"},
+	}
+	positionRows := []domain.EHRMSPositionRecord{
+		{"job_code": "1502", "job_title_zh": "董事長", "job_title_en": "Chairman"},
+		{"job_code": "0901", "job_title_zh": "經理", "job_title_en": "Manager"},
 	}
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.org_unit", Action: "create", Scope: "all"},
-	}, service.Options{EHRMSClient: fakeEHRMSClient{departmentRows: departmentRows}})
+		{Resource: "hr.position", Action: "create", Scope: "all"},
+	}, service.Options{EHRMSClient: fakeEHRMSClient{departmentRows: departmentRows, positionRows: positionRows}})
 
 	result, err := svc.HR().SyncEHRMSOrgUnits(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Fetched != 2 || result.Upserted != 2 {
+	if result.Fetched != 3 || result.Upserted != 3 {
 		t.Fatalf("unexpected org sync result: %+v", result)
 	}
 	parent := mustOrgUnitByCode(t, store, "tenant-1", "C01")
-	child := mustOrgUnitByCode(t, store, "tenant-1", "C0101")
-	if child.ParentID != parent.ID || child.Source != "ehrms" {
-		t.Fatalf("expected synced child org unit, unit=%+v", child)
+	sameJobChild := mustOrgUnitByCode(t, store, "tenant-1", "C0101")
+	ownJobChild := mustOrgUnitByCode(t, store, "tenant-1", "C0102")
+	if sameJobChild.ParentID != parent.ID || sameJobChild.Source != "ehrms" {
+		t.Fatalf("expected synced child org unit, unit=%+v", sameJobChild)
+	}
+	chairman := mustPositionByCode(t, store, "tenant-1", "1502")
+	manager := mustPositionByCode(t, store, "tenant-1", "0901")
+	if parent.ManagerPositionID != chairman.ID {
+		t.Fatalf("expected parent manager position %s, got %q", chairman.ID, parent.ManagerPositionID)
+	}
+	if sameJobChild.ManagerPositionID != "" {
+		t.Fatalf("expected same-as-parent manager job to inherit (empty), got %q", sameJobChild.ManagerPositionID)
+	}
+	if ownJobChild.ManagerPositionID != manager.ID {
+		t.Fatalf("expected distinct child manager position %s, got %q", manager.ID, ownJobChild.ManagerPositionID)
 	}
 }
 
@@ -5470,8 +5556,9 @@ func TestSyncEHRMSAttendanceRequiresUnknownLeaveCodesToBeMapped(t *testing.T) {
 	}
 }
 
-// TestValidateAttendancePolicyBlocksRemovingLinkedLeaveTypes verifies HR must deactivate stable leave identities.
-func TestValidateAttendancePolicyBlocksRemovingLinkedLeaveTypes(t *testing.T) {
+// TestValidateAttendancePolicyDoesNotRewriteLinkedLeaveStorage verifies work-time
+// validation no longer accepts or projects a local leave catalog.
+func TestValidateAttendancePolicyDoesNotRewriteLinkedLeaveStorage(t *testing.T) {
 	now := time.Date(2026, 6, 20, 8, 0, 0, 0, time.UTC)
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "attendance.leave", Action: "read", Scope: "all"},
@@ -5487,20 +5574,14 @@ func TestValidateAttendancePolicyBlocksRemovingLinkedLeaveTypes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	leaveTypes := make([]domain.AttendanceLeaveType, 0, len(policy.LeaveTypes)-1)
-	for _, leaveType := range policy.LeaveTypes {
-		if leaveType.Code != "annual" {
-			leaveTypes = append(leaveTypes, leaveType)
-		}
-	}
 	validation, err := svc.Attendance().ValidateAttendancePolicy(ctx, domain.UpdateAttendancePolicyInput{
-		BaseVersion: policy.Version, WorkTime: policy.WorkTime, LeaveTypes: leaveTypes,
+		BaseVersion: policy.Version, WorkTime: policy.WorkTime,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if validation.Valid || len(validation.Issues) != 1 || !strings.Contains(validation.Issues[0], "deactivate it instead of deleting it") {
-		t.Fatalf("expected linked leave type removal to be rejected, got %+v", validation)
+	if !validation.Valid || len(validation.Issues) != 0 {
+		t.Fatalf("expected work-time-only policy validation, got %+v", validation)
 	}
 }
 
@@ -6619,7 +6700,7 @@ func TestPlatformTaskMutationsPersistAndProject(t *testing.T) {
 		t.Fatalf("unexpected created task item: %+v", item)
 	}
 
-	tasks, err := svc.Platform().Tasks(ctx)
+	tasks, err := svc.Platform().Tasks(ctx, domain.PlatformTasksQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6666,7 +6747,7 @@ func TestPlatformTaskMutationsPersistAndProject(t *testing.T) {
 		t.Fatalf("unexpected converted item: %+v", converted)
 	}
 
-	tasks, err = svc.Platform().Tasks(ctx)
+	tasks, err = svc.Platform().Tasks(ctx, domain.PlatformTasksQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -6691,7 +6772,7 @@ func TestPlatformTaskMutationsPersistAndProject(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	tasks, err = svc.Platform().Tasks(ctx)
+	tasks, err = svc.Platform().Tasks(ctx, domain.PlatformTasksQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -7192,7 +7273,6 @@ type fakeEHRMSClient struct {
 	departmentRows  []domain.EHRMSDepartmentRecord
 	positionRows    []domain.EHRMSPositionRecord
 	attendanceRows  []domain.EHRMSAttendanceRecord
-	leaveTypes      []domain.EHRMSLeaveType
 	leaveBalances   []domain.EHRMSLeaveBalanceRecord
 	leaveDetails    []domain.EHRMSLeaveDetailRecord
 	err             error
@@ -7227,11 +7307,6 @@ func (c fakeEHRMSClient) ListPositions(context.Context) ([]domain.EHRMSPositionR
 // ListAttendance 驗證考勤。
 func (c fakeEHRMSClient) ListAttendance(context.Context) ([]domain.EHRMSAttendanceRecord, error) {
 	return ehrms.NormalizeAttendanceRecords(c.attendanceRows), c.attendanceErr
-}
-
-// ListLeaveTypes 驗證 eHRMS 假期類型目錄。
-func (c fakeEHRMSClient) ListLeaveTypes(context.Context) ([]domain.EHRMSLeaveType, error) {
-	return c.leaveTypes, nil
 }
 
 // ListLeaveBalances 驗證假別餘額。

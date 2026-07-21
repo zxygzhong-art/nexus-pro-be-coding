@@ -65,10 +65,11 @@ func TestAgentCreatesDraftAndRequiresConfirmationBeforeSubmission(t *testing.T) 
 	if run.Status != string(domain.AgentRunStatusCompleted) || confirmation == nil || confirmation.Kind != "form_submit" {
 		t.Fatalf("expected a completed chat with submit confirmation, run=%+v confirmation=%+v", run, confirmation)
 	}
-	messages, err := agentservice.New(svc).ListSessionMessages(ctx, run.SessionID)
+	messagePage, err := agentservice.New(svc).ListSessionMessages(ctx, run.SessionID, domain.ListAgentSessionMessagesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	messages := messagePage.Items
 	artifactNames := map[string]int{}
 	for _, message := range messages {
 		raw, _ := message.Metadata["agent_artifact_json"].(string)
@@ -101,10 +102,11 @@ func TestAgentCreatesDraftAndRequiresConfirmationBeforeSubmission(t *testing.T) 
 	if executed.FormInstance == nil || executed.FormInstance.Status != "in_review" {
 		t.Fatalf("expected confirmed draft to enter workflow, got %+v", executed)
 	}
-	messages, err = agentservice.New(svc).ListSessionMessages(ctx, run.SessionID)
+	messagePage, err = agentservice.New(svc).ListSessionMessages(ctx, run.SessionID, domain.ListAgentSessionMessagesQuery{})
 	if err != nil {
 		t.Fatal(err)
 	}
+	messages = messagePage.Items
 	for _, message := range messages {
 		raw, _ := message.Metadata["agent_artifact_json"].(string)
 		if raw != "" && strings.Contains(raw, "confirmation_required") {

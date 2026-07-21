@@ -47,11 +47,16 @@ type (
 	AssumableRoleSession               = domain.AssumableRoleSession
 	AssumedRoleDecision                = domain.AssumedRoleDecision
 	OrgUnit                            = domain.OrgUnit
+	OrgUnitQuery                       = domain.OrgUnitQuery
+	WorkspaceOrgUnitDirectoryResponse  = domain.WorkspaceOrgUnitDirectoryResponse
+	WorkspaceOrgUnitDirectoryRow       = domain.WorkspaceOrgUnitDirectoryRow
+	WorkspaceOrgUnitDirectoryEmployee  = domain.WorkspaceOrgUnitDirectoryEmployee
 	Position                           = domain.Position
 	EmploymentContract                 = domain.EmploymentContract
 	Employee                           = domain.Employee
 	EmployeeExperience                 = domain.EmployeeExperience
 	EmployeeQuery                      = domain.EmployeeQuery
+	EmployeeScopeConstraint            = domain.EmployeeScopeConstraint
 	EmployeeStats                      = domain.EmployeeStats
 	EmployeeOptions                    = domain.EmployeeOptions
 	FormDataSourceCatalogResponse      = domain.FormDataSourceCatalogResponse
@@ -99,8 +104,9 @@ type (
 	LeaveEntitlementRule               = domain.LeaveEntitlementRule
 	GrantLeaveBalancesInput            = domain.GrantLeaveBalancesInput
 	GrantLeaveBalancesResult           = domain.GrantLeaveBalancesResult
-	EHRMSLeaveType                     = domain.EHRMSLeaveType
-	EHRMSLeaveTypeCatalog              = domain.EHRMSLeaveTypeCatalog
+	LeaveType                          = domain.LeaveType
+	LeaveTypeCatalog                   = domain.LeaveTypeCatalog
+	SetLeaveTypeEnabledInput           = domain.SetLeaveTypeEnabledInput
 	LeaveTypeSyncIssue                 = domain.LeaveTypeSyncIssue
 	LeaveTypeIntegration               = domain.LeaveTypeIntegration
 	LeaveTypeIntegrationResponse       = domain.LeaveTypeIntegrationResponse
@@ -114,6 +120,9 @@ type (
 	PlatformAssistantsResponse         = domain.PlatformAssistantsResponse
 	PlatformFormApplication            = domain.PlatformFormApplication
 	PlatformFormDraft                  = domain.PlatformFormDraft
+	PlatformFormsQuery                 = domain.PlatformFormsQuery
+	PlatformFormApplicationPage        = domain.PlatformFormApplicationPage
+	PlatformFormDraftPage              = domain.PlatformFormDraftPage
 	PlatformFormsResponse              = domain.PlatformFormsResponse
 	PlatformTaskItem                   = domain.PlatformTaskItem
 	PlatformTaskRecord                 = domain.PlatformTaskRecord
@@ -125,6 +134,7 @@ type (
 	CreatePlatformTaskTodoInput        = domain.CreatePlatformTaskTodoInput
 	UpdatePlatformTaskTodoInput        = domain.UpdatePlatformTaskTodoInput
 	ConvertPlatformTaskTodoInput       = domain.ConvertPlatformTaskTodoInput
+	PlatformTasksQuery                 = domain.PlatformTasksQuery
 	PlatformTasksResponse              = domain.PlatformTasksResponse
 	PlatformFormDesign                 = domain.PlatformFormDesign
 	PlatformFormDesignForm             = domain.PlatformFormDesignForm
@@ -159,6 +169,7 @@ type (
 	WorkspacePieItem                   = domain.WorkspacePieItem
 	WorkspaceAnnualRow                 = domain.WorkspaceAnnualRow
 	WorkspaceAttendanceResponse        = domain.WorkspaceAttendanceResponse
+	WorkspaceAttendancePagination      = domain.WorkspaceAttendancePagination
 	WorkspaceDate                      = domain.WorkspaceDate
 	WorkspaceLeaveLegendItem           = domain.WorkspaceLeaveLegendItem
 	WorkspaceAttendanceMatrix          = domain.WorkspaceAttendanceMatrix
@@ -169,6 +180,7 @@ type (
 	WorkspaceAttendanceMatrixSum       = domain.WorkspaceAttendanceMatrixSum
 	WorkspaceClockMatrix               = domain.WorkspaceClockMatrix
 	WorkspaceClockAbnormal             = domain.WorkspaceClockAbnormal
+	WorkspaceClockAbnormalResponse     = domain.WorkspaceClockAbnormalResponse
 	WorkspaceClockRow                  = domain.WorkspaceClockRow
 	WorkspaceClockSummary              = domain.WorkspaceClockSummary
 	WorkspaceAuditLog                  = domain.WorkspaceAuditLog
@@ -258,6 +270,9 @@ type (
 	CreatePermissionSetInput                   = domain.CreatePermissionSetInput
 	UpdatePermissionSetInput                   = domain.UpdatePermissionSetInput
 	IamAccountProjection                       = domain.IamAccountProjection
+	OptionQuery                                = domain.OptionQuery
+	OptionItem                                 = domain.OptionItem
+	OptionPage                                 = domain.OptionPage
 	PermissionSetAssignmentQuery               = domain.PermissionSetAssignmentQuery
 	CreatePermissionSetAssignmentInput         = domain.CreatePermissionSetAssignmentInput
 	CreateFieldPolicyInput                     = domain.CreateFieldPolicyInput
@@ -320,6 +335,7 @@ type (
 	WorkspaceOverviewQuery                     = domain.WorkspaceOverviewQuery
 	WorkspaceTurnoverQuery                     = domain.WorkspaceTurnoverQuery
 	WorkspaceAttendanceQuery                   = domain.WorkspaceAttendanceQuery
+	WorkspaceClockAbnormalQuery                = domain.WorkspaceClockAbnormalQuery
 	WorkspaceAuditLogQuery                     = domain.WorkspaceAuditLogQuery
 	CreateAgentRunInput                        = domain.CreateAgentRunInput
 	ListAgentSessionsQuery                     = domain.ListAgentSessionsQuery
@@ -343,6 +359,7 @@ const (
 	DefaultPage                    = domain.DefaultPage
 	DefaultPageSize                = domain.DefaultPageSize
 	MaxPageSize                    = domain.MaxPageSize
+	DefaultOptionPageSize          = domain.DefaultOptionPageSize
 
 	EffectAllow = domain.EffectAllow
 	EffectDeny  = domain.EffectDeny

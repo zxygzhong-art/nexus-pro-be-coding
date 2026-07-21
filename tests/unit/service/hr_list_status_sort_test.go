@@ -58,7 +58,7 @@ func TestListOrgUnitPageSortsOpenBeforeClosed(t *testing.T) {
 		}
 	}
 
-	page, err := svc.HR().ListOrgUnitPage(ctx, domain.PageRequest{Page: 1, PageSize: 20, Sort: "created_at_asc"})
+	page, err := svc.HR().ListOrgUnitPage(ctx, domain.OrgUnitQuery{Page: 1, PageSize: 20, Sort: "created_at_asc"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,6 +87,64 @@ func TestListOrgUnitPageSortsOpenBeforeClosed(t *testing.T) {
 	}, "code_asc")
 	if sorted[0].ID != "ou-open" || sorted[1].ID != "ou-closed" {
 		t.Fatalf("expected SortOrgUnits to prefer open units, got %+v", sorted)
+	}
+}
+
+func TestListOrgUnitPageFiltersByStatus(t *testing.T) {
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.org_unit", Action: "read", Scope: "all"},
+		{Resource: "hr.org_unit", Action: "create", Scope: "all"},
+		{Resource: "hr.org_unit", Action: "update", Scope: "all"},
+	})
+	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
+	for _, unit := range []domain.OrgUnit{
+		{ID: "ou-root", TenantID: "tenant-1", Name: "Root", Closed: false, CreatedAt: now},
+		{ID: "ou-child", TenantID: "tenant-1", Name: "Child", ParentID: "ou-root", Closed: false, CreatedAt: now.Add(time.Minute)},
+		{ID: "ou-closed", TenantID: "tenant-1", Name: "Closed Leaf", Closed: true, CreatedAt: now.Add(2 * time.Minute)},
+	} {
+		if err := store.UpsertOrgUnit(context.Background(), unit); err != nil {
+			t.Fatal(err)
+		}
+	}
+	closed := true
+	if _, err := svc.HR().UpdateOrgUnit(ctx, "ou-root", domain.UpdateOrgUnitInput{Closed: &closed}); err != nil {
+		t.Fatal(err)
+	}
+
+	activePage, err := svc.HR().ListOrgUnitPage(ctx, domain.OrgUnitQuery{Status: "active", Page: 1, PageSize: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range activePage.Items {
+		if item.Closed {
+			t.Fatalf("status=active returned closed org unit: %+v", item)
+		}
+		if item.ID == "ou-root" || item.ID == "ou-child" || item.ID == "ou-closed" {
+			t.Fatalf("status=active unexpectedly included %s", item.ID)
+		}
+	}
+
+	closedPage, err := svc.HR().ListOrgUnitPage(ctx, domain.OrgUnitQuery{Status: "closed", Page: 1, PageSize: 50})
+	if err != nil {
+		t.Fatal(err)
+	}
+	closedIDs := map[string]bool{}
+	for _, item := range closedPage.Items {
+		if !item.Closed {
+			t.Fatalf("status=closed returned open org unit: %+v", item)
+		}
+		closedIDs[item.ID] = true
+	}
+	for _, id := range []string{"ou-root", "ou-child", "ou-closed"} {
+		if !closedIDs[id] {
+			t.Fatalf("status=closed missing inherited/closed unit %s in %+v", id, closedPage.Items)
+		}
+	}
+
+	if _, err := svc.HR().ListOrgUnitPage(ctx, domain.OrgUnitQuery{Status: "bogus", Page: 1, PageSize: 20}); err == nil {
+		t.Fatal("expected invalid status to fail")
+	} else if appErr, ok := err.(*domain.AppError); !ok || appErr.Status != 400 {
+		t.Fatalf("expected 400 AppError for invalid status, got %v", err)
 	}
 }
 

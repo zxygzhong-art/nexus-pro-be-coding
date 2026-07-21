@@ -24,7 +24,7 @@ type KnowledgeDocument struct {
 	TenantID           string    `json:"tenant_id"`
 	KnowledgeBaseID    string    `json:"knowledge_base_id"`
 	Title              string    `json:"title"`
-	Content            string    `json:"content"`
+	Content            string    `json:"content,omitempty"`
 	SourceType         string    `json:"source_type"`
 	OriginalFilename   string    `json:"original_filename"`
 	ContentType        string    `json:"content_type"`

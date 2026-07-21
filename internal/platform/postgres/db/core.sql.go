@@ -343,49 +343,86 @@ LEFT JOIN accounts
   ON accounts.tenant_id = employees.tenant_id
  AND accounts.id = employees.account_id
 WHERE employees.tenant_id = $1
+  AND NOT $2::boolean
   AND (
-    $2::text = ''
+    (
+      NOT $3::boolean
+      AND (coalesce(cardinality($4::text[]), 0) = 0 OR employees.id = ANY($4::text[]))
+      AND (coalesce(cardinality($5::text[]), 0) = 0 OR employees.org_unit_id = ANY($5::text[]))
+    )
+    OR (
+      $3::boolean
+      AND (
+        (coalesce(cardinality($4::text[]), 0) > 0 AND employees.id = ANY($4::text[]))
+        OR (coalesce(cardinality($5::text[]), 0) > 0 AND employees.org_unit_id = ANY($5::text[]))
+      )
+    )
+  )
+  AND (coalesce(cardinality($6::text[]), 0) = 0 OR coalesce(nullif(employees.employment_status, ''), employees.status) = ANY($6::text[]))
+  AND (
+    $7::text = ''
     OR lower(
       coalesce(employees.employee_no, '') || ' ' ||
       coalesce(employees.name, '') || ' ' ||
       coalesce(employees.company_email, '') || ' ' ||
       coalesce(employees.personal_email, '') || ' ' ||
       coalesce(employees.phone, '')
-    ) LIKE '%' || lower($2::text) || '%'
-    OR lower(coalesce(employees.account_id, '')) LIKE '%' || lower($2::text) || '%'
+    ) LIKE '%' || lower($7::text) || '%'
+    OR lower(coalesce(employees.account_id, '')) LIKE '%' || lower($7::text) || '%'
     OR lower(
       coalesce(accounts.display_name, '') || ' ' ||
       coalesce(accounts.email, '') || ' ' ||
       coalesce(accounts.employee_id, '')
-    ) LIKE '%' || lower($2::text) || '%'
+    ) LIKE '%' || lower($7::text) || '%'
   )
-  AND ($3::text = '' OR employees.org_unit_id = $3)
+  AND ($8::text = '' OR employees.org_unit_id = $8)
   AND (
-    $4::text = ''
-    OR coalesce(nullif(employees.employment_status, ''), employees.status) = $4
+    $9::text = ''
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) = $9
   )
   AND (
-    $4::text = 'deleted'
+    $9::text = 'deleted'
     OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'deleted'
   )
-  AND ($5::text = '' OR employees.category = $5)
+  AND ($10::text = '' OR employees.category = $10)
+  AND (
+    $11::text = ''
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'resigned'
+    OR employees.resign_date IS NOT NULL
+  )
+  AND (NULLIF($12::text, '') IS NULL OR employees.hire_date IS NULL OR employees.hire_date < NULLIF($12::text, '')::timestamptz)
+  AND (NULLIF($11::text, '') IS NULL OR employees.resign_date IS NULL OR employees.resign_date >= NULLIF($11::text, '')::timestamptz)
 `
 
 type CountEmployeesFilteredParams struct {
-	TenantID         string `json:"tenant_id"`
-	Keyword          string `json:"keyword"`
-	DepartmentID     string `json:"department_id"`
-	EmploymentStatus string `json:"employment_status"`
-	Category         string `json:"category"`
+	TenantID         string   `json:"tenant_id"`
+	ScopeDenyAll     bool     `json:"scope_deny_all"`
+	ScopeMatchAny    bool     `json:"scope_match_any"`
+	ScopeEmployeeIds []string `json:"scope_employee_ids"`
+	ScopeOrgUnitIds  []string `json:"scope_org_unit_ids"`
+	ScopeStatuses    []string `json:"scope_statuses"`
+	Keyword          string   `json:"keyword"`
+	DepartmentID     string   `json:"department_id"`
+	EmploymentStatus string   `json:"employment_status"`
+	Category         string   `json:"category"`
+	PresentFrom      string   `json:"present_from"`
+	PresentTo        string   `json:"present_to"`
 }
 
 func (q *Queries) CountEmployeesFiltered(ctx context.Context, arg CountEmployeesFilteredParams) (int64, error) {
 	row := q.db.QueryRow(ctx, countEmployeesFiltered,
 		arg.TenantID,
+		arg.ScopeDenyAll,
+		arg.ScopeMatchAny,
+		arg.ScopeEmployeeIds,
+		arg.ScopeOrgUnitIds,
+		arg.ScopeStatuses,
 		arg.Keyword,
 		arg.DepartmentID,
 		arg.EmploymentStatus,
 		arg.Category,
+		arg.PresentFrom,
+		arg.PresentTo,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -404,6 +441,17 @@ WHERE fi.tenant_id = $1
       AND form_templates.key = $4
   ))
   AND ($5::text = '' OR fi.applicant_account_id = $5)
+  AND ($6::text = '' OR fi.payload::text ILIKE '%' || $6 || '%' OR EXISTS (
+    SELECT 1 FROM form_templates fts
+    WHERE fts.tenant_id = fi.tenant_id
+      AND fts.id = fi.template_id
+      AND (fts.name ILIKE '%' || $6 || '%' OR fts.key ILIKE '%' || $6 || '%')
+  ) OR EXISTS (
+    SELECT 1 FROM accounts
+    WHERE accounts.tenant_id = fi.tenant_id
+      AND accounts.id = fi.applicant_account_id
+      AND accounts.display_name ILIKE '%' || $6 || '%'
+  ))
 `
 
 type CountFormInstancesByQueryParams struct {
@@ -412,6 +460,7 @@ type CountFormInstancesByQueryParams struct {
 	TemplateID         string `json:"template_id"`
 	TemplateKey        string `json:"template_key"`
 	ApplicantAccountID string `json:"applicant_account_id"`
+	Search             string `json:"search"`
 }
 
 func (q *Queries) CountFormInstancesByQuery(ctx context.Context, arg CountFormInstancesByQueryParams) (int64, error) {
@@ -421,6 +470,7 @@ func (q *Queries) CountFormInstancesByQuery(ctx context.Context, arg CountFormIn
 		arg.TemplateID,
 		arg.TemplateKey,
 		arg.ApplicantAccountID,
+		arg.Search,
 	)
 	var count int64
 	err := row.Scan(&count)
@@ -706,7 +756,7 @@ INSERT INTO leave_types (
     id, tenant_id, code, name, category, source_of_truth, status, created_at, updated_at
 ) VALUES (
     $1, $2, $3, $3,
-    'company', 'local_policy', 'active', $4, $5
+    'company', 'system_default', 'active', $4, $5
 )
 ON CONFLICT (tenant_id, id) DO NOTHING
 `
@@ -2020,7 +2070,7 @@ func (q *Queries) GetLeaveTypeExternalMapping(ctx context.Context, arg GetLeaveT
 }
 
 const getOrgUnit = `-- name: GetOrgUnit :one
-SELECT id, tenant_id, code, name, name_en, parent_id, path, source, closed, show_in_org_chart, created_at, updated_at FROM org_units
+SELECT id, tenant_id, code, name, name_en, parent_id, path, source, closed, show_in_org_chart, manager_position_id, created_at, updated_at FROM org_units
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -2043,6 +2093,7 @@ func (q *Queries) GetOrgUnit(ctx context.Context, arg GetOrgUnitParams) (OrgUnit
 		&i.Source,
 		&i.Closed,
 		&i.ShowInOrgChart,
+		&i.ManagerPositionID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -2822,28 +2873,31 @@ const listAttendanceClockRecords = `-- name: ListAttendanceClockRecords :many
 SELECT id, tenant_id, employee_id, shift_assignment_id, shift_id, worksite_id, work_date, direction, client_event_id, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, voided, voided_at, voided_by_account_id, void_reason, created_at FROM attendance_clock_records
 WHERE tenant_id = $1
   AND ($2::text = '' OR employee_id = $2)
-  AND ($3::text = '' OR work_date >= $3)
-  AND ($4::text = '' OR work_date <= $4)
-  AND ($5::text = '' OR direction = $5)
-  AND ($6::text = '' OR record_status = $6)
-  AND ($7::text = '' OR source = $7)
+  AND (coalesce(cardinality($3::text[]), 0) = 0 OR employee_id = ANY($3::text[]))
+  AND ($4::text = '' OR work_date >= $4)
+  AND ($5::text = '' OR work_date <= $5)
+  AND ($6::text = '' OR direction = $6)
+  AND ($7::text = '' OR record_status = $7)
+  AND ($8::text = '' OR source = $8)
 ORDER BY clocked_at DESC, created_at DESC, id ASC
 `
 
 type ListAttendanceClockRecordsParams struct {
-	TenantID     string `json:"tenant_id"`
-	EmployeeID   string `json:"employee_id"`
-	FromDate     string `json:"from_date"`
-	ToDate       string `json:"to_date"`
-	Direction    string `json:"direction"`
-	RecordStatus string `json:"record_status"`
-	Source       string `json:"source"`
+	TenantID     string   `json:"tenant_id"`
+	EmployeeID   string   `json:"employee_id"`
+	EmployeeIds  []string `json:"employee_ids"`
+	FromDate     string   `json:"from_date"`
+	ToDate       string   `json:"to_date"`
+	Direction    string   `json:"direction"`
+	RecordStatus string   `json:"record_status"`
+	Source       string   `json:"source"`
 }
 
 func (q *Queries) ListAttendanceClockRecords(ctx context.Context, arg ListAttendanceClockRecordsParams) ([]AttendanceClockRecord, error) {
 	rows, err := q.db.Query(ctx, listAttendanceClockRecords,
 		arg.TenantID,
 		arg.EmployeeID,
+		arg.EmployeeIds,
 		arg.FromDate,
 		arg.ToDate,
 		arg.Direction,
@@ -2964,24 +3018,27 @@ const listAttendanceDailySummaries = `-- name: ListAttendanceDailySummaries :man
 SELECT id, tenant_id, employee_id, work_date, shift_start, shift_end, shift_hours, daily_hours, clock_hours, clock_start, clock_end, attend_start, attend_end, attend_hours, attend_counted, leave_type, leave_start, leave_end, leave_hours, leave_counted, leave2_type, leave2_start, leave2_end, leave2_hours, leave2_counted, overtime_start, overtime_end, overtime_hours, overtime_counted, payload, source, external_ref, created_at, updated_at FROM attendance_daily_summaries
 WHERE tenant_id = $1
   AND ($2::text = '' OR employee_id = $2)
-  AND ($3::text = '' OR work_date >= $3)
-  AND ($4::text = '' OR work_date <= $4)
-  AND ($5::text = '' OR source = $5)
+  AND (coalesce(cardinality($3::text[]), 0) = 0 OR employee_id = ANY($3::text[]))
+  AND ($4::text = '' OR work_date >= $4)
+  AND ($5::text = '' OR work_date <= $5)
+  AND ($6::text = '' OR source = $6)
 ORDER BY work_date ASC, employee_id ASC, id ASC
 `
 
 type ListAttendanceDailySummariesParams struct {
-	TenantID   string `json:"tenant_id"`
-	EmployeeID string `json:"employee_id"`
-	FromDate   string `json:"from_date"`
-	ToDate     string `json:"to_date"`
-	Source     string `json:"source"`
+	TenantID    string   `json:"tenant_id"`
+	EmployeeID  string   `json:"employee_id"`
+	EmployeeIds []string `json:"employee_ids"`
+	FromDate    string   `json:"from_date"`
+	ToDate      string   `json:"to_date"`
+	Source      string   `json:"source"`
 }
 
 func (q *Queries) ListAttendanceDailySummaries(ctx context.Context, arg ListAttendanceDailySummariesParams) ([]AttendanceDailySummary, error) {
 	rows, err := q.db.Query(ctx, listAttendanceDailySummaries,
 		arg.TenantID,
 		arg.EmployeeID,
+		arg.EmployeeIds,
 		arg.FromDate,
 		arg.ToDate,
 		arg.Source,
@@ -3460,34 +3517,57 @@ LEFT JOIN accounts
   ON accounts.tenant_id = employees.tenant_id
  AND accounts.id = employees.account_id
 WHERE employees.tenant_id = $1
+	AND NOT $2::boolean
+	AND (
+		(
+			NOT $3::boolean
+			AND (coalesce(cardinality($4::text[]), 0) = 0 OR employees.id = ANY($4::text[]))
+			AND (coalesce(cardinality($5::text[]), 0) = 0 OR employees.org_unit_id = ANY($5::text[]))
+		)
+		OR (
+			$3::boolean
+			AND (
+				(coalesce(cardinality($4::text[]), 0) > 0 AND employees.id = ANY($4::text[]))
+				OR (coalesce(cardinality($5::text[]), 0) > 0 AND employees.org_unit_id = ANY($5::text[]))
+			)
+		)
+	)
+	AND (coalesce(cardinality($6::text[]), 0) = 0 OR coalesce(nullif(employees.employment_status, ''), employees.status) = ANY($6::text[]))
   AND (
-    $2::text = ''
+    $7::text = ''
     OR lower(
       coalesce(employees.employee_no, '') || ' ' ||
       coalesce(employees.name, '') || ' ' ||
       coalesce(employees.company_email, '') || ' ' ||
       coalesce(employees.personal_email, '') || ' ' ||
       coalesce(employees.phone, '')
-    ) LIKE '%' || lower($2::text) || '%'
-    OR lower(coalesce(employees.account_id, '')) LIKE '%' || lower($2::text) || '%'
+    ) LIKE '%' || lower($7::text) || '%'
+    OR lower(coalesce(employees.account_id, '')) LIKE '%' || lower($7::text) || '%'
     OR lower(
       coalesce(accounts.display_name, '') || ' ' ||
       coalesce(accounts.email, '') || ' ' ||
       coalesce(accounts.employee_id, '')
-    ) LIKE '%' || lower($2::text) || '%'
+    ) LIKE '%' || lower($7::text) || '%'
   )
-  AND ($3::text = '' OR employees.org_unit_id = $3)
+  AND ($8::text = '' OR employees.org_unit_id = $8)
   AND (
-    $4::text = ''
-    OR coalesce(nullif(employees.employment_status, ''), employees.status) = $4
+    $9::text = ''
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) = $9
   )
   AND (
-    $4::text = 'deleted'
+    $9::text = 'deleted'
     OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'deleted'
   )
-  AND ($5::text = '' OR employees.category = $5)
+  AND ($10::text = '' OR employees.category = $10)
+  AND (
+    $11::text = ''
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'resigned'
+    OR employees.resign_date IS NOT NULL
+  )
+  AND (NULLIF($12::text, '') IS NULL OR employees.hire_date IS NULL OR employees.hire_date < NULLIF($12::text, '')::timestamptz)
+  AND (NULLIF($11::text, '') IS NULL OR employees.resign_date IS NULL OR employees.resign_date >= NULLIF($11::text, '')::timestamptz)
 ORDER BY
-  CASE coalesce(nullif(employees.employment_status, ''), employees.status)
+  CASE WHEN $13::text <> 'attendance_asc' THEN CASE coalesce(nullif(employees.employment_status, ''), employees.status)
     WHEN 'active' THEN 0
     WHEN 'probation' THEN 1
     WHEN 'leave_suspended' THEN 2
@@ -3495,30 +3575,45 @@ ORDER BY
     WHEN 'resigned' THEN 4
     WHEN 'deleted' THEN 5
     ELSE 6
-  END ASC,
-  CASE WHEN $6::text = 'created_at_desc' THEN employees.created_at END DESC,
-  CASE WHEN $6::text = 'hire_date_desc' THEN employees.hire_date END DESC NULLS LAST,
-  CASE WHEN $6::text = 'hire_date_asc' THEN employees.hire_date END ASC NULLS LAST,
+  END END ASC,
+  CASE WHEN $13::text = 'attendance_asc' THEN lower(coalesce(nullif(employees.employee_no, ''), employees.id)) END ASC,
+  CASE WHEN $13::text = 'created_at_desc' THEN employees.created_at END DESC,
+  CASE WHEN $13::text = 'hire_date_desc' THEN employees.hire_date END DESC NULLS LAST,
+  CASE WHEN $13::text = 'hire_date_asc' THEN employees.hire_date END ASC NULLS LAST,
   employees.created_at ASC,
   employees.id ASC
 `
 
 type ListEmployeesFilteredParams struct {
-	TenantID         string `json:"tenant_id"`
-	Keyword          string `json:"keyword"`
-	DepartmentID     string `json:"department_id"`
-	EmploymentStatus string `json:"employment_status"`
-	Category         string `json:"category"`
-	Sort             string `json:"sort"`
+	TenantID         string   `json:"tenant_id"`
+	ScopeDenyAll     bool     `json:"scope_deny_all"`
+	ScopeMatchAny    bool     `json:"scope_match_any"`
+	ScopeEmployeeIds []string `json:"scope_employee_ids"`
+	ScopeOrgUnitIds  []string `json:"scope_org_unit_ids"`
+	ScopeStatuses    []string `json:"scope_statuses"`
+	Keyword          string   `json:"keyword"`
+	DepartmentID     string   `json:"department_id"`
+	EmploymentStatus string   `json:"employment_status"`
+	Category         string   `json:"category"`
+	PresentFrom      string   `json:"present_from"`
+	PresentTo        string   `json:"present_to"`
+	Sort             string   `json:"sort"`
 }
 
 func (q *Queries) ListEmployeesFiltered(ctx context.Context, arg ListEmployeesFilteredParams) ([]Employee, error) {
 	rows, err := q.db.Query(ctx, listEmployeesFiltered,
 		arg.TenantID,
+		arg.ScopeDenyAll,
+		arg.ScopeMatchAny,
+		arg.ScopeEmployeeIds,
+		arg.ScopeOrgUnitIds,
+		arg.ScopeStatuses,
 		arg.Keyword,
 		arg.DepartmentID,
 		arg.EmploymentStatus,
 		arg.Category,
+		arg.PresentFrom,
+		arg.PresentTo,
 		arg.Sort,
 	)
 	if err != nil {
@@ -3572,34 +3667,57 @@ LEFT JOIN accounts
   ON accounts.tenant_id = employees.tenant_id
  AND accounts.id = employees.account_id
 WHERE employees.tenant_id = $1
+  AND NOT $2::boolean
   AND (
-    $2::text = ''
+    (
+      NOT $3::boolean
+      AND (coalesce(cardinality($4::text[]), 0) = 0 OR employees.id = ANY($4::text[]))
+      AND (coalesce(cardinality($5::text[]), 0) = 0 OR employees.org_unit_id = ANY($5::text[]))
+    )
+    OR (
+      $3::boolean
+      AND (
+        (coalesce(cardinality($4::text[]), 0) > 0 AND employees.id = ANY($4::text[]))
+        OR (coalesce(cardinality($5::text[]), 0) > 0 AND employees.org_unit_id = ANY($5::text[]))
+      )
+    )
+  )
+  AND (coalesce(cardinality($6::text[]), 0) = 0 OR coalesce(nullif(employees.employment_status, ''), employees.status) = ANY($6::text[]))
+  AND (
+    $7::text = ''
     OR lower(
       coalesce(employees.employee_no, '') || ' ' ||
       coalesce(employees.name, '') || ' ' ||
       coalesce(employees.company_email, '') || ' ' ||
       coalesce(employees.personal_email, '') || ' ' ||
       coalesce(employees.phone, '')
-    ) LIKE '%' || lower($2::text) || '%'
-    OR lower(coalesce(employees.account_id, '')) LIKE '%' || lower($2::text) || '%'
+    ) LIKE '%' || lower($7::text) || '%'
+    OR lower(coalesce(employees.account_id, '')) LIKE '%' || lower($7::text) || '%'
     OR lower(
       coalesce(accounts.display_name, '') || ' ' ||
       coalesce(accounts.email, '') || ' ' ||
       coalesce(accounts.employee_id, '')
-    ) LIKE '%' || lower($2::text) || '%'
+    ) LIKE '%' || lower($7::text) || '%'
   )
-  AND ($3::text = '' OR employees.org_unit_id = $3)
+  AND ($8::text = '' OR employees.org_unit_id = $8)
   AND (
-    $4::text = ''
-    OR coalesce(nullif(employees.employment_status, ''), employees.status) = $4
+    $9::text = ''
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) = $9
   )
   AND (
-    $4::text = 'deleted'
+    $9::text = 'deleted'
     OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'deleted'
   )
-  AND ($5::text = '' OR employees.category = $5)
+  AND ($10::text = '' OR employees.category = $10)
+  AND (
+    $11::text = ''
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'resigned'
+    OR employees.resign_date IS NOT NULL
+  )
+  AND (NULLIF($12::text, '') IS NULL OR employees.hire_date IS NULL OR employees.hire_date < NULLIF($12::text, '')::timestamptz)
+  AND (NULLIF($11::text, '') IS NULL OR employees.resign_date IS NULL OR employees.resign_date >= NULLIF($11::text, '')::timestamptz)
 ORDER BY
-  CASE coalesce(nullif(employees.employment_status, ''), employees.status)
+  CASE WHEN $13::text <> 'attendance_asc' THEN CASE coalesce(nullif(employees.employment_status, ''), employees.status)
     WHEN 'active' THEN 0
     WHEN 'probation' THEN 1
     WHEN 'leave_suspended' THEN 2
@@ -3607,34 +3725,49 @@ ORDER BY
     WHEN 'resigned' THEN 4
     WHEN 'deleted' THEN 5
     ELSE 6
-  END ASC,
-  CASE WHEN $6::text = 'created_at_desc' THEN employees.created_at END DESC,
-  CASE WHEN $6::text = 'hire_date_desc' THEN employees.hire_date END DESC NULLS LAST,
-  CASE WHEN $6::text = 'hire_date_asc' THEN employees.hire_date END ASC NULLS LAST,
+  END END ASC,
+  CASE WHEN $13::text = 'attendance_asc' THEN lower(coalesce(nullif(employees.employee_no, ''), employees.id)) END ASC,
+  CASE WHEN $13::text = 'created_at_desc' THEN employees.created_at END DESC,
+  CASE WHEN $13::text = 'hire_date_desc' THEN employees.hire_date END DESC NULLS LAST,
+  CASE WHEN $13::text = 'hire_date_asc' THEN employees.hire_date END ASC NULLS LAST,
   employees.created_at ASC,
   employees.id ASC
-LIMIT $8::int
-OFFSET $7::int
+LIMIT $15::int
+OFFSET $14::int
 `
 
 type ListEmployeesFilteredPageParams struct {
-	TenantID         string `json:"tenant_id"`
-	Keyword          string `json:"keyword"`
-	DepartmentID     string `json:"department_id"`
-	EmploymentStatus string `json:"employment_status"`
-	Category         string `json:"category"`
-	Sort             string `json:"sort"`
-	OffsetCount      int32  `json:"offset_count"`
-	LimitCount       int32  `json:"limit_count"`
+	TenantID         string   `json:"tenant_id"`
+	ScopeDenyAll     bool     `json:"scope_deny_all"`
+	ScopeMatchAny    bool     `json:"scope_match_any"`
+	ScopeEmployeeIds []string `json:"scope_employee_ids"`
+	ScopeOrgUnitIds  []string `json:"scope_org_unit_ids"`
+	ScopeStatuses    []string `json:"scope_statuses"`
+	Keyword          string   `json:"keyword"`
+	DepartmentID     string   `json:"department_id"`
+	EmploymentStatus string   `json:"employment_status"`
+	Category         string   `json:"category"`
+	PresentFrom      string   `json:"present_from"`
+	PresentTo        string   `json:"present_to"`
+	Sort             string   `json:"sort"`
+	OffsetCount      int32    `json:"offset_count"`
+	LimitCount       int32    `json:"limit_count"`
 }
 
 func (q *Queries) ListEmployeesFilteredPage(ctx context.Context, arg ListEmployeesFilteredPageParams) ([]Employee, error) {
 	rows, err := q.db.Query(ctx, listEmployeesFilteredPage,
 		arg.TenantID,
+		arg.ScopeDenyAll,
+		arg.ScopeMatchAny,
+		arg.ScopeEmployeeIds,
+		arg.ScopeOrgUnitIds,
+		arg.ScopeStatuses,
 		arg.Keyword,
 		arg.DepartmentID,
 		arg.EmploymentStatus,
 		arg.Category,
+		arg.PresentFrom,
+		arg.PresentTo,
 		arg.Sort,
 		arg.OffsetCount,
 		arg.LimitCount,
@@ -3796,12 +3929,23 @@ WHERE fi.tenant_id = $1
       AND form_templates.key = $4
   ))
   AND ($5::text = '' OR fi.applicant_account_id = $5)
+  AND ($6::text = '' OR fi.payload::text ILIKE '%' || $6 || '%' OR EXISTS (
+    SELECT 1 FROM form_templates fts
+    WHERE fts.tenant_id = fi.tenant_id
+      AND fts.id = fi.template_id
+      AND (fts.name ILIKE '%' || $6 || '%' OR fts.key ILIKE '%' || $6 || '%')
+  ) OR EXISTS (
+    SELECT 1 FROM accounts
+    WHERE accounts.tenant_id = fi.tenant_id
+      AND accounts.id = fi.applicant_account_id
+      AND accounts.display_name ILIKE '%' || $6 || '%'
+  ))
 ORDER BY
-  CASE WHEN $6::text = 'submitted_at_asc' THEN fi.submitted_at END ASC,
+  CASE WHEN $7::text = 'submitted_at_asc' THEN fi.submitted_at END ASC,
   fi.submitted_at DESC,
   fi.id ASC
-LIMIT $8::int
-OFFSET $7::int
+LIMIT $9::int
+OFFSET $8::int
 `
 
 type ListFormInstancePageByQueryParams struct {
@@ -3810,6 +3954,7 @@ type ListFormInstancePageByQueryParams struct {
 	TemplateID         string `json:"template_id"`
 	TemplateKey        string `json:"template_key"`
 	ApplicantAccountID string `json:"applicant_account_id"`
+	Search             string `json:"search"`
 	Sort               string `json:"sort"`
 	OffsetCount        int32  `json:"offset_count"`
 	LimitCount         int32  `json:"limit_count"`
@@ -3822,6 +3967,7 @@ func (q *Queries) ListFormInstancePageByQuery(ctx context.Context, arg ListFormI
 		arg.TemplateID,
 		arg.TemplateKey,
 		arg.ApplicantAccountID,
+		arg.Search,
 		arg.Sort,
 		arg.OffsetCount,
 		arg.LimitCount,
@@ -3908,6 +4054,17 @@ WHERE fi.tenant_id = $1
       AND form_templates.key = $4
   ))
   AND ($5::text = '' OR fi.applicant_account_id = $5)
+  AND ($6::text = '' OR fi.payload::text ILIKE '%' || $6 || '%' OR EXISTS (
+    SELECT 1 FROM form_templates fts
+    WHERE fts.tenant_id = fi.tenant_id
+      AND fts.id = fi.template_id
+      AND (fts.name ILIKE '%' || $6 || '%' OR fts.key ILIKE '%' || $6 || '%')
+  ) OR EXISTS (
+    SELECT 1 FROM accounts
+    WHERE accounts.tenant_id = fi.tenant_id
+      AND accounts.id = fi.applicant_account_id
+      AND accounts.display_name ILIKE '%' || $6 || '%'
+  ))
 ORDER BY fi.submitted_at ASC
 `
 
@@ -3917,6 +4074,7 @@ type ListFormInstancesByQueryParams struct {
 	TemplateID         string `json:"template_id"`
 	TemplateKey        string `json:"template_key"`
 	ApplicantAccountID string `json:"applicant_account_id"`
+	Search             string `json:"search"`
 }
 
 func (q *Queries) ListFormInstancesByQuery(ctx context.Context, arg ListFormInstancesByQueryParams) ([]FormInstance, error) {
@@ -3926,6 +4084,7 @@ func (q *Queries) ListFormInstancesByQuery(ctx context.Context, arg ListFormInst
 		arg.TemplateID,
 		arg.TemplateKey,
 		arg.ApplicantAccountID,
+		arg.Search,
 	)
 	if err != nil {
 		return nil, err
@@ -4347,7 +4506,7 @@ func (q *Queries) ListOpenLeaveTypeSyncIssues(ctx context.Context, tenantID stri
 }
 
 const listOrgUnits = `-- name: ListOrgUnits :many
-SELECT id, tenant_id, code, name, name_en, parent_id, path, source, closed, show_in_org_chart, created_at, updated_at FROM org_units
+SELECT id, tenant_id, code, name, name_en, parent_id, path, source, closed, show_in_org_chart, manager_position_id, created_at, updated_at FROM org_units
 WHERE tenant_id = $1
 ORDER BY closed ASC, code ASC, name ASC, created_at ASC, id ASC
 `
@@ -4372,6 +4531,7 @@ func (q *Queries) ListOrgUnits(ctx context.Context, tenantID string) ([]OrgUnit,
 			&i.Source,
 			&i.Closed,
 			&i.ShowInOrgChart,
+			&i.ManagerPositionID,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -4628,16 +4788,39 @@ func (q *Queries) ListPermissionSets(ctx context.Context, tenantID string) ([]Pe
 const listPlatformTaskItems = `-- name: ListPlatformTaskItems :many
 SELECT id, tenant_id, account_id, work_date, title, category, product, hours, note, created_at, updated_at FROM platform_task_items
 WHERE tenant_id = $1 AND account_id = $2
-ORDER BY work_date DESC, created_at ASC, id ASC
+  AND ($3::timestamptz IS NULL OR created_at >= $3::timestamptz)
+  AND ($4::timestamptz IS NULL OR created_at < $4::timestamptz)
+  AND (
+    NOT $5::boolean
+    OR created_at < $6::timestamptz
+    OR (created_at = $6::timestamptz AND id < $7)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $8::int
 `
 
 type ListPlatformTaskItemsParams struct {
-	TenantID  string `json:"tenant_id"`
-	AccountID string `json:"account_id"`
+	TenantID        string             `json:"tenant_id"`
+	AccountID       string             `json:"account_id"`
+	FromCreatedAt   pgtype.Timestamptz `json:"from_created_at"`
+	ToCreatedAt     pgtype.Timestamptz `json:"to_created_at"`
+	HasCursor       bool               `json:"has_cursor"`
+	CursorCreatedAt pgtype.Timestamptz `json:"cursor_created_at"`
+	CursorID        string             `json:"cursor_id"`
+	LimitCount      int32              `json:"limit_count"`
 }
 
 func (q *Queries) ListPlatformTaskItems(ctx context.Context, arg ListPlatformTaskItemsParams) ([]PlatformTaskItem, error) {
-	rows, err := q.db.Query(ctx, listPlatformTaskItems, arg.TenantID, arg.AccountID)
+	rows, err := q.db.Query(ctx, listPlatformTaskItems,
+		arg.TenantID,
+		arg.AccountID,
+		arg.FromCreatedAt,
+		arg.ToCreatedAt,
+		arg.HasCursor,
+		arg.CursorCreatedAt,
+		arg.CursorID,
+		arg.LimitCount,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -4671,16 +4854,39 @@ func (q *Queries) ListPlatformTaskItems(ctx context.Context, arg ListPlatformTas
 const listPlatformTaskTodos = `-- name: ListPlatformTaskTodos :many
 SELECT id, tenant_id, account_id, text, due_date, status, converted_task_item_id, created_at, updated_at FROM platform_task_todos
 WHERE tenant_id = $1 AND account_id = $2
-ORDER BY CASE WHEN status = 'open' THEN 0 ELSE 1 END, created_at ASC, id ASC
+  AND ($3::timestamptz IS NULL OR created_at >= $3::timestamptz)
+  AND ($4::timestamptz IS NULL OR created_at < $4::timestamptz)
+  AND (
+    NOT $5::boolean
+    OR created_at < $6::timestamptz
+    OR (created_at = $6::timestamptz AND id < $7)
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT $8::int
 `
 
 type ListPlatformTaskTodosParams struct {
-	TenantID  string `json:"tenant_id"`
-	AccountID string `json:"account_id"`
+	TenantID        string             `json:"tenant_id"`
+	AccountID       string             `json:"account_id"`
+	FromCreatedAt   pgtype.Timestamptz `json:"from_created_at"`
+	ToCreatedAt     pgtype.Timestamptz `json:"to_created_at"`
+	HasCursor       bool               `json:"has_cursor"`
+	CursorCreatedAt pgtype.Timestamptz `json:"cursor_created_at"`
+	CursorID        string             `json:"cursor_id"`
+	LimitCount      int32              `json:"limit_count"`
 }
 
 func (q *Queries) ListPlatformTaskTodos(ctx context.Context, arg ListPlatformTaskTodosParams) ([]PlatformTaskTodo, error) {
-	rows, err := q.db.Query(ctx, listPlatformTaskTodos, arg.TenantID, arg.AccountID)
+	rows, err := q.db.Query(ctx, listPlatformTaskTodos,
+		arg.TenantID,
+		arg.AccountID,
+		arg.FromCreatedAt,
+		arg.ToCreatedAt,
+		arg.HasCursor,
+		arg.CursorCreatedAt,
+		arg.CursorID,
+		arg.LimitCount,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -5897,7 +6103,6 @@ INSERT INTO attendance_policies (
 ON CONFLICT (tenant_id) DO UPDATE SET
     id = EXCLUDED.id,
     work_time = EXCLUDED.work_time,
-    leave_types = EXCLUDED.leave_types,
     version = EXCLUDED.version,
     effective_from = EXCLUDED.effective_from,
     updated_by_account_id = EXCLUDED.updated_by_account_id,
@@ -6951,9 +7156,9 @@ func (q *Queries) UpsertLeaveTypeSyncIssue(ctx context.Context, arg UpsertLeaveT
 
 const upsertOrgUnit = `-- name: UpsertOrgUnit :one
 INSERT INTO org_units (
-    id, tenant_id, code, name, name_en, parent_id, path, source, closed, created_at, updated_at
+    id, tenant_id, code, name, name_en, parent_id, path, source, closed, manager_position_id, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
 ON CONFLICT (id) DO UPDATE SET
     code = EXCLUDED.code,
@@ -6963,24 +7168,26 @@ ON CONFLICT (id) DO UPDATE SET
     path = EXCLUDED.path,
     source = EXCLUDED.source,
     closed = EXCLUDED.closed,
+    manager_position_id = EXCLUDED.manager_position_id,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
 WHERE org_units.tenant_id = EXCLUDED.tenant_id
-RETURNING id, tenant_id, code, name, name_en, parent_id, path, source, closed, show_in_org_chart, created_at, updated_at
+RETURNING id, tenant_id, code, name, name_en, parent_id, path, source, closed, show_in_org_chart, manager_position_id, created_at, updated_at
 `
 
 type UpsertOrgUnitParams struct {
-	ID        string             `json:"id"`
-	TenantID  string             `json:"tenant_id"`
-	Code      string             `json:"code"`
-	Name      string             `json:"name"`
-	NameEn    string             `json:"name_en"`
-	ParentID  string             `json:"parent_id"`
-	Path      []string           `json:"path"`
-	Source    string             `json:"source"`
-	Closed    bool               `json:"closed"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	ID                string             `json:"id"`
+	TenantID          string             `json:"tenant_id"`
+	Code              string             `json:"code"`
+	Name              string             `json:"name"`
+	NameEn            string             `json:"name_en"`
+	ParentID          string             `json:"parent_id"`
+	Path              []string           `json:"path"`
+	Source            string             `json:"source"`
+	Closed            bool               `json:"closed"`
+	ManagerPositionID string             `json:"manager_position_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) UpsertOrgUnit(ctx context.Context, arg UpsertOrgUnitParams) (OrgUnit, error) {
@@ -6994,6 +7201,7 @@ func (q *Queries) UpsertOrgUnit(ctx context.Context, arg UpsertOrgUnitParams) (O
 		arg.Path,
 		arg.Source,
 		arg.Closed,
+		arg.ManagerPositionID,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
@@ -7009,6 +7217,7 @@ func (q *Queries) UpsertOrgUnit(ctx context.Context, arg UpsertOrgUnitParams) (O
 		&i.Source,
 		&i.Closed,
 		&i.ShowInOrgChart,
+		&i.ManagerPositionID,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

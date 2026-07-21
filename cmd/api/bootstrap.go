@@ -994,7 +994,7 @@ func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Lo
 			defer r.workers.Done()
 			r.liteLLMModelSyncer.Run(ctx, jobs.LiteLLMModelSyncOptions{})
 		}()
-		logger.Info("LiteLLM model reconciler started", "interval", "5m")
+		logger.Info("LiteLLM model reconciler started", "interval", "5m", "orphan_sweep_every", 6)
 	}
 	if r.ehrmsPipelineScheduler != nil {
 		r.workers.Add(1)

@@ -14,6 +14,9 @@ import (
 	"nexus-pro-api/internal/domain"
 )
 
+// liteLLMMaxResponseBytes caps LiteLLM admin JSON bodies while still fitting full /model/info lists.
+const liteLLMMaxResponseBytes = 4 << 20 // 4 MiB
+
 // LiteLLMAdminConfig defines the LiteLLM proxy admin client config.
 type LiteLLMAdminConfig struct {
 	BaseURL   string
@@ -43,7 +46,7 @@ func NewLiteLLMAdminClient(cfg LiteLLMAdminConfig) (*LiteLLMAdminClient, error) 
 	}
 	client := cfg.Client
 	if client == nil {
-		client = &http.Client{Timeout: 15 * time.Second}
+		client = &http.Client{Timeout: 30 * time.Second}
 	}
 	return &LiteLLMAdminClient{baseURL: baseURL, apiKey: apiKey, masterKey: masterKey, client: client}, nil
 }
@@ -285,7 +288,13 @@ func (c *LiteLLMAdminClient) doJSON(ctx context.Context, method, path, token str
 		return 0, nil, err
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(io.LimitReader(resp.Body, 8192))
+	respBody, err := io.ReadAll(io.LimitReader(resp.Body, liteLLMMaxResponseBytes+1))
+	if err != nil {
+		return resp.StatusCode, nil, fmt.Errorf("read litellm %s response: %w", path, err)
+	}
+	if len(respBody) > liteLLMMaxResponseBytes {
+		return resp.StatusCode, nil, fmt.Errorf("litellm %s response exceeds %d bytes", path, liteLLMMaxResponseBytes)
+	}
 	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
 		return resp.StatusCode, respBody, nil
 	}

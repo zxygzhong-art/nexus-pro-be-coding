@@ -212,9 +212,9 @@ RETURNING *;
 
 -- name: UpsertOrgUnit :one
 INSERT INTO org_units (
-    id, tenant_id, code, name, name_en, parent_id, path, source, closed, created_at, updated_at
+    id, tenant_id, code, name, name_en, parent_id, path, source, closed, manager_position_id, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
 )
 ON CONFLICT (id) DO UPDATE SET
     code = EXCLUDED.code,
@@ -224,6 +224,7 @@ ON CONFLICT (id) DO UPDATE SET
     path = EXCLUDED.path,
     source = EXCLUDED.source,
     closed = EXCLUDED.closed,
+    manager_position_id = EXCLUDED.manager_position_id,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
 WHERE org_units.tenant_id = EXCLUDED.tenant_id
@@ -335,6 +336,22 @@ LEFT JOIN accounts
   ON accounts.tenant_id = employees.tenant_id
  AND accounts.id = employees.account_id
 WHERE employees.tenant_id = sqlc.arg(tenant_id)
+	AND NOT sqlc.arg(scope_deny_all)::boolean
+	AND (
+		(
+			NOT sqlc.arg(scope_match_any)::boolean
+			AND (coalesce(cardinality(sqlc.arg(scope_employee_ids)::text[]), 0) = 0 OR employees.id = ANY(sqlc.arg(scope_employee_ids)::text[]))
+			AND (coalesce(cardinality(sqlc.arg(scope_org_unit_ids)::text[]), 0) = 0 OR employees.org_unit_id = ANY(sqlc.arg(scope_org_unit_ids)::text[]))
+		)
+		OR (
+			sqlc.arg(scope_match_any)::boolean
+			AND (
+				(coalesce(cardinality(sqlc.arg(scope_employee_ids)::text[]), 0) > 0 AND employees.id = ANY(sqlc.arg(scope_employee_ids)::text[]))
+				OR (coalesce(cardinality(sqlc.arg(scope_org_unit_ids)::text[]), 0) > 0 AND employees.org_unit_id = ANY(sqlc.arg(scope_org_unit_ids)::text[]))
+			)
+		)
+	)
+	AND (coalesce(cardinality(sqlc.arg(scope_statuses)::text[]), 0) = 0 OR coalesce(nullif(employees.employment_status, ''), employees.status) = ANY(sqlc.arg(scope_statuses)::text[]))
   AND (
     sqlc.arg(keyword)::text = ''
     OR lower(
@@ -361,8 +378,15 @@ WHERE employees.tenant_id = sqlc.arg(tenant_id)
     OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'deleted'
   )
   AND (sqlc.arg(category)::text = '' OR employees.category = sqlc.arg(category))
+  AND (
+    sqlc.arg(present_from)::text = ''
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'resigned'
+    OR employees.resign_date IS NOT NULL
+  )
+  AND (NULLIF(sqlc.arg(present_to)::text, '') IS NULL OR employees.hire_date IS NULL OR employees.hire_date < NULLIF(sqlc.arg(present_to)::text, '')::timestamptz)
+  AND (NULLIF(sqlc.arg(present_from)::text, '') IS NULL OR employees.resign_date IS NULL OR employees.resign_date >= NULLIF(sqlc.arg(present_from)::text, '')::timestamptz)
 ORDER BY
-  CASE coalesce(nullif(employees.employment_status, ''), employees.status)
+  CASE WHEN sqlc.arg(sort)::text <> 'attendance_asc' THEN CASE coalesce(nullif(employees.employment_status, ''), employees.status)
     WHEN 'active' THEN 0
     WHEN 'probation' THEN 1
     WHEN 'leave_suspended' THEN 2
@@ -370,7 +394,8 @@ ORDER BY
     WHEN 'resigned' THEN 4
     WHEN 'deleted' THEN 5
     ELSE 6
-  END ASC,
+  END END ASC,
+  CASE WHEN sqlc.arg(sort)::text = 'attendance_asc' THEN lower(coalesce(nullif(employees.employee_no, ''), employees.id)) END ASC,
   CASE WHEN sqlc.arg(sort)::text = 'created_at_desc' THEN employees.created_at END DESC,
   CASE WHEN sqlc.arg(sort)::text = 'hire_date_desc' THEN employees.hire_date END DESC NULLS LAST,
   CASE WHEN sqlc.arg(sort)::text = 'hire_date_asc' THEN employees.hire_date END ASC NULLS LAST,
@@ -383,39 +408,22 @@ LEFT JOIN accounts
   ON accounts.tenant_id = employees.tenant_id
  AND accounts.id = employees.account_id
 WHERE employees.tenant_id = sqlc.arg(tenant_id)
+  AND NOT sqlc.arg(scope_deny_all)::boolean
   AND (
-    sqlc.arg(keyword)::text = ''
-    OR lower(
-      coalesce(employees.employee_no, '') || ' ' ||
-      coalesce(employees.name, '') || ' ' ||
-      coalesce(employees.company_email, '') || ' ' ||
-      coalesce(employees.personal_email, '') || ' ' ||
-      coalesce(employees.phone, '')
-    ) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
-    OR lower(coalesce(employees.account_id, '')) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
-    OR lower(
-      coalesce(accounts.display_name, '') || ' ' ||
-      coalesce(accounts.email, '') || ' ' ||
-      coalesce(accounts.employee_id, '')
-    ) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
+    (
+      NOT sqlc.arg(scope_match_any)::boolean
+      AND (coalesce(cardinality(sqlc.arg(scope_employee_ids)::text[]), 0) = 0 OR employees.id = ANY(sqlc.arg(scope_employee_ids)::text[]))
+      AND (coalesce(cardinality(sqlc.arg(scope_org_unit_ids)::text[]), 0) = 0 OR employees.org_unit_id = ANY(sqlc.arg(scope_org_unit_ids)::text[]))
+    )
+    OR (
+      sqlc.arg(scope_match_any)::boolean
+      AND (
+        (coalesce(cardinality(sqlc.arg(scope_employee_ids)::text[]), 0) > 0 AND employees.id = ANY(sqlc.arg(scope_employee_ids)::text[]))
+        OR (coalesce(cardinality(sqlc.arg(scope_org_unit_ids)::text[]), 0) > 0 AND employees.org_unit_id = ANY(sqlc.arg(scope_org_unit_ids)::text[]))
+      )
+    )
   )
-  AND (sqlc.arg(department_id)::text = '' OR employees.org_unit_id = sqlc.arg(department_id))
-  AND (
-    sqlc.arg(employment_status)::text = ''
-    OR coalesce(nullif(employees.employment_status, ''), employees.status) = sqlc.arg(employment_status)
-  )
-  AND (
-    sqlc.arg(employment_status)::text = 'deleted'
-    OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'deleted'
-  )
-  AND (sqlc.arg(category)::text = '' OR employees.category = sqlc.arg(category));
-
--- name: ListEmployeesFilteredPage :many
-SELECT employees.* FROM employees
-LEFT JOIN accounts
-  ON accounts.tenant_id = employees.tenant_id
- AND accounts.id = employees.account_id
-WHERE employees.tenant_id = sqlc.arg(tenant_id)
+  AND (coalesce(cardinality(sqlc.arg(scope_statuses)::text[]), 0) = 0 OR coalesce(nullif(employees.employment_status, ''), employees.status) = ANY(sqlc.arg(scope_statuses)::text[]))
   AND (
     sqlc.arg(keyword)::text = ''
     OR lower(
@@ -442,8 +450,71 @@ WHERE employees.tenant_id = sqlc.arg(tenant_id)
     OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'deleted'
   )
   AND (sqlc.arg(category)::text = '' OR employees.category = sqlc.arg(category))
+  AND (
+    sqlc.arg(present_from)::text = ''
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'resigned'
+    OR employees.resign_date IS NOT NULL
+  )
+  AND (NULLIF(sqlc.arg(present_to)::text, '') IS NULL OR employees.hire_date IS NULL OR employees.hire_date < NULLIF(sqlc.arg(present_to)::text, '')::timestamptz)
+  AND (NULLIF(sqlc.arg(present_from)::text, '') IS NULL OR employees.resign_date IS NULL OR employees.resign_date >= NULLIF(sqlc.arg(present_from)::text, '')::timestamptz);
+
+-- name: ListEmployeesFilteredPage :many
+SELECT employees.* FROM employees
+LEFT JOIN accounts
+  ON accounts.tenant_id = employees.tenant_id
+ AND accounts.id = employees.account_id
+WHERE employees.tenant_id = sqlc.arg(tenant_id)
+  AND NOT sqlc.arg(scope_deny_all)::boolean
+  AND (
+    (
+      NOT sqlc.arg(scope_match_any)::boolean
+      AND (coalesce(cardinality(sqlc.arg(scope_employee_ids)::text[]), 0) = 0 OR employees.id = ANY(sqlc.arg(scope_employee_ids)::text[]))
+      AND (coalesce(cardinality(sqlc.arg(scope_org_unit_ids)::text[]), 0) = 0 OR employees.org_unit_id = ANY(sqlc.arg(scope_org_unit_ids)::text[]))
+    )
+    OR (
+      sqlc.arg(scope_match_any)::boolean
+      AND (
+        (coalesce(cardinality(sqlc.arg(scope_employee_ids)::text[]), 0) > 0 AND employees.id = ANY(sqlc.arg(scope_employee_ids)::text[]))
+        OR (coalesce(cardinality(sqlc.arg(scope_org_unit_ids)::text[]), 0) > 0 AND employees.org_unit_id = ANY(sqlc.arg(scope_org_unit_ids)::text[]))
+      )
+    )
+  )
+  AND (coalesce(cardinality(sqlc.arg(scope_statuses)::text[]), 0) = 0 OR coalesce(nullif(employees.employment_status, ''), employees.status) = ANY(sqlc.arg(scope_statuses)::text[]))
+  AND (
+    sqlc.arg(keyword)::text = ''
+    OR lower(
+      coalesce(employees.employee_no, '') || ' ' ||
+      coalesce(employees.name, '') || ' ' ||
+      coalesce(employees.company_email, '') || ' ' ||
+      coalesce(employees.personal_email, '') || ' ' ||
+      coalesce(employees.phone, '')
+    ) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
+    OR lower(coalesce(employees.account_id, '')) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
+    OR lower(
+      coalesce(accounts.display_name, '') || ' ' ||
+      coalesce(accounts.email, '') || ' ' ||
+      coalesce(accounts.employee_id, '')
+    ) LIKE '%' || lower(sqlc.arg(keyword)::text) || '%'
+  )
+  AND (sqlc.arg(department_id)::text = '' OR employees.org_unit_id = sqlc.arg(department_id))
+  AND (
+    sqlc.arg(employment_status)::text = ''
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) = sqlc.arg(employment_status)
+  )
+  AND (
+    sqlc.arg(employment_status)::text = 'deleted'
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'deleted'
+  )
+  AND (sqlc.arg(category)::text = '' OR employees.category = sqlc.arg(category))
+  AND (
+    sqlc.arg(present_from)::text = ''
+    OR coalesce(nullif(employees.employment_status, ''), employees.status) <> 'resigned'
+    OR employees.resign_date IS NOT NULL
+  )
+  AND (NULLIF(sqlc.arg(present_to)::text, '') IS NULL OR employees.hire_date IS NULL OR employees.hire_date < NULLIF(sqlc.arg(present_to)::text, '')::timestamptz)
+  AND (NULLIF(sqlc.arg(present_from)::text, '') IS NULL OR employees.resign_date IS NULL OR employees.resign_date >= NULLIF(sqlc.arg(present_from)::text, '')::timestamptz)
 ORDER BY
-  CASE coalesce(nullif(employees.employment_status, ''), employees.status)
+  CASE WHEN sqlc.arg(sort)::text <> 'attendance_asc' THEN CASE coalesce(nullif(employees.employment_status, ''), employees.status)
     WHEN 'active' THEN 0
     WHEN 'probation' THEN 1
     WHEN 'leave_suspended' THEN 2
@@ -451,7 +522,8 @@ ORDER BY
     WHEN 'resigned' THEN 4
     WHEN 'deleted' THEN 5
     ELSE 6
-  END ASC,
+  END END ASC,
+  CASE WHEN sqlc.arg(sort)::text = 'attendance_asc' THEN lower(coalesce(nullif(employees.employee_no, ''), employees.id)) END ASC,
   CASE WHEN sqlc.arg(sort)::text = 'created_at_desc' THEN employees.created_at END DESC,
   CASE WHEN sqlc.arg(sort)::text = 'hire_date_desc' THEN employees.hire_date END DESC NULLS LAST,
   CASE WHEN sqlc.arg(sort)::text = 'hire_date_asc' THEN employees.hire_date END ASC NULLS LAST,
@@ -597,7 +669,6 @@ INSERT INTO attendance_policies (
 ON CONFLICT (tenant_id) DO UPDATE SET
     id = EXCLUDED.id,
     work_time = EXCLUDED.work_time,
-    leave_types = EXCLUDED.leave_types,
     version = EXCLUDED.version,
     effective_from = EXCLUDED.effective_from,
     updated_by_account_id = EXCLUDED.updated_by_account_id,
@@ -673,7 +744,7 @@ INSERT INTO leave_types (
     id, tenant_id, code, name, category, source_of_truth, status, created_at, updated_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(code), sqlc.arg(code),
-    'company', 'local_policy', 'active', sqlc.arg(created_at), sqlc.arg(updated_at)
+    'company', 'system_default', 'active', sqlc.arg(created_at), sqlc.arg(updated_at)
 )
 ON CONFLICT (tenant_id, id) DO NOTHING;
 
@@ -895,7 +966,18 @@ WHERE fi.tenant_id = sqlc.arg(tenant_id)
       AND form_templates.id = fi.template_id
       AND form_templates.key = sqlc.arg(template_key)
   ))
-  AND (sqlc.arg(applicant_account_id)::text = '' OR fi.applicant_account_id = sqlc.arg(applicant_account_id));
+  AND (sqlc.arg(applicant_account_id)::text = '' OR fi.applicant_account_id = sqlc.arg(applicant_account_id))
+  AND (sqlc.arg(search)::text = '' OR fi.payload::text ILIKE '%' || sqlc.arg(search) || '%' OR EXISTS (
+    SELECT 1 FROM form_templates fts
+    WHERE fts.tenant_id = fi.tenant_id
+      AND fts.id = fi.template_id
+      AND (fts.name ILIKE '%' || sqlc.arg(search) || '%' OR fts.key ILIKE '%' || sqlc.arg(search) || '%')
+  ) OR EXISTS (
+    SELECT 1 FROM accounts
+    WHERE accounts.tenant_id = fi.tenant_id
+      AND accounts.id = fi.applicant_account_id
+      AND accounts.display_name ILIKE '%' || sqlc.arg(search) || '%'
+  ));
 
 -- name: ListFormInstancesByQuery :many
 SELECT * FROM form_instances fi
@@ -909,6 +991,17 @@ WHERE fi.tenant_id = sqlc.arg(tenant_id)
       AND form_templates.key = sqlc.arg(template_key)
   ))
   AND (sqlc.arg(applicant_account_id)::text = '' OR fi.applicant_account_id = sqlc.arg(applicant_account_id))
+  AND (sqlc.arg(search)::text = '' OR fi.payload::text ILIKE '%' || sqlc.arg(search) || '%' OR EXISTS (
+    SELECT 1 FROM form_templates fts
+    WHERE fts.tenant_id = fi.tenant_id
+      AND fts.id = fi.template_id
+      AND (fts.name ILIKE '%' || sqlc.arg(search) || '%' OR fts.key ILIKE '%' || sqlc.arg(search) || '%')
+  ) OR EXISTS (
+    SELECT 1 FROM accounts
+    WHERE accounts.tenant_id = fi.tenant_id
+      AND accounts.id = fi.applicant_account_id
+      AND accounts.display_name ILIKE '%' || sqlc.arg(search) || '%'
+  ))
 ORDER BY fi.submitted_at ASC;
 
 -- name: ListFormInstancePageByQuery :many
@@ -923,6 +1016,17 @@ WHERE fi.tenant_id = sqlc.arg(tenant_id)
       AND form_templates.key = sqlc.arg(template_key)
   ))
   AND (sqlc.arg(applicant_account_id)::text = '' OR fi.applicant_account_id = sqlc.arg(applicant_account_id))
+  AND (sqlc.arg(search)::text = '' OR fi.payload::text ILIKE '%' || sqlc.arg(search) || '%' OR EXISTS (
+    SELECT 1 FROM form_templates fts
+    WHERE fts.tenant_id = fi.tenant_id
+      AND fts.id = fi.template_id
+      AND (fts.name ILIKE '%' || sqlc.arg(search) || '%' OR fts.key ILIKE '%' || sqlc.arg(search) || '%')
+  ) OR EXISTS (
+    SELECT 1 FROM accounts
+    WHERE accounts.tenant_id = fi.tenant_id
+      AND accounts.id = fi.applicant_account_id
+      AND accounts.display_name ILIKE '%' || sqlc.arg(search) || '%'
+  ))
 ORDER BY
   CASE WHEN sqlc.arg(sort)::text = 'submitted_at_asc' THEN fi.submitted_at END ASC,
   fi.submitted_at DESC,
@@ -1321,6 +1425,7 @@ LIMIT 1;
 SELECT * FROM attendance_clock_records
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.arg(employee_id)::text = '' OR employee_id = sqlc.arg(employee_id))
+  AND (coalesce(cardinality(sqlc.arg(employee_ids)::text[]), 0) = 0 OR employee_id = ANY(sqlc.arg(employee_ids)::text[]))
   AND (sqlc.arg(from_date)::text = '' OR work_date >= sqlc.arg(from_date))
   AND (sqlc.arg(to_date)::text = '' OR work_date <= sqlc.arg(to_date))
   AND (sqlc.arg(direction)::text = '' OR direction = sqlc.arg(direction))
@@ -1390,6 +1495,7 @@ LIMIT 1;
 SELECT * FROM attendance_daily_summaries
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND (sqlc.arg(employee_id)::text = '' OR employee_id = sqlc.arg(employee_id))
+  AND (coalesce(cardinality(sqlc.arg(employee_ids)::text[]), 0) = 0 OR employee_id = ANY(sqlc.arg(employee_ids)::text[]))
   AND (sqlc.arg(from_date)::text = '' OR work_date >= sqlc.arg(from_date))
   AND (sqlc.arg(to_date)::text = '' OR work_date <= sqlc.arg(to_date))
   AND (sqlc.arg(source)::text = '' OR source = sqlc.arg(source))
@@ -1515,7 +1621,15 @@ WHERE tenant_id = sqlc.arg(tenant_id)
 -- name: ListPlatformTaskItems :many
 SELECT * FROM platform_task_items
 WHERE tenant_id = sqlc.arg(tenant_id) AND account_id = sqlc.arg(account_id)
-ORDER BY work_date DESC, created_at ASC, id ASC;
+  AND (sqlc.arg(from_created_at)::timestamptz IS NULL OR created_at >= sqlc.arg(from_created_at)::timestamptz)
+  AND (sqlc.arg(to_created_at)::timestamptz IS NULL OR created_at < sqlc.arg(to_created_at)::timestamptz)
+  AND (
+    NOT sqlc.arg(has_cursor)::boolean
+    OR created_at < sqlc.arg(cursor_created_at)::timestamptz
+    OR (created_at = sqlc.arg(cursor_created_at)::timestamptz AND id < sqlc.arg(cursor_id))
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(limit_count)::int;
 
 -- name: DeletePlatformTaskItem :exec
 DELETE FROM platform_task_items
@@ -1550,7 +1664,15 @@ WHERE tenant_id = sqlc.arg(tenant_id)
 -- name: ListPlatformTaskTodos :many
 SELECT * FROM platform_task_todos
 WHERE tenant_id = sqlc.arg(tenant_id) AND account_id = sqlc.arg(account_id)
-ORDER BY CASE WHEN status = 'open' THEN 0 ELSE 1 END, created_at ASC, id ASC;
+  AND (sqlc.arg(from_created_at)::timestamptz IS NULL OR created_at >= sqlc.arg(from_created_at)::timestamptz)
+  AND (sqlc.arg(to_created_at)::timestamptz IS NULL OR created_at < sqlc.arg(to_created_at)::timestamptz)
+  AND (
+    NOT sqlc.arg(has_cursor)::boolean
+    OR created_at < sqlc.arg(cursor_created_at)::timestamptz
+    OR (created_at = sqlc.arg(cursor_created_at)::timestamptz AND id < sqlc.arg(cursor_id))
+  )
+ORDER BY created_at DESC, id DESC
+LIMIT sqlc.arg(limit_count)::int;
 
 -- name: DeletePlatformTaskTodo :exec
 DELETE FROM platform_task_todos

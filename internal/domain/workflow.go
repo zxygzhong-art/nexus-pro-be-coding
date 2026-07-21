@@ -89,6 +89,7 @@ type FormInstanceQuery struct {
 	TemplateID         string `json:"template_id,omitempty"`
 	TemplateKey        string `json:"template_key,omitempty"`
 	ApplicantAccountID string `json:"applicant_account_id,omitempty"`
+	Search             string `json:"search,omitempty"`
 	Mine               bool   `json:"mine,omitempty"`
 }
 
@@ -247,6 +248,9 @@ const (
 	WorkflowRunStatusStartFailed = "start_failed"
 )
 
+// WorkflowStageEndID marks an explicit terminal edge in a workflow graph.
+const WorkflowStageEndID = "__end__"
+
 // WorkflowStageConfig 定義流程節點可執行設定。
 type WorkflowStageConfig struct {
 	Role                    string   `json:"role,omitempty"`
@@ -257,9 +261,11 @@ type WorkflowStageConfig struct {
 	Value                   string   `json:"value,omitempty"`
 	RemindAfterHours        int      `json:"remind_after_hours,omitempty"`
 	Levels                  []int    `json:"levels,omitempty"`
+	NextStageID             string   `json:"next_stage_id,omitempty"`
 	TrueNextStageID         string   `json:"true_next_stage_id,omitempty"`
 	FalseNextStageID        string   `json:"false_next_stage_id,omitempty"`
-	AccountIDs              []string `json:"account_ids,omitempty"`
+	AccountIDs []string `json:"account_ids,omitempty"`
+	// UserGroupIDs is retained only to detect and reject legacy approval-group targeting.
 	UserGroupIDs            []string `json:"user_group_ids,omitempty"`
 	ExcludeApplicant        bool     `json:"exclude_applicant,omitempty"`
 	RequireDistinctApprover bool     `json:"require_distinct_approver,omitempty"`

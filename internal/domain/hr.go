@@ -92,34 +92,46 @@ const (
 
 // OrgUnit 定義組織單位的資料結構。
 type OrgUnit struct {
-	ID             string    `json:"id"`
-	TenantID       string    `json:"tenant_id"`
-	Code           string    `json:"code,omitempty"`
-	Name           string    `json:"name"`
-	NameEN         string    `json:"name_en,omitempty"`
-	ParentID       string    `json:"parent_id,omitempty"`
-	Path           []string  `json:"path,omitempty"`
-	Source         string    `json:"source,omitempty"`
-	Closed         bool      `json:"closed,omitempty"`
-	ShowInOrgChart bool      `json:"show_in_org_chart"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID                string    `json:"id"`
+	TenantID          string    `json:"tenant_id"`
+	Code              string    `json:"code,omitempty"`
+	Name              string    `json:"name"`
+	NameEN            string    `json:"name_en,omitempty"`
+	ParentID          string    `json:"parent_id,omitempty"`
+	Path              []string  `json:"path,omitempty"`
+	Source            string    `json:"source,omitempty"`
+	Closed            bool      `json:"closed,omitempty"`
+	ShowInOrgChart    bool      `json:"show_in_org_chart"`
+	ManagerPositionID string    `json:"manager_position_id,omitempty"`
+	CreatedAt         time.Time `json:"created_at"`
+	UpdatedAt         time.Time `json:"updated_at"`
+}
+
+// OrgUnitQuery 定義組織單位列表查詢的資料結構。
+// Status 允許 active、closed、all（或省略）；非法值由服務層回傳 400。
+type OrgUnitQuery struct {
+	Status   string `json:"status,omitempty"`
+	Page     int    `json:"page,omitempty"`
+	PageSize int    `json:"page_size,omitempty"`
+	Sort     string `json:"sort,omitempty"`
 }
 
 // CreateOrgUnitInput 定義組織單位輸入的資料結構。
 type CreateOrgUnitInput struct {
-	Code     string `json:"code,omitempty"`
-	Name     string `json:"name"`
-	ParentID string `json:"parent_id,omitempty"`
+	Code              string `json:"code,omitempty"`
+	Name              string `json:"name"`
+	ParentID          string `json:"parent_id,omitempty"`
+	ManagerPositionID string `json:"manager_position_id,omitempty"`
 }
 
 // UpdateOrgUnitInput 定義組織單位 patch 輸入的資料結構。
 type UpdateOrgUnitInput struct {
-	Code           *string `json:"code,omitempty"`
-	Name           *string `json:"name,omitempty"`
-	ParentID       *string `json:"parent_id,omitempty"`
-	Closed         *bool   `json:"closed,omitempty"`
-	ShowInOrgChart *bool   `json:"show_in_org_chart,omitempty"`
+	Code              *string `json:"code,omitempty"`
+	Name              *string `json:"name,omitempty"`
+	ParentID          *string `json:"parent_id,omitempty"`
+	Closed            *bool   `json:"closed,omitempty"`
+	ShowInOrgChart    *bool   `json:"show_in_org_chart,omitempty"`
+	ManagerPositionID *string `json:"manager_position_id,omitempty"`
 }
 
 // Position 定義崗位的資料結構。
@@ -438,6 +450,8 @@ type EmployeeQuery struct {
 	DepartmentID     string                  `json:"department_id,omitempty"`
 	EmploymentStatus string                  `json:"employment_status,omitempty"`
 	Category         string                  `json:"category,omitempty"`
+	PresentFrom      string                  `json:"-"`
+	PresentTo        string                  `json:"-"`
 	Page             int                     `json:"page,omitempty"`
 	PageSize         int                     `json:"page_size,omitempty"`
 	Sort             string                  `json:"sort,omitempty"`
@@ -446,10 +460,11 @@ type EmployeeQuery struct {
 
 // EmployeeScopeConstraint 定義員工範圍 constraint 的資料結構。
 type EmployeeScopeConstraint struct {
-	EmployeeIDs []string `json:"-"`
-	OrgUnitIDs  []string `json:"-"`
-	Statuses    []string `json:"-"`
-	DenyAll     bool     `json:"-"`
+	EmployeeIDs    []string `json:"-"`
+	OrgUnitIDs     []string `json:"-"`
+	Statuses       []string `json:"-"`
+	MatchAnyEntity bool     `json:"-"`
+	DenyAll        bool     `json:"-"`
 }
 
 // EmployeeStats 定義員工 stats 的資料結構。

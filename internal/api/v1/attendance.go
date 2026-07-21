@@ -30,8 +30,8 @@ func (c AttendanceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	attendance.POST("/policies/validate", c.routes.Handle("attendance.leave", "update", c.validatePolicy))
 	attendance.POST("/policies/publish", c.routes.Handle("attendance.leave", "update", c.publishPolicy))
 	attendance.POST("/leave-balances/grant", c.routes.Handle("attendance.leave", "update", c.grantLeaveBalances))
-	attendance.GET("/ehrms/leave-types", c.routes.Handle("attendance.leave", "read", c.listEHRMSLeaveTypes))
-	attendance.POST("/ehrms/leave-types/sync", c.routes.Handle("attendance.leave", "update", c.syncEHRMSLeaveTypes, TenantWideScope()))
+	attendance.GET("/leave-types", c.routes.Handle("attendance.leave", "read", c.listLeaveTypes))
+	attendance.PATCH("/leave-types/:id", c.routes.Handle("attendance.leave", "update", c.setLeaveTypeEnabled, ResourceID(PathParamID)))
 	attendance.GET("/leave-type-integrations", c.routes.Handle("attendance.leave", "read", c.listLeaveTypeIntegrations))
 	attendance.POST("/leave-type-mappings", c.routes.Handle("attendance.leave", "update", c.saveLeaveTypeMapping))
 	attendance.DELETE("/leave-type-mappings/:id", c.routes.Handle("attendance.leave", "update", c.expireLeaveTypeMapping, ResourceID(PathParamID)))
@@ -204,9 +204,9 @@ func (c AttendanceCtrl) grantLeaveBalances(w http.ResponseWriter, r *http.Reques
 	return nil
 }
 
-// listEHRMSLeaveTypes returns the source-of-truth leave catalog from eHRMS.
-func (c AttendanceCtrl) listEHRMSLeaveTypes(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	catalog, err := c.svc.ListEHRMSLeaveTypes(ctx)
+// listLeaveTypes returns the system-defined leave catalog.
+func (c AttendanceCtrl) listLeaveTypes(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	catalog, err := c.svc.ListLeaveTypes(ctx)
 	if err != nil {
 		return err
 	}
@@ -214,13 +214,17 @@ func (c AttendanceCtrl) listEHRMSLeaveTypes(w http.ResponseWriter, r *http.Reque
 	return nil
 }
 
-// syncEHRMSLeaveTypes refreshes the complete persisted eHRMS leave catalog.
-func (c AttendanceCtrl) syncEHRMSLeaveTypes(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	catalog, err := c.svc.SyncEHRMSLeaveTypes(ctx)
+// setLeaveTypeEnabled changes tenant availability for one system leave type.
+func (c AttendanceCtrl) setLeaveTypeEnabled(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.SetLeaveTypeEnabledInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.SetLeaveTypeEnabled(ctx, r.PathValue(PathParamID), input)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, catalog)
+	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 

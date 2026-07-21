@@ -44,14 +44,19 @@ var employeeFieldAliases = map[string]string{
 }
 
 var departmentFieldAliases = map[string]string{
-	"code":        "部門代碼",
-	"name":        "部門中文名稱",
-	"name_zh":     "部門中文名稱",
-	"name_en":     "部門英文名稱",
-	"parent_code": "上級部門代碼",
-	"depth":       "部門層級",
-	"closed":      "部門已關閉",
-	"headcount":   "部門人數",
+	"code":                 "部門代碼",
+	"name":                 "部門中文名稱",
+	"name_zh":              "部門中文名稱",
+	"name_en":              "部門英文名稱",
+	"parent_code":          "上級部門代碼",
+	"depth":                "部門層級",
+	"closed":               "部門已關閉",
+	"headcount":            "部門人數",
+	"manager_job_code":     "主管職務代碼",
+	"manager_job_title":    "主管職務中文名稱",
+	"manager_job_title_en": "主管職務英文名稱",
+	"manager_emp_id":       "主管員工編號",
+	"manager":              "主管姓名",
 }
 
 var positionFieldAliases = map[string]string{

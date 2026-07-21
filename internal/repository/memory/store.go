@@ -46,8 +46,7 @@ type Store struct {
 	employeeImports         map[string]map[string]EmployeeImportSession
 	employmentContracts     map[string]map[string]EmploymentContract
 	attendancePolicies      map[string]AttendancePolicy
-	ehrmsLeaveTypes         map[string][]EHRMSLeaveType
-	ehrmsLeaveTypesSyncedAt map[string]time.Time
+	leaveTypeEnablements    map[string]map[string]bool
 	leaveTypeMappings       map[string]map[string]LeaveTypeExternalMapping
 	leaveTypeSyncIssues     map[string]map[string]LeaveTypeSyncIssue
 	leaveBalances           map[string]map[string]LeaveBalance
@@ -65,6 +64,7 @@ type Store struct {
 	formTemplateVersions    map[string]map[string]FormTemplateVersion
 	formInstances           map[string]map[string]FormInstance
 	formInstanceFieldValues map[string]map[string][]FormInstanceFieldValue
+	formInstanceFiles       map[string]map[string]domain.FormInstanceFile
 	workflowRuns            map[string]map[string]domain.WorkflowRun
 	workflowStageInstances  map[string]map[string]domain.WorkflowStageInstance
 	workflowStageAssignees  map[string]map[string]domain.WorkflowStageAssignee
@@ -124,8 +124,7 @@ func NewStore() *Store {
 		employeeImports:         map[string]map[string]EmployeeImportSession{},
 		employmentContracts:     map[string]map[string]EmploymentContract{},
 		attendancePolicies:      map[string]AttendancePolicy{},
-		ehrmsLeaveTypes:         map[string][]EHRMSLeaveType{},
-		ehrmsLeaveTypesSyncedAt: map[string]time.Time{},
+		leaveTypeEnablements:    map[string]map[string]bool{},
 		leaveTypeMappings:       map[string]map[string]LeaveTypeExternalMapping{},
 		leaveTypeSyncIssues:     map[string]map[string]LeaveTypeSyncIssue{},
 		leaveBalances:           map[string]map[string]LeaveBalance{},
@@ -143,6 +142,7 @@ func NewStore() *Store {
 		formTemplateVersions:    map[string]map[string]FormTemplateVersion{},
 		formInstances:           map[string]map[string]FormInstance{},
 		formInstanceFieldValues: map[string]map[string][]FormInstanceFieldValue{},
+		formInstanceFiles:       map[string]map[string]domain.FormInstanceFile{},
 		workflowRuns:            map[string]map[string]domain.WorkflowRun{},
 		workflowStageInstances:  map[string]map[string]domain.WorkflowStageInstance{},
 		workflowStageAssignees:  map[string]map[string]domain.WorkflowStageAssignee{},
@@ -1335,13 +1335,23 @@ func (s *Store) filterMemoryEmployeesByQuery(tenantID string, items []Employee, 
 	}
 	for _, item := range items {
 		status := utils.FirstNonEmpty(item.EmploymentStatus, item.Status)
-		if len(employeeAllowed) > 0 {
-			if _, ok := employeeAllowed[item.ID]; !ok {
+		employeeMatch := len(employeeAllowed) > 0
+		if employeeMatch {
+			_, employeeMatch = employeeAllowed[item.ID]
+		}
+		orgMatch := len(orgAllowed) > 0
+		if orgMatch {
+			_, orgMatch = orgAllowed[item.OrgUnitID]
+		}
+		if query.Scope.MatchAnyEntity {
+			if !employeeMatch && !orgMatch {
 				continue
 			}
-		}
-		if len(orgAllowed) > 0 {
-			if _, ok := orgAllowed[item.OrgUnitID]; !ok {
+		} else {
+			if len(employeeAllowed) > 0 && !employeeMatch {
+				continue
+			}
+			if len(orgAllowed) > 0 && !orgMatch {
 				continue
 			}
 		}
@@ -1360,6 +1370,9 @@ func (s *Store) filterMemoryEmployeesByQuery(tenantID string, items []Employee, 
 			continue
 		}
 		if query.Category != "" && item.Category != query.Category {
+			continue
+		}
+		if !memoryEmployeePresentInRange(item, query.PresentFrom, query.PresentTo) {
 			continue
 		}
 		if keyword != "" {
@@ -1382,6 +1395,23 @@ func (s *Store) filterMemoryEmployeesByQuery(tenantID string, items []Employee, 
 		out = append(out, item)
 	}
 	return out
+}
+
+func memoryEmployeePresentInRange(item Employee, fromRaw, toRaw string) bool {
+	if strings.TrimSpace(fromRaw) == "" && strings.TrimSpace(toRaw) == "" {
+		return true
+	}
+	status := strings.ToLower(utils.FirstNonEmpty(item.EmploymentStatus, item.Status))
+	if status == string(domain.EmployeeStatusDeleted) || (status == string(domain.EmployeeStatusResigned) && item.ResignDate == nil) {
+		return false
+	}
+	if to, err := time.Parse(time.RFC3339, strings.TrimSpace(toRaw)); err == nil && item.HireDate != nil && !item.HireDate.Before(to) {
+		return false
+	}
+	if from, err := time.Parse(time.RFC3339, strings.TrimSpace(fromRaw)); err == nil && item.ResignDate != nil && item.ResignDate.Before(from) {
+		return false
+	}
+	return true
 }
 
 // memoryStringSet 處理 memory 字串集合。
@@ -1460,6 +1490,17 @@ func normalizeMemoryEmployeeCategory(value string) string {
 func sortMemoryEmployees(items []Employee, sortKey string) {
 	sort.SliceStable(items, func(i, j int) bool {
 		a, b := items[i], items[j]
+		if sortKey == "attendance_asc" {
+			left := strings.ToLower(utils.FirstNonEmpty(a.EmployeeNo, a.ID))
+			right := strings.ToLower(utils.FirstNonEmpty(b.EmployeeNo, b.ID))
+			if left != right {
+				return left < right
+			}
+			if !a.CreatedAt.Equal(b.CreatedAt) {
+				return a.CreatedAt.Before(b.CreatedAt)
+			}
+			return a.ID < b.ID
+		}
 		leftRank := domain.EmployeeStatusSortRank(utils.FirstNonEmpty(a.EmploymentStatus, a.Status))
 		rightRank := domain.EmployeeStatusSortRank(utils.FirstNonEmpty(b.EmploymentStatus, b.Status))
 		if leftRank != rightRank {
@@ -1527,7 +1568,7 @@ func memoryLeaveRequestMatches(item LeaveRequest, query domain.LeaveRequestQuery
 }
 
 // memoryFormInstanceMatches 處理 memory 表單實例 matches。
-func memoryFormInstanceMatches(item FormInstance, templateKey string, query domain.FormInstanceQuery) bool {
+func memoryFormInstanceMatches(item FormInstance, templateKey, templateName, applicantName string, query domain.FormInstanceQuery) bool {
 	if status := strings.TrimSpace(query.Status); status != "" && item.Status != status {
 		return false
 	}
@@ -1539,6 +1580,26 @@ func memoryFormInstanceMatches(item FormInstance, templateKey string, query doma
 	}
 	if accountID := strings.TrimSpace(query.ApplicantAccountID); accountID != "" && item.ApplicantAccountID != accountID {
 		return false
+	}
+	if search := strings.ToLower(strings.TrimSpace(query.Search)); search != "" {
+		matched := false
+		for _, field := range []string{templateKey, templateName, applicantName} {
+			if strings.Contains(strings.ToLower(field), search) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			for _, value := range item.Payload {
+				if strings.Contains(strings.ToLower(fmt.Sprintf("%v", value)), search) {
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			return false
+		}
 	}
 	return true
 }
@@ -1659,6 +1720,9 @@ func (s *Store) UpsertAttendancePolicy(_ context.Context, v AttendancePolicy) er
 	if current, ok := s.attendancePolicies[v.TenantID]; ok && v.Version <= current.Version {
 		return domain.Conflict("attendance policy was modified concurrently")
 	}
+	if current, ok := s.attendancePolicies[v.TenantID]; ok && v.LeaveTypes == nil {
+		v.LeaveTypes = current.LeaveTypes
+	}
 	s.attendancePolicies[v.TenantID] = copyAttendancePolicy(v)
 	return nil
 }
@@ -1674,29 +1738,29 @@ func (s *Store) GetAttendancePolicy(_ context.Context, tenantID string) (Attenda
 	return copyAttendancePolicy(v), true, nil
 }
 
-// ReplaceEHRMSLeaveTypes atomically replaces the tenant's persisted upstream snapshot.
-func (s *Store) ReplaceEHRMSLeaveTypes(_ context.Context, tenantID string, items []EHRMSLeaveType, syncedAt time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	next := make([]EHRMSLeaveType, len(items))
-	for index, item := range items {
-		next[index] = copyEHRMSLeaveType(item)
-	}
-	s.ehrmsLeaveTypes[tenantID] = next
-	s.ehrmsLeaveTypesSyncedAt[tenantID] = syncedAt
-	return nil
-}
-
-// ListEHRMSLeaveTypes returns the latest persisted upstream snapshot in source order.
-func (s *Store) ListEHRMSLeaveTypes(_ context.Context, tenantID string) ([]EHRMSLeaveType, time.Time, error) {
+// ListLeaveTypes returns the fixed system definitions with tenant availability overrides.
+func (s *Store) ListLeaveTypes(_ context.Context, tenantID string) ([]domain.LeaveType, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	items := s.ehrmsLeaveTypes[tenantID]
-	out := make([]EHRMSLeaveType, len(items))
-	for index, item := range items {
-		out[index] = copyEHRMSLeaveType(item)
+	items := domain.DefaultLeaveTypes()
+	overrides := s.leaveTypeEnablements[tenantID]
+	for index := range items {
+		if enabled, ok := overrides[items[index].Code]; ok {
+			items[index].Enabled = enabled
+		}
 	}
-	return out, s.ehrmsLeaveTypesSyncedAt[tenantID], nil
+	return items, nil
+}
+
+// UpsertLeaveTypeEnabled stores only the tenant-specific enabled state.
+func (s *Store) UpsertLeaveTypeEnabled(_ context.Context, tenantID, code string, enabled bool, _ string, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.leaveTypeEnablements[tenantID] == nil {
+		s.leaveTypeEnablements[tenantID] = map[string]bool{}
+	}
+	s.leaveTypeEnablements[tenantID][strings.ToLower(strings.TrimSpace(code))] = enabled
+	return nil
 }
 
 // GetLeaveTypeExternalMapping resolves the latest effective upstream alias.
@@ -2385,6 +2449,12 @@ func memoryClockRecordMatches(item AttendanceClockRecord, query domain.Attendanc
 	if query.EmployeeID != "" && item.EmployeeID != query.EmployeeID {
 		return false
 	}
+	if len(query.EmployeeIDs) > 0 {
+		allowed := memoryStringSet(query.EmployeeIDs)
+		if _, ok := allowed[item.EmployeeID]; !ok {
+			return false
+		}
+	}
 	if query.FromDate != "" && item.WorkDate < query.FromDate {
 		return false
 	}
@@ -2407,6 +2477,12 @@ func memoryClockRecordMatches(item AttendanceClockRecord, query domain.Attendanc
 func memoryAttendanceDailySummaryMatches(item AttendanceDailySummary, query domain.AttendanceDailySummaryQuery) bool {
 	if query.EmployeeID != "" && item.EmployeeID != query.EmployeeID {
 		return false
+	}
+	if len(query.EmployeeIDs) > 0 {
+		allowed := memoryStringSet(query.EmployeeIDs)
+		if _, ok := allowed[item.EmployeeID]; !ok {
+			return false
+		}
 	}
 	if query.FromDate != "" && item.WorkDate < query.FromDate {
 		return false
@@ -2658,18 +2734,31 @@ func (s *Store) ListFormInstancesByQuery(ctx context.Context, tenantID string, q
 		return nil, err
 	}
 	templateKeys := map[string]string{}
-	if strings.TrimSpace(query.TemplateKey) != "" {
+	templateNames := map[string]string{}
+	applicantNames := map[string]string{}
+	search := strings.TrimSpace(query.Search)
+	if strings.TrimSpace(query.TemplateKey) != "" || search != "" {
 		templates, err := s.ListFormTemplates(ctx, tenantID)
 		if err != nil {
 			return nil, err
 		}
 		for _, template := range templates {
 			templateKeys[template.ID] = template.Key
+			templateNames[template.ID] = template.Name
+		}
+	}
+	if search != "" {
+		accounts, err := s.ListAccounts(ctx, tenantID)
+		if err != nil {
+			return nil, err
+		}
+		for _, account := range accounts {
+			applicantNames[account.ID] = account.DisplayName
 		}
 	}
 	out := make([]FormInstance, 0, len(items))
 	for _, item := range items {
-		if memoryFormInstanceMatches(item, templateKeys[item.TemplateID], query) {
+		if memoryFormInstanceMatches(item, templateKeys[item.TemplateID], templateNames[item.TemplateID], applicantNames[item.ApplicantAccountID], query) {
 			out = append(out, item)
 		}
 	}
@@ -2720,6 +2809,116 @@ func (s *Store) DeleteFormInstance(_ context.Context, tenantID, id string) error
 	defer s.mu.Unlock()
 	delete(s.formInstances[tenantID], id)
 	delete(s.formInstanceFieldValues[tenantID], id)
+	for fileID, file := range s.formInstanceFiles[tenantID] {
+		if file.FormInstanceID == id {
+			delete(s.formInstanceFiles[tenantID], fileID)
+		}
+	}
+	return nil
+}
+
+// UpsertFormFileAsset persists form attachment metadata.
+func (s *Store) UpsertFormFileAsset(_ context.Context, file domain.FormInstanceFile) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.formInstanceFiles, file.TenantID, file.ID, copyFormInstanceFile(file))
+	return nil
+}
+
+// InsertFormInstanceFile records the form instance and field binding.
+func (s *Store) InsertFormInstanceFile(_ context.Context, file domain.FormInstanceFile) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	putNested(s.formInstanceFiles, file.TenantID, file.ID, copyFormInstanceFile(file))
+	return nil
+}
+
+// GetFormInstanceFile resolves one attachment for a form instance.
+func (s *Store) GetFormInstanceFile(_ context.Context, tenantID, formInstanceID, fileID string) (domain.FormInstanceFile, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	file, ok := getNested(s.formInstanceFiles, tenantID, fileID)
+	if !ok || file.FormInstanceID != formInstanceID {
+		return domain.FormInstanceFile{}, false, nil
+	}
+	return copyFormInstanceFile(file), true, nil
+}
+
+// ListFormInstanceFiles lists attachments for a form instance.
+func (s *Store) ListFormInstanceFiles(_ context.Context, tenantID, formInstanceID string) ([]domain.FormInstanceFile, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]domain.FormInstanceFile, 0)
+	for _, file := range s.formInstanceFiles[tenantID] {
+		if file.FormInstanceID == formInstanceID {
+			out = append(out, copyFormInstanceFile(file))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].CreatedAt.Before(out[j].CreatedAt)
+	})
+	return out, nil
+}
+
+// ListFormInstanceFilesByField lists attachments for one field.
+func (s *Store) ListFormInstanceFilesByField(_ context.Context, tenantID, formInstanceID, fieldID string) ([]domain.FormInstanceFile, error) {
+	items, err := s.ListFormInstanceFiles(context.Background(), tenantID, formInstanceID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.FormInstanceFile, 0, len(items))
+	for _, file := range items {
+		if file.FieldID == fieldID {
+			out = append(out, file)
+		}
+	}
+	return out, nil
+}
+
+// CountFormInstanceFilesByField returns how many files are bound to a field.
+func (s *Store) CountFormInstanceFilesByField(ctx context.Context, tenantID, formInstanceID, fieldID string) (int, error) {
+	items, err := s.ListFormInstanceFilesByField(ctx, tenantID, formInstanceID, fieldID)
+	if err != nil {
+		return 0, err
+	}
+	return len(items), nil
+}
+
+// MarkFormInstanceFilesAttached promotes draft attachments after form submit.
+func (s *Store) MarkFormInstanceFilesAttached(_ context.Context, tenantID, formInstanceID string, updatedAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for fileID, file := range s.formInstanceFiles[tenantID] {
+		if file.FormInstanceID != formInstanceID || file.State != "draft" {
+			continue
+		}
+		file.State = "attached"
+		file.UpdatedAt = updatedAt
+		putNested(s.formInstanceFiles, tenantID, fileID, copyFormInstanceFile(file))
+	}
+	return nil
+}
+
+// DeleteDraftFormInstanceFile removes only an unattached draft binding.
+func (s *Store) DeleteDraftFormInstanceFile(_ context.Context, tenantID, formInstanceID, fileID string) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	file, ok := getNested(s.formInstanceFiles, tenantID, fileID)
+	if !ok || file.FormInstanceID != formInstanceID || file.State != "draft" {
+		return false, nil
+	}
+	delete(s.formInstanceFiles[tenantID], fileID)
+	return true, nil
+}
+
+// DeleteFormFileAsset removes in-memory form attachment metadata.
+func (s *Store) DeleteFormFileAsset(_ context.Context, tenantID, fileID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.formInstanceFiles[tenantID], fileID)
 	return nil
 }
 
@@ -2746,21 +2945,31 @@ func (s *Store) GetPlatformTaskItem(_ context.Context, tenantID, accountID, id s
 }
 
 // ListPlatformTaskItems 從儲存層列出平臺任務項目。
-func (s *Store) ListPlatformTaskItems(_ context.Context, tenantID, accountID string) ([]PlatformTaskRecordItem, error) {
+func (s *Store) ListPlatformTaskItems(_ context.Context, tenantID, accountID string, query domain.PlatformTasksQuery) ([]PlatformTaskRecordItem, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]PlatformTaskRecordItem, 0)
 	for _, v := range s.platformTaskItems[tenantID] {
-		if v.AccountID == accountID {
-			out = append(out, copyPlatformTaskRecordItem(v))
+		if v.AccountID != accountID {
+			continue
 		}
+		if !memoryPlatformTaskWithinWindow(v.CreatedAt, query) {
+			continue
+		}
+		if query.HasCursor && !memoryPlatformTaskAfterCursor(v.CreatedAt, v.ID, query) {
+			continue
+		}
+		out = append(out, copyPlatformTaskRecordItem(v))
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].WorkDate == out[j].WorkDate {
-			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID > out[j].ID
 		}
-		return out[i].WorkDate > out[j].WorkDate
+		return out[i].CreatedAt.After(out[j].CreatedAt)
 	})
+	if query.PageSize > 0 && len(out) > query.PageSize {
+		out = out[:query.PageSize]
+	}
 	return out, nil
 }
 
@@ -2797,22 +3006,48 @@ func (s *Store) GetPlatformTaskTodo(_ context.Context, tenantID, accountID, id s
 }
 
 // ListPlatformTaskTodos 從儲存層列出平臺任務待辦。
-func (s *Store) ListPlatformTaskTodos(_ context.Context, tenantID, accountID string) ([]PlatformTaskTodoRecord, error) {
+func (s *Store) ListPlatformTaskTodos(_ context.Context, tenantID, accountID string, query domain.PlatformTasksQuery) ([]PlatformTaskTodoRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]PlatformTaskTodoRecord, 0)
 	for _, v := range s.platformTaskTodos[tenantID] {
-		if v.AccountID == accountID {
-			out = append(out, copyPlatformTaskTodoRecord(v))
+		if v.AccountID != accountID {
+			continue
 		}
+		if !memoryPlatformTaskWithinWindow(v.CreatedAt, query) {
+			continue
+		}
+		if query.HasCursor && !memoryPlatformTaskAfterCursor(v.CreatedAt, v.ID, query) {
+			continue
+		}
+		out = append(out, copyPlatformTaskTodoRecord(v))
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].Status == out[j].Status {
-			return out[i].CreatedAt.Before(out[j].CreatedAt)
+		if out[i].CreatedAt.Equal(out[j].CreatedAt) {
+			return out[i].ID > out[j].ID
 		}
-		return out[i].Status < out[j].Status
+		return out[i].CreatedAt.After(out[j].CreatedAt)
 	})
+	if query.PageSize > 0 && len(out) > query.PageSize {
+		out = out[:query.PageSize]
+	}
 	return out, nil
+}
+
+// memoryPlatformTaskWithinWindow 判斷 created_at 是否落在查詢時間窗 [from, to) 內。
+func memoryPlatformTaskWithinWindow(createdAt time.Time, query domain.PlatformTasksQuery) bool {
+	if !query.From.IsZero() && createdAt.Before(query.From) {
+		return false
+	}
+	if !query.To.IsZero() && !createdAt.Before(query.To) {
+		return false
+	}
+	return true
+}
+
+// memoryPlatformTaskAfterCursor 判斷 (created_at, id) 是否落在遊標之後（倒序 keyset）。
+func memoryPlatformTaskAfterCursor(createdAt time.Time, id string, query domain.PlatformTasksQuery) bool {
+	return createdAt.Before(query.CursorCreatedAt) || (createdAt.Equal(query.CursorCreatedAt) && id < query.CursorID)
 }
 
 // DeletePlatformTaskTodo 從儲存層刪除平臺任務待辦。
@@ -3186,7 +3421,7 @@ func (s *Store) GetAgentSessionForUpdate(ctx context.Context, tenantID, id strin
 }
 
 // ListAgentSessionsByAccount 從儲存層列出 account 的 agent 會話。
-func (s *Store) ListAgentSessionsByAccount(_ context.Context, tenantID, accountID, status, agentID string) ([]AgentSession, error) {
+func (s *Store) ListAgentSessionsByAccount(_ context.Context, tenantID, accountID, status, agentID string, page domain.KeysetPage) ([]AgentSession, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]AgentSession, 0)
@@ -3200,10 +3435,26 @@ func (s *Store) ListAgentSessionsByAccount(_ context.Context, tenantID, accountI
 		if agentID != "" && item.AgentID != agentID {
 			continue
 		}
+		if page.HasCursor && !agentSessionAfterKeysetCursor(item, page) {
+			continue
+		}
 		out = append(out, copyAgentSession(item))
 	}
 	sortAgentSessions(out)
+	if page.Limit > 0 && len(out) > page.Limit {
+		out = out[:page.Limit]
+	}
 	return out, nil
+}
+
+// agentSessionAfterKeysetCursor 保留排在 (created_at DESC, id DESC) 遊標之後的會話。
+func agentSessionAfterKeysetCursor(item AgentSession, page domain.KeysetPage) bool {
+	createdAt := item.CreatedAt.UTC()
+	cursorAt := page.CursorCreatedAt.UTC()
+	if createdAt.Equal(cursorAt) {
+		return item.ID < page.CursorID
+	}
+	return createdAt.Before(cursorAt)
 }
 
 // ListAgentUsageByAccount returns a filtered account usage page.
@@ -3528,7 +3779,7 @@ func (s *Store) InsertAgentSessionMessage(_ context.Context, v AgentSessionMessa
 }
 
 // ListAgentSessionMessages 從儲存層列出 agent 會話訊息。
-func (s *Store) ListAgentSessionMessages(_ context.Context, tenantID, sessionID string) ([]AgentSessionMessage, error) {
+func (s *Store) ListAgentSessionMessages(_ context.Context, tenantID, sessionID string, page domain.KeysetPage) ([]AgentSessionMessage, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	out := make([]AgentSessionMessage, 0)
@@ -3538,16 +3789,32 @@ func (s *Store) ListAgentSessionMessages(_ context.Context, tenantID, sessionID 
 	}
 	for _, item := range s.agentSessionMessages[tenantID] {
 		if item.SessionID == sessionID && item.ContextVersion == session.ContextVersion {
+			if page.HasCursor && !agentMessageAfterKeysetCursor(item, page) {
+				continue
+			}
 			out = append(out, copyAgentSessionMessage(item))
 		}
 	}
 	sortAgentSessionMessages(out)
+	if page.Limit > 0 && len(out) > page.Limit {
+		out = out[:page.Limit]
+	}
 	return out, nil
+}
+
+// agentMessageAfterKeysetCursor 保留排在 (created_at ASC, id ASC) 遊標之後的訊息。
+func agentMessageAfterKeysetCursor(item AgentSessionMessage, page domain.KeysetPage) bool {
+	createdAt := item.CreatedAt.UTC()
+	cursorAt := page.CursorCreatedAt.UTC()
+	if createdAt.Equal(cursorAt) {
+		return item.ID > page.CursorID
+	}
+	return createdAt.After(cursorAt)
 }
 
 // ListRecentAgentSessionMessages 從儲存層列出最近 agent 會話訊息。
 func (s *Store) ListRecentAgentSessionMessages(ctx context.Context, tenantID, sessionID string, limit int) ([]AgentSessionMessage, error) {
-	items, err := s.ListAgentSessionMessages(ctx, tenantID, sessionID)
+	items, err := s.ListAgentSessionMessages(ctx, tenantID, sessionID, domain.KeysetPage{})
 	if err != nil {
 		return nil, err
 	}
@@ -3833,20 +4100,11 @@ func sortAgentDefinitions(items []AgentDefinition) {
 
 func sortAgentSessions(items []AgentSession) {
 	sort.SliceStable(items, func(i, j int) bool {
-		left := agentSessionSortTime(items[i])
-		right := agentSessionSortTime(items[j])
-		if left.Equal(right) {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
 			return items[i].ID > items[j].ID
 		}
-		return left.After(right)
+		return items[i].CreatedAt.After(items[j].CreatedAt)
 	})
-}
-
-func agentSessionSortTime(v AgentSession) time.Time {
-	if v.LastMessageAt != nil {
-		return v.LastMessageAt.UTC()
-	}
-	return v.UpdatedAt.UTC()
 }
 
 func sortAgentSessionMessages(items []AgentSessionMessage) {

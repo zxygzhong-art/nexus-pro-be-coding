@@ -27,8 +27,8 @@ func TestParseWorkflowStagesFromTemplateUsesExplicitAssignees(t *testing.T) {
 	}
 }
 
-// TestParseWorkflowStagesFromTemplateUsesIamGroups verifies group safety flags survive template parsing.
-func TestParseWorkflowStagesFromTemplateUsesIamGroups(t *testing.T) {
+// TestParseWorkflowStagesFromTemplatePreservesLegacyIamGroupsForRejection detects retired group targeting.
+func TestParseWorkflowStagesFromTemplatePreservesLegacyIamGroupsForRejection(t *testing.T) {
 	template := domain.FormTemplate{
 		ID:       "ft-group",
 		TenantID: "tenant-1",
@@ -53,8 +53,8 @@ func TestParseWorkflowStagesFromTemplateUsesIamGroups(t *testing.T) {
 		t.Fatalf("expected one stage, got %d", len(stages))
 	}
 	config := stages[0].Config
-	if len(config.UserGroupIDs) != 2 || !config.ExcludeApplicant || !config.RequireDistinctApprover {
-		t.Fatalf("expected IAM group safety config, got %+v", config)
+	if len(config.UserGroupIDs) != 2 {
+		t.Fatalf("expected legacy user_group_ids to remain detectable, got %+v", config)
 	}
 }
 

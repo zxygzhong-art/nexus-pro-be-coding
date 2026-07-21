@@ -226,6 +226,84 @@ func TestKnowledgeDocumentCreateRequiresEmbeddingRuntime(t *testing.T) {
 	}
 }
 
+// TestKnowledgeListPaginationAndMetadata covers paged listing, aggregate document counts, and metadata-only list items.
+func TestKnowledgeListPaginationAndMetadata(t *testing.T) {
+	now := time.Date(2026, 7, 14, 9, 0, 0, 0, time.UTC)
+	_, svc, ctx := newKnowledgeFixture(t, now)
+
+	baseA, err := agentservice.New(svc).CreateKnowledgeBase(ctx, domain.CreateKnowledgeBaseInput{Name: "Base A"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	baseB, err := agentservice.New(svc).CreateKnowledgeBase(ctx, domain.CreateKnowledgeBaseInput{Name: "Base B"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstDocument, err := agentservice.New(svc).CreateKnowledgeDocument(ctx, baseA.ID, domain.CreateKnowledgeDocumentInput{Title: "Doc 1", Content: "first body"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentservice.New(svc).CreateKnowledgeDocument(ctx, baseA.ID, domain.CreateKnowledgeDocumentInput{Title: "Doc 2", Content: "second body"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentservice.New(svc).CreateKnowledgeDocument(ctx, baseB.ID, domain.CreateKnowledgeDocumentInput{Title: "Doc 3", Content: "third body"}); err != nil {
+		t.Fatal(err)
+	}
+
+	allBases, err := agentservice.New(svc).ListKnowledgeBases(ctx, domain.PageRequest{Page: 1, PageSize: 10})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if allBases.Total != 2 || len(allBases.Items) != 2 || allBases.Page != 1 || allBases.PageSize != 10 {
+		t.Fatalf("unexpected knowledge base page: %+v", allBases)
+	}
+	countsByID := map[string]int{}
+	for _, item := range allBases.Items {
+		countsByID[item.ID] = item.DocumentCount
+	}
+	if countsByID[baseA.ID] != 2 || countsByID[baseB.ID] != 1 {
+		t.Fatalf("document counts were not aggregated per base: %+v", countsByID)
+	}
+
+	basesPageOne, err := agentservice.New(svc).ListKnowledgeBases(ctx, domain.PageRequest{Page: 1, PageSize: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	basesPageTwo, err := agentservice.New(svc).ListKnowledgeBases(ctx, domain.PageRequest{Page: 2, PageSize: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if basesPageOne.Total != 2 || len(basesPageOne.Items) != 1 || len(basesPageTwo.Items) != 1 || basesPageOne.Items[0].ID == basesPageTwo.Items[0].ID {
+		t.Fatalf("knowledge base pages must be disjoint: page1=%+v page2=%+v", basesPageOne.Items, basesPageTwo.Items)
+	}
+
+	documents, err := agentservice.New(svc).ListKnowledgeDocuments(ctx, baseA.ID, domain.PageRequest{Page: 1, PageSize: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if documents.Total != 2 || len(documents.Items) != 1 {
+		t.Fatalf("unexpected knowledge document page: %+v", documents)
+	}
+	for _, item := range documents.Items {
+		if item.Content != "" {
+			t.Fatalf("document list items must not include full content: %+v", item)
+		}
+	}
+
+	detail, err := agentservice.New(svc).GetKnowledgeDocument(ctx, baseA.ID, firstDocument.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Content != "first body" {
+		t.Fatalf("document detail did not return full content: %+v", detail)
+	}
+	if _, err := agentservice.New(svc).GetKnowledgeDocument(ctx, baseB.ID, firstDocument.ID); err == nil {
+		t.Fatal("expected cross-base document lookup to be not found")
+	} else if appErr, ok := domain.AsAppError(err); !ok || appErr.Status != 404 {
+		t.Fatalf("expected not found for cross-base document lookup, got %v", err)
+	}
+}
+
 type deterministicKnowledgeEmbedder struct{}
 
 // Model returns the stable public alias used by production configuration.

@@ -87,11 +87,21 @@ func (c HRService) employeeRelationshipTupleChanges(ctx RequestContext, before, 
 		}
 	}
 
-	beforeManagerAccountID, err := c.employeeAccountID(ctx, before.ManagerEmployeeID)
+	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
 	if err != nil {
 		return nil, err
 	}
-	afterManagerAccountID, err := c.employeeAccountID(ctx, after.ManagerEmployeeID)
+	units, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	beforeEmployees := replaceEmployeeInList(employees, before)
+	afterEmployees := replaceEmployeeInList(employees, after)
+	beforeManagerAccountID, err := c.employeeAccountID(ctx, ResolveEffectiveManager(before, beforeEmployees, units, now).ManagerEmployeeID)
+	if err != nil {
+		return nil, err
+	}
+	afterManagerAccountID, err := c.employeeAccountID(ctx, ResolveEffectiveManager(after, afterEmployees, units, now).ManagerEmployeeID)
 	if err != nil {
 		return nil, err
 	}
@@ -103,6 +113,70 @@ func (c HRService) employeeRelationshipTupleChanges(ctx RequestContext, before, 
 	}
 
 	return dedupeRelationshipTupleChanges(changes), nil
+}
+
+func replaceEmployeeInList(employees []Employee, next Employee) []Employee {
+	if strings.TrimSpace(next.ID) == "" {
+		return employees
+	}
+	out := make([]Employee, len(employees))
+	copy(out, employees)
+	for index, employee := range out {
+		if employee.ID == next.ID {
+			out[index] = next
+			return out
+		}
+	}
+	return append(out, next)
+}
+
+// resyncEmployeeManagerRelationshipTuples rebuilds employee#manager tuples after org manager-position changes.
+func (c HRService) resyncEmployeeManagerRelationshipTuples(ctx RequestContext) error {
+	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return err
+	}
+	units, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return err
+	}
+	now := c.Now()
+	for _, employee := range employees {
+		effectiveID := ResolveEffectiveManager(employee, employees, units, now).ManagerEmployeeID
+		managerAccountID, err := c.employeeAccountID(ctx, effectiveID)
+		if err != nil {
+			return err
+		}
+		existing, err := c.Service.store.ListAuthzRelationshipTuplesForObject(
+			goContext(ctx), ctx.TenantID, openFGATypeEmployee, employee.ID,
+		)
+		if err != nil {
+			return err
+		}
+		currentManagerAccountID := ""
+		for _, tuple := range existing {
+			if tuple.Relation != employeeManagerRelation || tuple.SubjectType != openFGASubjectTypeAccount {
+				continue
+			}
+			if tuple.SubjectID == managerAccountID {
+				currentManagerAccountID = tuple.SubjectID
+				continue
+			}
+			if err := c.applyAuthzRelationshipTupleChange(ctx, relationshipTupleChange(
+				ctx, domain.AuthzRelationshipTupleDelete, tuple.ObjectType, tuple.ObjectID, tuple.Relation, tuple.SubjectType, tuple.SubjectID, now,
+			)); err != nil {
+				return err
+			}
+		}
+		if managerAccountID != "" && currentManagerAccountID != managerAccountID {
+			if err := c.applyAuthzRelationshipTupleChange(ctx, relationshipTupleChange(
+				ctx, domain.AuthzRelationshipTupleWrite, openFGATypeEmployee, employee.ID, employeeManagerRelation, openFGASubjectTypeAccount, managerAccountID, now,
+			)); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // employeeAccountID 處理員工帳號 ID 的服務流程。

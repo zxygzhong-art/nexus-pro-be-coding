@@ -137,7 +137,7 @@ func (c AttendanceService) listLeaveRequestsByQuery(ctx RequestContext, query Le
 		return nil, err
 	}
 	if !all {
-		query.EmployeeIDs = employeeIDsFromSet(allowed)
+		query.EmployeeIDs = intersectEmployeeIDs(query.EmployeeIDs, allowed)
 		if len(query.EmployeeIDs) == 0 {
 			return []LeaveRequest{}, nil
 		}

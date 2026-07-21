@@ -561,7 +561,7 @@ func (c AgentService) recoverStaleAgentRuns(ctx RequestContext, sessionID string
 }
 
 func (c AgentService) agentChatHistoryForSession(ctx RequestContext, sessionID string) ([]domain.AgentSessionMessage, error) {
-	items, err := c.store.ListAgentSessionMessages(goContext(ctx), ctx.TenantID, strings.TrimSpace(sessionID))
+	items, err := c.store.ListAgentSessionMessages(goContext(ctx), ctx.TenantID, strings.TrimSpace(sessionID), domain.KeysetPage{})
 	if err != nil {
 		return nil, err
 	}

@@ -617,6 +617,16 @@ type FormInstanceFieldValue struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
+type FormInstanceFile struct {
+	TenantID       string             `json:"tenant_id"`
+	FormInstanceID string             `json:"form_instance_id"`
+	FileID         string             `json:"file_id"`
+	FieldID        string             `json:"field_id"`
+	State          string             `json:"state"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
 type FormTemplate struct {
 	ID             string             `json:"id"`
 	TenantID       string             `json:"tenant_id"`
@@ -784,6 +794,18 @@ type LeaveType struct {
 	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
 }
 
+type LeaveTypeDefinition struct {
+	Code            string             `json:"code"`
+	NameZh          string             `json:"name_zh"`
+	NameEn          string             `json:"name_en"`
+	Unit            string             `json:"unit"`
+	PaidRatio       pgtype.Numeric     `json:"paid_ratio"`
+	RequiresBalance bool               `json:"requires_balance"`
+	DisplayOrder    int32              `json:"display_order"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
 type LeaveTypeExternalMapping struct {
 	ID            string             `json:"id"`
 	TenantID      string             `json:"tenant_id"`
@@ -848,18 +870,19 @@ type NotificationRecipient struct {
 }
 
 type OrgUnit struct {
-	ID             string             `json:"id"`
-	TenantID       string             `json:"tenant_id"`
-	Code           string             `json:"code"`
-	Name           string             `json:"name"`
-	NameEn         string             `json:"name_en"`
-	ParentID       string             `json:"parent_id"`
-	Path           []string           `json:"path"`
-	Source         string             `json:"source"`
-	Closed         bool               `json:"closed"`
-	ShowInOrgChart bool               `json:"show_in_org_chart"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ID                string             `json:"id"`
+	TenantID          string             `json:"tenant_id"`
+	Code              string             `json:"code"`
+	Name              string             `json:"name"`
+	NameEn            string             `json:"name_en"`
+	ParentID          string             `json:"parent_id"`
+	Path              []string           `json:"path"`
+	Source            string             `json:"source"`
+	Closed            bool               `json:"closed"`
+	ShowInOrgChart    bool               `json:"show_in_org_chart"`
+	ManagerPositionID string             `json:"manager_position_id"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
 }
 
 type OutboxEvent struct {
@@ -1003,6 +1026,14 @@ type Tenant struct {
 	ID        string             `json:"id"`
 	Name      string             `json:"name"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type TenantLeaveTypeSetting struct {
+	TenantID           string             `json:"tenant_id"`
+	LeaveTypeCode      string             `json:"leave_type_code"`
+	Enabled            bool               `json:"enabled"`
+	UpdatedByAccountID string             `json:"updated_by_account_id"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
 }
 
 type UserGroup struct {

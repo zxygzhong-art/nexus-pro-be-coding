@@ -89,24 +89,34 @@ func (c AttendanceService) EvaluateLeaveRequestRules(ctx RequestContext, employe
 	if hours <= 0 {
 		return LeaveRequestEvaluation{}, BadRequest("selected time does not include working hours")
 	}
+	leaveTypes, err := c.loadLeaveTypes(ctx)
+	if err != nil {
+		return LeaveRequestEvaluation{}, err
+	}
+	leaveType, supported := findLeaveType(leaveTypes, leaveTypeRaw, true)
 	leaveTypeCode := normalizeLeaveTypeCode(leaveTypeRaw)
-	leaveType, supported := findLeaveTypeInPolicy(policy, leaveTypeCode)
-	rule := leaveRuleSnapshot(policy.Version, leaveType)
+	rule := leaveTypeRule(leaveType)
+	rule.PolicyVersion = policy.Version
+	if !supported {
+		rule = domain.LeaveRuleSnapshot{LeaveTypeID: domain.StableLeaveTypeID(leaveTypeCode), Code: leaveTypeCode, PolicyVersion: policy.Version}
+	} else {
+		leaveTypeCode = leaveType.Code
+	}
 	evaluation := LeaveRequestEvaluation{
 		Eligible: false, Status: LeaveEvaluationUnsupported,
-		Message:    "The requested leave type is not active in the current attendance policy.",
+		Message:    "The requested leave type is not enabled in the system leave catalog.",
 		EmployeeID: employeeID, LeaveTypeID: domain.StableLeaveTypeID(leaveTypeCode),
 		LeaveType: leaveTypeCode, Hours: hours, PolicyVersion: policy.Version, Rule: rule,
 	}
-	if !supported || !leaveType.Active {
+	if !supported {
 		return evaluation, nil
 	}
-	evaluation.LeaveTypeName = leaveType.Name
+	evaluation.LeaveTypeName = rule.Name
 	evaluation.LeaveTypeID = evaluation.Rule.LeaveTypeID
-	evaluation.BalanceRequired = leaveType.RequiresBalance
-	evaluation.ProofRequired = leaveType.ProofAfterHours != nil && hours >= *leaveType.ProofAfterHours
-	evaluation.Rule = leaveRuleSnapshot(policy.Version, leaveType)
-	if !leaveType.RequiresBalance {
+	evaluation.BalanceRequired = rule.RequiresBalance
+	evaluation.ProofRequired = rule.ProofAfterHours != nil && hours >= *rule.ProofAfterHours
+	evaluation.Rule = rule
+	if !rule.RequiresBalance {
 		evaluation.Eligible = true
 		evaluation.Status = leaveEvaluationEligible
 		evaluation.Message = "The requested leave type does not require a balance."
@@ -158,19 +168,6 @@ func applyLeaveBalanceFallback(evaluation LeaveRequestEvaluation, reason string)
 func leaveBalanceCoversDate(balance LeaveBalance, at time.Time) bool {
 	date := at.Format(time.DateOnly)
 	return (balance.PeriodStart == "" || balance.PeriodStart <= date) && (balance.PeriodEnd == "" || balance.PeriodEnd >= date)
-}
-
-// leaveRuleSnapshot captures the immutable policy fields needed after later policy changes.
-func leaveRuleSnapshot(policyVersion int, leaveType AttendanceLeaveType) domain.LeaveRuleSnapshot {
-	leaveTypeID := strings.TrimSpace(leaveType.ID)
-	if leaveTypeID == "" {
-		leaveTypeID = domain.StableLeaveTypeID(leaveType.Code)
-	}
-	return domain.LeaveRuleSnapshot{
-		LeaveTypeID: leaveTypeID, Code: leaveType.Code, Name: leaveType.Name,
-		Unit: leaveType.Unit, GrantMode: leaveType.GrantMode, RequiresBalance: leaveType.RequiresBalance,
-		PaidRatio: leaveType.PaidRatio, ProofAfterHours: cloneFloatPtr(leaveType.ProofAfterHours), PolicyVersion: policyVersion,
-	}
 }
 
 // leaveRuleSnapshotMap converts the typed rule into a JSON-safe persistence snapshot.
@@ -227,15 +224,12 @@ func (c AttendanceService) resolveExternalLeaveTypeCode(ctx RequestContext, sour
 	if strings.TrimSpace(externalCode) == "" {
 		return "", "", false, nil
 	}
-	code := normalizeLeaveTypeCode(externalCode)
-	policy, err := c.loadAttendancePolicyResponse(ctx)
+	leaveTypes, err := c.loadLeaveTypes(ctx)
 	if err != nil {
 		return "", "", false, err
 	}
-	for _, leaveType := range policy.LeaveTypes {
-		if strings.EqualFold(leaveType.Code, code) {
-			return leaveType.Code, leaveType.ID, true, nil
-		}
+	if leaveType, ok := findLeaveType(leaveTypes, externalCode, true); ok {
+		return leaveType.Code, leaveType.ID, true, nil
 	}
 	now := c.Now()
 	issue := domain.LeaveTypeSyncIssue{

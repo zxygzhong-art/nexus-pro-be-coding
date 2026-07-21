@@ -1,5 +1,7 @@
 package domain
 
+import "encoding/json"
+
 // WorkspaceOverviewQuery 定義工作區總覽查詢的資料結構。
 type WorkspaceOverviewQuery struct {
 	Year  int    `json:"year,omitempty"`
@@ -78,15 +80,41 @@ type WorkspaceTodoPerson struct {
 	Date   string `json:"date"`
 }
 
+// WorkspaceOrgUnitDirectoryResponse 定義組織單位管理頁的讀取投影。
+// 員工資料依權限選擇性包含，避免組織單位唯讀角色被迫取得員工名冊權限。
+type WorkspaceOrgUnitDirectoryResponse struct {
+	Rows                []WorkspaceOrgUnitDirectoryRow      `json:"rows"`
+	UnassignedEmployees []WorkspaceOrgUnitDirectoryEmployee `json:"unassigned_employees"`
+	EmployeesIncluded   bool                                `json:"employees_included"`
+}
+
+// WorkspaceOrgUnitDirectoryRow 將一個組織單位與其直屬員工投影在同一列。
+type WorkspaceOrgUnitDirectoryRow struct {
+	OrgUnit         OrgUnit                             `json:"org_unit"`
+	DirectEmployees []WorkspaceOrgUnitDirectoryEmployee `json:"direct_employees"`
+}
+
+// WorkspaceOrgUnitDirectoryEmployee 是組織單位管理頁所需的最小員工摘要。
+type WorkspaceOrgUnitDirectoryEmployee struct {
+	ID           string `json:"id"`
+	EmployeeNo   string `json:"employee_no,omitempty"`
+	Name         string `json:"name"`
+	CompanyEmail string `json:"company_email,omitempty"`
+	OrgUnitID    string `json:"org_unit_id,omitempty"`
+	Position     string `json:"position,omitempty"`
+}
+
 // WorkspaceOrganizationResponse 定義工作區 organization 回應的資料結構。
 type WorkspaceOrganizationResponse struct {
 	ParentNone string                     `json:"parent_none"`
+	OrgUnits   []OrgUnit                  `json:"org_units"`
 	Rows       []WorkspaceOrganizationRow `json:"rows"`
 }
 
 // WorkspaceOrganizationRow 定義工作區 organization 列的資料結構。
 type WorkspaceOrganizationRow struct {
 	ID             string `json:"id"`
+	EmployeeID     string `json:"employee_id,omitempty"`
 	NameZH         string `json:"name_zh"`
 	NameEN         string `json:"name_en"`
 	Dept           string `json:"dept"`
@@ -97,6 +125,7 @@ type WorkspaceOrganizationRow struct {
 	ParentID       string `json:"parent_id"`
 	OrgUnitID      string `json:"org_unit_id,omitempty"`
 	ManagerSource  string `json:"manager_source,omitempty"`
+	ManagerIssue   string `json:"manager_issue,omitempty"`
 	IsOverride     bool   `json:"is_override,omitempty"`
 }
 
@@ -215,21 +244,91 @@ type WorkspaceAnnualRow struct {
 
 // WorkspaceAttendanceQuery 定義工作區考勤查詢的資料結構。
 type WorkspaceAttendanceQuery struct {
-	Year  int `json:"year,omitempty"`
-	Month int `json:"month,omitempty"`
+	Year             int    `json:"year,omitempty"`
+	Month            int    `json:"month,omitempty"`
+	Projection       string `json:"projection,omitempty"`
+	DepartmentID     string `json:"department_id,omitempty"`
+	Keyword          string `json:"keyword,omitempty"`
+	Page             int    `json:"page,omitempty"`
+	PageSize         int    `json:"page_size,omitempty"`
+	Paginated        bool   `json:"-"`
+	ForceAll         bool   `json:"-"`
+	IncludeAbnormals bool   `json:"-"`
+}
+
+// WorkspaceClockAbnormalQuery paginates abnormal records within one bounded
+// employee page so the endpoint never scans an entire large tenant.
+type WorkspaceClockAbnormalQuery struct {
+	Year             int    `json:"year,omitempty"`
+	Month            int    `json:"month,omitempty"`
+	BaseDepartmentID string `json:"base_department_id,omitempty"`
+	DepartmentID     string `json:"department_id,omitempty"`
+	Keyword          string `json:"keyword,omitempty"`
+	Severity         string `json:"severity,omitempty"`
+	Page             int    `json:"page,omitempty"`
+	PageSize         int    `json:"page_size,omitempty"`
+	EmployeePage     int    `json:"employee_page,omitempty"`
+	EmployeePageSize int    `json:"employee_page_size,omitempty"`
 }
 
 // WorkspaceAttendanceResponse 定義工作區考勤回應的資料結構。
 type WorkspaceAttendanceResponse struct {
-	Year        int                        `json:"year"`
-	Month       int                        `json:"month"`
-	IsFuture    bool                       `json:"is_future"`
-	Label       string                     `json:"label"`
-	PeriodLabel string                     `json:"period_label"`
-	Dates       []WorkspaceDate            `json:"dates"`
-	LeaveLegend []WorkspaceLeaveLegendItem `json:"leave_legend"`
-	Attendance  WorkspaceAttendanceMatrix  `json:"attendance"`
-	Clock       WorkspaceClockMatrix       `json:"clock"`
+	Year         int                            `json:"year"`
+	Month        int                            `json:"month"`
+	IsFuture     bool                           `json:"is_future"`
+	Label        string                         `json:"label"`
+	PeriodLabel  string                         `json:"period_label"`
+	Dates        []WorkspaceDate                `json:"dates"`
+	LeaveLegend  []WorkspaceLeaveLegendItem     `json:"leave_legend"`
+	Pagination   *WorkspaceAttendancePagination `json:"pagination,omitempty"`
+	SummaryScope string                         `json:"summary_scope,omitempty"`
+	Attendance   WorkspaceAttendanceMatrix      `json:"-"`
+	Clock        WorkspaceClockMatrix           `json:"-"`
+	Projection   string                         `json:"-"`
+}
+
+// MarshalJSON keeps the legacy response complete while allowing projected
+// requests to omit the unused matrix entirely.
+func (r WorkspaceAttendanceResponse) MarshalJSON() ([]byte, error) {
+	type response struct {
+		Year         int                            `json:"year"`
+		Month        int                            `json:"month"`
+		IsFuture     bool                           `json:"is_future"`
+		Label        string                         `json:"label"`
+		PeriodLabel  string                         `json:"period_label"`
+		Dates        []WorkspaceDate                `json:"dates"`
+		LeaveLegend  []WorkspaceLeaveLegendItem     `json:"leave_legend"`
+		Pagination   *WorkspaceAttendancePagination `json:"pagination,omitempty"`
+		SummaryScope string                         `json:"summary_scope,omitempty"`
+		Attendance   *WorkspaceAttendanceMatrix     `json:"attendance,omitempty"`
+		Clock        any                            `json:"clock,omitempty"`
+	}
+	payload := response{
+		Year: r.Year, Month: r.Month, IsFuture: r.IsFuture, Label: r.Label,
+		PeriodLabel: r.PeriodLabel, Dates: r.Dates, LeaveLegend: r.LeaveLegend,
+		Pagination: r.Pagination, SummaryScope: r.SummaryScope,
+	}
+	switch r.Projection {
+	case "attendance":
+		payload.Attendance = &r.Attendance
+	case "clock":
+		payload.Clock = struct {
+			Rows    []WorkspaceClockRow   `json:"rows"`
+			Summary WorkspaceClockSummary `json:"summary"`
+		}{Rows: r.Clock.Rows, Summary: r.Clock.Summary}
+	default:
+		payload.Attendance = &r.Attendance
+		payload.Clock = &r.Clock
+	}
+	return json.Marshal(payload)
+}
+
+// WorkspaceAttendancePagination describes the employee-row page represented
+// by a projected matrix.
+type WorkspaceAttendancePagination struct {
+	Total    int `json:"total"`
+	Page     int `json:"page"`
+	PageSize int `json:"page_size"`
 }
 
 // WorkspaceDate 定義工作區日期的資料結構。
@@ -263,39 +362,44 @@ type WorkspaceAttendanceRow struct {
 
 // WorkspaceEmployeeCard 定義工作區員工 card 的資料結構。
 type WorkspaceEmployeeCard struct {
-	ID         string `json:"id"`
-	EmployeeID string `json:"employee_id"`
-	Avatar     string `json:"avatar"`
-	NameZH     string `json:"name_zh"`
-	NameEN     string `json:"name_en"`
-	Email      string `json:"email"`
-	Dept       string `json:"dept"`
-	Title      string `json:"title"`
-	Type       string `json:"type"`
-	Phone      string `json:"phone"`
-	Status     string `json:"status"`
-	HireDate   string `json:"hire_date"`
+	ID           string `json:"id"`
+	EmployeeID   string `json:"employee_id"`
+	Avatar       string `json:"avatar"`
+	NameZH       string `json:"name_zh"`
+	NameEN       string `json:"name_en"`
+	Email        string `json:"email"`
+	DepartmentID string `json:"department_id"`
+	Dept         string `json:"dept"`
+	Title        string `json:"title"`
+	Type         string `json:"type"`
+	Phone        string `json:"phone"`
+	Status       string `json:"status"`
+	HireDate     string `json:"hire_date"`
 }
 
 // WorkspaceDayCell 定義工作區 day 儲存格的資料結構。
 type WorkspaceDayCell struct {
-	Type     string  `json:"type"`
-	Holiday  string  `json:"holiday,omitempty"`
-	Leave    string  `json:"leave,omitempty"`
-	Hours    float64 `json:"hours,omitempty"`
-	Overtime float64 `json:"overtime,omitempty"`
-	Label    string  `json:"label,omitempty"`
-	In       string  `json:"in,omitempty"`
-	Out      string  `json:"out,omitempty"`
-	InLoc    string  `json:"in_loc,omitempty"`
-	OutLoc   string  `json:"out_loc,omitempty"`
-	Recorded bool    `json:"recorded,omitempty"`
-	Abnormal bool    `json:"abnormal,omitempty"`
-	Reason   string  `json:"reason,omitempty"`
+	Type         string  `json:"type"`
+	Holiday      string  `json:"holiday,omitempty"`
+	Leave        string  `json:"leave,omitempty"`
+	Hours        float64 `json:"hours,omitempty"`
+	ActualHours  float64 `json:"actual_hours,omitempty"`
+	MaxHours     float64 `json:"max_hours,omitempty"`
+	CountedHours float64 `json:"counted_hours,omitempty"`
+	Overtime     float64 `json:"overtime,omitempty"`
+	Label        string  `json:"label,omitempty"`
+	In           string  `json:"in,omitempty"`
+	Out          string  `json:"out,omitempty"`
+	InLoc        string  `json:"in_loc,omitempty"`
+	OutLoc       string  `json:"out_loc,omitempty"`
+	Recorded     bool    `json:"recorded,omitempty"`
+	Abnormal     bool    `json:"abnormal,omitempty"`
+	Reason       string  `json:"reason,omitempty"`
 }
 
 // WorkspaceEmployeeHours 定義工作區員工小時的資料結構。
 type WorkspaceEmployeeHours struct {
+	ActualHours   float64            `json:"actual_hours"`
 	AttendedHours float64            `json:"attended_hours"`
 	Birthday      bool               `json:"birthday"`
 	DeductHours   float64            `json:"deduct_hours"`
@@ -340,6 +444,15 @@ type WorkspaceClockSummary struct {
 	AbnormalDays   int `json:"abnormal_days"`
 	AbnormalPeople int `json:"abnormal_people"`
 	NormalDays     int `json:"normal_days"`
+}
+
+// WorkspaceClockAbnormalResponse is the on-demand abnormal-record list. Its
+// pagination applies to abnormal records, not employee rows.
+type WorkspaceClockAbnormalResponse struct {
+	Items              []WorkspaceClockAbnormal      `json:"items"`
+	Pagination         WorkspaceAttendancePagination `json:"pagination"`
+	SummaryScope       string                        `json:"summary_scope"`
+	EmployeePagination WorkspaceAttendancePagination `json:"employee_pagination"`
 }
 
 // WorkspaceAuditLogQuery 定義工作區稽覈 log 查詢的資料結構。

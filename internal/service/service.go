@@ -81,7 +81,6 @@ type EHRMSClient interface {
 	ListDepartments(context.Context) ([]domain.EHRMSDepartmentRecord, error)
 	ListPositions(context.Context) ([]domain.EHRMSPositionRecord, error)
 	ListAttendance(context.Context) ([]domain.EHRMSAttendanceRecord, error)
-	ListLeaveTypes(context.Context) ([]domain.EHRMSLeaveType, error)
 	ListLeaveBalances(context.Context) ([]domain.EHRMSLeaveBalanceRecord, error)
 	ListLeaveDetails(context.Context) ([]domain.EHRMSLeaveDetailRecord, error)
 }

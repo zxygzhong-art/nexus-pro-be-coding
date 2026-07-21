@@ -164,6 +164,8 @@ type AgentToolMeta struct {
 	Value              string `json:"value"`
 	Label              string `json:"label"`
 	Description        string `json:"description"`
+	DescriptionZhTW    string `json:"description_zh_tw"`
+	Category           string `json:"category"`
 	Readonly           bool   `json:"readonly"`
 	RequiredPermission string `json:"required_permission"`
 }

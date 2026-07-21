@@ -39,6 +39,58 @@ func (s *Store) ListKnowledgeBases(_ context.Context, tenantID string) ([]Knowle
 	return out, nil
 }
 
+// ListKnowledgeBasePage lists one paginated slice of tenant knowledge bases.
+func (s *Store) ListKnowledgeBasePage(ctx context.Context, tenantID string, page PageRequest) ([]KnowledgeBase, int, error) {
+	items, err := s.ListKnowledgeBases(ctx, tenantID)
+	if err != nil {
+		return nil, 0, err
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].ID < items[j].ID
+		}
+		switch page.Sort {
+		case "created_at_asc":
+			return items[i].CreatedAt.Before(items[j].CreatedAt)
+		default:
+			return items[i].CreatedAt.After(items[j].CreatedAt)
+		}
+	})
+	page = utils.NormalizePageRequest(page)
+	total := len(items)
+	return paginateMemory(items, page.Page, page.PageSize), total, nil
+}
+
+// CountKnowledgeDocumentsByBase counts documents per knowledge base in one pass.
+func (s *Store) CountKnowledgeDocumentsByBase(_ context.Context, tenantID string, knowledgeBaseIDs []string) (map[string]int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	allowed := make(map[string]struct{}, len(knowledgeBaseIDs))
+	for _, id := range knowledgeBaseIDs {
+		allowed[id] = struct{}{}
+	}
+	counts := make(map[string]int, len(knowledgeBaseIDs))
+	for _, document := range s.knowledgeDocuments[tenantID] {
+		if _, ok := allowed[document.KnowledgeBaseID]; ok {
+			counts[document.KnowledgeBaseID]++
+		}
+	}
+	return counts, nil
+}
+
+// CountKnowledgeDocuments counts documents within one knowledge base.
+func (s *Store) CountKnowledgeDocuments(_ context.Context, tenantID, knowledgeBaseID string) (int, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	count := 0
+	for _, document := range s.knowledgeDocuments[tenantID] {
+		if document.KnowledgeBaseID == knowledgeBaseID {
+			count++
+		}
+	}
+	return count, nil
+}
+
 // DeleteKnowledgeBase deletes a knowledge base and its documents.
 func (s *Store) DeleteKnowledgeBase(_ context.Context, tenantID, id string) (KnowledgeBase, bool, error) {
 	s.mu.Lock()
@@ -97,6 +149,32 @@ func (s *Store) ListKnowledgeDocuments(_ context.Context, tenantID, knowledgeBas
 		return out[i].UpdatedAt.After(out[j].UpdatedAt)
 	})
 	return out, nil
+}
+
+// ListKnowledgeDocumentPage lists one paginated slice of document metadata without full content.
+func (s *Store) ListKnowledgeDocumentPage(ctx context.Context, tenantID, knowledgeBaseID string, page PageRequest) ([]KnowledgeDocument, int, error) {
+	items, err := s.ListKnowledgeDocuments(ctx, tenantID, knowledgeBaseID)
+	if err != nil {
+		return nil, 0, err
+	}
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].ID < items[j].ID
+		}
+		switch page.Sort {
+		case "created_at_asc":
+			return items[i].CreatedAt.Before(items[j].CreatedAt)
+		default:
+			return items[i].CreatedAt.After(items[j].CreatedAt)
+		}
+	})
+	page = utils.NormalizePageRequest(page)
+	total := len(items)
+	out := paginateMemory(items, page.Page, page.PageSize)
+	for index := range out {
+		out[index].Content = ""
+	}
+	return out, total, nil
 }
 
 // DeleteKnowledgeDocument deletes a document within its knowledge base.

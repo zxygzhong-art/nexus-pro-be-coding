@@ -1,6 +1,8 @@
 package v1
 
 import (
+	"io"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -9,6 +11,8 @@ import (
 	"nexus-pro-api/internal/domain"
 	"nexus-pro-api/internal/service"
 )
+
+const pathParamFormFileID = "file_id"
 
 // WorkflowCtrl 定義流程 ctrl 的資料結構。
 type WorkflowCtrl struct {
@@ -54,6 +58,10 @@ func (c WorkflowCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workflows.POST("/forms/:id/return", c.routes.Handle("workflow.form_instance", "approve", c.returnForm, PathParam(PathParamID)))
 	workflows.POST("/forms/:id/cancel", c.routes.Handle("workflow.form_instance", "update", c.cancelForm, PathParam(PathParamID)))
 	workflows.POST("/forms/:id/duplicate", c.routes.Handle("workflow.form_instance", "submit", c.duplicateForm, PathParam(PathParamID)))
+	workflows.GET("/forms/:id/files", c.routes.Handle("workflow.form_instance", "read", c.listFormInstanceFiles, PathParam(PathParamID)))
+	workflows.POST("/forms/:id/files", c.routes.Handle("workflow.form_instance", "submit", c.uploadFormInstanceFile, PathParam(PathParamID)))
+	workflows.GET("/forms/:id/files/:file_id", c.routes.Handle("workflow.form_instance", "read", c.downloadFormInstanceFile, PathParam(PathParamID), PathParam(pathParamFormFileID)))
+	workflows.DELETE("/forms/:id/files/:file_id", c.routes.Handle("workflow.form_instance", "submit", c.deleteFormInstanceFile, PathParam(PathParamID), PathParam(pathParamFormFileID)))
 }
 
 // formBuilderCapabilities 回傳 Agent 創作所需的統一能力目錄。
@@ -439,6 +447,68 @@ func (c WorkflowCtrl) exportForm(w http.ResponseWriter, r *http.Request, ctx dom
 	w.Header().Set("Content-Disposition", `attachment; filename="`+file.FileName+`"`)
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(file.Body)
+	return nil
+}
+
+// uploadFormInstanceFile stages a multipart attachment into the object store for a draft form.
+func (c WorkflowCtrl) uploadFormInstanceFile(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	r.Body = http.MaxBytesReader(w, r.Body, 11<<20)
+	if err := r.ParseMultipartForm(11 << 20); err != nil {
+		return domain.BadRequest("invalid multipart form: " + err.Error())
+	}
+	file, header, err := r.FormFile("file")
+	if err != nil {
+		return domain.BadRequest("file is required")
+	}
+	defer file.Close()
+	content, err := io.ReadAll(io.LimitReader(file, (10<<20)+1))
+	if err != nil {
+		return domain.BadRequest("read form attachment: " + err.Error())
+	}
+	item, err := c.svc.UploadFormInstanceFile(ctx, r.PathValue(PathParamID), domain.UploadFormInstanceFileInput{
+		FieldID:     r.FormValue("field_id"),
+		Filename:    header.Filename,
+		ContentType: header.Header.Get("Content-Type"),
+		Content:     content,
+	})
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusCreated, item)
+	return nil
+}
+
+// listFormInstanceFiles lists attachments for a form instance.
+func (c WorkflowCtrl) listFormInstanceFiles(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	items, err := c.svc.ListFormInstanceFiles(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, domain.FormInstanceFileListResponse{Items: items, Total: len(items)})
+	return nil
+}
+
+// downloadFormInstanceFile proxies authorized object bytes without exposing SFTPGo credentials.
+func (c WorkflowCtrl) downloadFormInstanceFile(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	download, err := c.svc.DownloadFormInstanceFile(ctx, r.PathValue(PathParamID), r.PathValue(pathParamFormFileID))
+	if err != nil {
+		return err
+	}
+	w.Header().Set("Content-Type", download.File.ContentType)
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": download.File.OriginalFilename}))
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, err = w.Write(download.Content)
+	return err
+}
+
+// deleteFormInstanceFile deletes only a draft attachment that has not been submitted.
+func (c WorkflowCtrl) deleteFormInstanceFile(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.DeleteFormInstanceFile(ctx, r.PathValue(PathParamID), r.PathValue(pathParamFormFileID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 

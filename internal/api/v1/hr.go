@@ -517,16 +517,30 @@ func (c HRCtrl) deleteEmploymentContract(w http.ResponseWriter, r *http.Request,
 
 // listOrgUnits 處理組織單位的 HTTP 請求。
 func (c HRCtrl) listOrgUnits(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	page, err := pageRequestFromRequest(r)
+	query, err := orgUnitQueryFromRequest(r)
 	if err != nil {
 		return err
 	}
-	items, err := c.svc.ListOrgUnitPage(ctx, page)
+	items, err := c.svc.ListOrgUnitPage(ctx, query)
 	if err != nil {
 		return err
 	}
 	writeJSON(w, http.StatusOK, items)
 	return nil
+}
+
+// orgUnitQueryFromRequest 解析組織單位列表查詢參數。
+func orgUnitQueryFromRequest(r *http.Request) (domain.OrgUnitQuery, error) {
+	page, err := pageRequestFromRequest(r)
+	if err != nil {
+		return domain.OrgUnitQuery{}, err
+	}
+	return domain.OrgUnitQuery{
+		Status:   strings.TrimSpace(r.URL.Query().Get("status")),
+		Page:     page.Page,
+		PageSize: page.PageSize,
+		Sort:     page.Sort,
+	}, nil
 }
 
 // createOrgUnit 處理組織單位的 HTTP 請求。

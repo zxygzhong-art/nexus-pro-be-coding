@@ -10,9 +10,9 @@ import (
 )
 
 const (
-	leaveMappingStatusMapped    = "mapped"
-	leaveMappingStatusLocalOnly = "local_only"
-	leaveSyncIssueUnmapped      = "unmapped_leave_type"
+	leaveMappingStatusMapped      = "mapped"
+	leaveMappingStatusCatalogOnly = "catalog_only"
+	leaveSyncIssueUnmapped        = "unmapped_leave_type"
 )
 
 // ListLeaveTypeIntegrations returns the policy, usage, mapping, and unresolved sync state used by HR.
@@ -23,7 +23,8 @@ func (c AttendanceService) ListLeaveTypeIntegrations(ctx RequestContext) (LeaveT
 	return c.loadLeaveTypeIntegrations(ctx)
 }
 
-// SaveLeaveTypeExternalMapping validates and persists one EHRMS-to-local leave alias.
+// SaveLeaveTypeExternalMapping validates and persists one external alias to a
+// system leave type.
 func (c AttendanceService) SaveLeaveTypeExternalMapping(ctx RequestContext, input SaveLeaveTypeExternalMappingInput) (LeaveTypeExternalMapping, error) {
 	if _, _, err := c.requireAttendanceAuthz(ctx, ResourceLeave, ActionUpdate, ""); err != nil {
 		return LeaveTypeExternalMapping{}, err
@@ -41,14 +42,15 @@ func (c AttendanceService) SaveLeaveTypeExternalMapping(ctx RequestContext, inpu
 		return LeaveTypeExternalMapping{}, err
 	}
 
-	policy, err := c.loadAttendancePolicyResponse(ctx)
+	catalog, err := c.loadLeaveTypes(ctx)
 	if err != nil {
 		return LeaveTypeExternalMapping{}, err
 	}
-	var leaveType AttendanceLeaveType
+	var leaveType domain.LeaveType
 	found := false
-	for _, item := range policy.LeaveTypes {
-		if item.ID == leaveTypeID || strings.EqualFold(item.Code, strings.TrimPrefix(leaveTypeID, "lt_")) {
+	for _, item := range catalog {
+		canonicalCode := normalizeLeaveTypeCode(item.Code)
+		if item.ID == leaveTypeID || strings.EqualFold(canonicalCode, strings.TrimPrefix(leaveTypeID, "lt_")) {
 			leaveType = item
 			leaveTypeID = item.ID
 			found = true
@@ -56,13 +58,13 @@ func (c AttendanceService) SaveLeaveTypeExternalMapping(ctx RequestContext, inpu
 		}
 	}
 	if !found {
-		return LeaveTypeExternalMapping{}, BadRequest("leave_type_id must reference a current policy leave type")
+		return LeaveTypeExternalMapping{}, BadRequest("leave_type_id must reference a system leave type")
 	}
 
 	now := c.Now()
 	mapping := LeaveTypeExternalMapping{
 		ID: strings.TrimSpace(input.ID), TenantID: ctx.TenantID, Source: source, ExternalCode: externalCode,
-		LeaveTypeID: leaveTypeID, LeaveTypeCode: leaveType.Code,
+		LeaveTypeID: leaveTypeID, LeaveTypeCode: normalizeLeaveTypeCode(leaveType.Code),
 		EffectiveFrom: strings.TrimSpace(input.EffectiveFrom), EffectiveTo: strings.TrimSpace(input.EffectiveTo),
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -140,7 +142,7 @@ func (c AttendanceService) ExpireLeaveTypeExternalMapping(ctx RequestContext, id
 
 // loadLeaveTypeIntegrations aggregates links and historical usage without repeating authorization checks.
 func (c AttendanceService) loadLeaveTypeIntegrations(ctx RequestContext) (LeaveTypeIntegrationResponse, error) {
-	policy, err := c.loadAttendancePolicyResponse(ctx)
+	leaveTypes, err := c.loadLeaveTypes(ctx)
 	if err != nil {
 		return LeaveTypeIntegrationResponse{}, err
 	}
@@ -162,13 +164,14 @@ func (c AttendanceService) loadLeaveTypeIntegrations(ctx RequestContext) (LeaveT
 	}
 
 	today := c.Now().Format(time.DateOnly)
-	response := LeaveTypeIntegrationResponse{UnmappedIssues: issues, Items: make([]LeaveTypeIntegration, 0, len(policy.LeaveTypes))}
-	byID := make(map[string]int, len(policy.LeaveTypes))
-	byCode := make(map[string]int, len(policy.LeaveTypes))
-	for _, leaveType := range policy.LeaveTypes {
+	response := LeaveTypeIntegrationResponse{UnmappedIssues: issues, Items: make([]LeaveTypeIntegration, 0, len(leaveTypes))}
+	byID := make(map[string]int, len(leaveTypes))
+	byCode := make(map[string]int, len(leaveTypes))
+	for _, leaveType := range leaveTypes {
+		code := normalizeLeaveTypeCode(leaveType.Code)
 		item := LeaveTypeIntegration{
-			LeaveTypeID: leaveType.ID, LeaveTypeCode: leaveType.Code, LeaveTypeName: leaveType.Name,
-			Active: leaveType.Active, MappingStatus: leaveMappingStatusLocalOnly, Mappings: []LeaveTypeExternalMapping{},
+			LeaveTypeID: leaveType.ID, LeaveTypeCode: code, LeaveTypeName: firstNonEmptyString(leaveType.NameZH, leaveType.NameEN, code),
+			Active: leaveType.Enabled, MappingStatus: leaveMappingStatusCatalogOnly, Mappings: []LeaveTypeExternalMapping{},
 		}
 		response.Items = append(response.Items, item)
 		byID[item.LeaveTypeID] = len(response.Items) - 1
@@ -226,38 +229,6 @@ func (c AttendanceService) loadLeaveTypeIntegrations(ctx RequestContext) (LeaveT
 	response.NeedsMapping += len(response.UnmappedIssues)
 	sort.Slice(response.Items, func(i, j int) bool { return response.Items[i].LeaveTypeCode < response.Items[j].LeaveTypeCode })
 	return response, nil
-}
-
-// leaveTypeHasLinkedData protects stable leave identities from destructive policy removal.
-func (c AttendanceService) leaveTypeHasLinkedData(ctx RequestContext, leaveType AttendanceLeaveType) (bool, error) {
-	mappings, err := c.store.ListLeaveTypeExternalMappings(goContext(ctx), ctx.TenantID)
-	if err != nil {
-		return false, err
-	}
-	for _, mapping := range mappings {
-		if mapping.LeaveTypeID == leaveType.ID || strings.EqualFold(mapping.LeaveTypeCode, leaveType.Code) {
-			return true, nil
-		}
-	}
-	balances, err := c.store.ListLeaveBalances(goContext(ctx), ctx.TenantID)
-	if err != nil {
-		return false, err
-	}
-	for _, balance := range balances {
-		if balance.LeaveTypeID == leaveType.ID || strings.EqualFold(balance.LeaveType, leaveType.Code) {
-			return true, nil
-		}
-	}
-	requests, err := c.store.ListLeaveRequests(goContext(ctx), ctx.TenantID)
-	if err != nil {
-		return false, err
-	}
-	for _, request := range requests {
-		if request.LeaveTypeID == leaveType.ID || strings.EqualFold(request.LeaveType, leaveType.Code) {
-			return true, nil
-		}
-	}
-	return false, nil
 }
 
 func validateOptionalDateRange(from, to string) error {

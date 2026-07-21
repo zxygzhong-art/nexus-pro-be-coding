@@ -646,25 +646,44 @@ func workspaceEmployeeIsActive(employee Employee) bool {
 	}
 }
 
-// workspaceOrganizationEmployees 排除離職員工，並移除指向離職主管的人工覆蓋。
-func workspaceOrganizationEmployees(employees []Employee) []Employee {
-	departedIDs := map[string]struct{}{}
+// workspaceDirectoryEmployeeVisible 是所有組織目錄投影共用的人員口徑：
+// 在職、待轉正（試用期）、待離職（有未來離職日）。
+func workspaceDirectoryEmployeeVisible(employee Employee, now time.Time) bool {
+	status := NormalizeEmployeeStatus(utils.FirstNonEmpty(employee.EmploymentStatus, employee.Status))
+	if status == string(EmployeeStatusDeleted) {
+		return false
+	}
+	if status == string(EmployeeStatusActive) || status == string(EmployeeStatusProbation) {
+		return true
+	}
+	// 待離職：已有預計離職日且尚未到期（口徑同 overview resign todo）。
+	return employee.ResignDate != nil && !employee.ResignDate.Before(now)
+}
+
+func workspaceDirectoryEmployees(employees []Employee, now time.Time) []Employee {
+	out := make([]Employee, 0, len(employees))
 	for _, employee := range employees {
-		status := NormalizeEmployeeStatus(utils.FirstNonEmpty(employee.EmploymentStatus, employee.Status))
-		if status == string(EmployeeStatusResigned) || status == string(EmployeeStatusDeleted) {
-			departedIDs[employee.ID] = struct{}{}
+		if workspaceDirectoryEmployeeVisible(employee, now) {
+			out = append(out, employee)
+		}
+	}
+	return out
+}
+
+// workspaceOrganizationEmployees 復用目錄人員口徑，並移除指向不可見主管的人工覆蓋。
+func workspaceOrganizationEmployees(employees []Employee, now time.Time) []Employee {
+	hiddenIDs := map[string]struct{}{}
+	for _, employee := range employees {
+		if !workspaceDirectoryEmployeeVisible(employee, now) {
+			hiddenIDs[employee.ID] = struct{}{}
 		}
 	}
 
-	out := make([]Employee, 0, len(employees)-len(departedIDs))
-	for _, employee := range employees {
-		if _, departed := departedIDs[employee.ID]; departed {
-			continue
+	out := workspaceDirectoryEmployees(employees, now)
+	for index, employee := range out {
+		if _, managerHidden := hiddenIDs[strings.TrimSpace(employee.ManagerEmployeeID)]; managerHidden {
+			out[index].ManagerEmployeeID = ""
 		}
-		if _, managerDeparted := departedIDs[strings.TrimSpace(employee.ManagerEmployeeID)]; managerDeparted {
-			employee.ManagerEmployeeID = ""
-		}
-		out = append(out, employee)
 	}
 	return out
 }

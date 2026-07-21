@@ -88,7 +88,7 @@ func (c WorkflowService) loadFormDataSources(ctx RequestContext) (domain.FormDat
 	if err != nil {
 		return domain.FormDataSourceCatalogResponse{}, err
 	}
-	policy, err := c.Service.Attendance().loadAttendancePolicyResponse(ctx)
+	leaveTypes, err := c.Service.Attendance().loadLeaveTypes(ctx)
 	if err != nil {
 		return domain.FormDataSourceCatalogResponse{}, err
 	}
@@ -131,13 +131,13 @@ func (c WorkflowService) loadFormDataSources(ctx RequestContext) (domain.FormDat
 			"position_name": firstNonEmptyString(positionNames[employee.PositionID], employee.Position),
 		})
 	}
-	leaveTypeRecords := make([]map[string]interface{}, 0, len(policy.LeaveTypes))
-	for _, leaveType := range policy.LeaveTypes {
-		if !leaveType.Active {
+	leaveTypeRecords := make([]map[string]interface{}, 0, len(leaveTypes))
+	for _, leaveType := range leaveTypes {
+		if !leaveType.Enabled {
 			continue
 		}
 		leaveTypeRecords = append(leaveTypeRecords, map[string]interface{}{
-			"code": leaveType.Code, "name": leaveType.Name, "unit": leaveType.Unit,
+			"code": leaveType.Code, "name": leaveType.NameZH, "unit": leaveType.Unit,
 		})
 	}
 

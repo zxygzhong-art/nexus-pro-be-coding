@@ -12,6 +12,74 @@ import (
 	"github.com/pgvector/pgvector-go"
 )
 
+const countKnowledgeBases = `-- name: CountKnowledgeBases :one
+SELECT count(*) FROM knowledge_bases
+WHERE tenant_id = $1
+`
+
+func (q *Queries) CountKnowledgeBases(ctx context.Context, tenantID string) (int64, error) {
+	row := q.db.QueryRow(ctx, countKnowledgeBases, tenantID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countKnowledgeDocuments = `-- name: CountKnowledgeDocuments :one
+SELECT count(*) FROM knowledge_documents
+WHERE tenant_id = $1
+  AND knowledge_base_id = $2
+`
+
+type CountKnowledgeDocumentsParams struct {
+	TenantID        string `json:"tenant_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+}
+
+func (q *Queries) CountKnowledgeDocuments(ctx context.Context, arg CountKnowledgeDocumentsParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countKnowledgeDocuments, arg.TenantID, arg.KnowledgeBaseID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
+const countKnowledgeDocumentsByBase = `-- name: CountKnowledgeDocumentsByBase :many
+SELECT knowledge_base_id, count(*)::int AS document_count
+FROM knowledge_documents
+WHERE tenant_id = $1
+  AND knowledge_base_id = ANY($2::text[])
+GROUP BY knowledge_base_id
+`
+
+type CountKnowledgeDocumentsByBaseParams struct {
+	TenantID         string   `json:"tenant_id"`
+	KnowledgeBaseIds []string `json:"knowledge_base_ids"`
+}
+
+type CountKnowledgeDocumentsByBaseRow struct {
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	DocumentCount   int32  `json:"document_count"`
+}
+
+func (q *Queries) CountKnowledgeDocumentsByBase(ctx context.Context, arg CountKnowledgeDocumentsByBaseParams) ([]CountKnowledgeDocumentsByBaseRow, error) {
+	rows, err := q.db.Query(ctx, countKnowledgeDocumentsByBase, arg.TenantID, arg.KnowledgeBaseIds)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []CountKnowledgeDocumentsByBaseRow
+	for rows.Next() {
+		var i CountKnowledgeDocumentsByBaseRow
+		if err := rows.Scan(&i.KnowledgeBaseID, &i.DocumentCount); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const createKnowledgeDocumentChunk = `-- name: CreateKnowledgeDocumentChunk :exec
 INSERT INTO knowledge_document_chunks (
     id, tenant_id, knowledge_base_id, document_id, ordinal, content,
@@ -246,6 +314,61 @@ func (q *Queries) ListKnowledgeBases(ctx context.Context, tenantID string) ([]Kn
 	return items, nil
 }
 
+const listKnowledgeBasesPage = `-- name: ListKnowledgeBasesPage :many
+SELECT id, tenant_id, name, description, chunk_mode, chunk_size, chunk_overlap, created_by_account_id, updated_by_account_id, created_at, updated_at FROM knowledge_bases
+WHERE tenant_id = $1
+ORDER BY
+  CASE WHEN $2::text = 'created_at_asc' THEN created_at END ASC,
+  created_at DESC,
+  id ASC
+LIMIT $4::int
+OFFSET $3::int
+`
+
+type ListKnowledgeBasesPageParams struct {
+	TenantID    string `json:"tenant_id"`
+	Sort        string `json:"sort"`
+	OffsetCount int32  `json:"offset_count"`
+	LimitCount  int32  `json:"limit_count"`
+}
+
+func (q *Queries) ListKnowledgeBasesPage(ctx context.Context, arg ListKnowledgeBasesPageParams) ([]KnowledgeBasis, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeBasesPage,
+		arg.TenantID,
+		arg.Sort,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []KnowledgeBasis
+	for rows.Next() {
+		var i KnowledgeBasis
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Name,
+			&i.Description,
+			&i.ChunkMode,
+			&i.ChunkSize,
+			&i.ChunkOverlap,
+			&i.CreatedByAccountID,
+			&i.UpdatedByAccountID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listKnowledgeDocuments = `-- name: ListKnowledgeDocuments :many
 SELECT id, tenant_id, knowledge_base_id, title, content, source_type, original_filename, content_type, size_bytes, sha256, object_provider, object_bucket, object_key, parse_status, parse_error, created_by_account_id, updated_by_account_id, created_at, updated_at FROM knowledge_documents
 WHERE tenant_id = $1
@@ -273,6 +396,95 @@ func (q *Queries) ListKnowledgeDocuments(ctx context.Context, arg ListKnowledgeD
 			&i.KnowledgeBaseID,
 			&i.Title,
 			&i.Content,
+			&i.SourceType,
+			&i.OriginalFilename,
+			&i.ContentType,
+			&i.SizeBytes,
+			&i.Sha256,
+			&i.ObjectProvider,
+			&i.ObjectBucket,
+			&i.ObjectKey,
+			&i.ParseStatus,
+			&i.ParseError,
+			&i.CreatedByAccountID,
+			&i.UpdatedByAccountID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listKnowledgeDocumentsPage = `-- name: ListKnowledgeDocumentsPage :many
+SELECT id, tenant_id, knowledge_base_id, title, source_type, original_filename,
+    content_type, size_bytes, sha256, object_provider, object_bucket, object_key,
+    parse_status, parse_error, created_by_account_id, updated_by_account_id, created_at, updated_at
+FROM knowledge_documents
+WHERE tenant_id = $1
+  AND knowledge_base_id = $2
+ORDER BY
+  CASE WHEN $3::text = 'created_at_asc' THEN created_at END ASC,
+  created_at DESC,
+  id ASC
+LIMIT $5::int
+OFFSET $4::int
+`
+
+type ListKnowledgeDocumentsPageParams struct {
+	TenantID        string `json:"tenant_id"`
+	KnowledgeBaseID string `json:"knowledge_base_id"`
+	Sort            string `json:"sort"`
+	OffsetCount     int32  `json:"offset_count"`
+	LimitCount      int32  `json:"limit_count"`
+}
+
+type ListKnowledgeDocumentsPageRow struct {
+	ID                 string             `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	KnowledgeBaseID    string             `json:"knowledge_base_id"`
+	Title              string             `json:"title"`
+	SourceType         string             `json:"source_type"`
+	OriginalFilename   string             `json:"original_filename"`
+	ContentType        string             `json:"content_type"`
+	SizeBytes          int64              `json:"size_bytes"`
+	Sha256             string             `json:"sha256"`
+	ObjectProvider     string             `json:"object_provider"`
+	ObjectBucket       string             `json:"object_bucket"`
+	ObjectKey          string             `json:"object_key"`
+	ParseStatus        string             `json:"parse_status"`
+	ParseError         string             `json:"parse_error"`
+	CreatedByAccountID pgtype.Text        `json:"created_by_account_id"`
+	UpdatedByAccountID pgtype.Text        `json:"updated_by_account_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListKnowledgeDocumentsPage(ctx context.Context, arg ListKnowledgeDocumentsPageParams) ([]ListKnowledgeDocumentsPageRow, error) {
+	rows, err := q.db.Query(ctx, listKnowledgeDocumentsPage,
+		arg.TenantID,
+		arg.KnowledgeBaseID,
+		arg.Sort,
+		arg.OffsetCount,
+		arg.LimitCount,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListKnowledgeDocumentsPageRow
+	for rows.Next() {
+		var i ListKnowledgeDocumentsPageRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.KnowledgeBaseID,
+			&i.Title,
 			&i.SourceType,
 			&i.OriginalFilename,
 			&i.ContentType,

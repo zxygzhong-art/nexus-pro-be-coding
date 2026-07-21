@@ -10,10 +10,10 @@ import (
 type TaskStore interface {
 	UpsertPlatformTaskItem(context.Context, domain.PlatformTaskRecordItem) error
 	GetPlatformTaskItem(ctx context.Context, tenantID, accountID, id string) (domain.PlatformTaskRecordItem, bool, error)
-	ListPlatformTaskItems(ctx context.Context, tenantID, accountID string) ([]domain.PlatformTaskRecordItem, error)
+	ListPlatformTaskItems(ctx context.Context, tenantID, accountID string, query domain.PlatformTasksQuery) ([]domain.PlatformTaskRecordItem, error)
 	DeletePlatformTaskItem(ctx context.Context, tenantID, accountID, id string) error
 	UpsertPlatformTaskTodo(context.Context, domain.PlatformTaskTodoRecord) error
 	GetPlatformTaskTodo(ctx context.Context, tenantID, accountID, id string) (domain.PlatformTaskTodoRecord, bool, error)
-	ListPlatformTaskTodos(ctx context.Context, tenantID, accountID string) ([]domain.PlatformTaskTodoRecord, error)
+	ListPlatformTaskTodos(ctx context.Context, tenantID, accountID string, query domain.PlatformTasksQuery) ([]domain.PlatformTaskTodoRecord, error)
 	DeletePlatformTaskTodo(ctx context.Context, tenantID, accountID, id string) error
 }

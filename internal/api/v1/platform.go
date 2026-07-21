@@ -3,6 +3,7 @@ package v1
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -57,8 +58,19 @@ func (c PlatformCtrl) assistants(w http.ResponseWriter, r *http.Request, ctx dom
 }
 
 // forms 處理表單的 HTTP 請求。
-func (c PlatformCtrl) forms(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
-	item, err := c.svc.Forms(ctx)
+func (c PlatformCtrl) forms(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	page, err := pageRequestFromRequest(r)
+	if err != nil {
+		return err
+	}
+	values := r.URL.Query()
+	item, err := c.svc.Forms(ctx, domain.PlatformFormsQuery{
+		Status:   strings.TrimSpace(values.Get("status")),
+		Template: strings.TrimSpace(values.Get("template")),
+		Search:   strings.TrimSpace(values.Get("search")),
+		Page:     page.Page,
+		PageSize: page.PageSize,
+	})
 	if err != nil {
 		return err
 	}
@@ -67,13 +79,60 @@ func (c PlatformCtrl) forms(w http.ResponseWriter, _ *http.Request, ctx domain.R
 }
 
 // tasks 處理任務的 HTTP 請求。
-func (c PlatformCtrl) tasks(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
-	item, err := c.svc.Tasks(ctx)
+func (c PlatformCtrl) tasks(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	query, err := platformTasksQueryFromRequest(r)
+	if err != nil {
+		return err
+	}
+	item, err := c.svc.Tasks(ctx, query)
 	if err != nil {
 		return err
 	}
 	writeJSON(w, http.StatusOK, item)
 	return nil
+}
+
+// platformTasksQueryFromRequest 從 query params 解析任務 cursor 分頁與時間窗條件。
+func platformTasksQueryFromRequest(r *http.Request) (domain.PlatformTasksQuery, error) {
+	values := r.URL.Query()
+	pageSize, err := positiveIntQuery(values.Get("page_size"), "page_size", domain.MaxPageSize)
+	if err != nil {
+		return domain.PlatformTasksQuery{}, err
+	}
+	from, err := optionalTimeQuery(values.Get("from"), "from", false)
+	if err != nil {
+		return domain.PlatformTasksQuery{}, err
+	}
+	to, err := optionalTimeQuery(values.Get("to"), "to", true)
+	if err != nil {
+		return domain.PlatformTasksQuery{}, err
+	}
+	return domain.PlatformTasksQuery{
+		Cursor:   strings.TrimSpace(values.Get("cursor")),
+		PageSize: pageSize,
+		From:     from,
+		To:       to,
+	}, nil
+}
+
+// optionalTimeQuery 解析可選的時間查詢參數，支援 RFC3339 與 2006-01-02 日期格式。
+// 日期格式的 to 參數會視為當日結束（回傳翌日零時作為排他上界）。
+func optionalTimeQuery(raw, name string, endOfDay bool) (time.Time, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, nil
+	}
+	if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+		return parsed.UTC(), nil
+	}
+	if parsed, err := time.Parse("2006-01-02", raw); err == nil {
+		parsed = parsed.UTC()
+		if endOfDay {
+			parsed = parsed.AddDate(0, 0, 1)
+		}
+		return parsed, nil
+	}
+	return time.Time{}, domain.BadRequest(name + " must be RFC3339 or YYYY-MM-DD")
 }
 
 // createTaskItem 處理任務項目的 HTTP 請求。

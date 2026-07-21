@@ -667,6 +667,9 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 		if err != nil {
 			return err
 		}
+		if err := tx.store.MarkFormInstanceFilesAttached(goContext(ctx), ctx.TenantID, started.ID, now); err != nil {
+			return err
+		}
 		if err := tx.audit(ctx, "workflow.form.submit", string(ResourceFormInstance), started.ID, string(SeverityMedium), map[string]any{
 			"template_id": next.TemplateID,
 			"from_draft":  status == WorkflowFormStatusDraft,

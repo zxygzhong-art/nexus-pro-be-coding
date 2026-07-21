@@ -1,7 +1,6 @@
 package domain
 
 import (
-	"encoding/json"
 	"strings"
 	"time"
 )
@@ -58,6 +57,53 @@ type LeaveRequestAllocation struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
+// LeaveType is one system-defined leave option with a tenant-specific enabled state.
+// Definitions are global and immutable; tenants only override Enabled.
+type LeaveType struct {
+	ID              string  `json:"id"`
+	Code            string  `json:"code"`
+	NameZH          string  `json:"name_zh"`
+	NameEN          string  `json:"name_en"`
+	Unit            string  `json:"unit"`
+	PaidRatio       float64 `json:"paid_ratio"`
+	RequiresBalance bool    `json:"requires_balance"`
+	Enabled         bool    `json:"enabled"`
+	DisplayOrder    int     `json:"display_order"`
+}
+
+// LeaveTypeCatalog is the local leave catalog rendered by forms and HR settings.
+type LeaveTypeCatalog struct {
+	Items   []LeaveType `json:"items"`
+	Total   int         `json:"total"`
+	Enabled int         `json:"enabled"`
+}
+
+// SetLeaveTypeEnabledInput changes only a tenant's availability override.
+type SetLeaveTypeEnabledInput struct {
+	Enabled bool `json:"enabled"`
+}
+
+// DefaultLeaveTypes mirrors the seeded system catalog for in-memory runtimes.
+func DefaultLeaveTypes() []LeaveType {
+	return []LeaveType{
+		{ID: "lt_sick_full", Code: "sick_full", NameZH: "全薪病假", NameEN: "Full Pay Sick Leave", Unit: "hour", PaidRatio: 1, RequiresBalance: true, Enabled: true, DisplayOrder: 1},
+		{ID: "lt_flexible", Code: "flexible", NameZH: "彈性休假", NameEN: "Additional Leave", Unit: "hour", PaidRatio: 1, RequiresBalance: true, Enabled: true, DisplayOrder: 2},
+		{ID: "lt_personal", Code: "personal", NameZH: "事假", NameEN: "Personal Leave", Unit: "hour", PaidRatio: 0, Enabled: true, DisplayOrder: 3},
+		{ID: "lt_family_care", Code: "family_care", NameZH: "家庭照顧假", NameEN: "Family Care Leave", Unit: "hour", PaidRatio: 0, Enabled: true, DisplayOrder: 4},
+		{ID: "lt_sick_half", Code: "sick_half", NameZH: "半薪病假", NameEN: "Half Pay Sick Leave", Unit: "hour", PaidRatio: 0.5, RequiresBalance: true, Enabled: true, DisplayOrder: 5},
+		{ID: "lt_menstrual", Code: "menstrual", NameZH: "生理假", NameEN: "Menstruation Leave", Unit: "hour", PaidRatio: 0.5, Enabled: true, DisplayOrder: 6},
+		{ID: "lt_marriage", Code: "marriage", NameZH: "婚假", NameEN: "Marriage Leave", Unit: "hour", PaidRatio: 1, Enabled: true, DisplayOrder: 7},
+		{ID: "lt_maternity", Code: "maternity", NameZH: "八週產假", NameEN: "8-Week Maternity Leave", Unit: "hour", PaidRatio: 1, Enabled: true, DisplayOrder: 8},
+		{ID: "lt_paternity", Code: "paternity", NameZH: "陪產假", NameEN: "Paternity Leave", Unit: "hour", PaidRatio: 1, Enabled: true, DisplayOrder: 9},
+		{ID: "lt_bereavement", Code: "bereavement", NameZH: "喪假", NameEN: "Bereavement Leave", Unit: "hour", PaidRatio: 1, Enabled: true, DisplayOrder: 10},
+		{ID: "lt_official", Code: "official", NameZH: "公假", NameEN: "Official Leave", Unit: "hour", PaidRatio: 1, Enabled: true, DisplayOrder: 11},
+		{ID: "lt_prenatal", Code: "prenatal", NameZH: "產檢假", NameEN: "Prenatal Leave", Unit: "hour", PaidRatio: 1, Enabled: true, DisplayOrder: 12},
+		{ID: "lt_compensatory", Code: "compensatory", NameZH: "補休假", NameEN: "Compensatory Leave", Unit: "hour", PaidRatio: 1, RequiresBalance: true, Enabled: true, DisplayOrder: 13},
+		{ID: "lt_annual", Code: "annual", NameZH: "特休假", NameEN: "Annual Leave", Unit: "hour", PaidRatio: 1, RequiresBalance: true, Enabled: true, DisplayOrder: 14},
+		{ID: "lt_business_trip", Code: "business_trip", NameZH: "外勤", NameEN: "Business Trip", Unit: "hour", PaidRatio: 1, Enabled: true, DisplayOrder: 15},
+	}
+}
+
 // LeaveTypeExternalMapping maps one upstream leave code to a stable local leave type.
 type LeaveTypeExternalMapping struct {
 	ID            string    `json:"id"`
@@ -87,7 +133,7 @@ type LeaveTypeSyncIssue struct {
 	ResolvedAt   *time.Time `json:"resolved_at,omitempty"`
 }
 
-// LeaveTypeIntegration combines local policy usage with upstream mapping state.
+// LeaveTypeIntegration combines one system leave type with mapping and usage state.
 type LeaveTypeIntegration struct {
 	LeaveTypeID       string                     `json:"leave_type_id"`
 	LeaveTypeCode     string                     `json:"leave_type_code"`
@@ -101,7 +147,7 @@ type LeaveTypeIntegration struct {
 	LastEHRMSSyncAt   *time.Time                 `json:"last_ehrms_sync_at,omitempty"`
 }
 
-// LeaveTypeIntegrationResponse is the HR operations view for local and EHRMS leave types.
+// LeaveTypeIntegrationResponse is the HR operations view for system leave types and external aliases.
 type LeaveTypeIntegrationResponse struct {
 	Items          []LeaveTypeIntegration `json:"items"`
 	UnmappedIssues []LeaveTypeSyncIssue   `json:"unmapped_issues"`
@@ -403,9 +449,8 @@ type AttendanceMonthlyDaySummary struct {
 
 // AttendancePolicyResponse 定義考勤政策回應的資料結構。
 type AttendancePolicyResponse struct {
-	WorkTime   AttendancePolicyWorkTime `json:"work_time"`
-	LeaveTypes []AttendanceLeaveType    `json:"leave_types"`
-	Version    int                      `json:"version,omitempty"`
+	WorkTime AttendancePolicyWorkTime `json:"work_time"`
+	Version  int                      `json:"version,omitempty"`
 }
 
 // AttendancePolicyValidationResult reports whether a draft can be published safely.
@@ -442,10 +487,10 @@ type AttendancePolicyWorkTime struct {
 	Weekend                 string   `json:"weekend"`
 	CycleStart              string   `json:"cycle_start"`
 	CycleEnd                string   `json:"cycle_end"`
-	TimeOptions             []string `json:"time_options"`
-	WeekendOptions          []string `json:"weekend_options"`
-	CycleStartOptions       []string `json:"cycle_start_options"`
-	CycleEndOptions         []string `json:"cycle_end_options"`
+	TimeOptions             []string `json:"time_options,omitempty"`
+	WeekendOptions          []string `json:"weekend_options,omitempty"`
+	CycleStartOptions       []string `json:"cycle_start_options,omitempty"`
+	CycleEndOptions         []string `json:"cycle_end_options,omitempty"`
 }
 
 // Leave grant modes.
@@ -487,7 +532,6 @@ type AttendanceLeaveType struct {
 type UpdateAttendancePolicyInput struct {
 	BaseVersion int                      `json:"base_version,omitempty"`
 	WorkTime    AttendancePolicyWorkTime `json:"work_time"`
-	LeaveTypes  []AttendanceLeaveType    `json:"leave_types"`
 }
 
 // GrantLeaveBalancesInput 定義發放請假餘額輸入。
@@ -522,14 +566,6 @@ func (in UpdateAttendancePolicyInput) Validate() error {
 	}
 	if strings.TrimSpace(in.WorkTime.Weekend) == "" || strings.TrimSpace(in.WorkTime.CycleStart) == "" || strings.TrimSpace(in.WorkTime.CycleEnd) == "" {
 		return BadRequest("weekend, cycle_start and cycle_end are required")
-	}
-	if len(in.LeaveTypes) == 0 {
-		return BadRequest("leave_types is required")
-	}
-	for _, item := range in.LeaveTypes {
-		if strings.TrimSpace(item.Code) == "" || strings.TrimSpace(item.Name) == "" {
-			return BadRequest("leave type code and name are required")
-		}
 	}
 	return nil
 }
@@ -605,61 +641,26 @@ type CreateAttendanceClockRecordInput struct {
 
 // AttendanceClockRecordQuery 定義考勤打卡 record 查詢的資料結構。
 type AttendanceClockRecordQuery struct {
-	EmployeeID   string `json:"employee_id,omitempty"`
-	FromDate     string `json:"from_date,omitempty"`
-	ToDate       string `json:"to_date,omitempty"`
-	Direction    string `json:"direction,omitempty"`
-	RecordStatus string `json:"record_status,omitempty"`
-	Source       string `json:"source,omitempty"`
+	EmployeeID   string   `json:"employee_id,omitempty"`
+	EmployeeIDs  []string `json:"employee_ids,omitempty"`
+	FromDate     string   `json:"from_date,omitempty"`
+	ToDate       string   `json:"to_date,omitempty"`
+	Direction    string   `json:"direction,omitempty"`
+	RecordStatus string   `json:"record_status,omitempty"`
+	Source       string   `json:"source,omitempty"`
 }
 
 // AttendanceDailySummaryQuery 定義考勤日彙總查詢的資料結構。
 type AttendanceDailySummaryQuery struct {
-	EmployeeID string `json:"employee_id,omitempty"`
-	FromDate   string `json:"from_date,omitempty"`
-	ToDate     string `json:"to_date,omitempty"`
-	Source     string `json:"source,omitempty"`
+	EmployeeID  string   `json:"employee_id,omitempty"`
+	EmployeeIDs []string `json:"employee_ids,omitempty"`
+	FromDate    string   `json:"from_date,omitempty"`
+	ToDate      string   `json:"to_date,omitempty"`
+	Source      string   `json:"source,omitempty"`
 }
 
 // EHRMSAttendanceRecord 表示 eHRMS 考勤 record。
 type EHRMSAttendanceRecord map[string]string
-
-// EHRMSLeaveType preserves every documented eHRMS leave-type field plus the
-// untouched upstream object for forward-compatible fields.
-type EHRMSLeaveType struct {
-	Code          string          `json:"code"`
-	Kind          string          `json:"kind,omitempty"`
-	Unit          string          `json:"unit,omitempty"`
-	AbbrEN        string          `json:"abbr_en,omitempty"`
-	NameEN        string          `json:"name_en,omitempty"`
-	NameZH        string          `json:"name_zh,omitempty"`
-	MinUnit       string          `json:"min_unit,omitempty"`
-	MaxValue      string          `json:"max_value,omitempty"`
-	ParentCode    string          `json:"parent_code,omitempty"`
-	Show          string          `json:"show,omitempty"`
-	Range         string          `json:"range,omitempty"`
-	Ratio         string          `json:"ratio,omitempty"`
-	Target        string          `json:"target,omitempty"`
-	ShowMax       string          `json:"show_max,omitempty"`
-	PreLeave      string          `json:"pre_leave,omitempty"`
-	SalaryStd     string          `json:"salary_std,omitempty"`
-	InclHoliday   string          `json:"incl_holiday,omitempty"`
-	TargetClass   string          `json:"target_class,omitempty"`
-	InclFestival  string          `json:"incl_festival,omitempty"`
-	FirstYearRule string          `json:"first_year_rule,omitempty"`
-	Rule          string          `json:"rule,omitempty"`
-	Raw           json.RawMessage `json:"raw"`
-}
-
-// EHRMSLeaveTypeCatalog is the persisted tenant snapshot rendered by the HR page.
-type EHRMSLeaveTypeCatalog struct {
-	Items         []EHRMSLeaveType `json:"items"`
-	Total         int              `json:"total"`
-	Categories    int              `json:"categories"`
-	LeaveItems    int              `json:"leave_items"`
-	SpecialGroups int              `json:"special_groups"`
-	SyncedAt      *time.Time       `json:"synced_at,omitempty"`
-}
 
 // EHRMSLeaveBalanceRecord 表示 eHRMS 假別餘額 record。
 type EHRMSLeaveBalanceRecord map[string]string

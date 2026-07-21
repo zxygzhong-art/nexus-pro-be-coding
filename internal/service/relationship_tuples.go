@@ -234,7 +234,8 @@ func (c *Service) desiredOpenFGATuples(ctx context.Context, tenantID string) ([]
 		if employee.OrgUnitID != "" && employee.AccountID != "" {
 			add(openFGATypeOrgUnit, employee.OrgUnitID, openFGARelationOrgUnitMember, openFGASubjectTypeAccount, employee.AccountID)
 		}
-		managerAccountID, err := c.HR().employeeAccountID(RequestContext{Context: ctx, TenantID: tenant.ID}, employee.ManagerEmployeeID)
+		effectiveManagerID := ResolveEffectiveManager(employee, employees, orgUnits, now).ManagerEmployeeID
+		managerAccountID, err := c.HR().employeeAccountID(RequestContext{Context: ctx, TenantID: tenant.ID}, effectiveManagerID)
 		if err != nil {
 			return nil, err
 		}

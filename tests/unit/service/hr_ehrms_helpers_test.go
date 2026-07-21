@@ -73,6 +73,39 @@ func TestEHRMSCatalogIDsAreTenantScoped(t *testing.T) {
 	}
 }
 
+func TestEhrmsOrgUnitsFromDepartmentsCollapsesManagerPosition(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	units := service.EHRMSOrgUnitsFromDepartments("tenant-1", []domain.EHRMSDepartmentRecord{
+		{"部門代碼": "S05", "部門中文名稱": "Chairman", "主管職務代碼": "1502", "主管職務中文名稱": "董事長"},
+		{"部門代碼": "B02", "部門中文名稱": "GM", "上級部門代碼": "S05", "主管職務代碼": "1410", "主管職務中文名稱": "集團總經理"},
+		{"部門代碼": "C02", "部門中文名稱": "BU", "上級部門代碼": "B02", "主管職務代碼": "1301"},
+		{"部門代碼": "C0201", "部門中文名稱": "Sales", "上級部門代碼": "C02", "主管職務代碼": "1101"},
+		{"部門代碼": "C020101", "部門中文名稱": "Sales1", "上級部門代碼": "C0201", "主管職務代碼": "1101"},
+		{"部門代碼": "R0201", "部門中文名稱": "Lab", "上級部門代碼": "B02"},
+	}, now)
+	byCode := map[string]domain.OrgUnit{}
+	for _, unit := range units {
+		byCode[unit.Code] = unit
+	}
+	if byCode["S05"].ManagerPositionID == "" || byCode["B02"].ManagerPositionID == "" || byCode["C02"].ManagerPositionID == "" {
+		t.Fatalf("expected distinct manager jobs to be bound, got S05=%q B02=%q C02=%q",
+			byCode["S05"].ManagerPositionID, byCode["B02"].ManagerPositionID, byCode["C02"].ManagerPositionID)
+	}
+	if byCode["C0201"].ManagerPositionID == "" {
+		t.Fatalf("expected child with different job to bind, got empty")
+	}
+	if byCode["C020101"].ManagerPositionID != "" {
+		t.Fatalf("expected same-as-parent manager job to collapse to empty, got %q", byCode["C020101"].ManagerPositionID)
+	}
+	if byCode["R0201"].ManagerPositionID != "" {
+		t.Fatalf("expected empty upstream manager job to stay empty, got %q", byCode["R0201"].ManagerPositionID)
+	}
+	if byCode["C0201"].ManagerPositionID == byCode["C02"].ManagerPositionID {
+		t.Fatalf("expected different job codes to map to different position ids")
+	}
+}
+
 func TestEhrmsOrgUnitsFromDepartmentsInheritsClosedAncestor(t *testing.T) {
 	t.Parallel()
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)

@@ -12,13 +12,17 @@ const pathParamDocumentID = "document_id"
 
 const maxKnowledgeSourceUploadBytes = 20 << 20
 
-// listKnowledgeBases 列出租戶知識庫。
-func (c WorkspaceAgentCtrl) listKnowledgeBases(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
-	items, err := c.svc.ListKnowledgeBases(ctx)
+// listKnowledgeBases 列出租戶知識庫分頁。
+func (c WorkspaceAgentCtrl) listKnowledgeBases(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	page, err := pageRequestFromRequest(r)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, domain.KnowledgeBaseListResponse{Items: items, Total: len(items)})
+	items, err := c.svc.ListKnowledgeBases(ctx, page)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, items)
 	return nil
 }
 
@@ -70,13 +74,27 @@ func (c WorkspaceAgentCtrl) deleteKnowledgeBase(w http.ResponseWriter, r *http.R
 	return nil
 }
 
-// listKnowledgeDocuments lists manual and uploaded knowledge sources.
+// listKnowledgeDocuments lists one paginated slice of document metadata without full content.
 func (c WorkspaceAgentCtrl) listKnowledgeDocuments(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	items, err := c.svc.ListKnowledgeDocuments(ctx, r.PathValue(PathParamID))
+	page, err := pageRequestFromRequest(r)
 	if err != nil {
 		return err
 	}
-	writeJSON(w, http.StatusOK, domain.KnowledgeDocumentListResponse{Items: items, Total: len(items)})
+	items, err := c.svc.ListKnowledgeDocuments(ctx, r.PathValue(PathParamID), page)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, items)
+	return nil
+}
+
+// getKnowledgeDocument returns one document with its full content.
+func (c WorkspaceAgentCtrl) getKnowledgeDocument(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.GetKnowledgeDocument(ctx, r.PathValue(PathParamID), r.PathValue(pathParamDocumentID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 

@@ -402,6 +402,19 @@ func (c HRService) validatePosition(ctx RequestContext, position Position) error
 	} else if ok && existing.ID != position.ID {
 		return Conflict("position code already exists").WithPublicCode(domain.ErrorCodePositionConflict)
 	}
+	if position.Status == string(PositionStatusDisabled) {
+		units, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+		if err != nil {
+			return err
+		}
+		if orgUnitUsesManagerPosition(units, position.ID) {
+			fields = append(fields, FieldError{
+				Field:   "status",
+				Code:    "in_use",
+				Message: "position is used as an organization manager position",
+			})
+		}
+	}
 	if len(fields) > 0 {
 		return domainValidation("position validation failed", fields...)
 	}

@@ -124,7 +124,7 @@ func TestPlatformTasksOmitsClockSummaryWithoutAttendanceRead(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	tasks, err := svc.Platform().Tasks(employeeCtx)
+	tasks, err := svc.Platform().Tasks(employeeCtx, domain.PlatformTasksQuery{})
 	if err != nil {
 		t.Fatalf("expected accessible task subset, got %v", err)
 	}
@@ -142,7 +142,7 @@ func TestPlatformTasksKeepsAuthorizedClockErrors(t *testing.T) {
 	expected := errors.New("clock projection unavailable")
 	svc := service.New(&platformHomeClockFailureStore{Store: store, err: expected})
 
-	_, err := svc.Platform().Tasks(employeeCtx)
+	_, err := svc.Platform().Tasks(employeeCtx, domain.PlatformTasksQuery{})
 	if !errors.Is(err, expected) {
 		t.Fatalf("expected clock projection error to propagate, got %v", err)
 	}

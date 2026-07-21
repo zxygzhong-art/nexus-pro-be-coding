@@ -897,6 +897,7 @@ func haversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
 // normalizeClockRecordQuery 正規化打卡 record 查詢。
 func normalizeClockRecordQuery(query AttendanceClockRecordQuery) AttendanceClockRecordQuery {
 	query.EmployeeID = strings.TrimSpace(query.EmployeeID)
+	query.EmployeeIDs = employeeIDsFromSlice(query.EmployeeIDs)
 	query.FromDate = normalizeAttendanceDateQuery(query.FromDate)
 	query.ToDate = normalizeAttendanceDateQuery(query.ToDate)
 	if direction, err := normalizeClockDirection(query.Direction); err == nil {
@@ -912,6 +913,7 @@ func normalizeClockRecordQuery(query AttendanceClockRecordQuery) AttendanceClock
 // normalizeAttendanceDailySummaryQuery 正規化日彙總查詢。
 func normalizeAttendanceDailySummaryQuery(query AttendanceDailySummaryQuery) AttendanceDailySummaryQuery {
 	query.EmployeeID = strings.TrimSpace(query.EmployeeID)
+	query.EmployeeIDs = employeeIDsFromSlice(query.EmployeeIDs)
 	query.FromDate = normalizeAttendanceDateQuery(query.FromDate)
 	query.ToDate = normalizeAttendanceDateQuery(query.ToDate)
 	query.Source = strings.ToLower(strings.TrimSpace(query.Source))

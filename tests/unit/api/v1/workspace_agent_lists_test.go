@@ -152,8 +152,13 @@ func TestWorkspaceAgentListEndpointsReturnTypedResponses(t *testing.T) {
 		}
 		assertDataEnvelopeKeys(t, recorder.Body.Bytes(), "items", "total")
 		listed := decodeData[domain.AgentToolMetaListResponse](t, recorder.Body.Bytes())
-		if listed.Total == 0 || listed.Total != len(listed.Items) || listed.Items[0].Value == "" {
+		if listed.Total != 24 || listed.Total != len(listed.Items) || listed.Items[0].Value == "" {
 			t.Fatalf("unexpected agent tool list: %+v", listed)
+		}
+		for _, tool := range listed.Items {
+			if tool.Category == "" || tool.DescriptionZhTW == "" || tool.RequiredPermission == "" {
+				t.Fatalf("agent tool is missing display or authorization metadata: %+v", tool)
+			}
 		}
 	})
 }
@@ -180,9 +185,9 @@ func TestWorkspaceKnowledgeListAndSearchReturnTypedResponses(t *testing.T) {
 	if listRecorder.Code != http.StatusOK {
 		t.Fatalf("expected list status 200, got %d: %s", listRecorder.Code, listRecorder.Body.String())
 	}
-	assertDataEnvelopeKeys(t, listRecorder.Body.Bytes(), "items", "total")
-	bases := decodeData[domain.KnowledgeBaseListResponse](t, listRecorder.Body.Bytes())
-	if bases.Total != 1 || len(bases.Items) != 1 || bases.Items[0].ID != base.ID {
+	assertDataEnvelopeKeys(t, listRecorder.Body.Bytes(), "items", "total", "page", "page_size", "sort")
+	bases := decodeData[domain.PageResponse[domain.KnowledgeBase]](t, listRecorder.Body.Bytes())
+	if bases.Total != 1 || bases.Page != 1 || bases.PageSize != domain.DefaultPageSize || len(bases.Items) != 1 || bases.Items[0].ID != base.ID || bases.Items[0].DocumentCount != 0 {
 		t.Fatalf("unexpected knowledge base list: %+v", bases)
 	}
 
@@ -197,16 +202,38 @@ func TestWorkspaceKnowledgeListAndSearchReturnTypedResponses(t *testing.T) {
 	if documentRecorder.Code != http.StatusCreated {
 		t.Fatalf("expected document create status 201, got %d: %s", documentRecorder.Code, documentRecorder.Body.String())
 	}
+	createdDocument := decodeData[domain.KnowledgeDocument](t, documentRecorder.Body.Bytes())
 
 	documentsRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(documentsRecorder, httptest.NewRequest(http.MethodGet, "/v1/workspace/knowledge-bases/"+base.ID+"/documents", nil))
 	if documentsRecorder.Code != http.StatusOK {
 		t.Fatalf("expected documents list status 200, got %d: %s", documentsRecorder.Code, documentsRecorder.Body.String())
 	}
-	assertDataEnvelopeKeys(t, documentsRecorder.Body.Bytes(), "items", "total")
-	documents := decodeData[domain.KnowledgeDocumentListResponse](t, documentsRecorder.Body.Bytes())
+	assertDataEnvelopeKeys(t, documentsRecorder.Body.Bytes(), "items", "total", "page", "page_size", "sort")
+	documents := decodeData[domain.PageResponse[domain.KnowledgeDocument]](t, documentsRecorder.Body.Bytes())
 	if documents.Total != 1 || len(documents.Items) != 1 || documents.Items[0].Title != "加班規則" {
 		t.Fatalf("unexpected knowledge document list: %+v", documents)
+	}
+	var rawDocumentList struct {
+		Data struct {
+			Items []map[string]json.RawMessage `json:"items"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(documentsRecorder.Body.Bytes(), &rawDocumentList); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := rawDocumentList.Data.Items[0]["content"]; ok {
+		t.Fatalf("document list items must not include full content: %s", documentsRecorder.Body.String())
+	}
+
+	detailRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(detailRecorder, httptest.NewRequest(http.MethodGet, "/v1/workspace/knowledge-bases/"+base.ID+"/documents/"+createdDocument.ID, nil))
+	if detailRecorder.Code != http.StatusOK {
+		t.Fatalf("expected document detail status 200, got %d: %s", detailRecorder.Code, detailRecorder.Body.String())
+	}
+	detail := decodeData[domain.KnowledgeDocument](t, detailRecorder.Body.Bytes())
+	if detail.ID != createdDocument.ID || detail.Content != "加班需事先申請。" {
+		t.Fatalf("document detail did not return full content: %+v", detail)
 	}
 
 	searchRequest := httptest.NewRequest(
@@ -227,6 +254,44 @@ func TestWorkspaceKnowledgeListAndSearchReturnTypedResponses(t *testing.T) {
 	}
 	if result.Items[0].KnowledgeBaseID != base.ID || result.Items[0].Source == "" {
 		t.Fatalf("unexpected knowledge search hit: %+v", result.Items[0])
+	}
+
+	secondDocumentRequest := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/workspace/knowledge-bases/"+base.ID+"/documents",
+		strings.NewReader(`{"title":"請假規則","content":"請假需提前一天提出。"}`),
+	)
+	secondDocumentRequest.Header.Set("Content-Type", "application/json")
+	secondDocumentRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(secondDocumentRecorder, secondDocumentRequest)
+	if secondDocumentRecorder.Code != http.StatusCreated {
+		t.Fatalf("expected second document create status 201, got %d: %s", secondDocumentRecorder.Code, secondDocumentRecorder.Body.String())
+	}
+	pagedRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(pagedRecorder, httptest.NewRequest(http.MethodGet, "/v1/workspace/knowledge-bases/"+base.ID+"/documents?page=2&page_size=1", nil))
+	if pagedRecorder.Code != http.StatusOK {
+		t.Fatalf("expected paged documents status 200, got %d: %s", pagedRecorder.Code, pagedRecorder.Body.String())
+	}
+	paged := decodeData[domain.PageResponse[domain.KnowledgeDocument]](t, pagedRecorder.Body.Bytes())
+	if paged.Total != 2 || paged.Page != 2 || paged.PageSize != 1 || len(paged.Items) != 1 {
+		t.Fatalf("unexpected paged document list: %+v", paged)
+	}
+	firstPageRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(firstPageRecorder, httptest.NewRequest(http.MethodGet, "/v1/workspace/knowledge-bases/"+base.ID+"/documents?page=1&page_size=1", nil))
+	firstPage := decodeData[domain.PageResponse[domain.KnowledgeDocument]](t, firstPageRecorder.Body.Bytes())
+	if len(firstPage.Items) != 1 || firstPage.Items[0].ID == paged.Items[0].ID {
+		t.Fatalf("paged document lists must be disjoint: first=%+v second=%+v", firstPage.Items, paged.Items)
+	}
+	seenTitles := map[string]bool{firstPage.Items[0].Title: true, paged.Items[0].Title: true}
+	if !seenTitles["加班規則"] || !seenTitles["請假規則"] {
+		t.Fatalf("paged document lists did not cover both documents: %v", seenTitles)
+	}
+
+	basesRecorder := httptest.NewRecorder()
+	handler.ServeHTTP(basesRecorder, httptest.NewRequest(http.MethodGet, "/v1/workspace/knowledge-bases?page=1&page_size=10", nil))
+	counted := decodeData[domain.PageResponse[domain.KnowledgeBase]](t, basesRecorder.Body.Bytes())
+	if len(counted.Items) != 1 || counted.Items[0].DocumentCount != 2 {
+		t.Fatalf("knowledge base list did not aggregate document counts: %+v", counted)
 	}
 }
 

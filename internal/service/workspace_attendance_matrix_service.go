@@ -30,12 +30,15 @@ func workspaceHolidayName(_ time.Time) *string {
 	return nil
 }
 
-// workspaceLeaveLegend projects the current attendance policy as the only leave catalog used by reports.
-func workspaceLeaveLegend(leaveTypes []AttendanceLeaveType) []WorkspaceLeaveLegendItem {
+// workspaceLeaveLegend projects enabled system leave types for workspace reports.
+func workspaceLeaveLegend(leaveTypes []LeaveType) []WorkspaceLeaveLegendItem {
 	legend := make([]WorkspaceLeaveLegendItem, 0, len(leaveTypes))
 	for _, leaveType := range leaveTypes {
-		code := strings.TrimSpace(leaveType.Code)
-		name := strings.TrimSpace(leaveType.Name)
+		if !leaveType.Enabled {
+			continue
+		}
+		code := normalizeLeaveTypeCode(leaveType.Code)
+		name := firstNonEmptyString(leaveType.NameZH, leaveType.NameEN, code)
 		if code == "" || name == "" {
 			continue
 		}
@@ -214,13 +217,32 @@ func workspaceOvertimeCells(overtimes []OvertimeRequest, start time.Time, end ti
 	return out
 }
 
-// workspaceAttendanceEvidence records the actual hours and authoritative source for one employee day.
+// workspaceAttendanceEvidence preserves raw work, the daily normal-hours ceiling,
+// and the upstream candidate that may be credited before leave/day-type caps apply.
 type workspaceAttendanceEvidence struct {
-	Hours  float64
-	Source string
+	ActualHours    float64
+	MaxHours       float64
+	CandidateHours float64
+	Source         string
 }
 
-// workspaceAttendanceEvidenceCells prefers effective local punches and falls back to eHRMS actual-attendance facts.
+func workspaceDailyMaxHours(summary AttendanceDailySummary) float64 {
+	switch {
+	case summary.DailyHours > 0:
+		return summary.DailyHours
+	case summary.ShiftHours > 0:
+		return summary.ShiftHours
+	default:
+		return workspaceDayHours
+	}
+}
+
+func workspaceRoundHours(value float64) float64 {
+	return math.Round(math.Max(0, value)*100) / 100
+}
+
+// workspaceAttendanceEvidenceCells prefers effective local punches for actual
+// work while retaining eHRMS daily/shift ceilings for the same employee-day.
 func workspaceAttendanceEvidenceCells(clocks []AttendanceClockRecord, summaries []AttendanceDailySummary, leaves []LeaveRequest, workTime AttendancePolicyWorkTime) map[string]map[string]workspaceAttendanceEvidence {
 	recordsByEmployeeDate := map[string]map[string][]AttendanceClockRecord{}
 	for _, record := range clocks {
@@ -240,8 +262,32 @@ func workspaceAttendanceEvidenceCells(clocks []AttendanceClockRecord, summaries 
 	}
 
 	out := map[string]map[string]workspaceAttendanceEvidence{}
+	for _, summary := range summaries {
+		if summary.EmployeeID == "" || summary.WorkDate == "" {
+			continue
+		}
+		actualHours := math.Max(0, summary.ClockHours)
+		candidateHours := actualHours
+		if summary.AttendCounted {
+			candidateHours = math.Max(0, summary.AttendHours)
+			if actualHours == 0 {
+				actualHours = candidateHours
+			}
+		}
+		if out[summary.EmployeeID] == nil {
+			out[summary.EmployeeID] = map[string]workspaceAttendanceEvidence{}
+		}
+		out[summary.EmployeeID][summary.WorkDate] = workspaceAttendanceEvidence{
+			ActualHours:    actualHours,
+			MaxHours:       workspaceDailyMaxHours(summary),
+			CandidateHours: candidateHours,
+			Source:         "ehrms",
+		}
+	}
 	for employeeID, recordsByDate := range recordsByEmployeeDate {
-		out[employeeID] = map[string]workspaceAttendanceEvidence{}
+		if out[employeeID] == nil {
+			out[employeeID] = map[string]workspaceAttendanceEvidence{}
+		}
 		for workDate, records := range recordsByDate {
 			asOf := records[0].ClockedAt
 			for _, record := range records[1:] {
@@ -250,32 +296,16 @@ func workspaceAttendanceEvidenceCells(clocks []AttendanceClockRecord, summaries 
 				}
 			}
 			projection := ProjectAttendanceDay(records, leavesByEmployee[employeeID], workDate, workTime, asOf)
-			out[employeeID][workDate] = workspaceAttendanceEvidence{
-				Hours:  math.Max(0, float64(projection.WorkedMinutes)/60),
-				Source: "clock",
+			actualHours := math.Max(0, float64(projection.WorkedMinutes)/60)
+			evidence := out[employeeID][workDate]
+			if evidence.MaxHours <= 0 {
+				evidence.MaxHours = workspaceDayHours
 			}
+			evidence.ActualHours = actualHours
+			evidence.CandidateHours = actualHours
+			evidence.Source = "clock"
+			out[employeeID][workDate] = evidence
 		}
-	}
-	for _, summary := range summaries {
-		if summary.EmployeeID == "" || summary.WorkDate == "" {
-			continue
-		}
-		if _, exists := out[summary.EmployeeID][summary.WorkDate]; exists {
-			continue
-		}
-		hours := 0.0
-		switch {
-		case summary.AttendCounted:
-			hours = math.Max(0, summary.AttendHours)
-		case summary.ClockHours > 0:
-			hours = summary.ClockHours
-		default:
-			continue
-		}
-		if out[summary.EmployeeID] == nil {
-			out[summary.EmployeeID] = map[string]workspaceAttendanceEvidence{}
-		}
-		out[summary.EmployeeID][summary.WorkDate] = workspaceAttendanceEvidence{Hours: hours, Source: "ehrms"}
 	}
 	return out
 }
@@ -427,20 +457,32 @@ func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceE
 	holidays := workspaceHolidayCount(dates)
 	todayKey := now.In(attendanceClockLocation).Format(time.DateOnly)
 	for _, employee := range employees {
-		row := WorkspaceAttendanceRow{Employee: cards[employee.ID], Cells: make([]WorkspaceDayCell, 0, len(dates)), Summary: WorkspaceEmployeeHours{LeaveByType: map[string]float64{}, WorkDays: workdays}}
+		row := WorkspaceAttendanceRow{Employee: cards[employee.ID], Cells: make([]WorkspaceDayCell, 0, len(dates)), Summary: WorkspaceEmployeeHours{LeaveByType: map[string]float64{}}}
 		hasAbsence := false
 		hasRecordedAttendance := false
 		for _, date := range dates {
 			cell := workspaceBaseDayCell(date)
 			eligible := workspaceEmployeeEligibleOnDate(employee, date)
+			isWorkday := cell.Type == "work"
 			if cell.Type == "work" && !eligible {
 				cell.Type = "empty"
 			}
+			evidence, hasEvidence := attendanceEvidence[employee.ID][date.Key]
+			dailyMaxHours := workspaceDayHours
+			if hasEvidence && evidence.MaxHours > 0 {
+				dailyMaxHours = evidence.MaxHours
+			}
+			if isWorkday && eligible {
+				row.Summary.WorkDays++
+				row.Summary.DueHours += dailyMaxHours
+			}
+			leaveHours := 0.0
 			if leave, ok := leaveCells[employee.ID][date.Key]; ok && eligible {
 				cell.Type = "leave"
 				cell.Leave = leave.Code
 				cell.Hours = leave.Hours
 				cell.Label = leave.Label
+				leaveHours = leave.Hours
 				row.Summary.LeaveHours += leave.Hours
 				row.Summary.LeaveByType[leave.Code] += leave.Hours
 			}
@@ -448,10 +490,20 @@ func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceE
 				cell.Overtime = overtime
 				row.Summary.OvertimeHours += overtime
 			}
-			if evidence, ok := attendanceEvidence[employee.ID][date.Key]; ok && eligible {
-				row.Summary.AttendedHours += math.Max(0, evidence.Hours)
-				if cell.Type == "work" && evidence.Hours > 0 {
-					cell.Hours = evidence.Hours
+			if hasEvidence && eligible {
+				effectiveMaxHours := 0.0
+				if isWorkday {
+					effectiveMaxHours = dailyMaxHours
+				}
+				availableNormalHours := math.Max(0, effectiveMaxHours-leaveHours)
+				countedHours := math.Min(math.Max(0, evidence.CandidateHours), availableNormalHours)
+				cell.ActualHours = workspaceRoundHours(evidence.ActualHours)
+				cell.MaxHours = workspaceRoundHours(effectiveMaxHours)
+				cell.CountedHours = workspaceRoundHours(countedHours)
+				row.Summary.ActualHours += math.Max(0, evidence.ActualHours)
+				row.Summary.AttendedHours += countedHours
+				if cell.Type == "work" && evidence.ActualHours > 0 {
+					cell.Hours = cell.CountedHours
 					if evidence.Source == "ehrms" {
 						cell.Label = "eHRMS"
 						cell.Recorded = true
@@ -476,7 +528,9 @@ func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceE
 			}
 			row.Cells = append(row.Cells, cell)
 		}
-		row.Summary.DueHours = float64(workdays) * workspaceDayHours
+		row.Summary.ActualHours = workspaceRoundHours(row.Summary.ActualHours)
+		row.Summary.AttendedHours = workspaceRoundHours(row.Summary.AttendedHours)
+		row.Summary.DueHours = workspaceRoundHours(row.Summary.DueHours)
 		if row.Summary.LeaveHours == 0 && !hasAbsence && hasRecordedAttendance {
 			perfect++
 		}
@@ -523,10 +577,14 @@ func workspaceSummaryCells(items []AttendanceDailySummary) map[string]map[string
 }
 
 // workspaceClockMatrix 處理工作區打卡矩陣。
-func workspaceClockMatrix(employees []Employee, cards map[string]WorkspaceEmployeeCard, dates []WorkspaceDate, leaveCells map[string]map[string]workspaceLeaveCell, clockCells map[string]map[string]workspaceClockCell) WorkspaceClockMatrix {
+func workspaceClockMatrix(employees []Employee, cards map[string]WorkspaceEmployeeCard, dates []WorkspaceDate, leaveCells map[string]map[string]workspaceLeaveCell, clockCells map[string]map[string]workspaceClockCell, includeAbnormals bool) WorkspaceClockMatrix {
 	rows := []WorkspaceClockRow{}
-	abnormals := []WorkspaceClockAbnormal{}
+	var abnormals []WorkspaceClockAbnormal
+	if includeAbnormals {
+		abnormals = []WorkspaceClockAbnormal{}
+	}
 	abnormalPeople := map[string]struct{}{}
+	abnormalDays := 0
 	normalDays := 0
 	for _, employee := range employees {
 		row := WorkspaceClockRow{Employee: cards[employee.ID], Cells: make([]WorkspaceDayCell, 0, len(dates))}
@@ -549,8 +607,11 @@ func workspaceClockMatrix(employees []Employee, cards map[string]WorkspaceEmploy
 				cell.Abnormal = clock.Abnormal
 				cell.Reason = clock.Reason
 				if clock.Abnormal {
+					abnormalDays++
 					abnormalPeople[employee.ID] = struct{}{}
-					abnormals = append(abnormals, WorkspaceClockAbnormal{Date: date, Employee: cards[employee.ID], Record: cell})
+					if includeAbnormals {
+						abnormals = append(abnormals, WorkspaceClockAbnormal{Date: date, Employee: cards[employee.ID], Record: cell})
+					}
 				} else if cell.Type == "work" {
 					normalDays++
 				}
@@ -559,13 +620,15 @@ func workspaceClockMatrix(employees []Employee, cards map[string]WorkspaceEmploy
 		}
 		rows = append(rows, row)
 	}
-	sort.SliceStable(abnormals, func(i, j int) bool {
-		if abnormals[i].Date.Key != abnormals[j].Date.Key {
-			return abnormals[i].Date.Key < abnormals[j].Date.Key
-		}
-		return abnormals[i].Employee.ID < abnormals[j].Employee.ID
-	})
-	return WorkspaceClockMatrix{Rows: rows, Abnormals: abnormals, Summary: WorkspaceClockSummary{AbnormalDays: len(abnormals), AbnormalPeople: len(abnormalPeople), NormalDays: normalDays}}
+	if includeAbnormals {
+		sort.SliceStable(abnormals, func(i, j int) bool {
+			if abnormals[i].Date.Key != abnormals[j].Date.Key {
+				return abnormals[i].Date.Key < abnormals[j].Date.Key
+			}
+			return abnormals[i].Employee.ID < abnormals[j].Employee.ID
+		})
+	}
+	return WorkspaceClockMatrix{Rows: rows, Abnormals: abnormals, Summary: WorkspaceClockSummary{AbnormalDays: abnormalDays, AbnormalPeople: len(abnormalPeople), NormalDays: normalDays}}
 }
 
 // workspaceEmployeeCards 處理工作區員工 cards。
@@ -573,18 +636,19 @@ func workspaceEmployeeCards(employees []Employee, orgNames map[string]string) ma
 	out := map[string]WorkspaceEmployeeCard{}
 	for _, employee := range employees {
 		out[employee.ID] = WorkspaceEmployeeCard{
-			ID:         workspaceEmployeeDisplayID(employee),
-			EmployeeID: employee.ID,
-			Avatar:     workspaceAvatar(employee.Name),
-			NameZH:     employee.Name,
-			NameEN:     workspaceEmployeeNameEN(employee),
-			Email:      employee.CompanyEmail,
-			Dept:       workspaceOrgName(orgNames, employee.OrgUnitID),
-			Title:      employee.Position,
-			Type:       workspaceCategoryLabel(employee.Category),
-			Phone:      employee.Phone,
-			Status:     workspaceStatusLabel(workspaceEmployeeStatus(employee)),
-			HireDate:   workspaceFormatDateSlash(employee.HireDate),
+			ID:           workspaceEmployeeDisplayID(employee),
+			EmployeeID:   employee.ID,
+			Avatar:       workspaceAvatar(employee.Name),
+			NameZH:       employee.Name,
+			NameEN:       workspaceEmployeeNameEN(employee),
+			Email:        employee.CompanyEmail,
+			DepartmentID: employee.OrgUnitID,
+			Dept:         workspaceOrgName(orgNames, employee.OrgUnitID),
+			Title:        employee.Position,
+			Type:         workspaceCategoryLabel(employee.Category),
+			Phone:        employee.Phone,
+			Status:       workspaceStatusLabel(workspaceEmployeeStatus(employee)),
+			HireDate:     workspaceFormatDateSlash(employee.HireDate),
 		}
 	}
 	return out

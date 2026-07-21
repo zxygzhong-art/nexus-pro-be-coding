@@ -2,6 +2,7 @@ package postgres
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"nexus-pro-api/internal/domain"
@@ -50,12 +51,16 @@ func (s *Store) GetAgentSessionForUpdate(execCtx context.Context, tenantID, id s
 }
 
 // ListAgentSessionsByAccount 從儲存層列出 account 的 agent 會話。
-func (s *Store) ListAgentSessionsByAccount(execCtx context.Context, tenantID, accountID, status, agentID string) ([]domain.AgentSession, error) {
+func (s *Store) ListAgentSessionsByAccount(execCtx context.Context, tenantID, accountID, status, agentID string, page domain.KeysetPage) ([]domain.AgentSession, error) {
 	items, err := s.q.ListAgentSessionsByAccount(tenantContext(execCtx, tenantID), sqlc.ListAgentSessionsByAccountParams{
-		TenantID:  tenantID,
-		AccountID: accountID,
-		Status:    status,
-		AgentID:   agentID,
+		TenantID:        tenantID,
+		AccountID:       accountID,
+		Status:          status,
+		AgentID:         agentID,
+		HasCursor:       page.HasCursor,
+		CursorCreatedAt: timestamptz(page.CursorCreatedAt),
+		CursorID:        page.CursorID,
+		LimitCount:      keysetLimitCount(page.Limit),
 	})
 	if err != nil {
 		return nil, err
@@ -161,12 +166,27 @@ func (s *Store) InsertAgentSessionMessage(execCtx context.Context, v domain.Agen
 }
 
 // ListAgentSessionMessages 從儲存層列出 agent 會話訊息。
-func (s *Store) ListAgentSessionMessages(execCtx context.Context, tenantID, sessionID string) ([]domain.AgentSessionMessage, error) {
-	items, err := s.q.ListAgentSessionMessages(tenantContext(execCtx, tenantID), sqlc.ListAgentSessionMessagesParams{TenantID: tenantID, SessionID: sessionID})
+func (s *Store) ListAgentSessionMessages(execCtx context.Context, tenantID, sessionID string, page domain.KeysetPage) ([]domain.AgentSessionMessage, error) {
+	items, err := s.q.ListAgentSessionMessages(tenantContext(execCtx, tenantID), sqlc.ListAgentSessionMessagesParams{
+		TenantID:        tenantID,
+		SessionID:       sessionID,
+		HasCursor:       page.HasCursor,
+		CursorCreatedAt: timestamptz(page.CursorCreatedAt),
+		CursorID:        page.CursorID,
+		LimitCount:      keysetLimitCount(page.Limit),
+	})
 	if err != nil {
 		return nil, err
 	}
 	return mapSlice(items, fromAgentSessionMessage), nil
+}
+
+// keysetLimitCount 將非正數 limit 視為不分頁（內部全量讀取），轉成 SQL LIMIT 參數。
+func keysetLimitCount(limit int) int32 {
+	if limit <= 0 {
+		return math.MaxInt32
+	}
+	return int32(limit)
 }
 
 // ListRecentAgentSessionMessages 從儲存層列出最近 agent 會話訊息。

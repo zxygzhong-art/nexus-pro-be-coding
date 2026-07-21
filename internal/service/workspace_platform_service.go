@@ -550,7 +550,7 @@ func (c WorkspaceService) UpdateWorkspaceOrganizationManager(ctx RequestContext,
 	if err != nil {
 		return WorkspaceOrganizationResponse{}, err
 	}
-	visibleEmployees = workspaceOrganizationEmployees(visibleEmployees)
+	visibleEmployees = workspaceOrganizationEmployees(visibleEmployees, c.Now())
 	employee, ok := workspaceEmployeeByDisplayID(visibleEmployees, displayID)
 	if !ok {
 		return WorkspaceOrganizationResponse{}, NotFound("employee", strings.TrimSpace(displayID))
@@ -624,7 +624,7 @@ func (c WorkspaceService) UpdateWorkspaceOrganizationVisibility(ctx RequestConte
 	if err != nil {
 		return WorkspaceOrganizationResponse{}, err
 	}
-	visibleEmployees = workspaceOrganizationEmployees(visibleEmployees)
+	visibleEmployees = workspaceOrganizationEmployees(visibleEmployees, c.Now())
 	employee, ok := workspaceEmployeeByDisplayID(visibleEmployees, displayID)
 	if !ok {
 		return WorkspaceOrganizationResponse{}, NotFound("employee", strings.TrimSpace(displayID))

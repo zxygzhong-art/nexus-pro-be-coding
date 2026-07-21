@@ -25,10 +25,12 @@ func (c WorkspaceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace.GET("", c.routes.Handle("hr.employee", "read", c.aggregate, TenantWideScope()))
 	workspace.GET("/overview", c.routes.Handle("hr.employee", "read", c.overview, TenantWideScope()))
 	workspace.GET("/employees", c.routes.Handle("hr.employee", "read", c.employees, TenantWideScope()))
+	workspace.GET("/org-units-directory", c.routes.Handle("hr.org_unit", "read", c.orgUnitsDirectory, TenantWideScope()))
 	workspace.GET("/organization", c.routes.Handle("hr.employee", "read", c.organization, TenantWideScope()))
 	workspace.PATCH("/organization/employees/:id/manager", c.routes.Handle("hr.employee", "update", c.updateOrganizationManager, PathParam(PathParamID), TenantWideScope()))
 	workspace.PATCH("/organization/employees/:id/visibility", c.routes.Handle("hr.employee", "update", c.updateOrganizationVisibility, PathParam(PathParamID), TenantWideScope()))
 	workspace.GET("/attendance", c.routes.Handle("attendance.clock", "read", c.attendance, TenantWideScope()))
+	workspace.GET("/attendance/abnormals", c.routes.Handle("attendance.clock", "read", c.attendanceAbnormals, TenantWideScope()))
 	workspace.GET("/attendance/export", c.routes.Handle("attendance.clock", "export", c.exportAttendanceCSV, TenantWideScope()))
 	workspace.GET("/turnover", c.routes.Handle("hr.employee", "read", c.turnover, TenantWideScope()))
 	workspace.GET("/turnover/export", c.routes.Handle("hr.employee", "export", c.exportTurnoverCSV, TenantWideScope()))
@@ -75,6 +77,17 @@ func (c WorkspaceCtrl) employees(w http.ResponseWriter, r *http.Request, ctx dom
 		EmploymentStatus: strings.TrimSpace(values.Get("employment_status")),
 		Keyword:          strings.TrimSpace(firstQueryValue(values, "keyword", "search")),
 	})
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// orgUnitsDirectory 處理組織單位管理頁的聚合讀取請求。
+func (c WorkspaceCtrl) orgUnitsDirectory(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	includeEmployees := strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_employees")), "true")
+	item, err := c.svc.WorkspaceOrgUnitsDirectory(ctx, includeEmployees)
 	if err != nil {
 		return err
 	}
@@ -160,9 +173,56 @@ func (c WorkspaceCtrl) exportTurnoverCSV(w http.ResponseWriter, r *http.Request,
 
 // attendance 處理考勤的 HTTP 請求。
 func (c WorkspaceCtrl) attendance(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	page, err := pageRequestFromRequest(r)
+	if err != nil {
+		return err
+	}
+	values := r.URL.Query()
+	projection := strings.TrimSpace(firstQueryValue(values, "projection", "view"))
 	item, err := c.svc.WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{
-		Year:  workspaceIntQuery(r, "year"),
-		Month: workspaceIntQuery(r, "month"),
+		Year:         workspaceIntQuery(r, "year"),
+		Month:        workspaceIntQuery(r, "month"),
+		Projection:   projection,
+		DepartmentID: strings.TrimSpace(values.Get("department_id")),
+		Keyword:      strings.TrimSpace(firstQueryValue(values, "keyword", "search")),
+		Page:         page.Page,
+		PageSize:     page.PageSize,
+		Paginated:    projection != "" || values.Has("page") || values.Has("page_size"),
+	})
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// attendanceAbnormals returns anomaly rows within an explicitly bounded
+// employee page; page/page_size then paginate those filtered anomaly rows.
+func (c WorkspaceCtrl) attendanceAbnormals(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	page, err := pageRequestFromRequest(r)
+	if err != nil {
+		return err
+	}
+	values := r.URL.Query()
+	employeePage, err := positiveIntQuery(values.Get("employee_page"), "employee_page", 0)
+	if err != nil {
+		return err
+	}
+	employeePageSize, err := positiveIntQuery(values.Get("employee_page_size"), "employee_page_size", domain.MaxPageSize)
+	if err != nil {
+		return err
+	}
+	item, err := c.svc.WorkspaceClockAbnormals(ctx, domain.WorkspaceClockAbnormalQuery{
+		Year:             workspaceIntQuery(r, "year"),
+		Month:            workspaceIntQuery(r, "month"),
+		BaseDepartmentID: strings.TrimSpace(values.Get("base_department_id")),
+		DepartmentID:     strings.TrimSpace(values.Get("department_id")),
+		Keyword:          strings.TrimSpace(firstQueryValue(values, "keyword", "search")),
+		Severity:         strings.TrimSpace(values.Get("severity")),
+		Page:             page.Page,
+		PageSize:         page.PageSize,
+		EmployeePage:     employeePage,
+		EmployeePageSize: employeePageSize,
 	})
 	if err != nil {
 		return err
@@ -173,9 +233,12 @@ func (c WorkspaceCtrl) attendance(w http.ResponseWriter, r *http.Request, ctx do
 
 // exportAttendanceCSV 處理考勤 CSV 匯出。
 func (c WorkspaceCtrl) exportAttendanceCSV(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	values := r.URL.Query()
 	raw, filename, err := c.svc.ExportWorkspaceAttendanceCSV(ctx, domain.WorkspaceAttendanceQuery{
-		Year:  workspaceIntQuery(r, "year"),
-		Month: workspaceIntQuery(r, "month"),
+		Year:         workspaceIntQuery(r, "year"),
+		Month:        workspaceIntQuery(r, "month"),
+		DepartmentID: strings.TrimSpace(values.Get("department_id")),
+		Keyword:      strings.TrimSpace(firstQueryValue(values, "keyword", "search")),
 	}, strings.TrimSpace(r.URL.Query().Get("kind")))
 	if err != nil {
 		return err

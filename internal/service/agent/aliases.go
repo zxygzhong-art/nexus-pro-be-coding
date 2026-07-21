@@ -99,6 +99,9 @@ type (
 	LeaveEntitlementRule               = domain.LeaveEntitlementRule
 	GrantLeaveBalancesInput            = domain.GrantLeaveBalancesInput
 	GrantLeaveBalancesResult           = domain.GrantLeaveBalancesResult
+	LeaveType                          = domain.LeaveType
+	LeaveTypeCatalog                   = domain.LeaveTypeCatalog
+	SetLeaveTypeEnabledInput           = domain.SetLeaveTypeEnabledInput
 	LeaveTypeSyncIssue                 = domain.LeaveTypeSyncIssue
 	LeaveTypeIntegration               = domain.LeaveTypeIntegration
 	LeaveTypeIntegrationResponse       = domain.LeaveTypeIntegrationResponse

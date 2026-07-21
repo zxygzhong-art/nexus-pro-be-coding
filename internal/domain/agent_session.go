@@ -157,8 +157,36 @@ type UpdateAgentSessionInput struct {
 
 // ListAgentSessionsQuery 定義會話列表查詢。
 type ListAgentSessionsQuery struct {
-	AgentID string `json:"agent_id"`
-	Status  string `json:"status"`
+	AgentID  string `json:"agent_id"`
+	Status   string `json:"status"`
+	Cursor   string `json:"cursor,omitempty"`
+	PageSize int    `json:"page_size,omitempty"`
+}
+
+// ListAgentSessionMessagesQuery 定義會話訊息列表查詢。
+type ListAgentSessionMessagesQuery struct {
+	Cursor   string `json:"cursor,omitempty"`
+	PageSize int    `json:"page_size,omitempty"`
+}
+
+// KeysetPage 定義 (created_at, id) keyset 分頁條件。
+type KeysetPage struct {
+	Limit           int
+	HasCursor       bool
+	CursorCreatedAt time.Time
+	CursorID        string
+}
+
+// AgentSessionListPage 包裝一頁會話 keyset 結果。
+type AgentSessionListPage struct {
+	Items      []AgentSession `json:"items"`
+	NextCursor string         `json:"next_cursor,omitempty"`
+}
+
+// AgentSessionMessageListPage 包裝一頁會話訊息 keyset 結果。
+type AgentSessionMessageListPage struct {
+	Items      []AgentSessionMessage `json:"items"`
+	NextCursor string                `json:"next_cursor,omitempty"`
 }
 
 // CreateAgentMemoryInput 定義建立記憶輸入。

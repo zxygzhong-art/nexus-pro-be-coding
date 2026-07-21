@@ -349,11 +349,6 @@ func copyAttendancePolicy(v AttendancePolicy) AttendancePolicy {
 	return v
 }
 
-func copyEHRMSLeaveType(v EHRMSLeaveType) EHRMSLeaveType {
-	v.Raw = append([]byte(nil), v.Raw...)
-	return v
-}
-
 // copyLeaveRequest preserves immutable rule and evaluation snapshots across reads.
 func copyLeaveRequest(v LeaveRequest) LeaveRequest {
 	v.RuleSnapshot = utils.CopyStringMap(v.RuleSnapshot)
@@ -560,6 +555,14 @@ func copyAgentSessionMessage(v AgentSessionMessage) AgentSessionMessage {
 
 // copyAgentSessionFile copies nullable retention metadata.
 func copyAgentSessionFile(v domain.AgentSessionFile) domain.AgentSessionFile {
+	if v.ExpiresAt != nil {
+		expiresAt := *v.ExpiresAt
+		v.ExpiresAt = &expiresAt
+	}
+	return v
+}
+
+func copyFormInstanceFile(v domain.FormInstanceFile) domain.FormInstanceFile {
 	if v.ExpiresAt != nil {
 		expiresAt := *v.ExpiresAt
 		v.ExpiresAt = &expiresAt

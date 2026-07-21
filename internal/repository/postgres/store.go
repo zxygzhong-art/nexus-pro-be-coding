@@ -1077,17 +1077,18 @@ func (s *Store) UpsertOrgUnit(execCtx context.Context, v domain.OrgUnit) error {
 		v.UpdatedAt = v.CreatedAt
 	}
 	_, err := s.q.UpsertOrgUnit(execCtx, sqlc.UpsertOrgUnitParams{
-		ID:        v.ID,
-		TenantID:  v.TenantID,
-		Code:      v.Code,
-		Name:      v.Name,
-		NameEn:    v.NameEN,
-		ParentID:  v.ParentID,
-		Path:      utils.CopyStrings(v.Path),
-		Source:    v.Source,
-		Closed:    v.Closed,
-		CreatedAt: timestamptz(v.CreatedAt),
-		UpdatedAt: timestamptz(v.UpdatedAt),
+		ID:                v.ID,
+		TenantID:          v.TenantID,
+		Code:              v.Code,
+		Name:              v.Name,
+		NameEn:            v.NameEN,
+		ParentID:          v.ParentID,
+		Path:              utils.CopyStrings(v.Path),
+		Source:            v.Source,
+		Closed:            v.Closed,
+		ManagerPositionID: v.ManagerPositionID,
+		CreatedAt:         timestamptz(v.CreatedAt),
+		UpdatedAt:         timestamptz(v.UpdatedAt),
 	})
 	return err
 }
@@ -1313,34 +1314,40 @@ func (s *Store) ListEmployees(execCtx context.Context, tenantID string) ([]domai
 func (s *Store) ListEmployeesByQuery(execCtx context.Context, tenantID string, query domain.EmployeeQuery) ([]domain.Employee, error) {
 	items, err := s.q.ListEmployeesFiltered(execCtx, sqlc.ListEmployeesFilteredParams{
 		TenantID:         tenantID,
+		ScopeDenyAll:     query.Scope.DenyAll,
+		ScopeMatchAny:    query.Scope.MatchAnyEntity,
+		ScopeEmployeeIds: query.Scope.EmployeeIDs,
+		ScopeOrgUnitIds:  query.Scope.OrgUnitIDs,
+		ScopeStatuses:    query.Scope.Statuses,
 		Keyword:          query.Keyword,
 		DepartmentID:     query.DepartmentID,
 		EmploymentStatus: query.EmploymentStatus,
 		Category:         query.Category,
+		PresentFrom:      query.PresentFrom,
+		PresentTo:        query.PresentTo,
 		Sort:             query.Sort,
 	})
 	if err != nil {
 		return nil, err
 	}
-	return filterPostgresEmployeesByScope(mapSlice(items, fromEmployee), query.Scope), nil
+	return mapSlice(items, fromEmployee), nil
 }
 
 // ListEmployeePageByQuery 從儲存層列出員工分頁 by 查詢。
 func (s *Store) ListEmployeePageByQuery(execCtx context.Context, tenantID string, query domain.EmployeeQuery) ([]domain.Employee, int, error) {
-	if employeeQueryHasScope(query) {
-		items, err := s.ListEmployeesByQuery(execCtx, tenantID, query)
-		if err != nil {
-			return nil, 0, err
-		}
-		page, pageSize := normalizePostgresEmployeePage(query)
-		return paginatePostgresEmployees(items, page, pageSize), len(items), nil
-	}
 	params := sqlc.CountEmployeesFilteredParams{
 		TenantID:         tenantID,
+		ScopeDenyAll:     query.Scope.DenyAll,
+		ScopeMatchAny:    query.Scope.MatchAnyEntity,
+		ScopeEmployeeIds: query.Scope.EmployeeIDs,
+		ScopeOrgUnitIds:  query.Scope.OrgUnitIDs,
+		ScopeStatuses:    query.Scope.Statuses,
 		Keyword:          query.Keyword,
 		DepartmentID:     query.DepartmentID,
 		EmploymentStatus: query.EmploymentStatus,
 		Category:         query.Category,
+		PresentFrom:      query.PresentFrom,
+		PresentTo:        query.PresentTo,
 	}
 	total, err := s.q.CountEmployeesFiltered(execCtx, params)
 	if err != nil {
@@ -1356,10 +1363,17 @@ func (s *Store) ListEmployeePageByQuery(execCtx context.Context, tenantID string
 	}
 	items, err := s.q.ListEmployeesFilteredPage(execCtx, sqlc.ListEmployeesFilteredPageParams{
 		TenantID:         params.TenantID,
+		ScopeDenyAll:     params.ScopeDenyAll,
+		ScopeMatchAny:    params.ScopeMatchAny,
+		ScopeEmployeeIds: params.ScopeEmployeeIds,
+		ScopeOrgUnitIds:  params.ScopeOrgUnitIds,
+		ScopeStatuses:    params.ScopeStatuses,
 		Keyword:          params.Keyword,
 		DepartmentID:     params.DepartmentID,
 		EmploymentStatus: params.EmploymentStatus,
 		Category:         params.Category,
+		PresentFrom:      params.PresentFrom,
+		PresentTo:        params.PresentTo,
 		Sort:             query.Sort,
 		OffsetCount:      int32((page - 1) * pageSize),
 		LimitCount:       int32(pageSize),
@@ -1372,19 +1386,19 @@ func (s *Store) ListEmployeePageByQuery(execCtx context.Context, tenantID string
 
 // CountEmployeesByQuery 從儲存層處理 count 員工 by 查詢。
 func (s *Store) CountEmployeesByQuery(execCtx context.Context, tenantID string, query domain.EmployeeQuery) (int, error) {
-	if employeeQueryHasScope(query) {
-		items, err := s.ListEmployeesByQuery(execCtx, tenantID, query)
-		if err != nil {
-			return 0, err
-		}
-		return len(items), nil
-	}
 	total, err := s.q.CountEmployeesFiltered(execCtx, sqlc.CountEmployeesFilteredParams{
 		TenantID:         tenantID,
+		ScopeDenyAll:     query.Scope.DenyAll,
+		ScopeMatchAny:    query.Scope.MatchAnyEntity,
+		ScopeEmployeeIds: query.Scope.EmployeeIDs,
+		ScopeOrgUnitIds:  query.Scope.OrgUnitIDs,
+		ScopeStatuses:    query.Scope.Statuses,
 		Keyword:          query.Keyword,
 		DepartmentID:     query.DepartmentID,
 		EmploymentStatus: query.EmploymentStatus,
 		Category:         query.Category,
+		PresentFrom:      query.PresentFrom,
+		PresentTo:        query.PresentTo,
 	})
 	if err != nil {
 		return 0, err
@@ -1608,58 +1622,61 @@ func (s *Store) GetAttendancePolicy(execCtx context.Context, tenantID string) (d
 	return fromAttendancePolicy(v), true, nil
 }
 
-// ReplaceEHRMSLeaveTypes replaces one tenant's upstream snapshot inside the caller's transaction.
-func (s *Store) ReplaceEHRMSLeaveTypes(execCtx context.Context, tenantID string, items []domain.EHRMSLeaveType, syncedAt time.Time) error {
-	execCtx = tenantContext(execCtx, tenantID)
-	if _, err := s.db.Exec(execCtx, `DELETE FROM ehrms_leave_types WHERE tenant_id = $1`, tenantID); err != nil {
-		return err
-	}
-	for position, item := range items {
-		payload, err := json.Marshal(item)
-		if err != nil {
-			return fmt.Errorf("encode ehrms leave type %q: %w", item.Code, err)
-		}
-		if _, err := s.db.Exec(execCtx, `
-INSERT INTO ehrms_leave_types (tenant_id, code, position, payload, synced_at)
-VALUES ($1, $2, $3, $4::jsonb, $5)`, tenantID, item.Code, position, payload, syncedAt); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-// ListEHRMSLeaveTypes returns the persisted snapshot in the exact upstream order.
-func (s *Store) ListEHRMSLeaveTypes(execCtx context.Context, tenantID string) ([]domain.EHRMSLeaveType, time.Time, error) {
+// ListLeaveTypes joins immutable system definitions with the tenant's availability overrides.
+func (s *Store) ListLeaveTypes(execCtx context.Context, tenantID string) ([]domain.LeaveType, error) {
 	rows, err := s.db.Query(tenantContext(execCtx, tenantID), `
-SELECT payload, synced_at
-FROM ehrms_leave_types
-WHERE tenant_id = $1
-ORDER BY position`, tenantID)
+SELECT
+    'lt_' || definition.code,
+    definition.code,
+    definition.name_zh,
+    definition.name_en,
+    definition.unit,
+    definition.paid_ratio::double precision,
+    definition.requires_balance,
+    coalesce(setting.enabled, true),
+    definition.display_order
+FROM leave_type_definitions definition
+LEFT JOIN tenant_leave_type_settings setting
+  ON setting.tenant_id = $1 AND setting.leave_type_code = definition.code
+ORDER BY definition.display_order`, tenantID)
 	if err != nil {
-		return nil, time.Time{}, err
+		return nil, err
 	}
 	defer rows.Close()
-	items := make([]domain.EHRMSLeaveType, 0)
-	var syncedAt time.Time
+	items := make([]domain.LeaveType, 0, 15)
 	for rows.Next() {
-		var payload []byte
-		var rowSyncedAt time.Time
-		if err := rows.Scan(&payload, &rowSyncedAt); err != nil {
-			return nil, time.Time{}, err
-		}
-		var item domain.EHRMSLeaveType
-		if err := json.Unmarshal(payload, &item); err != nil {
-			return nil, time.Time{}, fmt.Errorf("decode persisted ehrms leave type: %w", err)
+		var item domain.LeaveType
+		if err := rows.Scan(
+			&item.ID, &item.Code, &item.NameZH, &item.NameEN, &item.Unit,
+			&item.PaidRatio, &item.RequiresBalance, &item.Enabled, &item.DisplayOrder,
+		); err != nil {
+			return nil, err
 		}
 		items = append(items, item)
-		if rowSyncedAt.After(syncedAt) {
-			syncedAt = rowSyncedAt
-		}
 	}
-	if err := rows.Err(); err != nil {
-		return nil, time.Time{}, err
+	return items, rows.Err()
+}
+
+// UpsertLeaveTypeEnabled persists one tenant override without copying definitions.
+func (s *Store) UpsertLeaveTypeEnabled(execCtx context.Context, tenantID, code string, enabled bool, updatedByAccountID string, updatedAt time.Time) error {
+	result, err := s.db.Exec(tenantContext(execCtx, tenantID), `
+INSERT INTO tenant_leave_type_settings (
+    tenant_id, leave_type_code, enabled, updated_by_account_id, updated_at
+)
+SELECT $1, definition.code, $3, $4, $5
+FROM leave_type_definitions definition
+WHERE definition.code = $2
+ON CONFLICT (tenant_id, leave_type_code) DO UPDATE SET
+    enabled = EXCLUDED.enabled,
+    updated_by_account_id = EXCLUDED.updated_by_account_id,
+    updated_at = EXCLUDED.updated_at`, tenantID, code, enabled, updatedByAccountID, updatedAt)
+	if err != nil {
+		return err
 	}
-	return items, syncedAt, nil
+	if result.RowsAffected() == 0 {
+		return domain.NotFound("leave type", code)
+	}
+	return nil
 }
 
 // GetLeaveTypeExternalMapping resolves a tenant-specific upstream leave alias.
@@ -2257,6 +2274,7 @@ func (s *Store) ListAttendanceClockRecords(execCtx context.Context, tenantID str
 	items, err := s.q.ListAttendanceClockRecords(tenantContext(execCtx, tenantID), sqlc.ListAttendanceClockRecordsParams{
 		TenantID:     tenantID,
 		EmployeeID:   query.EmployeeID,
+		EmployeeIds:  query.EmployeeIDs,
 		FromDate:     query.FromDate,
 		ToDate:       query.ToDate,
 		Direction:    query.Direction,
@@ -2343,11 +2361,12 @@ func (s *Store) GetAttendanceDailySummaryByEmployeeDate(execCtx context.Context,
 // ListAttendanceDailySummaries 從儲存層列出考勤日彙總。
 func (s *Store) ListAttendanceDailySummaries(execCtx context.Context, tenantID string, query domain.AttendanceDailySummaryQuery) ([]domain.AttendanceDailySummary, error) {
 	items, err := s.q.ListAttendanceDailySummaries(tenantContext(execCtx, tenantID), sqlc.ListAttendanceDailySummariesParams{
-		TenantID:   tenantID,
-		EmployeeID: query.EmployeeID,
-		FromDate:   query.FromDate,
-		ToDate:     query.ToDate,
-		Source:     query.Source,
+		TenantID:    tenantID,
+		EmployeeID:  query.EmployeeID,
+		EmployeeIds: query.EmployeeIDs,
+		FromDate:    query.FromDate,
+		ToDate:      query.ToDate,
+		Source:      query.Source,
 	})
 	if err != nil {
 		return nil, err
@@ -2699,6 +2718,7 @@ func (s *Store) ListFormInstancesByQuery(execCtx context.Context, tenantID strin
 		TemplateID:         params.TemplateID,
 		TemplateKey:        params.TemplateKey,
 		ApplicantAccountID: params.ApplicantAccountID,
+		Search:             params.Search,
 	})
 	if err != nil {
 		return nil, err
@@ -2723,6 +2743,7 @@ func (s *Store) ListFormInstancePageByQuery(execCtx context.Context, tenantID st
 		Sort:               page.Sort,
 		LimitCount:         int32(page.PageSize),
 		OffsetCount:        int32((page.Page - 1) * page.PageSize),
+		Search:             countParams.Search,
 	}
 	items, err := s.q.ListFormInstancePageByQuery(tenantContext(execCtx, tenantID), listParams)
 	if err != nil {
@@ -2796,8 +2817,17 @@ func (s *Store) GetPlatformTaskItem(execCtx context.Context, tenantID, accountID
 }
 
 // ListPlatformTaskItems 從儲存層列出平臺任務項目。
-func (s *Store) ListPlatformTaskItems(execCtx context.Context, tenantID, accountID string) ([]domain.PlatformTaskRecordItem, error) {
-	items, err := s.q.ListPlatformTaskItems(tenantContext(execCtx, tenantID), sqlc.ListPlatformTaskItemsParams{TenantID: tenantID, AccountID: accountID})
+func (s *Store) ListPlatformTaskItems(execCtx context.Context, tenantID, accountID string, query domain.PlatformTasksQuery) ([]domain.PlatformTaskRecordItem, error) {
+	items, err := s.q.ListPlatformTaskItems(tenantContext(execCtx, tenantID), sqlc.ListPlatformTaskItemsParams{
+		TenantID:        tenantID,
+		AccountID:       accountID,
+		FromCreatedAt:   timestamptz(query.From),
+		ToCreatedAt:     timestamptz(query.To),
+		HasCursor:       query.HasCursor,
+		CursorCreatedAt: timestamptz(query.CursorCreatedAt),
+		CursorID:        strings.TrimSpace(query.CursorID),
+		LimitCount:      int32(query.PageSize),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -2838,8 +2868,17 @@ func (s *Store) GetPlatformTaskTodo(execCtx context.Context, tenantID, accountID
 }
 
 // ListPlatformTaskTodos 從儲存層列出平臺任務待辦。
-func (s *Store) ListPlatformTaskTodos(execCtx context.Context, tenantID, accountID string) ([]domain.PlatformTaskTodoRecord, error) {
-	items, err := s.q.ListPlatformTaskTodos(tenantContext(execCtx, tenantID), sqlc.ListPlatformTaskTodosParams{TenantID: tenantID, AccountID: accountID})
+func (s *Store) ListPlatformTaskTodos(execCtx context.Context, tenantID, accountID string, query domain.PlatformTasksQuery) ([]domain.PlatformTaskTodoRecord, error) {
+	items, err := s.q.ListPlatformTaskTodos(tenantContext(execCtx, tenantID), sqlc.ListPlatformTaskTodosParams{
+		TenantID:        tenantID,
+		AccountID:       accountID,
+		FromCreatedAt:   timestamptz(query.From),
+		ToCreatedAt:     timestamptz(query.To),
+		HasCursor:       query.HasCursor,
+		CursorCreatedAt: timestamptz(query.CursorCreatedAt),
+		CursorID:        strings.TrimSpace(query.CursorID),
+		LimitCount:      int32(query.PageSize),
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -3757,6 +3796,7 @@ func formInstanceQueryParams(tenantID string, query domain.FormInstanceQuery) sq
 		TemplateID:         strings.TrimSpace(query.TemplateID),
 		TemplateKey:        strings.TrimSpace(query.TemplateKey),
 		ApplicantAccountID: strings.TrimSpace(query.ApplicantAccountID),
+		Search:             strings.TrimSpace(query.Search),
 	}
 }
 
@@ -4315,18 +4355,19 @@ func fromAssumableRoleSession(v sqlc.AuthzAssumableRoleSession) domain.Assumable
 // fromOrgUnit 轉換組織單位。
 func fromOrgUnit(v sqlc.OrgUnit) domain.OrgUnit {
 	return domain.OrgUnit{
-		ID:             v.ID,
-		TenantID:       v.TenantID,
-		Code:           v.Code,
-		Name:           v.Name,
-		NameEN:         v.NameEn,
-		ParentID:       v.ParentID,
-		Path:           utils.CopyStrings(v.Path),
-		Source:         v.Source,
-		Closed:         v.Closed,
-		ShowInOrgChart: v.ShowInOrgChart,
-		CreatedAt:      timeFrom(v.CreatedAt),
-		UpdatedAt:      timeFrom(v.UpdatedAt),
+		ID:                v.ID,
+		TenantID:          v.TenantID,
+		Code:              v.Code,
+		Name:              v.Name,
+		NameEN:            v.NameEn,
+		ParentID:          v.ParentID,
+		Path:              utils.CopyStrings(v.Path),
+		Source:            v.Source,
+		Closed:            v.Closed,
+		ShowInOrgChart:    v.ShowInOrgChart,
+		ManagerPositionID: v.ManagerPositionID,
+		CreatedAt:         timeFrom(v.CreatedAt),
+		UpdatedAt:         timeFrom(v.UpdatedAt),
 	}
 }
 

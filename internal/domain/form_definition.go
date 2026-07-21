@@ -303,8 +303,11 @@ func ValidateFormDefinitionSchemaV2(schema FormDefinitionSchemaV2) FormDefinitio
 		if strings.TrimSpace(stage.Label) == "" {
 			add(path+".label", "required", "stage label is required")
 		}
-		if stage.Type == "approver" && strings.TrimSpace(stringFromAny(stage.Config["role"])) == "" && len(stringSliceFromAny(stage.Config["account_ids"])) == 0 && len(stringSliceFromAny(stage.Config["user_group_ids"])) == 0 {
-			add(path+".config", "approver_target_required", "approver stage requires role, account_ids, or user_group_ids")
+		if len(stringSliceFromAny(stage.Config["user_group_ids"])) > 0 {
+			add(path+".config.user_group_ids", "unsupported", "workflow user_group_ids targeting is retired; assign an approval role instead")
+		}
+		if stage.Type == "approver" && strings.TrimSpace(stringFromAny(stage.Config["role"])) == "" && len(stringSliceFromAny(stage.Config["account_ids"])) == 0 {
+			add(path+".config", "approver_target_required", "approver stage requires role or account_ids")
 		}
 	}
 	if len(schema.Workflow.Stages) == 0 {
@@ -408,7 +411,7 @@ func isOptionWidget(value string) bool {
 }
 func validWorkflowStageType(value string) bool {
 	switch strings.TrimSpace(value) {
-	case "approver", "condition", "parallel", "notify":
+	case "approver", "condition", "notify":
 		return true
 	}
 	return false

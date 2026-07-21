@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"time"
 
 	"nexus-pro-api/internal/domain"
 )
@@ -29,6 +30,16 @@ type WorkflowStore interface {
 	ReplaceFormInstanceFieldValues(ctx context.Context, tenantID, formInstanceID string, values []domain.FormInstanceFieldValue) error
 	ListFormInstanceFieldValues(ctx context.Context, tenantID, formInstanceID string) ([]domain.FormInstanceFieldValue, error)
 	DeleteFormInstance(ctx context.Context, tenantID, id string) error
+
+	UpsertFormFileAsset(context.Context, domain.FormInstanceFile) error
+	InsertFormInstanceFile(context.Context, domain.FormInstanceFile) error
+	GetFormInstanceFile(ctx context.Context, tenantID, formInstanceID, fileID string) (domain.FormInstanceFile, bool, error)
+	ListFormInstanceFiles(ctx context.Context, tenantID, formInstanceID string) ([]domain.FormInstanceFile, error)
+	ListFormInstanceFilesByField(ctx context.Context, tenantID, formInstanceID, fieldID string) ([]domain.FormInstanceFile, error)
+	CountFormInstanceFilesByField(ctx context.Context, tenantID, formInstanceID, fieldID string) (int, error)
+	MarkFormInstanceFilesAttached(ctx context.Context, tenantID, formInstanceID string, updatedAt time.Time) error
+	DeleteDraftFormInstanceFile(ctx context.Context, tenantID, formInstanceID, fileID string) (bool, error)
+	DeleteFormFileAsset(ctx context.Context, tenantID, fileID string) error
 
 	UpsertWorkflowRun(context.Context, domain.WorkflowRun) error
 	GetWorkflowRun(ctx context.Context, tenantID, id string) (domain.WorkflowRun, bool, error)

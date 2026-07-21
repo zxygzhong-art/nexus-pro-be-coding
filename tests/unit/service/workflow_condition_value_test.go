@@ -96,11 +96,15 @@ func conditionWorkflowTemplateSchema(value string) map[string]any {
 				},
 				{
 					"id": "stage-approver-high", "type": "approver", "label": "高階主管",
-					"config": map[string]any{"account_ids": []any{"acct-reviewer"}},
+					"config": map[string]any{
+						"account_ids": []any{"acct-reviewer"}, "next_stage_id": "__end__",
+					},
 				},
 				{
 					"id": "stage-approver-low", "type": "approver", "label": "直屬主管",
-					"config": map[string]any{"account_ids": []any{"acct-reviewer"}},
+					"config": map[string]any{
+						"account_ids": []any{"acct-reviewer"}, "next_stage_id": "__end__",
+					},
 				},
 			},
 		},
@@ -182,5 +186,57 @@ func TestWorkflowConditionNumericValueStillRoutes(t *testing.T) {
 	}
 	if target, _ := condition.Result["target_stage_id"].(string); target != "stage-approver-high" {
 		t.Fatalf("expected routing to true branch stage-approver-high, got %+v", condition.Result)
+	}
+}
+
+// TestWorkflowConditionTrueBranchDoesNotEnterFalseBranch 驗證真分支審批完成後不會誤進假分支。
+func TestWorkflowConditionTrueBranchDoesNotEnterFalseBranch(t *testing.T) {
+	now := time.Date(2026, 7, 16, 8, 0, 0, 0, time.UTC)
+	svc, ctx, store := newWorkflowEngineFixture(t, now, "acct-reviewer")
+	if err := store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
+		ID: "ft-amount", TenantID: "tenant-1", Key: "amount-approval", Name: "Amount",
+		Schema: conditionWorkflowTemplateSchema("100"), CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	instance, err := svc.Workflow().SubmitForm(ctx, domain.SubmitFormInput{
+		TemplateKey: "amount-approval",
+		Payload:     map[string]any{"amount": 500},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, found, err := store.GetWorkflowRunByFormInstance(context.Background(), "tenant-1", instance.ID)
+	if err != nil || !found {
+		t.Fatalf("expected workflow run, found=%v err=%v", found, err)
+	}
+	active, ok, err := store.GetWorkflowStageInstance(context.Background(), "tenant-1", run.CurrentStageInstanceID)
+	if err != nil || !ok {
+		t.Fatalf("expected active stage, ok=%v err=%v", ok, err)
+	}
+	if active.StageID != "stage-approver-high" {
+		t.Fatalf("expected true-branch approver, got %s", active.StageID)
+	}
+
+	reviewerCtx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-reviewer"}
+	if _, err := svc.Workflow().ActOnWorkflowStage(reviewerCtx, instance.ID, "approve", "ok"); err != nil {
+		t.Fatal(err)
+	}
+	updated, ok, err := store.GetFormInstance(context.Background(), "tenant-1", instance.ID)
+	if err != nil || !ok {
+		t.Fatalf("expected form instance, ok=%v err=%v", ok, err)
+	}
+	if updated.Status != "approved" {
+		t.Fatalf("expected workflow to complete after true branch, status=%s", updated.Status)
+	}
+	stages, err := store.ListWorkflowStageInstancesByRun(context.Background(), "tenant-1", run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, stage := range stages {
+		if stage.StageID == "stage-approver-low" {
+			t.Fatalf("false-branch stage should never activate, got %+v", stage)
+		}
 	}
 }

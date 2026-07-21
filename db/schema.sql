@@ -427,12 +427,36 @@ CREATE TABLE org_units (
     source text NOT NULL DEFAULT '',
     closed boolean NOT NULL DEFAULT false,
     show_in_org_chart boolean NOT NULL DEFAULT true,
+    manager_position_id text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL
 );
 
 CREATE INDEX org_units_tenant_id_idx ON org_units (tenant_id);
 CREATE INDEX org_units_path_idx ON org_units USING gin (path);
+CREATE INDEX org_units_tenant_manager_position_idx ON org_units (tenant_id, manager_position_id) WHERE manager_position_id <> '';
+
+CREATE OR REPLACE FUNCTION validate_org_unit_manager_position()
+RETURNS trigger AS $$
+BEGIN
+    IF NEW.manager_position_id <> '' AND NOT EXISTS (
+        SELECT 1
+        FROM positions
+        WHERE tenant_id = NEW.tenant_id
+          AND id = NEW.manager_position_id
+    ) THEN
+        RAISE EXCEPTION 'org unit manager_position_id % does not exist in tenant %',
+            NEW.manager_position_id, NEW.tenant_id
+            USING ERRCODE = 'foreign_key_violation';
+    END IF;
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER org_units_manager_position_check
+BEFORE INSERT OR UPDATE OF tenant_id, manager_position_id ON org_units
+FOR EACH ROW EXECUTE FUNCTION validate_org_unit_manager_position();
+
 CREATE TABLE positions (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -652,7 +676,7 @@ CREATE TABLE leave_types (
     code text NOT NULL,
     name text NOT NULL,
     category text NOT NULL DEFAULT 'company' CHECK (category IN ('statutory', 'company')),
-    source_of_truth text NOT NULL DEFAULT 'local_policy' CHECK (source_of_truth IN ('local_policy', 'ehrms', 'overtime', 'manual')),
+    source_of_truth text NOT NULL DEFAULT 'local_policy' CHECK (source_of_truth IN ('local_policy', 'system_default', 'ehrms', 'overtime', 'manual')),
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
@@ -660,17 +684,26 @@ CREATE TABLE leave_types (
     CONSTRAINT leave_types_tenant_code_idx UNIQUE (tenant_id, code)
 );
 
-CREATE TABLE ehrms_leave_types (
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    code text NOT NULL,
-    position integer NOT NULL CHECK (position >= 0),
-    payload jsonb NOT NULL CHECK (jsonb_typeof(payload) = 'object'),
-    synced_at timestamptz NOT NULL,
-    PRIMARY KEY (tenant_id, position)
+CREATE TABLE leave_type_definitions (
+    code text PRIMARY KEY,
+    name_zh text NOT NULL,
+    name_en text NOT NULL,
+    unit text NOT NULL DEFAULT 'hour' CHECK (unit IN ('hour', 'day')),
+    paid_ratio numeric(5,4) NOT NULL DEFAULT 1 CHECK (paid_ratio >= 0 AND paid_ratio <= 1),
+    requires_balance boolean NOT NULL DEFAULT false,
+    display_order integer NOT NULL UNIQUE CHECK (display_order > 0),
+    created_at timestamptz NOT NULL DEFAULT now(),
+    updated_at timestamptz NOT NULL DEFAULT now()
 );
 
-CREATE INDEX ehrms_leave_types_tenant_code_idx
-ON ehrms_leave_types (tenant_id, code);
+CREATE TABLE tenant_leave_type_settings (
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    leave_type_code text NOT NULL REFERENCES leave_type_definitions(code) ON DELETE CASCADE,
+    enabled boolean NOT NULL DEFAULT true,
+    updated_by_account_id text NOT NULL DEFAULT '',
+    updated_at timestamptz NOT NULL DEFAULT now(),
+    PRIMARY KEY (tenant_id, leave_type_code)
+);
 
 CREATE TABLE leave_type_external_mappings (
     id text PRIMARY KEY,
@@ -977,7 +1010,7 @@ CREATE TABLE workflow_stage_instances (
     tenant_id text NOT NULL,
     run_id text NOT NULL,
     stage_id text NOT NULL,
-    stage_type text NOT NULL CHECK (stage_type IN ('notify', 'condition', 'approver', 'parallel')),
+    stage_type text NOT NULL CHECK (stage_type IN ('notify', 'condition', 'approver')),
     label text NOT NULL,
     status text NOT NULL CHECK (status IN ('pending', 'active', 'completed', 'skipped', 'rejected')),
     sequence integer NOT NULL,
@@ -1357,6 +1390,7 @@ CREATE TABLE knowledge_bases (
 );
 
 CREATE INDEX knowledge_bases_tenant_updated_idx ON knowledge_bases (tenant_id, updated_at DESC, id);
+CREATE INDEX knowledge_bases_tenant_created_idx ON knowledge_bases (tenant_id, created_at DESC, id);
 
 CREATE TABLE knowledge_documents (
     id text PRIMARY KEY,
@@ -1385,6 +1419,7 @@ CREATE TABLE knowledge_documents (
 );
 
 CREATE INDEX knowledge_documents_base_updated_idx ON knowledge_documents (tenant_id, knowledge_base_id, updated_at DESC, id);
+CREATE INDEX knowledge_documents_base_created_idx ON knowledge_documents (tenant_id, knowledge_base_id, created_at DESC, id);
 
 CREATE TABLE knowledge_document_chunks (
     id text PRIMARY KEY,
@@ -1618,6 +1653,26 @@ CREATE TABLE agent_message_attachments (
 CREATE INDEX agent_message_attachments_message_idx
     ON agent_message_attachments (tenant_id, message_id, ordinal ASC, file_id ASC);
 
+CREATE TABLE form_instance_files (
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    form_instance_id text NOT NULL,
+    file_id text NOT NULL,
+    field_id text NOT NULL,
+    state text NOT NULL DEFAULT 'draft' CHECK (state IN ('draft', 'attached')),
+    created_at timestamptz NOT NULL,
+    updated_at timestamptz NOT NULL,
+    PRIMARY KEY (tenant_id, form_instance_id, file_id),
+    CONSTRAINT form_instance_files_instance_fk
+        FOREIGN KEY (tenant_id, form_instance_id)
+        REFERENCES form_instances (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT form_instance_files_file_fk
+        FOREIGN KEY (tenant_id, file_id)
+        REFERENCES file_assets (tenant_id, id) ON DELETE CASCADE
+);
+
+CREATE INDEX form_instance_files_field_idx
+    ON form_instance_files (tenant_id, form_instance_id, field_id, created_at ASC, file_id ASC);
+
 CREATE TABLE agent_memories (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -1766,8 +1821,8 @@ ALTER TABLE attendance_policy_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_policy_versions FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_types ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_types FORCE ROW LEVEL SECURITY;
-ALTER TABLE ehrms_leave_types ENABLE ROW LEVEL SECURITY;
-ALTER TABLE ehrms_leave_types FORCE ROW LEVEL SECURITY;
+ALTER TABLE tenant_leave_type_settings ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tenant_leave_type_settings FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_type_external_mappings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_type_external_mappings FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_type_sync_issues ENABLE ROW LEVEL SECURITY;
@@ -1844,6 +1899,8 @@ ALTER TABLE agent_session_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_session_files FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_message_attachments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_message_attachments FORCE ROW LEVEL SECURITY;
+ALTER TABLE form_instance_files ENABLE ROW LEVEL SECURITY;
+ALTER TABLE form_instance_files FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_memories ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_memories FORCE ROW LEVEL SECURITY;
 
@@ -1893,7 +1950,7 @@ CREATE POLICY tenant_isolation_employment_contracts ON employment_contracts USIN
 CREATE POLICY tenant_isolation_attendance_policies ON attendance_policies USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_policy_versions ON attendance_policy_versions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_types ON leave_types USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_ehrms_leave_types ON ehrms_leave_types USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_tenant_leave_type_settings ON tenant_leave_type_settings USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_type_external_mappings ON leave_type_external_mappings USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_type_sync_issues ON leave_type_sync_issues USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_balances ON leave_balances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -1932,6 +1989,7 @@ CREATE POLICY tenant_isolation_file_assets ON file_assets USING (tenant_id = cur
 CREATE POLICY tenant_isolation_file_chunks ON file_chunks USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_session_files ON agent_session_files USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_message_attachments ON agent_message_attachments USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_form_instance_files ON form_instance_files USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_memories ON agent_memories USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 
 CREATE POLICY tenant_isolation_notifications ON notifications USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));

@@ -55,7 +55,7 @@ func (c WorkflowService) initWorkflowRun(ctx RequestContext, instance domain.For
 	if err := c.store.UpsertFormInstance(goContext(ctx), instance); err != nil {
 		return domain.FormInstance{}, err
 	}
-	if err := c.advanceWorkflowFrom(ctx, run, stages, 0, applicant, instance.Payload, ""); err != nil {
+	if err := c.advanceWorkflowAt(ctx, run, stages, stages[0].ID, applicant, instance.Payload, ""); err != nil {
 		return domain.FormInstance{}, err
 	}
 	updated, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, instance.ID)
@@ -223,7 +223,7 @@ func (c WorkflowService) GetWorkflowFormState(ctx RequestContext, formInstanceID
 			if err != nil {
 				return domain.WorkflowFormStateResponse{}, err
 			}
-			if workflowAssigneeCanAct(assignees, ctx.AccountID) && (current.StageType == "approver" || current.StageType == "parallel") {
+			if workflowAssigneeCanAct(assignees, ctx.AccountID) && current.StageType == "approver" {
 				canAct = true
 				allowed = []string{"approve", "reject", "return"}
 			}
@@ -286,31 +286,50 @@ func (c WorkflowService) loadActiveWorkflowStage(ctx RequestContext, formInstanc
 }
 
 func (c WorkflowService) advanceWorkflowFrom(ctx RequestContext, run domain.WorkflowRun, stages []domain.WorkflowStageDefinition, startIndex int, applicant domain.Account, payload map[string]any, approvalComment string) error {
-	for index := startIndex; index < len(stages); index++ {
-		stage := stages[index]
+	if startIndex < 0 || startIndex >= len(stages) {
+		return c.completeWorkflowApproved(ctx, run, applicant, payload, approvalComment)
+	}
+	return c.advanceWorkflowAt(ctx, run, stages, stages[startIndex].ID, applicant, payload, approvalComment)
+}
+
+func (c WorkflowService) advanceWorkflowAt(ctx RequestContext, run domain.WorkflowRun, stages []domain.WorkflowStageDefinition, stageID string, applicant domain.Account, payload map[string]any, approvalComment string) error {
+	stageID = strings.TrimSpace(stageID)
+	for hop := 0; hop < len(stages)+2; hop++ {
+		if stageID == "" || stageID == domain.WorkflowStageEndID {
+			return c.completeWorkflowApproved(ctx, run, applicant, payload, approvalComment)
+		}
+		stage := workflowStageByID(stages, stageID)
+		if strings.TrimSpace(stage.ID) == "" {
+			return BadRequest("workflow stage not found: " + stageID).WithReasonCode("workflow_stage_unavailable")
+		}
+		sequence := workflowStageIndexByID(stages, stage.ID)
+		if sequence < 0 {
+			sequence = hop
+		}
 		switch strings.TrimSpace(stage.Type) {
 		case "notify":
-			if err := c.completeAutomaticStage(ctx, run, stage, index, "notify", applicant, payload); err != nil {
+			if err := c.completeAutomaticStage(ctx, run, stage, sequence, "notify", applicant, payload); err != nil {
 				return err
+			}
+			stageID = strings.TrimSpace(stage.Config.NextStageID)
+			if stageID == "" {
+				stageID = domain.WorkflowStageEndID
 			}
 			continue
 		case "condition":
-			nextIndex, err := c.completeConditionStage(ctx, run, stage, index, applicant, payload, stages)
+			nextID, err := c.completeConditionStage(ctx, run, stage, sequence, applicant, payload, stages)
 			if err != nil {
 				return err
 			}
-			if nextIndex < 0 || nextIndex >= len(stages) {
-				return c.completeWorkflowApproved(ctx, run, applicant, payload, approvalComment)
-			}
-			index = nextIndex - 1
+			stageID = nextID
 			continue
-		case "approver", "parallel":
-			return c.activateApprovalStage(ctx, run, stage, index, applicant, payload)
+		case "approver":
+			return c.activateApprovalStage(ctx, run, stage, sequence, applicant, payload)
 		default:
 			return BadRequest("unsupported workflow stage type: " + stage.Type)
 		}
 	}
-	return c.completeWorkflowApproved(ctx, run, applicant, payload, approvalComment)
+	return BadRequest("workflow graph appears to cycle").WithReasonCode("workflow_stage_unavailable")
 }
 
 func (c WorkflowService) completeAutomaticStage(ctx RequestContext, run domain.WorkflowRun, stage domain.WorkflowStageDefinition, sequence int, action string, applicant domain.Account, payload map[string]any) error {
@@ -382,23 +401,22 @@ func (c WorkflowService) persistAutomaticStage(ctx RequestContext, run domain.Wo
 	return c.recordWorkflowAction(ctx, run, stageInstance, action, "", now)
 }
 
-func (c WorkflowService) completeConditionStage(ctx RequestContext, run domain.WorkflowRun, stage domain.WorkflowStageDefinition, sequence int, applicant domain.Account, payload map[string]any, stages []domain.WorkflowStageDefinition) (int, error) {
+func (c WorkflowService) completeConditionStage(ctx RequestContext, run domain.WorkflowRun, stage domain.WorkflowStageDefinition, sequence int, applicant domain.Account, payload map[string]any, stages []domain.WorkflowStageDefinition) (string, error) {
 	employee, err := c.resolveWorkflowApplicantEmployee(ctx, applicant)
 	if err != nil {
-		return -1, err
+		return "", err
 	}
 	now := c.Now()
 	matched := evaluateWorkflowCondition(stage.Config, employee, payload)
-	targetStageID := stage.Config.FalseNextStageID
+	targetStageID := strings.TrimSpace(stage.Config.FalseNextStageID)
 	if matched {
-		targetStageID = stage.Config.TrueNextStageID
+		targetStageID = strings.TrimSpace(stage.Config.TrueNextStageID)
 	}
 	if targetStageID == "" {
-		if matched {
-			targetStageID = workflowNextStageID(stages, stage.ID)
-		} else {
-			targetStageID = workflowSkipToNextApproverStageID(stages, stage.ID)
-		}
+		return "", BadRequest("condition stage is missing routing targets: " + stage.ID).WithReasonCode("workflow_stage_unavailable")
+	}
+	if targetStageID != domain.WorkflowStageEndID && workflowStageByID(stages, targetStageID).ID == "" {
+		return "", BadRequest("condition stage routes to unknown stage: " + targetStageID).WithReasonCode("workflow_stage_unavailable")
 	}
 	stageInstance := domain.WorkflowStageInstance{
 		ID:        utils.NewID("wfs"),
@@ -417,12 +435,12 @@ func (c WorkflowService) completeConditionStage(ctx RequestContext, run domain.W
 		CompletedAt: &now,
 	}
 	if err := c.store.UpsertWorkflowStageInstance(goContext(ctx), stageInstance); err != nil {
-		return -1, err
+		return "", err
 	}
 	if err := c.recordWorkflowAction(ctx, run, stageInstance, "auto_condition", "", now); err != nil {
-		return -1, err
+		return "", err
 	}
-	return workflowStageIndexByID(stages, targetStageID), nil
+	return targetStageID, nil
 }
 
 func (c WorkflowService) activateApprovalStage(ctx RequestContext, run domain.WorkflowRun, stage domain.WorkflowStageDefinition, sequence int, applicant domain.Account, payload map[string]any) error {
@@ -519,9 +537,6 @@ func (c WorkflowService) handleWorkflowApprove(ctx RequestContext, instance doma
 	}
 	stageDef := workflowStageByID(stages, stageInstance.StageID)
 	mode := strings.TrimSpace(stageDef.Config.Mode)
-	if stageInstance.StageType == "parallel" && mode == "" {
-		mode = "all"
-	}
 	if mode == "all" {
 		for _, assignee := range assignees {
 			if assignee.Status != domain.WorkflowAssigneeStatusApproved {
@@ -546,7 +561,11 @@ func (c WorkflowService) handleWorkflowApprove(ctx RequestContext, instance doma
 	if !ok {
 		return NotFound("account", instance.ApplicantAccountID)
 	}
-	return c.advanceWorkflowFrom(ctx, run, stages, stageInstance.Sequence+1, applicant, instance.Payload, comment)
+	nextID := strings.TrimSpace(stageDef.Config.NextStageID)
+	if nextID == "" {
+		nextID = domain.WorkflowStageEndID
+	}
+	return c.advanceWorkflowAt(ctx, run, stages, nextID, applicant, instance.Payload, comment)
 }
 
 func (c WorkflowService) completeWorkflowDecision(ctx RequestContext, instance domain.FormInstance, run domain.WorkflowRun, stageInstance domain.WorkflowStageInstance, formStatus, runStatus, action, comment string, now time.Time) error {
@@ -687,8 +706,9 @@ func (c WorkflowService) resolveWorkflowAssignees(ctx RequestContext, applicant 
 	if len(stage.Config.AccountIDs) > 0 {
 		return uniqueWorkflowRecipientIDs(stage.Config.AccountIDs), nil
 	}
+	// Migration: reject legacy group targeting so admins must reconfigure templates with approval roles.
 	if len(stage.Config.UserGroupIDs) > 0 {
-		return c.resolveWorkflowGroupAssignees(ctx, applicant.ID, stage.Config.UserGroupIDs)
+		return nil, BadRequest("workflow user_group_ids targeting is retired; assign an approval role instead").WithReasonCode("workflow_user_group_retired")
 	}
 	employee, err := c.resolveWorkflowApplicantEmployee(ctx, applicant)
 	if err != nil {
@@ -702,27 +722,24 @@ func (c WorkflowService) resolveWorkflowAssignees(ctx RequestContext, applicant 
 	case "applicant":
 		return []string{applicant.ID}, nil
 	case "manager":
-		return c.accountIDsForEmployeeIDs(ctx, []string{employee.ManagerEmployeeID})
+		managerID, err := c.effectiveManagerEmployeeID(ctx, employee, 1)
+		if err != nil {
+			return nil, err
+		}
+		return c.accountIDsForEmployeeIDs(ctx, []string{managerID})
 	case "relative":
 		level := stage.Config.RelativeLevel
 		if level <= 0 {
 			level = 1
 		}
-		managerID := employee.ManagerEmployeeID
-		for i := 0; i < level && managerID != ""; i++ {
-			if i == level-1 {
-				return c.accountIDsForEmployeeIDs(ctx, []string{managerID})
-			}
-			manager, ok, err := c.store.GetEmployee(goContext(ctx), ctx.TenantID, managerID)
-			if err != nil {
-				return nil, err
-			}
-			if !ok {
-				break
-			}
-			managerID = manager.ManagerEmployeeID
+		managerID, err := c.effectiveManagerEmployeeID(ctx, employee, level)
+		if err != nil {
+			return nil, err
 		}
-		return nil, BadRequest("unable to resolve relative approver")
+		if managerID == "" {
+			return nil, BadRequest("unable to resolve relative approver")
+		}
+		return c.accountIDsForEmployeeIDs(ctx, []string{managerID})
 	case "dept-head":
 		return c.resolveRoleAssignees(ctx, employee, []string{"主管", "部門主管", "head"})
 	case "hr":
@@ -732,50 +749,30 @@ func (c WorkflowService) resolveWorkflowAssignees(ctx RequestContext, applicant 
 	case "ceo":
 		return c.resolveRoleAssignees(ctx, employee, []string{"ceo", "總經理", "general manager"})
 	default:
-		return c.accountIDsForEmployeeIDs(ctx, []string{employee.ManagerEmployeeID})
-	}
-}
-
-// resolveWorkflowGroupAssignees snapshots only currently active, non-applicant group members.
-func (c WorkflowService) resolveWorkflowGroupAssignees(ctx RequestContext, applicantAccountID string, groupIDs []string) ([]string, error) {
-	now := c.Now()
-	accountIDs := make([]string, 0)
-	for _, groupID := range uniqueWorkflowRecipientIDs(groupIDs) {
-		memberships, err := c.store.ListGroupMembershipsForGroup(goContext(ctx), ctx.TenantID, groupID)
+		managerID, err := c.effectiveManagerEmployeeID(ctx, employee, 1)
 		if err != nil {
 			return nil, err
 		}
-		for _, membership := range memberships {
-			if membership.AccountID == applicantAccountID || !groupMembershipActiveAt(membership, now) {
-				continue
-			}
-			account, ok, err := c.store.GetAccount(goContext(ctx), ctx.TenantID, membership.AccountID)
-			if err != nil {
-				return nil, err
-			}
-			if !ok || account.Status != string(domain.AccountStatusActive) {
-				continue
-			}
-			accountIDs = append(accountIDs, membership.AccountID)
-		}
+		return c.accountIDsForEmployeeIDs(ctx, []string{managerID})
 	}
-	return uniqueWorkflowRecipientIDs(accountIDs), nil
 }
 
-// validateWorkflowActorEligibility rechecks dynamic group eligibility and segregation before every action.
-func (c WorkflowService) validateWorkflowActorEligibility(ctx RequestContext, instance domain.FormInstance, run domain.WorkflowRun, stage domain.WorkflowStageDefinition, action string) error {
-	if len(stage.Config.UserGroupIDs) > 0 {
-		if ctx.AccountID == instance.ApplicantAccountID {
-			return Forbidden("applicant cannot act as a group approver").WithReasonCode("workflow_not_assignee")
-		}
-		eligible, err := c.resolveWorkflowGroupAssignees(ctx, instance.ApplicantAccountID, stage.Config.UserGroupIDs)
-		if err != nil {
-			return err
-		}
-		if !workflowRecipientContains(eligible, ctx.AccountID) {
-			return Forbidden("current account is no longer an eligible member of the approval group").WithReasonCode("workflow_not_assignee")
-		}
+func (c WorkflowService) effectiveManagerEmployeeID(ctx RequestContext, employee Employee, levels int) (string, error) {
+	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return "", err
 	}
+	units, err := c.Service.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return "", err
+	}
+	resolved := ResolveEffectiveManagerChain(employee, employees, units, c.Now(), levels)
+	return strings.TrimSpace(resolved.ManagerEmployeeID), nil
+}
+
+// validateWorkflowActorEligibility rechecks segregation-of-duties before every action.
+// Legacy user_group_ids stages no longer revalidate membership; in-flight assignee snapshots remain authoritative.
+func (c WorkflowService) validateWorkflowActorEligibility(ctx RequestContext, instance domain.FormInstance, run domain.WorkflowRun, stage domain.WorkflowStageDefinition, action string) error {
 	if action != "approve" || !stage.Config.RequireDistinctApprover {
 		return nil
 	}
@@ -789,16 +786,6 @@ func (c WorkflowService) validateWorkflowActorEligibility(ctx RequestContext, in
 		}
 	}
 	return nil
-}
-
-// workflowRecipientContains reports whether an account is present in a normalized recipient list.
-func workflowRecipientContains(accountIDs []string, accountID string) bool {
-	for _, candidate := range accountIDs {
-		if candidate == accountID {
-			return true
-		}
-	}
-	return false
 }
 
 func (c WorkflowService) resolveWorkflowApplicantEmployee(ctx RequestContext, applicant domain.Account) (domain.Employee, error) {
@@ -983,8 +970,7 @@ func workflowSkipToNextApproverStageID(stages []domain.WorkflowStageDefinition, 
 			continue
 		}
 		for offset := index + 1; offset < len(stages); offset++ {
-			nextType := strings.TrimSpace(stages[offset].Type)
-			if nextType == "approver" || nextType == "parallel" {
+			if strings.TrimSpace(stages[offset].Type) == "approver" {
 				return stages[offset].ID
 			}
 		}

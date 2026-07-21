@@ -12,7 +12,11 @@ import (
 	"nexus-pro-api/internal/repository"
 )
 
-const defaultLiteLLMModelReconcileInterval = 5 * time.Minute
+const (
+	defaultLiteLLMModelReconcileInterval = 5 * time.Minute
+	// defaultLiteLLMOrphanSweepEvery 表示每 N 次本地對帳才做一次全量孤兒清理。
+	defaultLiteLLMOrphanSweepEvery = 6
+)
 
 // ErrLiteLLMModelSyncNotConfigured 讓 outbox 保留 pending，待下次以完整設定啟動後重試。
 var ErrLiteLLMModelSyncNotConfigured = errors.New("LiteLLM model syncer is not configured")
@@ -24,9 +28,16 @@ type LiteLLMModelAdmin interface {
 	ListManagedModelIDs(context.Context) ([]string, error)
 }
 
-// LiteLLMModelSyncOptions 定義完整模型對帳的執行間隔。
+// LiteLLMModelSyncOptions 定義完整模型對帳的執行間隔與孤兒清理頻率。
 type LiteLLMModelSyncOptions struct {
 	Interval time.Duration
+	// OrphanSweepEvery 每 N 次本地對帳執行一次遠端孤兒清理；0 表示使用預設，負數表示關閉。
+	OrphanSweepEvery int
+}
+
+// LiteLLMReconcileOptions 控制單次對帳是否包含遠端孤兒清理。
+type LiteLLMReconcileOptions struct {
+	SweepOrphans bool
 }
 
 // LiteLLMModelSyncer 消費模型 outbox 並定期以本地資料修復 LiteLLM registry。
@@ -95,8 +106,13 @@ func (s *LiteLLMModelSyncer) HandleAgentModelSyncEvent(ctx context.Context, even
 	}
 }
 
-// ReconcileAll 逐租戶以本地模型真源修復 LiteLLM registry。
+// ReconcileAll 以本地模型真源逐條修復 LiteLLM，並順便做一次遠端孤兒清理。
 func (s *LiteLLMModelSyncer) ReconcileAll(ctx context.Context) (int, error) {
+	return s.Reconcile(ctx, LiteLLMReconcileOptions{SweepOrphans: true})
+}
+
+// Reconcile 逐租戶以本地模型真源修復 LiteLLM registry；孤兒清理可選且失敗不阻斷本地對帳結果。
+func (s *LiteLLMModelSyncer) Reconcile(ctx context.Context, opts LiteLLMReconcileOptions) (int, error) {
 	if !s.Configured() {
 		return 0, ErrLiteLLMModelSyncNotConfigured
 	}
@@ -121,24 +137,38 @@ func (s *LiteLLMModelSyncer) ReconcileAll(ctx context.Context) (int, error) {
 			}
 		}
 	}
-	remoteIDs, err := s.client.ListManagedModelIDs(ctx)
-	if err != nil {
-		reconcileErr = errors.Join(reconcileErr, err)
-	} else {
-		for _, remoteID := range remoteIDs {
-			if _, exists := localIDs[remoteID]; exists {
-				continue
-			}
-			processed++
-			if _, err := s.client.DeleteModel(ctx, remoteID); err != nil {
-				reconcileErr = errors.Join(reconcileErr, fmt.Errorf("orphan model %s: %w", remoteID, err))
-			}
+	if opts.SweepOrphans {
+		swept, sweepErr := s.sweepOrphanModels(ctx, localIDs)
+		processed += swept
+		if sweepErr != nil {
+			// 全量 list 失敗不應讓本地逐條對帳結果一起失敗；刪除失敗同樣僅警告。
+			s.logger.WarnContext(ctx, "LiteLLM orphan sweep failed", "orphans", swept, "error", sweepErr)
 		}
 	}
 	return processed, reconcileErr
 }
 
-// Run 啟動立即一次、其後按固定間隔執行的完整模型對帳。
+// sweepOrphanModels 刪除遠端仍存在、但本地已無對應記錄的 Nexus managed deployment。
+func (s *LiteLLMModelSyncer) sweepOrphanModels(ctx context.Context, localIDs map[string]struct{}) (int, error) {
+	remoteIDs, err := s.client.ListManagedModelIDs(ctx)
+	if err != nil {
+		return 0, err
+	}
+	swept := 0
+	var sweepErr error
+	for _, remoteID := range remoteIDs {
+		if _, exists := localIDs[remoteID]; exists {
+			continue
+		}
+		swept++
+		if _, err := s.client.DeleteModel(ctx, remoteID); err != nil {
+			sweepErr = errors.Join(sweepErr, fmt.Errorf("orphan model %s: %w", remoteID, err))
+		}
+	}
+	return swept, sweepErr
+}
+
+// Run 啟動立即一次、其後按固定間隔執行的本地模型對帳；孤兒清理按 OrphanSweepEvery 降頻。
 func (s *LiteLLMModelSyncer) Run(ctx context.Context, opts LiteLLMModelSyncOptions) {
 	if !s.Configured() {
 		return
@@ -146,7 +176,17 @@ func (s *LiteLLMModelSyncer) Run(ctx context.Context, opts LiteLLMModelSyncOptio
 	if opts.Interval <= 0 {
 		opts.Interval = defaultLiteLLMModelReconcileInterval
 	}
-	s.reconcileAllAndLog(ctx)
+	orphanEvery := opts.OrphanSweepEvery
+	if orphanEvery == 0 {
+		orphanEvery = defaultLiteLLMOrphanSweepEvery
+	}
+	tick := 0
+	runOnce := func() {
+		sweep := orphanEvery > 0 && tick%orphanEvery == 0
+		tick++
+		s.reconcileAndLog(ctx, LiteLLMReconcileOptions{SweepOrphans: sweep})
+	}
+	runOnce()
 	ticker := time.NewTicker(opts.Interval)
 	defer ticker.Stop()
 	for {
@@ -154,7 +194,7 @@ func (s *LiteLLMModelSyncer) Run(ctx context.Context, opts LiteLLMModelSyncOptio
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.reconcileAllAndLog(ctx)
+			runOnce()
 		}
 	}
 }
@@ -195,12 +235,12 @@ func (s *LiteLLMModelSyncer) reconcileModel(ctx context.Context, model domain.Ag
 	return nil
 }
 
-// reconcileAllAndLog 執行完整對帳並輸出摘要。
-func (s *LiteLLMModelSyncer) reconcileAllAndLog(ctx context.Context) {
-	processed, err := s.ReconcileAll(ctx)
+// reconcileAndLog 執行對帳並輸出摘要。
+func (s *LiteLLMModelSyncer) reconcileAndLog(ctx context.Context, opts LiteLLMReconcileOptions) {
+	processed, err := s.Reconcile(ctx, opts)
 	if err != nil {
-		s.logger.WarnContext(ctx, "LiteLLM model reconciliation failed", "models", processed, "error", err)
+		s.logger.WarnContext(ctx, "LiteLLM model reconciliation failed", "models", processed, "sweep_orphans", opts.SweepOrphans, "error", err)
 		return
 	}
-	s.logger.InfoContext(ctx, "LiteLLM model reconciliation completed", "models", processed)
+	s.logger.InfoContext(ctx, "LiteLLM model reconciliation completed", "models", processed, "sweep_orphans", opts.SweepOrphans)
 }

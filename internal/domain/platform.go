@@ -92,13 +92,38 @@ type PlatformFormDraft struct {
 	Payload     map[string]any `json:"payload,omitempty"`
 }
 
+// PlatformFormsQuery 定義平臺表單查詢的資料結構。
+type PlatformFormsQuery struct {
+	Status   string `json:"status,omitempty"`
+	Template string `json:"template,omitempty"`
+	Search   string `json:"search,omitempty"`
+	Page     int    `json:"page,omitempty"`
+	PageSize int    `json:"page_size,omitempty"`
+}
+
+// PlatformFormApplicationPage 定義平臺表單 application 分頁回應的資料結構。
+type PlatformFormApplicationPage struct {
+	Items    []PlatformFormApplication `json:"items"`
+	Total    int                       `json:"total"`
+	Page     int                       `json:"page"`
+	PageSize int                       `json:"page_size"`
+}
+
+// PlatformFormDraftPage 定義平臺表單草稿分頁回應的資料結構。
+type PlatformFormDraftPage struct {
+	Items    []PlatformFormDraft `json:"items"`
+	Total    int                 `json:"total"`
+	Page     int                 `json:"page"`
+	PageSize int                 `json:"page_size"`
+}
+
 // PlatformFormsResponse 定義平臺表單回應的資料結構。
 type PlatformFormsResponse struct {
-	Categories   []PlatformFormColumn      `json:"categories"`
-	Applications []PlatformFormApplication `json:"applications"`
-	Drafts       []PlatformFormDraft       `json:"drafts"`
-	AIMessages   []PlatformChatMessage     `json:"ai_messages"`
-	QuickPrompts []string                  `json:"quick_prompts"`
+	Categories   []PlatformFormColumn       `json:"categories"`
+	Applications PlatformFormApplicationPage `json:"applications"`
+	Drafts       PlatformFormDraftPage       `json:"drafts"`
+	AIMessages   []PlatformChatMessage      `json:"ai_messages"`
+	QuickPrompts []string                   `json:"quick_prompts"`
 }
 
 // PlatformTaskItem 定義平臺任務項目的資料結構。
@@ -109,6 +134,7 @@ type PlatformTaskItem struct {
 	Product  string  `json:"product"`
 	Hours    float64 `json:"hours"`
 	Note     string  `json:"note"`
+	WorkDate string  `json:"work_date,omitempty"`
 	Source   string  `json:"source,omitempty"`
 	ReadOnly bool    `json:"read_only,omitempty"`
 }
@@ -204,10 +230,26 @@ type ConvertPlatformTaskTodoInput struct {
 	Note     string  `json:"note,omitempty"`
 }
 
+// PlatformTasksDefaultWindowDays 是平臺任務查詢的預設時間窗天數。
+const PlatformTasksDefaultWindowDays = 90
+
+// PlatformTasksQuery 定義平臺任務 cursor 分頁與時間窗查詢的資料結構。
+type PlatformTasksQuery struct {
+	Cursor          string    `json:"cursor,omitempty"`
+	PageSize        int       `json:"page_size,omitempty"`
+	From            time.Time `json:"from,omitempty"`
+	To              time.Time `json:"to,omitempty"`
+	HasCursor       bool      `json:"-"`
+	CursorCreatedAt time.Time `json:"-"`
+	CursorID        string    `json:"-"`
+}
+
 // PlatformTasksResponse 定義平臺任務回應的資料結構。
 type PlatformTasksResponse struct {
 	Records      []PlatformTaskRecord  `json:"records"`
+	Items        []PlatformTaskItem    `json:"items"`
 	Todos        []PlatformTaskTodo    `json:"todos"`
+	NextCursor   string                `json:"next_cursor,omitempty"`
 	ClockSummary *PlatformClockSummary `json:"clock_summary,omitempty"`
 	AIMessages   []PlatformChatMessage `json:"ai_messages"`
 	QuickPrompts []string              `json:"quick_prompts"`
