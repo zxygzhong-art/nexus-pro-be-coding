@@ -2,6 +2,7 @@ package ehrms_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -145,5 +146,38 @@ func TestListLeaveBalancesAndDetails(t *testing.T) {
 	}
 	if len(details) != 1 || details[0]["員工編號"] != "IKM017" || details[0]["日期"] != "2026-06-11" || details[0]["開始時間"] != "09:00" {
 		t.Fatalf("unexpected leave details: %+v", details)
+	}
+}
+
+func TestListLeaveTypesUsesCatalogEndpoint(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/leave-types" || r.Header.Get("X-API-Key") != "secret" {
+			t.Fatalf("unexpected request: path=%s apiKey=%q", r.URL.Path, r.Header.Get("X-API-Key"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"leave_types": [
+			{"code":"I001","kind":"category","unit":"小時","abbr_en":"全薪病假","name_en":"全薪病假","name_zh":"全薪病假","min_unit":"0.5","max_value":"40小時(1年)","parent_code":null,"future_field":"preserved"},
+			{"code":"I001-1","kind":"item","show":"是","range":"當月當年","name_zh":"Full Pay Sick Leave","name_en":"全薪病假","parent_code":"I001","incl_holiday":"否","incl_festival":"否","first_year_rule":"無"}
+		]}`))
+	}))
+	defer server.Close()
+
+	client, err := ehrms.NewClient(server.URL, "secret", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	items, err := client.ListLeaveTypes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 2 || items[0].Code != "I001" || items[0].Kind != "category" || items[0].NameZH != "全薪病假" || items[0].MinUnit != "0.5" {
+		t.Fatalf("unexpected first leave type: %+v", items)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(items[0].Raw, &raw); err != nil || raw["future_field"] != "preserved" {
+		t.Fatalf("expected untouched raw payload, got raw=%v err=%v", raw, err)
+	}
+	if items[1].Code != "I001-1" || items[1].ParentCode != "I001" || items[1].InclHoliday != "否" || items[1].FirstYearRule != "無" {
+		t.Fatalf("unexpected child leave type: %+v", items[1])
 	}
 }

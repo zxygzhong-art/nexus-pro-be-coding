@@ -504,7 +504,7 @@ func (c HRService) TransitionEmployeeStatus(ctx RequestContext, id string, input
 		next.EmploymentInfo["transition_end_date"] = input.EndDate
 		next.EmploymentInfo["transition_type"] = employeeTransitionType(currentStatus, status)
 		next = tx.appendHistoryForChangedEmployment(before, next, input.Reason)
-		if reinstating && transitionStart != nil && len(next.InternalExperiences) > 0 {
+		if transitionStart != nil && len(next.InternalExperiences) > 0 {
 			next.InternalExperiences[len(next.InternalExperiences)-1].StartDate = transitionStart
 		}
 		if err := tx.store.UpsertEmployee(goContext(ctx), next); err != nil {

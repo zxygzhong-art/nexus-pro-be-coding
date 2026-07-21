@@ -2020,7 +2020,7 @@ func (q *Queries) GetLeaveTypeExternalMapping(ctx context.Context, arg GetLeaveT
 }
 
 const getOrgUnit = `-- name: GetOrgUnit :one
-SELECT id, tenant_id, code, name, name_en, parent_id, path, manager_position_id, source, closed, created_at, updated_at FROM org_units
+SELECT id, tenant_id, code, name, name_en, parent_id, path, source, closed, show_in_org_chart, created_at, updated_at FROM org_units
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -2040,9 +2040,9 @@ func (q *Queries) GetOrgUnit(ctx context.Context, arg GetOrgUnitParams) (OrgUnit
 		&i.NameEn,
 		&i.ParentID,
 		&i.Path,
-		&i.ManagerPositionID,
 		&i.Source,
 		&i.Closed,
+		&i.ShowInOrgChart,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -2337,7 +2337,7 @@ INSERT INTO form_instance_field_values (
     $5, $6,
     CASE WHEN $6::text = 'text' THEN $7::text ELSE NULL END,
     CASE WHEN $6::text = 'number' THEN NULLIF($8::text, '')::numeric ELSE NULL END,
-    CASE WHEN $6::text = 'boolean' THEN $9 ELSE NULL END,
+    CASE WHEN $6::text = 'boolean' THEN $9::boolean ELSE NULL END,
     CASE WHEN $6::text = 'date' THEN NULLIF($10::text, '')::date ELSE NULL END,
     CASE WHEN $6::text = 'timestamp' THEN NULLIF($11::text, '')::timestamptz ELSE NULL END,
     CASE WHEN $6::text = 'json' AND $12::text <> '' THEN $12::jsonb ELSE NULL END,
@@ -2365,7 +2365,7 @@ type InsertFormInstanceFieldValueParams struct {
 	ValueType         string             `json:"value_type"`
 	ValueText         string             `json:"value_text"`
 	ValueNumber       string             `json:"value_number"`
-	ValueBoolean      interface{}        `json:"value_boolean"`
+	ValueBoolean      pgtype.Bool        `json:"value_boolean"`
 	ValueDate         string             `json:"value_date"`
 	ValueTimestamp    string             `json:"value_timestamp"`
 	ValueJson         string             `json:"value_json"`
@@ -4347,7 +4347,7 @@ func (q *Queries) ListOpenLeaveTypeSyncIssues(ctx context.Context, tenantID stri
 }
 
 const listOrgUnits = `-- name: ListOrgUnits :many
-SELECT id, tenant_id, code, name, name_en, parent_id, path, manager_position_id, source, closed, created_at, updated_at FROM org_units
+SELECT id, tenant_id, code, name, name_en, parent_id, path, source, closed, show_in_org_chart, created_at, updated_at FROM org_units
 WHERE tenant_id = $1
 ORDER BY closed ASC, code ASC, name ASC, created_at ASC, id ASC
 `
@@ -4369,9 +4369,9 @@ func (q *Queries) ListOrgUnits(ctx context.Context, tenantID string) ([]OrgUnit,
 			&i.NameEn,
 			&i.ParentID,
 			&i.Path,
-			&i.ManagerPositionID,
 			&i.Source,
 			&i.Closed,
+			&i.ShowInOrgChart,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -5176,6 +5176,30 @@ type UpdateEmployeeOrgChartVisibilityParams struct {
 
 func (q *Queries) UpdateEmployeeOrgChartVisibility(ctx context.Context, arg UpdateEmployeeOrgChartVisibilityParams) error {
 	_, err := q.db.Exec(ctx, updateEmployeeOrgChartVisibility,
+		arg.ShowInOrgChart,
+		arg.UpdatedAt,
+		arg.TenantID,
+		arg.ID,
+	)
+	return err
+}
+
+const updateOrgUnitOrgChartVisibility = `-- name: UpdateOrgUnitOrgChartVisibility :exec
+UPDATE org_units
+SET show_in_org_chart = $1,
+    updated_at = $2
+WHERE tenant_id = $3 AND id = $4
+`
+
+type UpdateOrgUnitOrgChartVisibilityParams struct {
+	ShowInOrgChart bool               `json:"show_in_org_chart"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	TenantID       string             `json:"tenant_id"`
+	ID             string             `json:"id"`
+}
+
+func (q *Queries) UpdateOrgUnitOrgChartVisibility(ctx context.Context, arg UpdateOrgUnitOrgChartVisibilityParams) error {
+	_, err := q.db.Exec(ctx, updateOrgUnitOrgChartVisibility,
 		arg.ShowInOrgChart,
 		arg.UpdatedAt,
 		arg.TenantID,
@@ -6927,9 +6951,9 @@ func (q *Queries) UpsertLeaveTypeSyncIssue(ctx context.Context, arg UpsertLeaveT
 
 const upsertOrgUnit = `-- name: UpsertOrgUnit :one
 INSERT INTO org_units (
-    id, tenant_id, code, name, name_en, parent_id, path, manager_position_id, source, closed, created_at, updated_at
+    id, tenant_id, code, name, name_en, parent_id, path, source, closed, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
 ON CONFLICT (id) DO UPDATE SET
     code = EXCLUDED.code,
@@ -6937,28 +6961,26 @@ ON CONFLICT (id) DO UPDATE SET
     name_en = EXCLUDED.name_en,
     parent_id = EXCLUDED.parent_id,
     path = EXCLUDED.path,
-    manager_position_id = EXCLUDED.manager_position_id,
     source = EXCLUDED.source,
     closed = EXCLUDED.closed,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
 WHERE org_units.tenant_id = EXCLUDED.tenant_id
-RETURNING id, tenant_id, code, name, name_en, parent_id, path, manager_position_id, source, closed, created_at, updated_at
+RETURNING id, tenant_id, code, name, name_en, parent_id, path, source, closed, show_in_org_chart, created_at, updated_at
 `
 
 type UpsertOrgUnitParams struct {
-	ID                string             `json:"id"`
-	TenantID          string             `json:"tenant_id"`
-	Code              string             `json:"code"`
-	Name              string             `json:"name"`
-	NameEn            string             `json:"name_en"`
-	ParentID          string             `json:"parent_id"`
-	Path              []string           `json:"path"`
-	ManagerPositionID string             `json:"manager_position_id"`
-	Source            string             `json:"source"`
-	Closed            bool               `json:"closed"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ID        string             `json:"id"`
+	TenantID  string             `json:"tenant_id"`
+	Code      string             `json:"code"`
+	Name      string             `json:"name"`
+	NameEn    string             `json:"name_en"`
+	ParentID  string             `json:"parent_id"`
+	Path      []string           `json:"path"`
+	Source    string             `json:"source"`
+	Closed    bool               `json:"closed"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) UpsertOrgUnit(ctx context.Context, arg UpsertOrgUnitParams) (OrgUnit, error) {
@@ -6970,7 +6992,6 @@ func (q *Queries) UpsertOrgUnit(ctx context.Context, arg UpsertOrgUnitParams) (O
 		arg.NameEn,
 		arg.ParentID,
 		arg.Path,
-		arg.ManagerPositionID,
 		arg.Source,
 		arg.Closed,
 		arg.CreatedAt,
@@ -6985,9 +7006,9 @@ func (q *Queries) UpsertOrgUnit(ctx context.Context, arg UpsertOrgUnitParams) (O
 		&i.NameEn,
 		&i.ParentID,
 		&i.Path,
-		&i.ManagerPositionID,
 		&i.Source,
 		&i.Closed,
+		&i.ShowInOrgChart,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)

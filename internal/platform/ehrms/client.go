@@ -45,6 +45,7 @@ const maxEmployeesResponseBytes = 10 << 20
 const maxDepartmentsResponseBytes = 5 << 20
 const maxPositionsResponseBytes = 5 << 20
 const maxAttendanceResponseBytes = 20 << 20
+const maxLeaveTypesResponseBytes = 5 << 20
 const maxLeaveBalancesResponseBytes = 10 << 20
 const maxLeaveDetailsResponseBytes = 10 << 20
 
@@ -151,6 +152,55 @@ func (c *Client) ListAttendance(ctx context.Context) ([]domain.EHRMSAttendanceRe
 	return normalizeAttendanceRecords(rows), nil
 }
 
+// ListLeaveTypes 列出 eHRMS 假期類型目錄。
+func (c *Client) ListLeaveTypes(ctx context.Context) ([]domain.EHRMSLeaveType, error) {
+	body, err := c.getJSON(ctx, "/leave-types", maxLeaveTypesResponseBytes, "leave types")
+	if err != nil {
+		return nil, err
+	}
+	raw, err := decodeJSONObjectRowsOrEnvelope(body, "leave types", "items", "data", "leave_types", "leaveTypes")
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]domain.EHRMSLeaveType, 0, len(raw))
+	for index, item := range raw {
+		record := stringRecordFromJSON(item)
+		code := firstRecordValue(record, "code", "leave_code", "leave_type_code", "leave_type", "假別代碼", "假別")
+		if code == "" {
+			return nil, fmt.Errorf("decode ehrms leave types row %d: code is required", index+1)
+		}
+		rawItem, marshalErr := json.Marshal(item)
+		if marshalErr != nil {
+			return nil, fmt.Errorf("encode ehrms leave types row %d: %w", index+1, marshalErr)
+		}
+		rows = append(rows, domain.EHRMSLeaveType{
+			Code:          code,
+			Kind:          firstRecordValue(record, "kind"),
+			Unit:          firstRecordValue(record, "unit"),
+			AbbrEN:        firstRecordValue(record, "abbr_en"),
+			NameEN:        firstRecordValue(record, "name_en"),
+			NameZH:        firstRecordValue(record, "name_zh", "name", "label"),
+			MinUnit:       firstRecordValue(record, "min_unit"),
+			MaxValue:      firstRecordValue(record, "max_value"),
+			ParentCode:    firstRecordValue(record, "parent_code"),
+			Show:          firstRecordValue(record, "show"),
+			Range:         firstRecordValue(record, "range"),
+			Ratio:         firstRecordValue(record, "ratio"),
+			Target:        firstRecordValue(record, "target"),
+			ShowMax:       firstRecordValue(record, "show_max"),
+			PreLeave:      firstRecordValue(record, "pre_leave"),
+			SalaryStd:     firstRecordValue(record, "salary_std"),
+			InclHoliday:   firstRecordValue(record, "incl_holiday"),
+			TargetClass:   firstRecordValue(record, "target_class"),
+			InclFestival:  firstRecordValue(record, "incl_festival"),
+			FirstYearRule: firstRecordValue(record, "first_year_rule"),
+			Rule:          firstRecordValue(record, "rule"),
+			Raw:           rawItem,
+		})
+	}
+	return rows, nil
+}
+
 // ListLeaveBalances 列出假別餘額。
 func (c *Client) ListLeaveBalances(ctx context.Context) ([]domain.EHRMSLeaveBalanceRecord, error) {
 	body, err := c.getJSON(ctx, "/leave-balance", maxLeaveBalancesResponseBytes, "leave balances")
@@ -166,6 +216,22 @@ func (c *Client) ListLeaveBalances(ctx context.Context) ([]domain.EHRMSLeaveBala
 		rows = append(rows, domain.EHRMSLeaveBalanceRecord(stringRecordFromJSON(row)))
 	}
 	return normalizeLeaveBalanceRecords(rows), nil
+}
+
+func firstRecordValue(record map[string]string, keys ...string) string {
+	for _, key := range keys {
+		if value := strings.TrimSpace(record[key]); value != "" {
+			return value
+		}
+		for candidate, raw := range record {
+			if strings.EqualFold(candidate, key) {
+				if value := strings.TrimSpace(raw); value != "" {
+					return value
+				}
+			}
+		}
+	}
+	return ""
 }
 
 // ListLeaveDetails 列出已休逐筆明細。
@@ -219,4 +285,30 @@ func decodeJSONObjectRows(body []byte, label string) ([]map[string]any, error) {
 		return nil, fmt.Errorf("decode ehrms %s: %w", label, err)
 	}
 	return raw, nil
+}
+
+func decodeJSONObjectRowsOrEnvelope(body []byte, label string, envelopeKeys ...string) ([]map[string]any, error) {
+	rows, err := decodeJSONObjectRows(body, label)
+	if err == nil {
+		return rows, nil
+	}
+
+	decoder := json.NewDecoder(strings.NewReader(string(body)))
+	decoder.UseNumber()
+	var envelope map[string]json.RawMessage
+	if decodeErr := decoder.Decode(&envelope); decodeErr != nil {
+		return nil, err
+	}
+	for _, key := range envelopeKeys {
+		raw, ok := envelope[key]
+		if !ok {
+			continue
+		}
+		rows, decodeErr := decodeJSONObjectRows(raw, label)
+		if decodeErr != nil {
+			return nil, decodeErr
+		}
+		return rows, nil
+	}
+	return nil, err
 }

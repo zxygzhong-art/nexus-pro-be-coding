@@ -12,7 +12,7 @@ import (
 )
 
 const getPosition = `-- name: GetPosition :one
-SELECT id, tenant_id, code, name, name_en, org_unit_id, level, status, description, source, created_at, updated_at FROM positions
+SELECT id, tenant_id, code, name, name_en, level, status, description, source, created_at, updated_at FROM positions
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -30,7 +30,6 @@ func (q *Queries) GetPosition(ctx context.Context, arg GetPositionParams) (Posit
 		&i.Code,
 		&i.Name,
 		&i.NameEn,
-		&i.OrgUnitID,
 		&i.Level,
 		&i.Status,
 		&i.Description,
@@ -42,7 +41,7 @@ func (q *Queries) GetPosition(ctx context.Context, arg GetPositionParams) (Posit
 }
 
 const getPositionByCode = `-- name: GetPositionByCode :one
-SELECT id, tenant_id, code, name, name_en, org_unit_id, level, status, description, source, created_at, updated_at FROM positions
+SELECT id, tenant_id, code, name, name_en, level, status, description, source, created_at, updated_at FROM positions
 WHERE tenant_id = $1 AND lower(code) = lower($2)
 `
 
@@ -60,7 +59,6 @@ func (q *Queries) GetPositionByCode(ctx context.Context, arg GetPositionByCodePa
 		&i.Code,
 		&i.Name,
 		&i.NameEn,
-		&i.OrgUnitID,
 		&i.Level,
 		&i.Status,
 		&i.Description,
@@ -72,7 +70,7 @@ func (q *Queries) GetPositionByCode(ctx context.Context, arg GetPositionByCodePa
 }
 
 const getPositionByName = `-- name: GetPositionByName :one
-SELECT id, tenant_id, code, name, name_en, org_unit_id, level, status, description, source, created_at, updated_at FROM positions
+SELECT id, tenant_id, code, name, name_en, level, status, description, source, created_at, updated_at FROM positions
 WHERE tenant_id = $1 AND lower(name) = lower($2)
 `
 
@@ -90,7 +88,6 @@ func (q *Queries) GetPositionByName(ctx context.Context, arg GetPositionByNamePa
 		&i.Code,
 		&i.Name,
 		&i.NameEn,
-		&i.OrgUnitID,
 		&i.Level,
 		&i.Status,
 		&i.Description,
@@ -102,7 +99,7 @@ func (q *Queries) GetPositionByName(ctx context.Context, arg GetPositionByNamePa
 }
 
 const listPositions = `-- name: ListPositions :many
-SELECT id, tenant_id, code, name, name_en, org_unit_id, level, status, description, source, created_at, updated_at FROM positions
+SELECT id, tenant_id, code, name, name_en, level, status, description, source, created_at, updated_at FROM positions
 WHERE tenant_id = $1
 ORDER BY
   CASE WHEN status = 'active' THEN 0 ELSE 1 END,
@@ -126,7 +123,6 @@ func (q *Queries) ListPositions(ctx context.Context, tenantID string) ([]Positio
 			&i.Code,
 			&i.Name,
 			&i.NameEn,
-			&i.OrgUnitID,
 			&i.Level,
 			&i.Status,
 			&i.Description,
@@ -146,15 +142,14 @@ func (q *Queries) ListPositions(ctx context.Context, tenantID string) ([]Positio
 
 const upsertPosition = `-- name: UpsertPosition :one
 INSERT INTO positions (
-    id, tenant_id, code, name, name_en, org_unit_id, level, status, description, source, created_at, updated_at
+    id, tenant_id, code, name, name_en, level, status, description, source, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
 ON CONFLICT (id) DO UPDATE SET
     code = EXCLUDED.code,
     name = EXCLUDED.name,
     name_en = EXCLUDED.name_en,
-    org_unit_id = EXCLUDED.org_unit_id,
     level = EXCLUDED.level,
     status = EXCLUDED.status,
     description = EXCLUDED.description,
@@ -162,7 +157,7 @@ ON CONFLICT (id) DO UPDATE SET
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
 WHERE positions.tenant_id = EXCLUDED.tenant_id
-RETURNING id, tenant_id, code, name, name_en, org_unit_id, level, status, description, source, created_at, updated_at
+RETURNING id, tenant_id, code, name, name_en, level, status, description, source, created_at, updated_at
 `
 
 type UpsertPositionParams struct {
@@ -171,7 +166,6 @@ type UpsertPositionParams struct {
 	Code        string             `json:"code"`
 	Name        string             `json:"name"`
 	NameEn      string             `json:"name_en"`
-	OrgUnitID   string             `json:"org_unit_id"`
 	Level       string             `json:"level"`
 	Status      string             `json:"status"`
 	Description string             `json:"description"`
@@ -187,7 +181,6 @@ func (q *Queries) UpsertPosition(ctx context.Context, arg UpsertPositionParams) 
 		arg.Code,
 		arg.Name,
 		arg.NameEn,
-		arg.OrgUnitID,
 		arg.Level,
 		arg.Status,
 		arg.Description,
@@ -202,7 +195,6 @@ func (q *Queries) UpsertPosition(ctx context.Context, arg UpsertPositionParams) 
 		&i.Code,
 		&i.Name,
 		&i.NameEn,
-		&i.OrgUnitID,
 		&i.Level,
 		&i.Status,
 		&i.Description,

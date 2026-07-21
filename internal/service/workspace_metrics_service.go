@@ -18,19 +18,24 @@ type workspaceOrgInfo struct {
 }
 
 type workspaceMovementStats struct {
-	BU         string
-	Dept       string
-	Base       int
-	Prev       int
-	Hires      int
-	Resigned   int
-	Layoff     int
-	OnLeave    int
-	End        int
-	YTDSep     int
-	YTDHires   int
-	YTDEnd     int
-	YTDOnLeave int
+	BU                     string
+	Dept                   string
+	Base                   int
+	Prev                   int
+	Hires                  int
+	Resigned               int
+	Layoff                 int
+	OnLeave                int
+	End                    int
+	YTDSep                 int
+	YTDHires               int
+	YTDEnd                 int
+	YTDOnLeave             int
+	PrevLastDaySeparations int
+	NonLastDaySeparations  int
+	RatePrev               [12]int
+	RateEnd                [12]int
+	RateResigned           [12]int
 }
 
 type workspaceLeaveCell struct {
@@ -235,6 +240,119 @@ func workspaceEmployeeSeparatedInRange(item Employee, start time.Time, end time.
 		return false
 	}
 	return !separatedAt.Before(start) && separatedAt.Before(end)
+}
+
+// workspaceEmployeeIsLayoff 依離職原因區分資遣。資遣仍會減少期末人數，
+// 但依在職分析口徑不納入離職人數與離職率。
+func workspaceEmployeeIsLayoff(item Employee) bool {
+	reason := strings.ToLower(strings.TrimSpace(utils.FirstNonEmpty(
+		stringFromMap(item.EmploymentInfo, "resign_reason"),
+		stringFromMap(item.EmploymentInfo, "transition_reason"),
+	)))
+	if reason == "" {
+		for i := len(item.InternalExperiences) - 1; i >= 0; i-- {
+			if NormalizeEmployeeStatus(item.InternalExperiences[i].Status) == string(EmployeeStatusResigned) {
+				reason = strings.ToLower(strings.TrimSpace(item.InternalExperiences[i].Reason))
+				break
+			}
+		}
+	}
+	return strings.Contains(reason, "資遣") || strings.Contains(reason, "资遣") ||
+		strings.Contains(reason, "layoff") || strings.Contains(reason, "laid off") ||
+		strings.Contains(reason, "redundan")
+}
+
+func workspaceDateOnlyUTC(value time.Time) time.Time {
+	value = value.UTC()
+	return time.Date(value.Year(), value.Month(), value.Day(), 0, 0, 0, 0, time.UTC)
+}
+
+// workspaceSeparationOnClosingDay 判斷離職日是否為 periodEnd 前一日（即期末日）。
+// 期末日離職者留在當期期末人數，於次期扣除。
+func workspaceSeparationOnClosingDay(separatedAt time.Time, periodEnd time.Time) bool {
+	closingDay := workspaceDateOnlyUTC(periodEnd).AddDate(0, 0, -1)
+	return workspaceDateOnlyUTC(separatedAt).Equal(closingDay)
+}
+
+func workspaceEmployeeLeaveSuspensionRange(item Employee) (time.Time, time.Time, bool) {
+	if workspaceEmployeeStatus(item) != string(EmployeeStatusLeaveSuspended) {
+		return time.Time{}, time.Time{}, false
+	}
+	start := workspaceDateOnlyUTC(item.UpdatedAt)
+	if raw := strings.TrimSpace(stringFromMap(item.EmploymentInfo, "transition_start_date")); raw != "" {
+		if parsed, err := utils.ParseDate(raw); err == nil {
+			start = workspaceDateOnlyUTC(parsed)
+		}
+	}
+	var end time.Time
+	if raw := strings.TrimSpace(stringFromMap(item.EmploymentInfo, "transition_end_date")); raw != "" {
+		if parsed, err := utils.ParseDate(raw); err == nil {
+			end = workspaceDateOnlyUTC(parsed)
+		}
+	}
+	return start, end, true
+}
+
+func workspaceEmployeeLeaveSuspendedAt(item Employee, at time.Time) bool {
+	start, end, ok := workspaceEmployeeLeaveSuspensionRange(item)
+	if ok && workspaceDateInInclusiveRange(at, start, end) {
+		return true
+	}
+	for _, experience := range item.InternalExperiences {
+		if experience.Current || NormalizeEmployeeStatus(experience.Status) != string(EmployeeStatusLeaveSuspended) || experience.StartDate == nil {
+			continue
+		}
+		experienceEnd := time.Time{}
+		if experience.EndDate != nil {
+			experienceEnd = *experience.EndDate
+		}
+		if workspaceDateInInclusiveRange(at, *experience.StartDate, experienceEnd) {
+			return true
+		}
+	}
+	return false
+}
+
+func workspaceEmployeeLeaveSuspendedInRange(item Employee, start time.Time, end time.Time) bool {
+	leaveStart, _, ok := workspaceEmployeeLeaveSuspensionRange(item)
+	if ok && !leaveStart.Before(start) && leaveStart.Before(end) {
+		return true
+	}
+	for _, experience := range item.InternalExperiences {
+		if experience.Current || NormalizeEmployeeStatus(experience.Status) != string(EmployeeStatusLeaveSuspended) || experience.StartDate == nil {
+			continue
+		}
+		leaveStart = workspaceDateOnlyUTC(*experience.StartDate)
+		if !leaveStart.Before(start) && leaveStart.Before(end) {
+			return true
+		}
+	}
+	return false
+}
+
+func workspaceDateInInclusiveRange(value time.Time, start time.Time, end time.Time) bool {
+	day := workspaceDateOnlyUTC(value)
+	start = workspaceDateOnlyUTC(start)
+	if day.Before(start) {
+		return false
+	}
+	return end.IsZero() || !day.After(workspaceDateOnlyUTC(end))
+}
+
+// workspaceEmployeeInTurnoverClosingHeadcountAt 使用在職分析的期末口徑：
+// 待加入與留停不計入；期末日離職者仍計入本期，於次期扣除。
+func workspaceEmployeeInTurnoverClosingHeadcountAt(item Employee, periodEnd time.Time) bool {
+	closingAt := periodEnd.Add(-time.Nanosecond)
+	if item.HireDate != nil && item.HireDate.After(closingAt) {
+		return false
+	}
+	if workspaceEmployeeStatus(item) == string(EmployeeStatusOnboarding) {
+		return false
+	}
+	if separatedAt, ok := workspaceEmployeeSeparationTime(item); ok && separatedAt.Before(periodEnd) && !workspaceSeparationOnClosingDay(separatedAt, periodEnd) {
+		return false
+	}
+	return !workspaceEmployeeLeaveSuspendedAt(item, closingAt)
 }
 
 // workspaceAttendanceSegments 處理工作區考勤 segments。
@@ -489,103 +607,6 @@ func workspaceManagerCycle(employees []Employee, employeeID, managerID string) b
 	return false
 }
 
-// workspaceDerivedManager 記錄組織單元的直接主管與配置異常。
-type workspaceDerivedManager struct {
-	EmployeeID string
-	Issue      string
-}
-
-// workspaceDerivedManagersByOrgUnit 建立每個組織單元的直接主管與配置異常。
-func workspaceDerivedManagersByOrgUnit(units []OrgUnit, positions []Position, employees []Employee) (map[string]workspaceDerivedManager, map[string]OrgUnit) {
-	activePositions := map[string]Position{}
-	for _, position := range positions {
-		if position.Status == string(PositionStatusDisabled) {
-			continue
-		}
-		activePositions[position.ID] = position
-	}
-	incumbentsByPosition := map[string][]Employee{}
-	for _, employee := range employees {
-		if strings.TrimSpace(employee.PositionID) == "" {
-			continue
-		}
-		if !workspaceEmployeeIsActive(employee) {
-			continue
-		}
-		incumbentsByPosition[employee.PositionID] = append(incumbentsByPosition[employee.PositionID], employee)
-	}
-	for positionID, incumbents := range incumbentsByPosition {
-		sort.SliceStable(incumbents, func(i, j int) bool {
-			left := workspaceEmployeeDisplayID(incumbents[i])
-			right := workspaceEmployeeDisplayID(incumbents[j])
-			if left != right {
-				return left < right
-			}
-			return incumbents[i].ID < incumbents[j].ID
-		})
-		incumbentsByPosition[positionID] = incumbents
-	}
-	unitsByID := map[string]OrgUnit{}
-	for _, unit := range units {
-		unitsByID[unit.ID] = unit
-	}
-	out := map[string]workspaceDerivedManager{}
-	for _, unit := range units {
-		positionID := strings.TrimSpace(unit.ManagerPositionID)
-		if positionID == "" {
-			out[unit.ID] = workspaceDerivedManager{Issue: "manager_position_missing"}
-			continue
-		}
-		if _, ok := activePositions[positionID]; !ok {
-			out[unit.ID] = workspaceDerivedManager{Issue: "manager_position_invalid"}
-			continue
-		}
-		incumbents := incumbentsByPosition[positionID]
-		if len(incumbents) == 0 {
-			out[unit.ID] = workspaceDerivedManager{Issue: "manager_position_unstaffed"}
-			continue
-		}
-		issue := ""
-		if len(incumbents) > 1 {
-			issue = "manager_position_multiple"
-		}
-		out[unit.ID] = workspaceDerivedManager{EmployeeID: incumbents[0].ID, Issue: issue}
-	}
-	return out, unitsByID
-}
-
-// workspaceEffectiveManager 依人工覆蓋或最近的組織單元主管推導有效上級。
-func workspaceEffectiveManager(employee Employee, derivedManagers map[string]workspaceDerivedManager, unitsByID map[string]OrgUnit) (string, string, string) {
-	if override := strings.TrimSpace(employee.ManagerEmployeeID); override != "" {
-		return override, "override", ""
-	}
-	orgUnitID := strings.TrimSpace(employee.OrgUnitID)
-	if orgUnitID == "" {
-		return "", "none", "org_unit_missing"
-	}
-	issue := ""
-	seen := map[string]struct{}{}
-	for orgUnitID != "" {
-		if _, exists := seen[orgUnitID]; exists {
-			return "", "none", "org_unit_cycle"
-		}
-		seen[orgUnitID] = struct{}{}
-		unit, ok := unitsByID[orgUnitID]
-		if !ok {
-			return "", "none", "org_unit_not_found"
-		}
-		manager := derivedManagers[orgUnitID]
-		if issue == "" {
-			issue = manager.Issue
-		}
-		if manager.EmployeeID != "" && manager.EmployeeID != employee.ID {
-			return manager.EmployeeID, "org_unit", issue
-		}
-		orgUnitID = strings.TrimSpace(unit.ParentID)
-	}
-	return "", "none", issue
-}
-
 func workspaceEffectiveEmployeeLevel(id string, parents map[string]string, employees map[string]Employee, memo map[string]int) int {
 	if level, ok := memo[id]; ok {
 		return level
@@ -625,34 +646,6 @@ func workspaceEmployeeIsActive(employee Employee) bool {
 	}
 }
 
-// workspaceTurnoverEligibleEmployees 排除目前隸屬已關閉組織或已停用崗位的員工。
-func workspaceTurnoverEligibleEmployees(employees []Employee, units []OrgUnit, positions []Position) []Employee {
-	closedOrgUnitIDs := map[string]struct{}{}
-	for _, unit := range units {
-		if unit.Closed {
-			closedOrgUnitIDs[unit.ID] = struct{}{}
-		}
-	}
-	disabledPositionIDs := map[string]struct{}{}
-	for _, position := range positions {
-		if position.Status == string(PositionStatusDisabled) {
-			disabledPositionIDs[position.ID] = struct{}{}
-		}
-	}
-
-	eligible := make([]Employee, 0, len(employees))
-	for _, employee := range employees {
-		if _, closed := closedOrgUnitIDs[strings.TrimSpace(employee.OrgUnitID)]; closed {
-			continue
-		}
-		if _, disabled := disabledPositionIDs[strings.TrimSpace(employee.PositionID)]; disabled {
-			continue
-		}
-		eligible = append(eligible, employee)
-	}
-	return eligible
-}
-
 // workspaceOrganizationEmployees 排除離職員工，並移除指向離職主管的人工覆蓋。
 func workspaceOrganizationEmployees(employees []Employee) []Employee {
 	departedIDs := map[string]struct{}{}
@@ -676,7 +669,7 @@ func workspaceOrganizationEmployees(employees []Employee) []Employee {
 	return out
 }
 
-// workspaceAverageHeadcount 回傳期間平均在職人數 = (期初在職 + 期末在職) / 2，保底 1。
+// workspaceAverageHeadcount 回傳期間平均在職人數 = (前期期末 + 本期期末) / 2，保底 1。
 // 這是所有離職率的統一分母。採用期間平均在職（而非期初或期末單一時點快照），
 // 是人資統計的常規口徑：當期內人數劇烈變動時，單一時點分母會讓離職率失真
 // （例如期初基數極小時離職率可超過 100%）。
@@ -688,8 +681,7 @@ func workspaceAverageHeadcount(prev int, end int) float64 {
 	return avg
 }
 
-// workspaceTurnoverRate 統一離職率口徑：期間離職人數 ÷ 期間平均在職人數 × 100%。
-// prev/end 為期間起訖時點的在職快照（月視圖：月初/月末；年視圖與 YTD：年初/當期末）。
+// workspaceTurnoverRate 統一單月離職率口徑：非資遣離職人數 ÷ 月平均在職人數 × 100%。
 func workspaceTurnoverRate(separations int, prev int, end int) float64 {
 	return float64(separations) / workspaceAverageHeadcount(prev, end) * 100
 }
@@ -707,8 +699,8 @@ func workspaceMonthlyTurnover(employees []Employee, orgs map[string]workspaceOrg
 	prevMonthStart := start.AddDate(0, -1, 0)
 	prevMonthEnd := start
 	prevStats := workspaceMovementTotal(workspaceMovementByDept(employees, orgs, prevMonthStart, prevMonthEnd, time.Date(start.Year(), 1, 1, 0, 0, 0, 0, time.UTC)))
-	rate := workspaceTurnoverRate(total.Resigned+total.Layoff, total.Prev, total.End)
-	prevRate := workspaceTurnoverRate(prevStats.Resigned+prevStats.Layoff, prevStats.Prev, prevStats.End)
+	rate := workspaceTurnoverRate(total.Resigned, total.Prev, total.End)
+	prevRate := workspaceTurnoverRate(prevStats.Resigned, prevStats.Prev, prevStats.End)
 	return WorkspaceTurnoverMonthly{
 		Year:           start.Year(),
 		Month:          int(start.Month()),
@@ -717,7 +709,7 @@ func workspaceMonthlyTurnover(employees []Employee, orgs map[string]workspaceOrg
 		Stats:          workspaceMonthlyKPIs(total, rate, prevRate),
 		HireComparison: workspaceComparisonFromStats(stats, func(s workspaceMovementStats) float64 { return float64(s.Hires) }, "人", false),
 		RateComparison: workspaceComparisonFromStats(stats, func(s workspaceMovementStats) float64 {
-			return workspaceTurnoverRate(s.Resigned+s.Layoff, s.Prev, s.End)
+			return workspaceTurnoverRate(s.Resigned, s.Prev, s.End)
 		}, "%", true),
 		Rows:       rows,
 		CSVHeaders: []string{"BU", "部門", "上月在職人數", "新進人數", "離職人數", "資遣", "當月留停", "本月在職人數", "預估離職率", "YTD離職率"},
@@ -730,7 +722,7 @@ func workspaceAnnualTurnover(employees []Employee, orgs map[string]workspaceOrgI
 	annualEnd := annualStart.AddDate(1, 0, 0)
 	stats := workspaceMovementByBU(employees, orgs, annualStart, annualEnd)
 	total := workspaceMovementTotal(stats)
-	rate := workspaceTurnoverRate(total.Resigned+total.Layoff, total.Base, total.End)
+	rate := workspaceCumulativeTurnoverRate(total)
 	return WorkspaceTurnoverAnnual{
 		Year:           year,
 		IsFuture:       annualStart.After(now),
@@ -740,7 +732,7 @@ func workspaceAnnualTurnover(employees []Employee, orgs map[string]workspaceOrgI
 		RateTrend:      workspaceRateTrend(employees, year, now),
 		Pie:            workspacePieFromStats(stats),
 		DeptRateComparison: workspaceComparisonFromStats(workspaceMovementByDept(employees, orgs, annualStart, annualEnd, annualStart), func(s workspaceMovementStats) float64 {
-			return workspaceTurnoverRate(s.Resigned+s.Layoff, s.Base, s.End)
+			return workspaceCumulativeTurnoverRate(s)
 		}, "%", true),
 		Rows:       workspaceAnnualTurnoverRows(stats),
 		CSVHeaders: []string{"BU", "年初在職", "年新進", "年離職", "年資遣", "年留停", "年末在職", "年離職率"},
@@ -749,6 +741,27 @@ func workspaceAnnualTurnover(employees []Employee, orgs map[string]workspaceOrgI
 
 // workspaceMovementByDept 處理工作區 movement by 部門。
 func workspaceMovementByDept(employees []Employee, orgs map[string]workspaceOrgInfo, start time.Time, end time.Time, ytdStart time.Time) []workspaceMovementStats {
+	out := workspaceMovementByDeptPeriod(employees, orgs, start, end, ytdStart)
+	byKey := map[string]*workspaceMovementStats{}
+	for i := range out {
+		byKey[out[i].BU+"\x00"+out[i].Dept] = &out[i]
+	}
+	for monthStart := ytdStart; monthStart.Before(end); monthStart = monthStart.AddDate(0, 1, 0) {
+		monthEnd := monthStart.AddDate(0, 1, 0)
+		monthly := workspaceMovementByDeptPeriod(employees, orgs, monthStart, monthEnd, monthStart)
+		monthIndex := int(monthStart.Month()) - 1
+		for _, stat := range monthly {
+			if target := byKey[stat.BU+"\x00"+stat.Dept]; target != nil {
+				target.RatePrev[monthIndex] = stat.Prev
+				target.RateEnd[monthIndex] = stat.End
+				target.RateResigned[monthIndex] = stat.Resigned
+			}
+		}
+	}
+	return out
+}
+
+func workspaceMovementByDeptPeriod(employees []Employee, orgs map[string]workspaceOrgInfo, start time.Time, end time.Time, ytdStart time.Time) []workspaceMovementStats {
 	byKey := map[string]*workspaceMovementStats{}
 	for _, employee := range employees {
 		bu, dept := workspaceOrgBUAndDept(orgs, employee.OrgUnitID)
@@ -762,6 +775,7 @@ func workspaceMovementByDept(employees []Employee, orgs map[string]workspaceOrgI
 	}
 	out := make([]workspaceMovementStats, 0, len(byKey))
 	for _, stat := range byKey {
+		workspaceFinalizeMovement(stat)
 		out = append(out, *stat)
 	}
 	sort.SliceStable(out, func(i, j int) bool {
@@ -775,6 +789,27 @@ func workspaceMovementByDept(employees []Employee, orgs map[string]workspaceOrgI
 
 // workspaceMovementByBU 處理工作區 movement by bu。
 func workspaceMovementByBU(employees []Employee, orgs map[string]workspaceOrgInfo, start time.Time, end time.Time) []workspaceMovementStats {
+	out := workspaceMovementByBUPeriod(employees, orgs, start, end)
+	byKey := map[string]*workspaceMovementStats{}
+	for i := range out {
+		byKey[out[i].BU] = &out[i]
+	}
+	for monthStart := start; monthStart.Before(end); monthStart = monthStart.AddDate(0, 1, 0) {
+		monthEnd := monthStart.AddDate(0, 1, 0)
+		monthly := workspaceMovementByBUPeriod(employees, orgs, monthStart, monthEnd)
+		monthIndex := int(monthStart.Month()) - 1
+		for _, stat := range monthly {
+			if target := byKey[stat.BU]; target != nil {
+				target.RatePrev[monthIndex] = stat.Prev
+				target.RateEnd[monthIndex] = stat.End
+				target.RateResigned[monthIndex] = stat.Resigned
+			}
+		}
+	}
+	return out
+}
+
+func workspaceMovementByBUPeriod(employees []Employee, orgs map[string]workspaceOrgInfo, start time.Time, end time.Time) []workspaceMovementStats {
 	byKey := map[string]*workspaceMovementStats{}
 	for _, employee := range employees {
 		bu, _ := workspaceOrgBUAndDept(orgs, employee.OrgUnitID)
@@ -787,6 +822,7 @@ func workspaceMovementByBU(employees []Employee, orgs map[string]workspaceOrgInf
 	}
 	out := make([]workspaceMovementStats, 0, len(byKey))
 	for _, stat := range byKey {
+		workspaceFinalizeMovement(stat)
 		out = append(out, *stat)
 	}
 	sort.SliceStable(out, func(i, j int) bool { return out[i].BU < out[j].BU })
@@ -795,15 +831,11 @@ func workspaceMovementByBU(employees []Employee, orgs map[string]workspaceOrgInf
 
 // workspaceApplyMovement 處理工作區 apply movement。
 func workspaceApplyMovement(stat *workspaceMovementStats, employee Employee, start time.Time, end time.Time, ytdStart time.Time) {
-	if workspaceEmployeeActiveAt(employee, start.Add(-time.Nanosecond)) {
+	if workspaceEmployeeInTurnoverClosingHeadcountAt(employee, start) {
 		stat.Prev++
 	}
-	if workspaceEmployeeActiveAt(employee, ytdStart.Add(-time.Nanosecond)) {
+	if workspaceEmployeeInTurnoverClosingHeadcountAt(employee, ytdStart) {
 		stat.Base++
-	}
-	if workspaceEmployeeActiveAt(employee, end.Add(-time.Nanosecond)) {
-		stat.End++
-		stat.YTDEnd++
 	}
 	if employee.HireDate != nil && !employee.HireDate.Before(start) && employee.HireDate.Before(end) {
 		stat.Hires++
@@ -811,16 +843,43 @@ func workspaceApplyMovement(stat *workspaceMovementStats, employee Employee, sta
 	if employee.HireDate != nil && !employee.HireDate.Before(ytdStart) && employee.HireDate.Before(end) {
 		stat.YTDHires++
 	}
-	if workspaceEmployeeSeparatedInRange(employee, start, end) {
-		stat.Resigned++
+	if separatedAt, ok := workspaceEmployeeSeparationTime(employee); ok {
+		if workspaceSeparationOnClosingDay(separatedAt, start) {
+			stat.PrevLastDaySeparations++
+		}
+		if !separatedAt.Before(start) && separatedAt.Before(end) {
+			if workspaceEmployeeIsLayoff(employee) {
+				stat.Layoff++
+			} else {
+				stat.Resigned++
+			}
+			if !workspaceSeparationOnClosingDay(separatedAt, end) {
+				stat.NonLastDaySeparations++
+			}
+		}
 	}
-	if workspaceEmployeeSeparatedInRange(employee, ytdStart, end) {
+	if workspaceEmployeeSeparatedInRange(employee, ytdStart, end) && !workspaceEmployeeIsLayoff(employee) {
 		stat.YTDSep++
 	}
-	if workspaceEmployeeStatus(employee) == string(EmployeeStatusLeaveSuspended) && workspaceEmployeeActiveAt(employee, end.Add(-time.Nanosecond)) {
+	if workspaceEmployeeLeaveSuspendedInRange(employee, start, end) {
 		stat.OnLeave++
+	}
+	if workspaceEmployeeLeaveSuspendedInRange(employee, ytdStart, end) {
 		stat.YTDOnLeave++
 	}
+}
+
+func workspaceFinalizeMovement(stat *workspaceMovementStats) {
+	stat.End = maxInt(0, stat.Prev-stat.PrevLastDaySeparations-stat.NonLastDaySeparations-stat.OnLeave+stat.Hires)
+	stat.YTDEnd = stat.End
+}
+
+func workspaceCumulativeTurnoverRate(stat workspaceMovementStats) float64 {
+	total := 0.0
+	for month := 0; month < len(stat.RatePrev); month++ {
+		total += workspaceTurnoverRate(stat.RateResigned[month], stat.RatePrev[month], stat.RateEnd[month])
+	}
+	return total
 }
 
 // workspaceMovementTotal 處理工作區 movement total。
@@ -838,6 +897,11 @@ func workspaceMovementTotal(items []workspaceMovementStats) workspaceMovementSta
 		total.YTDHires += item.YTDHires
 		total.YTDEnd += item.YTDEnd
 		total.YTDOnLeave += item.YTDOnLeave
+		for month := 0; month < len(total.RatePrev); month++ {
+			total.RatePrev[month] += item.RatePrev[month]
+			total.RateEnd[month] += item.RateEnd[month]
+			total.RateResigned[month] += item.RateResigned[month]
+		}
 	}
 	return total
 }
@@ -873,7 +937,6 @@ func workspaceMonthlyTurnoverRows(stats []workspaceMovementStats) []WorkspaceTur
 
 // workspaceMonthlyRow 處理工作區每月列。
 func workspaceMonthlyRow(stat workspaceMovementStats, rowType string, rowSpan int) WorkspaceTurnoverRow {
-	sep := stat.Resigned + stat.Layoff
 	return WorkspaceTurnoverRow{
 		Key:       workspaceTurnoverKey(stat, rowType),
 		RowType:   rowType,
@@ -886,8 +949,8 @@ func workspaceMonthlyRow(stat workspaceMovementStats, rowType string, rowSpan in
 		Layoff:    stat.Layoff,
 		OnLeave:   stat.OnLeave,
 		End:       stat.End,
-		MonthRate: workspaceTurnoverRateLabel(sep, stat.Prev, stat.End),
-		YTDRate:   workspaceTurnoverRateLabel(stat.YTDSep, stat.Base, stat.End),
+		MonthRate: workspaceTurnoverRateLabel(stat.Resigned, stat.Prev, stat.End),
+		YTDRate:   fmt.Sprintf("%.1f%%", workspaceCumulativeTurnoverRate(stat)),
 	}
 }
 
@@ -905,7 +968,6 @@ func workspaceAnnualTurnoverRows(stats []workspaceMovementStats) []WorkspaceAnnu
 
 // workspaceAnnualRow 處理工作區年度列。
 func workspaceAnnualRow(stat workspaceMovementStats) WorkspaceAnnualRow {
-	sep := stat.Resigned + stat.Layoff
 	return WorkspaceAnnualRow{
 		BU:       stat.BU,
 		Base:     stat.Base,
@@ -914,8 +976,8 @@ func workspaceAnnualRow(stat workspaceMovementStats) WorkspaceAnnualRow {
 		Layoff:   stat.Layoff,
 		OnLeave:  stat.OnLeave,
 		End:      stat.End,
-		Sep:      sep,
-		Rate:     workspaceTurnoverRateLabel(sep, stat.Base, stat.End),
+		Sep:      stat.Resigned,
+		Rate:     fmt.Sprintf("%.1f%%", workspaceCumulativeTurnoverRate(stat)),
 	}
 }
 
@@ -932,6 +994,11 @@ func workspaceSumMovement(total workspaceMovementStats, item workspaceMovementSt
 	total.YTDHires += item.YTDHires
 	total.YTDEnd += item.YTDEnd
 	total.YTDOnLeave += item.YTDOnLeave
+	for month := 0; month < len(total.RatePrev); month++ {
+		total.RatePrev[month] += item.RatePrev[month]
+		total.RateEnd[month] += item.RateEnd[month]
+		total.RateResigned[month] += item.RateResigned[month]
+	}
 	return total
 }
 
@@ -964,7 +1031,7 @@ func workspaceMonthlyKPIs(total workspaceMovementStats, rate float64, prevRate f
 	return []WorkspaceKPI{
 		{Key: "active", Label: "在職人數", Value: strconv.Itoa(total.End), Unit: "人", TrendTone: "flat"},
 		{Key: "hires", Label: "本月新進", Value: strconv.Itoa(total.Hires), Unit: "人", TrendTone: "flat"},
-		{Key: "sep", Label: "本月離職", Value: strconv.Itoa(total.Resigned + total.Layoff), Unit: "人", TrendTone: "flat"},
+		{Key: "sep", Label: "本月離職", Value: strconv.Itoa(total.Resigned), Unit: "人", TrendTone: "flat"},
 		{Key: "rate", Label: "本月離職率", Value: fmt.Sprintf("%.1f", rate), Unit: "%", TrendText: trendText, TrendTone: trendTone},
 	}
 }
@@ -978,7 +1045,7 @@ func workspaceAnnualKPIs(total workspaceMovementStats, rate float64) []Workspace
 	}
 	return []WorkspaceKPI{
 		{Key: "total", Label: "年度員工總數", Value: strconv.Itoa(total.End), Unit: "人", TrendTone: "flat"},
-		{Key: "sep", Label: "年度離職總數", Value: strconv.Itoa(total.Resigned + total.Layoff), Unit: "人", TrendTone: "flat"},
+		{Key: "sep", Label: "年度離職總數", Value: strconv.Itoa(total.Resigned), Unit: "人", TrendTone: "flat"},
 		{Key: "net", Label: "年淨增減", Value: netText, Unit: "人", TrendTone: "flat"},
 		{Key: "rate", Label: "年度離職率", Value: fmt.Sprintf("%.1f", rate), Unit: "%", TrendTone: "flat"},
 	}
@@ -1024,13 +1091,14 @@ func workspaceHeadcountTrend(employees []Employee, year int, now time.Time) []Wo
 	values := make([]int, 12)
 	futures := make([]bool, 12)
 	for month := 1; month <= 12; month++ {
-		end := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC).AddDate(0, 1, 0)
+		start := time.Date(year, time.Month(month), 1, 0, 0, 0, 0, time.UTC)
+		end := start.AddDate(0, 1, 0)
 		future := end.After(now) && year >= now.Year()
 		futures[month-1] = future
 		if future {
 			continue
 		}
-		values[month-1] = workspaceCountActiveAt(employees, end.Add(-time.Nanosecond))
+		values[month-1] = workspaceMovementForEmployees(employees, start, end).End
 		if values[month-1] > maxValue {
 			maxValue = values[month-1]
 		}
@@ -1067,10 +1135,8 @@ func workspaceRateTrend(employees []Employee, year int, now time.Time) []Workspa
 		if future {
 			continue
 		}
-		sep := workspaceCountSeparations(employees, start, end)
-		prev := workspaceCountActiveAt(employees, start.Add(-time.Nanosecond))
-		endCount := workspaceCountActiveAt(employees, end.Add(-time.Nanosecond))
-		values[month-1] = workspaceTurnoverRate(sep, prev, endCount)
+		stat := workspaceMovementForEmployees(employees, start, end)
+		values[month-1] = workspaceTurnoverRate(stat.Resigned, stat.Prev, stat.End)
 		if values[month-1] > maxValue {
 			maxValue = values[month-1]
 		}
@@ -1091,6 +1157,15 @@ func workspaceRateTrend(employees []Employee, year int, now time.Time) []Workspa
 		points = append(points, WorkspaceTrendPoint{Month: month, Value: value, Label: label, Percent: workspacePercentFloat(value, maxValue), Future: future, Tone: tone})
 	}
 	return points
+}
+
+func workspaceMovementForEmployees(employees []Employee, start time.Time, end time.Time) workspaceMovementStats {
+	stat := workspaceMovementStats{}
+	for _, employee := range employees {
+		workspaceApplyMovement(&stat, employee, start, end, start)
+	}
+	workspaceFinalizeMovement(&stat)
+	return stat
 }
 
 // workspacePieFromStats 處理工作區 pie 來源 stats。

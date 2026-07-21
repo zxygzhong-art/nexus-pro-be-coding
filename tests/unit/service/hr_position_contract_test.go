@@ -18,7 +18,6 @@ func TestHRPositionCRUDSoftDisablesPosition(t *testing.T) {
 	created, err := svc.HR().CreatePosition(ctx, domain.CreatePositionInput{
 		Code:        "eng",
 		Name:        "Engineer",
-		OrgUnitID:   "ou-1",
 		Level:       "L3",
 		Description: "Engineering role",
 	})
@@ -69,7 +68,7 @@ func TestHRPositionCreateAndUpdateRollbackWhenAuditFails(t *testing.T) {
 	store, baseService, ctx := newEmployeeFeatureFixture(t, hrPositionContractPermissions())
 	createStore := &positionAuditFailureStore{Store: store, failAction: "hr.position.create"}
 	createService := service.New(createStore)
-	if _, err := createService.HR().CreatePosition(ctx, domain.CreatePositionInput{Code: "rollback", Name: "Rollback", OrgUnitID: "ou-1"}); err == nil {
+	if _, err := createService.HR().CreatePosition(ctx, domain.CreatePositionInput{Code: "rollback", Name: "Rollback"}); err == nil {
 		t.Fatal("expected create audit failure")
 	}
 	positions, err := store.ListPositions(context.Background(), ctx.TenantID)
@@ -80,7 +79,7 @@ func TestHRPositionCreateAndUpdateRollbackWhenAuditFails(t *testing.T) {
 		t.Fatalf("position create escaped failed audit transaction: %+v", positions)
 	}
 
-	created, err := baseService.HR().CreatePosition(ctx, domain.CreatePositionInput{Code: "stable", Name: "Stable", OrgUnitID: "ou-1", Level: "L3"})
+	created, err := baseService.HR().CreatePosition(ctx, domain.CreatePositionInput{Code: "stable", Name: "Stable", Level: "L3"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,36 +95,6 @@ func TestHRPositionCreateAndUpdateRollbackWhenAuditFails(t *testing.T) {
 	}
 	if !ok || persisted.Level != "L3" {
 		t.Fatalf("position update escaped failed audit transaction: %+v", persisted)
-	}
-}
-
-// TestManagerPositionCannotMoveOrDisable 驗證主管崗位必須保留在所屬組織且保持啟用。
-func TestManagerPositionCannotMoveOrDisable(t *testing.T) {
-	permissions := append(hrPositionContractPermissions(),
-		domain.Permission{Resource: "hr.org_unit", Action: "create", Scope: "all"},
-		domain.Permission{Resource: "hr.org_unit", Action: "update", Scope: "all"},
-	)
-	_, svc, ctx := newEmployeeFeatureFixture(t, permissions)
-	other, err := svc.HR().CreateOrgUnit(ctx, domain.CreateOrgUnitInput{Name: "Other"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	position, err := svc.HR().CreatePosition(ctx, domain.CreatePositionInput{
-		Code: "HQ-HEAD", Name: "HQ Head", OrgUnitID: "ou-1",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	positionID := position.ID
-	if _, err := svc.HR().UpdateOrgUnit(ctx, "ou-1", domain.UpdateOrgUnitInput{ManagerPositionID: &positionID}); err != nil {
-		t.Fatal(err)
-	}
-	otherID := other.ID
-	if _, err := svc.HR().UpdatePosition(ctx, position.ID, domain.UpdatePositionInput{OrgUnitID: &otherID}); err == nil {
-		t.Fatal("expected moving a manager position to fail")
-	}
-	if _, err := svc.HR().DeletePosition(ctx, position.ID); err == nil {
-		t.Fatal("expected disabling a manager position to fail")
 	}
 }
 

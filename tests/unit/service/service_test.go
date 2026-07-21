@@ -6573,37 +6573,6 @@ func TestCreateOrgUnitPathDoesNotDuplicateParent(t *testing.T) {
 	}
 }
 
-// TestUpdateOrgUnitManagerPosition 驗證組織單位可綁定主管崗。
-func TestUpdateOrgUnitManagerPosition(t *testing.T) {
-	svc, ctx := newServiceFixture([]domain.Permission{
-		{Resource: "hr.org_unit", Action: "create", Scope: "all"},
-		{Resource: "hr.org_unit", Action: "update", Scope: "all"},
-		{Resource: "hr.org_unit", Action: "read", Scope: "all"},
-		{Resource: "hr.position", Action: "create", Scope: "all"},
-		{Resource: "hr.position", Action: "read", Scope: "all"},
-	})
-	root, err := svc.HR().CreateOrgUnit(ctx, domain.CreateOrgUnitInput{Name: "Root"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	position, err := svc.HR().CreatePosition(ctx, domain.CreatePositionInput{
-		Code: "ROOT-HEAD", Name: "Root Head", OrgUnitID: root.ID,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	managerPositionID := position.ID
-	updated, err := svc.HR().UpdateOrgUnit(ctx, root.ID, domain.UpdateOrgUnitInput{
-		ManagerPositionID: &managerPositionID,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.ManagerPositionID != position.ID {
-		t.Fatalf("expected manager position %s, got %s", position.ID, updated.ManagerPositionID)
-	}
-}
-
 // TestPlatformTaskMutationsPersistAndProject 驗證平臺任務 mutations persist and project。
 func TestPlatformTaskMutationsPersistAndProject(t *testing.T) {
 	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
@@ -7223,6 +7192,7 @@ type fakeEHRMSClient struct {
 	departmentRows  []domain.EHRMSDepartmentRecord
 	positionRows    []domain.EHRMSPositionRecord
 	attendanceRows  []domain.EHRMSAttendanceRecord
+	leaveTypes      []domain.EHRMSLeaveType
 	leaveBalances   []domain.EHRMSLeaveBalanceRecord
 	leaveDetails    []domain.EHRMSLeaveDetailRecord
 	err             error
@@ -7257,6 +7227,11 @@ func (c fakeEHRMSClient) ListPositions(context.Context) ([]domain.EHRMSPositionR
 // ListAttendance 驗證考勤。
 func (c fakeEHRMSClient) ListAttendance(context.Context) ([]domain.EHRMSAttendanceRecord, error) {
 	return ehrms.NormalizeAttendanceRecords(c.attendanceRows), c.attendanceErr
+}
+
+// ListLeaveTypes 驗證 eHRMS 假期類型目錄。
+func (c fakeEHRMSClient) ListLeaveTypes(context.Context) ([]domain.EHRMSLeaveType, error) {
+	return c.leaveTypes, nil
 }
 
 // ListLeaveBalances 驗證假別餘額。

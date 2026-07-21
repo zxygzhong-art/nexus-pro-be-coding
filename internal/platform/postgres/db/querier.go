@@ -240,6 +240,7 @@ type Querier interface {
 	UpdateAuthzDataScope(ctx context.Context, arg UpdateAuthzDataScopeParams) (AuthzDataScope, error)
 	UpdateEmployeeOrgChartVisibility(ctx context.Context, arg UpdateEmployeeOrgChartVisibilityParams) error
 	UpdateIdentityProvisioningOutboxEvent(ctx context.Context, arg UpdateIdentityProvisioningOutboxEventParams) (IdentityProvisioningOutbox, error)
+	UpdateOrgUnitOrgChartVisibility(ctx context.Context, arg UpdateOrgUnitOrgChartVisibilityParams) error
 	UpdateOutboxEvent(ctx context.Context, arg UpdateOutboxEventParams) (OutboxEvent, error)
 	UpdatePermissionPackageStatus(ctx context.Context, arg UpdatePermissionPackageStatusParams) (PermissionPackage, error)
 	// expected_version = 0 表示盲寫(新建或無條件覆蓋);> 0 時執行樂觀鎖檢查,

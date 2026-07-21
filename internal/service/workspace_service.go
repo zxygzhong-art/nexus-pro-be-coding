@@ -112,32 +112,30 @@ func (c WorkspaceService) WorkspaceOrganization(ctx RequestContext) (WorkspaceOr
 	if err != nil {
 		return WorkspaceOrganizationResponse{}, err
 	}
-	positions, err := c.store.ListPositions(goContext(ctx), ctx.TenantID)
-	if err != nil {
-		return WorkspaceOrganizationResponse{}, err
-	}
 	orgNames := workspaceOrgNames(units)
 	displayIDs := workspaceEmployeeDisplayIDs(employees)
 	byID := map[string]Employee{}
 	for _, employee := range employees {
 		byID[employee.ID] = employee
 	}
-	derivedManagers, orgUnitsByID := workspaceDerivedManagersByOrgUnit(units, positions, employees)
 	effectiveParents := map[string]string{}
 	managerIDs := map[string]struct{}{}
 	for _, employee := range employees {
-		parentID, source, _ := workspaceEffectiveManager(employee, derivedManagers, orgUnitsByID)
+		parentID := strings.TrimSpace(employee.ManagerEmployeeID)
 		effectiveParents[employee.ID] = parentID
 		if parentID != "" {
 			managerIDs[parentID] = struct{}{}
 		}
-		_ = source
 	}
 	rows := make([]WorkspaceOrganizationRow, 0, len(employees))
 	levelMemo := map[string]int{}
 	for _, employee := range employees {
 		displayID := displayIDs[employee.ID]
-		managerID, source, managerIssue := workspaceEffectiveManager(employee, derivedManagers, orgUnitsByID)
+		managerID := strings.TrimSpace(employee.ManagerEmployeeID)
+		source := "none"
+		if managerID != "" {
+			source = "override"
+		}
 		parentID := workspaceParentNone
 		if managerID != "" {
 			if managerDisplayID, ok := displayIDs[managerID]; ok {
@@ -158,7 +156,6 @@ func (c WorkspaceService) WorkspaceOrganization(ctx RequestContext) (WorkspaceOr
 			OrgUnitID:      employee.OrgUnitID,
 			ManagerSource:  source,
 			IsOverride:     source == "override",
-			ManagerIssue:   managerIssue,
 		})
 	}
 	sort.SliceStable(rows, func(i, j int) bool {
@@ -189,11 +186,6 @@ func (c WorkspaceService) WorkspaceTurnover(ctx RequestContext, query WorkspaceT
 	if err != nil {
 		return WorkspaceTurnoverResponse{}, err
 	}
-	positions, err := c.store.ListPositions(goContext(ctx), ctx.TenantID)
-	if err != nil {
-		return WorkspaceTurnoverResponse{}, err
-	}
-	employees = workspaceTurnoverEligibleEmployees(employees, units, positions)
 	orgs := workspaceOrgCatalog(units)
 	monthly := workspaceMonthlyTurnover(employees, orgs, start, end, now)
 	annual := workspaceAnnualTurnover(employees, orgs, annualYear, now)
@@ -256,8 +248,9 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	orgNames := workspaceOrgNames(units)
 	cards := workspaceEmployeeCards(employees, orgNames)
 	monthEmployees := workspaceEmployeesPresentInRange(employees, start, end)
-	leaveByEmployeeDate := workspaceSummaryLeaveCells(summaries)
-	leaveByEmployeeDate = workspaceMergeApprovedLeaveCells(leaveByEmployeeDate, leaves, policy.WorkTime, start, end)
+	leaveLegend := workspaceLeaveLegend(policy.LeaveTypes)
+	leaveByEmployeeDate := workspaceSummaryLeaveCells(summaries, leaveLegend)
+	leaveByEmployeeDate = workspaceMergeApprovedLeaveCells(leaveByEmployeeDate, leaves, policy.WorkTime, leaveLegend, start, end)
 	overtimeByEmployeeDate := workspaceOvertimeCells(overtimes, start, end)
 	attendanceEvidenceByEmployeeDate := workspaceAttendanceEvidenceCells(clocks, summaries, leaves, policy.WorkTime)
 	clockByEmployeeDate := workspaceClockCells(clocks, summaries, worksites, leaveByEmployeeDate, overtimeByEmployeeDate)
@@ -271,7 +264,7 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 		Label:       fmt.Sprintf("%d 年 %d 月", start.Year(), int(start.Month())),
 		PeriodLabel: fmt.Sprintf("%d 年 %d/%d-%d/%d 期間", start.Year(), int(start.Month()), start.Day(), int(end.AddDate(0, 0, -1).Month()), end.AddDate(0, 0, -1).Day()),
 		Dates:       dates,
-		LeaveLegend: workspaceLeaveLegend(),
+		LeaveLegend: leaveLegend,
 		Attendance:  attendanceMatrix,
 		Clock:       clockMatrix,
 	}, nil

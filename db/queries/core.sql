@@ -212,9 +212,9 @@ RETURNING *;
 
 -- name: UpsertOrgUnit :one
 INSERT INTO org_units (
-    id, tenant_id, code, name, name_en, parent_id, path, manager_position_id, source, closed, created_at, updated_at
+    id, tenant_id, code, name, name_en, parent_id, path, source, closed, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
 ON CONFLICT (id) DO UPDATE SET
     code = EXCLUDED.code,
@@ -222,7 +222,6 @@ ON CONFLICT (id) DO UPDATE SET
     name_en = EXCLUDED.name_en,
     parent_id = EXCLUDED.parent_id,
     path = EXCLUDED.path,
-    manager_position_id = EXCLUDED.manager_position_id,
     source = EXCLUDED.source,
     closed = EXCLUDED.closed,
     created_at = EXCLUDED.created_at,
@@ -233,6 +232,12 @@ RETURNING *;
 -- name: GetOrgUnit :one
 SELECT * FROM org_units
 WHERE tenant_id = $1 AND id = $2;
+
+-- name: UpdateOrgUnitOrgChartVisibility :exec
+UPDATE org_units
+SET show_in_org_chart = sqlc.arg(show_in_org_chart),
+    updated_at = sqlc.arg(updated_at)
+WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id);
 
 -- name: ListOrgUnits :many
 SELECT * FROM org_units
@@ -939,7 +944,7 @@ INSERT INTO form_instance_field_values (
     sqlc.arg(field_id), sqlc.arg(value_type),
     CASE WHEN sqlc.arg(value_type)::text = 'text' THEN sqlc.arg(value_text)::text ELSE NULL END,
     CASE WHEN sqlc.arg(value_type)::text = 'number' THEN NULLIF(sqlc.arg(value_number)::text, '')::numeric ELSE NULL END,
-    CASE WHEN sqlc.arg(value_type)::text = 'boolean' THEN sqlc.narg(value_boolean) ELSE NULL END,
+    CASE WHEN sqlc.arg(value_type)::text = 'boolean' THEN sqlc.narg(value_boolean)::boolean ELSE NULL END,
     CASE WHEN sqlc.arg(value_type)::text = 'date' THEN NULLIF(sqlc.arg(value_date)::text, '')::date ELSE NULL END,
     CASE WHEN sqlc.arg(value_type)::text = 'timestamp' THEN NULLIF(sqlc.arg(value_timestamp)::text, '')::timestamptz ELSE NULL END,
     CASE WHEN sqlc.arg(value_type)::text = 'json' AND sqlc.arg(value_json)::text <> '' THEN sqlc.arg(value_json)::jsonb ELSE NULL END,

@@ -4,8 +4,20 @@ import (
 	"math"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"nexus-pro-api/internal/utils"
+)
+
+const (
+	// attendanceCorrectionReasonMinLength / attendanceCorrectionReasonMaxLength bound the
+	// free-text reason an employee gives when filing a punch correction.
+	attendanceCorrectionReasonMinLength = 4
+	attendanceCorrectionReasonMaxLength = 200
+	// attendanceCorrectionReviewReasonMinLength bounds the review note; approvers often
+	// write terse confirmations (e.g. "ok"), so the floor is lower than for applicants.
+	attendanceCorrectionReviewReasonMinLength = 2
+	attendanceCorrectionReviewReasonMaxLength = 200
 )
 
 // AttendanceClockStatus returns punch state together with the authoritative worksite policy.
@@ -325,6 +337,11 @@ func (c AttendanceService) CreateAttendanceCorrection(ctx RequestContext, input 
 	reason := strings.TrimSpace(input.Reason)
 	if reason == "" {
 		return AttendanceCorrectionRequest{}, BadRequest("reason is required")
+	}
+	if n := utf8.RuneCountInString(reason); n < attendanceCorrectionReasonMinLength {
+		return AttendanceCorrectionRequest{}, BadRequest("reason must be at least 4 characters").WithReasonCode("attendance_correction_reason_too_short")
+	} else if n > attendanceCorrectionReasonMaxLength {
+		return AttendanceCorrectionRequest{}, BadRequest("reason must be at most 200 characters").WithReasonCode("attendance_correction_reason_too_long")
 	}
 	var correction AttendanceCorrectionRequest
 	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
@@ -969,10 +986,17 @@ func (c AttendanceService) reviewAttendanceCorrection(ctx RequestContext, id, ne
 			return NotFound("attendance correction", id)
 		}
 		if !strings.EqualFold(current.Status, correctionStatusPending) {
-			return BadRequest("correction request is not pending").WithReasonCode("attendance_correction_invalid_state")
+			return Conflict("correction request is not pending (current status: " + current.Status + ")").WithReasonCode("attendance_correction_invalid_state")
 		}
 		now := tx.Now()
 		reviewReason := strings.TrimSpace(input.Reason)
+		if reviewReason != "" {
+			if n := utf8.RuneCountInString(reviewReason); n < attendanceCorrectionReviewReasonMinLength {
+				return BadRequest("reason must be at least 2 characters").WithReasonCode("attendance_correction_review_reason_too_short")
+			} else if n > attendanceCorrectionReviewReasonMaxLength {
+				return BadRequest("reason must be at most 200 characters").WithReasonCode("attendance_correction_review_reason_too_long")
+			}
+		}
 		current.Status = nextStatus
 		current.ReviewedByAccountID = account.ID
 		current.ReviewReason = reviewReason

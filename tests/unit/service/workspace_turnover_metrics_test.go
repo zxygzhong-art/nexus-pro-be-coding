@@ -216,3 +216,51 @@ func TestWorkspaceOverviewSeparationRateMatchesTurnoverBasis(t *testing.T) {
 		t.Fatalf("overview rate %s != turnover rate %s", overview.HRSummary.SeparationRate, rate.Value)
 	}
 }
+
+// TestWorkspaceTurnoverUsesRequestedClosingAndCumulativeRules 驗證在職分析口徑：
+// 期末日離職延至次月扣除、留停不計入期末、資遣單列且不進離職率，YTD 為月率累加。
+func TestWorkspaceTurnoverUsesRequestedClosingAndCumulativeRules(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	hire := func(y int, m time.Month, d int) *time.Time { return ptrTime(time.Date(y, m, d, 0, 0, 0, 0, time.UTC)) }
+	at := func(y int, m time.Month, d int) time.Time { return time.Date(y, m, d, 0, 0, 0, 0, time.UTC) }
+
+	insertTurnoverEmployee(t, store, "emp-stay", "active", hire(2024, 1, 1), nil, at(2026, 1, 1))
+	insertTurnoverEmployee(t, store, "emp-prev-last", "resigned", hire(2024, 1, 1), hire(2026, 6, 30), at(2026, 6, 30))
+	insertTurnoverEmployee(t, store, "emp-mid", "resigned", hire(2024, 1, 1), hire(2026, 7, 15), at(2026, 7, 15))
+	insertTurnoverEmployee(t, store, "emp-last", "resigned", hire(2024, 1, 1), hire(2026, 7, 31), at(2026, 7, 31))
+	insertWorkspaceEmployee(t, store, domain.Employee{
+		ID: "emp-layoff", EmployeeNo: "emp-layoff", Name: "emp-layoff",
+		Status: "resigned", EmploymentStatus: "resigned", HireDate: hire(2024, 1, 1), ResignDate: hire(2026, 7, 10),
+		EmploymentInfo: map[string]any{"resign_reason": "資遣"}, CreatedAt: at(2024, 1, 1), UpdatedAt: at(2026, 7, 10),
+	})
+	insertWorkspaceEmployee(t, store, domain.Employee{
+		ID: "emp-leave", EmployeeNo: "emp-leave", Name: "emp-leave",
+		Status: "leave_suspended", EmploymentStatus: "leave_suspended", HireDate: hire(2024, 1, 1),
+		EmploymentInfo: map[string]any{
+			"transition_type": "leave_suspension", "transition_start_date": "2026-07-05", "transition_end_date": "2026-08-05",
+		},
+		CreatedAt: at(2024, 1, 1), UpdatedAt: at(2026, 7, 5),
+	})
+
+	got, err := svc.Workspace().WorkspaceTurnover(ctx, domain.WorkspaceTurnoverQuery{Year: 2026, Month: 7, AnnualYear: 2026})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	total := workspaceMonthlyTotalRow(t, got.Monthly)
+	if total.Prev != 6 || total.Resigned != 2 || total.Layoff != 1 || total.OnLeave != 1 || total.End != 2 {
+		t.Fatalf("unexpected requested-rule monthly total: %+v", total)
+	}
+	if total.MonthRate != "50.0%" {
+		t.Fatalf("expected July rate 50.0%% (2 voluntary resignations / avg(6,2)), got %s", total.MonthRate)
+	}
+	if total.YTDRate != "66.7%" {
+		t.Fatalf("expected YTD 66.7%% (June 16.7%% + July 50.0%%), got %s", total.YTDRate)
+	}
+	if kpi := workspaceKPIByKey(t, got.Monthly.Stats, "sep"); kpi.Value != "2" {
+		t.Fatalf("expected layoff excluded from separation KPI, got %+v", kpi)
+	}
+	if annual := workspaceAnnualTotalRow(t, got.Annual); annual.Rate != "66.7%" || annual.Sep != 3 || annual.Layoff != 1 {
+		t.Fatalf("expected annual rate to sum monthly voluntary turnover rates, got %+v", annual)
+	}
+}

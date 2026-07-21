@@ -1,14 +1,13 @@
 -- name: UpsertPosition :one
 INSERT INTO positions (
-    id, tenant_id, code, name, name_en, org_unit_id, level, status, description, source, created_at, updated_at
+    id, tenant_id, code, name, name_en, level, status, description, source, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12
+    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
 )
 ON CONFLICT (id) DO UPDATE SET
     code = EXCLUDED.code,
     name = EXCLUDED.name,
     name_en = EXCLUDED.name_en,
-    org_unit_id = EXCLUDED.org_unit_id,
     level = EXCLUDED.level,
     status = EXCLUDED.status,
     description = EXCLUDED.description,

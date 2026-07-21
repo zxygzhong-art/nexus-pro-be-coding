@@ -98,7 +98,6 @@ type WorkspaceOrganizationRow struct {
 	OrgUnitID      string `json:"org_unit_id,omitempty"`
 	ManagerSource  string `json:"manager_source,omitempty"`
 	IsOverride     bool   `json:"is_override,omitempty"`
-	ManagerIssue   string `json:"manager_issue,omitempty"`
 }
 
 // WorkspaceTurnoverQuery 定義工作區人員異動查詢的資料結構。
@@ -115,9 +114,9 @@ type WorkspaceTurnoverResponse struct {
 }
 
 // WorkspaceTurnoverMonthly 定義工作區人員異動每月的資料結構。
-// 口徑說明：統計範圍排除隸屬已關閉組織單元或已停用崗位的員工，
-// 因此在職數會小於概覽頁（全員月末快照）。離職率 = 當月離職 ÷ 當月平均在職
-// （月初與月末快照平均）；每列均滿足 上月在職 + 新進 − 離職 − 資遣 = 本月在職。
+// 口徑說明：組織或崗位停用不等於員工離職，統計範圍仍包含其中的員工。
+// 待加入與留停不計入期末在職；期末日離職者保留在本期期末，於次期扣除。
+// 當月離職率 = 非資遣離職 ÷ ((上月期末 + 當月期末) / 2)；YTD 為各月離職率累加。
 type WorkspaceTurnoverMonthly struct {
 	Year           int                       `json:"year"`
 	Month          int                       `json:"month"`
@@ -131,9 +130,8 @@ type WorkspaceTurnoverMonthly struct {
 }
 
 // WorkspaceTurnoverAnnual 定義工作區人員異動年度的資料結構。
-// 口徑說明：年離職率 = 年度離職 ÷ 年度平均在職（年初與年末快照平均）；
-// 年淨增減 = 年新進 − 年離職 − 年資遣，且恆等於 年末在職 − 年初在職
-// （每列均滿足 年初在職 + 新進 − 離職 − 資遣 = 年末在職 的閉合恆等式）。
+// 口徑說明：年度離職率為各月非資遣離職率累加；資遣仍單列並影響期末人數，
+// 但不納入離職總數與離職率。
 type WorkspaceTurnoverAnnual struct {
 	Year               int                       `json:"year"`
 	IsFuture           bool                      `json:"is_future"`

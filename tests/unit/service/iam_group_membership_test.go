@@ -399,6 +399,30 @@ func TestCreateUserGroupExpandsMemberAccountIDsToMemberships(t *testing.T) {
 	}
 }
 
+func TestListUserGroupPageFiltersByNameOrDescriptionBeforePaging(t *testing.T) {
+	svc, ctx := newServiceFixture([]domain.Permission{
+		{Resource: "iam.user_group", Action: "read", Scope: "all"},
+		{Resource: "iam.user_group", Action: "create", Scope: "all"},
+	})
+	for _, input := range []domain.CreateUserGroupInput{
+		{Name: "Finance Reviewers", Description: "Month-end approval"},
+		{Name: "Operations", Description: "Finance data consumers"},
+		{Name: "People Team", Description: "HR operations"},
+	} {
+		if _, err := svc.IAM().CreateUserGroup(ctx, input); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	page, err := svc.IAM().ListUserGroupPage(ctx, "FINANCE", domain.PageRequest{Page: 1, PageSize: 20})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.Total != 2 || len(page.Items) != 2 {
+		t.Fatalf("expected name and description matches before paging, got %+v", page)
+	}
+}
+
 func containsTestString(values []string, value string) bool {
 	for _, item := range values {
 		if item == value {

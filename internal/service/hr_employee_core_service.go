@@ -504,12 +504,12 @@ func (c HRService) validateEmployee(ctx RequestContext, employee Employee, mode 
 		}
 	}
 	if strings.TrimSpace(employee.PositionID) != "" {
-		position, ok, err := c.store.GetPosition(goContext(ctx), ctx.TenantID, employee.PositionID)
+		_, ok, err := c.store.GetPosition(goContext(ctx), ctx.TenantID, employee.PositionID)
 		if err != nil {
 			return err
 		}
-		if ok && strings.TrimSpace(position.OrgUnitID) != "" && strings.TrimSpace(employee.OrgUnitID) != position.OrgUnitID {
-			fields = append(fields, FieldError{Tab: "employment_info", Field: "position_id", Code: "org_unit_mismatch", Message: "position does not belong to the employee org unit"})
+		if !ok {
+			fields = append(fields, FieldError{Tab: "employment_info", Field: "position_id", Code: "not_found", Message: "position not found"})
 		}
 	}
 	if strings.TrimSpace(employee.AccountID) != "" {

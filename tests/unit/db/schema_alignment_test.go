@@ -34,6 +34,26 @@ func TestEmployeeIntegrityConstraintsStayInSchema(t *testing.T) {
 	}
 }
 
+// TestPositionLookupIndexesStayInSchema keeps the retained position directory efficient and case-insensitive.
+func TestPositionLookupIndexesStayInSchema(t *testing.T) {
+	raw, err := os.ReadFile("../../../db/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := string(raw)
+	required := []string{
+		"CREATE TABLE positions (",
+		"CREATE UNIQUE INDEX positions_tenant_code_ci_idx ON positions (tenant_id, lower(code));",
+		"CREATE INDEX positions_tenant_name_ci_idx ON positions (tenant_id, lower(name));",
+		"CREATE INDEX positions_tenant_status_idx ON positions (tenant_id, status, name);",
+	}
+	for _, item := range required {
+		if !strings.Contains(schema, item) {
+			t.Fatalf("expected position directory schema fragment %q", item)
+		}
+	}
+}
+
 // TestTenantResourceIDsStayGloballyUniqueContract 驗證租戶 resource IDs stay globally unique contract。
 func TestTenantResourceIDsStayGloballyUniqueContract(t *testing.T) {
 	schemaRaw, err := os.ReadFile("../../../db/schema.sql")

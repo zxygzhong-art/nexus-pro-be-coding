@@ -92,35 +92,34 @@ const (
 
 // OrgUnit 定義組織單位的資料結構。
 type OrgUnit struct {
-	ID                string    `json:"id"`
-	TenantID          string    `json:"tenant_id"`
-	Code              string    `json:"code,omitempty"`
-	Name              string    `json:"name"`
-	NameEN            string    `json:"name_en,omitempty"`
-	ParentID          string    `json:"parent_id,omitempty"`
-	Path              []string  `json:"path,omitempty"`
-	ManagerPositionID string    `json:"manager_position_id,omitempty"`
-	Source            string    `json:"source,omitempty"`
-	Closed            bool      `json:"closed,omitempty"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID             string    `json:"id"`
+	TenantID       string    `json:"tenant_id"`
+	Code           string    `json:"code,omitempty"`
+	Name           string    `json:"name"`
+	NameEN         string    `json:"name_en,omitempty"`
+	ParentID       string    `json:"parent_id,omitempty"`
+	Path           []string  `json:"path,omitempty"`
+	Source         string    `json:"source,omitempty"`
+	Closed         bool      `json:"closed,omitempty"`
+	ShowInOrgChart bool      `json:"show_in_org_chart"`
+	CreatedAt      time.Time `json:"created_at"`
+	UpdatedAt      time.Time `json:"updated_at"`
 }
 
 // CreateOrgUnitInput 定義組織單位輸入的資料結構。
 type CreateOrgUnitInput struct {
-	Code              string `json:"code,omitempty"`
-	Name              string `json:"name"`
-	ParentID          string `json:"parent_id,omitempty"`
-	ManagerPositionID string `json:"manager_position_id,omitempty"`
+	Code     string `json:"code,omitempty"`
+	Name     string `json:"name"`
+	ParentID string `json:"parent_id,omitempty"`
 }
 
 // UpdateOrgUnitInput 定義組織單位 patch 輸入的資料結構。
 type UpdateOrgUnitInput struct {
-	Code              *string `json:"code,omitempty"`
-	Name              *string `json:"name,omitempty"`
-	ParentID          *string `json:"parent_id,omitempty"`
-	ManagerPositionID *string `json:"manager_position_id,omitempty"`
-	Closed            *bool   `json:"closed,omitempty"`
+	Code           *string `json:"code,omitempty"`
+	Name           *string `json:"name,omitempty"`
+	ParentID       *string `json:"parent_id,omitempty"`
+	Closed         *bool   `json:"closed,omitempty"`
+	ShowInOrgChart *bool   `json:"show_in_org_chart,omitempty"`
 }
 
 // Position 定義崗位的資料結構。
@@ -130,7 +129,6 @@ type Position struct {
 	Code        string    `json:"code"`
 	Name        string    `json:"name"`
 	NameEN      string    `json:"name_en,omitempty"`
-	OrgUnitID   string    `json:"org_unit_id,omitempty"`
 	Level       string    `json:"level,omitempty"`
 	Status      string    `json:"status"`
 	Description string    `json:"description,omitempty"`
@@ -143,7 +141,6 @@ type Position struct {
 type CreatePositionInput struct {
 	Code        string `json:"code,omitempty"`
 	Name        string `json:"name"`
-	OrgUnitID   string `json:"org_unit_id,omitempty"`
 	Level       string `json:"level,omitempty"`
 	Status      string `json:"status,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -153,7 +150,6 @@ type CreatePositionInput struct {
 type UpdatePositionInput struct {
 	Code        *string `json:"code,omitempty"`
 	Name        *string `json:"name,omitempty"`
-	OrgUnitID   *string `json:"org_unit_id,omitempty"`
 	Level       *string `json:"level,omitempty"`
 	Status      *string `json:"status,omitempty"`
 	Description *string `json:"description,omitempty"`
@@ -728,7 +724,7 @@ func EmployeeSectionsFromEmployee(employee Employee) EmployeeSections {
 				"labor_insurance_date", "labor_insurance_level", "labor_insurance_salary",
 				"health_insurance_date", "health_insurance_level", "health_insurance_amount"),
 		},
-		InternalExperiences: append([]EmployeeExperience(nil), employee.InternalExperiences...),
+		InternalExperiences: append([]EmployeeExperience{}, employee.InternalExperiences...),
 	}
 }
 

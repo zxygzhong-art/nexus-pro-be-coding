@@ -11,6 +11,8 @@ import (
 type AttendanceStore interface {
 	UpsertAttendancePolicy(context.Context, domain.AttendancePolicy) error
 	GetAttendancePolicy(ctx context.Context, tenantID string) (domain.AttendancePolicy, bool, error)
+	ReplaceEHRMSLeaveTypes(ctx context.Context, tenantID string, items []domain.EHRMSLeaveType, syncedAt time.Time) error
+	ListEHRMSLeaveTypes(ctx context.Context, tenantID string) ([]domain.EHRMSLeaveType, time.Time, error)
 	GetLeaveTypeExternalMapping(ctx context.Context, tenantID, source, externalCode string, asOf time.Time) (domain.LeaveTypeExternalMapping, bool, error)
 	ListLeaveTypeExternalMappings(ctx context.Context, tenantID string) ([]domain.LeaveTypeExternalMapping, error)
 	LockLeaveTypeExternalMappingKey(ctx context.Context, tenantID, source, externalCode string) error

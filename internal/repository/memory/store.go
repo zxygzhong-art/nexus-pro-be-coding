@@ -46,6 +46,8 @@ type Store struct {
 	employeeImports         map[string]map[string]EmployeeImportSession
 	employmentContracts     map[string]map[string]EmploymentContract
 	attendancePolicies      map[string]AttendancePolicy
+	ehrmsLeaveTypes         map[string][]EHRMSLeaveType
+	ehrmsLeaveTypesSyncedAt map[string]time.Time
 	leaveTypeMappings       map[string]map[string]LeaveTypeExternalMapping
 	leaveTypeSyncIssues     map[string]map[string]LeaveTypeSyncIssue
 	leaveBalances           map[string]map[string]LeaveBalance
@@ -122,6 +124,8 @@ func NewStore() *Store {
 		employeeImports:         map[string]map[string]EmployeeImportSession{},
 		employmentContracts:     map[string]map[string]EmploymentContract{},
 		attendancePolicies:      map[string]AttendancePolicy{},
+		ehrmsLeaveTypes:         map[string][]EHRMSLeaveType{},
+		ehrmsLeaveTypesSyncedAt: map[string]time.Time{},
 		leaveTypeMappings:       map[string]map[string]LeaveTypeExternalMapping{},
 		leaveTypeSyncIssues:     map[string]map[string]LeaveTypeSyncIssue{},
 		leaveBalances:           map[string]map[string]LeaveBalance{},
@@ -1026,7 +1030,26 @@ func (s *Store) UpsertOrgUnit(_ context.Context, v OrgUnit) error {
 	if v.UpdatedAt.IsZero() {
 		v.UpdatedAt = v.CreatedAt
 	}
+	if current, ok := getNested(s.orgUnits, v.TenantID, v.ID); ok {
+		v.ShowInOrgChart = current.ShowInOrgChart
+	} else {
+		v.ShowInOrgChart = true
+	}
 	putNested(s.orgUnits, v.TenantID, v.ID, copyOrgUnit(v))
+	return nil
+}
+
+// UpdateOrgUnitOrgChartVisibility 更新組織單位在組織圖預覽中的可見性。
+func (s *Store) UpdateOrgUnitOrgChartVisibility(_ context.Context, tenantID, id string, showInOrgChart bool, updatedAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	unit, ok := getNested(s.orgUnits, tenantID, id)
+	if !ok {
+		return nil
+	}
+	unit.ShowInOrgChart = showInOrgChart
+	unit.UpdatedAt = updatedAt
+	putNested(s.orgUnits, tenantID, id, unit)
 	return nil
 }
 
@@ -1649,6 +1672,31 @@ func (s *Store) GetAttendancePolicy(_ context.Context, tenantID string) (Attenda
 		return AttendancePolicy{}, false, nil
 	}
 	return copyAttendancePolicy(v), true, nil
+}
+
+// ReplaceEHRMSLeaveTypes atomically replaces the tenant's persisted upstream snapshot.
+func (s *Store) ReplaceEHRMSLeaveTypes(_ context.Context, tenantID string, items []EHRMSLeaveType, syncedAt time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	next := make([]EHRMSLeaveType, len(items))
+	for index, item := range items {
+		next[index] = copyEHRMSLeaveType(item)
+	}
+	s.ehrmsLeaveTypes[tenantID] = next
+	s.ehrmsLeaveTypesSyncedAt[tenantID] = syncedAt
+	return nil
+}
+
+// ListEHRMSLeaveTypes returns the latest persisted upstream snapshot in source order.
+func (s *Store) ListEHRMSLeaveTypes(_ context.Context, tenantID string) ([]EHRMSLeaveType, time.Time, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	items := s.ehrmsLeaveTypes[tenantID]
+	out := make([]EHRMSLeaveType, len(items))
+	for index, item := range items {
+		out[index] = copyEHRMSLeaveType(item)
+	}
+	return out, s.ehrmsLeaveTypesSyncedAt[tenantID], nil
 }
 
 // GetLeaveTypeExternalMapping resolves the latest effective upstream alias.

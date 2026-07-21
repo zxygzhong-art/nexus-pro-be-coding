@@ -349,6 +349,11 @@ func copyAttendancePolicy(v AttendancePolicy) AttendancePolicy {
 	return v
 }
 
+func copyEHRMSLeaveType(v EHRMSLeaveType) EHRMSLeaveType {
+	v.Raw = append([]byte(nil), v.Raw...)
+	return v
+}
+
 // copyLeaveRequest preserves immutable rule and evaluation snapshots across reads.
 func copyLeaveRequest(v LeaveRequest) LeaveRequest {
 	v.RuleSnapshot = utils.CopyStringMap(v.RuleSnapshot)

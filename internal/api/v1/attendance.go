@@ -30,6 +30,8 @@ func (c AttendanceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	attendance.POST("/policies/validate", c.routes.Handle("attendance.leave", "update", c.validatePolicy))
 	attendance.POST("/policies/publish", c.routes.Handle("attendance.leave", "update", c.publishPolicy))
 	attendance.POST("/leave-balances/grant", c.routes.Handle("attendance.leave", "update", c.grantLeaveBalances))
+	attendance.GET("/ehrms/leave-types", c.routes.Handle("attendance.leave", "read", c.listEHRMSLeaveTypes))
+	attendance.POST("/ehrms/leave-types/sync", c.routes.Handle("attendance.leave", "update", c.syncEHRMSLeaveTypes, TenantWideScope()))
 	attendance.GET("/leave-type-integrations", c.routes.Handle("attendance.leave", "read", c.listLeaveTypeIntegrations))
 	attendance.POST("/leave-type-mappings", c.routes.Handle("attendance.leave", "update", c.saveLeaveTypeMapping))
 	attendance.DELETE("/leave-type-mappings/:id", c.routes.Handle("attendance.leave", "update", c.expireLeaveTypeMapping, ResourceID(PathParamID)))
@@ -199,6 +201,26 @@ func (c AttendanceCtrl) grantLeaveBalances(w http.ResponseWriter, r *http.Reques
 		return err
 	}
 	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// listEHRMSLeaveTypes returns the source-of-truth leave catalog from eHRMS.
+func (c AttendanceCtrl) listEHRMSLeaveTypes(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	catalog, err := c.svc.ListEHRMSLeaveTypes(ctx)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, catalog)
+	return nil
+}
+
+// syncEHRMSLeaveTypes refreshes the complete persisted eHRMS leave catalog.
+func (c AttendanceCtrl) syncEHRMSLeaveTypes(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	catalog, err := c.svc.SyncEHRMSLeaveTypes(ctx)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, catalog)
 	return nil
 }
 

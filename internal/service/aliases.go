@@ -99,6 +99,8 @@ type (
 	LeaveEntitlementRule               = domain.LeaveEntitlementRule
 	GrantLeaveBalancesInput            = domain.GrantLeaveBalancesInput
 	GrantLeaveBalancesResult           = domain.GrantLeaveBalancesResult
+	EHRMSLeaveType                     = domain.EHRMSLeaveType
+	EHRMSLeaveTypeCatalog              = domain.EHRMSLeaveTypeCatalog
 	LeaveTypeSyncIssue                 = domain.LeaveTypeSyncIssue
 	LeaveTypeIntegration               = domain.LeaveTypeIntegration
 	LeaveTypeIntegrationResponse       = domain.LeaveTypeIntegrationResponse

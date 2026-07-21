@@ -10,6 +10,7 @@ import (
 // OrgStore 定義組織儲存層的行為契約。
 type OrgStore interface {
 	UpsertOrgUnit(context.Context, domain.OrgUnit) error
+	UpdateOrgUnitOrgChartVisibility(ctx context.Context, tenantID, id string, showInOrgChart bool, updatedAt time.Time) error
 	GetOrgUnit(ctx context.Context, tenantID, id string) (domain.OrgUnit, bool, error)
 	ListOrgUnits(ctx context.Context, tenantID string) ([]domain.OrgUnit, error)
 }

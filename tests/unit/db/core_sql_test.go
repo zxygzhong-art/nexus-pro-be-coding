@@ -4,9 +4,11 @@ import (
 	"context"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/pgtype"
 
 	sqlc "nexus-pro-api/internal/platform/postgres/db"
 )
@@ -14,11 +16,15 @@ import (
 type captureDBTX struct {
 	queryRowSQL  string
 	queryRowArgs []interface{}
+	execSQL      string
+	execArgs     []interface{}
 	row          pgx.Row
 }
 
 // Exec 驗證 exec。
-func (db *captureDBTX) Exec(context.Context, string, ...interface{}) (pgconn.CommandTag, error) {
+func (db *captureDBTX) Exec(_ context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
+	db.execSQL = sql
+	db.execArgs = append([]interface{}{}, args...)
 	return pgconn.CommandTag{}, nil
 }
 
@@ -69,5 +75,30 @@ func TestNextEmployeeNoSequenceUsesSequenceTable(t *testing.T) {
 	}
 	if strings.Contains(dbtx.queryRowSQL, "FROM employees") {
 		t.Fatalf("employee number sequence query should not scan employees: %s", dbtx.queryRowSQL)
+	}
+}
+
+// TestInsertFormInstanceFieldValueBooleanBranchCasts 驗證 boolean 投影欄位帶 ::boolean cast。
+// 2026-07-17 缺陷:缺少 cast 時 Postgres PREPARE 報 42804,CASE 分支無法確定型別,
+// 導致所有含 analytics.reportable 布林欄位的表單提交 500。
+func TestInsertFormInstanceFieldValueBooleanBranchCasts(t *testing.T) {
+	dbtx := &captureDBTX{}
+	err := sqlc.New(dbtx).InsertFormInstanceFieldValue(context.Background(), sqlc.InsertFormInstanceFieldValueParams{
+		TenantID:       "tenant-1",
+		FormInstanceID: "fi-1",
+		TemplateID:     "ft-1",
+		FieldID:        "overtime_confirmed",
+		ValueType:      "boolean",
+		ValueBoolean:   pgtype.Bool{Bool: true, Valid: true},
+		CreatedAt:      pgtype.Timestamptz{Time: time.Unix(0, 0).UTC(), Valid: true},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(dbtx.execSQL, "'boolean' THEN $9::boolean") {
+		t.Fatalf("boolean CASE branch must cast the parameter with ::boolean, got SQL: %s", dbtx.execSQL)
+	}
+	if got, ok := dbtx.execArgs[8].(pgtype.Bool); !ok || !got.Valid || !got.Bool {
+		t.Fatalf("expected boolean arg at position 9, got %#v", dbtx.execArgs[8])
 	}
 }

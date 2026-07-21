@@ -345,7 +345,6 @@ func (c HRService) positionFromInput(ctx RequestContext, input CreatePositionInp
 		TenantID:    ctx.TenantID,
 		Code:        strings.TrimSpace(input.Code),
 		Name:        strings.TrimSpace(input.Name),
-		OrgUnitID:   strings.TrimSpace(input.OrgUnitID),
 		Level:       strings.TrimSpace(input.Level),
 		Status:      normalizePositionStatus(input.Status),
 		Description: strings.TrimSpace(input.Description),
@@ -373,9 +372,6 @@ func (c HRService) applyPositionPatch(ctx RequestContext, position *Position, in
 	if input.Name != nil {
 		position.Name = strings.TrimSpace(*input.Name)
 	}
-	if input.OrgUnitID != nil {
-		position.OrgUnitID = strings.TrimSpace(*input.OrgUnitID)
-	}
 	if input.Level != nil {
 		position.Level = strings.TrimSpace(*input.Level)
 	}
@@ -400,44 +396,6 @@ func (c HRService) validatePosition(ctx RequestContext, position Position) error
 	}
 	if !validPositionStatus(position.Status) {
 		fields = append(fields, FieldError{Field: "status", Code: "invalid", Message: "status must be active or disabled"})
-	}
-	if position.OrgUnitID != "" {
-		if _, ok, err := c.store.GetOrgUnit(goContext(ctx), ctx.TenantID, position.OrgUnitID); err != nil {
-			return err
-		} else if !ok {
-			fields = append(fields, FieldError{Field: "org_unit_id", Code: "not_found", Message: "org unit not found"})
-		}
-	}
-	units, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
-	if err != nil {
-		return err
-	}
-	for _, unit := range units {
-		if strings.TrimSpace(unit.ManagerPositionID) != position.ID {
-			continue
-		}
-		if position.Status == string(PositionStatusDisabled) {
-			fields = append(fields, FieldError{Field: "status", Code: "in_use", Message: "manager position cannot be disabled"})
-		}
-		if position.OrgUnitID != unit.ID {
-			fields = append(fields, FieldError{Field: "org_unit_id", Code: "in_use", Message: "manager position must remain in its org unit"})
-		}
-		break
-	}
-	if position.OrgUnitID != "" {
-		employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
-		if err != nil {
-			return err
-		}
-		for _, employee := range employees {
-			if strings.TrimSpace(employee.PositionID) != position.ID || strings.TrimSpace(employee.OrgUnitID) == "" {
-				continue
-			}
-			if employee.OrgUnitID != position.OrgUnitID {
-				fields = append(fields, FieldError{Field: "org_unit_id", Code: "in_use", Message: "position is used by employees in another org unit"})
-				break
-			}
-		}
 	}
 	if existing, ok, err := c.store.GetPositionByCode(goContext(ctx), ctx.TenantID, position.Code); err != nil {
 		return err

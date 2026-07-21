@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/json"
 	"strings"
 	"time"
 )
@@ -622,6 +623,43 @@ type AttendanceDailySummaryQuery struct {
 
 // EHRMSAttendanceRecord 表示 eHRMS 考勤 record。
 type EHRMSAttendanceRecord map[string]string
+
+// EHRMSLeaveType preserves every documented eHRMS leave-type field plus the
+// untouched upstream object for forward-compatible fields.
+type EHRMSLeaveType struct {
+	Code          string          `json:"code"`
+	Kind          string          `json:"kind,omitempty"`
+	Unit          string          `json:"unit,omitempty"`
+	AbbrEN        string          `json:"abbr_en,omitempty"`
+	NameEN        string          `json:"name_en,omitempty"`
+	NameZH        string          `json:"name_zh,omitempty"`
+	MinUnit       string          `json:"min_unit,omitempty"`
+	MaxValue      string          `json:"max_value,omitempty"`
+	ParentCode    string          `json:"parent_code,omitempty"`
+	Show          string          `json:"show,omitempty"`
+	Range         string          `json:"range,omitempty"`
+	Ratio         string          `json:"ratio,omitempty"`
+	Target        string          `json:"target,omitempty"`
+	ShowMax       string          `json:"show_max,omitempty"`
+	PreLeave      string          `json:"pre_leave,omitempty"`
+	SalaryStd     string          `json:"salary_std,omitempty"`
+	InclHoliday   string          `json:"incl_holiday,omitempty"`
+	TargetClass   string          `json:"target_class,omitempty"`
+	InclFestival  string          `json:"incl_festival,omitempty"`
+	FirstYearRule string          `json:"first_year_rule,omitempty"`
+	Rule          string          `json:"rule,omitempty"`
+	Raw           json.RawMessage `json:"raw"`
+}
+
+// EHRMSLeaveTypeCatalog is the persisted tenant snapshot rendered by the HR page.
+type EHRMSLeaveTypeCatalog struct {
+	Items         []EHRMSLeaveType `json:"items"`
+	Total         int              `json:"total"`
+	Categories    int              `json:"categories"`
+	LeaveItems    int              `json:"leave_items"`
+	SpecialGroups int              `json:"special_groups"`
+	SyncedAt      *time.Time       `json:"synced_at,omitempty"`
+}
 
 // EHRMSLeaveBalanceRecord 表示 eHRMS 假別餘額 record。
 type EHRMSLeaveBalanceRecord map[string]string

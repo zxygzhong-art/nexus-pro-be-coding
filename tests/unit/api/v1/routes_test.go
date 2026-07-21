@@ -1,6 +1,7 @@
 package v1_test
 
 import (
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
@@ -160,6 +161,52 @@ func TestPermissionSetAssignmentPoliciesUseDedicatedResource(t *testing.T) {
 	}
 	if found != 2 {
 		t.Fatalf("expected read and create assignment policies, got %d", found)
+	}
+}
+
+// TestWorkflowReviewMutationsRequireApprove prevents read-only reviewers from mutating workflow state.
+func TestWorkflowReviewMutationsRequireApprove(t *testing.T) {
+	want := map[string]bool{
+		"/v1/workflows/reviews/bulk-action": false,
+		"/v1/workflows/forms/:id/approve":   false,
+		"/v1/workflows/forms/:id/reject":    false,
+		"/v1/workflows/forms/:id/return":    false,
+	}
+	for _, policy := range domain.DefaultRoutePolicies {
+		if _, ok := want[policy.Path]; !ok {
+			continue
+		}
+		want[policy.Path] = true
+		if policy.Method != http.MethodPost || policy.Action != "approve" {
+			t.Fatalf("workflow review mutation must require approve: %+v", policy)
+		}
+	}
+	for path, found := range want {
+		if !found {
+			t.Fatalf("missing workflow review policy for %s", path)
+		}
+	}
+}
+
+// TestEHRMSLeaveTypeSyncPolicySeparatesReadAndUpdate keeps GET read-only and protects explicit synchronization.
+func TestEHRMSLeaveTypeSyncPolicySeparatesReadAndUpdate(t *testing.T) {
+	want := map[string]string{
+		"GET /v1/attendance/ehrms/leave-types":       "read",
+		"POST /v1/attendance/ehrms/leave-types/sync": "update",
+	}
+	for _, policy := range domain.DefaultRoutePolicies {
+		key := policy.Method + " " + policy.Path
+		action, ok := want[key]
+		if !ok {
+			continue
+		}
+		if policy.Action != action {
+			t.Fatalf("expected %s to require %s, got %+v", key, action, policy)
+		}
+		delete(want, key)
+	}
+	if len(want) != 0 {
+		t.Fatalf("missing eHRMS leave type policies: %+v", want)
 	}
 }
 

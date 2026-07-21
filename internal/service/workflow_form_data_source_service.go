@@ -112,7 +112,7 @@ func (c WorkflowService) loadFormDataSources(ctx RequestContext) (domain.FormDat
 			continue
 		}
 		positionRecords = append(positionRecords, map[string]interface{}{
-			"id": position.ID, "name": position.Name, "code": position.Code, "department_id": position.OrgUnitID,
+			"id": position.ID, "name": position.Name, "code": position.Code,
 		})
 	}
 	employeeRecords := make([]map[string]interface{}, 0, len(employees))

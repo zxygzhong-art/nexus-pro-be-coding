@@ -178,7 +178,6 @@ func TestCanonicalWorkspacePageActionsDeriveNavigation(t *testing.T) {
 		{menuKey: "workspace.overview", primaryResource: "hr.employee", resource: "hr.employee", action: domain.ActionRead},
 		{menuKey: "hr.employees", primaryResource: "hr.employee", resource: "hr.employee", action: domain.ActionCreate},
 		{menuKey: "hr.org_units", primaryResource: "hr.org_unit", resource: "hr.org_unit", action: domain.ActionUpdate},
-		{menuKey: "hr.positions", primaryResource: "hr.position", resource: "hr.position", action: domain.ActionDelete},
 		{menuKey: "hr.organization", primaryResource: "hr.employee", resource: "hr.employee", action: domain.ActionUpdate},
 		{menuKey: "hr.turnover", primaryResource: "hr.employee", resource: "hr.employee", action: domain.ActionExport},
 		{menuKey: "attendance.overview", primaryResource: "attendance.clock", resource: "attendance.clock", action: domain.ActionImport},

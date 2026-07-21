@@ -848,18 +848,18 @@ type NotificationRecipient struct {
 }
 
 type OrgUnit struct {
-	ID                string             `json:"id"`
-	TenantID          string             `json:"tenant_id"`
-	Code              string             `json:"code"`
-	Name              string             `json:"name"`
-	NameEn            string             `json:"name_en"`
-	ParentID          string             `json:"parent_id"`
-	Path              []string           `json:"path"`
-	ManagerPositionID string             `json:"manager_position_id"`
-	Source            string             `json:"source"`
-	Closed            bool               `json:"closed"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	Code           string             `json:"code"`
+	Name           string             `json:"name"`
+	NameEn         string             `json:"name_en"`
+	ParentID       string             `json:"parent_id"`
+	Path           []string           `json:"path"`
+	Source         string             `json:"source"`
+	Closed         bool               `json:"closed"`
+	ShowInOrgChart bool               `json:"show_in_org_chart"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
 type OutboxEvent struct {
@@ -991,7 +991,6 @@ type Position struct {
 	Code        string             `json:"code"`
 	Name        string             `json:"name"`
 	NameEn      string             `json:"name_en"`
-	OrgUnitID   string             `json:"org_unit_id"`
 	Level       string             `json:"level"`
 	Status      string             `json:"status"`
 	Description string             `json:"description"`

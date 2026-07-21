@@ -631,9 +631,6 @@ func (c HRService) UpsertEHRMSOrgUnits(ctx RequestContext, departments []OrgUnit
 		if err != nil {
 			return 0, err
 		}
-		if ok && unit.ManagerPositionID == "" {
-			unit.ManagerPositionID = before.ManagerPositionID
-		}
 		if err := c.store.UpsertOrgUnit(goContext(ctx), unit); err != nil {
 			return 0, err
 		}
@@ -734,7 +731,7 @@ func (c HRService) attachEHRMSRootsToCanonicalRoot(ctx RequestContext, departmen
 	return out, nil
 }
 
-// UpsertEHRMSPositions persists normalized upstream positions while preserving local organization assignments.
+// UpsertEHRMSPositions persists normalized upstream positions by stable tenant-local code.
 func (c HRService) UpsertEHRMSPositions(ctx RequestContext, positions []Position) (int, error) {
 	for _, position := range positions {
 		before, ok, err := c.store.GetPositionByCode(goContext(ctx), ctx.TenantID, position.Code)
@@ -743,9 +740,6 @@ func (c HRService) UpsertEHRMSPositions(ctx RequestContext, positions []Position
 		}
 		if ok {
 			position.ID = before.ID
-			if position.OrgUnitID == "" {
-				position.OrgUnitID = before.OrgUnitID
-			}
 		}
 		if err := c.store.UpsertPosition(goContext(ctx), position); err != nil {
 			return 0, err

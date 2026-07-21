@@ -34,10 +34,6 @@ var pagePermissionBundles = map[string][]pagePermissionResource{
 		{applicationCode: AppHR, resourceType: ResourceOrgUnit, actions: []Action{ActionRead, ActionCreate, ActionUpdate}},
 		{applicationCode: AppHR, resourceType: ResourcePosition, actions: []Action{ActionRead}},
 	},
-	"hr.positions": {
-		{applicationCode: AppHR, resourceType: ResourcePosition, actions: []Action{ActionRead, ActionCreate, ActionUpdate, ActionDelete}},
-		{applicationCode: AppHR, resourceType: ResourceOrgUnit, actions: []Action{ActionRead}},
-	},
 	"hr.organization": {
 		{applicationCode: AppHR, resourceType: ResourceEmployee, actions: []Action{ActionRead, ActionUpdate}},
 		{applicationCode: AppHR, resourceType: ResourceOrgUnit, actions: []Action{ActionRead}},
@@ -136,7 +132,6 @@ var tenantWideWorkspaceMenuKeys = map[string]struct{}{
 	"workspace.overview":      {},
 	"hr.employees":            {},
 	"hr.org_units":            {},
-	"hr.positions":            {},
 	"hr.organization":         {},
 	"hr.turnover":             {},
 	"attendance.overview":     {},
@@ -282,7 +277,7 @@ func canonicalMenuKeyForPermission(permission Permission) string {
 	case strings.HasPrefix(key, "hr.org_unit."):
 		return "hr.org_units"
 	case strings.HasPrefix(key, "hr.position."):
-		return "hr.positions"
+		return "hr.employees"
 	case strings.HasPrefix(key, "hr.employment_contract."):
 		return "hr.employees"
 	case key == "attendance.clock.export", key == "attendance.clock.import":

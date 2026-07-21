@@ -13,8 +13,8 @@ import (
 	"nexus-pro-api/internal/service"
 )
 
-// TestWorkflowAssignedSelfReaderCanApproveOverHTTP keeps route authz from hiding active assignee access.
-func TestWorkflowAssignedSelfReaderCanApproveOverHTTP(t *testing.T) {
+// TestWorkflowAssignedReaderStillRequiresApproveOverHTTP separates assignment scope from review capability.
+func TestWorkflowAssignedReaderStillRequiresApproveOverHTTP(t *testing.T) {
 	now := time.Date(2026, 7, 15, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
 	populateDemoFixture(store)
@@ -92,7 +92,20 @@ func TestWorkflowAssignedSelfReaderCanApproveOverHTTP(t *testing.T) {
 	if rec := request("acct-http-bystander"); rec.Code != http.StatusForbidden {
 		t.Fatalf("expected unassigned self reader to receive 403, got %d: %s", rec.Code, rec.Body.String())
 	}
+	if rec := request("acct-workflow-approver"); rec.Code != http.StatusForbidden {
+		t.Fatalf("expected assigned read-only reviewer to receive 403, got %d: %s", rec.Code, rec.Body.String())
+	}
+	if err := store.UpsertPermissionSet(t.Context(), domain.PermissionSet{
+		ID: "ps-http-assignee", TenantID: "demo", Name: "HTTP assigned reviewer",
+		Permissions: []domain.Permission{
+			{Resource: "workflow.form_instance", Action: "read", Scope: "self"},
+			{Resource: "workflow.form_instance", Action: "approve", Scope: "self"},
+		},
+		CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if rec := request("acct-workflow-approver"); rec.Code != http.StatusOK {
-		t.Fatalf("expected assigned self reader to approve, got %d: %s", rec.Code, rec.Body.String())
+		t.Fatalf("expected assigned reviewer with approve capability to succeed, got %d: %s", rec.Code, rec.Body.String())
 	}
 }

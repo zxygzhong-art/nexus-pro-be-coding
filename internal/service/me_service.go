@@ -441,7 +441,6 @@ var defaultMenuCatalog = []MenuNode{
 			{Key: "workspace.overview", Label: "概覽", Path: "/workspace/overview"},
 			{Key: "hr.employees", Label: "員工", Path: "/workspace/employees"},
 			{Key: "hr.org_units", Label: "組織單元", Path: "/workspace/org-units"},
-			{Key: "hr.positions", Label: "崗位", Path: "/workspace/positions"},
 			{Key: "hr.organization", Label: "組織架構", Path: "/workspace/organization"},
 			{Key: "hr.turnover", Label: "在職分析", Path: "/workspace/turnover"},
 			{Key: "attendance.overview", Label: "工時統計", Path: "/workspace/attendance"},

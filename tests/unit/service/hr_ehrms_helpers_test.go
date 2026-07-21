@@ -144,11 +144,11 @@ func mustPositionByCode(t *testing.T, store *memory.Store, tenantID, code string
 	return position
 }
 
-func TestUpsertEHRMSPositionsPreservesOrgUnitAssignment(t *testing.T) {
+func TestUpsertEHRMSPositionsPreservesStableID(t *testing.T) {
 	store := memory.NewStore()
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	if err := store.UpsertPosition(context.Background(), domain.Position{
-		ID: "0901", TenantID: "tenant-1", Code: "0901", Name: "Manager", OrgUnitID: "ou-ceo",
+		ID: "0901", TenantID: "tenant-1", Code: "0901", Name: "Manager",
 		Status: string(domain.PositionStatusActive), CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
@@ -163,20 +163,20 @@ func TestUpsertEHRMSPositionsPreservesOrgUnitAssignment(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("expected position after sync, ok=%v err=%v", ok, err)
 	}
-	if updated.OrgUnitID != "ou-ceo" {
-		t.Fatalf("expected eHRMS sync to preserve org unit, got %+v", updated)
+	if updated.ID != "0901" {
+		t.Fatalf("expected eHRMS sync to preserve the stable ID, got %+v", updated)
 	}
 	if _, ok, err := store.GetPosition(context.Background(), "tenant-1", "ehrms-pos-new"); err != nil || ok {
 		t.Fatalf("expected business-code reconciliation to preserve the legacy ID, ok=%v err=%v", ok, err)
 	}
 }
 
-func TestUpsertEHRMSOrgUnitsPreservesManagerPosition(t *testing.T) {
+func TestUpsertEHRMSOrgUnitsPreservesStableID(t *testing.T) {
 	store := memory.NewStore()
 	now := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
 	if err := store.UpsertOrgUnit(context.Background(), domain.OrgUnit{
 		ID: "ou-ceo", TenantID: "tenant-1", Code: "CEO", Name: "CEO", Path: []string{"ou-ceo"},
-		ManagerPositionID: "0901", CreatedAt: now, UpdatedAt: now,
+		CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -190,8 +190,8 @@ func TestUpsertEHRMSOrgUnitsPreservesManagerPosition(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("expected org unit after sync, ok=%v err=%v", ok, err)
 	}
-	if updated.ManagerPositionID != "0901" {
-		t.Fatalf("expected eHRMS sync to preserve manager position, got %+v", updated)
+	if updated.ID != "ou-ceo" {
+		t.Fatalf("expected eHRMS sync to preserve the stable ID, got %+v", updated)
 	}
 	if _, ok, err := store.GetOrgUnit(context.Background(), "tenant-1", "ehrms-ou-new"); err != nil || ok {
 		t.Fatalf("expected business-code reconciliation to preserve the legacy ID, ok=%v err=%v", ok, err)

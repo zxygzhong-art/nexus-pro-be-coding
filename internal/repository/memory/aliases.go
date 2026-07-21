@@ -35,6 +35,7 @@ type (
 	EmploymentContract              = domain.EmploymentContract
 	AttendancePolicy                = domain.AttendancePolicy
 	AttendanceLeaveType             = domain.AttendanceLeaveType
+	EHRMSLeaveType                  = domain.EHRMSLeaveType
 	LeaveBalance                    = domain.LeaveBalance
 	LeaveRequest                    = domain.LeaveRequest
 	LeaveRequestAllocation          = domain.LeaveRequestAllocation

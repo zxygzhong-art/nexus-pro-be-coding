@@ -1,7 +1,6 @@
 package service_test
 
 import (
-	"context"
 	"testing"
 
 	"nexus-pro-api/internal/domain"
@@ -92,86 +91,37 @@ func TestCreateOrgUnitUnderClosedParentInheritsClosed(t *testing.T) {
 	}
 }
 
-// TestAssignManagerPositionUpdatesPositionOrgUnit 驗證主管崗位綁定會同步崗位所屬組織單元。
-func TestAssignManagerPositionUpdatesPositionOrgUnit(t *testing.T) {
+// TestUpdateOrgUnitChartVisibility 驗證部門層級的樹狀圖展示設定會持久化。
+func TestUpdateOrgUnitChartVisibility(t *testing.T) {
 	svc, ctx := newServiceFixture([]domain.Permission{
 		{Resource: "hr.org_unit", Action: "create", Scope: "all"},
 		{Resource: "hr.org_unit", Action: "update", Scope: "all"},
-		{Resource: "hr.position", Action: "create", Scope: "all"},
-		{Resource: "hr.position", Action: "read", Scope: "all"},
+		{Resource: "hr.org_unit", Action: "read", Scope: "all"},
 	})
-	unit, err := svc.HR().CreateOrgUnit(ctx, domain.CreateOrgUnitInput{Name: "CEO"})
+	unit, err := svc.HR().CreateOrgUnit(ctx, domain.CreateOrgUnitInput{Name: "Hidden Department"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	position, err := svc.HR().CreatePosition(ctx, domain.CreatePositionInput{Code: "MANAGER", Name: "Manager"})
-	if err != nil {
-		t.Fatal(err)
+	if !unit.ShowInOrgChart {
+		t.Fatalf("expected a new org unit to be visible by default, got %+v", unit)
 	}
-	positionID := position.ID
-	if _, err := svc.HR().UpdateOrgUnit(ctx, unit.ID, domain.UpdateOrgUnitInput{ManagerPositionID: &positionID}); err != nil {
-		t.Fatal(err)
-	}
-	updated, err := svc.HR().GetPosition(ctx, position.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.OrgUnitID != unit.ID {
-		t.Fatalf("expected position org unit %s, got %+v", unit.ID, updated)
-	}
-}
 
-// TestCreateOrgUnitWithManagerPositionUpdatesPositionOrgUnit 驗證創建組織時綁定主管崗位也會同步歸屬。
-func TestCreateOrgUnitWithManagerPositionUpdatesPositionOrgUnit(t *testing.T) {
-	svc, ctx := newServiceFixture([]domain.Permission{
-		{Resource: "hr.org_unit", Action: "create", Scope: "all"},
-		{Resource: "hr.position", Action: "create", Scope: "all"},
-		{Resource: "hr.position", Action: "read", Scope: "all"},
-	})
-	position, err := svc.HR().CreatePosition(ctx, domain.CreatePositionInput{Code: "DIRECTOR", Name: "Director"})
+	hidden := false
+	updated, err := svc.HR().UpdateOrgUnit(ctx, unit.ID, domain.UpdateOrgUnitInput{ShowInOrgChart: &hidden})
 	if err != nil {
 		t.Fatal(err)
 	}
-	unit, err := svc.HR().CreateOrgUnit(ctx, domain.CreateOrgUnitInput{Name: "R&D", ManagerPositionID: position.ID})
-	if err != nil {
-		t.Fatal(err)
+	if updated.ShowInOrgChart {
+		t.Fatalf("expected updated org unit to be hidden, got %+v", updated)
 	}
-	updated, err := svc.HR().GetPosition(ctx, position.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.OrgUnitID != unit.ID {
-		t.Fatalf("expected position org unit %s, got %+v", unit.ID, updated)
-	}
-}
 
-// TestAssignSharedPositionAsManagerIsRejected 驗證跨組織共用崗位不能被收窄為單一組織的主管崗。
-func TestAssignSharedPositionAsManagerIsRejected(t *testing.T) {
-	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
-		{Resource: "hr.org_unit", Action: "create", Scope: "all"},
-		{Resource: "hr.org_unit", Action: "update", Scope: "all"},
-		{Resource: "hr.position", Action: "create", Scope: "all"},
-	})
-	target, err := svc.HR().CreateOrgUnit(ctx, domain.CreateOrgUnitInput{Name: "Target"})
+	units, err := svc.HR().ListOrgUnits(ctx)
 	if err != nil {
 		t.Fatal(err)
 	}
-	other, err := svc.HR().CreateOrgUnit(ctx, domain.CreateOrgUnitInput{Name: "Other"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	position, err := svc.HR().CreatePosition(ctx, domain.CreatePositionInput{Code: "SHARED", Name: "Shared"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := store.UpsertEmployee(context.Background(), domain.Employee{
-		ID: "emp-other", TenantID: ctx.TenantID, Name: "Other Employee", OrgUnitID: other.ID,
-		PositionID: position.ID, Position: position.Name, Status: string(domain.EmployeeStatusActive),
-	}); err != nil {
-		t.Fatal(err)
-	}
-	positionID := position.ID
-	if _, err := svc.HR().UpdateOrgUnit(ctx, target.ID, domain.UpdateOrgUnitInput{ManagerPositionID: &positionID}); err == nil {
-		t.Fatal("expected shared position manager assignment to fail")
+	for _, item := range units {
+		if item.ID == unit.ID && item.ShowInOrgChart {
+			t.Fatalf("expected persisted org unit visibility to be false, got %+v", item)
+		}
 	}
 }

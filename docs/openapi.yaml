@@ -1252,6 +1252,7 @@ paths:
         - $ref: "#/components/parameters/Page"
         - $ref: "#/components/parameters/PageSize"
         - $ref: "#/components/parameters/Sort"
+        - {name: q, in: query, schema: {type: string}, description: Case-insensitive name or description search}
       responses:
         "200":
           description: User group page
@@ -1801,10 +1802,12 @@ paths:
                 code: {type: string}
                 name: {type: string}
                 parent_id: {type: string}
-                manager_position_id: {type: string}
                 closed:
                   type: boolean
                   description: Closing an organization unit also closes all descendants; a child cannot reopen while an ancestor remains closed.
+                show_in_org_chart:
+                  type: boolean
+                  description: Whether this department and its subtree are displayed in the organization chart.
       responses:
         "200":
           description: Updated organization unit
@@ -1986,6 +1989,34 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/GrantLeaveBalancesDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/attendance/ehrms/leave-types:
+    get:
+      summary: List the persisted EHRMS leave-type snapshot
+      responses:
+        "200":
+          description: EHRMS leave type catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EHRMSLeaveTypeListDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/attendance/ehrms/leave-types/sync:
+    post:
+      summary: Refresh and persist every EHRMS leave-type field
+      responses:
+        "200":
+          description: Refreshed EHRMS leave-type catalog
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EHRMSLeaveTypeListDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -2434,10 +2465,10 @@ paths:
     get:
       summary: Get workspace employment turnover analysis
       description: |
-        統計範圍排除隸屬已關閉組織單元或已停用崗位的員工，因此在職數小於概覽頁（全員快照）。
-        離職以有效離職時間（resign_date 優先）落入期間為準；
-        離職率 = 期間離職 ÷ 期間平均在職（期初與期末快照平均）× 100%；
-        年度數字滿足閉合恆等式：年初在職 + 年新進 − 年離職 − 年資遣 = 年末在職。
+        統計範圍排除隸屬已關閉組織單元的員工；留停不計入期末在職。
+        離職以有效離職時間（resign_date 優先）落入期間為準；期末日離職者保留在本期期末，於次期扣除。
+        當月離職率 = 非資遣離職 ÷ ((上月期末人數 + 當月期末人數) / 2) × 100%；
+        資遣單列但不納入離職總數與離職率；YTD 與年度離職率為各月離職率累加。
       parameters:
         - {name: year, in: query, schema: {type: integer, minimum: 1970}}
         - {name: month, in: query, schema: {type: integer, minimum: 1, maximum: 12}}
@@ -6565,6 +6596,54 @@ components:
         projected_version: {type: integer}
         policy:
           $ref: "#/components/schemas/AttendancePolicy"
+    EHRMSLeaveType:
+      type: object
+      required: [code, raw]
+      properties:
+        code: {type: string}
+        kind: {type: string, enum: [category, item, special_group]}
+        unit: {type: string}
+        abbr_en: {type: string}
+        name_en: {type: string}
+        name_zh: {type: string}
+        min_unit: {type: string}
+        max_value: {type: string}
+        parent_code: {type: string}
+        show: {type: string}
+        range: {type: string}
+        ratio: {type: string}
+        target: {type: string}
+        show_max: {type: string}
+        pre_leave: {type: string}
+        salary_std: {type: string}
+        incl_holiday: {type: string}
+        target_class: {type: string}
+        incl_festival: {type: string}
+        first_year_rule: {type: string}
+        rule: {type: string}
+        raw:
+          type: object
+          additionalProperties: true
+          description: Untouched upstream object; preserves future EHRMS fields.
+    EHRMSLeaveTypeCatalog:
+      type: object
+      required: [items, total, categories, leave_items, special_groups]
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/EHRMSLeaveType"
+        total: {type: integer}
+        categories: {type: integer}
+        leave_items: {type: integer}
+        special_groups: {type: integer}
+        synced_at: {type: string, format: date-time}
+    EHRMSLeaveTypeListDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EHRMSLeaveTypeCatalog"
     LeaveTypeExternalMapping:
       type: object
       required: [id, source, external_code, leave_type_id, leave_type_code]
@@ -6850,11 +6929,8 @@ components:
               show_in_org_chart: {type: boolean}
               parent_id: {type: string}
               org_unit_id: {type: string}
-              manager_source: {type: string, enum: [override, org_unit, none]}
+              manager_source: {type: string, enum: [override, none]}
               is_override: {type: boolean}
-              manager_issue:
-                type: string
-                enum: [org_unit_missing, org_unit_not_found, org_unit_cycle, manager_position_missing, manager_position_invalid, manager_position_unstaffed, manager_position_multiple]
     WorkspaceTurnover:
       type: object
       required: [monthly, annual]
@@ -7200,11 +7276,11 @@ components:
         target_clock_record_id: {type: string}
         direction: {type: string, enum: [clock_in, clock_out]}
         requested_clocked_at: {type: string}
-        reason: {type: string}
+        reason: {type: string, minLength: 4, maxLength: 200, description: 4-200 characters (after trimming whitespace).}
     ReviewAttendanceCorrectionRequest:
       type: object
       properties:
-        reason: {type: string}
+        reason: {type: string, minLength: 2, maxLength: 200, description: Optional; when provided it must be 2-200 characters (after trimming whitespace). Reviewing a non-pending correction returns 409 Conflict.}
     EmployeeImportPreviewRequest:
       type: object
       required: [filename, content]
@@ -7428,7 +7504,7 @@ components:
         status:
           $ref: "#/components/schemas/EmployeeDirectStatus"
     Position:
-      description: Tenant-scoped HR position entity. Existing employee.position remains for backward-compatible display.
+      description: Tenant-scoped HR position directory entry used for display and employee job-title selection. Positions are independent of organization units.
       allOf:
         - $ref: "#/components/schemas/PositionInput"
         - type: object
@@ -7444,9 +7520,6 @@ components:
       properties:
         code: {type: string}
         name: {type: string}
-        org_unit_id:
-          type: string
-          description: Optional tenant-local org unit id. Empty means position is not bound to one org unit.
         level: {type: string}
         status:
           $ref: "#/components/schemas/PositionStatus"
@@ -7456,7 +7529,6 @@ components:
       properties:
         code: {type: string}
         name: {type: string}
-        org_unit_id: {type: string}
         level: {type: string}
         status:
           $ref: "#/components/schemas/PositionStatus"

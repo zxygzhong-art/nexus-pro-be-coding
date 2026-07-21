@@ -1077,20 +1077,29 @@ func (s *Store) UpsertOrgUnit(execCtx context.Context, v domain.OrgUnit) error {
 		v.UpdatedAt = v.CreatedAt
 	}
 	_, err := s.q.UpsertOrgUnit(execCtx, sqlc.UpsertOrgUnitParams{
-		ID:                v.ID,
-		TenantID:          v.TenantID,
-		Code:              v.Code,
-		Name:              v.Name,
-		NameEn:            v.NameEN,
-		ParentID:          v.ParentID,
-		Path:              utils.CopyStrings(v.Path),
-		ManagerPositionID: v.ManagerPositionID,
-		Source:            v.Source,
-		Closed:            v.Closed,
-		CreatedAt:         timestamptz(v.CreatedAt),
-		UpdatedAt:         timestamptz(v.UpdatedAt),
+		ID:        v.ID,
+		TenantID:  v.TenantID,
+		Code:      v.Code,
+		Name:      v.Name,
+		NameEn:    v.NameEN,
+		ParentID:  v.ParentID,
+		Path:      utils.CopyStrings(v.Path),
+		Source:    v.Source,
+		Closed:    v.Closed,
+		CreatedAt: timestamptz(v.CreatedAt),
+		UpdatedAt: timestamptz(v.UpdatedAt),
 	})
 	return err
+}
+
+// UpdateOrgUnitOrgChartVisibility 更新組織單位在組織圖預覽中的可見性。
+func (s *Store) UpdateOrgUnitOrgChartVisibility(execCtx context.Context, tenantID, id string, showInOrgChart bool, updatedAt time.Time) error {
+	return s.q.UpdateOrgUnitOrgChartVisibility(execCtx, sqlc.UpdateOrgUnitOrgChartVisibilityParams{
+		TenantID:       tenantID,
+		ID:             id,
+		ShowInOrgChart: showInOrgChart,
+		UpdatedAt:      timestamptz(updatedAt),
+	})
 }
 
 // GetOrgUnit 從儲存層取得組織單位。
@@ -1122,7 +1131,6 @@ func (s *Store) UpsertPosition(execCtx context.Context, v domain.Position) error
 		Code:        v.Code,
 		Name:        v.Name,
 		NameEn:      v.NameEN,
-		OrgUnitID:   v.OrgUnitID,
 		Level:       v.Level,
 		Status:      v.Status,
 		Description: v.Description,
@@ -1598,6 +1606,60 @@ func (s *Store) GetAttendancePolicy(execCtx context.Context, tenantID string) (d
 		return domain.AttendancePolicy{}, false, err
 	}
 	return fromAttendancePolicy(v), true, nil
+}
+
+// ReplaceEHRMSLeaveTypes replaces one tenant's upstream snapshot inside the caller's transaction.
+func (s *Store) ReplaceEHRMSLeaveTypes(execCtx context.Context, tenantID string, items []domain.EHRMSLeaveType, syncedAt time.Time) error {
+	execCtx = tenantContext(execCtx, tenantID)
+	if _, err := s.db.Exec(execCtx, `DELETE FROM ehrms_leave_types WHERE tenant_id = $1`, tenantID); err != nil {
+		return err
+	}
+	for position, item := range items {
+		payload, err := json.Marshal(item)
+		if err != nil {
+			return fmt.Errorf("encode ehrms leave type %q: %w", item.Code, err)
+		}
+		if _, err := s.db.Exec(execCtx, `
+INSERT INTO ehrms_leave_types (tenant_id, code, position, payload, synced_at)
+VALUES ($1, $2, $3, $4::jsonb, $5)`, tenantID, item.Code, position, payload, syncedAt); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// ListEHRMSLeaveTypes returns the persisted snapshot in the exact upstream order.
+func (s *Store) ListEHRMSLeaveTypes(execCtx context.Context, tenantID string) ([]domain.EHRMSLeaveType, time.Time, error) {
+	rows, err := s.db.Query(tenantContext(execCtx, tenantID), `
+SELECT payload, synced_at
+FROM ehrms_leave_types
+WHERE tenant_id = $1
+ORDER BY position`, tenantID)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	defer rows.Close()
+	items := make([]domain.EHRMSLeaveType, 0)
+	var syncedAt time.Time
+	for rows.Next() {
+		var payload []byte
+		var rowSyncedAt time.Time
+		if err := rows.Scan(&payload, &rowSyncedAt); err != nil {
+			return nil, time.Time{}, err
+		}
+		var item domain.EHRMSLeaveType
+		if err := json.Unmarshal(payload, &item); err != nil {
+			return nil, time.Time{}, fmt.Errorf("decode persisted ehrms leave type: %w", err)
+		}
+		items = append(items, item)
+		if rowSyncedAt.After(syncedAt) {
+			syncedAt = rowSyncedAt
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, time.Time{}, err
+	}
+	return items, syncedAt, nil
 }
 
 // GetLeaveTypeExternalMapping resolves a tenant-specific upstream leave alias.
@@ -4253,18 +4315,18 @@ func fromAssumableRoleSession(v sqlc.AuthzAssumableRoleSession) domain.Assumable
 // fromOrgUnit 轉換組織單位。
 func fromOrgUnit(v sqlc.OrgUnit) domain.OrgUnit {
 	return domain.OrgUnit{
-		ID:                v.ID,
-		TenantID:          v.TenantID,
-		Code:              v.Code,
-		Name:              v.Name,
-		NameEN:            v.NameEn,
-		ParentID:          v.ParentID,
-		Path:              utils.CopyStrings(v.Path),
-		ManagerPositionID: v.ManagerPositionID,
-		Source:            v.Source,
-		Closed:            v.Closed,
-		CreatedAt:         timeFrom(v.CreatedAt),
-		UpdatedAt:         timeFrom(v.UpdatedAt),
+		ID:             v.ID,
+		TenantID:       v.TenantID,
+		Code:           v.Code,
+		Name:           v.Name,
+		NameEN:         v.NameEn,
+		ParentID:       v.ParentID,
+		Path:           utils.CopyStrings(v.Path),
+		Source:         v.Source,
+		Closed:         v.Closed,
+		ShowInOrgChart: v.ShowInOrgChart,
+		CreatedAt:      timeFrom(v.CreatedAt),
+		UpdatedAt:      timeFrom(v.UpdatedAt),
 	}
 }
 
@@ -4276,7 +4338,6 @@ func fromPosition(v sqlc.Position) domain.Position {
 		Code:        v.Code,
 		Name:        v.Name,
 		NameEN:      v.NameEn,
-		OrgUnitID:   v.OrgUnitID,
 		Level:       v.Level,
 		Status:      v.Status,
 		Description: v.Description,

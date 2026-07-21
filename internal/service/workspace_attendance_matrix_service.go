@@ -30,25 +30,21 @@ func workspaceHolidayName(_ time.Time) *string {
 	return nil
 }
 
-// workspaceLeaveLegend 處理工作區請假 legend。
-func workspaceLeaveLegend() []WorkspaceLeaveLegendItem {
-	return []WorkspaceLeaveLegendItem{
-		{Code: "病", Label: "全薪病假"},
-		{Code: "彈", Label: "彈性休假"},
-		{Code: "事", Label: "事假"},
-		{Code: "照", Label: "家庭照顧假"},
-		{Code: "半", Label: "半薪病假"},
-		{Code: "理", Label: "生理假"},
-		{Code: "婚", Label: "婚假"},
-		{Code: "產", Label: "八週產假"},
-		{Code: "陪", Label: "陪產假"},
-		{Code: "喪", Label: "喪假"},
-		{Code: "公", Label: "公假"},
-		{Code: "檢", Label: "產檢假"},
-		{Code: "補", Label: "補休假"},
-		{Code: "特", Label: "特休假"},
-		{Code: "其", Label: "其他假別"},
+// workspaceLeaveLegend projects the current attendance policy as the only leave catalog used by reports.
+func workspaceLeaveLegend(leaveTypes []AttendanceLeaveType) []WorkspaceLeaveLegendItem {
+	legend := make([]WorkspaceLeaveLegendItem, 0, len(leaveTypes))
+	for _, leaveType := range leaveTypes {
+		code := strings.TrimSpace(leaveType.Code)
+		name := strings.TrimSpace(leaveType.Name)
+		if code == "" || name == "" {
+			continue
+		}
+		legend = append(legend, WorkspaceLeaveLegendItem{
+			Code:  code,
+			Label: name,
+		})
 	}
+	return legend
 }
 
 // workspaceAuditLogQueryEmpty 處理工作區稽覈 log 查詢空值。
@@ -120,7 +116,7 @@ func workspaceAuditDetail(log AuditLog) string {
 }
 
 // workspaceSummaryLeaveCells 直接投影 eHRMS 每日假勤事實，避免從請假區間推算日期或分攤時數。
-func workspaceSummaryLeaveCells(summaries []AttendanceDailySummary) map[string]map[string]workspaceLeaveCell {
+func workspaceSummaryLeaveCells(summaries []AttendanceDailySummary, legend []WorkspaceLeaveLegendItem) map[string]map[string]workspaceLeaveCell {
 	out := map[string]map[string]workspaceLeaveCell{}
 	for _, summary := range summaries {
 		if summary.EmployeeID == "" || summary.WorkDate == "" {
@@ -128,14 +124,18 @@ func workspaceSummaryLeaveCells(summaries []AttendanceDailySummary) map[string]m
 		}
 		cell := workspaceLeaveCell{}
 		if summary.LeaveCounted && summary.LeaveHours > 0 {
-			cell.Code, cell.Label = workspaceLeaveCodeLabel(summary.LeaveType)
-			cell.Hours = summary.LeaveHours
+			if leaveType, ok := workspacePolicyLeaveType(summary.LeaveType, legend); ok {
+				cell.Code, cell.Label = leaveType.Code, leaveType.Label
+				cell.Hours = summary.LeaveHours
+			}
 		}
 		if summary.Leave2Counted && summary.Leave2Hours > 0 {
-			if cell.Code == "" {
-				cell.Code, cell.Label = workspaceLeaveCodeLabel(summary.Leave2Type)
+			if leaveType, ok := workspacePolicyLeaveType(summary.Leave2Type, legend); ok {
+				if cell.Code == "" {
+					cell.Code, cell.Label = leaveType.Code, leaveType.Label
+				}
+				cell.Hours += summary.Leave2Hours
 			}
-			cell.Hours += summary.Leave2Hours
 		}
 		if cell.Hours <= 0 {
 			continue
@@ -149,7 +149,7 @@ func workspaceSummaryLeaveCells(summaries []AttendanceDailySummary) map[string]m
 }
 
 // workspaceMergeApprovedLeaveCells merges local approved leave without double-counting an eHRMS daily fact.
-func workspaceMergeApprovedLeaveCells(existing map[string]map[string]workspaceLeaveCell, leaves []LeaveRequest, workTime AttendancePolicyWorkTime, start, end time.Time) map[string]map[string]workspaceLeaveCell {
+func workspaceMergeApprovedLeaveCells(existing map[string]map[string]workspaceLeaveCell, leaves []LeaveRequest, workTime AttendancePolicyWorkTime, legend []WorkspaceLeaveLegendItem, start, end time.Time) map[string]map[string]workspaceLeaveCell {
 	for day := start; day.Before(end); day = day.AddDate(0, 0, 1) {
 		if day.Weekday() == time.Saturday || day.Weekday() == time.Sunday {
 			continue
@@ -158,6 +158,10 @@ func workspaceMergeApprovedLeaveCells(existing map[string]map[string]workspaceLe
 		schedule, breaks := attendanceScheduleIntervals(date, workTime)
 		for _, leave := range leaves {
 			if leave.EmployeeID == "" || !strings.EqualFold(strings.TrimSpace(leave.Status), "approved") {
+				continue
+			}
+			leaveType, ok := workspacePolicyLeaveType(leave.LeaveType, legend)
+			if !ok {
 				continue
 			}
 			approved, _ := attendanceLeaveIntervals([]LeaveRequest{leave}, schedule, breaks)
@@ -170,7 +174,7 @@ func workspaceMergeApprovedLeaveCells(existing map[string]map[string]workspaceLe
 			}
 			cell := existing[leave.EmployeeID][date]
 			if cell.Code == "" {
-				cell.Code, cell.Label = workspaceLeaveCodeLabel(leave.LeaveType)
+				cell.Code, cell.Label = leaveType.Code, leaveType.Label
 			}
 			// eHRMS and local workflow can describe the same leave, so use the larger daily fact.
 			if hours > cell.Hours {
@@ -619,33 +623,15 @@ func workspaceHolidayCount(dates []WorkspaceDate) int {
 	return count
 }
 
-// workspaceLeaveCodeLabel 處理工作區請假碼 label。
-func workspaceLeaveCodeLabel(leaveType string) (string, string) {
-	normalized := normalizeLeaveTypeCode(leaveType)
-	labels := map[string]WorkspaceLeaveLegendItem{
-		leaveTypeCodeSickFull:     {Code: "病", Label: "全薪病假"},
-		leaveTypeCodeFlexible:     {Code: "彈", Label: "彈性休假"},
-		leaveTypeCodePersonal:     {Code: "事", Label: "事假"},
-		leaveTypeCodeFamilyCare:   {Code: "照", Label: "家庭照顧假"},
-		leaveTypeCodeSickHalf:     {Code: "半", Label: "半薪病假"},
-		leaveTypeCodeMenstrual:    {Code: "理", Label: "生理假"},
-		leaveTypeCodeMarriage:     {Code: "婚", Label: "婚假"},
-		leaveTypeCodeMaternity:    {Code: "產", Label: "八週產假"},
-		leaveTypeCodePaternity:    {Code: "陪", Label: "陪產假"},
-		leaveTypeCodeBereavement:  {Code: "喪", Label: "喪假"},
-		leaveTypeCodeOfficial:     {Code: "公", Label: "公假"},
-		leaveTypeCodePrenatal:     {Code: "檢", Label: "產檢假"},
-		leaveTypeCodeCompensatory: {Code: "補", Label: "補休假"},
-		leaveTypeCodeAnnual:       {Code: "特", Label: "特休假"},
+func workspacePolicyLeaveType(raw string, legend []WorkspaceLeaveLegendItem) (WorkspaceLeaveLegendItem, bool) {
+	normalized := normalizeLeaveTypeCode(raw)
+	trimmed := strings.TrimSpace(raw)
+	for _, item := range legend {
+		if strings.EqualFold(item.Code, normalized) || strings.EqualFold(item.Code, trimmed) || strings.EqualFold(item.Label, trimmed) {
+			return item, true
+		}
 	}
-	if item, ok := labels[normalized]; ok {
-		return item.Code, item.Label
-	}
-	trimmed := strings.TrimSpace(leaveType)
-	if trimmed == "" {
-		return "其", "其他假別"
-	}
-	return "其", trimmed
+	return WorkspaceLeaveLegendItem{}, false
 }
 
 // workspaceEmployeeNameEN 處理工作區員工名稱 en。

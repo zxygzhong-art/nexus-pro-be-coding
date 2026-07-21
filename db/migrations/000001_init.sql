@@ -431,82 +431,33 @@ CREATE TABLE org_units (
     name_en text NOT NULL DEFAULT '',
     parent_id text NOT NULL DEFAULT '',
     path text[] NOT NULL DEFAULT '{}',
-    manager_position_id text NOT NULL DEFAULT '',
     source text NOT NULL DEFAULT '',
     closed boolean NOT NULL DEFAULT false,
+    show_in_org_chart boolean NOT NULL DEFAULT true,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL
 );
 
 CREATE INDEX org_units_tenant_id_idx ON org_units (tenant_id);
 CREATE INDEX org_units_path_idx ON org_units USING gin (path);
-CREATE INDEX org_units_tenant_manager_position_idx
-    ON org_units (tenant_id, manager_position_id)
-    WHERE manager_position_id <> '';
-
 CREATE TABLE positions (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     code text NOT NULL,
     name text NOT NULL,
     name_en text NOT NULL DEFAULT '',
-    org_unit_id text NOT NULL DEFAULT '',
     level text NOT NULL DEFAULT '',
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
     description text NOT NULL DEFAULT '',
     source text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
-    CONSTRAINT positions_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT positions_tenant_code_idx UNIQUE (tenant_id, code)
+    CONSTRAINT positions_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
+CREATE UNIQUE INDEX positions_tenant_code_ci_idx ON positions (tenant_id, lower(code));
+CREATE INDEX positions_tenant_name_ci_idx ON positions (tenant_id, lower(name));
 CREATE INDEX positions_tenant_status_idx ON positions (tenant_id, status, name);
-CREATE INDEX positions_tenant_org_unit_idx ON positions (tenant_id, org_unit_id) WHERE org_unit_id <> '';
-
--- +goose StatementBegin
-CREATE OR REPLACE FUNCTION validate_position_references()
-RETURNS trigger AS $$
-BEGIN
-    IF NEW.org_unit_id <> '' AND NOT EXISTS (
-        SELECT 1 FROM org_units WHERE tenant_id = NEW.tenant_id AND id = NEW.org_unit_id
-    ) THEN
-        RAISE EXCEPTION 'position org_unit_id % does not exist in tenant %', NEW.org_unit_id, NEW.tenant_id
-            USING ERRCODE = 'foreign_key_violation';
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
--- +goose StatementEnd
-
-CREATE TRIGGER positions_reference_check
-BEFORE INSERT OR UPDATE OF tenant_id, org_unit_id ON positions
-FOR EACH ROW EXECUTE FUNCTION validate_position_references();
-
--- +goose StatementBegin
-CREATE OR REPLACE FUNCTION validate_org_unit_manager_position()
-RETURNS trigger AS $$
-BEGIN
-    IF NEW.manager_position_id <> '' AND NOT EXISTS (
-        SELECT 1
-        FROM positions
-        WHERE tenant_id = NEW.tenant_id
-          AND id = NEW.manager_position_id
-          AND (org_unit_id = '' OR org_unit_id = NEW.id)
-    ) THEN
-        RAISE EXCEPTION 'org unit manager_position_id % does not exist in tenant % for org unit %',
-            NEW.manager_position_id, NEW.tenant_id, NEW.id
-            USING ERRCODE = 'foreign_key_violation';
-    END IF;
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
--- +goose StatementEnd
-
-CREATE TRIGGER org_units_manager_position_check
-BEFORE INSERT OR UPDATE OF tenant_id, id, manager_position_id ON org_units
-FOR EACH ROW EXECUTE FUNCTION validate_org_unit_manager_position();
-
 CREATE TABLE employees (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -2077,8 +2028,6 @@ DROP FUNCTION IF EXISTS sync_leave_type_catalog_from_policy();
 DROP FUNCTION IF EXISTS snapshot_attendance_policy_version();
 DROP FUNCTION IF EXISTS validate_employee_position_reference();
 DROP FUNCTION IF EXISTS validate_employee_references();
-DROP FUNCTION IF EXISTS validate_org_unit_manager_position();
-DROP FUNCTION IF EXISTS validate_position_references();
 DROP FUNCTION IF EXISTS validate_authz_assignment_references();
 DROP FUNCTION IF EXISTS sync_group_membership_projections();
 DROP FUNCTION IF EXISTS refresh_group_membership_projection(text, text, text);

@@ -27,10 +27,20 @@ func (c IAMService) ListUserGroups(ctx RequestContext) ([]UserGroup, error) {
 }
 
 // ListUserGroupPage 列出使用者羣組分頁的服務流程。
-func (c IAMService) ListUserGroupPage(ctx RequestContext, page PageRequest) (PageResponse[UserGroup], error) {
+func (c IAMService) ListUserGroupPage(ctx RequestContext, keyword string, page PageRequest) (PageResponse[UserGroup], error) {
 	items, err := c.ListUserGroups(ctx)
 	if err != nil {
 		return PageResponse[UserGroup]{}, err
+	}
+	keyword = strings.ToLower(strings.TrimSpace(keyword))
+	if keyword != "" {
+		filtered := make([]UserGroup, 0, len(items))
+		for _, item := range items {
+			if strings.Contains(strings.ToLower(item.Name), keyword) || strings.Contains(strings.ToLower(item.Description), keyword) {
+				filtered = append(filtered, item)
+			}
+		}
+		items = filtered
 	}
 	items = utils.SortUserGroups(items, page.Sort)
 	return utils.PageResponse(items, page), nil

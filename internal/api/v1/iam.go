@@ -180,7 +180,7 @@ func (c IAMCtrl) listUserGroups(w http.ResponseWriter, r *http.Request, ctx doma
 	if err != nil {
 		return err
 	}
-	items, err := c.svc.ListUserGroupPage(ctx, page)
+	items, err := c.svc.ListUserGroupPage(ctx, r.URL.Query().Get("q"), page)
 	if err != nil {
 		return err
 	}

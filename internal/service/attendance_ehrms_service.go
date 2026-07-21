@@ -74,6 +74,73 @@ var ehrmsAttendanceOnlyLeaveTypes = map[string]struct{}{
 	"忘刷忘帶卡":            {},
 }
 
+// ListEHRMSLeaveTypes returns the persisted upstream catalog without mutating local or upstream state.
+func (c AttendanceService) ListEHRMSLeaveTypes(ctx RequestContext) (EHRMSLeaveTypeCatalog, error) {
+	if _, _, err := c.requireAttendanceAuthz(ctx, ResourceLeave, ActionRead, ""); err != nil {
+		return EHRMSLeaveTypeCatalog{}, err
+	}
+	items, syncedAt, err := c.store.ListEHRMSLeaveTypes(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return EHRMSLeaveTypeCatalog{}, err
+	}
+	return ehrmsLeaveTypeCatalog(items, syncedAt), nil
+}
+
+// SyncEHRMSLeaveTypes refreshes and atomically persists the complete upstream payload.
+func (c AttendanceService) SyncEHRMSLeaveTypes(ctx RequestContext) (EHRMSLeaveTypeCatalog, error) {
+	_, decision, err := c.requireAttendanceAuthz(ctx, ResourceLeave, ActionUpdate, "")
+	if err != nil {
+		return EHRMSLeaveTypeCatalog{}, err
+	}
+	if err := requireTenantWideEHRMSSyncScope(decision); err != nil {
+		return EHRMSLeaveTypeCatalog{}, err
+	}
+	return c.syncEHRMSLeaveTypes(ctx)
+}
+
+func (c AttendanceService) syncEHRMSLeaveTypes(ctx RequestContext) (EHRMSLeaveTypeCatalog, error) {
+	if c.ehrmsClient == nil {
+		return EHRMSLeaveTypeCatalog{}, BadRequest("eHRMS is not configured")
+	}
+	items, err := c.ehrmsClient.ListLeaveTypes(goContext(ctx))
+	if err != nil {
+		c.logWarn(ctx, "eHRMS leave types fetch failed", "error", err)
+		return EHRMSLeaveTypeCatalog{}, ehrmsFetchError("leave types", err)
+	}
+	syncedAt := c.Now()
+	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
+		if err := tx.store.ReplaceEHRMSLeaveTypes(goContext(ctx), ctx.TenantID, items, syncedAt); err != nil {
+			return err
+		}
+		return tx.audit(ctx, "attendance.ehrms_leave_type.sync", string(ResourceLeave), ctx.TenantID, string(SeverityHigh), map[string]any{
+			"fetched":   len(items),
+			"synced_at": syncedAt.UTC().Format(time.RFC3339Nano),
+		})
+	}); err != nil {
+		return EHRMSLeaveTypeCatalog{}, err
+	}
+	return ehrmsLeaveTypeCatalog(items, syncedAt), nil
+}
+
+func ehrmsLeaveTypeCatalog(items []EHRMSLeaveType, syncedAt time.Time) EHRMSLeaveTypeCatalog {
+	catalog := EHRMSLeaveTypeCatalog{Items: items, Total: len(items)}
+	if !syncedAt.IsZero() {
+		syncedAt = syncedAt.UTC()
+		catalog.SyncedAt = &syncedAt
+	}
+	for _, item := range items {
+		switch item.Kind {
+		case "category":
+			catalog.Categories++
+		case "item":
+			catalog.LeaveItems++
+		case "special_group":
+			catalog.SpecialGroups++
+		}
+	}
+	return catalog
+}
+
 // SyncEHRMSAttendance synchronizes tenant-wide attendance data only for tenant-wide grants.
 func (c AttendanceService) SyncEHRMSAttendance(ctx RequestContext, input EHRMSAttendanceSyncInput) (EHRMSAttendanceSyncResponse, error) {
 	if c.ehrmsClient == nil {
