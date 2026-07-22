@@ -34,8 +34,8 @@ func TestFormDataSourcesUsesEnabledSystemLeaveTypes(t *testing.T) {
 	if err := store.UpsertEmployee(t.Context(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", AccountID: "acct-1", Name: "Employee", Status: "active", CreatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.UpsertAttendancePolicy(context.Background(), domain.AttendancePolicy{
-		ID: "current", TenantID: "tenant-1", LeaveTypes: []domain.AttendanceLeaveType{{Code: "policy_only", Name: "Policy Only", Active: true}}, Version: 3,
+	if err := store.InsertAttendancePolicyVersion(context.Background(), domain.AttendancePolicy{
+		TenantID: "tenant-1", Version: 3, EffectiveFrom: &now, PublishedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -60,8 +60,11 @@ func TestFormDataSourcesUsesEnabledSystemLeaveTypes(t *testing.T) {
 	for _, record := range records {
 		byCode[fmt.Sprint(record["code"])] = record
 	}
-	if byCode["sick_full"]["name"] != "全薪病假" || byCode["sick_full"]["unit"] != "hour" {
+	if byCode["sick_full"]["name"] != "全薪病假" {
 		t.Fatalf("expected local bilingual definition projection, got %+v", byCode["sick_full"])
+	}
+	if _, ok := byCode["sick_full"]["unit"]; ok {
+		t.Fatalf("leave type form projection must omit unit: %+v", byCode["sick_full"])
 	}
 	if _, ok := byCode["policy_only"]; ok {
 		t.Fatalf("legacy policy JSON must stay out of form options: %+v", records)

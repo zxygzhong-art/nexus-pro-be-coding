@@ -21,156 +21,158 @@ type Store struct {
 
 	tenants map[string]Tenant
 
-	accounts                map[string]map[string]Account
-	userIdentities          map[string]map[string]UserIdentity
-	userGroups              map[string]map[string]UserGroup
-	groupMemberships        map[string]map[string]GroupMembership
-	permissionSets          map[string]map[string]PermissionSet
-	permissionPackages      map[string]PermissionPackage
-	permissionSetTemplates  map[string]map[string]PermissionSetTemplate
-	userGroupTemplates      map[string]map[string]UserGroupTemplate
-	assumableRoleTemplates  map[string]map[string]AssumableRoleTemplate
-	permissionImports       map[string]map[string]PermissionPackageImport
-	permissionCatalog       map[string]map[string]PermissionCatalogItem
-	menuItems               map[string]map[string]MenuItem
-	permissionSetItems      map[string]map[string]PermissionSetItem
-	assignments             map[string]map[string]PermissionSetAssignment
-	dataScopes              map[string]map[string]DataScope
-	fieldPolicies           map[string]map[string]FieldPolicy
-	assumableRoles          map[string]map[string]AssumableRole
-	roleSessions            map[string]map[string]AssumableRoleSession
-	orgUnits                map[string]map[string]OrgUnit
-	positions               map[string]map[string]Position
-	employees               map[string]map[string]Employee
-	employeeNoSequences     map[string]map[string]int
-	employeeImports         map[string]map[string]EmployeeImportSession
-	employmentContracts     map[string]map[string]EmploymentContract
-	attendancePolicies      map[string]AttendancePolicy
-	leaveTypeEnablements    map[string]map[string]bool
-	leaveTypeMappings       map[string]map[string]LeaveTypeExternalMapping
-	leaveTypeSyncIssues     map[string]map[string]LeaveTypeSyncIssue
-	leaveBalances           map[string]map[string]LeaveBalance
-	leaveRequests           map[string]map[string]LeaveRequest
-	leaveRequestAllocations map[string]map[string]LeaveRequestAllocation
-	attendanceWorksites     map[string]map[string]AttendanceWorksite
-	attendanceShifts        map[string]map[string]AttendanceShift
-	attendanceAssignments   map[string]map[string]AttendanceShiftAssignment
-	attendanceClockRecords  map[string]map[string]AttendanceClockRecord
-	attendanceSummaries     map[string]map[string]AttendanceDailySummary
-	attendanceCorrections   map[string]map[string]AttendanceCorrectionRequest
-	overtimeRequests        map[string]map[string]OvertimeRequest
-	formDefinitionDrafts    map[string]map[string]domain.FormDefinitionDraft
-	formTemplates           map[string]map[string]FormTemplate
-	formTemplateVersions    map[string]map[string]FormTemplateVersion
-	formInstances           map[string]map[string]FormInstance
-	formInstanceFieldValues map[string]map[string][]FormInstanceFieldValue
-	formInstanceFiles       map[string]map[string]domain.FormInstanceFile
-	workflowRuns            map[string]map[string]domain.WorkflowRun
-	workflowStageInstances  map[string]map[string]domain.WorkflowStageInstance
-	workflowStageAssignees  map[string]map[string]domain.WorkflowStageAssignee
-	workflowActions         map[string][]domain.WorkflowAction
-	platformTaskItems       map[string]map[string]PlatformTaskRecordItem
-	platformTaskTodos       map[string]map[string]PlatformTaskTodoRecord
-	agentRuns               map[string]map[string]AgentRun
-	agentModels             map[string]map[string]AgentModel
-	agentExternalTools      map[string]map[string]AgentExternalTool
-	agentDefinitions        map[string]map[string]AgentDefinition
-	agentDefinitionVersions map[string]map[string]AgentDefinitionVersion
-	knowledgeBases          map[string]map[string]KnowledgeBase
-	knowledgeDocuments      map[string]map[string]KnowledgeDocument
-	knowledgeDocumentChunks map[string]map[string]KnowledgeDocumentChunk
-	agentSessions           map[string]map[string]AgentSession
-	agentSessionMessages    map[string]map[string]AgentSessionMessage
-	agentSessionFiles       map[string]map[string]domain.AgentSessionFile
-	agentFileChunks         map[string]map[string][]string
-	agentMessageAttachments map[string]map[string][]domain.AgentMessageAttachment
-	agentMemories           map[string]map[string]AgentMemory
-	notifications           map[string]map[string]Notification
-	notificationRecipients  map[string]map[string]NotificationRecipient
-	auditLogs               map[string][]AuditLog
-	permissionVersions      map[string]int64
-	identityOutbox          map[string][]IdentityProvisioningOutboxEvent
-	outboxEvents            map[string][]OutboxEvent
-	relationshipTuples      map[string]map[string]AuthzRelationshipTuple
-	ehrmsSyncLocks          map[string]bool
+	accounts                 map[string]map[string]Account
+	userIdentities           map[string]map[string]UserIdentity
+	userGroups               map[string]map[string]UserGroup
+	groupMemberships         map[string]map[string]GroupMembership
+	permissionSets           map[string]map[string]PermissionSet
+	permissionPackages       map[string]PermissionPackage
+	permissionSetTemplates   map[string]map[string]PermissionSetTemplate
+	userGroupTemplates       map[string]map[string]UserGroupTemplate
+	assumableRoleTemplates   map[string]map[string]AssumableRoleTemplate
+	permissionImports        map[string]map[string]PermissionPackageImport
+	permissionCatalog        map[string]map[string]PermissionCatalogItem
+	menuItems                map[string]map[string]MenuItem
+	permissionSetItems       map[string]map[string]PermissionSetItem
+	assignments              map[string]map[string]PermissionSetAssignment
+	dataScopes               map[string]map[string]DataScope
+	fieldPolicies            map[string]map[string]FieldPolicy
+	assumableRoles           map[string]map[string]AssumableRole
+	roleSessions             map[string]map[string]AssumableRoleSession
+	orgUnits                 map[string]map[string]OrgUnit
+	positions                map[string]map[string]Position
+	employees                map[string]map[string]Employee
+	employeeNoSequences      map[string]map[string]int
+	employeeImports          map[string]map[string]EmployeeImportSession
+	employmentContracts      map[string]map[string]EmploymentContract
+	attendancePolicyVersions map[string]map[int]AttendancePolicy
+	leaveTypes               map[string]map[string]domain.LeaveType
+	leaveTypeExternalRefs    map[string]map[string]LeaveTypeExternalRef
+	leaveBalances            map[string]map[string]LeaveBalance
+	leaveBalanceEntries      map[string]map[string]LeaveBalanceEntry
+	leaveRequests            map[string]map[string]LeaveRequest
+	leaveRequestAllocations  map[string]map[string]LeaveRequestAllocation
+	leaveCases               map[string]map[string]LeaveCase
+	leaveCaseSources         map[string]map[string]LeaveCaseSource
+	externalLeaveRecords     map[string]map[string]ExternalLeaveRecord
+	attendanceWorksites      map[string]map[string]AttendanceWorksite
+	attendanceClockRecords   map[string]map[string]AttendanceClockRecord
+	attendanceSummaries      map[string]map[string]AttendanceDailySummary
+	attendanceCorrections    map[string]map[string]AttendanceCorrectionRequest
+	overtimeRequests         map[string]map[string]OvertimeRequest
+	formDefinitionDrafts     map[string]map[string]domain.FormDefinitionDraft
+	formTemplates            map[string]map[string]FormTemplate
+	formTemplateVersions     map[string]map[string]FormTemplateVersion
+	formInstances            map[string]map[string]FormInstance
+	formInstanceFieldValues  map[string]map[string][]FormInstanceFieldValue
+	formInstanceFiles        map[string]map[string]domain.FormInstanceFile
+	workflowRuns             map[string]map[string]domain.WorkflowRun
+	workflowStageInstances   map[string]map[string]domain.WorkflowStageInstance
+	workflowStageAssignees   map[string]map[string]domain.WorkflowStageAssignee
+	workflowActions          map[string][]domain.WorkflowAction
+	platformTaskItems        map[string]map[string]PlatformTaskRecordItem
+	platformTaskTodos        map[string]map[string]PlatformTaskTodoRecord
+	agentRuns                map[string]map[string]AgentRun
+	agentModels              map[string]map[string]AgentModel
+	agentExternalTools       map[string]map[string]AgentExternalTool
+	agentDefinitions         map[string]map[string]AgentDefinition
+	agentDefinitionVersions  map[string]map[string]AgentDefinitionVersion
+	knowledgeBases           map[string]map[string]KnowledgeBase
+	knowledgeDocuments       map[string]map[string]KnowledgeDocument
+	knowledgeDocumentChunks  map[string]map[string]KnowledgeDocumentChunk
+	agentSessions            map[string]map[string]AgentSession
+	agentSessionMessages     map[string]map[string]AgentSessionMessage
+	agentSessionFiles        map[string]map[string]domain.AgentSessionFile
+	agentFileChunks          map[string]map[string][]string
+	agentMessageAttachments  map[string]map[string][]domain.AgentMessageAttachment
+	agentMemories            map[string]map[string]AgentMemory
+	notifications            map[string]map[string]Notification
+	notificationRecipients   map[string]map[string]NotificationRecipient
+	auditLogs                map[string][]AuditLog
+	permissionVersions       map[string]int64
+	identityOutbox           map[string][]IdentityProvisioningOutboxEvent
+	outboxEvents             map[string][]OutboxEvent
+	relationshipTuples       map[string]map[string]AuthzRelationshipTuple
+	ehrmsSyncLocks           map[string]bool
 }
 
 // NewStore 建立儲存層。
 func NewStore() *Store {
 	return &Store{
-		tenants:                 map[string]Tenant{},
-		accounts:                map[string]map[string]Account{},
-		userIdentities:          map[string]map[string]UserIdentity{},
-		userGroups:              map[string]map[string]UserGroup{},
-		groupMemberships:        map[string]map[string]GroupMembership{},
-		permissionSets:          map[string]map[string]PermissionSet{},
-		permissionPackages:      map[string]PermissionPackage{},
-		permissionSetTemplates:  map[string]map[string]PermissionSetTemplate{},
-		userGroupTemplates:      map[string]map[string]UserGroupTemplate{},
-		assumableRoleTemplates:  map[string]map[string]AssumableRoleTemplate{},
-		permissionImports:       map[string]map[string]PermissionPackageImport{},
-		permissionCatalog:       map[string]map[string]PermissionCatalogItem{},
-		menuItems:               map[string]map[string]MenuItem{},
-		permissionSetItems:      map[string]map[string]PermissionSetItem{},
-		assignments:             map[string]map[string]PermissionSetAssignment{},
-		dataScopes:              map[string]map[string]DataScope{},
-		fieldPolicies:           map[string]map[string]FieldPolicy{},
-		assumableRoles:          map[string]map[string]AssumableRole{},
-		roleSessions:            map[string]map[string]AssumableRoleSession{},
-		orgUnits:                map[string]map[string]OrgUnit{},
-		positions:               map[string]map[string]Position{},
-		employees:               map[string]map[string]Employee{},
-		employeeNoSequences:     map[string]map[string]int{},
-		employeeImports:         map[string]map[string]EmployeeImportSession{},
-		employmentContracts:     map[string]map[string]EmploymentContract{},
-		attendancePolicies:      map[string]AttendancePolicy{},
-		leaveTypeEnablements:    map[string]map[string]bool{},
-		leaveTypeMappings:       map[string]map[string]LeaveTypeExternalMapping{},
-		leaveTypeSyncIssues:     map[string]map[string]LeaveTypeSyncIssue{},
-		leaveBalances:           map[string]map[string]LeaveBalance{},
-		leaveRequests:           map[string]map[string]LeaveRequest{},
-		leaveRequestAllocations: map[string]map[string]LeaveRequestAllocation{},
-		attendanceWorksites:     map[string]map[string]AttendanceWorksite{},
-		attendanceShifts:        map[string]map[string]AttendanceShift{},
-		attendanceAssignments:   map[string]map[string]AttendanceShiftAssignment{},
-		attendanceClockRecords:  map[string]map[string]AttendanceClockRecord{},
-		attendanceSummaries:     map[string]map[string]AttendanceDailySummary{},
-		attendanceCorrections:   map[string]map[string]AttendanceCorrectionRequest{},
-		overtimeRequests:        map[string]map[string]OvertimeRequest{},
-		formDefinitionDrafts:    map[string]map[string]domain.FormDefinitionDraft{},
-		formTemplates:           map[string]map[string]FormTemplate{},
-		formTemplateVersions:    map[string]map[string]FormTemplateVersion{},
-		formInstances:           map[string]map[string]FormInstance{},
-		formInstanceFieldValues: map[string]map[string][]FormInstanceFieldValue{},
-		formInstanceFiles:       map[string]map[string]domain.FormInstanceFile{},
-		workflowRuns:            map[string]map[string]domain.WorkflowRun{},
-		workflowStageInstances:  map[string]map[string]domain.WorkflowStageInstance{},
-		workflowStageAssignees:  map[string]map[string]domain.WorkflowStageAssignee{},
-		workflowActions:         map[string][]domain.WorkflowAction{},
-		platformTaskItems:       map[string]map[string]PlatformTaskRecordItem{},
-		platformTaskTodos:       map[string]map[string]PlatformTaskTodoRecord{},
-		agentRuns:               map[string]map[string]AgentRun{},
-		agentModels:             map[string]map[string]AgentModel{},
-		agentExternalTools:      map[string]map[string]AgentExternalTool{},
-		agentDefinitions:        map[string]map[string]AgentDefinition{},
-		agentDefinitionVersions: map[string]map[string]AgentDefinitionVersion{},
-		knowledgeBases:          map[string]map[string]KnowledgeBase{},
-		knowledgeDocuments:      map[string]map[string]KnowledgeDocument{},
-		knowledgeDocumentChunks: map[string]map[string]KnowledgeDocumentChunk{},
-		agentSessions:           map[string]map[string]AgentSession{},
-		agentSessionMessages:    map[string]map[string]AgentSessionMessage{},
-		agentSessionFiles:       map[string]map[string]domain.AgentSessionFile{},
-		agentFileChunks:         map[string]map[string][]string{},
-		agentMessageAttachments: map[string]map[string][]domain.AgentMessageAttachment{},
-		agentMemories:           map[string]map[string]AgentMemory{},
-		notifications:           map[string]map[string]Notification{},
-		notificationRecipients:  map[string]map[string]NotificationRecipient{},
-		auditLogs:               map[string][]AuditLog{},
-		permissionVersions:      map[string]int64{},
-		identityOutbox:          map[string][]IdentityProvisioningOutboxEvent{},
-		outboxEvents:            map[string][]OutboxEvent{},
-		relationshipTuples:      map[string]map[string]AuthzRelationshipTuple{},
-		ehrmsSyncLocks:          map[string]bool{},
+		tenants:                  map[string]Tenant{},
+		accounts:                 map[string]map[string]Account{},
+		userIdentities:           map[string]map[string]UserIdentity{},
+		userGroups:               map[string]map[string]UserGroup{},
+		groupMemberships:         map[string]map[string]GroupMembership{},
+		permissionSets:           map[string]map[string]PermissionSet{},
+		permissionPackages:       map[string]PermissionPackage{},
+		permissionSetTemplates:   map[string]map[string]PermissionSetTemplate{},
+		userGroupTemplates:       map[string]map[string]UserGroupTemplate{},
+		assumableRoleTemplates:   map[string]map[string]AssumableRoleTemplate{},
+		permissionImports:        map[string]map[string]PermissionPackageImport{},
+		permissionCatalog:        map[string]map[string]PermissionCatalogItem{},
+		menuItems:                map[string]map[string]MenuItem{},
+		permissionSetItems:       map[string]map[string]PermissionSetItem{},
+		assignments:              map[string]map[string]PermissionSetAssignment{},
+		dataScopes:               map[string]map[string]DataScope{},
+		fieldPolicies:            map[string]map[string]FieldPolicy{},
+		assumableRoles:           map[string]map[string]AssumableRole{},
+		roleSessions:             map[string]map[string]AssumableRoleSession{},
+		orgUnits:                 map[string]map[string]OrgUnit{},
+		positions:                map[string]map[string]Position{},
+		employees:                map[string]map[string]Employee{},
+		employeeNoSequences:      map[string]map[string]int{},
+		employeeImports:          map[string]map[string]EmployeeImportSession{},
+		employmentContracts:      map[string]map[string]EmploymentContract{},
+		attendancePolicyVersions: map[string]map[int]AttendancePolicy{},
+		leaveTypes:               map[string]map[string]domain.LeaveType{},
+		leaveTypeExternalRefs:    map[string]map[string]LeaveTypeExternalRef{},
+		leaveBalances:            map[string]map[string]LeaveBalance{},
+		leaveBalanceEntries:      map[string]map[string]LeaveBalanceEntry{},
+		leaveRequests:            map[string]map[string]LeaveRequest{},
+		leaveRequestAllocations:  map[string]map[string]LeaveRequestAllocation{},
+		leaveCases:               map[string]map[string]LeaveCase{},
+		leaveCaseSources:         map[string]map[string]LeaveCaseSource{},
+		externalLeaveRecords:     map[string]map[string]ExternalLeaveRecord{},
+		attendanceWorksites:      map[string]map[string]AttendanceWorksite{},
+		attendanceClockRecords:   map[string]map[string]AttendanceClockRecord{},
+		attendanceSummaries:      map[string]map[string]AttendanceDailySummary{},
+		attendanceCorrections:    map[string]map[string]AttendanceCorrectionRequest{},
+		overtimeRequests:         map[string]map[string]OvertimeRequest{},
+		formDefinitionDrafts:     map[string]map[string]domain.FormDefinitionDraft{},
+		formTemplates:            map[string]map[string]FormTemplate{},
+		formTemplateVersions:     map[string]map[string]FormTemplateVersion{},
+		formInstances:            map[string]map[string]FormInstance{},
+		formInstanceFieldValues:  map[string]map[string][]FormInstanceFieldValue{},
+		formInstanceFiles:        map[string]map[string]domain.FormInstanceFile{},
+		workflowRuns:             map[string]map[string]domain.WorkflowRun{},
+		workflowStageInstances:   map[string]map[string]domain.WorkflowStageInstance{},
+		workflowStageAssignees:   map[string]map[string]domain.WorkflowStageAssignee{},
+		workflowActions:          map[string][]domain.WorkflowAction{},
+		platformTaskItems:        map[string]map[string]PlatformTaskRecordItem{},
+		platformTaskTodos:        map[string]map[string]PlatformTaskTodoRecord{},
+		agentRuns:                map[string]map[string]AgentRun{},
+		agentModels:              map[string]map[string]AgentModel{},
+		agentExternalTools:       map[string]map[string]AgentExternalTool{},
+		agentDefinitions:         map[string]map[string]AgentDefinition{},
+		agentDefinitionVersions:  map[string]map[string]AgentDefinitionVersion{},
+		knowledgeBases:           map[string]map[string]KnowledgeBase{},
+		knowledgeDocuments:       map[string]map[string]KnowledgeDocument{},
+		knowledgeDocumentChunks:  map[string]map[string]KnowledgeDocumentChunk{},
+		agentSessions:            map[string]map[string]AgentSession{},
+		agentSessionMessages:     map[string]map[string]AgentSessionMessage{},
+		agentSessionFiles:        map[string]map[string]domain.AgentSessionFile{},
+		agentFileChunks:          map[string]map[string][]string{},
+		agentMessageAttachments:  map[string]map[string][]domain.AgentMessageAttachment{},
+		agentMemories:            map[string]map[string]AgentMemory{},
+		notifications:            map[string]map[string]Notification{},
+		notificationRecipients:   map[string]map[string]NotificationRecipient{},
+		auditLogs:                map[string][]AuditLog{},
+		permissionVersions:       map[string]int64{},
+		identityOutbox:           map[string][]IdentityProvisioningOutboxEvent{},
+		outboxEvents:             map[string][]OutboxEvent{},
+		relationshipTuples:       map[string]map[string]AuthzRelationshipTuple{},
+		ehrmsSyncLocks:           map[string]bool{},
 	}
 }
 
@@ -179,6 +181,13 @@ func (s *Store) UpsertTenant(_ context.Context, v Tenant) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tenants[v.ID] = copyTenant(v)
+	// Memory runtime seeds a convenience catalog; Postgres leave_types stay manual-only.
+	if s.leaveTypes[v.ID] == nil {
+		s.leaveTypes[v.ID] = map[string]domain.LeaveType{}
+		for _, item := range domain.DefaultLeaveTypes() {
+			s.leaveTypes[v.ID][item.Code] = item
+		}
+	}
 	return nil
 }
 
@@ -1713,17 +1722,20 @@ func sortEmploymentContracts(items []EmploymentContract) {
 	})
 }
 
-// UpsertAttendancePolicy 從儲存層處理 upsert 考勤政策。
-func (s *Store) UpsertAttendancePolicy(_ context.Context, v AttendancePolicy) error {
+// InsertAttendancePolicyVersion appends one immutable attendance policy version.
+func (s *Store) InsertAttendancePolicyVersion(_ context.Context, v AttendancePolicy) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if current, ok := s.attendancePolicies[v.TenantID]; ok && v.Version <= current.Version {
+	if v.Version <= 0 {
+		v.Version = 1
+	}
+	if s.attendancePolicyVersions[v.TenantID] == nil {
+		s.attendancePolicyVersions[v.TenantID] = map[int]AttendancePolicy{}
+	}
+	if _, exists := s.attendancePolicyVersions[v.TenantID][v.Version]; exists {
 		return domain.Conflict("attendance policy was modified concurrently")
 	}
-	if current, ok := s.attendancePolicies[v.TenantID]; ok && v.LeaveTypes == nil {
-		v.LeaveTypes = current.LeaveTypes
-	}
-	s.attendancePolicies[v.TenantID] = copyAttendancePolicy(v)
+	s.attendancePolicyVersions[v.TenantID][v.Version] = copyAttendancePolicy(v)
 	return nil
 }
 
@@ -1731,154 +1743,80 @@ func (s *Store) UpsertAttendancePolicy(_ context.Context, v AttendancePolicy) er
 func (s *Store) GetAttendancePolicy(_ context.Context, tenantID string) (AttendancePolicy, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	v, ok := s.attendancePolicies[tenantID]
-	if !ok {
+	versions := s.attendancePolicyVersions[tenantID]
+	if len(versions) == 0 {
 		return AttendancePolicy{}, false, nil
 	}
-	return copyAttendancePolicy(v), true, nil
+	latestVersion := 0
+	for version := range versions {
+		if version > latestVersion {
+			latestVersion = version
+		}
+	}
+	return copyAttendancePolicy(versions[latestVersion]), true, nil
 }
 
-// ListLeaveTypes returns the fixed system definitions with tenant availability overrides.
+// ListLeaveTypes returns tenant-owned leave_types rows.
 func (s *Store) ListLeaveTypes(_ context.Context, tenantID string) ([]domain.LeaveType, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	items := domain.DefaultLeaveTypes()
-	overrides := s.leaveTypeEnablements[tenantID]
-	for index := range items {
-		if enabled, ok := overrides[items[index].Code]; ok {
-			items[index].Enabled = enabled
-		}
+	items := make([]domain.LeaveType, 0, len(s.leaveTypes[tenantID]))
+	for _, item := range s.leaveTypes[tenantID] {
+		items = append(items, item)
 	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].DisplayOrder != items[j].DisplayOrder {
+			return items[i].DisplayOrder < items[j].DisplayOrder
+		}
+		return items[i].Code < items[j].Code
+	})
 	return items, nil
 }
 
-// UpsertLeaveTypeEnabled stores only the tenant-specific enabled state.
+// UpsertLeaveTypeEnabled updates leave_types.status for an existing catalog row.
 func (s *Store) UpsertLeaveTypeEnabled(_ context.Context, tenantID, code string, enabled bool, _ string, _ time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.leaveTypeEnablements[tenantID] == nil {
-		s.leaveTypeEnablements[tenantID] = map[string]bool{}
-	}
-	s.leaveTypeEnablements[tenantID][strings.ToLower(strings.TrimSpace(code))] = enabled
-	return nil
-}
-
-// GetLeaveTypeExternalMapping resolves the latest effective upstream alias.
-func (s *Store) GetLeaveTypeExternalMapping(_ context.Context, tenantID, source, externalCode string, asOf time.Time) (LeaveTypeExternalMapping, bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var selected LeaveTypeExternalMapping
-	found := false
-	for _, mapping := range s.leaveTypeMappings[tenantID] {
-		if !strings.EqualFold(mapping.Source, source) || !strings.EqualFold(mapping.ExternalCode, externalCode) {
-			continue
-		}
-		if mapping.EffectiveFrom != "" && mapping.EffectiveFrom > asOf.Format(time.DateOnly) {
-			continue
-		}
-		if mapping.EffectiveTo != "" && mapping.EffectiveTo <= asOf.Format(time.DateOnly) {
-			continue
-		}
-		if !found || mapping.EffectiveFrom > selected.EffectiveFrom || (mapping.EffectiveFrom == selected.EffectiveFrom && mapping.UpdatedAt.After(selected.UpdatedAt)) {
-			selected = mapping
-			found = true
-		}
-	}
-	return selected, found, nil
-}
-
-// ListLeaveTypeExternalMappings returns all mapping history for HR administration.
-func (s *Store) ListLeaveTypeExternalMappings(_ context.Context, tenantID string) ([]LeaveTypeExternalMapping, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]LeaveTypeExternalMapping, 0, len(s.leaveTypeMappings[tenantID]))
-	for _, mapping := range s.leaveTypeMappings[tenantID] {
-		out = append(out, mapping)
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Source != out[j].Source {
-			return out[i].Source < out[j].Source
-		}
-		if out[i].ExternalCode != out[j].ExternalCode {
-			return out[i].ExternalCode < out[j].ExternalCode
-		}
-		return out[i].EffectiveFrom > out[j].EffectiveFrom
-	})
-	return out, nil
-}
-
-// LockLeaveTypeExternalMappingKey is a no-op because memory transactions already serialize writers.
-func (s *Store) LockLeaveTypeExternalMappingKey(_ context.Context, _, _, _ string) error {
-	return nil
-}
-
-// UpsertLeaveTypeExternalMapping stores one effective upstream alias.
-func (s *Store) UpsertLeaveTypeExternalMapping(_ context.Context, mapping LeaveTypeExternalMapping) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	putNested(s.leaveTypeMappings, mapping.TenantID, mapping.ID, mapping)
-	return nil
-}
-
-// ExpireLeaveTypeExternalMapping ends one alias without removing its history.
-func (s *Store) ExpireLeaveTypeExternalMapping(_ context.Context, tenantID, id, effectiveTo string, updatedAt time.Time) (bool, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	mapping, ok := getNested(s.leaveTypeMappings, tenantID, id)
+	code = strings.ToLower(strings.TrimSpace(code))
+	item, ok := s.leaveTypes[tenantID][code]
 	if !ok {
-		return false, nil
+		return domain.NotFound("leave type", code)
 	}
-	mapping.EffectiveTo = effectiveTo
-	mapping.UpdatedAt = updatedAt
-	putNested(s.leaveTypeMappings, tenantID, id, mapping)
-	return true, nil
+	item.Enabled = enabled
+	s.leaveTypes[tenantID][code] = item
+	return nil
 }
 
-// UpsertLeaveTypeSyncIssue records repeated unknown upstream codes as one actionable issue.
-func (s *Store) UpsertLeaveTypeSyncIssue(_ context.Context, issue LeaveTypeSyncIssue) error {
+func (s *Store) UpsertLeaveTypeExternalRef(_ context.Context, v LeaveTypeExternalRef) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for id, existing := range s.leaveTypeSyncIssues[issue.TenantID] {
-		if strings.EqualFold(existing.Source, issue.Source) && strings.EqualFold(existing.ExternalCode, issue.ExternalCode) && existing.IssueCode == issue.IssueCode {
-			issue.ID = id
-			issue.FirstSeenAt = existing.FirstSeenAt
-			issue.Occurrences = existing.Occurrences + 1
+	v.SourceSystem = strings.ToLower(strings.TrimSpace(v.SourceSystem))
+	v.ExternalCode = strings.TrimSpace(v.ExternalCode)
+	for id, existing := range s.leaveTypeExternalRefs[v.TenantID] {
+		if strings.EqualFold(existing.SourceSystem, v.SourceSystem) && strings.EqualFold(existing.ExternalCode, v.ExternalCode) && strings.EqualFold(existing.ExternalCategoryCode, v.ExternalCategoryCode) && existing.EffectiveFrom == v.EffectiveFrom {
+			v.ID = id
+			v.CreatedAt = existing.CreatedAt
 			break
 		}
 	}
-	issue.Status = "open"
-	issue.ResolvedAt = nil
-	putNested(s.leaveTypeSyncIssues, issue.TenantID, issue.ID, issue)
+	putNested(s.leaveTypeExternalRefs, v.TenantID, v.ID, v)
 	return nil
 }
 
-// ListOpenLeaveTypeSyncIssues returns unresolved HR mapping work.
-func (s *Store) ListOpenLeaveTypeSyncIssues(_ context.Context, tenantID string) ([]LeaveTypeSyncIssue, error) {
+func (s *Store) GetLeaveTypeExternalRef(_ context.Context, tenantID, sourceSystem, externalCode, externalCategoryCode string, asOf time.Time) (LeaveTypeExternalRef, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]LeaveTypeSyncIssue, 0)
-	for _, issue := range s.leaveTypeSyncIssues[tenantID] {
-		if issue.Status == "open" {
-			out = append(out, issue)
+	asOfDate := asOf.Format(time.DateOnly)
+	for _, item := range s.leaveTypeExternalRefs[tenantID] {
+		if !strings.EqualFold(item.SourceSystem, sourceSystem) || !strings.EqualFold(item.ExternalCode, externalCode) || !strings.EqualFold(item.ExternalCategoryCode, externalCategoryCode) {
+			continue
 		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].LastSeenAt.After(out[j].LastSeenAt) })
-	return out, nil
-}
-
-// ResolveLeaveTypeSyncIssues closes outstanding work after HR saves a mapping.
-func (s *Store) ResolveLeaveTypeSyncIssues(_ context.Context, tenantID, source, externalCode string, resolvedAt time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for id, issue := range s.leaveTypeSyncIssues[tenantID] {
-		if issue.Status == "open" && strings.EqualFold(issue.Source, source) && strings.EqualFold(issue.ExternalCode, externalCode) {
-			issue.Status = "resolved"
-			issue.ResolvedAt = &resolvedAt
-			issue.LastSeenAt = resolvedAt
-			putNested(s.leaveTypeSyncIssues, tenantID, id, issue)
+		if item.EffectiveFrom != "" && item.EffectiveFrom > asOfDate || item.EffectiveTo != "" && item.EffectiveTo < asOfDate {
+			continue
 		}
+		return item, true, nil
 	}
-	return nil
+	return LeaveTypeExternalRef{}, false, nil
 }
 
 // UpsertLeaveBalance 從儲存層處理 upsert 請假 balance。
@@ -1886,6 +1824,7 @@ func (s *Store) UpsertLeaveBalance(_ context.Context, v LeaveBalance) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	v.LeaveType = strings.ToLower(strings.TrimSpace(v.LeaveType))
+	v.LeaveTypeID = strings.TrimSpace(v.LeaveTypeID)
 	if strings.TrimSpace(v.LeaveTypeID) == "" {
 		v.LeaveTypeID = domain.StableLeaveTypeID(v.LeaveType)
 	}
@@ -1893,7 +1832,7 @@ func (s *Store) UpsertLeaveBalance(_ context.Context, v LeaveBalance) error {
 	v.GrantedHours = roundLeaveHours(v.GrantedHours)
 	v.UsedHours = roundLeaveHours(v.UsedHours)
 	for id, existing := range s.leaveBalances[v.TenantID] {
-		if existing.EmployeeID == v.EmployeeID && strings.EqualFold(existing.LeaveType, v.LeaveType) && existing.PeriodStart == v.PeriodStart && existing.PeriodEnd == v.PeriodEnd {
+		if existing.EmployeeID == v.EmployeeID && existing.LeaveTypeID == v.LeaveTypeID && existing.PeriodStart == v.PeriodStart && existing.PeriodEnd == v.PeriodEnd {
 			v.ID = id
 			break
 		}
@@ -1913,6 +1852,23 @@ func (s *Store) GetLeaveBalance(_ context.Context, tenantID, id string) (LeaveBa
 	return copyLeaveBalance(v), true, nil
 }
 
+func (s *Store) GetLeaveBalanceForOverlay(_ context.Context, tenantID, employeeID, leaveTypeID string, asOf time.Time) (LeaveBalance, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	asOfDate := asOf.Format(time.DateOnly)
+	var selected LeaveBalance
+	found := false
+	for _, item := range s.leaveBalances[tenantID] {
+		if item.EmployeeID != employeeID || item.LeaveTypeID != leaveTypeID || item.PeriodStart != "" && item.PeriodStart > asOfDate || item.PeriodEnd != "" && item.PeriodEnd < asOfDate {
+			continue
+		}
+		if !found || selected.PeriodEnd == "" || item.PeriodEnd != "" && item.PeriodEnd < selected.PeriodEnd {
+			selected, found = item, true
+		}
+	}
+	return copyLeaveBalance(selected), found, nil
+}
+
 // ListLeaveBalances 從儲存層列出請假 balances。
 func (s *Store) ListLeaveBalances(_ context.Context, tenantID string) ([]LeaveBalance, error) {
 	s.mu.RLock()
@@ -1922,13 +1878,56 @@ func (s *Store) ListLeaveBalances(_ context.Context, tenantID string) ([]LeaveBa
 	return out, nil
 }
 
-// ReserveLeaveBalance 從儲存層保留請假 balance。
-func (s *Store) ReserveLeaveBalance(_ context.Context, tenantID, employeeID, leaveType string, hours float64, asOf, updatedAt time.Time) (LeaveBalance, bool, bool, error) {
+func (s *Store) AppendLeaveBalanceEntry(_ context.Context, v LeaveBalanceEntry) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	leaveType = strings.TrimSpace(leaveType)
+	for _, existing := range s.leaveBalanceEntries[v.TenantID] {
+		if existing.IdempotencyKey == v.IdempotencyKey {
+			return false, nil
+		}
+	}
+	putNested(s.leaveBalanceEntries, v.TenantID, v.ID, copyLeaveBalanceEntry(v))
+	return true, nil
+}
+
+func (s *Store) ListLeaveBalanceEntries(_ context.Context, tenantID string) ([]LeaveBalanceEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.leaveBalanceEntries[tenantID], copyLeaveBalanceEntry)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].OccurredAt.Equal(out[j].OccurredAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].OccurredAt.Before(out[j].OccurredAt)
+	})
+	return out, nil
+}
+
+func (s *Store) ListLeaveBalanceEntriesByBalance(_ context.Context, tenantID, balanceID string) ([]LeaveBalanceEntry, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]LeaveBalanceEntry, 0)
+	for _, entry := range s.leaveBalanceEntries[tenantID] {
+		if entry.BalanceID == balanceID {
+			out = append(out, copyLeaveBalanceEntry(entry))
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].OccurredAt.Equal(out[j].OccurredAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].OccurredAt.Before(out[j].OccurredAt)
+	})
+	return out, nil
+}
+
+// ReserveLeaveBalance 從儲存層保留請假 balance。
+func (s *Store) ReserveLeaveBalance(_ context.Context, tenantID, employeeID, leaveTypeID string, hours float64, asOf, updatedAt time.Time) (LeaveBalance, bool, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	leaveTypeID = strings.TrimSpace(leaveTypeID)
 	for id, balance := range s.leaveBalances[tenantID] {
-		if balance.EmployeeID != employeeID || !strings.EqualFold(balance.LeaveType, leaveType) {
+		if balance.EmployeeID != employeeID || balance.LeaveTypeID != leaveTypeID {
 			continue
 		}
 		asOfDate := asOf.Format("2006-01-02")
@@ -1965,12 +1964,12 @@ func (s *Store) ReleaseLeaveBalanceByID(_ context.Context, tenantID, balanceID s
 }
 
 // ReleaseLeaveBalance 從儲存層釋放請假 balance。
-func (s *Store) ReleaseLeaveBalance(_ context.Context, tenantID, employeeID, leaveType string, hours float64, updatedAt time.Time) (LeaveBalance, bool, error) {
+func (s *Store) ReleaseLeaveBalance(_ context.Context, tenantID, employeeID, leaveTypeID string, hours float64, updatedAt time.Time) (LeaveBalance, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	leaveType = strings.TrimSpace(leaveType)
+	leaveTypeID = strings.TrimSpace(leaveTypeID)
 	for id, balance := range s.leaveBalances[tenantID] {
-		if balance.EmployeeID != employeeID || !strings.EqualFold(balance.LeaveType, leaveType) {
+		if balance.EmployeeID != employeeID || balance.LeaveTypeID != leaveTypeID {
 			continue
 		}
 		hours = roundLeaveHours(hours)
@@ -1998,6 +1997,12 @@ func (s *Store) UpsertLeaveRequest(_ context.Context, v LeaveRequest) error {
 	if strings.TrimSpace(v.LeaveTypeID) == "" {
 		v.LeaveTypeID = domain.StableLeaveTypeID(v.LeaveType)
 	}
+	if strings.TrimSpace(v.ReconciliationStatus) == "" {
+		v.ReconciliationStatus = "not_required"
+	}
+	if v.UpdatedAt.IsZero() {
+		v.UpdatedAt = v.CreatedAt
+	}
 	putNested(s.leaveRequests, v.TenantID, v.ID, copyLeaveRequest(v))
 	return nil
 }
@@ -2009,6 +2014,79 @@ func (s *Store) UpsertLeaveRequestAllocation(_ context.Context, v LeaveRequestAl
 	key := v.LeaveRequestID + "|" + v.LeaveBalanceID
 	putNested(s.leaveRequestAllocations, v.TenantID, key, v)
 	return nil
+}
+
+func (s *Store) UpsertLeaveCase(_ context.Context, v LeaveCase) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if existing, ok := s.leaveCases[v.TenantID][v.ID]; ok && v.CreatedAt.IsZero() {
+		v.CreatedAt = existing.CreatedAt
+	}
+	putNested(s.leaveCases, v.TenantID, v.ID, v)
+	return nil
+}
+
+func (s *Store) GetLeaveCaseBySource(_ context.Context, tenantID, sourceType, sourceID string) (LeaveCase, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	key := strings.ToLower(strings.TrimSpace(sourceType)) + "|" + strings.TrimSpace(sourceID)
+	source, ok := s.leaveCaseSources[tenantID][key]
+	if !ok {
+		return LeaveCase{}, false, nil
+	}
+	item, ok := s.leaveCases[tenantID][source.LeaveCaseID]
+	return item, ok, nil
+}
+
+func (s *Store) UpsertLeaveCaseSource(_ context.Context, v LeaveCaseSource) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := strings.ToLower(strings.TrimSpace(v.SourceType)) + "|" + strings.TrimSpace(v.SourceID)
+	putNested(s.leaveCaseSources, v.TenantID, key, v)
+	return nil
+}
+
+func (s *Store) DeleteLeaveCaseIfUnreferenced(_ context.Context, tenantID, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, source := range s.leaveCaseSources[tenantID] {
+		if source.LeaveCaseID == id {
+			return nil
+		}
+	}
+	delete(s.leaveCases[tenantID], id)
+	return nil
+}
+
+func (s *Store) UpsertExternalLeaveRecord(_ context.Context, v ExternalLeaveRecord) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	key := strings.ToLower(strings.TrimSpace(v.SourceSystem)) + "|" + strings.TrimSpace(v.ExternalRef)
+	if existing, ok := s.externalLeaveRecords[v.TenantID][key]; ok {
+		v.ID = existing.ID
+		v.FirstSeenAt = existing.FirstSeenAt
+	}
+	putNested(s.externalLeaveRecords, v.TenantID, key, copyExternalLeaveRecord(v))
+	return nil
+}
+
+func (s *Store) GetExternalLeaveRecordByRef(_ context.Context, tenantID, sourceSystem, externalRef string) (ExternalLeaveRecord, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	key := strings.ToLower(strings.TrimSpace(sourceSystem)) + "|" + strings.TrimSpace(externalRef)
+	item, ok := s.externalLeaveRecords[tenantID][key]
+	if !ok {
+		return ExternalLeaveRecord{}, false, nil
+	}
+	return copyExternalLeaveRecord(item), true, nil
+}
+
+func (s *Store) ListExternalLeaveRecords(_ context.Context, tenantID string) ([]ExternalLeaveRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.externalLeaveRecords[tenantID], copyExternalLeaveRecord)
+	sort.Slice(out, func(i, j int) bool { return out[i].StartAt.Before(out[j].StartAt) })
+	return out, nil
 }
 
 // GetLeaveRequest 從儲存層取得請假請求。
@@ -2103,71 +2181,6 @@ func (s *Store) ListAttendanceWorksites(_ context.Context, tenantID string) ([]A
 	out := copyNestedValues(s.attendanceWorksites[tenantID], copyAttendanceWorksite)
 	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
 	return out, nil
-}
-
-// UpsertAttendanceShift 從儲存層處理 upsert 考勤班別。
-func (s *Store) UpsertAttendanceShift(_ context.Context, v AttendanceShift) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	putNested(s.attendanceShifts, v.TenantID, v.ID, copyAttendanceShift(v))
-	return nil
-}
-
-// GetAttendanceShift 從儲存層取得考勤班別。
-func (s *Store) GetAttendanceShift(_ context.Context, tenantID, id string) (AttendanceShift, bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	v, ok := getNested(s.attendanceShifts, tenantID, id)
-	if !ok {
-		return AttendanceShift{}, false, nil
-	}
-	return copyAttendanceShift(v), true, nil
-}
-
-// ListAttendanceShifts 從儲存層列出考勤 shifts。
-func (s *Store) ListAttendanceShifts(_ context.Context, tenantID string) ([]AttendanceShift, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := copyNestedValues(s.attendanceShifts[tenantID], copyAttendanceShift)
-	sort.Slice(out, func(i, j int) bool { return out[i].CreatedAt.After(out[j].CreatedAt) })
-	return out, nil
-}
-
-// UpsertAttendanceShiftAssignment 儲存員工班別指派。
-func (s *Store) UpsertAttendanceShiftAssignment(_ context.Context, v AttendanceShiftAssignment) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	putNested(s.attendanceAssignments, v.TenantID, v.ID, copyAttendanceShiftAssignment(v))
-	return nil
-}
-
-// ListAttendanceShiftAssignments 列出租戶的員工班別指派。
-func (s *Store) ListAttendanceShiftAssignments(_ context.Context, tenantID string) ([]AttendanceShiftAssignment, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := copyNestedValues(s.attendanceAssignments[tenantID], copyAttendanceShiftAssignment)
-	sort.Slice(out, func(i, j int) bool { return out[i].EffectiveFrom.After(out[j].EffectiveFrom) })
-	return out, nil
-}
-
-// FindEffectiveAttendanceShiftAssignment 取得指定時點生效的員工排班。
-func (s *Store) FindEffectiveAttendanceShiftAssignment(_ context.Context, tenantID, employeeID string, at time.Time) (AttendanceShiftAssignment, bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	var best AttendanceShiftAssignment
-	found := false
-	for _, item := range s.attendanceAssignments[tenantID] {
-		if item.EmployeeID != employeeID || !strings.EqualFold(item.Status, "active") || item.EffectiveFrom.After(at) || (item.EffectiveTo != nil && item.EffectiveTo.Before(at)) {
-			continue
-		}
-		if !found || item.EffectiveFrom.After(best.EffectiveFrom) {
-			best, found = item, true
-		}
-	}
-	if !found {
-		return AttendanceShiftAssignment{}, false, nil
-	}
-	return copyAttendanceShiftAssignment(best), true, nil
 }
 
 // UpsertAttendanceClockRecord 從儲存層處理 upsert 考勤打卡 record。
@@ -4645,8 +4658,43 @@ func (s *Store) UpdateIdentityProvisioningOutboxEvent(_ context.Context, v Ident
 func (s *Store) AppendOutboxEvent(_ context.Context, v OutboxEvent) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	v = normalizeMemoryOutboxEvent(v)
+	if v.IdempotencyKey != "" {
+		for _, existing := range s.outboxEvents[v.TenantID] {
+			if existing.EventType == v.EventType && existing.IdempotencyKey == v.IdempotencyKey {
+				return nil
+			}
+		}
+	}
 	s.outboxEvents[v.TenantID] = append(s.outboxEvents[v.TenantID], copyOutboxEvent(v))
 	return nil
+}
+
+// normalizeMemoryOutboxEvent mirrors the defaults applied by PostgreSQL.
+func normalizeMemoryOutboxEvent(v OutboxEvent) OutboxEvent {
+	if v.PayloadVersion <= 0 {
+		v.PayloadVersion = 1
+	}
+	if v.Status == "" {
+		v.Status = domain.OutboxStatusPending
+	}
+	if v.CreatedAt.IsZero() {
+		v.CreatedAt = time.Now().UTC()
+	}
+	if v.NextAttemptAt.IsZero() {
+		v.NextAttemptAt = v.CreatedAt
+	}
+	if v.UpdatedAt.IsZero() {
+		v.UpdatedAt = v.CreatedAt
+	}
+	if v.AttemptCount == 0 && v.RetryCount > 0 {
+		v.AttemptCount = v.RetryCount
+	}
+	if v.MaxAttempts == nil {
+		maxAttempts := domain.DefaultOutboxMaxAttempts
+		v.MaxAttempts = &maxAttempts
+	}
+	return v
 }
 
 // ListOutboxEvents 從儲存層列出 outbox 事件。
@@ -4721,15 +4769,12 @@ func outboxEventMatchesQuery(v OutboxEvent, query domain.OutboxEventQuery) bool 
 	return true
 }
 
-// ClaimOutboxEvents atomically claims dispatchable outbox events for a worker.
-func (s *Store) ClaimOutboxEvents(_ context.Context, tenantID string, limit, maxRetries int) ([]OutboxEvent, error) {
+// ClaimOutboxEvents atomically leases due or stale outbox events for a worker.
+func (s *Store) ClaimOutboxEvents(_ context.Context, tenantID string, limit int, claimedAt, leaseUntil time.Time, claimOwner, claimToken string) ([]OutboxEvent, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if limit <= 0 {
 		return nil, nil
-	}
-	if maxRetries <= 0 {
-		maxRetries = 1
 	}
 	events := s.outboxEvents[tenantID]
 	type ranked struct {
@@ -4738,15 +4783,21 @@ func (s *Store) ClaimOutboxEvents(_ context.Context, tenantID string, limit, max
 	}
 	candidates := make([]ranked, 0, len(events))
 	for i, event := range events {
-		if event.RetryCount >= maxRetries {
+		event = normalizeMemoryOutboxEvent(event)
+		events[i] = event
+		if event.MaxAttempts != nil && *event.MaxAttempts > 0 && event.AttemptCount >= *event.MaxAttempts {
 			continue
 		}
-		switch event.Status {
-		case "pending", "failed":
+		due := (event.Status == domain.OutboxStatusPending || event.Status == domain.OutboxStatusFailed) && !event.NextAttemptAt.After(claimedAt)
+		stale := event.Status == domain.OutboxStatusProcessing && event.ClaimExpiresAt != nil && !event.ClaimExpiresAt.After(claimedAt)
+		if due || stale {
 			candidates = append(candidates, ranked{idx: i, ev: event})
 		}
 	}
 	sort.Slice(candidates, func(i, j int) bool {
+		if !candidates[i].ev.NextAttemptAt.Equal(candidates[j].ev.NextAttemptAt) {
+			return candidates[i].ev.NextAttemptAt.Before(candidates[j].ev.NextAttemptAt)
+		}
 		if candidates[i].ev.CreatedAt.Equal(candidates[j].ev.CreatedAt) {
 			return candidates[i].ev.ID < candidates[j].ev.ID
 		}
@@ -4757,28 +4808,72 @@ func (s *Store) ClaimOutboxEvents(_ context.Context, tenantID string, limit, max
 	}
 	out := make([]OutboxEvent, 0, len(candidates))
 	for _, item := range candidates {
-		events[item.idx].Status = "processing"
+		events[item.idx].Status = domain.OutboxStatusProcessing
+		events[item.idx].AttemptCount++
 		events[item.idx].LastError = ""
+		events[item.idx].ClaimOwner = claimOwner
+		events[item.idx].ClaimToken = claimToken + ":" + events[item.idx].ID
+		expires := leaseUntil.UTC()
+		events[item.idx].ClaimExpiresAt = &expires
+		attemptedAt := claimedAt.UTC()
+		events[item.idx].LastAttemptAt = &attemptedAt
+		events[item.idx].UpdatedAt = attemptedAt
 		events[item.idx].ProcessedAt = nil
+		events[item.idx].DeadLetteredAt = nil
 		out = append(out, copyOutboxEvent(events[item.idx]))
 	}
 	s.outboxEvents[tenantID] = events
 	return out, nil
 }
 
-// UpdateOutboxEvent 從儲存層更新 outbox 事件處理狀態。
-func (s *Store) UpdateOutboxEvent(_ context.Context, v OutboxEvent) error {
+// FinalizeOutboxEvent updates only the worker's currently fenced claim.
+func (s *Store) FinalizeOutboxEvent(_ context.Context, v OutboxEvent) (bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	events := s.outboxEvents[v.TenantID]
 	for i := range events {
-		if events[i].ID == v.ID {
+		if events[i].ID == v.ID && events[i].Status == domain.OutboxStatusProcessing && v.ClaimToken != "" && events[i].ClaimToken == v.ClaimToken {
+			v.ClaimOwner = ""
+			v.ClaimToken = ""
+			v.ClaimExpiresAt = nil
 			events[i] = copyOutboxEvent(v)
 			s.outboxEvents[v.TenantID] = events
-			return nil
+			return true, nil
 		}
 	}
-	return nil
+	return false, nil
+}
+
+// RetryOutboxEvent resets an operator-selected terminal failure for immediate dispatch.
+func (s *Store) RetryOutboxEvent(_ context.Context, tenantID, id string, retriedAt time.Time) (OutboxEvent, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	events := s.outboxEvents[tenantID]
+	for i := range events {
+		if events[i].ID != id {
+			continue
+		}
+		switch events[i].Status {
+		case domain.OutboxStatusFailed, domain.OutboxStatusParked, domain.OutboxStatusDeadLettered:
+		default:
+			return OutboxEvent{}, false, nil
+		}
+		events[i].Status = domain.OutboxStatusPending
+		events[i].RetryCount = 0
+		events[i].AttemptCount = 0
+		events[i].LastError = ""
+		events[i].NextAttemptAt = retriedAt.UTC()
+		events[i].ClaimOwner = ""
+		events[i].ClaimToken = ""
+		events[i].ClaimExpiresAt = nil
+		events[i].LastAttemptAt = nil
+		events[i].UpdatedAt = retriedAt.UTC()
+		events[i].ProcessedAt = nil
+		events[i].DeadLetteredAt = nil
+		s.outboxEvents[tenantID] = events
+		return copyOutboxEvent(events[i]), true, nil
+	}
+	return OutboxEvent{}, false, nil
 }
 
 // DeleteSucceededOutboxEventsBefore 從儲存層刪除已成功且早於 cutoff 的 outbox 事件。
@@ -4936,6 +5031,12 @@ func nowUTC() time.Time {
 func (s *Store) UpsertWorkflowRun(_ context.Context, v domain.WorkflowRun) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if v.TemporalStartStatus == "" {
+		v.TemporalStartStatus = domain.WorkflowTemporalStartStarted
+	}
+	if v.TemporalWorkflowID == "" {
+		v.TemporalWorkflowID = domain.FormApprovalWorkflowID(v.TenantID, v.FormInstanceID)
+	}
 	if s.workflowRuns == nil {
 		s.workflowRuns = map[string]map[string]domain.WorkflowRun{}
 	}
@@ -4984,6 +5085,97 @@ func (s *Store) ListWorkflowRunsByFormInstance(_ context.Context, tenantID, form
 		return out[i].Version < out[j].Version
 	})
 	return out, nil
+}
+
+func (s *Store) ListPendingWorkflowRuns(_ context.Context, tenantID string, staleBefore time.Time, limit int) ([]domain.WorkflowRun, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := make([]domain.WorkflowRun, 0)
+	for _, item := range s.workflowRuns[tenantID] {
+		if item.TemporalStartStatus == domain.WorkflowTemporalStartPending ||
+			(item.TemporalStartStatus == domain.WorkflowTemporalStartStarting && !item.UpdatedAt.After(staleBefore)) {
+			out = append(out, copyWorkflowRun(item))
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		if out[i].UpdatedAt.Equal(out[j].UpdatedAt) {
+			return out[i].ID < out[j].ID
+		}
+		return out[i].UpdatedAt.Before(out[j].UpdatedAt)
+	})
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out, nil
+}
+
+func (s *Store) ClaimWorkflowRunTemporalStart(_ context.Context, tenantID, id string, claimedAt, staleBefore time.Time) (domain.WorkflowRun, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := getNested(s.workflowRuns, tenantID, id)
+	if !ok || (item.TemporalStartStatus != domain.WorkflowTemporalStartPending &&
+		!(item.TemporalStartStatus == domain.WorkflowTemporalStartStarting && !item.UpdatedAt.After(staleBefore))) {
+		return domain.WorkflowRun{}, false, nil
+	}
+	item.TemporalStartStatus = domain.WorkflowTemporalStartStarting
+	item.UpdatedAt = claimedAt
+	putNested(s.workflowRuns, tenantID, id, copyWorkflowRun(item))
+	return copyWorkflowRun(item), true, nil
+}
+
+func (s *Store) ReleaseWorkflowRunTemporalStart(_ context.Context, tenantID, id string, claimedAt, releasedAt time.Time) (bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := getNested(s.workflowRuns, tenantID, id)
+	if !ok || item.TemporalStartStatus != domain.WorkflowTemporalStartStarting || !item.UpdatedAt.Equal(claimedAt) {
+		return false, nil
+	}
+	item.TemporalStartStatus = domain.WorkflowTemporalStartPending
+	item.UpdatedAt = releasedAt
+	putNested(s.workflowRuns, tenantID, id, copyWorkflowRun(item))
+	return true, nil
+}
+
+func (s *Store) MarkWorkflowRunTemporalStarted(_ context.Context, tenantID, id string, claimedAt time.Time, execution domain.FormApprovalWorkflowExecution, startedAt time.Time) (domain.WorkflowRun, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := getNested(s.workflowRuns, tenantID, id)
+	if !ok || item.TemporalStartStatus != domain.WorkflowTemporalStartStarting || !item.UpdatedAt.Equal(claimedAt) {
+		return domain.WorkflowRun{}, false, nil
+	}
+	item.TemporalStartStatus = domain.WorkflowTemporalStartStarted
+	item.TemporalWorkflowID = execution.WorkflowID
+	item.TemporalRunID = execution.RunID
+	item.TemporalStartedAt = &startedAt
+	item.UpdatedAt = startedAt
+	putNested(s.workflowRuns, tenantID, id, copyWorkflowRun(item))
+	return copyWorkflowRun(item), true, nil
+}
+
+func (s *Store) AbandonPendingWorkflowRunTemporalStart(_ context.Context, tenantID, id string, abandonedAt time.Time) (domain.WorkflowRun, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := getNested(s.workflowRuns, tenantID, id)
+	if !ok || item.TemporalStartStatus != domain.WorkflowTemporalStartPending {
+		return domain.WorkflowRun{}, false, nil
+	}
+	item.TemporalStartStatus = domain.WorkflowTemporalStartAbandoned
+	item.UpdatedAt = abandonedAt
+	putNested(s.workflowRuns, tenantID, id, copyWorkflowRun(item))
+	return copyWorkflowRun(item), true, nil
+}
+
+func (s *Store) AbandonClaimedWorkflowRunTemporalStart(_ context.Context, tenantID, id string, claimedAt, abandonedAt time.Time) (domain.WorkflowRun, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item, ok := getNested(s.workflowRuns, tenantID, id)
+	if !ok || item.TemporalStartStatus != domain.WorkflowTemporalStartStarting || !item.UpdatedAt.Equal(claimedAt) {
+		return domain.WorkflowRun{}, false, nil
+	}
+	item.TemporalStartStatus = domain.WorkflowTemporalStartAbandoned
+	item.UpdatedAt = abandonedAt
+	putNested(s.workflowRuns, tenantID, id, copyWorkflowRun(item))
+	return copyWorkflowRun(item), true, nil
 }
 
 func (s *Store) UpsertWorkflowStageInstance(_ context.Context, v domain.WorkflowStageInstance) error {
@@ -5068,6 +5260,17 @@ func (s *Store) InsertWorkflowAction(_ context.Context, v domain.WorkflowAction)
 	}
 	s.workflowActions[v.TenantID] = append(s.workflowActions[v.TenantID], copyWorkflowAction(v))
 	return nil
+}
+
+func (s *Store) GetWorkflowActionByIdempotencyKey(_ context.Context, tenantID, runID, idempotencyKey string) (domain.WorkflowAction, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for _, item := range s.workflowActions[tenantID] {
+		if item.RunID == runID && item.IdempotencyKey == idempotencyKey && idempotencyKey != "" {
+			return copyWorkflowAction(item), true, nil
+		}
+	}
+	return domain.WorkflowAction{}, false, nil
 }
 
 func (s *Store) ListWorkflowActionsByRun(_ context.Context, tenantID, runID string) ([]domain.WorkflowAction, error) {

@@ -137,11 +137,12 @@ func (a *Activities) ApplyFormApprovalSignal(ctx context.Context, signal domain.
 		return domain.FormApprovalProjection{}, nil
 	}
 	projection, err = a.Service.Workflow().ApplyTemporalFormApprovalSignal(domain.RequestContext{
-		Context:   ctx,
-		TenantID:  signal.TenantID,
-		AccountID: signal.AccountID,
-		RequestID: signal.RequestID,
-		TraceID:   signal.TraceID,
+		Context:        ctx,
+		TenantID:       signal.TenantID,
+		AccountID:      signal.AccountID,
+		RequestID:      signal.RequestID,
+		IdempotencyKey: signal.IdempotencyKey,
+		TraceID:        signal.TraceID,
 	}, signal)
 	return projection, NonRetryableActivityError(err)
 }

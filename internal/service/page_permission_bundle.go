@@ -164,7 +164,6 @@ var pagePermissionAliases = map[string]string{
 var legacyMenuPrimaryReads = map[string]string{
 	"attendance.corrections": permissionKey(AppAttendance, ResourceAttendanceCorrection, ActionRead),
 	"attendance.worksites":   permissionKey(AppAttendance, ResourceAttendanceWorksite, ActionRead),
-	"attendance.shifts":      permissionKey(AppAttendance, ResourceAttendanceShift, ActionRead),
 }
 
 // canonicalPageMenuKey 將舊選單 key 正規化成目前 workspace 頁面 key。
@@ -284,7 +283,7 @@ func canonicalMenuKeyForPermission(permission Permission) string {
 		return "attendance.overview"
 	case strings.HasPrefix(key, "attendance.clock."), strings.HasPrefix(key, "attendance.correction."):
 		return "attendance.clock"
-	case strings.HasPrefix(key, "attendance.leave."), strings.HasPrefix(key, "attendance.worksite."), strings.HasPrefix(key, "attendance.shift."):
+	case strings.HasPrefix(key, "attendance.leave."), strings.HasPrefix(key, "attendance.worksite."):
 		return "attendance.leave_policy"
 	case strings.HasPrefix(key, "workflow.form_template."):
 		return "workflow.forms"

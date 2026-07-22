@@ -139,22 +139,33 @@ func (c AttendanceService) UpdateAttendancePolicy(ctx RequestContext, input Upda
 	var next AttendancePolicy
 	if err := c.Service.withTenantTransaction(ctx, func(txService *Service) error {
 		tx := txService.Attendance()
-		var err error
-		next, err = tx.attendancePolicyFromInput(ctx, account.ID, input)
-		if err != nil {
-			return err
-		}
 		current, exists, err := tx.store.GetAttendancePolicy(goContext(ctx), ctx.TenantID)
 		if err != nil {
 			return err
 		}
-		if exists && current.Version == next.Version {
-			return authzAudit.CommitWith(ctx, tx.Service)
-		}
-		if err := tx.store.UpsertAttendancePolicy(goContext(ctx), next); err != nil {
+		next, err = tx.attendancePolicyFromCurrent(ctx, account.ID, input, current, exists)
+		if err != nil {
 			return err
 		}
-		if err := tx.audit(ctx, "attendance.policy.update", string(ResourceLeave), next.ID, string(SeverityHigh), auditDecisionDetails(ctx, decision, map[string]any{
+		if exists && current.Version == next.Version {
+			next = current
+			return authzAudit.CommitWith(ctx, tx.Service)
+		}
+		if !exists {
+			baseline := defaultAttendancePolicyVersion(ctx.TenantID, tx.Now())
+			if err := tx.store.InsertAttendancePolicyVersion(goContext(ctx), baseline); err != nil {
+				return err
+			}
+			if next.Version == baseline.Version {
+				next = baseline
+			}
+		}
+		if next.Version > defaultAttendancePolicyResponse().Version || exists {
+			if err := tx.store.InsertAttendancePolicyVersion(goContext(ctx), next); err != nil {
+				return err
+			}
+		}
+		if err := tx.audit(ctx, "attendance.policy.update", string(ResourceLeave), "current", string(SeverityHigh), auditDecisionDetails(ctx, decision, map[string]any{
 			"clock_mode":                 next.WorkTime.ClockMode,
 			"flexible_clock_in_earliest": next.WorkTime.FlexibleClockInEarliest,
 			"flexible_clock_out_latest":  next.WorkTime.FlexibleClockOutLatest,
@@ -178,18 +189,18 @@ func (c AttendanceService) attendancePolicyFromInput(ctx RequestContext, account
 	if err != nil {
 		return AttendancePolicy{}, err
 	}
+	return c.attendancePolicyFromCurrent(ctx, accountID, input, current, ok)
+}
+
+func (c AttendanceService) attendancePolicyFromCurrent(ctx RequestContext, accountID string, input UpdateAttendancePolicyInput, current AttendancePolicy, exists bool) (AttendancePolicy, error) {
 	now := c.Now()
-	createdAt := now
 	defaults := defaultAttendancePolicyResponse()
 	currentVersion := defaults.Version
 	currentWorkTime := normalizeAttendancePolicyWorkTime(defaults.WorkTime)
-	if ok && !current.CreatedAt.IsZero() {
-		createdAt = current.CreatedAt
-	}
-	if ok && current.Version > 0 {
+	if exists && current.Version > 0 {
 		currentVersion = current.Version
 	}
-	if ok {
+	if exists {
 		currentWorkTime = normalizeAttendancePolicyWorkTime(current.WorkTime)
 	}
 	if input.BaseVersion > 0 && input.BaseVersion != currentVersion {
@@ -201,19 +212,28 @@ func (c AttendanceService) attendancePolicyFromInput(ctx RequestContext, account
 		version++
 	}
 	policy := AttendancePolicy{
-		ID:                 "current",
-		TenantID:           ctx.TenantID,
-		WorkTime:           nextWorkTime,
-		Version:            version,
-		EffectiveFrom:      &now,
-		UpdatedByAccountID: strings.TrimSpace(accountID),
-		CreatedAt:          createdAt,
-		UpdatedAt:          now,
+		TenantID:             ctx.TenantID,
+		WorkTime:             nextWorkTime,
+		Version:              version,
+		EffectiveFrom:        &now,
+		PublishedByAccountID: strings.TrimSpace(accountID),
+		PublishedAt:          now,
 	}
 	if err := validateAttendancePolicy(policy); err != nil {
 		return policy, err
 	}
 	return policy, nil
+}
+
+func defaultAttendancePolicyVersion(tenantID string, now time.Time) AttendancePolicy {
+	workTime := defaultAttendancePolicyResponse().WorkTime
+	return AttendancePolicy{
+		TenantID:      tenantID,
+		WorkTime:      workTime,
+		Version:       1,
+		EffectiveFrom: &now,
+		PublishedAt:   now,
+	}
 }
 
 // defaultAttendancePolicyResponse 處理預設考勤政策回應。

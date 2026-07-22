@@ -3,7 +3,6 @@ package service_test
 import (
 	"context"
 	"encoding/json"
-	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -100,15 +99,14 @@ func TestGrantLeaveBalancesRequiresEHRMSSync(t *testing.T) {
 	}
 }
 
-func TestAttendancePolicyPublishesOnlyWorkTimeAndPreservesLegacyStorage(t *testing.T) {
+func TestAttendancePolicyPublishesImmutableWorkTimeVersion(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store, svc, ctx := newLeavePolicyEngineFixture(t, now)
-	legacyLeaveTypes := []domain.AttendanceLeaveType{{Code: "legacy", Name: "Legacy row", Active: true}}
 	current := domain.AttendancePolicy{
-		ID: "current", TenantID: "tenant-1", WorkTime: defaultPolicyWorkTime(), LeaveTypes: legacyLeaveTypes,
-		Version: 7, CreatedAt: now, UpdatedAt: now,
+		TenantID: "tenant-1", WorkTime: defaultPolicyWorkTime(), Version: 7,
+		EffectiveFrom: &now, PublishedAt: now,
 	}
-	if err := store.UpsertAttendancePolicy(context.Background(), current); err != nil {
+	if err := store.InsertAttendancePolicyVersion(context.Background(), current); err != nil {
 		t.Fatal(err)
 	}
 	workTime := current.WorkTime
@@ -125,8 +123,48 @@ func TestAttendancePolicyPublishesOnlyWorkTimeAndPreservesLegacyStorage(t *testi
 		t.Fatalf("policy response must contain work time only, got %s", raw)
 	}
 	stored, found, err := store.GetAttendancePolicy(context.Background(), "tenant-1")
-	if err != nil || !found || !reflect.DeepEqual(stored.LeaveTypes, legacyLeaveTypes) {
-		t.Fatalf("work-time publish must preserve legacy storage without consuming it: found=%v stored=%+v err=%v", found, stored.LeaveTypes, err)
+	if err != nil || !found || stored.Version != 8 || stored.WorkTime.StandardEnd != "18:00" {
+		t.Fatalf("latest immutable policy version was not stored: found=%v stored=%+v err=%v", found, stored, err)
+	}
+}
+
+func TestAttendancePolicyRejectsStaleBaseVersion(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	_, svc, ctx := newLeavePolicyEngineFixture(t, now)
+	first := defaultPolicyWorkTime()
+	first.StandardEnd = "18:00"
+	if _, err := svc.Attendance().PublishAttendancePolicy(ctx, domain.UpdateAttendancePolicyInput{BaseVersion: 1, WorkTime: first}); err != nil {
+		t.Fatal(err)
+	}
+	second := defaultPolicyWorkTime()
+	second.StandardEnd = "19:00"
+	_, err := svc.Attendance().PublishAttendancePolicy(ctx, domain.UpdateAttendancePolicyInput{BaseVersion: 1, WorkTime: second})
+	appErr, ok := domain.AsAppError(err)
+	if !ok || appErr.Status != 409 {
+		t.Fatalf("expected stale policy publish to return 409, got %v", err)
+	}
+}
+
+func TestAttendancePolicyVersionCannotBeOverwritten(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	original := domain.AttendancePolicy{
+		TenantID: "tenant-1", Version: 1, WorkTime: defaultPolicyWorkTime(),
+		EffectiveFrom: &now, PublishedAt: now,
+	}
+	if err := store.InsertAttendancePolicyVersion(context.Background(), original); err != nil {
+		t.Fatal(err)
+	}
+	replacement := original
+	replacement.WorkTime.StandardEnd = "19:00"
+	err := store.InsertAttendancePolicyVersion(context.Background(), replacement)
+	appErr, ok := domain.AsAppError(err)
+	if !ok || appErr.Status != 409 {
+		t.Fatalf("expected immutable version overwrite to return 409, got %v", err)
+	}
+	stored, found, err := store.GetAttendancePolicy(context.Background(), "tenant-1")
+	if err != nil || !found || stored.WorkTime.StandardEnd != original.WorkTime.StandardEnd {
+		t.Fatalf("immutable version was overwritten: found=%v stored=%+v err=%v", found, stored, err)
 	}
 }
 

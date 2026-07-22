@@ -70,7 +70,6 @@ const (
 	ErrorCodeAttendanceWorksiteRequired       ErrorCode = 40022
 	ErrorCodeAttendanceOutsideWorksite        ErrorCode = 40023
 	ErrorCodeAttendanceLocationAccuracyLow    ErrorCode = 40024
-	ErrorCodeAttendanceShiftRequired          ErrorCode = 40025
 	ErrorCodeAttendanceCorrectionInvalidState ErrorCode = 40030
 	ErrorCodeAttendanceNotFound               ErrorCode = 40050
 	ErrorCodeAttendanceConflict               ErrorCode = 40060
@@ -218,8 +217,6 @@ func reasonErrorCode(reason string) (ErrorCode, bool) {
 		return ErrorCodeAttendanceOutsideWorksite, true
 	case "attendance_location_accuracy_low":
 		return ErrorCodeAttendanceLocationAccuracyLow, true
-	case "attendance_shift_required":
-		return ErrorCodeAttendanceShiftRequired, true
 	case "attendance_correction_invalid_state":
 		return ErrorCodeAttendanceCorrectionInvalidState, true
 	case "workflow_invalid_state":

@@ -148,15 +148,14 @@ func TestAgentLeaveDraftDefaultsMissingTimes(t *testing.T) {
 		ID: "ft-leave-default", TenantID: "tenant-1", Key: "leave-request", Name: "請假申請單",
 		Status: "published", Schema: leaveSchema, CreatedAt: now, UpdatedAt: now,
 	})
-	if err := store.UpsertAttendancePolicy(context.Background(), domain.AttendancePolicy{
-		ID: "current", TenantID: "tenant-1", Version: 1,
+	if err := store.InsertAttendancePolicyVersion(context.Background(), domain.AttendancePolicy{
+		TenantID: "tenant-1", Version: 1,
 		WorkTime: domain.AttendancePolicyWorkTime{
 			ClockMode: "fixed", StandardStart: "09:00", StandardEnd: "18:00",
 			BreakStart: "12:00", BreakEnd: "13:00", Weekend: "週六、週日",
 			CycleStart: "1 日", CycleEnd: "本月 月底（最後一日）",
 		},
-		LeaveTypes: []domain.AttendanceLeaveType{{Code: "annual", Name: "特休", Active: true}},
-		CreatedAt:  now, UpdatedAt: now,
+		EffectiveFrom: &now, PublishedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}

@@ -1692,7 +1692,7 @@ paths:
     get:
       summary: List IAM outbox events
       parameters:
-        - {name: status, in: query, schema: {type: string, enum: [pending, processing, processed, failed]}}
+        - {name: status, in: query, schema: {type: string, enum: [pending, processing, succeeded, failed, parked, dead_lettered]}}
         - {name: event_type, in: query, schema: {type: string}}
         - {name: last_error, in: query, schema: {type: string}}
         - {name: has_error, in: query, schema: {type: boolean}}
@@ -1712,7 +1712,7 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
   /v1/iam/outbox-events/{id}/retry:
     post:
-      summary: Retry a failed outbox event
+      summary: Retry a failed, parked, or dead-lettered outbox event
       parameters:
         - $ref: "#/components/parameters/ID"
       responses:
@@ -1930,7 +1930,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/LeaveBalancePageDataResponse"
   /v1/attendance/leave-requests:
     get:
       summary: List leave requests
@@ -1948,7 +1948,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/LeaveRequestPageDataResponse"
     post:
       summary: Create leave request
       responses:
@@ -1957,7 +1957,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/DataResponse"
+                $ref: "#/components/schemas/LeaveRequestDataResponse"
   /v1/attendance/leave-requests/evaluate:
     post:
       summary: Evaluate a leave request without creating it
@@ -2097,7 +2097,7 @@ paths:
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/attendance/leave-types:
     get:
-      summary: List the fixed system leave catalog with tenant availability
+      summary: List the tenant leave_types catalog
       responses:
         "200":
           description: System leave type catalog
@@ -2111,7 +2111,7 @@ paths:
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/attendance/leave-types/{id}:
     patch:
-      summary: Set tenant availability for one system leave type
+      summary: Set leave_types.status (active/inactive) for one leave type
       parameters:
         - in: path
           name: id
@@ -2133,56 +2133,6 @@ paths:
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/attendance/leave-type-integrations:
-    get:
-      summary: List system leave types with external mapping, usage, and unresolved sync state
-      responses:
-        "200":
-          description: HR-facing leave type integration summary
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LeaveTypeIntegrationDataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/attendance/leave-type-mappings:
-    post:
-      summary: Create or update an external code mapping to a system leave type
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/SaveLeaveTypeExternalMappingRequest"
-      responses:
-        "200":
-          description: Saved external leave type mapping
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LeaveTypeExternalMappingDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/attendance/leave-type-mappings/{id}:
-    delete:
-      summary: End an external leave type mapping while preserving its history
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Expired external leave type mapping
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LeaveTypeExternalMappingDataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/attendance/worksites:
     get:
@@ -2237,104 +2187,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AttendanceWorksiteDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/attendance/shifts:
-    get:
-      summary: List attendance shifts
-      parameters:
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
-        - $ref: "#/components/parameters/Sort"
-      responses:
-        "200":
-          description: Attendance shift page
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AttendanceShiftPageDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    post:
-      summary: Create attendance shift
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateAttendanceShiftRequest"
-      responses:
-        "201":
-          description: Created attendance shift
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AttendanceShiftDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    patch:
-      summary: Update attendance shift
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateAttendanceShiftRequest"
-      responses:
-        "200":
-          description: Updated attendance shift
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AttendanceShiftDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/attendance/shift-assignments:
-    get:
-      summary: List optional attendance shift assignments
-      parameters:
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
-        - $ref: "#/components/parameters/Sort"
-      responses:
-        "200":
-          description: Attendance shift assignment page
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AttendanceShiftAssignmentPageDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    post:
-      summary: Create optional attendance shift assignment
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateAttendanceShiftAssignmentRequest"
-      responses:
-        "201":
-          description: Created attendance shift assignment
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AttendanceShiftAssignmentDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -3587,7 +3439,7 @@ paths:
   /v1/workflows/form-data-sources:
     get:
       summary: List permission-filtered form data sources
-      description: The leave_types collection is populated from enabled items in the fixed system leave catalog.
+      description: The leave_types collection is populated from enabled tenant leave_types rows.
       responses:
         "200":
           description: Form data source catalog
@@ -3655,6 +3507,8 @@ paths:
   /v1/workflows/reviews/bulk-action:
     post:
       summary: Apply one workflow review action to multiple form instances
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -3798,6 +3652,7 @@ paths:
       summary: Approve the current business workflow form stage
       parameters:
         - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -3824,6 +3679,7 @@ paths:
       summary: Reject a workflow form instance
       parameters:
         - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -3850,6 +3706,7 @@ paths:
       summary: Return a workflow form instance for applicant revision
       parameters:
         - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -3876,6 +3733,7 @@ paths:
       summary: Cancel a workflow form instance
       parameters:
         - $ref: "#/components/parameters/ID"
+        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: false
         content:
@@ -4283,6 +4141,15 @@ components:
       description: Globally unique persisted resource identifier; tenant_id still scopes ownership and authorization.
       schema:
         type: string
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: Stable key for one workflow review command. Reusing it with the same command returns the current result; reusing it with different input returns 409.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 255
     Page:
       name: page
       in: query
@@ -5522,7 +5389,7 @@ components:
         permission_id: {type: string}
     OutboxEvent:
       type: object
-      required: [id, tenant_id, event_type, status, retry_count, created_at]
+      required: [id, tenant_id, event_type, payload_version, status, retry_count, attempt_count, next_attempt_at, created_at, updated_at]
       properties:
         id: {type: string}
         tenant_id: {type: string}
@@ -5532,11 +5399,30 @@ components:
         payload:
           type: object
           additionalProperties: true
-        status: {type: string, enum: [pending, processing, processed, failed]}
+        payload_version: {type: integer, minimum: 1}
+        idempotency_key: {type: string}
+        status: {type: string, enum: [pending, processing, succeeded, failed, parked, dead_lettered]}
         retry_count: {type: integer}
+        attempt_count: {type: integer}
+        max_attempts: {type: integer, minimum: 0, description: Zero means unlimited attempts.}
         last_error: {type: string}
+        next_attempt_at: {type: string, format: date-time}
+        claim_owner: {type: string}
+        claim_expires_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_attempt_at:
+          type: string
+          format: date-time
+          nullable: true
         created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
         processed_at:
+          type: string
+          format: date-time
+          nullable: true
+        dead_lettered_at:
           type: string
           format: date-time
           nullable: true
@@ -6056,6 +5942,13 @@ components:
         run_status:
           type: string
           enum: [running, returned, completed, cancelled]
+        temporal_start_status:
+          type: string
+          enum: [pending_start, starting, started, abandoned]
+          description: Durable Temporal delivery state. Review actions are unavailable while pending_start or starting.
+        temporal_workflow_id: {type: string}
+        temporal_run_id: {type: string}
+        temporal_started_at: {type: string, format: date-time}
         current_stage_id: {type: string}
         current_stage_label: {type: string}
         can_act: {type: boolean}
@@ -6462,6 +6355,9 @@ components:
         enabled: {type: boolean}
         added_this_month: {type: boolean}
         updated_at: {type: string}
+        updated_by:
+          type: string
+          description: Display name of the account that last updated the form design.
         fields:
           type: array
           items:
@@ -6722,50 +6618,6 @@ components:
             page: {type: integer}
             page_size: {type: integer}
             sort: {type: string}
-    AttendanceShiftDataResponse:
-      type: object
-      required: [data]
-      properties:
-        data:
-          $ref: "#/components/schemas/AttendanceShift"
-    AttendanceShiftPageDataResponse:
-      type: object
-      required: [data]
-      properties:
-        data:
-          type: object
-          required: [items, total, page, page_size, sort]
-          properties:
-            items:
-              type: array
-              items:
-                $ref: "#/components/schemas/AttendanceShift"
-            total: {type: integer}
-            page: {type: integer}
-            page_size: {type: integer}
-            sort: {type: string}
-    AttendanceShiftAssignmentDataResponse:
-      type: object
-      required: [data]
-      properties:
-        data:
-          $ref: "#/components/schemas/AttendanceShiftAssignment"
-    AttendanceShiftAssignmentPageDataResponse:
-      type: object
-      required: [data]
-      properties:
-        data:
-          type: object
-          required: [items, total, page, page_size, sort]
-          properties:
-            items:
-              type: array
-              items:
-                $ref: "#/components/schemas/AttendanceShiftAssignment"
-            total: {type: integer}
-            page: {type: integer}
-            page_size: {type: integer}
-            sort: {type: string}
     AttendanceClockStatusDataResponse:
       type: object
       required: [data]
@@ -6828,6 +6680,83 @@ components:
             page: {type: integer}
             page_size: {type: integer}
             sort: {type: string}
+    LeaveBalance:
+      type: object
+      required: [id, employee_id, leave_type, remaining_hours, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        employee_id: {type: string}
+        leave_type: {type: string}
+        leave_type_id: {type: string}
+        remaining_hours: {type: number, description: Effective Nexus availability after applying local overlay entries}
+        upstream_remaining_hours: {type: number, description: Unmodified remaining balance from the latest eHRMS snapshot}
+        pending_hours: {type: number, minimum: 0, description: Nexus hours reserved by requests still under review}
+        local_used_hours: {type: number, minimum: 0, description: Approved Nexus-only hours not yet reconciled to eHRMS}
+        granted_hours: {type: number}
+        used_hours: {type: number, description: Used hours reported by eHRMS}
+        period_start: {type: string, format: date}
+        period_end: {type: string, format: date}
+        entitlement_year: {type: integer}
+        carry_in_hours: {type: number}
+        carry_expire: {type: string, format: date}
+        source: {type: string, description: Entitlement snapshot source; leave quotas synchronized from eHRMS use ehrms}
+        external_leave_code: {type: string}
+        external_category_code: {type: string}
+        last_synced_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    LeaveBalancePageDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [items, total, page, page_size, sort]
+          properties:
+            items: {type: array, items: {$ref: "#/components/schemas/LeaveBalance"}}
+            total: {type: integer}
+            page: {type: integer}
+            page_size: {type: integer}
+            sort: {type: string}
+    LeaveRequest:
+      type: object
+      required: [id, employee_id, leave_type, start_at, end_at, hours, status, created_at, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        employee_id: {type: string}
+        leave_type: {type: string}
+        leave_type_id: {type: string}
+        start_at: {type: string, format: date-time}
+        end_at: {type: string, format: date-time}
+        hours: {type: number}
+        reason: {type: string}
+        status: {type: string, enum: [pending_approval, approved, rejected, cancelled]}
+        form_instance_id: {type: string}
+        leave_balance_id: {type: string}
+        reconciliation_status:
+          type: string
+          enum: [not_required, nexus_only, matched, ambiguous, mismatch, manually_confirmed]
+        created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+    LeaveRequestDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data: {$ref: "#/components/schemas/LeaveRequest"}
+    LeaveRequestPageDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          type: object
+          required: [items, total, page, page_size, sort]
+          properties:
+            items: {type: array, items: {$ref: "#/components/schemas/LeaveRequest"}}
+            total: {type: integer}
+            page: {type: integer}
+            page_size: {type: integer}
+            sort: {type: string}
     AttendancePolicyDataResponse:
       type: object
       required: [data]
@@ -6852,18 +6781,6 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/GrantLeaveBalancesResult"
-    LeaveTypeIntegrationDataResponse:
-      type: object
-      required: [data]
-      properties:
-        data:
-          $ref: "#/components/schemas/LeaveTypeIntegrationResponse"
-    LeaveTypeExternalMappingDataResponse:
-      type: object
-      required: [data]
-      properties:
-        data:
-          $ref: "#/components/schemas/LeaveTypeExternalMapping"
     WorkspaceOverviewDataResponse:
       type: object
       required: [data]
@@ -6957,15 +6874,12 @@ components:
           $ref: "#/components/schemas/AttendancePolicy"
     LeaveType:
       type: object
-      required: [id, code, name_zh, name_en, unit, paid_ratio, requires_balance, enabled, display_order]
+      required: [id, code, name_zh, name_en, enabled, display_order]
       properties:
         id: {type: string, example: lt_annual}
         code: {type: string}
         name_zh: {type: string}
         name_en: {type: string}
-        unit: {type: string, enum: [hour, day]}
-        paid_ratio: {type: number, format: double, minimum: 0, maximum: 1}
-        requires_balance: {type: boolean}
         enabled:
           type: boolean
           description: Tenant-specific availability for new leave requests; defaults to true.
@@ -6997,76 +6911,6 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/LeaveTypeCatalog"
-    LeaveTypeExternalMapping:
-      type: object
-      required: [id, source, external_code, leave_type_id, leave_type_code]
-      properties:
-        id: {type: string}
-        tenant_id: {type: string}
-        source: {type: string, example: ehrms}
-        external_code: {type: string}
-        leave_type_id: {type: string}
-        leave_type_code: {type: string}
-        effective_from: {type: string, format: date}
-        effective_to: {type: string, format: date}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
-    LeaveTypeSyncIssue:
-      type: object
-      required: [id, source, external_code, issue_code, message, occurrences, status, first_seen_at, last_seen_at]
-      properties:
-        id: {type: string}
-        source: {type: string}
-        external_code: {type: string}
-        issue_code: {type: string, enum: [unmapped_leave_type]}
-        message: {type: string}
-        occurrences: {type: integer}
-        status: {type: string, enum: [open, resolved]}
-        first_seen_at: {type: string, format: date-time}
-        last_seen_at: {type: string, format: date-time}
-        resolved_at: {type: string, format: date-time}
-    LeaveTypeIntegration:
-      type: object
-      required: [leave_type_id, leave_type_code, leave_type_name, active, mapping_status, mappings, balance_count, request_count, ehrms_balance_count]
-      properties:
-        leave_type_id: {type: string}
-        leave_type_code: {type: string}
-        leave_type_name: {type: string}
-        active: {type: boolean}
-        mapping_status: {type: string, enum: [mapped, catalog_only]}
-        mappings:
-          type: array
-          items:
-            $ref: "#/components/schemas/LeaveTypeExternalMapping"
-        balance_count: {type: integer}
-        request_count: {type: integer}
-        ehrms_balance_count: {type: integer}
-        last_ehrms_sync_at: {type: string, format: date-time}
-    LeaveTypeIntegrationResponse:
-      type: object
-      required: [items, unmapped_issues, mapped, needs_mapping, ehrms_balances]
-      properties:
-        items:
-          type: array
-          items:
-            $ref: "#/components/schemas/LeaveTypeIntegration"
-        unmapped_issues:
-          type: array
-          items:
-            $ref: "#/components/schemas/LeaveTypeSyncIssue"
-        mapped: {type: integer}
-        needs_mapping: {type: integer}
-        ehrms_balances: {type: integer}
-    SaveLeaveTypeExternalMappingRequest:
-      type: object
-      required: [external_code, leave_type_id]
-      properties:
-        id: {type: string}
-        source: {type: string, default: ehrms}
-        external_code: {type: string}
-        leave_type_id: {type: string, description: Stable ID of a system leave type}
-        effective_from: {type: string, format: date}
-        effective_to: {type: string, format: date}
     EvaluateLeaveRequestRequest:
       type: object
       required: [leave_type, start_at, end_at]
@@ -7078,15 +6922,13 @@ components:
         hours: {type: number, exclusiveMinimum: 0, description: Calculated from the published work schedule when omitted}
     LeaveRuleSnapshot:
       type: object
-      required: [leave_type_id, code, name, unit, grant_mode, requires_balance, paid_ratio, policy_version]
+      required: [leave_type_id, code, name, grant_mode, requires_balance, policy_version]
       properties:
         leave_type_id: {type: string}
         code: {type: string}
         name: {type: string}
-        unit: {type: string, enum: [day, hour]}
         grant_mode: {type: string, enum: [ehrms_sync]}
         requires_balance: {type: boolean}
-        paid_ratio: {type: number}
         proof_after_hours: {type: number}
         policy_version: {type: integer}
     LeaveRequestEvaluation:
@@ -7119,10 +6961,8 @@ components:
         quota: {type: string}
         rule: {type: string}
         proof: {type: string}
-        unit: {type: string, enum: [day, hour]}
         grant_mode: {type: string, enum: [annual_grant, event, overtime_credit, unlimited]}
         requires_balance: {type: boolean}
-        paid_ratio: {type: number}
         proof_after_hours: {type: number, nullable: true}
         active: {type: boolean}
         entitlements:
@@ -7493,73 +7333,6 @@ components:
         longitude: {type: number, format: double}
         radius_meters: {type: integer, minimum: 1}
         status: {type: string, enum: [active, inactive]}
-    AttendanceShift:
-      type: object
-      description: Persisted tenant resource. id is globally unique across tenants; tenant_id scopes ownership and authorization.
-      required: [id, tenant_id, name, clock_in_start, clock_in_end, clock_out_start, clock_out_end, status, created_at, updated_at]
-      properties:
-        id: {type: string}
-        tenant_id: {type: string}
-        name: {type: string}
-        clock_in_start: {type: string, pattern: "^\\d{2}:\\d{2}$"}
-        clock_in_end: {type: string, pattern: "^\\d{2}:\\d{2}$"}
-        clock_out_start: {type: string, pattern: "^\\d{2}:\\d{2}$"}
-        clock_out_end: {type: string, pattern: "^\\d{2}:\\d{2}$"}
-        late_grace_minutes: {type: integer, minimum: 0}
-        early_leave_grace_minutes: {type: integer, minimum: 0}
-        status: {type: string, enum: [active, inactive]}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
-    CreateAttendanceShiftRequest:
-      type: object
-      required: [name, clock_in_start, clock_in_end, clock_out_start, clock_out_end]
-      properties:
-        name: {type: string}
-        clock_in_start: {type: string, pattern: "^\\d{2}:\\d{2}$"}
-        clock_in_end: {type: string, pattern: "^\\d{2}:\\d{2}$"}
-        clock_out_start: {type: string, pattern: "^\\d{2}:\\d{2}$"}
-        clock_out_end: {type: string, pattern: "^\\d{2}:\\d{2}$"}
-        late_grace_minutes: {type: integer, minimum: 0}
-        early_leave_grace_minutes: {type: integer, minimum: 0}
-        status: {type: string, enum: [active, inactive]}
-    UpdateAttendanceShiftRequest:
-      type: object
-      required: [id]
-      properties:
-        id: {type: string}
-        name: {type: string}
-        clock_in_start: {type: string, pattern: "^\\d{2}:\\d{2}$"}
-        clock_in_end: {type: string, pattern: "^\\d{2}:\\d{2}$"}
-        clock_out_start: {type: string, pattern: "^\\d{2}:\\d{2}$"}
-        clock_out_end: {type: string, pattern: "^\\d{2}:\\d{2}$"}
-        late_grace_minutes: {type: integer, minimum: 0}
-        early_leave_grace_minutes: {type: integer, minimum: 0}
-        status: {type: string, enum: [active, inactive]}
-    AttendanceShiftAssignment:
-      type: object
-      description: Optional scheduling metadata; GPS clocking does not require it.
-      required: [id, tenant_id, employee_id, shift_id, worksite_id, effective_from, status, created_at, updated_at]
-      properties:
-        id: {type: string}
-        tenant_id: {type: string}
-        employee_id: {type: string}
-        shift_id: {type: string}
-        worksite_id: {type: string}
-        effective_from: {type: string, format: date-time}
-        effective_to: {type: string, format: date-time}
-        status: {type: string, enum: [active, inactive]}
-        created_at: {type: string, format: date-time}
-        updated_at: {type: string, format: date-time}
-    CreateAttendanceShiftAssignmentRequest:
-      type: object
-      required: [employee_id, shift_id, worksite_id, effective_from]
-      properties:
-        employee_id: {type: string}
-        shift_id: {type: string}
-        worksite_id: {type: string}
-        effective_from: {type: string}
-        effective_to: {type: string}
-        status: {type: string, enum: [active, inactive]}
     AttendanceClockStatus:
       type: object
       required: [employee_id, work_date, punch_count, next_action, can_clock_in, can_clock_out, worked_minutes, approved_leave_minutes, required_minutes, day_status]
@@ -7618,8 +7391,6 @@ components:
         id: {type: string}
         tenant_id: {type: string}
         employee_id: {type: string}
-        shift_assignment_id: {type: string, nullable: true}
-        shift_id: {type: string, nullable: true}
         worksite_id: {type: string, nullable: true}
         worksite_name:
           type: string
@@ -8631,7 +8402,6 @@ components:
                 - 40022
                 - 40023
                 - 40024
-                - 40025
                 - 40030
                 - 40050
                 - 40060
@@ -8679,7 +8449,6 @@ components:
                 - attendance_worksite_required
                 - attendance_outside_worksite
                 - attendance_location_accuracy_low
-                - attendance_shift_required
                 - attendance_correction_invalid_state
                 - workflow_invalid_state
                 - workflow_not_assignee

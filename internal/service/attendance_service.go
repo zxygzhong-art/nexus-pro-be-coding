@@ -78,7 +78,7 @@ func (c AttendanceService) ListLeaveBalances(ctx RequestContext) ([]LeaveBalance
 	if !decision.Allowed {
 		return nil, forbiddenAuthz(decision)
 	}
-	items, err := c.store.ListLeaveBalances(goContext(ctx), ctx.TenantID)
+	items, err := c.listEffectiveLeaveBalances(ctx)
 	if err != nil {
 		return nil, err
 	}

@@ -96,20 +96,30 @@ func TestLiteLLMConfig(t *testing.T) {
 
 // TestTemporalConfig 驗證 Temporal workflow engine 組態。
 func TestTemporalConfig(t *testing.T) {
+	t.Setenv("WORKFLOW_START_OUTBOX_ENABLED", "")
+	t.Setenv("OUTBOX_DISPATCH_ENABLED", "")
 	cfg := config.Load()
 	if cfg.TemporalBaseURL != "127.0.0.1:27233" || cfg.TemporalNamespace != "default" || cfg.TemporalTaskQueue != "nexus-workflows" {
 		t.Fatalf("unexpected Temporal defaults: %+v", cfg)
+	}
+	if cfg.WorkflowStartOutboxEnabled || !cfg.OutboxDispatchEnabled {
+		t.Fatalf("unexpected workflow delivery defaults: %+v", cfg)
 	}
 
 	t.Setenv("TEMPORAL_BASE_URL", "temporal:7233")
 	t.Setenv("TEMPORAL_NAMESPACE", "tenant-workflows")
 	t.Setenv("TEMPORAL_TASK_QUEUE", "tenant-queue")
+	t.Setenv("WORKFLOW_START_OUTBOX_ENABLED", "true")
+	t.Setenv("OUTBOX_DISPATCH_ENABLED", "false")
 	cfg, err := config.LoadE()
 	if err != nil {
 		t.Fatal(err)
 	}
 	if cfg.TemporalBaseURL != "temporal:7233" || cfg.TemporalNamespace != "tenant-workflows" || cfg.TemporalTaskQueue != "tenant-queue" {
 		t.Fatalf("unexpected Temporal config: %+v", cfg)
+	}
+	if !cfg.WorkflowStartOutboxEnabled || cfg.OutboxDispatchEnabled {
+		t.Fatalf("unexpected workflow delivery config: %+v", cfg)
 	}
 }
 

@@ -30,8 +30,9 @@ func TestOutboxEventRepositoryQueries(t *testing.T) {
 	suffix := time.Now().UTC().Format("20060102150405.000000000")
 	tenantID := "tenant-outbox-" + suffix
 	otherTenantID := "tenant-outbox-other-" + suffix
+	claimTenantID := "tenant-outbox-claim-" + suffix
 	base := time.Date(2026, 7, 10, 8, 0, 0, 0, time.UTC)
-	for _, id := range []string{tenantID, otherTenantID} {
+	for _, id := range []string{tenantID, otherTenantID, claimTenantID} {
 		if err := store.UpsertTenant(ctx, domain.Tenant{ID: id, Name: "Outbox Tenant " + id, CreatedAt: base}); err != nil {
 			t.Fatal(err)
 		}
@@ -136,6 +137,61 @@ func TestOutboxEventRepositoryQueries(t *testing.T) {
 		deleted, err = store.DeleteSucceededOutboxEventsBefore(ctx, otherTenantID, base.Add(-7*24*time.Hour))
 		if err != nil || deleted != 1 {
 			t.Fatalf("expected other tenant cleanup to delete its own event, deleted=%d err=%v", deleted, err)
+		}
+	})
+
+	t.Run("idempotency lease reclaim and token fencing", func(t *testing.T) {
+		maxAttempts := 3
+		first := domain.OutboxEvent{
+			ID:             "obe_claim_" + suffix,
+			TenantID:       claimTenantID,
+			EventType:      "test.outbox.claim",
+			IdempotencyKey: "claim-once",
+			Status:         domain.OutboxStatusPending,
+			MaxAttempts:    &maxAttempts,
+			CreatedAt:      base,
+		}
+		if err := store.AppendOutboxEvent(tenantctx.WithTenantID(ctx, claimTenantID), first); err != nil {
+			t.Fatal(err)
+		}
+		duplicate := first
+		duplicate.ID = "obe_claim_duplicate_" + suffix
+		if err := store.AppendOutboxEvent(tenantctx.WithTenantID(ctx, claimTenantID), duplicate); err != nil {
+			t.Fatal(err)
+		}
+		listed, err := store.ListOutboxEvents(ctx, claimTenantID)
+		if err != nil || len(listed) != 1 || listed[0].ID != first.ID {
+			t.Fatalf("idempotent append should keep original row, events=%+v err=%v", listed, err)
+		}
+
+		claimed, err := store.ClaimOutboxEvents(ctx, claimTenantID, 1, base, base.Add(5*time.Minute), "worker-a", "claim-a")
+		if err != nil || len(claimed) != 1 || claimed[0].AttemptCount != 1 || claimed[0].ClaimToken == "" {
+			t.Fatalf("first claim: events=%+v err=%v", claimed, err)
+		}
+		if premature, err := store.ClaimOutboxEvents(ctx, claimTenantID, 1, base.Add(4*time.Minute), base.Add(9*time.Minute), "worker-b", "claim-b"); err != nil || len(premature) != 0 {
+			t.Fatalf("lease must remain exclusive before expiry, events=%+v err=%v", premature, err)
+		}
+		reclaimed, err := store.ClaimOutboxEvents(ctx, claimTenantID, 1, base.Add(5*time.Minute), base.Add(10*time.Minute), "worker-b", "claim-b")
+		if err != nil || len(reclaimed) != 1 || reclaimed[0].AttemptCount != 2 || reclaimed[0].ClaimToken == claimed[0].ClaimToken {
+			t.Fatalf("expired lease reclaim: events=%+v err=%v", reclaimed, err)
+		}
+
+		stale := claimed[0]
+		stale.Status = domain.OutboxStatusSucceeded
+		stale.UpdatedAt = base.Add(5 * time.Minute)
+		if updated, err := store.FinalizeOutboxEvent(ctx, stale); err != nil || updated {
+			t.Fatalf("stale claim must be fenced, updated=%v err=%v", updated, err)
+		}
+		current := reclaimed[0]
+		current.Status = domain.OutboxStatusSucceeded
+		current.UpdatedAt = base.Add(5 * time.Minute)
+		current.ProcessedAt = &current.UpdatedAt
+		if updated, err := store.FinalizeOutboxEvent(ctx, current); err != nil || !updated {
+			t.Fatalf("current claim should finalize, updated=%v err=%v", updated, err)
+		}
+		stored, ok, err := store.GetOutboxEventByID(ctx, claimTenantID, first.ID)
+		if err != nil || !ok || stored.Status != domain.OutboxStatusSucceeded || stored.ClaimToken != "" || stored.ClaimExpiresAt != nil {
+			t.Fatalf("finalized row: event=%+v ok=%v err=%v", stored, ok, err)
 		}
 	})
 }

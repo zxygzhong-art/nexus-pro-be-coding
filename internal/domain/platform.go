@@ -273,6 +273,7 @@ type PlatformFormDesignForm struct {
 	Enabled        bool                       `json:"enabled"`
 	AddedThisMonth bool                       `json:"added_this_month"`
 	UpdatedAt      string                     `json:"updated_at"`
+	UpdatedBy      string                     `json:"updated_by,omitempty"`
 	FormKind       string                     `json:"form_kind,omitempty"`
 	Fields         []PlatformFormBuilderField `json:"fields,omitempty"`
 	Stages         []PlatformFormBuilderStage `json:"stages,omitempty"`

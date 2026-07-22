@@ -81,7 +81,8 @@ func TestOutboxDispatcherRetriesFailedOpenFGATuple(t *testing.T) {
 		CreatedAt: now,
 	})
 	writer := &recordingTupleWriter{err: errors.New("openfga unavailable")}
-	dispatcher := jobs.NewOutboxDispatcher(store, writer, nil)
+	clock := now
+	dispatcher := jobs.NewOutboxDispatcher(store, writer, nil).WithClock(func() time.Time { return clock })
 
 	if _, err := dispatcher.ProcessTenant(ctx, "tenant-1", jobs.OutboxDispatchOptions{BatchSize: 10, MaxRetries: 2}); err != nil {
 		t.Fatal(err)
@@ -90,11 +91,15 @@ func TestOutboxDispatcherRetriesFailedOpenFGATuple(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if events[0].Status != "failed" || events[0].RetryCount != 1 || events[0].LastError == "" {
+	if events[0].Status != "failed" || events[0].RetryCount != 1 || events[0].AttemptCount != 1 || events[0].LastError == "" || !events[0].NextAttemptAt.Equal(now.Add(30*time.Second)) {
 		t.Fatalf("expected failed event with retry metadata, got %+v", events[0])
 	}
 
 	writer.err = nil
+	if processed, err := dispatcher.ProcessTenant(ctx, "tenant-1", jobs.OutboxDispatchOptions{BatchSize: 10, MaxRetries: 2}); err != nil || processed != 0 {
+		t.Fatalf("expected backoff to suppress immediate retry, processed=%d err=%v", processed, err)
+	}
+	clock = clock.Add(30 * time.Second)
 	if _, err := dispatcher.ProcessTenant(ctx, "tenant-1", jobs.OutboxDispatchOptions{BatchSize: 10, MaxRetries: 2}); err != nil {
 		t.Fatal(err)
 	}
@@ -269,6 +274,111 @@ func TestOutboxDispatcherClaimIsExclusiveAcrossWorkers(t *testing.T) {
 	}
 }
 
+// TestOutboxLeaseReclaimFencesStaleWorker verifies that an expired claim can be
+// recovered without allowing the former worker to overwrite the new result.
+func TestOutboxLeaseReclaimFencesStaleWorker(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 18, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.AppendOutboxEvent(ctx, domain.OutboxEvent{
+		ID:        "outbox-lease-1",
+		TenantID:  "tenant-1",
+		EventType: string(domain.EventOpenFGARelationshipWrite),
+		Status:    domain.OutboxStatusPending,
+		CreatedAt: now,
+	})
+
+	first, err := store.ClaimOutboxEvents(ctx, "tenant-1", 1, now, now.Add(5*time.Minute), "worker-a", "claim-a")
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first claim: events=%+v err=%v", first, err)
+	}
+	beforeExpiry, err := store.ClaimOutboxEvents(ctx, "tenant-1", 1, now.Add(4*time.Minute), now.Add(9*time.Minute), "worker-b", "claim-b")
+	if err != nil || len(beforeExpiry) != 0 {
+		t.Fatalf("claim before lease expiry: events=%+v err=%v", beforeExpiry, err)
+	}
+	second, err := store.ClaimOutboxEvents(ctx, "tenant-1", 1, now.Add(5*time.Minute), now.Add(10*time.Minute), "worker-b", "claim-b")
+	if err != nil || len(second) != 1 || second[0].AttemptCount != 2 || second[0].ClaimToken == first[0].ClaimToken {
+		t.Fatalf("reclaimed event: events=%+v err=%v", second, err)
+	}
+
+	stale := first[0]
+	stale.Status = domain.OutboxStatusSucceeded
+	stale.UpdatedAt = now.Add(5 * time.Minute)
+	if updated, err := store.FinalizeOutboxEvent(ctx, stale); err != nil || updated {
+		t.Fatalf("stale token must be fenced, updated=%v err=%v", updated, err)
+	}
+	fresh := second[0]
+	fresh.Status = domain.OutboxStatusSucceeded
+	fresh.UpdatedAt = now.Add(5 * time.Minute)
+	if updated, err := store.FinalizeOutboxEvent(ctx, fresh); err != nil || !updated {
+		t.Fatalf("current token should finalize, updated=%v err=%v", updated, err)
+	}
+}
+
+// TestOutboxDispatcherDeadLettersAtFiniteAttemptLimit verifies per-event retry
+// limits and manual diagnosis metadata.
+func TestOutboxDispatcherDeadLettersAtFiniteAttemptLimit(t *testing.T) {
+	ctx := context.Background()
+	clock := time.Date(2026, 7, 18, 8, 0, 0, 0, time.UTC)
+	maxAttempts := 2
+	store := memory.NewStore()
+	_ = store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-1", Name: "Tenant", CreatedAt: clock})
+	_ = store.AppendOutboxEvent(ctx, domain.OutboxEvent{
+		ID:          "outbox-dead-1",
+		TenantID:    "tenant-1",
+		EventType:   string(domain.EventOpenFGARelationshipWrite),
+		MaxAttempts: &maxAttempts,
+		Payload: map[string]any{
+			"object_type": "hr.employee", "object_id": "emp-1", "relation": "owner",
+			"subject_type": "account", "subject_id": "acct-1",
+		},
+		Status:    domain.OutboxStatusPending,
+		CreatedAt: clock,
+	})
+	dispatcher := jobs.NewOutboxDispatcher(store, &recordingTupleWriter{err: errors.New("openfga unavailable")}, nil).
+		WithClock(func() time.Time { return clock })
+
+	if _, err := dispatcher.ProcessTenant(ctx, "tenant-1", jobs.OutboxDispatchOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	clock = clock.Add(30 * time.Second)
+	if _, err := dispatcher.ProcessTenant(ctx, "tenant-1", jobs.OutboxDispatchOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	events, err := store.ListOutboxEvents(ctx, "tenant-1")
+	if err != nil || len(events) != 1 {
+		t.Fatalf("events=%+v err=%v", events, err)
+	}
+	if events[0].Status != domain.OutboxStatusDeadLettered || events[0].AttemptCount != 2 || events[0].RetryCount != 2 || events[0].DeadLetteredAt == nil {
+		t.Fatalf("expected second failure to dead-letter event, got %+v", events[0])
+	}
+}
+
+// TestWorkflowStartHandlerRunsBeforeNATSPublisher keeps the infrastructure
+// command on its local convergence path even when generic publishing is enabled.
+func TestWorkflowStartHandlerRunsBeforeNATSPublisher(t *testing.T) {
+	ctx := context.Background()
+	now := time.Date(2026, 7, 18, 8, 0, 0, 0, time.UTC)
+	store := memory.NewStore()
+	_ = store.UpsertTenant(ctx, domain.Tenant{ID: "tenant-1", Name: "Tenant", CreatedAt: now})
+	_ = store.AppendOutboxEvent(ctx, domain.OutboxEvent{
+		ID: "outbox-workflow-1", TenantID: "tenant-1",
+		EventType: "workflow.form_approval.start_requested", Status: domain.OutboxStatusPending, CreatedAt: now,
+	})
+	handler := &recordingWorkflowStartHandler{}
+	publisher := &recordingEventPublisher{}
+	dispatcher := jobs.NewOutboxDispatcher(store, nil, nil).
+		WithWorkflowStartHandler(handler).
+		WithEventPublisher(publisher)
+
+	if _, err := dispatcher.ProcessTenant(ctx, "tenant-1", jobs.OutboxDispatchOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if len(handler.events) != 1 || len(publisher.events) != 0 {
+		t.Fatalf("workflow handler/publisher calls = %d/%d, want 1/0", len(handler.events), len(publisher.events))
+	}
+}
+
 // TestOutboxDispatcherContinuesAfterTenantFailure 驗證單一租戶處理失敗不阻塞其他租戶。
 func TestOutboxDispatcherContinuesAfterTenantFailure(t *testing.T) {
 	ctx := context.Background()
@@ -319,16 +429,25 @@ type failingClaimStore struct {
 }
 
 // ClaimOutboxEvents 驗證指定租戶的 claim 失敗。
-func (s *failingClaimStore) ClaimOutboxEvents(ctx context.Context, tenantID string, limit, maxRetries int) ([]domain.OutboxEvent, error) {
+func (s *failingClaimStore) ClaimOutboxEvents(ctx context.Context, tenantID string, limit int, claimedAt, leaseUntil time.Time, claimOwner, claimToken string) ([]domain.OutboxEvent, error) {
 	if tenantID == s.failTenant {
 		return nil, errors.New("claim query failed")
 	}
-	return s.Store.ClaimOutboxEvents(ctx, tenantID, limit, maxRetries)
+	return s.Store.ClaimOutboxEvents(ctx, tenantID, limit, claimedAt, leaseUntil, claimOwner, claimToken)
 }
 
 type recordingTupleWriter struct {
 	err     error
 	changes []domain.AuthzRelationshipTupleChange
+}
+
+type recordingWorkflowStartHandler struct {
+	events []domain.OutboxEvent
+}
+
+func (h *recordingWorkflowStartHandler) HandleWorkflowStartEvent(_ context.Context, event domain.OutboxEvent) error {
+	h.events = append(h.events, event)
+	return nil
 }
 
 // WriteRelationshipTuples 驗證關係 tuple。

@@ -122,12 +122,12 @@ func (c AttendanceService) EvaluateLeaveRequestRules(ctx RequestContext, employe
 		evaluation.Message = "The requested leave type does not require a balance."
 		return evaluation, nil
 	}
-	balances, err := c.store.ListLeaveBalances(goContext(ctx), ctx.TenantID)
+	balances, err := c.listEffectiveLeaveBalances(ctx)
 	if err != nil {
 		return LeaveRequestEvaluation{}, err
 	}
 	for _, balance := range balances {
-		if balance.EmployeeID != employeeID || !strings.EqualFold(strings.TrimSpace(balance.LeaveType), leaveTypeCode) || !leaveBalanceCoversDate(balance, startAt) {
+		if balance.EmployeeID != employeeID || balance.LeaveTypeID != evaluation.LeaveTypeID || !leaveBalanceCoversDate(balance, startAt) {
 			continue
 		}
 		evaluation.BalanceInitialized = true
@@ -173,8 +173,8 @@ func leaveBalanceCoversDate(balance LeaveBalance, at time.Time) bool {
 // leaveRuleSnapshotMap converts the typed rule into a JSON-safe persistence snapshot.
 func leaveRuleSnapshotMap(rule domain.LeaveRuleSnapshot) map[string]any {
 	out := map[string]any{
-		"leave_type_id": rule.LeaveTypeID, "code": rule.Code, "name": rule.Name, "unit": rule.Unit,
-		"grant_mode": rule.GrantMode, "requires_balance": rule.RequiresBalance, "paid_ratio": rule.PaidRatio,
+		"leave_type_id": rule.LeaveTypeID, "code": rule.Code, "name": rule.Name,
+		"grant_mode": rule.GrantMode, "requires_balance": rule.RequiresBalance,
 		"policy_version": rule.PolicyVersion,
 	}
 	if rule.ProofAfterHours != nil {
@@ -207,22 +207,24 @@ func leaveEvaluationError(evaluation LeaveRequestEvaluation) error {
 	}
 }
 
-// resolveExternalLeaveTypeCode accepts explicit mappings and known policy aliases, and records unknown upstream codes.
-func (c AttendanceService) resolveExternalLeaveTypeCode(ctx RequestContext, source, externalCode string, asOf time.Time) (string, string, bool, error) {
-	mapping, found, err := c.store.GetLeaveTypeExternalMapping(goContext(ctx), ctx.TenantID, source, externalCode, asOf)
-	if err != nil {
-		return "", "", false, err
-	}
-	if found {
-		if code := strings.TrimSpace(mapping.LeaveTypeCode); code != "" {
-			return normalizeLeaveTypeCode(code), mapping.LeaveTypeID, true, nil
-		}
-		if code := strings.TrimPrefix(strings.TrimSpace(mapping.LeaveTypeID), "lt_"); code != "" {
-			return normalizeLeaveTypeCode(code), mapping.LeaveTypeID, true, nil
-		}
-	}
+// resolveExternalLeaveTypeCode resolves a stable upstream code first, then falls
+// back to the tenant catalog identity for feeds that still send canonical codes.
+func (c AttendanceService) resolveExternalLeaveTypeCode(ctx RequestContext, source, externalCode, externalCategoryCode string, asOf time.Time) (string, string, bool, error) {
 	if strings.TrimSpace(externalCode) == "" {
 		return "", "", false, nil
+	}
+	if ref, ok, err := c.store.GetLeaveTypeExternalRef(goContext(ctx), ctx.TenantID, source, externalCode, externalCategoryCode, asOf); err != nil {
+		return "", "", false, err
+	} else if ok {
+		leaveTypes, loadErr := c.loadLeaveTypes(ctx)
+		if loadErr != nil {
+			return "", "", false, loadErr
+		}
+		for _, item := range leaveTypes {
+			if item.ID == ref.LeaveTypeID && item.Enabled {
+				return item.Code, item.ID, true, nil
+			}
+		}
 	}
 	leaveTypes, err := c.loadLeaveTypes(ctx)
 	if err != nil {
@@ -231,15 +233,47 @@ func (c AttendanceService) resolveExternalLeaveTypeCode(ctx RequestContext, sour
 	if leaveType, ok := findLeaveType(leaveTypes, externalCode, true); ok {
 		return leaveType.Code, leaveType.ID, true, nil
 	}
-	now := c.Now()
-	issue := domain.LeaveTypeSyncIssue{
-		ID:       ehrmsStableID("ltsi", ctx.TenantID, source, strings.ToLower(strings.TrimSpace(externalCode)), leaveSyncIssueUnmapped),
-		TenantID: ctx.TenantID, Source: strings.ToLower(strings.TrimSpace(source)), ExternalCode: strings.TrimSpace(externalCode),
-		IssueCode: leaveSyncIssueUnmapped, Message: "upstream leave code requires HR mapping",
-		Occurrences: 1, Status: "open", FirstSeenAt: now, LastSeenAt: now,
+	return "", "", false, nil
+}
+
+func (c AttendanceService) resolveEHRMSLeaveType(ctx RequestContext, externalCode, externalCategoryCode, displayName string, asOf time.Time) (string, string, bool, error) {
+	if strings.TrimSpace(externalCode) != "" {
+		if code, id, found, err := c.resolveExternalLeaveTypeCode(ctx, ehrmsAttendanceSource, externalCode, externalCategoryCode, asOf); err != nil || found {
+			return code, id, found, err
+		}
 	}
-	if err := c.store.UpsertLeaveTypeSyncIssue(goContext(ctx), issue); err != nil {
+	items, err := c.loadLeaveTypes(ctx)
+	if err != nil {
 		return "", "", false, err
 	}
-	return "", "", false, nil
+	var matched LeaveType
+	for _, candidate := range []string{displayName, externalCode} {
+		wanted := normalizeLeaveTypeCode(candidate)
+		for _, item := range items {
+			if !item.Enabled {
+				continue
+			}
+			if normalizeLeaveTypeCode(item.Code) == wanted || normalizeLeaveTypeCode(item.NameZH) == wanted || normalizeLeaveTypeCode(item.NameEN) == wanted {
+				matched = item
+				break
+			}
+		}
+		if matched.ID != "" {
+			break
+		}
+	}
+	if matched.ID == "" {
+		return "", "", false, nil
+	}
+	if strings.TrimSpace(externalCode) != "" {
+		now := c.Now()
+		if err := c.store.UpsertLeaveTypeExternalRef(goContext(ctx), domain.LeaveTypeExternalRef{
+			ID: utils.NewID("lter"), TenantID: ctx.TenantID, SourceSystem: ehrmsAttendanceSource,
+			ExternalCode: strings.TrimSpace(externalCode), ExternalCategoryCode: strings.TrimSpace(externalCategoryCode),
+			LeaveTypeID: matched.ID, CreatedAt: now, UpdatedAt: now,
+		}); err != nil {
+			return "", "", false, err
+		}
+	}
+	return matched.Code, matched.ID, true, nil
 }

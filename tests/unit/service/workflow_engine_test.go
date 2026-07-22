@@ -409,9 +409,9 @@ func TestDirectLeaveStartFailureRestoresBalanceBeforeRetry(t *testing.T) {
 	if err != nil || !ok || failedRequest.Status != "cancelled" {
 		t.Fatalf("expected cancelled failed leave projection, ok=%v err=%v request=%+v", ok, err, failedRequest)
 	}
-	balance, ok, err := store.GetLeaveBalance(t.Context(), "tenant-1", "lb-direct-retry")
-	if err != nil || !ok || balance.RemainingHours != 16 || balance.UsedHours != 0 {
-		t.Fatalf("expected failed start to restore balance, ok=%v err=%v balance=%+v", ok, err, balance)
+	balance := effectiveLeaveBalanceForTest(t, store, "lb-direct-retry")
+	if balance.RemainingHours != 16 {
+		t.Fatalf("expected failed start to release its overlay reservation, balance=%+v", balance)
 	}
 
 	fakeTemporal.failStart = false
@@ -422,9 +422,9 @@ func TestDirectLeaveStartFailureRestoresBalanceBeforeRetry(t *testing.T) {
 	if retried.Status != "pending_approval" || retried.ID == failedRequest.ID {
 		t.Fatalf("expected independent pending retry, failed=%+v retried=%+v", failedRequest, retried)
 	}
-	balance, ok, err = store.GetLeaveBalance(t.Context(), "tenant-1", "lb-direct-retry")
-	if err != nil || !ok || balance.RemainingHours != 16-retried.Hours || balance.UsedHours != retried.Hours {
-		t.Fatalf("expected exactly one active reservation after retry, ok=%v err=%v balance=%+v retry=%+v", ok, err, balance, retried)
+	balance = effectiveLeaveBalanceForTest(t, store, "lb-direct-retry")
+	if balance.RemainingHours != 16-retried.Hours || balance.PendingHours != retried.Hours {
+		t.Fatalf("expected exactly one active overlay reservation after retry, balance=%+v retry=%+v", balance, retried)
 	}
 	failedRequest, ok, err = store.GetLeaveRequestByFormInstanceID(t.Context(), "tenant-1", failedForm.ID)
 	if err != nil || !ok || failedRequest.Status != "cancelled" {
@@ -998,9 +998,9 @@ func TestSubmitFormMarksWorkflowStartFailedWhenTemporalUnavailable(t *testing.T)
 	if requestErr != nil || !ok || failedRequest.Status != "cancelled" {
 		t.Fatalf("expected cancelled leave projection, got ok=%v err=%v request=%+v", ok, requestErr, failedRequest)
 	}
-	balance, ok, balanceErr := store.GetLeaveBalance(t.Context(), "tenant-1", "lb-standard-retry")
-	if balanceErr != nil || !ok || balance.RemainingHours != 16 || balance.UsedHours != 0 {
-		t.Fatalf("expected failed start to restore leave balance, got ok=%v err=%v balance=%+v", ok, balanceErr, balance)
+	balance := effectiveLeaveBalanceForTest(t, store, "lb-standard-retry")
+	if balance.RemainingHours != 16 {
+		t.Fatalf("expected failed start to release its overlay reservation, balance=%+v", balance)
 	}
 
 	fakeTemporal.failStart = false
@@ -1012,9 +1012,9 @@ func TestSubmitFormMarksWorkflowStartFailedWhenTemporalUnavailable(t *testing.T)
 	if requestErr != nil || !ok || retriedRequest.Status != "pending_approval" || retriedRequest.ID == failedRequest.ID {
 		t.Fatalf("expected independent pending retry, got ok=%v err=%v failed=%+v retried=%+v", ok, requestErr, failedRequest, retriedRequest)
 	}
-	balance, ok, balanceErr = store.GetLeaveBalance(t.Context(), "tenant-1", "lb-standard-retry")
-	if balanceErr != nil || !ok || balance.RemainingHours != 16-retriedRequest.Hours || balance.UsedHours != retriedRequest.Hours {
-		t.Fatalf("expected one active reservation after retry, got ok=%v err=%v balance=%+v", ok, balanceErr, balance)
+	balance = effectiveLeaveBalanceForTest(t, store, "lb-standard-retry")
+	if balance.RemainingHours != 16-retriedRequest.Hours || balance.PendingHours != retriedRequest.Hours {
+		t.Fatalf("expected one active overlay reservation after retry, balance=%+v", balance)
 	}
 	failedRequest, ok, requestErr = store.GetLeaveRequestByFormInstanceID(t.Context(), "tenant-1", instances[0].ID)
 	if requestErr != nil || !ok || failedRequest.Status != "cancelled" {

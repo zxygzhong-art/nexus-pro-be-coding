@@ -79,22 +79,20 @@ WHERE employee.tenant_id = context.tenant_id
 
 -- Initialize the annual-grant leave types from the built-in fallback policy without erasing used hours.
 INSERT INTO leave_balances (
-    id, tenant_id, employee_id, leave_type, remaining_hours,
-    period_start, period_end, granted_hours, used_hours, source, policy_version, prorate_ratio, updated_at
+    id, tenant_id, employee_id, leave_type_id, remaining_hours,
+    period_start, period_end, granted_hours, used_hours, source, updated_at
 )
 SELECT
     'lb-' || context.employee_id || '-' || entitlement.leave_type,
     context.tenant_id,
     context.employee_id,
-    entitlement.leave_type,
+    'lt_' || entitlement.leave_type,
     entitlement.granted_hours,
     make_date(EXTRACT(YEAR FROM current_date)::int, 1, 1)::text,
     make_date(EXTRACT(YEAR FROM current_date)::int, 12, 31)::text,
     entitlement.granted_hours,
     0,
     'demo_policy_grant',
-    COALESCE((SELECT policy.version FROM attendance_policies policy WHERE policy.tenant_id = context.tenant_id), 1),
-    1,
     context.patched_at
 FROM demo_agent_flow_context context
 CROSS JOIN (VALUES
@@ -105,14 +103,12 @@ CROSS JOIN (VALUES
     ('sick_half', 240::double precision),
     ('annual', 112::double precision)
 ) AS entitlement(leave_type, granted_hours)
-ON CONFLICT (tenant_id, employee_id, leave_type) DO UPDATE SET
+ON CONFLICT (tenant_id, employee_id, leave_type_id, period_start, period_end) DO UPDATE SET
     remaining_hours = GREATEST(EXCLUDED.granted_hours - leave_balances.used_hours, 0),
     period_start = EXCLUDED.period_start,
     period_end = EXCLUDED.period_end,
     granted_hours = EXCLUDED.granted_hours,
     source = EXCLUDED.source,
-    policy_version = EXCLUDED.policy_version,
-    prorate_ratio = EXCLUDED.prorate_ratio,
     updated_at = EXCLUDED.updated_at;
 
 CREATE TEMP TABLE updated_demo_assistant ON COMMIT DROP AS

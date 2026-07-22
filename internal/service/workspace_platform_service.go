@@ -131,7 +131,7 @@ func (c WorkspaceService) CreateWorkspaceFormDesign(ctx RequestContext, input Sa
 			Key:            key,
 			Name:           strings.TrimSpace(input.Name),
 			Description:    strings.TrimSpace(input.Desc),
-			Schema:         workspaceFormDesignSchema(nil, input, enabled, false, now),
+			Schema:         workspaceFormDesignSchema(nil, input, enabled, false, ctx.AccountID, now),
 			Status:         workspaceFormTemplateStatus(enabled, false),
 			CurrentVersion: currentVersion,
 			CreatedAt:      createdAt,
@@ -225,7 +225,7 @@ func (c WorkspaceService) UpdateWorkspaceFormDesign(ctx RequestContext, id strin
 		now := workspace.Now()
 		template.Name = strings.TrimSpace(next.Name)
 		template.Description = strings.TrimSpace(next.Desc)
-		template.Schema = workspaceFormDesignSchema(template.Schema, next, enabled, false, now)
+		template.Schema = workspaceFormDesignSchema(template.Schema, next, enabled, false, ctx.AccountID, now)
 		template.Status = workspaceFormTemplateStatus(enabled, false)
 		template.CurrentVersion = max(template.CurrentVersion, 1) + 1
 		template.UpdatedAt = now
@@ -273,7 +273,7 @@ func (c WorkspaceService) DeleteWorkspaceFormDesign(ctx RequestContext, id strin
 		disabled := false
 		next.Enabled = &disabled
 		now := workspace.Now()
-		template.Schema = workspaceFormDesignSchema(template.Schema, next, false, true, now)
+		template.Schema = workspaceFormDesignSchema(template.Schema, next, false, true, ctx.AccountID, now)
 		template.Status = workspaceFormTemplateStatus(false, true)
 		template.CurrentVersion = max(template.CurrentVersion, 1) + 1
 		template.UpdatedAt = now
@@ -300,11 +300,24 @@ func (c WorkspaceService) formDesign(ctx RequestContext) (PlatformFormDesign, er
 	if err != nil {
 		return PlatformFormDesign{}, err
 	}
+	accounts, err := c.store.ListAccounts(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return PlatformFormDesign{}, err
+	}
+	accountNames := make(map[string]string, len(accounts))
+	for _, account := range accounts {
+		accountNames[account.ID] = firstNonEmpty(strings.TrimSpace(account.DisplayName), account.ID)
+	}
 	forms := make([]PlatformFormDesignForm, 0, len(templates))
 	hasTemplates := len(templates) > 0
 	for _, template := range templates {
 		if platformTemplateDeleted(template.Schema) {
 			continue
+		}
+		updatedByAccountID := platformTemplateUpdatedByAccountID(template.Schema)
+		updatedBy := "系統"
+		if updatedByAccountID != "" {
+			updatedBy = firstNonEmpty(accountNames[updatedByAccountID], updatedByAccountID)
 		}
 		forms = append(forms, PlatformFormDesignForm{
 			ID:             template.Key,
@@ -316,6 +329,7 @@ func (c WorkspaceService) formDesign(ctx RequestContext) (PlatformFormDesign, er
 			Enabled:        platformTemplateEnabled(template.Schema),
 			AddedThisMonth: sameYearMonth(template.CreatedAt, c.Now()),
 			UpdatedAt:      platformTemplateUpdatedAt(template.Schema, template.CreatedAt),
+			UpdatedBy:      updatedBy,
 			FormKind:       firstNonEmpty(platformTemplateFormKind(template.Schema), defaultFormKindForTemplateKey(template.Key)),
 			Fields:         platformTemplateFields(template.Key, template.Schema),
 			Stages:         platformTemplateStages(template.Schema),

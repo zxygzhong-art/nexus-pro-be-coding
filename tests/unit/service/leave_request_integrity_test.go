@@ -36,12 +36,9 @@ func TestCreateLeaveRequestUsesPolicyHours(t *testing.T) {
 	if created.EvaluationSnapshot["hours"] != float64(7) {
 		t.Fatalf("expected evaluation snapshot to persist policy hours, got %+v", created.EvaluationSnapshot)
 	}
-	balance, ok, err := store.GetLeaveBalance(context.Background(), "tenant-1", "lb-2026")
-	if err != nil || !ok {
-		t.Fatalf("leave balance lookup failed ok=%v err=%v", ok, err)
-	}
-	if balance.RemainingHours != 9 || balance.UsedHours != 7 {
-		t.Fatalf("expected seven reserved hours, got %+v", balance)
+	balance := effectiveLeaveBalanceForTest(t, store, "lb-2026")
+	if balance.RemainingHours != 9 || balance.PendingHours != 7 {
+		t.Fatalf("expected seven overlay-reserved hours, got %+v", balance)
 	}
 	instance, ok, err := store.GetFormInstance(context.Background(), "tenant-1", created.FormInstanceID)
 	if err != nil || !ok {
@@ -279,11 +276,35 @@ func createLegacyLeaveRequestForReview(t *testing.T, store *memory.Store, svc *s
 
 func assertLeaveBalanceHours(t *testing.T, store *memory.Store, balanceID string, remaining, used float64) {
 	t.Helper()
+	balance := effectiveLeaveBalanceForTest(t, store, balanceID)
+	overlayUsed := balance.UpstreamRemainingHours - balance.RemainingHours
+	if balance.RemainingHours != remaining || overlayUsed != used {
+		t.Fatalf("unexpected effective leave balance %s: %+v", balanceID, balance)
+	}
+}
+
+func effectiveLeaveBalanceForTest(t *testing.T, store *memory.Store, balanceID string) domain.LeaveBalance {
+	t.Helper()
 	balance, ok, err := store.GetLeaveBalance(context.Background(), "tenant-1", balanceID)
 	if err != nil || !ok {
 		t.Fatalf("leave balance %s lookup failed ok=%v err=%v", balanceID, ok, err)
 	}
-	if balance.RemainingHours != remaining || balance.UsedHours != used {
-		t.Fatalf("unexpected leave balance %s: %+v", balanceID, balance)
+	balance.UpstreamRemainingHours = balance.RemainingHours
+	entries, err := store.ListLeaveBalanceEntries(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
 	}
+	for _, entry := range entries {
+		if entry.BalanceID != balanceID {
+			continue
+		}
+		balance.RemainingHours += float64(entry.AmountMinutes) / 60
+		switch entry.EntryType {
+		case "reserve", "release":
+			balance.PendingHours -= float64(entry.AmountMinutes) / 60
+		case "local_consume", "local_refund", "external_reconcile":
+			balance.LocalUsedHours -= float64(entry.AmountMinutes) / 60
+		}
+	}
+	return balance
 }

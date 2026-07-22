@@ -312,7 +312,14 @@ func copyRowErrors(src []RowError) []RowError {
 }
 
 // copyLeaveBalance 複製請假 balance。
-func copyLeaveBalance(v LeaveBalance) LeaveBalance { return v }
+func copyLeaveBalance(v LeaveBalance) LeaveBalance {
+	v.RawPayload = utils.CopyStringMap(v.RawPayload)
+	if v.LastSyncedAt != nil {
+		t := *v.LastSyncedAt
+		v.LastSyncedAt = &t
+	}
+	return v
+}
 
 // copyAttendancePolicy 複製考勤政策。
 func copyAttendancePolicy(v AttendancePolicy) AttendancePolicy {
@@ -324,28 +331,6 @@ func copyAttendancePolicy(v AttendancePolicy) AttendancePolicy {
 		t := *v.EffectiveFrom
 		v.EffectiveFrom = &t
 	}
-	if len(v.LeaveTypes) > 0 {
-		next := make([]AttendanceLeaveType, len(v.LeaveTypes))
-		for i, item := range v.LeaveTypes {
-			next[i] = item
-			if item.ProofAfterHours != nil {
-				h := *item.ProofAfterHours
-				next[i].ProofAfterHours = &h
-			}
-			if len(item.Entitlements) > 0 {
-				ents := make([]domain.LeaveEntitlementRule, len(item.Entitlements))
-				copy(ents, item.Entitlements)
-				for j := range ents {
-					if item.Entitlements[j].TenureMaxYears != nil {
-						max := *item.Entitlements[j].TenureMaxYears
-						ents[j].TenureMaxYears = &max
-					}
-				}
-				next[i].Entitlements = ents
-			}
-		}
-		v.LeaveTypes = next
-	}
 	return v
 }
 
@@ -356,20 +341,22 @@ func copyLeaveRequest(v LeaveRequest) LeaveRequest {
 	return v
 }
 
-// copyAttendanceWorksite 複製考勤工作地點。
-func copyAttendanceWorksite(v AttendanceWorksite) AttendanceWorksite { return v }
+func copyLeaveBalanceEntry(v LeaveBalanceEntry) LeaveBalanceEntry {
+	v.Metadata = utils.CopyStringMap(v.Metadata)
+	return v
+}
 
-// copyAttendanceShift 複製考勤班別。
-func copyAttendanceShift(v AttendanceShift) AttendanceShift { return v }
-
-// copyAttendanceShiftAssignment 複製員工班別指派。
-func copyAttendanceShiftAssignment(v AttendanceShiftAssignment) AttendanceShiftAssignment {
-	if v.EffectiveTo != nil {
-		t := *v.EffectiveTo
-		v.EffectiveTo = &t
+func copyExternalLeaveRecord(v ExternalLeaveRecord) ExternalLeaveRecord {
+	v.RawPayload = utils.CopyStringMap(v.RawPayload)
+	if v.DeletedAt != nil {
+		t := *v.DeletedAt
+		v.DeletedAt = &t
 	}
 	return v
 }
+
+// copyAttendanceWorksite 複製考勤工作地點。
+func copyAttendanceWorksite(v AttendanceWorksite) AttendanceWorksite { return v }
 
 // copyAttendanceClockRecord 複製考勤打卡 record。
 func copyAttendanceClockRecord(v AttendanceClockRecord) AttendanceClockRecord {
@@ -633,9 +620,25 @@ func copyAuditLog(v AuditLog) AuditLog {
 // copyOutboxEvent 複製 outbox 事件。
 func copyOutboxEvent(v OutboxEvent) OutboxEvent {
 	v.Payload = utils.CopyStringMap(v.Payload)
+	if v.MaxAttempts != nil {
+		n := *v.MaxAttempts
+		v.MaxAttempts = &n
+	}
+	if v.ClaimExpiresAt != nil {
+		t := *v.ClaimExpiresAt
+		v.ClaimExpiresAt = &t
+	}
+	if v.LastAttemptAt != nil {
+		t := *v.LastAttemptAt
+		v.LastAttemptAt = &t
+	}
 	if v.ProcessedAt != nil {
 		t := *v.ProcessedAt
 		v.ProcessedAt = &t
+	}
+	if v.DeadLetteredAt != nil {
+		t := *v.DeadLetteredAt
+		v.DeadLetteredAt = &t
 	}
 	return v
 }

@@ -1012,7 +1012,7 @@ func workspaceFormDesignInputFromTemplate(template FormTemplate) SaveWorkspaceFo
 }
 
 // workspaceFormDesignSchema 處理工作區表單 design schema。
-func workspaceFormDesignSchema(base map[string]any, input SaveWorkspaceFormDesignInput, enabled bool, deleted bool, updatedAt time.Time) map[string]any {
+func workspaceFormDesignSchema(base map[string]any, input SaveWorkspaceFormDesignInput, enabled bool, deleted bool, updatedByAccountID string, updatedAt time.Time) map[string]any {
 	schema := utils.CopyStringMap(base)
 	if schema == nil {
 		schema = map[string]any{"type": "object"}
@@ -1028,15 +1028,16 @@ func workspaceFormDesignSchema(base map[string]any, input SaveWorkspaceFormDesig
 		stages = platformFormBuilderContract().Stages
 	}
 	schema[platformFormDesignSchemaKey] = map[string]any{
-		"icon":       firstNonEmpty(input.Icon, "📋"),
-		"category":   firstNonEmpty(input.Category, "其他"),
-		"desc":       strings.TrimSpace(input.Desc),
-		"enabled":    enabled,
-		"deleted":    deleted,
-		"form_kind":  firstNonEmpty(strings.TrimSpace(input.FormKind), platformTemplateFormKind(base)),
-		"updated_at": updatedAt.UTC().Format(time.RFC3339),
-		"fields":     fields,
-		"stages":     stages,
+		"icon":                  firstNonEmpty(input.Icon, "📋"),
+		"category":              firstNonEmpty(input.Category, "其他"),
+		"desc":                  strings.TrimSpace(input.Desc),
+		"enabled":               enabled,
+		"deleted":               deleted,
+		"form_kind":             firstNonEmpty(strings.TrimSpace(input.FormKind), platformTemplateFormKind(base)),
+		"updated_at":            updatedAt.UTC().Format(time.RFC3339),
+		"updated_by_account_id": strings.TrimSpace(updatedByAccountID),
+		"fields":                fields,
+		"stages":                stages,
 	}
 	schema["flow"] = platformStageFlow(stages)
 	return schema
@@ -1146,6 +1147,11 @@ func platformTemplateUpdatedAt(schema map[string]any, fallback time.Time) string
 		}
 	}
 	return platformTime(fallback)
+}
+
+// platformTemplateUpdatedByAccountID 取得最後更新工作區表單設計的帳號。
+func platformTemplateUpdatedByAccountID(schema map[string]any) string {
+	return platformDesignString(platformTemplateDesign(schema), "updated_by_account_id")
 }
 
 // platformExplicitTemplateFields returns only fields actually declared by the stored schema.

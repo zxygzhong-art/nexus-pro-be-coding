@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -146,6 +147,37 @@ func TestEhrmsPositionsFromRecordsDedupesByJobCode(t *testing.T) {
 	if positions[0].ID == positions[0].Code {
 		t.Fatalf("expected opaque position ID, got %+v", positions[0])
 	}
+}
+
+// seedOrgUnitCodes admits eHRMS department codes into the local org catalog for employee sync tests.
+func seedOrgUnitCodes(t *testing.T, store *memory.Store, tenantID string, codes ...string) {
+	t.Helper()
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	for i, code := range codes {
+		id := "ou-ehrms-" + strings.ToLower(code)
+		if err := store.UpsertOrgUnit(context.Background(), domain.OrgUnit{
+			ID:             id,
+			TenantID:       tenantID,
+			Code:           code,
+			Name:           code,
+			ParentID:       "ou-1",
+			Path:           []string{"ou-1", id},
+			ShowInOrgChart: true,
+			CreatedAt:      now.Add(time.Duration(i) * time.Second),
+			UpdatedAt:      now.Add(time.Duration(i) * time.Second),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
+func mustListOrgUnits(t *testing.T, store *memory.Store, tenantID string) []domain.OrgUnit {
+	t.Helper()
+	units, err := store.ListOrgUnits(context.Background(), tenantID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return units
 }
 
 // mustOrgUnitByCode resolves a tenant-local business code in memory-backed tests.

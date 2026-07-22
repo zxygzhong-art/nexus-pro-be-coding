@@ -60,8 +60,8 @@ func TestOutboxDispatcherConsumesTypedRelationshipPayload(t *testing.T) {
 	}
 }
 
-// TestOutboxDispatcherFailsMalformedRelationshipPayload 驗證 payload 鍵值型別錯誤時事件標記失敗且帶明確錯誤。
-func TestOutboxDispatcherFailsMalformedRelationshipPayload(t *testing.T) {
+// TestOutboxDispatcherParksMalformedRelationshipPayload 驗證永久 payload 錯誤不會消耗自動重試。
+func TestOutboxDispatcherParksMalformedRelationshipPayload(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2026, 7, 17, 8, 0, 0, 0, time.UTC)
 	store := memory.NewStore()
@@ -94,8 +94,8 @@ func TestOutboxDispatcherFailsMalformedRelationshipPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if events[0].Status != "failed" || !strings.Contains(events[0].LastError, "decode openfga relationship payload") {
-		t.Fatalf("expected failed event with explicit decode error, got %+v", events[0])
+	if events[0].Status != "parked" || events[0].RetryCount != 0 || !strings.Contains(events[0].LastError, "decode openfga relationship payload") {
+		t.Fatalf("expected parked event with explicit decode error, got %+v", events[0])
 	}
 }
 

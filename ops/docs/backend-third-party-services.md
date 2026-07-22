@@ -8,7 +8,7 @@
 
 | 服務 | 用途 | 需要提供 |
 | --- | --- | --- |
-| PostgreSQL + pgvector | 業務數據、審批投影、outbox、知識向量 | `DB_*`、TLS、備份；業務庫啓用 `pg_trgm`、`vector` |
+| PostgreSQL + pgvector | 業務數據、審批投影、outbox、知識向量 | runtime `DB_*`、部署 job 的 `MIGRATION_DATABASE_URL`、TLS、備份；業務庫啓用 `pg_trgm`、`vector` |
 | Temporal | 表單提交和審批 workflow | gRPC 地址、namespace、task queue；API 啓動時必須可連接 |
 | Keycloak | OIDC 登錄、JWT/JWKS 校驗 | HTTPS issuer、client ID、realm、token mapper |
 | OpenFGA | 關係權限和 tuple 同步 | HTTPS API、store ID、已發佈的 model ID |
@@ -37,8 +37,11 @@ Keycloak 用戶自動開通還需要 Admin client ID/secret；邀請或重置密
 ## 3. 後端主要配置
 
 ```text
-PostgreSQL: DB_HOST DB_PORT DB_USERNAME DB_PASSWORD DB_NAME DB_SSLMODE
+PostgreSQL runtime: DB_HOST DB_PORT DB_USERNAME DB_PASSWORD DB_NAME DB_SSLMODE
+PostgreSQL deploy:  MIGRATION_DATABASE_URL MIGRATION_DB_OWNER
+                    RUNTIME_DB_USERNAME RUNTIME_DB_PASSWORD
 Temporal:   TEMPORAL_BASE_URL TEMPORAL_NAMESPACE TEMPORAL_TASK_QUEUE
+            WORKFLOW_START_OUTBOX_ENABLED OUTBOX_DISPATCH_ENABLED
 Keycloak:   KEYCLOAK_BASE_URL KEYCLOAK_CLIENT_ID
 OpenFGA:    OPENFGA_BASE_URL OPENFGA_STORE_ID OPENFGA_MODEL_ID
 SFTPGo:     OBJECT_STORE_PROVIDER SFTPGO_BASE_URL SFTPGO_ROOT_BUCKET
@@ -75,6 +78,7 @@ Telemetry:  OTEL_ENABLED OTEL_BASE_URL METRICS_ADDR
 ## 5. 部署注意事項
 
 - `ops/.env` 是基礎設施配置，不能代替後端 `.env`；例如容器使用 `POSTGRES_*`，API 使用 `DB_*`。
+- `POSTGRES_*` / `MIGRATION_DATABASE_URL` 屬於初始化與遷移權限，不得注入 API。先執行 `make migrate-up` 與 `make db-provision-runtime-role`，API 僅使用開通後的 `nexus_app` runtime `DB_*`。
 - 不要使用 `COMPOSE_PROFILES=all` 直接部署生產，應按實際功能選擇 profile。
 - 已有環境升級 Keycloak 前先備份數據庫，並按官方升級指南完成預發佈驗證。
 - PostgreSQL、Redis、OpenFGA、Temporal、NATS、LiteLLM、SFTPGo 僅允許內網訪問。

@@ -1,0 +1,149 @@
+package service
+
+import (
+	"fmt"
+	"math"
+	"strings"
+	"time"
+
+	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/utils"
+)
+
+const (
+	leaveBalanceEntryReserve           = "reserve"
+	leaveBalanceEntryRelease           = "release"
+	leaveBalanceEntryLocalConsume      = "local_consume"
+	leaveBalanceEntryLocalRefund       = "local_refund"
+	leaveBalanceEntryExternalReconcile = "external_reconcile"
+)
+
+func leaveMinutes(hours float64) int {
+	return int(math.Round(hours * 60))
+}
+
+// listEffectiveLeaveBalances projects the immutable eHRMS balance snapshot through
+// the Nexus-only overlay ledger. Store-level remaining/used values stay untouched.
+func (c AttendanceService) listEffectiveLeaveBalances(ctx RequestContext) ([]LeaveBalance, error) {
+	items, err := c.store.ListLeaveBalances(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	entries, err := c.store.ListLeaveBalanceEntries(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return nil, err
+	}
+	return applyLeaveBalanceOverlay(items, entries), nil
+}
+
+func applyLeaveBalanceOverlay(items []LeaveBalance, entries []domain.LeaveBalanceEntry) []LeaveBalance {
+	totalByBalance := map[string]int{}
+	pendingByBalance := map[string]int{}
+	localByBalance := map[string]int{}
+	for _, entry := range entries {
+		totalByBalance[entry.BalanceID] += entry.AmountMinutes
+		switch entry.EntryType {
+		case leaveBalanceEntryReserve, leaveBalanceEntryRelease:
+			pendingByBalance[entry.BalanceID] += entry.AmountMinutes
+		case leaveBalanceEntryLocalConsume, leaveBalanceEntryLocalRefund, leaveBalanceEntryExternalReconcile:
+			localByBalance[entry.BalanceID] += entry.AmountMinutes
+		}
+	}
+	out := make([]LeaveBalance, len(items))
+	for index, item := range items {
+		item.UpstreamRemainingHours = item.RemainingHours
+		item.PendingHours = math.Max(0, -float64(pendingByBalance[item.ID])/60)
+		item.LocalUsedHours = math.Max(0, -float64(localByBalance[item.ID])/60)
+		item.RemainingHours = math.Round((item.RemainingHours+float64(totalByBalance[item.ID])/60)*100) / 100
+		out[index] = item
+	}
+	return out
+}
+
+// leaveBalanceForOverlay locks the selected entitlement row in Postgres, then
+// checks effective availability including every committed overlay entry.
+func (c AttendanceService) leaveBalanceForOverlay(ctx RequestContext, employeeID, leaveTypeID string, hours float64, asOf time.Time) (LeaveBalance, string, error) {
+	balance, found, err := c.store.GetLeaveBalanceForOverlay(goContext(ctx), ctx.TenantID, employeeID, leaveTypeID, asOf)
+	if err != nil {
+		return LeaveBalance{}, "", err
+	}
+	if !found {
+		return LeaveBalance{}, leaveEvaluationBalanceMissing, nil
+	}
+	entries, err := c.store.ListLeaveBalanceEntriesByBalance(goContext(ctx), ctx.TenantID, balance.ID)
+	if err != nil {
+		return LeaveBalance{}, "", err
+	}
+	effective := applyLeaveBalanceOverlay([]LeaveBalance{balance}, entries)[0]
+	if effective.RemainingHours < hours {
+		return effective, leaveEvaluationBalanceInsufficient, nil
+	}
+	return effective, "", nil
+}
+
+func (c AttendanceService) appendLeaveBalanceEntry(ctx RequestContext, request LeaveRequest, balanceID, caseID, entryType string, amountMinutes, cycle int) error {
+	if strings.TrimSpace(balanceID) == "" || amountMinutes == 0 {
+		return nil
+	}
+	now := c.Now()
+	idempotencyKey := fmt.Sprintf("leave-request:%s:cycle:%d:%s", request.ID, cycle, entryType)
+	_, err := c.store.AppendLeaveBalanceEntry(goContext(ctx), domain.LeaveBalanceEntry{
+		ID: utils.NewID("lbe"), TenantID: ctx.TenantID, EmployeeID: request.EmployeeID,
+		LeaveTypeID: request.LeaveTypeID, BalanceID: balanceID, LeaveRequestID: request.ID,
+		LeaveCaseID: caseID, EntryType: entryType, AmountMinutes: amountMinutes,
+		IdempotencyKey: idempotencyKey, Metadata: map[string]any{"source": "nexus_workflow", "cycle": cycle},
+		OccurredAt: now, CreatedAt: now,
+	})
+	return err
+}
+
+func leaveRequestBalanceCycle(request LeaveRequest) int {
+	if request.EvaluationSnapshot == nil {
+		return 1
+	}
+	switch value := request.EvaluationSnapshot["balance_cycle"].(type) {
+	case int:
+		if value > 0 {
+			return value
+		}
+	case int64:
+		if value > 0 {
+			return int(value)
+		}
+	case float64:
+		if value > 0 {
+			return int(value)
+		}
+	}
+	return 1
+}
+
+func nextLeaveRequestBalanceCycle(existing LeaveRequest, resubmitting bool) int {
+	if !resubmitting {
+		return 1
+	}
+	return leaveRequestBalanceCycle(existing) + 1
+}
+
+func (c AttendanceService) ensureNexusLeaveCase(ctx RequestContext, request LeaveRequest) (LeaveCase, error) {
+	if item, ok, err := c.store.GetLeaveCaseBySource(goContext(ctx), ctx.TenantID, "nexus_request", request.ID); err != nil || ok {
+		return item, err
+	}
+	now := c.Now()
+	item := LeaveCase{
+		ID: ehrmsStableID("lc", ctx.TenantID, "nexus", request.ID), TenantID: ctx.TenantID,
+		EmployeeID: request.EmployeeID, LeaveTypeID: request.LeaveTypeID,
+		StartAt: request.StartAt, EndAt: request.EndAt, NetMinutes: leaveMinutes(request.Hours),
+		Status: "active", Origin: "nexus", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := c.store.UpsertLeaveCase(goContext(ctx), item); err != nil {
+		return LeaveCase{}, err
+	}
+	if err := c.store.UpsertLeaveCaseSource(goContext(ctx), LeaveCaseSource{
+		TenantID: ctx.TenantID, LeaveCaseID: item.ID, SourceType: "nexus_request", SourceID: request.ID,
+		MatchMethod: "direct", MatchStatus: "confirmed", CreatedAt: now,
+	}); err != nil {
+		return LeaveCase{}, err
+	}
+	return item, nil
+}

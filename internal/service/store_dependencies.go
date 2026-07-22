@@ -45,6 +45,7 @@ type workflowStore interface {
 	repository.IAMStore
 	repository.WorkflowStore
 	repository.NotificationStore
+	repository.OutboxStore
 }
 
 type auditStore interface {

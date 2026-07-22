@@ -13,6 +13,15 @@ import (
 
 // UpsertWorkflowRun 持久化流程運行實例。
 func (s *Store) UpsertWorkflowRun(execCtx context.Context, v domain.WorkflowRun) error {
+	// Keep older callers compatible with the delivery columns introduced in
+	// migration 000010. Outbox-managed starts always provide both values, while
+	// legacy/synchronous callers historically omitted them.
+	if v.TemporalStartStatus == "" {
+		v.TemporalStartStatus = domain.WorkflowTemporalStartStarted
+	}
+	if v.TemporalWorkflowID == "" {
+		v.TemporalWorkflowID = domain.FormApprovalWorkflowID(v.TenantID, v.FormInstanceID)
+	}
 	_, err := s.q.UpsertWorkflowRun(tenantContext(execCtx, v.TenantID), sqlc.UpsertWorkflowRunParams{
 		ID:                     v.ID,
 		TenantID:               v.TenantID,
@@ -22,10 +31,115 @@ func (s *Store) UpsertWorkflowRun(execCtx context.Context, v domain.WorkflowRun)
 		Status:                 v.Status,
 		CurrentStageInstanceID: nullableText(v.CurrentStageInstanceID),
 		Column8:                []byte(v.StageDefinitionsJSON),
+		TemporalStartStatus:    v.TemporalStartStatus,
+		TemporalWorkflowID:     v.TemporalWorkflowID,
+		TemporalRunID:          v.TemporalRunID,
+		TemporalStartEventID:   v.TemporalStartEventID,
+		TemporalStartedAt:      nullableTimestamptz(v.TemporalStartedAt),
 		CreatedAt:              timestamptz(v.CreatedAt),
 		UpdatedAt:              timestamptz(v.UpdatedAt),
 	})
 	return err
+}
+
+// ListPendingWorkflowRuns returns durable starts that are immediately claimable.
+func (s *Store) ListPendingWorkflowRuns(execCtx context.Context, tenantID string, staleBefore time.Time, limit int) ([]domain.WorkflowRun, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	items, err := s.q.ListPendingWorkflowRuns(tenantContext(execCtx, tenantID), sqlc.ListPendingWorkflowRunsParams{
+		TenantID:    tenantID,
+		StaleBefore: timestamptz(staleBefore),
+		LimitCount:  int32(limit),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromWorkflowRun), nil
+}
+
+// ClaimWorkflowRunTemporalStart moves a pending or stale claim into the starting state.
+// The returned UpdatedAt is the database-normalized fencing token for follow-up writes.
+func (s *Store) ClaimWorkflowRunTemporalStart(execCtx context.Context, tenantID, id string, claimedAt, staleBefore time.Time) (domain.WorkflowRun, bool, error) {
+	v, err := s.q.ClaimWorkflowRunTemporalStart(tenantContext(execCtx, tenantID), sqlc.ClaimWorkflowRunTemporalStartParams{
+		ClaimedAt:   timestamptz(claimedAt),
+		TenantID:    tenantID,
+		ID:          id,
+		StaleBefore: timestamptz(staleBefore),
+	})
+	if isNotFound(err) {
+		return domain.WorkflowRun{}, false, nil
+	}
+	if err != nil {
+		return domain.WorkflowRun{}, false, err
+	}
+	return fromWorkflowRun(v), true, nil
+}
+
+// ReleaseWorkflowRunTemporalStart releases only the worker that owns claimedAt.
+func (s *Store) ReleaseWorkflowRunTemporalStart(execCtx context.Context, tenantID, id string, claimedAt, releasedAt time.Time) (bool, error) {
+	_, err := s.q.ReleaseWorkflowRunTemporalStart(tenantContext(execCtx, tenantID), sqlc.ReleaseWorkflowRunTemporalStartParams{
+		ReleasedAt: timestamptz(releasedAt),
+		TenantID:   tenantID,
+		ID:         id,
+		ClaimedAt:  timestamptz(claimedAt),
+	})
+	if isNotFound(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// MarkWorkflowRunTemporalStarted records an execution only when the claim token still owns the run.
+func (s *Store) MarkWorkflowRunTemporalStarted(execCtx context.Context, tenantID, id string, claimedAt time.Time, execution domain.FormApprovalWorkflowExecution, startedAt time.Time) (domain.WorkflowRun, bool, error) {
+	v, err := s.q.MarkWorkflowRunTemporalStarted(tenantContext(execCtx, tenantID), sqlc.MarkWorkflowRunTemporalStartedParams{
+		TemporalWorkflowID: execution.WorkflowID,
+		TemporalRunID:      execution.RunID,
+		StartedAt:          timestamptz(startedAt),
+		TenantID:           tenantID,
+		ID:                 id,
+		ClaimedAt:          timestamptz(claimedAt),
+	})
+	if isNotFound(err) {
+		return domain.WorkflowRun{}, false, nil
+	}
+	if err != nil {
+		return domain.WorkflowRun{}, false, err
+	}
+	return fromWorkflowRun(v), true, nil
+}
+
+// AbandonPendingWorkflowRunTemporalStart abandons a run only before a worker claims it.
+func (s *Store) AbandonPendingWorkflowRunTemporalStart(execCtx context.Context, tenantID, id string, abandonedAt time.Time) (domain.WorkflowRun, bool, error) {
+	v, err := s.q.AbandonPendingWorkflowRunTemporalStart(tenantContext(execCtx, tenantID), sqlc.AbandonPendingWorkflowRunTemporalStartParams{
+		AbandonedAt: timestamptz(abandonedAt),
+		TenantID:    tenantID,
+		ID:          id,
+	})
+	if isNotFound(err) {
+		return domain.WorkflowRun{}, false, nil
+	}
+	if err != nil {
+		return domain.WorkflowRun{}, false, err
+	}
+	return fromWorkflowRun(v), true, nil
+}
+
+// AbandonClaimedWorkflowRunTemporalStart abandons only the worker that owns claimedAt.
+func (s *Store) AbandonClaimedWorkflowRunTemporalStart(execCtx context.Context, tenantID, id string, claimedAt, abandonedAt time.Time) (domain.WorkflowRun, bool, error) {
+	v, err := s.q.AbandonClaimedWorkflowRunTemporalStart(tenantContext(execCtx, tenantID), sqlc.AbandonClaimedWorkflowRunTemporalStartParams{
+		AbandonedAt: timestamptz(abandonedAt),
+		TenantID:    tenantID,
+		ID:          id,
+		ClaimedAt:   timestamptz(claimedAt),
+	})
+	if isNotFound(err) {
+		return domain.WorkflowRun{}, false, nil
+	}
+	if err != nil {
+		return domain.WorkflowRun{}, false, err
+	}
+	return fromWorkflowRun(v), true, nil
 }
 
 // GetWorkflowRun 取得流程運行實例。
@@ -141,16 +255,36 @@ func (s *Store) ListPendingAssigneeStageInstanceIDs(execCtx context.Context, ten
 // InsertWorkflowAction 寫入流程審批動作。
 func (s *Store) InsertWorkflowAction(execCtx context.Context, v domain.WorkflowAction) error {
 	_, err := s.q.InsertWorkflowAction(tenantContext(execCtx, v.TenantID), sqlc.InsertWorkflowActionParams{
-		ID:              v.ID,
-		TenantID:        v.TenantID,
-		RunID:           v.RunID,
-		StageInstanceID: v.StageInstanceID,
-		AccountID:       v.AccountID,
-		Action:          v.Action,
-		Comment:         v.Comment,
-		CreatedAt:       timestamptz(v.CreatedAt),
+		ID:                 v.ID,
+		TenantID:           v.TenantID,
+		RunID:              v.RunID,
+		StageInstanceID:    v.StageInstanceID,
+		AccountID:          v.AccountID,
+		Action:             v.Action,
+		Comment:            v.Comment,
+		IdempotencyKey:     v.IdempotencyKey,
+		CommandFingerprint: v.CommandFingerprint,
+		RequestID:          v.RequestID,
+		TraceID:            v.TraceID,
+		CreatedAt:          timestamptz(v.CreatedAt),
 	})
 	return err
+}
+
+// GetWorkflowActionByIdempotencyKey loads the durable command receipt for a run.
+func (s *Store) GetWorkflowActionByIdempotencyKey(execCtx context.Context, tenantID, runID, idempotencyKey string) (domain.WorkflowAction, bool, error) {
+	v, err := s.q.GetWorkflowActionByIdempotencyKey(tenantContext(execCtx, tenantID), sqlc.GetWorkflowActionByIdempotencyKeyParams{
+		TenantID:       tenantID,
+		RunID:          runID,
+		IdempotencyKey: idempotencyKey,
+	})
+	if isNotFound(err) {
+		return domain.WorkflowAction{}, false, nil
+	}
+	if err != nil {
+		return domain.WorkflowAction{}, false, err
+	}
+	return fromWorkflowAction(v), true, nil
 }
 
 // ListWorkflowActionsByRun 列出流程運行下的審批動作。
@@ -175,6 +309,11 @@ func fromWorkflowRun(v sqlc.WorkflowRun) domain.WorkflowRun {
 		Status:                 v.Status,
 		CurrentStageInstanceID: textFrom(v.CurrentStageInstanceID),
 		StageDefinitionsJSON:   string(v.StageDefinitionsJson),
+		TemporalStartStatus:    v.TemporalStartStatus,
+		TemporalWorkflowID:     v.TemporalWorkflowID,
+		TemporalRunID:          v.TemporalRunID,
+		TemporalStartEventID:   v.TemporalStartEventID,
+		TemporalStartedAt:      timeFromPtr(v.TemporalStartedAt),
 		CreatedAt:              timeFrom(v.CreatedAt),
 		UpdatedAt:              timeFrom(v.UpdatedAt),
 	}
@@ -207,14 +346,18 @@ func fromWorkflowStageAssignee(v sqlc.WorkflowStageAssignee) domain.WorkflowStag
 
 func fromWorkflowAction(v sqlc.WorkflowAction) domain.WorkflowAction {
 	return domain.WorkflowAction{
-		ID:              v.ID,
-		TenantID:        v.TenantID,
-		RunID:           v.RunID,
-		StageInstanceID: v.StageInstanceID,
-		AccountID:       v.AccountID,
-		Action:          v.Action,
-		Comment:         v.Comment,
-		CreatedAt:       timeFrom(v.CreatedAt),
+		ID:                 v.ID,
+		TenantID:           v.TenantID,
+		RunID:              v.RunID,
+		StageInstanceID:    v.StageInstanceID,
+		AccountID:          v.AccountID,
+		Action:             v.Action,
+		Comment:            v.Comment,
+		IdempotencyKey:     v.IdempotencyKey,
+		CommandFingerprint: v.CommandFingerprint,
+		RequestID:          v.RequestID,
+		TraceID:            v.TraceID,
+		CreatedAt:          timeFrom(v.CreatedAt),
 	}
 }
 

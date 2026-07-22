@@ -54,20 +54,6 @@ func (c AttendanceService) AttendanceClockStatus(ctx RequestContext) (Attendance
 	if err != nil {
 		return AttendanceClockStatus{}, err
 	}
-	// 只有實際跨午夜班次仍在下班窗口內時，狀態才沿用前一工作日。
-	if _, shift, hasShift, shiftErr := c.optionalAttendanceShift(ctx, account.EmployeeID, now); shiftErr != nil {
-		return AttendanceClockStatus{}, shiftErr
-	} else if hasShift && clockOutBelongsToPreviousWorkDate(shift, now) {
-		previousWorkDate := attendanceWorkDate(now.Add(-24 * time.Hour))
-		previous, lookupErr := c.loadAttendanceDayProjection(ctx, account.EmployeeID, previousWorkDate, now)
-		if lookupErr != nil {
-			return AttendanceClockStatus{}, lookupErr
-		}
-		if previous.ClockIn != nil {
-			projection = previous
-			workDate = previousWorkDate
-		}
-	}
 	status := attendanceClockStatusFromProjection(account.EmployeeID, workDate, projection)
 	policy, err := c.loadAttendancePolicyResponse(ctx)
 	if err != nil {
@@ -154,10 +140,6 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 	if err != nil {
 		return AttendanceClockRecord{}, err
 	}
-	assignment, shift, hasShift, err := c.optionalAttendanceShift(ctx, employeeID, now)
-	if err != nil {
-		return AttendanceClockRecord{}, err
-	}
 	var worksite AttendanceWorksite
 	distance := 0.0
 	if policy.WorkTime.RequireWorksite {
@@ -167,9 +149,6 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 		}
 	}
 	workDate := attendanceWorkDate(now)
-	if hasShift {
-		workDate = attendanceWorkDateForClock(direction, shift, now)
-	}
 	recordStatus := clockRecordStatusAccepted
 	rejectionReason := ""
 	_, hasClockIn, err := c.store.GetEarliestAcceptedAttendanceClockIn(goContext(ctx), ctx.TenantID, employeeID, workDate)
@@ -178,7 +157,7 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 	}
 	rejectionReason = clockRejectionReason(direction, worksite, input.AccuracyMeters, distance, hasClockIn, policy.WorkTime.RequireWorksite)
 	if rejectionReason == "" {
-		outsideWindow, windowErr := clockOutsideConfiguredWindow(direction, shift, hasShift, policy.WorkTime, now)
+		outsideWindow, windowErr := clockOutsideConfiguredWindow(direction, policy.WorkTime, now)
 		if windowErr != nil {
 			return AttendanceClockRecord{}, windowErr
 		}
@@ -202,14 +181,12 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 		deviceInfo["location_source"] = strings.TrimSpace(input.LocationSource)
 	}
 	record := AttendanceClockRecord{
-		ID:                utils.NewID("acr"),
-		TenantID:          ctx.TenantID,
-		EmployeeID:        employeeID,
-		ShiftAssignmentID: assignment.ID,
-		ShiftID:           shift.ID,
-		WorksiteID:        worksite.ID,
-		WorksiteName:      worksite.Name,
-		WorksiteAddress:   worksite.Address,
+		ID:              utils.NewID("acr"),
+		TenantID:        ctx.TenantID,
+		EmployeeID:      employeeID,
+		WorksiteID:      worksite.ID,
+		WorksiteName:    worksite.Name,
+		WorksiteAddress: worksite.Address,
 		WorkDate:          workDate,
 		Direction:         direction,
 		ClientEventID:     clientEventID,
@@ -436,24 +413,6 @@ func (c AttendanceService) ApproveAttendanceCorrection(ctx RequestContext, id st
 // RejectAttendanceCorrection 駁回考勤 correction 的服務流程。
 func (c AttendanceService) RejectAttendanceCorrection(ctx RequestContext, id string, input ReviewAttendanceCorrectionInput) (AttendanceCorrectionRequest, error) {
 	return c.reviewAttendanceCorrection(ctx, strings.TrimSpace(id), correctionStatusRejected, input)
-}
-
-// filterShiftAssignmentsByDecision 依員工資料範圍篩選排班。
-func (c AttendanceService) filterShiftAssignmentsByDecision(ctx RequestContext, account Account, decision CheckResult, items []AttendanceShiftAssignment) ([]AttendanceShiftAssignment, error) {
-	allowed, all, err := c.attendanceEmployeeScope(ctx, account, decision)
-	if err != nil {
-		return nil, err
-	}
-	if all {
-		return items, nil
-	}
-	out := make([]AttendanceShiftAssignment, 0, len(items))
-	for _, item := range items {
-		if _, ok := allowed[item.EmployeeID]; ok {
-			out = append(out, item)
-		}
-	}
-	return out, nil
 }
 
 // filterClockRecordsByDecision 處理篩選打卡 records by 決策的服務流程。
@@ -695,7 +654,7 @@ func clockRejectionReason(direction string, worksite AttendanceWorksite, accurac
 }
 
 // clockOutsideConfiguredWindow 判斷固定制遲到/早退或彈性制超出設定範圍的時間異常。
-func clockOutsideConfiguredWindow(direction string, shift AttendanceShift, hasShift bool, workTime AttendancePolicyWorkTime, at time.Time) (bool, error) {
+func clockOutsideConfiguredWindow(direction string, workTime AttendancePolicyWorkTime, at time.Time) (bool, error) {
 	if workTime.ClockMode == clockModeFlexible {
 		earliest := parseHHMMMinutes(workTime.FlexibleClockInEarliest)
 		latest := parseHHMMMinutes(workTime.FlexibleClockOutLatest)
@@ -707,9 +666,6 @@ func clockOutsideConfiguredWindow(direction string, shift AttendanceShift, hasSh
 			return minute < earliest, nil
 		}
 		return minute > latest, nil
-	}
-	if hasShift {
-		return clockOutsideFixedShiftBoundary(direction, shift, at)
 	}
 	boundaryValue := workTime.StandardStart
 	if direction == clockDirectionOut {
@@ -723,53 +679,6 @@ func clockOutsideConfiguredWindow(direction string, shift AttendanceShift, hasSh
 		return clockMinuteOfDay(at) > boundary, nil
 	}
 	return clockMinuteOfDay(at) < boundary, nil
-}
-
-// clockOutsideFixedShiftBoundary 只把晚於上班截止或早於下班起始的固定班次打卡標成異常。
-func clockOutsideFixedShiftBoundary(direction string, shift AttendanceShift, at time.Time) (bool, error) {
-	start, end, err := clockWindowMinutes(direction, shift)
-	if err != nil {
-		return false, err
-	}
-	minute := clockMinuteOfDay(at)
-	if end < start {
-		end += 24 * 60
-		if minute < start {
-			minute += 24 * 60
-		}
-	}
-	if direction == clockDirectionIn {
-		return minute > end+shift.LateGraceMinutes, nil
-	}
-	return minute < start-shift.EarlyLeaveGraceMinutes, nil
-}
-
-// clockWindowMinutes 取得指定打卡方向的班次起訖分鐘。
-func clockWindowMinutes(direction string, shift AttendanceShift) (int, int, error) {
-	startField, endField := "clock_in_start", "clock_in_end"
-	startValue, endValue := shift.ClockInStart, shift.ClockInEnd
-	if direction == clockDirectionOut {
-		startField, endField = "clock_out_start", "clock_out_end"
-		startValue, endValue = shift.ClockOutStart, shift.ClockOutEnd
-	}
-	start, err := parseClockWindowMinute(startValue, startField)
-	if err != nil {
-		return 0, 0, err
-	}
-	end, err := parseClockWindowMinute(endValue, endField)
-	if err != nil {
-		return 0, 0, err
-	}
-	return start, end, nil
-}
-
-// parseClockWindowMinute 將 HH:MM 班次時間轉換為當天分鐘數。
-func parseClockWindowMinute(value, field string) (int, error) {
-	parsed, err := parseClockWindowTime(value, field)
-	if err != nil {
-		return 0, err
-	}
-	return parsed.Hour()*60 + parsed.Minute(), nil
 }
 
 // clockMinuteOfDay 取得業務時區的當天分鐘數。
@@ -792,47 +701,6 @@ func validateCoordinates(latitude, longitude float64) error {
 // attendanceWorkDate 處理考勤 work 日期。
 func attendanceWorkDate(at time.Time) string {
 	return at.In(attendanceClockLocation).Format("2006-01-02")
-}
-
-// attendanceWorkDateForClock 讓跨午夜班次的下班卡歸屬前一工作日。
-func attendanceWorkDateForClock(direction string, shift AttendanceShift, at time.Time) string {
-	if direction == clockDirectionOut && clockOutBelongsToPreviousWorkDate(shift, at) {
-		return at.In(attendanceClockLocation).AddDate(0, 0, -1).Format(time.DateOnly)
-	}
-	return attendanceWorkDate(at)
-}
-
-// clockOutBelongsToPreviousWorkDate 判斷跨午夜班次的下班卡日期歸屬。
-func clockOutBelongsToPreviousWorkDate(shift AttendanceShift, at time.Time) bool {
-	inStart, _, err := clockWindowMinutes(clockDirectionIn, shift)
-	if err != nil {
-		return false
-	}
-	outStart, outEnd, err := clockWindowMinutes(clockDirectionOut, shift)
-	if err != nil || outStart >= inStart {
-		return false
-	}
-	minute := clockMinuteOfDay(at)
-	if outStart <= outEnd {
-		return minute <= outEnd
-	}
-	return minute >= outStart || minute <= outEnd
-}
-
-// optionalAttendanceShift 讀取有效排班；未排班時回退到全局考勤政策。
-func (c AttendanceService) optionalAttendanceShift(ctx RequestContext, employeeID string, at time.Time) (AttendanceShiftAssignment, AttendanceShift, bool, error) {
-	assignment, ok, err := c.store.FindEffectiveAttendanceShiftAssignment(goContext(ctx), ctx.TenantID, employeeID, at)
-	if err != nil || !ok {
-		return AttendanceShiftAssignment{}, AttendanceShift{}, false, err
-	}
-	shift, ok, err := c.store.GetAttendanceShift(goContext(ctx), ctx.TenantID, assignment.ShiftID)
-	if err != nil {
-		return AttendanceShiftAssignment{}, AttendanceShift{}, false, err
-	}
-	if !ok || !strings.EqualFold(shift.Status, attendanceStatusActive) {
-		return AttendanceShiftAssignment{}, AttendanceShift{}, false, BadRequest("attendance shift is required").WithReasonCode("attendance_shift_required")
-	}
-	return assignment, shift, true, nil
 }
 
 // activeAttendanceWorksites returns every active tenant worksite in repository priority order.

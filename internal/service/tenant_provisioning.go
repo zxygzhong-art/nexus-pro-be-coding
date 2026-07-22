@@ -94,6 +94,13 @@ func (c *Service) ProvisionTenant(ctx context.Context, input TenantProvisionInpu
 		if err := tx.UpsertTenant(ctx, domain.Tenant{ID: normalized.TenantID, Name: normalized.TenantName, CreatedAt: now}); err != nil {
 			return err
 		}
+		if _, exists, err := tx.GetAttendancePolicy(ctx, normalized.TenantID); err != nil {
+			return err
+		} else if !exists {
+			if err := tx.InsertAttendancePolicyVersion(ctx, defaultAttendancePolicyVersion(normalized.TenantID, now)); err != nil {
+				return err
+			}
+		}
 		if _, err := ensureTenantDefaultFormTemplates(ctx, tx, normalized.TenantID, now); err != nil {
 			return err
 		}
@@ -377,12 +384,6 @@ func tenantProvisionAdminPermissions() []domain.Permission {
 		{Resource: "attendance.worksite", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "attendance.worksites"},
 		{Resource: "attendance.worksite", Action: domain.ActionCreate, Scope: domain.ScopeAll, MenuKey: "attendance.worksites"},
 		{Resource: "attendance.worksite", Action: domain.ActionUpdate, Scope: domain.ScopeAll, MenuKey: "attendance.worksites"},
-		{Resource: "attendance.shift", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "attendance.shifts"},
-		{Resource: "attendance.shift", Action: domain.ActionCreate, Scope: domain.ScopeAll, MenuKey: "attendance.shifts"},
-		{Resource: "attendance.shift", Action: domain.ActionUpdate, Scope: domain.ScopeAll, MenuKey: "attendance.shifts"},
-		{Resource: "attendance.shift_assignment", Action: domain.ActionRead, Scope: domain.ScopeAll},
-		{Resource: "attendance.shift_assignment", Action: domain.ActionCreate, Scope: domain.ScopeAll},
-		{Resource: "attendance.shift_assignment", Action: domain.ActionUpdate, Scope: domain.ScopeAll},
 		{Resource: "attendance.clock", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "attendance.clock"},
 		{Resource: "attendance.clock", Action: domain.ActionCreate, Scope: domain.ScopeAll, MenuKey: "attendance.clock"},
 		{Resource: "attendance.correction", Action: domain.ActionRead, Scope: domain.ScopeAll, MenuKey: "attendance.corrections"},

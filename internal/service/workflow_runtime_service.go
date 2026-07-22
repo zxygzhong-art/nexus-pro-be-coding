@@ -29,6 +29,17 @@ func (c WorkflowService) initWorkflowRun(ctx RequestContext, instance domain.For
 		version = runs[len(runs)-1].Version + 1
 	}
 	now := c.Now()
+	temporalStartStatus := domain.WorkflowTemporalStartStarted
+	temporalWorkflowID := domain.FormApprovalWorkflowID(ctx.TenantID, instance.ID)
+	temporalStartEventID := ""
+	var temporalStartedAt *time.Time
+	if c.workflowStartOutboxEnabled {
+		temporalStartStatus = domain.WorkflowTemporalStartPending
+		temporalWorkflowID = ""
+		temporalStartEventID = utils.NewID("outbox")
+	} else {
+		temporalStartedAt = &now
+	}
 	run := domain.WorkflowRun{
 		ID:                   utils.NewID("wfr"),
 		TenantID:             ctx.TenantID,
@@ -37,8 +48,16 @@ func (c WorkflowService) initWorkflowRun(ctx RequestContext, instance domain.For
 		Version:              version,
 		Status:               domain.WorkflowRunStatusRunning,
 		StageDefinitionsJSON: SerializeWorkflowStages(stages),
+		TemporalStartStatus:  temporalStartStatus,
+		TemporalWorkflowID:   temporalWorkflowID,
+		TemporalStartEventID: temporalStartEventID,
+		TemporalStartedAt:    temporalStartedAt,
 		CreatedAt:            now,
 		UpdatedAt:            now,
+	}
+	if c.workflowStartOutboxEnabled {
+		// The run ID is part of the Temporal identity so each resubmission is isolated.
+		run.TemporalWorkflowID = domain.FormApprovalWorkflowIDForRun(ctx.TenantID, instance.ID, run.ID)
 	}
 	// 呼叫端在同一交易內剛寫入過此表單,重讀以取得最新 version 供樂觀鎖檢查。
 	if current, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, instance.ID); err != nil {
@@ -58,6 +77,11 @@ func (c WorkflowService) initWorkflowRun(ctx RequestContext, instance domain.For
 	if err := c.advanceWorkflowAt(ctx, run, stages, stages[0].ID, applicant, instance.Payload, ""); err != nil {
 		return domain.FormInstance{}, err
 	}
+	if c.workflowStartOutboxEnabled {
+		if err := c.store.AppendOutboxEvent(goContext(ctx), workflowStartOutboxEvent(run, now)); err != nil {
+			return domain.FormInstance{}, err
+		}
+	}
 	updated, ok, err := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, instance.ID)
 	if err != nil {
 		return domain.FormInstance{}, err
@@ -70,9 +94,51 @@ func (c WorkflowService) initWorkflowRun(ctx RequestContext, instance domain.For
 
 // ActOnWorkflowStage 對當前流程節點執行審批動作。
 func (c WorkflowService) ActOnWorkflowStage(ctx RequestContext, formInstanceID, action, comment string) (domain.FormInstance, error) {
+	return c.actOnWorkflowStage(ctx, formInstanceID, action, comment, false)
+}
+
+// actOnWorkflowStage keeps the Temporal command receipt, projection mutation,
+// and its audit record in one transaction when temporalAudit is enabled.
+func (c WorkflowService) actOnWorkflowStage(ctx RequestContext, formInstanceID, action, comment string, temporalAudit bool) (domain.FormInstance, error) {
 	action = strings.TrimSpace(strings.ToLower(action))
 	if action == "" {
 		return domain.FormInstance{}, BadRequest("action is required")
+	}
+	if _, _, err := c.RequireWorkflowAuthz(ctx, ResourceFormInstance, ActionRead, ""); err != nil {
+		return domain.FormInstance{}, err
+	}
+	latestRun, runOK, err := c.store.GetWorkflowRunByFormInstance(goContext(ctx), ctx.TenantID, formInstanceID)
+	if err != nil {
+		return domain.FormInstance{}, err
+	}
+	if !runOK {
+		return domain.FormInstance{}, NotFound("workflow run", formInstanceID)
+	}
+	if latestRun.TemporalStartStatus == domain.WorkflowTemporalStartPending || latestRun.TemporalStartStatus == domain.WorkflowTemporalStartStarting {
+		return domain.FormInstance{}, Conflict("workflow is still starting").WithReasonCode("workflow_start_pending")
+	}
+	if latestRun.TemporalStartStatus == domain.WorkflowTemporalStartAbandoned {
+		return domain.FormInstance{}, Conflict("workflow start was abandoned").WithReasonCode("workflow_start_abandoned")
+	}
+	if key := strings.TrimSpace(ctx.IdempotencyKey); key != "" {
+		fingerprint := workflowCommandFingerprint(latestRun.ID, ctx.AccountID, action, comment)
+		existing, found, lookupErr := c.store.GetWorkflowActionByIdempotencyKey(goContext(ctx), ctx.TenantID, latestRun.ID, key)
+		if lookupErr != nil {
+			return domain.FormInstance{}, lookupErr
+		}
+		if found {
+			if existing.CommandFingerprint != fingerprint {
+				return domain.FormInstance{}, Conflict("idempotency key was already used for a different workflow command").WithReasonCode("idempotency_key_reused")
+			}
+			current, ok, loadErr := c.store.GetFormInstance(goContext(ctx), ctx.TenantID, formInstanceID)
+			if loadErr != nil {
+				return domain.FormInstance{}, loadErr
+			}
+			if !ok {
+				return domain.FormInstance{}, NotFound("form instance", formInstanceID)
+			}
+			return current, nil
+		}
 	}
 	instance, run, stageInstance, stages, assignees, err := c.loadActiveWorkflowStageForAssignee(ctx, formInstanceID)
 	if err != nil {
@@ -87,16 +153,31 @@ func (c WorkflowService) ActOnWorkflowStage(ctx RequestContext, formInstanceID, 
 		if err := tx.recordWorkflowAction(ctx, run, stageInstance, action, comment, now); err != nil {
 			return err
 		}
+		var mutationErr error
 		switch action {
 		case "approve":
-			return tx.handleWorkflowApprove(ctx, instance, run, stageInstance, stages, assignees, comment, now)
+			mutationErr = tx.handleWorkflowApprove(ctx, instance, run, stageInstance, stages, assignees, comment, now)
 		case "reject":
-			return tx.completeWorkflowDecision(ctx, instance, run, stageInstance, workflowFormStatusRejected, domain.WorkflowRunStatusCompleted, "reject", comment, now)
+			mutationErr = tx.completeWorkflowDecision(ctx, instance, run, stageInstance, workflowFormStatusRejected, domain.WorkflowRunStatusCompleted, "reject", comment, now)
 		case "return":
-			return tx.completeWorkflowDecision(ctx, instance, run, stageInstance, domain.WorkflowFormStatusReturned, domain.WorkflowRunStatusReturned, "return", comment, now)
+			mutationErr = tx.completeWorkflowDecision(ctx, instance, run, stageInstance, domain.WorkflowFormStatusReturned, domain.WorkflowRunStatusReturned, "return", comment, now)
 		default:
 			return BadRequest("unsupported workflow action: " + action)
 		}
+		if mutationErr != nil {
+			return mutationErr
+		}
+		if !temporalAudit {
+			return nil
+		}
+		result, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, formInstanceID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("form instance", formInstanceID)
+		}
+		return tx.auditTemporalWorkflowAction(ctx, result, action, comment, string(SeverityHigh))
 	})
 	if err != nil {
 		return domain.FormInstance{}, err
@@ -223,7 +304,7 @@ func (c WorkflowService) GetWorkflowFormState(ctx RequestContext, formInstanceID
 			if err != nil {
 				return domain.WorkflowFormStateResponse{}, err
 			}
-			if workflowAssigneeCanAct(assignees, ctx.AccountID) && current.StageType == "approver" {
+			if run.TemporalStartStatus == domain.WorkflowTemporalStartStarted && workflowAssigneeCanAct(assignees, ctx.AccountID) && current.StageType == "approver" {
 				canAct = true
 				allowed = []string{"approve", "reject", "return"}
 			}
@@ -247,16 +328,20 @@ func (c WorkflowService) GetWorkflowFormState(ctx RequestContext, formInstanceID
 		})
 	}
 	return domain.WorkflowFormStateResponse{
-		FormInstanceID:    formInstanceID,
-		FormStatus:        instance.Status,
-		RunID:             run.ID,
-		RunStatus:         run.Status,
-		CurrentStageID:    currentStageID,
-		CurrentStageLabel: currentStageLabel,
-		CanAct:            canAct,
-		AllowedActions:    allowed,
-		Steps:             steps,
-		Actions:           reviewLog,
+		FormInstanceID:      formInstanceID,
+		FormStatus:          instance.Status,
+		RunID:               run.ID,
+		RunStatus:           run.Status,
+		TemporalStartStatus: run.TemporalStartStatus,
+		TemporalWorkflowID:  run.TemporalWorkflowID,
+		TemporalRunID:       run.TemporalRunID,
+		TemporalStartedAt:   run.TemporalStartedAt,
+		CurrentStageID:      currentStageID,
+		CurrentStageLabel:   currentStageLabel,
+		CanAct:              canAct,
+		AllowedActions:      allowed,
+		Steps:               steps,
+		Actions:             reviewLog,
 	}, nil
 }
 
@@ -274,6 +359,12 @@ func (c WorkflowService) loadActiveWorkflowStage(ctx RequestContext, formInstanc
 	}
 	if !ok || run.Status != domain.WorkflowRunStatusRunning || run.CurrentStageInstanceID == "" {
 		return domain.FormInstance{}, domain.WorkflowRun{}, domain.WorkflowStageInstance{}, nil, BadRequest("form instance has no active workflow stage").WithReasonCode("workflow_stage_unavailable")
+	}
+	if run.TemporalStartStatus == domain.WorkflowTemporalStartPending || run.TemporalStartStatus == domain.WorkflowTemporalStartStarting {
+		return domain.FormInstance{}, domain.WorkflowRun{}, domain.WorkflowStageInstance{}, nil, Conflict("workflow is still starting").WithReasonCode("workflow_start_pending")
+	}
+	if run.TemporalStartStatus == domain.WorkflowTemporalStartAbandoned {
+		return domain.FormInstance{}, domain.WorkflowRun{}, domain.WorkflowStageInstance{}, nil, Conflict("workflow start was abandoned").WithReasonCode("workflow_start_abandoned")
 	}
 	stageInstance, ok, err := c.store.GetWorkflowStageInstance(goContext(ctx), ctx.TenantID, run.CurrentStageInstanceID)
 	if err != nil {
@@ -501,6 +592,9 @@ func (c WorkflowService) activateApprovalStage(ctx RequestContext, run domain.Wo
 	if !templateOK {
 		template = domain.FormTemplate{ID: run.TemplateID}
 	}
+	if run.TemporalStartStatus != domain.WorkflowTemporalStartStarted {
+		return nil
+	}
 	return c.notifyWorkflowPendingApprovers(ctx, instance, template, applicant, stage, assigneeIDs)
 }
 
@@ -671,15 +765,28 @@ func (c WorkflowService) recordWorkflowAction(ctx RequestContext, run domain.Wor
 	if accountID == "" && (action == "notify" || action == "auto_condition") {
 		accountID = "system"
 	}
+	idempotencyKey := ""
+	commandFingerprint := ""
+	switch strings.ToLower(strings.TrimSpace(action)) {
+	case domain.FormApprovalWorkflowActionApprove, domain.FormApprovalWorkflowActionReject, domain.FormApprovalWorkflowActionReturn, domain.FormApprovalWorkflowActionWithdraw:
+		idempotencyKey = strings.TrimSpace(ctx.IdempotencyKey)
+		if idempotencyKey != "" {
+			commandFingerprint = workflowCommandFingerprint(run.ID, accountID, action, comment)
+		}
+	}
 	return c.store.InsertWorkflowAction(goContext(ctx), domain.WorkflowAction{
-		ID:              utils.NewID("wfa"),
-		TenantID:        ctx.TenantID,
-		RunID:           run.ID,
-		StageInstanceID: stageInstance.ID,
-		AccountID:       accountID,
-		Action:          action,
-		Comment:         strings.TrimSpace(comment),
-		CreatedAt:       at,
+		ID:                 utils.NewID("wfa"),
+		TenantID:           ctx.TenantID,
+		RunID:              run.ID,
+		StageInstanceID:    stageInstance.ID,
+		AccountID:          accountID,
+		Action:             action,
+		Comment:            strings.TrimSpace(comment),
+		IdempotencyKey:     idempotencyKey,
+		CommandFingerprint: commandFingerprint,
+		RequestID:          strings.TrimSpace(ctx.RequestID),
+		TraceID:            strings.TrimSpace(ctx.TraceID),
+		CreatedAt:          at,
 	})
 }
 
@@ -996,7 +1103,7 @@ func workflowFormInstancePendingForAccount(ctx RequestContext, store workflowSto
 		if err != nil {
 			return nil, err
 		}
-		if !ok || run.Status != domain.WorkflowRunStatusRunning {
+		if !ok || run.Status != domain.WorkflowRunStatusRunning || run.TemporalStartStatus != domain.WorkflowTemporalStartStarted {
 			continue
 		}
 		out[run.FormInstanceID] = struct{}{}

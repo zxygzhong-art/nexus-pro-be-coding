@@ -200,6 +200,15 @@ func runTemporalBackfillFormWorkflows(args []string) error {
 			})
 			continue
 		}
+		if strings.EqualFold(strings.TrimSpace(item.Status), domain.WorkflowFormStatusWorkflowStartFailed) {
+			result.Skipped++
+			result.Items = append(result.Items, temporalBackfillFormWorkflowResultItem{
+				FormInstanceID: item.ID,
+				Status:         item.Status,
+				Action:         "skip_compensated_start_failure",
+			})
+			continue
+		}
 		if !temporalBackfillCandidateStatus(item.Status) {
 			result.Skipped++
 			continue
@@ -226,6 +235,22 @@ func runTemporalBackfillFormWorkflows(args []string) error {
 			})
 			continue
 		}
+		if ok && (run.TemporalStartStatus == domain.WorkflowTemporalStartPending || run.TemporalStartStatus == domain.WorkflowTemporalStartStarting || run.TemporalStartStatus == domain.WorkflowTemporalStartAbandoned) {
+			result.Skipped++
+			action := "skip_outbox_managed_pending_start"
+			if run.TemporalStartStatus == domain.WorkflowTemporalStartStarting {
+				action = "skip_outbox_managed_starting"
+			} else if run.TemporalStartStatus == domain.WorkflowTemporalStartAbandoned {
+				action = "skip_abandoned_start"
+			}
+			result.Items = append(result.Items, temporalBackfillFormWorkflowResultItem{
+				FormInstanceID: item.ID,
+				Status:         item.Status,
+				WorkflowRunID:  run.ID,
+				Action:         action,
+			})
+			continue
+		}
 		resultItem := temporalBackfillFormWorkflowResultItem{
 			FormInstanceID: item.ID,
 			Status:         item.Status,
@@ -238,6 +263,7 @@ func runTemporalBackfillFormWorkflows(args []string) error {
 		}
 		if ok {
 			start.RunID = run.ID
+			start.WorkflowID = domain.ResolveFormApprovalWorkflowID(run.TemporalWorkflowID, result.TenantID, item.ID, "")
 			start.StageDefinitionsJSON = run.StageDefinitionsJSON
 			resultItem.WorkflowRunID = run.ID
 		}
@@ -246,7 +272,7 @@ func runTemporalBackfillFormWorkflows(args []string) error {
 			result.Items = append(result.Items, resultItem)
 			continue
 		}
-		active, err := temporalBackfillWorkflowActive(ctx, temporalClient, result.TenantID, item.ID)
+		active, err := temporalBackfillWorkflowActive(ctx, temporalClient, domain.ResolveFormApprovalWorkflowID(start.WorkflowID, result.TenantID, item.ID, ""))
 		if err != nil {
 			result.Failed++
 			resultItem.Action = "error"
@@ -261,13 +287,6 @@ func runTemporalBackfillFormWorkflows(args []string) error {
 			continue
 		}
 		if err := workflowClient.StartFormApprovalWorkflow(ctx, start); err != nil {
-			result.Failed++
-			resultItem.Action = "error"
-			resultItem.Error = err.Error()
-			result.Items = append(result.Items, resultItem)
-			continue
-		}
-		if err := restoreFormApprovalAfterTemporalBackfill(ctx, store, result.TenantID, item, run, ok); err != nil {
 			result.Failed++
 			resultItem.Action = "error"
 			resultItem.Error = err.Error()
@@ -845,7 +864,7 @@ func firstNonEmpty(values ...string) string {
 
 func temporalBackfillCandidateStatus(status string) bool {
 	switch strings.TrimSpace(strings.ToLower(status)) {
-	case "submitted", "in_review", "pending", "pending_review", domain.WorkflowFormStatusWorkflowStartFailed:
+	case "submitted", "in_review", "pending", "pending_review":
 		return true
 	default:
 		return false
@@ -861,42 +880,11 @@ func temporalBackfillTerminalRunStatus(status string) bool {
 	}
 }
 
-func restoreFormApprovalAfterTemporalBackfill(
-	ctx context.Context,
-	store *postgresrepo.Store,
-	tenantID string,
-	item domain.FormInstance,
-	run domain.WorkflowRun,
-	hasRun bool,
-) error {
-	now := time.Now().UTC()
-	changed := false
-	if strings.EqualFold(strings.TrimSpace(item.Status), domain.WorkflowFormStatusWorkflowStartFailed) {
-		item.Status = domain.WorkflowFormStatusInReview
-		item.UpdatedAt = now
-		changed = true
-	}
-	if changed {
-		if err := store.UpsertFormInstance(ctx, item); err != nil {
-			return err
-		}
-	}
-	if hasRun && strings.EqualFold(strings.TrimSpace(run.Status), domain.WorkflowRunStatusStartFailed) {
-		run.Status = domain.WorkflowRunStatusRunning
-		run.UpdatedAt = now
-		if err := store.UpsertWorkflowRun(ctx, run); err != nil {
-			return err
-		}
-	}
-	_ = tenantID
-	return nil
-}
-
-func temporalBackfillWorkflowActive(ctx context.Context, client sdkclient.Client, tenantID, formInstanceID string) (bool, error) {
+func temporalBackfillWorkflowActive(ctx context.Context, client sdkclient.Client, workflowID string) (bool, error) {
 	if client == nil {
 		return false, nil
 	}
-	description, err := client.DescribeWorkflow(ctx, domain.FormApprovalWorkflowID(tenantID, formInstanceID), "")
+	description, err := client.DescribeWorkflow(ctx, workflowID, "")
 	if err != nil {
 		var notFound *serviceerror.NotFound
 		if errors.As(err, &notFound) {

@@ -15,39 +15,43 @@ import (
 
 // Service 定義服務的資料結構。
 type Service struct {
-	store                   repository.Store
-	now                     func() time.Time
-	logger                  *slog.Logger
-	authzSnapshot           AuthzSnapshotCache
-	relationships           RelationshipChecker
-	openFGAScopeChecks      bool
-	agentChatRuntime        AgentChatRuntime
-	liteLLMAdmin            LiteLLMAdminClient
-	knowledgeEmbedder       KnowledgeEmbedder
-	objectStore             ObjectStore
-	ehrmsClient             EHRMSClient
-	identityProvisioner     IdentityProvisioner
-	identityPasswordChanger IdentityPasswordChanger
-	formApprovalWorkflows   FormApprovalWorkflowClient
-	credentialCipher        CredentialCipher
+	store                      repository.Store
+	now                        func() time.Time
+	logger                     *slog.Logger
+	authzSnapshot              AuthzSnapshotCache
+	relationships              RelationshipChecker
+	openFGAScopeChecks         bool
+	agentChatRuntime           AgentChatRuntime
+	liteLLMAdmin               LiteLLMAdminClient
+	knowledgeEmbedder          KnowledgeEmbedder
+	objectStore                ObjectStore
+	ehrmsClient                EHRMSClient
+	identityProvisioner        IdentityProvisioner
+	identityPasswordChanger    IdentityPasswordChanger
+	formApprovalWorkflows      FormApprovalWorkflowClient
+	workflowStartOutboxEnabled bool
+	outboxWake                 func()
+	credentialCipher           CredentialCipher
 }
 
 // Options 定義選項的資料結構。
 type Options struct {
-	Logger                  *slog.Logger
-	Now                     func() time.Time
-	AuthzSnapshot           AuthzSnapshotCache
-	Relationships           RelationshipChecker
-	OpenFGAScopeChecks      bool
-	AgentChatRuntime        AgentChatRuntime
-	LiteLLMAdmin            LiteLLMAdminClient
-	KnowledgeEmbedder       KnowledgeEmbedder
-	ObjectStore             ObjectStore
-	EHRMSClient             EHRMSClient
-	IdentityProvisioner     IdentityProvisioner
-	IdentityPasswordChanger IdentityPasswordChanger
-	FormApprovalWorkflows   FormApprovalWorkflowClient
-	CredentialCipher        CredentialCipher
+	Logger                     *slog.Logger
+	Now                        func() time.Time
+	AuthzSnapshot              AuthzSnapshotCache
+	Relationships              RelationshipChecker
+	OpenFGAScopeChecks         bool
+	AgentChatRuntime           AgentChatRuntime
+	LiteLLMAdmin               LiteLLMAdminClient
+	KnowledgeEmbedder          KnowledgeEmbedder
+	ObjectStore                ObjectStore
+	EHRMSClient                EHRMSClient
+	IdentityProvisioner        IdentityProvisioner
+	IdentityPasswordChanger    IdentityPasswordChanger
+	FormApprovalWorkflows      FormApprovalWorkflowClient
+	WorkflowStartOutboxEnabled bool
+	OutboxWake                 func()
+	CredentialCipher           CredentialCipher
 }
 
 // CredentialCipher encrypts persisted secrets with contextual associated data.
@@ -116,21 +120,29 @@ func New(store repository.Store, options ...Options) *Service {
 		now = cfg.Now
 	}
 	return &Service{
-		store:                   store,
-		now:                     now,
-		logger:                  logger,
-		authzSnapshot:           cfg.AuthzSnapshot,
-		relationships:           cfg.Relationships,
-		openFGAScopeChecks:      cfg.OpenFGAScopeChecks,
-		agentChatRuntime:        cfg.AgentChatRuntime,
-		liteLLMAdmin:            cfg.LiteLLMAdmin,
-		knowledgeEmbedder:       cfg.KnowledgeEmbedder,
-		objectStore:             firstObjectStore(cfg.ObjectStore),
-		ehrmsClient:             cfg.EHRMSClient,
-		identityProvisioner:     cfg.IdentityProvisioner,
-		identityPasswordChanger: cfg.IdentityPasswordChanger,
-		formApprovalWorkflows:   cfg.FormApprovalWorkflows,
-		credentialCipher:        cfg.CredentialCipher,
+		store:                      store,
+		now:                        now,
+		logger:                     logger,
+		authzSnapshot:              cfg.AuthzSnapshot,
+		relationships:              cfg.Relationships,
+		openFGAScopeChecks:         cfg.OpenFGAScopeChecks,
+		agentChatRuntime:           cfg.AgentChatRuntime,
+		liteLLMAdmin:               cfg.LiteLLMAdmin,
+		knowledgeEmbedder:          cfg.KnowledgeEmbedder,
+		objectStore:                firstObjectStore(cfg.ObjectStore),
+		ehrmsClient:                cfg.EHRMSClient,
+		identityProvisioner:        cfg.IdentityProvisioner,
+		identityPasswordChanger:    cfg.IdentityPasswordChanger,
+		formApprovalWorkflows:      cfg.FormApprovalWorkflows,
+		workflowStartOutboxEnabled: cfg.WorkflowStartOutboxEnabled,
+		outboxWake:                 cfg.OutboxWake,
+		credentialCipher:           cfg.CredentialCipher,
+	}
+}
+
+func (c *Service) wakeOutboxDispatcher() {
+	if c != nil && c.outboxWake != nil {
+		c.outboxWake()
 	}
 }
 

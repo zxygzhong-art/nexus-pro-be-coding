@@ -456,7 +456,7 @@ func (c WorkflowService) DeleteFormDraft(ctx RequestContext, id string) (FormIns
 	return deleted, nil
 }
 
-// SubmitForm persists a canonical submission and compensates projections when Temporal cannot start.
+// SubmitForm persists a canonical submission before delivering its Temporal start.
 func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (FormInstance, error) {
 	idOrTemplateKey := strings.TrimSpace(input.TemplateKey)
 	if idOrTemplateKey == "" {
@@ -473,6 +473,9 @@ func (c WorkflowService) SubmitForm(ctx RequestContext, input SubmitFormInput) (
 	}
 	if err != nil {
 		return FormInstance{}, err
+	}
+	if c.workflowStartOutboxEnabled {
+		return instance, nil
 	}
 	if startErr := c.startTemporalFormApprovalWorkflow(ctx, instance); startErr != nil {
 		return FormInstance{}, c.compensateFormApprovalWorkflowStartFailure(ctx, instance, startErr)
@@ -592,6 +595,9 @@ func (c WorkflowService) submitNewFormForApplicant(ctx RequestContext, account A
 		"template_key", template.Key,
 		"status", instance.Status,
 	)
+	if c.workflowStartOutboxEnabled {
+		c.wakeOutboxDispatcher()
+	}
 	return instance, nil
 }
 
@@ -722,6 +728,9 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 			"hours", linkedOvertimeRequest.Hours,
 		)
 	}
+	if c.workflowStartOutboxEnabled {
+		c.wakeOutboxDispatcher()
+	}
 	return instance, nil
 }
 
@@ -786,6 +795,29 @@ func (c WorkflowService) CancelForm(ctx RequestContext, id string, input CancelF
 	}
 	if err := requireFormInstanceVisible(current, account, decision); err != nil {
 		return FormInstance{}, err
+	}
+	if run, ok, runErr := c.store.GetWorkflowRunByFormInstance(goContext(ctx), ctx.TenantID, id); runErr != nil {
+		return FormInstance{}, runErr
+	} else if ok {
+		switch run.TemporalStartStatus {
+		case domain.WorkflowTemporalStartPending, domain.WorkflowTemporalStartStarting:
+			instance, cancelErr := c.cancelPendingTemporalFormApproval(ctx, id, input.Reason)
+			if cancelErr != nil {
+				return FormInstance{}, cancelErr
+			}
+			if err := authzAudit.Commit(ctx); err != nil {
+				return FormInstance{}, err
+			}
+			c.wakeOutboxDispatcher()
+			return instance, nil
+		case domain.WorkflowTemporalStartAbandoned:
+			if run.Status == domain.WorkflowRunStatusCancelled && current.Status == workflowFormStatusCancelled {
+				if err := authzAudit.Commit(ctx); err != nil {
+					return FormInstance{}, err
+				}
+				return current, nil
+			}
+		}
 	}
 	instance, err := c.signalTemporalFormApprovalWorkflow(ctx, id, domain.FormApprovalWorkflowActionWithdraw, workflowFormStatusCancelled, input.Reason)
 	if err != nil {

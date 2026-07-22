@@ -83,13 +83,14 @@ func (c HRService) SyncEHRMSOrgUnits(ctx RequestContext) (EHRMSOrgUnitSyncRespon
 		return EHRMSOrgUnitSyncResponse{}, ehrmsFetchError("positions", err)
 	}
 	now := c.Now()
+	departments := filterOpenEHRMSOrgUnits(EHRMSOrgUnitsFromDepartments(ctx.TenantID, departmentRecords, now))
+	// Manager-position FKs only need jobs referenced by open departments being upserted.
 	positions := mergeEHRMSPositionsWithDepartmentManagers(
 		EHRMSPositionsFromRecords(ctx.TenantID, positionRecords, now),
 		ctx.TenantID,
-		departmentRecords,
+		filterEHRMSDepartmentRecordsByOrgUnits(departmentRecords, departments),
 		now,
 	)
-	departments := EHRMSOrgUnitsFromDepartments(ctx.TenantID, departmentRecords, now)
 	response := EHRMSOrgUnitSyncResponse{Fetched: len(departmentRecords)}
 	if err := c.withTransaction(ctx, func(tx HRService) error {
 		if _, err := tx.UpsertEHRMSPositions(ctx, positions); err != nil {
@@ -162,6 +163,8 @@ func (c HRService) SyncEHRMSPositions(ctx RequestContext) (EHRMSPositionSyncResp
 }
 
 // SyncEHRMSEmployees synchronizes tenant-wide employee data only for tenant-wide grants.
+// Only employees whose department code already exists in the local org catalog are synced;
+// unknown upstream departments are ignored (run SyncEHRMSOrgUnits first to admit them).
 func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyncInput) (EHRMSEmployeeSyncResponse, error) {
 	if c.ehrmsClient == nil {
 		return EHRMSEmployeeSyncResponse{}, BadRequest("eHRMS is not configured")
@@ -178,11 +181,17 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 	if err := requireTenantWideEHRMSSyncScope(decision); err != nil {
 		return EHRMSEmployeeSyncResponse{}, err
 	}
+	localUnits, err := c.store.ListOrgUnits(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return EHRMSEmployeeSyncResponse{}, err
+	}
+	localDeptCodes := ehrmsOrgUnitCodeSet(localUnits)
 	departmentRecords, err := c.ehrmsClient.ListDepartments(goContext(ctx))
 	if err != nil {
 		c.logWarn(ctx, "eHRMS department fetch failed", "error", err)
 		return EHRMSEmployeeSyncResponse{}, ehrmsFetchError("departments", err)
 	}
+	departmentRecords = filterEHRMSDepartmentRecordsByCodes(departmentRecords, localDeptCodes)
 	positionRecords, err := c.ehrmsClient.ListPositions(goContext(ctx))
 	if err != nil {
 		c.logWarn(ctx, "eHRMS position fetch failed", "error", err)
@@ -193,6 +202,7 @@ func (c HRService) SyncEHRMSEmployees(ctx RequestContext, input EHRMSEmployeeSyn
 		c.logWarn(ctx, "eHRMS employee fetch failed", "error", err)
 		return EHRMSEmployeeSyncResponse{}, ehrmsFetchError("employees", err)
 	}
+	records = filterEHRMSEmployeesByDepartmentCodes(records, localDeptCodes)
 	response := EHRMSEmployeeSyncResponse{Fetched: len(records), Mode: mode}
 	now := c.Now()
 	departments := EHRMSOrgUnitsFromDepartments(ctx.TenantID, departmentRecords, now)
@@ -824,6 +834,69 @@ func (c HRService) UpsertEHRMSPositions(ctx RequestContext, positions []Position
 		}
 	}
 	return len(positions), nil
+}
+
+// filterOpenEHRMSOrgUnits keeps only departments that are not closed (including parent-propagated closed).
+func filterOpenEHRMSOrgUnits(units []OrgUnit) []OrgUnit {
+	if len(units) == 0 {
+		return units
+	}
+	out := make([]OrgUnit, 0, len(units))
+	for _, unit := range units {
+		if unit.Closed {
+			continue
+		}
+		out = append(out, unit)
+	}
+	return out
+}
+
+// ehrmsOrgUnitCodeSet indexes local org-unit business codes for eHRMS sync filters.
+func ehrmsOrgUnitCodeSet(units []OrgUnit) map[string]struct{} {
+	out := make(map[string]struct{}, len(units))
+	for _, unit := range units {
+		if key := ehrmsExternalCodeKey(unit.Code); key != "" {
+			out[key] = struct{}{}
+		}
+	}
+	return out
+}
+
+// filterEHRMSDepartmentRecordsByCodes keeps upstream department rows whose codes are in the allow-list.
+func filterEHRMSDepartmentRecordsByCodes(records []EHRMSDepartmentRecord, codes map[string]struct{}) []EHRMSDepartmentRecord {
+	if len(records) == 0 || len(codes) == 0 {
+		return nil
+	}
+	out := make([]EHRMSDepartmentRecord, 0, len(codes))
+	for _, record := range records {
+		code := ehrmsExternalCodeKey(ehrmsValue(record, ehrmsFieldDepartmentCode))
+		if _, ok := codes[code]; !ok {
+			continue
+		}
+		out = append(out, record)
+	}
+	return out
+}
+
+// filterEHRMSDepartmentRecordsByOrgUnits keeps upstream department rows whose codes match the given org units.
+func filterEHRMSDepartmentRecordsByOrgUnits(records []EHRMSDepartmentRecord, units []OrgUnit) []EHRMSDepartmentRecord {
+	return filterEHRMSDepartmentRecordsByCodes(records, ehrmsOrgUnitCodeSet(units))
+}
+
+// filterEHRMSEmployeesByDepartmentCodes keeps upstream employees assigned to allow-listed department codes.
+func filterEHRMSEmployeesByDepartmentCodes(records []EHRMSEmployeeRecord, codes map[string]struct{}) []EHRMSEmployeeRecord {
+	if len(records) == 0 || len(codes) == 0 {
+		return nil
+	}
+	out := make([]EHRMSEmployeeRecord, 0, len(records))
+	for _, record := range records {
+		code := ehrmsExternalCodeKey(ehrmsValue(record, ehrmsFieldDepartmentCode))
+		if _, ok := codes[code]; !ok {
+			continue
+		}
+		out = append(out, record)
+	}
+	return out
 }
 
 // EHRMSOrgUnitsFromDepartments maps upstream department records into the canonical organization hierarchy.

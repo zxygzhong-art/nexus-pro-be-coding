@@ -16,6 +16,8 @@ type fakeFormApprovalWorkflowClient struct {
 	signals   []domain.FormApprovalWorkflowSignal
 	startErr  error
 	failStart bool
+	startSeen chan<- struct{}
+	startGate <-chan struct{}
 }
 
 func newServiceWithFakeFormApprovalWorkflows(store repository.Store, options service.Options) (*service.Service, *fakeFormApprovalWorkflowClient) {
@@ -31,6 +33,12 @@ func newServiceWithFakeFormApprovalWorkflows(store repository.Store, options ser
 
 func (c *fakeFormApprovalWorkflowClient) StartFormApprovalWorkflow(_ context.Context, start domain.FormApprovalWorkflowStart) error {
 	c.starts = append(c.starts, start)
+	if c.startSeen != nil {
+		c.startSeen <- struct{}{}
+	}
+	if c.startGate != nil {
+		<-c.startGate
+	}
 	if c.failStart {
 		if c.startErr != nil {
 			return c.startErr

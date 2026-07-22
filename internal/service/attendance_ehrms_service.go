@@ -2,7 +2,10 @@ package service
 
 import (
 	"crypto/sha1"
+	"encoding/json"
 	"fmt"
+	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -11,7 +14,11 @@ import (
 	"nexus-pro-api/internal/utils"
 )
 
+var ehrmsNumberPattern = regexp.MustCompile(`[0-9]+(?:\.[0-9]+)?`)
+
 const (
+	leaveTypeUnknownCode = "unknown_leave_type"
+
 	ehrmsAttendanceFieldEmployeeNo      = "員工編號"
 	ehrmsAttendanceFieldDate            = "日期"
 	ehrmsAttendanceFieldShiftStart      = "班別開始"
@@ -42,24 +49,33 @@ const (
 	ehrmsAttendanceSource               = "ehrms"
 	defaultEHRMSAttendanceSyncWindow    = 30 * 24 * time.Hour
 
-	ehrmsLeaveBalanceFieldEmployeeNo  = "員工編號"
-	ehrmsLeaveBalanceFieldYear        = "年度"
-	ehrmsLeaveBalanceFieldLeaveType   = "假別"
-	ehrmsLeaveBalanceFieldUnit        = "單位"
-	ehrmsLeaveBalanceFieldQuota       = "額度"
-	ehrmsLeaveBalanceFieldUsed        = "已使用"
-	ehrmsLeaveBalanceFieldRemaining   = "餘額"
-	ehrmsLeaveBalanceFieldGrantStart  = "發放起始日"
-	ehrmsLeaveBalanceFieldExpireDate  = "到期日"
-	ehrmsLeaveBalanceFieldCarryIn     = "遞延餘額"
-	ehrmsLeaveBalanceFieldCarryExpire = "遞延到期日"
+	ehrmsLeaveBalanceFieldEmployeeNo   = "員工編號"
+	ehrmsLeaveBalanceFieldYear         = "年度"
+	ehrmsLeaveBalanceFieldLeaveType    = "假別"
+	ehrmsLeaveBalanceFieldUnit         = "單位"
+	ehrmsLeaveBalanceFieldQuota        = "額度"
+	ehrmsLeaveBalanceFieldUsed         = "已使用"
+	ehrmsLeaveBalanceFieldRemaining    = "餘額"
+	ehrmsLeaveBalanceFieldGrantStart   = "發放起始日"
+	ehrmsLeaveBalanceFieldExpireDate   = "到期日"
+	ehrmsLeaveBalanceFieldCarryIn      = "遞延餘額"
+	ehrmsLeaveBalanceFieldCarryExpire  = "遞延到期日"
+	ehrmsLeaveBalanceFieldLeaveCode    = "假別代碼"
+	ehrmsLeaveBalanceFieldCategoryCode = "假別類別代碼"
 
-	ehrmsLeaveDetailFieldEmployeeNo = "員工編號"
-	ehrmsLeaveDetailFieldDate       = "日期"
-	ehrmsLeaveDetailFieldLeaveType  = "假別"
-	ehrmsLeaveDetailFieldStart      = "開始時間"
-	ehrmsLeaveDetailFieldEnd        = "結束時間"
-	ehrmsLeaveDetailFieldHours      = "時數"
+	ehrmsLeaveDetailFieldEmployeeNo   = "員工編號"
+	ehrmsLeaveDetailFieldDate         = "日期"
+	ehrmsLeaveDetailFieldLeaveType    = "假別"
+	ehrmsLeaveDetailFieldStart        = "開始時間"
+	ehrmsLeaveDetailFieldEnd          = "結束時間"
+	ehrmsLeaveDetailFieldHours        = "時數"
+	ehrmsLeaveDetailFieldLeaveCode    = "假別代碼"
+	ehrmsLeaveDetailFieldCategoryCode = "假別類別代碼"
+	ehrmsLeaveDetailFieldLeaveItem    = "假勤項目"
+	ehrmsLeaveDetailFieldRemark       = "備註"
+	ehrmsLeaveDetailFieldSource       = "資料來源"
+	ehrmsLeaveDetailFieldDeductItem   = "扣除項目"
+	ehrmsLeaveDetailFieldDeductHours  = "扣除時間"
 )
 
 var ehrmsAttendanceOnlyLeaveTypes = map[string]struct{}{
@@ -289,18 +305,16 @@ func (c AttendanceService) syncEHRMSLeaveBalanceRecord(ctx RequestContext, recor
 	return ehrmsAttendanceSyncResult{action: "upserted", result: BatchEmployeeResult{RowNumber: rowNumber, EmployeeID: employee.ID, Success: true, Action: "upserted", Message: "upserted"}}
 }
 
-// syncEHRMSLeaveDetailRecord excludes attendance metrics before persisting an approved external leave request.
+// syncEHRMSLeaveDetailRecord persists an eHRMS fact independently from Nexus
+// workflow requests, then reconciles exact dual-entry matches.
 func (c AttendanceService) syncEHRMSLeaveDetailRecord(ctx RequestContext, record domain.EHRMSLeaveDetailRecord, rowNumber int, mode string, since string) ehrmsAttendanceSyncResult {
 	leaveTypeRaw := ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldLeaveType)
 	if isEHRMSAttendanceOnlyLeaveType(leaveTypeRaw) {
 		return ehrmsAttendanceSkipped(rowNumber, "", "non_leave_detail_type", "attendance-only type was excluded from leave detail sync")
 	}
-	request, employeeNo, workDate, errors := c.ehrmsLeaveDetailCandidate(ctx, record, rowNumber)
+	external, employeeNo, _, errors := c.ehrmsLeaveDetailCandidate(ctx, record, rowNumber)
 	if len(errors) > 0 {
 		return ehrmsAttendanceFailed(rowNumber, errors)
-	}
-	if since != "" && workDate < since {
-		return ehrmsAttendanceSkipped(rowNumber, "", "before_since", "leave detail is before since date")
 	}
 	employee, ok, err := c.store.GetEmployeeByEmployeeNo(goContext(ctx), ctx.TenantID, employeeNo)
 	if err != nil {
@@ -309,9 +323,8 @@ func (c AttendanceService) syncEHRMSLeaveDetailRecord(ctx RequestContext, record
 	if !ok {
 		return ehrmsAttendanceSkipped(rowNumber, "", "employee_not_found", "employee_no was not found for eHRMS leave detail sync")
 	}
-	request.EmployeeID = employee.ID
-	request.ID = ehrmsStableID("ehrms-lr", ctx.TenantID, employee.EmployeeNo, workDate, request.LeaveType, request.StartAt.Format(time.RFC3339), request.EndAt.Format(time.RFC3339))
-	existing, exists, err := c.store.GetLeaveRequest(goContext(ctx), ctx.TenantID, request.ID)
+	external.EmployeeID = employee.ID
+	existing, exists, err := c.store.GetExternalLeaveRecordByRef(goContext(ctx), ctx.TenantID, ehrmsAttendanceSource, external.ExternalRef)
 	if err != nil {
 		return ehrmsAttendanceFailed(rowNumber, []RowError{{Row: rowNumber, Field: "leave_detail", Code: "store_error", Message: err.Error()}})
 	}
@@ -326,10 +339,14 @@ func (c AttendanceService) syncEHRMSLeaveDetailRecord(ctx RequestContext, record
 		}
 	}
 	if exists {
-		request.CreatedAt = existing.CreatedAt
+		external.ID = existing.ID
+		external.FirstSeenAt = existing.FirstSeenAt
 	}
-	if err := c.store.UpsertLeaveRequest(goContext(ctx), request); err != nil {
+	if err := c.store.UpsertExternalLeaveRecord(goContext(ctx), external); err != nil {
 		return ehrmsAttendanceFailed(rowNumber, []RowError{{Row: rowNumber, Field: "leave_detail", Code: "store_error", Message: err.Error()}})
+	}
+	if err := c.reconcileExternalLeaveRecord(ctx, external); err != nil {
+		return ehrmsAttendanceFailed(rowNumber, []RowError{{Row: rowNumber, Field: "leave_detail", Code: "reconciliation_error", Message: err.Error()}})
 	}
 	action := "created"
 	if exists {
@@ -353,18 +370,18 @@ func (c AttendanceService) ehrmsAttendanceSummaryCandidate(ctx RequestContext, r
 		asOf = parsed
 	}
 	leaveTypeRaw := ehrmsAttendanceValue(record, ehrmsAttendanceFieldLeaveType)
-	leaveType, _, leaveTypeFound, mappingErr := c.resolveExternalLeaveTypeCode(ctx, ehrmsAttendanceSource, leaveTypeRaw, asOf)
+	leaveType, _, leaveTypeFound, mappingErr := c.resolveExternalLeaveTypeCode(ctx, ehrmsAttendanceSource, leaveTypeRaw, "", asOf)
 	if mappingErr != nil {
 		errors = append(errors, RowError{Row: rowNumber, Field: "leave_type", Code: "store_error", Message: mappingErr.Error()})
 	} else if leaveTypeRaw != "" && !leaveTypeFound {
-		errors = append(errors, RowError{Row: rowNumber, Field: "leave_type", Code: leaveSyncIssueUnmapped, Message: "leave_type requires HR mapping"})
+		errors = append(errors, RowError{Row: rowNumber, Field: "leave_type", Code: leaveTypeUnknownCode, Message: "leave_type is not in the tenant leave catalog"})
 	}
 	leave2TypeRaw := ehrmsAttendanceValue(record, ehrmsAttendanceFieldLeave2Type)
-	leave2Type, _, leave2TypeFound, mappingErr := c.resolveExternalLeaveTypeCode(ctx, ehrmsAttendanceSource, leave2TypeRaw, asOf)
+	leave2Type, _, leave2TypeFound, mappingErr := c.resolveExternalLeaveTypeCode(ctx, ehrmsAttendanceSource, leave2TypeRaw, "", asOf)
 	if mappingErr != nil {
 		errors = append(errors, RowError{Row: rowNumber, Field: "leave2_type", Code: "store_error", Message: mappingErr.Error()})
 	} else if leave2TypeRaw != "" && !leave2TypeFound {
-		errors = append(errors, RowError{Row: rowNumber, Field: "leave2_type", Code: leaveSyncIssueUnmapped, Message: "leave2_type requires HR mapping"})
+		errors = append(errors, RowError{Row: rowNumber, Field: "leave2_type", Code: leaveTypeUnknownCode, Message: "leave2_type is not in the tenant leave catalog"})
 	}
 	shiftStart := normalizeEHRMSAttendanceTime(ehrmsAttendanceValue(record, ehrmsAttendanceFieldShiftStart))
 	if ehrmsAttendanceValue(record, ehrmsAttendanceFieldShiftStart) != "" && shiftStart == "" {
@@ -442,17 +459,19 @@ func (c AttendanceService) ehrmsLeaveBalanceCandidate(ctx RequestContext, record
 	errors := make([]RowError, 0)
 	employeeNo := ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldEmployeeNo)
 	leaveTypeRaw := ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldLeaveType)
+	externalLeaveCode := ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldLeaveCode)
+	externalCategoryCode := ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldCategoryCode)
 	periodStart := normalizeEHRMSAttendanceDate(ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldGrantStart))
 	periodEnd := normalizeEHRMSAttendanceDate(ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldExpireDate))
 	asOf := c.Now()
 	if parsed, err := time.Parse(time.DateOnly, periodStart); err == nil {
 		asOf = parsed
 	}
-	leaveType, leaveTypeID, leaveTypeFound, mappingErr := c.resolveExternalLeaveTypeCode(ctx, ehrmsAttendanceSource, leaveTypeRaw, asOf)
+	leaveType, leaveTypeID, leaveTypeFound, mappingErr := c.resolveEHRMSLeaveType(ctx, externalLeaveCode, externalCategoryCode, leaveTypeRaw, asOf)
 	if mappingErr != nil {
 		errors = append(errors, RowError{Row: rowNumber, Field: "leave_type", Code: "store_error", Message: mappingErr.Error()})
 	} else if leaveTypeRaw != "" && !leaveTypeFound {
-		errors = append(errors, RowError{Row: rowNumber, Field: "leave_type", Code: leaveSyncIssueUnmapped, Message: "leave_type requires HR mapping"})
+		errors = append(errors, RowError{Row: rowNumber, Field: "leave_type", Code: leaveTypeUnknownCode, Message: "leave_type is not in the tenant leave catalog"})
 	}
 	if employeeNo == "" {
 		errors = append(errors, RowError{Row: rowNumber, Field: "employee_no", Code: "required", Message: "employee_no is required"})
@@ -484,35 +503,50 @@ func (c AttendanceService) ehrmsLeaveBalanceCandidate(ctx RequestContext, record
 			remaining = 0
 		}
 	}
+	carryIn, ok := parseEHRMSLeaveBalanceNumber(ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldCarryIn), unit, dayHours)
+	if !ok {
+		errors = append(errors, RowError{Row: rowNumber, Field: "carry_in", Code: "invalid", Message: "carry_in must be a number"})
+	}
+	carryExpire := normalizeEHRMSAttendanceDate(ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldCarryExpire))
+	year, _ := ehrmsLeaveBalanceYear(record)
 	now := c.Now()
 	return LeaveBalance{
-		TenantID:       ctx.TenantID,
-		LeaveType:      leaveType,
-		LeaveTypeID:    leaveTypeID,
-		RemainingHours: remaining,
-		PeriodStart:    periodStart,
-		PeriodEnd:      periodEnd,
-		GrantedHours:   quota,
-		UsedHours:      used,
-		Source:         ehrmsAttendanceSource,
-		UpdatedAt:      now,
+		TenantID:             ctx.TenantID,
+		LeaveType:            leaveType,
+		LeaveTypeID:          leaveTypeID,
+		RemainingHours:       remaining,
+		PeriodStart:          periodStart,
+		PeriodEnd:            periodEnd,
+		GrantedHours:         quota,
+		UsedHours:            used,
+		Source:               ehrmsAttendanceSource,
+		ExternalLeaveCode:    externalLeaveCode,
+		ExternalCategoryCode: externalCategoryCode,
+		EntitlementYear:      year,
+		CarryInHours:         carryIn,
+		CarryExpire:          carryExpire,
+		RawPayload:           ehrmsStringPayload(map[string]string(record)),
+		LastSyncedAt:         &now,
+		UpdatedAt:            now,
 	}, employeeNo, errors
 }
 
-func (c AttendanceService) ehrmsLeaveDetailCandidate(ctx RequestContext, record domain.EHRMSLeaveDetailRecord, rowNumber int) (LeaveRequest, string, string, []RowError) {
+func (c AttendanceService) ehrmsLeaveDetailCandidate(ctx RequestContext, record domain.EHRMSLeaveDetailRecord, rowNumber int) (ExternalLeaveRecord, string, string, []RowError) {
 	errors := make([]RowError, 0)
 	employeeNo := ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldEmployeeNo)
 	workDate := normalizeEHRMSAttendanceDate(ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldDate))
 	leaveTypeRaw := ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldLeaveType)
+	externalLeaveCode := ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldLeaveCode)
+	externalCategoryCode := ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldCategoryCode)
 	asOf := c.Now()
 	if parsed, err := time.Parse(time.DateOnly, workDate); err == nil {
 		asOf = parsed
 	}
-	leaveType, leaveTypeID, leaveTypeFound, mappingErr := c.resolveExternalLeaveTypeCode(ctx, ehrmsAttendanceSource, leaveTypeRaw, asOf)
+	_, leaveTypeID, leaveTypeFound, mappingErr := c.resolveEHRMSLeaveType(ctx, externalLeaveCode, externalCategoryCode, leaveTypeRaw, asOf)
 	if mappingErr != nil {
 		errors = append(errors, RowError{Row: rowNumber, Field: "leave_type", Code: "store_error", Message: mappingErr.Error()})
 	} else if leaveTypeRaw != "" && !leaveTypeFound {
-		errors = append(errors, RowError{Row: rowNumber, Field: "leave_type", Code: leaveSyncIssueUnmapped, Message: "leave_type requires HR mapping"})
+		errors = append(errors, RowError{Row: rowNumber, Field: "leave_type", Code: leaveTypeUnknownCode, Message: "leave_type is not in the tenant leave catalog"})
 	}
 	if employeeNo == "" {
 		errors = append(errors, RowError{Row: rowNumber, Field: "employee_no", Code: "required", Message: "employee_no is required"})
@@ -538,12 +572,30 @@ func (c AttendanceService) ehrmsLeaveDetailCandidate(ctx RequestContext, record 
 	if !ok || hours <= 0 {
 		errors = append(errors, RowError{Row: rowNumber, Field: "hours", Code: "invalid", Message: "hours must be greater than zero"})
 	}
+	netMinutes := leaveMinutes(hours)
+	grossMinutes := int(endAt.Sub(startAt).Minutes())
+	deductMinutes := parseEHRMSDeductMinutes(ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldDeductHours))
+	if deductMinutes == 0 && grossMinutes > netMinutes {
+		deductMinutes = grossMinutes - netMinutes
+	}
+	if grossMinutes < netMinutes {
+		errors = append(errors, RowError{Row: rowNumber, Field: "hours", Code: "invalid", Message: "hours cannot exceed the leave interval"})
+	}
+	if deductMinutes+netMinutes > grossMinutes {
+		errors = append(errors, RowError{Row: rowNumber, Field: "deduct_hours", Code: "invalid", Message: "deduct_hours plus hours cannot exceed the leave interval"})
+	}
+	payload := ehrmsStringPayload(map[string]string(record))
+	payloadHash := ehrmsPayloadHash(payload)
+	externalRef := ehrmsStableID("ehrms-leave", employeeNo, leaveTypeID, externalLeaveCode, externalCategoryCode, startAt.Format(time.RFC3339), endAt.Format(time.RFC3339))
 	now := c.Now()
-	return LeaveRequest{
-		TenantID: ctx.TenantID, LeaveType: leaveType, LeaveTypeID: leaveTypeID,
-		RuleSnapshot:       map[string]any{"source": ehrmsAttendanceSource, "leave_type": leaveType},
-		EvaluationSnapshot: map[string]any{"source": ehrmsAttendanceSource, "eligible": true, "status": "approved_external"},
-		StartAt:            startAt, EndAt: endAt, Hours: hours, Reason: "eHRMS leave detail", Status: "approved", CreatedAt: now,
+	return ExternalLeaveRecord{
+		ID: ehrmsStableID("elr", ctx.TenantID, externalRef), TenantID: ctx.TenantID,
+		SourceSystem: ehrmsAttendanceSource, ExternalRef: externalRef,
+		ExternalLeaveCode: externalLeaveCode, ExternalCategoryCode: externalCategoryCode,
+		LeaveTypeID: leaveTypeID, LeaveName: utils.FirstNonEmpty(ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldLeaveItem), leaveTypeRaw),
+		StartAt: startAt, EndAt: endAt, GrossMinutes: grossMinutes, DeductMinutes: deductMinutes, NetMinutes: netMinutes,
+		Remark: ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldRemark), SourceLabel: ehrmsLeaveDetailValue(record, ehrmsLeaveDetailFieldSource),
+		Status: "active", RawPayload: payload, PayloadHash: payloadHash, FirstSeenAt: now, LastSeenAt: now,
 	}, employeeNo, workDate, errors
 }
 
@@ -665,6 +717,28 @@ func parseEHRMSLeaveDetailDateTime(workDate string, value string) (time.Time, bo
 	return time.Time{}, false
 }
 
+func parseEHRMSDeductMinutes(value string) int {
+	match := ehrmsNumberPattern.FindString(strings.TrimSpace(value))
+	if match == "" {
+		return 0
+	}
+	number, err := strconv.ParseFloat(match, 64)
+	if err != nil || number < 0 {
+		return 0
+	}
+	lower := strings.ToLower(value)
+	if strings.Contains(lower, "hour") || strings.Contains(value, "小時") || strings.Contains(value, "小时") {
+		number *= 60
+	}
+	return int(math.Round(number))
+}
+
+func ehrmsPayloadHash(payload map[string]any) string {
+	raw, _ := json.Marshal(payload)
+	sum := sha1.Sum(raw)
+	return fmt.Sprintf("%x", sum[:])
+}
+
 func ehrmsAttendanceTimeField(record domain.EHRMSAttendanceRecord, key string, rowNumber int, errors *[]RowError) string {
 	raw := ehrmsAttendanceValue(record, key)
 	value := normalizeEHRMSAttendanceTime(raw)
@@ -692,6 +766,10 @@ func ehrmsAttendanceBoolValue(record domain.EHRMSAttendanceRecord, key string) b
 }
 
 func ehrmsAttendancePayload(record domain.EHRMSAttendanceRecord) map[string]any {
+	return ehrmsStringPayload(map[string]string(record))
+}
+
+func ehrmsStringPayload(record map[string]string) map[string]any {
 	if len(record) == 0 {
 		return map[string]any{}
 	}
@@ -799,9 +877,41 @@ func ehrmsLeaveBalanceValue(record domain.EHRMSLeaveBalanceRecord, key string) s
 		return strings.TrimSpace(record["carry_in"])
 	case ehrmsLeaveBalanceFieldCarryExpire:
 		return strings.TrimSpace(record["carry_expire"])
+	case ehrmsLeaveBalanceFieldLeaveCode:
+		return strings.TrimSpace(record["leave_code"])
+	case ehrmsLeaveBalanceFieldCategoryCode:
+		return strings.TrimSpace(record["leave_category_code"])
 	default:
 		return ""
 	}
+}
+
+// ehrmsLeaveBalanceYear resolves the upstream leave-balance year from 年度, falling back to grant start.
+func ehrmsLeaveBalanceYear(record domain.EHRMSLeaveBalanceRecord) (int, bool) {
+	if year, ok := parseEHRMSLeaveBalanceYear(ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldYear)); ok {
+		return year, true
+	}
+	periodStart := normalizeEHRMSAttendanceDate(ehrmsLeaveBalanceValue(record, ehrmsLeaveBalanceFieldGrantStart))
+	if periodStart == "" {
+		return 0, false
+	}
+	parsed, err := time.Parse(time.DateOnly, periodStart)
+	if err != nil {
+		return 0, false
+	}
+	return parsed.Year(), true
+}
+
+func parseEHRMSLeaveBalanceYear(value string) (int, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, false
+	}
+	year, err := strconv.Atoi(value)
+	if err != nil || year < 1 {
+		return 0, false
+	}
+	return year, true
 }
 
 // isEHRMSAttendanceOnlyLeaveType rejects upstream attendance metrics that share the leave feeds.
@@ -830,6 +940,20 @@ func ehrmsLeaveDetailValue(record domain.EHRMSLeaveDetailRecord, key string) str
 		return strings.TrimSpace(record["end"])
 	case ehrmsLeaveDetailFieldHours:
 		return strings.TrimSpace(record["hours"])
+	case ehrmsLeaveDetailFieldLeaveCode:
+		return strings.TrimSpace(record["leave_code"])
+	case ehrmsLeaveDetailFieldCategoryCode:
+		return strings.TrimSpace(record["leave_category_code"])
+	case ehrmsLeaveDetailFieldLeaveItem:
+		return strings.TrimSpace(record["leave_item"])
+	case ehrmsLeaveDetailFieldRemark:
+		return strings.TrimSpace(record["remark"])
+	case ehrmsLeaveDetailFieldSource:
+		return strings.TrimSpace(record["source"])
+	case ehrmsLeaveDetailFieldDeductItem:
+		return strings.TrimSpace(record["deduct_item"])
+	case ehrmsLeaveDetailFieldDeductHours:
+		return strings.TrimSpace(record["deduct_hours"])
 	default:
 		return ""
 	}

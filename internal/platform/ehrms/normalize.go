@@ -108,6 +108,8 @@ var leaveBalanceFieldAliases = map[string]string{
 	"expire_date":  "到期日",
 	"carry_in":     "遞延餘額",
 	"carry_expire": "遞延到期日",
+	"leave_code": "假別代碼",
+	"leave_category_code": "假別類別代碼",
 }
 
 var leaveDetailFieldAliases = map[string]string{
@@ -117,6 +119,13 @@ var leaveDetailFieldAliases = map[string]string{
 	"start":      "開始時間",
 	"end":        "結束時間",
 	"hours":      "時數",
+	"leave_code": "假別代碼",
+	"leave_category_code": "假別類別代碼",
+	"leave_item": "假勤項目",
+	"remark": "備註",
+	"source": "資料來源",
+	"deduct_item": "扣除項目",
+	"deduct_hours": "扣除時間",
 }
 
 // NormalizeEmployeeRecords 將上游 JSON 欄位別名合併為服務層使用的 canonical key。

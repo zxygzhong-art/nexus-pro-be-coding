@@ -67,9 +67,11 @@ type Config struct {
 	OpenFGAAuthToken         string
 	OpenFGAScopeCheckEnabled bool
 
-	TemporalBaseURL   string
-	TemporalNamespace string
-	TemporalTaskQueue string
+	TemporalBaseURL            string
+	TemporalNamespace          string
+	TemporalTaskQueue          string
+	WorkflowStartOutboxEnabled bool
+	OutboxDispatchEnabled      bool
 
 	NATSEnabled        bool
 	NATSURL            string
@@ -297,9 +299,11 @@ func LoadE() (Config, error) {
 		OpenFGAAuthToken:         strings.TrimSpace(os.Getenv("OPENFGA_AUTH_TOKEN")),
 		OpenFGAScopeCheckEnabled: envBool("OPENFGA_SCOPE_CHECK_ENABLED", false, &problems),
 
-		TemporalBaseURL:   envAllowEmpty("TEMPORAL_BASE_URL", "127.0.0.1:27233"),
-		TemporalNamespace: env("TEMPORAL_NAMESPACE", "default"),
-		TemporalTaskQueue: env("TEMPORAL_TASK_QUEUE", "nexus-workflows"),
+		TemporalBaseURL:            envAllowEmpty("TEMPORAL_BASE_URL", "127.0.0.1:27233"),
+		TemporalNamespace:          env("TEMPORAL_NAMESPACE", "default"),
+		TemporalTaskQueue:          env("TEMPORAL_TASK_QUEUE", "nexus-workflows"),
+		WorkflowStartOutboxEnabled: envBool("WORKFLOW_START_OUTBOX_ENABLED", false, &problems),
+		OutboxDispatchEnabled:      envBool("OUTBOX_DISPATCH_ENABLED", true, &problems),
 
 		NATSEnabled:        envBool("NATS_ENABLED", false, &problems),
 		NATSURL:            env("NATS_BASE_URL", "nats://127.0.0.1:24222"),

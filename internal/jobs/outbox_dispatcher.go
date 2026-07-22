@@ -11,14 +11,23 @@ import (
 	"nexus-pro-api/internal/domain"
 	"nexus-pro-api/internal/platform/natsbus"
 	"nexus-pro-api/internal/repository"
+	"nexus-pro-api/internal/utils"
 )
 
 const (
-	defaultOutboxBatchSize  = 100
-	defaultOutboxMaxRetries = 5
-	defaultOutboxInterval   = 30 * time.Second
-	maxOutboxErrorLength    = 500
+	defaultOutboxBatchSize    = 100
+	defaultOutboxMaxRetries   = 5
+	defaultOutboxInterval     = 30 * time.Second
+	defaultOutboxClaimLease   = 5 * time.Minute
+	initialOutboxRetryBackoff = 30 * time.Second
+	maximumOutboxRetryBackoff = 10 * time.Minute
+	maxOutboxErrorLength      = 500
+	workflowStartOutboxEvent  = "workflow.form_approval.start_requested"
 )
+
+// ErrOutboxClaimLost indicates that another worker reclaimed an expired lease
+// before this worker persisted its result.
+var ErrOutboxClaimLost = errors.New("outbox claim is no longer owned by this worker")
 
 // RelationshipTupleWriter 定義關係 tuple writer 的行為契約。
 type RelationshipTupleWriter interface {
@@ -28,6 +37,29 @@ type RelationshipTupleWriter interface {
 // AgentModelSyncHandler 定義模型 outbox 事件的本地處理器。
 type AgentModelSyncHandler interface {
 	HandleAgentModelSyncEvent(context.Context, domain.OutboxEvent) error
+}
+
+// WorkflowStartHandler consumes workflow start requests locally before the
+// generic NATS publisher. This prevents infrastructure commands from being
+// published without a registered local convergence path.
+type WorkflowStartHandler interface {
+	HandleWorkflowStartEvent(context.Context, domain.OutboxEvent) error
+}
+
+type permanentOutboxError struct {
+	err error
+}
+
+func (e permanentOutboxError) Error() string { return e.err.Error() }
+func (e permanentOutboxError) Unwrap() error { return e.err }
+
+// MarkOutboxErrorPermanent marks invalid payload/configuration errors that
+// require operator correction instead of automatic retries.
+func MarkOutboxErrorPermanent(err error) error {
+	if err == nil {
+		return nil
+	}
+	return permanentOutboxError{err: err}
 }
 
 // NoopRelationshipTupleWriter 在未配置 OpenFGA 時接受 Write 並直接成功。
@@ -40,19 +72,25 @@ func (NoopRelationshipTupleWriter) WriteRelationshipTuples(context.Context, []do
 
 // OutboxDispatchOptions 定義 outbox dispatcher 選項的資料結構。
 type OutboxDispatchOptions struct {
-	BatchSize  int
-	MaxRetries int
-	Interval   time.Duration
+	BatchSize int
+	// MaxRetries is retained for source compatibility. Retry limits are now
+	// stored per event in max_attempts.
+	MaxRetries    int
+	Interval      time.Duration
+	LeaseDuration time.Duration
 }
 
 // OutboxDispatcher 消費統一 outbox_events,依 event_type 路由到對應 handler。
 type OutboxDispatcher struct {
-	store     repository.Store
-	writer    RelationshipTupleWriter
-	publisher natsbus.EventPublisher
-	modelSync AgentModelSyncHandler
-	logger    *slog.Logger
-	now       func() time.Time
+	store         repository.Store
+	writer        RelationshipTupleWriter
+	publisher     natsbus.EventPublisher
+	modelSync     AgentModelSyncHandler
+	workflowStart WorkflowStartHandler
+	logger        *slog.Logger
+	now           func() time.Time
+	wake          <-chan struct{}
+	workerID      string
 }
 
 // WithAgentModelSyncHandler 註冊不經 NATS 的 LiteLLM 模型同步 handler。
@@ -64,16 +102,45 @@ func (p *OutboxDispatcher) WithAgentModelSyncHandler(handler AgentModelSyncHandl
 	return p
 }
 
+// WithWorkflowStartHandler registers the local workflow-start convergence path.
+func (p *OutboxDispatcher) WithWorkflowStartHandler(handler WorkflowStartHandler) *OutboxDispatcher {
+	if p == nil {
+		return p
+	}
+	p.workflowStart = handler
+	return p
+}
+
+// WithWakeChannel lets committed producers wake the dispatcher without waiting
+// for the periodic crash-recovery ticker.
+func (p *OutboxDispatcher) WithWakeChannel(wake <-chan struct{}) *OutboxDispatcher {
+	if p == nil {
+		return p
+	}
+	p.wake = wake
+	return p
+}
+
+// WithClock installs a deterministic clock for tests and controlled jobs.
+func (p *OutboxDispatcher) WithClock(now func() time.Time) *OutboxDispatcher {
+	if p == nil || now == nil {
+		return p
+	}
+	p.now = now
+	return p
+}
+
 // NewOutboxDispatcher 建立統一 outbox dispatcher。
 func NewOutboxDispatcher(store repository.Store, writer RelationshipTupleWriter, logger *slog.Logger) *OutboxDispatcher {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &OutboxDispatcher{
-		store:  store,
-		writer: writer,
-		logger: logger,
-		now:    time.Now,
+		store:    store,
+		writer:   writer,
+		logger:   logger,
+		now:      time.Now,
+		workerID: utils.NewID("outbox-worker"),
 	}
 }
 
@@ -97,6 +164,12 @@ func (p *OutboxDispatcher) Run(ctx context.Context, opts OutboxDispatchOptions) 
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			p.processAllTenantsAndLog(ctx, opts)
+		case _, ok := <-p.wake:
+			if !ok {
+				p.wake = nil
+				continue
+			}
 			p.processAllTenantsAndLog(ctx, opts)
 		}
 	}
@@ -133,7 +206,16 @@ func (p *OutboxDispatcher) ProcessTenant(ctx context.Context, tenantID string, o
 	if p == nil || p.store == nil {
 		return 0, errors.New("outbox dispatcher requires store")
 	}
-	events, err := p.store.ClaimOutboxEvents(ctx, tenantID, opts.BatchSize, opts.MaxRetries)
+	claimedAt := p.now().UTC()
+	events, err := p.store.ClaimOutboxEvents(
+		ctx,
+		tenantID,
+		opts.BatchSize,
+		claimedAt,
+		claimedAt.Add(opts.LeaseDuration),
+		p.workerID,
+		utils.NewID("outbox-claim"),
+	)
 	if err != nil {
 		return 0, err
 	}
@@ -143,10 +225,13 @@ func (p *OutboxDispatcher) ProcessTenant(ctx context.Context, tenantID string, o
 			// Park unsupported types explicitly so operators can distinguish them
 			// from events currently owned by a worker.
 			// Reset to pending when a handler/publisher is later registered.
-			event.Status = "parked"
+			now := p.now().UTC()
+			event.Status = domain.OutboxStatusParked
 			event.LastError = truncateOutboxError("no handler registered for outbox event type " + event.EventType)
+			event.UpdatedAt = now
 			event.ProcessedAt = nil
-			if err := p.store.UpdateOutboxEvent(ctx, event); err != nil {
+			event.DeadLetteredAt = nil
+			if err := p.finalizeClaim(ctx, event); err != nil {
 				return processed, err
 			}
 			continue
@@ -163,26 +248,77 @@ func (p *OutboxDispatcher) ProcessTenant(ctx context.Context, tenantID string, o
 func (p *OutboxDispatcher) processEvent(ctx context.Context, event domain.OutboxEvent) error {
 	err := p.dispatchEvent(ctx, event)
 	now := p.now().UTC()
-	event.ProcessedAt = &now
+	event.UpdatedAt = now
 	if errors.Is(err, ErrLiteLLMModelSyncNotConfigured) {
-		event.Status = "pending"
+		// Missing optional runtime configuration should not exhaust a durable
+		// command. Release the lease and try later with backoff.
+		event.Status = domain.OutboxStatusPending
+		if event.AttemptCount > 0 {
+			event.AttemptCount--
+		}
+		event.NextAttemptAt = now.Add(initialOutboxRetryBackoff)
 		event.ProcessedAt = nil
+		event.DeadLetteredAt = nil
 		event.LastError = truncateOutboxError(err.Error())
-		return p.store.UpdateOutboxEvent(ctx, event)
+		return p.finalizeClaim(ctx, event)
 	}
 	if err != nil {
-		event.Status = "failed"
+		var permanent permanentOutboxError
+		if errors.As(err, &permanent) {
+			event.Status = domain.OutboxStatusParked
+			event.ProcessedAt = nil
+			event.DeadLetteredAt = nil
+			event.LastError = truncateOutboxError(err.Error())
+			return p.finalizeClaim(ctx, event)
+		}
 		event.RetryCount++
 		event.LastError = truncateOutboxError(err.Error())
-		return p.store.UpdateOutboxEvent(ctx, event)
+		maxAttempts := domain.DefaultOutboxMaxAttempts
+		if event.MaxAttempts != nil {
+			maxAttempts = *event.MaxAttempts
+		}
+		if maxAttempts > 0 && event.AttemptCount >= maxAttempts {
+			event.Status = domain.OutboxStatusDeadLettered
+			event.ProcessedAt = &now
+			event.DeadLetteredAt = &now
+			return p.finalizeClaim(ctx, event)
+		}
+		event.Status = domain.OutboxStatusFailed
+		event.NextAttemptAt = now.Add(outboxRetryBackoff(event.AttemptCount))
+		event.ProcessedAt = nil
+		event.DeadLetteredAt = nil
+		return p.finalizeClaim(ctx, event)
 	}
-	event.Status = "succeeded"
+	event.Status = domain.OutboxStatusSucceeded
 	event.LastError = ""
-	return p.store.UpdateOutboxEvent(ctx, event)
+	event.ProcessedAt = &now
+	event.DeadLetteredAt = nil
+	return p.finalizeClaim(ctx, event)
+}
+
+func (p *OutboxDispatcher) finalizeClaim(ctx context.Context, event domain.OutboxEvent) error {
+	updated, err := p.store.FinalizeOutboxEvent(ctx, event)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return fmt.Errorf("%w: event %s", ErrOutboxClaimLost, event.ID)
+	}
+	return nil
 }
 
 // dispatchEvent 依事件類型路由到對應 handler。
 func (p *OutboxDispatcher) dispatchEvent(ctx context.Context, event domain.OutboxEvent) error {
+	if event.EventType == workflowStartOutboxEvent {
+		if p.workflowStart == nil {
+			return errors.New("outbox dispatcher requires workflow start handler")
+		}
+		err := p.workflowStart.HandleWorkflowStartEvent(ctx, event)
+		if appErr, ok := domain.AsAppError(err); ok && appErr.Status >= 400 && appErr.Status < 500 {
+			return MarkOutboxErrorPermanent(err)
+		}
+		return err
+	}
 	if isAgentModelSyncEvent(event.EventType) {
 		if p.modelSync == nil {
 			return errors.New("outbox dispatcher requires agent model sync handler")
@@ -234,12 +370,18 @@ func normalizeOutboxDispatchOptions(opts OutboxDispatchOptions) OutboxDispatchOp
 	if opts.Interval <= 0 {
 		opts.Interval = defaultOutboxInterval
 	}
+	if opts.LeaseDuration <= 0 {
+		opts.LeaseDuration = defaultOutboxClaimLease
+	}
 	return opts
 }
 
 // isDispatchableEventType 判斷事件類型是否有可用 handler（狀態/重試由 Claim 過濾）。
 // NATS 啟用時改由 subject mapping 決定是否可發布;無映射事件保持不可派發。
 func (p *OutboxDispatcher) isDispatchableEventType(event domain.OutboxEvent) bool {
+	if event.EventType == workflowStartOutboxEvent {
+		return p != nil && p.workflowStart != nil
+	}
 	if isAgentModelSyncEvent(event.EventType) {
 		return p != nil && p.modelSync != nil
 	}
@@ -248,6 +390,17 @@ func (p *OutboxDispatcher) isDispatchableEventType(event domain.OutboxEvent) boo
 		return err == nil
 	}
 	return isOpenFGARelationshipEvent(event.EventType)
+}
+
+func outboxRetryBackoff(attemptCount int) time.Duration {
+	delay := initialOutboxRetryBackoff
+	for attempt := 1; attempt < attemptCount && delay < maximumOutboxRetryBackoff; attempt++ {
+		delay *= 2
+		if delay >= maximumOutboxRetryBackoff {
+			return maximumOutboxRetryBackoff
+		}
+	}
+	return delay
 }
 
 // isAgentModelSyncEvent 判斷是否為 LiteLLM 模型同步事件。
@@ -268,7 +421,7 @@ func relationshipChangeFromOutboxEvent(event domain.OutboxEvent) (domain.AuthzRe
 	}
 	payload, err := domain.DecodeOpenFGARelationshipPayload(event.Payload)
 	if err != nil {
-		return domain.AuthzRelationshipTupleChange{}, err
+		return domain.AuthzRelationshipTupleChange{}, MarkOutboxErrorPermanent(err)
 	}
 	tuple := domain.AuthzRelationshipTuple{
 		TenantID:    event.TenantID,
@@ -279,7 +432,7 @@ func relationshipChangeFromOutboxEvent(event domain.OutboxEvent) (domain.AuthzRe
 		SubjectID:   strings.TrimSpace(payload.SubjectID),
 	}
 	if tuple.ObjectType == "" || tuple.ObjectID == "" || tuple.Relation == "" || tuple.SubjectType == "" || tuple.SubjectID == "" {
-		return domain.AuthzRelationshipTupleChange{}, errors.New("openfga outbox payload missing relationship tuple fields")
+		return domain.AuthzRelationshipTupleChange{}, MarkOutboxErrorPermanent(errors.New("openfga outbox payload missing relationship tuple fields"))
 	}
 	return domain.AuthzRelationshipTupleChange{Operation: operation, Tuple: tuple}, nil
 }

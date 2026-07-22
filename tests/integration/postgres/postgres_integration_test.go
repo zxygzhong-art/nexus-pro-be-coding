@@ -237,7 +237,7 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 	if err := store.UpsertLeaveBalance(ctx, balance); err != nil {
 		t.Fatal(err)
 	}
-	updated, reserved, found, err := store.ReserveLeaveBalance(ctx, tenantA, empA, " annual ", 8, now, now.Add(time.Minute))
+	updated, reserved, found, err := store.ReserveLeaveBalance(ctx, tenantA, empA, domain.StableLeaveTypeID("annual"), 8, now, now.Add(time.Minute))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -636,7 +636,6 @@ func TestAttendanceClockHTTPPostgresFieldPolicy(t *testing.T) {
 	employeeAccountID := "acct_" + suffix + "_employee"
 	adminAccountID := "acct_" + suffix + "_admin"
 	worksiteID := "aws_" + suffix
-	shiftID := "ash_" + suffix
 	ctx = tenantScopedContext(tenantID)
 
 	if err := store.UpsertTenant(ctx, domain.Tenant{ID: tenantID, Name: tenantID, CreatedAt: now}); err != nil {
@@ -680,9 +679,6 @@ func TestAttendanceClockHTTPPostgresFieldPolicy(t *testing.T) {
 		t.Fatal(err)
 	}
 	if err := store.UpsertAttendanceWorksite(ctx, domain.AttendanceWorksite{ID: worksiteID, TenantID: tenantID, Name: "HQ", Latitude: 25.033964, Longitude: 121.564468, RadiusMeters: 200, Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.UpsertAttendanceShift(ctx, domain.AttendanceShift{ID: shiftID, TenantID: tenantID, Name: "Day Shift", ClockInStart: "08:00", ClockInEnd: "10:00", ClockOutStart: "17:00", ClockOutEnd: "19:00", Status: "active", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -823,7 +819,7 @@ func openIntegrationPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := config.DatabaseURLFromEnv()
 	if dsn == "" {
-		t.Skip("DB_* is not set; skipping postgres integration test")
+		skipRLSOrFail(t, "DB_* is not set; skipping postgres integration test")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
@@ -840,18 +836,18 @@ func tenantScopedContext(tenantID string) context.Context {
 	return tenantctx.WithTenantID(context.Background(), tenantID)
 }
 
-// openRLSIntegrationPool 開啟使用 NOSUPERUSER/NOBYPASSRLS 角色的連線池。
-// RLS 斷言必須透過這個連線池執行,否則 superuser 會靜默繞過 RLS 政策。
-// DB_RLS_USERNAME/DB_RLS_PASSWORD 未設定時維持過往行為直接 skip。
+// openRLSIntegrationPool 開啟使用最小權限 runtime 角色的連線池。
+// RLS 斷言必須透過這個連線池執行,否則高權限角色會靜默繞過隔離政策。
+// REQUIRE_RLS_TESTS=1 時，缺少專用角色會直接令測試失敗而不是 skip。
 func openRLSIntegrationPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := config.DatabaseURLFromEnv()
 	if dsn == "" {
-		t.Skip("DB_* is not set; skipping postgres integration test")
+		skipRLSOrFail(t, "DB_* is not set; skipping postgres integration test")
 	}
 	username := strings.TrimSpace(os.Getenv("DB_RLS_USERNAME"))
 	if username == "" {
-		t.Skip("DB_RLS_USERNAME is not set; skipping RLS integration test")
+		skipRLSOrFail(t, "DB_RLS_USERNAME is not set; skipping RLS integration test")
 	}
 	u, err := url.Parse(dsn)
 	if err != nil {
@@ -877,21 +873,21 @@ func requireMigratedSchema(t *testing.T, pool *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	if !ready {
-		t.Skip("postgres schema is not migrated; skipping integration semantics test")
+		skipRLSOrFail(t, "postgres schema is not migrated; skipping integration semantics test")
 	}
 }
 
-// requireRLSCapableUser 驗證 require RLS capable 使用者。
+// requireRLSCapableUser 驗證 role 不可繞過 RLS、建立 schema 物件或擁有業務表。
 func requireRLSCapableUser(t *testing.T, pool *pgxpool.Pool) {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
-	var bypassesRLS bool
-	if err := pool.QueryRow(ctx, "select rolsuper or rolbypassrls from pg_roles where rolname = current_user").Scan(&bypassesRLS); err != nil {
+	role, err := pgplatform.InspectRuntimeRole(ctx, pool)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if bypassesRLS {
-		t.Skip("current DB user bypasses RLS; use a non-superuser role to run RLS integration checks")
+	if err := role.Validate(); err != nil {
+		skipRLSOrFail(t, err.Error())
 	}
 }
 
@@ -905,7 +901,24 @@ func requireTenantsSystemReadPolicy(t *testing.T, pool *pgxpool.Pool) {
 		t.Fatal(err)
 	}
 	if !exists {
-		t.Skip("tenants system_read_tenants policy is not migrated; run current migrations to exercise system-task RLS reads")
+		skipRLSOrFail(t, "tenants system_read_tenants policy is not migrated; run current migrations to exercise system-task RLS reads")
+	}
+}
+
+func skipRLSOrFail(t *testing.T, message string) {
+	t.Helper()
+	if rlsTestsRequired() {
+		t.Fatal(message)
+	}
+	t.Skip(message)
+}
+
+func rlsTestsRequired() bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("REQUIRE_RLS_TESTS"))) {
+	case "1", "true", "yes":
+		return true
+	default:
+		return false
 	}
 }
 

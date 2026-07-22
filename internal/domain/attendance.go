@@ -7,20 +7,44 @@ import (
 
 // LeaveBalance 定義請假 balance 的資料結構。
 type LeaveBalance struct {
-	ID             string    `json:"id"`
-	TenantID       string    `json:"tenant_id"`
-	EmployeeID     string    `json:"employee_id"`
-	LeaveType      string    `json:"leave_type"`
-	LeaveTypeID    string    `json:"leave_type_id,omitempty"`
-	RemainingHours float64   `json:"remaining_hours"`
-	PeriodStart    string    `json:"period_start,omitempty"`
-	PeriodEnd      string    `json:"period_end,omitempty"`
-	GrantedHours   float64   `json:"granted_hours,omitempty"`
-	UsedHours      float64   `json:"used_hours,omitempty"`
-	Source         string    `json:"source,omitempty"`
-	PolicyVersion  int       `json:"policy_version,omitempty"`
-	ProrateRatio   *float64  `json:"prorate_ratio,omitempty"`
-	UpdatedAt      time.Time `json:"updated_at"`
+	ID                   string         `json:"id"`
+	TenantID             string         `json:"tenant_id"`
+	EmployeeID           string         `json:"employee_id"`
+	LeaveType            string         `json:"leave_type"`
+	LeaveTypeID          string         `json:"leave_type_id,omitempty"`
+	RemainingHours       float64        `json:"remaining_hours"`
+	PeriodStart          string         `json:"period_start,omitempty"`
+	PeriodEnd            string         `json:"period_end,omitempty"`
+	GrantedHours         float64        `json:"granted_hours,omitempty"`
+	UsedHours            float64        `json:"used_hours,omitempty"`
+	Source               string         `json:"source,omitempty"`
+	ExternalLeaveCode    string         `json:"external_leave_code,omitempty"`
+	ExternalCategoryCode string         `json:"external_category_code,omitempty"`
+	EntitlementYear      int            `json:"entitlement_year,omitempty"`
+	CarryInHours         float64        `json:"carry_in_hours,omitempty"`
+	CarryExpire          string         `json:"carry_expire,omitempty"`
+	RawPayload           map[string]any `json:"raw_payload,omitempty"`
+	LastSyncedAt         *time.Time     `json:"last_synced_at,omitempty"`
+	// UpstreamRemainingHours is the unmodified eHRMS snapshot. RemainingHours is
+	// the effective Nexus availability after applying the local overlay ledger.
+	UpstreamRemainingHours float64   `json:"upstream_remaining_hours,omitempty"`
+	PendingHours           float64   `json:"pending_hours,omitempty"`
+	LocalUsedHours         float64   `json:"local_used_hours,omitempty"`
+	UpdatedAt              time.Time `json:"updated_at"`
+}
+
+// LeaveTypeExternalRef maps a stable upstream code to the tenant-owned leave catalog.
+type LeaveTypeExternalRef struct {
+	ID                   string    `json:"id"`
+	TenantID             string    `json:"tenant_id"`
+	SourceSystem         string    `json:"source_system"`
+	ExternalCode         string    `json:"external_code"`
+	ExternalCategoryCode string    `json:"external_category_code,omitempty"`
+	LeaveTypeID          string    `json:"leave_type_id"`
+	EffectiveFrom        string    `json:"effective_from,omitempty"`
+	EffectiveTo          string    `json:"effective_to,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 // LeaveBalanceQuery scopes leave balances to selected employees before pagination.
@@ -30,22 +54,24 @@ type LeaveBalanceQuery struct {
 
 // LeaveRequest 定義請假請求的資料結構。
 type LeaveRequest struct {
-	ID                 string         `json:"id"`
-	TenantID           string         `json:"tenant_id"`
-	EmployeeID         string         `json:"employee_id"`
-	LeaveType          string         `json:"leave_type"`
-	LeaveTypeID        string         `json:"leave_type_id,omitempty"`
-	PolicyVersion      int            `json:"policy_version,omitempty"`
-	RuleSnapshot       map[string]any `json:"rule_snapshot,omitempty"`
-	EvaluationSnapshot map[string]any `json:"evaluation_snapshot,omitempty"`
-	StartAt            time.Time      `json:"start_at"`
-	EndAt              time.Time      `json:"end_at"`
-	Hours              float64        `json:"hours"`
-	Reason             string         `json:"reason,omitempty"`
-	Status             string         `json:"status"`
-	FormInstanceID     string         `json:"form_instance_id,omitempty"`
-	LeaveBalanceID     string         `json:"leave_balance_id,omitempty"`
-	CreatedAt          time.Time      `json:"created_at"`
+	ID                   string         `json:"id"`
+	TenantID             string         `json:"tenant_id"`
+	EmployeeID           string         `json:"employee_id"`
+	LeaveType            string         `json:"leave_type"`
+	LeaveTypeID          string         `json:"leave_type_id,omitempty"`
+	PolicyVersion        int            `json:"policy_version,omitempty"`
+	RuleSnapshot         map[string]any `json:"rule_snapshot,omitempty"`
+	EvaluationSnapshot   map[string]any `json:"evaluation_snapshot,omitempty"`
+	StartAt              time.Time      `json:"start_at"`
+	EndAt                time.Time      `json:"end_at"`
+	Hours                float64        `json:"hours"`
+	Reason               string         `json:"reason,omitempty"`
+	Status               string         `json:"status"`
+	FormInstanceID       string         `json:"form_instance_id,omitempty"`
+	LeaveBalanceID       string         `json:"leave_balance_id,omitempty"`
+	ReconciliationStatus string         `json:"reconciliation_status,omitempty"`
+	CreatedAt            time.Time      `json:"created_at"`
+	UpdatedAt            time.Time      `json:"updated_at"`
 }
 
 // LeaveRequestAllocation records the exact balance bucket reserved by a leave request.
@@ -57,18 +83,86 @@ type LeaveRequestAllocation struct {
 	CreatedAt      time.Time `json:"created_at"`
 }
 
-// LeaveType is one system-defined leave option with a tenant-specific enabled state.
-// Definitions are global and immutable; tenants only override Enabled.
+// LeaveBalanceEntry is the append-only Nexus overlay on an eHRMS balance snapshot.
+// Negative amounts reduce effective availability; positive amounts release or reconcile it.
+type LeaveBalanceEntry struct {
+	ID             string         `json:"id"`
+	TenantID       string         `json:"tenant_id"`
+	EmployeeID     string         `json:"employee_id"`
+	LeaveTypeID    string         `json:"leave_type_id"`
+	BalanceID      string         `json:"balance_id"`
+	LeaveRequestID string         `json:"leave_request_id,omitempty"`
+	LeaveCaseID    string         `json:"leave_case_id,omitempty"`
+	EntryType      string         `json:"entry_type"`
+	AmountMinutes  int            `json:"amount_minutes"`
+	IdempotencyKey string         `json:"idempotency_key"`
+	Metadata       map[string]any `json:"metadata,omitempty"`
+	OccurredAt     time.Time      `json:"occurred_at"`
+	CreatedAt      time.Time      `json:"created_at"`
+}
+
+// LeaveCase is one logical leave fact regardless of whether Nexus, eHRMS, or both observed it.
+type LeaveCase struct {
+	ID          string    `json:"id"`
+	TenantID    string    `json:"tenant_id"`
+	EmployeeID  string    `json:"employee_id"`
+	LeaveTypeID string    `json:"leave_type_id"`
+	StartAt     time.Time `json:"start_at"`
+	EndAt       time.Time `json:"end_at"`
+	NetMinutes  int       `json:"net_minutes"`
+	Status      string    `json:"status"`
+	Origin      string    `json:"origin"`
+	CreatedAt   time.Time `json:"created_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// ExternalLeaveRecord preserves the full eHRMS leave fact used for reconciliation.
+type ExternalLeaveRecord struct {
+	ID                   string         `json:"id"`
+	TenantID             string         `json:"tenant_id"`
+	EmployeeID           string         `json:"employee_id"`
+	SourceSystem         string         `json:"source_system"`
+	ExternalRef          string         `json:"external_ref"`
+	ExternalLeaveCode    string         `json:"external_leave_code,omitempty"`
+	ExternalCategoryCode string         `json:"external_category_code,omitempty"`
+	LeaveTypeID          string         `json:"leave_type_id"`
+	LeaveName            string         `json:"leave_name,omitempty"`
+	StartAt              time.Time      `json:"start_at"`
+	EndAt                time.Time      `json:"end_at"`
+	GrossMinutes         int            `json:"gross_minutes"`
+	DeductMinutes        int            `json:"deduct_minutes,omitempty"`
+	NetMinutes           int            `json:"net_minutes"`
+	Remark               string         `json:"remark,omitempty"`
+	SourceLabel          string         `json:"source_label,omitempty"`
+	Status               string         `json:"status"`
+	RawPayload           map[string]any `json:"raw_payload,omitempty"`
+	PayloadHash          string         `json:"payload_hash,omitempty"`
+	FirstSeenAt          time.Time      `json:"first_seen_at"`
+	LastSeenAt           time.Time      `json:"last_seen_at"`
+	DeletedAt            *time.Time     `json:"deleted_at,omitempty"`
+}
+
+// LeaveCaseSource links a logical case to one local request or synchronized eHRMS record.
+type LeaveCaseSource struct {
+	TenantID    string    `json:"tenant_id"`
+	LeaveCaseID string    `json:"leave_case_id"`
+	SourceType  string    `json:"source_type"`
+	SourceID    string    `json:"source_id"`
+	MatchMethod string    `json:"match_method"`
+	MatchStatus string    `json:"match_status"`
+	CreatedAt   time.Time `json:"created_at"`
+}
+
+// LeaveType is one tenant-owned leave catalog row.
+// Enabled maps to leave_types.status (active/inactive).
 type LeaveType struct {
-	ID              string  `json:"id"`
-	Code            string  `json:"code"`
-	NameZH          string  `json:"name_zh"`
-	NameEN          string  `json:"name_en"`
-	Unit            string  `json:"unit"`
-	PaidRatio       float64 `json:"paid_ratio"`
-	RequiresBalance bool    `json:"requires_balance"`
-	Enabled         bool    `json:"enabled"`
-	DisplayOrder    int     `json:"display_order"`
+	ID              string `json:"id"`
+	Code            string `json:"code"`
+	NameZH          string `json:"name_zh"`
+	NameEN          string `json:"name_en"`
+	RequiresBalance bool   `json:"-"`
+	Enabled         bool   `json:"enabled"`
+	DisplayOrder    int    `json:"display_order"`
 }
 
 // LeaveTypeCatalog is the local leave catalog rendered by forms and HR settings.
@@ -78,92 +172,31 @@ type LeaveTypeCatalog struct {
 	Enabled int         `json:"enabled"`
 }
 
-// SetLeaveTypeEnabledInput changes only a tenant's availability override.
+// SetLeaveTypeEnabledInput changes leave_types.status for one leave type.
 type SetLeaveTypeEnabledInput struct {
 	Enabled bool `json:"enabled"`
 }
 
-// DefaultLeaveTypes mirrors the seeded system catalog for in-memory runtimes.
+// DefaultLeaveTypes is a convenience catalog for in-memory test seeding only.
+// Production Postgres leave_types rows are maintained manually.
 func DefaultLeaveTypes() []LeaveType {
 	return []LeaveType{
-		{ID: "lt_sick_full", Code: "sick_full", NameZH: "全薪病假", NameEN: "Full Pay Sick Leave", Unit: "hour", PaidRatio: 1, RequiresBalance: true, Enabled: true, DisplayOrder: 1},
-		{ID: "lt_flexible", Code: "flexible", NameZH: "彈性休假", NameEN: "Additional Leave", Unit: "hour", PaidRatio: 1, RequiresBalance: true, Enabled: true, DisplayOrder: 2},
-		{ID: "lt_personal", Code: "personal", NameZH: "事假", NameEN: "Personal Leave", Unit: "hour", PaidRatio: 0, Enabled: true, DisplayOrder: 3},
-		{ID: "lt_family_care", Code: "family_care", NameZH: "家庭照顧假", NameEN: "Family Care Leave", Unit: "hour", PaidRatio: 0, Enabled: true, DisplayOrder: 4},
-		{ID: "lt_sick_half", Code: "sick_half", NameZH: "半薪病假", NameEN: "Half Pay Sick Leave", Unit: "hour", PaidRatio: 0.5, RequiresBalance: true, Enabled: true, DisplayOrder: 5},
-		{ID: "lt_menstrual", Code: "menstrual", NameZH: "生理假", NameEN: "Menstruation Leave", Unit: "hour", PaidRatio: 0.5, Enabled: true, DisplayOrder: 6},
-		{ID: "lt_marriage", Code: "marriage", NameZH: "婚假", NameEN: "Marriage Leave", Unit: "hour", PaidRatio: 1, Enabled: true, DisplayOrder: 7},
-		{ID: "lt_maternity", Code: "maternity", NameZH: "八週產假", NameEN: "8-Week Maternity Leave", Unit: "hour", PaidRatio: 1, Enabled: true, DisplayOrder: 8},
-		{ID: "lt_paternity", Code: "paternity", NameZH: "陪產假", NameEN: "Paternity Leave", Unit: "hour", PaidRatio: 1, Enabled: true, DisplayOrder: 9},
-		{ID: "lt_bereavement", Code: "bereavement", NameZH: "喪假", NameEN: "Bereavement Leave", Unit: "hour", PaidRatio: 1, Enabled: true, DisplayOrder: 10},
-		{ID: "lt_official", Code: "official", NameZH: "公假", NameEN: "Official Leave", Unit: "hour", PaidRatio: 1, Enabled: true, DisplayOrder: 11},
-		{ID: "lt_prenatal", Code: "prenatal", NameZH: "產檢假", NameEN: "Prenatal Leave", Unit: "hour", PaidRatio: 1, Enabled: true, DisplayOrder: 12},
-		{ID: "lt_compensatory", Code: "compensatory", NameZH: "補休假", NameEN: "Compensatory Leave", Unit: "hour", PaidRatio: 1, RequiresBalance: true, Enabled: true, DisplayOrder: 13},
-		{ID: "lt_annual", Code: "annual", NameZH: "特休假", NameEN: "Annual Leave", Unit: "hour", PaidRatio: 1, RequiresBalance: true, Enabled: true, DisplayOrder: 14},
-		{ID: "lt_business_trip", Code: "business_trip", NameZH: "外勤", NameEN: "Business Trip", Unit: "hour", PaidRatio: 1, Enabled: true, DisplayOrder: 15},
+		{ID: "lt_sick_full", Code: "sick_full", NameZH: "全薪病假", NameEN: "Full Pay Sick Leave", RequiresBalance: true, Enabled: true, DisplayOrder: 1},
+		{ID: "lt_flexible", Code: "flexible", NameZH: "彈性休假", NameEN: "Additional Leave", RequiresBalance: true, Enabled: true, DisplayOrder: 2},
+		{ID: "lt_personal", Code: "personal", NameZH: "事假", NameEN: "Personal Leave", Enabled: true, DisplayOrder: 3},
+		{ID: "lt_family_care", Code: "family_care", NameZH: "家庭照顧假", NameEN: "Family Care Leave", Enabled: true, DisplayOrder: 4},
+		{ID: "lt_sick_half", Code: "sick_half", NameZH: "半薪病假", NameEN: "Half Pay Sick Leave", RequiresBalance: true, Enabled: true, DisplayOrder: 5},
+		{ID: "lt_menstrual", Code: "menstrual", NameZH: "生理假", NameEN: "Menstruation Leave", Enabled: true, DisplayOrder: 6},
+		{ID: "lt_marriage", Code: "marriage", NameZH: "婚假", NameEN: "Marriage Leave", Enabled: true, DisplayOrder: 7},
+		{ID: "lt_maternity", Code: "maternity", NameZH: "八週產假", NameEN: "8-Week Maternity Leave", Enabled: true, DisplayOrder: 8},
+		{ID: "lt_paternity", Code: "paternity", NameZH: "陪產假", NameEN: "Paternity Leave", Enabled: true, DisplayOrder: 9},
+		{ID: "lt_bereavement", Code: "bereavement", NameZH: "喪假", NameEN: "Bereavement Leave", Enabled: true, DisplayOrder: 10},
+		{ID: "lt_official", Code: "official", NameZH: "公假", NameEN: "Official Leave", Enabled: true, DisplayOrder: 11},
+		{ID: "lt_prenatal", Code: "prenatal", NameZH: "產檢假", NameEN: "Prenatal Leave", Enabled: true, DisplayOrder: 12},
+		{ID: "lt_compensatory", Code: "compensatory", NameZH: "補休假", NameEN: "Compensatory Leave", RequiresBalance: true, Enabled: true, DisplayOrder: 13},
+		{ID: "lt_annual", Code: "annual", NameZH: "特休假", NameEN: "Annual Leave", RequiresBalance: true, Enabled: true, DisplayOrder: 14},
+		{ID: "lt_business_trip", Code: "business_trip", NameZH: "外勤", NameEN: "Business Trip", Enabled: true, DisplayOrder: 15},
 	}
-}
-
-// LeaveTypeExternalMapping maps one upstream leave code to a stable local leave type.
-type LeaveTypeExternalMapping struct {
-	ID            string    `json:"id"`
-	TenantID      string    `json:"tenant_id"`
-	Source        string    `json:"source"`
-	ExternalCode  string    `json:"external_code"`
-	LeaveTypeID   string    `json:"leave_type_id"`
-	LeaveTypeCode string    `json:"leave_type_code"`
-	EffectiveFrom string    `json:"effective_from,omitempty"`
-	EffectiveTo   string    `json:"effective_to,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	UpdatedAt     time.Time `json:"updated_at"`
-}
-
-// LeaveTypeSyncIssue records an upstream leave code that requires HR mapping.
-type LeaveTypeSyncIssue struct {
-	ID           string     `json:"id"`
-	TenantID     string     `json:"tenant_id"`
-	Source       string     `json:"source"`
-	ExternalCode string     `json:"external_code"`
-	IssueCode    string     `json:"issue_code"`
-	Message      string     `json:"message"`
-	Occurrences  int        `json:"occurrences"`
-	Status       string     `json:"status"`
-	FirstSeenAt  time.Time  `json:"first_seen_at"`
-	LastSeenAt   time.Time  `json:"last_seen_at"`
-	ResolvedAt   *time.Time `json:"resolved_at,omitempty"`
-}
-
-// LeaveTypeIntegration combines one system leave type with mapping and usage state.
-type LeaveTypeIntegration struct {
-	LeaveTypeID       string                     `json:"leave_type_id"`
-	LeaveTypeCode     string                     `json:"leave_type_code"`
-	LeaveTypeName     string                     `json:"leave_type_name"`
-	Active            bool                       `json:"active"`
-	MappingStatus     string                     `json:"mapping_status"`
-	Mappings          []LeaveTypeExternalMapping `json:"mappings"`
-	BalanceCount      int                        `json:"balance_count"`
-	RequestCount      int                        `json:"request_count"`
-	EHRMSBalanceCount int                        `json:"ehrms_balance_count"`
-	LastEHRMSSyncAt   *time.Time                 `json:"last_ehrms_sync_at,omitempty"`
-}
-
-// LeaveTypeIntegrationResponse is the HR operations view for system leave types and external aliases.
-type LeaveTypeIntegrationResponse struct {
-	Items          []LeaveTypeIntegration `json:"items"`
-	UnmappedIssues []LeaveTypeSyncIssue   `json:"unmapped_issues"`
-	Mapped         int                    `json:"mapped"`
-	NeedsMapping   int                    `json:"needs_mapping"`
-	EHRMSBalances  int                    `json:"ehrms_balances"`
-}
-
-// SaveLeaveTypeExternalMappingInput creates or updates one effective upstream alias.
-type SaveLeaveTypeExternalMappingInput struct {
-	ID            string `json:"id,omitempty"`
-	Source        string `json:"source,omitempty"`
-	ExternalCode  string `json:"external_code"`
-	LeaveTypeID   string `json:"leave_type_id"`
-	EffectiveFrom string `json:"effective_from,omitempty"`
-	EffectiveTo   string `json:"effective_to,omitempty"`
 }
 
 // StableLeaveTypeID derives the immutable local identity from a canonical leave code.
@@ -199,10 +232,8 @@ type LeaveRuleSnapshot struct {
 	LeaveTypeID     string   `json:"leave_type_id"`
 	Code            string   `json:"code"`
 	Name            string   `json:"name"`
-	Unit            string   `json:"unit"`
 	GrantMode       string   `json:"grant_mode"`
 	RequiresBalance bool     `json:"requires_balance"`
-	PaidRatio       float64  `json:"paid_ratio"`
 	ProofAfterHours *float64 `json:"proof_after_hours,omitempty"`
 	PolicyVersion   int      `json:"policy_version"`
 }
@@ -285,43 +316,11 @@ type AttendanceWorksite struct {
 	UpdatedAt    time.Time `json:"updated_at"`
 }
 
-// AttendanceShift 定義考勤班別的資料結構。
-type AttendanceShift struct {
-	ID                     string    `json:"id"`
-	TenantID               string    `json:"tenant_id"`
-	Name                   string    `json:"name"`
-	ClockInStart           string    `json:"clock_in_start"`
-	ClockInEnd             string    `json:"clock_in_end"`
-	ClockOutStart          string    `json:"clock_out_start"`
-	ClockOutEnd            string    `json:"clock_out_end"`
-	LateGraceMinutes       int       `json:"late_grace_minutes,omitempty"`
-	EarlyLeaveGraceMinutes int       `json:"early_leave_grace_minutes,omitempty"`
-	Status                 string    `json:"status"`
-	CreatedAt              time.Time `json:"created_at"`
-	UpdatedAt              time.Time `json:"updated_at"`
-}
-
-// AttendanceShiftAssignment 定義可選的考勤班別指派。
-type AttendanceShiftAssignment struct {
-	ID            string     `json:"id"`
-	TenantID      string     `json:"tenant_id"`
-	EmployeeID    string     `json:"employee_id"`
-	ShiftID       string     `json:"shift_id"`
-	WorksiteID    string     `json:"worksite_id"`
-	EffectiveFrom time.Time  `json:"effective_from"`
-	EffectiveTo   *time.Time `json:"effective_to,omitempty"`
-	Status        string     `json:"status"`
-	CreatedAt     time.Time  `json:"created_at"`
-	UpdatedAt     time.Time  `json:"updated_at"`
-}
-
 // AttendanceClockRecord 定義考勤打卡 record 的資料結構。
 type AttendanceClockRecord struct {
 	ID                  string         `json:"id"`
 	TenantID            string         `json:"tenant_id"`
 	EmployeeID          string         `json:"employee_id"`
-	ShiftAssignmentID   string         `json:"shift_assignment_id,omitempty"`
-	ShiftID             string         `json:"shift_id,omitempty"`
 	WorksiteID          string         `json:"worksite_id,omitempty"`
 	WorksiteName        string         `json:"worksite_name,omitempty"`
 	WorksiteAddress     string         `json:"worksite_address,omitempty"`
@@ -463,15 +462,12 @@ type AttendancePolicyValidationResult struct {
 
 // AttendancePolicy 定義考勤政策的資料結構。
 type AttendancePolicy struct {
-	ID                 string                   `json:"id"`
-	TenantID           string                   `json:"tenant_id"`
-	WorkTime           AttendancePolicyWorkTime `json:"work_time"`
-	LeaveTypes         []AttendanceLeaveType    `json:"leave_types"`
-	Version            int                      `json:"version,omitempty"`
-	EffectiveFrom      *time.Time               `json:"effective_from,omitempty"`
-	UpdatedByAccountID string                   `json:"updated_by_account_id,omitempty"`
-	CreatedAt          time.Time                `json:"created_at"`
-	UpdatedAt          time.Time                `json:"updated_at"`
+	TenantID             string                   `json:"tenant_id"`
+	WorkTime             AttendancePolicyWorkTime `json:"work_time"`
+	Version              int                      `json:"version,omitempty"`
+	EffectiveFrom        *time.Time               `json:"effective_from,omitempty"`
+	PublishedByAccountID string                   `json:"published_by_account_id,omitempty"`
+	PublishedAt          time.Time                `json:"published_at"`
 }
 
 // AttendancePolicyWorkTime 定義考勤政策 work 時間的資料結構。
@@ -519,10 +515,8 @@ type AttendanceLeaveType struct {
 	Quota           string                 `json:"quota"`
 	Rule            string                 `json:"rule"`
 	Proof           string                 `json:"proof"`
-	Unit            string                 `json:"unit,omitempty"`
 	GrantMode       string                 `json:"grant_mode,omitempty"`
 	RequiresBalance bool                   `json:"requires_balance"`
-	PaidRatio       float64                `json:"paid_ratio"`
 	ProofAfterHours *float64               `json:"proof_after_hours,omitempty"`
 	Active          bool                   `json:"active"`
 	Entitlements    []LeaveEntitlementRule `json:"entitlements,omitempty"`
@@ -589,41 +583,6 @@ type UpdateAttendanceWorksiteInput struct {
 	Longitude    *float64 `json:"longitude,omitempty"`
 	RadiusMeters *int     `json:"radius_meters,omitempty"`
 	Status       *string  `json:"status,omitempty"`
-}
-
-// CreateAttendanceShiftInput 定義考勤班別輸入的資料結構。
-type CreateAttendanceShiftInput struct {
-	Name                   string `json:"name"`
-	ClockInStart           string `json:"clock_in_start"`
-	ClockInEnd             string `json:"clock_in_end"`
-	ClockOutStart          string `json:"clock_out_start"`
-	ClockOutEnd            string `json:"clock_out_end"`
-	LateGraceMinutes       int    `json:"late_grace_minutes,omitempty"`
-	EarlyLeaveGraceMinutes int    `json:"early_leave_grace_minutes,omitempty"`
-	Status                 string `json:"status,omitempty"`
-}
-
-// UpdateAttendanceShiftInput 定義考勤班別輸入的資料結構。
-type UpdateAttendanceShiftInput struct {
-	ID                     string  `json:"id"`
-	Name                   *string `json:"name,omitempty"`
-	ClockInStart           *string `json:"clock_in_start,omitempty"`
-	ClockInEnd             *string `json:"clock_in_end,omitempty"`
-	ClockOutStart          *string `json:"clock_out_start,omitempty"`
-	ClockOutEnd            *string `json:"clock_out_end,omitempty"`
-	LateGraceMinutes       *int    `json:"late_grace_minutes,omitempty"`
-	EarlyLeaveGraceMinutes *int    `json:"early_leave_grace_minutes,omitempty"`
-	Status                 *string `json:"status,omitempty"`
-}
-
-// CreateAttendanceShiftAssignmentInput 定義可選的班別指派輸入。
-type CreateAttendanceShiftAssignmentInput struct {
-	EmployeeID    string `json:"employee_id"`
-	ShiftID       string `json:"shift_id"`
-	WorksiteID    string `json:"worksite_id"`
-	EffectiveFrom string `json:"effective_from"`
-	EffectiveTo   string `json:"effective_to,omitempty"`
-	Status        string `json:"status,omitempty"`
 }
 
 // CreateAttendanceClockRecordInput 定義考勤打卡 record 輸入的資料結構。

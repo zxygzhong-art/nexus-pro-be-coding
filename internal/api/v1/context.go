@@ -48,6 +48,7 @@ func (a *API) requestContext(r *http.Request) (domain.RequestContext, error) {
 		PlatformAdmin:        platformAdmin,
 		AssumedRoleSessionID: strings.TrimSpace(r.Header.Get("X-Assumable-Role-Session-ID")),
 		RequestID:            requestID,
+		IdempotencyKey:       strings.TrimSpace(r.Header.Get("Idempotency-Key")),
 		TraceID:              traceID,
 		SpanID:               spanID,
 	}, nil

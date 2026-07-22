@@ -90,7 +90,7 @@ func ProjectAttendanceDay(records []AttendanceClockRecord, leaves []LeaveRequest
 	return projectAttendanceDay(records, leaves, workDate, workTime, asOf, attendanceOpenClockDeadlineForPolicy(workDate, workTime))
 }
 
-// projectAttendanceDay allows service paths to provide a persisted-shift-aware deadline for an open clock.
+// projectAttendanceDay allows service paths to provide a policy-based open-clock deadline.
 func projectAttendanceDay(records []AttendanceClockRecord, leaves []LeaveRequest, workDate string, workTime AttendancePolicyWorkTime, asOf, openClockDeadline time.Time) AttendanceDayProjection {
 	effective := make([]AttendanceClockRecord, 0, len(records))
 	for _, record := range records {
@@ -163,85 +163,10 @@ func projectAttendanceDay(records []AttendanceClockRecord, leaves []LeaveRequest
 	return projection
 }
 
-// projectAttendanceDay resolves the authoritative shift attached to an open punch before projecting its state.
+// projectAttendanceDay derives day state using the policy open-clock deadline.
 func (c AttendanceService) projectAttendanceDay(ctx RequestContext, records []AttendanceClockRecord, leaves []LeaveRequest, workDate string, workTime AttendancePolicyWorkTime, asOf time.Time) (AttendanceDayProjection, error) {
-	deadline, err := c.attendanceOpenClockDeadline(ctx, records, workDate, workTime)
-	if err != nil {
-		return AttendanceDayProjection{}, err
-	}
+	deadline := attendanceOpenClockDeadlineForPolicy(workDate, workTime)
 	return projectAttendanceDay(records, leaves, workDate, workTime, asOf, deadline), nil
-}
-
-// attendanceOpenClockDeadline prefers the shift persisted on the punch and falls back to its historical assignment.
-func (c AttendanceService) attendanceOpenClockDeadline(ctx RequestContext, records []AttendanceClockRecord, workDate string, workTime AttendancePolicyWorkTime) (time.Time, error) {
-	fallback := attendanceOpenClockDeadlineForPolicy(workDate, workTime)
-	clockIn, ok := openAttendanceClockIn(records, workDate)
-	if !ok {
-		return fallback, nil
-	}
-	var shift AttendanceShift
-	if strings.TrimSpace(clockIn.ShiftID) != "" {
-		item, found, err := c.store.GetAttendanceShift(goContext(ctx), ctx.TenantID, clockIn.ShiftID)
-		if err != nil {
-			return time.Time{}, err
-		}
-		if found {
-			shift = item
-		}
-	}
-	if strings.TrimSpace(shift.ID) == "" {
-		assignment, found, err := c.store.FindEffectiveAttendanceShiftAssignment(goContext(ctx), ctx.TenantID, clockIn.EmployeeID, clockIn.ClockedAt)
-		if err != nil {
-			return time.Time{}, err
-		}
-		if found {
-			item, shiftFound, lookupErr := c.store.GetAttendanceShift(goContext(ctx), ctx.TenantID, assignment.ShiftID)
-			if lookupErr != nil {
-				return time.Time{}, lookupErr
-			}
-			if shiftFound {
-				shift = item
-			}
-		}
-	}
-	if deadline, valid := attendanceOpenClockDeadlineForShift(workDate, shift); valid {
-		return deadline, nil
-	}
-	return fallback, nil
-}
-
-// openAttendanceClockIn returns the earliest accepted clock-in only while the day has no accepted clock-out.
-func openAttendanceClockIn(records []AttendanceClockRecord, workDate string) (AttendanceClockRecord, bool) {
-	var earliest AttendanceClockRecord
-	found := false
-	for _, record := range records {
-		if record.WorkDate != workDate || record.Voided || !strings.EqualFold(record.RecordStatus, clockRecordStatusAccepted) {
-			continue
-		}
-		if record.Direction == clockDirectionOut {
-			return AttendanceClockRecord{}, false
-		}
-		if record.Direction == clockDirectionIn && (!found || record.ClockedAt.Before(earliest.ClockedAt)) {
-			earliest = record
-			found = true
-		}
-	}
-	return earliest, found
-}
-
-// attendanceOpenClockDeadlineForShift includes the configured final clock-out minute and supports overnight windows.
-func attendanceOpenClockDeadlineForShift(workDate string, shift AttendanceShift) (time.Time, bool) {
-	day, err := time.ParseInLocation(time.DateOnly, workDate, attendanceClockLocation)
-	clockInStart := parseHHMMMinutes(shift.ClockInStart)
-	clockOutEnd := parseHHMMMinutes(shift.ClockOutEnd)
-	if err != nil || clockInStart < 0 || clockOutEnd < 0 {
-		return time.Time{}, false
-	}
-	deadline := day.Add(time.Duration(clockOutEnd) * time.Minute)
-	if clockOutEnd < clockInStart {
-		deadline = deadline.AddDate(0, 0, 1)
-	}
-	return deadline.Add(time.Minute), true
 }
 
 // attendanceOpenClockDeadlineForPolicy keeps an open punch active through its business day and overnight schedule.

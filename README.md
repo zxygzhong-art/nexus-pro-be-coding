@@ -77,7 +77,9 @@ Agent model API keys, MCP/external-tool credentials, and other persisted secrets
 
 ### Temporal Workflow Engine
 
-Temporal is a required runtime dependency for form approval. Form submit starts a Temporal workflow, and approve / reject / return / withdraw API actions only send Temporal signals. The existing `form_instances` and `workflow_runs` tables remain the query projection used by the API, updated by workflow activities. There is no API fallback to the legacy synchronous state machine when a workflow execution is missing.
+Temporal is a required runtime dependency for form approval. With `WORKFLOW_START_OUTBOX_ENABLED=true`, form submission commits the business row, workflow projection, and a versioned start event in one PostgreSQL transaction; the local outbox dispatcher then idempotently ensures the Temporal execution. While delivery is `pending_start` or fenced as `starting`, the item is excluded from review queues and review commands fail with `workflow_start_pending`. Approve / reject / return / withdraw actions send Temporal signals and persist an `Idempotency-Key` receipt so client retries do not apply the command twice.
+
+`form_instances` and `workflow_runs` remain the query projection updated by workflow activities. A reconciler repairs missing/stuck start events, and start events use unlimited retry with lease recovery and exponential backoff. Cancelling a still-pending submission is handled locally and marks the start `abandoned`, preventing an orphan Temporal workflow.
 
 Start the local Temporal profile:
 
@@ -93,10 +95,14 @@ Then configure Temporal before startup:
 export TEMPORAL_BASE_URL=127.0.0.1:27233
 export TEMPORAL_NAMESPACE=default
 export TEMPORAL_TASK_QUEUE=nexus-workflows
+export OUTBOX_DISPATCH_ENABLED=true
+export WORKFLOW_START_OUTBOX_ENABLED=true
 go run ./cmd/api
 ```
 
 The API dials Temporal during startup and fails fast if the connection is unavailable. The worker starts in the API process and shuts down with the existing runtime shutdown path.
+
+Migration `000010` adds columns to tables that older generated sqlc binaries read with `SELECT *`; therefore this change is not a one-step zero-downtime rollout. Either schedule a short API maintenance window, or first deploy an intermediate compatibility build that uses explicit pre-`000010` column lists without depending on the new columns. Then apply `000009`/`000010`, deploy this build everywhere with `WORKFLOW_START_OUTBOX_ENABLED=false`, and enable the flag last. `OUTBOX_DISPATCH_ENABLED` is an operational kill switch and should remain enabled normally. Before downgrading `000010`, disable new starts and drain pending/starting runs and active run-scoped Temporal executions; the migration refuses an unsafe down migration.
 
 Backfill in-flight approvals created before Temporal-only rollout:
 
@@ -176,9 +182,14 @@ set +a
 
 make migrate-up
 make migrate-status
+make db-provision-runtime-role
 ```
 
-At minimum, `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_NAME`, and `DB_SSLMODE` must describe the target business database. In production, use `DB_SSLMODE=require`, `verify-ca`, or `verify-full` as appropriate.
+`MIGRATION_DATABASE_URL` is the administrator/owner connection used only by Goose and `db-provision-runtime-role`. `DB_HOST`, `DB_PORT`, `DB_USERNAME`, `DB_PASSWORD`, `DB_NAME`, and `DB_SSLMODE` are the API/CLI runtime connection and should identify the provisioned `nexus_app` role. The application intentionally ignores `MIGRATION_DATABASE_URL`, so migration credentials do not need to enter the API container.
+
+`RUNTIME_DB_USERNAME` defaults to `nexus_app`; `RUNTIME_DB_PASSWORD` is required when provisioning it. `MIGRATION_DB_OWNER` defaults to the role in `MIGRATION_DATABASE_URL` and controls default privileges for tables created by later migrations. The provisioning command is idempotent, grants business-table DML and sequence usage, excludes `goose_db_version`, and enforces `NOSUPERUSER`, `NOBYPASSRLS`, no `CREATE` on `public`, and no business-table ownership. Run migrations before provisioning the role. For compatibility, local commands still fall back to `DB_*` when `MIGRATION_DATABASE_URL` is absent, but production must keep the two credentials separate.
+
+In production, use `DB_SSLMODE=require`, `verify-ca`, or `verify-full` as appropriate. The runtime-role password and migration URL must come from the deployment secret store rather than a checked-in env file.
 
 ### 2. Choose the administrator identity path
 
@@ -314,9 +325,11 @@ Package import is idempotent for the same tenant, package ID, and version. It cr
 Run the API:
 
 ```sh
-export DB_HOST=localhost DB_PORT=5432 DB_USERNAME=nexus DB_PASSWORD=nexus DB_NAME=nexus_pro_be DB_SSLMODE=disable
+export DB_HOST=localhost DB_PORT=5432 DB_USERNAME=nexus_app DB_PASSWORD=nexus-app-password DB_NAME=nexus_pro_be DB_SSLMODE=disable
 go run ./cmd/api
 ```
+
+For a new database, run `make migrate-up` and `make db-provision-runtime-role` with `MIGRATION_DATABASE_URL` first. Development/test log a warning when the connected role is privileged so existing local databases remain usable; staging/production abort startup when the role is a superuser, has `BYPASSRLS` or schema `CREATE`, owns business tables, or can access `goose_db_version`.
 
 Useful endpoints:
 
@@ -330,7 +343,7 @@ curl http://127.0.0.1:9091/metrics
 
 Connection pool sizing is configurable through `DB_MAX_CONNS` (default `10`), `DB_MIN_CONNS` (default `1`), and `DB_MAX_CONN_LIFETIME` (default `1h`).
 
-In production (`APP_ENV=production`), startup validation requires `DB_SSLMODE` to be `require`, `verify-ca`, or `verify-full`; `disable` or an unspecified mode is rejected.
+In production (`APP_ENV=production`) and staging, startup validation requires `DB_SSLMODE` to be `require`, `verify-ca`, or `verify-full`; `disable` or an unspecified mode is rejected. After connecting, startup also verifies that the effective runtime role cannot bypass RLS or mutate/own the business schema.
 
 ### CORS
 
@@ -374,6 +387,8 @@ go test ./tests/unit/...
 make unit-test
 ```
 
+CI provisions the same least-privilege role used by production. Set `REQUIRE_RLS_TESTS=1` for database-backed runs that must fail (rather than skip) when the runtime role, migrated schema, or required RLS policy is missing or unsafe.
+
 The same checks are available as:
 
 ```sh
@@ -403,7 +418,7 @@ Project code-organization preferences are documented in `docs/code-organization.
 
 The API runtime uses PostgreSQL as the source of truth:
 
-- PostgreSQL-backed repository is required through `DB_HOST` / `DB_USERNAME` / `DB_NAME`.
+- PostgreSQL-backed repository is required through least-privilege runtime `DB_HOST` / `DB_USERNAME` / `DB_NAME`; migrations use the separately scoped `MIGRATION_DATABASE_URL`.
 - In-memory repository remains available only for focused tests.
 
 The project has the production persistence foundation in place:

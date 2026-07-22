@@ -45,6 +45,12 @@ type WorkflowStore interface {
 	GetWorkflowRun(ctx context.Context, tenantID, id string) (domain.WorkflowRun, bool, error)
 	GetWorkflowRunByFormInstance(ctx context.Context, tenantID, formInstanceID string) (domain.WorkflowRun, bool, error)
 	ListWorkflowRunsByFormInstance(ctx context.Context, tenantID, formInstanceID string) ([]domain.WorkflowRun, error)
+	ListPendingWorkflowRuns(ctx context.Context, tenantID string, staleBefore time.Time, limit int) ([]domain.WorkflowRun, error)
+	ClaimWorkflowRunTemporalStart(ctx context.Context, tenantID, id string, claimedAt, staleBefore time.Time) (domain.WorkflowRun, bool, error)
+	ReleaseWorkflowRunTemporalStart(ctx context.Context, tenantID, id string, claimedAt, releasedAt time.Time) (bool, error)
+	MarkWorkflowRunTemporalStarted(ctx context.Context, tenantID, id string, claimedAt time.Time, execution domain.FormApprovalWorkflowExecution, startedAt time.Time) (domain.WorkflowRun, bool, error)
+	AbandonPendingWorkflowRunTemporalStart(ctx context.Context, tenantID, id string, abandonedAt time.Time) (domain.WorkflowRun, bool, error)
+	AbandonClaimedWorkflowRunTemporalStart(ctx context.Context, tenantID, id string, claimedAt, abandonedAt time.Time) (domain.WorkflowRun, bool, error)
 
 	UpsertWorkflowStageInstance(context.Context, domain.WorkflowStageInstance) error
 	GetWorkflowStageInstance(ctx context.Context, tenantID, id string) (domain.WorkflowStageInstance, bool, error)
@@ -55,5 +61,6 @@ type WorkflowStore interface {
 	ListPendingAssigneeStageInstanceIDs(ctx context.Context, tenantID, accountID string) ([]string, error)
 
 	InsertWorkflowAction(context.Context, domain.WorkflowAction) error
+	GetWorkflowActionByIdempotencyKey(ctx context.Context, tenantID, runID, idempotencyKey string) (domain.WorkflowAction, bool, error)
 	ListWorkflowActionsByRun(ctx context.Context, tenantID, runID string) ([]domain.WorkflowAction, error)
 }

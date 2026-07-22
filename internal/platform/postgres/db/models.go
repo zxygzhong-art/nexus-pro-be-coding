@@ -226,8 +226,6 @@ type AttendanceClockRecord struct {
 	ID                  string             `json:"id"`
 	TenantID            string             `json:"tenant_id"`
 	EmployeeID          string             `json:"employee_id"`
-	ShiftAssignmentID   pgtype.Text        `json:"shift_assignment_id"`
-	ShiftID             pgtype.Text        `json:"shift_id"`
 	WorksiteID          pgtype.Text        `json:"worksite_id"`
 	WorkDate            string             `json:"work_date"`
 	Direction           string             `json:"direction"`
@@ -308,55 +306,13 @@ type AttendanceDailySummary struct {
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
-type AttendancePolicy struct {
-	ID                 string             `json:"id"`
-	TenantID           string             `json:"tenant_id"`
-	WorkTime           []byte             `json:"work_time"`
-	LeaveTypes         []byte             `json:"leave_types"`
-	Version            int32              `json:"version"`
-	EffectiveFrom      pgtype.Timestamptz `json:"effective_from"`
-	UpdatedByAccountID string             `json:"updated_by_account_id"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-}
-
 type AttendancePolicyVersion struct {
-	TenantID           string             `json:"tenant_id"`
-	Version            int32              `json:"version"`
-	PolicyID           string             `json:"policy_id"`
-	WorkTime           []byte             `json:"work_time"`
-	LeaveTypes         []byte             `json:"leave_types"`
-	EffectiveFrom      pgtype.Timestamptz `json:"effective_from"`
-	UpdatedByAccountID string             `json:"updated_by_account_id"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-}
-
-type AttendanceShift struct {
-	ID                     string             `json:"id"`
-	TenantID               string             `json:"tenant_id"`
-	Name                   string             `json:"name"`
-	ClockInStart           string             `json:"clock_in_start"`
-	ClockInEnd             string             `json:"clock_in_end"`
-	ClockOutStart          string             `json:"clock_out_start"`
-	ClockOutEnd            string             `json:"clock_out_end"`
-	LateGraceMinutes       int32              `json:"late_grace_minutes"`
-	EarlyLeaveGraceMinutes int32              `json:"early_leave_grace_minutes"`
-	Status                 string             `json:"status"`
-	CreatedAt              pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
-}
-
-type AttendanceShiftAssignment struct {
-	ID            string             `json:"id"`
-	TenantID      string             `json:"tenant_id"`
-	EmployeeID    string             `json:"employee_id"`
-	ShiftID       string             `json:"shift_id"`
-	WorksiteID    string             `json:"worksite_id"`
-	EffectiveFrom pgtype.Timestamptz `json:"effective_from"`
-	EffectiveTo   pgtype.Timestamptz `json:"effective_to"`
-	Status        string             `json:"status"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	TenantID             string             `json:"tenant_id"`
+	Version              int32              `json:"version"`
+	WorkTime             []byte             `json:"work_time"`
+	EffectiveFrom        pgtype.Timestamptz `json:"effective_from"`
+	PublishedByAccountID string             `json:"published_by_account_id"`
+	PublishedAt          pgtype.Timestamptz `json:"published_at"`
 }
 
 type AttendanceWorksite struct {
@@ -533,6 +489,31 @@ type EmploymentContract struct {
 	Version             int64              `json:"version"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt           pgtype.Timestamptz `json:"updated_at"`
+}
+
+type ExternalLeaveRecord struct {
+	ID                   string             `json:"id"`
+	TenantID             string             `json:"tenant_id"`
+	EmployeeID           string             `json:"employee_id"`
+	SourceSystem         string             `json:"source_system"`
+	ExternalRef          string             `json:"external_ref"`
+	ExternalLeaveCode    string             `json:"external_leave_code"`
+	ExternalCategoryCode string             `json:"external_category_code"`
+	LeaveTypeID          string             `json:"leave_type_id"`
+	LeaveName            string             `json:"leave_name"`
+	StartAt              pgtype.Timestamptz `json:"start_at"`
+	EndAt                pgtype.Timestamptz `json:"end_at"`
+	GrossMinutes         int32              `json:"gross_minutes"`
+	DeductMinutes        int32              `json:"deduct_minutes"`
+	NetMinutes           int32              `json:"net_minutes"`
+	Remark               string             `json:"remark"`
+	SourceLabel          string             `json:"source_label"`
+	Status               string             `json:"status"`
+	RawPayload           []byte             `json:"raw_payload"`
+	PayloadHash          string             `json:"payload_hash"`
+	FirstSeenAt          pgtype.Timestamptz `json:"first_seen_at"`
+	LastSeenAt           pgtype.Timestamptz `json:"last_seen_at"`
+	DeletedAt            pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type FileAsset struct {
@@ -721,20 +702,40 @@ type KnowledgeDocumentChunk struct {
 }
 
 type LeaveBalance struct {
+	ID                   string             `json:"id"`
+	TenantID             string             `json:"tenant_id"`
+	EmployeeID           string             `json:"employee_id"`
+	LeaveTypeID          string             `json:"leave_type_id"`
+	RemainingHours       pgtype.Numeric     `json:"remaining_hours"`
+	PeriodStart          pgtype.Date        `json:"period_start"`
+	PeriodEnd            pgtype.Date        `json:"period_end"`
+	GrantedHours         pgtype.Numeric     `json:"granted_hours"`
+	UsedHours            pgtype.Numeric     `json:"used_hours"`
+	Source               string             `json:"source"`
+	ExternalLeaveCode    string             `json:"external_leave_code"`
+	ExternalCategoryCode string             `json:"external_category_code"`
+	EntitlementYear      pgtype.Int4        `json:"entitlement_year"`
+	CarryInHours         pgtype.Numeric     `json:"carry_in_hours"`
+	CarryExpire          pgtype.Date        `json:"carry_expire"`
+	RawPayload           []byte             `json:"raw_payload"`
+	LastSyncedAt         pgtype.Timestamptz `json:"last_synced_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+type LeaveBalanceEntry struct {
 	ID             string             `json:"id"`
 	TenantID       string             `json:"tenant_id"`
 	EmployeeID     string             `json:"employee_id"`
-	LeaveType      string             `json:"leave_type"`
 	LeaveTypeID    string             `json:"leave_type_id"`
-	RemainingHours pgtype.Numeric     `json:"remaining_hours"`
-	PeriodStart    pgtype.Date        `json:"period_start"`
-	PeriodEnd      pgtype.Date        `json:"period_end"`
-	GrantedHours   pgtype.Numeric     `json:"granted_hours"`
-	UsedHours      pgtype.Numeric     `json:"used_hours"`
-	Source         string             `json:"source"`
-	PolicyVersion  int32              `json:"policy_version"`
-	ProrateRatio   pgtype.Float8      `json:"prorate_ratio"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	BalanceID      string             `json:"balance_id"`
+	LeaveRequestID pgtype.Text        `json:"leave_request_id"`
+	LeaveCaseID    pgtype.Text        `json:"leave_case_id"`
+	EntryType      string             `json:"entry_type"`
+	AmountMinutes  int32              `json:"amount_minutes"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	Metadata       []byte             `json:"metadata"`
+	OccurredAt     pgtype.Timestamptz `json:"occurred_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
 type LeaveBalanceLedger struct {
@@ -742,7 +743,7 @@ type LeaveBalanceLedger struct {
 	TenantID       string             `json:"tenant_id"`
 	BalanceID      string             `json:"balance_id"`
 	EmployeeID     string             `json:"employee_id"`
-	LeaveType      string             `json:"leave_type"`
+	LeaveTypeID    string             `json:"leave_type_id"`
 	PeriodStart    pgtype.Date        `json:"period_start"`
 	PeriodEnd      pgtype.Date        `json:"period_end"`
 	EventType      string             `json:"event_type"`
@@ -754,23 +755,50 @@ type LeaveBalanceLedger struct {
 	OccurredAt     pgtype.Timestamptz `json:"occurred_at"`
 }
 
+type LeaveCase struct {
+	ID          string             `json:"id"`
+	TenantID    string             `json:"tenant_id"`
+	EmployeeID  string             `json:"employee_id"`
+	LeaveTypeID string             `json:"leave_type_id"`
+	StartAt     pgtype.Timestamptz `json:"start_at"`
+	EndAt       pgtype.Timestamptz `json:"end_at"`
+	NetMinutes  int32              `json:"net_minutes"`
+	Status      string             `json:"status"`
+	Origin      string             `json:"origin"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+type LeaveCaseSource struct {
+	ID          int64              `json:"id"`
+	TenantID    string             `json:"tenant_id"`
+	LeaveCaseID string             `json:"leave_case_id"`
+	SourceType  string             `json:"source_type"`
+	SourceID    string             `json:"source_id"`
+	MatchMethod string             `json:"match_method"`
+	MatchStatus string             `json:"match_status"`
+	CreatedAt   pgtype.Timestamptz `json:"created_at"`
+}
+
 type LeaveRequest struct {
-	ID                 string             `json:"id"`
-	TenantID           string             `json:"tenant_id"`
-	EmployeeID         string             `json:"employee_id"`
-	LeaveType          string             `json:"leave_type"`
-	LeaveTypeID        string             `json:"leave_type_id"`
-	PolicyVersion      int32              `json:"policy_version"`
-	RuleSnapshot       []byte             `json:"rule_snapshot"`
-	EvaluationSnapshot []byte             `json:"evaluation_snapshot"`
-	StartAt            pgtype.Timestamptz `json:"start_at"`
-	EndAt              pgtype.Timestamptz `json:"end_at"`
-	Hours              float64            `json:"hours"`
-	Reason             string             `json:"reason"`
-	Status             string             `json:"status"`
-	FormInstanceID     string             `json:"form_instance_id"`
-	LeaveBalanceID     pgtype.Text        `json:"leave_balance_id"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
+	ID                   string             `json:"id"`
+	TenantID             string             `json:"tenant_id"`
+	EmployeeID           string             `json:"employee_id"`
+	LeaveType            string             `json:"leave_type"`
+	LeaveTypeID          string             `json:"leave_type_id"`
+	PolicyVersion        int32              `json:"policy_version"`
+	RuleSnapshot         []byte             `json:"rule_snapshot"`
+	EvaluationSnapshot   []byte             `json:"evaluation_snapshot"`
+	StartAt              pgtype.Timestamptz `json:"start_at"`
+	EndAt                pgtype.Timestamptz `json:"end_at"`
+	Hours                float64            `json:"hours"`
+	Reason               string             `json:"reason"`
+	Status               string             `json:"status"`
+	FormInstanceID       string             `json:"form_instance_id"`
+	LeaveBalanceID       pgtype.Text        `json:"leave_balance_id"`
+	ReconciliationStatus string             `json:"reconciliation_status"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 }
 
 type LeaveRequestAllocation struct {
@@ -783,53 +811,32 @@ type LeaveRequestAllocation struct {
 }
 
 type LeaveType struct {
-	ID            string             `json:"id"`
-	TenantID      string             `json:"tenant_id"`
-	Code          string             `json:"code"`
-	Name          string             `json:"name"`
-	Category      string             `json:"category"`
-	SourceOfTruth string             `json:"source_of_truth"`
-	Status        string             `json:"status"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-}
-
-type LeaveTypeDefinition struct {
+	ID              string             `json:"id"`
+	TenantID        string             `json:"tenant_id"`
 	Code            string             `json:"code"`
+	Name            string             `json:"name"`
 	NameZh          string             `json:"name_zh"`
 	NameEn          string             `json:"name_en"`
-	Unit            string             `json:"unit"`
-	PaidRatio       pgtype.Numeric     `json:"paid_ratio"`
+	Category        string             `json:"category"`
+	SourceOfTruth   string             `json:"source_of_truth"`
+	Status          string             `json:"status"`
 	RequiresBalance bool               `json:"requires_balance"`
 	DisplayOrder    int32              `json:"display_order"`
 	CreatedAt       pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
 }
 
-type LeaveTypeExternalMapping struct {
-	ID            string             `json:"id"`
-	TenantID      string             `json:"tenant_id"`
-	Source        string             `json:"source"`
-	ExternalCode  string             `json:"external_code"`
-	LeaveTypeID   string             `json:"leave_type_id"`
-	EffectiveFrom pgtype.Date        `json:"effective_from"`
-	EffectiveTo   pgtype.Date        `json:"effective_to"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
-}
-
-type LeaveTypeSyncIssue struct {
-	ID           string             `json:"id"`
-	TenantID     string             `json:"tenant_id"`
-	Source       string             `json:"source"`
-	ExternalCode string             `json:"external_code"`
-	IssueCode    string             `json:"issue_code"`
-	Message      string             `json:"message"`
-	Occurrences  int32              `json:"occurrences"`
-	Status       string             `json:"status"`
-	FirstSeenAt  pgtype.Timestamptz `json:"first_seen_at"`
-	LastSeenAt   pgtype.Timestamptz `json:"last_seen_at"`
-	ResolvedAt   pgtype.Timestamptz `json:"resolved_at"`
+type LeaveTypeExternalRef struct {
+	ID                   string             `json:"id"`
+	TenantID             string             `json:"tenant_id"`
+	SourceSystem         string             `json:"source_system"`
+	ExternalCode         string             `json:"external_code"`
+	ExternalCategoryCode string             `json:"external_category_code"`
+	LeaveTypeID          string             `json:"leave_type_id"`
+	EffectiveFrom        pgtype.Date        `json:"effective_from"`
+	EffectiveTo          pgtype.Date        `json:"effective_to"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
 }
 
 type MenuItem struct {
@@ -886,17 +893,28 @@ type OrgUnit struct {
 }
 
 type OutboxEvent struct {
-	ID            string             `json:"id"`
-	TenantID      string             `json:"tenant_id"`
-	EventType     string             `json:"event_type"`
-	AggregateType string             `json:"aggregate_type"`
-	AggregateID   string             `json:"aggregate_id"`
-	Payload       []byte             `json:"payload"`
-	Status        string             `json:"status"`
-	RetryCount    int32              `json:"retry_count"`
-	LastError     string             `json:"last_error"`
-	CreatedAt     pgtype.Timestamptz `json:"created_at"`
-	ProcessedAt   pgtype.Timestamptz `json:"processed_at"`
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	EventType      string             `json:"event_type"`
+	AggregateType  string             `json:"aggregate_type"`
+	AggregateID    string             `json:"aggregate_id"`
+	Payload        []byte             `json:"payload"`
+	PayloadVersion int32              `json:"payload_version"`
+	IdempotencyKey string             `json:"idempotency_key"`
+	Status         string             `json:"status"`
+	RetryCount     int32              `json:"retry_count"`
+	AttemptCount   int32              `json:"attempt_count"`
+	MaxAttempts    int32              `json:"max_attempts"`
+	LastError      string             `json:"last_error"`
+	NextAttemptAt  pgtype.Timestamptz `json:"next_attempt_at"`
+	ClaimOwner     string             `json:"claim_owner"`
+	ClaimToken     string             `json:"claim_token"`
+	ClaimExpiresAt pgtype.Timestamptz `json:"claim_expires_at"`
+	LastAttemptAt  pgtype.Timestamptz `json:"last_attempt_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	ProcessedAt    pgtype.Timestamptz `json:"processed_at"`
+	DeadLetteredAt pgtype.Timestamptz `json:"dead_lettered_at"`
 }
 
 type OvertimeRequest struct {
@@ -1028,14 +1046,6 @@ type Tenant struct {
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
-type TenantLeaveTypeSetting struct {
-	TenantID           string             `json:"tenant_id"`
-	LeaveTypeCode      string             `json:"leave_type_code"`
-	Enabled            bool               `json:"enabled"`
-	UpdatedByAccountID string             `json:"updated_by_account_id"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-}
-
 type UserGroup struct {
 	ID                   string             `json:"id"`
 	TenantID             string             `json:"tenant_id"`
@@ -1069,14 +1079,18 @@ type UserIdentity struct {
 }
 
 type WorkflowAction struct {
-	ID              string             `json:"id"`
-	TenantID        string             `json:"tenant_id"`
-	RunID           string             `json:"run_id"`
-	StageInstanceID string             `json:"stage_instance_id"`
-	AccountID       string             `json:"account_id"`
-	Action          string             `json:"action"`
-	Comment         string             `json:"comment"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	ID                 string             `json:"id"`
+	TenantID           string             `json:"tenant_id"`
+	RunID              string             `json:"run_id"`
+	StageInstanceID    string             `json:"stage_instance_id"`
+	AccountID          string             `json:"account_id"`
+	Action             string             `json:"action"`
+	Comment            string             `json:"comment"`
+	IdempotencyKey     string             `json:"idempotency_key"`
+	CommandFingerprint string             `json:"command_fingerprint"`
+	RequestID          string             `json:"request_id"`
+	TraceID            string             `json:"trace_id"`
+	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 }
 
 type WorkflowRun struct {
@@ -1088,6 +1102,11 @@ type WorkflowRun struct {
 	Status                 string             `json:"status"`
 	CurrentStageInstanceID pgtype.Text        `json:"current_stage_instance_id"`
 	StageDefinitionsJson   []byte             `json:"stage_definitions_json"`
+	TemporalStartStatus    string             `json:"temporal_start_status"`
+	TemporalWorkflowID     string             `json:"temporal_workflow_id"`
+	TemporalRunID          string             `json:"temporal_run_id"`
+	TemporalStartEventID   string             `json:"temporal_start_event_id"`
+	TemporalStartedAt      pgtype.Timestamptz `json:"temporal_started_at"`
 	CreatedAt              pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt              pgtype.Timestamptz `json:"updated_at"`
 }

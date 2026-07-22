@@ -1252,7 +1252,7 @@ func TestUpdateAttendancePolicyPersistsWorkspaceSettings(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("policy was not stored: ok=%v err=%v", ok, err)
 	}
-	if stored.UpdatedByAccountID != "acct-1" || stored.WorkTime.ClockMode != "fixed" || stored.WorkTime.FlexibleClockInEarliest != "08:00" || stored.WorkTime.FlexibleClockOutLatest != "20:00" || stored.WorkTime.CycleEnd != "次月 4 日" {
+	if stored.PublishedByAccountID != "acct-1" || stored.WorkTime.ClockMode != "fixed" || stored.WorkTime.FlexibleClockInEarliest != "08:00" || stored.WorkTime.FlexibleClockOutLatest != "20:00" || stored.WorkTime.CycleEnd != "次月 4 日" {
 		t.Fatalf("unexpected stored policy: %+v", stored)
 	}
 	workspace, err := svc.Workspace().Workspace(ctx)

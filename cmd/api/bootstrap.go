@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strconv"
@@ -54,6 +55,10 @@ type apiRuntime struct {
 	openFGAConsumer            *jobs.OpenFGAConsumer
 	openFGAConsumerOptions     jobs.OpenFGAConsumerOptions
 	liteLLMModelSyncer         *jobs.LiteLLMModelSyncer
+	workflowStartHandler       jobs.WorkflowStartHandler
+	workflowStartReconciler    *jobs.WorkflowStartReconciler
+	outboxWake                 <-chan struct{}
+	outboxDispatchEnabled      bool
 	shutdowns                  []moduleShutdown
 	workers                    sync.WaitGroup
 }
@@ -198,12 +203,20 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 
 	authHTTPClient := &http.Client{Timeout: 5 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}
 	modelHTTPClient := &http.Client{Timeout: 30 * time.Second, Transport: otelhttp.NewTransport(http.DefaultTransport)}
+	outboxWake := make(chan struct{}, 1)
 	serviceOptions := service.Options{
-		Logger:             logger,
-		AuthzSnapshot:      authzSnapshotModule.cache,
-		Relationships:      relationshipModule.checker,
-		OpenFGAScopeChecks: cfg.OpenFGAScopeCheckEnabled,
-		ObjectStore:        objectStoreModule.store,
+		Logger:                     logger,
+		AuthzSnapshot:              authzSnapshotModule.cache,
+		Relationships:              relationshipModule.checker,
+		OpenFGAScopeChecks:         cfg.OpenFGAScopeCheckEnabled,
+		ObjectStore:                objectStoreModule.store,
+		WorkflowStartOutboxEnabled: cfg.WorkflowStartOutboxEnabled,
+		OutboxWake: func() {
+			select {
+			case outboxWake <- struct{}{}:
+			default:
+			}
+		},
 		FormApprovalWorkflows: temporalplatform.NewFormApprovalClient(
 			temporalModule.client,
 			cfg.TemporalTaskQueue,
@@ -388,6 +401,9 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		ehrmsAttendanceScheduler: ehrmsAttendanceScheduler,
 		ehrmsAttendanceOptions:   ehrmsAttendanceOptions,
 		liteLLMModelSyncer:       liteLLMModelSyncer,
+		workflowStartHandler:     app.Workflow(),
+		outboxWake:               outboxWake,
+		outboxDispatchEnabled:    cfg.OutboxDispatchEnabled,
 		shutdowns:                shutdowns,
 	}
 	if natsModule.client != nil {
@@ -396,6 +412,9 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 			Stream:         cfg.NATSStream,
 			ConsumerPrefix: cfg.NATSConsumerPrefix,
 		}
+	}
+	if cfg.WorkflowStartOutboxEnabled {
+		runtime.workflowStartReconciler = jobs.NewWorkflowStartReconciler(store, app.Workflow(), logger)
 	}
 	if identityProvisioner != nil {
 		// 重試 fast path 失敗後仍停留在佇列中的 Keycloak provisioning。
@@ -468,10 +487,27 @@ func startRepositoryModule(ctx context.Context, cfg config.Config, logger *slog.
 		MinConns:        cfg.DBMinConns,
 		MaxConnLifetime: cfg.DBMaxConnLifetime,
 	})
-	cancel()
 	if err != nil {
+		cancel()
 		logger.Error("postgres connection failed", "error", err)
 		return result, err
+	}
+	role, roleErr := postgres.InspectRuntimeRole(startupCtx, pool)
+	cancel()
+	if roleErr == nil {
+		roleErr = role.Validate()
+	}
+	if roleErr != nil {
+		environment := strings.ToLower(strings.TrimSpace(cfg.Env))
+		if environment == "staging" || environment == "production" {
+			pool.Close()
+			err = fmt.Errorf("postgres runtime role validation failed: %w", roleErr)
+			logger.Error("postgres connection rejected", "error", err)
+			return result, err
+		}
+		logger.Warn("postgres runtime role is not production-safe", "role", role.Name, "error", roleErr)
+	} else {
+		logger.Info("postgres runtime role validated", "role", role.Name)
 	}
 	logger.Info("postgres connected")
 	result.store = pgstore.NewStore(pool)
@@ -953,7 +989,7 @@ func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Lo
 		}()
 		logger.Info("openfga event consumer started")
 	}
-	if r.store != nil {
+	if r.store != nil && r.outboxDispatchEnabled {
 		writer := r.relationshipWriter
 		usingNoopWriter := false
 		if writer == nil && r.eventPublisher == nil {
@@ -961,6 +997,7 @@ func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Lo
 			usingNoopWriter = true
 		}
 		dispatcher := jobs.NewOutboxDispatcher(r.store, writer, logger)
+		dispatcher.WithWorkflowStartHandler(r.workflowStartHandler).WithWakeChannel(r.outboxWake)
 		if r.liteLLMModelSyncer != nil {
 			dispatcher.WithAgentModelSyncHandler(r.liteLLMModelSyncer)
 		}
@@ -987,6 +1024,8 @@ func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Lo
 			outboxCleaner.Run(ctx, jobs.OutboxCleanupOptions{})
 		}()
 		logger.Info("outbox cleanup worker started", "interval", "24h", "retention", "168h")
+	} else if r.store != nil {
+		logger.Info("outbox dispatcher disabled", "config", "OUTBOX_DISPATCH_ENABLED=false")
 	}
 	if r.liteLLMModelSyncer != nil && r.liteLLMModelSyncer.Configured() {
 		r.workers.Add(1)
@@ -995,6 +1034,14 @@ func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Lo
 			r.liteLLMModelSyncer.Run(ctx, jobs.LiteLLMModelSyncOptions{})
 		}()
 		logger.Info("LiteLLM model reconciler started", "interval", "5m", "orphan_sweep_every", 6)
+	}
+	if r.workflowStartReconciler != nil {
+		r.workers.Add(1)
+		go func() {
+			defer r.workers.Done()
+			r.workflowStartReconciler.Run(ctx)
+		}()
+		logger.Info("workflow start reconciler started", "interval", "1m")
 	}
 	if r.ehrmsPipelineScheduler != nil {
 		r.workers.Add(1)

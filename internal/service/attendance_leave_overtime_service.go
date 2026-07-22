@@ -50,61 +50,53 @@ func (c AttendanceService) submitAttendanceCompatibilityForm(ctx RequestContext,
 	if err != nil {
 		return FormInstance{}, err
 	}
+	if workflow.workflowStartOutboxEnabled {
+		return instance, nil
+	}
 	if startErr := workflow.startTemporalFormApprovalWorkflow(ctx, instance); startErr != nil {
 		return FormInstance{}, workflow.compensateFormApprovalWorkflowStartFailure(ctx, instance, startErr)
 	}
 	return instance, nil
 }
 
-// reserveLeaveBalanceIfAvailable degrades a missing or insufficient balance to a no-balance request.
-func (c AttendanceService) reserveLeaveBalanceIfAvailable(ctx RequestContext, employeeID, leaveType string, hours float64, asOf time.Time) (LeaveBalance, string, error) {
-	balance, reserved, found, err := c.store.ReserveLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, leaveType, hours, asOf, c.Now())
-	if err != nil {
-		return LeaveBalance{}, "", err
-	}
-	if !found {
-		return LeaveBalance{}, leaveEvaluationBalanceMissing, nil
-	}
-	if !reserved {
-		return balance, leaveEvaluationBalanceInsufficient, nil
-	}
-	return balance, "", nil
+// reserveLeaveBalanceIfAvailable selects and locks an eHRMS entitlement bucket.
+// The caller appends a Nexus overlay entry after the request has been persisted.
+func (c AttendanceService) reserveLeaveBalanceIfAvailable(ctx RequestContext, employeeID, leaveTypeID string, hours float64, asOf time.Time) (LeaveBalance, string, error) {
+	return c.leaveBalanceForOverlay(ctx, employeeID, leaveTypeID, hours, asOf)
 }
 
-// releaseLeaveBalance restores one exact balance bucket, resolving legacy requests by their start date.
-func (c AttendanceService) releaseLeaveBalance(ctx RequestContext, balanceID, employeeID, leaveType string, hours float64, asOf time.Time) (LeaveBalance, error) {
+// resolveLeaveBalanceID resolves legacy requests without mutating the eHRMS snapshot.
+func (c AttendanceService) resolveLeaveBalanceID(ctx RequestContext, balanceID, employeeID, leaveTypeID string, asOf time.Time) (string, error) {
 	resolvedID := strings.TrimSpace(balanceID)
 	if resolvedID == "" {
 		balances, err := c.store.ListLeaveBalances(goContext(ctx), ctx.TenantID)
 		if err != nil {
-			return LeaveBalance{}, err
+			return "", err
 		}
 		matches := make([]LeaveBalance, 0, 1)
 		for _, balance := range balances {
-			if balance.EmployeeID == employeeID && strings.EqualFold(strings.TrimSpace(balance.LeaveType), strings.TrimSpace(leaveType)) && leaveBalanceCoversDate(balance, asOf) {
+			if balance.EmployeeID == employeeID && balance.LeaveTypeID == leaveTypeID && leaveBalanceCoversDate(balance, asOf) {
 				matches = append(matches, balance)
 			}
 		}
 		switch len(matches) {
 		case 0:
-			return LeaveBalance{}, Conflict("legacy leave request has no balance covering its start date")
+			return "", Conflict("legacy leave request has no balance covering its start date")
 		case 1:
 			resolvedID = strings.TrimSpace(matches[0].ID)
 		default:
-			return LeaveBalance{}, Conflict("legacy leave request matches multiple balances for its start date")
+			return "", Conflict("legacy leave request matches multiple balances for its start date")
 		}
 		if resolvedID == "" {
-			return LeaveBalance{}, Conflict("legacy leave request resolved to an invalid balance")
+			return "", Conflict("legacy leave request resolved to an invalid balance")
 		}
 	}
-	balance, found, err := c.store.ReleaseLeaveBalanceByID(goContext(ctx), ctx.TenantID, resolvedID, hours, c.Now())
-	if err != nil {
-		return LeaveBalance{}, err
+	if _, found, err := c.store.GetLeaveBalance(goContext(ctx), ctx.TenantID, resolvedID); err != nil {
+		return "", err
+	} else if !found {
+		return "", Conflict("linked leave balance was not found")
 	}
-	if !found {
-		return LeaveBalance{}, Conflict("linked leave balance was not found")
-	}
-	return balance, nil
+	return resolvedID, nil
 }
 
 // applyLeaveWorkflowReview 處理 apply 請假流程審核的服務流程。
@@ -143,18 +135,42 @@ func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance
 	if previousStatus == "approved" && nextStatus != "approved" {
 		return BadRequest("approved leave request cannot be changed by workflow")
 	}
-	if leaveRequestStatusReleasesBalance(previousStatus, nextStatus) {
-		requiresBalance := strings.TrimSpace(request.LeaveBalanceID) != ""
-		if snapshotValue, ok := request.EvaluationSnapshot["balance_required"].(bool); ok {
-			requiresBalance = snapshotValue
+	requiresBalance := strings.TrimSpace(request.LeaveBalanceID) != ""
+	if snapshotValue, ok := request.EvaluationSnapshot["balance_required"].(bool); ok {
+		requiresBalance = snapshotValue
+	}
+	leaveTypeID := strings.TrimSpace(request.LeaveTypeID)
+	if leaveTypeID == "" {
+		leaveTypeID = domain.StableLeaveTypeID(request.LeaveType)
+		request.LeaveTypeID = leaveTypeID
+	}
+	cycle := leaveRequestBalanceCycle(request)
+	if requiresBalance && (leaveRequestStatusReleasesBalance(previousStatus, nextStatus) || previousStatus == "pending_approval" && nextStatus == "approved") {
+		balanceID, err := c.resolveLeaveBalanceID(ctx, request.LeaveBalanceID, request.EmployeeID, leaveTypeID, request.StartAt)
+		if err != nil {
+			return err
 		}
-		if requiresBalance {
-			if _, err := c.releaseLeaveBalance(ctx, request.LeaveBalanceID, request.EmployeeID, request.LeaveType, request.Hours, request.StartAt); err != nil {
+		if err := c.appendLeaveBalanceEntry(ctx, request, balanceID, "", leaveBalanceEntryRelease, leaveMinutes(request.Hours), cycle); err != nil {
+			return err
+		}
+		if nextStatus == "approved" {
+			leaveCase, err := c.ensureNexusLeaveCase(ctx, request)
+			if err != nil {
 				return err
 			}
+			if err := c.appendLeaveBalanceEntry(ctx, request, balanceID, leaveCase.ID, leaveBalanceEntryLocalConsume, -leaveMinutes(request.Hours), cycle); err != nil {
+				return err
+			}
+			request.ReconciliationStatus = "nexus_only"
 		}
+	} else if nextStatus == "approved" {
+		if _, err := c.ensureNexusLeaveCase(ctx, request); err != nil {
+			return err
+		}
+		request.ReconciliationStatus = "nexus_only"
 	}
 	request.Status = nextStatus
+	request.UpdatedAt = c.Now()
 	return c.store.UpsertLeaveRequest(goContext(ctx), request)
 }
 
@@ -501,7 +517,8 @@ func (c AttendanceService) creditCompensatoryLeaveBalance(ctx RequestContext, em
 		return nil
 	}
 	leaveType := leaveTypeCodeCompensatory
-	if _, found, err := c.store.ReleaseLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, leaveType, hours, c.Now()); err != nil {
+	leaveTypeID := domain.StableLeaveTypeID(leaveType)
+	if _, found, err := c.store.ReleaseLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, leaveTypeID, hours, c.Now()); err != nil {
 		return err
 	} else if found {
 		return nil
@@ -511,6 +528,7 @@ func (c AttendanceService) creditCompensatoryLeaveBalance(ctx RequestContext, em
 		TenantID:       ctx.TenantID,
 		EmployeeID:     employeeID,
 		LeaveType:      leaveType,
+		LeaveTypeID:    leaveTypeID,
 		RemainingHours: hours,
 		GrantedHours:   hours,
 		Source:         "overtime",

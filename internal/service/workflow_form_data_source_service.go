@@ -20,7 +20,7 @@ var formDataSourceAllowedFields = map[string]map[string]struct{}{
 	formDataSourceDepartments: {"id": {}, "name": {}, "code": {}},
 	formDataSourceEmployees:   {"id": {}, "name": {}, "employee_no": {}, "email": {}, "department_id": {}, "department_name": {}, "position_id": {}, "position_name": {}},
 	formDataSourcePositions:   {"id": {}, "name": {}, "code": {}, "department_id": {}},
-	formDataSourceLeaveTypes:  {"code": {}, "name": {}, "unit": {}},
+	formDataSourceLeaveTypes:  {"code": {}, "name": {}},
 }
 
 // ValidateFormFieldBinding validates that a persisted form binding uses an allowlisted data source.
@@ -137,7 +137,7 @@ func (c WorkflowService) loadFormDataSources(ctx RequestContext) (domain.FormDat
 			continue
 		}
 		leaveTypeRecords = append(leaveTypeRecords, map[string]interface{}{
-			"code": leaveType.Code, "name": leaveType.NameZH, "unit": leaveType.Unit,
+			"code": leaveType.Code, "name": leaveType.NameZH,
 		})
 	}
 
@@ -226,5 +226,5 @@ func positionDataSourceFields() []domain.FormDataSourceField {
 }
 
 func leaveTypeDataSourceFields() []domain.FormDataSourceField {
-	return []domain.FormDataSourceField{{Key: "code", Label: "假別代碼", Type: "string"}, {Key: "name", Label: "假別名稱", Type: "string"}, {Key: "unit", Label: "計算單位", Type: "string"}}
+	return []domain.FormDataSourceField{{Key: "code", Label: "假別代碼", Type: "string"}, {Key: "name", Label: "假別名稱", Type: "string"}}
 }

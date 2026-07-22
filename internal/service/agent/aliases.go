@@ -75,7 +75,6 @@ type (
 	LeaveBalance                       = domain.LeaveBalance
 	LeaveBalanceQuery                  = domain.LeaveBalanceQuery
 	LeaveRequestAllocation             = domain.LeaveRequestAllocation
-	LeaveTypeExternalMapping           = domain.LeaveTypeExternalMapping
 	LeaveRequest                       = domain.LeaveRequest
 	LeaveRequestEvaluation             = domain.LeaveRequestEvaluation
 	EvaluateLeaveRequestInput          = domain.EvaluateLeaveRequestInput
@@ -83,8 +82,6 @@ type (
 	OvertimeRequest                    = domain.OvertimeRequest
 	OvertimeRequestQuery               = domain.OvertimeRequestQuery
 	AttendanceWorksite                 = domain.AttendanceWorksite
-	AttendanceShift                    = domain.AttendanceShift
-	AttendanceShiftAssignment          = domain.AttendanceShiftAssignment
 	AttendanceClockRecord              = domain.AttendanceClockRecord
 	AttendanceDailySummary             = domain.AttendanceDailySummary
 	AttendanceCorrectionRequest        = domain.AttendanceCorrectionRequest
@@ -102,10 +99,6 @@ type (
 	LeaveType                          = domain.LeaveType
 	LeaveTypeCatalog                   = domain.LeaveTypeCatalog
 	SetLeaveTypeEnabledInput           = domain.SetLeaveTypeEnabledInput
-	LeaveTypeSyncIssue                 = domain.LeaveTypeSyncIssue
-	LeaveTypeIntegration               = domain.LeaveTypeIntegration
-	LeaveTypeIntegrationResponse       = domain.LeaveTypeIntegrationResponse
-	SaveLeaveTypeExternalMappingInput  = domain.SaveLeaveTypeExternalMappingInput
 	PlatformAssistant                  = domain.PlatformAssistant
 	PlatformFormItem                   = domain.PlatformFormItem
 	PlatformFormColumn                 = domain.PlatformFormColumn
@@ -300,9 +293,6 @@ type (
 	CreateOvertimeRequestInput                 = domain.CreateOvertimeRequestInput
 	CreateAttendanceWorksiteInput              = domain.CreateAttendanceWorksiteInput
 	UpdateAttendanceWorksiteInput              = domain.UpdateAttendanceWorksiteInput
-	CreateAttendanceShiftInput                 = domain.CreateAttendanceShiftInput
-	CreateAttendanceShiftAssignmentInput       = domain.CreateAttendanceShiftAssignmentInput
-	UpdateAttendanceShiftInput                 = domain.UpdateAttendanceShiftInput
 	CreateAttendanceClockRecordInput           = domain.CreateAttendanceClockRecordInput
 	AttendanceClockRecordQuery                 = domain.AttendanceClockRecordQuery
 	AttendanceDailySummaryQuery                = domain.AttendanceDailySummaryQuery
@@ -408,8 +398,6 @@ const (
 	ResourceEmploymentContract        = domain.ResourceEmploymentContract
 	ResourceLeave                     = domain.ResourceLeave
 	ResourceAttendanceWorksite        = domain.ResourceAttendanceWorksite
-	ResourceAttendanceShift           = domain.ResourceAttendanceShift
-	ResourceAttendanceShiftAssignment = domain.ResourceAttendanceShiftAssignment
 	ResourceAttendanceClock           = domain.ResourceAttendanceClock
 	ResourceAttendanceCorrection      = domain.ResourceAttendanceCorrection
 	ResourceUserGroup                 = domain.ResourceUserGroup

@@ -9,25 +9,25 @@ import (
 
 // AttendanceStore 定義考勤儲存層的行為契約。
 type AttendanceStore interface {
-	UpsertAttendancePolicy(context.Context, domain.AttendancePolicy) error
+	InsertAttendancePolicyVersion(context.Context, domain.AttendancePolicy) error
 	GetAttendancePolicy(ctx context.Context, tenantID string) (domain.AttendancePolicy, bool, error)
+	// ListLeaveTypes returns tenant leave_types rows ordered by display_order.
 	ListLeaveTypes(ctx context.Context, tenantID string) ([]domain.LeaveType, error)
+	// UpsertLeaveTypeEnabled writes leave_types.status (active/inactive) for one existing code.
 	UpsertLeaveTypeEnabled(ctx context.Context, tenantID, code string, enabled bool, updatedByAccountID string, updatedAt time.Time) error
-	GetLeaveTypeExternalMapping(ctx context.Context, tenantID, source, externalCode string, asOf time.Time) (domain.LeaveTypeExternalMapping, bool, error)
-	ListLeaveTypeExternalMappings(ctx context.Context, tenantID string) ([]domain.LeaveTypeExternalMapping, error)
-	LockLeaveTypeExternalMappingKey(ctx context.Context, tenantID, source, externalCode string) error
-	UpsertLeaveTypeExternalMapping(context.Context, domain.LeaveTypeExternalMapping) error
-	ExpireLeaveTypeExternalMapping(ctx context.Context, tenantID, id, effectiveTo string, updatedAt time.Time) (bool, error)
-	UpsertLeaveTypeSyncIssue(context.Context, domain.LeaveTypeSyncIssue) error
-	ListOpenLeaveTypeSyncIssues(ctx context.Context, tenantID string) ([]domain.LeaveTypeSyncIssue, error)
-	ResolveLeaveTypeSyncIssues(ctx context.Context, tenantID, source, externalCode string, resolvedAt time.Time) error
+	UpsertLeaveTypeExternalRef(context.Context, domain.LeaveTypeExternalRef) error
+	GetLeaveTypeExternalRef(ctx context.Context, tenantID, sourceSystem, externalCode, externalCategoryCode string, asOf time.Time) (domain.LeaveTypeExternalRef, bool, error)
 
 	UpsertLeaveBalance(context.Context, domain.LeaveBalance) error
 	GetLeaveBalance(ctx context.Context, tenantID, id string) (domain.LeaveBalance, bool, error)
+	GetLeaveBalanceForOverlay(ctx context.Context, tenantID, employeeID, leaveTypeID string, asOf time.Time) (domain.LeaveBalance, bool, error)
 	ListLeaveBalances(ctx context.Context, tenantID string) ([]domain.LeaveBalance, error)
-	ReserveLeaveBalance(ctx context.Context, tenantID, employeeID, leaveType string, hours float64, asOf, updatedAt time.Time) (domain.LeaveBalance, bool, bool, error)
-	ReleaseLeaveBalance(ctx context.Context, tenantID, employeeID, leaveType string, hours float64, updatedAt time.Time) (domain.LeaveBalance, bool, error)
+	ReserveLeaveBalance(ctx context.Context, tenantID, employeeID, leaveTypeID string, hours float64, asOf, updatedAt time.Time) (domain.LeaveBalance, bool, bool, error)
+	ReleaseLeaveBalance(ctx context.Context, tenantID, employeeID, leaveTypeID string, hours float64, updatedAt time.Time) (domain.LeaveBalance, bool, error)
 	ReleaseLeaveBalanceByID(ctx context.Context, tenantID, balanceID string, hours float64, updatedAt time.Time) (domain.LeaveBalance, bool, error)
+	AppendLeaveBalanceEntry(context.Context, domain.LeaveBalanceEntry) (bool, error)
+	ListLeaveBalanceEntries(ctx context.Context, tenantID string) ([]domain.LeaveBalanceEntry, error)
+	ListLeaveBalanceEntriesByBalance(ctx context.Context, tenantID, balanceID string) ([]domain.LeaveBalanceEntry, error)
 
 	UpsertLeaveRequest(context.Context, domain.LeaveRequest) error
 	UpsertLeaveRequestAllocation(context.Context, domain.LeaveRequestAllocation) error
@@ -36,17 +36,17 @@ type AttendanceStore interface {
 	ListLeaveRequests(ctx context.Context, tenantID string) ([]domain.LeaveRequest, error)
 	ListLeaveRequestsByQuery(ctx context.Context, tenantID string, query domain.LeaveRequestQuery) ([]domain.LeaveRequest, error)
 	ListLeaveRequestPageByQuery(ctx context.Context, tenantID string, query domain.LeaveRequestQuery, page domain.PageRequest) ([]domain.LeaveRequest, int, error)
+	UpsertLeaveCase(context.Context, domain.LeaveCase) error
+	GetLeaveCaseBySource(ctx context.Context, tenantID, sourceType, sourceID string) (domain.LeaveCase, bool, error)
+	UpsertLeaveCaseSource(context.Context, domain.LeaveCaseSource) error
+	DeleteLeaveCaseIfUnreferenced(ctx context.Context, tenantID, id string) error
+	UpsertExternalLeaveRecord(context.Context, domain.ExternalLeaveRecord) error
+	GetExternalLeaveRecordByRef(ctx context.Context, tenantID, sourceSystem, externalRef string) (domain.ExternalLeaveRecord, bool, error)
+	ListExternalLeaveRecords(ctx context.Context, tenantID string) ([]domain.ExternalLeaveRecord, error)
 
 	UpsertAttendanceWorksite(context.Context, domain.AttendanceWorksite) error
 	GetAttendanceWorksite(ctx context.Context, tenantID, id string) (domain.AttendanceWorksite, bool, error)
 	ListAttendanceWorksites(ctx context.Context, tenantID string) ([]domain.AttendanceWorksite, error)
-
-	UpsertAttendanceShift(context.Context, domain.AttendanceShift) error
-	GetAttendanceShift(ctx context.Context, tenantID, id string) (domain.AttendanceShift, bool, error)
-	ListAttendanceShifts(ctx context.Context, tenantID string) ([]domain.AttendanceShift, error)
-	UpsertAttendanceShiftAssignment(context.Context, domain.AttendanceShiftAssignment) error
-	ListAttendanceShiftAssignments(ctx context.Context, tenantID string) ([]domain.AttendanceShiftAssignment, error)
-	FindEffectiveAttendanceShiftAssignment(ctx context.Context, tenantID, employeeID string, at time.Time) (domain.AttendanceShiftAssignment, bool, error)
 
 	UpsertAttendanceClockRecord(context.Context, domain.AttendanceClockRecord) error
 	GetAttendanceClockRecordByClientEventID(ctx context.Context, tenantID, clientEventID string) (domain.AttendanceClockRecord, bool, error)

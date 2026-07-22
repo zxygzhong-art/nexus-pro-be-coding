@@ -109,9 +109,10 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 		requestID = existing.ID
 		createdAt = existing.CreatedAt
 	}
+	balanceCycle := nextLeaveRequestBalanceCycle(existing, resubmitting)
 	leaveBalanceID := ""
 	if evaluation.BalanceRequired {
-		balance, fallbackReason, err := c.reserveLeaveBalanceIfAvailable(ctx, employeeID, leaveTypeCode, hours, startAt)
+		balance, fallbackReason, err := c.reserveLeaveBalanceIfAvailable(ctx, employeeID, evaluation.LeaveTypeID, hours, startAt)
 		if err != nil {
 			return LeaveRequest{}, err
 		}
@@ -123,23 +124,27 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 			leaveBalanceID = balance.ID
 		}
 	}
+	evaluationSnapshot := leaveEvaluationSnapshotMap(evaluation)
+	evaluationSnapshot["balance_cycle"] = balanceCycle
 	req := LeaveRequest{
-		ID:                 requestID,
-		TenantID:           ctx.TenantID,
-		EmployeeID:         employeeID,
-		LeaveType:          leaveTypeCode,
-		LeaveTypeID:        evaluation.LeaveTypeID,
-		PolicyVersion:      evaluation.PolicyVersion,
-		RuleSnapshot:       leaveRuleSnapshotMap(evaluation.Rule),
-		EvaluationSnapshot: leaveEvaluationSnapshotMap(evaluation),
-		StartAt:            startAt,
-		EndAt:              endAt,
-		Hours:              hours,
-		Reason:             strings.TrimSpace(reason),
-		Status:             "pending_approval",
-		FormInstanceID:     instance.ID,
-		LeaveBalanceID:     leaveBalanceID,
-		CreatedAt:          createdAt,
+		ID:                   requestID,
+		TenantID:             ctx.TenantID,
+		EmployeeID:           employeeID,
+		LeaveType:            leaveTypeCode,
+		LeaveTypeID:          evaluation.LeaveTypeID,
+		PolicyVersion:        evaluation.PolicyVersion,
+		RuleSnapshot:         leaveRuleSnapshotMap(evaluation.Rule),
+		EvaluationSnapshot:   evaluationSnapshot,
+		StartAt:              startAt,
+		EndAt:                endAt,
+		Hours:                hours,
+		Reason:               strings.TrimSpace(reason),
+		Status:               "pending_approval",
+		FormInstanceID:       instance.ID,
+		LeaveBalanceID:       leaveBalanceID,
+		ReconciliationStatus: "not_required",
+		CreatedAt:            createdAt,
+		UpdatedAt:            c.Now(),
 	}
 	if err := c.store.UpsertLeaveRequest(goContext(ctx), req); err != nil {
 		return LeaveRequest{}, err
@@ -149,6 +154,9 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 			TenantID: ctx.TenantID, LeaveRequestID: req.ID, LeaveBalanceID: leaveBalanceID,
 			ReservedHours: req.Hours, CreatedAt: c.Now(),
 		}); err != nil {
+			return LeaveRequest{}, err
+		}
+		if err := c.appendLeaveBalanceEntry(ctx, req, leaveBalanceID, "", leaveBalanceEntryReserve, -leaveMinutes(req.Hours), balanceCycle); err != nil {
 			return LeaveRequest{}, err
 		}
 	}

@@ -250,6 +250,8 @@ func TestIAMOutboxEventsFilterAndRetry(t *testing.T) {
 	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-iam"}, CreatedAt: now})
 	_ = store.AppendOutboxEvent(context.Background(), domain.OutboxEvent{ID: "outbox-failed", TenantID: "tenant-1", EventType: string(domain.EventOpenFGARelationshipWrite), Status: "failed", RetryCount: 3, LastError: "openfga unavailable", CreatedAt: now})
 	_ = store.AppendOutboxEvent(context.Background(), domain.OutboxEvent{ID: "outbox-parked", TenantID: "tenant-1", EventType: "tenant.provisioned", Status: "parked", LastError: "no handler registered", CreatedAt: now.Add(30 * time.Second)})
+	deadLetteredAt := now.Add(45 * time.Second)
+	_ = store.AppendOutboxEvent(context.Background(), domain.OutboxEvent{ID: "outbox-dead", TenantID: "tenant-1", EventType: "tenant.provisioned", Status: "dead_lettered", RetryCount: 5, AttemptCount: 5, LastError: "attempt limit reached", DeadLetteredAt: &deadLetteredAt, CreatedAt: deadLetteredAt})
 	_ = store.AppendOutboxEvent(context.Background(), domain.OutboxEvent{ID: "outbox-pending", TenantID: "tenant-1", EventType: "tenant.provisioned", Status: "pending", CreatedAt: now.Add(time.Minute)})
 	svc := service.New(store, service.Options{Now: func() time.Time { return now }})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
@@ -275,6 +277,13 @@ func TestIAMOutboxEventsFilterAndRetry(t *testing.T) {
 	}
 	if parked.Status != "pending" || parked.LastError != "" {
 		t.Fatalf("expected parked event to return to pending, got %+v", parked)
+	}
+	dead, err := svc.IAM().RetryOutboxEvent(ctx, "outbox-dead")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if dead.Status != "pending" || dead.AttemptCount != 0 || dead.DeadLetteredAt != nil || !dead.NextAttemptAt.Equal(now) {
+		t.Fatalf("expected dead-lettered event metadata reset, got %+v", dead)
 	}
 	events, err := store.ListOutboxEvents(context.Background(), "tenant-1")
 	if err != nil {

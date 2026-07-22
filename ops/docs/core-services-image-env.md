@@ -19,18 +19,26 @@ POSTGRES_INTERNAL_HOST=<postgres-host>
 POSTGRES_INTERNAL_PORT=5432
 POSTGRES_BIND_HOST=127.0.0.1
 POSTGRES_HOST_PORT=25432
-POSTGRES_USER=<postgres-user>
-POSTGRES_PASSWORD=<postgres-password>
+POSTGRES_USER=<migration-owner>
+POSTGRES_PASSWORD=<migration-owner-password>
 POSTGRES_DB=nexus_pro
 
-# 後端側
+# 遷移/角色開通側（僅交給部署 job，不注入 API）
+MIGRATION_DATABASE_URL=<postgres://migration-owner:password@postgres-host:5432/nexus_pro?sslmode=require>
+MIGRATION_DB_OWNER=<migration-owner>
+RUNTIME_DB_USERNAME=nexus_app
+RUNTIME_DB_PASSWORD=<runtime-password>
+
+# 後端 runtime 側
 DB_HOST=<postgres-host>
 DB_PORT=5432
-DB_USERNAME=<postgres-user>
-DB_PASSWORD=<postgres-password>
+DB_USERNAME=nexus_app
+DB_PASSWORD=<runtime-password>
 DB_NAME=nexus_pro
 DB_SSLMODE=<require>
 ```
+
+部署順序：以 `MIGRATION_DATABASE_URL` 執行 `make migrate-up`，再執行 `make db-provision-runtime-role`，最後只把 `DB_*` 注入 API。`nexus_app` 必須是 `NOSUPERUSER NOBYPASSRLS`，不可在 `public` 建物件，也不可擁有業務表；API 在 staging/production 會於啟動時強制驗證。
 
 ### Redis
 
@@ -201,7 +209,11 @@ TEMPORAL_CORS_ORIGINS=<https://app.example.com>
 TEMPORAL_BASE_URL=<temporal-host:7233>
 TEMPORAL_NAMESPACE=default
 TEMPORAL_TASK_QUEUE=nexus-workflows
+OUTBOX_DISPATCH_ENABLED=true
+WORKFLOW_START_OUTBOX_ENABLED=false
 ```
+
+`WORKFLOW_START_OUTBOX_ENABLED` 必須在 `000009`/`000010` 遷移與所有新 API 實例就緒後才切為 `true`。舊版 sqlc 曾以 `SELECT *` 讀取被 `000010` 擴充的表；零停機升級需先發佈顯式舊欄位的中間相容版，否則安排短暫維護窗口。正常運行保持 `OUTBOX_DISPATCH_ENABLED=true`。
 
 ## NATS
 

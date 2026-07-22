@@ -40,23 +40,32 @@ func NewFormApprovalClient(client sdkclient.Client, taskQueue string) FormApprov
 
 // StartFormApprovalWorkflow starts the workflow and atomically sends the submit signal.
 func (c FormApprovalClient) StartFormApprovalWorkflow(ctx context.Context, input domain.FormApprovalWorkflowStart) error {
+	_, err := c.EnsureFormApprovalWorkflow(ctx, input)
+	return err
+}
+
+// EnsureFormApprovalWorkflow idempotently starts or signals the persisted execution identity.
+func (c FormApprovalClient) EnsureFormApprovalWorkflow(ctx context.Context, input domain.FormApprovalWorkflowStart) (domain.FormApprovalWorkflowExecution, error) {
 	if c.client == nil {
-		return domain.E(503, "temporal_workflow_unavailable", "temporal form approval workflow client is required")
+		return domain.FormApprovalWorkflowExecution{}, domain.E(503, "temporal_workflow_unavailable", "temporal form approval workflow client is required")
 	}
 	if err := domain.ValidateFormApprovalWorkflowStart(input); err != nil {
-		return err
+		return domain.FormApprovalWorkflowExecution{}, err
 	}
-	workflowID := domain.FormApprovalWorkflowID(input.TenantID, input.FormInstanceID)
+	workflowID := domain.ResolveFormApprovalWorkflowID(input.WorkflowID, input.TenantID, input.FormInstanceID, input.RunID)
 	signal := domain.FormApprovalWorkflowSignal{
 		TenantID:       input.TenantID,
 		FormInstanceID: input.FormInstanceID,
 		Action:         domain.FormApprovalWorkflowActionSubmit,
 	}
-	_, err := c.client.SignalWithStartWorkflow(ctx, workflowID, domain.FormApprovalWorkflowSignalName, signal, sdkclient.StartWorkflowOptions{
+	execution, err := c.client.SignalWithStartWorkflow(ctx, workflowID, domain.FormApprovalWorkflowSignalName, signal, sdkclient.StartWorkflowOptions{
 		ID:        workflowID,
 		TaskQueue: c.taskQueue,
 	}, workflows.FormApprovalWorkflow, input)
-	return err
+	if err != nil {
+		return domain.FormApprovalWorkflowExecution{}, err
+	}
+	return domain.FormApprovalWorkflowExecution{WorkflowID: execution.GetID(), RunID: execution.GetRunID()}, nil
 }
 
 // SignalFormApprovalWorkflow sends a review signal to an existing workflow.
@@ -64,7 +73,7 @@ func (c FormApprovalClient) SignalFormApprovalWorkflow(ctx context.Context, sign
 	if c.client == nil {
 		return domain.ErrFormApprovalWorkflowNotFound
 	}
-	workflowID := domain.FormApprovalWorkflowID(signal.TenantID, signal.FormInstanceID)
+	workflowID := domain.ResolveFormApprovalWorkflowID(signal.WorkflowID, signal.TenantID, signal.FormInstanceID, signal.RunID)
 	if err := c.client.SignalWorkflow(ctx, workflowID, "", domain.FormApprovalWorkflowSignalName, signal); err != nil {
 		if temporalErrorLooksNotFound(err) {
 			return domain.ErrFormApprovalWorkflowNotFound

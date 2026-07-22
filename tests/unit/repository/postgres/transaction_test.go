@@ -3,12 +3,15 @@ package postgres_test
 import (
 	"context"
 	"errors"
-	"nexus-pro-api/internal/config"
+	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"nexus-pro-api/internal/config"
+	pgplatform "nexus-pro-api/internal/platform/postgres"
 	"nexus-pro-api/internal/repository"
 	postgresrepo "nexus-pro-api/internal/repository/postgres"
 )
@@ -55,19 +58,19 @@ func TestListTenantsInjectsSystemTaskScope(t *testing.T) {
 	defer pool.Close()
 	ctx := context.Background()
 
-	var bypass bool
-	if err := pool.QueryRow(ctx, "select rolsuper or rolbypassrls from pg_roles where rolname = current_user").Scan(&bypass); err != nil {
+	role, err := pgplatform.InspectRuntimeRole(ctx, pool)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if bypass {
-		t.Skip("current user bypasses RLS; system_task scope is exercised by non-BYPASSRLS integration runs")
+	if err := role.Validate(); err != nil {
+		skipRLSOrFail(t, err.Error())
 	}
 	var policyExists bool
 	if err := pool.QueryRow(ctx, "select exists (select 1 from pg_policies where tablename = 'tenants' and policyname = 'system_read_tenants')").Scan(&policyExists); err != nil {
 		t.Fatal(err)
 	}
 	if !policyExists {
-		t.Skip("tenants system_read_tenants policy is not migrated; run current migrations")
+		skipRLSOrFail(t, "tenants system_read_tenants policy is not migrated; run current migrations")
 	}
 
 	tenantID := "tenant-system-task-" + time.Now().UTC().Format("20060102150405.000000000")
@@ -107,7 +110,7 @@ func openPostgresIntegrationPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	dsn := config.DatabaseURLFromEnv()
 	if dsn == "" {
-		t.Skip("DB_* is not set; skipping postgres integration test")
+		skipRLSOrFail(t, "DB_* is not set; skipping postgres integration test")
 	}
 	config, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
@@ -125,6 +128,16 @@ func openPostgresIntegrationPool(t *testing.T) *pgxpool.Pool {
 		t.Fatal(err)
 	}
 	return pool
+}
+
+func skipRLSOrFail(t *testing.T, message string) {
+	t.Helper()
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("REQUIRE_RLS_TESTS"))) {
+	case "1", "true", "yes":
+		t.Fatal(message)
+	default:
+		t.Skip(message)
+	}
 }
 
 // requirePostgresConnectionAvailable 驗證 require Postgres connection available。

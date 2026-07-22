@@ -6,7 +6,7 @@ import (
 	"nexus-pro-api/internal/domain"
 )
 
-// ListLeaveTypes returns the system catalog with tenant enablement overrides.
+// ListLeaveTypes returns the tenant leave_types catalog.
 func (c AttendanceService) ListLeaveTypes(ctx RequestContext) (LeaveTypeCatalog, error) {
 	if _, _, err := c.requireAttendanceAuthz(ctx, ResourceLeave, ActionRead, ""); err != nil {
 		return LeaveTypeCatalog{}, err
@@ -18,7 +18,7 @@ func (c AttendanceService) ListLeaveTypes(ctx RequestContext) (LeaveTypeCatalog,
 	return leaveTypeCatalog(items), nil
 }
 
-// SetLeaveTypeEnabled changes availability for new requests without modifying the definition.
+// SetLeaveTypeEnabled updates leave_types.status for an existing catalog row.
 func (c AttendanceService) SetLeaveTypeEnabled(ctx RequestContext, code string, input SetLeaveTypeEnabledInput) (LeaveType, error) {
 	if _, _, err := c.requireAttendanceAuthz(ctx, ResourceLeave, ActionUpdate, code); err != nil {
 		return LeaveType{}, err
@@ -47,7 +47,7 @@ func (c AttendanceService) SetLeaveTypeEnabled(ctx RequestContext, code string, 
 	return item, nil
 }
 
-// loadLeaveTypes is the internal source of truth for forms, validation, legends, and mappings.
+// loadLeaveTypes is the internal source of truth for forms, validation, and legends.
 func (c AttendanceService) loadLeaveTypes(ctx RequestContext) ([]LeaveType, error) {
 	return c.store.ListLeaveTypes(goContext(ctx), ctx.TenantID)
 }
@@ -81,9 +81,7 @@ func leaveTypeRule(item LeaveType) domain.LeaveRuleSnapshot {
 		LeaveTypeID:     item.ID,
 		Code:            item.Code,
 		Name:            firstNonEmptyString(strings.TrimSpace(item.NameZH), strings.TrimSpace(item.NameEN), item.Code),
-		Unit:            item.Unit,
 		GrantMode:       grantMode,
 		RequiresBalance: item.RequiresBalance,
-		PaidRatio:       item.PaidRatio,
 	}
 }

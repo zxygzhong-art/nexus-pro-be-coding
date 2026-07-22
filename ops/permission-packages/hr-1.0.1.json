@@ -89,23 +89,6 @@
     },
     {
       "application_code": "attendance",
-      "resource_type": "shift",
-      "actions": [
-        "create",
-        "read",
-        "update"
-      ]
-    },
-    {
-      "application_code": "attendance",
-      "resource_type": "shift_assignment",
-      "actions": [
-        "create",
-        "read"
-      ]
-    },
-    {
-      "application_code": "attendance",
       "resource_type": "worksite",
       "actions": [
         "create",
@@ -818,36 +801,6 @@
     },
     {
       "application_code": "attendance",
-      "resource_type": "shift",
-      "resource": "attendance.shift",
-      "action": "read"
-    },
-    {
-      "application_code": "attendance",
-      "resource_type": "shift",
-      "resource": "attendance.shift",
-      "action": "create"
-    },
-    {
-      "application_code": "attendance",
-      "resource_type": "shift",
-      "resource": "attendance.shift",
-      "action": "update"
-    },
-    {
-      "application_code": "attendance",
-      "resource_type": "shift_assignment",
-      "resource": "attendance.shift_assignment",
-      "action": "read"
-    },
-    {
-      "application_code": "attendance",
-      "resource_type": "shift_assignment",
-      "resource": "attendance.shift_assignment",
-      "action": "create"
-    },
-    {
-      "application_code": "attendance",
       "resource_type": "clock",
       "resource": "attendance.clock",
       "action": "read"
@@ -1312,12 +1265,6 @@
           "label": "辦公地點",
           "path": "/workspace/leave-policy",
           "sort_order": 2
-        },
-        {
-          "key": "attendance.shifts",
-          "label": "班次規則",
-          "path": "/workspace/leave-policy",
-          "sort_order": 3
         }
       ],
       "sort_order": 3

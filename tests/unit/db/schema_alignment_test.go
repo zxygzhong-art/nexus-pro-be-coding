@@ -34,6 +34,57 @@ func TestEmployeeIntegrityConstraintsStayInSchema(t *testing.T) {
 	}
 }
 
+// TestOutboxReliabilityContractStayInSchema keeps rolling-deploy-safe explicit
+// projections and the lease/idempotency indexes aligned with the domain model.
+func TestOutboxReliabilityContractStayInSchema(t *testing.T) {
+	schemaRaw, err := os.ReadFile("../../../db/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	queriesRaw, err := os.ReadFile("../../../db/queries/core.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	schema := string(schemaRaw)
+	queries := string(queriesRaw)
+	for _, fragment := range []string{
+		"payload_version integer NOT NULL DEFAULT 1",
+		"attempt_count integer NOT NULL DEFAULT 0",
+		"max_attempts integer NOT NULL DEFAULT 5",
+		"claim_token text NOT NULL DEFAULT ''",
+		"dead_lettered_at timestamptz",
+		"CREATE INDEX outbox_events_dispatch_due_idx",
+		"CREATE INDEX outbox_events_expired_claim_idx",
+		"CREATE UNIQUE INDEX outbox_events_idempotency_idx",
+	} {
+		if !strings.Contains(schema, fragment) {
+			t.Fatalf("expected outbox reliability schema fragment %q", fragment)
+		}
+	}
+	for _, fragment := range []string{
+		"-- name: ClaimOutboxEvents :many",
+		"candidate.claim_expires_at <= sqlc.arg(claimed_at)",
+		"claim_token = sqlc.arg(claim_token)::text || ':' || claimed.id",
+		"-- name: FinalizeOutboxEvent :one",
+		"AND claim_token = sqlc.arg(claim_token)",
+		"-- name: RetryOutboxEvent :one",
+		"AND status IN ('failed', 'parked', 'dead_lettered')",
+	} {
+		if !strings.Contains(queries, fragment) {
+			t.Fatalf("expected outbox reliability query fragment %q", fragment)
+		}
+	}
+	for _, unsafeProjection := range []string{
+		"SELECT * FROM outbox_events",
+		"RETURNING claimed.*",
+		"RETURNING outbox_events.*",
+	} {
+		if strings.Contains(queries, unsafeProjection) {
+			t.Fatalf("outbox queries must use explicit rolling-deploy-safe columns: %q", unsafeProjection)
+		}
+	}
+}
+
 // TestPositionLookupIndexesStayInSchema keeps the retained position directory efficient and case-insensitive.
 func TestPositionLookupIndexesStayInSchema(t *testing.T) {
 	raw, err := os.ReadFile("../../../db/schema.sql")

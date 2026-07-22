@@ -19,7 +19,6 @@ type (
 	Employee              = domain.Employee
 	LeaveBalance          = domain.LeaveBalance
 	AttendanceWorksite    = domain.AttendanceWorksite
-	AttendanceShift       = domain.AttendanceShift
 	LeaveRequest          = domain.LeaveRequest
 	AttendanceClockRecord = domain.AttendanceClockRecord
 	FormTemplate          = domain.FormTemplate
@@ -69,9 +68,6 @@ func populateDemoFixture(store repository.Store) {
 			{Resource: "attendance.worksite", Action: "read", Scope: "all", MenuKey: "attendance.worksites"},
 			{Resource: "attendance.worksite", Action: "create", Scope: "all", MenuKey: "attendance.worksites"},
 			{Resource: "attendance.worksite", Action: "update", Scope: "all", MenuKey: "attendance.worksites"},
-			{Resource: "attendance.shift", Action: "read", Scope: "all", MenuKey: "attendance.shifts"},
-			{Resource: "attendance.shift", Action: "create", Scope: "all", MenuKey: "attendance.shifts"},
-			{Resource: "attendance.shift", Action: "update", Scope: "all", MenuKey: "attendance.shifts"},
 			{Resource: "attendance.clock", Action: "read", Scope: "all", MenuKey: "attendance.clock"},
 			{Resource: "attendance.clock", Action: "create", Scope: "all", MenuKey: "attendance.clock"},
 			{Resource: "attendance.correction", Action: "read", Scope: "all", MenuKey: "attendance.corrections"},
@@ -232,9 +228,6 @@ func populateDemoFixture(store repository.Store) {
 			{Resource: "attendance.worksite", Action: "read", Scope: "all", MenuKey: "attendance.worksites"},
 			{Resource: "attendance.worksite", Action: "create", Scope: "all", MenuKey: "attendance.worksites"},
 			{Resource: "attendance.worksite", Action: "update", Scope: "all", MenuKey: "attendance.worksites"},
-			{Resource: "attendance.shift", Action: "read", Scope: "all", MenuKey: "attendance.shifts"},
-			{Resource: "attendance.shift", Action: "create", Scope: "all", MenuKey: "attendance.shifts"},
-			{Resource: "attendance.shift", Action: "update", Scope: "all", MenuKey: "attendance.shifts"},
 			{Resource: "attendance.clock", Action: "read", Scope: "all", MenuKey: "attendance.clock"},
 			{Resource: "attendance.clock", Action: "create", Scope: "all", MenuKey: "attendance.clock"},
 			{Resource: "attendance.correction", Action: "read", Scope: "all", MenuKey: "attendance.corrections"},
@@ -920,20 +913,6 @@ func populateDemoFixture(store repository.Store) {
 		Status:       "active",
 		CreatedAt:    now,
 		UpdatedAt:    now,
-	})
-	_ = store.UpsertAttendanceShift(ctx, AttendanceShift{
-		ID:                     "ash-day",
-		TenantID:               "demo",
-		Name:                   "Day Shift",
-		ClockInStart:           "08:00",
-		ClockInEnd:             "10:00",
-		ClockOutStart:          "17:00",
-		ClockOutEnd:            "19:00",
-		LateGraceMinutes:       10,
-		EarlyLeaveGraceMinutes: 10,
-		Status:                 "active",
-		CreatedAt:              now,
-		UpdatedAt:              now,
 	})
 	dashboardDate := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
 	_ = store.UpsertLeaveRequest(ctx, LeaveRequest{

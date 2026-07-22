@@ -1587,24 +1587,25 @@ func (s *Store) ListEmploymentContractsByEmployee(execCtx context.Context, tenan
 	return mapSlice(items, fromEmploymentContract), nil
 }
 
-// UpsertAttendancePolicy 從儲存層處理 upsert 考勤政策。
-func (s *Store) UpsertAttendancePolicy(execCtx context.Context, v domain.AttendancePolicy) error {
+// InsertAttendancePolicyVersion appends one immutable attendance policy version.
+func (s *Store) InsertAttendancePolicyVersion(execCtx context.Context, v domain.AttendancePolicy) error {
 	version := v.Version
 	if version <= 0 {
 		version = 1
 	}
-	_, err := s.q.UpsertAttendancePolicy(execCtx, sqlc.UpsertAttendancePolicyParams{
-		ID:                 v.ID,
-		TenantID:           v.TenantID,
-		WorkTime:           mustJSON(v.WorkTime),
-		LeaveTypes:         mustJSON(v.LeaveTypes),
-		Version:            int32(version),
-		EffectiveFrom:      nullableTimestamptz(v.EffectiveFrom),
-		UpdatedByAccountID: v.UpdatedByAccountID,
-		CreatedAt:          timestamptz(v.CreatedAt),
-		UpdatedAt:          timestamptz(v.UpdatedAt),
+	effectiveFrom := v.PublishedAt
+	if v.EffectiveFrom != nil {
+		effectiveFrom = *v.EffectiveFrom
+	}
+	_, err := s.q.InsertAttendancePolicyVersion(tenantContext(execCtx, v.TenantID), sqlc.InsertAttendancePolicyVersionParams{
+		TenantID:             v.TenantID,
+		Version:              int32(version),
+		WorkTime:             mustJSON(v.WorkTime),
+		EffectiveFrom:        timestamptz(effectiveFrom),
+		PublishedByAccountID: v.PublishedByAccountID,
+		PublishedAt:          timestamptz(v.PublishedAt),
 	})
-	if isNotFound(err) {
+	if isUniqueConstraint(err, "attendance_policy_versions_pkey") {
 		return domain.Conflict("attendance policy was modified concurrently")
 	}
 	return err
@@ -1622,33 +1623,30 @@ func (s *Store) GetAttendancePolicy(execCtx context.Context, tenantID string) (d
 	return fromAttendancePolicy(v), true, nil
 }
 
-// ListLeaveTypes joins immutable system definitions with the tenant's availability overrides.
+// ListLeaveTypes returns manually maintained leave_types for one tenant.
 func (s *Store) ListLeaveTypes(execCtx context.Context, tenantID string) ([]domain.LeaveType, error) {
 	rows, err := s.db.Query(tenantContext(execCtx, tenantID), `
 SELECT
-    'lt_' || definition.code,
-    definition.code,
-    definition.name_zh,
-    definition.name_en,
-    definition.unit,
-    definition.paid_ratio::double precision,
-    definition.requires_balance,
-    coalesce(setting.enabled, true),
-    definition.display_order
-FROM leave_type_definitions definition
-LEFT JOIN tenant_leave_type_settings setting
-  ON setting.tenant_id = $1 AND setting.leave_type_code = definition.code
-ORDER BY definition.display_order`, tenantID)
+    id,
+    code,
+    name_zh,
+    name_en,
+    requires_balance,
+    status = 'active',
+    display_order
+FROM leave_types
+WHERE tenant_id = $1
+ORDER BY display_order ASC, code ASC`, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := make([]domain.LeaveType, 0, 15)
+	items := make([]domain.LeaveType, 0)
 	for rows.Next() {
 		var item domain.LeaveType
 		if err := rows.Scan(
-			&item.ID, &item.Code, &item.NameZH, &item.NameEN, &item.Unit,
-			&item.PaidRatio, &item.RequiresBalance, &item.Enabled, &item.DisplayOrder,
+			&item.ID, &item.Code, &item.NameZH, &item.NameEN,
+			&item.RequiresBalance, &item.Enabled, &item.DisplayOrder,
 		); err != nil {
 			return nil, err
 		}
@@ -1657,19 +1655,16 @@ ORDER BY definition.display_order`, tenantID)
 	return items, rows.Err()
 }
 
-// UpsertLeaveTypeEnabled persists one tenant override without copying definitions.
-func (s *Store) UpsertLeaveTypeEnabled(execCtx context.Context, tenantID, code string, enabled bool, updatedByAccountID string, updatedAt time.Time) error {
+// UpsertLeaveTypeEnabled updates leave_types.status for an existing tenant leave type.
+func (s *Store) UpsertLeaveTypeEnabled(execCtx context.Context, tenantID, code string, enabled bool, _ string, updatedAt time.Time) error {
+	status := "inactive"
+	if enabled {
+		status = "active"
+	}
 	result, err := s.db.Exec(tenantContext(execCtx, tenantID), `
-INSERT INTO tenant_leave_type_settings (
-    tenant_id, leave_type_code, enabled, updated_by_account_id, updated_at
-)
-SELECT $1, definition.code, $3, $4, $5
-FROM leave_type_definitions definition
-WHERE definition.code = $2
-ON CONFLICT (tenant_id, leave_type_code) DO UPDATE SET
-    enabled = EXCLUDED.enabled,
-    updated_by_account_id = EXCLUDED.updated_by_account_id,
-    updated_at = EXCLUDED.updated_at`, tenantID, code, enabled, updatedByAccountID, updatedAt)
+UPDATE leave_types
+SET status = $3, updated_at = $4
+WHERE tenant_id = $1 AND lower(code) = lower($2)`, tenantID, code, status, updatedAt)
 	if err != nil {
 		return err
 	}
@@ -1679,146 +1674,14 @@ ON CONFLICT (tenant_id, leave_type_code) DO UPDATE SET
 	return nil
 }
 
-// GetLeaveTypeExternalMapping resolves a tenant-specific upstream leave alias.
-func (s *Store) GetLeaveTypeExternalMapping(execCtx context.Context, tenantID, source, externalCode string, asOf time.Time) (domain.LeaveTypeExternalMapping, bool, error) {
-	v, err := s.q.GetLeaveTypeExternalMapping(tenantContext(execCtx, tenantID), sqlc.GetLeaveTypeExternalMappingParams{
-		TenantID:     tenantID,
-		Source:       source,
-		ExternalCode: externalCode,
-		AsOf:         pgtype.Date{Time: asOf, Valid: true},
-	})
-	if isNotFound(err) {
-		return domain.LeaveTypeExternalMapping{}, false, nil
-	}
-	if err != nil {
-		return domain.LeaveTypeExternalMapping{}, false, err
-	}
-	return domain.LeaveTypeExternalMapping{
-		ID:            v.ID,
-		TenantID:      v.TenantID,
-		Source:        v.Source,
-		ExternalCode:  v.ExternalCode,
-		LeaveTypeID:   v.LeaveTypeID,
-		LeaveTypeCode: v.LeaveTypeCode,
-		EffectiveFrom: dateTextFrom(v.EffectiveFrom),
-		EffectiveTo:   dateTextFrom(v.EffectiveTo),
-		CreatedAt:     timeFrom(v.CreatedAt),
-		UpdatedAt:     timeFrom(v.UpdatedAt),
-	}, true, nil
-}
-
-// ListLeaveTypeExternalMappings returns the mapping history used by the HR admin view.
-func (s *Store) ListLeaveTypeExternalMappings(execCtx context.Context, tenantID string) ([]domain.LeaveTypeExternalMapping, error) {
-	rows, err := s.q.ListLeaveTypeExternalMappings(tenantContext(execCtx, tenantID), tenantID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]domain.LeaveTypeExternalMapping, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, domain.LeaveTypeExternalMapping{
-			ID: row.ID, TenantID: row.TenantID, Source: row.Source, ExternalCode: row.ExternalCode,
-			LeaveTypeID: row.LeaveTypeID, LeaveTypeCode: row.LeaveTypeCode,
-			EffectiveFrom: dateTextFrom(row.EffectiveFrom), EffectiveTo: dateTextFrom(row.EffectiveTo),
-			CreatedAt: timeFrom(row.CreatedAt), UpdatedAt: timeFrom(row.UpdatedAt),
-		})
-	}
-	return out, nil
-}
-
-// LockLeaveTypeExternalMappingKey serializes overlap validation for one normalized upstream code.
-func (s *Store) LockLeaveTypeExternalMappingKey(execCtx context.Context, tenantID, source, externalCode string) error {
-	tenantID = strings.TrimSpace(tenantID)
-	source = strings.ToLower(strings.TrimSpace(source))
-	externalCode = strings.ToLower(strings.TrimSpace(externalCode))
-	lockKey := fmt.Sprintf(
-		"leave-type-external-mapping|%d:%s|%d:%s|%d:%s",
-		len(tenantID), tenantID,
-		len(source), source,
-		len(externalCode), externalCode,
-	)
-	_, err := s.db.Exec(
-		tenantContext(execCtx, tenantID),
-		"SELECT pg_advisory_xact_lock(hashtextextended($1::text, 0))",
-		lockKey,
-	)
-	return err
-}
-
-// UpsertLeaveTypeExternalMapping persists one effective upstream alias.
-func (s *Store) UpsertLeaveTypeExternalMapping(execCtx context.Context, mapping domain.LeaveTypeExternalMapping) error {
-	tenantCtx := tenantContext(execCtx, mapping.TenantID)
-	if err := s.q.EnsureLeaveTypeCatalog(tenantCtx, sqlc.EnsureLeaveTypeCatalogParams{
-		ID: mapping.LeaveTypeID, TenantID: mapping.TenantID, Code: mapping.LeaveTypeCode,
-		CreatedAt: timestamptz(mapping.CreatedAt), UpdatedAt: timestamptz(mapping.UpdatedAt),
-	}); err != nil {
-		return err
-	}
-	effectiveFrom, err := nullableDate(mapping.EffectiveFrom)
-	if err != nil {
-		return err
-	}
-	effectiveTo, err := nullableDate(mapping.EffectiveTo)
-	if err != nil {
-		return err
-	}
-	return s.q.UpsertLeaveTypeExternalMapping(tenantCtx, sqlc.UpsertLeaveTypeExternalMappingParams{
-		ID: mapping.ID, TenantID: mapping.TenantID, Source: mapping.Source, ExternalCode: mapping.ExternalCode,
-		LeaveTypeID: mapping.LeaveTypeID, EffectiveFrom: effectiveFrom, EffectiveTo: effectiveTo,
-		CreatedAt: timestamptz(mapping.CreatedAt), UpdatedAt: timestamptz(mapping.UpdatedAt),
-	})
-}
-
-// ExpireLeaveTypeExternalMapping ends one mapping while keeping its audit history.
-func (s *Store) ExpireLeaveTypeExternalMapping(execCtx context.Context, tenantID, id, effectiveTo string, updatedAt time.Time) (bool, error) {
-	date, err := nullableDate(effectiveTo)
-	if err != nil {
-		return false, err
-	}
-	rows, err := s.q.ExpireLeaveTypeExternalMapping(tenantContext(execCtx, tenantID), sqlc.ExpireLeaveTypeExternalMappingParams{
-		EffectiveTo: date, UpdatedAt: timestamptz(updatedAt), TenantID: tenantID, ID: id,
-	})
-	return rows > 0, err
-}
-
-// UpsertLeaveTypeSyncIssue groups repeated unknown upstream codes into one issue.
-func (s *Store) UpsertLeaveTypeSyncIssue(execCtx context.Context, issue domain.LeaveTypeSyncIssue) error {
-	return s.q.UpsertLeaveTypeSyncIssue(tenantContext(execCtx, issue.TenantID), sqlc.UpsertLeaveTypeSyncIssueParams{
-		ID: issue.ID, TenantID: issue.TenantID, Source: issue.Source, ExternalCode: issue.ExternalCode,
-		IssueCode: issue.IssueCode, Message: issue.Message,
-		FirstSeenAt: timestamptz(issue.FirstSeenAt), LastSeenAt: timestamptz(issue.LastSeenAt),
-	})
-}
-
-// ListOpenLeaveTypeSyncIssues returns unresolved upstream leave codes.
-func (s *Store) ListOpenLeaveTypeSyncIssues(execCtx context.Context, tenantID string) ([]domain.LeaveTypeSyncIssue, error) {
-	rows, err := s.q.ListOpenLeaveTypeSyncIssues(tenantContext(execCtx, tenantID), tenantID)
-	if err != nil {
-		return nil, err
-	}
-	out := make([]domain.LeaveTypeSyncIssue, 0, len(rows))
-	for _, row := range rows {
-		out = append(out, domain.LeaveTypeSyncIssue{
-			ID: row.ID, TenantID: row.TenantID, Source: row.Source, ExternalCode: row.ExternalCode,
-			IssueCode: row.IssueCode, Message: row.Message, Occurrences: int(row.Occurrences), Status: row.Status,
-			FirstSeenAt: timeFrom(row.FirstSeenAt), LastSeenAt: timeFrom(row.LastSeenAt), ResolvedAt: timePtrFrom(row.ResolvedAt),
-		})
-	}
-	return out, nil
-}
-
-// ResolveLeaveTypeSyncIssues closes mapping work after HR provides an alias.
-func (s *Store) ResolveLeaveTypeSyncIssues(execCtx context.Context, tenantID, source, externalCode string, resolvedAt time.Time) error {
-	return s.q.ResolveLeaveTypeSyncIssues(tenantContext(execCtx, tenantID), sqlc.ResolveLeaveTypeSyncIssuesParams{
-		ResolvedAt: timestamptz(resolvedAt), TenantID: tenantID, Source: source, ExternalCode: externalCode,
-	})
-}
-
 // UpsertLeaveBalance 從儲存層處理 upsert 請假 balance。
 func (s *Store) UpsertLeaveBalance(execCtx context.Context, v domain.LeaveBalance) error {
 	v.LeaveType = strings.ToLower(strings.TrimSpace(v.LeaveType))
-	if strings.TrimSpace(v.LeaveTypeID) == "" {
+	v.LeaveTypeID = strings.TrimSpace(v.LeaveTypeID)
+	if v.LeaveTypeID == "" {
 		v.LeaveTypeID = domain.StableLeaveTypeID(v.LeaveType)
 	}
+	tenantCtx := tenantContext(execCtx, v.TenantID)
 	source := strings.TrimSpace(v.Source)
 	if source == "" {
 		source = "legacy"
@@ -1835,6 +1698,18 @@ func (s *Store) UpsertLeaveBalance(execCtx context.Context, v domain.LeaveBalanc
 	if err != nil {
 		return err
 	}
+	carryInHours, err := numericFromFloat64(v.CarryInHours)
+	if err != nil {
+		return err
+	}
+	carryExpire, err := nullableDate(v.CarryExpire)
+	if err != nil {
+		return err
+	}
+	entitlementYear := pgtype.Int4{}
+	if v.EntitlementYear > 0 {
+		entitlementYear = pgtype.Int4{Int32: int32(v.EntitlementYear), Valid: true}
+	}
 	periodStart, err := nullableDate(v.PeriodStart)
 	if err != nil {
 		return err
@@ -1843,23 +1718,59 @@ func (s *Store) UpsertLeaveBalance(execCtx context.Context, v domain.LeaveBalanc
 	if err != nil {
 		return err
 	}
-	_, err = s.q.UpsertLeaveBalance(execCtx, sqlc.UpsertLeaveBalanceParams{
-		ID:             v.ID,
-		TenantID:       v.TenantID,
-		EmployeeID:     v.EmployeeID,
-		LeaveType:      v.LeaveType,
-		LeaveTypeID:    v.LeaveTypeID,
-		RemainingHours: remainingHours,
-		PeriodStart:    periodStart,
-		PeriodEnd:      periodEnd,
-		GrantedHours:   grantedHours,
-		UsedHours:      usedHours,
-		Source:         source,
-		PolicyVersion:  int32(v.PolicyVersion),
-		ProrateRatio:   float8Ptr(v.ProrateRatio),
-		UpdatedAt:      timestamptz(v.UpdatedAt),
+	err = s.q.UpsertLeaveBalance(tenantCtx, sqlc.UpsertLeaveBalanceParams{
+		ID:                   v.ID,
+		TenantID:             v.TenantID,
+		EmployeeID:           v.EmployeeID,
+		LeaveTypeID:          v.LeaveTypeID,
+		RemainingHours:       remainingHours,
+		PeriodStart:          periodStart,
+		PeriodEnd:            periodEnd,
+		GrantedHours:         grantedHours,
+		UsedHours:            usedHours,
+		Source:               source,
+		ExternalLeaveCode:    v.ExternalLeaveCode,
+		ExternalCategoryCode: v.ExternalCategoryCode,
+		EntitlementYear:      entitlementYear,
+		CarryInHours:         carryInHours,
+		CarryExpire:          carryExpire,
+		RawPayload:           mustJSON(v.RawPayload),
+		LastSyncedAt:         nullableTimestamptz(v.LastSyncedAt),
+		UpdatedAt:            timestamptz(v.UpdatedAt),
 	})
 	return err
+}
+
+func (s *Store) UpsertLeaveTypeExternalRef(execCtx context.Context, v domain.LeaveTypeExternalRef) error {
+	effectiveFrom, err := nullableDate(v.EffectiveFrom)
+	if err != nil {
+		return err
+	}
+	effectiveTo, err := nullableDate(v.EffectiveTo)
+	if err != nil {
+		return err
+	}
+	_, err = s.q.UpsertLeaveTypeExternalRef(tenantContext(execCtx, v.TenantID), sqlc.UpsertLeaveTypeExternalRefParams{
+		ID: v.ID, TenantID: v.TenantID, SourceSystem: v.SourceSystem, ExternalCode: v.ExternalCode,
+		ExternalCategoryCode: v.ExternalCategoryCode, LeaveTypeID: v.LeaveTypeID,
+		EffectiveFrom: effectiveFrom, EffectiveTo: effectiveTo,
+		CreatedAt: timestamptz(v.CreatedAt), UpdatedAt: timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+func (s *Store) GetLeaveTypeExternalRef(execCtx context.Context, tenantID, sourceSystem, externalCode, externalCategoryCode string, asOf time.Time) (domain.LeaveTypeExternalRef, bool, error) {
+	v, err := s.q.GetLeaveTypeExternalRef(tenantContext(execCtx, tenantID), sqlc.GetLeaveTypeExternalRefParams{
+		TenantID: tenantID, SourceSystem: sourceSystem, ExternalCategoryCode: externalCategoryCode,
+		ExternalCode: externalCode, AsOf: pgtype.Date{Time: asOf, Valid: true},
+	})
+	if isNotFound(err) {
+		return domain.LeaveTypeExternalRef{}, false, nil
+	}
+	if err != nil {
+		return domain.LeaveTypeExternalRef{}, false, err
+	}
+	return fromLeaveTypeExternalRef(v), true, nil
 }
 
 // GetLeaveBalance 從儲存層取得請假 balance。
@@ -1871,7 +1782,20 @@ func (s *Store) GetLeaveBalance(execCtx context.Context, tenantID, id string) (d
 	if err != nil {
 		return domain.LeaveBalance{}, false, err
 	}
-	return fromLeaveBalance(v), true, nil
+	return fromLeaveBalance(v.LeaveBalance, v.LeaveType), true, nil
+}
+
+func (s *Store) GetLeaveBalanceForOverlay(execCtx context.Context, tenantID, employeeID, leaveTypeID string, asOf time.Time) (domain.LeaveBalance, bool, error) {
+	v, err := s.q.GetLeaveBalanceForOverlay(tenantContext(execCtx, tenantID), sqlc.GetLeaveBalanceForOverlayParams{
+		TenantID: tenantID, EmployeeID: employeeID, LeaveTypeID: leaveTypeID, AsOf: pgtype.Date{Time: asOf, Valid: true},
+	})
+	if isNotFound(err) {
+		return domain.LeaveBalance{}, false, nil
+	}
+	if err != nil {
+		return domain.LeaveBalance{}, false, err
+	}
+	return fromLeaveBalance(v.LeaveBalance, v.LeaveType), true, nil
 }
 
 // ListLeaveBalances 從儲存層列出請假 balances。
@@ -1880,23 +1804,58 @@ func (s *Store) ListLeaveBalances(execCtx context.Context, tenantID string) ([]d
 	if err != nil {
 		return nil, err
 	}
-	return mapSlice(items, fromLeaveBalance), nil
+	out := make([]domain.LeaveBalance, 0, len(items))
+	for _, item := range items {
+		out = append(out, fromLeaveBalance(item.LeaveBalance, item.LeaveType))
+	}
+	return out, nil
+}
+
+func (s *Store) AppendLeaveBalanceEntry(execCtx context.Context, v domain.LeaveBalanceEntry) (bool, error) {
+	_, err := s.q.AppendLeaveBalanceEntry(tenantContext(execCtx, v.TenantID), sqlc.AppendLeaveBalanceEntryParams{
+		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, LeaveTypeID: v.LeaveTypeID,
+		BalanceID: v.BalanceID, LeaveRequestID: nullableText(v.LeaveRequestID), LeaveCaseID: nullableText(v.LeaveCaseID),
+		EntryType: v.EntryType, AmountMinutes: int32(v.AmountMinutes), IdempotencyKey: v.IdempotencyKey,
+		Metadata: mustJSON(v.Metadata), OccurredAt: timestamptz(v.OccurredAt), CreatedAt: timestamptz(v.CreatedAt),
+	})
+	if isNotFound(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+func (s *Store) ListLeaveBalanceEntries(execCtx context.Context, tenantID string) ([]domain.LeaveBalanceEntry, error) {
+	items, err := s.q.ListLeaveBalanceEntries(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromLeaveBalanceEntry), nil
+}
+
+func (s *Store) ListLeaveBalanceEntriesByBalance(execCtx context.Context, tenantID, balanceID string) ([]domain.LeaveBalanceEntry, error) {
+	items, err := s.q.ListLeaveBalanceEntriesByBalance(tenantContext(execCtx, tenantID), sqlc.ListLeaveBalanceEntriesByBalanceParams{
+		TenantID: tenantID, BalanceID: balanceID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromLeaveBalanceEntry), nil
 }
 
 // ReserveLeaveBalance 從儲存層保留請假 balance。
-func (s *Store) ReserveLeaveBalance(execCtx context.Context, tenantID, employeeID, leaveType string, hours float64, asOf, updatedAt time.Time) (domain.LeaveBalance, bool, bool, error) {
-	leaveType = strings.TrimSpace(leaveType)
+func (s *Store) ReserveLeaveBalance(execCtx context.Context, tenantID, employeeID, leaveTypeID string, hours float64, asOf, updatedAt time.Time) (domain.LeaveBalance, bool, bool, error) {
+	leaveTypeID = strings.TrimSpace(leaveTypeID)
 	numericHours, err := numericFromFloat64(hours)
 	if err != nil {
 		return domain.LeaveBalance{}, false, false, err
 	}
 	v, err := s.q.ReserveLeaveBalance(tenantContext(execCtx, tenantID), sqlc.ReserveLeaveBalanceParams{
-		TenantID:   tenantID,
-		EmployeeID: employeeID,
-		LeaveType:  leaveType,
-		Hours:      numericHours,
-		AsOf:       pgtype.Date{Time: asOf, Valid: true},
-		UpdatedAt:  timestamptz(updatedAt),
+		TenantID:    tenantID,
+		EmployeeID:  employeeID,
+		LeaveTypeID: leaveTypeID,
+		Hours:       numericHours,
+		AsOf:        pgtype.Date{Time: asOf, Valid: true},
+		UpdatedAt:   timestamptz(updatedAt),
 	})
 	if err == nil {
 		return fromLeaveBalance(v), true, true, nil
@@ -1909,8 +1868,8 @@ func (s *Store) ReserveLeaveBalance(execCtx context.Context, tenantID, employeeI
 		return domain.LeaveBalance{}, false, false, listErr
 	}
 	for _, item := range items {
-		balance := fromLeaveBalance(item)
-		if balance.EmployeeID == employeeID && strings.EqualFold(balance.LeaveType, strings.TrimSpace(leaveType)) && leaveBalanceIncludesDate(balance, asOf) {
+		balance := fromLeaveBalance(item.LeaveBalance, item.LeaveType)
+		if balance.EmployeeID == employeeID && balance.LeaveTypeID == leaveTypeID && leaveBalanceIncludesDate(balance, asOf) {
 			return balance, false, true, nil
 		}
 	}
@@ -1942,18 +1901,18 @@ func (s *Store) ReleaseLeaveBalanceByID(execCtx context.Context, tenantID, balan
 }
 
 // ReleaseLeaveBalance 從儲存層釋放請假 balance。
-func (s *Store) ReleaseLeaveBalance(execCtx context.Context, tenantID, employeeID, leaveType string, hours float64, updatedAt time.Time) (domain.LeaveBalance, bool, error) {
-	leaveType = strings.TrimSpace(leaveType)
+func (s *Store) ReleaseLeaveBalance(execCtx context.Context, tenantID, employeeID, leaveTypeID string, hours float64, updatedAt time.Time) (domain.LeaveBalance, bool, error) {
+	leaveTypeID = strings.TrimSpace(leaveTypeID)
 	numericHours, err := numericFromFloat64(hours)
 	if err != nil {
 		return domain.LeaveBalance{}, false, err
 	}
 	v, err := s.q.ReleaseLeaveBalance(tenantContext(execCtx, tenantID), sqlc.ReleaseLeaveBalanceParams{
-		TenantID:   tenantID,
-		EmployeeID: employeeID,
-		LeaveType:  leaveType,
-		Hours:      numericHours,
-		UpdatedAt:  timestamptz(updatedAt),
+		TenantID:    tenantID,
+		EmployeeID:  employeeID,
+		LeaveTypeID: leaveTypeID,
+		Hours:       numericHours,
+		UpdatedAt:   timestamptz(updatedAt),
 	})
 	if isNotFound(err) {
 		return domain.LeaveBalance{}, false, nil
@@ -1977,23 +1936,31 @@ func (s *Store) UpsertLeaveRequest(execCtx context.Context, v domain.LeaveReques
 	if evaluationSnapshot == nil {
 		evaluationSnapshot = map[string]any{}
 	}
+	if strings.TrimSpace(v.ReconciliationStatus) == "" {
+		v.ReconciliationStatus = "not_required"
+	}
+	if v.UpdatedAt.IsZero() {
+		v.UpdatedAt = v.CreatedAt
+	}
 	_, err := s.q.UpsertLeaveRequest(tenantContext(execCtx, v.TenantID), sqlc.UpsertLeaveRequestParams{
-		ID:                 v.ID,
-		TenantID:           v.TenantID,
-		EmployeeID:         v.EmployeeID,
-		LeaveType:          v.LeaveType,
-		LeaveTypeID:        v.LeaveTypeID,
-		PolicyVersion:      int32(v.PolicyVersion),
-		RuleSnapshot:       mustJSON(ruleSnapshot),
-		EvaluationSnapshot: mustJSON(evaluationSnapshot),
-		StartAt:            timestamptz(v.StartAt),
-		EndAt:              timestamptz(v.EndAt),
-		Hours:              v.Hours,
-		Reason:             v.Reason,
-		Status:             v.Status,
-		FormInstanceID:     v.FormInstanceID,
-		LeaveBalanceID:     nullableText(v.LeaveBalanceID),
-		CreatedAt:          timestamptz(v.CreatedAt),
+		ID:                   v.ID,
+		TenantID:             v.TenantID,
+		EmployeeID:           v.EmployeeID,
+		LeaveType:            v.LeaveType,
+		LeaveTypeID:          v.LeaveTypeID,
+		PolicyVersion:        int32(v.PolicyVersion),
+		RuleSnapshot:         mustJSON(ruleSnapshot),
+		EvaluationSnapshot:   mustJSON(evaluationSnapshot),
+		StartAt:              timestamptz(v.StartAt),
+		EndAt:                timestamptz(v.EndAt),
+		Hours:                v.Hours,
+		Reason:               v.Reason,
+		Status:               v.Status,
+		FormInstanceID:       v.FormInstanceID,
+		LeaveBalanceID:       nullableText(v.LeaveBalanceID),
+		ReconciliationStatus: v.ReconciliationStatus,
+		CreatedAt:            timestamptz(v.CreatedAt),
+		UpdatedAt:            timestamptz(v.UpdatedAt),
 	})
 	return err
 }
@@ -2012,6 +1979,72 @@ func (s *Store) UpsertLeaveRequestAllocation(execCtx context.Context, v domain.L
 		CreatedAt:      timestamptz(v.CreatedAt),
 	})
 	return err
+}
+
+func (s *Store) UpsertLeaveCase(execCtx context.Context, v domain.LeaveCase) error {
+	_, err := s.q.UpsertLeaveCase(tenantContext(execCtx, v.TenantID), sqlc.UpsertLeaveCaseParams{
+		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, LeaveTypeID: v.LeaveTypeID,
+		StartAt: timestamptz(v.StartAt), EndAt: timestamptz(v.EndAt), NetMinutes: int32(v.NetMinutes),
+		Status: v.Status, Origin: v.Origin, CreatedAt: timestamptz(v.CreatedAt), UpdatedAt: timestamptz(v.UpdatedAt),
+	})
+	return err
+}
+
+func (s *Store) GetLeaveCaseBySource(execCtx context.Context, tenantID, sourceType, sourceID string) (domain.LeaveCase, bool, error) {
+	v, err := s.q.GetLeaveCaseBySource(tenantContext(execCtx, tenantID), sqlc.GetLeaveCaseBySourceParams{TenantID: tenantID, SourceType: sourceType, SourceID: sourceID})
+	if isNotFound(err) {
+		return domain.LeaveCase{}, false, nil
+	}
+	if err != nil {
+		return domain.LeaveCase{}, false, err
+	}
+	return fromLeaveCase(v.LeaveCase), true, nil
+}
+
+func (s *Store) UpsertLeaveCaseSource(execCtx context.Context, v domain.LeaveCaseSource) error {
+	_, err := s.q.UpsertLeaveCaseSource(tenantContext(execCtx, v.TenantID), sqlc.UpsertLeaveCaseSourceParams{
+		TenantID: v.TenantID, LeaveCaseID: v.LeaveCaseID, SourceType: v.SourceType,
+		SourceID: v.SourceID, MatchMethod: v.MatchMethod, MatchStatus: v.MatchStatus, CreatedAt: timestamptz(v.CreatedAt),
+	})
+	return err
+}
+
+func (s *Store) DeleteLeaveCaseIfUnreferenced(execCtx context.Context, tenantID, id string) error {
+	_, err := s.q.DeleteLeaveCaseIfUnreferenced(tenantContext(execCtx, tenantID), sqlc.DeleteLeaveCaseIfUnreferencedParams{
+		TenantID: tenantID, ID: id,
+	})
+	return err
+}
+
+func (s *Store) UpsertExternalLeaveRecord(execCtx context.Context, v domain.ExternalLeaveRecord) error {
+	_, err := s.q.UpsertExternalLeaveRecord(tenantContext(execCtx, v.TenantID), sqlc.UpsertExternalLeaveRecordParams{
+		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, SourceSystem: v.SourceSystem, ExternalRef: v.ExternalRef,
+		ExternalLeaveCode: v.ExternalLeaveCode, ExternalCategoryCode: v.ExternalCategoryCode, LeaveTypeID: v.LeaveTypeID,
+		LeaveName: v.LeaveName, StartAt: timestamptz(v.StartAt), EndAt: timestamptz(v.EndAt),
+		GrossMinutes: int32(v.GrossMinutes), DeductMinutes: int32(v.DeductMinutes), NetMinutes: int32(v.NetMinutes),
+		Remark: v.Remark, SourceLabel: v.SourceLabel, Status: v.Status, RawPayload: mustJSON(v.RawPayload), PayloadHash: v.PayloadHash,
+		FirstSeenAt: timestamptz(v.FirstSeenAt), LastSeenAt: timestamptz(v.LastSeenAt), DeletedAt: nullableTimestamptz(v.DeletedAt),
+	})
+	return err
+}
+
+func (s *Store) GetExternalLeaveRecordByRef(execCtx context.Context, tenantID, sourceSystem, externalRef string) (domain.ExternalLeaveRecord, bool, error) {
+	v, err := s.q.GetExternalLeaveRecordByRef(tenantContext(execCtx, tenantID), sqlc.GetExternalLeaveRecordByRefParams{TenantID: tenantID, SourceSystem: sourceSystem, ExternalRef: externalRef})
+	if isNotFound(err) {
+		return domain.ExternalLeaveRecord{}, false, nil
+	}
+	if err != nil {
+		return domain.ExternalLeaveRecord{}, false, err
+	}
+	return fromExternalLeaveRecord(v), true, nil
+}
+
+func (s *Store) ListExternalLeaveRecords(execCtx context.Context, tenantID string) ([]domain.ExternalLeaveRecord, error) {
+	items, err := s.q.ListExternalLeaveRecords(tenantContext(execCtx, tenantID), tenantID)
+	if err != nil {
+		return nil, err
+	}
+	return mapSlice(items, fromExternalLeaveRecord), nil
 }
 
 // GetLeaveRequest 從儲存層取得請假請求。
@@ -2126,84 +2159,12 @@ func (s *Store) ListAttendanceWorksites(execCtx context.Context, tenantID string
 	return mapSlice(items, fromAttendanceWorksite), nil
 }
 
-// UpsertAttendanceShift 從儲存層處理 upsert 考勤班別。
-func (s *Store) UpsertAttendanceShift(execCtx context.Context, v domain.AttendanceShift) error {
-	_, err := s.q.UpsertAttendanceShift(execCtx, sqlc.UpsertAttendanceShiftParams{
-		ID:                     v.ID,
-		TenantID:               v.TenantID,
-		Name:                   v.Name,
-		ClockInStart:           v.ClockInStart,
-		ClockInEnd:             v.ClockInEnd,
-		ClockOutStart:          v.ClockOutStart,
-		ClockOutEnd:            v.ClockOutEnd,
-		LateGraceMinutes:       int32(v.LateGraceMinutes),
-		EarlyLeaveGraceMinutes: int32(v.EarlyLeaveGraceMinutes),
-		Status:                 v.Status,
-		CreatedAt:              timestamptz(v.CreatedAt),
-		UpdatedAt:              timestamptz(v.UpdatedAt),
-	})
-	return err
-}
-
-// GetAttendanceShift 從儲存層取得考勤班別。
-func (s *Store) GetAttendanceShift(execCtx context.Context, tenantID, id string) (domain.AttendanceShift, bool, error) {
-	v, err := s.q.GetAttendanceShift(execCtx, sqlc.GetAttendanceShiftParams{TenantID: tenantID, ID: id})
-	if isNotFound(err) {
-		return domain.AttendanceShift{}, false, nil
-	}
-	if err != nil {
-		return domain.AttendanceShift{}, false, err
-	}
-	return fromAttendanceShift(v), true, nil
-}
-
-// ListAttendanceShifts 從儲存層列出考勤 shifts。
-func (s *Store) ListAttendanceShifts(execCtx context.Context, tenantID string) ([]domain.AttendanceShift, error) {
-	items, err := s.q.ListAttendanceShifts(tenantContext(execCtx, tenantID), tenantID)
-	if err != nil {
-		return nil, err
-	}
-	return mapSlice(items, fromAttendanceShift), nil
-}
-
-// UpsertAttendanceShiftAssignment 儲存員工班別指派。
-func (s *Store) UpsertAttendanceShiftAssignment(execCtx context.Context, v domain.AttendanceShiftAssignment) error {
-	_, err := s.q.UpsertAttendanceShiftAssignment(execCtx, sqlc.UpsertAttendanceShiftAssignmentParams{ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, ShiftID: v.ShiftID, WorksiteID: v.WorksiteID, EffectiveFrom: timestamptz(v.EffectiveFrom), EffectiveTo: nullableTimestamptz(v.EffectiveTo), Status: v.Status, CreatedAt: timestamptz(v.CreatedAt), UpdatedAt: timestamptz(v.UpdatedAt)})
-	if IsExclusionConstraint(err, "attendance_shift_assignments_active_no_overlap") {
-		return domain.Conflict("active shift assignment overlaps existing assignment")
-	}
-	return err
-}
-
-// ListAttendanceShiftAssignments 列出租戶的員工班別指派。
-func (s *Store) ListAttendanceShiftAssignments(execCtx context.Context, tenantID string) ([]domain.AttendanceShiftAssignment, error) {
-	items, err := s.q.ListAttendanceShiftAssignments(tenantContext(execCtx, tenantID), tenantID)
-	if err != nil {
-		return nil, err
-	}
-	return mapSlice(items, fromAttendanceShiftAssignment), nil
-}
-
-// FindEffectiveAttendanceShiftAssignment 取得指定時點生效的員工排班。
-func (s *Store) FindEffectiveAttendanceShiftAssignment(execCtx context.Context, tenantID, employeeID string, at time.Time) (domain.AttendanceShiftAssignment, bool, error) {
-	v, err := s.q.FindEffectiveAttendanceShiftAssignment(execCtx, sqlc.FindEffectiveAttendanceShiftAssignmentParams{TenantID: tenantID, EmployeeID: employeeID, EffectiveFrom: timestamptz(at)})
-	if isNotFound(err) {
-		return domain.AttendanceShiftAssignment{}, false, nil
-	}
-	if err != nil {
-		return domain.AttendanceShiftAssignment{}, false, err
-	}
-	return fromAttendanceShiftAssignment(v), true, nil
-}
-
 // UpsertAttendanceClockRecord 從儲存層處理 upsert 考勤打卡 record。
 func (s *Store) UpsertAttendanceClockRecord(execCtx context.Context, v domain.AttendanceClockRecord) error {
 	_, err := s.q.UpsertAttendanceClockRecord(execCtx, sqlc.UpsertAttendanceClockRecordParams{
 		ID:                  v.ID,
 		TenantID:            v.TenantID,
 		EmployeeID:          v.EmployeeID,
-		ShiftAssignmentID:   nullableText(v.ShiftAssignmentID),
-		ShiftID:             nullableText(v.ShiftID),
 		WorksiteID:          nullableText(v.WorksiteID),
 		WorkDate:            v.WorkDate,
 		Direction:           v.Direction,
@@ -2217,7 +2178,7 @@ func (s *Store) UpsertAttendanceClockRecord(execCtx context.Context, v domain.At
 		RejectionReason:     v.RejectionReason,
 		Source:              v.Source,
 		DeviceID:            v.DeviceID,
-		Column19:            mustJSON(v.DeviceInfo),
+		Column17:            mustJSON(v.DeviceInfo),
 		CorrectionRequestID: v.CorrectionRequestID,
 		Voided:              v.Voided,
 		VoidedAt:            nullableTimestamptz(v.VoidedAt),
@@ -3563,18 +3524,35 @@ func (s *Store) ListAuthzRelationshipTuplesForObject(execCtx context.Context, te
 
 // AppendOutboxEvent 從儲存層附加 outbox 事件。
 func (s *Store) AppendOutboxEvent(execCtx context.Context, v domain.OutboxEvent) error {
+	if v.Status == "" {
+		v.Status = domain.OutboxStatusPending
+	}
+	if v.AttemptCount == 0 && v.RetryCount > 0 {
+		v.AttemptCount = v.RetryCount
+	}
 	_, err := s.q.AppendOutboxEvent(execCtx, sqlc.AppendOutboxEventParams{
-		ID:            v.ID,
-		TenantID:      v.TenantID,
-		EventType:     v.EventType,
-		AggregateType: v.AggregateType,
-		AggregateID:   v.AggregateID,
-		Column6:       mustJSON(v.Payload),
-		Status:        v.Status,
-		RetryCount:    int32(v.RetryCount),
-		LastError:     v.LastError,
-		CreatedAt:     timestamptz(v.CreatedAt),
-		ProcessedAt:   nullableTimestamptz(v.ProcessedAt),
+		ID:             v.ID,
+		TenantID:       v.TenantID,
+		EventType:      v.EventType,
+		AggregateType:  v.AggregateType,
+		AggregateID:    v.AggregateID,
+		Payload:        mustJSON(v.Payload),
+		PayloadVersion: int32(v.PayloadVersion),
+		IdempotencyKey: v.IdempotencyKey,
+		Status:         v.Status,
+		RetryCount:     int32(v.RetryCount),
+		AttemptCount:   int32(v.AttemptCount),
+		MaxAttempts:    nullableInt4(v.MaxAttempts),
+		LastError:      v.LastError,
+		NextAttemptAt:  timestamptz(v.NextAttemptAt),
+		ClaimOwner:     v.ClaimOwner,
+		ClaimToken:     v.ClaimToken,
+		ClaimExpiresAt: nullableTimestamptz(v.ClaimExpiresAt),
+		LastAttemptAt:  nullableTimestamptz(v.LastAttemptAt),
+		CreatedAt:      timestamptz(v.CreatedAt),
+		UpdatedAt:      timestamptz(v.UpdatedAt),
+		ProcessedAt:    nullableTimestamptz(v.ProcessedAt),
+		DeadLetteredAt: nullableTimestamptz(v.DeadLetteredAt),
 	})
 	return err
 }
@@ -3645,18 +3623,18 @@ func outboxEventFilterParams(tenantID string, query domain.OutboxEventQuery, pag
 	return params
 }
 
-// ClaimOutboxEvents atomically claims dispatchable outbox events for a worker.
-func (s *Store) ClaimOutboxEvents(execCtx context.Context, tenantID string, limit, maxRetries int) ([]domain.OutboxEvent, error) {
+// ClaimOutboxEvents atomically leases due or expired outbox events for a worker.
+func (s *Store) ClaimOutboxEvents(execCtx context.Context, tenantID string, limit int, claimedAt, leaseUntil time.Time, claimOwner, claimToken string) ([]domain.OutboxEvent, error) {
 	if limit <= 0 {
 		return nil, nil
 	}
-	if maxRetries <= 0 {
-		maxRetries = 1
-	}
 	items, err := s.q.ClaimOutboxEvents(tenantContext(execCtx, tenantID), sqlc.ClaimOutboxEventsParams{
 		TenantID:   tenantID,
-		MaxRetries: int32(maxRetries),
 		BatchLimit: int32(limit),
+		ClaimedAt:  timestamptz(claimedAt),
+		LeaseUntil: timestamptz(leaseUntil),
+		ClaimOwner: claimOwner,
+		ClaimToken: claimToken,
 	})
 	if err != nil {
 		return nil, err
@@ -3664,17 +3642,41 @@ func (s *Store) ClaimOutboxEvents(execCtx context.Context, tenantID string, limi
 	return mapSlice(items, fromOutboxEvent), nil
 }
 
-// UpdateOutboxEvent 從儲存層更新 outbox 事件處理狀態。
-func (s *Store) UpdateOutboxEvent(execCtx context.Context, v domain.OutboxEvent) error {
-	_, err := s.q.UpdateOutboxEvent(tenantContext(execCtx, v.TenantID), sqlc.UpdateOutboxEventParams{
-		TenantID:    v.TenantID,
-		ID:          v.ID,
-		Status:      v.Status,
-		RetryCount:  int32(v.RetryCount),
-		LastError:   v.LastError,
-		ProcessedAt: nullableTimestamptz(v.ProcessedAt),
+// FinalizeOutboxEvent persists a result only if the processing token is still current.
+func (s *Store) FinalizeOutboxEvent(execCtx context.Context, v domain.OutboxEvent) (bool, error) {
+	_, err := s.q.FinalizeOutboxEvent(tenantContext(execCtx, v.TenantID), sqlc.FinalizeOutboxEventParams{
+		TenantID:       v.TenantID,
+		ID:             v.ID,
+		ClaimToken:     v.ClaimToken,
+		Status:         v.Status,
+		RetryCount:     int32(v.RetryCount),
+		AttemptCount:   int32(v.AttemptCount),
+		LastError:      v.LastError,
+		NextAttemptAt:  timestamptz(v.NextAttemptAt),
+		UpdatedAt:      timestamptz(v.UpdatedAt),
+		ProcessedAt:    nullableTimestamptz(v.ProcessedAt),
+		DeadLetteredAt: nullableTimestamptz(v.DeadLetteredAt),
 	})
-	return err
+	if isNotFound(err) {
+		return false, nil
+	}
+	return err == nil, err
+}
+
+// RetryOutboxEvent resets a failed terminal state for immediate operator retry.
+func (s *Store) RetryOutboxEvent(execCtx context.Context, tenantID, id string, retriedAt time.Time) (domain.OutboxEvent, bool, error) {
+	v, err := s.q.RetryOutboxEvent(tenantContext(execCtx, tenantID), sqlc.RetryOutboxEventParams{
+		TenantID:  tenantID,
+		ID:        id,
+		RetriedAt: timestamptz(retriedAt),
+	})
+	if isNotFound(err) {
+		return domain.OutboxEvent{}, false, nil
+	}
+	if err != nil {
+		return domain.OutboxEvent{}, false, err
+	}
+	return fromOutboxEvent(v), true, nil
 }
 
 // DeleteSucceededOutboxEventsBefore 從儲存層刪除已成功且早於 cutoff 的 outbox 事件。
@@ -3716,6 +3718,14 @@ func nullableTimestamptz(t *time.Time) pgtype.Timestamptz {
 		return pgtype.Timestamptz{}
 	}
 	return timestamptz(*t)
+}
+
+// nullableInt4 converts an optional integer while preserving an explicit zero.
+func nullableInt4(v *int) pgtype.Int4 {
+	if v == nil {
+		return pgtype.Int4{}
+	}
+	return pgtype.Int4{Int32: int32(*v), Valid: true}
 }
 
 // nullableBool 轉換可選布林值。
@@ -3993,18 +4003,6 @@ func jsonAttendancePolicyWorkTime(b []byte) domain.AttendancePolicyWorkTime {
 	var out domain.AttendancePolicyWorkTime
 	if err := json.Unmarshal(b, &out); err != nil {
 		return domain.AttendancePolicyWorkTime{}
-	}
-	return out
-}
-
-// jsonAttendanceLeaveTypes 處理 JSON 考勤請假 types。
-func jsonAttendanceLeaveTypes(b []byte) []domain.AttendanceLeaveType {
-	if len(b) == 0 {
-		return nil
-	}
-	var out []domain.AttendanceLeaveType
-	if err := json.Unmarshal(b, &out); err != nil {
-		return nil
 	}
 	return out
 }
@@ -4464,75 +4462,132 @@ func fromEmploymentContract(v sqlc.EmploymentContract) domain.EmploymentContract
 
 // fromOutboxEvent 轉換 outbox 事件。
 func fromOutboxEvent(v sqlc.OutboxEvent) domain.OutboxEvent {
+	maxAttempts := int(v.MaxAttempts)
 	return domain.OutboxEvent{
-		ID:            v.ID,
-		TenantID:      v.TenantID,
-		EventType:     v.EventType,
-		AggregateType: v.AggregateType,
-		AggregateID:   v.AggregateID,
-		Payload:       jsonMap(v.Payload),
-		Status:        v.Status,
-		RetryCount:    int(v.RetryCount),
-		LastError:     v.LastError,
-		CreatedAt:     timeFrom(v.CreatedAt),
-		ProcessedAt:   timePtrFrom(v.ProcessedAt),
+		ID:             v.ID,
+		TenantID:       v.TenantID,
+		EventType:      v.EventType,
+		AggregateType:  v.AggregateType,
+		AggregateID:    v.AggregateID,
+		Payload:        jsonMap(v.Payload),
+		PayloadVersion: int(v.PayloadVersion),
+		IdempotencyKey: v.IdempotencyKey,
+		Status:         v.Status,
+		RetryCount:     int(v.RetryCount),
+		AttemptCount:   int(v.AttemptCount),
+		MaxAttempts:    &maxAttempts,
+		LastError:      v.LastError,
+		NextAttemptAt:  timeFrom(v.NextAttemptAt),
+		ClaimOwner:     v.ClaimOwner,
+		ClaimToken:     v.ClaimToken,
+		ClaimExpiresAt: timePtrFrom(v.ClaimExpiresAt),
+		LastAttemptAt:  timePtrFrom(v.LastAttemptAt),
+		CreatedAt:      timeFrom(v.CreatedAt),
+		UpdatedAt:      timeFrom(v.UpdatedAt),
+		ProcessedAt:    timePtrFrom(v.ProcessedAt),
+		DeadLetteredAt: timePtrFrom(v.DeadLetteredAt),
 	}
 }
 
 // fromAttendancePolicy 轉換考勤政策。
-func fromAttendancePolicy(v sqlc.AttendancePolicy) domain.AttendancePolicy {
+func fromAttendancePolicy(v sqlc.AttendancePolicyVersion) domain.AttendancePolicy {
 	return domain.AttendancePolicy{
-		ID:                 v.ID,
-		TenantID:           v.TenantID,
-		WorkTime:           jsonAttendancePolicyWorkTime(v.WorkTime),
-		LeaveTypes:         jsonAttendanceLeaveTypes(v.LeaveTypes),
-		Version:            int(v.Version),
-		EffectiveFrom:      timePtrFrom(v.EffectiveFrom),
-		UpdatedByAccountID: v.UpdatedByAccountID,
-		CreatedAt:          timeFrom(v.CreatedAt),
-		UpdatedAt:          timeFrom(v.UpdatedAt),
+		TenantID:             v.TenantID,
+		WorkTime:             jsonAttendancePolicyWorkTime(v.WorkTime),
+		Version:              int(v.Version),
+		EffectiveFrom:        timePtrFrom(v.EffectiveFrom),
+		PublishedByAccountID: v.PublishedByAccountID,
+		PublishedAt:          timeFrom(v.PublishedAt),
 	}
 }
 
 // fromLeaveBalance 轉換請假 balance。
-func fromLeaveBalance(v sqlc.LeaveBalance) domain.LeaveBalance {
+func fromLeaveBalance(v sqlc.LeaveBalance, leaveTypes ...string) domain.LeaveBalance {
+	leaveType := ""
+	if len(leaveTypes) > 0 {
+		leaveType = leaveTypes[0]
+	}
 	return domain.LeaveBalance{
-		ID:             v.ID,
-		TenantID:       v.TenantID,
-		EmployeeID:     v.EmployeeID,
-		LeaveType:      v.LeaveType,
-		LeaveTypeID:    v.LeaveTypeID,
-		RemainingHours: float64FromNumeric(v.RemainingHours),
-		PeriodStart:    dateTextFrom(v.PeriodStart),
-		PeriodEnd:      dateTextFrom(v.PeriodEnd),
-		GrantedHours:   float64FromNumeric(v.GrantedHours),
-		UsedHours:      float64FromNumeric(v.UsedHours),
-		Source:         v.Source,
-		PolicyVersion:  int(v.PolicyVersion),
-		ProrateRatio:   float64PtrFrom(v.ProrateRatio),
-		UpdatedAt:      timeFrom(v.UpdatedAt),
+		ID:                   v.ID,
+		TenantID:             v.TenantID,
+		EmployeeID:           v.EmployeeID,
+		LeaveType:            leaveType,
+		LeaveTypeID:          v.LeaveTypeID,
+		RemainingHours:       float64FromNumeric(v.RemainingHours),
+		PeriodStart:          dateTextFrom(v.PeriodStart),
+		PeriodEnd:            dateTextFrom(v.PeriodEnd),
+		GrantedHours:         float64FromNumeric(v.GrantedHours),
+		UsedHours:            float64FromNumeric(v.UsedHours),
+		Source:               v.Source,
+		ExternalLeaveCode:    v.ExternalLeaveCode,
+		ExternalCategoryCode: v.ExternalCategoryCode,
+		EntitlementYear:      int(v.EntitlementYear.Int32),
+		CarryInHours:         float64FromNumeric(v.CarryInHours),
+		CarryExpire:          dateTextFrom(v.CarryExpire),
+		RawPayload:           jsonMap(v.RawPayload),
+		LastSyncedAt:         timePtrFrom(v.LastSyncedAt),
+		UpdatedAt:            timeFrom(v.UpdatedAt),
+	}
+}
+
+func fromLeaveTypeExternalRef(v sqlc.LeaveTypeExternalRef) domain.LeaveTypeExternalRef {
+	return domain.LeaveTypeExternalRef{
+		ID: v.ID, TenantID: v.TenantID, SourceSystem: v.SourceSystem, ExternalCode: v.ExternalCode,
+		ExternalCategoryCode: v.ExternalCategoryCode, LeaveTypeID: v.LeaveTypeID,
+		EffectiveFrom: dateTextFrom(v.EffectiveFrom), EffectiveTo: dateTextFrom(v.EffectiveTo),
+		CreatedAt: timeFrom(v.CreatedAt), UpdatedAt: timeFrom(v.UpdatedAt),
+	}
+}
+
+func fromLeaveBalanceEntry(v sqlc.LeaveBalanceEntry) domain.LeaveBalanceEntry {
+	return domain.LeaveBalanceEntry{
+		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, LeaveTypeID: v.LeaveTypeID,
+		BalanceID: v.BalanceID, LeaveRequestID: textFrom(v.LeaveRequestID), LeaveCaseID: textFrom(v.LeaveCaseID),
+		EntryType: v.EntryType, AmountMinutes: int(v.AmountMinutes), IdempotencyKey: v.IdempotencyKey,
+		Metadata: jsonMap(v.Metadata), OccurredAt: timeFrom(v.OccurredAt), CreatedAt: timeFrom(v.CreatedAt),
 	}
 }
 
 // fromLeaveRequest 轉換請假請求。
 func fromLeaveRequest(v sqlc.LeaveRequest) domain.LeaveRequest {
 	return domain.LeaveRequest{
-		ID:                 v.ID,
-		TenantID:           v.TenantID,
-		EmployeeID:         v.EmployeeID,
-		LeaveType:          v.LeaveType,
-		LeaveTypeID:        v.LeaveTypeID,
-		PolicyVersion:      int(v.PolicyVersion),
-		RuleSnapshot:       jsonMap(v.RuleSnapshot),
-		EvaluationSnapshot: jsonMap(v.EvaluationSnapshot),
-		StartAt:            timeFrom(v.StartAt),
-		EndAt:              timeFrom(v.EndAt),
-		Hours:              v.Hours,
-		Reason:             v.Reason,
-		Status:             v.Status,
-		FormInstanceID:     v.FormInstanceID,
-		LeaveBalanceID:     textFrom(v.LeaveBalanceID),
-		CreatedAt:          timeFrom(v.CreatedAt),
+		ID:                   v.ID,
+		TenantID:             v.TenantID,
+		EmployeeID:           v.EmployeeID,
+		LeaveType:            v.LeaveType,
+		LeaveTypeID:          v.LeaveTypeID,
+		PolicyVersion:        int(v.PolicyVersion),
+		RuleSnapshot:         jsonMap(v.RuleSnapshot),
+		EvaluationSnapshot:   jsonMap(v.EvaluationSnapshot),
+		StartAt:              timeFrom(v.StartAt),
+		EndAt:                timeFrom(v.EndAt),
+		Hours:                v.Hours,
+		Reason:               v.Reason,
+		Status:               v.Status,
+		FormInstanceID:       v.FormInstanceID,
+		LeaveBalanceID:       textFrom(v.LeaveBalanceID),
+		ReconciliationStatus: v.ReconciliationStatus,
+		CreatedAt:            timeFrom(v.CreatedAt),
+		UpdatedAt:            timeFrom(v.UpdatedAt),
+	}
+}
+
+func fromLeaveCase(v sqlc.LeaveCase) domain.LeaveCase {
+	return domain.LeaveCase{
+		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, LeaveTypeID: v.LeaveTypeID,
+		StartAt: timeFrom(v.StartAt), EndAt: timeFrom(v.EndAt), NetMinutes: int(v.NetMinutes),
+		Status: v.Status, Origin: v.Origin, CreatedAt: timeFrom(v.CreatedAt), UpdatedAt: timeFrom(v.UpdatedAt),
+	}
+}
+
+func fromExternalLeaveRecord(v sqlc.ExternalLeaveRecord) domain.ExternalLeaveRecord {
+	return domain.ExternalLeaveRecord{
+		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, SourceSystem: v.SourceSystem, ExternalRef: v.ExternalRef,
+		ExternalLeaveCode: v.ExternalLeaveCode, ExternalCategoryCode: v.ExternalCategoryCode, LeaveTypeID: v.LeaveTypeID,
+		LeaveName: v.LeaveName, StartAt: timeFrom(v.StartAt), EndAt: timeFrom(v.EndAt),
+		GrossMinutes: int(v.GrossMinutes), DeductMinutes: int(v.DeductMinutes), NetMinutes: int(v.NetMinutes),
+		Remark: v.Remark, SourceLabel: v.SourceLabel, Status: v.Status, RawPayload: jsonMap(v.RawPayload), PayloadHash: v.PayloadHash,
+		FirstSeenAt: timeFrom(v.FirstSeenAt), LastSeenAt: timeFrom(v.LastSeenAt), DeletedAt: timePtrFrom(v.DeletedAt),
 	}
 }
 
@@ -4552,37 +4607,12 @@ func fromAttendanceWorksite(v sqlc.AttendanceWorksite) domain.AttendanceWorksite
 	}
 }
 
-// fromAttendanceShift 轉換考勤班別。
-func fromAttendanceShift(v sqlc.AttendanceShift) domain.AttendanceShift {
-	return domain.AttendanceShift{
-		ID:                     v.ID,
-		TenantID:               v.TenantID,
-		Name:                   v.Name,
-		ClockInStart:           v.ClockInStart,
-		ClockInEnd:             v.ClockInEnd,
-		ClockOutStart:          v.ClockOutStart,
-		ClockOutEnd:            v.ClockOutEnd,
-		LateGraceMinutes:       int(v.LateGraceMinutes),
-		EarlyLeaveGraceMinutes: int(v.EarlyLeaveGraceMinutes),
-		Status:                 v.Status,
-		CreatedAt:              timeFrom(v.CreatedAt),
-		UpdatedAt:              timeFrom(v.UpdatedAt),
-	}
-}
-
-// fromAttendanceShiftAssignment 轉換員工班別指派。
-func fromAttendanceShiftAssignment(v sqlc.AttendanceShiftAssignment) domain.AttendanceShiftAssignment {
-	return domain.AttendanceShiftAssignment{ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, ShiftID: v.ShiftID, WorksiteID: v.WorksiteID, EffectiveFrom: timeFrom(v.EffectiveFrom), EffectiveTo: timePtrFrom(v.EffectiveTo), Status: v.Status, CreatedAt: timeFrom(v.CreatedAt), UpdatedAt: timeFrom(v.UpdatedAt)}
-}
-
 // fromAttendanceClockRecord 轉換考勤打卡 record。
 func fromAttendanceClockRecord(v sqlc.AttendanceClockRecord) domain.AttendanceClockRecord {
 	return domain.AttendanceClockRecord{
 		ID:                  v.ID,
 		TenantID:            v.TenantID,
 		EmployeeID:          v.EmployeeID,
-		ShiftAssignmentID:   textFrom(v.ShiftAssignmentID),
-		ShiftID:             textFrom(v.ShiftID),
 		WorksiteID:          textFrom(v.WorksiteID),
 		WorkDate:            v.WorkDate,
 		Direction:           v.Direction,

@@ -212,7 +212,7 @@ var formDefinitionBindingFields = map[string]map[string]struct{}{
 	"departments":  {"id": {}, "name": {}, "code": {}},
 	"employees":    {"id": {}, "name": {}, "employee_no": {}, "email": {}, "department_id": {}, "department_name": {}, "position_id": {}, "position_name": {}},
 	"positions":    {"id": {}, "name": {}, "code": {}, "department_id": {}},
-	"leave_types":  {"code": {}, "name": {}, "unit": {}},
+	"leave_types":  {"code": {}, "name": {}},
 }
 
 // ValidateFormDefinitionSchemaV2 執行不依賴數據庫狀態的結構校驗。

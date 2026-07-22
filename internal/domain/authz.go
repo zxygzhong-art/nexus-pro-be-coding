@@ -100,8 +100,6 @@ const (
 	ResourceEmploymentContract        ResourceType = "employment_contract"
 	ResourceLeave                     ResourceType = "leave"
 	ResourceAttendanceWorksite        ResourceType = "worksite"
-	ResourceAttendanceShift           ResourceType = "shift"
-	ResourceAttendanceShiftAssignment ResourceType = "shift_assignment"
 	ResourceAttendanceClock           ResourceType = "clock"
 	ResourceAttendanceCorrection      ResourceType = "correction"
 	ResourceUserGroup                 ResourceType = "user_group"
@@ -321,9 +319,6 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "attendance.leave.grant_balance", Method: "POST", Path: "/v1/attendance/leave-balances/grant", ApplicationCode: "attendance", ResourceType: "leave", Action: "update", RiskLevel: RiskCritical},
 	{Name: "attendance.leave_type.read", Method: "GET", Path: "/v1/attendance/leave-types", ApplicationCode: "attendance", ResourceType: "leave", Action: "read"},
 	{Name: "attendance.leave_type.set_enabled", Method: "PATCH", Path: "/v1/attendance/leave-types/:id", ApplicationCode: "attendance", ResourceType: "leave", Action: "update", RiskLevel: RiskHigh},
-	{Name: "attendance.leave_type_integration.read", Method: "GET", Path: "/v1/attendance/leave-type-integrations", ApplicationCode: "attendance", ResourceType: "leave", Action: "read"},
-	{Name: "attendance.leave_type_mapping.upsert", Method: "POST", Path: "/v1/attendance/leave-type-mappings", ApplicationCode: "attendance", ResourceType: "leave", Action: "update", RiskLevel: RiskHigh},
-	{Name: "attendance.leave_type_mapping.expire", Method: "DELETE", Path: "/v1/attendance/leave-type-mappings/:id", ApplicationCode: "attendance", ResourceType: "leave", Action: "update", RiskLevel: RiskHigh},
 	{Name: "attendance.leave.read_request", Method: "GET", Path: "/v1/attendance/leave-requests", ApplicationCode: "attendance", ResourceType: "leave", Action: "read"},
 	{Name: "attendance.leave.evaluate", Method: "POST", Path: "/v1/attendance/leave-requests/evaluate", ApplicationCode: "attendance", ResourceType: "leave", Action: "create"},
 	{Name: "attendance.leave.create", Method: "POST", Path: "/v1/attendance/leave-requests", ApplicationCode: "attendance", ResourceType: "leave", Action: "create"},
@@ -336,11 +331,6 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "attendance.worksite.read", Method: "GET", Path: "/v1/attendance/worksites", ApplicationCode: "attendance", ResourceType: "worksite", Action: "read"},
 	{Name: "attendance.worksite.create", Method: "POST", Path: "/v1/attendance/worksites", ApplicationCode: "attendance", ResourceType: "worksite", Action: "create"},
 	{Name: "attendance.worksite.update", Method: "PATCH", Path: "/v1/attendance/worksites", ApplicationCode: "attendance", ResourceType: "worksite", Action: "update"},
-	{Name: "attendance.shift.read", Method: "GET", Path: "/v1/attendance/shifts", ApplicationCode: "attendance", ResourceType: "shift", Action: "read"},
-	{Name: "attendance.shift.create", Method: "POST", Path: "/v1/attendance/shifts", ApplicationCode: "attendance", ResourceType: "shift", Action: "create"},
-	{Name: "attendance.shift.update", Method: "PATCH", Path: "/v1/attendance/shifts", ApplicationCode: "attendance", ResourceType: "shift", Action: "update"},
-	{Name: "attendance.shift_assignment.read", Method: "GET", Path: "/v1/attendance/shift-assignments", ApplicationCode: "attendance", ResourceType: "shift_assignment", Action: "read"},
-	{Name: "attendance.shift_assignment.create", Method: "POST", Path: "/v1/attendance/shift-assignments", ApplicationCode: "attendance", ResourceType: "shift_assignment", Action: "create"},
 	{Name: "attendance.clock.status", Method: "GET", Path: "/v1/attendance/clock-status", ApplicationCode: "attendance", ResourceType: "clock", Action: "read"},
 	{Name: "attendance.clock.monthly_summary", Method: "GET", Path: "/v1/attendance/monthly-summary", ApplicationCode: "attendance", ResourceType: "clock", Action: "read"},
 	{Name: "attendance.clock.read", Method: "GET", Path: "/v1/attendance/clock-records", ApplicationCode: "attendance", ResourceType: "clock", Action: "read"},

@@ -15,6 +15,7 @@ type RequestContext struct {
 	RouteAction          string
 	RoutePath            string
 	RequestID            string
+	IdempotencyKey       string
 	TraceID              string
 	SpanID               string
 }

@@ -477,7 +477,6 @@ var defaultMenuCatalog = []MenuNode{
 			{Key: "attendance.corrections", Label: "補卡申請", Path: "/workspace/clock"},
 			{Key: "attendance.leave", Label: "我的假勤", Path: "/attendance"},
 			{Key: "attendance.worksites", Label: "辦公地點", Path: "/workspace/leave-policy"},
-			{Key: "attendance.shifts", Label: "班次規則", Path: "/workspace/leave-policy"},
 		},
 	},
 	{

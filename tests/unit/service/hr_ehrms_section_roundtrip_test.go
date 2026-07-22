@@ -35,6 +35,7 @@ func TestSyncEHRMSEmployeesSectionKeysRoundTrip(t *testing.T) {
 		{Resource: "hr.employee", Action: "import", Scope: "all"},
 		{Resource: "hr.employee", Action: "read", Scope: "all"},
 	}, service.Options{EHRMSClient: fakeEHRMSClient{rows: rows}})
+	seedOrgUnitCodes(t, store, "tenant-1", "C01")
 
 	result, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{})
 	if err != nil {

@@ -32,17 +32,9 @@ func (c AttendanceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	attendance.POST("/leave-balances/grant", c.routes.Handle("attendance.leave", "update", c.grantLeaveBalances))
 	attendance.GET("/leave-types", c.routes.Handle("attendance.leave", "read", c.listLeaveTypes))
 	attendance.PATCH("/leave-types/:id", c.routes.Handle("attendance.leave", "update", c.setLeaveTypeEnabled, ResourceID(PathParamID)))
-	attendance.GET("/leave-type-integrations", c.routes.Handle("attendance.leave", "read", c.listLeaveTypeIntegrations))
-	attendance.POST("/leave-type-mappings", c.routes.Handle("attendance.leave", "update", c.saveLeaveTypeMapping))
-	attendance.DELETE("/leave-type-mappings/:id", c.routes.Handle("attendance.leave", "update", c.expireLeaveTypeMapping, ResourceID(PathParamID)))
 	attendance.GET("/worksites", c.routes.Handle("attendance.worksite", "read", c.listWorksites))
 	attendance.POST("/worksites", c.routes.Handle("attendance.worksite", "create", c.createWorksite))
 	attendance.PATCH("/worksites", c.routes.Handle("attendance.worksite", "update", c.updateWorksite))
-	attendance.GET("/shifts", c.routes.Handle("attendance.shift", "read", c.listShifts))
-	attendance.POST("/shifts", c.routes.Handle("attendance.shift", "create", c.createShift))
-	attendance.PATCH("/shifts", c.routes.Handle("attendance.shift", "update", c.updateShift))
-	attendance.GET("/shift-assignments", c.routes.Handle("attendance.shift_assignment", "read", c.listShiftAssignments))
-	attendance.POST("/shift-assignments", c.routes.Handle("attendance.shift_assignment", "create", c.createShiftAssignment))
 	attendance.GET("/clock-status", c.routes.Handle("attendance.clock", "read", c.clockStatus))
 	attendance.GET("/monthly-summary", c.routes.Handle("attendance.clock", "read", c.monthlySummary))
 	attendance.GET("/clock-records", c.routes.Handle("attendance.clock", "read", c.listClockRecords))
@@ -204,7 +196,7 @@ func (c AttendanceCtrl) grantLeaveBalances(w http.ResponseWriter, r *http.Reques
 	return nil
 }
 
-// listLeaveTypes returns the system-defined leave catalog.
+// listLeaveTypes returns the tenant leave_types catalog.
 func (c AttendanceCtrl) listLeaveTypes(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	catalog, err := c.svc.ListLeaveTypes(ctx)
 	if err != nil {
@@ -214,47 +206,13 @@ func (c AttendanceCtrl) listLeaveTypes(w http.ResponseWriter, r *http.Request, c
 	return nil
 }
 
-// setLeaveTypeEnabled changes tenant availability for one system leave type.
+// setLeaveTypeEnabled updates leave_types.status for one leave type.
 func (c AttendanceCtrl) setLeaveTypeEnabled(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	var input domain.SetLeaveTypeEnabledInput
 	if err := readJSON(w, r, &input); err != nil {
 		return err
 	}
 	item, err := c.svc.SetLeaveTypeEnabled(ctx, r.PathValue(PathParamID), input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// listLeaveTypeIntegrations returns the HR-facing EHRMS mapping and usage summary.
-func (c AttendanceCtrl) listLeaveTypeIntegrations(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	item, err := c.svc.ListLeaveTypeIntegrations(ctx)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// saveLeaveTypeMapping creates or updates one external EHRMS leave-code mapping.
-func (c AttendanceCtrl) saveLeaveTypeMapping(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.SaveLeaveTypeExternalMappingInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.SaveLeaveTypeExternalMapping(ctx, input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// expireLeaveTypeMapping ends an external mapping without deleting its history.
-func (c AttendanceCtrl) expireLeaveTypeMapping(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	item, err := c.svc.ExpireLeaveTypeExternalMapping(ctx, r.PathValue(PathParamID))
 	if err != nil {
 		return err
 	}
@@ -301,76 +259,6 @@ func (c AttendanceCtrl) updateWorksite(w http.ResponseWriter, r *http.Request, c
 		return err
 	}
 	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// listShifts 處理 shifts 的 HTTP 請求。
-func (c AttendanceCtrl) listShifts(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	page, err := pageRequestFromRequest(r)
-	if err != nil {
-		return err
-	}
-	items, err := c.svc.ListAttendanceShiftPage(ctx, page)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, items)
-	return nil
-}
-
-// createShift 處理班別的 HTTP 請求。
-func (c AttendanceCtrl) createShift(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.CreateAttendanceShiftInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.CreateAttendanceShift(ctx, input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusCreated, item)
-	return nil
-}
-
-// updateShift 處理班別的 HTTP 請求。
-func (c AttendanceCtrl) updateShift(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.UpdateAttendanceShiftInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.UpdateAttendanceShift(ctx, input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// listShiftAssignments 處理班別指派的 HTTP 請求。
-func (c AttendanceCtrl) listShiftAssignments(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	page, err := pageRequestFromRequest(r)
-	if err != nil {
-		return err
-	}
-	items, err := c.svc.ListAttendanceShiftAssignmentPage(ctx, page)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, items)
-	return nil
-}
-
-// createShiftAssignment 處理班別指派的 HTTP 請求。
-func (c AttendanceCtrl) createShiftAssignment(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.CreateAttendanceShiftAssignmentInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.CreateAttendanceShiftAssignment(ctx, input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusCreated, item)
 	return nil
 }
 
