@@ -67,7 +67,7 @@ func TestInactiveEmploymentBlocksAttendanceSubmissionSideEffects(t *testing.T) {
 			store, svc, employeeCtx := newAttendanceEmploymentFixture(t, employmentStatus)
 			if err := store.UpsertLeaveBalance(t.Context(), domain.LeaveBalance{
 				ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual",
-				RemainingHours: 16, UpdatedAt: attendanceFixtureClockInTime(),
+				RemainingMinutes: 16 * 60, UpdatedAt: attendanceFixtureClockInTime(),
 			}); err != nil {
 				t.Fatal(err)
 			}
@@ -116,7 +116,7 @@ func TestInactiveEmploymentBlocksAttendanceSubmissionSideEffects(t *testing.T) {
 
 			assertNoAttendanceSubmissionSideEffects(t, store)
 			balance, ok, err := store.GetLeaveBalance(t.Context(), "tenant-1", "lb-1")
-			if err != nil || !ok || balance.RemainingHours != 16 {
+			if err != nil || !ok || balance.RemainingMinutes != 16*60 {
 				t.Fatalf("rejected submissions changed leave balance: ok=%v err=%v balance=%+v", ok, err, balance)
 			}
 		})

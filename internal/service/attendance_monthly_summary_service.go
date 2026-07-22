@@ -1,7 +1,6 @@
 package service
 
 import (
-	"sort"
 	"strings"
 	"time"
 )
@@ -32,18 +31,17 @@ func (c AttendanceService) AttendanceMonthlySummary(ctx RequestContext, month st
 	if err != nil {
 		return AttendanceMonthlySummary{}, err
 	}
-	leaves, err := c.store.ListLeaveRequestsByQuery(goContext(ctx), ctx.TenantID, LeaveRequestQuery{
-		EmployeeIDs: []string{employeeID},
-		Status:      "approved",
-		FromDate:    start.Format(time.DateOnly),
-		ToDate:      end.Format(time.DateOnly),
-	})
+	leaves, err := c.loadEffectiveAttendanceLeaves(ctx, []string{employeeID}, start.Format(time.DateOnly), end.Format(time.DateOnly))
 	if err != nil {
 		return AttendanceMonthlySummary{}, err
 	}
-	policy, err := c.loadAttendancePolicyResponse(ctx)
+	storedProjections, err := c.store.ListAttendanceDayProjections(goContext(ctx), ctx.TenantID, []string{employeeID}, start.Format(time.DateOnly), end.Format(time.DateOnly))
 	if err != nil {
 		return AttendanceMonthlySummary{}, err
+	}
+	persistedDates := make(map[string]struct{}, len(storedProjections))
+	for _, projection := range storedProjections {
+		persistedDates[projection.WorkDate] = struct{}{}
 	}
 
 	result := AttendanceMonthlySummary{
@@ -61,16 +59,20 @@ func (c AttendanceService) AttendanceMonthlySummary(ctx RequestContext, month st
 		}
 	}
 	result.AttendanceDays = len(attendanceDates)
-	workDates := make([]string, 0, len(recordsByDate))
-	for workDate := range recordsByDate {
-		workDates = append(workDates, workDate)
-	}
-	sort.Strings(workDates)
+	workDates := attendanceMonthlyProjectionDates(recordsByDate, leaves, persistedDates, start, end)
+	now := c.Now()
 	for _, workDate := range workDates {
 		dayRecords := recordsByDate[workDate]
-		projection, err := c.projectAttendanceDay(ctx, dayRecords, leaves, workDate, policy.WorkTime, c.Now())
+		policy, err := c.loadAttendancePolicyResponseForWorkDate(ctx, workDate)
 		if err != nil {
 			return AttendanceMonthlySummary{}, err
+		}
+		projection, err := c.projectAndPersistAttendanceDay(ctx, employeeID, dayRecords, leaves, workDate, policy, now)
+		if err != nil {
+			return AttendanceMonthlySummary{}, err
+		}
+		if len(dayRecords) == 0 && projection.ApprovedLeaveMinutes == 0 && projection.PendingLeaveMinutes == 0 {
+			continue
 		}
 		workedMinutes := 0
 		if projection.ClockIn != nil && projection.ClockOut != nil {
@@ -89,6 +91,32 @@ func (c AttendanceService) AttendanceMonthlySummary(ctx RequestContext, month st
 		})
 	}
 	return result, nil
+}
+
+// attendanceMonthlyProjectionDates returns the union of raw-punch dates and
+// leave-only dates. A day is retained only as a candidate here; the policy-aware
+// projection performs the final schedule clipping before it enters the report.
+func attendanceMonthlyProjectionDates(recordsByDate map[string][]AttendanceClockRecord, leaves []attendanceEffectiveLeave, persistedDates map[string]struct{}, start, end time.Time) []string {
+	out := make([]string, 0, len(recordsByDate))
+	for day := start; !day.After(end); day = day.AddDate(0, 0, 1) {
+		workDate := day.Format(time.DateOnly)
+		_, persisted := persistedDates[workDate]
+		if len(recordsByDate[workDate]) > 0 || persisted || attendanceEffectiveLeaveOverlapsDay(leaves, day) {
+			out = append(out, workDate)
+		}
+	}
+	return out
+}
+
+func attendanceEffectiveLeaveOverlapsDay(leaves []attendanceEffectiveLeave, day time.Time) bool {
+	// A work date may own an overnight schedule ending on the next calendar day.
+	end := day.AddDate(0, 0, 2)
+	for _, leave := range leaves {
+		if leave.StartAt.Before(end) && leave.EndAt.After(day) {
+			return true
+		}
+	}
+	return false
 }
 
 // attendanceMonthRange validates YYYY-MM and returns inclusive business-time-zone boundaries.

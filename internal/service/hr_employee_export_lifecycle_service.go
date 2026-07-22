@@ -10,6 +10,8 @@ import (
 	"nexus-pro-api/internal/utils"
 )
 
+const maxEmployeeExportRows = 5000
+
 func (c HRService) ExportEmployeesCSV(ctx RequestContext, query EmployeeQuery) ([]byte, string, error) {
 	query = normalizeEmployeeQuery(query)
 	items, decision, err := c.exportEmployees(ctx, query)

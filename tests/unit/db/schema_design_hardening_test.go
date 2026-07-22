@@ -14,14 +14,20 @@ func TestSchemaDesignHardeningKeepsDatabaseLevelInvariants(t *testing.T) {
 	}
 	schema := string(raw)
 	required := []string{
-		"api_key_ciphertext text NOT NULL DEFAULT ''",
+		"CREATE TABLE credential_secrets (",
+		"ciphertext text NOT NULL",
+		"CONSTRAINT model_connections_secret_fk FOREIGN KEY (tenant_id, credential_secret_id) REFERENCES credential_secrets (tenant_id, id) ON DELETE RESTRICT",
 		"CONSTRAINT authz_group_memberships_no_overlap EXCLUDE USING gist",
 		"CREATE TRIGGER authz_group_memberships_projection_trigger",
 		"CREATE TABLE attendance_policy_versions",
-		"CREATE TABLE leave_balance_ledger",
-		"remaining_hours numeric(12,2) NOT NULL",
-		"CONSTRAINT leave_balances_employee_type_period_idx UNIQUE NULLS NOT DISTINCT",
-		"CONSTRAINT leave_balances_period_no_overlap EXCLUDE USING gist",
+		"CREATE TABLE leave_balances (",
+		"remaining_minutes integer NOT NULL",
+		"CONSTRAINT leave_balances_local_anchor_zero_check CHECK",
+		"CREATE INDEX leave_balances_fefo_idx",
+		"CREATE UNIQUE INDEX leave_balances_local_anchor_idx",
+		"CREATE TABLE leave_balance_entries (",
+		"amount_minutes integer NOT NULL CHECK (amount_minutes <> 0)",
+		"CREATE TABLE attendance_day_projections (",
 		"CONSTRAINT leave_balances_leave_type_fk FOREIGN KEY (tenant_id, leave_type_id)",
 		"status text NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'processing', 'succeeded', 'failed'))",
 		"FOREIGN KEY (tenant_id, id, current_stage_instance_id)",
@@ -33,10 +39,15 @@ func TestSchemaDesignHardeningKeepsDatabaseLevelInvariants(t *testing.T) {
 	}
 	for _, forbidden := range []string{
 		"api_key text NOT NULL DEFAULT ''",
+		"CREATE TABLE leave_balance_ledger (",
+		"remaining_hours numeric(12,2) NOT NULL",
+		"granted_hours numeric(12,2) NOT NULL",
+		"used_hours numeric(12,2) NOT NULL",
+		"requested_hours numeric(12,2) NOT NULL",
 		"policy_version integer NOT NULL DEFAULT 0,\n    prorate_ratio double precision,\n    updated_at timestamptz NOT NULL,\n    CONSTRAINT leave_balances_tenant_id_id_idx",
 		"CREATE INDEX leave_balances_tenant_id_idx",
 		"CREATE POLICY system_task_positions",
-		"CREATE POLICY system_task_employment_contracts",
+		"CREATE TABLE employment_contracts (",
 		"CREATE TABLE tenant_leave_type_settings",
 		"CREATE TABLE leave_type_definitions",
 		"CREATE TABLE leave_type_external_mappings",
@@ -49,6 +60,8 @@ func TestSchemaDesignHardeningKeepsDatabaseLevelInvariants(t *testing.T) {
 		"leave_types jsonb NOT NULL",
 		"CREATE TABLE attendance_shifts",
 		"CREATE TABLE attendance_shift_assignments",
+		"CONSTRAINT leave_balances_period_no_overlap EXCLUDE USING gist",
+		"CREATE UNIQUE INDEX leave_balances_snapshot_period_idx",
 	} {
 		if strings.Contains(schema, forbidden) {
 			t.Fatalf("forbidden schema fragment remains: %q", forbidden)

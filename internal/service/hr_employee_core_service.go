@@ -240,11 +240,6 @@ func employeeStringValues(items []Employee, fn func(Employee) string) []string {
 
 const employeeNoPrefix = "IKL"
 
-const (
-	employeeValidationFullForm      = "full_form"
-	employeeValidationImportMinimal = "import_minimal"
-)
-
 type employeeUniqueLookupStore interface {
 	GetEmployeeByEmployeeNo(context.Context, string, string) (Employee, bool, error)
 	GetEmployeeByCompanyEmail(context.Context, string, string) (Employee, bool, error)
@@ -255,16 +250,6 @@ type employeeUniqueLookupStore interface {
 
 // employeeFromCreateInput 處理員工 來源 create 輸入的服務流程。
 func (c HRService) employeeFromCreateInput(ctx RequestContext, input CreateEmployeeInput, reservedEmployeeNos ...map[string]struct{}) (Employee, error) {
-	return c.employeeFromCreateInputWithProfile(ctx, input, employeeValidationFullForm, reservedEmployeeNos...)
-}
-
-// employeeFromImportInput 處理員工 來源 import 輸入的服務流程。
-func (c HRService) employeeFromImportInput(ctx RequestContext, input CreateEmployeeInput, reservedEmployeeNos ...map[string]struct{}) (Employee, error) {
-	return c.employeeFromCreateInputWithProfile(ctx, input, employeeValidationImportMinimal, reservedEmployeeNos...)
-}
-
-// employeeFromCreateInputWithProfile 處理員工 來源 create 輸入 with 資料檔的服務流程。
-func (c HRService) employeeFromCreateInputWithProfile(ctx RequestContext, input CreateEmployeeInput, profile string, reservedEmployeeNos ...map[string]struct{}) (Employee, error) {
 	employee, err := c.employeeCreateCandidate(ctx, input)
 	if err != nil {
 		return Employee{}, err
@@ -279,7 +264,7 @@ func (c HRService) employeeFromCreateInputWithProfile(ctx RequestContext, input 
 	if err := c.ensureEmployeePosition(ctx, &employee, true); err != nil {
 		return Employee{}, err
 	}
-	if err := c.validateEmployee(ctx, employee, "create", profile); err != nil {
+	if err := c.validateEmployee(ctx, employee, "create"); err != nil {
 		return Employee{}, err
 	}
 	if err := reserveEmployeeNo(employee.EmployeeNo, reservedEmployeeNos...); err != nil {
@@ -411,7 +396,7 @@ func (c HRService) applyEmployeePatchWithPositionCreation(ctx RequestContext, em
 		return err
 	}
 	employee.UpdatedAt = c.Now()
-	return c.validateEmployee(ctx, *employee, "update", employeeValidationFullForm)
+	return c.validateEmployee(ctx, *employee, "update")
 }
 
 // forbiddenEmployeePatchFields 處理禁止員工 patch 欄位。
@@ -478,16 +463,12 @@ func (c HRService) deriveEmployeeHotFields(employee Employee) Employee {
 }
 
 // validateEmployee 驗證員工的服務流程。
-func (c HRService) validateEmployee(ctx RequestContext, employee Employee, mode string, profile ...string) error {
-	validationProfile := employeeValidationFullForm
-	if len(profile) > 0 && strings.TrimSpace(profile[0]) != "" {
-		validationProfile = strings.TrimSpace(profile[0])
-	}
+func (c HRService) validateEmployee(ctx RequestContext, employee Employee, mode string) error {
 	fields := make([]FieldError, 0)
 	if strings.TrimSpace(employee.Name) == "" {
 		fields = append(fields, FieldError{Tab: "basic_info", Field: "name", Code: "required", Message: "name is required"})
 	}
-	if validationProfile != employeeValidationImportMinimal && strings.TrimSpace(employee.CompanyEmail) == "" {
+	if strings.TrimSpace(employee.CompanyEmail) == "" {
 		fields = append(fields, FieldError{Tab: "basic_info", Field: "company_email", Code: "required", Message: "company_email is required"})
 	}
 	if employee.Category != "" && !validEmployeeCategory(employee.Category) {
@@ -547,7 +528,7 @@ func (c HRService) validateEmployee(ctx RequestContext, employee Employee, mode 
 		fields = append(fields, FieldError{Tab: "basic_info", Field: "national_id", Code: "required", Message: "national_id is required for local employees"})
 	}
 	status := employeeStatus(employee)
-	if status == string(EmployeeStatusResigned) && validationProfile != employeeValidationImportMinimal {
+	if status == string(EmployeeStatusResigned) {
 		if employee.ResignDate == nil && stringFromMap(employee.EmploymentInfo, "resign_date") == "" {
 			fields = append(fields, FieldError{Tab: "employment_info", Field: "resign_date", Code: "required", Message: "resign_date is required"})
 		}
@@ -555,9 +536,7 @@ func (c HRService) validateEmployee(ctx RequestContext, employee Employee, mode 
 			fields = append(fields, FieldError{Tab: "employment_info", Field: "resign_reason", Code: "required", Message: "resign_reason is required"})
 		}
 	}
-	if validationProfile == employeeValidationFullForm {
-		fields = append(fields, fullFormEmployeeFieldErrors(employee)...)
-	}
+	fields = append(fields, fullFormEmployeeFieldErrors(employee)...)
 	if len(fields) == 0 {
 		if uniqueLookup, ok := c.store.(employeeUniqueLookupStore); ok {
 			uniqueFields, err := c.employeeUniqueFieldErrors(ctx, uniqueLookup, employee)
@@ -1031,7 +1010,7 @@ func (c HRService) appendEmployeeEvent(ctx RequestContext, eventType, target str
 	payload["target"] = target
 	aggregateType := string(ResourceEmployee)
 	if eventType == string(EventEmployeeImported) {
-		aggregateType = string(ResourceEmployeeImport)
+		aggregateType = string(ResourceEmployeeSync)
 	}
 	return c.store.AppendOutboxEvent(goContext(ctx), OutboxEvent{
 		ID:            utils.NewID("outbox"),
@@ -1171,43 +1150,6 @@ func employeeExportColumnsForPolicy(policies map[string]string) []employeeExport
 // employeeFieldPolicyHidden 處理員工欄位政策 hidden。
 func employeeFieldPolicyHidden(effect string) bool {
 	return effect == "hide" || effect == "deny"
-}
-
-const (
-	employeeImportColumnEmployeeNo = iota
-	employeeImportColumnName
-	employeeImportColumnEmail
-	employeeImportColumnOrgUnit
-	employeeImportColumnPosition
-	employeeImportColumnCategory
-	employeeImportColumnPhone
-	employeeImportColumnStatus
-	employeeImportColumnHireDate
-	employeeImportColumnManagerEmployeeID
-	employeeImportColumnAccountPolicy
-)
-
-type employeeImportColumn struct {
-	header string
-}
-
-var employeeImportColumns = []employeeImportColumn{
-	{header: "員工編號"},
-	{header: "姓名"},
-	{header: "Email"},
-	{header: "部門"},
-	{header: "職位"},
-	{header: "類別"},
-	{header: "電話"},
-	{header: "狀態"},
-	{header: "到職日期"},
-	{header: "主管員工ID"},
-	{header: "帳號策略"},
-}
-
-// employeeImportColumnCount 處理員工 import column count。
-func employeeImportColumnCount() int {
-	return len(employeeImportColumns)
 }
 
 // restrictedEmployeeFieldPolicies 處理 restricted 員工欄位政策。
@@ -1355,50 +1297,6 @@ func minInt(a, b int) int {
 		return a
 	}
 	return b
-}
-
-// employeeImportInputFromRecord 處理員工 import 輸入 來源 record。
-func employeeImportInputFromRecord(record []string) map[string]string {
-	input := make(map[string]string, len(employeeImportColumns))
-	for i, column := range employeeImportColumns {
-		input[column.header] = record[i]
-	}
-	return input
-}
-
-// employeeCreateInputFromImportRecord 處理員工 create 輸入 來源 import record。
-func employeeCreateInputFromImportRecord(record []string) CreateEmployeeInput {
-	email := strings.TrimSpace(record[employeeImportColumnEmail])
-	name := strings.TrimSpace(record[employeeImportColumnName])
-	orgUnitID := strings.TrimSpace(record[employeeImportColumnOrgUnit])
-	managerEmployeeID := strings.TrimSpace(record[employeeImportColumnManagerEmployeeID])
-	position := strings.TrimSpace(record[employeeImportColumnPosition])
-	category := normalizeEmployeeCategory(record[employeeImportColumnCategory])
-	phone := strings.TrimSpace(record[employeeImportColumnPhone])
-	status := normalizeEmployeeStatus(record[employeeImportColumnStatus])
-	accountPolicy := normalizeEmployeeAccountPolicy(record[employeeImportColumnAccountPolicy])
-	return CreateEmployeeInput{
-		EmployeeNo:        strings.TrimSpace(record[employeeImportColumnEmployeeNo]),
-		Name:              name,
-		CompanyEmail:      email,
-		OrgUnitID:         orgUnitID,
-		ManagerEmployeeID: managerEmployeeID,
-		Position:          position,
-		Category:          category,
-		Phone:             phone,
-		EmploymentStatus:  status,
-		Status:            status,
-		AccountPolicy:     accountPolicy,
-		HireDate:          normalizeImportDate(record[employeeImportColumnHireDate]),
-		BasicInfo:         map[string]any{"company_email": email, "name": name},
-		EmploymentInfo: map[string]any{
-			"org_unit_id":         orgUnitID,
-			"manager_employee_id": managerEmployeeID,
-			"position":            position,
-			"category":            category,
-		},
-		ContactInfo: map[string]any{"mobile_phone": phone},
-	}
 }
 
 // employeeHotValue 處理員工 hot value。

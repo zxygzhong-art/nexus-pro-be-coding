@@ -5,9 +5,14 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
+	"nexus-pro-api/internal/domain"
 	"nexus-pro-api/internal/platform/ehrms"
 )
 
@@ -15,8 +20,10 @@ import (
 func TestListAttendanceFetchesAndNormalizesEnglishFields(t *testing.T) {
 	var gotPath string
 	var gotAPIKey string
+	var gotQuery string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
 		gotAPIKey = r.Header.Get("X-API-Key")
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = w.Write([]byte(`[{
@@ -35,12 +42,16 @@ func TestListAttendanceFetchesAndNormalizesEnglishFields(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	rows, err := client.ListAttendance(context.Background())
+	client.WithRequestInterval(0)
+	rows, err := client.ListAttendance(context.Background(), domain.EHRMSAttendanceQuery{
+		EmployeeID: "IKM017",
+		Start:      "2026-01-01",
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if gotPath != "/attendance" || gotAPIKey != "secret" {
-		t.Fatalf("unexpected request path/header: path=%s apiKey=%s", gotPath, gotAPIKey)
+	if gotPath != "/attendance" || gotQuery != "emp_id=IKM017&start=2026-01-01" || gotAPIKey != "secret" {
+		t.Fatalf("unexpected request: path=%s query=%s apiKey=%s", gotPath, gotQuery, gotAPIKey)
 	}
 	if len(rows) != 1 {
 		t.Fatalf("expected one attendance row, got %+v", rows)
@@ -64,6 +75,7 @@ func TestRequestErrorClassifiesRetryableStatuses(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			client.WithRequestInterval(0)
 			_, err = client.ListEmployees(context.Background())
 			var requestErr *ehrms.RequestError
 			if !errors.As(err, &requestErr) || requestErr.Temporary() != tt.temporary {
@@ -93,6 +105,7 @@ func TestListDepartmentsAndPositions(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	client.WithRequestInterval(0)
 	departments, err := client.ListDepartments(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -132,18 +145,82 @@ func TestListLeaveBalancesAndDetails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	balances, err := client.ListLeaveBalances(context.Background())
+	client.WithRequestInterval(0)
+	query := domain.EHRMSAttendanceQuery{EmployeeID: "IKM017", Start: "2026-01-01"}
+	balances, err := client.ListLeaveBalances(context.Background(), query)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(balances) != 1 || balances[0]["員工編號"] != "IKM017" || balances[0]["假別"] != "annual" || balances[0]["餘額"] != "8" {
 		t.Fatalf("unexpected leave balances: %+v", balances)
 	}
-	details, err := client.ListLeaveDetails(context.Background())
+	details, err := client.ListLeaveDetails(context.Background(), query)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(details) != 1 || details[0]["員工編號"] != "IKM017" || details[0]["日期"] != "2026-06-11" || details[0]["開始時間"] != "09:00" {
 		t.Fatalf("unexpected leave details: %+v", details)
+	}
+}
+
+func TestClientSerializesAndSpacesUpstreamRequests(t *testing.T) {
+	var active int32
+	var maxActive int32
+	var startsMu sync.Mutex
+	starts := make([]time.Time, 0, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		current := atomic.AddInt32(&active, 1)
+		for {
+			maximum := atomic.LoadInt32(&maxActive)
+			if current <= maximum || atomic.CompareAndSwapInt32(&maxActive, maximum, current) {
+				break
+			}
+		}
+		startsMu.Lock()
+		starts = append(starts, time.Now())
+		startsMu.Unlock()
+		time.Sleep(5 * time.Millisecond)
+		atomic.AddInt32(&active, -1)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[]`))
+	}))
+	defer server.Close()
+
+	client, err := ehrms.NewClient(server.URL, "secret", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.WithRequestInterval(20 * time.Millisecond)
+	var wg sync.WaitGroup
+	errs := make(chan error, 3)
+	for range 3 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			_, callErr := client.ListEmployees(context.Background())
+			errs <- callErr
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for callErr := range errs {
+		if callErr != nil {
+			t.Fatal(callErr)
+		}
+	}
+	if got := atomic.LoadInt32(&maxActive); got != 1 {
+		t.Fatalf("maximum concurrent upstream requests = %d, want 1", got)
+	}
+	startsMu.Lock()
+	sort.Slice(starts, func(i, j int) bool { return starts[i].Before(starts[j]) })
+	gotStarts := append([]time.Time(nil), starts...)
+	startsMu.Unlock()
+	if len(gotStarts) != 3 {
+		t.Fatalf("request starts = %d, want 3", len(gotStarts))
+	}
+	for i := 1; i < len(gotStarts); i++ {
+		if gap := gotStarts[i].Sub(gotStarts[i-1]); gap < 15*time.Millisecond {
+			t.Fatalf("request start gap = %s, want at least 15ms", gap)
+		}
 	}
 }

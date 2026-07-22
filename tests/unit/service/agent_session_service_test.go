@@ -78,6 +78,9 @@ func TestAgentSessionChatPersistsMessagesAndAutoMemory(t *testing.T) {
 	if len(memories) != 1 || memories[0].Source != domain.AgentMemorySourceAuto || memories[0].Key != "preference" || !strings.Contains(memories[0].Content, "特休") {
 		t.Fatalf("expected auto preference memory, got %+v", memories)
 	}
+	if memories[0].Scope != "global" || memories[0].SourceMessageID != messages[0].ID || memories[0].Status != "active" {
+		t.Fatalf("expected memory provenance to bind the persisted user message, got %+v", memories[0])
+	}
 }
 
 // TestAgentSessionListKeysetPagination verifies created_at,id keyset paging keeps filters working.

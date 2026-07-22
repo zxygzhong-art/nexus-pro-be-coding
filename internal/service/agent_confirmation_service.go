@@ -14,34 +14,44 @@ import (
 
 const (
 	agentConfirmationTTL           = 10 * time.Minute
+	agentConfirmationSettleTimeout = 5 * time.Second
 	agentBulkReviewLimit           = 20
 	agentConfirmationFormSubmit    = "form_submit"
 	agentConfirmationBulkReview    = "workflow_bulk_review"
+	agentConfirmationExternalTool  = "external_tool_call"
 	agentConfirmationStatusDone    = "completed"
 	agentConfirmationStatusPartial = "partial"
 	AgentConfirmationMemoryKey     = "__agent_confirmation__"
 )
 
 type agentConfirmationExpectedReview struct {
-	FormInstanceID      string
-	FormInstanceVersion int64
-	WorkflowRunID       string
-	StageInstanceID     string
+	FormInstanceID      string `json:"form_instance_id"`
+	FormInstanceVersion int64  `json:"form_instance_version"`
+	WorkflowRunID       string `json:"workflow_run_id"`
+	StageInstanceID     string `json:"stage_instance_id"`
 }
 
 type agentConfirmationAction struct {
-	Public               domain.AgentConfirmation
-	TenantID             string
-	AccountID            string
-	AgentID              string
-	SessionID            string
-	ContextVersion       int64
-	DraftID              string
-	ExpectedDraftVersion int64
-	Payload              map[string]any
-	ReviewAction         string
-	ReviewReason         string
-	Reviews              []agentConfirmationExpectedReview
+	Public                 domain.AgentConfirmation          `json:"-"`
+	DraftID                string                            `json:"draft_id,omitempty"`
+	ExpectedDraftVersion   int64                             `json:"expected_draft_version,omitempty"`
+	Payload                map[string]any                    `json:"payload,omitempty"`
+	ReviewAction           string                            `json:"review_action,omitempty"`
+	ReviewReason           string                            `json:"review_reason,omitempty"`
+	Reviews                []agentConfirmationExpectedReview `json:"reviews,omitempty"`
+	ExternalConnectionID   string                            `json:"connection_id,omitempty"`
+	ExternalCapabilityID   string                            `json:"capability_id,omitempty"`
+	ExternalSchemaChecksum string                            `json:"schema_checksum,omitempty"`
+	ExternalArguments      map[string]any                    `json:"arguments,omitempty"`
+}
+
+// agentConfirmationStore is the confirmation-only subset of repository.AgentV2Store.
+// Keeping it structural lets the legacy repository.Store remain unchanged during the v2 cutover.
+type agentConfirmationStore interface {
+	UpsertAgentConfirmation(context.Context, domain.AgentConfirmationRecord) error
+	ListPendingAgentConfirmations(ctx context.Context, tenantID, accountID, conversationID, segmentID string, now time.Time) ([]domain.AgentConfirmationRecord, error)
+	ClaimAgentConfirmation(ctx context.Context, tenantID, accountID, id string, now time.Time) (domain.AgentConfirmationRecord, bool, error)
+	UpdateAgentConfirmation(ctx context.Context, confirmation domain.AgentConfirmationRecord) (domain.AgentConfirmationRecord, bool, error)
 }
 
 // ExecuteConfirmation 在重新驗證資源版本與操作者後執行一次性 Agent 操作。
@@ -49,7 +59,7 @@ func (c *Service) ExecuteAgentConfirmation(ctx RequestContext, id string, _ doma
 	if _, _, err := c.requireServiceAuthz(ctx, AppAgent, ResourceType("run"), ActionCreate, ""); err != nil {
 		return domain.AgentConfirmationExecution{}, err
 	}
-	action, err := c.takeAgentConfirmation(ctx, id)
+	action, record, err := c.takeAgentConfirmation(ctx, id)
 	if err != nil {
 		return domain.AgentConfirmationExecution{}, err
 	}
@@ -60,32 +70,66 @@ func (c *Service) ExecuteAgentConfirmation(ctx RequestContext, id string, _ doma
 		result, err = c.executeConfirmedFormSubmission(ctx, action)
 	case agentConfirmationBulkReview:
 		result, err = c.executeConfirmedBulkReview(ctx, action)
+	case agentConfirmationExternalTool:
+		result, err = c.executeConfirmedExternalToolCall(ctx, action, record)
 	default:
 		err = BadRequest("unsupported agent confirmation kind")
 	}
 	if err != nil {
-		c.restoreRetryableAgentConfirmation(ctx, action, err)
+		c.settleFailedAgentConfirmation(ctx, record, err)
 		return domain.AgentConfirmationExecution{}, err
 	}
-	if err := c.RecordAudit(ctx, "agent.confirmation.execute", "agent_confirmation", action.Public.ID, "high", map[string]any{
+	if err := c.completeAgentConfirmation(ctx, record, result); err != nil {
+		return domain.AgentConfirmationExecution{}, err
+	}
+	auditDetails := map[string]any{
 		"kind":   action.Public.Kind,
 		"action": action.Public.Action,
 		"count":  len(action.Reviews),
-	}); err != nil {
+	}
+	if action.Public.Kind == agentConfirmationExternalTool {
+		auditDetails["connection_id"] = action.ExternalConnectionID
+		auditDetails["capability_id"] = action.ExternalCapabilityID
+	}
+	if err := c.RecordAudit(ctx, "agent.confirmation.execute", "agent_confirmation", action.Public.ID, "high", auditDetails); err != nil {
 		return domain.AgentConfirmationExecution{}, err
 	}
 	return result, nil
 }
 
-// restoreRetryableAgentConfirmation 恢復尚未成功的短效操作，並保留原始 TTL 與業務錯誤。
-func (c *Service) restoreRetryableAgentConfirmation(ctx RequestContext, action agentConfirmationAction, executionErr error) {
-	if !agentConfirmationExecutionRetryable(executionErr) || !action.Public.ExpiresAt.After(c.Now()) {
+// settleFailedAgentConfirmation moves a claimed record to pending only for retryable failures.
+// Cancellation, expiry, and deterministic failures are terminal and cannot be replayed.
+func (c *Service) settleFailedAgentConfirmation(ctx RequestContext, record domain.AgentConfirmationRecord, executionErr error) {
+	store, ok := c.agentConfirmationPersistence()
+	if !ok {
+		c.LogWarn(ctx, "agent confirmation settlement unavailable", "confirmation_id", record.ID)
 		return
 	}
-	if err := c.saveAgentConfirmation(ctx, action); err != nil {
-		c.LogWarn(ctx, "agent confirmation restore failed",
-			"confirmation_id", action.Public.ID,
-			"kind", action.Public.Kind,
+	now := c.Now()
+	record.LastError = agentConfirmationStoredError(executionErr)
+	record.UpdatedAt = now
+	record.ResultPayload = map[string]any{}
+	switch {
+	case !record.ExpiresAt.After(now):
+		record.Status = domain.AgentConfirmationStatusExpired
+		record.ConsumedAt = &now
+	case errors.Is(executionErr, context.Canceled):
+		record.Status = domain.AgentConfirmationStatusCancelled
+		record.ConsumedAt = &now
+	case agentConfirmationExecutionRetryable(executionErr):
+		record.Status = domain.AgentConfirmationStatusPending
+		record.ConsumedAt = nil
+	default:
+		record.Status = domain.AgentConfirmationStatusFailed
+		record.ConsumedAt = &now
+	}
+	settleCtx, cancel := context.WithTimeout(context.WithoutCancel(goContext(ctx)), agentConfirmationSettleTimeout)
+	defer cancel()
+	if _, updated, err := store.UpdateAgentConfirmation(settleCtx, record); err != nil || !updated {
+		c.LogWarn(ctx, "agent confirmation settlement failed",
+			"confirmation_id", record.ID,
+			"status", record.Status,
+			"updated", updated,
 			"error_type", fmt.Sprintf("%T", err),
 		)
 	}
@@ -94,6 +138,9 @@ func (c *Service) restoreRetryableAgentConfirmation(ctx RequestContext, action a
 // agentConfirmationExecutionRetryable 僅接受明確的伺服器端、逾時或暫時性基礎設施錯誤。
 func agentConfirmationExecutionRetryable(err error) bool {
 	if err == nil {
+		return false
+	}
+	if errors.Is(err, errAgentConfirmationNonRetryable) {
 		return false
 	}
 	if appErr, ok := domain.AsAppError(err); ok {
@@ -110,83 +157,106 @@ func agentConfirmationExecutionRetryable(err error) bool {
 	return errors.As(err, &temporary) && temporary.Temporary()
 }
 
-// saveAgentConfirmation 複用持久化 Agent memory 存放短效內部記錄，支持多實例執行。
+// saveAgentConfirmation persists display and protected action payloads in the dedicated confirmation store.
 func (c *Service) saveAgentConfirmation(ctx RequestContext, action agentConfirmationAction) error {
-	if execution, ok := AgentChatExecutionContextFromContext(ctx.Context); ok {
-		action.AgentID = execution.AgentID
-		action.SessionID = execution.SessionID
-		action.ContextVersion = execution.ContextVersion
+	execution, ok := AgentChatExecutionContextFromContext(ctx.Context)
+	if !ok || strings.TrimSpace(execution.SessionID) == "" || strings.TrimSpace(execution.SegmentID) == "" {
+		return domain.E(500, "agent_confirmation_context_missing", "agent confirmation context is unavailable")
 	}
-	raw, err := json.Marshal(action)
+	store, ok := c.agentConfirmationPersistence()
+	if !ok {
+		return domain.E(500, "agent_confirmation_store_unavailable", "agent confirmation storage is unavailable")
+	}
+	publicPayload, err := agentConfirmationJSONMap(action.Public)
 	if err != nil {
 		return err
 	}
-	expiresAt := action.Public.ExpiresAt
-	return c.store.UpsertAgentMemory(goContext(ctx), domain.AgentMemory{
+	actionPayload, err := agentConfirmationActionPayload(action)
+	if err != nil {
+		return err
+	}
+	now := c.Now()
+	return store.UpsertAgentConfirmation(goContext(ctx), domain.AgentConfirmationRecord{
 		ID: action.Public.ID, TenantID: ctx.TenantID, AccountID: ctx.AccountID,
-		AgentID: action.AgentID, SessionID: action.SessionID,
-		Key: AgentConfirmationMemoryKey, Content: string(raw), Source: domain.AgentMemorySourceAuto,
-		Importance: 1, ExpiresAt: &expiresAt, CreatedAt: c.Now(), UpdatedAt: c.Now(),
+		ConversationID: execution.SessionID, SegmentID: execution.SegmentID,
+		ExecutionID: execution.RunID, SourceMessageID: execution.InputMessageID,
+		Kind: action.Public.Kind, Title: action.Public.Title, Action: action.Public.Action,
+		PublicPayload: publicPayload, ActionPayload: actionPayload, ResultPayload: map[string]any{},
+		Status: domain.AgentConfirmationStatusPending, ExpiresAt: action.Public.ExpiresAt,
+		CreatedAt: now, UpdatedAt: now,
 	})
 }
 
-// takeAgentConfirmation 驗證歸屬後原子刪除並解析一次性確認，拒絕過期與重放。
-func (c *Service) takeAgentConfirmation(ctx RequestContext, id string) (agentConfirmationAction, error) {
+func agentConfirmationActionPayload(action agentConfirmationAction) (map[string]any, error) {
+	if action.Public.Kind != agentConfirmationExternalTool {
+		return agentConfirmationJSONMap(action)
+	}
+	arguments, err := agentConfirmationJSONMap(action.ExternalArguments)
+	if err != nil {
+		return nil, err
+	}
+	if arguments == nil {
+		arguments = map[string]any{}
+	}
+	return map[string]any{
+		"connection_id":   action.ExternalConnectionID,
+		"capability_id":   action.ExternalCapabilityID,
+		"schema_checksum": action.ExternalSchemaChecksum,
+		"arguments":       arguments,
+	}, nil
+}
+
+// takeAgentConfirmation atomically claims a current-segment record and reconstructs the legacy public DTO.
+func (c *Service) takeAgentConfirmation(ctx RequestContext, id string) (agentConfirmationAction, domain.AgentConfirmationRecord, error) {
 	id = strings.TrimSpace(id)
-	memory, ok, err := c.store.GetAgentMemory(goContext(ctx), ctx.TenantID, id)
-	if err != nil {
-		return agentConfirmationAction{}, err
+	if id == "" {
+		return agentConfirmationAction{}, domain.AgentConfirmationRecord{}, NotFound("agent confirmation", id)
 	}
-	if !ok || memory.AccountID != ctx.AccountID || memory.Key != AgentConfirmationMemoryKey {
-		return agentConfirmationAction{}, NotFound("agent confirmation", id)
-	}
-	claimed, ok, err := c.store.DeleteAgentMemory(goContext(ctx), ctx.TenantID, id)
-	if err != nil {
-		return agentConfirmationAction{}, err
-	}
+	store, ok := c.agentConfirmationPersistence()
 	if !ok {
-		return agentConfirmationAction{}, Conflict("agent confirmation was already used").WithReasonCode("agent_confirmation_invalid")
+		return agentConfirmationAction{}, domain.AgentConfirmationRecord{}, domain.E(500, "agent_confirmation_store_unavailable", "agent confirmation storage is unavailable")
 	}
-	var action agentConfirmationAction
-	if err := json.Unmarshal([]byte(claimed.Content), &action); err != nil {
-		return agentConfirmationAction{}, Conflict("agent confirmation is invalid").WithReasonCode("agent_confirmation_invalid")
+	record, claimed, err := store.ClaimAgentConfirmation(goContext(ctx), ctx.TenantID, ctx.AccountID, id, c.Now())
+	if err != nil {
+		return agentConfirmationAction{}, domain.AgentConfirmationRecord{}, err
 	}
-	if action.TenantID != ctx.TenantID || action.AccountID != ctx.AccountID {
-		return agentConfirmationAction{}, NotFound("agent confirmation", id)
+	if !claimed {
+		return agentConfirmationAction{}, domain.AgentConfirmationRecord{}, Conflict("agent confirmation is invalid or was already used").WithReasonCode("agent_confirmation_invalid")
 	}
-	if action.SessionID != "" && action.ContextVersion > 0 {
-		session, sessionErr := c.CurrentAgentSession(ctx, ctx.AccountID, action.SessionID)
-		if sessionErr != nil {
-			return agentConfirmationAction{}, sessionErr
-		}
-		if session.ContextVersion != action.ContextVersion {
-			return agentConfirmationAction{}, Conflict("agent confirmation belongs to an earlier conversation context").WithReasonCode("agent_confirmation_invalid")
-		}
+	if record.Status == domain.AgentConfirmationStatusExpired {
+		return agentConfirmationAction{}, record, Conflict("agent confirmation has expired").WithReasonCode("agent_confirmation_expired")
 	}
-	if !action.Public.ExpiresAt.After(c.Now()) {
-		return agentConfirmationAction{}, Conflict("agent confirmation has expired").WithReasonCode("agent_confirmation_expired")
+	if record.Status != domain.AgentConfirmationStatusExecuting {
+		return agentConfirmationAction{}, record, Conflict("agent confirmation is invalid").WithReasonCode("agent_confirmation_invalid")
 	}
-	return action, nil
+	action, err := decodeAgentConfirmationRecord(record)
+	if err != nil {
+		c.settleFailedAgentConfirmation(ctx, record, err)
+		return agentConfirmationAction{}, record, Conflict("agent confirmation is invalid").WithReasonCode("agent_confirmation_invalid")
+	}
+	return action, record, nil
 }
 
 // PendingAgentConfirmationMessages restores only unexpired, unconsumed confirmations owned by this session context.
 func (c *Service) PendingAgentConfirmationMessages(ctx RequestContext, accountID string, session domain.AgentSession) ([]domain.AgentSessionMessage, error) {
-	memories, err := c.store.ListAgentMemoriesByAccount(
-		goContext(ctx), ctx.TenantID, accountID, session.AgentID, session.ID, agentBulkReviewLimit,
+	if strings.TrimSpace(session.ID) == "" || strings.TrimSpace(session.SegmentID) == "" {
+		return []domain.AgentSessionMessage{}, nil
+	}
+	store, ok := c.agentConfirmationPersistence()
+	if !ok {
+		// During the v2 cutover legacy/in-memory stores may not implement AgentV2Store.
+		return []domain.AgentSessionMessage{}, nil
+	}
+	records, err := store.ListPendingAgentConfirmations(
+		goContext(ctx), ctx.TenantID, accountID, session.ID, session.SegmentID, c.Now(),
 	)
 	if err != nil {
 		return nil, err
 	}
-	messages := make([]domain.AgentSessionMessage, 0, len(memories))
-	for _, memory := range memories {
-		if memory.Key != AgentConfirmationMemoryKey {
-			continue
-		}
-		var action agentConfirmationAction
-		if err := json.Unmarshal([]byte(memory.Content), &action); err != nil {
-			continue
-		}
-		if action.ContextVersion > 0 && action.ContextVersion != session.ContextVersion {
+	messages := make([]domain.AgentSessionMessage, 0, len(records))
+	for _, record := range records {
+		action, err := decodeAgentConfirmationRecord(record)
+		if err != nil {
 			continue
 		}
 		data := map[string]any{}
@@ -205,13 +275,97 @@ func (c *Service) PendingAgentConfirmationMessages(ctx RequestContext, accountID
 			ID:             "pending-" + action.Public.ID,
 			TenantID:       ctx.TenantID,
 			SessionID:      session.ID,
+			SegmentID:      session.SegmentID,
 			Role:           domain.AgentMessageRoleTool,
+			RunID:          record.ExecutionID,
 			ContextVersion: session.ContextVersion,
 			Metadata:       metadata,
-			CreatedAt:      memory.CreatedAt,
+			CreatedAt:      record.CreatedAt,
 		})
 	}
 	return messages, nil
+}
+
+func (c *Service) completeAgentConfirmation(ctx RequestContext, record domain.AgentConfirmationRecord, result domain.AgentConfirmationExecution) error {
+	store, ok := c.agentConfirmationPersistence()
+	if !ok {
+		return domain.E(500, "agent_confirmation_store_unavailable", "agent confirmation storage is unavailable")
+	}
+	resultPayload, err := agentConfirmationJSONMap(result)
+	if err != nil {
+		return err
+	}
+	now := c.Now()
+	record.Status = domain.AgentConfirmationStatusCompleted
+	record.ResultPayload = resultPayload
+	record.LastError = ""
+	record.ConsumedAt = &now
+	record.UpdatedAt = now
+	// The protected action has already succeeded. Persist its terminal state even
+	// when the client disconnects immediately after the side effect commits.
+	completeCtx, cancel := context.WithTimeout(context.WithoutCancel(goContext(ctx)), agentConfirmationSettleTimeout)
+	defer cancel()
+	_, updated, err := store.UpdateAgentConfirmation(completeCtx, record)
+	if err != nil {
+		return err
+	}
+	if !updated {
+		return Conflict("agent confirmation state changed during execution").WithReasonCode("agent_confirmation_invalid")
+	}
+	return nil
+}
+
+func (c *Service) agentConfirmationPersistence() (agentConfirmationStore, bool) {
+	store, ok := c.store.(agentConfirmationStore)
+	return store, ok
+}
+
+func agentConfirmationJSONMap(value any) (map[string]any, error) {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, err
+	}
+	payload := map[string]any{}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		return nil, err
+	}
+	return payload, nil
+}
+
+func decodeAgentConfirmationRecord(record domain.AgentConfirmationRecord) (agentConfirmationAction, error) {
+	publicRaw, err := json.Marshal(record.PublicPayload)
+	if err != nil {
+		return agentConfirmationAction{}, err
+	}
+	var public domain.AgentConfirmation
+	if err := json.Unmarshal(publicRaw, &public); err != nil {
+		return agentConfirmationAction{}, err
+	}
+	actionRaw, err := json.Marshal(record.ActionPayload)
+	if err != nil {
+		return agentConfirmationAction{}, err
+	}
+	var action agentConfirmationAction
+	if err := json.Unmarshal(actionRaw, &action); err != nil {
+		return agentConfirmationAction{}, err
+	}
+	public.ID = record.ID
+	public.Kind = record.Kind
+	public.Title = record.Title
+	public.Action = record.Action
+	public.ExpiresAt = record.ExpiresAt
+	action.Public = public
+	return action, nil
+}
+
+func agentConfirmationStoredError(err error) string {
+	if err == nil {
+		return ""
+	}
+	if appErr, ok := domain.AsAppError(err); ok {
+		return appErr.Code
+	}
+	return fmt.Sprintf("%T", err)
 }
 
 // executeConfirmedFormSubmission 防止草稿在預覽後被修改或換人提交。
@@ -495,7 +649,7 @@ func (c *Service) newFormSubmissionConfirmation(ctx domain.RequestContext, templ
 		ExpiresAt: c.Now().Add(agentConfirmationTTL),
 	}
 	if err := c.saveAgentConfirmation(ctx, agentConfirmationAction{
-		Public: confirmation, TenantID: ctx.TenantID, AccountID: ctx.AccountID,
+		Public:  confirmation,
 		DraftID: instance.ID, ExpectedDraftVersion: instance.Version, Payload: utils.CopyStringMap(payload),
 	}); err != nil {
 		return nil, err
@@ -544,7 +698,7 @@ func (c *Service) newBulkReviewConfirmation(ctx domain.RequestContext, pending m
 		Rows: rows, Items: items, ExpiresAt: c.Now().Add(agentConfirmationTTL),
 	}
 	if err := c.saveAgentConfirmation(ctx, agentConfirmationAction{
-		Public: confirmation, TenantID: ctx.TenantID, AccountID: ctx.AccountID,
+		Public:       confirmation,
 		ReviewAction: action, ReviewReason: reason, Reviews: expected,
 	}); err != nil {
 		return nil, err

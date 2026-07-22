@@ -127,6 +127,30 @@ func (c AttendanceService) loadAttendancePolicyResponse(ctx RequestContext) (Att
 	return attendancePolicyResponse(policy), nil
 }
 
+// loadAttendancePolicyResponseAsOf resolves the policy version that was
+// effective at the supplied instant instead of applying today's policy to
+// historical attendance.
+func (c AttendanceService) loadAttendancePolicyResponseAsOf(ctx RequestContext, asOf time.Time) (AttendancePolicyResponse, error) {
+	policy, exists, err := c.store.GetAttendancePolicyAsOf(goContext(ctx), ctx.TenantID, asOf)
+	if err != nil {
+		return AttendancePolicyResponse{}, err
+	}
+	if !exists {
+		return defaultAttendancePolicyResponse(), nil
+	}
+	return attendancePolicyResponse(policy), nil
+}
+
+// loadAttendancePolicyResponseForWorkDate anchors policy selection to the
+// business date, making re-projection deterministic after later policy edits.
+func (c AttendanceService) loadAttendancePolicyResponseForWorkDate(ctx RequestContext, workDate string) (AttendancePolicyResponse, error) {
+	day, err := time.ParseInLocation(time.DateOnly, strings.TrimSpace(workDate), attendanceClockLocation)
+	if err != nil {
+		return AttendancePolicyResponse{}, BadRequest("work_date must be YYYY-MM-DD")
+	}
+	return c.loadAttendancePolicyResponseAsOf(ctx, day)
+}
+
 // UpdateAttendancePolicy 更新考勤政策的服務流程。
 func (c AttendanceService) UpdateAttendancePolicy(ctx RequestContext, input UpdateAttendancePolicyInput) (AttendancePolicyResponse, error) {
 	account, decision, authzAudit, err := c.Authorize(ctx,

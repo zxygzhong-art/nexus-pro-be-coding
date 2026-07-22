@@ -23,27 +23,13 @@ type WorkflowCtrl struct {
 // RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c WorkflowCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	builder := router.Group("/form-builder")
-	builder.GET("/capabilities", c.routes.Handle("workflow.form_definition_draft", "read", c.formBuilderCapabilities))
-	builder.GET("/data-sources", c.routes.Handle("workflow.form_definition_draft", "read", c.formBuilderCapabilities))
-	builder.GET("/workflow-targets", c.routes.Handle("workflow.form_definition_draft", "read", c.formBuilderCapabilities))
 	builder.GET("/drafts", c.routes.Handle("workflow.form_definition_draft", "read", c.listFormDefinitionDrafts))
-	builder.POST("/drafts", c.routes.Handle("workflow.form_definition_draft", "create", c.createFormDefinitionDraft))
-	builder.GET("/drafts/:id", c.routes.Handle("workflow.form_definition_draft", "read", c.getFormDefinitionDraft, ResourceID(PathParamID)))
-	builder.PATCH("/drafts/:id", c.routes.Handle("workflow.form_definition_draft", "update", c.updateFormDefinitionDraft, ResourceID(PathParamID)))
-	builder.POST("/drafts/:id/validate", c.routes.Handle("workflow.form_definition_draft", "read", c.validateFormDefinitionDraft, ResourceID(PathParamID)))
-	builder.POST("/drafts/:id/preview", c.routes.Handle("workflow.form_definition_draft", "read", c.previewFormDefinitionDraft, ResourceID(PathParamID)))
-	builder.POST("/drafts/:id/simulate", c.routes.Handle("workflow.form_definition_draft", "read", c.simulateFormDefinitionWorkflow, ResourceID(PathParamID)))
 	builder.POST("/drafts/:id/submit-review", c.routes.Handle("workflow.form_definition_draft", "submit", c.submitFormDefinitionDraftForReview, ResourceID(PathParamID)))
 	builder.POST("/drafts/:id/publish", c.routes.Handle("workflow.form_definition_draft", "approve", c.publishFormDefinitionDraft, ResourceID(PathParamID)))
-
-	forms := router.Group("/forms")
-	forms.GET("/templates", c.routes.Handle("workflow.form_template", "read", c.listFormTemplates))
-	forms.POST("/templates", c.routes.Handle("workflow.form_template", "create", c.createFormTemplate))
 
 	workflows := router.Group("/workflows")
 	workflows.GET("/form-data-sources", c.routes.Handle("workflow.form_instance", "read", c.formDataSources))
 	workflows.GET("/form-templates/:key", c.routes.Handle("workflow.form_instance", "read", c.getRuntimeFormTemplate, PathParam("key")))
-	workflows.GET("/forms", c.routes.Handle("workflow.form_instance", "read", c.listFormInstances))
 	workflows.GET("/forms/:id", c.routes.Handle("workflow.form_instance", "read", c.getFormInstance, PathParam(PathParamID)))
 	workflows.GET("/reviews", c.routes.Handle("workflow.form_instance", "read", c.reviewQueue))
 	workflows.POST("/reviews/bulk-action", c.routes.Handle("workflow.form_instance", "approve", c.bulkReviewForms))
@@ -58,31 +44,9 @@ func (c WorkflowCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workflows.POST("/forms/:id/return", c.routes.Handle("workflow.form_instance", "approve", c.returnForm, PathParam(PathParamID)))
 	workflows.POST("/forms/:id/cancel", c.routes.Handle("workflow.form_instance", "update", c.cancelForm, PathParam(PathParamID)))
 	workflows.POST("/forms/:id/duplicate", c.routes.Handle("workflow.form_instance", "submit", c.duplicateForm, PathParam(PathParamID)))
-	workflows.GET("/forms/:id/files", c.routes.Handle("workflow.form_instance", "read", c.listFormInstanceFiles, PathParam(PathParamID)))
 	workflows.POST("/forms/:id/files", c.routes.Handle("workflow.form_instance", "submit", c.uploadFormInstanceFile, PathParam(PathParamID)))
 	workflows.GET("/forms/:id/files/:file_id", c.routes.Handle("workflow.form_instance", "read", c.downloadFormInstanceFile, PathParam(PathParamID), PathParam(pathParamFormFileID)))
 	workflows.DELETE("/forms/:id/files/:file_id", c.routes.Handle("workflow.form_instance", "submit", c.deleteFormInstanceFile, PathParam(PathParamID), PathParam(pathParamFormFileID)))
-}
-
-// formBuilderCapabilities 回傳 Agent 創作所需的統一能力目錄。
-func (c WorkflowCtrl) formBuilderCapabilities(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	item, err := c.svc.FormBuilderCapabilities(ctx)
-	if err != nil {
-		return err
-	}
-	path := r.URL.Path
-	if strings.HasSuffix(path, "/data-sources") {
-		item.WorkflowTargets = nil
-		item.FieldTypes = nil
-		item.Widgets = nil
-	}
-	if strings.HasSuffix(path, "/workflow-targets") {
-		item.DataSources = nil
-		item.FieldTypes = nil
-		item.Widgets = nil
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
 }
 
 // listFormDefinitionDrafts 列出 Agent/管理員可見的表單定義草稿。
@@ -96,74 +60,6 @@ func (c WorkflowCtrl) listFormDefinitionDrafts(w http.ResponseWriter, r *http.Re
 		return err
 	}
 	writeJSON(w, http.StatusOK, items)
-	return nil
-}
-
-// createFormDefinitionDraft 建立受控表單定義草稿。
-func (c WorkflowCtrl) createFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.CreateFormDefinitionDraftInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.CreateFormDefinitionDraft(ctx, input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusCreated, item)
-	return nil
-}
-
-// getFormDefinitionDraft 取得單個草稿。
-func (c WorkflowCtrl) getFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	item, err := c.svc.GetFormDefinitionDraft(ctx, r.PathValue(PathParamID))
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// updateFormDefinitionDraft 更新草稿並執行 revision 檢查。
-func (c WorkflowCtrl) updateFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.UpdateFormDefinitionDraftInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.UpdateFormDefinitionDraft(ctx, r.PathValue(PathParamID), input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// validateFormDefinitionDraft 執行確定性驗證。
-func (c WorkflowCtrl) validateFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	item, err := c.svc.ValidateFormDefinitionDraft(ctx, r.PathValue(PathParamID))
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// previewFormDefinitionDraft 回傳預覽 contract。
-func (c WorkflowCtrl) previewFormDefinitionDraft(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	item, err := c.svc.PreviewFormDefinitionDraft(ctx, r.PathValue(PathParamID))
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// simulateFormDefinitionWorkflow 靜態模擬審批路徑。
-func (c WorkflowCtrl) simulateFormDefinitionWorkflow(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	item, err := c.svc.SimulateFormDefinitionWorkflow(ctx, r.PathValue(PathParamID))
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 
@@ -216,52 +112,6 @@ func (c WorkflowCtrl) getRuntimeFormTemplate(w http.ResponseWriter, r *http.Requ
 		return err
 	}
 	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// listFormTemplates 處理表單範本的 HTTP 請求。
-func (c WorkflowCtrl) listFormTemplates(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	page, err := pageRequestFromRequest(r)
-	if err != nil {
-		return err
-	}
-	items, err := c.svc.ListFormTemplatePage(ctx, page)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, items)
-	return nil
-}
-
-// createFormTemplate 處理表單範本的 HTTP 請求。
-func (c WorkflowCtrl) createFormTemplate(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.CreateFormTemplateInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.CreateFormTemplate(ctx, input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusCreated, item)
-	return nil
-}
-
-// listFormInstances 處理表單實例的 HTTP 請求。
-func (c WorkflowCtrl) listFormInstances(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	page, err := pageRequestFromRequest(r)
-	if err != nil {
-		return err
-	}
-	query, err := formInstanceQueryFromRequest(r)
-	if err != nil {
-		return err
-	}
-	items, err := c.svc.ListFormInstancePage(ctx, query, page)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, items)
 	return nil
 }
 
@@ -475,16 +325,6 @@ func (c WorkflowCtrl) uploadFormInstanceFile(w http.ResponseWriter, r *http.Requ
 		return err
 	}
 	writeJSON(w, http.StatusCreated, item)
-	return nil
-}
-
-// listFormInstanceFiles lists attachments for a form instance.
-func (c WorkflowCtrl) listFormInstanceFiles(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	items, err := c.svc.ListFormInstanceFiles(ctx, r.PathValue(PathParamID))
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, domain.FormInstanceFileListResponse{Items: items, Total: len(items)})
 	return nil
 }
 

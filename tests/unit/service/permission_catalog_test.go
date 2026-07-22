@@ -189,7 +189,7 @@ func TestListMenusUsesDBAndFallsBackToDefaultCatalog(t *testing.T) {
 	})
 }
 
-// TestLegacyBusinessMenusRemainVisible 驗證 business workflow 與 Agent 自助入口未被 canonical workspace menu 取代。
+// TestLegacyBusinessMenusRemainVisible 驗證穩定 menu key 仍能導向 canonical business 與 Agent 頁面。
 func TestLegacyBusinessMenusRemainVisible(t *testing.T) {
 	now := time.Date(2026, 7, 7, 9, 0, 0, 0, time.UTC)
 	for _, menuKey := range []string{"workflow.instances", "agents.runs"} {
@@ -202,6 +202,13 @@ func TestLegacyBusinessMenusRemainVisible(t *testing.T) {
 				t.Fatalf("expected legacy business menu %s in /me/menus, got %+v", menuKey, menus)
 			}
 		})
+	}
+	menus, err := service.New(menuFixtureStore(now, "agents.runs")).Me().ListMenus(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if agentMenu, ok := permissionCatalogMenuNode(menus, "agents.runs"); !ok || agentMenu.Path != "/assistants" {
+		t.Fatalf("stable agents.runs key must point at /assistants, menu=%+v ok=%v", agentMenu, ok)
 	}
 }
 
@@ -289,10 +296,18 @@ func menuFixtureStore(now time.Time, menuKey string) *memory.Store {
 
 // permissionCatalogHasMenuNode 遞迴檢查 menu tree 是否含指定 key。
 func permissionCatalogHasMenuNode(nodes []domain.MenuNode, expected string) bool {
+	_, ok := permissionCatalogMenuNode(nodes, expected)
+	return ok
+}
+
+func permissionCatalogMenuNode(nodes []domain.MenuNode, expected string) (domain.MenuNode, bool) {
 	for _, node := range nodes {
-		if node.Key == expected || permissionCatalogHasMenuNode(node.Children, expected) {
-			return true
+		if node.Key == expected {
+			return node, true
+		}
+		if child, ok := permissionCatalogMenuNode(node.Children, expected); ok {
+			return child, true
 		}
 	}
-	return false
+	return domain.MenuNode{}, false
 }

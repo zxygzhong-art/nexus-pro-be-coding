@@ -64,6 +64,7 @@ func (c AgentService) CreateSession(ctx RequestContext, input domain.CreateAgent
 		TenantID:       ctx.TenantID,
 		AccountID:      account.ID,
 		AgentID:        agentID,
+		SegmentID:      utils.NewID("aseg"),
 		Title:          strings.TrimSpace(input.Title),
 		Status:         domain.AgentSessionStatusActive,
 		ContextVersion: 1,
@@ -141,6 +142,7 @@ func (c AgentService) ClearSessionContext(ctx RequestContext, id string) (domain
 			locked.ContextVersion = 1
 		}
 		locked.ContextVersion++
+		locked.SegmentID = utils.NewID("aseg")
 		locked.Title = "新對話"
 		locked.LastMessageAt = nil
 		locked.UpdatedAt = c.Now()
@@ -361,8 +363,15 @@ func (c AgentService) currentAgentMemory(ctx RequestContext, accountID, id strin
 }
 
 func (c AgentService) normalizeAgentMemory(ctx RequestContext, memory domain.AgentMemory) (domain.AgentMemory, error) {
+	memory.AgentID = strings.TrimSpace(memory.AgentID)
+	memory.SessionID = strings.TrimSpace(memory.SessionID)
+	memory.SegmentID = strings.TrimSpace(memory.SegmentID)
+	memory.SourceMessageID = strings.TrimSpace(memory.SourceMessageID)
 	memory.Key = strings.TrimSpace(memory.Key)
 	memory.Content = strings.TrimSpace(memory.Content)
+	if memory.Key == "" {
+		return domain.AgentMemory{}, BadRequest("key is required")
+	}
 	if memory.Content == "" {
 		return domain.AgentMemory{}, BadRequest("content is required")
 	}
@@ -375,14 +384,35 @@ func (c AgentService) normalizeAgentMemory(ctx RequestContext, memory domain.Age
 	if memory.Importance <= 0 {
 		memory.Importance = 1
 	}
+	if memory.Importance > 5 {
+		return domain.AgentMemory{}, BadRequest("importance must be between 1 and 5")
+	}
+	if memory.Confidence == 0 {
+		memory.Confidence = 1
+	}
+	if memory.Confidence < 0 || memory.Confidence > 1 {
+		return domain.AgentMemory{}, BadRequest("confidence must be between 0 and 1")
+	}
+	if memory.Status == "" {
+		memory.Status = "active"
+	}
 	if memory.SessionID != "" {
 		session, err := c.CurrentAgentSession(ctx, memory.AccountID, memory.SessionID)
 		if err != nil {
 			return domain.AgentMemory{}, err
 		}
-		if memory.AgentID == "" {
-			memory.AgentID = session.AgentID
+		if memory.AgentID != "" && memory.AgentID != session.AgentID {
+			return domain.AgentMemory{}, BadRequest("agent id does not match the session")
 		}
+		memory.Scope = "conversation"
+		memory.AgentID = ""
+		memory.SegmentID = session.SegmentID
+	} else if memory.AgentID != "" {
+		memory.Scope = "agent"
+		memory.SegmentID = ""
+	} else {
+		memory.Scope = "global"
+		memory.SegmentID = ""
 	}
 	return memory, nil
 }

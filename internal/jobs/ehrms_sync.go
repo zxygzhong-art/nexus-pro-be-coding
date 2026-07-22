@@ -10,105 +10,138 @@ import (
 	"nexus-pro-api/internal/domain"
 )
 
-const defaultEHRMSEmployeeSyncInterval = 24 * time.Hour
+const (
+	ehrmsSyncMorningHour = 8
+	ehrmsSyncEveningHour = 20
+)
 
-// EHRMSEmployeeSyncService 定義 eHRMS 員工 sync 服務的行為契約。
-type EHRMSEmployeeSyncService interface {
+var ehrmsSyncLocation = time.FixedZone("Asia/Shanghai", 8*60*60)
+
+// EHRMSSyncHRService defines the HR operations required by the unified eHRMS sync.
+type EHRMSSyncHRService interface {
+	SyncEHRMSOrgUnits(domain.RequestContext) (domain.EHRMSOrgUnitSyncResponse, error)
 	SyncEHRMSEmployees(domain.RequestContext, domain.EHRMSEmployeeSyncInput) (domain.EHRMSEmployeeSyncResponse, error)
 }
 
-// EHRMSEmployeeSyncOptions 定義 eHRMS 員工 sync 選項的資料結構。
-type EHRMSEmployeeSyncOptions struct {
-	Interval   time.Duration
-	Mode       string
-	TenantID   string
-	AccountID  string
-	RunOnStart bool
+// EHRMSSyncAttendanceService defines the attendance operation required by the unified eHRMS sync.
+type EHRMSSyncAttendanceService interface {
+	SyncEHRMSAttendance(domain.RequestContext, domain.EHRMSAttendanceSyncInput) (domain.EHRMSAttendanceSyncResponse, error)
 }
 
-// EHRMSEmployeeSyncScheduler 定義 eHRMS 員工 sync scheduler 的資料結構。
-type EHRMSEmployeeSyncScheduler struct {
-	service EHRMSEmployeeSyncService
-	logger  *slog.Logger
-	now     func() time.Time
+// EHRMSSyncOptions configures the unified eHRMS sync job.
+type EHRMSSyncOptions struct {
+	Mode      string
+	TenantID  string
+	AccountID string
 }
 
-// NewEHRMSEmployeeSyncScheduler 建立 eHRMS 員工 sync scheduler。
-func NewEHRMSEmployeeSyncScheduler(service EHRMSEmployeeSyncService, logger *slog.Logger) *EHRMSEmployeeSyncScheduler {
+// EHRMSSyncResult contains the result of every step in one unified run.
+type EHRMSSyncResult struct {
+	OrgUnits   domain.EHRMSOrgUnitSyncResponse    `json:"org_units"`
+	Employees  domain.EHRMSEmployeeSyncResponse   `json:"employees"`
+	Attendance domain.EHRMSAttendanceSyncResponse `json:"attendance"`
+}
+
+// EHRMSSyncScheduler runs org-unit, employee, and attendance synchronization as one ordered job.
+type EHRMSSyncScheduler struct {
+	hrService         EHRMSSyncHRService
+	attendanceService EHRMSSyncAttendanceService
+	logger            *slog.Logger
+	now               func() time.Time
+}
+
+// NewEHRMSSyncScheduler creates the unified eHRMS scheduler.
+func NewEHRMSSyncScheduler(hrService EHRMSSyncHRService, attendanceService EHRMSSyncAttendanceService, logger *slog.Logger) *EHRMSSyncScheduler {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &EHRMSEmployeeSyncScheduler{
-		service: service,
-		logger:  logger,
-		now:     time.Now,
+	return &EHRMSSyncScheduler{
+		hrService:         hrService,
+		attendanceService: attendanceService,
+		logger:            logger,
+		now:               time.Now,
 	}
 }
 
-// Run 執行背景工作主迴圈。
-func (s *EHRMSEmployeeSyncScheduler) Run(ctx context.Context, opts EHRMSEmployeeSyncOptions) {
-	opts = normalizeEHRMSEmployeeSyncOptions(opts)
-	if opts.RunOnStart {
-		s.syncAndLog(ctx, opts)
-	}
-	ticker := time.NewTicker(opts.Interval)
-	defer ticker.Stop()
+// Run executes once on startup, then at 08:00 and 20:00 UTC+8 every day.
+func (s *EHRMSSyncScheduler) Run(ctx context.Context, opts EHRMSSyncOptions) {
+	opts = normalizeEHRMSSyncOptions(opts)
+	s.syncAndLog(ctx, opts)
 	for {
+		nextRun := nextEHRMSSyncTime(s.now())
+		timer := time.NewTimer(time.Until(nextRun))
 		select {
 		case <-ctx.Done():
+			if !timer.Stop() {
+				<-timer.C
+			}
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			s.syncAndLog(ctx, opts)
 		}
 	}
 }
 
-// SyncOnce 同步 once。
-func (s *EHRMSEmployeeSyncScheduler) SyncOnce(ctx context.Context, opts EHRMSEmployeeSyncOptions) (domain.EHRMSEmployeeSyncResponse, error) {
-	opts = normalizeEHRMSEmployeeSyncOptions(opts)
-	if s == nil || s.service == nil {
-		return domain.EHRMSEmployeeSyncResponse{}, errors.New("eHRMS employee sync scheduler requires service")
+// SyncOnce runs org units, employees, and attendance sequentially.
+func (s *EHRMSSyncScheduler) SyncOnce(ctx context.Context, opts EHRMSSyncOptions) (EHRMSSyncResult, error) {
+	opts = normalizeEHRMSSyncOptions(opts)
+	if s == nil || s.hrService == nil || s.attendanceService == nil {
+		return EHRMSSyncResult{}, errors.New("eHRMS sync scheduler requires HR and attendance services")
 	}
 	if opts.TenantID == "" {
-		return domain.EHRMSEmployeeSyncResponse{}, errors.New("EHRMS_SYNC_TENANT_ID is required")
+		return EHRMSSyncResult{}, errors.New("EHRMS_SYNC_TENANT_ID is required")
 	}
 	if opts.AccountID == "" {
-		return domain.EHRMSEmployeeSyncResponse{}, errors.New("EHRMS_SYNC_ACCOUNT_ID is required")
+		return EHRMSSyncResult{}, errors.New("EHRMS_SYNC_ACCOUNT_ID is required")
 	}
 	requestID := "ehrms-sync-" + s.now().UTC().Format("20060102T150405Z")
-	return s.service.SyncEHRMSEmployees(domain.RequestContext{
+	requestContext := domain.RequestContext{
 		Context:   ctx,
 		TenantID:  opts.TenantID,
 		AccountID: opts.AccountID,
 		RequestID: requestID,
 		TraceID:   requestID,
-	}, domain.EHRMSEmployeeSyncInput{Mode: opts.Mode})
+	}
+	result := EHRMSSyncResult{}
+	var err error
+	result.OrgUnits, err = s.hrService.SyncEHRMSOrgUnits(requestContext)
+	if err != nil {
+		return result, err
+	}
+	result.Employees, err = s.hrService.SyncEHRMSEmployees(requestContext, domain.EHRMSEmployeeSyncInput{Mode: opts.Mode})
+	if err != nil {
+		return result, err
+	}
+	result.Attendance, err = s.attendanceService.SyncEHRMSAttendance(requestContext, domain.EHRMSAttendanceSyncInput{Mode: opts.Mode})
+	if err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
-// syncAndLog 同步 and log。
-func (s *EHRMSEmployeeSyncScheduler) syncAndLog(ctx context.Context, opts EHRMSEmployeeSyncOptions) {
+func (s *EHRMSSyncScheduler) syncAndLog(ctx context.Context, opts EHRMSSyncOptions) {
 	result, err := s.SyncOnce(ctx, opts)
 	if err != nil {
-		s.logger.WarnContext(ctx, "eHRMS employee sync failed", "error", err)
+		s.logger.WarnContext(ctx, "eHRMS sync failed", "error", err)
 		return
 	}
-	s.logger.InfoContext(ctx, "eHRMS employee sync completed",
-		"fetched", result.Fetched,
-		"created", result.Created,
-		"updated", result.Updated,
-		"skipped", result.Skipped,
-		"failed", result.Failed,
-		"departments_upserted", result.DepartmentsUpserted,
-		"positions_upserted", result.PositionsUpserted,
-		"mode", result.Mode,
+	s.logger.InfoContext(ctx, "eHRMS sync completed",
+		"org_units_upserted", result.OrgUnits.Upserted,
+		"employees_fetched", result.Employees.Fetched,
+		"employees_created", result.Employees.Created,
+		"employees_updated", result.Employees.Updated,
+		"attendance_fetched", result.Attendance.Fetched,
+		"attendance_created", result.Attendance.Created,
+		"attendance_updated", result.Attendance.Updated,
+		"leave_balances_upserted", result.Attendance.LeaveBalancesUpserted,
+		"leave_details_created", result.Attendance.LeaveDetailsCreated,
+		"leave_details_updated", result.Attendance.LeaveDetailsUpdated,
+		"mode", result.Employees.Mode,
+		"start", result.Attendance.Start,
 	)
 }
 
-// normalizeEHRMSEmployeeSyncOptions 正規化eHRMS 員工 sync 選項。
-func normalizeEHRMSEmployeeSyncOptions(opts EHRMSEmployeeSyncOptions) EHRMSEmployeeSyncOptions {
-	if opts.Interval <= 0 {
-		opts.Interval = defaultEHRMSEmployeeSyncInterval
-	}
+func normalizeEHRMSSyncOptions(opts EHRMSSyncOptions) EHRMSSyncOptions {
 	opts.Mode = strings.ToLower(strings.TrimSpace(opts.Mode))
 	if opts.Mode == "" {
 		opts.Mode = "upsert"
@@ -116,4 +149,15 @@ func normalizeEHRMSEmployeeSyncOptions(opts EHRMSEmployeeSyncOptions) EHRMSEmplo
 	opts.TenantID = strings.TrimSpace(opts.TenantID)
 	opts.AccountID = strings.TrimSpace(opts.AccountID)
 	return opts
+}
+
+func nextEHRMSSyncTime(now time.Time) time.Time {
+	localNow := now.In(ehrmsSyncLocation)
+	for _, hour := range []int{ehrmsSyncMorningHour, ehrmsSyncEveningHour} {
+		candidate := time.Date(localNow.Year(), localNow.Month(), localNow.Day(), hour, 0, 0, 0, ehrmsSyncLocation)
+		if candidate.After(localNow) {
+			return candidate
+		}
+	}
+	return time.Date(localNow.Year(), localNow.Month(), localNow.Day()+1, ehrmsSyncMorningHour, 0, 0, 0, ehrmsSyncLocation)
 }

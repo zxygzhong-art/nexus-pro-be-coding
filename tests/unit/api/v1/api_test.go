@@ -346,7 +346,7 @@ func TestWorkspaceManagementRejectsSelfScope(t *testing.T) {
 	now := time.Date(2026, 7, 2, 9, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
 	handler := newTestAPIForAccountNow("acct-employee", now, nil)
 
-	for _, path := range []string{"/v1/workspace/overview", "/v1/workspace/employees"} {
+	for _, path := range []string{"/v1/workspace/overview", "/v1/workspace/organization"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		rec := httptest.NewRecorder()
 		handler.ServeHTTP(rec, req)
@@ -370,7 +370,7 @@ func TestWorkspaceManagementRejectsSelfScope(t *testing.T) {
 // TestWorkspaceManagementAllowsTenantWideScope keeps the administrator path available.
 func TestWorkspaceManagementAllowsTenantWideScope(t *testing.T) {
 	handler := newTestAPI(true)
-	req := httptest.NewRequest(http.MethodGet, "/v1/workspace/employees", nil)
+	req := httptest.NewRequest(http.MethodGet, "/v1/workspace/overview", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
@@ -1048,30 +1048,6 @@ func TestSwaggerUIDisplaysOpenAPISpec(t *testing.T) {
 	}
 }
 
-// TestAuthzCheckReturnsTargetSchema 驗證授權 check returns target schema。
-func TestAuthzCheckReturnsTargetSchema(t *testing.T) {
-	handler := newTestAPI(true)
-	req := httptest.NewRequest(http.MethodPost, "/v1/authz/check", strings.NewReader(`{"application_code":"hr","resource_type":"employee","action":"export","resource_id":"emp-employee"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for authz check, got %d: %s", rec.Code, rec.Body.String())
-	}
-	result := decodeData[domain.CheckResult](t, rec.Body.Bytes())
-	if !result.Allowed || result.ApplicationCode != "hr" || result.ResourceType != "employee" || result.ResourceID != "emp-employee" {
-		t.Fatalf("unexpected authz result: %+v", result)
-	}
-	if result.RiskLevel != string(domain.RiskCritical) {
-		t.Fatalf("expected export check to retain critical audit risk, got %+v", result)
-	}
-	if len(result.MatchedBy) == 0 || len(result.PermissionSetIDs) == 0 {
-		t.Fatalf("expected matched sources and permission sets, got %+v", result)
-	}
-}
-
 // TestCreatePermissionSetAssignmentEndpointWritesAssignment 驗證權限集合指派 endpoint writes 指派。
 func TestCreatePermissionSetAssignmentEndpointWritesAssignment(t *testing.T) {
 	handler := newTestAPI(true)
@@ -1093,7 +1069,7 @@ func TestCreatePermissionSetAssignmentEndpointWritesAssignment(t *testing.T) {
 // TestReadJSONRejectsMultipleValues 驗證 JSON rejects multiple values。
 func TestReadJSONRejectsMultipleValues(t *testing.T) {
 	handler := newTestAPI(true)
-	req := httptest.NewRequest(http.MethodPost, "/v1/authz/check", strings.NewReader(`{"resource":"me","action":"read"} {}`))
+	req := httptest.NewRequest(http.MethodPost, "/v1/iam/user-groups", strings.NewReader(`{"name":"Finance Admin"} {}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 
@@ -1151,16 +1127,16 @@ func TestEHRMSEmployeeSyncRouteReachesServiceWithoutApprovalHeader(t *testing.T)
 	}
 }
 
-// TestAuditLogRouteAllowsGrantedRead 驗證稽覈列表依 read 權限直接放行。
-func TestAuditLogRouteAllowsGrantedRead(t *testing.T) {
+// TestRemovedAuditLogRouteReturnsNotFound verifies the retired global audit route stays unavailable.
+func TestRemovedAuditLogRouteReturnsNotFound(t *testing.T) {
 	handler := newTestAPI(true)
 	req := httptest.NewRequest(http.MethodGet, "/v1/audit-logs", nil)
 	rec := httptest.NewRecorder()
 
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for granted audit log read, got %d: %s", rec.Code, rec.Body.String())
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("expected 404 for removed audit log route, got %d: %s", rec.Code, rec.Body.String())
 	}
 }
 
@@ -1203,7 +1179,7 @@ func TestHRRouteForbiddenReasonCodes(t *testing.T) {
 		t.Fatalf("expected menu_denied reason code, got %+v", listErr)
 	}
 
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees", strings.NewReader(`{"name":"No Button","company_email":"no.button@example.com"}`))
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/org/units", strings.NewReader(`{"name":"No Button"}`))
 	createReq.Header.Set("Content-Type", "application/json")
 	createRec := httptest.NewRecorder()
 	handler.ServeHTTP(createRec, createReq)
@@ -1310,12 +1286,12 @@ func TestMeProjectsAssumedAccessWhenBoundaryExcludesMeRead(t *testing.T) {
 		t.Fatalf("expected canonical audit.logs menu key, got %+v", me.EffectiveMenuKeys)
 	}
 
-	auditReq := httptest.NewRequest(http.MethodGet, "/v1/audit-logs", nil)
+	auditReq := httptest.NewRequest(http.MethodGet, "/v1/workspace/audit-logs", nil)
 	auditReq.Header.Set("X-Assumable-Role-Session-ID", assumed.SessionID)
 	auditRec := httptest.NewRecorder()
 	handler.ServeHTTP(auditRec, auditReq)
 	if auditRec.Code != http.StatusOK {
-		t.Fatalf("expected legacy audit.log.read boundary to authorize the audit route, got %d", auditRec.Code)
+		t.Fatalf("expected audit.log.read boundary to authorize the workspace audit route, got %d", auditRec.Code)
 	}
 
 	invalidReq := httptest.NewRequest(http.MethodGet, "/v1/me", nil)
@@ -1350,22 +1326,6 @@ func TestCreateAssumableRoleRejectsMissingPermissionBoundary(t *testing.T) {
 	}
 	if payload.Error.Code != domain.ErrorCodeBadRequest || payload.Error.Message != "assumable role permission_boundary is required" {
 		t.Fatalf("unexpected missing-boundary error: %+v", payload.Error)
-	}
-}
-
-// TestBatchDeleteEmployeesReturnsMultiStatusOnRowFailure 驗證批次 delete 員工 returns multi 狀態 on 列 failure。
-func TestBatchDeleteEmployeesReturnsMultiStatusOnRowFailure(t *testing.T) {
-	handler := newTestAPI(true)
-	req := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/batch-delete", strings.NewReader(`{"employee_ids":["emp-employee","emp-missing"],"reason":"cleanup"}`))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusMultiStatus {
-		t.Fatalf("expected 207 for partial batch delete, got %d: %s", rec.Code, rec.Body.String())
-	}
-	result := decodeData[domain.BatchEmployeeResponse](t, rec.Body.Bytes())
-	if len(result.Results) != 2 || !result.Results[0].Success || result.Results[1].Success {
-		t.Fatalf("unexpected batch delete result: %+v", result)
 	}
 }
 
@@ -1469,320 +1429,6 @@ func TestEmployeeExportAuditUsesOpenTelemetryTraceID(t *testing.T) {
 	}
 	if !apiSpanEnded(spanRecorder, "service.authz.authorize") {
 		t.Fatalf("expected HR Core authz span, got %v", apiSpanNames(spanRecorder))
-	}
-}
-
-// TestEmployeeImportPreviewConfirmAndValidationErrors 驗證員工 import preview confirm and 驗證錯誤。
-func TestEmployeeImportPreviewConfirmAndValidationErrors(t *testing.T) {
-	handler := newTestAPI(true)
-	payload, _ := json.Marshal(map[string]string{
-		"filename": "employees.csv",
-		"content":  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\nE9001,Nina Lin,nina@example.com,ou-hq,Recruiter,全職,0911888999,在職,2026-06-01,\n",
-	})
-	previewReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/preview", strings.NewReader(string(payload)))
-	previewReq.Header.Set("Content-Type", "application/json")
-	previewRec := httptest.NewRecorder()
-
-	handler.ServeHTTP(previewRec, previewReq)
-
-	if previewRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for import preview, got %d: %s", previewRec.Code, previewRec.Body.String())
-	}
-	session := decodeData[domain.EmployeeImportSession](t, previewRec.Body.Bytes())
-	if session.ID == "" || session.Summary["valid"].(float64) != 1 {
-		t.Fatalf("unexpected preview session: %+v", session)
-	}
-
-	confirmReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/"+session.ID+"/confirm", strings.NewReader(`{"mode":"create"}`))
-	confirmReq.Header.Set("Content-Type", "application/json")
-	confirmRec := httptest.NewRecorder()
-	handler.ServeHTTP(confirmRec, confirmReq)
-	if confirmRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for import confirm, got %d: %s", confirmRec.Code, confirmRec.Body.String())
-	}
-
-	duplicatePreviewReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/preview", strings.NewReader(string(payload)))
-	duplicatePreviewReq.Header.Set("Content-Type", "application/json")
-	duplicatePreviewRec := httptest.NewRecorder()
-	handler.ServeHTTP(duplicatePreviewRec, duplicatePreviewReq)
-	if duplicatePreviewRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for duplicate import preview, got %d: %s", duplicatePreviewRec.Code, duplicatePreviewRec.Body.String())
-	}
-	duplicateSession := decodeData[domain.EmployeeImportSession](t, duplicatePreviewRec.Body.Bytes())
-	duplicateConfirmReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/"+duplicateSession.ID+"/confirm", strings.NewReader(`{"mode":"create"}`))
-	duplicateConfirmReq.Header.Set("Content-Type", "application/json")
-	duplicateConfirmRec := httptest.NewRecorder()
-	handler.ServeHTTP(duplicateConfirmRec, duplicateConfirmReq)
-	if duplicateConfirmRec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for duplicate import confirm, got %d: %s", duplicateConfirmRec.Code, duplicateConfirmRec.Body.String())
-	}
-	duplicateErr := decodeError(t, duplicateConfirmRec.Body.Bytes())
-	if duplicateErr.Code != domain.ErrorCodeFieldUnique || len(duplicateErr.RowErrors) == 0 || duplicateErr.RowErrors[0].RowNumber == 0 || len(duplicateErr.RowErrors[0].FieldErrors) == 0 {
-		t.Fatalf("expected row_number and field_errors for import error, got %+v", duplicateErr)
-	}
-
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees", strings.NewReader(`{}`))
-	createReq.Header.Set("Content-Type", "application/json")
-	createReq.Header.Set("X-Request-ID", "trace-test")
-	createRec := httptest.NewRecorder()
-	handler.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for invalid employee create, got %d: %s", createRec.Code, createRec.Body.String())
-	}
-	var errPayload struct {
-		Error struct {
-			Code        domain.ErrorCode    `json:"code"`
-			FieldErrors []domain.FieldError `json:"field_errors"`
-			TraceID     string              `json:"trace_id"`
-		} `json:"error"`
-	}
-	if err := json.Unmarshal(createRec.Body.Bytes(), &errPayload); err != nil {
-		t.Fatal(err)
-	}
-	if errPayload.Error.Code != domain.ErrorCodeFieldRequired || len(errPayload.Error.FieldErrors) == 0 || errPayload.Error.TraceID != "trace-test" {
-		t.Fatalf("expected validation error details, got %+v", errPayload)
-	}
-}
-
-// TestEmployeeImportPreviewRejectsOversizedMultipartBody 驗證員工 import preview rejects oversized multipart body。
-func TestEmployeeImportPreviewRejectsOversizedMultipartBody(t *testing.T) {
-	handler := newTestAPI(true)
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("file", "employees.csv")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := part.Write(bytes.Repeat([]byte("x"), 17<<20)); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	req := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/import/preview", body)
-	req.Header.Set("Content-Type", writer.FormDataContentType())
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for oversized multipart import, got %d: %s", rec.Code, rec.Body.String())
-	}
-	errPayload := decodeError(t, rec.Body.Bytes())
-	if errPayload.Code != domain.ErrorCodeInvalidMultipartForm {
-		t.Fatalf("expected invalid multipart form code for oversized multipart import, got %+v", errPayload)
-	}
-}
-
-// TestEmployeeCreateStatusAndDeleteContract 驗證員工 create 狀態 and delete contract。
-func TestEmployeeCreateStatusAndDeleteContract(t *testing.T) {
-	handler := newTestAPI(true)
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees", strings.NewReader(validEmployeeCreateJSON("Contract Person", "contract.person@example.com")))
-	createReq.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-
-	handler.ServeHTTP(rec, createReq)
-
-	if rec.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for employee create, got %d: %s", rec.Code, rec.Body.String())
-	}
-	created := decodeData[domain.EmployeeDetail](t, rec.Body.Bytes())
-	if created.EmployeeNo != "IKL001" || created.Category != "full_time" || created.EmploymentStatus != "onboarding" {
-		t.Fatalf("expected generated number and normalized fields, got %+v", created)
-	}
-	if created.Sections.BasicInfo.NationalID == "" || created.Sections.EmploymentInfo.OrgUnitID != "ou-hq" {
-		t.Fatalf("expected create response to include detail sections, got %+v", created.Sections)
-	}
-
-	statusReq := httptest.NewRequest(http.MethodPatch, "/v1/hr/employees/"+created.ID+"/status", strings.NewReader(`{"status":"試用中"}`))
-	statusReq.Header.Set("Content-Type", "application/json")
-	statusRec := httptest.NewRecorder()
-	handler.ServeHTTP(statusRec, statusReq)
-	if statusRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for status patch, got %d: %s", statusRec.Code, statusRec.Body.String())
-	}
-	updated := decodeData[domain.Employee](t, statusRec.Body.Bytes())
-	if updated.EmploymentStatus != "probation" {
-		t.Fatalf("expected normalized probation status, got %+v", updated)
-	}
-
-	resignReq := httptest.NewRequest(http.MethodPatch, "/v1/hr/employees/"+created.ID+"/status", strings.NewReader(`{"status":"resigned"}`))
-	resignReq.Header.Set("Content-Type", "application/json")
-	resignRec := httptest.NewRecorder()
-	handler.ServeHTTP(resignRec, resignReq)
-	if resignRec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 when direct status patch tries to resign, got %d: %s", resignRec.Code, resignRec.Body.String())
-	}
-
-	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/hr/employees/"+created.ID, nil)
-	deleteRec := httptest.NewRecorder()
-	handler.ServeHTTP(deleteRec, deleteReq)
-	if deleteRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for confirmed delete, got %d: %s", deleteRec.Code, deleteRec.Body.String())
-	}
-
-	listReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees?keyword=contract.person@example.com", nil)
-	listRec := httptest.NewRecorder()
-	handler.ServeHTTP(listRec, listReq)
-	if listRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for list after delete, got %d: %s", listRec.Code, listRec.Body.String())
-	}
-	page := decodeData[domain.PageResponse[domain.Employee]](t, listRec.Body.Bytes())
-	if page.Total != 0 || len(page.Items) != 0 {
-		t.Fatalf("expected soft-deleted employee to be hidden by default, got %+v", page)
-	}
-}
-
-// TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes 驗證員工 preview avatar 範本 and 流程覈準路由。
-func TestEmployeePreviewAvatarTemplateAndWorkflowApproveRoutes(t *testing.T) {
-	handler := newTestAPIWithFormApprovalWorkflows(true)
-
-	previewReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/preview", strings.NewReader(`{}`))
-	previewReq.Header.Set("Content-Type", "application/json")
-	previewRec := httptest.NewRecorder()
-	handler.ServeHTTP(previewRec, previewReq)
-	if previewRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for invalid employee preview response, got %d: %s", previewRec.Code, previewRec.Body.String())
-	}
-	preview := decodeData[domain.EmployeePreviewResponse](t, previewRec.Body.Bytes())
-	if preview.Valid || len(preview.FieldErrors) == 0 {
-		t.Fatalf("expected preview validation details, got %+v", preview)
-	}
-
-	createReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees", strings.NewReader(validEmployeeCreateJSON("Route Person", "route.person@example.com")))
-	createReq.Header.Set("Content-Type", "application/json")
-	createRec := httptest.NewRecorder()
-	handler.ServeHTTP(createRec, createReq)
-	if createRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for employee create, got %d: %s", createRec.Code, createRec.Body.String())
-	}
-	created := decodeData[domain.EmployeeDetail](t, createRec.Body.Bytes())
-
-	updatePreviewReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/"+created.ID+"/preview", strings.NewReader(`{"name":"Updated Route Person"}`))
-	updatePreviewReq.Header.Set("Content-Type", "application/json")
-	updatePreviewRec := httptest.NewRecorder()
-	handler.ServeHTTP(updatePreviewRec, updatePreviewReq)
-	if updatePreviewRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for employee update preview, got %d: %s", updatePreviewRec.Code, updatePreviewRec.Body.String())
-	}
-	updatePreview := decodeData[domain.EmployeePreviewResponse](t, updatePreviewRec.Body.Bytes())
-	if !updatePreview.Valid || updatePreview.Employee.Name != "Updated Route Person" || updatePreview.Diff["name"] == nil {
-		t.Fatalf("expected update preview diff, got %+v", updatePreview)
-	}
-
-	nonBasicUpdateReq := httptest.NewRequest(http.MethodPatch, "/v1/hr/employees/"+created.ID, strings.NewReader(`{"position":"Lead Engineer"}`))
-	nonBasicUpdateReq.Header.Set("Content-Type", "application/json")
-	nonBasicUpdateRec := httptest.NewRecorder()
-	handler.ServeHTTP(nonBasicUpdateRec, nonBasicUpdateReq)
-	if nonBasicUpdateRec.Code != http.StatusBadRequest || !strings.Contains(nonBasicUpdateRec.Body.String(), "basic_info_only") {
-		t.Fatalf("expected non-basic employee update rejection, got %d: %s", nonBasicUpdateRec.Code, nonBasicUpdateRec.Body.String())
-	}
-
-	templateReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/import/template?format=csv", nil)
-	templateRec := httptest.NewRecorder()
-	handler.ServeHTTP(templateRec, templateReq)
-	if templateRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for import template, got %d: %s", templateRec.Code, templateRec.Body.String())
-	}
-	if !strings.Contains(templateRec.Header().Get("Content-Type"), "text/csv") || !bytes.HasPrefix(templateRec.Body.Bytes(), []byte{0xEF, 0xBB, 0xBF}) {
-		t.Fatalf("expected csv template response with BOM, headers=%v body=%q", templateRec.Header(), templateRec.Body.String())
-	}
-	badTemplateReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/import/template?format=pdf", nil)
-	badTemplateRec := httptest.NewRecorder()
-	handler.ServeHTTP(badTemplateRec, badTemplateReq)
-	if badTemplateRec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for bad template format, got %d: %s", badTemplateRec.Code, badTemplateRec.Body.String())
-	}
-
-	avatarBody, avatarContentType := avatarMultipartBody(t)
-	avatarReq := httptest.NewRequest(http.MethodPost, "/v1/hr/employees/"+created.ID+"/avatar", avatarBody)
-	avatarReq.Header.Set("Content-Type", avatarContentType)
-	avatarRec := httptest.NewRecorder()
-	handler.ServeHTTP(avatarRec, avatarReq)
-	if avatarRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for avatar upload, got %d: %s", avatarRec.Code, avatarRec.Body.String())
-	}
-	withAvatar := decodeData[domain.Employee](t, avatarRec.Body.Bytes())
-	if got, ok := withAvatar.BasicInfo["avatar_object_key"].(string); !ok || !strings.HasPrefix(got, "employee-avatars/demo/"+created.ID+"/") {
-		t.Fatalf("expected avatar object key in response, got %+v", withAvatar.BasicInfo)
-	}
-	deleteAvatarReq := httptest.NewRequest(http.MethodDelete, "/v1/hr/employees/"+created.ID+"/avatar", nil)
-	deleteAvatarRec := httptest.NewRecorder()
-	handler.ServeHTTP(deleteAvatarRec, deleteAvatarReq)
-	if deleteAvatarRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for avatar delete, got %d: %s", deleteAvatarRec.Code, deleteAvatarRec.Body.String())
-	}
-	withoutAvatar := decodeData[domain.Employee](t, deleteAvatarRec.Body.Bytes())
-	if _, ok := withoutAvatar.BasicInfo["avatar_object_key"]; ok {
-		t.Fatalf("expected avatar metadata removed, got %+v", withoutAvatar.BasicInfo)
-	}
-
-	templateReqBody := `{"key":"approval-evidence","name":"Approval Evidence","schema":{"type":"object","properties":{"subject":{"type":"string"}},"workspace_design":{"stages":[{"id":"stage-admin","type":"approver","label":"審核","detail":"由管理員審核","config":{"account_ids":["acct-admin"]}}]}}}`
-	createTemplateReq := httptest.NewRequest(http.MethodPost, "/v1/forms/templates", strings.NewReader(templateReqBody))
-	createTemplateReq.Header.Set("Content-Type", "application/json")
-	createTemplateRec := httptest.NewRecorder()
-	handler.ServeHTTP(createTemplateRec, createTemplateReq)
-	if createTemplateRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for workflow template create, got %d: %s", createTemplateRec.Code, createTemplateRec.Body.String())
-	}
-
-	workflowApprovalPayload := `{"payload":{"application_code":"hr","resource_type":"employee","action":"export","filters":{"employment_status":"active"},"subject":"approval evidence test"}}`
-	submitReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/approval-evidence/submit", strings.NewReader(workflowApprovalPayload))
-	submitReq.Header.Set("Content-Type", "application/json")
-	submitRec := httptest.NewRecorder()
-	handler.ServeHTTP(submitRec, submitReq)
-	if submitRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for workflow form submit, got %d: %s", submitRec.Code, submitRec.Body.String())
-	}
-	form := decodeData[domain.FormInstance](t, submitRec.Body.Bytes())
-	draftReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/drafts", strings.NewReader(`{"template_key":"approval-evidence","payload":{"application_code":"hr","resource_type":"employee","action":"export","subject":"draft approval evidence test"}}`))
-	draftReq.Header.Set("Content-Type", "application/json")
-	draftRec := httptest.NewRecorder()
-	handler.ServeHTTP(draftRec, draftReq)
-	if draftRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for workflow draft create, got %d: %s", draftRec.Code, draftRec.Body.String())
-	}
-	draft := decodeData[domain.FormInstance](t, draftRec.Body.Bytes())
-	submitDraftReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/"+draft.ID+"/submit", strings.NewReader(workflowApprovalPayload))
-	submitDraftReq.Header.Set("Content-Type", "application/json")
-	submitDraftRec := httptest.NewRecorder()
-	handler.ServeHTTP(submitDraftRec, submitDraftReq)
-	if submitDraftRec.Code != http.StatusCreated {
-		t.Fatalf("expected 201 for workflow draft submit, got %d: %s", submitDraftRec.Code, submitDraftRec.Body.String())
-	}
-	submittedDraft := decodeData[domain.FormInstance](t, submitDraftRec.Body.Bytes())
-	if submittedDraft.ID != draft.ID || submittedDraft.Status != "in_review" {
-		t.Fatalf("expected draft id to be submitted in place, draft=%s got %+v", draft.ID, submittedDraft)
-	}
-	approveReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/"+form.ID+"/approve", strings.NewReader(`{"reason":"frontend approval"}`))
-	approveReq.Header.Set("Content-Type", "application/json")
-	approveRec := httptest.NewRecorder()
-	handler.ServeHTTP(approveRec, approveReq)
-	if approveRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for workflow approve, got %d: %s", approveRec.Code, approveRec.Body.String())
-	}
-	approved := decodeData[domain.FormInstance](t, approveRec.Body.Bytes())
-	if approved.Status != "approved" || approved.ApprovedBy != "acct-admin" {
-		t.Fatalf("expected approved form instance, got %+v", approved)
-	}
-	review, _ := approved.Payload["_review"].(map[string]any)
-	if review["type"] != "approve" || review["comment"] != "frontend approval" {
-		t.Fatalf("expected approve reason in workflow review payload, got %+v", approved.Payload)
-	}
-
-	forgedApproveReq := httptest.NewRequest(http.MethodPost, "/v1/workflows/forms/"+form.ID+"/approve", strings.NewReader(`{"approved_by":"acct-other"}`))
-	forgedApproveReq.Header.Set("Content-Type", "application/json")
-	forgedApproveRec := httptest.NewRecorder()
-	handler.ServeHTTP(forgedApproveRec, forgedApproveReq)
-	if forgedApproveRec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400 for forged approved_by, got %d: %s", forgedApproveRec.Code, forgedApproveRec.Body.String())
-	}
-
-	exportReq := httptest.NewRequest(http.MethodGet, "/v1/hr/employees/export?employment_status=active", nil)
-	exportRec := httptest.NewRecorder()
-	handler.ServeHTTP(exportRec, exportReq)
-	if exportRec.Code != http.StatusOK {
-		t.Fatalf("expected 200 for permission-authorized export, got %d: %s", exportRec.Code, exportRec.Body.String())
 	}
 }
 

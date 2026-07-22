@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"nexus-pro-api/internal/domain"
 	"nexus-pro-api/internal/utils"
 	"sort"
 	"strings"
@@ -30,13 +31,11 @@ func workspaceHolidayName(_ time.Time) *string {
 	return nil
 }
 
-// workspaceLeaveLegend projects enabled system leave types for workspace reports.
+// workspaceLeaveLegend includes inactive historical leave types so old leave
+// facts remain interpretable after administrators disable a catalog item.
 func workspaceLeaveLegend(leaveTypes []LeaveType) []WorkspaceLeaveLegendItem {
 	legend := make([]WorkspaceLeaveLegendItem, 0, len(leaveTypes))
 	for _, leaveType := range leaveTypes {
-		if !leaveType.Enabled {
-			continue
-		}
 		code := normalizeLeaveTypeCode(leaveType.Code)
 		name := firstNonEmptyString(leaveType.NameZH, leaveType.NameEN, code)
 		if code == "" || name == "" {
@@ -118,75 +117,64 @@ func workspaceAuditDetail(log AuditLog) string {
 	return utils.FirstNonEmpty(sanitizeAuditText(log.Result), sanitizeAuditText(log.TraceID))
 }
 
-// workspaceSummaryLeaveCells 直接投影 eHRMS 每日假勤事實，避免從請假區間推算日期或分攤時數。
-func workspaceSummaryLeaveCells(summaries []AttendanceDailySummary, legend []WorkspaceLeaveLegendItem) map[string]map[string]workspaceLeaveCell {
+// workspaceEffectiveLeaveCells projects the reconciled leave-case set once.
+// Source-specific daily summaries and approved requests are deliberately not
+// merged here, eliminating the former max-hours deduplication heuristic.
+func workspaceEffectiveLeaveCells(leaves []attendanceEffectiveLeave, workTimes map[string]AttendancePolicyWorkTime, leaveTypes []LeaveType, legend []WorkspaceLeaveLegendItem, start, end time.Time) map[string]map[string]workspaceLeaveCell {
 	out := map[string]map[string]workspaceLeaveCell{}
-	for _, summary := range summaries {
-		if summary.EmployeeID == "" || summary.WorkDate == "" {
+	leavesByEmployee := map[string][]attendanceEffectiveLeave{}
+	for _, leave := range leaves {
+		if leave.EmployeeID == "" || leave.FactStatus != attendanceLeaveFactApproved {
 			continue
 		}
-		cell := workspaceLeaveCell{}
-		if summary.LeaveCounted && summary.LeaveHours > 0 {
-			if leaveType, ok := workspacePolicyLeaveType(summary.LeaveType, legend); ok {
-				cell.Code, cell.Label = leaveType.Code, leaveType.Label
-				cell.Hours = summary.LeaveHours
-			}
-		}
-		if summary.Leave2Counted && summary.Leave2Hours > 0 {
-			if leaveType, ok := workspacePolicyLeaveType(summary.Leave2Type, legend); ok {
-				if cell.Code == "" {
-					cell.Code, cell.Label = leaveType.Code, leaveType.Label
-				}
-				cell.Hours += summary.Leave2Hours
-			}
-		}
-		if cell.Hours <= 0 {
-			continue
-		}
-		if out[summary.EmployeeID] == nil {
-			out[summary.EmployeeID] = map[string]workspaceLeaveCell{}
-		}
-		out[summary.EmployeeID][summary.WorkDate] = cell
+		leavesByEmployee[leave.EmployeeID] = append(leavesByEmployee[leave.EmployeeID], leave)
 	}
-	return out
-}
-
-// workspaceMergeApprovedLeaveCells merges local approved leave without double-counting an eHRMS daily fact.
-func workspaceMergeApprovedLeaveCells(existing map[string]map[string]workspaceLeaveCell, leaves []LeaveRequest, workTime AttendancePolicyWorkTime, legend []WorkspaceLeaveLegendItem, start, end time.Time) map[string]map[string]workspaceLeaveCell {
 	for day := start; day.Before(end); day = day.AddDate(0, 0, 1) {
 		if day.Weekday() == time.Saturday || day.Weekday() == time.Sunday {
 			continue
 		}
 		date := day.Format(time.DateOnly)
-		schedule, breaks := attendanceScheduleIntervals(date, workTime)
-		for _, leave := range leaves {
-			if leave.EmployeeID == "" || !strings.EqualFold(strings.TrimSpace(leave.Status), "approved") {
-				continue
-			}
-			leaveType, ok := workspacePolicyLeaveType(leave.LeaveType, legend)
-			if !ok {
-				continue
-			}
-			approved, _ := attendanceLeaveIntervals([]LeaveRequest{leave}, schedule, breaks)
+		schedule, breaks := attendanceScheduleIntervals(date, workTimes[date])
+		for employeeID, employeeLeaves := range leavesByEmployee {
+			approved, _ := attendanceEffectiveLeaveIntervals(employeeLeaves, schedule, breaks)
 			hours := float64(intervalMinutes(approved)) / 60
 			if hours <= 0 {
 				continue
 			}
-			if existing[leave.EmployeeID] == nil {
-				existing[leave.EmployeeID] = map[string]workspaceLeaveCell{}
+			leaveType, ok := workspaceEffectiveLeaveType(employeeLeaves, schedule, breaks, leaveTypes, legend)
+			if !ok {
+				continue
 			}
-			cell := existing[leave.EmployeeID][date]
-			if cell.Code == "" {
-				cell.Code, cell.Label = leaveType.Code, leaveType.Label
+			if out[employeeID] == nil {
+				out[employeeID] = map[string]workspaceLeaveCell{}
 			}
-			// eHRMS and local workflow can describe the same leave, so use the larger daily fact.
-			if hours > cell.Hours {
-				cell.Hours = hours
-			}
-			existing[leave.EmployeeID][date] = cell
+			out[employeeID][date] = workspaceLeaveCell{Code: leaveType.Code, Label: leaveType.Label, Hours: hours}
 		}
 	}
-	return existing
+	return out
+}
+
+func workspaceEffectiveLeaveType(leaves []attendanceEffectiveLeave, schedule, breaks []attendanceTimeInterval, leaveTypes []LeaveType, legend []WorkspaceLeaveLegendItem) (WorkspaceLeaveLegendItem, bool) {
+	for _, leave := range leaves {
+		if leave.FactStatus != attendanceLeaveFactApproved {
+			continue
+		}
+		approved, _ := attendanceEffectiveLeaveIntervals([]attendanceEffectiveLeave{leave}, schedule, breaks)
+		if intervalMinutes(approved) <= 0 {
+			continue
+		}
+		raw := leave.LeaveType
+		for _, leaveType := range leaveTypes {
+			if leave.LeaveTypeID != "" && leaveType.ID == leave.LeaveTypeID {
+				raw = leaveType.Code
+				break
+			}
+		}
+		if item, ok := workspacePolicyLeaveType(raw, legend); ok {
+			return item, true
+		}
+	}
+	return WorkspaceLeaveLegendItem{}, false
 }
 
 // workspaceOvertimeCells 處理工作區加班儲存格。僅累計覈準加班的每日時數。
@@ -241,26 +229,9 @@ func workspaceRoundHours(value float64) float64 {
 	return math.Round(math.Max(0, value)*100) / 100
 }
 
-// workspaceAttendanceEvidenceCells prefers effective local punches for actual
-// work while retaining eHRMS daily/shift ceilings for the same employee-day.
-func workspaceAttendanceEvidenceCells(clocks []AttendanceClockRecord, summaries []AttendanceDailySummary, leaves []LeaveRequest, workTime AttendancePolicyWorkTime) map[string]map[string]workspaceAttendanceEvidence {
-	recordsByEmployeeDate := map[string]map[string][]AttendanceClockRecord{}
-	for _, record := range clocks {
-		if record.EmployeeID == "" || record.WorkDate == "" || record.Voided || !strings.EqualFold(record.RecordStatus, clockRecordStatusAccepted) {
-			continue
-		}
-		if recordsByEmployeeDate[record.EmployeeID] == nil {
-			recordsByEmployeeDate[record.EmployeeID] = map[string][]AttendanceClockRecord{}
-		}
-		recordsByEmployeeDate[record.EmployeeID][record.WorkDate] = append(recordsByEmployeeDate[record.EmployeeID][record.WorkDate], record)
-	}
-	leavesByEmployee := map[string][]LeaveRequest{}
-	for _, leave := range leaves {
-		if leave.EmployeeID != "" {
-			leavesByEmployee[leave.EmployeeID] = append(leavesByEmployee[leave.EmployeeID], leave)
-		}
-	}
-
+// workspaceAttendanceEvidenceCells reads the shared persisted projections for
+// local clock evidence while retaining eHRMS daily/shift ceilings as fallback.
+func workspaceAttendanceEvidenceCells(summaries []AttendanceDailySummary, projections map[string]map[string]domain.AttendanceDayProjection) map[string]map[string]workspaceAttendanceEvidence {
 	out := map[string]map[string]workspaceAttendanceEvidence{}
 	for _, summary := range summaries {
 		if summary.EmployeeID == "" || summary.WorkDate == "" {
@@ -284,19 +255,18 @@ func workspaceAttendanceEvidenceCells(clocks []AttendanceClockRecord, summaries 
 			Source:         "ehrms",
 		}
 	}
-	for employeeID, recordsByDate := range recordsByEmployeeDate {
+	for employeeID, projectionsByDate := range projections {
 		if out[employeeID] == nil {
 			out[employeeID] = map[string]workspaceAttendanceEvidence{}
 		}
-		for workDate, records := range recordsByDate {
-			asOf := records[0].ClockedAt
-			for _, record := range records[1:] {
-				if record.ClockedAt.After(asOf) {
-					asOf = record.ClockedAt
-				}
+		for workDate, projection := range projectionsByDate {
+			if projection.PunchCount == 0 {
+				continue
 			}
-			projection := ProjectAttendanceDay(records, leavesByEmployee[employeeID], workDate, workTime, asOf)
-			actualHours := math.Max(0, float64(projection.WorkedMinutes)/60)
+			actualHours := 0.0
+			if projection.ClockInRecordID != "" && projection.ClockOutRecordID != "" {
+				actualHours = math.Max(0, float64(projection.WorkedMinutes)/60)
+			}
 			evidence := out[employeeID][workDate]
 			if evidence.MaxHours <= 0 {
 				evidence.MaxHours = workspaceDayHours

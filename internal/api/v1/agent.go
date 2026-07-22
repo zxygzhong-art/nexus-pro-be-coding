@@ -28,25 +28,17 @@ type AgentCtrl struct {
 // RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c AgentCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	agents := router.Group("/agents")
-	agents.GET("/runs", c.routes.Handle("agent.run", "read", c.listAgentRuns))
-	agents.POST("/runs", c.routes.Handle("agent.run", "create", c.createAgentRun))
 	agents.POST("/chat", c.routes.Handle("agent.run", "create", c.chatAgent))
 	agents.POST("/confirmations/:id/execute", c.routes.Handle("agent.run", "create", c.executeAgentConfirmation, PathParam(PathParamID)))
 	agents.GET("/sessions", c.routes.Handle("agent.run", "read", c.listAgentSessions))
 	agents.POST("/sessions", c.routes.Handle("agent.run", "create", c.createAgentSession))
-	agents.GET("/sessions/:id", c.routes.Handle("agent.run", "read", c.getAgentSession, ResourceID(PathParamID)))
-	agents.PATCH("/sessions/:id", c.routes.Handle("agent.run", "update", c.updateAgentSession, ResourceID(PathParamID)))
 	agents.POST("/sessions/:id/clear-context", c.routes.Handle("agent.run", "create", c.clearAgentSessionContext, ResourceID(PathParamID)))
 	agents.DELETE("/sessions/:id", c.routes.Handle("agent.run", "delete", c.deleteAgentSession, ResourceID(PathParamID)))
 	agents.GET("/sessions/:id/messages", c.routes.Handle("agent.run", "read", c.listAgentSessionMessages, ResourceID(PathParamID)))
-	agents.GET("/sessions/:id/files", c.routes.Handle("agent.run", "read", c.listAgentSessionFiles, ResourceID(PathParamID)))
 	agents.POST("/sessions/:id/files", c.routes.Handle("agent.run", "create", c.uploadAgentSessionFile, ResourceID(PathParamID)))
 	agents.GET("/sessions/:id/files/:file_id", c.routes.Handle("agent.run", "read", c.downloadAgentSessionFile, ResourceID(PathParamID), PathParam(pathParamAgentFileID)))
 	agents.DELETE("/sessions/:id/files/:file_id", c.routes.Handle("agent.run", "create", c.deleteAgentSessionFile, ResourceID(PathParamID), PathParam(pathParamAgentFileID)))
 	agents.GET("/memories", c.routes.Handle("agent.run", "read", c.listAgentMemories))
-	agents.POST("/memories", c.routes.Handle("agent.run", "create", c.createAgentMemory))
-	agents.PATCH("/memories/:id", c.routes.Handle("agent.run", "update", c.updateAgentMemory, ResourceID(PathParamID)))
-	agents.DELETE("/memories/:id", c.routes.Handle("agent.run", "delete", c.deleteAgentMemory, ResourceID(PathParamID)))
 }
 
 // executeAgentConfirmation 執行使用者在 Agent 卡片上明確確認的一次性操作。
@@ -60,34 +52,6 @@ func (c AgentCtrl) executeAgentConfirmation(w http.ResponseWriter, r *http.Reque
 		return err
 	}
 	writeJSON(w, http.StatusOK, result)
-	return nil
-}
-
-// listAgentRuns 處理 agent 執行紀錄的 HTTP 請求。
-func (c AgentCtrl) listAgentRuns(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	page, err := pageRequestFromRequest(r)
-	if err != nil {
-		return err
-	}
-	items, err := c.svc.ListRunPage(ctx, page)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, items)
-	return nil
-}
-
-// createAgentRun 處理 agent 執行的 HTTP 請求。
-func (c AgentCtrl) createAgentRun(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.CreateAgentRunInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.CreateRun(ctx, input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusCreated, item)
 	return nil
 }
 
@@ -123,30 +87,6 @@ func (c AgentCtrl) createAgentSession(w http.ResponseWriter, r *http.Request, ct
 		return err
 	}
 	writeJSON(w, http.StatusCreated, item)
-	return nil
-}
-
-// getAgentSession 處理取得 agent 會話的 HTTP 請求。
-func (c AgentCtrl) getAgentSession(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	item, err := c.svc.GetSession(ctx, r.PathValue(PathParamID))
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// updateAgentSession 處理更新 agent 會話的 HTTP 請求。
-func (c AgentCtrl) updateAgentSession(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.UpdateAgentSessionInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.UpdateSession(ctx, r.PathValue(PathParamID), input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 
@@ -200,44 +140,6 @@ func (c AgentCtrl) listAgentMemories(w http.ResponseWriter, r *http.Request, ctx
 		return err
 	}
 	writeJSON(w, http.StatusOK, items)
-	return nil
-}
-
-// createAgentMemory 處理建立 agent 記憶的 HTTP 請求。
-func (c AgentCtrl) createAgentMemory(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.CreateAgentMemoryInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.CreateMemory(ctx, input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusCreated, item)
-	return nil
-}
-
-// updateAgentMemory 處理更新 agent 記憶的 HTTP 請求。
-func (c AgentCtrl) updateAgentMemory(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.UpdateAgentMemoryInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.UpdateMemory(ctx, r.PathValue(PathParamID), input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// deleteAgentMemory 處理刪除 agent 記憶的 HTTP 請求。
-func (c AgentCtrl) deleteAgentMemory(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	item, err := c.svc.DeleteMemory(ctx, r.PathValue(PathParamID))
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 
@@ -316,16 +218,6 @@ func (c AgentCtrl) uploadAgentSessionFile(w http.ResponseWriter, r *http.Request
 		return err
 	}
 	writeJSON(w, http.StatusCreated, item)
-	return nil
-}
-
-// listAgentSessionFiles lists files visible in the current context version.
-func (c AgentCtrl) listAgentSessionFiles(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	items, err := c.svc.ListSessionFiles(ctx, r.PathValue(PathParamID))
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, domain.AgentSessionFileListResponse{Items: items, Total: len(items)})
 	return nil
 }
 

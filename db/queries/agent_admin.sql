@@ -1,264 +1,1020 @@
+-- Agent v2 administration persistence. Legacy query names are retained as
+-- compatibility projections while all writes target the v2 aggregates.
+
 -- name: UpsertAgentModel :one
-INSERT INTO agent_models (
-    id, tenant_id, name, provider, model_name, litellm_model,
-    api_base_url, api_key_ciphertext, api_key_preview, rate_limit_rpm,
-    status, timeout_seconds,
-    monthly_quota, used_quota, last_tested_at, last_test_status,
-    last_test_message, sync_status, last_synced_at, last_sync_error,
-    synced_config_hash, created_at, updated_at
-) VALUES (
-    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(name), sqlc.arg(provider),
-    sqlc.arg(model_name), sqlc.arg(litellm_model), sqlc.arg(api_base_url),
-    sqlc.arg(api_key_ciphertext), sqlc.arg(api_key_preview), sqlc.arg(rate_limit_rpm), sqlc.arg(status),
-    sqlc.arg(timeout_seconds),
-    sqlc.arg(monthly_quota), sqlc.arg(used_quota), sqlc.arg(last_tested_at),
-    sqlc.arg(last_test_status), sqlc.arg(last_test_message),
-    sqlc.arg(sync_status), sqlc.arg(last_synced_at), sqlc.arg(last_sync_error),
-    sqlc.arg(synced_config_hash),
-    sqlc.arg(created_at), sqlc.arg(updated_at)
+WITH upserted_secret AS (
+    INSERT INTO credential_secrets (
+        id, tenant_id, name, secret_type, ciphertext, preview, status,
+        created_by_account_id, created_at, updated_at, revoked_at
+    )
+    SELECT
+        COALESCE(NULLIF(sqlc.arg(credential_secret_id)::text, ''), sqlc.arg(id)::text || ':credential'), sqlc.arg(tenant_id),
+        sqlc.arg(name)::text || ' API key', 'api_key',
+        sqlc.arg(api_key_ciphertext), sqlc.arg(api_key_preview), 'active',
+        NULL, sqlc.arg(created_at), sqlc.arg(updated_at), NULL
+    WHERE sqlc.arg(api_key_ciphertext)::text <> ''
+    ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        ciphertext = EXCLUDED.ciphertext,
+        preview = EXCLUDED.preview,
+        status = 'active',
+        updated_at = EXCLUDED.updated_at,
+        revoked_at = NULL
+    WHERE credential_secrets.tenant_id = EXCLUDED.tenant_id
+    RETURNING id
+), upserted_connection AS (
+    INSERT INTO model_connections (
+        id, tenant_id, name, provider, upstream_model, api_base_url,
+        credential_secret_id, rate_limit_rpm, timeout_ms, status,
+        created_by_account_id, updated_by_account_id,
+        created_at, updated_at, archived_at
+    ) VALUES (
+        sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(name), sqlc.arg(provider),
+        COALESCE(NULLIF(sqlc.arg(litellm_model)::text, ''), sqlc.arg(model_name)),
+        sqlc.arg(api_base_url),
+        CASE WHEN sqlc.arg(api_key_ciphertext)::text = '' THEN NULL ELSE COALESCE(NULLIF(sqlc.arg(credential_secret_id)::text, ''), sqlc.arg(id)::text || ':credential') END,
+        sqlc.arg(rate_limit_rpm), GREATEST(sqlc.arg(timeout_seconds)::int, 1) * 1000,
+        sqlc.arg(status), NULL, NULL,
+        sqlc.arg(created_at), sqlc.arg(updated_at), NULL
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name,
+        provider = EXCLUDED.provider,
+        upstream_model = EXCLUDED.upstream_model,
+        api_base_url = EXCLUDED.api_base_url,
+        credential_secret_id = COALESCE(EXCLUDED.credential_secret_id, model_connections.credential_secret_id),
+        rate_limit_rpm = EXCLUDED.rate_limit_rpm,
+        timeout_ms = EXCLUDED.timeout_ms,
+        status = EXCLUDED.status,
+        updated_at = EXCLUDED.updated_at,
+        archived_at = NULL
+    WHERE model_connections.tenant_id = EXCLUDED.tenant_id
+    RETURNING *
+), upserted_state AS (
+    INSERT INTO model_connection_state (
+        tenant_id, model_connection_id, sync_status, synced_config_checksum,
+        last_synced_at, last_sync_error, last_tested_at, last_test_status,
+        last_test_message, updated_at
+    )
+    SELECT
+        tenant_id, id, sqlc.arg(sync_status), sqlc.arg(synced_config_hash),
+        sqlc.arg(last_synced_at), sqlc.arg(last_sync_error),
+        sqlc.arg(last_tested_at), sqlc.arg(last_test_status),
+        sqlc.arg(last_test_message), sqlc.arg(updated_at)
+    FROM upserted_connection
+    ON CONFLICT (tenant_id, model_connection_id) DO UPDATE SET
+        sync_status = EXCLUDED.sync_status,
+        synced_config_checksum = EXCLUDED.synced_config_checksum,
+        last_synced_at = EXCLUDED.last_synced_at,
+        last_sync_error = EXCLUDED.last_sync_error,
+        last_tested_at = EXCLUDED.last_tested_at,
+        last_test_status = EXCLUDED.last_test_status,
+        last_test_message = EXCLUDED.last_test_message,
+        updated_at = EXCLUDED.updated_at
+    RETURNING *
 )
-ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    name = EXCLUDED.name,
-    provider = EXCLUDED.provider,
-    model_name = EXCLUDED.model_name,
-    litellm_model = EXCLUDED.litellm_model,
-    api_base_url = EXCLUDED.api_base_url,
-    api_key_ciphertext = EXCLUDED.api_key_ciphertext,
-    api_key_preview = EXCLUDED.api_key_preview,
-    rate_limit_rpm = EXCLUDED.rate_limit_rpm,
-    status = EXCLUDED.status,
-    timeout_seconds = EXCLUDED.timeout_seconds,
-    monthly_quota = EXCLUDED.monthly_quota,
-    used_quota = EXCLUDED.used_quota,
-    last_tested_at = EXCLUDED.last_tested_at,
-    last_test_status = EXCLUDED.last_test_status,
-    last_test_message = EXCLUDED.last_test_message,
-    sync_status = EXCLUDED.sync_status,
-    last_synced_at = EXCLUDED.last_synced_at,
-    last_sync_error = EXCLUDED.last_sync_error,
-    synced_config_hash = EXCLUDED.synced_config_hash,
-    created_at = EXCLUDED.created_at,
-    updated_at = EXCLUDED.updated_at
-RETURNING *;
+SELECT
+    connections.id, connections.tenant_id, connections.name, connections.provider,
+    connections.upstream_model AS model_name,
+    connections.upstream_model AS litellm_model,
+    connections.api_base_url,
+    COALESCE(secrets.ciphertext, '')::text AS api_key_ciphertext,
+    COALESCE(secrets.preview, '')::text AS api_key_preview,
+    connections.credential_secret_id,
+    connections.rate_limit_rpm,
+    CASE WHEN connections.status = 'archived' THEN 'disabled' ELSE connections.status END::text AS status,
+    GREATEST(connections.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    0::bigint AS monthly_quota,
+    0::bigint AS used_quota,
+    state.last_tested_at, state.last_test_status, state.last_test_message,
+    state.sync_status, state.last_synced_at, state.last_sync_error,
+    state.synced_config_checksum AS synced_config_hash,
+    connections.created_at, connections.updated_at
+FROM upserted_connection connections
+JOIN upserted_state state
+  ON state.tenant_id = connections.tenant_id
+ AND state.model_connection_id = connections.id
+LEFT JOIN credential_secrets secrets
+  ON secrets.tenant_id = connections.tenant_id
+ AND secrets.id = connections.credential_secret_id
+ AND secrets.status = 'active';
 
 -- name: GetAgentModel :one
-SELECT * FROM agent_models
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id = sqlc.arg(id);
+SELECT
+    connections.id, connections.tenant_id, connections.name, connections.provider,
+    connections.upstream_model AS model_name, connections.upstream_model AS litellm_model,
+    connections.api_base_url,
+    COALESCE(secrets.ciphertext, '')::text AS api_key_ciphertext,
+    COALESCE(secrets.preview, '')::text AS api_key_preview,
+    connections.credential_secret_id,
+    connections.rate_limit_rpm,
+    CASE WHEN connections.status = 'archived' THEN 'disabled' ELSE connections.status END::text AS status,
+    GREATEST(connections.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    0::bigint AS monthly_quota, 0::bigint AS used_quota,
+    state.last_tested_at, state.last_test_status, state.last_test_message,
+    state.sync_status, state.last_synced_at, state.last_sync_error,
+    state.synced_config_checksum AS synced_config_hash,
+    connections.created_at, connections.updated_at
+FROM model_connections connections
+JOIN model_connection_state state
+  ON state.tenant_id = connections.tenant_id AND state.model_connection_id = connections.id
+LEFT JOIN credential_secrets secrets
+  ON secrets.tenant_id = connections.tenant_id AND secrets.id = connections.credential_secret_id AND secrets.status = 'active'
+WHERE connections.tenant_id = sqlc.arg(tenant_id)
+  AND connections.id = sqlc.arg(id);
 
 -- name: ListAgentModels :many
-SELECT * FROM agent_models
-WHERE tenant_id = sqlc.arg(tenant_id)
-ORDER BY updated_at DESC, id ASC;
+SELECT
+    connections.id, connections.tenant_id, connections.name, connections.provider,
+    connections.upstream_model AS model_name, connections.upstream_model AS litellm_model,
+    connections.api_base_url,
+    COALESCE(secrets.ciphertext, '')::text AS api_key_ciphertext,
+    COALESCE(secrets.preview, '')::text AS api_key_preview,
+    connections.credential_secret_id,
+    connections.rate_limit_rpm,
+    CASE WHEN connections.status = 'archived' THEN 'disabled' ELSE connections.status END::text AS status,
+    GREATEST(connections.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    0::bigint AS monthly_quota, 0::bigint AS used_quota,
+    state.last_tested_at, state.last_test_status, state.last_test_message,
+    state.sync_status, state.last_synced_at, state.last_sync_error,
+    state.synced_config_checksum AS synced_config_hash,
+    connections.created_at, connections.updated_at
+FROM model_connections connections
+JOIN model_connection_state state
+  ON state.tenant_id = connections.tenant_id AND state.model_connection_id = connections.id
+LEFT JOIN credential_secrets secrets
+  ON secrets.tenant_id = connections.tenant_id AND secrets.id = connections.credential_secret_id AND secrets.status = 'active'
+WHERE connections.tenant_id = sqlc.arg(tenant_id)
+  AND connections.status <> 'archived'
+ORDER BY connections.updated_at DESC, connections.id ASC;
 
 -- name: DeleteAgentModel :one
-DELETE FROM agent_models
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id = sqlc.arg(id)
-RETURNING *;
+WITH archived AS (
+    UPDATE model_connections
+    SET status = 'archived', archived_at = COALESCE(archived_at, now()), updated_at = GREATEST(updated_at, now())
+    WHERE model_connections.tenant_id = sqlc.arg(tenant_id) AND model_connections.id = sqlc.arg(id)
+    RETURNING *
+)
+SELECT
+    archived.id, archived.tenant_id, archived.name, archived.provider,
+    archived.upstream_model AS model_name, archived.upstream_model AS litellm_model,
+    archived.api_base_url,
+    COALESCE(secrets.ciphertext, '')::text AS api_key_ciphertext,
+    COALESCE(secrets.preview, '')::text AS api_key_preview,
+    archived.credential_secret_id,
+    archived.rate_limit_rpm, 'disabled'::text AS status,
+    GREATEST(archived.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    0::bigint AS monthly_quota, 0::bigint AS used_quota,
+    state.last_tested_at, state.last_test_status, state.last_test_message,
+    state.sync_status, state.last_synced_at, state.last_sync_error,
+    state.synced_config_checksum AS synced_config_hash,
+    archived.created_at, archived.updated_at
+FROM archived
+JOIN model_connection_state state
+  ON state.tenant_id = archived.tenant_id AND state.model_connection_id = archived.id
+LEFT JOIN credential_secrets secrets
+  ON secrets.tenant_id = archived.tenant_id AND secrets.id = archived.credential_secret_id AND secrets.status = 'active';
 
 -- name: UpdateAgentModelTestResult :one
-UPDATE agent_models
-SET last_tested_at = sqlc.arg(last_tested_at),
-    last_test_status = sqlc.arg(last_test_status),
-    last_test_message = sqlc.arg(last_test_message),
-    updated_at = sqlc.arg(updated_at)
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id = sqlc.arg(id)
-RETURNING *;
+WITH updated_state AS (
+    UPDATE model_connection_state
+    SET last_tested_at = sqlc.arg(last_tested_at),
+        last_test_status = sqlc.arg(last_test_status),
+        last_test_message = sqlc.arg(last_test_message),
+        updated_at = sqlc.arg(updated_at)
+    WHERE model_connection_state.tenant_id = sqlc.arg(tenant_id) AND model_connection_state.model_connection_id = sqlc.arg(id)
+    RETURNING *
+), touched AS (
+    UPDATE model_connections
+    SET updated_at = sqlc.arg(updated_at)
+    FROM updated_state
+    WHERE model_connections.tenant_id = updated_state.tenant_id
+      AND model_connections.id = updated_state.model_connection_id
+    RETURNING model_connections.*
+)
+SELECT
+    touched.id, touched.tenant_id, touched.name, touched.provider,
+    touched.upstream_model AS model_name, touched.upstream_model AS litellm_model,
+    touched.api_base_url,
+    COALESCE(secrets.ciphertext, '')::text AS api_key_ciphertext,
+    COALESCE(secrets.preview, '')::text AS api_key_preview,
+    touched.credential_secret_id,
+    touched.rate_limit_rpm,
+    CASE WHEN touched.status = 'archived' THEN 'disabled' ELSE touched.status END::text AS status,
+    GREATEST(touched.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    0::bigint AS monthly_quota, 0::bigint AS used_quota,
+    updated_state.last_tested_at, updated_state.last_test_status, updated_state.last_test_message,
+    updated_state.sync_status, updated_state.last_synced_at, updated_state.last_sync_error,
+    updated_state.synced_config_checksum AS synced_config_hash,
+    touched.created_at, touched.updated_at
+FROM touched
+JOIN updated_state ON updated_state.tenant_id = touched.tenant_id AND updated_state.model_connection_id = touched.id
+LEFT JOIN credential_secrets secrets ON secrets.tenant_id = touched.tenant_id AND secrets.id = touched.credential_secret_id AND secrets.status = 'active';
 
 -- name: UpdateAgentModelSyncResult :one
-UPDATE agent_models
-SET sync_status = sqlc.arg(sync_status),
-    last_synced_at = sqlc.arg(last_synced_at),
-    last_sync_error = sqlc.arg(last_sync_error),
-    synced_config_hash = sqlc.arg(synced_config_hash),
-    updated_at = sqlc.arg(updated_at)
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id = sqlc.arg(id)
-RETURNING *;
+WITH updated_state AS (
+    UPDATE model_connection_state
+    SET sync_status = sqlc.arg(sync_status),
+        last_synced_at = sqlc.arg(last_synced_at),
+        last_sync_error = sqlc.arg(last_sync_error),
+        synced_config_checksum = sqlc.arg(synced_config_hash),
+        updated_at = sqlc.arg(updated_at)
+    WHERE model_connection_state.tenant_id = sqlc.arg(tenant_id) AND model_connection_state.model_connection_id = sqlc.arg(id)
+    RETURNING *
+), touched AS (
+    UPDATE model_connections
+    SET updated_at = sqlc.arg(updated_at)
+    FROM updated_state
+    WHERE model_connections.tenant_id = updated_state.tenant_id
+      AND model_connections.id = updated_state.model_connection_id
+    RETURNING model_connections.*
+)
+SELECT
+    touched.id, touched.tenant_id, touched.name, touched.provider,
+    touched.upstream_model AS model_name, touched.upstream_model AS litellm_model,
+    touched.api_base_url,
+    COALESCE(secrets.ciphertext, '')::text AS api_key_ciphertext,
+    COALESCE(secrets.preview, '')::text AS api_key_preview,
+    touched.credential_secret_id,
+    touched.rate_limit_rpm,
+    CASE WHEN touched.status = 'archived' THEN 'disabled' ELSE touched.status END::text AS status,
+    GREATEST(touched.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    0::bigint AS monthly_quota, 0::bigint AS used_quota,
+    updated_state.last_tested_at, updated_state.last_test_status, updated_state.last_test_message,
+    updated_state.sync_status, updated_state.last_synced_at, updated_state.last_sync_error,
+    updated_state.synced_config_checksum AS synced_config_hash,
+    touched.created_at, touched.updated_at
+FROM touched
+JOIN updated_state ON updated_state.tenant_id = touched.tenant_id AND updated_state.model_connection_id = touched.id
+LEFT JOIN credential_secrets secrets ON secrets.tenant_id = touched.tenant_id AND secrets.id = touched.credential_secret_id AND secrets.status = 'active';
 
 -- name: ListAgentDefinitionRefsByModel :many
--- 只統計「目前」定義對模型的引用；歷史版本是不可變審計快照，不應阻止模型刪除。
-SELECT id, name FROM agent_definitions
-WHERE agent_definitions.tenant_id = sqlc.arg(tenant_id)
-  AND (
-    agent_definitions.model_id = sqlc.arg(model_id)
-    OR EXISTS (
-        SELECT 1 FROM jsonb_array_elements(agent_definitions.sub_agents) member
-        WHERE member->>'model_id' = sqlc.arg(model_id)
-    )
-  )
-ORDER BY name;
+SELECT DISTINCT agents.id, revisions.name
+FROM agents
+JOIN agent_revisions revisions
+  ON revisions.tenant_id = agents.tenant_id
+ AND revisions.agent_id = agents.id
+ AND revisions.id = COALESCE(agents.draft_revision_id, agents.published_revision_id)
+LEFT JOIN agent_revision_members members
+  ON members.tenant_id = revisions.tenant_id AND members.revision_id = revisions.id
+WHERE agents.tenant_id = sqlc.arg(tenant_id)
+  AND agents.lifecycle_status = 'active'
+  AND (revisions.model_connection_id = sqlc.arg(model_id) OR members.model_connection_id = sqlc.arg(model_id))
+ORDER BY revisions.name;
 
 -- name: InsertAgentExternalTool :one
-INSERT INTO agent_external_tools (
-    id, tenant_id, name, description, kind, transport, endpoint_url,
-    auth_type, auth_header_name, auth_username, auth_secret_ciphertext,
-    created_by_account_id, created_at
-) VALUES (
-    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(name), sqlc.arg(description), sqlc.arg(kind),
-    sqlc.arg(transport), sqlc.arg(endpoint_url), sqlc.arg(auth_type), sqlc.arg(auth_header_name),
-    sqlc.arg(auth_username), sqlc.arg(auth_secret_ciphertext), sqlc.arg(created_by_account_id), sqlc.arg(created_at)
+WITH upserted_secret AS (
+    INSERT INTO credential_secrets (
+        id, tenant_id, name, secret_type, ciphertext, preview, status,
+        created_by_account_id, created_at, updated_at, revoked_at
+    )
+    SELECT
+        COALESCE(NULLIF(sqlc.arg(credential_secret_id)::text, ''), sqlc.arg(id)::text || ':credential'), sqlc.arg(tenant_id), sqlc.arg(name)::text || ' credential',
+        CASE sqlc.arg(auth_type)::text WHEN 'bearer' THEN 'bearer' WHEN 'basic' THEN 'basic_password' ELSE 'api_key' END,
+        sqlc.arg(auth_secret_ciphertext), '', 'active', sqlc.arg(created_by_account_id),
+        sqlc.arg(created_at), sqlc.arg(created_at), NULL
+    WHERE sqlc.arg(auth_secret_ciphertext)::text <> ''
+    ON CONFLICT (id) DO UPDATE SET
+        name = EXCLUDED.name, secret_type = EXCLUDED.secret_type,
+        ciphertext = EXCLUDED.ciphertext, status = 'active',
+        updated_at = EXCLUDED.updated_at, revoked_at = NULL
+    WHERE credential_secrets.tenant_id = EXCLUDED.tenant_id
+    RETURNING id
+), inserted AS (
+    INSERT INTO external_tool_connections (
+        id, tenant_id, name, description, kind, transport, endpoint_url,
+        auth_type, auth_header_name, auth_username, credential_secret_id,
+        timeout_ms, status, created_by_account_id, updated_by_account_id,
+        created_at, updated_at, archived_at
+    ) VALUES (
+        sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(name), sqlc.arg(description),
+        sqlc.arg(kind), sqlc.arg(transport), sqlc.arg(endpoint_url), sqlc.arg(auth_type),
+        sqlc.arg(auth_header_name), sqlc.arg(auth_username),
+        CASE WHEN sqlc.arg(auth_secret_ciphertext)::text = '' THEN NULL ELSE COALESCE(NULLIF(sqlc.arg(credential_secret_id)::text, ''), sqlc.arg(id)::text || ':credential') END,
+        GREATEST(sqlc.arg(timeout_seconds)::int, 1) * 1000,
+        'active', sqlc.arg(created_by_account_id), sqlc.arg(created_by_account_id),
+        sqlc.arg(created_at), sqlc.arg(created_at), NULL
+    )
+    RETURNING *
 )
-RETURNING *;
+SELECT
+    inserted.id, inserted.tenant_id, inserted.name, inserted.description,
+    inserted.kind, inserted.transport, inserted.endpoint_url,
+    inserted.auth_type, inserted.auth_header_name, inserted.auth_username,
+    COALESCE(secrets.ciphertext, '')::text AS auth_secret_ciphertext,
+    inserted.credential_secret_id, GREATEST(inserted.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    inserted.status, inserted.last_tested_at, inserted.last_test_status, inserted.last_test_message,
+    inserted.created_by_account_id, inserted.created_at, inserted.updated_at, inserted.archived_at
+FROM inserted
+LEFT JOIN credential_secrets secrets
+  ON secrets.tenant_id = inserted.tenant_id AND secrets.id = inserted.credential_secret_id AND secrets.status = 'active';
 
 -- name: ListAgentExternalTools :many
-SELECT * FROM agent_external_tools
-WHERE tenant_id = sqlc.arg(tenant_id)
-ORDER BY created_at DESC, id ASC;
+SELECT
+    connections.id, connections.tenant_id, connections.name, connections.description,
+    connections.kind, connections.transport, connections.endpoint_url,
+    connections.auth_type, connections.auth_header_name, connections.auth_username,
+    COALESCE(secrets.ciphertext, '')::text AS auth_secret_ciphertext,
+    connections.credential_secret_id, GREATEST(connections.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    connections.status, connections.last_tested_at, connections.last_test_status, connections.last_test_message,
+    connections.created_by_account_id, connections.created_at, connections.updated_at, connections.archived_at
+FROM external_tool_connections connections
+LEFT JOIN credential_secrets secrets
+  ON secrets.tenant_id = connections.tenant_id AND secrets.id = connections.credential_secret_id AND secrets.status = 'active'
+WHERE connections.tenant_id = sqlc.arg(tenant_id)
+ORDER BY CASE connections.status WHEN 'active' THEN 0 WHEN 'disabled' THEN 1 ELSE 2 END,
+         connections.updated_at DESC, connections.id ASC;
 
 -- name: DeleteAgentExternalTool :one
-DELETE FROM agent_external_tools
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id = sqlc.arg(id)
-RETURNING *;
+WITH archived AS (
+    UPDATE external_tool_connections
+    SET status = 'archived', archived_at = COALESCE(archived_at, now()), updated_at = GREATEST(updated_at, now())
+    WHERE external_tool_connections.tenant_id = sqlc.arg(tenant_id) AND external_tool_connections.id = sqlc.arg(id)
+    RETURNING *
+), archived_tools AS (
+    UPDATE external_tools
+    SET enabled = false,
+        archived_at = COALESCE(external_tools.archived_at, archived.archived_at),
+        updated_at = archived.updated_at
+    FROM archived
+    WHERE external_tools.tenant_id = archived.tenant_id
+      AND external_tools.connection_id = archived.id
+    RETURNING external_tools.id
+)
+SELECT
+    archived.id, archived.tenant_id, archived.name, archived.description,
+    archived.kind, archived.transport, archived.endpoint_url,
+    archived.auth_type, archived.auth_header_name, archived.auth_username,
+    COALESCE(secrets.ciphertext, '')::text AS auth_secret_ciphertext,
+    archived.credential_secret_id, GREATEST(archived.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    archived.status, archived.last_tested_at, archived.last_test_status, archived.last_test_message,
+    archived.created_by_account_id, archived.created_at, archived.updated_at, archived.archived_at
+FROM archived
+LEFT JOIN credential_secrets secrets
+  ON secrets.tenant_id = archived.tenant_id AND secrets.id = archived.credential_secret_id AND secrets.status = 'active';
 
 -- name: CountAgentDefinitionsByKnowledgeBase :one
-SELECT (
-    SELECT count(*) FROM agent_definitions
-    WHERE agent_definitions.tenant_id = sqlc.arg(tenant_id)
-      AND (
-        agent_definitions.knowledge_base_ids ? sqlc.arg(knowledge_base_id)::text
-        OR EXISTS (
-            SELECT 1 FROM jsonb_array_elements(agent_definitions.sub_agents) member
-            WHERE COALESCE(member->'knowledge_base_ids', '[]'::jsonb) ? sqlc.arg(knowledge_base_id)::text
-        )
-      )
-) + (
-    SELECT count(*) FROM agent_definition_versions
-    WHERE agent_definition_versions.tenant_id = sqlc.arg(tenant_id)
-      AND (
-        agent_definition_versions.knowledge_base_ids ? sqlc.arg(knowledge_base_id)::text
-        OR EXISTS (
-            SELECT 1 FROM jsonb_array_elements(agent_definition_versions.sub_agents) member
-            WHERE COALESCE(member->'knowledge_base_ids', '[]'::jsonb) ? sqlc.arg(knowledge_base_id)::text
-        )
-      )
-);
+SELECT count(DISTINCT binding.revision_id)::bigint
+FROM (
+    SELECT revision_id
+    FROM agent_revision_knowledge_bases
+    WHERE agent_revision_knowledge_bases.tenant_id = sqlc.arg(tenant_id) AND agent_revision_knowledge_bases.knowledge_base_id = sqlc.arg(knowledge_base_id)
+    UNION ALL
+    SELECT revision_id
+    FROM agent_revision_member_knowledge_bases
+    WHERE agent_revision_member_knowledge_bases.tenant_id = sqlc.arg(tenant_id) AND agent_revision_member_knowledge_bases.knowledge_base_id = sqlc.arg(knowledge_base_id)
+) binding;
 
 -- name: UpsertAgentDefinition :one
-INSERT INTO agent_definitions (
-    id, tenant_id, name, description, emoji, category, model_id,
-    main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds,
-    version, published_version, usage_total_runs, usage_success_runs, usage_failed_runs, usage_avg_latency_ms,
-    usage_last_run_at, usage_top_prompts, created_by_account_id, updated_by_account_id,
-    created_at, updated_at
-) VALUES (
-    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(name), sqlc.arg(description),
-    sqlc.arg(emoji), sqlc.arg(category), sqlc.arg(model_id),
-    sqlc.arg(main_agent_role), sqlc.arg(sub_agents)::jsonb, sqlc.arg(system_prompt), sqlc.arg(welcome_message), sqlc.arg(suggested_questions)::jsonb, sqlc.arg(suggested_question_translations)::jsonb, sqlc.arg(tools)::jsonb, sqlc.arg(knowledge_base_ids)::jsonb, sqlc.arg(status), sqlc.arg(visibility),
-    sqlc.arg(visibility_targets)::jsonb, sqlc.arg(timeout_seconds), sqlc.arg(version), sqlc.arg(published_version),
-    sqlc.arg(usage_total_runs), sqlc.arg(usage_success_runs), sqlc.arg(usage_failed_runs),
-    sqlc.arg(usage_avg_latency_ms), sqlc.arg(usage_last_run_at), sqlc.arg(usage_top_prompts)::jsonb,
-    sqlc.arg(created_by_account_id), sqlc.arg(updated_by_account_id),
-    sqlc.arg(created_at), sqlc.arg(updated_at)
+WITH upserted_agent AS (
+    INSERT INTO agents (
+        id, tenant_id, lifecycle_status, draft_revision_id, published_revision_id,
+        next_revision_no, created_by_account_id, created_at, updated_at, archived_at
+    ) VALUES (
+        sqlc.arg(id), sqlc.arg(tenant_id), 'active', NULL, NULL,
+        GREATEST(sqlc.arg(version)::int + 1, 2), sqlc.arg(created_by_account_id),
+        sqlc.arg(created_at), sqlc.arg(updated_at), NULL
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        lifecycle_status = 'active',
+        next_revision_no = GREATEST(agents.next_revision_no, EXCLUDED.next_revision_no),
+        updated_at = EXCLUDED.updated_at,
+        archived_at = NULL
+    WHERE agents.tenant_id = EXCLUDED.tenant_id
+    RETURNING *
+), inserted_revision AS (
+    INSERT INTO agent_revisions (
+        id, tenant_id, agent_id, revision_no, name, description, icon, category,
+        visibility, visibility_targets, main_agent_role, system_prompt, welcome_message,
+        suggested_questions, suggested_question_translations,
+        model_connection_id, model_config_checksum, timeout_ms,
+        config_schema_version, checksum, revision_note,
+        created_by_account_id, created_at
+    )
+    SELECT
+        COALESCE(NULLIF(sqlc.arg(draft_revision_id)::text, ''), sqlc.arg(id)::text || ':revision:' || GREATEST(sqlc.arg(version)::int, 1)::text),
+        sqlc.arg(tenant_id), sqlc.arg(id), GREATEST(sqlc.arg(version)::int, 1),
+        sqlc.arg(name), sqlc.arg(description), sqlc.arg(emoji), sqlc.arg(category),
+        sqlc.arg(visibility), sqlc.arg(visibility_targets)::jsonb,
+        sqlc.arg(main_agent_role), sqlc.arg(system_prompt), sqlc.arg(welcome_message),
+        sqlc.arg(suggested_questions)::jsonb, sqlc.arg(suggested_question_translations)::jsonb,
+        sqlc.arg(model_id), COALESCE(model_state.synced_config_checksum, ''),
+        GREATEST(sqlc.arg(timeout_seconds)::int, 1) * 1000,
+        1,
+        md5(concat_ws('|', sqlc.arg(model_id)::text, sqlc.arg(main_agent_role)::text,
+            sqlc.arg(system_prompt)::text, sqlc.arg(tools)::text,
+            sqlc.arg(external_tool_ids)::text, sqlc.arg(knowledge_base_ids)::text,
+            sqlc.arg(sub_agents)::text)),
+        '', sqlc.arg(created_by_account_id), sqlc.arg(updated_at)
+    FROM upserted_agent
+    LEFT JOIN model_connection_state model_state
+      ON model_state.tenant_id = sqlc.arg(tenant_id)
+     AND model_state.model_connection_id = sqlc.arg(model_id)
+    ON CONFLICT (tenant_id, agent_id, revision_no) DO NOTHING
+    RETURNING *
+), target_revision AS (
+    SELECT * FROM inserted_revision
+    UNION ALL
+    SELECT revisions.*
+    FROM agent_revisions revisions
+    WHERE revisions.tenant_id = sqlc.arg(tenant_id)
+      AND revisions.agent_id = sqlc.arg(id)
+      AND revisions.revision_no = GREATEST(sqlc.arg(version)::int, 1)
+    LIMIT 1
+), inserted_members AS (
+    INSERT INTO agent_revision_members (
+        tenant_id, revision_id, id, name, role, model_connection_id,
+        model_config_checksum, ordinal
+    )
+    SELECT
+        target_revision.tenant_id, target_revision.id,
+        members.id, members.name, members.role, members.model_id,
+        COALESCE(NULLIF(members.model_config_checksum, ''), member_model_state.synced_config_checksum, ''),
+        members.ordinality::int - 1
+    FROM target_revision
+    CROSS JOIN LATERAL jsonb_to_recordset(sqlc.arg(sub_agents)::jsonb)
+        WITH ORDINALITY AS members(id text, name text, role text, model_id text, model_config_checksum text, tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb, ordinality bigint)
+    LEFT JOIN model_connection_state member_model_state
+      ON member_model_state.tenant_id = target_revision.tenant_id
+     AND member_model_state.model_connection_id = members.model_id
+    ON CONFLICT DO NOTHING
+    RETURNING *
+), inserted_tools AS (
+    INSERT INTO agent_revision_builtin_tools (tenant_id, revision_id, tool_key, ordinal, config)
+    SELECT target_revision.tenant_id, target_revision.id, tool.value,
+           tool.ordinality::int - 1, '{}'::jsonb
+    FROM target_revision
+    CROSS JOIN LATERAL jsonb_array_elements_text(sqlc.arg(tools)::jsonb) WITH ORDINALITY AS tool(value, ordinality)
+    ON CONFLICT DO NOTHING
+    RETURNING *
+), inserted_knowledge AS (
+    INSERT INTO agent_revision_knowledge_bases (tenant_id, revision_id, knowledge_base_id, ordinal)
+    SELECT target_revision.tenant_id, target_revision.id, knowledge.value,
+           knowledge.ordinality::int - 1
+    FROM target_revision
+    CROSS JOIN LATERAL jsonb_array_elements_text(sqlc.arg(knowledge_base_ids)::jsonb) WITH ORDINALITY AS knowledge(value, ordinality)
+    ON CONFLICT DO NOTHING
+    RETURNING *
+), inserted_external_tools AS (
+    INSERT INTO agent_revision_external_tools (
+        tenant_id, revision_id, external_tool_id, tool_schema_checksum, ordinal, config
+    )
+    SELECT target_revision.tenant_id, target_revision.id, requested.value,
+           external_tools.schema_checksum, requested.ordinality::int - 1, '{}'::jsonb
+    FROM target_revision
+    CROSS JOIN LATERAL jsonb_array_elements_text(sqlc.arg(external_tool_ids)::jsonb)
+        WITH ORDINALITY AS requested(value, ordinality)
+    JOIN external_tools
+      ON external_tools.tenant_id = target_revision.tenant_id
+     AND external_tools.id = requested.value
+     AND external_tools.enabled
+     AND external_tools.archived_at IS NULL
+    JOIN external_tool_connections external_connections
+      ON external_connections.tenant_id = external_tools.tenant_id
+     AND external_connections.id = external_tools.connection_id
+     AND external_connections.status = 'active'
+    ON CONFLICT DO NOTHING
+    RETURNING *
+), inserted_member_tools AS (
+    INSERT INTO agent_revision_member_builtin_tools (
+        tenant_id, revision_id, member_id, tool_key, ordinal, config
+    )
+    SELECT target_revision.tenant_id, target_revision.id, members.id,
+           tool.value, tool.ordinality::int - 1, '{}'::jsonb
+    FROM target_revision
+    CROSS JOIN LATERAL jsonb_to_recordset(sqlc.arg(sub_agents)::jsonb)
+        AS members(id text, tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb)
+    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(members.tools, '[]'::jsonb)) WITH ORDINALITY AS tool(value, ordinality)
+    ON CONFLICT DO NOTHING
+    RETURNING *
+), inserted_member_external_tools AS (
+    INSERT INTO agent_revision_member_external_tools (
+        tenant_id, revision_id, member_id, external_tool_id,
+        tool_schema_checksum, ordinal, config
+    )
+    SELECT target_revision.tenant_id, target_revision.id, members.id,
+           requested.value, external_tools.schema_checksum,
+           requested.ordinality::int - 1, '{}'::jsonb
+    FROM target_revision
+    CROSS JOIN LATERAL jsonb_to_recordset(sqlc.arg(sub_agents)::jsonb)
+        AS members(id text, tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb)
+    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(members.external_tool_ids, '[]'::jsonb))
+        WITH ORDINALITY AS requested(value, ordinality)
+    JOIN external_tools
+      ON external_tools.tenant_id = target_revision.tenant_id
+     AND external_tools.id = requested.value
+     AND external_tools.enabled
+     AND external_tools.archived_at IS NULL
+    JOIN external_tool_connections external_connections
+      ON external_connections.tenant_id = external_tools.tenant_id
+     AND external_connections.id = external_tools.connection_id
+     AND external_connections.status = 'active'
+    ON CONFLICT DO NOTHING
+    RETURNING *
+), inserted_member_knowledge AS (
+    INSERT INTO agent_revision_member_knowledge_bases (
+        tenant_id, revision_id, member_id, knowledge_base_id, ordinal
+    )
+    SELECT target_revision.tenant_id, target_revision.id, members.id,
+           knowledge.value, knowledge.ordinality::int - 1
+    FROM target_revision
+    CROSS JOIN LATERAL jsonb_to_recordset(sqlc.arg(sub_agents)::jsonb)
+        AS members(id text, tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb)
+    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(members.knowledge_base_ids, '[]'::jsonb)) WITH ORDINALITY AS knowledge(value, ordinality)
+    ON CONFLICT DO NOTHING
+    RETURNING *
+), updated_agent AS (
+    UPDATE agents
+    SET draft_revision_id = target_revision.id,
+        published_revision_id = NULLIF(sqlc.arg(published_revision_id)::text, ''),
+        updated_at = sqlc.arg(updated_at)
+    FROM target_revision
+    WHERE agents.tenant_id = target_revision.tenant_id
+      AND agents.id = target_revision.agent_id
+    RETURNING agents.*
 )
-ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    name = EXCLUDED.name,
-    description = EXCLUDED.description,
-    emoji = EXCLUDED.emoji,
-    category = EXCLUDED.category,
-    model_id = EXCLUDED.model_id,
-	main_agent_role = EXCLUDED.main_agent_role,
-    sub_agents = EXCLUDED.sub_agents,
-    system_prompt = EXCLUDED.system_prompt,
-    welcome_message = EXCLUDED.welcome_message,
-    suggested_questions = EXCLUDED.suggested_questions,
-    suggested_question_translations = EXCLUDED.suggested_question_translations,
-    tools = EXCLUDED.tools,
-    knowledge_base_ids = EXCLUDED.knowledge_base_ids,
-    status = EXCLUDED.status,
-    visibility = EXCLUDED.visibility,
-    visibility_targets = EXCLUDED.visibility_targets,
-    timeout_seconds = EXCLUDED.timeout_seconds,
-    version = EXCLUDED.version,
-	published_version = EXCLUDED.published_version,
-    usage_total_runs = EXCLUDED.usage_total_runs,
-    usage_success_runs = EXCLUDED.usage_success_runs,
-    usage_failed_runs = EXCLUDED.usage_failed_runs,
-    usage_avg_latency_ms = EXCLUDED.usage_avg_latency_ms,
-    usage_last_run_at = EXCLUDED.usage_last_run_at,
-    usage_top_prompts = EXCLUDED.usage_top_prompts,
-    created_by_account_id = EXCLUDED.created_by_account_id,
-    updated_by_account_id = EXCLUDED.updated_by_account_id,
-    created_at = EXCLUDED.created_at,
-    updated_at = EXCLUDED.updated_at
-RETURNING *;
+SELECT updated_agent.id, updated_agent.tenant_id, target_revision.id AS revision_id
+FROM updated_agent
+JOIN target_revision ON target_revision.tenant_id = updated_agent.tenant_id AND target_revision.agent_id = updated_agent.id;
 
 -- name: GetAgentDefinition :one
-SELECT * FROM agent_definitions
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id = sqlc.arg(id);
+WITH selected AS (
+    SELECT
+        agents.id AS agent_id,
+        agents.tenant_id,
+        agents.draft_revision_id,
+        agents.published_revision_id,
+        agents.created_by_account_id,
+        agents.created_at,
+        agents.updated_at,
+        revisions.id,
+        revisions.revision_no,
+        revisions.name,
+        revisions.description,
+        revisions.icon,
+        revisions.category,
+        revisions.visibility,
+        revisions.visibility_targets,
+        revisions.main_agent_role,
+        revisions.system_prompt,
+        revisions.welcome_message,
+        revisions.suggested_questions,
+        revisions.suggested_question_translations,
+        revisions.model_connection_id,
+        revisions.timeout_ms
+    FROM agents
+    JOIN agent_revisions revisions
+      ON revisions.tenant_id = agents.tenant_id
+     AND revisions.agent_id = agents.id
+     AND revisions.id = COALESCE(agents.draft_revision_id, agents.published_revision_id)
+    WHERE agents.tenant_id = sqlc.arg(tenant_id) AND agents.id = sqlc.arg(id)
+)
+SELECT
+    selected.agent_id AS id, selected.tenant_id, selected.name, selected.description,
+    selected.icon AS emoji, selected.category, selected.model_connection_id AS model_id,
+    selected.main_agent_role,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id', members.id, 'name', members.name, 'role', members.role,
+        'model_id', members.model_connection_id,
+        'model_config_checksum', members.model_config_checksum,
+        'tools', COALESCE((SELECT jsonb_agg(tools.tool_key ORDER BY tools.ordinal) FROM agent_revision_member_builtin_tools tools WHERE tools.tenant_id = members.tenant_id AND tools.revision_id = members.revision_id AND tools.member_id = members.id), '[]'::jsonb),
+        'external_tool_ids', COALESCE((SELECT jsonb_agg(tools.external_tool_id ORDER BY tools.ordinal) FROM agent_revision_member_external_tools tools WHERE tools.tenant_id = members.tenant_id AND tools.revision_id = members.revision_id AND tools.member_id = members.id), '[]'::jsonb),
+        'knowledge_base_ids', COALESCE((SELECT jsonb_agg(kb.knowledge_base_id ORDER BY kb.ordinal) FROM agent_revision_member_knowledge_bases kb WHERE kb.tenant_id = members.tenant_id AND kb.revision_id = members.revision_id AND kb.member_id = members.id), '[]'::jsonb)
+    ) ORDER BY members.ordinal) FROM agent_revision_members members WHERE members.tenant_id = selected.tenant_id AND members.revision_id = selected.id), '[]'::jsonb) AS sub_agents,
+    selected.system_prompt, selected.welcome_message, selected.suggested_questions,
+    selected.suggested_question_translations,
+    COALESCE((SELECT jsonb_agg(tools.tool_key ORDER BY tools.ordinal) FROM agent_revision_builtin_tools tools WHERE tools.tenant_id = selected.tenant_id AND tools.revision_id = selected.id), '[]'::jsonb) AS tools,
+    COALESCE((SELECT jsonb_agg(tools.external_tool_id ORDER BY tools.ordinal) FROM agent_revision_external_tools tools WHERE tools.tenant_id = selected.tenant_id AND tools.revision_id = selected.id), '[]'::jsonb) AS external_tool_ids,
+    COALESCE((SELECT jsonb_agg(kb.knowledge_base_id ORDER BY kb.ordinal) FROM agent_revision_knowledge_bases kb WHERE kb.tenant_id = selected.tenant_id AND kb.revision_id = selected.id), '[]'::jsonb) AS knowledge_base_ids,
+    CASE WHEN selected.published_revision_id IS NOT NULL THEN 'published' ELSE 'draft' END::text AS status,
+    selected.visibility, selected.visibility_targets,
+    GREATEST(selected.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    selected.revision_no AS version,
+    COALESCE((SELECT revisions.revision_no FROM agent_revisions revisions WHERE revisions.tenant_id = selected.tenant_id AND revisions.id = selected.published_revision_id), 0)::integer AS published_version,
+    selected.draft_revision_id, selected.published_revision_id,
+    COALESCE(usage.total_runs, 0)::bigint AS usage_total_runs,
+    COALESCE(usage.success_runs, 0)::bigint AS usage_success_runs,
+    COALESCE(usage.failed_runs, 0)::bigint AS usage_failed_runs,
+    COALESCE(usage.avg_latency_ms, 0)::integer AS usage_avg_latency_ms,
+    usage.last_run_at AS usage_last_run_at,
+    '[]'::jsonb AS usage_top_prompts,
+    selected.created_by_account_id, selected.created_by_account_id AS updated_by_account_id,
+    selected.created_at, selected.updated_at
+FROM selected
+LEFT JOIN LATERAL (
+    SELECT count(*)::bigint AS total_runs,
+           count(*) FILTER (WHERE status = 'completed')::bigint AS success_runs,
+           count(*) FILTER (WHERE status = 'failed')::bigint AS failed_runs,
+           COALESCE(avg(EXTRACT(EPOCH FROM (completed_at - started_at)) * 1000) FILTER (WHERE started_at IS NOT NULL AND completed_at IS NOT NULL), 0)::integer AS avg_latency_ms,
+           max(updated_at)::timestamptz AS last_run_at
+    FROM executions
+    WHERE executions.tenant_id = selected.tenant_id AND executions.agent_id = selected.agent_id
+) usage ON true;
 
 -- name: ListAgentDefinitions :many
-SELECT * FROM agent_definitions
-WHERE tenant_id = sqlc.arg(tenant_id)
-ORDER BY status ASC, updated_at DESC, id ASC;
+SELECT agents.id, agents.tenant_id
+FROM agents
+WHERE agents.tenant_id = sqlc.arg(tenant_id)
+  AND agents.lifecycle_status = 'active'
+ORDER BY agents.updated_at DESC, agents.id ASC;
 
 -- name: ListPublishedAgentDefinitions :many
-SELECT * FROM agent_definitions
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND status = 'published'
-ORDER BY updated_at DESC, id ASC;
+SELECT agents.id, agents.tenant_id
+FROM agents
+WHERE agents.tenant_id = sqlc.arg(tenant_id)
+  AND agents.lifecycle_status = 'active'
+  AND agents.published_revision_id IS NOT NULL
+ORDER BY agents.updated_at DESC, agents.id ASC;
 
 -- name: DeleteAgentDefinition :one
-DELETE FROM agent_definitions
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id = sqlc.arg(id)
-RETURNING *;
-
--- name: UpdateAgentDefinitionUsage :one
-UPDATE agent_definitions
-SET usage_total_runs = usage_total_runs + 1,
-    usage_success_runs = usage_success_runs + CASE WHEN sqlc.arg(success)::boolean THEN 1 ELSE 0 END,
-    usage_failed_runs = usage_failed_runs + CASE WHEN sqlc.arg(success)::boolean THEN 0 ELSE 1 END,
-    usage_avg_latency_ms = CASE
-        WHEN sqlc.arg(latency_ms)::int <= 0 THEN usage_avg_latency_ms
-        ELSE ((usage_avg_latency_ms::bigint * usage_total_runs) + sqlc.arg(latency_ms)::int) / (usage_total_runs + 1)
-    END,
-    usage_last_run_at = sqlc.arg(run_at),
-    usage_top_prompts = CASE
-        WHEN sqlc.arg(prompt)::text = '' THEN usage_top_prompts
-        ELSE (
-            SELECT COALESCE(jsonb_agg(to_jsonb(value)), '[]'::jsonb)
-            FROM (
-                SELECT value
-                FROM (
-                    SELECT jsonb_array_elements_text(
-                        jsonb_build_array(sqlc.arg(prompt)::text) || COALESCE(usage_top_prompts, '[]'::jsonb)
-                    ) AS value
-                ) ranked
-                LIMIT 5
-            ) limited
-        )
-    END,
-    updated_at = sqlc.arg(run_at)
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND id = sqlc.arg(id)
-RETURNING *;
+WITH archived AS (
+    UPDATE agents
+    SET lifecycle_status = 'archived', archived_at = COALESCE(archived_at, now()), updated_at = GREATEST(updated_at, now())
+    WHERE agents.tenant_id = sqlc.arg(tenant_id)
+      AND agents.id = sqlc.arg(id)
+    RETURNING id, tenant_id
+)
+SELECT * FROM archived;
 
 -- name: InsertAgentDefinitionVersion :one
-INSERT INTO agent_definition_versions (
-    id, tenant_id, agent_id, version, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, model_id, note,
-    created_by_account_id, created_at
-) VALUES (
-    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(agent_id), sqlc.arg(version),
-    sqlc.arg(main_agent_role), sqlc.arg(sub_agents)::jsonb, sqlc.arg(system_prompt), sqlc.arg(welcome_message), sqlc.arg(suggested_questions)::jsonb, sqlc.arg(suggested_question_translations)::jsonb, sqlc.arg(tools)::jsonb, sqlc.arg(knowledge_base_ids)::jsonb, sqlc.arg(model_id), sqlc.arg(note),
-    sqlc.arg(created_by_account_id), sqlc.arg(created_at)
+WITH upserted_revision AS (
+    INSERT INTO agent_revisions (
+        id, tenant_id, agent_id, revision_no, name, description, icon, category,
+        visibility, visibility_targets, main_agent_role, system_prompt, welcome_message,
+        suggested_questions, suggested_question_translations,
+        model_connection_id, model_config_checksum, timeout_ms,
+        config_schema_version, checksum, revision_note,
+        created_by_account_id, created_at
+    ) VALUES (
+        sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(agent_id), sqlc.arg(version),
+        sqlc.arg(name), sqlc.arg(description), sqlc.arg(emoji), sqlc.arg(category),
+        sqlc.arg(visibility), sqlc.arg(visibility_targets)::jsonb,
+        sqlc.arg(main_agent_role), sqlc.arg(system_prompt), sqlc.arg(welcome_message),
+        sqlc.arg(suggested_questions)::jsonb, sqlc.arg(suggested_question_translations)::jsonb,
+        sqlc.arg(model_id), sqlc.arg(model_config_checksum),
+        GREATEST(sqlc.arg(timeout_seconds)::int, 1) * 1000,
+        GREATEST(sqlc.arg(config_schema_version)::int, 1), sqlc.arg(checksum), sqlc.arg(note),
+        sqlc.arg(created_by_account_id), sqlc.arg(created_at)
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        model_config_checksum = EXCLUDED.model_config_checksum,
+        config_schema_version = EXCLUDED.config_schema_version,
+        checksum = EXCLUDED.checksum,
+        revision_note = EXCLUDED.revision_note
+    WHERE agent_revisions.tenant_id = EXCLUDED.tenant_id
+      AND agent_revisions.agent_id = EXCLUDED.agent_id
+      AND agent_revisions.revision_no = EXCLUDED.revision_no
+      AND NOT EXISTS (
+          SELECT 1
+          FROM agents published_agent
+          WHERE published_agent.tenant_id = agent_revisions.tenant_id
+            AND published_agent.id = agent_revisions.agent_id
+            AND published_agent.published_revision_id = agent_revisions.id
+      )
+    RETURNING *
+), inserted_members AS (
+    INSERT INTO agent_revision_members (
+        tenant_id, revision_id, id, name, role, model_connection_id,
+        model_config_checksum, ordinal
+    )
+    SELECT revision.tenant_id, revision.id,
+           members.id, members.name, members.role, members.model_id,
+           COALESCE(NULLIF(members.model_config_checksum, ''), member_model_state.synced_config_checksum, ''),
+           members.ordinality::int - 1
+    FROM upserted_revision revision
+    CROSS JOIN LATERAL jsonb_to_recordset(sqlc.arg(sub_agents)::jsonb)
+        WITH ORDINALITY AS members(
+            id text, name text, role text, model_id text,
+            model_config_checksum text,
+            tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb,
+            ordinality bigint
+        )
+    LEFT JOIN model_connection_state member_model_state
+      ON member_model_state.tenant_id = revision.tenant_id
+     AND member_model_state.model_connection_id = members.model_id
+    ON CONFLICT (tenant_id, revision_id, id) DO UPDATE SET
+        model_config_checksum = EXCLUDED.model_config_checksum
+    WHERE NOT EXISTS (
+        SELECT 1
+        FROM agents published_agent
+        WHERE published_agent.tenant_id = agent_revision_members.tenant_id
+          AND published_agent.published_revision_id = agent_revision_members.revision_id
+    )
+    RETURNING *
+), inserted_tools AS (
+    INSERT INTO agent_revision_builtin_tools (tenant_id, revision_id, tool_key, ordinal, config)
+    SELECT revision.tenant_id, revision.id, tool.value,
+           tool.ordinality::int - 1, '{}'::jsonb
+    FROM upserted_revision revision
+    CROSS JOIN LATERAL jsonb_array_elements_text(sqlc.arg(tools)::jsonb)
+        WITH ORDINALITY AS tool(value, ordinality)
+    ON CONFLICT DO NOTHING
+    RETURNING *
+), inserted_external_tools AS (
+    INSERT INTO agent_revision_external_tools (
+        tenant_id, revision_id, external_tool_id, tool_schema_checksum, ordinal, config
+    )
+    SELECT revision.tenant_id, revision.id, requested.value,
+           external_tools.schema_checksum, requested.ordinality::int - 1, '{}'::jsonb
+    FROM upserted_revision revision
+    CROSS JOIN LATERAL jsonb_array_elements_text(sqlc.arg(external_tool_ids)::jsonb)
+        WITH ORDINALITY AS requested(value, ordinality)
+    JOIN external_tools
+      ON external_tools.tenant_id = revision.tenant_id
+     AND external_tools.id = requested.value
+     AND external_tools.enabled
+     AND external_tools.archived_at IS NULL
+    JOIN external_tool_connections external_connections
+      ON external_connections.tenant_id = external_tools.tenant_id
+     AND external_connections.id = external_tools.connection_id
+     AND external_connections.status = 'active'
+    ON CONFLICT DO NOTHING
+    RETURNING *
+), inserted_knowledge AS (
+    INSERT INTO agent_revision_knowledge_bases (
+        tenant_id, revision_id, knowledge_base_id, ordinal
+    )
+    SELECT revision.tenant_id, revision.id, knowledge.value,
+           knowledge.ordinality::int - 1
+    FROM upserted_revision revision
+    CROSS JOIN LATERAL jsonb_array_elements_text(sqlc.arg(knowledge_base_ids)::jsonb)
+        WITH ORDINALITY AS knowledge(value, ordinality)
+    ON CONFLICT DO NOTHING
+    RETURNING *
+), inserted_member_tools AS (
+    INSERT INTO agent_revision_member_builtin_tools (
+        tenant_id, revision_id, member_id, tool_key, ordinal, config
+    )
+    SELECT revision.tenant_id, revision.id, members.id,
+           tool.value, tool.ordinality::int - 1, '{}'::jsonb
+    FROM upserted_revision revision
+    CROSS JOIN LATERAL jsonb_to_recordset(sqlc.arg(sub_agents)::jsonb)
+        AS members(id text, tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb)
+    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(members.tools, '[]'::jsonb))
+        WITH ORDINALITY AS tool(value, ordinality)
+    ON CONFLICT DO NOTHING
+    RETURNING *
+), inserted_member_external_tools AS (
+    INSERT INTO agent_revision_member_external_tools (
+        tenant_id, revision_id, member_id, external_tool_id,
+        tool_schema_checksum, ordinal, config
+    )
+    SELECT revision.tenant_id, revision.id, members.id,
+           requested.value, external_tools.schema_checksum,
+           requested.ordinality::int - 1, '{}'::jsonb
+    FROM upserted_revision revision
+    CROSS JOIN LATERAL jsonb_to_recordset(sqlc.arg(sub_agents)::jsonb)
+        AS members(id text, tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb)
+    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(members.external_tool_ids, '[]'::jsonb))
+        WITH ORDINALITY AS requested(value, ordinality)
+    JOIN external_tools
+      ON external_tools.tenant_id = revision.tenant_id
+     AND external_tools.id = requested.value
+     AND external_tools.enabled
+     AND external_tools.archived_at IS NULL
+    JOIN external_tool_connections external_connections
+      ON external_connections.tenant_id = external_tools.tenant_id
+     AND external_connections.id = external_tools.connection_id
+     AND external_connections.status = 'active'
+    ON CONFLICT DO NOTHING
+    RETURNING *
+), inserted_member_knowledge AS (
+    INSERT INTO agent_revision_member_knowledge_bases (
+        tenant_id, revision_id, member_id, knowledge_base_id, ordinal
+    )
+    SELECT revision.tenant_id, revision.id, members.id,
+           knowledge.value, knowledge.ordinality::int - 1
+    FROM upserted_revision revision
+    CROSS JOIN LATERAL jsonb_to_recordset(sqlc.arg(sub_agents)::jsonb)
+        AS members(id text, tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb)
+    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(members.knowledge_base_ids, '[]'::jsonb))
+        WITH ORDINALITY AS knowledge(value, ordinality)
+    ON CONFLICT DO NOTHING
+    RETURNING *
 )
-RETURNING *;
+SELECT id, tenant_id, agent_id, revision_no
+FROM upserted_revision;
 
 -- name: ListAgentDefinitionVersions :many
-SELECT * FROM agent_definition_versions
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND agent_id = sqlc.arg(agent_id)
-ORDER BY version DESC;
+SELECT
+    revisions.id, revisions.tenant_id, revisions.agent_id,
+    revisions.revision_no AS version,
+    revisions.name, revisions.description, revisions.icon AS emoji, revisions.category,
+    revisions.visibility, revisions.visibility_targets, revisions.main_agent_role,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id', members.id, 'name', members.name, 'role', members.role,
+        'model_id', members.model_connection_id,
+        'model_config_checksum', members.model_config_checksum,
+        'tools', COALESCE((SELECT jsonb_agg(tools.tool_key ORDER BY tools.ordinal) FROM agent_revision_member_builtin_tools tools WHERE tools.tenant_id = members.tenant_id AND tools.revision_id = members.revision_id AND tools.member_id = members.id), '[]'::jsonb),
+        'external_tool_ids', COALESCE((SELECT jsonb_agg(tools.external_tool_id ORDER BY tools.ordinal) FROM agent_revision_member_external_tools tools WHERE tools.tenant_id = members.tenant_id AND tools.revision_id = members.revision_id AND tools.member_id = members.id), '[]'::jsonb),
+        'knowledge_base_ids', COALESCE((SELECT jsonb_agg(kb.knowledge_base_id ORDER BY kb.ordinal) FROM agent_revision_member_knowledge_bases kb WHERE kb.tenant_id = members.tenant_id AND kb.revision_id = members.revision_id AND kb.member_id = members.id), '[]'::jsonb)
+    ) ORDER BY members.ordinal) FROM agent_revision_members members WHERE members.tenant_id = revisions.tenant_id AND members.revision_id = revisions.id), '[]'::jsonb) AS sub_agents,
+    revisions.system_prompt, revisions.welcome_message, revisions.suggested_questions,
+    revisions.suggested_question_translations,
+    COALESCE((SELECT jsonb_agg(tools.tool_key ORDER BY tools.ordinal) FROM agent_revision_builtin_tools tools WHERE tools.tenant_id = revisions.tenant_id AND tools.revision_id = revisions.id), '[]'::jsonb) AS tools,
+    COALESCE((SELECT jsonb_agg(tools.external_tool_id ORDER BY tools.ordinal) FROM agent_revision_external_tools tools WHERE tools.tenant_id = revisions.tenant_id AND tools.revision_id = revisions.id), '[]'::jsonb) AS external_tool_ids,
+    COALESCE((SELECT jsonb_agg(kb.knowledge_base_id ORDER BY kb.ordinal) FROM agent_revision_knowledge_bases kb WHERE kb.tenant_id = revisions.tenant_id AND kb.revision_id = revisions.id), '[]'::jsonb) AS knowledge_base_ids,
+    revisions.model_connection_id AS model_id,
+    revisions.model_config_checksum,
+    GREATEST(revisions.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    revisions.config_schema_version,
+    revisions.checksum,
+    revisions.revision_note AS note,
+    revisions.created_by_account_id, revisions.created_at
+FROM agent_revisions revisions
+WHERE revisions.tenant_id = sqlc.arg(tenant_id) AND revisions.agent_id = sqlc.arg(agent_id)
+ORDER BY revisions.revision_no DESC;
 
 -- name: GetAgentDefinitionVersion :one
-SELECT * FROM agent_definition_versions
+SELECT
+    revisions.id, revisions.tenant_id, revisions.agent_id,
+    revisions.revision_no AS version,
+    revisions.name, revisions.description, revisions.icon AS emoji, revisions.category,
+    revisions.visibility, revisions.visibility_targets, revisions.main_agent_role,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object(
+        'id', members.id, 'name', members.name, 'role', members.role,
+        'model_id', members.model_connection_id,
+        'model_config_checksum', members.model_config_checksum,
+        'tools', COALESCE((SELECT jsonb_agg(tools.tool_key ORDER BY tools.ordinal) FROM agent_revision_member_builtin_tools tools WHERE tools.tenant_id = members.tenant_id AND tools.revision_id = members.revision_id AND tools.member_id = members.id), '[]'::jsonb),
+        'external_tool_ids', COALESCE((SELECT jsonb_agg(tools.external_tool_id ORDER BY tools.ordinal) FROM agent_revision_member_external_tools tools WHERE tools.tenant_id = members.tenant_id AND tools.revision_id = members.revision_id AND tools.member_id = members.id), '[]'::jsonb),
+        'knowledge_base_ids', COALESCE((SELECT jsonb_agg(kb.knowledge_base_id ORDER BY kb.ordinal) FROM agent_revision_member_knowledge_bases kb WHERE kb.tenant_id = members.tenant_id AND kb.revision_id = members.revision_id AND kb.member_id = members.id), '[]'::jsonb)
+    ) ORDER BY members.ordinal) FROM agent_revision_members members WHERE members.tenant_id = revisions.tenant_id AND members.revision_id = revisions.id), '[]'::jsonb) AS sub_agents,
+    revisions.system_prompt, revisions.welcome_message, revisions.suggested_questions,
+    revisions.suggested_question_translations,
+    COALESCE((SELECT jsonb_agg(tools.tool_key ORDER BY tools.ordinal) FROM agent_revision_builtin_tools tools WHERE tools.tenant_id = revisions.tenant_id AND tools.revision_id = revisions.id), '[]'::jsonb) AS tools,
+    COALESCE((SELECT jsonb_agg(tools.external_tool_id ORDER BY tools.ordinal) FROM agent_revision_external_tools tools WHERE tools.tenant_id = revisions.tenant_id AND tools.revision_id = revisions.id), '[]'::jsonb) AS external_tool_ids,
+    COALESCE((SELECT jsonb_agg(kb.knowledge_base_id ORDER BY kb.ordinal) FROM agent_revision_knowledge_bases kb WHERE kb.tenant_id = revisions.tenant_id AND kb.revision_id = revisions.id), '[]'::jsonb) AS knowledge_base_ids,
+    revisions.model_connection_id AS model_id,
+    revisions.model_config_checksum,
+    GREATEST(revisions.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    revisions.config_schema_version,
+    revisions.checksum,
+    revisions.revision_note AS note,
+    revisions.created_by_account_id, revisions.created_at
+FROM agent_revisions revisions
+WHERE revisions.tenant_id = sqlc.arg(tenant_id)
+  AND revisions.agent_id = sqlc.arg(agent_id)
+  AND revisions.revision_no = sqlc.arg(version);
+
+-- name: UpsertCredentialSecretV2 :one
+INSERT INTO credential_secrets (
+    id, tenant_id, name, secret_type, ciphertext, preview, status,
+    created_by_account_id, created_at, updated_at, revoked_at
+) VALUES (
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(name), sqlc.arg(secret_type),
+    sqlc.arg(ciphertext), sqlc.arg(preview), sqlc.arg(status),
+    sqlc.arg(created_by_account_id), sqlc.arg(created_at), sqlc.arg(updated_at), sqlc.arg(revoked_at)
+)
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    secret_type = EXCLUDED.secret_type,
+    ciphertext = EXCLUDED.ciphertext,
+    preview = EXCLUDED.preview,
+    status = EXCLUDED.status,
+    updated_at = EXCLUDED.updated_at,
+    revoked_at = EXCLUDED.revoked_at
+WHERE credential_secrets.tenant_id = EXCLUDED.tenant_id
+RETURNING *;
+
+-- name: GetCredentialSecretV2 :one
+SELECT *
+FROM credential_secrets
+WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id);
+
+-- name: RevokeCredentialSecretV2 :one
+UPDATE credential_secrets
+SET status = 'revoked', revoked_at = sqlc.arg(revoked_at), updated_at = sqlc.arg(revoked_at)
 WHERE tenant_id = sqlc.arg(tenant_id)
-  AND agent_id = sqlc.arg(agent_id)
-  AND version = sqlc.arg(version);
+  AND id = sqlc.arg(id)
+  AND status = 'active'
+RETURNING *;
+
+-- name: GetAgentExternalToolV2 :one
+SELECT
+    connections.id, connections.tenant_id, connections.name, connections.description,
+    connections.kind, connections.transport, connections.endpoint_url,
+    connections.auth_type, connections.auth_header_name, connections.auth_username,
+    COALESCE(secrets.ciphertext, '')::text AS auth_secret_ciphertext,
+    connections.credential_secret_id, GREATEST(connections.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    connections.status, connections.last_tested_at, connections.last_test_status, connections.last_test_message,
+    connections.created_by_account_id, connections.created_at, connections.updated_at, connections.archived_at
+FROM external_tool_connections connections
+LEFT JOIN credential_secrets secrets
+  ON secrets.tenant_id = connections.tenant_id AND secrets.id = connections.credential_secret_id AND secrets.status = 'active'
+WHERE connections.tenant_id = sqlc.arg(tenant_id) AND connections.id = sqlc.arg(id);
+
+-- name: UpdateAgentExternalToolTestResultV2 :one
+WITH updated AS (
+    UPDATE external_tool_connections
+    SET last_tested_at = sqlc.arg(last_tested_at),
+        last_test_status = sqlc.arg(last_test_status),
+        last_test_message = sqlc.arg(last_test_message),
+        updated_at = sqlc.arg(last_tested_at)
+    WHERE external_tool_connections.tenant_id = sqlc.arg(tenant_id)
+      AND external_tool_connections.id = sqlc.arg(id)
+    RETURNING *
+)
+SELECT
+    updated.id, updated.tenant_id, updated.name, updated.description,
+    updated.kind, updated.transport, updated.endpoint_url,
+    updated.auth_type, updated.auth_header_name, updated.auth_username,
+    COALESCE(secrets.ciphertext, '')::text AS auth_secret_ciphertext,
+    updated.credential_secret_id, GREATEST(updated.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    updated.status, updated.last_tested_at, updated.last_test_status, updated.last_test_message,
+    updated.created_by_account_id, updated.created_at, updated.updated_at, updated.archived_at
+FROM updated
+LEFT JOIN credential_secrets secrets
+  ON secrets.tenant_id = updated.tenant_id AND secrets.id = updated.credential_secret_id AND secrets.status = 'active';
+
+-- name: ArchiveAgentExternalToolCapabilitiesV2 :exec
+UPDATE external_tools
+SET enabled = false,
+    archived_at = COALESCE(archived_at, sqlc.arg(archived_at)),
+    updated_at = sqlc.arg(archived_at)
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND connection_id = sqlc.arg(connection_id)
+  AND archived_at IS NULL;
+
+-- name: UpsertAgentExternalToolCapabilityV2 :one
+INSERT INTO external_tools (
+    id, tenant_id, connection_id, tool_name, description,
+    http_method, http_path, input_schema, output_schema,
+    readonly, enabled, schema_checksum, discovered_at, updated_at, archived_at
+) VALUES (
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(connection_id), sqlc.arg(tool_name), sqlc.arg(description),
+    sqlc.arg(http_method), sqlc.arg(http_path), sqlc.arg(input_schema)::jsonb, sqlc.arg(output_schema)::jsonb,
+    sqlc.arg(readonly), sqlc.arg(enabled), sqlc.arg(schema_checksum),
+    sqlc.arg(discovered_at), sqlc.arg(updated_at), NULL
+)
+ON CONFLICT (tenant_id, connection_id, tool_name) DO UPDATE SET
+    description = EXCLUDED.description,
+    http_method = EXCLUDED.http_method,
+    http_path = EXCLUDED.http_path,
+    input_schema = EXCLUDED.input_schema,
+    output_schema = EXCLUDED.output_schema,
+    readonly = EXCLUDED.readonly,
+    enabled = EXCLUDED.enabled,
+    schema_checksum = EXCLUDED.schema_checksum,
+    discovered_at = EXCLUDED.discovered_at,
+    updated_at = EXCLUDED.updated_at,
+    archived_at = NULL
+RETURNING *;
+
+-- name: GetAgentExternalToolCapabilityV2 :one
+SELECT tools.*
+FROM external_tools tools
+JOIN external_tool_connections connections
+  ON connections.tenant_id = tools.tenant_id
+ AND connections.id = tools.connection_id
+ AND connections.status = 'active'
+WHERE tools.tenant_id = sqlc.arg(tenant_id)
+  AND tools.id = sqlc.arg(id)
+  AND tools.enabled
+  AND tools.archived_at IS NULL;
+
+-- name: ListAgentExternalToolCapabilitiesV2 :many
+SELECT tools.*
+FROM external_tools tools
+JOIN external_tool_connections connections
+  ON connections.tenant_id = tools.tenant_id
+ AND connections.id = tools.connection_id
+ AND connections.status = 'active'
+WHERE tools.tenant_id = sqlc.arg(tenant_id)
+  AND tools.connection_id = sqlc.arg(connection_id)
+  AND tools.enabled
+  AND tools.archived_at IS NULL
+ORDER BY tools.tool_name, tools.id;
+
+-- name: ListAgentExternalToolCapabilitiesAllV2 :many
+SELECT *
+FROM external_tools
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND connection_id = sqlc.arg(connection_id)
+ORDER BY archived_at NULLS FIRST, tool_name, id;
+
+-- name: ListAgentExternalToolCapabilitiesByIDsV2 :many
+SELECT tools.*
+FROM external_tools tools
+JOIN external_tool_connections connections
+  ON connections.tenant_id = tools.tenant_id
+ AND connections.id = tools.connection_id
+ AND connections.status = 'active'
+WHERE tools.tenant_id = sqlc.arg(tenant_id)
+  AND tools.id = ANY(sqlc.arg(ids)::text[])
+  AND tools.enabled
+  AND tools.archived_at IS NULL
+ORDER BY tools.tool_name, tools.id;
+
+-- name: ListAgentRevisionExternalToolBindingsV2 :many
+SELECT *
+FROM agent_revision_external_tools
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND revision_id = sqlc.arg(revision_id)
+ORDER BY ordinal, external_tool_id;
+
+-- name: ListAgentRevisionMemberExternalToolBindingsV2 :many
+SELECT *
+FROM agent_revision_member_external_tools
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND revision_id = sqlc.arg(revision_id)
+ORDER BY member_id, ordinal, external_tool_id;

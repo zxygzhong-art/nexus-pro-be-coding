@@ -5,6 +5,8 @@ import (
 	"math"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
+
 	"nexus-pro-api/internal/domain"
 	sqlc "nexus-pro-api/internal/platform/postgres/db"
 )
@@ -15,7 +17,8 @@ func (s *Store) UpsertAgentSession(execCtx context.Context, v domain.AgentSessio
 		ID:             v.ID,
 		TenantID:       v.TenantID,
 		AccountID:      v.AccountID,
-		AgentID:        nullableText(v.AgentID),
+		AgentID:        v.AgentID,
+		SegmentID:      v.SegmentID,
 		Title:          v.Title,
 		Status:         string(v.Status),
 		ContextVersion: v.ContextVersion,
@@ -35,7 +38,7 @@ func (s *Store) GetAgentSession(execCtx context.Context, tenantID, id string) (d
 	if err != nil {
 		return domain.AgentSession{}, false, err
 	}
-	return fromAgentSession(v), true, nil
+	return agentSessionFromFields(v.ID, v.TenantID, v.AccountID, textFrom(v.AgentID), v.SegmentID, v.Title, v.Status, v.ContextVersion, v.LastMessageAt, v.CreatedAt, v.UpdatedAt), true, nil
 }
 
 // GetAgentSessionForUpdate locks an agent session for a context-version write transaction.
@@ -47,7 +50,7 @@ func (s *Store) GetAgentSessionForUpdate(execCtx context.Context, tenantID, id s
 	if err != nil {
 		return domain.AgentSession{}, false, err
 	}
-	return fromAgentSession(v), true, nil
+	return agentSessionFromFields(v.ID, v.TenantID, v.AccountID, textFrom(v.AgentID), v.SegmentID, v.Title, v.Status, v.ContextVersion, v.LastMessageAt, v.CreatedAt, v.UpdatedAt), true, nil
 }
 
 // ListAgentSessionsByAccount 從儲存層列出 account 的 agent 會話。
@@ -65,7 +68,11 @@ func (s *Store) ListAgentSessionsByAccount(execCtx context.Context, tenantID, ac
 	if err != nil {
 		return nil, err
 	}
-	return mapSlice(items, fromAgentSession), nil
+	out := make([]domain.AgentSession, 0, len(items))
+	for _, item := range items {
+		out = append(out, agentSessionFromFields(item.ID, item.TenantID, item.AccountID, textFrom(item.AgentID), item.SegmentID, item.Title, item.Status, item.ContextVersion, item.LastMessageAt, item.CreatedAt, item.UpdatedAt))
+	}
+	return out, nil
 }
 
 // ListAgentUsageByAccount returns a filtered and ordered account usage page.
@@ -146,21 +153,20 @@ func (s *Store) DeleteAgentSession(execCtx context.Context, tenantID, id string)
 	if err != nil {
 		return domain.AgentSession{}, false, err
 	}
-	return fromAgentSession(v), true, nil
+	return agentSessionFromFields(v.ID, v.TenantID, v.AccountID, textFrom(v.AgentID), v.SegmentID, v.Title, v.Status, v.ContextVersion, v.LastMessageAt, v.CreatedAt, v.UpdatedAt), true, nil
 }
 
 // InsertAgentSessionMessage 從儲存層新增 agent 會話訊息。
 func (s *Store) InsertAgentSessionMessage(execCtx context.Context, v domain.AgentSessionMessage) error {
 	_, err := s.q.InsertAgentSessionMessage(tenantContext(execCtx, v.TenantID), sqlc.InsertAgentSessionMessageParams{
-		ID:             v.ID,
-		TenantID:       v.TenantID,
-		SessionID:      v.SessionID,
-		Role:           string(v.Role),
-		Content:        v.Content,
-		RunID:          nullableText(v.RunID),
-		ContextVersion: v.ContextVersion,
-		Metadata:       mustJSON(v.Metadata),
-		CreatedAt:      timestamptz(v.CreatedAt),
+		ID:        v.ID,
+		TenantID:  v.TenantID,
+		SessionID: v.SessionID,
+		Role:      string(v.Role),
+		Content:   v.Content,
+		RunID:     v.RunID,
+		Metadata:  mustJSON(v.Metadata),
+		CreatedAt: timestamptz(v.CreatedAt),
 	})
 	return err
 }
@@ -178,7 +184,11 @@ func (s *Store) ListAgentSessionMessages(execCtx context.Context, tenantID, sess
 	if err != nil {
 		return nil, err
 	}
-	return mapSlice(items, fromAgentSessionMessage), nil
+	out := make([]domain.AgentSessionMessage, 0, len(items))
+	for _, item := range items {
+		out = append(out, agentSessionMessageFromFields(item.ID, item.TenantID, item.SessionID, item.SegmentID, item.SequenceNo, item.Role, item.Content, textFrom(item.RunID), item.ContextVersion, item.Metadata, item.CreatedAt))
+	}
+	return out, nil
 }
 
 // keysetLimitCount 將非正數 limit 視為不分頁（內部全量讀取），轉成 SQL LIMIT 參數。
@@ -202,20 +212,27 @@ func (s *Store) ListRecentAgentSessionMessages(execCtx context.Context, tenantID
 	if err != nil {
 		return nil, err
 	}
-	return mapSlice(items, fromAgentSessionMessage), nil
+	out := make([]domain.AgentSessionMessage, 0, len(items))
+	for _, item := range items {
+		out = append(out, agentSessionMessageFromFields(item.ID, item.TenantID, item.SessionID, item.SegmentID, item.SequenceNo, item.Role, item.Content, textFrom(item.RunID), item.ContextVersion, item.Metadata, item.CreatedAt))
+	}
+	return out, nil
 }
 
 // FailStaleAgentRunsBySession closes interrupted runs without touching a live run inside its timeout window.
 func (s *Store) FailStaleAgentRunsBySession(execCtx context.Context, tenantID, sessionID string, staleBefore, failedAt time.Time, reason string) (int, error) {
 	result, err := s.db.Exec(tenantContext(execCtx, tenantID), `
-UPDATE agent_runs
+UPDATE executions
 SET status = 'failed',
-    answer = CASE WHEN btrim(answer) = '' THEN $4 ELSE answer END,
-    updated_at = $5
+    completed_at = $4,
+    error_code = CASE WHEN error_code = '' THEN 'interrupted' ELSE error_code END,
+    error_category = CASE WHEN error_category = '' THEN 'runtime' ELSE error_category END,
+    safe_error_message = CASE WHEN safe_error_message = '' THEN $5 ELSE safe_error_message END,
+    updated_at = $4
 WHERE tenant_id = $1
-  AND session_id = $2
+  AND conversation_id = $2
   AND status IN ('queued', 'running')
-  AND updated_at < $3`, tenantID, sessionID, staleBefore, reason, failedAt)
+  AND updated_at < $3`, tenantID, sessionID, staleBefore, failedAt, reason)
 	if err != nil {
 		return 0, err
 	}
@@ -226,7 +243,7 @@ WHERE tenant_id = $1
 func (s *Store) CountActiveAgentRunsBySession(execCtx context.Context, tenantID, sessionID string) (int, error) {
 	count, err := s.q.CountActiveAgentRunsBySession(tenantContext(execCtx, tenantID), sqlc.CountActiveAgentRunsBySessionParams{
 		TenantID:  tenantID,
-		SessionID: nullableText(sessionID),
+		SessionID: sessionID,
 	})
 	if err != nil {
 		return 0, err
@@ -236,19 +253,22 @@ func (s *Store) CountActiveAgentRunsBySession(execCtx context.Context, tenantID,
 
 // UpsertAgentMemory 從儲存層處理 upsert agent 記憶。
 func (s *Store) UpsertAgentMemory(execCtx context.Context, v domain.AgentMemory) error {
-	_, err := s.q.UpsertAgentMemory(tenantContext(execCtx, v.TenantID), sqlc.UpsertAgentMemoryParams{
-		ID:         v.ID,
-		TenantID:   v.TenantID,
-		AccountID:  v.AccountID,
-		AgentID:    nullableText(v.AgentID),
-		SessionID:  nullableText(v.SessionID),
-		Key:        v.Key,
-		Content:    v.Content,
-		Source:     string(v.Source),
-		Importance: int32(v.Importance),
-		ExpiresAt:  nullableTimestamptz(v.ExpiresAt),
-		CreatedAt:  timestamptz(v.CreatedAt),
-		UpdatedAt:  timestamptz(v.UpdatedAt),
+	confidence, err := numericFromFloat64(v.Confidence)
+	if err != nil {
+		return err
+	}
+	status := v.Status
+	if status == "" {
+		status = "active"
+	}
+	_, err = s.q.UpsertAgentMemory(tenantContext(execCtx, v.TenantID), sqlc.UpsertAgentMemoryParams{
+		ID: v.ID, TenantID: v.TenantID, AccountID: v.AccountID,
+		AgentID: v.AgentID, SessionID: v.SessionID,
+		Key: v.Key, Content: v.Content, Source: string(v.Source),
+		SourceMessageID: v.SourceMessageID, Confidence: confidence,
+		Importance: int32(v.Importance), Status: status,
+		ExpiresAt: nullableTimestamptz(v.ExpiresAt),
+		CreatedAt: timestamptz(v.CreatedAt), UpdatedAt: timestamptz(v.UpdatedAt),
 	})
 	return err
 }
@@ -262,7 +282,7 @@ func (s *Store) GetAgentMemory(execCtx context.Context, tenantID, id string) (do
 	if err != nil {
 		return domain.AgentMemory{}, false, err
 	}
-	return fromAgentMemory(v), true, nil
+	return agentMemoryFromFields(v.ID, v.TenantID, v.AccountID, textFrom(v.AgentID), textFrom(v.SessionID), textFrom(v.SegmentID), v.Scope, textFrom(v.SourceMessageID), float64FromNumeric(v.Confidence), v.Status, v.Key, v.Content, v.Source, v.Importance, v.ExpiresAt, v.CreatedAt, v.UpdatedAt), true, nil
 }
 
 // ListAgentMemoriesByAccount 從儲存層列出 account 的 agent 記憶。
@@ -280,7 +300,11 @@ func (s *Store) ListAgentMemoriesByAccount(execCtx context.Context, tenantID, ac
 	if err != nil {
 		return nil, err
 	}
-	return mapSlice(items, fromAgentMemory), nil
+	out := make([]domain.AgentMemory, 0, len(items))
+	for _, item := range items {
+		out = append(out, agentMemoryFromFields(item.ID, item.TenantID, item.AccountID, textFrom(item.AgentID), textFrom(item.SessionID), textFrom(item.SegmentID), item.Scope, textFrom(item.SourceMessageID), float64FromNumeric(item.Confidence), item.Status, item.Key, item.Content, item.Source, item.Importance, item.ExpiresAt, item.CreatedAt, item.UpdatedAt))
+	}
+	return out, nil
 }
 
 // DeleteAgentMemory 從儲存層刪除 agent 記憶。
@@ -292,35 +316,22 @@ func (s *Store) DeleteAgentMemory(execCtx context.Context, tenantID, id string) 
 	if err != nil {
 		return domain.AgentMemory{}, false, err
 	}
-	return fromAgentMemory(v), true, nil
+	return agentMemoryFromFields(v.ID, v.TenantID, v.AccountID, textFrom(v.AgentID), textFrom(v.SessionID), textFrom(v.SegmentID), v.Scope, textFrom(v.SourceMessageID), float64FromNumeric(v.Confidence), v.Status, v.Key, v.Content, v.Source, v.Importance, v.ExpiresAt, v.CreatedAt, v.UpdatedAt), true, nil
 }
 
-func fromAgentSession(v sqlc.AgentSession) domain.AgentSession {
+func agentSessionFromFields(id, tenantID, accountID, agentID, segmentID, title, status string, contextVersion int64, lastMessageAt, createdAt, updatedAt pgtype.Timestamptz) domain.AgentSession {
 	return domain.AgentSession{
-		ID:             v.ID,
-		TenantID:       v.TenantID,
-		AccountID:      v.AccountID,
-		AgentID:        textFrom(v.AgentID),
-		Title:          v.Title,
-		Status:         domain.AgentSessionStatus(v.Status),
-		ContextVersion: v.ContextVersion,
-		LastMessageAt:  timePtrFrom(v.LastMessageAt),
-		CreatedAt:      timeFrom(v.CreatedAt),
-		UpdatedAt:      timeFrom(v.UpdatedAt),
+		ID: id, TenantID: tenantID, AccountID: accountID, AgentID: agentID, SegmentID: segmentID,
+		Title: title, Status: domain.AgentSessionStatus(status), ContextVersion: contextVersion,
+		LastMessageAt: timePtrFrom(lastMessageAt), CreatedAt: timeFrom(createdAt), UpdatedAt: timeFrom(updatedAt),
 	}
 }
 
-func fromAgentSessionMessage(v sqlc.AgentSessionMessage) domain.AgentSessionMessage {
+func agentSessionMessageFromFields(id, tenantID, sessionID, segmentID string, sequenceNo int64, role, content, runID string, contextVersion int64, metadata []byte, createdAt pgtype.Timestamptz) domain.AgentSessionMessage {
 	return domain.AgentSessionMessage{
-		ID:             v.ID,
-		TenantID:       v.TenantID,
-		SessionID:      v.SessionID,
-		Role:           domain.AgentMessageRole(v.Role),
-		Content:        v.Content,
-		RunID:          textFrom(v.RunID),
-		ContextVersion: v.ContextVersion,
-		Metadata:       jsonMap(v.Metadata),
-		CreatedAt:      timeFrom(v.CreatedAt),
+		ID: id, TenantID: tenantID, SessionID: sessionID, SegmentID: segmentID, SequenceNo: sequenceNo,
+		Role: domain.AgentMessageRole(role), Content: content, RunID: runID,
+		ContextVersion: contextVersion, Metadata: jsonMap(metadata), CreatedAt: timeFrom(createdAt),
 	}
 }
 
@@ -357,19 +368,12 @@ func fromAgentSessionUsage(v sqlc.ListAgentUsageBySessionRow) domain.AgentSessio
 	}
 }
 
-func fromAgentMemory(v sqlc.AgentMemory) domain.AgentMemory {
+func agentMemoryFromFields(id, tenantID, accountID, agentID, sessionID, segmentID, scope, sourceMessageID string, confidence float64, status, key, content, source string, importance int32, expiresAt, createdAt, updatedAt pgtype.Timestamptz) domain.AgentMemory {
 	return domain.AgentMemory{
-		ID:         v.ID,
-		TenantID:   v.TenantID,
-		AccountID:  v.AccountID,
-		AgentID:    textFrom(v.AgentID),
-		SessionID:  textFrom(v.SessionID),
-		Key:        v.Key,
-		Content:    v.Content,
-		Source:     domain.AgentMemorySource(v.Source),
-		Importance: int(v.Importance),
-		ExpiresAt:  timePtrFrom(v.ExpiresAt),
-		CreatedAt:  timeFrom(v.CreatedAt),
-		UpdatedAt:  timeFrom(v.UpdatedAt),
+		ID: id, TenantID: tenantID, AccountID: accountID, AgentID: agentID, SessionID: sessionID,
+		SegmentID: segmentID, Scope: scope, Key: key, Content: content,
+		Source: domain.AgentMemorySource(source), SourceMessageID: sourceMessageID,
+		Confidence: confidence, Status: status, Importance: int(importance),
+		ExpiresAt: timePtrFrom(expiresAt), CreatedAt: timeFrom(createdAt), UpdatedAt: timeFrom(updatedAt),
 	}
 }

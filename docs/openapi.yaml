@@ -319,101 +319,6 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "500": {$ref: "#/components/responses/InternalError"}
-    post:
-      summary: Create position
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PositionInput"
-      responses:
-        "201":
-          description: Created position
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PositionDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/hr/positions/ehrms/sync:
-    post:
-      summary: Sync positions from configured eHRMS
-      responses:
-        "200":
-          description: eHRMS position sync summary
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EHRMSPositionSyncDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/hr/positions/{id}:
-    get:
-      summary: Get position
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Position detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PositionDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    patch:
-      summary: Patch position
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PositionPatch"
-      responses:
-        "200":
-          description: Updated position
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PositionDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    delete:
-      summary: Disable position
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Disabled position
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PositionDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees:
     get:
       summary: List employees
@@ -432,49 +337,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmployeeListDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    post:
-      summary: Create employee aggregate
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EmployeeInput"
-      responses:
-        "201":
-          description: Created employee
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmployeeDetailDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/hr/employees/preview:
-    post:
-      summary: Validate and normalize employee create payload without persistence
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EmployeeInput"
-      responses:
-        "200":
-          description: Employee preview
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmployeePreviewDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -522,91 +384,6 @@ paths:
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
         "500": {$ref: "#/components/responses/InternalError"}
-    delete:
-      summary: Soft delete an employee
-      parameters:
-        - $ref: "#/components/parameters/EmployeeID"
-      responses:
-        "200":
-          description: Soft-deleted employee
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmployeeDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/hr/employees/{id}/preview:
-    post:
-      summary: Validate and preview employee patch without persistence
-      parameters:
-        - $ref: "#/components/parameters/EmployeeID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EmployeePatch"
-      responses:
-        "200":
-          description: Employee update preview
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmployeePreviewDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/hr/employees/{id}/avatar:
-    post:
-      summary: Upload or replace employee avatar
-      parameters:
-        - $ref: "#/components/parameters/EmployeeID"
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [file]
-              properties:
-                file: {type: string, format: binary}
-      responses:
-        "200":
-          description: Employee with updated avatar metadata
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmployeeDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    delete:
-      summary: Remove employee avatar
-      parameters:
-        - $ref: "#/components/parameters/EmployeeID"
-      responses:
-        "200":
-          description: Employee with avatar metadata removed
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmployeeDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
   /v1/hr/employees/stats:
     get:
       summary: Employee dashboard counts
@@ -622,97 +399,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/EmployeeStatsDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/hr/employee-options:
-    get:
-      summary: Employee form options
-      responses:
-        "200":
-          description: Employee options
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmployeeOptionsDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/hr/employees/import/template:
-    get:
-      summary: Download employee import template
-      parameters:
-        - {name: format, in: query, schema: {type: string, enum: [csv, xlsx], default: csv}}
-      responses:
-        "200":
-          description: CSV or XLSX template with 10 import columns
-          content:
-            text/csv:
-              schema:
-                type: string
-            application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
-              schema:
-                type: string
-                format: binary
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/hr/employees/import/preview:
-    post:
-      summary: Preview employee CSV or XLSX import
-      requestBody:
-        required: true
-        content:
-          multipart/form-data:
-            schema:
-              type: object
-              required: [file]
-              properties:
-                file:
-                  type: string
-                  format: binary
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EmployeeImportPreviewRequest"
-      responses:
-        "201":
-          description: Import preview session
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmployeeImportSessionDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/hr/employees/import/{id}/confirm:
-    post:
-      summary: Confirm a previewed employee import
-      parameters:
-        - {name: id, in: path, required: true, schema: {type: string}}
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EmployeeImportConfirmRequest"
-      responses:
-        "200":
-          description: Confirmed import session
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmployeeImportSessionDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -755,225 +441,6 @@ paths:
             text/csv:
               schema:
                 type: string
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    post:
-      summary: Export filtered employees as JSON
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EmployeeQuery"
-      responses:
-        "200":
-          description: Exported employee rows
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmployeeExportDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/hr/employees/batch-delete:
-    post:
-      summary: Soft delete employees in batch
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/BatchDeleteEmployeesRequest"
-      responses:
-        "200":
-          description: Batch delete results
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/BatchEmployeeDataResponse"
-        "207":
-          description: Batch delete results with per-employee failures
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/BatchEmployeeDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/hr/employees/{id}/invite:
-    post:
-      summary: Create or resend an account invitation for an employee
-      parameters:
-        - $ref: "#/components/parameters/EmployeeID"
-      requestBody:
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/InviteEmployeeRequest"
-      responses:
-        "200":
-          description: Employee with invitation account link
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmployeeDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/hr/employees/{id}/status-transition:
-    post:
-      summary: Transition employee lifecycle status
-      description: Use status=active, probation, or onboarding with reason and start_date to reinstate a resigned employee. Use status=resigned with reason and end_date to offboard. Use status=leave_suspended with reason, start_date, and end_date for leave suspension.
-      parameters:
-        - $ref: "#/components/parameters/EmployeeID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EmployeeStatusTransitionRequest"
-      responses:
-        "200":
-          description: Updated employee
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmployeeDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/hr/employees/{id}/status:
-    patch:
-      summary: Update employee status directly
-      parameters:
-        - $ref: "#/components/parameters/EmployeeID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EmployeeDirectStatusRequest"
-      responses:
-        "200":
-          description: Updated employee
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmployeeDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/hr/employees/{id}/contracts:
-    get:
-      summary: List employment contracts for an employee
-      parameters:
-        - $ref: "#/components/parameters/EmployeeID"
-      responses:
-        "200":
-          description: Employment contracts
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmploymentContractListDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    post:
-      summary: Create employment contract for an employee
-      parameters:
-        - $ref: "#/components/parameters/EmployeeID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EmploymentContractInput"
-      responses:
-        "201":
-          description: Created employment contract
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmploymentContractDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/hr/contracts/{id}:
-    get:
-      summary: Get employment contract
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Employment contract detail
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmploymentContractDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    patch:
-      summary: Patch employment contract
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EmploymentContractPatch"
-      responses:
-        "200":
-          description: Updated employment contract
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmploymentContractDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    delete:
-      summary: Terminate employment contract
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Terminated employment contract
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/EmploymentContractDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
@@ -1060,80 +527,6 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "409": {$ref: "#/components/responses/Conflict"}
         "503": {$ref: "#/components/responses/ServiceUnavailable"}
-  /v1/me/menus:
-    get:
-      summary: List current account menus
-      responses:
-        "200":
-          description: Current account menus
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-  /v1/authz/check:
-    post:
-      summary: Check one authorization request
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CheckRequest"
-      responses:
-        "200":
-          description: Authorization decision
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/CheckResultDataResponse"
-  /v1/authz/batch-check:
-    post:
-      summary: Check multiple authorization requests
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/BatchCheckRequest"
-      responses:
-        "200":
-          description: Batch authorization decisions
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/BatchCheckResultDataResponse"
-  /v1/authz/explain:
-    post:
-      summary: Explain one authorization decision
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CheckRequest"
-      responses:
-        "200":
-          description: Authorization explanation
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AuthzExplainDataResponse"
-  /v1/authz/simulate:
-    post:
-      summary: Simulate one authorization decision
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/AuthzSimulationRequest"
-      responses:
-        "200":
-          description: Authorization simulation
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AuthzSimulationDataResponse"
   /v1/iam/permissions:
     get:
       summary: List permissions
@@ -1152,34 +545,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
-  /v1/iam/roles:
-    get:
-      summary: List read-only IAM role projections
-      parameters:
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
-        - $ref: "#/components/parameters/Sort"
-      responses:
-        "200":
-          description: Role projection page
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/IAMRoleProjectionListDataResponse"
-  /v1/iam/role-bindings:
-    get:
-      summary: List read-only IAM role binding projections
-      parameters:
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
-        - $ref: "#/components/parameters/Sort"
-      responses:
-        "200":
-          description: Role binding projection page
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/IAMRoleBindingProjectionListDataResponse"
   /v1/iam/permission-packages:
     get:
       summary: List registered permission packages
@@ -1197,64 +562,6 @@ paths:
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    post:
-      summary: Register a draft permission package (platform-global authorizer required)
-      description: Requires the tenant package-create permission and a verified token with platform_admin=true or the nexus-platform-admin realm role.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/PermissionPackageContent"
-      responses:
-        "201":
-          description: Registered permission package
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PermissionPackageDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/iam/permission-packages/{id}/publish:
-    post:
-      summary: Publish a registered permission package version (platform-global authorizer required)
-      description: Requires the tenant package-publish permission and a verified token with platform_admin=true or the nexus-platform-admin realm role.
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Published permission package
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PermissionPackageDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/iam/permission-packages/{id}/import:
-    post:
-      summary: Import a published permission package into the current tenant
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Tenant import result
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PermissionPackageImportResultDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/iam/user-groups:
     get:
@@ -1304,21 +611,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/UserGroupDataResponse"
-    delete:
-      summary: Delete user group
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Deleted user group
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/UserGroupDataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
   /v1/iam/user-groups/{id}/members:
     get:
       summary: List user group members
@@ -1415,21 +707,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
-    delete:
-      summary: Delete permission set
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Deleted permission set
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
   /v1/iam/permission-sets/options:
     get:
       summary: List lightweight permission set options for pickers
@@ -1520,30 +797,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
-  /v1/iam/applications:
-    get:
-      summary: List IAM applications
-      responses:
-        "200":
-          description: IAM application catalog
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/IAMApplicationListDataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-  /v1/iam/resource-types:
-    get:
-      summary: List IAM resource types
-      responses:
-        "200":
-          description: IAM resource type catalog
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/IAMResourceTypeListDataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
   /v1/iam/data-scopes:
     get:
       summary: List data scopes
@@ -1688,44 +941,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-  /v1/iam/outbox-events:
-    get:
-      summary: List IAM outbox events
-      parameters:
-        - {name: status, in: query, schema: {type: string, enum: [pending, processing, succeeded, failed, parked, dead_lettered]}}
-        - {name: event_type, in: query, schema: {type: string}}
-        - {name: last_error, in: query, schema: {type: string}}
-        - {name: has_error, in: query, schema: {type: boolean}}
-        - {name: retry_count, in: query, schema: {type: integer, minimum: 0}}
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
-        - $ref: "#/components/parameters/Sort"
-      responses:
-        "200":
-          description: Outbox event page
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OutboxEventPageDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-  /v1/iam/outbox-events/{id}/retry:
-    post:
-      summary: Retry a failed, parked, or dead-lettered outbox event
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Outbox event reset to pending
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/OutboxEventDataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
   /v1/iam/assumable-roles:
     get:
       summary: List assumable roles
@@ -1758,36 +973,6 @@ paths:
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
-  /v1/iam/assumable-roles/{id}:
-    patch:
-      summary: Update assumable role
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Updated assumable role
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-    delete:
-      summary: Delete assumable role
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Deleted assumable role
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "409": {$ref: "#/components/responses/Conflict"}
   /v1/iam/assumable-roles/{id}/assume:
     post:
       summary: Assume a role
@@ -1949,83 +1134,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LeaveRequestPageDataResponse"
-    post:
-      summary: Create leave request
-      responses:
-        "201":
-          description: Created leave request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LeaveRequestDataResponse"
-  /v1/attendance/leave-requests/evaluate:
-    post:
-      summary: Evaluate a leave request without creating it
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/EvaluateLeaveRequestRequest"
-      responses:
-        "200":
-          description: Policy, balance, and proof decision for the proposed request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/LeaveRequestEvaluationDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/attendance/overtime-requests:
-    get:
-      summary: List overtime requests
-      parameters:
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
-        - $ref: "#/components/parameters/Sort"
-      responses:
-        "200":
-          description: Overtime request page
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-    post:
-      summary: Create overtime request
-      responses:
-        "201":
-          description: Created overtime request
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
   /v1/attendance/policies/current:
     get:
       summary: Get current attendance policy
       responses:
         "200":
           description: Current attendance policy projection
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AttendancePolicyDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-    patch:
-      summary: Update current attendance policy
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateAttendancePolicyRequest"
-      responses:
-        "200":
-          description: Updated current attendance policy projection
           content:
             application/json:
               schema:
@@ -2071,27 +1185,6 @@ paths:
               schema:
                 $ref: "#/components/schemas/AttendancePolicyDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/attendance/leave-balances/grant:
-    post:
-      deprecated: true
-      summary: Retired local leave balance grant endpoint
-      description: Always returns 400 after authorization. Leave balances must be refreshed through EHRMS attendance sync.
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/GrantLeaveBalancesRequest"
-      responses:
-        "400":
-          description: Local leave balance grants are retired; use EHRMS attendance sync
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/ErrorResponse"
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
@@ -2379,20 +1472,6 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/workspace:
-    get:
-      summary: Get workspace settings aggregate
-      responses:
-        "200":
-          description: Workspace settings panes
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PlatformWorkspaceDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/workspace/overview:
     get:
@@ -3134,12 +2213,12 @@ paths:
         "503": {$ref: "#/components/responses/InternalError"}
   /v1/workspace/agents/external-tools/{id}:
     delete:
-      summary: Delete a workspace external agent tool
+      summary: Archive a workspace external agent tool
       parameters:
         - $ref: "#/components/parameters/ID"
       responses:
         "200":
-          description: Deleted external tool
+          description: Archived external tool; historical revision and execution references are retained
           content:
             application/json:
               schema:
@@ -3148,75 +2227,41 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
-  /v1/workspace/employees:
-    get:
-      summary: Get workspace employee table
-      parameters:
-        - {name: department_id, in: query, schema: {type: string}}
-        - {name: department, in: query, schema: {type: string}}
-        - {name: dept, in: query, schema: {type: string}}
-        - {name: status, in: query, schema: {type: string, enum: [在職, 待加入, 已停用]}}
-        - {name: employment_status, in: query, schema: {type: string, enum: [active, probation, leave_suspended, onboarding, resigned, deleted]}}
-        - {name: keyword, in: query, schema: {type: string}}
-        - {name: search, in: query, schema: {type: string}}
-      responses:
-        "200":
-          description: Employee table rows and CSV headers
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/PlatformWorkspaceEmployeesDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/workspace/organization/employees/{id}/manager:
-    patch:
-      summary: Update one employee manager from the workspace organization view
+  /v1/workspace/agents/external-tools/{id}/test:
+    post:
+      summary: Test an external agent tool connection
       parameters:
         - $ref: "#/components/parameters/ID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateWorkspaceOrganizationManagerRequest"
       responses:
         "200":
-          description: Updated employee organization hierarchy
+          description: Connection with its latest test result
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/WorkspaceOrganizationDataResponse"
+                $ref: "#/components/schemas/AgentExternalToolDataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "502": {$ref: "#/components/responses/InternalError"}
+        "503": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/agents/external-tools/{id}/discover:
+    post:
+      summary: Refresh capabilities discovered from an MCP connection
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      responses:
+        "200":
+          description: Connection with its refreshed capability catalogue
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentExternalToolDataResponse"
         "400": {$ref: "#/components/responses/ValidationError"}
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "422": {$ref: "#/components/responses/ValidationError"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/workspace/organization/employees/{id}/visibility:
-    patch:
-      summary: Update whether one employee is shown in the organization chart preview
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/UpdateWorkspaceOrganizationVisibilityRequest"
-      responses:
-        "200":
-          description: Updated organization chart visibility
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/WorkspaceOrganizationDataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
+        "502": {$ref: "#/components/responses/InternalError"}
+        "503": {$ref: "#/components/responses/InternalError"}
   /v1/workspace/insights:
     get:
       summary: Get insight report dashboard projection
@@ -3270,38 +2315,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
-  /v1/form-builder/capabilities:
-    get:
-      summary: Read Agent-safe form builder capabilities
-      responses:
-        "200":
-          description: Schema v2 field, widget, metadata-only data source, and workflow target capabilities
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-  /v1/form-builder/data-sources:
-    get:
-      summary: Read metadata-only form data source schemas
-      responses:
-        "200":
-          description: Data source fields without tenant business records
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-  /v1/form-builder/workflow-targets:
-    get:
-      summary: Read allowed workflow target roles
-      responses:
-        "200":
-          description: Workflow target role catalog
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
   /v1/form-builder/drafts:
     get:
       summary: List form definition drafts
@@ -3315,74 +2328,6 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
-    post:
-      summary: Create a controlled form definition draft
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/CreateFormDefinitionDraftRequest"
-      responses:
-        "201":
-          description: Created draft
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/DataResponse"}
-  /v1/form-builder/drafts/{id}:
-    get:
-      summary: Get a form definition draft
-      parameters: [{$ref: "#/components/parameters/ID"}]
-      responses:
-        "200":
-          description: Form definition draft
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/DataResponse"}
-    patch:
-      summary: Update a form definition draft with optimistic revision
-      parameters: [{$ref: "#/components/parameters/ID"}]
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema: {$ref: "#/components/schemas/UpdateFormDefinitionDraftRequest"}
-      responses:
-        "200":
-          description: Updated draft
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/DataResponse"}
-  /v1/form-builder/drafts/{id}/validate:
-    post:
-      summary: Validate and compile a form definition draft
-      parameters: [{$ref: "#/components/parameters/ID"}]
-      responses:
-        "200":
-          description: Validation and runtime preview
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/DataResponse"}
-  /v1/form-builder/drafts/{id}/preview:
-    post:
-      summary: Preview a form definition draft
-      parameters: [{$ref: "#/components/parameters/ID"}]
-      responses:
-        "200":
-          description: Preview
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/DataResponse"}
-  /v1/form-builder/drafts/{id}/simulate:
-    post:
-      summary: Simulate the workflow path without starting a run
-      parameters: [{$ref: "#/components/parameters/ID"}]
-      responses:
-        "200":
-          description: Workflow simulation
-          content:
-            application/json:
-              schema: {$ref: "#/components/schemas/DataResponse"}
   /v1/form-builder/drafts/{id}/submit-review:
     post:
       summary: Submit a valid draft for administrator review
@@ -3413,29 +2358,6 @@ paths:
           content:
             application/json:
               schema: {$ref: "#/components/schemas/DataResponse"}
-  /v1/forms/templates:
-    get:
-      summary: List form templates
-      parameters:
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
-        - $ref: "#/components/parameters/Sort"
-      responses:
-        "200":
-          description: Form template page
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-    post:
-      summary: Create form template
-      responses:
-        "201":
-          description: Created form template
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
   /v1/workflows/form-data-sources:
     get:
       summary: List permission-filtered form data sources
@@ -3467,29 +2389,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
-        "500": {$ref: "#/components/responses/InternalError"}
-  /v1/workflows/forms:
-    get:
-      summary: List workflow form instances
-      parameters:
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
-        - $ref: "#/components/parameters/Sort"
-        - {name: status, in: query, schema: {type: string, enum: [all, submitted, pending, approved, rejected, cancelled]}}
-        - {name: template_id, in: query, schema: {type: string}}
-        - {name: template_key, in: query, schema: {type: string}}
-        - {name: applicant_account_id, in: query, schema: {type: string}}
-        - {name: mine, in: query, schema: {type: boolean}}
-      responses:
-        "200":
-          description: Workflow form instance page
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-        "400": {$ref: "#/components/responses/ValidationError"}
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/workflows/reviews:
     get:
@@ -3786,29 +2685,62 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
-  /v1/agents/runs:
-    get:
-      summary: List agent runs
-      parameters:
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
-        - $ref: "#/components/parameters/Sort"
-      responses:
-        "200":
-          description: Agent run page
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
+  /v1/workflows/forms/{id}/files:
     post:
-      summary: Create agent run
+      summary: Upload a file to a workflow form instance
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file: {type: string, format: binary}
       responses:
         "201":
-          description: Created agent run
+          description: Uploaded workflow form file metadata
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/DataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+  /v1/workflows/forms/{id}/files/{file_id}:
+    parameters:
+      - $ref: "#/components/parameters/ID"
+      - name: file_id
+        in: path
+        required: true
+        schema: {type: string}
+    get:
+      summary: Download a workflow form file
+      responses:
+        "200":
+          description: Authorized workflow form file bytes
+          content:
+            application/octet-stream:
+              schema: {type: string, format: binary}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+    delete:
+      summary: Delete a workflow form draft file
+      responses:
+        "200":
+          description: Deleted workflow form file metadata
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DataResponse"
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
   /v1/agents/chat:
     post:
       summary: Stream agent chat
@@ -3909,34 +2841,6 @@ paths:
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
   /v1/agents/sessions/{id}:
-    get:
-      summary: Get agent session
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Agent session
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-    patch:
-      summary: Update agent session
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Updated agent session
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
     delete:
       summary: Delete agent session
       parameters:
@@ -3988,20 +2892,6 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
   /v1/agents/sessions/{id}/files:
-    get:
-      summary: List files in the current session context
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Current-context session files
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/AgentSessionFileListDataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
     post:
       summary: Upload a UTF-8 text file into the current session context
       parameters:
@@ -4072,60 +2962,6 @@ paths:
                 $ref: "#/components/schemas/DataResponse"
         "401": {$ref: "#/components/responses/Unauthenticated"}
         "403": {$ref: "#/components/responses/Forbidden"}
-    post:
-      summary: Create agent memory
-      responses:
-        "201":
-          description: Created agent memory
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-  /v1/agents/memories/{id}:
-    patch:
-      summary: Update agent memory
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Updated agent memory
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-    delete:
-      summary: Delete agent memory
-      parameters:
-        - $ref: "#/components/parameters/ID"
-      responses:
-        "200":
-          description: Deleted agent memory
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
-        "401": {$ref: "#/components/responses/Unauthenticated"}
-        "403": {$ref: "#/components/responses/Forbidden"}
-        "404": {$ref: "#/components/responses/NotFound"}
-  /v1/audit-logs:
-    get:
-      summary: List audit logs
-      parameters:
-        - $ref: "#/components/parameters/Page"
-        - $ref: "#/components/parameters/PageSize"
-        - $ref: "#/components/parameters/Sort"
-      responses:
-        "200":
-          description: Audit log page
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/DataResponse"
 components:
   securitySchemes:
     bearerAuth:
@@ -4234,7 +3070,7 @@ components:
           description: Successful response payload.
     AgentExternalTool:
       type: object
-      required: [id, tenant_id, name, description, kind, transport, endpoint_url, auth_type, credential_set, created_at]
+      required: [id, tenant_id, name, description, kind, transport, endpoint_url, auth_type, timeout_seconds, credential_set, status, last_test_status, capabilities, created_at, updated_at]
       properties:
         id: {type: string}
         tenant_id: {type: string}
@@ -4246,9 +3082,38 @@ components:
         auth_type: {type: string, enum: [none, bearer, api_key, basic]}
         auth_header_name: {type: string, maxLength: 100}
         auth_username: {type: string, maxLength: 200}
+        timeout_seconds: {type: integer, minimum: 1, maximum: 120, default: 30}
         credential_set: {type: boolean}
+        status: {type: string, enum: [active, disabled, archived]}
+        last_tested_at: {type: string, format: date-time}
+        last_test_status: {type: string, enum: [untested, ok, failed]}
+        last_test_message: {type: string, maxLength: 500}
+        capabilities:
+          type: array
+          items: {$ref: "#/components/schemas/AgentExternalToolCapability"}
         created_by_account_id: {type: string}
         created_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        archived_at: {type: string, format: date-time}
+    AgentExternalToolCapability:
+      type: object
+      required: [id, tenant_id, connection_id, tool_name, description, input_schema, output_schema, readonly, enabled, schema_checksum, discovered_at, updated_at]
+      properties:
+        id: {type: string}
+        tenant_id: {type: string}
+        connection_id: {type: string}
+        tool_name: {type: string}
+        description: {type: string}
+        http_method: {type: string, enum: [GET, POST, PUT, PATCH, DELETE]}
+        http_path: {type: string}
+        input_schema: {type: object, additionalProperties: true}
+        output_schema: {type: object, additionalProperties: true}
+        readonly: {type: boolean}
+        enabled: {type: boolean}
+        schema_checksum: {type: string}
+        discovered_at: {type: string, format: date-time}
+        updated_at: {type: string, format: date-time}
+        archived_at: {type: string, format: date-time}
     CreateAgentExternalToolRequest:
       type: object
       required: [name, kind, endpoint_url]
@@ -4273,6 +3138,13 @@ components:
           writeOnly: true
           maxLength: 8192
           description: Required for bearer, api_key, and basic authentication; encrypted before persistence and never returned.
+        timeout_seconds: {type: integer, minimum: 1, maximum: 120, default: 30}
+        tool_name: {type: string, description: Required for a manual HTTP connection.}
+        http_method: {type: string, enum: [GET, POST, PUT, PATCH, DELETE], description: Required for a manual HTTP connection.}
+        http_path: {type: string, description: Same-origin relative path used by a manual HTTP capability.}
+        input_schema: {type: object, additionalProperties: true}
+        output_schema: {type: object, additionalProperties: true}
+        readonly: {type: boolean, default: false}
     AgentExternalToolListResponse:
       type: object
       required: [items, total]
@@ -4495,13 +3367,14 @@ components:
         data: {$ref: "#/components/schemas/KnowledgeSearchResponse"}
     AgentTeamMember:
       type: object
-      required: [id, name, role, model_id, tools, knowledge_base_ids]
+      required: [id, name, role, model_id, tools, external_tool_ids, knowledge_base_ids]
       properties:
         id: {type: string}
         name: {type: string}
         role: {type: string}
         model_id: {type: string}
         tools: {type: array, items: {type: string}}
+        external_tool_ids: {type: array, maxItems: 32, items: {type: string}}
         knowledge_base_ids: {type: array, items: {type: string}}
     LocalizedAgentSuggestedQuestion:
       type: object
@@ -4607,6 +3480,7 @@ components:
         suggested_questions: {type: array, maxItems: 10, items: {type: string, maxLength: 100}, description: Default-locale compatibility projection.}
         suggested_question_translations: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/LocalizedAgentSuggestedQuestion"}}
         tools: {type: array, items: {type: string}}
+        external_tool_ids: {type: array, maxItems: 32, items: {type: string}}
         knowledge_base_ids: {type: array, items: {type: string}}
         visibility: {type: string, enum: [all, department, role]}
         visibility_targets: {type: array, items: {type: string}}
@@ -4626,6 +3500,7 @@ components:
         suggested_questions: {type: array, maxItems: 10, items: {type: string, maxLength: 100}, description: Default-locale compatibility projection.}
         suggested_question_translations: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/LocalizedAgentSuggestedQuestion"}}
         tools: {type: array, items: {type: string}}
+        external_tool_ids: {type: array, maxItems: 32, items: {type: string}}
         knowledge_base_ids: {type: array, items: {type: string}}
         visibility: {type: string, enum: [all, department, role]}
         visibility_targets: {type: array, items: {type: string}}
@@ -4633,12 +3508,18 @@ components:
         version_note: {type: string}
     AgentDefinitionVersion:
       type: object
-      required: [id, tenant_id, agent_id, version, sub_agents, tools, knowledge_base_ids]
+      required: [id, tenant_id, agent_id, version, name, description, emoji, category, visibility, visibility_targets, sub_agents, tools, external_tool_ids, knowledge_base_ids, model_id, model_config_checksum, timeout_seconds, config_schema_version, checksum]
       properties:
         id: {type: string}
         tenant_id: {type: string}
         agent_id: {type: string}
         version: {type: integer, minimum: 1}
+        name: {type: string}
+        description: {type: string}
+        emoji: {type: string}
+        category: {type: string, enum: [workflow, doc, analytics, it]}
+        visibility: {type: string, enum: [all, department, role]}
+        visibility_targets: {type: array, items: {type: string}}
         main_agent_role: {type: string}
         sub_agents: {type: array, items: {$ref: "#/components/schemas/AgentTeamMember"}}
         system_prompt: {type: string}
@@ -4646,8 +3527,13 @@ components:
         suggested_questions: {type: array, items: {type: string}}
         suggested_question_translations: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/LocalizedAgentSuggestedQuestion"}}
         tools: {type: array, items: {type: string}}
+        external_tool_ids: {type: array, maxItems: 32, items: {type: string}}
         knowledge_base_ids: {type: array, items: {type: string}}
         model_id: {type: string}
+        model_config_checksum: {type: string}
+        timeout_seconds: {type: integer, minimum: 1}
+        config_schema_version: {type: integer, minimum: 1}
+        checksum: {type: string}
         note: {type: string}
         created_at: {type: string, format: date-time}
     AgentUsageStats:
@@ -4662,10 +3548,12 @@ components:
         top_prompts: {type: array, items: {type: string}}
     AgentDefinition:
       type: object
-      required: [id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage, created_at, updated_at]
+      required: [id, tenant_id, name, description, emoji, category, model_id, main_agent_role, sub_agents, system_prompt, welcome_message, suggested_questions, suggested_question_translations, tools, external_tool_ids, knowledge_base_ids, status, visibility, visibility_targets, timeout_seconds, version, published_version, usage, created_at, updated_at]
       properties:
         id: {type: string}
         tenant_id: {type: string}
+        draft_revision_id: {type: string}
+        published_revision_id: {type: string}
         name: {type: string}
         description: {type: string}
         emoji: {type: string}
@@ -4678,6 +3566,7 @@ components:
         suggested_questions: {type: array, maxItems: 10, items: {type: string, maxLength: 100}, description: Default-locale compatibility projection.}
         suggested_question_translations: {type: array, maxItems: 10, items: {$ref: "#/components/schemas/LocalizedAgentSuggestedQuestion"}}
         tools: {type: array, items: {type: string}}
+        external_tool_ids: {type: array, maxItems: 32, items: {type: string}}
         knowledge_base_ids: {type: array, items: {type: string}}
         status: {type: string, enum: [draft, published]}
         visibility: {type: string, enum: [all, department, role]}
@@ -4704,11 +3593,13 @@ components:
         data: {$ref: "#/components/schemas/AgentDefinitionListResponse"}
     AgentSessionFile:
       type: object
-      required: [id, tenant_id, session_id, context_version, created_by_account_id, original_filename, content_type, size_bytes, sha256, scan_status, parse_status, retention_class, state, created_at, updated_at]
+      required: [id, tenant_id, session_id, segment_id, conversation_file_id, context_version, created_by_account_id, original_filename, content_type, size_bytes, sha256, scan_status, parse_status, retention_class, state, created_at, updated_at]
       properties:
         id: {type: string}
         tenant_id: {type: string}
         session_id: {type: string}
+        segment_id: {type: string}
+        conversation_file_id: {type: string}
         context_version: {type: integer, format: int64, minimum: 1}
         created_by_account_id: {type: string}
         original_filename: {type: string}
@@ -4735,12 +3626,13 @@ components:
         data: {$ref: "#/components/schemas/AgentSessionFileListResponse"}
     AgentSession:
       type: object
-      required: [id, tenant_id, account_id, title, status, context_version, created_at, updated_at]
+      required: [id, tenant_id, account_id, segment_id, title, status, context_version, created_at, updated_at]
       properties:
         id: {type: string}
         tenant_id: {type: string}
         account_id: {type: string}
         agent_id: {type: string}
+        segment_id: {type: string}
         title: {type: string}
         status: {type: string, enum: [active, archived]}
         context_version: {type: integer, format: int64}
@@ -4760,11 +3652,13 @@ components:
         data: {$ref: "#/components/schemas/AgentSessionListPage"}
     AgentSessionMessage:
       type: object
-      required: [id, tenant_id, session_id, role, content, context_version, created_at]
+      required: [id, tenant_id, session_id, segment_id, sequence_no, role, content, context_version, created_at]
       properties:
         id: {type: string}
         tenant_id: {type: string}
         session_id: {type: string}
+        segment_id: {type: string}
+        sequence_no: {type: integer, format: int64, minimum: 1}
         role: {type: string, enum: [user, assistant, system, tool]}
         content: {type: string}
         run_id: {type: string}
@@ -6524,12 +5418,6 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/EmployeeOptions"
-    EmployeeImportSessionDataResponse:
-      type: object
-      required: [data]
-      properties:
-        data:
-          $ref: "#/components/schemas/EmployeeImportSession"
     EHRMSEmployeeSyncDataResponse:
       type: object
       required: [data]
@@ -6542,12 +5430,6 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/EHRMSOrgUnitSyncResponse"
-    EHRMSPositionSyncDataResponse:
-      type: object
-      required: [data]
-      properties:
-        data:
-          $ref: "#/components/schemas/EHRMSPositionSyncResponse"
     EmployeeExportDataResponse:
       type: object
       required: [data]
@@ -6582,20 +5464,6 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/PositionListResponse"
-    EmploymentContractDataResponse:
-      type: object
-      required: [data]
-      properties:
-        data:
-          $ref: "#/components/schemas/EmploymentContract"
-    EmploymentContractListDataResponse:
-      type: object
-      required: [data]
-      properties:
-        data:
-          type: array
-          items:
-            $ref: "#/components/schemas/EmploymentContract"
     AttendanceWorksiteDataResponse:
       type: object
       required: [data]
@@ -6682,23 +5550,23 @@ components:
             sort: {type: string}
     LeaveBalance:
       type: object
-      required: [id, employee_id, leave_type, remaining_hours, updated_at]
+      required: [id, employee_id, leave_type, remaining_minutes, updated_at]
       properties:
         id: {type: string}
         tenant_id: {type: string}
         employee_id: {type: string}
         leave_type: {type: string}
         leave_type_id: {type: string}
-        remaining_hours: {type: number, description: Effective Nexus availability after applying local overlay entries}
-        upstream_remaining_hours: {type: number, description: Unmodified remaining balance from the latest eHRMS snapshot}
-        pending_hours: {type: number, minimum: 0, description: Nexus hours reserved by requests still under review}
-        local_used_hours: {type: number, minimum: 0, description: Approved Nexus-only hours not yet reconciled to eHRMS}
-        granted_hours: {type: number}
-        used_hours: {type: number, description: Used hours reported by eHRMS}
+        remaining_minutes: {type: integer, description: Effective Nexus availability after applying local entries}
+        snapshot_remaining_minutes: {type: integer, description: Unmodified remaining balance from the latest upstream snapshot}
+        pending_minutes: {type: integer, minimum: 0, description: Minutes reserved by requests still under review}
+        local_used_minutes: {type: integer, minimum: 0, description: Approved local minutes not yet reconciled upstream}
+        granted_minutes: {type: integer}
+        used_minutes: {type: integer, description: Used minutes reported by the upstream snapshot}
         period_start: {type: string, format: date}
         period_end: {type: string, format: date}
         entitlement_year: {type: integer}
-        carry_in_hours: {type: number}
+        carry_in_minutes: {type: integer}
         carry_expire: {type: string, format: date}
         source: {type: string, description: Entitlement snapshot source; leave quotas synchronized from eHRMS use ehrms}
         external_leave_code: {type: string}
@@ -6720,7 +5588,7 @@ components:
             sort: {type: string}
     LeaveRequest:
       type: object
-      required: [id, employee_id, leave_type, start_at, end_at, hours, status, created_at, updated_at]
+      required: [id, employee_id, leave_type, start_at, end_at, requested_minutes, status, created_at, updated_at]
       properties:
         id: {type: string}
         tenant_id: {type: string}
@@ -6729,11 +5597,10 @@ components:
         leave_type_id: {type: string}
         start_at: {type: string, format: date-time}
         end_at: {type: string, format: date-time}
-        hours: {type: number}
+        requested_minutes: {type: integer, minimum: 1}
         reason: {type: string}
         status: {type: string, enum: [pending_approval, approved, rejected, cancelled]}
         form_instance_id: {type: string}
-        leave_balance_id: {type: string}
         reconciliation_status:
           type: string
           enum: [not_required, nexus_only, matched, ambiguous, mismatch, manually_confirmed]
@@ -6933,7 +5800,7 @@ components:
         policy_version: {type: integer}
     LeaveRequestEvaluation:
       type: object
-      required: [eligible, status, message, employee_id, leave_type_id, leave_type, leave_type_name, hours, policy_version, balance_required, balance_initialized, proof_required, rule]
+      required: [eligible, status, message, employee_id, leave_type_id, leave_type, leave_type_name, requested_minutes, policy_version, balance_required, balance_initialized, proof_required, rule]
       properties:
         eligible: {type: boolean}
         status: {type: string, enum: [eligible, eligible_without_balance, unsupported_leave_type]}
@@ -6942,12 +5809,12 @@ components:
         leave_type_id: {type: string}
         leave_type: {type: string}
         leave_type_name: {type: string}
-        hours: {type: number}
+        requested_minutes: {type: integer, minimum: 1}
         policy_version: {type: integer}
         balance_required: {type: boolean}
         balance_initialized: {type: boolean}
         balance_fallback_reason: {type: string, enum: [balance_not_initialized, insufficient_balance]}
-        available_hours: {type: number}
+        available_minutes: {type: integer, minimum: 0}
         proof_required: {type: boolean}
         rule:
           $ref: "#/components/schemas/LeaveRuleSnapshot"
@@ -7496,19 +6363,6 @@ components:
       type: object
       properties:
         reason: {type: string, minLength: 2, maxLength: 200, description: Optional; when provided it must be 2-200 characters (after trimming whitespace). Reviewing a non-pending correction returns 409 Conflict.}
-    EmployeeImportPreviewRequest:
-      type: object
-      required: [filename, content]
-      properties:
-        filename: {type: string}
-        content:
-          type: string
-          description: Raw CSV or XLSX content when JSON upload is used.
-    EmployeeImportConfirmRequest:
-      type: object
-      properties:
-        mode: {type: string, enum: [create, update, upsert], default: create}
-        failure_policy: {type: string, enum: [all_or_nothing], default: all_or_nothing}
     EHRMSEmployeeSyncRequest:
       type: object
       properties:
@@ -7525,10 +6379,6 @@ components:
           enum: [create, update, upsert]
           default: upsert
           description: create rejects existing employee/date summaries, update rejects missing summaries, upsert creates or updates by employee/date.
-        since:
-          type: string
-          format: date
-          description: Optional YYYY-MM-DD lower bound; older upstream summary rows are skipped.
     BatchDeleteEmployeesRequest:
       type: object
       required: [employee_ids, reason]
@@ -7762,52 +6612,6 @@ components:
         page: {type: integer}
         page_size: {type: integer}
         sort: {type: string}
-    EmploymentContract:
-      description: Tenant-scoped employment contract metadata. attachment_object_key stores object metadata only.
-      allOf:
-        - $ref: "#/components/schemas/EmploymentContractInput"
-        - type: object
-          required: [id, tenant_id, employee_id, contract_type, start_date, status, version, created_at, updated_at]
-          properties:
-            id: {type: string}
-            tenant_id: {type: string}
-            employee_id: {type: string}
-            version: {type: integer, format: int64}
-            created_at: {type: string, format: date-time}
-            updated_at: {type: string, format: date-time}
-    EmploymentContractInput:
-      type: object
-      required: [contract_type, start_date]
-      properties:
-        contract_type:
-          $ref: "#/components/schemas/EmploymentContractType"
-        contract_no: {type: string}
-        start_date: {type: string, format: date-time}
-        end_date: {type: string, format: date-time}
-        status:
-          $ref: "#/components/schemas/EmploymentContractStatus"
-        attachment_object_key:
-          type: string
-          description: Object-store key for an already uploaded attachment.
-        notes: {type: string}
-    EmploymentContractPatch:
-      type: object
-      properties:
-        contract_type:
-          $ref: "#/components/schemas/EmploymentContractType"
-        contract_no: {type: string}
-        start_date: {type: string, format: date-time}
-        end_date: {type: string, format: date-time}
-        status:
-          $ref: "#/components/schemas/EmploymentContractStatus"
-        attachment_object_key: {type: string}
-        notes: {type: string}
-    EmploymentContractType:
-      type: string
-      enum: [fulltime, parttime, contractor, intern]
-    EmploymentContractStatus:
-      type: string
-      enum: [draft, active, expired, terminated, renewed]
     Employee:
       description: Persisted tenant resource. id is globally unique across tenants; tenant_id scopes ownership and authorization.
       allOf:
@@ -8201,31 +7005,6 @@ components:
         job_levels:
           type: array
           items: {type: string}
-    EmployeeImportSession:
-      type: object
-      description: Persisted tenant resource. id is globally unique across tenants; tenant_id scopes ownership and authorization.
-      properties:
-        id: {type: string}
-        tenant_id: {type: string}
-        filename: {type: string}
-        object_provider: {type: string}
-        object_bucket: {type: string}
-        object_key: {type: string}
-        content_type: {type: string}
-        size_bytes: {type: integer, format: int64}
-        sha256: {type: string}
-        status: {type: string}
-        rows:
-          type: array
-          items: {type: object}
-        summary:
-          type: object
-          additionalProperties: true
-        created_by_account_id: {type: string}
-        confirmed_by_account_id: {type: string}
-        created_at: {type: string, format: date-time}
-        expires_at: {type: string, format: date-time}
-        confirmed_at: {type: string, format: date-time}
     EHRMSEmployeeSyncResponse:
       type: object
       properties:
@@ -8250,11 +7029,6 @@ components:
       properties:
         fetched: {type: integer}
         upserted: {type: integer}
-    EHRMSPositionSyncResponse:
-      type: object
-      properties:
-        fetched: {type: integer}
-        upserted: {type: integer}
     EHRMSAttendanceSyncResponse:
       type: object
       properties:
@@ -8273,7 +7047,7 @@ components:
         leave_details_skipped: {type: integer}
         leave_details_failed: {type: integer}
         mode: {type: string, enum: [create, update, upsert]}
-        since: {type: string, format: date}
+        start: {type: string, format: date, description: January 1 of the current year used for per-employee upstream queries.}
         results:
           type: array
           items:

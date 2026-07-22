@@ -12,25 +12,25 @@ type LeaveBalance struct {
 	EmployeeID           string         `json:"employee_id"`
 	LeaveType            string         `json:"leave_type"`
 	LeaveTypeID          string         `json:"leave_type_id,omitempty"`
-	RemainingHours       float64        `json:"remaining_hours"`
+	RemainingMinutes     int            `json:"remaining_minutes"`
 	PeriodStart          string         `json:"period_start,omitempty"`
 	PeriodEnd            string         `json:"period_end,omitempty"`
-	GrantedHours         float64        `json:"granted_hours,omitempty"`
-	UsedHours            float64        `json:"used_hours,omitempty"`
+	GrantedMinutes       int            `json:"granted_minutes,omitempty"`
+	UsedMinutes          int            `json:"used_minutes,omitempty"`
 	Source               string         `json:"source,omitempty"`
 	ExternalLeaveCode    string         `json:"external_leave_code,omitempty"`
 	ExternalCategoryCode string         `json:"external_category_code,omitempty"`
 	EntitlementYear      int            `json:"entitlement_year,omitempty"`
-	CarryInHours         float64        `json:"carry_in_hours,omitempty"`
+	CarryInMinutes       int            `json:"carry_in_minutes,omitempty"`
 	CarryExpire          string         `json:"carry_expire,omitempty"`
 	RawPayload           map[string]any `json:"raw_payload,omitempty"`
 	LastSyncedAt         *time.Time     `json:"last_synced_at,omitempty"`
-	// UpstreamRemainingHours is the unmodified eHRMS snapshot. RemainingHours is
-	// the effective Nexus availability after applying the local overlay ledger.
-	UpstreamRemainingHours float64   `json:"upstream_remaining_hours,omitempty"`
-	PendingHours           float64   `json:"pending_hours,omitempty"`
-	LocalUsedHours         float64   `json:"local_used_hours,omitempty"`
-	UpdatedAt              time.Time `json:"updated_at"`
+	// SnapshotRemainingMinutes is the unmodified upstream bucket. Effective
+	// availability is derived by applying the append-only local entries.
+	SnapshotRemainingMinutes int       `json:"snapshot_remaining_minutes,omitempty"`
+	PendingMinutes           int       `json:"pending_minutes,omitempty"`
+	LocalUsedMinutes         int       `json:"local_used_minutes,omitempty"`
+	UpdatedAt                time.Time `json:"updated_at"`
 }
 
 // LeaveTypeExternalRef maps a stable upstream code to the tenant-owned leave catalog.
@@ -64,11 +64,10 @@ type LeaveRequest struct {
 	EvaluationSnapshot   map[string]any `json:"evaluation_snapshot,omitempty"`
 	StartAt              time.Time      `json:"start_at"`
 	EndAt                time.Time      `json:"end_at"`
-	Hours                float64        `json:"hours"`
+	RequestedMinutes     int            `json:"requested_minutes"`
 	Reason               string         `json:"reason,omitempty"`
 	Status               string         `json:"status"`
 	FormInstanceID       string         `json:"form_instance_id,omitempty"`
-	LeaveBalanceID       string         `json:"leave_balance_id,omitempty"`
 	ReconciliationStatus string         `json:"reconciliation_status,omitempty"`
 	CreatedAt            time.Time      `json:"created_at"`
 	UpdatedAt            time.Time      `json:"updated_at"`
@@ -76,29 +75,35 @@ type LeaveRequest struct {
 
 // LeaveRequestAllocation records the exact balance bucket reserved by a leave request.
 type LeaveRequestAllocation struct {
-	TenantID       string    `json:"tenant_id"`
-	LeaveRequestID string    `json:"leave_request_id"`
-	LeaveBalanceID string    `json:"leave_balance_id"`
-	ReservedHours  float64   `json:"reserved_hours"`
-	CreatedAt      time.Time `json:"created_at"`
+	ID              int64     `json:"id"`
+	TenantID        string    `json:"tenant_id"`
+	LeaveRequestID  string    `json:"leave_request_id"`
+	LeaveBalanceID  string    `json:"leave_balance_id"`
+	EmployeeID      string    `json:"employee_id"`
+	LeaveTypeID     string    `json:"leave_type_id"`
+	Cycle           int       `json:"cycle"`
+	ReservedMinutes int       `json:"reserved_minutes"`
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // LeaveBalanceEntry is the append-only Nexus overlay on an eHRMS balance snapshot.
 // Negative amounts reduce effective availability; positive amounts release or reconcile it.
 type LeaveBalanceEntry struct {
-	ID             string         `json:"id"`
-	TenantID       string         `json:"tenant_id"`
-	EmployeeID     string         `json:"employee_id"`
-	LeaveTypeID    string         `json:"leave_type_id"`
-	BalanceID      string         `json:"balance_id"`
-	LeaveRequestID string         `json:"leave_request_id,omitempty"`
-	LeaveCaseID    string         `json:"leave_case_id,omitempty"`
-	EntryType      string         `json:"entry_type"`
-	AmountMinutes  int            `json:"amount_minutes"`
-	IdempotencyKey string         `json:"idempotency_key"`
-	Metadata       map[string]any `json:"metadata,omitempty"`
-	OccurredAt     time.Time      `json:"occurred_at"`
-	CreatedAt      time.Time      `json:"created_at"`
+	ID                string         `json:"id"`
+	TenantID          string         `json:"tenant_id"`
+	EmployeeID        string         `json:"employee_id"`
+	LeaveTypeID       string         `json:"leave_type_id"`
+	BalanceID         string         `json:"balance_id"`
+	LeaveRequestID    string         `json:"leave_request_id,omitempty"`
+	LeaveCaseID       string         `json:"leave_case_id,omitempty"`
+	AllocationID      int64          `json:"allocation_id,omitempty"`
+	OvertimeRequestID string         `json:"overtime_request_id,omitempty"`
+	EntryType         string         `json:"entry_type"`
+	AmountMinutes     int            `json:"amount_minutes"`
+	IdempotencyKey    string         `json:"idempotency_key"`
+	Metadata          map[string]any `json:"metadata,omitempty"`
+	OccurredAt        time.Time      `json:"occurred_at"`
+	CreatedAt         time.Time      `json:"created_at"`
 }
 
 // LeaveCase is one logical leave fact regardless of whether Nexus, eHRMS, or both observed it.
@@ -144,13 +149,13 @@ type ExternalLeaveRecord struct {
 
 // LeaveCaseSource links a logical case to one local request or synchronized eHRMS record.
 type LeaveCaseSource struct {
-	TenantID    string    `json:"tenant_id"`
-	LeaveCaseID string    `json:"leave_case_id"`
-	SourceType  string    `json:"source_type"`
-	SourceID    string    `json:"source_id"`
-	MatchMethod string    `json:"match_method"`
-	MatchStatus string    `json:"match_status"`
-	CreatedAt   time.Time `json:"created_at"`
+	TenantID              string    `json:"tenant_id"`
+	LeaveCaseID           string    `json:"leave_case_id"`
+	LeaveRequestID        string    `json:"leave_request_id,omitempty"`
+	ExternalLeaveRecordID string    `json:"external_leave_record_id,omitempty"`
+	MatchMethod           string    `json:"match_method"`
+	MatchStatus           string    `json:"match_status"`
+	CreatedAt             time.Time `json:"created_at"`
 }
 
 // LeaveType is one tenant-owned leave catalog row.
@@ -247,12 +252,12 @@ type LeaveRequestEvaluation struct {
 	LeaveTypeID           string            `json:"leave_type_id"`
 	LeaveType             string            `json:"leave_type"`
 	LeaveTypeName         string            `json:"leave_type_name"`
-	Hours                 float64           `json:"hours"`
+	RequestedMinutes      int               `json:"requested_minutes"`
 	PolicyVersion         int               `json:"policy_version"`
 	BalanceRequired       bool              `json:"balance_required"`
 	BalanceInitialized    bool              `json:"balance_initialized"`
 	BalanceFallbackReason string            `json:"balance_fallback_reason,omitempty"`
-	AvailableHours        float64           `json:"available_hours,omitempty"`
+	AvailableMinutes      int               `json:"available_minutes,omitempty"`
 	ProofRequired         bool              `json:"proof_required"`
 	Rule                  LeaveRuleSnapshot `json:"rule"`
 }
@@ -318,20 +323,23 @@ type AttendanceWorksite struct {
 
 // AttendanceClockRecord 定義考勤打卡 record 的資料結構。
 type AttendanceClockRecord struct {
-	ID                  string         `json:"id"`
-	TenantID            string         `json:"tenant_id"`
-	EmployeeID          string         `json:"employee_id"`
-	WorksiteID          string         `json:"worksite_id,omitempty"`
-	WorksiteName        string         `json:"worksite_name,omitempty"`
-	WorksiteAddress     string         `json:"worksite_address,omitempty"`
-	WorkDate            string         `json:"work_date"`
-	Direction           string         `json:"direction"`
-	ClientEventID       string         `json:"client_event_id,omitempty"`
-	ClockedAt           time.Time      `json:"clocked_at"`
-	Latitude            float64        `json:"latitude"`
-	Longitude           float64        `json:"longitude"`
-	AccuracyMeters      float64        `json:"accuracy_meters,omitempty"`
-	DistanceMeters      float64        `json:"distance_meters,omitempty"`
+	ID              string    `json:"id"`
+	TenantID        string    `json:"tenant_id"`
+	EmployeeID      string    `json:"employee_id"`
+	WorksiteID      string    `json:"worksite_id,omitempty"`
+	WorksiteName    string    `json:"worksite_name,omitempty"`
+	WorksiteAddress string    `json:"worksite_address,omitempty"`
+	WorkDate        string    `json:"work_date"`
+	Direction       string    `json:"direction"`
+	ClientEventID   string    `json:"client_event_id,omitempty"`
+	ClockedAt       time.Time `json:"clocked_at"`
+	Latitude        float64   `json:"latitude"`
+	Longitude       float64   `json:"longitude"`
+	AccuracyMeters  float64   `json:"accuracy_meters,omitempty"`
+	DistanceMeters  float64   `json:"distance_meters,omitempty"`
+	// LocationCaptured distinguishes a real (0,0) coordinate from records such
+	// as approved manual corrections, which deliberately carry no GPS evidence.
+	LocationCaptured    bool           `json:"location_captured"`
 	RecordStatus        string         `json:"record_status"`
 	RejectionReason     string         `json:"rejection_reason,omitempty"`
 	Source              string         `json:"source"`
@@ -381,6 +389,42 @@ type AttendanceDailySummary struct {
 	ExternalRef     string         `json:"external_ref"`
 	CreatedAt       time.Time      `json:"created_at"`
 	UpdatedAt       time.Time      `json:"updated_at"`
+}
+
+// AttendanceDayProjection is the rebuildable, policy-versioned read model for
+// one employee and business date. Raw clocks, leave cases and policy versions
+// remain the sources of truth; this row is safe to replace after any input
+// changes.
+type AttendanceDayProjection struct {
+	TenantID             string         `json:"tenant_id"`
+	EmployeeID           string         `json:"employee_id"`
+	WorkDate             string         `json:"work_date"`
+	PolicyVersion        int            `json:"policy_version"`
+	ScheduledStartAt     *time.Time     `json:"scheduled_start_at,omitempty"`
+	ScheduledEndAt       *time.Time     `json:"scheduled_end_at,omitempty"`
+	ClockInRecordID      string         `json:"clock_in_record_id,omitempty"`
+	ClockOutRecordID     string         `json:"clock_out_record_id,omitempty"`
+	LastPunchRecordID    string         `json:"last_punch_record_id,omitempty"`
+	PunchCount           int            `json:"punch_count"`
+	WorkedMinutes        int            `json:"worked_minutes"`
+	ApprovedLeaveMinutes int            `json:"approved_leave_minutes"`
+	PendingLeaveMinutes  int            `json:"pending_leave_minutes"`
+	RequiredMinutes      int            `json:"required_minutes"`
+	OvertimeMinutes      int            `json:"overtime_minutes"`
+	DayStatus            string         `json:"day_status"`
+	AnomalyReasons       []string       `json:"anomaly_reasons,omitempty"`
+	InputFingerprint     string         `json:"input_fingerprint"`
+	Payload              map[string]any `json:"payload,omitempty"`
+	ComputedAt           time.Time      `json:"computed_at"`
+	UpdatedAt            time.Time      `json:"updated_at"`
+
+	// Runtime-only materialization used by the clock-status response. Persistence
+	// stores stable record IDs; a projector may attach the source rows it loaded.
+	ClockIn     *AttendanceClockRecord `json:"-"`
+	ClockOut    *AttendanceClockRecord `json:"-"`
+	LastPunch   *AttendanceClockRecord `json:"-"`
+	CanClockIn  bool                   `json:"-"`
+	CanClockOut bool                   `json:"-"`
 }
 
 // AttendanceCorrectionRequest 定義考勤 correction 請求的資料結構。
@@ -627,10 +671,16 @@ type EHRMSLeaveBalanceRecord map[string]string
 // EHRMSLeaveDetailRecord 表示 eHRMS 已休逐筆明細 record。
 type EHRMSLeaveDetailRecord map[string]string
 
+// EHRMSAttendanceQuery 定義按單一 eHRMS 員工查詢考勤的條件。
+type EHRMSAttendanceQuery struct {
+	EmployeeID string
+	Start      string
+	End        string
+}
+
 // EHRMSAttendanceSyncInput 定義 eHRMS 考勤 sync 輸入的資料結構。
 type EHRMSAttendanceSyncInput struct {
-	Mode  string `json:"mode,omitempty"`
-	Since string `json:"since,omitempty"`
+	Mode string `json:"mode,omitempty"`
 }
 
 // EHRMSAttendanceSyncResponse 定義 eHRMS 考勤 sync 回應的資料結構。
@@ -650,7 +700,7 @@ type EHRMSAttendanceSyncResponse struct {
 	LeaveDetailsSkipped   int                   `json:"leave_details_skipped"`
 	LeaveDetailsFailed    int                   `json:"leave_details_failed"`
 	Mode                  string                `json:"mode"`
-	Since                 string                `json:"since,omitempty"`
+	Start                 string                `json:"start,omitempty"`
 	Results               []BatchEmployeeResult `json:"results,omitempty"`
 	RowErrors             []RowError            `json:"row_errors,omitempty"`
 }

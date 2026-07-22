@@ -22,13 +22,9 @@ type WorkspaceCtrl struct {
 // RegisterRoutes 註冊此 controller 的 HTTP 路由。
 func (c WorkspaceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace := router.Group("/workspace")
-	workspace.GET("", c.routes.Handle("hr.employee", "read", c.aggregate, TenantWideScope()))
 	workspace.GET("/overview", c.routes.Handle("hr.employee", "read", c.overview, TenantWideScope()))
-	workspace.GET("/employees", c.routes.Handle("hr.employee", "read", c.employees, TenantWideScope()))
 	workspace.GET("/org-units-directory", c.routes.Handle("hr.org_unit", "read", c.orgUnitsDirectory, TenantWideScope()))
 	workspace.GET("/organization", c.routes.Handle("hr.employee", "read", c.organization, TenantWideScope()))
-	workspace.PATCH("/organization/employees/:id/manager", c.routes.Handle("hr.employee", "update", c.updateOrganizationManager, PathParam(PathParamID), TenantWideScope()))
-	workspace.PATCH("/organization/employees/:id/visibility", c.routes.Handle("hr.employee", "update", c.updateOrganizationVisibility, PathParam(PathParamID), TenantWideScope()))
 	workspace.GET("/attendance", c.routes.Handle("attendance.clock", "read", c.attendance, TenantWideScope()))
 	workspace.GET("/attendance/abnormals", c.routes.Handle("attendance.clock", "read", c.attendanceAbnormals, TenantWideScope()))
 	workspace.GET("/attendance/export", c.routes.Handle("attendance.clock", "export", c.exportAttendanceCSV, TenantWideScope()))
@@ -43,39 +39,12 @@ func (c WorkspaceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace.GET("/insights", c.routes.Handle("hr.employee", "read", c.insights, TenantWideScope()))
 }
 
-// aggregate 處理工作區 aggregate 的 HTTP 請求。
-func (c WorkspaceCtrl) aggregate(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
-	item, err := c.svc.Workspace(ctx)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
 // overview 處理總覽的 HTTP 請求。
 func (c WorkspaceCtrl) overview(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.WorkspaceOverview(ctx, domain.WorkspaceOverviewQuery{
 		Year:  workspaceIntQuery(r, "year"),
 		Month: workspaceIntQuery(r, "month"),
 		Date:  strings.TrimSpace(r.URL.Query().Get("date")),
-	})
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// employees 處理員工的 HTTP 請求。
-func (c WorkspaceCtrl) employees(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	values := r.URL.Query()
-	item, err := c.svc.WorkspaceEmployees(ctx, domain.PlatformWorkspaceEmployeesQuery{
-		DepartmentID:     strings.TrimSpace(values.Get("department_id")),
-		Department:       strings.TrimSpace(firstQueryValue(values, "department", "dept")),
-		Status:           strings.TrimSpace(values.Get("status")),
-		EmploymentStatus: strings.TrimSpace(values.Get("employment_status")),
-		Keyword:          strings.TrimSpace(firstQueryValue(values, "keyword", "search")),
 	})
 	if err != nil {
 		return err
@@ -98,34 +67,6 @@ func (c WorkspaceCtrl) orgUnitsDirectory(w http.ResponseWriter, r *http.Request,
 // organization 處理 organization 的 HTTP 請求。
 func (c WorkspaceCtrl) organization(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.WorkspaceOrganization(ctx)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// updateOrganizationManager 處理 organization 主管的 HTTP 請求。
-func (c WorkspaceCtrl) updateOrganizationManager(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.UpdateWorkspaceOrganizationManagerInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.UpdateWorkspaceOrganizationManager(ctx, r.PathValue(PathParamID), input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// updateOrganizationVisibility 處理組織圖預覽可見性更新。
-func (c WorkspaceCtrl) updateOrganizationVisibility(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.UpdateWorkspaceOrganizationVisibilityInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.UpdateWorkspaceOrganizationVisibility(ctx, r.PathValue(PathParamID), input)
 	if err != nil {
 		return err
 	}

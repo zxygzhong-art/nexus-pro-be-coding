@@ -30,9 +30,6 @@ type (
 	Employee                        = domain.Employee
 	EmployeeExperience              = domain.EmployeeExperience
 	EmployeeQuery                   = domain.EmployeeQuery
-	EmployeeImportSession           = domain.EmployeeImportSession
-	EmployeeImportRow               = domain.EmployeeImportRow
-	EmploymentContract              = domain.EmploymentContract
 	AttendancePolicy                = domain.AttendancePolicy
 	AttendanceLeaveType             = domain.AttendanceLeaveType
 	LeaveBalance                    = domain.LeaveBalance
@@ -46,6 +43,7 @@ type (
 	AttendanceWorksite              = domain.AttendanceWorksite
 	AttendanceClockRecord           = domain.AttendanceClockRecord
 	AttendanceDailySummary          = domain.AttendanceDailySummary
+	AttendanceDayProjection         = domain.AttendanceDayProjection
 	AttendanceCorrectionRequest     = domain.AttendanceCorrectionRequest
 	OvertimeRequest                 = domain.OvertimeRequest
 	FormTemplate                    = domain.FormTemplate

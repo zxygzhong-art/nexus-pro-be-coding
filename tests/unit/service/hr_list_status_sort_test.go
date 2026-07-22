@@ -149,7 +149,7 @@ func TestListOrgUnitPageFiltersByStatus(t *testing.T) {
 }
 
 func TestListPositionPageSortsActiveBeforeDisabled(t *testing.T) {
-	store, svc, ctx := newEmployeeFeatureFixture(t, hrPositionContractPermissions())
+	store, svc, ctx := newEmployeeFeatureFixture(t, hrPositionPermissions())
 	now := time.Date(2026, 7, 1, 9, 0, 0, 0, time.UTC)
 	for _, position := range []domain.Position{
 		{ID: "pos-disabled", TenantID: "tenant-1", Code: "DIS", Name: "Disabled Role", Status: string(domain.PositionStatusDisabled), CreatedAt: now, UpdatedAt: now},

@@ -491,9 +491,9 @@ var defaultMenuCatalog = []MenuNode{
 	{
 		Key:   "agents",
 		Label: "AI Agent",
-		Path:  "/agents",
+		Path:  "/assistants",
 		Children: []MenuNode{
-			{Key: "agents.runs", Label: "Agent Runs", Path: "/agents/runs"},
+			{Key: "agents.runs", Label: "Agent Runs", Path: "/assistants"},
 		},
 	},
 	{Key: "audit", Label: "審計中心", Path: "/workspace/audit-log"},

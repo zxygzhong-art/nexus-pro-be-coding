@@ -147,8 +147,17 @@ func (c AgentService) CreateRun(ctx RequestContext, input CreateAgentRunInput) (
 // transitionRun 轉換執行的服務流程。
 func (c AgentService) transitionRun(ctx RequestContext, run AgentRun, status AgentRunStatus) (AgentRun, error) {
 	previousStatus := run.Status
+	now := c.Now()
 	run.Status = string(status)
-	run.UpdatedAt = c.Now()
+	run.UpdatedAt = now
+	switch status {
+	case AgentRunStatusRunning:
+		if run.StartedAt == nil {
+			run.StartedAt = &now
+		}
+	case AgentRunStatusCompleted, AgentRunStatusFailed, AgentRunStatusCancelled:
+		run.CompletedAt = &now
+	}
 	if err := c.store.UpsertAgentRun(goContext(ctx), run); err != nil {
 		return AgentRun{}, err
 	}
@@ -237,6 +246,34 @@ func (c AgentService) publishedAgentDefinition(ctx RequestContext, id string) (d
 	if !ok || agent.Status != domain.AgentDefinitionStatusPublished {
 		return domain.AgentDefinition{}, NotFound("published agent definition", id)
 	}
+	publishedVersion := agent.PublishedVersion
+	publishedModelChecksum := ""
+	if publishedVersion <= 0 {
+		publishedVersion = agent.Version
+	}
+	if snapshot, found, snapshotErr := c.store.GetAgentDefinitionVersion(goContext(ctx), ctx.TenantID, agent.ID, publishedVersion); snapshotErr != nil {
+		return domain.AgentDefinition{}, snapshotErr
+	} else if found {
+		publishedModelChecksum = snapshot.ModelConfigChecksum
+		agent.PublishedRevisionID = snapshot.ID
+		agent.Name = snapshot.Name
+		agent.Description = snapshot.Description
+		agent.Emoji = snapshot.Emoji
+		agent.Category = snapshot.Category
+		agent.Visibility = snapshot.Visibility
+		agent.VisibilityTargets = snapshot.VisibilityTargets
+		agent.MainAgentRole = snapshot.MainAgentRole
+		agent.SubAgents = snapshot.SubAgents
+		agent.SystemPrompt = snapshot.SystemPrompt
+		agent.WelcomeMessage = snapshot.WelcomeMessage
+		agent.SuggestedQuestions = snapshot.SuggestedQuestions
+		agent.SuggestedQuestionTranslations = snapshot.SuggestedQuestionTranslations
+		agent.Tools = snapshot.Tools
+		agent.ExternalToolIDs = snapshot.ExternalToolIDs
+		agent.KnowledgeBaseIDs = snapshot.KnowledgeBaseIDs
+		agent.ModelID = snapshot.ModelID
+		agent.TimeoutSeconds = snapshot.TimeoutSeconds
+	}
 	account, _, err := c.ResolveAccount(ctx)
 	if err != nil {
 		return domain.AgentDefinition{}, err
@@ -248,22 +285,33 @@ func (c AgentService) publishedAgentDefinition(ctx RequestContext, id string) (d
 	if !visible {
 		return domain.AgentDefinition{}, NotFound("published agent definition", id)
 	}
-	publishedVersion := agent.PublishedVersion
-	if publishedVersion <= 0 {
-		publishedVersion = agent.Version
-	}
-	if snapshot, found, snapshotErr := c.store.GetAgentDefinitionVersion(goContext(ctx), ctx.TenantID, agent.ID, publishedVersion); snapshotErr != nil {
-		return domain.AgentDefinition{}, snapshotErr
-	} else if found {
-		agent.MainAgentRole = snapshot.MainAgentRole
-		agent.SubAgents = snapshot.SubAgents
-		agent.SystemPrompt = snapshot.SystemPrompt
-		agent.WelcomeMessage = snapshot.WelcomeMessage
-		agent.SuggestedQuestions = snapshot.SuggestedQuestions
-		agent.SuggestedQuestionTranslations = snapshot.SuggestedQuestionTranslations
-		agent.Tools = snapshot.Tools
-		agent.KnowledgeBaseIDs = snapshot.KnowledgeBaseIDs
-		agent.ModelID = snapshot.ModelID
+	if err := c.validatePublishedAgentModelBindings(ctx, agent, publishedModelChecksum); err != nil {
+		return domain.AgentDefinition{}, err
 	}
 	return agent, nil
+}
+
+// validatePublishedAgentModelBindings makes model routing immutable at the
+// revision boundary. Any desired model change requires a new publish before
+// chat or trial execution can resume.
+func (c AgentService) validatePublishedAgentModelBindings(ctx RequestContext, agent domain.AgentDefinition, rootChecksum string) error {
+	validate := func(modelID, expectedChecksum string) error {
+		model, err := c.currentAgentModel(ctx, modelID)
+		if err != nil {
+			return err
+		}
+		if model.Status != domain.AgentModelStatusActive || strings.TrimSpace(expectedChecksum) == "" || domain.AgentModelSyncConfigHash(model) != expectedChecksum {
+			return Conflict("published agent model configuration changed; republish the agent definition").WithReasonCode("agent_model_config_drift")
+		}
+		return nil
+	}
+	if err := validate(agent.ModelID, rootChecksum); err != nil {
+		return err
+	}
+	for _, member := range agent.SubAgents {
+		if err := validate(member.ModelID, member.ModelConfigChecksum); err != nil {
+			return err
+		}
+	}
+	return nil
 }

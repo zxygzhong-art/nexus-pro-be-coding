@@ -42,13 +42,18 @@ func (c WorkspaceService) WorkspaceOverview(ctx RequestContext, query WorkspaceO
 	if err != nil {
 		return WorkspaceOverviewResponse{}, err
 	}
-	leaves, err := c.Service.Attendance().listLeaveRequestsByQuery(ctx, LeaveRequestQuery{
-		FromDate: start.Format(time.DateOnly),
-		ToDate:   end.AddDate(0, 0, -1).Format(time.DateOnly),
-	})
+	leaveEmployeeIDs, err := c.workspaceAuthorizedAttendanceEmployeeIDs(ctx, ResourceLeave, employees)
 	if err != nil {
 		return WorkspaceOverviewResponse{}, err
 	}
+	effectiveLeaves := []attendanceEffectiveLeave{}
+	if len(leaveEmployeeIDs) > 0 {
+		effectiveLeaves, err = c.Service.Attendance().loadEffectiveAttendanceLeaves(ctx, leaveEmployeeIDs, start.Format(time.DateOnly), end.AddDate(0, 0, -1).Format(time.DateOnly))
+		if err != nil {
+			return WorkspaceOverviewResponse{}, err
+		}
+	}
+	leaves := workspaceApprovedLeaveRequestsFromEffective(effectiveLeaves)
 	clocks, err := c.visibleWorkspaceClockRecords(ctx, AttendanceClockRecordQuery{
 		FromDate: start.Format(time.DateOnly),
 		ToDate:   end.AddDate(0, 0, -1).Format(time.DateOnly),
@@ -103,6 +108,29 @@ func (c WorkspaceService) WorkspaceOverview(ctx RequestContext, query WorkspaceO
 		},
 		TodoCategories: workspaceTodoCategories(employees, now),
 	}, nil
+}
+
+// workspaceApprovedLeaveRequestsFromEffective adapts canonical approved facts
+// to the existing workspace metric helpers without reintroducing request rows
+// as an approval source.
+func workspaceApprovedLeaveRequestsFromEffective(items []attendanceEffectiveLeave) []LeaveRequest {
+	out := make([]LeaveRequest, 0, len(items))
+	for _, item := range items {
+		if item.FactStatus != attendanceLeaveFactApproved {
+			continue
+		}
+		out = append(out, LeaveRequest{
+			ID:               item.SourceFactID,
+			EmployeeID:       item.EmployeeID,
+			LeaveType:        item.LeaveType,
+			LeaveTypeID:      item.LeaveTypeID,
+			StartAt:          item.StartAt,
+			EndAt:            item.EndAt,
+			RequestedMinutes: item.NetMinutes,
+			Status:           "approved",
+		})
+	}
+	return out
 }
 
 // WorkspaceOrgUnitsDirectory 返回組織單位管理頁所需的完整後端投影。
@@ -291,10 +319,6 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	if err != nil {
 		return WorkspaceAttendanceResponse{}, err
 	}
-	policy, err := c.Service.Attendance().loadAttendancePolicyResponse(ctx)
-	if err != nil {
-		return WorkspaceAttendanceResponse{}, err
-	}
 	leaveTypes, err := c.Attendance().loadLeaveTypes(ctx)
 	if err != nil {
 		return WorkspaceAttendanceResponse{}, err
@@ -303,11 +327,22 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	employeeIDs := workspaceEmployeeIDs(employees)
 	fromDate := start.Format(time.DateOnly)
 	toDate := end.AddDate(0, 0, -1).Format(time.DateOnly)
+	dates := workspaceMonthDates(start, end)
 	clocks := []AttendanceClockRecord{}
 	summaries := []AttendanceDailySummary{}
 	overtimes := []OvertimeRequest{}
-	leaves := []LeaveRequest{}
+	leaves := []attendanceEffectiveLeave{}
+	policiesByDate := map[string]AttendancePolicyResponse{}
+	workTimesByDate := map[string]AttendancePolicyWorkTime{}
 	if len(employeeIDs) > 0 {
+		for _, date := range dates {
+			policy, policyErr := c.Service.Attendance().loadAttendancePolicyResponseForWorkDate(ctx, date.Key)
+			if policyErr != nil {
+				return WorkspaceAttendanceResponse{}, policyErr
+			}
+			policiesByDate[date.Key] = policy
+			workTimesByDate[date.Key] = policy.WorkTime
+		}
 		clocks, err = c.store.ListAttendanceClockRecords(goContext(ctx), ctx.TenantID, normalizeClockRecordQuery(AttendanceClockRecordQuery{
 			EmployeeIDs: employeeIDs,
 			FromDate:    fromDate,
@@ -339,12 +374,7 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 			if err != nil {
 				return WorkspaceAttendanceResponse{}, err
 			}
-			leaves, err = c.store.ListLeaveRequestsByQuery(goContext(ctx), ctx.TenantID, normalizeLeaveRequestQuery(LeaveRequestQuery{
-				EmployeeIDs: leaveEmployeeIDs,
-				Status:      "approved",
-				FromDate:    fromDate,
-				ToDate:      toDate,
-			}))
+			leaves, err = c.Service.Attendance().loadEffectiveAttendanceLeaves(ctx, leaveEmployeeIDs, fromDate, toDate)
 			if err != nil {
 				return WorkspaceAttendanceResponse{}, err
 			}
@@ -360,20 +390,22 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 		}
 	}
 
-	dates := workspaceMonthDates(start, end)
 	orgNames := workspaceOrgNames(units)
 	cards := workspaceEmployeeCards(employees, orgNames)
 	if query.Projection != "" {
 		workspaceCompactEmployeeCards(cards)
 	}
 	leaveLegend := workspaceLeaveLegend(leaveTypes)
-	leaveByEmployeeDate := workspaceSummaryLeaveCells(summaries, leaveLegend)
-	leaveByEmployeeDate = workspaceMergeApprovedLeaveCells(leaveByEmployeeDate, leaves, policy.WorkTime, leaveLegend, start, end)
+	leaveByEmployeeDate := workspaceEffectiveLeaveCells(leaves, workTimesByDate, leaveTypes, leaveLegend, start, end)
 	overtimeByEmployeeDate := workspaceOvertimeCells(overtimes, start, end)
 	clockByEmployeeDate := workspaceClockCells(clocks, summaries, worksites, leaveByEmployeeDate, overtimeByEmployeeDate)
 	attendanceMatrix := WorkspaceAttendanceMatrix{}
 	if includeAttendance {
-		attendanceEvidenceByEmployeeDate := workspaceAttendanceEvidenceCells(clocks, summaries, leaves, policy.WorkTime)
+		projections, projectionErr := c.Service.Attendance().projectAttendanceDays(ctx, employeeIDs, clocks, leaves, policiesByDate, fromDate, toDate, now)
+		if projectionErr != nil {
+			return WorkspaceAttendanceResponse{}, projectionErr
+		}
+		attendanceEvidenceByEmployeeDate := workspaceAttendanceEvidenceCells(summaries, projections)
 		attendanceMatrix = workspaceAttendanceMatrix(employees, cards, dates, leaveByEmployeeDate, overtimeByEmployeeDate, attendanceEvidenceByEmployeeDate, clockByEmployeeDate, now)
 	}
 	clockMatrix := WorkspaceClockMatrix{}

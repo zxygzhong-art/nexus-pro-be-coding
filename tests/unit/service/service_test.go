@@ -1,16 +1,14 @@
 package service_test
 
 import (
-	"archive/zip"
-	"bytes"
 	"context"
 	"encoding/csv"
-	"encoding/xml"
 	"errors"
 	"fmt"
 	"net/http"
 	"slices"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -216,10 +214,32 @@ func TestCreateAgentRunReturnsNoMatchWithoutBoundKnowledge(t *testing.T) {
 		DirectPermissionSetIDs: []string{"ps-agent"},
 		CreatedAt:              now,
 	})
-	_ = store.UpsertAgentDefinition(context.Background(), domain.AgentDefinition{
-		ID: "agent-1", TenantID: "tenant-1", Name: "Test Agent", SystemPrompt: "Internal system prompt",
-		Status: domain.AgentDefinitionStatusPublished, Visibility: domain.AgentVisibilityAll, CreatedAt: now, UpdatedAt: now,
-	})
+	model := domain.AgentModel{
+		ID: "model-1", TenantID: "tenant-1", Name: "Test Model", ModelName: "gpt-test",
+		LiteLLMModel: "openai/gpt-test", Status: domain.AgentModelStatusActive,
+		TimeoutSeconds: 30, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.UpsertAgentModel(context.Background(), model); err != nil {
+		t.Fatal(err)
+	}
+	revision := domain.AgentDefinitionVersion{
+		ID: "arev-1", TenantID: "tenant-1", AgentID: "agent-1", Version: 1,
+		Name: "Test Agent", Category: domain.AgentCategoryWorkflow, Visibility: domain.AgentVisibilityAll,
+		SystemPrompt: "Internal system prompt", ModelID: model.ID,
+		ModelConfigChecksum: domain.AgentModelSyncConfigHash(model),
+		TimeoutSeconds:      30, ConfigSchemaVersion: 1, Checksum: "test-checksum", CreatedAt: now,
+	}
+	if err := store.InsertAgentDefinitionVersion(context.Background(), revision); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertAgentDefinition(context.Background(), domain.AgentDefinition{
+		ID: "agent-1", TenantID: "tenant-1", DraftRevisionID: revision.ID, PublishedRevisionID: revision.ID,
+		Name: revision.Name, Category: revision.Category, ModelID: revision.ModelID, SystemPrompt: revision.SystemPrompt,
+		Status: domain.AgentDefinitionStatusPublished, Visibility: revision.Visibility,
+		TimeoutSeconds: revision.TimeoutSeconds, Version: 1, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	run, err := agentservice.New(service.New(store)).CreateRun(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.CreateAgentRunInput{AgentID: "agent-1", Prompt: "請"})
 	if err != nil {
@@ -1537,10 +1557,10 @@ func TestSelfScopedLeaveReadOnlyReturnsCurrentEmployeeItems(t *testing.T) {
 	})
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now})
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-2", TenantID: "tenant-1", Name: "Employee Two", Status: "active", CreatedAt: now.Add(time.Minute)})
-	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 8, UpdatedAt: now})
-	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-2", TenantID: "tenant-1", EmployeeID: "emp-2", LeaveType: "annual", RemainingHours: 8, UpdatedAt: now})
-	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lr-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", Hours: 8, Status: "pending", CreatedAt: now})
-	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lr-2", TenantID: "tenant-1", EmployeeID: "emp-2", LeaveType: "annual", Hours: 8, Status: "pending", CreatedAt: now.Add(time.Minute)})
+	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingMinutes: 8 * 60, UpdatedAt: now})
+	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-2", TenantID: "tenant-1", EmployeeID: "emp-2", LeaveType: "annual", RemainingMinutes: 8 * 60, UpdatedAt: now})
+	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lr-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RequestedMinutes: 8 * 60, Status: "pending", CreatedAt: now})
+	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lr-2", TenantID: "tenant-1", EmployeeID: "emp-2", LeaveType: "annual", RequestedMinutes: 8 * 60, Status: "pending", CreatedAt: now.Add(time.Minute)})
 
 	svc := service.New(store)
 	balances, err := svc.Attendance().ListLeaveBalances(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"})
@@ -1587,10 +1607,10 @@ func TestAttendanceLeavePagesFilterEmployeeBeforePagination(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	for _, employeeID := range []string{"emp-1", "emp-2"} {
 		_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{
-			ID: employeeID + "-annual", TenantID: "tenant-1", EmployeeID: employeeID, LeaveType: "annual", RemainingHours: 8, UpdatedAt: now,
+			ID: employeeID + "-annual", TenantID: "tenant-1", EmployeeID: employeeID, LeaveType: "annual", RemainingMinutes: 8 * 60, UpdatedAt: now,
 		})
 		_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{
-			ID: employeeID + "-request", TenantID: "tenant-1", EmployeeID: employeeID, LeaveType: "annual", Hours: 8, Status: "approved", CreatedAt: now,
+			ID: employeeID + "-request", TenantID: "tenant-1", EmployeeID: employeeID, LeaveType: "annual", RequestedMinutes: 8 * 60, Status: "approved", CreatedAt: now,
 		})
 	}
 
@@ -1773,16 +1793,43 @@ func TestAttendanceClockOneHourPlusApprovedLeaveCompletesDay(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{
-		ID:         "leave-rest-of-day",
-		TenantID:   "tenant-1",
-		EmployeeID: "emp-1",
-		LeaveType:  "annual",
-		StartAt:    clockInAt.Add(time.Hour),
-		EndAt:      clockInAt.Add(9 * time.Hour),
-		Hours:      7,
-		Status:     "approved",
-		CreatedAt:  clockInAt,
+	request := domain.LeaveRequest{
+		ID:               "leave-rest-of-day",
+		TenantID:         "tenant-1",
+		EmployeeID:       "emp-1",
+		LeaveType:        "annual",
+		LeaveTypeID:      "leave-type-annual",
+		StartAt:          clockInAt.Add(time.Hour),
+		EndAt:            clockInAt.Add(9 * time.Hour),
+		RequestedMinutes: 7 * 60,
+		Status:           "approved",
+		CreatedAt:        clockInAt,
+	}
+	if err := store.UpsertLeaveRequest(context.Background(), request); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertLeaveCase(context.Background(), domain.LeaveCase{
+		ID:          "case-rest-of-day",
+		TenantID:    "tenant-1",
+		EmployeeID:  "emp-1",
+		LeaveTypeID: request.LeaveTypeID,
+		StartAt:     request.StartAt,
+		EndAt:       request.EndAt,
+		NetMinutes:  request.RequestedMinutes,
+		Status:      "active",
+		Origin:      "nexus",
+		CreatedAt:   clockInAt,
+		UpdatedAt:   clockInAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertLeaveCaseSource(context.Background(), domain.LeaveCaseSource{
+		TenantID:       "tenant-1",
+		LeaveCaseID:    "case-rest-of-day",
+		LeaveRequestID: request.ID,
+		MatchMethod:    "exact",
+		MatchStatus:    "confirmed",
+		CreatedAt:      clockInAt,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -1838,7 +1885,7 @@ func TestAttendanceClockRejectsInsufficientWorkHoursAndAllowsRetry(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.NextAction != "clock_out" || status.ClockIn == nil || status.ClockOut == nil || status.DayStatus != "abnormal" || status.CanClockIn || !status.CanClockOut {
+	if status.NextAction != "complete" || status.ClockIn == nil || status.ClockOut == nil || status.DayStatus != "abnormal" || status.CanClockIn || status.CanClockOut {
 		t.Fatalf("expected early clock-out to produce an abnormal day projection, got %+v", status)
 	}
 	records, err := store.ListAttendanceClockRecords(context.Background(), "tenant-1", domain.AttendanceClockRecordQuery{EmployeeID: "emp-1", FromDate: clockIn.WorkDate, ToDate: clockIn.WorkDate})
@@ -1866,7 +1913,7 @@ func TestAttendanceClockRejectsInsufficientWorkHoursAndAllowsRetry(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.NextAction != "clock_out" || status.ClockOut == nil || status.DayStatus != "complete" || status.CanClockIn || !status.CanClockOut {
+	if status.NextAction != "complete" || status.ClockOut == nil || status.DayStatus != "complete" || status.CanClockIn || status.CanClockOut {
 		t.Fatalf("expected completed status after valid retry, got %+v", status)
 	}
 
@@ -1955,6 +2002,81 @@ func TestAttendanceMonthlySummaryMarksPastOpenDayAbnormal(t *testing.T) {
 	}
 }
 
+// TestAttendanceMonthlySummaryIncludesLeaveOnlyCase verifies the report date
+// set is the union of punches and reconciled leave facts, and that the shared
+// projection is persisted for downstream workspace reads.
+func TestAttendanceMonthlySummaryIncludesLeaveOnlyCase(t *testing.T) {
+	store, svc, employeeCtx, _, _ := newAttendanceFixture(t)
+	location := time.FixedZone("UTC+8", 8*60*60)
+	start := time.Date(2026, 6, 11, 9, 0, 0, 0, location)
+	end := time.Date(2026, 6, 11, 18, 0, 0, 0, location)
+	if err := store.UpsertLeaveCase(context.Background(), domain.LeaveCase{
+		ID: "case-leave-only", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveTypeID: "leave-type-annual",
+		StartAt: start, EndAt: end, NetMinutes: 480, Status: "active", Origin: "nexus",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertLeaveCaseSource(context.Background(), domain.LeaveCaseSource{
+		TenantID: "tenant-1", LeaveCaseID: "case-leave-only", LeaveRequestID: "request-leave-only",
+		MatchMethod: "exact", MatchStatus: "confirmed",
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	summary, err := svc.Attendance().AttendanceMonthlySummary(employeeCtx, "2026-06")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(summary.Days) != 1 || summary.Days[0].WorkDate != "2026-06-11" || summary.Days[0].RecordCount != 0 || summary.Days[0].DayStatus != "complete" {
+		t.Fatalf("expected one leave-only complete day, got %+v", summary.Days)
+	}
+	projection, ok, err := store.GetAttendanceDayProjection(context.Background(), "tenant-1", "emp-1", "2026-06-11")
+	if err != nil || !ok {
+		t.Fatalf("persisted projection missing: ok=%v err=%v", ok, err)
+	}
+	// The canonical case carries 480 source minutes, but the projection credits
+	// only the 420 scheduled minutes after clipping the 09:00-18:00 envelope to
+	// the effective 09:00-17:00 policy and removing the one-hour break.
+	if projection.ApprovedLeaveMinutes != 420 || projection.PunchCount != 0 || projection.InputFingerprint == "" {
+		t.Fatalf("unexpected persisted leave-only projection: %+v", projection)
+	}
+}
+
+// TestAttendanceMonthlySummaryUsesPolicyEffectiveOnWorkDate protects historical
+// projections from later policy publications.
+func TestAttendanceMonthlySummaryUsesPolicyEffectiveOnWorkDate(t *testing.T) {
+	store, svc, employeeCtx, _, _ := newAttendanceFixture(t)
+	local := time.FixedZone("UTC+8", 8*60*60)
+	versionOneAt := time.Date(2026, 6, 1, 0, 0, 0, 0, local)
+	versionTwoAt := time.Date(2026, 7, 1, 0, 0, 0, 0, local)
+	workTime := domain.AttendancePolicyWorkTime{ClockMode: "fixed", StandardStart: "09:00", StandardEnd: "17:00", BreakStart: "12:00", BreakEnd: "13:00"}
+	if err := store.InsertAttendancePolicyVersion(context.Background(), domain.AttendancePolicy{TenantID: "tenant-1", Version: 1, EffectiveFrom: &versionOneAt, WorkTime: workTime, PublishedAt: versionOneAt}); err != nil {
+		t.Fatal(err)
+	}
+	workTime.StandardEnd = "18:00"
+	if err := store.InsertAttendancePolicyVersion(context.Background(), domain.AttendancePolicy{TenantID: "tenant-1", Version: 2, EffectiveFrom: &versionTwoAt, WorkTime: workTime, PublishedAt: versionTwoAt}); err != nil {
+		t.Fatal(err)
+	}
+	for _, record := range []domain.AttendanceClockRecord{
+		{ID: "historical-in", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_in", ClockedAt: time.Date(2026, 6, 10, 9, 0, 0, 0, local), RecordStatus: "accepted", Source: "geofence", CreatedAt: versionOneAt},
+		{ID: "historical-out", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_out", ClockedAt: time.Date(2026, 6, 10, 17, 0, 0, 0, local), RecordStatus: "accepted", Source: "geofence", CreatedAt: versionOneAt},
+	} {
+		if err := store.UpsertAttendanceClockRecord(context.Background(), record); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := svc.Attendance().AttendanceMonthlySummary(employeeCtx, "2026-06"); err != nil {
+		t.Fatal(err)
+	}
+	projection, ok, err := store.GetAttendanceDayProjection(context.Background(), "tenant-1", "emp-1", "2026-06-10")
+	if err != nil || !ok {
+		t.Fatalf("historical projection missing: ok=%v err=%v", ok, err)
+	}
+	if projection.PolicyVersion != 1 || projection.RequiredMinutes != 420 || projection.DayStatus != "complete" {
+		t.Fatalf("historical projection used the wrong policy: %+v", projection)
+	}
+}
+
 // TestAttendanceClockUsesElapsedHoursInsteadOfFixedClockOutTime 驗證彈性打卡只依實際工時判定。
 func TestAttendanceClockUsesElapsedHoursInsteadOfFixedClockOutTime(t *testing.T) {
 	_, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
@@ -1986,7 +2108,7 @@ func TestAttendanceClockUsesElapsedHoursInsteadOfFixedClockOutTime(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.NextAction != "clock_out" || status.ClockOut == nil || status.DayStatus != "abnormal" || status.CanClockIn || !status.CanClockOut {
+	if status.NextAction != "complete" || status.ClockOut == nil || status.DayStatus != "abnormal" || status.CanClockIn || status.CanClockOut {
 		t.Fatalf("expected early clock-out to remain visible as an abnormal day, got %+v", status)
 	}
 
@@ -2009,6 +2131,7 @@ func TestAttendanceClockUsesElapsedHoursInsteadOfFixedClockOutTime(t *testing.T)
 func TestAttendanceClockFixedModeRecordsLateAndEarlyPunchesAsAcceptedAnomalies(t *testing.T) {
 	store, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
 	clockInAt := attendanceFixtureClockInTime()
+	effectiveFrom := attendanceFixtureWorkDateStart()
 	if err := store.InsertAttendancePolicyVersion(context.Background(), domain.AttendancePolicy{
 		TenantID: "tenant-1",
 		WorkTime: domain.AttendancePolicyWorkTime{
@@ -2023,8 +2146,8 @@ func TestAttendanceClockFixedModeRecordsLateAndEarlyPunchesAsAcceptedAnomalies(t
 			CycleEnd:        "本月 月底（最後一日）",
 		},
 		Version:       1,
-		EffectiveFrom: &clockInAt,
-		PublishedAt:   clockInAt,
+		EffectiveFrom: &effectiveFrom,
+		PublishedAt:   effectiveFrom,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2069,7 +2192,7 @@ func TestAttendanceClockFixedModeRecordsLateAndEarlyPunchesAsAcceptedAnomalies(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.NextAction != "clock_out" || status.ClockIn == nil || status.ClockOut == nil || status.DayStatus != "abnormal" || status.CanClockIn || !status.CanClockOut {
+	if status.NextAction != "complete" || status.ClockIn == nil || status.ClockOut == nil || status.DayStatus != "abnormal" || status.CanClockIn || status.CanClockOut {
 		t.Fatalf("expected fixed-mode punches to produce an abnormal daily projection, got %+v", status)
 	}
 
@@ -2089,6 +2212,7 @@ func TestAttendanceClockFixedModeRecordsLateAndEarlyPunchesAsAcceptedAnomalies(t
 func TestAttendanceClockFlexibleBoundsKeepAbnormalClockOutRetryable(t *testing.T) {
 	store, svc, employeeCtx, _, setNow := newAttendanceFixture(t)
 	base := attendanceFixtureClockInTime()
+	effectiveFrom := attendanceFixtureWorkDateStart()
 	if err := store.InsertAttendancePolicyVersion(context.Background(), domain.AttendancePolicy{
 		TenantID: "tenant-1",
 		WorkTime: domain.AttendancePolicyWorkTime{
@@ -2105,8 +2229,8 @@ func TestAttendanceClockFlexibleBoundsKeepAbnormalClockOutRetryable(t *testing.T
 			CycleEnd:                "本月 月底（最後一日）",
 		},
 		Version:       1,
-		EffectiveFrom: &base,
-		PublishedAt:   base,
+		EffectiveFrom: &effectiveFrom,
+		PublishedAt:   effectiveFrom,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2151,7 +2275,7 @@ func TestAttendanceClockFlexibleBoundsKeepAbnormalClockOutRetryable(t *testing.T
 	if err != nil {
 		t.Fatal(err)
 	}
-	if status.NextAction != "clock_out" || status.ClockIn == nil || status.ClockOut == nil || status.DayStatus != "abnormal" || status.CanClockIn || !status.CanClockOut {
+	if status.NextAction != "complete" || status.ClockIn == nil || status.ClockOut == nil || status.DayStatus != "abnormal" || status.CanClockIn || status.CanClockOut {
 		t.Fatalf("expected flexible bounds anomaly in daily projection, got %+v", status)
 	}
 }
@@ -2206,7 +2330,7 @@ func TestAttendanceClockResetsNormalWorkDateAfterMidnight(t *testing.T) {
 // TestAttendanceClockRecordSkipsGeofenceWhenPolicyDisablesIt 驗證關閉地點校驗後不要求工作地點或定位範圍。
 func TestAttendanceClockRecordSkipsGeofenceWhenPolicyDisablesIt(t *testing.T) {
 	store, svc, employeeCtx, _, _ := newAttendanceFixture(t)
-	now := attendanceFixtureClockInTime()
+	effectiveFrom := attendanceFixtureWorkDateStart()
 	if err := store.InsertAttendancePolicyVersion(context.Background(), domain.AttendancePolicy{
 		TenantID: "tenant-1",
 		WorkTime: domain.AttendancePolicyWorkTime{
@@ -2220,8 +2344,8 @@ func TestAttendanceClockRecordSkipsGeofenceWhenPolicyDisablesIt(t *testing.T) {
 			CycleEnd:        "本月 月底（最後一日）",
 		},
 		Version:       1,
-		EffectiveFrom: &now,
-		PublishedAt:   now,
+		EffectiveFrom: &effectiveFrom,
+		PublishedAt:   effectiveFrom,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2422,6 +2546,9 @@ func TestAttendanceCorrectionApproveCreatesManualRecordAndRejectDoesNot(t *testi
 	if !ok || record.Source != "manual_correction" || record.CorrectionRequestID != approved.ID {
 		t.Fatalf("expected accepted manual correction record, got ok=%v record=%+v", ok, record)
 	}
+	if record.WorksiteID != "" || record.LocationCaptured || record.Latitude != 0 || record.Longitude != 0 {
+		t.Fatalf("manual correction must not fabricate worksite or GPS evidence: %+v", record)
+	}
 
 	rejected, err := svc.Attendance().CreateAttendanceCorrection(employeeCtx, domain.CreateAttendanceCorrectionInput{
 		Direction:          "clock_out",
@@ -2442,6 +2569,56 @@ func TestAttendanceCorrectionApproveCreatesManualRecordAndRejectDoesNot(t *testi
 		t.Fatal(err)
 	} else if ok {
 		t.Fatal("rejecting a correction should not create an accepted clock-out record")
+	}
+}
+
+// TestAttendanceCorrectionConcurrentApprovalClaimsPendingOnce verifies the
+// transaction-level row lock prevents two reviewers from applying the same
+// correction side effect twice.
+func TestAttendanceCorrectionConcurrentApprovalClaimsPendingOnce(t *testing.T) {
+	store, svc, employeeCtx, adminCtx, _ := newAttendanceFixture(t)
+	pending, err := svc.Attendance().CreateAttendanceCorrection(employeeCtx, domain.CreateAttendanceCorrectionInput{
+		Direction: "clock_in", RequestedClockedAt: attendanceFixtureClockInTime().Format(time.RFC3339), Reason: "forgot to clock in",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for i := 0; i < 2; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			<-start
+			_, reviewErr := svc.Attendance().ApproveAttendanceCorrection(adminCtx, pending.ID, domain.ReviewAttendanceCorrectionInput{Reason: "verified"})
+			errs <- reviewErr
+		}()
+	}
+	close(start)
+	wg.Wait()
+	close(errs)
+	successes := 0
+	for reviewErr := range errs {
+		if reviewErr == nil {
+			successes++
+		}
+	}
+	if successes != 1 {
+		t.Fatalf("concurrent approval successes = %d, want exactly one", successes)
+	}
+	records, err := store.ListAttendanceClockRecords(context.Background(), "tenant-1", domain.AttendanceClockRecordQuery{EmployeeID: "emp-1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	created := 0
+	for _, record := range records {
+		if record.CorrectionRequestID == pending.ID {
+			created++
+		}
+	}
+	if created != 1 {
+		t.Fatalf("manual records for correction = %d, want one", created)
 	}
 }
 
@@ -2607,7 +2784,7 @@ func TestCreateLeaveRequestReservesLeaveBalance(t *testing.T) {
 		CreatedAt:              now,
 	})
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now})
-	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 16, UpdatedAt: now})
+	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingMinutes: 16 * 60, UpdatedAt: now})
 
 	created, err := newDirectAttendanceWorkflowService(t, store, now, "leave-request").Attendance().CreateLeaveRequest(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
@@ -2625,7 +2802,7 @@ func TestCreateLeaveRequestReservesLeaveBalance(t *testing.T) {
 		t.Fatalf("unexpected leave request status: %s", created.Status)
 	}
 	balance := effectiveLeaveBalanceForTest(t, store, "lb-1")
-	if created.Hours != 7 || balance.RemainingHours != 9 {
+	if created.RequestedMinutes != 7*60 || balance.RemainingMinutes != 9*60 {
 		t.Fatalf("expected policy-derived 7 hours and remaining balance 9, request=%+v balance=%+v", created, balance)
 	}
 }
@@ -2673,7 +2850,7 @@ func TestLeaveWorkflowReviewUpdatesRequestAndBalance(t *testing.T) {
 		CreatedAt:              now,
 	})
 	_ = store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now})
-	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 24, UpdatedAt: now})
+	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingMinutes: 24 * 60, UpdatedAt: now})
 	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
 		ID:        "ft-leave",
 		TenantID:  "tenant-1",
@@ -2706,8 +2883,8 @@ func TestLeaveWorkflowReviewUpdatesRequestAndBalance(t *testing.T) {
 		t.Fatalf("expected approved leave request, got %+v", storedApproved)
 	}
 	balance := effectiveLeaveBalanceForTest(t, store, "lb-1")
-	if balance.RemainingHours != 17 {
-		t.Fatalf("approval should keep Nexus-consumed hours deducted from the effective balance, got %v", balance.RemainingHours)
+	if balance.RemainingMinutes != 17*60 {
+		t.Fatalf("approval should keep Nexus-consumed minutes deducted from the effective balance, got %v", balance.RemainingMinutes)
 	}
 
 	rejectedRequest, err := svc.Attendance().CreateLeaveRequest(employeeCtx, domain.CreateLeaveRequestInput{
@@ -2736,8 +2913,8 @@ func TestLeaveWorkflowReviewUpdatesRequestAndBalance(t *testing.T) {
 		t.Fatalf("expected rejected leave request, got %+v", storedRejected)
 	}
 	balance = effectiveLeaveBalanceForTest(t, store, "lb-1")
-	if balance.RemainingHours != 17 {
-		t.Fatalf("rejection should release reserved hours, got %v", balance.RemainingHours)
+	if balance.RemainingMinutes != 17*60 {
+		t.Fatalf("rejection should release reserved minutes, got %v", balance.RemainingMinutes)
 	}
 }
 
@@ -2944,14 +3121,38 @@ func TestOvertimeWorkflowReviewUpdatesRequestAndCreditsBalance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	compensatory := 0.0
+	compensatory := 0
+	compensatoryBalanceID := ""
 	for _, balance := range balances {
 		if balance.EmployeeID == "emp-1" && balance.LeaveType == "compensatory" {
-			compensatory = balance.RemainingHours
+			compensatoryBalanceID = balance.ID
 		}
 	}
-	if compensatory != 3 {
-		t.Fatalf("expected 3 compensatory hours credited, got %v", compensatory)
+	if compensatoryBalanceID != "" {
+		compensatory = effectiveLeaveBalanceForTest(t, store, compensatoryBalanceID).RemainingMinutes
+	}
+	if compensatory != 3*60 {
+		t.Fatalf("expected 180 compensatory minutes credited, got %v", compensatory)
+	}
+	rawAnchor, ok, err := store.GetLeaveBalance(t.Context(), "tenant-1", compensatoryBalanceID)
+	if err != nil || !ok || rawAnchor.Source != "local_anchor" || rawAnchor.RemainingMinutes != 0 || rawAnchor.GrantedMinutes != 0 {
+		t.Fatalf("overtime credit must not mutate anchor snapshot, ok=%v err=%v anchor=%+v", ok, err, rawAnchor)
+	}
+	entries, err := store.ListLeaveBalanceEntries(t.Context(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	creditCount := 0
+	for _, entry := range entries {
+		if entry.EntryType == "overtime_credit" {
+			creditCount++
+			if entry.OvertimeRequestID != approvedRequest.ID || entry.AmountMinutes != 3*60 {
+				t.Fatalf("credit is not bound minute-exactly to overtime request: %+v", entry)
+			}
+		}
+	}
+	if creditCount != 1 {
+		t.Fatalf("expected one idempotent overtime credit, got %+v", entries)
 	}
 
 	rejectedRequest, err := svc.Attendance().CreateOvertimeRequest(employeeCtx, domain.CreateOvertimeRequestInput{
@@ -2976,14 +3177,14 @@ func TestOvertimeWorkflowReviewUpdatesRequestAndCreditsBalance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	compensatory = 0.0
+	compensatory = 0
 	for _, balance := range balances {
 		if balance.EmployeeID == "emp-1" && balance.LeaveType == "compensatory" {
-			compensatory = balance.RemainingHours
+			compensatory = effectiveLeaveBalanceForTest(t, store, balance.ID).RemainingMinutes
 		}
 	}
-	if compensatory != 3 {
-		t.Fatalf("rejection should not change compensatory hours, got %v", compensatory)
+	if compensatory != 3*60 {
+		t.Fatalf("rejection should not change compensatory minutes, got %v", compensatory)
 	}
 }
 
@@ -3011,7 +3212,7 @@ func TestCreateLeaveRequestFallsBackFromInsufficientLeaveBalance(t *testing.T) {
 		CreatedAt:              now,
 	})
 	store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now})
-	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 4, UpdatedAt: now})
+	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingMinutes: 4 * 60, UpdatedAt: now})
 
 	created, err := newDirectAttendanceWorkflowService(t, store, now, "leave-request").Attendance().CreateLeaveRequest(
 		domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"},
@@ -3025,7 +3226,7 @@ func TestCreateLeaveRequestFallsBackFromInsufficientLeaveBalance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.LeaveBalanceID != "" || created.RuleSnapshot["requires_balance"] != true || created.EvaluationSnapshot["balance_required"] != false || created.EvaluationSnapshot["balance_fallback_reason"] != "insufficient_balance" {
+	if created.RuleSnapshot["requires_balance"] != true || created.EvaluationSnapshot["balance_required"] != false || created.EvaluationSnapshot["balance_fallback_reason"] != "insufficient_balance" {
 		t.Fatalf("expected a no-balance fallback request with an auditable policy snapshot, got %+v", created)
 	}
 	if requests, err := store.ListLeaveRequests(context.Background(), "tenant-1"); err != nil || len(requests) != 1 {
@@ -3045,8 +3246,8 @@ func TestCreateLeaveRequestFallsBackFromInsufficientLeaveBalance(t *testing.T) {
 	if !ok {
 		t.Fatal("leave balance was not found")
 	}
-	if balance.RemainingHours != 4 {
-		t.Fatalf("expected remaining balance to stay 4, got %v", balance.RemainingHours)
+	if balance.RemainingMinutes != 4*60 {
+		t.Fatalf("expected remaining balance to stay 240 minutes, got %v", balance.RemainingMinutes)
 	}
 }
 
@@ -4100,260 +4301,6 @@ func TestEmployeeStatusWritesRequireTransitionPath(t *testing.T) {
 	}
 }
 
-// TestEmployeeImportPreviewConfirmAndStatusTransition 驗證員工 import preview confirm and 狀態轉換。
-func TestEmployeeImportPreviewConfirmAndStatusTransition(t *testing.T) {
-	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
-	store := memory.NewStore()
-	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
-	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "HQ", Path: []string{"ou-1"}, CreatedAt: now})
-	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
-		ID:       "ps-hr",
-		TenantID: "tenant-1",
-		Name:     "HR",
-		Permissions: []domain.Permission{
-			{Resource: "hr.employee", Action: "import", Scope: "all"},
-			{Resource: "hr.employee", Action: "read", Scope: "all"},
-			{Resource: "hr.employee", Action: "status_transition", Scope: "all"},
-		},
-		CreatedAt: now,
-	})
-	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-hr"}, CreatedAt: now})
-	objects := &recordingObjectStore{}
-	svc := service.New(store, service.Options{ObjectStore: objects})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
-
-	session, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
-		Filename: "employees.csv",
-		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\nE2001,Partial Wu,partial@example.com,ou-1,HRBP,全職,0911000222,在職,2026-06-01,\nE2001,Duplicate,dup@example.com,ou-1,HRBP,全職,0911000333,在職,2026-06-01,\n",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if session.Summary["valid"] != 1 || session.Summary["invalid"] != 1 {
-		t.Fatalf("expected one valid and one invalid row, got %+v", session.Summary)
-	}
-	if len(objects.keys) != 1 || objects.keys[0] != session.ObjectKey {
-		t.Fatalf("expected import file to be stored through object store, keys=%+v session=%+v", objects.keys, session)
-	}
-	if session.ObjectProvider != "test" || session.ObjectBucket != "imports" || session.SizeBytes == 0 || session.SHA256 == "" || session.CreatedByAccountID != "acct-1" {
-		t.Fatalf("expected object metadata on preview session, got %+v", session)
-	}
-
-	_, err = svc.HR().ConfirmEmployeeImport(ctx, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
-	if err == nil {
-		t.Fatal("expected all-or-nothing import confirmation to reject invalid preview rows")
-	}
-	appErr, ok := domain.AsAppError(err)
-	if !ok || appErr.Code != "import_validation_failed" || len(appErr.RowErrors) == 0 {
-		t.Fatalf("expected import_validation_failed with row errors, got %v", err)
-	}
-	failedSession, ok, err := store.GetEmployeeImportSession(context.Background(), "tenant-1", session.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok || failedSession.Status != "failed_validation" || failedSession.Summary["failed"] != 2 {
-		t.Fatalf("expected failed validation session summary, got ok=%v session=%+v", ok, failedSession)
-	}
-	logs, err := store.ListAuditLogs(context.Background(), "tenant-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if failedLog, ok := findAuditLog(logs, "hr.employee.import.confirm_failed"); !ok || failedLog.Details["object_key"] != failedSession.ObjectKey {
-		t.Fatalf("expected failed import audit with object metadata, got %+v", logs)
-	}
-	storedEmployees, err := store.ListEmployees(context.Background(), "tenant-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, employee := range storedEmployees {
-		if employee.CompanyEmail == "partial@example.com" || employee.CompanyEmail == "dup@example.com" {
-			t.Fatalf("invalid import should not partially write employees, got %+v", storedEmployees)
-		}
-	}
-
-	session, err = svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
-		Filename: "employees.csv",
-		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\n,Lina Wu,lina@example.com,ou-1,HRBP,約聘,0911000222,在職,2026-06-01,\n",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	confirmed, err := svc.HR().ConfirmEmployeeImport(ctx, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if confirmed.Summary["confirmed"] != 1 {
-		t.Fatalf("expected one confirmed import, got %+v", confirmed.Summary)
-	}
-	events, err := store.ListOutboxEvents(context.Background(), "tenant-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !hasBusinessOutboxEvent(events, string(domain.EventEmployeeImported)) {
-		t.Fatalf("expected employee.imported outbox event, got %+v", events)
-	}
-
-	var imported domain.Employee
-	storedEmployees, err = store.ListEmployees(context.Background(), "tenant-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, item := range storedEmployees {
-		if item.CompanyEmail == "lina@example.com" {
-			imported = item
-			break
-		}
-	}
-	if imported.ID == "" {
-		t.Fatal("imported employee was not written")
-	}
-	if imported.EmployeeNo != "IKL001" || imported.Category != "contractor" {
-		t.Fatalf("expected generated employee number and normalized category, got %+v", imported)
-	}
-
-	transitioned, err := svc.HR().TransitionEmployeeStatus(ctx, imported.ID, domain.StatusTransitionInput{
-		Status:  "resigned",
-		Reason:  "contract ended",
-		EndDate: "2026-06-30",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if transitioned.EmploymentStatus != "resigned" || transitioned.ResignDate == nil {
-		t.Fatalf("expected resigned employee with resign date, got %+v", transitioned)
-	}
-	if len(transitioned.InternalExperiences) < 2 {
-		t.Fatalf("expected status transition history, got %+v", transitioned.InternalExperiences)
-	}
-}
-
-// TestEmployeeImportConfirmProvisionsKeycloakIdentityForAccountPolicy 驗證員工 import confirm provisions Keycloak 身分 for 帳號政策。
-func TestEmployeeImportConfirmProvisionsKeycloakIdentityForAccountPolicy(t *testing.T) {
-	provisioner := &recordingIdentityProvisioner{}
-	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
-		{Resource: "hr.employee", Action: "import", Scope: "all"},
-	}, service.Options{IdentityProvisioner: provisioner})
-
-	session, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
-		Filename: "employees.csv",
-		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID,帳號策略\nE2101,Import Login,import.login@example.com,ou-1,HRBP,全職,0911000444,在職,2026-06-01,,create_pending_invite\n",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	confirmed, err := svc.HR().ConfirmEmployeeImport(ctx, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if confirmed.Summary["confirmed"] != 1 || len(provisioner.inputs) != 1 || !provisioner.inputs[0].SendInvite {
-		t.Fatalf("expected import confirmation to provision one invited keycloak user, summary=%+v inputs=%+v", confirmed.Summary, provisioner.inputs)
-	}
-
-	employee, ok, err := store.GetEmployeeByEmployeeNo(context.Background(), "tenant-1", "E2101")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok || employee.AccountID == "" {
-		t.Fatalf("expected imported employee with account id, ok=%v employee=%+v", ok, employee)
-	}
-	account, ok, err := store.GetAccount(context.Background(), "tenant-1", employee.AccountID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok || account.Status != "pending_invite" || account.EmployeeID != employee.ID {
-		t.Fatalf("expected pending invite account from import, ok=%v account=%+v", ok, account)
-	}
-	identities, err := store.ListUserIdentities(context.Background(), "tenant-1", employee.AccountID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(identities) != 1 || identities[0].Subject != "kc-"+employee.AccountID || identities[0].Email != "import.login@example.com" {
-		t.Fatalf("expected keycloak identity binding for imported employee, got %+v", identities)
-	}
-}
-
-// TestEmployeeImportPreviewCleansObjectWhenSessionPersistenceFails 驗證員工 import preview cleans 物件 when session persistence fails。
-func TestEmployeeImportPreviewCleansObjectWhenSessionPersistenceFails(t *testing.T) {
-	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
-	base := memory.NewStore()
-	store := &failingEmployeeImportSessionStore{Store: base}
-	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
-	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "HQ", Path: []string{"ou-1"}, CreatedAt: now})
-	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
-		ID:       "ps-hr",
-		TenantID: "tenant-1",
-		Name:     "HR",
-		Permissions: []domain.Permission{
-			{Resource: "hr.employee", Action: "import", Scope: "all"},
-		},
-		CreatedAt: now,
-	})
-	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-hr"}, CreatedAt: now})
-	objects := &recordingObjectStore{}
-	svc := service.New(store, service.Options{ObjectStore: objects})
-
-	_, err := svc.HR().PreviewEmployeeImport(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, domain.EmployeeImportPreviewInput{
-		Filename: "employees.csv",
-		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\nE9001,Cleanup Target,cleanup@example.com,ou-1,HRBP,全職,0911000222,在職,2026-06-01,\n",
-	})
-	if err == nil || !strings.Contains(err.Error(), "session persistence failed") {
-		t.Fatalf("expected session persistence failure, got %v", err)
-	}
-	if len(objects.keys) != 1 || len(objects.deleted) != 1 || objects.deleted[0] != objects.keys[0] {
-		t.Fatalf("expected stored import object to be deleted on failure, keys=%+v deleted=%+v", objects.keys, objects.deleted)
-	}
-}
-
-// TestEmployeeImportConfirmRevalidatesBatchDuplicates 驗證員工 import confirm revalidates 批次 duplicates。
-func TestEmployeeImportConfirmRevalidatesBatchDuplicates(t *testing.T) {
-	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
-	store := memory.NewStore()
-	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
-	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
-		ID:       "ps-hr",
-		TenantID: "tenant-1",
-		Name:     "HR",
-		Permissions: []domain.Permission{
-			{Resource: "hr.employee", Action: "import", Scope: "all"},
-		},
-		CreatedAt: now,
-	})
-	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-hr"}, CreatedAt: now})
-	session := domain.EmployeeImportSession{
-		ID:        "eimp-test",
-		TenantID:  "tenant-1",
-		Filename:  "employees.csv",
-		Status:    "previewed",
-		CreatedAt: now,
-		ExpiresAt: time.Now().UTC().Add(time.Hour),
-		Rows: []domain.EmployeeImportRow{
-			{RowNumber: 2, Valid: true, Employee: domain.CreateEmployeeInput{Name: "One", CompanyEmail: "dup@example.com", AccountID: "acct-dup", Status: "active"}},
-			{RowNumber: 3, Valid: true, Employee: domain.CreateEmployeeInput{Name: "Two", CompanyEmail: "dup@example.com", AccountID: "acct-dup", Status: "active"}},
-		},
-	}
-	if err := store.UpsertEmployeeImportSession(context.Background(), session); err != nil {
-		t.Fatal(err)
-	}
-	_, err := service.New(store).HR().ConfirmEmployeeImport(domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
-	if err == nil {
-		t.Fatal("expected duplicate batch to fail all-or-nothing import confirmation")
-	}
-	appErr, ok := domain.AsAppError(err)
-	if !ok || appErr.Code != "import_validation_failed" {
-		t.Fatalf("expected import_validation_failed, got %v", err)
-	}
-	if len(appErr.RowErrors) < 2 {
-		t.Fatalf("expected duplicate email and account row errors, got %+v", appErr.RowErrors)
-	}
-	storedEmployees, err := store.ListEmployees(context.Background(), "tenant-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(storedEmployees) != 0 {
-		t.Fatalf("duplicate batch should not write partial employees, got %+v", storedEmployees)
-	}
-}
-
 // TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments 驗證 eHRMS 員工同步會更新既有部門並建立員工。
 func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
 	rows := []domain.EHRMSEmployeeRecord{{
@@ -5035,29 +4982,6 @@ func TestSyncEHRMSOrgUnitsUpsertsDepartments(t *testing.T) {
 	}
 }
 
-// TestSyncEHRMSPositionsUpsertsCatalog 驗證單獨同步崗位。
-func TestSyncEHRMSPositionsUpsertsCatalog(t *testing.T) {
-	positionRows := []domain.EHRMSPositionRecord{
-		{"job_code": "0901", "job_title_zh": "經理", "job_title_en": "Manager"},
-		{"job_code": "0704", "job_title_zh": "工程師", "job_title_en": "Engineer"},
-	}
-	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
-		{Resource: "hr.position", Action: "create", Scope: "all"},
-	}, service.Options{EHRMSClient: fakeEHRMSClient{positionRows: positionRows}})
-
-	result, err := svc.HR().SyncEHRMSPositions(ctx)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if result.Fetched != 2 || result.Upserted != 2 {
-		t.Fatalf("unexpected position sync result: %+v", result)
-	}
-	position := mustPositionByCode(t, store, "tenant-1", "0704")
-	if position.Name != "工程師" || position.Source != "ehrms" {
-		t.Fatalf("expected synced position, position=%+v", position)
-	}
-}
-
 // TestSyncEHRMSEmployeesBuildsOrgHierarchyAndPositions 驗證員工同步只刷新 DB 既有部門並建立崗位目錄。
 func TestSyncEHRMSEmployeesBuildsOrgHierarchyAndPositions(t *testing.T) {
 	rows := []domain.EHRMSEmployeeRecord{
@@ -5157,6 +5081,9 @@ func TestSyncEHRMSEmployeesBuildsOrgHierarchyAndPositions(t *testing.T) {
 // TestSyncEHRMSAttendanceUpsertsDailySummaries 驗證 eHRMS 考勤同步 writes 日彙總 without GPS 打卡。
 func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
 	syncNow := time.Date(2026, 6, 20, 8, 0, 0, 0, time.UTC)
+	queries := make([]domain.EHRMSAttendanceQuery, 0)
+	balanceQueries := make([]domain.EHRMSAttendanceQuery, 0)
+	detailQueries := make([]domain.EHRMSAttendanceQuery, 0)
 	rows := []domain.EHRMSAttendanceRecord{{
 		"emp_id":           "IKM017",
 		"date":             "2026-06-10",
@@ -5196,7 +5123,10 @@ func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "attendance.clock", Action: "import", Scope: "all"},
 		{Resource: "attendance.clock", Action: "read", Scope: "all"},
-	}, service.Options{EHRMSClient: fakeEHRMSClient{attendanceRows: rows}, Now: func() time.Time { return syncNow }})
+	}, service.Options{EHRMSClient: fakeEHRMSClient{
+		attendanceRows: rows, attendanceQueries: &queries,
+		leaveBalanceQueries: &balanceQueries, leaveDetailQueries: &detailQueries,
+	}, Now: func() time.Time { return syncNow }})
 	now := time.Date(2026, 6, 1, 8, 0, 0, 0, time.UTC)
 	if err := store.UpsertEmployee(context.Background(), domain.Employee{
 		ID:               "emp-ehrms",
@@ -5210,13 +5140,24 @@ func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
+	if err := store.UpsertEmployee(context.Background(), domain.Employee{
+		ID: "emp-other-tenant", TenantID: "tenant-2", EmployeeNo: "OTHER001", Name: "Other Tenant", Status: "active", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := svc.Attendance().SyncEHRMSAttendance(ctx, domain.EHRMSAttendanceSyncInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Fetched != 2 || result.Created != 1 || result.Updated != 0 || result.Skipped != 1 || result.Failed != 0 || result.Mode != "upsert" {
+	if result.Fetched != 1 || result.Created != 1 || result.Updated != 0 || result.Skipped != 0 || result.Failed != 0 || result.Mode != "upsert" || result.Start != "2026-01-01" {
 		t.Fatalf("unexpected eHRMS attendance sync result: %+v", result)
+	}
+	if len(queries) != 1 || queries[0].EmployeeID != "IKM017" || queries[0].Start != "2026-01-01" || queries[0].End != "" {
+		t.Fatalf("expected one current-tenant employee query with annual start and no end, got %+v", queries)
+	}
+	if len(balanceQueries) != 1 || balanceQueries[0] != queries[0] || len(detailQueries) != 1 || detailQueries[0] != queries[0] {
+		t.Fatalf("expected attendance, leave balance, and leave detail to use the same employee query, balances=%+v details=%+v", balanceQueries, detailQueries)
 	}
 	summaries, err := store.ListAttendanceDailySummaries(context.Background(), "tenant-1", domain.AttendanceDailySummaryQuery{EmployeeID: "emp-ehrms", FromDate: "2026-06-10", ToDate: "2026-06-10"})
 	if err != nil {
@@ -5270,7 +5211,7 @@ func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Created != 0 || result.Updated != 1 || result.Skipped != 1 {
+	if result.Created != 0 || result.Updated != 1 || result.Skipped != 0 {
 		t.Fatalf("expected idempotent upsert on second sync, got %+v", result)
 	}
 }
@@ -5357,7 +5298,7 @@ func TestSyncEHRMSAttendanceUpsertsLeaveBalancesAndDetails(t *testing.T) {
 			current = balance
 		}
 	}
-	if current.EmployeeID != "emp-ehrms" || current.LeaveType != "annual" || current.GrantedHours != 70 || current.UsedHours != 14 || current.RemainingHours != 56 || current.Source != "ehrms" {
+	if current.EmployeeID != "emp-ehrms" || current.LeaveType != "annual" || current.GrantedMinutes != 70*60 || current.UsedMinutes != 14*60 || current.RemainingMinutes != 56*60 || current.Source != "ehrms" {
 		t.Fatalf("unexpected current leave balance mapping: %+v", current)
 	}
 	requests, err := store.ListLeaveRequests(context.Background(), "tenant-1")
@@ -5435,7 +5376,7 @@ func TestValidateAttendancePolicyDoesNotRewriteLinkedLeaveStorage(t *testing.T) 
 	}, service.Options{Now: func() time.Time { return now }})
 	if err := store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{
 		ID: "lb-linked", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", LeaveTypeID: "lt_annual",
-		RemainingHours: 7, PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", Source: "ehrms", UpdatedAt: now,
+		RemainingMinutes: 7 * 60, PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", Source: "ehrms", UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -5462,9 +5403,12 @@ func TestSyncEHRMSAttendanceCountsInvalidRows(t *testing.T) {
 		"shift_start": "bad-time",
 		"clock_hours": "oops",
 	}}
-	_, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "attendance.clock", Action: "import", Scope: "all"},
 	}, service.Options{EHRMSClient: fakeEHRMSClient{attendanceRows: rows}})
+	if err := store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-invalid", TenantID: "tenant-1", EmployeeNo: "IKM018", Name: "Invalid", Status: "active", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
 
 	result, err := svc.Attendance().SyncEHRMSAttendance(ctx, domain.EHRMSAttendanceSyncInput{})
 	if err != nil {
@@ -5477,9 +5421,12 @@ func TestSyncEHRMSAttendanceCountsInvalidRows(t *testing.T) {
 
 // TestSyncEHRMSAttendanceHidesUpstreamFetchDetails 驗證 eHRMS 考勤 hides upstream fetch details。
 func TestSyncEHRMSAttendanceHidesUpstreamFetchDetails(t *testing.T) {
-	_, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "attendance.clock", Action: "import", Scope: "all"},
 	}, service.Options{EHRMSClient: fakeEHRMSClient{attendanceErr: errors.New("upstream 500: token=secret-value")}})
+	if err := store.UpsertEmployee(context.Background(), domain.Employee{ID: "emp-fetch", TenantID: "tenant-1", EmployeeNo: "IKM-FETCH", Name: "Fetch", Status: "active", CreatedAt: time.Now()}); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := svc.Attendance().SyncEHRMSAttendance(ctx, domain.EHRMSAttendanceSyncInput{})
 	if err == nil {
@@ -5491,163 +5438,6 @@ func TestSyncEHRMSAttendanceHidesUpstreamFetchDetails(t *testing.T) {
 	}
 	if strings.Contains(err.Error(), "secret-value") || strings.Contains(err.Error(), "upstream 500") {
 		t.Fatalf("eHRMS attendance fetch error leaked upstream detail: %v", err)
-	}
-}
-
-// TestEmployeeImportConfirmSupportsUpdateAndUpsert 驗證員工 import confirm supports update and upsert。
-func TestEmployeeImportConfirmSupportsUpdateAndUpsert(t *testing.T) {
-	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
-	store := memory.NewStore()
-	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
-	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "HQ", Path: []string{"ou-1"}, CreatedAt: now})
-	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
-		ID:       "ps-hr",
-		TenantID: "tenant-1",
-		Name:     "HR",
-		Permissions: []domain.Permission{
-			{Resource: "hr.employee", Action: "import", Scope: "all"},
-			{Resource: "hr.employee", Action: "read", Scope: "all"},
-		},
-		CreatedAt: now,
-	})
-	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-hr"}, CreatedAt: now})
-	_ = store.UpsertEmployee(context.Background(), domain.Employee{
-		ID:               "emp-existing",
-		TenantID:         "tenant-1",
-		EmployeeNo:       "E3001",
-		Name:             "Original",
-		CompanyEmail:     "original@example.com",
-		Phone:            "0900000000",
-		OrgUnitID:        "ou-1",
-		Position:         "HRBP",
-		Category:         "full_time",
-		Status:           "active",
-		EmploymentStatus: "active",
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	})
-	svc := service.New(store)
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
-
-	updateSession, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
-		Filename: "employees.csv",
-		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\nE3001,Updated,original@example.com,ou-1,People Lead,全職,0911000999,在職,2026-06-01,\n",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	updatedSession, err := svc.HR().ConfirmEmployeeImport(ctx, updateSession.ID, domain.EmployeeImportConfirmInput{Mode: "update"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updatedSession.Summary["updated"] != 1 || updatedSession.Summary["created"] != 0 {
-		t.Fatalf("expected update import summary, got %+v", updatedSession.Summary)
-	}
-	updated, ok, err := store.GetEmployee(context.Background(), "tenant-1", "emp-existing")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok || updated.Phone != "0911000999" || updated.Position != "People Lead" {
-		t.Fatalf("expected existing employee to be updated, got ok=%v employee=%+v", ok, updated)
-	}
-
-	upsertSession, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
-		Filename: "employees.csv",
-		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\nE3001,Updated Again,original@example.com,ou-1,HR Manager,全職,0911000888,在職,2026-06-01,\nE3002,New Hire,new.hire@example.com,ou-1,Recruiter,全職,0911000777,在職,2026-06-01,\n",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	upsertedSession, err := svc.HR().ConfirmEmployeeImport(ctx, upsertSession.ID, domain.EmployeeImportConfirmInput{Mode: "upsert"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if upsertedSession.Summary["updated"] != 1 || upsertedSession.Summary["created"] != 1 {
-		t.Fatalf("expected upsert import summary, got %+v", upsertedSession.Summary)
-	}
-	employees, err := store.ListEmployees(context.Background(), "tenant-1")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(employees) != 2 {
-		t.Fatalf("expected one updated and one created employee, got %+v", employees)
-	}
-}
-
-// TestEmployeeImportConfirmEnforcesAssignedOrgScope 驗證員工 import confirm enforces assigned 組織範圍。
-func TestEmployeeImportConfirmEnforcesAssignedOrgScope(t *testing.T) {
-	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
-	store := memory.NewStore()
-	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
-	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-allowed", TenantID: "tenant-1", Name: "Allowed", Path: []string{"ou-allowed"}, CreatedAt: now})
-	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-blocked", TenantID: "tenant-1", Name: "Blocked", Path: []string{"ou-blocked"}, CreatedAt: now})
-	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
-		ID:       "ps-import",
-		TenantID: "tenant-1",
-		Name:     "Scoped Import",
-		Permissions: []domain.Permission{
-			{Resource: "hr.employee", Action: "import", Scope: "all"},
-		},
-		CreatedAt: now,
-	})
-	_ = store.UpsertDataScope(context.Background(), domain.DataScope{
-		ID:        "ds-assigned",
-		TenantID:  "tenant-1",
-		Code:      "assigned_hr_orgs",
-		Name:      "Assigned HR Orgs",
-		ScopeType: "assigned_org_units",
-		Params:    map[string]any{"org_unit_ids": []string{"ou-allowed"}},
-		CreatedAt: now,
-	})
-	_ = store.UpsertPermissionSetAssignment(context.Background(), domain.PermissionSetAssignment{
-		ID:              "assign-1",
-		TenantID:        "tenant-1",
-		PrincipalType:   "account",
-		PrincipalID:     "acct-1",
-		PermissionSetID: "ps-import",
-		Effect:          "allow",
-		DataScopeID:     "ds-assigned",
-		CreatedAt:       now,
-	})
-	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", CreatedAt: now})
-	_ = store.UpsertEmployee(context.Background(), domain.Employee{
-		ID:               "emp-blocked",
-		TenantID:         "tenant-1",
-		EmployeeNo:       "E9001",
-		Name:             "Blocked",
-		CompanyEmail:     "blocked@example.com",
-		OrgUnitID:        "ou-blocked",
-		Position:         "Engineer",
-		Category:         "full_time",
-		Status:           "active",
-		EmploymentStatus: "active",
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	})
-	svc := service.New(store)
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
-
-	session, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
-		Filename: "employees.csv",
-		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\nE9001,Move Into Scope,blocked@example.com,ou-allowed,Engineer,全職,0911000000,在職,2026-06-01,\n",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = svc.HR().ConfirmEmployeeImport(ctx, session.ID, domain.EmployeeImportConfirmInput{Mode: "update"})
-	if err == nil {
-		t.Fatal("expected scoped import confirmation to reject out-of-scope employee update")
-	}
-	appErr, ok := domain.AsAppError(err)
-	if !ok || appErr.Code != "import_validation_failed" || !rowErrorsContain(appErr.RowErrors, "authz_scope") {
-		t.Fatalf("expected authz_scope import validation error, got %v", err)
-	}
-	stored, ok, err := store.GetEmployee(context.Background(), "tenant-1", "emp-blocked")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !ok || stored.OrgUnitID != "ou-blocked" || stored.Name != "Blocked" {
-		t.Fatalf("out-of-scope import should not mutate employee, got ok=%v employee=%+v", ok, stored)
 	}
 }
 
@@ -5864,100 +5654,6 @@ func TestAuditServiceRequiresAuditReadPermission(t *testing.T) {
 	}
 }
 
-// TestEmployeeImportXLSXPreservesManagerEmployeeID 驗證員工 import XLSX preserves 主管員工 ID。
-func TestEmployeeImportXLSXPreservesManagerEmployeeID(t *testing.T) {
-	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
-	store := memory.NewStore()
-	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
-	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "HQ", Path: []string{"ou-1"}, CreatedAt: now})
-	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
-		ID:       "ps-hr",
-		TenantID: "tenant-1",
-		Name:     "HR",
-		Permissions: []domain.Permission{
-			{Resource: "hr.employee", Action: "import", Scope: "all"},
-		},
-		CreatedAt: now,
-	})
-	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-hr"}, CreatedAt: now})
-	_ = store.UpsertEmployee(context.Background(), domain.Employee{
-		ID:               "emp-manager",
-		TenantID:         "tenant-1",
-		EmployeeNo:       "E1000",
-		Name:             "Manager Chen",
-		CompanyEmail:     "manager@example.com",
-		Status:           "active",
-		EmploymentStatus: "active",
-		CreatedAt:        now,
-		UpdatedAt:        now,
-	})
-
-	svc := service.New(store)
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
-	content := minimalEmployeeImportXLSX(t, [][]string{
-		{"員工編號", "姓名", "Email", "部門", "職位", "類別", "電話", "狀態", "到職日期", "主管員工ID"},
-		{"E2002", "Mina Chen", "mina@example.com", "ou-1", "HRBP", "全職", "0911000444", "在職", "2026-06-01", "emp-manager"},
-	})
-
-	session, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
-		Filename: "employees.xlsx",
-		Content:  content,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(session.Rows) != 1 {
-		t.Fatalf("expected one preview row, got %d", len(session.Rows))
-	}
-	row := session.Rows[0]
-	if row.Employee.ManagerEmployeeID != "emp-manager" {
-		t.Fatalf("expected manager employee id from xlsx column J, got %+v", row.Employee)
-	}
-	if got := row.Employee.EmploymentInfo["manager_employee_id"]; got != "emp-manager" {
-		t.Fatalf("expected employment info manager_employee_id from xlsx column J, got %v", got)
-	}
-	if got := row.Input["主管員工ID"]; got != "emp-manager" {
-		t.Fatalf("expected input manager column from xlsx column J, got %q", got)
-	}
-	if !row.Valid {
-		t.Fatalf("expected import_minimal profile to accept 10-column xlsx row, got errors %+v", row.Errors)
-	}
-
-	missingManagerContent := minimalEmployeeImportXLSX(t, [][]string{
-		{"員工編號", "姓名", "Email", "部門", "職位", "類別", "電話", "狀態", "到職日期", "主管員工ID"},
-		{"E2003", "Missing Manager", "missing.manager@example.com", "ou-1", "HRBP", "全職", "0911000445", "在職", "2026-06-01", "emp-missing"},
-	})
-	missingSession, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
-		Filename: "employees.xlsx",
-		Content:  missingManagerContent,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(missingSession.Rows) != 1 || missingSession.Rows[0].Valid || !rowErrorsContain(missingSession.Rows[0].Errors, "manager_employee_id") {
-		t.Fatalf("expected missing manager employee id to invalidate import row, got %+v", missingSession.Rows)
-	}
-}
-
-// TestEmployeeImportPreviewRejectsOversizedXLSXEntry 驗證員工 import preview rejects oversized XLSX entry。
-func TestEmployeeImportPreviewRejectsOversizedXLSXEntry(t *testing.T) {
-	_, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
-		{Resource: "hr.employee", Action: "import", Scope: "all"},
-	})
-	content := oversizedEmployeeImportXLSX(t)
-	if len(content) > 10<<20 {
-		t.Fatalf("test workbook should stay below upload byte limit, got %d bytes", len(content))
-	}
-
-	_, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
-		Filename: "employees.xlsx",
-		Content:  content,
-	})
-	if err == nil || !strings.Contains(err.Error(), "exceeds") {
-		t.Fatalf("expected oversized xlsx entry error, got %v", err)
-	}
-}
-
 // TestEmployeePreviewCreateDoesNotPersist 驗證員工 preview create does not persist。
 func TestEmployeePreviewCreateDoesNotPersist(t *testing.T) {
 	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
@@ -6080,41 +5776,6 @@ func TestEmployeeAvatarRejectsForgedContentType(t *testing.T) {
 	}
 	if len(objects.keys) != 0 || len(objects.deleted) != 0 {
 		t.Fatalf("invalid avatar should not touch object store, keys=%+v deleted=%+v", objects.keys, objects.deleted)
-	}
-}
-
-// TestEmployeeImportTemplateHeaders 驗證員工 import 範本 headers。
-func TestEmployeeImportTemplateHeaders(t *testing.T) {
-	_, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
-		{Resource: "hr.employee", Action: "read", Scope: "all"},
-	})
-	expected := []string{"員工編號", "姓名", "Email", "部門", "職位", "類別", "電話", "狀態", "到職日期", "主管員工ID", "帳號策略"}
-
-	rawCSV, filename, contentType, err := svc.HR().EmployeeImportTemplate(ctx, "csv")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if filename != "employee-import-template.csv" || !strings.HasPrefix(contentType, "text/csv") {
-		t.Fatalf("unexpected csv template metadata filename=%q content_type=%q", filename, contentType)
-	}
-	if !bytes.HasPrefix(rawCSV, []byte{0xEF, 0xBB, 0xBF}) {
-		t.Fatalf("expected csv template to include UTF-8 BOM")
-	}
-	csvHeaders := strings.Split(strings.TrimSpace(strings.TrimPrefix(string(rawCSV), "\ufeff")), ",")
-	if !equalStrings(csvHeaders, expected) || csvHeaders[10] != "帳號策略" {
-		t.Fatalf("unexpected csv headers: %+v", csvHeaders)
-	}
-
-	rawXLSX, filename, contentType, err := svc.HR().EmployeeImportTemplate(ctx, "xlsx")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if filename != "employee-import-template.xlsx" || contentType != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" {
-		t.Fatalf("unexpected xlsx template metadata filename=%q content_type=%q", filename, contentType)
-	}
-	xlsxHeaders := xlsxSharedStrings(t, rawXLSX)
-	if !equalStrings(xlsxHeaders, expected) || xlsxHeaders[10] != "帳號策略" {
-		t.Fatalf("unexpected xlsx headers: %+v", xlsxHeaders)
 	}
 }
 
@@ -7104,6 +6765,14 @@ func attendanceFixtureClockInTime() time.Time {
 	return time.Date(2026, 6, 10, 1, 0, 0, 0, time.UTC)
 }
 
+// attendanceFixtureWorkDateStart returns the instant at which a policy must
+// become effective to govern the whole fixture work date. Attendance policy
+// resolution is deliberately anchored to the work-date boundary, not the
+// punch time or the latest published version.
+func attendanceFixtureWorkDateStart() time.Time {
+	return time.Date(2026, 6, 10, 0, 0, 0, 0, time.FixedZone("UTC+8", 8*60*60))
+}
+
 // attendanceFixtureClockOutTime 驗證考勤 fixture 打卡 out 時間。
 func attendanceFixtureClockOutTime() time.Time {
 	return time.Date(2026, 6, 10, 10, 0, 0, 0, time.UTC)
@@ -7129,18 +6798,21 @@ func (p *recordingIdentityProvisioner) EnsureUser(_ context.Context, input domai
 }
 
 type fakeEHRMSClient struct {
-	rows            []domain.EHRMSEmployeeRecord
-	departmentRows  []domain.EHRMSDepartmentRecord
-	positionRows    []domain.EHRMSPositionRecord
-	attendanceRows  []domain.EHRMSAttendanceRecord
-	leaveBalances   []domain.EHRMSLeaveBalanceRecord
-	leaveDetails    []domain.EHRMSLeaveDetailRecord
-	err             error
-	departmentsErr  error
-	positionsErr    error
-	attendanceErr   error
-	leaveBalanceErr error
-	leaveDetailErr  error
+	rows                []domain.EHRMSEmployeeRecord
+	departmentRows      []domain.EHRMSDepartmentRecord
+	positionRows        []domain.EHRMSPositionRecord
+	attendanceRows      []domain.EHRMSAttendanceRecord
+	attendanceQueries   *[]domain.EHRMSAttendanceQuery
+	leaveBalances       []domain.EHRMSLeaveBalanceRecord
+	leaveBalanceQueries *[]domain.EHRMSAttendanceQuery
+	leaveDetails        []domain.EHRMSLeaveDetailRecord
+	leaveDetailQueries  *[]domain.EHRMSAttendanceQuery
+	err                 error
+	departmentsErr      error
+	positionsErr        error
+	attendanceErr       error
+	leaveBalanceErr     error
+	leaveDetailErr      error
 }
 
 // ListEmployees 驗證員工。
@@ -7165,18 +6837,60 @@ func (c fakeEHRMSClient) ListPositions(context.Context) ([]domain.EHRMSPositionR
 }
 
 // ListAttendance 驗證考勤。
-func (c fakeEHRMSClient) ListAttendance(context.Context) ([]domain.EHRMSAttendanceRecord, error) {
-	return ehrms.NormalizeAttendanceRecords(c.attendanceRows), c.attendanceErr
+func (c fakeEHRMSClient) ListAttendance(_ context.Context, query domain.EHRMSAttendanceQuery) ([]domain.EHRMSAttendanceRecord, error) {
+	if c.attendanceQueries != nil {
+		*c.attendanceQueries = append(*c.attendanceQueries, query)
+	}
+	if c.attendanceErr != nil {
+		return nil, c.attendanceErr
+	}
+	rows := ehrms.NormalizeAttendanceRecords(c.attendanceRows)
+	if query.EmployeeID == "" {
+		return rows, nil
+	}
+	filtered := make([]domain.EHRMSAttendanceRecord, 0, len(rows))
+	for _, row := range rows {
+		if strings.TrimSpace(row["員工編號"]) == query.EmployeeID {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered, nil
 }
 
 // ListLeaveBalances 驗證假別餘額。
-func (c fakeEHRMSClient) ListLeaveBalances(context.Context) ([]domain.EHRMSLeaveBalanceRecord, error) {
-	return ehrms.NormalizeLeaveBalanceRecords(c.leaveBalances), c.leaveBalanceErr
+func (c fakeEHRMSClient) ListLeaveBalances(_ context.Context, query domain.EHRMSAttendanceQuery) ([]domain.EHRMSLeaveBalanceRecord, error) {
+	if c.leaveBalanceQueries != nil {
+		*c.leaveBalanceQueries = append(*c.leaveBalanceQueries, query)
+	}
+	if c.leaveBalanceErr != nil {
+		return nil, c.leaveBalanceErr
+	}
+	rows := ehrms.NormalizeLeaveBalanceRecords(c.leaveBalances)
+	filtered := make([]domain.EHRMSLeaveBalanceRecord, 0, len(rows))
+	for _, row := range rows {
+		if strings.TrimSpace(row["員工編號"]) == query.EmployeeID {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered, nil
 }
 
 // ListLeaveDetails 驗證假別明細。
-func (c fakeEHRMSClient) ListLeaveDetails(context.Context) ([]domain.EHRMSLeaveDetailRecord, error) {
-	return ehrms.NormalizeLeaveDetailRecords(c.leaveDetails), c.leaveDetailErr
+func (c fakeEHRMSClient) ListLeaveDetails(_ context.Context, query domain.EHRMSAttendanceQuery) ([]domain.EHRMSLeaveDetailRecord, error) {
+	if c.leaveDetailQueries != nil {
+		*c.leaveDetailQueries = append(*c.leaveDetailQueries, query)
+	}
+	if c.leaveDetailErr != nil {
+		return nil, c.leaveDetailErr
+	}
+	rows := ehrms.NormalizeLeaveDetailRecords(c.leaveDetails)
+	filtered := make([]domain.EHRMSLeaveDetailRecord, 0, len(rows))
+	for _, row := range rows {
+		if strings.TrimSpace(row["員工編號"]) == query.EmployeeID {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered, nil
 }
 
 func ehrmsDepartmentsFromEmployees(rows []domain.EHRMSEmployeeRecord) []domain.EHRMSDepartmentRecord {
@@ -7270,20 +6984,6 @@ func (s *recordingObjectStore) Provider() string {
 // Bucket 驗證 bucket。
 func (s *recordingObjectStore) Bucket() string {
 	return "imports"
-}
-
-type failingEmployeeImportSessionStore struct {
-	*memory.Store
-}
-
-// WithTenantTransaction 驗證租戶 transaction。
-func (s *failingEmployeeImportSessionStore) WithTenantTransaction(_ context.Context, _ string, fn func(repository.Store) error) error {
-	return fn(s)
-}
-
-// UpsertEmployeeImportSession 驗證 upsert 員工 import session。
-func (s *failingEmployeeImportSessionStore) UpsertEmployeeImportSession(_ context.Context, _ domain.EmployeeImportSession) error {
-	return fmt.Errorf("session persistence failed")
 }
 
 // validEmployeeInput 驗證有效員工輸入。
@@ -7537,16 +7237,6 @@ func fieldErrorsContain(fields []domain.FieldError, expectedField string) bool {
 	return false
 }
 
-// rowErrorsContain 驗證列錯誤 contain。
-func rowErrorsContain(fields []domain.RowError, expectedField string) bool {
-	for _, field := range fields {
-		if field.Field == expectedField {
-			return true
-		}
-	}
-	return false
-}
-
 // testPNGBytes 驗證 png bytes。
 func testPNGBytes() []byte {
 	return []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0}
@@ -7563,117 +7253,4 @@ func equalStrings(left, right []string) bool {
 		}
 	}
 	return true
-}
-
-// xlsxSharedStrings 驗證 XLSX shared 字串。
-func xlsxSharedStrings(t *testing.T, raw []byte) []string {
-	t.Helper()
-	reader, err := zip.NewReader(bytes.NewReader(raw), int64(len(raw)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, file := range reader.File {
-		if file.Name != "xl/sharedStrings.xml" {
-			continue
-		}
-		rc, err := file.Open()
-		if err != nil {
-			t.Fatal(err)
-		}
-		defer rc.Close()
-		var buf bytes.Buffer
-		if _, err := buf.ReadFrom(rc); err != nil {
-			t.Fatal(err)
-		}
-		var parsed struct {
-			Items []struct {
-				Text string `xml:"t"`
-			} `xml:"si"`
-		}
-		if err := xml.Unmarshal(buf.Bytes(), &parsed); err != nil {
-			t.Fatal(err)
-		}
-		values := make([]string, 0, len(parsed.Items))
-		for _, item := range parsed.Items {
-			values = append(values, item.Text)
-		}
-		return values
-	}
-	t.Fatal("xl/sharedStrings.xml not found")
-	return nil
-}
-
-// minimalEmployeeImportXLSX 驗證 minimal 員工 import XLSX。
-func minimalEmployeeImportXLSX(t *testing.T, rows [][]string) string {
-	t.Helper()
-	var values []string
-	for _, row := range rows {
-		values = append(values, row...)
-	}
-
-	var shared bytes.Buffer
-	shared.WriteString(`<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`)
-	for _, value := range values {
-		shared.WriteString("<si><t>")
-		if err := xml.EscapeText(&shared, []byte(value)); err != nil {
-			t.Fatal(err)
-		}
-		shared.WriteString("</t></si>")
-	}
-	shared.WriteString("</sst>")
-
-	var sheet bytes.Buffer
-	sheet.WriteString(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>`)
-	index := 0
-	for rowIndex, row := range rows {
-		fmt.Fprintf(&sheet, `<row r="%d">`, rowIndex+1)
-		for colIndex := range row {
-			ref := string(rune('A'+colIndex)) + fmt.Sprint(rowIndex+1)
-			fmt.Fprintf(&sheet, `<c r="%s" t="s"><v>%d</v></c>`, ref, index)
-			index++
-		}
-		sheet.WriteString("</row>")
-	}
-	sheet.WriteString("</sheetData></worksheet>")
-
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	add := func(name string, data []byte) {
-		w, err := zw.Create(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := w.Write(data); err != nil {
-			t.Fatal(err)
-		}
-	}
-	add("xl/sharedStrings.xml", shared.Bytes())
-	add("xl/worksheets/sheet1.xml", sheet.Bytes())
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buf.String()
-}
-
-// oversizedEmployeeImportXLSX 驗證 oversized 員工 import XLSX。
-func oversizedEmployeeImportXLSX(t *testing.T) string {
-	t.Helper()
-	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
-	add := func(name string, data []byte) {
-		w, err := zw.Create(name)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := w.Write(data); err != nil {
-			t.Fatal(err)
-		}
-	}
-	add("xl/sharedStrings.xml", []byte(`<sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><si><t>員工編號</t></si></sst>`))
-	oversizedSheet := `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>` + strings.Repeat(" ", (10<<20)+1) + `</sheetData></worksheet>`
-	add("xl/worksheets/sheet1.xml", []byte(oversizedSheet))
-	if err := zw.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return buf.String()
 }

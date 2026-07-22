@@ -10,16 +10,30 @@ import (
 func TestNormalizeEmployeeRecordsMapsEnglishAliases(t *testing.T) {
 	t.Parallel()
 	rows := ehrms.NormalizeEmployeeRecords([]domain.EHRMSEmployeeRecord{{
-		"emp_id":      "IKM001",
-		"name_zh":     "測試員工",
-		"work_status": "在職",
-		"dept_code":   "M0101",
-		"hire_date":   "2026/06/01",
-		"quit_date":   "2026/06/30",
-		"national_id": "A123456789",
-		"leave_group": "-",
-		"school_zh":   "Nexus University",
-		"email":       "test@ikala.ai",
+		"emp_id":                  "IKM001",
+		"name_zh":                 "測試員工",
+		"work_status":             "在職",
+		"dept_code":               "M0101",
+		"hire_date":               "2026/06/01",
+		"quit_date":               "2026/06/30",
+		"seniority_start":         "2026/06/01",
+		"probation_end":           "2026/09/01",
+		"national_id":             "A123456789",
+		"passport_name":           "TEST EMPLOYEE",
+		"entry_date":              "2026/01/02",
+		"arc_no":                  "A800000001",
+		"arc_expiry_date":         "2027/01/02",
+		"tax_id":                  "TW-001",
+		"work_permit_no":          "WP-001",
+		"work_permit_expiry_date": "2027/01/01",
+		"contract_expiry_date":    "2028/01/01",
+		"broker":                  "Nexus Agency",
+		"emergency_phone":         "0912-345-678",
+		"emergency_contact":       "王小明",
+		"emergency_relation":      "配偶",
+		"leave_group":             "-",
+		"school_zh":               "Nexus University",
+		"email":                   "test@ikala.ai",
 	}})
 	if rows[0]["員工編號"] != "IKM001" || rows[0]["中文姓名"] != "測試員工" || rows[0]["在職狀態"] != "在職" {
 		t.Fatalf("unexpected normalized record: %+v", rows[0])
@@ -38,6 +52,15 @@ func TestNormalizeEmployeeRecordsMapsEnglishAliases(t *testing.T) {
 	}
 	if rows[0]["離職日期"] != "2026/06/30" {
 		t.Fatalf("expected quit_date alias, got %+v", rows[0])
+	}
+	if rows[0]["年資起始日"] != "2026/06/01" || rows[0]["試用期滿日"] != "2026/09/01" {
+		t.Fatalf("expected employment date aliases, got %+v", rows[0])
+	}
+	if rows[0]["護照姓名"] != "TEST EMPLOYEE" || rows[0]["居留證號"] != "A800000001" || rows[0]["仲介單位"] != "Nexus Agency" {
+		t.Fatalf("expected foreign employee basic-info aliases, got %+v", rows[0])
+	}
+	if rows[0]["緊急聯絡人電話"] != "0912-345-678" || rows[0]["緊急聯絡人姓名"] != "王小明" || rows[0]["緊急聯絡人關係"] != "配偶" {
+		t.Fatalf("expected emergency contact aliases, got %+v", rows[0])
 	}
 }
 

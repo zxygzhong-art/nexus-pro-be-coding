@@ -3,7 +3,6 @@ package service
 import (
 	"sort"
 	"strings"
-	"time"
 
 	"nexus-pro-api/internal/domain"
 	"nexus-pro-api/internal/utils"
@@ -59,46 +58,6 @@ func (c AttendanceService) submitAttendanceCompatibilityForm(ctx RequestContext,
 	return instance, nil
 }
 
-// reserveLeaveBalanceIfAvailable selects and locks an eHRMS entitlement bucket.
-// The caller appends a Nexus overlay entry after the request has been persisted.
-func (c AttendanceService) reserveLeaveBalanceIfAvailable(ctx RequestContext, employeeID, leaveTypeID string, hours float64, asOf time.Time) (LeaveBalance, string, error) {
-	return c.leaveBalanceForOverlay(ctx, employeeID, leaveTypeID, hours, asOf)
-}
-
-// resolveLeaveBalanceID resolves legacy requests without mutating the eHRMS snapshot.
-func (c AttendanceService) resolveLeaveBalanceID(ctx RequestContext, balanceID, employeeID, leaveTypeID string, asOf time.Time) (string, error) {
-	resolvedID := strings.TrimSpace(balanceID)
-	if resolvedID == "" {
-		balances, err := c.store.ListLeaveBalances(goContext(ctx), ctx.TenantID)
-		if err != nil {
-			return "", err
-		}
-		matches := make([]LeaveBalance, 0, 1)
-		for _, balance := range balances {
-			if balance.EmployeeID == employeeID && balance.LeaveTypeID == leaveTypeID && leaveBalanceCoversDate(balance, asOf) {
-				matches = append(matches, balance)
-			}
-		}
-		switch len(matches) {
-		case 0:
-			return "", Conflict("legacy leave request has no balance covering its start date")
-		case 1:
-			resolvedID = strings.TrimSpace(matches[0].ID)
-		default:
-			return "", Conflict("legacy leave request matches multiple balances for its start date")
-		}
-		if resolvedID == "" {
-			return "", Conflict("legacy leave request resolved to an invalid balance")
-		}
-	}
-	if _, found, err := c.store.GetLeaveBalance(goContext(ctx), ctx.TenantID, resolvedID); err != nil {
-		return "", err
-	} else if !found {
-		return "", Conflict("linked leave balance was not found")
-	}
-	return resolvedID, nil
-}
-
 // applyLeaveWorkflowReview 處理 apply 請假流程審核的服務流程。
 func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance FormInstance, kind string, status string) error {
 	request, ok, err := c.store.GetLeaveRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID)
@@ -135,37 +94,41 @@ func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance
 	if previousStatus == "approved" && nextStatus != "approved" {
 		return BadRequest("approved leave request cannot be changed by workflow")
 	}
-	requiresBalance := strings.TrimSpace(request.LeaveBalanceID) != ""
-	if snapshotValue, ok := request.EvaluationSnapshot["balance_required"].(bool); ok {
-		requiresBalance = snapshotValue
-	}
 	leaveTypeID := strings.TrimSpace(request.LeaveTypeID)
 	if leaveTypeID == "" {
 		leaveTypeID = domain.StableLeaveTypeID(request.LeaveType)
 		request.LeaveTypeID = leaveTypeID
 	}
 	cycle := leaveRequestBalanceCycle(request)
-	if requiresBalance && (leaveRequestStatusReleasesBalance(previousStatus, nextStatus) || previousStatus == "pending_approval" && nextStatus == "approved") {
-		balanceID, err := c.resolveLeaveBalanceID(ctx, request.LeaveBalanceID, request.EmployeeID, leaveTypeID, request.StartAt)
+	allocations, err := c.store.ListLeaveRequestAllocationsByRequestCycle(goContext(ctx), ctx.TenantID, request.ID, cycle)
+	if err != nil {
+		return err
+	}
+	if balanceRequired, _ := request.EvaluationSnapshot["balance_required"].(bool); balanceRequired {
+		allocatedMinutes := 0
+		for _, allocation := range allocations {
+			allocatedMinutes += allocation.ReservedMinutes
+		}
+		if allocatedMinutes != request.RequestedMinutes {
+			return Conflict("leave request allocations do not cover the requested minutes")
+		}
+	}
+	if leaveRequestStatusReleasesBalance(previousStatus, nextStatus) || previousStatus == "pending_approval" && nextStatus == "approved" {
+		for _, allocation := range allocations {
+			if err := c.appendLeaveBalanceEntry(ctx, request, allocation, "", leaveBalanceEntryRelease, allocation.ReservedMinutes, cycle); err != nil {
+				return err
+			}
+		}
+	}
+	if nextStatus == "approved" {
+		leaveCase, err := c.ensureNexusLeaveCase(ctx, request)
 		if err != nil {
 			return err
 		}
-		if err := c.appendLeaveBalanceEntry(ctx, request, balanceID, "", leaveBalanceEntryRelease, leaveMinutes(request.Hours), cycle); err != nil {
-			return err
-		}
-		if nextStatus == "approved" {
-			leaveCase, err := c.ensureNexusLeaveCase(ctx, request)
-			if err != nil {
+		for _, allocation := range allocations {
+			if err := c.appendLeaveBalanceEntry(ctx, request, allocation, leaveCase.ID, leaveBalanceEntryLocalConsume, -allocation.ReservedMinutes, cycle); err != nil {
 				return err
 			}
-			if err := c.appendLeaveBalanceEntry(ctx, request, balanceID, leaveCase.ID, leaveBalanceEntryLocalConsume, -leaveMinutes(request.Hours), cycle); err != nil {
-				return err
-			}
-			request.ReconciliationStatus = "nexus_only"
-		}
-	} else if nextStatus == "approved" {
-		if _, err := c.ensureNexusLeaveCase(ctx, request); err != nil {
-			return err
 		}
 		request.ReconciliationStatus = "nexus_only"
 	}
@@ -421,16 +384,6 @@ func (c AttendanceService) applyAttendanceWorkflowReview(ctx RequestContext, ins
 
 // applyCorrectionWorkflowReview 處理補卡表單流程審核的服務流程。
 func (c AttendanceService) applyCorrectionWorkflowReview(ctx RequestContext, instance FormInstance, kind string) error {
-	current, ok, err := c.store.GetAttendanceCorrectionRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		return nil
-	}
-	if !strings.EqualFold(current.Status, correctionStatusPending) {
-		return nil
-	}
 	nextStatus := ""
 	switch strings.ToLower(strings.TrimSpace(kind)) {
 	case "approve":
@@ -441,6 +394,15 @@ func (c AttendanceService) applyCorrectionWorkflowReview(ctx RequestContext, ins
 		return nil
 	}
 	now := c.Now()
+	current, claimed, err := c.store.ClaimAttendanceCorrectionReview(
+		goContext(ctx), ctx.TenantID, instance.ID, strings.TrimSpace(ctx.AccountID), now,
+	)
+	if err != nil {
+		return err
+	}
+	if !claimed {
+		return nil
+	}
 	current.Status = nextStatus
 	current.ReviewedByAccountID = strings.TrimSpace(ctx.AccountID)
 	current.ReviewedAt = &now
@@ -502,7 +464,7 @@ func (c AttendanceService) applyOvertimeWorkflowReview(ctx RequestContext, insta
 		return BadRequest("approved overtime request cannot be changed by workflow")
 	}
 	if nextStatus == "approved" && strings.EqualFold(request.CompensationType, overtimeCompensationLeave) {
-		if err := c.creditCompensatoryLeaveBalance(ctx, request.EmployeeID, request.Hours); err != nil {
+		if err := c.creditCompensatoryLeaveBalance(ctx, request); err != nil {
 			return err
 		}
 	}
@@ -511,29 +473,34 @@ func (c AttendanceService) applyOvertimeWorkflowReview(ctx RequestContext, insta
 	return c.store.UpsertOvertimeRequest(goContext(ctx), request)
 }
 
-// creditCompensatoryLeaveBalance 依覈準加班時數累積補休假餘額。
-func (c AttendanceService) creditCompensatoryLeaveBalance(ctx RequestContext, employeeID string, hours float64) error {
-	if hours <= 0 {
+// creditCompensatoryLeaveBalance writes one idempotent credit bound to the
+// approved overtime request. The deterministic local anchor is immutable and
+// carries no snapshot amount of its own.
+func (c AttendanceService) creditCompensatoryLeaveBalance(ctx RequestContext, request OvertimeRequest) error {
+	minutes := leaveMinutes(request.Hours)
+	if minutes <= 0 {
 		return nil
 	}
 	leaveType := leaveTypeCodeCompensatory
 	leaveTypeID := domain.StableLeaveTypeID(leaveType)
-	if _, found, err := c.store.ReleaseLeaveBalance(goContext(ctx), ctx.TenantID, employeeID, leaveTypeID, hours, c.Now()); err != nil {
-		return err
-	} else if found {
-		return nil
-	}
-	return c.store.UpsertLeaveBalance(goContext(ctx), LeaveBalance{
-		ID:             utils.NewID("lb"),
-		TenantID:       ctx.TenantID,
-		EmployeeID:     employeeID,
-		LeaveType:      leaveType,
-		LeaveTypeID:    leaveTypeID,
-		RemainingHours: hours,
-		GrantedHours:   hours,
-		Source:         "overtime",
-		UpdatedAt:      c.Now(),
+	now := c.Now()
+	anchor, err := c.store.EnsureLocalLeaveBalanceAnchor(goContext(ctx), LeaveBalance{
+		ID:       ehrmsStableID("lb-local-anchor", ctx.TenantID, request.EmployeeID, leaveTypeID),
+		TenantID: ctx.TenantID, EmployeeID: request.EmployeeID,
+		LeaveType: leaveType, LeaveTypeID: leaveTypeID, Source: "local_anchor", UpdatedAt: now,
 	})
+	if err != nil {
+		return err
+	}
+	_, err = c.store.AppendStandaloneLeaveBalanceEntry(goContext(ctx), domain.LeaveBalanceEntry{
+		ID: utils.NewID("lbe"), TenantID: ctx.TenantID,
+		EmployeeID: request.EmployeeID, LeaveTypeID: leaveTypeID, BalanceID: anchor.ID,
+		OvertimeRequestID: request.ID, EntryType: leaveBalanceEntryOvertimeCredit,
+		AmountMinutes: minutes, IdempotencyKey: "overtime-request:" + request.ID + ":credit",
+		Metadata:   map[string]any{"source": "approved_overtime", "overtime_request_id": request.ID},
+		OccurredAt: now, CreatedAt: now,
+	})
+	return err
 }
 
 // workflowLinkedOvertimeRequestID 處理流程 linked 加班申請 ID。

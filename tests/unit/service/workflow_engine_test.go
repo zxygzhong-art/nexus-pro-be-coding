@@ -3,6 +3,7 @@ package service_test
 import (
 	"errors"
 	"reflect"
+	"sync"
 	"testing"
 	"time"
 
@@ -10,6 +11,80 @@ import (
 	"nexus-pro-api/internal/repository/memory"
 	"nexus-pro-api/internal/service"
 )
+
+func TestWorkflowConcurrentDecisionsSerializeOnActiveStage(t *testing.T) {
+	now := time.Date(2026, 7, 22, 14, 0, 0, 0, time.UTC)
+	svc, applicantCtx, store := newWorkflowEngineFixture(t, now, "acct-reviewer")
+	instance, err := svc.Workflow().SubmitForm(applicantCtx, domain.SubmitFormInput{
+		TemplateKey: "leave-request",
+		Payload:     map[string]any{"desc": "concurrent decision"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	run, ok, err := store.GetWorkflowRunByFormInstance(t.Context(), applicantCtx.TenantID, instance.ID)
+	if err != nil || !ok {
+		t.Fatalf("workflow run lookup failed ok=%v err=%v", ok, err)
+	}
+
+	start := make(chan struct{})
+	errs := make(chan error, 2)
+	var workers sync.WaitGroup
+	for _, key := range []string{"concurrent-decision-1", "concurrent-decision-2"} {
+		key := key
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			<-start
+			_, actionErr := svc.Workflow().ApplyTemporalFormApprovalSignal(domain.RequestContext{
+				TenantID:  applicantCtx.TenantID,
+				AccountID: "acct-reviewer",
+			}, domain.FormApprovalWorkflowSignal{
+				TenantID:       applicantCtx.TenantID,
+				FormInstanceID: instance.ID,
+				RunID:          run.ID,
+				AccountID:      "acct-reviewer",
+				Action:         domain.FormApprovalWorkflowActionApprove,
+				Reason:         "concurrent",
+				IdempotencyKey: key,
+			})
+			errs <- actionErr
+		}()
+	}
+	close(start)
+	workers.Wait()
+	close(errs)
+
+	succeeded, conflicted := 0, 0
+	for actionErr := range errs {
+		if actionErr == nil {
+			succeeded++
+			continue
+		}
+		var appErr *domain.AppError
+		if errors.As(actionErr, &appErr) && appErr.Status == 409 && appErr.ReasonCode == "workflow_stage_unavailable" {
+			conflicted++
+			continue
+		}
+		t.Fatalf("unexpected concurrent decision error: %T %v", actionErr, actionErr)
+	}
+	if succeeded != 1 || conflicted != 1 {
+		t.Fatalf("expected one committed decision and one stale-stage conflict, success=%d conflict=%d", succeeded, conflicted)
+	}
+	actions, err := store.ListWorkflowActionsByRun(t.Context(), applicantCtx.TenantID, run.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	approved := 0
+	for _, action := range actions {
+		if action.Action == domain.FormApprovalWorkflowActionApprove {
+			approved++
+		}
+	}
+	if approved != 1 {
+		t.Fatalf("expected one durable approval action, got %d (%+v)", approved, actions)
+	}
+}
 
 func TestParseWorkflowStagesFromTemplateUsesExplicitAssignees(t *testing.T) {
 	template := domain.FormTemplate{
@@ -154,16 +229,16 @@ func TestWorkflowSubmitRejectsInjectedLeaveLink(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	svc, ctx, store := newWorkflowEngineFixture(t, now, "acct-admin")
 	victim := domain.LeaveRequest{
-		ID:             "lr-victim",
-		TenantID:       "tenant-1",
-		EmployeeID:     "emp-victim",
-		LeaveType:      "annual",
-		StartAt:        now.Add(24 * time.Hour),
-		EndAt:          now.Add(32 * time.Hour),
-		Hours:          8,
-		Status:         "pending_approval",
-		FormInstanceID: "fi-victim",
-		CreatedAt:      now,
+		ID:               "lr-victim",
+		TenantID:         "tenant-1",
+		EmployeeID:       "emp-victim",
+		LeaveType:        "annual",
+		StartAt:          now.Add(24 * time.Hour),
+		EndAt:            now.Add(32 * time.Hour),
+		RequestedMinutes: 8 * 60,
+		Status:           "pending_approval",
+		FormInstanceID:   "fi-victim",
+		CreatedAt:        now,
 	}
 	if err := store.UpsertLeaveRequest(t.Context(), victim); err != nil {
 		t.Fatal(err)
@@ -380,7 +455,7 @@ func TestDirectLeaveStartFailureRestoresBalanceBeforeRetry(t *testing.T) {
 	grantDirectAttendanceCreatePermission(t, store)
 	if err := store.UpsertLeaveBalance(t.Context(), domain.LeaveBalance{
 		ID: "lb-direct-retry", TenantID: "tenant-1", EmployeeID: "emp-applicant", LeaveType: "annual",
-		RemainingHours: 16, GrantedHours: 16, UpdatedAt: now,
+		RemainingMinutes: 16 * 60, GrantedMinutes: 16 * 60, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -410,7 +485,7 @@ func TestDirectLeaveStartFailureRestoresBalanceBeforeRetry(t *testing.T) {
 		t.Fatalf("expected cancelled failed leave projection, ok=%v err=%v request=%+v", ok, err, failedRequest)
 	}
 	balance := effectiveLeaveBalanceForTest(t, store, "lb-direct-retry")
-	if balance.RemainingHours != 16 {
+	if balance.RemainingMinutes != 16*60 {
 		t.Fatalf("expected failed start to release its overlay reservation, balance=%+v", balance)
 	}
 
@@ -423,7 +498,7 @@ func TestDirectLeaveStartFailureRestoresBalanceBeforeRetry(t *testing.T) {
 		t.Fatalf("expected independent pending retry, failed=%+v retried=%+v", failedRequest, retried)
 	}
 	balance = effectiveLeaveBalanceForTest(t, store, "lb-direct-retry")
-	if balance.RemainingHours != 16-retried.Hours || balance.PendingHours != retried.Hours {
+	if balance.RemainingMinutes != 16*60-retried.RequestedMinutes || balance.PendingMinutes != retried.RequestedMinutes {
 		t.Fatalf("expected exactly one active overlay reservation after retry, balance=%+v retry=%+v", balance, retried)
 	}
 	failedRequest, ok, err = store.GetLeaveRequestByFormInstanceID(t.Context(), "tenant-1", failedForm.ID)
@@ -959,7 +1034,7 @@ func TestSubmitFormMarksWorkflowStartFailedWhenTemporalUnavailable(t *testing.T)
 	svc, applicantCtx, store, fakeTemporal := newWorkflowEngineFixtureWithFake(t, now, "acct-admin")
 	if err := store.UpsertLeaveBalance(t.Context(), domain.LeaveBalance{
 		ID: "lb-standard-retry", TenantID: "tenant-1", EmployeeID: "emp-applicant", LeaveType: "annual",
-		RemainingHours: 16, GrantedHours: 16, UpdatedAt: now,
+		RemainingMinutes: 16 * 60, GrantedMinutes: 16 * 60, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -999,7 +1074,7 @@ func TestSubmitFormMarksWorkflowStartFailedWhenTemporalUnavailable(t *testing.T)
 		t.Fatalf("expected cancelled leave projection, got ok=%v err=%v request=%+v", ok, requestErr, failedRequest)
 	}
 	balance := effectiveLeaveBalanceForTest(t, store, "lb-standard-retry")
-	if balance.RemainingHours != 16 {
+	if balance.RemainingMinutes != 16*60 {
 		t.Fatalf("expected failed start to release its overlay reservation, balance=%+v", balance)
 	}
 
@@ -1013,7 +1088,7 @@ func TestSubmitFormMarksWorkflowStartFailedWhenTemporalUnavailable(t *testing.T)
 		t.Fatalf("expected independent pending retry, got ok=%v err=%v failed=%+v retried=%+v", ok, requestErr, failedRequest, retriedRequest)
 	}
 	balance = effectiveLeaveBalanceForTest(t, store, "lb-standard-retry")
-	if balance.RemainingHours != 16-retriedRequest.Hours || balance.PendingHours != retriedRequest.Hours {
+	if balance.RemainingMinutes != 16*60-retriedRequest.RequestedMinutes || balance.PendingMinutes != retriedRequest.RequestedMinutes {
 		t.Fatalf("expected one active overlay reservation after retry, balance=%+v", balance)
 	}
 	failedRequest, ok, requestErr = store.GetLeaveRequestByFormInstanceID(t.Context(), "tenant-1", instances[0].ID)

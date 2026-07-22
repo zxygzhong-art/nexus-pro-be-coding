@@ -83,12 +83,35 @@ func TestLeaveDualSourceOverlayReconcilesWithoutDoubleDeduction(t *testing.T) {
 		t.Fatal(err)
 	}
 	raw, ok, err := store.GetLeaveBalance(t.Context(), "tenant-1", balanceID)
-	if err != nil || !ok || raw.RemainingHours != 10 {
+	if err != nil || !ok || raw.RemainingMinutes != 10*60 {
 		t.Fatalf("Nexus approval must not mutate the eHRMS snapshot, ok=%v err=%v balance=%+v", ok, err, raw)
 	}
 	effective := effectiveLeaveBalanceForTest(t, store, balanceID)
-	if effective.RemainingHours != 3 || effective.PendingHours != 0 || effective.LocalUsedHours != 7 {
+	if effective.RemainingMinutes != 3*60 || effective.PendingMinutes != 0 || effective.LocalUsedMinutes != 7*60 {
 		t.Fatalf("expected Nexus-only approval to consume seven overlay hours, got %+v", effective)
+	}
+
+	// Seeing the detail before the authoritative balance snapshot absorbs it
+	// must not reopen availability.
+	if _, err := svc.Attendance().SyncEHRMSAttendance(reviewerCtx, domain.EHRMSAttendanceSyncInput{}); err != nil {
+		t.Fatal(err)
+	}
+	effective = effectiveLeaveBalanceForTest(t, store, balanceID)
+	if effective.RemainingMinutes != 3*60 || effective.LocalUsedMinutes != 7*60 {
+		t.Fatalf("unconfirmed upstream balance must keep the local deduction, got %+v", effective)
+	}
+	pending, ok, err := store.GetLeaveRequest(t.Context(), "tenant-1", request.ID)
+	if err != nil || !ok || pending.ReconciliationStatus != "pending_balance_confirmation" {
+		t.Fatalf("expected pending balance confirmation, ok=%v err=%v request=%+v", ok, err, pending)
+	}
+	entries, err := store.ListLeaveBalanceEntries(t.Context(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if entry.BalanceID == balanceID && entry.EntryType == "external_reconcile" {
+			t.Fatalf("unconfirmed upstream balance must not create external reconciliation entry: %+v", entry)
+		}
 	}
 
 	client.leaveBalances[0]["used"] = "137"
@@ -97,14 +120,14 @@ func TestLeaveDualSourceOverlayReconcilesWithoutDoubleDeduction(t *testing.T) {
 		t.Fatal(err)
 	}
 	effective = effectiveLeaveBalanceForTest(t, store, balanceID)
-	if effective.UpstreamRemainingHours != 3 || effective.RemainingHours != 3 || effective.LocalUsedHours != 0 {
+	if effective.SnapshotRemainingMinutes != 3*60 || effective.RemainingMinutes != 3*60 || effective.LocalUsedMinutes != 0 {
 		t.Fatalf("matched eHRMS fact must neutralize the local deduction, got %+v", effective)
 	}
 	stored, ok, err := store.GetLeaveRequest(t.Context(), "tenant-1", request.ID)
 	if err != nil || !ok || stored.ReconciliationStatus != "matched" {
 		t.Fatalf("expected the Nexus request to be reconciled, ok=%v err=%v request=%+v", ok, err, stored)
 	}
-	leaveCase, ok, err := store.GetLeaveCaseBySource(t.Context(), "tenant-1", "nexus_request", request.ID)
+	leaveCase, ok, err := store.GetLeaveCaseByLeaveRequest(t.Context(), "tenant-1", request.ID)
 	if err != nil || !ok || leaveCase.Origin != "both" {
 		t.Fatalf("expected one logical case linked to both sources, ok=%v err=%v case=%+v", ok, err, leaveCase)
 	}
@@ -117,7 +140,75 @@ func TestLeaveDualSourceOverlayReconcilesWithoutDoubleDeduction(t *testing.T) {
 		t.Fatal(err)
 	}
 	effective = effectiveLeaveBalanceForTest(t, store, balanceID)
-	if effective.RemainingHours != 3 {
+	if effective.RemainingMinutes != 3*60 {
 		t.Fatalf("replayed sync must be idempotent, got %+v", effective)
+	}
+
+	// Correcting the same external identity breaks the exact match, reverses the
+	// old reconciliation, and updates the eHRMS case without mutating snapshots.
+	client.leaveDetails[0]["hours"] = "6"
+	client.leaveDetails[0]["deduct_hours"] = "120分鐘"
+	client.leaveBalances[0]["used"] = "136"
+	client.leaveBalances[0]["remaining"] = "4"
+	if _, err := svc.Attendance().SyncEHRMSAttendance(reviewerCtx, domain.EHRMSAttendanceSyncInput{}); err != nil {
+		t.Fatal(err)
+	}
+	effective = effectiveLeaveBalanceForTest(t, store, balanceID)
+	if effective.SnapshotRemainingMinutes != 4*60 || effective.RemainingMinutes != -3*60 || effective.LocalUsedMinutes != 7*60 {
+		t.Fatalf("corrected mismatch must restore the Nexus-only deduction, got %+v", effective)
+	}
+	correctedRecords, err := store.ListExternalLeaveRecords(t.Context(), "tenant-1")
+	if err != nil || len(correctedRecords) != 1 || correctedRecords[0].NetMinutes != 6*60 {
+		t.Fatalf("corrected external record was not updated in place, err=%v records=%+v", err, correctedRecords)
+	}
+	correctedCase, ok, err := store.GetLeaveCaseByExternalRecord(t.Context(), "tenant-1", correctedRecords[0].ID)
+	if err != nil || !ok || correctedCase.NetMinutes != 6*60 || correctedCase.Origin != "ehrms" {
+		t.Fatalf("corrected external case was not split and updated, ok=%v err=%v case=%+v", ok, err, correctedCase)
+	}
+
+	// Restoring the original upstream fact reuses the same identity but starts a
+	// new ledger generation, so the exact match can be applied again.
+	client.leaveDetails[0]["hours"] = "7"
+	client.leaveDetails[0]["deduct_hours"] = "60分鐘"
+	client.leaveBalances[0]["used"] = "137"
+	client.leaveBalances[0]["remaining"] = "3"
+	if _, err := svc.Attendance().SyncEHRMSAttendance(reviewerCtx, domain.EHRMSAttendanceSyncInput{}); err != nil {
+		t.Fatal(err)
+	}
+	effective = effectiveLeaveBalanceForTest(t, store, balanceID)
+	if effective.RemainingMinutes != 3*60 || effective.LocalUsedMinutes != 0 {
+		t.Fatalf("restored exact fact must reconcile in a new generation, got %+v", effective)
+	}
+
+	// A successful empty detail snapshot tombstones the upstream fact and
+	// reverses only its prior reconciliation. The approved Nexus request remains
+	// the active deduction while the eHRMS snapshot restores its minutes.
+	client.leaveDetails = nil
+	client.leaveBalances[0]["used"] = "130"
+	client.leaveBalances[0]["remaining"] = "10"
+	if _, err := svc.Attendance().SyncEHRMSAttendance(reviewerCtx, domain.EHRMSAttendanceSyncInput{}); err != nil {
+		t.Fatal(err)
+	}
+	effective = effectiveLeaveBalanceForTest(t, store, balanceID)
+	if effective.SnapshotRemainingMinutes != 10*60 || effective.RemainingMinutes != 3*60 || effective.LocalUsedMinutes != 7*60 {
+		t.Fatalf("tombstone must restore the Nexus-only deduction exactly once, got %+v", effective)
+	}
+	external, err = store.ListExternalLeaveRecords(context.Background(), "tenant-1")
+	if err != nil || len(external) != 1 || external[0].DeletedAt == nil || external[0].Status != "cancelled" {
+		t.Fatalf("missing upstream fact was not tombstoned, err=%v records=%+v", err, external)
+	}
+	localCase, ok, err := store.GetLeaveCaseByLeaveRequest(t.Context(), "tenant-1", request.ID)
+	if err != nil || !ok || localCase.Origin != "nexus" || localCase.Status != "active" {
+		t.Fatalf("local case must remain active after upstream deletion, ok=%v err=%v case=%+v", ok, err, localCase)
+	}
+	externalCase, ok, err := store.GetLeaveCaseByExternalRecord(t.Context(), "tenant-1", external[0].ID)
+	if err != nil || !ok || externalCase.Origin != "ehrms" || externalCase.Status != "cancelled" {
+		t.Fatalf("external case must retain a cancelled tombstone, ok=%v err=%v case=%+v", ok, err, externalCase)
+	}
+	if _, err := svc.Attendance().SyncEHRMSAttendance(reviewerCtx, domain.EHRMSAttendanceSyncInput{}); err != nil {
+		t.Fatal(err)
+	}
+	if replayed := effectiveLeaveBalanceForTest(t, store, balanceID); replayed.RemainingMinutes != 3*60 {
+		t.Fatalf("replayed tombstone must be idempotent, got %+v", replayed)
 	}
 }

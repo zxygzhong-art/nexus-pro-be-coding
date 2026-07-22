@@ -578,7 +578,7 @@ func (c WorkflowService) submitNewFormForApplicant(ctx RequestContext, account A
 			"form_instance_id", instance.ID,
 			"template_key", template.Key,
 			"leave_type", linkedLeaveRequest.LeaveType,
-			"hours", linkedLeaveRequest.Hours,
+			"requested_minutes", linkedLeaveRequest.RequestedMinutes,
 		)
 	}
 	if linkedOvertimeRequest.ID != "" {
@@ -717,7 +717,7 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 			"form_instance_id", instance.ID,
 			"template_key", template.Key,
 			"leave_type", linkedLeaveRequest.LeaveType,
-			"hours", linkedLeaveRequest.Hours,
+			"requested_minutes", linkedLeaveRequest.RequestedMinutes,
 		)
 	}
 	if linkedOvertimeRequest.ID != "" {

@@ -11,14 +11,17 @@ CREATE TEMP TABLE seed_agent_context ON COMMIT DROP AS
 SELECT
     t.id AS tenant_id,
     (
-        SELECT m.id
-        FROM agent_models m
-        WHERE m.tenant_id = t.id
-          AND m.status = 'active'
-          AND m.sync_status = 'synced'
-        ORDER BY m.updated_at DESC, m.id
+        SELECT model.id
+        FROM model_connections model
+        JOIN model_connection_state state
+          ON state.tenant_id = model.tenant_id
+         AND state.model_connection_id = model.id
+        WHERE model.tenant_id = t.id
+          AND model.status = 'active'
+          AND state.sync_status = 'synced'
+        ORDER BY model.updated_at DESC, model.id
         LIMIT 1
-    ) AS model_id,
+    ) AS model_connection_id,
     (
         SELECT a.id
         FROM accounts a
@@ -52,13 +55,13 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM seed_agent_context) THEN
         RAISE EXCEPTION 'tenant does not exist';
     END IF;
-    IF EXISTS (SELECT 1 FROM seed_agent_context WHERE model_id IS NULL) THEN
+    IF EXISTS (SELECT 1 FROM seed_agent_context WHERE model_connection_id IS NULL) THEN
         RAISE EXCEPTION 'tenant requires an active synced agent model before seeding assistants';
     END IF;
 END
 $$;
 
-CREATE TEMP TABLE seeded_agent_ids ON COMMIT DROP AS
+CREATE TEMP TABLE seed_agent_definitions ON COMMIT DROP AS
 WITH definitions(
     suffix,
     name,
@@ -108,7 +111,7 @@ WITH definitions(
 	            '[]'::jsonb,
 		            '你是 Nexus Pro 考勤助理，只處理員工考勤自助。你可以建立 leave-request 請假單、overtime-approval 加班單與 punch-fix 補卡單，並查詢假期餘額、本人表單歷史、打卡紀錄與本月考勤摘要。查詢歷史請假時必須呼叫 my_form_history 並指定 template_key=leave-request；查詢本月工時、出勤天數、已覈準請假或加班時數時必須呼叫 my_attendance_summary。建立任何單據前先呼叫 get_published_form_template 取得真實欄位與資料來源，不得猜測欄位 ID。建立請假草稿前必須呼叫 check_leave_eligibility；若餘額未初始化或不足，仍必須按不使用餘額繼續建立草稿，不得只回覆說明文字；my_leave_balances 的 initialized=false 表示餘額尚未初始化，不是餘額為零。若請假未提供開始與結束時間，不要追問，後端會依 Asia/Shanghai 當天與考勤政策自動填入，建立草稿後說明實際採用的日期、時間與時數。建立補卡前先查 my_clock_records 核對缺口。只能建立或更新可撤銷草稿，完成必填欄位後必須呼叫 preview_form_submission，等待使用者在確認卡上確認，絕不能聲稱已自動提交。',
 	            '您好，我是考勤助理，可以協助請假、加班、補卡與考勤查詢。',
-	            '["幫我申請下週一特休","幫我建立加班單","查看本月考勤摘要"]'::jsonb,
+	            '["幫我申請下週一特休","幫我建立加班單","查看本月考勤摘要","查詢我的請假紀錄"]'::jsonb,
 	            '["get_my_profile","my_attendance_summary","my_form_history","my_leave_balances","check_leave_eligibility","my_clock_records","list_employees","list_published_form_templates","get_published_form_template","create_form_draft","update_form_draft","preview_form_submission"]'::jsonb
         ),
         (
@@ -123,121 +126,182 @@ WITH definitions(
 	            '["幫我建立人事變動單","我要申請人員增補","幫我準備離職申請單"]'::jsonb,
 	            '["get_my_profile","list_employees","get_employee","my_form_history","list_published_form_templates","get_published_form_template","create_form_draft","update_form_draft","preview_form_submission"]'::jsonb
         )
-), inserted AS (
-    INSERT INTO agent_definitions (
-        id,
-        tenant_id,
-        name,
-        description,
-        emoji,
-        category,
-        model_id,
-        main_agent_role,
-        sub_agents,
-        system_prompt,
-        welcome_message,
-        suggested_questions,
-        tools,
-        status,
-        visibility,
-        visibility_targets,
-        timeout_seconds,
-        version,
-        published_version,
-        created_by_account_id,
-        updated_by_account_id,
-        created_at,
-        updated_at
-    )
-    SELECT
-        'adef-' || context.tenant_id || '-' || definitions.suffix,
-        context.tenant_id,
-        definitions.name,
-        definitions.description,
-        definitions.emoji,
-        'workflow',
-        context.model_id,
-        definitions.main_agent_role,
-	        COALESCE((
-	            SELECT jsonb_agg(member || jsonb_build_object('model_id', context.model_id))
-	            FROM jsonb_array_elements(definitions.sub_agents) AS member
-        ), '[]'::jsonb),
-        definitions.system_prompt,
-        definitions.welcome_message,
-        definitions.suggested_questions,
-        definitions.tools,
-        'published',
-        'all',
-        '[]'::jsonb,
-        60,
-        1,
-        1,
-        context.actor_id,
-        context.actor_id,
-        context.seeded_at,
-        context.seeded_at
-    FROM definitions
-    CROSS JOIN seed_agent_context context
-    ON CONFLICT (id) DO UPDATE SET
-        welcome_message = CASE
-            WHEN agent_definitions.welcome_message = '' THEN EXCLUDED.welcome_message
-            ELSE agent_definitions.welcome_message
-        END,
-        suggested_questions = CASE
-            WHEN agent_definitions.suggested_questions = '[]'::jsonb THEN EXCLUDED.suggested_questions
-            ELSE agent_definitions.suggested_questions
-        END
-    RETURNING id, tenant_id, name
 )
-SELECT * FROM inserted;
+SELECT * FROM definitions;
 
-INSERT INTO agent_definition_versions (
-    id,
-    tenant_id,
-    agent_id,
-    version,
-    main_agent_role,
-    sub_agents,
-    system_prompt,
-    welcome_message,
-    suggested_questions,
-    tools,
-    model_id,
-    note,
-    created_by_account_id,
-    created_at
+-- Agent v2 keeps stable identity separate from immutable runtime revisions.
+INSERT INTO agents (
+    id, tenant_id, lifecycle_status, draft_revision_id, published_revision_id,
+    next_revision_no, created_by_account_id, created_at, updated_at, archived_at
 )
 SELECT
-    definition.id || '-v1',
-    definition.tenant_id,
-    definition.id,
+    'adef-' || context.tenant_id || '-' || definition.suffix,
+    context.tenant_id,
+    'active',
+    NULL,
+    NULL,
+    2,
+    context.actor_id,
+    context.seeded_at,
+    context.seeded_at,
+    NULL
+FROM seed_agent_definitions definition
+CROSS JOIN seed_agent_context context
+ON CONFLICT (id) DO UPDATE SET
+    lifecycle_status = 'active',
+    next_revision_no = GREATEST(agents.next_revision_no, 2),
+    updated_at = EXCLUDED.updated_at,
+    archived_at = NULL
+WHERE agents.tenant_id = EXCLUDED.tenant_id;
+
+INSERT INTO agent_revisions (
+    id, tenant_id, agent_id, revision_no, name, description, icon, category,
+    visibility, visibility_targets, main_agent_role, system_prompt, welcome_message,
+    suggested_questions, suggested_question_translations,
+    model_connection_id, model_config_checksum, timeout_ms,
+    config_schema_version, checksum, revision_note, created_by_account_id, created_at
+)
+SELECT
+    'arev-' || context.tenant_id || '-' || definition.suffix || '-v1',
+    context.tenant_id,
+    'adef-' || context.tenant_id || '-' || definition.suffix,
     1,
+    definition.name,
+    definition.description,
+    definition.emoji,
+    'workflow',
+    'all',
+    '[]'::jsonb,
     definition.main_agent_role,
-    definition.sub_agents,
     definition.system_prompt,
     definition.welcome_message,
     definition.suggested_questions,
-    definition.tools,
-    definition.model_id,
-    'initial published configuration',
-    definition.created_by_account_id,
-    definition.created_at
-FROM agent_definitions definition
-JOIN seed_agent_context context ON context.tenant_id = definition.tenant_id
-WHERE definition.id IN (
+    '[]'::jsonb,
+    context.model_connection_id,
+    state.synced_config_checksum,
+    60000,
+    1,
+    md5(concat_ws('|', context.model_connection_id, definition.main_agent_role,
+        definition.system_prompt, definition.tools::text, definition.sub_agents::text)),
+    'initial published demo configuration',
+    context.actor_id,
+    context.seeded_at
+FROM seed_agent_definitions definition
+CROSS JOIN seed_agent_context context
+JOIN model_connection_state state
+  ON state.tenant_id = context.tenant_id
+ AND state.model_connection_id = context.model_connection_id
+ON CONFLICT (tenant_id, agent_id, revision_no) DO NOTHING;
+
+INSERT INTO agent_revision_members (
+    tenant_id, revision_id, id, name, role, model_connection_id, ordinal
+)
+SELECT
+    context.tenant_id,
+    revision.id,
+    member.id,
+    member.name,
+    member.role,
+    context.model_connection_id,
+    member.ordinality::int - 1
+FROM seed_agent_definitions definition
+CROSS JOIN seed_agent_context context
+JOIN agent_revisions revision
+  ON revision.tenant_id = context.tenant_id
+ AND revision.agent_id = 'adef-' || context.tenant_id || '-' || definition.suffix
+ AND revision.id = 'arev-' || context.tenant_id || '-' || definition.suffix || '-v1'
+ AND revision.revision_no = 1
+CROSS JOIN LATERAL jsonb_to_recordset(definition.sub_agents) WITH ORDINALITY
+    AS member(id text, name text, role text, tools jsonb, knowledge_base_ids jsonb, ordinality bigint)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO agent_revision_builtin_tools (tenant_id, revision_id, tool_key, ordinal, config)
+SELECT
+    context.tenant_id,
+    revision.id,
+    tool.value,
+    tool.ordinality::int - 1,
+    '{}'::jsonb
+FROM seed_agent_definitions definition
+CROSS JOIN seed_agent_context context
+JOIN agent_revisions revision
+  ON revision.tenant_id = context.tenant_id
+ AND revision.agent_id = 'adef-' || context.tenant_id || '-' || definition.suffix
+ AND revision.id = 'arev-' || context.tenant_id || '-' || definition.suffix || '-v1'
+ AND revision.revision_no = 1
+CROSS JOIN LATERAL jsonb_array_elements_text(definition.tools) WITH ORDINALITY AS tool(value, ordinality)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO agent_revision_member_builtin_tools (
+    tenant_id, revision_id, member_id, tool_key, ordinal, config
+)
+SELECT
+    context.tenant_id,
+    revision.id,
+    member.id,
+    tool.value,
+    tool.ordinality::int - 1,
+    '{}'::jsonb
+FROM seed_agent_definitions definition
+CROSS JOIN seed_agent_context context
+JOIN agent_revisions revision
+  ON revision.tenant_id = context.tenant_id
+ AND revision.agent_id = 'adef-' || context.tenant_id || '-' || definition.suffix
+ AND revision.id = 'arev-' || context.tenant_id || '-' || definition.suffix || '-v1'
+ AND revision.revision_no = 1
+CROSS JOIN LATERAL jsonb_to_recordset(definition.sub_agents)
+    AS member(id text, tools jsonb, knowledge_base_ids jsonb)
+CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(member.tools, '[]'::jsonb)) WITH ORDINALITY AS tool(value, ordinality)
+ON CONFLICT DO NOTHING;
+
+INSERT INTO agent_revision_member_knowledge_bases (
+    tenant_id, revision_id, member_id, knowledge_base_id, ordinal
+)
+SELECT
+    context.tenant_id,
+    revision.id,
+    member.id,
+    knowledge.value,
+    knowledge.ordinality::int - 1
+FROM seed_agent_definitions definition
+CROSS JOIN seed_agent_context context
+JOIN agent_revisions revision
+  ON revision.tenant_id = context.tenant_id
+ AND revision.agent_id = 'adef-' || context.tenant_id || '-' || definition.suffix
+ AND revision.id = 'arev-' || context.tenant_id || '-' || definition.suffix || '-v1'
+ AND revision.revision_no = 1
+CROSS JOIN LATERAL jsonb_to_recordset(definition.sub_agents)
+    AS member(id text, tools jsonb, knowledge_base_ids jsonb)
+CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(member.knowledge_base_ids, '[]'::jsonb)) WITH ORDINALITY AS knowledge(value, ordinality)
+ON CONFLICT DO NOTHING;
+
+UPDATE agents agent
+SET draft_revision_id = COALESCE(agent.draft_revision_id, revision.id),
+    published_revision_id = COALESCE(agent.published_revision_id, revision.id),
+    next_revision_no = GREATEST(agent.next_revision_no, 2)
+FROM seed_agent_definitions definition
+CROSS JOIN seed_agent_context context
+JOIN agent_revisions revision
+  ON revision.tenant_id = context.tenant_id
+ AND revision.agent_id = 'adef-' || context.tenant_id || '-' || definition.suffix
+ AND revision.id = 'arev-' || context.tenant_id || '-' || definition.suffix || '-v1'
+ AND revision.revision_no = 1
+WHERE agent.tenant_id = context.tenant_id
+  AND agent.id = revision.agent_id;
+
+CREATE TEMP TABLE seeded_agent_ids ON COMMIT DROP AS
+SELECT agent.id, agent.tenant_id, revision.name
+FROM agents agent
+JOIN agent_revisions revision
+  ON revision.tenant_id = agent.tenant_id
+ AND revision.agent_id = agent.id
+ AND revision.id = agent.published_revision_id
+JOIN seed_agent_context context ON context.tenant_id = agent.tenant_id
+WHERE agent.id IN (
     'adef-' || context.tenant_id || '-assistant',
     'adef-' || context.tenant_id || '-leave',
     'adef-' || context.tenant_id || '-punch-correction'
-)
-ON CONFLICT (tenant_id, agent_id, version) DO UPDATE SET
-    welcome_message = CASE
-        WHEN agent_definition_versions.welcome_message = '' THEN EXCLUDED.welcome_message
-        ELSE agent_definition_versions.welcome_message
-    END,
-    suggested_questions = CASE
-        WHEN agent_definition_versions.suggested_questions = '[]'::jsonb THEN EXCLUDED.suggested_questions
-        ELSE agent_definition_versions.suggested_questions
-    END;
+);
 
 INSERT INTO audit_logs (
     id,
@@ -276,7 +340,26 @@ ON CONFLICT (id) DO NOTHING;
 
 COMMIT;
 
-SELECT id, name, status, visibility, version, published_version
-FROM agent_definitions
-WHERE tenant_id = :'tenant_id'
-ORDER BY updated_at DESC, id;
+SELECT
+    agent.id,
+    revision.name,
+    CASE WHEN agent.published_revision_id = revision.id THEN 'published' ELSE 'draft' END AS status,
+    revision.visibility,
+    revision.revision_no AS version,
+    published.revision_no AS published_version
+FROM agents agent
+JOIN agent_revisions revision
+  ON revision.tenant_id = agent.tenant_id
+ AND revision.agent_id = agent.id
+ AND revision.id = COALESCE(agent.draft_revision_id, agent.published_revision_id)
+LEFT JOIN agent_revisions published
+  ON published.tenant_id = agent.tenant_id
+ AND published.agent_id = agent.id
+ AND published.id = agent.published_revision_id
+WHERE agent.tenant_id = :'tenant_id'
+  AND agent.id IN (
+      'adef-' || :'tenant_id' || '-assistant',
+      'adef-' || :'tenant_id' || '-leave',
+      'adef-' || :'tenant_id' || '-punch-correction'
+  )
+ORDER BY agent.updated_at DESC, agent.id;

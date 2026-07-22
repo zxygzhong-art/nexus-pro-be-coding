@@ -8,6 +8,7 @@ import "nexus-pro-api/internal/service"
 type (
 	Service                         = service.Service
 	AgentTool                       = service.AgentTool
+	AgentToolSpec                   = service.AgentToolSpec
 	AgentChatEmitFunc               = service.AgentChatEmitFunc
 	AgentChatRuntime                = service.AgentChatRuntime
 	AgentChatRuntimeRequest         = service.AgentChatRuntimeRequest

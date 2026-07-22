@@ -16,7 +16,7 @@ import (
 
 const (
 	defaultHRPermissionPackageApplication = "hr"
-	defaultHRPermissionPackageVersion     = "1.0.1"
+	defaultHRPermissionPackageVersion     = "1.0.2"
 )
 
 var semverPattern = regexp.MustCompile(`^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)

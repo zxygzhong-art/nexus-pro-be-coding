@@ -11,6 +11,13 @@ import (
 // AgentTool 定義 agent runtime 可呼叫、且受工具與業務權限雙重檢查的工具。
 type AgentTool func(context.Context, map[string]any) (map[string]any, error)
 
+// AgentToolSpec carries the model-facing contract for dynamically resolved
+// tools. Tools without a spec continue to use the built-in catalog contract.
+type AgentToolSpec struct {
+	Description string         `json:"description"`
+	InputSchema map[string]any `json:"input_schema"`
+}
+
 type AgentChatEmitFunc func(context.Context, domain.AgentChatEvent) error
 
 // AgentChatRuntimeRequest 定義 agent runtime 輸入。
@@ -26,6 +33,7 @@ type AgentChatRuntimeRequest struct {
 	Memories       []domain.AgentMemory
 	Mode           string
 	Tools          map[string]AgentTool
+	ToolSpecs      map[string]AgentToolSpec
 	SubAgents      []AgentChatSubAgentRuntimeRequest
 	RecordUsage    func(domain.AgentTokenUsage)
 }
@@ -37,6 +45,7 @@ type AgentChatSubAgentRuntimeRequest struct {
 	Role      string
 	ModelName string
 	Tools     map[string]AgentTool
+	ToolSpecs map[string]AgentToolSpec
 }
 
 type ResolvedAgentTeamMember struct {
@@ -45,6 +54,7 @@ type ResolvedAgentTeamMember struct {
 	Role             string
 	ModelName        string
 	ToolNames        []string
+	ExternalToolIDs  []string
 	KnowledgeBaseIDs []string
 }
 
@@ -56,7 +66,9 @@ type AgentChatRuntime interface {
 type AgentChatExecutionContext struct {
 	AgentID        string
 	SessionID      string
+	SegmentID      string
 	RunID          string
+	InputMessageID string
 	ContextVersion int64
 }
 

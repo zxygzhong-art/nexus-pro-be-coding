@@ -538,7 +538,7 @@ func (c PlatformService) monthlyClockAndLeaveSummary(ctx RequestContext, employe
 			if leave.EmployeeID != employeeID || leave.EndAt.Before(start) || !leave.StartAt.Before(end) {
 				continue
 			}
-			leaveHours += leave.Hours
+			leaveHours += float64(leave.RequestedMinutes) / 60
 		}
 	}
 	monthlyHours := 0.0

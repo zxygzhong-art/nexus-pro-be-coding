@@ -86,7 +86,10 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		agentID = boundAgentID
 	}
 	var configuredTools []string
+	var configuredExternalToolIDs []string
 	var configuredKnowledgeBaseIDs []string
+	agentRevisionID := ""
+	modelConnectionID := ""
 	limitTools := false
 	systemPrompt := ""
 	modelName := ""
@@ -102,7 +105,10 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		}
 		limitTools = true
 		configuredTools = definition.Tools
+		configuredExternalToolIDs = definition.ExternalToolIDs
 		configuredKnowledgeBaseIDs = definition.KnowledgeBaseIDs
+		agentRevisionID = definition.PublishedRevisionID
+		modelConnectionID = definition.ModelID
 		agentName = definition.Name
 		agentRole = definition.MainAgentRole
 		systemPrompt = strings.TrimSpace(definition.SystemPrompt)
@@ -165,37 +171,30 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 	if err != nil {
 		return AgentRun{}, err
 	}
-	if err := c.rememberAgentPreferenceIfNeeded(ctx, account.ID, agentID, sessionID, userMessage); err != nil {
-		return AgentRun{}, err
-	}
-	memories, err := c.agentMemoriesForChat(ctx, account.ID, agentID, sessionID, agentMemoryContextLimit)
-	if err != nil {
-		return AgentRun{}, err
-	}
 	_, fileContext, err := c.currentAgentFilesForRuntime(ctx, sessionID, attachmentIDs)
 	if err != nil {
 		return AgentRun{}, err
 	}
-	runtimeUserMessage := userMessage
-	if fileContext != "" {
-		runtimeUserMessage += "\n\n" + fileContext
-	}
-	runtimeMessage := buildAgentRuntimeMessage(systemPrompt, history, memories, runtimeUserMessage)
 
 	run := AgentRun{
-		ID:        utils.NewID("arun"),
-		TenantID:  ctx.TenantID,
-		AccountID: account.ID,
-		AgentID:   agentID,
-		SessionID: sessionID,
-		Mode:      mode,
-		Prompt:    userMessage,
-		Status:    string(AgentRunStatusQueued),
-		CreatedAt: c.Now(),
-		UpdatedAt: c.Now(),
+		ID:                utils.NewID("arun"),
+		TenantID:          ctx.TenantID,
+		AccountID:         account.ID,
+		AgentID:           agentID,
+		AgentRevisionID:   agentRevisionID,
+		ModelConnectionID: modelConnectionID,
+		SessionID:         sessionID,
+		SegmentID:         session.SegmentID,
+		Mode:              mode,
+		Prompt:            userMessage,
+		Status:            string(AgentRunStatusQueued),
+		CreatedAt:         c.Now(),
+		UpdatedAt:         c.Now(),
 	}
 	messageID := utils.NewID("amsg")
+	run.InputMessageID = messageID
 	messageCreatedAt := c.Now()
+	var memories []domain.AgentMemory
 	if err := c.withTransaction(ctx, func(tx AgentService) error {
 		locked, err := tx.lockCurrentAgentSession(ctx, account.ID, sessionID)
 		if err != nil {
@@ -204,7 +203,7 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		if locked.Status != domain.AgentSessionStatusActive {
 			return BadRequest("agent session is archived").WithReasonCode("agent_session_archived")
 		}
-		if locked.ContextVersion != session.ContextVersion {
+		if locked.ContextVersion != session.ContextVersion || locked.SegmentID != session.SegmentID {
 			return Conflict("agent session context changed; retry the message").WithReasonCode("agent_session_context_changed")
 		}
 		if err := tx.ensureNoActiveAgentRun(ctx, sessionID); err != nil {
@@ -223,13 +222,22 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 			}
 		}
 		session = locked
+		run.SegmentID = locked.SegmentID
+		if err := tx.store.InsertAgentSessionMessage(goContext(ctx), domain.AgentSessionMessage{
+			ID: messageID, TenantID: ctx.TenantID, SessionID: sessionID, SegmentID: session.SegmentID,
+			Role: domain.AgentMessageRoleUser, Content: userMessage,
+			ContextVersion: session.ContextVersion, CreatedAt: messageCreatedAt,
+		}); err != nil {
+			return err
+		}
 		if err := tx.store.UpsertAgentRun(goContext(ctx), run); err != nil {
 			return err
 		}
-		if err := tx.store.InsertAgentSessionMessage(goContext(ctx), domain.AgentSessionMessage{
-			ID: messageID, TenantID: ctx.TenantID, SessionID: sessionID, Role: domain.AgentMessageRoleUser,
-			Content: userMessage, RunID: run.ID, ContextVersion: session.ContextVersion, CreatedAt: messageCreatedAt,
-		}); err != nil {
+		if err := tx.rememberAgentPreferenceIfNeeded(ctx, account.ID, agentID, messageID, userMessage); err != nil {
+			return err
+		}
+		memories, err = tx.agentMemoriesForChat(ctx, account.ID, agentID, sessionID, agentMemoryContextLimit)
+		if err != nil {
 			return err
 		}
 		for ordinal, fileID := range attachmentIDs {
@@ -244,6 +252,11 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 	}); err != nil {
 		return AgentRun{}, err
 	}
+	runtimeUserMessage := userMessage
+	if fileContext != "" {
+		runtimeUserMessage += "\n\n" + fileContext
+	}
+	runtimeMessage := buildAgentRuntimeMessage(systemPrompt, history, memories, runtimeUserMessage)
 	run, err = c.transitionRun(ctx, run, AgentRunStatusRunning)
 	if err != nil {
 		return AgentRun{}, err
@@ -258,7 +271,8 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 	defer cancel()
 	baseCtx = WithAgentRequestContext(baseCtx, ctx)
 	baseCtx = WithAgentChatExecutionContext(baseCtx, AgentChatExecutionContext{
-		AgentID: agentID, SessionID: sessionID, RunID: run.ID, ContextVersion: session.ContextVersion,
+		AgentID: agentID, SessionID: sessionID, SegmentID: session.SegmentID,
+		RunID: run.ID, InputMessageID: run.InputMessageID, ContextVersion: session.ContextVersion,
 	})
 	if err := emit(baseCtx, domain.AgentChatEvent{Event: domain.AgentChatEventSession, SessionID: sessionID, RunID: run.ID}); err != nil {
 		_ = c.FailRun(ctx, run, err)
@@ -288,14 +302,36 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		eventMu.Unlock()
 		return emit(eventCtx, event)
 	}
+	rootTools := c.filteredAgentTools(ctx, configuredTools, limitTools, wrappedEmit, configuredKnowledgeBaseIDs)
+	rootToolSpecs := map[string]AgentToolSpec{}
+	var runtimeErr error
+	if len(configuredExternalToolIDs) > 0 {
+		var externalTools map[string]AgentTool
+		var externalSpecs map[string]AgentToolSpec
+		externalTools, externalSpecs, runtimeErr = c.externalAgentRuntimeTools(ctx, agentRevisionID, "", configuredExternalToolIDs, wrappedEmit)
+		if runtimeErr == nil {
+			runtimeErr = mergeRuntimeTools(rootTools, rootToolSpecs, externalTools, externalSpecs)
+		}
+	}
 	runtimeSubAgents := make([]AgentChatSubAgentRuntimeRequest, 0, len(resolvedSubAgents))
 	for _, member := range resolvedSubAgents {
+		memberTools := c.filteredAgentTools(ctx, member.ToolNames, true, wrappedEmit, member.KnowledgeBaseIDs)
+		memberToolSpecs := map[string]AgentToolSpec{}
+		if runtimeErr == nil && len(member.ExternalToolIDs) > 0 {
+			var externalTools map[string]AgentTool
+			var externalSpecs map[string]AgentToolSpec
+			externalTools, externalSpecs, runtimeErr = c.externalAgentRuntimeTools(ctx, agentRevisionID, member.ID, member.ExternalToolIDs, wrappedEmit)
+			if runtimeErr == nil {
+				runtimeErr = mergeRuntimeTools(memberTools, memberToolSpecs, externalTools, externalSpecs)
+			}
+		}
 		runtimeSubAgents = append(runtimeSubAgents, AgentChatSubAgentRuntimeRequest{
 			ID:        member.ID,
 			Name:      member.Name,
 			Role:      member.Role,
 			ModelName: member.ModelName,
-			Tools:     c.filteredAgentTools(ctx, member.ToolNames, true, wrappedEmit, member.KnowledgeBaseIDs),
+			Tools:     memberTools,
+			ToolSpecs: memberToolSpecs,
 		})
 	}
 	req := AgentChatRuntimeRequest{
@@ -309,7 +345,8 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 		History:        history,
 		Memories:       memories,
 		Mode:           mode,
-		Tools:          c.filteredAgentTools(ctx, configuredTools, limitTools, wrappedEmit, configuredKnowledgeBaseIDs),
+		Tools:          rootTools,
+		ToolSpecs:      rootToolSpecs,
 		SubAgents:      runtimeSubAgents,
 		RecordUsage: func(usage domain.AgentTokenUsage) {
 			usageMu.Lock()
@@ -321,7 +358,9 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 			usageMu.Unlock()
 		},
 	}
-	runtimeErr := c.AgentChatRuntime().RunAgentChat(baseCtx, req, wrappedEmit)
+	if runtimeErr == nil {
+		runtimeErr = c.AgentChatRuntime().RunAgentChat(baseCtx, req, wrappedEmit)
+	}
 	usageComplete := runtimeErr == nil
 	if runtimeErr != nil && mode == agentChatModeAssistantRecommendation && strings.TrimSpace(answer.String()) == "" {
 		fallbackAnswer := assistantRecommendationFallback(userMessage, recommendationCatalog)
@@ -380,6 +419,7 @@ func (c AgentService) failAgentChat(ctx RequestContext, accountID string, expect
 	run.Status = string(AgentRunStatusFailed)
 	run.Answer = agentRuntimeFailureAnswer(ctx)
 	run.UpdatedAt = c.Now()
+	run.CompletedAt = &run.UpdatedAt
 	messageCreatedAt := c.Now()
 	metadata := map[string]any{
 		"status":      "failed",
@@ -393,13 +433,14 @@ func (c AgentService) failAgentChat(ctx RequestContext, accountID string, expect
 		if err != nil {
 			return err
 		}
-		if session.ContextVersion != expectedSession.ContextVersion {
+		if session.ContextVersion != expectedSession.ContextVersion || session.SegmentID != expectedSession.SegmentID {
 			return Conflict("agent session context changed while the message was running").WithReasonCode("agent_session_context_changed")
 		}
 		if err := tx.store.InsertAgentSessionMessage(goContext(ctx), domain.AgentSessionMessage{
 			ID:             utils.NewID("amsg"),
 			TenantID:       ctx.TenantID,
 			SessionID:      session.ID,
+			SegmentID:      session.SegmentID,
 			Role:           domain.AgentMessageRoleAssistant,
 			Content:        run.Answer,
 			RunID:          run.ID,
@@ -602,6 +643,7 @@ func (c AgentService) createAgentSessionForChat(ctx RequestContext, accountID, a
 		TenantID:       ctx.TenantID,
 		AccountID:      accountID,
 		AgentID:        strings.TrimSpace(agentID),
+		SegmentID:      utils.NewID("aseg"),
 		Title:          strings.TrimSpace(title),
 		Status:         domain.AgentSessionStatusActive,
 		ContextVersion: 1,
@@ -619,13 +661,14 @@ func (c AgentService) completeAgentChat(ctx RequestContext, accountID string, ex
 	previousStatus := run.Status
 	run.Status = string(AgentRunStatusCompleted)
 	run.UpdatedAt = c.Now()
+	run.CompletedAt = &run.UpdatedAt
 	messageCreatedAt := c.Now()
 	if err := c.withTransaction(ctx, func(tx AgentService) error {
 		session, err := tx.lockCurrentAgentSession(ctx, accountID, expectedSession.ID)
 		if err != nil {
 			return err
 		}
-		if session.ContextVersion != expectedSession.ContextVersion {
+		if session.ContextVersion != expectedSession.ContextVersion || session.SegmentID != expectedSession.SegmentID {
 			return Conflict("agent session context changed while the message was running").WithReasonCode("agent_session_context_changed")
 		}
 		for index, artifact := range artifacts {
@@ -637,6 +680,7 @@ func (c AgentService) completeAgentChat(ctx RequestContext, accountID string, ex
 				ID:             utils.NewID("amsg"),
 				TenantID:       ctx.TenantID,
 				SessionID:      session.ID,
+				SegmentID:      session.SegmentID,
 				Role:           domain.AgentMessageRoleTool,
 				Content:        "",
 				RunID:          run.ID,
@@ -651,6 +695,7 @@ func (c AgentService) completeAgentChat(ctx RequestContext, accountID string, ex
 			ID:             utils.NewID("amsg"),
 			TenantID:       ctx.TenantID,
 			SessionID:      session.ID,
+			SegmentID:      session.SegmentID,
 			Role:           domain.AgentMessageRoleAssistant,
 			Content:        run.Answer,
 			RunID:          run.ID,
@@ -701,24 +746,30 @@ func agentArtifactMessageMetadata(event domain.AgentChatEvent) (map[string]any, 
 	})
 }
 
-func (c AgentService) rememberAgentPreferenceIfNeeded(ctx RequestContext, accountID, agentID, sessionID, message string) error {
+func (c AgentService) rememberAgentPreferenceIfNeeded(ctx RequestContext, accountID, agentID, sourceMessageID, message string) error {
 	content := extractAgentAutoMemory(message)
 	if content == "" {
 		return nil
 	}
 	now := c.Now()
 	memory := domain.AgentMemory{
-		ID:         utils.NewID("amem"),
-		TenantID:   ctx.TenantID,
-		AccountID:  accountID,
-		AgentID:    strings.TrimSpace(agentID),
-		SessionID:  strings.TrimSpace(sessionID),
-		Key:        "preference",
-		Content:    content,
-		Source:     domain.AgentMemorySourceAuto,
-		Importance: 3,
-		CreatedAt:  now,
-		UpdatedAt:  now,
+		ID:              utils.NewID("amem"),
+		TenantID:        ctx.TenantID,
+		AccountID:       accountID,
+		AgentID:         strings.TrimSpace(agentID),
+		Scope:           "global",
+		Key:             "preference",
+		Content:         content,
+		Source:          domain.AgentMemorySourceAuto,
+		SourceMessageID: strings.TrimSpace(sourceMessageID),
+		Importance:      3,
+		Confidence:      1,
+		Status:          "active",
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	if strings.TrimSpace(agentID) != "" {
+		memory.Scope = "agent"
 	}
 	return c.store.UpsertAgentMemory(goContext(ctx), memory)
 }
@@ -727,56 +778,22 @@ func (c AgentService) agentMemoriesForChat(ctx RequestContext, accountID, agentI
 	if limit <= 0 {
 		return nil, nil
 	}
-	out := make([]domain.AgentMemory, 0, limit)
-	seen := map[string]struct{}{}
-	appendUnique := func(items []domain.AgentMemory) {
-		for _, item := range items {
-			if item.Key == AgentConfirmationMemoryKey {
-				continue
-			}
-			if _, ok := seen[item.ID]; ok {
-				continue
-			}
-			seen[item.ID] = struct{}{}
+	items, err := c.store.ListAgentMemoriesByAccount(
+		goContext(ctx),
+		ctx.TenantID,
+		accountID,
+		strings.TrimSpace(agentID),
+		strings.TrimSpace(sessionID),
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]domain.AgentMemory, 0, len(items))
+	for _, item := range items {
+		if item.Key != AgentConfirmationMemoryKey {
 			out = append(out, item)
-			if len(out) >= limit {
-				return
-			}
 		}
-	}
-	if strings.TrimSpace(agentID) != "" {
-		items, err := c.store.ListAgentMemoriesByAccount(goContext(ctx), ctx.TenantID, accountID, strings.TrimSpace(agentID), "", limit)
-		if err != nil {
-			return nil, err
-		}
-		exact := make([]domain.AgentMemory, 0, len(items))
-		generic := make([]domain.AgentMemory, 0, len(items))
-		for _, item := range items {
-			if item.AgentID == strings.TrimSpace(agentID) {
-				exact = append(exact, item)
-			} else {
-				generic = append(generic, item)
-			}
-		}
-		appendUnique(exact)
-		appendUnique(generic)
-	}
-	if len(out) < limit {
-		items, err := c.store.ListAgentMemoriesByAccount(goContext(ctx), ctx.TenantID, accountID, "", strings.TrimSpace(sessionID), limit)
-		if err != nil {
-			return nil, err
-		}
-		appendUnique(items)
-	}
-	if len(out) < limit {
-		items, err := c.store.ListAgentMemoriesByAccount(goContext(ctx), ctx.TenantID, accountID, "", "", limit)
-		if err != nil {
-			return nil, err
-		}
-		appendUnique(items)
-	}
-	if len(out) > limit {
-		out = out[:limit]
 	}
 	return out, nil
 }
@@ -882,6 +899,7 @@ func (c AgentService) resolveAgentTeamMembers(ctx RequestContext, members []doma
 			Role:             member.Role,
 			ModelName:        modelName,
 			ToolNames:        append([]string(nil), member.Tools...),
+			ExternalToolIDs:  append([]string(nil), member.ExternalToolIDs...),
 			KnowledgeBaseIDs: append([]string(nil), member.KnowledgeBaseIDs...),
 		})
 	}
@@ -1158,7 +1176,7 @@ func (c AgentService) toolCheckLeaveEligibility(ctx domain.RequestContext, args 
 	result["leave_type_name"] = evaluation.LeaveTypeName
 	if evaluation.BalanceFallbackReason != "" {
 		if evaluation.BalanceInitialized {
-			result["remaining_hours"] = evaluation.AvailableHours
+			result["remaining_hours"] = float64(evaluation.AvailableMinutes) / 60
 		}
 		result["reason"] = "balance_unavailable_fallback"
 		return result, nil
@@ -1167,7 +1185,7 @@ func (c AgentService) toolCheckLeaveEligibility(ctx domain.RequestContext, args 
 		result["reason"] = "balance_not_required"
 		return result, nil
 	}
-	result["remaining_hours"] = evaluation.AvailableHours
+	result["remaining_hours"] = float64(evaluation.AvailableMinutes) / 60
 	result["reason"] = "sufficient_balance"
 	return result, nil
 }

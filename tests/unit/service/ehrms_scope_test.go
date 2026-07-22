@@ -27,15 +27,6 @@ func TestEHRMSBulkSyncRejectsScopedGrantsBeforeFetch(t *testing.T) {
 			},
 		},
 		{
-			name:       "positions",
-			permission: domain.Permission{Resource: "hr.position", Action: "create", Scope: domain.ScopeSelf},
-			client:     fakeEHRMSClient{positionsErr: errors.New("scoped request must not fetch positions")},
-			run: func(svc *service.Service, ctx domain.RequestContext) error {
-				_, err := svc.HR().SyncEHRMSPositions(ctx)
-				return err
-			},
-		},
-		{
 			name:       "employees self scope",
 			permission: domain.Permission{Resource: "hr.employee", Action: "import", Scope: domain.ScopeSelf},
 			client: fakeEHRMSClient{
@@ -101,22 +92,22 @@ func TestEHRMSBulkSyncAcceptsTenantScope(t *testing.T) {
 			"emp_id": "MISSING", "date": "2026-06-10", "shift_start": "09:00", "shift_end": "18:00", "clock_hours": "8",
 		}},
 	}
-	_, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
 		{Resource: "hr.org_unit", Action: "create", Scope: domain.ScopeTenant},
-		{Resource: "hr.position", Action: "create", Scope: domain.ScopeTenant},
 		{Resource: "attendance.clock", Action: "import", Scope: domain.ScopeTenant},
 	}, service.Options{EHRMSClient: client})
+	if err := store.UpsertEmployee(context.Background(), domain.Employee{
+		ID: "emp-missing", TenantID: "tenant-1", EmployeeNo: "MISSING", Name: "Attendance Employee", Status: "active",
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	orgResult, err := svc.HR().SyncEHRMSOrgUnits(ctx)
 	if err != nil || orgResult.Fetched != 1 || orgResult.Upserted != 1 {
 		t.Fatalf("expected tenant-scoped org sync success, result=%+v err=%v", orgResult, err)
 	}
-	positionResult, err := svc.HR().SyncEHRMSPositions(ctx)
-	if err != nil || positionResult.Fetched != 1 || positionResult.Upserted != 1 {
-		t.Fatalf("expected tenant-scoped position sync success, result=%+v err=%v", positionResult, err)
-	}
 	attendanceResult, err := svc.Attendance().SyncEHRMSAttendance(ctx, domain.EHRMSAttendanceSyncInput{})
-	if err != nil || attendanceResult.Fetched != 1 || attendanceResult.Skipped != 1 {
+	if err != nil || attendanceResult.Fetched != 1 || attendanceResult.Created != 1 {
 		t.Fatalf("expected tenant-scoped attendance sync success, result=%+v err=%v", attendanceResult, err)
 	}
 }

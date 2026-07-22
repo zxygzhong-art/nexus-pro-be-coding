@@ -47,10 +47,8 @@ type apiRuntime struct {
 	store                      repository.Store
 	relationshipWriter         jobs.RelationshipTupleWriter
 	eventPublisher             natsbus.EventPublisher
-	ehrmsPipelineScheduler     *jobs.EHRMSPipelineScheduler
-	ehrmsPipelineOptions       jobs.EHRMSPipelineOptions
-	ehrmsAttendanceScheduler   *jobs.EHRMSAttendanceSyncScheduler
-	ehrmsAttendanceOptions     jobs.EHRMSAttendanceSyncOptions
+	ehrmsSyncScheduler         *jobs.EHRMSSyncScheduler
+	ehrmsSyncOptions           jobs.EHRMSSyncOptions
 	identityProvisioningOutbox *jobs.IdentityProvisioningOutboxProcessor
 	openFGAConsumer            *jobs.OpenFGAConsumer
 	openFGAConsumerOptions     jobs.OpenFGAConsumerOptions
@@ -331,32 +329,8 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 		worker.Stop()
 		return nil
 	}})
-	ehrmsPipelineScheduler, ehrmsPipelineOptions, ehrmsPipelineDependency := configuredEHRMSPipelineScheduler(cfg, app.HR(), app.Attendance(), ehrmsClient != nil, logger)
-	if ehrmsPipelineScheduler != nil {
-		ehrmsPipelineScheduler.WithSyncLocker(store)
-	}
-	report.Dependencies = append(report.Dependencies, ehrmsPipelineDependency)
-	var ehrmsAttendanceScheduler *jobs.EHRMSAttendanceSyncScheduler
-	var ehrmsAttendanceOptions jobs.EHRMSAttendanceSyncOptions
-	if ehrmsPipelineScheduler == nil {
-		var ehrmsAttendanceDependency startup.Dependency
-		ehrmsAttendanceScheduler, ehrmsAttendanceOptions, ehrmsAttendanceDependency = configuredEHRMSAttendanceSyncScheduler(cfg, app.Attendance(), ehrmsClient != nil, logger)
-		report.Dependencies = append(report.Dependencies, ehrmsAttendanceDependency)
-	} else if cfg.EHRMSSyncEnabled {
-		report.Dependencies = append(report.Dependencies, startup.Dependency{
-			Name:   "eHRMS Attendance Scheduler",
-			Status: "configured",
-			Target: "merged into eHRMS Scheduler",
-			Detail: "interval=" + cfg.EHRMSAttendanceSyncInterval.String() + " attendance runs after a successful employee refresh",
-		})
-	} else {
-		report.Dependencies = append(report.Dependencies, startup.Dependency{
-			Name:   "eHRMS Attendance Scheduler",
-			Status: "skipped",
-			Target: "EHRMS_SYNC_ENABLED=false",
-			Detail: "periodic attendance sync disabled",
-		})
-	}
+	ehrmsSyncScheduler, ehrmsSyncOptions, ehrmsSyncDependency := configuredEHRMSSyncScheduler(cfg, app.HR(), app.Attendance(), ehrmsClient != nil, logger)
+	report.Dependencies = append(report.Dependencies, ehrmsSyncDependency)
 	apiOptions := v1api.Options{
 		ReadinessChecks:     readinessChecks,
 		CORSAllowedOrigins:  cfg.CORSAllowedOrigins,
@@ -391,20 +365,18 @@ func startModules(ctx context.Context, cfg config.Config, logger *slog.Logger) (
 	}
 
 	runtime := &apiRuntime{
-		server:                   server,
-		report:                   report,
-		store:                    store,
-		relationshipWriter:       relationshipModule.writer,
-		eventPublisher:           natsModule.client,
-		ehrmsPipelineScheduler:   ehrmsPipelineScheduler,
-		ehrmsPipelineOptions:     ehrmsPipelineOptions,
-		ehrmsAttendanceScheduler: ehrmsAttendanceScheduler,
-		ehrmsAttendanceOptions:   ehrmsAttendanceOptions,
-		liteLLMModelSyncer:       liteLLMModelSyncer,
-		workflowStartHandler:     app.Workflow(),
-		outboxWake:               outboxWake,
-		outboxDispatchEnabled:    cfg.OutboxDispatchEnabled,
-		shutdowns:                shutdowns,
+		server:                server,
+		report:                report,
+		store:                 store,
+		relationshipWriter:    relationshipModule.writer,
+		eventPublisher:        natsModule.client,
+		ehrmsSyncScheduler:    ehrmsSyncScheduler,
+		ehrmsSyncOptions:      ehrmsSyncOptions,
+		liteLLMModelSyncer:    liteLLMModelSyncer,
+		workflowStartHandler:  app.Workflow(),
+		outboxWake:            outboxWake,
+		outboxDispatchEnabled: cfg.OutboxDispatchEnabled,
+		shutdowns:             shutdowns,
 	}
 	if natsModule.client != nil {
 		runtime.openFGAConsumer = jobs.NewOpenFGAConsumer(natsModule.client, relationshipModule.writer, store, logger)
@@ -898,84 +870,32 @@ func configuredEHRMSClient(cfg config.Config, client *http.Client, logger *slog.
 		logger.Error("ehrms client initialization failed", "base_url", startup.SafeURL(cfg.EHRMSBaseURL), "error", err)
 		return nil, dependency, err
 	}
-	return clientAdapter, startup.Dependency{Name: "eHRMS", Status: "configured", Target: startup.SafeURL(cfg.EHRMSBaseURL), Detail: "employee sync enabled"}, nil
+	clientAdapter.WithRequestInterval(cfg.EHRMSRequestInterval)
+	return clientAdapter, startup.Dependency{Name: "eHRMS", Status: "configured", Target: startup.SafeURL(cfg.EHRMSBaseURL), Detail: "unified sync enabled; max_concurrency=1 request_interval=" + cfg.EHRMSRequestInterval.String()}, nil
 }
 
-// configuredEHRMSPipelineScheduler 配置有序 eHRMS pipeline（部門→崗位→員工→考勤）。
-func configuredEHRMSPipelineScheduler(cfg config.Config, employees jobs.EHRMSEmployeeSyncService, attendance jobs.EHRMSAttendanceSyncService, ehrmsConfigured bool, logger *slog.Logger) (*jobs.EHRMSPipelineScheduler, jobs.EHRMSPipelineOptions, startup.Dependency) {
-	opts := jobs.EHRMSPipelineOptions{
-		Interval:             cfg.EHRMSSyncInterval,
-		RunOnStart:           cfg.EHRMSSyncRunOnStart,
-		EmployeeMode:         cfg.EHRMSSyncMode,
-		EmployeeTenantID:     cfg.EHRMSSyncTenantID,
-		EmployeeAccountID:    cfg.EHRMSSyncAccountID,
-		AttendanceEnabled:    cfg.EHRMSSyncEnabled,
-		AttendanceInterval:   cfg.EHRMSAttendanceSyncInterval,
-		AttendanceRunOnStart: cfg.EHRMSSyncRunOnStart,
-		AttendanceMode:       cfg.EHRMSAttendanceSyncMode,
-		AttendanceSince:      cfg.EHRMSAttendanceSyncSince,
-		AttendanceTenant:     cfg.EHRMSAttendanceSyncTenantID,
-		AttendanceAccount:    cfg.EHRMSAttendanceSyncAccountID,
-		RetryAttempts:        4,
-		RetryBaseDelay:       time.Minute,
+// configuredEHRMSSyncScheduler configures one ordered org-unit, employee, and attendance job.
+func configuredEHRMSSyncScheduler(cfg config.Config, hrService jobs.EHRMSSyncHRService, attendanceService jobs.EHRMSSyncAttendanceService, ehrmsConfigured bool, logger *slog.Logger) (*jobs.EHRMSSyncScheduler, jobs.EHRMSSyncOptions, startup.Dependency) {
+	opts := jobs.EHRMSSyncOptions{
+		Mode:      cfg.EHRMSSyncMode,
+		TenantID:  cfg.EHRMSSyncTenantID,
+		AccountID: cfg.EHRMSSyncAccountID,
 	}
 	if !cfg.EHRMSSyncEnabled {
-		return nil, opts, startup.Dependency{Name: "eHRMS Scheduler", Status: "skipped", Target: "EHRMS_SYNC_ENABLED=false", Detail: "periodic eHRMS pipeline disabled"}
+		return nil, opts, startup.Dependency{Name: "eHRMS Sync Scheduler", Status: "skipped", Target: "EHRMS_SYNC_ENABLED=false", Detail: "periodic sync disabled"}
 	}
 	if !ehrmsConfigured {
-		return nil, opts, startup.Dependency{Name: "eHRMS Scheduler", Status: "incomplete", Target: "disabled", Detail: "eHRMS upstream is not configured"}
+		return nil, opts, startup.Dependency{Name: "eHRMS Sync Scheduler", Status: "incomplete", Target: "disabled", Detail: "eHRMS upstream is not configured"}
 	}
 	mode := strings.TrimSpace(cfg.EHRMSSyncMode)
 	if mode == "" {
 		mode = "upsert"
 	}
-	detail := "employee_interval=" + cfg.EHRMSSyncInterval.String() + " mode=" + mode + " steps=departments,positions,employees"
-	if cfg.EHRMSSyncEnabled {
-		detail += " attendance_interval=" + cfg.EHRMSAttendanceSyncInterval.String() + " attendance_after_employee=true"
-		if since := strings.TrimSpace(cfg.EHRMSAttendanceSyncSince); since != "" {
-			detail += " attendance_since=" + since
-		}
-	} else {
-		detail += " attendance=disabled"
-	}
-	return jobs.NewEHRMSPipelineScheduler(employees, attendance, logger), opts, startup.Dependency{
-		Name:   "eHRMS Scheduler",
+	return jobs.NewEHRMSSyncScheduler(hrService, attendanceService, logger), opts, startup.Dependency{
+		Name:   "eHRMS Sync Scheduler",
 		Status: "configured",
 		Target: "tenant=" + cfg.EHRMSSyncTenantID + " account=" + cfg.EHRMSSyncAccountID,
-		Detail: detail,
-	}
-}
-
-// configuredEHRMSAttendanceSyncScheduler 處理 configured eHRMS attendance sync scheduler。
-func configuredEHRMSAttendanceSyncScheduler(cfg config.Config, svc jobs.EHRMSAttendanceSyncService, ehrmsConfigured bool, logger *slog.Logger) (*jobs.EHRMSAttendanceSyncScheduler, jobs.EHRMSAttendanceSyncOptions, startup.Dependency) {
-	opts := jobs.EHRMSAttendanceSyncOptions{
-		Interval:         cfg.EHRMSAttendanceSyncInterval,
-		Mode:             cfg.EHRMSAttendanceSyncMode,
-		Since:            cfg.EHRMSAttendanceSyncSince,
-		TenantID:         cfg.EHRMSAttendanceSyncTenantID,
-		AccountID:        cfg.EHRMSAttendanceSyncAccountID,
-		DefaultTenantID:  cfg.EHRMSSyncTenantID,
-		DefaultAccountID: cfg.EHRMSSyncAccountID,
-		RunOnStart:       cfg.EHRMSSyncRunOnStart,
-	}
-	if !cfg.EHRMSSyncEnabled {
-		return nil, opts, startup.Dependency{Name: "eHRMS Attendance Scheduler", Status: "skipped", Target: "EHRMS_SYNC_ENABLED=false", Detail: "periodic attendance sync disabled"}
-	}
-	if !ehrmsConfigured {
-		return nil, opts, startup.Dependency{Name: "eHRMS Attendance Scheduler", Status: "incomplete", Target: "disabled", Detail: "eHRMS upstream is not configured"}
-	}
-	detail := "interval=" + cfg.EHRMSAttendanceSyncInterval.String() + " mode=" + strings.TrimSpace(cfg.EHRMSAttendanceSyncMode)
-	if strings.TrimSpace(cfg.EHRMSAttendanceSyncMode) == "" {
-		detail = "interval=" + cfg.EHRMSAttendanceSyncInterval.String() + " mode=upsert"
-	}
-	if cfg.EHRMSAttendanceSyncSince != "" {
-		detail += " since=" + cfg.EHRMSAttendanceSyncSince
-	}
-	return jobs.NewEHRMSAttendanceSyncScheduler(svc, logger), opts, startup.Dependency{
-		Name:   "eHRMS Attendance Scheduler",
-		Status: "configured",
-		Target: "tenant=" + opts.TenantID + " account=" + opts.AccountID,
-		Detail: detail,
+		Detail: "schedule=startup,08:00,20:00 UTC+8 mode=" + mode,
 	}
 }
 
@@ -1043,33 +963,18 @@ func (r *apiRuntime) startBackgroundWorkers(ctx context.Context, logger *slog.Lo
 		}()
 		logger.Info("workflow start reconciler started", "interval", "1m")
 	}
-	if r.ehrmsPipelineScheduler != nil {
+	if r.ehrmsSyncScheduler != nil {
 		r.workers.Add(1)
 		go func() {
 			defer r.workers.Done()
-			r.ehrmsPipelineScheduler.Run(ctx, r.ehrmsPipelineOptions)
+			r.ehrmsSyncScheduler.Run(ctx, r.ehrmsSyncOptions)
 		}()
-		logger.Info("eHRMS pipeline scheduler started",
-			"employee_interval", r.ehrmsPipelineOptions.Interval.String(),
-			"employee_run_on_start", r.ehrmsPipelineOptions.RunOnStart,
-			"employee_mode", r.ehrmsPipelineOptions.EmployeeMode,
-			"tenant_id", r.ehrmsPipelineOptions.EmployeeTenantID,
-			"account_id", r.ehrmsPipelineOptions.EmployeeAccountID,
-			"attendance_enabled", r.ehrmsPipelineOptions.AttendanceEnabled,
-			"attendance_interval", r.ehrmsPipelineOptions.AttendanceInterval.String(),
-			"attendance_run_on_start", r.ehrmsPipelineOptions.AttendanceRunOnStart,
-			"attendance_mode", r.ehrmsPipelineOptions.AttendanceMode,
-			"attendance_since", r.ehrmsPipelineOptions.AttendanceSince,
-			"steps", "departments,positions,employees[,attendance]",
+		logger.Info("eHRMS sync scheduler started",
+			"schedule", "startup,08:00,20:00 UTC+8",
+			"mode", r.ehrmsSyncOptions.Mode,
+			"tenant_id", r.ehrmsSyncOptions.TenantID,
+			"account_id", r.ehrmsSyncOptions.AccountID,
 		)
-	}
-	if r.ehrmsAttendanceScheduler != nil {
-		r.workers.Add(1)
-		go func() {
-			defer r.workers.Done()
-			r.ehrmsAttendanceScheduler.Run(ctx, r.ehrmsAttendanceOptions)
-		}()
-		logger.Info("eHRMS attendance sync scheduler started", "interval", r.ehrmsAttendanceOptions.Interval.String(), "mode", r.ehrmsAttendanceOptions.Mode, "tenant_id", r.ehrmsAttendanceOptions.TenantID, "account_id", r.ehrmsAttendanceOptions.AccountID, "since", r.ehrmsAttendanceOptions.Since)
 	}
 	if r.identityProvisioningOutbox != nil {
 		r.workers.Add(1)

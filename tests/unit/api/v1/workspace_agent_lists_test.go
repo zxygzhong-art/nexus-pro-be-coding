@@ -295,8 +295,8 @@ func TestWorkspaceKnowledgeListAndSearchReturnTypedResponses(t *testing.T) {
 	}
 }
 
-// TestAgentSessionFileListReturnsTypedResponse keeps the session file list payload on its typed items/total contract.
-func TestAgentSessionFileListReturnsTypedResponse(t *testing.T) {
+// TestRemovedAgentSessionFileListReturnsNotFound verifies the retired list endpoint stays unavailable.
+func TestRemovedAgentSessionFileListReturnsNotFound(t *testing.T) {
 	handler := newTypedListTestAPI(t, []domain.Permission{
 		{Resource: "agent.run", Action: "read", Scope: "all"},
 		{Resource: "agent.run", Action: "create", Scope: "all"},
@@ -331,15 +331,13 @@ func TestAgentSessionFileListReturnsTypedResponse(t *testing.T) {
 		t.Fatalf("expected file upload, got %d: %s", uploadRecorder.Code, uploadRecorder.Body.String())
 	}
 	file := decodeData[domain.AgentSessionFile](t, uploadRecorder.Body.Bytes())
+	if file.ID == "" {
+		t.Fatal("expected uploaded file id")
+	}
 
 	listRecorder := httptest.NewRecorder()
 	handler.ServeHTTP(listRecorder, httptest.NewRequest(http.MethodGet, "/v1/agents/sessions/"+session.ID+"/files", nil))
-	if listRecorder.Code != http.StatusOK {
-		t.Fatalf("expected file list status 200, got %d: %s", listRecorder.Code, listRecorder.Body.String())
-	}
-	assertDataEnvelopeKeys(t, listRecorder.Body.Bytes(), "items", "total")
-	listed := decodeData[domain.AgentSessionFileListResponse](t, listRecorder.Body.Bytes())
-	if listed.Total != 1 || len(listed.Items) != 1 || listed.Items[0].ID != file.ID {
-		t.Fatalf("unexpected session file list: %+v", listed)
+	if listRecorder.Code != http.StatusNotFound {
+		t.Fatalf("expected removed file list endpoint to return 404, got %d: %s", listRecorder.Code, listRecorder.Body.String())
 	}
 }

@@ -876,28 +876,22 @@ func populateDemoFixture(store repository.Store) {
 	})
 
 	_ = store.UpsertLeaveBalance(ctx, LeaveBalance{
-		ID:             "lb-1",
-		TenantID:       "demo",
-		EmployeeID:     "emp-employee",
-		LeaveType:      "annual",
-		RemainingHours: 96,
-		UpdatedAt:      now,
+		ID: "lb-1", TenantID: "demo", EmployeeID: "emp-employee",
+		LeaveType: "annual", LeaveTypeID: domain.StableLeaveTypeID("annual"),
+		RemainingMinutes: 96 * 60, Source: "explicit_snapshot", UpdatedAt: now,
 	})
 	_ = store.UpsertLeaveBalance(ctx, LeaveBalance{
-		ID:             "lb-2",
-		TenantID:       "demo",
-		EmployeeID:     "emp-employee",
-		LeaveType:      "sick",
-		RemainingHours: 40,
-		UpdatedAt:      now,
+		ID: "lb-2", TenantID: "demo", EmployeeID: "emp-employee",
+		LeaveType: "sick", LeaveTypeID: domain.StableLeaveTypeID("sick"),
+		RemainingMinutes: 40 * 60, Source: "explicit_snapshot", UpdatedAt: now,
 	})
 	for _, balance := range []LeaveBalance{
-		{ID: "lb-hr-manager-annual", TenantID: "demo", EmployeeID: "emp-hr-manager", LeaveType: "annual", RemainingHours: 120, UpdatedAt: now.Add(3 * time.Minute)},
-		{ID: "lb-hr-readonly-annual", TenantID: "demo", EmployeeID: "emp-hr-readonly", LeaveType: "annual", RemainingHours: 64, UpdatedAt: now.Add(4 * time.Minute)},
-		{ID: "lb-attendance-manager-annual", TenantID: "demo", EmployeeID: "emp-attendance-manager", LeaveType: "annual", RemainingHours: 88, UpdatedAt: now.Add(5 * time.Minute)},
-		{ID: "lb-workflow-approver-annual", TenantID: "demo", EmployeeID: "emp-workflow-approver", LeaveType: "annual", RemainingHours: 72, UpdatedAt: now.Add(6 * time.Minute)},
-		{ID: "lb-security-admin-annual", TenantID: "demo", EmployeeID: "emp-security-admin", LeaveType: "annual", RemainingHours: 80, UpdatedAt: now.Add(7 * time.Minute)},
-		{ID: "lb-insights-viewer-annual", TenantID: "demo", EmployeeID: "emp-insights-viewer", LeaveType: "annual", RemainingHours: 40, UpdatedAt: now.Add(8 * time.Minute)},
+		{ID: "lb-hr-manager-annual", TenantID: "demo", EmployeeID: "emp-hr-manager", LeaveType: "annual", LeaveTypeID: domain.StableLeaveTypeID("annual"), RemainingMinutes: 120 * 60, Source: "explicit_snapshot", UpdatedAt: now.Add(3 * time.Minute)},
+		{ID: "lb-hr-readonly-annual", TenantID: "demo", EmployeeID: "emp-hr-readonly", LeaveType: "annual", LeaveTypeID: domain.StableLeaveTypeID("annual"), RemainingMinutes: 64 * 60, Source: "explicit_snapshot", UpdatedAt: now.Add(4 * time.Minute)},
+		{ID: "lb-attendance-manager-annual", TenantID: "demo", EmployeeID: "emp-attendance-manager", LeaveType: "annual", LeaveTypeID: domain.StableLeaveTypeID("annual"), RemainingMinutes: 88 * 60, Source: "explicit_snapshot", UpdatedAt: now.Add(5 * time.Minute)},
+		{ID: "lb-workflow-approver-annual", TenantID: "demo", EmployeeID: "emp-workflow-approver", LeaveType: "annual", LeaveTypeID: domain.StableLeaveTypeID("annual"), RemainingMinutes: 72 * 60, Source: "explicit_snapshot", UpdatedAt: now.Add(6 * time.Minute)},
+		{ID: "lb-security-admin-annual", TenantID: "demo", EmployeeID: "emp-security-admin", LeaveType: "annual", LeaveTypeID: domain.StableLeaveTypeID("annual"), RemainingMinutes: 80 * 60, Source: "explicit_snapshot", UpdatedAt: now.Add(7 * time.Minute)},
+		{ID: "lb-insights-viewer-annual", TenantID: "demo", EmployeeID: "emp-insights-viewer", LeaveType: "annual", LeaveTypeID: domain.StableLeaveTypeID("annual"), RemainingMinutes: 40 * 60, Source: "explicit_snapshot", UpdatedAt: now.Add(8 * time.Minute)},
 	} {
 		_ = store.UpsertLeaveBalance(ctx, balance)
 	}

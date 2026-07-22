@@ -48,7 +48,6 @@ type (
 	AssumedRoleDecision                = domain.AssumedRoleDecision
 	OrgUnit                            = domain.OrgUnit
 	Position                           = domain.Position
-	EmploymentContract                 = domain.EmploymentContract
 	Employee                           = domain.Employee
 	EmployeeExperience                 = domain.EmployeeExperience
 	EmployeeQuery                      = domain.EmployeeQuery
@@ -62,14 +61,11 @@ type (
 	FormBuilderWorkflowTarget          = domain.FormBuilderWorkflowTarget
 	FormDefinitionPreview              = domain.FormDefinitionPreview
 	FormWorkflowSimulation             = domain.FormWorkflowSimulation
-	EmployeeImportSession              = domain.EmployeeImportSession
-	EmployeeImportRow                  = domain.EmployeeImportRow
 	EHRMSEmployeeRecord                = domain.EHRMSEmployeeRecord
 	EHRMSDepartmentRecord              = domain.EHRMSDepartmentRecord
 	EHRMSPositionRecord                = domain.EHRMSPositionRecord
 	EHRMSEmployeeSyncResponse          = domain.EHRMSEmployeeSyncResponse
 	EHRMSOrgUnitSyncResponse           = domain.EHRMSOrgUnitSyncResponse
-	EHRMSPositionSyncResponse          = domain.EHRMSPositionSyncResponse
 	BatchEmployeeResponse              = domain.BatchEmployeeResponse
 	BatchEmployeeResult                = domain.BatchEmployeeResult
 	LeaveBalance                       = domain.LeaveBalance
@@ -268,12 +264,8 @@ type (
 	UpdatePositionInput                        = domain.UpdatePositionInput
 	CreateEmployeeInput                        = domain.CreateEmployeeInput
 	UpdateEmployeeInput                        = domain.UpdateEmployeeInput
-	CreateEmploymentContractInput              = domain.CreateEmploymentContractInput
-	UpdateEmploymentContractInput              = domain.UpdateEmploymentContractInput
 	EmployeePreviewResponse                    = domain.EmployeePreviewResponse
 	EmployeeAvatarInput                        = domain.EmployeeAvatarInput
-	EmployeeImportPreviewInput                 = domain.EmployeeImportPreviewInput
-	EmployeeImportConfirmInput                 = domain.EmployeeImportConfirmInput
 	EHRMSEmployeeSyncInput                     = domain.EHRMSEmployeeSyncInput
 	BatchDeleteEmployeesInput                  = domain.BatchDeleteEmployeesInput
 	InviteEmployeeInput                        = domain.InviteEmployeeInput
@@ -391,35 +383,34 @@ const (
 	PermissionPackageStatusPublished  = domain.PermissionPackageStatusPublished
 	PermissionPackageStatusDeprecated = domain.PermissionPackageStatusDeprecated
 
-	ResourceEmployee                  = domain.ResourceEmployee
-	ResourceEmployeeImport            = domain.ResourceEmployeeImport
-	ResourceOrgUnit                   = domain.ResourceOrgUnit
-	ResourcePosition                  = domain.ResourcePosition
-	ResourceEmploymentContract        = domain.ResourceEmploymentContract
-	ResourceLeave                     = domain.ResourceLeave
-	ResourceAttendanceWorksite        = domain.ResourceAttendanceWorksite
-	ResourceAttendanceClock           = domain.ResourceAttendanceClock
-	ResourceAttendanceCorrection      = domain.ResourceAttendanceCorrection
-	ResourceUserGroup                 = domain.ResourceUserGroup
-	ResourcePermission                = domain.ResourcePermission
-	ResourcePermissionPackage         = domain.ResourcePermissionPackage
-	ResourcePermissionSet             = domain.ResourcePermissionSet
-	ResourcePermissionAssign          = domain.ResourcePermissionAssign
-	ResourceIAMAccount                = domain.ResourceIAMAccount
-	ResourceDataScope                 = domain.ResourceDataScope
-	ResourceFieldPolicy               = domain.ResourceFieldPolicy
-	ResourceApplication               = domain.ResourceApplication
-	ResourceResourceType              = domain.ResourceResourceType
-	ResourceOutboxEvent               = domain.ResourceOutboxEvent
-	ResourceAssumableRole             = domain.ResourceAssumableRole
-	ResourceTool                      = domain.ResourceTool
-	ResourceDefinition                = domain.ResourceDefinition
-	ResourceUsage                     = domain.ResourceUsage
-	ResourceModel                     = domain.ResourceModel
-	ResourceEmployeeCollection        = domain.ResourceEmployeeCollection
-	ResourceFormInstance              = domain.ResourceFormInstance
-	ResourceFormDefinitionDraft       = domain.ResourceFormDefinitionDraft
-	ResourceNotification              = domain.ResourceNotification
+	ResourceEmployee             = domain.ResourceEmployee
+	ResourceEmployeeSync         = domain.ResourceEmployeeSync
+	ResourceOrgUnit              = domain.ResourceOrgUnit
+	ResourcePosition             = domain.ResourcePosition
+	ResourceLeave                = domain.ResourceLeave
+	ResourceAttendanceWorksite   = domain.ResourceAttendanceWorksite
+	ResourceAttendanceClock      = domain.ResourceAttendanceClock
+	ResourceAttendanceCorrection = domain.ResourceAttendanceCorrection
+	ResourceUserGroup            = domain.ResourceUserGroup
+	ResourcePermission           = domain.ResourcePermission
+	ResourcePermissionPackage    = domain.ResourcePermissionPackage
+	ResourcePermissionSet        = domain.ResourcePermissionSet
+	ResourcePermissionAssign     = domain.ResourcePermissionAssign
+	ResourceIAMAccount           = domain.ResourceIAMAccount
+	ResourceDataScope            = domain.ResourceDataScope
+	ResourceFieldPolicy          = domain.ResourceFieldPolicy
+	ResourceApplication          = domain.ResourceApplication
+	ResourceResourceType         = domain.ResourceResourceType
+	ResourceOutboxEvent          = domain.ResourceOutboxEvent
+	ResourceAssumableRole        = domain.ResourceAssumableRole
+	ResourceTool                 = domain.ResourceTool
+	ResourceDefinition           = domain.ResourceDefinition
+	ResourceUsage                = domain.ResourceUsage
+	ResourceModel                = domain.ResourceModel
+	ResourceEmployeeCollection   = domain.ResourceEmployeeCollection
+	ResourceFormInstance         = domain.ResourceFormInstance
+	ResourceFormDefinitionDraft  = domain.ResourceFormDefinitionDraft
+	ResourceNotification         = domain.ResourceNotification
 
 	AccountStatusActive        = domain.AccountStatusActive
 	AccountStatusDisabled      = domain.AccountStatusDisabled
@@ -434,6 +425,7 @@ const (
 	AgentRunStatusRunning   = domain.AgentRunStatusRunning
 	AgentRunStatusCompleted = domain.AgentRunStatusCompleted
 	AgentRunStatusFailed    = domain.AgentRunStatusFailed
+	AgentRunStatusCancelled = domain.AgentRunStatusCancelled
 
 	EventEmployeeCreated            = domain.EventEmployeeCreated
 	EventEmployeeUpdated            = domain.EventEmployeeUpdated
@@ -461,17 +453,6 @@ const (
 
 	PositionStatusActive   = domain.PositionStatusActive
 	PositionStatusDisabled = domain.PositionStatusDisabled
-
-	EmploymentContractTypeFulltime   = domain.EmploymentContractTypeFulltime
-	EmploymentContractTypeParttime   = domain.EmploymentContractTypeParttime
-	EmploymentContractTypeContractor = domain.EmploymentContractTypeContractor
-	EmploymentContractTypeIntern     = domain.EmploymentContractTypeIntern
-
-	EmploymentContractStatusDraft      = domain.EmploymentContractStatusDraft
-	EmploymentContractStatusActive     = domain.EmploymentContractStatusActive
-	EmploymentContractStatusExpired    = domain.EmploymentContractStatusExpired
-	EmploymentContractStatusTerminated = domain.EmploymentContractStatusTerminated
-	EmploymentContractStatusRenewed    = domain.EmploymentContractStatusRenewed
 )
 
 // 下列變數保存此模組共用的狀態。

@@ -43,6 +43,8 @@ func (c WorkspaceAgentCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace.GET("/agent-usage/:id/sessions", c.routes.Handle("agent.usage", "read", c.listAccountSessionUsage, PathParam(PathParamID)))
 	workspace.GET("/agents/external-tools", c.routes.Handle("agent.tool", "read", c.listExternalTools))
 	workspace.POST("/agents/external-tools", c.routes.Handle("agent.tool", "create", c.createExternalTool))
+	workspace.POST("/agents/external-tools/:id/test", c.routes.Handle("agent.tool", "update", c.testExternalTool, ResourceID(PathParamID)))
+	workspace.POST("/agents/external-tools/:id/discover", c.routes.Handle("agent.tool", "update", c.discoverExternalTool, ResourceID(PathParamID)))
 	workspace.DELETE("/agents/external-tools/:id", c.routes.Handle("agent.tool", "delete", c.deleteExternalTool, ResourceID(PathParamID)))
 	workspace.GET("/agents", c.routes.Handle("agent.definition", "read", c.listDefinitions))
 	workspace.POST("/agents", c.routes.Handle("agent.definition", "create", c.createDefinition))
@@ -268,7 +270,27 @@ func (c WorkspaceAgentCtrl) createExternalTool(w http.ResponseWriter, r *http.Re
 	return nil
 }
 
-// deleteExternalTool removes one tenant-owned external tool registration.
+// testExternalTool verifies authentication and endpoint reachability without invoking a business operation.
+func (c WorkspaceAgentCtrl) testExternalTool(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.TestExternalTool(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// discoverExternalTool refreshes the persisted capability catalogue for one connection.
+func (c WorkspaceAgentCtrl) discoverExternalTool(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.DiscoverExternalTool(ctx, r.PathValue(PathParamID))
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// deleteExternalTool archives one tenant-owned external tool registration.
 func (c WorkspaceAgentCtrl) deleteExternalTool(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.DeleteExternalTool(ctx, r.PathValue(PathParamID))
 	if err != nil {

@@ -16,12 +16,6 @@ type EmployeeCategory string
 // PositionStatus 表示崗位狀態。
 type PositionStatus string
 
-// EmploymentContractType 表示僱用合約類型。
-type EmploymentContractType string
-
-// EmploymentContractStatus 表示僱用合約狀態。
-type EmploymentContractStatus string
-
 // EmployeeAccountPolicy 表示員工帳號政策。
 type EmployeeAccountPolicy string
 
@@ -48,23 +42,6 @@ const (
 const (
 	PositionStatusActive   PositionStatus = "active"
 	PositionStatusDisabled PositionStatus = "disabled"
-)
-
-// 下列常數定義此模組使用的固定值。
-const (
-	EmploymentContractTypeFulltime   EmploymentContractType = "fulltime"
-	EmploymentContractTypeParttime   EmploymentContractType = "parttime"
-	EmploymentContractTypeContractor EmploymentContractType = "contractor"
-	EmploymentContractTypeIntern     EmploymentContractType = "intern"
-)
-
-// 下列常數定義此模組使用的固定值。
-const (
-	EmploymentContractStatusDraft      EmploymentContractStatus = "draft"
-	EmploymentContractStatusActive     EmploymentContractStatus = "active"
-	EmploymentContractStatusExpired    EmploymentContractStatus = "expired"
-	EmploymentContractStatusTerminated EmploymentContractStatus = "terminated"
-	EmploymentContractStatusRenewed    EmploymentContractStatus = "renewed"
 )
 
 // 下列常數定義此模組使用的固定值。
@@ -167,45 +144,6 @@ type UpdatePositionInput struct {
 	Description *string `json:"description,omitempty"`
 }
 
-// EmploymentContract 定義員工合約的資料結構。
-type EmploymentContract struct {
-	ID                  string     `json:"id"`
-	TenantID            string     `json:"tenant_id"`
-	EmployeeID          string     `json:"employee_id"`
-	ContractType        string     `json:"contract_type"`
-	ContractNo          string     `json:"contract_no,omitempty"`
-	StartDate           time.Time  `json:"start_date"`
-	EndDate             *time.Time `json:"end_date,omitempty"`
-	Status              string     `json:"status"`
-	AttachmentObjectKey string     `json:"attachment_object_key,omitempty"`
-	Notes               string     `json:"notes,omitempty"`
-	Version             int64      `json:"version"`
-	CreatedAt           time.Time  `json:"created_at"`
-	UpdatedAt           time.Time  `json:"updated_at"`
-}
-
-// CreateEmploymentContractInput 定義員工合約輸入的資料結構。
-type CreateEmploymentContractInput struct {
-	ContractType        string `json:"contract_type"`
-	ContractNo          string `json:"contract_no,omitempty"`
-	StartDate           string `json:"start_date"`
-	EndDate             string `json:"end_date,omitempty"`
-	Status              string `json:"status,omitempty"`
-	AttachmentObjectKey string `json:"attachment_object_key,omitempty"`
-	Notes               string `json:"notes,omitempty"`
-}
-
-// UpdateEmploymentContractInput 定義員工合約 patch 輸入的資料結構。
-type UpdateEmploymentContractInput struct {
-	ContractType        *string `json:"contract_type,omitempty"`
-	ContractNo          *string `json:"contract_no,omitempty"`
-	StartDate           *string `json:"start_date,omitempty"`
-	EndDate             *string `json:"end_date,omitempty"`
-	Status              *string `json:"status,omitempty"`
-	AttachmentObjectKey *string `json:"attachment_object_key,omitempty"`
-	Notes               *string `json:"notes,omitempty"`
-}
-
 // Employee 定義員工的資料結構。
 type Employee struct {
 	ID                    string               `json:"id"`
@@ -269,15 +207,24 @@ type EmployeeDetailPreview struct {
 // 避免鍵名漂移導致資料在 typed 視圖中靜默遺失。標示 legacy 的鍵為早期 eHRMS 同步
 // 寫入的舊鍵，讀端以别名相容資料庫中既有資料。
 const (
-	EmployeeBasicInfoKeyName            = "name"
-	EmployeeBasicInfoKeyNameEN          = "name_en"
-	EmployeeBasicInfoKeyGender          = "gender"
-	EmployeeBasicInfoKeyBirthDate       = "birth_date"
-	EmployeeBasicInfoKeyNationalityType = "nationality_type"
-	EmployeeBasicInfoKeyNationality     = "nationality" // legacy eHRMS 鍵；前端仍讀取原始國籍名稱
-	EmployeeBasicInfoKeyNationalID      = "national_id"
-	EmployeeBasicInfoKeyPassportNo      = "passport_no"
-	EmployeeBasicInfoKeyCompanyEmail    = "company_email"
+	EmployeeBasicInfoKeyName                 = "name"
+	EmployeeBasicInfoKeyNameEN               = "name_en"
+	EmployeeBasicInfoKeyGender               = "gender"
+	EmployeeBasicInfoKeyBirthDate            = "birth_date"
+	EmployeeBasicInfoKeyNationalityType      = "nationality_type"
+	EmployeeBasicInfoKeyNationality          = "nationality" // legacy eHRMS 鍵；前端仍讀取原始國籍名稱
+	EmployeeBasicInfoKeyNationalID           = "national_id"
+	EmployeeBasicInfoKeyPassportNo           = "passport_no"
+	EmployeeBasicInfoKeyPassportName         = "passport_name"
+	EmployeeBasicInfoKeyEntryDate            = "entry_date"
+	EmployeeBasicInfoKeyARCNo                = "arc_no"
+	EmployeeBasicInfoKeyARCExpiryDate        = "arc_expiry_date"
+	EmployeeBasicInfoKeyTaxID                = "tax_id"
+	EmployeeBasicInfoKeyWorkPermitNo         = "work_permit_no"
+	EmployeeBasicInfoKeyWorkPermitExpiryDate = "work_permit_expiry_date"
+	EmployeeBasicInfoKeyContractExpiryDate   = "contract_expiry_date"
+	EmployeeBasicInfoKeyBroker               = "broker"
+	EmployeeBasicInfoKeyCompanyEmail         = "company_email"
 )
 
 // EmploymentInfo section map 鍵名常數，用途同上。
@@ -492,36 +439,6 @@ type EmployeeOptions struct {
 	JobLevels          []string  `json:"job_levels"`
 }
 
-// EmployeeImportSession 定義員工 import session 的資料結構。
-type EmployeeImportSession struct {
-	ID                   string              `json:"id"`
-	TenantID             string              `json:"tenant_id"`
-	Filename             string              `json:"filename"`
-	ObjectProvider       string              `json:"object_provider,omitempty"`
-	ObjectBucket         string              `json:"object_bucket,omitempty"`
-	ObjectKey            string              `json:"object_key,omitempty"`
-	ContentType          string              `json:"content_type,omitempty"`
-	SizeBytes            int64               `json:"size_bytes,omitempty"`
-	SHA256               string              `json:"sha256,omitempty"`
-	Status               string              `json:"status"`
-	Rows                 []EmployeeImportRow `json:"rows"`
-	Summary              map[string]any      `json:"summary,omitempty"`
-	CreatedByAccountID   string              `json:"created_by_account_id,omitempty"`
-	ConfirmedByAccountID string              `json:"confirmed_by_account_id,omitempty"`
-	CreatedAt            time.Time           `json:"created_at"`
-	ExpiresAt            time.Time           `json:"expires_at"`
-	ConfirmedAt          *time.Time          `json:"confirmed_at,omitempty"`
-}
-
-// EmployeeImportRow 定義員工 import 列的資料結構。
-type EmployeeImportRow struct {
-	RowNumber int                 `json:"row_number"`
-	Input     map[string]string   `json:"input"`
-	Employee  CreateEmployeeInput `json:"employee"`
-	Errors    []RowError          `json:"errors,omitempty"`
-	Valid     bool                `json:"valid"`
-}
-
 // EmployeePreviewResponse 定義員工 preview 回應的資料結構。
 type EmployeePreviewResponse struct {
 	Employee    Employee       `json:"employee"`
@@ -536,18 +453,6 @@ type EmployeeAvatarInput struct {
 	Filename    string `json:"filename"`
 	ContentType string `json:"content_type"`
 	Content     []byte `json:"-"`
-}
-
-// EmployeeImportPreviewInput 定義員工 import preview 輸入的資料結構。
-type EmployeeImportPreviewInput struct {
-	Filename string `json:"filename"`
-	Content  string `json:"content"`
-}
-
-// EmployeeImportConfirmInput 定義員工 import confirm 輸入的資料結構。
-type EmployeeImportConfirmInput struct {
-	Mode          string `json:"mode,omitempty"`
-	FailurePolicy string `json:"failure_policy,omitempty"`
 }
 
 // EHRMSEmployeeRecord 表示 eHRMS 員工 record。
@@ -580,12 +485,6 @@ type EHRMSEmployeeSyncResponse struct {
 
 // EHRMSOrgUnitSyncResponse 定義 eHRMS 組織單位 sync 回應。
 type EHRMSOrgUnitSyncResponse struct {
-	Fetched  int `json:"fetched"`
-	Upserted int `json:"upserted"`
-}
-
-// EHRMSPositionSyncResponse 定義 eHRMS 崗位 sync 回應。
-type EHRMSPositionSyncResponse struct {
 	Fetched  int `json:"fetched"`
 	Upserted int `json:"upserted"`
 }
@@ -671,15 +570,15 @@ func EmployeeSectionsFromEmployee(employee Employee) EmployeeSections {
 			NationalityType:      firstNonEmpty(sectionString(employee.BasicInfo, EmployeeBasicInfoKeyNationalityType), sectionString(employee.BasicInfo, EmployeeBasicInfoKeyNationality)),
 			NationalID:           sectionString(employee.BasicInfo, EmployeeBasicInfoKeyNationalID),
 			PassportNo:           sectionString(employee.BasicInfo, EmployeeBasicInfoKeyPassportNo),
-			PassportName:         sectionString(employee.BasicInfo, "passport_name"),
-			EntryDate:            sectionString(employee.BasicInfo, "entry_date"),
-			ARCNo:                sectionString(employee.BasicInfo, "arc_no"),
-			ARCExpiryDate:        sectionString(employee.BasicInfo, "arc_expiry_date"),
-			TaxID:                sectionString(employee.BasicInfo, "tax_id"),
-			WorkPermitNo:         sectionString(employee.BasicInfo, "work_permit_no"),
-			WorkPermitExpiryDate: sectionString(employee.BasicInfo, "work_permit_expiry_date"),
-			ContractExpiryDate:   sectionString(employee.BasicInfo, "contract_expiry_date"),
-			Broker:               sectionString(employee.BasicInfo, "broker"),
+			PassportName:         sectionString(employee.BasicInfo, EmployeeBasicInfoKeyPassportName),
+			EntryDate:            sectionString(employee.BasicInfo, EmployeeBasicInfoKeyEntryDate),
+			ARCNo:                sectionString(employee.BasicInfo, EmployeeBasicInfoKeyARCNo),
+			ARCExpiryDate:        sectionString(employee.BasicInfo, EmployeeBasicInfoKeyARCExpiryDate),
+			TaxID:                sectionString(employee.BasicInfo, EmployeeBasicInfoKeyTaxID),
+			WorkPermitNo:         sectionString(employee.BasicInfo, EmployeeBasicInfoKeyWorkPermitNo),
+			WorkPermitExpiryDate: sectionString(employee.BasicInfo, EmployeeBasicInfoKeyWorkPermitExpiryDate),
+			ContractExpiryDate:   sectionString(employee.BasicInfo, EmployeeBasicInfoKeyContractExpiryDate),
+			Broker:               sectionString(employee.BasicInfo, EmployeeBasicInfoKeyBroker),
 			Avatar:               employee.BasicInfo["avatar"],
 			// "nationality" 刻意不列入 known：原始國籍名稱需透過 Additional 保留給前端顯示。
 			Additional: sectionAdditional(employee.BasicInfo,
@@ -937,15 +836,15 @@ func dateString(t *time.Time) string {
 // ParseEmployeeStatus 解析員工狀態。
 func ParseEmployeeStatus(raw string) (EmployeeStatus, bool) {
 	switch strings.TrimSpace(raw) {
-	case "在職", "active":
+	case "在職", "在职", "active":
 		return EmployeeStatusActive, true
 	case "試用中", "probation":
 		return EmployeeStatusProbation, true
 	case "留停", "留職停薪", "on-leave", "leave_suspended":
 		return EmployeeStatusLeaveSuspended, true
-	case "待加入", "pending", "onboarding":
+	case "待加入", "待入職", "待入职", "pending", "onboarding":
 		return EmployeeStatusOnboarding, true
-	case "離職", "resigned":
+	case "離職", "离职", "resigned":
 		return EmployeeStatusResigned, true
 	case "已停用", "deleted":
 		return EmployeeStatusDeleted, true

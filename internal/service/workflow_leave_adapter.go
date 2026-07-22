@@ -100,7 +100,7 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 		return LeaveRequest{}, leaveEvaluationError(evaluation)
 	}
 	leaveTypeCode := evaluation.LeaveType
-	hours := evaluation.Hours
+	requestedMinutes := evaluation.RequestedMinutes
 
 	reason := utils.FirstNonEmpty(stringFromAny(payload["reason"]), stringFromAny(payload["description"]))
 	requestID := utils.NewID("lr")
@@ -110,18 +110,16 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 		createdAt = existing.CreatedAt
 	}
 	balanceCycle := nextLeaveRequestBalanceCycle(existing, resubmitting)
-	leaveBalanceID := ""
+	allocations := []LeaveRequestAllocation{}
 	if evaluation.BalanceRequired {
-		balance, fallbackReason, err := c.reserveLeaveBalanceIfAvailable(ctx, employeeID, evaluation.LeaveTypeID, hours, startAt)
+		var fallbackReason string
+		allocations, evaluation.AvailableMinutes, fallbackReason, err = c.leaveBalanceAllocationsForOverlay(ctx, employeeID, evaluation.LeaveTypeID, requestedMinutes, startAt)
 		if err != nil {
 			return LeaveRequest{}, err
 		}
 		if fallbackReason != "" {
 			evaluation.BalanceInitialized = fallbackReason != leaveEvaluationBalanceMissing
-			evaluation.AvailableHours = balance.RemainingHours
 			evaluation = applyLeaveBalanceFallback(evaluation, fallbackReason)
-		} else {
-			leaveBalanceID = balance.ID
 		}
 	}
 	evaluationSnapshot := leaveEvaluationSnapshotMap(evaluation)
@@ -137,11 +135,10 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 		EvaluationSnapshot:   evaluationSnapshot,
 		StartAt:              startAt,
 		EndAt:                endAt,
-		Hours:                hours,
+		RequestedMinutes:     requestedMinutes,
 		Reason:               strings.TrimSpace(reason),
 		Status:               "pending_approval",
 		FormInstanceID:       instance.ID,
-		LeaveBalanceID:       leaveBalanceID,
 		ReconciliationStatus: "not_required",
 		CreatedAt:            createdAt,
 		UpdatedAt:            c.Now(),
@@ -149,14 +146,21 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 	if err := c.store.UpsertLeaveRequest(goContext(ctx), req); err != nil {
 		return LeaveRequest{}, err
 	}
-	if leaveBalanceID != "" {
-		if err := c.store.UpsertLeaveRequestAllocation(goContext(ctx), LeaveRequestAllocation{
-			TenantID: ctx.TenantID, LeaveRequestID: req.ID, LeaveBalanceID: leaveBalanceID,
-			ReservedHours: req.Hours, CreatedAt: c.Now(),
-		}); err != nil {
+	for index := range allocations {
+		allocation := allocations[index]
+		allocation.LeaveRequestID = req.ID
+		allocation.Cycle = balanceCycle
+		allocation.CreatedAt = c.Now()
+		if err := c.store.UpsertLeaveRequestAllocation(goContext(ctx), allocation); err != nil {
 			return LeaveRequest{}, err
 		}
-		if err := c.appendLeaveBalanceEntry(ctx, req, leaveBalanceID, "", leaveBalanceEntryReserve, -leaveMinutes(req.Hours), balanceCycle); err != nil {
+	}
+	allocations, err = c.store.ListLeaveRequestAllocationsByRequestCycle(goContext(ctx), ctx.TenantID, req.ID, balanceCycle)
+	if err != nil {
+		return LeaveRequest{}, err
+	}
+	for _, allocation := range allocations {
+		if err := c.appendLeaveBalanceEntry(ctx, req, allocation, "", leaveBalanceEntryReserve, -allocation.ReservedMinutes, balanceCycle); err != nil {
 			return LeaveRequest{}, err
 		}
 	}
@@ -172,18 +176,20 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 	nextPayload["linked_resource_type"] = "attendance.leave_request"
 	nextPayload["start_at"] = startAt.Format(time.RFC3339)
 	nextPayload["end_at"] = endAt.Format(time.RFC3339)
-	nextPayload["hours"] = hours
+	nextPayload["requested_minutes"] = requestedMinutes
+	nextPayload["hours"] = leaveHours(requestedMinutes)
 	nextPayload["reason"] = strings.TrimSpace(reason)
 	instance.Payload = nextPayload
 	instance.UpdatedAt = c.Now()
 	if err := c.store.UpsertFormInstance(goContext(ctx), instance); err != nil {
 		return LeaveRequest{}, err
 	}
-	if leaveBalanceID != "" {
+	if len(allocations) > 0 {
 		if err := c.audit(ctx, "attendance.leave_balance.reserve", "leave_balance", employeeID+"|"+leaveTypeCode, "medium", map[string]any{
-			"employee_id":    employeeID,
-			"leave_type":     leaveTypeCode,
-			"reserved_hours": hours,
+			"employee_id":      employeeID,
+			"leave_type":       leaveTypeCode,
+			"reserved_minutes": requestedMinutes,
+			"bucket_count":     len(allocations),
 		}); err != nil {
 			return LeaveRequest{}, err
 		}
@@ -193,11 +199,11 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 		event = "attendance.leave_request.resubmit"
 	}
 	if err := c.audit(ctx, event, "leave_request", req.ID, "medium", map[string]any{
-		"leave_type":       req.LeaveType,
-		"hours":            req.Hours,
-		"form_instance_id": instance.ID,
-		"source":           "workflow.form.submit",
-		"resubmit":         resubmitting,
+		"leave_type":        req.LeaveType,
+		"requested_minutes": req.RequestedMinutes,
+		"form_instance_id":  instance.ID,
+		"source":            "workflow.form.submit",
+		"resubmit":          resubmitting,
 	}); err != nil {
 		return LeaveRequest{}, err
 	}

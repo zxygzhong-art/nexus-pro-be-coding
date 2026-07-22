@@ -61,7 +61,8 @@ func (c AgentService) UploadSessionFile(ctx RequestContext, sessionID string, in
 	}()
 	hash := sha256.Sum256(input.Content)
 	file := domain.AgentSessionFile{
-		ID: fileID, TenantID: ctx.TenantID, SessionID: session.ID, ContextVersion: session.ContextVersion,
+		ID: fileID, TenantID: ctx.TenantID, SessionID: session.ID, SegmentID: session.SegmentID,
+		ConversationFileID: utils.NewID("cfile"), ContextVersion: session.ContextVersion,
 		CreatedByAccountID: account.ID, OriginalFilename: filename,
 		ObjectProvider: ObjectStoreProvider(c.ObjectStore()), ObjectBucket: ObjectStoreBucket(c.ObjectStore()), ObjectKey: objectKey,
 		ContentType: contentType, SizeBytes: int64(len(input.Content)), SHA256: hex.EncodeToString(hash[:]),
@@ -76,7 +77,7 @@ func (c AgentService) UploadSessionFile(ctx RequestContext, sessionID string, in
 		if locked.Status != domain.AgentSessionStatusActive {
 			return BadRequest("agent session is archived").WithReasonCode("agent_session_archived")
 		}
-		if locked.ContextVersion != file.ContextVersion {
+		if locked.ContextVersion != file.ContextVersion || locked.SegmentID != file.SegmentID {
 			return Conflict("agent session context changed; retry the upload").WithReasonCode("agent_session_context_changed")
 		}
 		if err := tx.store.UpsertAgentFileAsset(goContext(ctx), file); err != nil {

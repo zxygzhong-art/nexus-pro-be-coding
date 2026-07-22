@@ -28,70 +28,73 @@ func (s *Store) WithTenantTransaction(ctx context.Context, tenantID string, fn f
 // cloneLocked 從儲存層複製 locked。
 func (s *Store) cloneLocked() *Store {
 	return &Store{
-		tenants:                  cloneMap(s.tenants, copyTenant),
-		accounts:                 cloneNestedMap(s.accounts, copyAccount),
-		userIdentities:           cloneNestedMap(s.userIdentities, copyUserIdentity),
-		userGroups:               cloneNestedMap(s.userGroups, copyUserGroup),
-		groupMemberships:         cloneNestedMap(s.groupMemberships, copyGroupMembership),
-		permissionSets:           cloneNestedMap(s.permissionSets, copyPermissionSet),
-		permissionPackages:       cloneMap(s.permissionPackages, copyPermissionPackage),
-		permissionSetTemplates:   cloneNestedMap(s.permissionSetTemplates, copyPermissionSetTemplate),
-		userGroupTemplates:       cloneNestedMap(s.userGroupTemplates, copyUserGroupTemplate),
-		assumableRoleTemplates:   cloneNestedMap(s.assumableRoleTemplates, copyAssumableRoleTemplate),
-		permissionImports:        cloneNestedMap(s.permissionImports, copyPermissionPackageImport),
-		permissionCatalog:        cloneNestedMap(s.permissionCatalog, copyPermissionCatalogItem),
-		menuItems:                cloneNestedMap(s.menuItems, copyMenuItem),
-		permissionSetItems:       cloneNestedMap(s.permissionSetItems, copyPermissionSetItem),
-		assignments:              cloneNestedMap(s.assignments, copyPermissionSetAssignment),
-		dataScopes:               cloneNestedMap(s.dataScopes, copyDataScope),
-		fieldPolicies:            cloneNestedMap(s.fieldPolicies, copyFieldPolicy),
-		assumableRoles:           cloneNestedMap(s.assumableRoles, copyAssumableRole),
-		roleSessions:             cloneNestedMap(s.roleSessions, copyAssumableRoleSession),
-		orgUnits:                 cloneNestedMap(s.orgUnits, copyOrgUnit),
-		positions:                cloneNestedMap(s.positions, copyPosition),
-		employees:                cloneNestedMap(s.employees, copyEmployee),
-		employeeNoSequences:      cloneNestedMap(s.employeeNoSequences, func(v int) int { return v }),
-		employeeImports:          cloneNestedMap(s.employeeImports, copyEmployeeImportSession),
-		employmentContracts:      cloneNestedMap(s.employmentContracts, copyEmploymentContract),
-		attendancePolicyVersions: cloneNestedMap(s.attendancePolicyVersions, copyAttendancePolicy),
-		leaveTypes:               cloneNestedMap(s.leaveTypes, func(v domain.LeaveType) domain.LeaveType { return v }),
-		leaveTypeExternalRefs:    cloneNestedMap(s.leaveTypeExternalRefs, func(v LeaveTypeExternalRef) LeaveTypeExternalRef { return v }),
-		leaveBalances:            cloneNestedMap(s.leaveBalances, copyLeaveBalance),
-		leaveBalanceEntries:      cloneNestedMap(s.leaveBalanceEntries, copyLeaveBalanceEntry),
-		leaveRequests:            cloneNestedMap(s.leaveRequests, copyLeaveRequest),
-		leaveRequestAllocations:  cloneNestedMap(s.leaveRequestAllocations, func(v LeaveRequestAllocation) LeaveRequestAllocation { return v }),
-		leaveCases:               cloneNestedMap(s.leaveCases, func(v LeaveCase) LeaveCase { return v }),
-		leaveCaseSources:         cloneNestedMap(s.leaveCaseSources, func(v LeaveCaseSource) LeaveCaseSource { return v }),
-		externalLeaveRecords:     cloneNestedMap(s.externalLeaveRecords, copyExternalLeaveRecord),
-		attendanceWorksites:      cloneNestedMap(s.attendanceWorksites, copyAttendanceWorksite),
-		attendanceClockRecords:   cloneNestedMap(s.attendanceClockRecords, copyAttendanceClockRecord),
-		attendanceSummaries:      cloneNestedMap(s.attendanceSummaries, copyAttendanceDailySummary),
-		attendanceCorrections:    cloneNestedMap(s.attendanceCorrections, copyAttendanceCorrectionRequest),
-		overtimeRequests:         cloneNestedMap(s.overtimeRequests, copyOvertimeRequest),
-		formDefinitionDrafts:     cloneNestedMap(s.formDefinitionDrafts, copyFormDefinitionDraft),
-		formTemplates:            cloneNestedMap(s.formTemplates, copyFormTemplate),
-		formTemplateVersions:     cloneNestedMap(s.formTemplateVersions, copyFormTemplateVersion),
-		formInstances:            cloneNestedMap(s.formInstances, copyFormInstance),
-		formInstanceFieldValues:  cloneNestedMap(s.formInstanceFieldValues, copyFormInstanceFieldValues),
-		formInstanceFiles:        cloneNestedMap(s.formInstanceFiles, copyFormInstanceFile),
-		workflowRuns:             cloneNestedMap(s.workflowRuns, copyWorkflowRun),
-		workflowStageInstances:   cloneNestedMap(s.workflowStageInstances, copyWorkflowStageInstance),
-		workflowStageAssignees:   cloneNestedMap(s.workflowStageAssignees, copyWorkflowStageAssignee),
-		workflowActions:          cloneSliceMap(s.workflowActions, copyWorkflowAction),
-		platformTaskItems:        cloneNestedMap(s.platformTaskItems, copyPlatformTaskRecordItem),
-		platformTaskTodos:        cloneNestedMap(s.platformTaskTodos, copyPlatformTaskTodoRecord),
-		agentRuns:                cloneNestedMap(s.agentRuns, copyAgentRun),
-		agentModels:              cloneNestedMap(s.agentModels, copyAgentModel),
-		agentExternalTools:       cloneNestedMap(s.agentExternalTools, func(v AgentExternalTool) AgentExternalTool { return v }),
-		agentDefinitions:         cloneNestedMap(s.agentDefinitions, copyAgentDefinition),
-		agentDefinitionVersions:  cloneNestedMap(s.agentDefinitionVersions, copyAgentDefinitionVersion),
-		knowledgeBases:           cloneNestedMap(s.knowledgeBases, func(v KnowledgeBase) KnowledgeBase { return v }),
-		knowledgeDocuments:       cloneNestedMap(s.knowledgeDocuments, func(v KnowledgeDocument) KnowledgeDocument { return v }),
-		knowledgeDocumentChunks:  cloneNestedMap(s.knowledgeDocumentChunks, copyKnowledgeDocumentChunk),
-		agentSessions:            cloneNestedMap(s.agentSessions, copyAgentSession),
-		agentSessionMessages:     cloneNestedMap(s.agentSessionMessages, copyAgentSessionMessage),
-		agentSessionFiles:        cloneNestedMap(s.agentSessionFiles, copyAgentSessionFile),
-		agentFileChunks:          cloneNestedMap(s.agentFileChunks, func(v []string) []string { return append([]string(nil), v...) }),
+		tenants:                          cloneMap(s.tenants, copyTenant),
+		accounts:                         cloneNestedMap(s.accounts, copyAccount),
+		userIdentities:                   cloneNestedMap(s.userIdentities, copyUserIdentity),
+		userGroups:                       cloneNestedMap(s.userGroups, copyUserGroup),
+		groupMemberships:                 cloneNestedMap(s.groupMemberships, copyGroupMembership),
+		permissionSets:                   cloneNestedMap(s.permissionSets, copyPermissionSet),
+		permissionPackages:               cloneMap(s.permissionPackages, copyPermissionPackage),
+		permissionSetTemplates:           cloneNestedMap(s.permissionSetTemplates, copyPermissionSetTemplate),
+		userGroupTemplates:               cloneNestedMap(s.userGroupTemplates, copyUserGroupTemplate),
+		assumableRoleTemplates:           cloneNestedMap(s.assumableRoleTemplates, copyAssumableRoleTemplate),
+		permissionImports:                cloneNestedMap(s.permissionImports, copyPermissionPackageImport),
+		permissionCatalog:                cloneNestedMap(s.permissionCatalog, copyPermissionCatalogItem),
+		menuItems:                        cloneNestedMap(s.menuItems, copyMenuItem),
+		permissionSetItems:               cloneNestedMap(s.permissionSetItems, copyPermissionSetItem),
+		assignments:                      cloneNestedMap(s.assignments, copyPermissionSetAssignment),
+		dataScopes:                       cloneNestedMap(s.dataScopes, copyDataScope),
+		fieldPolicies:                    cloneNestedMap(s.fieldPolicies, copyFieldPolicy),
+		assumableRoles:                   cloneNestedMap(s.assumableRoles, copyAssumableRole),
+		roleSessions:                     cloneNestedMap(s.roleSessions, copyAssumableRoleSession),
+		orgUnits:                         cloneNestedMap(s.orgUnits, copyOrgUnit),
+		positions:                        cloneNestedMap(s.positions, copyPosition),
+		employees:                        cloneNestedMap(s.employees, copyEmployee),
+		employeeNoSequences:              cloneNestedMap(s.employeeNoSequences, func(v int) int { return v }),
+		attendancePolicyVersions:         cloneNestedMap(s.attendancePolicyVersions, copyAttendancePolicy),
+		leaveTypes:                       cloneNestedMap(s.leaveTypes, func(v domain.LeaveType) domain.LeaveType { return v }),
+		leaveTypeExternalRefs:            cloneNestedMap(s.leaveTypeExternalRefs, func(v LeaveTypeExternalRef) LeaveTypeExternalRef { return v }),
+		leaveBalances:                    cloneNestedMap(s.leaveBalances, copyLeaveBalance),
+		leaveBalanceEntries:              cloneNestedMap(s.leaveBalanceEntries, copyLeaveBalanceEntry),
+		leaveRequests:                    cloneNestedMap(s.leaveRequests, copyLeaveRequest),
+		leaveRequestAllocations:          cloneNestedMap(s.leaveRequestAllocations, func(v LeaveRequestAllocation) LeaveRequestAllocation { return v }),
+		leaveCases:                       cloneNestedMap(s.leaveCases, func(v LeaveCase) LeaveCase { return v }),
+		leaveCaseSources:                 cloneNestedMap(s.leaveCaseSources, func(v LeaveCaseSource) LeaveCaseSource { return v }),
+		externalLeaveRecords:             cloneNestedMap(s.externalLeaveRecords, copyExternalLeaveRecord),
+		attendanceWorksites:              cloneNestedMap(s.attendanceWorksites, copyAttendanceWorksite),
+		attendanceClockRecords:           cloneNestedMap(s.attendanceClockRecords, copyAttendanceClockRecord),
+		attendanceSummaries:              cloneNestedMap(s.attendanceSummaries, copyAttendanceDailySummary),
+		attendanceDayProjections:         cloneNestedMap(s.attendanceDayProjections, copyAttendanceDayProjection),
+		attendanceCorrections:            cloneNestedMap(s.attendanceCorrections, copyAttendanceCorrectionRequest),
+		overtimeRequests:                 cloneNestedMap(s.overtimeRequests, copyOvertimeRequest),
+		formDefinitionDrafts:             cloneNestedMap(s.formDefinitionDrafts, copyFormDefinitionDraft),
+		formTemplates:                    cloneNestedMap(s.formTemplates, copyFormTemplate),
+		formTemplateVersions:             cloneNestedMap(s.formTemplateVersions, copyFormTemplateVersion),
+		formInstances:                    cloneNestedMap(s.formInstances, copyFormInstance),
+		formInstanceFieldValues:          cloneNestedMap(s.formInstanceFieldValues, copyFormInstanceFieldValues),
+		formInstanceFiles:                cloneNestedMap(s.formInstanceFiles, copyFormInstanceFile),
+		workflowRuns:                     cloneNestedMap(s.workflowRuns, copyWorkflowRun),
+		workflowStageInstances:           cloneNestedMap(s.workflowStageInstances, copyWorkflowStageInstance),
+		workflowStageAssignees:           cloneNestedMap(s.workflowStageAssignees, copyWorkflowStageAssignee),
+		workflowActions:                  cloneSliceMap(s.workflowActions, copyWorkflowAction),
+		platformTaskItems:                cloneNestedMap(s.platformTaskItems, copyPlatformTaskRecordItem),
+		platformTaskTodos:                cloneNestedMap(s.platformTaskTodos, copyPlatformTaskTodoRecord),
+		agentRuns:                        cloneNestedMap(s.agentRuns, copyAgentRun),
+		agentModels:                      cloneNestedMap(s.agentModels, copyAgentModel),
+		agentExternalTools:               cloneNestedMap(s.agentExternalTools, copyAgentExternalTool),
+		agentDefinitions:                 cloneNestedMap(s.agentDefinitions, copyAgentDefinition),
+		agentDefinitionVersions:          cloneNestedMap(s.agentDefinitionVersions, copyAgentDefinitionVersion),
+		agentExecutionSteps:              cloneNestedMap(s.agentExecutionSteps, copyExecutionStep),
+		agentRevisionExternalTools:       cloneNestedMap(s.agentRevisionExternalTools, copyAgentRevisionExternalTools),
+		agentRevisionMemberExternalTools: cloneNestedMap(s.agentRevisionMemberExternalTools, copyAgentRevisionMemberExternalTools),
+		agentConfirmations:               cloneNestedMap(s.agentConfirmations, copyAgentConfirmation),
+		knowledgeBases:                   cloneNestedMap(s.knowledgeBases, func(v KnowledgeBase) KnowledgeBase { return v }),
+		knowledgeDocuments:               cloneNestedMap(s.knowledgeDocuments, func(v KnowledgeDocument) KnowledgeDocument { return v }),
+		knowledgeDocumentChunks:          cloneNestedMap(s.knowledgeDocumentChunks, copyKnowledgeDocumentChunk),
+		agentSessions:                    cloneNestedMap(s.agentSessions, copyAgentSession),
+		agentSessionMessages:             cloneNestedMap(s.agentSessionMessages, copyAgentSessionMessage),
+		agentSessionFiles:                cloneNestedMap(s.agentSessionFiles, copyAgentSessionFile),
+		agentFileChunks:                  cloneNestedMap(s.agentFileChunks, func(v []string) []string { return append([]string(nil), v...) }),
 		agentMessageAttachments: cloneNestedMap(s.agentMessageAttachments, func(v []domain.AgentMessageAttachment) []domain.AgentMessageAttachment {
 			out := append([]domain.AgentMessageAttachment(nil), v...)
 			for index := range out {
@@ -107,7 +110,6 @@ func (s *Store) cloneLocked() *Store {
 		identityOutbox:         cloneSliceMap(s.identityOutbox, func(v IdentityProvisioningOutboxEvent) IdentityProvisioningOutboxEvent { return v }),
 		outboxEvents:           cloneSliceMap(s.outboxEvents, copyOutboxEvent),
 		relationshipTuples:     cloneNestedMap(s.relationshipTuples, func(v AuthzRelationshipTuple) AuthzRelationshipTuple { return v }),
-		ehrmsSyncLocks:         cloneMap(s.ehrmsSyncLocks, func(v bool) bool { return v }),
 	}
 }
 
@@ -136,8 +138,6 @@ func (s *Store) replaceLocked(next *Store) {
 	s.positions = next.positions
 	s.employees = next.employees
 	s.employeeNoSequences = next.employeeNoSequences
-	s.employeeImports = next.employeeImports
-	s.employmentContracts = next.employmentContracts
 	s.attendancePolicyVersions = next.attendancePolicyVersions
 	s.leaveTypes = next.leaveTypes
 	s.leaveTypeExternalRefs = next.leaveTypeExternalRefs
@@ -151,6 +151,7 @@ func (s *Store) replaceLocked(next *Store) {
 	s.attendanceWorksites = next.attendanceWorksites
 	s.attendanceClockRecords = next.attendanceClockRecords
 	s.attendanceSummaries = next.attendanceSummaries
+	s.attendanceDayProjections = next.attendanceDayProjections
 	s.attendanceCorrections = next.attendanceCorrections
 	s.overtimeRequests = next.overtimeRequests
 	s.formDefinitionDrafts = next.formDefinitionDrafts
@@ -170,6 +171,10 @@ func (s *Store) replaceLocked(next *Store) {
 	s.agentExternalTools = next.agentExternalTools
 	s.agentDefinitions = next.agentDefinitions
 	s.agentDefinitionVersions = next.agentDefinitionVersions
+	s.agentExecutionSteps = next.agentExecutionSteps
+	s.agentRevisionExternalTools = next.agentRevisionExternalTools
+	s.agentRevisionMemberExternalTools = next.agentRevisionMemberExternalTools
+	s.agentConfirmations = next.agentConfirmations
 	s.knowledgeBases = next.knowledgeBases
 	s.knowledgeDocuments = next.knowledgeDocuments
 	s.knowledgeDocumentChunks = next.knowledgeDocumentChunks

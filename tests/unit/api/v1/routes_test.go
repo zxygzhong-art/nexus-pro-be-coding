@@ -285,29 +285,14 @@ func TestDocumentedJSONSuccessResponsesUseDataEnvelope(t *testing.T) {
 
 	refs := openAPISuccessJSONSchemaRefs(t)
 	expected := map[string]string{
-		"GET /v1/hr/employees 200":                         "EmployeeListDataResponse",
-		"POST /v1/hr/employees 201":                        "EmployeeDetailDataResponse",
-		"POST /v1/hr/employees/preview 200":                "EmployeePreviewDataResponse",
-		"GET /v1/hr/employees/{id} 200":                    "EmployeeDetailDataResponse",
-		"PATCH /v1/hr/employees/{id} 200":                  "EmployeeDetailDataResponse",
-		"DELETE /v1/hr/employees/{id} 200":                 "EmployeeDataResponse",
-		"POST /v1/hr/employees/{id}/preview 200":           "EmployeePreviewDataResponse",
-		"POST /v1/hr/employees/{id}/avatar 200":            "EmployeeDataResponse",
-		"DELETE /v1/hr/employees/{id}/avatar 200":          "EmployeeDataResponse",
-		"GET /v1/hr/employees/stats 200":                   "EmployeeStatsDataResponse",
-		"GET /v1/hr/employee-options 200":                  "EmployeeOptionsDataResponse",
-		"POST /v1/hr/employees/import/preview 201":         "EmployeeImportSessionDataResponse",
-		"POST /v1/hr/employees/import/{id}/confirm 200":    "EmployeeImportSessionDataResponse",
-		"POST /v1/hr/employees/ehrms/sync 200":             "EHRMSEmployeeSyncDataResponse",
-		"POST /v1/hr/positions/ehrms/sync 200":             "EHRMSPositionSyncDataResponse",
-		"POST /v1/org/units/ehrms/sync 200":                "EHRMSOrgUnitSyncDataResponse",
-		"POST /v1/attendance/ehrms/sync 200":               "EHRMSAttendanceSyncDataResponse",
-		"POST /v1/hr/employees/export 200":                 "EmployeeExportDataResponse",
-		"POST /v1/hr/employees/batch-delete 200":           "BatchEmployeeDataResponse",
-		"POST /v1/hr/employees/{id}/invite 200":            "EmployeeDataResponse",
-		"POST /v1/hr/employees/{id}/status-transition 200": "EmployeeDataResponse",
-		"PATCH /v1/hr/employees/{id}/status 200":           "EmployeeDataResponse",
-		"GET /v1/workspace/org-units-directory 200":        "WorkspaceOrgUnitDirectoryDataResponse",
+		"GET /v1/hr/employees 200":                  "EmployeeListDataResponse",
+		"GET /v1/hr/employees/{id} 200":             "EmployeeDetailDataResponse",
+		"PATCH /v1/hr/employees/{id} 200":           "EmployeeDetailDataResponse",
+		"GET /v1/hr/employees/stats 200":            "EmployeeStatsDataResponse",
+		"POST /v1/hr/employees/ehrms/sync 200":      "EHRMSEmployeeSyncDataResponse",
+		"POST /v1/org/units/ehrms/sync 200":         "EHRMSOrgUnitSyncDataResponse",
+		"POST /v1/attendance/ehrms/sync 200":        "EHRMSAttendanceSyncDataResponse",
+		"GET /v1/workspace/org-units-directory 200": "WorkspaceOrgUnitDirectoryDataResponse",
 	}
 	for key, want := range expected {
 		if got := refs[key]; got != want {
@@ -325,19 +310,9 @@ func TestDocumentedJSONSuccessResponsesUseDataEnvelope(t *testing.T) {
 func TestEmployeeOpenAPIRequestBodiesUseNamedSchemas(t *testing.T) {
 	refs := openAPIRequestJSONSchemaRefs(t)
 	expected := map[string]string{
-		"POST /v1/hr/employees":                        "EmployeeInput",
-		"POST /v1/hr/employees/preview":                "EmployeeInput",
-		"PATCH /v1/hr/employees/{id}":                  "EmployeePatch",
-		"POST /v1/hr/employees/{id}/preview":           "EmployeePatch",
-		"POST /v1/hr/employees/import/preview":         "EmployeeImportPreviewRequest",
-		"POST /v1/hr/employees/import/{id}/confirm":    "EmployeeImportConfirmRequest",
-		"POST /v1/hr/employees/ehrms/sync":             "EHRMSEmployeeSyncRequest",
-		"POST /v1/attendance/ehrms/sync":               "EHRMSAttendanceSyncRequest",
-		"POST /v1/hr/employees/export":                 "EmployeeQuery",
-		"POST /v1/hr/employees/batch-delete":           "BatchDeleteEmployeesRequest",
-		"POST /v1/hr/employees/{id}/invite":            "InviteEmployeeRequest",
-		"POST /v1/hr/employees/{id}/status-transition": "EmployeeStatusTransitionRequest",
-		"PATCH /v1/hr/employees/{id}/status":           "EmployeeDirectStatusRequest",
+		"PATCH /v1/hr/employees/{id}":      "EmployeePatch",
+		"POST /v1/hr/employees/ehrms/sync": "EHRMSEmployeeSyncRequest",
+		"POST /v1/attendance/ehrms/sync":   "EHRMSAttendanceSyncRequest",
 	}
 	for key, schemaName := range expected {
 		if got := refs[key]; got != schemaName {

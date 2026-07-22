@@ -97,22 +97,13 @@ type Config struct {
 	ObjectStoreUseSSL                  bool
 	ObjectStoreCreateBucket            bool
 
-	EHRMSBaseURL        string
-	EHRMSAPIKey         string
-	EHRMSSyncEnabled    bool
-	EHRMSSyncInterval   time.Duration
-	EHRMSSyncMode       string
-	EHRMSSyncTenantID   string
-	EHRMSSyncAccountID  string
-	EHRMSSyncRunOnStart bool
-
-	EHRMSAttendanceSyncEnabled    bool
-	EHRMSAttendanceSyncInterval   time.Duration
-	EHRMSAttendanceSyncMode       string
-	EHRMSAttendanceSyncTenantID   string
-	EHRMSAttendanceSyncAccountID  string
-	EHRMSAttendanceSyncRunOnStart bool
-	EHRMSAttendanceSyncSince      string
+	EHRMSBaseURL         string
+	EHRMSAPIKey          string
+	EHRMSRequestInterval time.Duration
+	EHRMSSyncEnabled     bool
+	EHRMSSyncMode        string
+	EHRMSSyncTenantID    string
+	EHRMSSyncAccountID   string
 
 	OTelEnabled              bool
 	OTelServiceName          string
@@ -251,7 +242,6 @@ func LoadE() (Config, error) {
 	redisHost := strings.TrimSpace(os.Getenv("REDIS_HOST"))
 	redisPort := env("REDIS_PORT", "6379")
 	ehrmsSyncEnabled := envBool("EHRMS_SYNC_ENABLED", false, &problems)
-	ehrmsSyncRunOnStart := envBool("EHRMS_SYNC_RUN_ON_START", false, &problems)
 	cfg := Config{
 		Env:               appEnv,
 		HTTPAddr:          env("HTTP_ADDR", ":8080"),
@@ -329,37 +319,21 @@ func LoadE() (Config, error) {
 		ObjectStoreUseSSL:                  envBool("OBJECT_STORE_USE_SSL", false, &problems),
 		ObjectStoreCreateBucket:            envBool("OBJECT_STORE_CREATE_BUCKET", false, &problems),
 
-		EHRMSBaseURL:        strings.TrimSpace(os.Getenv("EHRMS_BASE_URL")),
-		EHRMSAPIKey:         os.Getenv("EHRMS_API_KEY"),
-		EHRMSSyncEnabled:    ehrmsSyncEnabled,
-		EHRMSSyncInterval:   envDuration("EHRMS_SYNC_INTERVAL", 24*time.Hour, &problems),
-		EHRMSSyncMode:       env("EHRMS_SYNC_MODE", "upsert"),
-		EHRMSSyncTenantID:   strings.TrimSpace(os.Getenv("EHRMS_SYNC_TENANT_ID")),
-		EHRMSSyncAccountID:  strings.TrimSpace(os.Getenv("EHRMS_SYNC_ACCOUNT_ID")),
-		EHRMSSyncRunOnStart: ehrmsSyncRunOnStart,
-
-		EHRMSAttendanceSyncEnabled:    ehrmsSyncEnabled,
-		EHRMSAttendanceSyncInterval:   envDuration("EHRMS_ATTENDANCE_SYNC_INTERVAL", 30*24*time.Hour, &problems),
-		EHRMSAttendanceSyncMode:       env("EHRMS_ATTENDANCE_SYNC_MODE", "upsert"),
-		EHRMSAttendanceSyncTenantID:   strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_TENANT_ID")),
-		EHRMSAttendanceSyncAccountID:  strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_ACCOUNT_ID")),
-		EHRMSAttendanceSyncRunOnStart: ehrmsSyncEnabled && ehrmsSyncRunOnStart,
-		EHRMSAttendanceSyncSince:      strings.TrimSpace(os.Getenv("EHRMS_ATTENDANCE_SYNC_SINCE")),
+		EHRMSBaseURL:         strings.TrimSpace(os.Getenv("EHRMS_BASE_URL")),
+		EHRMSAPIKey:          os.Getenv("EHRMS_API_KEY"),
+		EHRMSRequestInterval: envDuration("EHRMS_REQUEST_INTERVAL", time.Second, &problems),
+		EHRMSSyncEnabled:     ehrmsSyncEnabled,
+		EHRMSSyncMode:        env("EHRMS_SYNC_MODE", "upsert"),
+		EHRMSSyncTenantID:    strings.TrimSpace(os.Getenv("EHRMS_SYNC_TENANT_ID")),
+		EHRMSSyncAccountID:   strings.TrimSpace(os.Getenv("EHRMS_SYNC_ACCOUNT_ID")),
 
 		OTelEnabled:              envBool("OTEL_ENABLED", false, &problems),
 		OTelServiceName:          env("OTEL_SERVICE_NAME", "nexus-pro-api"),
 		OTelExporterOTLPEndpoint: env("OTEL_BASE_URL", "localhost:4317"),
 		OTelExporterOTLPInsecure: envBool("OTEL_EXPORTER_OTLP_INSECURE", true, &problems),
 	}
-	if cfg.EHRMSAttendanceSyncTenantID == "" {
-		cfg.EHRMSAttendanceSyncTenantID = cfg.EHRMSSyncTenantID
-	}
-	if cfg.EHRMSAttendanceSyncAccountID == "" {
-		cfg.EHRMSAttendanceSyncAccountID = cfg.EHRMSSyncAccountID
-	}
 	problems = append(problems, ehrmsConfigProblems(cfg.EHRMSBaseURL, cfg.EHRMSAPIKey)...)
 	problems = append(problems, ehrmsSyncConfigProblems(cfg)...)
-	problems = append(problems, ehrmsAttendanceSyncConfigProblems(cfg)...)
 	problems = append(problems, keycloakProvisioningConfigProblems(cfg)...)
 	problems = append(problems, databasePoolConfigProblems(cfg)...)
 	problems = append(problems, rateLimitConfigProblems(cfg)...)
@@ -440,25 +414,6 @@ func ehrmsSyncConfigProblems(c Config) []string {
 	case "", "create", "update", "upsert":
 	default:
 		problems = append(problems, "EHRMS_SYNC_MODE must be create, update, or upsert")
-	}
-	return problems
-}
-
-// ehrmsAttendanceSyncConfigProblems validates attendance options when the master eHRMS sync is enabled.
-func ehrmsAttendanceSyncConfigProblems(c Config) []string {
-	if !c.EHRMSSyncEnabled {
-		return nil
-	}
-	problems := []string{}
-	switch strings.ToLower(strings.TrimSpace(c.EHRMSAttendanceSyncMode)) {
-	case "", "create", "update", "upsert":
-	default:
-		problems = append(problems, "EHRMS_ATTENDANCE_SYNC_MODE must be create, update, or upsert")
-	}
-	if since := strings.TrimSpace(c.EHRMSAttendanceSyncSince); since != "" {
-		if _, err := time.Parse(time.DateOnly, since); err != nil {
-			problems = append(problems, "EHRMS_ATTENDANCE_SYNC_SINCE must be YYYY-MM-DD")
-		}
 	}
 	return problems
 }

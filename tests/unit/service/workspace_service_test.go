@@ -22,7 +22,8 @@ func TestWorkspaceOverviewAggregatesVisibleHRAndAttendance(t *testing.T) {
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-3", EmployeeNo: "IKL003", Name: "陳俊", Status: "resigned", EmploymentStatus: "resigned", HireDate: ptrTime(time.Date(2025, 1, 1, 0, 0, 0, 0, time.UTC)), ResignDate: ptrTime(time.Date(2026, 6, 5, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: time.Date(2026, 6, 5, 0, 0, 0, 0, time.UTC)})
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-4", EmployeeNo: "IKL004", Name: "李雅琳", Status: "onboarding", EmploymentStatus: "onboarding", HireDate: ptrTime(time.Date(2026, 6, 20, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
 	_ = store.UpsertAttendanceClockRecord(context.Background(), domain.AttendanceClockRecord{ID: "clk-1", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_in", ClockedAt: now, RecordStatus: "accepted", Source: "geofence", CreatedAt: now})
-	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lv-1", TenantID: "tenant-1", EmployeeID: "emp-2", LeaveType: "annual", StartAt: now, EndAt: now.Add(8 * time.Hour), Hours: 8, Status: "approved", CreatedAt: now})
+	local := time.FixedZone("UTC+8", 8*60*60)
+	insertWorkspaceConfirmedLeaveCase(t, store, "case-overview", "emp-2", "annual", time.Date(2026, 6, 10, 9, 0, 0, 0, local), time.Date(2026, 6, 10, 17, 0, 0, 0, local), 420)
 
 	got, err := svc.Workspace().WorkspaceOverview(ctx, domain.WorkspaceOverviewQuery{Year: 2026, Month: 6, Date: "2026-06-10"})
 	if err != nil {
@@ -132,13 +133,8 @@ func TestWorkspaceInsightsProjectsAttendanceMembers(t *testing.T) {
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-2", EmployeeNo: "IKL002", Name: "張琪", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
-	if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{
-		ID: "sum-leave", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10",
-		LeaveType: "annual", LeaveHours: 8, LeaveCounted: true, Source: "ehrms",
-		ExternalRef: "IKL001:2026-06-10", CreatedAt: now, UpdatedAt: now,
-	}); err != nil {
-		t.Fatal(err)
-	}
+	local := time.FixedZone("UTC+8", 8*60*60)
+	insertWorkspaceConfirmedLeaveCase(t, store, "case-insights", "emp-1", "annual", time.Date(2026, 6, 10, 9, 0, 0, 0, local), time.Date(2026, 6, 10, 17, 0, 0, 0, local), 420)
 	workDates := []string{"2026-06-01", "2026-06-02", "2026-06-03", "2026-06-04", "2026-06-05", "2026-06-08", "2026-06-09"}
 	for i, hours := range []float64{7.8, 8.43, 8.18, 8.13, 8.2, 8.12, 8.02} {
 		workDate := workDates[i]
@@ -167,7 +163,7 @@ func TestWorkspaceInsightsProjectsAttendanceMembers(t *testing.T) {
 	if len(members) != 2 {
 		t.Fatalf("expected two attendance members, got %+v", members)
 	}
-	if members[0]["id"] != "IKL001" || members[0]["leave_days"] != float64(1) || members[0]["leave_type"] != "特休假" {
+	if members[0]["id"] != "IKL001" || members[0]["leave_days"] != float64(0.875) || members[0]["leave_type"] != "特休假" {
 		t.Fatalf("unexpected first member projection: %+v", members[0])
 	}
 	if members[0]["primary_product"] != "—" || members[0]["task_count"] != 0 || len(members[0]["tasks"].([]map[string]any)) != 0 {
@@ -539,7 +535,8 @@ func TestWorkspaceAttendanceBuildsLeaveAndClockMatrices(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", CompanyEmail: "wei@example.com", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
-	_ = store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "sum-leave", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", LeaveType: "annual", LeaveHours: 8, LeaveCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-10", CreatedAt: now, UpdatedAt: now})
+	local := time.FixedZone("UTC+8", 8*60*60)
+	insertWorkspaceConfirmedLeaveCase(t, store, "case-matrix", "emp-1", "annual", time.Date(2026, 6, 10, 9, 0, 0, 0, local), time.Date(2026, 6, 10, 17, 0, 0, 0, local), 420)
 	_ = store.UpsertAttendanceClockRecord(context.Background(), domain.AttendanceClockRecord{ID: "clk-in", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", Direction: "clock_in", ClockedAt: time.Date(2026, 6, 11, 9, 0, 0, 0, time.UTC), RecordStatus: "accepted", Source: "geofence", CreatedAt: now})
 
 	got, err := svc.Workspace().WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 6})
@@ -552,7 +549,7 @@ func TestWorkspaceAttendanceBuildsLeaveAndClockMatrices(t *testing.T) {
 	if card := got.Clock.Rows[0].Employee; card.ID != "IKL001" || card.EmployeeID != "emp-1" {
 		t.Fatalf("expected display and canonical employee IDs, got %+v", card)
 	}
-	if cell := got.Attendance.Rows[0].Cells[9]; cell.Type != "leave" || cell.Leave != "annual" || cell.Hours != 8 {
+	if cell := got.Attendance.Rows[0].Cells[9]; cell.Type != "leave" || cell.Leave != "annual" || cell.Hours != 7 {
 		t.Fatalf("unexpected leave cell: %+v", cell)
 	}
 	if len(got.LeaveLegend) != 15 || got.LeaveLegend[14].Code != "business_trip" || got.LeaveLegend[14].Label != "外勤" {
@@ -768,30 +765,36 @@ func TestWorkspaceAttendanceMarksOnlyPastEligibleMissingDaysAbsent(t *testing.T)
 	}
 }
 
-// TestWorkspaceAttendanceNormalizesEHRMSLeaveTypes 驗證 eHRMS 假別名稱穩定映射且非請假明細不進入矩陣。
+// TestWorkspaceAttendanceProjectsCanonicalLeaveTypes verifies reconciled cases
+// render stable catalog codes and raw summary labels cannot bypass that boundary.
 func TestWorkspaceAttendanceNormalizesEHRMSLeaveTypes(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
 	types := []struct {
-		leaveType string
-		code      string
+		code string
 	}{
-		{leaveType: "Additional Leave", code: "flexible"},
-		{leaveType: "Full Pay Sick Leave", code: "sick_full"},
-		{leaveType: "Half Pay Sick Leave", code: "sick_half"},
-		{leaveType: "Menstruation Leave", code: "menstrual"},
-		{leaveType: "Personal Leave", code: "personal"},
-		{leaveType: "Compensatory Leave", code: "compensatory"},
-		{leaveType: "特休假", code: "annual"},
-		{leaveType: "Future Leave Type", code: ""},
+		{code: "flexible"},
+		{code: "sick_full"},
+		{code: "sick_half"},
+		{code: "menstrual"},
+		{code: "personal"},
+		{code: "compensatory"},
+		{code: "annual"},
+		{code: ""},
 	}
 	workdays := []int{1, 2, 3, 4, 5, 8, 9, 10}
+	local := time.FixedZone("UTC+8", 8*60*60)
 	for i, item := range types {
 		workDate := time.Date(2026, 6, workdays[i], 0, 0, 0, 0, time.UTC).Format(time.DateOnly)
-		if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "sum-" + workDate, TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: workDate, LeaveType: item.leaveType, LeaveHours: 8, LeaveCounted: true, Source: "ehrms", ExternalRef: "IKL001:" + workDate, CreatedAt: now, UpdatedAt: now}); err != nil {
-			t.Fatal(err)
+		if item.code == "" {
+			if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "sum-" + workDate, TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: workDate, LeaveType: "Future Leave Type", LeaveHours: 8, LeaveCounted: true, Source: "ehrms", ExternalRef: "IKL001:" + workDate, CreatedAt: now, UpdatedAt: now}); err != nil {
+				t.Fatal(err)
+			}
+			continue
 		}
+		start := time.Date(2026, 6, workdays[i], 9, 0, 0, 0, local)
+		insertWorkspaceConfirmedLeaveCase(t, store, "case-"+workDate, "emp-1", item.code, start, time.Date(2026, 6, workdays[i], 17, 0, 0, 0, local), 420)
 	}
 
 	got, err := svc.Workspace().WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 6})
@@ -803,12 +806,12 @@ func TestWorkspaceAttendanceNormalizesEHRMSLeaveTypes(t *testing.T) {
 		cell := row.Cells[workdays[i]-1]
 		if item.code == "" {
 			if cell.Type == "leave" || cell.Leave != "" {
-				t.Fatalf("unmapped leave type %q must not create a policy leave cell, got %+v", item.leaveType, cell)
+				t.Fatalf("unreconciled summary must not create a policy leave cell, got %+v", cell)
 			}
 			continue
 		}
 		if cell.Type != "leave" || cell.Leave != item.code {
-			t.Fatalf("leave type %q expected code %q, got %+v", item.leaveType, item.code, cell)
+			t.Fatalf("canonical leave expected code %q, got %+v", item.code, cell)
 		}
 	}
 }
@@ -833,21 +836,78 @@ func TestWorkspaceAttendanceRejectsNonCatalogLeaveType(t *testing.T) {
 	}
 }
 
-// TestWorkspaceAttendanceMergesApprovedLocalLeaveWithDailyFacts 驗證矩陣即時合併已覈準本地請假，且不重複計算每日假勤。
+// TestWorkspaceAttendanceKeepsInactiveHistoricalLeaveType verifies disabling a
+// catalog item does not erase the label or the reconciled historical case.
+func TestWorkspaceAttendanceKeepsInactiveHistoricalLeaveType(t *testing.T) {
+	store, svc, ctx := newWorkspaceFixture(t)
+	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
+	leaveTypes, err := store.ListLeaveTypes(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	annualID := ""
+	for _, leaveType := range leaveTypes {
+		if leaveType.Code == "annual" {
+			annualID = leaveType.ID
+			break
+		}
+	}
+	if annualID == "" {
+		t.Fatal("annual leave type missing from fixture")
+	}
+	if err := store.UpsertLeaveTypeEnabled(context.Background(), "tenant-1", "annual", false, "acct-1", now); err != nil {
+		t.Fatal(err)
+	}
+	location := time.FixedZone("UTC+8", 8*60*60)
+	if err := store.UpsertLeaveCase(context.Background(), domain.LeaveCase{
+		ID: "case-inactive-annual", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveTypeID: annualID,
+		StartAt: time.Date(2026, 6, 9, 9, 0, 0, 0, location), EndAt: time.Date(2026, 6, 9, 17, 0, 0, 0, location),
+		NetMinutes: 420, Status: "active", Origin: "ehrms", CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertLeaveCaseSource(context.Background(), domain.LeaveCaseSource{
+		TenantID: "tenant-1", LeaveCaseID: "case-inactive-annual", ExternalLeaveRecordID: "external-annual",
+		MatchMethod: "exact", MatchStatus: "confirmed", CreatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := svc.Workspace().WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 6})
+	if err != nil {
+		t.Fatal(err)
+	}
+	legendFound := false
+	for _, item := range got.LeaveLegend {
+		legendFound = legendFound || item.Code == "annual"
+	}
+	if !legendFound {
+		t.Fatalf("inactive annual leave missing from legend: %+v", got.LeaveLegend)
+	}
+	cell := got.Attendance.Rows[0].Cells[8]
+	if cell.Type != "leave" || cell.Leave != "annual" || cell.Hours != 7 {
+		t.Fatalf("historical inactive leave case not rendered: %+v", cell)
+	}
+}
+
+// TestWorkspaceAttendanceUsesCanonicalCaseAcrossSources verifies one case with
+// local and eHRMS evidence is projected once without max-hours guessing.
 func TestWorkspaceAttendanceUsesDailyLeaveFactsInsteadOfLeaveRanges(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 7, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKM229", Name: "測試員工", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
-	if err := store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{
-		ID: "lv-cross-weekend", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual",
-		StartAt: time.Date(2026, 7, 9, 9, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 7, 14, 17, 0, 0, 0, time.UTC),
-		Hours: 28, Status: "approved", CreatedAt: now,
+	local := time.FixedZone("UTC+8", 8*60*60)
+	insertWorkspaceConfirmedLeaveCase(t, store, "case-cross-weekend", "emp-1", "annual", time.Date(2026, 7, 9, 9, 0, 0, 0, local), time.Date(2026, 7, 14, 17, 0, 0, 0, local), 1680)
+	if err := store.UpsertLeaveCaseSource(context.Background(), domain.LeaveCaseSource{
+		TenantID: "tenant-1", LeaveCaseID: "case-cross-weekend", ExternalLeaveRecordID: "external-cross-weekend",
+		MatchMethod: "exact", MatchStatus: "confirmed", CreatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{
 		ID: "sum-ikm229-0709", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-07-09",
-		LeaveType: "annual", LeaveHours: 7, LeaveCounted: true,
+		LeaveType: "annual", LeaveHours: 8, LeaveCounted: true,
 		Source: "ehrms", ExternalRef: "IKM229:2026-07-09", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
@@ -859,15 +919,15 @@ func TestWorkspaceAttendanceUsesDailyLeaveFactsInsteadOfLeaveRanges(t *testing.T
 	}
 	row := got.Attendance.Rows[0]
 	if cell := row.Cells[8]; cell.Type != "leave" || cell.Hours != 7 || cell.Leave != "annual" {
-		t.Fatalf("expected July 9 daily fact only, got %+v", cell)
+		t.Fatalf("expected July 9 canonical case hours, got %+v", cell)
 	}
 	for _, day := range []int{10, 13, 14} {
 		if cell := row.Cells[day-1]; cell.Type != "leave" || cell.Hours != 7 || cell.Leave != "annual" {
-			t.Fatalf("approved local leave should cover business day %d, got %+v", day, cell)
+			t.Fatalf("canonical leave case should cover business day %d, got %+v", day, cell)
 		}
 	}
 	if row.Summary.LeaveHours != 28 {
-		t.Fatalf("expected merged leave total without duplicate July 9, got %+v", row.Summary)
+		t.Fatalf("expected canonical leave total without source duplication, got %+v", row.Summary)
 	}
 }
 
@@ -1046,6 +1106,7 @@ func TestWorkspaceAttendanceCapsNormalHoursPerDayAndPreservesActualHours(t *test
 			t.Fatal(err)
 		}
 	}
+	insertWorkspaceConfirmedLeaveCase(t, store, "case-half-leave", "emp-1", "annual", time.Date(2026, 6, 9, 9, 0, 0, 0, local), time.Date(2026, 6, 9, 14, 0, 0, 0, local), 240)
 	for _, record := range []domain.AttendanceClockRecord{
 		{ID: "local-in", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", Direction: "clock_in", ClockedAt: time.Date(2026, 6, 11, 8, 0, 0, 0, local), RecordStatus: "accepted", Source: "geofence", CreatedAt: now},
 		{ID: "local-out", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", Direction: "clock_out", ClockedAt: time.Date(2026, 6, 11, 18, 0, 0, 0, local), RecordStatus: "accepted", Source: "geofence", CreatedAt: now},
@@ -1108,14 +1169,14 @@ func TestWorkspaceAttendanceMarksIncompleteEHRMSClockSummaryAbnormal(t *testing.
 	}
 }
 
-// TestWorkspaceAttendanceCountsApprovedLeaveAndOvertime 驗證工時統計合併每日假勤、本地核準請假與覈準加班。
+// TestWorkspaceAttendanceCountsApprovedLeaveAndOvertime verifies canonical
+// leave cases and approved overtime remain separate attendance facts.
 func TestWorkspaceAttendanceCountsDailyLeaveAndApprovedOvertime(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
-	// 本地核準請假與 eHRMS 每日事實合併，同一天取較完整的時數，避免重複累加。
-	_ = store.UpsertLeaveRequest(context.Background(), domain.LeaveRequest{ID: "lv-approved", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", StartAt: time.Date(2026, 6, 10, 0, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 12, 23, 0, 0, 0, time.UTC), Hours: 24, Status: "approved", CreatedAt: now})
-	_ = store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "sum-leave", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", LeaveType: "annual", LeaveHours: 4, LeaveCounted: true, Leave2Type: "personal", Leave2Hours: 4, Leave2Counted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-11", CreatedAt: now, UpdatedAt: now})
+	local := time.FixedZone("UTC+8", 8*60*60)
+	insertWorkspaceConfirmedLeaveCase(t, store, "case-approved", "emp-1", "annual", time.Date(2026, 6, 10, 9, 0, 0, 0, local), time.Date(2026, 6, 12, 17, 0, 0, 0, local), 1260)
 	// 只有 approved 加班會累計時數。
 	_ = store.UpsertOvertimeRequest(context.Background(), domain.OvertimeRequest{ID: "ot-approved", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-12", StartAt: time.Date(2026, 6, 12, 18, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 12, 21, 0, 0, 0, time.UTC), Hours: 3, OvertimeType: "weekday", CompensationType: "leave", Status: "approved", CreatedAt: now, UpdatedAt: now})
 	_ = store.UpsertOvertimeRequest(context.Background(), domain.OvertimeRequest{ID: "ot-pending", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-13", StartAt: time.Date(2026, 6, 13, 18, 0, 0, 0, time.UTC), EndAt: time.Date(2026, 6, 13, 20, 0, 0, 0, time.UTC), Hours: 2, OvertimeType: "weekday", CompensationType: "leave", Status: "pending_approval", CreatedAt: now, UpdatedAt: now})
@@ -1128,8 +1189,8 @@ func TestWorkspaceAttendanceCountsDailyLeaveAndApprovedOvertime(t *testing.T) {
 	if cell := row.Cells[9]; cell.Type != "leave" || cell.Hours != 7 {
 		t.Fatalf("approved local leave should create a leave cell, got %+v", cell)
 	}
-	if cell := row.Cells[10]; cell.Type != "leave" || cell.Hours != 8 {
-		t.Fatalf("two daily leave segments should create one exact 8-hour cell, got %+v", cell)
+	if cell := row.Cells[10]; cell.Type != "leave" || cell.Hours != 7 {
+		t.Fatalf("canonical leave case should create one seven-hour policy cell, got %+v", cell)
 	}
 	if cell := row.Cells[11]; cell.Overtime != 3 {
 		t.Fatalf("approved overtime should mark the day cell, got %+v", cell)
@@ -1137,7 +1198,7 @@ func TestWorkspaceAttendanceCountsDailyLeaveAndApprovedOvertime(t *testing.T) {
 	if cell := row.Cells[12]; cell.Overtime != 0 {
 		t.Fatalf("pending overtime should not mark the day cell, got %+v", cell)
 	}
-	if row.Summary.LeaveHours != 22 || row.Summary.OvertimeHours != 3 {
+	if row.Summary.LeaveHours != 21 || row.Summary.OvertimeHours != 3 {
 		t.Fatalf("unexpected summary hours: %+v", row.Summary)
 	}
 	if row.Summary.AttendedHours != 0 {
@@ -1153,8 +1214,9 @@ func TestWorkspaceClockShortHoursExemptedByDailyLeave(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
-	// 半天假勤 + 半天出勤：工時不足由同日每日假勤補足，不應標記異常。
-	_ = store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "sum-half", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", LeaveType: "annual", LeaveHours: 4, LeaveCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-10", CreatedAt: now, UpdatedAt: now})
+	// 半天覈準 case + 半天出勤：工時不足由同日請假補足，不應標記異常。
+	local := time.FixedZone("UTC+8", 8*60*60)
+	insertWorkspaceConfirmedLeaveCase(t, store, "case-short-hours", "emp-1", "annual", time.Date(2026, 6, 10, 9, 0, 0, 0, local), time.Date(2026, 6, 10, 14, 0, 0, 0, local), 240)
 	_ = store.UpsertAttendanceClockRecord(context.Background(), domain.AttendanceClockRecord{ID: "clk-in", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_in", ClockedAt: time.Date(2026, 6, 10, 13, 0, 0, 0, time.UTC), RecordStatus: "accepted", Source: "geofence", CreatedAt: now})
 	_ = store.UpsertAttendanceClockRecord(context.Background(), domain.AttendanceClockRecord{ID: "clk-out", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", Direction: "clock_out", ClockedAt: time.Date(2026, 6, 10, 18, 0, 0, 0, time.UTC), RecordStatus: "accepted", Source: "geofence", CreatedAt: now})
 
@@ -1427,6 +1489,38 @@ func insertWorkspaceEmployee(t *testing.T, store *memory.Store, employee domain.
 		employee.UpdatedAt = employee.CreatedAt
 	}
 	if err := store.UpsertEmployee(context.Background(), employee); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func insertWorkspaceConfirmedLeaveCase(t *testing.T, store *memory.Store, id, employeeID, leaveTypeCode string, startAt, endAt time.Time, netMinutes int) {
+	t.Helper()
+	leaveTypes, err := store.ListLeaveTypes(context.Background(), "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	leaveTypeID := ""
+	for _, leaveType := range leaveTypes {
+		if leaveType.Code == leaveTypeCode {
+			leaveTypeID = leaveType.ID
+			break
+		}
+	}
+	if leaveTypeID == "" {
+		t.Fatalf("leave type %q missing from fixture", leaveTypeCode)
+	}
+	createdAt := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
+	if err := store.UpsertLeaveCase(context.Background(), domain.LeaveCase{
+		ID: id, TenantID: "tenant-1", EmployeeID: employeeID, LeaveTypeID: leaveTypeID,
+		StartAt: startAt, EndAt: endAt, NetMinutes: netMinutes, Status: "active", Origin: "nexus",
+		CreatedAt: createdAt, UpdatedAt: createdAt,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertLeaveCaseSource(context.Background(), domain.LeaveCaseSource{
+		TenantID: "tenant-1", LeaveCaseID: id, LeaveRequestID: "request-" + id,
+		MatchMethod: "exact", MatchStatus: "confirmed", CreatedAt: createdAt,
+	}); err != nil {
 		t.Fatal(err)
 	}
 }

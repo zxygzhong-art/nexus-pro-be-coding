@@ -2,11 +2,14 @@ package agent
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"net/url"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 	"unicode/utf8"
 
 	"nexus-pro-api/internal/domain"
@@ -37,21 +40,22 @@ func (c AgentService) CreateModel(ctx RequestContext, input domain.CreateAgentMo
 	}
 	now := c.Now()
 	model, err := c.normalizeAgentModel(ctx, domain.AgentModel{
-		ID:             utils.NewID("amodel"),
-		TenantID:       ctx.TenantID,
-		Name:           input.Name,
-		Provider:       input.Provider,
-		ModelName:      input.ModelName,
-		APIBaseURL:     input.APIBaseURL,
-		APIKey:         input.APIKey,
-		RateLimitRPM:   input.RateLimitRPM,
-		Status:         domain.AgentModelStatus(input.Status),
-		TimeoutSeconds: input.TimeoutSeconds,
-		MonthlyQuota:   input.MonthlyQuota,
-		LastTestStatus: "untested",
-		SyncStatus:     domain.AgentModelSyncStatusPending,
-		CreatedAt:      now,
-		UpdatedAt:      now,
+		ID:                 utils.NewID("amodel"),
+		TenantID:           ctx.TenantID,
+		CredentialSecretID: utils.NewID("cred"),
+		Name:               input.Name,
+		Provider:           input.Provider,
+		ModelName:          input.ModelName,
+		APIBaseURL:         input.APIBaseURL,
+		APIKey:             input.APIKey,
+		RateLimitRPM:       input.RateLimitRPM,
+		Status:             domain.AgentModelStatus(input.Status),
+		TimeoutSeconds:     input.TimeoutSeconds,
+		MonthlyQuota:       input.MonthlyQuota,
+		LastTestStatus:     "untested",
+		SyncStatus:         domain.AgentModelSyncStatusPending,
+		CreatedAt:          now,
+		UpdatedAt:          now,
 	})
 	if err != nil {
 		return domain.AgentModel{}, err
@@ -358,6 +362,7 @@ func (c AgentService) CreateDefinition(ctx RequestContext, input domain.CreateAg
 		SuggestedQuestions:            input.SuggestedQuestions,
 		SuggestedQuestionTranslations: input.SuggestedQuestionTranslations,
 		Tools:                         input.Tools,
+		ExternalToolIDs:               input.ExternalToolIDs,
 		KnowledgeBaseIDs:              input.KnowledgeBaseIDs,
 		Status:                        domain.AgentDefinitionStatusDraft,
 		Visibility:                    domain.AgentVisibility(input.Visibility),
@@ -372,6 +377,7 @@ func (c AgentService) CreateDefinition(ctx RequestContext, input domain.CreateAg
 	if err != nil {
 		return domain.AgentDefinition{}, err
 	}
+	agent.DraftRevisionID = agentDefinitionRevisionID(agent.ID, agent.Version)
 	if err := c.withTransaction(ctx, func(tx AgentService) error {
 		if err := tx.store.UpsertAgentDefinition(goContext(ctx), agent); err != nil {
 			return err
@@ -437,6 +443,9 @@ func (c AgentService) UpdateDefinition(ctx RequestContext, id string, input doma
 	if input.Tools != nil {
 		agent.Tools = input.Tools
 	}
+	if input.ExternalToolIDs != nil {
+		agent.ExternalToolIDs = input.ExternalToolIDs
+	}
 	if input.KnowledgeBaseIDs != nil {
 		agent.KnowledgeBaseIDs = input.KnowledgeBaseIDs
 	}
@@ -458,6 +467,7 @@ func (c AgentService) UpdateDefinition(ctx RequestContext, id string, input doma
 	versionChanged := beforeRuntimeConfig != agentDefinitionRuntimeSignature(agent)
 	if versionChanged {
 		agent.Version++
+		agent.DraftRevisionID = agentDefinitionRevisionID(agent.ID, agent.Version)
 	}
 	note := strings.TrimSpace(input.VersionNote)
 	if note == "" {
@@ -501,6 +511,10 @@ func (c AgentService) transitionDefinitionPublishStatus(ctx RequestContext, id s
 	agent.Status = status
 	if status == domain.AgentDefinitionStatusPublished {
 		agent.PublishedVersion = agent.Version
+		agent.PublishedRevisionID = agent.DraftRevisionID
+	} else {
+		agent.PublishedVersion = 0
+		agent.PublishedRevisionID = ""
 	}
 	agent.UpdatedByAccountID = account.ID
 	agent.UpdatedAt = c.Now()
@@ -532,7 +546,7 @@ func (c AgentService) DeleteDefinition(ctx RequestContext, id string) (domain.Ag
 		if err != nil {
 			return err
 		}
-		if agent.Status == domain.AgentDefinitionStatusPublished {
+		if agent.PublishedRevisionID != "" || agent.Status == domain.AgentDefinitionStatusPublished {
 			return Conflict("published agent definition must be unpublished before deletion").WithReasonCode("agent_definition_published")
 		}
 		agent, ok, err := tx.store.DeleteAgentDefinition(goContext(ctx), ctx.TenantID, id)
@@ -688,16 +702,25 @@ func (c AgentService) RollbackDefinition(ctx RequestContext, id string, input do
 	if !ok {
 		return domain.AgentDefinition{}, NotFound("agent definition version", fmt.Sprintf("%s:%d", id, input.Version))
 	}
+	agent.Name = version.Name
+	agent.Description = version.Description
+	agent.Emoji = version.Emoji
+	agent.Category = version.Category
+	agent.Visibility = version.Visibility
+	agent.VisibilityTargets = version.VisibilityTargets
 	agent.SystemPrompt = version.SystemPrompt
 	agent.WelcomeMessage = version.WelcomeMessage
 	agent.SuggestedQuestions = version.SuggestedQuestions
 	agent.SuggestedQuestionTranslations = version.SuggestedQuestionTranslations
 	agent.Tools = version.Tools
+	agent.ExternalToolIDs = version.ExternalToolIDs
 	agent.KnowledgeBaseIDs = version.KnowledgeBaseIDs
 	agent.ModelID = version.ModelID
+	agent.TimeoutSeconds = version.TimeoutSeconds
 	agent.MainAgentRole = version.MainAgentRole
 	agent.SubAgents = version.SubAgents
 	agent.Version++
+	agent.DraftRevisionID = agentDefinitionRevisionID(agent.ID, agent.Version)
 	agent.UpdatedByAccountID = account.ID
 	agent.UpdatedAt = c.Now()
 	agent, err = c.normalizeAgentDefinition(ctx, agent)
@@ -735,7 +758,7 @@ func (c AgentService) ListExternalTools(ctx RequestContext) ([]domain.AgentExter
 	return c.store.ListAgentExternalTools(goContext(ctx), ctx.TenantID)
 }
 
-// CreateExternalTool registers connection metadata without enabling runtime calls.
+// CreateExternalTool registers an MCP connection or one manually described HTTP capability.
 func (c AgentService) CreateExternalTool(ctx RequestContext, input domain.CreateAgentExternalToolInput) (domain.AgentExternalTool, error) {
 	account, _, err := c.requireAgentAuthz(ctx, ResourceTool, ActionCreate, "")
 	if err != nil {
@@ -771,14 +794,23 @@ func (c AgentService) CreateExternalTool(ctx RequestContext, input domain.Create
 	if err != nil {
 		return domain.AgentExternalTool{}, err
 	}
+	timeoutSeconds := input.TimeoutSeconds
+	if timeoutSeconds == 0 {
+		timeoutSeconds = int(externalToolDefaultTimeout / time.Second)
+	}
+	if timeoutSeconds < 1 || timeoutSeconds > 120 {
+		return domain.AgentExternalTool{}, BadRequest("timeout_seconds must be between 1 and 120")
+	}
 	now := c.Now()
 	id := utils.NewID("atool")
 	credentialCiphertext := ""
+	credentialSecretID := ""
 	if auth.secret != "" {
 		if c.CredentialCipher() == nil {
 			return domain.AgentExternalTool{}, domain.E(503, "service_unavailable", "external tool credential storage is not configured")
 		}
-		credentialCiphertext, err = c.CredentialCipher().Encrypt([]byte(auth.secret), externalToolCredentialAAD(ctx.TenantID, id))
+		credentialSecretID = id + ":credential"
+		credentialCiphertext, err = c.CredentialCipher().Encrypt([]byte(auth.secret), domain.CredentialSecretAAD(ctx.TenantID, credentialSecretID))
 		if err != nil {
 			return domain.AgentExternalTool{}, domain.E(500, "internal_error", "failed to protect external tool credential")
 		}
@@ -794,14 +826,35 @@ func (c AgentService) CreateExternalTool(ctx RequestContext, input domain.Create
 		AuthType:             auth.authType,
 		AuthHeaderName:       auth.headerName,
 		AuthUsername:         auth.username,
+		TimeoutSeconds:       timeoutSeconds,
 		AuthSecretCiphertext: credentialCiphertext,
+		CredentialSecretID:   credentialSecretID,
 		CredentialSet:        credentialCiphertext != "",
+		Status:               string(domain.ExternalToolConnectionStatusActive),
+		LastTestStatus:       string(domain.ConnectionTestStatusUntested),
 		CreatedByAccountID:   account.ID,
 		CreatedAt:            now,
+		UpdatedAt:            now,
+	}
+	if kind == "http" {
+		capability, capabilityErr := manualHTTPExternalToolCapability(item, input, now)
+		if capabilityErr != nil {
+			return domain.AgentExternalTool{}, capabilityErr
+		}
+		item.Capabilities = []domain.ExternalToolCapability{capability}
 	}
 	if err := c.withTransaction(ctx, func(tx AgentService) error {
 		if err := tx.store.InsertAgentExternalTool(goContext(ctx), item); err != nil {
 			return err
+		}
+		if len(item.Capabilities) > 0 {
+			store, err := tx.externalToolLifecycleStore()
+			if err != nil {
+				return err
+			}
+			if err := store.ReplaceAgentExternalToolCapabilities(goContext(ctx), ctx.TenantID, item.ID, item.Capabilities); err != nil {
+				return err
+			}
 		}
 		return tx.recordAgentAdminAudit(ctx, account, "external_tool", item.ID, item.Name, "create", "external tool registered")
 	}); err != nil {
@@ -810,7 +863,7 @@ func (c AgentService) CreateExternalTool(ctx RequestContext, input domain.Create
 	return item, nil
 }
 
-// DeleteExternalTool removes external tool metadata from the current tenant.
+// DeleteExternalTool archives external tool metadata while preserving revision and execution audit references.
 func (c AgentService) DeleteExternalTool(ctx RequestContext, id string) (domain.AgentExternalTool, error) {
 	account, _, err := c.requireAgentAuthz(ctx, ResourceTool, ActionDelete, id)
 	if err != nil {
@@ -829,7 +882,7 @@ func (c AgentService) DeleteExternalTool(ctx RequestContext, id string) (domain.
 		if !ok {
 			return NotFound("agent external tool", id)
 		}
-		if err := tx.recordAgentAdminAudit(ctx, account, "external_tool", item.ID, item.Name, "delete", "external tool deleted"); err != nil {
+		if err := tx.recordAgentAdminAudit(ctx, account, "external_tool", item.ID, item.Name, "archive", "external tool archived"); err != nil {
 			return err
 		}
 		deleted = item
@@ -938,11 +991,6 @@ func validHTTPHeaderName(value string) bool {
 	return true
 }
 
-// externalToolCredentialAAD binds ciphertext to one tenant and tool identifier.
-func externalToolCredentialAAD(tenantID, toolID string) []byte {
-	return []byte(tenantID + "\x00" + toolID)
-}
-
 // normalizeExternalToolEndpoint accepts explicit HTTP(S) endpoints and rejects embedded credentials.
 func normalizeExternalToolEndpoint(value string) (string, error) {
 	raw := strings.TrimSpace(value)
@@ -973,7 +1021,7 @@ func (c AgentService) currentAgentModel(ctx RequestContext, id string) (domain.A
 		if c.CredentialCipher() == nil {
 			return domain.AgentModel{}, domain.E(503, "service_unavailable", "agent model credential storage is not configured")
 		}
-		plaintext, err := c.CredentialCipher().Decrypt(model.APIKeyCiphertext, domain.AgentModelCredentialAAD(model.TenantID, model.ID))
+		plaintext, err := c.CredentialCipher().Decrypt(model.APIKeyCiphertext, agentModelCredentialAAD(model))
 		if err != nil {
 			return domain.AgentModel{}, domain.E(500, "internal_error", "failed to open agent model credential")
 		}
@@ -990,7 +1038,10 @@ func (c AgentService) protectAgentModelCredential(model domain.AgentModel) (doma
 	if c.CredentialCipher() == nil {
 		return domain.AgentModel{}, domain.E(503, "service_unavailable", "agent model credential storage is not configured")
 	}
-	ciphertext, err := c.CredentialCipher().Encrypt([]byte(model.APIKey), domain.AgentModelCredentialAAD(model.TenantID, model.ID))
+	if strings.TrimSpace(model.CredentialSecretID) == "" {
+		model.CredentialSecretID = utils.NewID("cred")
+	}
+	ciphertext, err := c.CredentialCipher().Encrypt([]byte(model.APIKey), domain.CredentialSecretAAD(model.TenantID, model.CredentialSecretID))
 	if err != nil {
 		return domain.AgentModel{}, domain.E(500, "internal_error", "failed to protect agent model credential")
 	}
@@ -999,6 +1050,13 @@ func (c AgentService) protectAgentModelCredential(model domain.AgentModel) (doma
 	model.APIKeySet = true
 	model.APIKey = ""
 	return model, nil
+}
+
+func agentModelCredentialAAD(model domain.AgentModel) []byte {
+	if strings.TrimSpace(model.CredentialSecretID) != "" {
+		return domain.CredentialSecretAAD(model.TenantID, model.CredentialSecretID)
+	}
+	return domain.AgentModelCredentialAAD(model.TenantID, model.ID)
 }
 
 func (c AgentService) currentAgentDefinition(ctx RequestContext, id string) (domain.AgentDefinition, error) {
@@ -1176,6 +1234,10 @@ func (c AgentService) normalizeAgentDefinition(ctx RequestContext, agent domain.
 	if err := validateAgentTools(agent.Tools); err != nil {
 		return domain.AgentDefinition{}, err
 	}
+	agent.ExternalToolIDs = uniqueStrings(agent.ExternalToolIDs)
+	if err := c.validateExternalToolReferences(ctx, agent.ExternalToolIDs); err != nil {
+		return domain.AgentDefinition{}, err
+	}
 	agent.KnowledgeBaseIDs = uniqueStrings(agent.KnowledgeBaseIDs)
 	if err := c.validateKnowledgeBaseReferences(ctx, agent.KnowledgeBaseIDs); err != nil {
 		return domain.AgentDefinition{}, err
@@ -1208,6 +1270,10 @@ func (c AgentService) normalizeAgentDefinition(ctx RequestContext, agent domain.
 		}
 		member.Tools = uniqueStrings(member.Tools)
 		if err := validateAgentTools(member.Tools); err != nil {
+			return domain.AgentDefinition{}, err
+		}
+		member.ExternalToolIDs = uniqueStrings(member.ExternalToolIDs)
+		if err := c.validateExternalToolReferences(ctx, member.ExternalToolIDs); err != nil {
 			return domain.AgentDefinition{}, err
 		}
 		member.KnowledgeBaseIDs = uniqueStrings(member.KnowledgeBaseIDs)
@@ -1394,30 +1460,107 @@ func validateAgentTools(tools []string) error {
 	return nil
 }
 
+func (c AgentService) validateExternalToolReferences(ctx RequestContext, capabilityIDs []string) error {
+	if len(capabilityIDs) == 0 {
+		return nil
+	}
+	if len(capabilityIDs) > 32 {
+		return BadRequest("external_tool_ids supports at most 32 capabilities")
+	}
+	connections, err := c.store.ListAgentExternalTools(goContext(ctx), ctx.TenantID)
+	if err != nil {
+		return err
+	}
+	available := make(map[string]struct{})
+	for _, connection := range connections {
+		if connection.Status != string(domain.ExternalToolConnectionStatusActive) || connection.ArchivedAt != nil {
+			continue
+		}
+		for _, capability := range connection.Capabilities {
+			if capability.Enabled && capability.ArchivedAt == nil {
+				available[capability.ID] = struct{}{}
+			}
+		}
+	}
+	for _, capabilityID := range capabilityIDs {
+		if _, ok := available[capabilityID]; !ok {
+			return BadRequest("external tool capability is unavailable: " + capabilityID)
+		}
+	}
+	return nil
+}
+
 func (c AgentService) snapshotAgentDefinition(ctx RequestContext, agent domain.AgentDefinition, actorID, note string) error {
+	revisionID := strings.TrimSpace(agent.DraftRevisionID)
+	if revisionID == "" {
+		revisionID = agentDefinitionRevisionID(agent.ID, agent.Version)
+	}
+	model, err := c.currentAgentModel(ctx, agent.ModelID)
+	if err != nil {
+		return err
+	}
+	modelChecksum := domain.AgentModelSyncConfigHash(model)
+	revisionMembers := append([]domain.AgentTeamMember(nil), agent.SubAgents...)
+	for index := range revisionMembers {
+		memberModel, memberErr := c.currentAgentModel(ctx, revisionMembers[index].ModelID)
+		if memberErr != nil {
+			return memberErr
+		}
+		revisionMembers[index].ModelConfigChecksum = domain.AgentModelSyncConfigHash(memberModel)
+	}
+	signatureAgent := agent
+	signatureAgent.SubAgents = revisionMembers
+	contentChecksum := fmt.Sprintf("%x", sha256.Sum256([]byte(agentDefinitionRuntimeSignature(signatureAgent)+"\x00"+modelChecksum)))
 	return c.store.InsertAgentDefinitionVersion(goContext(ctx), domain.AgentDefinitionVersion{
-		ID:                            utils.NewID("adefv"),
+		ID:                            revisionID,
 		TenantID:                      ctx.TenantID,
 		AgentID:                       agent.ID,
 		Version:                       agent.Version,
+		Name:                          agent.Name,
+		Description:                   agent.Description,
+		Emoji:                         agent.Emoji,
+		Category:                      agent.Category,
+		Visibility:                    agent.Visibility,
+		VisibilityTargets:             agent.VisibilityTargets,
 		MainAgentRole:                 agent.MainAgentRole,
-		SubAgents:                     agent.SubAgents,
+		SubAgents:                     revisionMembers,
 		SystemPrompt:                  agent.SystemPrompt,
 		WelcomeMessage:                agent.WelcomeMessage,
 		SuggestedQuestions:            agent.SuggestedQuestions,
 		SuggestedQuestionTranslations: agent.SuggestedQuestionTranslations,
 		Tools:                         agent.Tools,
+		ExternalToolIDs:               agent.ExternalToolIDs,
 		KnowledgeBaseIDs:              agent.KnowledgeBaseIDs,
 		ModelID:                       agent.ModelID,
+		ModelConfigChecksum:           modelChecksum,
+		TimeoutSeconds:                agent.TimeoutSeconds,
+		ConfigSchemaVersion:           1,
+		Checksum:                      contentChecksum,
 		Note:                          note,
 		CreatedByAccountID:            actorID,
 		CreatedAt:                     c.Now(),
 	})
 }
 
+// agentDefinitionRevisionID matches the immutable identity written by the
+// compatibility aggregate query, preventing a second insert for the same
+// (agent, revision number) under a different primary key.
+func agentDefinitionRevisionID(agentID string, version int) string {
+	if version < 1 {
+		version = 1
+	}
+	return strings.TrimSpace(agentID) + ":revision:" + strconv.Itoa(version)
+}
+
 // agentDefinitionRuntimeSignature 生成會影響真實執行的穩定配置簽名。
 func agentDefinitionRuntimeSignature(agent domain.AgentDefinition) string {
 	payload := struct {
+		Name                          string                                   `json:"name"`
+		Description                   string                                   `json:"description"`
+		Emoji                         string                                   `json:"emoji"`
+		Category                      domain.AgentCategory                     `json:"category"`
+		Visibility                    domain.AgentVisibility                   `json:"visibility"`
+		VisibilityTargets             []string                                 `json:"visibility_targets"`
 		MainAgentRole                 string                                   `json:"main_agent_role"`
 		SubAgents                     []domain.AgentTeamMember                 `json:"sub_agents"`
 		SystemPrompt                  string                                   `json:"system_prompt"`
@@ -1425,9 +1568,17 @@ func agentDefinitionRuntimeSignature(agent domain.AgentDefinition) string {
 		SuggestedQuestions            []string                                 `json:"suggested_questions"`
 		SuggestedQuestionTranslations []domain.LocalizedAgentSuggestedQuestion `json:"suggested_question_translations"`
 		Tools                         []string                                 `json:"tools"`
+		ExternalToolIDs               []string                                 `json:"external_tool_ids"`
 		KnowledgeBaseIDs              []string                                 `json:"knowledge_base_ids"`
 		ModelID                       string                                   `json:"model_id"`
+		TimeoutSeconds                int                                      `json:"timeout_seconds"`
 	}{
+		Name:                          agent.Name,
+		Description:                   agent.Description,
+		Emoji:                         agent.Emoji,
+		Category:                      agent.Category,
+		Visibility:                    agent.Visibility,
+		VisibilityTargets:             agent.VisibilityTargets,
 		MainAgentRole:                 agent.MainAgentRole,
 		SubAgents:                     agent.SubAgents,
 		SystemPrompt:                  agent.SystemPrompt,
@@ -1435,8 +1586,10 @@ func agentDefinitionRuntimeSignature(agent domain.AgentDefinition) string {
 		SuggestedQuestions:            agent.SuggestedQuestions,
 		SuggestedQuestionTranslations: agent.SuggestedQuestionTranslations,
 		Tools:                         agent.Tools,
+		ExternalToolIDs:               agent.ExternalToolIDs,
 		KnowledgeBaseIDs:              agent.KnowledgeBaseIDs,
 		ModelID:                       agent.ModelID,
+		TimeoutSeconds:                agent.TimeoutSeconds,
 	}
 	encoded, _ := json.Marshal(payload)
 	return string(encoded)

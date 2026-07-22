@@ -140,13 +140,61 @@ func (c WorkflowService) actOnWorkflowStage(ctx RequestContext, formInstanceID, 
 			return current, nil
 		}
 	}
-	instance, run, stageInstance, stages, assignees, err := c.loadActiveWorkflowStageForAssignee(ctx, formInstanceID)
-	if err != nil {
-		return domain.FormInstance{}, err
+	stageInstanceID := strings.TrimSpace(latestRun.CurrentStageInstanceID)
+	if stageInstanceID == "" {
+		return domain.FormInstance{}, Conflict("form instance has no active workflow stage").WithReasonCode("workflow_stage_unavailable")
 	}
-	stageDefinition := workflowStageByID(stages, stageInstance.StageID)
 	now := c.Now()
 	err = c.withTransaction(ctx, func(tx WorkflowService) error {
+		// Every decision on a stage serializes on the same row. After acquiring
+		// the lock, reload all mutable workflow state so an earlier decision can
+		// never be replayed from the stale pre-transaction snapshot.
+		stageInstance, ok, err := tx.store.GetWorkflowStageInstanceForUpdate(goContext(ctx), ctx.TenantID, stageInstanceID)
+		if err != nil {
+			return err
+		}
+		if key := strings.TrimSpace(ctx.IdempotencyKey); key != "" {
+			fingerprint := workflowCommandFingerprint(latestRun.ID, ctx.AccountID, action, comment)
+			existing, found, lookupErr := tx.store.GetWorkflowActionByIdempotencyKey(goContext(ctx), ctx.TenantID, latestRun.ID, key)
+			if lookupErr != nil {
+				return lookupErr
+			}
+			if found {
+				if existing.CommandFingerprint != fingerprint {
+					return Conflict("idempotency key was already used for a different workflow command").WithReasonCode("idempotency_key_reused")
+				}
+				return nil
+			}
+		}
+		if !ok || stageInstance.Status != domain.WorkflowStageStatusActive {
+			return Conflict("workflow stage is no longer active").WithReasonCode("workflow_stage_unavailable")
+		}
+		run, ok, err := tx.store.GetWorkflowRun(goContext(ctx), ctx.TenantID, latestRun.ID)
+		if err != nil {
+			return err
+		}
+		if !ok || run.Status != domain.WorkflowRunStatusRunning || run.CurrentStageInstanceID != stageInstance.ID {
+			return Conflict("workflow stage is no longer current").WithReasonCode("workflow_stage_unavailable")
+		}
+		instance, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, formInstanceID)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("form instance", formInstanceID)
+		}
+		if instance.CurrentRunID != run.ID {
+			return Conflict("workflow run is no longer current").WithReasonCode("workflow_stage_unavailable")
+		}
+		stages := DeserializeWorkflowStages(run.StageDefinitionsJSON)
+		stageDefinition := workflowStageByID(stages, stageInstance.StageID)
+		assignees, err := tx.store.ListWorkflowStageAssignees(goContext(ctx), ctx.TenantID, stageInstance.ID)
+		if err != nil {
+			return err
+		}
+		if !workflowAssigneeCanAct(assignees, ctx.AccountID) {
+			return Forbidden("current account is not an active assignee for this stage").WithReasonCode("workflow_not_assignee")
+		}
 		if err := tx.validateWorkflowActorEligibility(ctx, instance, run, stageDefinition, action); err != nil {
 			return err
 		}

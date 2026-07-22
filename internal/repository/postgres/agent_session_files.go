@@ -51,7 +51,7 @@ func (s *Store) ListAgentFileChunks(execCtx context.Context, tenantID, fileID st
 // InsertAgentSessionFile stages a file inside the session's current context version.
 func (s *Store) InsertAgentSessionFile(execCtx context.Context, file domain.AgentSessionFile) error {
 	_, err := s.q.InsertAgentSessionFile(tenantContext(execCtx, file.TenantID), sqlc.InsertAgentSessionFileParams{
-		TenantID: file.TenantID, SessionID: file.SessionID, FileID: file.ID, ContextVersion: file.ContextVersion,
+		TenantID: file.TenantID, SessionID: file.SessionID, FileID: file.ID, ConversationFileID: file.ConversationFileID, ContextVersion: file.ContextVersion,
 		State: file.State, CreatedAt: timestamptz(file.CreatedAt), UpdatedAt: timestamptz(file.UpdatedAt),
 	})
 	return err
@@ -112,7 +112,10 @@ func (s *Store) ListCurrentAgentMessageAttachments(execCtx context.Context, tena
 	}
 	out := make([]domain.AgentMessageAttachment, 0, len(items))
 	for _, item := range items {
-		out = append(out, domain.AgentMessageAttachment{MessageID: item.MessageID, Ordinal: int(item.Ordinal), File: agentSessionFileFromAttachmentRow(item)})
+		out = append(out, domain.AgentMessageAttachment{
+			MessageID: item.MessageID, ConversationFileID: item.ConversationFileID,
+			Ordinal: int(item.Ordinal), File: agentSessionFileFromAttachmentRow(item),
+		})
 	}
 	return out, nil
 }
@@ -135,7 +138,7 @@ func (s *Store) DeleteAgentFileAsset(execCtx context.Context, tenantID, fileID s
 
 func agentSessionFileFromRow(item sqlc.GetCurrentAgentSessionFileRow) domain.AgentSessionFile {
 	return domain.AgentSessionFile{
-		ID: item.ID, TenantID: item.TenantID, SessionID: item.SessionID, ContextVersion: item.ContextVersion,
+		ID: item.ID, TenantID: item.TenantID, SessionID: item.SessionID, SegmentID: item.SegmentID, ConversationFileID: item.ConversationFileID, ContextVersion: item.ContextVersion,
 		CreatedByAccountID: item.CreatedByAccountID, OriginalFilename: item.OriginalFilename,
 		ObjectProvider: item.ObjectProvider, ObjectBucket: item.ObjectBucket, ObjectKey: item.ObjectKey,
 		ContentType: item.ContentType, SizeBytes: item.SizeBytes, SHA256: item.Sha256,
@@ -146,7 +149,7 @@ func agentSessionFileFromRow(item sqlc.GetCurrentAgentSessionFileRow) domain.Age
 
 func agentSessionFileFromListRow(item sqlc.ListCurrentAgentSessionFilesRow) domain.AgentSessionFile {
 	return domain.AgentSessionFile{
-		ID: item.ID, TenantID: item.TenantID, SessionID: item.SessionID, ContextVersion: item.ContextVersion,
+		ID: item.ID, TenantID: item.TenantID, SessionID: item.SessionID, SegmentID: item.SegmentID, ConversationFileID: item.ConversationFileID, ContextVersion: item.ContextVersion,
 		CreatedByAccountID: item.CreatedByAccountID, OriginalFilename: item.OriginalFilename,
 		ObjectProvider: item.ObjectProvider, ObjectBucket: item.ObjectBucket, ObjectKey: item.ObjectKey,
 		ContentType: item.ContentType, SizeBytes: item.SizeBytes, SHA256: item.Sha256,
@@ -157,7 +160,7 @@ func agentSessionFileFromListRow(item sqlc.ListCurrentAgentSessionFilesRow) doma
 
 func agentSessionFileFromAttachmentRow(item sqlc.ListCurrentAgentMessageAttachmentsRow) domain.AgentSessionFile {
 	return domain.AgentSessionFile{
-		ID: item.ID, TenantID: item.TenantID, SessionID: item.SessionID, ContextVersion: item.ContextVersion,
+		ID: item.ID, TenantID: item.TenantID, SessionID: item.SessionID, SegmentID: item.SegmentID, ConversationFileID: item.ConversationFileID, ContextVersion: item.ContextVersion,
 		CreatedByAccountID: item.CreatedByAccountID, OriginalFilename: item.OriginalFilename,
 		ObjectProvider: item.ObjectProvider, ObjectBucket: item.ObjectBucket, ObjectKey: item.ObjectKey,
 		ContentType: item.ContentType, SizeBytes: item.SizeBytes, SHA256: item.Sha256,

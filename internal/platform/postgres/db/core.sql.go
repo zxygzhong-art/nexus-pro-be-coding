@@ -159,49 +159,59 @@ func (q *Queries) AppendAuditLog(ctx context.Context, arg AppendAuditLogParams) 
 
 const appendLeaveBalanceEntry = `-- name: AppendLeaveBalanceEntry :one
 INSERT INTO leave_balance_entries (
-    id, tenant_id, employee_id, leave_type_id, balance_id, leave_request_id,
-    leave_case_id, entry_type, amount_minutes, idempotency_key, metadata,
+    id, tenant_id, employee_id, leave_type_id, balance_id, allocation_id,
+    leave_request_id, leave_case_id, overtime_request_id,
+    entry_type, amount_minutes, idempotency_key, metadata,
     occurred_at, created_at
-) VALUES (
-    $1, $2, $3, $4, $5, $6,
-    $7, $8, $9, $10, $11::jsonb,
-    $12, $13
-)
+) SELECT
+    $1, balance.tenant_id, balance.employee_id, balance.leave_type_id, balance.id,
+    allocation.id, $2, $3, $4,
+    $5, $6, $7, $8::jsonb,
+    $9, $10
+FROM leave_balances balance
+LEFT JOIN leave_request_allocations allocation
+ ON allocation.tenant_id = balance.tenant_id
+ AND allocation.leave_balance_id = balance.id
+ AND allocation.leave_request_id = $2
+ AND allocation.id = $11::bigint
+WHERE balance.tenant_id = $12
+  AND balance.id = $13
+  AND ($2::text IS NULL OR allocation.id IS NOT NULL)
 ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
-RETURNING id, tenant_id, employee_id, leave_type_id, balance_id, leave_request_id, leave_case_id, entry_type, amount_minutes, idempotency_key, metadata, occurred_at, created_at
+RETURNING id, tenant_id, employee_id, leave_type_id, balance_id, allocation_id, leave_request_id, leave_case_id, overtime_request_id, entry_type, amount_minutes, idempotency_key, metadata, occurred_at, created_at
 `
 
 type AppendLeaveBalanceEntryParams struct {
-	ID             string             `json:"id"`
-	TenantID       string             `json:"tenant_id"`
-	EmployeeID     string             `json:"employee_id"`
-	LeaveTypeID    string             `json:"leave_type_id"`
-	BalanceID      string             `json:"balance_id"`
-	LeaveRequestID pgtype.Text        `json:"leave_request_id"`
-	LeaveCaseID    pgtype.Text        `json:"leave_case_id"`
-	EntryType      string             `json:"entry_type"`
-	AmountMinutes  int32              `json:"amount_minutes"`
-	IdempotencyKey string             `json:"idempotency_key"`
-	Metadata       []byte             `json:"metadata"`
-	OccurredAt     pgtype.Timestamptz `json:"occurred_at"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	ID                string             `json:"id"`
+	LeaveRequestID    pgtype.Text        `json:"leave_request_id"`
+	LeaveCaseID       pgtype.Text        `json:"leave_case_id"`
+	OvertimeRequestID pgtype.Text        `json:"overtime_request_id"`
+	EntryType         string             `json:"entry_type"`
+	AmountMinutes     int32              `json:"amount_minutes"`
+	IdempotencyKey    string             `json:"idempotency_key"`
+	Metadata          []byte             `json:"metadata"`
+	OccurredAt        pgtype.Timestamptz `json:"occurred_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	AllocationID      pgtype.Int8        `json:"allocation_id"`
+	TenantID          string             `json:"tenant_id"`
+	BalanceID         string             `json:"balance_id"`
 }
 
 func (q *Queries) AppendLeaveBalanceEntry(ctx context.Context, arg AppendLeaveBalanceEntryParams) (LeaveBalanceEntry, error) {
 	row := q.db.QueryRow(ctx, appendLeaveBalanceEntry,
 		arg.ID,
-		arg.TenantID,
-		arg.EmployeeID,
-		arg.LeaveTypeID,
-		arg.BalanceID,
 		arg.LeaveRequestID,
 		arg.LeaveCaseID,
+		arg.OvertimeRequestID,
 		arg.EntryType,
 		arg.AmountMinutes,
 		arg.IdempotencyKey,
 		arg.Metadata,
 		arg.OccurredAt,
 		arg.CreatedAt,
+		arg.AllocationID,
+		arg.TenantID,
+		arg.BalanceID,
 	)
 	var i LeaveBalanceEntry
 	err := row.Scan(
@@ -210,8 +220,10 @@ func (q *Queries) AppendLeaveBalanceEntry(ctx context.Context, arg AppendLeaveBa
 		&i.EmployeeID,
 		&i.LeaveTypeID,
 		&i.BalanceID,
+		&i.AllocationID,
 		&i.LeaveRequestID,
 		&i.LeaveCaseID,
+		&i.OvertimeRequestID,
 		&i.EntryType,
 		&i.AmountMinutes,
 		&i.IdempotencyKey,
@@ -322,6 +334,121 @@ func (q *Queries) AppendOutboxEvent(ctx context.Context, arg AppendOutboxEventPa
 		&i.UpdatedAt,
 		&i.ProcessedAt,
 		&i.DeadLetteredAt,
+	)
+	return i, err
+}
+
+const appendStandaloneLeaveBalanceEntry = `-- name: AppendStandaloneLeaveBalanceEntry :one
+INSERT INTO leave_balance_entries (
+    id, tenant_id, employee_id, leave_type_id, balance_id,
+    leave_case_id, overtime_request_id, entry_type, amount_minutes,
+    idempotency_key, metadata, occurred_at, created_at
+) SELECT
+    $1, balance.tenant_id, balance.employee_id, balance.leave_type_id, balance.id,
+    $2, $3, $4, $5,
+    $6, $7::jsonb, $8, $9
+FROM leave_balances balance
+WHERE balance.tenant_id = $10
+  AND balance.id = $11
+ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
+RETURNING id, tenant_id, employee_id, leave_type_id, balance_id, allocation_id, leave_request_id, leave_case_id, overtime_request_id, entry_type, amount_minutes, idempotency_key, metadata, occurred_at, created_at
+`
+
+type AppendStandaloneLeaveBalanceEntryParams struct {
+	ID                string             `json:"id"`
+	LeaveCaseID       pgtype.Text        `json:"leave_case_id"`
+	OvertimeRequestID pgtype.Text        `json:"overtime_request_id"`
+	EntryType         string             `json:"entry_type"`
+	AmountMinutes     int32              `json:"amount_minutes"`
+	IdempotencyKey    string             `json:"idempotency_key"`
+	Metadata          []byte             `json:"metadata"`
+	OccurredAt        pgtype.Timestamptz `json:"occurred_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	TenantID          string             `json:"tenant_id"`
+	BalanceID         string             `json:"balance_id"`
+}
+
+func (q *Queries) AppendStandaloneLeaveBalanceEntry(ctx context.Context, arg AppendStandaloneLeaveBalanceEntryParams) (LeaveBalanceEntry, error) {
+	row := q.db.QueryRow(ctx, appendStandaloneLeaveBalanceEntry,
+		arg.ID,
+		arg.LeaveCaseID,
+		arg.OvertimeRequestID,
+		arg.EntryType,
+		arg.AmountMinutes,
+		arg.IdempotencyKey,
+		arg.Metadata,
+		arg.OccurredAt,
+		arg.CreatedAt,
+		arg.TenantID,
+		arg.BalanceID,
+	)
+	var i LeaveBalanceEntry
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.LeaveTypeID,
+		&i.BalanceID,
+		&i.AllocationID,
+		&i.LeaveRequestID,
+		&i.LeaveCaseID,
+		&i.OvertimeRequestID,
+		&i.EntryType,
+		&i.AmountMinutes,
+		&i.IdempotencyKey,
+		&i.Metadata,
+		&i.OccurredAt,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const claimAttendanceCorrectionReview = `-- name: ClaimAttendanceCorrectionReview :one
+UPDATE attendance_correction_requests
+SET status = 'reviewing',
+    reviewed_by_account_id = $1,
+    reviewed_at = NULL,
+    updated_at = $2
+WHERE tenant_id = $3
+  AND form_instance_id = $4
+  AND status = 'pending'
+RETURNING id, tenant_id, employee_id, direction, requested_clocked_at, work_date, correction_type, target_clock_record_id, replacement_clock_record_id, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at
+`
+
+type ClaimAttendanceCorrectionReviewParams struct {
+	ReviewerID     pgtype.Text        `json:"reviewer_id"`
+	ClaimedAt      pgtype.Timestamptz `json:"claimed_at"`
+	TenantID       string             `json:"tenant_id"`
+	FormInstanceID string             `json:"form_instance_id"`
+}
+
+func (q *Queries) ClaimAttendanceCorrectionReview(ctx context.Context, arg ClaimAttendanceCorrectionReviewParams) (AttendanceCorrectionRequest, error) {
+	row := q.db.QueryRow(ctx, claimAttendanceCorrectionReview,
+		arg.ReviewerID,
+		arg.ClaimedAt,
+		arg.TenantID,
+		arg.FormInstanceID,
+	)
+	var i AttendanceCorrectionRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.Direction,
+		&i.RequestedClockedAt,
+		&i.WorkDate,
+		&i.CorrectionType,
+		&i.TargetClockRecordID,
+		&i.ReplacementClockRecordID,
+		&i.Reason,
+		&i.Status,
+		&i.FormInstanceID,
+		&i.ClockRecordID,
+		&i.ReviewedByAccountID,
+		&i.ReviewReason,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
 	)
 	return i, err
 }
@@ -520,7 +647,7 @@ func (q *Queries) CloseGroupMembership(ctx context.Context, arg CloseGroupMember
 }
 
 const countAgentRuns = `-- name: CountAgentRuns :one
-SELECT count(*) FROM agent_runs
+SELECT count(*) FROM executions
 WHERE tenant_id = $1
 `
 
@@ -532,7 +659,7 @@ func (q *Queries) CountAgentRuns(ctx context.Context, tenantID string) (int64, e
 }
 
 const countAgentRunsByAccount = `-- name: CountAgentRunsByAccount :one
-SELECT count(*) FROM agent_runs
+SELECT count(*) FROM executions
 WHERE tenant_id = $1
   AND account_id = $2
 `
@@ -1074,6 +1201,62 @@ func (q *Queries) DeleteUserGroup(ctx context.Context, arg DeleteUserGroupParams
 	return i, err
 }
 
+const ensureLocalLeaveBalanceAnchor = `-- name: EnsureLocalLeaveBalanceAnchor :one
+INSERT INTO leave_balances (
+    id, tenant_id, employee_id, leave_type_id, remaining_minutes,
+    period_start, period_end, granted_minutes, used_minutes, source,
+    carry_in_minutes, raw_payload, updated_at
+) VALUES (
+    $1, $2, $3, $4, 0,
+    NULL, NULL, 0, 0, 'local_anchor',
+    0, '{}'::jsonb, $5
+)
+ON CONFLICT (tenant_id, employee_id, leave_type_id)
+WHERE source = 'local_anchor' DO UPDATE SET
+    id = leave_balances.id
+RETURNING id, tenant_id, employee_id, leave_type_id, remaining_minutes, period_start, period_end, granted_minutes, used_minutes, source, external_leave_code, external_category_code, entitlement_year, carry_in_minutes, carry_expire, raw_payload, last_synced_at, updated_at
+`
+
+type EnsureLocalLeaveBalanceAnchorParams struct {
+	ID          string             `json:"id"`
+	TenantID    string             `json:"tenant_id"`
+	EmployeeID  string             `json:"employee_id"`
+	LeaveTypeID string             `json:"leave_type_id"`
+	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) EnsureLocalLeaveBalanceAnchor(ctx context.Context, arg EnsureLocalLeaveBalanceAnchorParams) (LeaveBalance, error) {
+	row := q.db.QueryRow(ctx, ensureLocalLeaveBalanceAnchor,
+		arg.ID,
+		arg.TenantID,
+		arg.EmployeeID,
+		arg.LeaveTypeID,
+		arg.UpdatedAt,
+	)
+	var i LeaveBalance
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.LeaveTypeID,
+		&i.RemainingMinutes,
+		&i.PeriodStart,
+		&i.PeriodEnd,
+		&i.GrantedMinutes,
+		&i.UsedMinutes,
+		&i.Source,
+		&i.ExternalLeaveCode,
+		&i.ExternalCategoryCode,
+		&i.EntitlementYear,
+		&i.CarryInMinutes,
+		&i.CarryExpire,
+		&i.RawPayload,
+		&i.LastSyncedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const finalizeOutboxEvent = `-- name: FinalizeOutboxEvent :one
 UPDATE outbox_events
 SET status = $1,
@@ -1332,16 +1515,53 @@ func (q *Queries) GetAttendanceCorrectionRequestByFormInstanceID(ctx context.Con
 	return i, err
 }
 
+const getAttendanceCorrectionRequestForUpdate = `-- name: GetAttendanceCorrectionRequestForUpdate :one
+SELECT id, tenant_id, employee_id, direction, requested_clocked_at, work_date, correction_type, target_clock_record_id, replacement_clock_record_id, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at FROM attendance_correction_requests
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type GetAttendanceCorrectionRequestForUpdateParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetAttendanceCorrectionRequestForUpdate(ctx context.Context, arg GetAttendanceCorrectionRequestForUpdateParams) (AttendanceCorrectionRequest, error) {
+	row := q.db.QueryRow(ctx, getAttendanceCorrectionRequestForUpdate, arg.TenantID, arg.ID)
+	var i AttendanceCorrectionRequest
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.Direction,
+		&i.RequestedClockedAt,
+		&i.WorkDate,
+		&i.CorrectionType,
+		&i.TargetClockRecordID,
+		&i.ReplacementClockRecordID,
+		&i.Reason,
+		&i.Status,
+		&i.FormInstanceID,
+		&i.ClockRecordID,
+		&i.ReviewedByAccountID,
+		&i.ReviewReason,
+		&i.ReviewedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getAttendanceDailySummaryByEmployeeDate = `-- name: GetAttendanceDailySummaryByEmployeeDate :one
 SELECT id, tenant_id, employee_id, work_date, shift_start, shift_end, shift_hours, daily_hours, clock_hours, clock_start, clock_end, attend_start, attend_end, attend_hours, attend_counted, leave_type, leave_start, leave_end, leave_hours, leave_counted, leave2_type, leave2_start, leave2_end, leave2_hours, leave2_counted, overtime_start, overtime_end, overtime_hours, overtime_counted, payload, source, external_ref, created_at, updated_at FROM attendance_daily_summaries
-WHERE tenant_id = $1 AND employee_id = $2 AND work_date = $3
+WHERE tenant_id = $1 AND employee_id = $2 AND work_date = $3::date
 LIMIT 1
 `
 
 type GetAttendanceDailySummaryByEmployeeDateParams struct {
-	TenantID   string `json:"tenant_id"`
-	EmployeeID string `json:"employee_id"`
-	WorkDate   string `json:"work_date"`
+	TenantID   string      `json:"tenant_id"`
+	EmployeeID string      `json:"employee_id"`
+	WorkDate   pgtype.Date `json:"work_date"`
 }
 
 func (q *Queries) GetAttendanceDailySummaryByEmployeeDate(ctx context.Context, arg GetAttendanceDailySummaryByEmployeeDateParams) (AttendanceDailySummary, error) {
@@ -1439,6 +1659,91 @@ func (q *Queries) GetAttendanceDailySummaryByExternalRef(ctx context.Context, ar
 	return i, err
 }
 
+const getAttendanceDayProjection = `-- name: GetAttendanceDayProjection :one
+SELECT tenant_id, employee_id, work_date, policy_version, scheduled_start_at, scheduled_end_at, clock_in_record_id, clock_out_record_id, last_punch_record_id, punch_count, required_minutes, worked_minutes, approved_leave_minutes, pending_leave_minutes, overtime_minutes, day_status, anomaly_reasons, input_fingerprint, payload, computed_at, updated_at FROM attendance_day_projections
+WHERE tenant_id = $1
+  AND employee_id = $2
+  AND work_date = $3::date
+`
+
+type GetAttendanceDayProjectionParams struct {
+	TenantID   string      `json:"tenant_id"`
+	EmployeeID string      `json:"employee_id"`
+	WorkDate   pgtype.Date `json:"work_date"`
+}
+
+func (q *Queries) GetAttendanceDayProjection(ctx context.Context, arg GetAttendanceDayProjectionParams) (AttendanceDayProjection, error) {
+	row := q.db.QueryRow(ctx, getAttendanceDayProjection, arg.TenantID, arg.EmployeeID, arg.WorkDate)
+	var i AttendanceDayProjection
+	err := row.Scan(
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.WorkDate,
+		&i.PolicyVersion,
+		&i.ScheduledStartAt,
+		&i.ScheduledEndAt,
+		&i.ClockInRecordID,
+		&i.ClockOutRecordID,
+		&i.LastPunchRecordID,
+		&i.PunchCount,
+		&i.RequiredMinutes,
+		&i.WorkedMinutes,
+		&i.ApprovedLeaveMinutes,
+		&i.PendingLeaveMinutes,
+		&i.OvertimeMinutes,
+		&i.DayStatus,
+		&i.AnomalyReasons,
+		&i.InputFingerprint,
+		&i.Payload,
+		&i.ComputedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const getAttendanceDayProjectionForUpdate = `-- name: GetAttendanceDayProjectionForUpdate :one
+SELECT tenant_id, employee_id, work_date, policy_version, scheduled_start_at, scheduled_end_at, clock_in_record_id, clock_out_record_id, last_punch_record_id, punch_count, required_minutes, worked_minutes, approved_leave_minutes, pending_leave_minutes, overtime_minutes, day_status, anomaly_reasons, input_fingerprint, payload, computed_at, updated_at FROM attendance_day_projections
+WHERE tenant_id = $1
+  AND employee_id = $2
+  AND work_date = $3::date
+FOR UPDATE
+`
+
+type GetAttendanceDayProjectionForUpdateParams struct {
+	TenantID   string      `json:"tenant_id"`
+	EmployeeID string      `json:"employee_id"`
+	WorkDate   pgtype.Date `json:"work_date"`
+}
+
+func (q *Queries) GetAttendanceDayProjectionForUpdate(ctx context.Context, arg GetAttendanceDayProjectionForUpdateParams) (AttendanceDayProjection, error) {
+	row := q.db.QueryRow(ctx, getAttendanceDayProjectionForUpdate, arg.TenantID, arg.EmployeeID, arg.WorkDate)
+	var i AttendanceDayProjection
+	err := row.Scan(
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.WorkDate,
+		&i.PolicyVersion,
+		&i.ScheduledStartAt,
+		&i.ScheduledEndAt,
+		&i.ClockInRecordID,
+		&i.ClockOutRecordID,
+		&i.LastPunchRecordID,
+		&i.PunchCount,
+		&i.RequiredMinutes,
+		&i.WorkedMinutes,
+		&i.ApprovedLeaveMinutes,
+		&i.PendingLeaveMinutes,
+		&i.OvertimeMinutes,
+		&i.DayStatus,
+		&i.AnomalyReasons,
+		&i.InputFingerprint,
+		&i.Payload,
+		&i.ComputedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const getAttendancePolicy = `-- name: GetAttendancePolicy :one
 SELECT tenant_id, version, work_time, effective_from, published_by_account_id, published_at FROM attendance_policy_versions
 WHERE tenant_id = $1
@@ -1448,6 +1753,33 @@ LIMIT 1
 
 func (q *Queries) GetAttendancePolicy(ctx context.Context, tenantID string) (AttendancePolicyVersion, error) {
 	row := q.db.QueryRow(ctx, getAttendancePolicy, tenantID)
+	var i AttendancePolicyVersion
+	err := row.Scan(
+		&i.TenantID,
+		&i.Version,
+		&i.WorkTime,
+		&i.EffectiveFrom,
+		&i.PublishedByAccountID,
+		&i.PublishedAt,
+	)
+	return i, err
+}
+
+const getAttendancePolicyAsOf = `-- name: GetAttendancePolicyAsOf :one
+SELECT tenant_id, version, work_time, effective_from, published_by_account_id, published_at FROM attendance_policy_versions
+WHERE tenant_id = $1
+  AND effective_from <= $2::timestamptz
+ORDER BY effective_from DESC, version DESC
+LIMIT 1
+`
+
+type GetAttendancePolicyAsOfParams struct {
+	TenantID string             `json:"tenant_id"`
+	AsOf     pgtype.Timestamptz `json:"as_of"`
+}
+
+func (q *Queries) GetAttendancePolicyAsOf(ctx context.Context, arg GetAttendancePolicyAsOfParams) (AttendancePolicyVersion, error) {
+	row := q.db.QueryRow(ctx, getAttendancePolicyAsOf, arg.TenantID, arg.AsOf)
 	var i AttendancePolicyVersion
 	err := row.Scan(
 		&i.TenantID,
@@ -1492,7 +1824,7 @@ const getEarliestAcceptedAttendanceClockIn = `-- name: GetEarliestAcceptedAttend
 SELECT id, tenant_id, employee_id, worksite_id, work_date, direction, client_event_id, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, voided, voided_at, voided_by_account_id, void_reason, created_at FROM attendance_clock_records
 WHERE tenant_id = $1
   AND employee_id = $2
-  AND work_date = $3
+  AND work_date = $3::date
   AND direction = 'clock_in'
   AND record_status = 'accepted'
   AND voided = false
@@ -1501,9 +1833,9 @@ LIMIT 1
 `
 
 type GetEarliestAcceptedAttendanceClockInParams struct {
-	TenantID   string `json:"tenant_id"`
-	EmployeeID string `json:"employee_id"`
-	WorkDate   string `json:"work_date"`
+	TenantID   string      `json:"tenant_id"`
+	EmployeeID string      `json:"employee_id"`
+	WorkDate   pgtype.Date `json:"work_date"`
 }
 
 func (q *Queries) GetEarliestAcceptedAttendanceClockIn(ctx context.Context, arg GetEarliestAcceptedAttendanceClockInParams) (AttendanceClockRecord, error) {
@@ -1800,41 +2132,6 @@ func (q *Queries) GetEmployeeByPersonalEmail(ctx context.Context, arg GetEmploye
 		&i.InternalExperiences,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const getEmployeeImportSession = `-- name: GetEmployeeImportSession :one
-SELECT id, tenant_id, filename, object_provider, object_bucket, object_key, content_type, size_bytes, sha256, status, rows, summary, created_by_account_id, confirmed_by_account_id, created_at, expires_at, confirmed_at FROM employee_import_sessions
-WHERE tenant_id = $1 AND id = $2
-`
-
-type GetEmployeeImportSessionParams struct {
-	TenantID string `json:"tenant_id"`
-	ID       string `json:"id"`
-}
-
-func (q *Queries) GetEmployeeImportSession(ctx context.Context, arg GetEmployeeImportSessionParams) (EmployeeImportSession, error) {
-	row := q.db.QueryRow(ctx, getEmployeeImportSession, arg.TenantID, arg.ID)
-	var i EmployeeImportSession
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.Filename,
-		&i.ObjectProvider,
-		&i.ObjectBucket,
-		&i.ObjectKey,
-		&i.ContentType,
-		&i.SizeBytes,
-		&i.Sha256,
-		&i.Status,
-		&i.Rows,
-		&i.Summary,
-		&i.CreatedByAccountID,
-		&i.ConfirmedByAccountID,
-		&i.CreatedAt,
-		&i.ExpiresAt,
-		&i.ConfirmedAt,
 	)
 	return i, err
 }
@@ -2136,7 +2433,7 @@ const getLatestAcceptedAttendanceClockOut = `-- name: GetLatestAcceptedAttendanc
 SELECT id, tenant_id, employee_id, worksite_id, work_date, direction, client_event_id, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, voided, voided_at, voided_by_account_id, void_reason, created_at FROM attendance_clock_records
 WHERE tenant_id = $1
   AND employee_id = $2
-  AND work_date = $3
+  AND work_date = $3::date
   AND direction = 'clock_out'
   AND record_status = 'accepted'
   AND voided = false
@@ -2145,9 +2442,9 @@ LIMIT 1
 `
 
 type GetLatestAcceptedAttendanceClockOutParams struct {
-	TenantID   string `json:"tenant_id"`
-	EmployeeID string `json:"employee_id"`
-	WorkDate   string `json:"work_date"`
+	TenantID   string      `json:"tenant_id"`
+	EmployeeID string      `json:"employee_id"`
+	WorkDate   pgtype.Date `json:"work_date"`
 }
 
 func (q *Queries) GetLatestAcceptedAttendanceClockOut(ctx context.Context, arg GetLatestAcceptedAttendanceClockOutParams) (AttendanceClockRecord, error) {
@@ -2185,7 +2482,7 @@ const getLatestAcceptedAttendanceClockRecord = `-- name: GetLatestAcceptedAttend
 SELECT id, tenant_id, employee_id, worksite_id, work_date, direction, client_event_id, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, voided, voided_at, voided_by_account_id, void_reason, created_at FROM attendance_clock_records
 WHERE tenant_id = $1
   AND employee_id = $2
-  AND work_date = $3
+  AND work_date = $3::date
   AND record_status = 'accepted'
   AND voided = false
 ORDER BY clocked_at DESC, created_at DESC, id DESC
@@ -2193,9 +2490,9 @@ LIMIT 1
 `
 
 type GetLatestAcceptedAttendanceClockRecordParams struct {
-	TenantID   string `json:"tenant_id"`
-	EmployeeID string `json:"employee_id"`
-	WorkDate   string `json:"work_date"`
+	TenantID   string      `json:"tenant_id"`
+	EmployeeID string      `json:"employee_id"`
+	WorkDate   pgtype.Date `json:"work_date"`
 }
 
 func (q *Queries) GetLatestAcceptedAttendanceClockRecord(ctx context.Context, arg GetLatestAcceptedAttendanceClockRecordParams) (AttendanceClockRecord, error) {
@@ -2230,7 +2527,7 @@ func (q *Queries) GetLatestAcceptedAttendanceClockRecord(ctx context.Context, ar
 }
 
 const getLeaveBalance = `-- name: GetLeaveBalance :one
-SELECT balance.id, balance.tenant_id, balance.employee_id, balance.leave_type_id, balance.remaining_hours, balance.period_start, balance.period_end, balance.granted_hours, balance.used_hours, balance.source, balance.external_leave_code, balance.external_category_code, balance.entitlement_year, balance.carry_in_hours, balance.carry_expire, balance.raw_payload, balance.last_synced_at, balance.updated_at, leave_type.code AS leave_type
+SELECT balance.id, balance.tenant_id, balance.employee_id, balance.leave_type_id, balance.remaining_minutes, balance.period_start, balance.period_end, balance.granted_minutes, balance.used_minutes, balance.source, balance.external_leave_code, balance.external_category_code, balance.entitlement_year, balance.carry_in_minutes, balance.carry_expire, balance.raw_payload, balance.last_synced_at, balance.updated_at, leave_type.code AS leave_type
 FROM leave_balances balance
 JOIN leave_types leave_type
   ON leave_type.tenant_id = balance.tenant_id
@@ -2256,16 +2553,16 @@ func (q *Queries) GetLeaveBalance(ctx context.Context, arg GetLeaveBalanceParams
 		&i.LeaveBalance.TenantID,
 		&i.LeaveBalance.EmployeeID,
 		&i.LeaveBalance.LeaveTypeID,
-		&i.LeaveBalance.RemainingHours,
+		&i.LeaveBalance.RemainingMinutes,
 		&i.LeaveBalance.PeriodStart,
 		&i.LeaveBalance.PeriodEnd,
-		&i.LeaveBalance.GrantedHours,
-		&i.LeaveBalance.UsedHours,
+		&i.LeaveBalance.GrantedMinutes,
+		&i.LeaveBalance.UsedMinutes,
 		&i.LeaveBalance.Source,
 		&i.LeaveBalance.ExternalLeaveCode,
 		&i.LeaveBalance.ExternalCategoryCode,
 		&i.LeaveBalance.EntitlementYear,
-		&i.LeaveBalance.CarryInHours,
+		&i.LeaveBalance.CarryInMinutes,
 		&i.LeaveBalance.CarryExpire,
 		&i.LeaveBalance.RawPayload,
 		&i.LeaveBalance.LastSyncedAt,
@@ -2276,7 +2573,7 @@ func (q *Queries) GetLeaveBalance(ctx context.Context, arg GetLeaveBalanceParams
 }
 
 const getLeaveBalanceForOverlay = `-- name: GetLeaveBalanceForOverlay :one
-SELECT balance.id, balance.tenant_id, balance.employee_id, balance.leave_type_id, balance.remaining_hours, balance.period_start, balance.period_end, balance.granted_hours, balance.used_hours, balance.source, balance.external_leave_code, balance.external_category_code, balance.entitlement_year, balance.carry_in_hours, balance.carry_expire, balance.raw_payload, balance.last_synced_at, balance.updated_at, leave_type.code AS leave_type
+SELECT balance.id, balance.tenant_id, balance.employee_id, balance.leave_type_id, balance.remaining_minutes, balance.period_start, balance.period_end, balance.granted_minutes, balance.used_minutes, balance.source, balance.external_leave_code, balance.external_category_code, balance.entitlement_year, balance.carry_in_minutes, balance.carry_expire, balance.raw_payload, balance.last_synced_at, balance.updated_at, leave_type.code AS leave_type
 FROM leave_balances balance
 JOIN leave_types leave_type
   ON leave_type.tenant_id = balance.tenant_id
@@ -2286,7 +2583,8 @@ WHERE balance.tenant_id = $1
   AND balance.leave_type_id = $3
   AND (balance.period_start IS NULL OR balance.period_start <= $4::date)
   AND (balance.period_end IS NULL OR balance.period_end >= $4::date)
-ORDER BY balance.period_end ASC NULLS LAST, balance.period_start ASC NULLS FIRST
+ORDER BY (balance.source = 'local_anchor') ASC,
+         balance.period_end ASC NULLS LAST, balance.period_start ASC NULLS FIRST
 LIMIT 1
 FOR UPDATE OF balance
 `
@@ -2316,16 +2614,16 @@ func (q *Queries) GetLeaveBalanceForOverlay(ctx context.Context, arg GetLeaveBal
 		&i.LeaveBalance.TenantID,
 		&i.LeaveBalance.EmployeeID,
 		&i.LeaveBalance.LeaveTypeID,
-		&i.LeaveBalance.RemainingHours,
+		&i.LeaveBalance.RemainingMinutes,
 		&i.LeaveBalance.PeriodStart,
 		&i.LeaveBalance.PeriodEnd,
-		&i.LeaveBalance.GrantedHours,
-		&i.LeaveBalance.UsedHours,
+		&i.LeaveBalance.GrantedMinutes,
+		&i.LeaveBalance.UsedMinutes,
 		&i.LeaveBalance.Source,
 		&i.LeaveBalance.ExternalLeaveCode,
 		&i.LeaveBalance.ExternalCategoryCode,
 		&i.LeaveBalance.EntitlementYear,
-		&i.LeaveBalance.CarryInHours,
+		&i.LeaveBalance.CarryInMinutes,
 		&i.LeaveBalance.CarryExpire,
 		&i.LeaveBalance.RawPayload,
 		&i.LeaveBalance.LastSyncedAt,
@@ -2335,30 +2633,66 @@ func (q *Queries) GetLeaveBalanceForOverlay(ctx context.Context, arg GetLeaveBal
 	return i, err
 }
 
-const getLeaveCaseBySource = `-- name: GetLeaveCaseBySource :one
+const getLeaveCaseByExternalLeaveRecordID = `-- name: GetLeaveCaseByExternalLeaveRecordID :one
 SELECT leave_case.id, leave_case.tenant_id, leave_case.employee_id, leave_case.leave_type_id, leave_case.start_at, leave_case.end_at, leave_case.net_minutes, leave_case.status, leave_case.origin, leave_case.created_at, leave_case.updated_at
 FROM leave_case_sources source
 JOIN leave_cases leave_case
   ON leave_case.tenant_id = source.tenant_id AND leave_case.id = source.leave_case_id
 WHERE source.tenant_id = $1
-  AND source.source_type = $2
-  AND source.source_id = $3
+  AND source.external_leave_record_id = $2
 LIMIT 1
 `
 
-type GetLeaveCaseBySourceParams struct {
-	TenantID   string `json:"tenant_id"`
-	SourceType string `json:"source_type"`
-	SourceID   string `json:"source_id"`
+type GetLeaveCaseByExternalLeaveRecordIDParams struct {
+	TenantID              string      `json:"tenant_id"`
+	ExternalLeaveRecordID pgtype.Text `json:"external_leave_record_id"`
 }
 
-type GetLeaveCaseBySourceRow struct {
+type GetLeaveCaseByExternalLeaveRecordIDRow struct {
 	LeaveCase LeaveCase `json:"leave_case"`
 }
 
-func (q *Queries) GetLeaveCaseBySource(ctx context.Context, arg GetLeaveCaseBySourceParams) (GetLeaveCaseBySourceRow, error) {
-	row := q.db.QueryRow(ctx, getLeaveCaseBySource, arg.TenantID, arg.SourceType, arg.SourceID)
-	var i GetLeaveCaseBySourceRow
+func (q *Queries) GetLeaveCaseByExternalLeaveRecordID(ctx context.Context, arg GetLeaveCaseByExternalLeaveRecordIDParams) (GetLeaveCaseByExternalLeaveRecordIDRow, error) {
+	row := q.db.QueryRow(ctx, getLeaveCaseByExternalLeaveRecordID, arg.TenantID, arg.ExternalLeaveRecordID)
+	var i GetLeaveCaseByExternalLeaveRecordIDRow
+	err := row.Scan(
+		&i.LeaveCase.ID,
+		&i.LeaveCase.TenantID,
+		&i.LeaveCase.EmployeeID,
+		&i.LeaveCase.LeaveTypeID,
+		&i.LeaveCase.StartAt,
+		&i.LeaveCase.EndAt,
+		&i.LeaveCase.NetMinutes,
+		&i.LeaveCase.Status,
+		&i.LeaveCase.Origin,
+		&i.LeaveCase.CreatedAt,
+		&i.LeaveCase.UpdatedAt,
+	)
+	return i, err
+}
+
+const getLeaveCaseByLeaveRequestID = `-- name: GetLeaveCaseByLeaveRequestID :one
+SELECT leave_case.id, leave_case.tenant_id, leave_case.employee_id, leave_case.leave_type_id, leave_case.start_at, leave_case.end_at, leave_case.net_minutes, leave_case.status, leave_case.origin, leave_case.created_at, leave_case.updated_at
+FROM leave_case_sources source
+JOIN leave_cases leave_case
+  ON leave_case.tenant_id = source.tenant_id AND leave_case.id = source.leave_case_id
+WHERE source.tenant_id = $1
+  AND source.leave_request_id = $2
+LIMIT 1
+`
+
+type GetLeaveCaseByLeaveRequestIDParams struct {
+	TenantID       string      `json:"tenant_id"`
+	LeaveRequestID pgtype.Text `json:"leave_request_id"`
+}
+
+type GetLeaveCaseByLeaveRequestIDRow struct {
+	LeaveCase LeaveCase `json:"leave_case"`
+}
+
+func (q *Queries) GetLeaveCaseByLeaveRequestID(ctx context.Context, arg GetLeaveCaseByLeaveRequestIDParams) (GetLeaveCaseByLeaveRequestIDRow, error) {
+	row := q.db.QueryRow(ctx, getLeaveCaseByLeaveRequestID, arg.TenantID, arg.LeaveRequestID)
+	var i GetLeaveCaseByLeaveRequestIDRow
 	err := row.Scan(
 		&i.LeaveCase.ID,
 		&i.LeaveCase.TenantID,
@@ -2376,7 +2710,7 @@ func (q *Queries) GetLeaveCaseBySource(ctx context.Context, arg GetLeaveCaseBySo
 }
 
 const getLeaveRequest = `-- name: GetLeaveRequest :one
-SELECT id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, reconciliation_status, created_at, updated_at FROM leave_requests
+SELECT id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, requested_minutes, reason, status, form_instance_id, reconciliation_status, created_at, updated_at FROM leave_requests
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -2399,11 +2733,10 @@ func (q *Queries) GetLeaveRequest(ctx context.Context, arg GetLeaveRequestParams
 		&i.EvaluationSnapshot,
 		&i.StartAt,
 		&i.EndAt,
-		&i.Hours,
+		&i.RequestedMinutes,
 		&i.Reason,
 		&i.Status,
 		&i.FormInstanceID,
-		&i.LeaveBalanceID,
 		&i.ReconciliationStatus,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -2411,8 +2744,45 @@ func (q *Queries) GetLeaveRequest(ctx context.Context, arg GetLeaveRequestParams
 	return i, err
 }
 
+const getLeaveRequestAllocationByCycleBalance = `-- name: GetLeaveRequestAllocationByCycleBalance :one
+SELECT id, tenant_id, leave_request_id, leave_balance_id, employee_id, leave_type_id, cycle, reserved_minutes, created_at FROM leave_request_allocations
+WHERE tenant_id = $1
+  AND leave_request_id = $2
+  AND leave_balance_id = $3
+  AND cycle = $4
+`
+
+type GetLeaveRequestAllocationByCycleBalanceParams struct {
+	TenantID       string `json:"tenant_id"`
+	LeaveRequestID string `json:"leave_request_id"`
+	LeaveBalanceID string `json:"leave_balance_id"`
+	Cycle          int32  `json:"cycle"`
+}
+
+func (q *Queries) GetLeaveRequestAllocationByCycleBalance(ctx context.Context, arg GetLeaveRequestAllocationByCycleBalanceParams) (LeaveRequestAllocation, error) {
+	row := q.db.QueryRow(ctx, getLeaveRequestAllocationByCycleBalance,
+		arg.TenantID,
+		arg.LeaveRequestID,
+		arg.LeaveBalanceID,
+		arg.Cycle,
+	)
+	var i LeaveRequestAllocation
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.LeaveRequestID,
+		&i.LeaveBalanceID,
+		&i.EmployeeID,
+		&i.LeaveTypeID,
+		&i.Cycle,
+		&i.ReservedMinutes,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const getLeaveRequestByFormInstanceID = `-- name: GetLeaveRequestByFormInstanceID :one
-SELECT id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, reconciliation_status, created_at, updated_at FROM leave_requests
+SELECT id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, requested_minutes, reason, status, form_instance_id, reconciliation_status, created_at, updated_at FROM leave_requests
 WHERE tenant_id = $1 AND form_instance_id = $2
 LIMIT 1
 `
@@ -2436,11 +2806,10 @@ func (q *Queries) GetLeaveRequestByFormInstanceID(ctx context.Context, arg GetLe
 		&i.EvaluationSnapshot,
 		&i.StartAt,
 		&i.EndAt,
-		&i.Hours,
+		&i.RequestedMinutes,
 		&i.Reason,
 		&i.Status,
 		&i.FormInstanceID,
-		&i.LeaveBalanceID,
 		&i.ReconciliationStatus,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -2861,6 +3230,36 @@ func (q *Queries) GetWorkflowStageInstance(ctx context.Context, arg GetWorkflowS
 	return i, err
 }
 
+const getWorkflowStageInstanceForUpdate = `-- name: GetWorkflowStageInstanceForUpdate :one
+SELECT id, tenant_id, run_id, stage_id, stage_type, label, status, sequence, result, started_at, completed_at FROM workflow_stage_instances
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE
+`
+
+type GetWorkflowStageInstanceForUpdateParams struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetWorkflowStageInstanceForUpdate(ctx context.Context, arg GetWorkflowStageInstanceForUpdateParams) (WorkflowStageInstance, error) {
+	row := q.db.QueryRow(ctx, getWorkflowStageInstanceForUpdate, arg.TenantID, arg.ID)
+	var i WorkflowStageInstance
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.RunID,
+		&i.StageID,
+		&i.StageType,
+		&i.Label,
+		&i.Status,
+		&i.Sequence,
+		&i.Result,
+		&i.StartedAt,
+		&i.CompletedAt,
+	)
+	return i, err
+}
+
 const insertAttendancePolicyVersion = `-- name: InsertAttendancePolicyVersion :one
 INSERT INTO attendance_policy_versions (
     tenant_id, version, work_time, effective_from,
@@ -3146,26 +3545,79 @@ func (q *Queries) ListActiveGroupMembershipsForAccount(ctx context.Context, arg 
 }
 
 const listAgentRuns = `-- name: ListAgentRuns :many
-SELECT id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer, status, reference_items, llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens, usage_complete, created_at, updated_at FROM agent_runs
-WHERE tenant_id = $1
-ORDER BY created_at ASC
+SELECT
+    executions.id, executions.tenant_id, executions.account_id, executions.agent_id,
+    executions.conversation_id AS session_id, executions.segment_id,
+    executions.input_message_id, executions.agent_revision_id, executions.model_connection_id,
+    executions.mode, input_message.content AS prompt,
+    COALESCE(answer_message.content, '')::text AS answer, executions.status,
+    COALESCE(answer_message.content_json->'reference_items', '[]'::jsonb) AS reference_items,
+    executions.llm_call_count, executions.input_tokens, executions.cached_tokens,
+    executions.output_tokens, executions.total_tokens, executions.usage_complete,
+    executions.queued_at, executions.started_at, executions.completed_at,
+    executions.error_code, executions.error_category, executions.safe_error_message,
+    executions.created_at, executions.updated_at
+FROM executions
+JOIN messages input_message ON input_message.tenant_id = executions.tenant_id AND input_message.id = executions.input_message_id
+LEFT JOIN LATERAL (
+    SELECT messages.id, messages.tenant_id, messages.conversation_id, messages.segment_id, messages.sequence_no, messages.role, messages.content, messages.content_json, messages.execution_id, messages.execution_step_id, messages.created_at FROM messages
+    WHERE messages.tenant_id = executions.tenant_id AND messages.execution_id = executions.id AND messages.role = 'assistant'
+    ORDER BY messages.sequence_no DESC LIMIT 1
+) answer_message ON true
+WHERE executions.tenant_id = $1
+ORDER BY executions.created_at ASC
 `
 
-func (q *Queries) ListAgentRuns(ctx context.Context, tenantID string) ([]AgentRun, error) {
+type ListAgentRunsRow struct {
+	ID                string             `json:"id"`
+	TenantID          string             `json:"tenant_id"`
+	AccountID         string             `json:"account_id"`
+	AgentID           pgtype.Text        `json:"agent_id"`
+	SessionID         string             `json:"session_id"`
+	SegmentID         string             `json:"segment_id"`
+	InputMessageID    string             `json:"input_message_id"`
+	AgentRevisionID   pgtype.Text        `json:"agent_revision_id"`
+	ModelConnectionID pgtype.Text        `json:"model_connection_id"`
+	Mode              string             `json:"mode"`
+	Prompt            string             `json:"prompt"`
+	Answer            string             `json:"answer"`
+	Status            string             `json:"status"`
+	ReferenceItems    interface{}        `json:"reference_items"`
+	LlmCallCount      int64              `json:"llm_call_count"`
+	InputTokens       int64              `json:"input_tokens"`
+	CachedTokens      int64              `json:"cached_tokens"`
+	OutputTokens      int64              `json:"output_tokens"`
+	TotalTokens       int64              `json:"total_tokens"`
+	UsageComplete     bool               `json:"usage_complete"`
+	QueuedAt          pgtype.Timestamptz `json:"queued_at"`
+	StartedAt         pgtype.Timestamptz `json:"started_at"`
+	CompletedAt       pgtype.Timestamptz `json:"completed_at"`
+	ErrorCode         string             `json:"error_code"`
+	ErrorCategory     string             `json:"error_category"`
+	SafeErrorMessage  string             `json:"safe_error_message"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListAgentRuns(ctx context.Context, tenantID string) ([]ListAgentRunsRow, error) {
 	rows, err := q.db.Query(ctx, listAgentRuns, tenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AgentRun
+	var items []ListAgentRunsRow
 	for rows.Next() {
-		var i AgentRun
+		var i ListAgentRunsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
 			&i.AccountID,
 			&i.AgentID,
 			&i.SessionID,
+			&i.SegmentID,
+			&i.InputMessageID,
+			&i.AgentRevisionID,
+			&i.ModelConnectionID,
 			&i.Mode,
 			&i.Prompt,
 			&i.Answer,
@@ -3177,6 +3629,12 @@ func (q *Queries) ListAgentRuns(ctx context.Context, tenantID string) ([]AgentRu
 			&i.OutputTokens,
 			&i.TotalTokens,
 			&i.UsageComplete,
+			&i.QueuedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.ErrorCode,
+			&i.ErrorCategory,
+			&i.SafeErrorMessage,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -3191,10 +3649,28 @@ func (q *Queries) ListAgentRuns(ctx context.Context, tenantID string) ([]AgentRu
 }
 
 const listAgentRunsByAccount = `-- name: ListAgentRunsByAccount :many
-SELECT id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer, status, reference_items, llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens, usage_complete, created_at, updated_at FROM agent_runs
-WHERE tenant_id = $1
-  AND account_id = $2
-ORDER BY created_at DESC, id ASC
+SELECT
+    executions.id, executions.tenant_id, executions.account_id, executions.agent_id,
+    executions.conversation_id AS session_id, executions.segment_id,
+    executions.input_message_id, executions.agent_revision_id, executions.model_connection_id,
+    executions.mode, input_message.content AS prompt,
+    COALESCE(answer_message.content, '')::text AS answer, executions.status,
+    COALESCE(answer_message.content_json->'reference_items', '[]'::jsonb) AS reference_items,
+    executions.llm_call_count, executions.input_tokens, executions.cached_tokens,
+    executions.output_tokens, executions.total_tokens, executions.usage_complete,
+    executions.queued_at, executions.started_at, executions.completed_at,
+    executions.error_code, executions.error_category, executions.safe_error_message,
+    executions.created_at, executions.updated_at
+FROM executions
+JOIN messages input_message ON input_message.tenant_id = executions.tenant_id AND input_message.id = executions.input_message_id
+LEFT JOIN LATERAL (
+    SELECT messages.id, messages.tenant_id, messages.conversation_id, messages.segment_id, messages.sequence_no, messages.role, messages.content, messages.content_json, messages.execution_id, messages.execution_step_id, messages.created_at FROM messages
+    WHERE messages.tenant_id = executions.tenant_id AND messages.execution_id = executions.id AND messages.role = 'assistant'
+    ORDER BY messages.sequence_no DESC LIMIT 1
+) answer_message ON true
+WHERE executions.tenant_id = $1
+  AND executions.account_id = $2
+ORDER BY executions.created_at DESC, executions.id ASC
 `
 
 type ListAgentRunsByAccountParams struct {
@@ -3202,21 +3678,56 @@ type ListAgentRunsByAccountParams struct {
 	AccountID string `json:"account_id"`
 }
 
-func (q *Queries) ListAgentRunsByAccount(ctx context.Context, arg ListAgentRunsByAccountParams) ([]AgentRun, error) {
+type ListAgentRunsByAccountRow struct {
+	ID                string             `json:"id"`
+	TenantID          string             `json:"tenant_id"`
+	AccountID         string             `json:"account_id"`
+	AgentID           pgtype.Text        `json:"agent_id"`
+	SessionID         string             `json:"session_id"`
+	SegmentID         string             `json:"segment_id"`
+	InputMessageID    string             `json:"input_message_id"`
+	AgentRevisionID   pgtype.Text        `json:"agent_revision_id"`
+	ModelConnectionID pgtype.Text        `json:"model_connection_id"`
+	Mode              string             `json:"mode"`
+	Prompt            string             `json:"prompt"`
+	Answer            string             `json:"answer"`
+	Status            string             `json:"status"`
+	ReferenceItems    interface{}        `json:"reference_items"`
+	LlmCallCount      int64              `json:"llm_call_count"`
+	InputTokens       int64              `json:"input_tokens"`
+	CachedTokens      int64              `json:"cached_tokens"`
+	OutputTokens      int64              `json:"output_tokens"`
+	TotalTokens       int64              `json:"total_tokens"`
+	UsageComplete     bool               `json:"usage_complete"`
+	QueuedAt          pgtype.Timestamptz `json:"queued_at"`
+	StartedAt         pgtype.Timestamptz `json:"started_at"`
+	CompletedAt       pgtype.Timestamptz `json:"completed_at"`
+	ErrorCode         string             `json:"error_code"`
+	ErrorCategory     string             `json:"error_category"`
+	SafeErrorMessage  string             `json:"safe_error_message"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListAgentRunsByAccount(ctx context.Context, arg ListAgentRunsByAccountParams) ([]ListAgentRunsByAccountRow, error) {
 	rows, err := q.db.Query(ctx, listAgentRunsByAccount, arg.TenantID, arg.AccountID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AgentRun
+	var items []ListAgentRunsByAccountRow
 	for rows.Next() {
-		var i AgentRun
+		var i ListAgentRunsByAccountRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
 			&i.AccountID,
 			&i.AgentID,
 			&i.SessionID,
+			&i.SegmentID,
+			&i.InputMessageID,
+			&i.AgentRevisionID,
+			&i.ModelConnectionID,
 			&i.Mode,
 			&i.Prompt,
 			&i.Answer,
@@ -3228,6 +3739,12 @@ func (q *Queries) ListAgentRunsByAccount(ctx context.Context, arg ListAgentRunsB
 			&i.OutputTokens,
 			&i.TotalTokens,
 			&i.UsageComplete,
+			&i.QueuedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.ErrorCode,
+			&i.ErrorCategory,
+			&i.SafeErrorMessage,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -3242,12 +3759,30 @@ func (q *Queries) ListAgentRunsByAccount(ctx context.Context, arg ListAgentRunsB
 }
 
 const listAgentRunsPage = `-- name: ListAgentRunsPage :many
-SELECT id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer, status, reference_items, llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens, usage_complete, created_at, updated_at FROM agent_runs
-WHERE tenant_id = $1
+SELECT
+    executions.id, executions.tenant_id, executions.account_id, executions.agent_id,
+    executions.conversation_id AS session_id, executions.segment_id,
+    executions.input_message_id, executions.agent_revision_id, executions.model_connection_id,
+    executions.mode, input_message.content AS prompt,
+    COALESCE(answer_message.content, '')::text AS answer, executions.status,
+    COALESCE(answer_message.content_json->'reference_items', '[]'::jsonb) AS reference_items,
+    executions.llm_call_count, executions.input_tokens, executions.cached_tokens,
+    executions.output_tokens, executions.total_tokens, executions.usage_complete,
+    executions.queued_at, executions.started_at, executions.completed_at,
+    executions.error_code, executions.error_category, executions.safe_error_message,
+    executions.created_at, executions.updated_at
+FROM executions
+JOIN messages input_message ON input_message.tenant_id = executions.tenant_id AND input_message.id = executions.input_message_id
+LEFT JOIN LATERAL (
+    SELECT messages.id, messages.tenant_id, messages.conversation_id, messages.segment_id, messages.sequence_no, messages.role, messages.content, messages.content_json, messages.execution_id, messages.execution_step_id, messages.created_at FROM messages
+    WHERE messages.tenant_id = executions.tenant_id AND messages.execution_id = executions.id AND messages.role = 'assistant'
+    ORDER BY messages.sequence_no DESC LIMIT 1
+) answer_message ON true
+WHERE executions.tenant_id = $1
 ORDER BY
-  CASE WHEN $2::text = 'created_at_asc' THEN created_at END ASC,
-  created_at DESC,
-  id ASC
+  CASE WHEN $2::text = 'created_at_asc' THEN executions.created_at END ASC,
+  executions.created_at DESC,
+  executions.id ASC
 LIMIT $4::int
 OFFSET $3::int
 `
@@ -3259,7 +3794,38 @@ type ListAgentRunsPageParams struct {
 	LimitCount  int32  `json:"limit_count"`
 }
 
-func (q *Queries) ListAgentRunsPage(ctx context.Context, arg ListAgentRunsPageParams) ([]AgentRun, error) {
+type ListAgentRunsPageRow struct {
+	ID                string             `json:"id"`
+	TenantID          string             `json:"tenant_id"`
+	AccountID         string             `json:"account_id"`
+	AgentID           pgtype.Text        `json:"agent_id"`
+	SessionID         string             `json:"session_id"`
+	SegmentID         string             `json:"segment_id"`
+	InputMessageID    string             `json:"input_message_id"`
+	AgentRevisionID   pgtype.Text        `json:"agent_revision_id"`
+	ModelConnectionID pgtype.Text        `json:"model_connection_id"`
+	Mode              string             `json:"mode"`
+	Prompt            string             `json:"prompt"`
+	Answer            string             `json:"answer"`
+	Status            string             `json:"status"`
+	ReferenceItems    interface{}        `json:"reference_items"`
+	LlmCallCount      int64              `json:"llm_call_count"`
+	InputTokens       int64              `json:"input_tokens"`
+	CachedTokens      int64              `json:"cached_tokens"`
+	OutputTokens      int64              `json:"output_tokens"`
+	TotalTokens       int64              `json:"total_tokens"`
+	UsageComplete     bool               `json:"usage_complete"`
+	QueuedAt          pgtype.Timestamptz `json:"queued_at"`
+	StartedAt         pgtype.Timestamptz `json:"started_at"`
+	CompletedAt       pgtype.Timestamptz `json:"completed_at"`
+	ErrorCode         string             `json:"error_code"`
+	ErrorCategory     string             `json:"error_category"`
+	SafeErrorMessage  string             `json:"safe_error_message"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListAgentRunsPage(ctx context.Context, arg ListAgentRunsPageParams) ([]ListAgentRunsPageRow, error) {
 	rows, err := q.db.Query(ctx, listAgentRunsPage,
 		arg.TenantID,
 		arg.Sort,
@@ -3270,15 +3836,19 @@ func (q *Queries) ListAgentRunsPage(ctx context.Context, arg ListAgentRunsPagePa
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AgentRun
+	var items []ListAgentRunsPageRow
 	for rows.Next() {
-		var i AgentRun
+		var i ListAgentRunsPageRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
 			&i.AccountID,
 			&i.AgentID,
 			&i.SessionID,
+			&i.SegmentID,
+			&i.InputMessageID,
+			&i.AgentRevisionID,
+			&i.ModelConnectionID,
 			&i.Mode,
 			&i.Prompt,
 			&i.Answer,
@@ -3290,6 +3860,12 @@ func (q *Queries) ListAgentRunsPage(ctx context.Context, arg ListAgentRunsPagePa
 			&i.OutputTokens,
 			&i.TotalTokens,
 			&i.UsageComplete,
+			&i.QueuedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.ErrorCode,
+			&i.ErrorCategory,
+			&i.SafeErrorMessage,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -3304,13 +3880,31 @@ func (q *Queries) ListAgentRunsPage(ctx context.Context, arg ListAgentRunsPagePa
 }
 
 const listAgentRunsPageByAccount = `-- name: ListAgentRunsPageByAccount :many
-SELECT id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer, status, reference_items, llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens, usage_complete, created_at, updated_at FROM agent_runs
-WHERE tenant_id = $1
-  AND account_id = $2
+SELECT
+    executions.id, executions.tenant_id, executions.account_id, executions.agent_id,
+    executions.conversation_id AS session_id, executions.segment_id,
+    executions.input_message_id, executions.agent_revision_id, executions.model_connection_id,
+    executions.mode, input_message.content AS prompt,
+    COALESCE(answer_message.content, '')::text AS answer, executions.status,
+    COALESCE(answer_message.content_json->'reference_items', '[]'::jsonb) AS reference_items,
+    executions.llm_call_count, executions.input_tokens, executions.cached_tokens,
+    executions.output_tokens, executions.total_tokens, executions.usage_complete,
+    executions.queued_at, executions.started_at, executions.completed_at,
+    executions.error_code, executions.error_category, executions.safe_error_message,
+    executions.created_at, executions.updated_at
+FROM executions
+JOIN messages input_message ON input_message.tenant_id = executions.tenant_id AND input_message.id = executions.input_message_id
+LEFT JOIN LATERAL (
+    SELECT messages.id, messages.tenant_id, messages.conversation_id, messages.segment_id, messages.sequence_no, messages.role, messages.content, messages.content_json, messages.execution_id, messages.execution_step_id, messages.created_at FROM messages
+    WHERE messages.tenant_id = executions.tenant_id AND messages.execution_id = executions.id AND messages.role = 'assistant'
+    ORDER BY messages.sequence_no DESC LIMIT 1
+) answer_message ON true
+WHERE executions.tenant_id = $1
+  AND executions.account_id = $2
 ORDER BY
-  CASE WHEN $3::text = 'created_at_asc' THEN created_at END ASC,
-  created_at DESC,
-  id ASC
+  CASE WHEN $3::text = 'created_at_asc' THEN executions.created_at END ASC,
+  executions.created_at DESC,
+  executions.id ASC
 LIMIT $5::int
 OFFSET $4::int
 `
@@ -3323,7 +3917,38 @@ type ListAgentRunsPageByAccountParams struct {
 	LimitCount  int32  `json:"limit_count"`
 }
 
-func (q *Queries) ListAgentRunsPageByAccount(ctx context.Context, arg ListAgentRunsPageByAccountParams) ([]AgentRun, error) {
+type ListAgentRunsPageByAccountRow struct {
+	ID                string             `json:"id"`
+	TenantID          string             `json:"tenant_id"`
+	AccountID         string             `json:"account_id"`
+	AgentID           pgtype.Text        `json:"agent_id"`
+	SessionID         string             `json:"session_id"`
+	SegmentID         string             `json:"segment_id"`
+	InputMessageID    string             `json:"input_message_id"`
+	AgentRevisionID   pgtype.Text        `json:"agent_revision_id"`
+	ModelConnectionID pgtype.Text        `json:"model_connection_id"`
+	Mode              string             `json:"mode"`
+	Prompt            string             `json:"prompt"`
+	Answer            string             `json:"answer"`
+	Status            string             `json:"status"`
+	ReferenceItems    interface{}        `json:"reference_items"`
+	LlmCallCount      int64              `json:"llm_call_count"`
+	InputTokens       int64              `json:"input_tokens"`
+	CachedTokens      int64              `json:"cached_tokens"`
+	OutputTokens      int64              `json:"output_tokens"`
+	TotalTokens       int64              `json:"total_tokens"`
+	UsageComplete     bool               `json:"usage_complete"`
+	QueuedAt          pgtype.Timestamptz `json:"queued_at"`
+	StartedAt         pgtype.Timestamptz `json:"started_at"`
+	CompletedAt       pgtype.Timestamptz `json:"completed_at"`
+	ErrorCode         string             `json:"error_code"`
+	ErrorCategory     string             `json:"error_category"`
+	SafeErrorMessage  string             `json:"safe_error_message"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListAgentRunsPageByAccount(ctx context.Context, arg ListAgentRunsPageByAccountParams) ([]ListAgentRunsPageByAccountRow, error) {
 	rows, err := q.db.Query(ctx, listAgentRunsPageByAccount,
 		arg.TenantID,
 		arg.AccountID,
@@ -3335,15 +3960,19 @@ func (q *Queries) ListAgentRunsPageByAccount(ctx context.Context, arg ListAgentR
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AgentRun
+	var items []ListAgentRunsPageByAccountRow
 	for rows.Next() {
-		var i AgentRun
+		var i ListAgentRunsPageByAccountRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
 			&i.AccountID,
 			&i.AgentID,
 			&i.SessionID,
+			&i.SegmentID,
+			&i.InputMessageID,
+			&i.AgentRevisionID,
+			&i.ModelConnectionID,
 			&i.Mode,
 			&i.Prompt,
 			&i.Answer,
@@ -3355,6 +3984,12 @@ func (q *Queries) ListAgentRunsPageByAccount(ctx context.Context, arg ListAgentR
 			&i.OutputTokens,
 			&i.TotalTokens,
 			&i.UsageComplete,
+			&i.QueuedAt,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.ErrorCode,
+			&i.ErrorCategory,
+			&i.SafeErrorMessage,
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
@@ -3412,8 +4047,8 @@ SELECT id, tenant_id, employee_id, worksite_id, work_date, direction, client_eve
 WHERE tenant_id = $1
   AND ($2::text = '' OR employee_id = $2)
   AND (coalesce(cardinality($3::text[]), 0) = 0 OR employee_id = ANY($3::text[]))
-  AND ($4::text = '' OR work_date >= $4)
-  AND ($5::text = '' OR work_date <= $5)
+  AND (NULLIF($4::text, '') IS NULL OR work_date >= NULLIF($4::text, '')::date)
+  AND (NULLIF($5::text, '') IS NULL OR work_date <= NULLIF($5::text, '')::date)
   AND ($6::text = '' OR direction = $6)
   AND ($7::text = '' OR record_status = $7)
   AND ($8::text = '' OR source = $8)
@@ -3488,8 +4123,8 @@ const listAttendanceCorrectionRequests = `-- name: ListAttendanceCorrectionReque
 SELECT id, tenant_id, employee_id, direction, requested_clocked_at, work_date, correction_type, target_clock_record_id, replacement_clock_record_id, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at FROM attendance_correction_requests
 WHERE tenant_id = $1
   AND ($2::text = '' OR employee_id = $2)
-  AND ($3::text = '' OR work_date >= $3)
-  AND ($4::text = '' OR work_date <= $4)
+  AND (NULLIF($3::text, '') IS NULL OR work_date >= NULLIF($3::text, '')::date)
+  AND (NULLIF($4::text, '') IS NULL OR work_date <= NULLIF($4::text, '')::date)
   AND ($5::text = '' OR status = $5)
   AND ($6::text = '' OR direction = $6)
 ORDER BY created_at DESC, id ASC
@@ -3555,8 +4190,8 @@ SELECT id, tenant_id, employee_id, work_date, shift_start, shift_end, shift_hour
 WHERE tenant_id = $1
   AND ($2::text = '' OR employee_id = $2)
   AND (coalesce(cardinality($3::text[]), 0) = 0 OR employee_id = ANY($3::text[]))
-  AND ($4::text = '' OR work_date >= $4)
-  AND ($5::text = '' OR work_date <= $5)
+  AND (NULLIF($4::text, '') IS NULL OR work_date >= NULLIF($4::text, '')::date)
+  AND (NULLIF($5::text, '') IS NULL OR work_date <= NULLIF($5::text, '')::date)
   AND ($6::text = '' OR source = $6)
 ORDER BY work_date ASC, employee_id ASC, id ASC
 `
@@ -3620,6 +4255,69 @@ func (q *Queries) ListAttendanceDailySummaries(ctx context.Context, arg ListAtte
 			&i.Source,
 			&i.ExternalRef,
 			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listAttendanceDayProjections = `-- name: ListAttendanceDayProjections :many
+SELECT tenant_id, employee_id, work_date, policy_version, scheduled_start_at, scheduled_end_at, clock_in_record_id, clock_out_record_id, last_punch_record_id, punch_count, required_minutes, worked_minutes, approved_leave_minutes, pending_leave_minutes, overtime_minutes, day_status, anomaly_reasons, input_fingerprint, payload, computed_at, updated_at FROM attendance_day_projections
+WHERE tenant_id = $1
+  AND (coalesce(cardinality($2::text[]), 0) = 0 OR employee_id = ANY($2::text[]))
+  AND (NULLIF($3::text, '') IS NULL OR work_date >= NULLIF($3::text, '')::date)
+  AND (NULLIF($4::text, '') IS NULL OR work_date <= NULLIF($4::text, '')::date)
+ORDER BY work_date, employee_id
+`
+
+type ListAttendanceDayProjectionsParams struct {
+	TenantID    string   `json:"tenant_id"`
+	EmployeeIds []string `json:"employee_ids"`
+	FromDate    string   `json:"from_date"`
+	ToDate      string   `json:"to_date"`
+}
+
+func (q *Queries) ListAttendanceDayProjections(ctx context.Context, arg ListAttendanceDayProjectionsParams) ([]AttendanceDayProjection, error) {
+	rows, err := q.db.Query(ctx, listAttendanceDayProjections,
+		arg.TenantID,
+		arg.EmployeeIds,
+		arg.FromDate,
+		arg.ToDate,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AttendanceDayProjection
+	for rows.Next() {
+		var i AttendanceDayProjection
+		if err := rows.Scan(
+			&i.TenantID,
+			&i.EmployeeID,
+			&i.WorkDate,
+			&i.PolicyVersion,
+			&i.ScheduledStartAt,
+			&i.ScheduledEndAt,
+			&i.ClockInRecordID,
+			&i.ClockOutRecordID,
+			&i.LastPunchRecordID,
+			&i.PunchCount,
+			&i.RequiredMinutes,
+			&i.WorkedMinutes,
+			&i.ApprovedLeaveMinutes,
+			&i.PendingLeaveMinutes,
+			&i.OvertimeMinutes,
+			&i.DayStatus,
+			&i.AnomalyReasons,
+			&i.InputFingerprint,
+			&i.Payload,
+			&i.ComputedAt,
 			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
@@ -3896,6 +4594,67 @@ func (q *Queries) ListAuditLogsPage(ctx context.Context, arg ListAuditLogsPagePa
 			&i.Severity,
 			&i.Details,
 			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listConfirmedActiveLeaveCasesByQuery = `-- name: ListConfirmedActiveLeaveCasesByQuery :many
+SELECT id, tenant_id, employee_id, leave_type_id, start_at, end_at, net_minutes, status, origin, created_at, updated_at FROM leave_cases leave_case
+WHERE leave_case.tenant_id = $1
+  AND leave_case.status = 'active'
+  AND leave_case.employee_id = ANY($2::text[])
+  AND leave_case.start_at < $3::timestamptz
+  AND leave_case.end_at > $4::timestamptz
+  AND EXISTS (
+      SELECT 1
+      FROM leave_case_sources source
+      WHERE source.tenant_id = leave_case.tenant_id
+        AND source.leave_case_id = leave_case.id
+        AND source.match_status = 'confirmed'
+  )
+ORDER BY leave_case.start_at, leave_case.end_at, leave_case.id
+`
+
+type ListConfirmedActiveLeaveCasesByQueryParams struct {
+	TenantID    string             `json:"tenant_id"`
+	EmployeeIds []string           `json:"employee_ids"`
+	ToAt        pgtype.Timestamptz `json:"to_at"`
+	FromAt      pgtype.Timestamptz `json:"from_at"`
+}
+
+func (q *Queries) ListConfirmedActiveLeaveCasesByQuery(ctx context.Context, arg ListConfirmedActiveLeaveCasesByQueryParams) ([]LeaveCase, error) {
+	rows, err := q.db.Query(ctx, listConfirmedActiveLeaveCasesByQuery,
+		arg.TenantID,
+		arg.EmployeeIds,
+		arg.ToAt,
+		arg.FromAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LeaveCase
+	for rows.Next() {
+		var i LeaveCase
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.EmployeeID,
+			&i.LeaveTypeID,
+			&i.StartAt,
+			&i.EndAt,
+			&i.NetMinutes,
+			&i.Status,
+			&i.Origin,
+			&i.CreatedAt,
+			&i.UpdatedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -4707,7 +5466,7 @@ func (q *Queries) ListGroupMembershipsForGroup(ctx context.Context, arg ListGrou
 }
 
 const listLeaveBalanceEntries = `-- name: ListLeaveBalanceEntries :many
-SELECT id, tenant_id, employee_id, leave_type_id, balance_id, leave_request_id, leave_case_id, entry_type, amount_minutes, idempotency_key, metadata, occurred_at, created_at FROM leave_balance_entries
+SELECT id, tenant_id, employee_id, leave_type_id, balance_id, allocation_id, leave_request_id, leave_case_id, overtime_request_id, entry_type, amount_minutes, idempotency_key, metadata, occurred_at, created_at FROM leave_balance_entries
 WHERE tenant_id = $1
 ORDER BY occurred_at ASC, id ASC
 `
@@ -4727,8 +5486,10 @@ func (q *Queries) ListLeaveBalanceEntries(ctx context.Context, tenantID string) 
 			&i.EmployeeID,
 			&i.LeaveTypeID,
 			&i.BalanceID,
+			&i.AllocationID,
 			&i.LeaveRequestID,
 			&i.LeaveCaseID,
+			&i.OvertimeRequestID,
 			&i.EntryType,
 			&i.AmountMinutes,
 			&i.IdempotencyKey,
@@ -4747,7 +5508,7 @@ func (q *Queries) ListLeaveBalanceEntries(ctx context.Context, tenantID string) 
 }
 
 const listLeaveBalanceEntriesByBalance = `-- name: ListLeaveBalanceEntriesByBalance :many
-SELECT id, tenant_id, employee_id, leave_type_id, balance_id, leave_request_id, leave_case_id, entry_type, amount_minutes, idempotency_key, metadata, occurred_at, created_at FROM leave_balance_entries
+SELECT id, tenant_id, employee_id, leave_type_id, balance_id, allocation_id, leave_request_id, leave_case_id, overtime_request_id, entry_type, amount_minutes, idempotency_key, metadata, occurred_at, created_at FROM leave_balance_entries
 WHERE tenant_id = $1
   AND balance_id = $2
 ORDER BY occurred_at ASC, id ASC
@@ -4773,8 +5534,10 @@ func (q *Queries) ListLeaveBalanceEntriesByBalance(ctx context.Context, arg List
 			&i.EmployeeID,
 			&i.LeaveTypeID,
 			&i.BalanceID,
+			&i.AllocationID,
 			&i.LeaveRequestID,
 			&i.LeaveCaseID,
+			&i.OvertimeRequestID,
 			&i.EntryType,
 			&i.AmountMinutes,
 			&i.IdempotencyKey,
@@ -4793,7 +5556,7 @@ func (q *Queries) ListLeaveBalanceEntriesByBalance(ctx context.Context, arg List
 }
 
 const listLeaveBalances = `-- name: ListLeaveBalances :many
-SELECT balance.id, balance.tenant_id, balance.employee_id, balance.leave_type_id, balance.remaining_hours, balance.period_start, balance.period_end, balance.granted_hours, balance.used_hours, balance.source, balance.external_leave_code, balance.external_category_code, balance.entitlement_year, balance.carry_in_hours, balance.carry_expire, balance.raw_payload, balance.last_synced_at, balance.updated_at, leave_type.code AS leave_type
+SELECT balance.id, balance.tenant_id, balance.employee_id, balance.leave_type_id, balance.remaining_minutes, balance.period_start, balance.period_end, balance.granted_minutes, balance.used_minutes, balance.source, balance.external_leave_code, balance.external_category_code, balance.entitlement_year, balance.carry_in_minutes, balance.carry_expire, balance.raw_payload, balance.last_synced_at, balance.updated_at, leave_type.code AS leave_type
 FROM leave_balances balance
 JOIN leave_types leave_type
   ON leave_type.tenant_id = balance.tenant_id
@@ -4821,16 +5584,16 @@ func (q *Queries) ListLeaveBalances(ctx context.Context, tenantID string) ([]Lis
 			&i.LeaveBalance.TenantID,
 			&i.LeaveBalance.EmployeeID,
 			&i.LeaveBalance.LeaveTypeID,
-			&i.LeaveBalance.RemainingHours,
+			&i.LeaveBalance.RemainingMinutes,
 			&i.LeaveBalance.PeriodStart,
 			&i.LeaveBalance.PeriodEnd,
-			&i.LeaveBalance.GrantedHours,
-			&i.LeaveBalance.UsedHours,
+			&i.LeaveBalance.GrantedMinutes,
+			&i.LeaveBalance.UsedMinutes,
 			&i.LeaveBalance.Source,
 			&i.LeaveBalance.ExternalLeaveCode,
 			&i.LeaveBalance.ExternalCategoryCode,
 			&i.LeaveBalance.EntitlementYear,
-			&i.LeaveBalance.CarryInHours,
+			&i.LeaveBalance.CarryInMinutes,
 			&i.LeaveBalance.CarryExpire,
 			&i.LeaveBalance.RawPayload,
 			&i.LeaveBalance.LastSyncedAt,
@@ -4847,8 +5610,167 @@ func (q *Queries) ListLeaveBalances(ctx context.Context, tenantID string) ([]Lis
 	return items, nil
 }
 
+const listLeaveBalancesForOverlay = `-- name: ListLeaveBalancesForOverlay :many
+SELECT balance.id, balance.tenant_id, balance.employee_id, balance.leave_type_id, balance.remaining_minutes, balance.period_start, balance.period_end, balance.granted_minutes, balance.used_minutes, balance.source, balance.external_leave_code, balance.external_category_code, balance.entitlement_year, balance.carry_in_minutes, balance.carry_expire, balance.raw_payload, balance.last_synced_at, balance.updated_at, leave_type.code AS leave_type
+FROM leave_balances balance
+JOIN leave_types leave_type
+  ON leave_type.tenant_id = balance.tenant_id
+ AND leave_type.id = balance.leave_type_id
+WHERE balance.tenant_id = $1
+  AND balance.employee_id = $2
+  AND balance.leave_type_id = $3
+  AND (balance.period_start IS NULL OR balance.period_start <= $4::date)
+  AND (balance.period_end IS NULL OR balance.period_end >= $4::date)
+ORDER BY (balance.source = 'local_anchor') ASC,
+         balance.period_end ASC NULLS LAST, balance.period_start ASC NULLS FIRST, balance.id
+FOR UPDATE OF balance
+`
+
+type ListLeaveBalancesForOverlayParams struct {
+	TenantID    string      `json:"tenant_id"`
+	EmployeeID  string      `json:"employee_id"`
+	LeaveTypeID string      `json:"leave_type_id"`
+	AsOf        pgtype.Date `json:"as_of"`
+}
+
+type ListLeaveBalancesForOverlayRow struct {
+	LeaveBalance LeaveBalance `json:"leave_balance"`
+	LeaveType    string       `json:"leave_type"`
+}
+
+func (q *Queries) ListLeaveBalancesForOverlay(ctx context.Context, arg ListLeaveBalancesForOverlayParams) ([]ListLeaveBalancesForOverlayRow, error) {
+	rows, err := q.db.Query(ctx, listLeaveBalancesForOverlay,
+		arg.TenantID,
+		arg.EmployeeID,
+		arg.LeaveTypeID,
+		arg.AsOf,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListLeaveBalancesForOverlayRow
+	for rows.Next() {
+		var i ListLeaveBalancesForOverlayRow
+		if err := rows.Scan(
+			&i.LeaveBalance.ID,
+			&i.LeaveBalance.TenantID,
+			&i.LeaveBalance.EmployeeID,
+			&i.LeaveBalance.LeaveTypeID,
+			&i.LeaveBalance.RemainingMinutes,
+			&i.LeaveBalance.PeriodStart,
+			&i.LeaveBalance.PeriodEnd,
+			&i.LeaveBalance.GrantedMinutes,
+			&i.LeaveBalance.UsedMinutes,
+			&i.LeaveBalance.Source,
+			&i.LeaveBalance.ExternalLeaveCode,
+			&i.LeaveBalance.ExternalCategoryCode,
+			&i.LeaveBalance.EntitlementYear,
+			&i.LeaveBalance.CarryInMinutes,
+			&i.LeaveBalance.CarryExpire,
+			&i.LeaveBalance.RawPayload,
+			&i.LeaveBalance.LastSyncedAt,
+			&i.LeaveBalance.UpdatedAt,
+			&i.LeaveType,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLeaveRequestAllocationsByRequest = `-- name: ListLeaveRequestAllocationsByRequest :many
+SELECT id, tenant_id, leave_request_id, leave_balance_id, employee_id, leave_type_id, cycle, reserved_minutes, created_at FROM leave_request_allocations
+WHERE tenant_id = $1
+  AND leave_request_id = $2
+ORDER BY id
+`
+
+type ListLeaveRequestAllocationsByRequestParams struct {
+	TenantID       string `json:"tenant_id"`
+	LeaveRequestID string `json:"leave_request_id"`
+}
+
+func (q *Queries) ListLeaveRequestAllocationsByRequest(ctx context.Context, arg ListLeaveRequestAllocationsByRequestParams) ([]LeaveRequestAllocation, error) {
+	rows, err := q.db.Query(ctx, listLeaveRequestAllocationsByRequest, arg.TenantID, arg.LeaveRequestID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LeaveRequestAllocation
+	for rows.Next() {
+		var i LeaveRequestAllocation
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.LeaveRequestID,
+			&i.LeaveBalanceID,
+			&i.EmployeeID,
+			&i.LeaveTypeID,
+			&i.Cycle,
+			&i.ReservedMinutes,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listLeaveRequestAllocationsByRequestCycle = `-- name: ListLeaveRequestAllocationsByRequestCycle :many
+SELECT id, tenant_id, leave_request_id, leave_balance_id, employee_id, leave_type_id, cycle, reserved_minutes, created_at FROM leave_request_allocations
+WHERE tenant_id = $1
+  AND leave_request_id = $2
+  AND cycle = $3
+ORDER BY id
+`
+
+type ListLeaveRequestAllocationsByRequestCycleParams struct {
+	TenantID       string `json:"tenant_id"`
+	LeaveRequestID string `json:"leave_request_id"`
+	Cycle          int32  `json:"cycle"`
+}
+
+func (q *Queries) ListLeaveRequestAllocationsByRequestCycle(ctx context.Context, arg ListLeaveRequestAllocationsByRequestCycleParams) ([]LeaveRequestAllocation, error) {
+	rows, err := q.db.Query(ctx, listLeaveRequestAllocationsByRequestCycle, arg.TenantID, arg.LeaveRequestID, arg.Cycle)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LeaveRequestAllocation
+	for rows.Next() {
+		var i LeaveRequestAllocation
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.LeaveRequestID,
+			&i.LeaveBalanceID,
+			&i.EmployeeID,
+			&i.LeaveTypeID,
+			&i.Cycle,
+			&i.ReservedMinutes,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listLeaveRequestPageByQuery = `-- name: ListLeaveRequestPageByQuery :many
-SELECT id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, reconciliation_status, created_at, updated_at FROM leave_requests
+SELECT id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, requested_minutes, reason, status, form_instance_id, reconciliation_status, created_at, updated_at FROM leave_requests
 WHERE tenant_id = $1
   AND (coalesce(cardinality($2::text[]), 0) = 0 OR employee_id = ANY($2::text[]))
   AND ($3::text = '' OR lower(status) = lower($3::text))
@@ -4902,11 +5824,10 @@ func (q *Queries) ListLeaveRequestPageByQuery(ctx context.Context, arg ListLeave
 			&i.EvaluationSnapshot,
 			&i.StartAt,
 			&i.EndAt,
-			&i.Hours,
+			&i.RequestedMinutes,
 			&i.Reason,
 			&i.Status,
 			&i.FormInstanceID,
-			&i.LeaveBalanceID,
 			&i.ReconciliationStatus,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -4922,7 +5843,7 @@ func (q *Queries) ListLeaveRequestPageByQuery(ctx context.Context, arg ListLeave
 }
 
 const listLeaveRequests = `-- name: ListLeaveRequests :many
-SELECT id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, reconciliation_status, created_at, updated_at FROM leave_requests
+SELECT id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, requested_minutes, reason, status, form_instance_id, reconciliation_status, created_at, updated_at FROM leave_requests
 WHERE tenant_id = $1
 ORDER BY created_at ASC
 `
@@ -4947,11 +5868,10 @@ func (q *Queries) ListLeaveRequests(ctx context.Context, tenantID string) ([]Lea
 			&i.EvaluationSnapshot,
 			&i.StartAt,
 			&i.EndAt,
-			&i.Hours,
+			&i.RequestedMinutes,
 			&i.Reason,
 			&i.Status,
 			&i.FormInstanceID,
-			&i.LeaveBalanceID,
 			&i.ReconciliationStatus,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -4967,7 +5887,7 @@ func (q *Queries) ListLeaveRequests(ctx context.Context, tenantID string) ([]Lea
 }
 
 const listLeaveRequestsByQuery = `-- name: ListLeaveRequestsByQuery :many
-SELECT id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, reconciliation_status, created_at, updated_at FROM leave_requests
+SELECT id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, requested_minutes, reason, status, form_instance_id, reconciliation_status, created_at, updated_at FROM leave_requests
 WHERE tenant_id = $1
   AND (coalesce(cardinality($2::text[]), 0) = 0 OR employee_id = ANY($2::text[]))
   AND ($3::text = '' OR lower(status) = lower($3::text))
@@ -5010,11 +5930,10 @@ func (q *Queries) ListLeaveRequestsByQuery(ctx context.Context, arg ListLeaveReq
 			&i.EvaluationSnapshot,
 			&i.StartAt,
 			&i.EndAt,
-			&i.Hours,
+			&i.RequestedMinutes,
 			&i.Reason,
 			&i.Status,
 			&i.FormInstanceID,
-			&i.LeaveBalanceID,
 			&i.ReconciliationStatus,
 			&i.CreatedAt,
 			&i.UpdatedAt,
@@ -5852,105 +6771,6 @@ func (q *Queries) NextEmployeeNoSequence(ctx context.Context, arg NextEmployeeNo
 	return column_1, err
 }
 
-const releaseLeaveBalance = `-- name: ReleaseLeaveBalance :one
-UPDATE leave_balances
-SET remaining_hours = remaining_hours + $1::numeric(12,2),
-    used_hours = GREATEST(0, used_hours - $1::numeric(12,2)),
-    updated_at = $2::timestamptz
-WHERE tenant_id = $3
-  AND employee_id = $4
-  AND leave_type_id = $5
-RETURNING id, tenant_id, employee_id, leave_type_id, remaining_hours, period_start, period_end, granted_hours, used_hours, source, external_leave_code, external_category_code, entitlement_year, carry_in_hours, carry_expire, raw_payload, last_synced_at, updated_at
-`
-
-type ReleaseLeaveBalanceParams struct {
-	Hours       pgtype.Numeric     `json:"hours"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	TenantID    string             `json:"tenant_id"`
-	EmployeeID  string             `json:"employee_id"`
-	LeaveTypeID string             `json:"leave_type_id"`
-}
-
-func (q *Queries) ReleaseLeaveBalance(ctx context.Context, arg ReleaseLeaveBalanceParams) (LeaveBalance, error) {
-	row := q.db.QueryRow(ctx, releaseLeaveBalance,
-		arg.Hours,
-		arg.UpdatedAt,
-		arg.TenantID,
-		arg.EmployeeID,
-		arg.LeaveTypeID,
-	)
-	var i LeaveBalance
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.EmployeeID,
-		&i.LeaveTypeID,
-		&i.RemainingHours,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.GrantedHours,
-		&i.UsedHours,
-		&i.Source,
-		&i.ExternalLeaveCode,
-		&i.ExternalCategoryCode,
-		&i.EntitlementYear,
-		&i.CarryInHours,
-		&i.CarryExpire,
-		&i.RawPayload,
-		&i.LastSyncedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const releaseLeaveBalanceByID = `-- name: ReleaseLeaveBalanceByID :one
-UPDATE leave_balances
-SET remaining_hours = remaining_hours + $1::numeric(12,2),
-    used_hours = GREATEST(0, used_hours - $1::numeric(12,2)),
-    updated_at = $2::timestamptz
-WHERE tenant_id = $3
-  AND id = $4
-RETURNING id, tenant_id, employee_id, leave_type_id, remaining_hours, period_start, period_end, granted_hours, used_hours, source, external_leave_code, external_category_code, entitlement_year, carry_in_hours, carry_expire, raw_payload, last_synced_at, updated_at
-`
-
-type ReleaseLeaveBalanceByIDParams struct {
-	Hours     pgtype.Numeric     `json:"hours"`
-	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
-	TenantID  string             `json:"tenant_id"`
-	BalanceID string             `json:"balance_id"`
-}
-
-func (q *Queries) ReleaseLeaveBalanceByID(ctx context.Context, arg ReleaseLeaveBalanceByIDParams) (LeaveBalance, error) {
-	row := q.db.QueryRow(ctx, releaseLeaveBalanceByID,
-		arg.Hours,
-		arg.UpdatedAt,
-		arg.TenantID,
-		arg.BalanceID,
-	)
-	var i LeaveBalance
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.EmployeeID,
-		&i.LeaveTypeID,
-		&i.RemainingHours,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.GrantedHours,
-		&i.UsedHours,
-		&i.Source,
-		&i.ExternalLeaveCode,
-		&i.ExternalCategoryCode,
-		&i.EntitlementYear,
-		&i.CarryInHours,
-		&i.CarryExpire,
-		&i.RawPayload,
-		&i.LastSyncedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
-}
-
 const releaseWorkflowRunTemporalStart = `-- name: ReleaseWorkflowRunTemporalStart :one
 UPDATE workflow_runs
 SET temporal_start_status = 'pending_start',
@@ -5979,62 +6799,6 @@ func (q *Queries) ReleaseWorkflowRunTemporalStart(ctx context.Context, arg Relea
 	var id string
 	err := row.Scan(&id)
 	return id, err
-}
-
-const reserveLeaveBalance = `-- name: ReserveLeaveBalance :one
-UPDATE leave_balances
-SET remaining_hours = remaining_hours - $1::numeric(12,2),
-    used_hours = used_hours + $1::numeric(12,2),
-    updated_at = $2::timestamptz
-WHERE tenant_id = $3
-  AND employee_id = $4
-  AND leave_type_id = $5
-  AND (NULLIF(period_start::text, '') IS NULL OR NULLIF(period_start::text, '')::date <= $6::date)
-  AND (NULLIF(period_end::text, '') IS NULL OR NULLIF(period_end::text, '')::date >= $6::date)
-  AND remaining_hours >= $1::numeric(12,2)
-RETURNING id, tenant_id, employee_id, leave_type_id, remaining_hours, period_start, period_end, granted_hours, used_hours, source, external_leave_code, external_category_code, entitlement_year, carry_in_hours, carry_expire, raw_payload, last_synced_at, updated_at
-`
-
-type ReserveLeaveBalanceParams struct {
-	Hours       pgtype.Numeric     `json:"hours"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-	TenantID    string             `json:"tenant_id"`
-	EmployeeID  string             `json:"employee_id"`
-	LeaveTypeID string             `json:"leave_type_id"`
-	AsOf        pgtype.Date        `json:"as_of"`
-}
-
-func (q *Queries) ReserveLeaveBalance(ctx context.Context, arg ReserveLeaveBalanceParams) (LeaveBalance, error) {
-	row := q.db.QueryRow(ctx, reserveLeaveBalance,
-		arg.Hours,
-		arg.UpdatedAt,
-		arg.TenantID,
-		arg.EmployeeID,
-		arg.LeaveTypeID,
-		arg.AsOf,
-	)
-	var i LeaveBalance
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.EmployeeID,
-		&i.LeaveTypeID,
-		&i.RemainingHours,
-		&i.PeriodStart,
-		&i.PeriodEnd,
-		&i.GrantedHours,
-		&i.UsedHours,
-		&i.Source,
-		&i.ExternalLeaveCode,
-		&i.ExternalCategoryCode,
-		&i.EntitlementYear,
-		&i.CarryInHours,
-		&i.CarryExpire,
-		&i.RawPayload,
-		&i.LastSyncedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
 }
 
 const retryOutboxEvent = `-- name: RetryOutboxEvent :one
@@ -6256,87 +7020,270 @@ func (q *Queries) UpsertAccount(ctx context.Context, arg UpsertAccountParams) (A
 }
 
 const upsertAgentRun = `-- name: UpsertAgentRun :one
-INSERT INTO agent_runs (
-    id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer,
-    status, reference_items, llm_call_count, input_tokens, cached_tokens,
-    output_tokens, total_tokens, usage_complete, created_at, updated_at
-) VALUES (
-    $1, $2, $3, $4,
-    $5, $6, $7, $8,
-    $9, $10::jsonb, $11,
-    $12, $13, $14,
-    $15, $16, $17, $18
+WITH inserted_conversation AS (
+    INSERT INTO conversations (
+        id, tenant_id, owner_account_id, agent_id, current_segment_id,
+        next_message_sequence, title, status, last_message_at,
+        created_at, updated_at, archived_at
+    )
+    SELECT
+        'execution:' || $3::text,
+        $4,
+        $5,
+        (SELECT agents.id FROM agents WHERE agents.tenant_id = $4 AND agents.id = NULLIF($6::text, '') AND agents.lifecycle_status = 'active'),
+        NULL, 1, '', 'active', NULL,
+        $7, $8, NULL
+    WHERE $9::text = ''
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id, tenant_id, owner_account_id, agent_id, current_segment_id, next_message_sequence, title, status, last_message_at, created_at, updated_at, archived_at
+), target_conversation AS (
+    SELECT id, tenant_id, owner_account_id, agent_id, current_segment_id, next_message_sequence, title, status, last_message_at, created_at, updated_at, archived_at FROM inserted_conversation
+    UNION ALL
+    SELECT conversations.id, conversations.tenant_id, conversations.owner_account_id, conversations.agent_id, conversations.current_segment_id, conversations.next_message_sequence, conversations.title, conversations.status, conversations.last_message_at, conversations.created_at, conversations.updated_at, conversations.archived_at
+    FROM conversations
+    WHERE conversations.tenant_id = $4
+      AND conversations.id = NULLIF($9::text, '')
+    LIMIT 1
+), inserted_segment AS (
+    INSERT INTO conversation_segments (
+        id, tenant_id, conversation_id, ordinal, start_reason, created_at
+    )
+    SELECT target_conversation.id || ':segment:1', target_conversation.tenant_id,
+           target_conversation.id, 1, 'initial', $7
+    FROM target_conversation
+    WHERE target_conversation.current_segment_id IS NULL
+    ON CONFLICT (tenant_id, conversation_id, ordinal) DO NOTHING
+    RETURNING id, tenant_id, conversation_id, ordinal, start_reason, created_at
+), target_segment AS (
+    SELECT id, tenant_id, conversation_id FROM inserted_segment
+    UNION ALL
+    SELECT segments.id, segments.tenant_id, segments.conversation_id
+    FROM conversation_segments segments
+    JOIN target_conversation conversations
+      ON conversations.tenant_id = segments.tenant_id
+     AND conversations.id = segments.conversation_id
+     AND conversations.current_segment_id = segments.id
+    UNION ALL
+    SELECT segments.id, segments.tenant_id, segments.conversation_id
+    FROM conversation_segments segments
+    JOIN target_conversation conversations
+      ON conversations.tenant_id = segments.tenant_id
+     AND conversations.id = segments.conversation_id
+    WHERE conversations.current_segment_id IS NULL AND segments.ordinal = 1
+    LIMIT 1
+), allocated_input AS (
+    UPDATE conversations
+    SET current_segment_id = target_segment.id,
+        next_message_sequence = conversations.next_message_sequence + 1,
+        last_message_at = GREATEST(COALESCE(conversations.last_message_at, $7::timestamptz), $7::timestamptz),
+        updated_at = GREATEST(conversations.updated_at, $8::timestamptz)
+    FROM target_segment
+    WHERE conversations.tenant_id = target_segment.tenant_id
+      AND conversations.id = target_segment.conversation_id
+    RETURNING conversations.id, conversations.tenant_id, conversations.owner_account_id, conversations.agent_id, conversations.current_segment_id, conversations.next_message_sequence, conversations.title, conversations.status, conversations.last_message_at, conversations.created_at, conversations.updated_at, conversations.archived_at, conversations.next_message_sequence - 1 AS allocated_sequence
+), input_message AS (
+    INSERT INTO messages (
+        id, tenant_id, conversation_id, segment_id, sequence_no,
+        role, content, content_json, execution_id, execution_step_id, created_at
+    )
+    SELECT
+        $3::text || ':input', allocated_input.tenant_id,
+        allocated_input.id, allocated_input.current_segment_id,
+        allocated_input.allocated_sequence, 'user', $10,
+        '{}'::jsonb, NULL, NULL, $7
+    FROM allocated_input
+    ON CONFLICT (id) DO UPDATE SET
+        content = EXCLUDED.content,
+        content_json = EXCLUDED.content_json
+    WHERE messages.tenant_id = EXCLUDED.tenant_id
+    RETURNING id, tenant_id, conversation_id, segment_id, sequence_no, role, content, content_json, execution_id, execution_step_id, created_at
+), binding AS (
+    SELECT
+        input_message.id, input_message.tenant_id, input_message.conversation_id, input_message.segment_id, input_message.sequence_no, input_message.role, input_message.content, input_message.content_json, input_message.execution_id, input_message.execution_step_id, input_message.created_at,
+        CASE WHEN revisions.id IS NULL THEN NULL ELSE agents.id END AS bound_agent_id,
+        revisions.id AS bound_revision_id,
+        revisions.model_connection_id AS bound_model_connection_id
+    FROM input_message
+    JOIN conversations
+      ON conversations.tenant_id = input_message.tenant_id
+     AND conversations.id = input_message.conversation_id
+    LEFT JOIN agents
+      ON agents.tenant_id = conversations.tenant_id
+     AND agents.id = conversations.agent_id
+    LEFT JOIN agent_revisions revisions
+      ON revisions.tenant_id = agents.tenant_id
+     AND revisions.agent_id = agents.id
+     AND revisions.id = COALESCE(agents.published_revision_id, agents.draft_revision_id)
+), upserted_execution AS (
+    INSERT INTO executions (
+        id, tenant_id, account_id, conversation_id, segment_id, input_message_id,
+        agent_id, agent_revision_id, model_connection_id,
+        mode, trigger_type, status, queued_at, started_at, completed_at,
+        error_code, error_category, safe_error_message,
+        llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens,
+        usage_complete, created_at, updated_at
+    )
+    SELECT
+        $3, $4, $5,
+        binding.conversation_id, binding.segment_id, binding.id,
+        binding.bound_agent_id, binding.bound_revision_id, binding.bound_model_connection_id,
+        $11, 'chat', $12, $7,
+        CASE WHEN $12::text = 'queued' THEN NULL ELSE $7::timestamptz END,
+        CASE WHEN $12::text IN ('completed', 'failed', 'cancelled') THEN $8::timestamptz ELSE NULL END,
+        '', '', CASE WHEN $12::text = 'failed' THEN $1::text ELSE '' END,
+        $13, $14, $15,
+        $16, $17, $18,
+        $7, $8
+    FROM binding
+    ON CONFLICT (id) DO UPDATE SET
+        status = EXCLUDED.status,
+        started_at = CASE
+            WHEN EXCLUDED.status = 'queued' THEN NULL
+            ELSE COALESCE(executions.started_at, EXCLUDED.started_at)
+        END,
+        completed_at = EXCLUDED.completed_at,
+        safe_error_message = EXCLUDED.safe_error_message,
+        llm_call_count = EXCLUDED.llm_call_count,
+        input_tokens = EXCLUDED.input_tokens,
+        cached_tokens = EXCLUDED.cached_tokens,
+        output_tokens = EXCLUDED.output_tokens,
+        total_tokens = EXCLUDED.total_tokens,
+        usage_complete = EXCLUDED.usage_complete,
+        updated_at = EXCLUDED.updated_at
+    WHERE executions.tenant_id = EXCLUDED.tenant_id
+    RETURNING id, tenant_id, account_id, conversation_id, segment_id, input_message_id, agent_id, agent_revision_id, model_connection_id, mode, trigger_type, status, queued_at, started_at, completed_at, error_code, error_category, safe_error_message, llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens, usage_complete, created_at, updated_at
+), allocated_answer AS (
+    UPDATE conversations
+    SET next_message_sequence = conversations.next_message_sequence + 1,
+        last_message_at = GREATEST(COALESCE(conversations.last_message_at, $8::timestamptz), $8::timestamptz),
+        updated_at = GREATEST(conversations.updated_at, $8::timestamptz)
+    FROM upserted_execution
+    WHERE conversations.tenant_id = upserted_execution.tenant_id
+      AND conversations.id = upserted_execution.conversation_id
+      AND $1::text <> ''
+    RETURNING conversations.next_message_sequence - 1 AS allocated_sequence
+), answer_message AS (
+    INSERT INTO messages (
+        id, tenant_id, conversation_id, segment_id, sequence_no,
+        role, content, content_json, execution_id, execution_step_id, created_at
+    )
+    SELECT
+        upserted_execution.id || ':answer', upserted_execution.tenant_id,
+        upserted_execution.conversation_id, upserted_execution.segment_id,
+        allocated_answer.allocated_sequence, 'assistant', $1,
+        jsonb_build_object('reference_items', $2::jsonb),
+        upserted_execution.id, NULL, $8
+    FROM upserted_execution
+    CROSS JOIN allocated_answer
+    ON CONFLICT (id) DO UPDATE SET
+        content = EXCLUDED.content,
+        content_json = EXCLUDED.content_json,
+        execution_id = EXCLUDED.execution_id
+    WHERE messages.tenant_id = EXCLUDED.tenant_id
+    RETURNING id, tenant_id, conversation_id, segment_id, sequence_no, role, content, content_json, execution_id, execution_step_id, created_at
 )
-ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    account_id = EXCLUDED.account_id,
-    agent_id = EXCLUDED.agent_id,
-    session_id = EXCLUDED.session_id,
-    mode = EXCLUDED.mode,
-    prompt = EXCLUDED.prompt,
-    answer = EXCLUDED.answer,
-    status = EXCLUDED.status,
-    reference_items = EXCLUDED.reference_items,
-    llm_call_count = EXCLUDED.llm_call_count,
-    input_tokens = EXCLUDED.input_tokens,
-    cached_tokens = EXCLUDED.cached_tokens,
-    output_tokens = EXCLUDED.output_tokens,
-    total_tokens = EXCLUDED.total_tokens,
-    usage_complete = EXCLUDED.usage_complete,
-    created_at = EXCLUDED.created_at,
-    updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, account_id, agent_id, session_id, mode, prompt, answer, status, reference_items, llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens, usage_complete, created_at, updated_at
+SELECT
+    executions.id, executions.tenant_id, executions.account_id, executions.agent_id,
+    executions.conversation_id AS session_id, executions.segment_id,
+    executions.input_message_id, executions.agent_revision_id, executions.model_connection_id,
+    executions.mode, input_message.content AS prompt,
+    COALESCE(answer_message.content, $1::text, '')::text AS answer,
+    executions.status,
+    COALESCE(answer_message.content_json->'reference_items', $2::jsonb, '[]'::jsonb) AS reference_items,
+    executions.llm_call_count, executions.input_tokens, executions.cached_tokens,
+    executions.output_tokens, executions.total_tokens, executions.usage_complete,
+    executions.queued_at, executions.started_at, executions.completed_at,
+    executions.error_code, executions.error_category, executions.safe_error_message,
+    executions.created_at, executions.updated_at
+FROM upserted_execution executions
+JOIN input_message ON input_message.tenant_id = executions.tenant_id AND input_message.id = executions.input_message_id
+LEFT JOIN answer_message ON answer_message.tenant_id = executions.tenant_id AND answer_message.execution_id = executions.id
 `
 
 type UpsertAgentRunParams struct {
+	Answer         string             `json:"answer"`
+	ReferenceItems []byte             `json:"reference_items"`
 	ID             string             `json:"id"`
 	TenantID       string             `json:"tenant_id"`
 	AccountID      string             `json:"account_id"`
-	AgentID        pgtype.Text        `json:"agent_id"`
-	SessionID      pgtype.Text        `json:"session_id"`
-	Mode           string             `json:"mode"`
+	AgentID        string             `json:"agent_id"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	SessionID      string             `json:"session_id"`
 	Prompt         string             `json:"prompt"`
-	Answer         string             `json:"answer"`
+	Mode           string             `json:"mode"`
 	Status         string             `json:"status"`
-	ReferenceItems []byte             `json:"reference_items"`
 	LlmCallCount   int64              `json:"llm_call_count"`
 	InputTokens    int64              `json:"input_tokens"`
 	CachedTokens   int64              `json:"cached_tokens"`
 	OutputTokens   int64              `json:"output_tokens"`
 	TotalTokens    int64              `json:"total_tokens"`
 	UsageComplete  bool               `json:"usage_complete"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) UpsertAgentRun(ctx context.Context, arg UpsertAgentRunParams) (AgentRun, error) {
+type UpsertAgentRunRow struct {
+	ID                string             `json:"id"`
+	TenantID          string             `json:"tenant_id"`
+	AccountID         string             `json:"account_id"`
+	AgentID           pgtype.Text        `json:"agent_id"`
+	SessionID         string             `json:"session_id"`
+	SegmentID         string             `json:"segment_id"`
+	InputMessageID    string             `json:"input_message_id"`
+	AgentRevisionID   pgtype.Text        `json:"agent_revision_id"`
+	ModelConnectionID pgtype.Text        `json:"model_connection_id"`
+	Mode              string             `json:"mode"`
+	Prompt            string             `json:"prompt"`
+	Answer            string             `json:"answer"`
+	Status            string             `json:"status"`
+	ReferenceItems    interface{}        `json:"reference_items"`
+	LlmCallCount      int64              `json:"llm_call_count"`
+	InputTokens       int64              `json:"input_tokens"`
+	CachedTokens      int64              `json:"cached_tokens"`
+	OutputTokens      int64              `json:"output_tokens"`
+	TotalTokens       int64              `json:"total_tokens"`
+	UsageComplete     bool               `json:"usage_complete"`
+	QueuedAt          pgtype.Timestamptz `json:"queued_at"`
+	StartedAt         pgtype.Timestamptz `json:"started_at"`
+	CompletedAt       pgtype.Timestamptz `json:"completed_at"`
+	ErrorCode         string             `json:"error_code"`
+	ErrorCategory     string             `json:"error_category"`
+	SafeErrorMessage  string             `json:"safe_error_message"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt         pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertAgentRun(ctx context.Context, arg UpsertAgentRunParams) (UpsertAgentRunRow, error) {
 	row := q.db.QueryRow(ctx, upsertAgentRun,
+		arg.Answer,
+		arg.ReferenceItems,
 		arg.ID,
 		arg.TenantID,
 		arg.AccountID,
 		arg.AgentID,
+		arg.CreatedAt,
+		arg.UpdatedAt,
 		arg.SessionID,
-		arg.Mode,
 		arg.Prompt,
-		arg.Answer,
+		arg.Mode,
 		arg.Status,
-		arg.ReferenceItems,
 		arg.LlmCallCount,
 		arg.InputTokens,
 		arg.CachedTokens,
 		arg.OutputTokens,
 		arg.TotalTokens,
 		arg.UsageComplete,
-		arg.CreatedAt,
-		arg.UpdatedAt,
 	)
-	var i AgentRun
+	var i UpsertAgentRunRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.AccountID,
 		&i.AgentID,
 		&i.SessionID,
+		&i.SegmentID,
+		&i.InputMessageID,
+		&i.AgentRevisionID,
+		&i.ModelConnectionID,
 		&i.Mode,
 		&i.Prompt,
 		&i.Answer,
@@ -6348,6 +7295,12 @@ func (q *Queries) UpsertAgentRun(ctx context.Context, arg UpsertAgentRunParams) 
 		&i.OutputTokens,
 		&i.TotalTokens,
 		&i.UsageComplete,
+		&i.QueuedAt,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.ErrorCode,
+		&i.ErrorCategory,
+		&i.SafeErrorMessage,
 		&i.CreatedAt,
 		&i.UpdatedAt,
 	)
@@ -6432,13 +7385,15 @@ INSERT INTO attendance_clock_records (
     device_info, correction_request_id, voided, voided_at, voided_by_account_id,
     void_reason, created_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-    $11, $12, $13, $14, $15, $16, $17::jsonb, $18, $19, $20, $21,
-    $22, $23
+    $1, $2, $3, $4,
+    $5::date, $6, $7, $8,
+    $9, $10, $11,
+    $12, $13, $14,
+    $15, $16, $17::jsonb,
+    $18, $19, $20,
+    $21, $22, $23
 )
 ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    employee_id = EXCLUDED.employee_id,
     worksite_id = EXCLUDED.worksite_id,
     work_date = EXCLUDED.work_date,
     direction = EXCLUDED.direction,
@@ -6457,8 +7412,9 @@ ON CONFLICT (id) DO UPDATE SET
     voided = EXCLUDED.voided,
     voided_at = EXCLUDED.voided_at,
     voided_by_account_id = EXCLUDED.voided_by_account_id,
-    void_reason = EXCLUDED.void_reason,
-    created_at = EXCLUDED.created_at
+    void_reason = EXCLUDED.void_reason
+WHERE attendance_clock_records.tenant_id = EXCLUDED.tenant_id
+  AND attendance_clock_records.employee_id = EXCLUDED.employee_id
 RETURNING id, tenant_id, employee_id, worksite_id, work_date, direction, client_event_id, clocked_at, latitude, longitude, accuracy_meters, distance_meters, record_status, rejection_reason, source, device_id, device_info, correction_request_id, voided, voided_at, voided_by_account_id, void_reason, created_at
 `
 
@@ -6467,24 +7423,24 @@ type UpsertAttendanceClockRecordParams struct {
 	TenantID            string             `json:"tenant_id"`
 	EmployeeID          string             `json:"employee_id"`
 	WorksiteID          pgtype.Text        `json:"worksite_id"`
-	WorkDate            string             `json:"work_date"`
+	WorkDate            pgtype.Date        `json:"work_date"`
 	Direction           string             `json:"direction"`
 	ClientEventID       string             `json:"client_event_id"`
 	ClockedAt           pgtype.Timestamptz `json:"clocked_at"`
-	Latitude            float64            `json:"latitude"`
-	Longitude           float64            `json:"longitude"`
-	AccuracyMeters      float64            `json:"accuracy_meters"`
-	DistanceMeters      float64            `json:"distance_meters"`
+	Latitude            pgtype.Float8      `json:"latitude"`
+	Longitude           pgtype.Float8      `json:"longitude"`
+	AccuracyMeters      pgtype.Float8      `json:"accuracy_meters"`
+	DistanceMeters      pgtype.Float8      `json:"distance_meters"`
 	RecordStatus        string             `json:"record_status"`
 	RejectionReason     string             `json:"rejection_reason"`
 	Source              string             `json:"source"`
 	DeviceID            string             `json:"device_id"`
-	Column17            []byte             `json:"column_17"`
-	CorrectionRequestID string             `json:"correction_request_id"`
+	DeviceInfo          []byte             `json:"device_info"`
+	CorrectionRequestID pgtype.Text        `json:"correction_request_id"`
 	Voided              bool               `json:"voided"`
 	VoidedAt            pgtype.Timestamptz `json:"voided_at"`
-	VoidedByAccountID   string             `json:"voided_by_account_id"`
-	VoidReason          string             `json:"void_reason"`
+	VoidedByAccountID   pgtype.Text        `json:"voided_by_account_id"`
+	VoidReason          pgtype.Text        `json:"void_reason"`
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 }
 
@@ -6506,7 +7462,7 @@ func (q *Queries) UpsertAttendanceClockRecord(ctx context.Context, arg UpsertAtt
 		arg.RejectionReason,
 		arg.Source,
 		arg.DeviceID,
-		arg.Column17,
+		arg.DeviceInfo,
 		arg.CorrectionRequestID,
 		arg.Voided,
 		arg.VoidedAt,
@@ -6550,12 +7506,14 @@ INSERT INTO attendance_correction_requests (
     status, form_instance_id, clock_record_id, reviewed_by_account_id,
     review_reason, reviewed_at, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14,
-    $15, $16, $17, $18
+    $1, $2, $3, $4,
+    $5, $6::date, $7,
+    $8, $9, $10,
+    $11, $12, $13,
+    $14, $15, $16,
+    $17, $18
 )
 ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    employee_id = EXCLUDED.employee_id,
     direction = EXCLUDED.direction,
     requested_clocked_at = EXCLUDED.requested_clocked_at,
     work_date = EXCLUDED.work_date,
@@ -6569,8 +7527,9 @@ ON CONFLICT (id) DO UPDATE SET
     reviewed_by_account_id = EXCLUDED.reviewed_by_account_id,
     review_reason = EXCLUDED.review_reason,
     reviewed_at = EXCLUDED.reviewed_at,
-    created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
+WHERE attendance_correction_requests.tenant_id = EXCLUDED.tenant_id
+  AND attendance_correction_requests.employee_id = EXCLUDED.employee_id
 RETURNING id, tenant_id, employee_id, direction, requested_clocked_at, work_date, correction_type, target_clock_record_id, replacement_clock_record_id, reason, status, form_instance_id, clock_record_id, reviewed_by_account_id, review_reason, reviewed_at, created_at, updated_at
 `
 
@@ -6580,15 +7539,15 @@ type UpsertAttendanceCorrectionRequestParams struct {
 	EmployeeID               string             `json:"employee_id"`
 	Direction                string             `json:"direction"`
 	RequestedClockedAt       pgtype.Timestamptz `json:"requested_clocked_at"`
-	WorkDate                 string             `json:"work_date"`
+	WorkDate                 pgtype.Date        `json:"work_date"`
 	CorrectionType           string             `json:"correction_type"`
-	TargetClockRecordID      string             `json:"target_clock_record_id"`
-	ReplacementClockRecordID string             `json:"replacement_clock_record_id"`
+	TargetClockRecordID      pgtype.Text        `json:"target_clock_record_id"`
+	ReplacementClockRecordID pgtype.Text        `json:"replacement_clock_record_id"`
 	Reason                   string             `json:"reason"`
 	Status                   string             `json:"status"`
 	FormInstanceID           string             `json:"form_instance_id"`
-	ClockRecordID            string             `json:"clock_record_id"`
-	ReviewedByAccountID      string             `json:"reviewed_by_account_id"`
+	ClockRecordID            pgtype.Text        `json:"clock_record_id"`
+	ReviewedByAccountID      pgtype.Text        `json:"reviewed_by_account_id"`
 	ReviewReason             string             `json:"review_reason"`
 	ReviewedAt               pgtype.Timestamptz `json:"reviewed_at"`
 	CreatedAt                pgtype.Timestamptz `json:"created_at"`
@@ -6649,7 +7608,7 @@ INSERT INTO attendance_daily_summaries (
     leave2_counted, overtime_start, overtime_end, overtime_hours, overtime_counted,
     payload, source, external_ref, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+    $1, $2, $3, $4::date, $5, $6, $7, $8, $9, $10, $11, $12,
     $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
     $25, $26, $27, $28, $29, $30::jsonb, $31, $32, $33, $34
 )
@@ -6693,7 +7652,7 @@ type UpsertAttendanceDailySummaryParams struct {
 	ID              string             `json:"id"`
 	TenantID        string             `json:"tenant_id"`
 	EmployeeID      string             `json:"employee_id"`
-	WorkDate        string             `json:"work_date"`
+	Column4         pgtype.Date        `json:"column_4"`
 	ShiftStart      string             `json:"shift_start"`
 	ShiftEnd        string             `json:"shift_end"`
 	ShiftHours      float64            `json:"shift_hours"`
@@ -6731,7 +7690,7 @@ func (q *Queries) UpsertAttendanceDailySummary(ctx context.Context, arg UpsertAt
 		arg.ID,
 		arg.TenantID,
 		arg.EmployeeID,
-		arg.WorkDate,
+		arg.Column4,
 		arg.ShiftStart,
 		arg.ShiftEnd,
 		arg.ShiftHours,
@@ -6798,6 +7757,118 @@ func (q *Queries) UpsertAttendanceDailySummary(ctx context.Context, arg UpsertAt
 		&i.Source,
 		&i.ExternalRef,
 		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertAttendanceDayProjection = `-- name: UpsertAttendanceDayProjection :one
+INSERT INTO attendance_day_projections (
+    tenant_id, employee_id, work_date, policy_version,
+    scheduled_start_at, scheduled_end_at, clock_in_record_id, clock_out_record_id,
+    last_punch_record_id, punch_count, worked_minutes, approved_leave_minutes,
+    pending_leave_minutes, required_minutes, overtime_minutes, day_status,
+    anomaly_reasons, input_fingerprint, payload, computed_at, updated_at
+) VALUES (
+    $1, $2, $3::date, $4,
+    $5, $6, $7, $8,
+    $9, $10, $11, $12,
+    $13, $14, $15, $16,
+    $17::text[], $18, $19::jsonb,
+    $20, $21
+)
+ON CONFLICT (tenant_id, employee_id, work_date) DO UPDATE SET
+    policy_version = EXCLUDED.policy_version,
+    scheduled_start_at = EXCLUDED.scheduled_start_at,
+    scheduled_end_at = EXCLUDED.scheduled_end_at,
+    clock_in_record_id = EXCLUDED.clock_in_record_id,
+    clock_out_record_id = EXCLUDED.clock_out_record_id,
+    last_punch_record_id = EXCLUDED.last_punch_record_id,
+    punch_count = EXCLUDED.punch_count,
+    worked_minutes = EXCLUDED.worked_minutes,
+    approved_leave_minutes = EXCLUDED.approved_leave_minutes,
+    pending_leave_minutes = EXCLUDED.pending_leave_minutes,
+    required_minutes = EXCLUDED.required_minutes,
+    overtime_minutes = EXCLUDED.overtime_minutes,
+    day_status = EXCLUDED.day_status,
+    anomaly_reasons = EXCLUDED.anomaly_reasons,
+    input_fingerprint = EXCLUDED.input_fingerprint,
+    payload = EXCLUDED.payload,
+    computed_at = EXCLUDED.computed_at,
+    updated_at = EXCLUDED.updated_at
+RETURNING tenant_id, employee_id, work_date, policy_version, scheduled_start_at, scheduled_end_at, clock_in_record_id, clock_out_record_id, last_punch_record_id, punch_count, required_minutes, worked_minutes, approved_leave_minutes, pending_leave_minutes, overtime_minutes, day_status, anomaly_reasons, input_fingerprint, payload, computed_at, updated_at
+`
+
+type UpsertAttendanceDayProjectionParams struct {
+	TenantID             string             `json:"tenant_id"`
+	EmployeeID           string             `json:"employee_id"`
+	WorkDate             pgtype.Date        `json:"work_date"`
+	PolicyVersion        int32              `json:"policy_version"`
+	ScheduledStartAt     pgtype.Timestamptz `json:"scheduled_start_at"`
+	ScheduledEndAt       pgtype.Timestamptz `json:"scheduled_end_at"`
+	ClockInRecordID      pgtype.Text        `json:"clock_in_record_id"`
+	ClockOutRecordID     pgtype.Text        `json:"clock_out_record_id"`
+	LastPunchRecordID    pgtype.Text        `json:"last_punch_record_id"`
+	PunchCount           int32              `json:"punch_count"`
+	WorkedMinutes        int32              `json:"worked_minutes"`
+	ApprovedLeaveMinutes int32              `json:"approved_leave_minutes"`
+	PendingLeaveMinutes  int32              `json:"pending_leave_minutes"`
+	RequiredMinutes      int32              `json:"required_minutes"`
+	OvertimeMinutes      int32              `json:"overtime_minutes"`
+	DayStatus            string             `json:"day_status"`
+	AnomalyReasons       []string           `json:"anomaly_reasons"`
+	InputFingerprint     string             `json:"input_fingerprint"`
+	Payload              []byte             `json:"payload"`
+	ComputedAt           pgtype.Timestamptz `json:"computed_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertAttendanceDayProjection(ctx context.Context, arg UpsertAttendanceDayProjectionParams) (AttendanceDayProjection, error) {
+	row := q.db.QueryRow(ctx, upsertAttendanceDayProjection,
+		arg.TenantID,
+		arg.EmployeeID,
+		arg.WorkDate,
+		arg.PolicyVersion,
+		arg.ScheduledStartAt,
+		arg.ScheduledEndAt,
+		arg.ClockInRecordID,
+		arg.ClockOutRecordID,
+		arg.LastPunchRecordID,
+		arg.PunchCount,
+		arg.WorkedMinutes,
+		arg.ApprovedLeaveMinutes,
+		arg.PendingLeaveMinutes,
+		arg.RequiredMinutes,
+		arg.OvertimeMinutes,
+		arg.DayStatus,
+		arg.AnomalyReasons,
+		arg.InputFingerprint,
+		arg.Payload,
+		arg.ComputedAt,
+		arg.UpdatedAt,
+	)
+	var i AttendanceDayProjection
+	err := row.Scan(
+		&i.TenantID,
+		&i.EmployeeID,
+		&i.WorkDate,
+		&i.PolicyVersion,
+		&i.ScheduledStartAt,
+		&i.ScheduledEndAt,
+		&i.ClockInRecordID,
+		&i.ClockOutRecordID,
+		&i.LastPunchRecordID,
+		&i.PunchCount,
+		&i.RequiredMinutes,
+		&i.WorkedMinutes,
+		&i.ApprovedLeaveMinutes,
+		&i.PendingLeaveMinutes,
+		&i.OvertimeMinutes,
+		&i.DayStatus,
+		&i.AnomalyReasons,
+		&i.InputFingerprint,
+		&i.Payload,
+		&i.ComputedAt,
 		&i.UpdatedAt,
 	)
 	return i, err
@@ -6991,93 +8062,48 @@ func (q *Queries) UpsertEmployee(ctx context.Context, arg UpsertEmployeeParams) 
 	return i, err
 }
 
-const upsertEmployeeImportSession = `-- name: UpsertEmployeeImportSession :one
-INSERT INTO employee_import_sessions (
-    id, tenant_id, filename, object_provider, object_bucket, object_key,
-    content_type, size_bytes, sha256, status, rows, summary,
-    created_by_account_id, confirmed_by_account_id, created_at, expires_at, confirmed_at
+const upsertExternalLeaveCaseSource = `-- name: UpsertExternalLeaveCaseSource :one
+INSERT INTO leave_case_sources (
+    tenant_id, leave_case_id, external_leave_record_id, match_method, match_status, created_at
 ) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17
+    $1, $2, $3,
+    $4, $5, $6
 )
-ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    filename = EXCLUDED.filename,
-    object_provider = EXCLUDED.object_provider,
-    object_bucket = EXCLUDED.object_bucket,
-    object_key = EXCLUDED.object_key,
-    content_type = EXCLUDED.content_type,
-    size_bytes = EXCLUDED.size_bytes,
-    sha256 = EXCLUDED.sha256,
-    status = EXCLUDED.status,
-    rows = EXCLUDED.rows,
-    summary = EXCLUDED.summary,
-    created_by_account_id = EXCLUDED.created_by_account_id,
-    confirmed_by_account_id = EXCLUDED.confirmed_by_account_id,
-    created_at = EXCLUDED.created_at,
-    expires_at = EXCLUDED.expires_at,
-    confirmed_at = EXCLUDED.confirmed_at
-RETURNING id, tenant_id, filename, object_provider, object_bucket, object_key, content_type, size_bytes, sha256, status, rows, summary, created_by_account_id, confirmed_by_account_id, created_at, expires_at, confirmed_at
+ON CONFLICT (tenant_id, external_leave_record_id) WHERE external_leave_record_id IS NOT NULL DO UPDATE SET
+    leave_case_id = EXCLUDED.leave_case_id,
+    match_method = EXCLUDED.match_method,
+    match_status = EXCLUDED.match_status
+RETURNING id, tenant_id, leave_case_id, leave_request_id, external_leave_record_id, match_method, match_status, created_at
 `
 
-type UpsertEmployeeImportSessionParams struct {
-	ID                   string             `json:"id"`
-	TenantID             string             `json:"tenant_id"`
-	Filename             string             `json:"filename"`
-	ObjectProvider       string             `json:"object_provider"`
-	ObjectBucket         string             `json:"object_bucket"`
-	ObjectKey            string             `json:"object_key"`
-	ContentType          string             `json:"content_type"`
-	SizeBytes            int64              `json:"size_bytes"`
-	Sha256               string             `json:"sha256"`
-	Status               string             `json:"status"`
-	Rows                 []byte             `json:"rows"`
-	Summary              []byte             `json:"summary"`
-	CreatedByAccountID   string             `json:"created_by_account_id"`
-	ConfirmedByAccountID string             `json:"confirmed_by_account_id"`
-	CreatedAt            pgtype.Timestamptz `json:"created_at"`
-	ExpiresAt            pgtype.Timestamptz `json:"expires_at"`
-	ConfirmedAt          pgtype.Timestamptz `json:"confirmed_at"`
+type UpsertExternalLeaveCaseSourceParams struct {
+	TenantID              string             `json:"tenant_id"`
+	LeaveCaseID           string             `json:"leave_case_id"`
+	ExternalLeaveRecordID pgtype.Text        `json:"external_leave_record_id"`
+	MatchMethod           string             `json:"match_method"`
+	MatchStatus           string             `json:"match_status"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
 }
 
-func (q *Queries) UpsertEmployeeImportSession(ctx context.Context, arg UpsertEmployeeImportSessionParams) (EmployeeImportSession, error) {
-	row := q.db.QueryRow(ctx, upsertEmployeeImportSession,
-		arg.ID,
+func (q *Queries) UpsertExternalLeaveCaseSource(ctx context.Context, arg UpsertExternalLeaveCaseSourceParams) (LeaveCaseSource, error) {
+	row := q.db.QueryRow(ctx, upsertExternalLeaveCaseSource,
 		arg.TenantID,
-		arg.Filename,
-		arg.ObjectProvider,
-		arg.ObjectBucket,
-		arg.ObjectKey,
-		arg.ContentType,
-		arg.SizeBytes,
-		arg.Sha256,
-		arg.Status,
-		arg.Rows,
-		arg.Summary,
-		arg.CreatedByAccountID,
-		arg.ConfirmedByAccountID,
+		arg.LeaveCaseID,
+		arg.ExternalLeaveRecordID,
+		arg.MatchMethod,
+		arg.MatchStatus,
 		arg.CreatedAt,
-		arg.ExpiresAt,
-		arg.ConfirmedAt,
 	)
-	var i EmployeeImportSession
+	var i LeaveCaseSource
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
-		&i.Filename,
-		&i.ObjectProvider,
-		&i.ObjectBucket,
-		&i.ObjectKey,
-		&i.ContentType,
-		&i.SizeBytes,
-		&i.Sha256,
-		&i.Status,
-		&i.Rows,
-		&i.Summary,
-		&i.CreatedByAccountID,
-		&i.ConfirmedByAccountID,
+		&i.LeaveCaseID,
+		&i.LeaveRequestID,
+		&i.ExternalLeaveRecordID,
+		&i.MatchMethod,
+		&i.MatchStatus,
 		&i.CreatedAt,
-		&i.ExpiresAt,
-		&i.ConfirmedAt,
 	)
 	return i, err
 }
@@ -7496,25 +8522,25 @@ func (q *Queries) UpsertGroupMembership(ctx context.Context, arg UpsertGroupMemb
 
 const upsertLeaveBalance = `-- name: UpsertLeaveBalance :exec
 INSERT INTO leave_balances (
-    id, tenant_id, employee_id, leave_type_id, remaining_hours,
-    period_start, period_end, granted_hours, used_hours, source, external_leave_code,
-    external_category_code, entitlement_year, carry_in_hours, carry_expire, raw_payload,
+    id, tenant_id, employee_id, leave_type_id, remaining_minutes,
+    period_start, period_end, granted_minutes, used_minutes, source, external_leave_code,
+    external_category_code, entitlement_year, carry_in_minutes, carry_expire, raw_payload,
     last_synced_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5::numeric(12,2),
-    $6, $7, $8::numeric(12,2), $9::numeric(12,2), $10, $11,
-    $12, $13, $14::numeric(12,2), $15, $16::jsonb,
+    $1, $2, $3, $4, $5,
+    $6, $7, $8, $9, $10, $11,
+    $12, $13, $14, $15, $16::jsonb,
     $17, $18
 )
-ON CONFLICT (tenant_id, employee_id, leave_type_id, period_start, period_end) DO UPDATE SET
-    remaining_hours = EXCLUDED.remaining_hours,
-    granted_hours = EXCLUDED.granted_hours,
-    used_hours = EXCLUDED.used_hours,
+ON CONFLICT (id) DO UPDATE SET
+    remaining_minutes = EXCLUDED.remaining_minutes,
+    granted_minutes = EXCLUDED.granted_minutes,
+    used_minutes = EXCLUDED.used_minutes,
     source = EXCLUDED.source,
     external_leave_code = EXCLUDED.external_leave_code,
     external_category_code = EXCLUDED.external_category_code,
     entitlement_year = EXCLUDED.entitlement_year,
-    carry_in_hours = EXCLUDED.carry_in_hours,
+    carry_in_minutes = EXCLUDED.carry_in_minutes,
     carry_expire = EXCLUDED.carry_expire,
     raw_payload = EXCLUDED.raw_payload,
     last_synced_at = EXCLUDED.last_synced_at,
@@ -7526,16 +8552,16 @@ type UpsertLeaveBalanceParams struct {
 	TenantID             string             `json:"tenant_id"`
 	EmployeeID           string             `json:"employee_id"`
 	LeaveTypeID          string             `json:"leave_type_id"`
-	RemainingHours       pgtype.Numeric     `json:"remaining_hours"`
+	RemainingMinutes     int32              `json:"remaining_minutes"`
 	PeriodStart          pgtype.Date        `json:"period_start"`
 	PeriodEnd            pgtype.Date        `json:"period_end"`
-	GrantedHours         pgtype.Numeric     `json:"granted_hours"`
-	UsedHours            pgtype.Numeric     `json:"used_hours"`
+	GrantedMinutes       int32              `json:"granted_minutes"`
+	UsedMinutes          int32              `json:"used_minutes"`
 	Source               string             `json:"source"`
 	ExternalLeaveCode    string             `json:"external_leave_code"`
 	ExternalCategoryCode string             `json:"external_category_code"`
 	EntitlementYear      pgtype.Int4        `json:"entitlement_year"`
-	CarryInHours         pgtype.Numeric     `json:"carry_in_hours"`
+	CarryInMinutes       int32              `json:"carry_in_minutes"`
 	CarryExpire          pgtype.Date        `json:"carry_expire"`
 	RawPayload           []byte             `json:"raw_payload"`
 	LastSyncedAt         pgtype.Timestamptz `json:"last_synced_at"`
@@ -7548,16 +8574,16 @@ func (q *Queries) UpsertLeaveBalance(ctx context.Context, arg UpsertLeaveBalance
 		arg.TenantID,
 		arg.EmployeeID,
 		arg.LeaveTypeID,
-		arg.RemainingHours,
+		arg.RemainingMinutes,
 		arg.PeriodStart,
 		arg.PeriodEnd,
-		arg.GrantedHours,
-		arg.UsedHours,
+		arg.GrantedMinutes,
+		arg.UsedMinutes,
 		arg.Source,
 		arg.ExternalLeaveCode,
 		arg.ExternalCategoryCode,
 		arg.EntitlementYear,
-		arg.CarryInHours,
+		arg.CarryInMinutes,
 		arg.CarryExpire,
 		arg.RawPayload,
 		arg.LastSyncedAt,
@@ -7632,66 +8658,17 @@ func (q *Queries) UpsertLeaveCase(ctx context.Context, arg UpsertLeaveCaseParams
 	return i, err
 }
 
-const upsertLeaveCaseSource = `-- name: UpsertLeaveCaseSource :one
-INSERT INTO leave_case_sources (
-    tenant_id, leave_case_id, source_type, source_id, match_method, match_status, created_at
-) VALUES (
-    $1, $2, $3, $4,
-    $5, $6, $7
-)
-ON CONFLICT (tenant_id, source_type, source_id) DO UPDATE SET
-    leave_case_id = EXCLUDED.leave_case_id,
-    match_method = EXCLUDED.match_method,
-    match_status = EXCLUDED.match_status
-RETURNING id, tenant_id, leave_case_id, source_type, source_id, match_method, match_status, created_at
-`
-
-type UpsertLeaveCaseSourceParams struct {
-	TenantID    string             `json:"tenant_id"`
-	LeaveCaseID string             `json:"leave_case_id"`
-	SourceType  string             `json:"source_type"`
-	SourceID    string             `json:"source_id"`
-	MatchMethod string             `json:"match_method"`
-	MatchStatus string             `json:"match_status"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-}
-
-func (q *Queries) UpsertLeaveCaseSource(ctx context.Context, arg UpsertLeaveCaseSourceParams) (LeaveCaseSource, error) {
-	row := q.db.QueryRow(ctx, upsertLeaveCaseSource,
-		arg.TenantID,
-		arg.LeaveCaseID,
-		arg.SourceType,
-		arg.SourceID,
-		arg.MatchMethod,
-		arg.MatchStatus,
-		arg.CreatedAt,
-	)
-	var i LeaveCaseSource
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.LeaveCaseID,
-		&i.SourceType,
-		&i.SourceID,
-		&i.MatchMethod,
-		&i.MatchStatus,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const upsertLeaveRequest = `-- name: UpsertLeaveRequest :one
 INSERT INTO leave_requests (
     id, tenant_id, employee_id, leave_type, leave_type_id, policy_version,
     rule_snapshot, evaluation_snapshot, start_at, end_at,
-    hours, reason, status, form_instance_id, leave_balance_id, reconciliation_status, created_at, updated_at
+    requested_minutes, reason, status, form_instance_id, reconciliation_status, created_at, updated_at
 ) VALUES (
     $1, $2, $3, $4, $5, $6,
     $7::jsonb, $8::jsonb, $9, $10,
-    $11, $12, $13, $14, $15, $16, $17, $18
+    $11, $12, $13, $14, $15, $16, $17
 )
 ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
     employee_id = EXCLUDED.employee_id,
     leave_type = EXCLUDED.leave_type,
     leave_type_id = EXCLUDED.leave_type_id,
@@ -7700,15 +8677,15 @@ ON CONFLICT (id) DO UPDATE SET
     evaluation_snapshot = EXCLUDED.evaluation_snapshot,
     start_at = EXCLUDED.start_at,
     end_at = EXCLUDED.end_at,
-    hours = EXCLUDED.hours,
+    requested_minutes = EXCLUDED.requested_minutes,
     reason = EXCLUDED.reason,
     status = EXCLUDED.status,
     form_instance_id = EXCLUDED.form_instance_id,
-    leave_balance_id = EXCLUDED.leave_balance_id,
     reconciliation_status = EXCLUDED.reconciliation_status,
     created_at = EXCLUDED.created_at,
     updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, hours, reason, status, form_instance_id, leave_balance_id, reconciliation_status, created_at, updated_at
+WHERE leave_requests.tenant_id = EXCLUDED.tenant_id
+RETURNING id, tenant_id, employee_id, leave_type, leave_type_id, policy_version, rule_snapshot, evaluation_snapshot, start_at, end_at, requested_minutes, reason, status, form_instance_id, reconciliation_status, created_at, updated_at
 `
 
 type UpsertLeaveRequestParams struct {
@@ -7722,11 +8699,10 @@ type UpsertLeaveRequestParams struct {
 	EvaluationSnapshot   []byte             `json:"evaluation_snapshot"`
 	StartAt              pgtype.Timestamptz `json:"start_at"`
 	EndAt                pgtype.Timestamptz `json:"end_at"`
-	Hours                float64            `json:"hours"`
+	RequestedMinutes     int32              `json:"requested_minutes"`
 	Reason               string             `json:"reason"`
 	Status               string             `json:"status"`
 	FormInstanceID       string             `json:"form_instance_id"`
-	LeaveBalanceID       pgtype.Text        `json:"leave_balance_id"`
 	ReconciliationStatus string             `json:"reconciliation_status"`
 	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
@@ -7744,11 +8720,10 @@ func (q *Queries) UpsertLeaveRequest(ctx context.Context, arg UpsertLeaveRequest
 		arg.EvaluationSnapshot,
 		arg.StartAt,
 		arg.EndAt,
-		arg.Hours,
+		arg.RequestedMinutes,
 		arg.Reason,
 		arg.Status,
 		arg.FormInstanceID,
-		arg.LeaveBalanceID,
 		arg.ReconciliationStatus,
 		arg.CreatedAt,
 		arg.UpdatedAt,
@@ -7765,11 +8740,10 @@ func (q *Queries) UpsertLeaveRequest(ctx context.Context, arg UpsertLeaveRequest
 		&i.EvaluationSnapshot,
 		&i.StartAt,
 		&i.EndAt,
-		&i.Hours,
+		&i.RequestedMinutes,
 		&i.Reason,
 		&i.Status,
 		&i.FormInstanceID,
-		&i.LeaveBalanceID,
 		&i.ReconciliationStatus,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -7779,31 +8753,40 @@ func (q *Queries) UpsertLeaveRequest(ctx context.Context, arg UpsertLeaveRequest
 
 const upsertLeaveRequestAllocation = `-- name: UpsertLeaveRequestAllocation :one
 INSERT INTO leave_request_allocations (
-    tenant_id, leave_request_id, leave_balance_id, reserved_hours, created_at
-) VALUES (
-    $1, $2, $3,
-    $4::numeric(12,2), $5
-)
-ON CONFLICT (tenant_id, leave_request_id, leave_balance_id) DO UPDATE SET
-    reserved_hours = EXCLUDED.reserved_hours
-RETURNING id, tenant_id, leave_request_id, leave_balance_id, reserved_hours, created_at
+    tenant_id, leave_request_id, leave_balance_id, employee_id, leave_type_id,
+    cycle, reserved_minutes, created_at
+) SELECT
+    request.tenant_id, request.id, balance.id, request.employee_id, request.leave_type_id,
+    $1, $2, $3
+FROM leave_requests request
+JOIN leave_balances balance
+  ON balance.tenant_id = request.tenant_id
+ AND balance.id = $4
+ AND balance.employee_id = request.employee_id
+ AND balance.leave_type_id = request.leave_type_id
+WHERE request.tenant_id = $5
+  AND request.id = $6
+ON CONFLICT (tenant_id, leave_request_id, leave_balance_id, cycle) DO NOTHING
+RETURNING id, tenant_id, leave_request_id, leave_balance_id, employee_id, leave_type_id, cycle, reserved_minutes, created_at
 `
 
 type UpsertLeaveRequestAllocationParams struct {
-	TenantID       string             `json:"tenant_id"`
-	LeaveRequestID string             `json:"leave_request_id"`
-	LeaveBalanceID string             `json:"leave_balance_id"`
-	ReservedHours  pgtype.Numeric     `json:"reserved_hours"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	Cycle           int32              `json:"cycle"`
+	ReservedMinutes int32              `json:"reserved_minutes"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	LeaveBalanceID  string             `json:"leave_balance_id"`
+	TenantID        string             `json:"tenant_id"`
+	LeaveRequestID  string             `json:"leave_request_id"`
 }
 
 func (q *Queries) UpsertLeaveRequestAllocation(ctx context.Context, arg UpsertLeaveRequestAllocationParams) (LeaveRequestAllocation, error) {
 	row := q.db.QueryRow(ctx, upsertLeaveRequestAllocation,
+		arg.Cycle,
+		arg.ReservedMinutes,
+		arg.CreatedAt,
+		arg.LeaveBalanceID,
 		arg.TenantID,
 		arg.LeaveRequestID,
-		arg.LeaveBalanceID,
-		arg.ReservedHours,
-		arg.CreatedAt,
 	)
 	var i LeaveRequestAllocation
 	err := row.Scan(
@@ -7811,7 +8794,56 @@ func (q *Queries) UpsertLeaveRequestAllocation(ctx context.Context, arg UpsertLe
 		&i.TenantID,
 		&i.LeaveRequestID,
 		&i.LeaveBalanceID,
-		&i.ReservedHours,
+		&i.EmployeeID,
+		&i.LeaveTypeID,
+		&i.Cycle,
+		&i.ReservedMinutes,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const upsertLeaveRequestCaseSource = `-- name: UpsertLeaveRequestCaseSource :one
+INSERT INTO leave_case_sources (
+    tenant_id, leave_case_id, leave_request_id, match_method, match_status, created_at
+) VALUES (
+    $1, $2, $3,
+    $4, $5, $6
+)
+ON CONFLICT (tenant_id, leave_request_id) WHERE leave_request_id IS NOT NULL DO UPDATE SET
+    leave_case_id = EXCLUDED.leave_case_id,
+    match_method = EXCLUDED.match_method,
+    match_status = EXCLUDED.match_status
+RETURNING id, tenant_id, leave_case_id, leave_request_id, external_leave_record_id, match_method, match_status, created_at
+`
+
+type UpsertLeaveRequestCaseSourceParams struct {
+	TenantID       string             `json:"tenant_id"`
+	LeaveCaseID    string             `json:"leave_case_id"`
+	LeaveRequestID pgtype.Text        `json:"leave_request_id"`
+	MatchMethod    string             `json:"match_method"`
+	MatchStatus    string             `json:"match_status"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) UpsertLeaveRequestCaseSource(ctx context.Context, arg UpsertLeaveRequestCaseSourceParams) (LeaveCaseSource, error) {
+	row := q.db.QueryRow(ctx, upsertLeaveRequestCaseSource,
+		arg.TenantID,
+		arg.LeaveCaseID,
+		arg.LeaveRequestID,
+		arg.MatchMethod,
+		arg.MatchStatus,
+		arg.CreatedAt,
+	)
+	var i LeaveCaseSource
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.LeaveCaseID,
+		&i.LeaveRequestID,
+		&i.ExternalLeaveRecordID,
+		&i.MatchMethod,
+		&i.MatchStatus,
 		&i.CreatedAt,
 	)
 	return i, err
@@ -7822,10 +8854,10 @@ INSERT INTO leave_type_external_refs (
     id, tenant_id, source_system, external_code, external_category_code,
     leave_type_id, effective_from, effective_to, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4, $5,
+    $1, $2, lower(btrim($3::text)), lower(btrim($4::text)), lower(btrim($5::text)),
     $6, $7, $8, $9, $10
 )
-ON CONFLICT (tenant_id, source_system, lower(external_category_code), lower(external_code), effective_from) DO UPDATE SET
+ON CONFLICT (tenant_id, source_system, external_category_code, external_code, effective_from) DO UPDATE SET
     leave_type_id = EXCLUDED.leave_type_id,
     effective_to = EXCLUDED.effective_to,
     updated_at = EXCLUDED.updated_at

@@ -56,12 +56,6 @@ const (
 	ErrorCodePositionNotFound ErrorCode = 30030
 	// ErrorCodePositionConflict 說明此處的錯誤處理語義。
 	ErrorCodePositionConflict ErrorCode = 30031
-	// ErrorCodeEmploymentContractNotFound 說明此處的錯誤處理語義。
-	ErrorCodeEmploymentContractNotFound ErrorCode = 30040
-	// ErrorCodeEmploymentContractInvalidStatus 說明此處的錯誤處理語義。
-	ErrorCodeEmploymentContractInvalidStatus ErrorCode = 30041
-	// ErrorCodeEmploymentContractInvalidTransition 說明此處的錯誤處理語義。
-	ErrorCodeEmploymentContractInvalidTransition ErrorCode = 30042
 
 	// Attendance errors use 4xxxx so clients can distinguish attendance failures.
 	ErrorCodeAttendanceBadRequest             ErrorCode = 40001

@@ -21,15 +21,9 @@ func (c AttendanceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	attendance := router.Group("/attendance")
 	attendance.GET("/leave-balances", c.routes.Handle("attendance.leave", "read", c.listLeaveBalances))
 	attendance.GET("/leave-requests", c.routes.Handle("attendance.leave", "read", c.listLeaveRequests))
-	attendance.POST("/leave-requests/evaluate", c.routes.Handle("attendance.leave", "create", c.evaluateLeaveRequest))
-	attendance.POST("/leave-requests", c.routes.Handle("attendance.leave", "create", c.createLeaveRequest))
-	attendance.GET("/overtime-requests", c.routes.Handle("attendance.leave", "read", c.listOvertimeRequests))
-	attendance.POST("/overtime-requests", c.routes.Handle("attendance.leave", "create", c.createOvertimeRequest))
 	attendance.GET("/policies/current", c.routes.Handle("attendance.leave", "read", c.currentPolicy))
-	attendance.PATCH("/policies/current", c.routes.Handle("attendance.leave", "update", c.updatePolicy))
 	attendance.POST("/policies/validate", c.routes.Handle("attendance.leave", "update", c.validatePolicy))
 	attendance.POST("/policies/publish", c.routes.Handle("attendance.leave", "update", c.publishPolicy))
-	attendance.POST("/leave-balances/grant", c.routes.Handle("attendance.leave", "update", c.grantLeaveBalances))
 	attendance.GET("/leave-types", c.routes.Handle("attendance.leave", "read", c.listLeaveTypes))
 	attendance.PATCH("/leave-types/:id", c.routes.Handle("attendance.leave", "update", c.setLeaveTypeEnabled, ResourceID(PathParamID)))
 	attendance.GET("/worksites", c.routes.Handle("attendance.worksite", "read", c.listWorksites))
@@ -44,20 +38,6 @@ func (c AttendanceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	attendance.POST("/corrections", c.routes.Handle("attendance.correction", "create", c.createCorrection))
 	attendance.POST("/corrections/:id/approve", c.routes.Handle("attendance.correction", "approve", c.approveCorrection, ResourceID(PathParamID)))
 	attendance.POST("/corrections/:id/reject", c.routes.Handle("attendance.correction", "update", c.rejectCorrection, ResourceID(PathParamID)))
-}
-
-// evaluateLeaveRequest returns a non-mutating policy and balance decision.
-func (c AttendanceCtrl) evaluateLeaveRequest(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.EvaluateLeaveRequestInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.EvaluateLeaveRequest(ctx, input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
 }
 
 // listLeaveBalances 處理請假 balances 的 HTTP 請求。
@@ -88,65 +68,9 @@ func (c AttendanceCtrl) listLeaveRequests(w http.ResponseWriter, r *http.Request
 	return nil
 }
 
-// createLeaveRequest 處理請假請求的 HTTP 請求。
-func (c AttendanceCtrl) createLeaveRequest(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.CreateLeaveRequestInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.CreateLeaveRequest(ctx, input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusCreated, item)
-	return nil
-}
-
-// listOvertimeRequests 處理加班申請的 HTTP 請求。
-func (c AttendanceCtrl) listOvertimeRequests(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	page, err := pageRequestFromRequest(r)
-	if err != nil {
-		return err
-	}
-	items, err := c.svc.ListOvertimeRequestPage(ctx, page)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, items)
-	return nil
-}
-
-// createOvertimeRequest 處理加班申請的 HTTP 請求。
-func (c AttendanceCtrl) createOvertimeRequest(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.CreateOvertimeRequestInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.CreateOvertimeRequest(ctx, input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusCreated, item)
-	return nil
-}
-
 // currentPolicy 處理目前政策的 HTTP 請求。
 func (c AttendanceCtrl) currentPolicy(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
 	item, err := c.svc.CurrentAttendancePolicy(ctx)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// updatePolicy 處理政策的 HTTP 請求。
-func (c AttendanceCtrl) updatePolicy(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.UpdateAttendancePolicyInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.UpdateAttendancePolicy(ctx, input)
 	if err != nil {
 		return err
 	}
@@ -175,20 +99,6 @@ func (c AttendanceCtrl) publishPolicy(w http.ResponseWriter, r *http.Request, ct
 		return err
 	}
 	item, err := c.svc.PublishAttendancePolicy(ctx, input)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, item)
-	return nil
-}
-
-// grantLeaveBalances 處理請假餘額發放的 HTTP 請求。
-func (c AttendanceCtrl) grantLeaveBalances(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	var input domain.GrantLeaveBalancesInput
-	if err := readJSON(w, r, &input); err != nil {
-		return err
-	}
-	item, err := c.svc.GrantLeaveBalances(ctx, input)
 	if err != nil {
 		return err
 	}

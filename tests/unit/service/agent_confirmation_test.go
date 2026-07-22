@@ -3,7 +3,9 @@ package service_test
 import (
 	"context"
 	"encoding/json"
+	"sort"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -51,7 +53,8 @@ func TestAgentCreatesDraftAndRequiresConfirmationBeforeSubmission(t *testing.T) 
 		}
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "草稿已準備，請確認提交。"})
 	}}
-	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
+	confirmationStore := newAgentConfirmationTestStore(store)
+	svc, _ := newServiceWithFakeFormApprovalWorkflows(confirmationStore, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"}
 	run, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{Message: "幫我創建請假單"}, func(_ context.Context, event domain.AgentChatEvent) error {
 		if event.Event == domain.AgentChatEventConfirmation {
@@ -201,7 +204,8 @@ func TestAgentLeaveDraftDefaultsMissingTimes(t *testing.T) {
 		explicitNormalizedFields, _ = explicitResult["normalized_fields"].([]string)
 		return nil
 	}}
-	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
+	confirmationStore := newAgentConfirmationTestStore(store)
+	svc, _ := newServiceWithFakeFormApprovalWorkflows(confirmationStore, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"}
 	if _, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{Message: "幫我申請特休，原因是家庭安排"}, func(context.Context, domain.AgentChatEvent) error { return nil }); err != nil {
 		t.Fatal(err)
@@ -262,7 +266,8 @@ func TestAgentConfirmationExpiryUsesServiceClock(t *testing.T) {
 		return nil
 	}}
 	clock := now
-	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return clock }, AgentChatRuntime: runtime})
+	confirmationStore := newAgentConfirmationTestStore(store)
+	svc, _ := newServiceWithFakeFormApprovalWorkflows(confirmationStore, service.Options{Now: func() time.Time { return clock }, AgentChatRuntime: runtime})
 	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"}
 	if _, err := agentservice.New(svc).Chat(ctx, domain.AgentChatInput{Message: "創建確認單"}, func(context.Context, domain.AgentChatEvent) error { return nil }); err != nil {
 		t.Fatal(err)
@@ -275,8 +280,64 @@ func TestAgentConfirmationExpiryUsesServiceClock(t *testing.T) {
 	if _, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
 		t.Fatal("expected expired confirmation to be rejected")
 	}
+	if record, ok := confirmationStore.confirmation("tenant-1", confirmation.ID); !ok || record.Status != domain.AgentConfirmationStatusExpired {
+		t.Fatalf("expected expired confirmation state, record=%+v ok=%v", record, ok)
+	}
 	if _, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
 		t.Fatal("expected expired confirmation replay to be rejected")
+	}
+}
+
+func TestAgentConfirmationIsHiddenAfterContextClear(t *testing.T) {
+	now := time.Date(2026, 7, 13, 9, 30, 0, 0, time.UTC)
+	baseStore := memory.NewStore()
+	seedAgentConfirmationAccount(t, baseStore, now, "acct-employee", []domain.Permission{
+		{Resource: "agent.run", Action: "create", Scope: "all"},
+	})
+	confirmationStore := newAgentConfirmationTestStore(baseStore)
+	session := domain.AgentSession{
+		ID: "session-clear-confirmation", TenantID: "tenant-1", AccountID: "acct-employee",
+		SegmentID: "segment-before-clear", Status: domain.AgentSessionStatusActive, ContextVersion: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := baseStore.UpsertAgentSession(context.Background(), session); err != nil {
+		t.Fatal(err)
+	}
+	public := domain.AgentConfirmation{
+		ID: "aconf-before-clear", Kind: "form_submit", Title: "確認提交",
+		Action: "submit", ActionLabel: "確認", ExpiresAt: now.Add(10 * time.Minute),
+	}
+	publicRaw, _ := json.Marshal(public)
+	publicPayload := map[string]any{}
+	_ = json.Unmarshal(publicRaw, &publicPayload)
+	if err := confirmationStore.UpsertAgentConfirmation(context.Background(), domain.AgentConfirmationRecord{
+		ID: public.ID, TenantID: "tenant-1", AccountID: "acct-employee",
+		ConversationID: session.ID, SegmentID: session.SegmentID,
+		Kind: public.Kind, Title: public.Title, Action: public.Action,
+		PublicPayload: publicPayload, ActionPayload: map[string]any{}, ResultPayload: map[string]any{},
+		Status: domain.AgentConfirmationStatusPending, ExpiresAt: public.ExpiresAt, CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := service.New(confirmationStore, service.Options{Now: func() time.Time { return now }})
+	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-employee"}
+	pending, err := svc.PendingAgentConfirmationMessages(ctx, ctx.AccountID, session)
+	if err != nil || len(pending) != 1 {
+		t.Fatalf("expected one pending confirmation before clear, pending=%+v err=%v", pending, err)
+	}
+	cleared, err := agentservice.New(svc).ClearSessionContext(ctx, session.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cleared.SegmentID == session.SegmentID {
+		t.Fatal("context clear must allocate a new segment")
+	}
+	pending, err = svc.PendingAgentConfirmationMessages(ctx, ctx.AccountID, cleared)
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("old-segment confirmation leaked after clear, pending=%+v err=%v", pending, err)
+	}
+	if _, err := agentservice.New(svc).ExecuteConfirmation(ctx, public.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
+		t.Fatal("old-segment confirmation must not be claimable after clear")
 	}
 }
 
@@ -284,7 +345,8 @@ func TestAgentConfirmationExpiryUsesServiceClock(t *testing.T) {
 func TestAgentConfirmationRetriesTransientFailureButConsumesConflict(t *testing.T) {
 	now := time.Date(2026, 7, 13, 9, 0, 0, 0, time.UTC)
 	baseStore := memory.NewStore()
-	store := &transientAgentConfirmationStore{Store: baseStore}
+	confirmationStore := newAgentConfirmationTestStore(baseStore)
+	store := &transientAgentConfirmationStore{agentConfirmationTestStore: confirmationStore}
 	seedAgentConfirmationAccount(t, baseStore, now, "acct-employee", []domain.Permission{
 		{Resource: "agent.run", Action: "create", Scope: "all"},
 		agentToolTestPermission("create_form_draft"),
@@ -338,12 +400,27 @@ func TestAgentConfirmationRetriesTransientFailureButConsumesConflict(t *testing.
 	} else if appErr, ok := domain.AsAppError(err); !ok || appErr.Status != 503 {
 		t.Fatalf("expected original 503 error, got %v", err)
 	}
+	if record, ok := confirmationStore.confirmation("tenant-1", confirmation.ID); !ok || record.Status != domain.AgentConfirmationStatusPending {
+		t.Fatalf("expected retryable failure to restore pending, record=%+v ok=%v", record, ok)
+	}
 	executed, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if executed.FormInstance == nil || executed.FormInstance.Status != "in_review" {
 		t.Fatalf("expected restored confirmation to submit successfully, got %+v", executed)
+	}
+
+	prepare()
+	store.cancelNextFormInstanceGet = true
+	if _, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err != context.Canceled {
+		t.Fatalf("expected original cancellation, got %v", err)
+	}
+	if record, ok := confirmationStore.confirmation("tenant-1", confirmation.ID); !ok || record.Status != domain.AgentConfirmationStatusCancelled {
+		t.Fatalf("expected cancelled execution to become terminal, record=%+v ok=%v", record, ok)
+	}
+	if _, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
+		t.Fatal("expected cancelled confirmation replay to remain consumed")
 	}
 
 	prepare()
@@ -359,6 +436,9 @@ func TestAgentConfirmationRetriesTransientFailureButConsumesConflict(t *testing.
 		t.Fatal("expected stale confirmation conflict")
 	} else if appErr, ok := domain.AsAppError(err); !ok || appErr.Status != 409 {
 		t.Fatalf("expected conflict error, got %v", err)
+	}
+	if record, ok := confirmationStore.confirmation("tenant-1", confirmation.ID); !ok || record.Status != domain.AgentConfirmationStatusFailed {
+		t.Fatalf("expected deterministic conflict to become failed, record=%+v ok=%v", record, ok)
 	}
 	if _, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
 		t.Fatal("expected stale confirmation replay to remain consumed")
@@ -377,6 +457,9 @@ func TestAgentConfirmationRetriesTransientFailureButConsumesConflict(t *testing.
 	}
 	if _, err := agentservice.New(svc).ExecuteConfirmation(ctx, confirmation.ID, domain.ExecuteAgentConfirmationInput{}); err == nil {
 		t.Fatal("expected audit failure not to restore a completed confirmation")
+	}
+	if record, ok := confirmationStore.confirmation("tenant-1", confirmation.ID); !ok || record.Status != domain.AgentConfirmationStatusCompleted {
+		t.Fatalf("expected audit failure to leave confirmation completed, record=%+v ok=%v", record, ok)
 	}
 }
 
@@ -414,7 +497,8 @@ func TestAgentPreparesAndExecutesFixedBulkReview(t *testing.T) {
 		}
 		return emit(ctx, domain.AgentChatEvent{Event: domain.AgentChatEventMessageDelta, Delta: "請確認批量批准。"})
 	}}
-	svc, _ := newServiceWithFakeFormApprovalWorkflows(store, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
+	confirmationStore := newAgentConfirmationTestStore(store)
+	svc, _ := newServiceWithFakeFormApprovalWorkflows(confirmationStore, service.Options{Now: func() time.Time { return now }, AgentChatRuntime: runtime})
 	for _, id := range []string{"fi-one", "fi-two"} {
 		startWorkflowRunForTest(t, svc, store, "tenant-1", id, "acct-applicant")
 	}
@@ -467,19 +551,133 @@ func agentToolTestPermission(name string) domain.Permission {
 	return domain.Permission{Resource: "agent.tool", Action: "call", Target: name, Scope: "all"}
 }
 
-type transientAgentConfirmationStore struct {
+type agentConfirmationTestState struct {
+	mu      sync.Mutex
+	records map[string]domain.AgentConfirmationRecord
+}
+
+// agentConfirmationTestStore adds the narrow Agent v2 confirmation contract to the legacy memory store.
+type agentConfirmationTestStore struct {
 	repository.Store
-	failNextFormInstanceGet bool
-	failConfirmationAudit   bool
+	confirmations *agentConfirmationTestState
+}
+
+func newAgentConfirmationTestStore(store repository.Store) *agentConfirmationTestStore {
+	return &agentConfirmationTestStore{
+		Store: store,
+		confirmations: &agentConfirmationTestState{
+			records: map[string]domain.AgentConfirmationRecord{},
+		},
+	}
+}
+
+func (s *agentConfirmationTestStore) WithTenantTransaction(ctx context.Context, tenantID string, fn func(repository.Store) error) error {
+	return repository.WithinTenantTransaction(ctx, s.Store, tenantID, func(tx repository.Store) error {
+		return fn(&agentConfirmationTestStore{Store: tx, confirmations: s.confirmations})
+	})
+}
+
+func (s *agentConfirmationTestStore) UpsertAgentConfirmation(_ context.Context, record domain.AgentConfirmationRecord) error {
+	s.confirmations.mu.Lock()
+	defer s.confirmations.mu.Unlock()
+	s.confirmations.records[agentConfirmationTestKey(record.TenantID, record.ID)] = record
+	return nil
+}
+
+func (s *agentConfirmationTestStore) ListPendingAgentConfirmations(_ context.Context, tenantID, accountID, conversationID, segmentID string, now time.Time) ([]domain.AgentConfirmationRecord, error) {
+	s.confirmations.mu.Lock()
+	defer s.confirmations.mu.Unlock()
+	items := make([]domain.AgentConfirmationRecord, 0)
+	for _, record := range s.confirmations.records {
+		if record.TenantID == tenantID && record.AccountID == accountID && record.ConversationID == conversationID && record.SegmentID == segmentID && record.Status == domain.AgentConfirmationStatusPending && record.ExpiresAt.After(now) {
+			items = append(items, record)
+		}
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].ExpiresAt.Equal(items[j].ExpiresAt) {
+			return items[i].ID < items[j].ID
+		}
+		return items[i].ExpiresAt.Before(items[j].ExpiresAt)
+	})
+	return items, nil
+}
+
+func (s *agentConfirmationTestStore) ClaimAgentConfirmation(ctx context.Context, tenantID, accountID, id string, now time.Time) (domain.AgentConfirmationRecord, bool, error) {
+	s.confirmations.mu.Lock()
+	defer s.confirmations.mu.Unlock()
+	key := agentConfirmationTestKey(tenantID, id)
+	record, ok := s.confirmations.records[key]
+	if !ok || record.AccountID != accountID || record.Status != domain.AgentConfirmationStatusPending {
+		return domain.AgentConfirmationRecord{}, false, nil
+	}
+	session, ok, err := s.Store.GetAgentSession(ctx, tenantID, record.ConversationID)
+	if err != nil {
+		return domain.AgentConfirmationRecord{}, false, err
+	}
+	if !ok || session.SegmentID != record.SegmentID {
+		return domain.AgentConfirmationRecord{}, false, nil
+	}
+	record.UpdatedAt = now
+	if !record.ExpiresAt.After(now) {
+		record.Status = domain.AgentConfirmationStatusExpired
+		record.ConsumedAt = &now
+	} else {
+		record.Status = domain.AgentConfirmationStatusExecuting
+	}
+	s.confirmations.records[key] = record
+	return record, true, nil
+}
+
+func (s *agentConfirmationTestStore) UpdateAgentConfirmation(_ context.Context, record domain.AgentConfirmationRecord) (domain.AgentConfirmationRecord, bool, error) {
+	s.confirmations.mu.Lock()
+	defer s.confirmations.mu.Unlock()
+	key := agentConfirmationTestKey(record.TenantID, record.ID)
+	current, ok := s.confirmations.records[key]
+	if !ok || current.Status != domain.AgentConfirmationStatusExecuting {
+		return domain.AgentConfirmationRecord{}, false, nil
+	}
+	switch record.Status {
+	case domain.AgentConfirmationStatusPending,
+		domain.AgentConfirmationStatusCompleted,
+		domain.AgentConfirmationStatusFailed,
+		domain.AgentConfirmationStatusCancelled,
+		domain.AgentConfirmationStatusExpired:
+	default:
+		return domain.AgentConfirmationRecord{}, false, nil
+	}
+	s.confirmations.records[key] = record
+	return record, true, nil
+}
+
+func (s *agentConfirmationTestStore) confirmation(tenantID, id string) (domain.AgentConfirmationRecord, bool) {
+	s.confirmations.mu.Lock()
+	defer s.confirmations.mu.Unlock()
+	record, ok := s.confirmations.records[agentConfirmationTestKey(tenantID, id)]
+	return record, ok
+}
+
+func agentConfirmationTestKey(tenantID, id string) string {
+	return tenantID + "\x00" + id
+}
+
+type transientAgentConfirmationStore struct {
+	*agentConfirmationTestStore
+	failNextFormInstanceGet   bool
+	cancelNextFormInstanceGet bool
+	failConfirmationAudit     bool
 }
 
 // WithTenantTransaction 保留底層 memory store 的交易語義，僅讓 wrapper 注入單次讀取故障。
 func (s *transientAgentConfirmationStore) WithTenantTransaction(ctx context.Context, tenantID string, fn func(repository.Store) error) error {
-	return repository.WithinTenantTransaction(ctx, s.Store, tenantID, fn)
+	return s.agentConfirmationTestStore.WithTenantTransaction(ctx, tenantID, fn)
 }
 
 // GetFormInstance 注入一次明確的 503，模擬 side effect 開始前的暫時性儲存故障。
 func (s *transientAgentConfirmationStore) GetFormInstance(ctx context.Context, tenantID, id string) (domain.FormInstance, bool, error) {
+	if s.cancelNextFormInstanceGet {
+		s.cancelNextFormInstanceGet = false
+		return domain.FormInstance{}, false, context.Canceled
+	}
 	if s.failNextFormInstanceGet {
 		s.failNextFormInstanceGet = false
 		return domain.FormInstance{}, false, domain.E(503, "repository_unavailable", "temporary form instance lookup failure")

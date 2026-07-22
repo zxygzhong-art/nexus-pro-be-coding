@@ -7,6 +7,8 @@ type AgentSessionFile struct {
 	ID                 string     `json:"id"`
 	TenantID           string     `json:"tenant_id"`
 	SessionID          string     `json:"session_id"`
+	SegmentID          string     `json:"segment_id"`
+	ConversationFileID string     `json:"conversation_file_id"`
 	ContextVersion     int64      `json:"context_version"`
 	CreatedByAccountID string     `json:"created_by_account_id"`
 	OriginalFilename   string     `json:"original_filename"`
@@ -27,9 +29,10 @@ type AgentSessionFile struct {
 
 // AgentMessageAttachment defines the file provenance for one persisted message.
 type AgentMessageAttachment struct {
-	MessageID string           `json:"message_id"`
-	Ordinal   int              `json:"ordinal"`
-	File      AgentSessionFile `json:"file"`
+	MessageID          string           `json:"message_id"`
+	ConversationFileID string           `json:"conversation_file_id"`
+	Ordinal            int              `json:"ordinal"`
+	File               AgentSessionFile `json:"file"`
 }
 
 // UploadAgentSessionFileInput defines a validated multipart upload passed into the service.

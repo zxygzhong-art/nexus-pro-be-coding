@@ -63,3 +63,32 @@ type AgentStore interface {
 	ListAgentMemoriesByAccount(ctx context.Context, tenantID, accountID, agentID, sessionID string, limit int) ([]domain.AgentMemory, error)
 	DeleteAgentMemory(ctx context.Context, tenantID, id string) (domain.AgentMemory, bool, error)
 }
+
+// AgentV2Store defines persistence capabilities introduced by the normalized
+// agent data model. It intentionally remains separate from AgentStore while
+// legacy and v2 runtime paths coexist, so non-PostgreSQL compatibility stores
+// do not have to implement unused v2 aggregates.
+type AgentV2Store interface {
+	UpsertCredentialSecret(context.Context, domain.CredentialSecret) error
+	GetCredentialSecret(ctx context.Context, tenantID, id string) (domain.CredentialSecret, bool, error)
+	RevokeCredentialSecret(ctx context.Context, tenantID, id string, revokedAt time.Time) (domain.CredentialSecret, bool, error)
+
+	GetAgentExternalTool(ctx context.Context, tenantID, id string) (domain.AgentExternalTool, bool, error)
+	ReplaceAgentExternalToolCapabilities(ctx context.Context, tenantID, connectionID string, capabilities []domain.ExternalToolCapability) error
+	UpdateAgentExternalToolTestResult(ctx context.Context, tenantID, id, status, message string, testedAt time.Time) (domain.AgentExternalTool, bool, error)
+	GetAgentExternalToolCapability(ctx context.Context, tenantID, capabilityID string) (domain.ExternalToolCapability, bool, error)
+	ListAgentExternalToolCapabilities(ctx context.Context, tenantID, connectionID string) ([]domain.ExternalToolCapability, error)
+	ListAgentExternalToolCapabilitiesByIDs(ctx context.Context, tenantID string, capabilityIDs []string) ([]domain.ExternalToolCapability, error)
+	ListAgentRevisionExternalToolBindings(ctx context.Context, tenantID, revisionID string) ([]domain.AgentRevisionExternalTool, error)
+	ListAgentRevisionMemberExternalToolBindings(ctx context.Context, tenantID, revisionID string) ([]domain.AgentRevisionMemberExternalTool, error)
+
+	UpsertExecutionStep(context.Context, domain.ExecutionStep) error
+	AppendExecutionStep(context.Context, domain.ExecutionStep) (domain.ExecutionStep, error)
+	GetExecutionStep(ctx context.Context, tenantID, id string) (domain.ExecutionStep, bool, error)
+	ListExecutionSteps(ctx context.Context, tenantID, executionID string) ([]domain.ExecutionStep, error)
+
+	UpsertAgentConfirmation(context.Context, domain.AgentConfirmationRecord) error
+	ListPendingAgentConfirmations(ctx context.Context, tenantID, accountID, conversationID, segmentID string, now time.Time) ([]domain.AgentConfirmationRecord, error)
+	ClaimAgentConfirmation(ctx context.Context, tenantID, accountID, id string, now time.Time) (domain.AgentConfirmationRecord, bool, error)
+	UpdateAgentConfirmation(ctx context.Context, confirmation domain.AgentConfirmationRecord) (domain.AgentConfirmationRecord, bool, error)
+}

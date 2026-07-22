@@ -16,14 +16,20 @@ const (
 	leaveBalanceEntryLocalConsume      = "local_consume"
 	leaveBalanceEntryLocalRefund       = "local_refund"
 	leaveBalanceEntryExternalReconcile = "external_reconcile"
+	leaveBalanceEntryExternalReversal  = "external_reversal"
+	leaveBalanceEntryOvertimeCredit    = "overtime_credit"
 )
 
 func leaveMinutes(hours float64) int {
 	return int(math.Round(hours * 60))
 }
 
-// listEffectiveLeaveBalances projects the immutable eHRMS balance snapshot through
-// the Nexus-only overlay ledger. Store-level remaining/used values stay untouched.
+func leaveHours(minutes int) float64 {
+	return math.Round(float64(minutes)/60*100) / 100
+}
+
+// listEffectiveLeaveBalances projects immutable upstream snapshots and local
+// anchor rows through the append-only integer-minute overlay.
 func (c AttendanceService) listEffectiveLeaveBalances(ctx RequestContext) ([]LeaveBalance, error) {
 	items, err := c.store.ListLeaveBalances(goContext(ctx), ctx.TenantID)
 	if err != nil {
@@ -45,53 +51,91 @@ func applyLeaveBalanceOverlay(items []LeaveBalance, entries []domain.LeaveBalanc
 		switch entry.EntryType {
 		case leaveBalanceEntryReserve, leaveBalanceEntryRelease:
 			pendingByBalance[entry.BalanceID] += entry.AmountMinutes
-		case leaveBalanceEntryLocalConsume, leaveBalanceEntryLocalRefund, leaveBalanceEntryExternalReconcile:
+		case leaveBalanceEntryLocalConsume, leaveBalanceEntryLocalRefund,
+			leaveBalanceEntryExternalReconcile, leaveBalanceEntryExternalReversal:
 			localByBalance[entry.BalanceID] += entry.AmountMinutes
 		}
 	}
 	out := make([]LeaveBalance, len(items))
 	for index, item := range items {
-		item.UpstreamRemainingHours = item.RemainingHours
-		item.PendingHours = math.Max(0, -float64(pendingByBalance[item.ID])/60)
-		item.LocalUsedHours = math.Max(0, -float64(localByBalance[item.ID])/60)
-		item.RemainingHours = math.Round((item.RemainingHours+float64(totalByBalance[item.ID])/60)*100) / 100
+		item.SnapshotRemainingMinutes = item.RemainingMinutes
+		item.PendingMinutes = max(0, -pendingByBalance[item.ID])
+		item.LocalUsedMinutes = max(0, -localByBalance[item.ID])
+		item.RemainingMinutes += totalByBalance[item.ID]
 		out[index] = item
 	}
 	return out
 }
 
-// leaveBalanceForOverlay locks the selected entitlement row in Postgres, then
-// checks effective availability including every committed overlay entry.
-func (c AttendanceService) leaveBalanceForOverlay(ctx RequestContext, employeeID, leaveTypeID string, hours float64, asOf time.Time) (LeaveBalance, string, error) {
-	balance, found, err := c.store.GetLeaveBalanceForOverlay(goContext(ctx), ctx.TenantID, employeeID, leaveTypeID, asOf)
+// leaveBalanceAllocationsForOverlay locks every eligible bucket in a stable
+// expiry order, then splits one request across as many buckets as necessary.
+// No snapshot row is updated; callers persist only allocations and entries.
+func (c AttendanceService) leaveBalanceAllocationsForOverlay(ctx RequestContext, employeeID, leaveTypeID string, requestedMinutes int, asOf time.Time) ([]LeaveRequestAllocation, int, string, error) {
+	items, err := c.store.ListLeaveBalancesForOverlay(goContext(ctx), ctx.TenantID, employeeID, leaveTypeID, asOf)
 	if err != nil {
-		return LeaveBalance{}, "", err
+		return nil, 0, "", err
 	}
-	if !found {
-		return LeaveBalance{}, leaveEvaluationBalanceMissing, nil
+	if len(items) == 0 {
+		return nil, 0, leaveEvaluationBalanceMissing, nil
 	}
-	entries, err := c.store.ListLeaveBalanceEntriesByBalance(goContext(ctx), ctx.TenantID, balance.ID)
+	entries, err := c.store.ListLeaveBalanceEntries(goContext(ctx), ctx.TenantID)
 	if err != nil {
-		return LeaveBalance{}, "", err
+		return nil, 0, "", err
 	}
-	effective := applyLeaveBalanceOverlay([]LeaveBalance{balance}, entries)[0]
-	if effective.RemainingHours < hours {
-		return effective, leaveEvaluationBalanceInsufficient, nil
+	effective := applyLeaveBalanceOverlay(items, entries)
+	availableMinutes := 0
+	for _, item := range effective {
+		availableMinutes += max(0, item.RemainingMinutes)
 	}
-	return effective, "", nil
+	if availableMinutes < requestedMinutes {
+		return nil, availableMinutes, leaveEvaluationBalanceInsufficient, nil
+	}
+
+	remaining := requestedMinutes
+	allocations := make([]LeaveRequestAllocation, 0, len(effective))
+	for _, item := range effective {
+		if remaining == 0 {
+			break
+		}
+		reserved := min(max(0, item.RemainingMinutes), remaining)
+		if reserved == 0 {
+			continue
+		}
+		allocations = append(allocations, LeaveRequestAllocation{
+			TenantID: ctx.TenantID, LeaveBalanceID: item.ID,
+			EmployeeID: employeeID, LeaveTypeID: leaveTypeID, ReservedMinutes: reserved,
+		})
+		remaining -= reserved
+	}
+	return allocations, availableMinutes, "", nil
 }
 
-func (c AttendanceService) appendLeaveBalanceEntry(ctx RequestContext, request LeaveRequest, balanceID, caseID, entryType string, amountMinutes, cycle int) error {
-	if strings.TrimSpace(balanceID) == "" || amountMinutes == 0 {
+func (c AttendanceService) appendLeaveBalanceEntry(ctx RequestContext, request LeaveRequest, allocation LeaveRequestAllocation, caseID, entryType string, amountMinutes, cycle int) error {
+	if strings.TrimSpace(allocation.LeaveBalanceID) == "" || amountMinutes == 0 {
 		return nil
 	}
 	now := c.Now()
-	idempotencyKey := fmt.Sprintf("leave-request:%s:cycle:%d:%s", request.ID, cycle, entryType)
+	idempotencyKey := fmt.Sprintf("leave-request:%s:cycle:%d:balance:%s:%s", request.ID, cycle, allocation.LeaveBalanceID, entryType)
+	metadata := map[string]any{"source": "nexus_workflow", "cycle": cycle}
+	if entryType == leaveBalanceEntryReserve {
+		balance, found, err := c.store.GetLeaveBalance(goContext(ctx), ctx.TenantID, allocation.LeaveBalanceID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return Conflict("allocated leave balance was not found")
+		}
+		metadata["snapshot_remaining_minutes"] = balance.RemainingMinutes
+		metadata["snapshot_used_minutes"] = balance.UsedMinutes
+		metadata["balance_source"] = balance.Source
+	}
 	_, err := c.store.AppendLeaveBalanceEntry(goContext(ctx), domain.LeaveBalanceEntry{
-		ID: utils.NewID("lbe"), TenantID: ctx.TenantID, EmployeeID: request.EmployeeID,
-		LeaveTypeID: request.LeaveTypeID, BalanceID: balanceID, LeaveRequestID: request.ID,
-		LeaveCaseID: caseID, EntryType: entryType, AmountMinutes: amountMinutes,
-		IdempotencyKey: idempotencyKey, Metadata: map[string]any{"source": "nexus_workflow", "cycle": cycle},
+		ID: utils.NewID("lbe"), TenantID: ctx.TenantID,
+		EmployeeID: request.EmployeeID, LeaveTypeID: request.LeaveTypeID,
+		BalanceID: allocation.LeaveBalanceID, LeaveRequestID: request.ID,
+		LeaveCaseID: caseID, AllocationID: allocation.ID,
+		EntryType: entryType, AmountMinutes: amountMinutes, IdempotencyKey: idempotencyKey,
+		Metadata:   metadata,
 		OccurredAt: now, CreatedAt: now,
 	})
 	return err
@@ -126,21 +170,21 @@ func nextLeaveRequestBalanceCycle(existing LeaveRequest, resubmitting bool) int 
 }
 
 func (c AttendanceService) ensureNexusLeaveCase(ctx RequestContext, request LeaveRequest) (LeaveCase, error) {
-	if item, ok, err := c.store.GetLeaveCaseBySource(goContext(ctx), ctx.TenantID, "nexus_request", request.ID); err != nil || ok {
+	if item, ok, err := c.store.GetLeaveCaseByLeaveRequest(goContext(ctx), ctx.TenantID, request.ID); err != nil || ok {
 		return item, err
 	}
 	now := c.Now()
 	item := LeaveCase{
 		ID: ehrmsStableID("lc", ctx.TenantID, "nexus", request.ID), TenantID: ctx.TenantID,
 		EmployeeID: request.EmployeeID, LeaveTypeID: request.LeaveTypeID,
-		StartAt: request.StartAt, EndAt: request.EndAt, NetMinutes: leaveMinutes(request.Hours),
+		StartAt: request.StartAt, EndAt: request.EndAt, NetMinutes: request.RequestedMinutes,
 		Status: "active", Origin: "nexus", CreatedAt: now, UpdatedAt: now,
 	}
 	if err := c.store.UpsertLeaveCase(goContext(ctx), item); err != nil {
 		return LeaveCase{}, err
 	}
 	if err := c.store.UpsertLeaveCaseSource(goContext(ctx), LeaveCaseSource{
-		TenantID: ctx.TenantID, LeaveCaseID: item.ID, SourceType: "nexus_request", SourceID: request.ID,
+		TenantID: ctx.TenantID, LeaveCaseID: item.ID, LeaveRequestID: request.ID,
 		MatchMethod: "direct", MatchStatus: "confirmed", CreatedAt: now,
 	}); err != nil {
 		return LeaveCase{}, err

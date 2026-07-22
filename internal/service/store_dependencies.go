@@ -27,7 +27,6 @@ type hrStore interface {
 	repository.OrgStore
 	repository.PositionStore
 	repository.EmployeeStore
-	repository.EmploymentContractStore
 	repository.AuthzEventStore
 	repository.OutboxStore
 }

@@ -54,6 +54,7 @@ type WorkflowStore interface {
 
 	UpsertWorkflowStageInstance(context.Context, domain.WorkflowStageInstance) error
 	GetWorkflowStageInstance(ctx context.Context, tenantID, id string) (domain.WorkflowStageInstance, bool, error)
+	GetWorkflowStageInstanceForUpdate(ctx context.Context, tenantID, id string) (domain.WorkflowStageInstance, bool, error)
 	ListWorkflowStageInstancesByRun(ctx context.Context, tenantID, runID string) ([]domain.WorkflowStageInstance, error)
 
 	UpsertWorkflowStageAssignee(context.Context, domain.WorkflowStageAssignee) error

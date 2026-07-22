@@ -11,16 +11,200 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 )
 
+const appendExecutionStepV2 = `-- name: AppendExecutionStepV2 :one
+WITH locked_execution AS (
+    SELECT id, tenant_id
+    FROM executions
+    WHERE executions.tenant_id = $10
+      AND executions.id = $11
+    FOR UPDATE
+), next_sequence AS (
+    SELECT locked_execution.id AS execution_id,
+           locked_execution.tenant_id,
+           COALESCE(max(steps.sequence_no), 0)::integer + 1 AS sequence_no
+    FROM locked_execution
+    LEFT JOIN execution_steps steps
+      ON steps.tenant_id = locked_execution.tenant_id
+     AND steps.execution_id = locked_execution.id
+    GROUP BY locked_execution.id, locked_execution.tenant_id
+)
+INSERT INTO execution_steps (
+    id, tenant_id, execution_id, parent_step_id, sequence_no, step_type,
+    name, model_connection_id, external_tool_id, status,
+    input_summary, output_summary, input_tokens, cached_tokens, output_tokens,
+    started_at, completed_at, error_code, created_at
+)
+SELECT
+    $1, next_sequence.tenant_id, next_sequence.execution_id,
+    NULLIF($2::text, ''), next_sequence.sequence_no,
+    $3, $4,
+    NULLIF($5::text, ''),
+    NULLIF($6::text, ''),
+    'running', $7::jsonb, '{}'::jsonb,
+    0, 0, 0, $8, NULL, '', $9
+FROM next_sequence
+RETURNING id, tenant_id, execution_id, parent_step_id, sequence_no, step_type, name, model_connection_id, external_tool_id, status, input_summary, output_summary, input_tokens, cached_tokens, output_tokens, started_at, completed_at, error_code, created_at
+`
+
+type AppendExecutionStepV2Params struct {
+	ID                string             `json:"id"`
+	ParentStepID      string             `json:"parent_step_id"`
+	StepType          string             `json:"step_type"`
+	Name              string             `json:"name"`
+	ModelConnectionID string             `json:"model_connection_id"`
+	ExternalToolID    string             `json:"external_tool_id"`
+	InputSummary      []byte             `json:"input_summary"`
+	StartedAt         pgtype.Timestamptz `json:"started_at"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	TenantID          string             `json:"tenant_id"`
+	ExecutionID       string             `json:"execution_id"`
+}
+
+func (q *Queries) AppendExecutionStepV2(ctx context.Context, arg AppendExecutionStepV2Params) (ExecutionStep, error) {
+	row := q.db.QueryRow(ctx, appendExecutionStepV2,
+		arg.ID,
+		arg.ParentStepID,
+		arg.StepType,
+		arg.Name,
+		arg.ModelConnectionID,
+		arg.ExternalToolID,
+		arg.InputSummary,
+		arg.StartedAt,
+		arg.CreatedAt,
+		arg.TenantID,
+		arg.ExecutionID,
+	)
+	var i ExecutionStep
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ExecutionID,
+		&i.ParentStepID,
+		&i.SequenceNo,
+		&i.StepType,
+		&i.Name,
+		&i.ModelConnectionID,
+		&i.ExternalToolID,
+		&i.Status,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.InputTokens,
+		&i.CachedTokens,
+		&i.OutputTokens,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.ErrorCode,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const claimAgentConfirmationV2 = `-- name: ClaimAgentConfirmationV2 :one
+WITH expired AS (
+    UPDATE agent_confirmations confirmations
+    SET status = 'expired', consumed_at = $1, updated_at = $1
+    FROM conversations
+    WHERE confirmations.tenant_id = $2
+      AND confirmations.account_id = $3
+      AND confirmations.id = $4
+      AND confirmations.status = 'pending'
+      AND confirmations.expires_at <= $1
+      AND conversations.tenant_id = confirmations.tenant_id
+      AND conversations.id = confirmations.conversation_id
+      AND conversations.current_segment_id = confirmations.segment_id
+    RETURNING confirmations.id, confirmations.tenant_id, confirmations.account_id, confirmations.conversation_id, confirmations.segment_id, confirmations.execution_id, confirmations.source_message_id, confirmations.kind, confirmations.title, confirmations.action, confirmations.public_payload, confirmations.action_payload, confirmations.result_payload, confirmations.status, confirmations.last_error, confirmations.expires_at, confirmations.consumed_at, confirmations.created_at, confirmations.updated_at
+), claimed AS (
+    UPDATE agent_confirmations confirmations
+    SET status = 'executing', updated_at = $1
+    FROM conversations
+    WHERE confirmations.tenant_id = $2
+      AND confirmations.account_id = $3
+      AND confirmations.id = $4
+      AND confirmations.status = 'pending'
+      AND confirmations.expires_at > $1
+      AND conversations.tenant_id = confirmations.tenant_id
+      AND conversations.id = confirmations.conversation_id
+      AND conversations.current_segment_id = confirmations.segment_id
+    RETURNING confirmations.id, confirmations.tenant_id, confirmations.account_id, confirmations.conversation_id, confirmations.segment_id, confirmations.execution_id, confirmations.source_message_id, confirmations.kind, confirmations.title, confirmations.action, confirmations.public_payload, confirmations.action_payload, confirmations.result_payload, confirmations.status, confirmations.last_error, confirmations.expires_at, confirmations.consumed_at, confirmations.created_at, confirmations.updated_at
+)
+SELECT id, tenant_id, account_id, conversation_id, segment_id, execution_id, source_message_id, kind, title, action, public_payload, action_payload, result_payload, status, last_error, expires_at, consumed_at, created_at, updated_at FROM expired
+UNION ALL
+SELECT id, tenant_id, account_id, conversation_id, segment_id, execution_id, source_message_id, kind, title, action, public_payload, action_payload, result_payload, status, last_error, expires_at, consumed_at, created_at, updated_at FROM claimed
+LIMIT 1
+`
+
+type ClaimAgentConfirmationV2Params struct {
+	NowAt     pgtype.Timestamptz `json:"now_at"`
+	TenantID  string             `json:"tenant_id"`
+	AccountID string             `json:"account_id"`
+	ID        string             `json:"id"`
+}
+
+type ClaimAgentConfirmationV2Row struct {
+	ID              string             `json:"id"`
+	TenantID        string             `json:"tenant_id"`
+	AccountID       string             `json:"account_id"`
+	ConversationID  string             `json:"conversation_id"`
+	SegmentID       string             `json:"segment_id"`
+	ExecutionID     pgtype.Text        `json:"execution_id"`
+	SourceMessageID pgtype.Text        `json:"source_message_id"`
+	Kind            string             `json:"kind"`
+	Title           string             `json:"title"`
+	Action          string             `json:"action"`
+	PublicPayload   []byte             `json:"public_payload"`
+	ActionPayload   []byte             `json:"action_payload"`
+	ResultPayload   []byte             `json:"result_payload"`
+	Status          string             `json:"status"`
+	LastError       string             `json:"last_error"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt      pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ClaimAgentConfirmationV2(ctx context.Context, arg ClaimAgentConfirmationV2Params) (ClaimAgentConfirmationV2Row, error) {
+	row := q.db.QueryRow(ctx, claimAgentConfirmationV2,
+		arg.NowAt,
+		arg.TenantID,
+		arg.AccountID,
+		arg.ID,
+	)
+	var i ClaimAgentConfirmationV2Row
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.ConversationID,
+		&i.SegmentID,
+		&i.ExecutionID,
+		&i.SourceMessageID,
+		&i.Kind,
+		&i.Title,
+		&i.Action,
+		&i.PublicPayload,
+		&i.ActionPayload,
+		&i.ResultPayload,
+		&i.Status,
+		&i.LastError,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
 const countActiveAgentRunsBySession = `-- name: CountActiveAgentRunsBySession :one
-SELECT count(*) FROM agent_runs
+SELECT count(*)
+FROM executions
 WHERE tenant_id = $1
-  AND session_id = $2
+  AND conversation_id = $2
   AND status IN ('queued', 'running')
 `
 
 type CountActiveAgentRunsBySessionParams struct {
-	TenantID  string      `json:"tenant_id"`
-	SessionID pgtype.Text `json:"session_id"`
+	TenantID  string `json:"tenant_id"`
+	SessionID string `json:"session_id"`
 }
 
 func (q *Queries) CountActiveAgentRunsBySession(ctx context.Context, arg CountActiveAgentRunsBySessionParams) (int64, error) {
@@ -53,9 +237,9 @@ func (q *Queries) CountAgentUsageByAccount(ctx context.Context, arg CountAgentUs
 
 const countAgentUsageSessionsByAccount = `-- name: CountAgentUsageSessionsByAccount :one
 SELECT count(*)::bigint
-FROM agent_sessions
+FROM conversations
 WHERE tenant_id = $1
-  AND account_id = $2
+  AND owner_account_id = $2
 `
 
 type CountAgentUsageSessionsByAccountParams struct {
@@ -71,10 +255,20 @@ func (q *Queries) CountAgentUsageSessionsByAccount(ctx context.Context, arg Coun
 }
 
 const deleteAgentMemory = `-- name: DeleteAgentMemory :one
-DELETE FROM agent_memories
-WHERE tenant_id = $1
-  AND id = $2
-RETURNING id, tenant_id, account_id, agent_id, session_id, key, content, source, importance, expires_at, created_at, updated_at
+WITH superseded AS (
+    UPDATE memories
+    SET status = 'superseded', updated_at = GREATEST(updated_at, now())
+    WHERE tenant_id = $1
+      AND id = $2
+    RETURNING id, tenant_id, account_id, scope_type, agent_id, conversation_id, segment_id, key, content, source_type, source_message_id, confidence, importance, status, expires_at, created_at, updated_at
+)
+SELECT
+    id, tenant_id, account_id, agent_id, conversation_id AS session_id, segment_id,
+    scope_type AS scope, source_message_id, confidence, status,
+    key, content,
+    CASE WHEN source_type = 'manual' THEN 'manual' ELSE 'auto' END::text AS source,
+    importance, expires_at, created_at, updated_at
+FROM superseded
 `
 
 type DeleteAgentMemoryParams struct {
@@ -82,15 +276,40 @@ type DeleteAgentMemoryParams struct {
 	ID       string `json:"id"`
 }
 
-func (q *Queries) DeleteAgentMemory(ctx context.Context, arg DeleteAgentMemoryParams) (AgentMemory, error) {
+type DeleteAgentMemoryRow struct {
+	ID              string             `json:"id"`
+	TenantID        string             `json:"tenant_id"`
+	AccountID       string             `json:"account_id"`
+	AgentID         pgtype.Text        `json:"agent_id"`
+	SessionID       pgtype.Text        `json:"session_id"`
+	SegmentID       pgtype.Text        `json:"segment_id"`
+	Scope           string             `json:"scope"`
+	SourceMessageID pgtype.Text        `json:"source_message_id"`
+	Confidence      pgtype.Numeric     `json:"confidence"`
+	Status          string             `json:"status"`
+	Key             string             `json:"key"`
+	Content         string             `json:"content"`
+	Source          string             `json:"source"`
+	Importance      int32              `json:"importance"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) DeleteAgentMemory(ctx context.Context, arg DeleteAgentMemoryParams) (DeleteAgentMemoryRow, error) {
 	row := q.db.QueryRow(ctx, deleteAgentMemory, arg.TenantID, arg.ID)
-	var i AgentMemory
+	var i DeleteAgentMemoryRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.AccountID,
 		&i.AgentID,
 		&i.SessionID,
+		&i.SegmentID,
+		&i.Scope,
+		&i.SourceMessageID,
+		&i.Confidence,
+		&i.Status,
 		&i.Key,
 		&i.Content,
 		&i.Source,
@@ -103,10 +322,32 @@ func (q *Queries) DeleteAgentMemory(ctx context.Context, arg DeleteAgentMemoryPa
 }
 
 const deleteAgentSession = `-- name: DeleteAgentSession :one
-DELETE FROM agent_sessions
-WHERE tenant_id = $1
-  AND id = $2
-RETURNING id, tenant_id, account_id, agent_id, title, status, context_version, last_message_at, created_at, updated_at
+WITH archived AS (
+    UPDATE conversations
+    SET status = 'archived',
+        archived_at = COALESCE(archived_at, now()),
+        updated_at = GREATEST(updated_at, now())
+    WHERE conversations.tenant_id = $1
+      AND conversations.id = $2
+    RETURNING id, tenant_id, owner_account_id, agent_id, current_segment_id, next_message_sequence, title, status, last_message_at, created_at, updated_at, archived_at
+)
+SELECT
+    archived.id,
+    archived.tenant_id,
+    archived.owner_account_id AS account_id,
+    archived.agent_id,
+    segments.id AS segment_id,
+    archived.title,
+    archived.status,
+    segments.ordinal::bigint AS context_version,
+    archived.last_message_at,
+    archived.created_at,
+    archived.updated_at
+FROM archived
+JOIN conversation_segments segments
+  ON segments.tenant_id = archived.tenant_id
+ AND segments.conversation_id = archived.id
+ AND segments.id = archived.current_segment_id
 `
 
 type DeleteAgentSessionParams struct {
@@ -114,14 +355,29 @@ type DeleteAgentSessionParams struct {
 	ID       string `json:"id"`
 }
 
-func (q *Queries) DeleteAgentSession(ctx context.Context, arg DeleteAgentSessionParams) (AgentSession, error) {
+type DeleteAgentSessionRow struct {
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	AccountID      string             `json:"account_id"`
+	AgentID        pgtype.Text        `json:"agent_id"`
+	SegmentID      string             `json:"segment_id"`
+	Title          string             `json:"title"`
+	Status         string             `json:"status"`
+	ContextVersion int64              `json:"context_version"`
+	LastMessageAt  pgtype.Timestamptz `json:"last_message_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) DeleteAgentSession(ctx context.Context, arg DeleteAgentSessionParams) (DeleteAgentSessionRow, error) {
 	row := q.db.QueryRow(ctx, deleteAgentSession, arg.TenantID, arg.ID)
-	var i AgentSession
+	var i DeleteAgentSessionRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.AccountID,
 		&i.AgentID,
+		&i.SegmentID,
 		&i.Title,
 		&i.Status,
 		&i.ContextVersion,
@@ -133,9 +389,15 @@ func (q *Queries) DeleteAgentSession(ctx context.Context, arg DeleteAgentSession
 }
 
 const getAgentMemory = `-- name: GetAgentMemory :one
-SELECT id, tenant_id, account_id, agent_id, session_id, key, content, source, importance, expires_at, created_at, updated_at FROM agent_memories
-WHERE tenant_id = $1
-  AND id = $2
+SELECT
+    id, tenant_id, account_id, agent_id, conversation_id AS session_id, segment_id,
+    scope_type AS scope, source_message_id, confidence, status,
+    key, content,
+    CASE WHEN source_type = 'manual' THEN 'manual' ELSE 'auto' END::text AS source,
+    importance, expires_at, created_at, updated_at
+FROM memories
+WHERE memories.tenant_id = $1
+  AND memories.id = $2
 `
 
 type GetAgentMemoryParams struct {
@@ -143,15 +405,40 @@ type GetAgentMemoryParams struct {
 	ID       string `json:"id"`
 }
 
-func (q *Queries) GetAgentMemory(ctx context.Context, arg GetAgentMemoryParams) (AgentMemory, error) {
+type GetAgentMemoryRow struct {
+	ID              string             `json:"id"`
+	TenantID        string             `json:"tenant_id"`
+	AccountID       string             `json:"account_id"`
+	AgentID         pgtype.Text        `json:"agent_id"`
+	SessionID       pgtype.Text        `json:"session_id"`
+	SegmentID       pgtype.Text        `json:"segment_id"`
+	Scope           string             `json:"scope"`
+	SourceMessageID pgtype.Text        `json:"source_message_id"`
+	Confidence      pgtype.Numeric     `json:"confidence"`
+	Status          string             `json:"status"`
+	Key             string             `json:"key"`
+	Content         string             `json:"content"`
+	Source          string             `json:"source"`
+	Importance      int32              `json:"importance"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetAgentMemory(ctx context.Context, arg GetAgentMemoryParams) (GetAgentMemoryRow, error) {
 	row := q.db.QueryRow(ctx, getAgentMemory, arg.TenantID, arg.ID)
-	var i AgentMemory
+	var i GetAgentMemoryRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.AccountID,
 		&i.AgentID,
 		&i.SessionID,
+		&i.SegmentID,
+		&i.Scope,
+		&i.SourceMessageID,
+		&i.Confidence,
+		&i.Status,
 		&i.Key,
 		&i.Content,
 		&i.Source,
@@ -164,9 +451,25 @@ func (q *Queries) GetAgentMemory(ctx context.Context, arg GetAgentMemoryParams) 
 }
 
 const getAgentSession = `-- name: GetAgentSession :one
-SELECT id, tenant_id, account_id, agent_id, title, status, context_version, last_message_at, created_at, updated_at FROM agent_sessions
-WHERE tenant_id = $1
-  AND id = $2
+SELECT
+    conversations.id,
+    conversations.tenant_id,
+    conversations.owner_account_id AS account_id,
+    conversations.agent_id,
+    segments.id AS segment_id,
+    conversations.title,
+    conversations.status,
+    segments.ordinal::bigint AS context_version,
+    conversations.last_message_at,
+    conversations.created_at,
+    conversations.updated_at
+FROM conversations
+JOIN conversation_segments segments
+  ON segments.tenant_id = conversations.tenant_id
+ AND segments.conversation_id = conversations.id
+ AND segments.id = conversations.current_segment_id
+WHERE conversations.tenant_id = $1
+  AND conversations.id = $2
 `
 
 type GetAgentSessionParams struct {
@@ -174,14 +477,29 @@ type GetAgentSessionParams struct {
 	ID       string `json:"id"`
 }
 
-func (q *Queries) GetAgentSession(ctx context.Context, arg GetAgentSessionParams) (AgentSession, error) {
+type GetAgentSessionRow struct {
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	AccountID      string             `json:"account_id"`
+	AgentID        pgtype.Text        `json:"agent_id"`
+	SegmentID      string             `json:"segment_id"`
+	Title          string             `json:"title"`
+	Status         string             `json:"status"`
+	ContextVersion int64              `json:"context_version"`
+	LastMessageAt  pgtype.Timestamptz `json:"last_message_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetAgentSession(ctx context.Context, arg GetAgentSessionParams) (GetAgentSessionRow, error) {
 	row := q.db.QueryRow(ctx, getAgentSession, arg.TenantID, arg.ID)
-	var i AgentSession
+	var i GetAgentSessionRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.AccountID,
 		&i.AgentID,
+		&i.SegmentID,
 		&i.Title,
 		&i.Status,
 		&i.ContextVersion,
@@ -193,10 +511,26 @@ func (q *Queries) GetAgentSession(ctx context.Context, arg GetAgentSessionParams
 }
 
 const getAgentSessionForUpdate = `-- name: GetAgentSessionForUpdate :one
-SELECT id, tenant_id, account_id, agent_id, title, status, context_version, last_message_at, created_at, updated_at FROM agent_sessions
-WHERE tenant_id = $1
-  AND id = $2
-FOR UPDATE
+SELECT
+    conversations.id,
+    conversations.tenant_id,
+    conversations.owner_account_id AS account_id,
+    conversations.agent_id,
+    segments.id AS segment_id,
+    conversations.title,
+    conversations.status,
+    segments.ordinal::bigint AS context_version,
+    conversations.last_message_at,
+    conversations.created_at,
+    conversations.updated_at
+FROM conversations
+JOIN conversation_segments segments
+  ON segments.tenant_id = conversations.tenant_id
+ AND segments.conversation_id = conversations.id
+ AND segments.id = conversations.current_segment_id
+WHERE conversations.tenant_id = $1
+  AND conversations.id = $2
+FOR UPDATE OF conversations
 `
 
 type GetAgentSessionForUpdateParams struct {
@@ -204,14 +538,29 @@ type GetAgentSessionForUpdateParams struct {
 	ID       string `json:"id"`
 }
 
-func (q *Queries) GetAgentSessionForUpdate(ctx context.Context, arg GetAgentSessionForUpdateParams) (AgentSession, error) {
+type GetAgentSessionForUpdateRow struct {
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	AccountID      string             `json:"account_id"`
+	AgentID        pgtype.Text        `json:"agent_id"`
+	SegmentID      string             `json:"segment_id"`
+	Title          string             `json:"title"`
+	Status         string             `json:"status"`
+	ContextVersion int64              `json:"context_version"`
+	LastMessageAt  pgtype.Timestamptz `json:"last_message_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) GetAgentSessionForUpdate(ctx context.Context, arg GetAgentSessionForUpdateParams) (GetAgentSessionForUpdateRow, error) {
 	row := q.db.QueryRow(ctx, getAgentSessionForUpdate, arg.TenantID, arg.ID)
-	var i AgentSession
+	var i GetAgentSessionForUpdateRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.AccountID,
 		&i.AgentID,
+		&i.SegmentID,
 		&i.Title,
 		&i.Status,
 		&i.ContextVersion,
@@ -223,55 +572,43 @@ func (q *Queries) GetAgentSessionForUpdate(ctx context.Context, arg GetAgentSess
 }
 
 const getAgentUsageByAccount = `-- name: GetAgentUsageByAccount :one
-WITH session_usage AS (
-    SELECT
-        account_id,
-        count(*)::bigint AS session_count,
-        max(COALESCE(last_message_at, updated_at))::timestamptz AS last_session_at
-    FROM agent_sessions sessions
-    WHERE sessions.tenant_id = $1
-    GROUP BY sessions.account_id
+WITH conversation_usage AS (
+    SELECT owner_account_id AS account_id, count(*)::bigint AS session_count,
+           max(COALESCE(last_message_at, updated_at))::timestamptz AS last_session_at
+    FROM conversations
+    WHERE tenant_id = $1
+    GROUP BY owner_account_id
 ), message_usage AS (
-    SELECT
-        sessions.account_id,
-        count(messages.id)::bigint AS message_count,
-        max(messages.created_at)::timestamptz AS last_message_at
-    FROM agent_sessions sessions
-    JOIN agent_session_messages messages
-      ON messages.tenant_id = sessions.tenant_id
-     AND messages.session_id = sessions.id
-    WHERE sessions.tenant_id = $1
-    GROUP BY sessions.account_id
-), run_usage AS (
-    SELECT
-        account_id,
-        sum(llm_call_count)::bigint AS llm_call_count,
-        sum(input_tokens)::bigint AS input_tokens,
-        sum(cached_tokens)::bigint AS cached_tokens,
-        sum(output_tokens)::bigint AS output_tokens,
-        sum(total_tokens)::bigint AS total_tokens
-    FROM agent_runs
+    SELECT conversations.owner_account_id AS account_id, count(messages.id)::bigint AS message_count,
+           max(messages.created_at)::timestamptz AS last_message_at
+    FROM conversations
+    JOIN messages ON messages.tenant_id = conversations.tenant_id AND messages.conversation_id = conversations.id
+    WHERE conversations.tenant_id = $1
+    GROUP BY conversations.owner_account_id
+), execution_usage AS (
+    SELECT account_id, sum(llm_call_count)::bigint AS llm_call_count,
+           sum(input_tokens)::bigint AS input_tokens, sum(cached_tokens)::bigint AS cached_tokens,
+           sum(output_tokens)::bigint AS output_tokens, sum(total_tokens)::bigint AS total_tokens,
+           max(updated_at)::timestamptz AS last_execution_at
+    FROM executions
     WHERE tenant_id = $1
     GROUP BY account_id
 )
 SELECT
-    accounts.id AS account_id,
-    accounts.display_name,
-    accounts.email,
-    accounts.status,
-    COALESCE(session_usage.session_count, 0)::bigint AS session_count,
+    accounts.id AS account_id, accounts.display_name, accounts.email, accounts.status,
+    COALESCE(conversation_usage.session_count, 0)::bigint AS session_count,
     COALESCE(message_usage.message_count, 0)::bigint AS message_count,
-    COALESCE(run_usage.llm_call_count, 0)::bigint AS llm_call_count,
-    COALESCE(run_usage.input_tokens, 0)::bigint AS input_tokens,
-    COALESCE(run_usage.cached_tokens, 0)::bigint AS cached_tokens,
-    COALESCE(run_usage.output_tokens, 0)::bigint AS output_tokens,
-    COALESCE(run_usage.total_tokens, 0)::bigint AS total_tokens,
-    GREATEST(COALESCE(run_usage.total_tokens, 0) - COALESCE(run_usage.cached_tokens, 0), 0)::bigint AS actual_tokens,
-    GREATEST(session_usage.last_session_at, message_usage.last_message_at)::timestamptz AS last_active_at
+    COALESCE(execution_usage.llm_call_count, 0)::bigint AS llm_call_count,
+    COALESCE(execution_usage.input_tokens, 0)::bigint AS input_tokens,
+    COALESCE(execution_usage.cached_tokens, 0)::bigint AS cached_tokens,
+    COALESCE(execution_usage.output_tokens, 0)::bigint AS output_tokens,
+    COALESCE(execution_usage.total_tokens, 0)::bigint AS total_tokens,
+    GREATEST(COALESCE(execution_usage.total_tokens, 0) - COALESCE(execution_usage.cached_tokens, 0), 0)::bigint AS actual_tokens,
+    GREATEST(conversation_usage.last_session_at, message_usage.last_message_at, execution_usage.last_execution_at)::timestamptz AS last_active_at
 FROM accounts
-LEFT JOIN session_usage ON session_usage.account_id = accounts.id
+LEFT JOIN conversation_usage ON conversation_usage.account_id = accounts.id
 LEFT JOIN message_usage ON message_usage.account_id = accounts.id
-LEFT JOIN run_usage ON run_usage.account_id = accounts.id
+LEFT JOIN execution_usage ON execution_usage.account_id = accounts.id
 WHERE accounts.tenant_id = $1
   AND accounts.id = $2
 `
@@ -319,44 +656,34 @@ func (q *Queries) GetAgentUsageByAccount(ctx context.Context, arg GetAgentUsageB
 }
 
 const getAgentUsageSummary = `-- name: GetAgentUsageSummary :one
-WITH session_usage AS (
-    SELECT account_id, count(*)::bigint AS session_count
-    FROM agent_sessions sessions
-    WHERE sessions.tenant_id = $1
-    GROUP BY sessions.account_id
+WITH conversation_usage AS (
+    SELECT owner_account_id AS account_id, count(*)::bigint AS session_count
+    FROM conversations WHERE conversations.tenant_id = $1 GROUP BY conversations.owner_account_id
 ), message_usage AS (
-    SELECT sessions.account_id, count(messages.id)::bigint AS message_count
-    FROM agent_sessions sessions
-    JOIN agent_session_messages messages
-      ON messages.tenant_id = sessions.tenant_id
-     AND messages.session_id = sessions.id
-    WHERE sessions.tenant_id = $1
-    GROUP BY sessions.account_id
-), run_usage AS (
-    SELECT
-        account_id,
-        sum(llm_call_count)::bigint AS llm_call_count,
-        sum(input_tokens)::bigint AS input_tokens,
-        sum(cached_tokens)::bigint AS cached_tokens,
-        sum(output_tokens)::bigint AS output_tokens,
-        sum(total_tokens)::bigint AS total_tokens
-    FROM agent_runs
-    WHERE tenant_id = $1
-    GROUP BY account_id
+    SELECT conversations.owner_account_id AS account_id, count(messages.id)::bigint AS message_count
+    FROM conversations
+    JOIN messages ON messages.tenant_id = conversations.tenant_id AND messages.conversation_id = conversations.id
+    WHERE conversations.tenant_id = $1
+    GROUP BY conversations.owner_account_id
+), execution_usage AS (
+    SELECT account_id, sum(llm_call_count)::bigint AS llm_call_count,
+           sum(input_tokens)::bigint AS input_tokens, sum(cached_tokens)::bigint AS cached_tokens,
+           sum(output_tokens)::bigint AS output_tokens, sum(total_tokens)::bigint AS total_tokens
+    FROM executions WHERE tenant_id = $1 GROUP BY account_id
 ), account_usage AS (
     SELECT
-        COALESCE(session_usage.session_count, 0)::bigint AS session_count,
+        COALESCE(conversation_usage.session_count, 0)::bigint AS session_count,
         COALESCE(message_usage.message_count, 0)::bigint AS message_count,
-        COALESCE(run_usage.llm_call_count, 0)::bigint AS llm_call_count,
-        COALESCE(run_usage.input_tokens, 0)::bigint AS input_tokens,
-        COALESCE(run_usage.cached_tokens, 0)::bigint AS cached_tokens,
-        COALESCE(run_usage.output_tokens, 0)::bigint AS output_tokens,
-        COALESCE(run_usage.total_tokens, 0)::bigint AS total_tokens,
-        GREATEST(COALESCE(run_usage.total_tokens, 0) - COALESCE(run_usage.cached_tokens, 0), 0)::bigint AS actual_tokens
+        COALESCE(execution_usage.llm_call_count, 0)::bigint AS llm_call_count,
+        COALESCE(execution_usage.input_tokens, 0)::bigint AS input_tokens,
+        COALESCE(execution_usage.cached_tokens, 0)::bigint AS cached_tokens,
+        COALESCE(execution_usage.output_tokens, 0)::bigint AS output_tokens,
+        COALESCE(execution_usage.total_tokens, 0)::bigint AS total_tokens,
+        GREATEST(COALESCE(execution_usage.total_tokens, 0) - COALESCE(execution_usage.cached_tokens, 0), 0)::bigint AS actual_tokens
     FROM accounts
-    LEFT JOIN session_usage ON session_usage.account_id = accounts.id
+    LEFT JOIN conversation_usage ON conversation_usage.account_id = accounts.id
     LEFT JOIN message_usage ON message_usage.account_id = accounts.id
-    LEFT JOIN run_usage ON run_usage.account_id = accounts.id
+    LEFT JOIN execution_usage ON execution_usage.account_id = accounts.id
     WHERE accounts.tenant_id = $1
 )
 SELECT
@@ -404,20 +731,107 @@ func (q *Queries) GetAgentUsageSummary(ctx context.Context, tenantID string) (Ge
 	return i, err
 }
 
+const getExecutionStepV2 = `-- name: GetExecutionStepV2 :one
+SELECT id, tenant_id, execution_id, parent_step_id, sequence_no, step_type, name, model_connection_id, external_tool_id, status, input_summary, output_summary, input_tokens, cached_tokens, output_tokens, started_at, completed_at, error_code, created_at
+FROM execution_steps
+WHERE tenant_id = $1 AND id = $2
+`
+
+type GetExecutionStepV2Params struct {
+	TenantID string `json:"tenant_id"`
+	ID       string `json:"id"`
+}
+
+func (q *Queries) GetExecutionStepV2(ctx context.Context, arg GetExecutionStepV2Params) (ExecutionStep, error) {
+	row := q.db.QueryRow(ctx, getExecutionStepV2, arg.TenantID, arg.ID)
+	var i ExecutionStep
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ExecutionID,
+		&i.ParentStepID,
+		&i.SequenceNo,
+		&i.StepType,
+		&i.Name,
+		&i.ModelConnectionID,
+		&i.ExternalToolID,
+		&i.Status,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.InputTokens,
+		&i.CachedTokens,
+		&i.OutputTokens,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.ErrorCode,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
 const insertAgentSessionMessage = `-- name: InsertAgentSessionMessage :one
-INSERT INTO agent_session_messages (
-    id, tenant_id, session_id, role, content, run_id, context_version, metadata, created_at
-) VALUES (
-    $1, $2, $3, $4,
-    $5, $6, $7, $8::jsonb, $9
+WITH allocated AS (
+    UPDATE conversations
+    SET next_message_sequence = next_message_sequence + 1,
+        last_message_at = GREATEST(COALESCE(last_message_at, $1::timestamptz), $1::timestamptz),
+        updated_at = GREATEST(updated_at, $1::timestamptz)
+    WHERE conversations.tenant_id = $2
+      AND conversations.id = $3
+    RETURNING id, tenant_id, owner_account_id, agent_id, current_segment_id, next_message_sequence, title, status, last_message_at, created_at, updated_at, archived_at, next_message_sequence - 1 AS allocated_sequence
+), inserted AS (
+    INSERT INTO messages (
+        id, tenant_id, conversation_id, segment_id, sequence_no, role,
+        content, content_json, execution_id, execution_step_id, created_at
+    )
+    SELECT
+        $4, allocated.tenant_id, allocated.id, allocated.current_segment_id,
+        allocated.allocated_sequence, $5, $6,
+        $7::jsonb,
+        executions.id, NULL, $1
+    FROM allocated
+    LEFT JOIN executions
+      ON executions.tenant_id = allocated.tenant_id
+     AND executions.conversation_id = allocated.id
+     AND executions.segment_id = allocated.current_segment_id
+     AND executions.id = NULLIF($8::text, '')
+    RETURNING id, tenant_id, conversation_id, segment_id, sequence_no, role, content, content_json, execution_id, execution_step_id, created_at
 )
-RETURNING id, tenant_id, session_id, role, content, run_id, context_version, metadata, created_at
+SELECT
+    inserted.id,
+    inserted.tenant_id,
+    inserted.conversation_id AS session_id,
+    inserted.segment_id,
+    inserted.sequence_no,
+    inserted.role,
+    inserted.content,
+    inserted.execution_id AS run_id,
+    segments.ordinal::bigint AS context_version,
+    COALESCE(inserted.content_json, '{}'::jsonb) AS metadata,
+    inserted.created_at
+FROM inserted
+JOIN conversation_segments segments
+  ON segments.tenant_id = inserted.tenant_id
+ AND segments.conversation_id = inserted.conversation_id
+ AND segments.id = inserted.segment_id
 `
 
 type InsertAgentSessionMessageParams struct {
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	TenantID  string             `json:"tenant_id"`
+	SessionID string             `json:"session_id"`
+	ID        string             `json:"id"`
+	Role      string             `json:"role"`
+	Content   string             `json:"content"`
+	Metadata  []byte             `json:"metadata"`
+	RunID     string             `json:"run_id"`
+}
+
+type InsertAgentSessionMessageRow struct {
 	ID             string             `json:"id"`
 	TenantID       string             `json:"tenant_id"`
 	SessionID      string             `json:"session_id"`
+	SegmentID      string             `json:"segment_id"`
+	SequenceNo     int64              `json:"sequence_no"`
 	Role           string             `json:"role"`
 	Content        string             `json:"content"`
 	RunID          pgtype.Text        `json:"run_id"`
@@ -426,23 +840,24 @@ type InsertAgentSessionMessageParams struct {
 	CreatedAt      pgtype.Timestamptz `json:"created_at"`
 }
 
-func (q *Queries) InsertAgentSessionMessage(ctx context.Context, arg InsertAgentSessionMessageParams) (AgentSessionMessage, error) {
+func (q *Queries) InsertAgentSessionMessage(ctx context.Context, arg InsertAgentSessionMessageParams) (InsertAgentSessionMessageRow, error) {
 	row := q.db.QueryRow(ctx, insertAgentSessionMessage,
-		arg.ID,
+		arg.CreatedAt,
 		arg.TenantID,
 		arg.SessionID,
+		arg.ID,
 		arg.Role,
 		arg.Content,
-		arg.RunID,
-		arg.ContextVersion,
 		arg.Metadata,
-		arg.CreatedAt,
+		arg.RunID,
 	)
-	var i AgentSessionMessage
+	var i InsertAgentSessionMessageRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.SessionID,
+		&i.SegmentID,
+		&i.SequenceNo,
 		&i.Role,
 		&i.Content,
 		&i.RunID,
@@ -454,13 +869,37 @@ func (q *Queries) InsertAgentSessionMessage(ctx context.Context, arg InsertAgent
 }
 
 const listAgentMemoriesByAccount = `-- name: ListAgentMemoriesByAccount :many
-SELECT id, tenant_id, account_id, agent_id, session_id, key, content, source, importance, expires_at, created_at, updated_at FROM agent_memories
-WHERE tenant_id = $1
-  AND account_id = $2
-  AND ($3::text = '' OR agent_id = $3 OR agent_id IS NULL OR agent_id = '')
-  AND ($4::text = '' OR session_id = $4)
-  AND (expires_at IS NULL OR expires_at > now())
-ORDER BY importance DESC, updated_at DESC, id DESC
+SELECT
+    id, tenant_id, account_id, agent_id, conversation_id AS session_id, segment_id,
+    scope_type AS scope, source_message_id, confidence, status,
+    key, content,
+    CASE WHEN source_type = 'manual' THEN 'manual' ELSE 'auto' END::text AS source,
+    importance, expires_at, created_at, updated_at
+FROM memories
+WHERE memories.tenant_id = $1
+  AND memories.account_id = $2
+  AND memories.status = 'active'
+  AND (
+      memories.scope_type = 'global'
+      OR (
+          memories.scope_type = 'agent'
+          AND $3::text <> ''
+          AND memories.agent_id = $3
+      )
+      OR (
+          memories.scope_type = 'conversation'
+          AND $4::text <> ''
+          AND memories.conversation_id = $4
+          AND memories.segment_id = (
+              SELECT conversations.current_segment_id
+              FROM conversations
+              WHERE conversations.tenant_id = $1
+                AND conversations.id = $4
+          )
+      )
+  )
+  AND (memories.expires_at IS NULL OR memories.expires_at > now())
+ORDER BY memories.importance DESC, memories.updated_at DESC, memories.id DESC
 LIMIT $5::int
 `
 
@@ -472,7 +911,27 @@ type ListAgentMemoriesByAccountParams struct {
 	LimitCount int32  `json:"limit_count"`
 }
 
-func (q *Queries) ListAgentMemoriesByAccount(ctx context.Context, arg ListAgentMemoriesByAccountParams) ([]AgentMemory, error) {
+type ListAgentMemoriesByAccountRow struct {
+	ID              string             `json:"id"`
+	TenantID        string             `json:"tenant_id"`
+	AccountID       string             `json:"account_id"`
+	AgentID         pgtype.Text        `json:"agent_id"`
+	SessionID       pgtype.Text        `json:"session_id"`
+	SegmentID       pgtype.Text        `json:"segment_id"`
+	Scope           string             `json:"scope"`
+	SourceMessageID pgtype.Text        `json:"source_message_id"`
+	Confidence      pgtype.Numeric     `json:"confidence"`
+	Status          string             `json:"status"`
+	Key             string             `json:"key"`
+	Content         string             `json:"content"`
+	Source          string             `json:"source"`
+	Importance      int32              `json:"importance"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListAgentMemoriesByAccount(ctx context.Context, arg ListAgentMemoriesByAccountParams) ([]ListAgentMemoriesByAccountRow, error) {
 	rows, err := q.db.Query(ctx, listAgentMemoriesByAccount,
 		arg.TenantID,
 		arg.AccountID,
@@ -484,15 +943,20 @@ func (q *Queries) ListAgentMemoriesByAccount(ctx context.Context, arg ListAgentM
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AgentMemory
+	var items []ListAgentMemoriesByAccountRow
 	for rows.Next() {
-		var i AgentMemory
+		var i ListAgentMemoriesByAccountRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
 			&i.AccountID,
 			&i.AgentID,
 			&i.SessionID,
+			&i.SegmentID,
+			&i.Scope,
+			&i.SourceMessageID,
+			&i.Confidence,
+			&i.Status,
 			&i.Key,
 			&i.Content,
 			&i.Source,
@@ -512,14 +976,29 @@ func (q *Queries) ListAgentMemoriesByAccount(ctx context.Context, arg ListAgentM
 }
 
 const listAgentSessionMessages = `-- name: ListAgentSessionMessages :many
-SELECT messages.id, messages.tenant_id, messages.session_id, messages.role, messages.content, messages.run_id, messages.context_version, messages.metadata, messages.created_at
-FROM agent_session_messages messages
-JOIN agent_sessions sessions
-  ON sessions.tenant_id = messages.tenant_id
- AND sessions.id = messages.session_id
+SELECT
+    messages.id,
+    messages.tenant_id,
+    messages.conversation_id AS session_id,
+    messages.segment_id,
+    messages.sequence_no,
+    messages.role,
+    messages.content,
+    messages.execution_id AS run_id,
+    segments.ordinal::bigint AS context_version,
+    COALESCE(messages.content_json, '{}'::jsonb) AS metadata,
+    messages.created_at
+FROM messages
+JOIN conversations
+  ON conversations.tenant_id = messages.tenant_id
+ AND conversations.id = messages.conversation_id
+JOIN conversation_segments segments
+  ON segments.tenant_id = messages.tenant_id
+ AND segments.conversation_id = messages.conversation_id
+ AND segments.id = messages.segment_id
 WHERE messages.tenant_id = $1
-  AND messages.session_id = $2
-  AND messages.context_version = sessions.context_version
+  AND messages.conversation_id = $2
+  AND messages.segment_id = conversations.current_segment_id
   AND (
     NOT $3::boolean
     OR messages.created_at > $4::timestamptz
@@ -538,7 +1017,21 @@ type ListAgentSessionMessagesParams struct {
 	LimitCount      int32              `json:"limit_count"`
 }
 
-func (q *Queries) ListAgentSessionMessages(ctx context.Context, arg ListAgentSessionMessagesParams) ([]AgentSessionMessage, error) {
+type ListAgentSessionMessagesRow struct {
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	SessionID      string             `json:"session_id"`
+	SegmentID      string             `json:"segment_id"`
+	SequenceNo     int64              `json:"sequence_no"`
+	Role           string             `json:"role"`
+	Content        string             `json:"content"`
+	RunID          pgtype.Text        `json:"run_id"`
+	ContextVersion int64              `json:"context_version"`
+	Metadata       []byte             `json:"metadata"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListAgentSessionMessages(ctx context.Context, arg ListAgentSessionMessagesParams) ([]ListAgentSessionMessagesRow, error) {
 	rows, err := q.db.Query(ctx, listAgentSessionMessages,
 		arg.TenantID,
 		arg.SessionID,
@@ -551,13 +1044,15 @@ func (q *Queries) ListAgentSessionMessages(ctx context.Context, arg ListAgentSes
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AgentSessionMessage
+	var items []ListAgentSessionMessagesRow
 	for rows.Next() {
-		var i AgentSessionMessage
+		var i ListAgentSessionMessagesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
 			&i.SessionID,
+			&i.SegmentID,
+			&i.SequenceNo,
 			&i.Role,
 			&i.Content,
 			&i.RunID,
@@ -576,17 +1071,33 @@ func (q *Queries) ListAgentSessionMessages(ctx context.Context, arg ListAgentSes
 }
 
 const listAgentSessionsByAccount = `-- name: ListAgentSessionsByAccount :many
-SELECT id, tenant_id, account_id, agent_id, title, status, context_version, last_message_at, created_at, updated_at FROM agent_sessions
-WHERE tenant_id = $1
-  AND account_id = $2
-  AND ($3::text = '' OR status = $3)
-  AND ($4::text = '' OR agent_id = $4)
+SELECT
+    conversations.id,
+    conversations.tenant_id,
+    conversations.owner_account_id AS account_id,
+    conversations.agent_id,
+    segments.id AS segment_id,
+    conversations.title,
+    conversations.status,
+    segments.ordinal::bigint AS context_version,
+    conversations.last_message_at,
+    conversations.created_at,
+    conversations.updated_at
+FROM conversations
+JOIN conversation_segments segments
+  ON segments.tenant_id = conversations.tenant_id
+ AND segments.conversation_id = conversations.id
+ AND segments.id = conversations.current_segment_id
+WHERE conversations.tenant_id = $1
+  AND conversations.owner_account_id = $2
+  AND ($3::text = '' OR conversations.status = $3)
+  AND ($4::text = '' OR conversations.agent_id = $4)
   AND (
     NOT $5::boolean
-    OR created_at < $6::timestamptz
-    OR (created_at = $6::timestamptz AND id < $7)
+    OR conversations.created_at < $6::timestamptz
+    OR (conversations.created_at = $6::timestamptz AND conversations.id < $7)
   )
-ORDER BY created_at DESC, id DESC
+ORDER BY conversations.created_at DESC, conversations.id DESC
 LIMIT $8::int
 `
 
@@ -601,7 +1112,21 @@ type ListAgentSessionsByAccountParams struct {
 	LimitCount      int32              `json:"limit_count"`
 }
 
-func (q *Queries) ListAgentSessionsByAccount(ctx context.Context, arg ListAgentSessionsByAccountParams) ([]AgentSession, error) {
+type ListAgentSessionsByAccountRow struct {
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	AccountID      string             `json:"account_id"`
+	AgentID        pgtype.Text        `json:"agent_id"`
+	SegmentID      string             `json:"segment_id"`
+	Title          string             `json:"title"`
+	Status         string             `json:"status"`
+	ContextVersion int64              `json:"context_version"`
+	LastMessageAt  pgtype.Timestamptz `json:"last_message_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) ListAgentSessionsByAccount(ctx context.Context, arg ListAgentSessionsByAccountParams) ([]ListAgentSessionsByAccountRow, error) {
 	rows, err := q.db.Query(ctx, listAgentSessionsByAccount,
 		arg.TenantID,
 		arg.AccountID,
@@ -616,14 +1141,15 @@ func (q *Queries) ListAgentSessionsByAccount(ctx context.Context, arg ListAgentS
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AgentSession
+	var items []ListAgentSessionsByAccountRow
 	for rows.Next() {
-		var i AgentSession
+		var i ListAgentSessionsByAccountRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
 			&i.AccountID,
 			&i.AgentID,
+			&i.SegmentID,
 			&i.Title,
 			&i.Status,
 			&i.ContextVersion,
@@ -642,56 +1168,57 @@ func (q *Queries) ListAgentSessionsByAccount(ctx context.Context, arg ListAgentS
 }
 
 const listAgentUsageByAccount = `-- name: ListAgentUsageByAccount :many
-WITH session_usage AS (
+WITH conversation_usage AS (
     SELECT
-        account_id,
+        owner_account_id AS account_id,
         count(*)::bigint AS session_count,
         max(COALESCE(last_message_at, updated_at))::timestamptz AS last_session_at
-    FROM agent_sessions sessions
-    WHERE sessions.tenant_id = $6
-    GROUP BY sessions.account_id
+    FROM conversations
+    WHERE conversations.tenant_id = $6
+    GROUP BY conversations.owner_account_id
 ), message_usage AS (
     SELECT
-        sessions.account_id,
+        conversations.owner_account_id AS account_id,
         count(messages.id)::bigint AS message_count,
         max(messages.created_at)::timestamptz AS last_message_at
-    FROM agent_sessions sessions
-    JOIN agent_session_messages messages
-      ON messages.tenant_id = sessions.tenant_id
-     AND messages.session_id = sessions.id
-    WHERE sessions.tenant_id = $6
-    GROUP BY sessions.account_id
-), run_usage AS (
+    FROM conversations
+    JOIN messages
+      ON messages.tenant_id = conversations.tenant_id
+     AND messages.conversation_id = conversations.id
+    WHERE conversations.tenant_id = $6
+    GROUP BY conversations.owner_account_id
+), execution_usage AS (
     SELECT
         account_id,
         sum(llm_call_count)::bigint AS llm_call_count,
         sum(input_tokens)::bigint AS input_tokens,
         sum(cached_tokens)::bigint AS cached_tokens,
         sum(output_tokens)::bigint AS output_tokens,
-        sum(total_tokens)::bigint AS total_tokens
-    FROM agent_runs
+        sum(total_tokens)::bigint AS total_tokens,
+        max(updated_at)::timestamptz AS last_execution_at
+    FROM executions
     WHERE tenant_id = $6
     GROUP BY account_id
 ), account_usage AS (
-SELECT
-    accounts.id AS account_id,
-    accounts.display_name,
-    accounts.email,
-    accounts.status,
-    COALESCE(session_usage.session_count, 0)::bigint AS session_count,
-    COALESCE(message_usage.message_count, 0)::bigint AS message_count,
-    COALESCE(run_usage.llm_call_count, 0)::bigint AS llm_call_count,
-    COALESCE(run_usage.input_tokens, 0)::bigint AS input_tokens,
-    COALESCE(run_usage.cached_tokens, 0)::bigint AS cached_tokens,
-    COALESCE(run_usage.output_tokens, 0)::bigint AS output_tokens,
-    COALESCE(run_usage.total_tokens, 0)::bigint AS total_tokens,
-    GREATEST(COALESCE(run_usage.total_tokens, 0) - COALESCE(run_usage.cached_tokens, 0), 0)::bigint AS actual_tokens,
-    GREATEST(session_usage.last_session_at, message_usage.last_message_at)::timestamptz AS last_active_at
-FROM accounts
-LEFT JOIN session_usage ON session_usage.account_id = accounts.id
-LEFT JOIN message_usage ON message_usage.account_id = accounts.id
-LEFT JOIN run_usage ON run_usage.account_id = accounts.id
-WHERE accounts.tenant_id = $6
+    SELECT
+        accounts.id AS account_id,
+        accounts.display_name,
+        accounts.email,
+        accounts.status,
+        COALESCE(conversation_usage.session_count, 0)::bigint AS session_count,
+        COALESCE(message_usage.message_count, 0)::bigint AS message_count,
+        COALESCE(execution_usage.llm_call_count, 0)::bigint AS llm_call_count,
+        COALESCE(execution_usage.input_tokens, 0)::bigint AS input_tokens,
+        COALESCE(execution_usage.cached_tokens, 0)::bigint AS cached_tokens,
+        COALESCE(execution_usage.output_tokens, 0)::bigint AS output_tokens,
+        COALESCE(execution_usage.total_tokens, 0)::bigint AS total_tokens,
+        GREATEST(COALESCE(execution_usage.total_tokens, 0) - COALESCE(execution_usage.cached_tokens, 0), 0)::bigint AS actual_tokens,
+        GREATEST(conversation_usage.last_session_at, message_usage.last_message_at, execution_usage.last_execution_at)::timestamptz AS last_active_at
+    FROM accounts
+    LEFT JOIN conversation_usage ON conversation_usage.account_id = accounts.id
+    LEFT JOIN message_usage ON message_usage.account_id = accounts.id
+    LEFT JOIN execution_usage ON execution_usage.account_id = accounts.id
+    WHERE accounts.tenant_id = $6
 )
 SELECT account_id, display_name, email, status, session_count, message_count, llm_call_count, input_tokens, cached_tokens, output_tokens, total_tokens, actual_tokens, last_active_at
 FROM account_usage
@@ -782,53 +1309,46 @@ func (q *Queries) ListAgentUsageByAccount(ctx context.Context, arg ListAgentUsag
 }
 
 const listAgentUsageBySession = `-- name: ListAgentUsageBySession :many
-WITH account_sessions AS (
-	SELECT id
-	FROM agent_sessions
-	WHERE tenant_id = $1
-	  AND account_id = $2
+WITH account_conversations AS (
+    SELECT id
+    FROM conversations
+    WHERE tenant_id = $1 AND owner_account_id = $2
 ), message_usage AS (
-    SELECT
-		messages.session_id,
-        count(*)::bigint AS message_count,
-        max(messages.created_at)::timestamptz AS last_message_at
-    FROM agent_session_messages messages
-	JOIN account_sessions ON account_sessions.id = messages.session_id
+    SELECT messages.conversation_id, count(*)::bigint AS message_count,
+           max(messages.created_at)::timestamptz AS last_message_at
+    FROM messages
+    JOIN account_conversations ON account_conversations.id = messages.conversation_id
     WHERE messages.tenant_id = $1
-    GROUP BY messages.session_id
-), run_usage AS (
-    SELECT
-		runs.session_id,
-        sum(llm_call_count)::bigint AS llm_call_count,
-        sum(input_tokens)::bigint AS input_tokens,
-        sum(cached_tokens)::bigint AS cached_tokens,
-        sum(output_tokens)::bigint AS output_tokens,
-        sum(total_tokens)::bigint AS total_tokens,
-        max(updated_at)::timestamptz AS last_run_at
-	FROM agent_runs runs
-	JOIN account_sessions ON account_sessions.id = runs.session_id
-	WHERE runs.tenant_id = $1
-	GROUP BY runs.session_id
+    GROUP BY messages.conversation_id
+), execution_usage AS (
+    SELECT executions.conversation_id, sum(llm_call_count)::bigint AS llm_call_count,
+           sum(input_tokens)::bigint AS input_tokens, sum(cached_tokens)::bigint AS cached_tokens,
+           sum(output_tokens)::bigint AS output_tokens, sum(total_tokens)::bigint AS total_tokens,
+           max(updated_at)::timestamptz AS last_execution_at
+    FROM executions
+    JOIN account_conversations ON account_conversations.id = executions.conversation_id
+    WHERE executions.tenant_id = $1
+    GROUP BY executions.conversation_id
 )
 SELECT
-    sessions.id AS session_id,
-    sessions.account_id,
-    sessions.title,
-    sessions.status,
+    conversations.id AS session_id,
+    conversations.owner_account_id AS account_id,
+    conversations.title,
+    conversations.status,
     COALESCE(message_usage.message_count, 0)::bigint AS message_count,
-    COALESCE(run_usage.llm_call_count, 0)::bigint AS llm_call_count,
-    COALESCE(run_usage.input_tokens, 0)::bigint AS input_tokens,
-    COALESCE(run_usage.cached_tokens, 0)::bigint AS cached_tokens,
-    COALESCE(run_usage.output_tokens, 0)::bigint AS output_tokens,
-    COALESCE(run_usage.total_tokens, 0)::bigint AS total_tokens,
-    GREATEST(COALESCE(run_usage.total_tokens, 0) - COALESCE(run_usage.cached_tokens, 0), 0)::bigint AS actual_tokens,
-    GREATEST(COALESCE(sessions.last_message_at, sessions.updated_at), message_usage.last_message_at, run_usage.last_run_at)::timestamptz AS last_active_at
-FROM agent_sessions sessions
-LEFT JOIN message_usage ON message_usage.session_id = sessions.id
-LEFT JOIN run_usage ON run_usage.session_id = sessions.id
-WHERE sessions.tenant_id = $1
-  AND sessions.account_id = $2
-ORDER BY last_active_at DESC, sessions.id DESC
+    COALESCE(execution_usage.llm_call_count, 0)::bigint AS llm_call_count,
+    COALESCE(execution_usage.input_tokens, 0)::bigint AS input_tokens,
+    COALESCE(execution_usage.cached_tokens, 0)::bigint AS cached_tokens,
+    COALESCE(execution_usage.output_tokens, 0)::bigint AS output_tokens,
+    COALESCE(execution_usage.total_tokens, 0)::bigint AS total_tokens,
+    GREATEST(COALESCE(execution_usage.total_tokens, 0) - COALESCE(execution_usage.cached_tokens, 0), 0)::bigint AS actual_tokens,
+    GREATEST(COALESCE(conversations.last_message_at, conversations.updated_at), message_usage.last_message_at, execution_usage.last_execution_at)::timestamptz AS last_active_at
+FROM conversations
+LEFT JOIN message_usage ON message_usage.conversation_id = conversations.id
+LEFT JOIN execution_usage ON execution_usage.conversation_id = conversations.id
+WHERE conversations.tenant_id = $1
+  AND conversations.owner_account_id = $2
+ORDER BY last_active_at DESC, conversations.id DESC
 LIMIT $4::int
 OFFSET $3::int
 `
@@ -893,16 +1413,153 @@ func (q *Queries) ListAgentUsageBySession(ctx context.Context, arg ListAgentUsag
 	return items, nil
 }
 
+const listExecutionStepsV2 = `-- name: ListExecutionStepsV2 :many
+SELECT id, tenant_id, execution_id, parent_step_id, sequence_no, step_type, name, model_connection_id, external_tool_id, status, input_summary, output_summary, input_tokens, cached_tokens, output_tokens, started_at, completed_at, error_code, created_at
+FROM execution_steps
+WHERE tenant_id = $1 AND execution_id = $2
+ORDER BY sequence_no, id
+`
+
+type ListExecutionStepsV2Params struct {
+	TenantID    string `json:"tenant_id"`
+	ExecutionID string `json:"execution_id"`
+}
+
+func (q *Queries) ListExecutionStepsV2(ctx context.Context, arg ListExecutionStepsV2Params) ([]ExecutionStep, error) {
+	rows, err := q.db.Query(ctx, listExecutionStepsV2, arg.TenantID, arg.ExecutionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ExecutionStep
+	for rows.Next() {
+		var i ExecutionStep
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.ExecutionID,
+			&i.ParentStepID,
+			&i.SequenceNo,
+			&i.StepType,
+			&i.Name,
+			&i.ModelConnectionID,
+			&i.ExternalToolID,
+			&i.Status,
+			&i.InputSummary,
+			&i.OutputSummary,
+			&i.InputTokens,
+			&i.CachedTokens,
+			&i.OutputTokens,
+			&i.StartedAt,
+			&i.CompletedAt,
+			&i.ErrorCode,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listPendingAgentConfirmationsV2 = `-- name: ListPendingAgentConfirmationsV2 :many
+SELECT confirmations.id, confirmations.tenant_id, confirmations.account_id, confirmations.conversation_id, confirmations.segment_id, confirmations.execution_id, confirmations.source_message_id, confirmations.kind, confirmations.title, confirmations.action, confirmations.public_payload, confirmations.action_payload, confirmations.result_payload, confirmations.status, confirmations.last_error, confirmations.expires_at, confirmations.consumed_at, confirmations.created_at, confirmations.updated_at
+FROM agent_confirmations confirmations
+JOIN conversations
+  ON conversations.tenant_id = confirmations.tenant_id
+ AND conversations.id = confirmations.conversation_id
+ AND conversations.current_segment_id = confirmations.segment_id
+WHERE confirmations.tenant_id = $1
+  AND confirmations.account_id = $2
+  AND confirmations.conversation_id = $3
+  AND confirmations.segment_id = $4
+  AND confirmations.status = 'pending'
+  AND confirmations.expires_at > $5
+ORDER BY confirmations.created_at, confirmations.id
+`
+
+type ListPendingAgentConfirmationsV2Params struct {
+	TenantID       string             `json:"tenant_id"`
+	AccountID      string             `json:"account_id"`
+	ConversationID string             `json:"conversation_id"`
+	SegmentID      string             `json:"segment_id"`
+	NowAt          pgtype.Timestamptz `json:"now_at"`
+}
+
+func (q *Queries) ListPendingAgentConfirmationsV2(ctx context.Context, arg ListPendingAgentConfirmationsV2Params) ([]AgentConfirmation, error) {
+	rows, err := q.db.Query(ctx, listPendingAgentConfirmationsV2,
+		arg.TenantID,
+		arg.AccountID,
+		arg.ConversationID,
+		arg.SegmentID,
+		arg.NowAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []AgentConfirmation
+	for rows.Next() {
+		var i AgentConfirmation
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.AccountID,
+			&i.ConversationID,
+			&i.SegmentID,
+			&i.ExecutionID,
+			&i.SourceMessageID,
+			&i.Kind,
+			&i.Title,
+			&i.Action,
+			&i.PublicPayload,
+			&i.ActionPayload,
+			&i.ResultPayload,
+			&i.Status,
+			&i.LastError,
+			&i.ExpiresAt,
+			&i.ConsumedAt,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listRecentAgentSessionMessages = `-- name: ListRecentAgentSessionMessages :many
-SELECT id, tenant_id, session_id, role, content, run_id, context_version, metadata, created_at FROM (
-    SELECT messages.id, messages.tenant_id, messages.session_id, messages.role, messages.content, messages.run_id, messages.context_version, messages.metadata, messages.created_at
-    FROM agent_session_messages messages
-    JOIN agent_sessions sessions
-      ON sessions.tenant_id = messages.tenant_id
-     AND sessions.id = messages.session_id
+SELECT id, tenant_id, session_id, segment_id, sequence_no, role, content, run_id, context_version, metadata, created_at FROM (
+    SELECT
+        messages.id,
+        messages.tenant_id,
+        messages.conversation_id AS session_id,
+        messages.segment_id,
+        messages.sequence_no,
+        messages.role,
+        messages.content,
+        messages.execution_id AS run_id,
+        segments.ordinal::bigint AS context_version,
+        COALESCE(messages.content_json, '{}'::jsonb) AS metadata,
+        messages.created_at
+    FROM messages
+    JOIN conversations
+      ON conversations.tenant_id = messages.tenant_id
+     AND conversations.id = messages.conversation_id
+    JOIN conversation_segments segments
+      ON segments.tenant_id = messages.tenant_id
+     AND segments.conversation_id = messages.conversation_id
+     AND segments.id = messages.segment_id
     WHERE messages.tenant_id = $1
-      AND messages.session_id = $2
-      AND messages.context_version = sessions.context_version
+      AND messages.conversation_id = $2
+      AND messages.segment_id = conversations.current_segment_id
     ORDER BY messages.created_at DESC, messages.id DESC
     LIMIT $3::int
 ) recent
@@ -915,19 +1572,35 @@ type ListRecentAgentSessionMessagesParams struct {
 	LimitCount int32  `json:"limit_count"`
 }
 
-func (q *Queries) ListRecentAgentSessionMessages(ctx context.Context, arg ListRecentAgentSessionMessagesParams) ([]AgentSessionMessage, error) {
+type ListRecentAgentSessionMessagesRow struct {
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	SessionID      string             `json:"session_id"`
+	SegmentID      string             `json:"segment_id"`
+	SequenceNo     int64              `json:"sequence_no"`
+	Role           string             `json:"role"`
+	Content        string             `json:"content"`
+	RunID          pgtype.Text        `json:"run_id"`
+	ContextVersion int64              `json:"context_version"`
+	Metadata       []byte             `json:"metadata"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) ListRecentAgentSessionMessages(ctx context.Context, arg ListRecentAgentSessionMessagesParams) ([]ListRecentAgentSessionMessagesRow, error) {
 	rows, err := q.db.Query(ctx, listRecentAgentSessionMessages, arg.TenantID, arg.SessionID, arg.LimitCount)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AgentSessionMessage
+	var items []ListRecentAgentSessionMessagesRow
 	for rows.Next() {
-		var i AgentSessionMessage
+		var i ListRecentAgentSessionMessagesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
 			&i.SessionID,
+			&i.SegmentID,
+			&i.SequenceNo,
 			&i.Role,
 			&i.Content,
 			&i.RunID,
@@ -945,67 +1618,338 @@ func (q *Queries) ListRecentAgentSessionMessages(ctx context.Context, arg ListRe
 	return items, nil
 }
 
-const upsertAgentMemory = `-- name: UpsertAgentMemory :one
-INSERT INTO agent_memories (
-    id, tenant_id, account_id, agent_id, session_id, key, content,
-    source, importance, expires_at, created_at, updated_at
-) VALUES (
-    $1, $2, $3, $4,
-    $5, $6, $7, $8,
-    $9, $10, $11, $12
-)
-ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    account_id = EXCLUDED.account_id,
-    agent_id = EXCLUDED.agent_id,
-    session_id = EXCLUDED.session_id,
-    key = EXCLUDED.key,
-    content = EXCLUDED.content,
-    source = EXCLUDED.source,
-    importance = EXCLUDED.importance,
-    expires_at = EXCLUDED.expires_at,
-    created_at = EXCLUDED.created_at,
-    updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, account_id, agent_id, session_id, key, content, source, importance, expires_at, created_at, updated_at
+const updateAgentConfirmationV2 = `-- name: UpdateAgentConfirmationV2 :one
+UPDATE agent_confirmations
+SET result_payload = $1::jsonb,
+    status = $2,
+    last_error = $3,
+    consumed_at = $4,
+    updated_at = $5
+WHERE tenant_id = $6
+  AND account_id = $7
+  AND id = $8
+  AND (
+    (agent_confirmations.status = 'executing' AND $2::text IN ('pending', 'completed', 'failed', 'cancelled', 'expired'))
+    OR (agent_confirmations.status = 'pending' AND $2::text IN ('cancelled', 'expired'))
+    OR agent_confirmations.status = $2
+  )
+RETURNING id, tenant_id, account_id, conversation_id, segment_id, execution_id, source_message_id, kind, title, action, public_payload, action_payload, result_payload, status, last_error, expires_at, consumed_at, created_at, updated_at
 `
 
-type UpsertAgentMemoryParams struct {
-	ID         string             `json:"id"`
-	TenantID   string             `json:"tenant_id"`
-	AccountID  string             `json:"account_id"`
-	AgentID    pgtype.Text        `json:"agent_id"`
-	SessionID  pgtype.Text        `json:"session_id"`
-	Key        string             `json:"key"`
-	Content    string             `json:"content"`
-	Source     string             `json:"source"`
-	Importance int32              `json:"importance"`
-	ExpiresAt  pgtype.Timestamptz `json:"expires_at"`
-	CreatedAt  pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt  pgtype.Timestamptz `json:"updated_at"`
+type UpdateAgentConfirmationV2Params struct {
+	ResultPayload []byte             `json:"result_payload"`
+	Status        string             `json:"status"`
+	LastError     string             `json:"last_error"`
+	ConsumedAt    pgtype.Timestamptz `json:"consumed_at"`
+	UpdatedAt     pgtype.Timestamptz `json:"updated_at"`
+	TenantID      string             `json:"tenant_id"`
+	AccountID     string             `json:"account_id"`
+	ID            string             `json:"id"`
 }
 
-func (q *Queries) UpsertAgentMemory(ctx context.Context, arg UpsertAgentMemoryParams) (AgentMemory, error) {
-	row := q.db.QueryRow(ctx, upsertAgentMemory,
+func (q *Queries) UpdateAgentConfirmationV2(ctx context.Context, arg UpdateAgentConfirmationV2Params) (AgentConfirmation, error) {
+	row := q.db.QueryRow(ctx, updateAgentConfirmationV2,
+		arg.ResultPayload,
+		arg.Status,
+		arg.LastError,
+		arg.ConsumedAt,
+		arg.UpdatedAt,
+		arg.TenantID,
+		arg.AccountID,
+		arg.ID,
+	)
+	var i AgentConfirmation
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.ConversationID,
+		&i.SegmentID,
+		&i.ExecutionID,
+		&i.SourceMessageID,
+		&i.Kind,
+		&i.Title,
+		&i.Action,
+		&i.PublicPayload,
+		&i.ActionPayload,
+		&i.ResultPayload,
+		&i.Status,
+		&i.LastError,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertAgentConfirmationV2 = `-- name: UpsertAgentConfirmationV2 :one
+WITH inserted AS (
+    INSERT INTO agent_confirmations (
+        id, tenant_id, account_id, conversation_id, segment_id,
+        execution_id, source_message_id, kind, title, action,
+        public_payload, action_payload, result_payload, status,
+        last_error, expires_at, consumed_at, created_at, updated_at
+    ) VALUES (
+        $1, $2, $3,
+        $4, $5,
+        NULLIF($6::text, ''), NULLIF($7::text, ''),
+        $8, $9, $10,
+        $11::jsonb, $12::jsonb,
+        $13::jsonb, $14, $15,
+        $16, $17, $18, $19
+    )
+    ON CONFLICT (id) DO NOTHING
+    RETURNING id, tenant_id, account_id, conversation_id, segment_id, execution_id, source_message_id, kind, title, action, public_payload, action_payload, result_payload, status, last_error, expires_at, consumed_at, created_at, updated_at
+)
+SELECT id, tenant_id, account_id, conversation_id, segment_id, execution_id, source_message_id, kind, title, action, public_payload, action_payload, result_payload, status, last_error, expires_at, consumed_at, created_at, updated_at FROM inserted
+UNION ALL
+SELECT confirmations.id, confirmations.tenant_id, confirmations.account_id, confirmations.conversation_id, confirmations.segment_id, confirmations.execution_id, confirmations.source_message_id, confirmations.kind, confirmations.title, confirmations.action, confirmations.public_payload, confirmations.action_payload, confirmations.result_payload, confirmations.status, confirmations.last_error, confirmations.expires_at, confirmations.consumed_at, confirmations.created_at, confirmations.updated_at
+FROM agent_confirmations confirmations
+WHERE confirmations.tenant_id = $2
+  AND confirmations.id = $1
+  AND NOT EXISTS (SELECT 1 FROM inserted)
+LIMIT 1
+`
+
+type UpsertAgentConfirmationV2Params struct {
+	ID              string             `json:"id"`
+	TenantID        string             `json:"tenant_id"`
+	AccountID       string             `json:"account_id"`
+	ConversationID  string             `json:"conversation_id"`
+	SegmentID       string             `json:"segment_id"`
+	ExecutionID     string             `json:"execution_id"`
+	SourceMessageID string             `json:"source_message_id"`
+	Kind            string             `json:"kind"`
+	Title           string             `json:"title"`
+	Action          string             `json:"action"`
+	PublicPayload   []byte             `json:"public_payload"`
+	ActionPayload   []byte             `json:"action_payload"`
+	ResultPayload   []byte             `json:"result_payload"`
+	Status          string             `json:"status"`
+	LastError       string             `json:"last_error"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt      pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type UpsertAgentConfirmationV2Row struct {
+	ID              string             `json:"id"`
+	TenantID        string             `json:"tenant_id"`
+	AccountID       string             `json:"account_id"`
+	ConversationID  string             `json:"conversation_id"`
+	SegmentID       string             `json:"segment_id"`
+	ExecutionID     pgtype.Text        `json:"execution_id"`
+	SourceMessageID pgtype.Text        `json:"source_message_id"`
+	Kind            string             `json:"kind"`
+	Title           string             `json:"title"`
+	Action          string             `json:"action"`
+	PublicPayload   []byte             `json:"public_payload"`
+	ActionPayload   []byte             `json:"action_payload"`
+	ResultPayload   []byte             `json:"result_payload"`
+	Status          string             `json:"status"`
+	LastError       string             `json:"last_error"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	ConsumedAt      pgtype.Timestamptz `json:"consumed_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertAgentConfirmationV2(ctx context.Context, arg UpsertAgentConfirmationV2Params) (UpsertAgentConfirmationV2Row, error) {
+	row := q.db.QueryRow(ctx, upsertAgentConfirmationV2,
 		arg.ID,
 		arg.TenantID,
 		arg.AccountID,
-		arg.AgentID,
-		arg.SessionID,
-		arg.Key,
-		arg.Content,
-		arg.Source,
-		arg.Importance,
+		arg.ConversationID,
+		arg.SegmentID,
+		arg.ExecutionID,
+		arg.SourceMessageID,
+		arg.Kind,
+		arg.Title,
+		arg.Action,
+		arg.PublicPayload,
+		arg.ActionPayload,
+		arg.ResultPayload,
+		arg.Status,
+		arg.LastError,
 		arg.ExpiresAt,
+		arg.ConsumedAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
 	)
-	var i AgentMemory
+	var i UpsertAgentConfirmationV2Row
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.AccountID,
+		&i.ConversationID,
+		&i.SegmentID,
+		&i.ExecutionID,
+		&i.SourceMessageID,
+		&i.Kind,
+		&i.Title,
+		&i.Action,
+		&i.PublicPayload,
+		&i.ActionPayload,
+		&i.ResultPayload,
+		&i.Status,
+		&i.LastError,
+		&i.ExpiresAt,
+		&i.ConsumedAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertAgentMemory = `-- name: UpsertAgentMemory :one
+WITH scope_values AS (
+    SELECT
+        CASE
+            WHEN $1::text <> '' THEN 'conversation'
+            WHEN $2::text <> '' THEN 'agent'
+            ELSE 'global'
+        END::text AS scope_type,
+        CASE WHEN $1::text = '' THEN NULLIF($2::text, '') ELSE NULL END AS agent_id,
+        CASE WHEN $1::text <> '' THEN conversations.id ELSE NULL END AS conversation_id,
+        CASE WHEN $1::text <> '' THEN conversations.current_segment_id ELSE NULL END AS segment_id
+    FROM (SELECT 1) seed
+    LEFT JOIN conversations
+      ON conversations.tenant_id = $3
+     AND conversations.id = NULLIF($1::text, '')
+    WHERE $1::text = '' OR conversations.id IS NOT NULL
+), updated_by_id AS (
+    UPDATE memories
+    SET account_id = $4,
+        scope_type = scope_values.scope_type,
+        agent_id = scope_values.agent_id,
+        conversation_id = scope_values.conversation_id,
+        segment_id = scope_values.segment_id,
+        key = $5,
+        content = $6,
+        source_type = CASE WHEN $7::text = 'manual' THEN 'manual' ELSE 'extracted' END,
+        source_message_id = NULLIF($8::text, ''),
+        confidence = $9,
+        importance = LEAST(GREATEST($10::int, 1), 5),
+        status = COALESCE(NULLIF($11::text, ''), 'active'),
+        expires_at = $12,
+        updated_at = $13
+    FROM scope_values
+    WHERE memories.tenant_id = $3
+      AND memories.id = $14
+    RETURNING memories.id, memories.tenant_id, memories.account_id, memories.scope_type, memories.agent_id, memories.conversation_id, memories.segment_id, memories.key, memories.content, memories.source_type, memories.source_message_id, memories.confidence, memories.importance, memories.status, memories.expires_at, memories.created_at, memories.updated_at
+), inserted_or_merged AS (
+    INSERT INTO memories (
+        id, tenant_id, account_id, scope_type, agent_id, conversation_id, segment_id,
+        key, content, source_type, source_message_id, confidence, importance,
+        status, expires_at, created_at, updated_at
+    )
+    SELECT
+        $14, $3, $4, scope_values.scope_type,
+        scope_values.agent_id, scope_values.conversation_id, scope_values.segment_id,
+        $5, $6,
+        CASE WHEN $7::text = 'manual' THEN 'manual' ELSE 'extracted' END,
+        NULLIF($8::text, ''), $9,
+        LEAST(GREATEST($10::int, 1), 5),
+        COALESCE(NULLIF($11::text, ''), 'active'),
+        $12, $15, $13
+    FROM scope_values
+    WHERE NOT EXISTS (SELECT 1 FROM updated_by_id)
+    ON CONFLICT (tenant_id, account_id, scope_type, agent_id, conversation_id, segment_id, key)
+        WHERE status = 'active'
+    DO UPDATE SET
+        content = EXCLUDED.content,
+        source_type = EXCLUDED.source_type,
+        source_message_id = EXCLUDED.source_message_id,
+        confidence = EXCLUDED.confidence,
+        importance = EXCLUDED.importance,
+        status = EXCLUDED.status,
+        expires_at = EXCLUDED.expires_at,
+        updated_at = EXCLUDED.updated_at
+    RETURNING id, tenant_id, account_id, scope_type, agent_id, conversation_id, segment_id, key, content, source_type, source_message_id, confidence, importance, status, expires_at, created_at, updated_at
+), upserted AS (
+    SELECT id, tenant_id, account_id, scope_type, agent_id, conversation_id, segment_id, key, content, source_type, source_message_id, confidence, importance, status, expires_at, created_at, updated_at FROM updated_by_id
+    UNION ALL
+    SELECT id, tenant_id, account_id, scope_type, agent_id, conversation_id, segment_id, key, content, source_type, source_message_id, confidence, importance, status, expires_at, created_at, updated_at FROM inserted_or_merged
+)
+SELECT
+    id, tenant_id, account_id, agent_id, conversation_id AS session_id, segment_id,
+    scope_type AS scope, source_message_id, confidence, status,
+    key, content,
+    CASE WHEN source_type = 'manual' THEN 'manual' ELSE 'auto' END::text AS source,
+    importance, expires_at, created_at, updated_at
+FROM upserted
+`
+
+type UpsertAgentMemoryParams struct {
+	SessionID       string             `json:"session_id"`
+	AgentID         string             `json:"agent_id"`
+	TenantID        string             `json:"tenant_id"`
+	AccountID       string             `json:"account_id"`
+	Key             string             `json:"key"`
+	Content         string             `json:"content"`
+	Source          string             `json:"source"`
+	SourceMessageID string             `json:"source_message_id"`
+	Confidence      pgtype.Numeric     `json:"confidence"`
+	Importance      int32              `json:"importance"`
+	Status          string             `json:"status"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	ID              string             `json:"id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+}
+
+type UpsertAgentMemoryRow struct {
+	ID              string             `json:"id"`
+	TenantID        string             `json:"tenant_id"`
+	AccountID       string             `json:"account_id"`
+	AgentID         pgtype.Text        `json:"agent_id"`
+	SessionID       pgtype.Text        `json:"session_id"`
+	SegmentID       pgtype.Text        `json:"segment_id"`
+	Scope           string             `json:"scope"`
+	SourceMessageID pgtype.Text        `json:"source_message_id"`
+	Confidence      pgtype.Numeric     `json:"confidence"`
+	Status          string             `json:"status"`
+	Key             string             `json:"key"`
+	Content         string             `json:"content"`
+	Source          string             `json:"source"`
+	Importance      int32              `json:"importance"`
+	ExpiresAt       pgtype.Timestamptz `json:"expires_at"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+func (q *Queries) UpsertAgentMemory(ctx context.Context, arg UpsertAgentMemoryParams) (UpsertAgentMemoryRow, error) {
+	row := q.db.QueryRow(ctx, upsertAgentMemory,
+		arg.SessionID,
+		arg.AgentID,
+		arg.TenantID,
+		arg.AccountID,
+		arg.Key,
+		arg.Content,
+		arg.Source,
+		arg.SourceMessageID,
+		arg.Confidence,
+		arg.Importance,
+		arg.Status,
+		arg.ExpiresAt,
+		arg.UpdatedAt,
+		arg.ID,
+		arg.CreatedAt,
+	)
+	var i UpsertAgentMemoryRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.AccountID,
 		&i.AgentID,
 		&i.SessionID,
+		&i.SegmentID,
+		&i.Scope,
+		&i.SourceMessageID,
+		&i.Confidence,
+		&i.Status,
 		&i.Key,
 		&i.Content,
 		&i.Source,
@@ -1018,32 +1962,103 @@ func (q *Queries) UpsertAgentMemory(ctx context.Context, arg UpsertAgentMemoryPa
 }
 
 const upsertAgentSession = `-- name: UpsertAgentSession :one
-INSERT INTO agent_sessions (
-    id, tenant_id, account_id, agent_id, title, status,
-    context_version, last_message_at, created_at, updated_at
-) VALUES (
-    $1, $2, $3, $4,
-    $5, $6, $7, $8,
-    $9, $10
+
+WITH upserted_conversation AS (
+    INSERT INTO conversations (
+        id, tenant_id, owner_account_id, agent_id, current_segment_id,
+        next_message_sequence, title, status, last_message_at,
+        created_at, updated_at, archived_at
+    ) VALUES (
+        $1, $2, $3,
+        NULLIF($4::text, ''), NULL, 1,
+        $5, $6, $7,
+        $8, $9,
+        CASE WHEN $6::text = 'archived' THEN $9::timestamptz ELSE NULL END
+    )
+    ON CONFLICT (id) DO UPDATE SET
+        owner_account_id = EXCLUDED.owner_account_id,
+        agent_id = EXCLUDED.agent_id,
+        title = EXCLUDED.title,
+        status = EXCLUDED.status,
+        last_message_at = EXCLUDED.last_message_at,
+        updated_at = EXCLUDED.updated_at,
+        archived_at = EXCLUDED.archived_at
+    WHERE conversations.tenant_id = EXCLUDED.tenant_id
+    RETURNING id, tenant_id, owner_account_id, agent_id, current_segment_id, next_message_sequence, title, status, last_message_at, created_at, updated_at, archived_at
+), inserted_segment AS (
+    INSERT INTO conversation_segments (
+        id, tenant_id, conversation_id, ordinal, start_reason, created_at
+    )
+    SELECT
+        COALESCE(
+            NULLIF($10::text, ''),
+            $1::text || ':segment:' || GREATEST($11::bigint, 1)::text
+        ),
+        tenant_id,
+        id,
+        GREATEST($11::bigint, 1)::integer,
+        CASE WHEN GREATEST($11::bigint, 1) = 1 THEN 'initial' ELSE 'context_reset' END,
+        $9
+    FROM upserted_conversation
+    ON CONFLICT (tenant_id, conversation_id, ordinal) DO NOTHING
+    RETURNING id, tenant_id, conversation_id, ordinal, start_reason, created_at
+), target_segment AS (
+    SELECT id, tenant_id, conversation_id, ordinal
+    FROM inserted_segment
+    UNION ALL
+    SELECT segments.id, segments.tenant_id, segments.conversation_id, segments.ordinal
+    FROM conversation_segments segments
+    JOIN upserted_conversation conversations
+      ON conversations.tenant_id = segments.tenant_id
+     AND conversations.id = segments.conversation_id
+    WHERE segments.ordinal = GREATEST($11::bigint, 1)::integer
+    LIMIT 1
+), updated_conversation AS (
+    UPDATE conversations
+    SET current_segment_id = target_segment.id
+    FROM target_segment
+    WHERE conversations.tenant_id = target_segment.tenant_id
+      AND conversations.id = target_segment.conversation_id
+    RETURNING conversations.id, conversations.tenant_id, conversations.owner_account_id, conversations.agent_id, conversations.current_segment_id, conversations.next_message_sequence, conversations.title, conversations.status, conversations.last_message_at, conversations.created_at, conversations.updated_at, conversations.archived_at
 )
-ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    account_id = EXCLUDED.account_id,
-    agent_id = EXCLUDED.agent_id,
-    title = EXCLUDED.title,
-    status = EXCLUDED.status,
-    context_version = EXCLUDED.context_version,
-    last_message_at = EXCLUDED.last_message_at,
-    created_at = EXCLUDED.created_at,
-    updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, account_id, agent_id, title, status, context_version, last_message_at, created_at, updated_at
+SELECT
+    conversations.id,
+    conversations.tenant_id,
+    conversations.owner_account_id AS account_id,
+    conversations.agent_id,
+    target_segment.id AS segment_id,
+    conversations.title,
+    conversations.status,
+    target_segment.ordinal::bigint AS context_version,
+    conversations.last_message_at,
+    conversations.created_at,
+    conversations.updated_at
+FROM updated_conversation conversations
+JOIN target_segment
+  ON target_segment.tenant_id = conversations.tenant_id
+ AND target_segment.conversation_id = conversations.id
 `
 
 type UpsertAgentSessionParams struct {
 	ID             string             `json:"id"`
 	TenantID       string             `json:"tenant_id"`
 	AccountID      string             `json:"account_id"`
+	AgentID        string             `json:"agent_id"`
+	Title          string             `json:"title"`
+	Status         string             `json:"status"`
+	LastMessageAt  pgtype.Timestamptz `json:"last_message_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
+	SegmentID      string             `json:"segment_id"`
+	ContextVersion int64              `json:"context_version"`
+}
+
+type UpsertAgentSessionRow struct {
+	ID             string             `json:"id"`
+	TenantID       string             `json:"tenant_id"`
+	AccountID      string             `json:"account_id"`
 	AgentID        pgtype.Text        `json:"agent_id"`
+	SegmentID      string             `json:"segment_id"`
 	Title          string             `json:"title"`
 	Status         string             `json:"status"`
 	ContextVersion int64              `json:"context_version"`
@@ -1052,7 +2067,8 @@ type UpsertAgentSessionParams struct {
 	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
 }
 
-func (q *Queries) UpsertAgentSession(ctx context.Context, arg UpsertAgentSessionParams) (AgentSession, error) {
+// Legacy AgentSession compatibility over the v2 conversation/segment model.
+func (q *Queries) UpsertAgentSession(ctx context.Context, arg UpsertAgentSessionParams) (UpsertAgentSessionRow, error) {
 	row := q.db.QueryRow(ctx, upsertAgentSession,
 		arg.ID,
 		arg.TenantID,
@@ -1060,23 +2076,123 @@ func (q *Queries) UpsertAgentSession(ctx context.Context, arg UpsertAgentSession
 		arg.AgentID,
 		arg.Title,
 		arg.Status,
-		arg.ContextVersion,
 		arg.LastMessageAt,
 		arg.CreatedAt,
 		arg.UpdatedAt,
+		arg.SegmentID,
+		arg.ContextVersion,
 	)
-	var i AgentSession
+	var i UpsertAgentSessionRow
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
 		&i.AccountID,
 		&i.AgentID,
+		&i.SegmentID,
 		&i.Title,
 		&i.Status,
 		&i.ContextVersion,
 		&i.LastMessageAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const upsertExecutionStepV2 = `-- name: UpsertExecutionStepV2 :one
+INSERT INTO execution_steps (
+    id, tenant_id, execution_id, parent_step_id, sequence_no, step_type,
+    name, model_connection_id, external_tool_id, status,
+    input_summary, output_summary, input_tokens, cached_tokens, output_tokens,
+    started_at, completed_at, error_code, created_at
+) VALUES (
+    $1, $2, $3, NULLIF($4::text, ''),
+    $5, $6, $7,
+    NULLIF($8::text, ''), NULLIF($9::text, ''),
+    $10, $11::jsonb, $12::jsonb,
+    $13, $14, $15,
+    $16, $17, $18, $19
+)
+ON CONFLICT (id) DO UPDATE SET
+    status = EXCLUDED.status,
+    input_summary = EXCLUDED.input_summary,
+    output_summary = EXCLUDED.output_summary,
+    input_tokens = EXCLUDED.input_tokens,
+    cached_tokens = EXCLUDED.cached_tokens,
+    output_tokens = EXCLUDED.output_tokens,
+    started_at = EXCLUDED.started_at,
+    completed_at = EXCLUDED.completed_at,
+    error_code = EXCLUDED.error_code
+WHERE execution_steps.tenant_id = EXCLUDED.tenant_id
+  AND execution_steps.execution_id = EXCLUDED.execution_id
+RETURNING id, tenant_id, execution_id, parent_step_id, sequence_no, step_type, name, model_connection_id, external_tool_id, status, input_summary, output_summary, input_tokens, cached_tokens, output_tokens, started_at, completed_at, error_code, created_at
+`
+
+type UpsertExecutionStepV2Params struct {
+	ID                string             `json:"id"`
+	TenantID          string             `json:"tenant_id"`
+	ExecutionID       string             `json:"execution_id"`
+	ParentStepID      string             `json:"parent_step_id"`
+	SequenceNo        int32              `json:"sequence_no"`
+	StepType          string             `json:"step_type"`
+	Name              string             `json:"name"`
+	ModelConnectionID string             `json:"model_connection_id"`
+	ExternalToolID    string             `json:"external_tool_id"`
+	Status            string             `json:"status"`
+	InputSummary      []byte             `json:"input_summary"`
+	OutputSummary     []byte             `json:"output_summary"`
+	InputTokens       int64              `json:"input_tokens"`
+	CachedTokens      int64              `json:"cached_tokens"`
+	OutputTokens      int64              `json:"output_tokens"`
+	StartedAt         pgtype.Timestamptz `json:"started_at"`
+	CompletedAt       pgtype.Timestamptz `json:"completed_at"`
+	ErrorCode         string             `json:"error_code"`
+	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+}
+
+func (q *Queries) UpsertExecutionStepV2(ctx context.Context, arg UpsertExecutionStepV2Params) (ExecutionStep, error) {
+	row := q.db.QueryRow(ctx, upsertExecutionStepV2,
+		arg.ID,
+		arg.TenantID,
+		arg.ExecutionID,
+		arg.ParentStepID,
+		arg.SequenceNo,
+		arg.StepType,
+		arg.Name,
+		arg.ModelConnectionID,
+		arg.ExternalToolID,
+		arg.Status,
+		arg.InputSummary,
+		arg.OutputSummary,
+		arg.InputTokens,
+		arg.CachedTokens,
+		arg.OutputTokens,
+		arg.StartedAt,
+		arg.CompletedAt,
+		arg.ErrorCode,
+		arg.CreatedAt,
+	)
+	var i ExecutionStep
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.ExecutionID,
+		&i.ParentStepID,
+		&i.SequenceNo,
+		&i.StepType,
+		&i.Name,
+		&i.ModelConnectionID,
+		&i.ExternalToolID,
+		&i.Status,
+		&i.InputSummary,
+		&i.OutputSummary,
+		&i.InputTokens,
+		&i.CachedTokens,
+		&i.OutputTokens,
+		&i.StartedAt,
+		&i.CompletedAt,
+		&i.ErrorCode,
+		&i.CreatedAt,
 	)
 	return i, err
 }

@@ -27,6 +27,9 @@ func TestProjectAttendanceDayUsesEarliestInAndLatestOut(t *testing.T) {
 	if projection.PunchCount != 4 || projection.WorkedMinutes != 480 || projection.DayStatus != "complete" {
 		t.Fatalf("projection = %#v, want 4 punches, 480 minutes, complete", projection)
 	}
+	if projection.CanClockIn || projection.CanClockOut {
+		t.Fatalf("closed projection must expose no further clock action: %#v", projection)
+	}
 }
 
 // TestProjectAttendanceDayCreditsApprovedLeave verifies a one-hour workday can close normally when approved leave covers the remainder.
@@ -112,13 +115,55 @@ func TestProjectAttendanceDayKeepsOvernightClockWorkingUntilScheduleEnds(t *test
 	workTime.StandardEnd = "06:00"
 
 	working := service.ProjectAttendanceDay(records, nil, workDate, workTime, attendanceProjectionTime("2026-07-14", "01:00"))
-	if working.DayStatus != "working" {
+	if working.DayStatus != "working" || !working.CanClockOut || working.CanClockIn {
 		t.Fatalf("day status before overnight schedule end = %q, want working", working.DayStatus)
 	}
 
 	expired := service.ProjectAttendanceDay(records, nil, workDate, workTime, attendanceProjectionTime("2026-07-14", "07:00"))
 	if expired.DayStatus != "abnormal" {
 		t.Fatalf("day status after overnight schedule end = %q, want abnormal", expired.DayStatus)
+	}
+}
+
+// TestProjectAttendanceDayWithEffectiveLeaveUsesCasesForApprovedTime ensures an
+// approved workflow request cannot bypass case reconciliation, while a
+// confirmed-active case can complete a leave-only workday.
+func TestProjectAttendanceDayWithEffectiveLeaveUsesCasesForApprovedTime(t *testing.T) {
+	workDate := "2026-07-13"
+	start := attendanceProjectionTime(workDate, "09:00")
+	end := attendanceProjectionTime(workDate, "18:00")
+	approvedRequest := domain.LeaveRequest{
+		ID: "request-only", EmployeeID: "emp-1", StartAt: start, EndAt: end,
+		RequestedMinutes: 480, Status: "approved",
+	}
+
+	withoutCase := service.ProjectAttendanceDayWithEffectiveLeave(nil, nil, []domain.LeaveRequest{approvedRequest}, workDate, attendanceProjectionWorkTime(), end)
+	if withoutCase.ApprovedLeaveMinutes != 0 || withoutCase.DayStatus != "not_started" {
+		t.Fatalf("approved request leaked into effective projection: %#v", withoutCase)
+	}
+
+	withCase := service.ProjectAttendanceDayWithEffectiveLeave(nil, []domain.LeaveCase{{
+		ID: "case-1", EmployeeID: "emp-1", StartAt: start, EndAt: end,
+		NetMinutes: 480, Status: "active",
+	}}, nil, workDate, attendanceProjectionWorkTime(), end)
+	if withCase.ApprovedLeaveMinutes != 480 || withCase.DayStatus != "complete" {
+		t.Fatalf("active leave case projection = %#v, want 480 credited minutes and complete", withCase)
+	}
+}
+
+// TestProjectAttendanceDayWithEffectiveLeaveKeepsPendingSeparate verifies the
+// pending request interval is visible but never credited as approved time.
+func TestProjectAttendanceDayWithEffectiveLeaveKeepsPendingSeparate(t *testing.T) {
+	workDate := "2026-07-13"
+	start := attendanceProjectionTime(workDate, "09:00")
+	end := attendanceProjectionTime(workDate, "18:00")
+	pending := domain.LeaveRequest{
+		ID: "pending-1", EmployeeID: "emp-1", StartAt: start, EndAt: end,
+		RequestedMinutes: 480, Status: "pending_approval",
+	}
+	projection := service.ProjectAttendanceDayWithEffectiveLeave(nil, nil, []domain.LeaveRequest{pending}, workDate, attendanceProjectionWorkTime(), end)
+	if projection.ApprovedLeaveMinutes != 0 || projection.PendingLeaveMinutes != 480 || projection.DayStatus != "pending_leave" {
+		t.Fatalf("pending leave projection = %#v", projection)
 	}
 }
 

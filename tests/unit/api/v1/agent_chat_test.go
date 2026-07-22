@@ -372,7 +372,7 @@ func TestAgentConfirmationEndpointSubmitsPreparedDraft(t *testing.T) {
 		},
 	}
 	workflowClient := &apiFakeFormApprovalWorkflowClient{started: map[string]domain.FormApprovalWorkflowStart{}}
-	svc := service.New(store, service.Options{
+	svc := service.New(newAPIAgentConfirmationTestStore(store), service.Options{
 		Now: func() time.Time { return now }, AgentChatRuntime: runtime, FormApprovalWorkflows: workflowClient,
 	})
 	workflowClient.service = svc

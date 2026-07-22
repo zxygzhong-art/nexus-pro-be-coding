@@ -29,7 +29,7 @@ func (c HRService) PreviewCreateEmployee(ctx RequestContext, input CreateEmploye
 		employee.InternalExperiences = append(employee.InternalExperiences, c.newEmployeeExperience(employee, "新進"))
 	}
 	resp := employeePreviewResponse(employee, nil)
-	if err := c.validateEmployee(ctx, employee, "create", employeeValidationFullForm); err != nil {
+	if err := c.validateEmployee(ctx, employee, "create"); err != nil {
 		if appErr, ok := domain.AsAppError(err); ok && appErr.Code == "validation_failed" {
 			resp.FieldErrors = appErr.FieldErrors
 			resp.Valid = false
@@ -217,31 +217,6 @@ func (c HRService) DeleteEmployeeAvatar(ctx RequestContext, id string) (Employee
 	return employee, nil
 }
 
-// EmployeeImportTemplate 處理員工 import 範本的服務流程。
-func (c HRService) EmployeeImportTemplate(ctx RequestContext, format string) ([]byte, string, string, error) {
-	account, _, err := c.resolveAccount(ctx)
-	if err != nil {
-		return nil, "", "", err
-	}
-	decision, err := c.evaluateAuthz(ctx, account, CheckRequest{ApplicationCode: AppHR, ResourceType: ResourceEmployee, Action: ActionRead})
-	if err != nil {
-		return nil, "", "", err
-	}
-	if !decision.Allowed {
-		return nil, "", "", forbiddenAuthz(decision)
-	}
-	switch strings.ToLower(strings.TrimSpace(format)) {
-	case "", "csv":
-		raw, err := employeeImportTemplateCSV()
-		return raw, "employee-import-template.csv", "text/csv; charset=utf-8", err
-	case "xlsx":
-		raw, err := employeeImportTemplateXLSX()
-		return raw, "employee-import-template.xlsx", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", err
-	default:
-		return nil, "", "", BadRequest("format must be csv or xlsx")
-	}
-}
-
 // employeePreviewResponse 處理員工 preview 回應。
 func employeePreviewResponse(employee Employee, diff map[string]any) EmployeePreviewResponse {
 	return EmployeePreviewResponse{Employee: employee, Detail: domain.EmployeeDetailFromEmployee(employee), Diff: diff, Valid: true}
@@ -375,5 +350,3 @@ func (c HRService) deleteObjectIfSupported(ctx RequestContext, key string) {
 	}
 	_ = deleter.DeleteObject(goContext(ctx), key)
 }
-
-// employeeImportTemplateCSV 處理員工 import 範本 CSV。

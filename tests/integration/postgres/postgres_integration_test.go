@@ -132,12 +132,42 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 	t.Run("attendance multi-punch boundaries are deterministic", func(t *testing.T) {
 		workDate := "2026-06-10"
 		base := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+		accountID := "acct_" + suffix + "_attendance"
+		templateID := "ft_" + suffix + "_attendance_correction"
+		formInstanceID := "fi_" + suffix + "_attendance_correction"
+		worksiteID := "ws_" + suffix + "_attendance"
+		if err := store.UpsertAccount(ctx, domain.Account{
+			ID: accountID, TenantID: tenantA, EmployeeID: empA,
+			DisplayName: "Attendance Applicant", Status: "active", CreatedAt: base,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.UpsertFormTemplate(ctx, domain.FormTemplate{
+			ID: templateID, TenantID: tenantA, Key: "attendance-correction-" + suffix,
+			Name: "Attendance Correction", Schema: map[string]any{"type": "object"}, CreatedAt: base,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.UpsertFormInstance(ctx, domain.FormInstance{
+			ID: formInstanceID, TenantID: tenantA, TemplateID: templateID,
+			ApplicantAccountID: accountID, Status: "submitted", SubmittedAt: base, UpdatedAt: base,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.UpsertAttendanceWorksite(ctx, domain.AttendanceWorksite{
+			ID: worksiteID, TenantID: tenantA, Name: "HQ",
+			Latitude: 25.033, Longitude: 121.565, RadiusMeters: 300,
+			Status: "active", CreatedAt: base, UpdatedAt: base,
+		}); err != nil {
+			t.Fatal(err)
+		}
+		voidedAt := base.Add(11*time.Hour + time.Minute)
 		records := []domain.AttendanceClockRecord{
-			{ID: "acr_" + suffix + "_in_first", TenantID: tenantA, EmployeeID: empA, WorkDate: workDate, Direction: "clock_in", ClientEventID: "evt_" + suffix + "_in_first", ClockedAt: base, RecordStatus: "accepted", Source: "geofence", CreatedAt: base},
-			{ID: "acr_" + suffix + "_in_middle", TenantID: tenantA, EmployeeID: empA, WorkDate: workDate, Direction: "clock_in", ClientEventID: "evt_" + suffix + "_in_middle", ClockedAt: base.Add(4 * time.Hour), RecordStatus: "accepted", Source: "geofence", CreatedAt: base.Add(4 * time.Hour)},
-			{ID: "acr_" + suffix + "_out_middle", TenantID: tenantA, EmployeeID: empA, WorkDate: workDate, Direction: "clock_out", ClientEventID: "evt_" + suffix + "_out_middle", ClockedAt: base.Add(2 * time.Hour), RecordStatus: "accepted", Source: "geofence", CreatedAt: base.Add(2 * time.Hour)},
-			{ID: "acr_" + suffix + "_out_last", TenantID: tenantA, EmployeeID: empA, WorkDate: workDate, Direction: "clock_out", ClientEventID: "evt_" + suffix + "_out_last", ClockedAt: base.Add(10 * time.Hour), RecordStatus: "accepted", Source: "geofence", CreatedAt: base.Add(10 * time.Hour)},
-			{ID: "acr_" + suffix + "_out_voided", TenantID: tenantA, EmployeeID: empA, WorkDate: workDate, Direction: "clock_out", ClientEventID: "evt_" + suffix + "_out_voided", ClockedAt: base.Add(11 * time.Hour), RecordStatus: "accepted", Source: "geofence", Voided: true, CreatedAt: base.Add(11 * time.Hour)},
+			{ID: "acr_" + suffix + "_in_first", TenantID: tenantA, EmployeeID: empA, WorksiteID: worksiteID, WorkDate: workDate, Direction: "clock_in", ClientEventID: "evt_" + suffix + "_in_first", ClockedAt: base, Latitude: 25.033, Longitude: 121.565, LocationCaptured: true, RecordStatus: "accepted", Source: "geofence", CreatedAt: base},
+			{ID: "acr_" + suffix + "_in_middle", TenantID: tenantA, EmployeeID: empA, WorksiteID: worksiteID, WorkDate: workDate, Direction: "clock_in", ClientEventID: "evt_" + suffix + "_in_middle", ClockedAt: base.Add(4 * time.Hour), Latitude: 25.033, Longitude: 121.565, LocationCaptured: true, RecordStatus: "accepted", Source: "geofence", CreatedAt: base.Add(4 * time.Hour)},
+			{ID: "acr_" + suffix + "_out_middle", TenantID: tenantA, EmployeeID: empA, WorksiteID: worksiteID, WorkDate: workDate, Direction: "clock_out", ClientEventID: "evt_" + suffix + "_out_middle", ClockedAt: base.Add(2 * time.Hour), Latitude: 25.033, Longitude: 121.565, LocationCaptured: true, RecordStatus: "accepted", Source: "geofence", CreatedAt: base.Add(2 * time.Hour)},
+			{ID: "acr_" + suffix + "_out_last", TenantID: tenantA, EmployeeID: empA, WorksiteID: worksiteID, WorkDate: workDate, Direction: "clock_out", ClientEventID: "evt_" + suffix + "_out_last", ClockedAt: base.Add(10 * time.Hour), Latitude: 25.033, Longitude: 121.565, LocationCaptured: true, RecordStatus: "accepted", Source: "geofence", CreatedAt: base.Add(10 * time.Hour)},
+			{ID: "acr_" + suffix + "_out_voided", TenantID: tenantA, EmployeeID: empA, WorksiteID: worksiteID, WorkDate: workDate, Direction: "clock_out", ClientEventID: "evt_" + suffix + "_out_voided", ClockedAt: base.Add(11 * time.Hour), Latitude: 25.033, Longitude: 121.565, LocationCaptured: true, RecordStatus: "accepted", Source: "geofence", Voided: true, VoidedAt: &voidedAt, VoidedByAccountID: accountID, VoidReason: "duplicate punch", CreatedAt: base.Add(11 * time.Hour)},
 		}
 		for _, record := range records {
 			if err := store.UpsertAttendanceClockRecord(ctx, record); err != nil {
@@ -171,13 +201,18 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 			ID: "acorr_" + suffix, TenantID: tenantA, EmployeeID: empA,
 			Direction: "clock_out", RequestedClockedAt: base.Add(10 * time.Hour), WorkDate: workDate,
 			CorrectionType: "replace_record", TargetClockRecordID: records[2].ID,
-			Reason: "replace mistaken punch", Status: "pending", CreatedAt: base, UpdatedAt: base,
+			Reason: "replace mistaken punch", Status: "pending", FormInstanceID: formInstanceID,
+			CreatedAt: base, UpdatedAt: base,
 		}
 		if err := store.UpsertAttendanceCorrectionRequest(ctx, correction); err != nil {
 			t.Fatal(err)
 		}
 		correction.ReplacementClockRecordID = records[3].ID
+		correction.ClockRecordID = records[3].ID
 		correction.Status = "approved"
+		correction.ReviewedByAccountID = accountID
+		reviewedAt := base.Add(time.Minute)
+		correction.ReviewedAt = &reviewedAt
 		correction.UpdatedAt = base.Add(time.Minute)
 		if err := store.UpsertAttendanceCorrectionRequest(ctx, correction); err != nil {
 			t.Fatal(err)
@@ -233,21 +268,34 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 		}
 	}
 
-	balance := domain.LeaveBalance{ID: "lb_" + suffix, TenantID: tenantA, EmployeeID: empA, LeaveType: "annual", RemainingHours: 16, UpdatedAt: now}
+	balance := domain.LeaveBalance{
+		ID: "lb_" + suffix, TenantID: tenantA, EmployeeID: empA,
+		LeaveType: "annual", LeaveTypeID: domain.StableLeaveTypeID("annual"),
+		RemainingMinutes: 16 * 60, Source: "manual_snapshot", UpdatedAt: now,
+	}
 	if err := store.UpsertLeaveBalance(ctx, balance); err != nil {
 		t.Fatal(err)
 	}
-	updated, reserved, found, err := store.ReserveLeaveBalance(ctx, tenantA, empA, domain.StableLeaveTypeID("annual"), 8, now, now.Add(time.Minute))
+	inserted, err := store.AppendStandaloneLeaveBalanceEntry(ctx, domain.LeaveBalanceEntry{
+		ID: "lbe_" + suffix, TenantID: tenantA, BalanceID: balance.ID,
+		EntryType: "manual_adjust", AmountMinutes: -8 * 60,
+		IdempotencyKey: "integration-manual-adjust-" + suffix,
+		OccurredAt:     now.Add(time.Minute), CreatedAt: now.Add(time.Minute),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !found || !reserved || updated.RemainingHours != 8 {
-		t.Fatalf("expected trimmed leave type to reserve hours, got found=%v reserved=%v balance=%+v", found, reserved, updated)
+	if !inserted {
+		t.Fatal("expected append-only balance entry to be inserted")
+	}
+	raw, found, err := store.GetLeaveBalance(ctx, tenantA, balance.ID)
+	if err != nil || !found || raw.RemainingMinutes != 16*60 {
+		t.Fatalf("append-only adjustment mutated the snapshot: found=%v balance=%+v err=%v", found, raw, err)
 	}
 
 	ehrmsBalance := balance
 	ehrmsBalance.ID = "ehrms_" + suffix
-	ehrmsBalance.RemainingHours = 24
+	ehrmsBalance.RemainingMinutes = 24 * 60
 	ehrmsBalance.Source = "ehrms"
 	ehrmsBalance.UpdatedAt = now.Add(2 * time.Minute)
 	if err := store.UpsertLeaveBalance(ctx, ehrmsBalance); err != nil {
@@ -263,7 +311,7 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 			matched = append(matched, item)
 		}
 	}
-	if len(matched) != 1 || matched[0].ID != balance.ID || matched[0].RemainingHours != 24 || matched[0].Source != "ehrms" {
+	if len(matched) != 1 || matched[0].ID != balance.ID || matched[0].RemainingMinutes != 24*60 || matched[0].Source != "ehrms" {
 		t.Fatalf("expected one updated balance preserving original id, got %+v", matched)
 	}
 }
@@ -338,26 +386,12 @@ func TestHRCoreCRUDPostgresAcceptanceSemantics(t *testing.T) {
 		t.Fatalf("expected updated phone, got %+v", updated)
 	}
 
-	session, err := app.HR().PreviewEmployeeImport(reqCtx, domain.EmployeeImportPreviewInput{
-		Filename: "employees.csv",
-		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\n,Integration Import,import_" + suffix + "@example.com,,HRBP,全職,0911000222,在職,2026-06-01,\n",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	confirmed, err := app.HR().ConfirmEmployeeImport(reqCtx, session.ID, domain.EmployeeImportConfirmInput{Mode: "create"})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if confirmed.Summary["confirmed"] != 1 {
-		t.Fatalf("expected one confirmed import, got %+v", confirmed.Summary)
-	}
 	exported, err := app.HR().ExportEmployees(reqCtx, domain.EmployeeQuery{Keyword: "Integration"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(exported) < 2 {
-		t.Fatalf("expected created and imported employees in export, got %+v", exported)
+	if len(exported) != 1 {
+		t.Fatalf("expected created employee in export, got %+v", exported)
 	}
 	resigned, err := app.HR().TransitionEmployeeStatus(reqCtx, created.ID, domain.StatusTransitionInput{Status: "resigned", Reason: "integration offboard", EndDate: "2026-06-30"})
 	if err != nil {

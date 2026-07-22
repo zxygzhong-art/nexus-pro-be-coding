@@ -77,27 +77,3 @@ func TestUpdateEmployeeAvatarObjectStoreFailure(t *testing.T) {
 	})
 	assertObjectStoreError(t, err)
 }
-
-// TestPreviewEmployeeImportObjectStoreFailure 驗證匯入檔案儲存失敗以 502 固定文案返回。
-func TestPreviewEmployeeImportObjectStoreFailure(t *testing.T) {
-	now := time.Date(2026, 7, 16, 9, 0, 0, 0, time.UTC)
-	store := memory.NewStore()
-	_ = store.UpsertTenant(context.Background(), domain.Tenant{ID: "tenant-1", Name: "Tenant 1", CreatedAt: now})
-	_ = store.UpsertOrgUnit(context.Background(), domain.OrgUnit{ID: "ou-1", TenantID: "tenant-1", Name: "HQ", Path: []string{"ou-1"}, CreatedAt: now})
-	_ = store.UpsertPermissionSet(context.Background(), domain.PermissionSet{
-		ID: "ps-hr", TenantID: "tenant-1", Name: "HR", CreatedAt: now,
-		Permissions: []domain.Permission{
-			{Resource: "hr.employee", Action: "import", Scope: "all"},
-			{Resource: "hr.employee", Action: "read", Scope: "all"},
-		},
-	})
-	_ = store.UpsertAccount(context.Background(), domain.Account{ID: "acct-1", TenantID: "tenant-1", Status: "active", DirectPermissionSetIDs: []string{"ps-hr"}, CreatedAt: now})
-	svc := service.New(store, service.Options{ObjectStore: &failingObjectStore{err: errObjectStoreOutage}})
-	ctx := domain.RequestContext{TenantID: "tenant-1", AccountID: "acct-1"}
-
-	_, err := svc.HR().PreviewEmployeeImport(ctx, domain.EmployeeImportPreviewInput{
-		Filename: "employees.csv",
-		Content:  "員工編號,姓名,Email,部門,職位,類別,電話,狀態,到職日期,主管員工ID\nE2001,Partial Wu,partial@example.com,ou-1,HRBP,全職,0911000222,在職,2026-06-01,\n",
-	})
-	assertObjectStoreError(t, err)
-}

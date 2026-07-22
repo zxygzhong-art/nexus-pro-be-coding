@@ -2,9 +2,11 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"iter"
 	"log/slog"
+	"sort"
 	"strings"
 
 	"github.com/google/jsonschema-go/jsonschema"
@@ -50,7 +52,7 @@ func NewADKAgentChatRuntime(llm model.LLM) (*ADKAgentChatRuntime, error) {
 }
 
 func (r *ADKAgentChatRuntime) RunAgentChat(ctx context.Context, req AgentChatRuntimeRequest, emit AgentChatEmitFunc) error {
-	tools, err := adkTools(req.Tools)
+	tools, err := adkTools(req.Tools, req.ToolSpecs)
 	if err != nil {
 		return err
 	}
@@ -61,7 +63,7 @@ func (r *ADKAgentChatRuntime) RunAgentChat(ctx context.Context, req AgentChatRun
 	subAgents := make([]adkagent.Agent, 0, len(req.SubAgents))
 	agentLabels := map[string]string{}
 	for index, member := range req.SubAgents {
-		memberTools, toolErr := adkTools(member.Tools)
+		memberTools, toolErr := adkTools(member.Tools, member.ToolSpecs)
 		if toolErr != nil {
 			return toolErr
 		}
@@ -238,14 +240,36 @@ func (m modelOverrideLLM) GenerateContent(ctx context.Context, req *model.LLMReq
 	return m.base.GenerateContent(ctx, req, stream)
 }
 
-func adkTools(src map[string]AgentTool) ([]tool.Tool, error) {
+func adkTools(src map[string]AgentTool, optionalSpecs ...map[string]AgentToolSpec) ([]tool.Tool, error) {
 	out := make([]tool.Tool, 0, len(src))
-	for name, fn := range src {
+	var specs map[string]AgentToolSpec
+	if len(optionalSpecs) > 0 {
+		specs = optionalSpecs[0]
+	}
+	names := make([]string, 0, len(src))
+	for name := range src {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		fn := src[name]
 		name, fn := name, fn
+		description := agentToolDescription(name)
+		inputSchema := agentToolInputSchema(name)
+		if spec, ok := specs[name]; ok {
+			if value := strings.TrimSpace(spec.Description); value != "" {
+				description = value
+			}
+			var schemaErr error
+			inputSchema, schemaErr = dynamicAgentToolInputSchema(spec.InputSchema)
+			if schemaErr != nil {
+				return nil, fmt.Errorf("agent tool %q input schema: %w", name, schemaErr)
+			}
+		}
 		t, err := functiontool.New[map[string]any, map[string]any](functiontool.Config{
 			Name:        name,
-			Description: agentToolDescription(name),
-			InputSchema: agentToolInputSchema(name),
+			Description: description,
+			InputSchema: inputSchema,
 		}, func(ctx adkagent.Context, args map[string]any) (map[string]any, error) {
 			return fn(ctx, args)
 		})
@@ -255,6 +279,29 @@ func adkTools(src map[string]AgentTool) ([]tool.Tool, error) {
 		out = append(out, t)
 	}
 	return out, nil
+}
+
+// dynamicAgentToolInputSchema translates a persisted JSON Schema without
+// flattening descriptions, required fields, enums, or nested constraints.
+func dynamicAgentToolInputSchema(value map[string]any) (*jsonschema.Schema, error) {
+	if value == nil {
+		return &jsonschema.Schema{Type: "object"}, nil
+	}
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return nil, fmt.Errorf("encode JSON schema: %w", err)
+	}
+	var schema jsonschema.Schema
+	if err := json.Unmarshal(raw, &schema); err != nil {
+		return nil, fmt.Errorf("decode JSON schema: %w", err)
+	}
+	if schema.Type != "" && schema.Type != "object" {
+		return nil, fmt.Errorf("top-level type must be object")
+	}
+	if schema.Type == "" && len(schema.Types) == 0 {
+		schema.Type = "object"
+	}
+	return &schema, nil
 }
 
 // agentToolInputSchema gives the model required fields and enums for high-value business tools.

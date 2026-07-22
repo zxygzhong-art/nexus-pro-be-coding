@@ -55,7 +55,7 @@ func (c AttendanceService) AttendanceClockStatus(ctx RequestContext) (Attendance
 		return AttendanceClockStatus{}, err
 	}
 	status := attendanceClockStatusFromProjection(account.EmployeeID, workDate, projection)
-	policy, err := c.loadAttendancePolicyResponse(ctx)
+	policy, err := c.loadAttendancePolicyResponseForWorkDate(ctx, workDate)
 	if err != nil {
 		return AttendanceClockStatus{}, err
 	}
@@ -136,7 +136,8 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 		}
 	}
 	now := c.Now()
-	policy, err := c.loadAttendancePolicyResponse(ctx)
+	workDate := attendanceWorkDate(now)
+	policy, err := c.loadAttendancePolicyResponseForWorkDate(ctx, workDate)
 	if err != nil {
 		return AttendanceClockRecord{}, err
 	}
@@ -148,7 +149,6 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 			return AttendanceClockRecord{}, err
 		}
 	}
-	workDate := attendanceWorkDate(now)
 	recordStatus := clockRecordStatusAccepted
 	rejectionReason := ""
 	_, hasClockIn, err := c.store.GetEarliestAcceptedAttendanceClockIn(goContext(ctx), ctx.TenantID, employeeID, workDate)
@@ -181,26 +181,27 @@ func (c AttendanceService) CreateAttendanceClockRecord(ctx RequestContext, input
 		deviceInfo["location_source"] = strings.TrimSpace(input.LocationSource)
 	}
 	record := AttendanceClockRecord{
-		ID:              utils.NewID("acr"),
-		TenantID:        ctx.TenantID,
-		EmployeeID:      employeeID,
-		WorksiteID:      worksite.ID,
-		WorksiteName:    worksite.Name,
-		WorksiteAddress: worksite.Address,
-		WorkDate:          workDate,
-		Direction:         direction,
-		ClientEventID:     clientEventID,
-		ClockedAt:         now,
-		Latitude:          input.Latitude,
-		Longitude:         input.Longitude,
-		AccuracyMeters:    input.AccuracyMeters,
-		DistanceMeters:    distance,
-		RecordStatus:      recordStatus,
-		RejectionReason:   rejectionReason,
-		Source:            clockSourceGeofence,
-		DeviceID:          strings.TrimSpace(input.DeviceID),
-		DeviceInfo:        deviceInfo,
-		CreatedAt:         now,
+		ID:               utils.NewID("acr"),
+		TenantID:         ctx.TenantID,
+		EmployeeID:       employeeID,
+		WorksiteID:       worksite.ID,
+		WorksiteName:     worksite.Name,
+		WorksiteAddress:  worksite.Address,
+		WorkDate:         workDate,
+		Direction:        direction,
+		ClientEventID:    clientEventID,
+		ClockedAt:        now,
+		Latitude:         input.Latitude,
+		Longitude:        input.Longitude,
+		AccuracyMeters:   input.AccuracyMeters,
+		DistanceMeters:   distance,
+		LocationCaptured: true,
+		RecordStatus:     recordStatus,
+		RejectionReason:  rejectionReason,
+		Source:           clockSourceGeofence,
+		DeviceID:         strings.TrimSpace(input.DeviceID),
+		DeviceInfo:       deviceInfo,
+		CreatedAt:        now,
 	}
 	if err := c.store.UpsertAttendanceClockRecord(goContext(ctx), record); err != nil {
 		if clientEventID != "" {
@@ -605,22 +606,14 @@ func (c AttendanceService) applyApprovedAttendanceCorrection(ctx RequestContext,
 			return Conflict("accepted clock-in record already exists").WithReasonCode("attendance_clock_sequence_conflict")
 		}
 	}
-	worksite, err := c.firstActiveAttendanceWorksite(ctx)
-	if err != nil {
-		return err
-	}
 	record := AttendanceClockRecord{
 		ID:                  utils.NewID("acr"),
 		TenantID:            ctx.TenantID,
 		EmployeeID:          current.EmployeeID,
-		WorksiteID:          worksite.ID,
-		WorksiteName:        worksite.Name,
-		WorksiteAddress:     worksite.Address,
 		WorkDate:            current.WorkDate,
 		Direction:           current.Direction,
 		ClockedAt:           current.RequestedClockedAt,
-		Latitude:            worksite.Latitude,
-		Longitude:           worksite.Longitude,
+		LocationCaptured:    false,
 		RecordStatus:        clockRecordStatusAccepted,
 		Source:              clockSourceManualCorrection,
 		CorrectionRequestID: current.ID,
@@ -738,18 +731,6 @@ func (c AttendanceService) nearestActiveAttendanceWorksite(ctx RequestContext, l
 	return selected, selectedDistance, nil
 }
 
-// firstActiveAttendanceWorksite returns the primary active worksite for manual correction records.
-func (c AttendanceService) firstActiveAttendanceWorksite(ctx RequestContext) (AttendanceWorksite, error) {
-	items, err := c.activeAttendanceWorksites(ctx)
-	if err != nil {
-		return AttendanceWorksite{}, err
-	}
-	if len(items) > 0 {
-		return items[0], nil
-	}
-	return AttendanceWorksite{}, BadRequest("attendance worksite is required").WithReasonCode("attendance_worksite_required")
-}
-
 // haversineMeters 處理 haversine meters。
 func haversineMeters(lat1, lon1, lat2, lon2 float64) float64 {
 	const earthRadiusMeters = 6371000.0
@@ -848,7 +829,7 @@ func (c AttendanceService) reviewAttendanceCorrection(ctx RequestContext, id, ne
 	}
 	var correction AttendanceCorrectionRequest
 	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
-		current, ok, err := tx.store.GetAttendanceCorrectionRequest(goContext(ctx), ctx.TenantID, id)
+		current, ok, err := tx.store.GetAttendanceCorrectionRequestForUpdate(goContext(ctx), ctx.TenantID, id)
 		if err != nil {
 			return err
 		}

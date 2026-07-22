@@ -258,7 +258,7 @@ func TestAgentChatLeaveEligibilityFallsBackFromRealZeroBalance(t *testing.T) {
 	store := memory.NewStore()
 	seedAgentChatAccount(t, store, now, agentLeaveToolPermissions("self"))
 	if err := store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{
-		ID: "lb-annual", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 0, UpdatedAt: now,
+		ID: "lb-annual", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingMinutes: 0, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -286,7 +286,7 @@ func TestAgentChatLeaveEligibilityAcceptsSufficientBalance(t *testing.T) {
 	store := memory.NewStore()
 	seedAgentChatAccount(t, store, now, agentLeaveToolPermissions("self"))
 	if err := store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{
-		ID: "lb-annual", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 16, UpdatedAt: now,
+		ID: "lb-annual", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingMinutes: 16 * 60, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -319,8 +319,8 @@ func TestAgentChatLeaveBalanceAdminScopeStaysSelfOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, balance := range []domain.LeaveBalance{
-		{ID: "lb-self", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingHours: 8, UpdatedAt: now},
-		{ID: "lb-other", TenantID: "tenant-1", EmployeeID: "emp-2", LeaveType: "annual", RemainingHours: 80, UpdatedAt: now},
+		{ID: "lb-self", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", RemainingMinutes: 8 * 60, UpdatedAt: now},
+		{ID: "lb-other", TenantID: "tenant-1", EmployeeID: "emp-2", LeaveType: "annual", RemainingMinutes: 80 * 60, UpdatedAt: now},
 	} {
 		if err := store.UpsertLeaveBalance(context.Background(), balance); err != nil {
 			t.Fatal(err)
@@ -592,17 +592,30 @@ func TestAgentChatUsesSessionBoundAgentAndRejectsAgentSwitch(t *testing.T) {
 	seedAgentChatAccount(t, store, now, []domain.Permission{
 		{Resource: "agent.run", Action: "create", Scope: "all"},
 	})
-	if err := store.UpsertAgentModel(context.Background(), domain.AgentModel{
+	boundModel := domain.AgentModel{
 		ID: "model-bound", TenantID: "tenant-1", Name: "Bound Model", ModelName: "gpt-bound",
 		LiteLLMModel: "openai/gpt-bound", Status: domain.AgentModelStatusActive, TimeoutSeconds: 45,
 		CreatedAt: now, UpdatedAt: now,
-	}); err != nil {
+	}
+	if err := store.UpsertAgentModel(context.Background(), boundModel); err != nil {
+		t.Fatal(err)
+	}
+	boundRevision := domain.AgentDefinitionVersion{
+		ID: "arev-bound", TenantID: "tenant-1", AgentID: "agent-bound", Version: 1,
+		Name: "Bound Agent", Category: domain.AgentCategoryWorkflow, Visibility: domain.AgentVisibilityAll,
+		SystemPrompt: "Bound system prompt", ModelID: boundModel.ID,
+		ModelConfigChecksum: domain.AgentModelSyncConfigHash(boundModel),
+		TimeoutSeconds:      30, ConfigSchemaVersion: 1, Checksum: "bound-checksum", CreatedAt: now,
+	}
+	if err := store.InsertAgentDefinitionVersion(context.Background(), boundRevision); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.UpsertAgentDefinition(context.Background(), domain.AgentDefinition{
-		ID: "agent-bound", TenantID: "tenant-1", Name: "Bound Agent", ModelID: "model-bound",
-		SystemPrompt: "Bound system prompt", Status: domain.AgentDefinitionStatusPublished,
-		Visibility: domain.AgentVisibilityAll, TimeoutSeconds: 30, CreatedAt: now, UpdatedAt: now,
+		ID: "agent-bound", TenantID: "tenant-1", DraftRevisionID: boundRevision.ID, PublishedRevisionID: boundRevision.ID,
+		Name: boundRevision.Name, Category: boundRevision.Category, ModelID: boundRevision.ModelID,
+		SystemPrompt: boundRevision.SystemPrompt, Status: domain.AgentDefinitionStatusPublished,
+		Visibility: boundRevision.Visibility, TimeoutSeconds: boundRevision.TimeoutSeconds,
+		Version: 1, PublishedVersion: 1, CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}

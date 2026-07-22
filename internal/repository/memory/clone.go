@@ -261,46 +261,6 @@ func copyEmployee(v Employee) Employee {
 	return v
 }
 
-// copyEmployeeImportSession 複製員工 import session。
-func copyEmployeeImportSession(v EmployeeImportSession) EmployeeImportSession {
-	v.Rows = copyEmployeeImportRows(v.Rows)
-	v.Summary = utils.CopyStringMap(v.Summary)
-	if v.ConfirmedAt != nil {
-		t := *v.ConfirmedAt
-		v.ConfirmedAt = &t
-	}
-	return v
-}
-
-// copyEmploymentContract 複製員工合約。
-func copyEmploymentContract(v EmploymentContract) EmploymentContract {
-	if v.EndDate != nil {
-		t := *v.EndDate
-		v.EndDate = &t
-	}
-	return v
-}
-
-// copyEmployeeImportRows 複製員工 import 列。
-func copyEmployeeImportRows(src []EmployeeImportRow) []EmployeeImportRow {
-	if len(src) == 0 {
-		return nil
-	}
-	dst := make([]EmployeeImportRow, len(src))
-	for i, item := range src {
-		item.Input = utils.CopyStringStringMap(item.Input)
-		item.Employee.BasicInfo = utils.CopyStringMap(item.Employee.BasicInfo)
-		item.Employee.EmploymentInfo = utils.CopyStringMap(item.Employee.EmploymentInfo)
-		item.Employee.EducationMilitaryInfo = utils.CopyStringMap(item.Employee.EducationMilitaryInfo)
-		item.Employee.ContactInfo = utils.CopyStringMap(item.Employee.ContactInfo)
-		item.Employee.InsuranceInfo = utils.CopyStringMap(item.Employee.InsuranceInfo)
-		item.Employee.InternalExperiences = utils.CopyEmployeeExperiences(item.Employee.InternalExperiences)
-		item.Errors = copyRowErrors(item.Errors)
-		dst[i] = item
-	}
-	return dst
-}
-
 // copyRowErrors 複製列錯誤。
 func copyRowErrors(src []RowError) []RowError {
 	if len(src) == 0 {
@@ -371,6 +331,32 @@ func copyAttendanceClockRecord(v AttendanceClockRecord) AttendanceClockRecord {
 // copyAttendanceDailySummary 複製考勤日彙總。
 func copyAttendanceDailySummary(v AttendanceDailySummary) AttendanceDailySummary {
 	v.Payload = utils.CopyStringMap(v.Payload)
+	return v
+}
+
+func copyAttendanceDayProjection(v AttendanceDayProjection) AttendanceDayProjection {
+	v.AnomalyReasons = utils.CopyStrings(v.AnomalyReasons)
+	v.Payload = utils.CopyStringMap(v.Payload)
+	if v.ScheduledStartAt != nil {
+		t := *v.ScheduledStartAt
+		v.ScheduledStartAt = &t
+	}
+	if v.ScheduledEndAt != nil {
+		t := *v.ScheduledEndAt
+		v.ScheduledEndAt = &t
+	}
+	if v.ClockIn != nil {
+		item := copyAttendanceClockRecord(*v.ClockIn)
+		v.ClockIn = &item
+	}
+	if v.ClockOut != nil {
+		item := copyAttendanceClockRecord(*v.ClockOut)
+		v.ClockOut = &item
+	}
+	if v.LastPunch != nil {
+		item := copyAttendanceClockRecord(*v.LastPunch)
+		v.LastPunch = &item
+	}
 	return v
 }
 
@@ -457,6 +443,7 @@ func copyAgentDefinition(v AgentDefinition) AgentDefinition {
 	v.SuggestedQuestions = utils.CopyStrings(v.SuggestedQuestions)
 	v.SuggestedQuestionTranslations = copyLocalizedAgentSuggestedQuestions(v.SuggestedQuestionTranslations)
 	v.Tools = utils.CopyStrings(v.Tools)
+	v.ExternalToolIDs = utils.CopyStrings(v.ExternalToolIDs)
 	v.KnowledgeBaseIDs = utils.CopyStrings(v.KnowledgeBaseIDs)
 	v.SubAgents = copyAgentTeamMembers(v.SubAgents)
 	v.VisibilityTargets = utils.CopyStrings(v.VisibilityTargets)
@@ -474,7 +461,9 @@ func copyAgentDefinitionVersion(v AgentDefinitionVersion) AgentDefinitionVersion
 	v.SuggestedQuestions = utils.CopyStrings(v.SuggestedQuestions)
 	v.SuggestedQuestionTranslations = copyLocalizedAgentSuggestedQuestions(v.SuggestedQuestionTranslations)
 	v.Tools = utils.CopyStrings(v.Tools)
+	v.ExternalToolIDs = utils.CopyStrings(v.ExternalToolIDs)
 	v.KnowledgeBaseIDs = utils.CopyStrings(v.KnowledgeBaseIDs)
+	v.VisibilityTargets = utils.CopyStrings(v.VisibilityTargets)
 	v.SubAgents = copyAgentTeamMembers(v.SubAgents)
 	return v
 }
@@ -506,6 +495,7 @@ func copyAgentTeamMembers(src []AgentTeamMember) []AgentTeamMember {
 	copy(out, src)
 	for i := range out {
 		out[i].Tools = utils.CopyStrings(out[i].Tools)
+		out[i].ExternalToolIDs = utils.CopyStrings(out[i].ExternalToolIDs)
 		out[i].KnowledgeBaseIDs = utils.CopyStrings(out[i].KnowledgeBaseIDs)
 	}
 	return out
@@ -562,6 +552,79 @@ func copyAgentMemory(v AgentMemory) AgentMemory {
 	if v.ExpiresAt != nil {
 		t := *v.ExpiresAt
 		v.ExpiresAt = &t
+	}
+	return v
+}
+
+// copyAgentExternalTool isolates mutable capability schemas and timestamps.
+func copyAgentExternalTool(v AgentExternalTool) AgentExternalTool {
+	if v.LastTestedAt != nil {
+		t := *v.LastTestedAt
+		v.LastTestedAt = &t
+	}
+	if v.ArchivedAt != nil {
+		t := *v.ArchivedAt
+		v.ArchivedAt = &t
+	}
+	v.Capabilities = append([]domain.ExternalToolCapability(nil), v.Capabilities...)
+	for i := range v.Capabilities {
+		v.Capabilities[i].InputSchema = utils.CopyStringMap(v.Capabilities[i].InputSchema)
+		v.Capabilities[i].OutputSchema = utils.CopyStringMap(v.Capabilities[i].OutputSchema)
+		if v.Capabilities[i].ArchivedAt != nil {
+			t := *v.Capabilities[i].ArchivedAt
+			v.Capabilities[i].ArchivedAt = &t
+		}
+	}
+	return v
+}
+
+func copyExternalToolCapability(v domain.ExternalToolCapability) domain.ExternalToolCapability {
+	v.InputSchema = utils.CopyStringMap(v.InputSchema)
+	v.OutputSchema = utils.CopyStringMap(v.OutputSchema)
+	if v.ArchivedAt != nil {
+		archivedAt := *v.ArchivedAt
+		v.ArchivedAt = &archivedAt
+	}
+	return v
+}
+
+func copyExecutionStep(v domain.ExecutionStep) domain.ExecutionStep {
+	v.InputSummary = utils.CopyStringMap(v.InputSummary)
+	v.OutputSummary = utils.CopyStringMap(v.OutputSummary)
+	if v.StartedAt != nil {
+		startedAt := *v.StartedAt
+		v.StartedAt = &startedAt
+	}
+	if v.CompletedAt != nil {
+		completedAt := *v.CompletedAt
+		v.CompletedAt = &completedAt
+	}
+	return v
+}
+
+func copyAgentRevisionExternalTools(src []domain.AgentRevisionExternalTool) []domain.AgentRevisionExternalTool {
+	out := append([]domain.AgentRevisionExternalTool(nil), src...)
+	for index := range out {
+		out[index].Config = utils.CopyStringMap(out[index].Config)
+	}
+	return out
+}
+
+func copyAgentRevisionMemberExternalTools(src []domain.AgentRevisionMemberExternalTool) []domain.AgentRevisionMemberExternalTool {
+	out := append([]domain.AgentRevisionMemberExternalTool(nil), src...)
+	for index := range out {
+		out[index].Config = utils.CopyStringMap(out[index].Config)
+	}
+	return out
+}
+
+func copyAgentConfirmation(v domain.AgentConfirmationRecord) domain.AgentConfirmationRecord {
+	v.PublicPayload = utils.CopyStringMap(v.PublicPayload)
+	v.ActionPayload = utils.CopyStringMap(v.ActionPayload)
+	v.ResultPayload = utils.CopyStringMap(v.ResultPayload)
+	if v.ConsumedAt != nil {
+		consumedAt := *v.ConsumedAt
+		v.ConsumedAt = &consumedAt
 	}
 	return v
 }

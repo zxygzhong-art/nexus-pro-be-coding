@@ -709,9 +709,9 @@ def build_role_matrix_cases() -> list[MatrixCase]:
             {"admin": 200, "employee": 403, "audit": 200},
         ),
         MatrixCase(
-            "agent run list",
+            "agent session list",
             "GET",
-            "/v1/agents/runs?page=1&page_size=5",
+            "/v1/agents/sessions?page_size=5",
             {"admin": 200, "employee": 200, "audit": 403},
         ),
         MatrixCase(
@@ -736,11 +736,11 @@ def build_role_matrix_cases() -> list[MatrixCase]:
             json_body={"employee_id": "emp-employee", "leave_type": "annual", "start_at": "2026-08-01", "end_at": "2026-08-02", "hours": 8, "reason": "matrix"},
         ),
         MatrixCase(
-            "create agent run",
+            "create agent session",
             "POST",
-            "/v1/agents/runs",
+            "/v1/agents/sessions",
             {"admin": 201, "employee": 201, "audit": 403},
-            json_body={"mode": "policy_qa", "prompt": "Matrix role check"},
+            json_body={"title": "Matrix Agent Session"},
         ),
     ]
 
@@ -769,7 +769,7 @@ def list_cases() -> list[Case]:
         Case("leave balances list", "GET", "/v1/attendance/leave-balances?page=1&page_size=5", 200, "GET /v1/attendance/leave-balances", check=expect_page),
         Case("leave requests list", "GET", "/v1/attendance/leave-requests?page=1&page_size=5", 200, "GET /v1/attendance/leave-requests", check=expect_page),
         Case("form templates list", "GET", "/v1/forms/templates?page=1&page_size=5", 200, "GET /v1/forms/templates", check=expect_page),
-        Case("agent runs list", "GET", "/v1/agents/runs?page=1&page_size=5", 200, "GET /v1/agents/runs", check=expect_page),
+        Case("agent sessions list", "GET", "/v1/agents/sessions?page_size=5", 200, "GET /v1/agents/sessions", check=expect_cursor_page),
     ]
 
 
@@ -1112,14 +1112,14 @@ def workflow_cases() -> list[Case]:
 def agent_cases() -> list[Case]:
     return [
         Case(
-            "create agent run",
+            "create agent session",
             "POST",
-            "/v1/agents/runs",
+            "/v1/agents/sessions",
             201,
-            "POST /v1/agents/runs",
-            json_body={"mode": "policy_qa", "prompt": "What is the leave policy?"},
+            "POST /v1/agents/sessions",
+            json_body={"title": "Smoke Agent Session"},
             check=expect_data_object,
-            capture=capture_id("agent_run_id"),
+            capture=capture_id("agent_session_id"),
         ),
     ]
 
@@ -1219,6 +1219,13 @@ def expect_page(result: HTTPResult, context: dict[str, Any]) -> None:
     data = result.json_body["data"]
     if not isinstance(data, dict) or "items" not in data or "total" not in data:
         raise SmokeFailure(f"expected page envelope, got {truncate(result.text)}")
+
+
+def expect_cursor_page(result: HTTPResult, context: dict[str, Any]) -> None:
+    expect_data_object(result, context)
+    data = result.json_body["data"]
+    if not isinstance(data, dict) or not isinstance(data.get("items"), list):
+        raise SmokeFailure(f"expected cursor page envelope, got {truncate(result.text)}")
 
 
 def expect_text(needle: str) -> CheckFunc:

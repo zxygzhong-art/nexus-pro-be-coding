@@ -38,30 +38,6 @@ func TestNextEmployeeNoIncrementsAcrossCalls(t *testing.T) {
 	}
 }
 
-// TestEHRMSSyncLockerIsNonBlocking 驗證同步互斥不依賴運行資料儲存。
-func TestEHRMSSyncLockerIsNonBlocking(t *testing.T) {
-	store := memory.NewStore()
-	ctx := context.Background()
-
-	entered := make(chan struct{})
-	release := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		acquired, err := store.WithEHRMSSyncLock(ctx, "tenant-1", "pipeline", func() error { close(entered); <-release; return nil })
-		if err != nil || !acquired {
-			t.Errorf("first lock acquired=%v err=%v", acquired, err)
-		}
-	}()
-	<-entered
-	acquired, err := store.WithEHRMSSyncLock(ctx, "tenant-1", "pipeline", func() error { return nil })
-	if err != nil || acquired {
-		t.Fatalf("second lock acquired=%v err=%v", acquired, err)
-	}
-	close(release)
-	<-done
-}
-
 // TestListEmployeePageByQueryMatchesMemoryFiltering 驗證員工分頁 by 查詢 matches memory filtering。
 func TestListEmployeePageByQueryMatchesMemoryFiltering(t *testing.T) {
 	store := memory.NewStore()
@@ -203,21 +179,23 @@ func TestAttendanceClockRecordMultiPunchBoundariesAndIdempotency(t *testing.T) {
 	}
 }
 
-// TestUpsertLeaveBalanceUsesEmployeeTypeAndPeriodIdentity verifies period balances stay independent.
-func TestUpsertLeaveBalanceUsesEmployeeTypeAndPeriodIdentity(t *testing.T) {
+// TestUpsertLeaveBalanceUsesStableBucketIdentity verifies overlapping snapshot
+// buckets stay independent and only the same stable bucket ID is refreshed.
+func TestUpsertLeaveBalanceUsesStableBucketIdentity(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()
 	now := time.Now().UTC()
 	first := domain.LeaveBalance{
 		ID: "policy-balance", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual",
-		RemainingHours: 8, Source: "policy", UpdatedAt: now,
+		LeaveTypeID: domain.StableLeaveTypeID("annual"), PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", RemainingMinutes: 8 * 60,
+		Source: "explicit_snapshot", UpdatedAt: now,
 	}
 	if err := store.UpsertLeaveBalance(ctx, first); err != nil {
 		t.Fatal(err)
 	}
 	fromEHRMS := first
 	fromEHRMS.ID = "ehrms-balance"
-	fromEHRMS.RemainingHours = 24
+	fromEHRMS.RemainingMinutes = 24 * 60
 	fromEHRMS.Source = "ehrms"
 	fromEHRMS.UpdatedAt = now.Add(time.Minute)
 	if err := store.UpsertLeaveBalance(ctx, fromEHRMS); err != nil {
@@ -228,11 +206,18 @@ func TestUpsertLeaveBalanceUsesEmployeeTypeAndPeriodIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(balances) != 1 {
-		t.Fatalf("expected one balance for employee/type identity, got %+v", balances)
+	if len(balances) != 2 {
+		t.Fatalf("expected same-period buckets with distinct stable IDs, got %+v", balances)
 	}
-	if balances[0].ID != first.ID || balances[0].RemainingHours != 24 || balances[0].Source != "ehrms" {
-		t.Fatalf("expected existing balance identity with eHRMS values, got %+v", balances[0])
+	if stored, ok, err := store.GetLeaveBalance(ctx, "tenant-1", first.ID); err != nil || !ok || stored.RemainingMinutes != 8*60 {
+		t.Fatalf("first bucket was overwritten: ok=%v balance=%+v err=%v", ok, stored, err)
+	}
+	fromEHRMS.RemainingMinutes = 20 * 60
+	if err := store.UpsertLeaveBalance(ctx, fromEHRMS); err != nil {
+		t.Fatal(err)
+	}
+	if stored, ok, err := store.GetLeaveBalance(ctx, "tenant-1", fromEHRMS.ID); err != nil || !ok || stored.RemainingMinutes != 20*60 {
+		t.Fatalf("same stable bucket ID was not refreshed: ok=%v balance=%+v err=%v", ok, stored, err)
 	}
 
 	nextPeriod := first
@@ -246,8 +231,82 @@ func TestUpsertLeaveBalanceUsesEmployeeTypeAndPeriodIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(balances) != 2 {
+	if len(balances) != 3 {
 		t.Fatalf("expected a new balance identity for another period, got %+v", balances)
+	}
+}
+
+func TestLocalLeaveBalanceAnchorCoexistsWithTimelessSnapshot(t *testing.T) {
+	store := memory.NewStore()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	leaveTypeID := domain.StableLeaveTypeID("annual")
+	snapshot := domain.LeaveBalance{
+		ID: "snapshot", TenantID: "tenant-1", EmployeeID: "emp-1",
+		LeaveType: "annual", LeaveTypeID: leaveTypeID,
+		RemainingMinutes: 8 * 60, Source: "ehrms", UpdatedAt: now,
+	}
+	if err := store.UpsertLeaveBalance(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	anchor, err := store.EnsureLocalLeaveBalanceAnchor(ctx, domain.LeaveBalance{
+		ID: "local-anchor", TenantID: "tenant-1", EmployeeID: "emp-1",
+		LeaveType: "annual", LeaveTypeID: leaveTypeID, UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if anchor.ID != "local-anchor" || anchor.Source != "local_anchor" {
+		t.Fatalf("expected distinct local anchor, got %+v", anchor)
+	}
+
+	overlay, err := store.ListLeaveBalancesForOverlay(ctx, "tenant-1", "emp-1", leaveTypeID, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(overlay) != 2 || overlay[0].ID != snapshot.ID || overlay[1].ID != anchor.ID {
+		t.Fatalf("expected snapshot before local anchor, got %+v", overlay)
+	}
+
+	refreshed := snapshot
+	refreshed.RemainingMinutes = 7 * 60
+	refreshed.UpdatedAt = now.Add(time.Minute)
+	if err := store.UpsertLeaveBalance(ctx, refreshed); err != nil {
+		t.Fatal(err)
+	}
+	balances, err := store.ListLeaveBalances(ctx, "tenant-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(balances) != 2 {
+		t.Fatalf("upstream refresh must not overwrite the local anchor: %+v", balances)
+	}
+	storedSnapshot, ok, err := store.GetLeaveBalance(ctx, "tenant-1", snapshot.ID)
+	if err != nil || !ok || storedSnapshot.RemainingMinutes != 7*60 {
+		t.Fatalf("expected in-place snapshot refresh, ok=%v balance=%+v err=%v", ok, storedSnapshot, err)
+	}
+}
+
+func TestLeaveRequestAllocationIsImmutableWithinCycle(t *testing.T) {
+	store := memory.NewStore()
+	ctx := context.Background()
+	allocation := domain.LeaveRequestAllocation{
+		TenantID: "tenant-1", LeaveRequestID: "request-1", LeaveBalanceID: "balance-1",
+		EmployeeID: "employee-1", LeaveTypeID: "leave-type-1", Cycle: 1, ReservedMinutes: 60,
+	}
+	if err := store.UpsertLeaveRequestAllocation(ctx, allocation); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertLeaveRequestAllocation(ctx, allocation); err != nil {
+		t.Fatalf("idempotent allocation replay failed: %v", err)
+	}
+	allocation.ReservedMinutes = 120
+	if appErr, ok := domain.AsAppError(store.UpsertLeaveRequestAllocation(ctx, allocation)); !ok || appErr.Status != 409 {
+		t.Fatalf("expected conflicting allocation rewrite to return 409, got %v", appErr)
+	}
+	items, err := store.ListLeaveRequestAllocationsByRequestCycle(ctx, "tenant-1", "request-1", 1)
+	if err != nil || len(items) != 1 || items[0].ReservedMinutes != 60 {
+		t.Fatalf("immutable allocation changed: items=%+v err=%v", items, err)
 	}
 }
 
@@ -410,5 +469,70 @@ func TestOptimisticLockingRejectsStaleWrites(t *testing.T) {
 	f2.Status = "approved"
 	if appErr, ok := domain.AsAppError(store.UpsertFormInstance(ctx, f2)); !ok || appErr.Status != 409 {
 		t.Fatalf("expected 409 for stale form instance write")
+	}
+}
+
+func TestAgentMemoriesAreIdempotentAndScopedToCurrentSegment(t *testing.T) {
+	store := memory.NewStore()
+	ctx := context.Background()
+	now := time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC)
+	session := domain.AgentSession{
+		ID: "conversation-1", TenantID: "tenant-1", AccountID: "account-1",
+		AgentID: "agent-1", SegmentID: "segment-1", Status: domain.AgentSessionStatusActive,
+		ContextVersion: 1, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := store.UpsertAgentSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range []domain.AgentMemory{
+		{ID: "global-1", TenantID: "tenant-1", AccountID: "account-1", Key: "locale", Content: "zh-TW", Status: "active", CreatedAt: now, UpdatedAt: now},
+		{ID: "agent-1-memory", TenantID: "tenant-1", AccountID: "account-1", AgentID: "agent-1", Key: "tone", Content: "brief", Status: "active", CreatedAt: now, UpdatedAt: now},
+		{ID: "agent-2-memory", TenantID: "tenant-1", AccountID: "account-1", AgentID: "agent-2", Key: "private", Content: "must-not-leak", Status: "active", CreatedAt: now, UpdatedAt: now},
+		{ID: "conversation-memory", TenantID: "tenant-1", AccountID: "account-1", SessionID: session.ID, Key: "topic", Content: "current segment only", Status: "active", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := store.UpsertAgentMemory(ctx, item); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	visible, err := store.ListAgentMemoriesByAccount(ctx, "tenant-1", "account-1", "agent-1", session.ID, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(visible) != 3 {
+		t.Fatalf("expected global, matching agent and current-segment memories, got %+v", visible)
+	}
+	for _, item := range visible {
+		if item.AgentID == "agent-2" || item.Content == "must-not-leak" {
+			t.Fatalf("cross-agent memory leaked into chat context: %+v", visible)
+		}
+	}
+
+	if err := store.UpsertAgentMemory(ctx, domain.AgentMemory{
+		ID: "global-retry", TenantID: "tenant-1", AccountID: "account-1",
+		Key: "locale", Content: "zh-CN", Status: "active", CreatedAt: now.Add(time.Minute), UpdatedAt: now.Add(time.Minute),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	global, err := store.ListAgentMemoriesByAccount(ctx, "tenant-1", "account-1", "", "", 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(global) != 1 || global[0].ID != "global-1" || global[0].Content != "zh-CN" {
+		t.Fatalf("expected scope/key upsert to update one stable memory, got %+v", global)
+	}
+
+	session.SegmentID = "segment-2"
+	session.ContextVersion = 2
+	session.UpdatedAt = now.Add(2 * time.Minute)
+	if err := store.UpsertAgentSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	visible, err = store.ListAgentMemoriesByAccount(ctx, "tenant-1", "account-1", "agent-1", session.ID, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(visible) != 2 {
+		t.Fatalf("expected clear-context segment to hide old conversation memory, got %+v", visible)
 	}
 }

@@ -55,31 +55,32 @@ type LocalizedAgentSuggestedQuestion struct {
 
 // AgentModel 定義租戶模型設定。
 type AgentModel struct {
-	ID               string               `json:"id"`
-	TenantID         string               `json:"tenant_id"`
-	Name             string               `json:"name"`
-	Provider         string               `json:"provider"`
-	ModelName        string               `json:"model_name"`
-	LiteLLMModel     string               `json:"litellm_model"`
-	APIBaseURL       string               `json:"api_base_url,omitempty"`
-	APIKey           string               `json:"-"`
-	APIKeyCiphertext string               `json:"-"`
-	APIKeySet        bool                 `json:"api_key_set"`
-	APIKeyPreview    string               `json:"api_key_preview,omitempty"`
-	RateLimitRPM     int                  `json:"rate_limit_rpm"`
-	Status           AgentModelStatus     `json:"status"`
-	TimeoutSeconds   int                  `json:"timeout_seconds"`
-	MonthlyQuota     int64                `json:"monthly_quota"`
-	UsedQuota        int64                `json:"used_quota"`
-	LastTestedAt     *time.Time           `json:"last_tested_at,omitempty"`
-	LastTestStatus   string               `json:"last_test_status"`
-	LastTestMessage  string               `json:"last_test_message,omitempty"`
-	SyncStatus       AgentModelSyncStatus `json:"sync_status"`
-	LastSyncedAt     *time.Time           `json:"last_synced_at,omitempty"`
-	LastSyncError    string               `json:"last_sync_error,omitempty"`
-	SyncedConfigHash string               `json:"synced_config_hash,omitempty"`
-	CreatedAt        time.Time            `json:"created_at"`
-	UpdatedAt        time.Time            `json:"updated_at"`
+	ID                 string               `json:"id"`
+	TenantID           string               `json:"tenant_id"`
+	Name               string               `json:"name"`
+	Provider           string               `json:"provider"`
+	ModelName          string               `json:"model_name"`
+	LiteLLMModel       string               `json:"litellm_model"`
+	APIBaseURL         string               `json:"api_base_url,omitempty"`
+	APIKey             string               `json:"-"`
+	APIKeyCiphertext   string               `json:"-"`
+	CredentialSecretID string               `json:"credential_secret_id,omitempty"`
+	APIKeySet          bool                 `json:"api_key_set"`
+	APIKeyPreview      string               `json:"api_key_preview,omitempty"`
+	RateLimitRPM       int                  `json:"rate_limit_rpm"`
+	Status             AgentModelStatus     `json:"status"`
+	TimeoutSeconds     int                  `json:"timeout_seconds"`
+	MonthlyQuota       int64                `json:"monthly_quota"`
+	UsedQuota          int64                `json:"used_quota"`
+	LastTestedAt       *time.Time           `json:"last_tested_at,omitempty"`
+	LastTestStatus     string               `json:"last_test_status"`
+	LastTestMessage    string               `json:"last_test_message,omitempty"`
+	SyncStatus         AgentModelSyncStatus `json:"sync_status"`
+	LastSyncedAt       *time.Time           `json:"last_synced_at,omitempty"`
+	LastSyncError      string               `json:"last_sync_error,omitempty"`
+	SyncedConfigHash   string               `json:"synced_config_hash,omitempty"`
+	CreatedAt          time.Time            `json:"created_at"`
+	UpdatedAt          time.Time            `json:"updated_at"`
 }
 
 // AgentDefinitionVersion 定義 Agent 版本快照。
@@ -88,6 +89,12 @@ type AgentDefinitionVersion struct {
 	TenantID                      string                            `json:"tenant_id"`
 	AgentID                       string                            `json:"agent_id"`
 	Version                       int                               `json:"version"`
+	Name                          string                            `json:"name"`
+	Description                   string                            `json:"description"`
+	Emoji                         string                            `json:"emoji"`
+	Category                      AgentCategory                     `json:"category"`
+	Visibility                    AgentVisibility                   `json:"visibility"`
+	VisibilityTargets             []string                          `json:"visibility_targets"`
 	MainAgentRole                 string                            `json:"main_agent_role"`
 	SubAgents                     []AgentTeamMember                 `json:"sub_agents"`
 	SystemPrompt                  string                            `json:"system_prompt"`
@@ -95,8 +102,13 @@ type AgentDefinitionVersion struct {
 	SuggestedQuestions            []string                          `json:"suggested_questions"`
 	SuggestedQuestionTranslations []LocalizedAgentSuggestedQuestion `json:"suggested_question_translations"`
 	Tools                         []string                          `json:"tools"`
+	ExternalToolIDs               []string                          `json:"external_tool_ids"`
 	KnowledgeBaseIDs              []string                          `json:"knowledge_base_ids"`
 	ModelID                       string                            `json:"model_id"`
+	ModelConfigChecksum           string                            `json:"model_config_checksum"`
+	TimeoutSeconds                int                               `json:"timeout_seconds"`
+	ConfigSchemaVersion           int                               `json:"config_schema_version"`
+	Checksum                      string                            `json:"checksum"`
 	Note                          string                            `json:"note"`
 	CreatedByAccountID            string                            `json:"created_by_account_id,omitempty"`
 	CreatedAt                     time.Time                         `json:"created_at"`
@@ -104,12 +116,14 @@ type AgentDefinitionVersion struct {
 
 // AgentTeamMember 定義由主 Agent 調度的子 Agent 配置。
 type AgentTeamMember struct {
-	ID               string   `json:"id"`
-	Name             string   `json:"name"`
-	Role             string   `json:"role"`
-	ModelID          string   `json:"model_id"`
-	Tools            []string `json:"tools"`
-	KnowledgeBaseIDs []string `json:"knowledge_base_ids"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	Role                string   `json:"role"`
+	ModelID             string   `json:"model_id"`
+	ModelConfigChecksum string   `json:"model_config_checksum,omitempty"`
+	Tools               []string `json:"tools"`
+	ExternalToolIDs     []string `json:"external_tool_ids"`
+	KnowledgeBaseIDs    []string `json:"knowledge_base_ids"`
 }
 
 // AgentUsageStats 定義用量統計。
@@ -132,6 +146,8 @@ type AgentDefinitionRef struct {
 type AgentDefinition struct {
 	ID                            string                            `json:"id"`
 	TenantID                      string                            `json:"tenant_id"`
+	DraftRevisionID               string                            `json:"draft_revision_id,omitempty"`
+	PublishedRevisionID           string                            `json:"published_revision_id,omitempty"`
 	Name                          string                            `json:"name"`
 	Description                   string                            `json:"description"`
 	Emoji                         string                            `json:"emoji"`
@@ -144,6 +160,7 @@ type AgentDefinition struct {
 	SuggestedQuestions            []string                          `json:"suggested_questions"`
 	SuggestedQuestionTranslations []LocalizedAgentSuggestedQuestion `json:"suggested_question_translations"`
 	Tools                         []string                          `json:"tools"`
+	ExternalToolIDs               []string                          `json:"external_tool_ids"`
 	KnowledgeBaseIDs              []string                          `json:"knowledge_base_ids"`
 	Status                        AgentDefinitionStatus             `json:"status"`
 	Visibility                    AgentVisibility                   `json:"visibility"`
@@ -172,33 +189,49 @@ type AgentToolMeta struct {
 
 // AgentExternalTool represents a tenant-managed external tool registration.
 type AgentExternalTool struct {
-	ID                   string    `json:"id"`
-	TenantID             string    `json:"tenant_id"`
-	Name                 string    `json:"name"`
-	Description          string    `json:"description"`
-	Kind                 string    `json:"kind"`
-	Transport            string    `json:"transport"`
-	EndpointURL          string    `json:"endpoint_url"`
-	AuthType             string    `json:"auth_type"`
-	AuthHeaderName       string    `json:"auth_header_name,omitempty"`
-	AuthUsername         string    `json:"auth_username,omitempty"`
-	AuthSecretCiphertext string    `json:"-"`
-	CredentialSet        bool      `json:"credential_set"`
-	CreatedByAccountID   string    `json:"created_by_account_id,omitempty"`
-	CreatedAt            time.Time `json:"created_at"`
+	ID                   string                   `json:"id"`
+	TenantID             string                   `json:"tenant_id"`
+	Name                 string                   `json:"name"`
+	Description          string                   `json:"description"`
+	Kind                 string                   `json:"kind"`
+	Transport            string                   `json:"transport"`
+	EndpointURL          string                   `json:"endpoint_url"`
+	AuthType             string                   `json:"auth_type"`
+	AuthHeaderName       string                   `json:"auth_header_name,omitempty"`
+	AuthUsername         string                   `json:"auth_username,omitempty"`
+	TimeoutSeconds       int                      `json:"timeout_seconds"`
+	AuthSecretCiphertext string                   `json:"-"`
+	CredentialSecretID   string                   `json:"credential_secret_id,omitempty"`
+	CredentialSet        bool                     `json:"credential_set"`
+	Status               string                   `json:"status"`
+	LastTestedAt         *time.Time               `json:"last_tested_at,omitempty"`
+	LastTestStatus       string                   `json:"last_test_status"`
+	LastTestMessage      string                   `json:"last_test_message,omitempty"`
+	Capabilities         []ExternalToolCapability `json:"capabilities,omitempty"`
+	CreatedByAccountID   string                   `json:"created_by_account_id,omitempty"`
+	CreatedAt            time.Time                `json:"created_at"`
+	UpdatedAt            time.Time                `json:"updated_at"`
+	ArchivedAt           *time.Time               `json:"archived_at,omitempty"`
 }
 
 // CreateAgentExternalToolInput defines the editable external tool fields.
 type CreateAgentExternalToolInput struct {
-	Name           string `json:"name"`
-	Description    string `json:"description"`
-	Kind           string `json:"kind"`
-	Transport      string `json:"transport"`
-	EndpointURL    string `json:"endpoint_url"`
-	AuthType       string `json:"auth_type"`
-	AuthHeaderName string `json:"auth_header_name"`
-	AuthUsername   string `json:"auth_username"`
-	AuthSecret     string `json:"auth_secret"`
+	Name           string         `json:"name"`
+	Description    string         `json:"description"`
+	Kind           string         `json:"kind"`
+	Transport      string         `json:"transport"`
+	EndpointURL    string         `json:"endpoint_url"`
+	AuthType       string         `json:"auth_type"`
+	AuthHeaderName string         `json:"auth_header_name"`
+	AuthUsername   string         `json:"auth_username"`
+	AuthSecret     string         `json:"auth_secret"`
+	TimeoutSeconds int            `json:"timeout_seconds"`
+	ToolName       string         `json:"tool_name"`
+	HTTPMethod     string         `json:"http_method"`
+	HTTPPath       string         `json:"http_path"`
+	InputSchema    map[string]any `json:"input_schema"`
+	OutputSchema   map[string]any `json:"output_schema"`
+	Readonly       bool           `json:"readonly"`
 }
 
 // CreateAgentModelInput 定義建立模型輸入。
@@ -243,6 +276,7 @@ type CreateAgentDefinitionInput struct {
 	SuggestedQuestions            []string                          `json:"suggested_questions"`
 	SuggestedQuestionTranslations []LocalizedAgentSuggestedQuestion `json:"suggested_question_translations"`
 	Tools                         []string                          `json:"tools"`
+	ExternalToolIDs               []string                          `json:"external_tool_ids"`
 	KnowledgeBaseIDs              []string                          `json:"knowledge_base_ids"`
 	Visibility                    string                            `json:"visibility"`
 	VisibilityTargets             []string                          `json:"visibility_targets"`
@@ -263,6 +297,7 @@ type UpdateAgentDefinitionInput struct {
 	SuggestedQuestions            []string                          `json:"suggested_questions"`
 	SuggestedQuestionTranslations []LocalizedAgentSuggestedQuestion `json:"suggested_question_translations"`
 	Tools                         []string                          `json:"tools"`
+	ExternalToolIDs               []string                          `json:"external_tool_ids"`
 	KnowledgeBaseIDs              []string                          `json:"knowledge_base_ids"`
 	Visibility                    *string                           `json:"visibility"`
 	VisibilityTargets             []string                          `json:"visibility_targets"`

@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/platform/mcpclient"
 )
 
 // export_bridge.go — 子領域包（internal/service/agent 等）存取基底 Service 的橋接。
@@ -20,6 +21,12 @@ func (c *Service) ObjectStore() ObjectStore { return c.objectStore }
 
 // CredentialCipher 回傳憑證加解密器。
 func (c *Service) CredentialCipher() CredentialCipher { return c.credentialCipher }
+
+// MCPConnector 回傳外部 MCP 連線器。
+func (c *Service) MCPConnector() mcpclient.Connector { return c.mcpConnector }
+
+// ExternalHTTPExecutor 回傳手動 HTTP capability 執行器。
+func (c *Service) ExternalHTTPExecutor() ExternalHTTPExecutor { return c.externalHTTPExecutor }
 
 // LiteLLMAdmin 回傳 LiteLLM 管理 client。
 func (c *Service) LiteLLMAdmin() LiteLLMAdminClient { return c.liteLLMAdmin }

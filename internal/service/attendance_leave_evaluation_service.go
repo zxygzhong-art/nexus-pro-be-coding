@@ -86,7 +86,8 @@ func (c AttendanceService) EvaluateLeaveRequestRules(ctx RequestContext, employe
 	if hours <= 0 {
 		hours = CalculateLeaveHoursWithinPolicy(startAt, endAt, policy.WorkTime)
 	}
-	if hours <= 0 {
+	requestedMinutes := leaveMinutes(hours)
+	if requestedMinutes <= 0 {
 		return LeaveRequestEvaluation{}, BadRequest("selected time does not include working hours")
 	}
 	leaveTypes, err := c.loadLeaveTypes(ctx)
@@ -106,7 +107,7 @@ func (c AttendanceService) EvaluateLeaveRequestRules(ctx RequestContext, employe
 		Eligible: false, Status: LeaveEvaluationUnsupported,
 		Message:    "The requested leave type is not enabled in the system leave catalog.",
 		EmployeeID: employeeID, LeaveTypeID: domain.StableLeaveTypeID(leaveTypeCode),
-		LeaveType: leaveTypeCode, Hours: hours, PolicyVersion: policy.Version, Rule: rule,
+		LeaveType: leaveTypeCode, RequestedMinutes: requestedMinutes, PolicyVersion: policy.Version, Rule: rule,
 	}
 	if !supported {
 		return evaluation, nil
@@ -114,7 +115,7 @@ func (c AttendanceService) EvaluateLeaveRequestRules(ctx RequestContext, employe
 	evaluation.LeaveTypeName = rule.Name
 	evaluation.LeaveTypeID = evaluation.Rule.LeaveTypeID
 	evaluation.BalanceRequired = rule.RequiresBalance
-	evaluation.ProofRequired = rule.ProofAfterHours != nil && hours >= *rule.ProofAfterHours
+	evaluation.ProofRequired = rule.ProofAfterHours != nil && requestedMinutes >= leaveMinutes(*rule.ProofAfterHours)
 	evaluation.Rule = rule
 	if !rule.RequiresBalance {
 		evaluation.Eligible = true
@@ -131,14 +132,14 @@ func (c AttendanceService) EvaluateLeaveRequestRules(ctx RequestContext, employe
 			continue
 		}
 		evaluation.BalanceInitialized = true
-		if balance.RemainingHours > evaluation.AvailableHours {
-			evaluation.AvailableHours = balance.RemainingHours
+		if balance.RemainingMinutes > 0 {
+			evaluation.AvailableMinutes += balance.RemainingMinutes
 		}
 	}
 	if !evaluation.BalanceInitialized {
 		return applyLeaveBalanceFallback(evaluation, leaveEvaluationBalanceMissing), nil
 	}
-	if evaluation.AvailableHours < hours {
+	if evaluation.AvailableMinutes < requestedMinutes {
 		return applyLeaveBalanceFallback(evaluation, leaveEvaluationBalanceInsufficient), nil
 	}
 	evaluation.Eligible = true
@@ -187,8 +188,8 @@ func leaveRuleSnapshotMap(rule domain.LeaveRuleSnapshot) map[string]any {
 func leaveEvaluationSnapshotMap(evaluation LeaveRequestEvaluation) map[string]any {
 	return map[string]any{
 		"eligible": evaluation.Eligible, "status": evaluation.Status, "message": evaluation.Message,
-		"hours": evaluation.Hours, "balance_required": evaluation.BalanceRequired,
-		"balance_initialized": evaluation.BalanceInitialized, "available_hours": evaluation.AvailableHours,
+		"requested_minutes": evaluation.RequestedMinutes, "balance_required": evaluation.BalanceRequired,
+		"balance_initialized": evaluation.BalanceInitialized, "available_minutes": evaluation.AvailableMinutes,
 		"balance_fallback_reason": evaluation.BalanceFallbackReason, "proof_required": evaluation.ProofRequired,
 	}
 }

@@ -18,29 +18,38 @@ const (
 	AgentRunStatusRunning   AgentRunStatus = "running"
 	AgentRunStatusCompleted AgentRunStatus = "completed"
 	AgentRunStatusFailed    AgentRunStatus = "failed"
+	AgentRunStatusCancelled AgentRunStatus = "cancelled"
 )
 
 // AgentRun 定義 agent 執行的資料結構。
 type AgentRun struct {
-	ID            string        `json:"id"`
-	TenantID      string        `json:"tenant_id"`
-	AccountID     string        `json:"account_id"`
-	AgentID       string        `json:"agent_id,omitempty"`
-	SessionID     string        `json:"session_id,omitempty"`
-	Mode          string        `json:"mode"`
-	Prompt        string        `json:"prompt"`
-	Answer        string        `json:"answer,omitempty"`
-	Status        string        `json:"status"`
-	References    []Reference   `json:"references,omitempty"`
-	ToolDecisions []CheckResult `json:"tool_decisions,omitempty"`
-	LLMCallCount  int64         `json:"-"`
-	InputTokens   int64         `json:"-"`
-	CachedTokens  int64         `json:"-"`
-	OutputTokens  int64         `json:"-"`
-	TotalTokens   int64         `json:"-"`
-	UsageComplete bool          `json:"-"`
-	CreatedAt     time.Time     `json:"created_at"`
-	UpdatedAt     time.Time     `json:"updated_at"`
+	ID                string        `json:"id"`
+	TenantID          string        `json:"tenant_id"`
+	AccountID         string        `json:"account_id"`
+	AgentID           string        `json:"agent_id,omitempty"`
+	SessionID         string        `json:"session_id,omitempty"`
+	SegmentID         string        `json:"segment_id,omitempty"`
+	InputMessageID    string        `json:"input_message_id,omitempty"`
+	AgentRevisionID   string        `json:"agent_revision_id,omitempty"`
+	ModelConnectionID string        `json:"model_connection_id,omitempty"`
+	Mode              string        `json:"mode"`
+	Prompt            string        `json:"prompt"`
+	Answer            string        `json:"answer,omitempty"`
+	Status            string        `json:"status"`
+	References        []Reference   `json:"references,omitempty"`
+	ToolDecisions     []CheckResult `json:"tool_decisions,omitempty"`
+	LLMCallCount      int64         `json:"-"`
+	InputTokens       int64         `json:"-"`
+	CachedTokens      int64         `json:"-"`
+	OutputTokens      int64         `json:"-"`
+	TotalTokens       int64         `json:"-"`
+	UsageComplete     bool          `json:"-"`
+	StartedAt         *time.Time    `json:"started_at,omitempty"`
+	CompletedAt       *time.Time    `json:"completed_at,omitempty"`
+	ErrorCode         string        `json:"error_code,omitempty"`
+	ErrorCategory     string        `json:"error_category,omitempty"`
+	CreatedAt         time.Time     `json:"created_at"`
+	UpdatedAt         time.Time     `json:"updated_at"`
 }
 
 // AgentTokenUsage records one model response usage report.

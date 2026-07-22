@@ -22,7 +22,6 @@ func (c MeCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	me.PATCH("/profile", c.routes.Handle("me", "update", c.updateProfile))
 	me.PATCH("/preferences", c.routes.Handle("me", "update", c.updatePreferences))
 	me.PUT("/password", c.routes.Handle("me", "update", c.changePassword))
-	me.GET("/menus", c.routes.Handle("me", "read", c.getMenus))
 }
 
 // updatePreferences updates only account-level settings owned by the authenticated user.
@@ -73,15 +72,5 @@ func (c MeCtrl) updateProfile(w http.ResponseWriter, r *http.Request, ctx domain
 		return err
 	}
 	writeJSON(w, http.StatusOK, me)
-	return nil
-}
-
-// getMenus 處理 menus 的 HTTP 請求。
-func (c MeCtrl) getMenus(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
-	menus, err := c.svc.ListMenus(ctx)
-	if err != nil {
-		return err
-	}
-	writeJSON(w, http.StatusOK, domain.MenuListResponse{Items: menus, Total: len(menus)})
 	return nil
 }

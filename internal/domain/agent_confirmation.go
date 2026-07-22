@@ -27,6 +27,15 @@ type AgentConfirmation struct {
 // ExecuteAgentConfirmationInput 定義確認操作輸入。
 type ExecuteAgentConfirmationInput struct{}
 
+// CreateExternalToolConfirmationInput binds a mutating external-tool preview
+// to the exact discovered capability contract that the model observed.
+type CreateExternalToolConfirmationInput struct {
+	ConnectionID   string         `json:"connection_id"`
+	CapabilityID   string         `json:"capability_id"`
+	SchemaChecksum string         `json:"schema_checksum"`
+	Arguments      map[string]any `json:"arguments"`
+}
+
 // AgentConfirmationExecution 回傳一次性確認操作的執行結果。
 type AgentConfirmationExecution struct {
 	ConfirmationID string                   `json:"confirmation_id"`
@@ -34,4 +43,5 @@ type AgentConfirmationExecution struct {
 	Status         string                   `json:"status"`
 	FormInstance   *FormInstance            `json:"form_instance,omitempty"`
 	BulkReview     *BulkReviewFormsResponse `json:"bulk_review,omitempty"`
+	Data           map[string]any           `json:"data,omitempty"`
 }

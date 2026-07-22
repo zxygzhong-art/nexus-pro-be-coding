@@ -34,6 +34,7 @@ type AgentSession struct {
 	TenantID       string             `json:"tenant_id"`
 	AccountID      string             `json:"account_id"`
 	AgentID        string             `json:"agent_id,omitempty"`
+	SegmentID      string             `json:"segment_id"`
 	Title          string             `json:"title"`
 	Status         AgentSessionStatus `json:"status"`
 	ContextVersion int64              `json:"context_version"`
@@ -47,6 +48,8 @@ type AgentSessionMessage struct {
 	ID             string             `json:"id"`
 	TenantID       string             `json:"tenant_id"`
 	SessionID      string             `json:"session_id"`
+	SegmentID      string             `json:"segment_id"`
+	SequenceNo     int64              `json:"sequence_no"`
 	Role           AgentMessageRole   `json:"role"`
 	Content        string             `json:"content"`
 	RunID          string             `json:"run_id,omitempty"`
@@ -129,18 +132,23 @@ type AgentSessionUsagePage struct {
 
 // AgentMemory 定義簡單記憶條目。
 type AgentMemory struct {
-	ID         string            `json:"id"`
-	TenantID   string            `json:"tenant_id"`
-	AccountID  string            `json:"account_id"`
-	AgentID    string            `json:"agent_id,omitempty"`
-	SessionID  string            `json:"session_id,omitempty"`
-	Key        string            `json:"key,omitempty"`
-	Content    string            `json:"content"`
-	Source     AgentMemorySource `json:"source"`
-	Importance int               `json:"importance"`
-	ExpiresAt  *time.Time        `json:"expires_at,omitempty"`
-	CreatedAt  time.Time         `json:"created_at"`
-	UpdatedAt  time.Time         `json:"updated_at"`
+	ID              string            `json:"id"`
+	TenantID        string            `json:"tenant_id"`
+	AccountID       string            `json:"account_id"`
+	AgentID         string            `json:"agent_id,omitempty"`
+	SessionID       string            `json:"session_id,omitempty"`
+	SegmentID       string            `json:"segment_id,omitempty"`
+	Scope           string            `json:"scope"`
+	Key             string            `json:"key,omitempty"`
+	Content         string            `json:"content"`
+	Source          AgentMemorySource `json:"source"`
+	SourceMessageID string            `json:"source_message_id,omitempty"`
+	Confidence      float64           `json:"confidence"`
+	Status          string            `json:"status"`
+	Importance      int               `json:"importance"`
+	ExpiresAt       *time.Time        `json:"expires_at,omitempty"`
+	CreatedAt       time.Time         `json:"created_at"`
+	UpdatedAt       time.Time         `json:"updated_at"`
 }
 
 // CreateAgentSessionInput 定義建立會話輸入。

@@ -99,7 +99,6 @@ func (a *API) RegisterRoutes(router *gin.Engine) {
 	v1 := router.Group("/v1")
 	AuthCtrl{api: a, svc: a.identity, tokenResolver: a.tokenResolver}.RegisterRoutes(v1)
 	MeCtrl{routes: routes, svc: a.me}.RegisterRoutes(v1)
-	AuthzCtrl{routes: routes, svc: a.authz}.RegisterRoutes(v1)
 	IAMCtrl{routes: routes, svc: a.iam}.RegisterRoutes(v1)
 	HRCtrl{routes: routes, svc: a.hr}.RegisterRoutes(v1)
 	AttendanceCtrl{routes: routes, svc: a.attendance}.RegisterRoutes(v1)
@@ -109,5 +108,4 @@ func (a *API) RegisterRoutes(router *gin.Engine) {
 	WorkflowCtrl{routes: routes, svc: a.workflow}.RegisterRoutes(v1)
 	AgentCtrl{routes: routes, svc: a.agent}.RegisterRoutes(v1)
 	NotificationCtrl{routes: routes, svc: a.notification}.RegisterRoutes(v1)
-	AuditCtrl{routes: routes, svc: a.audit}.RegisterRoutes(v1)
 }

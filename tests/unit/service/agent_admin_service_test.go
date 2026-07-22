@@ -273,7 +273,7 @@ func TestAgentExternalToolRegistryLifecycle(t *testing.T) {
 	if created.AuthSecretCiphertext == "" || strings.Contains(created.AuthSecretCiphertext, "support-secret") {
 		t.Fatalf("expected encrypted credential, got %q", created.AuthSecretCiphertext)
 	}
-	plaintext, err := credentialCipher.Decrypt(created.AuthSecretCiphertext, []byte("tenant-1\x00"+created.ID))
+	plaintext, err := credentialCipher.Decrypt(created.AuthSecretCiphertext, domain.CredentialSecretAAD("tenant-1", created.CredentialSecretID))
 	if err != nil || string(plaintext) != "support-secret" {
 		t.Fatalf("expected decryptable tenant-bound credential, plaintext=%q err=%v", plaintext, err)
 	}
@@ -301,8 +301,8 @@ func TestAgentExternalToolRegistryLifecycle(t *testing.T) {
 		t.Fatalf("expected deleted external tool, got %+v", deleted)
 	}
 	items, err = agentservice.New(svc).ListExternalTools(ctx)
-	if err != nil || len(items) != 0 {
-		t.Fatalf("expected empty external tool registry after deletion, items=%+v err=%v", items, err)
+	if err != nil || len(items) != 1 || items[0].Status != string(domain.ExternalToolConnectionStatusArchived) {
+		t.Fatalf("expected archived external tool to remain visible, items=%+v err=%v", items, err)
 	}
 
 	if _, err := agentservice.New(svc).CreateExternalTool(ctx, domain.CreateAgentExternalToolInput{
@@ -650,6 +650,7 @@ func seedAgentAdminAccount(t *testing.T, store *memory.Store, now time.Time) {
 			{Resource: "agent.definition", Action: "delete", Scope: "all"},
 			{Resource: "agent.tool", Action: "read", Scope: "all"},
 			{Resource: "agent.tool", Action: "create", Scope: "all"},
+			{Resource: "agent.tool", Action: "update", Scope: "all"},
 			{Resource: "agent.tool", Action: "delete", Scope: "all"},
 			{Resource: "agent.tool", Action: "call", Target: "get_my_profile", Scope: "all"},
 			{Resource: "me", Action: "read", Scope: "self"},

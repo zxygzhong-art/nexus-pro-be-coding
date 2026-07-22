@@ -277,8 +277,6 @@ func canonicalMenuKeyForPermission(permission Permission) string {
 		return "hr.org_units"
 	case strings.HasPrefix(key, "hr.position."):
 		return "hr.employees"
-	case strings.HasPrefix(key, "hr.employment_contract."):
-		return "hr.employees"
 	case key == "attendance.clock.export", key == "attendance.clock.import":
 		return "attendance.overview"
 	case strings.HasPrefix(key, "attendance.clock."), strings.HasPrefix(key, "attendance.correction."):

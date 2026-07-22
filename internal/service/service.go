@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"nexus-pro-api/internal/domain"
+	"nexus-pro-api/internal/platform/externaltool"
+	"nexus-pro-api/internal/platform/mcpclient"
 	"nexus-pro-api/internal/repository"
 	"nexus-pro-api/internal/utils"
 )
@@ -32,6 +34,8 @@ type Service struct {
 	workflowStartOutboxEnabled bool
 	outboxWake                 func()
 	credentialCipher           CredentialCipher
+	mcpConnector               mcpclient.Connector
+	externalHTTPExecutor       ExternalHTTPExecutor
 }
 
 // Options 定義選項的資料結構。
@@ -52,12 +56,21 @@ type Options struct {
 	WorkflowStartOutboxEnabled bool
 	OutboxWake                 func()
 	CredentialCipher           CredentialCipher
+	MCPConnector               mcpclient.Connector
+	ExternalHTTPExecutor       ExternalHTTPExecutor
 }
 
 // CredentialCipher encrypts persisted secrets with contextual associated data.
 type CredentialCipher interface {
 	Encrypt(plaintext, associatedData []byte) (string, error)
 	Decrypt(ciphertext string, associatedData []byte) ([]byte, error)
+}
+
+// ExternalHTTPExecutor invokes one administrator-configured HTTP capability.
+// The narrow interface keeps network behavior replaceable in service tests.
+type ExternalHTTPExecutor interface {
+	Call(context.Context, externaltool.Request) (externaltool.Result, error)
+	Probe(context.Context, externaltool.ProbeRequest) (externaltool.ProbeResult, error)
 }
 
 // LiteLLMAdminClient 定義 LiteLLM 管理與探測 client 行為契約。
@@ -84,9 +97,9 @@ type EHRMSClient interface {
 	ListEmployees(context.Context) ([]domain.EHRMSEmployeeRecord, error)
 	ListDepartments(context.Context) ([]domain.EHRMSDepartmentRecord, error)
 	ListPositions(context.Context) ([]domain.EHRMSPositionRecord, error)
-	ListAttendance(context.Context) ([]domain.EHRMSAttendanceRecord, error)
-	ListLeaveBalances(context.Context) ([]domain.EHRMSLeaveBalanceRecord, error)
-	ListLeaveDetails(context.Context) ([]domain.EHRMSLeaveDetailRecord, error)
+	ListAttendance(context.Context, domain.EHRMSAttendanceQuery) ([]domain.EHRMSAttendanceRecord, error)
+	ListLeaveBalances(context.Context, domain.EHRMSAttendanceQuery) ([]domain.EHRMSLeaveBalanceRecord, error)
+	ListLeaveDetails(context.Context, domain.EHRMSAttendanceQuery) ([]domain.EHRMSLeaveDetailRecord, error)
 }
 
 // IdentityProvisioner 定義身分 provisioner 的行為契約。
@@ -119,6 +132,14 @@ func New(store repository.Store, options ...Options) *Service {
 	if cfg.Now != nil {
 		now = cfg.Now
 	}
+	mcpConnector := cfg.MCPConnector
+	if mcpConnector == nil {
+		mcpConnector = mcpclient.DefaultConnector{}
+	}
+	externalHTTPExecutor := cfg.ExternalHTTPExecutor
+	if externalHTTPExecutor == nil {
+		externalHTTPExecutor = externaltool.Executor{}
+	}
 	return &Service{
 		store:                      store,
 		now:                        now,
@@ -137,6 +158,8 @@ func New(store repository.Store, options ...Options) *Service {
 		workflowStartOutboxEnabled: cfg.WorkflowStartOutboxEnabled,
 		outboxWake:                 cfg.OutboxWake,
 		credentialCipher:           cfg.CredentialCipher,
+		mcpConnector:               mcpConnector,
+		externalHTTPExecutor:       externalHTTPExecutor,
 	}
 }
 

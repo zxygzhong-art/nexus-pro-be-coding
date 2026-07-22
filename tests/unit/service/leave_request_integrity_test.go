@@ -16,7 +16,7 @@ func TestCreateLeaveRequestUsesPolicyHours(t *testing.T) {
 	store, svc, employeeCtx, _ := newLeaveRequestIntegrityFixture(t, now)
 	if err := store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{
 		ID: "lb-2026", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual",
-		PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", RemainingHours: 16, UpdatedAt: now,
+		PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", RemainingMinutes: 16 * 60, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -30,14 +30,14 @@ func TestCreateLeaveRequestUsesPolicyHours(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if created.Hours != 7 {
+	if created.RequestedMinutes != 7*60 {
 		t.Fatalf("expected policy-derived seven hours, got %+v", created)
 	}
-	if created.EvaluationSnapshot["hours"] != float64(7) {
-		t.Fatalf("expected evaluation snapshot to persist policy hours, got %+v", created.EvaluationSnapshot)
+	if created.EvaluationSnapshot["requested_minutes"] != 7*60 {
+		t.Fatalf("expected evaluation snapshot to persist policy minutes, got %+v", created.EvaluationSnapshot)
 	}
 	balance := effectiveLeaveBalanceForTest(t, store, "lb-2026")
-	if balance.RemainingHours != 9 || balance.PendingHours != 7 {
+	if balance.RemainingMinutes != 9*60 || balance.PendingMinutes != 7*60 {
 		t.Fatalf("expected seven overlay-reserved hours, got %+v", balance)
 	}
 	instance, ok, err := store.GetFormInstance(context.Background(), "tenant-1", created.FormInstanceID)
@@ -47,6 +47,40 @@ func TestCreateLeaveRequestUsesPolicyHours(t *testing.T) {
 	if instance.Payload["hours"] != float64(7) {
 		t.Fatalf("expected form payload to persist policy hours, got %+v", instance.Payload)
 	}
+}
+
+// TestLeaveRequestAllocatesAcrossBuckets verifies allocations are the sole,
+// minute-exact request-to-entitlement relationship.
+func TestLeaveRequestAllocatesAcrossBuckets(t *testing.T) {
+	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
+	store, svc, employeeCtx, _ := newLeaveRequestIntegrityFixture(t, now)
+	for _, balance := range []domain.LeaveBalance{
+		{ID: "lb-expiring", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", PeriodEnd: "2026-06-30", RemainingMinutes: 3 * 60, UpdatedAt: now},
+		{ID: "lb-later", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", PeriodEnd: "2026-12-31", RemainingMinutes: 5 * 60, UpdatedAt: now},
+	} {
+		if err := store.UpsertLeaveBalance(t.Context(), balance); err != nil {
+			t.Fatal(err)
+		}
+	}
+	created, err := svc.Attendance().CreateLeaveRequest(employeeCtx, domain.CreateLeaveRequestInput{
+		LeaveType: "annual", StartAt: "2026-06-10T09:00:00+08:00", EndAt: "2026-06-10T17:00:00+08:00",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	allocations, err := store.ListLeaveRequestAllocationsByRequest(t.Context(), "tenant-1", created.ID)
+	if err != nil || len(allocations) != 2 {
+		t.Fatalf("expected two allocations, err=%v allocations=%+v", err, allocations)
+	}
+	reserved := map[string]int{}
+	for _, allocation := range allocations {
+		reserved[allocation.LeaveBalanceID] = allocation.ReservedMinutes
+	}
+	if reserved["lb-expiring"] != 3*60 || reserved["lb-later"] != 4*60 {
+		t.Fatalf("expected FEFO 180+240 minute allocation, got %+v", allocations)
+	}
+	assertLeaveBalanceMinutes(t, store, "lb-expiring", 0, 3*60)
+	assertLeaveBalanceMinutes(t, store, "lb-later", 60, 4*60)
 }
 
 // TestReturnedLeaveFormCanBeEditedAndResubmitted verifies the same form and leave request survive supplementation.
@@ -67,7 +101,7 @@ func TestReturnedLeaveFormCanBeEditedAndResubmitted(t *testing.T) {
 	}
 	if err := store.UpsertLeaveBalance(t.Context(), domain.LeaveBalance{
 		ID: "lb-resubmit", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual",
-		PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", RemainingHours: 16, UpdatedAt: now,
+		PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", RemainingMinutes: 16 * 60, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -82,7 +116,7 @@ func TestReturnedLeaveFormCanBeEditedAndResubmitted(t *testing.T) {
 	if _, err := svc.Workflow().ReturnForm(reviewerCtx, created.FormInstanceID, domain.ReturnFormInput{Reason: "please supplement"}); err != nil {
 		t.Fatal(err)
 	}
-	assertLeaveBalanceHours(t, store, "lb-resubmit", 16, 0)
+	assertLeaveBalanceMinutes(t, store, "lb-resubmit", 16*60, 0)
 
 	updated, err := svc.Workflow().UpdateFormDraft(employeeCtx, created.FormInstanceID, domain.UpdateFormDraftInput{Payload: map[string]any{
 		"leave_type": "annual",
@@ -114,20 +148,24 @@ func TestReturnedLeaveFormCanBeEditedAndResubmitted(t *testing.T) {
 	if request.ID != created.ID || request.Status != "pending_approval" || request.Reason != "supplemented reason" || request.StartAt.Day() != 11 {
 		t.Fatalf("expected stable linked leave projection with supplemented values, got %+v", request)
 	}
-	assertLeaveBalanceHours(t, store, "lb-resubmit", 9, 7)
+	allocations, err := store.ListLeaveRequestAllocationsByRequest(t.Context(), "tenant-1", request.ID)
+	if err != nil || len(allocations) != 2 || allocations[0].Cycle != 1 || allocations[1].Cycle != 2 {
+		t.Fatalf("resubmission must retain immutable allocation cycles, err=%v allocations=%+v", err, allocations)
+	}
+	assertLeaveBalanceMinutes(t, store, "lb-resubmit", 9*60, 7*60)
 	runs, err := store.ListWorkflowRunsByFormInstance(t.Context(), "tenant-1", created.FormInstanceID)
 	if err != nil || len(runs) != 2 || runs[1].Version != 2 {
 		t.Fatalf("expected a second workflow run for resubmission, err=%v runs=%+v", err, runs)
 	}
 }
 
-// TestLegacyLeaveReleaseResolvesTheRequestPeriod verifies only the reserved entitlement period is restored.
-func TestLegacyLeaveReleaseResolvesTheRequestPeriod(t *testing.T) {
+// TestLeaveReleaseUsesPersistedAllocation verifies review never re-resolves a bucket from request dates.
+func TestLeaveReleaseUsesPersistedAllocation(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store, svc, employeeCtx, reviewerCtx := newLeaveRequestIntegrityFixture(t, now)
 	for _, balance := range []domain.LeaveBalance{
-		{ID: "lb-2025", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", PeriodStart: "2025-01-01", PeriodEnd: "2025-12-31", RemainingHours: 16, UpdatedAt: now},
-		{ID: "lb-2026", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", RemainingHours: 16, UpdatedAt: now.Add(time.Second)},
+		{ID: "lb-2025", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", PeriodStart: "2025-01-01", PeriodEnd: "2025-12-31", RemainingMinutes: 16 * 60, UpdatedAt: now},
+		{ID: "lb-2026", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", RemainingMinutes: 16 * 60, UpdatedAt: now.Add(time.Second)},
 	} {
 		if err := store.UpsertLeaveBalance(context.Background(), balance); err != nil {
 			t.Fatal(err)
@@ -135,32 +173,29 @@ func TestLegacyLeaveReleaseResolvesTheRequestPeriod(t *testing.T) {
 	}
 
 	created := createLegacyLeaveRequestForReview(t, store, svc, employeeCtx)
-	if created.LeaveBalanceID != "lb-2026" {
-		t.Fatalf("expected the 2026 balance to be reserved, got %+v", created)
-	}
-	created.LeaveBalanceID = ""
-	if err := store.UpsertLeaveRequest(context.Background(), created); err != nil {
-		t.Fatal(err)
+	allocations, err := store.ListLeaveRequestAllocationsByRequest(t.Context(), "tenant-1", created.ID)
+	if err != nil || len(allocations) != 1 || allocations[0].LeaveBalanceID != "lb-2026" {
+		t.Fatalf("expected the request allocation to select the 2026 bucket, err=%v allocations=%+v", err, allocations)
 	}
 
 	if _, err := svc.Workflow().RejectForm(reviewerCtx, created.FormInstanceID, domain.RejectFormInput{Reason: "not approved"}); err != nil {
 		t.Fatal(err)
 	}
-	assertLeaveBalanceHours(t, store, "lb-2025", 16, 0)
-	assertLeaveBalanceHours(t, store, "lb-2026", 16, 0)
+	assertLeaveBalanceMinutes(t, store, "lb-2025", 16*60, 0)
+	assertLeaveBalanceMinutes(t, store, "lb-2026", 16*60, 0)
 
 	// A replay may be rejected by the workflow state, but it must never restore the balance twice.
 	_, _ = svc.Workflow().RejectForm(reviewerCtx, created.FormInstanceID, domain.RejectFormInput{Reason: "replayed"})
-	assertLeaveBalanceHours(t, store, "lb-2026", 16, 0)
+	assertLeaveBalanceMinutes(t, store, "lb-2026", 16*60, 0)
 }
 
-// TestLegacyLeaveReleaseRejectsAmbiguousPeriod verifies review state and balances roll back together.
-func TestLegacyLeaveReleaseRejectsAmbiguousPeriod(t *testing.T) {
+// TestLeaveAllocationUsesSoonestExpiringBucket verifies overlapping buckets are deterministic.
+func TestLeaveAllocationUsesSoonestExpiringBucket(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store, svc, employeeCtx, reviewerCtx := newLeaveRequestIntegrityFixture(t, now)
 	for _, balance := range []domain.LeaveBalance{
-		{ID: "lb-a", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", RemainingHours: 16, UpdatedAt: now},
-		{ID: "lb-b", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", PeriodStart: "2026-06-01", PeriodEnd: "2026-06-30", RemainingHours: 16, UpdatedAt: now.Add(time.Second)},
+		{ID: "lb-a", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", RemainingMinutes: 16 * 60, UpdatedAt: now},
+		{ID: "lb-b", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", PeriodStart: "2026-06-01", PeriodEnd: "2026-06-30", RemainingMinutes: 16 * 60, UpdatedAt: now.Add(time.Second)},
 	} {
 		if err := store.UpsertLeaveBalance(context.Background(), balance); err != nil {
 			t.Fatal(err)
@@ -168,52 +203,37 @@ func TestLegacyLeaveReleaseRejectsAmbiguousPeriod(t *testing.T) {
 	}
 
 	created := createLegacyLeaveRequestForReview(t, store, svc, employeeCtx)
-	created.LeaveBalanceID = ""
-	if err := store.UpsertLeaveRequest(context.Background(), created); err != nil {
+	allocations, err := store.ListLeaveRequestAllocationsByRequest(t.Context(), "tenant-1", created.ID)
+	if err != nil || len(allocations) != 1 || allocations[0].LeaveBalanceID != "lb-b" {
+		t.Fatalf("expected soonest-expiring bucket, err=%v allocations=%+v", err, allocations)
+	}
+	if _, err := svc.Workflow().RejectForm(reviewerCtx, created.FormInstanceID, domain.RejectFormInput{Reason: "not approved"}); err != nil {
 		t.Fatal(err)
 	}
-	beforeA, _, _ := store.GetLeaveBalance(context.Background(), "tenant-1", "lb-a")
-	beforeB, _, _ := store.GetLeaveBalance(context.Background(), "tenant-1", "lb-b")
-
-	if _, err := svc.Workflow().RejectForm(reviewerCtx, created.FormInstanceID, domain.RejectFormInput{Reason: "not approved"}); err == nil {
-		t.Fatal("expected an ambiguous legacy balance period to block review")
-	}
-	afterA, _, _ := store.GetLeaveBalance(context.Background(), "tenant-1", "lb-a")
-	afterB, _, _ := store.GetLeaveBalance(context.Background(), "tenant-1", "lb-b")
-	if afterA.RemainingHours != beforeA.RemainingHours || afterA.UsedHours != beforeA.UsedHours ||
-		afterB.RemainingHours != beforeB.RemainingHours || afterB.UsedHours != beforeB.UsedHours {
-		t.Fatalf("ambiguous release changed balances: before=(%+v,%+v) after=(%+v,%+v)", beforeA, beforeB, afterA, afterB)
-	}
-	request, ok, err := store.GetLeaveRequest(context.Background(), "tenant-1", created.ID)
-	if err != nil || !ok || request.Status != "pending_approval" {
-		t.Fatalf("failed review must retain the pending request, ok=%v err=%v request=%+v", ok, err, request)
-	}
-	instance, ok, err := store.GetFormInstance(context.Background(), "tenant-1", created.FormInstanceID)
-	if err != nil || !ok || instance.Status != "in_review" {
-		t.Fatalf("failed review must roll back form state, ok=%v err=%v instance=%+v", ok, err, instance)
-	}
+	assertLeaveBalanceMinutes(t, store, "lb-a", 16*60, 0)
+	assertLeaveBalanceMinutes(t, store, "lb-b", 16*60, 0)
 }
 
-// TestLeaveReleaseDoesNotFallbackFromMissingLinkedBalance preserves the request's exact allocation identity.
-func TestLeaveReleaseDoesNotFallbackFromMissingLinkedBalance(t *testing.T) {
+// TestLeaveReleaseRejectsAllocationCoverageMismatch preserves the persisted allocation invariant.
+func TestLeaveReleaseRejectsAllocationCoverageMismatch(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store, svc, employeeCtx, reviewerCtx := newLeaveRequestIntegrityFixture(t, now)
 	if err := store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{
 		ID: "lb-2026", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual",
-		PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", RemainingHours: 16, UpdatedAt: now,
+		PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", RemainingMinutes: 16 * 60, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
 
 	created := createLegacyLeaveRequestForReview(t, store, svc, employeeCtx)
-	created.LeaveBalanceID = "lb-missing"
+	created.RequestedMinutes += 60
 	if err := store.UpsertLeaveRequest(context.Background(), created); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := svc.Workflow().RejectForm(reviewerCtx, created.FormInstanceID, domain.RejectFormInput{Reason: "not approved"}); err == nil {
-		t.Fatal("expected a missing linked balance to block review without a date fallback")
+		t.Fatal("expected incomplete allocation coverage to block review")
 	}
-	assertLeaveBalanceHours(t, store, "lb-2026", 9, 7)
+	assertLeaveBalanceMinutes(t, store, "lb-2026", 9*60, 7*60)
 	request, ok, err := store.GetLeaveRequest(context.Background(), "tenant-1", created.ID)
 	if err != nil || !ok || request.Status != "pending_approval" {
 		t.Fatalf("failed review must retain the pending request, ok=%v err=%v request=%+v", ok, err, request)
@@ -274,11 +294,11 @@ func createLegacyLeaveRequestForReview(t *testing.T, store *memory.Store, svc *s
 	return created
 }
 
-func assertLeaveBalanceHours(t *testing.T, store *memory.Store, balanceID string, remaining, used float64) {
+func assertLeaveBalanceMinutes(t *testing.T, store *memory.Store, balanceID string, remaining, used int) {
 	t.Helper()
 	balance := effectiveLeaveBalanceForTest(t, store, balanceID)
-	overlayUsed := balance.UpstreamRemainingHours - balance.RemainingHours
-	if balance.RemainingHours != remaining || overlayUsed != used {
+	overlayUsed := balance.SnapshotRemainingMinutes - balance.RemainingMinutes
+	if balance.RemainingMinutes != remaining || overlayUsed != used {
 		t.Fatalf("unexpected effective leave balance %s: %+v", balanceID, balance)
 	}
 }
@@ -289,7 +309,7 @@ func effectiveLeaveBalanceForTest(t *testing.T, store *memory.Store, balanceID s
 	if err != nil || !ok {
 		t.Fatalf("leave balance %s lookup failed ok=%v err=%v", balanceID, ok, err)
 	}
-	balance.UpstreamRemainingHours = balance.RemainingHours
+	balance.SnapshotRemainingMinutes = balance.RemainingMinutes
 	entries, err := store.ListLeaveBalanceEntries(context.Background(), "tenant-1")
 	if err != nil {
 		t.Fatal(err)
@@ -298,12 +318,12 @@ func effectiveLeaveBalanceForTest(t *testing.T, store *memory.Store, balanceID s
 		if entry.BalanceID != balanceID {
 			continue
 		}
-		balance.RemainingHours += float64(entry.AmountMinutes) / 60
+		balance.RemainingMinutes += entry.AmountMinutes
 		switch entry.EntryType {
 		case "reserve", "release":
-			balance.PendingHours -= float64(entry.AmountMinutes) / 60
-		case "local_consume", "local_refund", "external_reconcile":
-			balance.LocalUsedHours -= float64(entry.AmountMinutes) / 60
+			balance.PendingMinutes -= entry.AmountMinutes
+		case "local_consume", "local_refund", "external_reconcile", "external_reversal":
+			balance.LocalUsedMinutes -= entry.AmountMinutes
 		}
 	}
 	return balance
