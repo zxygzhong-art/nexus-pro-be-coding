@@ -76,10 +76,7 @@ type (
 	LeaveBalance                       = domain.LeaveBalance
 	LeaveBalanceEntry                  = domain.LeaveBalanceEntry
 	LeaveBalanceQuery                  = domain.LeaveBalanceQuery
-	LeaveCase                          = domain.LeaveCase
-	LeaveCaseSource                    = domain.LeaveCaseSource
-	ExternalLeaveRecord                = domain.ExternalLeaveRecord
-	LeaveRequestAllocation             = domain.LeaveRequestAllocation
+	LeaveRecord                        = domain.LeaveRecord
 	LeaveRequest                       = domain.LeaveRequest
 	LeaveRequestEvaluation             = domain.LeaveRequestEvaluation
 	EvaluateLeaveRequestInput          = domain.EvaluateLeaveRequestInput
@@ -318,6 +315,7 @@ type (
 	UpdateWorkspaceOrganizationVisibilityInput = domain.UpdateWorkspaceOrganizationVisibilityInput
 	SaveWorkspaceFormDesignInput               = domain.SaveWorkspaceFormDesignInput
 	UpdateWorkspaceFormDesignInput             = domain.UpdateWorkspaceFormDesignInput
+	PublishWorkspaceFormDesignInput            = domain.PublishWorkspaceFormDesignInput
 	PlatformInsightsQuery                      = domain.PlatformInsightsQuery
 	WorkspaceOverviewQuery                     = domain.WorkspaceOverviewQuery
 	WorkspaceTurnoverQuery                     = domain.WorkspaceTurnoverQuery

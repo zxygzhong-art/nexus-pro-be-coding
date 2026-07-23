@@ -77,11 +77,8 @@ func (c WorkflowService) GetRuntimeFormTemplate(ctx RequestContext, templateKey,
 	if !ok {
 		return domain.RuntimeFormTemplate{}, NotFound("form template", templateKey)
 	}
-	if status := strings.TrimSpace(strings.ToLower(template.Status)); status != "" && status != "published" {
+	if template.Status == "archived" || workspaceFormPublishedVersion(template) <= 0 {
 		return domain.RuntimeFormTemplate{}, BadRequest("form template is not published")
-	}
-	if err := ValidateWorkflowTemplateSubmittable(template); err != nil {
-		return domain.RuntimeFormTemplate{}, err
 	}
 	version, err := c.formTemplateVersionByID(ctx, template, versionID)
 	if err != nil {
@@ -288,14 +285,14 @@ func (c WorkflowService) SaveFormDraft(ctx RequestContext, input SaveFormDraftIn
 	if !ok {
 		return FormInstance{}, NotFound("form template", templateKey)
 	}
-	if err := ValidateWorkflowTemplateSubmittable(template); err != nil {
-		return FormInstance{}, err
-	}
 	version, err := c.currentFormTemplateVersionForNewInstance(ctx, template, input.TemplateVersionID)
 	if err != nil {
 		return FormInstance{}, err
 	}
 	template = FormTemplateAtVersion(template, version)
+	if err := ValidateWorkflowTemplateSubmittable(template); err != nil {
+		return FormInstance{}, err
+	}
 	now := c.Now()
 	instance := FormInstance{
 		ID:                 utils.NewID("fi"),
@@ -507,9 +504,6 @@ func (c WorkflowService) submitNewFormForApplicant(ctx RequestContext, account A
 		if !ok {
 			return NotFound("form template", templateKey)
 		}
-		if err := ValidateWorkflowTemplateSubmittable(nextTemplate); err != nil {
-			return err
-		}
 		if err := tx.Service.Attendance().preflightWorkflowAttendanceSubmission(ctx, account, nextTemplate.Key); err != nil {
 			return err
 		}
@@ -518,6 +512,9 @@ func (c WorkflowService) submitNewFormForApplicant(ctx RequestContext, account A
 			return err
 		}
 		nextTemplate = FormTemplateAtVersion(nextTemplate, version)
+		if err := ValidateWorkflowTemplateSubmittable(nextTemplate); err != nil {
+			return err
+		}
 		normalizedPayload, err := tx.validateFormSubmissionPayload(ctx, nextTemplate, payload)
 		if err != nil {
 			return err

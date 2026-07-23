@@ -35,10 +35,7 @@ type (
 	LeaveBalance                    = domain.LeaveBalance
 	LeaveBalanceEntry               = domain.LeaveBalanceEntry
 	LeaveRequest                    = domain.LeaveRequest
-	LeaveRequestAllocation          = domain.LeaveRequestAllocation
-	LeaveCase                       = domain.LeaveCase
-	LeaveCaseSource                 = domain.LeaveCaseSource
-	ExternalLeaveRecord             = domain.ExternalLeaveRecord
+	LeaveRecord                     = domain.LeaveRecord
 	AttendanceWorksite              = domain.AttendanceWorksite
 	AttendanceClockRecord           = domain.AttendanceClockRecord
 	AttendanceDailySummary          = domain.AttendanceDailySummary

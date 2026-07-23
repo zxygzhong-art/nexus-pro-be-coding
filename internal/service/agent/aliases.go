@@ -70,7 +70,6 @@ type (
 	BatchEmployeeResult                = domain.BatchEmployeeResult
 	LeaveBalance                       = domain.LeaveBalance
 	LeaveBalanceQuery                  = domain.LeaveBalanceQuery
-	LeaveRequestAllocation             = domain.LeaveRequestAllocation
 	LeaveRequest                       = domain.LeaveRequest
 	LeaveRequestEvaluation             = domain.LeaveRequestEvaluation
 	EvaluateLeaveRequestInput          = domain.EvaluateLeaveRequestInput
@@ -299,6 +298,7 @@ type (
 	UpdateWorkspaceOrganizationVisibilityInput = domain.UpdateWorkspaceOrganizationVisibilityInput
 	SaveWorkspaceFormDesignInput               = domain.SaveWorkspaceFormDesignInput
 	UpdateWorkspaceFormDesignInput             = domain.UpdateWorkspaceFormDesignInput
+	PublishWorkspaceFormDesignInput            = domain.PublishWorkspaceFormDesignInput
 	PlatformInsightsQuery                      = domain.PlatformInsightsQuery
 	WorkspaceOverviewQuery                     = domain.WorkspaceOverviewQuery
 	WorkspaceTurnoverQuery                     = domain.WorkspaceTurnoverQuery

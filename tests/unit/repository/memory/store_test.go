@@ -152,16 +152,14 @@ func TestAttendanceClockRecordMultiPunchBoundariesAndIdempotency(t *testing.T) {
 	}
 }
 
-// TestUpsertLeaveBalanceUsesStableBucketIdentity verifies overlapping snapshot
-// buckets stay independent and only the same stable bucket ID is refreshed.
-func TestUpsertLeaveBalanceUsesStableBucketIdentity(t *testing.T) {
+func TestUpsertLeaveBalanceUsesEmployeeTypeYearIdentity(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()
 	now := time.Now().UTC()
 	first := domain.LeaveBalance{
 		ID: "policy-balance", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual",
-		LeaveTypeID: domain.StableLeaveTypeID("annual"), PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", RemainingMinutes: 8 * 60,
-		Source: "explicit_snapshot", UpdatedAt: now,
+		LeaveTypeID: domain.StableLeaveTypeID("annual"), EntitlementYear: 2026, RemainingMinutes: 8 * 60,
+		Source: "nexus", UpdatedAt: now,
 	}
 	if err := store.UpsertLeaveBalance(ctx, first); err != nil {
 		t.Fatal(err)
@@ -179,24 +177,20 @@ func TestUpsertLeaveBalanceUsesStableBucketIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(balances) != 2 {
-		t.Fatalf("expected same-period buckets with distinct stable IDs, got %+v", balances)
-	}
-	if stored, ok, err := store.GetLeaveBalance(ctx, "tenant-1", first.ID); err != nil || !ok || stored.RemainingMinutes != 8*60 {
-		t.Fatalf("first bucket was overwritten: ok=%v balance=%+v err=%v", ok, stored, err)
+	if len(balances) != 1 || balances[0].ID != first.ID || balances[0].RemainingMinutes != 24*60 {
+		t.Fatalf("expected one annual balance refreshed in place, got %+v", balances)
 	}
 	fromEHRMS.RemainingMinutes = 20 * 60
 	if err := store.UpsertLeaveBalance(ctx, fromEHRMS); err != nil {
 		t.Fatal(err)
 	}
-	if stored, ok, err := store.GetLeaveBalance(ctx, "tenant-1", fromEHRMS.ID); err != nil || !ok || stored.RemainingMinutes != 20*60 {
-		t.Fatalf("same stable bucket ID was not refreshed: ok=%v balance=%+v err=%v", ok, stored, err)
+	if stored, ok, err := store.GetLeaveBalance(ctx, "tenant-1", first.ID); err != nil || !ok || stored.RemainingMinutes != 20*60 {
+		t.Fatalf("annual balance was not refreshed: ok=%v balance=%+v err=%v", ok, stored, err)
 	}
 
 	nextPeriod := first
 	nextPeriod.ID = "next-period"
-	nextPeriod.PeriodStart = "2027-01-01"
-	nextPeriod.PeriodEnd = "2027-12-31"
+	nextPeriod.EntitlementYear = 2027
 	if err := store.UpsertLeaveBalance(ctx, nextPeriod); err != nil {
 		t.Fatal(err)
 	}
@@ -204,12 +198,12 @@ func TestUpsertLeaveBalanceUsesStableBucketIdentity(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(balances) != 3 {
-		t.Fatalf("expected a new balance identity for another period, got %+v", balances)
+	if len(balances) != 2 {
+		t.Fatalf("expected a new balance identity for another year, got %+v", balances)
 	}
 }
 
-func TestLocalLeaveBalanceAnchorCoexistsWithTimelessSnapshot(t *testing.T) {
+func TestEnsureAnnualNexusBalanceReusesExistingYear(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()
 	now := time.Now().UTC()
@@ -217,28 +211,28 @@ func TestLocalLeaveBalanceAnchorCoexistsWithTimelessSnapshot(t *testing.T) {
 	snapshot := domain.LeaveBalance{
 		ID: "snapshot", TenantID: "tenant-1", EmployeeID: "emp-1",
 		LeaveType: "annual", LeaveTypeID: leaveTypeID,
-		RemainingMinutes: 8 * 60, Source: "ehrms", UpdatedAt: now,
+		EntitlementYear: 2026, RemainingMinutes: 8 * 60, Source: "ehrms", UpdatedAt: now,
 	}
 	if err := store.UpsertLeaveBalance(ctx, snapshot); err != nil {
 		t.Fatal(err)
 	}
 	anchor, err := store.EnsureLocalLeaveBalanceAnchor(ctx, domain.LeaveBalance{
 		ID: "local-anchor", TenantID: "tenant-1", EmployeeID: "emp-1",
-		LeaveType: "annual", LeaveTypeID: leaveTypeID, UpdatedAt: now,
+		LeaveType: "annual", LeaveTypeID: leaveTypeID, EntitlementYear: 2026, UpdatedAt: now,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if anchor.ID != "local-anchor" || anchor.Source != "local_anchor" {
-		t.Fatalf("expected distinct local anchor, got %+v", anchor)
+	if anchor.ID != snapshot.ID || anchor.Source != "ehrms" {
+		t.Fatalf("expected the existing annual balance, got %+v", anchor)
 	}
 
 	overlay, err := store.ListLeaveBalancesForOverlay(ctx, "tenant-1", "emp-1", leaveTypeID, now)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(overlay) != 2 || overlay[0].ID != snapshot.ID || overlay[1].ID != anchor.ID {
-		t.Fatalf("expected snapshot before local anchor, got %+v", overlay)
+	if len(overlay) != 1 || overlay[0].ID != snapshot.ID {
+		t.Fatalf("expected one annual balance, got %+v", overlay)
 	}
 
 	refreshed := snapshot
@@ -251,8 +245,8 @@ func TestLocalLeaveBalanceAnchorCoexistsWithTimelessSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(balances) != 2 {
-		t.Fatalf("upstream refresh must not overwrite the local anchor: %+v", balances)
+	if len(balances) != 1 {
+		t.Fatalf("annual refresh must keep one row: %+v", balances)
 	}
 	storedSnapshot, ok, err := store.GetLeaveBalance(ctx, "tenant-1", snapshot.ID)
 	if err != nil || !ok || storedSnapshot.RemainingMinutes != 7*60 {
@@ -260,26 +254,26 @@ func TestLocalLeaveBalanceAnchorCoexistsWithTimelessSnapshot(t *testing.T) {
 	}
 }
 
-func TestLeaveRequestAllocationIsImmutableWithinCycle(t *testing.T) {
+func TestLeaveRecordUpsertKeepsSingleIdentity(t *testing.T) {
 	store := memory.NewStore()
 	ctx := context.Background()
-	allocation := domain.LeaveRequestAllocation{
-		TenantID: "tenant-1", LeaveRequestID: "request-1", LeaveBalanceID: "balance-1",
-		EmployeeID: "employee-1", LeaveTypeID: "leave-type-1", Cycle: 1, ReservedMinutes: 60,
+	now := time.Now().UTC()
+	record := domain.LeaveRecord{
+		ID: "request-1", TenantID: "tenant-1", BalanceID: "balance-1",
+		EmployeeID: "employee-1", LeaveTypeID: "leave-type-1", EntitlementYear: 2026,
+		Source: "nexus", EventDate: now, StartAt: now, EndAt: now.Add(time.Hour),
+		NetMinutes: 60, Status: "pending", ReconciliationStatus: "not_required", UpdatedAt: now,
 	}
-	if err := store.UpsertLeaveRequestAllocation(ctx, allocation); err != nil {
+	if err := store.UpsertLeaveRecord(ctx, record); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.UpsertLeaveRequestAllocation(ctx, allocation); err != nil {
-		t.Fatalf("idempotent allocation replay failed: %v", err)
+	record.Status = "active"
+	if err := store.UpsertLeaveRecord(ctx, record); err != nil {
+		t.Fatal(err)
 	}
-	allocation.ReservedMinutes = 120
-	if appErr, ok := domain.AsAppError(store.UpsertLeaveRequestAllocation(ctx, allocation)); !ok || appErr.Status != 409 {
-		t.Fatalf("expected conflicting allocation rewrite to return 409, got %v", appErr)
-	}
-	items, err := store.ListLeaveRequestAllocationsByRequestCycle(ctx, "tenant-1", "request-1", 1)
-	if err != nil || len(items) != 1 || items[0].ReservedMinutes != 60 {
-		t.Fatalf("immutable allocation changed: items=%+v err=%v", items, err)
+	item, ok, err := store.GetLeaveRecord(ctx, "tenant-1", record.ID)
+	if err != nil || !ok || item.Status != "active" || item.BalanceID != "balance-1" {
+		t.Fatalf("leave record was not updated in place: item=%+v ok=%v err=%v", item, ok, err)
 	}
 }
 

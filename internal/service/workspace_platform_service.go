@@ -20,6 +20,16 @@ func workspaceFormTemplateStatus(enabled, deleted bool) string {
 	return "draft"
 }
 
+func workspaceFormPublishedVersion(template FormTemplate) int {
+	if template.PublishedVersion > 0 {
+		return template.PublishedVersion
+	}
+	if template.Status == "published" {
+		return max(template.CurrentVersion, 1)
+	}
+	return 0
+}
+
 func (c WorkspaceService) Workspace(ctx RequestContext) (PlatformWorkspaceResponse, error) {
 	auditLogs, err := c.workspaceAuditLogsForAggregate(ctx)
 	if err != nil {
@@ -134,8 +144,14 @@ func (c WorkspaceService) CreateWorkspaceFormDesign(ctx RequestContext, input Sa
 			Schema:         workspaceFormDesignSchema(nil, input, enabled, false, ctx.AccountID, now),
 			Status:         workspaceFormTemplateStatus(enabled, false),
 			CurrentVersion: currentVersion,
-			CreatedAt:      createdAt,
-			UpdatedAt:      now,
+			PublishedVersion: func() int {
+				if enabled {
+					return currentVersion
+				}
+				return 0
+			}(),
+			CreatedAt: createdAt,
+			UpdatedAt: now,
 		}
 		if err := workspace.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
 			return err
@@ -212,8 +228,20 @@ func (c WorkspaceService) UpdateWorkspaceFormDesign(ctx RequestContext, id strin
 			if err := validateSystemFormFieldLocks(template.Key, next.FormKind, next.Fields); err != nil {
 				return err
 			}
-			if input.Fields != nil && template.Status == "published" {
-				if err := ValidatePublishedFormFieldIdentity(platformTemplateFields(template.Key, template.Schema), next.Fields); err != nil {
+			if input.Fields != nil && workspaceFormPublishedVersion(template) > 0 {
+				published, ok, err := workspace.store.GetFormTemplateVersionByNumber(
+					goContext(ctx),
+					ctx.TenantID,
+					template.ID,
+					workspaceFormPublishedVersion(template),
+				)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return NotFound("form template version", template.ID)
+				}
+				if err := ValidatePublishedFormFieldIdentity(platformTemplateFields(template.Key, published.Schema), next.Fields); err != nil {
 					return err
 				}
 			}
@@ -225,9 +253,23 @@ func (c WorkspaceService) UpdateWorkspaceFormDesign(ctx RequestContext, id strin
 		now := workspace.Now()
 		template.Name = strings.TrimSpace(next.Name)
 		template.Description = strings.TrimSpace(next.Desc)
+		nextVersion := max(template.CurrentVersion, 1) + 1
+		publishedVersion := workspaceFormPublishedVersion(template)
+		if input.Enabled != nil {
+			if *input.Enabled {
+				publishedVersion = nextVersion
+			} else {
+				publishedVersion = 0
+			}
+		}
 		template.Schema = workspaceFormDesignSchema(template.Schema, next, enabled, false, ctx.AccountID, now)
-		template.Status = workspaceFormTemplateStatus(enabled, false)
-		template.CurrentVersion = max(template.CurrentVersion, 1) + 1
+		if input.Enabled != nil && *input.Enabled {
+			template.Status = "published"
+		} else {
+			template.Status = "draft"
+		}
+		template.CurrentVersion = nextVersion
+		template.PublishedVersion = publishedVersion
 		template.UpdatedAt = now
 		template.DeletedAt = nil
 		if err := workspace.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
@@ -237,6 +279,78 @@ func (c WorkspaceService) UpdateWorkspaceFormDesign(ctx RequestContext, id strin
 			"template_key": template.Key,
 			"name":         template.Name,
 			"enabled":      enabled,
+		})); err != nil {
+			return err
+		}
+		return authzAudit.CommitWith(ctx, tx)
+	}); err != nil {
+		return PlatformFormDesign{}, err
+	}
+	return c.formDesign(ctx)
+}
+
+// PublishWorkspaceFormDesign 將目前草稿版本切換為新的線上發布版本。
+func (c WorkspaceService) PublishWorkspaceFormDesign(ctx RequestContext, id string, input PublishWorkspaceFormDesignInput) (PlatformFormDesign, error) {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return PlatformFormDesign{}, BadRequest("id is required")
+	}
+	_, decision, authzAudit, err := c.Authorize(ctx,
+		CheckRequest{ApplicationCode: AppWorkflow, ResourceType: ResourceType("form_template"), ResourceID: id, Action: ActionUpdate},
+		AuditTarget{Event: "platform.workspace.form_design.publish", Resource: "form_template", Target: id},
+	)
+	if err != nil {
+		return PlatformFormDesign{}, err
+	}
+	if err := c.withTenantTransaction(ctx, func(tx *Service) error {
+		workspace := tx.Workspace()
+		template, err := workspace.currentWorkspaceFormTemplate(ctx, id)
+		if err != nil {
+			return err
+		}
+		if platformTemplateDeleted(template.Schema) || template.Status == "archived" {
+			return NotFound("form template", id)
+		}
+		currentVersion := max(template.CurrentVersion, 1)
+		if input.Version <= 0 {
+			return BadRequest("version is required")
+		}
+		if input.Version != currentVersion {
+			return Conflict("form template changed before publish").WithReasonCode("workflow_form_template_version_changed")
+		}
+		current, ok, err := workspace.store.GetFormTemplateVersionByNumber(
+			goContext(ctx),
+			ctx.TenantID,
+			template.ID,
+			currentVersion,
+		)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return NotFound("form template version", template.ID)
+		}
+		if err := validateWorkspaceFormDesignInput(
+			platformTemplateFields(template.Key, current.Schema),
+			platformTemplateStages(current.Schema),
+		); err != nil {
+			return err
+		}
+		now := workspace.Now()
+		next := workspaceFormDesignInputFromTemplate(template)
+		enabled := true
+		next.Enabled = &enabled
+		template.Schema = workspaceFormDesignSchema(template.Schema, next, true, false, ctx.AccountID, now)
+		template.Status = "published"
+		template.PublishedVersion = currentVersion
+		template.UpdatedAt = now
+		if err := workspace.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
+			return err
+		}
+		if err := tx.audit(ctx, "platform.workspace.form_design.publish", "form_template", template.ID, string(SeverityMedium), auditDecisionDetails(ctx, decision, map[string]any{
+			"template_key":      template.Key,
+			"name":              template.Name,
+			"published_version": currentVersion,
 		})); err != nil {
 			return err
 		}
@@ -276,6 +390,7 @@ func (c WorkspaceService) DeleteWorkspaceFormDesign(ctx RequestContext, id strin
 		template.Schema = workspaceFormDesignSchema(template.Schema, next, false, true, ctx.AccountID, now)
 		template.Status = workspaceFormTemplateStatus(false, true)
 		template.CurrentVersion = max(template.CurrentVersion, 1) + 1
+		template.PublishedVersion = 0
 		template.UpdatedAt = now
 		template.DeletedAt = &now
 		if err := workspace.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
@@ -320,19 +435,21 @@ func (c WorkspaceService) formDesign(ctx RequestContext) (PlatformFormDesign, er
 			updatedBy = firstNonEmpty(accountNames[updatedByAccountID], updatedByAccountID)
 		}
 		forms = append(forms, PlatformFormDesignForm{
-			ID:             template.Key,
-			Icon:           platformTemplateIcon(template),
-			Name:           template.Name,
-			Category:       platformTemplateCategory(template),
-			Desc:           platformTemplateDesc(template),
-			Flow:           platformTemplateFlow(template.Schema),
-			Enabled:        platformTemplateEnabled(template.Schema),
-			AddedThisMonth: sameYearMonth(template.CreatedAt, c.Now()),
-			UpdatedAt:      platformTemplateUpdatedAt(template.Schema, template.CreatedAt),
-			UpdatedBy:      updatedBy,
-			FormKind:       firstNonEmpty(platformTemplateFormKind(template.Schema), defaultFormKindForTemplateKey(template.Key)),
-			Fields:         platformTemplateFields(template.Key, template.Schema),
-			Stages:         platformTemplateStages(template.Schema),
+			ID:               template.Key,
+			Icon:             platformTemplateIcon(template),
+			Name:             template.Name,
+			Category:         platformTemplateCategory(template),
+			Desc:             platformTemplateDesc(template),
+			Flow:             platformTemplateFlow(template.Schema),
+			Enabled:          template.Status != "archived" && workspaceFormPublishedVersion(template) > 0,
+			AddedThisMonth:   sameYearMonth(template.CreatedAt, c.Now()),
+			UpdatedAt:        platformTemplateUpdatedAt(template.Schema, template.CreatedAt),
+			UpdatedBy:        updatedBy,
+			FormKind:         firstNonEmpty(platformTemplateFormKind(template.Schema), defaultFormKindForTemplateKey(template.Key)),
+			CurrentVersion:   max(template.CurrentVersion, 1),
+			PublishedVersion: workspaceFormPublishedVersion(template),
+			Fields:           platformTemplateFields(template.Key, template.Schema),
+			Stages:           platformTemplateStages(template.Schema),
 		})
 	}
 	if len(forms) == 0 && !hasTemplates {
@@ -363,12 +480,12 @@ func (c WorkspaceService) currentWorkspaceFormTemplate(ctx RequestContext, id st
 	if id == "" {
 		return FormTemplate{}, BadRequest("id is required")
 	}
-	if template, ok, err := c.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, id); err != nil {
+	if template, ok, err := c.store.GetFormTemplateByKeyForUpdate(goContext(ctx), ctx.TenantID, id); err != nil {
 		return FormTemplate{}, err
 	} else if ok {
 		return template, nil
 	}
-	if template, ok, err := c.store.GetFormTemplate(goContext(ctx), ctx.TenantID, id); err != nil {
+	if template, ok, err := c.store.GetFormTemplateForUpdate(goContext(ctx), ctx.TenantID, id); err != nil {
 		return FormTemplate{}, err
 	} else if ok {
 		return template, nil

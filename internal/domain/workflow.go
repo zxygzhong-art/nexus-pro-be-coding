@@ -4,17 +4,18 @@ import "time"
 
 // FormTemplate 定義表單範本的資料結構。
 type FormTemplate struct {
-	ID             string         `json:"id"`
-	TenantID       string         `json:"tenant_id"`
-	Key            string         `json:"key"`
-	Name           string         `json:"name"`
-	Description    string         `json:"description,omitempty"`
-	Schema         map[string]any `json:"schema,omitempty"`
-	Status         string         `json:"status"`
-	CurrentVersion int            `json:"current_version"`
-	CreatedAt      time.Time      `json:"created_at"`
-	UpdatedAt      time.Time      `json:"updated_at"`
-	DeletedAt      *time.Time     `json:"deleted_at,omitempty"`
+	ID               string         `json:"id"`
+	TenantID         string         `json:"tenant_id"`
+	Key              string         `json:"key"`
+	Name             string         `json:"name"`
+	Description      string         `json:"description,omitempty"`
+	Schema           map[string]any `json:"schema,omitempty"`
+	Status           string         `json:"status"`
+	CurrentVersion   int            `json:"current_version"`
+	PublishedVersion int            `json:"published_version"`
+	CreatedAt        time.Time      `json:"created_at"`
+	UpdatedAt        time.Time      `json:"updated_at"`
+	DeletedAt        *time.Time     `json:"deleted_at,omitempty"`
 }
 
 // FormTemplateVersion 保存不可變的表單資料契約快照。

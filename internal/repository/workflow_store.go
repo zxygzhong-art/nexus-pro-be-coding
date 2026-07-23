@@ -16,7 +16,9 @@ type WorkflowStore interface {
 
 	UpsertFormTemplate(context.Context, domain.FormTemplate) error
 	GetFormTemplate(ctx context.Context, tenantID, id string) (domain.FormTemplate, bool, error)
+	GetFormTemplateForUpdate(ctx context.Context, tenantID, id string) (domain.FormTemplate, bool, error)
 	GetFormTemplateByKey(ctx context.Context, tenantID, key string) (domain.FormTemplate, bool, error)
+	GetFormTemplateByKeyForUpdate(ctx context.Context, tenantID, key string) (domain.FormTemplate, bool, error)
 	ListFormTemplates(ctx context.Context, tenantID string) ([]domain.FormTemplate, error)
 	InsertFormTemplateVersion(context.Context, domain.FormTemplateVersion) error
 	GetFormTemplateVersion(ctx context.Context, tenantID, id string) (domain.FormTemplateVersion, bool, error)

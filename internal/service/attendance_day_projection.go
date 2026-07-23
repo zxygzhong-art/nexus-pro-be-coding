@@ -57,7 +57,7 @@ func (c AttendanceService) loadEffectiveAttendanceLeaves(ctx RequestContext, emp
 	// leave interval that starts after midnight but belongs to the prior work date.
 	queryFrom := from.AddDate(0, 0, -1)
 	queryToExclusive := toExclusive.AddDate(0, 0, 1)
-	cases, err := c.store.ListConfirmedActiveLeaveCasesByQuery(goContext(ctx), ctx.TenantID, employeeIDs, queryFrom, queryToExclusive)
+	records, err := c.store.ListActiveLeaveRecordsByQuery(goContext(ctx), ctx.TenantID, employeeIDs, queryFrom, queryToExclusive)
 	if err != nil {
 		return nil, err
 	}
@@ -70,7 +70,7 @@ func (c AttendanceService) loadEffectiveAttendanceLeaves(ctx RequestContext, emp
 	if err != nil {
 		return nil, err
 	}
-	return attendanceEffectiveLeaves(cases, pending), nil
+	return attendanceEffectiveLeaves(records, pending), nil
 }
 
 // attendanceProjectionDateRange converts inclusive work-date filters to the
@@ -346,8 +346,8 @@ func ProjectAttendanceDay(records []AttendanceClockRecord, leaves []LeaveRequest
 // ProjectAttendanceDayWithEffectiveLeave is the canonical projection entrypoint:
 // confirmed active cases supply approved time and pending requests supply only
 // non-credited pending time.
-func ProjectAttendanceDayWithEffectiveLeave(records []AttendanceClockRecord, approvedCases []LeaveCase, pendingRequests []LeaveRequest, workDate string, workTime AttendancePolicyWorkTime, asOf time.Time) domain.AttendanceDayProjection {
-	leaves := attendanceEffectiveLeaves(approvedCases, pendingRequests)
+func ProjectAttendanceDayWithEffectiveLeave(records []AttendanceClockRecord, approvedRecords []LeaveRecord, pendingRequests []LeaveRequest, workDate string, workTime AttendancePolicyWorkTime, asOf time.Time) domain.AttendanceDayProjection {
+	leaves := attendanceEffectiveLeaves(approvedRecords, pendingRequests)
 	return projectAttendanceDayWithEffectiveLeaves(records, leaves, workDate, workTime, asOf, attendanceOpenClockDeadlineForPolicy(workDate, workTime))
 }
 
@@ -585,20 +585,20 @@ func attendanceEffectiveLeaveIntervals(leaves []attendanceEffectiveLeave, schedu
 // attendanceEffectiveLeaves enforces the canonical source contract at the
 // projection boundary. Confirmation is enforced by the repository query; the
 // status checks here protect pure callers and tests from stale rows.
-func attendanceEffectiveLeaves(approvedCases []LeaveCase, pendingRequests []LeaveRequest) []attendanceEffectiveLeave {
-	out := make([]attendanceEffectiveLeave, 0, len(approvedCases)+len(pendingRequests))
-	for _, leaveCase := range approvedCases {
-		if !strings.EqualFold(strings.TrimSpace(leaveCase.Status), "active") || !leaveCase.EndAt.After(leaveCase.StartAt) {
+func attendanceEffectiveLeaves(approvedRecords []LeaveRecord, pendingRequests []LeaveRequest) []attendanceEffectiveLeave {
+	out := make([]attendanceEffectiveLeave, 0, len(approvedRecords)+len(pendingRequests))
+	for _, leaveRecord := range approvedRecords {
+		if !strings.EqualFold(strings.TrimSpace(leaveRecord.Status), "active") || !leaveRecord.EndAt.After(leaveRecord.StartAt) {
 			continue
 		}
 		out = append(out, attendanceEffectiveLeave{
-			EmployeeID:   leaveCase.EmployeeID,
-			LeaveTypeID:  leaveCase.LeaveTypeID,
-			StartAt:      leaveCase.StartAt,
-			EndAt:        leaveCase.EndAt,
-			NetMinutes:   leaveCase.NetMinutes,
+			EmployeeID:   leaveRecord.EmployeeID,
+			LeaveTypeID:  leaveRecord.LeaveTypeID,
+			StartAt:      leaveRecord.StartAt,
+			EndAt:        leaveRecord.EndAt,
+			NetMinutes:   leaveRecord.NetMinutes,
 			FactStatus:   attendanceLeaveFactApproved,
-			SourceFactID: leaveCase.ID,
+			SourceFactID: leaveRecord.ID,
 		})
 	}
 	for _, request := range pendingRequests {

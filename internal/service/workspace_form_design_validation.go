@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"nexus-pro-api/internal/domain"
 	"nexus-pro-api/internal/utils"
@@ -538,6 +539,9 @@ func (c WorkflowService) normalizeLeaveSubmissionHours(ctx RequestContext, templ
 		return nil, ValidationFailed("leave time validation failed", []domain.FieldError{{
 			Field: "end_at", Code: "invalid_range", Message: "end time must be after start time",
 		}})
+	}
+	if startAt.In(attendanceClockLocation).Year() != endAt.Add(-time.Nanosecond).In(attendanceClockLocation).Year() {
+		return nil, BadRequest("leave request cannot cross calendar years; split it into separate requests")
 	}
 
 	policy, err := c.Service.Attendance().loadAttendancePolicyResponse(ctx)

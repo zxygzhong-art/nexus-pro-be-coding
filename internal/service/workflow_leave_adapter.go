@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -92,6 +93,10 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 	if !endAt.After(startAt) {
 		return LeaveRequest{}, BadRequest("end_at must be after start_at")
 	}
+	entitlementYear := startAt.In(attendanceClockLocation).Year()
+	if entitlementYear != endAt.Add(-time.Nanosecond).In(attendanceClockLocation).Year() {
+		return LeaveRequest{}, BadRequest("leave request cannot cross calendar years; split it into separate requests")
+	}
 
 	evaluation, err := c.EvaluateLeaveRequestRules(ctx, employeeID, leaveTypeRaw, startAt, endAt, 0)
 	if err != nil {
@@ -111,16 +116,30 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 		createdAt = existing.CreatedAt
 	}
 	balanceCycle := nextLeaveRequestBalanceCycle(existing, resubmitting)
-	allocations := []LeaveRequestAllocation{}
+	balance := LeaveBalance{}
+	reserveBalance := false
 	if evaluation.BalanceRequired {
 		var fallbackReason string
-		allocations, evaluation.AvailableMinutes, fallbackReason, err = c.leaveBalanceAllocationsForOverlay(ctx, employeeID, evaluation.LeaveTypeID, requestedMinutes, startAt)
+		balance, evaluation.AvailableMinutes, fallbackReason, err = c.leaveBalanceForOverlay(ctx, employeeID, evaluation.LeaveTypeID, requestedMinutes, startAt)
 		if err != nil {
 			return LeaveRequest{}, err
 		}
 		if fallbackReason != "" {
 			evaluation.BalanceInitialized = fallbackReason != leaveEvaluationBalanceMissing
 			evaluation = applyLeaveBalanceFallback(evaluation, fallbackReason)
+		} else {
+			reserveBalance = true
+		}
+	}
+	if balance.ID == "" {
+		now := c.Now()
+		balance, err = c.store.EnsureLocalLeaveBalanceAnchor(goContext(ctx), LeaveBalance{
+			ID:       ehrmsStableID("lb-nexus", ctx.TenantID, employeeID, evaluation.LeaveTypeID, fmt.Sprint(entitlementYear)),
+			TenantID: ctx.TenantID, EmployeeID: employeeID, LeaveType: leaveTypeCode,
+			LeaveTypeID: evaluation.LeaveTypeID, EntitlementYear: entitlementYear, Source: "nexus", UpdatedAt: now,
+		})
+		if err != nil {
+			return LeaveRequest{}, err
 		}
 	}
 	evaluationSnapshot := leaveEvaluationSnapshotMap(evaluation)
@@ -148,21 +167,13 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 	if err := c.store.UpsertLeaveRequest(goContext(ctx), req); err != nil {
 		return LeaveRequest{}, err
 	}
-	for index := range allocations {
-		allocation := allocations[index]
-		allocation.LeaveRequestID = req.ID
-		allocation.Cycle = balanceCycle
-		allocation.CreatedAt = c.Now()
-		if err := c.store.UpsertLeaveRequestAllocation(goContext(ctx), allocation); err != nil {
-			return LeaveRequest{}, err
-		}
-	}
-	allocations, err = c.store.ListLeaveRequestAllocationsByRequestCycle(goContext(ctx), ctx.TenantID, req.ID, balanceCycle)
+	var leaveRecord LeaveRecord
+	leaveRecord, err = c.ensureNexusLeaveRecord(ctx, req, balance, "pending")
 	if err != nil {
 		return LeaveRequest{}, err
 	}
-	for _, allocation := range allocations {
-		if err := c.appendLeaveBalanceEntry(ctx, req, allocation, "", leaveBalanceEntryReserve, -allocation.ReservedMinutes, balanceCycle); err != nil {
+	if reserveBalance {
+		if err := c.appendLeaveBalanceEntry(ctx, req, leaveRecord, leaveBalanceEntryReserve, -requestedMinutes, balanceCycle); err != nil {
 			return LeaveRequest{}, err
 		}
 	}
@@ -186,12 +197,12 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 	if err := c.store.UpsertFormInstance(goContext(ctx), instance); err != nil {
 		return LeaveRequest{}, err
 	}
-	if len(allocations) > 0 {
+	if leaveRecord.ID != "" {
 		if err := c.audit(ctx, "attendance.leave_balance.reserve", "leave_balance", employeeID+"|"+leaveTypeCode, "medium", map[string]any{
 			"employee_id":      employeeID,
 			"leave_type":       leaveTypeCode,
 			"reserved_minutes": requestedMinutes,
-			"bucket_count":     len(allocations),
+			"balance_id":       balance.ID,
 		}); err != nil {
 			return LeaveRequest{}, err
 		}

@@ -443,12 +443,20 @@ func (c *Service) ToolListPublishedFormTemplates(ctx domain.RequestContext, _ ma
 	}
 	items := make([]map[string]any, 0, len(templates))
 	for _, template := range templates {
-		if !agentTemplatePublished(template) || ValidateWorkflowTemplateSubmittable(template) != nil {
+		if !agentTemplatePublished(template) {
+			continue
+		}
+		version, versionErr := c.Workflow().currentFormTemplateVersion(ctx, template)
+		if versionErr != nil {
+			continue
+		}
+		publishedTemplate := FormTemplateAtVersion(template, version)
+		if ValidateWorkflowTemplateSubmittable(publishedTemplate) != nil {
 			continue
 		}
 		items = append(items, map[string]any{
 			"id": template.ID, "key": template.Key, "name": template.Name,
-			"description": template.Description, "current_version": template.CurrentVersion,
+			"description": template.Description, "current_version": version.Version,
 		})
 	}
 	return map[string]any{"items": items, "total": len(items)}, nil
@@ -723,10 +731,15 @@ func (c *Service) agentPublishedFormTemplate(ctx domain.RequestContext, keyOrID 
 		if !agentTemplatePublished(template) {
 			return domain.FormTemplate{}, BadRequest("form template is not published")
 		}
-		if err := ValidateWorkflowTemplateSubmittable(template); err != nil {
+		version, err := c.Workflow().currentFormTemplateVersion(ctx, template)
+		if err != nil {
 			return domain.FormTemplate{}, err
 		}
-		return template, nil
+		publishedTemplate := FormTemplateAtVersion(template, version)
+		if err := ValidateWorkflowTemplateSubmittable(publishedTemplate); err != nil {
+			return domain.FormTemplate{}, err
+		}
+		return publishedTemplate, nil
 	}
 	return domain.FormTemplate{}, NotFound("form template", keyOrID)
 }
@@ -734,7 +747,7 @@ func (c *Service) agentPublishedFormTemplate(ctx domain.RequestContext, keyOrID 
 // agentTemplatePublished 相容舊資料空狀態，並拒絕明確未發佈的模板。
 func agentTemplatePublished(template domain.FormTemplate) bool {
 	status := strings.TrimSpace(strings.ToLower(template.Status))
-	return status == "" || status == "published"
+	return status != "archived" && workspaceFormPublishedVersion(template) > 0
 }
 
 // agentAccessibleFormFields 排除佈局欄位與 schema 明確禁止 Agent 存取的欄位。

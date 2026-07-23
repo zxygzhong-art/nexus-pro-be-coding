@@ -273,7 +273,6 @@ func copyRowErrors(src []RowError) []RowError {
 
 // copyLeaveBalance 複製請假 balance。
 func copyLeaveBalance(v LeaveBalance) LeaveBalance {
-	v.RawPayload = utils.CopyStringMap(v.RawPayload)
 	if v.LastSyncedAt != nil {
 		t := *v.LastSyncedAt
 		v.LastSyncedAt = &t
@@ -302,12 +301,14 @@ func copyLeaveRequest(v LeaveRequest) LeaveRequest {
 }
 
 func copyLeaveBalanceEntry(v LeaveBalanceEntry) LeaveBalanceEntry {
-	v.Metadata = utils.CopyStringMap(v.Metadata)
 	return v
 }
 
-func copyExternalLeaveRecord(v ExternalLeaveRecord) ExternalLeaveRecord {
-	v.RawPayload = utils.CopyStringMap(v.RawPayload)
+func copyLeaveRecord(v LeaveRecord) LeaveRecord {
+	if v.LastSeenAt != nil {
+		t := *v.LastSeenAt
+		v.LastSeenAt = &t
+	}
 	if v.DeletedAt != nil {
 		t := *v.DeletedAt
 		v.DeletedAt = &t

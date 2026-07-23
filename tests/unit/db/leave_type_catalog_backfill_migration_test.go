@@ -28,9 +28,7 @@ func TestLeaveTypeCatalogSchemaModelsSourceHierarchyAndCodeIdentity(t *testing.T
 	}
 	for _, table := range []string{
 		"leave_balances",
-		"leave_request_allocations",
-		"leave_cases",
-		"leave_external_records",
+		"leave_records",
 		"leave_balance_entries",
 	} {
 		if !strings.Contains(schema, "CREATE TABLE "+table+" (") {

@@ -10,9 +10,12 @@ import (
 	"nexus-pro-api/internal/domain"
 )
 
-// currentFormTemplateVersion 取得模板目前指向的不可變版本。
+// currentFormTemplateVersion 取得模板目前線上發布的不可變版本。
 func (c WorkflowService) currentFormTemplateVersion(ctx RequestContext, template domain.FormTemplate) (domain.FormTemplateVersion, error) {
-	versionNumber := max(template.CurrentVersion, 1)
+	versionNumber := workspaceFormPublishedVersion(template)
+	if versionNumber <= 0 {
+		return domain.FormTemplateVersion{}, BadRequest("form template is not published")
+	}
 	version, ok, err := c.store.GetFormTemplateVersionByNumber(goContext(ctx), ctx.TenantID, template.ID, versionNumber)
 	if err != nil {
 		return domain.FormTemplateVersion{}, err

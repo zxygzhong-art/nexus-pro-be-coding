@@ -859,16 +859,11 @@ func TestWorkspaceAttendanceKeepsInactiveHistoricalLeaveType(t *testing.T) {
 		t.Fatal(err)
 	}
 	location := time.FixedZone("UTC+8", 8*60*60)
-	if err := store.UpsertLeaveCase(context.Background(), domain.LeaveCase{
+	if err := store.UpsertLeaveRecord(context.Background(), domain.LeaveRecord{
 		ID: "case-inactive-annual", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveTypeID: annualID,
+		BalanceID: "balance-inactive-annual", EntitlementYear: 2026, Source: "ehrms", EventDate: now,
 		StartAt: time.Date(2026, 6, 9, 9, 0, 0, 0, location), EndAt: time.Date(2026, 6, 9, 17, 0, 0, 0, location),
-		NetMinutes: 420, Status: "active", Origin: "ehrms", CreatedAt: now, UpdatedAt: now,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.UpsertLeaveCaseSource(context.Background(), domain.LeaveCaseSource{
-		TenantID: "tenant-1", LeaveCaseID: "case-inactive-annual", ExternalLeaveRecordID: "external-annual",
-		MatchMethod: "exact", MatchStatus: "confirmed", CreatedAt: now,
+		NetMinutes: 420, Status: "active", ReconciliationStatus: "unmatched", UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -891,12 +886,6 @@ func TestWorkspaceAttendanceUsesDailyLeaveFactsInsteadOfLeaveRanges(t *testing.T
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKM229", Name: "測試員工", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
 	local := time.FixedZone("UTC+8", 8*60*60)
 	insertWorkspaceConfirmedLeaveCase(t, store, "case-cross-weekend", "emp-1", "annual", time.Date(2026, 7, 9, 9, 0, 0, 0, local), time.Date(2026, 7, 14, 17, 0, 0, 0, local), 1680)
-	if err := store.UpsertLeaveCaseSource(context.Background(), domain.LeaveCaseSource{
-		TenantID: "tenant-1", LeaveCaseID: "case-cross-weekend", ExternalLeaveRecordID: "external-cross-weekend",
-		MatchMethod: "exact", MatchStatus: "confirmed", CreatedAt: now,
-	}); err != nil {
-		t.Fatal(err)
-	}
 	if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{
 		TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-07-09",
 		Source: "ehrms", ExternalRef: "IKM229:2026-07-09", CreatedAt: now, UpdatedAt: now,
@@ -1500,16 +1489,11 @@ func insertWorkspaceConfirmedLeaveCase(t *testing.T, store *memory.Store, id, em
 		t.Fatalf("leave type %q missing from fixture", leaveTypeCode)
 	}
 	createdAt := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
-	if err := store.UpsertLeaveCase(context.Background(), domain.LeaveCase{
+	if err := store.UpsertLeaveRecord(context.Background(), domain.LeaveRecord{
 		ID: id, TenantID: "tenant-1", EmployeeID: employeeID, LeaveTypeID: leaveTypeID,
-		StartAt: startAt, EndAt: endAt, NetMinutes: netMinutes, Status: "active", Origin: "nexus",
-		CreatedAt: createdAt, UpdatedAt: createdAt,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.UpsertLeaveCaseSource(context.Background(), domain.LeaveCaseSource{
-		TenantID: "tenant-1", LeaveCaseID: id, LeaveRequestID: "request-" + id,
-		MatchMethod: "exact", MatchStatus: "confirmed", CreatedAt: createdAt,
+		BalanceID: "balance-" + id, EntitlementYear: startAt.Year(), Source: "nexus", EventDate: createdAt,
+		StartAt: startAt, EndAt: endAt, NetMinutes: netMinutes, Status: "active",
+		ReconciliationStatus: "not_required", UpdatedAt: createdAt,
 	}); err != nil {
 		t.Fatal(err)
 	}

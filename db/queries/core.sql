@@ -732,42 +732,30 @@ LIMIT 1;
 
 -- name: UpsertLeaveBalance :exec
 INSERT INTO leave_balances (
-    id, tenant_id, employee_id, leave_type_id, remaining_minutes,
-    period_start, period_end, granted_minutes, used_minutes, source, external_leave_code,
-    external_category_code, entitlement_year, carry_in_minutes, carry_expire, raw_payload,
-    last_synced_at, updated_at
+    id, tenant_id, employee_id, leave_type_id, entitlement_year,
+    granted_minutes, used_minutes, remaining_minutes, source, last_synced_at, updated_at
 ) VALUES (
-    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(leave_type_id), sqlc.arg(remaining_minutes),
-    sqlc.narg(period_start), sqlc.narg(period_end), sqlc.arg(granted_minutes), sqlc.arg(used_minutes), sqlc.arg(source), sqlc.arg(external_leave_code),
-    sqlc.arg(external_category_code), sqlc.narg(entitlement_year), sqlc.arg(carry_in_minutes), sqlc.narg(carry_expire), sqlc.arg(raw_payload)::jsonb,
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(leave_type_id), sqlc.arg(entitlement_year),
+    sqlc.arg(granted_minutes), sqlc.arg(used_minutes), sqlc.arg(remaining_minutes), sqlc.arg(source),
     sqlc.narg(last_synced_at), sqlc.arg(updated_at)
 )
-ON CONFLICT (id) DO UPDATE SET
+ON CONFLICT (tenant_id, employee_id, leave_type_id, entitlement_year) DO UPDATE SET
     remaining_minutes = EXCLUDED.remaining_minutes,
     granted_minutes = EXCLUDED.granted_minutes,
     used_minutes = EXCLUDED.used_minutes,
     source = EXCLUDED.source,
-    external_leave_code = EXCLUDED.external_leave_code,
-    external_category_code = EXCLUDED.external_category_code,
-    entitlement_year = EXCLUDED.entitlement_year,
-    carry_in_minutes = EXCLUDED.carry_in_minutes,
-    carry_expire = EXCLUDED.carry_expire,
-    raw_payload = EXCLUDED.raw_payload,
     last_synced_at = EXCLUDED.last_synced_at,
     updated_at = EXCLUDED.updated_at;
 
 -- name: EnsureLocalLeaveBalanceAnchor :one
 INSERT INTO leave_balances (
-    id, tenant_id, employee_id, leave_type_id, remaining_minutes,
-    period_start, period_end, granted_minutes, used_minutes, source,
-    carry_in_minutes, raw_payload, updated_at
+    id, tenant_id, employee_id, leave_type_id, entitlement_year,
+    granted_minutes, used_minutes, remaining_minutes, source, updated_at
 ) VALUES (
-    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(leave_type_id), 0,
-    NULL, NULL, 0, 0, 'local_anchor',
-    0, '{}'::jsonb, sqlc.arg(updated_at)
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(leave_type_id), sqlc.arg(entitlement_year),
+    0, 0, 0, 'nexus', sqlc.arg(updated_at)
 )
-ON CONFLICT (tenant_id, employee_id, leave_type_id)
-WHERE source = 'local_anchor' DO UPDATE SET
+ON CONFLICT (tenant_id, employee_id, leave_type_id, entitlement_year) DO UPDATE SET
     id = leave_balances.id
 RETURNING *;
 
@@ -812,36 +800,31 @@ WHERE tenant_id = sqlc.arg(tenant_id)
 
 -- name: AppendLeaveBalanceEntry :one
 INSERT INTO leave_balance_entries (
-    id, tenant_id, employee_id, leave_type_id, balance_id, allocation_id,
-    leave_request_id, leave_case_id, overtime_request_id,
-    entry_type, amount_minutes, idempotency_key, metadata,
-    occurred_at, created_at
+    id, tenant_id, balance_id, leave_record_id, employee_id, leave_type_id,
+    entitlement_year, entry_type, amount_minutes, idempotency_key, occurred_at, created_at
 ) SELECT
-    sqlc.arg(id), balance.tenant_id, balance.employee_id, balance.leave_type_id, balance.id,
-    allocation.id, sqlc.narg(leave_request_id), sqlc.narg(leave_case_id), sqlc.narg(overtime_request_id),
-    sqlc.arg(entry_type), sqlc.arg(amount_minutes), sqlc.arg(idempotency_key), sqlc.arg(metadata)::jsonb,
+    sqlc.arg(id), balance.tenant_id, balance.id, record.id, balance.employee_id, balance.leave_type_id,
+    balance.entitlement_year, sqlc.arg(entry_type), sqlc.arg(amount_minutes), sqlc.arg(idempotency_key),
     sqlc.arg(occurred_at), sqlc.arg(created_at)
 FROM leave_balances balance
-LEFT JOIN leave_request_allocations allocation
- ON allocation.tenant_id = balance.tenant_id
- AND allocation.leave_balance_id = balance.id
- AND allocation.leave_request_id = sqlc.narg(leave_request_id)
- AND allocation.id = sqlc.narg(allocation_id)::bigint
+LEFT JOIN leave_records record
+  ON record.tenant_id = balance.tenant_id
+ AND record.id = sqlc.narg(leave_record_id)
+ AND record.balance_id = balance.id
 WHERE balance.tenant_id = sqlc.arg(tenant_id)
   AND balance.id = sqlc.arg(balance_id)
-  AND (sqlc.narg(leave_request_id)::text IS NULL OR allocation.id IS NOT NULL)
+  AND (sqlc.narg(leave_record_id)::text IS NULL OR record.id IS NOT NULL)
 ON CONFLICT (tenant_id, idempotency_key) DO NOTHING
 RETURNING *;
 
 -- name: AppendStandaloneLeaveBalanceEntry :one
 INSERT INTO leave_balance_entries (
-    id, tenant_id, employee_id, leave_type_id, balance_id,
-    leave_case_id, overtime_request_id, entry_type, amount_minutes,
-    idempotency_key, metadata, occurred_at, created_at
+    id, tenant_id, balance_id, employee_id, leave_type_id, entitlement_year,
+    entry_type, amount_minutes, idempotency_key, occurred_at, created_at
 ) SELECT
-    sqlc.arg(id), balance.tenant_id, balance.employee_id, balance.leave_type_id, balance.id,
-    sqlc.narg(leave_case_id), sqlc.narg(overtime_request_id), sqlc.arg(entry_type), sqlc.arg(amount_minutes),
-    sqlc.arg(idempotency_key), sqlc.arg(metadata)::jsonb, sqlc.arg(occurred_at), sqlc.arg(created_at)
+    sqlc.arg(id), balance.tenant_id, balance.id, balance.employee_id, balance.leave_type_id, balance.entitlement_year,
+    sqlc.arg(entry_type), sqlc.arg(amount_minutes), sqlc.arg(idempotency_key),
+    sqlc.arg(occurred_at), sqlc.arg(created_at)
 FROM leave_balances balance
 WHERE balance.tenant_id = sqlc.arg(tenant_id)
   AND balance.id = sqlc.arg(balance_id)
@@ -876,10 +859,9 @@ JOIN leave_types leave_type
 WHERE balance.tenant_id = sqlc.arg(tenant_id)
   AND balance.employee_id = sqlc.arg(employee_id)
   AND balance.leave_type_id = sqlc.arg(leave_type_id)
-  AND (balance.period_start IS NULL OR balance.period_start <= sqlc.arg(as_of)::date)
-  AND (balance.period_end IS NULL OR balance.period_end >= sqlc.arg(as_of)::date)
-ORDER BY (balance.source = 'local_anchor') ASC,
-         balance.period_end ASC NULLS LAST, balance.period_start ASC NULLS FIRST
+  AND balance.entitlement_year = EXTRACT(
+      YEAR FROM sqlc.arg(as_of)::timestamptz AT TIME ZONE 'Asia/Shanghai'
+  )::integer
 LIMIT 1
 FOR UPDATE OF balance;
 
@@ -892,10 +874,10 @@ JOIN leave_types leave_type
 WHERE balance.tenant_id = sqlc.arg(tenant_id)
   AND balance.employee_id = sqlc.arg(employee_id)
   AND balance.leave_type_id = sqlc.arg(leave_type_id)
-  AND (balance.period_start IS NULL OR balance.period_start <= sqlc.arg(as_of)::date)
-  AND (balance.period_end IS NULL OR balance.period_end >= sqlc.arg(as_of)::date)
-ORDER BY (balance.source = 'local_anchor') ASC,
-         balance.period_end ASC NULLS LAST, balance.period_start ASC NULLS FIRST, balance.id
+  AND balance.entitlement_year = EXTRACT(
+      YEAR FROM sqlc.arg(as_of)::timestamptz AT TIME ZONE 'Asia/Shanghai'
+  )::integer
+ORDER BY balance.id
 FOR UPDATE OF balance;
 
 -- name: ListLeaveBalances :many
@@ -956,10 +938,10 @@ ORDER BY updated_at DESC;
 
 -- name: UpsertFormTemplate :one
 INSERT INTO form_templates (
-    id, tenant_id, key, name, description, schema, status, current_version, created_at, updated_at, deleted_at
+    id, tenant_id, key, name, description, schema, status, current_version, published_version, created_at, updated_at, deleted_at
 ) VALUES (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(key), sqlc.arg(name), sqlc.arg(description), sqlc.arg(schema)::jsonb,
-    sqlc.arg(status), sqlc.arg(current_version), sqlc.arg(created_at), sqlc.arg(updated_at), sqlc.narg(deleted_at)
+    sqlc.arg(status), sqlc.arg(current_version), sqlc.arg(published_version), sqlc.arg(created_at), sqlc.arg(updated_at), sqlc.narg(deleted_at)
 )
 ON CONFLICT (id) DO UPDATE SET
     key = EXCLUDED.key,
@@ -968,6 +950,7 @@ ON CONFLICT (id) DO UPDATE SET
     schema = EXCLUDED.schema,
     status = EXCLUDED.status,
     current_version = EXCLUDED.current_version,
+    published_version = EXCLUDED.published_version,
     updated_at = EXCLUDED.updated_at,
     deleted_at = EXCLUDED.deleted_at
 WHERE form_templates.tenant_id = EXCLUDED.tenant_id
@@ -977,9 +960,19 @@ RETURNING *;
 SELECT * FROM form_templates
 WHERE tenant_id = $1 AND id = $2;
 
+-- name: GetFormTemplateForUpdate :one
+SELECT * FROM form_templates
+WHERE tenant_id = $1 AND id = $2
+FOR UPDATE;
+
 -- name: GetFormTemplateByKey :one
 SELECT * FROM form_templates
 WHERE tenant_id = $1 AND key = $2;
+
+-- name: GetFormTemplateByKeyForUpdate :one
+SELECT * FROM form_templates
+WHERE tenant_id = $1 AND key = $2
+FOR UPDATE;
 
 -- name: ListFormTemplates :many
 SELECT * FROM form_templates
@@ -993,7 +986,9 @@ INSERT INTO form_template_versions (
     sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(template_id), sqlc.arg(version), sqlc.arg(schema)::jsonb,
     sqlc.arg(status), sqlc.arg(created_at), sqlc.narg(published_at)
 )
-ON CONFLICT (tenant_id, template_id, version) DO NOTHING;
+ON CONFLICT (tenant_id, template_id, version) DO UPDATE SET
+    status = EXCLUDED.status,
+    published_at = COALESCE(form_template_versions.published_at, EXCLUDED.published_at);
 
 -- name: GetFormTemplateVersion :one
 SELECT * FROM form_template_versions
@@ -1160,177 +1155,61 @@ ORDER BY field_id ASC;
 DELETE FROM form_instances
 WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id);
 
--- name: UpsertLeaveRequestAllocation :one
-INSERT INTO leave_request_allocations (
-    tenant_id, leave_request_id, leave_balance_id, employee_id, leave_type_id,
-    cycle, reserved_minutes, created_at
-) SELECT
-    request.tenant_id, request.id, balance.id, request.subject_employee_id, request.data->>'leave_type_id',
-    sqlc.arg(cycle), sqlc.arg(reserved_minutes), sqlc.arg(created_at)
-FROM form_business_records request
-JOIN leave_balances balance
-  ON balance.tenant_id = request.tenant_id
- AND balance.id = sqlc.arg(leave_balance_id)
- AND balance.employee_id = request.subject_employee_id
- AND balance.leave_type_id = request.data->>'leave_type_id'
-WHERE request.tenant_id = sqlc.arg(tenant_id)
-  AND request.id = sqlc.arg(leave_request_id)
-  AND request.business_type = 'attendance.leave'
-ON CONFLICT (tenant_id, leave_request_id, leave_balance_id, cycle) DO NOTHING
-RETURNING *;
-
--- name: GetLeaveRequestAllocationByCycleBalance :one
-SELECT * FROM leave_request_allocations
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND leave_request_id = sqlc.arg(leave_request_id)
-  AND leave_balance_id = sqlc.arg(leave_balance_id)
-  AND cycle = sqlc.arg(cycle);
-
--- name: ListLeaveRequestAllocationsByRequest :many
-SELECT * FROM leave_request_allocations
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND leave_request_id = sqlc.arg(leave_request_id)
-ORDER BY id;
-
--- name: ListLeaveRequestAllocationsByRequestCycle :many
-SELECT * FROM leave_request_allocations
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND leave_request_id = sqlc.arg(leave_request_id)
-  AND cycle = sqlc.arg(cycle)
-ORDER BY id;
-
--- name: UpsertLeaveCase :one
-INSERT INTO leave_cases (
-    id, tenant_id, employee_id, leave_type_id, start_at, end_at,
-    net_minutes, status, origin, created_at, updated_at
+-- name: UpsertLeaveRecord :one
+INSERT INTO leave_records (
+    id, tenant_id, employee_id, leave_type_id, balance_id, entitlement_year,
+    source, event_date, start_at, end_at, net_minutes, remark, status,
+    matched_record_id, reconciliation_status, last_seen_at, deleted_at, updated_at
 ) VALUES (
-    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(leave_type_id), sqlc.arg(start_at), sqlc.arg(end_at),
-    sqlc.arg(net_minutes), sqlc.arg(status), sqlc.arg(origin), sqlc.arg(created_at), sqlc.arg(updated_at)
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(leave_type_id),
+    sqlc.arg(balance_id), sqlc.arg(entitlement_year), sqlc.arg(source), sqlc.arg(event_date),
+    sqlc.arg(start_at), sqlc.arg(end_at), sqlc.arg(net_minutes), sqlc.arg(remark), sqlc.arg(status),
+    sqlc.narg(matched_record_id), sqlc.arg(reconciliation_status),
+    sqlc.narg(last_seen_at), sqlc.narg(deleted_at), sqlc.arg(updated_at)
 )
 ON CONFLICT (id) DO UPDATE SET
     employee_id = EXCLUDED.employee_id,
     leave_type_id = EXCLUDED.leave_type_id,
+    balance_id = EXCLUDED.balance_id,
+    entitlement_year = EXCLUDED.entitlement_year,
+    source = EXCLUDED.source,
+    event_date = EXCLUDED.event_date,
     start_at = EXCLUDED.start_at,
     end_at = EXCLUDED.end_at,
-    net_minutes = EXCLUDED.net_minutes,
-    status = EXCLUDED.status,
-    origin = EXCLUDED.origin,
-    updated_at = EXCLUDED.updated_at
-WHERE leave_cases.tenant_id = EXCLUDED.tenant_id
-RETURNING *;
-
--- name: UpsertLeaveRequestCaseSource :one
-INSERT INTO leave_case_sources (
-    tenant_id, leave_case_id, leave_request_id, match_method, match_status, created_at
-) VALUES (
-    sqlc.arg(tenant_id), sqlc.arg(leave_case_id), sqlc.arg(leave_request_id),
-    sqlc.arg(match_method), sqlc.arg(match_status), sqlc.arg(created_at)
-)
-ON CONFLICT (tenant_id, leave_request_id) WHERE leave_request_id IS NOT NULL DO UPDATE SET
-    leave_case_id = EXCLUDED.leave_case_id,
-    match_method = EXCLUDED.match_method,
-    match_status = EXCLUDED.match_status
-RETURNING *;
-
--- name: UpsertExternalLeaveCaseSource :one
-INSERT INTO leave_case_sources (
-    tenant_id, leave_case_id, external_leave_record_id, match_method, match_status, created_at
-) VALUES (
-    sqlc.arg(tenant_id), sqlc.arg(leave_case_id), sqlc.arg(external_leave_record_id),
-    sqlc.arg(match_method), sqlc.arg(match_status), sqlc.arg(created_at)
-)
-ON CONFLICT (tenant_id, external_leave_record_id) WHERE external_leave_record_id IS NOT NULL DO UPDATE SET
-    leave_case_id = EXCLUDED.leave_case_id,
-    match_method = EXCLUDED.match_method,
-    match_status = EXCLUDED.match_status
-RETURNING *;
-
--- name: GetLeaveCaseByLeaveRequestID :one
-SELECT sqlc.embed(leave_case)
-FROM leave_case_sources source
-JOIN leave_cases leave_case
-  ON leave_case.tenant_id = source.tenant_id AND leave_case.id = source.leave_case_id
-WHERE source.tenant_id = sqlc.arg(tenant_id)
-  AND source.leave_request_id = sqlc.arg(leave_request_id)
-LIMIT 1;
-
--- name: GetLeaveCaseByExternalLeaveRecordID :one
-SELECT sqlc.embed(leave_case)
-FROM leave_case_sources source
-JOIN leave_cases leave_case
-  ON leave_case.tenant_id = source.tenant_id AND leave_case.id = source.leave_case_id
-WHERE source.tenant_id = sqlc.arg(tenant_id)
-  AND source.external_leave_record_id = sqlc.arg(external_leave_record_id)
-LIMIT 1;
-
--- name: ListConfirmedActiveLeaveCasesByQuery :many
-SELECT * FROM leave_cases leave_case
-WHERE leave_case.tenant_id = sqlc.arg(tenant_id)
-  AND leave_case.status = 'active'
-  AND leave_case.employee_id = ANY(sqlc.arg(employee_ids)::text[])
-  AND leave_case.start_at < sqlc.arg(to_at)::timestamptz
-  AND leave_case.end_at > sqlc.arg(from_at)::timestamptz
-  AND EXISTS (
-      SELECT 1
-      FROM leave_case_sources source
-      WHERE source.tenant_id = leave_case.tenant_id
-        AND source.leave_case_id = leave_case.id
-        AND source.match_status = 'confirmed'
-  )
-ORDER BY leave_case.start_at, leave_case.end_at, leave_case.id;
-
--- name: DeleteLeaveCaseIfUnreferenced :execrows
-DELETE FROM leave_cases leave_case
-WHERE leave_case.tenant_id = sqlc.arg(tenant_id)
-  AND leave_case.id = sqlc.arg(id)
-  AND NOT EXISTS (
-      SELECT 1 FROM leave_case_sources source
-      WHERE source.tenant_id = leave_case.tenant_id
-        AND source.leave_case_id = leave_case.id
-  );
-
--- name: UpsertExternalLeaveRecord :one
-INSERT INTO leave_external_records (
-    id, tenant_id, employee_id, source_system, external_ref, external_leave_code,
-    external_category_code, leave_type_id, leave_name, start_at, end_at,
-    gross_minutes, deduct_minutes, net_minutes, remark, source_label, status,
-    raw_payload, payload_hash, first_seen_at, last_seen_at, deleted_at
-) VALUES (
-    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(source_system), sqlc.arg(external_ref), sqlc.arg(external_leave_code),
-    sqlc.arg(external_category_code), sqlc.arg(leave_type_id), sqlc.arg(leave_name), sqlc.arg(start_at), sqlc.arg(end_at),
-    sqlc.arg(gross_minutes), sqlc.arg(deduct_minutes), sqlc.arg(net_minutes), sqlc.arg(remark), sqlc.arg(source_label), sqlc.arg(status),
-    sqlc.arg(raw_payload)::jsonb, sqlc.arg(payload_hash), sqlc.arg(first_seen_at), sqlc.arg(last_seen_at), sqlc.narg(deleted_at)
-)
-ON CONFLICT (tenant_id, source_system, external_ref) DO UPDATE SET
-    employee_id = EXCLUDED.employee_id,
-    external_leave_code = EXCLUDED.external_leave_code,
-    external_category_code = EXCLUDED.external_category_code,
-    leave_type_id = EXCLUDED.leave_type_id,
-    leave_name = EXCLUDED.leave_name,
-    start_at = EXCLUDED.start_at,
-    end_at = EXCLUDED.end_at,
-    gross_minutes = EXCLUDED.gross_minutes,
-    deduct_minutes = EXCLUDED.deduct_minutes,
     net_minutes = EXCLUDED.net_minutes,
     remark = EXCLUDED.remark,
-    source_label = EXCLUDED.source_label,
     status = EXCLUDED.status,
-    raw_payload = EXCLUDED.raw_payload,
-    payload_hash = EXCLUDED.payload_hash,
+    matched_record_id = EXCLUDED.matched_record_id,
+    reconciliation_status = EXCLUDED.reconciliation_status,
     last_seen_at = EXCLUDED.last_seen_at,
-    deleted_at = EXCLUDED.deleted_at
+    deleted_at = EXCLUDED.deleted_at,
+    updated_at = EXCLUDED.updated_at
+WHERE leave_records.tenant_id = EXCLUDED.tenant_id
 RETURNING *;
 
--- name: GetExternalLeaveRecordByRef :one
-SELECT * FROM leave_external_records
+-- name: GetLeaveRecord :one
+SELECT * FROM leave_records
 WHERE tenant_id = sqlc.arg(tenant_id)
-  AND source_system = sqlc.arg(source_system)
-  AND external_ref = sqlc.arg(external_ref)
+  AND id = sqlc.arg(id)
 LIMIT 1;
 
--- name: ListExternalLeaveRecords :many
-SELECT * FROM leave_external_records
+-- name: ListLeaveRecords :many
+SELECT * FROM leave_records
 WHERE tenant_id = sqlc.arg(tenant_id)
+ORDER BY event_date ASC, id ASC;
+
+-- name: ListActiveLeaveRecordsByQuery :many
+SELECT * FROM leave_records
+WHERE tenant_id = sqlc.arg(tenant_id)
+  AND status = 'active'
+  AND deleted_at IS NULL
+  AND employee_id = ANY(sqlc.arg(employee_ids)::text[])
+  AND start_at < sqlc.arg(to_at)::timestamptz
+  AND end_at > sqlc.arg(from_at)::timestamptz
+  AND (
+      source = 'nexus'
+      OR (source = 'ehrms' AND matched_record_id IS NULL)
+  )
 ORDER BY start_at ASC, id ASC;
 
 -- name: UpsertWorkflowRun :one

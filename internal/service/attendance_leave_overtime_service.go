@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
@@ -102,37 +103,35 @@ func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance
 		request.LeaveTypeID = leaveTypeID
 	}
 	cycle := leaveRequestBalanceCycle(request)
-	allocations, err := c.store.ListLeaveRequestAllocationsByRequestCycle(goContext(ctx), ctx.TenantID, request.ID, cycle)
+	leaveRecord, found, err := c.store.GetLeaveRecord(goContext(ctx), ctx.TenantID, request.ID)
 	if err != nil {
 		return err
 	}
-	if balanceRequired, _ := request.EvaluationSnapshot["balance_required"].(bool); balanceRequired {
-		allocatedMinutes := 0
-		for _, allocation := range allocations {
-			allocatedMinutes += allocation.ReservedMinutes
-		}
-		if allocatedMinutes != request.RequestedMinutes {
-			return Conflict("leave request allocations do not cover the requested minutes")
-		}
+	if !found {
+		return Conflict("leave request has no annual leave record")
 	}
+	reserved, _ := request.EvaluationSnapshot["balance_required"].(bool)
 	if nextStatus == "approved" || nextStatus == "rejected" || nextStatus == "cancelled" {
-		for _, allocation := range allocations {
-			if err := c.appendLeaveBalanceEntry(ctx, request, allocation, "", leaveBalanceEntryRelease, allocation.ReservedMinutes, cycle); err != nil {
+		if reserved {
+			if err := c.appendLeaveBalanceEntry(ctx, request, leaveRecord, leaveBalanceEntryRelease, request.RequestedMinutes, cycle); err != nil {
 				return err
 			}
 		}
 	}
 	if nextStatus == "approved" {
-		leaveCase, err := c.ensureNexusLeaveCase(ctx, request)
-		if err != nil {
-			return err
-		}
-		for _, allocation := range allocations {
-			if err := c.appendLeaveBalanceEntry(ctx, request, allocation, leaveCase.ID, leaveBalanceEntryLocalConsume, -allocation.ReservedMinutes, cycle); err != nil {
+		if reserved {
+			if err := c.appendLeaveBalanceEntry(ctx, request, leaveRecord, leaveBalanceEntryLocalConsume, -request.RequestedMinutes, cycle); err != nil {
 				return err
 			}
 		}
+		leaveRecord.Status = "active"
 		request.ReconciliationStatus = "nexus_only"
+	} else {
+		leaveRecord.Status = "cancelled"
+	}
+	leaveRecord.UpdatedAt = c.Now()
+	if err := c.store.UpsertLeaveRecord(goContext(ctx), leaveRecord); err != nil {
+		return err
 	}
 	request.Status = nextStatus
 	request.UpdatedAt = c.Now()
@@ -145,7 +144,7 @@ func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance
 	if nextStatus == "approved" {
 		request.EffectStatus = "applied"
 		request.EffectAppliedAt = &request.UpdatedAt
-		request.EffectResult["leave_case_applied"] = true
+		request.EffectResult["leave_record_applied"] = true
 	} else {
 		request.EffectStatus = "compensated"
 		request.EffectAppliedAt = nil
@@ -502,8 +501,8 @@ func (c AttendanceService) applyOvertimeWorkflowReview(ctx RequestContext, insta
 }
 
 // creditCompensatoryLeaveBalance writes one idempotent credit bound to the
-// approved overtime request. The deterministic local anchor is immutable and
-// carries no snapshot amount of its own.
+// approved overtime request. The deterministic annual Nexus balance carries no
+// snapshot amount of its own.
 func (c AttendanceService) creditCompensatoryLeaveBalance(ctx RequestContext, request OvertimeRequest) error {
 	minutes := leaveMinutes(request.Hours)
 	if minutes <= 0 {
@@ -512,10 +511,11 @@ func (c AttendanceService) creditCompensatoryLeaveBalance(ctx RequestContext, re
 	leaveType := leaveTypeCodeCompensatory
 	leaveTypeID := domain.StableLeaveTypeID(leaveType)
 	now := c.Now()
+	year := request.StartAt.In(attendanceClockLocation).Year()
 	anchor, err := c.store.EnsureLocalLeaveBalanceAnchor(goContext(ctx), LeaveBalance{
-		ID:       ehrmsStableID("lb-local-anchor", ctx.TenantID, request.EmployeeID, leaveTypeID),
+		ID:       ehrmsStableID("lb-nexus", ctx.TenantID, request.EmployeeID, leaveTypeID, fmt.Sprint(year)),
 		TenantID: ctx.TenantID, EmployeeID: request.EmployeeID,
-		LeaveType: leaveType, LeaveTypeID: leaveTypeID, Source: "local_anchor", UpdatedAt: now,
+		LeaveType: leaveType, LeaveTypeID: leaveTypeID, EntitlementYear: year, Source: "nexus", UpdatedAt: now,
 	})
 	if err != nil {
 		return err
@@ -523,9 +523,8 @@ func (c AttendanceService) creditCompensatoryLeaveBalance(ctx RequestContext, re
 	_, err = c.store.AppendStandaloneLeaveBalanceEntry(goContext(ctx), domain.LeaveBalanceEntry{
 		ID: utils.NewID("lbe"), TenantID: ctx.TenantID,
 		EmployeeID: request.EmployeeID, LeaveTypeID: leaveTypeID, BalanceID: anchor.ID,
-		OvertimeRequestID: request.ID, EntryType: leaveBalanceEntryOvertimeCredit,
+		EntitlementYear: year, EntryType: leaveBalanceEntryOvertimeCredit,
 		AmountMinutes: minutes, IdempotencyKey: "overtime-request:" + request.ID + ":credit",
-		Metadata:   map[string]any{"source": "approved_overtime", "overtime_request_id": request.ID},
 		OccurredAt: now, CreatedAt: now,
 	})
 	return err

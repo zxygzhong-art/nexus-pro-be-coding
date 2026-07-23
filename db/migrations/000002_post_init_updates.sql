@@ -36,6 +36,7 @@ BEGIN
 END $$;
 -- +goose StatementEnd
 
+
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
 CREATE EXTENSION IF NOT EXISTS vector;
 CREATE EXTENSION IF NOT EXISTS btree_gist;
@@ -147,6 +148,7 @@ BEGIN
 END;
 $$;
 -- +goose StatementEnd
+
 -- +goose StatementBegin
 CREATE FUNCTION sync_group_membership_projections()
 RETURNS trigger
@@ -166,6 +168,7 @@ BEGIN
 END;
 $$;
 -- +goose StatementEnd
+
 CREATE TRIGGER authz_group_memberships_projection_trigger
 AFTER INSERT OR UPDATE OR DELETE ON authz_group_memberships
 FOR EACH ROW EXECUTE FUNCTION sync_group_membership_projections();
@@ -395,6 +398,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 -- +goose StatementEnd
+
 CREATE TRIGGER authz_permission_set_assignments_reference_check
 BEFORE INSERT OR UPDATE ON authz_permission_set_assignments
 FOR EACH ROW EXECUTE FUNCTION validate_authz_assignment_references();
@@ -494,6 +498,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 -- +goose StatementEnd
+
 CREATE TRIGGER org_units_manager_position_check
 BEFORE INSERT OR UPDATE OF tenant_id, manager_position_id ON org_units
 FOR EACH ROW EXECUTE FUNCTION validate_org_unit_manager_position();
@@ -567,6 +572,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 -- +goose StatementEnd
+
 CREATE TRIGGER employees_reference_check
 BEFORE INSERT OR UPDATE OF tenant_id, account_id, org_unit_id ON employees
 FOR EACH ROW EXECUTE FUNCTION validate_employee_references();
@@ -585,6 +591,7 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 -- +goose StatementEnd
+
 CREATE TRIGGER employees_position_reference_check
 BEFORE INSERT OR UPDATE OF tenant_id, position_id ON employees
 FOR EACH ROW EXECUTE FUNCTION validate_employee_position_reference();
@@ -688,47 +695,36 @@ CREATE TABLE leave_balances (
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     employee_id text NOT NULL,
     leave_type_id text NOT NULL,
-    remaining_minutes integer NOT NULL,
-    period_start date,
-    period_end date,
+    entitlement_year integer NOT NULL CHECK (entitlement_year >= 2000),
     granted_minutes integer NOT NULL DEFAULT 0,
     used_minutes integer NOT NULL DEFAULT 0,
-    source text NOT NULL CHECK (source IN ('ehrms', 'explicit_snapshot', 'manual_snapshot', 'local_anchor')),
-    external_leave_code text NOT NULL DEFAULT '',
-    external_category_code text NOT NULL DEFAULT '',
-    entitlement_year integer,
-    carry_in_minutes integer NOT NULL DEFAULT 0 CHECK (carry_in_minutes >= 0),
-    carry_expire date,
-    raw_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+    remaining_minutes integer NOT NULL DEFAULT 0,
+    source text NOT NULL CHECK (source IN ('nexus', 'ehrms')),
     last_synced_at timestamptz,
     updated_at timestamptz NOT NULL,
     CONSTRAINT leave_balances_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT leave_balances_period_check CHECK (period_start IS NULL OR period_end IS NULL OR period_end >= period_start),
     CONSTRAINT leave_balances_nonnegative_check CHECK (remaining_minutes >= 0 AND granted_minutes >= 0 AND used_minutes >= 0),
-    CONSTRAINT leave_balances_local_anchor_zero_check CHECK (
-        source <> 'local_anchor'
-        OR (remaining_minutes = 0 AND granted_minutes = 0 AND used_minutes = 0 AND carry_in_minutes = 0
-            AND period_start IS NULL AND period_end IS NULL)
-    ),
     CONSTRAINT leave_balances_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
     CONSTRAINT leave_balances_leave_type_fk FOREIGN KEY (tenant_id, leave_type_id) REFERENCES leave_types (tenant_id, id),
-    CONSTRAINT leave_balances_tenant_identity_idx UNIQUE (tenant_id, id, employee_id, leave_type_id)
+    CONSTRAINT leave_balances_tenant_identity_idx UNIQUE (tenant_id, id, employee_id, leave_type_id, entitlement_year),
+    CONSTRAINT leave_balances_employee_type_year_idx UNIQUE (tenant_id, employee_id, leave_type_id, entitlement_year)
 );
 
-CREATE INDEX leave_balances_fefo_idx
-ON leave_balances (
-    tenant_id,
-    employee_id,
-    leave_type_id,
-    ((source = 'local_anchor')),
-    period_end ASC NULLS LAST,
-    period_start ASC NULLS FIRST,
-    id
-);
+CREATE INDEX leave_balances_employee_year_idx
+ON leave_balances (tenant_id, employee_id, entitlement_year DESC, leave_type_id);
 
-CREATE UNIQUE INDEX leave_balances_local_anchor_idx
-ON leave_balances (tenant_id, employee_id, leave_type_id)
-WHERE source = 'local_anchor';
+COMMENT ON TABLE leave_balances IS '员工按年度、假别汇总的假期余额；同一员工、假别、年度仅一条';
+COMMENT ON COLUMN leave_balances.id IS '余额主键';
+COMMENT ON COLUMN leave_balances.tenant_id IS '租户 ID';
+COMMENT ON COLUMN leave_balances.employee_id IS '员工 ID';
+COMMENT ON COLUMN leave_balances.leave_type_id IS '假别代码；Nexus 与 eHRMS 使用同一套代码';
+COMMENT ON COLUMN leave_balances.entitlement_year IS '额度所属年度；不结转';
+COMMENT ON COLUMN leave_balances.granted_minutes IS '年度授予分钟数';
+COMMENT ON COLUMN leave_balances.used_minutes IS '上游已使用分钟数';
+COMMENT ON COLUMN leave_balances.remaining_minutes IS '余额快照剩余分钟数';
+COMMENT ON COLUMN leave_balances.source IS '余额来源：nexus / ehrms';
+COMMENT ON COLUMN leave_balances.last_synced_at IS '最近同步时间；Nexus 本地余额可为空';
+COMMENT ON COLUMN leave_balances.updated_at IS '更新时间';
 
 CREATE TABLE form_definition_drafts (
     id text PRIMARY KEY,
@@ -767,6 +763,7 @@ CREATE TABLE form_templates (
     schema jsonb NOT NULL DEFAULT '{}'::jsonb,
     status text NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'published', 'archived')),
     current_version integer NOT NULL DEFAULT 1 CHECK (current_version > 0),
+    published_version integer NOT NULL DEFAULT 0 CHECK (published_version >= 0 AND published_version <= current_version),
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     deleted_at timestamptz,
@@ -977,119 +974,114 @@ CREATE INDEX form_business_records_tenant_effect_idx
 ON form_business_records (tenant_id, effect_status, updated_at);
 CREATE INDEX form_business_records_data_gin_idx ON form_business_records USING gin (data);
 
-CREATE TABLE leave_request_allocations (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    leave_request_id text NOT NULL,
-    leave_balance_id text NOT NULL,
-    employee_id text NOT NULL,
-    leave_type_id text NOT NULL,
-    cycle integer NOT NULL CHECK (cycle > 0),
-    reserved_minutes integer NOT NULL CHECK (reserved_minutes > 0),
-    created_at timestamptz NOT NULL,
-    CONSTRAINT leave_request_allocations_request_balance_cycle_idx UNIQUE (tenant_id, leave_request_id, leave_balance_id, cycle),
-    CONSTRAINT leave_request_allocations_identity_idx UNIQUE (
-        tenant_id, id, leave_request_id, leave_balance_id, employee_id, leave_type_id
-    ),
-    CONSTRAINT leave_request_allocations_request_fk FOREIGN KEY (
-        tenant_id, leave_request_id, employee_id
-    ) REFERENCES form_business_records (tenant_id, id, subject_employee_id) ON DELETE CASCADE,
-    CONSTRAINT leave_request_allocations_balance_fk FOREIGN KEY (
-        tenant_id, leave_balance_id, employee_id, leave_type_id
-    ) REFERENCES leave_balances (tenant_id, id, employee_id, leave_type_id)
-);
-
-CREATE INDEX leave_request_allocations_tenant_balance_idx ON leave_request_allocations (tenant_id, leave_balance_id);
-
-CREATE TABLE leave_cases (
-    id text PRIMARY KEY,
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    employee_id text NOT NULL,
-    leave_type_id text NOT NULL,
-    start_at timestamptz NOT NULL,
-    end_at timestamptz NOT NULL,
-    net_minutes integer NOT NULL CHECK (net_minutes > 0),
-    status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled', 'corrected')),
-    origin text NOT NULL CHECK (origin IN ('nexus', 'ehrms', 'both')),
-    created_at timestamptz NOT NULL,
-    updated_at timestamptz NOT NULL,
-    CONSTRAINT leave_cases_interval_check CHECK (end_at > start_at),
-    CONSTRAINT leave_cases_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
-    CONSTRAINT leave_cases_type_fk FOREIGN KEY (tenant_id, leave_type_id) REFERENCES leave_types (tenant_id, id),
-    CONSTRAINT leave_cases_tenant_id_id_idx UNIQUE (tenant_id, id)
-);
-
-CREATE INDEX leave_cases_employee_interval_idx ON leave_cases (tenant_id, employee_id, start_at, end_at);
-
-CREATE TABLE leave_external_records (
-    id text PRIMARY KEY,
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    employee_id text NOT NULL,
-    source_system text NOT NULL,
-    external_ref text NOT NULL,
-    external_leave_code text NOT NULL DEFAULT '',
-    external_category_code text NOT NULL DEFAULT '',
-    leave_type_id text NOT NULL,
-    leave_name text NOT NULL DEFAULT '',
-    start_at timestamptz NOT NULL,
-    end_at timestamptz NOT NULL,
-    gross_minutes integer NOT NULL CHECK (gross_minutes > 0),
-    deduct_minutes integer NOT NULL DEFAULT 0 CHECK (deduct_minutes >= 0),
-    net_minutes integer NOT NULL CHECK (net_minutes > 0),
-    remark text NOT NULL DEFAULT '',
-    source_label text NOT NULL DEFAULT '',
-    status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'cancelled', 'corrected')),
-    raw_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
-    payload_hash text NOT NULL DEFAULT '',
-    first_seen_at timestamptz NOT NULL,
-    last_seen_at timestamptz NOT NULL,
-    deleted_at timestamptz,
-    CONSTRAINT leave_external_records_interval_check CHECK (end_at > start_at),
-    CONSTRAINT leave_external_records_duration_check CHECK (gross_minutes >= net_minutes AND deduct_minutes + net_minutes <= gross_minutes),
-    CONSTRAINT leave_external_records_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
-    CONSTRAINT leave_external_records_type_fk FOREIGN KEY (tenant_id, leave_type_id) REFERENCES leave_types (tenant_id, id),
-    CONSTRAINT leave_external_records_identity_idx UNIQUE (tenant_id, source_system, external_ref),
-    CONSTRAINT leave_external_records_tenant_id_id_idx UNIQUE (tenant_id, id)
-);
-
-CREATE INDEX leave_external_records_employee_interval_idx ON leave_external_records (tenant_id, employee_id, start_at, end_at);
-
-CREATE TABLE leave_case_sources (
-    id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    leave_case_id text NOT NULL,
-    leave_request_id text,
-    external_leave_record_id text,
-    match_method text NOT NULL DEFAULT 'direct' CHECK (match_method IN ('direct', 'exact', 'heuristic', 'manual')),
-    match_status text NOT NULL DEFAULT 'confirmed' CHECK (match_status IN ('proposed', 'confirmed', 'rejected', 'ambiguous')),
-    created_at timestamptz NOT NULL,
-    CONSTRAINT leave_case_sources_case_fk FOREIGN KEY (tenant_id, leave_case_id) REFERENCES leave_cases (tenant_id, id) ON DELETE CASCADE,
-    CONSTRAINT leave_case_sources_source_xor_check CHECK (num_nonnulls(leave_request_id, external_leave_record_id) = 1),
-    CONSTRAINT leave_case_sources_request_fk FOREIGN KEY (tenant_id, leave_request_id) REFERENCES form_business_records (tenant_id, id) ON DELETE CASCADE,
-    CONSTRAINT leave_case_sources_external_fk FOREIGN KEY (tenant_id, external_leave_record_id) REFERENCES leave_external_records (tenant_id, id) ON DELETE CASCADE
-);
-
-CREATE INDEX leave_case_sources_case_idx ON leave_case_sources (tenant_id, leave_case_id);
-CREATE UNIQUE INDEX leave_case_sources_request_idx ON leave_case_sources (tenant_id, leave_request_id) WHERE leave_request_id IS NOT NULL;
-CREATE UNIQUE INDEX leave_case_sources_external_idx ON leave_case_sources (tenant_id, external_leave_record_id) WHERE external_leave_record_id IS NOT NULL;
-
-CREATE TABLE leave_balance_entries (
+CREATE TABLE leave_records (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     employee_id text NOT NULL,
     leave_type_id text NOT NULL,
     balance_id text NOT NULL,
-    allocation_id bigint,
-    leave_request_id text,
-    leave_case_id text,
-    overtime_request_id text,
+    entitlement_year integer NOT NULL CHECK (entitlement_year >= 2000),
+    source text NOT NULL CHECK (source IN ('nexus', 'ehrms')),
+    event_date timestamptz NOT NULL,
+    start_at timestamptz NOT NULL,
+    end_at timestamptz NOT NULL,
+    net_minutes integer NOT NULL CHECK (net_minutes > 0),
+    remark text NOT NULL DEFAULT '',
+    status text NOT NULL DEFAULT 'active' CHECK (status IN ('pending', 'active', 'cancelled', 'corrected')),
+    matched_record_id text,
+    reconciliation_status text NOT NULL DEFAULT 'unmatched' CHECK (
+        reconciliation_status IN ('unmatched', 'matched', 'mismatch', 'ambiguous', 'not_required')
+    ),
+    last_seen_at timestamptz,
+    deleted_at timestamptz,
+    updated_at timestamptz NOT NULL,
+    CONSTRAINT leave_records_interval_check CHECK (end_at > start_at),
+    CONSTRAINT leave_records_year_check CHECK (
+        EXTRACT(YEAR FROM start_at AT TIME ZONE 'Asia/Shanghai')::integer = entitlement_year
+        AND EXTRACT(YEAR FROM (end_at - interval '1 microsecond') AT TIME ZONE 'Asia/Shanghai')::integer = entitlement_year
+    ),
+    CONSTRAINT leave_records_match_shape_check CHECK (
+        (source = 'nexus' AND matched_record_id IS NULL)
+        OR source = 'ehrms'
+    ),
+    CONSTRAINT leave_records_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
+    CONSTRAINT leave_records_type_fk FOREIGN KEY (tenant_id, leave_type_id) REFERENCES leave_types (tenant_id, id),
+    CONSTRAINT leave_records_balance_fk FOREIGN KEY (
+        tenant_id, balance_id, employee_id, leave_type_id, entitlement_year
+    ) REFERENCES leave_balances (tenant_id, id, employee_id, leave_type_id, entitlement_year),
+    CONSTRAINT leave_records_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT leave_records_matched_fk FOREIGN KEY (tenant_id, matched_record_id)
+        REFERENCES leave_records (tenant_id, id) DEFERRABLE INITIALLY DEFERRED
+);
+
+CREATE INDEX leave_records_employee_interval_idx
+ON leave_records (tenant_id, employee_id, start_at, end_at);
+CREATE INDEX leave_records_balance_idx ON leave_records (tenant_id, balance_id, event_date DESC);
+CREATE UNIQUE INDEX leave_records_ehrms_match_idx
+ON leave_records (tenant_id, matched_record_id)
+WHERE source = 'ehrms' AND matched_record_id IS NOT NULL;
+
+-- +goose StatementBegin
+CREATE OR REPLACE FUNCTION enforce_leave_record_match_source()
+RETURNS trigger
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF NEW.matched_record_id IS NOT NULL AND NOT EXISTS (
+        SELECT 1
+        FROM leave_records nexus
+        WHERE nexus.tenant_id = NEW.tenant_id
+          AND nexus.id = NEW.matched_record_id
+          AND nexus.source = 'nexus'
+    ) THEN
+        RAISE EXCEPTION 'matched_record_id must reference a Nexus leave record'
+            USING ERRCODE = '23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+-- +goose StatementEnd
+
+CREATE CONSTRAINT TRIGGER leave_records_match_source_check
+AFTER INSERT OR UPDATE OF tenant_id, source, matched_record_id ON leave_records
+DEFERRABLE INITIALLY DEFERRED
+FOR EACH ROW
+EXECUTE FUNCTION enforce_leave_record_match_source();
+
+COMMENT ON TABLE leave_records IS '统一休假记录；Nexus 申请和 eHRMS 同步记录共用此表';
+COMMENT ON COLUMN leave_records.id IS '休假记录主键；Nexus 记录与 leave request 使用同一 ID';
+COMMENT ON COLUMN leave_records.tenant_id IS '租户 ID';
+COMMENT ON COLUMN leave_records.employee_id IS '员工 ID';
+COMMENT ON COLUMN leave_records.leave_type_id IS '假别代码；Nexus 与 eHRMS 使用同一套代码';
+COMMENT ON COLUMN leave_records.balance_id IS '本记录唯一对应的年度余额 ID';
+COMMENT ON COLUMN leave_records.entitlement_year IS '额度所属年度；记录不得跨年度';
+COMMENT ON COLUMN leave_records.source IS '记录来源：nexus / ehrms';
+COMMENT ON COLUMN leave_records.event_date IS '来源记录创建时间';
+COMMENT ON COLUMN leave_records.start_at IS '请假开始时间';
+COMMENT ON COLUMN leave_records.end_at IS '请假结束时间';
+COMMENT ON COLUMN leave_records.net_minutes IS '实际请假分钟数';
+COMMENT ON COLUMN leave_records.remark IS '请假说明';
+COMMENT ON COLUMN leave_records.status IS '记录状态：pending / active / cancelled / corrected';
+COMMENT ON COLUMN leave_records.matched_record_id IS '一对一匹配的 Nexus 记录 ID；仅 eHRMS 记录填写';
+COMMENT ON COLUMN leave_records.reconciliation_status IS '双来源核对状态';
+COMMENT ON COLUMN leave_records.last_seen_at IS 'eHRMS 最近同步看到该记录的时间';
+COMMENT ON COLUMN leave_records.deleted_at IS 'eHRMS 记录被上游移除的时间';
+COMMENT ON COLUMN leave_records.updated_at IS '更新时间';
+
+CREATE TABLE leave_balance_entries (
+    id text PRIMARY KEY,
+    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    balance_id text NOT NULL,
+    leave_record_id text,
+    employee_id text NOT NULL,
+    leave_type_id text NOT NULL,
+    entitlement_year integer NOT NULL,
     entry_type text NOT NULL CHECK (entry_type IN (
         'reserve', 'release', 'local_consume', 'local_refund',
         'external_reconcile', 'external_reversal', 'overtime_credit', 'manual_adjust'
     )),
     amount_minutes integer NOT NULL CHECK (amount_minutes <> 0),
     idempotency_key text NOT NULL CHECK (btrim(idempotency_key) <> ''),
-    metadata jsonb NOT NULL DEFAULT '{}'::jsonb,
     occurred_at timestamptz NOT NULL,
     created_at timestamptz NOT NULL,
     CONSTRAINT leave_balance_entries_sign_check CHECK (
@@ -1097,35 +1089,32 @@ CREATE TABLE leave_balance_entries (
         OR (entry_type IN ('release', 'local_refund', 'external_reconcile', 'overtime_credit') AND amount_minutes > 0)
         OR (entry_type = 'manual_adjust' AND amount_minutes <> 0)
     ),
-    CONSTRAINT leave_balance_entries_reference_shape_check CHECK (
-        (entry_type IN ('reserve', 'release', 'local_consume', 'local_refund', 'external_reconcile', 'external_reversal')
-            AND allocation_id IS NOT NULL AND leave_request_id IS NOT NULL
-            AND overtime_request_id IS NULL)
-        OR (entry_type = 'overtime_credit'
-            AND allocation_id IS NULL AND leave_request_id IS NULL
-            AND leave_case_id IS NULL AND overtime_request_id IS NOT NULL)
-        OR (entry_type = 'manual_adjust'
-            AND allocation_id IS NULL AND leave_request_id IS NULL
-            AND leave_case_id IS NULL AND overtime_request_id IS NULL)
-    ),
-    CONSTRAINT leave_balance_entries_reconciliation_case_check CHECK (
-        entry_type NOT IN ('external_reconcile', 'external_reversal') OR leave_case_id IS NOT NULL
-    ),
-    CONSTRAINT leave_balance_entries_allocation_fk FOREIGN KEY (
-        tenant_id, allocation_id, leave_request_id, balance_id, employee_id, leave_type_id
-    ) REFERENCES leave_request_allocations (
-        tenant_id, id, leave_request_id, leave_balance_id, employee_id, leave_type_id
-    ),
     CONSTRAINT leave_balance_entries_balance_fk FOREIGN KEY (
-        tenant_id, balance_id, employee_id, leave_type_id
-    ) REFERENCES leave_balances (tenant_id, id, employee_id, leave_type_id),
-    CONSTRAINT leave_balance_entries_case_fk FOREIGN KEY (tenant_id, leave_case_id) REFERENCES leave_cases (tenant_id, id),
+        tenant_id, balance_id, employee_id, leave_type_id, entitlement_year
+    ) REFERENCES leave_balances (tenant_id, id, employee_id, leave_type_id, entitlement_year),
+    CONSTRAINT leave_balance_entries_record_fk FOREIGN KEY (
+        tenant_id, leave_record_id
+    ) REFERENCES leave_records (tenant_id, id),
     CONSTRAINT leave_balance_entries_idempotency_idx UNIQUE (tenant_id, idempotency_key)
 );
 
 CREATE INDEX leave_balance_entries_balance_idx ON leave_balance_entries (tenant_id, balance_id, occurred_at, id);
-CREATE INDEX leave_balance_entries_request_idx ON leave_balance_entries (tenant_id, leave_request_id, occurred_at, id);
-CREATE INDEX leave_balance_entries_case_idx ON leave_balance_entries (tenant_id, leave_case_id, occurred_at, id) WHERE leave_case_id IS NOT NULL;
+CREATE INDEX leave_balance_entries_record_idx ON leave_balance_entries (tenant_id, leave_record_id, occurred_at, id)
+WHERE leave_record_id IS NOT NULL;
+
+COMMENT ON TABLE leave_balance_entries IS '余额变动流水；金额为分钟，追加写入';
+COMMENT ON COLUMN leave_balance_entries.id IS '余额流水主键';
+COMMENT ON COLUMN leave_balance_entries.tenant_id IS '租户 ID';
+COMMENT ON COLUMN leave_balance_entries.balance_id IS '被调整的年度余额 ID';
+COMMENT ON COLUMN leave_balance_entries.leave_record_id IS '关联休假记录；加班入账和人工调整可为空';
+COMMENT ON COLUMN leave_balance_entries.employee_id IS '员工 ID';
+COMMENT ON COLUMN leave_balance_entries.leave_type_id IS '假别代码';
+COMMENT ON COLUMN leave_balance_entries.entitlement_year IS '余额所属年度';
+COMMENT ON COLUMN leave_balance_entries.entry_type IS '变动类型';
+COMMENT ON COLUMN leave_balance_entries.amount_minutes IS '变动分钟数；负数扣减，正数返还或增加';
+COMMENT ON COLUMN leave_balance_entries.idempotency_key IS '业务幂等键';
+COMMENT ON COLUMN leave_balance_entries.occurred_at IS '业务发生时间';
+COMMENT ON COLUMN leave_balance_entries.created_at IS '流水创建时间';
 
 CREATE TABLE attendance_worksites (
     id text PRIMARY KEY,
@@ -1260,13 +1249,6 @@ ALTER TABLE attendance_clock_records
     ADD CONSTRAINT attendance_clock_records_voided_by_fk
     FOREIGN KEY (tenant_id, voided_by_account_id)
     REFERENCES accounts (tenant_id, id);
-
-ALTER TABLE leave_balance_entries
-    ADD CONSTRAINT leave_balance_entries_overtime_request_fk
-    FOREIGN KEY (tenant_id, overtime_request_id, employee_id)
-    REFERENCES form_business_records (tenant_id, id, subject_employee_id);
-
-CREATE INDEX leave_balance_entries_overtime_request_idx ON leave_balance_entries (tenant_id, overtime_request_id) WHERE overtime_request_id IS NOT NULL;
 
 CREATE TABLE platform_task_items (
     id text PRIMARY KEY,
@@ -2052,14 +2034,8 @@ ALTER TABLE workflow_actions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE workflow_actions FORCE ROW LEVEL SECURITY;
 ALTER TABLE form_business_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE form_business_records FORCE ROW LEVEL SECURITY;
-ALTER TABLE leave_request_allocations ENABLE ROW LEVEL SECURITY;
-ALTER TABLE leave_request_allocations FORCE ROW LEVEL SECURITY;
-ALTER TABLE leave_cases ENABLE ROW LEVEL SECURITY;
-ALTER TABLE leave_cases FORCE ROW LEVEL SECURITY;
-ALTER TABLE leave_external_records ENABLE ROW LEVEL SECURITY;
-ALTER TABLE leave_external_records FORCE ROW LEVEL SECURITY;
-ALTER TABLE leave_case_sources ENABLE ROW LEVEL SECURITY;
-ALTER TABLE leave_case_sources FORCE ROW LEVEL SECURITY;
+ALTER TABLE leave_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leave_records FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_worksites ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_worksites FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_clock_records ENABLE ROW LEVEL SECURITY;
@@ -2173,10 +2149,7 @@ CREATE POLICY tenant_isolation_workflow_stage_instances ON workflow_stage_instan
 CREATE POLICY tenant_isolation_workflow_stage_assignees ON workflow_stage_assignees USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_workflow_actions ON workflow_actions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_form_business_records ON form_business_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_leave_request_allocations ON leave_request_allocations USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_leave_cases ON leave_cases USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_leave_external_records ON leave_external_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_leave_case_sources ON leave_case_sources USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_leave_records ON leave_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_worksites ON attendance_worksites USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_clock_records ON attendance_clock_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_daily_summaries ON attendance_daily_summaries USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));

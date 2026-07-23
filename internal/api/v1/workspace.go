@@ -33,6 +33,7 @@ func (c WorkspaceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	workspace.GET("/forms", c.routes.Handle("workflow.form_template", "read", c.formDesign, TenantWideScope()))
 	workspace.POST("/forms", c.routes.Handle("workflow.form_template", "create", c.createFormDesign, TenantWideScope()))
 	workspace.PATCH("/forms/:id", c.routes.Handle("workflow.form_template", "update", c.updateFormDesign, PathParam(PathParamID), TenantWideScope()))
+	workspace.POST("/forms/:id/publish", c.routes.Handle("workflow.form_template", "update", c.publishFormDesign, PathParam(PathParamID), TenantWideScope()))
 	workspace.DELETE("/forms/:id", c.routes.Handle("workflow.form_template", "delete", c.deleteFormDesign, PathParam(PathParamID), TenantWideScope()))
 	workspace.GET("/audit-logs", c.routes.Handle("audit.log", "read", c.auditLogs, TenantWideScope()))
 	workspace.GET("/audit-logs/facets", c.routes.Handle("audit.log", "read", c.auditLogFacets, TenantWideScope()))
@@ -221,6 +222,20 @@ func (c WorkspaceCtrl) updateFormDesign(w http.ResponseWriter, r *http.Request, 
 		return err
 	}
 	item, err := c.svc.UpdateWorkspaceFormDesign(ctx, r.PathValue(PathParamID), input)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
+	return nil
+}
+
+// publishFormDesign 將目前表單草稿版本發布為新的線上版本。
+func (c WorkspaceCtrl) publishFormDesign(w http.ResponseWriter, r *http.Request, ctx domain.RequestContext) error {
+	var input domain.PublishWorkspaceFormDesignInput
+	if err := readJSON(w, r, &input); err != nil {
+		return err
+	}
+	item, err := c.svc.PublishWorkspaceFormDesign(ctx, r.PathValue(PathParamID), input)
 	if err != nil {
 		return err
 	}

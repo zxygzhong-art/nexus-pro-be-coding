@@ -1808,28 +1808,21 @@ func TestAttendanceClockOneHourPlusApprovedLeaveCompletesDay(t *testing.T) {
 	if err := store.UpsertLeaveRequest(context.Background(), request); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.UpsertLeaveCase(context.Background(), domain.LeaveCase{
-		ID:          "case-rest-of-day",
-		TenantID:    "tenant-1",
-		EmployeeID:  "emp-1",
-		LeaveTypeID: request.LeaveTypeID,
-		StartAt:     request.StartAt,
-		EndAt:       request.EndAt,
-		NetMinutes:  request.RequestedMinutes,
-		Status:      "active",
-		Origin:      "nexus",
-		CreatedAt:   clockInAt,
-		UpdatedAt:   clockInAt,
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.UpsertLeaveCaseSource(context.Background(), domain.LeaveCaseSource{
-		TenantID:       "tenant-1",
-		LeaveCaseID:    "case-rest-of-day",
-		LeaveRequestID: request.ID,
-		MatchMethod:    "exact",
-		MatchStatus:    "confirmed",
-		CreatedAt:      clockInAt,
+	if err := store.UpsertLeaveRecord(context.Background(), domain.LeaveRecord{
+		ID:                   "case-rest-of-day",
+		TenantID:             "tenant-1",
+		EmployeeID:           "emp-1",
+		LeaveTypeID:          request.LeaveTypeID,
+		BalanceID:            "balance-rest-of-day",
+		EntitlementYear:      request.StartAt.Year(),
+		Source:               "nexus",
+		EventDate:            clockInAt,
+		StartAt:              request.StartAt,
+		EndAt:                request.EndAt,
+		NetMinutes:           request.RequestedMinutes,
+		Status:               "active",
+		ReconciliationStatus: "not_required",
+		UpdatedAt:            clockInAt,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -2010,15 +2003,10 @@ func TestAttendanceMonthlySummaryIncludesLeaveOnlyCase(t *testing.T) {
 	location := time.FixedZone("UTC+8", 8*60*60)
 	start := time.Date(2026, 6, 11, 9, 0, 0, 0, location)
 	end := time.Date(2026, 6, 11, 18, 0, 0, 0, location)
-	if err := store.UpsertLeaveCase(context.Background(), domain.LeaveCase{
+	if err := store.UpsertLeaveRecord(context.Background(), domain.LeaveRecord{
 		ID: "case-leave-only", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveTypeID: "leave-type-annual",
-		StartAt: start, EndAt: end, NetMinutes: 480, Status: "active", Origin: "nexus",
-	}); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.UpsertLeaveCaseSource(context.Background(), domain.LeaveCaseSource{
-		TenantID: "tenant-1", LeaveCaseID: "case-leave-only", LeaveRequestID: "request-leave-only",
-		MatchMethod: "exact", MatchStatus: "confirmed",
+		BalanceID: "balance-leave-only", EntitlementYear: 2026, Source: "nexus", EventDate: start,
+		StartAt: start, EndAt: end, NetMinutes: 480, Status: "active", ReconciliationStatus: "not_required", UpdatedAt: start,
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -3172,7 +3160,7 @@ func TestOvertimeWorkflowReviewUpdatesRequestAndCreditsBalance(t *testing.T) {
 		t.Fatalf("expected 180 compensatory minutes credited, got %v", compensatory)
 	}
 	rawAnchor, ok, err := store.GetLeaveBalance(t.Context(), "tenant-1", compensatoryBalanceID)
-	if err != nil || !ok || rawAnchor.Source != "local_anchor" || rawAnchor.RemainingMinutes != 0 || rawAnchor.GrantedMinutes != 0 {
+	if err != nil || !ok || rawAnchor.Source != "nexus" || rawAnchor.EntitlementYear != approvedRequest.StartAt.Year() || rawAnchor.RemainingMinutes != 0 || rawAnchor.GrantedMinutes != 0 {
 		t.Fatalf("overtime credit must not mutate anchor snapshot, ok=%v err=%v anchor=%+v", ok, err, rawAnchor)
 	}
 	entries, err := store.ListLeaveBalanceEntries(t.Context(), "tenant-1")
@@ -3183,8 +3171,8 @@ func TestOvertimeWorkflowReviewUpdatesRequestAndCreditsBalance(t *testing.T) {
 	for _, entry := range entries {
 		if entry.EntryType == "overtime_credit" {
 			creditCount++
-			if entry.OvertimeRequestID != approvedRequest.ID || entry.AmountMinutes != 3*60 {
-				t.Fatalf("credit is not bound minute-exactly to overtime request: %+v", entry)
+			if entry.LeaveRecordID != "" || entry.AmountMinutes != 3*60 {
+				t.Fatalf("credit must be a standalone minute-exact balance entry: %+v", entry)
 			}
 		}
 	}
@@ -4393,6 +4381,66 @@ func TestSyncEHRMSEmployeesCreatesEmployeesAndDepartments(t *testing.T) {
 	if employee.BasicInfo["national_id"] != "A123456789" || employee.EmploymentInfo["position"] != "工程師" || employee.EducationMilitaryInfo["school_name"] != "Nexus University" {
 		t.Fatalf("expected eHRMS profile sections to be preserved, got basic=%+v employment=%+v education=%+v", employee.BasicInfo, employee.EmploymentInfo, employee.EducationMilitaryInfo)
 	}
+	if len(employee.InternalExperiences) != 1 || !employee.InternalExperiences[0].Current || employee.InternalExperiences[0].OrgUnitID != unit.ID || employee.InternalExperiences[0].Reason != "eHRMS sync" {
+		t.Fatalf("expected initial eHRMS internal experience to be persisted, got %+v", employee.InternalExperiences)
+	}
+}
+
+// TestSyncEHRMSEmployeesPersistsDepartmentChangeExperience verifies department changes are recorded once.
+func TestSyncEHRMSEmployeesPersistsDepartmentChangeExperience(t *testing.T) {
+	client := &fakeEHRMSClient{rows: []domain.EHRMSEmployeeRecord{{
+		"員工編號":   "EHRMS-HISTORY-001",
+		"中文姓名":   "歷程測試員工",
+		"到職日期":   "2026/06/01",
+		"在職狀態":   "在職",
+		"部門代碼":   "C01",
+		"部門中文名稱": "Corporate",
+		"職務代碼":   "0704",
+		"職務中文名稱": "工程師",
+	}}}
+	store, svc, ctx := newEmployeeFeatureFixture(t, []domain.Permission{
+		{Resource: "hr.employee", Action: "import", Scope: "all"},
+		{Resource: "hr.employee", Action: "read", Scope: "all"},
+	}, service.Options{EHRMSClient: client})
+	seedOrgUnitCodes(t, store, ctx.TenantID, "C01", "C02")
+
+	if _, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{}); err != nil {
+		t.Fatal(err)
+	}
+	originalUnit := mustOrgUnitByCode(t, store, ctx.TenantID, "C01")
+
+	client.rows[0]["部門代碼"] = "C02"
+	client.rows[0]["部門中文名稱"] = "People"
+	if _, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{}); err != nil {
+		t.Fatal(err)
+	}
+	updatedUnit := mustOrgUnitByCode(t, store, ctx.TenantID, "C02")
+	employee, ok, err := store.GetEmployeeByEmployeeNo(context.Background(), ctx.TenantID, "EHRMS-HISTORY-001")
+	if err != nil || !ok {
+		t.Fatalf("expected synced employee, ok=%v err=%v", ok, err)
+	}
+	if len(employee.InternalExperiences) != 2 {
+		t.Fatalf("expected department change to persist a second internal experience, got %+v", employee.InternalExperiences)
+	}
+	previous := employee.InternalExperiences[0]
+	current := employee.InternalExperiences[1]
+	if previous.Current || previous.EndDate == nil || previous.OrgUnitID != originalUnit.ID {
+		t.Fatalf("expected previous department experience to be closed, got %+v", previous)
+	}
+	if !current.Current || current.EndDate != nil || current.OrgUnitID != updatedUnit.ID || current.Reason != "eHRMS sync" {
+		t.Fatalf("expected current department experience to be persisted, got %+v", current)
+	}
+
+	if _, err := svc.HR().SyncEHRMSEmployees(ctx, domain.EHRMSEmployeeSyncInput{}); err != nil {
+		t.Fatal(err)
+	}
+	employee, ok, err = store.GetEmployeeByEmployeeNo(context.Background(), ctx.TenantID, "EHRMS-HISTORY-001")
+	if err != nil || !ok {
+		t.Fatalf("expected synced employee after idempotency check, ok=%v err=%v", ok, err)
+	}
+	if len(employee.InternalExperiences) != 2 {
+		t.Fatalf("expected unchanged eHRMS sync not to duplicate internal experiences, got %+v", employee.InternalExperiences)
+	}
 }
 
 // TestSyncEHRMSEmployeesRepairsLegacyRawCatalogReferences verifies an upsert rewrites old code-based references.
@@ -5336,9 +5384,15 @@ func TestSyncEHRMSAttendanceUpsertsLeaveBalancesAndDetails(t *testing.T) {
 	if len(requests) != 0 {
 		t.Fatalf("eHRMS facts must not be inserted as Nexus requests, got %+v", requests)
 	}
-	externalRecords, err := store.ListExternalLeaveRecords(context.Background(), "tenant-1")
+	allLeaveRecords, err := store.ListLeaveRecords(context.Background(), "tenant-1")
 	if err != nil {
 		t.Fatal(err)
+	}
+	externalRecords := make([]domain.LeaveRecord, 0)
+	for _, record := range allLeaveRecords {
+		if record.Source == "ehrms" {
+			externalRecords = append(externalRecords, record)
+		}
 	}
 	if len(externalRecords) != 1 {
 		t.Fatalf("expected one independent eHRMS leave fact, got %+v", externalRecords)
@@ -5366,7 +5420,7 @@ func TestSyncEHRMSAttendanceRejectsUnknownLeaveCodes(t *testing.T) {
 		{Resource: "attendance.leave", Action: "update", Scope: "all"},
 	}, service.Options{EHRMSClient: fakeEHRMSClient{
 		leaveBalances: []domain.EHRMSLeaveBalanceRecord{{
-			"emp_id": "IKM-MAP", "leave_type": "Wellness Leave", "unit": "days", "quota": "1", "remaining": "1",
+			"emp_id": "IKM-MAP", "year": "2026", "leave_type": "Wellness Leave", "unit": "days", "quota": "1", "remaining": "1",
 			"grant_start": "2026-01-01", "expire_date": "2026-12-31",
 		}},
 	}, Now: func() time.Time { return syncNow }})
@@ -5404,7 +5458,7 @@ func TestValidateAttendancePolicyDoesNotRewriteLinkedLeaveStorage(t *testing.T) 
 	}, service.Options{Now: func() time.Time { return now }})
 	if err := store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{
 		ID: "lb-linked", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", LeaveTypeID: "lt_annual",
-		RemainingMinutes: 7 * 60, PeriodStart: "2026-01-01", PeriodEnd: "2026-12-31", Source: "ehrms", UpdatedAt: now,
+		RemainingMinutes: 7 * 60, EntitlementYear: 2026, Source: "ehrms", UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
 	}

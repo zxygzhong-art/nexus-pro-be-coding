@@ -258,3 +258,35 @@ func TestAgentV2SchemaContract(t *testing.T) {
 		}
 	}
 }
+
+// TestPostInitMigrationEmbedsCurrentSchemaSnapshot verifies the squashed
+// baseline contains the current leave model directly.
+func TestPostInitMigrationEmbedsCurrentSchemaSnapshot(t *testing.T) {
+	schemaRaw, err := os.ReadFile("../../../db/schema.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	migrationRaw, err := os.ReadFile("../../../db/migrations/000002_post_init_updates.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	migration := string(migrationRaw)
+	up, _, ok := strings.Cut(migration, "-- +goose Down")
+	if !ok {
+		t.Fatal("000002 must declare a goose Down section")
+	}
+	marker := "CREATE EXTENSION IF NOT EXISTS pg_trgm;"
+	idx := strings.Index(up, marker)
+	if idx < 0 {
+		t.Fatal("000002 must embed the schema snapshot starting at CREATE EXTENSION")
+	}
+	if !strings.Contains(string(schemaRaw), "CREATE TABLE leave_records (") {
+		t.Fatal("current schema must include leave_records")
+	}
+	if !strings.Contains(migration, "CREATE TABLE leave_records (") {
+		t.Fatal("000002 must embed the final leave_records table")
+	}
+	if !strings.Contains(migration, "tablename <> 'goose_db_version'") {
+		t.Fatal("000002 must preserve goose_db_version while replacing baseline objects")
+	}
+}

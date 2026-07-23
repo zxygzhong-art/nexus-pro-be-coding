@@ -624,17 +624,18 @@ type FormInstanceFile struct {
 }
 
 type FormTemplate struct {
-	ID             string             `json:"id"`
-	TenantID       string             `json:"tenant_id"`
-	Key            string             `json:"key"`
-	Name           string             `json:"name"`
-	Description    string             `json:"description"`
-	Schema         []byte             `json:"schema"`
-	Status         string             `json:"status"`
-	CurrentVersion int32              `json:"current_version"`
-	CreatedAt      pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt      pgtype.Timestamptz `json:"updated_at"`
-	DeletedAt      pgtype.Timestamptz `json:"deleted_at"`
+	ID               string             `json:"id"`
+	TenantID         string             `json:"tenant_id"`
+	Key              string             `json:"key"`
+	Name             string             `json:"name"`
+	Description      string             `json:"description"`
+	Schema           []byte             `json:"schema"`
+	Status           string             `json:"status"`
+	CurrentVersion   int32              `json:"current_version"`
+	PublishedVersion int32              `json:"published_version"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	DeletedAt        pgtype.Timestamptz `json:"deleted_at"`
 }
 
 type FormTemplateVersion struct {
@@ -716,105 +717,98 @@ type KnowledgeDocumentChunk struct {
 	CreatedAt           pgtype.Timestamptz `json:"created_at"`
 }
 
+// 员工按年度、假别汇总的假期余额；同一员工、假别、年度仅一条
 type LeaveBalance struct {
-	ID                   string             `json:"id"`
-	TenantID             string             `json:"tenant_id"`
-	EmployeeID           string             `json:"employee_id"`
-	LeaveTypeID          string             `json:"leave_type_id"`
-	RemainingMinutes     int32              `json:"remaining_minutes"`
-	PeriodStart          pgtype.Date        `json:"period_start"`
-	PeriodEnd            pgtype.Date        `json:"period_end"`
-	GrantedMinutes       int32              `json:"granted_minutes"`
-	UsedMinutes          int32              `json:"used_minutes"`
-	Source               string             `json:"source"`
-	ExternalLeaveCode    string             `json:"external_leave_code"`
-	ExternalCategoryCode string             `json:"external_category_code"`
-	EntitlementYear      pgtype.Int4        `json:"entitlement_year"`
-	CarryInMinutes       int32              `json:"carry_in_minutes"`
-	CarryExpire          pgtype.Date        `json:"carry_expire"`
-	RawPayload           []byte             `json:"raw_payload"`
-	LastSyncedAt         pgtype.Timestamptz `json:"last_synced_at"`
-	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	// 余额主键
+	ID string `json:"id"`
+	// 租户 ID
+	TenantID string `json:"tenant_id"`
+	// 员工 ID
+	EmployeeID string `json:"employee_id"`
+	// 假别代码；Nexus 与 eHRMS 使用同一套代码
+	LeaveTypeID string `json:"leave_type_id"`
+	// 额度所属年度；不结转
+	EntitlementYear int32 `json:"entitlement_year"`
+	// 年度授予分钟数
+	GrantedMinutes int32 `json:"granted_minutes"`
+	// 上游已使用分钟数
+	UsedMinutes int32 `json:"used_minutes"`
+	// 余额快照剩余分钟数
+	RemainingMinutes int32 `json:"remaining_minutes"`
+	// 余额来源：nexus / ehrms
+	Source string `json:"source"`
+	// 最近同步时间；Nexus 本地余额可为空
+	LastSyncedAt pgtype.Timestamptz `json:"last_synced_at"`
+	// 更新时间
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+// 余额变动流水；金额为分钟，追加写入
 type LeaveBalanceEntry struct {
-	ID                string             `json:"id"`
-	TenantID          string             `json:"tenant_id"`
-	EmployeeID        string             `json:"employee_id"`
-	LeaveTypeID       string             `json:"leave_type_id"`
-	BalanceID         string             `json:"balance_id"`
-	AllocationID      pgtype.Int8        `json:"allocation_id"`
-	LeaveRequestID    pgtype.Text        `json:"leave_request_id"`
-	LeaveCaseID       pgtype.Text        `json:"leave_case_id"`
-	OvertimeRequestID pgtype.Text        `json:"overtime_request_id"`
-	EntryType         string             `json:"entry_type"`
-	AmountMinutes     int32              `json:"amount_minutes"`
-	IdempotencyKey    string             `json:"idempotency_key"`
-	Metadata          []byte             `json:"metadata"`
-	OccurredAt        pgtype.Timestamptz `json:"occurred_at"`
-	CreatedAt         pgtype.Timestamptz `json:"created_at"`
+	// 余额流水主键
+	ID string `json:"id"`
+	// 租户 ID
+	TenantID string `json:"tenant_id"`
+	// 被调整的年度余额 ID
+	BalanceID string `json:"balance_id"`
+	// 关联休假记录；加班入账和人工调整可为空
+	LeaveRecordID pgtype.Text `json:"leave_record_id"`
+	// 员工 ID
+	EmployeeID string `json:"employee_id"`
+	// 假别代码
+	LeaveTypeID string `json:"leave_type_id"`
+	// 余额所属年度
+	EntitlementYear int32 `json:"entitlement_year"`
+	// 变动类型
+	EntryType string `json:"entry_type"`
+	// 变动分钟数；负数扣减，正数返还或增加
+	AmountMinutes int32 `json:"amount_minutes"`
+	// 业务幂等键
+	IdempotencyKey string `json:"idempotency_key"`
+	// 业务发生时间
+	OccurredAt pgtype.Timestamptz `json:"occurred_at"`
+	// 流水创建时间
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
 }
 
-type LeaveCase struct {
-	ID          string             `json:"id"`
-	TenantID    string             `json:"tenant_id"`
-	EmployeeID  string             `json:"employee_id"`
-	LeaveTypeID string             `json:"leave_type_id"`
-	StartAt     pgtype.Timestamptz `json:"start_at"`
-	EndAt       pgtype.Timestamptz `json:"end_at"`
-	NetMinutes  int32              `json:"net_minutes"`
-	Status      string             `json:"status"`
-	Origin      string             `json:"origin"`
-	CreatedAt   pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz `json:"updated_at"`
-}
-
-type LeaveCaseSource struct {
-	ID                    int64              `json:"id"`
-	TenantID              string             `json:"tenant_id"`
-	LeaveCaseID           string             `json:"leave_case_id"`
-	LeaveRequestID        pgtype.Text        `json:"leave_request_id"`
-	ExternalLeaveRecordID pgtype.Text        `json:"external_leave_record_id"`
-	MatchMethod           string             `json:"match_method"`
-	MatchStatus           string             `json:"match_status"`
-	CreatedAt             pgtype.Timestamptz `json:"created_at"`
-}
-
-type LeaveExternalRecord struct {
-	ID                   string             `json:"id"`
-	TenantID             string             `json:"tenant_id"`
-	EmployeeID           string             `json:"employee_id"`
-	SourceSystem         string             `json:"source_system"`
-	ExternalRef          string             `json:"external_ref"`
-	ExternalLeaveCode    string             `json:"external_leave_code"`
-	ExternalCategoryCode string             `json:"external_category_code"`
-	LeaveTypeID          string             `json:"leave_type_id"`
-	LeaveName            string             `json:"leave_name"`
-	StartAt              pgtype.Timestamptz `json:"start_at"`
-	EndAt                pgtype.Timestamptz `json:"end_at"`
-	GrossMinutes         int32              `json:"gross_minutes"`
-	DeductMinutes        int32              `json:"deduct_minutes"`
-	NetMinutes           int32              `json:"net_minutes"`
-	Remark               string             `json:"remark"`
-	SourceLabel          string             `json:"source_label"`
-	Status               string             `json:"status"`
-	RawPayload           []byte             `json:"raw_payload"`
-	PayloadHash          string             `json:"payload_hash"`
-	FirstSeenAt          pgtype.Timestamptz `json:"first_seen_at"`
-	LastSeenAt           pgtype.Timestamptz `json:"last_seen_at"`
-	DeletedAt            pgtype.Timestamptz `json:"deleted_at"`
-}
-
-type LeaveRequestAllocation struct {
-	ID              int64              `json:"id"`
-	TenantID        string             `json:"tenant_id"`
-	LeaveRequestID  string             `json:"leave_request_id"`
-	LeaveBalanceID  string             `json:"leave_balance_id"`
-	EmployeeID      string             `json:"employee_id"`
-	LeaveTypeID     string             `json:"leave_type_id"`
-	Cycle           int32              `json:"cycle"`
-	ReservedMinutes int32              `json:"reserved_minutes"`
-	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+// 统一休假记录；Nexus 申请和 eHRMS 同步记录共用此表
+type LeaveRecord struct {
+	// 休假记录主键；Nexus 记录与 leave request 使用同一 ID
+	ID string `json:"id"`
+	// 租户 ID
+	TenantID string `json:"tenant_id"`
+	// 员工 ID
+	EmployeeID string `json:"employee_id"`
+	// 假别代码；Nexus 与 eHRMS 使用同一套代码
+	LeaveTypeID string `json:"leave_type_id"`
+	// 本记录唯一对应的年度余额 ID
+	BalanceID string `json:"balance_id"`
+	// 额度所属年度；记录不得跨年度
+	EntitlementYear int32 `json:"entitlement_year"`
+	// 记录来源：nexus / ehrms
+	Source string `json:"source"`
+	// 来源记录创建时间
+	EventDate pgtype.Timestamptz `json:"event_date"`
+	// 请假开始时间
+	StartAt pgtype.Timestamptz `json:"start_at"`
+	// 请假结束时间
+	EndAt pgtype.Timestamptz `json:"end_at"`
+	// 实际请假分钟数
+	NetMinutes int32 `json:"net_minutes"`
+	// 请假说明
+	Remark string `json:"remark"`
+	// 记录状态：pending / active / cancelled / corrected
+	Status string `json:"status"`
+	// 一对一匹配的 Nexus 记录 ID；仅 eHRMS 记录填写
+	MatchedRecordID pgtype.Text `json:"matched_record_id"`
+	// 双来源核对状态
+	ReconciliationStatus string `json:"reconciliation_status"`
+	// eHRMS 最近同步看到该记录的时间
+	LastSeenAt pgtype.Timestamptz `json:"last_seen_at"`
+	// eHRMS 记录被上游移除的时间
+	DeletedAt pgtype.Timestamptz `json:"deleted_at"`
+	// 更新时间
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 // EHRMS /leave-types 假別樹；id 預設使用 code

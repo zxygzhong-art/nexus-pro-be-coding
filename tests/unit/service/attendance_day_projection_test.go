@@ -142,9 +142,9 @@ func TestProjectAttendanceDayWithEffectiveLeaveUsesCasesForApprovedTime(t *testi
 		t.Fatalf("approved request leaked into effective projection: %#v", withoutCase)
 	}
 
-	withCase := service.ProjectAttendanceDayWithEffectiveLeave(nil, []domain.LeaveCase{{
-		ID: "case-1", EmployeeID: "emp-1", StartAt: start, EndAt: end,
-		NetMinutes: 480, Status: "active",
+	withCase := service.ProjectAttendanceDayWithEffectiveLeave(nil, []domain.LeaveRecord{{
+		ID: "record-1", EmployeeID: "emp-1", StartAt: start, EndAt: end,
+		NetMinutes: 480, Status: "active", Source: "nexus",
 	}}, nil, workDate, attendanceProjectionWorkTime(), end)
 	if withCase.ApprovedLeaveMinutes != 480 || withCase.DayStatus != "complete" {
 		t.Fatalf("active leave case projection = %#v, want 480 credited minutes and complete", withCase)

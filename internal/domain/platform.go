@@ -119,11 +119,11 @@ type PlatformFormDraftPage struct {
 
 // PlatformFormsResponse 定義平臺表單回應的資料結構。
 type PlatformFormsResponse struct {
-	Categories   []PlatformFormColumn       `json:"categories"`
+	Categories   []PlatformFormColumn        `json:"categories"`
 	Applications PlatformFormApplicationPage `json:"applications"`
 	Drafts       PlatformFormDraftPage       `json:"drafts"`
-	AIMessages   []PlatformChatMessage      `json:"ai_messages"`
-	QuickPrompts []string                   `json:"quick_prompts"`
+	AIMessages   []PlatformChatMessage       `json:"ai_messages"`
+	QuickPrompts []string                    `json:"quick_prompts"`
 }
 
 // PlatformTaskItem 定義平臺任務項目的資料結構。
@@ -264,19 +264,21 @@ type PlatformFormDesign struct {
 
 // PlatformFormDesignForm 定義平臺表單 design 表單的資料結構。
 type PlatformFormDesignForm struct {
-	ID             string                     `json:"id"`
-	Icon           string                     `json:"icon"`
-	Name           string                     `json:"name"`
-	Category       string                     `json:"category"`
-	Desc           string                     `json:"desc,omitempty"`
-	Flow           string                     `json:"flow"`
-	Enabled        bool                       `json:"enabled"`
-	AddedThisMonth bool                       `json:"added_this_month"`
-	UpdatedAt      string                     `json:"updated_at"`
-	UpdatedBy      string                     `json:"updated_by,omitempty"`
-	FormKind       string                     `json:"form_kind,omitempty"`
-	Fields         []PlatformFormBuilderField `json:"fields,omitempty"`
-	Stages         []PlatformFormBuilderStage `json:"stages,omitempty"`
+	ID               string                     `json:"id"`
+	Icon             string                     `json:"icon"`
+	Name             string                     `json:"name"`
+	Category         string                     `json:"category"`
+	Desc             string                     `json:"desc,omitempty"`
+	Flow             string                     `json:"flow"`
+	Enabled          bool                       `json:"enabled"`
+	AddedThisMonth   bool                       `json:"added_this_month"`
+	UpdatedAt        string                     `json:"updated_at"`
+	UpdatedBy        string                     `json:"updated_by,omitempty"`
+	FormKind         string                     `json:"form_kind,omitempty"`
+	CurrentVersion   int                        `json:"current_version"`
+	PublishedVersion int                        `json:"published_version"`
+	Fields           []PlatformFormBuilderField `json:"fields,omitempty"`
+	Stages           []PlatformFormBuilderStage `json:"stages,omitempty"`
 }
 
 // PlatformFormBuilderContract 定義平臺表單 builder contract 的資料結構。
@@ -411,6 +413,11 @@ type UpdateWorkspaceFormDesignInput struct {
 	FormKind *string                     `json:"form_kind,omitempty"`
 	Fields   *[]PlatformFormBuilderField `json:"fields,omitempty"`
 	Stages   *[]PlatformFormBuilderStage `json:"stages,omitempty"`
+}
+
+// PublishWorkspaceFormDesignInput 定義工作區表單發布時的樂觀鎖版本。
+type PublishWorkspaceFormDesignInput struct {
+	Version int `json:"version"`
 }
 
 // PlatformInsightsQuery 定義平臺洞察查詢的資料結構。

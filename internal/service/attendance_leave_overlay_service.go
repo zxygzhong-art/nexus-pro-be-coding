@@ -67,75 +67,38 @@ func applyLeaveBalanceOverlay(items []LeaveBalance, entries []domain.LeaveBalanc
 	return out
 }
 
-// leaveBalanceAllocationsForOverlay locks every eligible bucket in a stable
-// expiry order, then splits one request across as many buckets as necessary.
-// No snapshot row is updated; callers persist only allocations and entries.
-func (c AttendanceService) leaveBalanceAllocationsForOverlay(ctx RequestContext, employeeID, leaveTypeID string, requestedMinutes int, asOf time.Time) ([]LeaveRequestAllocation, int, string, error) {
-	items, err := c.store.ListLeaveBalancesForOverlay(goContext(ctx), ctx.TenantID, employeeID, leaveTypeID, asOf)
+// leaveBalanceForOverlay resolves the single annual balance a request may use.
+func (c AttendanceService) leaveBalanceForOverlay(ctx RequestContext, employeeID, leaveTypeID string, requestedMinutes int, asOf time.Time) (LeaveBalance, int, string, error) {
+	item, found, err := c.store.GetLeaveBalanceForOverlay(goContext(ctx), ctx.TenantID, employeeID, leaveTypeID, asOf)
 	if err != nil {
-		return nil, 0, "", err
+		return LeaveBalance{}, 0, "", err
 	}
-	if len(items) == 0 {
-		return nil, 0, leaveEvaluationBalanceMissing, nil
+	if !found {
+		return LeaveBalance{}, 0, leaveEvaluationBalanceMissing, nil
 	}
 	entries, err := c.store.ListLeaveBalanceEntries(goContext(ctx), ctx.TenantID)
 	if err != nil {
-		return nil, 0, "", err
+		return LeaveBalance{}, 0, "", err
 	}
-	effective := applyLeaveBalanceOverlay(items, entries)
-	availableMinutes := 0
-	for _, item := range effective {
-		availableMinutes += max(0, item.RemainingMinutes)
-	}
+	effective := applyLeaveBalanceOverlay([]LeaveBalance{item}, entries)[0]
+	availableMinutes := max(0, effective.RemainingMinutes)
 	if availableMinutes < requestedMinutes {
-		return nil, availableMinutes, leaveEvaluationBalanceInsufficient, nil
+		return item, availableMinutes, leaveEvaluationBalanceInsufficient, nil
 	}
-
-	remaining := requestedMinutes
-	allocations := make([]LeaveRequestAllocation, 0, len(effective))
-	for _, item := range effective {
-		if remaining == 0 {
-			break
-		}
-		reserved := min(max(0, item.RemainingMinutes), remaining)
-		if reserved == 0 {
-			continue
-		}
-		allocations = append(allocations, LeaveRequestAllocation{
-			TenantID: ctx.TenantID, LeaveBalanceID: item.ID,
-			EmployeeID: employeeID, LeaveTypeID: leaveTypeID, ReservedMinutes: reserved,
-		})
-		remaining -= reserved
-	}
-	return allocations, availableMinutes, "", nil
+	return item, availableMinutes, "", nil
 }
 
-func (c AttendanceService) appendLeaveBalanceEntry(ctx RequestContext, request LeaveRequest, allocation LeaveRequestAllocation, caseID, entryType string, amountMinutes, cycle int) error {
-	if strings.TrimSpace(allocation.LeaveBalanceID) == "" || amountMinutes == 0 {
+func (c AttendanceService) appendLeaveBalanceEntry(ctx RequestContext, request LeaveRequest, record LeaveRecord, entryType string, amountMinutes, cycle int) error {
+	if strings.TrimSpace(record.BalanceID) == "" || amountMinutes == 0 {
 		return nil
 	}
 	now := c.Now()
-	idempotencyKey := fmt.Sprintf("leave-request:%s:cycle:%d:balance:%s:%s", request.ID, cycle, allocation.LeaveBalanceID, entryType)
-	metadata := map[string]any{"source": "nexus_workflow", "cycle": cycle}
-	if entryType == leaveBalanceEntryReserve {
-		balance, found, err := c.store.GetLeaveBalance(goContext(ctx), ctx.TenantID, allocation.LeaveBalanceID)
-		if err != nil {
-			return err
-		}
-		if !found {
-			return Conflict("allocated leave balance was not found")
-		}
-		metadata["snapshot_remaining_minutes"] = balance.RemainingMinutes
-		metadata["snapshot_used_minutes"] = balance.UsedMinutes
-		metadata["balance_source"] = balance.Source
-	}
+	idempotencyKey := fmt.Sprintf("leave-request:%s:cycle:%d:balance:%s:%s", request.ID, cycle, record.BalanceID, entryType)
 	_, err := c.store.AppendLeaveBalanceEntry(goContext(ctx), domain.LeaveBalanceEntry{
 		ID: utils.NewID("lbe"), TenantID: ctx.TenantID,
 		EmployeeID: request.EmployeeID, LeaveTypeID: request.LeaveTypeID,
-		BalanceID: allocation.LeaveBalanceID, LeaveRequestID: request.ID,
-		LeaveCaseID: caseID, AllocationID: allocation.ID,
+		BalanceID: record.BalanceID, LeaveRecordID: record.ID, EntitlementYear: record.EntitlementYear,
 		EntryType: entryType, AmountMinutes: amountMinutes, IdempotencyKey: idempotencyKey,
-		Metadata:   metadata,
 		OccurredAt: now, CreatedAt: now,
 	})
 	return err
@@ -169,25 +132,29 @@ func nextLeaveRequestBalanceCycle(existing LeaveRequest, resubmitting bool) int 
 	return leaveRequestBalanceCycle(existing) + 1
 }
 
-func (c AttendanceService) ensureNexusLeaveCase(ctx RequestContext, request LeaveRequest) (LeaveCase, error) {
-	if item, ok, err := c.store.GetLeaveCaseByLeaveRequest(goContext(ctx), ctx.TenantID, request.ID); err != nil || ok {
-		return item, err
+func (c AttendanceService) ensureNexusLeaveRecord(ctx RequestContext, request LeaveRequest, balance LeaveBalance, status string) (LeaveRecord, error) {
+	if item, ok, err := c.store.GetLeaveRecord(goContext(ctx), ctx.TenantID, request.ID); err != nil {
+		return LeaveRecord{}, err
+	} else if ok {
+		item.EmployeeID = request.EmployeeID
+		item.LeaveTypeID = request.LeaveTypeID
+		item.BalanceID = balance.ID
+		item.EntitlementYear = balance.EntitlementYear
+		item.Status = status
+		item.StartAt = request.StartAt
+		item.EndAt = request.EndAt
+		item.NetMinutes = request.RequestedMinutes
+		item.Remark = request.Reason
+		item.UpdatedAt = c.Now()
+		return item, c.store.UpsertLeaveRecord(goContext(ctx), item)
 	}
 	now := c.Now()
-	item := LeaveCase{
-		ID: ehrmsStableID("lc", ctx.TenantID, "nexus", request.ID), TenantID: ctx.TenantID,
-		EmployeeID: request.EmployeeID, LeaveTypeID: request.LeaveTypeID,
+	item := LeaveRecord{
+		ID: request.ID, TenantID: ctx.TenantID, EmployeeID: request.EmployeeID,
+		LeaveTypeID: request.LeaveTypeID, BalanceID: balance.ID,
+		EntitlementYear: balance.EntitlementYear, Source: "nexus", EventDate: request.CreatedAt,
 		StartAt: request.StartAt, EndAt: request.EndAt, NetMinutes: request.RequestedMinutes,
-		Status: "active", Origin: "nexus", CreatedAt: now, UpdatedAt: now,
+		Remark: request.Reason, Status: status, ReconciliationStatus: "not_required", UpdatedAt: now,
 	}
-	if err := c.store.UpsertLeaveCase(goContext(ctx), item); err != nil {
-		return LeaveCase{}, err
-	}
-	if err := c.store.UpsertLeaveCaseSource(goContext(ctx), LeaveCaseSource{
-		TenantID: ctx.TenantID, LeaveCaseID: item.ID, LeaveRequestID: request.ID,
-		MatchMethod: "direct", MatchStatus: "confirmed", CreatedAt: now,
-	}); err != nil {
-		return LeaveCase{}, err
-	}
-	return item, nil
+	return item, c.store.UpsertLeaveRecord(goContext(ctx), item)
 }

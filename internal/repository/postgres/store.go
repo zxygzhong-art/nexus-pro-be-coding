@@ -1723,47 +1723,16 @@ func (s *Store) UpsertLeaveBalance(execCtx context.Context, v domain.LeaveBalanc
 	tenantCtx := tenantContext(execCtx, v.TenantID)
 	source := strings.TrimSpace(v.Source)
 	if source == "" {
-		source = "manual_snapshot"
+		source = "nexus"
 	}
-	if source == "local_anchor" {
-		_, err := s.EnsureLocalLeaveBalanceAnchor(execCtx, v)
-		return err
+	if v.EntitlementYear == 0 {
+		v.EntitlementYear = v.UpdatedAt.Year()
 	}
-	carryExpire, err := nullableDate(v.CarryExpire)
-	if err != nil {
-		return err
-	}
-	entitlementYear := pgtype.Int4{}
-	if v.EntitlementYear > 0 {
-		entitlementYear = pgtype.Int4{Int32: int32(v.EntitlementYear), Valid: true}
-	}
-	periodStart, err := nullableDate(v.PeriodStart)
-	if err != nil {
-		return err
-	}
-	periodEnd, err := nullableDate(v.PeriodEnd)
-	if err != nil {
-		return err
-	}
-	err = s.q.UpsertLeaveBalance(tenantCtx, sqlc.UpsertLeaveBalanceParams{
-		ID:                   v.ID,
-		TenantID:             v.TenantID,
-		EmployeeID:           v.EmployeeID,
-		LeaveTypeID:          v.LeaveTypeID,
-		RemainingMinutes:     int32(v.RemainingMinutes),
-		PeriodStart:          periodStart,
-		PeriodEnd:            periodEnd,
-		GrantedMinutes:       int32(v.GrantedMinutes),
-		UsedMinutes:          int32(v.UsedMinutes),
-		Source:               source,
-		ExternalLeaveCode:    v.ExternalLeaveCode,
-		ExternalCategoryCode: v.ExternalCategoryCode,
-		EntitlementYear:      entitlementYear,
-		CarryInMinutes:       int32(v.CarryInMinutes),
-		CarryExpire:          carryExpire,
-		RawPayload:           mustJSON(v.RawPayload),
-		LastSyncedAt:         nullableTimestamptz(v.LastSyncedAt),
-		UpdatedAt:            timestamptz(v.UpdatedAt),
+	err := s.q.UpsertLeaveBalance(tenantCtx, sqlc.UpsertLeaveBalanceParams{
+		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, LeaveTypeID: v.LeaveTypeID,
+		EntitlementYear: int32(v.EntitlementYear), GrantedMinutes: int32(v.GrantedMinutes),
+		UsedMinutes: int32(v.UsedMinutes), RemainingMinutes: int32(v.RemainingMinutes), Source: source,
+		LastSyncedAt: nullableTimestamptz(v.LastSyncedAt), UpdatedAt: timestamptz(v.UpdatedAt),
 	})
 	return err
 }
@@ -1776,12 +1745,16 @@ func (s *Store) EnsureLocalLeaveBalanceAnchor(execCtx context.Context, v domain.
 	if v.LeaveTypeID == "" {
 		v.LeaveTypeID = domain.StableLeaveTypeID(v.LeaveType)
 	}
+	if v.EntitlementYear == 0 {
+		v.EntitlementYear = v.UpdatedAt.Year()
+	}
 	row, err := s.q.EnsureLocalLeaveBalanceAnchor(tenantContext(execCtx, v.TenantID), sqlc.EnsureLocalLeaveBalanceAnchorParams{
-		ID:          v.ID,
-		TenantID:    v.TenantID,
-		EmployeeID:  v.EmployeeID,
-		LeaveTypeID: v.LeaveTypeID,
-		UpdatedAt:   timestamptz(v.UpdatedAt),
+		ID:              v.ID,
+		TenantID:        v.TenantID,
+		EmployeeID:      v.EmployeeID,
+		LeaveTypeID:     v.LeaveTypeID,
+		EntitlementYear: int32(v.EntitlementYear),
+		UpdatedAt:       timestamptz(v.UpdatedAt),
 	})
 	if err != nil {
 		return domain.LeaveBalance{}, err
@@ -1804,7 +1777,7 @@ func (s *Store) GetLeaveBalance(execCtx context.Context, tenantID, id string) (d
 func (s *Store) ListLeaveBalancesForOverlay(execCtx context.Context, tenantID, employeeID, leaveTypeID string, asOf time.Time) ([]domain.LeaveBalance, error) {
 	items, err := s.q.ListLeaveBalancesForOverlay(tenantContext(execCtx, tenantID), sqlc.ListLeaveBalancesForOverlayParams{
 		TenantID: tenantID, EmployeeID: employeeID, LeaveTypeID: leaveTypeID,
-		AsOf: pgtype.Date{Time: asOf, Valid: true},
+		AsOf: pgtype.Timestamptz{Time: asOf, Valid: true},
 	})
 	if err != nil {
 		return nil, err
@@ -1818,7 +1791,7 @@ func (s *Store) ListLeaveBalancesForOverlay(execCtx context.Context, tenantID, e
 
 func (s *Store) GetLeaveBalanceForOverlay(execCtx context.Context, tenantID, employeeID, leaveTypeID string, asOf time.Time) (domain.LeaveBalance, bool, error) {
 	v, err := s.q.GetLeaveBalanceForOverlay(tenantContext(execCtx, tenantID), sqlc.GetLeaveBalanceForOverlayParams{
-		TenantID: tenantID, EmployeeID: employeeID, LeaveTypeID: leaveTypeID, AsOf: pgtype.Date{Time: asOf, Valid: true},
+		TenantID: tenantID, EmployeeID: employeeID, LeaveTypeID: leaveTypeID, AsOf: pgtype.Timestamptz{Time: asOf, Valid: true},
 	})
 	if isNotFound(err) {
 		return domain.LeaveBalance{}, false, nil
@@ -1845,10 +1818,9 @@ func (s *Store) ListLeaveBalances(execCtx context.Context, tenantID string) ([]d
 func (s *Store) AppendLeaveBalanceEntry(execCtx context.Context, v domain.LeaveBalanceEntry) (bool, error) {
 	_, err := s.q.AppendLeaveBalanceEntry(tenantContext(execCtx, v.TenantID), sqlc.AppendLeaveBalanceEntryParams{
 		ID: v.ID, TenantID: v.TenantID, BalanceID: v.BalanceID,
-		AllocationID: nullableInt8(v.AllocationID), LeaveRequestID: nullableText(v.LeaveRequestID),
-		LeaveCaseID: nullableText(v.LeaveCaseID), OvertimeRequestID: nullableText(v.OvertimeRequestID),
-		EntryType: v.EntryType, AmountMinutes: int32(v.AmountMinutes), IdempotencyKey: v.IdempotencyKey,
-		Metadata: mustJSON(v.Metadata), OccurredAt: timestamptz(v.OccurredAt), CreatedAt: timestamptz(v.CreatedAt),
+		LeaveRecordID: nullableText(v.LeaveRecordID),
+		EntryType:     v.EntryType, AmountMinutes: int32(v.AmountMinutes), IdempotencyKey: v.IdempotencyKey,
+		OccurredAt: timestamptz(v.OccurredAt), CreatedAt: timestamptz(v.CreatedAt),
 	})
 	if isNotFound(err) {
 		return false, nil
@@ -1859,9 +1831,8 @@ func (s *Store) AppendLeaveBalanceEntry(execCtx context.Context, v domain.LeaveB
 func (s *Store) AppendStandaloneLeaveBalanceEntry(execCtx context.Context, v domain.LeaveBalanceEntry) (bool, error) {
 	_, err := s.q.AppendStandaloneLeaveBalanceEntry(tenantContext(execCtx, v.TenantID), sqlc.AppendStandaloneLeaveBalanceEntryParams{
 		ID: v.ID, TenantID: v.TenantID, BalanceID: v.BalanceID,
-		LeaveCaseID: nullableText(v.LeaveCaseID), OvertimeRequestID: nullableText(v.OvertimeRequestID),
 		EntryType: v.EntryType, AmountMinutes: int32(v.AmountMinutes), IdempotencyKey: v.IdempotencyKey,
-		Metadata: mustJSON(v.Metadata), OccurredAt: timestamptz(v.OccurredAt), CreatedAt: timestamptz(v.CreatedAt),
+		OccurredAt: timestamptz(v.OccurredAt), CreatedAt: timestamptz(v.CreatedAt),
 	})
 	if isNotFound(err) {
 		return false, nil
@@ -1932,153 +1903,46 @@ func (s *Store) UpsertLeaveRequest(execCtx context.Context, v domain.LeaveReques
 	})
 }
 
-// UpsertLeaveRequestAllocation persists the exact reserved balance bucket.
-func (s *Store) UpsertLeaveRequestAllocation(execCtx context.Context, v domain.LeaveRequestAllocation) error {
-	tenantCtx := tenantContext(execCtx, v.TenantID)
-	_, err := s.q.UpsertLeaveRequestAllocation(tenantCtx, sqlc.UpsertLeaveRequestAllocationParams{
-		TenantID:        v.TenantID,
-		LeaveRequestID:  v.LeaveRequestID,
-		LeaveBalanceID:  v.LeaveBalanceID,
-		Cycle:           int32(v.Cycle),
-		ReservedMinutes: int32(v.ReservedMinutes),
-		CreatedAt:       timestamptz(v.CreatedAt),
-	})
-	if !isNotFound(err) {
-		return err
-	}
-	existing, getErr := s.q.GetLeaveRequestAllocationByCycleBalance(tenantCtx, sqlc.GetLeaveRequestAllocationByCycleBalanceParams{
-		TenantID: v.TenantID, LeaveRequestID: v.LeaveRequestID,
-		LeaveBalanceID: v.LeaveBalanceID, Cycle: int32(v.Cycle),
-	})
-	if getErr != nil {
-		return getErr
-	}
-	if existing.ReservedMinutes != int32(v.ReservedMinutes) {
-		return domain.Conflict("leave allocation is immutable within a request cycle")
-	}
-	return nil
-}
-
-func (s *Store) ListLeaveRequestAllocationsByRequest(execCtx context.Context, tenantID, leaveRequestID string) ([]domain.LeaveRequestAllocation, error) {
-	items, err := s.q.ListLeaveRequestAllocationsByRequest(tenantContext(execCtx, tenantID), sqlc.ListLeaveRequestAllocationsByRequestParams{
-		TenantID: tenantID, LeaveRequestID: leaveRequestID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	return mapSlice(items, fromLeaveRequestAllocation), nil
-}
-
-func (s *Store) ListLeaveRequestAllocationsByRequestCycle(execCtx context.Context, tenantID, leaveRequestID string, cycle int) ([]domain.LeaveRequestAllocation, error) {
-	items, err := s.q.ListLeaveRequestAllocationsByRequestCycle(tenantContext(execCtx, tenantID), sqlc.ListLeaveRequestAllocationsByRequestCycleParams{
-		TenantID: tenantID, LeaveRequestID: leaveRequestID, Cycle: int32(cycle),
-	})
-	if err != nil {
-		return nil, err
-	}
-	return mapSlice(items, fromLeaveRequestAllocation), nil
-}
-
-func (s *Store) UpsertLeaveCase(execCtx context.Context, v domain.LeaveCase) error {
-	_, err := s.q.UpsertLeaveCase(tenantContext(execCtx, v.TenantID), sqlc.UpsertLeaveCaseParams{
+func (s *Store) UpsertLeaveRecord(execCtx context.Context, v domain.LeaveRecord) error {
+	_, err := s.q.UpsertLeaveRecord(tenantContext(execCtx, v.TenantID), sqlc.UpsertLeaveRecordParams{
 		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, LeaveTypeID: v.LeaveTypeID,
-		StartAt: timestamptz(v.StartAt), EndAt: timestamptz(v.EndAt), NetMinutes: int32(v.NetMinutes),
-		Status: v.Status, Origin: v.Origin, CreatedAt: timestamptz(v.CreatedAt), UpdatedAt: timestamptz(v.UpdatedAt),
+		BalanceID: v.BalanceID, EntitlementYear: int32(v.EntitlementYear), Source: v.Source,
+		EventDate: timestamptz(v.EventDate), StartAt: timestamptz(v.StartAt), EndAt: timestamptz(v.EndAt),
+		NetMinutes: int32(v.NetMinutes), Remark: v.Remark, Status: v.Status,
+		MatchedRecordID: nullableText(v.MatchedRecordID), ReconciliationStatus: v.ReconciliationStatus,
+		LastSeenAt: nullableTimestamptz(v.LastSeenAt), DeletedAt: nullableTimestamptz(v.DeletedAt),
+		UpdatedAt: timestamptz(v.UpdatedAt),
 	})
 	return err
 }
 
-func (s *Store) GetLeaveCaseByLeaveRequest(execCtx context.Context, tenantID, leaveRequestID string) (domain.LeaveCase, bool, error) {
-	v, err := s.q.GetLeaveCaseByLeaveRequestID(tenantContext(execCtx, tenantID), sqlc.GetLeaveCaseByLeaveRequestIDParams{
-		TenantID: tenantID, LeaveRequestID: nullableText(leaveRequestID),
-	})
+func (s *Store) GetLeaveRecord(execCtx context.Context, tenantID, id string) (domain.LeaveRecord, bool, error) {
+	v, err := s.q.GetLeaveRecord(tenantContext(execCtx, tenantID), sqlc.GetLeaveRecordParams{TenantID: tenantID, ID: id})
 	if isNotFound(err) {
-		return domain.LeaveCase{}, false, nil
+		return domain.LeaveRecord{}, false, nil
 	}
 	if err != nil {
-		return domain.LeaveCase{}, false, err
+		return domain.LeaveRecord{}, false, err
 	}
-	return fromLeaveCase(v.LeaveCase), true, nil
+	return fromLeaveRecord(v), true, nil
 }
 
-func (s *Store) GetLeaveCaseByExternalRecord(execCtx context.Context, tenantID, externalLeaveRecordID string) (domain.LeaveCase, bool, error) {
-	v, err := s.q.GetLeaveCaseByExternalLeaveRecordID(tenantContext(execCtx, tenantID), sqlc.GetLeaveCaseByExternalLeaveRecordIDParams{
-		TenantID: tenantID, ExternalLeaveRecordID: nullableText(externalLeaveRecordID),
-	})
-	if isNotFound(err) {
-		return domain.LeaveCase{}, false, nil
-	}
+func (s *Store) ListLeaveRecords(execCtx context.Context, tenantID string) ([]domain.LeaveRecord, error) {
+	items, err := s.q.ListLeaveRecords(tenantContext(execCtx, tenantID), tenantID)
 	if err != nil {
-		return domain.LeaveCase{}, false, err
+		return nil, err
 	}
-	return fromLeaveCase(v.LeaveCase), true, nil
+	return mapSlice(items, fromLeaveRecord), nil
 }
 
-func (s *Store) ListConfirmedActiveLeaveCasesByQuery(execCtx context.Context, tenantID string, employeeIDs []string, fromAt, toAt time.Time) ([]domain.LeaveCase, error) {
-	items, err := s.q.ListConfirmedActiveLeaveCasesByQuery(tenantContext(execCtx, tenantID), sqlc.ListConfirmedActiveLeaveCasesByQueryParams{
+func (s *Store) ListActiveLeaveRecordsByQuery(execCtx context.Context, tenantID string, employeeIDs []string, fromAt, toAt time.Time) ([]domain.LeaveRecord, error) {
+	items, err := s.q.ListActiveLeaveRecordsByQuery(tenantContext(execCtx, tenantID), sqlc.ListActiveLeaveRecordsByQueryParams{
 		TenantID: tenantID, EmployeeIds: textArray(employeeIDs), FromAt: timestamptz(fromAt), ToAt: timestamptz(toAt),
 	})
 	if err != nil {
 		return nil, err
 	}
-	return mapSlice(items, fromLeaveCase), nil
-}
-
-func (s *Store) UpsertLeaveCaseSource(execCtx context.Context, v domain.LeaveCaseSource) error {
-	switch {
-	case strings.TrimSpace(v.LeaveRequestID) != "" && strings.TrimSpace(v.ExternalLeaveRecordID) == "":
-		_, err := s.q.UpsertLeaveRequestCaseSource(tenantContext(execCtx, v.TenantID), sqlc.UpsertLeaveRequestCaseSourceParams{
-			TenantID: v.TenantID, LeaveCaseID: v.LeaveCaseID, LeaveRequestID: nullableText(v.LeaveRequestID),
-			MatchMethod: v.MatchMethod, MatchStatus: v.MatchStatus, CreatedAt: timestamptz(v.CreatedAt),
-		})
-		return err
-	case strings.TrimSpace(v.ExternalLeaveRecordID) != "" && strings.TrimSpace(v.LeaveRequestID) == "":
-		_, err := s.q.UpsertExternalLeaveCaseSource(tenantContext(execCtx, v.TenantID), sqlc.UpsertExternalLeaveCaseSourceParams{
-			TenantID: v.TenantID, LeaveCaseID: v.LeaveCaseID, ExternalLeaveRecordID: nullableText(v.ExternalLeaveRecordID),
-			MatchMethod: v.MatchMethod, MatchStatus: v.MatchStatus, CreatedAt: timestamptz(v.CreatedAt),
-		})
-		return err
-	default:
-		return fmt.Errorf("leave case source must reference exactly one typed source")
-	}
-}
-
-func (s *Store) DeleteLeaveCaseIfUnreferenced(execCtx context.Context, tenantID, id string) error {
-	_, err := s.q.DeleteLeaveCaseIfUnreferenced(tenantContext(execCtx, tenantID), sqlc.DeleteLeaveCaseIfUnreferencedParams{
-		TenantID: tenantID, ID: id,
-	})
-	return err
-}
-
-func (s *Store) UpsertExternalLeaveRecord(execCtx context.Context, v domain.ExternalLeaveRecord) error {
-	_, err := s.q.UpsertExternalLeaveRecord(tenantContext(execCtx, v.TenantID), sqlc.UpsertExternalLeaveRecordParams{
-		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, SourceSystem: v.SourceSystem, ExternalRef: v.ExternalRef,
-		ExternalLeaveCode: v.ExternalLeaveCode, ExternalCategoryCode: v.ExternalCategoryCode, LeaveTypeID: v.LeaveTypeID,
-		LeaveName: v.LeaveName, StartAt: timestamptz(v.StartAt), EndAt: timestamptz(v.EndAt),
-		GrossMinutes: int32(v.GrossMinutes), DeductMinutes: int32(v.DeductMinutes), NetMinutes: int32(v.NetMinutes),
-		Remark: v.Remark, SourceLabel: v.SourceLabel, Status: v.Status, RawPayload: mustJSON(v.RawPayload), PayloadHash: v.PayloadHash,
-		FirstSeenAt: timestamptz(v.FirstSeenAt), LastSeenAt: timestamptz(v.LastSeenAt), DeletedAt: nullableTimestamptz(v.DeletedAt),
-	})
-	return err
-}
-
-func (s *Store) GetExternalLeaveRecordByRef(execCtx context.Context, tenantID, sourceSystem, externalRef string) (domain.ExternalLeaveRecord, bool, error) {
-	v, err := s.q.GetExternalLeaveRecordByRef(tenantContext(execCtx, tenantID), sqlc.GetExternalLeaveRecordByRefParams{TenantID: tenantID, SourceSystem: sourceSystem, ExternalRef: externalRef})
-	if isNotFound(err) {
-		return domain.ExternalLeaveRecord{}, false, nil
-	}
-	if err != nil {
-		return domain.ExternalLeaveRecord{}, false, err
-	}
-	return fromExternalLeaveRecord(v), true, nil
-}
-
-func (s *Store) ListExternalLeaveRecords(execCtx context.Context, tenantID string) ([]domain.ExternalLeaveRecord, error) {
-	items, err := s.q.ListExternalLeaveRecords(tenantContext(execCtx, tenantID), tenantID)
-	if err != nil {
-		return nil, err
-	}
-	return mapSlice(items, fromExternalLeaveRecord), nil
+	return mapSlice(items, fromLeaveRecord), nil
 }
 
 // GetLeaveRequest 從儲存層取得請假請求。
@@ -2644,26 +2508,28 @@ func (s *Store) ListFormDefinitionDrafts(execCtx context.Context, tenantID, owne
 func (s *Store) UpsertFormTemplate(execCtx context.Context, v domain.FormTemplate) error {
 	v = normalizeFormTemplate(v)
 	_, err := s.q.UpsertFormTemplate(execCtx, sqlc.UpsertFormTemplateParams{
-		ID:             v.ID,
-		TenantID:       v.TenantID,
-		Key:            v.Key,
-		Name:           v.Name,
-		Description:    v.Description,
-		Schema:         mustJSON(v.Schema),
-		Status:         v.Status,
-		CurrentVersion: int32(v.CurrentVersion),
-		CreatedAt:      timestamptz(v.CreatedAt),
-		UpdatedAt:      timestamptz(v.UpdatedAt),
-		DeletedAt:      nullableTimestamptz(v.DeletedAt),
+		ID:               v.ID,
+		TenantID:         v.TenantID,
+		Key:              v.Key,
+		Name:             v.Name,
+		Description:      v.Description,
+		Schema:           mustJSON(v.Schema),
+		Status:           v.Status,
+		CurrentVersion:   int32(v.CurrentVersion),
+		PublishedVersion: int32(v.PublishedVersion),
+		CreatedAt:        timestamptz(v.CreatedAt),
+		UpdatedAt:        timestamptz(v.UpdatedAt),
+		DeletedAt:        nullableTimestamptz(v.DeletedAt),
 	})
 	if err != nil {
 		return err
 	}
+	versionStatus := formTemplateVersionStatus(v)
 	version := domain.FormTemplateVersion{
 		ID: utils.NewID("ftv"), TenantID: v.TenantID, TemplateID: v.ID,
-		Version: v.CurrentVersion, Schema: v.Schema, Status: v.Status, CreatedAt: v.UpdatedAt,
+		Version: v.CurrentVersion, Schema: v.Schema, Status: versionStatus, CreatedAt: v.UpdatedAt,
 	}
-	if v.Status == "published" {
+	if versionStatus == "published" {
 		publishedAt := v.UpdatedAt
 		version.PublishedAt = &publishedAt
 	}
@@ -2682,9 +2548,33 @@ func (s *Store) GetFormTemplate(execCtx context.Context, tenantID, id string) (d
 	return fromFormTemplate(v), true, nil
 }
 
+// GetFormTemplateForUpdate reads and locks a template for a version lifecycle mutation.
+func (s *Store) GetFormTemplateForUpdate(execCtx context.Context, tenantID, id string) (domain.FormTemplate, bool, error) {
+	v, err := s.q.GetFormTemplateForUpdate(execCtx, sqlc.GetFormTemplateForUpdateParams{TenantID: tenantID, ID: id})
+	if isNotFound(err) {
+		return domain.FormTemplate{}, false, nil
+	}
+	if err != nil {
+		return domain.FormTemplate{}, false, err
+	}
+	return fromFormTemplate(v), true, nil
+}
+
 // GetFormTemplateByKey 從儲存層取得表單範本 by key。
 func (s *Store) GetFormTemplateByKey(execCtx context.Context, tenantID, key string) (domain.FormTemplate, bool, error) {
 	v, err := s.q.GetFormTemplateByKey(execCtx, sqlc.GetFormTemplateByKeyParams{TenantID: tenantID, Key: key})
+	if isNotFound(err) {
+		return domain.FormTemplate{}, false, nil
+	}
+	if err != nil {
+		return domain.FormTemplate{}, false, err
+	}
+	return fromFormTemplate(v), true, nil
+}
+
+// GetFormTemplateByKeyForUpdate reads and locks a template by key for a version lifecycle mutation.
+func (s *Store) GetFormTemplateByKeyForUpdate(execCtx context.Context, tenantID, key string) (domain.FormTemplate, bool, error) {
+	v, err := s.q.GetFormTemplateByKeyForUpdate(execCtx, sqlc.GetFormTemplateByKeyForUpdateParams{TenantID: tenantID, Key: key})
 	if isNotFound(err) {
 		return domain.FormTemplate{}, false, nil
 	}
@@ -3897,6 +3787,9 @@ func normalizeFormTemplate(v domain.FormTemplate) domain.FormTemplate {
 	if v.CurrentVersion <= 0 {
 		v.CurrentVersion = 1
 	}
+	if v.Status == "published" {
+		v.PublishedVersion = v.CurrentVersion
+	}
 	if v.CreatedAt.IsZero() {
 		v.CreatedAt = time.Now().UTC()
 	}
@@ -3904,6 +3797,16 @@ func normalizeFormTemplate(v domain.FormTemplate) domain.FormTemplate {
 		v.UpdatedAt = v.CreatedAt
 	}
 	return v
+}
+
+func formTemplateVersionStatus(template domain.FormTemplate) string {
+	if template.Status == "archived" {
+		return "archived"
+	}
+	if template.Status == "published" && template.PublishedVersion == template.CurrentVersion {
+		return "published"
+	}
+	return "draft"
 }
 
 // float8Ptr 轉換 *float64 為 pgtype.Float8。
@@ -4622,23 +4525,10 @@ func fromLeaveBalance(v sqlc.LeaveBalance, leaveTypes ...string) domain.LeaveBal
 		leaveType = leaveTypes[0]
 	}
 	return domain.LeaveBalance{
-		ID:                       v.ID,
-		TenantID:                 v.TenantID,
-		EmployeeID:               v.EmployeeID,
-		LeaveType:                leaveType,
-		LeaveTypeID:              v.LeaveTypeID,
-		RemainingMinutes:         int(v.RemainingMinutes),
-		PeriodStart:              dateTextFrom(v.PeriodStart),
-		PeriodEnd:                dateTextFrom(v.PeriodEnd),
-		GrantedMinutes:           int(v.GrantedMinutes),
-		UsedMinutes:              int(v.UsedMinutes),
-		Source:                   v.Source,
-		ExternalLeaveCode:        v.ExternalLeaveCode,
-		ExternalCategoryCode:     v.ExternalCategoryCode,
-		EntitlementYear:          int(v.EntitlementYear.Int32),
-		CarryInMinutes:           int(v.CarryInMinutes),
-		CarryExpire:              dateTextFrom(v.CarryExpire),
-		RawPayload:               jsonMap(v.RawPayload),
+		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, LeaveType: leaveType,
+		LeaveTypeID: v.LeaveTypeID, EntitlementYear: int(v.EntitlementYear),
+		GrantedMinutes: int(v.GrantedMinutes), UsedMinutes: int(v.UsedMinutes),
+		RemainingMinutes: int(v.RemainingMinutes), Source: v.Source,
 		LastSyncedAt:             timePtrFrom(v.LastSyncedAt),
 		SnapshotRemainingMinutes: int(v.RemainingMinutes),
 		UpdatedAt:                timeFrom(v.UpdatedAt),
@@ -4648,37 +4538,20 @@ func fromLeaveBalance(v sqlc.LeaveBalance, leaveTypes ...string) domain.LeaveBal
 func fromLeaveBalanceEntry(v sqlc.LeaveBalanceEntry) domain.LeaveBalanceEntry {
 	return domain.LeaveBalanceEntry{
 		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, LeaveTypeID: v.LeaveTypeID,
-		BalanceID: v.BalanceID, LeaveRequestID: textFrom(v.LeaveRequestID), LeaveCaseID: textFrom(v.LeaveCaseID),
-		AllocationID: v.AllocationID.Int64, OvertimeRequestID: textFrom(v.OvertimeRequestID),
+		BalanceID: v.BalanceID, LeaveRecordID: textFrom(v.LeaveRecordID), EntitlementYear: int(v.EntitlementYear),
 		EntryType: v.EntryType, AmountMinutes: int(v.AmountMinutes), IdempotencyKey: v.IdempotencyKey,
-		Metadata: jsonMap(v.Metadata), OccurredAt: timeFrom(v.OccurredAt), CreatedAt: timeFrom(v.CreatedAt),
+		OccurredAt: timeFrom(v.OccurredAt), CreatedAt: timeFrom(v.CreatedAt),
 	}
 }
 
-func fromLeaveRequestAllocation(v sqlc.LeaveRequestAllocation) domain.LeaveRequestAllocation {
-	return domain.LeaveRequestAllocation{
-		ID: v.ID, TenantID: v.TenantID, LeaveRequestID: v.LeaveRequestID,
-		LeaveBalanceID: v.LeaveBalanceID, EmployeeID: v.EmployeeID, LeaveTypeID: v.LeaveTypeID,
-		Cycle: int(v.Cycle), ReservedMinutes: int(v.ReservedMinutes), CreatedAt: timeFrom(v.CreatedAt),
-	}
-}
-
-func fromLeaveCase(v sqlc.LeaveCase) domain.LeaveCase {
-	return domain.LeaveCase{
+func fromLeaveRecord(v sqlc.LeaveRecord) domain.LeaveRecord {
+	return domain.LeaveRecord{
 		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, LeaveTypeID: v.LeaveTypeID,
-		StartAt: timeFrom(v.StartAt), EndAt: timeFrom(v.EndAt), NetMinutes: int(v.NetMinutes),
-		Status: v.Status, Origin: v.Origin, CreatedAt: timeFrom(v.CreatedAt), UpdatedAt: timeFrom(v.UpdatedAt),
-	}
-}
-
-func fromExternalLeaveRecord(v sqlc.LeaveExternalRecord) domain.ExternalLeaveRecord {
-	return domain.ExternalLeaveRecord{
-		ID: v.ID, TenantID: v.TenantID, EmployeeID: v.EmployeeID, SourceSystem: v.SourceSystem, ExternalRef: v.ExternalRef,
-		ExternalLeaveCode: v.ExternalLeaveCode, ExternalCategoryCode: v.ExternalCategoryCode, LeaveTypeID: v.LeaveTypeID,
-		LeaveName: v.LeaveName, StartAt: timeFrom(v.StartAt), EndAt: timeFrom(v.EndAt),
-		GrossMinutes: int(v.GrossMinutes), DeductMinutes: int(v.DeductMinutes), NetMinutes: int(v.NetMinutes),
-		Remark: v.Remark, SourceLabel: v.SourceLabel, Status: v.Status, RawPayload: jsonMap(v.RawPayload), PayloadHash: v.PayloadHash,
-		FirstSeenAt: timeFrom(v.FirstSeenAt), LastSeenAt: timeFrom(v.LastSeenAt), DeletedAt: timePtrFrom(v.DeletedAt),
+		BalanceID: v.BalanceID, EntitlementYear: int(v.EntitlementYear), Source: v.Source,
+		EventDate: timeFrom(v.EventDate), StartAt: timeFrom(v.StartAt), EndAt: timeFrom(v.EndAt),
+		NetMinutes: int(v.NetMinutes), Remark: v.Remark, Status: v.Status,
+		MatchedRecordID: textFrom(v.MatchedRecordID), ReconciliationStatus: v.ReconciliationStatus,
+		LastSeenAt: timePtrFrom(v.LastSeenAt), DeletedAt: timePtrFrom(v.DeletedAt), UpdatedAt: timeFrom(v.UpdatedAt),
 	}
 }
 
@@ -4794,17 +4667,18 @@ func fromFormDefinitionDraft(v sqlc.FormDefinitionDraft) domain.FormDefinitionDr
 // fromFormTemplate 轉換表單範本。
 func fromFormTemplate(v sqlc.FormTemplate) domain.FormTemplate {
 	return domain.FormTemplate{
-		ID:             v.ID,
-		TenantID:       v.TenantID,
-		Key:            v.Key,
-		Name:           v.Name,
-		Description:    v.Description,
-		Schema:         jsonMap(v.Schema),
-		Status:         v.Status,
-		CurrentVersion: int(v.CurrentVersion),
-		CreatedAt:      timeFrom(v.CreatedAt),
-		UpdatedAt:      timeFrom(v.UpdatedAt),
-		DeletedAt:      timePtrFrom(v.DeletedAt),
+		ID:               v.ID,
+		TenantID:         v.TenantID,
+		Key:              v.Key,
+		Name:             v.Name,
+		Description:      v.Description,
+		Schema:           jsonMap(v.Schema),
+		Status:           v.Status,
+		CurrentVersion:   int(v.CurrentVersion),
+		PublishedVersion: int(v.PublishedVersion),
+		CreatedAt:        timeFrom(v.CreatedAt),
+		UpdatedAt:        timeFrom(v.UpdatedAt),
+		DeletedAt:        timePtrFrom(v.DeletedAt),
 	}
 }
 

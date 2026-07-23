@@ -175,6 +175,7 @@ type WorkspaceFacade interface {
 	WorkspaceFormDesign(RequestContext) (PlatformFormDesign, error)
 	CreateWorkspaceFormDesign(RequestContext, SaveWorkspaceFormDesignInput) (PlatformFormDesign, error)
 	UpdateWorkspaceFormDesign(RequestContext, string, UpdateWorkspaceFormDesignInput) (PlatformFormDesign, error)
+	PublishWorkspaceFormDesign(RequestContext, string, PublishWorkspaceFormDesignInput) (PlatformFormDesign, error)
 	DeleteWorkspaceFormDesign(RequestContext, string) (PlatformFormDesign, error)
 	WorkspaceAuditLogs(RequestContext, WorkspaceAuditLogQuery, PageRequest) (PageResponse[WorkspaceAuditLog], error)
 	WorkspaceAuditLogFacets(RequestContext) (WorkspaceAuditLogFacets, error)

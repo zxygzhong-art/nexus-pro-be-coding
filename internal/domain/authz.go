@@ -317,6 +317,7 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "workspace.form.read", Method: "GET", Path: "/v1/workspace/forms", ApplicationCode: "workflow", ResourceType: "form_template", Action: "read"},
 	{Name: "workspace.form.create", Method: "POST", Path: "/v1/workspace/forms", ApplicationCode: "workflow", ResourceType: "form_template", Action: "create"},
 	{Name: "workspace.form.update", Method: "PATCH", Path: "/v1/workspace/forms/:id", ApplicationCode: "workflow", ResourceType: "form_template", Action: "update"},
+	{Name: "workspace.form.publish", Method: "POST", Path: "/v1/workspace/forms/:id/publish", ApplicationCode: "workflow", ResourceType: "form_template", Action: "update"},
 	{Name: "workspace.form.delete", Method: "DELETE", Path: "/v1/workspace/forms/:id", ApplicationCode: "workflow", ResourceType: "form_template", Action: "delete", RiskLevel: RiskHigh},
 	{Name: "workspace.audit_logs.read", Method: "GET", Path: "/v1/workspace/audit-logs", ApplicationCode: "audit", ResourceType: "audit_log", Action: "read"},
 	{Name: "workspace.audit_log_facets.read", Method: "GET", Path: "/v1/workspace/audit-logs/facets", ApplicationCode: "audit", ResourceType: "audit_log", Action: "read"},

@@ -7,24 +7,17 @@ import (
 
 // LeaveBalance 定義請假 balance 的資料結構。
 type LeaveBalance struct {
-	ID                   string         `json:"id"`
-	TenantID             string         `json:"tenant_id"`
-	EmployeeID           string         `json:"employee_id"`
-	LeaveType            string         `json:"leave_type"`
-	LeaveTypeID          string         `json:"leave_type_id,omitempty"`
-	RemainingMinutes     int            `json:"remaining_minutes"`
-	PeriodStart          string         `json:"period_start,omitempty"`
-	PeriodEnd            string         `json:"period_end,omitempty"`
-	GrantedMinutes       int            `json:"granted_minutes,omitempty"`
-	UsedMinutes          int            `json:"used_minutes,omitempty"`
-	Source               string         `json:"source,omitempty"`
-	ExternalLeaveCode    string         `json:"external_leave_code,omitempty"`
-	ExternalCategoryCode string         `json:"external_category_code,omitempty"`
-	EntitlementYear      int            `json:"entitlement_year,omitempty"`
-	CarryInMinutes       int            `json:"carry_in_minutes,omitempty"`
-	CarryExpire          string         `json:"carry_expire,omitempty"`
-	RawPayload           map[string]any `json:"raw_payload,omitempty"`
-	LastSyncedAt         *time.Time     `json:"last_synced_at,omitempty"`
+	ID               string     `json:"id"`
+	TenantID         string     `json:"tenant_id"`
+	EmployeeID       string     `json:"employee_id"`
+	LeaveType        string     `json:"leave_type"`
+	LeaveTypeID      string     `json:"leave_type_id"`
+	EntitlementYear  int        `json:"entitlement_year"`
+	GrantedMinutes   int        `json:"granted_minutes"`
+	UsedMinutes      int        `json:"used_minutes"`
+	RemainingMinutes int        `json:"remaining_minutes"`
+	Source           string     `json:"source"`
+	LastSyncedAt     *time.Time `json:"last_synced_at,omitempty"`
 	// SnapshotRemainingMinutes is the unmodified upstream bucket. Effective
 	// availability is derived by applying the append-only local entries.
 	SnapshotRemainingMinutes int       `json:"snapshot_remaining_minutes,omitempty"`
@@ -62,89 +55,43 @@ type LeaveRequest struct {
 	EffectAppliedAt      *time.Time     `json:"-"`
 }
 
-// LeaveRequestAllocation records the exact balance bucket reserved by a leave request.
-type LeaveRequestAllocation struct {
-	ID              int64     `json:"id"`
+// LeaveBalanceEntry is the append-only minute-level overlay on one annual balance.
+// Negative amounts reduce effective availability; positive amounts release or reconcile it.
+type LeaveBalanceEntry struct {
+	ID              string    `json:"id"`
 	TenantID        string    `json:"tenant_id"`
-	LeaveRequestID  string    `json:"leave_request_id"`
-	LeaveBalanceID  string    `json:"leave_balance_id"`
+	BalanceID       string    `json:"balance_id"`
+	LeaveRecordID   string    `json:"leave_record_id,omitempty"`
 	EmployeeID      string    `json:"employee_id"`
 	LeaveTypeID     string    `json:"leave_type_id"`
-	Cycle           int       `json:"cycle"`
-	ReservedMinutes int       `json:"reserved_minutes"`
+	EntitlementYear int       `json:"entitlement_year"`
+	EntryType       string    `json:"entry_type"`
+	AmountMinutes   int       `json:"amount_minutes"`
+	IdempotencyKey  string    `json:"idempotency_key"`
+	OccurredAt      time.Time `json:"occurred_at"`
 	CreatedAt       time.Time `json:"created_at"`
 }
 
-// LeaveBalanceEntry is the append-only Nexus overlay on an eHRMS balance snapshot.
-// Negative amounts reduce effective availability; positive amounts release or reconcile it.
-type LeaveBalanceEntry struct {
-	ID                string         `json:"id"`
-	TenantID          string         `json:"tenant_id"`
-	EmployeeID        string         `json:"employee_id"`
-	LeaveTypeID       string         `json:"leave_type_id"`
-	BalanceID         string         `json:"balance_id"`
-	LeaveRequestID    string         `json:"leave_request_id,omitempty"`
-	LeaveCaseID       string         `json:"leave_case_id,omitempty"`
-	AllocationID      int64          `json:"allocation_id,omitempty"`
-	OvertimeRequestID string         `json:"overtime_request_id,omitempty"`
-	EntryType         string         `json:"entry_type"`
-	AmountMinutes     int            `json:"amount_minutes"`
-	IdempotencyKey    string         `json:"idempotency_key"`
-	Metadata          map[string]any `json:"metadata,omitempty"`
-	OccurredAt        time.Time      `json:"occurred_at"`
-	CreatedAt         time.Time      `json:"created_at"`
-}
-
-// LeaveCase is one logical leave fact regardless of whether Nexus, eHRMS, or both observed it.
-type LeaveCase struct {
-	ID          string    `json:"id"`
-	TenantID    string    `json:"tenant_id"`
-	EmployeeID  string    `json:"employee_id"`
-	LeaveTypeID string    `json:"leave_type_id"`
-	StartAt     time.Time `json:"start_at"`
-	EndAt       time.Time `json:"end_at"`
-	NetMinutes  int       `json:"net_minutes"`
-	Status      string    `json:"status"`
-	Origin      string    `json:"origin"`
-	CreatedAt   time.Time `json:"created_at"`
-	UpdatedAt   time.Time `json:"updated_at"`
-}
-
-// ExternalLeaveRecord preserves the full eHRMS leave fact used for reconciliation.
-type ExternalLeaveRecord struct {
-	ID                   string         `json:"id"`
-	TenantID             string         `json:"tenant_id"`
-	EmployeeID           string         `json:"employee_id"`
-	SourceSystem         string         `json:"source_system"`
-	ExternalRef          string         `json:"external_ref"`
-	ExternalLeaveCode    string         `json:"external_leave_code,omitempty"`
-	ExternalCategoryCode string         `json:"external_category_code,omitempty"`
-	LeaveTypeID          string         `json:"leave_type_id"`
-	LeaveName            string         `json:"leave_name,omitempty"`
-	StartAt              time.Time      `json:"start_at"`
-	EndAt                time.Time      `json:"end_at"`
-	GrossMinutes         int            `json:"gross_minutes"`
-	DeductMinutes        int            `json:"deduct_minutes,omitempty"`
-	NetMinutes           int            `json:"net_minutes"`
-	Remark               string         `json:"remark,omitempty"`
-	SourceLabel          string         `json:"source_label,omitempty"`
-	Status               string         `json:"status"`
-	RawPayload           map[string]any `json:"raw_payload,omitempty"`
-	PayloadHash          string         `json:"payload_hash,omitempty"`
-	FirstSeenAt          time.Time      `json:"first_seen_at"`
-	LastSeenAt           time.Time      `json:"last_seen_at"`
-	DeletedAt            *time.Time     `json:"deleted_at,omitempty"`
-}
-
-// LeaveCaseSource links a logical case to one local request or synchronized eHRMS record.
-type LeaveCaseSource struct {
-	TenantID              string    `json:"tenant_id"`
-	LeaveCaseID           string    `json:"leave_case_id"`
-	LeaveRequestID        string    `json:"leave_request_id,omitempty"`
-	ExternalLeaveRecordID string    `json:"external_leave_record_id,omitempty"`
-	MatchMethod           string    `json:"match_method"`
-	MatchStatus           string    `json:"match_status"`
-	CreatedAt             time.Time `json:"created_at"`
+// LeaveRecord is one Nexus or eHRMS leave fact tied to exactly one annual balance.
+type LeaveRecord struct {
+	ID                   string     `json:"id"`
+	TenantID             string     `json:"tenant_id"`
+	EmployeeID           string     `json:"employee_id"`
+	LeaveTypeID          string     `json:"leave_type_id"`
+	BalanceID            string     `json:"balance_id"`
+	EntitlementYear      int        `json:"entitlement_year"`
+	Source               string     `json:"source"`
+	EventDate            time.Time  `json:"event_date"`
+	StartAt              time.Time  `json:"start_at"`
+	EndAt                time.Time  `json:"end_at"`
+	NetMinutes           int        `json:"net_minutes"`
+	Remark               string     `json:"remark,omitempty"`
+	Status               string     `json:"status"`
+	MatchedRecordID      string     `json:"matched_record_id,omitempty"`
+	ReconciliationStatus string     `json:"reconciliation_status"`
+	LastSeenAt           *time.Time `json:"last_seen_at,omitempty"`
+	DeletedAt            *time.Time `json:"deleted_at,omitempty"`
+	UpdatedAt            time.Time  `json:"updated_at"`
 }
 
 // LeaveType is one tenant leave catalog row synced from EHRMS /leave-types.

@@ -165,10 +165,9 @@ func applyLeaveBalanceFallback(evaluation LeaveRequestEvaluation, reason string)
 	return evaluation
 }
 
-// leaveBalanceCoversDate checks the entitlement period before reporting availability.
+// leaveBalanceCoversDate checks the entitlement year before reporting availability.
 func leaveBalanceCoversDate(balance LeaveBalance, at time.Time) bool {
-	date := at.Format(time.DateOnly)
-	return (balance.PeriodStart == "" || balance.PeriodStart <= date) && (balance.PeriodEnd == "" || balance.PeriodEnd >= date)
+	return balance.EntitlementYear == at.In(attendanceClockLocation).Year()
 }
 
 // leaveRuleSnapshotMap converts the typed rule into a JSON-safe persistence snapshot.

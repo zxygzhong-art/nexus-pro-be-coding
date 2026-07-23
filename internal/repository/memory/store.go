@@ -45,11 +45,8 @@ type Store struct {
 	leaveTypes                 map[string]map[string]domain.LeaveType
 	leaveBalances              map[string]map[string]LeaveBalance
 	leaveBalanceEntries        map[string]map[string]LeaveBalanceEntry
+	leaveRecords               map[string]map[string]LeaveRecord
 	leaveRequests              map[string]map[string]LeaveRequest
-	leaveRequestAllocations    map[string]map[string]LeaveRequestAllocation
-	leaveCases                 map[string]map[string]LeaveCase
-	leaveCaseSources           map[string]map[string]LeaveCaseSource
-	externalLeaveRecords       map[string]map[string]ExternalLeaveRecord
 	attendanceWorksites        map[string]map[string]AttendanceWorksite
 	attendanceClockRecords     map[string]map[string]AttendanceClockRecord
 	attendanceSummaries        map[string]map[string]AttendanceDailySummary
@@ -122,11 +119,8 @@ func NewStore() *Store {
 		leaveTypes:                 map[string]map[string]domain.LeaveType{},
 		leaveBalances:              map[string]map[string]LeaveBalance{},
 		leaveBalanceEntries:        map[string]map[string]LeaveBalanceEntry{},
+		leaveRecords:               map[string]map[string]LeaveRecord{},
 		leaveRequests:              map[string]map[string]LeaveRequest{},
-		leaveRequestAllocations:    map[string]map[string]LeaveRequestAllocation{},
-		leaveCases:                 map[string]map[string]LeaveCase{},
-		leaveCaseSources:           map[string]map[string]LeaveCaseSource{},
-		externalLeaveRecords:       map[string]map[string]ExternalLeaveRecord{},
 		attendanceWorksites:        map[string]map[string]AttendanceWorksite{},
 		attendanceClockRecords:     map[string]map[string]AttendanceClockRecord{},
 		attendanceSummaries:        map[string]map[string]AttendanceDailySummary{},
@@ -1777,10 +1771,17 @@ func (s *Store) UpsertLeaveBalance(_ context.Context, v LeaveBalance) error {
 		v.LeaveTypeID = domain.StableLeaveTypeID(v.LeaveType)
 	}
 	if strings.TrimSpace(v.Source) == "" {
-		v.Source = "manual_snapshot"
+		v.Source = "nexus"
 	}
-	if v.Source == "local_anchor" {
-		return s.ensureLocalLeaveBalanceAnchorLocked(v)
+	if v.EntitlementYear == 0 {
+		v.EntitlementYear = v.UpdatedAt.Year()
+	}
+	for id, existing := range s.leaveBalances[v.TenantID] {
+		if existing.EmployeeID == v.EmployeeID && existing.LeaveTypeID == v.LeaveTypeID &&
+			existing.EntitlementYear == v.EntitlementYear && id != v.ID {
+			v.ID = existing.ID
+			break
+		}
 	}
 	putNested(s.leaveBalances, v.TenantID, v.ID, copyLeaveBalance(v))
 	return nil
@@ -1794,11 +1795,14 @@ func (s *Store) EnsureLocalLeaveBalanceAnchor(_ context.Context, v LeaveBalance)
 	if v.LeaveTypeID == "" {
 		v.LeaveTypeID = domain.StableLeaveTypeID(v.LeaveType)
 	}
+	if v.EntitlementYear == 0 {
+		v.EntitlementYear = v.UpdatedAt.Year()
+	}
 	if err := s.ensureLocalLeaveBalanceAnchorLocked(v); err != nil {
 		return LeaveBalance{}, err
 	}
 	for _, existing := range s.leaveBalances[v.TenantID] {
-		if existing.Source == "local_anchor" && existing.EmployeeID == v.EmployeeID && existing.LeaveTypeID == v.LeaveTypeID {
+		if existing.EmployeeID == v.EmployeeID && existing.LeaveTypeID == v.LeaveTypeID && existing.EntitlementYear == v.EntitlementYear {
 			return copyLeaveBalance(existing), nil
 		}
 	}
@@ -1807,18 +1811,15 @@ func (s *Store) EnsureLocalLeaveBalanceAnchor(_ context.Context, v LeaveBalance)
 
 func (s *Store) ensureLocalLeaveBalanceAnchorLocked(v LeaveBalance) error {
 	for _, existing := range s.leaveBalances[v.TenantID] {
-		if existing.Source == "local_anchor" && existing.EmployeeID == v.EmployeeID && existing.LeaveTypeID == v.LeaveTypeID {
+		if existing.EmployeeID == v.EmployeeID && existing.LeaveTypeID == v.LeaveTypeID && existing.EntitlementYear == v.EntitlementYear {
 			return nil
 		}
 	}
-	v.Source = "local_anchor"
-	v.PeriodStart = ""
-	v.PeriodEnd = ""
+	v.Source = "nexus"
 	v.RemainingMinutes = 0
 	v.SnapshotRemainingMinutes = 0
 	v.GrantedMinutes = 0
 	v.UsedMinutes = 0
-	v.CarryInMinutes = 0
 	putNested(s.leaveBalances, v.TenantID, v.ID, copyLeaveBalance(v))
 	return nil
 }
@@ -1856,23 +1857,15 @@ func (s *Store) ListLeaveBalancesForOverlay(_ context.Context, tenantID, employe
 }
 
 func (s *Store) leaveBalancesForOverlayLocked(tenantID, employeeID, leaveTypeID string, asOf time.Time) []LeaveBalance {
-	asOfDate := asOf.Format(time.DateOnly)
 	items := make([]LeaveBalance, 0)
+	entitlementYear := asOf.In(time.FixedZone("Asia/Shanghai", 8*60*60)).Year()
 	for _, item := range s.leaveBalances[tenantID] {
-		if item.EmployeeID != employeeID || item.LeaveTypeID != leaveTypeID || item.PeriodStart != "" && item.PeriodStart > asOfDate || item.PeriodEnd != "" && item.PeriodEnd < asOfDate {
+		if item.EmployeeID != employeeID || item.LeaveTypeID != leaveTypeID || item.EntitlementYear != entitlementYear {
 			continue
 		}
 		items = append(items, item)
 	}
 	sort.Slice(items, func(i, j int) bool {
-		leftAnchor := items[i].Source == "local_anchor"
-		rightAnchor := items[j].Source == "local_anchor"
-		if leftAnchor != rightAnchor {
-			return !leftAnchor
-		}
-		if items[i].PeriodEnd != items[j].PeriodEnd {
-			return items[i].PeriodEnd != "" && (items[j].PeriodEnd == "" || items[i].PeriodEnd < items[j].PeriodEnd)
-		}
 		return items[i].ID < items[j].ID
 	})
 	return items
@@ -1959,111 +1952,43 @@ func (s *Store) UpsertLeaveRequest(_ context.Context, v LeaveRequest) error {
 	return nil
 }
 
-// UpsertLeaveRequestAllocation persists one request-to-balance reservation link.
-func (s *Store) UpsertLeaveRequestAllocation(_ context.Context, v LeaveRequestAllocation) error {
+func (s *Store) UpsertLeaveRecord(_ context.Context, v LeaveRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if v.Cycle <= 0 {
-		v.Cycle = 1
-	}
-	key := fmt.Sprintf("%s|%d|%s", v.LeaveRequestID, v.Cycle, v.LeaveBalanceID)
-	if existing, ok := s.leaveRequestAllocations[v.TenantID][key]; ok {
-		if existing.ReservedMinutes != v.ReservedMinutes ||
-			existing.EmployeeID != v.EmployeeID || existing.LeaveTypeID != v.LeaveTypeID {
-			return domain.Conflict("leave allocation is immutable within a request cycle")
-		}
-		return nil
-	}
-	if v.ID == 0 {
-		for _, existing := range s.leaveRequestAllocations[v.TenantID] {
-			if existing.ID >= v.ID {
-				v.ID = existing.ID + 1
-			}
-		}
-		if v.ID == 0 {
-			v.ID = 1
-		}
-	}
-	putNested(s.leaveRequestAllocations, v.TenantID, key, v)
+	putNested(s.leaveRecords, v.TenantID, v.ID, copyLeaveRecord(v))
 	return nil
 }
 
-func (s *Store) ListLeaveRequestAllocationsByRequest(_ context.Context, tenantID, leaveRequestID string) ([]LeaveRequestAllocation, error) {
+func (s *Store) GetLeaveRecord(_ context.Context, tenantID, id string) (LeaveRecord, bool, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	out := make([]LeaveRequestAllocation, 0)
-	for _, item := range s.leaveRequestAllocations[tenantID] {
-		if item.LeaveRequestID == leaveRequestID {
-			out = append(out, item)
+	item, ok := s.leaveRecords[tenantID][id]
+	return copyLeaveRecord(item), ok, nil
+}
+
+func (s *Store) ListLeaveRecords(_ context.Context, tenantID string) ([]LeaveRecord, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	out := copyNestedValues(s.leaveRecords[tenantID], copyLeaveRecord)
+	sort.Slice(out, func(i, j int) bool {
+		if out[i].EventDate.Equal(out[j].EventDate) {
+			return out[i].ID < out[j].ID
 		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+		return out[i].EventDate.Before(out[j].EventDate)
+	})
 	return out, nil
 }
 
-func (s *Store) ListLeaveRequestAllocationsByRequestCycle(_ context.Context, tenantID, leaveRequestID string, cycle int) ([]LeaveRequestAllocation, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := make([]LeaveRequestAllocation, 0)
-	for _, item := range s.leaveRequestAllocations[tenantID] {
-		if item.LeaveRequestID == leaveRequestID && item.Cycle == cycle {
-			out = append(out, item)
-		}
-	}
-	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
-	return out, nil
-}
-
-func (s *Store) UpsertLeaveCase(_ context.Context, v LeaveCase) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if existing, ok := s.leaveCases[v.TenantID][v.ID]; ok && v.CreatedAt.IsZero() {
-		v.CreatedAt = existing.CreatedAt
-	}
-	putNested(s.leaveCases, v.TenantID, v.ID, v)
-	return nil
-}
-
-func (s *Store) GetLeaveCaseByLeaveRequest(_ context.Context, tenantID, leaveRequestID string) (LeaveCase, bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	key := "request|" + strings.TrimSpace(leaveRequestID)
-	source, ok := s.leaveCaseSources[tenantID][key]
-	if !ok {
-		return LeaveCase{}, false, nil
-	}
-	item, ok := s.leaveCases[tenantID][source.LeaveCaseID]
-	return item, ok, nil
-}
-
-func (s *Store) GetLeaveCaseByExternalRecord(_ context.Context, tenantID, externalLeaveRecordID string) (LeaveCase, bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	key := "external|" + strings.TrimSpace(externalLeaveRecordID)
-	source, ok := s.leaveCaseSources[tenantID][key]
-	if !ok {
-		return LeaveCase{}, false, nil
-	}
-	item, ok := s.leaveCases[tenantID][source.LeaveCaseID]
-	return item, ok, nil
-}
-
-func (s *Store) ListConfirmedActiveLeaveCasesByQuery(_ context.Context, tenantID string, employeeIDs []string, fromAt, toAt time.Time) ([]LeaveCase, error) {
+func (s *Store) ListActiveLeaveRecordsByQuery(_ context.Context, tenantID string, employeeIDs []string, fromAt, toAt time.Time) ([]LeaveRecord, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	employeeSet := make(map[string]struct{}, len(employeeIDs))
 	for _, employeeID := range employeeIDs {
 		employeeSet[employeeID] = struct{}{}
 	}
-	confirmedCaseIDs := make(map[string]struct{})
-	for _, source := range s.leaveCaseSources[tenantID] {
-		if source.MatchStatus == "confirmed" {
-			confirmedCaseIDs[source.LeaveCaseID] = struct{}{}
-		}
-	}
-	out := make([]LeaveCase, 0)
-	for _, item := range s.leaveCases[tenantID] {
-		if item.Status != "active" || !item.StartAt.Before(toAt) || !item.EndAt.After(fromAt) {
+	out := make([]LeaveRecord, 0)
+	for _, item := range s.leaveRecords[tenantID] {
+		if item.Status != "active" || item.DeletedAt != nil || !item.StartAt.Before(toAt) || !item.EndAt.After(fromAt) {
 			continue
 		}
 		if len(employeeSet) > 0 {
@@ -2071,10 +1996,10 @@ func (s *Store) ListConfirmedActiveLeaveCasesByQuery(_ context.Context, tenantID
 				continue
 			}
 		}
-		if _, ok := confirmedCaseIDs[item.ID]; !ok {
+		if item.Source == "ehrms" && item.MatchedRecordID != "" {
 			continue
 		}
-		out = append(out, item)
+		out = append(out, copyLeaveRecord(item))
 	}
 	sort.Slice(out, func(i, j int) bool {
 		if out[i].StartAt.Equal(out[j].StartAt) {
@@ -2082,65 +2007,6 @@ func (s *Store) ListConfirmedActiveLeaveCasesByQuery(_ context.Context, tenantID
 		}
 		return out[i].StartAt.Before(out[j].StartAt)
 	})
-	return out, nil
-}
-
-func (s *Store) UpsertLeaveCaseSource(_ context.Context, v LeaveCaseSource) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	requestID := strings.TrimSpace(v.LeaveRequestID)
-	externalID := strings.TrimSpace(v.ExternalLeaveRecordID)
-	if (requestID == "") == (externalID == "") {
-		return domain.BadRequest("leave case source must reference exactly one source")
-	}
-	key := "request|" + requestID
-	if externalID != "" {
-		key = "external|" + externalID
-	}
-	putNested(s.leaveCaseSources, v.TenantID, key, v)
-	return nil
-}
-
-func (s *Store) DeleteLeaveCaseIfUnreferenced(_ context.Context, tenantID, id string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	for _, source := range s.leaveCaseSources[tenantID] {
-		if source.LeaveCaseID == id {
-			return nil
-		}
-	}
-	delete(s.leaveCases[tenantID], id)
-	return nil
-}
-
-func (s *Store) UpsertExternalLeaveRecord(_ context.Context, v ExternalLeaveRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	key := strings.ToLower(strings.TrimSpace(v.SourceSystem)) + "|" + strings.TrimSpace(v.ExternalRef)
-	if existing, ok := s.externalLeaveRecords[v.TenantID][key]; ok {
-		v.ID = existing.ID
-		v.FirstSeenAt = existing.FirstSeenAt
-	}
-	putNested(s.externalLeaveRecords, v.TenantID, key, copyExternalLeaveRecord(v))
-	return nil
-}
-
-func (s *Store) GetExternalLeaveRecordByRef(_ context.Context, tenantID, sourceSystem, externalRef string) (ExternalLeaveRecord, bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	key := strings.ToLower(strings.TrimSpace(sourceSystem)) + "|" + strings.TrimSpace(externalRef)
-	item, ok := s.externalLeaveRecords[tenantID][key]
-	if !ok {
-		return ExternalLeaveRecord{}, false, nil
-	}
-	return copyExternalLeaveRecord(item), true, nil
-}
-
-func (s *Store) ListExternalLeaveRecords(_ context.Context, tenantID string) ([]ExternalLeaveRecord, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	out := copyNestedValues(s.externalLeaveRecords[tenantID], copyExternalLeaveRecord)
-	sort.Slice(out, func(i, j int) bool { return out[i].StartAt.Before(out[j].StartAt) })
 	return out, nil
 }
 
@@ -2738,6 +2604,9 @@ func (s *Store) UpsertFormTemplate(_ context.Context, v FormTemplate) error {
 	if v.CurrentVersion <= 0 {
 		v.CurrentVersion = 1
 	}
+	if v.Status == "published" {
+		v.PublishedVersion = v.CurrentVersion
+	}
 	if v.CreatedAt.IsZero() {
 		v.CreatedAt = time.Now().UTC()
 	}
@@ -2746,18 +2615,34 @@ func (s *Store) UpsertFormTemplate(_ context.Context, v FormTemplate) error {
 	}
 	putNested(s.formTemplates, v.TenantID, v.ID, copyFormTemplate(v))
 	versionKey := fmt.Sprintf("%s:%d", v.ID, v.CurrentVersion)
-	if _, exists := getNested(s.formTemplateVersions, v.TenantID, versionKey); !exists {
+	versionStatus := formTemplateVersionStatus(v)
+	if existing, exists := getNested(s.formTemplateVersions, v.TenantID, versionKey); !exists {
 		version := FormTemplateVersion{
 			ID: utils.NewID("ftv"), TenantID: v.TenantID, TemplateID: v.ID, Version: v.CurrentVersion,
-			Schema: utils.CopyStringMap(v.Schema), Status: v.Status, CreatedAt: v.UpdatedAt,
+			Schema: utils.CopyStringMap(v.Schema), Status: versionStatus, CreatedAt: v.UpdatedAt,
 		}
-		if v.Status == "published" {
+		if versionStatus == "published" {
 			publishedAt := v.UpdatedAt
 			version.PublishedAt = &publishedAt
 		}
 		putNested(s.formTemplateVersions, v.TenantID, versionKey, version)
+	} else if versionStatus == "published" && existing.Status != "published" {
+		publishedAt := v.UpdatedAt
+		existing.Status = "published"
+		existing.PublishedAt = &publishedAt
+		putNested(s.formTemplateVersions, v.TenantID, versionKey, existing)
 	}
 	return nil
+}
+
+func formTemplateVersionStatus(template FormTemplate) string {
+	if template.Status == "archived" {
+		return "archived"
+	}
+	if template.Status == "published" && template.PublishedVersion == template.CurrentVersion {
+		return "published"
+	}
+	return "draft"
 }
 
 // GetFormTemplate 從儲存層取得表單範本。
@@ -2771,6 +2656,11 @@ func (s *Store) GetFormTemplate(_ context.Context, tenantID, id string) (FormTem
 	return copyFormTemplate(v), true, nil
 }
 
+// GetFormTemplateForUpdate mirrors the row-locking contract; memory transactions already serialize writers.
+func (s *Store) GetFormTemplateForUpdate(ctx context.Context, tenantID, id string) (FormTemplate, bool, error) {
+	return s.GetFormTemplate(ctx, tenantID, id)
+}
+
 // GetFormTemplateByKey 從儲存層取得表單範本 by key。
 func (s *Store) GetFormTemplateByKey(_ context.Context, tenantID, key string) (FormTemplate, bool, error) {
 	s.mu.RLock()
@@ -2782,6 +2672,11 @@ func (s *Store) GetFormTemplateByKey(_ context.Context, tenantID, key string) (F
 		}
 	}
 	return FormTemplate{}, false, nil
+}
+
+// GetFormTemplateByKeyForUpdate mirrors the row-locking contract; memory transactions already serialize writers.
+func (s *Store) GetFormTemplateByKeyForUpdate(ctx context.Context, tenantID, key string) (FormTemplate, bool, error) {
+	return s.GetFormTemplateByKey(ctx, tenantID, key)
 }
 
 // ListFormTemplates 從儲存層列出表單範本。
@@ -2798,7 +2693,14 @@ func (s *Store) InsertFormTemplateVersion(_ context.Context, v FormTemplateVersi
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	key := fmt.Sprintf("%s:%d", v.TemplateID, v.Version)
-	if _, exists := getNested(s.formTemplateVersions, v.TenantID, key); exists {
+	if existing, exists := getNested(s.formTemplateVersions, v.TenantID, key); exists {
+		if v.Status == "published" && existing.Status != "published" {
+			existing.Status = "published"
+			if existing.PublishedAt == nil {
+				existing.PublishedAt = v.PublishedAt
+			}
+			putNested(s.formTemplateVersions, v.TenantID, key, existing)
+		}
 		return nil
 	}
 	putNested(s.formTemplateVersions, v.TenantID, key, copyFormTemplateVersion(v))
@@ -2835,9 +2737,13 @@ func (s *Store) UpsertFormInstance(_ context.Context, v FormInstance) error {
 	if strings.TrimSpace(v.TemplateVersionID) == "" {
 		template, ok := getNested(s.formTemplates, v.TenantID, v.TemplateID)
 		if ok {
-			version, versionExists := getNested(s.formTemplateVersions, v.TenantID, fmt.Sprintf("%s:%d", v.TemplateID, template.CurrentVersion))
+			versionNumber := template.PublishedVersion
+			if versionNumber <= 0 {
+				versionNumber = template.CurrentVersion
+			}
+			version, versionExists := getNested(s.formTemplateVersions, v.TenantID, fmt.Sprintf("%s:%d", v.TemplateID, versionNumber))
 			if !versionExists {
-				return fmt.Errorf("form template version %s:%d not found", v.TemplateID, template.CurrentVersion)
+				return fmt.Errorf("form template version %s:%d not found", v.TemplateID, versionNumber)
 			}
 			v.TemplateVersionID = version.ID
 		}

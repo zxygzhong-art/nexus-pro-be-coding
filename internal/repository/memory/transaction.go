@@ -54,11 +54,8 @@ func (s *Store) cloneLocked() *Store {
 		leaveTypes:                 cloneNestedMap(s.leaveTypes, func(v domain.LeaveType) domain.LeaveType { return v }),
 		leaveBalances:              cloneNestedMap(s.leaveBalances, copyLeaveBalance),
 		leaveBalanceEntries:        cloneNestedMap(s.leaveBalanceEntries, copyLeaveBalanceEntry),
+		leaveRecords:               cloneNestedMap(s.leaveRecords, copyLeaveRecord),
 		leaveRequests:              cloneNestedMap(s.leaveRequests, copyLeaveRequest),
-		leaveRequestAllocations:    cloneNestedMap(s.leaveRequestAllocations, func(v LeaveRequestAllocation) LeaveRequestAllocation { return v }),
-		leaveCases:                 cloneNestedMap(s.leaveCases, func(v LeaveCase) LeaveCase { return v }),
-		leaveCaseSources:           cloneNestedMap(s.leaveCaseSources, func(v LeaveCaseSource) LeaveCaseSource { return v }),
-		externalLeaveRecords:       cloneNestedMap(s.externalLeaveRecords, copyExternalLeaveRecord),
 		attendanceWorksites:        cloneNestedMap(s.attendanceWorksites, copyAttendanceWorksite),
 		attendanceClockRecords:     cloneNestedMap(s.attendanceClockRecords, copyAttendanceClockRecord),
 		attendanceSummaries:        cloneNestedMap(s.attendanceSummaries, copyAttendanceDailySummary),
@@ -93,13 +90,13 @@ func (s *Store) cloneLocked() *Store {
 		agentSessionFiles:          cloneNestedMap(s.agentSessionFiles, copyAgentSessionFile),
 		agentFileChunks:            cloneNestedMap(s.agentFileChunks, func(v []string) []string { return append([]string(nil), v...) }),
 		agentMemories:              cloneNestedMap(s.agentMemories, copyAgentMemory),
-		notifications:          cloneNestedMap(s.notifications, copyNotification),
-		notificationRecipients: cloneNestedMap(s.notificationRecipients, copyNotificationRecipient),
-		auditLogs:              cloneSliceMap(s.auditLogs, copyAuditLog),
-		permissionVersions:     cloneMap(s.permissionVersions, func(v int64) int64 { return v }),
-		identityOutbox:         cloneSliceMap(s.identityOutbox, func(v IdentityProvisioningOutboxEvent) IdentityProvisioningOutboxEvent { return v }),
-		outboxEvents:           cloneSliceMap(s.outboxEvents, copyOutboxEvent),
-		relationshipTuples:     cloneNestedMap(s.relationshipTuples, func(v AuthzRelationshipTuple) AuthzRelationshipTuple { return v }),
+		notifications:              cloneNestedMap(s.notifications, copyNotification),
+		notificationRecipients:     cloneNestedMap(s.notificationRecipients, copyNotificationRecipient),
+		auditLogs:                  cloneSliceMap(s.auditLogs, copyAuditLog),
+		permissionVersions:         cloneMap(s.permissionVersions, func(v int64) int64 { return v }),
+		identityOutbox:             cloneSliceMap(s.identityOutbox, func(v IdentityProvisioningOutboxEvent) IdentityProvisioningOutboxEvent { return v }),
+		outboxEvents:               cloneSliceMap(s.outboxEvents, copyOutboxEvent),
+		relationshipTuples:         cloneNestedMap(s.relationshipTuples, func(v AuthzRelationshipTuple) AuthzRelationshipTuple { return v }),
 	}
 }
 
@@ -131,11 +128,8 @@ func (s *Store) replaceLocked(next *Store) {
 	s.leaveTypes = next.leaveTypes
 	s.leaveBalances = next.leaveBalances
 	s.leaveBalanceEntries = next.leaveBalanceEntries
+	s.leaveRecords = next.leaveRecords
 	s.leaveRequests = next.leaveRequests
-	s.leaveRequestAllocations = next.leaveRequestAllocations
-	s.leaveCases = next.leaveCases
-	s.leaveCaseSources = next.leaveCaseSources
-	s.externalLeaveRecords = next.externalLeaveRecords
 	s.attendanceWorksites = next.attendanceWorksites
 	s.attendanceClockRecords = next.attendanceClockRecords
 	s.attendanceSummaries = next.attendanceSummaries

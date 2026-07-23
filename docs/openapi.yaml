@@ -1720,6 +1720,30 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "500": {$ref: "#/components/responses/InternalError"}
+  /v1/workspace/forms/{id}/publish:
+    post:
+      summary: Publish the current workspace form-builder version
+      parameters:
+        - $ref: "#/components/parameters/ID"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PublishWorkspaceFormDesignRequest"
+      responses:
+        "200":
+          description: Refreshed workspace form design settings
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlatformFormDesignDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
   /v1/workspace/knowledge-bases:
     get:
       summary: List tenant knowledge bases
@@ -5252,7 +5276,7 @@ components:
           $ref: "#/components/schemas/PlatformFormBuilder"
     PlatformFormDesignForm:
       type: object
-      required: [id, icon, name, category, flow, enabled, added_this_month, updated_at]
+      required: [id, icon, name, category, flow, enabled, added_this_month, updated_at, current_version, published_version]
       properties:
         id: {type: string}
         icon: {type: string}
@@ -5266,6 +5290,8 @@ components:
         updated_by:
           type: string
           description: Display name of the account that last updated the form design.
+        current_version: {type: integer, minimum: 1}
+        published_version: {type: integer, minimum: 0}
         fields:
           type: array
           items:
@@ -6522,6 +6548,14 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/PlatformFormBuilderStage"
+    PublishWorkspaceFormDesignRequest:
+      type: object
+      required: [version]
+      properties:
+        version:
+          type: integer
+          minimum: 1
+          description: Current draft version expected by the publisher.
     CreatePlatformTaskItemRequest:
       type: object
       required: [title, hours]

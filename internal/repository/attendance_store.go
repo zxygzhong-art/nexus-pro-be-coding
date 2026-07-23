@@ -31,26 +31,17 @@ type AttendanceStore interface {
 	AppendStandaloneLeaveBalanceEntry(context.Context, domain.LeaveBalanceEntry) (bool, error)
 	ListLeaveBalanceEntries(ctx context.Context, tenantID string) ([]domain.LeaveBalanceEntry, error)
 	ListLeaveBalanceEntriesByBalance(ctx context.Context, tenantID, balanceID string) ([]domain.LeaveBalanceEntry, error)
+	UpsertLeaveRecord(context.Context, domain.LeaveRecord) error
+	GetLeaveRecord(ctx context.Context, tenantID, id string) (domain.LeaveRecord, bool, error)
+	ListLeaveRecords(ctx context.Context, tenantID string) ([]domain.LeaveRecord, error)
+	ListActiveLeaveRecordsByQuery(ctx context.Context, tenantID string, employeeIDs []string, fromAt, toAt time.Time) ([]domain.LeaveRecord, error)
 
 	UpsertLeaveRequest(context.Context, domain.LeaveRequest) error
-	UpsertLeaveRequestAllocation(context.Context, domain.LeaveRequestAllocation) error
-	ListLeaveRequestAllocationsByRequest(ctx context.Context, tenantID, leaveRequestID string) ([]domain.LeaveRequestAllocation, error)
-	ListLeaveRequestAllocationsByRequestCycle(ctx context.Context, tenantID, leaveRequestID string, cycle int) ([]domain.LeaveRequestAllocation, error)
 	GetLeaveRequest(ctx context.Context, tenantID, id string) (domain.LeaveRequest, bool, error)
 	GetLeaveRequestByFormInstanceID(ctx context.Context, tenantID, formInstanceID string) (domain.LeaveRequest, bool, error)
 	ListLeaveRequests(ctx context.Context, tenantID string) ([]domain.LeaveRequest, error)
 	ListLeaveRequestsByQuery(ctx context.Context, tenantID string, query domain.LeaveRequestQuery) ([]domain.LeaveRequest, error)
 	ListLeaveRequestPageByQuery(ctx context.Context, tenantID string, query domain.LeaveRequestQuery, page domain.PageRequest) ([]domain.LeaveRequest, int, error)
-	UpsertLeaveCase(context.Context, domain.LeaveCase) error
-	GetLeaveCaseByLeaveRequest(ctx context.Context, tenantID, leaveRequestID string) (domain.LeaveCase, bool, error)
-	GetLeaveCaseByExternalRecord(ctx context.Context, tenantID, externalLeaveRecordID string) (domain.LeaveCase, bool, error)
-	ListConfirmedActiveLeaveCasesByQuery(ctx context.Context, tenantID string, employeeIDs []string, fromAt, toAt time.Time) ([]domain.LeaveCase, error)
-	UpsertLeaveCaseSource(context.Context, domain.LeaveCaseSource) error
-	DeleteLeaveCaseIfUnreferenced(ctx context.Context, tenantID, id string) error
-	UpsertExternalLeaveRecord(context.Context, domain.ExternalLeaveRecord) error
-	GetExternalLeaveRecordByRef(ctx context.Context, tenantID, sourceSystem, externalRef string) (domain.ExternalLeaveRecord, bool, error)
-	ListExternalLeaveRecords(ctx context.Context, tenantID string) ([]domain.ExternalLeaveRecord, error)
-
 	UpsertAttendanceWorksite(context.Context, domain.AttendanceWorksite) error
 	GetAttendanceWorksite(ctx context.Context, tenantID, id string) (domain.AttendanceWorksite, bool, error)
 	ListAttendanceWorksites(ctx context.Context, tenantID string) ([]domain.AttendanceWorksite, error)
