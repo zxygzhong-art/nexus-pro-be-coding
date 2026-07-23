@@ -30,10 +30,9 @@ func AgentModelCredentialAAD(tenantID, modelID string) []byte {
 	return []byte(strings.TrimSpace(tenantID) + "\x00agent-model\x00" + strings.TrimSpace(modelID))
 }
 
-// CredentialSecretAAD binds encrypted material to its tenant-scoped secret row.
-// Business connections may rotate references without changing the ciphertext's identity.
-func CredentialSecretAAD(tenantID, secretID string) []byte {
-	return []byte(strings.TrimSpace(tenantID) + "\x00credential-secret\x00" + strings.TrimSpace(secretID))
+// ExternalToolCredentialAAD binds an encrypted auth secret to one tenant and external tool connection row.
+func ExternalToolCredentialAAD(tenantID, connectionID string) []byte {
+	return []byte(strings.TrimSpace(tenantID) + "\x00external-tool-connection\x00" + strings.TrimSpace(connectionID))
 }
 
 // AgentModelSyncConfigHash 計算會影響 LiteLLM 路由的設定摘要。

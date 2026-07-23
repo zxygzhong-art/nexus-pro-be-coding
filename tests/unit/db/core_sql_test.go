@@ -53,31 +53,6 @@ func (r singleIntRow) Scan(dest ...interface{}) error {
 	return nil
 }
 
-// TestNextEmployeeNoSequenceUsesSequenceTable 驗證 next 員工 no sequence uses sequence table。
-func TestNextEmployeeNoSequenceUsesSequenceTable(t *testing.T) {
-	dbtx := &captureDBTX{row: singleIntRow{value: 7}}
-	got, err := sqlc.New(dbtx).NextEmployeeNoSequence(context.Background(), sqlc.NextEmployeeNoSequenceParams{
-		TenantID:    "tenant-1",
-		Prefix:      "IKL",
-		InitialNext: 1,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != 7 {
-		t.Fatalf("unexpected next sequence: %d", got)
-	}
-	if len(dbtx.queryRowArgs) != 3 {
-		t.Fatalf("expected 3 query args, got %d: %#v", len(dbtx.queryRowArgs), dbtx.queryRowArgs)
-	}
-	if dbtx.queryRowArgs[0] != "tenant-1" || dbtx.queryRowArgs[1] != "IKL" || dbtx.queryRowArgs[2] != int32(1) {
-		t.Fatalf("expected tenantID, prefix, initial sequence query args, got %#v", dbtx.queryRowArgs)
-	}
-	if strings.Contains(dbtx.queryRowSQL, "FROM employees") {
-		t.Fatalf("employee number sequence query should not scan employees: %s", dbtx.queryRowSQL)
-	}
-}
-
 // TestInsertFormInstanceFieldValueBooleanBranchCasts 驗證 boolean 投影欄位帶 ::boolean cast。
 // 2026-07-17 缺陷:缺少 cast 時 Postgres PREPARE 報 42804,CASE 分支無法確定型別,
 // 導致所有含 analytics.reportable 布林欄位的表單提交 500。

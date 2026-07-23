@@ -5,72 +5,6 @@ import (
 	"time"
 )
 
-// CredentialSecretType identifies the shape of encrypted credential material.
-type CredentialSecretType string
-
-const (
-	CredentialSecretTypeAPIKey        CredentialSecretType = "api_key"
-	CredentialSecretTypeBearer        CredentialSecretType = "bearer"
-	CredentialSecretTypeBasicPassword CredentialSecretType = "basic_password"
-)
-
-// Valid reports whether the credential secret type is supported by storage.
-func (t CredentialSecretType) Valid() bool {
-	switch t {
-	case CredentialSecretTypeAPIKey, CredentialSecretTypeBearer, CredentialSecretTypeBasicPassword:
-		return true
-	default:
-		return false
-	}
-}
-
-// CredentialSecretStatus describes whether encrypted credential material may be used.
-type CredentialSecretStatus string
-
-const (
-	CredentialSecretStatusActive  CredentialSecretStatus = "active"
-	CredentialSecretStatusRevoked CredentialSecretStatus = "revoked"
-)
-
-// Valid reports whether the credential secret status is supported by storage.
-func (s CredentialSecretStatus) Valid() bool {
-	return s == CredentialSecretStatusActive || s == CredentialSecretStatusRevoked
-}
-
-// CredentialSecret is tenant-owned encrypted credential material. Ciphertext is never serialized.
-type CredentialSecret struct {
-	ID                 string                 `json:"id"`
-	TenantID           string                 `json:"tenant_id"`
-	Name               string                 `json:"name"`
-	SecretType         CredentialSecretType   `json:"secret_type"`
-	Ciphertext         string                 `json:"-"`
-	Preview            string                 `json:"preview,omitempty"`
-	Status             CredentialSecretStatus `json:"status"`
-	CreatedByAccountID string                 `json:"created_by_account_id,omitempty"`
-	CreatedAt          time.Time              `json:"created_at"`
-	UpdatedAt          time.Time              `json:"updated_at"`
-	RevokedAt          *time.Time             `json:"revoked_at,omitempty"`
-}
-
-// Validate checks credential metadata and revocation consistency without decrypting it.
-func (s CredentialSecret) Validate() error {
-	fields := make([]FieldError, 0, 7)
-	agentV2Required(&fields, "id", s.ID)
-	agentV2Required(&fields, "tenant_id", s.TenantID)
-	agentV2Required(&fields, "ciphertext", s.Ciphertext)
-	if !s.SecretType.Valid() {
-		fields = append(fields, agentV2Invalid("secret_type", "secret_type must be api_key, bearer, or basic_password"))
-	}
-	if !s.Status.Valid() {
-		fields = append(fields, agentV2Invalid("status", "status must be active or revoked"))
-	} else if s.Status == CredentialSecretStatusActive && s.RevokedAt != nil {
-		fields = append(fields, agentV2Invalid("revoked_at", "revoked_at must be empty for an active secret"))
-	} else if s.Status == CredentialSecretStatusRevoked && s.RevokedAt == nil {
-		fields = append(fields, agentV2RequiredError("revoked_at"))
-	}
-	return agentV2ValidationResult("credential secret is invalid", fields)
-}
-
 // ModelConnectionStatus describes whether a model connection accepts new traffic.
 type ModelConnectionStatus string
 
@@ -125,9 +59,10 @@ type ModelConnection struct {
 	Name               string                `json:"name"`
 	Provider           string                `json:"provider"`
 	UpstreamModel      string                `json:"upstream_model"`
-	APIBaseURL         string                `json:"api_base_url,omitempty"`
-	CredentialSecretID string                `json:"credential_secret_id,omitempty"`
-	RateLimitRPM       int                   `json:"rate_limit_rpm"`
+	APIBaseURL        string                `json:"api_base_url,omitempty"`
+	APIKeyCiphertext  string                `json:"-"`
+	APIKeyPreview     string                `json:"api_key_preview,omitempty"`
+	RateLimitRPM      int                   `json:"rate_limit_rpm"`
 	TimeoutMS          int                   `json:"timeout_ms"`
 	Status             ModelConnectionStatus `json:"status"`
 	CreatedByAccountID string                `json:"created_by_account_id,omitempty"`
@@ -273,10 +208,10 @@ type ExternalToolConnection struct {
 	Transport          ExternalToolTransport        `json:"transport"`
 	EndpointURL        string                       `json:"endpoint_url"`
 	AuthType           ExternalToolAuthType         `json:"auth_type"`
-	AuthHeaderName     string                       `json:"auth_header_name,omitempty"`
-	AuthUsername       string                       `json:"auth_username,omitempty"`
-	CredentialSecretID string                       `json:"credential_secret_id,omitempty"`
-	TimeoutMS          int                          `json:"timeout_ms"`
+	AuthHeaderName       string                       `json:"auth_header_name,omitempty"`
+	AuthUsername         string                       `json:"auth_username,omitempty"`
+	AuthSecretCiphertext string                       `json:"-"`
+	TimeoutMS            int                          `json:"timeout_ms"`
 	Status             ExternalToolConnectionStatus `json:"status"`
 	LastTestedAt       *time.Time                   `json:"last_tested_at,omitempty"`
 	LastTestStatus     ConnectionTestStatus         `json:"last_test_status"`
@@ -306,8 +241,8 @@ func (c ExternalToolConnection) Validate() error {
 	}
 	if !c.AuthType.Valid() {
 		fields = append(fields, agentV2Invalid("auth_type", "auth_type must be none, bearer, api_key, or basic"))
-	} else if c.AuthType != ExternalToolAuthTypeNone && strings.TrimSpace(c.CredentialSecretID) == "" {
-		fields = append(fields, agentV2RequiredError("credential_secret_id"))
+	} else if c.AuthType != ExternalToolAuthTypeNone && strings.TrimSpace(c.AuthSecretCiphertext) == "" {
+		fields = append(fields, agentV2RequiredError("auth_secret_ciphertext"))
 	}
 	if c.TimeoutMS < 1_000 || c.TimeoutMS > 120_000 {
 		fields = append(fields, agentV2Invalid("timeout_ms", "timeout_ms must be between 1000 and 120000"))
@@ -377,6 +312,7 @@ func (s AgentLifecycleStatus) Valid() bool {
 type Agent struct {
 	ID                  string               `json:"id"`
 	TenantID            string               `json:"tenant_id"`
+	ParentAgentID       string               `json:"parent_agent_id,omitempty"`
 	LifecycleStatus     AgentLifecycleStatus `json:"lifecycle_status"`
 	DraftRevisionID     string               `json:"draft_revision_id,omitempty"`
 	PublishedRevisionID string               `json:"published_revision_id,omitempty"`
@@ -392,6 +328,9 @@ func (a Agent) Validate() error {
 	fields := make([]FieldError, 0, 6)
 	agentV2Required(&fields, "id", a.ID)
 	agentV2Required(&fields, "tenant_id", a.TenantID)
+	if a.ParentAgentID == a.ID {
+		fields = append(fields, agentV2Invalid("parent_agent_id", "an agent cannot be its own parent"))
+	}
 	if a.NextRevisionNo <= 0 {
 		fields = append(fields, agentV2Invalid("next_revision_no", "next_revision_no must be greater than zero"))
 	}
@@ -411,6 +350,7 @@ type AgentRevision struct {
 	TenantID                      string                            `json:"tenant_id"`
 	AgentID                       string                            `json:"agent_id"`
 	RevisionNo                    int                               `json:"revision_no"`
+	Ordinal                       *int                              `json:"ordinal,omitempty"`
 	Name                          string                            `json:"name"`
 	Description                   string                            `json:"description"`
 	Icon                          string                            `json:"icon"`
@@ -457,6 +397,9 @@ func (r AgentRevision) Validate() error {
 	if r.RevisionNo <= 0 {
 		fields = append(fields, agentV2Invalid("revision_no", "revision_no must be greater than zero"))
 	}
+	if r.Ordinal != nil && *r.Ordinal < 0 {
+		fields = append(fields, agentV2Invalid("ordinal", "ordinal must not be negative"))
+	}
 	if !agentV2CategoryValid(r.Category) {
 		fields = append(fields, agentV2Invalid("category", "category must be workflow, doc, analytics, or it"))
 	}
@@ -481,18 +424,6 @@ func (r AgentRevision) Validate() error {
 		}
 	}
 	return agentV2ValidationResult("agent revision is invalid", fields)
-}
-
-// AgentRevisionMember is one immutable worker row owned by a revision.
-type AgentRevisionMember struct {
-	TenantID            string `json:"tenant_id"`
-	RevisionID          string `json:"revision_id"`
-	ID                  string `json:"id"`
-	Name                string `json:"name"`
-	Role                string `json:"role"`
-	ModelConnectionID   string `json:"model_connection_id"`
-	ModelConfigChecksum string `json:"model_config_checksum,omitempty"`
-	Ordinal             int    `json:"ordinal"`
 }
 
 // AgentRevisionBuiltinTool is a root built-in tool binding.
@@ -522,46 +453,12 @@ type AgentRevisionKnowledgeBase struct {
 	Ordinal         int    `json:"ordinal"`
 }
 
-// AgentRevisionMemberBuiltinTool binds a built-in tool to one revision member.
-type AgentRevisionMemberBuiltinTool struct {
-	TenantID   string         `json:"tenant_id"`
-	RevisionID string         `json:"revision_id"`
-	MemberID   string         `json:"member_id"`
-	ToolKey    string         `json:"tool_key"`
-	Ordinal    int            `json:"ordinal"`
-	Config     map[string]any `json:"config"`
-}
-
-// AgentRevisionMemberExternalTool binds an external tool to one revision member.
-type AgentRevisionMemberExternalTool struct {
-	TenantID           string         `json:"tenant_id"`
-	RevisionID         string         `json:"revision_id"`
-	MemberID           string         `json:"member_id"`
-	ExternalToolID     string         `json:"external_tool_id"`
-	ToolSchemaChecksum string         `json:"tool_schema_checksum,omitempty"`
-	Ordinal            int            `json:"ordinal"`
-	Config             map[string]any `json:"config"`
-}
-
-// AgentRevisionMemberKnowledgeBase binds a knowledge base to one revision member.
-type AgentRevisionMemberKnowledgeBase struct {
-	TenantID        string `json:"tenant_id"`
-	RevisionID      string `json:"revision_id"`
-	MemberID        string `json:"member_id"`
-	KnowledgeBaseID string `json:"knowledge_base_id"`
-	Ordinal         int    `json:"ordinal"`
-}
-
 // AgentRevisionSnapshot assembles one revision row and its normalized binding rows for services.
 type AgentRevisionSnapshot struct {
-	Revision             AgentRevision                      `json:"revision"`
-	Members              []AgentRevisionMember              `json:"members"`
-	BuiltinTools         []AgentRevisionBuiltinTool         `json:"builtin_tools"`
-	ExternalTools        []AgentRevisionExternalTool        `json:"external_tools"`
-	KnowledgeBases       []AgentRevisionKnowledgeBase       `json:"knowledge_bases"`
-	MemberBuiltinTools   []AgentRevisionMemberBuiltinTool   `json:"member_builtin_tools"`
-	MemberExternalTools  []AgentRevisionMemberExternalTool  `json:"member_external_tools"`
-	MemberKnowledgeBases []AgentRevisionMemberKnowledgeBase `json:"member_knowledge_bases"`
+	Revision       AgentRevision                `json:"revision"`
+	BuiltinTools   []AgentRevisionBuiltinTool   `json:"builtin_tools"`
+	ExternalTools  []AgentRevisionExternalTool  `json:"external_tools"`
+	KnowledgeBases []AgentRevisionKnowledgeBase `json:"knowledge_bases"`
 }
 
 // Validate checks the revision row and normalized binding ownership and ordinals.
@@ -569,52 +466,22 @@ func (s AgentRevisionSnapshot) Validate() error {
 	if err := s.Revision.Validate(); err != nil {
 		return err
 	}
-	fields := make([]FieldError, 0, 8)
-	memberIDs := make(map[string]struct{}, len(s.Members))
-	for _, member := range s.Members {
-		if !agentV2BindingOwnerValid(s.Revision, member.TenantID, member.RevisionID) || strings.TrimSpace(member.ID) == "" || strings.TrimSpace(member.Name) == "" || strings.TrimSpace(member.ModelConnectionID) == "" || member.Ordinal < 0 {
-			fields = append(fields, agentV2Invalid("members", "one or more member rows are invalid"))
-			break
-		}
-		if _, exists := memberIDs[member.ID]; exists {
-			fields = append(fields, agentV2Invalid("members", "member ids must be unique"))
-			break
-		}
-		memberIDs[member.ID] = struct{}{}
-	}
+	fields := make([]FieldError, 0, 3)
 	for _, binding := range s.BuiltinTools {
 		if !agentV2BindingOwnerValid(s.Revision, binding.TenantID, binding.RevisionID) || strings.TrimSpace(binding.ToolKey) == "" || binding.Ordinal < 0 {
-			fields = append(fields, agentV2Invalid("builtin_tools", "one or more root built-in tool bindings are invalid"))
+			fields = append(fields, agentV2Invalid("builtin_tools", "one or more built-in tool bindings are invalid"))
 			break
 		}
 	}
 	for _, binding := range s.ExternalTools {
 		if !agentV2BindingOwnerValid(s.Revision, binding.TenantID, binding.RevisionID) || strings.TrimSpace(binding.ExternalToolID) == "" || binding.Ordinal < 0 {
-			fields = append(fields, agentV2Invalid("external_tools", "one or more root external tool bindings are invalid"))
+			fields = append(fields, agentV2Invalid("external_tools", "one or more external tool bindings are invalid"))
 			break
 		}
 	}
 	for _, binding := range s.KnowledgeBases {
 		if !agentV2BindingOwnerValid(s.Revision, binding.TenantID, binding.RevisionID) || strings.TrimSpace(binding.KnowledgeBaseID) == "" || binding.Ordinal < 0 {
-			fields = append(fields, agentV2Invalid("knowledge_bases", "one or more root knowledge-base bindings are invalid"))
-			break
-		}
-	}
-	for _, binding := range s.MemberBuiltinTools {
-		if !agentV2MemberBindingValid(s.Revision, memberIDs, binding.TenantID, binding.RevisionID, binding.MemberID) || strings.TrimSpace(binding.ToolKey) == "" || binding.Ordinal < 0 {
-			fields = append(fields, agentV2Invalid("member_builtin_tools", "one or more member built-in tool bindings are invalid"))
-			break
-		}
-	}
-	for _, binding := range s.MemberExternalTools {
-		if !agentV2MemberBindingValid(s.Revision, memberIDs, binding.TenantID, binding.RevisionID, binding.MemberID) || strings.TrimSpace(binding.ExternalToolID) == "" || binding.Ordinal < 0 {
-			fields = append(fields, agentV2Invalid("member_external_tools", "one or more member external tool bindings are invalid"))
-			break
-		}
-	}
-	for _, binding := range s.MemberKnowledgeBases {
-		if !agentV2MemberBindingValid(s.Revision, memberIDs, binding.TenantID, binding.RevisionID, binding.MemberID) || strings.TrimSpace(binding.KnowledgeBaseID) == "" || binding.Ordinal < 0 {
-			fields = append(fields, agentV2Invalid("member_knowledge_bases", "one or more member knowledge-base bindings are invalid"))
+			fields = append(fields, agentV2Invalid("knowledge_bases", "one or more knowledge-base bindings are invalid"))
 			break
 		}
 	}
@@ -927,26 +794,18 @@ func (s ConversationFileState) Valid() bool {
 }
 
 // ConversationFile binds an existing file asset to one conversation segment.
+// When State is attached, MessageID and Ordinal record the single owning message.
 type ConversationFile struct {
 	ID             string                `json:"id"`
 	TenantID       string                `json:"tenant_id"`
 	ConversationID string                `json:"conversation_id"`
 	SegmentID      string                `json:"segment_id"`
 	FileAssetID    string                `json:"file_asset_id"`
+	MessageID      string                `json:"message_id,omitempty"`
+	Ordinal        *int                  `json:"ordinal,omitempty"`
 	State          ConversationFileState `json:"state"`
 	CreatedAt      time.Time             `json:"created_at"`
 	UpdatedAt      time.Time             `json:"updated_at"`
-}
-
-// MessageAttachment records ordered file provenance for one message in the same segment.
-type MessageAttachment struct {
-	TenantID           string    `json:"tenant_id"`
-	ConversationID     string    `json:"conversation_id"`
-	SegmentID          string    `json:"segment_id"`
-	MessageID          string    `json:"message_id"`
-	ConversationFileID string    `json:"conversation_file_id"`
-	Ordinal            int       `json:"ordinal"`
-	CreatedAt          time.Time `json:"created_at"`
 }
 
 // MemoryScope identifies the retrieval boundary of a memory.
@@ -1157,14 +1016,6 @@ func externalToolHTTPMethodValid(method string) bool {
 
 func agentV2BindingOwnerValid(revision AgentRevision, tenantID, revisionID string) bool {
 	return tenantID == revision.TenantID && revisionID == revision.ID
-}
-
-func agentV2MemberBindingValid(revision AgentRevision, memberIDs map[string]struct{}, tenantID, revisionID, memberID string) bool {
-	if !agentV2BindingOwnerValid(revision, tenantID, revisionID) {
-		return false
-	}
-	_, ok := memberIDs[memberID]
-	return ok
 }
 
 func agentV2Required(fields *[]FieldError, name, value string) {

@@ -7,23 +7,33 @@ import (
 	"time"
 )
 
-func TestCredentialSecretAADIsStableAndRowScoped(t *testing.T) {
-	want := "tenant-1\x00credential-secret\x00secret-1"
-	if got := string(CredentialSecretAAD(" tenant-1 ", " secret-1 ")); got != want {
-		t.Fatalf("CredentialSecretAAD() = %q, want %q", got, want)
+func TestAgentModelCredentialAADIsStableAndRowScoped(t *testing.T) {
+	want := "tenant-1\x00agent-model\x00model-1"
+	if got := string(AgentModelCredentialAAD(" tenant-1 ", " model-1 ")); got != want {
+		t.Fatalf("AgentModelCredentialAAD() = %q, want %q", got, want)
 	}
-	if string(CredentialSecretAAD("tenant-1", "secret-2")) == want {
-		t.Fatal("CredentialSecretAAD must change when the secret row changes")
+	if string(AgentModelCredentialAAD("tenant-1", "model-2")) == want {
+		t.Fatal("AgentModelCredentialAAD must change when the model row changes")
 	}
 }
 
-func TestCredentialSecretJSONDoesNotExposeCiphertext(t *testing.T) {
-	raw, err := json.Marshal(CredentialSecret{ID: "secret-1", Ciphertext: "encrypted-secret"})
+func TestExternalToolCredentialAADIsStableAndRowScoped(t *testing.T) {
+	want := "tenant-1\x00external-tool-connection\x00tool-1"
+	if got := string(ExternalToolCredentialAAD(" tenant-1 ", " tool-1 ")); got != want {
+		t.Fatalf("ExternalToolCredentialAAD() = %q, want %q", got, want)
+	}
+	if string(ExternalToolCredentialAAD("tenant-1", "tool-2")) == want {
+		t.Fatal("ExternalToolCredentialAAD must change when the connection row changes")
+	}
+}
+
+func TestModelConnectionJSONDoesNotExposeCiphertext(t *testing.T) {
+	raw, err := json.Marshal(ModelConnection{ID: "model-1", APIKeyCiphertext: "encrypted-secret"})
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
 	if strings.Contains(string(raw), "encrypted-secret") || strings.Contains(string(raw), "ciphertext") {
-		t.Fatalf("credential secret JSON exposed ciphertext: %s", raw)
+		t.Fatalf("model connection JSON exposed ciphertext: %s", raw)
 	}
 }
 

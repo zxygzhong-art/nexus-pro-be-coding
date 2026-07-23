@@ -3,7 +3,6 @@ package service_test
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -139,16 +138,16 @@ func TestWorkspaceInsightsProjectsAttendanceMembers(t *testing.T) {
 	for i, hours := range []float64{7.8, 8.43, 8.18, 8.13, 8.2, 8.12, 8.02} {
 		workDate := workDates[i]
 		if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{
-			ID: fmt.Sprintf("sum-attended-%d", i), TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: workDate,
-			DailyHours: hours, AttendHours: hours, AttendCounted: true, Source: "ehrms",
+			TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: workDate,
+			DailyHours: hours, ClockHours: hours, Source: "ehrms",
 			ExternalRef: "IKL001:" + workDate, CreatedAt: now, UpdatedAt: now,
 		}); err != nil {
 			t.Fatal(err)
 		}
 	}
 	if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{
-		ID: "sum-attended-emp-2", TenantID: "tenant-1", EmployeeID: "emp-2", WorkDate: "2026-06-01",
-		DailyHours: 8, AttendHours: 7.209999999999994, AttendCounted: true, Source: "ehrms",
+		TenantID: "tenant-1", EmployeeID: "emp-2", WorkDate: "2026-06-01",
+		DailyHours: 8, ClockHours: 7.209999999999994, Source: "ehrms",
 		ExternalRef: "IKL002:2026-06-01", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
@@ -169,7 +168,7 @@ func TestWorkspaceInsightsProjectsAttendanceMembers(t *testing.T) {
 	if members[0]["primary_product"] != "—" || members[0]["task_count"] != 0 || len(members[0]["tasks"].([]map[string]any)) != 0 {
 		t.Fatalf("unsourced task data must stay empty, got %+v", members[0])
 	}
-	if members[0]["hours"] != float64(56.88) || members[1]["hours"] != float64(7.21) {
+	if members[0]["hours"] != float64(48.86) || members[1]["hours"] != float64(7.21) {
 		t.Fatalf("expected member hours rounded to hundredths, got %+v", members)
 	}
 	memberHours := report["member_hours"].([]map[string]any)
@@ -177,12 +176,12 @@ func TestWorkspaceInsightsProjectsAttendanceMembers(t *testing.T) {
 	if len(memberHours) != 2 || len(leaveChart) != 1 || leaveChart[0]["id"] != "IKL001" {
 		t.Fatalf("unexpected member charts: hours=%+v leave=%+v", memberHours, leaveChart)
 	}
-	if memberHours[0]["value"] != float64(56.88) || memberHours[0]["meta"] != "56.88h" || memberHours[1]["value"] != float64(7.21) || memberHours[1]["meta"] != "7.21h" {
+	if memberHours[0]["value"] != float64(48.86) || memberHours[0]["meta"] != "48.86h" || memberHours[1]["value"] != float64(7.21) || memberHours[1]["meta"] != "7.21h" {
 		t.Fatalf("expected member chart values and labels rounded to hundredths, got %+v", memberHours)
 	}
 	totalHours := insightMetricValueByID(t, report, "dept-total-hours").(float64)
 	wantTotal := members[0]["hours"].(float64) + members[1]["hours"].(float64)
-	if totalHours != float64(64.09) || totalHours != wantTotal {
+	if totalHours != float64(56.07) || totalHours != wantTotal {
 		t.Fatalf("expected rounded total hours %.2f from member rows, got %.2f", wantTotal, totalHours)
 	}
 }
@@ -723,7 +722,7 @@ func TestWorkspaceAttendanceMarksOnlyPastEligibleMissingDaysAbsent(t *testing.T)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-resigned", EmployeeNo: "E003", Name: "Resigned", Status: "resigned", EmploymentStatus: "resigned", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), ResignDate: ptrTime(time.Date(2026, 7, 5, 0, 0, 0, 0, time.UTC))})
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-future-hire", EmployeeNo: "E004", Name: "Future Hire", Status: "onboarding", EmploymentStatus: "onboarding", HireDate: ptrTime(time.Date(2026, 7, 15, 0, 0, 0, 0, time.UTC))})
 	_ = store.UpsertAttendanceClockRecord(context.Background(), domain.AttendanceClockRecord{ID: "clk-in", TenantID: "tenant-1", EmployeeID: "emp-active", WorkDate: "2026-07-08", Direction: "clock_in", ClockedAt: time.Date(2026, 7, 8, 1, 0, 0, 0, time.UTC), RecordStatus: "accepted", Source: "geofence", CreatedAt: now})
-	_ = store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "summary", TenantID: "tenant-1", EmployeeID: "emp-active", WorkDate: "2026-07-09", ClockHours: 8, Source: "ehrms", ExternalRef: "E001:2026-07-09", CreatedAt: now, UpdatedAt: now})
+	_ = store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{TenantID: "tenant-1", EmployeeID: "emp-active", WorkDate: "2026-07-09", ClockHours: 8, Source: "ehrms", ExternalRef: "E001:2026-07-09", CreatedAt: now, UpdatedAt: now})
 
 	got, err := svc.Workspace().WorkspaceAttendance(ctx, domain.WorkspaceAttendanceQuery{Year: 2026, Month: 7})
 	if err != nil {
@@ -788,7 +787,7 @@ func TestWorkspaceAttendanceNormalizesEHRMSLeaveTypes(t *testing.T) {
 	for i, item := range types {
 		workDate := time.Date(2026, 6, workdays[i], 0, 0, 0, 0, time.UTC).Format(time.DateOnly)
 		if item.code == "" {
-			if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "sum-" + workDate, TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: workDate, LeaveType: "Future Leave Type", LeaveHours: 8, LeaveCounted: true, Source: "ehrms", ExternalRef: "IKL001:" + workDate, CreatedAt: now, UpdatedAt: now}); err != nil {
+			if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: workDate, Source: "ehrms", ExternalRef: "IKL001:" + workDate, CreatedAt: now, UpdatedAt: now}); err != nil {
 				t.Fatal(err)
 			}
 			continue
@@ -820,7 +819,7 @@ func TestWorkspaceAttendanceRejectsNonCatalogLeaveType(t *testing.T) {
 	store, svc, ctx := newWorkspaceFixture(t)
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
-	if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{ID: "sum-wellness", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-09", LeaveType: "wellness_leave", LeaveHours: 8, LeaveCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-09", CreatedAt: now, UpdatedAt: now}); err != nil {
+	if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-09", ClockHours: 12, Source: "ehrms", ExternalRef: "IKL001:2026-06-09", CreatedAt: now, UpdatedAt: now}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -878,13 +877,6 @@ func TestWorkspaceAttendanceKeepsInactiveHistoricalLeaveType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	legendFound := false
-	for _, item := range got.LeaveLegend {
-		legendFound = legendFound || item.Code == "annual"
-	}
-	if !legendFound {
-		t.Fatalf("inactive annual leave missing from legend: %+v", got.LeaveLegend)
-	}
 	cell := got.Attendance.Rows[0].Cells[8]
 	if cell.Type != "leave" || cell.Leave != "annual" || cell.Hours != 7 {
 		t.Fatalf("historical inactive leave case not rendered: %+v", cell)
@@ -906,8 +898,7 @@ func TestWorkspaceAttendanceUsesDailyLeaveFactsInsteadOfLeaveRanges(t *testing.T
 		t.Fatal(err)
 	}
 	if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{
-		ID: "sum-ikm229-0709", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-07-09",
-		LeaveType: "annual", LeaveHours: 8, LeaveCounted: true,
+		TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-07-09",
 		Source: "ehrms", ExternalRef: "IKM229:2026-07-09", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)
@@ -1007,7 +998,6 @@ func TestWorkspaceAttendanceUsesEHRMSDailySummaries(t *testing.T) {
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
 	if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{
-		ID:          "ads-1",
 		TenantID:    "tenant-1",
 		EmployeeID:  "emp-1",
 		WorkDate:    "2026-06-10",
@@ -1061,9 +1051,9 @@ func TestWorkspaceAttendancePrefersLocalActualEvidence(t *testing.T) {
 		}
 	}
 	for _, summary := range []domain.AttendanceDailySummary{
-		{ID: "local-fallback", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-09", AttendHours: 12, AttendCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-09", CreatedAt: now, UpdatedAt: now},
-		{ID: "open-fallback", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", AttendHours: 7, AttendCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-10", CreatedAt: now, UpdatedAt: now},
-		{ID: "rejected-fallback", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", AttendHours: 6, AttendCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-11", CreatedAt: now, UpdatedAt: now},
+		{TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-09", ClockHours: 12, Source: "ehrms", ExternalRef: "IKL001:2026-06-09", CreatedAt: now, UpdatedAt: now},
+		{TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", ClockHours: 7, Source: "ehrms", ExternalRef: "IKL001:2026-06-10", CreatedAt: now, UpdatedAt: now},
+		{TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", ClockHours: 6, Source: "ehrms", ExternalRef: "IKL001:2026-06-11", CreatedAt: now, UpdatedAt: now},
 	} {
 		if err := store.UpsertAttendanceDailySummary(context.Background(), summary); err != nil {
 			t.Fatal(err)
@@ -1075,17 +1065,17 @@ func TestWorkspaceAttendancePrefersLocalActualEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	row := got.Attendance.Rows[0]
-	if row.Summary.AttendedHours != 14 {
-		t.Fatalf("expected 8 local hours plus 6 eHRMS fallback hours, got %+v", row.Summary)
+	if row.Summary.ActualHours != 8 || row.Summary.AttendedHours != 7 {
+		t.Fatalf("expected attendance_day_projections to supply the attended hours, got %+v", row.Summary)
 	}
-	if row.Cells[8].Hours != 8 || row.Cells[8].Label != "打卡" {
+	if row.Cells[8].ActualHours != 8 || row.Cells[8].Hours != 7 || row.Cells[8].MaxHours != 7 || row.Cells[8].Label != "打卡" {
 		t.Fatalf("expected local evidence to drive the June 9 cell, got %+v", row.Cells[8])
 	}
 	if row.Cells[9].Hours != 0 {
 		t.Fatalf("expected a trailing open punch to contribute zero hours, got %+v", row.Cells[9])
 	}
-	if row.Cells[10].Hours != 6 || row.Cells[10].Label != "eHRMS" {
-		t.Fatalf("expected rejected local punches to allow eHRMS fallback, got %+v", row.Cells[10])
+	if row.Cells[10].Hours != 0 || row.Cells[10].Label == "eHRMS" {
+		t.Fatalf("expected a zero-punch projection to override the eHRMS fallback, got %+v", row.Cells[10])
 	}
 }
 
@@ -1096,11 +1086,11 @@ func TestWorkspaceAttendanceCapsNormalHoursPerDayAndPreservesActualHours(t *test
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", HireDate: ptrTime(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)), CreatedAt: now, UpdatedAt: now})
 
 	for _, summary := range []domain.AttendanceDailySummary{
-		{ID: "over-cap", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-08", DailyHours: 8, ClockHours: 9.5, AttendHours: 9.5, AttendCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-08", CreatedAt: now, UpdatedAt: now},
-		{ID: "half-leave", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-09", DailyHours: 8, ClockHours: 5, AttendHours: 5, AttendCounted: true, LeaveType: "annual", LeaveHours: 4, LeaveCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-09", CreatedAt: now, UpdatedAt: now},
-		{ID: "short-day", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", DailyHours: 6, ClockHours: 8, AttendHours: 8, AttendCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-10", CreatedAt: now, UpdatedAt: now},
-		{ID: "local-cap", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", DailyHours: 6, Source: "ehrms", ExternalRef: "IKL001:2026-06-11", CreatedAt: now, UpdatedAt: now},
-		{ID: "weekend", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-13", DailyHours: 8, ClockHours: 6, AttendHours: 6, AttendCounted: true, Source: "ehrms", ExternalRef: "IKL001:2026-06-13", CreatedAt: now, UpdatedAt: now},
+		{TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-08", DailyHours: 8, ClockHours: 9.5, Source: "ehrms", ExternalRef: "IKL001:2026-06-08", CreatedAt: now, UpdatedAt: now},
+		{TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-09", DailyHours: 8, ClockHours: 5, Source: "ehrms", ExternalRef: "IKL001:2026-06-09", CreatedAt: now, UpdatedAt: now},
+		{TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10", DailyHours: 6, ClockHours: 8, Source: "ehrms", ExternalRef: "IKL001:2026-06-10", CreatedAt: now, UpdatedAt: now},
+		{TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-11", DailyHours: 6, Source: "ehrms", ExternalRef: "IKL001:2026-06-11", CreatedAt: now, UpdatedAt: now},
+		{TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-13", DailyHours: 8, ClockHours: 6, Source: "ehrms", ExternalRef: "IKL001:2026-06-13", CreatedAt: now, UpdatedAt: now},
 	} {
 		if err := store.UpsertAttendanceDailySummary(context.Background(), summary); err != nil {
 			t.Fatal(err)
@@ -1124,20 +1114,20 @@ func TestWorkspaceAttendanceCapsNormalHoursPerDayAndPreservesActualHours(t *test
 		t.Fatal(err)
 	}
 	row := got.Attendance.Rows[0]
-	if row.Summary.ActualHours != 37.5 || row.Summary.AttendedHours != 24 {
-		t.Fatalf("expected actual hours to remain 37.5 and counted hours to cap at 24, got %+v", row.Summary)
+	if row.Summary.ActualHours != 23 || row.Summary.AttendedHours != 13 {
+		t.Fatalf("expected projection-backed actual hours 23 and counted hours 13, got %+v", row.Summary)
 	}
-	if row.Summary.DueHours != 172 || row.Summary.WorkDays != 22 {
-		t.Fatalf("expected per-day ceilings to produce 172 due hours across 22 workdays, got %+v", row.Summary)
+	if row.Summary.DueHours != 171 || row.Summary.WorkDays != 22 {
+		t.Fatalf("expected projection required minutes to produce 171 due hours across 22 workdays, got %+v", row.Summary)
 	}
-	if cell := row.Cells[7]; cell.ActualHours != 9.5 || cell.MaxHours != 8 || cell.CountedHours != 8 || cell.Hours != 8 {
-		t.Fatalf("expected June 8 work to cap at 8 hours, got %+v", cell)
+	if cell := row.Cells[7]; cell.ActualHours != 0 || cell.MaxHours != 7 || cell.CountedHours != 0 || cell.Type != "absence" {
+		t.Fatalf("expected the June 8 projection to override the eHRMS summary, got %+v", cell)
 	}
-	if cell := row.Cells[8]; cell.Type != "leave" || cell.ActualHours != 5 || cell.MaxHours != 8 || cell.CountedHours != 4 {
-		t.Fatalf("expected half-day leave to leave four normal work hours available, got %+v", cell)
+	if cell := row.Cells[8]; cell.Type != "leave" || cell.ActualHours != 0 || cell.MaxHours != 7 || cell.CountedHours != 0 {
+		t.Fatalf("expected the leave-day projection to override eHRMS work evidence, got %+v", cell)
 	}
-	if cell := row.Cells[10]; cell.ActualHours != 9 || cell.MaxHours != 6 || cell.CountedHours != 6 || cell.Label != "打卡" {
-		t.Fatalf("expected local punches to retain the eHRMS daily ceiling, got %+v", cell)
+	if cell := row.Cells[10]; cell.ActualHours != 9 || cell.MaxHours != 7 || cell.CountedHours != 7 || cell.Label != "打卡" {
+		t.Fatalf("expected local punches to use the projection required minutes, got %+v", cell)
 	}
 	if cell := row.Cells[12]; cell.Type != "weekend" || cell.ActualHours != 6 || cell.MaxHours != 0 || cell.CountedHours != 0 || cell.Overtime != 2 {
 		t.Fatalf("expected weekend work to stay actual-only with approved overtime separate, got %+v", cell)
@@ -1150,7 +1140,7 @@ func TestWorkspaceAttendanceMarksIncompleteEHRMSClockSummaryAbnormal(t *testing.
 	now := time.Date(2026, 6, 10, 9, 0, 0, 0, time.UTC)
 	insertWorkspaceEmployee(t, store, domain.Employee{ID: "emp-1", EmployeeNo: "IKL001", Name: "王偉", Status: "active", EmploymentStatus: "active", CreatedAt: now, UpdatedAt: now})
 	if err := store.UpsertAttendanceDailySummary(context.Background(), domain.AttendanceDailySummary{
-		ID: "ads-incomplete", TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10",
+		TenantID: "tenant-1", EmployeeID: "emp-1", WorkDate: "2026-06-10",
 		DailyHours: 8, ClockHours: 4, ClockStart: "09:00", Source: "ehrms", ExternalRef: "IKL001:2026-06-10", CreatedAt: now, UpdatedAt: now,
 	}); err != nil {
 		t.Fatal(err)

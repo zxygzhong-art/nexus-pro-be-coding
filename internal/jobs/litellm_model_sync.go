@@ -205,11 +205,7 @@ func (s *LiteLLMModelSyncer) reconcileModel(ctx context.Context, model domain.Ag
 		if s.credentialCipher == nil {
 			return errors.New("agent model credential cipher is not configured")
 		}
-		aad := domain.AgentModelCredentialAAD(model.TenantID, model.ID)
-		if strings.TrimSpace(model.CredentialSecretID) != "" {
-			aad = domain.CredentialSecretAAD(model.TenantID, model.CredentialSecretID)
-		}
-		plaintext, err := s.credentialCipher.Decrypt(model.APIKeyCiphertext, aad)
+		plaintext, err := s.credentialCipher.Decrypt(model.APIKeyCiphertext, domain.AgentModelCredentialAAD(model.TenantID, model.ID))
 		if err != nil {
 			return fmt.Errorf("decrypt agent model credential: %w", err)
 		}

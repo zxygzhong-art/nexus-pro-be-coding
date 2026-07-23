@@ -100,6 +100,7 @@ type EHRMSClient interface {
 	ListAttendance(context.Context, domain.EHRMSAttendanceQuery) ([]domain.EHRMSAttendanceRecord, error)
 	ListLeaveBalances(context.Context, domain.EHRMSAttendanceQuery) ([]domain.EHRMSLeaveBalanceRecord, error)
 	ListLeaveDetails(context.Context, domain.EHRMSAttendanceQuery) ([]domain.EHRMSLeaveDetailRecord, error)
+	ListLeaveTypes(context.Context) ([]domain.EHRMSLeaveTypeRecord, error)
 }
 
 // IdentityProvisioner 定義身分 provisioner 的行為契約。

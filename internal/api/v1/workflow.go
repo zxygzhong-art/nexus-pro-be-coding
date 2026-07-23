@@ -352,22 +352,6 @@ func (c WorkflowCtrl) deleteFormInstanceFile(w http.ResponseWriter, r *http.Requ
 	return nil
 }
 
-// formInstanceQueryFromRequest 處理表單實例查詢 來源 請求。
-func formInstanceQueryFromRequest(r *http.Request) (domain.FormInstanceQuery, error) {
-	values := r.URL.Query()
-	mine, err := optionalBoolQuery(values.Get("mine"), "mine")
-	if err != nil {
-		return domain.FormInstanceQuery{}, err
-	}
-	return domain.FormInstanceQuery{
-		Status:             values.Get("status"),
-		TemplateID:         values.Get("template_id"),
-		TemplateKey:        values.Get("template_key"),
-		ApplicantAccountID: values.Get("applicant_account_id"),
-		Mine:               mine,
-	}, nil
-}
-
 // optionalBoolQuery 處理可選布林值查詢。
 func optionalBoolQuery(raw, name string) (bool, error) {
 	raw = strings.TrimSpace(raw)

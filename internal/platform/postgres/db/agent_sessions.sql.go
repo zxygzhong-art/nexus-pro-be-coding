@@ -14,21 +14,21 @@ import (
 const appendExecutionStepV2 = `-- name: AppendExecutionStepV2 :one
 WITH locked_execution AS (
     SELECT id, tenant_id
-    FROM executions
-    WHERE executions.tenant_id = $10
-      AND executions.id = $11
+    FROM conversation_executions
+    WHERE conversation_executions.tenant_id = $10
+      AND conversation_executions.id = $11
     FOR UPDATE
 ), next_sequence AS (
     SELECT locked_execution.id AS execution_id,
            locked_execution.tenant_id,
            COALESCE(max(steps.sequence_no), 0)::integer + 1 AS sequence_no
     FROM locked_execution
-    LEFT JOIN execution_steps steps
+    LEFT JOIN conversation_execution_steps steps
       ON steps.tenant_id = locked_execution.tenant_id
      AND steps.execution_id = locked_execution.id
     GROUP BY locked_execution.id, locked_execution.tenant_id
 )
-INSERT INTO execution_steps (
+INSERT INTO conversation_execution_steps (
     id, tenant_id, execution_id, parent_step_id, sequence_no, step_type,
     name, model_connection_id, external_tool_id, status,
     input_summary, output_summary, input_tokens, cached_tokens, output_tokens,
@@ -60,7 +60,7 @@ type AppendExecutionStepV2Params struct {
 	ExecutionID       string             `json:"execution_id"`
 }
 
-func (q *Queries) AppendExecutionStepV2(ctx context.Context, arg AppendExecutionStepV2Params) (ExecutionStep, error) {
+func (q *Queries) AppendExecutionStepV2(ctx context.Context, arg AppendExecutionStepV2Params) (ConversationExecutionStep, error) {
 	row := q.db.QueryRow(ctx, appendExecutionStepV2,
 		arg.ID,
 		arg.ParentStepID,
@@ -74,7 +74,7 @@ func (q *Queries) AppendExecutionStepV2(ctx context.Context, arg AppendExecution
 		arg.TenantID,
 		arg.ExecutionID,
 	)
-	var i ExecutionStep
+	var i ConversationExecutionStep
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -196,7 +196,7 @@ func (q *Queries) ClaimAgentConfirmationV2(ctx context.Context, arg ClaimAgentCo
 
 const countActiveAgentRunsBySession = `-- name: CountActiveAgentRunsBySession :one
 SELECT count(*)
-FROM executions
+FROM conversation_executions
 WHERE tenant_id = $1
   AND conversation_id = $2
   AND status IN ('queued', 'running')
@@ -256,7 +256,7 @@ func (q *Queries) CountAgentUsageSessionsByAccount(ctx context.Context, arg Coun
 
 const deleteAgentMemory = `-- name: DeleteAgentMemory :one
 WITH superseded AS (
-    UPDATE memories
+    UPDATE agent_memories
     SET status = 'superseded', updated_at = GREATEST(updated_at, now())
     WHERE tenant_id = $1
       AND id = $2
@@ -395,9 +395,9 @@ SELECT
     key, content,
     CASE WHEN source_type = 'manual' THEN 'manual' ELSE 'auto' END::text AS source,
     importance, expires_at, created_at, updated_at
-FROM memories
-WHERE memories.tenant_id = $1
-  AND memories.id = $2
+FROM agent_memories
+WHERE agent_memories.tenant_id = $1
+  AND agent_memories.id = $2
 `
 
 type GetAgentMemoryParams struct {
@@ -579,10 +579,10 @@ WITH conversation_usage AS (
     WHERE tenant_id = $1
     GROUP BY owner_account_id
 ), message_usage AS (
-    SELECT conversations.owner_account_id AS account_id, count(messages.id)::bigint AS message_count,
-           max(messages.created_at)::timestamptz AS last_message_at
+    SELECT conversations.owner_account_id AS account_id, count(conversation_messages.id)::bigint AS message_count,
+           max(conversation_messages.created_at)::timestamptz AS last_message_at
     FROM conversations
-    JOIN messages ON messages.tenant_id = conversations.tenant_id AND messages.conversation_id = conversations.id
+    JOIN conversation_messages ON conversation_messages.tenant_id = conversations.tenant_id AND conversation_messages.conversation_id = conversations.id
     WHERE conversations.tenant_id = $1
     GROUP BY conversations.owner_account_id
 ), execution_usage AS (
@@ -590,7 +590,7 @@ WITH conversation_usage AS (
            sum(input_tokens)::bigint AS input_tokens, sum(cached_tokens)::bigint AS cached_tokens,
            sum(output_tokens)::bigint AS output_tokens, sum(total_tokens)::bigint AS total_tokens,
            max(updated_at)::timestamptz AS last_execution_at
-    FROM executions
+    FROM conversation_executions
     WHERE tenant_id = $1
     GROUP BY account_id
 )
@@ -660,16 +660,16 @@ WITH conversation_usage AS (
     SELECT owner_account_id AS account_id, count(*)::bigint AS session_count
     FROM conversations WHERE conversations.tenant_id = $1 GROUP BY conversations.owner_account_id
 ), message_usage AS (
-    SELECT conversations.owner_account_id AS account_id, count(messages.id)::bigint AS message_count
+    SELECT conversations.owner_account_id AS account_id, count(conversation_messages.id)::bigint AS message_count
     FROM conversations
-    JOIN messages ON messages.tenant_id = conversations.tenant_id AND messages.conversation_id = conversations.id
+    JOIN conversation_messages ON conversation_messages.tenant_id = conversations.tenant_id AND conversation_messages.conversation_id = conversations.id
     WHERE conversations.tenant_id = $1
     GROUP BY conversations.owner_account_id
 ), execution_usage AS (
     SELECT account_id, sum(llm_call_count)::bigint AS llm_call_count,
            sum(input_tokens)::bigint AS input_tokens, sum(cached_tokens)::bigint AS cached_tokens,
            sum(output_tokens)::bigint AS output_tokens, sum(total_tokens)::bigint AS total_tokens
-    FROM executions WHERE tenant_id = $1 GROUP BY account_id
+    FROM conversation_executions WHERE tenant_id = $1 GROUP BY account_id
 ), account_usage AS (
     SELECT
         COALESCE(conversation_usage.session_count, 0)::bigint AS session_count,
@@ -733,7 +733,7 @@ func (q *Queries) GetAgentUsageSummary(ctx context.Context, tenantID string) (Ge
 
 const getExecutionStepV2 = `-- name: GetExecutionStepV2 :one
 SELECT id, tenant_id, execution_id, parent_step_id, sequence_no, step_type, name, model_connection_id, external_tool_id, status, input_summary, output_summary, input_tokens, cached_tokens, output_tokens, started_at, completed_at, error_code, created_at
-FROM execution_steps
+FROM conversation_execution_steps
 WHERE tenant_id = $1 AND id = $2
 `
 
@@ -742,9 +742,9 @@ type GetExecutionStepV2Params struct {
 	ID       string `json:"id"`
 }
 
-func (q *Queries) GetExecutionStepV2(ctx context.Context, arg GetExecutionStepV2Params) (ExecutionStep, error) {
+func (q *Queries) GetExecutionStepV2(ctx context.Context, arg GetExecutionStepV2Params) (ConversationExecutionStep, error) {
 	row := q.db.QueryRow(ctx, getExecutionStepV2, arg.TenantID, arg.ID)
-	var i ExecutionStep
+	var i ConversationExecutionStep
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,
@@ -779,7 +779,7 @@ WITH allocated AS (
       AND conversations.id = $3
     RETURNING id, tenant_id, owner_account_id, agent_id, current_segment_id, next_message_sequence, title, status, last_message_at, created_at, updated_at, archived_at, next_message_sequence - 1 AS allocated_sequence
 ), inserted AS (
-    INSERT INTO messages (
+    INSERT INTO conversation_messages (
         id, tenant_id, conversation_id, segment_id, sequence_no, role,
         content, content_json, execution_id, execution_step_id, created_at
     )
@@ -787,13 +787,13 @@ WITH allocated AS (
         $4, allocated.tenant_id, allocated.id, allocated.current_segment_id,
         allocated.allocated_sequence, $5, $6,
         $7::jsonb,
-        executions.id, NULL, $1
+        conversation_executions.id, NULL, $1
     FROM allocated
-    LEFT JOIN executions
-      ON executions.tenant_id = allocated.tenant_id
-     AND executions.conversation_id = allocated.id
-     AND executions.segment_id = allocated.current_segment_id
-     AND executions.id = NULLIF($8::text, '')
+    LEFT JOIN conversation_executions
+      ON conversation_executions.tenant_id = allocated.tenant_id
+     AND conversation_executions.conversation_id = allocated.id
+     AND conversation_executions.segment_id = allocated.current_segment_id
+     AND conversation_executions.id = NULLIF($8::text, '')
     RETURNING id, tenant_id, conversation_id, segment_id, sequence_no, role, content, content_json, execution_id, execution_step_id, created_at
 )
 SELECT
@@ -875,22 +875,22 @@ SELECT
     key, content,
     CASE WHEN source_type = 'manual' THEN 'manual' ELSE 'auto' END::text AS source,
     importance, expires_at, created_at, updated_at
-FROM memories
-WHERE memories.tenant_id = $1
-  AND memories.account_id = $2
-  AND memories.status = 'active'
+FROM agent_memories
+WHERE agent_memories.tenant_id = $1
+  AND agent_memories.account_id = $2
+  AND agent_memories.status = 'active'
   AND (
-      memories.scope_type = 'global'
+      agent_memories.scope_type = 'global'
       OR (
-          memories.scope_type = 'agent'
+          agent_memories.scope_type = 'agent'
           AND $3::text <> ''
-          AND memories.agent_id = $3
+          AND agent_memories.agent_id = $3
       )
       OR (
-          memories.scope_type = 'conversation'
+          agent_memories.scope_type = 'conversation'
           AND $4::text <> ''
-          AND memories.conversation_id = $4
-          AND memories.segment_id = (
+          AND agent_memories.conversation_id = $4
+          AND agent_memories.segment_id = (
               SELECT conversations.current_segment_id
               FROM conversations
               WHERE conversations.tenant_id = $1
@@ -898,8 +898,8 @@ WHERE memories.tenant_id = $1
           )
       )
   )
-  AND (memories.expires_at IS NULL OR memories.expires_at > now())
-ORDER BY memories.importance DESC, memories.updated_at DESC, memories.id DESC
+  AND (agent_memories.expires_at IS NULL OR agent_memories.expires_at > now())
+ORDER BY agent_memories.importance DESC, agent_memories.updated_at DESC, agent_memories.id DESC
 LIMIT $5::int
 `
 
@@ -977,34 +977,34 @@ func (q *Queries) ListAgentMemoriesByAccount(ctx context.Context, arg ListAgentM
 
 const listAgentSessionMessages = `-- name: ListAgentSessionMessages :many
 SELECT
-    messages.id,
-    messages.tenant_id,
-    messages.conversation_id AS session_id,
-    messages.segment_id,
-    messages.sequence_no,
-    messages.role,
-    messages.content,
-    messages.execution_id AS run_id,
+    conversation_messages.id,
+    conversation_messages.tenant_id,
+    conversation_messages.conversation_id AS session_id,
+    conversation_messages.segment_id,
+    conversation_messages.sequence_no,
+    conversation_messages.role,
+    conversation_messages.content,
+    conversation_messages.execution_id AS run_id,
     segments.ordinal::bigint AS context_version,
-    COALESCE(messages.content_json, '{}'::jsonb) AS metadata,
-    messages.created_at
-FROM messages
+    COALESCE(conversation_messages.content_json, '{}'::jsonb) AS metadata,
+    conversation_messages.created_at
+FROM conversation_messages
 JOIN conversations
-  ON conversations.tenant_id = messages.tenant_id
- AND conversations.id = messages.conversation_id
+  ON conversations.tenant_id = conversation_messages.tenant_id
+ AND conversations.id = conversation_messages.conversation_id
 JOIN conversation_segments segments
-  ON segments.tenant_id = messages.tenant_id
- AND segments.conversation_id = messages.conversation_id
- AND segments.id = messages.segment_id
-WHERE messages.tenant_id = $1
-  AND messages.conversation_id = $2
-  AND messages.segment_id = conversations.current_segment_id
+  ON segments.tenant_id = conversation_messages.tenant_id
+ AND segments.conversation_id = conversation_messages.conversation_id
+ AND segments.id = conversation_messages.segment_id
+WHERE conversation_messages.tenant_id = $1
+  AND conversation_messages.conversation_id = $2
+  AND conversation_messages.segment_id = conversations.current_segment_id
   AND (
     NOT $3::boolean
-    OR messages.created_at > $4::timestamptz
-    OR (messages.created_at = $4::timestamptz AND messages.id > $5)
+    OR conversation_messages.created_at > $4::timestamptz
+    OR (conversation_messages.created_at = $4::timestamptz AND conversation_messages.id > $5)
   )
-ORDER BY messages.created_at ASC, messages.id ASC
+ORDER BY conversation_messages.created_at ASC, conversation_messages.id ASC
 LIMIT $6::int
 `
 
@@ -1179,12 +1179,12 @@ WITH conversation_usage AS (
 ), message_usage AS (
     SELECT
         conversations.owner_account_id AS account_id,
-        count(messages.id)::bigint AS message_count,
-        max(messages.created_at)::timestamptz AS last_message_at
+        count(conversation_messages.id)::bigint AS message_count,
+        max(conversation_messages.created_at)::timestamptz AS last_message_at
     FROM conversations
-    JOIN messages
-      ON messages.tenant_id = conversations.tenant_id
-     AND messages.conversation_id = conversations.id
+    JOIN conversation_messages
+      ON conversation_messages.tenant_id = conversations.tenant_id
+     AND conversation_messages.conversation_id = conversations.id
     WHERE conversations.tenant_id = $6
     GROUP BY conversations.owner_account_id
 ), execution_usage AS (
@@ -1196,7 +1196,7 @@ WITH conversation_usage AS (
         sum(output_tokens)::bigint AS output_tokens,
         sum(total_tokens)::bigint AS total_tokens,
         max(updated_at)::timestamptz AS last_execution_at
-    FROM executions
+    FROM conversation_executions
     WHERE tenant_id = $6
     GROUP BY account_id
 ), account_usage AS (
@@ -1314,21 +1314,21 @@ WITH account_conversations AS (
     FROM conversations
     WHERE tenant_id = $1 AND owner_account_id = $2
 ), message_usage AS (
-    SELECT messages.conversation_id, count(*)::bigint AS message_count,
-           max(messages.created_at)::timestamptz AS last_message_at
-    FROM messages
-    JOIN account_conversations ON account_conversations.id = messages.conversation_id
-    WHERE messages.tenant_id = $1
-    GROUP BY messages.conversation_id
+    SELECT conversation_messages.conversation_id, count(*)::bigint AS message_count,
+           max(conversation_messages.created_at)::timestamptz AS last_message_at
+    FROM conversation_messages
+    JOIN account_conversations ON account_conversations.id = conversation_messages.conversation_id
+    WHERE conversation_messages.tenant_id = $1
+    GROUP BY conversation_messages.conversation_id
 ), execution_usage AS (
-    SELECT executions.conversation_id, sum(llm_call_count)::bigint AS llm_call_count,
+    SELECT conversation_executions.conversation_id, sum(llm_call_count)::bigint AS llm_call_count,
            sum(input_tokens)::bigint AS input_tokens, sum(cached_tokens)::bigint AS cached_tokens,
            sum(output_tokens)::bigint AS output_tokens, sum(total_tokens)::bigint AS total_tokens,
            max(updated_at)::timestamptz AS last_execution_at
-    FROM executions
-    JOIN account_conversations ON account_conversations.id = executions.conversation_id
-    WHERE executions.tenant_id = $1
-    GROUP BY executions.conversation_id
+    FROM conversation_executions
+    JOIN account_conversations ON account_conversations.id = conversation_executions.conversation_id
+    WHERE conversation_executions.tenant_id = $1
+    GROUP BY conversation_executions.conversation_id
 )
 SELECT
     conversations.id AS session_id,
@@ -1415,7 +1415,7 @@ func (q *Queries) ListAgentUsageBySession(ctx context.Context, arg ListAgentUsag
 
 const listExecutionStepsV2 = `-- name: ListExecutionStepsV2 :many
 SELECT id, tenant_id, execution_id, parent_step_id, sequence_no, step_type, name, model_connection_id, external_tool_id, status, input_summary, output_summary, input_tokens, cached_tokens, output_tokens, started_at, completed_at, error_code, created_at
-FROM execution_steps
+FROM conversation_execution_steps
 WHERE tenant_id = $1 AND execution_id = $2
 ORDER BY sequence_no, id
 `
@@ -1425,15 +1425,15 @@ type ListExecutionStepsV2Params struct {
 	ExecutionID string `json:"execution_id"`
 }
 
-func (q *Queries) ListExecutionStepsV2(ctx context.Context, arg ListExecutionStepsV2Params) ([]ExecutionStep, error) {
+func (q *Queries) ListExecutionStepsV2(ctx context.Context, arg ListExecutionStepsV2Params) ([]ConversationExecutionStep, error) {
 	rows, err := q.db.Query(ctx, listExecutionStepsV2, arg.TenantID, arg.ExecutionID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []ExecutionStep
+	var items []ConversationExecutionStep
 	for rows.Next() {
-		var i ExecutionStep
+		var i ConversationExecutionStep
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -1538,29 +1538,29 @@ func (q *Queries) ListPendingAgentConfirmationsV2(ctx context.Context, arg ListP
 const listRecentAgentSessionMessages = `-- name: ListRecentAgentSessionMessages :many
 SELECT id, tenant_id, session_id, segment_id, sequence_no, role, content, run_id, context_version, metadata, created_at FROM (
     SELECT
-        messages.id,
-        messages.tenant_id,
-        messages.conversation_id AS session_id,
-        messages.segment_id,
-        messages.sequence_no,
-        messages.role,
-        messages.content,
-        messages.execution_id AS run_id,
+        conversation_messages.id,
+        conversation_messages.tenant_id,
+        conversation_messages.conversation_id AS session_id,
+        conversation_messages.segment_id,
+        conversation_messages.sequence_no,
+        conversation_messages.role,
+        conversation_messages.content,
+        conversation_messages.execution_id AS run_id,
         segments.ordinal::bigint AS context_version,
-        COALESCE(messages.content_json, '{}'::jsonb) AS metadata,
-        messages.created_at
-    FROM messages
+        COALESCE(conversation_messages.content_json, '{}'::jsonb) AS metadata,
+        conversation_messages.created_at
+    FROM conversation_messages
     JOIN conversations
-      ON conversations.tenant_id = messages.tenant_id
-     AND conversations.id = messages.conversation_id
+      ON conversations.tenant_id = conversation_messages.tenant_id
+     AND conversations.id = conversation_messages.conversation_id
     JOIN conversation_segments segments
-      ON segments.tenant_id = messages.tenant_id
-     AND segments.conversation_id = messages.conversation_id
-     AND segments.id = messages.segment_id
-    WHERE messages.tenant_id = $1
-      AND messages.conversation_id = $2
-      AND messages.segment_id = conversations.current_segment_id
-    ORDER BY messages.created_at DESC, messages.id DESC
+      ON segments.tenant_id = conversation_messages.tenant_id
+     AND segments.conversation_id = conversation_messages.conversation_id
+     AND segments.id = conversation_messages.segment_id
+    WHERE conversation_messages.tenant_id = $1
+      AND conversation_messages.conversation_id = $2
+      AND conversation_messages.segment_id = conversations.current_segment_id
+    ORDER BY conversation_messages.created_at DESC, conversation_messages.id DESC
     LIMIT $3::int
 ) recent
 ORDER BY created_at ASC, id ASC
@@ -1820,7 +1820,7 @@ WITH scope_values AS (
      AND conversations.id = NULLIF($1::text, '')
     WHERE $1::text = '' OR conversations.id IS NOT NULL
 ), updated_by_id AS (
-    UPDATE memories
+    UPDATE agent_memories
     SET account_id = $4,
         scope_type = scope_values.scope_type,
         agent_id = scope_values.agent_id,
@@ -1836,11 +1836,11 @@ WITH scope_values AS (
         expires_at = $12,
         updated_at = $13
     FROM scope_values
-    WHERE memories.tenant_id = $3
-      AND memories.id = $14
-    RETURNING memories.id, memories.tenant_id, memories.account_id, memories.scope_type, memories.agent_id, memories.conversation_id, memories.segment_id, memories.key, memories.content, memories.source_type, memories.source_message_id, memories.confidence, memories.importance, memories.status, memories.expires_at, memories.created_at, memories.updated_at
+    WHERE agent_memories.tenant_id = $3
+      AND agent_memories.id = $14
+    RETURNING agent_memories.id, agent_memories.tenant_id, agent_memories.account_id, agent_memories.scope_type, agent_memories.agent_id, agent_memories.conversation_id, agent_memories.segment_id, agent_memories.key, agent_memories.content, agent_memories.source_type, agent_memories.source_message_id, agent_memories.confidence, agent_memories.importance, agent_memories.status, agent_memories.expires_at, agent_memories.created_at, agent_memories.updated_at
 ), inserted_or_merged AS (
-    INSERT INTO memories (
+    INSERT INTO agent_memories (
         id, tenant_id, account_id, scope_type, agent_id, conversation_id, segment_id,
         key, content, source_type, source_message_id, confidence, importance,
         status, expires_at, created_at, updated_at
@@ -2100,7 +2100,7 @@ func (q *Queries) UpsertAgentSession(ctx context.Context, arg UpsertAgentSession
 }
 
 const upsertExecutionStepV2 = `-- name: UpsertExecutionStepV2 :one
-INSERT INTO execution_steps (
+INSERT INTO conversation_execution_steps (
     id, tenant_id, execution_id, parent_step_id, sequence_no, step_type,
     name, model_connection_id, external_tool_id, status,
     input_summary, output_summary, input_tokens, cached_tokens, output_tokens,
@@ -2123,8 +2123,8 @@ ON CONFLICT (id) DO UPDATE SET
     started_at = EXCLUDED.started_at,
     completed_at = EXCLUDED.completed_at,
     error_code = EXCLUDED.error_code
-WHERE execution_steps.tenant_id = EXCLUDED.tenant_id
-  AND execution_steps.execution_id = EXCLUDED.execution_id
+WHERE conversation_execution_steps.tenant_id = EXCLUDED.tenant_id
+  AND conversation_execution_steps.execution_id = EXCLUDED.execution_id
 RETURNING id, tenant_id, execution_id, parent_step_id, sequence_no, step_type, name, model_connection_id, external_tool_id, status, input_summary, output_summary, input_tokens, cached_tokens, output_tokens, started_at, completed_at, error_code, created_at
 `
 
@@ -2150,7 +2150,7 @@ type UpsertExecutionStepV2Params struct {
 	CreatedAt         pgtype.Timestamptz `json:"created_at"`
 }
 
-func (q *Queries) UpsertExecutionStepV2(ctx context.Context, arg UpsertExecutionStepV2Params) (ExecutionStep, error) {
+func (q *Queries) UpsertExecutionStepV2(ctx context.Context, arg UpsertExecutionStepV2Params) (ConversationExecutionStep, error) {
 	row := q.db.QueryRow(ctx, upsertExecutionStepV2,
 		arg.ID,
 		arg.TenantID,
@@ -2172,7 +2172,7 @@ func (q *Queries) UpsertExecutionStepV2(ctx context.Context, arg UpsertExecution
 		arg.ErrorCode,
 		arg.CreatedAt,
 	)
-	var i ExecutionStep
+	var i ConversationExecutionStep
 	err := row.Scan(
 		&i.ID,
 		&i.TenantID,

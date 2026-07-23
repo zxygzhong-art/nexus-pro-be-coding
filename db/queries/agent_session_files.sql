@@ -156,46 +156,31 @@ ORDER BY conversation_files.created_at ASC, assets.id ASC;
 
 -- name: MarkAgentSessionFileAttached :one
 UPDATE conversation_files
-SET state = 'attached', updated_at = sqlc.arg(updated_at)
+SET
+    state = 'attached',
+    message_id = sqlc.arg(message_id),
+    ordinal = sqlc.arg(ordinal),
+    updated_at = sqlc.arg(updated_at)
 FROM conversations
+JOIN conversation_messages
+  ON conversation_messages.tenant_id = conversations.tenant_id
+ AND conversation_messages.conversation_id = conversations.id
+ AND conversation_messages.segment_id = conversations.current_segment_id
+ AND conversation_messages.id = sqlc.arg(message_id)
 WHERE conversation_files.tenant_id = sqlc.arg(tenant_id)
   AND conversation_files.conversation_id = sqlc.arg(session_id)
   AND conversation_files.file_asset_id = sqlc.arg(file_id)
   AND conversations.tenant_id = conversation_files.tenant_id
   AND conversations.id = conversation_files.conversation_id
   AND conversations.current_segment_id = conversation_files.segment_id
+  AND conversation_files.state = 'draft'
 RETURNING conversation_files.*;
-
--- name: InsertAgentMessageAttachment :one
-INSERT INTO message_attachments (
-    tenant_id, conversation_id, segment_id, message_id,
-    conversation_file_id, ordinal, created_at
-)
-SELECT
-    messages.tenant_id,
-    messages.conversation_id,
-    messages.segment_id,
-    messages.id,
-    conversation_files.id,
-    sqlc.arg(ordinal),
-    sqlc.arg(created_at)
-FROM messages
-JOIN conversation_files
-  ON conversation_files.tenant_id = messages.tenant_id
- AND conversation_files.conversation_id = messages.conversation_id
- AND conversation_files.segment_id = messages.segment_id
- AND conversation_files.file_asset_id = sqlc.arg(file_id)
-WHERE messages.tenant_id = sqlc.arg(tenant_id)
-  AND messages.id = sqlc.arg(message_id)
-ON CONFLICT (tenant_id, message_id, conversation_file_id) DO UPDATE SET
-    ordinal = EXCLUDED.ordinal
-RETURNING *;
 
 -- name: ListCurrentAgentMessageAttachments :many
 SELECT
-    attachments.message_id,
-    attachments.conversation_file_id,
-    attachments.ordinal,
+    conversation_files.message_id,
+    conversation_files.id AS conversation_file_id,
+    conversation_files.ordinal,
     assets.id,
     assets.tenant_id,
     conversation_files.conversation_id AS session_id,
@@ -216,21 +201,16 @@ SELECT
     assets.expires_at,
     assets.created_at,
     assets.updated_at
-FROM message_attachments attachments
-JOIN messages
-  ON messages.tenant_id = attachments.tenant_id
- AND messages.conversation_id = attachments.conversation_id
- AND messages.segment_id = attachments.segment_id
- AND messages.id = attachments.message_id
+FROM conversation_files
+JOIN conversation_messages
+  ON conversation_messages.tenant_id = conversation_files.tenant_id
+ AND conversation_messages.conversation_id = conversation_files.conversation_id
+ AND conversation_messages.segment_id = conversation_files.segment_id
+ AND conversation_messages.id = conversation_files.message_id
 JOIN conversations
-  ON conversations.tenant_id = messages.tenant_id
- AND conversations.id = messages.conversation_id
- AND conversations.current_segment_id = messages.segment_id
-JOIN conversation_files
-  ON conversation_files.tenant_id = attachments.tenant_id
- AND conversation_files.conversation_id = attachments.conversation_id
- AND conversation_files.segment_id = attachments.segment_id
- AND conversation_files.id = attachments.conversation_file_id
+  ON conversations.tenant_id = conversation_messages.tenant_id
+ AND conversations.id = conversation_messages.conversation_id
+ AND conversations.current_segment_id = conversation_messages.segment_id
 JOIN conversation_segments segments
   ON segments.tenant_id = conversation_files.tenant_id
  AND segments.conversation_id = conversation_files.conversation_id
@@ -238,10 +218,12 @@ JOIN conversation_segments segments
 JOIN file_assets assets
   ON assets.tenant_id = conversation_files.tenant_id
  AND assets.id = conversation_files.file_asset_id
-WHERE messages.tenant_id = sqlc.arg(tenant_id)
-  AND messages.conversation_id = sqlc.arg(session_id)
+WHERE conversation_files.tenant_id = sqlc.arg(tenant_id)
+  AND conversation_files.conversation_id = sqlc.arg(session_id)
+  AND conversation_files.message_id IS NOT NULL
+  AND conversation_files.state = 'attached'
   AND assets.deleted_at IS NULL
-ORDER BY messages.sequence_no ASC, attachments.ordinal ASC, assets.id ASC;
+ORDER BY conversation_messages.sequence_no ASC, conversation_files.ordinal ASC, assets.id ASC;
 
 -- name: DeleteCurrentDraftAgentSessionFile :one
 WITH target AS (

@@ -135,6 +135,7 @@ type AttendanceFacade interface {
 	AttendanceMonthlySummary(RequestContext, string) (AttendanceMonthlySummary, error)
 	CreateAttendanceClockRecord(RequestContext, CreateAttendanceClockRecordInput) (AttendanceClockRecord, error)
 	ListAttendanceClockRecordPage(RequestContext, AttendanceClockRecordQuery, PageRequest) (PageResponse[AttendanceClockRecord], error)
+	SyncEHRMSLeaveTypes(RequestContext) (EHRMSLeaveTypeSyncResponse, error)
 	SyncEHRMSAttendance(RequestContext, EHRMSAttendanceSyncInput) (EHRMSAttendanceSyncResponse, error)
 	CreateAttendanceCorrection(RequestContext, CreateAttendanceCorrectionInput) (AttendanceCorrectionRequest, error)
 	ListAttendanceCorrectionPage(RequestContext, AttendanceCorrectionQuery, PageRequest) (PageResponse[AttendanceCorrectionRequest], error)

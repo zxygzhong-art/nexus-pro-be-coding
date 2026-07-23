@@ -26,7 +26,6 @@ var errExternalToolReportedFailure = errors.New("external tool reported a failur
 // a published external capability to the model.
 type externalToolRuntimeStore interface {
 	ListAgentRevisionExternalToolBindings(context.Context, string, string) ([]domain.AgentRevisionExternalTool, error)
-	ListAgentRevisionMemberExternalToolBindings(context.Context, string, string) ([]domain.AgentRevisionMemberExternalTool, error)
 	ListAgentExternalToolCapabilitiesByIDs(context.Context, string, []string) ([]domain.ExternalToolCapability, error)
 	GetAgentExternalToolCapability(context.Context, string, string) (domain.ExternalToolCapability, bool, error)
 	GetAgentExternalTool(context.Context, string, string) (domain.AgentExternalTool, bool, error)
@@ -66,24 +65,16 @@ func (c AgentService) externalAgentRuntimeTools(
 		ordinal      int
 	}
 	bindings := make([]binding, 0, len(configured))
-	if memberID == "" {
-		items, err := store.ListAgentRevisionExternalToolBindings(goContext(reqCtx), reqCtx.TenantID, revisionID)
-		if err != nil {
-			return nil, nil, err
-		}
-		for _, item := range items {
-			bindings = append(bindings, binding{item.ExternalToolID, item.ToolSchemaChecksum, item.Ordinal})
-		}
-	} else {
-		items, err := store.ListAgentRevisionMemberExternalToolBindings(goContext(reqCtx), reqCtx.TenantID, revisionID)
-		if err != nil {
-			return nil, nil, err
-		}
-		for _, item := range items {
-			if item.MemberID == memberID {
-				bindings = append(bindings, binding{item.ExternalToolID, item.ToolSchemaChecksum, item.Ordinal})
-			}
-		}
+	bindingRevisionID := revisionID
+	if memberID != "" {
+		bindingRevisionID = agentDefinitionChildRevisionID(revisionID, memberID)
+	}
+	items, err := store.ListAgentRevisionExternalToolBindings(goContext(reqCtx), reqCtx.TenantID, bindingRevisionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, item := range items {
+		bindings = append(bindings, binding{item.ExternalToolID, item.ToolSchemaChecksum, item.Ordinal})
 	}
 	sort.SliceStable(bindings, func(i, j int) bool {
 		if bindings[i].ordinal == bindings[j].ordinal {
@@ -123,7 +114,7 @@ func (c AgentService) externalAgentRuntimeTools(
 			continue
 		}
 		if strings.TrimSpace(item.checksum) == "" || item.checksum != capability.SchemaChecksum {
-			c.Logger().Warn("published external tool schema no longer matches discovery", "tenant_id", reqCtx.TenantID, "revision_id", revisionID, "external_tool_id", capabilityID)
+			c.Logger().Warn("published external tool schema no longer matches discovery", "tenant_id", reqCtx.TenantID, "revision_id", bindingRevisionID, "external_tool_id", capabilityID)
 			continue
 		}
 		connection, cached := connectionByID[capability.ConnectionID]

@@ -8,6 +8,8 @@ import (
 	"nexus-pro-api/internal/utils"
 
 	sqlc "nexus-pro-api/internal/platform/postgres/db"
+
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 // UpsertAgentFileAsset persists object metadata without exposing its storage key through the API.
@@ -86,18 +88,13 @@ func (s *Store) ListCurrentAgentSessionFiles(execCtx context.Context, tenantID, 
 	return out, nil
 }
 
-// MarkAgentSessionFileAttached moves a staged file into persisted message history.
-func (s *Store) MarkAgentSessionFileAttached(execCtx context.Context, tenantID, sessionID, fileID string, updatedAt time.Time) error {
+// MarkAgentSessionFileAttached binds a draft file to one message and marks it attached.
+func (s *Store) MarkAgentSessionFileAttached(execCtx context.Context, tenantID, sessionID, fileID, messageID string, ordinal int, updatedAt time.Time) error {
 	_, err := s.q.MarkAgentSessionFileAttached(tenantContext(execCtx, tenantID), sqlc.MarkAgentSessionFileAttachedParams{
-		UpdatedAt: timestamptz(updatedAt), TenantID: tenantID, SessionID: sessionID, FileID: fileID,
-	})
-	return err
-}
-
-// InsertAgentMessageAttachment records exact turn-level file provenance.
-func (s *Store) InsertAgentMessageAttachment(execCtx context.Context, tenantID, messageID, fileID string, ordinal int, createdAt time.Time) error {
-	_, err := s.q.InsertAgentMessageAttachment(tenantContext(execCtx, tenantID), sqlc.InsertAgentMessageAttachmentParams{
-		TenantID: tenantID, MessageID: messageID, FileID: fileID, Ordinal: int32(ordinal), CreatedAt: timestamptz(createdAt),
+		MessageID: nullableText(messageID),
+		Ordinal:   pgtype.Int4{Int32: int32(ordinal), Valid: true},
+		UpdatedAt: timestamptz(updatedAt),
+		TenantID:  tenantID, SessionID: sessionID, FileID: fileID,
 	})
 	return err
 }
@@ -113,8 +110,10 @@ func (s *Store) ListCurrentAgentMessageAttachments(execCtx context.Context, tena
 	out := make([]domain.AgentMessageAttachment, 0, len(items))
 	for _, item := range items {
 		out = append(out, domain.AgentMessageAttachment{
-			MessageID: item.MessageID, ConversationFileID: item.ConversationFileID,
-			Ordinal: int(item.Ordinal), File: agentSessionFileFromAttachmentRow(item),
+			MessageID:          textFrom(item.MessageID),
+			ConversationFileID: item.ConversationFileID,
+			Ordinal:            int(item.Ordinal.Int32),
+			File:               agentSessionFileFromAttachmentRow(item),
 		})
 	}
 	return out, nil
@@ -159,12 +158,18 @@ func agentSessionFileFromListRow(item sqlc.ListCurrentAgentSessionFilesRow) doma
 }
 
 func agentSessionFileFromAttachmentRow(item sqlc.ListCurrentAgentMessageAttachmentsRow) domain.AgentSessionFile {
+	var ordinal *int
+	if item.Ordinal.Valid {
+		value := int(item.Ordinal.Int32)
+		ordinal = &value
+	}
 	return domain.AgentSessionFile{
 		ID: item.ID, TenantID: item.TenantID, SessionID: item.SessionID, SegmentID: item.SegmentID, ConversationFileID: item.ConversationFileID, ContextVersion: item.ContextVersion,
 		CreatedByAccountID: item.CreatedByAccountID, OriginalFilename: item.OriginalFilename,
 		ObjectProvider: item.ObjectProvider, ObjectBucket: item.ObjectBucket, ObjectKey: item.ObjectKey,
 		ContentType: item.ContentType, SizeBytes: item.SizeBytes, SHA256: item.Sha256,
 		ScanStatus: item.ScanStatus, ParseStatus: item.ParseStatus, RetentionClass: item.RetentionClass,
-		State: item.State, ExpiresAt: timePtrFrom(item.ExpiresAt), CreatedAt: timeFrom(item.CreatedAt), UpdatedAt: timeFrom(item.UpdatedAt),
+		State: item.State, MessageID: textFrom(item.MessageID), Ordinal: ordinal,
+		ExpiresAt: timePtrFrom(item.ExpiresAt), CreatedAt: timeFrom(item.CreatedAt), UpdatedAt: timeFrom(item.UpdatedAt),
 	}
 }

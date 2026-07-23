@@ -65,20 +65,6 @@ func pageRequestFromRequest(r *http.Request) (domain.PageRequest, error) {
 	}, nil
 }
 
-// pageResponseRequest 處理分頁回應請求。
-func pageResponseRequest(page, pageSize int, sort string) domain.PageRequest {
-	if page <= 0 {
-		page = domain.DefaultPage
-	}
-	if pageSize <= 0 {
-		pageSize = domain.DefaultPageSize
-	}
-	if pageSize > domain.MaxPageSize {
-		pageSize = domain.MaxPageSize
-	}
-	return domain.PageRequest{Page: page, PageSize: pageSize, Sort: strings.TrimSpace(sort)}
-}
-
 // positiveIntQuery 處理正數整數查詢。
 func positiveIntQuery(raw, name string, max int) (int, error) {
 	raw = strings.TrimSpace(raw)

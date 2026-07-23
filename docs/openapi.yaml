@@ -1204,7 +1204,7 @@ paths:
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/attendance/leave-types/{id}:
     patch:
-      summary: Set leave_types.status (active/inactive) for one leave type
+      summary: Set one leave_types node status by ID; parent and child states are independent
       parameters:
         - in: path
           name: id
@@ -1360,6 +1360,20 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "409": {$ref: "#/components/responses/Conflict"}
+        "500": {$ref: "#/components/responses/InternalError"}
+  /v1/attendance/ehrms/leave-types/sync:
+    post:
+      summary: Sync only the leave type catalog from configured eHRMS
+      responses:
+        "200":
+          description: eHRMS leave type catalog sync summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EHRMSLeaveTypeSyncDataResponse"
+        "400": {$ref: "#/components/responses/ValidationError"}
+        "401": {$ref: "#/components/responses/Unauthenticated"}
+        "403": {$ref: "#/components/responses/Forbidden"}
         "500": {$ref: "#/components/responses/InternalError"}
   /v1/attendance/ehrms/sync:
     post:
@@ -5510,6 +5524,12 @@ components:
       properties:
         data:
           $ref: "#/components/schemas/EHRMSAttendanceSyncResponse"
+    EHRMSLeaveTypeSyncDataResponse:
+      type: object
+      required: [data]
+      properties:
+        data:
+          $ref: "#/components/schemas/EHRMSLeaveTypeSyncResponse"
     AttendanceClockRecordPageDataResponse:
       type: object
       required: [data]
@@ -5741,12 +5761,30 @@ components:
           $ref: "#/components/schemas/AttendancePolicy"
     LeaveType:
       type: object
-      required: [id, code, name_zh, name_en, enabled, display_order]
+      required: [id, code, kind, name_zh, name_en, category, max_balance_minutes, enabled, display_order]
       properties:
-        id: {type: string, example: lt_annual}
+        id: {type: string, example: i001-1, description: Stable identity; defaults to code. A same-code category uses category:<code>.}
         code: {type: string}
+        kind:
+          type: string
+          enum: [category, item, special_group]
+          description: Hierarchy node type from EHRMS /leave-types.
+        parent_id:
+          type: string
+          description: Resolved parent node ID; omitted for root nodes.
+        parent_code:
+          type: string
+          description: Parent category code; omitted for root categories.
         name_zh: {type: string}
         name_en: {type: string}
+        category:
+          type: string
+          enum: [statutory, company]
+          description: Tree grouping for statutory or company leave types.
+        max_balance_minutes:
+          type: integer
+          minimum: 0
+          description: Synced leave balance cap in minutes; zero means unlimited.
         enabled:
           type: boolean
           description: Tenant-specific availability for new leave requests; defaults to true.
@@ -7056,6 +7094,13 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/SyncRowError"
+    EHRMSLeaveTypeSyncResponse:
+      type: object
+      required: [fetched, upserted, deactivated]
+      properties:
+        fetched: {type: integer}
+        upserted: {type: integer}
+        deactivated: {type: integer}
     BatchEmployeeResponse:
       type: object
       properties:

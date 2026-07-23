@@ -33,6 +33,7 @@ func (c AttendanceCtrl) RegisterRoutes(router *gin.RouterGroup) {
 	attendance.GET("/monthly-summary", c.routes.Handle("attendance.clock", "read", c.monthlySummary))
 	attendance.GET("/clock-records", c.routes.Handle("attendance.clock", "read", c.listClockRecords))
 	attendance.POST("/clock-records", c.routes.Handle("attendance.clock", "create", c.createClockRecord))
+	attendance.POST("/ehrms/leave-types/sync", c.routes.Handle("attendance.clock", "import", c.syncEHRMSLeaveTypes))
 	attendance.POST("/ehrms/sync", c.routes.Handle("attendance.clock", "import", c.syncEHRMSAttendance))
 	attendance.GET("/corrections", c.routes.Handle("attendance.correction", "read", c.listCorrections))
 	attendance.POST("/corrections", c.routes.Handle("attendance.correction", "create", c.createCorrection))
@@ -217,6 +218,16 @@ func (c AttendanceCtrl) createClockRecord(w http.ResponseWriter, r *http.Request
 		return err
 	}
 	writeJSON(w, http.StatusCreated, item)
+	return nil
+}
+
+// syncEHRMSLeaveTypes synchronizes only the EHRMS leave type catalog.
+func (c AttendanceCtrl) syncEHRMSLeaveTypes(w http.ResponseWriter, _ *http.Request, ctx domain.RequestContext) error {
+	item, err := c.svc.SyncEHRMSLeaveTypes(ctx)
+	if err != nil {
+		return err
+	}
+	writeJSON(w, http.StatusOK, item)
 	return nil
 }
 

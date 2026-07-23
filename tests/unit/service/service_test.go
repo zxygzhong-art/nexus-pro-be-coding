@@ -2918,6 +2918,43 @@ func TestLeaveWorkflowReviewUpdatesRequestAndBalance(t *testing.T) {
 	}
 }
 
+// TestPunchFixFormSubmitCreatesLinkedCorrection 驗證通用表單提交會建立補卡業務記錄。
+func TestPunchFixFormSubmitCreatesLinkedCorrection(t *testing.T) {
+	store, svc, employeeCtx, _, _ := newAttendanceFixture(t)
+	now := attendanceFixtureClockInTime()
+	_ = store.UpsertFormTemplate(context.Background(), domain.FormTemplate{
+		ID:        "ft-punch-fix",
+		TenantID:  "tenant-1",
+		Key:       "punch-fix",
+		Name:      "HR-005 補卡單",
+		Schema:    workflowEnabledTemplateSchema("acct-admin"),
+		CreatedAt: now,
+	})
+
+	submitted, err := svc.Workflow().SubmitForm(employeeCtx, domain.SubmitFormInput{
+		TemplateKey: "punch-fix",
+		Payload: map[string]any{
+			"correction_type":      "add_record",
+			"direction":            "clock_in",
+			"requested_clocked_at": now.Format(time.RFC3339),
+			"reason":               "forgot to clock in",
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	request, ok, err := store.GetAttendanceCorrectionRequestByFormInstanceID(context.Background(), "tenant-1", submitted.ID)
+	if err != nil || !ok {
+		t.Fatalf("linked correction missing ok=%v err=%v", ok, err)
+	}
+	if request.EmployeeID != "emp-1" || request.FormInstanceID != submitted.ID || request.Status != "pending" || request.EffectStatus != "not_applied" {
+		t.Fatalf("unexpected linked correction: %+v", request)
+	}
+	if submitted.Payload["linked_resource_id"] != request.ID || submitted.Payload["linked_resource_type"] != "attendance.clock_correction" {
+		t.Fatalf("expected form payload to link correction record, got %+v", submitted.Payload)
+	}
+}
+
 // TestCorrectionWorkflowApproveCreatesClockRecord 驗證補卡單走 workflow 審批也會產生打卡記錄。
 func TestCorrectionWorkflowApproveCreatesClockRecord(t *testing.T) {
 	store, svc, employeeCtx, _, _ := newAttendanceFixture(t)
@@ -5170,20 +5207,11 @@ func TestSyncEHRMSAttendanceUpsertsDailySummaries(t *testing.T) {
 	if got.EmployeeID != "emp-ehrms" || got.WorkDate != "2026-06-10" || got.ShiftStart != "09:00" || got.ShiftEnd != "18:00" || got.ClockHours != 8 || got.ExternalRef != "IKM017:2026-06-10" || got.Source != "ehrms" {
 		t.Fatalf("unexpected daily summary mapping: %+v", got)
 	}
-	if got.ClockStart != "09:01" || got.ClockEnd != "18:02" || got.AttendStart != "09:00" || got.AttendEnd != "18:00" || got.AttendHours != 8 || !got.AttendCounted {
-		t.Fatalf("unexpected clock/attend mapping: %+v", got)
-	}
-	if got.LeaveType != "annual" || got.LeaveStart != "13:00" || got.LeaveEnd != "15:00" || got.LeaveHours != 2 || !got.LeaveCounted {
-		t.Fatalf("unexpected leave mapping: %+v", got)
-	}
-	if got.Leave2Type != "sick_full" || got.Leave2Start != "16:00" || got.Leave2End != "17:00" || got.Leave2Hours != 1 || !got.Leave2Counted {
-		t.Fatalf("unexpected second leave mapping: %+v", got)
-	}
-	if got.OvertimeStart != "18:30" || got.OvertimeEnd != "20:00" || got.OvertimeHours != 1.5 || !got.OvertimeCounted {
-		t.Fatalf("unexpected overtime mapping: %+v", got)
+	if got.ClockStart != "09:01" || got.ClockEnd != "18:02" || got.ShiftHours != 8 || got.DailyHours != 8 {
+		t.Fatalf("unexpected clock/shift mapping: %+v", got)
 	}
 	if got.Payload["name_zh"] != "測試員工" || got.Payload["clock_start"] != "2026-06-10 09:01" || got.Payload["leave_type"] != "特休" {
-		t.Fatalf("expected normalized payload to preserve source fields, got %+v", got.Payload)
+		t.Fatalf("expected payload to preserve unused upstream fields, got %+v", got.Payload)
 	}
 	clocks, err := store.ListAttendanceClockRecords(context.Background(), "tenant-1", domain.AttendanceClockRecordQuery{EmployeeID: "emp-ehrms"})
 	if err != nil {
@@ -6702,6 +6730,7 @@ func newAttendanceFixture(t *testing.T) (*memory.Store, *service.Service, domain
 			{Resource: "attendance.clock", Action: "create", Scope: "self"},
 			{Resource: "attendance.correction", Action: "read", Scope: "self"},
 			{Resource: "attendance.correction", Action: "create", Scope: "self"},
+			{Resource: "workflow.form_instance", Action: "submit", Scope: "self"},
 		},
 		CreatedAt: now,
 	})
@@ -6734,9 +6763,9 @@ func newAttendanceFixture(t *testing.T) (*memory.Store, *service.Service, domain
 		CreatedAt:              now,
 	})
 	for _, employee := range []domain.Employee{
-		{ID: "emp-1", TenantID: "tenant-1", Name: "Employee One", Status: "active", CreatedAt: now},
+		{ID: "emp-1", TenantID: "tenant-1", AccountID: "acct-employee", ManagerEmployeeID: "emp-admin", Name: "Employee One", Status: "active", CreatedAt: now},
 		{ID: "emp-2", TenantID: "tenant-1", Name: "Employee Two", Status: "active", CreatedAt: now},
-		{ID: "emp-admin", TenantID: "tenant-1", Name: "Attendance Admin", Status: "active", CreatedAt: now},
+		{ID: "emp-admin", TenantID: "tenant-1", AccountID: "acct-admin", Name: "Attendance Admin", Position: "HR", Status: "active", CreatedAt: now},
 	} {
 		_ = store.UpsertEmployee(context.Background(), employee)
 	}
@@ -6803,6 +6832,7 @@ type fakeEHRMSClient struct {
 	positionRows        []domain.EHRMSPositionRecord
 	attendanceRows      []domain.EHRMSAttendanceRecord
 	attendanceQueries   *[]domain.EHRMSAttendanceQuery
+	leaveTypes          []domain.EHRMSLeaveTypeRecord
 	leaveBalances       []domain.EHRMSLeaveBalanceRecord
 	leaveBalanceQueries *[]domain.EHRMSAttendanceQuery
 	leaveDetails        []domain.EHRMSLeaveDetailRecord
@@ -6811,6 +6841,7 @@ type fakeEHRMSClient struct {
 	departmentsErr      error
 	positionsErr        error
 	attendanceErr       error
+	leaveTypesErr       error
 	leaveBalanceErr     error
 	leaveDetailErr      error
 }
@@ -6855,6 +6886,14 @@ func (c fakeEHRMSClient) ListAttendance(_ context.Context, query domain.EHRMSAtt
 		}
 	}
 	return filtered, nil
+}
+
+// ListLeaveTypes 驗證假別目錄。
+func (c fakeEHRMSClient) ListLeaveTypes(context.Context) ([]domain.EHRMSLeaveTypeRecord, error) {
+	if c.leaveTypesErr != nil {
+		return nil, c.leaveTypesErr
+	}
+	return ehrms.NormalizeLeaveTypeRecords(c.leaveTypes), nil
 }
 
 // ListLeaveBalances 驗證假別餘額。
@@ -7240,17 +7279,4 @@ func fieldErrorsContain(fields []domain.FieldError, expectedField string) bool {
 // testPNGBytes 驗證 png bytes。
 func testPNGBytes() []byte {
 	return []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0}
-}
-
-// equalStrings 驗證 equal 字串。
-func equalStrings(left, right []string) bool {
-	if len(left) != len(right) {
-		return false
-	}
-	for i := range left {
-		if left[i] != right[i] {
-			return false
-		}
-	}
-	return true
 }

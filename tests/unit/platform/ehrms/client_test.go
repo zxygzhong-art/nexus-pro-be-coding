@@ -16,6 +16,46 @@ import (
 	"nexus-pro-api/internal/platform/ehrms"
 )
 
+// TestListEmployeesCoercesNonStringFields 驗證員工 JSON 出現陣列/布林/數字欄位時仍可解碼並正規化。
+func TestListEmployeesCoercesNonStringFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/employees" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{
+			"emp_id":"IKM001",
+			"name_zh":"王小明",
+			"clock_required":true,
+			"dept_code":"C01",
+			"tags":["remote","contractor"],
+			"headcount":3,
+			"quit_date":null
+		}]`))
+	}))
+	defer server.Close()
+
+	client, err := ehrms.NewClient(server.URL, "secret", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.WithRequestInterval(0)
+	rows, err := client.ListEmployees(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected one employee row, got %+v", rows)
+	}
+	row := rows[0]
+	if row["員工編號"] != "IKM001" || row["中文姓名"] != "王小明" || row["部門代碼"] != "C01" {
+		t.Fatalf("expected normalized employee identity fields, got %+v", row)
+	}
+	if row["上下班刷卡"] != "true" || row["tags"] != "remote, contractor" || row["headcount"] != "3" || row["離職日期"] != "" {
+		t.Fatalf("expected coerced non-string fields, got %+v", row)
+	}
+}
+
 // TestListAttendanceFetchesAndNormalizesEnglishFields 驗證 attendance endpoint and field normalization。
 func TestListAttendanceFetchesAndNormalizesEnglishFields(t *testing.T) {
 	var gotPath string
@@ -119,6 +159,62 @@ func TestListDepartmentsAndPositions(t *testing.T) {
 	}
 	if len(positions) != 1 || positions[0]["職務代碼"] != "0704" || positions[0]["職務中文名稱"] != "工程師" {
 		t.Fatalf("unexpected positions: %+v", positions)
+	}
+}
+
+func TestListLeaveTypes(t *testing.T) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/leave-types", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("X-API-Key") != "secret" {
+			t.Fatalf("expected X-API-Key header, got %q", r.Header.Get("X-API-Key"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`[{"code":"annual","name":"特休假","name_en":"Annual Leave","max_value":14,"unit":"days"},{"leave_code":"sick_full","leave_type":"全薪病假","maxValue":30,"unit":"days"}]`))
+	})
+	server := httptest.NewServer(mux)
+	defer server.Close()
+
+	client, err := ehrms.NewClient(server.URL, "secret", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.WithRequestInterval(0)
+	rows, err := client.ListLeaveTypes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 leave types, got %+v", rows)
+	}
+	if rows[0]["假別代碼"] != "annual" || rows[0]["假別名稱"] != "特休假" || rows[0]["最大值"] != "14" || rows[0]["單位"] != "days" {
+		t.Fatalf("unexpected leave type[0]: %+v", rows[0])
+	}
+	if rows[1]["假別代碼"] != "sick_full" || rows[1]["假別名稱"] != "全薪病假" || rows[1]["最大值"] != "30" {
+		t.Fatalf("unexpected leave type[1]: %+v", rows[1])
+	}
+}
+
+func TestListLeaveTypesAcceptsLeaveTypesEnvelope(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/leave-types" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"leave_types":[{"code":"annual","name":"特休假","name_en":"Annual Leave"}]}`))
+	}))
+	defer server.Close()
+
+	client, err := ehrms.NewClient(server.URL, "secret", server.Client())
+	if err != nil {
+		t.Fatal(err)
+	}
+	client.WithRequestInterval(0)
+	rows, err := client.ListLeaveTypes(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 1 || rows[0]["假別代碼"] != "annual" || rows[0]["假別名稱"] != "特休假" {
+		t.Fatalf("unexpected enveloped leave types: %+v", rows)
 	}
 }
 

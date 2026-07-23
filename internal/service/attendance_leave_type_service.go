@@ -19,32 +19,42 @@ func (c AttendanceService) ListLeaveTypes(ctx RequestContext) (LeaveTypeCatalog,
 }
 
 // SetLeaveTypeEnabled updates leave_types.status for an existing catalog row.
-func (c AttendanceService) SetLeaveTypeEnabled(ctx RequestContext, code string, input SetLeaveTypeEnabledInput) (LeaveType, error) {
-	if _, _, err := c.requireAttendanceAuthz(ctx, ResourceLeave, ActionUpdate, code); err != nil {
+func (c AttendanceService) SetLeaveTypeEnabled(ctx RequestContext, id string, input SetLeaveTypeEnabledInput) (LeaveType, error) {
+	id = strings.ToLower(strings.TrimSpace(id))
+	if _, _, err := c.requireAttendanceAuthz(ctx, ResourceLeave, ActionUpdate, id); err != nil {
 		return LeaveType{}, err
 	}
-	code = normalizeLeaveTypeCode(code)
 	items, err := c.loadLeaveTypes(ctx)
 	if err != nil {
 		return LeaveType{}, err
 	}
-	item, found := findLeaveType(items, code, false)
+	item, found := findLeaveTypeByID(items, id)
 	if !found {
-		return LeaveType{}, domain.NotFound("leave type", code)
+		return LeaveType{}, domain.NotFound("leave type", id)
 	}
 	now := c.Now()
 	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
-		if err := tx.store.UpsertLeaveTypeEnabled(goContext(ctx), ctx.TenantID, code, input.Enabled, ctx.AccountID, now); err != nil {
+		if err := tx.store.UpsertLeaveTypeEnabled(goContext(ctx), ctx.TenantID, id, input.Enabled, ctx.AccountID, now); err != nil {
 			return err
 		}
-		return tx.audit(ctx, "attendance.leave_type.set_enabled", string(ResourceLeave), code, string(SeverityMedium), map[string]any{
-			"code": code, "enabled": input.Enabled,
+		return tx.audit(ctx, "attendance.leave_type.set_enabled", string(ResourceLeave), id, string(SeverityMedium), map[string]any{
+			"id": id, "code": item.Code, "kind": item.Kind, "enabled": input.Enabled,
 		})
 	}); err != nil {
 		return LeaveType{}, err
 	}
 	item.Enabled = input.Enabled
 	return item, nil
+}
+
+func findLeaveTypeByID(items []LeaveType, id string) (LeaveType, bool) {
+	wanted := strings.ToLower(strings.TrimSpace(id))
+	for _, item := range items {
+		if strings.ToLower(strings.TrimSpace(item.ID)) == wanted {
+			return item, true
+		}
+	}
+	return LeaveType{}, false
 }
 
 // loadLeaveTypes is the internal source of truth for forms, validation, and legends.
@@ -65,7 +75,7 @@ func leaveTypeCatalog(items []LeaveType) LeaveTypeCatalog {
 func findLeaveType(items []LeaveType, code string, enabledOnly bool) (LeaveType, bool) {
 	wanted := normalizeLeaveTypeCode(code)
 	for _, item := range items {
-		if normalizeLeaveTypeCode(item.Code) == wanted && (!enabledOnly || item.Enabled) {
+		if (item.Kind == "" || item.Kind == "item") && normalizeLeaveTypeCode(item.Code) == wanted && (!enabledOnly || item.Enabled) {
 			return item, true
 		}
 	}

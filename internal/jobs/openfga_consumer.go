@@ -111,7 +111,7 @@ func (c *OpenFGAConsumer) processMessage(ctx context.Context, message natsbus.Me
 		if err := message.Ack(); err != nil {
 			return err
 		}
-		c.logger.InfoContext(ctx, "duplicate openfga event acknowledged", "event_id", eventID, "event_type", eventType, "tenant_id", tenantID)
+		c.logger.DebugContext(ctx, "duplicate openfga event acknowledged", "event_id", eventID, "event_type", eventType, "tenant_id", tenantID)
 		return nil
 	}
 
@@ -142,7 +142,7 @@ func (c *OpenFGAConsumer) processMessage(ctx context.Context, message natsbus.Me
 	if err := message.Ack(); err != nil {
 		return err
 	}
-	c.logger.InfoContext(ctx, "openfga event consumed", "event_id", eventID, "event_type", eventType, "tenant_id", tenantID)
+	c.logger.DebugContext(ctx, "openfga event consumed", "event_id", eventID, "event_type", eventType, "tenant_id", tenantID)
 	return nil
 }
 

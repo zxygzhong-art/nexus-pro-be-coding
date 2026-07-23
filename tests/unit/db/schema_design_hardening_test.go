@@ -14,9 +14,9 @@ func TestSchemaDesignHardeningKeepsDatabaseLevelInvariants(t *testing.T) {
 	}
 	schema := string(raw)
 	required := []string{
-		"CREATE TABLE credential_secrets (",
-		"ciphertext text NOT NULL",
-		"CONSTRAINT model_connections_secret_fk FOREIGN KEY (tenant_id, credential_secret_id) REFERENCES credential_secrets (tenant_id, id) ON DELETE RESTRICT",
+		"api_key_ciphertext text NOT NULL DEFAULT ''",
+		"api_key_preview text NOT NULL DEFAULT ''",
+		"auth_secret_ciphertext text NOT NULL DEFAULT ''",
 		"CONSTRAINT authz_group_memberships_no_overlap EXCLUDE USING gist",
 		"CREATE TRIGGER authz_group_memberships_projection_trigger",
 		"CREATE TABLE attendance_policy_versions",
@@ -38,6 +38,8 @@ func TestSchemaDesignHardeningKeepsDatabaseLevelInvariants(t *testing.T) {
 		}
 	}
 	for _, forbidden := range []string{
+		"CREATE TABLE credential_secrets (",
+		"credential_secret_id text",
 		"api_key text NOT NULL DEFAULT ''",
 		"CREATE TABLE leave_balance_ledger (",
 		"remaining_hours numeric(12,2) NOT NULL",
@@ -51,6 +53,7 @@ func TestSchemaDesignHardeningKeepsDatabaseLevelInvariants(t *testing.T) {
 		"CREATE TABLE tenant_leave_type_settings",
 		"CREATE TABLE leave_type_definitions",
 		"CREATE TABLE leave_type_external_mappings",
+		"CREATE TABLE leave_type_external_refs",
 		"CREATE TABLE leave_type_sync_issues",
 		"CREATE FUNCTION sync_leave_type_catalog_from_policy",
 		"CREATE TRIGGER attendance_policies_leave_type_catalog_trigger",

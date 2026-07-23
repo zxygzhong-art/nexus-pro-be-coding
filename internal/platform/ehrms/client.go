@@ -51,6 +51,7 @@ const maxPositionsResponseBytes = 5 << 20
 const maxAttendanceResponseBytes = 20 << 20
 const maxLeaveBalancesResponseBytes = 10 << 20
 const maxLeaveDetailsResponseBytes = 10 << 20
+const maxLeaveTypesResponseBytes = 5 << 20
 const defaultRequestInterval = time.Second
 
 // NewClient 建立 client。
@@ -114,9 +115,13 @@ func (c *Client) ListEmployees(ctx context.Context) ([]domain.EHRMSEmployeeRecor
 	if err != nil {
 		return nil, err
 	}
-	var rows []domain.EHRMSEmployeeRecord
-	if err := json.Unmarshal(body, &rows); err != nil {
-		return nil, fmt.Errorf("decode ehrms employees: %w", err)
+	raw, err := decodeJSONObjectRows(body, "employees")
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]domain.EHRMSEmployeeRecord, 0, len(raw))
+	for _, row := range raw {
+		rows = append(rows, domain.EHRMSEmployeeRecord(stringRecordFromJSON(row)))
 	}
 	return normalizeEmployeeRecords(rows), nil
 }
@@ -237,6 +242,23 @@ func (c *Client) ListLeaveDetails(ctx context.Context, query domain.EHRMSAttenda
 		rows = append(rows, domain.EHRMSLeaveDetailRecord(stringRecordFromJSON(row)))
 	}
 	return normalizeLeaveDetailRecords(rows), nil
+}
+
+// ListLeaveTypes 列出假別目錄。
+func (c *Client) ListLeaveTypes(ctx context.Context) ([]domain.EHRMSLeaveTypeRecord, error) {
+	body, err := c.getJSON(ctx, "/leave-types", maxLeaveTypesResponseBytes, "leave types")
+	if err != nil {
+		return nil, err
+	}
+	raw, err := decodeJSONObjectRowsOrEnvelope(body, "leave types", "leave_types", "items", "data")
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]domain.EHRMSLeaveTypeRecord, 0, len(raw))
+	for _, row := range raw {
+		rows = append(rows, domain.EHRMSLeaveTypeRecord(stringRecordFromJSON(row)))
+	}
+	return normalizeLeaveTypeRecords(rows), nil
 }
 
 func (c *Client) getJSON(ctx context.Context, path string, maxBytes int, label string) ([]byte, error) {

@@ -2,7 +2,6 @@ package v1
 
 import (
 	"net/http"
-	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -362,31 +361,6 @@ func (c IAMCtrl) deleteFieldPolicy(w http.ResponseWriter, r *http.Request, ctx d
 	}
 	writeJSON(w, http.StatusOK, item)
 	return nil
-}
-
-// outboxEventQueryFromRequest 解析 outbox 事件查詢。
-func outboxEventQueryFromRequest(r *http.Request) (domain.OutboxEventQuery, error) {
-	query := r.URL.Query()
-	out := domain.OutboxEventQuery{
-		Status:    strings.TrimSpace(query.Get("status")),
-		EventType: strings.TrimSpace(query.Get("event_type")),
-		LastError: strings.TrimSpace(query.Get("last_error")),
-	}
-	if raw := strings.TrimSpace(query.Get("has_error")); raw != "" {
-		value, err := strconv.ParseBool(raw)
-		if err != nil {
-			return domain.OutboxEventQuery{}, domain.BadRequest("has_error must be a boolean")
-		}
-		out.HasError = &value
-	}
-	if raw := strings.TrimSpace(query.Get("retry_count")); raw != "" {
-		value, err := strconv.Atoi(raw)
-		if err != nil || value < 0 {
-			return domain.OutboxEventQuery{}, domain.BadRequest("retry_count must be a non-negative integer")
-		}
-		out.RetryCount = &value
-	}
-	return out, nil
 }
 
 // listAssumableRoles 處理 assumable 角色的 HTTP 請求。

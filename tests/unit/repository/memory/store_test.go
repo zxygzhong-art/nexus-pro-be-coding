@@ -11,33 +11,6 @@ import (
 	"nexus-pro-api/internal/repository/memory"
 )
 
-// TestNextEmployeeNoIncrementsAcrossCalls 驗證 next 員工 no increments across calls。
-func TestNextEmployeeNoIncrementsAcrossCalls(t *testing.T) {
-	store := memory.NewStore()
-	ctx := context.Background()
-	if err := store.UpsertEmployee(ctx, domain.Employee{
-		ID:         "emp-1",
-		TenantID:   "tenant-1",
-		EmployeeNo: "IKL002",
-		CreatedAt:  time.Now(),
-	}); err != nil {
-		t.Fatal(err)
-	}
-
-	first, err := store.NextEmployeeNo(ctx, "tenant-1", "IKL")
-	if err != nil {
-		t.Fatal(err)
-	}
-	second, err := store.NextEmployeeNo(ctx, "tenant-1", "IKL")
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if first != "IKL003" || second != "IKL004" {
-		t.Fatalf("NextEmployeeNo() = %q then %q, want IKL003 then IKL004", first, second)
-	}
-}
-
 // TestListEmployeePageByQueryMatchesMemoryFiltering 驗證員工分頁 by 查詢 matches memory filtering。
 func TestListEmployeePageByQueryMatchesMemoryFiltering(t *testing.T) {
 	store := memory.NewStore()

@@ -62,10 +62,9 @@ type AgentModel struct {
 	ModelName          string               `json:"model_name"`
 	LiteLLMModel       string               `json:"litellm_model"`
 	APIBaseURL         string               `json:"api_base_url,omitempty"`
-	APIKey             string               `json:"-"`
-	APIKeyCiphertext   string               `json:"-"`
-	CredentialSecretID string               `json:"credential_secret_id,omitempty"`
-	APIKeySet          bool                 `json:"api_key_set"`
+	APIKey           string               `json:"-"`
+	APIKeyCiphertext string               `json:"-"`
+	APIKeySet        bool                 `json:"api_key_set"`
 	APIKeyPreview      string               `json:"api_key_preview,omitempty"`
 	RateLimitRPM       int                  `json:"rate_limit_rpm"`
 	Status             AgentModelStatus     `json:"status"`
@@ -201,7 +200,6 @@ type AgentExternalTool struct {
 	AuthUsername         string                   `json:"auth_username,omitempty"`
 	TimeoutSeconds       int                      `json:"timeout_seconds"`
 	AuthSecretCiphertext string                   `json:"-"`
-	CredentialSecretID   string                   `json:"credential_secret_id,omitempty"`
 	CredentialSet        bool                     `json:"credential_set"`
 	Status               string                   `json:"status"`
 	LastTestedAt         *time.Time               `json:"last_tested_at,omitempty"`

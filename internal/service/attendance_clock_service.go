@@ -6,6 +6,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"nexus-pro-api/internal/domain"
 	"nexus-pro-api/internal/utils"
 )
 
@@ -298,7 +299,6 @@ func (c AttendanceService) CreateAttendanceCorrection(ctx RequestContext, input 
 	}
 	direction := targetRecord.Direction
 	requestedAt := targetRecord.ClockedAt
-	workDate := targetRecord.WorkDate
 	if correctionType != correctionTypeVoidRecord {
 		direction, err = normalizeClockDirection(input.Direction)
 		if err != nil {
@@ -307,9 +307,6 @@ func (c AttendanceService) CreateAttendanceCorrection(ctx RequestContext, input 
 		requestedAt, err = utils.ParseDateTime(input.RequestedClockedAt)
 		if err != nil {
 			return AttendanceCorrectionRequest{}, BadRequest("requested_clocked_at must be RFC3339 or YYYY-MM-DD")
-		}
-		if correctionType == correctionTypeAddRecord {
-			workDate = attendanceWorkDate(requestedAt)
 		}
 	}
 	reason := strings.TrimSpace(input.Reason)
@@ -321,69 +318,29 @@ func (c AttendanceService) CreateAttendanceCorrection(ctx RequestContext, input 
 	} else if n > attendanceCorrectionReasonMaxLength {
 		return AttendanceCorrectionRequest{}, BadRequest("reason must be at most 200 characters").WithReasonCode("attendance_correction_reason_too_long")
 	}
-	var correction AttendanceCorrectionRequest
-	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
-		template, ok, err := tx.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, "punch-fix")
-		if err != nil {
-			return err
-		}
-		if !ok {
-			template = FormTemplate{
-				ID:        utils.NewID("ft"),
-				TenantID:  ctx.TenantID,
-				Key:       "punch-fix",
-				Name:      "HR-005 補卡單",
-				Schema:    map[string]any{"type": "object"},
-				CreatedAt: tx.Now(),
-			}
-			if err := tx.store.UpsertFormTemplate(goContext(ctx), template); err != nil {
-				return err
-			}
-		}
-		instance := FormInstance{
-			ID:                 utils.NewID("fi"),
-			TenantID:           ctx.TenantID,
-			TemplateID:         template.ID,
-			ApplicantAccountID: account.ID,
-			Status:             "submitted",
-			Payload: map[string]any{
-				"application_code":       string(AppAttendance),
-				"resource_type":          string(ResourceAttendanceCorrection),
-				"action":                 string(ActionCreate),
-				"employee_id":            employeeID,
-				"correction_type":        correctionType,
-				"target_clock_record_id": targetRecordID,
-				"direction":              direction,
-				"requested_clocked_at":   requestedAt.Format(time.RFC3339),
-				"reason":                 reason,
-			},
-			SubmittedAt: tx.Now(),
-			UpdatedAt:   tx.Now(),
-		}
-		if err := tx.store.UpsertFormInstance(goContext(ctx), instance); err != nil {
-			return err
-		}
-		correction = AttendanceCorrectionRequest{
-			ID:                  utils.NewID("acorr"),
-			TenantID:            ctx.TenantID,
-			EmployeeID:          employeeID,
-			CorrectionType:      correctionType,
-			TargetClockRecordID: targetRecordID,
-			Direction:           direction,
-			RequestedClockedAt:  requestedAt,
-			WorkDate:            workDate,
-			Reason:              reason,
-			Status:              correctionStatusPending,
-			FormInstanceID:      instance.ID,
-			CreatedAt:           tx.Now(),
-			UpdatedAt:           tx.Now(),
-		}
-		if err := tx.store.UpsertAttendanceCorrectionRequest(goContext(ctx), correction); err != nil {
-			return err
-		}
-		return tx.audit(ctx, "attendance.correction.create", string(ResourceAttendanceCorrection), correction.ID, string(SeverityMedium), map[string]any{"employee_id": employeeID, "direction": direction})
-	}); err != nil {
+	if _, ok, err := c.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, correctionLinkedTemplateKey); err != nil {
 		return AttendanceCorrectionRequest{}, err
+	} else if !ok {
+		if err := c.store.UpsertFormTemplate(goContext(ctx), FormTemplate{
+			ID: utils.NewID("ft"), TenantID: ctx.TenantID, Key: correctionLinkedTemplateKey,
+			Name: "HR-005 補卡單", Schema: map[string]any{"type": "object"}, CreatedAt: c.Now(), UpdatedAt: c.Now(),
+		}); err != nil {
+			return AttendanceCorrectionRequest{}, err
+		}
+	}
+	instance, err := c.submitAttendanceCompatibilityForm(ctx, account, correctionLinkedTemplateKey, map[string]any{
+		"correction_type": correctionType, "target_clock_record_id": targetRecordID,
+		"direction": direction, "requested_clocked_at": requestedAt.Format(time.RFC3339), "reason": reason,
+	})
+	if err != nil {
+		return AttendanceCorrectionRequest{}, err
+	}
+	correction, ok, err := c.store.GetAttendanceCorrectionRequestByFormInstanceID(goContext(ctx), ctx.TenantID, instance.ID)
+	if err != nil {
+		return AttendanceCorrectionRequest{}, err
+	}
+	if !ok {
+		return AttendanceCorrectionRequest{}, domain.E(500, "attendance_projection_missing", "workflow submission did not create an attendance correction")
 	}
 	return correction, nil
 }
@@ -857,6 +814,11 @@ func (c AttendanceService) reviewAttendanceCorrection(ctx RequestContext, id, ne
 			if err := tx.applyApprovedAttendanceCorrection(ctx, &current, account.ID, reviewReason, now); err != nil {
 				return err
 			}
+			current.EffectStatus = "applied"
+			current.EffectAppliedAt = &now
+		} else {
+			current.EffectStatus = "compensated"
+			current.EffectAppliedAt = nil
 		}
 		if current.FormInstanceID != "" {
 			instance, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, current.FormInstanceID)

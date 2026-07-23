@@ -170,61 +170,6 @@ func (q *Queries) GetCurrentAgentSessionFile(ctx context.Context, arg GetCurrent
 	return i, err
 }
 
-const insertAgentMessageAttachment = `-- name: InsertAgentMessageAttachment :one
-INSERT INTO message_attachments (
-    tenant_id, conversation_id, segment_id, message_id,
-    conversation_file_id, ordinal, created_at
-)
-SELECT
-    messages.tenant_id,
-    messages.conversation_id,
-    messages.segment_id,
-    messages.id,
-    conversation_files.id,
-    $1,
-    $2
-FROM messages
-JOIN conversation_files
-  ON conversation_files.tenant_id = messages.tenant_id
- AND conversation_files.conversation_id = messages.conversation_id
- AND conversation_files.segment_id = messages.segment_id
- AND conversation_files.file_asset_id = $3
-WHERE messages.tenant_id = $4
-  AND messages.id = $5
-ON CONFLICT (tenant_id, message_id, conversation_file_id) DO UPDATE SET
-    ordinal = EXCLUDED.ordinal
-RETURNING tenant_id, conversation_id, segment_id, message_id, conversation_file_id, ordinal, created_at
-`
-
-type InsertAgentMessageAttachmentParams struct {
-	Ordinal   int32              `json:"ordinal"`
-	CreatedAt pgtype.Timestamptz `json:"created_at"`
-	FileID    string             `json:"file_id"`
-	TenantID  string             `json:"tenant_id"`
-	MessageID string             `json:"message_id"`
-}
-
-func (q *Queries) InsertAgentMessageAttachment(ctx context.Context, arg InsertAgentMessageAttachmentParams) (MessageAttachment, error) {
-	row := q.db.QueryRow(ctx, insertAgentMessageAttachment,
-		arg.Ordinal,
-		arg.CreatedAt,
-		arg.FileID,
-		arg.TenantID,
-		arg.MessageID,
-	)
-	var i MessageAttachment
-	err := row.Scan(
-		&i.TenantID,
-		&i.ConversationID,
-		&i.SegmentID,
-		&i.MessageID,
-		&i.ConversationFileID,
-		&i.Ordinal,
-		&i.CreatedAt,
-	)
-	return i, err
-}
-
 const insertAgentSessionFile = `-- name: InsertAgentSessionFile :one
 INSERT INTO conversation_files (
     id, tenant_id, conversation_id, segment_id, file_asset_id,
@@ -253,7 +198,7 @@ WHERE conversations.tenant_id = $6
 ON CONFLICT (tenant_id, conversation_id, segment_id, file_asset_id) DO UPDATE SET
     state = EXCLUDED.state,
     updated_at = EXCLUDED.updated_at
-RETURNING id, tenant_id, conversation_id, segment_id, file_asset_id, state, created_at, updated_at
+RETURNING id, tenant_id, conversation_id, segment_id, file_asset_id, message_id, ordinal, state, created_at, updated_at
 `
 
 type InsertAgentSessionFileParams struct {
@@ -285,6 +230,8 @@ func (q *Queries) InsertAgentSessionFile(ctx context.Context, arg InsertAgentSes
 		&i.ConversationID,
 		&i.SegmentID,
 		&i.FileAssetID,
+		&i.MessageID,
+		&i.Ordinal,
 		&i.State,
 		&i.CreatedAt,
 		&i.UpdatedAt,
@@ -334,9 +281,9 @@ func (q *Queries) InsertFileChunk(ctx context.Context, arg InsertFileChunkParams
 
 const listCurrentAgentMessageAttachments = `-- name: ListCurrentAgentMessageAttachments :many
 SELECT
-    attachments.message_id,
-    attachments.conversation_file_id,
-    attachments.ordinal,
+    conversation_files.message_id,
+    conversation_files.id AS conversation_file_id,
+    conversation_files.ordinal,
     assets.id,
     assets.tenant_id,
     conversation_files.conversation_id AS session_id,
@@ -357,21 +304,16 @@ SELECT
     assets.expires_at,
     assets.created_at,
     assets.updated_at
-FROM message_attachments attachments
-JOIN messages
-  ON messages.tenant_id = attachments.tenant_id
- AND messages.conversation_id = attachments.conversation_id
- AND messages.segment_id = attachments.segment_id
- AND messages.id = attachments.message_id
+FROM conversation_files
+JOIN conversation_messages
+  ON conversation_messages.tenant_id = conversation_files.tenant_id
+ AND conversation_messages.conversation_id = conversation_files.conversation_id
+ AND conversation_messages.segment_id = conversation_files.segment_id
+ AND conversation_messages.id = conversation_files.message_id
 JOIN conversations
-  ON conversations.tenant_id = messages.tenant_id
- AND conversations.id = messages.conversation_id
- AND conversations.current_segment_id = messages.segment_id
-JOIN conversation_files
-  ON conversation_files.tenant_id = attachments.tenant_id
- AND conversation_files.conversation_id = attachments.conversation_id
- AND conversation_files.segment_id = attachments.segment_id
- AND conversation_files.id = attachments.conversation_file_id
+  ON conversations.tenant_id = conversation_messages.tenant_id
+ AND conversations.id = conversation_messages.conversation_id
+ AND conversations.current_segment_id = conversation_messages.segment_id
 JOIN conversation_segments segments
   ON segments.tenant_id = conversation_files.tenant_id
  AND segments.conversation_id = conversation_files.conversation_id
@@ -379,10 +321,12 @@ JOIN conversation_segments segments
 JOIN file_assets assets
   ON assets.tenant_id = conversation_files.tenant_id
  AND assets.id = conversation_files.file_asset_id
-WHERE messages.tenant_id = $1
-  AND messages.conversation_id = $2
+WHERE conversation_files.tenant_id = $1
+  AND conversation_files.conversation_id = $2
+  AND conversation_files.message_id IS NOT NULL
+  AND conversation_files.state = 'attached'
   AND assets.deleted_at IS NULL
-ORDER BY messages.sequence_no ASC, attachments.ordinal ASC, assets.id ASC
+ORDER BY conversation_messages.sequence_no ASC, conversation_files.ordinal ASC, assets.id ASC
 `
 
 type ListCurrentAgentMessageAttachmentsParams struct {
@@ -391,9 +335,9 @@ type ListCurrentAgentMessageAttachmentsParams struct {
 }
 
 type ListCurrentAgentMessageAttachmentsRow struct {
-	MessageID          string             `json:"message_id"`
+	MessageID          pgtype.Text        `json:"message_id"`
 	ConversationFileID string             `json:"conversation_file_id"`
-	Ordinal            int32              `json:"ordinal"`
+	Ordinal            pgtype.Int4        `json:"ordinal"`
 	ID                 string             `json:"id"`
 	TenantID           string             `json:"tenant_id"`
 	SessionID          string             `json:"session_id"`
@@ -613,18 +557,30 @@ func (q *Queries) ListFileChunks(ctx context.Context, arg ListFileChunksParams) 
 
 const markAgentSessionFileAttached = `-- name: MarkAgentSessionFileAttached :one
 UPDATE conversation_files
-SET state = 'attached', updated_at = $1
+SET
+    state = 'attached',
+    message_id = $1,
+    ordinal = $2,
+    updated_at = $3
 FROM conversations
-WHERE conversation_files.tenant_id = $2
-  AND conversation_files.conversation_id = $3
-  AND conversation_files.file_asset_id = $4
+JOIN conversation_messages
+  ON conversation_messages.tenant_id = conversations.tenant_id
+ AND conversation_messages.conversation_id = conversations.id
+ AND conversation_messages.segment_id = conversations.current_segment_id
+ AND conversation_messages.id = $1
+WHERE conversation_files.tenant_id = $4
+  AND conversation_files.conversation_id = $5
+  AND conversation_files.file_asset_id = $6
   AND conversations.tenant_id = conversation_files.tenant_id
   AND conversations.id = conversation_files.conversation_id
   AND conversations.current_segment_id = conversation_files.segment_id
-RETURNING conversation_files.id, conversation_files.tenant_id, conversation_files.conversation_id, conversation_files.segment_id, conversation_files.file_asset_id, conversation_files.state, conversation_files.created_at, conversation_files.updated_at
+  AND conversation_files.state = 'draft'
+RETURNING conversation_files.id, conversation_files.tenant_id, conversation_files.conversation_id, conversation_files.segment_id, conversation_files.file_asset_id, conversation_files.message_id, conversation_files.ordinal, conversation_files.state, conversation_files.created_at, conversation_files.updated_at
 `
 
 type MarkAgentSessionFileAttachedParams struct {
+	MessageID pgtype.Text        `json:"message_id"`
+	Ordinal   pgtype.Int4        `json:"ordinal"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 	TenantID  string             `json:"tenant_id"`
 	SessionID string             `json:"session_id"`
@@ -633,6 +589,8 @@ type MarkAgentSessionFileAttachedParams struct {
 
 func (q *Queries) MarkAgentSessionFileAttached(ctx context.Context, arg MarkAgentSessionFileAttachedParams) (ConversationFile, error) {
 	row := q.db.QueryRow(ctx, markAgentSessionFileAttached,
+		arg.MessageID,
+		arg.Ordinal,
 		arg.UpdatedAt,
 		arg.TenantID,
 		arg.SessionID,
@@ -645,6 +603,8 @@ func (q *Queries) MarkAgentSessionFileAttached(ctx context.Context, arg MarkAgen
 		&i.ConversationID,
 		&i.SegmentID,
 		&i.FileAssetID,
+		&i.MessageID,
+		&i.Ordinal,
 		&i.State,
 		&i.CreatedAt,
 		&i.UpdatedAt,

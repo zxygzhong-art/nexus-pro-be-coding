@@ -22,12 +22,14 @@ type AgentSessionFile struct {
 	ParseStatus        string     `json:"parse_status"`
 	RetentionClass     string     `json:"retention_class"`
 	State              string     `json:"state"`
+	MessageID          string     `json:"message_id,omitempty"`
+	Ordinal            *int       `json:"ordinal,omitempty"`
 	ExpiresAt          *time.Time `json:"expires_at,omitempty"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
 
-// AgentMessageAttachment defines the file provenance for one persisted message.
+// AgentMessageAttachment is the API/view shape for a file attached to one message.
 type AgentMessageAttachment struct {
 	MessageID          string           `json:"message_id"`
 	ConversationFileID string           `json:"conversation_file_id"`

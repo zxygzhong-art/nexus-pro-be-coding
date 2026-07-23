@@ -177,9 +177,10 @@ func TestRelationshipHardeningStaysInSchema(t *testing.T) {
 		"CONSTRAINT form_instances_template_version_fk FOREIGN KEY (tenant_id, template_id, template_version_id)",
 		"CONSTRAINT form_instance_field_values_one_value_check CHECK",
 		"CONSTRAINT agent_revisions_agent_revision_no_idx UNIQUE (tenant_id, agent_id, revision_no)",
-		"CONSTRAINT executions_input_message_fk FOREIGN KEY (tenant_id, conversation_id, segment_id, input_message_id) REFERENCES messages (tenant_id, conversation_id, segment_id, id) ON DELETE RESTRICT",
-		"CONSTRAINT messages_execution_fk\n    FOREIGN KEY (tenant_id, conversation_id, segment_id, execution_id)",
-		"CONSTRAINT message_attachments_conversation_file_fk FOREIGN KEY (tenant_id, conversation_id, segment_id, conversation_file_id) REFERENCES conversation_files (tenant_id, conversation_id, segment_id, id) ON DELETE RESTRICT",
+		"CONSTRAINT conversation_executions_input_message_fk FOREIGN KEY (tenant_id, conversation_id, segment_id, input_message_id) REFERENCES conversation_messages (tenant_id, conversation_id, segment_id, id) ON DELETE RESTRICT",
+		"CONSTRAINT conversation_messages_execution_fk\n    FOREIGN KEY (tenant_id, conversation_id, segment_id, execution_id)",
+		"CONSTRAINT conversation_files_message_fk FOREIGN KEY (tenant_id, conversation_id, segment_id, message_id) REFERENCES conversation_messages (tenant_id, conversation_id, segment_id, id) ON DELETE RESTRICT",
+		"CONSTRAINT conversation_files_attachment_state_check CHECK (",
 	}
 	for _, item := range required {
 		if !strings.Contains(schema, item) {
@@ -211,28 +212,29 @@ func TestAgentV2SchemaContract(t *testing.T) {
 	}
 	schema := string(raw)
 	for _, fragment := range []string{
-		"CREATE TABLE credential_secrets (",
 		"CREATE TABLE model_connections (",
+		"api_key_ciphertext text NOT NULL DEFAULT ''",
 		"CREATE TABLE external_tool_connections (",
+		"auth_secret_ciphertext text NOT NULL DEFAULT ''",
 		"CREATE TABLE external_tools (",
 		"CREATE TABLE agents (",
 		"CREATE TABLE agent_revisions (",
 		"CREATE TABLE agent_revision_external_tools (",
 		"CREATE TABLE conversations (",
 		"CREATE TABLE conversation_segments (",
-		"CREATE TABLE messages (",
-		"CREATE TABLE executions (",
-		"CREATE TABLE execution_steps (",
+		"CREATE TABLE conversation_messages (",
+		"CREATE TABLE conversation_executions (",
+		"CREATE TABLE conversation_execution_steps (",
 		"CREATE TABLE conversation_files (",
-		"CREATE TABLE message_attachments (",
-		"CREATE TABLE memories (",
+		"CREATE UNIQUE INDEX conversation_files_message_ordinal_idx",
+		"CREATE TABLE agent_memories (",
 		"CREATE TABLE agent_confirmations (",
-		"CREATE UNIQUE INDEX executions_active_conversation_unique",
+		"CREATE UNIQUE INDEX conversation_executions_active_conversation_unique",
 		"(agent_id IS NULL AND agent_revision_id IS NULL AND model_connection_id IS NULL) OR",
 		"(agent_id IS NOT NULL AND agent_revision_id IS NOT NULL AND model_connection_id IS NOT NULL)",
 		"scope_type IN ('global', 'agent', 'conversation')",
 		"CREATE POLICY tenant_isolation_external_tools",
-		"CREATE POLICY tenant_isolation_execution_steps",
+		"CREATE POLICY tenant_isolation_conversation_execution_steps",
 		"CREATE POLICY tenant_isolation_agent_confirmations",
 	} {
 		if !strings.Contains(schema, fragment) {
@@ -240,6 +242,7 @@ func TestAgentV2SchemaContract(t *testing.T) {
 		}
 	}
 	for _, legacyTable := range []string{
+		"credential_secrets",
 		"agent_models",
 		"agent_external_tools",
 		"agent_definitions",
@@ -249,7 +252,6 @@ func TestAgentV2SchemaContract(t *testing.T) {
 		"agent_session_messages",
 		"agent_session_files",
 		"agent_message_attachments",
-		"agent_memories",
 	} {
 		if strings.Contains(schema, "CREATE TABLE "+legacyTable+" (") {
 			t.Fatalf("legacy Agent table must not return: %s", legacyTable)

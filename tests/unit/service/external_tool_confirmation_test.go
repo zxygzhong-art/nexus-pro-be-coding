@@ -290,11 +290,10 @@ func TestExternalToolConfirmationUsesCurrentCredentialAndTimeout(t *testing.T) {
 	fixture := newConfirmedExternalToolFixture(t)
 	cipher := newTestCredentialCipher(t)
 	fixture.connection.AuthType = string(domain.ExternalToolAuthTypeBearer)
-	fixture.connection.CredentialSecretID = "credential-support"
 	fixture.connection.TimeoutSeconds = 17
 	ciphertext, err := cipher.Encrypt(
 		[]byte("current-support-token"),
-		domain.CredentialSecretAAD("tenant-1", fixture.connection.CredentialSecretID),
+		domain.ExternalToolCredentialAAD("tenant-1", fixture.connection.ID),
 	)
 	if err != nil {
 		t.Fatal(err)

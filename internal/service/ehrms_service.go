@@ -523,6 +523,10 @@ func (c HRService) ehrmsEmployeeCandidate(ctx RequestContext, record EHRMSEmploy
 		}
 		return Employee{}, nil, err
 	}
+	// eHRMS 同步以 emp_id 作为 employees.id，便于与上游员工编号对齐。
+	if employeeNo := strings.TrimSpace(employee.EmployeeNo); employeeNo != "" {
+		employee.ID = employeeNo
+	}
 	if err := c.ensureEmployeePosition(ctx, &employee, positionCode == ""); err != nil {
 		errors, ok := employeeRowErrorsFromError(rowNumber, err)
 		if ok {
@@ -1406,34 +1410,16 @@ var ehrmsNumberPattern = regexp.MustCompile(`[0-9]+(?:\.[0-9]+)?`)
 const (
 	leaveTypeUnknownCode = "unknown_leave_type"
 
-	ehrmsAttendanceFieldEmployeeNo      = "員工編號"
-	ehrmsAttendanceFieldDate            = "日期"
-	ehrmsAttendanceFieldShiftStart      = "班別開始"
-	ehrmsAttendanceFieldShiftEnd        = "班別結束"
-	ehrmsAttendanceFieldShiftHours      = "班別工時"
-	ehrmsAttendanceFieldDailyHours      = "應出勤工時"
-	ehrmsAttendanceFieldClockHours      = "刷卡工時"
-	ehrmsAttendanceFieldClockStart      = "clock_start"
-	ehrmsAttendanceFieldClockEnd        = "clock_end"
-	ehrmsAttendanceFieldAttendStart     = "attend_start"
-	ehrmsAttendanceFieldAttendEnd       = "attend_end"
-	ehrmsAttendanceFieldAttendHours     = "attend_hours"
-	ehrmsAttendanceFieldAttendCounted   = "attend_counted"
-	ehrmsAttendanceFieldLeaveType       = "leave_type"
-	ehrmsAttendanceFieldLeaveStart      = "leave_start"
-	ehrmsAttendanceFieldLeaveEnd        = "leave_end"
-	ehrmsAttendanceFieldLeaveHours      = "leave_hours"
-	ehrmsAttendanceFieldLeaveCounted    = "leave_counted"
-	ehrmsAttendanceFieldLeave2Type      = "leave2_type"
-	ehrmsAttendanceFieldLeave2Start     = "leave2_start"
-	ehrmsAttendanceFieldLeave2End       = "leave2_end"
-	ehrmsAttendanceFieldLeave2Hours     = "leave2_hours"
-	ehrmsAttendanceFieldLeave2Counted   = "leave2_counted"
-	ehrmsAttendanceFieldOvertimeStart   = "overtime_start"
-	ehrmsAttendanceFieldOvertimeEnd     = "overtime_end"
-	ehrmsAttendanceFieldOvertimeHours   = "overtime_hours"
-	ehrmsAttendanceFieldOvertimeCounted = "overtime_counted"
-	ehrmsAttendanceSource               = "ehrms"
+	ehrmsAttendanceFieldEmployeeNo = "員工編號"
+	ehrmsAttendanceFieldDate       = "日期"
+	ehrmsAttendanceFieldShiftStart = "班別開始"
+	ehrmsAttendanceFieldShiftEnd   = "班別結束"
+	ehrmsAttendanceFieldShiftHours = "班別工時"
+	ehrmsAttendanceFieldDailyHours = "應出勤工時"
+	ehrmsAttendanceFieldClockHours = "刷卡工時"
+	ehrmsAttendanceFieldClockStart = "clock_start"
+	ehrmsAttendanceFieldClockEnd   = "clock_end"
+	ehrmsAttendanceSource          = "ehrms"
 
 	ehrmsLeaveBalanceFieldEmployeeNo   = "員工編號"
 	ehrmsLeaveBalanceFieldYear         = "年度"
@@ -1462,6 +1448,15 @@ const (
 	ehrmsLeaveDetailFieldSource       = "資料來源"
 	ehrmsLeaveDetailFieldDeductItem   = "扣除項目"
 	ehrmsLeaveDetailFieldDeductHours  = "扣除時間"
+
+	ehrmsLeaveTypeFieldCode     = "假別代碼"
+	ehrmsLeaveTypeFieldKind     = "節點類型"
+	ehrmsLeaveTypeFieldParent   = "上級假別代碼"
+	ehrmsLeaveTypeFieldName     = "假別名稱"
+	ehrmsLeaveTypeFieldNameEN   = "英文名稱"
+	ehrmsLeaveTypeFieldMaxValue = "最大值"
+	ehrmsLeaveTypeFieldUnit     = "單位"
+	ehrmsLeaveTypeFieldCategory = "假別類別"
 )
 
 var ehrmsAttendanceOnlyLeaveTypes = map[string]struct{}{
@@ -1474,6 +1469,47 @@ var ehrmsAttendanceOnlyLeaveTypes = map[string]struct{}{
 	"出勤時數":             {},
 	"加班":               {},
 	"忘刷忘帶卡":            {},
+}
+
+// SyncEHRMSLeaveTypes synchronizes only the tenant leave catalog from EHRMS.
+func (c AttendanceService) SyncEHRMSLeaveTypes(ctx RequestContext) (EHRMSLeaveTypeSyncResponse, error) {
+	if c.ehrmsClient == nil {
+		return EHRMSLeaveTypeSyncResponse{}, BadRequest("eHRMS is not configured")
+	}
+	_, decision, authzAudit, err := c.Service.Authorize(ctx,
+		CheckRequest{ApplicationCode: AppAttendance, ResourceType: ResourceAttendanceClock, Action: ActionImport},
+		AuditTarget{Event: "attendance.leave_type.ehrms.sync", Resource: string(ResourceLeave)},
+	)
+	if err != nil {
+		return EHRMSLeaveTypeSyncResponse{}, err
+	}
+	if err := requireTenantWideEHRMSSyncScope(decision); err != nil {
+		return EHRMSLeaveTypeSyncResponse{}, err
+	}
+	rows, err := c.ehrmsClient.ListLeaveTypes(goContext(ctx))
+	if err != nil {
+		c.logWarn(ctx, "eHRMS leave types fetch failed", "error", err)
+		return EHRMSLeaveTypeSyncResponse{}, ehrmsFetchError("leave types", err)
+	}
+	response := EHRMSLeaveTypeSyncResponse{Fetched: len(rows)}
+	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
+		upserted, deactivated, syncErr := tx.syncEHRMSLeaveTypes(ctx, rows)
+		if syncErr != nil {
+			return syncErr
+		}
+		response.Upserted = upserted
+		response.Deactivated = deactivated
+		if err := tx.audit(ctx, "attendance.leave_type.ehrms.sync", string(ResourceLeave), "ehrms", string(SeverityHigh), map[string]any{
+			"source": "ehrms", "fetched": response.Fetched, "upserted": upserted, "deactivated": deactivated,
+		}); err != nil {
+			return err
+		}
+		return authzAudit.CommitWith(ctx, tx.Service)
+	}); err != nil {
+		return EHRMSLeaveTypeSyncResponse{}, err
+	}
+	c.logInfo(ctx, "eHRMS leave type sync completed", "fetched", response.Fetched, "upserted", response.Upserted, "deactivated", response.Deactivated)
+	return response, nil
 }
 
 // SyncEHRMSAttendance synchronizes tenant-wide attendance data only for tenant-wide grants.
@@ -1496,6 +1532,11 @@ func (c AttendanceService) SyncEHRMSAttendance(ctx RequestContext, input EHRMSAt
 	}
 	if err := requireTenantWideEHRMSSyncScope(decision); err != nil {
 		return EHRMSAttendanceSyncResponse{}, err
+	}
+	leaveTypeRows, err := c.ehrmsClient.ListLeaveTypes(goContext(ctx))
+	if err != nil {
+		c.logWarn(ctx, "eHRMS leave types fetch failed", "error", err)
+		return EHRMSAttendanceSyncResponse{}, ehrmsFetchError("leave types", err)
 	}
 	employees, err := c.store.ListEmployees(goContext(ctx), ctx.TenantID)
 	if err != nil {
@@ -1538,12 +1579,19 @@ func (c AttendanceService) SyncEHRMSAttendance(ctx RequestContext, input EHRMSAt
 	}
 	response := EHRMSAttendanceSyncResponse{
 		Fetched:              len(records),
+		LeaveTypesFetched:    len(leaveTypeRows),
 		LeaveBalancesFetched: len(leaveBalances),
 		LeaveDetailsFetched:  len(leaveDetails),
 		Mode:                 mode,
 		Start:                syncStart,
 	}
 	if err := c.withTransaction(ctx, func(tx AttendanceService) error {
+		upserted, deactivated, syncErr := tx.syncEHRMSLeaveTypes(ctx, leaveTypeRows)
+		if syncErr != nil {
+			return syncErr
+		}
+		response.LeaveTypesUpserted = upserted
+		response.LeaveTypesDeactivated = deactivated
 		seenExternalLeaveRecords := map[string]struct{}{}
 		unsafeLeaveSweepEmployees := map[string]struct{}{}
 		for idx, record := range records {
@@ -1607,6 +1655,9 @@ func (c AttendanceService) SyncEHRMSAttendance(ctx RequestContext, input EHRMSAt
 			"updated":                 response.Updated,
 			"skipped":                 response.Skipped,
 			"failed":                  response.Failed,
+			"leave_types_fetched":     response.LeaveTypesFetched,
+			"leave_types_upserted":    response.LeaveTypesUpserted,
+			"leave_types_deactivated": response.LeaveTypesDeactivated,
 			"leave_balances_fetched":  response.LeaveBalancesFetched,
 			"leave_balances_upserted": response.LeaveBalancesUpserted,
 			"leave_balances_skipped":  response.LeaveBalancesSkipped,
@@ -1654,6 +1705,183 @@ type ehrmsAttendanceSyncResult struct {
 	externalLeaveRecordID string
 }
 
+// syncEHRMSLeaveTypes upserts the EHRMS /leave-types catalog and deactivates missing EHRMS rows.
+// max_value is converted into max_balance_minutes (and requires_balance) using the same unit rules as leave balances.
+func (c AttendanceService) syncEHRMSLeaveTypes(ctx RequestContext, rows []domain.EHRMSLeaveTypeRecord) (upserted int, deactivated int, err error) {
+	dayHours := 8.0
+	if policy, loadErr := c.loadAttendancePolicyResponse(ctx); loadErr == nil {
+		dayHours = standardDayHours(policy.WorkTime)
+	}
+	now := c.Now()
+	activeIDs := make([]string, 0, len(rows))
+	codeCounts := make(map[string]int, len(rows))
+	categoryIDs := make(map[string]string, len(rows))
+	parentUnits := make(map[string]string, len(rows))
+	for _, record := range rows {
+		code := ehrmsLeaveTypeCode(record)
+		if code == "" {
+			continue
+		}
+		codeCounts[code]++
+		if normalizedEHRMSLeaveTypeKind(record) == "category" {
+			id := domain.StableLeaveTypeID(code)
+			if codeCounts[code] > 1 {
+				id = "category:" + code
+			}
+			categoryIDs[code] = id
+			parentUnits[code] = strings.TrimSpace(ehrmsLeaveTypeValue(record, ehrmsLeaveTypeFieldUnit))
+		}
+	}
+	// A category can occur before its same-code item, so finalize collision IDs
+	// after all code counts are known.
+	for code := range categoryIDs {
+		if codeCounts[code] > 1 {
+			categoryIDs[code] = "category:" + code
+		}
+	}
+	orderedRows := make([]domain.EHRMSLeaveTypeRecord, 0, len(rows))
+	for _, record := range rows {
+		if normalizedEHRMSLeaveTypeKind(record) != "item" {
+			orderedRows = append(orderedRows, record)
+		}
+	}
+	for _, record := range rows {
+		if normalizedEHRMSLeaveTypeKind(record) == "item" {
+			orderedRows = append(orderedRows, record)
+		}
+	}
+	seenNodes := make(map[string]struct{}, len(rows))
+	for idx, record := range orderedRows {
+		code := ehrmsLeaveTypeCode(record)
+		if code == "" {
+			continue
+		}
+		nameZH := strings.TrimSpace(ehrmsLeaveTypeValue(record, ehrmsLeaveTypeFieldName))
+		if nameZH == "" {
+			nameZH = code
+		}
+		kind := normalizedEHRMSLeaveTypeKind(record)
+		nodeKey := kind + "\x00" + code
+		if _, duplicate := seenNodes[nodeKey]; duplicate {
+			continue
+		}
+		seenNodes[nodeKey] = struct{}{}
+		parentCode := strings.ToLower(strings.TrimSpace(ehrmsLeaveTypeValue(record, ehrmsLeaveTypeFieldParent)))
+		parentID := ""
+		if kind != "item" {
+			parentCode = ""
+		} else if resolvedParentID, found := categoryIDs[parentCode]; found {
+			parentID = resolvedParentID
+		} else {
+			parentCode = ""
+		}
+		unit := strings.TrimSpace(ehrmsLeaveTypeValue(record, ehrmsLeaveTypeFieldUnit))
+		if unit == "" && parentCode != "" {
+			unit = parentUnits[parentCode]
+		}
+		maxValueRaw := ehrmsLeaveTypeValue(record, ehrmsLeaveTypeFieldMaxValue)
+		maxHours, ok := parseEHRMSLeaveTypeMaxValue(maxValueRaw, unit, dayHours)
+		if !ok {
+			maxHours = 0
+		}
+		maxMinutes := leaveMinutes(maxHours)
+		id := domain.StableLeaveTypeID(code)
+		if kind != "item" && codeCounts[code] > 1 {
+			id = kind + ":" + code
+		}
+		item := domain.LeaveType{
+			ID:                id,
+			TenantID:          ctx.TenantID,
+			Code:              code,
+			Kind:              kind,
+			ParentID:          parentID,
+			ParentCode:        parentCode,
+			NameZH:            nameZH,
+			NameEN:            strings.TrimSpace(ehrmsLeaveTypeValue(record, ehrmsLeaveTypeFieldNameEN)),
+			Category:          ehrmsLeaveTypeCategory(record),
+			RequiresBalance:   maxMinutes > 0,
+			MaxBalanceMinutes: maxMinutes,
+			Unit:              unit,
+			Enabled:           true,
+			DisplayOrder:      idx + 1,
+			RawPayload:        ehrmsStringPayload(map[string]string(record)),
+			LastSyncedAt:      &now,
+			UpdatedAt:         now,
+		}
+		if err := c.store.UpsertLeaveType(goContext(ctx), item); err != nil {
+			return upserted, 0, err
+		}
+		activeIDs = append(activeIDs, id)
+		upserted++
+	}
+	if len(rows) == 0 {
+		// Empty upstream catalog is treated as "no change" for deactivation to avoid
+		// wiping the local catalog on a blank/misconfigured response.
+		return upserted, 0, nil
+	}
+	n, err := c.store.DeactivateMissingLeaveTypes(goContext(ctx), ctx.TenantID, activeIDs, now)
+	if err != nil {
+		return upserted, 0, err
+	}
+	return upserted, int(n), nil
+}
+
+func ehrmsLeaveTypeCode(record domain.EHRMSLeaveTypeRecord) string {
+	code := strings.ToLower(strings.TrimSpace(ehrmsLeaveTypeValue(record, ehrmsLeaveTypeFieldCode)))
+	if code == "" {
+		code = strings.ToLower(strings.TrimSpace(ehrmsLeaveTypeValue(record, ehrmsLeaveTypeFieldName)))
+	}
+	return code
+}
+
+func normalizedEHRMSLeaveTypeKind(record domain.EHRMSLeaveTypeRecord) string {
+	switch strings.ToLower(strings.TrimSpace(ehrmsLeaveTypeValue(record, ehrmsLeaveTypeFieldKind))) {
+	case "category":
+		return "category"
+	case "special_group":
+		return "special_group"
+	default:
+		return "item"
+	}
+}
+
+func ehrmsLeaveTypeCategory(record domain.EHRMSLeaveTypeRecord) string {
+	value := strings.ToLower(strings.TrimSpace(ehrmsLeaveTypeValue(record, ehrmsLeaveTypeFieldCategory)))
+	if value == "statutory" || strings.Contains(value, "法定") {
+		return "statutory"
+	}
+	return "company"
+}
+
+func ehrmsLeaveTypeValue(record domain.EHRMSLeaveTypeRecord, field string) string {
+	if len(record) == 0 {
+		return ""
+	}
+	if value := strings.TrimSpace(record[field]); value != "" {
+		return value
+	}
+	switch field {
+	case ehrmsLeaveTypeFieldCode:
+		return utils.FirstNonEmpty(record["code"], record["leave_code"])
+	case ehrmsLeaveTypeFieldKind:
+		return strings.TrimSpace(record["kind"])
+	case ehrmsLeaveTypeFieldParent:
+		return strings.TrimSpace(record["parent_code"])
+	case ehrmsLeaveTypeFieldName:
+		return utils.FirstNonEmpty(record["name"], record["name_zh"], record["leave_type"], record["假別"])
+	case ehrmsLeaveTypeFieldNameEN:
+		return strings.TrimSpace(record["name_en"])
+	case ehrmsLeaveTypeFieldMaxValue:
+		return utils.FirstNonEmpty(record["max_value"], record["maxValue"], record["最大額度"], record["額度上限"])
+	case ehrmsLeaveTypeFieldUnit:
+		return strings.TrimSpace(record["unit"])
+	case ehrmsLeaveTypeFieldCategory:
+		return strings.TrimSpace(record["category"])
+	default:
+		return ""
+	}
+}
+
 func (c AttendanceService) syncEHRMSAttendanceRecord(ctx RequestContext, record domain.EHRMSAttendanceRecord, rowNumber int, mode string, start string) ehrmsAttendanceSyncResult {
 	summary, employeeNo, errors := c.ehrmsAttendanceSummaryCandidate(ctx, record, rowNumber)
 	if len(errors) > 0 {
@@ -1692,7 +1920,6 @@ func (c AttendanceService) syncEHRMSAttendanceRecord(ctx RequestContext, record 
 		}
 	}
 	if update {
-		summary.ID = existing.ID
 		summary.CreatedAt = existing.CreatedAt
 	}
 	if err := c.store.UpsertAttendanceDailySummary(goContext(ctx), summary); err != nil {
@@ -1877,24 +2104,6 @@ func (c AttendanceService) ehrmsAttendanceSummaryCandidate(ctx RequestContext, r
 	if workDate == "" {
 		errors = append(errors, RowError{Row: rowNumber, Field: "date", Code: "invalid", Message: "date must be YYYY-MM-DD"})
 	}
-	asOf := c.Now()
-	if parsed, err := time.Parse(time.DateOnly, workDate); err == nil {
-		asOf = parsed
-	}
-	leaveTypeRaw := ehrmsAttendanceValue(record, ehrmsAttendanceFieldLeaveType)
-	leaveType, _, leaveTypeFound, mappingErr := c.resolveExternalLeaveTypeCode(ctx, ehrmsAttendanceSource, leaveTypeRaw, "", asOf)
-	if mappingErr != nil {
-		errors = append(errors, RowError{Row: rowNumber, Field: "leave_type", Code: "store_error", Message: mappingErr.Error()})
-	} else if leaveTypeRaw != "" && !leaveTypeFound {
-		errors = append(errors, RowError{Row: rowNumber, Field: "leave_type", Code: leaveTypeUnknownCode, Message: "leave_type is not in the tenant leave catalog"})
-	}
-	leave2TypeRaw := ehrmsAttendanceValue(record, ehrmsAttendanceFieldLeave2Type)
-	leave2Type, _, leave2TypeFound, mappingErr := c.resolveExternalLeaveTypeCode(ctx, ehrmsAttendanceSource, leave2TypeRaw, "", asOf)
-	if mappingErr != nil {
-		errors = append(errors, RowError{Row: rowNumber, Field: "leave2_type", Code: "store_error", Message: mappingErr.Error()})
-	} else if leave2TypeRaw != "" && !leave2TypeFound {
-		errors = append(errors, RowError{Row: rowNumber, Field: "leave2_type", Code: leaveTypeUnknownCode, Message: "leave2_type is not in the tenant leave catalog"})
-	}
 	shiftStart := normalizeEHRMSAttendanceTime(ehrmsAttendanceValue(record, ehrmsAttendanceFieldShiftStart))
 	if ehrmsAttendanceValue(record, ehrmsAttendanceFieldShiftStart) != "" && shiftStart == "" {
 		errors = append(errors, RowError{Row: rowNumber, Field: "shift_start", Code: "invalid", Message: "shift_start must be HH:MM"})
@@ -1917,53 +2126,22 @@ func (c AttendanceService) ehrmsAttendanceSummaryCandidate(ctx RequestContext, r
 	}
 	clockStart := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldClockStart, rowNumber, &errors)
 	clockEnd := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldClockEnd, rowNumber, &errors)
-	attendStart := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldAttendStart, rowNumber, &errors)
-	attendEnd := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldAttendEnd, rowNumber, &errors)
-	leaveStart := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldLeaveStart, rowNumber, &errors)
-	leaveEnd := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldLeaveEnd, rowNumber, &errors)
-	leave2Start := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldLeave2Start, rowNumber, &errors)
-	leave2End := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldLeave2End, rowNumber, &errors)
-	overtimeStart := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldOvertimeStart, rowNumber, &errors)
-	overtimeEnd := ehrmsAttendanceTimeField(record, ehrmsAttendanceFieldOvertimeEnd, rowNumber, &errors)
-	attendHours := ehrmsAttendanceHoursField(record, ehrmsAttendanceFieldAttendHours, rowNumber, &errors)
-	leaveHours := ehrmsAttendanceHoursField(record, ehrmsAttendanceFieldLeaveHours, rowNumber, &errors)
-	leave2Hours := ehrmsAttendanceHoursField(record, ehrmsAttendanceFieldLeave2Hours, rowNumber, &errors)
-	overtimeHours := ehrmsAttendanceHoursField(record, ehrmsAttendanceFieldOvertimeHours, rowNumber, &errors)
 	now := c.Now()
 	return AttendanceDailySummary{
-		ID:              utils.NewID("ads"),
-		TenantID:        ctx.TenantID,
-		WorkDate:        workDate,
-		ShiftStart:      shiftStart,
-		ShiftEnd:        shiftEnd,
-		ShiftHours:      shiftHours,
-		DailyHours:      dailyHours,
-		ClockHours:      clockHours,
-		ClockStart:      clockStart,
-		ClockEnd:        clockEnd,
-		AttendStart:     attendStart,
-		AttendEnd:       attendEnd,
-		AttendHours:     attendHours,
-		AttendCounted:   ehrmsAttendanceBoolValue(record, ehrmsAttendanceFieldAttendCounted),
-		LeaveType:       leaveType,
-		LeaveStart:      leaveStart,
-		LeaveEnd:        leaveEnd,
-		LeaveHours:      leaveHours,
-		LeaveCounted:    ehrmsAttendanceBoolValue(record, ehrmsAttendanceFieldLeaveCounted),
-		Leave2Type:      leave2Type,
-		Leave2Start:     leave2Start,
-		Leave2End:       leave2End,
-		Leave2Hours:     leave2Hours,
-		Leave2Counted:   ehrmsAttendanceBoolValue(record, ehrmsAttendanceFieldLeave2Counted),
-		OvertimeStart:   overtimeStart,
-		OvertimeEnd:     overtimeEnd,
-		OvertimeHours:   overtimeHours,
-		OvertimeCounted: ehrmsAttendanceBoolValue(record, ehrmsAttendanceFieldOvertimeCounted),
-		Payload:         ehrmsAttendancePayload(record),
-		Source:          ehrmsAttendanceSource,
-		ExternalRef:     fmt.Sprintf("%s:%s", employeeNo, workDate),
-		CreatedAt:       now,
-		UpdatedAt:       now,
+		TenantID:    ctx.TenantID,
+		WorkDate:    workDate,
+		ShiftStart:  shiftStart,
+		ShiftEnd:    shiftEnd,
+		ShiftHours:  shiftHours,
+		DailyHours:  dailyHours,
+		ClockHours:  clockHours,
+		ClockStart:  clockStart,
+		ClockEnd:    clockEnd,
+		Payload:     ehrmsAttendancePayload(record),
+		Source:      ehrmsAttendanceSource,
+		ExternalRef: fmt.Sprintf("%s:%s", employeeNo, workDate),
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}, employeeNo, errors
 }
 
@@ -2183,7 +2361,7 @@ func parseEHRMSLeaveBalanceNumber(value string, unit string, configuredDayHours 
 		return 0, false
 	}
 	switch strings.ToLower(strings.TrimSpace(unit)) {
-	case "days", "day":
+	case "days", "day", "天", "日":
 		dayHours := 8.0
 		if len(configuredDayHours) > 0 && configuredDayHours[0] > 0 {
 			dayHours = configuredDayHours[0]
@@ -2192,6 +2370,27 @@ func parseEHRMSLeaveBalanceNumber(value string, unit string, configuredDayHours 
 	default:
 		return n, true
 	}
+}
+
+// parseEHRMSLeaveTypeMaxValue accepts catalog values such as
+// "112小時(後1年)" while keeping balance endpoints strict-number only.
+func parseEHRMSLeaveTypeMaxValue(value string, unit string, configuredDayHours ...float64) (float64, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, true
+	}
+	end := 0
+	for end < len(value) {
+		char := value[end]
+		if (char < '0' || char > '9') && char != '.' {
+			break
+		}
+		end++
+	}
+	if end == 0 {
+		return 0, false
+	}
+	return parseEHRMSLeaveBalanceNumber(value[:end], unit, configuredDayHours...)
 }
 
 func parseEHRMSLeaveDetailDateTime(workDate string, value string) (time.Time, bool) {
@@ -2243,23 +2442,6 @@ func ehrmsAttendanceTimeField(record domain.EHRMSAttendanceRecord, key string, r
 	return value
 }
 
-func ehrmsAttendanceHoursField(record domain.EHRMSAttendanceRecord, key string, rowNumber int, errors *[]RowError) float64 {
-	value, ok := parseEHRMSAttendanceHours(ehrmsAttendanceValue(record, key))
-	if !ok {
-		*errors = append(*errors, RowError{Row: rowNumber, Field: key, Code: "invalid", Message: key + " must be a number"})
-	}
-	return value
-}
-
-func ehrmsAttendanceBoolValue(record domain.EHRMSAttendanceRecord, key string) bool {
-	switch strings.ToLower(strings.TrimSpace(ehrmsAttendanceValue(record, key))) {
-	case "v", "true", "1", "是":
-		return true
-	default:
-		return false
-	}
-}
-
 func ehrmsAttendancePayload(record domain.EHRMSAttendanceRecord) map[string]any {
 	return ehrmsStringPayload(map[string]string(record))
 }
@@ -2301,42 +2483,6 @@ func ehrmsAttendanceValue(record domain.EHRMSAttendanceRecord, key string) strin
 		return strings.TrimSpace(record["clock_start"])
 	case ehrmsAttendanceFieldClockEnd:
 		return strings.TrimSpace(record["clock_end"])
-	case ehrmsAttendanceFieldAttendStart:
-		return strings.TrimSpace(record["attend_start"])
-	case ehrmsAttendanceFieldAttendEnd:
-		return strings.TrimSpace(record["attend_end"])
-	case ehrmsAttendanceFieldAttendHours:
-		return strings.TrimSpace(record["attend_hours"])
-	case ehrmsAttendanceFieldAttendCounted:
-		return strings.TrimSpace(record["attend_counted"])
-	case ehrmsAttendanceFieldLeaveType:
-		return strings.TrimSpace(record["leave_type"])
-	case ehrmsAttendanceFieldLeaveStart:
-		return strings.TrimSpace(record["leave_start"])
-	case ehrmsAttendanceFieldLeaveEnd:
-		return strings.TrimSpace(record["leave_end"])
-	case ehrmsAttendanceFieldLeaveHours:
-		return strings.TrimSpace(record["leave_hours"])
-	case ehrmsAttendanceFieldLeaveCounted:
-		return strings.TrimSpace(record["leave_counted"])
-	case ehrmsAttendanceFieldLeave2Type:
-		return strings.TrimSpace(record["leave2_type"])
-	case ehrmsAttendanceFieldLeave2Start:
-		return strings.TrimSpace(record["leave2_start"])
-	case ehrmsAttendanceFieldLeave2End:
-		return strings.TrimSpace(record["leave2_end"])
-	case ehrmsAttendanceFieldLeave2Hours:
-		return strings.TrimSpace(record["leave2_hours"])
-	case ehrmsAttendanceFieldLeave2Counted:
-		return strings.TrimSpace(record["leave2_counted"])
-	case ehrmsAttendanceFieldOvertimeStart:
-		return strings.TrimSpace(record["overtime_start"])
-	case ehrmsAttendanceFieldOvertimeEnd:
-		return strings.TrimSpace(record["overtime_end"])
-	case ehrmsAttendanceFieldOvertimeHours:
-		return strings.TrimSpace(record["overtime_hours"])
-	case ehrmsAttendanceFieldOvertimeCounted:
-		return strings.TrimSpace(record["overtime_counted"])
 	default:
 		return ""
 	}

@@ -131,12 +131,13 @@ SELECT * FROM definitions;
 
 -- Agent v2 keeps stable identity separate from immutable runtime revisions.
 INSERT INTO agents (
-    id, tenant_id, lifecycle_status, draft_revision_id, published_revision_id,
+    id, tenant_id, parent_agent_id, lifecycle_status, draft_revision_id, published_revision_id,
     next_revision_no, created_by_account_id, created_at, updated_at, archived_at
 )
 SELECT
     'adef-' || context.tenant_id || '-' || definition.suffix,
     context.tenant_id,
+    NULL,
     'active',
     NULL,
     NULL,
@@ -155,7 +156,7 @@ ON CONFLICT (id) DO UPDATE SET
 WHERE agents.tenant_id = EXCLUDED.tenant_id;
 
 INSERT INTO agent_revisions (
-    id, tenant_id, agent_id, revision_no, name, description, icon, category,
+    id, tenant_id, agent_id, revision_no, ordinal, name, description, icon, category,
     visibility, visibility_targets, main_agent_role, system_prompt, welcome_message,
     suggested_questions, suggested_question_translations,
     model_connection_id, model_config_checksum, timeout_ms,
@@ -166,6 +167,7 @@ SELECT
     context.tenant_id,
     'adef-' || context.tenant_id || '-' || definition.suffix,
     1,
+    NULL,
     definition.name,
     definition.description,
     definition.emoji,
@@ -193,19 +195,74 @@ JOIN model_connection_state state
  AND state.model_connection_id = context.model_connection_id
 ON CONFLICT (tenant_id, agent_id, revision_no) DO NOTHING;
 
-INSERT INTO agent_revision_members (
-    tenant_id, revision_id, id, name, role, model_connection_id, ordinal
+INSERT INTO agents (
+    id, tenant_id, parent_agent_id, lifecycle_status,
+    draft_revision_id, published_revision_id, next_revision_no,
+    created_by_account_id, created_at, updated_at, archived_at
 )
 SELECT
+    'adef-' || context.tenant_id || '-' || definition.suffix || ':member:' || member.id,
     context.tenant_id,
-    revision.id,
-    member.id,
-    member.name,
-    member.role,
-    context.model_connection_id,
-    member.ordinality::int - 1
+    'adef-' || context.tenant_id || '-' || definition.suffix,
+    'active',
+    NULL,
+    NULL,
+    2,
+    context.actor_id,
+    context.seeded_at,
+    context.seeded_at,
+    NULL
 FROM seed_agent_definitions definition
 CROSS JOIN seed_agent_context context
+CROSS JOIN LATERAL jsonb_to_recordset(definition.sub_agents) WITH ORDINALITY
+    AS member(id text, name text, role text, tools jsonb, knowledge_base_ids jsonb, ordinality bigint)
+ON CONFLICT (id) DO UPDATE SET
+    lifecycle_status = 'active',
+    updated_at = EXCLUDED.updated_at,
+    archived_at = NULL
+WHERE agents.tenant_id = EXCLUDED.tenant_id
+  AND agents.parent_agent_id = EXCLUDED.parent_agent_id;
+
+INSERT INTO agent_revisions (
+    id, tenant_id, agent_id, revision_no, ordinal,
+    name, description, icon, category,
+    visibility, visibility_targets, main_agent_role,
+    system_prompt, welcome_message,
+    suggested_questions, suggested_question_translations,
+    model_connection_id, model_config_checksum, timeout_ms,
+    config_schema_version, checksum, revision_note,
+    created_by_account_id, created_at
+)
+SELECT
+    revision.id || ':member:' || member.id,
+    context.tenant_id,
+    revision.agent_id || ':member:' || member.id,
+    revision.revision_no,
+    member.ordinality::int - 1,
+    member.name,
+    '',
+    'AI',
+    revision.category,
+    revision.visibility,
+    revision.visibility_targets,
+    member.role,
+    '',
+    '',
+    '[]'::jsonb,
+    '[]'::jsonb,
+    context.model_connection_id,
+    state.synced_config_checksum,
+    revision.timeout_ms,
+    revision.config_schema_version,
+    md5(concat_ws('|', revision.checksum, member.id, member.role, member.tools::text, member.knowledge_base_ids::text)),
+    revision.revision_note,
+    context.actor_id,
+    context.seeded_at
+FROM seed_agent_definitions definition
+CROSS JOIN seed_agent_context context
+JOIN model_connection_state state
+  ON state.tenant_id = context.tenant_id
+ AND state.model_connection_id = context.model_connection_id
 JOIN agent_revisions revision
   ON revision.tenant_id = context.tenant_id
  AND revision.agent_id = 'adef-' || context.tenant_id || '-' || definition.suffix
@@ -213,7 +270,7 @@ JOIN agent_revisions revision
  AND revision.revision_no = 1
 CROSS JOIN LATERAL jsonb_to_recordset(definition.sub_agents) WITH ORDINALITY
     AS member(id text, name text, role text, tools jsonb, knowledge_base_ids jsonb, ordinality bigint)
-ON CONFLICT DO NOTHING;
+ON CONFLICT (tenant_id, agent_id, revision_no) DO NOTHING;
 
 INSERT INTO agent_revision_builtin_tools (tenant_id, revision_id, tool_key, ordinal, config)
 SELECT
@@ -232,13 +289,12 @@ JOIN agent_revisions revision
 CROSS JOIN LATERAL jsonb_array_elements_text(definition.tools) WITH ORDINALITY AS tool(value, ordinality)
 ON CONFLICT DO NOTHING;
 
-INSERT INTO agent_revision_member_builtin_tools (
-    tenant_id, revision_id, member_id, tool_key, ordinal, config
+INSERT INTO agent_revision_builtin_tools (
+    tenant_id, revision_id, tool_key, ordinal, config
 )
 SELECT
     context.tenant_id,
-    revision.id,
-    member.id,
+    revision.id || ':member:' || member.id,
     tool.value,
     tool.ordinality::int - 1,
     '{}'::jsonb
@@ -254,13 +310,12 @@ CROSS JOIN LATERAL jsonb_to_recordset(definition.sub_agents)
 CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(member.tools, '[]'::jsonb)) WITH ORDINALITY AS tool(value, ordinality)
 ON CONFLICT DO NOTHING;
 
-INSERT INTO agent_revision_member_knowledge_bases (
-    tenant_id, revision_id, member_id, knowledge_base_id, ordinal
+INSERT INTO agent_revision_knowledge_bases (
+    tenant_id, revision_id, knowledge_base_id, ordinal
 )
 SELECT
     context.tenant_id,
-    revision.id,
-    member.id,
+    revision.id || ':member:' || member.id,
     knowledge.value,
     knowledge.ordinality::int - 1
 FROM seed_agent_definitions definition
@@ -288,6 +343,25 @@ JOIN agent_revisions revision
  AND revision.revision_no = 1
 WHERE agent.tenant_id = context.tenant_id
   AND agent.id = revision.agent_id;
+
+UPDATE agents child
+SET draft_revision_id = child_revision.id,
+    published_revision_id = child_revision.id,
+    next_revision_no = GREATEST(child.next_revision_no, 2),
+    updated_at = context.seeded_at
+FROM seed_agent_context context
+JOIN agents parent
+  ON parent.tenant_id = context.tenant_id
+ AND parent.parent_agent_id IS NULL
+JOIN agent_revisions parent_revision
+  ON parent_revision.tenant_id = parent.tenant_id
+ AND parent_revision.id = parent.published_revision_id
+JOIN agent_revisions child_revision
+  ON child_revision.tenant_id = parent_revision.tenant_id
+ AND child_revision.revision_no = parent_revision.revision_no
+WHERE child.tenant_id = context.tenant_id
+  AND child.parent_agent_id = parent.id
+  AND child_revision.agent_id = child.id;
 
 CREATE TEMP TABLE seeded_agent_ids ON COMMIT DROP AS
 SELECT agent.id, agent.tenant_id, revision.name

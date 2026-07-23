@@ -64,6 +64,10 @@ func TestProvisionTenantCreatesUsableAdmin(t *testing.T) {
 	if err != nil || !ok || policy.Version != 1 || policy.WorkTime.StandardStart != "09:00" {
 		t.Fatalf("expected immutable default attendance policy v1, policy=%+v ok=%v err=%v", policy, ok, err)
 	}
+	leaveTypes, err := store.ListLeaveTypes(context.Background(), "tenant-acme")
+	if err != nil || len(leaveTypes) != 15 {
+		t.Fatalf("expected a usable leave_types catalog for the new tenant, leaveTypes=%+v err=%v", leaveTypes, err)
+	}
 	for key, requiredField := range map[string]string{
 		"leave-request": "leave_type", "overtime-approval": "overtime_type", "punch-fix": "correction_type",
 		"job-change": "change_types", "headcount-request": "openings", "resignation": "separation_type",

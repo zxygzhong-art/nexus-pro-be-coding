@@ -193,7 +193,7 @@ func (c AgentService) currentExternalTool(ctx RequestContext, id string) (domain
 	if !ok || item.Status == "archived" {
 		return domain.AgentExternalTool{}, NotFound("agent external tool", id)
 	}
-	item.CredentialSet = item.CredentialSecretID != "" || item.AuthSecretCiphertext != ""
+	item.CredentialSet = item.AuthSecretCiphertext != ""
 	return item, nil
 }
 
@@ -228,13 +228,13 @@ func (c AgentService) persistExternalToolTest(ctx RequestContext, account Accoun
 func (c AgentService) externalToolRequestConfig(ctx RequestContext, item domain.AgentExternalTool) (http.Header, time.Duration, error) {
 	header := make(http.Header)
 	if item.AuthType != "none" {
-		if item.AuthSecretCiphertext == "" || item.CredentialSecretID == "" {
+		if item.AuthSecretCiphertext == "" {
 			return nil, 0, domain.E(503, "service_unavailable", "external tool credential is unavailable")
 		}
 		if c.CredentialCipher() == nil {
 			return nil, 0, domain.E(503, "service_unavailable", "external tool credential storage is not configured")
 		}
-		plaintext, err := c.CredentialCipher().Decrypt(item.AuthSecretCiphertext, domain.CredentialSecretAAD(ctx.TenantID, item.CredentialSecretID))
+		plaintext, err := c.CredentialCipher().Decrypt(item.AuthSecretCiphertext, domain.ExternalToolCredentialAAD(ctx.TenantID, item.ID))
 		if err != nil {
 			return nil, 0, domain.E(500, "internal_error", "failed to open external tool credential")
 		}

@@ -916,7 +916,6 @@ func populateDemoFixture(store repository.Store) {
 		LeaveType:  "annual",
 		StartAt:    dashboardDate.Add(9 * time.Hour),
 		EndAt:      dashboardDate.Add(18 * time.Hour),
-		Hours:      8,
 		Reason:     fixtureDashboardLeaveReason,
 		Status:     "approved",
 		CreatedAt:  now.Add(10 * time.Minute),

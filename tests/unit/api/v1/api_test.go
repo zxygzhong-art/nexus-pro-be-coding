@@ -1,7 +1,6 @@
 package v1_test
 
 import (
-	"bytes"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -12,10 +11,8 @@ import (
 	"errors"
 	"io"
 	"math/big"
-	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
-	"net/textproto"
 	"regexp"
 	"slices"
 	"strings"
@@ -43,19 +40,6 @@ func newTestAPI(authenticated bool) http.Handler {
 		options.TokenResolver = staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo"}, ok: true}
 	}
 	return v1api.New(service.New(store), nil, options).Routes()
-}
-
-func newTestAPIWithFormApprovalWorkflows(authenticated bool) http.Handler {
-	store := memory.NewStore()
-	populateDemoFixture(store)
-	fake := &apiFakeFormApprovalWorkflowClient{started: map[string]domain.FormApprovalWorkflowStart{}}
-	svc := service.New(store, service.Options{FormApprovalWorkflows: fake})
-	fake.service = svc
-	options := v1api.Options{}
-	if authenticated {
-		options.TokenResolver = staticTokenResolver{ctx: v1api.TokenContext{Provider: "keycloak", Subject: "acct-admin", TenantID: "demo"}, ok: true}
-	}
-	return v1api.New(svc, nil, options).Routes()
 }
 
 type apiFakeFormApprovalWorkflowClient struct {
@@ -145,38 +129,6 @@ func decodeError(t *testing.T, body []byte) apiErrorPayload {
 		t.Fatal(err)
 	}
 	return payload.Error
-}
-
-// validEmployeeCreateJSON 驗證有效員工 create JSON。
-func validEmployeeCreateJSON(name, email string) string {
-	nationalID := "ID-" + strings.NewReplacer("@", "-", ".", "-", "+", "-").Replace(email)
-	return `{"name":"` + name + `","company_email":"` + email + `","org_unit_id":"ou-hq","position":"Engineer","category":"full-time","employment_status":"待加入","hire_date":"2026-06-01","basic_info":{"nationality_type":"local","national_id":"` + nationalID + `"},"employment_info":{"org_unit_id":"ou-hq","position":"Engineer","category":"full_time"},"education_military_info":{"highest_education":"master","school":"NTU"},"contact_info":{"mobile_phone":"0911222333","address":"Taipei","emergency_contact_relation":"spouse","emergency_contact_name":"Emergency Contact","emergency_contact_phone":"0922333444"},"insurance_info":{"labor_insurance_date":"2026-06-01","labor_insurance_level":"L1","labor_insurance_salary":"45800","health_insurance_date":"2026-06-01","health_insurance_level":"H1","health_insurance_amount":"826"}}`
-}
-
-// avatarMultipartBody 驗證 avatar multipart body。
-func avatarMultipartBody(t *testing.T) (*bytes.Buffer, string) {
-	t.Helper()
-	body := &bytes.Buffer{}
-	writer := multipart.NewWriter(body)
-	header := textproto.MIMEHeader{}
-	header.Set("Content-Disposition", `form-data; name="file"; filename="avatar.png"`)
-	header.Set("Content-Type", "image/png")
-	part, err := writer.CreatePart(header)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := part.Write(testPNGBytes()); err != nil {
-		t.Fatal(err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatal(err)
-	}
-	return body, writer.FormDataContentType()
-}
-
-// testPNGBytes 驗證 png bytes。
-func testPNGBytes() []byte {
-	return []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0}
 }
 
 // TestProductionContextRequiresAuthenticatedContext 驗證 production context requires authenticated context。

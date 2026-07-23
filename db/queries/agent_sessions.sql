@@ -161,12 +161,12 @@ WITH conversation_usage AS (
 ), message_usage AS (
     SELECT
         conversations.owner_account_id AS account_id,
-        count(messages.id)::bigint AS message_count,
-        max(messages.created_at)::timestamptz AS last_message_at
+        count(conversation_messages.id)::bigint AS message_count,
+        max(conversation_messages.created_at)::timestamptz AS last_message_at
     FROM conversations
-    JOIN messages
-      ON messages.tenant_id = conversations.tenant_id
-     AND messages.conversation_id = conversations.id
+    JOIN conversation_messages
+      ON conversation_messages.tenant_id = conversations.tenant_id
+     AND conversation_messages.conversation_id = conversations.id
     WHERE conversations.tenant_id = sqlc.arg(tenant_id)
     GROUP BY conversations.owner_account_id
 ), execution_usage AS (
@@ -178,7 +178,7 @@ WITH conversation_usage AS (
         sum(output_tokens)::bigint AS output_tokens,
         sum(total_tokens)::bigint AS total_tokens,
         max(updated_at)::timestamptz AS last_execution_at
-    FROM executions
+    FROM conversation_executions
     WHERE tenant_id = sqlc.arg(tenant_id)
     GROUP BY account_id
 ), account_usage AS (
@@ -238,10 +238,10 @@ WITH conversation_usage AS (
     WHERE tenant_id = sqlc.arg(tenant_id)
     GROUP BY owner_account_id
 ), message_usage AS (
-    SELECT conversations.owner_account_id AS account_id, count(messages.id)::bigint AS message_count,
-           max(messages.created_at)::timestamptz AS last_message_at
+    SELECT conversations.owner_account_id AS account_id, count(conversation_messages.id)::bigint AS message_count,
+           max(conversation_messages.created_at)::timestamptz AS last_message_at
     FROM conversations
-    JOIN messages ON messages.tenant_id = conversations.tenant_id AND messages.conversation_id = conversations.id
+    JOIN conversation_messages ON conversation_messages.tenant_id = conversations.tenant_id AND conversation_messages.conversation_id = conversations.id
     WHERE conversations.tenant_id = sqlc.arg(tenant_id)
     GROUP BY conversations.owner_account_id
 ), execution_usage AS (
@@ -249,7 +249,7 @@ WITH conversation_usage AS (
            sum(input_tokens)::bigint AS input_tokens, sum(cached_tokens)::bigint AS cached_tokens,
            sum(output_tokens)::bigint AS output_tokens, sum(total_tokens)::bigint AS total_tokens,
            max(updated_at)::timestamptz AS last_execution_at
-    FROM executions
+    FROM conversation_executions
     WHERE tenant_id = sqlc.arg(tenant_id)
     GROUP BY account_id
 )
@@ -276,16 +276,16 @@ WITH conversation_usage AS (
     SELECT owner_account_id AS account_id, count(*)::bigint AS session_count
     FROM conversations WHERE conversations.tenant_id = sqlc.arg(tenant_id) GROUP BY conversations.owner_account_id
 ), message_usage AS (
-    SELECT conversations.owner_account_id AS account_id, count(messages.id)::bigint AS message_count
+    SELECT conversations.owner_account_id AS account_id, count(conversation_messages.id)::bigint AS message_count
     FROM conversations
-    JOIN messages ON messages.tenant_id = conversations.tenant_id AND messages.conversation_id = conversations.id
+    JOIN conversation_messages ON conversation_messages.tenant_id = conversations.tenant_id AND conversation_messages.conversation_id = conversations.id
     WHERE conversations.tenant_id = sqlc.arg(tenant_id)
     GROUP BY conversations.owner_account_id
 ), execution_usage AS (
     SELECT account_id, sum(llm_call_count)::bigint AS llm_call_count,
            sum(input_tokens)::bigint AS input_tokens, sum(cached_tokens)::bigint AS cached_tokens,
            sum(output_tokens)::bigint AS output_tokens, sum(total_tokens)::bigint AS total_tokens
-    FROM executions WHERE tenant_id = sqlc.arg(tenant_id) GROUP BY account_id
+    FROM conversation_executions WHERE tenant_id = sqlc.arg(tenant_id) GROUP BY account_id
 ), account_usage AS (
     SELECT
         COALESCE(conversation_usage.session_count, 0)::bigint AS session_count,
@@ -321,21 +321,21 @@ WITH account_conversations AS (
     FROM conversations
     WHERE tenant_id = sqlc.arg(tenant_id) AND owner_account_id = sqlc.arg(account_id)
 ), message_usage AS (
-    SELECT messages.conversation_id, count(*)::bigint AS message_count,
-           max(messages.created_at)::timestamptz AS last_message_at
-    FROM messages
-    JOIN account_conversations ON account_conversations.id = messages.conversation_id
-    WHERE messages.tenant_id = sqlc.arg(tenant_id)
-    GROUP BY messages.conversation_id
+    SELECT conversation_messages.conversation_id, count(*)::bigint AS message_count,
+           max(conversation_messages.created_at)::timestamptz AS last_message_at
+    FROM conversation_messages
+    JOIN account_conversations ON account_conversations.id = conversation_messages.conversation_id
+    WHERE conversation_messages.tenant_id = sqlc.arg(tenant_id)
+    GROUP BY conversation_messages.conversation_id
 ), execution_usage AS (
-    SELECT executions.conversation_id, sum(llm_call_count)::bigint AS llm_call_count,
+    SELECT conversation_executions.conversation_id, sum(llm_call_count)::bigint AS llm_call_count,
            sum(input_tokens)::bigint AS input_tokens, sum(cached_tokens)::bigint AS cached_tokens,
            sum(output_tokens)::bigint AS output_tokens, sum(total_tokens)::bigint AS total_tokens,
            max(updated_at)::timestamptz AS last_execution_at
-    FROM executions
-    JOIN account_conversations ON account_conversations.id = executions.conversation_id
-    WHERE executions.tenant_id = sqlc.arg(tenant_id)
-    GROUP BY executions.conversation_id
+    FROM conversation_executions
+    JOIN account_conversations ON account_conversations.id = conversation_executions.conversation_id
+    WHERE conversation_executions.tenant_id = sqlc.arg(tenant_id)
+    GROUP BY conversation_executions.conversation_id
 )
 SELECT
     conversations.id AS session_id,
@@ -403,7 +403,7 @@ WITH allocated AS (
       AND conversations.id = sqlc.arg(session_id)
     RETURNING *, next_message_sequence - 1 AS allocated_sequence
 ), inserted AS (
-    INSERT INTO messages (
+    INSERT INTO conversation_messages (
         id, tenant_id, conversation_id, segment_id, sequence_no, role,
         content, content_json, execution_id, execution_step_id, created_at
     )
@@ -411,13 +411,13 @@ WITH allocated AS (
         sqlc.arg(id), allocated.tenant_id, allocated.id, allocated.current_segment_id,
         allocated.allocated_sequence, sqlc.arg(role), sqlc.arg(content),
         sqlc.arg(metadata)::jsonb,
-        executions.id, NULL, sqlc.arg(created_at)
+        conversation_executions.id, NULL, sqlc.arg(created_at)
     FROM allocated
-    LEFT JOIN executions
-      ON executions.tenant_id = allocated.tenant_id
-     AND executions.conversation_id = allocated.id
-     AND executions.segment_id = allocated.current_segment_id
-     AND executions.id = NULLIF(sqlc.arg(run_id)::text, '')
+    LEFT JOIN conversation_executions
+      ON conversation_executions.tenant_id = allocated.tenant_id
+     AND conversation_executions.conversation_id = allocated.id
+     AND conversation_executions.segment_id = allocated.current_segment_id
+     AND conversation_executions.id = NULLIF(sqlc.arg(run_id)::text, '')
     RETURNING *
 )
 SELECT
@@ -440,69 +440,69 @@ JOIN conversation_segments segments
 
 -- name: ListAgentSessionMessages :many
 SELECT
-    messages.id,
-    messages.tenant_id,
-    messages.conversation_id AS session_id,
-    messages.segment_id,
-    messages.sequence_no,
-    messages.role,
-    messages.content,
-    messages.execution_id AS run_id,
+    conversation_messages.id,
+    conversation_messages.tenant_id,
+    conversation_messages.conversation_id AS session_id,
+    conversation_messages.segment_id,
+    conversation_messages.sequence_no,
+    conversation_messages.role,
+    conversation_messages.content,
+    conversation_messages.execution_id AS run_id,
     segments.ordinal::bigint AS context_version,
-    COALESCE(messages.content_json, '{}'::jsonb) AS metadata,
-    messages.created_at
-FROM messages
+    COALESCE(conversation_messages.content_json, '{}'::jsonb) AS metadata,
+    conversation_messages.created_at
+FROM conversation_messages
 JOIN conversations
-  ON conversations.tenant_id = messages.tenant_id
- AND conversations.id = messages.conversation_id
+  ON conversations.tenant_id = conversation_messages.tenant_id
+ AND conversations.id = conversation_messages.conversation_id
 JOIN conversation_segments segments
-  ON segments.tenant_id = messages.tenant_id
- AND segments.conversation_id = messages.conversation_id
- AND segments.id = messages.segment_id
-WHERE messages.tenant_id = sqlc.arg(tenant_id)
-  AND messages.conversation_id = sqlc.arg(session_id)
-  AND messages.segment_id = conversations.current_segment_id
+  ON segments.tenant_id = conversation_messages.tenant_id
+ AND segments.conversation_id = conversation_messages.conversation_id
+ AND segments.id = conversation_messages.segment_id
+WHERE conversation_messages.tenant_id = sqlc.arg(tenant_id)
+  AND conversation_messages.conversation_id = sqlc.arg(session_id)
+  AND conversation_messages.segment_id = conversations.current_segment_id
   AND (
     NOT sqlc.arg(has_cursor)::boolean
-    OR messages.created_at > sqlc.arg(cursor_created_at)::timestamptz
-    OR (messages.created_at = sqlc.arg(cursor_created_at)::timestamptz AND messages.id > sqlc.arg(cursor_id))
+    OR conversation_messages.created_at > sqlc.arg(cursor_created_at)::timestamptz
+    OR (conversation_messages.created_at = sqlc.arg(cursor_created_at)::timestamptz AND conversation_messages.id > sqlc.arg(cursor_id))
   )
-ORDER BY messages.created_at ASC, messages.id ASC
+ORDER BY conversation_messages.created_at ASC, conversation_messages.id ASC
 LIMIT sqlc.arg(limit_count)::int;
 
 -- name: ListRecentAgentSessionMessages :many
 SELECT * FROM (
     SELECT
-        messages.id,
-        messages.tenant_id,
-        messages.conversation_id AS session_id,
-        messages.segment_id,
-        messages.sequence_no,
-        messages.role,
-        messages.content,
-        messages.execution_id AS run_id,
+        conversation_messages.id,
+        conversation_messages.tenant_id,
+        conversation_messages.conversation_id AS session_id,
+        conversation_messages.segment_id,
+        conversation_messages.sequence_no,
+        conversation_messages.role,
+        conversation_messages.content,
+        conversation_messages.execution_id AS run_id,
         segments.ordinal::bigint AS context_version,
-        COALESCE(messages.content_json, '{}'::jsonb) AS metadata,
-        messages.created_at
-    FROM messages
+        COALESCE(conversation_messages.content_json, '{}'::jsonb) AS metadata,
+        conversation_messages.created_at
+    FROM conversation_messages
     JOIN conversations
-      ON conversations.tenant_id = messages.tenant_id
-     AND conversations.id = messages.conversation_id
+      ON conversations.tenant_id = conversation_messages.tenant_id
+     AND conversations.id = conversation_messages.conversation_id
     JOIN conversation_segments segments
-      ON segments.tenant_id = messages.tenant_id
-     AND segments.conversation_id = messages.conversation_id
-     AND segments.id = messages.segment_id
-    WHERE messages.tenant_id = sqlc.arg(tenant_id)
-      AND messages.conversation_id = sqlc.arg(session_id)
-      AND messages.segment_id = conversations.current_segment_id
-    ORDER BY messages.created_at DESC, messages.id DESC
+      ON segments.tenant_id = conversation_messages.tenant_id
+     AND segments.conversation_id = conversation_messages.conversation_id
+     AND segments.id = conversation_messages.segment_id
+    WHERE conversation_messages.tenant_id = sqlc.arg(tenant_id)
+      AND conversation_messages.conversation_id = sqlc.arg(session_id)
+      AND conversation_messages.segment_id = conversations.current_segment_id
+    ORDER BY conversation_messages.created_at DESC, conversation_messages.id DESC
     LIMIT sqlc.arg(limit_count)::int
 ) recent
 ORDER BY created_at ASC, id ASC;
 
 -- name: CountActiveAgentRunsBySession :one
 SELECT count(*)
-FROM executions
+FROM conversation_executions
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND conversation_id = sqlc.arg(session_id)
   AND status IN ('queued', 'running');
@@ -524,7 +524,7 @@ WITH scope_values AS (
      AND conversations.id = NULLIF(sqlc.arg(session_id)::text, '')
     WHERE sqlc.arg(session_id)::text = '' OR conversations.id IS NOT NULL
 ), updated_by_id AS (
-    UPDATE memories
+    UPDATE agent_memories
     SET account_id = sqlc.arg(account_id),
         scope_type = scope_values.scope_type,
         agent_id = scope_values.agent_id,
@@ -540,11 +540,11 @@ WITH scope_values AS (
         expires_at = sqlc.arg(expires_at),
         updated_at = sqlc.arg(updated_at)
     FROM scope_values
-    WHERE memories.tenant_id = sqlc.arg(tenant_id)
-      AND memories.id = sqlc.arg(id)
-    RETURNING memories.*
+    WHERE agent_memories.tenant_id = sqlc.arg(tenant_id)
+      AND agent_memories.id = sqlc.arg(id)
+    RETURNING agent_memories.*
 ), inserted_or_merged AS (
-    INSERT INTO memories (
+    INSERT INTO agent_memories (
         id, tenant_id, account_id, scope_type, agent_id, conversation_id, segment_id,
         key, content, source_type, source_message_id, confidence, importance,
         status, expires_at, created_at, updated_at
@@ -592,9 +592,9 @@ SELECT
     key, content,
     CASE WHEN source_type = 'manual' THEN 'manual' ELSE 'auto' END::text AS source,
     importance, expires_at, created_at, updated_at
-FROM memories
-WHERE memories.tenant_id = sqlc.arg(tenant_id)
-  AND memories.id = sqlc.arg(id);
+FROM agent_memories
+WHERE agent_memories.tenant_id = sqlc.arg(tenant_id)
+  AND agent_memories.id = sqlc.arg(id);
 
 -- name: ListAgentMemoriesByAccount :many
 SELECT
@@ -603,22 +603,22 @@ SELECT
     key, content,
     CASE WHEN source_type = 'manual' THEN 'manual' ELSE 'auto' END::text AS source,
     importance, expires_at, created_at, updated_at
-FROM memories
-WHERE memories.tenant_id = sqlc.arg(tenant_id)
-  AND memories.account_id = sqlc.arg(account_id)
-  AND memories.status = 'active'
+FROM agent_memories
+WHERE agent_memories.tenant_id = sqlc.arg(tenant_id)
+  AND agent_memories.account_id = sqlc.arg(account_id)
+  AND agent_memories.status = 'active'
   AND (
-      memories.scope_type = 'global'
+      agent_memories.scope_type = 'global'
       OR (
-          memories.scope_type = 'agent'
+          agent_memories.scope_type = 'agent'
           AND sqlc.arg(agent_id)::text <> ''
-          AND memories.agent_id = sqlc.arg(agent_id)
+          AND agent_memories.agent_id = sqlc.arg(agent_id)
       )
       OR (
-          memories.scope_type = 'conversation'
+          agent_memories.scope_type = 'conversation'
           AND sqlc.arg(session_id)::text <> ''
-          AND memories.conversation_id = sqlc.arg(session_id)
-          AND memories.segment_id = (
+          AND agent_memories.conversation_id = sqlc.arg(session_id)
+          AND agent_memories.segment_id = (
               SELECT conversations.current_segment_id
               FROM conversations
               WHERE conversations.tenant_id = sqlc.arg(tenant_id)
@@ -626,13 +626,13 @@ WHERE memories.tenant_id = sqlc.arg(tenant_id)
           )
       )
   )
-  AND (memories.expires_at IS NULL OR memories.expires_at > now())
-ORDER BY memories.importance DESC, memories.updated_at DESC, memories.id DESC
+  AND (agent_memories.expires_at IS NULL OR agent_memories.expires_at > now())
+ORDER BY agent_memories.importance DESC, agent_memories.updated_at DESC, agent_memories.id DESC
 LIMIT sqlc.arg(limit_count)::int;
 
 -- name: DeleteAgentMemory :one
 WITH superseded AS (
-    UPDATE memories
+    UPDATE agent_memories
     SET status = 'superseded', updated_at = GREATEST(updated_at, now())
     WHERE tenant_id = sqlc.arg(tenant_id)
       AND id = sqlc.arg(id)
@@ -647,7 +647,7 @@ SELECT
 FROM superseded;
 
 -- name: UpsertExecutionStepV2 :one
-INSERT INTO execution_steps (
+INSERT INTO conversation_execution_steps (
     id, tenant_id, execution_id, parent_step_id, sequence_no, step_type,
     name, model_connection_id, external_tool_id, status,
     input_summary, output_summary, input_tokens, cached_tokens, output_tokens,
@@ -670,28 +670,28 @@ ON CONFLICT (id) DO UPDATE SET
     started_at = EXCLUDED.started_at,
     completed_at = EXCLUDED.completed_at,
     error_code = EXCLUDED.error_code
-WHERE execution_steps.tenant_id = EXCLUDED.tenant_id
-  AND execution_steps.execution_id = EXCLUDED.execution_id
+WHERE conversation_execution_steps.tenant_id = EXCLUDED.tenant_id
+  AND conversation_execution_steps.execution_id = EXCLUDED.execution_id
 RETURNING *;
 
 -- name: AppendExecutionStepV2 :one
 WITH locked_execution AS (
     SELECT id, tenant_id
-    FROM executions
-    WHERE executions.tenant_id = sqlc.arg(tenant_id)
-      AND executions.id = sqlc.arg(execution_id)
+    FROM conversation_executions
+    WHERE conversation_executions.tenant_id = sqlc.arg(tenant_id)
+      AND conversation_executions.id = sqlc.arg(execution_id)
     FOR UPDATE
 ), next_sequence AS (
     SELECT locked_execution.id AS execution_id,
            locked_execution.tenant_id,
            COALESCE(max(steps.sequence_no), 0)::integer + 1 AS sequence_no
     FROM locked_execution
-    LEFT JOIN execution_steps steps
+    LEFT JOIN conversation_execution_steps steps
       ON steps.tenant_id = locked_execution.tenant_id
      AND steps.execution_id = locked_execution.id
     GROUP BY locked_execution.id, locked_execution.tenant_id
 )
-INSERT INTO execution_steps (
+INSERT INTO conversation_execution_steps (
     id, tenant_id, execution_id, parent_step_id, sequence_no, step_type,
     name, model_connection_id, external_tool_id, status,
     input_summary, output_summary, input_tokens, cached_tokens, output_tokens,
@@ -710,12 +710,12 @@ RETURNING *;
 
 -- name: GetExecutionStepV2 :one
 SELECT *
-FROM execution_steps
+FROM conversation_execution_steps
 WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id);
 
 -- name: ListExecutionStepsV2 :many
 SELECT *
-FROM execution_steps
+FROM conversation_execution_steps
 WHERE tenant_id = sqlc.arg(tenant_id) AND execution_id = sqlc.arg(execution_id)
 ORDER BY sequence_no, id;
 

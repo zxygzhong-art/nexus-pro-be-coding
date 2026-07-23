@@ -11,7 +11,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -236,36 +235,6 @@ func TestPostgresRepositoryCriticalSemantics(t *testing.T) {
 	}
 	if _, ok, err := store.GetEmployee(ctx, tenantA, rolledBackID); err != nil || ok {
 		t.Fatalf("expected rollback employee to be absent, ok=%v err=%v", ok, err)
-	}
-
-	prefix := "PX" + now.Format("150405")
-	numbers := make([]string, 8)
-	var wg sync.WaitGroup
-	errs := make(chan error, len(numbers))
-	for i := range numbers {
-		wg.Add(1)
-		go func(i int) {
-			defer wg.Done()
-			value, err := store.NextEmployeeNo(ctx, tenantA, prefix)
-			if err != nil {
-				errs <- err
-				return
-			}
-			numbers[i] = value
-		}(i)
-	}
-	wg.Wait()
-	close(errs)
-	for err := range errs {
-		if err != nil {
-			t.Fatal(err)
-		}
-	}
-	sort.Strings(numbers)
-	for i := 1; i < len(numbers); i++ {
-		if numbers[i] == numbers[i-1] {
-			t.Fatalf("duplicate employee number generated: %v", numbers)
-		}
 	}
 
 	balance := domain.LeaveBalance{
@@ -903,7 +872,7 @@ func requireMigratedSchema(t *testing.T, pool *pgxpool.Pool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	var ready bool
-	if err := pool.QueryRow(ctx, "select to_regclass('public.tenants') is not null and to_regclass('public.employees') is not null and to_regclass('public.employee_number_sequences') is not null").Scan(&ready); err != nil {
+	if err := pool.QueryRow(ctx, "select to_regclass('public.tenants') is not null and to_regclass('public.employees') is not null").Scan(&ready); err != nil {
 		t.Fatal(err)
 	}
 	if !ready {

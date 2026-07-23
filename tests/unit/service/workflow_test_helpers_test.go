@@ -34,14 +34,6 @@ func workflowEnabledTemplateSchema(assigneeAccountIDs ...string) map[string]any 
 	}
 }
 
-func workflowTemplateWithSchema(key, name string, schema map[string]any) domain.FormTemplate {
-	return domain.FormTemplate{
-		Key:    key,
-		Name:   name,
-		Schema: schema,
-	}
-}
-
 func startWorkflowRunForTest(t *testing.T, svc *service.Service, store *memory.Store, tenantID, formInstanceID, applicantAccountID string) {
 	t.Helper()
 	instance, ok, err := store.GetFormInstance(context.Background(), tenantID, formInstanceID)

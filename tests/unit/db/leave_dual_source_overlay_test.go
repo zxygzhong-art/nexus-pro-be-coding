@@ -39,12 +39,18 @@ func TestLeaveTargetModelUsesMinuteSnapshotsAndAppendOnlyEntries(t *testing.T) {
 		t.Fatal("legacy mutable leave_balance_ledger must not return")
 	}
 
-	requests := normalizedTableDefinition(t, schema, "leave_requests")
-	requireSQLFragments(t, requests, []string{
-		"requested_minutes integer NOT NULL CHECK (requested_minutes > 0)",
-		"CONSTRAINT leave_requests_tenant_identity_idx UNIQUE (tenant_id, id, employee_id, leave_type_id)",
+	businessRecords := normalizedTableDefinition(t, schema, "form_business_records")
+	requireSQLFragments(t, businessRecords, []string{
+		"business_type text NOT NULL",
+		"data jsonb NOT NULL DEFAULT '{}'::jsonb",
+		"effect_status text NOT NULL DEFAULT 'not_applied'",
+		"CONSTRAINT form_business_records_form_type_idx UNIQUE (tenant_id, form_instance_id, business_type)",
 	})
-	forbidSQLFragments(t, requests, []string{"requested_hours", "leave_balance_id"})
+	forbidSQLFragments(t, normalizeSQL(schema), []string{
+		"CREATE TABLE leave_requests (",
+		"CREATE TABLE attendance_correction_requests (",
+		"CREATE TABLE overtime_requests (",
+	})
 
 	entries := normalizedTableDefinition(t, schema, "leave_balance_entries")
 	requireSQLFragments(t, entries, []string{
@@ -92,7 +98,7 @@ func TestLeaveRequestAllocationsAreCycleScopedAndImmutable(t *testing.T) {
 		"cycle integer NOT NULL CHECK (cycle > 0)",
 		"reserved_minutes integer NOT NULL CHECK (reserved_minutes > 0)",
 		"CONSTRAINT leave_request_allocations_request_balance_cycle_idx UNIQUE (tenant_id, leave_request_id, leave_balance_id, cycle)",
-		"FOREIGN KEY ( tenant_id, leave_request_id, employee_id, leave_type_id ) REFERENCES leave_requests (tenant_id, id, employee_id, leave_type_id)",
+		"FOREIGN KEY ( tenant_id, leave_request_id, employee_id ) REFERENCES form_business_records (tenant_id, id, subject_employee_id)",
 		"FOREIGN KEY ( tenant_id, leave_balance_id, employee_id, leave_type_id ) REFERENCES leave_balances (tenant_id, id, employee_id, leave_type_id)",
 	})
 
@@ -133,8 +139,8 @@ func TestLeaveCasesUseTypedSourcesAndConfirmedCanonicalFacts(t *testing.T) {
 		"leave_request_id text",
 		"external_leave_record_id text",
 		"CONSTRAINT leave_case_sources_source_xor_check CHECK (num_nonnulls(leave_request_id, external_leave_record_id) = 1)",
-		"CONSTRAINT leave_case_sources_request_fk FOREIGN KEY (tenant_id, leave_request_id) REFERENCES leave_requests (tenant_id, id)",
-		"CONSTRAINT leave_case_sources_external_fk FOREIGN KEY (tenant_id, external_leave_record_id) REFERENCES external_leave_records (tenant_id, id)",
+		"CONSTRAINT leave_case_sources_request_fk FOREIGN KEY (tenant_id, leave_request_id) REFERENCES form_business_records (tenant_id, id)",
+		"CONSTRAINT leave_case_sources_external_fk FOREIGN KEY (tenant_id, external_leave_record_id) REFERENCES leave_external_records (tenant_id, id)",
 	})
 	forbidSQLFragments(t, sources, []string{"source_type", "source_id"})
 	requireSQLFragments(t, normalizeSQL(schema), []string{
@@ -168,7 +174,6 @@ func TestAttendanceTargetReadModelUsesDatesAndPolicyBoundDayProjections(t *testi
 		"attendance_clock_records",
 		"attendance_daily_summaries",
 		"attendance_day_projections",
-		"attendance_correction_requests",
 	} {
 		definition := normalizedTableDefinition(t, schema, table)
 		requireSQLFragments(t, definition, []string{"work_date date NOT NULL"})
@@ -217,24 +222,31 @@ func TestAttendanceLeaveTablesKeepIndexesAndTenantRLS(t *testing.T) {
 	schema := normalizeSQL(readLeaveSchemaFile(t, "../../../db/schema.sql"))
 
 	for _, table := range []string{
-		"leave_type_external_refs",
+		"leave_types",
 		"leave_balances",
-		"leave_requests",
+		"form_business_records",
 		"leave_request_allocations",
 		"leave_cases",
-		"external_leave_records",
+		"leave_external_records",
 		"leave_case_sources",
 		"leave_balance_entries",
 		"attendance_clock_records",
 		"attendance_daily_summaries",
 		"attendance_day_projections",
-		"attendance_correction_requests",
 	} {
 		requireSQLFragments(t, schema, []string{
 			"ALTER TABLE " + table + " ENABLE ROW LEVEL SECURITY",
 			"ALTER TABLE " + table + " FORCE ROW LEVEL SECURITY",
 			"CREATE POLICY tenant_isolation_" + table + " ON " + table + " USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true))",
 		})
+	}
+	requireSQLFragments(t, schema, []string{
+		"max_balance_minutes integer NOT NULL DEFAULT 0 CHECK (max_balance_minutes >= 0)",
+		"raw_payload jsonb NOT NULL DEFAULT '{}'::jsonb",
+		"last_synced_at timestamptz",
+	})
+	if strings.Contains(schema, "CREATE TABLE leave_type_external_refs") {
+		t.Fatal("leave_type_external_refs must be removed from schema")
 	}
 	requireSQLFragments(t, schema, []string{
 		"CREATE INDEX leave_balances_fefo_idx ON leave_balances ( tenant_id, employee_id, leave_type_id, ((source = 'local_anchor')), period_end ASC NULLS LAST, period_start ASC NULLS FIRST, id )",
@@ -246,64 +258,48 @@ func TestAttendanceLeaveTablesKeepIndexesAndTenantRLS(t *testing.T) {
 	})
 }
 
-func TestAttendanceLeaveCleanSlateMigrationMatchesTargetSchema(t *testing.T) {
+func TestAttendanceLeaveCleanSlateSchemaMatchesTarget(t *testing.T) {
 	schema := readLeaveSchemaFile(t, "../../../db/schema.sql")
-	migration := readLeaveSchemaFile(t, "../../../db/migrations/000021_attendance_leave_clean_slate.sql")
+	migration := readLeaveSchemaFile(t, "../../../db/migrations/000002_post_init_updates.sql")
 
-	downMarker := strings.Index(migration, "-- +goose Down")
-	if downMarker < 0 {
-		t.Fatal("clean-slate migration must declare a goose Down section")
-	}
-	up := migration[:downMarker]
-	requireSQLFragments(t, normalizeSQL(up), []string{
-		"-- +goose Up",
-		"DROP TABLE IF EXISTS leave_balance_ledger",
-		"DROP FUNCTION IF EXISTS append_leave_balance_ledger()",
+	forbidSQLFragments(t, normalizeSQL(schema), []string{
+		"CREATE TABLE leave_balance_ledger (",
 	})
-	if strings.Contains(up, "CREATE TABLE leave_balance_ledger (") {
-		t.Fatal("clean-slate migration must drop, not recreate, the legacy ledger")
-	}
-
 	for _, table := range []string{
-		"leave_type_external_refs",
 		"leave_balances",
-		"leave_requests",
-		"leave_request_allocations",
 		"leave_cases",
-		"external_leave_records",
-		"leave_case_sources",
-		"leave_balance_entries",
-		"attendance_clock_records",
+		"leave_external_records",
 		"attendance_daily_summaries",
 		"attendance_day_projections",
-		"attendance_correction_requests",
 	} {
-		want := normalizedTableDefinition(t, schema, table)
-		got := normalizedTableDefinition(t, up, table)
-		if table == "leave_balance_entries" {
-			// db/schema.sql adds this FK after overtime_requests is declared; the
-			// clean-slate migration creates entries later and can declare it inline.
-			overtimeFK := "CONSTRAINT leave_balance_entries_overtime_request_fk FOREIGN KEY (tenant_id, overtime_request_id, employee_id) REFERENCES overtime_requests (tenant_id, id, employee_id)"
-			requireSQLFragments(t, got, []string{overtimeFK})
-			got = strings.Replace(got, ", "+overtimeFK, "", 1)
-			requireSQLFragments(t, normalizeSQL(schema), []string{
-				"ALTER TABLE leave_balance_entries ADD " + overtimeFK,
-			})
-		}
-		if canonicalSQL(got) != canonicalSQL(want) {
-			t.Fatalf("migration definition for %s diverges from db/schema.sql\nwant: %s\n got: %s", table, want, got)
-		}
-		requireSQLFragments(t, normalizeSQL(up), []string{
+		_ = normalizedTableDefinition(t, schema, table)
+		requireSQLFragments(t, normalizeSQL(schema), []string{
 			"ALTER TABLE " + table + " ENABLE ROW LEVEL SECURITY",
 			"ALTER TABLE " + table + " FORCE ROW LEVEL SECURITY",
 			"CREATE POLICY tenant_isolation_" + table + " ON " + table,
 		})
 	}
 
-	down := normalizeSQL(migration[downMarker:])
-	requireSQLFragments(t, down, []string{
+	requireSQLFragments(t, normalizeSQL(migration), []string{
 		"-- +goose Down",
-		"RAISE EXCEPTION '000021_attendance_leave_clean_slate is irreversible because legacy attendance and leave data was discarded'",
+		"RAISE EXCEPTION '000002_post_init_updates is irreversible because it is a squashed net schema snapshot'",
+	})
+}
+
+func TestFormBusinessRecordSchemaReplacesTypedRequestTables(t *testing.T) {
+	schema := normalizeSQL(readLeaveSchemaFile(t, "../../../db/schema.sql"))
+
+	requireSQLFragments(t, schema, []string{
+		"CREATE TABLE form_business_records (",
+		"business_type text NOT NULL",
+		"effect_status text NOT NULL DEFAULT 'not_applied'",
+		"CREATE POLICY tenant_isolation_form_business_records ON form_business_records",
+		"REFERENCES form_business_records (tenant_id, id, subject_employee_id)",
+	})
+	forbidSQLFragments(t, schema, []string{
+		"CREATE TABLE leave_requests (",
+		"CREATE TABLE attendance_correction_requests (",
+		"CREATE TABLE overtime_requests (",
 	})
 }
 

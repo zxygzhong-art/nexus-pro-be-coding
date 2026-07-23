@@ -40,10 +40,9 @@ func (c AgentService) CreateModel(ctx RequestContext, input domain.CreateAgentMo
 	}
 	now := c.Now()
 	model, err := c.normalizeAgentModel(ctx, domain.AgentModel{
-		ID:                 utils.NewID("amodel"),
-		TenantID:           ctx.TenantID,
-		CredentialSecretID: utils.NewID("cred"),
-		Name:               input.Name,
+		ID:       utils.NewID("amodel"),
+		TenantID: ctx.TenantID,
+		Name:     input.Name,
 		Provider:           input.Provider,
 		ModelName:          input.ModelName,
 		APIBaseURL:         input.APIBaseURL,
@@ -804,13 +803,11 @@ func (c AgentService) CreateExternalTool(ctx RequestContext, input domain.Create
 	now := c.Now()
 	id := utils.NewID("atool")
 	credentialCiphertext := ""
-	credentialSecretID := ""
 	if auth.secret != "" {
 		if c.CredentialCipher() == nil {
 			return domain.AgentExternalTool{}, domain.E(503, "service_unavailable", "external tool credential storage is not configured")
 		}
-		credentialSecretID = id + ":credential"
-		credentialCiphertext, err = c.CredentialCipher().Encrypt([]byte(auth.secret), domain.CredentialSecretAAD(ctx.TenantID, credentialSecretID))
+		credentialCiphertext, err = c.CredentialCipher().Encrypt([]byte(auth.secret), domain.ExternalToolCredentialAAD(ctx.TenantID, id))
 		if err != nil {
 			return domain.AgentExternalTool{}, domain.E(500, "internal_error", "failed to protect external tool credential")
 		}
@@ -828,7 +825,6 @@ func (c AgentService) CreateExternalTool(ctx RequestContext, input domain.Create
 		AuthUsername:         auth.username,
 		TimeoutSeconds:       timeoutSeconds,
 		AuthSecretCiphertext: credentialCiphertext,
-		CredentialSecretID:   credentialSecretID,
 		CredentialSet:        credentialCiphertext != "",
 		Status:               string(domain.ExternalToolConnectionStatusActive),
 		LastTestStatus:       string(domain.ConnectionTestStatusUntested),
@@ -1021,7 +1017,7 @@ func (c AgentService) currentAgentModel(ctx RequestContext, id string) (domain.A
 		if c.CredentialCipher() == nil {
 			return domain.AgentModel{}, domain.E(503, "service_unavailable", "agent model credential storage is not configured")
 		}
-		plaintext, err := c.CredentialCipher().Decrypt(model.APIKeyCiphertext, agentModelCredentialAAD(model))
+		plaintext, err := c.CredentialCipher().Decrypt(model.APIKeyCiphertext, domain.AgentModelCredentialAAD(model.TenantID, model.ID))
 		if err != nil {
 			return domain.AgentModel{}, domain.E(500, "internal_error", "failed to open agent model credential")
 		}
@@ -1038,10 +1034,7 @@ func (c AgentService) protectAgentModelCredential(model domain.AgentModel) (doma
 	if c.CredentialCipher() == nil {
 		return domain.AgentModel{}, domain.E(503, "service_unavailable", "agent model credential storage is not configured")
 	}
-	if strings.TrimSpace(model.CredentialSecretID) == "" {
-		model.CredentialSecretID = utils.NewID("cred")
-	}
-	ciphertext, err := c.CredentialCipher().Encrypt([]byte(model.APIKey), domain.CredentialSecretAAD(model.TenantID, model.CredentialSecretID))
+	ciphertext, err := c.CredentialCipher().Encrypt([]byte(model.APIKey), domain.AgentModelCredentialAAD(model.TenantID, model.ID))
 	if err != nil {
 		return domain.AgentModel{}, domain.E(500, "internal_error", "failed to protect agent model credential")
 	}
@@ -1050,13 +1043,6 @@ func (c AgentService) protectAgentModelCredential(model domain.AgentModel) (doma
 	model.APIKeySet = true
 	model.APIKey = ""
 	return model, nil
-}
-
-func agentModelCredentialAAD(model domain.AgentModel) []byte {
-	if strings.TrimSpace(model.CredentialSecretID) != "" {
-		return domain.CredentialSecretAAD(model.TenantID, model.CredentialSecretID)
-	}
-	return domain.AgentModelCredentialAAD(model.TenantID, model.ID)
 }
 
 func (c AgentService) currentAgentDefinition(ctx RequestContext, id string) (domain.AgentDefinition, error) {
@@ -1550,6 +1536,12 @@ func agentDefinitionRevisionID(agentID string, version int) string {
 		version = 1
 	}
 	return strings.TrimSpace(agentID) + ":revision:" + strconv.Itoa(version)
+}
+
+// agentDefinitionChildRevisionID addresses a child's immutable capability
+// bindings inside one root revision snapshot.
+func agentDefinitionChildRevisionID(rootRevisionID, memberID string) string {
+	return strings.TrimSpace(rootRevisionID) + ":member:" + strings.TrimSpace(memberID)
 }
 
 // agentDefinitionRuntimeSignature 生成會影響真實執行的穩定配置簽名。

@@ -16,7 +16,7 @@ func TestCreateLeaveRequestAcceptsMappedAliasForSystemLeaveType(t *testing.T) {
 	now := time.Date(2026, 6, 10, 8, 0, 0, 0, time.UTC)
 	store, svc, ctx := newLeavePolicyEngineFixture(t, now)
 	_ = store.UpsertLeaveBalance(context.Background(), domain.LeaveBalance{
-		ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", LeaveTypeID: "lt_annual", RemainingMinutes: 16 * 60, Source: "ehrms", UpdatedAt: now,
+		ID: "lb-1", TenantID: "tenant-1", EmployeeID: "emp-1", LeaveType: "annual", LeaveTypeID: "annual", RemainingMinutes: 16 * 60, Source: "ehrms", UpdatedAt: now,
 	})
 
 	created, err := svc.Attendance().CreateLeaveRequest(ctx, domain.CreateLeaveRequestInput{
@@ -26,7 +26,7 @@ func TestCreateLeaveRequestAcceptsMappedAliasForSystemLeaveType(t *testing.T) {
 		t.Fatal(err)
 	}
 	allocations, allocationErr := store.ListLeaveRequestAllocationsByRequest(t.Context(), "tenant-1", created.ID)
-	if created.LeaveType != "annual" || created.LeaveTypeID != "lt_annual" || allocationErr != nil || len(allocations) != 1 || allocations[0].LeaveBalanceID != "lb-1" {
+	if created.LeaveType != "annual" || created.LeaveTypeID != "annual" || allocationErr != nil || len(allocations) != 1 || allocations[0].LeaveBalanceID != "lb-1" {
 		t.Fatalf("expected annual balance reservation, got %+v", created)
 	}
 	if created.RuleSnapshot["requires_balance"] != true || created.RuleSnapshot["grant_mode"] != "annual_grant" || created.EvaluationSnapshot["status"] != "eligible" {

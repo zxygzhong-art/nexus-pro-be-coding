@@ -498,6 +498,7 @@ func (c WorkflowService) submitNewFormForApplicant(ctx RequestContext, account A
 	var template FormTemplate
 	var linkedLeaveRequest LeaveRequest
 	var linkedOvertimeRequest OvertimeRequest
+	var linkedCorrection AttendanceCorrectionRequest
 	if err := c.withTransaction(ctx, func(tx WorkflowService) error {
 		nextTemplate, ok, err := tx.store.GetFormTemplateByKey(goContext(ctx), ctx.TenantID, templateKey)
 		if err != nil {
@@ -555,7 +556,11 @@ func (c WorkflowService) submitNewFormForApplicant(ctx RequestContext, account A
 			return err
 		}
 		linkedOvertimeRequest = linkedOvertime
-		if linked.ID != "" || linkedOvertime.ID != "" {
+		linkedCorrection, err = tx.Service.Attendance().createCorrectionFromSubmittedForm(ctx, instance, template.Key, instance.Payload)
+		if err != nil {
+			return err
+		}
+		if linked.ID != "" || linkedOvertime.ID != "" || linkedCorrection.ID != "" {
 			updated, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, instance.ID)
 			if err != nil {
 				return err
@@ -589,6 +594,14 @@ func (c WorkflowService) submitNewFormForApplicant(ctx RequestContext, account A
 			"hours", linkedOvertimeRequest.Hours,
 		)
 	}
+	if linkedCorrection.ID != "" {
+		c.logInfo(ctx, "attendance correction linked from form submit",
+			"correction_request_id", linkedCorrection.ID,
+			"form_instance_id", instance.ID,
+			"template_key", template.Key,
+			"correction_type", linkedCorrection.CorrectionType,
+		)
+	}
 	c.logInfo(ctx, "form submitted",
 		"form_instance_id", instance.ID,
 		"form_template_id", template.ID,
@@ -614,6 +627,7 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 	var template FormTemplate
 	var linkedLeaveRequest LeaveRequest
 	var linkedOvertimeRequest OvertimeRequest
+	var linkedCorrection AttendanceCorrectionRequest
 	if err := c.withTransaction(ctx, func(tx WorkflowService) error {
 		next, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, id)
 		if err != nil {
@@ -697,7 +711,11 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 			return err
 		}
 		linkedOvertimeRequest = linkedOvertime
-		if linked.ID != "" || linkedOvertime.ID != "" {
+		linkedCorrection, err = tx.Service.Attendance().createCorrectionFromSubmittedForm(ctx, instance, template.Key, instance.Payload)
+		if err != nil {
+			return err
+		}
+		if linked.ID != "" || linkedOvertime.ID != "" || linkedCorrection.ID != "" {
 			updated, ok, err := tx.store.GetFormInstance(goContext(ctx), ctx.TenantID, instance.ID)
 			if err != nil {
 				return err
@@ -726,6 +744,14 @@ func (c WorkflowService) submitExistingDraft(ctx RequestContext, id string, payl
 			"form_instance_id", instance.ID,
 			"template_key", template.Key,
 			"hours", linkedOvertimeRequest.Hours,
+		)
+	}
+	if linkedCorrection.ID != "" {
+		c.logInfo(ctx, "attendance correction linked from form submit",
+			"correction_request_id", linkedCorrection.ID,
+			"form_instance_id", instance.ID,
+			"template_key", template.Key,
+			"correction_type", linkedCorrection.CorrectionType,
 		)
 	}
 	if c.workflowStartOutboxEnabled {

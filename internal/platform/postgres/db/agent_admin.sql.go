@@ -33,16 +33,16 @@ func (q *Queries) ArchiveAgentExternalToolCapabilitiesV2(ctx context.Context, ar
 }
 
 const countAgentDefinitionsByKnowledgeBase = `-- name: CountAgentDefinitionsByKnowledgeBase :one
-SELECT count(DISTINCT binding.revision_id)::bigint
-FROM (
-    SELECT revision_id
-    FROM agent_revision_knowledge_bases
-    WHERE agent_revision_knowledge_bases.tenant_id = $1 AND agent_revision_knowledge_bases.knowledge_base_id = $2
-    UNION ALL
-    SELECT revision_id
-    FROM agent_revision_member_knowledge_bases
-    WHERE agent_revision_member_knowledge_bases.tenant_id = $1 AND agent_revision_member_knowledge_bases.knowledge_base_id = $2
-) binding
+SELECT count(DISTINCT COALESCE(agent.parent_agent_id, agent.id))::bigint
+FROM agent_revision_knowledge_bases binding
+JOIN agent_revisions revision
+  ON revision.tenant_id = binding.tenant_id
+ AND revision.id = binding.revision_id
+JOIN agents agent
+  ON agent.tenant_id = revision.tenant_id
+ AND agent.id = revision.agent_id
+WHERE binding.tenant_id = $1
+  AND binding.knowledge_base_id = $2
 `
 
 type CountAgentDefinitionsByKnowledgeBaseParams struct {
@@ -61,16 +61,16 @@ const deleteAgentDefinition = `-- name: DeleteAgentDefinition :one
 WITH archived AS (
     UPDATE agents
     SET lifecycle_status = 'archived', archived_at = COALESCE(archived_at, now()), updated_at = GREATEST(updated_at, now())
-    WHERE agents.tenant_id = $1
-      AND agents.id = $2
+    WHERE agents.tenant_id = $2
+      AND (agents.id = $1 OR agents.parent_agent_id = $1)
     RETURNING id, tenant_id
 )
-SELECT id, tenant_id FROM archived
+SELECT id, tenant_id FROM archived WHERE id = $1
 `
 
 type DeleteAgentDefinitionParams struct {
-	TenantID string `json:"tenant_id"`
 	ID       string `json:"id"`
+	TenantID string `json:"tenant_id"`
 }
 
 type DeleteAgentDefinitionRow struct {
@@ -79,7 +79,7 @@ type DeleteAgentDefinitionRow struct {
 }
 
 func (q *Queries) DeleteAgentDefinition(ctx context.Context, arg DeleteAgentDefinitionParams) (DeleteAgentDefinitionRow, error) {
-	row := q.db.QueryRow(ctx, deleteAgentDefinition, arg.TenantID, arg.ID)
+	row := q.db.QueryRow(ctx, deleteAgentDefinition, arg.ID, arg.TenantID)
 	var i DeleteAgentDefinitionRow
 	err := row.Scan(&i.ID, &i.TenantID)
 	return i, err
@@ -90,7 +90,7 @@ WITH archived AS (
     UPDATE external_tool_connections
     SET status = 'archived', archived_at = COALESCE(archived_at, now()), updated_at = GREATEST(updated_at, now())
     WHERE external_tool_connections.tenant_id = $1 AND external_tool_connections.id = $2
-    RETURNING id, tenant_id, name, description, kind, transport, endpoint_url, auth_type, auth_header_name, auth_username, credential_secret_id, timeout_ms, status, last_tested_at, last_test_status, last_test_message, created_by_account_id, updated_by_account_id, created_at, updated_at, archived_at
+    RETURNING id, tenant_id, name, description, kind, transport, endpoint_url, auth_type, auth_header_name, auth_username, auth_secret_ciphertext, timeout_ms, status, last_tested_at, last_test_status, last_test_message, created_by_account_id, updated_by_account_id, created_at, updated_at, archived_at
 ), archived_tools AS (
     UPDATE external_tools
     SET enabled = false,
@@ -105,13 +105,11 @@ SELECT
     archived.id, archived.tenant_id, archived.name, archived.description,
     archived.kind, archived.transport, archived.endpoint_url,
     archived.auth_type, archived.auth_header_name, archived.auth_username,
-    COALESCE(secrets.ciphertext, '')::text AS auth_secret_ciphertext,
-    archived.credential_secret_id, GREATEST(archived.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    archived.auth_secret_ciphertext,
+    GREATEST(archived.timeout_ms / 1000, 1)::integer AS timeout_seconds,
     archived.status, archived.last_tested_at, archived.last_test_status, archived.last_test_message,
     archived.created_by_account_id, archived.created_at, archived.updated_at, archived.archived_at
 FROM archived
-LEFT JOIN credential_secrets secrets
-  ON secrets.tenant_id = archived.tenant_id AND secrets.id = archived.credential_secret_id AND secrets.status = 'active'
 `
 
 type DeleteAgentExternalToolParams struct {
@@ -131,7 +129,6 @@ type DeleteAgentExternalToolRow struct {
 	AuthHeaderName       string             `json:"auth_header_name"`
 	AuthUsername         string             `json:"auth_username"`
 	AuthSecretCiphertext string             `json:"auth_secret_ciphertext"`
-	CredentialSecretID   pgtype.Text        `json:"credential_secret_id"`
 	TimeoutSeconds       int32              `json:"timeout_seconds"`
 	Status               string             `json:"status"`
 	LastTestedAt         pgtype.Timestamptz `json:"last_tested_at"`
@@ -158,7 +155,6 @@ func (q *Queries) DeleteAgentExternalTool(ctx context.Context, arg DeleteAgentEx
 		&i.AuthHeaderName,
 		&i.AuthUsername,
 		&i.AuthSecretCiphertext,
-		&i.CredentialSecretID,
 		&i.TimeoutSeconds,
 		&i.Status,
 		&i.LastTestedAt,
@@ -177,15 +173,14 @@ WITH archived AS (
     UPDATE model_connections
     SET status = 'archived', archived_at = COALESCE(archived_at, now()), updated_at = GREATEST(updated_at, now())
     WHERE model_connections.tenant_id = $1 AND model_connections.id = $2
-    RETURNING id, tenant_id, name, provider, upstream_model, api_base_url, credential_secret_id, rate_limit_rpm, timeout_ms, status, created_by_account_id, updated_by_account_id, created_at, updated_at, archived_at
+    RETURNING id, tenant_id, name, provider, upstream_model, api_base_url, api_key_ciphertext, api_key_preview, rate_limit_rpm, timeout_ms, status, created_by_account_id, updated_by_account_id, created_at, updated_at, archived_at
 )
 SELECT
     archived.id, archived.tenant_id, archived.name, archived.provider,
-    archived.upstream_model AS model_name, archived.upstream_model AS litellm_model,
+    archived.upstream_model AS model_name, ('nexus-agent-model-' || archived.id)::text AS litellm_model,
     archived.api_base_url,
-    COALESCE(secrets.ciphertext, '')::text AS api_key_ciphertext,
-    COALESCE(secrets.preview, '')::text AS api_key_preview,
-    archived.credential_secret_id,
+    archived.api_key_ciphertext,
+    archived.api_key_preview,
     archived.rate_limit_rpm, 'disabled'::text AS status,
     GREATEST(archived.timeout_ms / 1000, 1)::integer AS timeout_seconds,
     0::bigint AS monthly_quota, 0::bigint AS used_quota,
@@ -196,8 +191,6 @@ SELECT
 FROM archived
 JOIN model_connection_state state
   ON state.tenant_id = archived.tenant_id AND state.model_connection_id = archived.id
-LEFT JOIN credential_secrets secrets
-  ON secrets.tenant_id = archived.tenant_id AND secrets.id = archived.credential_secret_id AND secrets.status = 'active'
 `
 
 type DeleteAgentModelParams struct {
@@ -206,30 +199,29 @@ type DeleteAgentModelParams struct {
 }
 
 type DeleteAgentModelRow struct {
-	ID                 string             `json:"id"`
-	TenantID           string             `json:"tenant_id"`
-	Name               string             `json:"name"`
-	Provider           string             `json:"provider"`
-	ModelName          string             `json:"model_name"`
-	LitellmModel       string             `json:"litellm_model"`
-	ApiBaseUrl         string             `json:"api_base_url"`
-	ApiKeyCiphertext   string             `json:"api_key_ciphertext"`
-	ApiKeyPreview      string             `json:"api_key_preview"`
-	CredentialSecretID pgtype.Text        `json:"credential_secret_id"`
-	RateLimitRpm       int32              `json:"rate_limit_rpm"`
-	Status             string             `json:"status"`
-	TimeoutSeconds     int32              `json:"timeout_seconds"`
-	MonthlyQuota       int64              `json:"monthly_quota"`
-	UsedQuota          int64              `json:"used_quota"`
-	LastTestedAt       pgtype.Timestamptz `json:"last_tested_at"`
-	LastTestStatus     string             `json:"last_test_status"`
-	LastTestMessage    string             `json:"last_test_message"`
-	SyncStatus         string             `json:"sync_status"`
-	LastSyncedAt       pgtype.Timestamptz `json:"last_synced_at"`
-	LastSyncError      string             `json:"last_sync_error"`
-	SyncedConfigHash   string             `json:"synced_config_hash"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ID               string             `json:"id"`
+	TenantID         string             `json:"tenant_id"`
+	Name             string             `json:"name"`
+	Provider         string             `json:"provider"`
+	ModelName        string             `json:"model_name"`
+	LitellmModel     string             `json:"litellm_model"`
+	ApiBaseUrl       string             `json:"api_base_url"`
+	ApiKeyCiphertext string             `json:"api_key_ciphertext"`
+	ApiKeyPreview    string             `json:"api_key_preview"`
+	RateLimitRpm     int32              `json:"rate_limit_rpm"`
+	Status           string             `json:"status"`
+	TimeoutSeconds   int32              `json:"timeout_seconds"`
+	MonthlyQuota     int64              `json:"monthly_quota"`
+	UsedQuota        int64              `json:"used_quota"`
+	LastTestedAt     pgtype.Timestamptz `json:"last_tested_at"`
+	LastTestStatus   string             `json:"last_test_status"`
+	LastTestMessage  string             `json:"last_test_message"`
+	SyncStatus       string             `json:"sync_status"`
+	LastSyncedAt     pgtype.Timestamptz `json:"last_synced_at"`
+	LastSyncError    string             `json:"last_sync_error"`
+	SyncedConfigHash string             `json:"synced_config_hash"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) DeleteAgentModel(ctx context.Context, arg DeleteAgentModelParams) (DeleteAgentModelRow, error) {
@@ -245,7 +237,6 @@ func (q *Queries) DeleteAgentModel(ctx context.Context, arg DeleteAgentModelPara
 		&i.ApiBaseUrl,
 		&i.ApiKeyCiphertext,
 		&i.ApiKeyPreview,
-		&i.CredentialSecretID,
 		&i.RateLimitRpm,
 		&i.Status,
 		&i.TimeoutSeconds,
@@ -294,20 +285,30 @@ WITH selected AS (
       ON revisions.tenant_id = agents.tenant_id
      AND revisions.agent_id = agents.id
      AND revisions.id = COALESCE(agents.draft_revision_id, agents.published_revision_id)
-    WHERE agents.tenant_id = $1 AND agents.id = $2
+    WHERE agents.tenant_id = $1
+      AND agents.id = $2
+      AND agents.parent_agent_id IS NULL
 )
 SELECT
     selected.agent_id AS id, selected.tenant_id, selected.name, selected.description,
     selected.icon AS emoji, selected.category, selected.model_connection_id AS model_id,
     selected.main_agent_role,
     COALESCE((SELECT jsonb_agg(jsonb_build_object(
-        'id', members.id, 'name', members.name, 'role', members.role,
-        'model_id', members.model_connection_id,
-        'model_config_checksum', members.model_config_checksum,
-        'tools', COALESCE((SELECT jsonb_agg(tools.tool_key ORDER BY tools.ordinal) FROM agent_revision_member_builtin_tools tools WHERE tools.tenant_id = members.tenant_id AND tools.revision_id = members.revision_id AND tools.member_id = members.id), '[]'::jsonb),
-        'external_tool_ids', COALESCE((SELECT jsonb_agg(tools.external_tool_id ORDER BY tools.ordinal) FROM agent_revision_member_external_tools tools WHERE tools.tenant_id = members.tenant_id AND tools.revision_id = members.revision_id AND tools.member_id = members.id), '[]'::jsonb),
-        'knowledge_base_ids', COALESCE((SELECT jsonb_agg(kb.knowledge_base_id ORDER BY kb.ordinal) FROM agent_revision_member_knowledge_bases kb WHERE kb.tenant_id = members.tenant_id AND kb.revision_id = members.revision_id AND kb.member_id = members.id), '[]'::jsonb)
-    ) ORDER BY members.ordinal) FROM agent_revision_members members WHERE members.tenant_id = selected.tenant_id AND members.revision_id = selected.id), '[]'::jsonb) AS sub_agents,
+        'id', substring(child.id FROM char_length(selected.agent_id || ':member:') + 1),
+        'name', child_revision.name, 'role', child_revision.main_agent_role,
+        'model_id', child_revision.model_connection_id,
+        'model_config_checksum', child_revision.model_config_checksum,
+        'tools', COALESCE((SELECT jsonb_agg(tools.tool_key ORDER BY tools.ordinal) FROM agent_revision_builtin_tools tools WHERE tools.tenant_id = child_revision.tenant_id AND tools.revision_id = child_revision.id), '[]'::jsonb),
+        'external_tool_ids', COALESCE((SELECT jsonb_agg(tools.external_tool_id ORDER BY tools.ordinal) FROM agent_revision_external_tools tools WHERE tools.tenant_id = child_revision.tenant_id AND tools.revision_id = child_revision.id), '[]'::jsonb),
+        'knowledge_base_ids', COALESCE((SELECT jsonb_agg(kb.knowledge_base_id ORDER BY kb.ordinal) FROM agent_revision_knowledge_bases kb WHERE kb.tenant_id = child_revision.tenant_id AND kb.revision_id = child_revision.id), '[]'::jsonb)
+    ) ORDER BY child_revision.ordinal)
+    FROM agents child
+    JOIN agent_revisions child_revision
+      ON child_revision.tenant_id = child.tenant_id
+     AND child_revision.agent_id = child.id
+     AND child_revision.revision_no = selected.revision_no
+    WHERE child.tenant_id = selected.tenant_id
+      AND child.parent_agent_id = selected.agent_id), '[]'::jsonb) AS sub_agents,
     selected.system_prompt, selected.welcome_message, selected.suggested_questions,
     selected.suggested_question_translations,
     COALESCE((SELECT jsonb_agg(tools.tool_key ORDER BY tools.ordinal) FROM agent_revision_builtin_tools tools WHERE tools.tenant_id = selected.tenant_id AND tools.revision_id = selected.id), '[]'::jsonb) AS tools,
@@ -334,8 +335,8 @@ LEFT JOIN LATERAL (
            count(*) FILTER (WHERE status = 'failed')::bigint AS failed_runs,
            COALESCE(avg(EXTRACT(EPOCH FROM (completed_at - started_at)) * 1000) FILTER (WHERE started_at IS NOT NULL AND completed_at IS NOT NULL), 0)::integer AS avg_latency_ms,
            max(updated_at)::timestamptz AS last_run_at
-    FROM executions
-    WHERE executions.tenant_id = selected.tenant_id AND executions.agent_id = selected.agent_id
+    FROM conversation_executions
+    WHERE conversation_executions.tenant_id = selected.tenant_id AND conversation_executions.agent_id = selected.agent_id
 ) usage ON true
 `
 
@@ -430,13 +431,21 @@ SELECT
     revisions.name, revisions.description, revisions.icon AS emoji, revisions.category,
     revisions.visibility, revisions.visibility_targets, revisions.main_agent_role,
     COALESCE((SELECT jsonb_agg(jsonb_build_object(
-        'id', members.id, 'name', members.name, 'role', members.role,
-        'model_id', members.model_connection_id,
-        'model_config_checksum', members.model_config_checksum,
-        'tools', COALESCE((SELECT jsonb_agg(tools.tool_key ORDER BY tools.ordinal) FROM agent_revision_member_builtin_tools tools WHERE tools.tenant_id = members.tenant_id AND tools.revision_id = members.revision_id AND tools.member_id = members.id), '[]'::jsonb),
-        'external_tool_ids', COALESCE((SELECT jsonb_agg(tools.external_tool_id ORDER BY tools.ordinal) FROM agent_revision_member_external_tools tools WHERE tools.tenant_id = members.tenant_id AND tools.revision_id = members.revision_id AND tools.member_id = members.id), '[]'::jsonb),
-        'knowledge_base_ids', COALESCE((SELECT jsonb_agg(kb.knowledge_base_id ORDER BY kb.ordinal) FROM agent_revision_member_knowledge_bases kb WHERE kb.tenant_id = members.tenant_id AND kb.revision_id = members.revision_id AND kb.member_id = members.id), '[]'::jsonb)
-    ) ORDER BY members.ordinal) FROM agent_revision_members members WHERE members.tenant_id = revisions.tenant_id AND members.revision_id = revisions.id), '[]'::jsonb) AS sub_agents,
+        'id', substring(child.id FROM char_length(revisions.agent_id || ':member:') + 1),
+        'name', child_revision.name, 'role', child_revision.main_agent_role,
+        'model_id', child_revision.model_connection_id,
+        'model_config_checksum', child_revision.model_config_checksum,
+        'tools', COALESCE((SELECT jsonb_agg(tools.tool_key ORDER BY tools.ordinal) FROM agent_revision_builtin_tools tools WHERE tools.tenant_id = child_revision.tenant_id AND tools.revision_id = child_revision.id), '[]'::jsonb),
+        'external_tool_ids', COALESCE((SELECT jsonb_agg(tools.external_tool_id ORDER BY tools.ordinal) FROM agent_revision_external_tools tools WHERE tools.tenant_id = child_revision.tenant_id AND tools.revision_id = child_revision.id), '[]'::jsonb),
+        'knowledge_base_ids', COALESCE((SELECT jsonb_agg(kb.knowledge_base_id ORDER BY kb.ordinal) FROM agent_revision_knowledge_bases kb WHERE kb.tenant_id = child_revision.tenant_id AND kb.revision_id = child_revision.id), '[]'::jsonb)
+    ) ORDER BY child_revision.ordinal)
+    FROM agents child
+    JOIN agent_revisions child_revision
+      ON child_revision.tenant_id = child.tenant_id
+     AND child_revision.agent_id = child.id
+     AND child_revision.revision_no = revisions.revision_no
+    WHERE child.tenant_id = revisions.tenant_id
+      AND child.parent_agent_id = revisions.agent_id), '[]'::jsonb) AS sub_agents,
     revisions.system_prompt, revisions.welcome_message, revisions.suggested_questions,
     revisions.suggested_question_translations,
     COALESCE((SELECT jsonb_agg(tools.tool_key ORDER BY tools.ordinal) FROM agent_revision_builtin_tools tools WHERE tools.tenant_id = revisions.tenant_id AND tools.revision_id = revisions.id), '[]'::jsonb) AS tools,
@@ -572,13 +581,11 @@ SELECT
     connections.id, connections.tenant_id, connections.name, connections.description,
     connections.kind, connections.transport, connections.endpoint_url,
     connections.auth_type, connections.auth_header_name, connections.auth_username,
-    COALESCE(secrets.ciphertext, '')::text AS auth_secret_ciphertext,
-    connections.credential_secret_id, GREATEST(connections.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    connections.auth_secret_ciphertext,
+    GREATEST(connections.timeout_ms / 1000, 1)::integer AS timeout_seconds,
     connections.status, connections.last_tested_at, connections.last_test_status, connections.last_test_message,
     connections.created_by_account_id, connections.created_at, connections.updated_at, connections.archived_at
 FROM external_tool_connections connections
-LEFT JOIN credential_secrets secrets
-  ON secrets.tenant_id = connections.tenant_id AND secrets.id = connections.credential_secret_id AND secrets.status = 'active'
 WHERE connections.tenant_id = $1 AND connections.id = $2
 `
 
@@ -599,7 +606,6 @@ type GetAgentExternalToolV2Row struct {
 	AuthHeaderName       string             `json:"auth_header_name"`
 	AuthUsername         string             `json:"auth_username"`
 	AuthSecretCiphertext string             `json:"auth_secret_ciphertext"`
-	CredentialSecretID   pgtype.Text        `json:"credential_secret_id"`
 	TimeoutSeconds       int32              `json:"timeout_seconds"`
 	Status               string             `json:"status"`
 	LastTestedAt         pgtype.Timestamptz `json:"last_tested_at"`
@@ -626,7 +632,6 @@ func (q *Queries) GetAgentExternalToolV2(ctx context.Context, arg GetAgentExtern
 		&i.AuthHeaderName,
 		&i.AuthUsername,
 		&i.AuthSecretCiphertext,
-		&i.CredentialSecretID,
 		&i.TimeoutSeconds,
 		&i.Status,
 		&i.LastTestedAt,
@@ -643,11 +648,10 @@ func (q *Queries) GetAgentExternalToolV2(ctx context.Context, arg GetAgentExtern
 const getAgentModel = `-- name: GetAgentModel :one
 SELECT
     connections.id, connections.tenant_id, connections.name, connections.provider,
-    connections.upstream_model AS model_name, connections.upstream_model AS litellm_model,
+    connections.upstream_model AS model_name, ('nexus-agent-model-' || connections.id)::text AS litellm_model,
     connections.api_base_url,
-    COALESCE(secrets.ciphertext, '')::text AS api_key_ciphertext,
-    COALESCE(secrets.preview, '')::text AS api_key_preview,
-    connections.credential_secret_id,
+    connections.api_key_ciphertext,
+    connections.api_key_preview,
     connections.rate_limit_rpm,
     CASE WHEN connections.status = 'archived' THEN 'disabled' ELSE connections.status END::text AS status,
     GREATEST(connections.timeout_ms / 1000, 1)::integer AS timeout_seconds,
@@ -659,8 +663,6 @@ SELECT
 FROM model_connections connections
 JOIN model_connection_state state
   ON state.tenant_id = connections.tenant_id AND state.model_connection_id = connections.id
-LEFT JOIN credential_secrets secrets
-  ON secrets.tenant_id = connections.tenant_id AND secrets.id = connections.credential_secret_id AND secrets.status = 'active'
 WHERE connections.tenant_id = $1
   AND connections.id = $2
 `
@@ -671,30 +673,29 @@ type GetAgentModelParams struct {
 }
 
 type GetAgentModelRow struct {
-	ID                 string             `json:"id"`
-	TenantID           string             `json:"tenant_id"`
-	Name               string             `json:"name"`
-	Provider           string             `json:"provider"`
-	ModelName          string             `json:"model_name"`
-	LitellmModel       string             `json:"litellm_model"`
-	ApiBaseUrl         string             `json:"api_base_url"`
-	ApiKeyCiphertext   string             `json:"api_key_ciphertext"`
-	ApiKeyPreview      string             `json:"api_key_preview"`
-	CredentialSecretID pgtype.Text        `json:"credential_secret_id"`
-	RateLimitRpm       int32              `json:"rate_limit_rpm"`
-	Status             string             `json:"status"`
-	TimeoutSeconds     int32              `json:"timeout_seconds"`
-	MonthlyQuota       int64              `json:"monthly_quota"`
-	UsedQuota          int64              `json:"used_quota"`
-	LastTestedAt       pgtype.Timestamptz `json:"last_tested_at"`
-	LastTestStatus     string             `json:"last_test_status"`
-	LastTestMessage    string             `json:"last_test_message"`
-	SyncStatus         string             `json:"sync_status"`
-	LastSyncedAt       pgtype.Timestamptz `json:"last_synced_at"`
-	LastSyncError      string             `json:"last_sync_error"`
-	SyncedConfigHash   string             `json:"synced_config_hash"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ID               string             `json:"id"`
+	TenantID         string             `json:"tenant_id"`
+	Name             string             `json:"name"`
+	Provider         string             `json:"provider"`
+	ModelName        string             `json:"model_name"`
+	LitellmModel     string             `json:"litellm_model"`
+	ApiBaseUrl       string             `json:"api_base_url"`
+	ApiKeyCiphertext string             `json:"api_key_ciphertext"`
+	ApiKeyPreview    string             `json:"api_key_preview"`
+	RateLimitRpm     int32              `json:"rate_limit_rpm"`
+	Status           string             `json:"status"`
+	TimeoutSeconds   int32              `json:"timeout_seconds"`
+	MonthlyQuota     int64              `json:"monthly_quota"`
+	UsedQuota        int64              `json:"used_quota"`
+	LastTestedAt     pgtype.Timestamptz `json:"last_tested_at"`
+	LastTestStatus   string             `json:"last_test_status"`
+	LastTestMessage  string             `json:"last_test_message"`
+	SyncStatus       string             `json:"sync_status"`
+	LastSyncedAt     pgtype.Timestamptz `json:"last_synced_at"`
+	LastSyncError    string             `json:"last_sync_error"`
+	SyncedConfigHash string             `json:"synced_config_hash"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) GetAgentModel(ctx context.Context, arg GetAgentModelParams) (GetAgentModelRow, error) {
@@ -710,7 +711,6 @@ func (q *Queries) GetAgentModel(ctx context.Context, arg GetAgentModelParams) (G
 		&i.ApiBaseUrl,
 		&i.ApiKeyCiphertext,
 		&i.ApiKeyPreview,
-		&i.CredentialSecretID,
 		&i.RateLimitRpm,
 		&i.Status,
 		&i.TimeoutSeconds,
@@ -729,47 +729,17 @@ func (q *Queries) GetAgentModel(ctx context.Context, arg GetAgentModelParams) (G
 	return i, err
 }
 
-const getCredentialSecretV2 = `-- name: GetCredentialSecretV2 :one
-SELECT id, tenant_id, name, secret_type, ciphertext, preview, status, created_by_account_id, created_at, updated_at, revoked_at
-FROM credential_secrets
-WHERE tenant_id = $1 AND id = $2
-`
-
-type GetCredentialSecretV2Params struct {
-	TenantID string `json:"tenant_id"`
-	ID       string `json:"id"`
-}
-
-func (q *Queries) GetCredentialSecretV2(ctx context.Context, arg GetCredentialSecretV2Params) (CredentialSecret, error) {
-	row := q.db.QueryRow(ctx, getCredentialSecretV2, arg.TenantID, arg.ID)
-	var i CredentialSecret
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.Name,
-		&i.SecretType,
-		&i.Ciphertext,
-		&i.Preview,
-		&i.Status,
-		&i.CreatedByAccountID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.RevokedAt,
-	)
-	return i, err
-}
-
 const insertAgentDefinitionVersion = `-- name: InsertAgentDefinitionVersion :one
 WITH upserted_revision AS (
     INSERT INTO agent_revisions (
-        id, tenant_id, agent_id, revision_no, name, description, icon, category,
+        id, tenant_id, agent_id, revision_no, ordinal, name, description, icon, category,
         visibility, visibility_targets, main_agent_role, system_prompt, welcome_message,
         suggested_questions, suggested_question_translations,
         model_connection_id, model_config_checksum, timeout_ms,
         config_schema_version, checksum, revision_note,
         created_by_account_id, created_at
     ) VALUES (
-        $1, $2, $3, $4,
+        $1, $2, $3, $4, NULL,
         $5, $6, $7, $8,
         $9, $10::jsonb,
         $11, $12, $13,
@@ -794,36 +764,98 @@ WITH upserted_revision AS (
             AND published_agent.id = agent_revisions.agent_id
             AND published_agent.published_revision_id = agent_revisions.id
       )
-    RETURNING id, tenant_id, agent_id, revision_no, name, description, icon, category, visibility, visibility_targets, main_agent_role, system_prompt, welcome_message, suggested_questions, suggested_question_translations, model_connection_id, model_config_checksum, timeout_ms, config_schema_version, checksum, revision_note, created_by_account_id, created_at
-), inserted_members AS (
-    INSERT INTO agent_revision_members (
-        tenant_id, revision_id, id, name, role, model_connection_id,
-        model_config_checksum, ordinal
-    )
-    SELECT revision.tenant_id, revision.id,
-           members.id, members.name, members.role, members.model_id,
-           COALESCE(NULLIF(members.model_config_checksum, ''), member_model_state.synced_config_checksum, ''),
-           members.ordinality::int - 1
+    RETURNING id, tenant_id, agent_id, revision_no, ordinal, name, description, icon, category, visibility, visibility_targets, main_agent_role, system_prompt, welcome_message, suggested_questions, suggested_question_translations, model_connection_id, model_config_checksum, timeout_ms, config_schema_version, checksum, revision_note, created_by_account_id, created_at
+), requested_members AS (
+    SELECT
+        revision.tenant_id,
+        revision.agent_id AS parent_agent_id,
+        revision.id AS parent_revision_id,
+        revision.revision_no,
+        revision.agent_id || ':member:' || (members.value->>'id') AS child_agent_id,
+        revision.id || ':member:' || (members.value->>'id') AS child_revision_id,
+        members.value->>'name' AS name,
+        members.value->>'role' AS role,
+        members.value->>'model_id' AS model_id,
+        COALESCE(NULLIF(members.value->>'model_config_checksum', ''), member_model_state.synced_config_checksum, '') AS model_config_checksum,
+        COALESCE(members.value->'tools', '[]'::jsonb) AS tools,
+        COALESCE(members.value->'external_tool_ids', '[]'::jsonb) AS external_tool_ids,
+        COALESCE(members.value->'knowledge_base_ids', '[]'::jsonb) AS knowledge_base_ids,
+        members.ordinality::int - 1 AS ordinal
     FROM upserted_revision revision
-    CROSS JOIN LATERAL jsonb_to_recordset($24::jsonb)
-        WITH ORDINALITY AS members(
-            id text, name text, role text, model_id text,
-            model_config_checksum text,
-            tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb,
-            ordinality bigint
-        )
+    CROSS JOIN LATERAL jsonb_array_elements($24::jsonb)
+        WITH ORDINALITY AS members(value, ordinality)
     LEFT JOIN model_connection_state member_model_state
       ON member_model_state.tenant_id = revision.tenant_id
-     AND member_model_state.model_connection_id = members.model_id
-    ON CONFLICT (tenant_id, revision_id, id) DO UPDATE SET
-        model_config_checksum = EXCLUDED.model_config_checksum
-    WHERE NOT EXISTS (
-        SELECT 1
-        FROM agents published_agent
-        WHERE published_agent.tenant_id = agent_revision_members.tenant_id
-          AND published_agent.published_revision_id = agent_revision_members.revision_id
+     AND member_model_state.model_connection_id = members.value->>'model_id'
+), upserted_children AS (
+    INSERT INTO agents (
+        id, tenant_id, parent_agent_id, lifecycle_status,
+        draft_revision_id, published_revision_id,
+        next_revision_no, created_by_account_id, created_at, updated_at, archived_at
     )
-    RETURNING tenant_id, revision_id, id, name, role, model_connection_id, model_config_checksum, ordinal
+    SELECT
+        member.child_agent_id, member.tenant_id, member.parent_agent_id, 'active',
+        NULL, NULL, GREATEST(member.revision_no + 1, 2),
+        $22, $23, $23, NULL
+    FROM requested_members member
+    ON CONFLICT (id) DO UPDATE SET
+        lifecycle_status = 'active',
+        next_revision_no = GREATEST(agents.next_revision_no, EXCLUDED.next_revision_no),
+        updated_at = EXCLUDED.updated_at,
+        archived_at = NULL
+    WHERE agents.tenant_id = EXCLUDED.tenant_id
+      AND agents.parent_agent_id = EXCLUDED.parent_agent_id
+    RETURNING id, tenant_id, parent_agent_id, lifecycle_status, draft_revision_id, published_revision_id, next_revision_no, created_by_account_id, created_at, updated_at, archived_at
+), inserted_child_revisions AS (
+    INSERT INTO agent_revisions (
+        id, tenant_id, agent_id, revision_no, ordinal,
+        name, description, icon, category,
+        visibility, visibility_targets, main_agent_role, system_prompt, welcome_message,
+        suggested_questions, suggested_question_translations,
+        model_connection_id, model_config_checksum, timeout_ms,
+        config_schema_version, checksum, revision_note,
+        created_by_account_id, created_at
+    )
+    SELECT
+        member.child_revision_id, member.tenant_id, member.child_agent_id,
+        member.revision_no, member.ordinal,
+        member.name, '', 'AI', root.category,
+        root.visibility, root.visibility_targets,
+        member.role, '', '', '[]'::jsonb, '[]'::jsonb,
+        member.model_id, member.model_config_checksum, root.timeout_ms,
+        root.config_schema_version,
+        md5(concat_ws('|', root.checksum, member.child_agent_id, member.role,
+            member.model_id, member.model_config_checksum, member.tools::text,
+            member.external_tool_ids::text, member.knowledge_base_ids::text)),
+        root.revision_note, root.created_by_account_id, root.created_at
+    FROM requested_members member
+    JOIN upserted_revision root ON root.id = member.parent_revision_id
+    JOIN upserted_children child ON child.id = member.child_agent_id
+    ON CONFLICT (tenant_id, agent_id, revision_no) DO UPDATE SET
+        model_config_checksum = EXCLUDED.model_config_checksum,
+        config_schema_version = EXCLUDED.config_schema_version,
+        checksum = EXCLUDED.checksum,
+        revision_note = EXCLUDED.revision_note
+    WHERE NOT EXISTS (
+        SELECT 1 FROM agents published_child
+        WHERE published_child.tenant_id = agent_revisions.tenant_id
+          AND published_child.id = agent_revisions.agent_id
+          AND published_child.published_revision_id = agent_revisions.id
+    )
+    RETURNING id, tenant_id, agent_id, revision_no, ordinal, name, description, icon, category, visibility, visibility_targets, main_agent_role, system_prompt, welcome_message, suggested_questions, suggested_question_translations, model_connection_id, model_config_checksum, timeout_ms, config_schema_version, checksum, revision_note, created_by_account_id, created_at
+), target_child_revisions AS (
+    SELECT id, tenant_id, agent_id, revision_no, ordinal, name, description, icon, category, visibility, visibility_targets, main_agent_role, system_prompt, welcome_message, suggested_questions, suggested_question_translations, model_connection_id, model_config_checksum, timeout_ms, config_schema_version, checksum, revision_note, created_by_account_id, created_at FROM inserted_child_revisions
+    UNION ALL
+    SELECT revision.id, revision.tenant_id, revision.agent_id, revision.revision_no, revision.ordinal, revision.name, revision.description, revision.icon, revision.category, revision.visibility, revision.visibility_targets, revision.main_agent_role, revision.system_prompt, revision.welcome_message, revision.suggested_questions, revision.suggested_question_translations, revision.model_connection_id, revision.model_config_checksum, revision.timeout_ms, revision.config_schema_version, revision.checksum, revision.revision_note, revision.created_by_account_id, revision.created_at
+    FROM agent_revisions revision
+    JOIN requested_members member
+      ON member.tenant_id = revision.tenant_id
+     AND member.child_agent_id = revision.agent_id
+     AND member.revision_no = revision.revision_no
+    WHERE NOT EXISTS (
+        SELECT 1 FROM inserted_child_revisions inserted
+        WHERE inserted.tenant_id = revision.tenant_id AND inserted.id = revision.id
+    )
 ), inserted_tools AS (
     INSERT INTO agent_revision_builtin_tools (tenant_id, revision_id, tool_key, ordinal, config)
     SELECT revision.tenant_id, revision.id, tool.value,
@@ -864,34 +896,37 @@ WITH upserted_revision AS (
         WITH ORDINALITY AS knowledge(value, ordinality)
     ON CONFLICT DO NOTHING
     RETURNING tenant_id, revision_id, knowledge_base_id, ordinal
-), inserted_member_tools AS (
-    INSERT INTO agent_revision_member_builtin_tools (
-        tenant_id, revision_id, member_id, tool_key, ordinal, config
+), inserted_child_tools AS (
+    INSERT INTO agent_revision_builtin_tools (
+        tenant_id, revision_id, tool_key, ordinal, config
     )
-    SELECT revision.tenant_id, revision.id, members.id,
+    SELECT member.tenant_id, revision.id,
            tool.value, tool.ordinality::int - 1, '{}'::jsonb
-    FROM upserted_revision revision
-    CROSS JOIN LATERAL jsonb_to_recordset($24::jsonb)
-        AS members(id text, tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb)
-    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(members.tools, '[]'::jsonb))
+    FROM requested_members member
+    JOIN target_child_revisions revision
+      ON revision.tenant_id = member.tenant_id
+     AND revision.agent_id = member.child_agent_id
+     AND revision.revision_no = member.revision_no
+    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(member.tools, '[]'::jsonb))
         WITH ORDINALITY AS tool(value, ordinality)
     ON CONFLICT DO NOTHING
-    RETURNING tenant_id, revision_id, member_id, tool_key, ordinal, config
-), inserted_member_external_tools AS (
-    INSERT INTO agent_revision_member_external_tools (
-        tenant_id, revision_id, member_id, external_tool_id,
-        tool_schema_checksum, ordinal, config
+    RETURNING tenant_id, revision_id, tool_key, ordinal, config
+), inserted_child_external_tools AS (
+    INSERT INTO agent_revision_external_tools (
+        tenant_id, revision_id, external_tool_id, tool_schema_checksum, ordinal, config
     )
-    SELECT revision.tenant_id, revision.id, members.id,
+    SELECT member.tenant_id, revision.id,
            requested.value, external_tools.schema_checksum,
            requested.ordinality::int - 1, '{}'::jsonb
-    FROM upserted_revision revision
-    CROSS JOIN LATERAL jsonb_to_recordset($24::jsonb)
-        AS members(id text, tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb)
-    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(members.external_tool_ids, '[]'::jsonb))
+    FROM requested_members member
+    JOIN target_child_revisions revision
+      ON revision.tenant_id = member.tenant_id
+     AND revision.agent_id = member.child_agent_id
+     AND revision.revision_no = member.revision_no
+    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(member.external_tool_ids, '[]'::jsonb))
         WITH ORDINALITY AS requested(value, ordinality)
     JOIN external_tools
-      ON external_tools.tenant_id = revision.tenant_id
+      ON external_tools.tenant_id = member.tenant_id
      AND external_tools.id = requested.value
      AND external_tools.enabled
      AND external_tools.archived_at IS NULL
@@ -900,20 +935,22 @@ WITH upserted_revision AS (
      AND external_connections.id = external_tools.connection_id
      AND external_connections.status = 'active'
     ON CONFLICT DO NOTHING
-    RETURNING tenant_id, revision_id, member_id, external_tool_id, tool_schema_checksum, ordinal, config
-), inserted_member_knowledge AS (
-    INSERT INTO agent_revision_member_knowledge_bases (
-        tenant_id, revision_id, member_id, knowledge_base_id, ordinal
+    RETURNING tenant_id, revision_id, external_tool_id, tool_schema_checksum, ordinal, config
+), inserted_child_knowledge AS (
+    INSERT INTO agent_revision_knowledge_bases (
+        tenant_id, revision_id, knowledge_base_id, ordinal
     )
-    SELECT revision.tenant_id, revision.id, members.id,
+    SELECT member.tenant_id, revision.id,
            knowledge.value, knowledge.ordinality::int - 1
-    FROM upserted_revision revision
-    CROSS JOIN LATERAL jsonb_to_recordset($24::jsonb)
-        AS members(id text, tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb)
-    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(members.knowledge_base_ids, '[]'::jsonb))
+    FROM requested_members member
+    JOIN target_child_revisions revision
+      ON revision.tenant_id = member.tenant_id
+     AND revision.agent_id = member.child_agent_id
+     AND revision.revision_no = member.revision_no
+    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(member.knowledge_base_ids, '[]'::jsonb))
         WITH ORDINALITY AS knowledge(value, ordinality)
     ON CONFLICT DO NOTHING
-    RETURNING tenant_id, revision_id, member_id, knowledge_base_id, ordinal
+    RETURNING tenant_id, revision_id, knowledge_base_id, ordinal
 )
 SELECT id, tenant_id, agent_id, revision_no
 FROM upserted_revision
@@ -997,69 +1034,44 @@ func (q *Queries) InsertAgentDefinitionVersion(ctx context.Context, arg InsertAg
 }
 
 const insertAgentExternalTool = `-- name: InsertAgentExternalTool :one
-WITH upserted_secret AS (
-    INSERT INTO credential_secrets (
-        id, tenant_id, name, secret_type, ciphertext, preview, status,
-        created_by_account_id, created_at, updated_at, revoked_at
-    )
-    SELECT
-        COALESCE(NULLIF($1::text, ''), $2::text || ':credential'), $3, $4::text || ' credential',
-        CASE $5::text WHEN 'bearer' THEN 'bearer' WHEN 'basic' THEN 'basic_password' ELSE 'api_key' END,
-        $6, '', 'active', $7,
-        $8, $8, NULL
-    WHERE $6::text <> ''
-    ON CONFLICT (id) DO UPDATE SET
-        name = EXCLUDED.name, secret_type = EXCLUDED.secret_type,
-        ciphertext = EXCLUDED.ciphertext, status = 'active',
-        updated_at = EXCLUDED.updated_at, revoked_at = NULL
-    WHERE credential_secrets.tenant_id = EXCLUDED.tenant_id
-    RETURNING id
-), inserted AS (
-    INSERT INTO external_tool_connections (
-        id, tenant_id, name, description, kind, transport, endpoint_url,
-        auth_type, auth_header_name, auth_username, credential_secret_id,
-        timeout_ms, status, created_by_account_id, updated_by_account_id,
-        created_at, updated_at, archived_at
-    ) VALUES (
-        $2, $3, $4, $9,
-        $10, $11, $12, $5,
-        $13, $14,
-        CASE WHEN $6::text = '' THEN NULL ELSE COALESCE(NULLIF($1::text, ''), $2::text || ':credential') END,
-        GREATEST($15::int, 1) * 1000,
-        'active', $7, $7,
-        $8, $8, NULL
-    )
-    RETURNING id, tenant_id, name, description, kind, transport, endpoint_url, auth_type, auth_header_name, auth_username, credential_secret_id, timeout_ms, status, last_tested_at, last_test_status, last_test_message, created_by_account_id, updated_by_account_id, created_at, updated_at, archived_at
+INSERT INTO external_tool_connections (
+    id, tenant_id, name, description, kind, transport, endpoint_url,
+    auth_type, auth_header_name, auth_username, auth_secret_ciphertext,
+    timeout_ms, status, created_by_account_id, updated_by_account_id,
+    created_at, updated_at, archived_at
+) VALUES (
+    $1, $2, $3, $4,
+    $5, $6, $7, $8,
+    $9, $10,
+    $11,
+    GREATEST($12::int, 1) * 1000,
+    'active', $13, $13,
+    $14, $14, NULL
 )
-SELECT
-    inserted.id, inserted.tenant_id, inserted.name, inserted.description,
-    inserted.kind, inserted.transport, inserted.endpoint_url,
-    inserted.auth_type, inserted.auth_header_name, inserted.auth_username,
-    COALESCE(secrets.ciphertext, '')::text AS auth_secret_ciphertext,
-    inserted.credential_secret_id, GREATEST(inserted.timeout_ms / 1000, 1)::integer AS timeout_seconds,
-    inserted.status, inserted.last_tested_at, inserted.last_test_status, inserted.last_test_message,
-    inserted.created_by_account_id, inserted.created_at, inserted.updated_at, inserted.archived_at
-FROM inserted
-LEFT JOIN credential_secrets secrets
-  ON secrets.tenant_id = inserted.tenant_id AND secrets.id = inserted.credential_secret_id AND secrets.status = 'active'
+RETURNING
+    id, tenant_id, name, description, kind, transport, endpoint_url,
+    auth_type, auth_header_name, auth_username,
+    auth_secret_ciphertext,
+    GREATEST(timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    status, last_tested_at, last_test_status, last_test_message,
+    created_by_account_id, created_at, updated_at, archived_at
 `
 
 type InsertAgentExternalToolParams struct {
-	CredentialSecretID   string             `json:"credential_secret_id"`
 	ID                   string             `json:"id"`
 	TenantID             string             `json:"tenant_id"`
 	Name                 string             `json:"name"`
-	AuthType             string             `json:"auth_type"`
-	AuthSecretCiphertext string             `json:"auth_secret_ciphertext"`
-	CreatedByAccountID   pgtype.Text        `json:"created_by_account_id"`
-	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 	Description          string             `json:"description"`
 	Kind                 string             `json:"kind"`
 	Transport            string             `json:"transport"`
 	EndpointUrl          string             `json:"endpoint_url"`
+	AuthType             string             `json:"auth_type"`
 	AuthHeaderName       string             `json:"auth_header_name"`
 	AuthUsername         string             `json:"auth_username"`
+	AuthSecretCiphertext string             `json:"auth_secret_ciphertext"`
 	TimeoutSeconds       int32              `json:"timeout_seconds"`
+	CreatedByAccountID   pgtype.Text        `json:"created_by_account_id"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
 }
 
 type InsertAgentExternalToolRow struct {
@@ -1074,7 +1086,6 @@ type InsertAgentExternalToolRow struct {
 	AuthHeaderName       string             `json:"auth_header_name"`
 	AuthUsername         string             `json:"auth_username"`
 	AuthSecretCiphertext string             `json:"auth_secret_ciphertext"`
-	CredentialSecretID   pgtype.Text        `json:"credential_secret_id"`
 	TimeoutSeconds       int32              `json:"timeout_seconds"`
 	Status               string             `json:"status"`
 	LastTestedAt         pgtype.Timestamptz `json:"last_tested_at"`
@@ -1088,21 +1099,20 @@ type InsertAgentExternalToolRow struct {
 
 func (q *Queries) InsertAgentExternalTool(ctx context.Context, arg InsertAgentExternalToolParams) (InsertAgentExternalToolRow, error) {
 	row := q.db.QueryRow(ctx, insertAgentExternalTool,
-		arg.CredentialSecretID,
 		arg.ID,
 		arg.TenantID,
 		arg.Name,
-		arg.AuthType,
-		arg.AuthSecretCiphertext,
-		arg.CreatedByAccountID,
-		arg.CreatedAt,
 		arg.Description,
 		arg.Kind,
 		arg.Transport,
 		arg.EndpointUrl,
+		arg.AuthType,
 		arg.AuthHeaderName,
 		arg.AuthUsername,
+		arg.AuthSecretCiphertext,
 		arg.TimeoutSeconds,
+		arg.CreatedByAccountID,
+		arg.CreatedAt,
 	)
 	var i InsertAgentExternalToolRow
 	err := row.Scan(
@@ -1117,7 +1127,6 @@ func (q *Queries) InsertAgentExternalTool(ctx context.Context, arg InsertAgentEx
 		&i.AuthHeaderName,
 		&i.AuthUsername,
 		&i.AuthSecretCiphertext,
-		&i.CredentialSecretID,
 		&i.TimeoutSeconds,
 		&i.Status,
 		&i.LastTestedAt,
@@ -1132,17 +1141,33 @@ func (q *Queries) InsertAgentExternalTool(ctx context.Context, arg InsertAgentEx
 }
 
 const listAgentDefinitionRefsByModel = `-- name: ListAgentDefinitionRefsByModel :many
+WITH selected_revisions AS (
+    SELECT tenant_id, id AS agent_id, draft_revision_id AS revision_id
+    FROM agents
+    UNION
+    SELECT tenant_id, id AS agent_id, published_revision_id AS revision_id
+    FROM agents
+)
 SELECT DISTINCT agents.id, revisions.name
 FROM agents
+JOIN selected_revisions
+  ON selected_revisions.tenant_id = agents.tenant_id
+ AND selected_revisions.agent_id = agents.id
 JOIN agent_revisions revisions
   ON revisions.tenant_id = agents.tenant_id
  AND revisions.agent_id = agents.id
- AND revisions.id = COALESCE(agents.draft_revision_id, agents.published_revision_id)
-LEFT JOIN agent_revision_members members
-  ON members.tenant_id = revisions.tenant_id AND members.revision_id = revisions.id
+ AND revisions.id = selected_revisions.revision_id
+LEFT JOIN agents children
+  ON children.tenant_id = agents.tenant_id
+ AND children.parent_agent_id = agents.id
+LEFT JOIN agent_revisions child_revisions
+  ON child_revisions.tenant_id = children.tenant_id
+ AND child_revisions.agent_id = children.id
+ AND child_revisions.revision_no = revisions.revision_no
 WHERE agents.tenant_id = $1
+  AND agents.parent_agent_id IS NULL
   AND agents.lifecycle_status = 'active'
-  AND (revisions.model_connection_id = $2 OR members.model_connection_id = $2)
+  AND (revisions.model_connection_id = $2 OR child_revisions.model_connection_id = $2)
 ORDER BY revisions.name
 `
 
@@ -1183,13 +1208,21 @@ SELECT
     revisions.name, revisions.description, revisions.icon AS emoji, revisions.category,
     revisions.visibility, revisions.visibility_targets, revisions.main_agent_role,
     COALESCE((SELECT jsonb_agg(jsonb_build_object(
-        'id', members.id, 'name', members.name, 'role', members.role,
-        'model_id', members.model_connection_id,
-        'model_config_checksum', members.model_config_checksum,
-        'tools', COALESCE((SELECT jsonb_agg(tools.tool_key ORDER BY tools.ordinal) FROM agent_revision_member_builtin_tools tools WHERE tools.tenant_id = members.tenant_id AND tools.revision_id = members.revision_id AND tools.member_id = members.id), '[]'::jsonb),
-        'external_tool_ids', COALESCE((SELECT jsonb_agg(tools.external_tool_id ORDER BY tools.ordinal) FROM agent_revision_member_external_tools tools WHERE tools.tenant_id = members.tenant_id AND tools.revision_id = members.revision_id AND tools.member_id = members.id), '[]'::jsonb),
-        'knowledge_base_ids', COALESCE((SELECT jsonb_agg(kb.knowledge_base_id ORDER BY kb.ordinal) FROM agent_revision_member_knowledge_bases kb WHERE kb.tenant_id = members.tenant_id AND kb.revision_id = members.revision_id AND kb.member_id = members.id), '[]'::jsonb)
-    ) ORDER BY members.ordinal) FROM agent_revision_members members WHERE members.tenant_id = revisions.tenant_id AND members.revision_id = revisions.id), '[]'::jsonb) AS sub_agents,
+        'id', substring(child.id FROM char_length(revisions.agent_id || ':member:') + 1),
+        'name', child_revision.name, 'role', child_revision.main_agent_role,
+        'model_id', child_revision.model_connection_id,
+        'model_config_checksum', child_revision.model_config_checksum,
+        'tools', COALESCE((SELECT jsonb_agg(tools.tool_key ORDER BY tools.ordinal) FROM agent_revision_builtin_tools tools WHERE tools.tenant_id = child_revision.tenant_id AND tools.revision_id = child_revision.id), '[]'::jsonb),
+        'external_tool_ids', COALESCE((SELECT jsonb_agg(tools.external_tool_id ORDER BY tools.ordinal) FROM agent_revision_external_tools tools WHERE tools.tenant_id = child_revision.tenant_id AND tools.revision_id = child_revision.id), '[]'::jsonb),
+        'knowledge_base_ids', COALESCE((SELECT jsonb_agg(kb.knowledge_base_id ORDER BY kb.ordinal) FROM agent_revision_knowledge_bases kb WHERE kb.tenant_id = child_revision.tenant_id AND kb.revision_id = child_revision.id), '[]'::jsonb)
+    ) ORDER BY child_revision.ordinal)
+    FROM agents child
+    JOIN agent_revisions child_revision
+      ON child_revision.tenant_id = child.tenant_id
+     AND child_revision.agent_id = child.id
+     AND child_revision.revision_no = revisions.revision_no
+    WHERE child.tenant_id = revisions.tenant_id
+      AND child.parent_agent_id = revisions.agent_id), '[]'::jsonb) AS sub_agents,
     revisions.system_prompt, revisions.welcome_message, revisions.suggested_questions,
     revisions.suggested_question_translations,
     COALESCE((SELECT jsonb_agg(tools.tool_key ORDER BY tools.ordinal) FROM agent_revision_builtin_tools tools WHERE tools.tenant_id = revisions.tenant_id AND tools.revision_id = revisions.id), '[]'::jsonb) AS tools,
@@ -1294,6 +1327,7 @@ const listAgentDefinitions = `-- name: ListAgentDefinitions :many
 SELECT agents.id, agents.tenant_id
 FROM agents
 WHERE agents.tenant_id = $1
+  AND agents.parent_agent_id IS NULL
   AND agents.lifecycle_status = 'active'
 ORDER BY agents.updated_at DESC, agents.id ASC
 `
@@ -1487,13 +1521,11 @@ SELECT
     connections.id, connections.tenant_id, connections.name, connections.description,
     connections.kind, connections.transport, connections.endpoint_url,
     connections.auth_type, connections.auth_header_name, connections.auth_username,
-    COALESCE(secrets.ciphertext, '')::text AS auth_secret_ciphertext,
-    connections.credential_secret_id, GREATEST(connections.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    connections.auth_secret_ciphertext,
+    GREATEST(connections.timeout_ms / 1000, 1)::integer AS timeout_seconds,
     connections.status, connections.last_tested_at, connections.last_test_status, connections.last_test_message,
     connections.created_by_account_id, connections.created_at, connections.updated_at, connections.archived_at
 FROM external_tool_connections connections
-LEFT JOIN credential_secrets secrets
-  ON secrets.tenant_id = connections.tenant_id AND secrets.id = connections.credential_secret_id AND secrets.status = 'active'
 WHERE connections.tenant_id = $1
 ORDER BY CASE connections.status WHEN 'active' THEN 0 WHEN 'disabled' THEN 1 ELSE 2 END,
          connections.updated_at DESC, connections.id ASC
@@ -1511,7 +1543,6 @@ type ListAgentExternalToolsRow struct {
 	AuthHeaderName       string             `json:"auth_header_name"`
 	AuthUsername         string             `json:"auth_username"`
 	AuthSecretCiphertext string             `json:"auth_secret_ciphertext"`
-	CredentialSecretID   pgtype.Text        `json:"credential_secret_id"`
 	TimeoutSeconds       int32              `json:"timeout_seconds"`
 	Status               string             `json:"status"`
 	LastTestedAt         pgtype.Timestamptz `json:"last_tested_at"`
@@ -1544,7 +1575,6 @@ func (q *Queries) ListAgentExternalTools(ctx context.Context, tenantID string) (
 			&i.AuthHeaderName,
 			&i.AuthUsername,
 			&i.AuthSecretCiphertext,
-			&i.CredentialSecretID,
 			&i.TimeoutSeconds,
 			&i.Status,
 			&i.LastTestedAt,
@@ -1568,11 +1598,10 @@ func (q *Queries) ListAgentExternalTools(ctx context.Context, tenantID string) (
 const listAgentModels = `-- name: ListAgentModels :many
 SELECT
     connections.id, connections.tenant_id, connections.name, connections.provider,
-    connections.upstream_model AS model_name, connections.upstream_model AS litellm_model,
+    connections.upstream_model AS model_name, ('nexus-agent-model-' || connections.id)::text AS litellm_model,
     connections.api_base_url,
-    COALESCE(secrets.ciphertext, '')::text AS api_key_ciphertext,
-    COALESCE(secrets.preview, '')::text AS api_key_preview,
-    connections.credential_secret_id,
+    connections.api_key_ciphertext,
+    connections.api_key_preview,
     connections.rate_limit_rpm,
     CASE WHEN connections.status = 'archived' THEN 'disabled' ELSE connections.status END::text AS status,
     GREATEST(connections.timeout_ms / 1000, 1)::integer AS timeout_seconds,
@@ -1584,38 +1613,35 @@ SELECT
 FROM model_connections connections
 JOIN model_connection_state state
   ON state.tenant_id = connections.tenant_id AND state.model_connection_id = connections.id
-LEFT JOIN credential_secrets secrets
-  ON secrets.tenant_id = connections.tenant_id AND secrets.id = connections.credential_secret_id AND secrets.status = 'active'
 WHERE connections.tenant_id = $1
   AND connections.status <> 'archived'
 ORDER BY connections.updated_at DESC, connections.id ASC
 `
 
 type ListAgentModelsRow struct {
-	ID                 string             `json:"id"`
-	TenantID           string             `json:"tenant_id"`
-	Name               string             `json:"name"`
-	Provider           string             `json:"provider"`
-	ModelName          string             `json:"model_name"`
-	LitellmModel       string             `json:"litellm_model"`
-	ApiBaseUrl         string             `json:"api_base_url"`
-	ApiKeyCiphertext   string             `json:"api_key_ciphertext"`
-	ApiKeyPreview      string             `json:"api_key_preview"`
-	CredentialSecretID pgtype.Text        `json:"credential_secret_id"`
-	RateLimitRpm       int32              `json:"rate_limit_rpm"`
-	Status             string             `json:"status"`
-	TimeoutSeconds     int32              `json:"timeout_seconds"`
-	MonthlyQuota       int64              `json:"monthly_quota"`
-	UsedQuota          int64              `json:"used_quota"`
-	LastTestedAt       pgtype.Timestamptz `json:"last_tested_at"`
-	LastTestStatus     string             `json:"last_test_status"`
-	LastTestMessage    string             `json:"last_test_message"`
-	SyncStatus         string             `json:"sync_status"`
-	LastSyncedAt       pgtype.Timestamptz `json:"last_synced_at"`
-	LastSyncError      string             `json:"last_sync_error"`
-	SyncedConfigHash   string             `json:"synced_config_hash"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ID               string             `json:"id"`
+	TenantID         string             `json:"tenant_id"`
+	Name             string             `json:"name"`
+	Provider         string             `json:"provider"`
+	ModelName        string             `json:"model_name"`
+	LitellmModel     string             `json:"litellm_model"`
+	ApiBaseUrl       string             `json:"api_base_url"`
+	ApiKeyCiphertext string             `json:"api_key_ciphertext"`
+	ApiKeyPreview    string             `json:"api_key_preview"`
+	RateLimitRpm     int32              `json:"rate_limit_rpm"`
+	Status           string             `json:"status"`
+	TimeoutSeconds   int32              `json:"timeout_seconds"`
+	MonthlyQuota     int64              `json:"monthly_quota"`
+	UsedQuota        int64              `json:"used_quota"`
+	LastTestedAt     pgtype.Timestamptz `json:"last_tested_at"`
+	LastTestStatus   string             `json:"last_test_status"`
+	LastTestMessage  string             `json:"last_test_message"`
+	SyncStatus       string             `json:"sync_status"`
+	LastSyncedAt     pgtype.Timestamptz `json:"last_synced_at"`
+	LastSyncError    string             `json:"last_sync_error"`
+	SyncedConfigHash string             `json:"synced_config_hash"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) ListAgentModels(ctx context.Context, tenantID string) ([]ListAgentModelsRow, error) {
@@ -1637,7 +1663,6 @@ func (q *Queries) ListAgentModels(ctx context.Context, tenantID string) ([]ListA
 			&i.ApiBaseUrl,
 			&i.ApiKeyCiphertext,
 			&i.ApiKeyPreview,
-			&i.CredentialSecretID,
 			&i.RateLimitRpm,
 			&i.Status,
 			&i.TimeoutSeconds,
@@ -1703,51 +1728,11 @@ func (q *Queries) ListAgentRevisionExternalToolBindingsV2(ctx context.Context, a
 	return items, nil
 }
 
-const listAgentRevisionMemberExternalToolBindingsV2 = `-- name: ListAgentRevisionMemberExternalToolBindingsV2 :many
-SELECT tenant_id, revision_id, member_id, external_tool_id, tool_schema_checksum, ordinal, config
-FROM agent_revision_member_external_tools
-WHERE tenant_id = $1
-  AND revision_id = $2
-ORDER BY member_id, ordinal, external_tool_id
-`
-
-type ListAgentRevisionMemberExternalToolBindingsV2Params struct {
-	TenantID   string `json:"tenant_id"`
-	RevisionID string `json:"revision_id"`
-}
-
-func (q *Queries) ListAgentRevisionMemberExternalToolBindingsV2(ctx context.Context, arg ListAgentRevisionMemberExternalToolBindingsV2Params) ([]AgentRevisionMemberExternalTool, error) {
-	rows, err := q.db.Query(ctx, listAgentRevisionMemberExternalToolBindingsV2, arg.TenantID, arg.RevisionID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []AgentRevisionMemberExternalTool
-	for rows.Next() {
-		var i AgentRevisionMemberExternalTool
-		if err := rows.Scan(
-			&i.TenantID,
-			&i.RevisionID,
-			&i.MemberID,
-			&i.ExternalToolID,
-			&i.ToolSchemaChecksum,
-			&i.Ordinal,
-			&i.Config,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listPublishedAgentDefinitions = `-- name: ListPublishedAgentDefinitions :many
 SELECT agents.id, agents.tenant_id
 FROM agents
 WHERE agents.tenant_id = $1
+  AND agents.parent_agent_id IS NULL
   AND agents.lifecycle_status = 'active'
   AND agents.published_revision_id IS NOT NULL
 ORDER BY agents.updated_at DESC, agents.id ASC
@@ -1778,40 +1763,6 @@ func (q *Queries) ListPublishedAgentDefinitions(ctx context.Context, tenantID st
 	return items, nil
 }
 
-const revokeCredentialSecretV2 = `-- name: RevokeCredentialSecretV2 :one
-UPDATE credential_secrets
-SET status = 'revoked', revoked_at = $1, updated_at = $1
-WHERE tenant_id = $2
-  AND id = $3
-  AND status = 'active'
-RETURNING id, tenant_id, name, secret_type, ciphertext, preview, status, created_by_account_id, created_at, updated_at, revoked_at
-`
-
-type RevokeCredentialSecretV2Params struct {
-	RevokedAt pgtype.Timestamptz `json:"revoked_at"`
-	TenantID  string             `json:"tenant_id"`
-	ID        string             `json:"id"`
-}
-
-func (q *Queries) RevokeCredentialSecretV2(ctx context.Context, arg RevokeCredentialSecretV2Params) (CredentialSecret, error) {
-	row := q.db.QueryRow(ctx, revokeCredentialSecretV2, arg.RevokedAt, arg.TenantID, arg.ID)
-	var i CredentialSecret
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.Name,
-		&i.SecretType,
-		&i.Ciphertext,
-		&i.Preview,
-		&i.Status,
-		&i.CreatedByAccountID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.RevokedAt,
-	)
-	return i, err
-}
-
 const updateAgentExternalToolTestResultV2 = `-- name: UpdateAgentExternalToolTestResultV2 :one
 WITH updated AS (
     UPDATE external_tool_connections
@@ -1821,19 +1772,17 @@ WITH updated AS (
         updated_at = $1
     WHERE external_tool_connections.tenant_id = $4
       AND external_tool_connections.id = $5
-    RETURNING id, tenant_id, name, description, kind, transport, endpoint_url, auth_type, auth_header_name, auth_username, credential_secret_id, timeout_ms, status, last_tested_at, last_test_status, last_test_message, created_by_account_id, updated_by_account_id, created_at, updated_at, archived_at
+    RETURNING id, tenant_id, name, description, kind, transport, endpoint_url, auth_type, auth_header_name, auth_username, auth_secret_ciphertext, timeout_ms, status, last_tested_at, last_test_status, last_test_message, created_by_account_id, updated_by_account_id, created_at, updated_at, archived_at
 )
 SELECT
     updated.id, updated.tenant_id, updated.name, updated.description,
     updated.kind, updated.transport, updated.endpoint_url,
     updated.auth_type, updated.auth_header_name, updated.auth_username,
-    COALESCE(secrets.ciphertext, '')::text AS auth_secret_ciphertext,
-    updated.credential_secret_id, GREATEST(updated.timeout_ms / 1000, 1)::integer AS timeout_seconds,
+    updated.auth_secret_ciphertext,
+    GREATEST(updated.timeout_ms / 1000, 1)::integer AS timeout_seconds,
     updated.status, updated.last_tested_at, updated.last_test_status, updated.last_test_message,
     updated.created_by_account_id, updated.created_at, updated.updated_at, updated.archived_at
 FROM updated
-LEFT JOIN credential_secrets secrets
-  ON secrets.tenant_id = updated.tenant_id AND secrets.id = updated.credential_secret_id AND secrets.status = 'active'
 `
 
 type UpdateAgentExternalToolTestResultV2Params struct {
@@ -1856,7 +1805,6 @@ type UpdateAgentExternalToolTestResultV2Row struct {
 	AuthHeaderName       string             `json:"auth_header_name"`
 	AuthUsername         string             `json:"auth_username"`
 	AuthSecretCiphertext string             `json:"auth_secret_ciphertext"`
-	CredentialSecretID   pgtype.Text        `json:"credential_secret_id"`
 	TimeoutSeconds       int32              `json:"timeout_seconds"`
 	Status               string             `json:"status"`
 	LastTestedAt         pgtype.Timestamptz `json:"last_tested_at"`
@@ -1889,7 +1837,6 @@ func (q *Queries) UpdateAgentExternalToolTestResultV2(ctx context.Context, arg U
 		&i.AuthHeaderName,
 		&i.AuthUsername,
 		&i.AuthSecretCiphertext,
-		&i.CredentialSecretID,
 		&i.TimeoutSeconds,
 		&i.Status,
 		&i.LastTestedAt,
@@ -1919,15 +1866,14 @@ WITH updated_state AS (
     FROM updated_state
     WHERE model_connections.tenant_id = updated_state.tenant_id
       AND model_connections.id = updated_state.model_connection_id
-    RETURNING model_connections.id, model_connections.tenant_id, model_connections.name, model_connections.provider, model_connections.upstream_model, model_connections.api_base_url, model_connections.credential_secret_id, model_connections.rate_limit_rpm, model_connections.timeout_ms, model_connections.status, model_connections.created_by_account_id, model_connections.updated_by_account_id, model_connections.created_at, model_connections.updated_at, model_connections.archived_at
+    RETURNING model_connections.id, model_connections.tenant_id, model_connections.name, model_connections.provider, model_connections.upstream_model, model_connections.api_base_url, model_connections.api_key_ciphertext, model_connections.api_key_preview, model_connections.rate_limit_rpm, model_connections.timeout_ms, model_connections.status, model_connections.created_by_account_id, model_connections.updated_by_account_id, model_connections.created_at, model_connections.updated_at, model_connections.archived_at
 )
 SELECT
     touched.id, touched.tenant_id, touched.name, touched.provider,
-    touched.upstream_model AS model_name, touched.upstream_model AS litellm_model,
+    touched.upstream_model AS model_name, ('nexus-agent-model-' || touched.id)::text AS litellm_model,
     touched.api_base_url,
-    COALESCE(secrets.ciphertext, '')::text AS api_key_ciphertext,
-    COALESCE(secrets.preview, '')::text AS api_key_preview,
-    touched.credential_secret_id,
+    touched.api_key_ciphertext,
+    touched.api_key_preview,
     touched.rate_limit_rpm,
     CASE WHEN touched.status = 'archived' THEN 'disabled' ELSE touched.status END::text AS status,
     GREATEST(touched.timeout_ms / 1000, 1)::integer AS timeout_seconds,
@@ -1938,7 +1884,6 @@ SELECT
     touched.created_at, touched.updated_at
 FROM touched
 JOIN updated_state ON updated_state.tenant_id = touched.tenant_id AND updated_state.model_connection_id = touched.id
-LEFT JOIN credential_secrets secrets ON secrets.tenant_id = touched.tenant_id AND secrets.id = touched.credential_secret_id AND secrets.status = 'active'
 `
 
 type UpdateAgentModelSyncResultParams struct {
@@ -1952,30 +1897,29 @@ type UpdateAgentModelSyncResultParams struct {
 }
 
 type UpdateAgentModelSyncResultRow struct {
-	ID                 string             `json:"id"`
-	TenantID           string             `json:"tenant_id"`
-	Name               string             `json:"name"`
-	Provider           string             `json:"provider"`
-	ModelName          string             `json:"model_name"`
-	LitellmModel       string             `json:"litellm_model"`
-	ApiBaseUrl         string             `json:"api_base_url"`
-	ApiKeyCiphertext   string             `json:"api_key_ciphertext"`
-	ApiKeyPreview      string             `json:"api_key_preview"`
-	CredentialSecretID pgtype.Text        `json:"credential_secret_id"`
-	RateLimitRpm       int32              `json:"rate_limit_rpm"`
-	Status             string             `json:"status"`
-	TimeoutSeconds     int32              `json:"timeout_seconds"`
-	MonthlyQuota       int64              `json:"monthly_quota"`
-	UsedQuota          int64              `json:"used_quota"`
-	LastTestedAt       pgtype.Timestamptz `json:"last_tested_at"`
-	LastTestStatus     string             `json:"last_test_status"`
-	LastTestMessage    string             `json:"last_test_message"`
-	SyncStatus         string             `json:"sync_status"`
-	LastSyncedAt       pgtype.Timestamptz `json:"last_synced_at"`
-	LastSyncError      string             `json:"last_sync_error"`
-	SyncedConfigHash   string             `json:"synced_config_hash"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ID               string             `json:"id"`
+	TenantID         string             `json:"tenant_id"`
+	Name             string             `json:"name"`
+	Provider         string             `json:"provider"`
+	ModelName        string             `json:"model_name"`
+	LitellmModel     string             `json:"litellm_model"`
+	ApiBaseUrl       string             `json:"api_base_url"`
+	ApiKeyCiphertext string             `json:"api_key_ciphertext"`
+	ApiKeyPreview    string             `json:"api_key_preview"`
+	RateLimitRpm     int32              `json:"rate_limit_rpm"`
+	Status           string             `json:"status"`
+	TimeoutSeconds   int32              `json:"timeout_seconds"`
+	MonthlyQuota     int64              `json:"monthly_quota"`
+	UsedQuota        int64              `json:"used_quota"`
+	LastTestedAt     pgtype.Timestamptz `json:"last_tested_at"`
+	LastTestStatus   string             `json:"last_test_status"`
+	LastTestMessage  string             `json:"last_test_message"`
+	SyncStatus       string             `json:"sync_status"`
+	LastSyncedAt     pgtype.Timestamptz `json:"last_synced_at"`
+	LastSyncError    string             `json:"last_sync_error"`
+	SyncedConfigHash string             `json:"synced_config_hash"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) UpdateAgentModelSyncResult(ctx context.Context, arg UpdateAgentModelSyncResultParams) (UpdateAgentModelSyncResultRow, error) {
@@ -1999,7 +1943,6 @@ func (q *Queries) UpdateAgentModelSyncResult(ctx context.Context, arg UpdateAgen
 		&i.ApiBaseUrl,
 		&i.ApiKeyCiphertext,
 		&i.ApiKeyPreview,
-		&i.CredentialSecretID,
 		&i.RateLimitRpm,
 		&i.Status,
 		&i.TimeoutSeconds,
@@ -2033,15 +1976,14 @@ WITH updated_state AS (
     FROM updated_state
     WHERE model_connections.tenant_id = updated_state.tenant_id
       AND model_connections.id = updated_state.model_connection_id
-    RETURNING model_connections.id, model_connections.tenant_id, model_connections.name, model_connections.provider, model_connections.upstream_model, model_connections.api_base_url, model_connections.credential_secret_id, model_connections.rate_limit_rpm, model_connections.timeout_ms, model_connections.status, model_connections.created_by_account_id, model_connections.updated_by_account_id, model_connections.created_at, model_connections.updated_at, model_connections.archived_at
+    RETURNING model_connections.id, model_connections.tenant_id, model_connections.name, model_connections.provider, model_connections.upstream_model, model_connections.api_base_url, model_connections.api_key_ciphertext, model_connections.api_key_preview, model_connections.rate_limit_rpm, model_connections.timeout_ms, model_connections.status, model_connections.created_by_account_id, model_connections.updated_by_account_id, model_connections.created_at, model_connections.updated_at, model_connections.archived_at
 )
 SELECT
     touched.id, touched.tenant_id, touched.name, touched.provider,
-    touched.upstream_model AS model_name, touched.upstream_model AS litellm_model,
+    touched.upstream_model AS model_name, ('nexus-agent-model-' || touched.id)::text AS litellm_model,
     touched.api_base_url,
-    COALESCE(secrets.ciphertext, '')::text AS api_key_ciphertext,
-    COALESCE(secrets.preview, '')::text AS api_key_preview,
-    touched.credential_secret_id,
+    touched.api_key_ciphertext,
+    touched.api_key_preview,
     touched.rate_limit_rpm,
     CASE WHEN touched.status = 'archived' THEN 'disabled' ELSE touched.status END::text AS status,
     GREATEST(touched.timeout_ms / 1000, 1)::integer AS timeout_seconds,
@@ -2052,7 +1994,6 @@ SELECT
     touched.created_at, touched.updated_at
 FROM touched
 JOIN updated_state ON updated_state.tenant_id = touched.tenant_id AND updated_state.model_connection_id = touched.id
-LEFT JOIN credential_secrets secrets ON secrets.tenant_id = touched.tenant_id AND secrets.id = touched.credential_secret_id AND secrets.status = 'active'
 `
 
 type UpdateAgentModelTestResultParams struct {
@@ -2065,30 +2006,29 @@ type UpdateAgentModelTestResultParams struct {
 }
 
 type UpdateAgentModelTestResultRow struct {
-	ID                 string             `json:"id"`
-	TenantID           string             `json:"tenant_id"`
-	Name               string             `json:"name"`
-	Provider           string             `json:"provider"`
-	ModelName          string             `json:"model_name"`
-	LitellmModel       string             `json:"litellm_model"`
-	ApiBaseUrl         string             `json:"api_base_url"`
-	ApiKeyCiphertext   string             `json:"api_key_ciphertext"`
-	ApiKeyPreview      string             `json:"api_key_preview"`
-	CredentialSecretID pgtype.Text        `json:"credential_secret_id"`
-	RateLimitRpm       int32              `json:"rate_limit_rpm"`
-	Status             string             `json:"status"`
-	TimeoutSeconds     int32              `json:"timeout_seconds"`
-	MonthlyQuota       int64              `json:"monthly_quota"`
-	UsedQuota          int64              `json:"used_quota"`
-	LastTestedAt       pgtype.Timestamptz `json:"last_tested_at"`
-	LastTestStatus     string             `json:"last_test_status"`
-	LastTestMessage    string             `json:"last_test_message"`
-	SyncStatus         string             `json:"sync_status"`
-	LastSyncedAt       pgtype.Timestamptz `json:"last_synced_at"`
-	LastSyncError      string             `json:"last_sync_error"`
-	SyncedConfigHash   string             `json:"synced_config_hash"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ID               string             `json:"id"`
+	TenantID         string             `json:"tenant_id"`
+	Name             string             `json:"name"`
+	Provider         string             `json:"provider"`
+	ModelName        string             `json:"model_name"`
+	LitellmModel     string             `json:"litellm_model"`
+	ApiBaseUrl       string             `json:"api_base_url"`
+	ApiKeyCiphertext string             `json:"api_key_ciphertext"`
+	ApiKeyPreview    string             `json:"api_key_preview"`
+	RateLimitRpm     int32              `json:"rate_limit_rpm"`
+	Status           string             `json:"status"`
+	TimeoutSeconds   int32              `json:"timeout_seconds"`
+	MonthlyQuota     int64              `json:"monthly_quota"`
+	UsedQuota        int64              `json:"used_quota"`
+	LastTestedAt     pgtype.Timestamptz `json:"last_tested_at"`
+	LastTestStatus   string             `json:"last_test_status"`
+	LastTestMessage  string             `json:"last_test_message"`
+	SyncStatus       string             `json:"sync_status"`
+	LastSyncedAt     pgtype.Timestamptz `json:"last_synced_at"`
+	LastSyncError    string             `json:"last_sync_error"`
+	SyncedConfigHash string             `json:"synced_config_hash"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 func (q *Queries) UpdateAgentModelTestResult(ctx context.Context, arg UpdateAgentModelTestResultParams) (UpdateAgentModelTestResultRow, error) {
@@ -2111,7 +2051,6 @@ func (q *Queries) UpdateAgentModelTestResult(ctx context.Context, arg UpdateAgen
 		&i.ApiBaseUrl,
 		&i.ApiKeyCiphertext,
 		&i.ApiKeyPreview,
-		&i.CredentialSecretID,
 		&i.RateLimitRpm,
 		&i.Status,
 		&i.TimeoutSeconds,
@@ -2133,10 +2072,11 @@ func (q *Queries) UpdateAgentModelTestResult(ctx context.Context, arg UpdateAgen
 const upsertAgentDefinition = `-- name: UpsertAgentDefinition :one
 WITH upserted_agent AS (
     INSERT INTO agents (
-        id, tenant_id, lifecycle_status, draft_revision_id, published_revision_id,
+        id, tenant_id, parent_agent_id, lifecycle_status,
+        draft_revision_id, published_revision_id,
         next_revision_no, created_by_account_id, created_at, updated_at, archived_at
     ) VALUES (
-        $1, $2, 'active', NULL, NULL,
+        $1, $2, NULL, 'active', NULL, NULL,
         GREATEST($3::int + 1, 2), $4,
         $5, $6, NULL
     )
@@ -2146,10 +2086,12 @@ WITH upserted_agent AS (
         updated_at = EXCLUDED.updated_at,
         archived_at = NULL
     WHERE agents.tenant_id = EXCLUDED.tenant_id
-    RETURNING id, tenant_id, lifecycle_status, draft_revision_id, published_revision_id, next_revision_no, created_by_account_id, created_at, updated_at, archived_at
+      AND agents.parent_agent_id IS NULL
+    RETURNING id, tenant_id, parent_agent_id, lifecycle_status, draft_revision_id, published_revision_id, next_revision_no, created_by_account_id, created_at, updated_at, archived_at
 ), inserted_revision AS (
     INSERT INTO agent_revisions (
-        id, tenant_id, agent_id, revision_no, name, description, icon, category,
+        id, tenant_id, agent_id, revision_no, ordinal,
+        name, description, icon, category,
         visibility, visibility_targets, main_agent_role, system_prompt, welcome_message,
         suggested_questions, suggested_question_translations,
         model_connection_id, model_config_checksum, timeout_ms,
@@ -2158,7 +2100,7 @@ WITH upserted_agent AS (
     )
     SELECT
         COALESCE(NULLIF($7::text, ''), $1::text || ':revision:' || GREATEST($3::int, 1)::text),
-        $2, $1, GREATEST($3::int, 1),
+        $2, $1, GREATEST($3::int, 1), NULL,
         $8, $9, $10, $11,
         $12, $13::jsonb,
         $14, $15, $16,
@@ -2176,34 +2118,110 @@ WITH upserted_agent AS (
       ON model_state.tenant_id = $2
      AND model_state.model_connection_id = $19
     ON CONFLICT (tenant_id, agent_id, revision_no) DO NOTHING
-    RETURNING id, tenant_id, agent_id, revision_no, name, description, icon, category, visibility, visibility_targets, main_agent_role, system_prompt, welcome_message, suggested_questions, suggested_question_translations, model_connection_id, model_config_checksum, timeout_ms, config_schema_version, checksum, revision_note, created_by_account_id, created_at
+    RETURNING id, tenant_id, agent_id, revision_no, ordinal, name, description, icon, category, visibility, visibility_targets, main_agent_role, system_prompt, welcome_message, suggested_questions, suggested_question_translations, model_connection_id, model_config_checksum, timeout_ms, config_schema_version, checksum, revision_note, created_by_account_id, created_at
 ), target_revision AS (
-    SELECT id, tenant_id, agent_id, revision_no, name, description, icon, category, visibility, visibility_targets, main_agent_role, system_prompt, welcome_message, suggested_questions, suggested_question_translations, model_connection_id, model_config_checksum, timeout_ms, config_schema_version, checksum, revision_note, created_by_account_id, created_at FROM inserted_revision
+    SELECT id, tenant_id, agent_id, revision_no, ordinal, name, description, icon, category, visibility, visibility_targets, main_agent_role, system_prompt, welcome_message, suggested_questions, suggested_question_translations, model_connection_id, model_config_checksum, timeout_ms, config_schema_version, checksum, revision_note, created_by_account_id, created_at FROM inserted_revision
     UNION ALL
-    SELECT revisions.id, revisions.tenant_id, revisions.agent_id, revisions.revision_no, revisions.name, revisions.description, revisions.icon, revisions.category, revisions.visibility, revisions.visibility_targets, revisions.main_agent_role, revisions.system_prompt, revisions.welcome_message, revisions.suggested_questions, revisions.suggested_question_translations, revisions.model_connection_id, revisions.model_config_checksum, revisions.timeout_ms, revisions.config_schema_version, revisions.checksum, revisions.revision_note, revisions.created_by_account_id, revisions.created_at
+    SELECT revisions.id, revisions.tenant_id, revisions.agent_id, revisions.revision_no, revisions.ordinal, revisions.name, revisions.description, revisions.icon, revisions.category, revisions.visibility, revisions.visibility_targets, revisions.main_agent_role, revisions.system_prompt, revisions.welcome_message, revisions.suggested_questions, revisions.suggested_question_translations, revisions.model_connection_id, revisions.model_config_checksum, revisions.timeout_ms, revisions.config_schema_version, revisions.checksum, revisions.revision_note, revisions.created_by_account_id, revisions.created_at
     FROM agent_revisions revisions
     WHERE revisions.tenant_id = $2
       AND revisions.agent_id = $1
       AND revisions.revision_no = GREATEST($3::int, 1)
     LIMIT 1
-), inserted_members AS (
-    INSERT INTO agent_revision_members (
-        tenant_id, revision_id, id, name, role, model_connection_id,
-        model_config_checksum, ordinal
-    )
+), requested_members AS (
     SELECT
-        target_revision.tenant_id, target_revision.id,
-        members.id, members.name, members.role, members.model_id,
-        COALESCE(NULLIF(members.model_config_checksum, ''), member_model_state.synced_config_checksum, ''),
-        members.ordinality::int - 1
+        target_revision.tenant_id,
+        target_revision.agent_id AS parent_agent_id,
+        target_revision.id AS parent_revision_id,
+        target_revision.revision_no,
+        target_revision.agent_id || ':member:' || (members.value->>'id') AS child_agent_id,
+        target_revision.id || ':member:' || (members.value->>'id') AS child_revision_id,
+        members.value->>'name' AS name,
+        members.value->>'role' AS role,
+        members.value->>'model_id' AS model_id,
+        COALESCE(NULLIF(members.value->>'model_config_checksum', ''), member_model_state.synced_config_checksum, '') AS model_config_checksum,
+        COALESCE(members.value->'tools', '[]'::jsonb) AS tools,
+        COALESCE(members.value->'external_tool_ids', '[]'::jsonb) AS external_tool_ids,
+        COALESCE(members.value->'knowledge_base_ids', '[]'::jsonb) AS knowledge_base_ids,
+        members.ordinality::int - 1 AS ordinal
     FROM target_revision
-    CROSS JOIN LATERAL jsonb_to_recordset($24::jsonb)
-        WITH ORDINALITY AS members(id text, name text, role text, model_id text, model_config_checksum text, tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb, ordinality bigint)
+    CROSS JOIN LATERAL jsonb_array_elements($24::jsonb)
+        WITH ORDINALITY AS members(value, ordinality)
     LEFT JOIN model_connection_state member_model_state
       ON member_model_state.tenant_id = target_revision.tenant_id
-     AND member_model_state.model_connection_id = members.model_id
-    ON CONFLICT DO NOTHING
-    RETURNING tenant_id, revision_id, id, name, role, model_connection_id, model_config_checksum, ordinal
+     AND member_model_state.model_connection_id = members.value->>'model_id'
+), upserted_children AS (
+    INSERT INTO agents (
+        id, tenant_id, parent_agent_id, lifecycle_status,
+        draft_revision_id, published_revision_id,
+        next_revision_no, created_by_account_id, created_at, updated_at, archived_at
+    )
+    SELECT
+        member.child_agent_id, member.tenant_id, member.parent_agent_id, 'active',
+        NULL, NULL, GREATEST(member.revision_no + 1, 2),
+        $4, $5, $6, NULL
+    FROM requested_members member
+    ON CONFLICT (id) DO UPDATE SET
+        lifecycle_status = 'active',
+        next_revision_no = GREATEST(agents.next_revision_no, EXCLUDED.next_revision_no),
+        updated_at = EXCLUDED.updated_at,
+        archived_at = NULL
+    WHERE agents.tenant_id = EXCLUDED.tenant_id
+      AND agents.parent_agent_id = EXCLUDED.parent_agent_id
+    RETURNING id, tenant_id, parent_agent_id, lifecycle_status, draft_revision_id, published_revision_id, next_revision_no, created_by_account_id, created_at, updated_at, archived_at
+), archived_children AS (
+    UPDATE agents child
+    SET lifecycle_status = 'archived',
+        archived_at = COALESCE(child.archived_at, $6),
+        updated_at = $6
+    WHERE child.tenant_id = $2
+      AND child.parent_agent_id = $1
+      AND NOT EXISTS (
+          SELECT 1 FROM requested_members member
+          WHERE member.child_agent_id = child.id
+      )
+    RETURNING child.id
+), inserted_child_revisions AS (
+    INSERT INTO agent_revisions (
+        id, tenant_id, agent_id, revision_no, ordinal,
+        name, description, icon, category,
+        visibility, visibility_targets, main_agent_role, system_prompt, welcome_message,
+        suggested_questions, suggested_question_translations,
+        model_connection_id, model_config_checksum, timeout_ms,
+        config_schema_version, checksum, revision_note,
+        created_by_account_id, created_at
+    )
+    SELECT
+        member.child_revision_id, member.tenant_id, member.child_agent_id,
+        member.revision_no, member.ordinal,
+        member.name, '', 'AI', target_revision.category,
+        target_revision.visibility, target_revision.visibility_targets,
+        member.role, '', '', '[]'::jsonb, '[]'::jsonb,
+        member.model_id, member.model_config_checksum, target_revision.timeout_ms,
+        target_revision.config_schema_version,
+        md5(concat_ws('|', target_revision.checksum, member.child_agent_id, member.role,
+            member.model_id, member.model_config_checksum, member.tools::text,
+            member.external_tool_ids::text, member.knowledge_base_ids::text)),
+        target_revision.revision_note,
+        target_revision.created_by_account_id, target_revision.created_at
+    FROM requested_members member
+    JOIN target_revision ON target_revision.id = member.parent_revision_id
+    JOIN upserted_children child ON child.id = member.child_agent_id
+    ON CONFLICT (tenant_id, agent_id, revision_no) DO NOTHING
+    RETURNING id, tenant_id, agent_id, revision_no, ordinal, name, description, icon, category, visibility, visibility_targets, main_agent_role, system_prompt, welcome_message, suggested_questions, suggested_question_translations, model_connection_id, model_config_checksum, timeout_ms, config_schema_version, checksum, revision_note, created_by_account_id, created_at
+), target_child_revisions AS (
+    SELECT id, tenant_id, agent_id, revision_no, ordinal, name, description, icon, category, visibility, visibility_targets, main_agent_role, system_prompt, welcome_message, suggested_questions, suggested_question_translations, model_connection_id, model_config_checksum, timeout_ms, config_schema_version, checksum, revision_note, created_by_account_id, created_at FROM inserted_child_revisions
+    UNION ALL
+    SELECT revision.id, revision.tenant_id, revision.agent_id, revision.revision_no, revision.ordinal, revision.name, revision.description, revision.icon, revision.category, revision.visibility, revision.visibility_targets, revision.main_agent_role, revision.system_prompt, revision.welcome_message, revision.suggested_questions, revision.suggested_question_translations, revision.model_connection_id, revision.model_config_checksum, revision.timeout_ms, revision.config_schema_version, revision.checksum, revision.revision_note, revision.created_by_account_id, revision.created_at
+    FROM agent_revisions revision
+    JOIN requested_members member
+      ON member.tenant_id = revision.tenant_id
+     AND member.child_agent_id = revision.agent_id
+     AND member.revision_no = revision.revision_no
+    WHERE NOT EXISTS (
+        SELECT 1 FROM inserted_child_revisions inserted
+        WHERE inserted.tenant_id = revision.tenant_id AND inserted.id = revision.id
+    )
 ), inserted_tools AS (
     INSERT INTO agent_revision_builtin_tools (tenant_id, revision_id, tool_key, ordinal, config)
     SELECT target_revision.tenant_id, target_revision.id, tool.value,
@@ -2240,33 +2258,36 @@ WITH upserted_agent AS (
      AND external_connections.status = 'active'
     ON CONFLICT DO NOTHING
     RETURNING tenant_id, revision_id, external_tool_id, tool_schema_checksum, ordinal, config
-), inserted_member_tools AS (
-    INSERT INTO agent_revision_member_builtin_tools (
-        tenant_id, revision_id, member_id, tool_key, ordinal, config
+), inserted_child_tools AS (
+    INSERT INTO agent_revision_builtin_tools (
+        tenant_id, revision_id, tool_key, ordinal, config
     )
-    SELECT target_revision.tenant_id, target_revision.id, members.id,
+    SELECT member.tenant_id, revision.id,
            tool.value, tool.ordinality::int - 1, '{}'::jsonb
-    FROM target_revision
-    CROSS JOIN LATERAL jsonb_to_recordset($24::jsonb)
-        AS members(id text, tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb)
-    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(members.tools, '[]'::jsonb)) WITH ORDINALITY AS tool(value, ordinality)
+    FROM requested_members member
+    JOIN target_child_revisions revision
+      ON revision.tenant_id = member.tenant_id
+     AND revision.agent_id = member.child_agent_id
+     AND revision.revision_no = member.revision_no
+    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(member.tools, '[]'::jsonb)) WITH ORDINALITY AS tool(value, ordinality)
     ON CONFLICT DO NOTHING
-    RETURNING tenant_id, revision_id, member_id, tool_key, ordinal, config
-), inserted_member_external_tools AS (
-    INSERT INTO agent_revision_member_external_tools (
-        tenant_id, revision_id, member_id, external_tool_id,
-        tool_schema_checksum, ordinal, config
+    RETURNING tenant_id, revision_id, tool_key, ordinal, config
+), inserted_child_external_tools AS (
+    INSERT INTO agent_revision_external_tools (
+        tenant_id, revision_id, external_tool_id, tool_schema_checksum, ordinal, config
     )
-    SELECT target_revision.tenant_id, target_revision.id, members.id,
+    SELECT member.tenant_id, revision.id,
            requested.value, external_tools.schema_checksum,
            requested.ordinality::int - 1, '{}'::jsonb
-    FROM target_revision
-    CROSS JOIN LATERAL jsonb_to_recordset($24::jsonb)
-        AS members(id text, tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb)
-    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(members.external_tool_ids, '[]'::jsonb))
+    FROM requested_members member
+    JOIN target_child_revisions revision
+      ON revision.tenant_id = member.tenant_id
+     AND revision.agent_id = member.child_agent_id
+     AND revision.revision_no = member.revision_no
+    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(member.external_tool_ids, '[]'::jsonb))
         WITH ORDINALITY AS requested(value, ordinality)
     JOIN external_tools
-      ON external_tools.tenant_id = target_revision.tenant_id
+      ON external_tools.tenant_id = member.tenant_id
      AND external_tools.id = requested.value
      AND external_tools.enabled
      AND external_tools.archived_at IS NULL
@@ -2275,19 +2296,39 @@ WITH upserted_agent AS (
      AND external_connections.id = external_tools.connection_id
      AND external_connections.status = 'active'
     ON CONFLICT DO NOTHING
-    RETURNING tenant_id, revision_id, member_id, external_tool_id, tool_schema_checksum, ordinal, config
-), inserted_member_knowledge AS (
-    INSERT INTO agent_revision_member_knowledge_bases (
-        tenant_id, revision_id, member_id, knowledge_base_id, ordinal
+    RETURNING tenant_id, revision_id, external_tool_id, tool_schema_checksum, ordinal, config
+), inserted_child_knowledge AS (
+    INSERT INTO agent_revision_knowledge_bases (
+        tenant_id, revision_id, knowledge_base_id, ordinal
     )
-    SELECT target_revision.tenant_id, target_revision.id, members.id,
+    SELECT member.tenant_id, revision.id,
            knowledge.value, knowledge.ordinality::int - 1
-    FROM target_revision
-    CROSS JOIN LATERAL jsonb_to_recordset($24::jsonb)
-        AS members(id text, tools jsonb, external_tool_ids jsonb, knowledge_base_ids jsonb)
-    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(members.knowledge_base_ids, '[]'::jsonb)) WITH ORDINALITY AS knowledge(value, ordinality)
+    FROM requested_members member
+    JOIN target_child_revisions revision
+      ON revision.tenant_id = member.tenant_id
+     AND revision.agent_id = member.child_agent_id
+     AND revision.revision_no = member.revision_no
+    CROSS JOIN LATERAL jsonb_array_elements_text(COALESCE(member.knowledge_base_ids, '[]'::jsonb)) WITH ORDINALITY AS knowledge(value, ordinality)
     ON CONFLICT DO NOTHING
-    RETURNING tenant_id, revision_id, member_id, knowledge_base_id, ordinal
+    RETURNING tenant_id, revision_id, knowledge_base_id, ordinal
+), updated_children AS (
+    UPDATE agents child
+    SET draft_revision_id = child_revision.id,
+        published_revision_id = (
+            SELECT published_child_revision.id
+            FROM agent_revisions published_root_revision
+            JOIN agent_revisions published_child_revision
+              ON published_child_revision.tenant_id = published_root_revision.tenant_id
+             AND published_child_revision.agent_id = child.id
+             AND published_child_revision.revision_no = published_root_revision.revision_no
+            WHERE published_root_revision.tenant_id = child.tenant_id
+              AND published_root_revision.id = NULLIF($25::text, '')
+        ),
+        updated_at = $6
+    FROM target_child_revisions child_revision
+    WHERE child.tenant_id = child_revision.tenant_id
+      AND child.id = child_revision.agent_id
+    RETURNING child.id
 ), updated_agent AS (
     UPDATE agents
     SET draft_revision_id = target_revision.id,
@@ -2296,7 +2337,7 @@ WITH upserted_agent AS (
     FROM target_revision
     WHERE agents.tenant_id = target_revision.tenant_id
       AND agents.id = target_revision.agent_id
-    RETURNING agents.id, agents.tenant_id, agents.lifecycle_status, agents.draft_revision_id, agents.published_revision_id, agents.next_revision_no, agents.created_by_account_id, agents.created_at, agents.updated_at, agents.archived_at
+    RETURNING agents.id, agents.tenant_id, agents.parent_agent_id, agents.lifecycle_status, agents.draft_revision_id, agents.published_revision_id, agents.next_revision_no, agents.created_by_account_id, agents.created_at, agents.updated_at, agents.archived_at
 )
 SELECT updated_agent.id, updated_agent.tenant_id, target_revision.id AS revision_id
 FROM updated_agent
@@ -2453,54 +2494,41 @@ func (q *Queries) UpsertAgentExternalToolCapabilityV2(ctx context.Context, arg U
 
 const upsertAgentModel = `-- name: UpsertAgentModel :one
 
-WITH upserted_secret AS (
-    INSERT INTO credential_secrets (
-        id, tenant_id, name, secret_type, ciphertext, preview, status,
-        created_by_account_id, created_at, updated_at, revoked_at
-    )
-    SELECT
-        COALESCE(NULLIF($1::text, ''), $2::text || ':credential'), $3,
-        $4::text || ' API key', 'api_key',
-        $5, $6, 'active',
-        NULL, $7, $8, NULL
-    WHERE $5::text <> ''
-    ON CONFLICT (id) DO UPDATE SET
-        name = EXCLUDED.name,
-        ciphertext = EXCLUDED.ciphertext,
-        preview = EXCLUDED.preview,
-        status = 'active',
-        updated_at = EXCLUDED.updated_at,
-        revoked_at = NULL
-    WHERE credential_secrets.tenant_id = EXCLUDED.tenant_id
-    RETURNING id
-), upserted_connection AS (
+WITH upserted_connection AS (
     INSERT INTO model_connections (
         id, tenant_id, name, provider, upstream_model, api_base_url,
-        credential_secret_id, rate_limit_rpm, timeout_ms, status,
+        api_key_ciphertext, api_key_preview, rate_limit_rpm, timeout_ms, status,
         created_by_account_id, updated_by_account_id,
         created_at, updated_at, archived_at
     ) VALUES (
-        $2, $3, $4, $9,
-        COALESCE(NULLIF($10::text, ''), $11),
-        $12,
-        CASE WHEN $5::text = '' THEN NULL ELSE COALESCE(NULLIF($1::text, ''), $2::text || ':credential') END,
-        $13, GREATEST($14::int, 1) * 1000,
-        $15, NULL, NULL,
-        $7, $8, NULL
+        $1, $2, $3, $4,
+        $5,
+        $6,
+        $7, $8,
+        $9, GREATEST($10::int, 1) * 1000,
+        $11, NULL, NULL,
+        $12, $13, NULL
     )
     ON CONFLICT (id) DO UPDATE SET
         name = EXCLUDED.name,
         provider = EXCLUDED.provider,
         upstream_model = EXCLUDED.upstream_model,
         api_base_url = EXCLUDED.api_base_url,
-        credential_secret_id = COALESCE(EXCLUDED.credential_secret_id, model_connections.credential_secret_id),
+        api_key_ciphertext = CASE
+            WHEN EXCLUDED.api_key_ciphertext = '' THEN model_connections.api_key_ciphertext
+            ELSE EXCLUDED.api_key_ciphertext
+        END,
+        api_key_preview = CASE
+            WHEN EXCLUDED.api_key_ciphertext = '' THEN model_connections.api_key_preview
+            ELSE EXCLUDED.api_key_preview
+        END,
         rate_limit_rpm = EXCLUDED.rate_limit_rpm,
         timeout_ms = EXCLUDED.timeout_ms,
         status = EXCLUDED.status,
         updated_at = EXCLUDED.updated_at,
         archived_at = NULL
     WHERE model_connections.tenant_id = EXCLUDED.tenant_id
-    RETURNING id, tenant_id, name, provider, upstream_model, api_base_url, credential_secret_id, rate_limit_rpm, timeout_ms, status, created_by_account_id, updated_by_account_id, created_at, updated_at, archived_at
+    RETURNING id, tenant_id, name, provider, upstream_model, api_base_url, api_key_ciphertext, api_key_preview, rate_limit_rpm, timeout_ms, status, created_by_account_id, updated_by_account_id, created_at, updated_at, archived_at
 ), upserted_state AS (
     INSERT INTO model_connection_state (
         tenant_id, model_connection_id, sync_status, synced_config_checksum,
@@ -2508,10 +2536,10 @@ WITH upserted_secret AS (
         last_test_message, updated_at
     )
     SELECT
-        tenant_id, id, $16, $17,
+        tenant_id, id, $14, $15,
+        $16, $17,
         $18, $19,
-        $20, $21,
-        $22, $8
+        $20, $13
     FROM upserted_connection
     ON CONFLICT (tenant_id, model_connection_id) DO UPDATE SET
         sync_status = EXCLUDED.sync_status,
@@ -2527,11 +2555,10 @@ WITH upserted_secret AS (
 SELECT
     connections.id, connections.tenant_id, connections.name, connections.provider,
     connections.upstream_model AS model_name,
-    connections.upstream_model AS litellm_model,
+    ('nexus-agent-model-' || connections.id)::text AS litellm_model,
     connections.api_base_url,
-    COALESCE(secrets.ciphertext, '')::text AS api_key_ciphertext,
-    COALESCE(secrets.preview, '')::text AS api_key_preview,
-    connections.credential_secret_id,
+    connections.api_key_ciphertext,
+    connections.api_key_preview,
     connections.rate_limit_rpm,
     CASE WHEN connections.status = 'archived' THEN 'disabled' ELSE connections.status END::text AS status,
     GREATEST(connections.timeout_ms / 1000, 1)::integer AS timeout_seconds,
@@ -2545,83 +2572,74 @@ FROM upserted_connection connections
 JOIN upserted_state state
   ON state.tenant_id = connections.tenant_id
  AND state.model_connection_id = connections.id
-LEFT JOIN credential_secrets secrets
-  ON secrets.tenant_id = connections.tenant_id
- AND secrets.id = connections.credential_secret_id
- AND secrets.status = 'active'
 `
 
 type UpsertAgentModelParams struct {
-	CredentialSecretID string             `json:"credential_secret_id"`
-	ID                 string             `json:"id"`
-	TenantID           string             `json:"tenant_id"`
-	Name               string             `json:"name"`
-	ApiKeyCiphertext   string             `json:"api_key_ciphertext"`
-	ApiKeyPreview      string             `json:"api_key_preview"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	Provider           string             `json:"provider"`
-	LitellmModel       string             `json:"litellm_model"`
-	ModelName          interface{}        `json:"model_name"`
-	ApiBaseUrl         string             `json:"api_base_url"`
-	RateLimitRpm       int32              `json:"rate_limit_rpm"`
-	TimeoutSeconds     int32              `json:"timeout_seconds"`
-	Status             string             `json:"status"`
-	SyncStatus         string             `json:"sync_status"`
-	SyncedConfigHash   string             `json:"synced_config_hash"`
-	LastSyncedAt       pgtype.Timestamptz `json:"last_synced_at"`
-	LastSyncError      string             `json:"last_sync_error"`
-	LastTestedAt       pgtype.Timestamptz `json:"last_tested_at"`
-	LastTestStatus     string             `json:"last_test_status"`
-	LastTestMessage    string             `json:"last_test_message"`
+	ID               string             `json:"id"`
+	TenantID         string             `json:"tenant_id"`
+	Name             string             `json:"name"`
+	Provider         string             `json:"provider"`
+	ModelName        string             `json:"model_name"`
+	ApiBaseUrl       string             `json:"api_base_url"`
+	ApiKeyCiphertext string             `json:"api_key_ciphertext"`
+	ApiKeyPreview    string             `json:"api_key_preview"`
+	RateLimitRpm     int32              `json:"rate_limit_rpm"`
+	TimeoutSeconds   int32              `json:"timeout_seconds"`
+	Status           string             `json:"status"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+	SyncStatus       string             `json:"sync_status"`
+	SyncedConfigHash string             `json:"synced_config_hash"`
+	LastSyncedAt     pgtype.Timestamptz `json:"last_synced_at"`
+	LastSyncError    string             `json:"last_sync_error"`
+	LastTestedAt     pgtype.Timestamptz `json:"last_tested_at"`
+	LastTestStatus   string             `json:"last_test_status"`
+	LastTestMessage  string             `json:"last_test_message"`
 }
 
 type UpsertAgentModelRow struct {
-	ID                 string             `json:"id"`
-	TenantID           string             `json:"tenant_id"`
-	Name               string             `json:"name"`
-	Provider           string             `json:"provider"`
-	ModelName          string             `json:"model_name"`
-	LitellmModel       string             `json:"litellm_model"`
-	ApiBaseUrl         string             `json:"api_base_url"`
-	ApiKeyCiphertext   string             `json:"api_key_ciphertext"`
-	ApiKeyPreview      string             `json:"api_key_preview"`
-	CredentialSecretID pgtype.Text        `json:"credential_secret_id"`
-	RateLimitRpm       int32              `json:"rate_limit_rpm"`
-	Status             string             `json:"status"`
-	TimeoutSeconds     int32              `json:"timeout_seconds"`
-	MonthlyQuota       int64              `json:"monthly_quota"`
-	UsedQuota          int64              `json:"used_quota"`
-	LastTestedAt       pgtype.Timestamptz `json:"last_tested_at"`
-	LastTestStatus     string             `json:"last_test_status"`
-	LastTestMessage    string             `json:"last_test_message"`
-	SyncStatus         string             `json:"sync_status"`
-	LastSyncedAt       pgtype.Timestamptz `json:"last_synced_at"`
-	LastSyncError      string             `json:"last_sync_error"`
-	SyncedConfigHash   string             `json:"synced_config_hash"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+	ID               string             `json:"id"`
+	TenantID         string             `json:"tenant_id"`
+	Name             string             `json:"name"`
+	Provider         string             `json:"provider"`
+	ModelName        string             `json:"model_name"`
+	LitellmModel     string             `json:"litellm_model"`
+	ApiBaseUrl       string             `json:"api_base_url"`
+	ApiKeyCiphertext string             `json:"api_key_ciphertext"`
+	ApiKeyPreview    string             `json:"api_key_preview"`
+	RateLimitRpm     int32              `json:"rate_limit_rpm"`
+	Status           string             `json:"status"`
+	TimeoutSeconds   int32              `json:"timeout_seconds"`
+	MonthlyQuota     int64              `json:"monthly_quota"`
+	UsedQuota        int64              `json:"used_quota"`
+	LastTestedAt     pgtype.Timestamptz `json:"last_tested_at"`
+	LastTestStatus   string             `json:"last_test_status"`
+	LastTestMessage  string             `json:"last_test_message"`
+	SyncStatus       string             `json:"sync_status"`
+	LastSyncedAt     pgtype.Timestamptz `json:"last_synced_at"`
+	LastSyncError    string             `json:"last_sync_error"`
+	SyncedConfigHash string             `json:"synced_config_hash"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
 }
 
 // Agent v2 administration persistence. Legacy query names are retained as
 // compatibility projections while all writes target the v2 aggregates.
 func (q *Queries) UpsertAgentModel(ctx context.Context, arg UpsertAgentModelParams) (UpsertAgentModelRow, error) {
 	row := q.db.QueryRow(ctx, upsertAgentModel,
-		arg.CredentialSecretID,
 		arg.ID,
 		arg.TenantID,
 		arg.Name,
-		arg.ApiKeyCiphertext,
-		arg.ApiKeyPreview,
-		arg.CreatedAt,
-		arg.UpdatedAt,
 		arg.Provider,
-		arg.LitellmModel,
 		arg.ModelName,
 		arg.ApiBaseUrl,
+		arg.ApiKeyCiphertext,
+		arg.ApiKeyPreview,
 		arg.RateLimitRpm,
 		arg.TimeoutSeconds,
 		arg.Status,
+		arg.CreatedAt,
+		arg.UpdatedAt,
 		arg.SyncStatus,
 		arg.SyncedConfigHash,
 		arg.LastSyncedAt,
@@ -2641,7 +2659,6 @@ func (q *Queries) UpsertAgentModel(ctx context.Context, arg UpsertAgentModelPara
 		&i.ApiBaseUrl,
 		&i.ApiKeyCiphertext,
 		&i.ApiKeyPreview,
-		&i.CredentialSecretID,
 		&i.RateLimitRpm,
 		&i.Status,
 		&i.TimeoutSeconds,
@@ -2656,72 +2673,6 @@ func (q *Queries) UpsertAgentModel(ctx context.Context, arg UpsertAgentModelPara
 		&i.SyncedConfigHash,
 		&i.CreatedAt,
 		&i.UpdatedAt,
-	)
-	return i, err
-}
-
-const upsertCredentialSecretV2 = `-- name: UpsertCredentialSecretV2 :one
-INSERT INTO credential_secrets (
-    id, tenant_id, name, secret_type, ciphertext, preview, status,
-    created_by_account_id, created_at, updated_at, revoked_at
-) VALUES (
-    $1, $2, $3, $4,
-    $5, $6, $7,
-    $8, $9, $10, $11
-)
-ON CONFLICT (id) DO UPDATE SET
-    name = EXCLUDED.name,
-    secret_type = EXCLUDED.secret_type,
-    ciphertext = EXCLUDED.ciphertext,
-    preview = EXCLUDED.preview,
-    status = EXCLUDED.status,
-    updated_at = EXCLUDED.updated_at,
-    revoked_at = EXCLUDED.revoked_at
-WHERE credential_secrets.tenant_id = EXCLUDED.tenant_id
-RETURNING id, tenant_id, name, secret_type, ciphertext, preview, status, created_by_account_id, created_at, updated_at, revoked_at
-`
-
-type UpsertCredentialSecretV2Params struct {
-	ID                 string             `json:"id"`
-	TenantID           string             `json:"tenant_id"`
-	Name               string             `json:"name"`
-	SecretType         string             `json:"secret_type"`
-	Ciphertext         string             `json:"ciphertext"`
-	Preview            string             `json:"preview"`
-	Status             string             `json:"status"`
-	CreatedByAccountID pgtype.Text        `json:"created_by_account_id"`
-	CreatedAt          pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
-	RevokedAt          pgtype.Timestamptz `json:"revoked_at"`
-}
-
-func (q *Queries) UpsertCredentialSecretV2(ctx context.Context, arg UpsertCredentialSecretV2Params) (CredentialSecret, error) {
-	row := q.db.QueryRow(ctx, upsertCredentialSecretV2,
-		arg.ID,
-		arg.TenantID,
-		arg.Name,
-		arg.SecretType,
-		arg.Ciphertext,
-		arg.Preview,
-		arg.Status,
-		arg.CreatedByAccountID,
-		arg.CreatedAt,
-		arg.UpdatedAt,
-		arg.RevokedAt,
-	)
-	var i CredentialSecret
-	err := row.Scan(
-		&i.ID,
-		&i.TenantID,
-		&i.Name,
-		&i.SecretType,
-		&i.Ciphertext,
-		&i.Preview,
-		&i.Status,
-		&i.CreatedByAccountID,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-		&i.RevokedAt,
 	)
 	return i, err
 }

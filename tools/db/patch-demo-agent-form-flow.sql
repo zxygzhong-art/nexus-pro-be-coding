@@ -138,9 +138,13 @@ SELECT
     (SELECT count(*) FROM leave_balances balance WHERE balance.tenant_id = context.tenant_id AND balance.employee_id = context.employee_id) AS leave_balance_count,
     assistant_revision.revision_no AS assistant_version,
     (SELECT count(*)
-     FROM agent_revision_members member
-     WHERE member.tenant_id = assistant_revision.tenant_id
-       AND member.revision_id = assistant_revision.id) AS assistant_sub_agent_count
+     FROM agents child
+     JOIN agent_revisions child_revision
+       ON child_revision.tenant_id = child.tenant_id
+      AND child_revision.agent_id = child.id
+      AND child_revision.revision_no = assistant_revision.revision_no
+     WHERE child.tenant_id = assistant_revision.tenant_id
+       AND child.parent_agent_id = assistant.id) AS assistant_sub_agent_count
 FROM demo_agent_flow_context context
 JOIN employees employee ON employee.tenant_id = context.tenant_id AND employee.id = context.employee_id
 JOIN agents assistant ON assistant.tenant_id = context.tenant_id AND assistant.id = 'adef-' || context.tenant_id || '-assistant'

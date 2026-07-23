@@ -1,7 +1,9 @@
 package service_test
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"nexus-pro-api/internal/domain"
 	"nexus-pro-api/internal/service"
@@ -43,5 +45,58 @@ func TestSystemLeaveTypeCatalogDefaultsAndTenantOverride(t *testing.T) {
 	}
 	if catalog.Enabled != 14 {
 		t.Fatalf("expected tenant override to reduce enabled count: %+v", catalog)
+	}
+}
+
+func TestLeaveTypeParentAndChildEnablementAreIndependentByID(t *testing.T) {
+	base, ctx := newServiceFixture([]domain.Permission{
+		{Resource: "attendance.leave", Action: "read", Scope: "all"},
+		{Resource: "attendance.leave", Action: "update", Scope: "all"},
+	})
+	store := base.Store()
+	now := time.Date(2026, 7, 22, 10, 0, 0, 0, time.UTC)
+	if err := store.UpsertLeaveType(context.Background(), domain.LeaveType{
+		ID: "category:s0020", TenantID: "tenant-1", Code: "s0020", Kind: "category",
+		NameZH: "病假分類", Enabled: true, DisplayOrder: 20, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.UpsertLeaveType(context.Background(), domain.LeaveType{
+		ID: "s0020", TenantID: "tenant-1", Code: "s0020", Kind: "item",
+		ParentID: "category:s0020", ParentCode: "s0020", NameZH: "全薪病假",
+		Enabled: true, DisplayOrder: 21, UpdatedAt: now,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	svc := service.New(store)
+
+	if _, err := svc.Attendance().SetLeaveTypeEnabled(ctx, "category:s0020", domain.SetLeaveTypeEnabledInput{Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := svc.Attendance().ListLeaveTypes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]bool{}
+	for _, item := range catalog.Items {
+		states[item.ID] = item.Enabled
+	}
+	if states["category:s0020"] || !states["s0020"] {
+		t.Fatalf("parent update must not change child state: %+v", states)
+	}
+
+	if _, err := svc.Attendance().SetLeaveTypeEnabled(ctx, "s0020", domain.SetLeaveTypeEnabledInput{Enabled: false}); err != nil {
+		t.Fatal(err)
+	}
+	catalog, err = svc.Attendance().ListLeaveTypes(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	states = map[string]bool{}
+	for _, item := range catalog.Items {
+		states[item.ID] = item.Enabled
+	}
+	if states["category:s0020"] || states["s0020"] {
+		t.Fatalf("child update must remain independent from parent: %+v", states)
 	}
 }

@@ -31,11 +31,14 @@ func workspaceHolidayName(_ time.Time) *string {
 	return nil
 }
 
-// workspaceLeaveLegend includes inactive historical leave types so old leave
+// workspaceLeaveLegend includes inactive historical item nodes so old leave
 // facts remain interpretable after administrators disable a catalog item.
 func workspaceLeaveLegend(leaveTypes []LeaveType) []WorkspaceLeaveLegendItem {
 	legend := make([]WorkspaceLeaveLegendItem, 0, len(leaveTypes))
 	for _, leaveType := range leaveTypes {
+		if leaveType.Kind != "" && leaveType.Kind != "item" {
+			continue
+		}
 		code := normalizeLeaveTypeCode(leaveType.Code)
 		name := firstNonEmptyString(leaveType.NameZH, leaveType.NameEN, code)
 		if code == "" || name == "" {
@@ -47,6 +50,18 @@ func workspaceLeaveLegend(leaveTypes []LeaveType) []WorkspaceLeaveLegendItem {
 		})
 	}
 	return legend
+}
+
+// workspaceEnabledLeaveLegend is the client-facing leave list: selectable item
+// nodes only, filtered by their own independent enabled state.
+func workspaceEnabledLeaveLegend(leaveTypes []LeaveType) []WorkspaceLeaveLegendItem {
+	enabled := make([]LeaveType, 0, len(leaveTypes))
+	for _, leaveType := range leaveTypes {
+		if leaveType.Enabled && (leaveType.Kind == "" || leaveType.Kind == "item") {
+			enabled = append(enabled, leaveType)
+		}
+	}
+	return workspaceLeaveLegend(enabled)
 }
 
 // workspaceAuditLogQueryEmpty 處理工作區稽覈 log 查詢空值。
@@ -229,8 +244,9 @@ func workspaceRoundHours(value float64) float64 {
 	return math.Round(math.Max(0, value)*100) / 100
 }
 
-// workspaceAttendanceEvidenceCells reads the shared persisted projections for
-// local clock evidence while retaining eHRMS daily/shift ceilings as fallback.
+// workspaceAttendanceEvidenceCells treats the shared persisted projection as
+// the default attendance read model. eHRMS summaries only fill employee-days
+// that do not have a projection yet.
 func workspaceAttendanceEvidenceCells(summaries []AttendanceDailySummary, projections map[string]map[string]domain.AttendanceDayProjection) map[string]map[string]workspaceAttendanceEvidence {
 	out := map[string]map[string]workspaceAttendanceEvidence{}
 	for _, summary := range summaries {
@@ -239,12 +255,6 @@ func workspaceAttendanceEvidenceCells(summaries []AttendanceDailySummary, projec
 		}
 		actualHours := math.Max(0, summary.ClockHours)
 		candidateHours := actualHours
-		if summary.AttendCounted {
-			candidateHours = math.Max(0, summary.AttendHours)
-			if actualHours == 0 {
-				actualHours = candidateHours
-			}
-		}
 		if out[summary.EmployeeID] == nil {
 			out[summary.EmployeeID] = map[string]workspaceAttendanceEvidence{}
 		}
@@ -260,21 +270,17 @@ func workspaceAttendanceEvidenceCells(summaries []AttendanceDailySummary, projec
 			out[employeeID] = map[string]workspaceAttendanceEvidence{}
 		}
 		for workDate, projection := range projectionsByDate {
-			if projection.PunchCount == 0 {
-				continue
-			}
-			actualHours := 0.0
+			maxHours := math.Max(0, float64(projection.RequiredMinutes)/60)
+			workedHours := 0.0
 			if projection.ClockInRecordID != "" && projection.ClockOutRecordID != "" {
-				actualHours = math.Max(0, float64(projection.WorkedMinutes)/60)
+				workedHours = math.Max(0, float64(projection.WorkedMinutes)/60)
 			}
-			evidence := out[employeeID][workDate]
-			if evidence.MaxHours <= 0 {
-				evidence.MaxHours = workspaceDayHours
+			out[employeeID][workDate] = workspaceAttendanceEvidence{
+				ActualHours:    workedHours,
+				MaxHours:       maxHours,
+				CandidateHours: workedHours,
+				Source:         "projection",
 			}
-			evidence.ActualHours = actualHours
-			evidence.CandidateHours = actualHours
-			evidence.Source = "clock"
-			out[employeeID][workDate] = evidence
 		}
 	}
 	return out
@@ -371,8 +377,8 @@ func workspaceClockCells(clocks []AttendanceClockRecord, summaries []AttendanceD
 
 // workspaceClockCellFromSummary 將 eHRMS 日彙總的打卡時間與缺卡、工時不足狀態投影到工作區矩陣。
 func workspaceClockCellFromSummary(summary AttendanceDailySummary, leaveCells map[string]map[string]workspaceLeaveCell, overtimeCells map[string]map[string]float64) (workspaceClockCell, bool) {
-	clockIn := utils.FirstNonEmpty(summary.ClockStart, summary.AttendStart)
-	clockOut := utils.FirstNonEmpty(summary.ClockEnd, summary.AttendEnd)
+	clockIn := summary.ClockStart
+	clockOut := summary.ClockEnd
 	if clockIn == "" && clockOut == "" && summary.ClockHours <= 0 {
 		return workspaceClockCell{}, false
 	}
@@ -480,10 +486,18 @@ func workspaceAttendanceMatrix(employees []Employee, cards map[string]WorkspaceE
 					}
 				}
 			}
-			if clock, ok := clockCells[employee.ID][date.Key]; ok && cell.Type == "work" && (clock.In != "" || clock.Out != "") {
-				cell.Recorded = true
-				if cell.Label == "" {
-					cell.Label = "打卡"
+			if clock, ok := clockCells[employee.ID][date.Key]; ok {
+				cell.In = clock.In
+				cell.Out = clock.Out
+				cell.InLoc = clock.InLoc
+				cell.OutLoc = clock.OutLoc
+				cell.Abnormal = clock.Abnormal
+				cell.Reason = clock.Reason
+				if cell.Type == "work" && (clock.In != "" || clock.Out != "") {
+					cell.Recorded = true
+					if cell.Label == "" {
+						cell.Label = "打卡"
+					}
 				}
 			}
 			if cell.Type == "work" {

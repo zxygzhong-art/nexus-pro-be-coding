@@ -133,7 +133,7 @@ func (c WorkflowService) loadFormDataSources(ctx RequestContext) (domain.FormDat
 	}
 	leaveTypeRecords := make([]map[string]interface{}, 0, len(leaveTypes))
 	for _, leaveType := range leaveTypes {
-		if !leaveType.Enabled {
+		if !leaveType.Enabled || (leaveType.Kind != "" && leaveType.Kind != "item") {
 			continue
 		}
 		leaveTypeRecords = append(leaveTypeRecords, map[string]interface{}{

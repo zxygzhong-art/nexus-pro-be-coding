@@ -91,6 +91,9 @@ func TestSyncEHRMSEmployeesUsesSeniorityStartForPendingHire(t *testing.T) {
 	if err != nil || !ok {
 		t.Fatalf("expected pending employee, ok=%v err=%v", ok, err)
 	}
+	if employee.ID != "IKM100" {
+		t.Fatalf("expected employees.id to equal emp_id, got %q", employee.ID)
+	}
 	wantHireDate := time.Date(2026, 8, 1, 0, 0, 0, 0, time.UTC)
 	if employee.EmploymentStatus != "onboarding" || employee.HireDate == nil || !employee.HireDate.Equal(wantHireDate) {
 		t.Fatalf("expected pending hire status and date, got %+v", employee)

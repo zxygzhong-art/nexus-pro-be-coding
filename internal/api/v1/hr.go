@@ -1,7 +1,6 @@
 package v1
 
 import (
-	"io"
 	"mime"
 	"net/http"
 	"strings"
@@ -10,12 +9,6 @@ import (
 
 	"nexus-pro-api/internal/domain"
 	"nexus-pro-api/internal/service"
-)
-
-const (
-	// 員工頭像 endpoint 保持嚴格的 request size 限制。
-	employeeAvatarMultipartMaxBytes = 4 << 20
-	employeeAvatarFileMaxBytes      = 3 << 20
 )
 
 // HRCtrl 定義 HR ctrl 的資料結構。
@@ -228,26 +221,4 @@ func employeeQueryFromRequest(r *http.Request) (domain.EmployeeQuery, error) {
 		PageSize:         page.PageSize,
 		Sort:             page.Sort,
 	}, nil
-}
-
-// employeeAvatarInput 處理員工 avatar 輸入。
-func employeeAvatarInput(w http.ResponseWriter, r *http.Request) (domain.EmployeeAvatarInput, error) {
-	r.Body = http.MaxBytesReader(w, r.Body, employeeAvatarMultipartMaxBytes)
-	if err := r.ParseMultipartForm(employeeAvatarMultipartMaxBytes); err != nil {
-		return domain.EmployeeAvatarInput{}, domain.BadRequestCode(domain.ErrorCodeInvalidMultipartForm, "invalid multipart form: "+err.Error())
-	}
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		return domain.EmployeeAvatarInput{}, domain.BadRequestCode(domain.ErrorCodeRequiredMultipartFile, "file is required")
-	}
-	defer file.Close()
-	raw, err := io.ReadAll(http.MaxBytesReader(w, file, employeeAvatarFileMaxBytes))
-	if err != nil {
-		return domain.EmployeeAvatarInput{}, domain.BadRequestCode(domain.ErrorCodeMultipartFileReadFailed, "read avatar file: "+err.Error())
-	}
-	contentType := strings.TrimSpace(header.Header.Get("Content-Type"))
-	if contentType == "" && len(raw) > 0 {
-		contentType = http.DetectContentType(raw)
-	}
-	return domain.EmployeeAvatarInput{Filename: header.Filename, ContentType: contentType, Content: raw}, nil
 }

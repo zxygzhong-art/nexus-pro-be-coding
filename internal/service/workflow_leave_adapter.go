@@ -17,7 +17,8 @@ func (c AttendanceService) preflightWorkflowAttendanceSubmission(ctx RequestCont
 	templateKey = strings.TrimSpace(templateKey)
 	_, isLeave := leaveLinkedTemplateKeys[templateKey]
 	_, isOvertime := overtimeLinkedTemplateKeys[templateKey]
-	if !isLeave && !isOvertime {
+	isCorrection := templateKey == correctionLinkedTemplateKey
+	if !isLeave && !isOvertime && !isCorrection {
 		return nil
 	}
 	employeeID := strings.TrimSpace(account.EmployeeID)
@@ -54,12 +55,12 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 		if strings.TrimSpace(existing.EmployeeID) != employeeID {
 			return LeaveRequest{}, Conflict("linked leave request does not belong to the form applicant")
 		}
-		switch normalizeLeaveRequestStatus(existing.Status) {
-		case "pending_approval":
+		switch existing.EffectStatus {
+		case "not_applied", "applying":
 			return existing, nil
-		case "rejected", "cancelled":
+		case "compensated", "failed":
 			// Returned submissions reuse their stable request identity and reserve entitlement again below.
-		case "approved":
+		case "applied":
 			return LeaveRequest{}, Conflict("approved linked leave request cannot be resubmitted")
 		default:
 			return LeaveRequest{}, Conflict("linked leave request is not eligible for resubmission")
@@ -140,6 +141,7 @@ func (c AttendanceService) createLeaveRequestFromSubmittedForm(ctx RequestContex
 		Status:               "pending_approval",
 		FormInstanceID:       instance.ID,
 		ReconciliationStatus: "not_required",
+		EffectStatus:         "not_applied",
 		CreatedAt:            createdAt,
 		UpdatedAt:            c.Now(),
 	}

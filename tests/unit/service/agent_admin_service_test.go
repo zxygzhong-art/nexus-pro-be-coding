@@ -273,7 +273,7 @@ func TestAgentExternalToolRegistryLifecycle(t *testing.T) {
 	if created.AuthSecretCiphertext == "" || strings.Contains(created.AuthSecretCiphertext, "support-secret") {
 		t.Fatalf("expected encrypted credential, got %q", created.AuthSecretCiphertext)
 	}
-	plaintext, err := credentialCipher.Decrypt(created.AuthSecretCiphertext, domain.CredentialSecretAAD("tenant-1", created.CredentialSecretID))
+	plaintext, err := credentialCipher.Decrypt(created.AuthSecretCiphertext, domain.ExternalToolCredentialAAD("tenant-1", created.ID))
 	if err != nil || string(plaintext) != "support-secret" {
 		t.Fatalf("expected decryptable tenant-bound credential, plaintext=%q err=%v", plaintext, err)
 	}

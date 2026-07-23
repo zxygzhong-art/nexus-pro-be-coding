@@ -79,33 +79,15 @@ var positionFieldAliases = map[string]string{
 }
 
 var attendanceFieldAliases = map[string]string{
-	"emp_id":           "員工編號",
-	"date":             "日期",
-	"shift_start":      "班別開始",
-	"shift_end":        "班別結束",
-	"shift_hours":      "班別工時",
-	"daily_hours":      "應出勤工時",
-	"clock_hours":      "刷卡工時",
-	"clock_start":      "clock_start",
-	"clock_end":        "clock_end",
-	"attend_start":     "attend_start",
-	"attend_end":       "attend_end",
-	"attend_hours":     "attend_hours",
-	"attend_counted":   "attend_counted",
-	"leave_type":       "leave_type",
-	"leave_start":      "leave_start",
-	"leave_end":        "leave_end",
-	"leave_hours":      "leave_hours",
-	"leave_counted":    "leave_counted",
-	"leave2_type":      "leave2_type",
-	"leave2_start":     "leave2_start",
-	"leave2_end":       "leave2_end",
-	"leave2_hours":     "leave2_hours",
-	"leave2_counted":   "leave2_counted",
-	"overtime_start":   "overtime_start",
-	"overtime_end":     "overtime_end",
-	"overtime_hours":   "overtime_hours",
-	"overtime_counted": "overtime_counted",
+	"emp_id":      "員工編號",
+	"date":        "日期",
+	"shift_start": "班別開始",
+	"shift_end":   "班別結束",
+	"shift_hours": "班別工時",
+	"daily_hours": "應出勤工時",
+	"clock_hours": "刷卡工時",
+	"clock_start": "clock_start",
+	"clock_end":   "clock_end",
 }
 
 var leaveBalanceFieldAliases = map[string]string{
@@ -138,6 +120,21 @@ var leaveDetailFieldAliases = map[string]string{
 	"source":              "資料來源",
 	"deduct_item":         "扣除項目",
 	"deduct_hours":        "扣除時間",
+}
+
+var leaveTypeFieldAliases = map[string]string{
+	"code":        "假別代碼",
+	"leave_code":  "假別代碼",
+	"kind":        "節點類型",
+	"parent_code": "上級假別代碼",
+	"name":        "假別名稱",
+	"name_zh":     "假別名稱",
+	"leave_type":  "假別名稱",
+	"name_en":     "英文名稱",
+	"max_value":   "最大值",
+	"maxValue":    "最大值",
+	"unit":        "單位",
+	"category":    "假別類別",
 }
 
 // NormalizeEmployeeRecords 將上游 JSON 欄位別名合併為服務層使用的 canonical key。
@@ -183,6 +180,11 @@ func NormalizeLeaveBalanceRecords(rows []domain.EHRMSLeaveBalanceRecord) []domai
 // NormalizeLeaveDetailRecords 將上游已休明細 JSON 欄位別名合併為服務層使用的 canonical key。
 func NormalizeLeaveDetailRecords(rows []domain.EHRMSLeaveDetailRecord) []domain.EHRMSLeaveDetailRecord {
 	return normalizeLeaveDetailRecords(rows)
+}
+
+// NormalizeLeaveTypeRecords 將上游假別目錄 JSON 欄位別名合併為服務層使用的 canonical key。
+func NormalizeLeaveTypeRecords(rows []domain.EHRMSLeaveTypeRecord) []domain.EHRMSLeaveTypeRecord {
+	return normalizeLeaveTypeRecords(rows)
 }
 
 func normalizeDepartmentRecords(rows []domain.EHRMSDepartmentRecord) []domain.EHRMSDepartmentRecord {
@@ -260,6 +262,21 @@ func normalizeLeaveDetailRecord(row domain.EHRMSLeaveDetailRecord) domain.EHRMSL
 	return domain.EHRMSLeaveDetailRecord(applyFieldAliases(map[string]string(row), leaveDetailFieldAliases))
 }
 
+func normalizeLeaveTypeRecords(rows []domain.EHRMSLeaveTypeRecord) []domain.EHRMSLeaveTypeRecord {
+	if len(rows) == 0 {
+		return rows
+	}
+	out := make([]domain.EHRMSLeaveTypeRecord, 0, len(rows))
+	for _, row := range rows {
+		out = append(out, normalizeLeaveTypeRecord(row))
+	}
+	return out
+}
+
+func normalizeLeaveTypeRecord(row domain.EHRMSLeaveTypeRecord) domain.EHRMSLeaveTypeRecord {
+	return domain.EHRMSLeaveTypeRecord(applyFieldAliases(map[string]string(row), leaveTypeFieldAliases))
+}
+
 func applyFieldAliases(row map[string]string, aliases map[string]string) map[string]string {
 	if len(row) == 0 {
 		return row
@@ -282,16 +299,35 @@ func applyFieldAliases(row map[string]string, aliases map[string]string) map[str
 func stringRecordFromJSON(values map[string]any) map[string]string {
 	out := make(map[string]string, len(values))
 	for key, value := range values {
-		switch v := value.(type) {
-		case nil:
-			out[key] = ""
-		case string:
-			out[key] = strings.TrimSpace(v)
-		case json.Number:
-			out[key] = v.String()
-		default:
-			out[key] = strings.TrimSpace(fmt.Sprint(v))
-		}
+		out[key] = stringValueFromJSON(value)
 	}
 	return out
+}
+
+// stringValueFromJSON coerces upstream JSON scalars and arrays into sync-friendly strings.
+// Arrays are joined with ", " so multi-value fields (e.g. tags/roles) do not fail decode.
+func stringValueFromJSON(value any) string {
+	switch v := value.(type) {
+	case nil:
+		return ""
+	case string:
+		return strings.TrimSpace(v)
+	case json.Number:
+		return v.String()
+	case bool:
+		if v {
+			return "true"
+		}
+		return "false"
+	case []any:
+		parts := make([]string, 0, len(v))
+		for _, item := range v {
+			if part := stringValueFromJSON(item); part != "" {
+				parts = append(parts, part)
+			}
+		}
+		return strings.Join(parts, ", ")
+	default:
+		return strings.TrimSpace(fmt.Sprint(v))
+	}
 }

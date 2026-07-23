@@ -530,11 +530,15 @@ func copyAgentSessionMessage(v AgentSessionMessage) AgentSessionMessage {
 	return v
 }
 
-// copyAgentSessionFile copies nullable retention metadata.
+// copyAgentSessionFile copies nullable retention and attachment metadata.
 func copyAgentSessionFile(v domain.AgentSessionFile) domain.AgentSessionFile {
 	if v.ExpiresAt != nil {
 		expiresAt := *v.ExpiresAt
 		v.ExpiresAt = &expiresAt
+	}
+	if v.Ordinal != nil {
+		ordinal := *v.Ordinal
+		v.Ordinal = &ordinal
 	}
 	return v
 }
@@ -604,14 +608,6 @@ func copyExecutionStep(v domain.ExecutionStep) domain.ExecutionStep {
 
 func copyAgentRevisionExternalTools(src []domain.AgentRevisionExternalTool) []domain.AgentRevisionExternalTool {
 	out := append([]domain.AgentRevisionExternalTool(nil), src...)
-	for index := range out {
-		out[index].Config = utils.CopyStringMap(out[index].Config)
-	}
-	return out
-}
-
-func copyAgentRevisionMemberExternalTools(src []domain.AgentRevisionMemberExternalTool) []domain.AgentRevisionMemberExternalTool {
-	out := append([]domain.AgentRevisionMemberExternalTool(nil), src...)
 	for index := range out {
 		out[index].Config = utils.CopyStringMap(out[index].Config)
 	}

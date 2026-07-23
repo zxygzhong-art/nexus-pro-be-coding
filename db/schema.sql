@@ -572,14 +572,6 @@ CREATE UNIQUE INDEX employees_tenant_arc_no_idx ON employees (tenant_id, lower(b
 CREATE UNIQUE INDEX employees_tenant_tax_id_idx ON employees (tenant_id, lower(basic_info->>'tax_id')) WHERE coalesce(basic_info->>'tax_id', '') <> '';
 CREATE UNIQUE INDEX employees_tenant_work_permit_no_idx ON employees (tenant_id, lower(basic_info->>'work_permit_no')) WHERE coalesce(basic_info->>'work_permit_no', '') <> '';
 
-CREATE TABLE employee_number_sequences (
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    prefix text NOT NULL,
-    next_value integer NOT NULL DEFAULT 1 CHECK (next_value > 0),
-    updated_at timestamptz NOT NULL DEFAULT now(),
-    PRIMARY KEY (tenant_id, prefix)
-);
-
 CREATE TABLE attendance_policy_versions (
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     version integer NOT NULL CHECK (version > 0),
@@ -594,51 +586,59 @@ CREATE TABLE leave_types (
     id text NOT NULL,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     code text NOT NULL,
+    kind text NOT NULL DEFAULT 'item' CHECK (kind IN ('category', 'item', 'special_group')),
+    parent_id text,
+    parent_code text,
     name text NOT NULL,
     name_zh text NOT NULL,
     name_en text NOT NULL DEFAULT '',
     category text NOT NULL DEFAULT 'company' CHECK (category IN ('statutory', 'company')),
-    source_of_truth text NOT NULL DEFAULT 'local_policy' CHECK (source_of_truth IN ('local_policy', 'system_default', 'ehrms', 'overtime', 'manual')),
+    source_of_truth text NOT NULL DEFAULT 'ehrms' CHECK (source_of_truth IN ('local_policy', 'system_default', 'ehrms', 'overtime', 'manual')),
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'inactive')),
     requires_balance boolean NOT NULL DEFAULT false,
+    max_balance_minutes integer NOT NULL DEFAULT 0 CHECK (max_balance_minutes >= 0),
+    unit text NOT NULL DEFAULT '',
     display_order integer NOT NULL DEFAULT 0,
+    raw_payload jsonb NOT NULL DEFAULT '{}'::jsonb,
+    last_synced_at timestamptz,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
     PRIMARY KEY (tenant_id, id),
-    CONSTRAINT leave_types_tenant_code_idx UNIQUE (tenant_id, code)
-);
-
-CREATE TABLE leave_type_external_refs (
-    id text PRIMARY KEY,
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    source_system text NOT NULL,
-    external_code text NOT NULL,
-    external_category_code text NOT NULL DEFAULT '',
-    leave_type_id text NOT NULL,
-    effective_from date,
-    effective_to date,
-    created_at timestamptz NOT NULL,
-    updated_at timestamptz NOT NULL,
-    CONSTRAINT leave_type_external_refs_type_fk FOREIGN KEY (tenant_id, leave_type_id) REFERENCES leave_types (tenant_id, id),
-    CONSTRAINT leave_type_external_refs_period_check CHECK (effective_from IS NULL OR effective_to IS NULL OR effective_to >= effective_from),
-    CONSTRAINT leave_type_external_refs_normalized_check CHECK (
-        source_system <> ''
-        AND source_system = lower(btrim(source_system))
-        AND external_code <> ''
-        AND external_code = lower(btrim(external_code))
-        AND external_category_code = lower(btrim(external_category_code))
+    CONSTRAINT leave_types_tenant_kind_code_idx UNIQUE (tenant_id, kind, code),
+    CONSTRAINT leave_types_id_format_check CHECK (
+        id = code OR (kind <> 'item' AND id = kind || ':' || code)
     ),
-    CONSTRAINT leave_type_external_refs_no_overlap EXCLUDE USING gist (
-        tenant_id WITH =,
-        source_system WITH =,
-        external_category_code WITH =,
-        external_code WITH =,
-        daterange(effective_from, effective_to, '[]') WITH &&
-    )
+    CONSTRAINT leave_types_parent_shape_check CHECK (
+        (kind IN ('category', 'special_group') AND parent_id IS NULL AND parent_code IS NULL)
+        OR (kind = 'item' AND (parent_id IS NULL) = (parent_code IS NULL) AND parent_id IS DISTINCT FROM id)
+    ),
+    CONSTRAINT leave_types_parent_fk FOREIGN KEY (tenant_id, parent_id)
+        REFERENCES leave_types (tenant_id, id) ON UPDATE CASCADE ON DELETE RESTRICT
 );
 
-CREATE UNIQUE INDEX leave_type_external_refs_identity_idx
-ON leave_type_external_refs (tenant_id, source_system, external_category_code, external_code, effective_from) NULLS NOT DISTINCT;
+CREATE INDEX leave_types_tenant_code_idx ON leave_types (tenant_id, code);
+
+COMMENT ON TABLE leave_types IS 'EHRMS /leave-types 假別樹；id 預設使用 code';
+COMMENT ON COLUMN leave_types.id IS '穩定主鍵；預設等於 code，category 與 item 同 code 時 category 使用 category:<code>';
+COMMENT ON COLUMN leave_types.tenant_id IS '租戶 ID';
+COMMENT ON COLUMN leave_types.code IS '假別代碼（与上游 /leave-types code 一致）';
+COMMENT ON COLUMN leave_types.kind IS '節點類型：category=上級分類 / item=可申請假別 / special_group=特殊群組';
+COMMENT ON COLUMN leave_types.parent_id IS '解析後的上級節點 ID；自關聯 leave_types.id';
+COMMENT ON COLUMN leave_types.parent_code IS '上級假別代碼；category 為 NULL，item 可指向 category';
+COMMENT ON COLUMN leave_types.name IS '显示名称';
+COMMENT ON COLUMN leave_types.name_zh IS '中文名称';
+COMMENT ON COLUMN leave_types.name_en IS '英文名称';
+COMMENT ON COLUMN leave_types.category IS '分类：statutory=法定 / company=公司';
+COMMENT ON COLUMN leave_types.source_of_truth IS '数据来源：ehrms / local_policy / manual 等';
+COMMENT ON COLUMN leave_types.status IS '启用状态：active / inactive';
+COMMENT ON COLUMN leave_types.requires_balance IS '是否需要余额（由 max_value>0 推导）';
+COMMENT ON COLUMN leave_types.max_balance_minutes IS '额度上限（分钟）；由上游 max_value 按 unit 换算';
+COMMENT ON COLUMN leave_types.unit IS '上游额度单位（days/hours 等）';
+COMMENT ON COLUMN leave_types.display_order IS '展示排序';
+COMMENT ON COLUMN leave_types.raw_payload IS '上游 /leave-types 原始字段快照';
+COMMENT ON COLUMN leave_types.last_synced_at IS '最近一次从 EHRMS 同步时间';
+COMMENT ON COLUMN leave_types.created_at IS '创建时间';
+COMMENT ON COLUMN leave_types.updated_at IS '更新时间';
 
 CREATE TABLE leave_balances (
     id text PRIMARY KEY,
@@ -894,35 +894,45 @@ ALTER TABLE workflow_runs
     REFERENCES workflow_stage_instances (tenant_id, run_id, id)
     DEFERRABLE INITIALLY DEFERRED;
 
-CREATE TABLE leave_requests (
+CREATE TABLE form_business_records (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    employee_id text NOT NULL,
-    leave_type text NOT NULL,
-    leave_type_id text NOT NULL,
-    policy_version integer NOT NULL DEFAULT 0 CHECK (policy_version >= 0),
-    rule_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
-    evaluation_snapshot jsonb NOT NULL DEFAULT '{}'::jsonb,
-    start_at timestamptz NOT NULL,
-    end_at timestamptz NOT NULL,
-    requested_minutes integer NOT NULL CHECK (requested_minutes > 0),
-    reason text NOT NULL DEFAULT '',
-    status text NOT NULL CHECK (status IN ('pending_approval', 'approved', 'rejected', 'cancelled')),
     form_instance_id text NOT NULL,
-    reconciliation_status text NOT NULL DEFAULT 'not_required' CHECK (reconciliation_status IN ('not_required', 'nexus_only', 'matched', 'pending_balance_confirmation', 'ambiguous', 'mismatch', 'manually_confirmed')),
+    business_type text NOT NULL CHECK (btrim(business_type) <> ''),
+    schema_version integer NOT NULL DEFAULT 1 CHECK (schema_version > 0),
+    subject_employee_id text,
+    effective_from timestamptz,
+    effective_to timestamptz,
+    business_date date,
+    data jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(data) = 'object'),
+    effect_status text NOT NULL DEFAULT 'not_applied' CHECK (effect_status IN ('not_applied', 'applying', 'applied', 'failed', 'compensated')),
+    result jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(result) = 'object'),
+    last_error jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(last_error) = 'object'),
+    handler_key text NOT NULL CHECK (btrim(handler_key) <> ''),
+    handler_version integer NOT NULL DEFAULT 1 CHECK (handler_version > 0),
+    applied_at timestamptz,
+    lock_version integer NOT NULL DEFAULT 0 CHECK (lock_version >= 0),
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
-    CONSTRAINT leave_requests_interval_check CHECK (end_at > start_at),
-    CONSTRAINT leave_requests_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT leave_requests_tenant_identity_idx UNIQUE (tenant_id, id, employee_id, leave_type_id),
-    CONSTRAINT leave_requests_form_instance_idx UNIQUE (tenant_id, form_instance_id),
-    CONSTRAINT leave_requests_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
-    CONSTRAINT leave_requests_type_fk FOREIGN KEY (tenant_id, leave_type_id) REFERENCES leave_types (tenant_id, id),
-    CONSTRAINT leave_requests_form_instance_fk FOREIGN KEY (tenant_id, form_instance_id) REFERENCES form_instances (tenant_id, id)
+    CONSTRAINT form_business_records_interval_check CHECK (
+        effective_from IS NULL OR effective_to IS NULL OR effective_to > effective_from
+    ),
+    CONSTRAINT form_business_records_effect_check CHECK (
+        (effect_status = 'applied' AND applied_at IS NOT NULL)
+        OR (effect_status <> 'applied')
+    ),
+    CONSTRAINT form_business_records_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT form_business_records_subject_identity_idx UNIQUE (tenant_id, id, subject_employee_id),
+    CONSTRAINT form_business_records_form_type_idx UNIQUE (tenant_id, form_instance_id, business_type),
+    CONSTRAINT form_business_records_form_fk FOREIGN KEY (tenant_id, form_instance_id) REFERENCES form_instances (tenant_id, id),
+    CONSTRAINT form_business_records_employee_fk FOREIGN KEY (tenant_id, subject_employee_id) REFERENCES employees (tenant_id, id)
 );
 
-CREATE INDEX leave_requests_tenant_id_idx ON leave_requests (tenant_id);
-CREATE INDEX leave_requests_tenant_employee_status_dates_idx ON leave_requests (tenant_id, employee_id, status, start_at, end_at);
+CREATE INDEX form_business_records_tenant_type_subject_date_idx
+ON form_business_records (tenant_id, business_type, subject_employee_id, business_date DESC);
+CREATE INDEX form_business_records_tenant_effect_idx
+ON form_business_records (tenant_id, effect_status, updated_at);
+CREATE INDEX form_business_records_data_gin_idx ON form_business_records USING gin (data);
 
 CREATE TABLE leave_request_allocations (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -939,8 +949,8 @@ CREATE TABLE leave_request_allocations (
         tenant_id, id, leave_request_id, leave_balance_id, employee_id, leave_type_id
     ),
     CONSTRAINT leave_request_allocations_request_fk FOREIGN KEY (
-        tenant_id, leave_request_id, employee_id, leave_type_id
-    ) REFERENCES leave_requests (tenant_id, id, employee_id, leave_type_id) ON DELETE CASCADE,
+        tenant_id, leave_request_id, employee_id
+    ) REFERENCES form_business_records (tenant_id, id, subject_employee_id) ON DELETE CASCADE,
     CONSTRAINT leave_request_allocations_balance_fk FOREIGN KEY (
         tenant_id, leave_balance_id, employee_id, leave_type_id
     ) REFERENCES leave_balances (tenant_id, id, employee_id, leave_type_id)
@@ -968,7 +978,7 @@ CREATE TABLE leave_cases (
 
 CREATE INDEX leave_cases_employee_interval_idx ON leave_cases (tenant_id, employee_id, start_at, end_at);
 
-CREATE TABLE external_leave_records (
+CREATE TABLE leave_external_records (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     employee_id text NOT NULL,
@@ -991,15 +1001,15 @@ CREATE TABLE external_leave_records (
     first_seen_at timestamptz NOT NULL,
     last_seen_at timestamptz NOT NULL,
     deleted_at timestamptz,
-    CONSTRAINT external_leave_records_interval_check CHECK (end_at > start_at),
-    CONSTRAINT external_leave_records_duration_check CHECK (gross_minutes >= net_minutes AND deduct_minutes + net_minutes <= gross_minutes),
-    CONSTRAINT external_leave_records_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
-    CONSTRAINT external_leave_records_type_fk FOREIGN KEY (tenant_id, leave_type_id) REFERENCES leave_types (tenant_id, id),
-    CONSTRAINT external_leave_records_identity_idx UNIQUE (tenant_id, source_system, external_ref),
-    CONSTRAINT external_leave_records_tenant_id_id_idx UNIQUE (tenant_id, id)
+    CONSTRAINT leave_external_records_interval_check CHECK (end_at > start_at),
+    CONSTRAINT leave_external_records_duration_check CHECK (gross_minutes >= net_minutes AND deduct_minutes + net_minutes <= gross_minutes),
+    CONSTRAINT leave_external_records_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
+    CONSTRAINT leave_external_records_type_fk FOREIGN KEY (tenant_id, leave_type_id) REFERENCES leave_types (tenant_id, id),
+    CONSTRAINT leave_external_records_identity_idx UNIQUE (tenant_id, source_system, external_ref),
+    CONSTRAINT leave_external_records_tenant_id_id_idx UNIQUE (tenant_id, id)
 );
 
-CREATE INDEX external_leave_records_employee_interval_idx ON external_leave_records (tenant_id, employee_id, start_at, end_at);
+CREATE INDEX leave_external_records_employee_interval_idx ON leave_external_records (tenant_id, employee_id, start_at, end_at);
 
 CREATE TABLE leave_case_sources (
     id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
@@ -1012,8 +1022,8 @@ CREATE TABLE leave_case_sources (
     created_at timestamptz NOT NULL,
     CONSTRAINT leave_case_sources_case_fk FOREIGN KEY (tenant_id, leave_case_id) REFERENCES leave_cases (tenant_id, id) ON DELETE CASCADE,
     CONSTRAINT leave_case_sources_source_xor_check CHECK (num_nonnulls(leave_request_id, external_leave_record_id) = 1),
-    CONSTRAINT leave_case_sources_request_fk FOREIGN KEY (tenant_id, leave_request_id) REFERENCES leave_requests (tenant_id, id) ON DELETE CASCADE,
-    CONSTRAINT leave_case_sources_external_fk FOREIGN KEY (tenant_id, external_leave_record_id) REFERENCES external_leave_records (tenant_id, id) ON DELETE CASCADE
+    CONSTRAINT leave_case_sources_request_fk FOREIGN KEY (tenant_id, leave_request_id) REFERENCES form_business_records (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT leave_case_sources_external_fk FOREIGN KEY (tenant_id, external_leave_record_id) REFERENCES leave_external_records (tenant_id, id) ON DELETE CASCADE
 );
 
 CREATE INDEX leave_case_sources_case_idx ON leave_case_sources (tenant_id, leave_case_id);
@@ -1137,7 +1147,6 @@ CREATE INDEX attendance_clock_records_effective_latest_idx ON attendance_clock_r
 CREATE UNIQUE INDEX attendance_clock_records_client_event_idx ON attendance_clock_records (tenant_id, client_event_id) WHERE client_event_id <> '';
 
 CREATE TABLE attendance_daily_summaries (
-    id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     employee_id text NOT NULL,
     work_date date NOT NULL,
@@ -1148,31 +1157,13 @@ CREATE TABLE attendance_daily_summaries (
     clock_hours double precision NOT NULL DEFAULT 0,
     clock_start text NOT NULL DEFAULT '',
     clock_end text NOT NULL DEFAULT '',
-    attend_start text NOT NULL DEFAULT '',
-    attend_end text NOT NULL DEFAULT '',
-    attend_hours double precision NOT NULL DEFAULT 0,
-    attend_counted boolean NOT NULL DEFAULT false,
-    leave_type text NOT NULL DEFAULT '',
-    leave_start text NOT NULL DEFAULT '',
-    leave_end text NOT NULL DEFAULT '',
-    leave_hours double precision NOT NULL DEFAULT 0,
-    leave_counted boolean NOT NULL DEFAULT false,
-    leave2_type text NOT NULL DEFAULT '',
-    leave2_start text NOT NULL DEFAULT '',
-    leave2_end text NOT NULL DEFAULT '',
-    leave2_hours double precision NOT NULL DEFAULT 0,
-    leave2_counted boolean NOT NULL DEFAULT false,
-    overtime_start text NOT NULL DEFAULT '',
-    overtime_end text NOT NULL DEFAULT '',
-    overtime_hours double precision NOT NULL DEFAULT 0,
-    overtime_counted boolean NOT NULL DEFAULT false,
     payload jsonb NOT NULL DEFAULT '{}'::jsonb,
     source text NOT NULL DEFAULT 'manual',
     external_ref text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
-    CONSTRAINT attendance_daily_summaries_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
-    CONSTRAINT attendance_daily_summaries_employee_date_idx UNIQUE (tenant_id, employee_id, work_date)
+    PRIMARY KEY (tenant_id, employee_id, work_date),
+    CONSTRAINT attendance_daily_summaries_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id)
 );
 
 CREATE INDEX attendance_daily_summaries_tenant_employee_date_idx ON attendance_daily_summaries (tenant_id, employee_id, work_date DESC);
@@ -1217,78 +1208,10 @@ CREATE TABLE attendance_day_projections (
 CREATE INDEX attendance_day_projections_tenant_date_status_idx
 ON attendance_day_projections (tenant_id, work_date, day_status, employee_id);
 
-CREATE TABLE attendance_correction_requests (
-    id text PRIMARY KEY,
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    employee_id text NOT NULL,
-    direction text NOT NULL CHECK (direction IN ('clock_in', 'clock_out')),
-    requested_clocked_at timestamptz NOT NULL,
-    work_date date NOT NULL,
-    correction_type text NOT NULL DEFAULT 'add_record' CHECK (correction_type IN ('add_record', 'void_record', 'replace_record')),
-    target_clock_record_id text,
-    replacement_clock_record_id text,
-    reason text NOT NULL DEFAULT '',
-    status text NOT NULL CHECK (status IN ('pending', 'reviewing', 'approved', 'rejected', 'cancelled')),
-    form_instance_id text NOT NULL,
-    clock_record_id text,
-    reviewed_by_account_id text,
-    review_reason text NOT NULL DEFAULT '',
-    reviewed_at timestamptz,
-    created_at timestamptz NOT NULL,
-    updated_at timestamptz NOT NULL,
-    CONSTRAINT attendance_correction_requests_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT attendance_correction_requests_employee_identity_idx UNIQUE (tenant_id, id, employee_id),
-    CONSTRAINT attendance_correction_requests_form_instance_idx UNIQUE (tenant_id, form_instance_id),
-    CONSTRAINT attendance_correction_requests_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id),
-    CONSTRAINT attendance_correction_requests_form_instance_fk FOREIGN KEY (tenant_id, form_instance_id) REFERENCES form_instances (tenant_id, id),
-    CONSTRAINT attendance_correction_requests_reviewer_fk FOREIGN KEY (tenant_id, reviewed_by_account_id) REFERENCES accounts (tenant_id, id),
-    CONSTRAINT attendance_correction_requests_target_fk FOREIGN KEY (tenant_id, target_clock_record_id, employee_id) REFERENCES attendance_clock_records (tenant_id, id, employee_id),
-    CONSTRAINT attendance_correction_requests_replacement_fk FOREIGN KEY (tenant_id, replacement_clock_record_id, employee_id) REFERENCES attendance_clock_records (tenant_id, id, employee_id),
-    CONSTRAINT attendance_correction_requests_clock_fk FOREIGN KEY (tenant_id, clock_record_id, employee_id) REFERENCES attendance_clock_records (tenant_id, id, employee_id),
-    CONSTRAINT attendance_correction_requests_target_shape_check CHECK (
-        (correction_type = 'add_record' AND target_clock_record_id IS NULL)
-        OR (correction_type IN ('void_record', 'replace_record') AND target_clock_record_id IS NOT NULL)
-    ),
-    CONSTRAINT attendance_correction_requests_output_shape_check CHECK (
-        (status <> 'approved' AND replacement_clock_record_id IS NULL AND clock_record_id IS NULL)
-        OR (status = 'approved' AND correction_type = 'void_record' AND replacement_clock_record_id IS NULL AND clock_record_id IS NULL)
-        OR (status = 'approved' AND correction_type = 'add_record' AND replacement_clock_record_id IS NULL AND clock_record_id IS NOT NULL)
-        OR (status = 'approved' AND correction_type = 'replace_record' AND replacement_clock_record_id IS NOT NULL AND replacement_clock_record_id = clock_record_id)
-    ),
-    CONSTRAINT attendance_correction_requests_review_shape_check CHECK (
-        (status = 'pending' AND reviewed_by_account_id IS NULL AND reviewed_at IS NULL)
-        OR (status = 'reviewing' AND reviewed_by_account_id IS NOT NULL AND reviewed_at IS NULL)
-        OR (status IN ('approved', 'rejected', 'cancelled') AND reviewed_by_account_id IS NOT NULL AND reviewed_at IS NOT NULL)
-    )
-);
-
-CREATE INDEX attendance_correction_requests_tenant_employee_date_idx ON attendance_correction_requests (tenant_id, employee_id, work_date DESC);
-CREATE INDEX attendance_correction_requests_tenant_status_idx ON attendance_correction_requests (tenant_id, status, created_at DESC);
-
-CREATE TABLE overtime_requests (
-    id text PRIMARY KEY,
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    employee_id text NOT NULL,
-    work_date text NOT NULL,
-    start_at timestamptz NOT NULL,
-    end_at timestamptz NOT NULL,
-    hours double precision NOT NULL CHECK (hours > 0),
-    overtime_type text NOT NULL DEFAULT 'weekday',
-    compensation_type text NOT NULL DEFAULT 'leave',
-    reason text NOT NULL DEFAULT '',
-    status text NOT NULL,
-    form_instance_id text NOT NULL DEFAULT '',
-    created_at timestamptz NOT NULL,
-    updated_at timestamptz NOT NULL,
-    CONSTRAINT overtime_requests_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT overtime_requests_employee_identity_idx UNIQUE (tenant_id, id, employee_id),
-    CONSTRAINT overtime_requests_employee_fk FOREIGN KEY (tenant_id, employee_id) REFERENCES employees (tenant_id, id)
-);
-
 ALTER TABLE attendance_clock_records
     ADD CONSTRAINT attendance_clock_records_correction_fk
     FOREIGN KEY (tenant_id, correction_request_id, employee_id)
-    REFERENCES attendance_correction_requests (tenant_id, id, employee_id);
+    REFERENCES form_business_records (tenant_id, id, subject_employee_id);
 
 ALTER TABLE attendance_clock_records
     ADD CONSTRAINT attendance_clock_records_voided_by_fk
@@ -1298,12 +1221,8 @@ ALTER TABLE attendance_clock_records
 ALTER TABLE leave_balance_entries
     ADD CONSTRAINT leave_balance_entries_overtime_request_fk
     FOREIGN KEY (tenant_id, overtime_request_id, employee_id)
-    REFERENCES overtime_requests (tenant_id, id, employee_id);
+    REFERENCES form_business_records (tenant_id, id, subject_employee_id);
 
-CREATE INDEX overtime_requests_tenant_id_idx ON overtime_requests (tenant_id);
-CREATE INDEX overtime_requests_tenant_employee_date_idx ON overtime_requests (tenant_id, employee_id, work_date DESC);
-CREATE INDEX overtime_requests_tenant_form_instance_idx ON overtime_requests (tenant_id, form_instance_id);
-CREATE INDEX overtime_requests_tenant_status_dates_idx ON overtime_requests (tenant_id, status, start_at, end_at);
 CREATE INDEX leave_balance_entries_overtime_request_idx ON leave_balance_entries (tenant_id, overtime_request_id) WHERE overtime_request_id IS NOT NULL;
 
 CREATE TABLE platform_task_items (
@@ -1340,27 +1259,6 @@ CREATE TABLE platform_task_todos (
 
 CREATE INDEX platform_task_todos_tenant_account_status_idx ON platform_task_todos (tenant_id, account_id, status, created_at ASC);
 
-CREATE TABLE credential_secrets (
-    id text PRIMARY KEY,
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    name text NOT NULL DEFAULT '',
-    secret_type text NOT NULL CHECK (secret_type IN ('api_key', 'bearer', 'basic_password')),
-    ciphertext text NOT NULL,
-    preview text NOT NULL DEFAULT '',
-    status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'revoked')),
-    created_by_account_id text,
-    created_at timestamptz NOT NULL,
-    updated_at timestamptz NOT NULL,
-    revoked_at timestamptz,
-    CONSTRAINT credential_secrets_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT credential_secrets_created_by_fk FOREIGN KEY (tenant_id, created_by_account_id) REFERENCES accounts (tenant_id, id),
-    CONSTRAINT credential_secrets_revoked_at_check CHECK (
-        (status = 'active' AND revoked_at IS NULL) OR
-        (status = 'revoked' AND revoked_at IS NOT NULL)
-    )
-);
-
-CREATE INDEX credential_secrets_tenant_status_idx ON credential_secrets (tenant_id, status, updated_at DESC, id);
 
 CREATE TABLE model_connections (
     id text PRIMARY KEY,
@@ -1369,7 +1267,8 @@ CREATE TABLE model_connections (
     provider text NOT NULL DEFAULT 'openai',
     upstream_model text NOT NULL,
     api_base_url text NOT NULL DEFAULT '',
-    credential_secret_id text,
+    api_key_ciphertext text NOT NULL DEFAULT '',
+    api_key_preview text NOT NULL DEFAULT '',
     rate_limit_rpm integer NOT NULL DEFAULT 0 CHECK (rate_limit_rpm >= 0),
     timeout_ms integer NOT NULL DEFAULT 60000 CHECK (timeout_ms > 0),
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled', 'archived')),
@@ -1379,7 +1278,6 @@ CREATE TABLE model_connections (
     updated_at timestamptz NOT NULL,
     archived_at timestamptz,
     CONSTRAINT model_connections_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT model_connections_secret_fk FOREIGN KEY (tenant_id, credential_secret_id) REFERENCES credential_secrets (tenant_id, id) ON DELETE RESTRICT,
     CONSTRAINT model_connections_created_by_fk FOREIGN KEY (tenant_id, created_by_account_id) REFERENCES accounts (tenant_id, id),
     CONSTRAINT model_connections_updated_by_fk FOREIGN KEY (tenant_id, updated_by_account_id) REFERENCES accounts (tenant_id, id),
     CONSTRAINT model_connections_archived_at_check CHECK (
@@ -1417,7 +1315,7 @@ CREATE TABLE external_tool_connections (
     auth_type text NOT NULL DEFAULT 'none' CHECK (auth_type IN ('none', 'bearer', 'api_key', 'basic')),
     auth_header_name text NOT NULL DEFAULT '',
     auth_username text NOT NULL DEFAULT '',
-    credential_secret_id text,
+    auth_secret_ciphertext text NOT NULL DEFAULT '',
     timeout_ms integer NOT NULL DEFAULT 30000 CHECK (timeout_ms BETWEEN 1000 AND 120000),
     status text NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled', 'archived')),
     last_tested_at timestamptz,
@@ -1433,7 +1331,6 @@ CREATE TABLE external_tool_connections (
         (kind = 'http' AND transport = 'http')
     ),
     CONSTRAINT external_tool_connections_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT external_tool_connections_secret_fk FOREIGN KEY (tenant_id, credential_secret_id) REFERENCES credential_secrets (tenant_id, id) ON DELETE RESTRICT,
     CONSTRAINT external_tool_connections_created_by_fk FOREIGN KEY (tenant_id, created_by_account_id) REFERENCES accounts (tenant_id, id),
     CONSTRAINT external_tool_connections_updated_by_fk FOREIGN KEY (tenant_id, updated_by_account_id) REFERENCES accounts (tenant_id, id),
     CONSTRAINT external_tool_connections_archived_at_check CHECK (
@@ -1539,6 +1436,7 @@ CREATE INDEX knowledge_document_chunks_search_idx
 CREATE TABLE agents (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+    parent_agent_id text,
     lifecycle_status text NOT NULL DEFAULT 'active' CHECK (lifecycle_status IN ('active', 'archived')),
     draft_revision_id text,
     published_revision_id text,
@@ -1548,7 +1446,9 @@ CREATE TABLE agents (
     updated_at timestamptz NOT NULL,
     archived_at timestamptz,
     CONSTRAINT agents_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT agents_parent_fk FOREIGN KEY (tenant_id, parent_agent_id) REFERENCES agents (tenant_id, id) ON DELETE CASCADE,
     CONSTRAINT agents_created_by_fk FOREIGN KEY (tenant_id, created_by_account_id) REFERENCES accounts (tenant_id, id),
+    CONSTRAINT agents_parent_not_self_check CHECK (parent_agent_id IS NULL OR parent_agent_id <> id),
     CONSTRAINT agents_archived_at_check CHECK (
         (lifecycle_status <> 'archived' AND archived_at IS NULL) OR
         (lifecycle_status = 'archived' AND archived_at IS NOT NULL)
@@ -1556,12 +1456,14 @@ CREATE TABLE agents (
 );
 
 CREATE INDEX agents_tenant_status_idx ON agents (tenant_id, lifecycle_status, updated_at DESC, id);
+CREATE INDEX agents_tenant_parent_idx ON agents (tenant_id, parent_agent_id, id) WHERE parent_agent_id IS NOT NULL;
 
 CREATE TABLE agent_revisions (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     agent_id text NOT NULL,
     revision_no integer NOT NULL CHECK (revision_no > 0),
+    ordinal integer CHECK (ordinal >= 0),
     name text NOT NULL,
     description text NOT NULL DEFAULT '',
     icon text NOT NULL DEFAULT 'AI',
@@ -1603,21 +1505,6 @@ ALTER TABLE agents
 CREATE INDEX agent_revisions_agent_idx ON agent_revisions (tenant_id, agent_id, revision_no DESC);
 CREATE INDEX agent_revisions_model_idx ON agent_revisions (tenant_id, model_connection_id, created_at DESC);
 
-CREATE TABLE agent_revision_members (
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    revision_id text NOT NULL,
-    id text NOT NULL,
-    name text NOT NULL,
-    role text NOT NULL DEFAULT '',
-    model_connection_id text NOT NULL,
-    model_config_checksum text NOT NULL DEFAULT '',
-    ordinal integer NOT NULL CHECK (ordinal >= 0),
-    PRIMARY KEY (tenant_id, revision_id, id),
-    CONSTRAINT agent_revision_members_ordinal_idx UNIQUE (tenant_id, revision_id, ordinal),
-    CONSTRAINT agent_revision_members_revision_fk FOREIGN KEY (tenant_id, revision_id) REFERENCES agent_revisions (tenant_id, id) ON DELETE CASCADE,
-    CONSTRAINT agent_revision_members_model_fk FOREIGN KEY (tenant_id, model_connection_id) REFERENCES model_connections (tenant_id, id) ON DELETE RESTRICT
-);
-
 CREATE TABLE agent_revision_builtin_tools (
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     revision_id text NOT NULL,
@@ -1651,44 +1538,6 @@ CREATE TABLE agent_revision_knowledge_bases (
     CONSTRAINT agent_revision_knowledge_bases_ordinal_idx UNIQUE (tenant_id, revision_id, ordinal),
     CONSTRAINT agent_revision_knowledge_bases_revision_fk FOREIGN KEY (tenant_id, revision_id) REFERENCES agent_revisions (tenant_id, id) ON DELETE CASCADE,
     CONSTRAINT agent_revision_knowledge_bases_base_fk FOREIGN KEY (tenant_id, knowledge_base_id) REFERENCES knowledge_bases (tenant_id, id) ON DELETE RESTRICT
-);
-
-CREATE TABLE agent_revision_member_builtin_tools (
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    revision_id text NOT NULL,
-    member_id text NOT NULL,
-    tool_key text NOT NULL,
-    ordinal integer NOT NULL CHECK (ordinal >= 0),
-    config jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(config) = 'object'),
-    PRIMARY KEY (tenant_id, revision_id, member_id, tool_key),
-    CONSTRAINT agent_revision_member_builtin_tools_ordinal_idx UNIQUE (tenant_id, revision_id, member_id, ordinal),
-    CONSTRAINT agent_revision_member_builtin_tools_member_fk FOREIGN KEY (tenant_id, revision_id, member_id) REFERENCES agent_revision_members (tenant_id, revision_id, id) ON DELETE CASCADE
-);
-
-CREATE TABLE agent_revision_member_external_tools (
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    revision_id text NOT NULL,
-    member_id text NOT NULL,
-    external_tool_id text NOT NULL,
-    tool_schema_checksum text NOT NULL DEFAULT '',
-    ordinal integer NOT NULL CHECK (ordinal >= 0),
-    config jsonb NOT NULL DEFAULT '{}'::jsonb CHECK (jsonb_typeof(config) = 'object'),
-    PRIMARY KEY (tenant_id, revision_id, member_id, external_tool_id),
-    CONSTRAINT agent_revision_member_external_tools_ordinal_idx UNIQUE (tenant_id, revision_id, member_id, ordinal),
-    CONSTRAINT agent_revision_member_external_tools_member_fk FOREIGN KEY (tenant_id, revision_id, member_id) REFERENCES agent_revision_members (tenant_id, revision_id, id) ON DELETE CASCADE,
-    CONSTRAINT agent_revision_member_external_tools_tool_fk FOREIGN KEY (tenant_id, external_tool_id) REFERENCES external_tools (tenant_id, id) ON DELETE RESTRICT
-);
-
-CREATE TABLE agent_revision_member_knowledge_bases (
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    revision_id text NOT NULL,
-    member_id text NOT NULL,
-    knowledge_base_id text NOT NULL,
-    ordinal integer NOT NULL CHECK (ordinal >= 0),
-    PRIMARY KEY (tenant_id, revision_id, member_id, knowledge_base_id),
-    CONSTRAINT agent_revision_member_knowledge_bases_ordinal_idx UNIQUE (tenant_id, revision_id, member_id, ordinal),
-    CONSTRAINT agent_revision_member_knowledge_bases_member_fk FOREIGN KEY (tenant_id, revision_id, member_id) REFERENCES agent_revision_members (tenant_id, revision_id, id) ON DELETE CASCADE,
-    CONSTRAINT agent_revision_member_knowledge_bases_base_fk FOREIGN KEY (tenant_id, knowledge_base_id) REFERENCES knowledge_bases (tenant_id, id) ON DELETE RESTRICT
 );
 
 CREATE TABLE conversations (
@@ -1735,7 +1584,7 @@ ALTER TABLE conversations
 CREATE INDEX conversations_tenant_owner_status_idx ON conversations (tenant_id, owner_account_id, status, updated_at DESC, id DESC);
 CREATE INDEX conversations_tenant_agent_idx ON conversations (tenant_id, agent_id, updated_at DESC, id DESC);
 
-CREATE TABLE messages (
+CREATE TABLE conversation_messages (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     conversation_id text NOT NULL,
@@ -1747,16 +1596,16 @@ CREATE TABLE messages (
     execution_id text,
     execution_step_id text,
     created_at timestamptz NOT NULL,
-    CONSTRAINT messages_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT messages_conversation_segment_id_idx UNIQUE (tenant_id, conversation_id, segment_id, id),
-    CONSTRAINT messages_conversation_sequence_idx UNIQUE (tenant_id, conversation_id, sequence_no),
-    CONSTRAINT messages_segment_fk FOREIGN KEY (tenant_id, conversation_id, segment_id) REFERENCES conversation_segments (tenant_id, conversation_id, id) ON DELETE CASCADE,
-    CONSTRAINT messages_execution_step_requires_execution CHECK (execution_step_id IS NULL OR execution_id IS NOT NULL)
+    CONSTRAINT conversation_messages_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT conversation_messages_conversation_segment_id_idx UNIQUE (tenant_id, conversation_id, segment_id, id),
+    CONSTRAINT conversation_messages_conversation_sequence_idx UNIQUE (tenant_id, conversation_id, sequence_no),
+    CONSTRAINT conversation_messages_segment_fk FOREIGN KEY (tenant_id, conversation_id, segment_id) REFERENCES conversation_segments (tenant_id, conversation_id, id) ON DELETE CASCADE,
+    CONSTRAINT conversation_messages_execution_step_requires_execution CHECK (execution_step_id IS NULL OR execution_id IS NOT NULL)
 );
 
-CREATE INDEX messages_conversation_segment_sequence_idx ON messages (tenant_id, conversation_id, segment_id, sequence_no ASC);
+CREATE INDEX conversation_messages_conversation_segment_sequence_idx ON conversation_messages (tenant_id, conversation_id, segment_id, sequence_no ASC);
 
-CREATE TABLE executions (
+CREATE TABLE conversation_executions (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     account_id text NOT NULL,
@@ -1783,33 +1632,33 @@ CREATE TABLE executions (
     usage_complete boolean NOT NULL DEFAULT false,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
-    CONSTRAINT executions_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT executions_conversation_segment_id_idx UNIQUE (tenant_id, conversation_id, segment_id, id),
-    CONSTRAINT executions_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id),
-    CONSTRAINT executions_conversation_agent_fk FOREIGN KEY (tenant_id, conversation_id, agent_id) REFERENCES conversations (tenant_id, id, agent_id) ON DELETE RESTRICT,
-    CONSTRAINT executions_segment_fk FOREIGN KEY (tenant_id, conversation_id, segment_id) REFERENCES conversation_segments (tenant_id, conversation_id, id) ON DELETE RESTRICT,
-    CONSTRAINT executions_input_message_fk FOREIGN KEY (tenant_id, conversation_id, segment_id, input_message_id) REFERENCES messages (tenant_id, conversation_id, segment_id, id) ON DELETE RESTRICT,
-    CONSTRAINT executions_agent_revision_fk FOREIGN KEY (tenant_id, agent_id, agent_revision_id, model_connection_id) REFERENCES agent_revisions (tenant_id, agent_id, id, model_connection_id) ON DELETE RESTRICT,
-    CONSTRAINT executions_model_fk FOREIGN KEY (tenant_id, model_connection_id) REFERENCES model_connections (tenant_id, id) ON DELETE RESTRICT,
-    CONSTRAINT executions_agent_binding_check CHECK (
+    CONSTRAINT conversation_executions_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT conversation_executions_conversation_segment_id_idx UNIQUE (tenant_id, conversation_id, segment_id, id),
+    CONSTRAINT conversation_executions_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id),
+    CONSTRAINT conversation_executions_conversation_agent_fk FOREIGN KEY (tenant_id, conversation_id, agent_id) REFERENCES conversations (tenant_id, id, agent_id) ON DELETE RESTRICT,
+    CONSTRAINT conversation_executions_segment_fk FOREIGN KEY (tenant_id, conversation_id, segment_id) REFERENCES conversation_segments (tenant_id, conversation_id, id) ON DELETE RESTRICT,
+    CONSTRAINT conversation_executions_input_message_fk FOREIGN KEY (tenant_id, conversation_id, segment_id, input_message_id) REFERENCES conversation_messages (tenant_id, conversation_id, segment_id, id) ON DELETE RESTRICT,
+    CONSTRAINT conversation_executions_agent_revision_fk FOREIGN KEY (tenant_id, agent_id, agent_revision_id, model_connection_id) REFERENCES agent_revisions (tenant_id, agent_id, id, model_connection_id) ON DELETE RESTRICT,
+    CONSTRAINT conversation_executions_model_fk FOREIGN KEY (tenant_id, model_connection_id) REFERENCES model_connections (tenant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT conversation_executions_agent_binding_check CHECK (
         (agent_id IS NULL AND agent_revision_id IS NULL AND model_connection_id IS NULL) OR
         (agent_id IS NOT NULL AND agent_revision_id IS NOT NULL AND model_connection_id IS NOT NULL)
     ),
-    CONSTRAINT executions_cached_tokens_check CHECK (cached_tokens <= input_tokens),
-    CONSTRAINT executions_timestamps_check CHECK (
+    CONSTRAINT conversation_executions_cached_tokens_lte_input_check CHECK (cached_tokens <= input_tokens),
+    CONSTRAINT conversation_executions_timestamps_check CHECK (
         (status = 'queued' AND started_at IS NULL AND completed_at IS NULL) OR
         (status = 'running' AND started_at IS NOT NULL AND completed_at IS NULL) OR
         (status IN ('completed', 'failed', 'cancelled') AND completed_at IS NOT NULL)
     )
 );
 
-CREATE UNIQUE INDEX executions_active_conversation_unique
-    ON executions (tenant_id, conversation_id)
+CREATE UNIQUE INDEX conversation_executions_active_conversation_unique
+    ON conversation_executions (tenant_id, conversation_id)
     WHERE status IN ('queued', 'running');
-CREATE INDEX executions_tenant_account_created_idx ON executions (tenant_id, account_id, created_at DESC, id DESC);
-CREATE INDEX executions_tenant_revision_created_idx ON executions (tenant_id, agent_revision_id, created_at DESC, id DESC);
+CREATE INDEX conversation_executions_tenant_account_created_idx ON conversation_executions (tenant_id, account_id, created_at DESC, id DESC);
+CREATE INDEX conversation_executions_tenant_revision_created_idx ON conversation_executions (tenant_id, agent_revision_id, created_at DESC, id DESC);
 
-CREATE TABLE execution_steps (
+CREATE TABLE conversation_execution_steps (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     execution_id text NOT NULL,
@@ -1829,25 +1678,25 @@ CREATE TABLE execution_steps (
     completed_at timestamptz,
     error_code text NOT NULL DEFAULT '',
     created_at timestamptz NOT NULL,
-    CONSTRAINT execution_steps_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT execution_steps_execution_id_idx UNIQUE (tenant_id, execution_id, id),
-    CONSTRAINT execution_steps_execution_sequence_idx UNIQUE (tenant_id, execution_id, sequence_no),
-    CONSTRAINT execution_steps_execution_fk FOREIGN KEY (tenant_id, execution_id) REFERENCES executions (tenant_id, id) ON DELETE CASCADE,
-    CONSTRAINT execution_steps_parent_fk FOREIGN KEY (tenant_id, execution_id, parent_step_id) REFERENCES execution_steps (tenant_id, execution_id, id) ON DELETE RESTRICT,
-    CONSTRAINT execution_steps_model_fk FOREIGN KEY (tenant_id, model_connection_id) REFERENCES model_connections (tenant_id, id) ON DELETE RESTRICT,
-    CONSTRAINT execution_steps_external_tool_fk FOREIGN KEY (tenant_id, external_tool_id) REFERENCES external_tools (tenant_id, id) ON DELETE RESTRICT,
-    CONSTRAINT execution_steps_cached_tokens_check CHECK (cached_tokens <= input_tokens)
+    CONSTRAINT conversation_execution_steps_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT conversation_execution_steps_execution_id_idx UNIQUE (tenant_id, execution_id, id),
+    CONSTRAINT conversation_execution_steps_execution_sequence_idx UNIQUE (tenant_id, execution_id, sequence_no),
+    CONSTRAINT conversation_execution_steps_execution_fk FOREIGN KEY (tenant_id, execution_id) REFERENCES conversation_executions (tenant_id, id) ON DELETE CASCADE,
+    CONSTRAINT conversation_execution_steps_parent_fk FOREIGN KEY (tenant_id, execution_id, parent_step_id) REFERENCES conversation_execution_steps (tenant_id, execution_id, id) ON DELETE RESTRICT,
+    CONSTRAINT conversation_execution_steps_model_fk FOREIGN KEY (tenant_id, model_connection_id) REFERENCES model_connections (tenant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT conversation_execution_steps_external_tool_fk FOREIGN KEY (tenant_id, external_tool_id) REFERENCES external_tools (tenant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT conversation_execution_steps_cached_tokens_lte_input_check CHECK (cached_tokens <= input_tokens)
 );
 
-ALTER TABLE messages
-    ADD CONSTRAINT messages_execution_fk
+ALTER TABLE conversation_messages
+    ADD CONSTRAINT conversation_messages_execution_fk
     FOREIGN KEY (tenant_id, conversation_id, segment_id, execution_id)
-    REFERENCES executions (tenant_id, conversation_id, segment_id, id) ON DELETE RESTRICT;
+    REFERENCES conversation_executions (tenant_id, conversation_id, segment_id, id) ON DELETE RESTRICT;
 
-ALTER TABLE messages
-    ADD CONSTRAINT messages_execution_step_fk
+ALTER TABLE conversation_messages
+    ADD CONSTRAINT conversation_messages_execution_step_fk
     FOREIGN KEY (tenant_id, execution_id, execution_step_id)
-    REFERENCES execution_steps (tenant_id, execution_id, id) ON DELETE RESTRICT;
+    REFERENCES conversation_execution_steps (tenant_id, execution_id, id) ON DELETE RESTRICT;
 
 CREATE TABLE file_assets (
     id text PRIMARY KEY,
@@ -1893,6 +1742,8 @@ CREATE TABLE conversation_files (
     conversation_id text NOT NULL,
     segment_id text NOT NULL,
     file_asset_id text NOT NULL,
+    message_id text,
+    ordinal integer,
     state text NOT NULL DEFAULT 'draft' CHECK (state IN ('draft', 'attached')),
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
@@ -1900,28 +1751,23 @@ CREATE TABLE conversation_files (
     CONSTRAINT conversation_files_conversation_segment_id_idx UNIQUE (tenant_id, conversation_id, segment_id, id),
     CONSTRAINT conversation_files_asset_idx UNIQUE (tenant_id, conversation_id, segment_id, file_asset_id),
     CONSTRAINT conversation_files_segment_fk FOREIGN KEY (tenant_id, conversation_id, segment_id) REFERENCES conversation_segments (tenant_id, conversation_id, id) ON DELETE CASCADE,
-    CONSTRAINT conversation_files_asset_fk FOREIGN KEY (tenant_id, file_asset_id) REFERENCES file_assets (tenant_id, id) ON DELETE RESTRICT
+    CONSTRAINT conversation_files_asset_fk FOREIGN KEY (tenant_id, file_asset_id) REFERENCES file_assets (tenant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT conversation_files_message_fk FOREIGN KEY (tenant_id, conversation_id, segment_id, message_id) REFERENCES conversation_messages (tenant_id, conversation_id, segment_id, id) ON DELETE RESTRICT,
+    CONSTRAINT conversation_files_ordinal_check CHECK (ordinal IS NULL OR ordinal >= 0),
+    CONSTRAINT conversation_files_attachment_state_check CHECK (
+        (state = 'draft' AND message_id IS NULL AND ordinal IS NULL) OR
+        (state = 'attached' AND message_id IS NOT NULL AND ordinal IS NOT NULL)
+    )
 );
 
 CREATE INDEX conversation_files_segment_idx
     ON conversation_files (tenant_id, conversation_id, segment_id, state, created_at ASC, id ASC);
-
-CREATE TABLE message_attachments (
-    tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
-    conversation_id text NOT NULL,
-    segment_id text NOT NULL,
-    message_id text NOT NULL,
-    conversation_file_id text NOT NULL,
-    ordinal integer NOT NULL CHECK (ordinal >= 0),
-    created_at timestamptz NOT NULL,
-    PRIMARY KEY (tenant_id, message_id, conversation_file_id),
-    CONSTRAINT message_attachments_ordinal_idx UNIQUE (tenant_id, message_id, ordinal),
-    CONSTRAINT message_attachments_message_fk FOREIGN KEY (tenant_id, conversation_id, segment_id, message_id) REFERENCES messages (tenant_id, conversation_id, segment_id, id) ON DELETE CASCADE,
-    CONSTRAINT message_attachments_conversation_file_fk FOREIGN KEY (tenant_id, conversation_id, segment_id, conversation_file_id) REFERENCES conversation_files (tenant_id, conversation_id, segment_id, id) ON DELETE RESTRICT
-);
-
-CREATE INDEX message_attachments_message_idx
-    ON message_attachments (tenant_id, conversation_id, segment_id, message_id, ordinal ASC);
+CREATE UNIQUE INDEX conversation_files_message_ordinal_idx
+    ON conversation_files (tenant_id, message_id, ordinal)
+    WHERE message_id IS NOT NULL;
+CREATE INDEX conversation_files_message_idx
+    ON conversation_files (tenant_id, conversation_id, segment_id, message_id, ordinal ASC)
+    WHERE message_id IS NOT NULL;
 
 CREATE TABLE form_instance_files (
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -1943,7 +1789,7 @@ CREATE TABLE form_instance_files (
 CREATE INDEX form_instance_files_field_idx
     ON form_instance_files (tenant_id, form_instance_id, field_id, created_at ASC, file_id ASC);
 
-CREATE TABLE memories (
+CREATE TABLE agent_memories (
     id text PRIMARY KEY,
     tenant_id text NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
     account_id text NOT NULL,
@@ -1961,23 +1807,23 @@ CREATE TABLE memories (
     expires_at timestamptz,
     created_at timestamptz NOT NULL,
     updated_at timestamptz NOT NULL,
-    CONSTRAINT memories_tenant_id_id_idx UNIQUE (tenant_id, id),
-    CONSTRAINT memories_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id),
-    CONSTRAINT memories_agent_fk FOREIGN KEY (tenant_id, agent_id) REFERENCES agents (tenant_id, id) ON DELETE RESTRICT,
-    CONSTRAINT memories_conversation_segment_fk FOREIGN KEY (tenant_id, conversation_id, segment_id) REFERENCES conversation_segments (tenant_id, conversation_id, id) ON DELETE RESTRICT,
-    CONSTRAINT memories_source_message_fk FOREIGN KEY (tenant_id, source_message_id) REFERENCES messages (tenant_id, id) ON DELETE SET NULL (source_message_id),
-    CONSTRAINT memories_scope_check CHECK (
+    CONSTRAINT agent_memories_tenant_id_id_idx UNIQUE (tenant_id, id),
+    CONSTRAINT agent_memories_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id),
+    CONSTRAINT agent_memories_agent_fk FOREIGN KEY (tenant_id, agent_id) REFERENCES agents (tenant_id, id) ON DELETE RESTRICT,
+    CONSTRAINT agent_memories_conversation_segment_fk FOREIGN KEY (tenant_id, conversation_id, segment_id) REFERENCES conversation_segments (tenant_id, conversation_id, id) ON DELETE RESTRICT,
+    CONSTRAINT agent_memories_source_message_fk FOREIGN KEY (tenant_id, source_message_id) REFERENCES conversation_messages (tenant_id, id) ON DELETE SET NULL (source_message_id),
+    CONSTRAINT agent_memories_scope_check CHECK (
         (scope_type = 'global' AND agent_id IS NULL AND conversation_id IS NULL AND segment_id IS NULL) OR
         (scope_type = 'agent' AND agent_id IS NOT NULL AND conversation_id IS NULL AND segment_id IS NULL) OR
         (scope_type = 'conversation' AND agent_id IS NULL AND conversation_id IS NOT NULL AND segment_id IS NOT NULL)
     )
 );
 
-CREATE UNIQUE INDEX memories_active_scope_key_idx
-    ON memories (tenant_id, account_id, scope_type, agent_id, conversation_id, segment_id, key) NULLS NOT DISTINCT
+CREATE UNIQUE INDEX agent_memories_active_scope_key_idx
+    ON agent_memories (tenant_id, account_id, scope_type, agent_id, conversation_id, segment_id, key) NULLS NOT DISTINCT
     WHERE status = 'active';
-CREATE INDEX memories_tenant_account_idx
-    ON memories (tenant_id, account_id, scope_type, importance DESC, updated_at DESC, id DESC)
+CREATE INDEX agent_memories_tenant_account_idx
+    ON agent_memories (tenant_id, account_id, scope_type, importance DESC, updated_at DESC, id DESC)
     WHERE status = 'active';
 
 CREATE TABLE agent_confirmations (
@@ -2003,8 +1849,8 @@ CREATE TABLE agent_confirmations (
     CONSTRAINT agent_confirmations_tenant_id_id_idx UNIQUE (tenant_id, id),
     CONSTRAINT agent_confirmations_account_fk FOREIGN KEY (tenant_id, account_id) REFERENCES accounts (tenant_id, id),
     CONSTRAINT agent_confirmations_segment_fk FOREIGN KEY (tenant_id, conversation_id, segment_id) REFERENCES conversation_segments (tenant_id, conversation_id, id) ON DELETE RESTRICT,
-    CONSTRAINT agent_confirmations_execution_fk FOREIGN KEY (tenant_id, conversation_id, segment_id, execution_id) REFERENCES executions (tenant_id, conversation_id, segment_id, id) ON DELETE RESTRICT,
-    CONSTRAINT agent_confirmations_source_message_fk FOREIGN KEY (tenant_id, conversation_id, segment_id, source_message_id) REFERENCES messages (tenant_id, conversation_id, segment_id, id) ON DELETE RESTRICT
+    CONSTRAINT agent_confirmations_execution_fk FOREIGN KEY (tenant_id, conversation_id, segment_id, execution_id) REFERENCES conversation_executions (tenant_id, conversation_id, segment_id, id) ON DELETE RESTRICT,
+    CONSTRAINT agent_confirmations_source_message_fk FOREIGN KEY (tenant_id, conversation_id, segment_id, source_message_id) REFERENCES conversation_messages (tenant_id, conversation_id, segment_id, id) ON DELETE RESTRICT
 );
 
 CREATE INDEX agent_confirmations_pending_idx
@@ -2135,14 +1981,10 @@ ALTER TABLE positions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE positions FORCE ROW LEVEL SECURITY;
 ALTER TABLE employees ENABLE ROW LEVEL SECURITY;
 ALTER TABLE employees FORCE ROW LEVEL SECURITY;
-ALTER TABLE employee_number_sequences ENABLE ROW LEVEL SECURITY;
-ALTER TABLE employee_number_sequences FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_policy_versions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_policy_versions FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_types ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_types FORCE ROW LEVEL SECURITY;
-ALTER TABLE leave_type_external_refs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE leave_type_external_refs FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_balances ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_balances FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_balance_entries ENABLE ROW LEVEL SECURITY;
@@ -2165,14 +2007,14 @@ ALTER TABLE workflow_stage_assignees ENABLE ROW LEVEL SECURITY;
 ALTER TABLE workflow_stage_assignees FORCE ROW LEVEL SECURITY;
 ALTER TABLE workflow_actions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE workflow_actions FORCE ROW LEVEL SECURITY;
-ALTER TABLE leave_requests ENABLE ROW LEVEL SECURITY;
-ALTER TABLE leave_requests FORCE ROW LEVEL SECURITY;
+ALTER TABLE form_business_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE form_business_records FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_request_allocations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_request_allocations FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_cases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_cases FORCE ROW LEVEL SECURITY;
-ALTER TABLE external_leave_records ENABLE ROW LEVEL SECURITY;
-ALTER TABLE external_leave_records FORCE ROW LEVEL SECURITY;
+ALTER TABLE leave_external_records ENABLE ROW LEVEL SECURITY;
+ALTER TABLE leave_external_records FORCE ROW LEVEL SECURITY;
 ALTER TABLE leave_case_sources ENABLE ROW LEVEL SECURITY;
 ALTER TABLE leave_case_sources FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_worksites ENABLE ROW LEVEL SECURITY;
@@ -2183,16 +2025,10 @@ ALTER TABLE attendance_daily_summaries ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_daily_summaries FORCE ROW LEVEL SECURITY;
 ALTER TABLE attendance_day_projections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE attendance_day_projections FORCE ROW LEVEL SECURITY;
-ALTER TABLE attendance_correction_requests ENABLE ROW LEVEL SECURITY;
-ALTER TABLE attendance_correction_requests FORCE ROW LEVEL SECURITY;
-ALTER TABLE overtime_requests ENABLE ROW LEVEL SECURITY;
-ALTER TABLE overtime_requests FORCE ROW LEVEL SECURITY;
 ALTER TABLE platform_task_items ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform_task_items FORCE ROW LEVEL SECURITY;
 ALTER TABLE platform_task_todos ENABLE ROW LEVEL SECURITY;
 ALTER TABLE platform_task_todos FORCE ROW LEVEL SECURITY;
-ALTER TABLE credential_secrets ENABLE ROW LEVEL SECURITY;
-ALTER TABLE credential_secrets FORCE ROW LEVEL SECURITY;
 ALTER TABLE model_connections ENABLE ROW LEVEL SECURITY;
 ALTER TABLE model_connections FORCE ROW LEVEL SECURITY;
 ALTER TABLE model_connection_state ENABLE ROW LEVEL SECURITY;
@@ -2211,42 +2047,32 @@ ALTER TABLE agents ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agents FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_revisions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_revisions FORCE ROW LEVEL SECURITY;
-ALTER TABLE agent_revision_members ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent_revision_members FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_revision_builtin_tools ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_revision_builtin_tools FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_revision_external_tools ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_revision_external_tools FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_revision_knowledge_bases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_revision_knowledge_bases FORCE ROW LEVEL SECURITY;
-ALTER TABLE agent_revision_member_builtin_tools ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent_revision_member_builtin_tools FORCE ROW LEVEL SECURITY;
-ALTER TABLE agent_revision_member_external_tools ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent_revision_member_external_tools FORCE ROW LEVEL SECURITY;
-ALTER TABLE agent_revision_member_knowledge_bases ENABLE ROW LEVEL SECURITY;
-ALTER TABLE agent_revision_member_knowledge_bases FORCE ROW LEVEL SECURITY;
 ALTER TABLE conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conversations FORCE ROW LEVEL SECURITY;
 ALTER TABLE conversation_segments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conversation_segments FORCE ROW LEVEL SECURITY;
-ALTER TABLE messages ENABLE ROW LEVEL SECURITY;
-ALTER TABLE messages FORCE ROW LEVEL SECURITY;
-ALTER TABLE executions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE executions FORCE ROW LEVEL SECURITY;
-ALTER TABLE execution_steps ENABLE ROW LEVEL SECURITY;
-ALTER TABLE execution_steps FORCE ROW LEVEL SECURITY;
+ALTER TABLE conversation_messages ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversation_messages FORCE ROW LEVEL SECURITY;
+ALTER TABLE conversation_executions ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversation_executions FORCE ROW LEVEL SECURITY;
+ALTER TABLE conversation_execution_steps ENABLE ROW LEVEL SECURITY;
+ALTER TABLE conversation_execution_steps FORCE ROW LEVEL SECURITY;
 ALTER TABLE file_assets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE file_assets FORCE ROW LEVEL SECURITY;
 ALTER TABLE file_chunks ENABLE ROW LEVEL SECURITY;
 ALTER TABLE file_chunks FORCE ROW LEVEL SECURITY;
 ALTER TABLE conversation_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE conversation_files FORCE ROW LEVEL SECURITY;
-ALTER TABLE message_attachments ENABLE ROW LEVEL SECURITY;
-ALTER TABLE message_attachments FORCE ROW LEVEL SECURITY;
 ALTER TABLE form_instance_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE form_instance_files FORCE ROW LEVEL SECURITY;
-ALTER TABLE memories ENABLE ROW LEVEL SECURITY;
-ALTER TABLE memories FORCE ROW LEVEL SECURITY;
+ALTER TABLE agent_memories ENABLE ROW LEVEL SECURITY;
+ALTER TABLE agent_memories FORCE ROW LEVEL SECURITY;
 ALTER TABLE agent_confirmations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE agent_confirmations FORCE ROW LEVEL SECURITY;
 
@@ -2290,10 +2116,8 @@ CREATE POLICY tenant_isolation_identity_provisioning_outbox ON identity_provisio
 CREATE POLICY tenant_isolation_org_units ON org_units USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_positions ON positions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_employees ON employees USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_employee_number_sequences ON employee_number_sequences USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_policy_versions ON attendance_policy_versions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_types ON leave_types USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_leave_type_external_refs ON leave_type_external_refs USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_balances ON leave_balances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_balance_entries ON leave_balance_entries USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_form_definition_drafts ON form_definition_drafts USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -2305,20 +2129,17 @@ CREATE POLICY tenant_isolation_workflow_runs ON workflow_runs USING (tenant_id =
 CREATE POLICY tenant_isolation_workflow_stage_instances ON workflow_stage_instances USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_workflow_stage_assignees ON workflow_stage_assignees USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_workflow_actions ON workflow_actions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_leave_requests ON leave_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_form_business_records ON form_business_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_request_allocations ON leave_request_allocations USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_cases ON leave_cases USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_external_leave_records ON external_leave_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_leave_external_records ON leave_external_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_leave_case_sources ON leave_case_sources USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_worksites ON attendance_worksites USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_clock_records ON attendance_clock_records USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_daily_summaries ON attendance_daily_summaries USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_attendance_day_projections ON attendance_day_projections USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_attendance_correction_requests ON attendance_correction_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_overtime_requests ON overtime_requests USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_platform_task_items ON platform_task_items USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_platform_task_todos ON platform_task_todos USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_credential_secrets ON credential_secrets USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_model_connections ON model_connections USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_model_connection_state ON model_connection_state USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_external_tool_connections ON external_tool_connections USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
@@ -2328,24 +2149,19 @@ CREATE POLICY tenant_isolation_knowledge_documents ON knowledge_documents USING 
 CREATE POLICY tenant_isolation_knowledge_document_chunks ON knowledge_document_chunks USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agents ON agents USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_revisions ON agent_revisions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_agent_revision_members ON agent_revision_members USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_revision_builtin_tools ON agent_revision_builtin_tools USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_revision_external_tools ON agent_revision_external_tools USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_revision_knowledge_bases ON agent_revision_knowledge_bases USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_agent_revision_member_builtin_tools ON agent_revision_member_builtin_tools USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_agent_revision_member_external_tools ON agent_revision_member_external_tools USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_agent_revision_member_knowledge_bases ON agent_revision_member_knowledge_bases USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_conversations ON conversations USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_conversation_segments ON conversation_segments USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_messages ON messages USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_executions ON executions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_execution_steps ON execution_steps USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_conversation_messages ON conversation_messages USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_conversation_executions ON conversation_executions USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_conversation_execution_steps ON conversation_execution_steps USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_file_assets ON file_assets USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_file_chunks ON file_chunks USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_conversation_files ON conversation_files USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_message_attachments ON message_attachments USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_form_instance_files ON form_instance_files USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
-CREATE POLICY tenant_isolation_memories ON memories USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
+CREATE POLICY tenant_isolation_agent_memories ON agent_memories USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 CREATE POLICY tenant_isolation_agent_confirmations ON agent_confirmations USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));
 
 CREATE POLICY tenant_isolation_notifications ON notifications USING (tenant_id = current_setting('app.tenant_id', true)) WITH CHECK (tenant_id = current_setting('app.tenant_id', true));

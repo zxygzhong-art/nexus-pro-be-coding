@@ -51,8 +51,7 @@ type AgentStore interface {
 	InsertAgentSessionFile(context.Context, domain.AgentSessionFile) error
 	GetCurrentAgentSessionFile(ctx context.Context, tenantID, sessionID, fileID string) (domain.AgentSessionFile, bool, error)
 	ListCurrentAgentSessionFiles(ctx context.Context, tenantID, sessionID string) ([]domain.AgentSessionFile, error)
-	MarkAgentSessionFileAttached(ctx context.Context, tenantID, sessionID, fileID string, updatedAt time.Time) error
-	InsertAgentMessageAttachment(ctx context.Context, tenantID, messageID, fileID string, ordinal int, createdAt time.Time) error
+	MarkAgentSessionFileAttached(ctx context.Context, tenantID, sessionID, fileID, messageID string, ordinal int, updatedAt time.Time) error
 	ListCurrentAgentMessageAttachments(ctx context.Context, tenantID, sessionID string) ([]domain.AgentMessageAttachment, error)
 	DeleteCurrentDraftAgentSessionFile(ctx context.Context, tenantID, sessionID, fileID string) (bool, error)
 	DeleteAgentFileAsset(ctx context.Context, tenantID, fileID string) error
@@ -69,10 +68,6 @@ type AgentStore interface {
 // legacy and v2 runtime paths coexist, so non-PostgreSQL compatibility stores
 // do not have to implement unused v2 aggregates.
 type AgentV2Store interface {
-	UpsertCredentialSecret(context.Context, domain.CredentialSecret) error
-	GetCredentialSecret(ctx context.Context, tenantID, id string) (domain.CredentialSecret, bool, error)
-	RevokeCredentialSecret(ctx context.Context, tenantID, id string, revokedAt time.Time) (domain.CredentialSecret, bool, error)
-
 	GetAgentExternalTool(ctx context.Context, tenantID, id string) (domain.AgentExternalTool, bool, error)
 	ReplaceAgentExternalToolCapabilities(ctx context.Context, tenantID, connectionID string, capabilities []domain.ExternalToolCapability) error
 	UpdateAgentExternalToolTestResult(ctx context.Context, tenantID, id, status, message string, testedAt time.Time) (domain.AgentExternalTool, bool, error)
@@ -80,7 +75,6 @@ type AgentV2Store interface {
 	ListAgentExternalToolCapabilities(ctx context.Context, tenantID, connectionID string) ([]domain.ExternalToolCapability, error)
 	ListAgentExternalToolCapabilitiesByIDs(ctx context.Context, tenantID string, capabilityIDs []string) ([]domain.ExternalToolCapability, error)
 	ListAgentRevisionExternalToolBindings(ctx context.Context, tenantID, revisionID string) ([]domain.AgentRevisionExternalTool, error)
-	ListAgentRevisionMemberExternalToolBindings(ctx context.Context, tenantID, revisionID string) ([]domain.AgentRevisionMemberExternalTool, error)
 
 	UpsertExecutionStep(context.Context, domain.ExecutionStep) error
 	AppendExecutionStep(context.Context, domain.ExecutionStep) (domain.ExecutionStep, error)

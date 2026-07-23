@@ -308,6 +308,7 @@ type (
 	AttendanceDailySummaryQuery                = domain.AttendanceDailySummaryQuery
 	EHRMSAttendanceSyncInput                   = domain.EHRMSAttendanceSyncInput
 	EHRMSAttendanceSyncResponse                = domain.EHRMSAttendanceSyncResponse
+	EHRMSLeaveTypeSyncResponse                 = domain.EHRMSLeaveTypeSyncResponse
 	CreateAttendanceCorrectionInput            = domain.CreateAttendanceCorrectionInput
 	UpdateAttendancePolicyInput                = domain.UpdateAttendancePolicyInput
 	ReviewAttendanceCorrectionInput            = domain.ReviewAttendanceCorrectionInput

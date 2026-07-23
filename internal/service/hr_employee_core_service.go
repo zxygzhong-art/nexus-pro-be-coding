@@ -238,8 +238,6 @@ func employeeStringValues(items []Employee, fn func(Employee) string) []string {
 	return out
 }
 
-const employeeNoPrefix = "IKL"
-
 type employeeUniqueLookupStore interface {
 	GetEmployeeByEmployeeNo(context.Context, string, string) (Employee, bool, error)
 	GetEmployeeByCompanyEmail(context.Context, string, string) (Employee, bool, error)
@@ -249,25 +247,15 @@ type employeeUniqueLookupStore interface {
 }
 
 // employeeFromCreateInput 處理員工 來源 create 輸入的服務流程。
-func (c HRService) employeeFromCreateInput(ctx RequestContext, input CreateEmployeeInput, reservedEmployeeNos ...map[string]struct{}) (Employee, error) {
+func (c HRService) employeeFromCreateInput(ctx RequestContext, input CreateEmployeeInput) (Employee, error) {
 	employee, err := c.employeeCreateCandidate(ctx, input)
 	if err != nil {
 		return Employee{}, err
-	}
-	if employee.EmployeeNo == "" {
-		employeeNo, err := c.generateEmployeeNo(ctx, reservedEmployeeNos...)
-		if err != nil {
-			return Employee{}, err
-		}
-		employee.EmployeeNo = employeeNo
 	}
 	if err := c.ensureEmployeePosition(ctx, &employee, true); err != nil {
 		return Employee{}, err
 	}
 	if err := c.validateEmployee(ctx, employee, "create"); err != nil {
-		return Employee{}, err
-	}
-	if err := reserveEmployeeNo(employee.EmployeeNo, reservedEmployeeNos...); err != nil {
 		return Employee{}, err
 	}
 	if len(employee.InternalExperiences) == 0 {
@@ -465,6 +453,9 @@ func (c HRService) deriveEmployeeHotFields(employee Employee) Employee {
 // validateEmployee 驗證員工的服務流程。
 func (c HRService) validateEmployee(ctx RequestContext, employee Employee, mode string) error {
 	fields := make([]FieldError, 0)
+	if strings.TrimSpace(employee.EmployeeNo) == "" {
+		fields = append(fields, FieldError{Tab: "basic_info", Field: "employee_no", Code: "required", Message: "employee_no is required"})
+	}
 	if strings.TrimSpace(employee.Name) == "" {
 		fields = append(fields, FieldError{Tab: "basic_info", Field: "name", Code: "required", Message: "name is required"})
 	}
@@ -717,54 +708,6 @@ var employeeUniqueBasicInfoFields = []string{
 	"arc_no",
 	"tax_id",
 	"work_permit_no",
-}
-
-// generateEmployeeNo 處理 generate 員工 no 的服務流程。
-func (c HRService) generateEmployeeNo(ctx RequestContext, reservedEmployeeNos ...map[string]struct{}) (string, error) {
-	for {
-		employeeNo, err := c.store.NextEmployeeNo(goContext(ctx), ctx.TenantID, employeeNoPrefix)
-		if err != nil {
-			return "", err
-		}
-		if !employeeNoReserved(employeeNo, reservedEmployeeNos...) {
-			return employeeNo, nil
-		}
-	}
-}
-
-// employeeNoReserved 處理員工 no reserved。
-func employeeNoReserved(employeeNo string, reservedEmployeeNos ...map[string]struct{}) bool {
-	employeeNo = strings.TrimSpace(employeeNo)
-	if employeeNo == "" {
-		return false
-	}
-	for _, reserved := range reservedEmployeeNos {
-		if reserved == nil {
-			continue
-		}
-		if _, ok := reserved[employeeNo]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-// reserveEmployeeNo 保留員工 no。
-func reserveEmployeeNo(employeeNo string, reservedEmployeeNos ...map[string]struct{}) error {
-	employeeNo = strings.TrimSpace(employeeNo)
-	if employeeNo == "" {
-		return nil
-	}
-	for _, reserved := range reservedEmployeeNos {
-		if reserved == nil {
-			continue
-		}
-		if _, ok := reserved[employeeNo]; ok {
-			return domainValidation("employee validation failed", FieldError{Tab: "basic_info", Field: "employee_no", Code: "duplicate_in_import", Message: "employee_no is duplicated in import batch"})
-		}
-		reserved[employeeNo] = struct{}{}
-	}
-	return nil
 }
 
 // stringFromMap 處理字串 來源 map。

@@ -13,51 +13,6 @@ import (
 
 var _ repository.AgentV2Store = (*Store)(nil)
 
-// UpsertCredentialSecret persists encrypted credential material independently
-// from the connection that references it.
-func (s *Store) UpsertCredentialSecret(execCtx context.Context, item domain.CredentialSecret) error {
-	_, err := s.q.UpsertCredentialSecretV2(tenantContext(execCtx, item.TenantID), sqlc.UpsertCredentialSecretV2Params{
-		ID:                 item.ID,
-		TenantID:           item.TenantID,
-		Name:               item.Name,
-		SecretType:         string(item.SecretType),
-		Ciphertext:         item.Ciphertext,
-		Preview:            item.Preview,
-		Status:             string(item.Status),
-		CreatedByAccountID: nullableText(item.CreatedByAccountID),
-		CreatedAt:          timestamptz(item.CreatedAt),
-		UpdatedAt:          timestamptz(item.UpdatedAt),
-		RevokedAt:          nullableTimestamptz(item.RevokedAt),
-	})
-	return err
-}
-
-// GetCredentialSecret returns one tenant-owned encrypted secret.
-func (s *Store) GetCredentialSecret(execCtx context.Context, tenantID, id string) (domain.CredentialSecret, bool, error) {
-	item, err := s.q.GetCredentialSecretV2(tenantContext(execCtx, tenantID), sqlc.GetCredentialSecretV2Params{TenantID: tenantID, ID: id})
-	if isNotFound(err) {
-		return domain.CredentialSecret{}, false, nil
-	}
-	if err != nil {
-		return domain.CredentialSecret{}, false, err
-	}
-	return credentialSecretFromRow(item), true, nil
-}
-
-// RevokeCredentialSecret makes active credential material permanently unusable.
-func (s *Store) RevokeCredentialSecret(execCtx context.Context, tenantID, id string, revokedAt time.Time) (domain.CredentialSecret, bool, error) {
-	item, err := s.q.RevokeCredentialSecretV2(tenantContext(execCtx, tenantID), sqlc.RevokeCredentialSecretV2Params{
-		TenantID: tenantID, ID: id, RevokedAt: timestamptz(revokedAt),
-	})
-	if isNotFound(err) {
-		return domain.CredentialSecret{}, false, nil
-	}
-	if err != nil {
-		return domain.CredentialSecret{}, false, err
-	}
-	return credentialSecretFromRow(item), true, nil
-}
-
 // GetAgentExternalTool returns one connection together with its active,
 // persisted capability catalogue.
 func (s *Store) GetAgentExternalTool(execCtx context.Context, tenantID, id string) (domain.AgentExternalTool, bool, error) {
@@ -200,26 +155,6 @@ func (s *Store) ListAgentRevisionExternalToolBindings(execCtx context.Context, t
 	return out, nil
 }
 
-// ListAgentRevisionMemberExternalToolBindings returns immutable member
-// bindings and their publish-time schema checksums.
-func (s *Store) ListAgentRevisionMemberExternalToolBindings(execCtx context.Context, tenantID, revisionID string) ([]domain.AgentRevisionMemberExternalTool, error) {
-	items, err := s.q.ListAgentRevisionMemberExternalToolBindingsV2(tenantContext(execCtx, tenantID), sqlc.ListAgentRevisionMemberExternalToolBindingsV2Params{
-		TenantID: tenantID, RevisionID: revisionID,
-	})
-	if err != nil {
-		return nil, err
-	}
-	out := make([]domain.AgentRevisionMemberExternalTool, 0, len(items))
-	for _, item := range items {
-		out = append(out, domain.AgentRevisionMemberExternalTool{
-			TenantID: item.TenantID, RevisionID: item.RevisionID, MemberID: item.MemberID,
-			ExternalToolID: item.ExternalToolID, ToolSchemaChecksum: item.ToolSchemaChecksum,
-			Ordinal: int(item.Ordinal), Config: jsonMap(item.Config),
-		})
-	}
-	return out, nil
-}
-
 // UpsertExecutionStep persists one observable orchestration step.
 func (s *Store) UpsertExecutionStep(execCtx context.Context, item domain.ExecutionStep) error {
 	_, err := s.q.UpsertExecutionStepV2(tenantContext(execCtx, item.TenantID), sqlc.UpsertExecutionStepV2Params{
@@ -338,19 +273,10 @@ func (s *Store) UpdateAgentConfirmation(execCtx context.Context, item domain.Age
 	return agentConfirmationFromRow(stored), true, nil
 }
 
-func credentialSecretFromRow(item sqlc.CredentialSecret) domain.CredentialSecret {
-	return domain.CredentialSecret{
-		ID: item.ID, TenantID: item.TenantID, Name: item.Name,
-		SecretType: domain.CredentialSecretType(item.SecretType), Ciphertext: item.Ciphertext, Preview: item.Preview,
-		Status: domain.CredentialSecretStatus(item.Status), CreatedByAccountID: textFrom(item.CreatedByAccountID),
-		CreatedAt: timeFrom(item.CreatedAt), UpdatedAt: timeFrom(item.UpdatedAt), RevokedAt: timePtrFrom(item.RevokedAt),
-	}
-}
-
 func agentExternalToolFromGetV2Row(item sqlc.GetAgentExternalToolV2Row) domain.AgentExternalTool {
 	return agentExternalToolFromFields(
 		item.ID, item.TenantID, item.Name, item.Description, item.Kind, item.Transport, item.EndpointUrl,
-		item.AuthType, item.AuthHeaderName, item.AuthUsername, item.AuthSecretCiphertext, textFrom(item.CredentialSecretID),
+		item.AuthType, item.AuthHeaderName, item.AuthUsername, item.AuthSecretCiphertext,
 		item.TimeoutSeconds, item.Status, item.LastTestedAt, item.LastTestStatus, item.LastTestMessage,
 		textFrom(item.CreatedByAccountID), item.CreatedAt, item.UpdatedAt, item.ArchivedAt,
 	)
@@ -359,7 +285,7 @@ func agentExternalToolFromGetV2Row(item sqlc.GetAgentExternalToolV2Row) domain.A
 func agentExternalToolFromTestV2Row(item sqlc.UpdateAgentExternalToolTestResultV2Row) domain.AgentExternalTool {
 	return agentExternalToolFromFields(
 		item.ID, item.TenantID, item.Name, item.Description, item.Kind, item.Transport, item.EndpointUrl,
-		item.AuthType, item.AuthHeaderName, item.AuthUsername, item.AuthSecretCiphertext, textFrom(item.CredentialSecretID),
+		item.AuthType, item.AuthHeaderName, item.AuthUsername, item.AuthSecretCiphertext,
 		item.TimeoutSeconds, item.Status, item.LastTestedAt, item.LastTestStatus, item.LastTestMessage,
 		textFrom(item.CreatedByAccountID), item.CreatedAt, item.UpdatedAt, item.ArchivedAt,
 	)
@@ -375,7 +301,7 @@ func externalToolCapabilityFromRow(item sqlc.ExternalTool) domain.ExternalToolCa
 	}
 }
 
-func executionStepFromRow(item sqlc.ExecutionStep) domain.ExecutionStep {
+func executionStepFromRow(item sqlc.ConversationExecutionStep) domain.ExecutionStep {
 	return domain.ExecutionStep{
 		ID: item.ID, TenantID: item.TenantID, ExecutionID: item.ExecutionID,
 		ParentStepID: textFrom(item.ParentStepID), SequenceNo: int(item.SequenceNo), StepType: domain.ExecutionStepType(item.StepType),

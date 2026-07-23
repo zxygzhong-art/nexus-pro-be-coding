@@ -14,10 +14,12 @@ type AttendanceStore interface {
 	GetAttendancePolicyAsOf(ctx context.Context, tenantID string, asOf time.Time) (domain.AttendancePolicy, bool, error)
 	// ListLeaveTypes returns tenant leave_types rows ordered by display_order.
 	ListLeaveTypes(ctx context.Context, tenantID string) ([]domain.LeaveType, error)
-	// UpsertLeaveTypeEnabled writes leave_types.status (active/inactive) for one existing code.
-	UpsertLeaveTypeEnabled(ctx context.Context, tenantID, code string, enabled bool, updatedByAccountID string, updatedAt time.Time) error
-	UpsertLeaveTypeExternalRef(context.Context, domain.LeaveTypeExternalRef) error
-	GetLeaveTypeExternalRef(ctx context.Context, tenantID, sourceSystem, externalCode, externalCategoryCode string, asOf time.Time) (domain.LeaveTypeExternalRef, bool, error)
+	// UpsertLeaveType writes one EHRMS-synced leave catalog row (preserves status on update).
+	UpsertLeaveType(context.Context, domain.LeaveType) error
+	// UpsertLeaveTypeEnabled writes leave_types.status (active/inactive) for one existing ID.
+	UpsertLeaveTypeEnabled(ctx context.Context, tenantID, id string, enabled bool, updatedByAccountID string, updatedAt time.Time) error
+	// DeactivateMissingLeaveTypes marks EHRMS-sourced leave types not in activeCodes as inactive.
+	DeactivateMissingLeaveTypes(ctx context.Context, tenantID string, activeCodes []string, updatedAt time.Time) (int64, error)
 
 	UpsertLeaveBalance(context.Context, domain.LeaveBalance) error
 	EnsureLocalLeaveBalanceAnchor(context.Context, domain.LeaveBalance) (domain.LeaveBalance, error)

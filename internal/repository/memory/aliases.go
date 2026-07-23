@@ -34,7 +34,6 @@ type (
 	AttendanceLeaveType             = domain.AttendanceLeaveType
 	LeaveBalance                    = domain.LeaveBalance
 	LeaveBalanceEntry               = domain.LeaveBalanceEntry
-	LeaveTypeExternalRef            = domain.LeaveTypeExternalRef
 	LeaveRequest                    = domain.LeaveRequest
 	LeaveRequestAllocation          = domain.LeaveRequestAllocation
 	LeaveCase                       = domain.LeaveCase

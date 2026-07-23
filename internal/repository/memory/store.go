@@ -20,162 +20,154 @@ type Store struct {
 
 	tenants map[string]Tenant
 
-	accounts                         map[string]map[string]Account
-	userIdentities                   map[string]map[string]UserIdentity
-	userGroups                       map[string]map[string]UserGroup
-	groupMemberships                 map[string]map[string]GroupMembership
-	permissionSets                   map[string]map[string]PermissionSet
-	permissionPackages               map[string]PermissionPackage
-	permissionSetTemplates           map[string]map[string]PermissionSetTemplate
-	userGroupTemplates               map[string]map[string]UserGroupTemplate
-	assumableRoleTemplates           map[string]map[string]AssumableRoleTemplate
-	permissionImports                map[string]map[string]PermissionPackageImport
-	permissionCatalog                map[string]map[string]PermissionCatalogItem
-	menuItems                        map[string]map[string]MenuItem
-	permissionSetItems               map[string]map[string]PermissionSetItem
-	assignments                      map[string]map[string]PermissionSetAssignment
-	dataScopes                       map[string]map[string]DataScope
-	fieldPolicies                    map[string]map[string]FieldPolicy
-	assumableRoles                   map[string]map[string]AssumableRole
-	roleSessions                     map[string]map[string]AssumableRoleSession
-	orgUnits                         map[string]map[string]OrgUnit
-	positions                        map[string]map[string]Position
-	employees                        map[string]map[string]Employee
-	employeeNoSequences              map[string]map[string]int
-	attendancePolicyVersions         map[string]map[int]AttendancePolicy
-	leaveTypes                       map[string]map[string]domain.LeaveType
-	leaveTypeExternalRefs            map[string]map[string]LeaveTypeExternalRef
-	leaveBalances                    map[string]map[string]LeaveBalance
-	leaveBalanceEntries              map[string]map[string]LeaveBalanceEntry
-	leaveRequests                    map[string]map[string]LeaveRequest
-	leaveRequestAllocations          map[string]map[string]LeaveRequestAllocation
-	leaveCases                       map[string]map[string]LeaveCase
-	leaveCaseSources                 map[string]map[string]LeaveCaseSource
-	externalLeaveRecords             map[string]map[string]ExternalLeaveRecord
-	attendanceWorksites              map[string]map[string]AttendanceWorksite
-	attendanceClockRecords           map[string]map[string]AttendanceClockRecord
-	attendanceSummaries              map[string]map[string]AttendanceDailySummary
-	attendanceDayProjections         map[string]map[string]AttendanceDayProjection
-	attendanceCorrections            map[string]map[string]AttendanceCorrectionRequest
-	overtimeRequests                 map[string]map[string]OvertimeRequest
-	formDefinitionDrafts             map[string]map[string]domain.FormDefinitionDraft
-	formTemplates                    map[string]map[string]FormTemplate
-	formTemplateVersions             map[string]map[string]FormTemplateVersion
-	formInstances                    map[string]map[string]FormInstance
-	formInstanceFieldValues          map[string]map[string][]FormInstanceFieldValue
-	formInstanceFiles                map[string]map[string]domain.FormInstanceFile
-	workflowRuns                     map[string]map[string]domain.WorkflowRun
-	workflowStageInstances           map[string]map[string]domain.WorkflowStageInstance
-	workflowStageAssignees           map[string]map[string]domain.WorkflowStageAssignee
-	workflowActions                  map[string][]domain.WorkflowAction
-	platformTaskItems                map[string]map[string]PlatformTaskRecordItem
-	platformTaskTodos                map[string]map[string]PlatformTaskTodoRecord
-	agentRuns                        map[string]map[string]AgentRun
-	agentModels                      map[string]map[string]AgentModel
-	agentExternalTools               map[string]map[string]AgentExternalTool
-	agentDefinitions                 map[string]map[string]AgentDefinition
-	agentDefinitionVersions          map[string]map[string]AgentDefinitionVersion
-	agentExecutionSteps              map[string]map[string]domain.ExecutionStep
-	agentRevisionExternalTools       map[string]map[string][]domain.AgentRevisionExternalTool
-	agentRevisionMemberExternalTools map[string]map[string][]domain.AgentRevisionMemberExternalTool
-	agentConfirmations               map[string]map[string]domain.AgentConfirmationRecord
-	knowledgeBases                   map[string]map[string]KnowledgeBase
-	knowledgeDocuments               map[string]map[string]KnowledgeDocument
-	knowledgeDocumentChunks          map[string]map[string]KnowledgeDocumentChunk
-	agentSessions                    map[string]map[string]AgentSession
-	agentSessionMessages             map[string]map[string]AgentSessionMessage
-	agentSessionFiles                map[string]map[string]domain.AgentSessionFile
-	agentFileChunks                  map[string]map[string][]string
-	agentMessageAttachments          map[string]map[string][]domain.AgentMessageAttachment
-	agentMemories                    map[string]map[string]AgentMemory
-	notifications                    map[string]map[string]Notification
-	notificationRecipients           map[string]map[string]NotificationRecipient
-	auditLogs                        map[string][]AuditLog
-	permissionVersions               map[string]int64
-	identityOutbox                   map[string][]IdentityProvisioningOutboxEvent
-	outboxEvents                     map[string][]OutboxEvent
-	relationshipTuples               map[string]map[string]AuthzRelationshipTuple
+	accounts                   map[string]map[string]Account
+	userIdentities             map[string]map[string]UserIdentity
+	userGroups                 map[string]map[string]UserGroup
+	groupMemberships           map[string]map[string]GroupMembership
+	permissionSets             map[string]map[string]PermissionSet
+	permissionPackages         map[string]PermissionPackage
+	permissionSetTemplates     map[string]map[string]PermissionSetTemplate
+	userGroupTemplates         map[string]map[string]UserGroupTemplate
+	assumableRoleTemplates     map[string]map[string]AssumableRoleTemplate
+	permissionImports          map[string]map[string]PermissionPackageImport
+	permissionCatalog          map[string]map[string]PermissionCatalogItem
+	menuItems                  map[string]map[string]MenuItem
+	permissionSetItems         map[string]map[string]PermissionSetItem
+	assignments                map[string]map[string]PermissionSetAssignment
+	dataScopes                 map[string]map[string]DataScope
+	fieldPolicies              map[string]map[string]FieldPolicy
+	assumableRoles             map[string]map[string]AssumableRole
+	roleSessions               map[string]map[string]AssumableRoleSession
+	orgUnits                   map[string]map[string]OrgUnit
+	positions                  map[string]map[string]Position
+	employees                  map[string]map[string]Employee
+	attendancePolicyVersions   map[string]map[int]AttendancePolicy
+	leaveTypes                 map[string]map[string]domain.LeaveType
+	leaveBalances              map[string]map[string]LeaveBalance
+	leaveBalanceEntries        map[string]map[string]LeaveBalanceEntry
+	leaveRequests              map[string]map[string]LeaveRequest
+	leaveRequestAllocations    map[string]map[string]LeaveRequestAllocation
+	leaveCases                 map[string]map[string]LeaveCase
+	leaveCaseSources           map[string]map[string]LeaveCaseSource
+	externalLeaveRecords       map[string]map[string]ExternalLeaveRecord
+	attendanceWorksites        map[string]map[string]AttendanceWorksite
+	attendanceClockRecords     map[string]map[string]AttendanceClockRecord
+	attendanceSummaries        map[string]map[string]AttendanceDailySummary
+	attendanceDayProjections   map[string]map[string]AttendanceDayProjection
+	attendanceCorrections      map[string]map[string]AttendanceCorrectionRequest
+	overtimeRequests           map[string]map[string]OvertimeRequest
+	formDefinitionDrafts       map[string]map[string]domain.FormDefinitionDraft
+	formTemplates              map[string]map[string]FormTemplate
+	formTemplateVersions       map[string]map[string]FormTemplateVersion
+	formInstances              map[string]map[string]FormInstance
+	formInstanceFieldValues    map[string]map[string][]FormInstanceFieldValue
+	formInstanceFiles          map[string]map[string]domain.FormInstanceFile
+	workflowRuns               map[string]map[string]domain.WorkflowRun
+	workflowStageInstances     map[string]map[string]domain.WorkflowStageInstance
+	workflowStageAssignees     map[string]map[string]domain.WorkflowStageAssignee
+	workflowActions            map[string][]domain.WorkflowAction
+	platformTaskItems          map[string]map[string]PlatformTaskRecordItem
+	platformTaskTodos          map[string]map[string]PlatformTaskTodoRecord
+	agentRuns                  map[string]map[string]AgentRun
+	agentModels                map[string]map[string]AgentModel
+	agentExternalTools         map[string]map[string]AgentExternalTool
+	agentDefinitions           map[string]map[string]AgentDefinition
+	agentDefinitionVersions    map[string]map[string]AgentDefinitionVersion
+	agentExecutionSteps        map[string]map[string]domain.ExecutionStep
+	agentRevisionExternalTools map[string]map[string][]domain.AgentRevisionExternalTool
+	agentConfirmations         map[string]map[string]domain.AgentConfirmationRecord
+	knowledgeBases             map[string]map[string]KnowledgeBase
+	knowledgeDocuments         map[string]map[string]KnowledgeDocument
+	knowledgeDocumentChunks    map[string]map[string]KnowledgeDocumentChunk
+	agentSessions              map[string]map[string]AgentSession
+	agentSessionMessages       map[string]map[string]AgentSessionMessage
+	agentSessionFiles          map[string]map[string]domain.AgentSessionFile
+	agentFileChunks            map[string]map[string][]string
+	agentMemories              map[string]map[string]AgentMemory
+	notifications              map[string]map[string]Notification
+	notificationRecipients     map[string]map[string]NotificationRecipient
+	auditLogs                  map[string][]AuditLog
+	permissionVersions         map[string]int64
+	identityOutbox             map[string][]IdentityProvisioningOutboxEvent
+	outboxEvents               map[string][]OutboxEvent
+	relationshipTuples         map[string]map[string]AuthzRelationshipTuple
 }
 
 // NewStore 建立儲存層。
 func NewStore() *Store {
 	return &Store{
-		tenants:                          map[string]Tenant{},
-		accounts:                         map[string]map[string]Account{},
-		userIdentities:                   map[string]map[string]UserIdentity{},
-		userGroups:                       map[string]map[string]UserGroup{},
-		groupMemberships:                 map[string]map[string]GroupMembership{},
-		permissionSets:                   map[string]map[string]PermissionSet{},
-		permissionPackages:               map[string]PermissionPackage{},
-		permissionSetTemplates:           map[string]map[string]PermissionSetTemplate{},
-		userGroupTemplates:               map[string]map[string]UserGroupTemplate{},
-		assumableRoleTemplates:           map[string]map[string]AssumableRoleTemplate{},
-		permissionImports:                map[string]map[string]PermissionPackageImport{},
-		permissionCatalog:                map[string]map[string]PermissionCatalogItem{},
-		menuItems:                        map[string]map[string]MenuItem{},
-		permissionSetItems:               map[string]map[string]PermissionSetItem{},
-		assignments:                      map[string]map[string]PermissionSetAssignment{},
-		dataScopes:                       map[string]map[string]DataScope{},
-		fieldPolicies:                    map[string]map[string]FieldPolicy{},
-		assumableRoles:                   map[string]map[string]AssumableRole{},
-		roleSessions:                     map[string]map[string]AssumableRoleSession{},
-		orgUnits:                         map[string]map[string]OrgUnit{},
-		positions:                        map[string]map[string]Position{},
-		employees:                        map[string]map[string]Employee{},
-		employeeNoSequences:              map[string]map[string]int{},
-		attendancePolicyVersions:         map[string]map[int]AttendancePolicy{},
-		leaveTypes:                       map[string]map[string]domain.LeaveType{},
-		leaveTypeExternalRefs:            map[string]map[string]LeaveTypeExternalRef{},
-		leaveBalances:                    map[string]map[string]LeaveBalance{},
-		leaveBalanceEntries:              map[string]map[string]LeaveBalanceEntry{},
-		leaveRequests:                    map[string]map[string]LeaveRequest{},
-		leaveRequestAllocations:          map[string]map[string]LeaveRequestAllocation{},
-		leaveCases:                       map[string]map[string]LeaveCase{},
-		leaveCaseSources:                 map[string]map[string]LeaveCaseSource{},
-		externalLeaveRecords:             map[string]map[string]ExternalLeaveRecord{},
-		attendanceWorksites:              map[string]map[string]AttendanceWorksite{},
-		attendanceClockRecords:           map[string]map[string]AttendanceClockRecord{},
-		attendanceSummaries:              map[string]map[string]AttendanceDailySummary{},
-		attendanceDayProjections:         map[string]map[string]AttendanceDayProjection{},
-		attendanceCorrections:            map[string]map[string]AttendanceCorrectionRequest{},
-		overtimeRequests:                 map[string]map[string]OvertimeRequest{},
-		formDefinitionDrafts:             map[string]map[string]domain.FormDefinitionDraft{},
-		formTemplates:                    map[string]map[string]FormTemplate{},
-		formTemplateVersions:             map[string]map[string]FormTemplateVersion{},
-		formInstances:                    map[string]map[string]FormInstance{},
-		formInstanceFieldValues:          map[string]map[string][]FormInstanceFieldValue{},
-		formInstanceFiles:                map[string]map[string]domain.FormInstanceFile{},
-		workflowRuns:                     map[string]map[string]domain.WorkflowRun{},
-		workflowStageInstances:           map[string]map[string]domain.WorkflowStageInstance{},
-		workflowStageAssignees:           map[string]map[string]domain.WorkflowStageAssignee{},
-		workflowActions:                  map[string][]domain.WorkflowAction{},
-		platformTaskItems:                map[string]map[string]PlatformTaskRecordItem{},
-		platformTaskTodos:                map[string]map[string]PlatformTaskTodoRecord{},
-		agentRuns:                        map[string]map[string]AgentRun{},
-		agentModels:                      map[string]map[string]AgentModel{},
-		agentExternalTools:               map[string]map[string]AgentExternalTool{},
-		agentDefinitions:                 map[string]map[string]AgentDefinition{},
-		agentDefinitionVersions:          map[string]map[string]AgentDefinitionVersion{},
-		agentExecutionSteps:              map[string]map[string]domain.ExecutionStep{},
-		agentRevisionExternalTools:       map[string]map[string][]domain.AgentRevisionExternalTool{},
-		agentRevisionMemberExternalTools: map[string]map[string][]domain.AgentRevisionMemberExternalTool{},
-		agentConfirmations:               map[string]map[string]domain.AgentConfirmationRecord{},
-		knowledgeBases:                   map[string]map[string]KnowledgeBase{},
-		knowledgeDocuments:               map[string]map[string]KnowledgeDocument{},
-		knowledgeDocumentChunks:          map[string]map[string]KnowledgeDocumentChunk{},
-		agentSessions:                    map[string]map[string]AgentSession{},
-		agentSessionMessages:             map[string]map[string]AgentSessionMessage{},
-		agentSessionFiles:                map[string]map[string]domain.AgentSessionFile{},
-		agentFileChunks:                  map[string]map[string][]string{},
-		agentMessageAttachments:          map[string]map[string][]domain.AgentMessageAttachment{},
-		agentMemories:                    map[string]map[string]AgentMemory{},
-		notifications:                    map[string]map[string]Notification{},
-		notificationRecipients:           map[string]map[string]NotificationRecipient{},
-		auditLogs:                        map[string][]AuditLog{},
-		permissionVersions:               map[string]int64{},
-		identityOutbox:                   map[string][]IdentityProvisioningOutboxEvent{},
-		outboxEvents:                     map[string][]OutboxEvent{},
-		relationshipTuples:               map[string]map[string]AuthzRelationshipTuple{},
+		tenants:                    map[string]Tenant{},
+		accounts:                   map[string]map[string]Account{},
+		userIdentities:             map[string]map[string]UserIdentity{},
+		userGroups:                 map[string]map[string]UserGroup{},
+		groupMemberships:           map[string]map[string]GroupMembership{},
+		permissionSets:             map[string]map[string]PermissionSet{},
+		permissionPackages:         map[string]PermissionPackage{},
+		permissionSetTemplates:     map[string]map[string]PermissionSetTemplate{},
+		userGroupTemplates:         map[string]map[string]UserGroupTemplate{},
+		assumableRoleTemplates:     map[string]map[string]AssumableRoleTemplate{},
+		permissionImports:          map[string]map[string]PermissionPackageImport{},
+		permissionCatalog:          map[string]map[string]PermissionCatalogItem{},
+		menuItems:                  map[string]map[string]MenuItem{},
+		permissionSetItems:         map[string]map[string]PermissionSetItem{},
+		assignments:                map[string]map[string]PermissionSetAssignment{},
+		dataScopes:                 map[string]map[string]DataScope{},
+		fieldPolicies:              map[string]map[string]FieldPolicy{},
+		assumableRoles:             map[string]map[string]AssumableRole{},
+		roleSessions:               map[string]map[string]AssumableRoleSession{},
+		orgUnits:                   map[string]map[string]OrgUnit{},
+		positions:                  map[string]map[string]Position{},
+		employees:                  map[string]map[string]Employee{},
+		attendancePolicyVersions:   map[string]map[int]AttendancePolicy{},
+		leaveTypes:                 map[string]map[string]domain.LeaveType{},
+		leaveBalances:              map[string]map[string]LeaveBalance{},
+		leaveBalanceEntries:        map[string]map[string]LeaveBalanceEntry{},
+		leaveRequests:              map[string]map[string]LeaveRequest{},
+		leaveRequestAllocations:    map[string]map[string]LeaveRequestAllocation{},
+		leaveCases:                 map[string]map[string]LeaveCase{},
+		leaveCaseSources:           map[string]map[string]LeaveCaseSource{},
+		externalLeaveRecords:       map[string]map[string]ExternalLeaveRecord{},
+		attendanceWorksites:        map[string]map[string]AttendanceWorksite{},
+		attendanceClockRecords:     map[string]map[string]AttendanceClockRecord{},
+		attendanceSummaries:        map[string]map[string]AttendanceDailySummary{},
+		attendanceDayProjections:   map[string]map[string]AttendanceDayProjection{},
+		attendanceCorrections:      map[string]map[string]AttendanceCorrectionRequest{},
+		overtimeRequests:           map[string]map[string]OvertimeRequest{},
+		formDefinitionDrafts:       map[string]map[string]domain.FormDefinitionDraft{},
+		formTemplates:              map[string]map[string]FormTemplate{},
+		formTemplateVersions:       map[string]map[string]FormTemplateVersion{},
+		formInstances:              map[string]map[string]FormInstance{},
+		formInstanceFieldValues:    map[string]map[string][]FormInstanceFieldValue{},
+		formInstanceFiles:          map[string]map[string]domain.FormInstanceFile{},
+		workflowRuns:               map[string]map[string]domain.WorkflowRun{},
+		workflowStageInstances:     map[string]map[string]domain.WorkflowStageInstance{},
+		workflowStageAssignees:     map[string]map[string]domain.WorkflowStageAssignee{},
+		workflowActions:            map[string][]domain.WorkflowAction{},
+		platformTaskItems:          map[string]map[string]PlatformTaskRecordItem{},
+		platformTaskTodos:          map[string]map[string]PlatformTaskTodoRecord{},
+		agentRuns:                  map[string]map[string]AgentRun{},
+		agentModels:                map[string]map[string]AgentModel{},
+		agentExternalTools:         map[string]map[string]AgentExternalTool{},
+		agentDefinitions:           map[string]map[string]AgentDefinition{},
+		agentDefinitionVersions:    map[string]map[string]AgentDefinitionVersion{},
+		agentExecutionSteps:        map[string]map[string]domain.ExecutionStep{},
+		agentRevisionExternalTools: map[string]map[string][]domain.AgentRevisionExternalTool{},
+		agentConfirmations:         map[string]map[string]domain.AgentConfirmationRecord{},
+		knowledgeBases:             map[string]map[string]KnowledgeBase{},
+		knowledgeDocuments:         map[string]map[string]KnowledgeDocument{},
+		knowledgeDocumentChunks:    map[string]map[string]KnowledgeDocumentChunk{},
+		agentSessions:              map[string]map[string]AgentSession{},
+		agentSessionMessages:       map[string]map[string]AgentSessionMessage{},
+		agentSessionFiles:          map[string]map[string]domain.AgentSessionFile{},
+		agentFileChunks:            map[string]map[string][]string{},
+		agentMemories:              map[string]map[string]AgentMemory{},
+		notifications:              map[string]map[string]Notification{},
+		notificationRecipients:     map[string]map[string]NotificationRecipient{},
+		auditLogs:                  map[string][]AuditLog{},
+		permissionVersions:         map[string]int64{},
+		identityOutbox:             map[string][]IdentityProvisioningOutboxEvent{},
+		outboxEvents:               map[string][]OutboxEvent{},
+		relationshipTuples:         map[string]map[string]AuthzRelationshipTuple{},
 	}
 }
 
@@ -184,10 +176,11 @@ func (s *Store) UpsertTenant(_ context.Context, v Tenant) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.tenants[v.ID] = copyTenant(v)
-	// Memory runtime seeds a convenience catalog; Postgres leave_types stay manual-only.
+	// Memory runtime seeds a convenience catalog for tests; Postgres leave_types sync from EHRMS.
 	if s.leaveTypes[v.ID] == nil {
 		s.leaveTypes[v.ID] = map[string]domain.LeaveType{}
 		for _, item := range domain.DefaultLeaveTypes() {
+			item.TenantID = v.ID
 			s.leaveTypes[v.ID][item.Code] = item
 		}
 	}
@@ -1308,24 +1301,6 @@ func (s *Store) CountEmployeesByQuery(ctx context.Context, tenantID string, quer
 	return len(items), nil
 }
 
-// NextEmployeeNo 從儲存層處理 next 員工 no。
-func (s *Store) NextEmployeeNo(_ context.Context, tenantID, prefix string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	maxSeq := s.employeeNoSequences[tenantID][prefix]
-	for _, employee := range s.employees[tenantID] {
-		if seq, ok := memoryEmployeeNoSequence(employee.EmployeeNo, prefix); ok && seq > maxSeq {
-			maxSeq = seq
-		}
-	}
-	nextSeq := maxSeq + 1
-	if s.employeeNoSequences[tenantID] == nil {
-		s.employeeNoSequences[tenantID] = map[string]int{}
-	}
-	s.employeeNoSequences[tenantID][prefix] = nextSeq
-	return fmt.Sprintf("%s%03d", prefix, nextSeq), nil
-}
-
 // filterMemoryEmployeesByQuery 從儲存層處理篩選 memory 員工 by 查詢。
 func (s *Store) filterMemoryEmployeesByQuery(tenantID string, items []Employee, query EmployeeQuery) []Employee {
 	out := make([]Employee, 0, len(items))
@@ -1637,20 +1612,6 @@ func memoryTimeValue(t *time.Time) time.Time {
 	return *t
 }
 
-// memoryEmployeeNoSequence 處理 memory 員工 no sequence。
-func memoryEmployeeNoSequence(employeeNo, prefix string) (int, bool) {
-	employeeNo = strings.TrimSpace(employeeNo)
-	prefix = strings.TrimSpace(prefix)
-	if prefix == "" || !strings.HasPrefix(employeeNo, prefix) {
-		return 0, false
-	}
-	seq, err := strconv.Atoi(strings.TrimPrefix(employeeNo, prefix))
-	if err != nil {
-		return 0, false
-	}
-	return seq, true
-}
-
 // InsertAttendancePolicyVersion appends one immutable attendance policy version.
 func (s *Store) InsertAttendancePolicyVersion(_ context.Context, v AttendancePolicy) error {
 	s.mu.Lock()
@@ -1730,50 +1691,80 @@ func (s *Store) ListLeaveTypes(_ context.Context, tenantID string) ([]domain.Lea
 	return items, nil
 }
 
-// UpsertLeaveTypeEnabled updates leave_types.status for an existing catalog row.
-func (s *Store) UpsertLeaveTypeEnabled(_ context.Context, tenantID, code string, enabled bool, _ string, _ time.Time) error {
+// UpsertLeaveType writes one leave catalog row from EHRMS sync (present rows are active).
+func (s *Store) UpsertLeaveType(_ context.Context, v domain.LeaveType) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	code = strings.ToLower(strings.TrimSpace(code))
-	item, ok := s.leaveTypes[tenantID][code]
+	v.Code = strings.ToLower(strings.TrimSpace(v.Code))
+	if strings.TrimSpace(v.ID) == "" {
+		v.ID = domain.StableLeaveTypeID(v.Code)
+	} else {
+		v.ID = strings.ToLower(strings.TrimSpace(v.ID))
+	}
+	v.ParentID = strings.ToLower(strings.TrimSpace(v.ParentID))
+	v.ParentCode = strings.ToLower(strings.TrimSpace(v.ParentCode))
+	switch strings.ToLower(strings.TrimSpace(v.Kind)) {
+	case "category":
+		v.Kind = "category"
+		v.ParentID = ""
+		v.ParentCode = ""
+	case "special_group":
+		v.Kind = "special_group"
+		v.ParentID = ""
+		v.ParentCode = ""
+	default:
+		v.Kind = "item"
+		if _, ok := s.leaveTypes[v.TenantID][v.ParentID]; v.ParentID != "" && !ok {
+			v.ParentID = ""
+			v.ParentCode = ""
+		}
+	}
+	v.Enabled = true
+	if s.leaveTypes[v.TenantID] == nil {
+		s.leaveTypes[v.TenantID] = map[string]domain.LeaveType{}
+	}
+	s.leaveTypes[v.TenantID][v.ID] = v
+	return nil
+}
+
+// UpsertLeaveTypeEnabled updates leave_types.status for one exact catalog ID.
+func (s *Store) UpsertLeaveTypeEnabled(_ context.Context, tenantID, id string, enabled bool, _ string, _ time.Time) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	id = strings.ToLower(strings.TrimSpace(id))
+	item, ok := s.leaveTypes[tenantID][id]
 	if !ok {
-		return domain.NotFound("leave type", code)
+		return domain.NotFound("leave type", id)
 	}
 	item.Enabled = enabled
-	s.leaveTypes[tenantID][code] = item
+	s.leaveTypes[tenantID][id] = item
 	return nil
 }
 
-func (s *Store) UpsertLeaveTypeExternalRef(_ context.Context, v LeaveTypeExternalRef) error {
+// DeactivateMissingLeaveTypes marks leave type nodes not in activeIDs as inactive.
+func (s *Store) DeactivateMissingLeaveTypes(_ context.Context, tenantID string, activeIDs []string, _ time.Time) (int64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	v.SourceSystem = strings.ToLower(strings.TrimSpace(v.SourceSystem))
-	v.ExternalCode = strings.TrimSpace(v.ExternalCode)
-	for id, existing := range s.leaveTypeExternalRefs[v.TenantID] {
-		if strings.EqualFold(existing.SourceSystem, v.SourceSystem) && strings.EqualFold(existing.ExternalCode, v.ExternalCode) && strings.EqualFold(existing.ExternalCategoryCode, v.ExternalCategoryCode) && existing.EffectiveFrom == v.EffectiveFrom {
-			v.ID = id
-			v.CreatedAt = existing.CreatedAt
-			break
+	keep := map[string]struct{}{}
+	for _, id := range activeIDs {
+		id = strings.ToLower(strings.TrimSpace(id))
+		if id != "" {
+			keep[id] = struct{}{}
 		}
 	}
-	putNested(s.leaveTypeExternalRefs, v.TenantID, v.ID, v)
-	return nil
-}
-
-func (s *Store) GetLeaveTypeExternalRef(_ context.Context, tenantID, sourceSystem, externalCode, externalCategoryCode string, asOf time.Time) (LeaveTypeExternalRef, bool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	asOfDate := asOf.Format(time.DateOnly)
-	for _, item := range s.leaveTypeExternalRefs[tenantID] {
-		if !strings.EqualFold(item.SourceSystem, sourceSystem) || !strings.EqualFold(item.ExternalCode, externalCode) || !strings.EqualFold(item.ExternalCategoryCode, externalCategoryCode) {
+	var deactivated int64
+	for id, item := range s.leaveTypes[tenantID] {
+		if _, ok := keep[id]; ok {
 			continue
 		}
-		if item.EffectiveFrom != "" && item.EffectiveFrom > asOfDate || item.EffectiveTo != "" && item.EffectiveTo < asOfDate {
+		if !item.Enabled {
 			continue
 		}
-		return item, true, nil
+		item.Enabled = false
+		s.leaveTypes[tenantID][id] = item
+		deactivated++
 	}
-	return LeaveTypeExternalRef{}, false, nil
+	return deactivated, nil
 }
 
 // UpsertLeaveBalance 從儲存層處理 upsert 請假 balance。
@@ -2343,16 +2334,21 @@ func (s *Store) ListAttendanceClockRecords(_ context.Context, tenantID string, q
 func (s *Store) UpsertAttendanceDailySummary(_ context.Context, v AttendanceDailySummary) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	for _, item := range s.attendanceSummaries[v.TenantID] {
-		if item.ID != v.ID && item.EmployeeID == v.EmployeeID && item.WorkDate == v.WorkDate {
+	key := attendanceDailySummaryKey(v.EmployeeID, v.WorkDate)
+	for existingKey, item := range s.attendanceSummaries[v.TenantID] {
+		if existingKey != key && item.EmployeeID == v.EmployeeID && item.WorkDate == v.WorkDate {
 			return domain.Conflict("attendance daily summary already exists")
 		}
-		if item.ID != v.ID && v.ExternalRef != "" && item.ExternalRef == v.ExternalRef {
+		if existingKey != key && v.ExternalRef != "" && item.ExternalRef == v.ExternalRef {
 			return domain.Conflict("attendance daily summary external_ref already exists")
 		}
 	}
-	putNested(s.attendanceSummaries, v.TenantID, v.ID, copyAttendanceDailySummary(v))
+	putNested(s.attendanceSummaries, v.TenantID, key, copyAttendanceDailySummary(v))
 	return nil
+}
+
+func attendanceDailySummaryKey(employeeID, workDate string) string {
+	return strings.TrimSpace(employeeID) + "|" + strings.TrimSpace(workDate)
 }
 
 // GetAttendanceDailySummaryByExternalRef 從儲存層取得考勤日彙總 by external ref。
@@ -3659,17 +3655,18 @@ func (s *Store) InsertAgentDefinitionVersion(_ context.Context, v AgentDefinitio
 		})
 	}
 	putNested(s.agentRevisionExternalTools, v.TenantID, v.ID, rootBindings)
-	memberBindings := make([]domain.AgentRevisionMemberExternalTool, 0)
 	for _, member := range v.SubAgents {
+		childRevisionID := v.ID + ":member:" + member.ID
+		childBindings := make([]domain.AgentRevisionExternalTool, 0, len(member.ExternalToolIDs))
 		for ordinal, externalToolID := range member.ExternalToolIDs {
 			capability, _ := s.agentExternalToolCapabilityLocked(v.TenantID, externalToolID)
-			memberBindings = append(memberBindings, domain.AgentRevisionMemberExternalTool{
-				TenantID: v.TenantID, RevisionID: v.ID, MemberID: member.ID, ExternalToolID: externalToolID,
+			childBindings = append(childBindings, domain.AgentRevisionExternalTool{
+				TenantID: v.TenantID, RevisionID: childRevisionID, ExternalToolID: externalToolID,
 				ToolSchemaChecksum: capability.SchemaChecksum, Ordinal: ordinal, Config: map[string]any{},
 			})
 		}
+		putNested(s.agentRevisionExternalTools, v.TenantID, childRevisionID, childBindings)
 	}
-	putNested(s.agentRevisionMemberExternalTools, v.TenantID, v.ID, memberBindings)
 	return nil
 }
 
@@ -3679,14 +3676,6 @@ func (s *Store) ListAgentRevisionExternalToolBindings(_ context.Context, tenantI
 	defer s.mu.RUnlock()
 	items, _ := getNested(s.agentRevisionExternalTools, tenantID, revisionID)
 	return copyAgentRevisionExternalTools(items), nil
-}
-
-// ListAgentRevisionMemberExternalToolBindings returns the publish-time member capability snapshot.
-func (s *Store) ListAgentRevisionMemberExternalToolBindings(_ context.Context, tenantID, revisionID string) ([]domain.AgentRevisionMemberExternalTool, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	items, _ := getNested(s.agentRevisionMemberExternalTools, tenantID, revisionID)
-	return copyAgentRevisionMemberExternalTools(items), nil
 }
 
 // AppendExecutionStep allocates the next execution-local sequence while holding the store lock.
@@ -4235,7 +4224,6 @@ func (s *Store) DeleteAgentSession(_ context.Context, tenantID, id string) (Agen
 	for messageID, message := range s.agentSessionMessages[tenantID] {
 		if message.SessionID == id {
 			delete(s.agentSessionMessages[tenantID], messageID)
-			delete(s.agentMessageAttachments[tenantID], messageID)
 		}
 	}
 	for fileID, file := range s.agentSessionFiles[tenantID] {
@@ -4375,41 +4363,30 @@ func (s *Store) ListCurrentAgentSessionFiles(_ context.Context, tenantID, sessio
 	return out, nil
 }
 
-// MarkAgentSessionFileAttached moves a draft file into persisted message history.
-func (s *Store) MarkAgentSessionFileAttached(_ context.Context, tenantID, sessionID, fileID string, updatedAt time.Time) error {
+// MarkAgentSessionFileAttached binds a draft file to one message and marks it attached.
+func (s *Store) MarkAgentSessionFileAttached(_ context.Context, tenantID, sessionID, fileID, messageID string, ordinal int, updatedAt time.Time) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	session, sessionOK := getNested(s.agentSessions, tenantID, sessionID)
 	file, fileOK := getNested(s.agentSessionFiles, tenantID, fileID)
-	if !sessionOK || !fileOK || file.SessionID != sessionID || file.ContextVersion != session.ContextVersion {
+	if !sessionOK || !fileOK || file.SessionID != sessionID || file.ContextVersion != session.ContextVersion || file.State != "draft" {
 		return errors.New("agent session file not found")
 	}
-	file.State = "attached"
-	file.UpdatedAt = updatedAt
-	putNested(s.agentSessionFiles, tenantID, fileID, copyAgentSessionFile(file))
-	return nil
-}
-
-// InsertAgentMessageAttachment records the exact message/file relation.
-func (s *Store) InsertAgentMessageAttachment(_ context.Context, tenantID, messageID, fileID string, ordinal int, _ time.Time) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	file, ok := getNested(s.agentSessionFiles, tenantID, fileID)
-	if !ok {
-		return errors.New("agent session file not found")
+	message, messageOK := getNested(s.agentSessionMessages, tenantID, messageID)
+	if !messageOK || message.SessionID != sessionID || message.ContextVersion != session.ContextVersion {
+		return errors.New("agent session message not found")
 	}
-	if s.agentMessageAttachments[tenantID] == nil {
-		s.agentMessageAttachments[tenantID] = map[string][]domain.AgentMessageAttachment{}
-	}
-	items := s.agentMessageAttachments[tenantID][messageID]
-	for _, item := range items {
-		if item.File.ID == fileID {
-			return nil
+	for _, existing := range s.agentSessionFiles[tenantID] {
+		if existing.SessionID == sessionID && existing.MessageID == messageID && existing.Ordinal != nil && *existing.Ordinal == ordinal && existing.ID != fileID {
+			return errors.New("attachment ordinal already used")
 		}
 	}
-	s.agentMessageAttachments[tenantID][messageID] = append(items, domain.AgentMessageAttachment{
-		MessageID: messageID, Ordinal: ordinal, File: copyAgentSessionFile(file),
-	})
+	ordinalCopy := ordinal
+	file.State = "attached"
+	file.MessageID = messageID
+	file.Ordinal = &ordinalCopy
+	file.UpdatedAt = updatedAt
+	putNested(s.agentSessionFiles, tenantID, fileID, copyAgentSessionFile(file))
 	return nil
 }
 
@@ -4422,16 +4399,20 @@ func (s *Store) ListCurrentAgentMessageAttachments(_ context.Context, tenantID, 
 		return []domain.AgentMessageAttachment{}, nil
 	}
 	out := make([]domain.AgentMessageAttachment, 0)
-	for messageID, items := range s.agentMessageAttachments[tenantID] {
-		message, messageOK := getNested(s.agentSessionMessages, tenantID, messageID)
+	for _, file := range s.agentSessionFiles[tenantID] {
+		if file.SessionID != sessionID || file.State != "attached" || file.MessageID == "" || file.Ordinal == nil {
+			continue
+		}
+		message, messageOK := getNested(s.agentSessionMessages, tenantID, file.MessageID)
 		if !messageOK || message.SessionID != sessionID || message.ContextVersion != session.ContextVersion {
 			continue
 		}
-		for _, item := range items {
-			copyItem := item
-			copyItem.File = copyAgentSessionFile(item.File)
-			out = append(out, copyItem)
-		}
+		out = append(out, domain.AgentMessageAttachment{
+			MessageID:          file.MessageID,
+			ConversationFileID: file.ConversationFileID,
+			Ordinal:            *file.Ordinal,
+			File:               copyAgentSessionFile(file),
+		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {
 		if out[i].MessageID == out[j].MessageID {
@@ -4455,21 +4436,12 @@ func (s *Store) DeleteCurrentDraftAgentSessionFile(_ context.Context, tenantID, 
 	return true, nil
 }
 
-// DeleteAgentFileAsset removes in-memory metadata, chunks, and stale attachment entries.
+// DeleteAgentFileAsset removes in-memory metadata and chunks.
 func (s *Store) DeleteAgentFileAsset(_ context.Context, tenantID, fileID string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.agentSessionFiles[tenantID], fileID)
 	delete(s.agentFileChunks[tenantID], fileID)
-	for messageID, items := range s.agentMessageAttachments[tenantID] {
-		filtered := items[:0]
-		for _, item := range items {
-			if item.File.ID != fileID {
-				filtered = append(filtered, item)
-			}
-		}
-		s.agentMessageAttachments[tenantID][messageID] = filtered
-	}
 	return nil
 }
 

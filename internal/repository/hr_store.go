@@ -38,5 +38,4 @@ type EmployeeStore interface {
 	ListEmployeesByQuery(ctx context.Context, tenantID string, query domain.EmployeeQuery) ([]domain.Employee, error)
 	ListEmployeePageByQuery(ctx context.Context, tenantID string, query domain.EmployeeQuery) ([]domain.Employee, int, error)
 	CountEmployeesByQuery(ctx context.Context, tenantID string, query domain.EmployeeQuery) (int, error)
-	NextEmployeeNo(ctx context.Context, tenantID, prefix string) (string, error)
 }

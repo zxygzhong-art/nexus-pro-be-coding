@@ -285,6 +285,7 @@ var DefaultRoutePolicies = []RoutePolicy{
 	{Name: "attendance.clock.monthly_summary", Method: "GET", Path: "/v1/attendance/monthly-summary", ApplicationCode: "attendance", ResourceType: "clock", Action: "read"},
 	{Name: "attendance.clock.read", Method: "GET", Path: "/v1/attendance/clock-records", ApplicationCode: "attendance", ResourceType: "clock", Action: "read"},
 	{Name: "attendance.clock.create", Method: "POST", Path: "/v1/attendance/clock-records", ApplicationCode: "attendance", ResourceType: "clock", Action: "create"},
+	{Name: "attendance.leave_type.ehrms_sync", Method: "POST", Path: "/v1/attendance/ehrms/leave-types/sync", ApplicationCode: "attendance", ResourceType: "clock", Action: "import", RiskLevel: RiskCritical},
 	{Name: "attendance.ehrms.sync", Method: "POST", Path: "/v1/attendance/ehrms/sync", ApplicationCode: "attendance", ResourceType: "clock", Action: "import", RiskLevel: RiskCritical},
 	{Name: "attendance.correction.read", Method: "GET", Path: "/v1/attendance/corrections", ApplicationCode: "attendance", ResourceType: "correction", Action: "read"},
 	{Name: "attendance.correction.create", Method: "POST", Path: "/v1/attendance/corrections", ApplicationCode: "attendance", ResourceType: "correction", Action: "create"},

@@ -285,14 +285,15 @@ func TestDocumentedJSONSuccessResponsesUseDataEnvelope(t *testing.T) {
 
 	refs := openAPISuccessJSONSchemaRefs(t)
 	expected := map[string]string{
-		"GET /v1/hr/employees 200":                  "EmployeeListDataResponse",
-		"GET /v1/hr/employees/{id} 200":             "EmployeeDetailDataResponse",
-		"PATCH /v1/hr/employees/{id} 200":           "EmployeeDetailDataResponse",
-		"GET /v1/hr/employees/stats 200":            "EmployeeStatsDataResponse",
-		"POST /v1/hr/employees/ehrms/sync 200":      "EHRMSEmployeeSyncDataResponse",
-		"POST /v1/org/units/ehrms/sync 200":         "EHRMSOrgUnitSyncDataResponse",
-		"POST /v1/attendance/ehrms/sync 200":        "EHRMSAttendanceSyncDataResponse",
-		"GET /v1/workspace/org-units-directory 200": "WorkspaceOrgUnitDirectoryDataResponse",
+		"GET /v1/hr/employees 200":                       "EmployeeListDataResponse",
+		"GET /v1/hr/employees/{id} 200":                  "EmployeeDetailDataResponse",
+		"PATCH /v1/hr/employees/{id} 200":                "EmployeeDetailDataResponse",
+		"GET /v1/hr/employees/stats 200":                 "EmployeeStatsDataResponse",
+		"POST /v1/hr/employees/ehrms/sync 200":           "EHRMSEmployeeSyncDataResponse",
+		"POST /v1/org/units/ehrms/sync 200":              "EHRMSOrgUnitSyncDataResponse",
+		"POST /v1/attendance/ehrms/leave-types/sync 200": "EHRMSLeaveTypeSyncDataResponse",
+		"POST /v1/attendance/ehrms/sync 200":             "EHRMSAttendanceSyncDataResponse",
+		"GET /v1/workspace/org-units-directory 200":      "WorkspaceOrgUnitDirectoryDataResponse",
 	}
 	for key, want := range expected {
 		if got := refs[key]; got != want {

@@ -86,13 +86,15 @@ func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance
 	if strings.TrimSpace(request.EmployeeID) != applicantEmployeeID {
 		return Conflict("linked leave request does not belong to the form applicant")
 	}
-	previousStatus := normalizeLeaveRequestStatus(request.Status)
 	nextStatus := leaveRequestStatusForWorkflow(kind, status)
-	if nextStatus == "" || previousStatus == nextStatus {
+	if nextStatus == "" {
 		return nil
 	}
-	if previousStatus == "approved" && nextStatus != "approved" {
-		return BadRequest("approved leave request cannot be changed by workflow")
+	if nextStatus == "approved" && request.EffectStatus == "applied" {
+		return nil
+	}
+	if (nextStatus == "rejected" || nextStatus == "cancelled") && request.EffectStatus == "compensated" {
+		return nil
 	}
 	leaveTypeID := strings.TrimSpace(request.LeaveTypeID)
 	if leaveTypeID == "" {
@@ -113,7 +115,7 @@ func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance
 			return Conflict("leave request allocations do not cover the requested minutes")
 		}
 	}
-	if leaveRequestStatusReleasesBalance(previousStatus, nextStatus) || previousStatus == "pending_approval" && nextStatus == "approved" {
+	if nextStatus == "approved" || nextStatus == "rejected" || nextStatus == "cancelled" {
 		for _, allocation := range allocations {
 			if err := c.appendLeaveBalanceEntry(ctx, request, allocation, "", leaveBalanceEntryRelease, allocation.ReservedMinutes, cycle); err != nil {
 				return err
@@ -134,6 +136,21 @@ func (c AttendanceService) applyLeaveWorkflowReview(ctx RequestContext, instance
 	}
 	request.Status = nextStatus
 	request.UpdatedAt = c.Now()
+	request.EffectResult = utils.CopyStringMap(request.EffectResult)
+	if request.EffectResult == nil {
+		request.EffectResult = map[string]any{}
+	}
+	request.EffectResult["workflow_action"] = strings.ToLower(strings.TrimSpace(kind))
+	request.EffectResult["balance_cycle"] = cycle
+	if nextStatus == "approved" {
+		request.EffectStatus = "applied"
+		request.EffectAppliedAt = &request.UpdatedAt
+		request.EffectResult["leave_case_applied"] = true
+	} else {
+		request.EffectStatus = "compensated"
+		request.EffectAppliedAt = nil
+		request.EffectResult["reservation_released"] = true
+	}
 	return c.store.UpsertLeaveRequest(goContext(ctx), request)
 }
 
@@ -243,15 +260,6 @@ func normalizeLeaveRequestStatus(status string) string {
 	default:
 		return strings.ToLower(strings.TrimSpace(status))
 	}
-}
-
-// leaveRequestStatusReleasesBalance 處理請假請求狀態 releases balance。
-func leaveRequestStatusReleasesBalance(previousStatus string, nextStatus string) bool {
-	switch previousStatus {
-	case "rejected", "cancelled":
-		return false
-	}
-	return nextStatus == "rejected" || nextStatus == "cancelled"
 }
 
 // CreateOvertimeRequest delegates the compatibility endpoint to the canonical workflow submission runtime.
@@ -411,6 +419,11 @@ func (c AttendanceService) applyCorrectionWorkflowReview(ctx RequestContext, ins
 		if err := c.applyApprovedAttendanceCorrection(ctx, &current, strings.TrimSpace(ctx.AccountID), current.ReviewReason, now); err != nil {
 			return err
 		}
+		current.EffectStatus = "applied"
+		current.EffectAppliedAt = &now
+	} else {
+		current.EffectStatus = "compensated"
+		current.EffectAppliedAt = nil
 	}
 	if err := c.store.UpsertAttendanceCorrectionRequest(goContext(ctx), current); err != nil {
 		return err
@@ -455,13 +468,15 @@ func (c AttendanceService) applyOvertimeWorkflowReview(ctx RequestContext, insta
 	if strings.TrimSpace(request.EmployeeID) != applicantEmployeeID {
 		return Conflict("linked overtime request does not belong to the form applicant")
 	}
-	previousStatus := normalizeLeaveRequestStatus(request.Status)
 	nextStatus := leaveRequestStatusForWorkflow(kind, status)
-	if nextStatus == "" || previousStatus == nextStatus {
+	if nextStatus == "" {
 		return nil
 	}
-	if previousStatus == "approved" && nextStatus != "approved" {
-		return BadRequest("approved overtime request cannot be changed by workflow")
+	if nextStatus == "approved" && request.EffectStatus == "applied" {
+		return nil
+	}
+	if (nextStatus == "rejected" || nextStatus == "cancelled") && request.EffectStatus == "compensated" {
+		return nil
 	}
 	if nextStatus == "approved" && strings.EqualFold(request.CompensationType, overtimeCompensationLeave) {
 		if err := c.creditCompensatoryLeaveBalance(ctx, request); err != nil {
@@ -470,6 +485,19 @@ func (c AttendanceService) applyOvertimeWorkflowReview(ctx RequestContext, insta
 	}
 	request.Status = nextStatus
 	request.UpdatedAt = c.Now()
+	request.EffectResult = utils.CopyStringMap(request.EffectResult)
+	if request.EffectResult == nil {
+		request.EffectResult = map[string]any{}
+	}
+	request.EffectResult["workflow_action"] = strings.ToLower(strings.TrimSpace(kind))
+	if nextStatus == "approved" {
+		request.EffectStatus = "applied"
+		request.EffectAppliedAt = &request.UpdatedAt
+		request.EffectResult["overtime_applied"] = true
+	} else {
+		request.EffectStatus = "compensated"
+		request.EffectAppliedAt = nil
+	}
 	return c.store.UpsertOvertimeRequest(goContext(ctx), request)
 }
 

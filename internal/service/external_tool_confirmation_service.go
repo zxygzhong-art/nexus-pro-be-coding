@@ -335,7 +335,7 @@ func (c *Service) callConfirmedExternalTool(
 func (c *Service) confirmedExternalToolRequestConfig(ctx RequestContext, connection domain.AgentExternalTool) (http.Header, time.Duration, error) {
 	headers := make(http.Header)
 	if connection.AuthType != string(domain.ExternalToolAuthTypeNone) {
-		if connection.AuthSecretCiphertext == "" || connection.CredentialSecretID == "" {
+		if connection.AuthSecretCiphertext == "" {
 			return nil, 0, domain.E(409, "external_tool_credential_unavailable", "external tool credential is unavailable")
 		}
 		if c.credentialCipher == nil {
@@ -343,7 +343,7 @@ func (c *Service) confirmedExternalToolRequestConfig(ctx RequestContext, connect
 		}
 		plaintext, err := c.credentialCipher.Decrypt(
 			connection.AuthSecretCiphertext,
-			domain.CredentialSecretAAD(ctx.TenantID, connection.CredentialSecretID),
+			domain.ExternalToolCredentialAAD(ctx.TenantID, connection.ID),
 		)
 		if err != nil {
 			return nil, 0, domain.E(500, "external_tool_credential_invalid", "failed to open external tool credential")

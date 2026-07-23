@@ -383,7 +383,7 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 	includeAttendance := query.Projection == "" || query.Projection == workspaceAttendanceProjection
 	includeClock := query.Projection == "" || query.Projection == workspaceClockProjection
 	worksites := []AttendanceWorksite{}
-	if includeClock {
+	if includeAttendance || includeClock {
 		worksites, err = c.store.ListAttendanceWorksites(goContext(ctx), ctx.TenantID)
 		if err != nil {
 			return WorkspaceAttendanceResponse{}, err
@@ -396,6 +396,7 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 		workspaceCompactEmployeeCards(cards)
 	}
 	leaveLegend := workspaceLeaveLegend(leaveTypes)
+	responseLeaveLegend := workspaceEnabledLeaveLegend(leaveTypes)
 	leaveByEmployeeDate := workspaceEffectiveLeaveCells(leaves, workTimesByDate, leaveTypes, leaveLegend, start, end)
 	overtimeByEmployeeDate := workspaceOvertimeCells(overtimes, start, end)
 	clockByEmployeeDate := workspaceClockCells(clocks, summaries, worksites, leaveByEmployeeDate, overtimeByEmployeeDate)
@@ -426,7 +427,7 @@ func (c WorkspaceService) WorkspaceAttendance(ctx RequestContext, query Workspac
 		Label:        fmt.Sprintf("%d 年 %d 月", start.Year(), int(start.Month())),
 		PeriodLabel:  fmt.Sprintf("%d 年 %d/%d-%d/%d 期間", start.Year(), int(start.Month()), start.Day(), int(end.AddDate(0, 0, -1).Month()), end.AddDate(0, 0, -1).Day()),
 		Dates:        dates,
-		LeaveLegend:  leaveLegend,
+		LeaveLegend:  responseLeaveLegend,
 		Pagination:   pagination,
 		SummaryScope: summaryScope,
 		Attendance:   attendanceMatrix,

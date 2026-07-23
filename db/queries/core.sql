@@ -532,17 +532,6 @@ ORDER BY
 LIMIT sqlc.arg(limit_count)::int
 OFFSET sqlc.arg(offset_count)::int;
 
--- name: NextEmployeeNoSequence :one
-INSERT INTO employee_number_sequences (
-    tenant_id, prefix, next_value, updated_at
-) VALUES (
-    sqlc.arg(tenant_id), sqlc.arg(prefix), sqlc.arg(initial_next)::int + 1, now()
-)
-ON CONFLICT (tenant_id, prefix) DO UPDATE SET
-    next_value = GREATEST(employee_number_sequences.next_value + 1, sqlc.arg(initial_next)::int + 1),
-    updated_at = now()
-RETURNING (next_value - 1)::int;
-
 -- name: AppendOutboxEvent :one
 INSERT INTO outbox_events (
     id, tenant_id, event_type, aggregate_type, aggregate_id,
@@ -782,30 +771,44 @@ WHERE source = 'local_anchor' DO UPDATE SET
     id = leave_balances.id
 RETURNING *;
 
--- name: UpsertLeaveTypeExternalRef :one
-INSERT INTO leave_type_external_refs (
-    id, tenant_id, source_system, external_code, external_category_code,
-    leave_type_id, effective_from, effective_to, created_at, updated_at
+-- name: UpsertLeaveType :one
+INSERT INTO leave_types (
+    id, tenant_id, code, kind, parent_id, parent_code, name, name_zh, name_en, category, source_of_truth, status,
+    requires_balance, max_balance_minutes, unit, display_order, raw_payload,
+    last_synced_at, created_at, updated_at
 ) VALUES (
-    sqlc.arg(id), sqlc.arg(tenant_id), lower(btrim(sqlc.arg(source_system)::text)), lower(btrim(sqlc.arg(external_code)::text)), lower(btrim(sqlc.arg(external_category_code)::text)),
-    sqlc.arg(leave_type_id), sqlc.narg(effective_from), sqlc.narg(effective_to), sqlc.arg(created_at), sqlc.arg(updated_at)
+    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(code), sqlc.arg(kind), sqlc.narg(parent_id), sqlc.narg(parent_code),
+    sqlc.arg(name), sqlc.arg(name_zh), sqlc.arg(name_en),
+    sqlc.arg(category), sqlc.arg(source_of_truth), sqlc.arg(status),
+    sqlc.arg(requires_balance), sqlc.arg(max_balance_minutes), sqlc.arg(unit), sqlc.arg(display_order),
+    sqlc.arg(raw_payload)::jsonb, sqlc.narg(last_synced_at), sqlc.arg(created_at), sqlc.arg(updated_at)
 )
-ON CONFLICT (tenant_id, source_system, external_category_code, external_code, effective_from) DO UPDATE SET
-    leave_type_id = EXCLUDED.leave_type_id,
-    effective_to = EXCLUDED.effective_to,
+ON CONFLICT (tenant_id, id) DO UPDATE SET
+    code = EXCLUDED.code,
+    kind = EXCLUDED.kind,
+    parent_id = EXCLUDED.parent_id,
+    parent_code = EXCLUDED.parent_code,
+    name = EXCLUDED.name,
+    name_zh = EXCLUDED.name_zh,
+    name_en = EXCLUDED.name_en,
+    category = EXCLUDED.category,
+    source_of_truth = EXCLUDED.source_of_truth,
+    status = EXCLUDED.status,
+    requires_balance = EXCLUDED.requires_balance,
+    max_balance_minutes = EXCLUDED.max_balance_minutes,
+    unit = EXCLUDED.unit,
+    display_order = EXCLUDED.display_order,
+    raw_payload = EXCLUDED.raw_payload,
+    last_synced_at = EXCLUDED.last_synced_at,
     updated_at = EXCLUDED.updated_at
 RETURNING *;
 
--- name: GetLeaveTypeExternalRef :one
-SELECT * FROM leave_type_external_refs
+-- name: DeactivateMissingLeaveTypes :execrows
+UPDATE leave_types
+SET status = 'inactive', updated_at = sqlc.arg(updated_at)
 WHERE tenant_id = sqlc.arg(tenant_id)
-  AND lower(source_system) = lower(sqlc.arg(source_system)::text)
-  AND lower(external_category_code) = lower(sqlc.arg(external_category_code)::text)
-  AND lower(external_code) = lower(sqlc.arg(external_code)::text)
-  AND (effective_from IS NULL OR effective_from <= sqlc.arg(as_of)::date)
-  AND (effective_to IS NULL OR effective_to >= sqlc.arg(as_of)::date)
-ORDER BY effective_from DESC NULLS LAST, updated_at DESC
-LIMIT 1;
+  AND source_of_truth = 'ehrms'
+  AND NOT (id = ANY (sqlc.arg(active_ids)::text[]));
 
 -- name: AppendLeaveBalanceEntry :one
 INSERT INTO leave_balance_entries (
@@ -1157,50 +1160,22 @@ ORDER BY field_id ASC;
 DELETE FROM form_instances
 WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id);
 
--- name: UpsertLeaveRequest :one
-INSERT INTO leave_requests (
-    id, tenant_id, employee_id, leave_type, leave_type_id, policy_version,
-    rule_snapshot, evaluation_snapshot, start_at, end_at,
-    requested_minutes, reason, status, form_instance_id, reconciliation_status, created_at, updated_at
-) VALUES (
-    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(leave_type), sqlc.arg(leave_type_id), sqlc.arg(policy_version),
-    sqlc.arg(rule_snapshot)::jsonb, sqlc.arg(evaluation_snapshot)::jsonb, sqlc.arg(start_at), sqlc.arg(end_at),
-    sqlc.arg(requested_minutes), sqlc.arg(reason), sqlc.arg(status), sqlc.arg(form_instance_id), sqlc.arg(reconciliation_status), sqlc.arg(created_at), sqlc.arg(updated_at)
-)
-ON CONFLICT (id) DO UPDATE SET
-    employee_id = EXCLUDED.employee_id,
-    leave_type = EXCLUDED.leave_type,
-    leave_type_id = EXCLUDED.leave_type_id,
-    policy_version = EXCLUDED.policy_version,
-    rule_snapshot = EXCLUDED.rule_snapshot,
-    evaluation_snapshot = EXCLUDED.evaluation_snapshot,
-    start_at = EXCLUDED.start_at,
-    end_at = EXCLUDED.end_at,
-    requested_minutes = EXCLUDED.requested_minutes,
-    reason = EXCLUDED.reason,
-    status = EXCLUDED.status,
-    form_instance_id = EXCLUDED.form_instance_id,
-    reconciliation_status = EXCLUDED.reconciliation_status,
-    created_at = EXCLUDED.created_at,
-    updated_at = EXCLUDED.updated_at
-WHERE leave_requests.tenant_id = EXCLUDED.tenant_id
-RETURNING *;
-
 -- name: UpsertLeaveRequestAllocation :one
 INSERT INTO leave_request_allocations (
     tenant_id, leave_request_id, leave_balance_id, employee_id, leave_type_id,
     cycle, reserved_minutes, created_at
 ) SELECT
-    request.tenant_id, request.id, balance.id, request.employee_id, request.leave_type_id,
+    request.tenant_id, request.id, balance.id, request.subject_employee_id, request.data->>'leave_type_id',
     sqlc.arg(cycle), sqlc.arg(reserved_minutes), sqlc.arg(created_at)
-FROM leave_requests request
+FROM form_business_records request
 JOIN leave_balances balance
   ON balance.tenant_id = request.tenant_id
  AND balance.id = sqlc.arg(leave_balance_id)
- AND balance.employee_id = request.employee_id
- AND balance.leave_type_id = request.leave_type_id
+ AND balance.employee_id = request.subject_employee_id
+ AND balance.leave_type_id = request.data->>'leave_type_id'
 WHERE request.tenant_id = sqlc.arg(tenant_id)
   AND request.id = sqlc.arg(leave_request_id)
+  AND request.business_type = 'attendance.leave'
 ON CONFLICT (tenant_id, leave_request_id, leave_balance_id, cycle) DO NOTHING
 RETURNING *;
 
@@ -1223,10 +1198,6 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND leave_request_id = sqlc.arg(leave_request_id)
   AND cycle = sqlc.arg(cycle)
 ORDER BY id;
-
--- name: GetLeaveRequest :one
-SELECT * FROM leave_requests
-WHERE tenant_id = $1 AND id = $2;
 
 -- name: UpsertLeaveCase :one
 INSERT INTO leave_cases (
@@ -1319,7 +1290,7 @@ WHERE leave_case.tenant_id = sqlc.arg(tenant_id)
   );
 
 -- name: UpsertExternalLeaveRecord :one
-INSERT INTO external_leave_records (
+INSERT INTO leave_external_records (
     id, tenant_id, employee_id, source_system, external_ref, external_leave_code,
     external_category_code, leave_type_id, leave_name, start_at, end_at,
     gross_minutes, deduct_minutes, net_minutes, remark, source_label, status,
@@ -1351,57 +1322,16 @@ ON CONFLICT (tenant_id, source_system, external_ref) DO UPDATE SET
 RETURNING *;
 
 -- name: GetExternalLeaveRecordByRef :one
-SELECT * FROM external_leave_records
+SELECT * FROM leave_external_records
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND source_system = sqlc.arg(source_system)
   AND external_ref = sqlc.arg(external_ref)
 LIMIT 1;
 
 -- name: ListExternalLeaveRecords :many
-SELECT * FROM external_leave_records
+SELECT * FROM leave_external_records
 WHERE tenant_id = sqlc.arg(tenant_id)
 ORDER BY start_at ASC, id ASC;
-
--- name: GetLeaveRequestByFormInstanceID :one
-SELECT * FROM leave_requests
-WHERE tenant_id = sqlc.arg(tenant_id) AND form_instance_id = sqlc.arg(form_instance_id)
-LIMIT 1;
-
--- name: ListLeaveRequests :many
-SELECT * FROM leave_requests
-WHERE tenant_id = $1
-ORDER BY created_at ASC;
-
--- name: CountLeaveRequestsByQuery :one
-SELECT count(*) FROM leave_requests
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND (coalesce(cardinality(sqlc.arg(employee_ids)::text[]), 0) = 0 OR employee_id = ANY(sqlc.arg(employee_ids)::text[]))
-  AND (sqlc.arg(status)::text = '' OR lower(status) = lower(sqlc.arg(status)::text))
-  AND (NULLIF(sqlc.arg(from_date)::text, '') IS NULL OR end_at::date >= NULLIF(sqlc.arg(from_date)::text, '')::date)
-  AND (NULLIF(sqlc.arg(to_date)::text, '') IS NULL OR start_at::date <= NULLIF(sqlc.arg(to_date)::text, '')::date);
-
--- name: ListLeaveRequestsByQuery :many
-SELECT * FROM leave_requests
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND (coalesce(cardinality(sqlc.arg(employee_ids)::text[]), 0) = 0 OR employee_id = ANY(sqlc.arg(employee_ids)::text[]))
-  AND (sqlc.arg(status)::text = '' OR lower(status) = lower(sqlc.arg(status)::text))
-  AND (NULLIF(sqlc.arg(from_date)::text, '') IS NULL OR end_at::date >= NULLIF(sqlc.arg(from_date)::text, '')::date)
-  AND (NULLIF(sqlc.arg(to_date)::text, '') IS NULL OR start_at::date <= NULLIF(sqlc.arg(to_date)::text, '')::date)
-ORDER BY created_at ASC;
-
--- name: ListLeaveRequestPageByQuery :many
-SELECT * FROM leave_requests
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND (coalesce(cardinality(sqlc.arg(employee_ids)::text[]), 0) = 0 OR employee_id = ANY(sqlc.arg(employee_ids)::text[]))
-  AND (sqlc.arg(status)::text = '' OR lower(status) = lower(sqlc.arg(status)::text))
-  AND (NULLIF(sqlc.arg(from_date)::text, '') IS NULL OR end_at::date >= NULLIF(sqlc.arg(from_date)::text, '')::date)
-  AND (NULLIF(sqlc.arg(to_date)::text, '') IS NULL OR start_at::date <= NULLIF(sqlc.arg(to_date)::text, '')::date)
-ORDER BY
-  CASE WHEN sqlc.arg(sort)::text = 'created_at_asc' THEN created_at END ASC,
-  created_at DESC,
-  id ASC
-LIMIT sqlc.arg(limit_count)::int
-OFFSET sqlc.arg(offset_count)::int;
 
 -- name: UpsertWorkflowRun :one
 INSERT INTO workflow_runs (
@@ -1734,21 +1664,17 @@ ORDER BY clocked_at DESC, created_at DESC, id ASC;
 
 -- name: UpsertAttendanceDailySummary :one
 INSERT INTO attendance_daily_summaries (
-    id, tenant_id, employee_id, work_date, shift_start, shift_end,
-    shift_hours, daily_hours, clock_hours, clock_start, clock_end, attend_start,
-    attend_end, attend_hours, attend_counted, leave_type, leave_start, leave_end,
-    leave_hours, leave_counted, leave2_type, leave2_start, leave2_end, leave2_hours,
-    leave2_counted, overtime_start, overtime_end, overtime_hours, overtime_counted,
+    tenant_id, employee_id, work_date, shift_start, shift_end,
+    shift_hours, daily_hours, clock_hours, clock_start, clock_end,
     payload, source, external_ref, created_at, updated_at
 ) VALUES (
-    $1, $2, $3, $4::date, $5, $6, $7, $8, $9, $10, $11, $12,
-    $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24,
-    $25, $26, $27, $28, $29, $30::jsonb, $31, $32, $33, $34
+    sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(work_date)::date,
+    sqlc.arg(shift_start), sqlc.arg(shift_end), sqlc.arg(shift_hours), sqlc.arg(daily_hours),
+    sqlc.arg(clock_hours), sqlc.arg(clock_start), sqlc.arg(clock_end),
+    sqlc.arg(payload)::jsonb, sqlc.arg(source), sqlc.arg(external_ref),
+    sqlc.arg(created_at), sqlc.arg(updated_at)
 )
-ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    employee_id = EXCLUDED.employee_id,
-    work_date = EXCLUDED.work_date,
+ON CONFLICT (tenant_id, employee_id, work_date) DO UPDATE SET
     shift_start = EXCLUDED.shift_start,
     shift_end = EXCLUDED.shift_end,
     shift_hours = EXCLUDED.shift_hours,
@@ -1756,24 +1682,6 @@ ON CONFLICT (id) DO UPDATE SET
     clock_hours = EXCLUDED.clock_hours,
     clock_start = EXCLUDED.clock_start,
     clock_end = EXCLUDED.clock_end,
-    attend_start = EXCLUDED.attend_start,
-    attend_end = EXCLUDED.attend_end,
-    attend_hours = EXCLUDED.attend_hours,
-    attend_counted = EXCLUDED.attend_counted,
-    leave_type = EXCLUDED.leave_type,
-    leave_start = EXCLUDED.leave_start,
-    leave_end = EXCLUDED.leave_end,
-    leave_hours = EXCLUDED.leave_hours,
-    leave_counted = EXCLUDED.leave_counted,
-    leave2_type = EXCLUDED.leave2_type,
-    leave2_start = EXCLUDED.leave2_start,
-    leave2_end = EXCLUDED.leave2_end,
-    leave2_hours = EXCLUDED.leave2_hours,
-    leave2_counted = EXCLUDED.leave2_counted,
-    overtime_start = EXCLUDED.overtime_start,
-    overtime_end = EXCLUDED.overtime_end,
-    overtime_hours = EXCLUDED.overtime_hours,
-    overtime_counted = EXCLUDED.overtime_counted,
     payload = EXCLUDED.payload,
     source = EXCLUDED.source,
     external_ref = EXCLUDED.external_ref,
@@ -1798,7 +1706,7 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (NULLIF(sqlc.arg(from_date)::text, '') IS NULL OR work_date >= NULLIF(sqlc.arg(from_date)::text, '')::date)
   AND (NULLIF(sqlc.arg(to_date)::text, '') IS NULL OR work_date <= NULLIF(sqlc.arg(to_date)::text, '')::date)
   AND (sqlc.arg(source)::text = '' OR source = sqlc.arg(source))
-ORDER BY work_date ASC, employee_id ASC, id ASC;
+ORDER BY work_date ASC, employee_id ASC;
 
 -- name: UpsertAttendanceDayProjection :one
 INSERT INTO attendance_day_projections (
@@ -1856,116 +1764,6 @@ WHERE tenant_id = sqlc.arg(tenant_id)
   AND (NULLIF(sqlc.arg(from_date)::text, '') IS NULL OR work_date >= NULLIF(sqlc.arg(from_date)::text, '')::date)
   AND (NULLIF(sqlc.arg(to_date)::text, '') IS NULL OR work_date <= NULLIF(sqlc.arg(to_date)::text, '')::date)
 ORDER BY work_date, employee_id;
-
--- name: UpsertAttendanceCorrectionRequest :one
-INSERT INTO attendance_correction_requests (
-    id, tenant_id, employee_id, direction, requested_clocked_at, work_date,
-    correction_type, target_clock_record_id, replacement_clock_record_id, reason,
-    status, form_instance_id, clock_record_id, reviewed_by_account_id,
-    review_reason, reviewed_at, created_at, updated_at
-) VALUES (
-    sqlc.arg(id), sqlc.arg(tenant_id), sqlc.arg(employee_id), sqlc.arg(direction),
-    sqlc.arg(requested_clocked_at), sqlc.arg(work_date)::date, sqlc.arg(correction_type),
-    sqlc.narg(target_clock_record_id), sqlc.narg(replacement_clock_record_id), sqlc.arg(reason),
-    sqlc.arg(status), sqlc.arg(form_instance_id), sqlc.narg(clock_record_id),
-    sqlc.narg(reviewed_by_account_id), sqlc.arg(review_reason), sqlc.narg(reviewed_at),
-    sqlc.arg(created_at), sqlc.arg(updated_at)
-)
-ON CONFLICT (id) DO UPDATE SET
-    direction = EXCLUDED.direction,
-    requested_clocked_at = EXCLUDED.requested_clocked_at,
-    work_date = EXCLUDED.work_date,
-    correction_type = EXCLUDED.correction_type,
-    target_clock_record_id = EXCLUDED.target_clock_record_id,
-    replacement_clock_record_id = EXCLUDED.replacement_clock_record_id,
-    reason = EXCLUDED.reason,
-    status = EXCLUDED.status,
-    form_instance_id = EXCLUDED.form_instance_id,
-    clock_record_id = EXCLUDED.clock_record_id,
-    reviewed_by_account_id = EXCLUDED.reviewed_by_account_id,
-    review_reason = EXCLUDED.review_reason,
-    reviewed_at = EXCLUDED.reviewed_at,
-    updated_at = EXCLUDED.updated_at
-WHERE attendance_correction_requests.tenant_id = EXCLUDED.tenant_id
-  AND attendance_correction_requests.employee_id = EXCLUDED.employee_id
-RETURNING *;
-
--- name: GetAttendanceCorrectionRequest :one
-SELECT * FROM attendance_correction_requests
-WHERE tenant_id = $1 AND id = $2;
-
--- name: GetAttendanceCorrectionRequestForUpdate :one
-SELECT * FROM attendance_correction_requests
-WHERE tenant_id = sqlc.arg(tenant_id) AND id = sqlc.arg(id)
-FOR UPDATE;
-
--- name: ClaimAttendanceCorrectionReview :one
-UPDATE attendance_correction_requests
-SET status = 'reviewing',
-    reviewed_by_account_id = sqlc.arg(reviewer_id),
-    reviewed_at = NULL,
-    updated_at = sqlc.arg(claimed_at)
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND form_instance_id = sqlc.arg(form_instance_id)
-  AND status = 'pending'
-RETURNING *;
-
--- name: ListAttendanceCorrectionRequests :many
-SELECT * FROM attendance_correction_requests
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND (sqlc.arg(employee_id)::text = '' OR employee_id = sqlc.arg(employee_id))
-  AND (NULLIF(sqlc.arg(from_date)::text, '') IS NULL OR work_date >= NULLIF(sqlc.arg(from_date)::text, '')::date)
-  AND (NULLIF(sqlc.arg(to_date)::text, '') IS NULL OR work_date <= NULLIF(sqlc.arg(to_date)::text, '')::date)
-  AND (sqlc.arg(status)::text = '' OR status = sqlc.arg(status))
-  AND (sqlc.arg(direction)::text = '' OR direction = sqlc.arg(direction))
-ORDER BY created_at DESC, id ASC;
-
--- name: GetAttendanceCorrectionRequestByFormInstanceID :one
-SELECT * FROM attendance_correction_requests
-WHERE tenant_id = sqlc.arg(tenant_id) AND form_instance_id = sqlc.arg(form_instance_id)
-LIMIT 1;
-
--- name: UpsertOvertimeRequest :one
-INSERT INTO overtime_requests (
-    id, tenant_id, employee_id, work_date, start_at, end_at,
-    hours, overtime_type, compensation_type, reason, status,
-    form_instance_id, created_at, updated_at
-) VALUES (
-    $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
-)
-ON CONFLICT (id) DO UPDATE SET
-    tenant_id = EXCLUDED.tenant_id,
-    employee_id = EXCLUDED.employee_id,
-    work_date = EXCLUDED.work_date,
-    start_at = EXCLUDED.start_at,
-    end_at = EXCLUDED.end_at,
-    hours = EXCLUDED.hours,
-    overtime_type = EXCLUDED.overtime_type,
-    compensation_type = EXCLUDED.compensation_type,
-    reason = EXCLUDED.reason,
-    status = EXCLUDED.status,
-    form_instance_id = EXCLUDED.form_instance_id,
-    created_at = EXCLUDED.created_at,
-    updated_at = EXCLUDED.updated_at
-RETURNING *;
-
--- name: GetOvertimeRequest :one
-SELECT * FROM overtime_requests
-WHERE tenant_id = $1 AND id = $2;
-
--- name: GetOvertimeRequestByFormInstanceID :one
-SELECT * FROM overtime_requests
-WHERE tenant_id = sqlc.arg(tenant_id) AND form_instance_id = sqlc.arg(form_instance_id)
-LIMIT 1;
-
--- name: ListOvertimeRequestsByQuery :many
-SELECT * FROM overtime_requests
-WHERE tenant_id = sqlc.arg(tenant_id)
-  AND (coalesce(cardinality(sqlc.arg(employee_ids)::text[]), 0) = 0 OR employee_id = ANY(sqlc.arg(employee_ids)::text[]))
-  AND (sqlc.arg(status)::text = '' OR lower(status) = lower(sqlc.arg(status)::text))
-  AND (NULLIF(sqlc.arg(from_date)::text, '') IS NULL OR end_at::date >= NULLIF(sqlc.arg(from_date)::text, '')::date)
-  AND (NULLIF(sqlc.arg(to_date)::text, '') IS NULL OR start_at::date <= NULLIF(sqlc.arg(to_date)::text, '')::date)
-ORDER BY created_at ASC;
 
 -- name: UpsertPlatformTaskItem :one
 INSERT INTO platform_task_items (
@@ -2118,7 +1916,7 @@ WITH inserted_conversation AS (
       AND conversations.id = target_segment.conversation_id
     RETURNING conversations.*, conversations.next_message_sequence - 1 AS allocated_sequence
 ), input_message AS (
-    INSERT INTO messages (
+    INSERT INTO conversation_messages (
         id, tenant_id, conversation_id, segment_id, sequence_no,
         role, content, content_json, execution_id, execution_step_id, created_at
     )
@@ -2131,7 +1929,7 @@ WITH inserted_conversation AS (
     ON CONFLICT (id) DO UPDATE SET
         content = EXCLUDED.content,
         content_json = EXCLUDED.content_json
-    WHERE messages.tenant_id = EXCLUDED.tenant_id
+    WHERE conversation_messages.tenant_id = EXCLUDED.tenant_id
     RETURNING *
 ), binding AS (
     SELECT
@@ -2151,7 +1949,7 @@ WITH inserted_conversation AS (
      AND revisions.agent_id = agents.id
      AND revisions.id = COALESCE(agents.published_revision_id, agents.draft_revision_id)
 ), upserted_execution AS (
-    INSERT INTO executions (
+    INSERT INTO conversation_executions (
         id, tenant_id, account_id, conversation_id, segment_id, input_message_id,
         agent_id, agent_revision_id, model_connection_id,
         mode, trigger_type, status, queued_at, started_at, completed_at,
@@ -2175,7 +1973,7 @@ WITH inserted_conversation AS (
         status = EXCLUDED.status,
         started_at = CASE
             WHEN EXCLUDED.status = 'queued' THEN NULL
-            ELSE COALESCE(executions.started_at, EXCLUDED.started_at)
+            ELSE COALESCE(conversation_executions.started_at, EXCLUDED.started_at)
         END,
         completed_at = EXCLUDED.completed_at,
         safe_error_message = EXCLUDED.safe_error_message,
@@ -2186,7 +1984,7 @@ WITH inserted_conversation AS (
         total_tokens = EXCLUDED.total_tokens,
         usage_complete = EXCLUDED.usage_complete,
         updated_at = EXCLUDED.updated_at
-    WHERE executions.tenant_id = EXCLUDED.tenant_id
+    WHERE conversation_executions.tenant_id = EXCLUDED.tenant_id
     RETURNING *
 ), allocated_answer AS (
     UPDATE conversations
@@ -2199,7 +1997,7 @@ WITH inserted_conversation AS (
       AND sqlc.arg(answer)::text <> ''
     RETURNING conversations.next_message_sequence - 1 AS allocated_sequence
 ), answer_message AS (
-    INSERT INTO messages (
+    INSERT INTO conversation_messages (
         id, tenant_id, conversation_id, segment_id, sequence_no,
         role, content, content_json, execution_id, execution_step_id, created_at
     )
@@ -2215,136 +2013,136 @@ WITH inserted_conversation AS (
         content = EXCLUDED.content,
         content_json = EXCLUDED.content_json,
         execution_id = EXCLUDED.execution_id
-    WHERE messages.tenant_id = EXCLUDED.tenant_id
+    WHERE conversation_messages.tenant_id = EXCLUDED.tenant_id
     RETURNING *
 )
 SELECT
-    executions.id, executions.tenant_id, executions.account_id, executions.agent_id,
-    executions.conversation_id AS session_id, executions.segment_id,
-    executions.input_message_id, executions.agent_revision_id, executions.model_connection_id,
-    executions.mode, input_message.content AS prompt,
+    conversation_executions.id, conversation_executions.tenant_id, conversation_executions.account_id, conversation_executions.agent_id,
+    conversation_executions.conversation_id AS session_id, conversation_executions.segment_id,
+    conversation_executions.input_message_id, conversation_executions.agent_revision_id, conversation_executions.model_connection_id,
+    conversation_executions.mode, input_message.content AS prompt,
     COALESCE(answer_message.content, sqlc.arg(answer)::text, '')::text AS answer,
-    executions.status,
+    conversation_executions.status,
     COALESCE(answer_message.content_json->'reference_items', sqlc.arg(reference_items)::jsonb, '[]'::jsonb) AS reference_items,
-    executions.llm_call_count, executions.input_tokens, executions.cached_tokens,
-    executions.output_tokens, executions.total_tokens, executions.usage_complete,
-    executions.queued_at, executions.started_at, executions.completed_at,
-    executions.error_code, executions.error_category, executions.safe_error_message,
-    executions.created_at, executions.updated_at
-FROM upserted_execution executions
-JOIN input_message ON input_message.tenant_id = executions.tenant_id AND input_message.id = executions.input_message_id
-LEFT JOIN answer_message ON answer_message.tenant_id = executions.tenant_id AND answer_message.execution_id = executions.id;
+    conversation_executions.llm_call_count, conversation_executions.input_tokens, conversation_executions.cached_tokens,
+    conversation_executions.output_tokens, conversation_executions.total_tokens, conversation_executions.usage_complete,
+    conversation_executions.queued_at, conversation_executions.started_at, conversation_executions.completed_at,
+    conversation_executions.error_code, conversation_executions.error_category, conversation_executions.safe_error_message,
+    conversation_executions.created_at, conversation_executions.updated_at
+FROM upserted_execution conversation_executions
+JOIN input_message ON input_message.tenant_id = conversation_executions.tenant_id AND input_message.id = conversation_executions.input_message_id
+LEFT JOIN answer_message ON answer_message.tenant_id = conversation_executions.tenant_id AND answer_message.execution_id = conversation_executions.id;
 
 -- name: ListAgentRuns :many
 SELECT
-    executions.id, executions.tenant_id, executions.account_id, executions.agent_id,
-    executions.conversation_id AS session_id, executions.segment_id,
-    executions.input_message_id, executions.agent_revision_id, executions.model_connection_id,
-    executions.mode, input_message.content AS prompt,
-    COALESCE(answer_message.content, '')::text AS answer, executions.status,
+    conversation_executions.id, conversation_executions.tenant_id, conversation_executions.account_id, conversation_executions.agent_id,
+    conversation_executions.conversation_id AS session_id, conversation_executions.segment_id,
+    conversation_executions.input_message_id, conversation_executions.agent_revision_id, conversation_executions.model_connection_id,
+    conversation_executions.mode, input_message.content AS prompt,
+    COALESCE(answer_message.content, '')::text AS answer, conversation_executions.status,
     COALESCE(answer_message.content_json->'reference_items', '[]'::jsonb) AS reference_items,
-    executions.llm_call_count, executions.input_tokens, executions.cached_tokens,
-    executions.output_tokens, executions.total_tokens, executions.usage_complete,
-    executions.queued_at, executions.started_at, executions.completed_at,
-    executions.error_code, executions.error_category, executions.safe_error_message,
-    executions.created_at, executions.updated_at
-FROM executions
-JOIN messages input_message ON input_message.tenant_id = executions.tenant_id AND input_message.id = executions.input_message_id
+    conversation_executions.llm_call_count, conversation_executions.input_tokens, conversation_executions.cached_tokens,
+    conversation_executions.output_tokens, conversation_executions.total_tokens, conversation_executions.usage_complete,
+    conversation_executions.queued_at, conversation_executions.started_at, conversation_executions.completed_at,
+    conversation_executions.error_code, conversation_executions.error_category, conversation_executions.safe_error_message,
+    conversation_executions.created_at, conversation_executions.updated_at
+FROM conversation_executions
+JOIN conversation_messages input_message ON input_message.tenant_id = conversation_executions.tenant_id AND input_message.id = conversation_executions.input_message_id
 LEFT JOIN LATERAL (
-    SELECT messages.* FROM messages
-    WHERE messages.tenant_id = executions.tenant_id AND messages.execution_id = executions.id AND messages.role = 'assistant'
-    ORDER BY messages.sequence_no DESC LIMIT 1
+    SELECT conversation_messages.* FROM conversation_messages
+    WHERE conversation_messages.tenant_id = conversation_executions.tenant_id AND conversation_messages.execution_id = conversation_executions.id AND conversation_messages.role = 'assistant'
+    ORDER BY conversation_messages.sequence_no DESC LIMIT 1
 ) answer_message ON true
-WHERE executions.tenant_id = $1
-ORDER BY executions.created_at ASC;
+WHERE conversation_executions.tenant_id = $1
+ORDER BY conversation_executions.created_at ASC;
 
 -- name: ListAgentRunsByAccount :many
 SELECT
-    executions.id, executions.tenant_id, executions.account_id, executions.agent_id,
-    executions.conversation_id AS session_id, executions.segment_id,
-    executions.input_message_id, executions.agent_revision_id, executions.model_connection_id,
-    executions.mode, input_message.content AS prompt,
-    COALESCE(answer_message.content, '')::text AS answer, executions.status,
+    conversation_executions.id, conversation_executions.tenant_id, conversation_executions.account_id, conversation_executions.agent_id,
+    conversation_executions.conversation_id AS session_id, conversation_executions.segment_id,
+    conversation_executions.input_message_id, conversation_executions.agent_revision_id, conversation_executions.model_connection_id,
+    conversation_executions.mode, input_message.content AS prompt,
+    COALESCE(answer_message.content, '')::text AS answer, conversation_executions.status,
     COALESCE(answer_message.content_json->'reference_items', '[]'::jsonb) AS reference_items,
-    executions.llm_call_count, executions.input_tokens, executions.cached_tokens,
-    executions.output_tokens, executions.total_tokens, executions.usage_complete,
-    executions.queued_at, executions.started_at, executions.completed_at,
-    executions.error_code, executions.error_category, executions.safe_error_message,
-    executions.created_at, executions.updated_at
-FROM executions
-JOIN messages input_message ON input_message.tenant_id = executions.tenant_id AND input_message.id = executions.input_message_id
+    conversation_executions.llm_call_count, conversation_executions.input_tokens, conversation_executions.cached_tokens,
+    conversation_executions.output_tokens, conversation_executions.total_tokens, conversation_executions.usage_complete,
+    conversation_executions.queued_at, conversation_executions.started_at, conversation_executions.completed_at,
+    conversation_executions.error_code, conversation_executions.error_category, conversation_executions.safe_error_message,
+    conversation_executions.created_at, conversation_executions.updated_at
+FROM conversation_executions
+JOIN conversation_messages input_message ON input_message.tenant_id = conversation_executions.tenant_id AND input_message.id = conversation_executions.input_message_id
 LEFT JOIN LATERAL (
-    SELECT messages.* FROM messages
-    WHERE messages.tenant_id = executions.tenant_id AND messages.execution_id = executions.id AND messages.role = 'assistant'
-    ORDER BY messages.sequence_no DESC LIMIT 1
+    SELECT conversation_messages.* FROM conversation_messages
+    WHERE conversation_messages.tenant_id = conversation_executions.tenant_id AND conversation_messages.execution_id = conversation_executions.id AND conversation_messages.role = 'assistant'
+    ORDER BY conversation_messages.sequence_no DESC LIMIT 1
 ) answer_message ON true
-WHERE executions.tenant_id = sqlc.arg(tenant_id)
-  AND executions.account_id = sqlc.arg(account_id)
-ORDER BY executions.created_at DESC, executions.id ASC;
+WHERE conversation_executions.tenant_id = sqlc.arg(tenant_id)
+  AND conversation_executions.account_id = sqlc.arg(account_id)
+ORDER BY conversation_executions.created_at DESC, conversation_executions.id ASC;
 
 -- name: CountAgentRuns :one
-SELECT count(*) FROM executions
+SELECT count(*) FROM conversation_executions
 WHERE tenant_id = $1;
 
 -- name: CountAgentRunsByAccount :one
-SELECT count(*) FROM executions
+SELECT count(*) FROM conversation_executions
 WHERE tenant_id = sqlc.arg(tenant_id)
   AND account_id = sqlc.arg(account_id);
 
 -- name: ListAgentRunsPage :many
 SELECT
-    executions.id, executions.tenant_id, executions.account_id, executions.agent_id,
-    executions.conversation_id AS session_id, executions.segment_id,
-    executions.input_message_id, executions.agent_revision_id, executions.model_connection_id,
-    executions.mode, input_message.content AS prompt,
-    COALESCE(answer_message.content, '')::text AS answer, executions.status,
+    conversation_executions.id, conversation_executions.tenant_id, conversation_executions.account_id, conversation_executions.agent_id,
+    conversation_executions.conversation_id AS session_id, conversation_executions.segment_id,
+    conversation_executions.input_message_id, conversation_executions.agent_revision_id, conversation_executions.model_connection_id,
+    conversation_executions.mode, input_message.content AS prompt,
+    COALESCE(answer_message.content, '')::text AS answer, conversation_executions.status,
     COALESCE(answer_message.content_json->'reference_items', '[]'::jsonb) AS reference_items,
-    executions.llm_call_count, executions.input_tokens, executions.cached_tokens,
-    executions.output_tokens, executions.total_tokens, executions.usage_complete,
-    executions.queued_at, executions.started_at, executions.completed_at,
-    executions.error_code, executions.error_category, executions.safe_error_message,
-    executions.created_at, executions.updated_at
-FROM executions
-JOIN messages input_message ON input_message.tenant_id = executions.tenant_id AND input_message.id = executions.input_message_id
+    conversation_executions.llm_call_count, conversation_executions.input_tokens, conversation_executions.cached_tokens,
+    conversation_executions.output_tokens, conversation_executions.total_tokens, conversation_executions.usage_complete,
+    conversation_executions.queued_at, conversation_executions.started_at, conversation_executions.completed_at,
+    conversation_executions.error_code, conversation_executions.error_category, conversation_executions.safe_error_message,
+    conversation_executions.created_at, conversation_executions.updated_at
+FROM conversation_executions
+JOIN conversation_messages input_message ON input_message.tenant_id = conversation_executions.tenant_id AND input_message.id = conversation_executions.input_message_id
 LEFT JOIN LATERAL (
-    SELECT messages.* FROM messages
-    WHERE messages.tenant_id = executions.tenant_id AND messages.execution_id = executions.id AND messages.role = 'assistant'
-    ORDER BY messages.sequence_no DESC LIMIT 1
+    SELECT conversation_messages.* FROM conversation_messages
+    WHERE conversation_messages.tenant_id = conversation_executions.tenant_id AND conversation_messages.execution_id = conversation_executions.id AND conversation_messages.role = 'assistant'
+    ORDER BY conversation_messages.sequence_no DESC LIMIT 1
 ) answer_message ON true
-WHERE executions.tenant_id = sqlc.arg(tenant_id)
+WHERE conversation_executions.tenant_id = sqlc.arg(tenant_id)
 ORDER BY
-  CASE WHEN sqlc.arg(sort)::text = 'created_at_asc' THEN executions.created_at END ASC,
-  executions.created_at DESC,
-  executions.id ASC
+  CASE WHEN sqlc.arg(sort)::text = 'created_at_asc' THEN conversation_executions.created_at END ASC,
+  conversation_executions.created_at DESC,
+  conversation_executions.id ASC
 LIMIT sqlc.arg(limit_count)::int
 OFFSET sqlc.arg(offset_count)::int;
 
 -- name: ListAgentRunsPageByAccount :many
 SELECT
-    executions.id, executions.tenant_id, executions.account_id, executions.agent_id,
-    executions.conversation_id AS session_id, executions.segment_id,
-    executions.input_message_id, executions.agent_revision_id, executions.model_connection_id,
-    executions.mode, input_message.content AS prompt,
-    COALESCE(answer_message.content, '')::text AS answer, executions.status,
+    conversation_executions.id, conversation_executions.tenant_id, conversation_executions.account_id, conversation_executions.agent_id,
+    conversation_executions.conversation_id AS session_id, conversation_executions.segment_id,
+    conversation_executions.input_message_id, conversation_executions.agent_revision_id, conversation_executions.model_connection_id,
+    conversation_executions.mode, input_message.content AS prompt,
+    COALESCE(answer_message.content, '')::text AS answer, conversation_executions.status,
     COALESCE(answer_message.content_json->'reference_items', '[]'::jsonb) AS reference_items,
-    executions.llm_call_count, executions.input_tokens, executions.cached_tokens,
-    executions.output_tokens, executions.total_tokens, executions.usage_complete,
-    executions.queued_at, executions.started_at, executions.completed_at,
-    executions.error_code, executions.error_category, executions.safe_error_message,
-    executions.created_at, executions.updated_at
-FROM executions
-JOIN messages input_message ON input_message.tenant_id = executions.tenant_id AND input_message.id = executions.input_message_id
+    conversation_executions.llm_call_count, conversation_executions.input_tokens, conversation_executions.cached_tokens,
+    conversation_executions.output_tokens, conversation_executions.total_tokens, conversation_executions.usage_complete,
+    conversation_executions.queued_at, conversation_executions.started_at, conversation_executions.completed_at,
+    conversation_executions.error_code, conversation_executions.error_category, conversation_executions.safe_error_message,
+    conversation_executions.created_at, conversation_executions.updated_at
+FROM conversation_executions
+JOIN conversation_messages input_message ON input_message.tenant_id = conversation_executions.tenant_id AND input_message.id = conversation_executions.input_message_id
 LEFT JOIN LATERAL (
-    SELECT messages.* FROM messages
-    WHERE messages.tenant_id = executions.tenant_id AND messages.execution_id = executions.id AND messages.role = 'assistant'
-    ORDER BY messages.sequence_no DESC LIMIT 1
+    SELECT conversation_messages.* FROM conversation_messages
+    WHERE conversation_messages.tenant_id = conversation_executions.tenant_id AND conversation_messages.execution_id = conversation_executions.id AND conversation_messages.role = 'assistant'
+    ORDER BY conversation_messages.sequence_no DESC LIMIT 1
 ) answer_message ON true
-WHERE executions.tenant_id = sqlc.arg(tenant_id)
-  AND executions.account_id = sqlc.arg(account_id)
+WHERE conversation_executions.tenant_id = sqlc.arg(tenant_id)
+  AND conversation_executions.account_id = sqlc.arg(account_id)
 ORDER BY
-  CASE WHEN sqlc.arg(sort)::text = 'created_at_asc' THEN executions.created_at END ASC,
-  executions.created_at DESC,
-  executions.id ASC
+  CASE WHEN sqlc.arg(sort)::text = 'created_at_asc' THEN conversation_executions.created_at END ASC,
+  conversation_executions.created_at DESC,
+  conversation_executions.id ASC
 LIMIT sqlc.arg(limit_count)::int
 OFFSET sqlc.arg(offset_count)::int;
 

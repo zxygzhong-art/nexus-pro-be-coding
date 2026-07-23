@@ -241,10 +241,7 @@ func (c AgentService) Chat(ctx RequestContext, input domain.AgentChatInput, emit
 			return err
 		}
 		for ordinal, fileID := range attachmentIDs {
-			if err := tx.store.MarkAgentSessionFileAttached(goContext(ctx), ctx.TenantID, sessionID, fileID, messageCreatedAt); err != nil {
-				return err
-			}
-			if err := tx.store.InsertAgentMessageAttachment(goContext(ctx), ctx.TenantID, messageID, fileID, ordinal, messageCreatedAt); err != nil {
+			if err := tx.store.MarkAgentSessionFileAttached(goContext(ctx), ctx.TenantID, sessionID, fileID, messageID, ordinal, messageCreatedAt); err != nil {
 				return err
 			}
 		}

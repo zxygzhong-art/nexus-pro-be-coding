@@ -35,12 +35,12 @@ func (c AttendanceService) createOvertimeRequestFromSubmittedForm(ctx RequestCon
 		if strings.TrimSpace(existing.EmployeeID) != employeeID {
 			return OvertimeRequest{}, Conflict("linked overtime request does not belong to the form applicant")
 		}
-		switch normalizeLeaveRequestStatus(existing.Status) {
-		case "pending_approval":
+		switch existing.EffectStatus {
+		case "not_applied", "applying":
 			return existing, nil
-		case "rejected", "cancelled":
+		case "compensated", "failed":
 			// Returned submissions reuse their stable request identity and refresh the requested values below.
-		case "approved":
+		case "applied":
 			return OvertimeRequest{}, Conflict("approved linked overtime request cannot be resubmitted")
 		default:
 			return OvertimeRequest{}, Conflict("linked overtime request is not eligible for resubmission")
@@ -89,6 +89,7 @@ func (c AttendanceService) createOvertimeRequestFromSubmittedForm(ctx RequestCon
 		WorkDate: attendanceWorkDate(startAt), StartAt: startAt, EndAt: endAt, Hours: hours,
 		OvertimeType: overtimeType, CompensationType: compensationType, Reason: reason,
 		Status: "pending_approval", FormInstanceID: instance.ID, CreatedAt: createdAt, UpdatedAt: now,
+		EffectStatus: "not_applied",
 	}
 	if err := c.store.UpsertOvertimeRequest(goContext(ctx), req); err != nil {
 		return OvertimeRequest{}, err
